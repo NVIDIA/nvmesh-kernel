@@ -328,14 +328,12 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 	const u16 dbits_on_topo_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 	struct nvmeibc_dbits_tx tx;
 	if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB) {
-		if (!has_stale_lock) {
-			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);	// If stale does not exists then do nothing, other client already fixed this
-			BUG();		// Miss-use of the function. This is illegal becuase we never took the lock to know if it is stale or not
-		} else if (nvmeibc_dbits_get_n_unk(&pre, topo_traits)) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
+		BUG_ON(!has_stale_lock);	// Miss-use of the function. This is illegal because we never took the lock to know if it is stale or not
+		if (nvmeibc_dbits_get_n_unk(&pre, topo_traits)) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
 			const u16 n_dead = hweight16(dbits_on_topo_bmp);
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);
 			tx.action.num_unknowns = n_dead; // Fill Every possible dead with optional unknown (unless it already has dbit)
-			//BUG_ON(n_dead != n_parities);	 // Todo: EC-5969: For 3-mirror, this sync is called wrongly and creates data corruption. So this BUG_ON() fails
+			BUG_ON(n_dead != topo_traits->n_parities);	 // Trap: Otherwise this sync is called wrongly and creates data corruption.
 		} else {													// If {Real dbit exists or nothing} + stale lock, fill with real dbits. Likely that data on R1 legs differs.
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0                              , 0);
 		}
@@ -343,7 +341,7 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		const bool should_db_turn_on =  has_stale_lock;										// Stale lock has to turn on dbit for dead segments coz cant access them, Dbit/Read-fail syncs do not introduce new info so can never turn dbits on
 		const bool should_db_turn_off = (so->n_slices == LOCKSET_SLICES);					// Only if we fix all slices
 		const u32 turn_off_topo_bmp = (nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask));
-		const u32 turn_off_inv_bmp = (~dbits_on_topo_bmp);										// Used in case simulater injected invalid dbits, and we want to clean them as well
+		const u32 turn_off_inv_bmp = (~dbits_on_topo_bmp);										// Used in case simulator injected invalid dbits, and we want to clean them as well
 		const u32 turn_off_bmp = (should_db_turn_off ? (turn_off_topo_bmp | turn_off_inv_bmp) : 0);
 		const u32 turn_on_bmp =  (should_db_turn_on  ?  dbits_on_topo_bmp                     : 0);
 		nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, turn_on_bmp, turn_off_bmp, 0);
@@ -351,12 +349,11 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 			so->R1.is_dirty_suspect = true;					// Note here: all syncs (stale/db/bad/read-fail) will run identically. Do all possible reads, compare data and turn off unknown dbits if possible
 
 		__mark_read_to_dirty_w_seg_as_do_not_send(so, pre);
-
 	}
 	nvmeibc_dbits_tx_apply(&pre, &tx);
 	rld->post.bits.dirty = tx.post.all_bits;
 	rld->post.bits.txid = __gen_mirror_txid_sync(so);
-	/* Todo: EC-5969: For 3-mirror, we have to first turn on dbits, then do writes then turn off. For 2 mirror never happends coz we have stale-to-dirty-sync */
+	/* Todo: EC-5969: For 3-mirror, we have to first turn on dbits (much like done in HTR for ec), then do writes then turn off. For 2 mirror never happends coz we have stale-to-dirty-sync */
 	if ((rld->pre.all != rld->post.all))
 		mark_blockset_info_not_written(so);
 
@@ -365,7 +362,7 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		mark_blockset_info_not_written(so); // Explicit mark_blockset_info_not_written
 	}
 	if ((so->n_slices != LOCKSET_SLICES) && should_blockset_info_commit(so)) {
-		if (rld->post.bits.dirty) {			// For 3 mirror, do a more elaborate analysis. dbits == 0 is overkill. We want to verify no dbits for 'W' segs are written to 'W' seg. But dbit for 'D' segs can be written on 'W' seg binfo
+		if (rld->post.bits.dirty) {			// EC-5969: For 3 mirror, do a more elaborate analysis. dbits == 0 is overkill. We want to verify no dbits for 'W' segs are written to 'W' seg. But dbit for 'D' segs can be written on 'W' seg binfo
 			mark_blockset_info_written(so);	// Writing dirtybits is illegal in R1 with 2 mirror {RW,W}! This sync cannot clean dbits, but also cannot propagate them to 'W' seg. Legal with 3 mirror and above. Example {RW,W,D} with Dbit for Seg2, Need to be copied from RW to W, to transition to {RW,RW,D} topo.
 			__dump_bug_NVMESH3032(so, "reason");
 		}
