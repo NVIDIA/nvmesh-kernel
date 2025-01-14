@@ -1393,10 +1393,9 @@ static int __convert_stale_special_2_dirty_bit(struct nvmeibc_cmd_lock *lock, nv
 
 /******************************* External API *********************************/
 
-static inline bool __can_r1_convert_stale_lock_2_diry_bit(const struct nvmeibc_cmd_lock *l)
+static inline bool __can_r1_convert_stale_lock_2_diry_bit(const struct nvmeibc_raid1* pr)
 {
-	const struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(l->ds);
-	return (!nvmeibc_raid_is_ec(pr) && (nvmeibc_raid1_get_num_dead_seg(pr) > 0));		// This is legal only for 2-mirror. Todo: EC-5969. Can run this sync only if n_dead = n_parities!!! 3-mirror issue
+	return (!nvmeibc_raid_is_ec(pr) && (nvmeibc_raid1_get_num_dead_seg(pr) == (pr->replicas-1)));
 }
 
 bool nvmeibc_sync_is_io_implicit_sync(const struct nvmeibc_cmd_lock *l,
@@ -1404,7 +1403,7 @@ bool nvmeibc_sync_is_io_implicit_sync(const struct nvmeibc_cmd_lock *l,
 {
 	const struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(l->ds);
 	if (!nvmeibc_raid_is_ec(pr)) {
-		if (unlikely(__can_r1_convert_stale_lock_2_diry_bit(l)))
+		if (unlikely(__can_r1_convert_stale_lock_2_diry_bit(pr)))
 			return true;	/* In degraded mode of raid-1, 2 mirror, sync stale-to-dirty is legal */
 		return ((c->nlbas == LOCKSET_SLICES) && (nvmeib_block_io_op_is_write(c->o->op)));
 		/* Daniel todo: Trim is not supported because even if command's length is
@@ -1494,7 +1493,7 @@ int nvmeibc_sync_fix_some_slices_in_stale(struct nvmeibc_cmd_lock *l,
 {
 	BUG_ON(start_block >= LOCKSET_SLICES);
 	BUG_ON(start_block + n_slices > LOCKSET_SLICES);
-	if (__can_r1_convert_stale_lock_2_diry_bit(l)) {
+	if (__can_r1_convert_stale_lock_2_diry_bit(nvmeibc_disk_segment_get_praid(l->ds))) {
 		start_block = 0; n_slices = LOCKSET_SLICES;					// ignore the blk range here bcz we set dbit for the whole LOCKSET extent
 		return __convert_stale_special_2_dirty_bit(l, done_cb, context); // {RW,DEAD} degraded mode
 	} else {
