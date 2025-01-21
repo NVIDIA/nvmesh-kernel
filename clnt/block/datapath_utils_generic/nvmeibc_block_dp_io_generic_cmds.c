@@ -171,6 +171,7 @@ static int __post_cmd_dirtybit_turnoff_cb(struct nvmeibc_d_rdma_comp *dc, struct
 	(void)tag;
 	icore_ops->cb_called_comp(icore_ops, c->ds->disk, dc);
 	dp_cmds_complete_cmd(c->cmdarr, c->my_leader, c);
+	BUILD_BUG_ON(STALE_LOCK_PROTECTS_WRONG_BINFO);	// See remark above
 	return 0;
 }
 
@@ -1259,7 +1260,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 			err = prev_rv;
 		}
 		if (err != 0) { // Implicit call to __post_cmd_dirtybit_turnoff_cb()
-			/* Dont do: c->o_rv = err; Nor use rv_storage_of_binfo_write(). Daniel: Optimization: Even if dbit turn off failed it does not affect overall bio error */
+			BUILD_BUG_ON(STALE_LOCK_PROTECTS_WRONG_BINFO);	/* Dont do: c->o_rv = err; Nor use rv_storage_of_binfo_write(). Daniel: Optimization: Even if dbit turn off failed it does not affect overall bio error */
 			dp_cmds_complete_cmd(cmds, li, c);
 		}
 		/* Warning: Here 'cmds' might already be free */

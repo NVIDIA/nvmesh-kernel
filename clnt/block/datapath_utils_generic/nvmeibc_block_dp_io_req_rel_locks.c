@@ -469,11 +469,11 @@ void dp_locks_release_locks_sibs(struct nvmeibc_cmd_lock *locksets, int owner_i)
 {
 	struct nvmeibc_cmd_lock *lo = &locksets[owner_i];
 	int i, end = owner_i + lo->n_siblings;
-	if (lo->secondary_id < 0) {		// Backwards release order
+	if (lo->secondary_id < 0) {		// Backwards release order. Unlock copies, and primary owner is last
 		for (i = end-1  ; i >= owner_i; i--)
 			dp_locks_release_lock(locksets, i);
 	} else {
-		for (i = owner_i; i  < end    ; i++)
+		for (i = owner_i; i  < end    ; i++)	// Deprecated topology first owner, then dual lock.
 			dp_locks_release_lock(locksets, i);
 	}
 }
@@ -804,7 +804,7 @@ static int __add_locks_for_raid(const struct nvmeibc_raid1 *r1, const enum nvmei
 		nvmeibc_b_rdma_comp_init(&l->comp, my_ind, locksets);
 
 		switch (rlmap.type[li]) {
-		case NVMEIBTC_DS_OWNER_MODE_SECONDARY: {		// Dual locks topology
+		case NVMEIBTC_DS_OWNER_MODE_SECONDARY: {		// Dual locks topology, deprecated in Toma
 			l->type = NVMEIBC_CMD_LOCK_OWNER;
 			locksets[owner_i].secondary_id = my_ind + 1; //+1 so 0 means no sec
 			l->status = NCL_STATUS_NOTISSUED;
@@ -1470,6 +1470,16 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 			__give_failed_lock_cb(dc);
 		}
 	}
+}
+
+bool dp_locks_is_ram_topology_degraded(struct nvmeibc_cmd_lock *ow_l)
+{
+	int i;
+	for (i = 0; i < ow_l->n_siblings; i++) {
+		if (!nvmeibc_is_readable(ow_l[i].ds)) // RW/W+ has correct binfo, W - uncommited, Dead - Impossible, lock would not have this sibling
+			return true;
+	}
+	return false;
 }
 
 /***************************** Locks Tracing **********************************/

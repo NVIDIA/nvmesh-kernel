@@ -171,15 +171,6 @@ static void __uncommited_binfo_inject_to_blkset_problem(union nvmeib_blkset_prob
 		arr[i].binfo_not_commited = (u16)1;
 }
 
-static __attribute__((unused)) bool __uncommited_binfo_detect_case_1(struct nvmeibc_cmd_lock *l)
-{
-	int i, all_ok = true;
-	for (i = 0; (i < l->n_siblings) && all_ok; i++) {
-		all_ok = nvmeibc_is_readable(l[i].ds); // RW/W+ has correct binfo, W - uncommited, Dead - Impossible, lock would not have this sibling
-	}
-	return !all_ok;
-}
-
 #include "block/controlpath/nvmeibc_b_cp_topo_common.h"
 #define dlba_blksets_ofst(tr) ((tr)->first_lba / LOCKSET_SLICES)
 #define n_bits_blkset_problem (sizeof(union nvmeib_blkset_problem_report)*8)
@@ -1431,14 +1422,13 @@ static void __recover_next_blockset(struct nvmeibc_recov_sync_worker *sw)
 				} else if (problem.dbits) {
 					// Just launch regular dbits sync
 				} else if (problem.binfo_not_commited) { // Verify if it is indeed not commited. For more info, see documentation of __uncommited_binfo_inject_to_blkset_problem()
-					sw->fn = nvmeibc_sync_commit_binfo;
 					//o->locks->commit_only_owner_binfo = true; // The sync will take the best case of all of the binfos, although it's enough to take the owner binfo.
-					/* if (__uncommited_binfo_detect_case_1(o->locks)) {
-						sw->fn = nvmeibc_sync_commit_binfo; // Just commit blockset info
-					} else {		// Case 2. with current implementation also need to commit binfo so this code is commented out
-						__schedule_skip_blockset(o, 0 / * No error * /); // Blockset has a 'W' segment but all locks segs are RW.
+					if (STALE_LOCK_PROTECTS_WRONG_BINFO && !dp_locks_is_ram_topology_degraded(o->locks)) {
+						__schedule_skip_blockset(o, 0 /* No error */); 	// Blockset has a 'W' segment but all locks segs are RW, and we know their data is OK
 						return;
-					} */
+					} else {  /* Commit owner binfo to other locks. Wither copy TxID to W locks, or clean incorrect Dbits from RW locks. There might be dbits on RW copies which we failed in turnoff or failed turning on dbits on owner while succeeded on copies. We dont leave stale locks in such cases */
+						sw->fn = nvmeibc_sync_commit_binfo;
+					}
 				} else {
 					WARN_RR(true, "unsuported code, wrong problem=0x%x\n", problem.all);
 					BUG();

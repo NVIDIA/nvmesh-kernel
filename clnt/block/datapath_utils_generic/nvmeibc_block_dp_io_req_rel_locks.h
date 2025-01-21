@@ -11,6 +11,7 @@
 
 // Todo: Move the below to somewhere else
 #define LOCKSET_MASK (~(long long)(LOCKSET_SLICES-1))     // Zero the lowest X bits which represent blocks within a lockset.
+#define STALE_LOCK_PROTECTS_WRONG_BINFO (0)			// Documentation: We decided to leave stale lock only if there is a slice corruption in disk (data,metadata), but not in RAM (failed to turn off dbit, etc). So when RAM data structures (lock,binfo) are wrong IO/SYNC does not leave a stale lock
 
 /******************************** Lock ID API *********************************/
 struct nvmeibc_raid1;
@@ -97,7 +98,7 @@ struct nvmeibc_cmd_lock {
 			nvmeibc_atomic_t ncmds;		// Amount of commands still using the this lock (currently need it). Instead of each sibling holding his own 'ncmds', owner holds the sum for all
 			int      ncmds_non_atomic;	// Tmp assist variable for calculating 'ncmds' in a loop (Avoid expensive atomic operations on ncmds).
 		};
-		int secondary_id;				// 0, normally, index of sec+1 in dual lock topology. -1 when copy of owners is used
+		int secondary_id;				// 0 if this is the only lock. Index of sec+1 in dual lock topology. -1 when copy of owners is used
 		struct  /* Primary owner only */{
 			nvmeibc_atomic_t pending;		// The amount of locks that we still need to acquire access to our protected raid. If we have 2 replications (raid1) pending starts from 2 and when we have both locks drops to 0. No we can continue with IO and then release locks
 			nvmeibc_atomic_t prediscards;	// For TRIM (discard) operations, first we want to receive all the results of owner locks requests, and later process the other locks. Stores the amount of needed owners.
@@ -177,6 +178,7 @@ void dp_locks_put_TxID_dbits(struct nvmeibc_cmd_lock *locksets, int owner_i,
 bool __attribute__((warn_unused_result)) verify_binfo_is_legal(struct nvmeibc_disk_segment *ds, const union nvmeib_blkset_info binfo, const u64 blockset_dlba, const char action);
 
 /* For EC / QLC recoveries and IO stages we update all lock binfos with a new value */
+bool dp_locks_is_ram_topology_degraded(struct nvmeibc_cmd_lock *ow_l);
 void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const union nvmeib_blkset_info *binfo, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag), int prev_rv);
 
 /********************* Stale Locks During lock acquisition ********************/
