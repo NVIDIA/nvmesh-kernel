@@ -500,7 +500,7 @@ int block_api_os_verify_bio_geometry(const struct bio *bio)
 	const struct nvmeibc_os_api *os = block_api_os_get_os(bio);
 	const ulong lba_bio_start_s = (ulong)__GET_BI_SECTOR(bio);
 	const long total_size_b = __GET_BI_SIZE(bio);
-	const enum nvmeib_block_io_op op = __get_bio_op(os, bio);	//Even if sub-read is done, there will be no change to the operation	
+	const enum nvmeib_block_io_op op = __get_bio_op(os, bio);	//Even if sub-read is done, there will be no change to the operation
 
 	if ((int)op < 0){// enum is uint so convert to signed error code
 		return -EINVAL;
@@ -747,7 +747,7 @@ static int __create_dummy_operation_locks_cmds(struct dplib_caller *sw) {
 
 		// Fill the dummy rld.pre binfo like and when a kernel caller does - some syncs need it
 		if (all_locks_taken) {
-			const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(o->locks, 0  /* owner_i */, false);
+			const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(o->locks, 0 /* owner_i */);
 			o->cmds[0].rld.pre.all = binfo.all;
 		}
 	}

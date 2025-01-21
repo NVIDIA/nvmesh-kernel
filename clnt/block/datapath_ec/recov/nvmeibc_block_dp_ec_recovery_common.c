@@ -293,7 +293,6 @@ static void __mutate_op_according_to_binfo(struct recovery_sync_op *so)
 			if (is_op_sync_commit_binfo(op)) {
 				// Note1: Regardless of whether we have stale locks or not, owner_binfo is valid
 				// Note2: Even if other copy has a more recent binfo than primary owner, it is legal to take the lesser problem, not the maximal problem. HTR should be able to take care of that
-				// Note3: so->o.commit_only_owner_binfo = can be True/False. and mathematically this is valid
 			}
 			if (op == NVMEIB_BLOCK_IO_OP_FIX_UNKNOWN_BINFO) {
 				// Mathematically was not implemented as no-writehole, but same as commit-binfo-sync.
@@ -371,8 +370,7 @@ _func_start:
 	switch (so->stage) {
 	/* Before doing the sync: Fixup Broken Ram (via maintanance ops) */
 	case sync_stage_recov_lo_all_taken: {		// Start state machine
-		bool take_only_owner_binfo = is_op_sync_commit_binfo(so->o->op) && so->o->commit_only_owner_binfo;
-		const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0, take_only_owner_binfo);
+		const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0);
 		if (!dp_sync_verify_binfo_is_legal(so, binfo))
 			goto _func_start;
 		if (unlikely(so->is_autonomous)) {

@@ -1032,7 +1032,7 @@ void dp_transition_to_locked_cmds_sm(struct nvmeibc_cmd_lock *locksets, int ow_i
 	/* If lock could not be acquired, all cmds which need it are not executed */
 	if (cmds->use_stages) {	// Commands state machine which uses stages is within 1 blockset
 		struct nvmeibc_cmd_lock *lo = &locksets[ow_i];
-		const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(locksets, ow_i, false);
+		const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(locksets, ow_i);
 		struct nvmeibc_block_command *rldr = nvmeibc_cllink_find_cmd_by_lock(locksets, ow_i);
 		BUG_ON(nvmeibc_atomic_read(&rldr->nlocks) != n_lock_copies);
 		nvmeibc_atomic_set(&rldr->nlocks, 0); // Daniel: atomic_sub is slower than set(0)

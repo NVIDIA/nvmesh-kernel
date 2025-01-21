@@ -1407,7 +1407,7 @@ void dp_locks_resend_raid_locks(struct nvmeibc_cmd_lock *locks)
 }
 
 /*********************** Locks and Binfo *******************************/
-union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *locksets, int owner_i, bool only_owner)
+union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *locksets, int owner_i)
 {
 	/* Daniel: Important!!! If seconday owner exists, must take its value coz
 	   it might be the sole owner in next topology and have higher TxID */
@@ -1415,7 +1415,7 @@ union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *
 	union nvmeib_blkset_info ow_rv, so_rv;
 	struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(lo->ds);
 	ow_rv = nvmeibc_cmd_lock_get_bi(lo);
-	if (lo->secondary_id && (!only_owner)) {
+	if (lo->secondary_id) {		// Same as (lo->n_siblings > 1) since active locks were removed
 		union nvmeibc_dbits_entry ow_dbits, so_dbits;
 		int i, n_sibs = lo->n_siblings;
 		for (i = 1; i < n_sibs; i++) {  // merge all copy-of-owner to owner

@@ -1422,7 +1422,6 @@ static void __recover_next_blockset(struct nvmeibc_recov_sync_worker *sw)
 				} else if (problem.dbits) {
 					// Just launch regular dbits sync
 				} else if (problem.binfo_not_commited) { // Verify if it is indeed not commited. For more info, see documentation of __uncommited_binfo_inject_to_blkset_problem()
-					//o->locks->commit_only_owner_binfo = true; // The sync will take the best case of all of the binfos, although it's enough to take the owner binfo.
 					if (STALE_LOCK_PROTECTS_WRONG_BINFO && !dp_locks_is_ram_topology_degraded(o->locks)) {
 						__schedule_skip_blockset(o, 0 /* No error */); 	// Blockset has a 'W' segment but all locks segs are RW, and we know their data is OK
 						return;

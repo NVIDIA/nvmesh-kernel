@@ -100,7 +100,7 @@ struct operation {
 		u32 was_bio_part_split         : 1;		// Was bio split to a few operations?
 		u32 need_to_copy_bio           : 1;		// If bio changes during read/write operation then we have to copy it for edic/parity calculations to be stable
 	} flags;
-	
+
 	union operation_dbg_cntrs dbg_cntrs;
 
 	struct nvmeib_pet_journal journal; //mutable
@@ -111,7 +111,6 @@ struct operation {
 			void **orig_sgls;					// QLC partial destage can manipulate the sgl and must be freed from original pointer
 		} md_op;								// Confusing name, Fix for 'elect op'
 		void* user_data; 						// Auxiliary payload (used in recovery->sync operation)
-		bool commit_only_owner_binfo;           // Tells commit binfo if it should only take the binfo from owner or merge all binfos.
 	};
 	struct operation *chained_op; 				// When bio is split to a few operations in the blockset, all operations are chained and transfer locks from first to last. Effectively serializing their execution, and avoiding timer retries on futile acquisition of locks. Pointer is relevant before operation actually starts executing
 #ifdef DEBUG_TOPO_CNTRS
@@ -206,7 +205,7 @@ union vv_bio_inter {			// Elevated bio iterator. Iterates on array of bios. Todo
 		bio_iter_t bi;				// Orig bio iterator
 		int nb;						// Exists due to elevater which unifies bios, index of current bio
 		int index_in_stage;			// BIO: Index of cmd in stage
-		// if bio page, we read into, is shared between different bio, then we cannot use it to restore "missing" data in degraded topology 
+		// if bio page, we read into, is shared between different bio, then we cannot use it to restore "missing" data in degraded topology
 		// thus we need to be an exclusive page owners
 		int on_op_read_use_private_blocks;
 		struct nps_block_iter private_read_blocks_iter;

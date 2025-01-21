@@ -64,7 +64,6 @@ struct nvmeibc_cmd_lock {
 		union {
 			struct nvmeibc_topo_percpu *last_ls;	// Points to the last IO request running on the same topology (and same CPU) as this locksets. I can request from this IO to transferr some of its locks to me.
 			void *user_data;						// Auxiliary payload for that lock. Todo: Union with entire triggere struct, not with this specicif field
-			bool commit_only_owner_binfo;			// Tells commit binfo if it should only take the binfo from owner or merge all binfos.
 		};
 	//};
 	// Generic fields of all type of locks locks
@@ -167,7 +166,7 @@ void dp_locks_resend_raid_locks(		struct nvmeibc_cmd_lock *locksets);
 int  dp_locks_calc_blockset_rv(const	struct nvmeibc_cmd_lock *owner_lock);
 
 /* Get binfo (TxID & Dbits) of blockset from locks state machine */
-union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *locksets, int owner_i, bool only_owner);
+union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *locksets, int owner_i);
 
 /* Inverse of the above, after binfo was altered by maintanance op's (like TxID
    wraparound), inject it back into the locks */

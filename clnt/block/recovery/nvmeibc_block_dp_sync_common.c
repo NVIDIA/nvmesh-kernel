@@ -1252,9 +1252,6 @@ static int __trigger_sync(struct nvmeibc_cmd_lock *lock, u16 start_block, u16 n_
 __checks_done:
 	if (is_op_sync_cold(op))
 		so->o->user_data = lock->user_data;		// Add reference to payload of cold recovery (sync will not free it)
-	if (is_op_sync_commit_binfo(op)) {
-		so->o->commit_only_owner_binfo = lock->commit_only_owner_binfo;
-	}
 	if (unlikely(rv))
 		goto error;
 

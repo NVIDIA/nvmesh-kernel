@@ -476,7 +476,7 @@ int dp_mirror_sync_prepare_op(struct recovery_sync_op *so)
 
 void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 {
-	const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0, false);
+	const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0);
 	const enum nvmeib_block_io_op op = so->o->op;
 	struct nvmeibc_block_command *rldr = so->cmds;
 	__ndump_operation(mirror_sync_execute, &so->o);
