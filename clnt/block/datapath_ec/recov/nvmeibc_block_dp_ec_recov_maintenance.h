@@ -16,10 +16,7 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"
 #include "block/recovery/nvmeibc_block_dp_sync_common.h"
 #include "block/nvmeibc_block_common.h"
-
-/* Test if maintainance needed by IO op, and invokes it */
-bool    dp_ec_mainten_has_txid_unreslvd(const struct nvmeibc_block_command *rldr);
-
+#include "block/datapath_utils_generic/binfo/nvmeibc_block_dp_binfo.h"
 extern bool qa_ec_stress_debug;
 
 // Advance txid by increment. Return true if that results in wraparound

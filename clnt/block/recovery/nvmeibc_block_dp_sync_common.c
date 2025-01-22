@@ -18,6 +18,7 @@
 #include "nvmeibc_io_pet.h"
 #include "common/nvmeib_measured_work.h"
 #include "clnt/nvmeibc_wq_metrics.h"
+#include "block/datapath_utils_generic/binfo/nvmeibc_block_dp_binfo.h"
 
 // a module parameter to set limit of concurrent sync operations
 uint nvmeibc_sync_max_operations_per_dev = NVMEIBC_MAX_ALLOWED_SYNC_OPS_DEFAULT;
@@ -796,13 +797,6 @@ static void __cleanup_after_all_binfo_writes(struct recovery_sync_op *so)
 		mark_blockset_info_written(so);
 }
 
-bool dp_sync_has_unknown_dbits(const struct nvmeibc_block_command *rldr, const int num_parities)
-{
-	union nvmeibc_dbits_entry dbits_pre;
-	dbits_pre.all_bits = rldr->rld.pre.bits.dirty;
-	return nvmeibc_dbits_get_n_unk(&dbits_pre, num_parities);
-}
-
 bool dp_sync_does_see_clean_ram_dbits(const struct recovery_sync_op *so)
 {
 	const union nvmeibc_dbits_entry pre = {.all_bits = so->cmds->rld.pre.bits.dirty};
@@ -821,7 +815,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		const bool should_post_txid_be_correct = (so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON);			// This is the only sync which will not resolve TxID. It just does not care
 		const bool should_post_dbit_be_correct = ((so->o->op != NVMEIB_BLOCK_IO_OP_REC_COLD) && !is_so_nested(so));	// EC has multiple stages of dbit manipulation, including turning on dbits, only last step guranteed to be without DBITs on 'W'
 		if (is_origininal_sync_should_resolved_binfo) {		// Verify the precondition to launching this state machine. rldr.pre, not post!
-			WARN_ON(dp_sync_has_unknown_dbits(so->cmds, nvmeibc_raid1_get_protect_lvl(so->r1)));		// Was already resolved, and cannot appear
+			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, so->r1));		// Was already resolved, and cannot appear
 			if ((so->o->op == NVMEIB_BLOCK_IO_OP_REC_COMMIT_BINFO) && (!is_so_nested(so)) && (dp_ec_can_fix_dbits(so->cmds))) {
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x copied instead of turning dbits off. n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);

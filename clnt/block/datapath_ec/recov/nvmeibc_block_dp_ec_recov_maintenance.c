@@ -13,36 +13,7 @@
 #include "nvmeibc_block_dp_ec_recov_stats.h"
 #include "nvmeibc_io_pet.h"
 
-bool dp_ec_mainten_has_txid_unreslvd(const struct nvmeibc_block_command *rldr)
-{
-	return (rldr->rld.pre.bits.txid == INITIAL_LAZY_READ_TXID);
-}
-
-/* We have at least 1 unknown dbits, and cannot resolve them from disk, assume
-   worst case (by topo) */
-static union nvmeibc_dbits_entry
-	__calc_worst_case_dbits(const struct recovery_sync_op *so)
-{
-	struct nvmeibc_dbits_tx tx;
-	union nvmeibc_dbits_entry pre = {.all_bits = so->cmds->rld.pre.bits.dirty};
-	sgmnts_bmp_t turn_on_dbit_bmp, turn_on_conv_bmp;
-
-	turn_on_dbit_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask) | nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
-	turn_on_conv_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, wm);
-
-	nvmeibc_dbits_tx_init_by_bmp(&tx, nvmeibc_raid1_get_protect_lvl(so->r1), turn_on_dbit_bmp, 0 /* turn_off_dbit_bmp */, turn_on_conv_bmp);
-	nvmeibc_dbits_tx_apply(&pre, &tx);
-
-	return tx.post;
-}
-
-static void __append_convicts_of_topo(const struct recovery_sync_op *so, union nvmeibc_dbits_entry *pre)
-{
-	struct nvmeibc_dbits_tx tx;
-	nvmeibc_dbits_tx_init_only_dconv(&tx, nvmeibc_raid1_get_protect_lvl(so->r1), nvmeibc_raid1_get_sgmnts_bmp(so->r1, wm));
-	nvmeibc_dbits_tx_apply(pre, &tx);
-	*pre = tx.post;
-}
+#include "block/datapath_utils_generic/binfo/nvmeibc_block_dp_binfo.inc.c"
 
 /*********************** DP maintain virtal functions *************************/
 union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct recovery_sync_op *so)
@@ -60,14 +31,14 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 
 	WARN((all_pari_degraded && (num_parities > 1)) && (!double_deg_and_deg_parity), "nvmeibc bug, so=%p incorrect topo!, nrp=0%x, ss=%d\n", so, non_readable, slice_start); // sanity
 	if (unlikely(double_deg_and_deg_parity || all_pari_degraded)) { // Exact condition for when on-disk-dbits cannot be used (inaccessible or cannot be trusted). Example: no-whole in the middle of turning-off dbits on D0 in slice -> cold recovery + Q becomes dead, D0 still W and no-whole only turned off the dbits in P (Q has dbits for D0) -> cold recovery needs to turn-on dbits on Q since it's dbits/txid might be invalid.
-		res = __calc_worst_case_dbits(so); /* nowhere to read dbits from */
+		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, so->r1); /* nowhere to read dbits from */
 		goto _resolved;
 	}
 	// Find the first valid parity metadata with with dirty bits
 	for (; (first_p < so->r1->replicas)&&(c[first_p].do_not_send); first_p++);
 	if (first_p >= so->r1->replicas) {
 		WARN(true, "nvmeibc bug, first_p=0x%x, so=%p must exist because readable_pari(0x%x) != all_pari(0x%x)!\n", first_p, so, non_readable_pari, pari_bmp); // sanity
-		res = __calc_worst_case_dbits(so); /* nowhere to read dbits from */
+		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, so->r1); /* nowhere to read dbits from */
 		goto _resolved;
 	}
 
@@ -81,7 +52,7 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 				if (cur.all_bits) res.all_bits = nvmeibc_dbits_merge_owners(&res, &cur, &so->r1->calculated_data.topo_traits);
 			}
 	}
-	__append_convicts_of_topo(so, &res);
+	nvmeibc_dbits_turn_on_convict(&res, so->r1);
 _resolved:
 	nvmeibc_dbits_del_unk(&res, num_parities);
 
@@ -98,7 +69,7 @@ _resolved:
 
 union nvmeibc_dbits_entry nvmeibcbdpec_calc_worst_case_dbits(const struct recovery_sync_op *so)
 {
-	union nvmeibc_dbits_entry res = __calc_worst_case_dbits(so);
+	union nvmeibc_dbits_entry res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology((union nvmeibc_dbits_entry){.all_bits = so->cmds->rld.pre.bits.dirty}, so->r1);
 	const int num_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 
 	nvmeibc_dbits_del_unk(&res, num_parities);
@@ -252,7 +223,9 @@ _func_start:
 
 			if (unlikely(so->write_unco_mask)) {
 				atomic_inc(&get_so_fctr(so)->main.n_binfo_resolve_readfail);
-				if (dp_ec_mainten_has_txid_unreslvd(rldr) && !nvmeibc_praid_are_all_readable(so->r1) && !dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))) {
+				if (nvmeibcbdp_binfo_has_txid_unreslvd(rldr) &&
+				    !nvmeibc_praid_are_all_readable(so->r1) &&
+					!nvmeibcbdp_binfo_has_unknown_dbits(rldr, so->r1)) {
 					// This should never happen, as there is no flow that resolves dbits without TxID or that sets unknown dbits after TxID was already resolved
 					WARN_ONCE(1, "nvmeibc bug! Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail");
 					_NTSO(trace_2_mainten_cb_stg, "Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail, aborting");
@@ -263,9 +236,10 @@ _func_start:
 
 			so->stage = sync_stage_recov_write_binfo;
 
-			if (dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))) {
-				union nvmeibc_dbits_entry db;
-				db = so->write_unco_mask ? nvmeibcbdpec_calc_worst_case_dbits(so) : nvmeibcbdpec_calc_max_dbit_in_ram_md(so);
+			if (nvmeibcbdp_binfo_has_unknown_dbits(rldr, so->r1)) {
+				const union nvmeibc_dbits_entry db = so->write_unco_mask ?
+									     nvmeibcbdpec_calc_worst_case_dbits(so) :
+									     nvmeibcbdpec_calc_max_dbit_in_ram_md(so);
 				fix->bits.dirty = db.all_bits;
 				atomic_inc(&get_so_fctr(so)->main.n_dbits_resolve);
 				if (nvmeibc_dbits_get_n_unk(&db, nvmeibc_raid1_get_protect_lvl(so->r1))) {
@@ -273,7 +247,7 @@ _func_start:
 				}
 			}
 
-			if (dp_ec_mainten_has_txid_unreslvd(rldr)) {
+			if (nvmeibcbdp_binfo_has_txid_unreslvd(rldr)) {
 				fix->bits.txid = nvmeibcbdpec_calc_max_txid_in_data_md(so);
 				atomic_inc(&get_so_fctr(so)->main.n_txid_resolve);
 			}
@@ -381,7 +355,7 @@ void dp_maintenance_execute_op(struct recovery_sync_op *so)
 	} else if (op == NVMEIB_BLOCK_IO_OP_MAINTAIN_RESOLVE_ALL_BINFO) {
 		struct nvmeibc_block_command *rldr = so->cmds;
 		BUG_ON(!nvmeibc_raid_is_ec(so->r1));	// Raid1 has nothing to do with this sync
-		so->n_cmds =   dp_ec_mainten_has_txid_unreslvd(rldr) ? n_write_cmds(so) : (u8)nvmeibc_raid1_count_bmp(so->r1, raid.pari);  // Dbits are not writen in data md blks, only in parity
+		so->n_cmds =   nvmeibcbdp_binfo_has_txid_unreslvd(rldr) ? n_write_cmds(so) : nvmeibc_raid1_get_protect_lvl(so->r1);  // Dbits are not writen in data md blks, only in parity
 		so->last_cmd = (n_read_cmds(so) ? n_read_cmds(so) : last_cmd(so)) -1;	// If 'so' is not nested, use its allocated commands, otherwise use pre-reads of caller 'so'
 		so->stage =    sync_stage_recov_read_cmds_sent;
 		nvmeibc_sync_set_uncompleted_cmds(so, so->n_cmds);

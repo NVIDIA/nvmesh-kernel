@@ -313,7 +313,6 @@ int  dp_sync_cmd_alloc_fill_rldr_only(struct recovery_sync_op *so); // for some 
    Rewrite those methods to be generalized well to EC. Now this is a hack on
    dbits framework, which is ugly */
 
-bool dp_sync_has_unknown_dbits(const struct nvmeibc_block_command *rldr, const int num_parities);
 bool dp_sync_does_see_clean_ram_dbits(const struct recovery_sync_op *so);
 bool dp_sync_common_are_all_binfo_equal(const struct recovery_sync_op *so);
 bool dp_sync_common_has_dbits_anywhere( const struct recovery_sync_op *so);

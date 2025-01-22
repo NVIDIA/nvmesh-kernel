@@ -338,11 +338,9 @@ static void __execute_op_post_maint_and_mutation(struct recovery_sync_op *so)
 static inline bool dp_ec_no_write_hole_has_pre_sync_work(const struct recovery_sync_op *so)
 {
 	const struct nvmeibc_block_command* rldr = so->cmds;
-	if (unlikely(dp_ec_mainten_has_txid_unreslvd(rldr)))
-		return true;
-	if (unlikely(dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))))
-		return true;
-	if (unlikely(!dp_sync_common_are_all_binfo_equal(so)))
+	if (nvmeibcbdp_binfo_has_txid_unreslvd(rldr) ||
+		nvmeibcbdp_binfo_has_unknown_dbits(rldr, so->r1) ||
+		!dp_sync_common_are_all_binfo_equal(so))
 		return true;
 	return false;
 }
@@ -393,7 +391,7 @@ _func_start:
 	}
 
 	case sync_stage_recov_analyze_binfo: {	// Check all preconditions
-		if (dp_ec_mainten_has_txid_unreslvd(rldr) || dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))) { // Step 1 part 1
+		if (nvmeibcbdp_binfo_has_txid_unreslvd(rldr) || nvmeibcbdp_binfo_has_unknown_dbits(rldr, so->r1)) { // Step 1 part 1
 			so->stage = sync_stage_recov_analyze_binfo;	// Continue analyzing for next problems implicit mark_blockset_info_not_written
 			nvmeibcbdpec_push_sm_to_stack(so, dp_ec_sync_execute_op);
 			dp_ec_mainten_reinit(so, NVMEIB_BLOCK_IO_OP_MAINTAIN_RESOLVE_ALL_BINFO);

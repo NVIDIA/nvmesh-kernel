@@ -93,6 +93,11 @@ static inline bool nvmeibc_dbits_tx_has_action(const struct nvmeibc_dbits_tx* tx
 /* tx->post = apply tx->action on pre_tx_dbit. Also return tx->post */
 u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *pre_tx_dbit,
 									         struct nvmeibc_dbits_tx *tx);
+static inline bool nvmeibc_dbits_tx_are_equal(const struct nvmeibc_dbits_tx* a, const struct nvmeibc_dbits_tx* b)
+{
+	return  (a->post.all_bits == b->post.all_bits) &&
+			(a->action.raw    == b->action.raw);
+}
 
 #define nvmeibc_dbits_has_turn_on( dbmap) ((dbmap)->action.db_turn_on_bmp)
 #define nvmeibc_dbits_has_turn_off(dbmap) ((dbmap)->action.db_turn_off_bmp)

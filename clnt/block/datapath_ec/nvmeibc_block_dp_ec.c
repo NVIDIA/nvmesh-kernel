@@ -535,8 +535,8 @@ BLKCMP_IO_ONLY_IF_PRESERVE_STACK(_func_start:)
 		return 0;
 	}
 
-	if (unlikely(dp_ec_mainten_has_txid_unreslvd(rldr) ||
-		         dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(nvmeibc_disk_segment_get_praid(rldr->ds))))) {
+	if (unlikely(nvmeibcbdp_binfo_has_txid_unreslvd(rldr) ||
+		         nvmeibcbdp_binfo_has_unknown_dbits(rldr, nvmeibc_disk_segment_get_praid(rldr->ds)))) {
 		__call_assist_sync(rldr, __analyze_binfo_sm_cb_b4j, NVMEIB_BLOCK_IO_OP_MAINTAIN_RESOLVE_ALL_BINFO);
 	}
 
@@ -1875,10 +1875,10 @@ static bool __dp_ec_prepare_op_calc_need_to_copy_bio(struct operation *o, const 
 	//if (nvmeibc_operation_has_bio_extention(o)){
 	//	return false; //extended rider to carrier bio - rider was supposed to handle this
 	//}
-	
+
 	if (nvmeib_block_io_op_is_write(op)) {
 		return nvmeibc_copy_bio_buffers;
-	} 
+	}
 
 	if (nvmeib_block_io_op_is_read(op)) {
 		const int read_has_mutable_bio_buffers = o->nd->dp.read_has_mutable_bio_buffers;
@@ -1956,7 +1956,7 @@ int dp_ec_prepare_op(struct operation *o)
 		pac.n_extra_blocks += nlbas;
 	}
 
-	_ND(dp_ec_prepare_op_integrity_checks, "op=@OP start=@VLBA nlbas=@NLBAS extra_blocks=@NLBAS need_to_copy_bio=@BOOL", 
+	_ND(dp_ec_prepare_op_integrity_checks, "op=@OP start=@VLBA nlbas=@NLBAS extra_blocks=@NLBAS need_to_copy_bio=@BOOL",
 	 										op, start_lba, nlbas, pac.n_extra_blocks, o->flags.need_to_copy_bio);
 
 	if (pac.n_extra_blocks &&
