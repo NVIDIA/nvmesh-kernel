@@ -234,18 +234,3 @@ void nvmeibc_dbits_turn_on_convict(union nvmeibc_dbits_entry *e, struct dp_topol
 	e->all_bits = nvmeibc_dbits_tx_apply(e, &dbits);
 }
 
-#if 0
-#include "block/controlpath/nvmeibc_b_cp_blkset_topo.h"
-union nvmeibc_dbits_entry
-nvmeibc_dbits_turn_on_by_tx(u16 d0_sgmnt_id, const struct nvmeibc_roles_bmps* bmps, roles_bmp_t tx_bm){
-	union nvmeibc_dbits_entry res;
-	const u32 n_replicas = hweight16(bmps->data|bmps->pari);
-	const roles_bmp_t dead_roles = nvmeibc_get_tx_dead_roles(*bmps, tx_bm);
-	const u32 dead_sgmnts = rol32_width(dead_roles, d0_sgmnt_id, n_replicas);
-	struct nvmeibc_dbits_tx dbmap;
-	union nvmeibc_dbits_entry old_dbits = { .all_bits = 0 };
-	nvmeibc_dbits_tx_init_by_bmp(&dbmap, dead_sgmnts, 0x0 /* No trun-off*/, 0, 0);
-	res.all_bits = nvmeibc_dbits_tx_apply(&old_dbits, &dbmap);
-	return res;
-}
-#endif
