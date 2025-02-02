@@ -271,7 +271,7 @@ static inline bool nvmeib_lockid_are_purified_eq(union nvmeib_lock_id lockid1, u
 #define NVMEIB_DBITS_IN_RAM_MARKER_LEGNTH (12)
 union nvmeibc_dbits_entry {			// 12[bits] field Supports raids of up to 15 segments, with 2 parities (Raid6 or 3-replica)
 	struct {						// Global mode: Supports 2 disks down, unknown values but no info per slice, only global per blockset
-		union {
+		union {							// Exactly 1 byte
 			struct {					// 4 bits Global mode marker
 				u16 mod_marker   : 4;	// Special value: {0,D,E,F} Meaning we are in global mode. 1..C means we are in slice mode
 				u16 dead0        : 4;	// First degraded, if exists. F for unknown
@@ -298,6 +298,27 @@ union nvmeibc_dbits_entry {			// 12[bits] field Supports raids of up to 15 segme
 		/* Note: Here 0x?FF is unknown range, have to scan slice by slice during rebuild, much like in dirty suspect */
 		/* Note: Here 0x?{i:5,j:3} such that i+j>=31 is resevered for future use, except for i=0x1F, j=0x7 which is 0x?FF */
 	} __attribute__((packed)) slmod;
+	struct {							// Special mode for raid-1 with 4,5 replicas. Allow 3,4 degraded seg modes.
+		// Note: Even when there is 0,1,2 degraded modes, 4,5 replicas will always use this representation. Never the above
+		struct { // Note: there is no way to know from dbits value that we are in this mode. Only from volume configuration
+			u16 num_unknowns  : 3;	// [0..4], 5,6,7 are special values.
+			u16 deg_bitmap    : 5;	// Bitmap for 5 segs, 1 for degraded. 0 for not. 0x1F is special value, 0 no degraded
+		} __attribute__((packed));
+		union {
+			struct {				// Access dirty convicts 1 by 1.
+				u16 is_d0 : 1;	// Is First (smalles index) degraded seg a dirty convict
+				u16 is_d1 : 1;	// Is d1 ...
+				u16 is_d2 : 1;	// Is d2 ...
+				u16 is_d3 : 1;	// Is highes index degraded seg a dirty convict
+				u16 _dont_use3 : 4;
+			};
+			struct {
+				u16 bmp : 4;	// Use dconvicts as bitmap.
+				u16 _dont_use4 : 4;
+			};
+		} __attribute__((packed)) d_convicts;
+		// There are many special values here. Example: d_convicts.bmp having more 1 bits then in deg_bitmap
+	} __attribute__((packed)) deg34;
 	struct {							// Used to allow access to all dirty bits as a single field
 		u16 bits		: 12;
 		u16 unuseds		: 4;
