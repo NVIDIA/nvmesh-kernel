@@ -214,8 +214,8 @@ static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1
 	}
 	{
 		struct nvmeibc_dbits_action a1, a2, a_rv;
-		nvmeibc_dbits_action_init_by_entry(&a1, e1, topo_traits->n_parities);
-		nvmeibc_dbits_action_init_by_entry(&a2, e2, topo_traits->n_parities);
+		nvmeibc_dbits_action_init_by_entry(&a1, e1, topo_traits->n_degraded);
+		nvmeibc_dbits_action_init_by_entry(&a2, e2, topo_traits->n_degraded);
 		a_rv = nvmeibc_dbits_action_merge(&a1, &a2, mo);
 		nvmeibc_dbits_action_to_entry(&a_rv, &rv);
 	}
@@ -246,7 +246,7 @@ u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *e_pre,
 
 void nvmeibc_dbits_tx_init_empty(struct nvmeibc_dbits_tx *tx, struct dp_topology_traits const* topo_traits)
 {
-	nvmeibc_dbits_action_init(&tx->action, topo_traits->n_parities);
+	nvmeibc_dbits_action_init(&tx->action, topo_traits->n_degraded);
 }
 
 void nvmeibc_dbits_tx_init_by_bmp(struct nvmeibc_dbits_tx* tx, struct dp_topology_traits const* topo_traits,

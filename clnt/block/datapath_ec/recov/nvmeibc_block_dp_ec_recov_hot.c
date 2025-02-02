@@ -2922,7 +2922,7 @@ static int htr_rollback_deg_segs(struct htr_ctx *h)
 
 	blkset_dbits.all_bits = h->params.lock_ent.blkset_info.bits.dirty;
 	WARN(nvmeibc_dbits_get_n_unk(&blkset_dbits, topo_traits) != 0,
-		 "nvmeibc bug, dbits=0x%x\n", blkset_dbits.all_bits);	// Should have resolved them earlier
+		 "nvmeibc bug, dbits=0x%x, num_deg=%u\n", blkset_dbits.all_bits, topo_traits->n_degraded);	// Should have resolved them earlier
 	h->so->nwhole_params = no_writehole_params_default;
 	h->so->nwhole_params.dbits_turnon_bmp = d_p_bm;
 	h->so->nwhole_params.force_rebuild_bmp = w_p_bm;

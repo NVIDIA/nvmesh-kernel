@@ -54,7 +54,7 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 			}
 	}
 	nvmeibc_dbits_turn_on_convict(&res, topo_traits);
-	nvmeibc_dbits_del_unk_worst_case(&res, topo_traits);
+	nvmeibc_dbits_del_unk(&res, topo_traits);
 _resolved:
 
 	if (unlikely(!verify_binfo_is_legal(so->locks->ds, (const union nvmeib_blkset_info){.bits.txid = so->cmds->rld.post.bits.txid, .bits.dirty = res.all_bits}, so->locks->address, 'r'))) { // merge failure, Todo: Check it, dump all metadatas. Probably data corruption

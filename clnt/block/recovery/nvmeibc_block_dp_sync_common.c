@@ -1209,7 +1209,7 @@ static int __trigger_sync(struct nvmeibc_cmd_lock *lock, u16 start_block, u16 n_
 	{ /* Anaylize amount of Non readable segs */
 		const int max_unavail_srcs = nvmeibc_raid1_get_protect_lvl( so->r1);
 		const int cur_deadseg_srcs = nvmeibc_raid1_get_num_dead_seg(so->r1);
-		const int num_nonread_srcs = nvmeibc_raid1_count_inverse_bmp(so->r1, readable);
+		const int num_nonread_srcs = nvmeibc_praid_get_num_deg_segs(so->r1);
 		const int cur_unavail_srcs = nvmeibc_raid_is_ec(so->r1) ? num_nonread_srcs : (int)nvmeibc_raid1_count_inverse_bmp(so->r1, readable_sync); // EC does not use 'W' for read, R1 cant use it if dbit exists
 		if (cur_unavail_srcs > max_unavail_srcs) {	// Test if there are too many preblematic segs, wrong topology
 			WARN(true, DMESG_PREFIX("%s: ") "nvmeibc bug. How? op=%d, %d > %d \n", so->o->nd->name, op, cur_unavail_srcs, max_unavail_srcs);

@@ -333,7 +333,7 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 			const u16 n_dead = hweight16(dbits_on_topo_bmp);
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);
 			tx.action.num_unknowns = n_dead; // Fill Every possible dead with optional unknown (unless it already has dbit)
-			BUG_ON(n_dead != topo_traits->n_parities);	 // Trap: Otherwise this sync is called wrongly and creates data corruption.
+			BUG_ON(n_dead != topo_traits->n_degraded);	 // Trap: Otherwise this sync is called wrongly and creates data corruption.
 		} else {													// If {Real dbit exists or nothing} + stale lock, fill with real dbits. Likely that data on R1 legs differs.
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0                              , 0);
 		}
@@ -361,7 +361,7 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 	if (!should_blockset_info_commit(so) && !dp_sync_common_are_all_binfo_equal(so)) { // Solve binfo descrepancy between ram copies
 		mark_blockset_info_not_written(so); // Explicit mark_blockset_info_not_written
 	}
-	if ((so->n_slices != LOCKSET_SLICES) && should_blockset_info_commit(so)) {
+	if ((so->n_slices != LOCKSET_SLICES) && should_blockset_info_commit(so) && (topo_traits->n_parities == 1)) {
 		if (rld->post.bits.dirty) {			// EC-5969: For 3 mirror, do a more elaborate analysis. dbits == 0 is overkill. We want to verify no dbits for 'W' segs are written to 'W' seg. But dbit for 'D' segs can be written on 'W' seg binfo
 			mark_blockset_info_written(so);	// Writing dirtybits is illegal in R1 with 2 mirror {RW,W}! This sync cannot clean dbits, but also cannot propagate them to 'W' seg. Legal with 3 mirror and above. Example {RW,W,D} with Dbit for Seg2, Need to be copied from RW to W, to transition to {RW,RW,D} topo.
 			__dump_bug_NVMESH3032(so, "reason");
