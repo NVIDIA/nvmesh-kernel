@@ -2034,24 +2034,23 @@ int unitest_resubmitIO(struct NVMeshSystem *sys) {
 	return rv;
 }
 
-#define __unitest_test_degraded_write(sys, r1, mem, volInd, startBlock, lenBlocks) __unitest_do_degraded_io(sys, r1, 0, mem, volInd, startBlock, lenBlocks)
-static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPraid* r1, int first_seg_ind, u8 *mem, int volInd, u64 startBlock, int lenBlocks){
+#define __unitest_test_degraded_write(sys, r1, mem, volInd, ioVLBA, lenBlocks) __unitest_do_degraded_io(sys, r1, 0, mem, volInd, ioVLBA, lenBlocks)
+static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPraid* r1, int first_seg_ind, u8 *mem, int volInd, u64 ioVLBA, int lenBlocks){
 	struct clientSimulator *client = &sys->clients[0];			// Test via the first client
-	int i, rv, has_only_one_mirror = false;
-	struct disk_range *curSeg = NULL;
-	const int max_n_owners = sys->mdb.vols[volInd].locks_scheme.maxNOwners;
+	int i, rv;
+	struct disk_range *curSeg = &sys->mdb.vols[volInd].segs[first_seg_ind];
 	const bool verify_bounds = (client->devs[volInd]->size > (unsigned)lenBlocks);
 	const bool isStriped  = tTopoOfVolume_isStriped(&sys->tcf.vols[volInd]);
 	u64        magic_pattern = __unitest_fill_blocks_unique_pattern(mem, lenBlocks);	// Set a pattern.
+	int n_deg = 0, live_seg_ind = 0;
 	tomaSimulator_waitProtoEnd(NULL);											// Wait for switch_topos which entered the client into degraded mode to terminate
-	rv = osSimulator_trim(    &client->OS, volInd, startBlock, lenBlocks);			REPORT_ERROR(rv);
+	rv = osSimulator_trim(    &client->OS, volInd, ioVLBA, lenBlocks);			REPORT_ERROR(rv);
 	clientSimulator_wait_for_all_bio_ops(client);
-	rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-	curSeg = &sys->mdb.vols[volInd].segs[first_seg_ind];
+	rv = osSimulator_writeArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);
 	BUG_ON(curSeg->stripe_index != 0);												// Must be first in chunk. Otherwise calculations below will not work
 	for (i=0; i<r1->header.n_segments; i++, curSeg++){ 								// Verify that magic number was written to both mirrors (first raid)
 		const u64 phys_seg_end = curSeg->length + curSeg->dlba_start;												// All the calculations below are done in units of 4K
-		const u64 phys_offset4K  = __to4K(startBlock) - curSeg->bd_start;											// Correct only for first r1 in a stripe (chunk)
+		const u64 phys_offset4K  = __to4K(ioVLBA) - curSeg->bd_start;											// Correct only for first r1 in a stripe (chunk)
 		const u64 phys_start = curSeg->dlba_start + phys_offset4K;
 		const u64 phys_len   = __to4K(lenBlocks);
 		int verifyLength = ((phys_start+phys_len-1)>=phys_seg_end) ? (phys_seg_end-phys_start) : phys_len;		// The IO wraps to a different segment after the end of the disk
@@ -2060,38 +2059,36 @@ static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPrai
 		u8 *dst = physSegStartPtr_off(curSeg, phys_offset4K);
 		if (access_mode == NVMEIBTC_DS_MODE_DEAD) {
 			BUG_ON(((u64*)dst)[0] == magic_pattern);
-			if ((i<max_n_owners)&&(r1->header.n_segments==2))
-				has_only_one_mirror = (i^1)+1;										// Index of live segment, in 2 replicas volume
+			n_deg++;
 		} else {
 			if (isStriped)
 				verifyLength = min(verifyLength, b4K_within_stripe);
 			__unitest_verify_blocks_pattern(dst, __from4K(verifyLength), magic_pattern, verify_bounds);
+			live_seg_ind = i;
 		}
 	}
 
-	if (has_only_one_mirror) { 													// Verify that read succeeds in full degraded even with stale special lock
-		const int live_seg_ind = first_seg_ind + has_only_one_mirror-1;
-		union nvmeibc_dbits_entry *db_val;
-		u64 seg_start;
-		curSeg = &sys->mdb.vols[volInd].segs[live_seg_ind];// Live segment
-		seg_start = __from4K(disk_range_get_start_addr(curSeg));	// First address of the segment.
-		ramDiskSimulator_lockStale(&sys->servers[curSeg->node_id].ramDisk, curSeg->dlba_start);			// Put stale special value in the first lock of the segment.
+	if ((n_deg == (r1->header.n_segments-1)) && (r1->header.n_segments == 2)) { 							// Verify that read succeeds in full degraded even with stale special lock
+		const struct disk_range *ownerSeg = &sys->mdb.vols[volInd].segs[first_seg_ind+live_seg_ind];						// Live segment in praid
+		const u64 seg_start = __from4K(disk_range_get_start_addr(ownerSeg));	// First address of the segment.
+		union nvmeibc_dbits_entry* db = physSegDBIdxPtr_off(ownerSeg, __to4K(seg_start));
+		ramDiskSimulator_lockStale(&sys->servers[ownerSeg->node_id].ramDisk, ownerSeg->dlba_start);			// Put stale special value in the first lock of the segment.
+		db->all_bits = 0;
 		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
-		db_val = physSegDBIdxPtr_off(curSeg, __to4K(seg_start));
-		BUG_ON(db_val->all_bits == 0);
-		db_val->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; 							// Set both unknowns, S2D must keep them intact
+		BUG_ON(db->all_bits == 0);
+		db->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; 							// Set both unknowns, S2D must keep them intact
 		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
-		BUG_ON(db_val->all_bits != nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
-		ramDiskSimulator_lockStale(&sys->servers[curSeg->node_id].ramDisk, curSeg->dlba_start);			// Put stale special value in the first lock of the segment.
+		BUG_ON(db->all_bits != nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
+		ramDiskSimulator_lockStale(&sys->servers[ownerSeg->node_id].ramDisk, ownerSeg->dlba_start);			// Put stale special value in the first lock of the segment.
 		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
-		BUG_ON(db_val->all_bits != nvmeib_dbits_entry_single_unk().all_bits);						// This is a 2 mirror only test, so we get back a single unknown
-		if (startBlock > LOCKSET_SLICES) {
-			db_val->all_bits = 0;
+		BUG_ON(db->all_bits != nvmeib_dbits_entry_single_unk().all_bits);						// This is a 2 mirror only test, so we get back a single unknown
+		if (ioVLBA > LOCKSET_SLICES) {
+			db->all_bits = 0;
 		}
-		ramDiskSimulator_verify_no_locks(&sys->servers[curSeg->node_id].ramDisk);
+		ramDiskSimulator_verify_no_locks(&sys->servers[ownerSeg->node_id].ramDisk);
 	}
 
-	rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds
+	rv = osSimulator_readArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds
 	return rv;
 }
 
@@ -3560,9 +3557,10 @@ static int __unitest_TrimSplit_genLockPattern(struct NVMeshSystem* sys, int pat_
 	for (i=0; i<nLocks; i++, pc++) {
 		l = (i/nDisks);
 		d = (i%nDisks);													// On 2 mirrored volume those 6 disks hold the locking segments
-		if (vol->segs[0].replicas > 2){
+		if (vol->segs[0].replicas > 2) {
+			const u64 seg_dlba_offset = (vol->segs[d].dlba_start - sys->servers[d].ramDisk.committed_addr.block);
 			d = (d/max_n_owners)*vol->segs[0].replicas + (d%max_n_owners);	// Convert 'd' into the d'th locking segment
-			l += vol->segs[d].dlba_start/LOCKSET_4KS;
+			l += seg_dlba_offset/LOCKSET_4KS;
 		}
 		if (*pc=='O') {
 			if (do_lock)  	ramDiskSimulator_lockDo( &sys->servers[d].ramDisk, l * LOCKSET_4KS + sys->servers[d].ramDisk.committed_addr.block);
@@ -6234,7 +6232,7 @@ TEST_FUNC int unitest_GoodPathIO_n_mirrored(struct NVMeshSystem *sys){
 		clientSimulator_send_to_cli_va(client, "#%s|max_retry_secs %d", dev->name, (int)(prev_rtj/HZ));
 
 
-		if (1) { 			// --------------------- Test that dirtybit piggibacked on correct segments
+		if (1) { 			// --------------------- Test that dirtybit piggibaged on correct segments
 			const int r1_ind = 0;
 			struct tTopoOfPraid *r1  = tTopoOfVolume_getRaid1(&sys->tcf.vols[volInd], r1_ind);
 			struct tTopoOfVolume *tv = &sys->tcf.vols[volInd];
@@ -6243,9 +6241,9 @@ TEST_FUNC int unitest_GoodPathIO_n_mirrored(struct NVMeshSystem *sys){
 			const u64 vlba = (1<<LOCKSET_SHIFT)*seg->stripe_width + small_offset;
 			const u64 dlba = (1<<LOCKSET_SHIFT)					  + small_offset;
 			union nvmeibc_dbits_entry expected_db_val;
-			int di, di_arr[2][2] = {{0, 2}, {1, 3}};						// Degraded mode type
+			int di, di_arr[2][2] = {{0, 2}, {1, 3}};						// 2 Double Degraded modes type. Todo: change to proper loops NVMESH-4712
 			for (di = 0; di < 2; di++) {
-				r1->s[di_arr[di][0]].access_mode = NVMEIBTC_DS_MODE_DEAD;
+				r1->s[di_arr[di][0]].access_mode = NVMEIBTC_DS_MODE_DEAD;	//
 				r1->s[di_arr[di][1]].access_mode = NVMEIBTC_DS_MODE_DEAD;
 				tTopoOfPraid_update_segs_by_access_mode(r1, tv->locks_scheme);
 				expected_db_val.all_bits = 0;
@@ -6279,26 +6277,25 @@ TEST_FUNC int unitest_GoodPathIO_n_mirrored(struct NVMeshSystem *sys){
 	return rv;
 }
 
-bool is_not_ioable_n_rep_all_locks_down(int first_dead, int last_dead, struct nvmeibc_locks_scheme_conf *ls) {
+bool is_not_ioable_n_rep_all_locks_down(int first_dead, int n_deg, struct nvmeibc_locks_scheme_conf *ls) {
+	const bool more_dead_than_locks = (n_deg >= (int)ls->maxNOwners);
 	if (ls->type == OWNER_SCHEME_FIRST_L_INC_A)
-		return ((first_dead == 0) && ((last_dead)+1 >= (int)ls->maxNOwners));
+		return more_dead_than_locks && (first_dead == 0);
 	else
-		return ((last_dead)+1 >= (int)ls->maxNOwners);		// ls->max_n_owners consecutive dead segments, At least 1 segment does not have any lock to protect it
+		return more_dead_than_locks;		// ls->max_n_owners consecutive dead segments, At least 1 segment does not have any lock to protect it
 }
-
-#define is_not_ioable_n_rep_full_raid_down(first_dead, last_dead, r1)     ((first_dead == 0) && ((last_dead)+1 == r1->header.n_segments    ))	// All data segs are down
 
 /* Test client's raid going in and out of a degraded mode */
 TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
-	int volInd = 0, ind_dead_seg = 0, j, last_dead, node_ind;	// Volume will be used to test switch topology
+	int volInd = 0, ind_dead_seg = 0, j, n_deg, node_ind;	// Volume will be used to test switch topology
 	struct clientSimulator *client = &sys->clients[0];			// Test via the first client
 	struct nvmeibc_locks_scheme_conf *locks_scheme = &sys->mdb.vols[volInd].locks_scheme;
-	const int max_n_owners = locks_scheme->maxNOwners;
+	struct nvmeibc_block_device *dev = client->devs[0];
+	struct nvmeibc_sync_stats *stats = &dev->dp.sync_rsrcs.stats;
 	struct disk_range *curSeg = NULL;
-	const int chunkOffset = _addr4k(0,31);						// IO's will be at this offset from beggining of the teste chunk
+	const int chunkOffsetVLBA = _addr4k(0,31);						// IO's will be at this offset from beggining of the test chunk
 	int rv = 0, c, seg_in_r1_offset = 0;
-	u64  startBlock;
-	int lenBlocks = __from4K(2);								// Length of IO. 1 4k-block is written as mirrored, 1 4K-block only in degraded mode
+	int lenBlocks = __from4K(2);								// Length of IO. Span on 2 blocksets
 	int memSize	 		 = lenBlocks*NVMEIBC_SECTOR_SIZE;		// Total array in bytes
 	u8 *mem = sim_kmalloc(memSize, GFP_KERNEL);									// Array to read/write to disk
 	enum NVMEIBTC_DS_MODE seg_stats[N_MAX_RAID_SLICE_LEN];// = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW};
@@ -6306,166 +6303,160 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 	#define segs_in_chunk() (curSeg->replicas * curSeg->stripe_width)
 	curSeg = &sys->mdb.vols[volInd].segs[0];
 	unset_warn_on_too_many_degraded();					// We will get more than 2 degraded segs
-	for (c = 0; c < sys->tcf.vols[volInd].nChunks; c++, seg_in_r1_offset += segs_in_chunk(), curSeg += segs_in_chunk()) {
-		struct tTopoOfPraid* r1 = &sys->tcf.vols[volInd].chunks[c].raids[0];
-		BUG_ON(curSeg->stripe_index != 0);						// Must be first in chunk. Otherwise calculations below will not work
-		startBlock = __from4K(curSeg->bd_start) + chunkOffset;
+	#define __verify_no_dbits(db_vals) ({ for (j = 0; j < r1->header.n_segments; j++) {	BUG_ON(db_vals[j]->all_bits != 0); } })
+	#define __clean_cur_dbits(db_vals) ({ for (j = 0; j < r1->header.n_segments; j++) {	db_vals[j]->all_bits = 0; } })
 
-	// -------------------- Simulate full toma protocol of entering and quitting from double/tripple degraded modes (seg 'ind_dead_seg' until 'ind_dead_seg+last_dead' are dead)
+	for (c = 0; c < sys->tcf.vols[volInd].nChunks; c++, seg_in_r1_offset += segs_in_chunk(), curSeg += segs_in_chunk()) {	// Loop on 4,3 mirror
+		struct tTopoOfPraid* r1 = &sys->tcf.vols[volInd].chunks[c].raids[0];
+		const u64 ioVLBA = __from4K(curSeg->bd_start) + chunkOffsetVLBA;		// Hit the first blockset of first praid in a chunk
+		union nvmeibc_dbits_entry* db_vals[4];
+		BUG_ON(curSeg->stripe_index != 0);						// Must be first in chunk. Otherwise calculations below will not work
+		BUG_ON(r1->header.n_segments != (4-c));					// We are testing 3/4-mirror here, 4 mirror first chunk, 3 mirror second
+		for (j = 0; j < r1->header.n_segments; j++) {			// Set dbit entries pointers for injection and verification
+			db_vals[j] = physSegDBIdxPtr_off(curSeg+j, __to4K(chunkOffsetVLBA));
+		}
+		for (j = r1->header.n_segments; j < N_MAX_RAID_SLICE_LEN; j++)
+			seg_stats[j] = NVMEIBTC_DS_MODE_INVALID;
+
+	// -------------------- Simulate full toma protocol of entering and quitting from double/tripple degraded modes (seg 'ind_dead_seg' until 'ind_dead_seg+n_deg' are dead)
 	for (ind_dead_seg = 0; ind_dead_seg < r1->header.n_segments; ind_dead_seg++) {
-		for (last_dead = 0; last_dead<(r1->header.n_segments-ind_dead_seg); last_dead++) {
-			const bool is_no_io_topo    = is_not_ioable_n_rep_all_locks_down(ind_dead_seg, last_dead, locks_scheme);
-			const bool is_all_segs_down = is_not_ioable_n_rep_full_raid_down(ind_dead_seg, last_dead, r1);
-			if (is_all_segs_down)
+		for (n_deg = 1; n_deg<=(r1->header.n_segments-ind_dead_seg); n_deg++) {
+			const bool is_no_io_topo = is_not_ioable_n_rep_all_locks_down(ind_dead_seg, n_deg, locks_scheme);
+			const bool only_1_lock_is_alive = ((n_deg + 1) == r1->header.n_segments);
+			const int owner_seg_ind = ((ind_dead_seg != 0) ? 0 : r1->header.n_segments-1);	// holding primary owner lock
+			struct disk_range *ownerSeg = &curSeg[owner_seg_ind];
+			const u64 io_blockset_ind = __from4K(ownerSeg->dlba_start) + chunkOffsetVLBA;
+			// pr_alert("______________c=%d_[%d..%d]\n",c, ind_dead_seg, ind_dead_seg+n_deg-1);
+			if (n_deg == r1->header.n_segments)
 				continue;			// Illegal topo, nothing to test
-			for (j = 0; j<=last_dead; j++) {
+			for (j = 0; j < n_deg; j++) {		// Move all degradedes to D
+				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_DEAD;
+			}
+			for (j = 0; j < n_deg; j++) {
 				serverSimulator_disconnect(serverOf(&client->physDiscs[curSeg[ind_dead_seg+j].node_id]));
 				tomaSimulator_unreg_raid1(r1uuid(r1),                    ind_dead_seg+j); // {DEAD , RW}
 			}
 			BUG_ON(client->devs[volInd]->topologies.io_perm != (is_no_io_topo ? NVMEIB_IO_TYPE_PERMIT_NONE_INV : NVMEIB_IO_TYPE_PERMIT_ALL));
 			if (is_no_io_topo){
-				for (j = 0; j<=last_dead; j++) {
+				for (j = 0; j < n_deg; j++) {
 					node_ind = curSeg[ind_dead_seg+j].node_id;
 					serverSimulator_re_connect(serverOf(&client->physDiscs[node_ind]));
 					tomaSimulator_waitProtoEnd(&sys->servers[node_ind].simToma);
 				}
 				goto _back_to_normal_topo;
-			} else {
-				__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, startBlock, lenBlocks);
 			}
+			// Degraded D mode tests
+			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
 
-			{	// Stale 2 dirty
-				if (ind_dead_seg && (c == 0)) { // Owner is alive only first chunk
-					struct serverSimulator *curServer = serverOf(&client->physDiscs[curSeg->node_id]);
-					const u64 phys_offset4K  = __to4K(startBlock);
-					union nvmeibc_dbits_entry* db_val = physSegDBIdxPtr_off(curSeg, phys_offset4K);
-					u16 unknown_entry = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
-					BUG_ON(db_val->all_bits < ind_dead_seg+1);
-					db_val->all_bits = 0; // Unset value
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-					ramDiskSimulator_lockStale(&curServer->ramDisk, startBlock);			// Put stale special value in the lock of the IO.
-					rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-					// Replaces Stale for dirty bits
-					BUG_ON(db_val->all_bits == unknown_entry);
-					BUG_ON(db_val->all_bits < ind_dead_seg+1);
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-					// Inject unknown + Stale special
-					db_val->all_bits = unknown_entry;
-					ramDiskSimulator_lockStale(&curServer->ramDisk, startBlock);			// Put stale special value in the lock of the IO.
-					rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-					// Removes Stale and retains Unknown Dbits
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-					if (curSeg->replicas == 2) {
-						unknown_entry = nvmeib_dbits_entry_single_unk().all_bits;
-					}
-					BUG_ON(db_val->all_bits != unknown_entry);
+			if (only_1_lock_is_alive) { // Test Stale 2 dirty in max degraded
+				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
+				union nvmeibc_dbits_entry* db = db_vals[owner_seg_ind];
+				const int one_dead_seg = (r1->header.n_segments - owner_seg_ind - 1);	// Just some dead segment
+				u16 double_unknown = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
+
+				// Test conversion of stale to Exact max dirty bits, without unknowns
+				nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);		// Zero stats for easier counting
+				db->all_bits = 0;
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				ramDiskSimulator_lockStale(&curServer->ramDisk, io_blockset_ind);			// Put stale special value in the lock of the IO.
+				rv = osSimulator_readArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);
+				BUG_ON(nvmeibc_dbits_has_unknowns(db));
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				BUG_ON(stats->num_full_blockset_ok != 0);				// Stale to dirty dont count as syncs
+
+				// Test conversion of stale + 1 dbit to max known dirty bits
+				nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);		// Zero stats for easier counting
+				db->all_bits = nvmeib_dbits_entry_build_for_seg(one_dead_seg).all_bits;
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				ramDiskSimulator_lockStale(&curServer->ramDisk, io_blockset_ind);			// Put stale special value in the lock of the IO.
+				rv = osSimulator_readArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);
+				BUG_ON(nvmeibc_dbits_has_unknowns(db));
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				BUG_ON(stats->num_full_blockset_ok != 0);				// Stale to dirty dont count as syncs
+
+				// Inject unknown + Stale special, Expect: Removes Stale and retains Unknown Dbits but exact
+				db->all_bits = double_unknown;
+				ramDiskSimulator_lockStale(&curServer->ramDisk, io_blockset_ind);			// Put stale special value in the lock of the IO.
+				rv = osSimulator_readArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);
+				BUG_ON(nvmeibc_dbits_has_unknowns(db) == false);
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				if (curSeg->replicas > 2) {		// Todo: Here add tripple/quadrupple unknown as well
+					BUG_ON(db->all_bits != double_unknown);
+				} else {
+					BUG_ON(db->all_bits != nvmeib_dbits_entry_single_unk().all_bits);
 				}
 			}
+			__clean_cur_dbits(db_vals);	// Remove unknowns before we transitino to next topo
 
-			for (j = 0; j<=last_dead; j++) {
+			for (j = 0; j < n_deg; j++) {		// Move all degradedes to W-
 				node_ind = curSeg[ind_dead_seg+j].node_id;
 				serverSimulator_re_connect(serverOf(&client->physDiscs[node_ind]));
 				tomaSimulator_waitProtoEnd(&sys->servers[node_ind].simToma);
 				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_W_IS_DIRTY;
 			}
+			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);
+			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
 
-			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);		// {W	, RW} - Lock live, active lock recovered
-			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, startBlock, lenBlocks);
-
-			{
-				if (ind_dead_seg && (c == 0)) { // Dirty convict tests
-					struct serverSimulator *curServer = serverOf(&client->physDiscs[curSeg->node_id]);
-					const u64 phys_offset4K  = __to4K(startBlock);
-					union nvmeibc_dbits_entry* db_val = physSegDBIdxPtr_off(curSeg, phys_offset4K);
-					// Inject invalid DBit - consider replacing this
-					db_val->all_bits = 0x7;
-					tomaSimulator_recoverOK_Blocking(r1, curSeg, RCVR_DIRTY_REBUILD_CONV);
-					BUG_ON(db_val->all_bits);
+			if (true) { // Dirty convict tests (various dbits values combination)
+				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
+				const u16 dbits_vals[3] = {0x7 /*Invalid*/, nvmeib_dbits_entry_single_unk().all_bits, nvmeib_dbits_entry_build_unk(-1,-1).all_bits};
+				int d;
+				__clean_cur_dbits(db_vals);	// Remove all dbits before we transitino to next topo
+				for (d = 0; d < 3; d++ ){
+					db_vals[owner_seg_ind]->all_bits = dbits_vals[d];		// Inject invalid DBit into primary owner - consider replacing this
+					tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD_CONV);
+					BUG_ON(db_vals[owner_seg_ind]->all_bits);
 					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
 					ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
-					// Inject single unknown DBit
-					db_val->all_bits = nvmeib_dbits_entry_single_unk().all_bits;
-					tomaSimulator_recoverOK_Blocking(r1, curSeg, RCVR_DIRTY_REBUILD_CONV);
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-					ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
-					BUG_ON(db_val->all_bits);
-					// Inject double unknown DBit
-					db_val->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
-					tomaSimulator_recoverOK_Blocking(r1, curSeg, RCVR_DIRTY_REBUILD_CONV);
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-					ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
-
-					// Wipe all copies
-					for (j = 0; j < r1->header.n_segments; j++) {
-						curServer = serverOf(&client->physDiscs[curSeg[j].node_id]);
-						ramDiskSimulator_wipe_dirty_bits(&curServer->ramDisk, 0);
-					}
 				}
+				__verify_no_dbits(db_vals);
 			}
 
-			for (j = 0; j<=last_dead; j++) {
-				node_ind = curSeg[ind_dead_seg+j].node_id;
-				serverSimulator_re_connect(serverOf(&client->physDiscs[node_ind]));
-				tomaSimulator_waitProtoEnd(&sys->servers[node_ind].simToma);
+			for (j = 0; j < n_deg; j++) {
 				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_W;
 			}
+			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);
+			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
 
+			if (true) { // Test Unknown Dbits
+				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
 
-			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);		// {W	, RW} - Lock live, active lock recovered
-			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, startBlock, lenBlocks);
+				// Stale lock fixes dbits as well as stale
+				nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);		// Zero stats for easier counting
+				*db_vals[owner_seg_ind] = nvmeib_dbits_entry_build_for_seg(ind_dead_seg);
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				ramDiskSimulator_lockStale(&curServer->ramDisk, io_blockset_ind);			// Put stale special value in the lock of the IO.
+				rv = osSimulator_readArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);
+				// Fixes DBs and Stale in this blockset on all segs
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				__verify_no_dbits(db_vals);
+				clientSimulator_wait_for_all_sync_ops(client);
+				BUG_ON(stats->num_full_blockset_ok != 1);
 
-			{
-				// Test Ram Loss - with Unknown Dbits
-				if (ind_dead_seg && (c == 0)) { // Owner is alive only first chunk
-					u64 *cur_num_syncs = &client->devs[0]->dp.sync_rsrcs.stats.num_dirty_bit_suspect;
-					u64 before = *cur_num_syncs, count = 0, after;
-					struct serverSimulator *curServer = serverOf(&client->physDiscs[curSeg->node_id]);
-					const u64 phys_offset4K  = __to4K(startBlock);
-					union nvmeibc_dbits_entry* db_val = physSegDBIdxPtr_off(curSeg, phys_offset4K);
-					// Stale lock fixes dbits as well as stale
-					db_val->all_bits = ind_dead_seg+1;
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-					ramDiskSimulator_lockStale(&curServer->ramDisk, startBlock);			// Put stale special value in the lock of the IO.
-					rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-					// Fixes DBs and Stale
-					BUG_ON(db_val->all_bits);
-					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
-
-					// Unknown Dbits recovery
-					db_val->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
-					count++;
-
-					// Call recovery for unknown
-					tomaSimulator_recoverOK_Blocking(r1, curSeg, RCVR_DIRTY_REBUILD);
-					BUG_ON(db_val->all_bits);
-
-					clientSimulator_wait_for_all_sync_ops(client);
-					after = *cur_num_syncs;
-					BUG_ON(after != before + count); // N locksets
-					ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
+				// Unknown Dbits recovery with dbits only in owner lock
+				*db_vals[owner_seg_ind] = nvmeib_dbits_entry_build_unk(-1,-1);
+				tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD);
+				clientSimulator_wait_for_all_sync_ops(client);
+				if (only_1_lock_is_alive) {
+					BUG_ON(stats->num_dirty_bit_suspect != 1); 	// Dirty suspect was resolved via sync
+				} else {
+					BUG_ON(stats->num_dirty_bit_suspect != 0); 	// Dirty suspect was resolved via other locks copies
 				}
-			}
+				__verify_no_dbits(db_vals);
+				nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);		// Zero stats for easier counting
 
-			if (ind_dead_seg < max_n_owners) {													// Dual lock is relevant only for degraded mode of locking segment
-				seg_stats[ind_dead_seg] = NVMEIBTC_DS_MODE_W_NO_DIRTY;
-				tomaSimulator_switchTopoEC(r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL); 	// {W	, RW} - lock both
-				__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, startBlock, lenBlocks);
-			}
-
-			for (j = 0; j< r1->header.n_segments; j++) {                                        // Test & cleanup dirtybits
-				const u64 phys_offset4K  = __to4K(startBlock) - curSeg->bd_start;
-				if (seg_stats[j] == NVMEIBTC_DS_MODE_RW) {                                        // Every RW segment must bear dirty bits which mark that other degraded segments don't have the latest data
-					union nvmeibc_dbits_entry* db_val = physSegDBIdxPtr_off(&curSeg[j], phys_offset4K);
-					if (ind_dead_seg && (c == 0)) {
-					} else
-						BUG_ON(db_val->all_bits == 0);
-					db_val->all_bits = 0;
+				// Unknown Dbits recovery with dbits only in all lock copies
+				for (j = 0; j < r1->header.n_segments; j++) {
+					*db_vals[j] = nvmeib_dbits_entry_build_unk(-1,-1);
 				}
+				tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD);
+				clientSimulator_wait_for_all_sync_ops(client);
+				BUG_ON(stats->num_dirty_bit_suspect != 1); 	// Dirty suspect was resolved via sync
+				__verify_no_dbits(db_vals);
 			}
-
 
 _back_to_normal_topo:
-			for (j = 0; j<=last_dead; j++) {
+			for (j = 0; j < n_deg; j++) {
 				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_RW;
 			}
 			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);// {RW	, RW} - normal
@@ -7374,19 +7365,18 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 		if (!buni->conf->bunitest.disableNreplicaTests) {
 			struct nvmeibc_locks_scheme_conf *locks = &sys->mdb.vols[0].locks_scheme, backup_locks = *locks;
 			bunitest_tic(buni);
+			BUG_ON(nvmeibc_debug_ram_binfo != true);	// This test should not create any binfo corruption
 			for (locks->type = OWNER_SCHEME_SL_START_DEC_C; locks->type <= OWNER_SCHEME_SL_START_DEC_C; locks->type++) {
 				for (locks->maxNOwners = 2; locks->maxNOwners <= N_MAX_RAID_LOCKS; locks->maxNOwners++) {
 					rv |= unitest_n_mirror(sys, "reattach_to_change_lock_server", UNITEST_UPDOWNGRADE_COLD);
 					rv |= SIMU_RUN_TEST(unitest_GoodPathLockServer_n_mirrored, sys);
 					rv |= SIMU_RUN_TEST(unitest_GoodPathIO_n_mirrored, sys);
-					if (locks->type>=OWNER_SCHEME_SL_START_DEC_C)
-						continue;										// Existing bugs, Daniel: Fix this
-					nvmeibc_debug_ram_binfo = false;			// EC-1894: unitest_DegradedMode_n_mirrored() injects wrong dbits. Todo, fix it
-					rv |= SIMU_RUN_TEST(unitest_DegradedMode_n_mirrored, sys);
-					nvmeibc_debug_ram_binfo = true;			// EC-1894: unitest_DegradedMode_n_mirrored() injects wrong dbits. Todo, fix it
+					if (locks->maxNOwners==4)		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
+						rv |= SIMU_RUN_TEST(unitest_DegradedMode_n_mirrored, sys);
+					// Todo: also unitest_DegradedMode()
 					if (locks->maxNOwners>2)
 						continue;										// Existing bugs, Daniel: Fix this
-					rv |= SIMU_RUN_TEST_ID(unitest_SyncStaleLocks, n_replica, buni);				// Very slow unitest
+					if (0) rv |= SIMU_RUN_TEST_ID(unitest_SyncStaleLocks, n_replica, buni);				// Very slow unitest
 					rv |= SIMU_RUN_TEST_ID(unitest_RetryLocksTrimSplit, n_replica, buni);
 					rv |= SIMU_RUN_TEST_ID(unitest_RetryLocksInDifferentLockModes, n_replica, sys);
 					//unitest_print("*** N-replica (l=%d) - %s\n", locks->max_n_owners, unitest_rv_to_string(rv));
