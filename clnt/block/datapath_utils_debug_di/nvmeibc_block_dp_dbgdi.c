@@ -487,12 +487,10 @@ static void __data_blk_fill_for_write(data_blk *d, const void *md,
 	struct nvmeibc_block_command *rldr = dp_cmd_get_raid_leader((void *)cmd);
 	const struct operation *o = cmd->o;
 	struct t_db_who_writer s = {.dbg_di_magic = 0};	// Non-journal EC write doesn't set data_md so init is required - TODO fix, jrnl might not be full set
-	const bool is_mirrored = !nvmeibc_raid_is_ec(pr) && !nvmeibc_raid_is_jbod(pr);
-
-	/* NVMESH-4505 - for mirror, the buffer is shared between the per-segment commands --> FIFO MD corruption
+	/* NVMESH-4505 - for mirror, the io buffer is shared between all disk commands --> FIFO MD corruption
 	 * may take place if one command fills the writer record while another command is DMA-ed. To address that
-	 * we only inject writer record for the raid leader. */
-	if (is_mirrored && cmd != &rldr[dp_cmds_get_first_cmd_of_stage(rldr, E_CMDS_STAGE_DO_IO_AND_PAR)]) {
+	 * we inject writer record for only the first write command. */
+	if (!nvmeibc_raid_is_ec(pr) && cmd != &rldr[dp_cmds_get_first_cmd_of_stage(rldr, E_CMDS_STAGE_DO_IO_AND_PAR)]) {
 		return;
 	}
 
