@@ -638,6 +638,10 @@ bool nvmeibc_debug_ram_binfo = true;	// By default check binfo
 module_param(nvmeibc_debug_ram_binfo, bool, 0644);
 MODULE_PARM_DESC(nvmeibc_debug_ram_binfo, "Enforce detection of topological data corruptions in RAM.");
 
+bool nvmeibc_debug_ram_unknown_dbits = true;	// By default check binfo
+module_param(nvmeibc_debug_ram_unknown_dbits, bool, 0644);
+MODULE_PARM_DESC(nvmeibc_debug_ram_unknown_dbits, "Enforce detection of too much unknown dbits relative to degraded mode");
+
 bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_blkset_info binfo, const u64 dlba, const char action)
 {
 	if (nvmeibc_debug_ram_binfo) {

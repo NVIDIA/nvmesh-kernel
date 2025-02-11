@@ -959,6 +959,7 @@ static u32 __gen_pre_tx_ram_dbits(struct t_ec_recov_tx *p) {
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 
 	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
@@ -977,6 +978,7 @@ static u32 __gen_ree_ram_dbits_from_dead_txbm(struct t_ec_recov_tx *p) {
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 
 	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
@@ -1002,25 +1004,37 @@ static u32 __gen_post_recov_ram_dbits_from_dead_txbm(struct t_ec_recov_tx *p) {
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 	p->blkset->resolve_dbits.after_resolve_dbits = after_resolve_dbits;
 	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
+static union nvmeibc_dbits_entry __gen_correct_num_unknowns_rer_sees(const struct t_ec_recov_tx *p) {
+	const u32 n_deg = hweight32((~p->rer_bmp.topo.readable) & p->rer_bmp.topo.raid.all);
+	union nvmeibc_dbits_entry dbits = {.all_bits = 0};
+	if (n_deg) {  // Toma don't inject unkowns if no degraded segs
+		if (n_deg == 1)
+			dbits.all_bits = nvmeib_dbits_entry_single_unk().all_bits;
+		else if (n_deg == 2)
+			dbits.all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; // puts 2 unknowns
+		else BUG();
+	}
+	return dbits;
+}
+
 static union nvmeib_blkset_info __gen_toma_lockset_info_for_cold(struct t_ec_recov_tx *p) {
 	union nvmeib_blkset_info blkset_info;
-	const u32 n_deg = hweight32((~p->rer_bmp.topo.readable) & p->rer_bmp.topo.raid.all);
 	const struct disk_range *pr = p->inp.sraid.cpr;
 	const u32 dconv_bm = p->pre.ram_dconv;
 	const u32 dconv_pr = rol32_width(dconv_bm, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
-	union nvmeibc_dbits_entry dbits = {.all_bits = 0};
+	union nvmeibc_dbits_entry dbits = __gen_correct_num_unknowns_rer_sees(p);
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
-	if (n_deg)  // Toma don't inject unkowns if no degraded segs
-		dbits.all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; // puts 2 unknowns
 	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, 0x0 /*No dbits*/, 0x0 /* No trun-off*/, dconv_pr);
 	blkset_info.bits.dirty = dbits.all_bits; //nvmeibc_dbits_tx_apply(&dbits, &db_tx);   // Add the convicts at the expanse of unkonws
 	blkset_info.bits.txid = INITIAL_LAZY_READ_TXID;
@@ -1050,6 +1064,7 @@ static u32 __gen_rer_ram_dbits(struct t_ec_recov_tx *p) {
 	const union nvmeibc_dbits_entry post_recov_dbits = { .all_bits = p->lid.post_recov.blkset_info.bits.dirty };
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 	if (p->inp.rer.bio_type == NVMEIB_BLOCK_IO_OP_WRITE) {
 		for (h = 0; h < p->inp.tx_height; h++) {
@@ -1128,6 +1143,7 @@ static u32 __gen_pre_tx_slice_dbits(struct t_ec_recov_tx *p, int slice) {
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, 0x0);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
@@ -1143,6 +1159,7 @@ static u32 __gen_ree_slice_dbits(struct t_ec_recov_tx *p, int slice) {
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
 	const struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, 0x0);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
@@ -1274,10 +1291,8 @@ static void ec_tx_inject_blkset_entries(struct t_ec_recov_tx *p) {
 			}
 
 			if (p->inp.rer.io_perm.bits.is_hot_recovery && p->blkset->is_unknown_dbits_injected_to_ram) {
-				ir->dbits->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; // puts 2 unknowns
+				ir->dbits->all_bits = __gen_correct_num_unknowns_rer_sees(p).all_bits;	// Inject max possible unknowns to RAM but not too much
 			}
-
-
 			 if (p->inp.rer.io_perm.bits.is_jgc_recovery) {
 				 p->lid.rer.lock_id.all |= *ir->lock;			// Journal GC will encounter ree's locks and will not fix anything in ram so rer lock == ree lock
 				 p->lid.post_recov.lock_id.all = p->lid.rer.lock_id.all;
@@ -1563,6 +1578,7 @@ static u32 ec_tx_calc_rer_slice_dbits_after_wraparound(struct t_ec_recov_tx *p, 
 	struct nvmeibc_dbits_tx db_tx;
 	struct dp_topology_traits topo_traits = {
 		.n_parities = __disk_range_get_num_parities(pr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 
 	if (p->rer_bmp.tx.is_neverwritten_slice[h])  // if slice neverwritten no dbits will be turned on on it.
@@ -2173,6 +2189,7 @@ static void __merge_rer_binfo_of_recovered_tx_with_completed_tx(struct t_ec_reco
 	union nvmeibc_dbits_entry _s = {.all_bits = s->lid.rer.blkset_info.bits.dirty};
 	struct dp_topology_traits const topo_traits = {
 		.n_parities = __disk_range_get_num_parities(env.sraid.cpr),
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(s),
 	};
 	bool has_candidate_for_blkset;
 	if (!d->inp.rer.io_perm.bits.is_hot_recovery) {
@@ -2295,6 +2312,7 @@ static void __update_expectors_according_to_err_injection(struct t_ec_tx_history
 				union nvmeibc_dbits_entry post_dbits;
 				struct dp_topology_traits topo_traits = {
 					.n_parities = __disk_range_get_num_parities(pr),
+					.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 				};
 				*writable_pari = p->rer_bmp.topo.raid.pari & (~p->rer_bmp.topo.dead);
 
@@ -2966,8 +2984,6 @@ static int __unitest_EC_Recovery(bunitest_s* B, const enum NVMEIBT_RECOVERY_TYPE
 				bool is_last_iteration = (u == 9);
 				//if (u == 2 && topos.impl.curr_permutation == 8) {
 				if (u == 0 && topos.impl.curr_permutation == 0) {
-					int vv =0;
-					vv++;
 				}
 				hist.iter.curr_permutation = topos.impl.curr_permutation;
 				hist.iter.iner_iteration = u;

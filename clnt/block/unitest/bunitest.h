@@ -24,6 +24,7 @@ extern bool force_reconf_reboot;						// disable hot transition.
 extern bool warn_on_too_many_degraded;					// Do WARN_ON() if we have 3+ degraded segments, always true in real systems, but can be turned off in unitest, Because unitest environment causes 3 degraded segs
 extern bool json_iostats_fixed_size;					// By default IO stats jsons are not padded to fixed size
 extern bool nvmeibc_debug_ram_binfo;					// Module param
+extern bool nvmeibc_debug_ram_unknown_dbits;			// Module param
 extern bool qa_ec_stress_debug;							// EC module param
 extern uint nvmeibc_jentry_num_blocks;					// Clients module param of binje
 extern unsigned self_recovery_detach_initial_time_sec;
@@ -35,9 +36,6 @@ extern bool nvmeibc_warn_on_parities_sync_missmatch;
 extern bool nvmeibc_notify_toma_on_slice_by_slice_destruction_in_sync;
 extern bool nvmeibc_raid1_destroy_force_physical_bad_sector_in_sync;
 extern unsigned int num_warnings;
-
-static inline void set_warn_on_too_many_degraded(  void) { warn_on_too_many_degraded = true; }
-static inline void unset_warn_on_too_many_degraded(void) { warn_on_too_many_degraded = false; }
 /****************** Framework for async testing with treads *******************/
 typedef struct { 						// Parameters for IO async thread
 	struct NVMeshSystem *sys;

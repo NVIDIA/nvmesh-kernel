@@ -2075,13 +2075,24 @@ static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPrai
 		ramDiskSimulator_lockStale(&sys->servers[ownerSeg->node_id].ramDisk, ownerSeg->dlba_start);			// Put stale special value in the first lock of the segment.
 		db->all_bits = 0;
 		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
-		BUG_ON(db->all_bits == 0);
+		BUG_ON(db->all_bits == 0);															// Write in degraded mode turns dbits on
+
+		// Test that read view lock does not change unknowns
+		nvmeibc_debug_ram_unknown_dbits = false;	// Double unknowns in 1-degraded
 		db->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; 							// Set both unknowns, S2D must keep them intact
 		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
 		BUG_ON(db->all_bits != nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
+		nvmeibc_debug_ram_unknown_dbits = true;
+
+		db->all_bits = nvmeib_dbits_entry_single_unk().all_bits;
+		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
+		BUG_ON(db->all_bits != nvmeib_dbits_entry_single_unk().all_bits);
+
+		// Test that sync analises unknowns and decreases their incorrect number
+		db->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; 							// Set 2-unknowns, in 1-deg topo
 		ramDiskSimulator_lockStale(&sys->servers[ownerSeg->node_id].ramDisk, ownerSeg->dlba_start);			// Put stale special value in the first lock of the segment.
 		rv = osSimulator_readArrWait(&client->OS, volInd, seg_start, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
-		BUG_ON(db->all_bits != nvmeib_dbits_entry_single_unk().all_bits);						// This is a 2 mirror only test, so we get back a single unknown
+		BUG_ON(db->all_bits != nvmeib_dbits_entry_single_unk().all_bits);						// 1-deg topo, so we get back a single unknown
 		if (ioVLBA > LOCKSET_SLICES) {
 			db->all_bits = 0;
 		}
@@ -2237,10 +2248,11 @@ TEST_FUNC int unitest_DegradedMode(struct NVMeshSystem *sys){
 			db_val = physSegDBIdxPtr_off(otherSeg, __to4K(startBlock));
 			BUG_ON(db_val->all_bits == 0);																						// Verify DB is set after write
 			// Test unknown DBs are not changed after read, and ARE changed after write
-			db_val->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
+			db_val->all_bits = nvmeib_dbits_entry_single_unk().all_bits;
 			rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
+			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_single_unk().all_bits);
 			// Add stale lock, stale should be release and unknown should remain (since merged by sync we will have a single unknown value)
+			db_val->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
 			ramDiskSimulator_lockStale(&otherServer->ramDisk, otherSeg->dlba_start+startBlock);			// Put stale special value in the lock of the IO.
 			rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
 			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_single_unk().all_bits); // Double unknown resolved to single unknowns
@@ -2253,12 +2265,12 @@ TEST_FUNC int unitest_DegradedMode(struct NVMeshSystem *sys){
 			tomaSimulator_switchTopo(r1uuid(r1), seg_stats[ind_dead_seg]	, seg_stats[ind_dead_seg^1]	, SW_TOPO__WAIT_ACK);	// {W	, RW} - Lock live
 			__unitest_test_degraded_write(sys, r1, mem, volInd, startBlock, lenBlocks);
 			// Set unknown again, verify read doesn't change it
-			db_val->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
+			db_val->all_bits = nvmeib_dbits_entry_single_unk().all_bits;
 			rv = osSimulator_readArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
+			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_single_unk().all_bits);
 			// Write will not fix unknown if small but will if big
 			rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
+			BUG_ON(db_val->all_bits != nvmeib_dbits_entry_single_unk().all_bits);
 			if (1) {
 				u8 *full_bs = sim_kmalloc(LOCKSET_SLICES*NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 				rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock - (startBlock % LOCKSET_SLICES), LOCKSET_SLICES, full_bs);		REPORT_ERROR(rv);
@@ -2292,9 +2304,9 @@ TEST_FUNC int unitest_DegradedMode(struct NVMeshSystem *sys){
 		db_val->all_bits = 0x17;
 	}
 	magic_pattern = __unitest_fill_blocks_unique_pattern(mem, lenBlocks);	// Set a pattern.
-	nvmeibc_debug_ram_binfo = false;
+	warn_on_too_many_degraded = nvmeibc_debug_ram_binfo = false;			// Deliberate ficticious dirty-bit
 	rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);		REPORT_ERROR(rv);
-	nvmeibc_debug_ram_binfo = true;
+	warn_on_too_many_degraded = nvmeibc_debug_ram_binfo = true;
 	for (i=0; i<4; i++){ 									// Verify that magic number was written to both mirrors
 		dst = physSegStartPtr_off(&curSeg[i], ((i<2)?__to4K(startBlock):0));
 		__unitest_verify_blocks_pattern(dst, __from4K(1), magic_pattern, true);
@@ -3941,8 +3953,8 @@ static void __set_bi_inj_from_stale_dirty_unknown(union nvmeib_blkset_problem_re
 		BUG_ON(sdu.is_unknown); // Mutual exclusive
 		bi_inj->dbits = dirty_value;
 	}
-	if (sdu.is_unknown) { // Can also use single unknown (not used in N_MIRROR)
-		bi_inj->dbits = nvmeib_dbits_entry_build_unk(-1, -1).all_bits;
+	if (sdu.is_unknown) {
+		bi_inj->dbits = nvmeib_dbits_entry_single_unk().all_bits;	// Used in 1-degraded
 	}
 	if (sdu.is_stale) {
 		bi_inj->is_stale = true;
@@ -3955,8 +3967,8 @@ static void __set_ram_binfo_from_stale_dirty_unknown(struct ramDiskSimulator *ss
 		BUG_ON(sdu.is_unknown); // Mutual exclusive
 		ramDiskSimulator_setDirty(ssd, addr, dirty_value);
 	}
-	if (sdu.is_unknown) { // Can also use single unknown (not used in N_MIRROR)
-		ramDiskSimulator_setDirty(ssd, addr, nvmeib_dbits_entry_build_unk(-1, -1).all_bits);
+	if (sdu.is_unknown) {
+		ramDiskSimulator_setDirty(ssd, addr, nvmeib_dbits_entry_single_unk().all_bits);	// Used in 1-degraded
 	}
 	if (sdu.is_stale) {
 		ramDiskSimulator_lockStale(ssd, addr);
@@ -4177,6 +4189,8 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 				const int inject_stale[2][2] = {{2,3}, {1,0}};								// Stale locks on blocksets {2,3}
 				before = *cur_num_syncs;
 				count = 0;
+
+				nvmeibc_debug_ram_unknown_dbits = false;	// Deliberately using double unknowns in 1-degraded
 				for (rlba = 0; rlba < 2; rlba++) {
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
 					ramDiskSimulator_lockStale(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][rlba]);
@@ -4190,6 +4204,7 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 				ramDiskSimulator_lockUnSta(oth, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][1]);
 				after = *cur_num_syncs;
 				BUG_ON(after != before + count);
+				nvmeibc_debug_ram_unknown_dbits = true;		// Double unknowns in 1-degraded
 
 				for (rlba = 0; rlba < 2; rlba++) { // Repeat with single unknown
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_single_unk().all_bits);
@@ -4197,7 +4212,6 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 					//_ND(t_simuav21, "sss @INT, @INT", inject_dbits[sgmnt_idx][rlba], inject_stale[sgmnt_idx][rlba]);
 					count++;
 				}
-
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD);
 				clientSimulator_wait_for_all_sync_ops(clnt);
 				// Verify that stale lock exists on both segments (where there was no dbits)
@@ -4233,26 +4247,27 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 				// DB suspect will still be assumed even though we had a convict and did not consider it known
 				before = *cur_num_syncs;
 				tomaSimulator_switchTopo(r1uuid(r1), conv[sgmnt_idx], conv[sgmnt_idx^1], SW_TOPO__WAIT_ACK);				// {RW,W-} or {W-,RW}
-				// When injecting invalid Dbit + convict we get more than allowed degraded segments and need to disable warn_on_too_many_degraded
-				unset_warn_on_too_many_degraded();					// We will get more than 2 degraded segs
+				// When injecting invalid Dbit + convict we get more than allowed degraded segments
 				for (rlba = 0; rlba < 2; rlba++) {
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], 0x6);		// Strange dirty + convict will be turned on and then turned off
 				}
+				warn_on_too_many_degraded = false;					// Deliberatly inject more dbits than degraded segs, see remark above
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
-
+				warn_on_too_many_degraded = true;
 				ramDiskSimulator_verify_no_locks(ssd);
-				set_warn_on_too_many_degraded();					// We will get more than 2 degraded segs
+
 				for (rlba = 0; rlba < 2; rlba++) {
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_single_unk().all_bits);		// Unknown + convict will be turned on and then turned off
 				}
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
-
 				ramDiskSimulator_verify_no_locks(ssd);
 
+				nvmeibc_debug_ram_unknown_dbits = false;	// Same as above but deliberate double unknowns in 1-degraded
 				for (rlba = 0; rlba < 2; rlba++) {
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_build_unk(-1,-1).all_bits);		// 2 Unknown + convict will be turned on and then turned off
 				}
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
+				nvmeibc_debug_ram_unknown_dbits = true;
 
 				ramDiskSimulator_verify_no_locks(ssd);
 				clientSimulator_wait_for_all_sync_ops(clnt);
@@ -6302,7 +6317,6 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 	array_fill(seg_stats, NVMEIBTC_DS_MODE_RW);
 	#define segs_in_chunk() (curSeg->replicas * curSeg->stripe_width)
 	curSeg = &sys->mdb.vols[volInd].segs[0];
-	unset_warn_on_too_many_degraded();					// We will get more than 2 degraded segs
 	#define __verify_no_dbits(db_vals) ({ for (j = 0; j < r1->header.n_segments; j++) {	BUG_ON(db_vals[j]->all_bits != 0); } })
 	#define __clean_cur_dbits(db_vals) ({ for (j = 0; j < r1->header.n_segments; j++) {	db_vals[j]->all_bits = 0; } })
 
@@ -6346,6 +6360,7 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 				goto _back_to_normal_topo;
 			}
 			// Degraded D mode tests
+			warn_on_too_many_degraded = (n_deg <= 2);		// Dbits marker still support only 2 degraded segs
 			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
 
 			if (only_1_lock_is_alive) { // Test Stale 2 dirty in max degraded
@@ -6399,12 +6414,14 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 
 			if (true) { // Dirty convict tests (various dbits values combination)
 				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
-				const u16 dbits_vals[3] = {0x7 /*Invalid*/, nvmeib_dbits_entry_single_unk().all_bits, nvmeib_dbits_entry_build_unk(-1,-1).all_bits};
+				const u16 dbits_vals[3] = {0x7 /*Invalid seg6*/, nvmeib_dbits_entry_single_unk().all_bits, nvmeib_dbits_entry_build_unk(-1,-1).all_bits};
 				int d;
 				__clean_cur_dbits(db_vals);	// Remove all dbits before we transitino to next topo
 				for (d = 0; d < 3; d++ ){
 					db_vals[owner_seg_ind]->all_bits = dbits_vals[d];		// Inject invalid DBit into primary owner - consider replacing this
+					warn_on_too_many_degraded &= (d != 0);					// Invaliud dbit for non existing seg 6
 					tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD_CONV);
+					warn_on_too_many_degraded = (n_deg <= 2);
 					BUG_ON(db_vals[owner_seg_ind]->all_bits);
 					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
 					ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
@@ -6454,6 +6471,7 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 				BUG_ON(stats->num_dirty_bit_suspect != 1); 	// Dirty suspect was resolved via sync
 				__verify_no_dbits(db_vals);
 			}
+			warn_on_too_many_degraded = true;	// Set back to enable, done with 3+ degraded mode
 
 _back_to_normal_topo:
 			for (j = 0; j < n_deg; j++) {
@@ -6465,9 +6483,7 @@ _back_to_normal_topo:
 		}
 	}
 	} // for (c = 0; chunks....
-	set_warn_on_too_many_degraded();
-
-	BUG_ON(rv);
+	BUG_ON(rv || (warn_on_too_many_degraded == false));
 	sim_kfree(mem);
 	_NI_dmesg(trace_bunitest_unitest_DegradedMode_n_mirrored, "*************** end");
 	return rv;

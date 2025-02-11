@@ -327,4 +327,5 @@ void ec_tx_verify_post_tx_ssd_disks_roll_fwd_dbits_fixup(struct t_ec_recov_tx *p
 void ec_tx_verify_post_sync_tx(struct NVMeshSystem *sys, struct t_ec_recov_tx *p, bool is_trans_errors_inject_enabled, bool could_unexpected_htr_executed);
 void ec_tx_init_blkset(struct t_ec_recov_blkset *blkset);
 void ec_tx_for_jmdc_do(struct NVMeshSystem *sys, struct t_ec_recov_tx *p, char *action);
+int  ec_tx_calc_topo_ree_num_deg_segs(const struct t_ec_recov_tx *p);
 u32 ec_tx_gen_next_txid(void);

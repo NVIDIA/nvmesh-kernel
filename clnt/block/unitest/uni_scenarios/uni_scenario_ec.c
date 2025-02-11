@@ -315,12 +315,9 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 	struct block_ram_inject_ptrs ram_inj_ps = serverSimulator_get_block_inject_ptrs(&sys->servers[ps], io_traits.slices[0].sgmnt2dlba[ps], 0, 0, 0).ram;
 	struct block_ram_inject_ptrs ram_inj_qs = serverSimulator_get_block_inject_ptrs(&sys->servers[qs], io_traits.slices[0].sgmnt2dlba[qs], 0, 0, 0).ram;
 	struct nvmeibc_maintain_sync_stats *maint_stats = &nvmeibc_flow_counters_ref()->main;
+	const int num_deg = nvmeibc_praid_get_num_deg_segs(raid);
 	BUG_ON((os >= raid->replicas) || (ps >= raid->replicas) || (qs >= raid->replicas));
 	nvmeibc_topology_put(t);											// Release t
-
-	if (!(n_parities > 1)) { // The bogus dbits are checked vs num_parities
-		unset_warn_on_too_many_degraded();
-	}
 
 	//if (deg_bit_map > 1) We already wrote the minimal dirty bits to the md (1,2...) so from now on we will get these as result
 	if (r1->s[0].access_mode == NVMEIBTC_DS_MODE_DEAD) { // Cannot be the owner
@@ -439,10 +436,11 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 			rcvr_args.type = prev_type;
 		}
 		if (1) { // Dedicated recovery resolves unknown tx-dbits
+			u16 unk_dbits = (num_deg > 1) ? nvmeib_dbits_entry_build_unk(-1,-1).all_bits : nvmeib_dbits_entry_single_unk().all_bits;
 			int recov_status = 0;
 			enum NVMEIBT_RECOVERY_TYPE prev_type = rcvr_args.type;
 			rcvr_args.type = NVMEIBT_RECOVERY_TYPE_EC_FIX_UNK_BINFO;
-			ram_inj_ps.dbits->all_bits = ram_inj_os.dbits->all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
+			ram_inj_ps.dbits->all_bits = ram_inj_os.dbits->all_bits = unk_dbits;
 			*ram_inj_ps.txid =           *ram_inj_os.txid = INITIAL_LAZY_READ_TXID;
 			BUG_ON(tomaSimulator_recoverThingStatus(env.sraid.tpr, env.sraid.cpr + os, rcvr_args, &recov_status) < 0);
 			BUG_ON(recov_status != 0); // Recovery did launch
@@ -468,13 +466,12 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 			struct block_ram_inject_ptrs dead_seg_ram_inj = serverSimulator_get_block_inject_ptrs(&sys->servers[0], io_traits.slices[0].sgmnt2dlba[0], 0, 0, 0).ram;
 			*dead_seg_ram_inj.txid = INITIAL_LAZY_READ_TXID;
 		}
-
 	}
 
-	nvmeibc_debug_ram_binfo = false;			// We inject dirtybits into all RW topology
 	if (are_writes_disabled)
 		goto _after_writes_test;
 	for (i = 0; i < 2; i++) { // Three staged test
+		const bool are_all_rw = (deg_bit_map == 0);	// Note: We can also use toma topology without accessing internal structures
 		// Setup parameters for test with all injection pointers ready
 		const int startBlock = rios[i]*lenBlocks;
 		struct io_traits db_inj_traits =           get_io_traits(env, rdbs[i][0]*lenBlocks, lenBlocks);
@@ -494,18 +491,23 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 		__set_valid_dbits(db_inj.dmd,   expected_dbit.bsmod.dead1, -1);   // Inject dirytbits values into pseudo random 2 slices in metadata on parity seg
 		__set_valid_dbits(db_2_inj.dmd, expected_dbit.bsmod.dead0, -1);
 		__unitest_fill_blocks_unique_pattern(&mem[0], lenBlocks);
+		nvmeibc_debug_ram_binfo = warn_on_too_many_degraded = false;								  // Injected 'expected_dbit' dbit for 2 segments in potentially single degraded mode
 		rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);	BUG_ON(rv);		// Full slice IO, writing 1 block on each segment
+		nvmeibc_debug_ram_binfo = warn_on_too_many_degraded = true;
 		clientSimulator_wait_for_all_sync_ops(client);
-		BUG_ON(*cur_num_syncs != 1);	// Exactly 1 maintanance operation occured (dirty suspect)
+		BUG_ON(*cur_num_syncs != (are_all_rw ? 0 : 1));	// Exactly 1 maintanance operation occured (dirty suspect), in all_rw, IO resolved them automatically
 		BUG_ON(atomic_read(&maint_stats->n_txid_wrap) != 1);	// Exactly 1 txid wraparound operation occured (txid wraparound)
 		// Verify client cleaned-up the stuff the ram on servers
 		BUG_ON(*ram_inj.txid != expected_TXID);
 		BUG_ON(*db_inj.ram.txid != expected_TXID);
-		if (deg_bit_map == 2) {
-			BUG_ON(ram_inj.dbits->all_bits !=       lower_dbit.all_bits);
-			BUG_ON(db_inj.ram.dbits->all_bits !=    lower_dbit.all_bits);
+		if (are_all_rw) {
+			BUG_ON(   ram_inj.dbits->all_bits != zero_dbits.all_bits);
+			BUG_ON(db_inj.ram.dbits->all_bits != zero_dbits.all_bits);
+		} else if (deg_bit_map == 2) {
+			BUG_ON(   ram_inj.dbits->all_bits != lower_dbit.all_bits);
+			BUG_ON(db_inj.ram.dbits->all_bits != lower_dbit.all_bits);
 		} else 				  {
-			BUG_ON(ram_inj.dbits->all_bits !=    expected_dbit.all_bits);
+			BUG_ON(   ram_inj.dbits->all_bits != expected_dbit.all_bits);
 			BUG_ON(db_inj.ram.dbits->all_bits != expected_dbit.all_bits);
 		}
 		ram_inj.dbits->all_bits = 0;
@@ -516,8 +518,9 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 				if (srvP_lock->state == ramDisk_running && srvOwlock != srvP_lock && srvPlock != srvP_lock) { // We might have already checked the owner which was P or Q or they might be down (When D0 is down Q is owner and P will be srvP)
 					struct block_inject_ptrs verify_ram = serverSimulator_get_block_inject_ptrs(&sys->servers[slice_size + s], io_traits.slices[0].sgmnt2dlba[slice_size + s], 0, 0, 0);
 					BUG_ON(*verify_ram.ram.txid != expected_TXID);
-					if (deg_bit_map == 2) BUG_ON(verify_ram.ram.dbits->all_bits != lower_dbit.all_bits);
-					else 				  BUG_ON(verify_ram.ram.dbits->all_bits != expected_dbit.all_bits);
+					if (are_all_rw)            BUG_ON(verify_ram.ram.dbits->all_bits != zero_dbits.all_bits);
+					else if (deg_bit_map == 2) BUG_ON(verify_ram.ram.dbits->all_bits != lower_dbit.all_bits);
+					else 				       BUG_ON(verify_ram.ram.dbits->all_bits != expected_dbit.all_bits);
 					verify_ram.ram.dbits->all_bits = 0;
 				}
 			}
@@ -542,7 +545,7 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 		BUG_ON(*db_inj.ram.txid != expected_TXID);
 		__verify_md_on_disk_after_txid_wraparound(sys, seg, rios[i], expected_TXID, deg_bit_map);
 		// ----------------------- Inject TxID unresolved + TxID wraparound + dbits suspect at once
-		if (deg_bit_map == 0) {		 // Daniel: For fast execution, test once in good topology without degraded modes
+		if (are_all_rw) {		 // Daniel: For fast execution, test once in good topology without degraded modes
 			*ram_inj.txid = NVMEIBC_DP_EC_MD_TX_ID_MAX - 1;         // make a write tx set txid max on blockset.
 			rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);	BUG_ON(rv);		// Full slice IO, writing 1 block on each segment
 			*cur_num_syncs = 0;
@@ -554,7 +557,8 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 			__unitest_fill_blocks_unique_pattern(&mem[0], lenBlocks);
 			rv = osSimulator_writeArrWait(&client->OS, volInd, startBlock, lenBlocks, mem);	BUG_ON(rv);		// Full slice IO, writing 1 block on each segment
 			clientSimulator_wait_for_all_sync_ops(client);
-			BUG_ON(*cur_num_syncs != 1);	// Exactly 1 maintanance operation occured dirty suspect -> since txid max is copied from a copy (need to inject all copies for TxID unresolved to occur)
+			// txid max is copied from a copy (need to inject all copies for TxID unresolved to occur)
+			BUG_ON(*cur_num_syncs != (are_all_rw ? 0 : 1));			// Exactly 1 maintanance operation occured dirty suspect. In perfect topo io resolves them to 0
 			BUG_ON(atomic_read(&maint_stats->n_txid_wrap) != 1);	// Exactly 1 txid wraparound operation occured (txid wraparound)
 			BUG_ON(*ram_inj.txid != expected_TXID);
 			BUG_ON(*db_inj.ram.txid != expected_TXID);
@@ -567,8 +571,9 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
 					if (srvP_lock->state == ramDisk_running && srvOwlock != srvP_lock && srvPlock != srvP_lock) { // We might have already checked the owner which was P or Q or they might be down (When D0 is down Q is owner and P will be srvP)
 						struct block_inject_ptrs verify_ram = serverSimulator_get_block_inject_ptrs(&sys->servers[slice_size + s], io_traits.slices[0].sgmnt2dlba[slice_size + s], 0, 0, 0);
 						BUG_ON(*verify_ram.ram.txid != expected_TXID);
-						if (deg_bit_map == 2) BUG_ON(verify_ram.ram.dbits->all_bits != lower_dbit.all_bits);
-						else 				  BUG_ON(verify_ram.ram.dbits->all_bits != expected_dbit.all_bits);
+						if (are_all_rw)            BUG_ON(verify_ram.ram.dbits->all_bits != zero_dbits.all_bits);
+						else if (deg_bit_map == 2) BUG_ON(verify_ram.ram.dbits->all_bits != lower_dbit.all_bits);
+						else 				       BUG_ON(verify_ram.ram.dbits->all_bits != expected_dbit.all_bits);
 						verify_ram.ram.dbits->all_bits = 0;
 					}
 				}
@@ -588,10 +593,6 @@ static void __test_io_maintanace_syncs(struct test_context env, u8* mem, bool ar
  _after_writes_test:
 	free_io_traits(&io_traits);
 	nvmeibc_raid_verify_tx_id_replica_consistency(raid);
-	nvmeibc_debug_ram_binfo = true;			// We inject dirtybits into all RW topology
-	if (!(n_parities > 1)) {
-		set_warn_on_too_many_degraded();
-	}
 }
 
 static void __verify_ec_2block_read(struct clientSimulator *client, int volInd, u8 *mem, int startBlock, int lenBlocks, u64 *magics) { 		// Verify data correctly read
@@ -1280,7 +1281,6 @@ TEST_FUNC int unitest_DegradedMode_EC(bunitest_s* B){
 	bunitest_tic(B);
 	if (B->conf->bunitest.enableEC_exhastiveTests) all_permutations=true; // Set value to all
 	#define segs_in_chunk() (curSeg->replicas * curSeg->stripe_width)
-	unset_warn_on_too_many_degraded();
 	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
 
 	// Write on 2 complete locksets (0 and 2) - Non degraded writes test
@@ -1357,7 +1357,6 @@ TEST_FUNC int unitest_DegradedMode_EC(bunitest_s* B){
 
 		BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
 	}
-	set_warn_on_too_many_degraded();
 	BUG_ON(rv);
 	sim_kfree(ls_mem);
 	sim_kfree(cmp_mem);
@@ -2823,8 +2822,8 @@ TEST_FUNC int __test_dirty_convict(bunitest_s* btest)
 
 	// pre(The initial state of dbits), expected state after convict turn on, expected state after rebuilding just the convict.
 	const struct tst_nvmeibc_dbits_entry dbits_pre[] =    { tst_db_entry(2,0,0,0,3), tst_db_entry(2,1,0,0,3), tst_db_entry(4,0,2,1,3), tst_db_entry(4,0,2,0,3), tst_db_entry(0xf,0,2,1,3), tst_db_entry(0xf,0,2,0,3), tst_db_entry(4,0,0,0,1), tst_db_entry(4,0,2,0,1), tst_db_entry(4,1,2,0,1), tst_db_entry(4,1,0,0,1), tst_db_entry(0xf,0,4,0,1), tst_db_entry(0xf,0,4,1,1), tst_db_entry(0xf,0,0,0,1), tst_db_entry(0xf,0,0xf,0,1), tst_db_entry(0,0,0,0,1) };
-	const union nvmeibc_dbits_entry dbits_post[] =        {    _db_entry(4,1,2,0),      _db_entry(4,1,2,1),      _db_entry(4,1,2,1),      _db_entry(4,1,2,0),      _db_entry(  4,1,2,1),        _db_entry(4,1,2,0),      _db_entry(4,0,2,1),      _db_entry(4,0,2,1),      _db_entry(4,1,2,1),      _db_entry(4,1,2,1),      _db_entry(  4,0,2,1),        _db_entry(4,1,2,1),      _db_entry(0xf,0,2,1),      _db_entry(0xf,0,2,1),        _db_entry(2,1,0,0)   };
-	const union nvmeibc_dbits_entry dbits_post_rebuild[] ={    _db_entry(2,0,0,0),      _db_entry(2,1,0,0),      _db_entry(2,1,0,0),      _db_entry(2,0,0,0),      _db_entry(  2,1,0,0),        _db_entry(2,0,0,0),      _db_entry(4,0,0,0),      _db_entry(4,0,0,0),      _db_entry(4,1,0,0),      _db_entry(4,1,0,0),      _db_entry(  4,0,0,0),        _db_entry(4,1,0,0),        _db_entry(0,0,0,0),        _db_entry(0,0,0,0),        _db_entry(0,0,0,0)   };
+	const union nvmeibc_dbits_entry dbits_post[] =        {    _db_entry(4,1,2,0),      _db_entry(4,1,2,1),      _db_entry(4,1,2,1),      _db_entry(4,1,2,0),      _db_entry(  4,1,2,1),        _db_entry(4,1,2,0),      _db_entry(4,0,2,1),      _db_entry(4,0,2,1),      _db_entry(4,1,2,1),      _db_entry(4,1,2,1),      _db_entry(  4,0,2,1),        _db_entry(4,1,2,1),       _db_entry(2,1,0,0),        _db_entry(2,1,0,0),        _db_entry(2,1,0,0)   };
+	const union nvmeibc_dbits_entry dbits_post_rebuild[] ={    _db_entry(2,0,0,0),      _db_entry(2,1,0,0),      _db_entry(2,1,0,0),      _db_entry(2,0,0,0),      _db_entry(  2,1,0,0),        _db_entry(2,0,0,0),      _db_entry(4,0,0,0),      _db_entry(4,0,0,0),      _db_entry(4,1,0,0),      _db_entry(4,1,0,0),      _db_entry(  4,0,0,0),        _db_entry(4,1,0,0),       _db_entry(0,0,0,0),        _db_entry(0,0,0,0),        _db_entry(0,0,0,0)   };
 	struct nvmeibc_maintain_sync_stats *maint_stats = &nvmeibc_flow_counters_ref()->main;
 
 	for (i = 0; i < N_MAX_RAID_SLICE_LEN; ++i)
@@ -3386,7 +3385,7 @@ int unitest_scrubRecovery_ec(bunitest_s* B) {
 TEST_FUNC int unitest_EC_recovery_Basic(bunitest_s* B) {
 	struct NVMeshSystem *sys = B->sys;
 	struct clientSimulator *client = &sys->clients[0];		// Test via the first client
-	u32 i;
+	u32 i, do_deg;
 	int os, l, k;											// Owner seg index, number of copies, lock index
 	int volIndx = 0;
 	u64 magic_pattern = 0;
@@ -3485,9 +3484,10 @@ TEST_FUNC int unitest_EC_recovery_Basic(bunitest_s* B) {
 		BUG_ON(!NVMeshSystem_is_stable(sys));
 	}
 
-	// Test dirty suspect
-	for (os = 0; os < n_segs; os++) { // ------------------------------------- Dbits suspect within DB sync
-		int si = os;
+	// ------------------------------------- Dbits suspect within DB sync
+	for (do_deg = 0; do_deg <= 1; do_deg++)	{ // 2 loops, 1 in perfect topology, 1 with single degraded 'W' but not D0,P,Q
+
+	for (os = 0; os < n_segs; os++) { 	// Advance in vlba to select D0 as segment 'os'
 		int ps = (os + slice_size)%n_segs, qs = (os + slice_size + 1)%n_segs;
 		const int p_index = (slice_size + os)%n_segs;
 		const int slice_index = os*(1<<LOCKSET_SHIFT);
@@ -3505,30 +3505,44 @@ TEST_FUNC int unitest_EC_recovery_Basic(bunitest_s* B) {
 
 			union nvmeibc_block_dp_ec_data_block_md *md_p = physSegMDIdxPtr_off(&seg[p_index], slice_index + 3);
 			union nvmeibc_dbits_entry dbs = {.all_bits = 0};
+			int si = os;
 			BUG_ON(slice_index+3 > (int)seg[p_index].length);
+
+			if (do_deg) {
+				__degrade_segment(&sys->clients[0], r1, seg, os+1);	// D1
+				__restore_seg_to_write(sys, &sys->clients[0], r1, seg, os+1, true);
+			}
 			srvOwlock->TxIDs[di] = NVMEIBC_DP_EC_MD_TX_ID_MAX;         // Screw-up the RAM of owner lock -> should not be affect by DB/DS sync
 			srvOwlock->dbits[di].all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
 			srvOwlock_p->dbits[di_p].all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
 			srvOwlock_q->dbits[di_q].all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
 			dbs.slmod.dead0 = 1;
 			__set_valid_dbits(md_p, 1, -1);
-			// We do not allow setting DBs that are in W+ or better
-			nvmeibc_debug_ram_binfo = false;
-			// Dirty suspec must resolve to 1 (even if it's not turn on/off)
+			nvmeibc_debug_ram_binfo = false;	// We do not allow setting DBs that are in W+ or better
 			BUG_ON(tomaSimulator_recoverThing(r1, &seg[os], RCVR_DIRTY_REBUILD) < 0);
 			clientSimulator_wait_for_all_sync_ops(&sys->clients[0]);
 			nvmeibc_debug_ram_binfo = true;
 			for (k = 0; k < max_copies; k++) {
 				struct ramDiskSimulator* si_ssd = &sys->servers[seg[si].node_id].ramDisk;
-				const u64 db_entry = COMMITTED_ADDR_AS(si_ssd, seg[si].dlba_start + slice_index, 4KB, LOCK);
-				BUG_ON(si_ssd->dbits[db_entry].all_bits != dbs.all_bits);
-				si_ssd->dbits[db_entry].all_bits = 0;
+				const u64 db_entry_offset = COMMITTED_ADDR_AS(si_ssd, seg[si].dlba_start + slice_index, 4KB, LOCK);
+				union nvmeibc_dbits_entry *dbit_in_ram = &si_ssd->dbits[db_entry_offset];
+				if (do_deg) {
+					BUG_ON(dbit_in_ram->all_bits != dbs.all_bits);			// Dirty suspect was resolve to 1 from disk metadata (even if it's not turn on/off)
+					dbit_in_ram->all_bits = 0;
+				} else {
+					BUG_ON(dbit_in_ram->all_bits != zero_dbits.all_bits);	// Because unknown was resolved automatically to 0
+				}
 				__move_to_prev_seg(si);
 			}
 			__set_valid_dbits(md_p, 0, -1);
+
+			if (do_deg)
+				__restore_seg_to_read_write(sys, r1, os+1);
+
 			NVMeshSystem_serialize(sys);
 			BUG_ON(!NVMeshSystem_is_stable(sys));
 		}
+	}
 	}
 	__EC_sync_commit_blockset(B);
 
@@ -3602,7 +3616,6 @@ TEST_FUNC int unitest_DoubleDegradedMode_EC(bunitest_s *B) {
 	//((struct nvmeibc_cinst_params_blk *)(env.dev->cips))->jentry_num_blocks = 1; // LKJ: (ofir) uncomment when transport and jam will be able to handle MS: nvmeibc_jmd_wr_version ? 1 : rand()%9;
 	bunitest_tic(B);
 	nvmeibc_htr_stats_reset();					// Dont care about counters of prev tests
-
 	BUG_ON(env.dev->dp.io_perm_alert.config.unprotected_write_period == 0);
 
 	__dd_restore_segments_and_wipe_db_md(env);
@@ -3653,7 +3666,6 @@ TEST_FUNC int unitest_DoubleDegradedMode_EC(bunitest_s *B) {
 			ex_tx_inject_tx(B->sys, &tx);
 
 			wbuffer = (void*)tx.tpd.rer.blocks[0][io.offset];
-
 			BUG_ON(osSimulator_writeArrWait(&env.client->OS, env.sraid.vsi.volume, io.vlba, io.length, wbuffer) < 0);
 			BUG_ON(osSimulator_readArrWait(&env.client->OS, env.sraid.vsi.volume, io.vlba, io.length, rbuffer) < 0);
 			BUG_ON(memcmp(wbuffer, rbuffer, ((env.dev->dp.enable_di_debug_mode) ? 8 : io.bytes)));		// Todo: Test first 8-byte of each block using __unitest_verify_blocks_pattern_data()
