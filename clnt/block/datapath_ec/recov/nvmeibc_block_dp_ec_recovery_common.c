@@ -174,7 +174,11 @@ bool dp_sync_common_are_all_binfo_equal(const struct recovery_sync_op *so)
 			rv = false;
 		}
 	}
-	if (likely(rv)) {
+	if (likely(rv)) {	// All locks are identical
+		if ((so->cmds) && (ow_rv.all != so->cmds->rld.pre.all)) {	// some syncs like stale2dirty are commandless
+			_NTSO(t_07_binfoeq, "locks binfos are equal: @BINFO, but != pre @BINFO", ow_rv.all, so->cmds->rld.pre.all);
+			return false;
+		}
 		_NTSO(t_05_binfoeq, "all binfos are equal: @BINFO", ow_rv.all);
 	}
 	return rv;
