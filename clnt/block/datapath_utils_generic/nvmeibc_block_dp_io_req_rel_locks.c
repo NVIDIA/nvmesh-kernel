@@ -649,7 +649,11 @@ bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_
 			struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(seg);
 			sgmnts_bmp_t clean_bm = nvmeibc_raid1_get_sgmnts_bmp(pr, readable);
 			const union nvmeibc_dbits_entry dbits_ent = { .all_bits = binfo.bits.dirty };
+			const int num_deg = pr->calculated_data.topo_traits.n_degraded;
 			const sgmnts_bmp_t dbits_bm = nvmeibc_dbits_get_turn_on_bmp(&dbits_ent, &pr->calculated_data.topo_traits);
+			const int num_unknowns =   nvmeibc_dbits_get_n_unk(&dbits_ent, &pr->calculated_data.topo_traits);
+			const u64 slba_blksets = (dlba - seg->first_lba) / LOCKSET_SLICES;
+			char buf_print[32];
 			if (action == 'w') {			// Write IO/Sync, Strongest verification, Ensure the dbits that we are turning off cannot be set
 				clean_bm |= nvmeibc_raid1_get_sgmnts_bmp(pr, w);
 			} else if (action == 's') {		// Write-by-Sync, Weaker verification, same as above but can turn on convicts for W- topology
@@ -657,19 +661,21 @@ bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_
 			} else if (action == 'r') {		// Read IO/Sync. Weakest verification, only readable segments, are tested dbits may exist on 'W' segs
 			}
 			if (unlikely(dbits_bm & clean_bm)) {                // Dbit on segment which cannot be turned on
-				const u64 slba_blksets = (dlba - seg->first_lba) / LOCKSET_SLICES;
-				char buf_print[32];
 				nvmeibc_dbits_entry_to_str(buf_print, sizeof(buf_print), binfo.bits.dirty);
 				WARN(true, "Possible Data corruption: seg=%-.8s, dlba=0x%llx, slba=0x%llx[blksets] binfo=0x%x=%s, dbits on clean seg. Disabling IO. Manual intervention is required to continue.\n", seg->uuid, dlba, slba_blksets, binfo.all, buf_print);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&nvmeibc_disk_seg_to_bdev(seg)->dp.io_stats.mgr);
 				return false;
 			}
-			/*if (nvmeibc_praid_are_all_readable(pr)) { // Unknonw dbits in perfect topology. This might indicatet a bug in toma, but not a corruption: Enable and fix unitest, now we dont test UNKNOWNS
-				const u64 slba_blksets = (dlba - seg->first_lba) / LOCKSET_SLICES;
-				char buf_print[32];
+			// Strict test for unknown dbits
+			if (num_deg == 0) { // Unknown dbits in perfect topology. This might indicatet a bug in toma, but not a data corruption
 				nvmeibc_dbits_entry_to_str(buf_print, sizeof(buf_print), binfo.bits.dirty);
-				WARN(true, "Possible Data corruption: seg=%-.8s, dlba=0x%llx, slba=0x%llx[blksets] binfo=0x%x=%s, unknown dbits in normal mode. Disabling IO. Manual intervention is required to continue.\n", seg->uuid, dlba, slba_blksets, binfo.all, buf_print);
-			}*/
+				WARN_ONCE(true, "Wrong dirty-bits on volume: seg=%-.8s, dlba=0x%llx, slba=0x%llx[blksets] binfo=0x%x=%s, unknown dbits in normal mode \n", seg->uuid, dlba, slba_blksets, binfo.all, buf_print);
+				return true;
+			} else if (nvmeibc_debug_ram_unknown_dbits && (num_unknowns > num_deg)) {	// Check too much unknowns, like double unknown in single degraded mode. Not a critical bug
+				nvmeibc_dbits_entry_to_str(buf_print, sizeof(buf_print), binfo.bits.dirty);
+				WARN_ONCE(true, "Wrong dirty-bits on volume: seg=%-.8s, dlba=0x%llx, slba=0x%llx[blksets] binfo=0x%x=%s, too much unknowns\n", seg->uuid, dlba, slba_blksets, binfo.all, buf_print);
+				return true;
+			}
 		}
 	}
 	return true;
