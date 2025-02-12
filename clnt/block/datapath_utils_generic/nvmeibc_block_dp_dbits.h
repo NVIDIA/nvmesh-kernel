@@ -101,4 +101,7 @@ static inline bool nvmeibc_dbits_tx_are_equal(const struct nvmeibc_dbits_tx* a, 
 #define nvmeibc_dbits_has_convict( dbmap) ((dbmap)->action.db_conv_map)
 #define nvmeibc_dbits_has_unknown( dbmap) ((dbmap)->action.num_unknowns)
 
+// Calc action of difference between entries
+struct nvmeibc_dbits_action nvmeibc_dbits_calc_diff_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, const int num_parities);
+
 #endif /* NVMEIBC_BLOCK_DP_DBITS_H_ */
