@@ -803,6 +803,7 @@ bool dp_sync_does_see_clean_ram_dbits(const struct recovery_sync_op *so)
 	return (pre.all_bits == zero_dbits.all_bits);
 }
 
+bool dp_sync_verify_binfo_is_legal(struct recovery_sync_op *so, const union nvmeib_blkset_info binfo);
 void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 	struct nvmeibc_cmd_lock *ow_l = &so->locks[0];
 	const bool expect_taken_lock = (NCL_do_i_have_lock(ow_l->status) || did_caller_of_so_took_this_lock(ow_l));
@@ -815,7 +816,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		const bool should_post_txid_be_correct = (so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON);			// This is the only sync which will not resolve TxID. It just does not care
 		const bool should_post_dbit_be_correct = ((so->o->op != NVMEIB_BLOCK_IO_OP_REC_COLD) && !is_so_nested(so));	// EC has multiple stages of dbit manipulation, including turning on dbits, only last step guranteed to be without DBITs on 'W'
 		if (is_origininal_sync_should_resolved_binfo) {		// Verify the precondition to launching this state machine. rldr.pre, not post!
-			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, so->r1));		// Was already resolved, and cannot appear
+			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, so->r1));		// Was already resolved, and cannot appear, test unknowns in pre-binfo
 			if ((so->o->op == NVMEIB_BLOCK_IO_OP_REC_COMMIT_BINFO) && (!is_so_nested(so)) && (dp_ec_can_fix_dbits(so->cmds))) {
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x copied instead of turning dbits off. n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
@@ -833,23 +834,33 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 	} else if (so->cmds->rld.post.bits.dirty != 0) {		// R1, verify dirty bits
 		const union nvmeib_blkset_info binfo = so->cmds->rld.post;
 		const union nvmeibc_dbits_entry dbits = { .all_bits = binfo.bits.dirty };
-		const u32 num_unknown = nvmeibc_dbits_get_n_unk(&dbits, &so->r1->calculated_data.topo_traits);
-		if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, 's')) {
+		const u32 num_unknown = nvmeibc_dbits_get_n_unk(&dbits, &so->r1->calculated_data.topo_traits);	// test unknowns in post-binfo
+		const bool special_2mirror_case = (so->r1->replicas <= 2);
+		const bool no_dbits_for_w_segs = (special_2mirror_case || (so->n_slices == LOCKSET_SLICES));
+		const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 's' :		// Dont check W-
+								no_dbits_for_w_segs ? 'w' :											// W- and W must not include any dbits
+								'r';																// 3+ Mirror, W seg in partial syncs can have dbits
+		if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
 			WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 			nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 		}
-		if (num_unknown != 0) {				// R1 cant write unknown dbits, because there is no way to resolve them. No dbits in metadata of P,Q
+		if ((num_unknown != 0) && no_dbits_for_w_segs) {		// R1 uses still preserves unknown dbits to prefer reads from W seg over writes + in future we might used metadata dbits so unknowns can be resolved
 			WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing unknown dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 			nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 		}
-		if (so->r1->replicas <= 2) {		// R1 2-mirror, special case where turning on dbits is not allowed
+		if (special_2mirror_case) {
+			// R1 2-mirror, special case where writing/turning-on dbits is allowed only by 2 syncs:
+			// 	Stale2dirty in {RW,D} - not using this function
+			// 	Dirty_convict_turn_on in {RW, W-}
+			// 	Note: in {RW, W}, This is a plain bug, must fix dirtybit.
+			// 	When more than 2 replicas: commit_stale_lock and other syncs can write dbits. Especially in {RW,W,D} topo
 			WARN(so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing dbits!\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all);
-			// {RW, W}, This is a plain bug, must fix dirtybit. Only dirty convict can write dbits in {RW, W-} and stale2dirty in {RW,D}
-		}	// Note: R1 3 mirrored behaves more like EC.
+		}
 	}
 	so->o->op = NVMEIB_BLOCK_IO_OP_MAINTAIN_COMMIT_BINFO;
 	nvmeibcbdpec_push_clean_to_stack(so, __cleanup_after_all_binfo_writes);
 	nvmeibc_sync_set_uncompleted_cmds(so, ow_l->n_siblings);		// Cleaner to use so->locks->n_uncompleted_locks
+	dp_sync_verify_binfo_is_legal(so, so->cmds->rld.post);
 	BLKCMP_SO_ASYNC_AWAIT(dp_locks_write_all_blocksets_info_op(ow_l, &so->cmds->rld.post, &__complete_bs_info_write, 0));
 	/* Watch out from here so might be freed. */
 }
