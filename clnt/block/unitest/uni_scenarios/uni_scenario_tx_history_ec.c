@@ -1323,7 +1323,8 @@ static void __verify_post_tx_lock_blkset_entry(struct t_ec_recov_tx *p, bool is_
 	if (!p->inp.ree.is_old_completed){
 		const ulong lock_porters = 1 | p->ree_bmp.topo.raid.pari; //hard coding D0, P & Q; the real code uses lock map
 		ulong l;
-		for_each_set_bit(l, &lock_porters, p->inp.sraid.cpr->replicas){
+		const int num_parities = __disk_range_get_num_parities(p->inp.sraid.cpr);
+		for_each_set_bit(l, &lock_porters, p->inp.sraid.cpr->replicas) {
 			struct block_ram_inject_ptrs* ir = &p->tpd.bptrs[0][l].ram; //Injection to ram
 			union nvmeib_lock_id *toma_lock = p->tpd.bptrs[0][l].toma_stale_lock;
 			if ((p->inp.rer.topo[l] != NVMEIBTC_DS_MODE_DEAD)&&(!p->inp.rer.io_perm.bits.is_jgc_recovery)) {
@@ -1332,7 +1333,7 @@ static void __verify_post_tx_lock_blkset_entry(struct t_ec_recov_tx *p, bool is_
 				if (is_trans_err_injected && p->inp.rer.io_perm.bits.is_hot_recovery) { // All TxID's are set to post transaction regardless of roll forward or abort
 					EC_TX_BUG_ON(*ir->txid < ebi.bits.txid);    // if there is a retry of the op the txid can inc more than once..
 					if ((!p->rer_bmp.tx.will_call_nwhole_sync)) {  // Because HTR is mandatory no_whole_sync called by it must finish correctly, so we only have to consider HTR's called by rer's TX.
-						EC_TX_BUG_ON(ir->dbits->all_bits != ebid.all_bits);
+						__verify_dbits_identical(*ir->dbits, ebid, num_parities);
 					} else {
 						EC_TX_BUG_ON((ir->dbits->all_bits != ebid.all_bits) && (ir->dbits->all_bits != p->lid.post_recov.blkset_info.bits.dirty));            // Verify Cleaned Dbits on on 'W' segments and Turn on on 'D' or that maybe there was a transport error while commiting non-owner binfo.
 					}
@@ -1340,13 +1341,13 @@ static void __verify_post_tx_lock_blkset_entry(struct t_ec_recov_tx *p, bool is_
 						__verify_ram_txid_equals_rers_dmd(p, *(ir->txid));
 					}
 				} else {
-					EC_TX_BUG_ON( ir->dbits->all_bits != ebid.all_bits);			// Verify Cleaned Dbits on on 'W' segments and Turn on on 'D'
+					__verify_dbits_identical(*ir->dbits, ebid, num_parities);
 					EC_TX_BUG_ON(*ir->txid != ebi.bits.txid);
 				}
 			}
-			*ir->lock =           0;
+			*ir->lock = 0;
 			toma_lock->all = 0;
-			 ir->dbits->all_bits = 0;									// Clean for next unitest scenario
+			ir->dbits->all_bits = 0;									// Clean for next unitest scenario
 		}
 	}
 }

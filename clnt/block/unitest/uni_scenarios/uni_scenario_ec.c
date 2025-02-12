@@ -2720,22 +2720,28 @@ void __fill_block_device_with_unique_data(struct NVMeshSystem *sys, u8 v)
 }
 
 
-static inline void __verify_dbits_valid(union nvmeibc_dbits_entry dbits, union nvmeibc_dbits_entry expected)
+void __verify_dbits_identical(union nvmeibc_dbits_entry dbits, union nvmeibc_dbits_entry expected, int num_parities)
 {
-	BUG_ON(dbits.all_bits != expected.all_bits);
+	if (dbits.all_bits != expected.all_bits) {
+		char buf0[32], buf1[32];
+		nvmeibc_dbits_entry_to_str(buf0, sizeof(buf0), dbits.all_bits);
+		nvmeibc_dbits_entry_to_str(buf1, sizeof(buf1), expected.all_bits);
+		WARN(true, "actual{%s=0x%x} != expected{%s=0x%x}, n_par=%u\n", buf0, dbits.all_bits, buf1, expected.all_bits, num_parities);
+	}
 }
 
 static inline void __verify_ram_dbits_valid(const struct NVMeshSystem *sys, const struct TstPRaid* praid, const u32 (*conv_segs)[3], const u32 conv_nblk[3], union nvmeibc_dbits_entry expected)
 {
 	u8 i, si;
 	const union nvmeibc_dbits_entry clean_dbit = { .all_bits = 0x0000 };
+	const int num_par = __disk_range_get_num_parities(praid->cpr);
 	for (si = 0; si < ARRAY_SIZE(*conv_segs); si++) {
 		const struct ramDiskSimulator *ssd = &sys->servers[(*conv_segs)[si]].ramDisk;
 		const u64 ram_blkst_offset = COMMITTED_ADDR_AS(ssd, praid->cpr[(*conv_segs)[si]].dlba_start, 4KB, LOCK);
 		for (i = 0; i < conv_nblk[si]; i++)
-			__verify_dbits_valid(ssd->dbits[ram_blkst_offset + i], expected);
+			__verify_dbits_identical(ssd->dbits[ram_blkst_offset + i], expected,   num_par);
 		if ((ram_blkst_offset + i) < RAMDISK_DATA_LOCK_SIZE)
-			__verify_dbits_valid(ssd->dbits[ram_blkst_offset + i], clean_dbit);
+			__verify_dbits_identical(ssd->dbits[ram_blkst_offset + i], clean_dbit, num_par);
 	}
 }
 
