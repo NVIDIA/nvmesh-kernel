@@ -2043,14 +2043,18 @@ static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPrai
 	const bool isStriped  = tTopoOfVolume_isStriped(&sys->tcf.vols[volInd]);
 	u64        magic_pattern = __unitest_fill_blocks_unique_pattern(mem, lenBlocks);	// Set a pattern.
 	int n_deg = 0, live_seg_ind = 0;
+	const int stripe_size = curSeg->stripe_size;
+	const int stripe_width = curSeg->stripe_width;
+	const int n_replicas = curSeg->replicas;
 	tomaSimulator_waitProtoEnd(NULL);											// Wait for switch_topos which entered the client into degraded mode to terminate
 	rv = osSimulator_trim(    &client->OS, volInd, ioVLBA, lenBlocks);			REPORT_ERROR(rv);
 	clientSimulator_wait_for_all_bio_ops(client);
 	rv = osSimulator_writeArrWait(&client->OS, volInd, ioVLBA, lenBlocks, mem);		REPORT_ERROR(rv);
-	BUG_ON(curSeg->stripe_index != 0);												// Must be first in chunk. Otherwise calculations below will not work
+	BUG_ON((curSeg->stripe_index)%n_replicas != 0);												// Must be first in stripe. Otherwise calculations below will not work
+	BUG_ON((((ioVLBA-curSeg->bd_start)/stripe_size)%stripe_width)*n_replicas != curSeg->stripe_index);							// Invariant check; they must equal
 	for (i=0; i<r1->header.n_segments; i++, curSeg++){ 								// Verify that magic number was written to both mirrors (first raid)
 		const u64 phys_seg_end = curSeg->length + curSeg->dlba_start;												// All the calculations below are done in units of 4K
-		const u64 phys_offset4K  = __to4K(ioVLBA) - curSeg->bd_start;											// Correct only for first r1 in a stripe (chunk)
+		const u64 phys_offset4K  = (__to4K(ioVLBA) - curSeg->bd_start)/(stripe_size*stripe_width)*stripe_size + ((__to4K(ioVLBA) - curSeg->bd_start)%stripe_size);
 		const u64 phys_start = curSeg->dlba_start + phys_offset4K;
 		const u64 phys_len   = __to4K(lenBlocks);
 		int verifyLength = ((phys_start+phys_len-1)>=phys_seg_end) ? (phys_seg_end-phys_start) : phys_len;		// The IO wraps to a different segment after the end of the disk
