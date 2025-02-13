@@ -417,6 +417,14 @@ static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_for_segs(/* seg
 	return rv;
 }
 
+static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_for_seg_and_unk(/* seg index or -1 if irrelevant, R1 values:0,1 */	int seg)
+{
+	union nvmeibc_dbits_entry rv = {.all_bits = 0};
+	rv.bsmod.dead0 = 0xF; // UNK_DB
+	rv.bsmod.dead1 = seg+1;
+	return rv;
+}
+
 /*************************** blkset info (32 bit) *****************************/
 union nvmeib_blkset_info {
 	struct {

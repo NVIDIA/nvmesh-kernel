@@ -6320,6 +6320,152 @@ bool is_not_ioable_n_rep_all_locks_down(int first_dead, int n_deg, struct nvmeib
 }
 
 /* Test client's raid going in and out of a degraded mode */
+TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
+	// Configuration: 4 mirror
+	// Topology: Seg0...Seg3 -> D0  P   Q  Q2
+
+	struct volume_segment_index vsi = {0,0,0,0};
+	struct test_context env = { .sys = sys
+								, .client = sys->clients
+								, .dev = sys->clients->devs[0]
+								, .sraid = NVMeshSystem_TstPRaid_init_rel(sys, vsi)};
+	struct clientSimulator *client = env.client;		// Test via the first client
+	struct disk_range *curSeg = &sys->mdb.vols[vsi.volume].segs[0];
+	int rv = 0, c = 0, blkset_jump=2;	// Use 2 blocksets first and 3rd
+	struct tTopoOfPraid* r1 = &sys->tcf.vols[vsi.volume].chunks[c].raids[0];
+	const int n_data_segs = curSeg->slice_size;
+	const int width = curSeg->stripe_width;
+	const int n_parities = curSeg->replicas - n_data_segs;
+	const int NUM_OF_TOPOS = 2;
+	struct topology_sgmnts_t topos[NUM_OF_TOPOS];
+	const int NUM_OF_DBIT_ENTRIES = 7;
+	char iter_descript[64];
+
+	{ // Constrcut all possible degraded topologies; will be replaced by create_no_protection_topo_enum_ordered, move_next, and __switch_to_new_topo.
+		struct topology_sgmnts_t topo0 = {
+				.modes = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW},
+				.dgrd_sgmnts = {1, 2},
+				.dgrd_modes = {NVMEIBTC_DS_MODE_DEAD, NVMEIBTC_DS_MODE_DEAD}
+			};		// {RW, D, D, RW}
+		struct topology_sgmnts_t topo1 = {
+				.modes = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW},
+				.dgrd_sgmnts = {0, 2},
+				.dgrd_modes = {NVMEIBTC_DS_MODE_DEAD, NVMEIBTC_DS_MODE_DEAD}
+			};		// {D, RW, D, RW}
+		topos[0]=topo0;
+		topos[1]=topo1;
+		for (int i = 0; i < NUM_OF_TOPOS; i++) {
+			topos[i].modes[topos[i].dgrd_sgmnts[0]] = topos[i].dgrd_modes[0];
+			topos[i].modes[topos[i].dgrd_sgmnts[1]] = topos[i].dgrd_modes[1];
+		}
+	}
+
+	BUG_ON(curSeg->replicas != 4); // Only test for 4-mirroring
+
+	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
+
+	// The following nested loops are respectively iterating through combinations of these sets:
+	// * All topos,
+	// * blockset 0 or 3, to rotate D0 from seg 0 to seg 1
+	// * IO, 1 slice (cannot turn off dbit), 32 slices  (can turn off dbits)
+	// * pre dbit Seg1, Seg2,  Seg1+Seg2, 1-Unknown, 2-unknowns, 1-unknown+Seg1, 1-unknown+seg2.
+	// * For w- topology also test pre-dbits with/without convict
+	// * Inject Pre dbits to:  3 subsets (bitmap) of locks: Only Primary owner and only 1 secondary owner, and all locks.
+
+	for (int topo_idx = 0; topo_idx < NUM_OF_TOPOS; topo_idx++) {
+		union nvmeibc_dbits_entry dbits[NUM_OF_DBIT_ENTRIES];
+		union nvmeibc_dbits_entry expected_dbits = nvmeib_dbits_entry_build_for_segs(topos[topo_idx].dgrd_sgmnts[0],topos[topo_idx].dgrd_sgmnts[1]);
+		{ // Construct all degraded pre-dbits to be tested.
+			dbits[0] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[0]); // dgrd_seg0
+			dbits[1] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[1]); // dgrd_seg1
+			dbits[2] = nvmeib_dbits_entry_build_for_segs(topos[topo_idx].dgrd_sgmnts[0],topos[topo_idx].dgrd_sgmnts[1]); // dgrd_seg0+dgrd_seg1
+			dbits[3] = nvmeib_dbits_entry_single_unk(); // 1-Unknown
+			dbits[4] = nvmeib_dbits_entry_build_unk(-1,-1); // 2-Unknowns
+			dbits[5] = nvmeib_dbits_entry_build_for_seg_and_unk(topos[topo_idx].dgrd_sgmnts[0]); // 1-Unknown+dgrd_seg0
+			dbits[6] = nvmeib_dbits_entry_build_for_seg_and_unk(topos[topo_idx].dgrd_sgmnts[1]); // 1-Unknown+dgrd_seg1
+		}
+		__switch_to_new_topo(env.client,topos[topo_idx],r1,curSeg);
+		for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+=blkset_jump) {
+			int chunkOffsetVLBA = _addr4k(blkset_idx*width,0); // IO's will be at this offset from beggining of the test blockset
+			u64 ioVLBA = __from4K(curSeg->bd_start) + chunkOffsetVLBA; // Hit the `blkset_idx` blockset of first praid in a chunk
+			for (int n_io_blocks = 1; n_io_blocks <= 32; n_io_blocks+=31) {
+				int lenBlocks = __from4K(n_io_blocks); // Number of blocks to IO.
+				int memSize = lenBlocks*NVMEIBC_SECTOR_SIZE; // Total array in bytes
+				u8 *mem = kmalloc(memSize, GFP_KERNEL); // Array to read/write to disk
+				int primary_owner_idx = -1, secondary_owner_idx = -1; // Segment index
+				struct block_inject_ptrs ram_injs[4];
+				struct io_traits io_t = get_io_traits(env, ioVLBA, n_io_blocks); // Analyze first n slice
+				for (u32 i = curSeg->replicas; i > 0; i--) { // Owner lock rotates to the left
+					// Find the first live segment as primary owner and second as the first secondary owner.
+					if (topos[topo_idx].modes[io_t.slices[0].role2sgmnt[i%curSeg->replicas]] == NVMEIBTC_DS_MODE_DEAD) continue;
+
+					if (primary_owner_idx == -1)
+						primary_owner_idx = io_t.slices[0].role2sgmnt[i%curSeg->replicas];
+					else {
+						secondary_owner_idx = io_t.slices[0].role2sgmnt[i%curSeg->replicas];
+						break;
+					}
+				}
+				BUG_ON(primary_owner_idx<0 || primary_owner_idx>3);
+				BUG_ON(primary_owner_idx == -1 || secondary_owner_idx == -1);
+
+				for (u32 i = 0; i < curSeg->replicas; i++){
+					BUG_ON(io_t.slices[0].role2sgmnt[i]<0 || io_t.slices[0].role2sgmnt[i]>3);
+					ram_injs[io_t.slices[0].role2sgmnt[i]] = serverSimulator_get_block_inject_ptrs(&sys->servers[curSeg[io_t.slices[0].role2sgmnt[i]].node_id], io_t.slices[0].sgmnt2dlba[io_t.slices[0].role2sgmnt[i]], 0, 0, 0);
+				}
+
+				for (int dbits_idx = 0; dbits_idx < NUM_OF_DBIT_ENTRIES; dbits_idx++) {
+					for (int inj_mode = 0; inj_mode < 3; inj_mode++){
+						// Mode 0: inject to only primary lock
+						// Mode 1: inject to the first secondary lock
+						// Mode 2: inject to all locks.
+
+						// Inject dbits
+						if (inj_mode == 0) {
+							ram_injs[primary_owner_idx].ram.dbits->all_bits = dbits[dbits_idx].all_bits;
+						} else if (inj_mode == 1) {
+							ram_injs[secondary_owner_idx].ram.dbits->all_bits = dbits[dbits_idx].all_bits;
+						} else { // inj_mode == 2, inject to all locks
+							for (u32 i = 0; i < curSeg->replicas; i++) {
+								if (topos[topo_idx].modes[i] == NVMEIBTC_DS_MODE_DEAD) continue;
+								ram_injs[i].ram.dbits->all_bits = dbits[dbits_idx].all_bits;
+							}
+						}
+
+						// Do IO
+						__unitest_do_degraded_io(sys, r1, curSeg, mem, 0, ioVLBA, lenBlocks);
+
+						// Verify
+						for (u32 i = 0; i < curSeg->replicas; i++) {
+							if (topos[topo_idx].modes[i] != NVMEIBTC_DS_MODE_DEAD)
+								BUG_ON(ram_injs[i].ram.dbits->all_bits != expected_dbits.all_bits);
+						}
+
+						// Reset dbits
+						for (u32 i = 0; i < 4; i++) {
+							ram_injs[i].ram.dbits->all_bits = 0;
+						}
+					}
+				}
+				free_io_traits(&io_t);
+				kfree(mem);
+			}
+		}
+		__prepare_for_next_iteration(client, topos[topo_idx], curSeg);
+	}
+	unitest_print("**** GoodPath_DegradedMode_n_mirrored Test %s => PASS\n",  iter_descript);
+	BUG_ON(rv);
+	NVMeshSystem_wipe_all_dirty_bits(sys);
+	unitest_print("*************** GoodPath_Degraded_n_mirror_IO RAID-%d%s (%d+%d)\n", 1, (width > 1) ? "0" : " ", n_data_segs, n_parities);
+	{	// Reset all topologies back to RW
+		const enum NVMEIBTC_DS_MODE reset[N_MAX_RAID_SLICE_LEN] = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW};
+		tomaSimulator_switchTopoEC(r1->header.uuid, reset, SW_TOPO__WAIT_ACK_DR, NULL);
+	}
+	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
+	return rv;
+}
+
+/* Test client's raid going in and out of a degraded mode */
 TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 	int volInd = 0, ind_dead_seg = 0, j, n_deg, node_ind;	// Volume will be used to test switch topology
 	struct clientSimulator *client = &sys->clients[0];			// Test via the first client
@@ -7405,8 +7551,10 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					rv |= unitest_n_mirror(sys, "reattach_to_change_lock_server", UNITEST_UPDOWNGRADE_COLD);
 					rv |= SIMU_RUN_TEST(unitest_GoodPathLockServer_n_mirrored, sys);
 					rv |= SIMU_RUN_TEST(unitest_GoodPathIO_n_mirrored, sys);
-					if (locks->maxNOwners==4)		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
+					if (locks->maxNOwners==4) {		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
 						rv |= SIMU_RUN_TEST(unitest_DegradedMode_n_mirrored, sys);
+						rv |= SIMU_RUN_TEST(unitest_GoodPath_DegradedMode_n_mirrored, sys);
+					}
 					// Todo: also unitest_DegradedMode()
 					if (locks->maxNOwners>2)
 						continue;										// Existing bugs, Daniel: Fix this
