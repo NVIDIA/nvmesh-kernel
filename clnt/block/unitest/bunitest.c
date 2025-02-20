@@ -6322,7 +6322,6 @@ bool is_not_ioable_n_rep_all_locks_down(int first_dead, int n_deg, struct nvmeib
 /* Test client's raid going in and out of a degraded mode */
 TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 	// Configuration: 4 mirror
-	// Topology: Seg0...Seg3 -> D0  P   Q  Q2
 
 	struct volume_segment_index vsi = {0,0,0,0};
 	struct test_context env = { .sys = sys
@@ -6336,7 +6335,7 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 	const int n_data_segs = curSeg->slice_size;
 	const int width = curSeg->stripe_width;
 	const int n_parities = curSeg->replicas - n_data_segs;
-	const int NUM_OF_TOPOS = 2;
+	const int NUM_OF_TOPOS = 4;
 	struct topology_sgmnts_t topos[NUM_OF_TOPOS];
 	const int NUM_OF_DBIT_ENTRIES = 7;
 	char iter_descript[64];
@@ -6352,8 +6351,20 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 				.dgrd_sgmnts = {0, 2},
 				.dgrd_modes = {NVMEIBTC_DS_MODE_DEAD, NVMEIBTC_DS_MODE_DEAD}
 			};		// {D, RW, D, RW}
+		struct topology_sgmnts_t topo2 = {
+				.modes = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW},
+				.dgrd_sgmnts = {1, 2},
+				.dgrd_modes = {NVMEIBTC_DS_MODE_W, NVMEIBTC_DS_MODE_DEAD}
+			};		// {RW, W, D, RW}
+		struct topology_sgmnts_t topo3 = {
+				.modes = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW},
+				.dgrd_sgmnts = {0, 1},
+				.dgrd_modes = {NVMEIBTC_DS_MODE_DEAD, NVMEIBTC_DS_MODE_W_IS_DIRTY}
+			};		// {D, W-, RW, RW}
 		topos[0]=topo0;
 		topos[1]=topo1;
+		topos[2]=topo2;
+		topos[3]=topo3;
 		for (int i = 0; i < NUM_OF_TOPOS; i++) {
 			topos[i].modes[topos[i].dgrd_sgmnts[0]] = topos[i].dgrd_modes[0];
 			topos[i].modes[topos[i].dgrd_sgmnts[1]] = topos[i].dgrd_modes[1];
@@ -6374,7 +6385,6 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 
 	for (int topo_idx = 0; topo_idx < NUM_OF_TOPOS; topo_idx++) {
 		union nvmeibc_dbits_entry dbits[NUM_OF_DBIT_ENTRIES];
-		union nvmeibc_dbits_entry expected_dbits = nvmeib_dbits_entry_build_for_segs(topos[topo_idx].dgrd_sgmnts[0],topos[topo_idx].dgrd_sgmnts[1]);
 		{ // Construct all degraded pre-dbits to be tested.
 			dbits[0] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[0]); // dgrd_seg0
 			dbits[1] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[1]); // dgrd_seg1
@@ -6397,7 +6407,7 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 				struct io_traits io_t = get_io_traits(env, ioVLBA, n_io_blocks); // Analyze first n slice
 				for (u32 i = curSeg->replicas; i > 0; i--) { // Owner lock rotates to the left
 					// Find the first live segment as primary owner and second as the first secondary owner.
-					if (topos[topo_idx].modes[io_t.slices[0].role2sgmnt[i%curSeg->replicas]] == NVMEIBTC_DS_MODE_DEAD) continue;
+					if (topos[topo_idx].modes[io_t.slices[0].role2sgmnt[i%curSeg->replicas]] != NVMEIBTC_DS_MODE_RW) continue;
 
 					if (primary_owner_idx == -1)
 						primary_owner_idx = io_t.slices[0].role2sgmnt[i%curSeg->replicas];
@@ -6425,7 +6435,7 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 							ram_injs[primary_owner_idx].ram.dbits->all_bits = dbits[dbits_idx].all_bits;
 						} else if (inj_mode == 1) {
 							ram_injs[secondary_owner_idx].ram.dbits->all_bits = dbits[dbits_idx].all_bits;
-						} else { // inj_mode == 2, inject to all locks
+						} else { // inj_mode == 2, inject to all locks that are not dead (including W,W+,W-)
 							for (u32 i = 0; i < curSeg->replicas; i++) {
 								if (topos[topo_idx].modes[i] == NVMEIBTC_DS_MODE_DEAD) continue;
 								ram_injs[i].ram.dbits->all_bits = dbits[dbits_idx].all_bits;
@@ -6435,11 +6445,57 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 						// Do IO
 						__unitest_do_degraded_io(sys, r1, curSeg, mem, 0, ioVLBA, lenBlocks);
 
-						// Verify
+						if(1){ // Verification begins
+						int n_dirty_segs = 0;	// Number of segments that remain dirty
+						int dirty_seg_idxs[2] = {-1,-1}; // Indices of segments that remain dirty
+						int n_convicted_segs = 0;
+						int convicted_seg_idxs[2] = {-1,-1};
+						union nvmeibc_dbits_entry expected_dbits = {.all_bits = 0};
+						for (int i = 0; i < 2; i++) {
+							if (topos[topo_idx].dgrd_modes[i]== NVMEIBTC_DS_MODE_DEAD || // Dead seg must be dirty in post-dbits
+								(n_io_blocks != 32 && inj_mode == 2 && dbits_idx != (i^1))) { // If it's not full blockset write, dbits are injected to all owners, and dgrd_sgmnts[i] is w, then dgrd_sgmnts[i] remains dirty as long as injected dbits says dgrd_sgmnts[i] is dirty. The only dbits[x] where dgrd_sgmnts[i] is NOT dirty is when x==0&&i==1 || x==1&&i==0.
+								dirty_seg_idxs[n_dirty_segs] = topos[topo_idx].dgrd_sgmnts[i];
+								n_dirty_segs++;
+							}
+
+							if (topos[topo_idx].dgrd_modes[i]==NVMEIBTC_DS_MODE_W_IS_DIRTY && n_io_blocks != 32 && inj_mode == 2 && dbits_idx >= 3) { // If it's w-, not full blockset write, inject prebits to all segs, and has unknown in prebits, then we will turn on convict for that seg
+								convicted_seg_idxs[n_convicted_segs]=topos[topo_idx].dgrd_sgmnts[i];
+								n_convicted_segs++;
+							}
+						}
+
+						// For expected post-dbits, we have n_dirty_segs*n_convicted_segs = {1,0},{1,1},{2,0},{2,1},{2,2} in total 5 combinations.
+						if (n_dirty_segs == 1) {
+							if (n_convicted_segs == 0) {
+								expected_dbits = nvmeib_dbits_entry_build_for_seg(dirty_seg_idxs[0]);
+							} else {
+								BUG_ON(n_convicted_segs!=1);
+								BUG_ON(dirty_seg_idxs[0]!=convicted_seg_idxs[0]);
+								BUG_ON(true); // We can't hit here; convict won't flip if there's only w- seg.
+							}
+						} else {
+							BUG_ON(n_dirty_segs!=2);
+							if (n_convicted_segs == 0) {
+								expected_dbits = nvmeib_dbits_entry_build_for_segs(dirty_seg_idxs[0], dirty_seg_idxs[1]);
+							} else if (n_convicted_segs == 1) {
+								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[1], dirty_seg_idxs[0]);
+								if (dirty_seg_idxs[1]==convicted_seg_idxs[0]) {
+									expected_dbits.bsmod.is_d1_convict = false;
+								} else if (dirty_seg_idxs[0]==convicted_seg_idxs[0]) {
+									expected_dbits.bsmod.is_d0_convict = false;
+								} else {
+									BUG_ON(true); // We can't hit here!
+								}
+							} else {
+								BUG_ON(n_convicted_segs!=2);
+								BUG_ON(true); // We can't hit here; convict won't flip if there are only w- segs.
+							}
+						}
 						for (u32 i = 0; i < curSeg->replicas; i++) {
 							if (topos[topo_idx].modes[i] != NVMEIBTC_DS_MODE_DEAD)
 								BUG_ON(ram_injs[i].ram.dbits->all_bits != expected_dbits.all_bits);
 						}
+						} // Verification ends
 
 						// Reset dbits
 						for (u32 i = 0; i < 4; i++) {
