@@ -6337,7 +6337,6 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 	const int n_parities = curSeg->replicas - n_data_segs;
 	const int NUM_OF_TOPOS = 4;
 	struct topology_sgmnts_t topos[NUM_OF_TOPOS];
-	const int NUM_OF_DBIT_ENTRIES = 7;
 	char iter_descript[64];
 
 	{ // Constrcut all possible degraded topologies; will be replaced by create_no_protection_topo_enum_ordered, move_next, and __switch_to_new_topo.
@@ -6384,7 +6383,10 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 	// * Inject Pre dbits to:  3 subsets (bitmap) of locks: Only Primary owner and only 1 secondary owner, and all locks.
 
 	for (int topo_idx = 0; topo_idx < NUM_OF_TOPOS; topo_idx++) {
+
+		const int NUM_OF_DBIT_ENTRIES = topo_idx==3 ? 10 : 7;
 		union nvmeibc_dbits_entry dbits[NUM_OF_DBIT_ENTRIES];
+		// No conv
 		{ // Construct all degraded pre-dbits to be tested.
 			dbits[0] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[0]); // dgrd_seg0
 			dbits[1] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[1]); // dgrd_seg1
@@ -6393,6 +6395,12 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 			dbits[4] = nvmeib_dbits_entry_build_unk(-1,-1); // 2-Unknowns
 			dbits[5] = nvmeib_dbits_entry_build_for_seg_and_unk(topos[topo_idx].dgrd_sgmnts[0]); // 1-Unknown+dgrd_seg0
 			dbits[6] = nvmeib_dbits_entry_build_for_seg_and_unk(topos[topo_idx].dgrd_sgmnts[1]); // 1-Unknown+dgrd_seg1
+		}
+		if(NUM_OF_DBIT_ENTRIES==10) // with conv
+		{
+			dbits[7] = nvmeib_dbits_entry_build_unk(topos[topo_idx].dgrd_sgmnts[1], 0); dbits[7].bsmod.dead1 = 0; dbits[7].bsmod.is_d1_convict = false;// dgrd_seg1 convict
+			dbits[8] = nvmeib_dbits_entry_build_unk(topos[topo_idx].dgrd_sgmnts[0],topos[topo_idx].dgrd_sgmnts[1]); dbits[8].bsmod.is_d1_convict = false;// dgrd_seg0+(dgrd_seg1 convict)
+			dbits[9] = nvmeib_dbits_entry_build_unk(topos[topo_idx].dgrd_sgmnts[1],-1); // 1-Unknown+(dgrd_seg1 convict)
 		}
 		__switch_to_new_topo(env.client,topos[topo_idx],r1,curSeg);
 		for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+=blkset_jump) {
@@ -6458,7 +6466,7 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 								n_dirty_segs++;
 							}
 
-							if (topos[topo_idx].dgrd_modes[i]==NVMEIBTC_DS_MODE_W_IS_DIRTY && n_io_blocks != 32 && inj_mode == 2 && dbits_idx >= 3) { // If it's w-, not full blockset write, inject prebits to all segs, and has unknown in prebits, then we will turn on convict for that seg
+							if (topos[topo_idx].dgrd_modes[i]==NVMEIBTC_DS_MODE_W_IS_DIRTY && n_io_blocks != 32 && inj_mode == 2 && dbits_idx >= 3) { // If it's w-, not full blockset write, inject prebits to all segs, and has unknown/convict in prebits, then we will turn on convict for that seg
 								convicted_seg_idxs[n_convicted_segs]=topos[topo_idx].dgrd_sgmnts[i];
 								n_convicted_segs++;
 							}
@@ -6471,24 +6479,25 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 							} else {
 								BUG_ON(n_convicted_segs!=1);
 								BUG_ON(dirty_seg_idxs[0]!=convicted_seg_idxs[0]);
-								BUG_ON(true); // We can't hit here; convict won't flip if there's only w- seg.
+								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[0], 0); expected_dbits.bsmod.dead1 = 0; expected_dbits.bsmod.is_d1_convict = false;
 							}
 						} else {
 							BUG_ON(n_dirty_segs!=2);
 							if (n_convicted_segs == 0) {
 								expected_dbits = nvmeib_dbits_entry_build_for_segs(dirty_seg_idxs[0], dirty_seg_idxs[1]);
 							} else if (n_convicted_segs == 1) {
+								BUG_ON(dirty_seg_idxs[1]<dirty_seg_idxs[0]);
 								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[1], dirty_seg_idxs[0]);
 								if (dirty_seg_idxs[1]==convicted_seg_idxs[0]) {
 									expected_dbits.bsmod.is_d1_convict = false;
 								} else if (dirty_seg_idxs[0]==convicted_seg_idxs[0]) {
 									expected_dbits.bsmod.is_d0_convict = false;
 								} else {
-									BUG_ON(true); // We can't hit here!
+									BUG_ON(true); // Sanity check; we can't hit here!
 								}
 							} else {
 								BUG_ON(n_convicted_segs!=2);
-								BUG_ON(true); // We can't hit here; convict won't flip if there are only w- segs.
+								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[1], dirty_seg_idxs[0]);
 							}
 						}
 						for (u32 i = 0; i < curSeg->replicas; i++) {
