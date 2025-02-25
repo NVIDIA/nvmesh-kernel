@@ -2745,7 +2745,7 @@ static inline void __verify_ram_dbits_valid(const struct NVMeshSystem *sys, cons
 #define __is_slmod(d0, is_d0_convict, d1) !(d0 == 0xf || (d0 && d1) || is_d0_convict)
 
 /* d0/d1 is dead0/dead1 value [ range 1 to 0xf which is unkown] , is_d0_convict = 1 if convict OW 0 */
-static inline union nvmeibc_dbits_entry _db_entry(int d0, int is_d0_convict, int d1, int is_d1_convict)
+inline union nvmeibc_dbits_entry _db_entry(int d0, int is_d0_convict, int d1, int is_d1_convict)
 {
 	union nvmeibc_dbits_entry db;
 	db.all_bits = 0;

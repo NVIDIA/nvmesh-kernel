@@ -6388,19 +6388,19 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 		union nvmeibc_dbits_entry dbits[NUM_OF_DBIT_ENTRIES];
 		// No conv
 		{ // Construct all degraded pre-dbits to be tested.
-			dbits[0] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[0]); // dgrd_seg0
-			dbits[1] = nvmeib_dbits_entry_build_for_seg(topos[topo_idx].dgrd_sgmnts[1]); // dgrd_seg1
-			dbits[2] = nvmeib_dbits_entry_build_for_segs(topos[topo_idx].dgrd_sgmnts[0],topos[topo_idx].dgrd_sgmnts[1]); // dgrd_seg0+dgrd_seg1
-			dbits[3] = nvmeib_dbits_entry_single_unk(); // 1-Unknown
-			dbits[4] = nvmeib_dbits_entry_build_unk(-1,-1); // 2-Unknowns
-			dbits[5] = nvmeib_dbits_entry_build_for_seg_and_unk(topos[topo_idx].dgrd_sgmnts[0]); // 1-Unknown+dgrd_seg0
-			dbits[6] = nvmeib_dbits_entry_build_for_seg_and_unk(topos[topo_idx].dgrd_sgmnts[1]); // 1-Unknown+dgrd_seg1
+			dbits[0] = _db_entry(topos[topo_idx].dgrd_sgmnts[0]+1,0,0,0); // dgrd_seg0
+			dbits[1] = _db_entry(topos[topo_idx].dgrd_sgmnts[1]+1,0,0,0); // dgrd_seg1
+			dbits[2] = _db_entry(topos[topo_idx].dgrd_sgmnts[1]+1,0,topos[topo_idx].dgrd_sgmnts[0]+1,0); // dgrd_seg0+dgrd_seg1
+			dbits[3] = _db_entry(0xf,0,0,0); // 1-Unknown
+			dbits[4] = _db_entry(0xf,0,0xf,0); // 2-Unknowns
+			dbits[5] = _db_entry(0xf,0,topos[topo_idx].dgrd_sgmnts[0]+1,0); // 1-Unknown+dgrd_seg0
+			dbits[6] = _db_entry(0xf,0,topos[topo_idx].dgrd_sgmnts[1]+1,0); // 1-Unknown+dgrd_seg1
 		}
 		if(NUM_OF_DBIT_ENTRIES==10) // with conv
 		{
-			dbits[7] = nvmeib_dbits_entry_build_unk(topos[topo_idx].dgrd_sgmnts[1], 0); dbits[7].bsmod.dead1 = 0; dbits[7].bsmod.is_d1_convict = false;// dgrd_seg1 convict
-			dbits[8] = nvmeib_dbits_entry_build_unk(topos[topo_idx].dgrd_sgmnts[0],topos[topo_idx].dgrd_sgmnts[1]); dbits[8].bsmod.is_d1_convict = false;// dgrd_seg0+(dgrd_seg1 convict)
-			dbits[9] = nvmeib_dbits_entry_build_unk(topos[topo_idx].dgrd_sgmnts[1],-1); // 1-Unknown+(dgrd_seg1 convict)
+			dbits[7] = _db_entry(topos[topo_idx].dgrd_sgmnts[1]+1,1,0,0); // dgrd_seg1 convict
+			dbits[8] = _db_entry(topos[topo_idx].dgrd_sgmnts[1]+1,1,topos[topo_idx].dgrd_sgmnts[0]+1,0); // dgrd_seg0+(dgrd_seg1 convict)
+			dbits[9] = _db_entry(0xf,0,topos[topo_idx].dgrd_sgmnts[1]+1,1); // 1-Unknown+(dgrd_seg1 convict)
 		}
 		__switch_to_new_topo(env.client,topos[topo_idx],r1,curSeg);
 		for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+=blkset_jump) {
@@ -6475,29 +6475,24 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 						// For expected post-dbits, we have n_dirty_segs*n_convicted_segs = {1,0},{1,1},{2,0},{2,1},{2,2} in total 5 combinations.
 						if (n_dirty_segs == 1) {
 							if (n_convicted_segs == 0) {
-								expected_dbits = nvmeib_dbits_entry_build_for_seg(dirty_seg_idxs[0]);
+								expected_dbits = _db_entry(dirty_seg_idxs[0]+1,0,0,0);
 							} else {
 								BUG_ON(n_convicted_segs!=1);
 								BUG_ON(dirty_seg_idxs[0]!=convicted_seg_idxs[0]);
-								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[0], 0); expected_dbits.bsmod.dead1 = 0; expected_dbits.bsmod.is_d1_convict = false;
+								expected_dbits = _db_entry(dirty_seg_idxs[0]+1,1,0,0);
 							}
 						} else {
 							BUG_ON(n_dirty_segs!=2);
 							if (n_convicted_segs == 0) {
-								expected_dbits = nvmeib_dbits_entry_build_for_segs(dirty_seg_idxs[0], dirty_seg_idxs[1]);
+								expected_dbits = _db_entry(dirty_seg_idxs[1]+1,0,dirty_seg_idxs[0]+1,0);
 							} else if (n_convicted_segs == 1) {
 								BUG_ON(dirty_seg_idxs[1]<dirty_seg_idxs[0]);
-								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[1], dirty_seg_idxs[0]);
-								if (dirty_seg_idxs[1]==convicted_seg_idxs[0]) {
-									expected_dbits.bsmod.is_d1_convict = false;
-								} else if (dirty_seg_idxs[0]==convicted_seg_idxs[0]) {
-									expected_dbits.bsmod.is_d0_convict = false;
-								} else {
-									BUG_ON(true); // Sanity check; we can't hit here!
-								}
+								BUG_ON(dirty_seg_idxs[1]!=convicted_seg_idxs[0]&&dirty_seg_idxs[0]!=convicted_seg_idxs[0]);
+
+								expected_dbits = _db_entry(dirty_seg_idxs[1]+1,dirty_seg_idxs[1]==convicted_seg_idxs[0],dirty_seg_idxs[0]+1,dirty_seg_idxs[0]==convicted_seg_idxs[0]);
 							} else {
 								BUG_ON(n_convicted_segs!=2);
-								expected_dbits = nvmeib_dbits_entry_build_unk(dirty_seg_idxs[1], dirty_seg_idxs[0]);
+								expected_dbits = _db_entry(dirty_seg_idxs[1]+1,1,dirty_seg_idxs[0]+1,1);
 							}
 						}
 						for (u32 i = 0; i < curSeg->replicas; i++) {

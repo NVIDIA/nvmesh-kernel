@@ -54,6 +54,7 @@ struct degraded_test_params {
 struct degraded_test_params __switch_to_new_topo(struct clientSimulator *client, struct topology_sgmnts_t new_topo, const struct tTopoOfPraid* r1, const struct disk_range *curSeg);
 void __prepare_for_next_iteration(struct clientSimulator *client, struct topology_sgmnts_t new_topo, const struct disk_range *curSeg);
 void __verify_dbits_identical(union nvmeibc_dbits_entry dbits, union nvmeibc_dbits_entry expected, int num_parities);
+union nvmeibc_dbits_entry _db_entry(int d0, int is_d0_convict, int d1, int is_d1_convict);
 #endif
 /*****************************************************************************/
 // EOF.
