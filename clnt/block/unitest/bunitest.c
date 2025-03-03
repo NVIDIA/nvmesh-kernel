@@ -6322,18 +6322,9 @@ bool is_not_ioable_n_rep_all_locks_down(int first_dead, int n_deg, struct nvmeib
 
 // Given a topology, fills valid dbits permutations into out_dbits_array and returns size of out_dbits_array. We generate up to two dirty segments, as we only support up to double degraded mode.
 static int __unitest_generate_valid_dbits(struct topology_sgmnts_t topo, union nvmeibc_dbits_entry* out_dbits_array){
-	// DEAD
-	const int n_dead	= (topo.dgrd_modes[0]==NVMEIBTC_DS_MODE_DEAD)
-						+ (topo.dgrd_modes[1]==NVMEIBTC_DS_MODE_DEAD);
-
-	// W
-	const int n_wseg	= (topo.dgrd_modes[0]==NVMEIBTC_DS_MODE_W)
-						+ (topo.dgrd_modes[1]==NVMEIBTC_DS_MODE_W);
-
-	// W-
-	const int n_w_dirty = (topo.dgrd_modes[0]==NVMEIBTC_DS_MODE_W_IS_DIRTY)
-						+ (topo.dgrd_modes[1]==NVMEIBTC_DS_MODE_W_IS_DIRTY);
-
+	const int n_dead = num_dead(&topo); // DEAD
+	const int n_wseg = num_wseg(&topo); // W
+	const int n_w_dirty = num_w_dirty(&topo); // W-
 	const int n_dgrd = n_dead+n_wseg+n_w_dirty;
 
 	int w_dirty_idx = -1; // Find w-; used only when n_w_dirty == 1
@@ -6343,13 +6334,10 @@ static int __unitest_generate_valid_dbits(struct topology_sgmnts_t topo, union n
 		if (topo.dgrd_modes[i]==NVMEIBTC_DS_MODE_W_IS_DIRTY) w_dirty_idx=i;
 	}
 
-	// All clean
-	out_dbits_array[n_dbits_entries++] = _db_entry(0,0,0,0);
+	skip_first_w_no_dirty(&topo);
 
-	if (topo.dgrd_modes[0] == NVMEIBTC_DS_MODE_W_NO_DIRTY) { // Move next dgrd info up if seg0 is W+, so we can better generate correct pre-dbits. We don't care if both segs are W+, as it is considered non degraded and we generate only clean dbits.
-		topo.dgrd_modes[0] = topo.dgrd_modes[1];
-		topo.dgrd_sgmnts[0] = topo.dgrd_sgmnts[1];
-	}
+	// All clean dbits.
+	out_dbits_array[n_dbits_entries++] = _db_entry(0,0,0,0);
 
 	// 1. If n_dgrd == 1,
 	//    1.1. If n_w_dirty == 0,
@@ -6487,17 +6475,9 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 
 	while (topos.move_next(&topos)) {
 		struct topology_sgmnts_t topo = topos.curr;
-		const int n_dead	= (topo.dgrd_modes[0]==NVMEIBTC_DS_MODE_DEAD)
-							+ (topo.dgrd_modes[1]==NVMEIBTC_DS_MODE_DEAD);
-
-		// W
-		const int n_wseg	= (topo.dgrd_modes[0]==NVMEIBTC_DS_MODE_W)
-							+ (topo.dgrd_modes[1]==NVMEIBTC_DS_MODE_W);
-
-		// W-
-		const int n_w_dirty = (topo.dgrd_modes[0]==NVMEIBTC_DS_MODE_W_IS_DIRTY)
-							+ (topo.dgrd_modes[1]==NVMEIBTC_DS_MODE_W_IS_DIRTY);
-
+		const int n_dead = num_dead(&topo); // DEAD
+		const int n_wseg = num_wseg(&topo); // W
+		const int n_w_dirty = num_w_dirty(&topo); // W-
 		const int n_dgrd = n_dead+n_wseg+n_w_dirty;
 		const int MAX_N_DBITS_ENTRIES = 15;
 		union nvmeibc_dbits_entry dbits[MAX_N_DBITS_ENTRIES];
@@ -6508,10 +6488,7 @@ TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys)
 
 		__switch_to_new_topo(env.client,topo,r1,curSeg);
 
-		if (topo.dgrd_modes[0] == NVMEIBTC_DS_MODE_W_NO_DIRTY) { // Move next dgrd info up if seg0 is W+, so we can better generate correct post-dbits. We don't care if both segs are W+, as it is considered non degraded and we generate only clean dbits.
-			topo.dgrd_modes[0] = topo.dgrd_modes[1];
-			topo.dgrd_sgmnts[0] = topo.dgrd_sgmnts[1];
-		}
+		skip_first_w_no_dirty(&topo);
 
 		for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+=blkset_jump) {
 			int chunkOffsetVLBA = _addr4k(blkset_idx*width,0); // IO's will be at this offset from beggining of the test blockset

@@ -21,6 +21,32 @@ struct topology_sgmnts_t{
 };
 
 void jdr_write_topology_sgmnts(struct jdr* jdr, char const* name, struct topology_sgmnts_t* topology_sgmnts);
+// DEAD
+static inline int num_dead(const struct topology_sgmnts_t* topo) {
+	BUG_ON(topo == NULL);
+	return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_DEAD)	+ (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_DEAD);
+}
+
+// W
+static inline int num_wseg(const struct topology_sgmnts_t* topo) {
+	BUG_ON(topo == NULL);
+	return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_W) + (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_W);
+}
+
+// W-
+static inline int num_w_dirty(const struct topology_sgmnts_t* topo) {
+	BUG_ON(topo == NULL);
+	return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_W_IS_DIRTY) + (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_W_IS_DIRTY);
+}
+
+// Move next dgrd info up if seg0 is W+, so we can better generate correct dbits. We don't care if both segs are W+, as it is considered non degraded and we generate only clean dbits.
+static inline void skip_first_w_no_dirty(struct topology_sgmnts_t* in_out_topo) {
+	BUG_ON(in_out_topo == NULL);
+	if (in_out_topo->dgrd_modes[0] == NVMEIBTC_DS_MODE_W_NO_DIRTY) {
+		in_out_topo->dgrd_modes[0] = in_out_topo->dgrd_modes[1];
+		in_out_topo->dgrd_sgmnts[0] = in_out_topo->dgrd_sgmnts[1];
+	}
+}
 
 #define topo_enum_fmt "{Topo: Seg[@SI]=@STR Seg[@SI]=@STR}"
 #define topo_enum_args(s)                                                                                              \
