@@ -564,15 +564,6 @@ static inline void __validate_write_cmds_do_not_send_vals(struct recovery_sync_o
 	}
 }
 
-static inline void __restore_write_cmds_do_not_send_vals(struct recovery_sync_op *so) {
-	const int slice_start = so_get_owner_seg(so);
-	const roles_bmp_t send_bmp = nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, dead);
-	so->n_cmds =   n_write_cmds(so);
-	so->last_cmd = last_cmd(so) - 1;	// Last write cmd
-	if (nvmeibc_raid_is_ec(so->r1))
-		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, (so->last_cmd + 1 - so->n_cmds), so->last_cmd, send_bmp);
-}
-
 static inline void __dump_nwhole_params(const struct recovery_sync_op *so) {
 	const union no_writehole_params *params = &so->nwhole_params;
 	_NTSO(trace_01_no_whole_sm, "ram_pre_dbits=[@DBITS], db_turnon_bmp=@BITMAP, force_rebuild_bmp=@BITMAP, destroy=@BOOL_YN, fix_badsect=@BOOL_YN, must_turn_off=@BOOL_YN, must_scrub=@BOOL_YN",
@@ -620,7 +611,9 @@ static void __update_no_whole_counters(const struct recovery_sync_op *so)
 
 static void __cleanup_no_write_hole_sync_upon_finish(struct recovery_sync_op *so)
 {	// Clean cause nwhole might be called again in the same sync.
-	__restore_write_cmds_do_not_send_vals(so);
+	so->n_cmds =   n_write_cmds(so);
+	so->last_cmd = last_cmd(so) - 1;	// Last write cmd
+	nvmeibc_restore_write_cmds_do_not_send_vals(so);
 	if (so->is_sbs_mode) {	// Only on Error could abort slice by slice and cause sync finish
 		BUG_ON(!so->error);
 		nvmeibc_sync_sl_by_sl_finish(so);

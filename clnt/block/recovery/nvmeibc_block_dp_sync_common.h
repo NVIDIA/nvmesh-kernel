@@ -295,6 +295,8 @@ void nvmeibc_sync_prepare_so_for_read( struct recovery_sync_op *so, const roles_
 void nvmeibc_sync_send_all_read_cmds(  struct recovery_sync_op *so, const roles_bmp_t *read_bmp, const enum sync_op_stage_e next_stage);
 void nvmeibc_sync_prepare_so_for_write(struct recovery_sync_op *so, const roles_bmp_t write_bmp, const enum sync_op_stage_e next_stage);
 void nvmeibc_sync_send_all_write_cmds( struct recovery_sync_op *so, const roles_bmp_t write_bmp, const enum sync_op_stage_e next_stage);
+void nvmeibc_restore_read_cmds_do_not_send_vals( struct recovery_sync_op *so);
+void nvmeibc_restore_write_cmds_do_not_send_vals(struct recovery_sync_op *so);
 
 /************************ API with resubmitter thread ************************/
 void nvmeibcbdp_sync_reschedule(struct recovery_sync_op *so);
@@ -427,13 +429,6 @@ static inline void nvmeibc_erase_rv_and_comp_codes_of_cur_stage_cmds(struct reco
 			__cmd_set_comp_err(&rldr[i], 0);
 		}
 	}
-}
-
-static inline void nvmeibc_restore_read_cmds_do_not_send_vals(struct recovery_sync_op *so) {
-	const int slice_start = so_get_owner_seg(so);
-	const roles_bmp_t send_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, readable);
-	if (nvmeibc_raid_is_ec(so->r1))
-		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, 0, n_read_cmds(so) - 1, send_bmp);
 }
 
 /* Fixup original IO 'pre' and Caller SO 'pre' with our 'post' */

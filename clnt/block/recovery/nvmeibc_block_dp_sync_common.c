@@ -1760,7 +1760,7 @@ void nvmeibc_sync_prepare_so_for_read(struct recovery_sync_op *so, const roles_b
 	int n_cmds_to_wait_for = so->n_cmds = n_read_cmds(so);
 	so->last_cmd = so->n_cmds - 1;
 	so->stage = next_stage;
-	if (nvmeibc_raid_is_ec(so->r1) && read_bmp)
+	if (read_bmp)	// Else send all commands as prepared
 		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, (so->last_cmd + 1 - so->n_cmds), so->last_cmd, (*read_bmp));
 	nvmeibc_sync_set_uncompleted_cmds(so, n_cmds_to_wait_for);
 }
@@ -1786,4 +1786,17 @@ void nvmeibc_sync_send_all_write_cmds(struct recovery_sync_op *so, const roles_b
 {
 	nvmeibc_sync_prepare_so_for_write(so, write_bmp, next_stage);
 	nvmeibc_sync_send_cur_stage_cmds(so);
+}
+
+void nvmeibc_restore_read_cmds_do_not_send_vals(struct recovery_sync_op *so) {
+	const int slice_start = so_get_owner_seg(so);
+	const roles_bmp_t send_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, readable);
+	nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, 0, n_read_cmds(so) - 1, send_bmp);
+}
+
+void nvmeibc_restore_write_cmds_do_not_send_vals(struct recovery_sync_op *so) {
+	const int slice_start = so_get_owner_seg(so);
+	const roles_bmp_t send_bmp = nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, dead);
+	if (nvmeibc_raid_is_ec(so->r1))
+		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, (so->last_cmd + 1 - so->n_cmds), so->last_cmd, send_bmp);
 }
