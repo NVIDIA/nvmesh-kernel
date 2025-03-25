@@ -52,8 +52,6 @@
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_async_mode.h"
 #include "nvmeibc_io_pet.h"
 
-#define __is_raid1_ec(so)       ((so)->r1->slice_size != 1)
-#define __is_raid1_mirror(so) ((so)->r1->slice_size == 1)
 #define is_op_sync_stale(op)    ((op) == NVMEIB_BLOCK_IO_OP_RECOVER_STALE)
 #define is_op_sync_cold(op)     ((op) == NVMEIB_BLOCK_IO_OP_REC_COLD)
 #define is_op_sync_db(op)       ((op) == NVMEIB_BLOCK_IO_OP_RECOVER_DB)
@@ -434,7 +432,7 @@ static inline void nvmeibc_erase_rv_and_comp_codes_of_cur_stage_cmds(struct reco
 static inline void nvmeibc_restore_read_cmds_do_not_send_vals(struct recovery_sync_op *so) {
 	const int slice_start = so_get_owner_seg(so);
 	const roles_bmp_t send_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, readable);
-	if (__is_raid1_ec(so))
+	if (nvmeibc_raid_is_ec(so->r1))
 		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, 0, n_read_cmds(so) - 1, send_bmp);
 }
 

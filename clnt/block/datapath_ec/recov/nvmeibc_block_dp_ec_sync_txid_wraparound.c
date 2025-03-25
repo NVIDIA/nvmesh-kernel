@@ -33,7 +33,7 @@ static void __set_cmds_new_md(struct recovery_sync_op *so, const u32 txid, const
 			enum nvmeibc_data_written_state written_state = nbdpec_md_get_data_written_state(md);
 			const int slice_start = so_get_owner_seg(so);
 			//WTF? when we sent those commands we sent them to readable_sync roles
-			//When we update TxId we should update on all non dead (writable) segments including W- 
+			//When we update TxId we should update on all non dead (writable) segments including W-
 			//readable_sync does not include D & W- segments; thus asking a question about the metadata on such segments produces false warnings
 			const roles_bmp_t readable_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, readable_sync);
 			const bool cmd_i_was_read = readable_bmp & (1u << cmd_i);
@@ -104,7 +104,7 @@ _func_start:
 			const int slice_start = so_get_owner_seg(so);
 			const roles_bmp_t read_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, readable_sync);
 			WARN_ON(so->cmds->rld.post.all != so->cmds->rld.pre.all); // the sync assumes pre binfo is the most updated version, so making sure that no one setted post before.
-			WARN_ON(__is_raid1_mirror(so)); // No wraparound on mirror
+			WARN_ON(!nvmeibc_raid_is_ec(so->r1)); // No wraparound on mirror
 			WARN(so->cmds->rld.pre.bits.txid != NVMEIBC_DP_EC_MD_TX_ID_MAX,
 				 "nvmeibc bug! txid_wraparound sync is callled but txid in binfo isn't NVMEIBC_DP_EC_MD_TX_ID_MAX, txid=%u\n",
 				 so->cmds->rld.pre.bits.txid);

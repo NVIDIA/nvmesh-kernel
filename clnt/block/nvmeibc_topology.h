@@ -224,6 +224,7 @@ static inline bool nvmeibc_raid_is_mirror(const struct nvmeibc_raid1 *r){ return
 #define nvmeibc_raid_is_enable_partial_slice_write(pr) nvmeibc_raid_is_ec(pr)				// protection raid capability
 static inline int  nvmeibc_raid1_get_protect_lvl(const struct nvmeibc_raid1 *pr){return pr->replicas - pr->slice_size; }
 static inline bool nvmeibc_raid_is_jbod(     const struct nvmeibc_raid1 *pr) {return pr->replicas == 1;}
+#define __is_raid1_mirror(so) ((so)->r1->slice_size == 1)
 static inline u64  nvmeibc_raid_get_rlba_len(const struct nvmeibc_raid1 *pr) {return pr->slice_size * pr->segments[0].length; }
 static inline u64  nvmeibc_raid_get_slba_len(const struct nvmeibc_raid1 *pr) {return pr->segments[0].length; }
 

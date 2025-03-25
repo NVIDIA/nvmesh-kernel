@@ -1760,7 +1760,7 @@ void nvmeibc_sync_prepare_so_for_read(struct recovery_sync_op *so, const roles_b
 	int n_cmds_to_wait_for = so->n_cmds = n_read_cmds(so);
 	so->last_cmd = so->n_cmds - 1;
 	so->stage = next_stage;
-	if (__is_raid1_ec(so) && read_bmp)
+	if (nvmeibc_raid_is_ec(so->r1) && read_bmp)
 		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, (so->last_cmd + 1 - so->n_cmds), so->last_cmd, (*read_bmp));
 	nvmeibc_sync_set_uncompleted_cmds(so, n_cmds_to_wait_for);
 }
@@ -1777,7 +1777,7 @@ void nvmeibc_sync_prepare_so_for_write(struct recovery_sync_op *so, const roles_
 	int n_cmds_to_wait_for = so->n_cmds = n_write_cmds(so);
 	so->last_cmd = last_cmd(so) - 1;	// Last write cmd
 	so->stage = next_stage;
-	if (__is_raid1_ec(so))
+	if (nvmeibc_raid_is_ec(so->r1))
 		nvmeibc_sync_set_cmds_do_not_send_by_bmp(so, (so->last_cmd + 1 - so->n_cmds), so->last_cmd, write_bmp);
 	nvmeibc_sync_set_uncompleted_cmds(so, n_cmds_to_wait_for);
 }
