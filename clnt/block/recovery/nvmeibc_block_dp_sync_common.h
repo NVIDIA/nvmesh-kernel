@@ -64,7 +64,7 @@
 #define is_op_sync_txid_wrap(op) ((op) == NVMEIB_BLOCK_IO_OP_REC_TXID_WRAP)
 #define is_op_sync_maintain(op)	 ((op) & NVMEIB_BLOCK_IO_OP_MAINTAIN_RESOLVE_ALL_BINFO)
 #define is_op_sync_commit_binfo(op) ((op) == NVMEIB_BLOCK_IO_OP_REC_COMMIT_BINFO)
-#define is_op_sync_commandless(op)  ((op) == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON)
+#define is_op_sync_commandless(op)  (((op) == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) || ((op) == NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE))
 #define is_op_sync_read_md_only(op)  (is_op_sync_maintain(op) || is_op_sync_commit_binfo(op))
 
 /* Generic state machine of all sync operations */

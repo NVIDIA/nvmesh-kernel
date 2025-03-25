@@ -1413,7 +1413,7 @@ static void __recover_next_blockset(struct nvmeibc_recov_sync_worker *sw)
 				if (problem.is_stale) {
 					lock_initial_val = R1_STALE_SPECIAL_BINFO_VAL; // Reduce priobability to retry lock
 					if (problem.dbits == 0) {
-						sw->fn = nvmeibc_sync_commit_stale_lock;
+						sw->fn = nvmeibc_sync_commit_stale_lock;	// 2 Optimizations: 1. Defer solving stale lock after dbits rebuild, making rebuild faster. 2. Allow solving stale in any direction (thus overcomming more bad sectors)
 					}
 				}
 			} else {

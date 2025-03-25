@@ -327,9 +327,10 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 	struct dp_topology_traits const *topo_traits = &so->r1->calculated_data.topo_traits;
 	const u16 dbits_on_topo_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 	struct nvmeibc_dbits_tx tx;
+	const bool has_unknown_dbits = (nvmeibc_dbits_get_n_unk(&pre, topo_traits) != 0);
 	if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB) {
 		BUG_ON(!has_stale_lock);	// Miss-use of the function. This is illegal because we never took the lock to know if it is stale or not
-		if (nvmeibc_dbits_get_n_unk(&pre, topo_traits)) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
+		if (has_unknown_dbits) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
 			const u16 n_dead = hweight16(dbits_on_topo_bmp);
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);
 			tx.action.num_unknowns = n_dead; // Fill Every possible dead with optional unknown (unless it already has dbit)
@@ -337,6 +338,12 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		} else {													// If {Real dbit exists or nothing} + stale lock, fill with real dbits. Likely that data on R1 legs differs.
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0                              , 0);
 		}
+	} else if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE) {
+		WARN_ON(topo_traits->n_parities <= 1);	// In 2-mirror pre and post dbits are always 0, no reason to call this function
+		BUG_ON(has_unknown_dbits);				// Dbits for 'W' seg cant exists, so naturally unknowns cannot exist as well
+		if (has_stale_lock)		// Copy stale lock to all writable ram segs, turn dbits on for all dead. Extended version of stale2dirty sync
+			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0, 0);
+		else {}					// Sync executed when stale lock exists, but other client already solved it. Just do nothing
 	} else {	// Note: We dont care about type of sync, only the situation after locks taken
 		const bool should_db_turn_on =  has_stale_lock;										// Stale lock has to turn on dbit for dead segments coz cant access them, Dbit/Read-fail syncs do not introduce new info so can never turn dbits on
 		const bool should_db_turn_off = (so->n_slices == LOCKSET_SLICES);					// Only if we fix all slices
@@ -345,10 +352,10 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		const u32 turn_off_bmp = (should_db_turn_off ? (turn_off_topo_bmp | turn_off_inv_bmp) : 0);
 		const u32 turn_on_bmp =  (should_db_turn_on  ?  dbits_on_topo_bmp                     : 0);
 		nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, turn_on_bmp, turn_off_bmp, 0);
-		if (nvmeibc_dbits_get_n_unk(&pre, topo_traits))
+		if (has_unknown_dbits)
 			so->R1.is_dirty_suspect = true;					// Note here: all syncs (stale/db/bad/read-fail) will run identically. Do all possible reads, compare data and turn off unknown dbits if possible
 
-		__mark_read_to_dirty_w_seg_as_do_not_send(so, pre);
+		__mark_read_to_dirty_w_seg_as_do_not_send(so, pre);	// unknown dbits may exist in pre, we did not resolve them to send read 'W' seg anyways to potentially avoid writes!
 	}
 	nvmeibc_dbits_tx_apply(&pre, &tx);
 	rld->post.bits.dirty = tx.post.all_bits;
@@ -463,7 +470,7 @@ int dp_mirror_sync_prepare_op(struct recovery_sync_op *so)
 	if (is_op_sync_stale(op)||is_op_sync_no_wr_ho(op)) {
 		WARN_WRONG_SKIP_CHECK(so->assume_caller_holds_locks && (!is_op_sync_readfail(op)), 0);	// Only read-fail is the single 'sync' that can be triggered by IO when it holds locks
 		return __mirror_sync_data_prepare_op(so);
-	} else if (is_op_sync_commandless(op) || (op == NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE)) {
+	} else if (is_op_sync_commandless(op)) {
 		return dp_sync_cmd_alloc_fill_rldr_only(so);
 	} else { BUG(); }
 	return 0;
@@ -489,11 +496,10 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		const union nvmeib_lock_id holder = __get_worst_stale_possible(so);
 		enum sync_op_stage_e next_stage = sync_stage_recov_no_write_hole_read_done;
 		const bool had_stale_lock = (holder.bits.is_stale);
-		struct nvmeibc_raid_leader_cmd_ctx *rld = &so->cmds->rld;
-		__mirror_sync_calc_post_binfo(so, rld, had_stale_lock);
-		if (!__mirror_check_if_has_something_to_do_with_disks(so, rld, had_stale_lock)) {
+		__mirror_sync_calc_post_binfo(so, &rldr->rld, had_stale_lock);
+		if (!__mirror_check_if_has_something_to_do_with_disks(so, &rldr->rld, had_stale_lock)) {
 			NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync do nothing", _T, goodpath_nvmeibc_syncs, _r1_sync_do_nothing, so->o->dbg_id);
-			nvmeibc_sync_set_cmds_only_do_not_send_by_bmp(so, 0, so->cmds->ncmds - 1, (~0));        // Do not send any commands, Not reads and not writes
+			nvmeibc_sync_set_cmds_only_do_not_send_by_bmp(so, 0, rldr->ncmds - 1, (~0));        // Do not send any commands, Not reads and not writes
 			next_stage = sync_stage_recov_write_cmds_done;
 		}
 		nvmeibc_sync_send_all_read_cmds(so, NULL, next_stage);
@@ -502,10 +508,22 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		WARN_ON(so->n_slices != 0);				// we dont fix any slice
 		WARN_ON(so->locks->n_siblings == 1);	// with single primary owner, nowhere to copy it! Bug in design, should have called stale-2-dirty sync
 		if (unlikely(rldr->rld.pre.bits.dirty)) {
-			// This is illegal in R1 with 2 mirror {RW,W}! Should have called dbits turn off! This sync is called when no dirtybits exits which can be turned off. Legal with 3 mirror and above. Example {RW,W,D} with Dbit for Seg2, Need to be copied from RW to W, to transition to {RW,RW,D} topo.
-			WARN_ONCE(true, "nvmeibc bug! so=" PRI_SO_NAME " {%u} Sync must turn-off dbits! Abort to prevent data corruption! pre=0x%x, locks_pre[0x%x,0x%x]\n", PRI_SO_NAME_ARGS(so), so->o->dbg_id, rldr->rld.pre.all, nvmeibc_cmd_lock_get_bi(&so->locks[0]).all, nvmeibc_cmd_lock_get_bi(&so->locks[1]).all);
-			nvmeibc_block_suspend(so->o->nd, NULL, NULL); /* Critical error. Any further action will cause corruption. Fail recovery, suspend the device. We require user intervention to exit this state. Should not happen normally. */
-			so->error = -10029;
+			const int num_deg =  nvmeibc_praid_get_num_deg_segs(so->r1);
+			// This situation is illegal for single-degrade mode (always illegal for 2 mirror)
+			//      Topo {RW,D}: Should have called stale-2 dirty
+			//      Topo {RW,RW,D}: Mathematically this is legal, but there is no such flow! We prefer solve stale locks asap (Remove stale lock and mark dbit for dead seg on all RW seg)
+			//      Topo {RW,RW,W/W-}: Must call dbits turn off sync.
+			if (num_deg <= 1) {
+					WARN_ONCE(num_deg <= 1, "nvmeibc bug! so=" PRI_SO_NAME " {%u} Sync must turn-off dbits! Abort to prevent data corruption! pre=0x%x, locks_pre[0x%x,0x%x]\n", PRI_SO_NAME_ARGS(so), so->o->dbg_id, rldr->rld.pre.all, (u32)nvmeibc_cmd_lock_get_bi(&so->locks[0]).all, (u32)nvmeibc_cmd_lock_get_bi(&so->locks[1]).all);
+					nvmeibc_block_suspend(so->o->nd, NULL, NULL); /* Critical error. Any further action will cause corruption. Fail recovery, suspend the device. We require user intervention to exit this state. Should not happen normally. */
+					so->error = -10029;
+			}
+			// In multi degraded this sync might be legal (3 mirror and above)
+			//      Topo {RW,W,D} with Dbit for Seg1 or DirtySuspect: Illegal! Must call dbits turn off sync to fix 'W' seg.
+			//      Topo {RW,W,D,D} with Dbit for Seg2, Need to copy stale lock from RW to W seg to transition to {RW,RW,D,D} asap and solve stale lock later in new topology
+			//              Do nothing with disk. However we do have to turn on dbit for all 'D' seg
+			//              Note: Verification that no dbits for seg1 exist will be done when binfo is commited with stale lock
+			__mirror_sync_calc_post_binfo(so, &rldr->rld, true);
 		} else if (unlikely(dp_sync_common_has_dbits_anywhere(so))) {
 			// Copy locks have incorrect binfo (dbit, while primary owner is clean). This should not happen! Caused by a bug somewhere else in the code. but we can recover from that by commiting clean owner binfo
 			BUG_ON(rldr->rld.post.bits.dirty);	// Primary owner supposed to be clean of locks!
