@@ -119,19 +119,24 @@ void __find_best_valid_source_for_data(struct recovery_sync_op *so)
 }
 
 static inline int __find_best_invalid_source_for_data(struct recovery_sync_op *so)
-{
+{	// Data is destroyed! But try preserving meaningfull block when writing logical bad sector
 	int i;
-	for (i = 0; i < n_read_cmds(so); i++) {								// Even if edic is wrong / logical bad sector, select this
-		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		if (!cmd->do_not_send && nvmeibc_is_mirror_md_enabled(cmd))
+	for (i = 0; i < n_read_cmds(so); i++) {								// (1) Maybe-old-data (W seg+dirty-suspect) > (2) Old-data (W seg+dbit)
+		const struct nvmeibc_block_command *c = &so->cmds[i];
+		if (__data_could_be_read(c) && __cant_trust_data(so, i))
 			return i;
 	}
-	for (i = 0; i < n_read_cmds(so); i++) {								// We dont have metadata at all. Select any read data.
-		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		if (!cmd->do_not_send)
+	for (i = 0; i < n_read_cmds(so); i++) {								// (3) Logical bad sector, WrongCrc > (4) Any-Data+Crc
+		const struct nvmeibc_block_command *c = &so->cmds[i];
+		if (__data_could_be_read(c) && nvmeibc_is_mirror_md_enabled(c))
 			return i;
 	}
-	return 0;															// DGL: Even write uncorrectable command needs an NDB. Data (SGL) does not matter, so any NDB will do, provided it has a correct length field set. Just take from the first read command.
+	for (i = 0; i < n_read_cmds(so); i++) {								// (5) Any-Data-No-Crc, W- Topo, BadSector
+		const struct nvmeibc_block_command *c = &so->cmds[i];
+		if (__data_could_be_read(c))
+			return i;
+	}
+	return 0;	// (6) Junk (Unitialized-Mem) DGL: Even write uncorrectable command needs an NDB. Data (SGL) does not matter, so any NDB will do, provided it has a correct length field set. Just take from the first read command.
 }
 
 bool nvmeibc_raid1_destroy_force_physical_bad_sector_in_sync = false;		// Use logical bad sector if possible
