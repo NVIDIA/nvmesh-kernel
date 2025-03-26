@@ -63,8 +63,7 @@ static void __set_wr_cmd_ndb_to_read_cmd_ptr(struct nvmeibc_block_command *cmd, 
    as do_not_send.
    Copy metadata to respective buffers if needed. Metadata has to be actually
    copied and not just pointer set since its size may vary from disk to disk,
-   thus influencing the whole buffer alignment.
-   Has 2 variants: slice_by_slice and full blockset */
+   thus influencing the whole buffer alignment.*/
 static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 {
 	int i, count = 0;
@@ -74,16 +73,11 @@ static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 	for (i = 0; i < n_write_cmds(so); i++) {
 		struct nvmeibc_block_command *dst_cmd = &so->cmds[write_start+i];
 		WARN(dst_cmd->iocmd->comp.comp_code, "nvmeibc bug\n");	// Clean on init and cleaned when advancing to next slice
+		BUG_ON(!nvmeib_block_io_op_is_write(dst_cmd->iocmd->reqs1.op));		// Same as above
 		if (dst_cmd->do_not_send /* Data already OK || SEG == DEAD) */ ||
 			(src == i) /* Write is the same as src */) {
 			dst_cmd->do_not_send = true;
 			continue;
-		}
-		if (!so->is_sbs_mode) {
-			BUG_ON(!nvmeib_block_io_op_is_write(dst_cmd->iocmd->reqs1.op));
-		} else {
-			BUG_ON(dst_cmd->do_not_send);
-			dst_cmd->iocmd->reqs1.op = NVMEIB_BLOCK_IO_OP_WRITE;	// Could be write uncorrectable, from previous slice
 		}
 		__set_wr_cmd_ndb_to_read_cmd_ptr(dst_cmd, src_cmd);
 		count++;
@@ -578,7 +572,6 @@ void dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so)
 	for (; i < so->cmds->ncmds; i++) { // Check all write CMDS and replace uncorrectable with WRITE
 		if (unlikely(so->cmds[i].ds->toma_acm == NVMEIBTC_DS_MODE_DEAD)) { // MUST BE 3 way mirroring or above
 			BUG_ON(!so->cmds[i].do_not_send);
-			continue;
 		} else { // Any writable seg should be ready for writing the next required slice
 			struct nvmeibc_block_io_req *req = &so->cmds[i].iocmd->reqs1;
 			if (so->cmds[i].do_not_send) { // Was the previous source segment
@@ -587,7 +580,7 @@ void dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so)
 				WARN_ON(req->ndb && !so->cmds[i].is_not_ndb_owner); // Going to leak NDB or wrong ownership
 				req->ndb = NULL;
 			}
-			req->op = NVMEIB_BLOCK_IO_OP_WRITE;	// In case we destroyed the previous slice, prepare the next slice for correctly writing data in it (if it will also be destroyed it will be set to NVMEIB_BLOCK_IO_OP_WRITE_UNCOR)
+			req->op = NVMEIB_BLOCK_IO_OP_WRITE;	// In case we destroyed the previous slice, revert to default write
 		}
 	}
 }
