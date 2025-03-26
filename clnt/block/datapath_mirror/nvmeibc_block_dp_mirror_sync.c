@@ -13,6 +13,19 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_io_pet.h"
 
+static bool __data_could_not_be_read(const struct nvmeibc_block_command *c)
+{
+	return c->do_not_send || (c->o_rv != 0);	// Note: return false does not mean that data is OK. It could be logical bad sector!
+}
+#define __data_could_be_read(c)		(!__data_could_not_be_read(c))
+
+static bool dp_sync_cmd_is_valid_read_source(const struct recovery_sync_op *so, const int i)
+{	// Note If this segment is not readable (for any reason: topo / dirtybit) then __mark_read_to_dirty_w_seg_as_do_not_send() would make it do not send.
+	const struct nvmeibc_block_command *c = &so->cmds[i];
+	return ((so->nwhole_exec_plan.invalid_sources & (1 << i)) == 0)	&&
+			__data_could_be_read(c);
+}
+
 static void __inject_debug_di_with_sync_info(struct recovery_sync_op *so, int n_cmds_to_do)
 {
 	if (so->cmds->o->nd->dp.enable_di_debug_mode) {
@@ -21,7 +34,7 @@ static void __inject_debug_di_with_sync_info(struct recovery_sync_op *so, int n_
 			if (so->cmds[iw].do_not_send)
 				continue;				// No need to execute write, already identical or segment is dead
 			ir = iw - n_read_cmds(so);
-			if (so->cmds[ir].o_rv == 0)	// Valid source + Read succeeded. Otherwise, either was not sent (-ENXIO) or failed completion (any other o_rv) TODO(EC-2583) (use dp_sync_cmd_is_valid_read_source for the current blockset (if not SBS) or slice if seg is W and Dirty)
+			if (dp_sync_cmd_is_valid_read_source(so, ir))
 				dp_dbgdi_copy_sync_overwritten(&so->cmds[iw], &so->cmds[ir]);
 			else
 				dp_dbgdi_clear_sync_overwritten(&so->cmds[iw]);
@@ -85,16 +98,6 @@ static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 	_ND(t_00_swbtbs, "Using read source @SEG_DBG_UUID to sync blkset, @INT write cmds", src_cmd->ds->dbg_uuid, count);
 	BUG_ON(!count);	// Why was the sync called if it has nothing to write
 	return count;
-}
-
-static bool dp_sync_cmd_is_valid_read_source(const struct recovery_sync_op *so, const int src)
-{	// Note If this segment is not readable (for any reason: topo / dirtybit) then __mark_read_to_dirty_w_seg_as_do_not_send() would make it do not send.
-	const struct nvmeibc_block_command *c = &so->cmds[src];
-	if (so->nwhole_exec_plan.invalid_sources & (1 << src))
-		return false;
-	if (c->do_not_send || (c->o_rv != 0))
-		return false;						// Read cmd to valid source failed.
-	return true;
 }
 
 void __find_best_valid_source_for_data(struct recovery_sync_op *so);
@@ -219,7 +222,7 @@ static void __copy_sync_read_to_orig_read_io_sgl(const struct recovery_sync_op *
 }
 
 // Compares read cmd's data with valid read's data. @irc - index of read cmd
-static inline bool __compare_read_cmds_data_for_stale_lock_write(struct recovery_sync_op *so, int irc)
+static inline bool __compare_read_cmds_data_for_mirror_write(struct recovery_sync_op *so, int irc)
 {
 	const int irc_valid = so->R1.valid_read_index;
 	struct nvmeib_data_buffer *ndb0 = so->cmds[irc_valid].iocmd->reqs1.ndb;
@@ -273,11 +276,11 @@ static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
 	for (ir = 0; ir < n_read_cmds(so); ir++) {
 		const struct nvmeibc_block_command *read_cmd = &so->cmds[ir];
 		const int iw = n_read_cmds(so) + ir;
-		if ((read_cmd->o_rv != 0) || read_cmd->do_not_send) {				// we can still do sync operation as if. this read yielded a different result from valid RW src
+		if (__data_could_not_be_read(read_cmd)) {				// we can still do sync operation as if. this read yielded a different result from valid RW src
 			_ND(tr_00_r1_stale_cmp, "Sync: Ignorring read cmd err: rv=@O_RV", read_cmd->o_rv);
 		} else if (so->nwhole_exec_plan.first_write_bmp & (1 << ir)) {
 			_ND(tr_01_r1_stale_cmp, "Sync: Ignorring read cmd due to bad sector");
-		} else if (__compare_read_cmds_data_for_stale_lock_write(so, ir)) { // Either data is identical to data in valid read, or this is the valid read
+		} else if (__compare_read_cmds_data_for_mirror_write(so, ir)) { // Either data is identical to data in valid read, or this is the valid read
 			so->cmds[iw].do_not_send = true; // Skip this write
 		}
 		if (!so->cmds[iw].do_not_send) {
