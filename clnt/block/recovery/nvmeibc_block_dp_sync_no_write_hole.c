@@ -763,10 +763,7 @@ _func_start:
 				__parity_md_dbits_turnoff(so);
 				ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_all_write_cmds(so, so->nwhole_exec_plan.second_write_bmp, sync_stage_recov_no_write_hole_turoff_parity_md_dbits_done));
 			} else {
-				if (nvmeibc_raid_is_ec(so->r1)) {
-					TODO(EC-6894, "We have second write bmp but did not do this. Hitting this bug on can cause a DI where dbits in parities are wrong (remain != 0, even after dbits rebuild");
-					BUG_ON(so->nwhole_exec_plan.second_write_bmp);
-				}
+				BUG_ON(so->nwhole_exec_plan.second_write_bmp);	// Sanity: We have second write bmp but did not do this. Can cause a DI where dbits in parities are wrong (!= 0, even after dbits rebuild), so future cold recovery can rise them to RAM
 				so->stage = sync_stage_recov_no_write_hole_sbs_loop_end;
 				goto _func_start;
 			}
