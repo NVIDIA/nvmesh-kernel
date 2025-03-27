@@ -691,9 +691,6 @@ _func_start:
 
 		case sync_stage_recov_no_write_hole_read_done: {	// If any read failed that we cannot fix, end sync with error
 			const union dp_sync_reads_rv_bmp rv_bmp = dp_sync_reads_rv_bmp_init(so);
-			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
-			const roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so);
-			BUG_ON(readfail_bmp != rv_bmp.readfail_bmp); BUG_ON(non_read_failure_error != rv_bmp.worst_software_error);
 			WARN((so->o->op == NVMEIB_BLOCK_IO_OP_RECOVER_STALE) && nvmeibc_raid_is_ec(so->r1), "Stale lock recovery is a no write hole solution for mirror only, however this raid has %d\n", so->r1->slice_size);
 			if (unlikely(rv_bmp.worst_software_error)) {  // If any read error (transport / detach / etc...), end sync with error
 				so->error = rv_bmp.worst_software_error;

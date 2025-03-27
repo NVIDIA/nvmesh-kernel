@@ -113,13 +113,11 @@ _func_start:
 		}
 
 		case sync_stage_recov_txid_wrap_read_done: {
-			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
-			const union dp_sync_reads_rv_bmp rv_bmp = dp_sync_reads_rv_bmp_init(so); BUG_ON(non_read_failure_error != rv_bmp.worst_software_error);
+			const union dp_sync_reads_rv_bmp rv_bmp = dp_sync_reads_rv_bmp_init(so);
 			if (unlikely(rv_bmp.worst_software_error)) {  // If any read error (transport / detach / etc...), end sync with error
 				so->error = rv_bmp.worst_software_error;
 				goto _func_start;
 			} else {
-				roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so); BUG_ON(readfail_bmp != rv_bmp.readfail_bmp);
 				nvmeibc_restore_read_cmds_do_not_send_vals(so);
 				nvmeibc_erase_rv_and_comp_codes_of_cur_stage_cmds(so, false);
 				if (unlikely(rv_bmp.readfail_bmp)) {  // call nwhole sync and start from the beginning.

@@ -510,45 +510,6 @@ union dp_sync_reads_rv_bmp dp_sync_reads_rv_bmp_init(const struct recovery_sync_
 	return rv;
 }
 
-/* Verify only readfail or do_not_send return codes exist */
-int dp_sync_get_any_non_readfail_errors(struct recovery_sync_op *so)
-// TODO(EC-2518) - rename and unite both of these
-{ /* Daniel: I would unite this fucntion with previous and call it __generate_slice_plan_from_read_cmds_rv(). It analyzes rv and creates decision plan:
-		{ .worst_software_error, .badsectors_bmp, .__find_best_valid_source_for_data() (for R1), .enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE }
-		Execution plan is created by this function and __analyze_no_write_hole_read(),  both should be wrappened in a single creatino of plan, upon which main state machine acts */
-	int i = so->last_cmd - so->n_cmds + 1, rv = 0;
-	BUG_ON(i != 0); BUG_ON(n_read_cmds(so) != so->last_cmd + 1);	// Verify The for loop is actually 0..n_reads()
-	for (; (i <= so->last_cmd) && (!rv); i++) {
-		if ((so->cmds[i].do_not_send) || (!is_transient_disk_error(so->cmds[i].o_rv))) {
-			continue;
-		}
-		rv = so->cmds[i].o_rv;
-		// if we are looking for any disk error we stop here; otherwise some errors merge strategy should be defined (at least in comments)
-		// If we are looking for the Worst Case RV (WCRV) we can call a function that clasifies errors and returns the worst of 2, can be part of EC-2518
-	}
-	if (rv)
-		_ND(tr_06_sync_check_read_rv, "Read cmd[@RV].error=@RV", i, rv);
-	return rv;
-}
-
-u32 dp_sync_gen_read_fail_bit_mask(const struct recovery_sync_op *so)
-{	// Generates the readfail bitmask for all read cmds
-	const struct nvmeibc_block_command *cmds = so->cmds;
-	int c, n_reads = n_read_cmds(so);
-	u32 bit_mask = 0;
-	for (c = 0; c < n_reads; c++) { // Search for read fail seg
-		BUG_ON(cmds[c].do_not_send && (cmds[c].o_rv != -ENXIO));		// Verify Comparison to ENXIO is not needed!
-		if (!is_transient_disk_error(cmds[c].o_rv)) { // Found one bad sector
-			bit_mask |= (1 << c);
-		} else if (unlikely(cmds[c].o_rv == -ENXIO) && cmds[c].do_not_send) { // Do Not Send
-			continue;
-		} else if (unlikely(cmds[c].o_rv)) { // Some other error
-			_NTSO(error_dp_ec_recovery_readfail_gen_read_fail_bit_mask, "error: @COMMAND_IDX, operation_rv=@OPERATION_RV", c, cmds[c].o_rv);
-		}
-	}
-	return bit_mask;
-}
-
 /* Write failures must notify TOMA */
 void dp_sync_notify_toma_on_write_failure(struct recovery_sync_op *so)
 {
