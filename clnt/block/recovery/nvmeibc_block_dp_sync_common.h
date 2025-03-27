@@ -206,6 +206,7 @@ struct recovery_sync_op {
 	union /* Run time claculations */ {
 		struct t_sync_mirror_extension {/* RAID-1: */
 			bool is_dirty_suspect;		/* Mark dirty suspect recoveries for accounting */
+			bool was_read_source_calced;/* Was the below read index calculated. Allocated to 0 (false) */
 			int valid_read_index: 8;	/* Index of the segment from which we actually obtained a valid copy of the data (RW with no bad sector, W with no dbits, etc)*/
 		} R1;
 		struct /*t_sync_ec_extension*/ {/* RAID-5: */

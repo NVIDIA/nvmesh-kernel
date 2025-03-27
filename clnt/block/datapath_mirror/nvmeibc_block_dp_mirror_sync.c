@@ -87,7 +87,6 @@ static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 	int i, count = 0;
 	const int write_start = n_read_cmds(so), src = so->R1.valid_read_index;
 	const struct nvmeibc_block_command *src_cmd = &so->cmds[src];
-	BUG_ON(src < 0);	// Sanity: No source???
 	for (i = 0; i < n_write_cmds(so); i++) {
 		struct nvmeibc_block_command *dst_cmd = &so->cmds[write_start+i];
 		WARN(dst_cmd->iocmd->comp.comp_code, "nvmeibc bug\n");	// Clean on init and cleaned when advancing to next slice
@@ -109,6 +108,7 @@ void __find_best_valid_source_for_data(struct recovery_sync_op *so);
 void __find_best_valid_source_for_data(struct recovery_sync_op *so)
 {
 	int i;
+	so->R1.was_read_source_calced = true;
 	so->R1.valid_read_index = -1;
 	for (i = 0; i < n_read_cmds(so); i++) {
 		if (dp_sync_cmd_is_valid_read_source(so, i)) {
@@ -117,6 +117,8 @@ void __find_best_valid_source_for_data(struct recovery_sync_op *so)
 		}	// else cmds[i] data cannot serve as source, but it might be compared to source to avoid write
 	}
 }
+#define __r1_valid_source_verify(so) BUG_ON(!(so->R1.was_read_source_calced && (so->R1.valid_read_index >= 0)))
+#define __r1_valid_source_remove(so) ({ so->R1.was_read_source_calced = false;  so->R1.valid_read_index = -1; })
 
 static inline int __find_best_invalid_source_for_data(struct recovery_sync_op *so)
 {	// Data is destroyed! But try preserving meaningfull block when writing logical bad sector
@@ -169,12 +171,10 @@ static void __set_write_buffer_to_bad_sector(struct recovery_sync_op *so)
 static void __copy_sync_read_to_orig_read_io_sgl(const struct recovery_sync_op *so)
 {
 	const struct nvmeibc_block_command *orig_read = so->orig_rldr;
-	const int valid_i = so->R1.valid_read_index;
 	BUG_ON(!orig_read  || orig_read->o->op != NVMEIB_BLOCK_IO_OP_READ);
-	BUG_ON(valid_i < 0);
 	if (1) {
 		const struct nvmeibc_block_io_req *orig_req = &orig_read->iocmd->reqs1;
-		const struct nvmeibc_block_command *valid_read = &so->cmds[valid_i];
+		const struct nvmeibc_block_command *valid_read = &so->cmds[so->R1.valid_read_index];
 		struct nvmeib_data_buffer *orig_ndb = orig_read->iocmd->reqs1.ndb;
 		struct nvmeib_data_buffer *valid_ndb = valid_read->iocmd->reqs1.ndb;
 		struct sgl_block_iter orig_sbi =  SGL_BLOCK_ITER_INIT(*orig_ndb->table.sgl);
@@ -224,7 +224,6 @@ static void __copy_sync_read_to_orig_read_io_sgl(const struct recovery_sync_op *
 			sgl_block_iter_advance(&orig_sbi, nblocks);
 			copy_nlbas -= nblocks;
 		}
-
 		// TODO(EC-2584): Mark original read as successful - only after sync completes successfully.
 		//__cmd_clean_comp_val((struct nvmeibc_block_command *)orig_read);
 	}
@@ -278,9 +277,8 @@ static inline bool __compare_read_cmds_data_for_mirror_write(struct recovery_syn
 
 static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
 {
-	const int ir_valid = so->R1.valid_read_index;
 	int ir, n_cmds_to_do = 0;       // Calculate how many writes to do
-	WARN(so->cmds[ir_valid].o_rv != 0, "nvmeibc bug! Read at valid_read_index failed???");
+	__r1_valid_source_verify(so);
 	WARN_ON((!is_op_sync_stale(so->o->op) && !is_op_sync_no_wr_ho(so->o->op))||(so->r1->slice_size != 1));
 	for (ir = 0; ir < n_read_cmds(so); ir++) {
 		const struct nvmeibc_block_command *read_cmd = &so->cmds[ir];
@@ -327,7 +325,7 @@ static union nvmeib_lock_id __get_worst_stale_possible(struct recovery_sync_op *
 }
 
 static void __mark_read_to_dirty_w_seg_as_do_not_send(struct recovery_sync_op *so, const union nvmeibc_dbits_entry pre)
-{	// Optimization, reads to W seg with dbit for them will be discarded as invalid sources, so just avoid the read.
+{	// Optimization, reads to W seg with dbit for them will be discarded as invalid sources, so just avoid the read. W seg with unknown dirtybits will be read
 	u16 pre_dirty_bmp = nvmeibc_dbits_get_turn_on_bmp(&pre, &so->r1->calculated_data.topo_traits); // Use DBits from pre transaction to prevent reads
 	if (pre_dirty_bmp) { 																		 // If any dirty bits are set (including convicts) we should not read them
 		const int slice_start = so_get_owner_seg(so);
@@ -600,8 +598,8 @@ enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE dp_mirror_no_write_hole_fix(struct recovery
 
 // Virtual function called from so->destroy_function
 void dp_mirror_no_write_hole_destroy(struct recovery_sync_op *so) {
-	const bool should_destroy = (so->R1.valid_read_index == -1) || ((int)hweight32(so->nwhole_exec_plan.invalid_sources) != n_read_cmds(so));
-	WARN(!should_destroy, "nvmeibc bug: no need to destroy slice. Source=%d, invalid_bmp=0x%x\n", so->R1.valid_read_index, so->nwhole_exec_plan.invalid_sources);
+	const bool should_destroy = (so->R1.valid_read_index < 0) || ((int)hweight32(so->nwhole_exec_plan.invalid_sources) != n_read_cmds(so));
+	WARN(!should_destroy, "nvmeibc bug: no need to destroy slice. Source=%d, invalid_bmp=0x%x, n_segs=%d\n", so->R1.valid_read_index, so->nwhole_exec_plan.invalid_sources, n_read_cmds(so));
 	__set_write_buffer_to_bad_sector(so);
 }
 
@@ -623,6 +621,7 @@ void dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so)
 			req->op = NVMEIB_BLOCK_IO_OP_WRITE;	// In case we destroyed the previous slice, revert to default write
 		}
 	}
+	__r1_valid_source_remove(so);				// Be extra carefull, protect from caller algorithm forgetting to calculate valid source of next slice
 }
 
 /**************** Mirror No Write Hole CB ************************************/
