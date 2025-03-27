@@ -759,6 +759,11 @@ _func_start:
 			// There are a few bugs in the lines below:
 			// 1. so->nwhole_exec_plan.second_write_bmp is initialized properly for R1 as {D0 + P + Q} or {D0 + P}. But R1 has no dbits in MD so 'second_write_bmp' should be == 0x0!
 			// 2. dbits_have_been_fixed_wrong_result() is wrong and the condition should be calculated from bitmaps, not from diff of pre.dbits versus post.dbits, coz pre is changed in nvmeibcbdpec_inject_binfo_back_to_caller()
+			{
+				const bool b1 = (so->nwhole_exec_plan.second_write_bmp!=0);
+				const bool b2  = nvmeibc_raid_is_ec(so->r1) && dbits_have_been_fixed_wrong_result(so);
+				BUG_ON(b1 != b2);
+			}
 			if (nvmeibc_raid_is_ec(so->r1) && dbits_have_been_fixed_wrong_result(so)) { // If Dbits have been fixed we need to update MD (parities)
 				__parity_md_dbits_turnoff(so);
 				ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_all_write_cmds(so, so->nwhole_exec_plan.second_write_bmp, sync_stage_recov_no_write_hole_turoff_parity_md_dbits_done));
