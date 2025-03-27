@@ -342,22 +342,15 @@ static roles_bmp_t __get_dirty_roles_bmp_pre_sync(const struct recovery_sync_op 
 
 static inline void __calc_execution_plan_for_dbits_turnoff(struct recovery_sync_op *so) {
 	const int slice_start = so_get_owner_seg(so);
-	roles_bmp_t fixable_binfo_dbits_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_off_mask);
+	const roles_bmp_t pre_db_bmp = __get_dirty_roles_bmp_pre_sync(so, slice_start);
+	const roles_bmp_t fixable_binfo_dbits_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_off_mask) & pre_db_bmp;
 	BUG_ON(!so->nwhole_params.must_turn_off_dbits);			// This function assumes we are turning off possible dbits in ram.
-	if (!nvmeibc_raid_is_ec(so->r1)) {
-		// W- Dbits were take care of in __mark_read_to_dirty_w_seg_as_do_not_send(). Now dbits are irrelevant, including unknowns that were not resolved
-		// All sent read cmds will be compared block by block, and write if they are different.
-		BUG();	// R1 does not support dbits in metadata
-		return;
-	} else { // No unknowns exist, EC resolves them in advance and R1 was already tested
-		const roles_bmp_t pre_db_bmp = __get_dirty_roles_bmp_pre_sync(so, slice_start);
-		fixable_binfo_dbits_bmp &= pre_db_bmp;		// Turn off only dbits that are indeed turned on, coz no unknowns exist
-	}
+	BUG_ON(!nvmeibc_raid_is_ec(so->r1)); // No unknowns dbits should exist, EC resolves them in advance, but R1 does not (calls __mark_read_to_dirty_w_seg_as_do_not_send). This will screw up the fixable bitmap
 	if (fixable_binfo_dbits_bmp) {  // Add writable parities.
 		so->nwhole_exec_plan.first_write_bmp |= fixable_binfo_dbits_bmp; // In fix dbits is possible and needed, need to change the data itself in the first write TOODO(LKJ): optimization: need to change the non readable parities md. //(fixable_binfo_dbits_bmp | (nvmeibc_raid1_get_parities_bmp(so->r1) & writable_non_readable));
 		so->nwhole_exec_plan.second_write_bmp = __get_writable_parities_bmp_for_dbits_metadata(so);  // Write the parities with dbits turned off
-	} else
-		BUG_ON(dp_ec_can_fix_dbits(so->cmds));
+	}
+	BUG_ON((bool)(fixable_binfo_dbits_bmp != 0) != dp_ec_can_fix_dbits(so->cmds));	// Sanity, 2 calcualtions yield the same result
 }
 
 static inline void __dump_nwhole_exec_plan(struct recovery_sync_op *so, bool should_restore, bool should_only_scrub, bool destroy_slice, bool start_slice_by_slice) {
@@ -577,12 +570,6 @@ static inline void __dump_nwhole_params(const struct recovery_sync_op *so) {
 		  so->cmds->rld.pre.bits.dirty, params->dbits_turnon_bmp, params->force_rebuild_bmp, params->destroy_full_slice, params->must_fix_bad_sectors, params->must_turn_off_dbits, params->must_scrub);
 }
 
-static inline bool dbits_have_been_fixed_wrong_result(const struct recovery_sync_op *so) {	// This function is wrong and abuses the call to can_fix_dbits
-	return (so->nwhole_params.must_turn_off_dbits && 			// Should turn off
-			dp_ec_can_fix_dbits(so->cmds) &&					// Can turn off by topo
-			(so->n_slices == LOCKSET_SLICES));					// Can turn off by processing the entire slice
-}
-
 static void __update_no_whole_counters(const struct recovery_sync_op *so)
 {
 	struct nvmeibc_nowhole_stats *nowh = &get_so_fctr(so)->nowh;
@@ -754,21 +741,10 @@ _func_start:
 				goto _func_start;
 			}
 			nvmeibc_erase_rv_and_comp_codes_of_cur_stage_cmds(so, true);
-
-			TODO(EC-1473, "Remove the EC condition. Will fail for 2-3 mirrored R1, because the definition of parity bitmap in R1 is incorrect!");
-			// There are a few bugs in the lines below:
-			// 1. so->nwhole_exec_plan.second_write_bmp is initialized properly for R1 as {D0 + P + Q} or {D0 + P}. But R1 has no dbits in MD so 'second_write_bmp' should be == 0x0!
-			// 2. dbits_have_been_fixed_wrong_result() is wrong and the condition should be calculated from bitmaps, not from diff of pre.dbits versus post.dbits, coz pre is changed in nvmeibcbdpec_inject_binfo_back_to_caller()
-			{
-				const bool b1 = (so->nwhole_exec_plan.second_write_bmp!=0);
-				const bool b2  = nvmeibc_raid_is_ec(so->r1) && dbits_have_been_fixed_wrong_result(so);
-				BUG_ON(b1 != b2);
-			}
-			if (nvmeibc_raid_is_ec(so->r1) && dbits_have_been_fixed_wrong_result(so)) { // If Dbits have been fixed we need to update MD (parities)
+			if (so->nwhole_exec_plan.second_write_bmp) { // If Dbits have been fixed we need to update MD (parities)
 				__parity_md_dbits_turnoff(so);
 				ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_all_write_cmds(so, so->nwhole_exec_plan.second_write_bmp, sync_stage_recov_no_write_hole_turoff_parity_md_dbits_done));
 			} else {
-				BUG_ON(so->nwhole_exec_plan.second_write_bmp);	// Sanity: We have second write bmp but did not do this. Can cause a DI where dbits in parities are wrong (!= 0, even after dbits rebuild), so future cold recovery can rise them to RAM
 				so->stage = sync_stage_recov_no_write_hole_sbs_loop_end;
 				goto _func_start;
 			}
