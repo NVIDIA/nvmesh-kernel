@@ -488,14 +488,36 @@ void dp_ec_sync_resume_op(struct recovery_sync_op *so)
 }
 
 /***************** EC common for READ+WRITE sync's (i.e: Np whole, HTR, cold, txid-wraparound)  *********************/
+union dp_sync_reads_rv_bmp dp_sync_reads_rv_bmp_init(const struct recovery_sync_op *so)
+{
+	union dp_sync_reads_rv_bmp rv = {.raw = 0ULL };
+	const struct nvmeibc_block_command *cmds = so->cmds;
+	int i, n_reads = n_read_cmds(so);
+	BUILD_BUG_ON(sizeof(rv) != 8);
+	for (i = 0; i < n_reads; i++) {
+		const int cur_rv = cmds[i].o_rv;
+		if (!is_transient_disk_error(cur_rv)) { // Found one bad sector
+			rv.readfail_bmp |= (1 << i);
+		} else if ((cmds[i].do_not_send) || (cur_rv == 0)) {
+			/* Do nothing */
+		} else {
+			_NTSO(t_dpsrrvbi, "error: cmd[@COMMAND_IDX].o_rv=@RV", i, cur_rv);
+			if (rv.worst_software_error == 0) {
+				rv.worst_software_error = cmds[i].o_rv; // Todo consider defining logic for taking worst case error or merging errors, not first one.
+			}
+		}
+	}
+	return rv;
+}
 
 /* Verify only readfail or do_not_send return codes exist */
 int dp_sync_get_any_non_readfail_errors(struct recovery_sync_op *so)
 // TODO(EC-2518) - rename and unite both of these
 { /* Daniel: I would unite this fucntion with previous and call it __generate_slice_plan_from_read_cmds_rv(). It analyzes rv and creates decision plan:
-		{ .worst_software_error, .badsectors_bmp, .first_valid_read (for R1), .enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE }
+		{ .worst_software_error, .badsectors_bmp, .__find_best_valid_source_for_data() (for R1), .enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE }
 		Execution plan is created by this function and __analyze_no_write_hole_read(),  both should be wrappened in a single creatino of plan, upon which main state machine acts */
 	int i = so->last_cmd - so->n_cmds + 1, rv = 0;
+	BUG_ON(i != 0); BUG_ON(n_read_cmds(so) != so->last_cmd + 1);	// Verify The for loop is actually 0..n_reads()
 	for (; (i <= so->last_cmd) && (!rv); i++) {
 		if ((so->cmds[i].do_not_send) || (!is_transient_disk_error(so->cmds[i].o_rv))) {
 			continue;
@@ -515,6 +537,7 @@ u32 dp_sync_gen_read_fail_bit_mask(const struct recovery_sync_op *so)
 	int c, n_reads = n_read_cmds(so);
 	u32 bit_mask = 0;
 	for (c = 0; c < n_reads; c++) { // Search for read fail seg
+		BUG_ON(cmds[c].do_not_send && (cmds[c].o_rv != -ENXIO));		// Verify Comparison to ENXIO is not needed!
 		if (!is_transient_disk_error(cmds[c].o_rv)) { // Found one bad sector
 			bit_mask |= (1 << c);
 		} else if (unlikely(cmds[c].o_rv == -ENXIO) && cmds[c].do_not_send) { // Do Not Send

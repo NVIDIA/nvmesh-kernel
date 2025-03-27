@@ -412,12 +412,11 @@ bool ec_8005_enable_warning = true; //will be used by um simulator to disable wa
          2. If already in SBS mode destroy this slice
    4. If in SBS mode and no target mask continue to next slice. (Assert if in turnon dbits stage)
    5. If no restore_bmp if in parity_md dbits turon stage turnon dbits on parities.  (else if in dbits turnon stage - assert, probably something odd happened). */
-static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct recovery_sync_op *so)
+static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct recovery_sync_op *so, const roles_bmp_t readfail_bmp)
 {
 	enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE rv = GOTO_NEXT_STAGE;
 	const int slice_start = so_get_owner_seg(so);
 	bool should_restore = false, should_only_scrub = false;
-	const roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so);
 	const roles_bmp_t writable_non_readable_ec = readfail_bmp | nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_off_mask);        // Todo: Here use per slice info in metadata if there is no convictness!
 	bool is_first_call_to_analayze = (!so->is_sbs_mode); // At the first loop iteration always so->is_sbs_mode = false if calling twice will always be true
 	bool destroy_slice = false;
@@ -691,12 +690,15 @@ _func_start:
 		}
 
 		case sync_stage_recov_no_write_hole_read_done: {	// If any read failed that we cannot fix, end sync with error
+			const union dp_sync_reads_rv_bmp rv_bmp = dp_sync_reads_rv_bmp_init(so);
 			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
+			const roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so);
+			BUG_ON(readfail_bmp != rv_bmp.readfail_bmp); BUG_ON(non_read_failure_error != rv_bmp.worst_software_error);
 			WARN((so->o->op == NVMEIB_BLOCK_IO_OP_RECOVER_STALE) && nvmeibc_raid_is_ec(so->r1), "Stale lock recovery is a no write hole solution for mirror only, however this raid has %d\n", so->r1->slice_size);
-			if (unlikely(non_read_failure_error)) {  // If any read failed that we cannot fix, end sync with error
-				so->error = non_read_failure_error;
+			if (unlikely(rv_bmp.worst_software_error)) {  // If any read error (transport / detach / etc...), end sync with error
+				so->error = rv_bmp.worst_software_error;
 			} else {// If only readfailure errors exist try to fix
-				const enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE rv = __analyze_no_write_hole_read(so);
+				const enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE rv = __analyze_no_write_hole_read(so, rv_bmp.readfail_bmp);
 				switch(rv){
 					case NO_WRITE_HOLE_DONE: { // EC-QLC: Can commit is writing to binfo here but a write will come soon anyway. Rider will have to solve this.
 						so->stage = sync_stage_recov_write_cmds_done;

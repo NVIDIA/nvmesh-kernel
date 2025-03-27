@@ -114,14 +114,15 @@ _func_start:
 
 		case sync_stage_recov_txid_wrap_read_done: {
 			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
-			if (unlikely(non_read_failure_error)) {  // If any read failed that we cannot fix, end sync with error
-				so->error = non_read_failure_error;
+			const union dp_sync_reads_rv_bmp rv_bmp = dp_sync_reads_rv_bmp_init(so); BUG_ON(non_read_failure_error != rv_bmp.worst_software_error);
+			if (unlikely(rv_bmp.worst_software_error)) {  // If any read error (transport / detach / etc...), end sync with error
+				so->error = rv_bmp.worst_software_error;
 				goto _func_start;
 			} else {
-				roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so);
+				roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so); BUG_ON(readfail_bmp != rv_bmp.readfail_bmp);
 				nvmeibc_restore_read_cmds_do_not_send_vals(so);
 				nvmeibc_erase_rv_and_comp_codes_of_cur_stage_cmds(so, false);
-				if (unlikely(readfail_bmp)) {  // call nwhole sync and start from the beginning.
+				if (unlikely(rv_bmp.readfail_bmp)) {  // call nwhole sync and start from the beginning.
 					_NTSO(trace_04_txid_wrap_sm, "Calling nwhole sync inorder to fix bad sectors.\n");
 					ASYNC_AWAIT_AND_RESUME(__call_no_whole_sync_and_restart_sm(so, NVMEIB_BLOCK_IO_OP_RECOVER_READFAIL));
 				} else {

@@ -12,6 +12,14 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 
 /***************** Common for READ+WRITE sync's (i.e: No whole, HTR, cold, txid-wraparound)  *********************/
+union dp_sync_reads_rv_bmp {
+	struct {
+		int worst_software_error;	// Non read fail error, worst error, that might abort sync op
+		roles_bmp_t readfail_bmp;	// Bitmap of bad sectors
+	};
+	u64 raw;						// For easier initalization as 0 and print of struct.
+};
+union dp_sync_reads_rv_bmp dp_sync_reads_rv_bmp_init(const struct recovery_sync_op *so);
 bool dp_sync_is_slice_neverwritten( const struct recovery_sync_op *so, u64 lba, const roles_bmp_t readable_segs, char debug_reason); // debug_reason = 'D' - destroy slice, 'R' - Reconstruct, 'W' - txid wraparound
 int  dp_sync_get_any_non_readfail_errors( struct recovery_sync_op *so);
 u32  dp_sync_gen_read_fail_bit_mask(const struct recovery_sync_op *so);
