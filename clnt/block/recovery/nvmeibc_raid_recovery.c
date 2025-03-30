@@ -258,10 +258,10 @@ static int __simulate_get_problems_array_from_server(struct nvmeibc_d_rdma_comp 
    of only owner blocksets. In R1 2-mirror this is the general case */
 static inline bool __recovery_are_wrong_owners(const struct nvmeibc_recovery *recov)
 {
-	if (!recov->args.silent_mode)
-		return (!recov->args.do_only_owners && recov->is_ec_raid);
-	else
+	if (recov->args.silent_mode)
 		return false; // We can trigger manual blockset recovery via ioctl anyway we want
+	else
+		return (!recov->args.do_only_owners) && recov->is_ec_raid;	// in EC only owners are mandatory, from Toma perspective
 }
 
 static int __recovery_get_topo(struct nvmeibc_recovery *recov, struct nvmeibc_recov_sync_worker *sw);
