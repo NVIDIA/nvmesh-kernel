@@ -219,8 +219,7 @@ static int __blocksets_problems_read_cb(struct nvmeibc_d_rdma_comp *dc, struct n
 			BLKCMP_RC_ASYNC_RESUME_CMP(recovery_on_batch_finish(recov, -10042), recov, true);
 			goto out;
 		}
-		if ((recov->type == NVMEIBT_RECOVERY_TYPE_SCRUBBING) ||
-			(recov->is_ec_raid && (recov->type == NVMEIBT_RECOVERY_TYPE_DIRTY_REBUILD))) {
+		if (recov->force_sync_binfo) {
 			__uncommited_binfo_inject_to_blkset_problem((void*)arr, n_elem);
 		}
 		b_length = n_elem;		// Bitmap worst case is it is full (need to process all blocksets)
@@ -1130,6 +1129,13 @@ _busy_corruption:			// Cant start recovery, bug in the system
 	goto _busy;
 }
 
+static bool __calc_must_fix_binfo(const struct nvmeibc_recovery *recov, const struct nvmeibc_raid1 *pr)
+{	// For more info see NVMESH-5280
+	const bool praid_needs_binfo_fix = nvmeibc_raid_is_ec(pr) || (nvmeibc_raid1_get_protect_lvl(pr) > 1); // EC or 3+ Mirror
+	return                        (recov->type == NVMEIBT_RECOVERY_TYPE_SCRUBBING) ||
+		(praid_needs_binfo_fix && (recov->type == NVMEIBT_RECOVERY_TYPE_DIRTY_REBUILD));
+}
+
 static  __attr_no_alignment_sanity int __nvmeibc_recovery_start(struct nvmeibc_subscription_ctx *tr, struct nvmeibc_raid1 *r1, struct nvmeibt_client_recovery_start_pl *ri, int praid_version, bool silent_mode, const struct nvmeibc_recovery_chaining *ch)
 {
 	int rv = -ENOEXEC, err_to_toma = -10001;					// Default: Cant start value
@@ -1195,6 +1201,7 @@ static  __attr_no_alignment_sanity int __nvmeibc_recovery_start(struct nvmeibc_s
 		recov->args.notify_caller = *ch;
 	recov->b_start = recov->args.r_start;
 	recov->is_ec_raid = is_ec;
+	recov->force_sync_binfo = __calc_must_fix_binfo(recov, r1);
 	recov->report.threshold = N_SYNCS_FOR_PROGRESS(r1);			// Daniel, consider adding ioctl which controls this in run-time and define precisely by recovery type. RAM recovery is much faster
 
 	__update_effort_from_toma_msg(recov, &ri->task);
@@ -1409,29 +1416,25 @@ static void __recover_next_blockset(struct nvmeibc_recov_sync_worker *sw)
 		} break;
 		case NVMEIBT_RECOVERY_TYPE_DIRTY_REBUILD: {
 			const union nvmeib_blkset_problem_report problem = job->aux.blckset_problem;
-			if (!recov->is_ec_raid) {
-				if (problem.is_stale) {
+			if (problem.is_stale) {
+				if (!recov->is_ec_raid) {
 					lock_initial_val = R1_STALE_SPECIAL_BINFO_VAL; // Reduce priobability to retry lock
-					if (problem.dbits == 0) {
+					if (problem.dbits == 0) {						// Todo: Stronger optimization, no dbits for 'W' seg / Unknowns instead of zero dbits at all.
 						sw->fn = nvmeibc_sync_commit_stale_lock;	// 2 Optimizations: 1. Defer solving stale lock after dbits rebuild, making rebuild faster. 2. Allow solving stale in any direction (thus overcomming more bad sectors)
 					}
 				}
-			} else {
-				if (problem.is_stale) {
-					// sw->fn = nvmeibc_sync_fix_stale;		// Todo: Covnert to stale sync - today we call dbits_rebuild sync which will mutate to stale lock recovery.
-				} else if (problem.dbits) {
-					// Just launch regular dbits sync
-				} else if (problem.binfo_not_commited) { // Verify if it is indeed not commited. For more info, see documentation of __uncommited_binfo_inject_to_blkset_problem()
-					if (STALE_LOCK_PROTECTS_WRONG_BINFO && !dp_locks_is_ram_topology_degraded(o->locks)) {
-						__schedule_skip_blockset(o, 0 /* No error */); 	// Blockset has a 'W' segment but all locks segs are RW, and we know their data is OK
-						return;
-					} else {  /* Commit owner binfo to other locks. Wither copy TxID to W locks, or clean incorrect Dbits from RW locks. There might be dbits on RW copies which we failed in turnoff or failed turning on dbits on owner while succeeded on copies. We dont leave stale locks in such cases */
-						sw->fn = nvmeibc_sync_commit_binfo;
-					}
-				} else {
-					WARN_RR(true, "unsuported code, wrong problem=0x%x\n", problem.all);
-					BUG();
+			} else if (problem.dbits) {
+				// Just launch regular dbits sync
+			} else if (problem.binfo_not_commited) {
+				if (STALE_LOCK_PROTECTS_WRONG_BINFO && !dp_locks_is_ram_topology_degraded(o->locks)) {
+					__schedule_skip_blockset(o, 0 /* No error */); 	// Blockset has a 'W' segment but all locks segs are RW, and we know their data is OK
+					return;
+				} else {  /* Commit owner binfo to other locks. Wither copy TxID to W locks, or clean incorrect Dbits from RW locks. There might be dbits on RW copies which we failed in turnoff or failed turning on dbits on owner while succeeded on copies. We dont leave stale locks in such cases */
+					sw->fn = nvmeibc_sync_commit_binfo;
 				}
+			} else {
+				WARN_RR(true, "unsuported code, wrong problem=0x%x\n", problem.all);
+				BUG();
 			}
 			_NDRR(tr_1_recov_next, "Fix @SLBA_BLKSETS, DB {db=@DBITS, is_st=@BOOL_YN, not_commited=@BOOL_YN}", job->blkset_lba, problem.dbits, problem.is_stale, problem.binfo_not_commited);
 		} break;

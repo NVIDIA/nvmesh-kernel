@@ -78,6 +78,7 @@ struct nvmeibc_recovery {		// holds information about recovery in process
 		} report;
 		bool has_appendix_task; // After all requested blocksets fixed, some recoveries need appendix
 		bool is_ec_raid;			// Just a caching var, to know if 'ec' without topology. Toma request recovery on 'ec' protection raid
+		bool force_sync_binfo;					// Recovery must always syncronize binfo copies even if primary owner binfo is correct
 	};
 
 	/* The recovery task may be divided into serveral batches of recoveries,
