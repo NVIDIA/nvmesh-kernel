@@ -410,7 +410,6 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE rv = GOTO_NEXT_STAGE;
 	const int slice_start = so_get_owner_seg(so);
 	bool should_restore = false, should_only_scrub = false;
-	const roles_bmp_t writable_non_readable_ec = readfail_bmp | nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_off_mask);        // Todo: Here use per slice info in metadata if there is no convictness!
 	bool is_first_call_to_analayze = (!so->is_sbs_mode); // At the first loop iteration always so->is_sbs_mode = false if calling twice will always be true
 	bool destroy_slice = false;
 	bool start_slice_by_slice = false;
@@ -432,20 +431,18 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	if (so->nwhole_params.must_fix_bad_sectors)
 		so->nwhole_exec_plan.first_write_bmp |= readfail_bmp;
 
-	{	// Check if we need to restore blocks (need to write something we could not read)
+	{	// Sanity check that we are not using dead segments.
 		const roles_bmp_t dead_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dead);
 		const roles_bmp_t any_write = (so->nwhole_exec_plan.first_write_bmp | so->nwhole_exec_plan.second_write_bmp);
 		const bool wrong_usage_of_dead_seg = ((dead_bmp & (readfail_bmp | any_write | so->nwhole_params.force_rebuild_bmp)) != 0);
 		WARN(wrong_usage_of_dead_seg, "nvmeibc bug using data from dead seg! bmp{d=0x%x, w1=0x%x, w2=0x%x, rf=0x%x, force=0x%x}\n", dead_bmp, so->nwhole_exec_plan.first_write_bmp, so->nwhole_exec_plan.second_write_bmp, readfail_bmp, so->nwhole_params.force_rebuild_bmp);
-		if (any_write & writable_non_readable_ec) {	// EC: Missing data that we need to write. Must resotre it
-			should_restore = true;
-		} else {
-			should_restore = __is_raid1_mirror(so); // R1: comparing the blocks must always be done (this is the restore step and single algorithm for all r1 problems)
+		if (__is_raid1_mirror(so)) {	// Check if we need to restore blocks (need to write something we could not read)
+			extern void __find_best_valid_source_for_data(struct recovery_sync_op *so);
+			__find_best_valid_source_for_data(so);	// Finding 1 seg with source of data is the restore step and a single algorithm for all r1 problems
+			should_restore = true; // R1: comparing the read blocks must always be done and write what is not identical to the source
+		} else {		// EC
+			should_restore = (any_write & so->nwhole_exec_plan.invalid_sources);	// EC: Missing data that we need to write. Must resotre it
 		}
-	}
-	if (__is_raid1_mirror(so)) {
-		extern void __find_best_valid_source_for_data(struct recovery_sync_op *so);
-		__find_best_valid_source_for_data(so);
 	}
 
 	// Check if not enough sources for restore
