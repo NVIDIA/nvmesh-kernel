@@ -4051,7 +4051,8 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 		}
 		__verify_raid_no_locks_no_dbits(sys, sgmnts);
 		for (sgmnt_idx = 0; sgmnt_idx < sgmnts->replicas; sgmnt_idx++) {				// ------------------------------------- Dbits recovery
-			u64 *cur_num_syncs = &dev->dp.sync_rsrcs.stats.num_dirty_bit_suspect;
+			struct nvmeibc_sync_stats *stats = &dev->dp.sync_rsrcs.stats;
+			u64 *cur_num_syncs = &stats->num_dirty_bit_suspect;
 			u64 before = *cur_num_syncs, count, after;
 			tomaSimulator_switchTopo(r1uuid(r1), sgmnts_mode[sgmnt_idx], sgmnts_mode[sgmnt_idx^1], SW_TOPO__WAIT_ACK);				// {RW,W} or {W,RW}
 			__verify_raid_no_locks_no_dbits(sys, sgmnts);
@@ -4259,22 +4260,36 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
 				warn_on_too_many_degraded = true;
 				ramDiskSimulator_verify_no_locks(ssd);
+				ramDiskSimulator_verify_no_dirty_bits(ssd);
 
 				for (rlba = 0; rlba < 2; rlba++) {
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_single_unk().all_bits);		// Unknown + convict will be turned on and then turned off
 				}
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
+				clientSimulator_wait_for_all_sync_ops(clnt);
 				ramDiskSimulator_verify_no_locks(ssd);
+				ramDiskSimulator_verify_no_dirty_bits(ssd);
 
+				stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
 				nvmeibc_debug_ram_unknown_dbits = false;	// Same as above but deliberate double unknowns in 1-degraded
 				for (rlba = 0; rlba < 2; rlba++) {
 					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_build_unk(-1,-1).all_bits);		// 2 Unknown + convict will be turned on and then turned off
 				}
 				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
 				nvmeibc_debug_ram_unknown_dbits = true;
-
-				ramDiskSimulator_verify_no_locks(ssd);
 				clientSimulator_wait_for_all_sync_ops(clnt);
+				ramDiskSimulator_verify_no_locks(ssd);
+				ramDiskSimulator_verify_no_dirty_bits(ssd);
+				BUG_ON(stats->num_full_blockset_ok != 2*(rws->length/LOCKSET_SLICES));	// Dconvict turn on on each blockset + dbit turn off
+
+				stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
+				ramDiskSimulator_lockStale(ssd, rws->dlba_start);	// Stale locks are auto solved by dirty convict turn on and thendbits rebuild turns them off
+				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
+				clientSimulator_wait_for_all_sync_ops(clnt);
+				ramDiskSimulator_verify_no_locks(ssd);
+				ramDiskSimulator_verify_no_dirty_bits(ssd);
+				BUG_ON(stats->num_full_blockset_ok != 2*(rws->length/LOCKSET_SLICES));	// Dconvict turn on on each blockset + dbit turn off
+
 				// DB Unknowns with convicts are not considered suspect (For 2 mirror)
 				after = *cur_num_syncs;
 				BUG_ON(after != before);
