@@ -43,7 +43,7 @@ enum dp_ec_dirty_bits_operation {
 	DBITS_OP_TURN_OFF,
 };
 
-struct dp_ec_restore_plan { // For ease of use
+struct dp_ec_restore_plan { 					// Equivalent to R1 index of cmd which is the source for data
 	const ulong parity_target_mask;				// Parities that have to be updated
 	const u32   invalid_sources;				// All non-readable segments (both writable and DEAD)
 	const roles_bmp_t md_to_calc;				// Which mds should be calced because the block is really going to be written and not just need it's data for parities calculation.

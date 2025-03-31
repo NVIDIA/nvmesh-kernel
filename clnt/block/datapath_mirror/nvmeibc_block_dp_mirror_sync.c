@@ -83,13 +83,13 @@ static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 			BUG_ON(!nvmeib_block_io_op_is_write(dst_cmd->iocmd->reqs1.op));
 		} else {
 			BUG_ON(dst_cmd->do_not_send);
-			dst_cmd->iocmd->reqs1.op = NVMEIB_BLOCK_IO_OP_WRITE;	// Could be write uncorrectable
+			dst_cmd->iocmd->reqs1.op = NVMEIB_BLOCK_IO_OP_WRITE;	// Could be write uncorrectable, from previous slice
 		}
 		__set_wr_cmd_ndb_to_read_cmd_ptr(dst_cmd, src_cmd);
 		count++;
 	}
-	_ND(t_00_swbtbs, "Using read source @SEG_DBG_UUID to sync blkset", src_cmd->ds->dbg_uuid);
-	BUG_ON(!count);
+	_ND(t_00_swbtbs, "Using read source @SEG_DBG_UUID to sync blkset, @INT write cmds", src_cmd->ds->dbg_uuid, count);
+	BUG_ON(!count);	// Why was the sync called if it has nothing to write
 	return count;
 }
 
@@ -299,12 +299,13 @@ static union nvmeib_lock_id __get_worst_stale_possible(struct recovery_sync_op *
 }
 
 static void __mark_read_to_dirty_w_seg_as_do_not_send(struct recovery_sync_op *so, const union nvmeibc_dbits_entry pre)
-{
+{	// Optimization, reads to W seg with dbit for them will be discarded as invalid sources, so just avoid the read.
 	u16 pre_dirty_bmp = nvmeibc_dbits_get_turn_on_bmp(&pre, &so->r1->calculated_data.topo_traits); // Use DBits from pre transaction to prevent reads
 	if (pre_dirty_bmp) { 																		 // If any dirty bits are set (including convicts) we should not read them
 		const int slice_start = so_get_owner_seg(so);
 		if (slice_start) // Convert from seg index in praid to roles within slice
 			pre_dirty_bmp = ror32_width(pre_dirty_bmp, slice_start, so->r1->replicas);
+		// Todo: Use __get_dirty_roles_bmp_pre_sync()
 		nvmeibc_sync_set_cmds_only_do_not_send_by_bmp(so, 0, n_read_cmds(so)-1, pre_dirty_bmp);		// Only set do not send to dirty segments (it could already be set if acm is NVMEIBTC_DS_MODE_W_IS_DIRTY
 	}
 }
