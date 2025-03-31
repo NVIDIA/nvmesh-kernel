@@ -291,6 +291,7 @@ bool nvmeibc_sync_sl_by_sl_is_current_slice_destroyed(const struct recovery_sync
 #define last_cmd(so)     (n_write_cmds((so))+n_read_cmds((so)))
 #define CMD_BYTES		NVMEIBC_SECTOR2BYTE(so->n_slices)
 
+void nvmeibc_sync_send_cur_stage_cmds( struct recovery_sync_op *so);
 void nvmeibc_sync_prepare_so_for_read( struct recovery_sync_op *so, const roles_bmp_t *read_bmp, const enum sync_op_stage_e next_stage);
 void nvmeibc_sync_send_all_read_cmds(  struct recovery_sync_op *so, const roles_bmp_t *read_bmp, const enum sync_op_stage_e next_stage);
 void nvmeibc_sync_prepare_so_for_write(struct recovery_sync_op *so, const roles_bmp_t write_bmp, const enum sync_op_stage_e next_stage);

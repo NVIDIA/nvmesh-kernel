@@ -68,8 +68,6 @@ enum cand_type {
 	ROLL_BWD           // Candidate should be roll backward.
 };
 
-/* Send all commands of current stage of sync*/
-void nvmeibc_sync_send_cur_stage_cmds(  struct recovery_sync_op *so);
 /* Get rv of current stage of sync */
 int  nvmeibcbdpec_get_rv_cur_stage_cmds(struct recovery_sync_op *so);
 /* PET describe for send_recovered_blkset request */

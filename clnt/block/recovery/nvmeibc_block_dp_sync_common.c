@@ -1749,7 +1749,6 @@ static void __nvmeibc_sync_send_cur_stage_cmds(struct recovery_sync_op *so)
 	so = NULL; /* BEWARE! sync operation already complete and free() here */
 }
 
-void nvmeibc_sync_send_cur_stage_cmds(struct recovery_sync_op *so);
 void nvmeibc_sync_send_cur_stage_cmds(struct recovery_sync_op *so)
 {
 	BLKCMP_SO_ASYNC_AWAIT(__nvmeibc_sync_send_cur_stage_cmds(so));
