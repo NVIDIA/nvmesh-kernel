@@ -322,8 +322,10 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 	const u16 dbits_on_topo_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 	struct nvmeibc_dbits_tx tx;
 	const bool has_unknown_dbits = (nvmeibc_dbits_get_n_unk(&pre, topo_traits) != 0);
+	const bool enable_store_dirty_bits_in_peristent_md = so->o->nd->dp.enable_store_dirty_bits_in_peristent_md;
 	if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB) {
 		BUG_ON(!has_stale_lock);	// Miss-use of the function. This is illegal because we never took the lock to know if it is stale or not
+		BUG_ON(enable_store_dirty_bits_in_peristent_md);	// Cannot use this sync as has to commit dbit to metadata
 		if (has_unknown_dbits) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
 			const u16 n_dead = hweight16(dbits_on_topo_bmp);
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);
@@ -353,9 +355,9 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 	}
 	nvmeibc_dbits_tx_apply(&pre, &tx);
 	rld->post.bits.dirty = tx.post.all_bits;
+	BUG_ON(enable_store_dirty_bits_in_peristent_md && (rld->post.bits.dirty != 0)); // First turn on dbits (much like done in HTR for ec), then do writes then turn off.
 	rld->post.bits.txid = __gen_mirror_txid_sync(so);
-	/* Todo: EC-5969: For 3-mirror, we have to first turn on dbits (much like done in HTR for ec), then do writes then turn off. For 2 mirror never happends coz we have stale-to-dirty-sync */
-	if ((rld->pre.all != rld->post.all))
+	if (rld->pre.all != rld->post.all)
 		mark_blockset_info_not_written(so);
 
 	// Same as EC: 'sync_stage_recov_analyze_binfo' stage

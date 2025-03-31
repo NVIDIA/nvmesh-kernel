@@ -305,15 +305,14 @@ static void __calc_new_binfo_dbits_turnoff(struct recovery_sync_op *so) {
 	}
 }
 
-static void __update_new_binfo_dbits_on_destroy(struct recovery_sync_op *so) {
+static void __update_new_binfo_dbits_on_destroy(struct recovery_sync_op *so, const sgmnts_bmp_t dead_bm) {
 	/* Turnon dbits on dead segs */
 	struct nvmeibc_dbits_tx tx;
 	struct nvmeibc_raid_leader_cmd_ctx *rld = &so->cmds->rld;
 	union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
-	const sgmnts_bmp_t dead_bm = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 	const int slice_start = so_get_owner_seg(so);
 	const roles_bmp_t dead_roles = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_on_mask);
-	BUG_ON(__is_raid1_mirror(so));
+	BUG_ON(__is_raid1_mirror(so));  // Currently not being used in mirror, needed for dbits in metadata
 
 	nvmeibc_dbits_tx_init_empty(&tx, &so->r1->calculated_data.topo_traits);
 	tx.action.db_turn_on_bmp = dead_bm;
@@ -343,6 +342,7 @@ static inline void __calc_execution_plan_for_dbits_turnoff(struct recovery_sync_
 	if (!nvmeibc_raid_is_ec(so->r1)) {
 		// W- Dbits were take care of in __mark_read_to_dirty_w_seg_as_do_not_send(). Now dbits are irrelevant, including unknowns that were not resolved
 		// All sent read cmds will be compared block by block, and write if they are different.
+		BUG();	// R1 does not support dbits in metadata
 		return;
 	} else { // No unknowns exist, EC resolves them in advance and R1 was already tested
 		const union nvmeibc_dbits_entry pre_db = { .all_bits = so->cmds->rld.pre.bits.dirty };
@@ -410,6 +410,7 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	bool is_first_call_to_analayze = (!so->is_sbs_mode); // At the first loop iteration always so->is_sbs_mode = false if calling twice will always be true
 	bool destroy_slice = false;
 	bool start_slice_by_slice = false;
+	const bool enable_store_dirty_bits_in_peristent_md = so->o->nd->dp.enable_store_dirty_bits_in_peristent_md;
 	// After using for checking readfails, clean the bad_sectors and do_not_send comp_codes and_rv
 	__dp_sync_no_write_hole_clean_bad_sector_and_do_not_send_comp_code_and_rv_from_read_cmds(so); // Clean up for SBS next stage (read RVs already analyzed) clean it also before return
 	so->nwhole_exec_plan.encountered_bad_sectors |= (readfail_bmp != 0);
@@ -420,28 +421,29 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 		so->nwhole_exec_plan.invalid_sources |= nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable_sync);
 	so->nwhole_exec_plan.first_write_bmp = so->nwhole_params.force_rebuild_bmp;  // Starting value - empty or specifically requested by caller
 	so->nwhole_exec_plan.second_write_bmp = 0;  // Starting value - empty, needed only if dbits exist in metadata
-	if (so->nwhole_params.must_turn_off_dbits && is_first_call_to_analayze && nvmeibc_raid_is_ec(so->r1))
-		__calc_new_binfo_dbits_turnoff(so); // Calc post ram dbits after turn off
+	if (so->nwhole_params.must_turn_off_dbits && is_first_call_to_analayze && enable_store_dirty_bits_in_peristent_md)
+		__calc_new_binfo_dbits_turnoff(so);
 
 	if (so->nwhole_params.dbits_turnon_bmp)
 		so->nwhole_exec_plan.first_write_bmp |= __get_writable_parities_bmp_for_dbits_metadata(so);
-	if (so->nwhole_params.must_turn_off_dbits)
+	if (so->nwhole_params.must_turn_off_dbits && enable_store_dirty_bits_in_peristent_md)
 		__calc_execution_plan_for_dbits_turnoff(so);
 	if (so->nwhole_params.must_fix_bad_sectors)
 		so->nwhole_exec_plan.first_write_bmp |= readfail_bmp;
 
-	{
+	{	// Check if we need to restore blocks (need to write something we could not read)
 		const roles_bmp_t dead_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dead);
 		const roles_bmp_t any_write = (so->nwhole_exec_plan.first_write_bmp | so->nwhole_exec_plan.second_write_bmp);
 		const bool wrong_usage_of_dead_seg = ((dead_bmp & (readfail_bmp | any_write | so->nwhole_params.force_rebuild_bmp)) != 0);
 		WARN(wrong_usage_of_dead_seg, "nvmeibc bug using data from dead seg! bmp{d=0x%x, w1=0x%x, w2=0x%x, rf=0x%x, force=0x%x}\n", dead_bmp, so->nwhole_exec_plan.first_write_bmp, so->nwhole_exec_plan.second_write_bmp, readfail_bmp, so->nwhole_params.force_rebuild_bmp);
-		if (any_write & writable_non_readable_ec) {	// EC: Missng data that we need to write. Must resotre it
+		if (any_write & writable_non_readable_ec) {	// EC: Missing data that we need to write. Must resotre it
 			should_restore = true;
 		} else {
-			should_restore = __is_raid1_mirror(so); // R1: comparing the blocks must always be done (this is the restore step and signle algorithm for all r1 problems)
+			should_restore = __is_raid1_mirror(so); // R1: comparing the blocks must always be done (this is the restore step and single algorithm for all r1 problems)
 		}
 	}
 
+	// Check if not enough sources for restore
 	if (should_restore && ((int)hweight32(so->nwhole_exec_plan.invalid_sources) > nvmeibc_raid1_get_protect_lvl(so->r1))) {
 		if (so->is_sbs_mode) { // Not enough sources destroy slice
 			const u32 slice_bit = nvmeibc_sync_sl_by_sl_get_bit_index(so);
@@ -453,16 +455,15 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	}
 
 	if (destroy_slice && nvmeibc_raid_is_ec(so->r1)) {	// Turn on dbits for dead segments in destroyed slice
-		sgmnts_bmp_t dead_bm = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
+		const sgmnts_bmp_t dead_bm = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 		if (!!dead_bm) { // on destroy need to turnon dbits on dead segs.
-			__update_new_binfo_dbits_on_destroy(so);
+			__update_new_binfo_dbits_on_destroy(so, dead_bm);
 			dp_sync_calc_new_binfo_dbits_turnon(so, dead_bm);  /* Prepares lock DB values for dbits turnon due to rollback */
 		}
 	}
 
-	if (so->nwhole_params.dbits_turnon_bmp) { // If we need to turn on DBits prepare MD before first write
-		__parity_md_dbits_turnon(so);
-		BUG_ON(__is_raid1_mirror(so));	// Only in regular EC
+	if ((so->nwhole_params.dbits_turnon_bmp) && (enable_store_dirty_bits_in_peristent_md)) {
+		__parity_md_dbits_turnon(so);	// prepare MD before first write
 	}
 	if (so->nwhole_params.must_scrub) {
 		WARN_ONCE((!!nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable)), "nvmeibt bug!, scrub isn't supported on degraded topo.\n");
@@ -638,7 +639,7 @@ _func_start:
 			// Equivallent to All locks taken - SBS index is 32 (more than possible)
 			__dump_nwhole_params(so);
 			WARN_ON(so->cmds->rld.post.all != so->cmds->rld.pre.all); // the sync assumes pre binfo is the most updated version, so making sure that no one setted post before.
-			WARN_ON(__is_raid1_mirror(so)); // mirror starts from stage: sync_stage_recov_no_write_hole_read_done
+			WARN_ON(__is_raid1_mirror(so)); // mirror starts from stage: sync_stage_recov_no_write_hole_read_done, needed for dbits in metadata
 			WARN_ON(should_blockset_info_commit(so));
 			__validate_nwhole_params(so);
 			__validate_write_cmds_do_not_send_vals(so);

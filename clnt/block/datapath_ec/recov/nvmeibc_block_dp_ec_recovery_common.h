@@ -23,7 +23,7 @@ static inline void dp_sync_calc_new_binfo_dbits_turnon(struct recovery_sync_op *
 	struct nvmeibc_raid_leader_cmd_ctx *rld = &so->cmds->rld;
 	struct nvmeibc_dbits_tx tx = {.action.db_turn_on_bmp = dbits_turnon_bmp, .action.num_degraded = nvmeibc_praid_get_num_deg_segs(so->r1)};
 	union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
-	BUG_ON(__is_raid1_mirror(so));  // Currently not being used in mirror
+	BUG_ON(__is_raid1_mirror(so));  // Currently not being used in mirror, needed for dbits in metadata
 	rld->post.bits.dirty = nvmeibc_dbits_tx_apply(&pre, &tx);
 	if (rld->post.bits.dirty != rld->pre.bits.dirty) {
 		union nvmeibc_dbits_entry post;
