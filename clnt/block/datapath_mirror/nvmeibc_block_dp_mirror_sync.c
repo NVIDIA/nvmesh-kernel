@@ -247,7 +247,7 @@ static inline bool __compare_read_cmds_data_for_stale_lock_write(struct recovery
 	return nvmeibc_are_metadatas_identical(&so->cmds[irc_valid], &so->cmds[irc]);
 }
 
-static int dp_mirror_stale_lock_write_preparation(struct recovery_sync_op *so)
+static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
 {	// first_write_bmp bits are turned on for read-fail, dirtibits to turn off, force rebuild, etc...
 	const int ir_valid = so->R1.valid_read_index;
 	int ir, n_cmds_to_do = 0;       // Calculate how many writes to do
@@ -287,13 +287,12 @@ static union nvmeib_lock_id __get_worst_stale_possible(struct recovery_sync_op *
 	int i;
 	for (i = 0; i < so->locks->n_siblings; i++) {				// Analyze all onwer locks, crucial for dual locks topology
 		const struct nvmeibc_cmd_lock *l = &so->locks[i];
-		if ((l->type == NVMEIBC_CMD_LOCK_OWNER) || (l->type == NVMEIBC_CMD_LOCK_COPY_OWNER)) {
-			holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp);
-			if (!((holder.all == 0ULL) || did_caller_of_so_took_this_lock(l))) { // is_read bit is irrelevant for R1: || (holder.bits.is_read))
-				WARN_WRONG_SKIP_CHECK(holder.bits.is_stale == 0, holder.all);
-				return holder;		// Found a stale lock
-			} // Else: No problem with this lock
-		}
+		BUG_ON(!((l->type == NVMEIBC_CMD_LOCK_OWNER) || (l->type == NVMEIBC_CMD_LOCK_COPY_OWNER)));
+		holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp);
+		if (!((holder.all == 0ULL) || did_caller_of_so_took_this_lock(l))) { // is_read bit is irrelevant for R1: || (holder.bits.is_read))
+			WARN_WRONG_SKIP_CHECK(holder.bits.is_stale == 0, holder.all);
+			return holder;		// Found a stale lock
+		} // Else: No problem with this lock
 	}
 	return holder;					// Not stale but result of last owner. Crucial for dual locks topology
 }
@@ -543,7 +542,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 /**************** No Write Hole Virtual Funcs *********************************/
 u32 dp_mirror_calc_scrub_writes(struct recovery_sync_op *so)
 {
-	const int n_writes = dp_mirror_stale_lock_write_preparation(so);
+	const int n_writes = dp_mirror_write_cmds_prepare(so);
 	const u32 wrong_slices_mask = (so->is_sbs_mode) ? (1U << nvmeibc_sync_sl_by_sl_is_get_current_slice_index(so)) : ~0U; // Todo: EC properly writes only problematic slices. R1 for simplicity writes the entire scatter gather so all slices are considered as bad
 	return n_writes ? wrong_slices_mask : 0;
 }
@@ -558,7 +557,7 @@ enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE dp_mirror_no_write_hole_fix(struct recovery
 	// result in a DI violation ("read uncommitted").
 	if (caller_op == NVMEIB_BLOCK_IO_OP_READ)
 		__copy_sync_read_to_orig_read_io_sgl(so);
-	n_writes = dp_mirror_stale_lock_write_preparation(so);
+	n_writes = dp_mirror_write_cmds_prepare(so);
 	if ((caller_op == NVMEIB_BLOCK_IO_OP_DPLIB_PROBLEM) && (n_writes > 0)) {
 		nvmeibc_mark_sync_wants_to_inject_caller_sgl(so->orig_rldr);	// Dont know for now if this is read or write, so mark this flag for caller
 	}

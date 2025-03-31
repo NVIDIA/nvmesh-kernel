@@ -475,7 +475,6 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	}
 
 	__dump_nwhole_exec_plan(so, should_restore, should_only_scrub, destroy_slice, start_slice_by_slice);
-	WARN((so->o->op == NVMEIB_BLOCK_IO_OP_RECOVER_STALE) && nvmeibc_raid_is_ec(so->r1), "Stale lock recovery is a no write hole solution for mirror only, however this raid has %d\n", so->r1->slice_size);
 	if (should_only_scrub) { // Currently we only verify data if there are no degaraded segs at all.
 		// If we can fix DBs from scrub context we should have mutated into DB sync (which is stronger than scrubbing, since we assume Ps are valid for restoration)
 		const u32 scrub_result = __scrub_blockset(so);
@@ -684,6 +683,7 @@ _func_start:
 
 		case sync_stage_recov_no_write_hole_read_done: {	// If any read failed that we cannot fix, end sync with error
 			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
+			WARN((so->o->op == NVMEIB_BLOCK_IO_OP_RECOVER_STALE) && nvmeibc_raid_is_ec(so->r1), "Stale lock recovery is a no write hole solution for mirror only, however this raid has %d\n", so->r1->slice_size);
 			if (unlikely(non_read_failure_error)) {  // If any read failed that we cannot fix, end sync with error
 				so->error = non_read_failure_error;
 			} else {// If only readfailure errors exist try to fix
