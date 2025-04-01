@@ -502,7 +502,9 @@ int dp_mirror_sync_prepare_op(struct recovery_sync_op *so)
 	if (is_op_sync_stale(op)||is_op_sync_no_wr_ho(op)) {
 		WARN_WRONG_SKIP_CHECK(so->assume_caller_holds_locks && (!is_op_sync_readfail(op)), 0);	// Only read-fail is the single 'sync' that can be triggered by IO when it holds locks
 		return __mirror_sync_data_prepare_op(so);
-	} else if (is_op_sync_commandless(op)) {
+	} else if (is_op_sync_commandless(op) || is_op_sync_commit_binfo(so->o->op)) {
+		// Unlike EC: Mirror syncs cannot mutate to one of the above, and we dont prepare commadns for them
+		// Note: so->n_slices may still be full blockset in special cases of 2 mirror, where we can solve full blockset without disk commands
 		return dp_sync_cmd_alloc_fill_rldr_only(so);
 	} else { BUG(); }
 	return 0;
@@ -512,9 +514,11 @@ int dp_mirror_sync_prepare_op(struct recovery_sync_op *so)
 
 void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 {
-	const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0);
-	const enum nvmeib_block_io_op op = so->o->op;
 	struct nvmeibc_block_command *rldr = so->cmds;
+	const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0);
+	const union nvmeib_lock_id holder = __get_worst_stale_possible(so);
+	const bool had_stale_lock = (holder.bits.is_stale);
+	const enum nvmeib_block_io_op op = so->o->op;
 	__ndump_operation(mirror_sync_execute, &so->o);
 	WARN(so->stage != sync_stage_recov_lo_all_taken, "so=" PRI_SO_NAME ", stage=%d\n", PRI_SO_NAME_ARGS(so), so->stage);
 	rldr->rld.post.all = rldr->rld.pre.all = binfo.all;	// Commit possibly broken binfo to rldr
@@ -525,9 +529,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		return nvmeibcbdpec_return_to_caller_sm(so);
 	// Note: we dont test nvmeib_do_i_care_about_broken_binfo(so) like EC because conditions below already split the cases
 	if (is_op_sync_stale(op)||is_op_sync_no_wr_ho(op)) {
-		const union nvmeib_lock_id holder = __get_worst_stale_possible(so);
 		enum sync_op_stage_e next_stage = sync_stage_recov_no_write_hole_read_done;
-		const bool had_stale_lock = (holder.bits.is_stale);
 		__mirror_sync_calc_post_binfo(so, &rldr->rld, had_stale_lock);
 		if (!__mirror_check_if_has_something_to_do_with_disks(so, &rldr->rld, had_stale_lock)) {
 			NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync do nothing", _T, goodpath_nvmeibc_syncs, _r1_sync_do_nothing, so->o->dbg_id);
@@ -564,6 +566,17 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 			__dump_bug_NVMESH3032(so, "clean");
 		}
 		return nvmeibcbdpec_return_to_caller_sm(so);	// Data is OK, nothing to do
+	} else if (is_op_sync_commit_binfo(op)) {
+		so->n_slices = 0;				// We never fix any slice (Used in 3+ mirror). Unlike EC where this sync can mutate and actually solve stale locks/bad sectors/etc
+		if (had_stale_lock) {			// If there is a stale lock, I cannot fix it, mutate and commit stale lock
+			so->o->op = NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE;
+			_NTSO(t02dpmseo, "mutated @BLOCK_IO_OP-->@BLOCK_IO_OP: has_stale=@BOOL_YN, has_unknowns=@BOOL_YN, pre_dbits=[@DBITS], post_dbits=[@DBITS], commit_binfo=@BOOL_YN", op, so->o->op, had_stale_lock, so->R1.is_dirty_suspect, rldr->rld.pre.bits.dirty, rldr->rld.post.bits.dirty, should_blockset_info_commit(so));
+			return dp_mirror_sync_execute_op(so);
+		} else {
+			mark_blockset_info_not_written(so);
+			_NTSO(t03dpmseo, "commit pre_dbits=[@DBITS], post_dbits=[@DBITS]", rldr->rld.pre.bits.dirty, rldr->rld.post.bits.dirty);
+			return nvmeibcbdpec_return_to_caller_sm(so);
+		}
 	} else if (op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) {
 		return dp_maintenance_execute_op(so);
 	} else {
