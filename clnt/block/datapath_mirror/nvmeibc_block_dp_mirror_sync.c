@@ -516,6 +516,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 {
 	struct nvmeibc_block_command *rldr = so->cmds;
 	const union nvmeib_blkset_info binfo = dp_locks_get_TxID_dbits(so->locks, 0);
+	const int num_p = so->r1->calculated_data.topo_traits.n_parities;
 	const union nvmeib_lock_id holder = __get_worst_stale_possible(so);
 	const bool had_stale_lock = (holder.bits.is_stale);
 	const enum nvmeib_block_io_op op = so->o->op;
@@ -579,6 +580,10 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 			return nvmeibcbdpec_return_to_caller_sm(so);
 		}
 	} else if (op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) {
+		if (had_stale_lock) {
+			if (num_p > 1)
+				so->n_slices = 0;	// For 2-mirror, dconvict turn on actually solves the stale lock. Think why? Not for 3+ Mirror. Turn on convict and leave stale lock
+		}
 		return dp_maintenance_execute_op(so);
 	} else {
 		WARN(true, "nvmeibc bug! so=" PRI_SO_NAME " unsupported\n", PRI_SO_NAME_ARGS(so));

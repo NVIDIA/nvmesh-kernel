@@ -6753,17 +6753,31 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 			if (true) { // Dirty convict tests (various dbits values combination)
 				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
 				const u16 dbits_vals[3] = {0x7 /*Invalid seg6*/, nvmeib_dbits_entry_single_unk().all_bits, nvmeib_dbits_entry_build_unk(-1,-1).all_bits};
+				const u64 n_total_blocksets_in_recovery = 2*(ownerSeg->length/LOCKSET_SLICES);	// Dconvict turn on on each blockset + dbit turn off
 				int d;
 				__clean_cur_dbits(db_vals);	// Remove all dbits before we transitino to next topo
 				for (d = 0; d < 3; d++ ){
 					db_vals[owner_seg_ind]->all_bits = dbits_vals[d];		// Inject invalid DBit into primary owner - consider replacing this
 					warn_on_too_many_degraded &= (d != 0);					// Invaliud dbit for non existing seg 6
+					stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
 					tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD_CONV);
 					warn_on_too_many_degraded = (n_deg <= 2);
 					BUG_ON(db_vals[owner_seg_ind]->all_bits);
+					clientSimulator_wait_for_all_sync_ops(client);
 					ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
 					ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
+					BUG_ON(stats->num_full_blockset_ok != n_total_blocksets_in_recovery);
 				}
+
+				// Stale locks are not auto solved by dirty convict turn on, but stale lock remains and then dbits rebuild turns it off
+				stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
+				ramDiskSimulator_lockStale(&curServer->ramDisk, io_blockset_ind);			// Put stale special value in the lock of the IO.
+				tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD_CONV);
+				clientSimulator_wait_for_all_sync_ops(client);
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
+				BUG_ON(stats->num_part_blockset_ok != 1);
+				BUG_ON(stats->num_full_blockset_ok != (n_total_blocksets_in_recovery - 1));
 				__verify_no_dbits(db_vals);
 			}
 
