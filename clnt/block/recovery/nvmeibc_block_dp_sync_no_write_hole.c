@@ -332,6 +332,14 @@ static roles_bmp_t __get_writable_parities_bmp_for_dbits_metadata(const struct r
 	return (roles_bmp_t)(nvmeibc_raid1_get_parities_bmp(so->r1) & writable_bmp);
 }
 
+static roles_bmp_t __get_dirty_roles_bmp_pre_sync(const struct recovery_sync_op *so, int slice_start)
+{
+	const union nvmeibc_dbits_entry pre_db = { .all_bits = so->cmds->rld.pre.bits.dirty };
+	const sgmnts_bmp_t pre_db_sgmnts_bmp = nvmeibc_dbits_get_turn_on_bmp(&pre_db, &so->r1->calculated_data.topo_traits);
+	return (roles_bmp_t)ror32_width(pre_db_sgmnts_bmp, slice_start, so->r1->replicas);
+	// const int slice = (so->is_sbs_mode ? so->slice_by_slice_index : -1);	// When dbit in metadata is implemented, use it to get per slice dbit and decide on validity of this read
+}
+
 static inline void __calc_execution_plan_for_dbits_turnoff(struct recovery_sync_op *so) {
 	const int slice_start = so_get_owner_seg(so);
 	roles_bmp_t fixable_binfo_dbits_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_off_mask);
@@ -342,9 +350,7 @@ static inline void __calc_execution_plan_for_dbits_turnoff(struct recovery_sync_
 		BUG();	// R1 does not support dbits in metadata
 		return;
 	} else { // No unknowns exist, EC resolves them in advance and R1 was already tested
-		const union nvmeibc_dbits_entry pre_db = { .all_bits = so->cmds->rld.pre.bits.dirty };
-		const sgmnts_bmp_t pre_db_sgmnts_bmp = nvmeibc_dbits_get_turn_on_bmp(&pre_db, &so->r1->calculated_data.topo_traits);
-		const roles_bmp_t pre_db_bmp =	ror32_width(pre_db_sgmnts_bmp, slice_start, so->r1->replicas);
+		const roles_bmp_t pre_db_bmp = __get_dirty_roles_bmp_pre_sync(so, slice_start);
 		fixable_binfo_dbits_bmp &= pre_db_bmp;		// Turn off only dbits that are indeed turned on, coz no unknowns exist
 	}
 	if (fixable_binfo_dbits_bmp) {  // Add writable parities.
@@ -385,6 +391,13 @@ static inline u32 __scrub_blockset(struct recovery_sync_op *so) {
 	}
 }
 
+static roles_bmp_t __calc_invalid_source(const struct recovery_sync_op *so, const roles_bmp_t readfail_bmp, const int slice_start)
+{	// Todo: Here use per slice info in metadata / dbits-binfo if there is no dirty convict
+	if (nvmeibc_raid_is_ec(so->r1) || (!dp_sync_does_see_clean_ram_dbits(so)))		// EC does not use 'W' for read, R1 cant use it if dbit exists
+		return readfail_bmp | nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable);
+	else
+		return readfail_bmp | nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable_sync);
+}
 
 bool ec_8005_enable_warning = true; //will be used by um simulator to disable warning
 /* Read phase analysis:
@@ -411,11 +424,7 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	// After using for checking readfails, clean the bad_sectors and do_not_send comp_codes and_rv
 	__dp_sync_no_write_hole_clean_bad_sector_and_do_not_send_comp_code_and_rv_from_read_cmds(so); // Clean up for SBS next stage (read RVs already analyzed) clean it also before return
 	so->nwhole_exec_plan.encountered_bad_sectors |= (readfail_bmp != 0);
-	so->nwhole_exec_plan.invalid_sources = readfail_bmp;
-	if (nvmeibc_raid_is_ec(so->r1) || (!dp_sync_does_see_clean_ram_dbits(so)))		// EC does not use 'W' for read, R1 cant use it if dbit exists
-		so->nwhole_exec_plan.invalid_sources |= nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable);
-	else
-		so->nwhole_exec_plan.invalid_sources |= nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable_sync);
+	so->nwhole_exec_plan.invalid_sources = __calc_invalid_source(so, readfail_bmp, slice_start);
 	so->nwhole_exec_plan.first_write_bmp = so->nwhole_params.force_rebuild_bmp;  // Starting value - empty or specifically requested by caller
 	so->nwhole_exec_plan.second_write_bmp = 0;  // Starting value - empty, needed only if dbits exist in metadata
 	if (enable_store_dirty_bits_in_peristent_md) {
