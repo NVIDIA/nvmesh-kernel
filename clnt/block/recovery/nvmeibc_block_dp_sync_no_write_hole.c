@@ -327,12 +327,9 @@ static void __update_new_binfo_dbits_on_destroy(struct recovery_sync_op *so, con
 /********************** Mirror DB Inspection - TBD ***************************/
 static roles_bmp_t __get_writable_parities_bmp_for_dbits_metadata(const struct recovery_sync_op *so)
 {	// We need that only if parities are actually storing dbits on disk. Update those parities when dbits are changed (turn on / off)
-	if (nvmeibc_raid_is_ec(so->r1)) {
-		const int slice_start = so_get_owner_seg(so);
-		const roles_bmp_t writable_bmp = nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, dead);
-		return (roles_bmp_t)(nvmeibc_raid1_get_parities_bmp(so->r1) & writable_bmp);
-	}
-	return (roles_bmp_t)0;	// R1, QLC dont store dbits in metadata of parities
+	const int slice_start = so_get_owner_seg(so);
+	const roles_bmp_t writable_bmp = nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, dead);
+	return (roles_bmp_t)(nvmeibc_raid1_get_parities_bmp(so->r1) & writable_bmp);
 }
 
 static inline void __calc_execution_plan_for_dbits_turnoff(struct recovery_sync_op *so) {
