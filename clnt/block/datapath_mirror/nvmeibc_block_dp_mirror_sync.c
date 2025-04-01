@@ -532,7 +532,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		enum sync_op_stage_e next_stage = sync_stage_recov_no_write_hole_read_done;
 		__mirror_sync_calc_post_binfo(so, &rldr->rld, had_stale_lock);
 		if (!__mirror_check_if_has_something_to_do_with_disks(so, &rldr->rld, had_stale_lock)) {
-			NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync do nothing", _T, goodpath_nvmeibc_syncs, _r1_sync_do_nothing, so->o->dbg_id);
+			_NTSO(t00dpmseo, "Sync skip no_whole algorithm, op=@BLOCK_IO_OP, pre_dbits=[@DBITS], post_dbits=[@DBITS], commit_binfo=@BOOL_YN", op, rldr->rld.pre.bits.dirty, rldr->rld.post.bits.dirty, should_blockset_info_commit(so));
 			nvmeibc_sync_set_cmds_only_do_not_send_by_bmp(so, 0, rldr->ncmds - 1, (~0));        // Do not send any commands, Not reads and not writes
 			next_stage = sync_stage_recov_write_cmds_done;
 		}
@@ -565,6 +565,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 			mark_blockset_info_not_written(so); // Explicit mark_blockset_info_not_written to commit empty dirty bits and fix the problem in binfo
 			__dump_bug_NVMESH3032(so, "clean");
 		}
+		_NTSO(t01dpmseo, "COMMIT_STALE: has_stale=@BOOL_YN, has_unknowns=@BOOL_YN, pre_dbits=[@DBITS], post_dbits=[@DBITS], commit_binfo=@BOOL_YN", had_stale_lock, so->R1.is_dirty_suspect, rldr->rld.pre.bits.dirty, rldr->rld.post.bits.dirty, should_blockset_info_commit(so));
 		return nvmeibcbdpec_return_to_caller_sm(so);	// Data is OK, nothing to do
 	} else if (is_op_sync_commit_binfo(op)) {
 		so->n_slices = 0;				// We never fix any slice (Used in 3+ mirror). Unlike EC where this sync can mutate and actually solve stale locks/bad sectors/etc
