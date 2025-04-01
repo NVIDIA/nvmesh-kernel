@@ -256,7 +256,6 @@ static void nvmeibc_sync_sl_by_sl_next(struct recovery_sync_op *so, const enum s
 }
 
 /******************************* Generic funcs *******************************/
-
 static inline struct dp_ec_restore_plan prepare_plan_for_parity_md_dbits_change(const struct recovery_sync_op *so, const enum dp_ec_dirty_bits_operation db_op) {
 	const int n_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 	const u16 slice_size = so->r1->slice_size;
@@ -272,22 +271,19 @@ static inline void __parity_md_dbits_turnoff(struct recovery_sync_op *so) {
 	prepare_parity_md(so, prepare_plan_for_parity_md_dbits_change(so, DBITS_OP_TURN_OFF));
 }
 
-
 /* Prepares lock DB values for dbits turnoff */
 static void __calc_new_binfo_dbits_turnoff(struct recovery_sync_op *so) {
-	BUG_ON(__is_raid1_mirror(so));
+	BUG_ON(__is_raid1_mirror(so));  // Currently not being used in mirror, needed for dbits in metadata
 	BUG_ON(!so->nwhole_params.must_turn_off_dbits); // Today no_whole sync never turn off dbits unless must_turn_off_dbits is ture, if changed in the future this bug_on() can be removed.
 	if (dp_ec_can_fix_dbits(so->cmds)) {
 		struct nvmeibc_raid_leader_cmd_ctx *rld = &so->cmds->rld;
-		sgmnts_bmp_t turn_on_dbit_bmp = 0;
-		sgmnts_bmp_t turn_off_dbit_bmp = 0;
 		struct nvmeibc_dbits_tx tx;
 		struct nvmeibc_dbits_tx tx_turnon;
 		union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
 
 		/* EC-4697: Dead parities become dirty, because parities contain dirty which is essential data, must be updated */
-		turn_on_dbit_bmp = nvmeibc_calc_db_on_parities_segs(so->cmds);
-		turn_off_dbit_bmp = (nvmeibc_mssa_calc_full_blockset_write_bmp(so->o->mssa) & nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask));
+		const sgmnts_bmp_t turn_on_dbit_bmp = nvmeibc_calc_db_on_parities_segs(so->cmds);
+		const sgmnts_bmp_t turn_off_dbit_bmp = (nvmeibc_mssa_calc_full_blockset_write_bmp(so->o->mssa) & nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask));
 
 		nvmeibc_dbits_tx_init_by_bmp(&tx_turnon, &so->r1->calculated_data.topo_traits, turn_on_dbit_bmp, 0 /* turn_off_dbit_bmp */, 0 /* turn_on_conv_bmp */);
 		nvmeibc_dbits_tx_init_by_bmp(&tx, &so->r1->calculated_data.topo_traits, turn_on_dbit_bmp, turn_off_dbit_bmp, 0 /* turn_on_conv_bmp */);
