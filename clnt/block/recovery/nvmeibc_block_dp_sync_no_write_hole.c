@@ -393,10 +393,12 @@ static inline u32 __scrub_blockset(struct recovery_sync_op *so) {
 
 static roles_bmp_t __calc_invalid_source(const struct recovery_sync_op *so, const roles_bmp_t readfail_bmp, const int slice_start)
 {	// Todo: Here use per slice info in metadata / dbits-binfo if there is no dirty convict
-	if (nvmeibc_raid_is_ec(so->r1) || (!dp_sync_does_see_clean_ram_dbits(so)))		// EC does not use 'W' for read, R1 cant use it if dbit exists
+	const roles_bmp_t pre_db_bmp = __get_dirty_roles_bmp_pre_sync(so, slice_start);
+	const roles_bmp_t invalid_by_topology = nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable_sync);
+	if (nvmeibc_raid_is_ec(so->r1) || (so->R1.is_dirty_suspect))		// Todo, remove this test for EC. Historically, EC still does not use 'W' for read, even if there is no dbit for it
 		return readfail_bmp | nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable);
-	else
-		return readfail_bmp | nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable_sync);
+	else // In R1 we do not resolve unknowns as optimization to favour reads over writes.
+		return readfail_bmp | invalid_by_topology | pre_db_bmp;	// This is the correct calculation
 }
 
 bool ec_8005_enable_warning = true; //will be used by um simulator to disable warning
