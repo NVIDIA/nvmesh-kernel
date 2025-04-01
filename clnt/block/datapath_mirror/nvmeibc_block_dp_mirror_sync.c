@@ -377,6 +377,9 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		__mark_read_to_dirty_w_seg_as_do_not_send(so, pre);	// unknown dbits may exist in pre, we did not resolve them to send read 'W' seg anyways to potentially avoid writes!
 	}
 	nvmeibc_dbits_tx_apply(&pre, &tx);
+	if ((so->o->op != NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB) && (so->n_slices == LOCKSET_SLICES)) {
+		BUG_ON(nvmeibc_dbits_get_n_unk(&tx.post, topo_traits) != 0);	// All other full syncs resolve unknown in to 'post'
+	}
 	rld->post.bits.dirty = tx.post.all_bits;
 	BUG_ON(enable_store_dirty_bits_in_peristent_md && (rld->post.bits.dirty != 0)); // First turn on dbits (much like done in HTR for ec), then do writes then turn off.
 	rld->post.bits.txid = __gen_mirror_txid_sync(so);
