@@ -14,7 +14,7 @@
 /***************** Common for READ+WRITE sync's (i.e: No whole, HTR, cold, txid-wraparound)  *********************/
 bool dp_sync_is_slice_neverwritten( const struct recovery_sync_op *so, u64 lba, const roles_bmp_t readable_segs, char debug_reason); // debug_reason = 'D' - destroy slice, 'R' - Reconstruct, 'W' - txid wraparound
 int  dp_sync_get_any_non_readfail_errors( struct recovery_sync_op *so);
-u32  dp_sync_gen_read_fail_bit_mask(      struct recovery_sync_op *so);
+u32  dp_sync_gen_read_fail_bit_mask(const struct recovery_sync_op *so);
 void dp_sync_notify_toma_on_write_failure(struct recovery_sync_op *so);
 bool dp_sync_verify_binfo_is_legal(          struct recovery_sync_op *so, const union nvmeib_blkset_info binfo);
 

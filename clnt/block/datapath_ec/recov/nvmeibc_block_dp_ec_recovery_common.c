@@ -509,50 +509,14 @@ int dp_sync_get_any_non_readfail_errors(struct recovery_sync_op *so)
 	return rv;
 }
 
-static bool dp_sync_cmd_is_valid_read_source(const struct recovery_sync_op *so, const int src)
-{	// Note If this segment is not readable (for any reason: topo / dirtybit) then __mark_read_to_dirty_w_seg_as_do_not_send() would make it do not send.
-	const struct nvmeibc_block_command *c = &so->cmds[src];
-	const bool cmd_succeeded = ((c->o_rv == 0) && (!c->do_not_send));
-	//const int slice = (so->is_sbs_mode ? so->slice_by_slice_index : -1);	// When dbit in metadata is implemented, use it to get per slice dbit and decide on validity of this read
-	if (!cmd_succeeded)
-		return false;						// Read cmd failed.
-	if (nvmeibc_is_readable(c->ds))
-		return true;
-	if (c->ds->toma_acm == NVMEIBTC_DS_MODE_W) {
-		// If dirty suspect or real dirtybit, we read this segment to compare to RW and potentially avoid write if they are identical, but this cannot be source of truth, only compared to source of truth
-		return dp_sync_does_see_clean_ram_dbits(so);			// Todo, for N-mirror, test if this specifc segment has dbits (not dbits in general) || so->R1.is_dirty_suspect
-	}
-	return false;
-}
-
-// TODO: make virtual and merge with EC-2518
-static void __find_valid_source_for_r1(struct recovery_sync_op *so)
-{
-	int ir;
-	so->R1.valid_read_index = -1;
-	for (ir = 0; ir < n_read_cmds(so); ir++) {
-		if (dp_sync_cmd_is_valid_read_source(so, ir)) {
-			so->R1.valid_read_index = ir;
-			break;
-		}
-	}
-}
-
-/* Generates the readfail bitmask for all reads for EC
-   Sets valid read index for Mirror */
-u32 dp_sync_gen_read_fail_bit_mask(struct recovery_sync_op *so)
-{
-	//TODO(EC-2518): the function name is misleading; I propose to split it to two with and without side effect , Daniel: Or unite it with function below to form executino plan
-	//               also it looks like this function should be virtual
-	struct nvmeibc_block_command *cmds = so->cmds;
-	int c;
-	u32 bit_mask = 0, bit;
-	if (__is_raid1_mirror(so)) { //TODO Follow integration in EC-2518
-		__find_valid_source_for_r1(so);
-	}
-	for (c = so->last_cmd + 1 - so->n_cmds, bit = 1; c <= so->last_cmd; c++, bit <<= 1) { // Search for read fail seg
+u32 dp_sync_gen_read_fail_bit_mask(const struct recovery_sync_op *so)
+{	// Generates the readfail bitmask for all read cmds
+	const struct nvmeibc_block_command *cmds = so->cmds;
+	int c, n_reads = n_read_cmds(so);
+	u32 bit_mask = 0;
+	for (c = 0; c < n_reads; c++) { // Search for read fail seg
 		if (!is_transient_disk_error(cmds[c].o_rv)) { // Found one bad sector
-			bit_mask |= bit;
+			bit_mask |= (1 << c);
 		} else if (unlikely(cmds[c].o_rv == -ENXIO) && cmds[c].do_not_send) { // Do Not Send
 			continue;
 		} else if (unlikely(cmds[c].o_rv)) { // Some other error
