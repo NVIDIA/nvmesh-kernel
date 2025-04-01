@@ -26,6 +26,11 @@ static bool dp_sync_cmd_is_valid_read_source(const struct recovery_sync_op *so, 
 			__data_could_be_read(c);
 }
 
+static bool __cant_trust_data(const struct recovery_sync_op *so, const int i)
+{
+	return !!(so->nwhole_exec_plan.first_write_bmp & (1 << i));	// First_write_bmp bits represent: read-fail, dbits on 'W' segs, force rebuild, etc...
+}
+
 static void __inject_debug_di_with_sync_info(struct recovery_sync_op *so, int n_cmds_to_do)
 {
 	if (so->cmds->o->nd->dp.enable_di_debug_mode) {
@@ -134,7 +139,6 @@ static void __set_write_buffer_to_bad_sector(struct recovery_sync_op *so)
 {	// Used only in slice by slice mode, because we dont destroy full data before attempt to fix each slice idependantly
 	int i;
 	const int src = __find_best_invalid_source_for_data(so);			// All sources are invalid, we are going to destroy the slice, but if any, even wrong block exists, preserve it
-	const struct nvmeibc_block_command *src_cmd = &so->cmds[src];
 	_NTSO(t_01_swbtbs, "No valid source. Detroying slice @SBS_INDEX, by cmd[@INT]", so->slice_by_slice_index, src);
 	for (i = 0; i < n_write_cmds(so); ++i ) {
 		struct nvmeibc_block_command *dst_cmd = &so->cmds[n_read_cmds(so) + i];
@@ -145,7 +149,7 @@ static void __set_write_buffer_to_bad_sector(struct recovery_sync_op *so)
 			continue;
 		WARN_ON(!nvmeib_block_io_op_is_write(req->op));						// Cleanup of previous iteration should have put it as 'write'
 		WARN_ON(dst_cmd->nlbas != 1);
-		__set_wr_cmd_ndb_to_read_cmd_ptr(dst_cmd, src_cmd);					// Direct write to use actual data block
+		__set_wr_cmd_ndb_to_read_cmd_ptr(dst_cmd, &so->cmds[src]);			// Direct write to use actual data block
 		if (nvmeibc_raid1_destroy_force_physical_bad_sector_in_sync || !nvmeibc_is_mirror_md_enabled(dst_cmd)) { // Write physical bad sector as we cant write logical one
 			req->op = NVMEIB_BLOCK_IO_OP_WRITE_UNCOR;						// Change from Write to write-Uncorrectable
 		} else {
@@ -268,7 +272,7 @@ static inline bool __compare_read_cmds_data_for_mirror_write(struct recovery_syn
 }
 
 static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
-{	// first_write_bmp bits are turned on for read-fail, dirtibits to turn off, force rebuild, etc...
+{
 	const int ir_valid = so->R1.valid_read_index;
 	int ir, n_cmds_to_do = 0;       // Calculate how many writes to do
 	WARN(so->cmds[ir_valid].o_rv != 0, "nvmeibc bug! Read at valid_read_index failed???");
@@ -278,7 +282,7 @@ static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
 		const int iw = n_read_cmds(so) + ir;
 		if (__data_could_not_be_read(read_cmd)) {				// we can still do sync operation as if. this read yielded a different result from valid RW src
 			_ND(tr_00_r1_stale_cmp, "Sync: Ignorring read cmd err: rv=@O_RV", read_cmd->o_rv);
-		} else if (so->nwhole_exec_plan.first_write_bmp & (1 << ir)) {
+		} else if (__cant_trust_data(so, ir)) {
 			_ND(tr_01_r1_stale_cmp, "Sync: Ignorring read cmd due to bad sector");
 		} else if (__compare_read_cmds_data_for_mirror_write(so, ir)) { // Either data is identical to data in valid read, or this is the valid read
 			so->cmds[iw].do_not_send = true; // Skip this write
