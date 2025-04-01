@@ -423,10 +423,6 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	bool destroy_slice = false;
 	bool start_slice_by_slice = false;
 	const bool enable_store_dirty_bits_in_peristent_md = so->o->nd->dp.enable_store_dirty_bits_in_peristent_md;
-	if (__is_raid1_mirror(so)) {
-		extern void __find_valid_source_for_r1(struct recovery_sync_op *so);
-		__find_valid_source_for_r1(so);
-	}
 	// After using for checking readfails, clean the bad_sectors and do_not_send comp_codes and_rv
 	__dp_sync_no_write_hole_clean_bad_sector_and_do_not_send_comp_code_and_rv_from_read_cmds(so); // Clean up for SBS next stage (read RVs already analyzed) clean it also before return
 	so->nwhole_exec_plan.encountered_bad_sectors |= (readfail_bmp != 0);
@@ -454,6 +450,10 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 		} else {
 			should_restore = __is_raid1_mirror(so); // R1: comparing the blocks must always be done (this is the restore step and single algorithm for all r1 problems)
 		}
+	}
+	if (__is_raid1_mirror(so)) {
+		extern void __find_best_valid_source_for_data(struct recovery_sync_op *so);
+		__find_best_valid_source_for_data(so);
 	}
 
 	// Check if not enough sources for restore

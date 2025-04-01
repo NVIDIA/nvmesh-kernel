@@ -797,12 +797,6 @@ static void __cleanup_after_all_binfo_writes(struct recovery_sync_op *so)
 		mark_blockset_info_written(so);
 }
 
-bool dp_sync_does_see_clean_ram_dbits(const struct recovery_sync_op *so)
-{
-	const union nvmeibc_dbits_entry pre = {.all_bits = so->cmds->rld.pre.bits.dirty};
-	return (pre.all_bits == zero_dbits.all_bits);
-}
-
 bool dp_sync_verify_binfo_is_legal(struct recovery_sync_op *so, const union nvmeib_blkset_info binfo);
 void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 	struct nvmeibc_cmd_lock *ow_l = &so->locks[0];

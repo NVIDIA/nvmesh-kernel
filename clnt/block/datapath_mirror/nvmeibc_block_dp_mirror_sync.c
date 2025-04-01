@@ -90,34 +90,28 @@ static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 static bool dp_sync_cmd_is_valid_read_source(const struct recovery_sync_op *so, const int src)
 {	// Note If this segment is not readable (for any reason: topo / dirtybit) then __mark_read_to_dirty_w_seg_as_do_not_send() would make it do not send.
 	const struct nvmeibc_block_command *c = &so->cmds[src];
-	const bool cmd_succeeded = ((c->o_rv == 0) && (!c->do_not_send));
-	//const int slice = (so->is_sbs_mode ? so->slice_by_slice_index : -1);	// When dbit in metadata is implemented, use it to get per slice dbit and decide on validity of this read
-	if (!cmd_succeeded)
-		return false;						// Read cmd failed.
-	if (nvmeibc_is_readable(c->ds))
-		return true;
-	if (c->ds->toma_acm == NVMEIBTC_DS_MODE_W) {
-		// If dirty suspect or real dirtybit, we read this segment to compare to RW and potentially avoid write if they are identical, but this cannot be source of truth, only compared to source of truth
-		return dp_sync_does_see_clean_ram_dbits(so);			// Todo, for N-mirror, test if this specifc segment has dbits (not dbits in general) || so->R1.is_dirty_suspect
-	}
-	return false;
+	if (so->nwhole_exec_plan.invalid_sources & (1 << src))
+		return false;
+	if (c->do_not_send || (c->o_rv != 0))
+		return false;						// Read cmd to valid source failed.
+	return true;
 }
 
-// TODO: make virtual and merge with EC-2518
-void __find_valid_source_for_r1(struct recovery_sync_op *so)
+void __find_best_valid_source_for_data(struct recovery_sync_op *so);
+void __find_best_valid_source_for_data(struct recovery_sync_op *so)
 {
-	int ir;
+	int i;
 	so->R1.valid_read_index = -1;
-	for (ir = 0; ir < n_read_cmds(so); ir++) {
-		if (dp_sync_cmd_is_valid_read_source(so, ir)) {
-			so->R1.valid_read_index = ir;
-			break;
-		}
+	for (i = 0; i < n_read_cmds(so); i++) {
+		if (dp_sync_cmd_is_valid_read_source(so, i)) {
+			so->R1.valid_read_index = i;
+			return;
+		}	// else cmds[i] data cannot serve as source, but it might be compared to source to avoid write
 	}
 }
 
 static inline int __find_best_invalid_source_for_data(struct recovery_sync_op *so)
-{ // Iteration on read cmds like __find_valid_source_for_r1
+{
 	int i;
 	for (i = 0; i < n_read_cmds(so); i++) {								// Even if edic is wrong / logical bad sector, select this
 		struct nvmeibc_block_command *cmd = &so->cmds[i];
