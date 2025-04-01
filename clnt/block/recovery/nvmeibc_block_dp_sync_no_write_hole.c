@@ -418,13 +418,14 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 		so->nwhole_exec_plan.invalid_sources |= nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable_sync);
 	so->nwhole_exec_plan.first_write_bmp = so->nwhole_params.force_rebuild_bmp;  // Starting value - empty or specifically requested by caller
 	so->nwhole_exec_plan.second_write_bmp = 0;  // Starting value - empty, needed only if dbits exist in metadata
-	if (so->nwhole_params.must_turn_off_dbits && is_first_call_to_analayze && enable_store_dirty_bits_in_peristent_md)
-		__calc_new_binfo_dbits_turnoff(so);
-
-	if (so->nwhole_params.dbits_turnon_bmp)
-		so->nwhole_exec_plan.first_write_bmp |= __get_writable_parities_bmp_for_dbits_metadata(so);
-	if (so->nwhole_params.must_turn_off_dbits && enable_store_dirty_bits_in_peristent_md)
-		__calc_execution_plan_for_dbits_turnoff(so);
+	if (enable_store_dirty_bits_in_peristent_md) {
+		if (so->nwhole_params.must_turn_off_dbits && is_first_call_to_analayze)
+			__calc_new_binfo_dbits_turnoff(so);
+		if (so->nwhole_params.dbits_turnon_bmp)
+			so->nwhole_exec_plan.first_write_bmp |= __get_writable_parities_bmp_for_dbits_metadata(so);
+		if (so->nwhole_params.must_turn_off_dbits)
+			__calc_execution_plan_for_dbits_turnoff(so);
+	}
 	if (so->nwhole_params.must_fix_bad_sectors)
 		so->nwhole_exec_plan.first_write_bmp |= readfail_bmp;
 
