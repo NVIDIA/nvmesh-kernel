@@ -3546,8 +3546,10 @@ static int __append_raid1_reconf(struct nvmeibc_raid1 *old_r1, struct nvmeibc_ra
 {
 	int res, si, rv = 0;
 	struct nvmeibc_disk_segment *seg;
-	int mirroring = old_r1->replicas * 0x10 + new_r1->replicas;
-	switch (mirroring) { /*EC-1473: Fix for non 2 segs,3-mirroring*/
+	const int max_replicas = MAX(old_r1->replicas, new_r1->replicas);
+	const int mirroring = old_r1->replicas * 0x10 + new_r1->replicas;
+	BUG_ON(max_replicas >= 3);	// Not implemented yet.
+	switch (mirroring) {
 		case 0x12: /* Upgrade */
 			raid1_for_each_seg(new_r1, seg, si){
 				if (strncmp(old_r1->segments[0].uuid, seg->uuid, UUID_LEN)){
