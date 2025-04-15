@@ -11,7 +11,7 @@
 struct jdr;
 
 //describes raid topology
-struct topology_sgmnts_t{
+struct topology_sgmnts_t {
 	enum NVMEIBTC_DS_MODE modes[N_MAX_RAID_SLICE_LEN];
 	//in the worst case we have 2 degraded segments in a topology, so instead of searching for them
 	//a shortcuts are provided; If there is no dgrd sgmnts, the variables content is undefined
@@ -21,48 +21,18 @@ struct topology_sgmnts_t{
 };
 
 void jdr_write_topology_sgmnts(struct jdr* jdr, char const* name, struct topology_sgmnts_t* topology_sgmnts);
-// DEAD
-static inline int num_dead(const struct topology_sgmnts_t* topo) {
-	BUG_ON(topo == NULL);
-	return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_DEAD)	+ (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_DEAD);
+
+static inline int topology_sgmnts_num_non_readable(const struct topology_sgmnts_t* t) {
+	return  !nvmeibc_is_readable_acm(t->dgrd_modes[0]) + !nvmeibc_is_readable_acm(t->dgrd_modes[1]);
 }
 
-// W
-static inline int num_wseg(const struct topology_sgmnts_t* topo) {
-	BUG_ON(topo == NULL);
-	return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_W) + (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_W);
-}
-
-// W-
-static inline int num_w_dirty(const struct topology_sgmnts_t* topo) {
-	BUG_ON(topo == NULL);
-	return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_W_IS_DIRTY) + (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_W_IS_DIRTY);
-}
-
-// Move next dgrd info up if seg0 is W+, so we can better generate correct dbits. We don't care if both segs are W+, as it is considered non degraded and we generate only clean dbits.
-static inline void skip_first_w_no_dirty(struct topology_sgmnts_t* in_out_topo) {
-	BUG_ON(in_out_topo == NULL);
-	if (in_out_topo->dgrd_modes[0] == NVMEIBTC_DS_MODE_W_NO_DIRTY) {
-		in_out_topo->dgrd_modes[0] = in_out_topo->dgrd_modes[1];
-		in_out_topo->dgrd_sgmnts[0] = in_out_topo->dgrd_sgmnts[1];
-	}
-}
-
-#define topo_enum_fmt "{Topo: Seg[@SI]=@STR Seg[@SI]=@STR}"
-#define topo_enum_args(s)                                                                                              \
-	(s)->curr.dgrd_sgmnts[0], nvmeibt_client_topo_seg_access_mode_to_str((s)->curr.dgrd_modes[0]),                    \
-	(s)->curr.dgrd_sgmnts[1], nvmeibt_client_topo_seg_access_mode_to_str((s)->curr.dgrd_modes[1])
-
-static const struct topology_sgmnts_t perfect_topo_sgmnts = {
-	.modes = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW},
-	.dgrd_sgmnts = {0,1},
-	.dgrd_modes = {NVMEIBTC_DS_MODE_RW,NVMEIBTC_DS_MODE_RW}
-};
+static inline int topology_sgmnts_num_dead(   const struct topology_sgmnts_t* topo) { return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_DEAD)       + (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_DEAD); }
+static inline int topology_sgmnts_num_w_dirty(const struct topology_sgmnts_t* topo) { return (topo->dgrd_modes[0]==NVMEIBTC_DS_MODE_W_IS_DIRTY) + (topo->dgrd_modes[1]==NVMEIBTC_DS_MODE_W_IS_DIRTY); }
 
 //switching topology is an expensive operation
 //so we should prefer to switch raid topology and run maximum amount of tests under it
 //the tests themself prefer to consume the topology by roles
-struct topology_roles_t{
+struct topology_roles_t {
 	enum NVMEIBTC_DS_MODE modes[N_MAX_RAID_SLICE_LEN];
 	//if there is a dead sgmnt it will be in the first element, the second one may be also dead
 	raid_role_t dgrd_roles[2];
