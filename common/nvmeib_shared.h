@@ -325,20 +325,6 @@ static inline bool nvmeibc_dbits_has_unknowns(const union nvmeibc_dbits_entry *e
 	return false;
 }
 
-static inline bool nvmeibc_dbits_is_seg_dirty(const union nvmeibc_dbits_entry *e, const u16 seg_idx) {
-	if (nvmeibc_dbits_entry_is_global_mode(e))
-		return nvmeibc_dbits_has_unknowns(e)||(e->bsmod.dead0 == seg_idx+1)||(e->bsmod.dead1 == seg_idx+1);
-	else
-		return e->slmod.dead0 == seg_idx+1;
-}
-
-static inline bool nvmeibc_dbits_is_seg_convict(const union nvmeibc_dbits_entry *e, const u16 seg_idx) {
-	if (nvmeibc_dbits_entry_is_global_mode(e))
-		return nvmeibc_dbits_has_unknowns(e)||(e->bsmod.dead0 == seg_idx+1 && e->bsmod.is_d0_convict)||(e->bsmod.dead1 == seg_idx+1 && e->bsmod.is_d1_convict);
-	else
-		return false;
-}
-
 static inline int nvmeibc_dbits_entry_to_str(char *buf, int len, long arg) {
 	const union nvmeibc_dbits_entry *e = (const union nvmeibc_dbits_entry *)&arg;
 	ssize_t count                      = 0;
@@ -428,14 +414,6 @@ static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_for_segs(/* seg
 		rv.bsmod.dead0 = seg1;
 		rv.bsmod.dead1 = seg0;
 	}
-	return rv;
-}
-
-static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_for_seg_and_unk(/* seg index or -1 if irrelevant, R1 values:0,1 */	int seg)
-{
-	union nvmeibc_dbits_entry rv = {.all_bits = 0};
-	rv.bsmod.dead0 = 0xF; // UNK_DB
-	rv.bsmod.dead1 = seg+1;
 	return rv;
 }
 
