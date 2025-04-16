@@ -961,7 +961,7 @@ TEST_FUNC int unitest_GoodPathIO_raid50_or_60(bunitest_s *B) {
 }
 
 // Disconnect the server and unregister the dead segment
-void __degrade_segment(struct clientSimulator *client, struct tTopoOfPraid* r1, struct disk_range *praid, int ind_dead_seg) {
+void __degrade_segment(struct clientSimulator *client, const struct tTopoOfPraid* r1, const struct disk_range *praid, int ind_dead_seg) {
 	serverSimulator_disconnect(serverOf(&client->physDiscs[praid[ind_dead_seg].node_id]));
 	tomaSimulator_unreg_raid1(r1->header.uuid,ind_dead_seg);
 }
@@ -1191,11 +1191,8 @@ void __dd_clean_dlba_pointers(struct test_context ctx){
 	}
 }
 
-//#define is_read_only_ec_degraded_mode(n_parties, n_dead_segs)      ((n_parities == n_dead_segs))										// We should be read-only
-//#define is_not_ioable_ec_full_raid_down(first_dead, last_dead, r1) ((first_dead == 0) && ((last_dead)+1 == r1->header.n_segments    ))	// All data segs are down
-
 // Switch topo and cut of tomas if dead, return value sets params for test execution
-struct degraded_test_params __switch_to_new_topo(struct clientSimulator *client, struct topology_sgmnts_t new_topo, struct tTopoOfPraid* r1, struct disk_range *curSeg) {
+struct degraded_test_params __switch_to_new_topo(struct clientSimulator *client, struct topology_sgmnts_t new_topo, const struct tTopoOfPraid* r1, const struct disk_range *curSeg) {
 	struct degraded_test_params rv;
 	rv.is_double_degraded = (new_topo.dgrd_modes[0] != NVMEIBTC_DS_MODE_RW && new_topo.dgrd_modes[1] != NVMEIBTC_DS_MODE_RW);
 	rv.any_seg_is_write = ((new_topo.dgrd_modes[0] == NVMEIBTC_DS_MODE_W) || (new_topo.dgrd_modes[1] == NVMEIBTC_DS_MODE_W));
@@ -1208,7 +1205,7 @@ struct degraded_test_params __switch_to_new_topo(struct clientSimulator *client,
 }
 
 // If any segments cut of toma re connect them in case they are in W mode next iteration
-void __prepare_for_next_iteration(struct clientSimulator *client, struct topology_sgmnts_t new_topo, struct disk_range *curSeg) {
+void __prepare_for_next_iteration(struct clientSimulator *client, struct topology_sgmnts_t new_topo, const struct disk_range *curSeg) {
 	if (new_topo.dgrd_modes[0] == NVMEIBTC_DS_MODE_DEAD) {
 		serverSimulator_re_connect(serverOf(&client->physDiscs[curSeg[new_topo.dgrd_sgmnts[0]].node_id]));
 	}

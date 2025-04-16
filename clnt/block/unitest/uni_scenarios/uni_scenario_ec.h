@@ -42,7 +42,7 @@ TEST_FUNC int unitest_ECDbitsOnDisk(bunitest_s* B);
 // Referenced in MTV/QLC tests as well
 int unitest_PermanentReadError_EC_IO(const struct test_context env, const int degraded_seg_index, u8 *mem, const int is_dead);
 void unitest_PermanentReadError_EC_Maintenance(const struct test_context env, const int degraded_seg_index, u8 *mem, const int is_dead);
-void __degrade_segment(struct clientSimulator *client, struct tTopoOfPraid* r1, struct disk_range *praid, int ind_dead_seg);
+void __degrade_segment(struct clientSimulator *client, const struct tTopoOfPraid* r1, const struct disk_range *praid, int ind_dead_seg);
 void __restore_seg_to_write(struct NVMeshSystem *sys, struct clientSimulator *client, struct tTopoOfPraid* r1, struct disk_range *praid, int ind_dead_seg, bool clear_ram);
 void __restore_seg_to_read_write(struct NVMeshSystem *sys, struct tTopoOfPraid* r1, int ind_dead_seg);
 
@@ -51,8 +51,8 @@ struct degraded_test_params {
 	bool any_seg_is_write;
 };
 
-struct degraded_test_params __switch_to_new_topo(struct clientSimulator *client, struct topology_sgmnts_t new_topo, struct tTopoOfPraid* r1, struct disk_range *curSeg);
-void __prepare_for_next_iteration(struct clientSimulator *client, struct topology_sgmnts_t new_topo, struct disk_range *curSeg);
+struct degraded_test_params __switch_to_new_topo(struct clientSimulator *client, struct topology_sgmnts_t new_topo, const struct tTopoOfPraid* r1, const struct disk_range *curSeg);
+void __prepare_for_next_iteration(struct clientSimulator *client, struct topology_sgmnts_t new_topo, const struct disk_range *curSeg);
 void __verify_dbits_identical(union nvmeibc_dbits_entry dbits, union nvmeibc_dbits_entry expected, int num_parities);
 #endif
 /*****************************************************************************/
