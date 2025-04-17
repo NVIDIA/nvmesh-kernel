@@ -654,11 +654,11 @@ bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_
 			const int num_unknowns =   nvmeibc_dbits_get_n_unk(&dbits_ent, &pr->calculated_data.topo_traits);
 			const u64 slba_blksets = (dlba - seg->first_lba) / LOCKSET_SLICES;
 			char buf_print[32];
-			if (action == 'w') {			// Write IO/Sync, Strongest verification, Ensure the dbits that we are turning off cannot be set
+			if (action == 'w') {			// Write IO/Full-Blockset-Sync, Strongest verification, Ensure the dbits that we are turning off cannot be set
 				clean_bm |= nvmeibc_raid1_get_sgmnts_bmp(pr, w);
-			} else if (action == 's') {		// Write-by-Sync, Weaker verification, same as above but can turn on convicts for W- topology
+			} else if (action == 's') {		// Write-by-Full-Blockset-Sync, Weaker verification, same as above but can turn on convicts for W- topology
 				clean_bm |= (nvmeibc_raid1_get_sgmnts_bmp(pr, w) & nvmeibc_raid1_get_inverse_sgmnts_bmp(pr, wm));
-			} else if (action == 'r') {		// Read IO/Sync. Weakest verification, only readable segments, are tested dbits may exist on 'W' segs
+			} else if (action == 'r') {		// Read IO/Parital-Blockset-Sync. Weakest verification, only readable segments are tested. Dbits may remain on 'W' segs and not be cleaned
 			}
 			if (unlikely(dbits_bm & clean_bm)) {                // Dbit on segment which cannot be turned on
 				nvmeibc_dbits_entry_to_str(buf_print, sizeof(buf_print), binfo.bits.dirty);
