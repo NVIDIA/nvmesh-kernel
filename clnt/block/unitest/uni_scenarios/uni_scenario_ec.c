@@ -2742,13 +2742,10 @@ static inline void __verify_ram_dbits_valid(const struct NVMeshSystem *sys, cons
 	}
 }
 
-#define __is_slmod(d0, is_d0_convict, d1) !(d0 == 0xf || (d0 && d1) || is_d0_convict)
-
 /* d0/d1 is dead0/dead1 value [ range 1 to 0xf which is unkown] , is_d0_convict = 1 if convict OW 0 */
-inline union nvmeibc_dbits_entry _db_entry(int d0, int is_d0_convict, int d1, int is_d1_convict)
-{
-	union nvmeibc_dbits_entry db;
-	db.all_bits = 0;
+inline union nvmeibc_dbits_entry _db_entry(int d0, int is_d0_convict, int d1, int is_d1_convict) {
+	#define __is_slmod(d0, is_d0_convict, d1) !(d0 == 0xf || (d0 && d1) || is_d0_convict)
+	union nvmeibc_dbits_entry db = {.all_bits = 0};		// We dont use nvmeibc_dbits_action_to_entry() to not rely on production code
 	if (!__is_slmod(d0, is_d0_convict, d1)) {
 		db.bsmod.dead0 = d0;
 		db.bsmod.is_d0_convict = is_d0_convict;
@@ -2756,8 +2753,7 @@ inline union nvmeibc_dbits_entry _db_entry(int d0, int is_d0_convict, int d1, in
 		db.bsmod.is_d1_convict = is_d1_convict;
 		if (db.bsmod.mod_marker)
 			db.bsmod.mod_marker += 0xc;
-	}
-	else {
+	} else {
 		db.slmod.dead0 = d0;
 	}
 	return db;
