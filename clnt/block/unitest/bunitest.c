@@ -2034,11 +2034,11 @@ int unitest_resubmitIO(struct NVMeshSystem *sys) {
 	return rv;
 }
 
-#define __unitest_test_degraded_write(sys, r1, mem, volInd, ioVLBA, lenBlocks) __unitest_do_degraded_io(sys, r1, 0, mem, volInd, ioVLBA, lenBlocks)
-static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPraid* r1, int first_seg_ind, u8 *mem, int volInd, u64 ioVLBA, int lenBlocks){
+#define __unitest_test_degraded_write(sys, r1, mem, volInd, ioVLBA, lenBlocks) __unitest_do_degraded_io(sys, r1, &sys->mdb.vols[volInd].segs[0], mem, volInd, ioVLBA, lenBlocks)
+static int __unitest_do_degraded_io(struct NVMeshSystem *sys, const struct tTopoOfPraid* r1, const struct disk_range *first_seg_in_pr, u8 *mem, int volInd, u64 ioVLBA, int lenBlocks){
 	struct clientSimulator *client = &sys->clients[0];			// Test via the first client
 	int i, rv;
-	struct disk_range *curSeg = &sys->mdb.vols[volInd].segs[first_seg_ind];
+	const struct disk_range *curSeg = first_seg_in_pr;
 	const bool verify_bounds = (client->devs[volInd]->size > (unsigned)lenBlocks);
 	const bool isStriped  = tTopoOfVolume_isStriped(&sys->tcf.vols[volInd]);
 	u64        magic_pattern = __unitest_fill_blocks_unique_pattern(mem, lenBlocks);	// Set a pattern.
@@ -2073,7 +2073,7 @@ static int __unitest_do_degraded_io(struct NVMeshSystem *sys, struct tTopoOfPrai
 	}
 
 	if ((n_deg == (r1->header.n_segments-1)) && (r1->header.n_segments == 2)) { 							// Verify that read succeeds in full degraded even with stale special lock
-		const struct disk_range *ownerSeg = &sys->mdb.vols[volInd].segs[first_seg_ind+live_seg_ind];						// Live segment in praid
+		const struct disk_range *ownerSeg = &first_seg_in_pr[live_seg_ind];						// Live segment in praid
 		const u64 seg_start = __from4K(disk_range_get_start_addr(ownerSeg));	// First address of the segment.
 		union nvmeibc_dbits_entry* db = physSegDBIdxPtr_off(ownerSeg, __to4K(seg_start));
 		ramDiskSimulator_lockStale(&sys->servers[ownerSeg->node_id].ramDisk, ownerSeg->dlba_start);			// Put stale special value in the first lock of the segment.
@@ -6313,18 +6313,17 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 	struct nvmeibc_sync_stats *stats = &dev->dp.sync_rsrcs.stats;
 	struct disk_range *curSeg = NULL;
 	const int chunkOffsetVLBA = _addr4k(0,31);						// IO's will be at this offset from beggining of the test chunk
-	int rv = 0, c, seg_in_r1_offset = 0;
+	int rv = 0, c;
 	int lenBlocks = __from4K(2);								// Length of IO. Span on 2 blocksets
 	int memSize	 		 = lenBlocks*NVMEIBC_SECTOR_SIZE;		// Total array in bytes
 	u8 *mem = sim_kmalloc(memSize, GFP_KERNEL);									// Array to read/write to disk
 	enum NVMEIBTC_DS_MODE seg_stats[N_MAX_RAID_SLICE_LEN];// = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW};
 	array_fill(seg_stats, NVMEIBTC_DS_MODE_RW);
-	#define segs_in_chunk() (curSeg->replicas * curSeg->stripe_width)
 	curSeg = &sys->mdb.vols[volInd].segs[0];
 	#define __verify_no_dbits(db_vals) ({ for (j = 0; j < r1->header.n_segments; j++) {	BUG_ON(db_vals[j]->all_bits != 0); } })
 	#define __clean_cur_dbits(db_vals) ({ for (j = 0; j < r1->header.n_segments; j++) {	db_vals[j]->all_bits = 0; } })
 
-	for (c = 0; c < sys->tcf.vols[volInd].nChunks; c++, seg_in_r1_offset += segs_in_chunk(), curSeg += segs_in_chunk()) {	// Loop on 4,3 mirror
+	for (c = 0; c < sys->tcf.vols[volInd].nChunks; c++, curSeg += __disk_range_segs_in_chunk(curSeg)) {	// Loop on 4,3 mirror
 		struct tTopoOfPraid* r1 = &sys->tcf.vols[volInd].chunks[c].raids[0];
 		const u64 ioVLBA = __from4K(curSeg->bd_start) + chunkOffsetVLBA;		// Hit the first blockset of first praid in a chunk
 		union nvmeibc_dbits_entry* db_vals[4];
@@ -6365,7 +6364,7 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 			}
 			// Degraded D mode tests
 			warn_on_too_many_degraded = (n_deg <= 2);		// Dbits marker still support only 2 degraded segs
-			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
+			__unitest_do_degraded_io(sys, r1, curSeg, mem, volInd, ioVLBA, lenBlocks);
 
 			if (only_1_lock_is_alive) { // Test Stale 2 dirty in max degraded
 				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
@@ -6414,7 +6413,7 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_W_IS_DIRTY;
 			}
 			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);
-			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
+			__unitest_do_degraded_io(sys, r1, curSeg, mem, volInd, ioVLBA, lenBlocks);
 
 			if (true) { // Dirty convict tests (various dbits values combination)
 				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
@@ -6437,7 +6436,7 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_W;
 			}
 			tomaSimulator_switchTopoEC( r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);
-			__unitest_do_degraded_io(sys, r1, seg_in_r1_offset, mem, volInd, ioVLBA, lenBlocks);
+			__unitest_do_degraded_io(sys, r1, curSeg, mem, volInd, ioVLBA, lenBlocks);
 
 			if (true) { // Test Unknown Dbits
 				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
