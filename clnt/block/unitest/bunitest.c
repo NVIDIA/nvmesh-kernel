@@ -6586,9 +6586,9 @@ void t_n_mirror_tester_r1_binfo_verify_and_cleanup(struct t_n_mirror_tester_r1* 
 
 TEST_FUNC int unitest_n_mirr_degraded_exhaustive(struct NVMeshSystem *sys) {
 	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol_0(&_t, sys, !true);
-	//struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync.stats;
+	struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync_rsrcs.stats;
 	u8 *mem = kmalloc(32*NVMEIBC_SECTOR_SIZE, GFP_KERNEL); // Array to read/write to disk, at most 1 blockset
-	//int rv;
+	int rv;
 	nvmeibc_nowhole_stats_reset();
 	for (; t_n_mirror_tester_r1_has_next_chunk(t); t_n_mirror_tester_r1_move_to_next_chunk(t)) {	// Loop on 4,3 mirror
 		const struct tTopoOfPraid* r1 = t_n_mirror_tester_r1_get_toma_praid_conf(t);
@@ -6604,7 +6604,7 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(struct NVMeshSystem *sys) {
 				__switch_to_new_topo(t->env.client, t->topos.curr, r1, curSeg);
 				for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+= (1<<LOCK_CHANGE_STRIDE_SHIFT)) {	// Use 2 blocksets first and 3rd (blockset 0 or 2, to rotate D0 from seg 0 to seg 1)
 					const u64 ioVLBA = t_n_mirror_tester_r1_init_io_and_inj_ptrs(t, blkset_idx);
-					//struct block_inject_ptrs *ow = &t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[0]];	// Primary owner lock
+					struct block_inject_ptrs *ow = &t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[0]];	// Primary owner lock
 					for (t->lv.dbits_idx = 0; t->lv.dbits_idx < t->n_dbits_entries; t->lv.dbits_idx++) {
 						const union nvmeibc_dbits_entry inj_dbits = t->dbits[t->lv.dbits_idx];
 						const enum e_binfo_inject_mode TOTAL_INJ_MODE = (inj_dbits.all_bits==0) ? BINFO_INJECT_ONLY_PRIMARY_LOCK : BINFO_INJECT_ALL_LOCKS; // Optimization, to reduce duplications on zero pre-dbits injection.
@@ -6623,14 +6623,47 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(struct NVMeshSystem *sys) {
 									__unitest_do_degraded_io(sys, r1, t->curSeg, mem, 0, ioVLBA, __from4K(n_io_blocks));
 									t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, io_changes_dbits);
 								}
+								{ 	// Read encounters a stale lock and fixes it with partial / full blockset sync
+									t->lv.cur_op = NVMEIB_BLOCK_IO_OP_RECOVER_STALE;
+									t_n_mirror_tester_r1_print_iter(t, "stale\n");
+									t_n_mirror_tester_r1_binfo_inject(t);
+									nvmeibc_sync_full_lockset_probability_factor = (t->lv.do_full_blkset_fixup ? NVMEIBC_SYNC_PROB_FORCE_LOCKSET : NVMEIBC_SYNC_PROB_FORCE_MIN);
+									ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba);	BUG_ON(*ow->ram.lock == 0);
+									stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
+									rv = osSimulator_readArrWait(&t->env.client->OS, 0, ioVLBA, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
+									clientSimulator_wait_for_all_sync_ops(t->env.client);
+									if (t->are_all_p_dead) {
+										BUG_ON(stats->num_full_blockset_ok + (stats->num_part_blockset_ok) != 0);		// Stale2dirty sync
+										BUG_ON(*ow->ram.lock != 0);
+									} else if (t->lv.do_full_blkset_fixup)	{
+										BUG_ON(stats->num_full_blockset_ok != 1);
+										BUG_ON(*ow->ram.lock != 0);
+									} else {
+										BUG_ON(stats->num_part_blockset_ok != 1);
+										ramDiskSimulator_lockUnSta(&ow->self->ramDisk, ow->dlba);						// Stale lock remains, remove it
+									}
+									t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, true);
+								}
 							}	// Full/Partial blockset
+							if (n_dgrd != (int)__disk_range_get_num_parities(t->curSeg)) {	// Dbit + bad sector (Do not destroy slice)
+								t->lv.do_full_blkset_fixup = true;
+								t->lv.cur_op = NVMEIB_BLOCK_IO_OP_RECOVER_READFAIL;
+								t_n_mirror_tester_r1_print_iter(t, "bad_sector\n");
+								t_n_mirror_tester_r1_binfo_inject(t);
+								stats->num_full_blockset_ok = 0;
+								ramDiskSimulator_do_bad_sector(&ow->self->ramDisk, ow->dlba, EPERM_READ_FAIL_NO_RETRY);
+								rv = osSimulator_readArrWait(&t->env.client->OS, 0, ioVLBA, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
+								clientSimulator_wait_for_all_sync_ops(t->env.client);
+								BUG_ON(stats->num_full_blockset_ok != 1);
+								t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, true);
+							}
 						}	// Dbit injection mode
 					}		// Dbit injection content
 					free_io_traits(&t->lv.io_t);
 				}			// VLBA offset
 				__prepare_for_next_iteration(t->env.client, t->topos.curr, curSeg);
-			}	
-		}			// Topology of first praid
+			}		
+		}		// Topology of first praid
 		t_n_mirror_tester_r1_move_to_next_raid(t, __FUNCTION__);
 	}					// For each chunk
 	kfree(mem);

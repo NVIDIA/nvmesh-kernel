@@ -161,8 +161,9 @@ _func_start:
 
 	switch (so->stage) {
 		case sync_stage_recov_read_cmds_sent: {
-			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
-			const roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so);
+			const union dp_sync_reads_rv_bmp rv_bmp = dp_sync_reads_rv_bmp_init(so);
+			const int non_read_failure_error = rv_bmp.worst_software_error;
+			const roles_bmp_t readfail_bmp = rv_bmp.readfail_bmp;
 
 			if (unlikely(so->is_sbs_mode)) {
 				if (unlikely(non_read_failure_error)) {
