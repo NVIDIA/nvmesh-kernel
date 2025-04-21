@@ -6320,11 +6320,28 @@ bool is_not_ioable_n_rep_all_locks_down(int first_dead, int n_deg, struct nvmeib
 }
 
 struct t_n_mirror_tester_r1 {
-	struct topologies_enumerator topos;		// Iterator on all topologies
-	char iter_descript[64], *itr_txt_cur;	// Print current topo info
+	struct test_context env;
+	const struct disk_range *curSeg;		// First seg of current praid
+	//struct {
+		struct topologies_enumerator topos;		// Iterator on all topologies
+		char iter_descript[64], *itr_txt_cur;	// Print current topo info
+		bool are_all_p_dead;					// Max amount of segments are Dead. Praid is unprotected in any way
+	//};
 	union nvmeibc_dbits_entry dbits[16];	// Enough space for all diffrenet dbit values
 	int n_dbits_entries;					// Number of elements in this array
 	int n_total_injected_dbits;
+	int lockset_prob_backup;
+	bool verbose;							// Turn on when debugging
+	struct t_loop_variables {				// Intermediate variables used in loops
+		struct block_inject_ptrs inj_ptrs[4];			// struct block_ram_inject_ptrs
+		union nvmeibc_dbits_entry save_inj_dbits[4];	// Save injection to be able to verify when they should not be changed
+		enum e_binfo_inject_mode { BINFO_INJECT_ONLY_PRIMARY_LOCK = 0, BINFO_INJECT_ONLY_SECONDARY_LOCK = 1, BINFO_INJECT_ALL_LOCKS = 2, BINFO_INJECT_INVALID = 3, } binfo_inject_mode;
+		struct io_traits io_t;
+		enum nvmeib_block_io_op cur_op;		// Current executed op
+		int dbits_idx;						// Index of current dbit injection in dbits[] array
+		int do_full_blkset_fixup;			// Boolean: Do implicit / explicit sync on the blockset
+		int total_iterations;
+	} lv;
 };
 
 // Given a topology, fills valid dbits permutations and returns its size. We generate up to two dirty segments, as we only support up to double degraded mode.
@@ -6378,186 +6395,248 @@ static int t_n_mirror_tester_r1_generate_valid_dbits(struct t_n_mirror_tester_r1
 }
 
 static void t_n_mirror_tester_r1_print_state(struct t_n_mirror_tester_r1* t) {
-	int i;
 	t->itr_txt_cur = &t->iter_descript[topo_enum_tostring(&t->topos, t->iter_descript)];
-	unitest_print("R1N %s\n", t->iter_descript);
-	for (i = 0; i < t->n_dbits_entries; i++) {
-		unitest_print("\t\t 0x%3x\n", t->dbits[i].all_bits);
+	if (t->verbose) {
+		int i;
+		unitest_print("R1N %s\n", t->iter_descript);
+		for (i = 0; i < t->n_dbits_entries; i++) {
+			unitest_print("\t\t 0x%3x\n", t->dbits[i].all_bits);
+		}
 	}
 }
 
-void t_n_mirror_tester_r1_init_vol_0(struct t_n_mirror_tester_r1* t, struct TstPRaid sraid) {
-	t->topos = create_all_topo_enum(sraid, 0);
+struct t_n_mirror_tester_r1* t_n_mirror_tester_r1_init_vol_0(struct t_n_mirror_tester_r1* t, struct NVMeshSystem *sys, bool _verbose) {
+	const struct volume_segment_index vsi = {0,0,0,0};
+	t->env = (struct test_context){ .sys = sys, .client = sys->clients, .dev = sys->clients->devs[vsi.volume], .sraid = NVMeshSystem_TstPRaid_init_rel(sys, vsi)};
+	t->curSeg = &t->env.sys->mdb.vols[t->env.sraid.vsi.volume].segs[0];
+	BUG_ON(t->curSeg->replicas != 4); // First chunk 4 mirror
 	t->n_total_injected_dbits = 0;
+	t->verbose = _verbose;
+	t->lockset_prob_backup = nvmeibc_sync_full_lockset_probability_factor;
+	memset(&t->lv, 0, sizeof(t->lv));
+	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
+	return t;
 }
 
-/* Test client's raid going in and out of a degraded mode */
-TEST_FUNC int unitest_GoodPath_DegradedMode_n_mirrored(struct NVMeshSystem *sys) {
-	// Configuration: 4 mirror
+const struct tTopoOfPraid* t_n_mirror_tester_r1_get_toma_praid_conf(const struct t_n_mirror_tester_r1* t) {
+	const struct volume_segment_index vsi = t->env.sraid.vsi;
+	return &t->env.sys->tcf.vols[vsi.volume].chunks[vsi.chunk].raids[0];
+}
 
-	struct volume_segment_index vsi = {0,0,0,0};
-	struct test_context env = { .sys = sys
-								, .client = sys->clients
-								, .dev = sys->clients->devs[0]
-								, .sraid = NVMeshSystem_TstPRaid_init_rel(sys, vsi)};
-	struct clientSimulator *client = env.client;		// Test via the first client
-	struct disk_range *curSeg = &sys->mdb.vols[vsi.volume].segs[0];
-	int rv = 0, c = 0;	// Use 2 blocksets first and 3rd
-	struct tTopoOfPraid* r1 = &sys->tcf.vols[vsi.volume].chunks[c].raids[0];
-	const int n_data_segs = curSeg->slice_size;
-	const int width = curSeg->stripe_width;
-	const int n_parities = curSeg->replicas - n_data_segs;
-	struct t_n_mirror_tester_r1 t;
-	t_n_mirror_tester_r1_init_vol_0(&t, env.sraid);
-	BUG_ON(curSeg->replicas != 4); // Only test for 4-mirroring
-	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
+void t_n_mirror_tester_r1_move_to_next_raid(const struct t_n_mirror_tester_r1* t, const char* info) {
+	// Reset all topologies back to RW
+	const enum NVMEIBTC_DS_MODE reset[N_MAX_RAID_SLICE_LEN] = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW};
+	const struct tTopoOfPraid* r1 = t_n_mirror_tester_r1_get_toma_praid_conf(t);
+	//NVMeshSystem_wipe_all_dirty_bits(t->env.sys);
+	tomaSimulator_switchTopoEC(r1->header.uuid, reset, SW_TOPO__WAIT_ACK_DR, NULL);
+	unitest_print("*************** %s RAID(%d+%d), n_topos=%u, n_dbits=%u, n_iters=%u\n", info, t->curSeg->slice_size, __disk_range_get_num_parities(t->curSeg), t->topos.impl.curr_permutation, t->n_total_injected_dbits, t->lv.total_iterations);
+}
 
-	// The following nested loops are respectively iterating through combinations of these sets:
-	// * All topos,
-	// * blockset 0 or 2, to rotate D0 from seg 0 to seg 1
-	// * IO, 1 slice (cannot turn off dbit), 32 slices  (can turn off dbits)
-	// * pre dbit Seg1, Seg2,  Seg1+Seg2, 1-Unknown, 2-unknowns, 1-unknown+Seg1, 1-unknown+seg2.
-	// * For w- topology also test pre-dbits with/without convict
-	// * Inject Pre dbits to:  3 subsets (bitmap) of locks: Only Primary owner and only 1 secondary owner, and all locks.
-	while (t.topos.move_next(&t.topos)) {
-		struct topology_sgmnts_t topo = t.topos.curr;
-		const int n_dead = topology_sgmnts_num_dead(&topo);
-		const int n_dgrd = topology_sgmnts_num_non_readable(&topo);
-		const int n_dbits_entries = t_n_mirror_tester_r1_generate_valid_dbits(&t);
-		if (0) t_n_mirror_tester_r1_print_state(&t);
-		__switch_to_new_topo(env.client,topo,r1,curSeg);
+void t_n_mirror_tester_r1_move_to_next_chunk(struct t_n_mirror_tester_r1* t) {
+	const int n_segs_in_chunk = __disk_range_segs_in_chunk(t->curSeg);
+	struct volume_segment_index vsi = t->env.sraid.vsi;
+	t->n_total_injected_dbits = 0;
+	vsi.chunk++;
+	if (vsi.chunk < t->env.sys->tcf.vols[vsi.volume].nChunks) {			// Verify chunks not depleted
+		t->env.sraid = NVMeshSystem_TstPRaid_init_rel(t->env.sys, vsi);
+		t->curSeg += n_segs_in_chunk;
+		BUG_ON(t->curSeg->replicas != 3);	// Second chunk 3-mirroring
+	} else {
+		t->curSeg = NULL;					// Depleted
+	}
+}
+bool t_n_mirror_tester_r1_has_next_chunk(const struct t_n_mirror_tester_r1* t) { return (t->curSeg != NULL); }
 
-		for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+=2 ) {	// Use 2 blocksets first and 3rd
-			int chunkOffsetVLBA = _addr4k(blkset_idx*width,0); // IO's will be at this offset from beggining of the test blockset
-			u64 ioVLBA = __from4K(curSeg->bd_start) + chunkOffsetVLBA; // Hit the `blkset_idx` blockset of first praid in a chunk
-			for (int n_io_blocks = 1; n_io_blocks <= 32; n_io_blocks+=31) {
-				int lenBlocks = __from4K(n_io_blocks); // Number of blocks to IO.
-				int memSize = lenBlocks*NVMEIBC_SECTOR_SIZE; // Total array in bytes
-				u8 *mem = kmalloc(memSize, GFP_KERNEL); // Array to read/write to disk
-				int primary_owner_idx = -1, secondary_owner_idx = -1; // Segment index
-				struct block_inject_ptrs ram_injs[4];
-				struct io_traits io_t = get_io_traits(env, ioVLBA, n_io_blocks); // Analyze first n slice
-				for (u32 i = curSeg->replicas; i > 0; i--) { // Owner lock rotates to the left
-					// Find the first live segment as primary owner and second as the first secondary owner.
-					if (topo.modes[io_t.slices[0].role2sgmnt[i%curSeg->replicas]] != NVMEIBTC_DS_MODE_RW) continue;
+void t_n_mirror_tester_r1_destroy(struct t_n_mirror_tester_r1* t) {
+	nvmeibc_sync_full_lockset_probability_factor = t->lockset_prob_backup;		// restore value
+	BUG_ON(!NVMeshSystem_is_stable(t->env.sys));					// System must be in a stable state
+}
 
-					if (primary_owner_idx == -1)
-						primary_owner_idx = io_t.slices[0].role2sgmnt[i%curSeg->replicas];
-					else {
-						secondary_owner_idx = io_t.slices[0].role2sgmnt[i%curSeg->replicas];
-						break;
-					}
-				}
-				BUG_ON(primary_owner_idx<0 || primary_owner_idx>3);
-				BUG_ON(primary_owner_idx == -1 || secondary_owner_idx == -1);
+u64 t_n_mirror_tester_r1_init_io_and_inj_ptrs(struct t_n_mirror_tester_r1* t, int blkset_idx) {
+	const u32 clba = _addr4k(blkset_idx * t->curSeg->stripe_width, 0); // IO's will be at this offset from beggining of the test blockset
+	const u64 vlba = __from4K(t->curSeg->bd_start) + clba; // Hit the `blkset_idx` blockset of first praid in a chunk
+	t->lv.io_t = get_io_traits(t->env, vlba, 1); // Analyze first 1 slice (IO is within 1 blockset)
+	for (u32 i = 0; i < t->curSeg->replicas; i++) {
+		const int si = t->lv.io_t.slices[0].role2sgmnt[i];
+		t->lv.inj_ptrs[si] = serverSimulator_get_block_inject_ptrs(&t->env.sys->servers[t->curSeg[si].node_id], t->lv.io_t.slices[0].sgmnt2dlba[si], 0, 0, 0);
+	}
+	return vlba;
+}
 
-				for (u32 i = 0; i < curSeg->replicas; i++){
-					BUG_ON(io_t.slices[0].role2sgmnt[i]<0 || io_t.slices[0].role2sgmnt[i]>3);
-					ram_injs[io_t.slices[0].role2sgmnt[i]] = serverSimulator_get_block_inject_ptrs(&sys->servers[curSeg[io_t.slices[0].role2sgmnt[i]].node_id], io_t.slices[0].sgmnt2dlba[io_t.slices[0].role2sgmnt[i]], 0, 0, 0);
-				}
+void t_n_mirror_tester_r1_binfo_inject(struct t_n_mirror_tester_r1* t) {
+	const union nvmeibc_dbits_entry inj_dbits = t->dbits[t->lv.dbits_idx];
+	if (		t->lv.binfo_inject_mode == BINFO_INJECT_ONLY_PRIMARY_LOCK) {
+				t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[0]].ram.dbits->all_bits = inj_dbits.all_bits;
+	} else if (	t->lv.binfo_inject_mode == BINFO_INJECT_ONLY_SECONDARY_LOCK) {
+		if (t->lv.io_t.slices[0].rlmap.n_locks > 1)
+				t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[1]].ram.dbits->all_bits = inj_dbits.all_bits;
+	} else if (	t->lv.binfo_inject_mode == BINFO_INJECT_ALL_LOCKS) {
+		for (u32 i = 0; i < t->curSeg->replicas; i++) {
+			if (t->topos.curr.modes[i] != NVMEIBTC_DS_MODE_DEAD)
+				t->lv.inj_ptrs[i].ram.dbits->all_bits = inj_dbits.all_bits;
+		}
+	}
+	for (u32 i = 0; i < t->curSeg->replicas; i++) {							// Save injected values into array
+		t->lv.save_inj_dbits[i] = *t->lv.inj_ptrs[i].ram.dbits;
+	}
+}
 
-				for (int dbits_idx = 0; dbits_idx < n_dbits_entries; dbits_idx++) {
-					const union nvmeibc_dbits_entry inj_dbits = t.dbits[dbits_idx];
-					union nvmeibc_dbits_entry save_inj_dbits[4];
-					const int TOTAL_INJ_MODE = (inj_dbits.all_bits==0) ? 1 : 3; // Optimization, to reduce duplications on zero pre-dbits injection.
-					for (int inj_mode = 0; inj_mode < TOTAL_INJ_MODE; inj_mode++){
-						// Mode 0: inject to only primary lock
-						// Mode 1: inject to the first secondary lock
-						// Mode 2: inject to all locks.
-						const bool is_io_implicit_sync = (n_io_blocks==32);
-						const bool io_changes_dbits =	(is_io_implicit_sync || 			// Full slice sync
-														(n_dgrd==0) ||						// Auto clean up all dbits in perfect topology
-														(n_dead > 0) ||						// IO Turn dbits on for dead seg
-														((inj_mode==2) && (n_dgrd > 1)));	// See generic algorithm optimization, IO changes dbits only if sees commited dbits in multi degraded mode
-						// Inject dbits
-						if (inj_mode == 0) {
-							ram_injs[primary_owner_idx].ram.dbits->all_bits = inj_dbits.all_bits;
-						} else if (inj_mode == 1) {
-							ram_injs[secondary_owner_idx].ram.dbits->all_bits = inj_dbits.all_bits;
-						} else { // inj_mode == 2, inject to all locks that are not dead (including W,W+,W-)
-							for (u32 i = 0; i < curSeg->replicas; i++) {
-								if (topo.modes[i] != NVMEIBTC_DS_MODE_DEAD)
-									ram_injs[i].ram.dbits->all_bits = inj_dbits.all_bits;
-							}
-						}
-						for (u32 i = 0; i < curSeg->replicas; i++) {							// Save injected values into array
-							save_inj_dbits[i] = *ram_injs[i].ram.dbits;
-						}
+static inline bool __is_seg_dirty(const union nvmeibc_dbits_entry *e, const u16 si) {	// Dont use: nvmeibc_dbits_get_bm() deliberatly to test its logic
+	if (nvmeibc_dbits_entry_is_global_mode(e))
+		return (e->bsmod.dead0 == si+1)||(e->bsmod.dead1 == si+1);
+	else
+		return e->slmod.dead0 == si+1;
+}
+static inline bool __is_seg_convict(const union nvmeibc_dbits_entry *e, const u16 si) {
+	return nvmeibc_dbits_entry_is_global_mode(e) &&
+			((e->bsmod.dead0 == (si+1) && e->bsmod.is_d0_convict)||(e->bsmod.dead1 == (si+1) && e->bsmod.is_d1_convict));
+}
 
-						// Do IO
-						__unitest_do_degraded_io(sys, r1, curSeg, mem, 0, ioVLBA, lenBlocks);
+static bool t_n_mirror_tester_r1_binfo_is_pre_dbit_visible(const struct t_n_mirror_tester_r1* t) {
+	if (t->lv.binfo_inject_mode == BINFO_INJECT_ALL_LOCKS)		// Datapath takes intersection of dbits
+		return true;
+	return  (t->lv.binfo_inject_mode == BINFO_INJECT_ONLY_PRIMARY_LOCK) &&
+			((int)__disk_range_get_num_parities(t->curSeg) == topology_sgmnts_num_non_readable(&t->topos.curr));	// Primary owner is the only readable seg
+}
 
-						if (io_changes_dbits) {		// Calcualte expected dbit
-							int n_dirty_segs = 0;	// Number of segments that remain dirty
-							int dirty_seg_idxs[2] = {-1,-1}; // Indices of segments that remain dirty
-							int n_convicted_segs = 0;
-							int convicted_seg_idxs[2] = {-1,-1};
-							union nvmeibc_dbits_entry expected_dbits = {.all_bits = 0};	// For expected post-dbits, we have n_dirty_segs*n_convicted_segs = {0,0},{1,0},{1,1},{2,0},{2,1},{2,2} in total 6 combinations.
-							for (int i = 0; i < 2; i++) {
-								if (!nvmeibc_is_readable_acm(topo.dgrd_modes[i])) {
-									const bool pre_dbits_was_commited = nvmeibc_dbits_is_seg_dirty(  &inj_dbits,topo.dgrd_sgmnts[i]) && (inj_mode == 2);
-									const bool pre_convc_was_commited = nvmeibc_dbits_is_seg_convict(&inj_dbits,topo.dgrd_sgmnts[i]) && (inj_mode == 2);
-									if (topo.dgrd_modes[i]== NVMEIBTC_DS_MODE_DEAD || // Dead seg always become dirty in post-dbits
-										(pre_dbits_was_commited && !is_io_implicit_sync)) { // Dbit remains on W/W- seg
-										dirty_seg_idxs[n_dirty_segs++] = topo.dgrd_sgmnts[i];
-									}
-									if ((topo.dgrd_modes[i]==NVMEIBTC_DS_MODE_W_IS_DIRTY) && pre_convc_was_commited && !is_io_implicit_sync) {
-										convicted_seg_idxs[n_convicted_segs++]=topo.dgrd_sgmnts[i];
-									}
-								}
-							}
-							BUG_ON(n_convicted_segs > n_dirty_segs);
-							if (n_dirty_segs == 0) {
-								expected_dbits = _db_entry(0,0,0,0);
-							} else if (n_dirty_segs == 1) {
-								if (n_convicted_segs == 0) {
-									expected_dbits = _db_entry(dirty_seg_idxs[0]+1,0,0,0);
-								} else {
-									BUG_ON(dirty_seg_idxs[0] != convicted_seg_idxs[0]);
-									expected_dbits = _db_entry(dirty_seg_idxs[0]+1,1,0,0);
-								}
-							} else {
-								BUG_ON((n_dgrd!=2) && (n_dirty_segs!=2));
-								if (n_convicted_segs == 0) {
-									expected_dbits = _db_entry(dirty_seg_idxs[1]+1,0,dirty_seg_idxs[0]+1,0);
-								} else if (n_convicted_segs == 1) {
-									BUG_ON(dirty_seg_idxs[1]<dirty_seg_idxs[0]);
-									BUG_ON(dirty_seg_idxs[1]!=convicted_seg_idxs[0]&&dirty_seg_idxs[0]!=convicted_seg_idxs[0]);
-
-									expected_dbits = _db_entry(dirty_seg_idxs[1]+1,dirty_seg_idxs[1]==convicted_seg_idxs[0],dirty_seg_idxs[0]+1,dirty_seg_idxs[0]==convicted_seg_idxs[0]);
-								} else {
-									expected_dbits = _db_entry(dirty_seg_idxs[1]+1,1,dirty_seg_idxs[0]+1,1);
-								}
-							}
-							for (u32 i = 0; i < curSeg->replicas; i++) {
-								if (topo.modes[i] != NVMEIBTC_DS_MODE_DEAD)
-									BUG_ON(ram_injs[i].ram.dbits->all_bits != expected_dbits.all_bits);
-							}
-						} else {	// Verify IO did not change injected dbits
-							for (u32 i = 0; i < curSeg->replicas; i++) {
-								BUG_ON(save_inj_dbits[i].all_bits != ram_injs[i].ram.dbits->all_bits);
-							}
-						}
-						for (u32 i = 0; i < curSeg->replicas; i++) {	// Reset dbits
-							ram_injs[i].ram.dbits->all_bits = 0;
-						}
-					}
-				}
-				free_io_traits(&io_t);
-				kfree(mem);
+static union nvmeibc_dbits_entry t_n_mirror_tester_r1_binfo_calc_expected(const struct t_n_mirror_tester_r1* t, const union nvmeibc_dbits_entry pre_dbits) {
+	// Note: We deliberately not using nvmeibc_dbits_action_...() to avoid tests having the same bugs as production code.
+	int n_dirty = 0;
+	int  d_segs[2] = {-1,-1}; 			// Indices of segments that remain dirty
+	bool is_conv[2] = {false, false};	// For the above dirty segs, is convict or not
+	const bool is_dbit_visible_in_pre = t_n_mirror_tester_r1_binfo_is_pre_dbit_visible(t);
+	const bool has_unknowns_in_pre = nvmeibc_dbits_has_unknowns(&pre_dbits) && is_dbit_visible_in_pre;
+	      bool has_stale2dirty_optimization = false;
+	      bool has_unknowns_in_post = false;
+	for (int i = 0; i < 2; i++) {
+		const enum NVMEIBTC_DS_MODE acm = t->topos.curr.dgrd_modes[i];
+		const raid_sgmnt_t seg_i = t->topos.curr.dgrd_sgmnts[i];
+		if (nvmeibc_is_readable_acm(acm)) {									// Handle RW / W+
+			/* No dbit for this seg */
+		} else if (acm == NVMEIBTC_DS_MODE_DEAD) {							// Handle Dead
+			if (is_dbit_visible_in_pre && __is_seg_dirty(&pre_dbits, seg_i))
+				d_segs[n_dirty++] = seg_i; 									// Turn-on dbit in post because cant clean it from pre
+			else if (t->lv.cur_op == NVMEIB_BLOCK_IO_OP_WRITE)
+				d_segs[n_dirty++] = seg_i; 									// Turn-on dbit for Dead seg: because full slice write
+			else if (t->lv.cur_op == NVMEIB_BLOCK_IO_OP_RECOVER_STALE) {
+				if (t->are_all_p_dead && has_unknowns_in_pre) { 						// Stale 2 dirty optimization, Unknown for Dead segs
+					has_stale2dirty_optimization = true;
+					has_unknowns_in_post = true;
+				} else
+					d_segs[n_dirty++] = seg_i; 								// Turn-on dbit for Dead seg because of stale lock
+			}
+		} else if (!is_dbit_visible_in_pre || t->lv.do_full_blkset_fixup) {	// Dbit was auto resolved via merge with other locks binfo / Dbit was cleaned by implicit/explicit sync
+			/* No dbit for this seg */
+		} else if (__is_seg_dirty(&pre_dbits, seg_i)) {						// Topos: W- / W Only
+			const bool can_convert_unknown_Wminus_to_convict = (t->lv.cur_op == NVMEIB_BLOCK_IO_OP_WRITE) && has_unknowns_in_pre;	// Syncs do not, Only Writes. This may be changed in the future
+			is_conv[n_dirty] = (acm == NVMEIBTC_DS_MODE_W_IS_DIRTY) &&
+									(__is_seg_convict(&pre_dbits, seg_i) ||	// W- pre convict remains
+									can_convert_unknown_Wminus_to_convict);	// W- unk converted to convict
+			d_segs[n_dirty++] = seg_i; 										// Did not clean existing dbits or unknowns for W/W-
+		} else if (has_unknowns_in_pre) {
+			if (t->lv.cur_op == NVMEIB_BLOCK_IO_OP_WRITE) {
+				is_conv[n_dirty] = (acm == NVMEIBTC_DS_MODE_W_IS_DIRTY);	// W- unknown becomes convict
+				d_segs[n_dirty++] = seg_i; 									// Write resolves unknowns of W/W- to worst possible by topo (as if they are Dead)
+			} else {
+				has_unknowns_in_post = true;								// Reads / Partial syncs will not resolve unknowns
 			}
 		}
-		__prepare_for_next_iteration(client, topo, curSeg);
 	}
-	BUG_ON(rv);
-	NVMeshSystem_wipe_all_dirty_bits(sys);
-	unitest_print("*************** GoodPath_Degraded_n_mirror_IO RAID-%d%s (%d+%d), n_dbits=%u\n", 1, (width > 1) ? "0" : " ", n_data_segs, n_parities, t.n_total_injected_dbits);
-	{	// Reset all topologies back to RW
-		const enum NVMEIBTC_DS_MODE reset[N_MAX_RAID_SLICE_LEN] = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW};
-		tomaSimulator_switchTopoEC(r1->header.uuid, reset, SW_TOPO__WAIT_ACK_DR, NULL);
+	if (has_unknowns_in_post && (n_dirty < 2)) {							// Add correct amount of unknowns
+		BUG_ON(t->lv.cur_op == NVMEIB_BLOCK_IO_OP_WRITE);					// Write should always resolve unknowns because it wrote on each and every seg
+		if (has_stale2dirty_optimization) {
+			if (n_dirty < 1)
+				d_segs[n_dirty++] = 0xf - 1;								// Max Fill existing dbits with unknowns to amount of degradedness
+		} else if (n_dirty == 0)
+			return pre_dbits;												// Copy pre->post. Has only uncleanded unknowns by sync
+		d_segs[n_dirty++] = 0xf - 1;										// Copy 1 unkown from pre to post.
 	}
-	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
-	return rv;
+	if (n_dirty == 0) 	return _db_entry(0,0,0,0);
+	if (n_dirty == 1) 	return _db_entry(d_segs[0]+1,is_conv[0],0,0);
+						return _db_entry(d_segs[1]+1,is_conv[1],d_segs[0]+1,is_conv[0]);
+}
+
+void t_n_mirror_tester_r1_binfo_verify_and_cleanup(struct t_n_mirror_tester_r1* t, bool was_changed) {
+	const union nvmeibc_dbits_entry inj_dbits = t->dbits[t->lv.dbits_idx];
+	if (t->verbose) {
+		for (u32 i = 0; i < t->curSeg->replicas; i++) {
+			if (t->topos.curr.modes[i] != NVMEIBTC_DS_MODE_DEAD)
+				unitest_print("\t\t post:seg[%u].dbits=0x%x\n", i, t->lv.inj_ptrs[i].ram.dbits->all_bits);
+		}
+	}
+	if (was_changed) {
+		const union nvmeibc_dbits_entry expected = t_n_mirror_tester_r1_binfo_calc_expected(t, inj_dbits);
+		if (t->verbose) unitest_print("\t\t ---->change_to:dbits=0x%x\n", expected.all_bits);
+		for (u32 i = 0; i < t->curSeg->replicas; i++) {
+			if (t->topos.curr.modes[i] != NVMEIBTC_DS_MODE_DEAD)
+				BUG_ON(t->lv.inj_ptrs[i].ram.dbits->all_bits != expected.all_bits);
+		}
+	} else {
+		if (t->verbose) unitest_print("\t\t ---->unchanged:dbits=0x%x\n", inj_dbits.all_bits);
+		for (u32 i = 0; i < t->curSeg->replicas; i++) {
+				BUG_ON(t->lv.inj_ptrs[i].ram.dbits->all_bits != t->lv.save_inj_dbits[i].all_bits);
+		}
+	}
+	for (u32 i = 0; i < t->curSeg->replicas; i++) {	// Reset dbits
+		t->lv.inj_ptrs[i].ram.dbits->all_bits = 0;
+	}
+	t->lv.total_iterations++;
+}
+#define t_n_mirror_tester_r1_print_iter(t, fmt, ...) 	({ if (t->verbose) pr_emerg("%06u) %s|op=%u|inj[0x%x].mode=%u, blkset[%u].full=%u, " fmt, t->lv.total_iterations, t->iter_descript, t->lv.cur_op, t->dbits[t->lv.dbits_idx].all_bits, t->lv.binfo_inject_mode, blkset_idx, t->lv.do_full_blkset_fixup, ##__VA_ARGS__); })
+
+TEST_FUNC int unitest_n_mirr_degraded_exhaustive(struct NVMeshSystem *sys) {
+	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol_0(&_t, sys, !true);
+	//struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync.stats;
+	u8 *mem = kmalloc(32*NVMEIBC_SECTOR_SIZE, GFP_KERNEL); // Array to read/write to disk, at most 1 blockset
+	//int rv;
+	nvmeibc_nowhole_stats_reset();
+	for (; t_n_mirror_tester_r1_has_next_chunk(t); t_n_mirror_tester_r1_move_to_next_chunk(t)) {	// Loop on 4,3 mirror
+		const struct tTopoOfPraid* r1 = t_n_mirror_tester_r1_get_toma_praid_conf(t);
+		const struct disk_range *curSeg = t->curSeg;
+		for (u16 n_deg = 0; n_deg <= 2; n_deg++) {
+			t->topos = create_all_topo_enum(t->env.sraid, n_deg);
+			while (t->topos.move_next(&t->topos)) {
+				const int n_dead = topology_sgmnts_num_dead(&t->topos.curr);
+				const int n_dgrd = topology_sgmnts_num_non_readable(&t->topos.curr);
+				t->are_all_p_dead = (n_dead == (int)__disk_range_get_num_parities(t->curSeg));
+				t_n_mirror_tester_r1_generate_valid_dbits(t);
+				t_n_mirror_tester_r1_print_state(t);
+				__switch_to_new_topo(t->env.client, t->topos.curr, r1, curSeg);
+				for (int blkset_idx = 0; blkset_idx < 4; blkset_idx+= (1<<LOCK_CHANGE_STRIDE_SHIFT)) {	// Use 2 blocksets first and 3rd (blockset 0 or 2, to rotate D0 from seg 0 to seg 1)
+					const u64 ioVLBA = t_n_mirror_tester_r1_init_io_and_inj_ptrs(t, blkset_idx);
+					//struct block_inject_ptrs *ow = &t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[0]];	// Primary owner lock
+					for (t->lv.dbits_idx = 0; t->lv.dbits_idx < t->n_dbits_entries; t->lv.dbits_idx++) {
+						const union nvmeibc_dbits_entry inj_dbits = t->dbits[t->lv.dbits_idx];
+						const enum e_binfo_inject_mode TOTAL_INJ_MODE = (inj_dbits.all_bits==0) ? BINFO_INJECT_ONLY_PRIMARY_LOCK : BINFO_INJECT_ALL_LOCKS; // Optimization, to reduce duplications on zero pre-dbits injection.
+						for (t->lv.binfo_inject_mode = BINFO_INJECT_ONLY_PRIMARY_LOCK; t->lv.binfo_inject_mode <= TOTAL_INJ_MODE; t->lv.binfo_inject_mode++) {
+							for (t->lv.do_full_blkset_fixup = 0; t->lv.do_full_blkset_fixup <= 1; t->lv.do_full_blkset_fixup++) {
+								{	// Write IO
+									const int n_io_blocks = t->lv.do_full_blkset_fixup ? LOCKSET_SLICES : 1;		// IO, 1 slice (cannot turn off dbit), 32 slices  (can turn off dbits)
+									const bool is_dbit_visible_in_pre = t_n_mirror_tester_r1_binfo_is_pre_dbit_visible(t);
+									const bool io_changes_dbits =	(t->lv.do_full_blkset_fixup ||		// Full blockset inplicit  sync
+																	(n_dgrd==0) ||						// Auto clean up all dbits in perfect topology
+																	(n_dead > 0) ||						// IO Turn dbits on for dead seg
+																	(is_dbit_visible_in_pre && (n_dgrd > 1)));	// See generic algorithm optimization, IO changes dbits only if sees commited dbits in multi degraded mode
+									t->lv.cur_op = NVMEIB_BLOCK_IO_OP_WRITE;
+									t_n_mirror_tester_r1_print_iter(t, "write\n");
+									t_n_mirror_tester_r1_binfo_inject(t);
+									__unitest_do_degraded_io(sys, r1, t->curSeg, mem, 0, ioVLBA, __from4K(n_io_blocks));
+									t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, io_changes_dbits);
+								}
+							}	// Full/Partial blockset
+						}	// Dbit injection mode
+					}		// Dbit injection content
+					free_io_traits(&t->lv.io_t);
+				}			// VLBA offset
+				__prepare_for_next_iteration(t->env.client, t->topos.curr, curSeg);
+			}	
+		}			// Topology of first praid
+		t_n_mirror_tester_r1_move_to_next_raid(t, __FUNCTION__);
+	}					// For each chunk
+	kfree(mem);
+	t_n_mirror_tester_r1_destroy(t);
+	unitest_print("*************** %s, n_iters=%u\n", __FUNCTION__, t->lv.total_iterations);
+	return 0;
 }
 
 /* Test client's raid going in and out of a degraded mode */
@@ -7648,7 +7727,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					rv |= SIMU_RUN_TEST(unitest_GoodPathIO_n_mirrored, sys);
 					if (locks->maxNOwners==4) {		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
 						rv |= SIMU_RUN_TEST(unitest_DegradedMode_n_mirrored, sys);
-						rv |= SIMU_RUN_TEST(unitest_GoodPath_DegradedMode_n_mirrored, sys);
+						rv |= SIMU_RUN_TEST(unitest_n_mirr_degraded_exhaustive, sys);
 					}
 					// Todo: also unitest_DegradedMode()
 					if (locks->maxNOwners>2)
