@@ -7811,17 +7811,15 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					rv |= unitest_n_mirror(sys, "reattach_to_change_lock_server", UNITEST_UPDOWNGRADE_COLD);
 					rv |= SIMU_RUN_TEST(unitest_GoodPathLockServer_n_mirrored, sys);
 					rv |= SIMU_RUN_TEST(unitest_GoodPathIO_n_mirrored, sys);
-					if (locks->maxNOwners==4) {		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
+					if (locks->maxNOwners==N_MAX_RAID_LOCKS) {		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
 						rv |= SIMU_RUN_TEST(unitest_DegradedMode_n_mirrored, sys);
 						rv |= SIMU_RUN_TEST(unitest_n_mirr_degraded_exhaustive, buni);
+					} else if (locks->maxNOwners == 2) {	// Tests below were written for 2-mirror so they assume 2 locks, even for N-replicas. Todo, fix
+						if (0) rv |= SIMU_RUN_TEST_ID(unitest_SyncStaleLocks, n_replica, buni);				// Very slow unitest
+						rv |= SIMU_RUN_TEST_ID(unitest_RetryLocksTrimSplit, n_replica, buni);
+						rv |= SIMU_RUN_TEST_ID(unitest_RetryLocksInDifferentLockModes, n_replica, sys);
+						//unitest_print("*** N-replica (l=%d) - %s\n", locks->max_n_owners, unitest_rv_to_string(rv));
 					}
-					// Todo: also unitest_DegradedMode()
-					if (locks->maxNOwners>2)
-						continue;										// Existing bugs, Daniel: Fix this
-					if (0) rv |= SIMU_RUN_TEST_ID(unitest_SyncStaleLocks, n_replica, buni);				// Very slow unitest
-					rv |= SIMU_RUN_TEST_ID(unitest_RetryLocksTrimSplit, n_replica, buni);
-					rv |= SIMU_RUN_TEST_ID(unitest_RetryLocksInDifferentLockModes, n_replica, sys);
-					//unitest_print("*** N-replica (l=%d) - %s\n", locks->max_n_owners, unitest_rv_to_string(rv));
 				}
 			}
 			*locks = backup_locks;
