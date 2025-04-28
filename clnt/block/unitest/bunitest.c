@@ -3951,8 +3951,7 @@ struct stale_dirty_unknown {		// Todo: Remove this confusing struct
 	};
 };
 
-static void __set_bi_inj_from_stale_dirty_unknown(union nvmeib_blkset_problem_report *bi_inj, struct stale_dirty_unknown sdu, int dirty_value)
-{
+static void __set_bi_inj_from_sdu(union nvmeib_blkset_problem_report *bi_inj, struct stale_dirty_unknown sdu, int dirty_value) {
 	BUG_ON(sdu.all == 0); // No injection
 	if (sdu.is_dirty) {
 		BUG_ON(sdu.is_unknown); // Mutual exclusive
@@ -3966,7 +3965,7 @@ static void __set_bi_inj_from_stale_dirty_unknown(union nvmeib_blkset_problem_re
 	}
 }
 
-static void __set_ram_binfo_from_stale_dirty_unknown(struct ramDiskSimulator *ssd, const u64 addr, struct stale_dirty_unknown sdu, int dirty_value)
+static void __set_ram_binfo_from_sdu(struct ramDiskSimulator *ssd, const u64 addr, struct stale_dirty_unknown sdu, int dirty_value)
 {
 	if (sdu.is_dirty) {
 		BUG_ON(sdu.is_unknown); // Mutual exclusive
@@ -4077,7 +4076,7 @@ struct t_n_mirror_tester_r1* t_n_mirror_tester_r1_init_vol(struct t_n_mirror_tes
 	t->verbose = _verbose;
 	t->lockset_prob_backup = nvmeibc_sync_full_lockset_probability_factor;
 	BUG_ON(t->lockset_prob_backup != NVMEIBC_SYNC_PROB_FORCE_LOCKSET);
-	t->mem = kmalloc(LOCKSET_SLICES * NVMEIBC_SECTOR_SIZE, GFP_KERNEL);	 // Array to read/write to disk, at most 1 blockset
+	t->mem = sim_kzalloc(LOCKSET_SLICES * NVMEIBC_SECTOR_SIZE, GFP_KERNEL);	 // Array to read/write to disk, at most 1 blockset
 	memset(&t->lv, 0, sizeof(t->lv));
 	memset(&t->topos, 0, sizeof(t->topos));
 	strlcpy(t->iter_descript, "Uninitialized", sizeof(t->iter_descript));
@@ -4117,7 +4116,7 @@ bool t_n_mirror_tester_r1_has_next_chunk(const struct t_n_mirror_tester_r1* t) {
 
 void t_n_mirror_tester_r1_destroy(struct t_n_mirror_tester_r1* t, const char* info) {
 	nvmeibc_sync_full_lockset_probability_factor = t->lockset_prob_backup;		// restore value
-	kfree(t->mem);
+	sim_kfree(t->mem);
 	BUG_ON(!NVMeshSystem_is_stable(t->env.sys));					// System must be in a stable state
 	unitest_print("*************** %s, finish, n_iters=%u\n", info, t->lv.total_iterations);
 }
@@ -4293,17 +4292,18 @@ void t_n_mirror_tester_r1_binfo_verify_and_cleanup(struct t_n_mirror_tester_r1* 
 
 /*****************************************************************************/
 
-/*run test that simulate recovery*/
-TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
+TEST_FUNC int unitest_R1_recovery_RW_W_Basic(bunitest_s* B) {
 	struct NVMeshSystem *sys = B->sys;
 	//struct clientSimulator *client = &sys->clients[0];				// Test via the first client
 	const enum NVMEIBTC_DS_MODE sgmnts_mode[2] = {NVMEIBTC_DS_MODE_RW, NVMEIBTC_DS_MODE_W};
-	int volIndx;
-	u32 rlba, sgmnt_idx;
+	int volIndx, n_vols = ((get_sys_test_phase(sys) == BUNI_N_MIRR_TESTING) ? 1 : sys->mdb.nVols);
+	u32 rlba, i, sgmnt_idx;
+	struct t_n_mirror_tester_r1 _t, *t;
+	struct block_inject_ptrs *ow = NULL, *_w = NULL;			// Owner seg (RW) injection and W seg ingection;
 
 	clientSimulator_wait_for_all_recoveries_done(sys->clients); //precondition
 
-	for (volIndx = 0; volIndx < sys->mdb.nVols; ++volIndx) {		// Only vol 0 is relevant for recovery
+	for (volIndx = 0; volIndx < n_vols; ++volIndx) {		// Only vol 0 is relevant for recovery
 		struct clientSimulator *clnt = sys->clients;
 		struct nvmeibc_block_device *dev = clnt->devs[volIndx];
 		struct disk_range *sgmnts = &sys->mdb.vols[volIndx].segs[0];
@@ -4312,25 +4312,26 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 		if (!tTopoOfVolume_isMirrored(cfv))
 			continue;													// recovery of non mirorred volumes is irrelevant
 
-		for (sgmnt_idx = 0; sgmnt_idx < sgmnts->replicas; sgmnt_idx++) {				// ------------------------------------- Stale locks recovery: msg sent by each of 2 tomas
-			struct nvmeibc_topology *t   = ___get_tail_topo_of_device(sys, volIndx);
-			struct nvmeibc_raid1 *c_raid = &t->chunks[0].raid1s[0];
-			for (rlba = sgmnt_idx*LOCKSET_4KS; rlba < sgmnts->length; rlba += LOCKSET_4KS) {							// Mark subset of raid with stale locks.
-				const int si = get_owner_seg_of_lock(c_raid, __from4K(rlba));
-				ramDiskSimulator_lockStale(&sys->servers[sgmnts[si].node_id].ramDisk, sgmnts[si].dlba_start + rlba);
-			}
-			for (rlba = 0; rlba < sgmnts->replicas; rlba++) {								// Verify stale lock was indeed cleared
-				BUG_ON(tomaSimulator_recoverThing(r1, &sgmnts[rlba], RCVR_STALE_REBUILD) < 0);
-				ramDiskSimulator_verify_no_locks(&sys->servers[sgmnts[rlba].node_id].ramDisk);
-			}
-
-			BUG_ON(tomaSimulator_recoverThing(r1, &sgmnts[sgmnt_idx], RCVR_STALE_REBUILD_PING) < 0);		// Test, ping and abort messages
-			BUG_ON(tomaSimulator_recoverThing(r1, &sgmnts[sgmnt_idx], RCVR_STALE_REBUILD_ABORT) < 0);
+		t = t_n_mirror_tester_r1_init_vol(&_t, sys, volIndx, !true);
+		BUG_ON(r1 != t_n_mirror_tester_r1_get_toma_praid_conf(t));
+		BUG_ON(sgmnts != t->curSeg);
+		// ------------------------------------- Stale locks recovery {RW,RW}: msg sent by each of 2 tomas
+		for (rlba = LOCKSET_4KS; rlba < sgmnts->length; rlba += LOCKSET_4KS) {							// Mark subset of raid with stale locks.
+			const int ows = (rlba / (LOCKSET_4KS<<LOCK_CHANGE_STRIDE_SHIFT)) % sgmnts->replicas;	// owner seg indx
+			t_n_mirror_tester_r1_print_gen(t, "Stale vol[%u].seg[%u].rlba=0x%x\n", volIndx, ows, rlba);
+			ramDiskSimulator_lockStale(&sys->servers[sgmnts[ows].node_id].ramDisk, sgmnts[ows].dlba_start + rlba);
+		}
+		for (i = 0; i < sgmnts->replicas; i++) {								// Verify stale lock was indeed cleared
+			BUG_ON(tomaSimulator_recoverThing(r1, &sgmnts[i], RCVR_STALE_REBUILD) < 0);
+			ramDiskSimulator_verify_no_locks(&sys->servers[sgmnts[i].node_id].ramDisk);
+			BUG_ON(tomaSimulator_recoverThing(r1, &sgmnts[i], RCVR_STALE_REBUILD_PING) < 0);		// Test, ping and abort messages
+			BUG_ON(tomaSimulator_recoverThing(r1, &sgmnts[i], RCVR_STALE_REBUILD_ABORT) < 0);
 		}
 		__verify_raid_no_locks_no_dbits(sys, sgmnts);
-		for (sgmnt_idx = 0; sgmnt_idx < sgmnts->replicas; sgmnt_idx++) { //checks PING & ABORT messages, while recovery is running
+
+		for (i = 0; i < sgmnts->replicas; i++) { 		// Checks PING & ABORT messages, while recovery is running
 			struct toma_recovery_args async_rebuild = RCVR_DIRTY_REBUILD;
-			struct disk_range *sgmnt = &sgmnts[sgmnt_idx];
+			struct disk_range *sgmnt = &sgmnts[i];
 			struct ramDiskSimulator *ssd = &sys->servers[sgmnt->node_id].ramDisk;
 			struct sim_recovery_hooks hooks = sim_recovery_hooks_create(0, 1, 1, 0); //don't sleep, wait for rcvr launched and cleanup
 			union nvmeib_blkset_problem_report bi_inj[RAMDISK_DATA_LOCK_SIZE];
@@ -4342,14 +4343,14 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 			ssd->c.bi_inj = bi_inj;
 			sim_recovery_setup_hooks(&hooks);
 
-			//start recovery - wait for launching
+			// Start recovery - wait for launching
 			BUG_ON(tomaSimulator_recoverThing(r1, sgmnt, async_rebuild) < 0);
 			nvmeibc_multi_completion_wait_for(&hooks.launched);
 
-			//send ping - some progress should be reported back to toma; would be nice to verify it to
+			// Send ping - some progress should be reported back to toma; would be nice to verify it to
 			BUG_ON(tomaSimulator_recoverThing(r1, sgmnt, RCVR_DIRTY_REBUILD_PING) < 0);
 
-			//now send abort message & wait
+			// Now send abort message & wait
 			BUG_ON(tomaSimulator_recoverThing(r1, sgmnt, RCVR_DIRTY_REBUILD_ABORT) < 0);
 			nvmeibc_multi_completion_wait_for(&hooks.cleaned);
 
@@ -4359,15 +4360,15 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 			sim_recovery_clean_hooks();
 			clientSimulator_wait_for_all_recoveries_done(clnt);
 			clientSimulator_wait_for_all_sync_ops(clnt);
-
 			busy_wait_forever_more(microseconds(20), atomic_read(&sys->servers[sgmnt->node_id].simToma.num_running_recoveries) == 0);
-			_NT(trace_bunitest_unitest_R1_recovery_Basic, "waiting for toma=@TOMA_UNIQUEID recoveries done", sys->servers[sgmnt->node_id].simToma.uniqueID);
+			_NT(t01r1rrwwb, "waiting for toma=@TOMA_UNIQUEID recoveries done", sys->servers[sgmnt->node_id].simToma.uniqueID);
 		}
 		__verify_raid_no_locks_no_dbits(sys, sgmnts);
-		for (sgmnt_idx = 0; sgmnt_idx < sgmnts->replicas; sgmnt_idx++) {				// ------------------------------------- Dbits recovery
+
+		// ------------------------------------- Dbits recovery
+		for (sgmnt_idx = 0; sgmnt_idx < 2; sgmnt_idx++) {				// Replace by t.topo loop on all single / double degraded modes if applicable
 			struct nvmeibc_sync_stats *stats = &dev->dp.sync_rsrcs.stats;
-			u64 *cur_num_syncs = &stats->num_dirty_bit_suspect;
-			u64 before = *cur_num_syncs, count, after;
+			const bool commit_binfo_syncs_used = (t->curSeg->replicas > 2);		// See production function __calc_must_fix_binfo()
 			tomaSimulator_switchTopo(r1uuid(r1), sgmnts_mode[sgmnt_idx], sgmnts_mode[sgmnt_idx^1], SW_TOPO__WAIT_ACK);				// {RW,W} or {W,RW}
 			__verify_raid_no_locks_no_dbits(sys, sgmnts);
 			tomaSimulator_recoverOK_Blocking(r1, &sgmnts[sgmnt_idx], RCVR_DIRTY_REBUILD);		// No dirtybits, call recovery which will do nothing
@@ -4404,217 +4405,185 @@ TEST_FUNC int unitest_R1_recovery_Basic(bunitest_s* B) {
 				sim_recovery_clean_hooks();
 				__verify_raid_no_locks_no_dbits(sys, sgmnts);
 			}
+			t_n_mirror_tester_r1_init_io_and_inj_ptrs(t, (sgmnt_idx << LOCK_CHANGE_STRIDE_SHIFT));	// Test with different blockset vlba offset, just for fun to change dlbas and primary owner in N-mirror. Can put 0 as well
+			ow = &t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[0]];	// Primary owner lock
+			_w = &t->lv.inj_ptrs[sgmnt_idx^1];						// W seg
+			t->lv.binfo_inject_mode = BINFO_INJECT_ALL_LOCKS;
 			if (1) { // Test all problem injections with different real lock scenarios
-				struct disk_range *sgmnt = &sgmnts[sgmnt_idx];
-				struct ramDiskSimulator *ssd = &sys->servers[sgmnt->node_id].ramDisk;
-				struct stale_dirty_unknown problem_injection;
-				struct stale_dirty_unknown lock_injection;
-				const u64 first_blockset_index_abs = (sgmnt->dlba_start / LOCKSET_SLICES);
-				const u64 first_blockset_index_rel = COMMITTED_ADDR_AS(ssd, sgmnt->dlba_start, 4KB, LOCK);
+				struct ramDiskSimulator *ssd = &ow->self->ramDisk; //&sys->servers[sgmnt->node_id].ramDisk;
+				struct stale_dirty_unknown problem_injection, lock_injection;
+				const u64 first_blockset_index_rel = COMMITTED_ADDR_AS(ssd, ow->dlba, 4KB, LOCK);
+				struct toma_recovery_args Dbits_sync_rebuild = RCVR_DIRTY_REBUILD;
+				const u16 all_dbits = (sgmnt_idx^1)+1;
 				int solve_with_io;
-				u8 *mem = sim_kzalloc(NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 				union nvmeib_blkset_problem_report bi_inj[RAMDISK_DATA_LOCK_SIZE];
+				Dbits_sync_rebuild.ext_args.lock_range.count = 3; Dbits_sync_rebuild.ext_args.lock_range.override = true;
+				BUG_ON(nvmeibc_sync_full_lockset_probability_factor != NVMEIBC_SYNC_PROB_FORCE_LOCKSET);		// force full LOCKSET sync
 				for (solve_with_io = 0; solve_with_io < 3; solve_with_io++) { // Solve with recovery or read/write IO
 					for (problem_injection.all = 2; problem_injection.all < 6; problem_injection.all++) { // Dirty (2), Stale + Dirty (3), Unknown (4), Unknown + Stale (5). No problem (0) and Stale (1) (will only trigger copy stale) tested below.
 						for (lock_injection.all = 0; lock_injection.all < 6; lock_injection.all++) { // None (0), Stale (1), Dirty (2), Stale + Dirty (3), Unknown (4), Unknown + Stale (5)
+							t_n_mirror_tester_r1_print_gen(t, "DiffLocks vol[%u].seg[%u], caller=%u, recov_prob=0x%x, lock=0x%x\n", volIndx,sgmnt_idx, solve_with_io, problem_injection.all, lock_injection.all);
+							nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);
 							memset(bi_inj, 0, sizeof(bi_inj));
-							*cur_num_syncs = 0;
-							if (!solve_with_io) { // Only for tiggered syncs
-								__set_bi_inj_from_stale_dirty_unknown(&bi_inj[first_blockset_index_rel], problem_injection, (1 ^ sgmnt_idx) + 1);
-							}
-							__set_ram_binfo_from_stale_dirty_unknown(ssd, first_blockset_index_abs*LOCKSET_SLICES, lock_injection, (1^sgmnt_idx)+1);
+							stats->num_dirty_bit_suspect = 0;
 							ssd->c.bi_inj = bi_inj;
+							__set_ram_binfo_from_sdu(ssd, ow->dlba, lock_injection, all_dbits);
 							if (solve_with_io) { // Cause IO to encounter injection in lock
 								if (solve_with_io == 1) { // Read can only resolve stale locks
-									int rv = osSimulator_readArrWait( &clnt->OS, volIndx, 0, 1, mem);	REPORT_ERROR(rv);
+									int rv = osSimulator_readArrWait( &clnt->OS, volIndx, t->lv.io_t.vlba, 1, t->mem);	REPORT_ERROR(rv);
 								} else { 				  // Small Write can only resolve stale locks
-									int rv = osSimulator_writeArrWait(&clnt->OS, volIndx, 0, 1, mem);	REPORT_ERROR(rv);
+									int rv = osSimulator_writeArrWait(&clnt->OS, volIndx, t->lv.io_t.vlba, 1, t->mem);	REPORT_ERROR(rv);
 								}
-								if (lock_injection.is_dirty || lock_injection.is_unknown) { // Read/Write will not solve any DBits
-									ramDiskSimulator_setDirty(ssd, sgmnt->dlba_start, 0);
+								if (lock_injection.is_dirty || lock_injection.is_unknown) { // Read/Write will not solve/change any DBits in {RW,W}
+									ramDiskSimulator_setDirty(ssd, ow->dlba, 0);
 								}
+								clientSimulator_wait_for_all_sync_ops(clnt);
+								BUG_ON(stats->num_full_blockset_ok != (lock_injection.is_stale ? 1 : 0));
 							} else { // Trigger recovery to get problem injected, but when taking the lock will encounter (the same or different lock value)
-								tomaSimulator_recoverOK_Blocking(r1, &sgmnts[sgmnt_idx], RCVR_DIRTY_REBUILD);
+								__set_bi_inj_from_sdu(&bi_inj[first_blockset_index_rel], problem_injection, all_dbits);
+								t_n_mirror_tester_r1_launchRecoveryAndWait(t, Dbits_sync_rebuild);
+								BUG_ON(stats->num_full_blockset_ok != 1);
+								if (commit_binfo_syncs_used)
+									BUG_ON((stats->num_commit_binfo + stats->num_full_blockset_ok) != Dbits_sync_rebuild.ext_args.lock_range.count);
 							}
-							clientSimulator_wait_for_all_sync_ops(clnt);
-							after = *cur_num_syncs;
-							BUG_ON(!solve_with_io && (after != lock_injection.is_unknown)); // Single unknown sync (IO doesn't trigger it) only if the lock was injected with unknown
-							__verify_raid_no_locks_no_dbits(sys, sgmnts);
-							// Clear injection for next round
-							ssd->c.bi_inj = NULL;
+							if (t->curSeg->replicas == 2) {
+								BUG_ON(!solve_with_io && (stats->num_dirty_bit_suspect != lock_injection.is_unknown)); // Single unknown sync (IO doesn't trigger it) only if the lock was injected with unknown
+							} else {
+								BUG_ON(stats->num_dirty_bit_suspect != 0);		// Resolve by merge with secondary lock
+							}
+							ssd->c.bi_inj = NULL;	// Clear injection for next round
+							__verify_raid_no_locks_no_dbits(sys, t->curSeg);
 						}
 					}
 				}
-				sim_kfree(mem);
-				__verify_raid_no_locks_no_dbits(sys, sgmnts);
 			}
-			if (volIndx == 0) {				// --------------------- R1: {RW,W} read-op causes partial sync which copies dirtybit to 'W' seg.
-				struct disk_range *rws = &sgmnts[sgmnt_idx];
-				struct ramDiskSimulator* ssd = &sys->servers[rws->node_id  ].ramDisk;
-				struct ramDiskSimulator* oth = &sys->servers[rws->node_id^1].ramDisk;		// The disk to which stale locks should be copied
-				const int inject[2] = {0,2}, inj = inject[sgmnt_idx];						// Dirty bit+Stale   on blocksets {0,2}. 0 rbla for {RW,W} and 2 for {W,RW}
-				u8	*read_blk = sim_kmalloc(NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
-				const u16 all_dbits = (sgmnt_idx^1)+1; 										// Dbit for 'W' segment
-				int read_rv, vlba;
-				rlba = LOCKSET_4KS*inj;
-				vlba = sys->tcf.vols[volIndx].chunks->stripeWidth * rlba;					// VLBA of read IO to fall on rlba blockset
-				ramDiskSimulator_setDirty( ssd, rws->dlba_start + rlba, all_dbits);
-				ramDiskSimulator_lockStale(ssd, rws->dlba_start + rlba);
-				oth->TxIDs[inj] = ssd->TxIDs[inj] = 0;
-				BUG_ON(nvmeibc_sync_full_lockset_probability_factor != NVMEIBC_SYNC_PROB_FORCE_LOCKSET);
+			if (volIndx != 0)
+				goto __done_with_praid;
+			// --------------------- R1: {RW,W} read-op causes partial sync which copies dirtybit to 'W' seg.
+			{													// Covered by n mirror degraded test
+				const u16 all_dbits = (sgmnt_idx^1)+1, invalid_dbit = 0x77;					// Dbit for 'W' segment
+				int read_rv;
+				t->lv.dbits_idx = 0; t->dbits[t->lv.dbits_idx].all_bits = all_dbits;
+				t_n_mirror_tester_r1_binfo_inject(t);
+				_w->ram.dbits->all_bits = invalid_dbit;
+				ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba);
+				t_n_mirror_tester_r1_binfo_inject_txid_all_different(t, 1000);
 				nvmeibc_sync_full_lockset_probability_factor = NVMEIBC_SYNC_PROB_FORCE_MIN;	// Force read to launch partial sync
-				read_rv = osSimulator_readArr(&clnt->OS, volIndx, vlba, 1, read_blk);	REPORT_ERROR(read_rv);
+				read_rv = osSimulator_readArr(&clnt->OS, volIndx, t->lv.io_t.vlba, 1, t->mem);	REPORT_ERROR(read_rv);
 				clientSimulator_wait_for_all_bio_ops(clnt);
-				BUG_ON(ssd->dbits[inj].all_bits != all_dbits);								// Injected dbit remain on owner seg, they could not be solved by partial sync
-				BUG_ON(ssd->TxIDs[inj] != oth->TxIDs[inj]);
-				if (1) { // BUG: NVMESH-3032 was fixed yet
-					BUG_ON((ssd->TxIDs[inj] != 0) || (oth->dbits[inj].all_bits != 0));		// Partial sync could not write binfo (txid, dbits)
-				} else {
-					BUG_ON(ssd->TxIDs[inj] != NVMEIB_BLOCK_IO_OP_RECOVER_STALE);			// Verify via debug TxID that this sync indeed ran
-					BUG_ON(oth->dbits[inj].all_bits != all_dbits);							// Wrong dirty bits on 'W' seg for themselves, created by partial sync
-				}
 				nvmeibc_sync_full_lockset_probability_factor = NVMEIBC_SYNC_PROB_FORCE_LOCKSET;		// force full LOCKSET sync
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD);
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				sim_kfree(read_blk);
-				__verify_raid_no_locks_no_dbits(sys, sgmnts); // Verify that all stale locks/dbits were removed
+				BUG_ON(ow->ram.dbits->all_bits != all_dbits);								// Injected dbit remain on owner seg, they could not be solved by partial sync
+				if (t->curSeg->replicas == 2) { // NVMESH-3032 - 2 mirror special optimization
+					t_n_mirror_tester_r1_binfo_inject_txid_verify(t, NVMEIB_BLOCK_IO_OP_RECOVER_STALE, false);
+					BUG_ON(_w->ram.dbits->all_bits != invalid_dbit);						// Partial sync could not write self dbits for W seg
+				} else {
+					t_n_mirror_tester_r1_binfo_inject_txid_verify(t, NVMEIB_BLOCK_IO_OP_RECOVER_STALE, true); // Verify via debug TxID that this sync indeed commited binfo
+					BUG_ON(_w->ram.dbits->all_bits != all_dbits);									// Wrong dirty bits on 'W' seg for themselves, created by partial sync
+				}
+				t_n_mirror_tester_r1_launchRecoveryAndWait(t, RCVR_DIRTY_REBUILD);
+				__verify_raid_no_locks_no_dbits(sys, t->curSeg); 	// Verify that all stale locks/dbits were removed from praid
 			}
-			if (volIndx == 0) {				// --------------------- R1: {RW,W} corrupted copy owner has wrong dbit. Sync of commit stale encounters it
-				struct disk_range *rws = &sgmnts[sgmnt_idx];
-				struct ramDiskSimulator* ssd = &sys->servers[rws->node_id  ].ramDisk;
-				struct ramDiskSimulator* oth = &sys->servers[rws->node_id^1].ramDisk;		// The disk to which stale locks should be copied
-				const int inject[2] = {0,2}, inj = inject[sgmnt_idx];						// Dirty bit+Stale   on blocksets {0,2}. 0 rbla for {RW,W} and 2 for {W,RW}
+			{				// --------------------- R1: {RW,W} corrupted copy owner has wrong dbit. Sync of commit stale encounters it
 				const u16 all_dbits = (sgmnt_idx^1)+1; 										// Dbit for 'W' segment
-				rlba = LOCKSET_4KS*inj;
-				ramDiskSimulator_lockStale(ssd, rws->dlba_start + rlba);
-				ramDiskSimulator_setDirty( oth, rws->dlba_start + rlba, all_dbits);	// Copy owner has wrong dbit!
+				const int inject_stale_idx = 0;
+				t_n_mirror_tester_r1_binfo_inject_txid_all_different(t, 1000);
+				ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba +  LOCKSET_4KS*inject_stale_idx);
+				_w->ram.dbits->all_bits = all_dbits;											// Copy owner has wrong dbit!
 				dev->dp.io_stats.mgr.n_binfo_copy_owner_error = 0;
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD);
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				BUG_ON((ssd->dbits[inj].all_bits != 0) || (oth->dbits[inj].all_bits != 0));	// Wrong dbit on copy owner was cleaned
-				BUG_ON(ssd->TxIDs[inj] != oth->TxIDs[inj]);
-				BUG_ON(oth->TxIDs[inj] != NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE);			// Verify via debug TxID that this sync indeed ran
+				t_n_mirror_tester_r1_launchRecoveryAndWait(t, RCVR_DIRTY_REBUILD);
+				BUG_ON((ow->ram.dbits->all_bits != 0) || (_w->ram.dbits->all_bits != 0));	// Wrong dbit on copy owner was cleaned
+				t_n_mirror_tester_r1_binfo_inject_txid_verify(t, NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE, true);	// Verify via debug TxID that this sync indeed comited binfo
 				BUG_ON(dev->dp.io_stats.mgr.n_binfo_copy_owner_error != 1);
-				ramDiskSimulator_lockUnSta(ssd, rws->dlba_start + rlba);					// Verify that stale lock exists on both segments
-				ramDiskSimulator_lockUnSta(oth, rws->dlba_start + rlba);
-				__verify_raid_no_locks_no_dbits(sys, sgmnts); // Verify that all stale locks/dbits were removed
+				t_n_mirror_tester_r1_verify_all_lock_copies_are_stale_and_clean_them(t, &inject_stale_idx, 1);	// Verify that stale lock exists on all segments
 			}
-
-			if (volIndx == 0) {             // --------------------- Verify dirty bits recovery also copies stale locks without solving them
-				struct disk_range *rws = &sgmnts[sgmnt_idx];
-				struct ramDiskSimulator* ssd = &sys->servers[rws->node_id  ].ramDisk;
-				struct ramDiskSimulator* oth = &sys->servers[rws->node_id^1].ramDisk;		// The disk to which stale locks should be copied
+			free_io_traits(&t->lv.io_t);
+			t_n_mirror_tester_r1_init_io_and_inj_ptrs(t, 0);					// Start from rlba 0
+			ow = &t->lv.inj_ptrs[t->lv.io_t.slices[0].rlmap.si[0]];	// Primary owner lock
+			{
 				const int inject_dbits[2][2] = {{0,2}, {1,3}};								// Dirty bit   on blocksets {0,2}. Thus we have all options (D+S, D, S, None)
 				const int inject_stale[2][2] = {{2,3}, {1,0}};								// Stale locks on blocksets {2,3}
-				before = *cur_num_syncs;
-				count = 0;
-
-				nvmeibc_debug_ram_unknown_dbits = false;	// Deliberately using double unknowns in 1-degraded
-				for (rlba = 0; rlba < 2; rlba++) {
-					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_build_unk(-1,-1).all_bits);
-					ramDiskSimulator_lockStale(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][rlba]);
-					//_ND(t_simuav20, "sss @INT, @INT", inject_dbits[sgmnt_idx][rlba], inject_stale[sgmnt_idx][rlba]);
-					count++;
-				}
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD);
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				// Verify that stale lock exists on both segments (where there was no dbits)
-				ramDiskSimulator_lockUnSta(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][1]);
-				ramDiskSimulator_lockUnSta(oth, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][1]);
-				after = *cur_num_syncs;
-				BUG_ON(after != before + count);
-				nvmeibc_debug_ram_unknown_dbits = true;		// Double unknowns in 1-degraded
-
-				for (rlba = 0; rlba < 2; rlba++) { // Repeat with single unknown
-					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_single_unk().all_bits);
-					ramDiskSimulator_lockStale(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][rlba]);
-					//_ND(t_simuav21, "sss @INT, @INT", inject_dbits[sgmnt_idx][rlba], inject_stale[sgmnt_idx][rlba]);
-					count++;
-				}
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD);
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				// Verify that stale lock exists on both segments (where there was no dbits)
-				ramDiskSimulator_lockUnSta(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][1]);
-				ramDiskSimulator_lockUnSta(oth, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][1]);
-				after = *cur_num_syncs;
-				BUG_ON(after != before + count);
-				if (1) {// --------------------- Verify dirty bits recovery also does not copy stale locks which were reported by server but solved by other client
-					union nvmeib_blkset_problem_report bi_inj[RAMDISK_DATA_LOCK_SIZE];
-					memset(bi_inj, 0, sizeof(bi_inj));
-					ssd->c.bi_inj = bi_inj;
-					for (rlba = 0; rlba < 2; rlba++) { // Create All 4 subsets of combinations (reported stale vs actual stale lock in RAM)
-						bi_inj[inject_dbits[sgmnt_idx][rlba]].is_stale = true;
-						ramDiskSimulator_lockStale(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][rlba]);
+				const int n_non_injected_blocksets = (t->curSeg->length/LOCKSET_SLICES) - 3;// 3 injections above, the rest are non injected
+				{// --------------------- Verify dirty bits recovery also copies stale locks without solving them, if no dbits in this blockset
+					const bool is_dbit_commited_in_pre = (t->curSeg->replicas == 2);								// Resolved via other RW segs
+					const u16 dbits_val[2] = { nvmeib_dbits_entry_build_unk(-1,-1).all_bits, nvmeib_dbits_entry_single_unk().all_bits }; t->n_dbits_entries = (int)ARRAY_SIZE(dbits_val);
+					for (t->lv.dbits_idx = 0; t->lv.dbits_idx < t->n_dbits_entries; t->lv.dbits_idx++) {			// 2 Iterations, single/double unknown
+						nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);
+						ramDiskSimulator_reset_txid(&ow->self->ramDisk);
+						for (i = 0; i < 2; i++) {
+							ramDiskSimulator_setDirty( &ow->self->ramDisk, ow->dlba + LOCKSET_4KS*inject_dbits[sgmnt_idx][i], dbits_val[t->lv.dbits_idx]);
+							ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba + LOCKSET_4KS*inject_stale[sgmnt_idx][i]);
+							t_n_mirror_tester_r1_print_gen(t, "seg[%u], %d {dbit[%u]=0x%3x, stale[%u]}\n", sgmnt_idx, i, inject_dbits[sgmnt_idx][i], dbits_val[t->lv.dbits_idx], inject_stale[sgmnt_idx][i]);
+						}
+						nvmeibc_debug_ram_unknown_dbits = (t->lv.dbits_idx != 0);	// Deliberately using double unknowns in 1-degraded
+						t_n_mirror_tester_r1_launchRecoveryAndWait(t, RCVR_DIRTY_REBUILD);
+						nvmeibc_debug_ram_unknown_dbits = true;		// Double unknowns in 1-degraded
+						t_n_mirror_tester_r1_verify_all_lock_copies_are_stale_and_clean_them(t, &inject_stale[sgmnt_idx][1], 1);	// Verify that stale lock exists on both segments (where there was no dbits)
+						BUG_ON(stats->num_commit_stale != 1);						// 1 stale lock blockset without dbit
+						BUG_ON(stats->num_full_blockset_ok != 2);					// 2 blocksets with dbits
+						BUG_ON(stats->num_dirty_bit_suspect != (is_dbit_commited_in_pre ? 2 : 0));	// Both dbits were unknown
+						BUG_ON(stats->num_commit_binfo != (u64)(commit_binfo_syncs_used ? n_non_injected_blocksets : 0));
+						BUG_ON(stats->num_part_blockset_ok != (stats->num_commit_stale + stats->num_commit_binfo));
 					}
-					tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD);
-					for (rlba = 0; rlba < 2; rlba++)		// Verify stales remained unchanged on primary owner (regardless of what server has reported), and no new stales were created
-						ramDiskSimulator_lockUnSta(ssd, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][rlba]);
-					ramDiskSimulator_verify_no_locks(ssd);
-
-					ramDiskSimulator_lockUnSta(oth, rws->dlba_start + LOCKSET_4KS*inject_stale[sgmnt_idx][0]);// Verify stales were copied only for blockset where actual stale existed AND stale was reported
-					ramDiskSimulator_verify_no_locks(oth);
-					ssd->c.bi_inj = NULL;
 				}
-				__verify_raid_no_locks_no_dbits(sys, sgmnts);
+				{// --------------------- Verify dirty bits recovery also does not copy stale locks which were reported by server but solved by other client
+					union nvmeib_blkset_problem_report bi_inj[RAMDISK_DATA_LOCK_SIZE];
+					const u64 first_blockset_index_rel = COMMITTED_ADDR_AS(&ow->self->ramDisk, ow->dlba, 4KB, LOCK);
+					memset(bi_inj, 0, sizeof(bi_inj));
+					ow->self->ramDisk.c.bi_inj = bi_inj;
+					nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);
+					for (i = 0; i < 2; i++) { // Create All 4 subsets of combinations (reported stale vs actual stale lock in RAM)
+						bi_inj[first_blockset_index_rel+inject_dbits[sgmnt_idx][i]].is_stale = true;
+						ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba + LOCKSET_4KS*inject_stale[sgmnt_idx][i]);
+						t_n_mirror_tester_r1_print_gen(t, "seg[%u], %d {recov_stale[%u], actual_stale[%u]}\n", sgmnt_idx, i, inject_dbits[sgmnt_idx][i], inject_stale[sgmnt_idx][i]);
+					}
+					t_n_mirror_tester_r1_launchRecoveryAndWait(t, RCVR_DIRTY_REBUILD);
+					ow->self->ramDisk.c.bi_inj = NULL;
+					if (!commit_binfo_syncs_used) {	// Stales were copied to 'W' seg only where recovery encountered them. If no binfo sync then this means only for blockset where actual stale existed AND stale was reported to the recovery
+						BUG_ON(*_w->ram.lock != 0);		// Recovery did not process this blockset at all so stale lock was not copied
+						ramDiskSimulator_lockStale(&_w->self->ramDisk, _w->dlba + LOCKSET_4KS*inject_stale[sgmnt_idx][1]);
+					}
+					// Verify all necessary stales were copied (regardless of what server has reported to the recovery), and no new stales were created
+					t_n_mirror_tester_r1_verify_all_lock_copies_are_stale_and_clean_them(t, inject_stale[sgmnt_idx], 2);
+					BUG_ON(stats->num_commit_stale != (2 + (commit_binfo_syncs_used ? 1 : 0)));					// 2 stale locks copied, 1 commit binfo discovered a stale lock and mutated to commit stale
+					BUG_ON(stats->num_commit_binfo != (u64)(commit_binfo_syncs_used ? n_non_injected_blocksets : 0));
+					BUG_ON(stats->num_part_blockset_ok != (stats->num_commit_stale + stats->num_commit_binfo));
+				}
+
+				{// --------------------- R1: Dirty bits recovery also turns on convicts and handles them
+					const enum NVMEIBTC_DS_MODE conv[2] = {NVMEIBTC_DS_MODE_RW, NVMEIBTC_DS_MODE_W_IS_DIRTY};
+					struct toma_recovery_args Dconv_recov = RCVR_DIRTY_REBUILD_CONV;
+					const u16 dbits_val[3] = { 0x6 /*Strange dbit*/, nvmeib_dbits_entry_single_unk().all_bits, nvmeib_dbits_entry_build_unk(-1,-1).all_bits }; t->n_dbits_entries = (int)ARRAY_SIZE(dbits_val);
+					Dconv_recov.ext_args.lock_range.count = 4; Dconv_recov.ext_args.lock_range.override = true;
+					tomaSimulator_switchTopo(r1uuid(r1), conv[sgmnt_idx], conv[sgmnt_idx^1], SW_TOPO__WAIT_ACK);				// {RW,W-} or {W-,RW}
+					for (t->lv.dbits_idx = 0; t->lv.dbits_idx < t->n_dbits_entries; t->lv.dbits_idx++) {
+						nvmeibc_datapath_syncs_zero_stats(&dev->dp.sync_rsrcs);					 // DB suspect will still be assumed even though we had a convict and did not consider it known
+						for (i = 0; i < 2; i++) {
+							ramDiskSimulator_setDirty( &ow->self->ramDisk, ow->dlba + LOCKSET_4KS*inject_dbits[sgmnt_idx][i], dbits_val[t->lv.dbits_idx]); // Stale locks are auto solved by dirty convict turn on and then dbits rebuild turns them off
+							ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba + LOCKSET_4KS*inject_stale[sgmnt_idx][i]);
+							t_n_mirror_tester_r1_print_gen(t, "seg[%u], %d {dbit[%u]=0x%3x, stale[%u]}\n", sgmnt_idx, i, inject_dbits[sgmnt_idx][i], dbits_val[t->lv.dbits_idx], inject_stale[sgmnt_idx][i]);
+						}
+						warn_on_too_many_degraded =       (t->lv.dbits_idx > 0);			// When injecting invalid Dbit + convict we get more than allowed degraded segments
+						nvmeibc_debug_ram_unknown_dbits = (t->lv.dbits_idx != 2);			// Deliberate double unknowns in 1-degraded
+						t_n_mirror_tester_r1_launchRecoveryAndWait(t, Dconv_recov);
+						nvmeibc_debug_ram_unknown_dbits = warn_on_too_many_degraded = true;
+						ramDiskSimulator_verify_no_locks(&ow->self->ramDisk);
+						ramDiskSimulator_verify_no_dirty_bits(&ow->self->ramDisk);
+						if (t->curSeg->replicas == 2) {
+							BUG_ON(stats->num_part_blockset_ok != 0);							// All syncs are full blocksets: For 2-mirror, dconvict turn on actually solves the stale lock
+						} else {
+							BUG_ON(stats->num_part_blockset_ok != 2);							// Stale locks cannot be solved by dconvict turn on, only by dirtybit turn off
+						}
+						BUG_ON(stats->num_full_blockset_ok + stats->num_part_blockset_ok != 2*Dconv_recov.ext_args.lock_range.count);	// Dconvict turn on on each blockset + dbit turn off
+						BUG_ON(stats->num_dirty_bit_suspect != 0);							// DB Unknowns with convicts are not considered suspect (For 2 mirror)
+					}
+				}
 			}
-			if (volIndx == 0) {				// --------------------- R1: Dirty bits recovery also turns on convicts and handles them
-				const enum NVMEIBTC_DS_MODE conv[2] = {NVMEIBTC_DS_MODE_RW, NVMEIBTC_DS_MODE_W_IS_DIRTY};
-				struct disk_range *rws = &sgmnts[sgmnt_idx];
-				struct ramDiskSimulator* ssd = &sys->servers[rws->node_id  ].ramDisk;
-				//struct ramDiskSimulator* oth = &sys->servers[rws->node_id^1].ramDisk;		// The disk to which stale locks should be copied
-				const int inject_dbits[2][2] = {{0,2}, {1,3}};								// Dirty bit   on blocksets {0,2}
-				// DB suspect will still be assumed even though we had a convict and did not consider it known
-				before = *cur_num_syncs;
-				tomaSimulator_switchTopo(r1uuid(r1), conv[sgmnt_idx], conv[sgmnt_idx^1], SW_TOPO__WAIT_ACK);				// {RW,W-} or {W-,RW}
-				// When injecting invalid Dbit + convict we get more than allowed degraded segments
-				for (rlba = 0; rlba < 2; rlba++) {
-					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], 0x6);		// Strange dirty + convict will be turned on and then turned off
-				}
-				warn_on_too_many_degraded = false;					// Deliberatly inject more dbits than degraded segs, see remark above
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
-				warn_on_too_many_degraded = true;
-				ramDiskSimulator_verify_no_locks(ssd);
-				ramDiskSimulator_verify_no_dirty_bits(ssd);
-
-				for (rlba = 0; rlba < 2; rlba++) {
-					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_single_unk().all_bits);		// Unknown + convict will be turned on and then turned off
-				}
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				ramDiskSimulator_verify_no_locks(ssd);
-				ramDiskSimulator_verify_no_dirty_bits(ssd);
-
-				stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
-				nvmeibc_debug_ram_unknown_dbits = false;	// Same as above but deliberate double unknowns in 1-degraded
-				for (rlba = 0; rlba < 2; rlba++) {
-					ramDiskSimulator_setDirty( ssd, rws->dlba_start + LOCKSET_4KS*inject_dbits[sgmnt_idx][rlba], nvmeib_dbits_entry_build_unk(-1,-1).all_bits);		// 2 Unknown + convict will be turned on and then turned off
-				}
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
-				nvmeibc_debug_ram_unknown_dbits = true;
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				ramDiskSimulator_verify_no_locks(ssd);
-				ramDiskSimulator_verify_no_dirty_bits(ssd);
-				BUG_ON(stats->num_full_blockset_ok != 2*(rws->length/LOCKSET_SLICES));	// Dconvict turn on on each blockset + dbit turn off
-
-				stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
-				ramDiskSimulator_lockStale(ssd, rws->dlba_start);	// Stale locks are auto solved by dirty convict turn on and thendbits rebuild turns them off
-				tomaSimulator_recoverOK_Blocking(r1, rws, RCVR_DIRTY_REBUILD_CONV);
-				clientSimulator_wait_for_all_sync_ops(clnt);
-				ramDiskSimulator_verify_no_locks(ssd);
-				ramDiskSimulator_verify_no_dirty_bits(ssd);
-				BUG_ON(stats->num_full_blockset_ok != 2*(rws->length/LOCKSET_SLICES));	// Dconvict turn on on each blockset + dbit turn off
-
-				// DB Unknowns with convicts are not considered suspect (For 2 mirror)
-				after = *cur_num_syncs;
-				BUG_ON(after != before);
-			}
-
-			tomaSimulator_switchTopo(r1uuid(r1), NVMEIBTC_DS_MODE_RW, NVMEIBTC_DS_MODE_RW, SW_TOPO__WAIT_ACK);			// {RW	, RW} - normal
-			NVMeshSystem_serialize(sys);
-			__verify_raid_no_locks_no_dbits(sys, sgmnts);
-		}
-	}
-	BUG_ON(!NVMeshSystem_is_stable(sys));
+		__done_with_praid:
+			free_io_traits(&t->lv.io_t);
+			t_n_mirror_tester_r1_move_to_next_raid(t, __FUNCTION__);
+		}	// For each Segment
+		t_n_mirror_tester_r1_destroy(t, __FUNCTION__);
+	}		// For each volume
 	return 0;
 }
 
@@ -6638,6 +6607,7 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol(&_t, sys, 0, !true);
 	struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync_rsrcs.stats;
 	int rv;
+	unitest_R1_recovery_RW_W_Basic(B);
 	nvmeibc_nowhole_stats_reset();
 	for (; t_n_mirror_tester_r1_has_next_chunk(t); t_n_mirror_tester_r1_move_to_next_chunk(t)) {	// Loop on 4,3 mirror
 		const struct tTopoOfPraid* r1 = t_n_mirror_tester_r1_get_toma_praid_conf(t);
@@ -7693,7 +7663,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 			rv |= SIMU_RUN_TEST_ID(unitest_read_mutable_buffer, mirror, sys, 0);
 			rv |= SIMU_RUN_TEST(unitest_scrubRecovery_R1, buni);
 			NVMeshSystem_all_clients_mirror_edic(sys, false);	// Async tests will create corruptions, hence edic check will often fail, while not indicating correctness issue. Disable edic check.
-			rv |= SIMU_RUN_TEST(unitest_R1_recovery_Basic, buni);
+			rv |= SIMU_RUN_TEST(unitest_R1_recovery_RW_W_Basic, buni);
 			rv |= SIMU_RUN_TEST(unitest_async_degraded_mode_rebuild_during_io, sys);
 			rv |= SIMU_RUN_TEST(unitest_async_suspend_revive_during_rebuild, sys);
 			rv |= SIMU_RUN_TEST(unitest_async_attach_detach_during_rebuild, sys);
