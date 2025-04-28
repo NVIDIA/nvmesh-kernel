@@ -3939,7 +3939,7 @@ void tomaSimulator_recoverOK_Blocking(const struct tTopoOfPraid *r1, const struc
 }
 
 /*************************** N mirror tester  ********************************/
-struct stale_dirty_unknown {
+struct stale_dirty_unknown {		// Todo: Remove this confusing struct
 	union {
 		struct {
 			u8 is_stale : 1;
@@ -3972,12 +3972,8 @@ static void __set_ram_binfo_from_stale_dirty_unknown(struct ramDiskSimulator *ss
 		BUG_ON(sdu.is_unknown); // Mutual exclusive
 		ramDiskSimulator_setDirty(ssd, addr, dirty_value);
 	}
-	if (sdu.is_unknown) {
-		ramDiskSimulator_setDirty(ssd, addr, nvmeib_dbits_entry_single_unk().all_bits);	// Used in 1-degraded
-	}
-	if (sdu.is_stale) {
-		ramDiskSimulator_lockStale(ssd, addr);
-	}
+	if (sdu.is_unknown) ramDiskSimulator_setDirty( ssd, addr, nvmeib_dbits_entry_single_unk().all_bits);	// Used in 1-degraded
+	if (sdu.is_stale  ) ramDiskSimulator_lockStale(ssd, addr);
 }
 
 struct t_n_mirror_tester_r1 {
@@ -3985,7 +3981,7 @@ struct t_n_mirror_tester_r1 {
 	const struct disk_range *curSeg;		// First seg of current praid
 	//struct {
 		struct topologies_enumerator topos;		// Iterator on all topologies
-		char iter_descript[64], *itr_txt_cur;	// Print current topo info
+		char iter_descript[64];				// Print current topo info
 		bool are_all_p_dead;					// Max amount of segments are Dead. Praid is unprotected in any way
 	//};
 	union nvmeibc_dbits_entry dbits[16];	// Enough space for all diffrenet dbit values
@@ -3993,9 +3989,11 @@ struct t_n_mirror_tester_r1 {
 	int n_total_injected_dbits;
 	int lockset_prob_backup;
 	bool verbose;							// Turn on when debugging
+	u8 *mem;								// IO buffers
 	struct t_loop_variables {				// Intermediate variables used in loops
-		struct block_inject_ptrs inj_ptrs[4];			// struct block_ram_inject_ptrs
-		union nvmeibc_dbits_entry save_inj_dbits[4];	// Save injection to be able to verify when they should not be changed
+		struct block_inject_ptrs inj_ptrs[N_MAX_RAID_LOCKS];			// struct block_ram_inject_ptrs
+		union nvmeibc_dbits_entry save_inj_dbits[N_MAX_RAID_LOCKS];	// Save injection to be able to verify when they should not be changed
+		u32 save_inj_txid[N_MAX_RAID_LOCKS];
 		enum e_binfo_inject_mode { BINFO_INJECT_ONLY_PRIMARY_LOCK = 0, BINFO_INJECT_ONLY_SECONDARY_LOCK = 1, BINFO_INJECT_ALL_LOCKS = 2, BINFO_INJECT_INVALID = 3, } binfo_inject_mode;
 		struct io_traits io_t;
 		enum nvmeib_block_io_op cur_op;		// Current executed op
@@ -4056,7 +4054,7 @@ static int t_n_mirror_tester_r1_generate_valid_dbits(struct t_n_mirror_tester_r1
 }
 
 static void t_n_mirror_tester_r1_print_state(struct t_n_mirror_tester_r1* t) {
-	t->itr_txt_cur = &t->iter_descript[topo_enum_tostring(&t->topos, t->iter_descript)];
+	(void)topo_enum_tostring(&t->topos, t->iter_descript);
 	if (t->verbose) {
 		int i;
 		unitest_print("R1N %s\n", t->iter_descript);
@@ -4066,15 +4064,23 @@ static void t_n_mirror_tester_r1_print_state(struct t_n_mirror_tester_r1* t) {
 	}
 }
 
-struct t_n_mirror_tester_r1* t_n_mirror_tester_r1_init_vol_0(struct t_n_mirror_tester_r1* t, struct NVMeshSystem *sys, bool _verbose) {
-	const struct volume_segment_index vsi = {0,0,0,0};
+struct t_n_mirror_tester_r1* t_n_mirror_tester_r1_init_vol(struct t_n_mirror_tester_r1* t, struct NVMeshSystem *sys, int vol_ind, bool _verbose) {
+	const struct volume_segment_index vsi = {vol_ind, 0,0,0};	// Start with first chunk
 	t->env = (struct test_context){ .sys = sys, .client = sys->clients, .dev = sys->clients->devs[vsi.volume], .sraid = NVMeshSystem_TstPRaid_init_rel(sys, vsi)};
 	t->curSeg = &t->env.sys->mdb.vols[t->env.sraid.vsi.volume].segs[0];
-	BUG_ON(t->curSeg->replicas != 4); // First chunk 4 mirror
+	if (get_sys_test_phase(sys) == BUNI_VOLUMES_TESTING) {
+		BUG_ON(t->curSeg->replicas != 2); // Legacy 2 mirror testing
+	} else if (get_sys_test_phase(sys) == BUNI_N_MIRR_TESTING) {
+		BUG_ON(t->curSeg->replicas != 4); // First chunk 4 mirror
+	} else BUG();
 	t->n_total_injected_dbits = 0;
 	t->verbose = _verbose;
 	t->lockset_prob_backup = nvmeibc_sync_full_lockset_probability_factor;
+	BUG_ON(t->lockset_prob_backup != NVMEIBC_SYNC_PROB_FORCE_LOCKSET);
+	t->mem = kmalloc(LOCKSET_SLICES * NVMEIBC_SECTOR_SIZE, GFP_KERNEL);	 // Array to read/write to disk, at most 1 blockset
 	memset(&t->lv, 0, sizeof(t->lv));
+	memset(&t->topos, 0, sizeof(t->topos));
+	strlcpy(t->iter_descript, "Uninitialized", sizeof(t->iter_descript));
 	BUG_ON(!NVMeshSystem_is_stable(sys));					// System must be in a stable state
 	return t;
 }
@@ -4085,12 +4091,13 @@ const struct tTopoOfPraid* t_n_mirror_tester_r1_get_toma_praid_conf(const struct
 }
 
 void t_n_mirror_tester_r1_move_to_next_raid(const struct t_n_mirror_tester_r1* t, const char* info) {
-	// Reset all topologies back to RW
+	// Reset all praid segments back to RW
 	const enum NVMEIBTC_DS_MODE reset[N_MAX_RAID_SLICE_LEN] = {[0 ... N_MAX_RAID_SLICE_LEN-1] = NVMEIBTC_DS_MODE_RW};
 	const struct tTopoOfPraid* r1 = t_n_mirror_tester_r1_get_toma_praid_conf(t);
-	//NVMeshSystem_wipe_all_dirty_bits(t->env.sys);
+	__verify_raid_no_locks_no_dbits(t->env.sys, t->curSeg);	// NVMeshSystem_wipe_all_dirty_bits(t->env.sys);
 	tomaSimulator_switchTopoEC(r1->header.uuid, reset, SW_TOPO__WAIT_ACK_DR, NULL);
-	unitest_print("*************** %s RAID(%d+%d), n_topos=%u, n_dbits=%u, n_iters=%u\n", info, t->curSeg->slice_size, __disk_range_get_num_parities(t->curSeg), t->topos.impl.curr_permutation, t->n_total_injected_dbits, t->lv.total_iterations);
+	//NVMeshSystem_serialize(sys);
+	unitest_print("*************** %s vol[%u].chunk[%u].RAID(%d+%d), n_topos=%u, n_dbits=%u, n_iters=%u\n", info, t->env.sraid.vsi.volume, t->env.sraid.vsi.chunk, t->curSeg->slice_size, __disk_range_get_num_parities(t->curSeg), t->topos.impl.curr_permutation, t->n_total_injected_dbits, t->lv.total_iterations);
 }
 
 void t_n_mirror_tester_r1_move_to_next_chunk(struct t_n_mirror_tester_r1* t) {
@@ -4108,10 +4115,15 @@ void t_n_mirror_tester_r1_move_to_next_chunk(struct t_n_mirror_tester_r1* t) {
 }
 bool t_n_mirror_tester_r1_has_next_chunk(const struct t_n_mirror_tester_r1* t) { return (t->curSeg != NULL); }
 
-void t_n_mirror_tester_r1_destroy(struct t_n_mirror_tester_r1* t) {
+void t_n_mirror_tester_r1_destroy(struct t_n_mirror_tester_r1* t, const char* info) {
 	nvmeibc_sync_full_lockset_probability_factor = t->lockset_prob_backup;		// restore value
+	kfree(t->mem);
 	BUG_ON(!NVMeshSystem_is_stable(t->env.sys));					// System must be in a stable state
+	unitest_print("*************** %s, finish, n_iters=%u\n", info, t->lv.total_iterations);
 }
+
+#define t_n_mirror_tester_r1_print_iter(t, fmt, ...) 	({ if (t->verbose) pr_emerg("%06u) %s|op=%u|inj[0x%x].mode=%u, blkset[%u].full=%u, " fmt, t->lv.total_iterations, t->iter_descript, t->lv.cur_op, t->dbits[t->lv.dbits_idx].all_bits, t->lv.binfo_inject_mode, blkset_idx, t->lv.do_full_blkset_fixup, ##__VA_ARGS__); })
+#define t_n_mirror_tester_r1_print_gen( t, fmt, ...) 	({ if (t->verbose) unitest_print("\t\t" fmt , ##__VA_ARGS__); })
 
 u64 t_n_mirror_tester_r1_init_io_and_inj_ptrs(struct t_n_mirror_tester_r1* t, int blkset_idx) {
 	const u32 clba = _addr4k(blkset_idx * t->curSeg->stripe_width, 0); // IO's will be at this offset from beggining of the test blockset
@@ -4140,6 +4152,41 @@ void t_n_mirror_tester_r1_binfo_inject(struct t_n_mirror_tester_r1* t) {
 	for (u32 i = 0; i < t->curSeg->replicas; i++) {							// Save injected values into array
 		t->lv.save_inj_dbits[i] = *t->lv.inj_ptrs[i].ram.dbits;
 	}
+}
+
+void t_n_mirror_tester_r1_binfo_inject_txid_all_different(struct t_n_mirror_tester_r1* t, u32 txid) {
+	for (u32 i = 0; i < t->curSeg->replicas; i++) {
+		t->lv.save_inj_txid[i] = *t->lv.inj_ptrs[i].ram.txid = txid + i;
+	}
+}
+
+void t_n_mirror_tester_r1_binfo_inject_txid_verify(struct t_n_mirror_tester_r1* t, u32 expected_txid, bool was_changed) {
+	if (was_changed) {
+		t_n_mirror_tester_r1_print_gen(t, " ---->change_to:txid=0x%x\n", expected_txid);
+		for (u32 i = 0; i < t->curSeg->replicas; i++)
+			BUG_ON(*t->lv.inj_ptrs[i].ram.txid != expected_txid);
+	} else {
+		t_n_mirror_tester_r1_print_gen(t, " ---->unchanged:txid\n");
+		for (u32 i = 0; i < t->curSeg->replicas; i++)
+			BUG_ON(*t->lv.inj_ptrs[i].ram.txid != t->lv.save_inj_txid[i]);
+	}
+	t->lv.total_iterations++;
+}
+
+void t_n_mirror_tester_r1_verify_all_lock_copies_are_stale_and_clean_them(struct t_n_mirror_tester_r1* t, const int blkset_indx_arr[], u32 arr_size) {
+	for (u32 i = 0; i < t->curSeg->replicas; i++) {			// Verify & Clean explicit stale lock that unitest expect to be
+		struct block_inject_ptrs *l = &t->lv.inj_ptrs[i];
+		for (u32 j = 0; j < arr_size; j++)
+			ramDiskSimulator_lockUnSta(&l->self->ramDisk, l->dlba + (LOCKSET_4KS * blkset_indx_arr[j]));
+	}
+	__verify_raid_no_locks_no_dbits(t->env.sys, t->curSeg); // Verify that all other stale locks/dbits are clean
+}
+
+void t_n_mirror_tester_r1_launchRecoveryAndWait(struct t_n_mirror_tester_r1* t, const struct toma_recovery_args args) {
+	const struct tTopoOfPraid *r1 = t_n_mirror_tester_r1_get_toma_praid_conf(t);
+	const struct disk_range *primary_ow_seg = &t->curSeg[t->lv.io_t.slices[0].rlmap.si[0]];
+	tomaSimulator_recoverOK_Blocking(r1, primary_ow_seg, args);
+	clientSimulator_wait_for_all_sync_ops(t->env.client);			// Crucial for testing stats counters of syncs
 }
 
 static inline bool __is_seg_dirty(const union nvmeibc_dbits_entry *e, const u16 si) {	// Dont use: nvmeibc_dbits_get_bm() deliberatly to test its logic
@@ -4227,13 +4274,13 @@ void t_n_mirror_tester_r1_binfo_verify_and_cleanup(struct t_n_mirror_tester_r1* 
 	}
 	if (was_changed) {
 		const union nvmeibc_dbits_entry expected = t_n_mirror_tester_r1_binfo_calc_expected(t, inj_dbits);
-		if (t->verbose) unitest_print("\t\t ---->change_to:dbits=0x%x\n", expected.all_bits);
+		t_n_mirror_tester_r1_print_gen(t, " ---->change_to:dbits=0x%x\n", expected.all_bits);
 		for (u32 i = 0; i < t->curSeg->replicas; i++) {
 			if (t->topos.curr.modes[i] != NVMEIBTC_DS_MODE_DEAD)
 				BUG_ON(t->lv.inj_ptrs[i].ram.dbits->all_bits != expected.all_bits);
 		}
 	} else {
-		if (t->verbose) unitest_print("\t\t ---->unchanged:dbits=0x%x\n", inj_dbits.all_bits);
+		t_n_mirror_tester_r1_print_gen(t, " ---->unchanged:dbits=0x%x\n", inj_dbits.all_bits);
 		for (u32 i = 0; i < t->curSeg->replicas; i++) {
 				BUG_ON(t->lv.inj_ptrs[i].ram.dbits->all_bits != t->lv.save_inj_dbits[i].all_bits);
 		}
@@ -4243,7 +4290,6 @@ void t_n_mirror_tester_r1_binfo_verify_and_cleanup(struct t_n_mirror_tester_r1* 
 	}
 	t->lv.total_iterations++;
 }
-#define t_n_mirror_tester_r1_print_iter(t, fmt, ...) 	({ if (t->verbose) pr_emerg("%06u) %s|op=%u|inj[0x%x].mode=%u, blkset[%u].full=%u, " fmt, t->lv.total_iterations, t->iter_descript, t->lv.cur_op, t->dbits[t->lv.dbits_idx].all_bits, t->lv.binfo_inject_mode, blkset_idx, t->lv.do_full_blkset_fixup, ##__VA_ARGS__); })
 
 /*****************************************************************************/
 
@@ -6589,9 +6635,8 @@ bool is_not_ioable_n_rep_all_locks_down(int first_dead, int n_deg, struct nvmeib
 
 TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 	struct NVMeshSystem *sys = B->sys;
-	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol_0(&_t, sys, !true);
+	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol(&_t, sys, 0, !true);
 	struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync_rsrcs.stats;
-	u8 *mem = kmalloc(32*NVMEIBC_SECTOR_SIZE, GFP_KERNEL); // Array to read/write to disk, at most 1 blockset
 	int rv;
 	nvmeibc_nowhole_stats_reset();
 	for (; t_n_mirror_tester_r1_has_next_chunk(t); t_n_mirror_tester_r1_move_to_next_chunk(t)) {	// Loop on 4,3 mirror
@@ -6624,7 +6669,7 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 									t->lv.cur_op = NVMEIB_BLOCK_IO_OP_WRITE;
 									t_n_mirror_tester_r1_print_iter(t, "write\n");
 									t_n_mirror_tester_r1_binfo_inject(t);
-									__unitest_do_degraded_io(sys, r1, t->curSeg, mem, 0, ioVLBA, __from4K(n_io_blocks));
+									__unitest_do_degraded_io(sys, r1, t->curSeg, t->mem, 0, ioVLBA, __from4K(n_io_blocks));
 									t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, io_changes_dbits);
 								}
 								{ 	// Read encounters a stale lock and fixes it with partial / full blockset sync
@@ -6634,7 +6679,7 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 									nvmeibc_sync_full_lockset_probability_factor = (t->lv.do_full_blkset_fixup ? NVMEIBC_SYNC_PROB_FORCE_LOCKSET : NVMEIBC_SYNC_PROB_FORCE_MIN);
 									ramDiskSimulator_lockStale(&ow->self->ramDisk, ow->dlba);	BUG_ON(*ow->ram.lock == 0);
 									stats->num_full_blockset_ok = stats->num_part_blockset_ok = 0;
-									rv = osSimulator_readArrWait(&t->env.client->OS, 0, ioVLBA, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
+									rv = osSimulator_readArrWait(&t->env.client->OS, 0, ioVLBA, 1, t->mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
 									clientSimulator_wait_for_all_sync_ops(t->env.client);
 									if (t->are_all_p_dead) {
 										BUG_ON(stats->num_full_blockset_ok + (stats->num_part_blockset_ok) != 0);		// Stale2dirty sync
@@ -6649,30 +6694,28 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 									t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, true);
 								}
 							}	// Full/Partial blockset
-							if (n_dgrd != (int)__disk_range_get_num_parities(t->curSeg)) {	// Dbit + bad sector (Do not destroy slice)
-								t->lv.do_full_blkset_fixup = true;
-								t->lv.cur_op = NVMEIB_BLOCK_IO_OP_RECOVER_READFAIL;
-								t_n_mirror_tester_r1_print_iter(t, "bad_sector\n");
-								t_n_mirror_tester_r1_binfo_inject(t);
-								stats->num_full_blockset_ok = 0;
-								ramDiskSimulator_do_bad_sector(&ow->self->ramDisk, ow->dlba, EPERM_READ_FAIL_NO_RETRY);
-								rv = osSimulator_readArrWait(&t->env.client->OS, 0, ioVLBA, 1, mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
-								clientSimulator_wait_for_all_sync_ops(t->env.client);
-								BUG_ON(stats->num_full_blockset_ok != 1);
-								t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, true);
-							}
-						}	// Dbit injection mode
-					}		// Dbit injection content
-					free_io_traits(&t->lv.io_t);
-				}			// VLBA offset
-				__prepare_for_next_iteration(t->env.client, t->topos.curr, curSeg);
-			}		
-		}		// Topology of first praid
+						}	// Full/Partial blockset
+						if (n_dgrd != (int)__disk_range_get_num_parities(t->curSeg)) {	// Dbit + bad sector (Do not destroy slice)
+							t->lv.do_full_blkset_fixup = true;
+							t->lv.cur_op = NVMEIB_BLOCK_IO_OP_RECOVER_READFAIL;
+							t_n_mirror_tester_r1_print_iter(t, "bad_sector\n");
+							t_n_mirror_tester_r1_binfo_inject(t);
+							stats->num_full_blockset_ok = 0;
+							ramDiskSimulator_do_bad_sector(&ow->self->ramDisk, ow->dlba, EPERM_READ_FAIL_NO_RETRY);
+							rv = osSimulator_readArrWait(&t->env.client->OS, 0, ioVLBA, 1, t->mem);		REPORT_ERROR(rv);   // Just test that the read succeeds and clears the stale special lock
+							clientSimulator_wait_for_all_sync_ops(t->env.client);
+							BUG_ON(stats->num_full_blockset_ok != 1);
+							t_n_mirror_tester_r1_binfo_verify_and_cleanup(t, true);
+						}
+					}	// Dbit injection mode
+				}		// Dbit injection content
+				free_io_traits(&t->lv.io_t);
+			}			// VLBA offset
+			__prepare_for_next_iteration(t->env.client, t->topos.curr, curSeg);
+		}				// Topology of first praid
 		t_n_mirror_tester_r1_move_to_next_raid(t, __FUNCTION__);
 	}					// For each chunk
-	kfree(mem);
-	t_n_mirror_tester_r1_destroy(t);
-	unitest_print("*************** %s, n_iters=%u\n", __FUNCTION__, t->lv.total_iterations);
+	t_n_mirror_tester_r1_destroy(t, __FUNCTION__);
 	return 0;
 }
 
