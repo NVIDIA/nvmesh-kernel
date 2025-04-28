@@ -4769,6 +4769,17 @@ static void t_scrub_tester_verify_fixed_r1(struct t_scrub_tester_r1 *st)
 	} else { BUG();	}
 }
 
+static void t_scrub_tester_inform_tomas(const struct t_scrub_tester_r1 *st, const struct TstPRaid *pr, struct NVMeshSystem *sys, short error_code, const u32 failed_slices, const u32 fixed_slices) {
+	for (u32 i = 0; i < pr->cpr->replicas; i++)
+		tomaSimulator_expectIOFailure(&sys->servers[pr->cpr[i].node_id].simToma, error_code, failed_slices, fixed_slices);
+	(void)st;
+}
+
+static void t_scrub_tester_bad_sector_on_segs_2toN(struct t_scrub_tester_r1 *st, const struct TstPRaid *pr) {
+	for (u32 i = 2; i < pr->cpr->replicas; i++)
+		t_scrub_tester_inject_bad_sector(st, i);
+}
+
 #include "block/recovery/nvmeibc_block_dp_sync_no_write_hole.h"
 TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 	struct NVMeshSystem *sys = B->sys;
@@ -4831,6 +4842,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_generate_valid_slice(&st);
 		t_scrub_tester_inject_valid_slice(&st);
 		t_scrub_tester_inject_bad_sector(&st, 0);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		fixed_slices |= (1 << slice);
 
 		slice = 28;	// Slice {OK, BAD_SECT}		- Will be fixed, physical bad sector removed
@@ -4838,6 +4850,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_generate_valid_slice(&st);
 		t_scrub_tester_inject_valid_slice(&st);
 		t_scrub_tester_inject_bad_sector(&st, 1);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		fixed_slices |= (1 << slice);
 
 		slice = 26;	// Slice {OK, Wrong Parity}  - Scrubbing will replace parity with D0
@@ -4858,6 +4871,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_reinit_to(&st, (slice + blockset * LOCKSET_SLICES), CORRUPT_BAD_SECT_NEVER_WRITTEN);
 		t_scrub_tester_inject_bad_sector(&st, 0);
 		t_scrub_tester_inject_bad_sector(&st, 1);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		failed_slices |= (1 << slice);
 
 		slice = 23;	// Slice {BAD_SECT, WRONG_EDIC}	Written slice with 2 failures. Slice destroyed
@@ -4867,6 +4881,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_inject_bad_sector(&st, 0);
 		st.type = CORRUPT_WRONG_EDIC;
 		t_scrub_tester_inject_bad_sector(&st, 1);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		failed_slices |= (1 << slice);
 
 		slice = 22;	// Slice {WRONG_EDIC, BAD_SECT}	Written slice with 2 failures. Slice destroyed
@@ -4876,6 +4891,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_inject_bad_sector(&st, 1);
 		st.type = CORRUPT_WRONG_EDIC;
 		t_scrub_tester_inject_bad_sector(&st, 0);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		failed_slices |= (1 << slice);
 
 		slice = 20;	// Slice {WRONG_EDIC, OK} - Slice will be fixed
@@ -4892,12 +4908,12 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_inject_valid_slice(&st);
 		t_scrub_tester_inject_bad_sector(&st, 0);
 		t_scrub_tester_inject_bad_sector(&st, 1);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		failed_slices |= (1 << slice);
 		// The rest of slices is OK
 
 		// Set expectors
-		tomaSimulator_expectIOFailure(&sys->servers[pr[st.lockset_owner_seg^0].node_id].simToma, EPERM_READ_FAIL_NO_RETRY, failed_slices, fixed_slices);
-		tomaSimulator_expectIOFailure(&sys->servers[pr[st.lockset_owner_seg^1].node_id].simToma, EPERM_READ_FAIL_NO_RETRY, failed_slices, fixed_slices);
+		t_scrub_tester_inform_tomas(&st, &sraid, sys, EPERM_READ_FAIL_NO_RETRY, failed_slices, fixed_slices);
 
 		unitest_print("-----------------------Corrupt: MultiSlice\n");
 		BUG_ON(tomaSimulator_recoverThing(sraid.tpr, sraid.cpr + st.lockset_owner_seg, rcvr_args) < 0);
@@ -4915,10 +4931,11 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 				t_scrub_tester_verify_fixed_r1(&st);
 			}
 		}
+		tomaSimulator_verifyIOFailure();										// Verify Tomas got correct messages
 		unitest_print("-----------------------Corrupt: MultiSlice2\n");
-		tomaSimulator_expectIOFailure(&sys->servers[pr[st.lockset_owner_seg^0].node_id].simToma, EPERM_READ_FAIL_NO_RETRY, failed_slices, 0);
-		tomaSimulator_expectIOFailure(&sys->servers[pr[st.lockset_owner_seg^1].node_id].simToma, EPERM_READ_FAIL_NO_RETRY, failed_slices, 0);
+		t_scrub_tester_inform_tomas(&st, &sraid, sys, EPERM_READ_FAIL_NO_RETRY, failed_slices, 0);
 		BUG_ON(tomaSimulator_recoverThing(sraid.tpr, sraid.cpr + st.lockset_owner_seg, rcvr_args) < 0);
+		tomaSimulator_verifyIOFailure();										// Verify Tomas got correct messages
 	}
 
 	// --------------------------------------------- Slice by slice mode without failure
@@ -4961,12 +4978,12 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		t_scrub_tester_generate_valid_slice(&st);
 		t_scrub_tester_inject_valid_slice(&st);
 		t_scrub_tester_inject_bad_sector(&st, 0);
+		t_scrub_tester_bad_sector_on_segs_2toN(&st, &sraid);
 		fixed_slices |= (1u << slice);
 		// The rest of slices is OK
 
 		// Set expectors
-		tomaSimulator_expectIOFailure(&sys->servers[pr[st.lockset_owner_seg^0].node_id].simToma, EPERM_READ_FAIL, 0, fixed_slices);
-		tomaSimulator_expectIOFailure(&sys->servers[pr[st.lockset_owner_seg^1].node_id].simToma, EPERM_READ_FAIL, 0, fixed_slices);
+		t_scrub_tester_inform_tomas(&st, &sraid, sys, EPERM_READ_FAIL, 0, fixed_slices);
 
 		unitest_print("-----------------------Corrupt: MultiSlice-OK\n");
 		BUG_ON(tomaSimulator_recoverThing(sraid.tpr, sraid.cpr + st.lockset_owner_seg, rcvr_args) < 0);
@@ -4982,6 +4999,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 				t_scrub_tester_verify_fixed_r1(&st);
 			}
 		}
+		tomaSimulator_verifyIOFailure();										// Verify Tomas got correct messages
 	}
 
 	if (1) { // --------------------------------------------- Scrubbing on Jbod
@@ -4992,7 +5010,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 		pr = env.sraid.cpr;
 		BUG_ON(pr->replicas != 1);		// Jbod
 		// unitest_print("-----------------------Corrupt: Jbod\n");
-		// nvmeibc_nowhole_stats_reset();
+		nvmeibc_nowhole_stats_reset();
 		BUG_ON(tomaSimulator_recoverThing(sjbod.tpr, sjbod.cpr, rcvr_args) < 0);
 		BUG_ON(atomic_read(&nowhole_stats->n_other_fix) != 0);	// Recoveries on jbod a re disabled
 	}
@@ -5002,7 +5020,8 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 	NVMeshSystem_serialize(sys);
 	nvmeibc_nowhole_stats_reset();
 	__dd_clean_dlba_pointers(env);				// Clean bad sectors
-	NVMeshSystem_volume_memset(sys, 0, 0);
+	NVMeshSystem_volume_memset(sys, sraid.vsi.volume, 0);
+	NVMeshSystem_volume_wipe_MD(sys, sraid.vsi.volume);
 	BUG_ON(!NVMeshSystem_is_stable(sys));
 	return 0;
 }
@@ -6607,6 +6626,7 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol(&_t, sys, 0, !true);
 	struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync_rsrcs.stats;
 	int rv;
+	unitest_scrubRecovery_R1(B);
 	unitest_R1_recovery_RW_W_Basic(B);
 	nvmeibc_nowhole_stats_reset();
 	for (; t_n_mirror_tester_r1_has_next_chunk(t); t_n_mirror_tester_r1_move_to_next_chunk(t)) {	// Loop on 4,3 mirror
