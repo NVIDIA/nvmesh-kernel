@@ -3920,8 +3920,8 @@ static int __offset_to_put_owner_lock_on_seg(int si, int n_mirror, int max_n_own
 	return lock_seg * (1<<LOCKSET_SHIFT);
 }
 
-void __verify_raid_no_locks_no_dbits(struct NVMeshSystem *sys, struct disk_range* segs){
-	for (struct disk_range* sgmnt = segs; sgmnt != (segs + segs->replicas); ++sgmnt) {
+static void __verify_raid_no_locks_no_dbits(struct NVMeshSystem *sys, const struct disk_range* segs){
+	for (const struct disk_range* sgmnt = segs; sgmnt != (segs + segs->replicas); ++sgmnt) {
 		struct ramDiskSimulator* ssd = &(sys->servers[sgmnt->node_id].ramDisk);
 		ramDiskSimulator_verify_no_locks(ssd);
 		ramDiskSimulator_verify_no_dirty_bits(ssd);
@@ -6584,7 +6584,8 @@ void t_n_mirror_tester_r1_binfo_verify_and_cleanup(struct t_n_mirror_tester_r1* 
 }
 #define t_n_mirror_tester_r1_print_iter(t, fmt, ...) 	({ if (t->verbose) pr_emerg("%06u) %s|op=%u|inj[0x%x].mode=%u, blkset[%u].full=%u, " fmt, t->lv.total_iterations, t->iter_descript, t->lv.cur_op, t->dbits[t->lv.dbits_idx].all_bits, t->lv.binfo_inject_mode, blkset_idx, t->lv.do_full_blkset_fixup, ##__VA_ARGS__); })
 
-TEST_FUNC int unitest_n_mirr_degraded_exhaustive(struct NVMeshSystem *sys) {
+TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
+	struct NVMeshSystem *sys = B->sys;
 	struct t_n_mirror_tester_r1 _t, *t = t_n_mirror_tester_r1_init_vol_0(&_t, sys, !true);
 	struct nvmeibc_sync_stats *stats = &t->env.dev->dp.sync_rsrcs.stats;
 	u8 *mem = kmalloc(32*NVMEIBC_SECTOR_SIZE, GFP_KERNEL); // Array to read/write to disk, at most 1 blockset
@@ -7763,6 +7764,8 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 				unitest_print("*** ErasureCoding Raid60 (locks=%d:%s) - %s\n", locks->maxNOwners, __lock_server_type_to_string(locks->type), unitest_rv_to_string(rv));
 			}
 		}
+		bunitest_phase_stack_do(buni, "Pop", 0);
+		bunitest_phase_stack_do(buni, "Push", BUNI_N_MIRR_TESTING);
 		if (!buni->conf->bunitest.disableNreplicaTests) {
 			struct nvmeibc_locks_scheme_conf *locks = &sys->mdb.vols[0].locks_scheme, backup_locks = *locks;
 			bunitest_tic(buni);
@@ -7774,7 +7777,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					rv |= SIMU_RUN_TEST(unitest_GoodPathIO_n_mirrored, sys);
 					if (locks->maxNOwners==4) {		//		Todo: Fix me, with less locks there are no 0 dbits visible so merge of locks yields unknowns
 						rv |= SIMU_RUN_TEST(unitest_DegradedMode_n_mirrored, sys);
-						rv |= SIMU_RUN_TEST(unitest_n_mirr_degraded_exhaustive, sys);
+						rv |= SIMU_RUN_TEST(unitest_n_mirr_degraded_exhaustive, buni);
 					}
 					// Todo: also unitest_DegradedMode()
 					if (locks->maxNOwners>2)
@@ -7789,8 +7792,8 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 			unitest_print("*** raid1-N-replica (locks=[%d..%d]:%s) - %s, %d[mSec]\n", 2, N_MAX_RAID_LOCKS, "3 types", unitest_rv_to_string(rv), bunitest_toc(buni));
 		}
 		rv |= unitest_n_mirror(sys, "d_udowngrade_to_2_mirror", UNITEST_UPDOWNGRADE_COLD);
-
 		bunitest_phase_stack_do(buni, "Pop", 0);
+
 		if (!buni->conf->bunitest.disableCmpBlocks)
 			rv |= unitest_cmp_blocks_validation();
 

@@ -99,8 +99,9 @@ void __unitest_verify_blocks_pattern(const void *buf, const int nblocks, u64 pat
 enum bunitest_phase {										// Different phases of the unitest, in each phase system stability differs so different stability checks are employed
 	BUNI_ILLEGAL = 0,
 	BUNI_INITIALIZING = 1,									// Creating NVMesh environment, tests have not been started yet
-	BUNI_VOLUMES_TESTING,									// Testing Thick volumes of NVMEsh V1: (JBOD, Raid1,0,10)
-	BUNI_ERASURE_CODING_TESTING,							// Testing Thick volumes of NVMEsh V1.1: Triple mirror,...
+	BUNI_VOLUMES_TESTING,									// Testing Thick volumes JBOD, Raid0,1,0,10  max 2 mirror
+	BUNI_ERASURE_CODING_TESTING,							// Testing Thick volumes EC Volumes Raid5,50,6,60
+	BUNI_N_MIRR_TESTING,									// Testing R1-N-mirror
 	BUNI_CLIENT_REMOVAL_TESTING,							// Client restart/removal tests
 	BUNI_ALL_DONE,											// All tests are done
 };
