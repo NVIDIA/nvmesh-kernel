@@ -369,14 +369,14 @@ static inline int nvmeibc_dbits_entry_to_str(char *buf, int len, long arg) {
 }
 #undef DBITS_BUF_ADD
 
-static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_single_unk(void)
+static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_single_unk(void) // deprecated, don't use
 {
 	union nvmeibc_dbits_entry rv = {.all_bits = 0};
 	rv.bsmod.dead0 = 0xF;
 	return rv;
 }
 
-static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unk(/* seg index or -1 if irrelevant */	int conv0, int conv1)
+static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unk(/* seg index or -1 if irrelevant */	int conv0, int conv1) // deprecated, don't use
 {
 	union nvmeibc_dbits_entry rv = {.all_bits = 0};
 	if (conv0 < conv1)	// sort the values. Use: #define swap(x, y)
@@ -404,6 +404,20 @@ static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unk(/* seg inde
 		rv.bsmod.is_d1_convict = tmp;
 	}
 	return rv;
+}
+
+static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unknowns_generic(int n_deg, int n_parities)
+{
+	union nvmeibc_dbits_entry rv = {.all_bits = 0};
+	// ASSERT((n_deg >= 0) && (n_parities >= n_deg) && (n_parities >= 1) && (n_parities <= 4))
+	if (false && (n_parities >= 3)) {			// 4-5 mirror representation, not supported yet
+		rv.deg34.num_unknowns = n_deg;
+		return rv;
+	} else {						// Raid-5/6, R1-2/3mirror
+		if (n_deg > 0) rv.bsmod.dead0 = 0xF;
+		if (n_deg > 1) rv.bsmod.dead1 = 0xF;
+	}
+	return rv;	// Note (on n_deg==0, returns zero dbits)
 }
 
 static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_for_seg(/* seg index or -1 if irrelevant, R1 values:0,1 */	int seg0)
