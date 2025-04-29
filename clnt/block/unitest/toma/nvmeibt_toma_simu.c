@@ -123,14 +123,12 @@ void tomaSimulator_disable_msg_q_to_client(struct tomaSimulator*_this) {
 /******************** Simulator of toma access to server **********************/
 void nvmeibr_ds_metadata_init_EC_lock_and_dirty(struct tomaSimulator* T, struct TstPRaid *pra) {
 	struct ramDiskSimulator *ram = serverSimulator_get_ram_by_toma(T);
-	const bool is_degraded = (tTopoOfPraid_gen_num_non_readble_segs(pra->tpr) > 0);
-	union nvmeibc_dbits_entry dbits = {.all_bits = 0};
+	const int n_parity = __disk_range_get_num_parities(pra->cpr);
+	const int n_deg = tTopoOfPraid_gen_num_non_readble_segs(pra->tpr);
+	const union nvmeibc_dbits_entry dbits = nvmeib_dbits_entry_build_unknowns_generic(n_deg, n_parity);	// Real Toma implements logic in __calc_unknown_dbit_seg_init()
 	const struct disk_range *seg = &pra->cpr[pra->vsi.segment];
 	u32 i, bi, n_locks = (seg->length/LOCKSET_4KS);
 	u64 b_start = COMMITTED_ADDR_AS(ram, seg->dlba_start, 4KB, LOCK);
-	if (is_degraded)
-		dbits.all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits;
-
 	for (i = 0; i < n_locks; i++) {						// Daniel: Todo, this is only correct for full praid cold recovery, not partial!
 		bi = i + b_start;
 		ram->locks[bi] = 0;
