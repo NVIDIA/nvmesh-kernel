@@ -50,7 +50,6 @@ cp -rf %{_builddir}/%{name}/management_cm %{buildroot}/opt/nvmesh/client-repo
 cp -rf %{_builddir}/%{name}/config/nvmesh.conf %{buildroot}/etc/nvmesh/
 cp -rf %{_builddir}/%{name}/config/nvmesh.conf.d/* %{buildroot}/etc/nvmesh/nvmesh.conf.d/
 cp -rf %{_builddir}/%{name}/dist/pytools/* %{buildroot}/opt/nvmesh/bin
-cp -rf %{_builddir}/%{name}/tools/humanize_json.py %{buildroot}/opt/nvmesh/common-repo/tools/humanize_json.py
 
 echo "version=\"%{version}-%{release}\"" > %{buildroot}/opt/nvmesh/client-repo/base-version
 echo "commit=\"%{commit_id}\"" >> %{buildroot}/opt/nvmesh/client-repo/base-version

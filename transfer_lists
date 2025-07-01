@@ -23,7 +23,6 @@ base_transfer_list="system.d/nvmeshagent.service \
 
 # Can include both static and compiled files
 base_tools_transfer_list="dist/pytools \
-		tools/humanize_json.py \
         scripts/target/nvme-cli"
 
 # Can include both static and compiled files

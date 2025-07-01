@@ -54,9 +54,6 @@ tools:
     linkpath: /usr/bin/nvmesh_clnt_shutdown
     analysis:
         pathex: ['.', './bin']
-  humanize_json:
-    source: tools/humanize_json.py
-    linkdir: /opt/nvmesh/common-repo
 
 
 analysis:
