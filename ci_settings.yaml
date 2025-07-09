@@ -14,7 +14,7 @@
 # limitations under the License.
 
 suite: "gitlab-ci-ec"
-phases: ["IB", "ROCE", "TCP", "NVMESHUM"]
+phases: ["IB", "ROCE", "TCP"]
 build-with:
-  management: "3.4.0-OSS"
+  management: "3.4.0"
   nvmeshum: "master"
