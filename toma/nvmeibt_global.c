@@ -8,6 +8,7 @@
 #include "nvmeibt_raft.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_rpc.h"
+#include "../common/nvmeib_hash.h"
 
 #include "nvmeibt_topology.h"
 #include "nvmeibt_kafka.h"
@@ -940,6 +941,7 @@ void nvmeibt_global_idle_time_activities(void)
 	nvmeibt_rpc_run();
 	nvmeibt_wq_stuck_pthread_check();
 	nvmeibt_global_call_all_seg_active_post_update_actions();
+	nvmeib_hash_resize_all_tables_as_needed();
 	//
 	nvmeibt_raft_calc_timeouts_based_on_IIRs();
 	nvmeibt_raft_follower_upd_effective_raft_heartbeat_timeout_and_factor();

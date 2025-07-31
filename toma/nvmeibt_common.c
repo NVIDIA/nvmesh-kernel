@@ -17,6 +17,7 @@
 #include "nvmeibt_toma.h"
 #include "nvmeibt_topology.h"
 #include "../common/nvmeib_heap.c"     // Compiling the shared heap code for TOMA without duplicating it
+#include "../common/nvmeib_hash.c"     // Compiling the shared hash code for TOMA without duplicating it
 
 struct nvmeibt_alloc_free_summary_entry nvmeibt_alloc_free_summary_table[ALLOC_FREE_TABLE_SIZE];
 
