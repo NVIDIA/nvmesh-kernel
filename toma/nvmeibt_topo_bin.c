@@ -3,6 +3,18 @@
 #include "nvmeibt_praid.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_topo_bin.h"
+#include <inttypes.h> // For PRIx64
+
+// Get the praid serialized topo header size for a given sw_ver.
+// In v0x310 and earlier, the struct was 48 bytes (no topo_idx_updated field).
+// In v0x330 and later, the struct is 56 bytes (with topo_idx_updated field).
+static inline size_t nvmeibt_praid_serialized_topo_hdr_size(unsigned int sw_ver)
+{
+	if (sw_ver <= 0x00000310) {
+		return NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310;
+	}
+	return sizeof(struct nvmeibt_praid_serialized_topo);
+}
 
 #define TOPOLOGY_MAX_PRAIDS_TO_PRINT				50
 #define TOPOLOGY_MAX_SEGS_TO_PRINT					300
@@ -77,16 +89,19 @@ void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char
 	struct nvmeibt_urn_uuid					praid_uuid;
 	struct nvmeibt_praid_serialized_topo 	serialized;
 
-	nvmeibt_praid_convert_topo_le_be(praid_wire_topo, &serialized);
+	nvmeibt_praid_convert_topo_le_be(praid_wire_topo, &serialized, TOMA_SW_COMPATIBILITY_VER);
 	praid_uuid = nvmeibt_union_uuid_to_urn_uuid(&(serialized.uuid));
-	(*printf_fn)(printf_ctx, "praid=%s ver=(%x,%x) sync_cmd=%s is_sync=%d act=%d n_seg=%d\n",
+	(*printf_fn)(printf_ctx, "praid=%s ver=(%x,%x) sync_cmd=%s is_sync=%d act=%d n_seg=%d topo_ver=%"PRIx64"\n",
 				 praid_uuid.str, serialized.praid_version_major, serialized.praid_version_minor,
 				 praid_registrants_sync_cmd_str(serialized.registrants_sync_cmd), serialized.leader_did_all_segs_sync_registrants,
-				 serialized.is_activated, serialized.segs_num);
+				 serialized.is_activated, serialized.segs_num, serialized.topo_idx_updated);
 }
 
-void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr)
+void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr, unsigned int src_sw_ver)
 {
+	{ _Static_assert(sizeof(struct nvmeibt_praid_serialized_topo) == 56, "Struct nvmeibt_praid_serialized_topo was changed without updating the serializing function! Also check all occurrences of the struct!"); }
+
+	memset(dst_ptr, 0, sizeof(*dst_ptr));
 	nvmeibt_strlcpy(dst_ptr->eyecatcher, src_ptr->eyecatcher, sizeof(dst_ptr->eyecatcher));
 	COPY_SWAP_UUID_STR_FIELD(src_ptr, dst_ptr, uuid);
 	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, praid_version_major);
@@ -95,6 +110,11 @@ void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_
 	COPY_SWAP32_STR_BITFIELD(src_ptr, dst_ptr, registrants_sync_cmd);
 	COPY_SWAP8_STR_FIELD(src_ptr, dst_ptr, is_activated);
 	COPY_SWAP8_STR_FIELD(src_ptr, dst_ptr, segs_num);
+	// topo_idx_updated was added in v0x330. In older versions, bytes at this offset
+	// belong to the first seg, so we must not read them as topo_idx_updated.
+	if (src_sw_ver >= TOMA_SW_COMPATIBILITY_VER) {
+		COPY_SWAP64_STR_FIELD(src_ptr, dst_ptr, topo_idx_updated);
+	}
 	dst_ptr->res_1 = 0;
 	dst_ptr->res_2 = 0;
 	dst_ptr->res_3 = 0;
@@ -227,8 +247,11 @@ void serialize_praid_topo_to_JSON(struct nvmeibt_praid_serialized_topo *t, struc
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&(t->uuid));
 	nvmeibt_Str_sprintf(JSON_output,
 						"\n\t{\"eyecatcher\":\"%.4s\", \"uuid\":\"%s\", \"praid_version_major\":%d, \"praid_version_minor\":%d, "
+						"\"topo_idx_updated\":%"PRId64", "
 						"\"leader_did_all_segs_sync_registrants\":%d, \"registrants_sync_cmd\":\"%s\", \"is_activated\":%d, \"segs_num\":%d, \"segments\":[",
-						t->eyecatcher, urn_uuid.str, t->praid_version_major, t->praid_version_minor, t->leader_did_all_segs_sync_registrants,
+						t->eyecatcher, urn_uuid.str, t->praid_version_major, t->praid_version_minor,
+						t->topo_idx_updated,
+						t->leader_did_all_segs_sync_registrants,
 						praid_registrants_sync_cmd_str(t->registrants_sync_cmd), t->is_activated, t->segs_num);
 out:;
 }
@@ -274,6 +297,9 @@ void nvmeibt_convert_topo_le_be(void *src_topo, void* dst_topo, BOOL is_src_the_
 	struct nvmeibt_serialized_seg_leader_topo		*src_seg_topo_ptr;
 	struct nvmeibt_serialized_seg_leader_topo		*dst_seg_topo_ptr;
 	int												i, j, praids_num, segs_num;
+	size_t											src_praid_hdr_size;
+	size_t											dst_praid_hdr_size;
+	unsigned int									usable_sw_ver;
 
 	src_header_ptr = (struct nvmeibt_topology_serialized_topo_header *)src_topo;
 	dst_header_ptr = (struct nvmeibt_topology_serialized_topo_header *)dst_topo;
@@ -284,19 +310,26 @@ void nvmeibt_convert_topo_le_be(void *src_topo, void* dst_topo, BOOL is_src_the_
 		serialize_topo_hdr_to_JSON(dst_header_ptr, JSON_output);
 	}
 
+	// Determine praid header sizes based on sw_ver for backward compatibility.
+	// The usable (host-byte-order) header has the converted sw_ver we can read.
+	usable_sw_ver = is_src_the_usable ? src_header_ptr->sw_ver : dst_header_ptr->sw_ver;
+	src_praid_hdr_size = is_src_the_usable ? nvmeibt_praid_serialized_topo_hdr_size(usable_sw_ver) : sizeof(struct nvmeibt_praid_serialized_topo);
+	dst_praid_hdr_size = is_src_the_usable ? sizeof(struct nvmeibt_praid_serialized_topo) : nvmeibt_praid_serialized_topo_hdr_size(usable_sw_ver);
+
 	src_praid_topo_ptr = (struct nvmeibt_praid_serialized_topo *)(src_header_ptr + 1);
 	dst_praid_topo_ptr = (struct nvmeibt_praid_serialized_topo *)(dst_header_ptr + 1);
 	praids_num = is_src_the_usable ? src_header_ptr->praids_num : dst_header_ptr->praids_num;
-	
+
 	for (i = 0; i < praids_num; i++) {
-		nvmeibt_praid_convert_topo_le_be(src_praid_topo_ptr, dst_praid_topo_ptr);
+		nvmeibt_praid_convert_topo_le_be(src_praid_topo_ptr, dst_praid_topo_ptr, usable_sw_ver);
 		if (is_src_the_usable) {
 			serialize_praid_topo_to_persist_and_wire(src_praid_topo_ptr, JSON_output);
 		} else {
 			serialize_praid_topo_to_JSON(dst_praid_topo_ptr, JSON_output);
 		}
-		src_seg_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)(src_praid_topo_ptr + 1);
-		dst_seg_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)(dst_praid_topo_ptr + 1);
+		// Use version-aware praid header size to find segs start
+		src_seg_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)((char *)src_praid_topo_ptr + src_praid_hdr_size);
+		dst_seg_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)((char *)dst_praid_topo_ptr + dst_praid_hdr_size);
 		segs_num = is_src_the_usable ? src_praid_topo_ptr->segs_num : dst_praid_topo_ptr->segs_num;
 
 		for (j = 0; j < segs_num; j++) {

@@ -206,9 +206,14 @@ static inline unsigned long long nvmeibt_raft_get_current_term(void)
 	return (nvmeibt_raft_get_my_raft()->current_term);
 }
 
+static inline int64_t leader_get_next_topology_version(void)
+{
+	return ((int64_t)nvmeibt_raft_get_current_term() << 32) | (((RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit) + 1) & 0xffffffff));
+}
+
 #define SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(name) ({ \
-	const int64_t val = ((int64_t)nvmeibt_raft_get_current_term() << 32) | (((RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit) + 1) & 0xffffffff)); \
-	SET_RAFT_COMMIT_LIFECYCLE_VAL(name, TOPO, leader_calculated, val); \
+	const int64_t val = leader_get_next_topology_version(); 			\
+	SET_RAFT_COMMIT_LIFECYCLE_VAL(name, TOPO, leader_calculated, val); 	\
 })
 
 static inline int nvmeibt_raft_get_leader_last_2_3rds_majority_timestamp_sec(void)

@@ -7,6 +7,7 @@
 #include "nvmeibt_toma.h"
 #include "nvmeibt_topo_bin.h"
 #include "nvmeibt_disk_segment.h"
+#include <inttypes.h> // For PRIx64
 
 int64_t praid_time_from_activation_attempt_to_degraded_mode_sec = PRAID_ACTIVATION_TIMEOUT_SEC_DEFAULT;
 
@@ -738,9 +739,15 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
 	serialized_praid.is_activated = praid_topo->is_activated;
 	serialized_praid.segs_num = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
+	// Since we may serialize a praid without updating it, topo_idx_updated may not equal to leader_get_next_topology_version().
+	serialized_praid.topo_idx_updated = praid_topo->topo_idx_updated;
 	// send_topo_ptr->res_1 = 0;
 	// send_topo_ptr->res_2 = 0;
 	// send_topo_ptr->res_3 = 0;
+
+	if (serialized_praid.topo_idx_updated != leader_get_next_topology_version()) {
+		N_Tf(ajkld10, "Serializing a praid updated in @INT64_TX while calculating topology @INT64_TX.", serialized_praid.topo_idx_updated, leader_get_next_topology_version());
+	}
 
 	// disk_segments
 	segs_topo_len = sizeof(struct nvmeibt_serialized_seg_leader_topo) * XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
@@ -753,7 +760,7 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 		seg_wire_topo_ptr++;
 	}
 	SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cbhj34k);
-	nvmeibt_praid_convert_topo_le_be(&serialized_praid, &(praid_leader->praid_wire_topo));
+	nvmeibt_praid_convert_topo_le_be(&serialized_praid, &(praid_leader->praid_wire_topo), TOMA_SW_COMPATIBILITY_VER);
 	nvmeibt_praid_print_leader_wire_topo_with_segs(praid_leader);
 out:
 	praid_leader->serialized_version_major = praid_topo->praid_version_major;
@@ -853,11 +860,11 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 		rv = NVMEIBT_ADD_ALREADY_UP_TO_DATE;
 		goto out_ok;
 	}
-	N_Tf(nhy76cw, "praid=@UUID_LE praid_version=@PRAID_VERSION,@PRAID_VERSION(@PRAID_VERSION,@PRAID_VERSION) is_activated=@IS_ACTIVATED(@IS_ACTIVATED)",
+	N_Tf(nhy76cw, "praid=@UUID_LE praid_version=@PRAID_VERSION,@PRAID_VERSION(@PRAID_VERSION,@PRAID_VERSION) is_activated=@IS_ACTIVATED(@IS_ACTIVATED) topo_idx_updated=@INT64_TX(@INT64_TX)",
 		nvmeibt_praid_UUID(praid),
 		praid_topo_ptr->praid_version_major, praid_topo_ptr->praid_version_minor,
 		committed_topo->praid_version_major, committed_topo->praid_version_minor,
-		praid_topo_ptr->is_activated, committed_topo->is_activated);
+		praid_topo_ptr->is_activated, committed_topo->is_activated, praid_topo_ptr->topo_idx_updated, committed_topo->topo_idx_updated);
 
 	memset(committed_topo, 0, sizeof(*committed_topo));
 	committed_topo->praid_version_major = praid_topo_ptr->praid_version_major;
@@ -865,6 +872,7 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 	committed_topo->registrants_sync_cmd = praid_topo_ptr->registrants_sync_cmd;
 	committed_topo->leader_did_all_segs_sync_registrants = praid_topo_ptr->leader_did_all_segs_sync_registrants;
 	committed_topo->is_activated = praid_topo_ptr->is_activated;
+	committed_topo->topo_idx_updated = praid_topo_ptr->topo_idx_updated;
 	praid->was_praid_ever_activated |= praid_topo_ptr->is_activated;
 
 	rv = NVMEIBT_ADD_MODIFIED;
@@ -899,6 +907,7 @@ static void praid_lot_reset_topo_ctx(struct nvmeibt_praid_lot *praid_lot)
 	praid_topo->praid_version_major = PRAID_VERSION_INITIAL_VALUE;
 	praid_topo->praid_version_minor = PRAID_VERSION_INITIAL_VALUE;
 	praid_topo->is_activated = 0;
+	praid_topo->topo_idx_updated = nvmeibt_offset_and_idx_uninitialized;  // -1 means never updated
 	praid_topo->registrants_sync_cmd = PRAID_REGISTRANTS_SYNC_CMD_UNKNOWN;
 	// praid_lot_reset_registrants_sync_status(praid_lot);
 	NFOUT;
@@ -970,6 +979,7 @@ static void increase_praid_topo_version(struct nvmeibt_praid_topo_ctx *praid_top
 	else {
 		++(praid_topo->praid_version_minor);	// Increase praid_version_minor
 	}
+	praid_topo->topo_idx_updated = leader_get_next_topology_version();	// Increased praid version will generate a new baseline, and trigger serialization in which TOPO leader_calculated will be updated to leader_get_next_topology_version(). That value will be the version of this new baseline.
 	NFOUT;
 }
 
@@ -2284,6 +2294,7 @@ out_not_activated:
 		calculated_praid_topo->is_activated = 0;
 
 		++(calculated_praid_topo->praid_version_minor);	// Increase praid_version_minor, allow distribution
+		calculated_praid_topo->topo_idx_updated = leader_get_next_topology_version();
 		XDLIST_FOREACH(calculated_seg_lot, &(calculated_praid_lot->all_seg_lot_list)) {
 			calculated_seg_lot->seg_topo.seg_praid_version_minor = calculated_praid_topo->praid_version_minor;
 		}
@@ -2745,11 +2756,12 @@ int nvmeibt_praid_dump_praid_status_line(int (*printf_fn)(void *ctx, const char 
 	} else {
 		(*printf_fn)(printf_ctx, "\t\t\t- ");
 	}
-	(*printf_fn)(printf_ctx, "praid_ver=%x.%x sync_cmd=%s are_reg_sync=%d is_activated=%d%s%s\n",
+	(*printf_fn)(printf_ctx, "praid_ver=%x.%x sync_cmd=%s are_reg_sync=%d is_activated=%d topo_idx_updated=%"PRIx64"%s%s\n",
 			praid_ctx->praid_version_major, praid_ctx->praid_version_minor,
 			praid_registrants_sync_cmd_str(praid_ctx->registrants_sync_cmd),
 			praid_ctx->leader_did_all_segs_sync_registrants,
 			praid_ctx->is_activated,
+			praid_ctx->topo_idx_updated,
 			(nvmeibt_praid_is_being_deleted(praid) ? " being_deleted" : ""),
 			(nvmeibt_praid_is_conf_corrupted(praid) ? " conf_corrupted" : ""));
 out:
@@ -2874,6 +2886,9 @@ void nvmeibt_praid_lot_duplicate_content(struct nvmeibt_praid_lot *praid_lot_dst
 		 praid_lot_src->topo_ctx.praid_version_minor,
 		 praid_lot_dst->topo_ctx.praid_version_major,
 		 praid_lot_dst->topo_ctx.praid_version_minor);
+	N_Tf(uuuax01, "src topo_idx_updated=@INT64_TX dst topo_idx_updated=@INT64_TX",
+		praid_lot_src->topo_ctx.topo_idx_updated,
+		praid_lot_dst->topo_ctx.topo_idx_updated);
 	praid_lot_dst->topo_ctx = praid_lot_src->topo_ctx;
 	is_dst_praid_lot_leader_calculated_lot = (&(praid_lot_dst->my_praid->praid_leader.calculated_praid_lot) == praid_lot_dst);
 	XDLIST_FOREACH_SAFE(seg_lot_dst, &(praid_lot_dst->all_seg_lot_list)) {

@@ -41,6 +41,7 @@ struct nvmeibt_praid_topo_ctx {
 																	// - Early stop of leader's calculation
 	int										praid_version_major;	// Increased upon every praid change that affects clients
 	int										praid_version_minor;	// Increased upon every praid change
+	int64_t									topo_idx_updated;	// Last topo version in which the praid was updated
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd;
 	int										leader_did_all_segs_sync_registrants;	// Used only ib the leader's context
 };
@@ -61,24 +62,32 @@ struct nvmeibt_praid_serialized_topo {
 	int										praid_version_minor;					// 32
 	int										leader_did_all_segs_sync_registrants;	// 36
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd:32;				// 40
-    int										res_2;									// 44
-    short									res_3;									// 48
-	BOOL									is_activated;							// 49
-    int8_t									segs_num;								// 50
+	int										res_2;									// 44
+	int16_t									res_3;									// 46
+	BOOL									is_activated;							// 47
+	int8_t									segs_num;								// 48
+	int64_t									topo_idx_updated;						// 56
 	struct nvmeibt_serialized_seg_leader_topo		segs[0] __attribute__((aligned(8)));	// 56
 } __attribute__((packed, aligned(8)));
+
+// Size of the old praid serialized topo (v0x310), before topo_idx_updated was added.
+// The old struct had segs[0] at offset 48 (after segs_num at 47), with aligned(8) having no effect since packed.
+// Used for backward compatibility during hot upgrade when parsing wire data from older TOMAs.
+#define NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310	48
 
 #define NVMEIBT_PRAID_TOPO_DUMP(name, _uuid, _which_str, _topo) do {					\
 	if (_topo) {																		\
 		N_Tf(name, "praid=@UUID_LE @STR "												\
 			"sync_cmd=@STR(are_synced=@X) "												\
 			"is_activated=@BOOL "														\
-			"praid_version=@X:@X",														\
+			"praid_version=@X:@X "														\
+			"topo_idx_updated=@INT64_TX",												\
 			_uuid, _which_str,															\
 			praid_registrants_sync_cmd_str(_topo->registrants_sync_cmd),				\
 			_topo->leader_did_all_segs_sync_registrants,								\
 			_topo->is_activated,														\
-			_topo->praid_version_major, _topo->praid_version_minor);					\
+			_topo->praid_version_major, _topo->praid_version_minor,						\
+			_topo->topo_idx_updated);													\
 	} 																					\
 } while (0)
 

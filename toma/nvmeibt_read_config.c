@@ -613,8 +613,12 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 
 		// sanity check
 		if (header->sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-			// It was just sw_ver format change, not a real change in 3.2->3.3 transition
-			if (!((header->sw_ver == 0x00020800) && (TOMA_SW_COMPATIBILITY_VER == 0x00000310))) {
+			// Allow backward compatible versions during hot upgrade
+			if (header->sw_ver == 0x00000310 || header->sw_ver == 0x00020800) {
+				// 0x00000310: v3.1->v3.3 transition (topo_idx_updated added to praid serialized topo)
+				// 0x00020800: v2.8->v3.1 transition (sw_ver format change only)
+				N_Tf(qnbvd68, "Received topo from older TOMA sw_ver=@HEX08, current=@HEX08", header->sw_ver, TOMA_SW_COMPATIBILITY_VER);
+			} else {
 				N_Ef(qnbvd67, "Unknown structs version=@HEX08", header->sw_ver);
 				goto out;
 			}
@@ -664,8 +668,12 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		nvmeibt_topology_convert_follower_header_le_be(header_ptr);
 		// sanity check
 		if (header_ptr->sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-			N_Ef(dpli981, "Unknown structs version=@HEX08", header_ptr->sw_ver);
-            goto out;
+			if (header_ptr->sw_ver == 0x00000310 || header_ptr->sw_ver == 0x00020800) {
+				N_Tf(dpli982, "Received active topo from older TOMA sw_ver=@HEX08", header_ptr->sw_ver);
+			} else {
+				N_Ef(dpli981, "Unknown structs version=@HEX08", header_ptr->sw_ver);
+				goto out;
+			}
 		}
 		calc_len = header_ptr->segs_num * sizeof(struct nvmeibt_serialized_seg_active_topo) + sizeof(*header_ptr);
 		if ((header_ptr->topo_len != calc_len) || ((unsigned int)wire_data_len != calc_len)) {

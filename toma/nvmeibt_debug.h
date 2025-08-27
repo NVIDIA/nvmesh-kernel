@@ -14,7 +14,8 @@
 #define TOMA_LOG_DIR        TOMA_ROOT_DIR "var/log/nvmesh"	// Logs directory
 #define TOMA_BINLOG_DIR     TOMA_LOG_DIR  "/trace_daemon"
 
-#define TOMA_SW_COMPATIBILITY_VER					0x00000310
+#define TOMA_SW_COMPATIBILITY_VER					0x00000330
+
 #define WARN(x...) ({})		// Just in order to compile
 
 #include "common/nvmeib_str.h"
