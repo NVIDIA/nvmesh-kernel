@@ -5,6 +5,7 @@
 
 #include "kr_incs.h"
 #include "nvmeibc_locks_channel.h"
+#include "nvmeib.h"
 #include "nvmeibc_disk.h"
 #include "nvmeibc_defs.h"
 #include "nvmeibc_ib_admin_channel.h"
@@ -676,7 +677,7 @@ out:
 static int try_connect(struct nvmeibc_locks_channel *ch,
 	struct nvmeibc_admin_channel *admin_ch, union ib_gid *dgid,
 	struct nvmeibc_ib_port *lport, int tgt_atomic_ops,
-	unsigned tcp_base_port);
+	unsigned tcp_base_port, unsigned tcp_num_ports);
 
 static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch,
 	int n_idx, u64 cid, int comp_cpu,
@@ -686,11 +687,32 @@ static void free_2nd_ch(struct nvmeibc_locks_channel *ch);
 
 static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch);
 
+static void compute_max_2nd_lock_chs(struct nvmeibc_locks_channel *ch,
+	struct nvmeibc_admin_channel *admin_ch, struct nvmeibc_ib_port *port)
+{
+	struct nvmeibc_disk *disk = admin_ch->base.disk;
+
+	if (P2NV(port)->dev_type == DT_siw)
+		disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels_tcp,
+						NVMEIB_DFLT_MAX_CPUS,
+						disk->tgt_num_cpus) - 1;
+	else
+		disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels,
+						NVMEIB_DFLT_MAX_CPUS,
+						disk->tgt_num_cpus) - 1;
+
+	if (ch->_2nd_ch_pcpu) {
+		int max_pcpu_cpus = min_t(int, num_online_cpus(), NVMEIB_DFLT_MAX_CPUS);
+		disk->max_2nd_lock_chs = ch->_2nd_ch_pcpu == 1 ?
+			max_pcpu_cpus : min_t(int, max_pcpu_cpus, ch->_2nd_ch_pcpu - 1);
+	}
+}
+
 static struct nvmeibc_locks_channel *try_connect_with_lport(
 	struct nvmeibc_admin_channel *admin_ch,
 	struct nvmeibc_local_nic_port *lport, union ib_gid *dgid, int max_tgt_atomic_ops,
 	enum rdma_link_layer dest_link_layer, enum rdma_transport_type dest_transport_type, int rgid_idx, int lnic_idx,
-	unsigned tcp_base_port)
+	unsigned tcp_base_port, unsigned tcp_num_ports)
 {
 	int rv = -ENODEV;
 	struct nvmeibc_locks_channel *locks_channel = NULL;
@@ -705,14 +727,14 @@ static struct nvmeibc_locks_channel *try_connect_with_lport(
 		goto out;
 	}
 	if (lport->ib_port->layer != dest_link_layer) {
-		_NT(trace_locks_channel_try_connect_with_dev_transport_miss,
+		_NT(trace_locks_channel_try_connect_with_lport_transport_miss,
 			"Skip, connecting to dest @GID_IPV6 with transport_type @TRANSPORT_TYPE from lport @GID_IPV6 with transport_type @TRANSPORT_TYPE",
 			dgid, dest_transport_type, &lport->ib_port->gid.gid, lport->ib_port->transport_type);
 		goto out;
 	}
 	if (disk->access_local &&
 		memcmp(&lport->ib_port->gid.gid, dgid, sizeof(*dgid))) {
-		_NT(trace_0_locks_channel_try_connect_with_dev,
+		_NT(trace_0_locks_channel_try_connect_with_lport,
 			"Skip, loopback but l=@GID_IPV6 vs r=@GID_IPV6",
 			&lport->ib_port->gid.gid, dgid);
 		goto out;
@@ -721,10 +743,11 @@ static struct nvmeibc_locks_channel *try_connect_with_lport(
 	if ((locks_channel = alloc(admin_ch)) == NULL) {
 		goto out;
 	}
+	compute_max_2nd_lock_chs(locks_channel, admin_ch, lport->ib_port);
 
 	rv = try_connect(
 		locks_channel, admin_ch, dgid, lport->ib_port,
-		max_tgt_atomic_ops, tcp_base_port);
+		max_tgt_atomic_ops, tcp_base_port, tcp_num_ports);
 	if (rv) {
 		_NT(trace_locks_channel_try_connect_with_dev, "Could not connect lock channel");
 		nvmeibc_locks_channel_free(locks_channel);
@@ -740,7 +763,7 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 	struct nvmeibc_admin_channel *admin_ch,
 	struct nvmeibc_local_nic *ln, union ib_gid *dgid, int max_tgt_atomic_ops,
 	enum rdma_link_layer dest_link_layer, enum rdma_transport_type dest_transport_type, int rgid_idx, int lnic_idx,
-	unsigned tcp_base_port)
+	unsigned tcp_base_port, unsigned tcp_num_ports)
 {
 	struct nvmeibc_local_nic_port *lport;
 	int rv = -ENODEV;
@@ -755,7 +778,7 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 		_NT(trace_locks_channel_try_connect_with_dev_base,
 			"[@INT32_02][@INT32_02][@INT32_02] Try connect l=@GID_IPV6 --> r=@GID_IPV6",
 			rgid_idx, lnic_idx, i, &lport->ib_port->gid.gid, dgid);
-		if ((locks_channel = try_connect_with_lport(admin_ch, lport, dgid, max_tgt_atomic_ops, dest_link_layer, dest_transport_type, rgid_idx, lnic_idx, tcp_base_port))) {
+		if ((locks_channel = try_connect_with_lport(admin_ch, lport, dgid, max_tgt_atomic_ops, dest_link_layer, dest_transport_type, rgid_idx, lnic_idx, tcp_base_port, tcp_num_ports))) {
 			_NT(connect_lchannel_done, "Managed to connect lock channel!");
 			break;
 		}
@@ -909,20 +932,12 @@ static struct nvmeibc_locks_channel *connect_2nd_lock_chs(struct nvmeibc_locks_c
 
 	/* Now try and connect secondary lock channels */
 	if (P2NV(ch->net.port)->dev_type == DT_siw) {
-		admin_ch->base.disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels_tcp,
-								NVMEIB_DFLT_MAX_CPUS,
-								admin_ch->base.disk->tgt_num_cpus) - 1;
 		ch->method = nvmeibc_lock_channel_choosing_method_tcp;
 	} else {
-		admin_ch->base.disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels,
-								NVMEIB_DFLT_MAX_CPUS,
-								admin_ch->base.disk->tgt_num_cpus) - 1;
 		ch->method = nvmeibc_lock_channel_choosing_method;
 	}
 
 	if (ch->_2nd_ch_pcpu) {
-		int max_pcpu_cpus = min_t(int, num_online_cpus(), NVMEIB_DFLT_MAX_CPUS);
-		admin_ch->base.disk->max_2nd_lock_chs = ch->_2nd_ch_pcpu == 1 ? max_pcpu_cpus : min_t(int, max_pcpu_cpus, ch->_2nd_ch_pcpu - 1);
 		if (ch->_2nd_ch_pcpu_mask_str) {
 			if (cpumask_parse(ch->_2nd_ch_pcpu_mask_str, ch->_2nd_ch_pcpu_mask)) {
 				_NE_dmesg(error_connect_locks_inv_pcpu_mask, "Invalid cpumask for nr_pcpu_ch_ll_cpus: @MASK_STRING",
@@ -1066,7 +1081,7 @@ struct nvmeibc_locks_channel *nvmeibc_locks_channel_connect_locks(
 	list_for_each_entry(ln, &admin_ch->base.disk->local_nics, link) {
 		if ((ch = try_connect_with_dev(
 			admin_ch, ln, gid, max_tgt_atomic_ops,
-			dest_link_layer, dest_transport_type, rgid_idx, i, tcp_base_port)) != NULL)
+			dest_link_layer, dest_transport_type, rgid_idx, i, tcp_base_port, tcp_num_ports)) != NULL)
 		{
 			break;
 		}
@@ -1099,7 +1114,7 @@ struct nvmeibc_locks_channel *nvmeibc_locks_channel_connect_lock_by_path(
 
 	if ((ch = try_connect_with_lport(
 			admin_ch, lport, gid, max_tgt_atomic_ops,
-			dest_link_layer, dest_transport_type, rgid_idx, 0, tcp_base_port)) == NULL) {
+			dest_link_layer, dest_transport_type, rgid_idx, 0, tcp_base_port, tcp_num_ports)) == NULL) {
 		_NT(nvmeibc_locks_channel_connect_lock_by_path_failed, "could not find any port to connect to target gid @GID_IPV6", gid);
 		goto out;
 	}
@@ -1455,7 +1470,7 @@ out:
 static int try_connect(struct nvmeibc_locks_channel *ch,
 	struct nvmeibc_admin_channel *admin_ch, union ib_gid *dgid,
 	struct nvmeibc_ib_port *lport, int max_tgt_atomic_ops,
-	unsigned tcp_base_port)
+	unsigned tcp_base_port, unsigned tcp_num_ports)
 {
 	int rv = 0, i;
 	struct nvmeibc_lock_opr_in_progress *opr_ip;
@@ -1505,7 +1520,14 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	}
 	else {
 		bool is_tcp = lport->transport_type == RDMA_TRANSPORT_IWARP;
-		u16 service_port = (is_tcp ? tcp_base_port : NVMEIB_PORT_ID);
+		u16 service_port = NVMEIB_PORT_ID;
+
+		if (is_tcp) {
+			/* Lock channels use ports from the high end of the range (reverse of nordda) to spread target CPU load. */
+			uint offset = (ch->base.disk->create_id * (ch->base.disk->max_2nd_lock_chs + 1)) % tcp_num_ports;
+			service_port = tcp_base_port + (tcp_num_ports - 1 - offset);
+		}
+
 		_ND(trace_3_locks_channel_try_connect,
 			"LOCKS locks channel is trying to connect via @STRING_LITERAL port @NVMEIB_PORT_ID",
 			is_tcp ? "TCP" : "RoCE", service_port);
@@ -1790,7 +1812,13 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	else {
 		info.service_id = 0;
 		info.pkey = 0;
-		info.service_port = lport->transport_type == RDMA_TRANSPORT_IWARP ? tcp_base_port + (ch->base.index % tcp_num_ports) : NVMEIB_PORT_ID;
+		if (lport->transport_type == RDMA_TRANSPORT_IWARP) {
+			/* Lock channels use ports from the high end of the range (reverse of nordda) to spread target CPU load. */
+			uint offset = (ch->base.disk->create_id * (ch->base.disk->max_2nd_lock_chs + 1) + ch->base.index) % tcp_num_ports;
+			info.service_port = tcp_base_port + (tcp_num_ports - 1 - offset);
+		} else {
+			info.service_port = NVMEIB_PORT_ID;
+		}
 		net->service_id = 0;
 		net->service_port = info.service_port;
 	}

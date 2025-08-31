@@ -4249,6 +4249,7 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 	__NFIN;
 
 	disk->nr_np_head = NULL;
+	BUG_ON(disk->n_nr_rionics != 0);
 	list_for_each_entry(rionic, rionics, disk_link) {
 		/* sanity */
 		if (!list_empty(&rionic->disk_nrlink)) {
@@ -4303,11 +4304,13 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 		if (rionic->nr_prefered) {
 			_ND(trace_3_ib_admin_channel_load_disk_nordda, "Add prefered rionic @RIONIC to disk's nr-rionics", rionic);
 			list_add(&rionic->disk_nrlink, &disk->nr_rionics);
+			disk->n_nr_rionics++;
 			p++;
 		}
 		else {
 			_ND(trace_4_ib_admin_channel_load_disk_nordda, "Add non-prefered rionic @RIONIC to disk's nr-rionics", rionic);
 			list_add_tail(&rionic->disk_nrlink, &disk->nr_rionics);
+			disk->n_nr_rionics++;
 			np++;
 			if (!disk->nr_np_head)
 				disk->nr_np_head = &rionic->disk_nrlink;
@@ -4319,10 +4322,19 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 		disk->nr_np_head = &disk->nr_rionics;
 	}
 
-	_NT(trace_6_ib_admin_channel_load_disk_nordda, "disk @DISK_NAME nr-rionics (p=@NR_PREFERED, np=@NP):", disk->name, p, np);
-	list_for_each_entry(rionic, rionics, disk_link)
-		_NT(trace_7_ib_admin_channel_load_disk_nordda, "nr-rionic @IB_GID_IPV6, prefered=@PREFERED",
-			&rionic->ib_gid, rionic->nr_prefered);
+	_NT(trace_6_ib_admin_channel_load_disk_nordda, 
+		"disk @DISK_NAME nr-rionics (p=@NR_PREFERED, np=@NP, total=@TOTAL):", 
+		disk->name, p, np, disk->n_nr_rionics);
+
+	/* Assign nr_idx by order in nr_rionics so service_port spread uses 0..n_rionics-1 without gaps */
+	{
+		uint i = 0;
+		list_for_each_entry(rionic, &disk->nr_rionics, disk_nrlink) {
+			_NT(trace_7_ib_admin_channel_load_disk_nordda, "nr-rionic[@IDX] @IB_GID_IPV6, prefered=@PREFERED",
+				i, &rionic->ib_gid, rionic->nr_prefered);
+			rionic->nr_idx = i++;
+		}
+	}
 	rv = 0;
 
 	#if 0

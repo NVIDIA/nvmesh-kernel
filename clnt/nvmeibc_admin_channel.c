@@ -66,8 +66,11 @@ static void free_iornic(struct nvmeibc_io_rnic *rionic)
 		/* Unlink rionic from the disk */
 		if (!list_empty(&rionic->disk_link))
 			list_del_init(&rionic->disk_link);
-		if (!list_empty(&rionic->disk_nrlink))
+		if (!list_empty(&rionic->disk_nrlink)) {
 			list_del_init(&rionic->disk_nrlink);
+			BUG_ON(rionic->disk->n_nr_rionics == 0);
+			rionic->disk->n_nr_rionics--;
+		}
 		spin_unlock_irqrestore(&rionic->disk->spinlock, flags);
 	}
 

@@ -1113,8 +1113,8 @@ static void net_status_fill_buf(struct nvmeibc_ib_net *net, struct write_status_
 				struct sock *sk = socket->sk;
 				if (sk) {
 					struct tcp_sock *tp = tcp_sk(sk);
-					BUF_ADD("%pI4n:%u -> %pI4n:%u\n",
-						&sk->sk_daddr, sk->sk_dport, &sk->sk_rcv_saddr, sk->sk_num);
+				BUF_ADD("%s%pI4n:%u -> %pI4n:%u\n",
+					prefix, &sk->sk_rcv_saddr, sk->sk_num, &sk->sk_daddr, ntohs(sk->sk_dport));
 #if KS_HAS_SO_INCOMING_CPU
 					BUF_ADD("%sSIW LLP\t socket: %px sk: %px incoming_cpu: %d napi_id: %d mss_cache: %d\n",
 						prefix, socket, sk, READ_ONCE(sk->sk_incoming_cpu), READ_ONCE(sk->sk_napi_id),

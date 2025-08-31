@@ -222,6 +222,8 @@ struct nvmeibc_io_lnic {
  */
 struct nvmeibc_channel;
 struct nvmeibc_io_rnic {
+	/* the remote io nic index in disk->nr_rionics list */
+	uint nr_idx;
 	/* the remote io nic id */
 	union ib_gid hw_gid;
 	/* the srv allow access to this rnic */
