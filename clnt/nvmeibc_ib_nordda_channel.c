@@ -1041,9 +1041,43 @@ int nvmeibc_ib_nordda_channel_connect(struct nvmeibc_ib_nordda_channel *ch)
 		ch->net.base.cm_rdma_type = _rdma_roce;
 	}
 	else if (ch->lionic->rdma_type == _rdma_iwarp) {
+		uint total_offset = 0;
+
+		/* We want to stagger the destination port to ensure a good spread amongst all RX queues for all disks.
+		So we need to offset the port by the total offset so far plus the offset for this rionic plus the offset for this channel.
+		The assumption is that each disk has the same number of paths and the same number of NRCHs per lionic.
+
+		So for example with 2 lionics, 2 rionics and 4 NRCHs per lionic.
+		Disk 0 lionic 0 NRCHs connected to the first rionic will have destination ports 7915 - 7919
+		Disk 0 lionic 0 NRCHS connected to the second rionic will have destination ports 7920 - 7923
+		Disk 1 lionic 0 NRCHs connected to the first rionic will have destination ports 7924 - 7927
+		Disk 1 lionic 0 NRCHs connected to the second rionic will have destination ports 7927 - 7930
+		*/
+
+		if (ch->base.disk->create_id) {
+			struct nvmeibc_io_rnic *rionic = NULL;
+			struct nvmeibc_io_lnic *lionic = NULL;
+			uint total_lionic_nr_qps = 0;
+			/* Sum n_nr_qps only for (rionic, lionic) paths that contain this lionic */
+			list_for_each_entry(rionic, &ch->base.disk->nr_rionics, disk_nrlink) {
+				list_for_each_entry(lionic, &rionic->nr_lionics, rionic_nrlink) {
+					if (lionic != ch->lionic)
+						continue;
+					total_lionic_nr_qps += lionic->n_nr_qps;
+				}
+			}
+			/* +8 per disk for this lionic's paths (e.g. 2 rionics * 4 per path) */
+			total_offset += total_lionic_nr_qps * ch->base.disk->create_id;
+		}
+
+		/* Offset by the number of lionic NRCH QPs for this rionic*/
+		total_offset += (ch->lionic->rionic->nr_idx * ch->lionic->n_nr_qps);
+		/* Offset by the channel index*/
+		total_offset += get_ch_ind(ch);
+
+		/* Add the base port and modulo by the number of TCP ports*/
 		ch->net.base.service_id = 0;
-		ch->net.base.service_port = ch->lionic->rionic->tcp_base_port +
-			(get_ch_ind(ch) % ch->lionic->rionic->tcp_num_ports);
+		ch->net.base.service_port = ch->lionic->rionic->tcp_base_port + total_offset % ch->lionic->rionic->tcp_num_ports;
 		ch->net.base.cm_rdma_type = _rdma_iwarp;
 	}
 

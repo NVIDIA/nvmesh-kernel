@@ -507,6 +507,7 @@ struct nvmeibc_disk {
 	   List is maintained separately from disk->rionics list so not to
 	   be effected from its IO channels load-balancing (lists rotation) */
 	struct list_head nr_rionics;
+	unsigned n_nr_rionics;
 	/* First non-prefered no-rdda rionic */
 	struct list_head *nr_np_head;
 	/* main disk guard */
