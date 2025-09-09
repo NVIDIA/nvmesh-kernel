@@ -69,6 +69,10 @@ struct raft_persistency {
 #define TLV_TYPE_TOPO_COMPLETE					((int8_t)2)
 #define TLV_TYPE_TOPO_CONFIG_COMPLETE			((int8_t)3)
 #define TLV_TYPE_RAFT_MEMBERS_COMPLETE			((int8_t)4)
+#define TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL	((int8_t)5)
+#define TLV_TYPE_TOPO_INCREMENTAL				((int8_t)6)
+#define TLV_TYPE_TOPO_CONFIG_INCREMENTAL		((int8_t)7)
+#define TLV_TYPE_RAFT_MEMBERS_INCREMENTAL		((int8_t)8)
 
 struct nvmeibt_wire_type_len_value {
 	int16_t						reserved_1;				// 2
