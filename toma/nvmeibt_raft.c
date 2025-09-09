@@ -3406,6 +3406,10 @@ int nvmeibt_raft_one_time_init(void)
 	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_config_complete));
 	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete));
 	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_raft_members_complete));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_incremental));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_config_incremental));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_raft_members_incremental));
 	if (nvmeibt_recursive_mkdir(NVMEIBT_PERSISTENCY_CACHE_DIR, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0) {
 		rv = -1;
 		goto out;

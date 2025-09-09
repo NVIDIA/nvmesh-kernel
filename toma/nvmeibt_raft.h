@@ -126,14 +126,20 @@ struct nvmeibt_raft_ctx {
 	// We have 4 sections in the persist_and_wire_buf:
 	// - TOPO, TOPO_CONFIG, KAFKA_MGMT_CONFIG, RAFT_MEMBERS
 	// The leader serializes a buffer per section on every we_have_a_new_baseline
+	// Depending on whether we enable incremental wire buffer, we choose either complete or incremental version.
 	struct nvmeibt_Buf			leader_to_commit_wire_topo_complete;
 	struct nvmeibt_Buf			leader_to_commit_wire_topo_config_complete;
 	struct nvmeibt_Buf			leader_to_commit_wire_kafka_mgmt_config_complete;
 	struct nvmeibt_Buf			leader_to_commit_wire_raft_members_complete;
+	struct nvmeibt_Buf			leader_to_commit_wire_topo_incremental;
+	struct nvmeibt_Buf			leader_to_commit_wire_topo_config_incremental;
+	struct nvmeibt_Buf			leader_to_commit_wire_kafka_mgmt_config_incremental;
+	struct nvmeibt_Buf			leader_to_commit_wire_raft_members_incremental;
 	int64_t						applied_raft_members_seq_no;
 	// When the leader sends an APPEND_ENTRIES it first generates (roughly speaking a concatenation of the above):
 	// - leader_to_commit_persist_and_wire_buf_full_complete
 	// - leader_to_commit_persist_and_wire_buf_topo_only_complete
+	// - leader_to_commit_persist_and_wire_buf_full_incremental
 	// The follower receives a persist_and_wire_buf and updates its follower_to_commit_persist_and_wire_buf_full
 	// - Next it is submitted, and updates the committed lot(s)
 	//   - The committed lots are updated prematurely, since they are used only later on by:
@@ -157,6 +163,7 @@ struct nvmeibt_raft_ctx {
 	struct nvmeibt_persist_and_wire_buf		*follower_to_commit_persist_and_wire_buf_full;
 	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_full_complete;
 	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_topo_only_complete;
+	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_full_incremental;
 	struct nvmeibt_persist_and_wire_buf		*follower_to_leader_wire_buf;
 	//
 	// committed == (raft's)matched
