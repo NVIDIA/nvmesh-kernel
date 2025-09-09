@@ -64,11 +64,11 @@ struct raft_persistency {
 				persist_and_wire_buf_get_raft_calculated_leader_append_entries_rep_time_ns(b), persist_and_wire_buf_get_raft_calculated_leader_topo_calc_time_ns(b), b->raft_ctx.reserved2);\
 })
 
-#define TLV_TYPE_UNKNOWN				((int8_t)0)
-#define TLV_TYPE_KAFKA_MGMT_CONFIG_FULL ((int8_t)1)
-#define TLV_TYPE_TOPO_FULL				((int8_t)2)
-#define TLV_TYPE_TOPO_CONFIG_FULL		((int8_t)3)
-#define TLV_TYPE_RAFT_MEMBERS_FULL		((int8_t)4)
+#define TLV_TYPE_UNKNOWN						((int8_t)0)
+#define TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE		((int8_t)1)
+#define TLV_TYPE_TOPO_COMPLETE					((int8_t)2)
+#define TLV_TYPE_TOPO_CONFIG_COMPLETE			((int8_t)3)
+#define TLV_TYPE_RAFT_MEMBERS_COMPLETE			((int8_t)4)
 
 struct nvmeibt_wire_type_len_value {
 	int16_t						reserved_1;				// 2

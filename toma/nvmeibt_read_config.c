@@ -2294,7 +2294,7 @@ void nvmeibt_read_config_print_status(int (*printf_fn)(void *ctx, const char *fm
 
 	NFIN;
 	wire_config.buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full,
-																					  TLV_TYPE_TOPO_CONFIG_FULL, (char **)&(wire_config.data_buf));
+																					  TLV_TYPE_TOPO_CONFIG_COMPLETE, (char **)&(wire_config.data_buf));
 	(*printf_fn)(printf_ctx, "\n- - - - -   MANAGEMENT CONFIG   - - - - -\n");
 	if (!HW_mgmt_conf) {
 		(*printf_fn)(printf_ctx, "HW configuration is empty\n");

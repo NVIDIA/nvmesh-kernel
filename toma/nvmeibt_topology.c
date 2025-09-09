@@ -1267,7 +1267,7 @@ int nvmeibt_topology_parse_committed_topology(void) {
 	int			topo_buf_len;
 
 	NFIN;
-	topo_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_FULL, &topo_buf);
+	topo_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_COMPLETE, &topo_buf);
 	if (topo_buf_len == 0) {
 		N_Tf(5vsjhs8, "Empty topo. Ignoring.");
 	} else if (topo_buf_len < (int)sizeof(struct nvmeibt_topology_serialized_topo_header)) {
@@ -1289,7 +1289,7 @@ int nvmeibt_topology_parse_a_config(enum NVMEIBT_CSV_TYPE content_type, struct n
 	NFIN;
 	reset_all_conf_corrupted_flags();
 	config_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(
-		nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, (content_type == NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES ? TLV_TYPE_TOPO_CONFIG_FULL : TLV_TYPE_KAFKA_MGMT_CONFIG_FULL), &config_buf);
+		nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, (content_type == NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES ? TLV_TYPE_TOPO_CONFIG_COMPLETE : TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE), &config_buf);
 	if (config_buf_len == 0) {
 		N_Tf(jajasd3, "volumes config is empty");
 		rv = 0;
@@ -2665,7 +2665,7 @@ int nvmeibt_topology_print_status(int (*printf_fn)(void *ctx, const char *fmt, .
 	struct nvmeibt_Buf		wire_topo = {(size_t)0, (void *)0};
 
 	(*printf_fn)(printf_ctx, "\n- - - - -   GLOBAL TOPOLOGY   - - - - -\n");
-	wire_topo.buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_FULL, (char **)&(wire_topo.data_buf));
+	wire_topo.buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_COMPLETE, (char **)&(wire_topo.data_buf));
 	if (wire_topo.buf_len) {
 		nvmeibt_topology_print(printf_fn, printf_ctx, &wire_topo, 0);
 	}

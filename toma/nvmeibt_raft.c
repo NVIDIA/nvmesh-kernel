@@ -449,22 +449,22 @@ int nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(const struct nvm
 	}
 	data_ptr = (char *)src->data;	// Override the const
 	wire_out_data_len = nvmeibt_tlv_get_len(&(src->topo_ctx));
-	if (tlv_type == TLV_TYPE_TOPO_FULL) {
+	if (tlv_type == TLV_TYPE_TOPO_COMPLETE) {
 		goto out;
 	}
 	data_ptr += wire_out_data_len;
 	wire_out_data_len = nvmeibt_tlv_get_len(&(src->topo_config_ctx));
-	if (tlv_type == TLV_TYPE_TOPO_CONFIG_FULL) {
+	if (tlv_type == TLV_TYPE_TOPO_CONFIG_COMPLETE) {
 		goto out;
 	}
 	data_ptr += wire_out_data_len;
 	wire_out_data_len = nvmeibt_tlv_get_len(&(src->kafka_mgmt_config_ctx));
-	if (tlv_type == TLV_TYPE_KAFKA_MGMT_CONFIG_FULL) {
+	if (tlv_type == TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE) {
 		goto out;
 	}
 	data_ptr += wire_out_data_len;
 	wire_out_data_len = nvmeibt_tlv_get_len(&(src->raft_members_ctx));
-	if (tlv_type == TLV_TYPE_RAFT_MEMBERS_FULL) {
+	if (tlv_type == TLV_TYPE_RAFT_MEMBERS_COMPLETE) {
 		goto out;
 	}
 	N_Ef(evai3j9, "Unknown tlv_type=@INT", tlv_type);
@@ -482,10 +482,10 @@ static void init_persist_and_wire_buf(struct nvmeibt_persist_and_wire_buf *buf)
 	memset(buf, 0, sizeof(*buf));
 	// buf must be already allocated large enough
 	buf->raft_ctx =              (struct raft_persistency){LE_SWAP64(0LL), LE_SWAP64(0LL), LE_SWAP64(0LL), swap_uuid_LE_BE(&nvmeib_uuid_null_val), swap_uuid_LE_BE(&nvmeib_uuid_null_val), LE_SWAP64(0LL), LE_SWAP64(0LL), LE_SWAP64(0LL), LE_SWAP64(0LL), LE_SWAP64(0LL)};
-	buf->topo_ctx =              (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_TOPO_FULL),              0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
-	buf->topo_config_ctx =       (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_TOPO_CONFIG_FULL),       0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
-	buf->kafka_mgmt_config_ctx = (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_KAFKA_MGMT_CONFIG_FULL), 0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
-	buf->raft_members_ctx =      (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_RAFT_MEMBERS_FULL),      0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
+	buf->topo_ctx =              (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_TOPO_COMPLETE),              0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
+	buf->topo_config_ctx =       (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_TOPO_CONFIG_COMPLETE),       0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
+	buf->kafka_mgmt_config_ctx = (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE), 0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
+	buf->raft_members_ctx =      (struct nvmeibt_wire_type_len_value){0, 0, LE_SWAP8(TLV_TYPE_RAFT_MEMBERS_COMPLETE),      0, 0, 0, LE_SWAP64(nvmeibt_offset_and_idx_uninitialized), LE_SWAP64(-1LL)};
 	// calc CRCs
 	buf->raft_ctx.raft_ctx_crc = 0;
 	buf->raft_ctx.raft_ctx_crc = LE_SWAP32(crc32(0, &buf->raft_ctx, sizeof(buf->raft_ctx)));
@@ -558,12 +558,12 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 	dst = alloc_persist_and_wire_buf(sizeof(*dst) + sum_data_len);
 	//
 	data_ptr = (char *)dst + sizeof(*dst);
-	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_ctx), data_ptr, topo_idx, topo_seq_no, topo_data, topo_data_len, TLV_TYPE_TOPO_FULL);
-	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_config_ctx), data_ptr, topo_config_idx, topo_config_seq_no, topo_config_data, topo_config_data_len, TLV_TYPE_TOPO_CONFIG_FULL);
+	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_ctx), data_ptr, topo_idx, topo_seq_no, topo_data, topo_data_len, TLV_TYPE_TOPO_COMPLETE);
+	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_config_ctx), data_ptr, topo_config_idx, topo_config_seq_no, topo_config_data, topo_config_data_len, TLV_TYPE_TOPO_CONFIG_COMPLETE);
 	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->kafka_mgmt_config_ctx), data_ptr, mgmt_config_offset, mgmt_config_seq_no, mgmt_config_data,
-												   mgmt_config_data_len, TLV_TYPE_KAFKA_MGMT_CONFIG_FULL);
+												   mgmt_config_data_len, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
 	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->raft_members_ctx), data_ptr, members_offset, members_seq_no, members_data,
-												   members_data_len, TLV_TYPE_RAFT_MEMBERS_FULL);
+												   members_data_len, TLV_TYPE_RAFT_MEMBERS_COMPLETE);
 	// Set the raft_ctx (usually in the leader), and it travels all the way to the follower's persistence as is
 	persist_and_wire_buf_set_current_raft_TERM(dst, current_raft_term, 0);
 	persist_and_wire_buf_set_voted_for_and_last_rx_append_entries_raft_TERM(dst, voted_for_raft_member_uuid, last_rx_append_entries_raft_term, 0);
@@ -588,25 +588,25 @@ int nvmeibt_raft_leader_copy_committed_persist_and_wire_buf_sections_into_separa
 	NFIN;
 	src_buf = my_raft_global.follower_to_commit_persist_and_wire_buf_full;
 
-	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_TOPO_FULL, &section_buf);
+	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_TOPO_COMPLETE, &section_buf);
 	if (section_buf_len) {
 		N_Tf(rxcva3J, "Copy topo");
 		NNVMEIBT_BUF_RESIZE(o3mgias, &(my_raft_global.leader_to_commit_wire_topo_complete), (size_t)section_buf_len);
 		memcpy(my_raft_global.leader_to_commit_wire_topo_complete.data_buf, section_buf, section_buf_len);
 	}
-	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_TOPO_CONFIG_FULL, &section_buf);
+	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_TOPO_CONFIG_COMPLETE, &section_buf);
 	if (section_buf_len) {
 		N_Tf(vbdkllr, "Copy topo_config");
 		NNVMEIBT_BUF_RESIZE(9vkkewj, &(my_raft_global.leader_to_commit_wire_topo_config_complete), (size_t)section_buf_len);
 		memcpy(my_raft_global.leader_to_commit_wire_topo_config_complete.data_buf, section_buf, section_buf_len);
 	}
-	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_KAFKA_MGMT_CONFIG_FULL, &section_buf);
+	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, &section_buf);
 	if (section_buf_len) {
 		N_Tf(cyugsiu, "Copy kafka_mgmt_config");
 		NNVMEIBT_BUF_RESIZE(abwiwn2, &(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete), (size_t)section_buf_len);
 		memcpy(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.data_buf, section_buf, section_buf_len);
 	}
-	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_RAFT_MEMBERS_FULL, &section_buf);
+	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_RAFT_MEMBERS_COMPLETE, &section_buf);
 	if (section_buf_len) {
 		N_Tf(hduksi3, "Copy raft_members");
 		NNVMEIBT_BUF_RESIZE(oudf3xy, &(my_raft_global.leader_to_commit_wire_raft_members_complete), (size_t)section_buf_len);
@@ -1080,7 +1080,7 @@ void nvmeibt_raft_align_members_with_committed_wire_buf(struct nvmeibt_Str *JSON
 		goto  out;
 	}
 	kafka_offset = nvmeibt_tlv_get_idx(&(my_raft_global.follower_to_commit_persist_and_wire_buf_full->raft_members_ctx));
-	members_wire_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_RAFT_MEMBERS_FULL, (char **)&members_wire_buf);
+	members_wire_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_RAFT_MEMBERS_COMPLETE, (char **)&members_wire_buf);
 	if (members_wire_buf_len == 0) {
 		N_Tf(cvasy3m, "members_wire_buf_len=0");
 		goto out;
@@ -1298,16 +1298,16 @@ static bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wi
 		rv = 0;
 	}
 
-	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_TOPO_FULL, &section_buf);
+	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_TOPO_COMPLETE, &section_buf);
 	if (!is_tlv_crc_ok(&buf->topo_ctx, section_buf, section_len, "TOPO"))
 		rv = 0;
-	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_TOPO_CONFIG_FULL, &section_buf);
+	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_TOPO_CONFIG_COMPLETE, &section_buf);
 	if (!is_tlv_crc_ok(&buf->topo_config_ctx, section_buf, section_len, "TOPO_CONFIG"))
 		rv = 0;
-	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_KAFKA_MGMT_CONFIG_FULL, &section_buf);
+	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, &section_buf);
 	if (!is_tlv_crc_ok(&buf->kafka_mgmt_config_ctx, section_buf, section_len, "MGMT_CONFIG"))
 		rv = 0;
-	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_RAFT_MEMBERS_FULL, &section_buf);
+	section_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_RAFT_MEMBERS_COMPLETE, &section_buf);
 	if (!is_tlv_crc_ok(&buf->raft_members_ctx, section_buf, section_len, "RAFT_MEMBERS"))
 		rv = 0;
 	return rv;
@@ -1392,7 +1392,7 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 	nvmeibt_raft_align_members_with_committed_wire_buf(JSON_output);
 	//
 	// The stored KAFKA_MGMT_CONFIG is used only if I become a leader
-	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_KAFKA_MGMT_CONFIG_FULL, &section_buf);
+	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, &section_buf);
 	serialize_tlv_JSON(JSON_output, "KAFKA_MGMT_CONFIG_FULL", &(my_raft_global.follower_to_commit_persist_and_wire_buf_full->kafka_mgmt_config_ctx));
 	if (section_buf_len) {
 		if (nvmeibt_parse_buf(section_buf, section_buf_len, 1, NVMEIBT_NOT_INITIALIZED_SER_VER, NULL, NVMEIBT_CSV_TYPE_FULL_KAFKA_MGMT_CONFIG_VOLUMES,
@@ -1416,7 +1416,7 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 	if ((JSON_output) && (nvmeibt_Str_end(JSON_output)[-1] == ',')) {	// Missing FULL_TOPO_CONFIG object finishing with ','  Todo: Fix me properly in the above func
 		nvmeibt_Str_strcat(JSON_output, "\"FULL_TOPO_CONFIG\" : {}");
 	}
-	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_FULL, &section_buf);
+	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_COMPLETE, &section_buf);
 	serialize_tlv_JSON(JSON_output, "TOPO_FULL", &(my_raft_global.follower_to_commit_persist_and_wire_buf_full->topo_ctx));
 	if (section_buf_len) {
 		if (nvmeibt_parse_buf(section_buf, section_buf_len, 0, NVMEIBT_NOT_INITIALIZED_SER_VER, NULL, NVMEIBT_CSV_TYPE_TOPO,
@@ -2743,7 +2743,7 @@ static int leader_process_peer_msg_data(const struct raft_msg *msg, struct nvmei
 	//
 	if ((serialization_version_diff != 0) && is_with_remote_applied_topo_data) {
 		src_member->last_local_serialization_version = msg->local_serialization_version;
-		applied_topo_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(&(msg->persist_and_wire_buf), TLV_TYPE_TOPO_FULL, &applied_topo_data);
+		applied_topo_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(&(msg->persist_and_wire_buf), TLV_TYPE_TOPO_COMPLETE, &applied_topo_data);
 		if (applied_topo_len) {
 			rv = nvmeibt_topology_leader_new_remote_applied_topology_arrived(applied_topo_data, applied_topo_len, src_member);
 		}
