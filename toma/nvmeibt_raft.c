@@ -758,6 +758,21 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, NULL, 0,
 		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, NULL, 0,
 		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
+	NNVMEIBT_TOMA_FREE(sk1lams, my_raft_global.leader_to_commit_persist_and_wire_buf_full_incremental);
+	my_raft_global.leader_to_commit_persist_and_wire_buf_full_incremental = nvmeibt_raft_generate_persist_and_wire_buf(
+		true,
+		nvmeibt_raft_get_current_term(),
+		nvmeibt_raft_get_current_term(),
+		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
+		&(my_raft_global.my_member->uuid),	// The voted_for_raft_member in the follower's persistence
+		nvmeibt_global_get_mgmt_DB_uuid(),
+		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
+		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
+		nvmeibt_raft_get_guaranteed_sw_ver(),
+		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_incremental.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_config_incremental.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_incremental.data_buf, my_raft_global.leader_to_commit_wire_raft_members_incremental.buf_len);
 	raft_leader_reset_counters_upon_last_LOG_change();
 	nvmeibt_global_get_global()->is_update_csv_of_config_and_topo_required = false;
 out:
