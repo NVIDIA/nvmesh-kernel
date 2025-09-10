@@ -201,6 +201,16 @@ static int64_t					raft_max_time_leader_survives_without_majority_nsec;
 static int64_t					raft_max_time_non_responsive_member_is_considered_alive_for_topo_nsec;
 static int64_t					praid_leader_max_nsec_wait_for_registrable_seg_to_apply;
 static int64_t					praid_leader_max_nsec_wait_for_non_registrable_seg_to_apply;
+static bool						raft_is_incremental_wire_buf_enabled = false;
+
+void nvmeibt_raft_set_incremental_wire_buf_enabled(bool is_enabled)
+{
+	if (raft_is_incremental_wire_buf_enabled != is_enabled) {
+		N_Tf(jfdn1al, "raft_is_incremental_wire_buf_enabled: @BOOL-->@BOOL", raft_is_incremental_wire_buf_enabled, is_enabled);
+		raft_is_incremental_wire_buf_enabled = is_enabled;
+	}
+}
+
 static __kernel_suseconds_t		max_wait_for_non_registrable_seg_nsec = PRAID_LEADER_MAX_NSEC_WAIT_FOR_NON_REGISTRABLE_SEG_TO_APPLY_DEFAULT;
 
 #define RAFT_RANDOM_ELECTION_TIMEOUT_NSEC	(raft_min_election_timeout_nsec + \

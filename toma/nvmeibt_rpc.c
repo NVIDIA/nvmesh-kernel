@@ -347,6 +347,19 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 		toma_sig_handler_fn( 9, 0xface00000009UL);
 		return nvmeibt_Str_sprintf(out, "remote kill -9 send!\n");
 	}
+	else if (strcmp("incremental-wire-buf", argv[1])==0 && argc>2) {
+		if (strcmp("disable", argv[2])==0) {
+			nvmeibt_raft_set_incremental_wire_buf_enabled(0);
+			nvmeibt_Str_sprintf(out, "Incremental wire buf disabled.\n");
+		} else if (strcmp("enable", argv[2])==0) {
+			nvmeibt_raft_set_incremental_wire_buf_enabled(1);
+			nvmeibt_Str_sprintf(out, "Incremental wire buf enabled.\n");
+		} else {
+			nvmeibt_Str_sprintf(out, "Unknown operation, use 'incremental-wire-buf enable|disable'.\n");
+			return -1;
+		}
+		return 0;
+	}
 #if 0
 	else if (strcmp("mallinfo", argv[1])==0) { // YR: On Ubuntu 22, this is mallinfo2. On RH 8, it is still mallinfo. To avoid wasting time now, disabling. Open it when you want to debug.
 		struct mallinfo2 m = mallinfo();
