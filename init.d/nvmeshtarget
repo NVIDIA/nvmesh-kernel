@@ -506,31 +506,28 @@ set_toma_conf() {
 	done
 
 	_NVMESH_MODE="${NVMESH_MODE:-nvmesh}"
+	TOMA_DEFAULT_CONF=/opt/nvmesh/common-repo/toma.d/default.rpc
 	TOMA_CONF=/opt/nvmesh/common-repo/toma.d/${_NVMESH_MODE}.rpc
 	if [ $try -lt $maxtries ]; then
-		if [ -f "$TOMA_CONF" ]; then
-			# Skip blank lines or comments.  Note - ignore errors because bbbb
-			sed -e 's/^ *//;s/#.*//;/^$/d;' $TOMA_CONF | while read cmd
-			do
-				# remove leading white-space
-				cmd=${cmd##*( )}
+		# Skip blank lines or comments.  Note - ignore errors because bbbb
+		sed -e 's/^ *//;s/#.*//;/^$/d;' $TOMA_DEFAULT_CONF $TOMA_CONF 2>/dev/null | while read cmd
+		do
+			# remove leading white-space
+			cmd=${cmd##*( )}
 
-				# check the first-word of cmd
-				case ${cmd%% *} in
-				config|disk-models)
-					echo "$TOMA_RPC $cmd"
-					$TOMA_RPC $cmd
-					;;
-				*)
-					# backwards-compatibility - assume is a config command
-					echo "$TOMA_RPC config $cmd"
-					$TOMA_RPC config $cmd
-					;;
-				esac
-			done
-		else
-			echo "$TOMA_CONF not exists, skip"
-		fi
+			# check the first-word of cmd
+			case ${cmd%% *} in
+			config|disk-models)
+				echo "$TOMA_RPC $cmd"
+				$TOMA_RPC $cmd
+				;;
+			*)
+				# backwards-compatibility - assume is a config command
+				echo "$TOMA_RPC config $cmd"
+				$TOMA_RPC config $cmd
+				;;
+			esac
+		done
 	else
 		echo "Could not connect to TOMA-RPC after $try tries."
 		exit 1

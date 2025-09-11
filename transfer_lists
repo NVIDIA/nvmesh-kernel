@@ -107,6 +107,7 @@ target_scripts_transfer_list="init.d/nvmeshtarget \
 			scripts/target/google_uuids.sh \
 			config/target_devices.conf \
 			toma/toma_trace.config \
+			toma/toma.d/default.rpc \
 			toma/toma.d/nvmesh_oci.rpc \
 			toma/toma.d/nvmesh_gcp.rpc	\
 			toma/toma.d/nvmesh_gfn.rpc \
