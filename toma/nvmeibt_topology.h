@@ -81,6 +81,7 @@ struct nvmeibt_topology;
 
 #define RAFT_LONG_MSG_TEST_TOTAL_STR_MAX_LEN		(8 * 1024 * 1024)
 #define	RAFT_LONG_MSG_TEST_SIGNATURE 0x7254535454535472 // '0x72 TSTTST 0x72'
+#define NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX 10
 struct raft_long_msg_test {
     long long		appendix_len;
     long long		appendix_signature;

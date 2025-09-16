@@ -1043,17 +1043,25 @@ unsigned long long nvmeibt_topology_leader_get_next_config_version(void)
 	return (nvmeibt_raft_get_current_term() << 32) | ((nvmeibt_global_get_global()->leader_config_version + 1) & 0xffffffff);
 }
 
-static inline bool omit_praid_in_serialized_topo(struct nvmeibt_praid *praid)
+static inline bool omit_praid_in_serialized_topo(struct nvmeibt_praid *praid, bool is_wire_buf_incremental)
 {
-	return (!nvmeibt_praid_is_serialized(praid) || NVMEIBT_OBJ_IS_MARKED_OUTDATED(nvmeibt_praid_get_blkdev(praid)) || nvmeibt_praid_is_being_deleted(praid));
+	bool omit_this_praid = (!nvmeibt_praid_is_serialized(praid) || NVMEIBT_OBJ_IS_MARKED_OUTDATED(nvmeibt_praid_get_blkdev(praid)) || nvmeibt_praid_is_being_deleted(praid));
+	if (is_wire_buf_incremental) {
+		// If we are generating an incremental topo, in addition to conditions above, we also need to omit praids that were not updated in the past NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX topology versions.
+		// Incremental topo doesn't include outdated praids either. They on followers will be garbage collected when followers receive full topo config.
+		int64_t min_version = RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated);
+		min_version = min_version > NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX ? min_version - NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX : 0;
+		omit_this_praid = omit_this_praid || praid->praid_leader.baseline_praid_lot.topo_ctx.topo_idx_updated < min_version;
+	}
+	return omit_this_praid;
 }
 
-void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
+static void nvmeibt_topology_leader_serialize_baseline_topo_to_wire_incremental_or_complete(bool is_wire_buf_incremental)
 {
 	struct nvmeibt_praid							*praid;
 	int												praids_num = 0, segs_num = 0;
 	unsigned int									topo_len;
-	struct nvmeibt_Buf								*dst_wire_topo_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_complete);
+	struct nvmeibt_Buf								*dst_wire_topo_buf;
 	struct nvmeibt_topology_serialized_topo_header	serialized_header = {0};
 	struct nvmeibt_topology_serialized_topo_header	*dst_wire_header_ptr;
 	struct nvmeibt_praid_serialized_topo			*dst_praid_wire_topo_ptr;
@@ -1062,9 +1070,14 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	struct nvmeibt_Buf								*src_praid_segs_wire_topo_buf;
 
 	NFIN;
+	if (is_wire_buf_incremental) {
+		dst_wire_topo_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_incremental);
+	} else {
+		dst_wire_topo_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_complete);
+	}
 	// Count how many praids and segments we have in order to allocate a buffer
 	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
-		if (omit_praid_in_serialized_topo(praid))
+		if (omit_praid_in_serialized_topo(praid, is_wire_buf_incremental))
 			continue;
 		praids_num++;
 		segs_num += XDLIST_N_ELEMNTS(&(praid->praid_leader.baseline_praid_lot.all_seg_lot_list));
@@ -1088,7 +1101,7 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	nvmeibt_topology_convert_header_le_be(&serialized_header, dst_wire_header_ptr);
 	dst_praid_wire_topo_ptr = (struct nvmeibt_praid_serialized_topo *)(dst_wire_header_ptr + 1);
 	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
-		if (omit_praid_in_serialized_topo(praid))
+		if (omit_praid_in_serialized_topo(praid, is_wire_buf_incremental))
 			continue;
 		*dst_praid_wire_topo_ptr = praid->praid_leader.praid_wire_topo;
 		dst_praid_segs_wire_topo_ptr = dst_praid_wire_topo_ptr->segs;
@@ -1103,8 +1116,14 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	NVMEIBT_LONG_TRACE_WRAPPER(poiurea, "SERIALIZED BASELINE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 	NNVMEIBT_STR_FREE(rpsnhs1, print_s);
 	// No need to convert to wire format, we already have a concatenation of praid wire buffers
-	nvmeibt_topology_mark_update_csv_of_config_and_topo_required();
 	NFOUT;
+}
+
+void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
+{
+	nvmeibt_topology_leader_serialize_baseline_topo_to_wire_incremental_or_complete(false);
+	nvmeibt_topology_leader_serialize_baseline_topo_to_wire_incremental_or_complete(true);
+	nvmeibt_topology_mark_update_csv_of_config_and_topo_required();
 }
 
 int nvmeibt_topology_serialize_active_topology(void)
