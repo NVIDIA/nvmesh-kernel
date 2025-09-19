@@ -77,7 +77,7 @@ struct raft_persistency {
 struct nvmeibt_wire_type_len_value {
 	int16_t						reserved_1;				// 2
 	int8_t						v3_3_kafka_topic_change_no;	// 3
-	int8_t						UNUSED_tlv_type;		// 4
+	int8_t						tlv_type;				// 4
 	int							tlv_len;				// 8
 	uint32_t					tlv_crc;				// 12
 	int							reserved_2;				// 16
@@ -109,7 +109,7 @@ static inline int32_t nvmeibt_tlv_get_len(const struct nvmeibt_wire_type_len_val
 
 static inline int8_t nvmeibt_tlv_get_type(const struct nvmeibt_wire_type_len_value *tlv)
 {
-	return LE_SWAP8(tlv->UNUSED_tlv_type);
+	return LE_SWAP8(tlv->tlv_type);
 }
 
 static inline int8_t nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(const struct nvmeibt_wire_type_len_value *tlv)

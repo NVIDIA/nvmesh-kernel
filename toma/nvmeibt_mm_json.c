@@ -1467,7 +1467,7 @@ int parse_generic_tlv_JSON(struct mm_json_dict *dict, struct nvmeibt_wire_type_l
 	JSON_LOOP_FOR_DICT(kv, dict) {
 		JSON_LOOP_ITERATION_START(krueove, kv->key);
 		// The JSON is LE. Need to convert to BE (sometimes only an int out of int64)
-		JSON_ASSIGN_PLAIN(v84io29, "type", tlv->UNUSED_tlv_type, LE_SWAP8((int8_t)(kv->value->num)));
+		JSON_ASSIGN_PLAIN(v84io29, "type", tlv->tlv_type, LE_SWAP8((int8_t)(kv->value->num)));
 		JSON_ASSIGN_PLAIN(aq9pk4i, "len", tlv->tlv_len, LE_SWAP32((uint32_t)(kv->value->num)));
 		JSON_ASSIGN_PLAIN(o04byxa, "idx", tlv->tlv_idx, LE_SWAP64(kv->value->num));
 		JSON_ASSIGN_PLAIN(vhsn89q, "seq_no", tlv->seq_no, LE_SWAP64(kv->value->num));

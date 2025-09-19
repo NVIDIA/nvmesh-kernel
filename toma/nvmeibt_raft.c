@@ -534,7 +534,7 @@ static int fill_persist_and_wire_tlv_and_data(struct nvmeibt_wire_type_len_value
 	memset(tlv, 0, sizeof(*tlv));
 	tlv->reserved_1 = 0;
 	tlv->reserved_2 = 0;
-	tlv->UNUSED_tlv_type = LE_SWAP8(tlv_type);
+	tlv->tlv_type = LE_SWAP8(tlv_type);
 	tlv->tlv_idx = LE_SWAP64(idx);
 	tlv->tlv_len = LE_SWAP32(in_data_len);
 	tlv->seq_no = LE_SWAP64(seq_no);
