@@ -11,6 +11,79 @@
 #include "nvmeibt_disk_segment.h"
 #include "vol/nvmeibt_chunk.h"
 
+/*
+ * nvmeibt_praid Information Flow:
+ *
+ * nvmeibt_praid represents praid state in TOMA (stored in global praids_hash).
+ * It contains configuration and topology for segments.
+ * Data flows differently between leader and follower nodes.
+ *
+ * THREE BUFFERS per praid:
+ *   1. KAFKA_MGMT_CONFIG: praid config (from vol config, bdev->kafka_mgmt_config_...wire_conf_buf)
+ *   2. TOPO_CONFIG:       praid config + seg configs (praid_leader.topo_config_...wire_conf_buf)
+ *   3. TOPO:              praid topo + seg topos (praid_leader.praid_wire_topo + segs_wire_topo_buf)
+ *
+ * DATA FLOW SUMMARY:
+ *   Leader:   from_config + praid_mgmt -> calculated -> baseline -> [Raft wire bufs]
+ *   Follower: [Raft wire bufs] -> committed -> applied -> active_seg_topo
+ *
+ * ========================= LEADER FLOW =========================
+ * Mgmt sends config via Kafka
+ *   |
+ *   └─> nvmeibt_read_config_apply_vol_mgmt_conf()
+ *       Populate from_config (praid config from vol config)
+ *       Populate praid_mgmt (segments array, topo_segs[])
+ *       Populate bdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf
+ *   |
+ *   └─> nvmeibt_topology_calc_topology() triggered
+ *       |
+ *       ├─> nvmeibt_praid_upd_calculated_lot_from_praid_mgmt()
+ *       |   baseline_praid_lot + from_config + praid_mgmt.topo_segs[] -> calculated_praid_lot
+ *       |
+ *       ├─> nvmeibt_praid_leader_calc_topo_main()
+ *       |   Calculate seg states, owners, init_modes, praid_version
+ *       |   Updates calculated_praid_lot (topo_ctx, seg_lot.seg_topo)
+ *       |
+ *       └─> nvmeibt_praid_leader_we_have_a_new_baseline()
+ *           calculated_praid_lot -> baseline_praid_lot
+ *           |
+ *           ├─> praid_leader_serialize_topo()
+ *           |   baseline_praid_lot -> praid_wire_topo + segs_wire_topo_buf
+ *           |   (Contains: registrants_sync_cmd, dirty_bits_state, init_modes, owners)
+ *           |
+ *           └─> leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_baseline_praid_lot()
+ *               baseline_praid_lot -> topo_config_praid_and_segs_wire_conf_buf
+ *               (Contains: praid version, seg configs with deprecation_flag)
+ *   |
+ *   └─> Assemble into persist_and_wire_buf:
+ *       TLV[TOPO]:        from praid_wire_topo + segs_wire_topo_buf
+ *       TLV[TOPO_CONFIG]: from topo_config_praid_and_segs_wire_conf_buf
+ *       TLV[MGMT_CONFIG]: from kafka_mgmt_config_...wire_conf_buf
+ *   |
+ *   └─> Send APPEND_ENTRIES to followers (one message with all three TLVs)
+ *   |
+ *   └─> Upon majority commit: baseline_praid_lot -> to_report_praid_lot
+ *       Used by nvmeibt_global_issue_leader_report_praids_status_to_mgmt()
+ *       to send "updatePRaidReport" to Kafka for mgmt monitoring
+ *
+ * ======================== FOLLOWER FLOW ========================
+ * Receive APPEND_ENTRIES from leader
+ *   |
+ *   └─> Persist follower_to_commit_persist_and_wire_buf_full to disk
+ *   |
+ *   └─> Parse THREE buffers into committed structures:
+ *       [KAFKA_MGMT_CONFIG] -> from_config + praid_mgmt (nvmeibt_read_config_apply_vol_mgmt_conf)
+ *       [TOPO_CONFIG]       -> committed_praid_lot.from_config (nvmeibt_read_config_apply_vol_committed_topo_conf)
+ *       [TOPO]              -> committed_praid_lot.topo_ctx + seg_topo (nvmeibt_praid_upd_committed_topo)
+ *   |
+ *   └─> Apply to active (update_applied_topology):
+ *       committed_praid_lot -> applied_praid_lot
+ *   |
+ *   └─> Update local seg_active (nvmeibt_seg_active_upd_active_topo_from_applied_topo):
+ *       applied_praid_lot -> seg_active->active_seg_topo
+ *       (Used for client registration decisions and local operations)
+ */
+
 struct nvmeibt_praid_mgmt {
 	XDLIST_DECLARE(, struct nvmeibt_disk_segment, praid_all_segs_link) all_segs_list;
 	struct nvmeibt_urn_uuid						urn_uuid;
