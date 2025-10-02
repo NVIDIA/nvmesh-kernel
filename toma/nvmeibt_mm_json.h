@@ -61,7 +61,7 @@ struct mm_vol_conf {
 	uint8_t num_chunks;					// 6
 	uint16_t blockSize;					// 8
 	uint32_t version;					// 12
-	uint8_t version_minor;				// 13	// For changes within the version that was provided by the mgmt
+	char	filler_0;					// 13
 	char name[26];						// 39
 	char action;						// 40
 	char res_type;						// 41	// Obsolete Elect

@@ -187,7 +187,6 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 	vol->stripeWidth = 1;		// default, as it could be null
 	vol->kafka_offset_or_idx = kafka_offset;		// Default, If arrives from Kafka then use it. From JSON file it is overriden
 	nvmeibt_strlcpy(vol->eyecatcher, "VOL", sizeof(vol->eyecatcher));
-	vol->version_minor = 0;		// When we receive from MGMT, TOMA did not yet make its own config subversions (if at all)
 	if (elem->type != JSON_E_DICT)
 		return;
 	JSON_LOOP_FOR_DICT(kv, dict) {
@@ -730,7 +729,7 @@ struct _packed_mm_vol_conf {
 	uint8_t num_chunks;						// 6
 	uint16_t blockSize;						// 8
 	uint32_t version;						// 12
-	uint8_t version_minor;					// 13
+	char	filler_0;						// 13
 	char action;							// 14
 	char res_type;							// 15	// Obsolete Elect
 	uint8_t relativeRebuildPriority;		// 16
@@ -833,7 +832,6 @@ static uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *sr
 	SWAP8_FIELD(num_chunks);
 	SWAP16_FIELD(blockSize);
 	SWAP32_FIELD(version);
-	SWAP8_FIELD(version_minor);
 	COPY_FIELD(name);
 	SWAP8_FIELD(action);
 	SWAP8_FIELD(relativeRebuildPriority);
