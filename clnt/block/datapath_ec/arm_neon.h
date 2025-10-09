@@ -13,6 +13,107 @@ typedef __Int64x2_t int64x2_t;
 typedef __Uint64x2_t uint64x2_t;
 typedef __Poly8x16_t poly8x16_t;
 
+#ifndef __GNUC__
+/* TBD: Add support for clang */
+#error "Compiler not supported"
+
+#else /*  __GNUC__ */
+
+/* GCC Support */
+
+#if __GNUC__ >= 12
+
+/* GCC >= 12 Support - Copied from /usr/lib/gcc/aarch64-linux-gnu/12/include/arm_neon.h */
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vshlq_n_u8 (uint8x16_t __a, const int __b)
+{
+	return (uint8x16_t) __builtin_aarch64_ashlv16qi ((int8x16_t) __a, __b);
+}
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vshrq_n_u8 (uint8x16_t __a, const int __b)
+{
+	return __builtin_aarch64_lshrv16qi_uus (__a, __b);
+}
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vqtbl1q_u8 (uint8x16_t __tab, uint8x16_t __idx)
+{
+	return __builtin_aarch64_qtbl1v16qi_uuu (__tab, __idx);
+}
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+veorq_u8 (uint8x16_t __a, uint8x16_t __b)
+{
+	return __a ^ __b;
+}
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vld1q_u8 (const uint8_t *__a)
+{
+	return __builtin_aarch64_ld1v16qi_us (
+		(const __builtin_aarch64_simd_qi *) __a);
+}
+
+__extension__ extern __inline void
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vst1q_u8 (uint8_t *__a, uint8x16_t __b)
+{
+	__builtin_aarch64_st1v16qi_su ((__builtin_aarch64_simd_qi *) __a, __b);
+}
+
+__extension__ extern __inline void
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vst1q_u64 (uint64_t *__a, uint64x2_t __b)
+{
+	__builtin_aarch64_st1v2di_su ((__builtin_aarch64_simd_di *) __a, __b);
+}
+
+__extension__ extern __inline poly8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vmulq_p8 (poly8x16_t __a, poly8x16_t __b)
+{
+	return __builtin_aarch64_pmulv16qi_ppp (__a, __b);
+}
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vandq_u8 (uint8x16_t __a, uint8x16_t __b)
+{
+	return __a & __b;
+}
+
+__extension__ extern __inline int8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vshrq_n_s8 (int8x16_t __a, const int __b)
+{
+	return (int8x16_t) __builtin_aarch64_ashrv16qi (__a, __b);
+}
+
+__extension__ extern __inline uint8x16_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+vdupq_n_u8 (uint8_t __a)
+{
+	return (uint8x16_t) {__a, __a, __a, __a, __a, __a, __a, __a,
+		__a, __a, __a, __a, __a, __a, __a, __a};
+}
+
+__extension__ extern __inline uint64x2_t
+__attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
+veorq_u64 (uint64x2_t __a, uint64x2_t __b)
+{
+	return __a ^ __b;
+}
+
+#else /* __GNUC__ >= 12 */
+
+/* GCC <= 11 Support - Copied from /usr/lib/gcc/aarch64-linux-gnu/11/include/arm_neon.h */
 
 __extension__ extern __inline uint8x16_t
 __attribute__ ((__always_inline__, __gnu_inline__, __artificial__))
@@ -107,6 +208,11 @@ veorq_u64 (uint64x2_t __a, uint64x2_t __b)
 {
 	return __a ^ __b;
 }
+
+#endif /* __GNUC__ >= 12 */
+
+#endif /* __GNUC__ */
+
 #pragma GCC pop_options
 #else
 typedef __attribute__((neon_vector_type(16))) int8_t int8x16_t;
