@@ -6,6 +6,145 @@
 #include "nvmeibt_ds.h"
 #include "../common/nvmeib_hash.h"
 
+/*
+ * Lifecycle of entities (segment/praid/chunk/volume):
+ * - Adding new entities can be found in praid info flow in nvmeibt_praid.h
+ * - Removing entities - THREE BUFFERS FLOW (mgmt_config, topo_config, topo):
+ *
+ * ================================ SUMMARY ================================
+ * THREE BUFFERS (all sent together in one persist_and_wire_buf as separate TLVs):
+ *   1. KAFKA_MGMT_CONFIG: vol{action='X'} - config-level deletion marker
+ *   2. TOPO_CONFIG:       seg{deprecation_flag='X'} - config-level seg deprecation
+ *   3. TOPO:              seg{dirty_bits_state=X_ZERO->X_DONE} - runtime deletion state
+ *
+ * High-Level Flow:
+ *   Mgmt sends VOL_DEL -> Leader marks 'X' in all 3 buffers + sets X_ZERO in topo
+ *     -> Followers receive in ONE wire buf, unregister clients, zero segs
+ *     -> Followers report X_DONE in topo (via APPEND_ENTRIES_REP) to leader
+ *     -> Leader sees all X_DONE, informs mgmt -> Mgmt sends VOL_DEL_COMPLETED
+ *     -> Leader marks OUTDATED, excludes from all 3 buffers
+ *     -> Followers receive buffers excluding them, garbage collect
+ *
+ * Leader Re-election & Kafka Replay:
+ *   New leader starts consuming Kafka from (follower_committed + 1) offset
+ *   (loaded from local persist_and_wire_buf->kafka_mgmt_config_ctx).
+ *   Replays VOL_DEL_COMPLETED idempotently: marks OUTDATED, excludes from buffers.
+ *
+ * ========================== DETAILED FLOW ================================
+ *
+ * PHASE 1: MARKING FOR DELETION (Mgmt -> Leader -> Followers)
+ * ──────────────────────────────────────────────────────────
+ * Mgmt: KAFKA_EVENT_TYPE_VOL_DEL -> Kafka incremental_VOL_updates topic
+ *   |
+ * Leader: toma_incremental_vol_update_handler()
+ *   └─> nvmeibt_read_config_vol_mark_vol_and_segs_for_removal()
+ *       Marks in memory: blkdev.is_deprecated=1, vol.action='X', seg.deprecation_flag='X'
+ *       Marks in kafka_mgmt_config wire buf: vol.action='X', seg.action='X'
+ *   |
+ *   └─> nvmeibt_praid_leader_calc_topo_main() (topo calculation triggered)
+ *       Sets: praid_topo.registrants_sync_cmd = PRAID_REGISTRANTS_SYNC_CMD_DELETE
+ *       Sets: seg_topo.dirty_bits_state = X_ZERO (or X_DONE if no zeroing needed)
+ *       X_ZERO blocks new registrations (nvmeibt_disk_segment_is_dirty_bits_state_registrable)
+ *   |
+ *   └─> Serialize THREE buffers per-praid:
+ *       [TOPO]:        praid{registrants_sync_cmd=DELETE, segs[]{dirty_bits_state=X_ZERO}}
+ *       [TOPO_CONFIG]: praid{mm_segment_conf[]{deprecation_flag='X'}}
+ *       [MGMT_CONFIG]: vol{action='X', mm_vol_conf[]{action='X'}}
+ *   |
+ *   └─> Assemble into ONE persist_and_wire_buf (raft_leader_regenerate_the_to_commit_...)
+ *       TLV[TOPO] + TLV[TOPO_CONFIG] + TLV[KAFKA_MGMT_CONFIG] + TLV[RAFT_MEMBERS]
+ *   |
+ *   └─> Send APPEND_ENTRIES to followers (one message, all three TLVs)
+ *
+ * Follower: raft_handle_append_entries() -> Persist, then apply
+ *   |
+ *   └─> Parse THREE buffers (order: KAFKA_MGMT_CONFIG, TOPO_CONFIG, TOPO):
+ *       [KAFKA_MGMT_CONFIG]: blkdev.is_deprecated=1, action='X', seg.deprecation_flag='X'
+ *       [TOPO_CONFIG]:       committed_seg_lot.from_config.deprecation_flag='X'
+ *       [TOPO]:              committed_seg_lot.seg_topo.dirty_bits_state=X_ZERO,
+ *                            committed_praid_topo.registrants_sync_cmd=DELETE
+ *   |
+ *   └─> Apply: committed->applied->active
+ *       active_seg_topo.dirty_bits_state = X_ZERO
+ *   |
+ *   └─> Actions on X_ZERO (nvmeibt_seg_active_handle_post_update_actions):
+ *       1. Send UNREGISTER to all clients (PRAID_REGISTRANTS_SYNC_CMD_DELETE)
+ *       2. Deprecate seg GPT entry in main_gpt (memory only)
+ *       3. Launch zeroing WQ task (when no registrants)
+ *
+ * PHASE 2: ZEROING AND REPORTING (Followers -> Leader -> Mgmt)
+ * ──────────────────────────────────────────────────────────
+ * Follower: seg_active_zeroing_wrapper/finalize() (WQ thread)
+ *   └─> Iteratively zero segment data + metadata
+ *   └─> Report to Kafka: "segmentZeroingProgress" (each follower independently, for UI)
+ *   └─> When done: active_seg_topo.dirty_bits_state = X_DONE
+ *   |
+ *   └─> nvmeibt_topology_serialize_active_topology() (periodic)
+ *       Serialize follower_to_leader_wire_buf with TLV[TOPO]{dirty_bits_state=X_DONE}
+ *       Send in APPEND_ENTRIES_REP to leader
+ *
+ * Leader: raft_handle_append_entries_rep()
+ *   └─> nvmeibt_disk_segment_leader_upd_from_peer_applied()
+ *       remote_seg_topo.dirty_bits_state = X_DONE
+ *   |
+ *   └─> nvmeibt_praid_leader_calc_topo_main() (next topo calc)
+ *       nvmeibt_disk_segment_leader_sync_with_remote_applied()
+ *         -> calculated_seg_topo.dirty_bits_state = X_DONE
+ *       nvmeibt_praid_leader_we_have_a_new_baseline()
+ *         -> calculated->baseline
+ *   |
+ *   └─> Serialize three buffers (still include vol with X_DONE markers)
+ *   └─> Send APPEND_ENTRIES to followers (vol still present)
+ *   |
+ *   └─> nvmeibt_global_issue_leader_report_praids_status_to_mgmt() (periodic)
+ *       Report to Kafka: "updatePRaidReport" with aggregated status
+ *         seg.status = "deprecated" (if X_DONE) or "zeroing" (if X_ZERO)
+ *
+ * Mgmt: Monitors "updatePRaidReport" from leader
+ *   └─> When all segs show status="deprecated", sends VOL_DEL_COMPLETED to leader
+ *
+ * PHASE 3: FINAL REMOVAL (Mgmt -> Leader -> Followers)
+ * ──────────────────────────────────────────────────────
+ * Mgmt: KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED -> Kafka incremental_VOL_updates
+ *
+ * Leader: nvmeibt_read_config_vol_removed_from_mgmt()
+ *   └─> blkdev->is_being_deleted = 1
+ *   └─> nvmeibt_block_device_trim_specific_block_device(CONFIG_TRIM_MGMT)
+ *       For blkdev/chunk/praid/seg: NVMEIBT_OBJ_MARK_OUTDATED()
+ *   |
+ *   └─> Serialize three buffers (now EXCLUDE vol):
+ *       omit_praid_in_serialized_topo() returns TRUE (OUTDATED or is_being_deleted)
+ *       All three buffers skip the vol entirely
+ *   |
+ *   └─> Assemble into ONE persist_and_wire_buf WITHOUT vol
+ *   └─> Send APPEND_ENTRIES to followers (vol absent from all three TLVs)
+ *
+ * Follower: raft_handle_append_entries()
+ *   └─> Parse three buffers: vol not found in any of them
+ *   └─> config_tag mechanism: objects with old config_tag marked OUTDATED
+ *   |
+ *   └─> nvmeibt_global_idle_time_activities() -> garbage_collect_as_needed()
+ *       nvmeibt_disk_segment_garbage_collect_old_segments()
+ *         -> nvmeibt_disk_segment_remove() (checks zeroing/recovery done, then frees)
+ *       nvmeibt_block_devices_garbage_collect()
+ *         -> nvmeibt_praid_remove(), nvmeibt_chunk_remove() (when all segs gone)
+ *         -> XHASHTABLE_DEL() + free from memory
+ *
+ * Complete - vol/praid/chunk/seg objects freed from all nodes.
+ *
+ * ================= LEADER ELECTION & KAFKA REPLAY (DETAILS) ===============
+ *
+ * Follower -> Leader Transition & Kafka Catchup:
+ *   1. nvmeibt_raft_convert_to_leader() -> starts consuming Kafka
+ *      Offset: follower_committed + 1 (from persist_and_wire_buf->kafka_mgmt_config_ctx)
+ *   2. incremental_VOL_updates_consume() replays: VOL_ADD/DEL/DEL_COMPLETED/UPD
+ *   3. VOL_DEL_COMPLETED -> nvmeibt_read_config_vol_removed_from_mgmt()
+ *      Sets: is_being_deleted=1, marks OUTDATED (blkdev/chunk/praid/seg)
+ *   4. Serialization: omit_praid_in_serialized_topo() excludes from 3 buffers
+ *
+ * Idempotent: Handles VOL_DEL_COMPLETED at any deletion stage (X_ZERO/X_DONE/removed)
+ */
+
 /****************************  MR Rename later on  ****************************/
 // TODO(Rename)
 #define nvmeibt_seg_topo_is_x(seg_topo) nvmeibt_disk_segment_is_x(seg_topo)
@@ -132,7 +271,7 @@ struct nvmeibt_disk_segment_config {
 	union nvmeib_uuid			id;
 	int							version;
 	int8_t						idx_in_praid;
-	char						deprecation_flag;
+	char						deprecation_flag; // N - normal, X - explicitly deleted, R - replaced, S - substitution
 };
 
 struct nvmeibt_disk_segment_topo_ctx {
