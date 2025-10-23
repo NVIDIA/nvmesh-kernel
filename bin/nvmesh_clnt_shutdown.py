@@ -130,6 +130,7 @@ if __name__ == "__main__":
 	instance_name = 'nvmeibc'
 	dev_root = 'nvmesh'
 	multi_client_utils = nvmesh_script_utils.MultiClientUtils(my_logger, instance_name, dev_root, args.json)
+	subprocess.run(['logger', '-t', 'nvmesh_clnt_shutdown', 'Shutdown process started'])
 
 	# Check root user
 	if os.geteuid() != 0: # Non root user
@@ -148,3 +149,4 @@ if __name__ == "__main__":
 			multi_client_utils.print_json_output()
 			sys.exit(nvmesh_script_utils.RETRY_ERROR_CODE)
 	multi_client_utils.print_json_output()
+	subprocess.run(['logger', '-t', 'nvmesh_clnt_shutdown', 'Shutdown process complete'])

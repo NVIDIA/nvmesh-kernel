@@ -70,6 +70,7 @@ optional_common_transfer_list="tools/traces_post_processor/cpager \
 			tools/read_dwarf.py \
 			tools/nvmesh_memmgr_monitor.py \
 			tools/nvmesh_metrics.py \
+			tools/nvmesh_client_upgrade_breakdown.py \
 			tools/infra_shared/infra_shared.so \
 			tools/the-calculator.py"
 

@@ -1390,6 +1390,7 @@ install_files:
 	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_netlink.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/read_dwarf.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_memmgr_monitor.py $(COMMON_REPO_DIR)/tools
+	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_client_upgrade_breakdown.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_metrics.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/toma_rpc/toma_rpc $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/perfTest/io_stress/scan_locks/scan_locks_ec $(COMMON_REPO_DIR)/tools
