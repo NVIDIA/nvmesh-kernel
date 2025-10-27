@@ -1258,7 +1258,7 @@ void nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire(uint64_t topo
 	struct mm_mgmt_conf								mgmt_conf;
 
 	NFIN;
-	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_config);
+	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_config_complete);
 	wire_out_p = wire_conf_buf->data_buf;
 
 	size = generate_vols_topo_config_wire(NULL, &n_vols, NULL) + sizeof(struct mm_mgmt_conf);
@@ -1286,7 +1286,7 @@ void nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire(void)
 	struct mm_mgmt_conf								mgmt_conf;
 
 	NFIN;
-	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config);
+	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config_complete);
 	size = generate_vols_kafka_mgmt_config_wire(NULL, &n_vols, NULL) + sizeof(struct _packed_mm_mgmt_conf);
 	NNVMEIBT_BUF_RESIZE(viem2ms, wire_conf_buf, size);
 	memset(wire_conf_buf->data_buf, 0, wire_conf_buf->buf_len);
@@ -1795,7 +1795,7 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	// Generate persist&wire buf
 	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	// Compare the input & output CRCs
-	persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full;
+	persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full_complete;
 	if (JSON_raft_ctx_crc != persist_and_wire_buf_get_raft_ctx_crc(persist_and_wire_buf)) {
 		N_Wf(vghs2jh, "JSON_raft_ctx_crc=@UINT != persist_and_wire_buf->raft_ctx.raft_ctx_crc=@UINT", JSON_raft_ctx_crc, persist_and_wire_buf->raft_ctx.raft_ctx_crc);
 	}

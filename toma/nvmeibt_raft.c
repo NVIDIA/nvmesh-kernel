@@ -591,26 +591,26 @@ int nvmeibt_raft_leader_copy_committed_persist_and_wire_buf_sections_into_separa
 	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_TOPO_FULL, &section_buf);
 	if (section_buf_len) {
 		N_Tf(rxcva3J, "Copy topo");
-		NNVMEIBT_BUF_RESIZE(o3mgias, &(my_raft_global.leader_to_commit_wire_topo), (size_t)section_buf_len);
-		memcpy(my_raft_global.leader_to_commit_wire_topo.data_buf, section_buf, section_buf_len);
+		NNVMEIBT_BUF_RESIZE(o3mgias, &(my_raft_global.leader_to_commit_wire_topo_complete), (size_t)section_buf_len);
+		memcpy(my_raft_global.leader_to_commit_wire_topo_complete.data_buf, section_buf, section_buf_len);
 	}
 	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_TOPO_CONFIG_FULL, &section_buf);
 	if (section_buf_len) {
 		N_Tf(vbdkllr, "Copy topo_config");
-		NNVMEIBT_BUF_RESIZE(9vkkewj, &(my_raft_global.leader_to_commit_wire_topo_config), (size_t)section_buf_len);
-		memcpy(my_raft_global.leader_to_commit_wire_topo_config.data_buf, section_buf, section_buf_len);
+		NNVMEIBT_BUF_RESIZE(9vkkewj, &(my_raft_global.leader_to_commit_wire_topo_config_complete), (size_t)section_buf_len);
+		memcpy(my_raft_global.leader_to_commit_wire_topo_config_complete.data_buf, section_buf, section_buf_len);
 	}
 	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_KAFKA_MGMT_CONFIG_FULL, &section_buf);
 	if (section_buf_len) {
 		N_Tf(cyugsiu, "Copy kafka_mgmt_config");
-		NNVMEIBT_BUF_RESIZE(abwiwn2, &(my_raft_global.leader_to_commit_wire_kafka_mgmt_config), (size_t)section_buf_len);
-		memcpy(my_raft_global.leader_to_commit_wire_kafka_mgmt_config.data_buf, section_buf, section_buf_len);
+		NNVMEIBT_BUF_RESIZE(abwiwn2, &(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete), (size_t)section_buf_len);
+		memcpy(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.data_buf, section_buf, section_buf_len);
 	}
 	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(src_buf, TLV_TYPE_RAFT_MEMBERS_FULL, &section_buf);
 	if (section_buf_len) {
 		N_Tf(hduksi3, "Copy raft_members");
-		NNVMEIBT_BUF_RESIZE(oudf3xy, &(my_raft_global.leader_to_commit_wire_raft_members), (size_t)section_buf_len);
-		memcpy(my_raft_global.leader_to_commit_wire_raft_members.data_buf, section_buf, section_buf_len);
+		NNVMEIBT_BUF_RESIZE(oudf3xy, &(my_raft_global.leader_to_commit_wire_raft_members_complete), (size_t)section_buf_len);
+		memcpy(my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, section_buf, section_buf_len);
 	}
 	NFOUT;
 	return 0;
@@ -714,8 +714,8 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 	if (!(nvmeibt_global_get_global()->is_update_csv_of_config_and_topo_required)) {
 		goto out;
 	}
-	NNVMEIBT_TOMA_FREE(ikdm49s, my_raft_global.leader_to_commit_persist_and_wire_buf_full);
-	my_raft_global.leader_to_commit_persist_and_wire_buf_full = nvmeibt_raft_generate_persist_and_wire_buf(
+	NNVMEIBT_TOMA_FREE(ikdm49s, my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete);
+	my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete = nvmeibt_raft_generate_persist_and_wire_buf(
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
@@ -724,12 +724,12 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_get_guaranteed_sw_ver(),
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo.data_buf, my_raft_global.leader_to_commit_wire_topo.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config.data_buf, my_raft_global.leader_to_commit_wire_topo_config.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members.data_buf, my_raft_global.leader_to_commit_wire_raft_members.buf_len);
-	NNVMEIBT_TOMA_FREE(6vbwi4k, my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only);
-	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only = nvmeibt_raft_generate_persist_and_wire_buf(
+		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_complete.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_config_complete.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
+	NNVMEIBT_TOMA_FREE(6vbwi4k, my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete);
+	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete = nvmeibt_raft_generate_persist_and_wire_buf(
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
@@ -738,10 +738,10 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_get_guaranteed_sw_ver(),
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo.data_buf, my_raft_global.leader_to_commit_wire_topo.buf_len,
+		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_complete.buf_len,
 		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, NULL, 0,
 		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, NULL, 0,
-		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members.data_buf, my_raft_global.leader_to_commit_wire_raft_members.buf_len);
+		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
 	raft_leader_reset_counters_upon_last_LOG_change();
 	nvmeibt_global_get_global()->is_update_csv_of_config_and_topo_required = false;
 out:
@@ -791,7 +791,7 @@ void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void)
 	size_t											required_size;
 
 	NFIN;
-	wire_conf_buf = &(my_raft_global.leader_to_commit_wire_raft_members);
+	wire_conf_buf = &(my_raft_global.leader_to_commit_wire_raft_members_complete);
 	required_size = sizeof(struct all_members_wire_buf_ctx) + my_raft_global.n_raft_members * sizeof(struct mm_raft_member_conf) + sizeof(EYECATCHER_CNF_END);
 	NNVMEIBT_BUF_RESIZE(gso0snh, wire_conf_buf, required_size);
 	memset(wire_conf_buf->data_buf, 0, wire_conf_buf->buf_len);
@@ -2347,26 +2347,26 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	//
 	// Decide what to send according to the peer's needs. HEADER_ONLY/TOPO_ONLY/FULL
-	tlv_bufs_diff = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(dst_member->committed_persist_and_wire_buf_hdr), my_raft_global.leader_to_commit_persist_and_wire_buf_full);
-	if (memcmp(&(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx), &(my_raft_global.leader_to_commit_persist_and_wire_buf_full->raft_ctx), sizeof(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx)) != 0) {
+	tlv_bufs_diff = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(dst_member->committed_persist_and_wire_buf_hdr), my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete);
+	if (memcmp(&(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx), &(my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete->raft_ctx), sizeof(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx)) != 0) {
 		N_Tf(5v7hnak, "raft_ctx diff (the member committed to a different leader). For now send the full buf. When we have a d.b., send only the missing updates");
 		tlv_bufs_diff = PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO;
 	}
 	switch (tlv_bufs_diff) {
 	case PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO:
 		// Full CONFIG
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_full;
+		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete;
 		data_len = persist_and_wire_buf_get_total_len(send_persist_and_wire_buf) - sizeof(struct nvmeibt_persist_and_wire_buf);
 		break;
 	case PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY:
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only;
+		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete;
 		data_len = persist_and_wire_buf_get_total_len(send_persist_and_wire_buf) - sizeof(struct nvmeibt_persist_and_wire_buf);
 		break;
 	case PERSIST_AND_WIRE_BUF_DIFF_EQUAL:
 	default:
 		// Only the header
 		N_Tf(5basjzs, "Sending only the header. The member already has this persist_and_wire_buf_full");
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_full;
+		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete;
 		data_len = 0;	// No real data
 		is_with_raft_log = 0;
 		break;
@@ -2663,7 +2663,7 @@ static void raft_convert_to_candidate(char flags)
 	//
 	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		if (!(member->is_me)) {
-			raft_send_msg_to_peer(RAFT_MSG_REQ_VOTE, nvmeibt_raft_member_get_node(member), 0, 0, my_raft_global.leader_to_commit_persist_and_wire_buf_full, flags, 0);  // Only the header
+			raft_send_msg_to_peer(RAFT_MSG_REQ_VOTE, nvmeibt_raft_member_get_node(member), 0, 0, my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete, flags, 0);  // Only the header
 		}
 	}
 	raft_reset_voted_for_me();
@@ -3401,10 +3401,10 @@ int nvmeibt_raft_one_time_init(void)
 	write_leader_name_to_file("");
 	leader_reset_peers_committed_values();
 	raft_leader_reset_counters_upon_last_LOG_change();
-	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo));
-	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_config));
-	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_kafka_mgmt_config));
-	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_raft_members));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_complete));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_config_complete));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete));
+	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_raft_members_complete));
 	if (nvmeibt_recursive_mkdir(NVMEIBT_PERSISTENCY_CACHE_DIR, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0) {
 		rv = -1;
 		goto out;

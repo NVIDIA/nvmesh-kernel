@@ -1053,7 +1053,7 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	struct nvmeibt_praid							*praid;
 	int												praids_num = 0, segs_num = 0;
 	unsigned int									topo_len;
-	struct nvmeibt_Buf								*dst_wire_topo_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo);
+	struct nvmeibt_Buf								*dst_wire_topo_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_complete);
 	struct nvmeibt_topology_serialized_topo_header	serialized_header = {0};
 	struct nvmeibt_topology_serialized_topo_header	*dst_wire_header_ptr;
 	struct nvmeibt_praid_serialized_topo			*dst_praid_wire_topo_ptr;
@@ -2730,12 +2730,12 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_TOMA_FREE(8dj3kss, my_raft->follower_to_commit_persist_and_wire_buf_full);
 	NNVMEIBT_TOMA_FREE(vbs8sl3, my_raft->follower_to_leader_wire_buf);
 	// NNVMEIBT_TOMA_FREE(0vdnzlw, my_raft->follower_submitted_persist_and_wire_buf_full);
-	NNVMEIBT_TOMA_FREE(c5c84k4, my_raft->leader_to_commit_persist_and_wire_buf_full);
-	NNVMEIBT_TOMA_FREE(c7colp2, my_raft->leader_to_commit_persist_and_wire_buf_topo_only);
-	NNVMEIBT_BM_FREE(y3mzpuq, my_raft->leader_to_commit_wire_topo.data_buf);
-	NNVMEIBT_BM_FREE(u76yvw2, my_raft->leader_to_commit_wire_topo_config.data_buf);
-	NNVMEIBT_BM_FREE(vivmfw0, my_raft->leader_to_commit_wire_kafka_mgmt_config.data_buf);
-	NNVMEIBT_BM_FREE(ycnks48, my_raft->leader_to_commit_wire_raft_members.data_buf);
+	NNVMEIBT_TOMA_FREE(c5c84k4, my_raft->leader_to_commit_persist_and_wire_buf_full_complete);
+	NNVMEIBT_TOMA_FREE(c7colp2, my_raft->leader_to_commit_persist_and_wire_buf_topo_only_complete);
+	NNVMEIBT_BM_FREE(y3mzpuq, my_raft->leader_to_commit_wire_topo_complete.data_buf);
+	NNVMEIBT_BM_FREE(u76yvw2, my_raft->leader_to_commit_wire_topo_config_complete.data_buf);
+	NNVMEIBT_BM_FREE(vivmfw0, my_raft->leader_to_commit_wire_kafka_mgmt_config_complete.data_buf);
+	NNVMEIBT_BM_FREE(ycnks48, my_raft->leader_to_commit_wire_raft_members_complete.data_buf);
 	NNVMEIBT_BM_FREE(kiu12qa, cur_topo->buf_of_follower_wire_topo.data_buf);
 	NNVMEIBT_BM_FREE(etnpa51, raft_long_msg_test_buf.data_buf);
 	nvmeibt_raft_del_all_members_at_exit();

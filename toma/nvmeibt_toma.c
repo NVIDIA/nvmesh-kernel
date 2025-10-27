@@ -2480,7 +2480,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 			if (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]) {
 				struct nvmeibt_persist_and_wire_buf		*out_persist_and_wire_buf;
 				nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(nvmeibt_toma_cmdline_arg_input_file_name);
-				out_persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full;
+				out_persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full_complete;
 				output_file_fd = NNVMEIBT_OPEN(wmtuc7d, nvmeibt_toma_cmdline_arg_output_file_name, O_CREAT | O_WRONLY | O_TRUNC, 0755);
 				if (output_file_fd >= 0) {
 					n_written = NNVMEIBT_PWRITE(0m2huea, output_file_fd, out_persist_and_wire_buf,
