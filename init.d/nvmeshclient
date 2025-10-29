@@ -83,6 +83,46 @@ MCS_SCRIPT_PATH="$MDIR/bin/managementCM"
 
 read_version_info_file
 
+# global variable to track upgrade state, default to false, set just below
+# the marker file is created by interopDB directive to the upgrade-agent or by user
+UPGRADE_FILE_MARKER="$runDir/$prog/upgrade"
+RESTART_FOR_UPGRADE=false
+
+create_upgrade_marker() {
+    # ensure the parent directory exists (safeguard)
+    local dir_path
+    dir_path=$(dirname "$UPGRADE_FILE_MARKER")
+
+    if [ ! -d "$dir_path" ]; then
+        mkdir -p "$dir_path"
+    fi
+
+    # create the file using touch
+    if touch "$UPGRADE_FILE_MARKER"; then
+        echo "Upgrade marker created successfully"
+        return 0
+    else
+        echo "Error: Failed to create upgrade marker at $UPGRADE_FILE_MARKER"
+        return 1
+    fi
+}
+
+read_upgrade_marker() {
+    if [ -f "$UPGRADE_FILE_MARKER" ]; then
+        echo "upgrade marker file found"
+        RESTART_FOR_UPGRADE=true
+    else
+        RESTART_FOR_UPGRADE=false
+    fi
+}
+
+cleanup_upgrade_marker() {
+    if [ "$RESTART_FOR_UPGRADE" = true ]; then
+        echo "upgrade start successful, removing upgrade marker"
+        rm -f "$UPGRADE_FILE_MARKER"
+    fi
+}
+
 find_and_alert_on_stuck_detaching() {
 	n_stuck=`cat /proc/nvmeiba/status.json | grep gendisk | grep \"null\" |wc -l`;
 	[ ! "$n_stuck" -eq 0 ] && echo "${n_stuck} Nvmesh volumes cannot detach (still used).";
@@ -107,13 +147,12 @@ check_if_nvmibc_can_abandon_nvmeiba() {
 detach_volumes() {
 	ret=0
 	# Step 1: Find out if we are force detaching or doing hot upgrade.
-	read_conf_file_raw;
-	# echo "DEBUG: value of hot-upgrade default=|${CLIENT_RESTART_ALWAYS_HOT_UPGRADE}|";
-	if [[ ${CLIENT_RESTART_ALWAYS_HOT_UPGRADE:0:1} =~ [Yy] ]]; then	 # "Yes", "yes"
+	# set shut_down_args
+	if [ "$RESTART_FOR_UPGRADE" = true ]; then
 		echo "Initiating client hot upgrade procedure";
-		shut_down_args="--upgrade --json";	# json is for readability
+		shut_down_args="--upgrade";
 	else
-		# echo "DEBUG: upgrade configuration instruction does NOT exist."
+		# echo "DEBUG: Not a hot upgrade."
 		shut_down_args=""; # can use --json
 	fi
 
@@ -190,6 +229,9 @@ verify_mcs_scheme_version() {
 
 start() {
 	wait_for_config_profile
+
+	# check for upgrade marker and potentially set a global variable
+	read_upgrade_marker
 
 	# too expensive (~130ms) - avoid it
 	# verify_mcs_scheme_version
@@ -335,6 +377,11 @@ start() {
 		exit 1
 	fi
 
+	if [ "$RETVAL" -eq 0 ]; then
+		# cleanup upgrade marker if exists
+		cleanup_upgrade_marker
+	fi
+
 	record_current_module_params on_startup_module_params.client
 
 	if is_k8s_operator; then
@@ -390,6 +437,9 @@ force_stop() {
 	echo "Stopping NVMesh Client: "
 	check_root
 
+	# check for upgrade marker and potentially set a global variable
+	read_upgrade_marker
+
 	if detach_volumes; then
 		rmdir /sys/kernel/config/nvmeibc/*/* > /dev/null 2>&1
 		if ! $sysv_triggered; then
@@ -414,13 +464,10 @@ force_stop() {
 					stop_management_CM_and_Agent
 				fi
 			fi
-			unload_module nvmeiba
-			ATOM_RV=$?
-			if [ "$ATOM_RV" -eq 0 ]; then
-				:
-				#echo "nvmeiba removed with nvmeibc"
-			else
+			if [ "$RESTART_FOR_UPGRADE" = true ]; then
 				echo "nvmeiba remained for upgrade of nvmeibc"
+			else
+				unload_module nvmeiba
 			fi
 		else
 			echo "Failed to unload client (nvmeibc) module"
@@ -532,6 +579,10 @@ case "$1" in
 	;;
   force_stop)
 	force_stop
+	RETVAL=$?
+	;;
+  create_upgrade_marker)
+	create_upgrade_marker
 	RETVAL=$?
 	;;
   check_if_busy)
