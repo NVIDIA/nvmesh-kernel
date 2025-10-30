@@ -767,12 +767,21 @@ struct _packed_mm_vol_conf {
 		else memset(src, 0, sizeof(*src));			\
 })
 
+#define CHECK_ALIGN16(name) ({	\
+	if (is_out) { 	\
+		NTOMA_ASSERT(name##_out, (uintptr_t)dst % 16 == 0, "dst=@PTR is not 16-byte aligned", dst);		\
+	} else { 		\
+		NTOMA_ASSERT(name##_in, (uintptr_t)src % 16 == 0, "src=@PTR is not 16-byte aligned", src);	\
+	}				\
+})
+
 static uint16_t nvmeibt_seg_convert_config_le_be(void *p, struct mm_segment_conf *src, BOOL is_out)
 {
 	struct _packed_mm_segment_conf *dst = p;
 
 	{ _Static_assert(sizeof(struct mm_segment_conf) == 64, "Struct mm_segment_conf was changed without updating the packing function!"); }
 	{ _Static_assert(sizeof(struct _packed_mm_segment_conf) == 80, "Struct _packed_mm_segment_conf was changed without updating the packing function!"); }
+	CHECK_ALIGN16(seg_align_dst);
 	MEMSET_ZERO_SRC_OR_DST(is_out, src, dst);
 	COPY_FIELD(eyecatcher);
 	SWAP8_FIELD(pRaidIndex);
@@ -793,6 +802,7 @@ static uint16_t nvmeibt_praid_convert_config_le_be(void *p, struct mm_praid_conf
 
 	{ _Static_assert(sizeof(struct mm_praid_conf) == 48, "Struct mm_praid_conf was changed without updating the packing function!"); }
 	{ _Static_assert(sizeof(struct _packed_mm_praid_conf) == 48, "Struct _packed_mm_praid_conf was changed without updating the packing function!"); }
+	CHECK_ALIGN16(praid_align_dst);
 	MEMSET_ZERO_SRC_OR_DST(is_out, src, dst);
 	COPY_FIELD(eyecatcher);
 	SWAP32_FIELD(version);
@@ -810,6 +820,7 @@ static uint16_t nvmeibt_chunk_convert_config_le_be(void *p, struct mm_chunk_conf
 
 	{ _Static_assert(sizeof(struct mm_chunk_conf) == 48, "Struct mm_chunk_conf was changed without updating the packing function!"); }
 	{ _Static_assert(sizeof(struct _packed_mm_chunk_conf) == 64, "Struct _packed_mm_chunk_conf was changed without updating the packing function!"); }
+	CHECK_ALIGN16(chunk_align_dst);
 	MEMSET_ZERO_SRC_OR_DST(is_out, src, dst);
 	COPY_FIELD(eyecatcher);
 	SWAP8_FIELD(num_praids);
@@ -826,6 +837,7 @@ static uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *sr
 
 	{ _Static_assert(sizeof(struct mm_vol_conf) == 112, "Struct mm_vol_conf was changed without updating the packing function!"); }
 	{ _Static_assert(sizeof(struct _packed_mm_vol_conf) == 96, "Struct _packed_mm_vol_conf was changed without updating the packing function!"); }
+	CHECK_ALIGN16(vol_align_dst);
 	MEMSET_ZERO_SRC_OR_DST(is_out, src, dst);
 	COPY_FIELD(eyecatcher);
 	SWAP8_FIELD(raidType);
@@ -854,6 +866,7 @@ static uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *sr
 uint16_t nvmeibt_raft_member_conf_convert_le_be(struct mm_raft_member_conf *dst, struct mm_raft_member_conf *src)
 {
 	{ _Static_assert(sizeof(struct mm_raft_member_conf) == 112, "Struct mm_raft_member_conf was changed without updating the packing function!"); }
+	NTOMA_ASSERT(raft_member_align_dst, (uintptr_t)dst % 16 == 0, "dst=@PTR is not 16-byte aligned", dst);
 	memset(dst, 0, sizeof(*dst));
 	MEMCPY_FIELD(dst->eyecatcher, src->eyecatcher);
 	MEMCPY_FIELD(dst->hostname, src->hostname);
@@ -868,6 +881,7 @@ uint16_t nvmeibt_mm_mgmt_convert_config_le_be(void *p, struct mm_mgmt_conf *src,
 
 	{ _Static_assert(sizeof(struct mm_mgmt_conf) == 224, "Struct mm_mgmt_conf was changed without updating the packing function!"); }
 	{ _Static_assert(sizeof(struct _packed_mm_mgmt_conf) == 144, "Struct _packed_mm_mgmt_conf was changed without updating the packing function!"); }
+	CHECK_ALIGN16(mm_mgmt_align_dst);
 	MEMSET_ZERO_SRC_OR_DST(is_out, src, dst);
 	COPY_FIELD(eyecatcher);
 	SWAP16_FIELD(structVersion);
