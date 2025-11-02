@@ -2,6 +2,7 @@
 #define NVMEIBT_WQ_H_INCLUDED
 
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 /*
  * Generic WorkQueues
  * ==================

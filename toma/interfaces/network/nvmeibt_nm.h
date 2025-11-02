@@ -30,6 +30,7 @@
 #include "nvmeibt_toma.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_common.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_wq.h"
 #include "nvmeibt_srm.h"
 #include "nvmeibt_node.h"

@@ -8,6 +8,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_srm.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_raft.h"
 #include "interfaces/network/network_incs.h"

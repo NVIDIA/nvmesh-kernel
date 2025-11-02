@@ -7,6 +7,7 @@
 #include "nvmeibt_disk_segment_basics.h"
 #include "nvmeibt_praid_basics.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_mm_json.h"
 #include "nvmeibt_read_config.h"
 

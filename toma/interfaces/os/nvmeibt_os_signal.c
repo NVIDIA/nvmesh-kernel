@@ -9,6 +9,7 @@
 #include <sys/ucontext.h>
 #include <sys/socket.h>
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 
 bool nvmeibt_toma_is_main_thread(void);
 static int g_log_file_fd = -1;

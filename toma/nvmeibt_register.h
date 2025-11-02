@@ -3,6 +3,7 @@
 
 #include "nvmeibt_common.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_params.h"
 #include "clnt/nvmeibt_client_protocol.h"
 #include "../common/nvmeib_shared.h"

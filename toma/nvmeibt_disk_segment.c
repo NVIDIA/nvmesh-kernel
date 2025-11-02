@@ -8,6 +8,7 @@
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_local_disk.h"
 #include "nvmeibt_topo_bin.h"
+#include "../common/nvmeib_hash.h"
 
 
 struct nvmeibt_local_disk *nvmeibt_disk_segment_get_local_disk(struct nvmeibt_disk_segment *seg)

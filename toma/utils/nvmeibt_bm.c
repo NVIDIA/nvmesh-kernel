@@ -3,6 +3,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_bm.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 
 struct memory_buffer {
 	struct xdlist link;

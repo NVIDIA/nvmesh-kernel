@@ -194,6 +194,7 @@ struct nvmeibt_msg_request {
 };
 
 #define SRM_EMPTY_USER ((void *)(~(0ULL)))
+#include "../common/nvmeib_hash.h"
 struct nvmeibt_srm { int dummy; };
 struct udp_peer { int dummy; };
 union ibv_gid { uint8_t raw[16]; struct { uint64_t subnet_prefix; uint64_t interface_id;} global; };

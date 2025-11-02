@@ -6,6 +6,7 @@
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
 #include "interfaces/nvmeibt_msg_queue_api.h"
+#include "../common/nvmeib_hash.h"
 
 /* kafka_offset life-cycle
  * There are several variables that hold the kafka_offset :

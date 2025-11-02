@@ -3,6 +3,7 @@
 
 #include "nvmeibt_common.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_disk_metadata.h"
 #include "nvmeibt_local_disk_util.h"

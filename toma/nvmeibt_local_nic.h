@@ -3,6 +3,7 @@
 
 #include "nvmeibt_common.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 
 struct nvmeibt_local_nic_config {
 	union nvmeib_uuid	id;

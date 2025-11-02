@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include "nvmeibt_global.h"
 #include "nvmeibt_seg_active.h"
+#include "../common/nvmeib_hash.h"
 extern struct nvmeibt_nm_local_node *nw_node;
 
 enum replacement_action_t {

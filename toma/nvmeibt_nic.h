@@ -3,6 +3,7 @@
 
 #include "nvmeibt_common.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_mm_json.h"
 
 struct nvmeibt_nic_config {

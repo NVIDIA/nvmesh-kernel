@@ -4,6 +4,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_mm_json.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 
 /****************************  MR Rename later on  ****************************/
 // TODO(Rename)

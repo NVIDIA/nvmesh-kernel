@@ -4,6 +4,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_mm_json.h"
 #include "../autogen/clnt/nvmeibc_mcs_stub.h"
 #include "clnt/nvmeibt_client_protocol.h"

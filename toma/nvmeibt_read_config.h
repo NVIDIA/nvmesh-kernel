@@ -4,6 +4,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_mm_json.h"
 #include "nvmeibt_kafka.h"
+#include "../common/nvmeib_hash.h"
 
 enum NVMEIBT_CSV_TYPE {
 	NVMEIBT_CSV_TYPE_NONE = 0x1,

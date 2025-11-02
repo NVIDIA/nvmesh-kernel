@@ -5,6 +5,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
+#include "../common/nvmeib_hash.h"
 #include "interfaces/network/network_incs.h"
 #include "nvmeibt_raft.h"
 #include "nvmeibt_mm_json.h"
