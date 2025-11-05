@@ -2430,7 +2430,6 @@ static void brute_force_disconnect_client(struct nvmeibt_registrant_ctx *reg_ctx
 
 	NFIN;
 	// Brutally cut the QP for RDMA clients
-	remove_longing_registrant_on_seg_by_ctx(reg_ctx, true);		// Remove clients of all segments on disk as an optional cleanup
 	if (nvmeibt_client_disconnect_force_cmd(cid) < 0) {
 		if (errno == ENOKEY) {
 			N_Tf(trace_register_brute_force_disconnect_client, "Client already disconnected. @AUTO_ERRNO ");
