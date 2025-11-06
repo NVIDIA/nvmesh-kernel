@@ -234,7 +234,7 @@ static void __failed_lock_pl_conv(struct nvmeibt_client_failed_lock_pl *p, bool 
 	}
 }
 
-static void _cleaned_stalock_convert(struct nvmeibt_cleaned_stalock_info *r, bool do_enc)
+static __attribute__((unused)) void _cleaned_stalock_convert(struct nvmeibt_cleaned_stalock_info *r, bool do_enc)
 {
 	if (do_enc)	{
 		r->lock_id = nvmeib_htonl( r->lock_id);
@@ -243,7 +243,7 @@ static void _cleaned_stalock_convert(struct nvmeibt_cleaned_stalock_info *r, boo
 	}
 }
 
-static void __lockid_cache_purge_pl_convert(struct nvmeibt_lockid_cache_purge_pl *pl, bool do_enc)
+static __attribute__((unused)) void __lockid_cache_purge_pl_convert(struct nvmeibt_lockid_cache_purge_pl *pl, bool do_enc)
 {
 	if (do_enc) {
 		pl->purge_seqno		= NVMEIB_HTONLL(pl->purge_seqno);
@@ -262,7 +262,7 @@ static void __recovery_hdr_convert(struct nvmeibt_client_recovery_generic_header
 	} else {      r->id = NVMEIB_NTONLL(r->id); r->type = nvmeib_ntohl(r->type); r->max_batch_size = nvmeib_ntohl(r->max_batch_size);}
 }
 
-static void __attr_no_alignment_sanity __recovery_start_pl_convert(struct nvmeibt_client_recovery_start_pl *r, bool do_enc)
+static __attribute__((unused)) void __attr_no_alignment_sanity __recovery_start_pl_convert(struct nvmeibt_client_recovery_start_pl *r, bool do_enc)
 {
 	if (do_enc)	{
 		const enum NVMEIBT_RECOVERY_TYPE r_type = r->task.type;
@@ -1068,7 +1068,4 @@ void nvmeibt_client_topo_disk_segment_read(struct nvmeibt_client_topo_disk_segme
 	#if (defined(__GNUC__) && (__GNUC__ >= 9)) || defined(__gcc__)
 		#pragma GCC diagnostic pop
 	#endif
-#endif
-#if defined(__clang__)
-	#pragma clang diagnostic pop
 #endif
