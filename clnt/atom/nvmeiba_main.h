@@ -5,7 +5,7 @@
    be adopted.
    Must not include anything from the rest of NVMesh codebase! */
 #include "nvmeiba_infra.h"
-
+#include "nvmeib_jdr.h"
 struct nvmeiba_all_os_apis {				// Main object of nvmeiba
 	spinlock_t lock;
 	struct list_head list;					// List of atoms

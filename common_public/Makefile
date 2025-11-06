@@ -17,7 +17,7 @@ nvmeib_common_public-y := \
 	poll/nvmeib_public_intr_poll.o \
 	nvmeib_trend.o nvmeib_trace.o nvmeib_rsc_pool.o \
 	nvmeib_trace_stress_test.o nvmeib_public_procfs.o nvmeib_public_mmap.o \
-	nvmeib_public_raid.o nvmeib_public_keeper.o traces_ids.o nvmeib_event.o
+	nvmeib_public_raid.o nvmeib_public_keeper.o traces_ids.o nvmeib_event.o ../utils/nvmeib_jdr/nvmeib_jdr.o
 
 ifeq ($(call ofed_ver_check,5,1),no)
 # Ofed below 5.1 - support mlx4 driver

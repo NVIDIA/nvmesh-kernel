@@ -117,6 +117,7 @@ INCLUDES :=
 INCLUDES += -I$(SSDA)/clnt/block/unitest -I$(SSDA)/clnt/ -I$(SSDA)/srv/ -I$(SSDA)/common/ -I$(SSDA)/common_public/ -I$(SSDA)/toma/ -I$(SSDA)/
 INCLUDES += -I/usr/include
 INCLUDES += -I$(SSDA)/autogen/toma/ -I$(SSDA)/autogen/common/ -I$(SSDA)/autogen/clnt/
+INCLUDES += -I$(SSDA)/utils/nvmeib_jdr/
 
 # ********** Define linker and compilation flags *********
 
@@ -157,11 +158,14 @@ SOURCES += ./uni_scenarios/uni_scenario_ec_serjio.c
 SOURCES += ./uni_scenarios/uni_scenario_common.c
 SOURCES += ./nvmeibc_tracer_unitest.c
 
+# Production code: /utils/
+UTILS_DIR := $(SSDA)/utils
+SOURCES += $(UTILS_DIR)/nvmeib_jdr/nvmeib_jdr.c
+
 # Production code: /common/
 CMDIR = $(SSDA)/common
 SOURCES += $(CMDIR)/nvmeib_io_stats.c $(CMDIR)/nvmeib_mcs_msg_cache.c $(CMDIR)/nvmeib_mcs.c $(CMDIR)/nvmeib_kth_events.c
 SOURCES += $(CMDIR)/nvmeib_json.c
-SOURCES += $(CMDIR)/nvmeib_jdr.c
 SOURCES += $(CMDIR)/nvmeib_metrics_jdr.c
 SOURCES += $(CMDIR)/nvmeib_memmgr_metrics.c
 SOURCES += $(CMDIR)/nvmeib_error_tags.c

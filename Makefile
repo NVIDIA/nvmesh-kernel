@@ -152,6 +152,8 @@ endif
 
 ifneq ($(COMPILE_SERVER),)
     obj-m += srv/
+    COMPILE_TOOLS= cd utils && make $(JOBS) all
+    CLEAN_TOOLS= cd utils && make clean
 
     ifeq ($(TCM), TCMD)
         INFO_TOMA = Building TOMA in DEBUG mode
@@ -1258,7 +1260,7 @@ LINUX_INCLUDE='\
     -I$$(srctree)/arch/$$(SRCARCH)/include \
     -Iarch/$$(SRCARCH)/include/generated \
     -I$(shell pwd) -I$(shell pwd)/common -I$(shell pwd)/common_public -I$(shell pwd)/srv -I$(shell pwd)/clnt -I$(shell pwd)/toma\
-    -I$(shell pwd)/softiwarp -I$(shell pwd)/softiwarp/common \
+    -I$(shell pwd)/softiwarp -I$(shell pwd)/softiwarp/common -I$(shell pwd)/utils/nvmeib_jdr \
     $(AUTOGEN_INCS) \
     $(INC_DIR2)'
 
@@ -1315,6 +1317,7 @@ ifeq ($(COMPILE_COMMON),yes)
 	KBUILD_EXTRA_SYMBOLS="$(OFED_SYMVERS) $(BNXT_SYMVERS) $(SIW_SYMVERS)" modules
     endif
 endif
+	+$(COMPILE_TOOLS)
 	+$(VV)$(COMPILE_TOMA) $(TOMA_LLVM) $(TOMA_SILENT)
 ifeq ($(BUILD_KERNEL_MODULES),yes)
 ifeq ($(IS_TOMA_FIRST),true)
@@ -1336,6 +1339,7 @@ clean:
 	$(MAKE) -C $(KSRC) M=$(PWD) clean
 	+$(CLEAN_DICTIONARIES)
 	+$(CLEAN_TOMA)
+	+$(CLEAN_TOOLS)
 	+$(CLEAN_UTILS)
 	+$(CLEAN_AUTOGEN)
 	+$(CLEAN_LZ4)

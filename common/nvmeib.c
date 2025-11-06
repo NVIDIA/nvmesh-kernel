@@ -22,6 +22,7 @@
 #include "nvmeib_completion_noise.h"
 #include "common_public/nvmeib_public_keeper.h"
 #include "nvmeib_json.h"
+#include "nvmeib_jdr.h"
 
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
