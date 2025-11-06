@@ -10,7 +10,6 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #else
-#include <stdarg.h>
 #include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -18,19 +17,9 @@
 
 static size_t indent = 4;
 
-#ifdef __KERNEL__
-#define JDR_ASSERT(cond) WARN_ON(!cond)
-#else
-#define JDR_ASSERT(cond) assert(cond)
-#endif
-
-static void __attribute__((format (printf, 2, 3))) __jdr_append(struct jdr* self, char const * const fmt, ...)
+static void __jdr_append_buffer(struct jdr* self, char const * const fmt, va_list args)
 {
-	int rc = 0;
-	va_list args;
-	va_start(args, fmt);
-	rc = vsnprintf(self->impl.remaining.base, self->impl.remaining.len, fmt, args);
-	va_end(args);
+	int rc = vsnprintf(self->impl.remaining.base, self->impl.remaining.len, fmt, args);
 
 	JDR_ASSERT((0 <= rc)); //this is only valid for user space; kernel don't deal with encoding error?
 
@@ -41,6 +30,26 @@ static void __attribute__((format (printf, 2, 3))) __jdr_append(struct jdr* self
 	} else {
 		self->impl.remaining = (struct charvec){0};
 	}
+}
+
+#ifdef __KERNEL__
+static void __jdr_append_seq(struct jdr* self, char const * const fmt, va_list args)
+{
+	seq_vprintf(self->impl.seq, fmt, args);
+}
+#endif
+
+static void __attribute__((format (printf, 2, 3))) __jdr_append(struct jdr* self, char const * const fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	self->impl.append(self, fmt, args);
+	va_end(args);
+}
+
+static void __jdr_vappend(struct jdr* self, char const * const fmt, va_list args)
+{
+	self->impl.append(self, fmt, args);
 }
 
 static void __jdr_on_value_append(struct jdr* self)
@@ -149,6 +158,27 @@ static void __jdr_ascii(struct jdr* self, char const * name, char const * const 
 	__jdr_append_name_value(self, "\"%s\"", name, text);
 }
 
+static void __attribute__((format (printf, 3, 4))) __jdr_ascii_format(struct jdr* self, char const * name, char const * fmt, ...)
+{
+	va_list args;
+	
+	/* start appending a new key/value */
+	__jdr_on_value_append(self);
+	/* append the key and/or a quote */
+	if (name){
+		__jdr_append(self, "%*s\"%s\": \"", self->impl.nesting, " ", name);
+	} else {
+		__jdr_append(self, "%*s\"", self->impl.nesting, " ");
+	}
+	/* append the value */
+	va_start(args, fmt);
+	__jdr_vappend(self, fmt, args);
+	va_end(args);
+
+	/* append the closing quote */
+	__jdr_append(self, "\"");
+}
+
 static void __jdr_bitmap(struct jdr* self, char const * name, unsigned long long value)
 {
 	if (value){
@@ -236,55 +266,89 @@ static void __jdr_end_document(struct jdr* self)
 	__jdr_end_scope(self, '}');
 }
 
+static struct charvec __jdr_finalize_buffer(struct jdr* self)
+{
+	if (self->impl.total <= self->impl.input.len){
+		return (struct charvec){.base = self->impl.input.base, .len = self->impl.total};
+	} else {
+		return (struct charvec){.base = NULL, .len = self->impl.total};
+	}
+}
+
+#ifdef __KERNEL__
+static struct charvec __jdr_finalize_seq(struct jdr* self)
+{
+	if (seq_has_overflowed(self->impl.seq)) {
+		return (struct charvec){.base = NULL, .len = 0};
+	} else {
+		return (struct charvec){.base = self->impl.seq->buf, .len = self->impl.seq->count};
+	}
+}
+#endif
+
+static struct jdr jdr_get_default(void)
+{
+	return (struct jdr){ .impl = {
+		.nesting = 0,
+		.is_first_value = true,
+	},
+	.ops = {
+		.null = __jdr_null,
+		.boolean = __jdr_boolean,
+		.u8 = __jdr_u8,
+		.s8 = __jdr_s8,
+		.u16 = __jdr_u16,
+		.s16 = __jdr_s16,
+		.u32 = __jdr_u32,
+		.s32 = __jdr_s32,
+		.u64 = __jdr_u64,
+		.s64 = __jdr_s64,
+		.ull = __jdr_ull,
+		.sll = __jdr_sll,
+		.ptr = __jdr_ptr,
+		.ascii = __jdr_ascii,
+		.ascii_format = __jdr_ascii_format,
+		.bitmap = __jdr_bitmap,
+		.uuid_be = __jdr_uuid_be,
+
+		.object = __jdr_object,
+		.object_done = __jdr_object_done,
+
+		.array = __jdr_array,
+		.array_done = __jdr_array_done
+	}
+
+	};
+}
+
 struct jdr jdr_make(struct charvec buffer)
 {
-	struct jdr jdr = (struct jdr){
-		.impl = {
-			.total = 0,
-			.input = buffer,
-			.remaining = buffer,
-			.nesting = 0,
-			.is_first_value = true,
-		},
-		.ops = {
-			.null = __jdr_null,
-
-			.boolean = __jdr_boolean,
-			.u8 = __jdr_u8,
-			.s8 = __jdr_s8,
-			.u16 = __jdr_u16,
-			.s16 = __jdr_s16,
-			.u32 = __jdr_u32,
-			.s32 = __jdr_s32,
-			.u64 = __jdr_u64,
-			.s64 = __jdr_s64,
-			.ull = __jdr_ull,
-			.sll = __jdr_sll,
-			.ptr = __jdr_ptr,
-			.ascii = __jdr_ascii,
-			.bitmap = __jdr_bitmap,
-			.uuid_be = __jdr_uuid_be,
-
-			.object = __jdr_object,
-			.object_done = __jdr_object_done,
-
-			.array = __jdr_array,
-			.array_done = __jdr_array_done
-		}
-	};
-
+	struct jdr jdr = jdr_get_default();
+	jdr.impl.input = buffer;
+	jdr.impl.remaining = buffer;
+	jdr.impl.total = 0;
+	jdr.impl.append = __jdr_append_buffer;
+	jdr.impl.finalize = __jdr_finalize_buffer;
 	__jdr_start_document(&jdr);
 	return jdr;
 }
 
+#ifdef __KERNEL__
+struct jdr jdr_make_seq(struct seq_file *seq)
+{
+	struct jdr jdr = jdr_get_default();
+	jdr.impl.seq = seq;
+	jdr.impl.append = __jdr_append_seq;
+	jdr.impl.finalize = __jdr_finalize_seq;
+	__jdr_start_document(&jdr);
+	return jdr;
+}
+#endif
+
 struct charvec jdr_finalize(struct jdr* jdr)
 {
 	__jdr_end_document(jdr);
-	if (jdr->impl.total <= jdr->impl.input.len){
-		return (struct charvec){.base = jdr->impl.input.base, .len = jdr->impl.total};
-	} else {
-		return (struct charvec){.base = NULL, .len = jdr->impl.total};
-	}
+	return jdr->impl.finalize(jdr);
 }
 
 #ifndef __KERNEL__

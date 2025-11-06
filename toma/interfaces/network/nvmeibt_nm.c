@@ -10,7 +10,7 @@
 #include "nvmeibt_ib_common.h"
 #include "nvmeibt_debug.h"
 #include "common_public/nvmeib_uuid_be.h"
-#include "common/nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 #define STATUS_STR_INIT_SIZE 4096
 #define MAX_FDS 1024
 #define LOCAL_NODE_PERIODIC_TIMER_NS SEC_TO_NSEC(1)

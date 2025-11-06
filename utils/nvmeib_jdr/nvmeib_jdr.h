@@ -6,8 +6,30 @@
 #ifndef NVMEIB_JDR_H_INCLUDE
 #define NVMEIB_JDR_H_INCLUDE
 
-#include "compat/kr_incs_percpu.h"
-#include "common_public/nvmeib_uuid_be.h"
+#ifdef __KERNEL__
+	#include <linux/types.h>
+	#include <linux/bug.h>      // WARN_ON
+	#include <linux/kernel.h>   // for vsnprintf
+	#include <linux/string.h> // strstr
+	#include <linux/seq_file.h> // seq_file support
+	#define JDR_ASSERT(cond) WARN_ON(!cond)
+#else
+	#include <stdint.h>
+	#include <stddef.h>    // size_t
+	#include <stdbool.h>   // bool, true, false
+	#include <assert.h>    // assert
+	#include <errno.h>
+	#include <stdio.h>
+	#include <string.h>
+	#include <stdarg.h>    // va_list
+	#define JDR_ASSERT(cond) assert(cond)
+#endif
+
+#ifndef UUID_BE
+	typedef struct {
+		unsigned char b[16];
+	} uuid_be;
+#endif
 
 struct charvec {
 	char* base;
@@ -23,11 +45,16 @@ struct jdr{
 		struct charvec remaining;
 		uint32_t nesting;
 		bool is_first_value;
+#ifdef __KERNEL__
+		struct seq_file *seq; // if non-NULL, output to seq_file instead of buffer
+#endif
+	void (*append)(struct jdr* self, char const * const fmt, va_list args);
+	struct charvec (*finalize)(struct jdr* self);
+
 	} impl;
 
 	struct {
 		void (*null)(struct jdr* self, char const * name, struct jdr_null_type null);
-
 		void (*boolean)(struct jdr* self, char const * name, bool value);
 		void (*u8)(struct jdr* self, char const * name, uint8_t value);
 		void (*s8)(struct jdr* self, char const * name, int8_t value);
@@ -41,6 +68,7 @@ struct jdr{
 		void (*sll)(struct jdr* self, char const * name, long long value);
 		void (*ptr)(struct jdr* self, char const * name, void const * value);
 		void (*ascii)(struct jdr* self, char const * name, char const * text);
+		void (*ascii_format)(struct jdr* self, char const* name, char const * fmt, ...);
 		void (*bitmap)(struct jdr* self, char const * name, unsigned long long value);
 		void (*uuid_be)(struct jdr* self, char const * name, uuid_be uuid);
 
@@ -52,10 +80,17 @@ struct jdr{
 	} ops;
 };
 
+//
+// the following functions APIs, note that for nvmeibc/s/common they are exported by nvmeib_public.c
+//
+
 // function to write a string key and string value pair directly
 void jdr_write_key_value_str(struct jdr *jdr, const char *key, const char *value);
 
 struct jdr jdr_make(struct charvec buffer);
+#ifdef __KERNEL__
+struct jdr jdr_make_seq(struct seq_file *seq);
+#endif
 
 //once you done serializing all your objects into the jdr archive - you should call jdr_finalize function;
 //the function should be called before jdr_free

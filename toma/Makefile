@@ -48,7 +48,7 @@ MERGE_MULTI_GEN := $(shell pwd)/../tools/pre_processor/merge_multi_gen_events.py
 MERGE_DICT := $(shell pwd)/../tools/merge_dictionary.sh
 DICT_JSON  := $(shell pwd)/../tools/dictionary.json
 
-EXTRA_SOURCES=$(TOOLS_DIR)/nvmeib_trace_userspace.o $(TOOLS_DIR)/nvmeib_trace_userspace_poller.o  $(TOOLS_DIR)/nvmeib_jdr_userspace.o
+EXTRA_SOURCES=$(TOOLS_DIR)/nvmeib_trace_userspace.o $(TOOLS_DIR)/nvmeib_trace_userspace_poller.o
 
 # The programs to create
 BINS =
@@ -371,6 +371,16 @@ define get_file_literal
 -D__FILE_LITERAL__=$(basename $(notdir $1))_c
 endef
 
+UTILS_DIR := ../utils
+JDR_DIR := $(UTILS_DIR)/nvmeib_jdr
+JDR_BUILD_DIR := $(JDR_DIR)/build
+JDR_STATIC_LIB := libnvmeib_jdr.a
+JDR_STATIC_LIB_PATH := $(JDR_BUILD_DIR)/$(JDR_STATIC_LIB)
+
+# Build nvmeib_jdr static library by invoking its own Makefile
+$(JDR_STATIC_LIB_PATH):
+	$(MAKE) -C $(JDR_DIR)
+
 # this is the main BIN generation template...
 define BIN_template
 # Important: = not :=
@@ -410,14 +420,9 @@ $(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c
 	@echo $(TRACE)$(CC) -c $$(CFLAGS) -o $$@ $$<
 	$(TRACE)$(CC) -c $$(CFLAGS) -o $$@ $$<
 
-# Userspace-specific compilation of nvmeib_jdr.c
-$(TOOLS_DIR)/nvmeib_jdr_userspace.o: ../common/nvmeib_jdr.c
-	@echo $(TRACE)$(CC) -c $$(CFLAGS) -o $$@ $$<
-	$(TRACE)$(CC) -c $$(CFLAGS) -o $$@ $$<
-
 $(BIN)/nm_udp.so: $(TRAGET_ROOT)/$(TRACE_AUTOGEN_ROOT)/$1/$(BDIR)/interfaces/network/nvmeibt_nm_udp.c_gen_events.h
 $(BIN)/nm_ibud.so: $(TRAGET_ROOT)/$(TRACE_AUTOGEN_ROOT)/$1/$(BDIR)/interfaces/network/nvmeibt_nm_ibud.c_gen_events.h
-$(BIN)/$1: $(BIN)/nm_udp.so $(BIN)/nm_ibud.so $$(call allexclude,$(PROJECT_DIRS_INCLUDES_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR),$(call allexclude,$(PROJECT_DIRS_EXCLUDES_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR),$(call alldir, $(PROJECT_DIRS_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)) $(call allsdir, $(SHARED_DIRS_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)))) $$(call allinclude,$(PROJECT_DIRS_INCLUDES_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)) $(EXTRA_SOURCES)
+$(BIN)/$1: $(BIN)/nm_udp.so $(BIN)/nm_ibud.so $$(call allexclude,$(PROJECT_DIRS_INCLUDES_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR),$(call allexclude,$(PROJECT_DIRS_EXCLUDES_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR),$(call alldir, $(PROJECT_DIRS_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)) $(call allsdir, $(SHARED_DIRS_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)))) $$(call allinclude,$(PROJECT_DIRS_INCLUDES_$1),$(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)) $(JDR_STATIC_LIB_PATH) $(EXTRA_SOURCES)
 	# first we merge all the jsons
 	$(MERGE_MULTI_GEN) $$(TRACE_JSON_$1) $(shell pwd)/$(TRAGET_ROOT)/$(TRACE_AUTOGEN_ROOT)/$1/$(BDIR) $$(filter-out %.so,$$^) $(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)/nvmeibt_nm_ibud.o $(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)/nvmeibt_nm_udp.o
 	# now we will compile the extern id traces file
@@ -432,7 +437,7 @@ $(BIN)/$1: $(BIN)/nm_udp.so $(BIN)/nm_ibud.so $$(call allexclude,$(PROJECT_DIRS_
 	$(TRACE)$(CC) -shared -Wl,--no-as-needed -libverbs -lrdmacm -Ttracer.ld -o $(BIN)/nw_ibud.so  $(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)/nvmeibt_nm_ibud.o
 	# now we can safly link
 	@echo $(TRACE)$(CC) $$(LDFLAGS) $(LDFLAGS_$(ARCH)) -o $$@ $$(filter-out %.so,$$^) $$(ID_TRACES_O_$1)  $$(LDLIBS) $$(LINKER_PASS)
-	$(TRACE)$(CC) $$(LDFLAGS) $(LDFLAGS_$(ARCH)) -o $$@ $$(filter-out %.so,$$^) $$(ID_TRACES_O_$1)  $$(LDLIBS) $$(LINKER_PASS)
+	$(TRACE)$(CC) $$(LDFLAGS) $(LDFLAGS_$(ARCH)) -o $$@ $$(filter-out %.so,$$^) $$(JDR_STATIC_LIB_PATH) $$(ID_TRACES_O_$1)  $$(LDLIBS) $$(LINKER_PASS)
 ifeq ($(MOD),$(RELEASE_STR))
 	cp $$@ $$@.with_symbols
 	## One solution is to create a symbols_only file

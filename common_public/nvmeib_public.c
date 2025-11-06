@@ -9,6 +9,7 @@
 #include <linux/random.h>
 #include "nvmeib_shared.h"
 #include "nvmeib_str.h"
+#include "../utils/nvmeib_jdr/nvmeib_jdr.h"
 #if KS_TRACE_EVENTS
 #	include <linux/trace_events.h>
 #	define ftrace_event_file trace_event_file
@@ -27,6 +28,12 @@ enum trace_reg {
 	#include <linux/ftrace_event.h>
 #endif
 
+#ifdef __KERNEL__
+EXPORT_SYMBOL(jdr_make);
+EXPORT_SYMBOL(jdr_finalize);
+EXPORT_SYMBOL(jdr_write_key_value_str);
+EXPORT_SYMBOL(jdr_make_seq);
+#endif
 
 #include "nvmeib_public.h"
 #include "nvmeib_ib_driver.h"

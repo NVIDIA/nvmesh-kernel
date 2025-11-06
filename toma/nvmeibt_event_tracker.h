@@ -7,7 +7,7 @@
 #define NVMEIBT_EVENT_TRACKER_H
 
 #include <sys/time.h>
-#include "common/nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 #define NVMEIBT_EVENT_TRACKER_DEFAULT_SIZE 10
 typedef const char * (*nvmeibt_event_to_str_fn)(int event_id);
