@@ -123,6 +123,14 @@ cleanup_upgrade_marker() {
     fi
 }
 
+# echo a message ONLY if an upgrade is in progress
+echo_if_upgrade() {
+    if [ "$RESTART_FOR_UPGRADE" = true ]; then
+        # The "$@" preserves all arguments passed to the function
+        echo "NDU: $@"
+    fi
+}
+
 find_and_alert_on_stuck_detaching() {
 	n_stuck=`cat /proc/nvmeiba/status.json | grep gendisk | grep \"null\" |wc -l`;
 	[ ! "$n_stuck" -eq 0 ] && echo "${n_stuck} Nvmesh volumes cannot detach (still used).";
@@ -160,11 +168,13 @@ detach_volumes() {
 	module_state=$(head /proc/nvmeibc/status -n 1 | cut -d = -f 2)
 	if [ "$module_state" != "3 Zombie, ready to removal" ]; then
 		#echo "DEBUG: calling|${shut_down_args}|"
+		echo_if_upgrade "client shutdown script invoked"
 		/opt/nvmesh/bin/nvmesh_clnt_shutdown ${shut_down_args};
 		RETVAL=$?
 		if [ ! "$RETVAL" -eq 0 ] ; then
 			ret=1
 		fi
+		echo_if_upgrade "client shutdown script done"
 		echo "Detached all volumes"
 	else
 		echo "Skipping volumes detach, module is ready for removal"
@@ -292,6 +302,7 @@ start() {
 
 	ftrace_init
 
+	echo_if_upgrade "Starting to load modules"
 	load_module nvmeib_common_public
 	should_load_mlx mlx4 && load_module nvmeib_common_mlx4_public
 	should_load_mlx mlx5 && load_module nvmeib_common_mlx5_public
@@ -377,6 +388,8 @@ start() {
 		exit 1
 	fi
 
+	echo_if_upgrade "Done loading modules"
+
 	if [ "$RETVAL" -eq 0 ]; then
 		# cleanup upgrade marker if exists
 		cleanup_upgrade_marker
@@ -445,6 +458,7 @@ force_stop() {
 		if ! $sysv_triggered; then
 			signal_monitor_process SIGUSR1 #suppress monitor failure
 		fi
+		echo_if_upgrade "Starting to unload modules"
 		unload_module nvmeibc
 		RETVAL=$?
 		if [ "$RETVAL" -eq 0 ]; then
@@ -469,6 +483,7 @@ force_stop() {
 			else
 				unload_module nvmeiba
 			fi
+			echo_if_upgrade "Done unloading modules"
 		else
 			echo "Failed to unload client (nvmeibc) module"
 			echo "See journalctl -u nvmeshclient for the error"
