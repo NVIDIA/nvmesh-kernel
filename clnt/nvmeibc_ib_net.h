@@ -586,15 +586,27 @@ int nvmeibc_ib_net_build_wriu(struct nvmeibc_ib_net *net,
        __rv;                                                       	\
 })
 
-void nvmeibc_ib_net_complete_iocmd_sg(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req);
+void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int orig_sgcount, bool was_reuse);
+
+#define nvmeibc_ib_net_complete_iocmd_sg(_n, _r) \
+	nvmeibc_ib_net_complete_iocmd_sg_reuse(_n, _r, (_r)->sgcount, false)
+
 void nvmeibc_ib_net_unmap_sg_to_ib_sge(struct nvmeib_iu *iu);
 void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
 	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code);
-void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code);
-void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code);
+
+void nvmeibc_ib_net_complete_iocmd_reuse(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req,  enum stats_done_info_type done_type, int comp_code, int orig_sgcount, bool was_reuse);
+
+#define nvmeibc_ib_net_complete_iocmd(_n, _r, _d, _c) \
+	nvmeibc_ib_net_complete_iocmd_reuse(_n, _r, _d, _c, (_r)->sgcount, false)
+
+void nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int comp_code, int orig_sgcount, bool was_reuse);
+
+#define nvmeibc_ib_net_unmap_and_unlink_iocmd(_n, _r, _c) \
+	nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(_n, _r, _c, (_r)->sgcount, false)
 
 struct nvmeibc_dev;
 void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, enum stats_done_info_type done_type, struct nvmeibc_dev *local_dev);
@@ -751,10 +763,14 @@ void req_reused_bb_lru_is_timeout_stats(struct nvmeibc_channel *ch);
    1) mark it as unused before adding its parent req to available-(ch)-pool.
    2) destroy ulp's cookie so it won't rerurn it
  */
-#define del_reuse_request(req, disk) do {	\
-	if ((req)->reused_bb == 1) 				\
-		__del_reuse_request(req, disk); 	\
-} while (0)
+#define del_reuse_request(req, disk) ({	\
+	bool ret = false;\
+	if ((req)->reused_bb == 1) { 				\
+		__del_reuse_request(req, disk);\
+		ret = true;\
+	}\
+	ret;\
+})
 
 /* called by ulp to return bb to our ownership, cookie was already destroyed */
 #define del_reuse_request_no_rcookie(ch, req) do {\

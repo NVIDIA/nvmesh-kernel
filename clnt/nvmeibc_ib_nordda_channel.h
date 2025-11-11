@@ -270,8 +270,9 @@ static inline bool ri_already_locked(struct nvmeibc_volume_req_info *ri)
 }
 
 #define REUSE_SG_FR_STORE(_req) \
-	do { \
+	({ \
 		extern bool nvmeibc_nr_store_fr; \
+		int _sgcount = (_req)->req.sgcount; \
 		if (nvmeibc_nr_store_fr && (_req)->req.sgcount) { \
 			BUG_ON((_req)->reuse_orig.sgcount || (_req)->reuse_orig.nmdesc || (_req)->reuse_orig.fr_list); \
 			(_req)->reuse_orig.sgcount = (_req)->req.sgcount; \
@@ -283,7 +284,8 @@ static inline bool ri_already_locked(struct nvmeibc_volume_req_info *ri)
 				(_req)->req.nmdesc = 0; \
 			} \
 		} \
-	} while (0)
+		_sgcount; \
+	})
 
 #define REUSE_FR_RESTORE(_req) \
 	do { \

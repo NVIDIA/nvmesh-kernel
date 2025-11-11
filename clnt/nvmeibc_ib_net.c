@@ -4622,23 +4622,30 @@ done:
 }
 #endif /* NVMEIBC_READ_POISON_BB */
 
-void nvmeibc_ib_net_complete_iocmd_sg(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req)
+void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int sgcount, bool was_reuse)
 {
 	struct nvmeibc_block_io_req *bcmd = &req->bcmd->reqs[0];
 
 	__NFIN;
-	if (req->sgcount && bcmd->ndb->table.sgl) {
-		/* JH IOMMU: req->dma_dir is set to DMA_FROM_DEVICE for Read Ops, DMA_TO_DEVICE for Write Ops */
-		ib_dma_unmap_sg(P2IB(net->port), bcmd->ndb->table.sgl,
-			bcmd->ndb->table.nents, req->dma_dir);
-		req->sgcount = 0;
-	} else if (bcmd->op == NVMEIB_BLOCK_IO_OP_MD_READ ||
-			bcmd->op == NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR) {
+	if (sgcount && bcmd->ndb->table.sgl) {
+		if (req->sgcount) {
+			/* JH IOMMU: req->dma_dir is set to DMA_FROM_DEVICE for Read Ops, DMA_TO_DEVICE for Write Ops */
+			ib_dma_unmap_sg(P2IB(net->port), bcmd->ndb->table.sgl,
+				bcmd->ndb->table.nents, req->dma_dir);
+			req->sgcount = 0;
+		}
+	}
+	else if (bcmd->op == NVMEIB_BLOCK_IO_OP_MD_READ ||
+		bcmd->op == NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR) 
+	{
 		/* ops which SG's (if any), was not ib-dma-mapped */
-	} else if (!nvmeib_block_io_op_is_write(bcmd->op) || !req->reused_bb) {
+	}
+	else if (!(nvmeib_block_io_op_is_write(bcmd->op) && was_reuse)) 
+	{
 		_NE(error_ib_net_nvmeibc_ib_net_complete_iocmd_sg,
-			"Invalid I/O command: NULL S/G (req=@REQ, op=@BLOCK_IO_OP)", req, bcmd->op);
+			"Invalid I/O command: NULL S/G (req=@REQ, op=@BLOCK_IO_OP, reused_bb=@BOOL_YN, was_reuse=@BOOL_YN)", 
+			req, bcmd->op, req->reused_bb, was_reuse);
 	}
 
 	/* if we have mapped MD unmapped it here */
@@ -4768,8 +4775,8 @@ void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
 	__NFOUT;
 }
 
-void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code)
+void nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int comp_code, int sgcount, bool was_reuse)
 {
 	struct nvmeibc_channel *ioch = net->ioch;
 	struct nvmeibc_disk_io_command *bcmd;
@@ -4780,7 +4787,7 @@ void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
 	   block's completion handler so that if block reruse
 	   these addreeses for a new io-req, we won't endup
 	   unmapping what we've just mapped for the new io-req */
-	nvmeibc_ib_net_complete_iocmd_sg(net, req);
+	nvmeibc_ib_net_complete_iocmd_sg_reuse(net, req, sgcount, was_reuse);
 
 	nvmeibc_ib_net_poison_verify(net, req, &comp_code);
 	dp_dbgdi_add_info_core_post_with_magic(net, req, comp_code);
@@ -4841,15 +4848,15 @@ static void nvmeibc_ib_net_complete_bcmd_work(struct workqe_struct *work)
 			NVMEIB_NOISE_CTRS_IO_COMPLETE_CB_PCPU_WQ);
 }
 
-void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code)
+void nvmeibc_ib_net_complete_iocmd_reuse(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code, int orig_sgcount, bool was_reuse)
 {
 	struct nvmeibc_disk_io_command *bcmd = req->bcmd;
 	const struct nvmeib_cpu_mask cpu_mask = req->bcmd->reqs[0].cpu_mask_info->mask;
 	static unsigned int pcpu_cntr = 0;
 
 	nvmeibc_in_net_warn_on_remote_cmd_wip(net, comp_code);
-	nvmeibc_ib_net_unmap_and_unlink_iocmd(net, req, comp_code);
+	nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(net, req, comp_code, orig_sgcount, was_reuse);
 
 	if (NVMEIBC_DISK_SHOULD_DEFER_TO_PCPU_WQ(nvmeibc_ib_net_complete_iocmd_use_pcpu_wq && \
 		!NVMEIBC_DISK_SAFE_TEST_CURRENT_CPU_IN_BITMAP(&cpu_mask), cpu_mask)) {

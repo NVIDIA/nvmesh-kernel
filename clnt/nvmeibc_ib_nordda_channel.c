@@ -789,15 +789,17 @@ static void nordda_channel_free_volume_reqs(
 					time_passed, time_passed/HZ, n_events);
 				if (ch->reqs[i].req.dcmd->cmd_type == NVMEIBC_DISK_CMD_IO) {
 					struct nvmeibc_disk_io_command *bcmd = ch->reqs[i].req.bcmd;
+					bool was_reuse;
 					dcmd = &bcmd->disk_cmd;
 					/* Restore put-aside SG and nmdesc if in the middle of reuse-BB */
 					if (ch->reqs[i].reuse_orig.sgcount) {
 						REUSE_SG_RESTORE(&(ch->reqs[i]));
 						REUSE_FR_RESTORE(&(ch->reqs[i]));
 					}
+					was_reuse = del_reuse_request((&ch->reqs[i].req), ch->base.disk);
 					nvmeibc_ib_net_unmap_data(&ch->net.base, &ch->reqs[i].req);
-					nvmeibc_ib_net_unmap_and_unlink_iocmd(
-						&ch->net.base, &ch->reqs[i].req, -EIO);
+					nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(
+						&ch->net.base, &ch->reqs[i].req, -EIO, ch->reqs[i].req.sgcount, was_reuse);
 				} else if (ch->reqs[i].req.dcmd->cmd_type == NVMEIBC_DISK_CMD_GEN) {
 					struct nvmeibc_disk_gen_cmd *gcmd = disk_to_gen(ch->reqs[i].req.dcmd);
 					dcmd = &gcmd->disk_cmd;
@@ -1719,6 +1721,8 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 	/* If we are completing only on recv completion (wait_release_zero_before_cb = false) */
 	if (!ch->wait_release_zero_before_cb)
 	{
+		bool was_reuse;
+		int orig_sgcount;
 		/* check for reuse mode */
 		if (req->comp_code == 0 && do_reuse_request(&req->req)) {
 			/* increase version and therefore disable any action on the
@@ -1766,13 +1770,13 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 			*/
 
 			/* Attempt #1: move fr_desc to req->reuse_orig_fr_desc */
-			REUSE_SG_FR_STORE(req);
+			orig_sgcount = REUSE_SG_FR_STORE(req);
 
 			nvmeibc_ib_net_free_req(&ch->net.base, &req->req);
 			nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
 			
-			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, 
-				STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_SAVE,req->comp_code);
+			nvmeibc_ib_net_complete_iocmd_reuse(&ch->net.base, &req->req, 
+				STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_SAVE, req->comp_code, orig_sgcount, false);
 			goto out;
 		}
 		if (req->req.reused_bb) {
@@ -1781,10 +1785,11 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 				REUSE_SG_RESTORE(req);
 			}
 		}
-		del_reuse_request(&req->req, ch->base.disk);
+		was_reuse = del_reuse_request(&req->req, ch->base.disk);
 		nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
-		nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, 
-			STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_REUSE_DEL, req->comp_code);
+		nvmeibc_ib_net_complete_iocmd_reuse(&ch->net.base, &req->req, 
+			STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_REUSE_DEL, 
+			req->comp_code, req->req.sgcount, was_reuse);
 	}
 
 	/* Dont do this before send-comp of the fast-reg (of this IO) arrives.
@@ -1865,7 +1870,7 @@ static inline void process_rsp_finalize(struct nvmeibc_ib_nordda_channel *ch,
 										struct nvmeibc_volume_req_info *req)
 {
 	struct nvmeibc_disk_command *dcmd = req->req.dcmd;
-	bool is_reuse = false;
+	bool is_reuse = false, was_reuse = false;
 	NFIN;
 
 	/* checks */
@@ -1885,19 +1890,23 @@ static inline void process_rsp_finalize(struct nvmeibc_ib_nordda_channel *ch,
 								   ch->base.disk);
 				is_reuse = true;
 			} else {
-				del_reuse_request(&req->req, ch->base.disk);
+				was_reuse = del_reuse_request(&req->req, ch->base.disk);
 			}
 			nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
-			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
+			nvmeibc_ib_net_complete_iocmd_reuse(&ch->net.base, &req->req, 
+				STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, 
+				req->comp_code, req->req.sgcount, was_reuse);
 
 			break;
 
 		case NVMEIBC_DISK_CMD_GEN:
-			nvmeibc_ib_net_nordda_complete_gen_cmd(&ch->net, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
+			nvmeibc_ib_net_nordda_complete_gen_cmd(&ch->net, &req->req, 
+				STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
 			break;
 
 		case NVMEIBC_DISK_CMD_LOCK:
-			nvmeibc_ib_net_nordda_complete_lock_cmd(&ch->net, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
+			nvmeibc_ib_net_nordda_complete_lock_cmd(&ch->net, &req->req, 
+				STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
 			break;
 
 		default:
