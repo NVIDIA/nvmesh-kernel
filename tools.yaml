@@ -16,6 +16,9 @@ tools:
     linkpath: /opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py
     analysis:
       pathex: ['.']
+  nvmesh_client_upgrade:
+    source: scripts/client/nvmesh_client_upgrade.py
+    linkpath: /opt/nvmesh/client-repo/scripts/nvmesh_client_upgrade.py
   the-calculator:
     linkdir: /opt/nvmesh/common-repo
     source: tools/the-calculator.py

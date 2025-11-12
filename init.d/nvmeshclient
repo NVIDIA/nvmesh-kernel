@@ -585,6 +585,10 @@ case "$1" in
 	create_upgrade_marker
 	RETVAL=$?
 	;;
+  check_modules)
+	check_modules common client
+	RETVAL=$?
+	;;
   check_if_busy)
 	check_busy
 	RETVAL=$?
