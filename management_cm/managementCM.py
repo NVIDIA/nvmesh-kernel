@@ -33,6 +33,7 @@ EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
 TLS_CERTS_DIR = '/var/run/nvmesh/tls/nvmeshcm'
 
 schemePath = '/opt/nvmesh/client-repo/management_cm/clnt/'
+CONFIG_PROFILE_PATH = "/etc/nvmesh/configs/nvmeibc/.mgmt.nvmesh.conf"
 
 
 POLL_PERIOD_BEFORE_FIRST_CONNECTION_SEC = 0.01
@@ -572,7 +573,11 @@ class ManagementCM(Daemon):
 	def waitForClient(self, clientPath: str, schemePathL: str = schemePath) -> bool:
 		"""Wait for the client process to create its proc file."""
 		if CMConfig.nvmeshUMClient:
-			return True
+			return False
+
+		if not os.path.exists(CONFIG_PROFILE_PATH):
+			self.logger.info("Config profile %s does not exist, will have to get one from management", CONFIG_PROFILE_PATH)
+			return False
 
 		self.logger.debug("Waiting for client proc file %s", clientPath)
 		start_time = time.time()
@@ -638,7 +643,7 @@ class ManagementCM(Daemon):
 
 		clientFD = os.path.join(procPathClient, "mcs")
 
-		kernelClientConnected = self.waitForClient(clientFD)
+		clientConnectedDuringStartup = self.waitForClient(clientFD)
 
 		while not self.shouldClose:
 			try:
@@ -686,6 +691,7 @@ class ManagementCM(Daemon):
 						self.logger.debug('accepting mcs NvmeshUMSocket')
 						connection, address = s.accept()
 						self.createNvmeshUMSocket(cmSocket=connection, jsonScheme=os.path.join(schemePath, "clnt_scheme.json"), ftype='c')
+						clientConnectedDuringStartup = True
 						self.logger.debug('created mcs NvmeshUMSocket')
 					elif any([isinstance(s, socketType) for socketType in [JsonSocket, FileSocket, NvmeshUMSocket]]):
 						try:
@@ -700,8 +706,8 @@ class ManagementCM(Daemon):
 						self.handleSocketErrorException(e, s)
 
 				# Timeout
-				if isTimeout and not kernelClientConnected:
-					kernelClientConnected = self.tryConnectKernelClient(clientFD)
+				if isTimeout and not CMConfig.nvmeshUMClient and not clientConnectedDuringStartup:
+					clientConnectedDuringStartup = self.tryConnectKernelClient(clientFD)
 
 			except select.error as e:
 				if e.errno == errno.EINTR:

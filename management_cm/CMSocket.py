@@ -1043,6 +1043,7 @@ class NvmeshUMSocket(ClientSocket):
 			      concurrentConnections, kafkaOutbox, logger, "NvmeshUMSocket", originType=originType)
 
 		self.ftype = ftype
+		self.resendMessagesFromCache(writeList)
 
 	def receive(self):
 		self.logger.debug("NvmeshUMSocket receive called")
@@ -1056,10 +1057,6 @@ class NvmeshUMSocket(ClientSocket):
 		self.logMessage(self.originType, 'MGMT', res)
 
 		self.kafkaOutbox.put(message)
-
-	def replayCacheUponReceivingUpdateToken(self, writeList):
-		self.logger.debug('This is the first updateToken, replaying messages from cache')
-		self.resendMessagesFromCache(writeList)
 
 	@staticmethod
 	def filterResponseForRequestedVolumes(response, requestedVolumes):
