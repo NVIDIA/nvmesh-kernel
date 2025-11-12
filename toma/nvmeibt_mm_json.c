@@ -1793,7 +1793,7 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	apply_parsed_JSON_tree_to_toma_objects(json_tree_root);
 
 	// Generate persist&wire buf
-	raft_leader_regenerate_the_two_to_commit_persist_and_wire_bufs_as_needed();
+	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	// Compare the input & output CRCs
 	persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full;
 	if (JSON_raft_ctx_crc != persist_and_wire_buf_get_raft_ctx_crc(persist_and_wire_buf)) {

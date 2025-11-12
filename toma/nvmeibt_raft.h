@@ -284,7 +284,7 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 
 struct nvmeibt_raft_member *nvmeibt_raft_get_member_by_id(const union nvmeib_uuid *id);
 void nvmeibt_raft_link_member_to_node(struct nvmeibt_raft_member *member, struct nvmeibt_node *node, const union nvmeib_uuid *uuid);
-void raft_leader_regenerate_the_two_to_commit_persist_and_wire_bufs_as_needed(void);
+void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void);
 void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void);
 void nvmeibt_raft_unlink_member_from_node(struct nvmeibt_raft_member *member, struct nvmeibt_node *node);
 void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_add_fr_mgmt, int64_t kafka_offset, int config_tag);

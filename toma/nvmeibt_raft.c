@@ -708,7 +708,7 @@ out:
 	return dst;
 }
 
-void raft_leader_regenerate_the_two_to_commit_persist_and_wire_bufs_as_needed(void)
+void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 {
 	NFIN;
 	if (!(nvmeibt_global_get_global()->is_update_csv_of_config_and_topo_required)) {
@@ -2344,7 +2344,7 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 		goto out;
 	}
 	// Decided to move forward, Update the header, and if needed, update the data (if is_with_raft_log and we passed the prev validation)
-	raft_leader_regenerate_the_two_to_commit_persist_and_wire_bufs_as_needed();
+	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	//
 	// Decide what to send according to the peer's needs. HEADER_ONLY/TOPO_ONLY/FULL
 	tlv_bufs_diff = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(dst_member->committed_persist_and_wire_buf_hdr), my_raft_global.leader_to_commit_persist_and_wire_buf_full);
@@ -2659,7 +2659,7 @@ static void raft_convert_to_candidate(char flags)
 	//
 	nvmeibt_topology_reset_due_to_convert_to_leader();
 	nvmeibt_topology_mark_update_csv_of_config_and_topo_required();
-	raft_leader_regenerate_the_two_to_commit_persist_and_wire_bufs_as_needed();
+	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	//
 	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		if (!(member->is_me)) {
