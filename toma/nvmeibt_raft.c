@@ -535,6 +535,7 @@ static int fill_persist_and_wire_tlv_and_data(struct nvmeibt_wire_type_len_value
 }
 
 struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
+	const bool is_incremental,
 	unsigned long long current_raft_term,
 	unsigned long long last_rx_append_entries_raft_term,
 	int64_t kafka_mgmt_zone_number,
@@ -552,18 +553,21 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 	int										sum_data_len;
 	char									*data_ptr;
 	struct nvmeibt_persist_and_wire_buf		*dst;
+	int8_t									tlv_type_offset;
 
 	NFIN;
+	tlv_type_offset = (is_incremental ? TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL - TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE : 0);
+
 	sum_data_len = mgmt_config_data_len + topo_data_len + topo_config_data_len + members_data_len;
 	dst = alloc_persist_and_wire_buf(sizeof(*dst) + sum_data_len);
 	//
 	data_ptr = (char *)dst + sizeof(*dst);
-	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_ctx), data_ptr, topo_idx, topo_seq_no, topo_data, topo_data_len, TLV_TYPE_TOPO_COMPLETE);
-	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_config_ctx), data_ptr, topo_config_idx, topo_config_seq_no, topo_config_data, topo_config_data_len, TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_ctx), data_ptr, topo_idx, topo_seq_no, topo_data, topo_data_len, TLV_TYPE_TOPO_COMPLETE+tlv_type_offset);
+	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_config_ctx), data_ptr, topo_config_idx, topo_config_seq_no, topo_config_data, topo_config_data_len, TLV_TYPE_TOPO_CONFIG_COMPLETE+tlv_type_offset);
 	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->kafka_mgmt_config_ctx), data_ptr, mgmt_config_offset, mgmt_config_seq_no, mgmt_config_data,
-												   mgmt_config_data_len, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+												   mgmt_config_data_len, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE+tlv_type_offset);
 	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->raft_members_ctx), data_ptr, members_offset, members_seq_no, members_data,
-												   members_data_len, TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+												   members_data_len, TLV_TYPE_RAFT_MEMBERS_COMPLETE+tlv_type_offset);
 	// Set the raft_ctx (usually in the leader), and it travels all the way to the follower's persistence as is
 	persist_and_wire_buf_set_current_raft_TERM(dst, current_raft_term, 0);
 	persist_and_wire_buf_set_voted_for_and_last_rx_append_entries_raft_TERM(dst, voted_for_raft_member_uuid, last_rx_append_entries_raft_term, 0);
@@ -716,6 +720,7 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 	}
 	NNVMEIBT_TOMA_FREE(ikdm49s, my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete);
 	my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete = nvmeibt_raft_generate_persist_and_wire_buf(
+		false,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
@@ -730,6 +735,7 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
 	NNVMEIBT_TOMA_FREE(6vbwi4k, my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete);
 	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete = nvmeibt_raft_generate_persist_and_wire_buf(
+		false,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),

@@ -1244,6 +1244,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	// Following the Leader's concept that the buffer is an assembly of several buffers that are serialized beforehand
 	NNVMEIBT_TOMA_FREE(ebwik25, nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf);
 	nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf = nvmeibt_raft_generate_persist_and_wire_buf(
+		false,
 		nvmeibt_raft_get_current_term(),	// Not really important
 		RAFT_COMMIT_LIFECYCLE_VAL(current_raft_TERM, follower_committed),	// Not really important
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),    // Not really important
@@ -2310,6 +2311,7 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 		// Following the Leader's concept that the buffer is an assembly of several buffers that are serialized beforehand
 		NNVMEIBT_TOMA_FREE(6dfbsoe, nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf);
 		nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf = nvmeibt_raft_generate_persist_and_wire_buf(
+			false,
 			nvmeibt_raft_get_current_term(),
 			RAFT_COMMIT_LIFECYCLE_VAL(current_raft_TERM, follower_committed),
 			nvmeibt_kafka_get_kafka_mgmt_zone_number(),

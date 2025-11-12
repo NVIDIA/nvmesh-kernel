@@ -280,6 +280,7 @@ void nvmeibt_raft_set_discard_append_entries(int discard_num, bool is_permanent)
 int nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(const struct nvmeibt_persist_and_wire_buf *src, int8_t tlv_type, char **out_data);
 int nvmeibt_raft_leader_copy_committed_persist_and_wire_buf_sections_into_separate_to_commit_bufs(void);
 struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
+	const bool is_incremental,
 	unsigned long long current_raft_term,
 	unsigned long long last_rx_append_entries_raft_term,
 	int64_t kafka_mgmt_zone_number,
