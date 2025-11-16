@@ -143,7 +143,6 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_l
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
 struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_reg_lock_id(
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
-struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_uuid( struct nvmeibt_seg_active *seg_active, const union nvmeib_uuid *uuid);
 void nvmeibt_register_totally_remove_registrant(struct nvmeibt_registrant_ctx *input_registrant_ctx);
 void nvmeibt_register_make_all_seg_active_registrants_sync_praid_topology(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_clients_sync_check_and_act_upon(struct nvmeibt_seg_active *seg_active);

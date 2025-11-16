@@ -1673,32 +1673,6 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_reg_
 	return reg_ctx_rv;
 }
 
-struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_uuid( struct nvmeibt_seg_active *seg_active, const union nvmeib_uuid *uuid)
-{
-	struct nvmeibt_registrant_ctx	*reg_ctx;
-	struct nvmeibt_registrant_ctx	*reg_ctx_rv = NULL;
-	int								is_found = 0;
-
-	N_Tf(juwaq15, "Looking for active registrant seg=@UUID_8 @UUID_LE",
-		 nvmeibt_seg_active_UUID_8(seg_active), uuid);
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants) {
-		if (ARE_UUID_EQ(&reg_ctx->client->client_provided_uuid, uuid)) {
-			N_Tf(dlor56n, "Found active registrant");
-			if (is_found) {
-				N_Ef(kdgnu87, "Found twice 1:@STR,@HANDLE 2:@STR,@HANDLE",
-					reg_ctx_rv->registrant_node_id.str, reg_ctx_rv->client_messaging_handle,
-					reg_ctx->registrant_node_id.str, reg_ctx->client_messaging_handle);
-			}
-			else {
-				is_found = 1;
-				reg_ctx_rv = reg_ctx;
-			}
-		}
-	}
-
-	return reg_ctx_rv;
-}
-
 static void add_longing_registrant_on_seg(struct nvmeibt_registrant_ctx *input_reg_ctx)
 {
 	struct nvmeibt_seg_active		*seg_active = input_reg_ctx->seg_active;
