@@ -588,7 +588,6 @@ static void alloc_reg_ctx(struct nvmeibt_registrant_ctx **reg_ctx, struct nvmeib
 	XDLIST_INIT_LINK(&((*reg_ctx)->active_link_by_cid), NULL);
 	XDLIST_INIT_LINK(&((*reg_ctx)->stale_link), NULL);
 	XDLIST_INIT_LINK(&((*reg_ctx)->longing_link), NULL);
-	XDLIST_HEAD_INIT(&((*reg_ctx)->locks_awaited_by_registrant));
 	(*reg_ctx)->n_stale_locks = 0;
 	nvmeibt_client_reg_ctx_ref_added((*reg_ctx)->client, *reg_ctx);
 }
@@ -1338,8 +1337,6 @@ void add_awaiting_lockid_recipient(
 	awaiting_registrant_wrapper->stale_lockid_provided_by_registrant = stale_lock_id;
 	XDLIST_INIT_LINK(&(awaiting_registrant_wrapper->awaiting_lockid_link), NULL);
 	XDLIST_INIT_LINK(&(awaiting_registrant_wrapper->registrant_link), NULL);
-	// Add the wrapper to the list of locks the given registrant awaits disconnection.
-	XDLIST_ADD_TAIL(&(registrant_ctx->locks_awaited_by_registrant), awaiting_registrant_wrapper);
 	// Add the wrapper to the list of those awaiting some lock disconnection.
 	XDLIST_ADD_TAIL(&(awaited_lockid->awaiting_registrants), awaiting_registrant_wrapper);
 

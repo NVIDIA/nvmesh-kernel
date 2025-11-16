@@ -57,7 +57,6 @@ struct nvmeibt_registrant_ctx {
 	struct xdlist						active_link_by_cid;
 	struct xdlist						stale_link;
 	struct xdlist						longing_link;
-	XDLIST_DECLARE(, struct nvmeibt_registrant_awaiting_lockid, registrant_link) locks_awaited_by_registrant;
 	enum REG_TIMEOUT_REASON				timeout_reason;
 	int									n_stale_locks;	// The stale_locks are held disk_segment->stale_locks_hash
 	u64									reservation_mode_version;
