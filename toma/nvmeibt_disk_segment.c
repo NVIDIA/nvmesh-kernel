@@ -185,7 +185,7 @@ enum nvmeibt_add_rv nvmeibt_disk_segment_add(struct mm_segment_conf *conf,
 							   new_disk_segment,
 							   config_tag,
 							   NVMEIBT_MAX_N_DISK_SEGMENTS,
-							   disk_segment, NULL, seg);
+							   disk_segment, seg);
 
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;

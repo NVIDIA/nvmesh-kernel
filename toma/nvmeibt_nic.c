@@ -79,7 +79,7 @@ enum nvmeibt_add_rv nvmeibt_nic_add(struct mm_nic_conf *conf, struct mm_node_con
 					&nvmeibt_global_get_global()->nics_hash,
 					new_nic,
 					config_tag,
-					NVMEIBT_MAX_N_NICS, nic, NULL, nic);
+					NVMEIBT_MAX_N_NICS, nic, nic);
 
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;

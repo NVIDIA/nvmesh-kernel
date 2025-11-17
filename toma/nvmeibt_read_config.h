@@ -89,7 +89,7 @@ static inline void _hash_copy(void* dst, void* src, int size) {
     2. get_hash_obj_ptr_addr - if not NULL, returns address of object in hash
     3. get_prev_config_buf - if not NULL, copies prev config value to it */
 #define NNVMEIBT_HASH_ADD_OBJ(name, __hash, __newobj, __tag, MAX_N,						\
-				get_hash_obj_ptr_addr, get_prev_config_buf, __obj_name)					\
+				get_hash_obj_ptr_addr, __obj_name)										\
 ({																						\
 	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
 	const int _config_size = sizeof((__newobj)->from_config);							\
@@ -107,7 +107,6 @@ static inline void _hash_copy(void* dst, void* src, int size) {
 									_uuid_);											\
 			_rv_ = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;								\
 		} else {																		\
-			_hash_copy(get_prev_config_buf, &_obj2_->from_config, _config_size);		\
 			_obj2_->from_config = (__newobj)->from_config;								\
 			N_Tf(name ## _2, "hash: object modified " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);	\
 			_rv_ = NVMEIBT_ADD_MODIFIED;												\
@@ -182,7 +181,7 @@ do {																					\
 })
 
 #define NNVMEIBT_HASH_ADD_OBJ_ASCII(name, __hash, __newobj, __tag, MAX_N,				\
-				get_hash_obj_ptr_addr, get_prev_config_buf, __obj_name)					\
+				get_hash_obj_ptr_addr, __obj_name)										\
 ({																						\
 	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
 	const int _config_size = sizeof((__newobj)->from_config);							\
@@ -199,7 +198,6 @@ do {																					\
 			N_Ef(name ## _error_1, "hash: Same ID diff objects " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);	\
 			_rv_ = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;								\
 		} else {																		\
-			_hash_copy(get_prev_config_buf, &_obj2_->from_config, _config_size);		\
 			_obj2_->from_config = (__newobj)->from_config;								\
 			N_Tf(name ## _2, "hash: object modified " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);			\
 			_rv_ = NVMEIBT_ADD_MODIFIED;												\
@@ -245,8 +243,8 @@ do {																					\
 	1. _rv_ - action the hash table performed
     2. get_hash_obj_ptr_addr - if not NULL, returns address of object in hash
     3. get_prev_config_buf - if not NULL, copies prev config value to it */
-#define NNVMEIBT_HASH_ADD_OBJ_new(name, __hash, __newobj, __tag, MAX_N,						\
-				get_hash_obj_ptr_addr, get_prev_config_buf, __obj_name)					\
+#define NNVMEIBT_HASH_ADD_OBJ_new(name, __hash, __newobj, __tag, MAX_N,					\
+				get_hash_obj_ptr_addr, __obj_name)										\
 ({																						\
 	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
 	const int						 _config_size = sizeof((__newobj)->from_config);	\
@@ -264,7 +262,6 @@ do {																					\
 									_uuid_);											\
 			_rv_ = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;								\
 		} else {																		\
-			_hash_copy(get_prev_config_buf, &_obj2_->from_config, _config_size);		\
 			_obj2_->from_config = (__newobj)->from_config;								\
 			N_Tf(name ## _2, "hash: object modified " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);	\
 			_rv_ = NVMEIBT_ADD_MODIFIED;												\

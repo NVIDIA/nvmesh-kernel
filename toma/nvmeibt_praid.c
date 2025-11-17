@@ -2413,7 +2413,7 @@ enum nvmeibt_add_rv nvmeibt_praid_add(struct mm_praid_conf *conf,
 							   config_tag,
 							   NVMEIBT_MAX_N_PRAIDS,
 							   praid,
-							   NULL, praid);
+							   praid);
 
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;

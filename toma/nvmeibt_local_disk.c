@@ -553,7 +553,7 @@ static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk
 		N_Tf(cjfur81, "disk=@STR is formatting, move to side list", nvmeibt_local_disk_display(local_disk));
 		NNVMEIBT_HASH_ADD_OBJ_ASCII(fkko035, &cur_topo->formatting_local_disks_hash,
 				local_disk, 0,
-				NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, NULL, local_disk);
+				NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, local_disk);
 	}
 	else {
 		NNVMEIBT_TOMA_FREE(alfo934, local_disk);
@@ -817,7 +817,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 					&cur_topo->local_disks_hash,
 					new_local_disk,
 					config_tag,
-					NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, NULL, local_disk);
+					NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, local_disk);
 
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;
@@ -1236,7 +1236,7 @@ static void fill_disk_from_stock_driver_finalize(struct nvmeibt_wq_entry *wq_ent
 					&nvmeibt_global_get_global()->stock_local_disks_hash,
 					entry->new_local_disk,
 					0, /* Don't care. The config_tag is useless for local_disks that are updated per event */
-					NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, NULL, local_disk);
+					NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, local_disk);
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL) {
 		N_Wf(q4nbs8z, "Failed adding stock_local_disk=@STR", nvmeibt_local_disk_display(entry->new_local_disk));
 		entry->rv = -1;

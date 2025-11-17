@@ -63,7 +63,7 @@ enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt
 	}
 
 	rv = NNVMEIBT_HASH_ADD_OBJ(tcgcby2, &nvmeibt_global_get_global()->chunks_hash, new_chunk,
-					config_tag, NVMEIBT_MAX_N_CHUNKS, chunk, NULL, chunk);
+					config_tag, NVMEIBT_MAX_N_CHUNKS, chunk, chunk);
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;
 

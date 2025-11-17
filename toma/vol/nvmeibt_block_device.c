@@ -60,7 +60,7 @@ enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config
 	enum nvmeibt_add_rv					rv = NVMEIBT_ADD_UNINITIALIZED;
 	struct nvmeibt_block_device			*new_block_device = NULL;	// Read into it, maybe use it.
 	struct nvmeibt_block_device			*block_device;
-	struct nvmeibt_block_device_config	*f = NULL, prev_f;
+	struct nvmeibt_block_device_config	*f = NULL;
 
 	NFIN;
 	//
@@ -109,7 +109,6 @@ enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config
 							   config_tag,
 							   NVMEIBT_MAX_N_BLOCK_DEVICES,
 							   block_device,
-							   &prev_f,
 							   block_device);
 	if (rv == NVMEIBT_ADD_NEW) {
 		block_device->urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&vol->uuid);

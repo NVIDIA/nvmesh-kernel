@@ -75,7 +75,7 @@ enum nvmeibt_add_rv nvmeibt_node_add(struct mm_node_conf *conf, int config_tag)
 					&nvmeibt_global_get_global()->nodes_hash,
 					new_node,
 					config_tag,
-					NVMEIBT_MAX_N_NODES, node, NULL, node);
+					NVMEIBT_MAX_N_NODES, node, node);
 
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;

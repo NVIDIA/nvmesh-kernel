@@ -59,7 +59,7 @@ enum nvmeibt_add_rv nvmeibt_local_nic_add(char *config_str, int config_tag)
 					&nvmeibt_global_get_global()->local_nics_hash,
 					new_local_nic,
 					config_tag,
-					NVMEIBT_MAX_N_NICS_PER_NODE, local_nic, NULL, local_nic);
+					NVMEIBT_MAX_N_NICS_PER_NODE, local_nic, local_nic);
 
 out:
 	if (rv != NVMEIBT_ADD_NEW) {

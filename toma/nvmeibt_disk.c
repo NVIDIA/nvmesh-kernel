@@ -132,7 +132,7 @@ enum nvmeibt_add_rv nvmeibt_disk_add(struct mm_disk_conf *conf, int config_tag)
 					&nvmeibt_global_get_global()->disks_hash,
 					new_disk,
 					config_tag,
-					NVMEIBT_MAX_N_DISKS, disk, NULL, disk);
+					NVMEIBT_MAX_N_DISKS, disk, disk);
 
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;
