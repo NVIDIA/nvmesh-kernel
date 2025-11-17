@@ -20492,5 +20492,31 @@
         "type": "s32",
         "fmt": "%d",
         "enum": true
+    },
+    "@IOSTATS_NAME" : {
+	    "size": "string",
+	    "type": "string",
+	    "fmt": "%s" 
+    },
+    "@IOSTATS_VERB": {
+	    "size": 32,
+	    "type": "s32",
+	    "fmt": "%d",
+	    "fmt_func": "fmt_iostats_verb"  
+    },
+    "@IOSTATS_IOPS_COUNT": {
+	    "size": 64,
+	    "type": "u64",
+	    "fmt": "%llu"
+    },
+    "@IOSTATS_IOPS_SIZE": {
+	    "size": 64,
+	    "type": "u64",
+	    "fmt": "%llu"
+    },
+    "@IOSTATS_IOPS_LATENCY": {
+	    "size": 64,
+	    "type": "u64",
+	    "fmt": "%llu"
     }
 }

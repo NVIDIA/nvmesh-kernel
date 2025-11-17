@@ -258,6 +258,20 @@ void nvmeib_io_stats_free(struct nvmeib_io_stats *ds)
 {
 	NFIN;
 	if (ds != NULL) {
+		if (ds->percpu) {
+			struct nvmeib_io_counters c = {0};
+			int i;
+			for (i = 0; i < N_IO_STAT_VERBS; i++) {
+				if (!nvmeib_io_stats_counts_verb(ds, i))
+					continue;
+				memset(&c, 0, sizeof(c));
+				nvmeib_io_stats_readc(ds, (const enum nvmeib_io_stat_verbs)i, 0, &c);
+				_NI(trace_nvmeib_io_stats_free, "STATS: @IOSTATS_NAME @IOSTATS_VERB - total_iops: "
+					"@IOSTATS_IOPS_COUNT total_size: @IOSTATS_IOPS_SIZE total_latency: @IOSTATS_IOPS_LATENCY",
+					ds->name, i, c.total_ops, c.total_size, c.total_latency);
+			}
+		}
+
 		nvmeib_public_free_percpu(ds->percpu_traced);
 		nvmeib_public_free_percpu(ds->percpu);
 		kfree(ds);

@@ -6,6 +6,7 @@
 #include "nvmeibc_trend_types.h"
 #include "nvmeibs_trend_types.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
+#include "nvmeib_io_stats.h"
 
 #include <arpa/inet.h>
 
@@ -135,6 +136,11 @@ int fmt_expect_last_wqe(char *buf, int len, long arg, int datalen) {
 int fmt_find_sock_cep_state(char *buf, int len, long arg, int datalen) {
 	(void)datalen;
 	return scnprintf(buf, len, "%s(%d)", find_path_cep_state_to_str((int)arg), (int)arg);
+}
+
+int fmt_iostats_verb(char *buf, int len, long arg, int datalen) {
+	(void)datalen;
+	return scnprintf(buf, len, "%s(%d)", verb_to_string((int)arg, false), (int)arg);
 }
 
 /*******************************************************************************
