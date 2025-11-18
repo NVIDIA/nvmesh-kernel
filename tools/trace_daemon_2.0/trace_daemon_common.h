@@ -27,6 +27,17 @@ typedef struct trace_daemon_cfg {
 	char cgroup[MAX_CGROUP_NAME];
 } trace_daemon_cfg_t;
 
+
+//Pay attention - those are compiled time defaults, they don't take into account the number of CPU's.
+//Thus if the system has more then 63 CPU we have a problem - no history.
+//The correct solution would be merging:
+//	* compile time defaults
+//	* run time defaults
+//	* user settings
+//As always, we have limited time and resources, so the trace_channel calculates the final settings on start
+//Also it looks like max_logs definition as "total number of log files" is problematic. 
+//I think we should have "max_logs_per_channel". Unfortunatelly, we cannot change this easily - backward compaibility.
+
 #define INIT_TRACE_CFG                                                                                   \
 	(trace_daemon_cfg_t)                                                                             \
 	{                                                                                                \
