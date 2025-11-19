@@ -110,9 +110,9 @@ struct nvmeibt_topology {
     struct nvmeibt_Buf			buf_of_follower_wire_topo;
 	struct nvmeibt_node			*my_node;
 	struct HW_mgmt_conf 		*HW_mgmt_conf;
-	local_disks_hash_t																									local_disks_hash;
-	local_disks_hash_t																									stock_local_disks_hash;
-	local_disks_hash_t																									formatting_local_disks_hash;
+	struct nvmeib_hash_table	*nvmesh_local_disks_hash_by_ldisk_id_str;
+	struct nvmeib_hash_table	*stock_local_disks_hash_by_ldisk_id_str;
+	struct nvmeib_hash_table	*formatting_local_disks_hash_by_ldisk_id_str;
 	XHASHTABLE_DECLARE(, struct nvmeibt_local_nic, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_NICS_PER_NODE))	local_nics_hash;
 	struct nvmeibt_mm					*mm;
 	XDLIST_DECLARE(, struct nvmeibt_registrant_ctx, longing_link) registrants_on_invalid_seg;

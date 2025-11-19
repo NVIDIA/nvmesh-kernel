@@ -882,7 +882,7 @@ static void udev_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 	// We need to raise the stock_local_disk version, since we know that all those who were executing on
 	// the old active version are done. We raise the active version now so that all new executions
 	// start with the next active version.
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 	if (local_disk) {
 		// If the disk is to be added by this hardware event, then the versioning is taken care of by local_disk_add.
 		// This part only takes care of some hardware event which happens on an existing disk.
@@ -1439,7 +1439,7 @@ int stock_local_disk_specific_add_work_with_sync(const struct nvmeibt_ascii_uuid
 	NFIN;
 	N_Tf(udmdhwr, "Adding work for stock_disk=@STR", ld_display);
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 		N_Wf(vgshjk3, "Unable to add work for specific stock_disk=@STR because the disk is not found neither from config nor from stock", ld_display);
 		rv = -1;
@@ -1469,10 +1469,10 @@ int local_disk_specific_add_work_with_sync(const struct nvmeibt_ascii_uuid *ldis
 	NFIN;
 	N_Tf(whcia9g, "Adding work for disk=@STR", ld_display);
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (!local_disk) {
 		N_Tf(d4nk1sp, "couldn't find local_disk=@STR, trying in stock_local_disks", ld_display);
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 		if (!local_disk) {
 			N_Wf(vdxgaj2, "Unable to add work for specific disk=@STR because the disk is not found neither from config nor from stock", ld_display);
 			rv = -1;
@@ -1583,11 +1583,11 @@ void wakeup_format_event(const struct nvmeibt_ascii_uuid *ldisk_id,
 	nvmeibt_urn_uuid_to_union_uuid(&format_mgmt_DB_uuid, mgmt_DB_urn_uuid);
 
 	nvmeibt_global_validate_and_upd_mgmt_DB_uuid(&format_mgmt_DB_uuid);
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (!local_disk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 		if (!local_disk) {
-			local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, &(nvmeibt_global_get_global()->formatting_local_disks_hash));
+			local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->formatting_local_disks_hash_by_ldisk_id_str);
 			if (local_disk) {
 				N_Tf(rcxj29s, "Already formatting disk=@STR. Ignoring", nvmeibt_local_disk_display(local_disk));
 			} else {

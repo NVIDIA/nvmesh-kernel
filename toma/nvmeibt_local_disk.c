@@ -532,7 +532,7 @@ static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk
 
 	// remove the workqueue from the hash, as we are guaranteed that no one will be using it
 
-	NNVMEIBT_HASH_DEL_OBJ_ASCII(hu86aw3, &cur_topo->local_disks_hash, local_disk, local_disk);
+	NNVMEIBT_HASH_DEL_OBJ_ASCII_new(hu86aw3, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str, local_disk, local_disk);
 	nvmeibt_local_disk_munmap_mem_tbls(local_disk);
 	nvmeibt_topology_active_mark_reserialization_required();
 	disk = NNVMEIBT_LOCAL_DISK_GET_DISK(ji8u723, local_disk);
@@ -551,7 +551,7 @@ static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk
 		struct nvmeibt_local_disk  *local_disk_tmp = NULL;
 
 		N_Tf(cjfur81, "disk=@STR is formatting, move to side list", nvmeibt_local_disk_display(local_disk));
-		NNVMEIBT_HASH_ADD_OBJ_ASCII(fkko035, &cur_topo->formatting_local_disks_hash,
+		NNVMEIBT_HASH_ADD_OBJ_ASCII_new(fkko035, cur_topo->formatting_local_disks_hash_by_ldisk_id_str,
 				local_disk, 0,
 				NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, local_disk);
 	}
@@ -569,7 +569,7 @@ void nvmeibt_local_disk_remove_by_ldisk_id_str(const char *ldisk_id_str)
 	struct nvmeibt_disk				*disk;
 
 	NFIN;
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id((const struct nvmeibt_ascii_uuid *)ldisk_id_str, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, ldisk_id_str);
 	if (!local_disk) {
 		N_Tf(uu55fr4, "disk_id=@STR is not in local_disks, probably already removed", ldisk_id_str);
 		goto out;
@@ -593,7 +593,7 @@ int nvmeibt_local_disk_free_all_resources(void)
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (nvmeibt_local_disk_munmap_mem_tbls(local_disk) < 0) {
 			N_Tf(vzyhq03, "failed to munmap mem tbls for disk=@STR (@AUTO_ERRNO)", nvmeibt_local_disk_display(local_disk));
 			rv = -1;
@@ -610,25 +610,15 @@ void nvmeibt_local_disk_free_stock_fds(void)
 	struct nvmeibt_local_disk *local_disk;
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str) {
 		NNVMEIBT_CLOSE(ol98nt5, local_disk->dev_file_fd);
 	}
 	NFOUT;
 }
 
-struct nvmeibt_local_disk *nvmeibt_local_disk_get_local_disk_by_ldisk_id(const struct nvmeibt_ascii_uuid *ldisk_id, local_disks_hash_t *local_disks_hash)
+struct nvmeibt_local_disk *nvmeibt_local_disk_get_local_disk_by_ldisk_id(const struct nvmeibt_ascii_uuid *ldisk_id, struct nvmeib_hash_table *local_disks_hash)
 {
-	struct nvmeibt_local_disk	*local_disk;
-	uint64_t 					calculated_hash_val = xhash_str_to_32_bits(ldisk_id->str);
-
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(local_disk, local_disks_hash, calculated_hash_val) {
-		if (is_ascii_uuid_eq(ldisk_id, nvmeibt_local_disk_UUID(local_disk)))
-			goto out;
-	}
-	// N_Tf(56dsbdf, "ldisk_id=@STR not found", ldisk_id->str);
-	local_disk = NULL;
-out:
-	return local_disk;
+	return nvmeib_hash_search_ascii_str(local_disks_hash, ldisk_id->str);
 }
 
 static void stock_local_disk_terminate(struct nvmeibt_local_disk *stock_local_disk)
@@ -645,7 +635,7 @@ static void stock_local_disk_terminate(struct nvmeibt_local_disk *stock_local_di
 		controller_del_local_disk(stock_local_disk->from_config.native_serial.str, stock_local_disk, 0);
 	}
 	nvmeibt_toma_stop_stock_local_disk_wq(nvmeibt_local_disk_UUID(stock_local_disk));
-	NNVMEIBT_HASH_DEL_OBJ_ASCII(vdgh2q7, &nvmeibt_global_get_global()->stock_local_disks_hash, stock_local_disk, local_disk);
+	NNVMEIBT_HASH_DEL_OBJ_ASCII_new(vdgh2q7, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str, stock_local_disk, local_disk);
 	NNVMEIBT_CLOSE(t3_stock_local_disk_terminate, stock_local_disk->dev_file_fd);
 	NNVMEIBT_TOMA_FREE(t4_stock_local_disk_terminate, stock_local_disk);
 out:
@@ -733,7 +723,6 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	NFIN;
 
 	new_local_disk = NNVMEIBT_TOMA_CALLOC(trace_local_disk_nvmeibt_local_disk_add_from_config, 1, sizeof(*new_local_disk)); // Read into it, maybe use it.
-	XDLIST_INIT_LINK(&new_local_disk->topo_link, NULL);
 	XDLIST_INIT_LINK(&new_local_disk->controller_local_disks_list_link, NULL);
 	new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(4vghs8d, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16);
 
@@ -797,7 +786,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	nvmeibt_strlcpy(f->smart_info.diskID, f->ldisk_id.str, sizeof(f->smart_info.diskID));
 	nvmeibt_strlcpy(f->smart_info.format_options, "[]", sizeof(f->smart_info.format_options));
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 
 	if (is_frozen || is_formatting) {
 		if (local_disk) {
@@ -813,8 +802,8 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	 * without further checks because it was just freshly allocated and surely
 	 * is not in @cur_topo->stock_local_disks_hash.
 	 */
-	rv = NNVMEIBT_HASH_ADD_OBJ_ASCII(dki98c6,
-					&cur_topo->local_disks_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_ASCII_new(dki98c6,
+					cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str,
 					new_local_disk,
 					config_tag,
 					NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, local_disk);
@@ -823,15 +812,15 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 		goto out;
 
 	// Clear formatting disk entry, if one existed
-	local_disk_tmp = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), &(cur_topo->formatting_local_disks_hash));
+	local_disk_tmp = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), cur_topo->formatting_local_disks_hash_by_ldisk_id_str);
 	if (local_disk_tmp) {
 		N_Tf(dgy777w, "disk=@STR finished formatting", nvmeibt_local_disk_display(new_local_disk));
-		NNVMEIBT_HASH_DEL_OBJ_ASCII(aki9e84, &cur_topo->formatting_local_disks_hash, local_disk_tmp, local_disk);
+		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(aki9e84, cur_topo->formatting_local_disks_hash_by_ldisk_id_str, local_disk_tmp, local_disk);
 		new_local_disk->reappearing_counter = local_disk_tmp->reappearing_counter;	// Got it from MGMT, and we need it in the next reportTarget
 		NNVMEIBT_TOMA_FREE(dko089e, local_disk_tmp);
 	}
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 
 	if (nvmeibt_topology_is_disk_explicitly_excluded(&new_local_disk->from_config.native_serial, new_local_disk->from_config.vendor, new_local_disk->from_config.smart_info.Model, new_local_disk->from_config.nsid)) {
 		local_disk->is_excluded = true;
@@ -930,7 +919,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 		// At the point of removal the device might be already deleted from the list since we might have gotten a udev event about
 		// it already, before we got the add event from nvmeibs.
 		N_Tf(gjit8u6, "Trying to remove disk=@STR from stock_local_disks inventory", nvmeibt_local_disk_display(new_local_disk));
-		stock_local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), &(cur_topo->stock_local_disks_hash));
+		stock_local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), cur_topo->stock_local_disks_hash_by_ldisk_id_str);
 		if (stock_local_disk) {
 			N_Tf(aji8456, "Erasing disk=@STR from stock_local_disks, as it was added to nvmeibs, format_request_counter=@FORMAT_REQUEST_COUNTER",
 				nvmeibt_local_disk_display(stock_local_disk), local_disk->active_format_request_counter);
@@ -1232,8 +1221,8 @@ static void fill_disk_from_stock_driver_finalize(struct nvmeibt_wq_entry *wq_ent
 	N_Tf(aski93e, "Adding stock_local_disk=@STR",  nvmeibt_local_disk_display(entry->new_local_disk));
 
 
-	rv = NNVMEIBT_HASH_ADD_OBJ_ASCII(fy7223c,
-					&nvmeibt_global_get_global()->stock_local_disks_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_ASCII_new(fy7223c,
+					nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str,
 					entry->new_local_disk,
 					0, /* Don't care. The config_tag is useless for local_disks that are updated per event */
 					NVMEIBT_MAX_N_DISKS_PER_NODE, local_disk_tmp, local_disk);
@@ -1311,7 +1300,6 @@ int nvmeibt_local_disk_add_from_stock_driver(struct nvmeibt_udev_event_info *ude
 	wqe->new_local_disk = NNVMEIBT_TOMA_CALLOC(t_h2_tomaldisk, 1, sizeof(*(wqe->new_local_disk)));   // Read into it, maybe use it.) {
 	sprintf(wqe->new_local_disk->from_config.status, "Not_Initialized");
 	wqe->new_local_disk->from_config.disk_type = udev_event_info->disk_type;
-	XDLIST_INIT_LINK(&wqe->new_local_disk->topo_link, NULL);
 	XDLIST_INIT_LINK(&wqe->new_local_disk->controller_local_disks_list_link, NULL);
 	wqe->new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(5vgd7j0, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16);
 
@@ -1495,7 +1483,7 @@ struct nvmeibt_local_disk *nvmeibt_stock_local_disk_get_by_dev_file_name(const c
 	struct nvmeibt_local_disk *stock_local_disk;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &nvmeibt_global_get_global()->stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(stock_local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str) {
 		if (!strcmp(dev_name, nvmeibt_local_disk_file_name(stock_local_disk))) {
 			goto out;
 		}
@@ -1517,7 +1505,7 @@ struct nvmeibt_local_disk* nvmeibt_local_disk_get_by_dev_file_name(const char *d
 	struct nvmeibt_local_disk *local_disk;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (!strcmp(dev_file_name, nvmeibt_local_disk_file_name(local_disk))) {
 			goto out;
 		}
@@ -1533,13 +1521,12 @@ out:
 void nvmeibt_local_disk_remove_stock_local_disk_by_dev_file_name(const char *dev_file_name)
 {
 	struct nvmeibt_local_disk	*stock_local_disk;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
 	N_Tf(4vhqj8q, "Trying to remove stock_local_disk with dev_file_name=@STR n_stock_local_disks=@N_STOCK_LOCAL_DISKS",
-		dev_file_name, NVMEIBT_HASH_N_OBJS(&cur_topo->stock_local_disks_hash));
+		dev_file_name, nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str));
 
-	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &cur_topo->stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(stock_local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str) {
 		if (!strcmp(dev_file_name, nvmeibt_local_disk_file_name(stock_local_disk))) {
 			if (stock_local_disk->is_being_formatted) {
 				// The stock disk will be removed later on, when the new drive is bound to nvmesh.
@@ -1574,11 +1561,9 @@ int nvmeibt_local_disk_update_serjio_state(const char *ldisk_id_str, const char 
 {
 	int		rv = 0;
 	struct nvmeibt_local_disk	*local_disk;
-	struct nvmeibt_ascii_uuid	ldisk_id;
 
 	NFIN;
-	nvmeibt_strlcpy(ldisk_id.str, ldisk_id_str, sizeof(ldisk_id.str));
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, ldisk_id_str);
 	if (local_disk) {
 		if (serjio_status == NVMEIBS_SERJIO_STATUS_ERROR)
 			N_Wf(o7w8wd7, "disk=@STR serjio_status=SERJIO_ERROR", nvmeibt_local_disk_display(local_disk));
@@ -1593,7 +1578,7 @@ int nvmeibt_local_disk_update_serjio_state(const char *ldisk_id_str, const char 
 		}
 	}
 	else {
-		N_Tf(fhjur83, LOCAL_DISK_LOG_FMT " not found", ldisk_id.str, native_serial_str, nsid);
+		N_Tf(fhjur83, LOCAL_DISK_LOG_FMT " not found", ldisk_id_str, native_serial_str, nsid);
 		rv = -1;
 	}
 	NFOUT;
@@ -1648,18 +1633,13 @@ void nvmeibt_local_disk_print_status(int (*printf_fn)(void *ctx, const char *fmt
 {
 	struct nvmeibt_local_disk	*local_disk;
 	struct nvmeibt_local_disk	*stock_local_disk;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	(*printf_fn)(printf_ctx, "\n- - - - -   LOCAL DISKS   - - - - -\n");
-	if (XHASHTABLE_N_ELEMENTS(&cur_topo->local_disks_hash) > 0) {
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash)
-			print_one_local_disk_status(printf_fn, printf_ctx, local_disk);
-	}
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)
+		print_one_local_disk_status(printf_fn, printf_ctx, local_disk);
 	(*printf_fn)(printf_ctx, "\n- - - - -   STOCK LOCAL DISKS   - - - - -\n");
-	if (XHASHTABLE_N_ELEMENTS(&cur_topo->stock_local_disks_hash) > 0) {
-		XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &cur_topo->stock_local_disks_hash)
-			print_one_local_disk_status(printf_fn, printf_ctx, stock_local_disk);
-	}
+	NVMEIB_HASH_FOREACH(stock_local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str)
+		print_one_local_disk_status(printf_fn, printf_ctx, stock_local_disk);
 	(*printf_fn)(printf_ctx, "\n");
 }
 
@@ -1708,10 +1688,10 @@ void periodic_reread_smart_counters_finalize(struct nvmeibt_wq_entry *wq_entry)
 	entry = container_of(wq_entry, struct periodic_reread_smart_counters_wq_entry, wq_entry);
 
 	if (entry->is_stock_disk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 	}
 	else {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	}
 
 	if (!local_disk) {
@@ -2011,8 +1991,8 @@ static void bind_disk_finalize(struct nvmeibt_wq_entry *wq_entry)
 		goto out;
 	}
 	old_local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(entry->ldisk_id),
-																   (entry->is_stock_to_nvmeibs ? &(nvmeibt_global_get_global()->stock_local_disks_hash) :
-																	&(nvmeibt_global_get_global()->local_disks_hash)));
+																   (entry->is_stock_to_nvmeibs ? nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str :
+																	nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str));
 	controller_del_local_disk(entry->serial, old_local_disk, !(entry->is_stock_to_nvmeibs));
 	if (entry->is_stock_to_nvmeibs == 0) {
 		goto out;	// bind_to_stock. No hurry
@@ -2458,9 +2438,9 @@ int nvmeibt_local_disk_launch_disk_format(struct nvmeibt_local_disk *in_local_di
 
 	NFIN;
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(in_local_disk->pending_format.ldisk_id), &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(in_local_disk->pending_format.ldisk_id), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (!local_disk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(in_local_disk->pending_format.ldisk_id), &(nvmeibt_global_get_global()->stock_local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(in_local_disk->pending_format.ldisk_id), nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 		if (!local_disk) {
 			N_Ef(fhur875, "disk=@STR not found, cannot launch format", nvmeibt_local_disk_display(in_local_disk));
 		}
@@ -2943,11 +2923,11 @@ void nvmeibt_local_disk_mark_is_specific_disk_report_req(const char *ldisk_id_st
 
 	NFIN;
 	nvmeibt_strlcpy(ldisk_id.str, ldisk_id_str, sizeof(ldisk_id.str));
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (!local_disk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 		if (!local_disk) {
-			local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->formatting_local_disks_hash));
+			local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->formatting_local_disks_hash_by_ldisk_id_str);
 			if (!local_disk) {
 				N_Tf(65gvbsd, "ldisk_id=@STR not found... cannot update reappearing_counter", ldisk_id_str);
 				goto out;

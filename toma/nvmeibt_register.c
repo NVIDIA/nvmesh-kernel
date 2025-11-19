@@ -196,7 +196,7 @@ void nvmeibt_register_validate_n_active_vs_n_applied(void)
 	struct nvmeibt_seg_active	*seg_active;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (nvmeibt_seg_active_n_active_registrants(seg_active) < nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(seg_active)) {
 				N_Ef(t_fk_tomareg, "seg=@UUID_8 n_active=@N_ACTIVE n_applied=@N_APPLIED",
@@ -807,7 +807,7 @@ void calc_next_wait_for_registrant_timeout(void)
 	}
 	cur_topo->is_need_calc_next_wait_for_registrant_timeout = 0;
 	// Go over the local disk_segments find the minimal timeout
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			struct nvmeibt_registrant_ctx	*reg_ctx;
 
@@ -913,7 +913,7 @@ BOOL nvmeibt_register_is_any_registered(void)
 	struct nvmeibt_disk			*disk;
 	BOOL	rv = 0;
 
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		disk = NNVMEIBT_LOCAL_DISK_GET_DISK(nvmeibt_register_is_any_registered_trace, local_disk);
 		if (!disk) {
 			continue;
@@ -2325,8 +2325,8 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int cl
 	tmp_reg_ctx.registrant_node = registrant_node;
 	tmp_reg_ctx.is_client_waiting_for_ack = 0;
 	N_Tf(heu44ns, "handle=@HANDLE node=@UUID_LE", tmp_reg_ctx.client_messaging_handle, nvmeibt_node_UUID(registrant_node));
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		n_local_disk = XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash);
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
+		n_local_disk = nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			tmp_reg_ctx.seg_active = seg_active;
 			// Go over all the segments active registrants and notify recovery about those that match by client handle + type.
@@ -2341,7 +2341,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int cl
 			}
 			if (launch_unregistered_registrant_removal(&tmp_reg_ctx, 1, true) == UNREGISTER_RV_FAILED)
 				rv = -1;
-			if (n_local_disk != XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash)) {
+			if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
 				N_Tf(fst6623, "Local disk removed");
 				break;
 			}
@@ -2826,7 +2826,7 @@ void nvmeibt_register_close_all_seg_actives_for_registration(void)
 	struct nvmeibt_seg_active	*seg_active;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		disk = local_disk->its_disk;
 		if (!disk)
 			continue;
@@ -2871,7 +2871,7 @@ void nvmeibt_register_open_all_eligible_seg_actives_for_use(void)
 	if (nvmeibt_raft_is_shutdown_triggered()) {
 		goto out;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		nvmeibt_register_open_disk_eligible_seg_actives_for_use(local_disk);
 	}
 out:
@@ -2922,7 +2922,7 @@ int nvmeibt_register_timeout_occurred(void)
 	NFIN;
 	getnstimeofday_boot(&now);
 	// Go over the local disk_segments, and locate the expired registrants' timeout
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			struct nvmeibt_registrant_ctx	*reg_ctx;
 			XDLIST_FOREACH_SAFE(reg_ctx, &(seg_active->registrants_on_timeout)) {

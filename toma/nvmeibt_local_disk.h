@@ -77,7 +77,6 @@ struct nvmeibt_local_disk {
 	struct nvmeibt_disk_gpt 							main_gpt;
 	struct nvmeibt_disk_gpt 							metadata_gpt;
 	int													config_tag;
-	struct xdlist										topo_link;
 	struct xdlist										controller_local_disks_list_link;
 	struct nvmeibt_local_disk_controller				*controller;
 	BOOL												is_being_deleted;	// Used as optimization to avoid noise in the log, turned early in the removal process to avoid new tasks on the local disk.
@@ -123,8 +122,6 @@ struct nvmeibt_local_disk {
 #define LOCAL_DISK_LOG_obj_ARGS(obj) (obj)->ldisk_id.str, (obj)->native_serial.str, (obj)->nsid
 
 typedef XDLIST_DECLARE(local_disks_list, struct nvmeibt_local_disk, controller_local_disks_list_link) nvmeibt_local_disk_controllers_local_disks_list_t;
-
-typedef XHASHTABLE_DECLARE(, struct nvmeibt_local_disk, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_DISKS_PER_NODE))	local_disks_hash_t;
 
 struct nvme_id_ctrl;
 struct nvme_id_ns;
@@ -241,7 +238,7 @@ BOOL nvmeibt_local_disk_is_bind_to_nvmeibs_needed(const struct nvmeibt_local_dis
 
 BOOL nvmeibt_local_disk_is_serjio_ready(const struct nvmeibt_local_disk *local_disk);
 int nvmeibt_local_disk_update_serjio_state(const char *ldisk_id_str, const char *native_serial_str, int nsid, enum nvmeibs_serjio_status serjio_status);
-struct nvmeibt_local_disk *nvmeibt_local_disk_get_local_disk_by_ldisk_id(const struct nvmeibt_ascii_uuid *ldisk_id, local_disks_hash_t *local_disks_hash);
+struct nvmeibt_local_disk *nvmeibt_local_disk_get_local_disk_by_ldisk_id(const struct nvmeibt_ascii_uuid *ldisk_id, struct nvmeib_hash_table *local_disks_hash_by_ldisk_id_str);
 void nvmeibt_local_disk_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 BOOL nvmeibt_local_disk_is_formatted(const struct nvmeibt_local_disk *local_disk);
 void nvmeibt_local_disk_launch_local_disk_periodic_reread_smart_counters_if_needed(struct nvmeibt_local_disk *local_disk, bool is_stock_disk);

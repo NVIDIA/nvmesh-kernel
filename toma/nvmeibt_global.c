@@ -47,9 +47,9 @@ void nvmeibt_global_init(void)
 	global_ctx.nodes_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw6, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "nodes_hash", 16);
 	global_ctx.chunks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw7, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "chunks_hash", 16);
 	XHASHTABLE_INIT(&(global_ctx.clients_hash));
-	XHASHTABLE_INIT(&(global_ctx.local_disks_hash));
-	XHASHTABLE_INIT(&(global_ctx.stock_local_disks_hash));
-	XHASHTABLE_INIT(&(global_ctx.formatting_local_disks_hash));
+	global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnw9, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_disks_hash", -1);
+	global_ctx.stock_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnwa, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_local_disks_hash", -1);
+	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1);
 	XHASHTABLE_INIT(&(global_ctx.local_nics_hash));
 
 	XDLIST_HEAD_INIT(&(global_ctx.registrants_on_invalid_seg));
@@ -556,13 +556,13 @@ static void write_disks_json(struct nvmeibt_Str *report_target)
 	NFIN;
 
 	N_Tf(fjiut85, "Generating report n_local_disks=@N_LOCAL_DISKS n_stock_local_disks=@N_STOCK_LOCAL_DISKS",
-		NVMEIBT_HASH_N_OBJS(&global_ctx.local_disks_hash),
-		NVMEIBT_HASH_N_OBJS(&global_ctx.stock_local_disks_hash));
+		nvmeib_hash_get_n_elements(global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str),
+		nvmeib_hash_get_n_elements(global_ctx.stock_local_disks_hash_by_ldisk_id_str));
 
 	nvmeibt_Str_sprintf(report_target, "%s", "\"disks\": [");
 
 	pre_array_fill_len = nvmeibt_Str_strlen(report_target);
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &global_ctx.local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 			continue;
 		}
@@ -570,21 +570,21 @@ static void write_disks_json(struct nvmeibt_Str *report_target)
 			N_Tf(sko95ft, "Skipping local disk=@STR in report_target since it is in the process of binding back to stock", nvmeibt_local_disk_display(local_disk));
 			continue;
 		}
-		if (	nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(local_disk), &(global_ctx.stock_local_disks_hash)) != NULL &&
+		if (	nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(local_disk), global_ctx.stock_local_disks_hash_by_ldisk_id_str) != NULL &&
 				!is_supported_not_nvme_disk(local_disk)) {
 			N_Wf(dlo0t65, "Skipping disk=@STR in report_yarget since it is found concurrently under both drivers, this is a transient state", nvmeibt_local_disk_display(local_disk));
 			continue;
 		}
 		write_one_disk_json(local_disk, report_target);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &global_ctx.stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(stock_local_disk, global_ctx.stock_local_disks_hash_by_ldisk_id_str) {
 		if (stock_local_disk->is_auto_takeover) {
 			continue;	// Do not report is_auto_takeover stock local disks before takeover (bind to nvmeibs)
 		}
 		if (nvmeibt_local_disk_is_being_deleted(stock_local_disk)) {
 			continue;
 		}
-		if (nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(stock_local_disk), &(global_ctx.local_disks_hash)) != NULL) {
+		if (nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(stock_local_disk), global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str) != NULL) {
 			N_Wf(dlo0or5, "Skipping stock_disk=@STR in report_target since it is found concurrently under both drivers, this is a transient state", nvmeibt_local_disk_display(stock_local_disk));
 			continue;
 		}
@@ -594,10 +594,9 @@ static void write_disks_json(struct nvmeibt_Str *report_target)
 		}
 		write_one_disk_json(stock_local_disk, report_target);
 	}
-	if (NVMEIBT_HASH_N_OBJS(&global_ctx.formatting_local_disks_hash)>0) {
-		N_Tf(fju8334, "Adding to report @N_LOCAL_DISKS disks which are being formatted",
-				NVMEIBT_HASH_N_OBJS(&global_ctx.formatting_local_disks_hash));
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &global_ctx.formatting_local_disks_hash) {
+	if (nvmeib_hash_get_n_elements(global_ctx.formatting_local_disks_hash_by_ldisk_id_str)>0) {
+		N_Tf(fju8334, "Adding to report @N_LOCAL_DISKS disks which are being formatted", nvmeib_hash_get_n_elements(global_ctx.formatting_local_disks_hash_by_ldisk_id_str));
+		NVMEIB_HASH_FOREACH(local_disk, global_ctx.formatting_local_disks_hash_by_ldisk_id_str) {
 			if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 				continue;
 			}
@@ -666,7 +665,7 @@ static void send_report_target_if_needed(void)
 
 #	define MAX_WAIT_FOR_DISKS_ON_BOOT_SECS 15
 	if (nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_startup_timespec().tv_sec < MAX_WAIT_FOR_DISKS_ON_BOOT_SECS) {
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 			if (!nvmeibt_local_disk_is_done_initial_reading_of_local_disk(local_disk)) {
 				N_Tf(c724j49, "local_disk=@STR not done_reading. Avoiding partial report to mgmt", nvmeibt_local_disk_display(local_disk));
 				goto out;
@@ -709,7 +708,7 @@ static void bind_stock_local_disks_to_nvmeibs_if_needed(void)
 	struct nvmeibt_local_disk *stock_local_disk;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &nvmeibt_global_get_global()->stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(stock_local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str) {
 		if (	(nvmeibt_local_disk_is_bind_to_nvmeibs_needed(stock_local_disk) &&
 				 !nvmeibt_local_disk_is_binding_to_nvmeibs(stock_local_disk) &&
 				 !(stock_local_disk->controller->is_excluded))) {
@@ -724,7 +723,7 @@ static void bind_local_disks_back_to_stock_if_needed(void)
 	struct nvmeibt_local_disk *local_disk;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (	((nvmeibt_local_disk_is_bind_back_to_stock_needed(local_disk) &&
 				  !nvmeibt_local_disk_is_binding_back_to_stock(local_disk)) ||
 				 local_disk->controller->is_excluded)) {
@@ -741,7 +740,7 @@ static void periodic_reread_smart_counters_from_local_disks(void)
 
     NFIN;
 
-	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &nvmeibt_global_get_global()->stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(stock_local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str) {
 		if (stock_local_disk->is_excluded) {
 			N_Df(lekfob2, "stock_local_disk=@STR is excluded, not launching periodic_reread_smart_counters",  nvmeibt_local_disk_display(stock_local_disk));
 			continue;
@@ -749,7 +748,7 @@ static void periodic_reread_smart_counters_from_local_disks(void)
 		nvmeibt_local_disk_launch_local_disk_periodic_reread_smart_counters_if_needed(stock_local_disk, 1);
 	}
 
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (local_disk->is_excluded) {
 			N_Tf(093bhja, "local_disk=@STR is excluded, not launching periodic_reread_smart_counters, disk will move back to stock driver anyway",  nvmeibt_local_disk_display(local_disk));
 			continue;

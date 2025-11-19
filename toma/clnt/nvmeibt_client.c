@@ -69,7 +69,7 @@ static struct nvmeibt_client *nvmeibt_client_add(struct nvmeibs_msg_s2t_subscrib
 		BUILD_BUG_ON(sizeof(client->net.host_name) < sizeof(msg->host_name));				// Will cause cut-off in host name
 		nvmeibt_strlcpy(client->net.host_name, msg->host_name, sizeof(client->net.host_name));
 		nvmeibt_strlcpy(client->ldisk_id.str , msg->disk_name, sizeof(client->ldisk_id.str));
-		client->local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(client->ldisk_id), &(nvmeibt_global_get_global()->local_disks_hash));
+		client->local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(client->ldisk_id), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 		client->client_provided_urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&(client->client_provided_uuid));
 		NVMEIBT_CLIENT_DUMP(nvmeibt_client_add_3, client);
 	}
@@ -275,7 +275,6 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 {
 	struct nvmeibt_client		*client;
 	int							n_local_disk;
-	uint64_t 					calculated_hash_val = xhash_str_to_32_bits(msg->disk_name);
 
 	NFIN;
 	N_Tf(trace_client_handle_subscriber_event, "cid=@CID handle=@HANDLE host_name=@HOSTNAME disk=@STR",
@@ -300,17 +299,16 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 		tmp_reg_ctx.client_messaging_handle = msg->toma_conn_proc_handle;
 		tmp_reg_ctx.registrant_node = NULL;
 		tmp_reg_ctx.is_client_waiting_for_ack = 0;
-		XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash, calculated_hash_val) {
-			if (strcmp(msg->disk_name, nvmeibt_local_disk_UUID_str(local_disk)) != 0)
-				continue;
-			n_local_disk = XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash);
+		local_disk = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, msg->disk_name);
+		if (local_disk) {
+			n_local_disk = nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 				// TODO: need to get the segment UUID from the client somehow, and use a hash-table to go
 				// directly to that segment. For now, we're doing a simple search on all segments.
 				tmp_reg_ctx.seg_active = seg_active;
 				// implicitly unregister the registrant and remove it from longing registrants list
 				nvmeibt_register_totally_remove_registrant(&tmp_reg_ctx);
-				if (n_local_disk != XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash)) {
+				if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
 					N_Tf(fst6645, "Local disk removed");
 					break;
 				}

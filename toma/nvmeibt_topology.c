@@ -305,11 +305,11 @@ static void remove_ptr_from_disk_to_local_disks_that_are_missing(void)
 	// Clean the previous disk->its_local_disk and local_disk->its_disk
 	for (i = my_node->n_disks_config - 1; i >= 0; --i) {
 		disk = my_node->disks_config[i];
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_disk_get_ldisk_id(disk), &(nvmeibt_global_get_global()->local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_disk_get_ldisk_id(disk), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 		if (!local_disk) {
-			local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_disk_get_ldisk_id(disk), &(nvmeibt_global_get_global()->stock_local_disks_hash));
+			local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_disk_get_ldisk_id(disk), nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 			if (!local_disk) {
-				local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_disk_get_ldisk_id(disk), &(nvmeibt_global_get_global()->formatting_local_disks_hash));
+				local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_disk_get_ldisk_id(disk), nvmeibt_global_get_global()->formatting_local_disks_hash_by_ldisk_id_str);
 			}
 		}
 		if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
@@ -473,11 +473,10 @@ static int add_segments_to_local_disks_gpt(void)
 	int								rv = 0;
 	struct nvmeibt_local_disk		*local_disk;
 	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_topology			*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (!nvmeibt_local_disk_is_ready_for_segments(local_disk) || !nvmeibt_local_disk_is_connected_to_disk(local_disk)) {
 			N_Tf(sadrfv6, "disk=@STR. Not is_ready_for_segments yet. Skipping for now", nvmeibt_local_disk_display(local_disk));
 			continue;
@@ -539,7 +538,7 @@ static int trim_stale_gpt_entries_from_local_disks_gpt(void)
 
 	NFIN;
 	if (nvmeibt_global_get_global()->is_valid_topo_config_received) {
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 			if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 				continue;	// Does not exist for us
 			}
@@ -670,24 +669,24 @@ static int connect_local_disks_with_disks(void)
 	remove_ptr_from_disk_to_local_disks_that_are_missing();
 	N_Tf(asr5t46, "n_disks=@N_DISKS n_local_disks=@N_LOCAL_DISKS",
 		nvmeib_hash_get_n_elements(cur_topo->disks_hash_by_uuid),
-		NVMEIBT_HASH_N_OBJS(&cur_topo->local_disks_hash));
+		nvmeib_hash_get_n_elements(cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str));
 
 	// Connect all the local_disks to disks.
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		rv = connect_local_disk_with_disk(local_disk);
 		if (rv < 0) {
 			goto out;
 		}
 	}
 /*
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->stock_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->stock_local_disks_hash_by_ldisk_id_str) {
 		rv = connect_local_disk_with_disk(local_disk);
 		if (rv < 0) {
 			goto out;
 		}
 	}
 */
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->formatting_local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->formatting_local_disks_hash_by_ldisk_id_str) {
 		rv = connect_local_disk_with_disk(local_disk);
 		if (rv < 0) {
 			goto out;
@@ -705,12 +704,11 @@ static void connect_local_disk_segments_with_seg_active(void)
 	struct nvmeibt_disk_segment 	*seg;
 //	struct nvmeibt_praid		 	*praid;
 	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_topology			*cur_topo = nvmeibt_global_get_global();
 	union nvmeib_uuid				seg_uuid;
 	int								seg_idx;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (!nvmeibt_local_disk_is_ready_for_segments(local_disk) || !nvmeibt_local_disk_is_connected_to_disk(local_disk)) {
 			N_Tf(uu77bst, "disk=@STR is not ready for segs yet", nvmeibt_local_disk_display(local_disk));
 			continue;
@@ -862,7 +860,7 @@ static int check_local_segments_validity(void)
 	int		j, k;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		unsigned long long	disk_size_4kblk;
 
 		if (!nvmeibt_local_disk_is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs(local_disk)) {
@@ -1147,7 +1145,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	N_Tf(beud95f, "running_local_serialization_version=@LLU", nvmeibt_global_get_global()->running_local_serialization_version);
 
 	n_seg = 0;
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		disk = NNVMEIBT_LOCAL_DISK_GET_DISK(oiq23mn, local_disk);
 		if (disk) {
 			n_seg += disk->n_segments;
@@ -1164,7 +1162,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	serialized_and_wire_seg_active_ptr = (struct nvmeibt_serialized_seg_active_topo *)(header_ptr + 1);
 	n_seg = 0;
 
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 			continue;
 		}
@@ -1353,7 +1351,7 @@ static void update_applied_topology(void)
 	}
 
 	//update active topo for all local segs
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		disk = NNVMEIBT_LOCAL_DISK_GET_DISK(agt64y3, local_disk);
 		if (!disk) {
 			N_Tf(ju88987, "Missing disk for local_disk=@STR", nvmeibt_local_disk_display(local_disk));
@@ -1741,7 +1739,7 @@ static void disk_change_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 	// We need to raise the local_disk version, since we know that all those who were executing on
 	// the old active version are done. We raise the active version now so that all new executions
 	// start with the next active version.
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (local_disk) {
 		// If the disk is to be added by this hardware event, then the versioning is taken care of by local_disk_add.
 		// This part only takes care of some hardware event which happens on an existing disk.
@@ -1970,7 +1968,7 @@ static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
 	}
 	NTOMA_ASSERT(change_disk_event_assert, (msg->status[0] != 0), "Bad status string from server, disk=@STR", ld_display);
 
-	stock_local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->stock_local_disks_hash));
+	stock_local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 	if (stock_local_disk) {
 		is_formatted_with_md = (stock_local_disk->from_config.smart_info.metadata_size != 0);
 		is_binding_to_nvmeibs = nvmeibt_local_disk_is_binding_to_nvmeibs(stock_local_disk);
@@ -1982,7 +1980,7 @@ static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
 		}
 	}
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (local_disk) {
 		if (op == 'a') {
 			N_Ef(fgyt766, "local_disk exists but op=@OP_CHR", op);
@@ -2339,7 +2337,7 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 	}
 	// Go over all the disks and check if they were persisted, if so update their info in the local_disk object
 	XDLIST_FOREACH_SAFE(ld_info, &persistency_entry->local_disks_info_hash) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(ld_info->from_config.ldisk_id), &(nvmeibt_global_get_global()->local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&(ld_info->from_config.ldisk_id), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 		if (!nvmeibt_local_disk_is_being_deleted(local_disk)) {
 			if (ld_info->is_gpt_written) {
 				local_disk->is_mbr_a_valid_pmbr = 1;
@@ -2371,7 +2369,7 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 	NNVMEIBT_GLOBAL_DEC_N_STORES_IN_PROGRESS(frrt225);
 	nvmeibt_raft_apply_committed_config_and_topo_as_needed();
 	XDLIST_FOREACH_SAFE(ld_info, &persistency_entry->local_disks_info_hash) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ld_info->from_config.ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ld_info->from_config.ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 		if (nvmeibt_local_disk_is_ready_for_segments(local_disk) && nvmeibt_local_disk_is_connected_to_disk(local_disk)) {
 			nvmeibt_register_open_disk_eligible_seg_actives_for_use(local_disk);
 		}
@@ -2594,7 +2592,7 @@ bool nvmeibt_topology_add_persistency_save_wq_item(bool is_req_vote)
 	write_to_persistency_task->wq_entry.free = store_config_and_topo_and_gpt_on_disk_freer;
 	TODO(Separate the store to system-disk from the store to segments metadata (+ disks GPT));
 	// For local disks, update added/removed segs, I.e., their GPTs
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		struct nvmeibt_disk *its_disk = NULL;
 
 		if (!local_disk || !nvmeibt_disk_is_local_in_config(NNVMEIBT_LOCAL_DISK_GET_DISK(nvmeibt_topology_add_persistency_save_wq_item_trace_disk, local_disk))) {

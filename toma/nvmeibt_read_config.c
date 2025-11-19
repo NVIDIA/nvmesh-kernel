@@ -1475,7 +1475,7 @@ static void local_disk_zero_iter_finalize(struct nvmeibt_wq_entry *wq_entry)
 	ld_info = &(entry->ld_info);
 	last_pba_zeroed = ld_info->from_config.disk_metadata.last_pba_zeroed;
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk.ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->ldisk.ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 
 	/* if wq_entry was canceled, then set wq_entry->rv = -1 to be treated like error */
 	if (wq_entry->is_canceled) {
@@ -1945,7 +1945,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 	N_Tf(ju8ur54, "Trying to finalize restore of disk structures for disk=@STR phys_format_request_counter=@FORMAT_REQUEST_COUNTER",
 		 nvmeibt_local_disk_config_display(&(entry->from_config)), entry->format_data.format_request_counter);
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->from_config.ldisk_id, &(nvmeibt_global_get_global()->local_disks_hash));
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&entry->from_config.ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 		N_Wf(sr538v5, "disk=@STR it is not found, probably removed. Cannot complete finalization of disk_structures restore", nvmeibt_local_disk_config_display(&(entry->from_config)));
 		goto out;
@@ -2223,7 +2223,7 @@ int nvmeibt_read_auto_takeover_target_drives(void)
 
 	NFIN;
 	rv = read_target_drives_spec_file(&(nvmeibt_global_get_global()->auto_takeover_drives_spec), AUTO_TAKEOVER_DRIVES_SPEC_FILE_PATH, 0);
-	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &(nvmeibt_global_get_global()->stock_local_disks_hash)) {
+	NVMEIB_HASH_FOREACH(stock_local_disk, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str) {
 		if (nvmeibt_topology_is_disk_explicitly_auto_takeover(&stock_local_disk->from_config.native_serial, stock_local_disk->from_config.vendor, stock_local_disk->from_config.smart_info.Model, stock_local_disk->from_config.nsid)) {
 			stock_local_disk->is_auto_takeover = 1;
 			continue;	// Do not report is_auto_takeover stock local disks before takeover (bind to nvmeibs)

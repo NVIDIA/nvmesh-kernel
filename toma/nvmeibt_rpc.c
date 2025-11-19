@@ -83,7 +83,6 @@ static int nvmeibt_rpc_command_trace(int argc, char *argv[], struct nvmeibt_Str 
 extern void toma_sig_handler_fn(int32_t n, uint64_t addr);
 static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_Str *out)
 {
-	struct nvmeibt_topology *cur_topo = nvmeibt_global_get_global();
 	struct nvmeibt_local_disk *local_disk;
 	extern enum ENCRYPT_DELAY_E nvmeibt_encrypt_delay;
 
@@ -116,7 +115,7 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 	}
 
 	if (strcmp("remove-all-disks", argv[1])==0) {
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 			nvmeibt_Str_sprintf(out, "Removing disk %s (note: serjio_status was %d)...\n", nvmeibt_local_disk_UUID_str(local_disk), local_disk->serjio_status);
 			nvmeibt_local_disk_remove_by_ldisk_id_str(nvmeibt_local_disk_UUID_str(local_disk));
 		}
@@ -125,7 +124,7 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 	} else if (strcmp("rescan-disks", argv[1])==0) {
 		nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_DISKS);
 		nvmeibt_Str_sprintf(out, "Done scanning for disks.\n");
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 			nvmeibt_Str_sprintf(out, "Available disk: %s\n", nvmeibt_local_disk_display(local_disk));
 			local_disk->serjio_status = NVMEIBS_SERJIO_STATUS_READY;
 			nvmeibt_local_disk_mark_segs_post_update_actions_required(local_disk);
@@ -374,7 +373,6 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 
 static int nvmeibt_rpc_command_locate(int argc, char *argv[], struct nvmeibt_Str *out)
 {
-	struct nvmeibt_topology	*cur_topo = nvmeibt_global_get_global();
 	if (argc<2) {
 		nvmeibt_Str_sprintf(out, "Locate a disk using the attention LED, if available.\n"
 				"Note that this feature works only when VMD is enabled in the server BIOS setup.\n"
@@ -391,7 +389,7 @@ static int nvmeibt_rpc_command_locate(int argc, char *argv[], struct nvmeibt_Str
 
 	if (strcmp(argv[1], "list")==0) {
 		struct nvmeibt_local_disk *local_disk;
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 			if (local_disk->from_config.pcie_slot[0] == 0 && local_disk->from_config.pcie_bdf[0] == 0)
 				continue;
 			nvmeibt_Str_sprintf(out, "    PCIe slot: %-8s  Address: %-16s  Disk ID: %-65s \n",
@@ -417,7 +415,7 @@ static int nvmeibt_rpc_command_locate(int argc, char *argv[], struct nvmeibt_Str
 			return -1;
 		}
 
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 			if (local_disk->from_config.pcie_slot[0] == 0)
 				continue;
 			if (strcmp(argv[2], nvmeibt_local_disk_UUID_str(local_disk)) == 0) {
@@ -699,7 +697,7 @@ static int nvmeibt_rpc_command_export_memory_gpt(int argc, char *argv[], struct 
 	cur_topo = nvmeibt_global_get_global();
 
 	/* Search for local_disk by device_path */
-	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (strcmp(local_disk->from_config.dev_file_name, device_path) == 0) {
 			found = true;
 			break;
@@ -708,7 +706,7 @@ static int nvmeibt_rpc_command_export_memory_gpt(int argc, char *argv[], struct 
 
 	if (!found) {
 		/* Try stock_local_disks_hash */
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->stock_local_disks_hash) {
+		NVMEIB_HASH_FOREACH(local_disk, cur_topo->stock_local_disks_hash_by_ldisk_id_str) {
 			if (strcmp(local_disk->from_config.dev_file_name, device_path) == 0) {
 				found = true;
 				break;
