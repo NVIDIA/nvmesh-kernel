@@ -76,6 +76,12 @@ int fmt_yesno(char *buf, int len, long arg, int datalen) {
 	else return scnprintf(buf, len, "No");
 }
 
+int fmt_ndu(char *buf, int len, long arg, int datalen) {
+	(void)arg;
+	(void)datalen;
+	return scnprintf(buf, len, "NDU(%d)", (int)arg);
+}
+
 int fmt_disk_disconnection_status_from_buf(char *buf, int len, long arg, int datalen) {
 	return scnprintf(buf, len, "%s(%d)", nvmeibc_disk_release_reason_str[(int)arg],
 	(int)arg);

@@ -12065,6 +12065,12 @@
         "fmt": "%d",
         "fmt_func": "fmt_yesno"
     },
+    "@NDU": {
+        "size": 8,
+        "type": "u8",
+        "fmt": "%d",
+        "fmt_func": "fmt_ndu"
+    },
     "@OWNER": {
         "size": "string",
         "type": "string",
