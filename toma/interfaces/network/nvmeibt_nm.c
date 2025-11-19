@@ -111,7 +111,7 @@ struct nvmeibt_nm_remote_node * nvmeibt_nm_l2rn(struct nvmeibt_nm_linkable *l)
 static inline struct nvmeibt_nm_hash_key_type * __attribute__ ((unused)) l2kt(
 	struct nvmeibt_nm_linkable *l)
 {
-	return container_of(l, struct nvmeibt_nm_hash_key_type, base);
+	return (l ? container_of(l, struct nvmeibt_nm_hash_key_type, base) : NULL);
 }
 
 static inline struct nvmeibt_nm_hash_wrid_key_type * kt2wrid( struct nvmeibt_nm_hash_key_type *kt)
