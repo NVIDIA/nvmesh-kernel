@@ -12,13 +12,13 @@
 
 #define _trace(LVL, HDR, fmt, ...)                                                                                     \
 	{                                                                                                                  \
-		time_t rawtime;                                                                                                \
-		struct tm *timeinfo;                                                                                           \
-		char timebuf[100];                                                                                             \
-		time(&rawtime);                                                                                                \
-		timeinfo = localtime(&rawtime);                                                                                \
-		strftime(timebuf, sizeof(timebuf), "%F %T", timeinfo);                                                         \
-		fprintf(stderr, "%s " LVL " (" HDR "): " fmt "\n", timebuf, ##__VA_ARGS__);                                    \
+		struct timespec ts;                                                                                     \
+		struct tm *timeinfo;                                                                                    \
+		char timebuf[100];                                                                                      \
+		clock_gettime(CLOCK_REALTIME, &ts);                                                                     \
+		timeinfo = localtime(&ts.tv_sec);                                                                       \
+		strftime(timebuf, sizeof(timebuf), "%F %T", timeinfo);                                                  \
+		fprintf(stderr, "%s.%06ld " LVL " (" HDR "): " fmt "\n", timebuf, ts.tv_nsec / 1000, ##__VA_ARGS__);    \
 	}
 
 #ifdef __MODULE_HDR_ARGS
