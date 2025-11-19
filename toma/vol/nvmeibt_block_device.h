@@ -72,7 +72,6 @@ struct nvmeibt_block_device {
 	int										config_tag;
 	int										encrypt_idx;
 	struct nvmeibt_encrypt_params 			*encrypt_params;
-	struct xdlist							topo_link;
 };
 
 static inline const char *nvmeibt_blkdev_name(const struct nvmeibt_block_device *b) {

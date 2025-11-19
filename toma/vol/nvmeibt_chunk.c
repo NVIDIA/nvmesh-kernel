@@ -16,7 +16,7 @@ const union nvmeib_uuid *nvmeibt_chunk_UUID(struct nvmeibt_chunk *chunk)
 int nvmeibt_chunk_remove(struct nvmeibt_chunk *chunk)
 {
 	N_Tf(tchrem0, "Removing chunk=@UUID_LE", nvmeibt_chunk_UUID(chunk));
-	NNVMEIBT_HASH_DEL_OBJ(tchrem1, &nvmeibt_global_get_global()->chunks_hash, chunk, chunk);
+	NNVMEIBT_HASH_DEL_OBJ_new(tchrem1, nvmeibt_global_get_global()->chunks_hash_by_uuid, chunk, chunk);
 	// The assumption is that the surrounding objects (block_device & chunk) are also removed
 	NNVMEIBT_TOMA_FREE(tchrem2, chunk);
 	return 0;
@@ -31,7 +31,7 @@ enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt
 	struct nvmeibt_chunk_config *f = NULL;
 
 	NFIN;
-	chunk = NNVMEIBT_HASH_GET_OBJ_BY_UUID(tcgcby1, &nvmeibt_global_get_global()->chunks_hash, id, chunk);
+	chunk =  nvmeib_hash_search_uuid(nvmeibt_global_get_global()->chunks_hash_by_uuid, id);
 	if (chunk) {
 		chunk->trim_flags &= ~CONFIG_TRIM_MGMT;
 		if (chunk->from_config.version >= blkdev->from_config.version) {
@@ -46,7 +46,6 @@ enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt
 	chunk = NULL;
 
 	new_chunk = NNVMEIBT_TOMA_CALLOC(trace_chunk_nvmeibt_chunk_add, 1, sizeof *new_chunk);
-	XDLIST_INIT_LINK(&new_chunk->topo_link, NULL);
 	f = &(new_chunk->from_config);
 	f->id = conf->uuid;
 	f->version = blkdev->from_config.version;
@@ -62,7 +61,7 @@ enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt
 		goto out;
 	}
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(tcgcby2, &nvmeibt_global_get_global()->chunks_hash, new_chunk,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(tcgcby2, nvmeibt_global_get_global()->chunks_hash_by_uuid, new_chunk,
 					config_tag, NVMEIBT_MAX_N_CHUNKS, chunk, chunk);
 	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
 		goto out;
@@ -99,7 +98,7 @@ void nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag)
 {
 	struct nvmeibt_chunk *chunk;
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(chunk, &nvmeibt_global_get_global()->chunks_hash) {
+	NVMEIB_HASH_FOREACH(chunk, nvmeibt_global_get_global()->chunks_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(chunk, config_tag)) {
 			nvmeibt_chunk_trim_specific_chunk(chunk, trim_flag);
 		}

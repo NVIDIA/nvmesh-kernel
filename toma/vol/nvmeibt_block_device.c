@@ -18,7 +18,7 @@ const char *nvmeibt_block_device_id_str(const struct nvmeibt_block_device *block
 
 static int block_device_remove(struct nvmeibt_block_device *block_device) {
 	N_Tf(fhu8236, "Removing block_device=@UUID_LE", nvmeibt_block_device_UUID(block_device));
-	NNVMEIBT_HASH_DEL_OBJ(fhuu87w, &nvmeibt_global_get_global()->block_devices_hash, block_device, block_device);
+	nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->block_devices_hash_by_uuid, nvmeibt_block_device_UUID(block_device));
 	if (block_device->encrypt_params) { // Don't del the block_device if in the middle of encrypt operation
 		block_device->encrypt_params = NULL;
 		// NNVMEIBT_TOMA_FREE(skmnji2, block_device->encrypt_params->shadow_vol);
@@ -83,7 +83,6 @@ enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config
 	block_device = NULL;
 	//
 	new_block_device = NNVMEIBT_TOMA_CALLOC(ghu76dw, 1, sizeof *new_block_device);
-	XDLIST_INIT_LINK(&new_block_device->topo_link, NULL);
 	f = &(new_block_device->from_config);
 
 	f->id = vol->uuid;
@@ -132,7 +131,7 @@ out:
 
 struct nvmeibt_block_device *nvmeibt_block_device_get_block_device_by_id(const union nvmeib_uuid *block_device_id)
 {
-	return NNVMEIBT_HASH_GET_OBJ_BY_UUID(bhwila4, &nvmeibt_global_get_global()->block_devices_hash, block_device_id, block_device);
+	return  nvmeib_hash_search_uuid(nvmeibt_global_get_global()->block_devices_hash_by_uuid, block_device_id);
 }
 
 /* Check if can do garbage collection on a candidate block device */
@@ -183,7 +182,7 @@ void nvmeibt_block_devices_garbage_collect(bool *is_any_garbage_collected, bool 
 	*is_any_garbage_collected = 0;
 	// If some block_device is_being_deleted, then clean it if possible.
 	// (In pre-history it was done one at a time, so keep the tradition)
-	XHASHTABLE_FOR_EACH_SAFE(block_device, &cur_topo->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(block_device, cur_topo->block_devices_hash_by_uuid) {
 		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(block_device))
 			continue;
 		n_blkdevs_needing_garbage_collection += 1;
@@ -245,7 +244,7 @@ void nvmeibt_block_device_trim_unused_entries(int config_tag, uint8_t trim_flag)
 	struct nvmeibt_block_device *block_device;
 	const int64_t committed_idx = nvmeibt_global_get_global()->highest_seen_committed_kafka_mgmt_config_idx;
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(block_device, &nvmeibt_global_get_global()->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(block_device, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(block_device, config_tag)) {
 			const int64_t cfg_offset = block_device->from_config.mgmt_config_kafka_offset_or_idx;
 			if (cfg_offset > committed_idx)
@@ -284,9 +283,7 @@ int nvmeibt_block_device_print_blkdevs_status(int (*printf_fn)(void *ctx, const 
 	struct nvmeibt_block_device	*blkdev;
 	int							j, k;
 	(*printf_fn)(printf_ctx, "BLOCK DEVICES (%sleader)\n", (nvmeibt_raft_is_leader() ? "" : "NOTE: For reliable results go to the "));
-	if (XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->block_devices_hash) == 0)
-		return 0;
-	XHASHTABLE_FOR_EACH_SAFE(blkdev, &nvmeibt_global_get_global()->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		const struct nvmeibt_block_device_config *cfg = &blkdev->from_config;
 		(*printf_fn)(printf_ctx, "\t- Volume=%s\tVersion=%d nChunks=%d\n", cfg->client_blkdev_name, cfg->version, cfg->n_chunks);
 		for (j = 0; j < blkdev->n_chunks; j++) {
@@ -314,7 +311,7 @@ void nvmeibt_block_device_print_zeroing_status(int (*printf_fn)(void *ctx, const
 	int											j, k;
 	struct nvmeibt_seg_lot						*seg_lot;
 	(*printf_fn)(printf_ctx, "VOLUMES ZEROING\n");
-	XHASHTABLE_FOR_EACH_SAFE(blkdev, &nvmeibt_global_get_global()->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		(*printf_fn)(printf_ctx, "\t- Volume=%s Version=%d nChunks=%d\n",
 				blkdev->from_config.client_blkdev_name, blkdev->from_config.version, blkdev->from_config.n_chunks);
 		for (j = 0; j < blkdev->n_chunks; j++) {
