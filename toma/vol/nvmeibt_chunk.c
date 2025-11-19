@@ -89,7 +89,7 @@ out:
 void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *chunk, uint8_t trim_flag)
 {
 	if (is_trim_needed(&chunk->trim_flags, trim_flag)) {
-		NVMEIBT_HASH_MARK_OBJ_OUTDATED(nvmeibt_chunk_trim_unused_entries_trace, chunk, chunk);
+		NVMEIBT_OBJ_MARK_OUTDATED(nvmeibt_chunk_trim_unused_entries_trace, chunk, chunk);
 	} else {
 		N_Tf(jdjs7w8, "not yet, chunk=@UUID_LE flags=@X", nvmeibt_chunk_UUID(chunk), chunk->trim_flags);
 	}
@@ -100,7 +100,7 @@ void nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag)
 	struct nvmeibt_chunk *chunk;
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(chunk, &nvmeibt_global_get_global()->chunks_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(chunk, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(chunk, config_tag)) {
 			nvmeibt_chunk_trim_specific_chunk(chunk, trim_flag);
 		}
 	}

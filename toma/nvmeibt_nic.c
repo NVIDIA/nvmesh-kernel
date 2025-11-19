@@ -121,9 +121,9 @@ void nvmeibt_nic_trim_unused_entries(int config_tag)
 	struct nvmeibt_nic		*nic;
 
 	XHASHTABLE_FOR_EACH_SAFE(nic, &nvmeibt_global_get_global()->nics_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(nic, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(nic, config_tag)) {
 			N_Tf(tt922bx, "drop nic: @UUID_LE with config tag @INT<@INT", nvmeibt_nic_UUID(nic), nic->config_tag, config_tag);
-			NVMEIBT_HASH_MARK_OBJ_OUTDATED(fhy76r5, nic, nic);
+			NVMEIBT_OBJ_MARK_OUTDATED(fhy76r5, nic, nic);
 			nvmeibt_nic_detach_from_node(nic);
 			nic_remove(nic);
 		}

@@ -242,7 +242,7 @@ void nvmeibt_disk_trim_unused_entries(int config_tag)
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(disk, &nvmeibt_global_get_global()->disks_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(disk, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(disk, config_tag)) {
 			struct nvmeibt_local_disk *local_disk = disk->its_local_disk;
 
 			N_Tf(dhuyr75, "drop disk=@UUID_LE with config tag @INT<@INT", nvmeibt_disk_UUID(disk), disk->config_tag, config_tag);
@@ -262,7 +262,7 @@ void nvmeibt_disk_trim_unused_entries(int config_tag)
 				nvmeibt_topology_active_mark_reserialization_required();
 			}
 
-			NVMEIBT_HASH_MARK_OBJ_OUTDATED(fhuyt75, disk, disk);
+			NVMEIBT_OBJ_MARK_OUTDATED(fhuyt75, disk, disk);
 			disk_remove(disk);
 		}
 	}

@@ -960,7 +960,7 @@ static struct nvmeibt_block_device *create_vol_and_chunk_for_single_praid(struct
 
 	origin_chunk = nvmeibt_praid_get_chunk(praid);
 	origin_vol = nvmeibt_chunk_get_blkdev(origin_chunk);
-	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(origin_vol)) {
+	if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(origin_vol)) {
 		goto out;
 	}
 

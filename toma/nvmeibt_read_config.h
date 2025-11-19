@@ -122,7 +122,7 @@ static inline void _hash_copy(void* dst, void* src, int size) {
 		XHASHTABLE_ADD(__hash, _obj2_, UUID_TO_64_HASH_KEY(_uuid_));					\
 		_rv_ = NVMEIBT_ADD_NEW;															\
 	}																					\
-	if (_obj2_ != NULL && !NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(_obj2_)) {				\
+	if (_obj2_ != NULL && !NVMEIBT_OBJ_IS_MARKED_OUTDATED(_obj2_)) {					\
 		_obj2_->config_tag = (__tag);													\
 	}																					\
 	get_hash_obj_ptr_addr = _obj2_;		(void)get_hash_obj_ptr_addr;					\
@@ -147,18 +147,18 @@ do {																					\
 #define NVMEIBT_HASH_N_OBJS(__hash)														\
 	XHASHTABLE_N_ELEMENTS(__hash)
 
-#define NVMEIBT_HASH_IS_OLDER_OBJ(__oldobj, tag)										\
+#define NVMEIBT_OBJ_IS_OLDER(__oldobj, tag)												\
 	((__oldobj)->config_tag < tag)
 
 // OUTDATING of objects
-#define NVMEIBT_HASH_MARK_OBJ_OUTDATED(__name__, __oldobj, __obj_name)					\
+#define NVMEIBT_OBJ_MARK_OUTDATED(__name__, __oldobj, __obj_name)						\
 do {																					\
 	const union nvmeib_uuid	*_uuid_ = nvmeibt_##__obj_name##_UUID(__oldobj);			\
 	N_Tf(__name__, "hash: mark old " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);	\
 	(__oldobj)->config_tag = CONFIG_TAG_OUTDATED;										\
 } while (0)
 
-#define NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(__oldobj)									\
+#define NVMEIBT_OBJ_IS_MARKED_OUTDATED(__oldobj)										\
 	((__oldobj)->config_tag == CONFIG_TAG_OUTDATED)
 
 	// HASH functions for ascii_uuid
@@ -277,7 +277,7 @@ do {																					\
 		NVMEIB_HASH_INSERT_UUID(name ## hash, __hash, _uuid_, _obj2_);					\
 		_rv_ = NVMEIBT_ADD_NEW;															\
 	}																					\
-	if (_obj2_ != NULL && !NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(_obj2_)) {				\
+	if (_obj2_ != NULL && !NVMEIBT_OBJ_IS_MARKED_OUTDATED(_obj2_)) {				\
 		_obj2_->config_tag = (__tag);													\
 	}																					\
 	get_hash_obj_ptr_addr = _obj2_;		(void)get_hash_obj_ptr_addr;					\

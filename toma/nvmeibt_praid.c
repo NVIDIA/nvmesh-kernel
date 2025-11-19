@@ -302,7 +302,7 @@ int nvmeibt_praid_validate_praids_config(void)
 			N_Tf(ru87tu5, "Skipping praid=@UUID_LE conf_corrupted", nvmeibt_praid_UUID(praid));
 			continue;
 		}
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 			N_Tf(ru87e81, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 			continue;
 		}
@@ -707,7 +707,7 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 	//  that the leader knows for sure that a received APPLIED_DISK_SEGMENTs
 	//  refer to the topology that it distributed.
 
-	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
+	if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 		NNVMEIBT_BUF_FREE(tcvsjjk, &(praid_leader->segs_wire_topo_buf));
 		memset(&(praid_leader->praid_wire_topo), 0, sizeof(praid_leader->praid_wire_topo));
 		goto out;
@@ -2390,7 +2390,7 @@ enum nvmeibt_add_rv nvmeibt_praid_add(struct mm_praid_conf *conf,
 	praid = nvmeibt_praid_get_praid_by_id(&(conf->uuid));
 	if (praid) {
 		praid->trim_flags &= ~CONFIG_TRIM_MGMT;
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) { // the praid is reanimated, take the new config
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) { // the praid is reanimated, take the new config
 			N_Tf(r9987b5, "praid=@UUID_LE praid->version=@X was outdated, recreating", &(vol->uuid), vol->version);
 			praid->from_config.version = ILLEGAL_CONFIG_VER; // NNVMEIBT_HASH_ADD_OBJ will update it
 			praid->config_tag = 0; // NNVMEIBT_HASH_ADD_OBJ will update it
@@ -2507,7 +2507,7 @@ static void praid_forget_all_segs(struct nvmeibt_praid *praid)
 
 	XDLIST_FOREACH_SAFE(seg, &(praid->praid_mgmt.all_segs_list)) {
 		if (seg->trim_flags == CONFIG_TRIM_ALL)
-			NVMEIBT_HASH_MARK_OBJ_OUTDATED(vvsjewm, seg, seg);
+			NVMEIBT_OBJ_MARK_OUTDATED(vvsjewm, seg, seg);
 		else
 			N_Tf(9sm2lso, "don't delete seg=@UUID_8 llags=@X", nvmeibt_seg_UUID_8(seg), seg->trim_flags);
 		XDLIST_DEL(&seg->praid_all_segs_link);
@@ -2524,7 +2524,7 @@ void nvmeibt_praid_trim_specific_praid(struct nvmeibt_praid *praid, uint8_t trim
 {
 	if (is_trim_needed(&praid->trim_flags, trim_flag)) {
 		// Ignoring unregister of clients. It is handled by the deleted segments
-		NVMEIBT_HASH_MARK_OBJ_OUTDATED(dkitu83, praid, praid);
+		NVMEIBT_OBJ_MARK_OUTDATED(dkitu83, praid, praid);
 		praid_forget_all_segs(praid);
 		// Let the standard conf & topo generations detect the OUTDATED and clean the serialized buffers
 		nvmeibt_mm_jason_leader_topo_config_mm_praid_conf_and_mm_segs_conf_to_wire_buf(praid);
@@ -2543,7 +2543,7 @@ void nvmeibt_praid_trim_unused_entries(int config_tag, uint8_t trim_flag)
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(praid, &nvmeibt_global_get_global()->praids_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(praid, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(praid, config_tag)) {
 			nvmeibt_praid_trim_specific_praid(praid, trim_flag);
 		}
 	}

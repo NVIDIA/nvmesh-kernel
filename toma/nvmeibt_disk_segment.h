@@ -379,7 +379,7 @@ static inline BOOL nvmeibt_disk_segment_is_Replaced_in_config(const struct nvmei
 
 static inline bool nvmeibt_disk_segment_is_missing_in_config(const struct nvmeibt_disk_segment *disk_segment)
 {
-	return NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(disk_segment);
+	return NVMEIBT_OBJ_IS_MARKED_OUTDATED(disk_segment);
 }
 
 static inline char *nvmeibt_disk_segment_id_str(struct nvmeibt_disk_segment *seg)

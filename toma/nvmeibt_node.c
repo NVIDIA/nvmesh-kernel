@@ -238,9 +238,8 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 	struct nvmeibt_topology	*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-
 	XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(node, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(node, config_tag)) {
 			N_Tf(skqo227, "drop node: @UUID_LE with config tag @INT<@INT", nvmeibt_node_UUID(node), node->config_tag, config_tag);
 			/*
 			 * close tx_conn and all rx_conns:
@@ -260,7 +259,7 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 				node->is_my_node = 0;
 				nvmeibt_global_set_my_node(NULL);
 			}
-			NVMEIBT_HASH_MARK_OBJ_OUTDATED(nvmeibt_node_trim_unused_entries_trace, node, node);
+			NVMEIBT_OBJ_MARK_OUTDATED(nvmeibt_node_trim_unused_entries_trace, node, node);
 			nvmeibt_node_remove(node);
 		}
 	}

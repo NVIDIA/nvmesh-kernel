@@ -68,7 +68,7 @@ enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config
 	if (block_device) {
 		block_device->trim_flags &= ~CONFIG_TRIM_MGMT;
 		if (block_device->from_config.version >= (int)vol->version) {
-			if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(block_device)) { // the vol is reanimated, take the new config
+			if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(block_device)) { // the vol is reanimated, take the new config
 				N_Tf(ghu87b5, "blkdev=@UUID_LE version=@X was outdated, recreating", &(vol->uuid), vol->version);
 				block_device->config_tag = config_tag;
 				rv = NVMEIBT_ADD_MODIFIED;
@@ -157,7 +157,7 @@ static bool nvmeibt_block_device_may_garbage_collect(struct nvmeibt_block_device
 				return false;
 			}
 			XDLIST_FOREACH(disk_segment, &praid->praid_mgmt.all_segs_list) {
-				if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(disk_segment)) {
+				if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(disk_segment)) {
 					N_Tf(rr998vs, "Not yet. Awaiting seg=@UUID_8", nvmeibt_seg_UUID_8(disk_segment));
 					return false;
 				}
@@ -184,7 +184,7 @@ void nvmeibt_block_devices_garbage_collect(bool *is_any_garbage_collected, bool 
 	// If some block_device is_being_deleted, then clean it if possible.
 	// (In pre-history it was done one at a time, so keep the tradition)
 	XHASHTABLE_FOR_EACH_SAFE(block_device, &cur_topo->block_devices_hash) {
-		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(block_device))
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(block_device))
 			continue;
 		n_blkdevs_needing_garbage_collection += 1;
 		if (!blkdev_for_GC && nvmeibt_block_device_may_garbage_collect(block_device))	// Select the first 1 to garbage collect
@@ -234,7 +234,7 @@ out:
 
 void nvmeibt_block_device_trim_specific_block_device(struct nvmeibt_block_device *block_device, uint8_t trim_flag) {
 	if (is_trim_needed(&block_device->trim_flags, trim_flag)) {
-		NVMEIBT_HASH_MARK_OBJ_OUTDATED(fhu8772, block_device, block_device);
+		NVMEIBT_OBJ_MARK_OUTDATED(fhu8772, block_device, block_device);
 		NNVMEIBT_BUF_FREE(cvajeb5, &(block_device->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf));
 	} else {
 		N_Tf(huhfy77, "not yet, vol=@UUID_LE flags=@X", nvmeibt_block_device_UUID(block_device), block_device->trim_flags);
@@ -246,7 +246,7 @@ void nvmeibt_block_device_trim_unused_entries(int config_tag, uint8_t trim_flag)
 	const int64_t committed_idx = nvmeibt_global_get_global()->highest_seen_committed_kafka_mgmt_config_idx;
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(block_device, &nvmeibt_global_get_global()->block_devices_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(block_device, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(block_device, config_tag)) {
 			const int64_t cfg_offset = block_device->from_config.mgmt_config_kafka_offset_or_idx;
 			if (cfg_offset > committed_idx)
 				N_IMf(gy7887t, "vol=@STR is newer than committed cfg. (vol_kafka_offset=@INT64, committed_kafka_offset=@INT64)", block_device->from_config.client_blkdev_name, cfg_offset, committed_idx);

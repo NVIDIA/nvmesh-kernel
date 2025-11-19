@@ -159,7 +159,7 @@ void nvmeibt_topology_leader_mark_recalc_required(void);
 #define NVMEIBT_PRAID_MARK_TOPO_RECALC_REQUIRED(name, _praid_) do {								\
 	struct nvmeibt_praid	*_praid = (_praid_);												\
 	if (_praid && XDLIST_NULL(&(_praid->praid_topo_recalc_link)) &&								\
-		!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(_praid)) {											\
+		!NVMEIBT_OBJ_IS_MARKED_OUTDATED(_praid)) {											\
 		N_Tf(name, "praid=@UUID_LE MARK_TOPO_RECALC_REQUIRED", nvmeibt_praid_UUID(_praid));		\
 		XDLIST_ADD_TAIL(&(nvmeibt_global_get_global()->praid_topo_recalc_list), _praid);		\
 		nvmeibt_topology_leader_mark_recalc_required();											\

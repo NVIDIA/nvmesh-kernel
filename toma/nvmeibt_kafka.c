@@ -2462,7 +2462,7 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Prev command didn't complete");
 		goto out;
 	}
-	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(vol)) {
+	if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(vol)) {
 		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume already deleted");
 		goto out;
 	}

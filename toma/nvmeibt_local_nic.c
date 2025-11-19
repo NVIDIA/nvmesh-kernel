@@ -79,10 +79,10 @@ void nvmeibt_local_nic_trim_unused_entries(int config_tag)
 	struct nvmeibt_local_nic	*local_nic;
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(local_nic, &nvmeibt_global_get_global()->local_nics_hash) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(local_nic, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(local_nic, config_tag)) {
 			N_Tf(inn87x, "Removing local nic: @UUID_LE with config tag @INT<@INT",
 				nvmeibt_local_nic_UUID(local_nic), local_nic->config_tag, config_tag);
-			NVMEIBT_HASH_MARK_OBJ_OUTDATED(fjuu873, local_nic, local_nic);
+			NVMEIBT_OBJ_MARK_OUTDATED(fjuu873, local_nic, local_nic);
 			__local_nic_remove(local_nic);
 		}
 	}

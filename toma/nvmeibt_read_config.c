@@ -233,7 +233,7 @@ static void add_seg_lot_to_praid_lot(struct nvmeibt_seg_lot *seg_lot)
 																						\
 	_obj = NNVMEIBT_HASH_GET_OBJ_BY_UUID(_name, _obj_hash, &_conf->uuid, _obj_name);	\
 	if (_obj) {																			\
-		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(_obj)) {								\
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(_obj)) {								\
 			_obj->config_tag = _config_tag;												\
 			_obj->trim_flags &= ~CONFIG_TRIM_TOPO;										\
 			_rv = NVMEIBT_ADD_MODIFIED;													\
@@ -252,7 +252,7 @@ static void add_seg_lot_to_praid_lot(struct nvmeibt_seg_lot *seg_lot)
 																						\
 	_obj = nvmeib_hash_search_uuid(_obj_hash, &_conf->uuid);							\
 	if (_obj) {																			\
-		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(_obj)) {								\
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(_obj)) {								\
 			_obj->config_tag = _config_tag;												\
 			_obj->trim_flags &= ~CONFIG_TRIM_TOPO;										\
 			_rv = NVMEIBT_ADD_MODIFIED;													\

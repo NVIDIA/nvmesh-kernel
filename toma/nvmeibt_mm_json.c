@@ -1089,7 +1089,7 @@ static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vo
 	n_segs = 0;
 
 	XHASHTABLE_FOR_EACH_SAFE(blkdev, &cur_topo->block_devices_hash) {
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev))
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev))
 			continue;
 		n_vols++;
 		if (wire_out_p) {
@@ -1155,7 +1155,7 @@ static int generate_vols_kafka_mgmt_config_wire(void *wire_out_p, uint32_t *tota
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(vol, &nvmeibt_global_get_global()->block_devices_hash) {
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(vol) || nvmeibt_blkdev_is_being_deleted(vol))
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(vol) || nvmeibt_blkdev_is_being_deleted(vol))
 			continue;
 		n_vols++;
 		if (wire_out_p) {
@@ -1182,7 +1182,7 @@ void nvmeibt_mm_jason_leader_topo_config_mm_praid_conf_and_mm_segs_conf_to_wire_
 	void 							*wire_out_p;
 	int								i;
 
-	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
+	if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 		NNVMEIBT_BUF_FREE(tcvswkr, &(praid_leader->topo_config_praid_and_segs_wire_conf_buf));
 		goto out;
 	}
@@ -1206,7 +1206,7 @@ void nvmeibt_mm_json_serialize_vol_and_chunks_and_praids_and_segs_kafka_mgmt_con
 	int						j, k, l;
 
 	NFIN;
-	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(blkdev)) {
+	if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev)) {
 		NNVMEIBT_BUF_FREE(cvaje35, &(blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf));
 		goto out;
 	}

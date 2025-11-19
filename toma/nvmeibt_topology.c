@@ -883,7 +883,7 @@ static int check_local_segments_validity(void)
 			struct nvmeibt_disk_segment			*seg0 = disk->disk_segments[j];
 			struct nvmeibt_seg_mgmt				*m0 = &(seg0->seg_mgmt);
 
-			if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(seg0)) {
+			if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(seg0)) {
 				N_Tf(uu88bb2 , "seg=@UUID_8 is old, skipping", nvmeibt_seg_UUID_8(seg0));
 				continue;
 			}
@@ -893,7 +893,7 @@ static int check_local_segments_validity(void)
 				struct nvmeibt_seg_mgmt				*m1 = &(seg1->seg_mgmt);
 				int									is_overlap = 0;
 
-				if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(seg1))
+				if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(seg1))
 					continue;
 
 				is_overlap |= nvmeibt_do_ranges_overlap(m0->lb_s, m0->lb_e, m1->lb_s, m1->lb_e);
@@ -987,7 +987,7 @@ void nvmeibt_topology_leader_mark_all_modified_praids_report_to_mgmt_due_to_comm
 
 	TODO(Consider avoiding full report to MGMT upon new leader);
 	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 			N_Tf(u876nss, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 		}
 		else {
@@ -1009,7 +1009,7 @@ void nvmeibt_topology_leader_resend_all_praids_report_to_mgmt(void)
 
 	N_Tf(y77uq21,"Resend all praids report");
 	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
-		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid))
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid))
 			nvmeibt_praid_mark_immediate_report_to_mgmt_required(praid);
 	}
 }
@@ -1026,7 +1026,7 @@ int nvmeibt_topology_leader_resend_specific_vol_praids_report_to_mgmt(char *vol_
 				struct nvmeibt_chunk	*chunk = vol->chunks[i];
 					for (j = 0; j < chunk->n_praids; j++) {
 						struct nvmeibt_praid	*praid = chunk->praids[j];
-						if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid))
+						if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid))
 							nvmeibt_praid_mark_immediate_report_to_mgmt_required(praid);
 					}
 			}
@@ -1053,7 +1053,7 @@ unsigned long long nvmeibt_topology_leader_get_next_config_version(void)
 
 static inline bool omit_praid_in_serialized_topo(struct nvmeibt_praid *praid)
 {
-	return (!nvmeibt_praid_is_serialized(praid) || NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(nvmeibt_praid_get_blkdev(praid)) || nvmeibt_praid_is_being_deleted(praid));
+	return (!nvmeibt_praid_is_serialized(praid) || NVMEIBT_OBJ_IS_MARKED_OUTDATED(nvmeibt_praid_get_blkdev(praid)) || nvmeibt_praid_is_being_deleted(praid));
 }
 
 void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
@@ -1340,7 +1340,7 @@ static void update_applied_topology(void)
 	NFIN;
 	nvmeibt_global_get_global()->last_apply_time = nvmeibt_global_get_cur_event_start_time();
 	XHASHTABLE_FOR_EACH_SAFE(praid, &nvmeibt_global_get_global()->praids_hash) {
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 			N_Tf(gegey33, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 			continue;
 		}
@@ -1564,7 +1564,7 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(vbnxmr5, RAFT_MEMBERS_SEQ_NO, leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed));
 	//
 	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid))
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid))
 			N_Tf(imfjj2, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 		else
 			nvmeibt_praid_reset_due_to_convert_to_leader(praid);
@@ -1654,7 +1654,7 @@ void nvmeibt_topology_calc_topology(void)
 		}
 
 		NVMEIBT_PRAID_CLEAR_TOPO_RECALC_REQUIRED(ju9q299, praid);
-		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 			N_Tf(itu86ut, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 			continue;
 		}
@@ -2499,7 +2499,7 @@ int nvmeibt_register_launch_seg_metadata_ctrl_save(struct nvmeibt_seg_active *se
 		rv = 0;
 		goto out;
 	}
-	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(disk_segment)) {
+	if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(disk_segment)) {
 		N_Tf(cvd78d6, "Skiping outdated seg=@UUID_8", nvmeibt_seg_UUID_8(disk_segment));
 		rv = 0;
 		goto out;

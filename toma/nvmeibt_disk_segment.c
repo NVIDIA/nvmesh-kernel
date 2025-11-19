@@ -653,7 +653,7 @@ enum nvmeibt_seg_remove_rv nvmeibt_disk_segment_remove(struct nvmeibt_disk_segme
 	}
 
 	// nvmeibt_seg_active_mark_zeroing_required_as_needed(seg_active);
-	if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(disk_segment)) {
+	if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(disk_segment)) {
 		N_Ef(as4561c, "Not yet. seg=@UUID_8 state=@STATE_STR is still in config",
 			 nvmeibt_seg_UUID_8(disk_segment), dirty_bits_state_str(disk_segment->seg_follower.applied_seg_lot.seg_topo.dirty_bits_state));
 		goto out;
@@ -716,7 +716,7 @@ void nvmeibt_disk_segment_garbage_collect_old_segments(bool *is_any_garbage_coll
     *is_all_garbage_collected = 1;
 	// Look for old segs, including orphans (not connected to praid, not even as replacement_topo_segs). Scan all segs.
 	NVMEIB_HASH_FOREACH(seg, nvmeibt_global_get_global()->disk_segments_hash_by_uuid) {
-		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(seg)) {
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(seg)) {
 			continue;   // Only segments that were removed from config can be removed. Otherwise, we still need to report them to mgmt
 		}
 		if (nvmeibt_disk_segment_remove(seg) == NVMEIBT_SEG_REMOVED) {
@@ -744,7 +744,7 @@ void nvmeibt_seg_lot_mark_conf_corrupted(struct nvmeibt_seg_lot *seg_lot)
 void nvmeibt_disk_segment_trim_specific_seg(struct nvmeibt_disk_segment *seg, uint8_t trim_flag)
 {
 	if (is_trim_needed(&seg->trim_flags, trim_flag))
-		NVMEIBT_HASH_MARK_OBJ_OUTDATED(dju87e9, seg, seg);
+		NVMEIBT_OBJ_MARK_OUTDATED(dju87e9, seg, seg);
 	else
 		N_Tf(nsse442, "not yet, seg=@UUID_8 flags=@X", nvmeibt_seg_UUID_8(seg), seg->trim_flags);
 		// A disk_segment that was removed from mgmt_config, was previously
@@ -763,7 +763,7 @@ void nvmeibt_disk_segment_trim_unused_entries(int config_tag, uint8_t trim_flag)
 
 	NFIN;
 	NVMEIB_HASH_FOREACH(disk_segment, nvmeibt_global_get_global()->disk_segments_hash_by_uuid) {
-		if (NVMEIBT_HASH_IS_OLDER_OBJ(disk_segment, config_tag)) {
+		if (NVMEIBT_OBJ_IS_OLDER(disk_segment, config_tag)) {
 			nvmeibt_disk_segment_trim_specific_seg(disk_segment, trim_flag);
 		}
 	}
