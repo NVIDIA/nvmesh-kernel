@@ -1427,5 +1427,10 @@ void __nvmeib_public_symbol_put(const char *symbol_name)
 }
 EXPORT_SYMBOL(__nvmeib_public_symbol_put);
 
+u64 nvmeib_public_local_clock(void) {
+	return local_clock();
+}
+EXPORT_SYMBOL(nvmeib_public_local_clock);
+
 module_init(nvmeib_public_module_init);
 module_exit(nvmeib_public_module_exit);

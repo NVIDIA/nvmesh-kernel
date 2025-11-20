@@ -284,6 +284,7 @@ struct cq_stats {
 	/* num wakeups of polling kthread */
 	u64 n_wakeups_burst;
 	u64 n_wakeups_cycles;
+	u64 n_wakeups_irq_time;
 	/* num send comps their processing was not done directly
 	   by interrupt or polling-kthread e.g. when post-send
 	   fails we try to process scq to get free send iu */

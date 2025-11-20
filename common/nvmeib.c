@@ -20,6 +20,7 @@
 #include "nvmeib_pcpu_wq.h"
 #include "nvmeib_completion_noise.h"
 #include "common_public/nvmeib_public_keeper.h"
+#include "nvmeib_json.h"
 
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
@@ -89,6 +90,34 @@ MODULE_PARM_DESC(tcp_num_ports, "TCP: Secondary iWARP listeners number of TCP po
 unsigned int nvmeib_pcpu_process_cq_retry_usecs = 0;
 module_param_named(pcpu_process_cq_retry_usecs, nvmeib_pcpu_process_cq_retry_usecs, uint, 0644);
 MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "Time window (us) to keep polling after last completion before rearming interrupts (0: disabled)");
+
+#define NVMEIB_INT_SHAPER_PROC_NAME "intr_shaper.json"
+#define NVMEIB_FRAME_SIZE_USECS (1000)
+#define NVMEIB_MAX_BURST (64)
+#define NVMEIB_MAX_IRQ_TIME_USECS (500)
+#define NVMEIB_MAX_COMP_INTR_PCT_CPU (20)
+
+
+unsigned int nvmeib_intr_shaper_max_burst = NVMEIB_MAX_BURST;
+module_param_named(intr_shaper_max_burst, nvmeib_intr_shaper_max_burst, uint, 0644);
+MODULE_PARM_DESC(intr_shaper_max_burst, "Max number of completions to handle in an interrupt before entering poll mode");
+
+unsigned int nvmeib_intr_shaper_max_pct_cpu = NVMEIB_MAX_COMP_INTR_PCT_CPU;
+module_param_named(intr_shaper_max_pct_cpu, nvmeib_intr_shaper_max_pct_cpu, uint, 0644);
+MODULE_PARM_DESC(intr_shaper_max_pct_cpu, "Max percentage of CPU time to spend processing completions in an interrupt before entering poll mode");
+
+unsigned int nvmeib_intr_shaper_max_irq_time_usecs = NVMEIB_MAX_IRQ_TIME_USECS;
+module_param_named(intr_shaper_max_irq_time_usecs, nvmeib_intr_shaper_max_irq_time_usecs, uint, 0644);
+MODULE_PARM_DESC(intr_shaper_max_irq_time_usecs, "Max time to spend in an interrupt before entering poll mode");
+
+static struct nvmeib_intr_shaper *nvmeib_intr_shaper = NULL;
+static struct nvmeib_public_procfs_ent *nvmeib_intr_shaper_procfs_ent = NULL;
+
+struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void)
+{
+	return nvmeib_intr_shaper;
+}
+EXPORT_SYMBOL(nvmeib_get_intr_shaper);
 
 /* option to blacklist NICs
  * Format is <hca_id>:<hca_id> ...
@@ -3979,16 +4008,12 @@ bool nvmeib_local_client_close_server(void)
 }
 EXPORT_SYMBOL(nvmeib_local_client_close_server);
 
-struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs,
-						     u64 max_burst_size,
-						     int max_percent_cpu)
+struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs)
 {
 	struct nvmeib_intr_shaper *shaper = NULL;
 	struct intr_shaper_percpu *pcpu;
+	int i;
 	NFIN;
-
-	if (max_percent_cpu < 0 || max_percent_cpu > 100)
-		goto out;
 
 	if (!(shaper = kzalloc(sizeof(*shaper), GFP_KERNEL))) {
 		_NT(trace_nvmeib_nvmeib_intr_shaper_create, "Fail to allocate memory for intr-shaper");
@@ -4003,9 +4028,14 @@ struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs,
 	}
 
 	_NT(trace_2_nvmeib_nvmeib_intr_shaper_create, "loops_per_jiffy @LOOPS_PER_JIFFY, HZ @INT", loops_per_jiffy, HZ);
-	shaper->frame_in_tscs = frame_size_usecs * loops_per_jiffy * HZ / 1000000;
-	shaper->max_burst_size = max_burst_size;
-	shaper->max_frame_cycles = DIV_ROUND_UP(shaper->frame_in_tscs * max_percent_cpu, 100);
+	shaper->frame_size_nsecs = frame_size_usecs * 1000ULL;
+
+	for_each_online_cpu(i) {
+		pcpu = (struct intr_shaper_percpu *)(shaper->percpu + i *shaper->percpu_size);
+		pcpu->max_burst_size_local = nvmeib_intr_shaper_max_burst;
+		pcpu->max_percent_cpu_local = nvmeib_intr_shaper_max_pct_cpu;
+		pcpu->max_irq_time_usecs_local = nvmeib_intr_shaper_max_irq_time_usecs;
+	}
 	goto out;
 
 free_shaper:
@@ -4029,34 +4059,365 @@ void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper)
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_destroy);
 
-int nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
-				    int n_polled,
-				    cycles_t n_cycles)
+/* EWMA α=1/16 (i.e. shift right by 4) */
+#define NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT 4
+
+static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
+				    u64 n_ns_spent)
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
 	(shaper->percpu + get_cpu()*shaper->percpu_size);
-	u64 curr_frame = nvmeib_public_rdtsc() / shaper->frame_in_tscs;
-	int ret = NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
+	u64 now = nvmeib_public_local_clock(); /* TSC in units of ns */
+	u64 dt, busy;
+	u32 inst_load_pct_x1000, ewma, pct;
+	s32 diff;
+	unsigned long flags;
 
 	NFIN;
-	if (pcpu->last_frame != curr_frame) {
-		pcpu->last_frame = curr_frame;
-		_ND(trace_nvmeib_nvmeib_intr_shaper_calc_percpu, "burst size @BURST_SIZE", pcpu->burst_size);
-		pcpu->burst_size = 0;
-		pcpu->frame_cycles = 0;
+	/* Allow it to work with soft-irqs too */
+	local_irq_save(flags);
+
+	pcpu->busy_since_last_ns += n_ns_spent;
+
+	if (unlikely(!pcpu->last_update_ns)) {
+		pcpu->last_update_ns = now;
 	}
-	pcpu->burst_size += n_polled;
-	pcpu->frame_cycles += n_cycles;
-	if (pcpu->burst_size > shaper->max_burst_size)
-		ret = NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST;
-	else if (pcpu->frame_cycles > shaper->max_frame_cycles)
-		ret = NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES;
+
+	dt = now - pcpu->last_update_ns;
+	if (dt < shaper->frame_size_nsecs) {
+		/* Not enough time passed; just reuse previous decision */
+		goto out;
+	}
+
+	pcpu->max_burst_size_local = READ_ONCE(nvmeib_intr_shaper_max_burst);
+	pcpu->max_percent_cpu_local = READ_ONCE(nvmeib_intr_shaper_max_pct_cpu);
+	pcpu->max_irq_time_usecs_local = READ_ONCE(nvmeib_intr_shaper_max_irq_time_usecs);
+
+	pcpu->last_update_ns = now;
+
+	busy = pcpu->busy_since_last_ns;
+	pcpu->busy_since_last_ns = 0;
+
+	if (!busy) {
+		/* No work → decay a bit towards 0 */
+		if (pcpu->ewma_load_pct_x1000)
+			pcpu->ewma_load_pct_x1000 -= pcpu->ewma_load_pct_x1000 >> NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT; /* α=1/16 */
+		goto check_thresh;
+	}
+
+	/*
+	 * instantaneous_load (% * 1000) ≈ busy/dt * 100 * 1000
+	 * => inst_x1000 = busy * 100000 / dt
+	 */
+	inst_load_pct_x1000 = div64_u64(busy * 100000ULL, dt);
+	if (inst_load_pct_x1000 > 100000)
+		inst_load_pct_x1000 = 100000; /* clamp at 100% */
+
+	/* EWMA: ewma += α * (inst - ewma), α = 1/16 via shift */
+	ewma = pcpu->ewma_load_pct_x1000;
+	diff = (s32)inst_load_pct_x1000 - (s32)ewma;
+	ewma += diff >> NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT;
+
+	pcpu->ewma_load_pct_x1000 = ewma;
+
+	/* Update statistics */
+	pcpu->total_ewma_percent_cpu_x1000 += ewma;
+	pcpu->n_calc_ewma_percent_cpu++;
+	if (ewma > pcpu->max_ewma_percent_cpu_x1000)
+		pcpu->max_ewma_percent_cpu_x1000 = ewma;
+	if (pcpu->min_ewma_percent_cpu_x1000 == 0 || ewma < pcpu->min_ewma_percent_cpu_x1000)
+		pcpu->min_ewma_percent_cpu_x1000 = ewma;
+
+check_thresh:
+	pct = pcpu->ewma_load_pct_x1000 / 1000;
+
+	if (pcpu->last_result == NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP && 
+		pct >= pcpu->max_percent_cpu_local + NVMEIB_INTR_SHAPER_OVERLOAD_PCT_MARGIN) 
+	{
+		pcpu->last_result = NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES;
+	} 
+	else if (pcpu->last_result == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES && 
+		pct <= pcpu->max_percent_cpu_local - NVMEIB_INTR_SHAPER_OVERLOAD_PCT_MARGIN) 
+	{
+		pcpu->last_result = NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
+	}
+
+out:
+	local_irq_restore(flags);
 	put_cpu();
 
 	NFOUT;
-	return ret;
 }
-EXPORT_SYMBOL(nvmeib_intr_shaper_calc_percpu);
+
+void nvmeib_intr_shaper_intr_enter(struct nvmeib_intr_shaper *shaper, enum intr_shaper_intr_type intr_type)
+{
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	BUG_ON(pcpu->intr_type != INTR_SHAPER_INTR_TYPE_NONE);
+	BUG_ON(pcpu->intr_start_ns);
+	BUG_ON(pcpu->intr_n_polled);
+	pcpu->intr_type = intr_type;
+	pcpu->intr_start_ns = nvmeib_public_local_clock();
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_intr_enter);
+
+void nvmeib_intr_shaper_intr_exit(struct nvmeib_intr_shaper *shaper)
+{
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	struct intr_shaper_percpu_stats *pcpu_stats = &pcpu->stats_per_intr_type[pcpu->intr_type];
+	u64 busy_ns = nvmeib_public_local_clock() - pcpu->intr_start_ns;
+	BUG_ON(!pcpu->intr_start_ns);
+
+	BUG_ON(pcpu->intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+	BUG_ON(pcpu->intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+
+	/* Store last-burst-size and update statistics */
+	pcpu->last_burst_size = pcpu->intr_n_polled;
+	pcpu_stats->total_burst_size += pcpu->last_burst_size;
+	if (pcpu->last_burst_size > pcpu_stats->max_burst_size)
+		pcpu_stats->max_burst_size = pcpu->last_burst_size;
+	if (pcpu_stats->min_burst_size == 0 || pcpu->last_burst_size < pcpu_stats->min_burst_size)
+		pcpu_stats->min_burst_size = pcpu->last_burst_size;
+	pcpu_stats->total_intr_time_ns += busy_ns;
+	if (busy_ns > pcpu_stats->max_intr_time_ns)
+	pcpu_stats->max_intr_time_ns = busy_ns;
+	if (pcpu_stats->min_intr_time_ns == 0 || busy_ns < pcpu_stats->min_intr_time_ns)
+	pcpu_stats->min_intr_time_ns = busy_ns;
+	pcpu_stats->n_intrs++;
+
+	/* Calculate EWMA of CPU load */
+	nvmeib_intr_shaper_calc_percpu(shaper, busy_ns);
+
+	/* Reset current interrupt status */
+	pcpu->intr_start_ns = 0;
+	pcpu->intr_n_polled = 0;
+	pcpu->intr_type = INTR_SHAPER_INTR_TYPE_NONE;
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_intr_exit);
+
+void nvmeib_intr_shaper_intr_polled(struct nvmeib_intr_shaper *shaper, int n_polled)
+{
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	pcpu->intr_n_polled += n_polled;
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_intr_polled);
+
+bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *shaper, enum nvmeib_intr_shaper_calc_ret *wake_up_reason)
+{
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	struct intr_shaper_percpu_stats *pcpu_stats = &pcpu->stats_per_intr_type[pcpu->intr_type];
+	enum nvmeib_intr_shaper_calc_ret local_wake_up_reason = NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
+
+	BUG_ON(pcpu->intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+	BUG_ON(pcpu->intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+
+	if (pcpu->intr_n_polled > pcpu->max_burst_size_local) {
+		local_wake_up_reason = NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST;
+		goto out;
+	}
+	if (nvmeib_public_local_clock() - pcpu->intr_start_ns > pcpu->max_irq_time_usecs_local * 1000ULL) {
+		local_wake_up_reason = NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME;
+		goto out;
+	}
+	local_wake_up_reason = pcpu->last_result;
+
+out:
+	if (local_wake_up_reason != NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP) {
+		if (wake_up_reason)
+			*wake_up_reason = local_wake_up_reason;
+		if (local_wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
+			pcpu_stats->n_wakeups_burst++;
+		else if (local_wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME)
+			pcpu_stats->n_wakeups_irq_time++;
+		else if (local_wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
+			pcpu_stats->n_wakeups_cycles++;
+	}
+	return local_wake_up_reason != NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_intr_should_wake_up_reason);
+
+bool nvmeib_intr_shaper_in_intr(struct nvmeib_intr_shaper *shaper)
+{
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	return pcpu->intr_start_ns != 0;
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_in_intr);
+
+unsigned int nvmeib_intr_shaper_get_max_burst(struct nvmeib_intr_shaper *shaper)
+{
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	return pcpu->max_burst_size_local;
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_get_max_burst);
+
+#define CALL_JSON_FN(data, fn, name, val, is_last)\
+do {\
+	(data)->count += (*jops->fn)((data)->buf + (data)->count, (data)->len - (data)->count, name, val, is_last, (data)->ntabs);\
+} while(0)
+
+#define CALL_JSON_DATA_UVAL(data, is_last, name, val)\
+do {\
+	(data)->count += (*jops->data_uval)((data)->buf + (data)->count, (data)->len - (data)->count, name, val, is_last, (data)->ntabs);\
+} while(0)
+
+#define CALL_JSON_DATA_STR(data, is_last, name, str)\
+do {\
+	(data)->count += (*jops->data_str)((data)->buf + (data)->count, (data)->len - (data)->count, name, str, is_last, (data)->ntabs);\
+} while(0)
+
+#define CALL_JSON_START_OBJ(data, name)\
+do {\
+	(data)->count += (*jops->start_obj)((data)->buf + (data)->count, (data)->len - (data)->count, name, (data)->ntabs++);\
+} while(0)
+
+#define CALL_JSON_END_OBJ(data, is_last)\
+do {\
+	(data)->count += (*jops->end_obj)((data)->buf + (data)->count, (data)->len - (data)->count, is_last, --(data)->ntabs);\
+} while(0)
+
+#define CALL_JSON_START_ARRAY(data, name)\
+do {\
+	(data)->count += (*jops->start_array)((data)->buf + (data)->count, (data)->len - (data)->count, name, (data)->ntabs++);\
+} while(0)
+
+#define CALL_JSON_END_ARRAY(data, is_last)\
+do {\
+	(data)->count += (*jops->end_array)((data)->buf + (data)->count, (data)->len - (data)->count, is_last, --(data)->ntabs);\
+} while(0)
+
+#define NVMEIB_INTR_SHAPER_PROC_FRMT_VER 1
+static int nvmeib_intr_shaper_print_stats_json(struct nvmeib_intr_shaper *shaper, char *buf, size_t len)
+{
+	int rv = 0;
+	int i, last_cpu, j;
+	const struct nvmeib_json_ops *jops = &nvmeib_json_ops;
+	struct intr_shaper_percpu *pcpu;
+	struct {
+		char *buf;
+		size_t len;
+		int count;
+		int ntabs;
+		const struct nvmeib_json_ops *jops;
+	} data = {
+		.buf = buf,
+		.len = len,
+		.count = 0,
+		.ntabs = 0,
+		.jops = jops,
+	};
+
+	CALL_JSON_START_OBJ(&data, NULL);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "frame_size_nsecs", shaper->frame_size_nsecs);
+	CALL_JSON_START_ARRAY(&data, "percpu");
+	last_cpu = cpumask_last(cpu_online_mask);
+	for_each_online_cpu(i) {
+		pcpu = (struct intr_shaper_percpu *)(shaper->percpu + i *shaper->percpu_size);
+		CALL_JSON_START_OBJ(&data, NULL);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "cpu", i);
+		CALL_JSON_START_OBJ(&data, "parameters");
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "max_burst_size", pcpu->max_burst_size_local);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "max_percent_cpu", pcpu->max_percent_cpu_local);
+		CALL_JSON_DATA_UVAL(&data, JSON_LAST_ELEM, "max_irq_time_usecs", pcpu->max_irq_time_usecs_local);
+		CALL_JSON_END_OBJ(&data, !JSON_LAST_ELEM);
+		CALL_JSON_START_OBJ(&data, "statistics");
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_ewma_percent_cpu", pcpu->total_ewma_percent_cpu_x1000);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_calc_ewma_percent_cpu", pcpu->n_calc_ewma_percent_cpu);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "max_ewma_percent_cpu", pcpu->max_ewma_percent_cpu_x1000 / 1000);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "min_ewma_percent_cpu", pcpu->min_ewma_percent_cpu_x1000 / 1000);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "avg_ewma_percent_cpu", pcpu->n_calc_ewma_percent_cpu ? pcpu->total_ewma_percent_cpu_x1000 / pcpu->n_calc_ewma_percent_cpu / 1000 : 0);
+		CALL_JSON_START_OBJ(&data, "per_intr_type");
+		for (j = INTR_SHAPER_INTR_TYPE_NONE + 1; j < MAX_INTR_SHAPER_INTR_TYPE; j++) {
+			CALL_JSON_START_OBJ(&data, intr_shaper_intr_type_to_str(j, true));
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_intrs", pcpu->stats_per_intr_type[j].n_intrs);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_intr_time_us", pcpu->stats_per_intr_type[j].total_intr_time_ns / 1000ULL);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "max_intr_time_us", pcpu->stats_per_intr_type[j].max_intr_time_ns / 1000ULL);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "min_intr_time_us", pcpu->stats_per_intr_type[j].min_intr_time_ns / 1000ULL);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "avg_intr_time_us", pcpu->stats_per_intr_type[j].n_intrs ? 
+				pcpu->stats_per_intr_type[j].total_intr_time_ns / pcpu->stats_per_intr_type[j].n_intrs / 1000ULL : 0);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_burst_size", pcpu->stats_per_intr_type[j].total_burst_size);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "max_burst_size", pcpu->stats_per_intr_type[j].max_burst_size);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "min_burst_size", pcpu->stats_per_intr_type[j].min_burst_size);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "avg_burst_size", pcpu->stats_per_intr_type[j].n_intrs ? pcpu->stats_per_intr_type[j].total_burst_size / pcpu->stats_per_intr_type[j].n_intrs : 0);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_wakeups_burst", pcpu->stats_per_intr_type[j].n_wakeups_burst);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_wakeups_cycles", pcpu->stats_per_intr_type[j].n_wakeups_cycles);
+			CALL_JSON_DATA_UVAL(&data, JSON_LAST_ELEM, "n_wakeups_irq_time", pcpu->stats_per_intr_type[j].n_wakeups_irq_time);
+			CALL_JSON_END_OBJ(&data, j == MAX_INTR_SHAPER_INTR_TYPE - 1 ? JSON_LAST_ELEM : !JSON_LAST_ELEM);
+		}
+		CALL_JSON_END_OBJ(&data, JSON_LAST_ELEM);
+		CALL_JSON_END_OBJ(&data, !JSON_LAST_ELEM);
+		CALL_JSON_START_OBJ(&data, "status");
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "last_update_ns", pcpu->last_update_ns);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "last_burst_size", pcpu->last_burst_size);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "busy_since_last_ns", pcpu->busy_since_last_ns);
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "ewma_load_pct_x1000", pcpu->ewma_load_pct_x1000);
+		CALL_JSON_DATA_STR(&data, JSON_LAST_ELEM, "last_result", 
+			nvmeib_intr_shaper_calc_ret_to_str(pcpu->last_result));
+		CALL_JSON_END_OBJ(&data, JSON_LAST_ELEM);
+		CALL_JSON_END_OBJ(&data, last_cpu == i ? JSON_LAST_ELEM : !JSON_LAST_ELEM);
+	}
+	CALL_JSON_END_ARRAY(&data, JSON_LAST_ELEM);
+	data.count += nvmeib_proc_add_json_proc_epilog(NVMEIB_INTR_SHAPER_PROC_FRMT_VER, data.buf + data.count, data.len - data.count);
+	CALL_JSON_END_OBJ(&data, JSON_LAST_ELEM);
+	rv = data.count;
+	return rv;
+}
+
+static void intr_shaper_reset_stats_cpu(void *arg)
+{
+	struct nvmeib_intr_shaper *shaper = arg;
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
+	unsigned long flags;
+
+	local_irq_save(flags);
+	memset(pcpu->stats_per_intr_type, 0, sizeof(pcpu->stats_per_intr_type));
+	local_irq_restore(flags);
+}
+
+static void nvmeib_intr_shaper_reset_stats(struct nvmeib_intr_shaper *shaper)
+{
+	on_each_cpu(intr_shaper_reset_stats_cpu, shaper, true);
+}
+
+#undef CALL_JSON_FN
+#undef CALL_JSON_DATA_UVAL
+#undef CALL_JSON_DATA_STR
+#undef CALL_JSON_START_OBJ
+#undef CALL_JSON_END_OBJ
+#undef CALL_JSON_START_ARRAY
+#undef CALL_JSON_END_ARRAY
+
+static ssize_t fill_intr_shaper_stats(void *arg, char *buf, size_t len)
+{
+	struct nvmeib_intr_shaper *shaper = arg;
+	int rv;
+
+	rv = nvmeib_intr_shaper_print_stats_json(shaper, buf, len);
+	return rv;
+}
+
+static ssize_t reset_intr_shaper_stats(void *arg, char *buf, size_t len)
+{
+	struct nvmeib_intr_shaper *shaper = arg;
+	int reset;
+	int rv;
+
+	if (sscanf(buf, "%d", &reset) != 1 || reset != 0) {
+		rv = -EINVAL;
+		goto out;
+	}
+
+	nvmeib_intr_shaper_reset_stats(shaper);
+	rv = len;
+
+out:
+	return rv;
+}
 
 int nvmeib_post_recvq(struct nvmeib_recvq *rq, struct ib_qp *qp, struct nvmeib_iu *iu)
 {
@@ -4306,6 +4667,10 @@ static void procs_remove(void)
 			nvmeib_public_proc_remove(with_local_completion_noise_proc);
 			with_local_completion_noise_proc = NULL;
 		}
+		if (nvmeib_intr_shaper_procfs_ent) {
+			nvmeib_public_proc_remove(nvmeib_intr_shaper_procfs_ent);
+			nvmeib_intr_shaper_procfs_ent = NULL;
+		}
 #ifdef NVMEIB_COUNT_MEM_USAGE
 		nvmeib_mem_usage_proc_remove(proc_dir);
 #endif
@@ -4357,6 +4722,13 @@ static int procs_create(void)
 		_NE(procs_create_e4, "Fail to create proc completion_noise_with_local");
 		goto err;
 	}
+
+	if (!(nvmeib_intr_shaper_procfs_ent = nvmeib_public_proc_create(NVMEIB_INT_SHAPER_PROC_NAME, proc_dir,
+		fill_intr_shaper_stats, reset_intr_shaper_stats, nvmeib_intr_shaper)))
+   {
+	   _NE_dmesg(error_nvmeib_module_init_intr_shaper_proc, "Failed to create intr-shaper proc file");
+	   goto err;
+   }
 
 #ifdef NVMEIB_COUNT_MEM_USAGE
 	if ((rv = nvmeib_mem_usage_proc_create(proc_dir) < 0)) {
@@ -5629,9 +6001,15 @@ static int __init nvmeib_module_init(void) /* Constructor */
 		}
 	}
 
+	if (!(nvmeib_intr_shaper = nvmeib_intr_shaper_create(NVMEIB_FRAME_SIZE_USECS)))
+	{
+		_NE_dmesg(error_nvmeib_module_init_intr_shaper, "Failed to allocate interrupts shaper");
+		goto err_net_notify;
+	}
+
 	ret = nvmeib_wd_init();
 	if (ret)
-		goto err_out;
+		goto err_shaper;
 
 	ret = procs_create();
 	if (ret < 0)
@@ -5679,6 +6057,10 @@ err_system_wq:
 err_wd:
 	nvmeib_wd_exit();
 
+err_shaper:
+	nvmeib_intr_shaper_destroy(nvmeib_intr_shaper);
+	nvmeib_intr_shaper = NULL;
+
 err_net_notify:
 	nvmeib_rdma_unregister_net_notifiers();
 
@@ -5696,6 +6078,7 @@ static void __exit nvmeib_module_exit(void) /* Destructor */
 	nvmeib_system_wq = NULL;
 
 	nvmeib_completion_noise_exit();
+	nvmeib_intr_shaper_destroy(nvmeib_intr_shaper);
 	nvmeib_wd_exit();
 	nvmeib_numa_iter_diag_store_destroy();
 	nvmeib_ibdr_dev_cleanup();

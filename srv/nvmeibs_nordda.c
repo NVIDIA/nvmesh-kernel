@@ -3107,12 +3107,14 @@ static void __nordda_recv_completion(struct ib_cq *cq,
 	struct ib_wc *wcs = nrch->rcq_wcs;
 	struct nvmeibs_net *net = nrch->net;
 	int i, n, rv;
-	bool defer;
-	cycles_t start_tsc = nvmeib_public_get_cycles();
+	bool defer = false;
 	__NFIN;
 
 	BUG_ON(nvmeibs_use_pcpu_cq);
-
+	if (nvmeibs_defer_recv_comps && nvmeib_intr_shaper_in_intr(s_intr_shaper)) {
+		defer = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
+	}
+poll_again:
 	while ((n = ib_poll_cq(cq, NVMEIBS_POLL_SIZE, wcs)) > 0) {
 		nvmeib_qp_stats_on_poll_cq(net->qp_stats, n, recv);
 		nvmeibs_net_dec_recv(net, n);
@@ -3120,8 +3122,6 @@ static void __nordda_recv_completion(struct ib_cq *cq,
 			if (nvmeib_opcode_from_wc(&wcs[i]) == NVMEIB_DRAIN_QUEUE)
 				nvmeibs_rq_drain_comp(net, &wcs[i]);
 			else if (!cl->dismissed) {
-				defer = !nvmeibs_defer_recv_comps ? false :
-					nvmeib_intr_shaper_calc_percpu(s_intr_shaper, n, nvmeib_public_get_cycles() - start_tsc);
 				if ((rv = process_recv_completion(nrch, &wcs[i], defer))) {
 					_ND(trace_nordda_nordda_recv_completion, "process_recv_completion failed (@RV)", rv);
 				}
@@ -3135,10 +3135,9 @@ static void __nordda_recv_completion(struct ib_cq *cq,
 					_NE(error_nordda_nordda_recv_completion, "Got null recv_ioctx");
 			}
 		}
-		if ((rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)) <= 0) {
-			if (rv < 0)
-				_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
-			break;
+		if (nvmeibs_defer_recv_comps && nvmeib_intr_shaper_in_intr(s_intr_shaper)) {
+			nvmeib_intr_shaper_intr_polled(s_intr_shaper, n);
+			defer = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 		}
 	}
 	if (n < 0) {
@@ -3146,6 +3145,14 @@ static void __nordda_recv_completion(struct ib_cq *cq,
 		nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
 	} else {
 		nvmeib_qp_stats_on_poll_cq_empty(net->qp_stats);
+		if ((rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)) != 0) {
+			if (rv < 0) {
+				_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
+				nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
+			} else {
+				goto poll_again;
+			}
+		}
 	}
 	__NFOUT;
 }

@@ -1223,7 +1223,7 @@ static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
 static inline void intr_process_send_cq_offload_enb_(struct nvmeibc_ib_net *net)
 {
 	bool missed_events;
-	int ret;
+	enum nvmeib_intr_shaper_calc_ret wake_up_reason;
 
 	__NFIN;
 
@@ -1233,25 +1233,26 @@ static inline void intr_process_send_cq_offload_enb_(struct nvmeibc_ib_net *net)
 		/* if this is the first intr after polling period and
 		   we are in the same time-frame */
 sw2polling:
-		if ((ret = nvmeib_intr_shaper_calc_percpu(net->intr_shaper, 0, 0))) {
+		if (nvmeib_intr_shaper_intr_should_wake_up_reason(net->intr_shaper, &wake_up_reason)) {
 			_NDn(trace_ib_net_intr_process_send_cq_offload_enb, net, "sw2polling (# wakeups_burst @N_WAKEUPS wakeups_cycles @N_WAKEUPS)", net->scq_stats.n_wakeups_burst, net->scq_stats.n_wakeups_cycles);
 			scq_offload_trace(net, __LINE__);
 			nvmeib_qp_stats_on_offload_sched(net->qp_stats);
 			net->scq_poll_mode = NVMEIBC_IB_CQ_POLLING;
 			wake_up_process(net->scq_kthread);
-			if (ret == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
+			if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
 				net->scq_stats.n_wakeups_cycles++;
-			else
+			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
 				net->scq_stats.n_wakeups_burst++;
+			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME)
+				net->scq_stats.n_wakeups_irq_time++;
+			else
+				BUG();
 		}
 		else {
 			int n;
-			cycles_t start_tsc = nvmeib_public_get_cycles();
 			net->scq_stats.n_external++;
-			if ((n = process_send_cq_offload_enb_(net, net->n_wc_s,
-												  REQ_NOTIFY_TRUE, true, &missed_events)) > 0) {
-				nvmeib_intr_shaper_calc_percpu(net->intr_shaper, n, nvmeib_public_get_cycles() - start_tsc);
-			}
+			n = process_send_cq_offload_enb_(net, net->n_wc_s,
+												  REQ_NOTIFY_TRUE, true, &missed_events);
 			if (n >= 0 && missed_events) {
 				goto sw2polling;
 			}
@@ -1312,6 +1313,7 @@ static void intr_process_send_cq_pcpu_func(void *info)
 	unsigned long start, delta;
 
 	__NFIN;
+	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_SCQ);
 	BUG_ON(!nvmeibc_channel_is_ll_pcpu_ch(net->ioch));
 	BUG_ON(nvmeibc_channel_pcpu_ch_get_cpu(net->ioch) != smp_processor_id());
 
@@ -1335,6 +1337,7 @@ static void intr_process_send_cq_pcpu_func(void *info)
 
 	//NOTE: Ref was increased by send_completion_intr */
 	nvmeib_ref_put(&net->ib_rsrc_ref);
+	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	__NFOUT;
 }
 
@@ -1376,7 +1379,6 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 	u64 start, delta;
 
 	__NFIN;
-
 	if (!(net = verify_net_generation(net_ptr)))
 		return;
 #if defined(DEBUG_USING_RADIX) && DEBUG_USING_RADIX
@@ -1402,6 +1404,7 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 			net, "failed to get ib_rsrc");
 		goto out;
 	}
+	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_SCQ);
 
 	if (nvmeibc_channel_is_ll_pcpu_ch(net->ioch)) {
 		if (net->ioch->ct == ct_n_rdda &&
@@ -1417,6 +1420,7 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 					_NEn(send_completion_intr_t2, net, "smp_call_function_single_async failed");
 					BUG_ON(atomic_xchg(&net->pcpu_send_comp_smp_call.call_pending, 0) != 1);
 				} else {
+					nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 					/* NOTE: We do not dec the ref count until the IPI runs so it does not get destroyed under out feet */
 					goto out;
 				}
@@ -1441,13 +1445,14 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 	}
 
 ref_put:
+	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	nvmeib_ref_put(&net->ib_rsrc_ref);
 
 out:
 	__NFOUT;
 }
 
-/* -------------------------------------------------------------------------- *
+/* --------------------------------------------------------------------- *
  *                           recv-completions                                 *
  * -------------------------------------------------------------------------- */
 /* former version of send-comp handling, prior to polling-kthread support */
@@ -1592,14 +1597,23 @@ static int process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify)
 					break;
 				}
 				tot += n;
-				if (tot > nvmeibc_net_get_cinst(net)->shaper_burst) {
-					if (net->rcq_kthread && net->rcq_poll_mode == NVMEIBC_IB_CQ_INTR) {
+				if (net->rcq_poll_mode == NVMEIBC_IB_CQ_INTR) {
+					enum nvmeib_intr_shaper_calc_ret wake_up_reason;
+					nvmeib_intr_shaper_intr_polled(net->intr_shaper, n);
+					if (net->rcq_kthread && nvmeib_intr_shaper_intr_should_wake_up_reason(net->intr_shaper, &wake_up_reason)) {
 						/* Processed more than the burst # Recv CQEs - Switch to polling thread */
 						_NDn(trace_ib_net_process_recv_cq, net, "transition to polling after @TOT completions", tot);
 						nvmeib_qp_stats_on_offload_sched(net->qp_stats);
 						net->rcq_poll_mode = NVMEIBC_IB_CQ_POLLING;
 						wake_up_process(net->rcq_kthread);
-						net->rcq_stats.n_wakeups_burst++;
+						if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
+							net->rcq_stats.n_wakeups_burst++;
+						else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
+							net->rcq_stats.n_wakeups_cycles++;
+						else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME)
+							net->rcq_stats.n_wakeups_irq_time++;
+						else
+							BUG();
 						break;
 					}
 				}
@@ -1822,7 +1836,7 @@ void rcq_kthread_stop(struct nvmeibc_ib_net *net)
  */
 static inline void intr_process_recv_cq_(struct nvmeibc_ib_net *net)
 {
-	int ret;
+	enum nvmeib_intr_shaper_calc_ret wake_up_reason;
 	__NFIN;
 
 	BUG_ON(!net->rcq_kthread);
@@ -1831,24 +1845,26 @@ static inline void intr_process_recv_cq_(struct nvmeibc_ib_net *net)
 		   we are in the same time-frame */
 		int ncqe = (false && net->peek_cq) ? (*net->peek_cq)(net->recv_cq,
 															 net->n_wc_r) : 0;
-		if ((ret = nvmeib_intr_shaper_calc_percpu(net->intr_shaper, 0, 0)) ||
-			(ncqe > nvmeibc_net_get_cinst(net)->shaper_burst)) {
+		if (nvmeib_intr_shaper_intr_should_wake_up_reason(net->intr_shaper, &wake_up_reason) ||
+			(ncqe > nvmeib_intr_shaper_get_max_burst(net->intr_shaper))) 
+		{
 			_NDn(trace_ib_net_intr_process_recv_cq, net, "sw2polling (# wakeups_burst @N_WAKEUPS wakeups_cycles @N_WAKEUPS # rcqes @NCQE)", net->rcq_stats.n_wakeups_burst, net->rcq_stats.n_wakeups_cycles, ncqe);
 			nvmeib_qp_stats_on_offload_sched(net->qp_stats);
 			net->rcq_poll_mode = NVMEIBC_IB_CQ_POLLING;
 			wake_up_process(net->rcq_kthread);
-			if (ret == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
+			if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
 				net->rcq_stats.n_wakeups_cycles++;
-			else
+			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
 				net->rcq_stats.n_wakeups_burst++;
+			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME)
+				net->rcq_stats.n_wakeups_irq_time++;
+			else
+				BUG();
 		}
 		else {
-			int n;
-			cycles_t start_tsc = nvmeib_public_get_cycles();
 			net->rcq_stats.n_external++;
-			if ((n = process_recv_cq_(net, REQ_NOTIFY_TRUE)) > 0) {
-				nvmeib_intr_shaper_calc_percpu(net->intr_shaper, n, nvmeib_public_get_cycles() - start_tsc);
-			}
+			/* NOTE: Further intr-shaper logic is handled in process_recv_cq_ */
+			process_recv_cq_(net, REQ_NOTIFY_TRUE);
 		}
 	}
 	else if (net->rcq_poll_mode == NVMEIBC_IB_CQ_POLLING) {
@@ -2138,6 +2154,7 @@ static void intr_process_recv_cq_pcpu_func(void *info)
 	unsigned long start, delta;
 
 	__NFIN;
+	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_RCQ);
 	BUG_ON(!nvmeibc_channel_is_ll_pcpu_ch(net->ioch));
 	BUG_ON(nvmeibc_channel_pcpu_ch_get_cpu(net->ioch) != smp_processor_id());
 
@@ -2158,9 +2175,9 @@ static void intr_process_recv_cq_pcpu_func(void *info)
 
 	BUG_ON(atomic_xchg(&net->pcpu_recv_comp_smp_call.call_pending, 0) != 1);
 
+	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	//NOTE: Ref count already increased by recv_completion_intr
 	nvmeib_ref_put(&net->ib_rsrc_ref);
-
 	__NFOUT;
 }
 
@@ -2176,7 +2193,6 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 	int rv;
 
 	__NFIN;
-
 	net = verify_net_generation(net_ptr);
 	if (!net)
 		goto out;
@@ -2197,6 +2213,7 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 		_NTn(recv_completion_intr_t1, net, "failed to get ib_rsrc");
 		goto out;
 	}
+	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_RCQ);
 
 	if (nvmeibc_channel_is_ll_pcpu_ch(net->ioch)) {
 		if (net->ioch->ct == ct_n_rdda &&
@@ -2215,6 +2232,7 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 						BUG_ON(atomic_xchg(&net->pcpu_recv_comp_smp_call.call_pending, 0) != 1);
 					} else {
 						/* NOTE: We do not dec the ref count until the IPI runs so it does not get destroyed under out feet */
+						nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 						goto out;
 					}
 				}
@@ -2246,6 +2264,7 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 	}
 
 ref_put:
+	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	nvmeib_ref_put(&net->ib_rsrc_ref);
 
 out:

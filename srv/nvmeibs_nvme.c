@@ -119,6 +119,10 @@ static uint64_t nvmeibs_fake_large_disk_size_lba = ((uint64_t)1 << (NVMEIB_EC_JM
 module_param_named(fake_large_disk_size_lba, nvmeibs_fake_large_disk_size_lba, ullong, 0444);
 MODULE_PARM_DESC(fake_large_disk_size_lba, "Fake large disks size (in 4kB LBA)");
 
+static bool nvmeibs_use_intr_shaper = true;
+module_param_named(use_intr_shaper, nvmeibs_use_intr_shaper, bool, 0644);
+MODULE_PARM_DESC(use_intr_shaper, "Use interrupt shaper for NVMe completions");
+
 static void nvmeibs_free_drives(struct kref *kref);
 
 //OM: increase value as we may be submitting many reset drivven cmds in parallel
@@ -482,6 +486,8 @@ struct device_data {
 
 	int max_completions;
 	bool defer_process_io_cq;
+
+	bool use_intr_shaper;
 	//struct task_struct *thread[MAX_LOCAL_IOQS];
 	//struct task_struct **thread;
 
@@ -1638,24 +1644,36 @@ out:
 	return num_handled;
 }
 
+extern struct nvmeib_intr_shaper *s_intr_shaper;
+
 static irqreturn_t nvmeibs_intr(int irq, void *arg)
 {
 	struct nvme_qp *q = (struct nvme_qp *)arg;
 	struct device_data *d = q->dev;
 	int d_max_completions = d->max_completions;
-	int d_defer_process_io_cq = (d->defer_process_io_cq && d->adminq != q);
+	bool d_use_intr_shaper = d->use_intr_shaper;
+	int d_defer_process_io_cq = d->adminq != q ? (d->defer_process_io_cq) : 0;
 	int num_handled = 0;
 	static long last_time = 0;
 
+	nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_NVME);
 	nvmeib_completion_noise_start(NVMEIB_NOISE_INTERRUPT);
+	if (d_use_intr_shaper && d->adminq != q) {
+		d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
+	}
 	if (q->irq_debug == 2) {
 		q->irq_debug = 0;
 		_ND(trace_nvme_nvmeibs_intr, "Got local IRQ again");
 	}
 	spin_lock(&q->q_lock);
 	nvmeib_qp_stats_on_interrupt(q->qp_stats);
-	if (!d_defer_process_io_cq)
+	if (!d_defer_process_io_cq || !q->thread) {
 		num_handled = nvmeibs_process_cq(q);
+		if (d_use_intr_shaper && d->adminq != q) {
+			nvmeib_intr_shaper_intr_polled(s_intr_shaper, num_handled);
+			d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
+		}
+	}
 	if (((num_handled == d_max_completions && d_max_completions) || d_defer_process_io_cq) && q->thread) {
 		nvmeib_qp_stats_on_offload_sched(q->qp_stats);
 		local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
@@ -1670,6 +1688,7 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	spin_unlock(&q->q_lock);
 	nvmeib_completion_noise_end(NVMEIB_NOISE_INTERRUPT, NULL, 0, NVMEIB_NOISE_CTRS_NVMEIBS_INTR);
 
+	nvmeib_intr_shaper_intr_exit(s_intr_shaper);
 	return ((num_handled > 0) || d_defer_process_io_cq) ? IRQ_HANDLED : IRQ_NONE;
 }
 
@@ -6624,6 +6643,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	d->max_msix = max_msix;
 	d->max_completions = max_completions;
 	d->defer_process_io_cq = nvmeibs_defer_process_io_cq;
+	d->use_intr_shaper = nvmeibs_use_intr_shaper;
 	INIT_DELAYED_WORK(&d->dwork, nvmeibs_probe1);
 	INIT_WORK(&d->async_work, async_event_work);
 	INIT_WORK(&d->remove_work, nvmeibs_remove_work);

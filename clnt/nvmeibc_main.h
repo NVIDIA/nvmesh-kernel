@@ -158,4 +158,6 @@ void *nvmeibc_get_poison_area(int *n_pages);
 bool nvmeibc_support_srq(struct nvmeib_dev *dev);
 extern unsigned int nvmeibc_tcp_mode;
 
+struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void);
+
 #endif /* NVMEIBC_MAIN_H */

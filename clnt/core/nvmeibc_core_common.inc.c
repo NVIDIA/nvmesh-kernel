@@ -51,8 +51,8 @@ int t_core_clnt_globals_create(const struct nvmeibc_cinst_params_core *p, const 
 		_NE(t_02_coreg, "Failed to init watch dog");
 		goto _out;
 	}
-	if (!(cg->intr_shaper = nvmeib_intr_shaper_create(p->shaper_fs, p->shaper_burst, p->shaper_max_pct_cpu))) {
-		_NE(t_03_coreg, "Failed to allocate interrupts shaper");
+	if (!(cg->intr_shaper = nvmeib_get_intr_shaper())) {
+		_NE(t_03_coreg, "Failed to get interrupts shaper");
 		goto _out;
 	}
 	if (!(cg->pcpu_wds = kcalloc(nr_cpu_ids, sizeof(*cg->pcpu_wds), GFP_KERNEL))) {
@@ -99,8 +99,6 @@ void t_core_clnt_globals_destroy(const struct nvmeibc_cinst_params_core *p)
 			}
 			kfree(cg->pcpu_wds);
 		}
-		/* nvmeib_intr_shaper_destroy() checks for NULL ptr internally */
-		nvmeib_intr_shaper_destroy(cg->intr_shaper); cg->intr_shaper = NULL;
 		/* nvmeib_wd_remove() checks for NULL ptr internally */
 		nvmeib_wd_remove(cg->wd_commands);           cg->wd_commands = NULL;
 		nvmeib_free_used_dev_list(&cg->devs_lists.used);

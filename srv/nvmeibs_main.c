@@ -69,7 +69,7 @@ static char nvmeibs_filter_guids[MAX_FP] = "";
 module_param_string(guids, nvmeibs_filter_guids, MAX_FP, 0644);
 MODULE_PARM_DESC(guids, "option to filter ports according to port\'s hardware guids");
 
-bool nvmeibs_defer_recv_comps = false;
+bool nvmeibs_defer_recv_comps = true;
 module_param_named(defer_recv_comps, nvmeibs_defer_recv_comps, bool, 0644);
 MODULE_PARM_DESC(defer_recv_comps, "Defer no-rdda receive completions");
 
@@ -193,9 +193,6 @@ struct nvmeibs_um_comm * nvmeibs_get_um_comm(void)
 /* params */
 static u64 nvmeibs_service_guid;
 
-#define NVMEIBS_FRAME_SIZE_USECS (1000)
-#define NVMEIBS_MAX_BURST (64)
-#define NVMEIBS_INTR_MAX_PCT_CPU (10)
 struct nvmeib_intr_shaper *s_intr_shaper;
 
 #if KS_MODULE_PARAM_CB
@@ -4133,22 +4130,20 @@ int nvmeibs_init(void) /* Constructor */
 		nvmeib_get_utsname_nodename());
 	atomic64_set(&client_uid, NVMEIBS_CLIENT_UID_BASE);
 	nvmeibs_client_registered = false;
-	if (!(s_intr_shaper = nvmeib_intr_shaper_create(NVMEIBS_FRAME_SIZE_USECS,
-							NVMEIBS_MAX_BURST,
-							NVMEIBS_INTR_MAX_PCT_CPU))) {
-		_NE(error_main_nvmeibs_init, "Failed to allocate interrupts shaper");
+	if (!(s_intr_shaper = nvmeib_get_intr_shaper())) {
+		_NE(error_main_nvmeibs_init, "Failed to get interrupts shaper");
 		rv = -1;
 		goto unlock;
 	}
 	if (!(main_wq = wq_create_verbose(proc_name_format("S", "WQ", "main")))) {
 		_NE(error_1_main_nvmeibs_init, "Failed to allocate main controller work queue");
 		rv = -1;
-		goto intr_shaper;
+		goto unlock;
 	}
 	if (!(um_comm = nvmeibs_um_comm_start())) {
 		_NE(error_2_main_nvmeibs_init, "Failed to usermode communication channel");
 		rv = -1;
-		goto intr_shaper;
+		goto unlock;
 	}
 	main_wq_pid = wq_pid(main_wq);
 
@@ -4156,9 +4151,6 @@ int nvmeibs_init(void) /* Constructor */
 	if (nvmeibs_serial_console_flag)
 		_NI(trace_1_main_nvmeibs_init, "Kernel has a serial console, reducing output");
 	goto unlock;
-
-intr_shaper:
-	nvmeib_intr_shaper_destroy(s_intr_shaper);
 
 unlock:
 	mutex_unlock(&guard);
@@ -4338,8 +4330,8 @@ void nvmeibs_exit(void) /* Destructor */
 		main_wq = NULL;
 	}
 	/* stop usermode communication */
-	nvmeibs_um_comm_stop(um_comm);
-	nvmeib_intr_shaper_destroy(s_intr_shaper);
+	nvmeibs_um_comm_stop(um_comm);	
+	s_intr_shaper = NULL;
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibs_memmgr_metrics, __stop_nvmeibs_memmgr_metrics);
 	mutex_unlock(&guard);
 	nvmeib_public_set_debug_level(NULL);

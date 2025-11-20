@@ -92,6 +92,7 @@
 #include <linux/rwlock.h>
 #include <linux/seqlock.h>
 #include <linux/bitmap.h>
+#include <linux/sched/clock.h>
 #if KS_HAS_GENHD_H
 	#include <linux/genhd.h>
 #else

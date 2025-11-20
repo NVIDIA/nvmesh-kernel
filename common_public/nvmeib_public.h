@@ -574,4 +574,6 @@ void *__nvmeib_public_symbol_get(const char *symbol_name);
 void __nvmeib_public_symbol_put(const char *symbol_name);
 #define nvmeib_public_symbol_put(x) __nvmeib_public_symbol_put(NVMEIB_PUBLIC_SYMBOL_STR(x))
 
+u64 nvmeib_public_local_clock(void);
+
 #endif

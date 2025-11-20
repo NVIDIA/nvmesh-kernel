@@ -81,18 +81,6 @@ static int update_disks_config(const struct nvmeibc_cinst_params_core *p,
 			       do_disk_update_fn_type do_fn, disk_pre_update_fn_type pre_fn,
 			       disk_post_update_fn_type post_fn, bool can_sleep);
 
-#define NVMEIBC_FRAME_SIZE_USECS (1000)
-#define NVMEIBC_MAX_BURST (64)
-#define NVMEIBC_MAX_COMP_INTR_PCT_CPU (10)
-
-int max_rcomp_intr = NVMEIBC_MAX_BURST;
-module_param(max_rcomp_intr, int, 0644);
-MODULE_PARM_DESC(max_rcomp_intr, "Max number of recv completions to handle in an interrupt before entering poll mode");
-
-int max_comp_intr_pct_cpu = NVMEIBC_MAX_COMP_INTR_PCT_CPU;
-module_param(max_comp_intr_pct_cpu, int, 0644);
-MODULE_PARM_DESC(max_comp_intr_pct_cpu, "Max percentage of CPU time to spend processing completions in an interrupt before entering poll mode");
-
 unsigned int nvmeibc_tcp_mode = 0;
 module_param_named(tcp_mode, nvmeibc_tcp_mode, uint, 0444);
 MODULE_PARM_DESC(tcp_mode, "TCP transport mode, 0 = RoCE only, 1 = TCP Only, 2 or greater = TCP and RoCE");
@@ -136,9 +124,6 @@ static void nvmeibc_core_ibdev_fill_cinst_params_from_module_params(struct nvmei
 	p->max_g_len = MAX_FP;
 	p->filter_ports = nvmeibc_filter_ports;
 	p->max_p_len = MAX_FP;
-	p->shaper_fs = NVMEIBC_FRAME_SIZE_USECS;
-	p->shaper_burst = max_rcomp_intr;
-	p->shaper_max_pct_cpu = max_comp_intr_pct_cpu;
 	p->max_nic_srqs = nvmeibc_max_nic_srqs;
 	p->sm_th = sm_th;
 	p->use_pcpu_cq = nvmeibc_use_pcpu_cq;

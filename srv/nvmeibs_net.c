@@ -1061,6 +1061,8 @@ static void cq_event(struct ib_event *event, void *context)
 	__NFOUT;
 }
 
+extern struct nvmeib_intr_shaper *s_intr_shaper;
+
 /**
  * scq_handler() - SCQ event handler
  */
@@ -1069,7 +1071,9 @@ static void s_net_scq_handler(struct ib_cq *cq, void *context)
 	struct nvmeibs_net *net = context;
 	__NFIN;
 	if (nvmeib_ref_get(&net->ib_rsrc_guard)) {
+		nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_SCQ);
 		net->params.scq_handler(cq, net->params.scq_context);
+		nvmeib_intr_shaper_intr_exit(s_intr_shaper);
 		nvmeib_ref_put(&net->ib_rsrc_guard);
 	}
 	__NFOUT;
@@ -1084,7 +1088,9 @@ static void s_net_rcq_handler(struct ib_cq *cq, void *context)
 	__NFIN;
 	nvmeib_qp_stats_on_interrupt(net->qp_stats);
 	if (nvmeib_ref_get(&net->ib_rsrc_guard)) {
+		nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_RCQ);
 		net->params.rcq_handler(cq, net->params.rcq_context);
+		nvmeib_intr_shaper_intr_exit(s_intr_shaper);
 		nvmeib_ref_put(&net->ib_rsrc_guard);
 	}
 	__NFOUT;

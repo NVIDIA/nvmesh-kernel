@@ -762,24 +762,74 @@ struct nvmeib_alloc_n_map_info {
 /*
  * interrupt shaper percpu
  */
+
+enum intr_shaper_intr_type {
+	INTR_SHAPER_INTR_TYPE_NONE = 0,
+	INTR_SHAPER_INTR_TYPE_CLIENT_SCQ = 1,
+	INTR_SHAPER_INTR_TYPE_CLIENT_RCQ = 2,
+	INTR_SHAPER_INTR_TYPE_SERVER_SCQ = 3,
+	INTR_SHAPER_INTR_TYPE_SERVER_RCQ = 4,
+	INTR_SHAPER_INTR_TYPE_SERVER_NVME = 5,
+	MAX_INTR_SHAPER_INTR_TYPE = 6,
+};
+
+inline static const char *intr_shaper_intr_type_to_str(enum intr_shaper_intr_type type, bool lower_case)
+{
+	switch (type) {
+	case INTR_SHAPER_INTR_TYPE_NONE: return lower_case ? "none" : "NONE";
+	case INTR_SHAPER_INTR_TYPE_CLIENT_SCQ: return lower_case ? "client_scq" : "CLIENT_SCQ";
+	case INTR_SHAPER_INTR_TYPE_CLIENT_RCQ: return lower_case ? "client_rcq" : "CLIENT_RCQ";
+	case INTR_SHAPER_INTR_TYPE_SERVER_SCQ: return lower_case ? "server_scq" : "SERVER_SCQ";
+	case INTR_SHAPER_INTR_TYPE_SERVER_RCQ: return lower_case ? "server_rcq" : "SERVER_RCQ";
+	case INTR_SHAPER_INTR_TYPE_SERVER_NVME: return lower_case ? "server_nvme" : "SERVER_NVME";
+	default: return lower_case ? "unknown" : "UNKNOWN";
+	}
+}
+
+struct intr_shaper_percpu_stats {
+	u64 n_intrs;
+	u64 total_intr_time_ns;
+	u64 max_intr_time_ns;
+	u64 min_intr_time_ns;
+	u64 total_burst_size;
+	u32 max_burst_size;
+	u32 min_burst_size;
+	u64 n_wakeups_burst;
+	u64 n_wakeups_cycles;
+	u64 n_wakeups_irq_time;
+};
+
 struct intr_shaper_percpu {
-	/* volatile is used for generic solution, it is not needed if the member:
-	 * 1) is not read by other cpus than their associated one
-	 * 2) is always read from the same function
-	 * 3) doesn't need to be so accurate (from other cpu pov) but statistic
-	 */
-	volatile u64 last_frame;
-	volatile u64 burst_size;
-	volatile cycles_t frame_cycles; /* Number of TSC ticks, that have been spent in interrupt */
+	/* for EWMA calculation */
+	u32 last_burst_size;
+	u64 last_update_ns;       /* when we last updated the ewma */
+	u64 busy_since_last_ns;   /* accumulated busy time since last update */
+	u32 ewma_load_pct_x1000;      /* EWMA of load (% * 1000) */
+	int last_result;
+
+	/* Status of current interrupt*/
+	enum intr_shaper_intr_type intr_type;
+	u64 intr_start_ns;
+	int intr_n_polled;
+
+	/* Local copy of the shaper parameters */
+	unsigned int max_burst_size_local;
+	unsigned int max_percent_cpu_local;
+	unsigned int max_irq_time_usecs_local;
+
+	/* Statistics*/
+	struct intr_shaper_percpu_stats stats_per_intr_type[MAX_INTR_SHAPER_INTR_TYPE];
+	u64 total_ewma_percent_cpu_x1000;
+	u64 n_calc_ewma_percent_cpu;
+	u32 max_ewma_percent_cpu_x1000;
+	u32 min_ewma_percent_cpu_x1000;
 };
 
 struct nvmeib_intr_shaper {
 	size_t percpu_size;
 	void *percpu; /* struct intr_shaper_percpu + cachline align */
 	/* use shorter frame for 'finer' burst detction */
-	u64 frame_in_tscs;
-	u64 max_burst_size;
-	cycles_t max_frame_cycles;
+	u64 frame_size_nsecs;
 };
 
 #define NVMEIB_STATE_GUARD_STACK_TRACE_DEPTH 5
@@ -1132,20 +1182,38 @@ void nvmeib_free_recvq(struct nvmeib_recvq *rq);
 int nvmeib_post_sq_drain(struct ib_qp *qp);
 int nvmeib_post_rq_drain(struct ib_qp *qp);
 
-struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs,
-						     u64 max_burst_size,
-						     int max_percent_cpu);
+struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs);
 void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper);
+unsigned int nvmeib_intr_shaper_get_max_burst(struct nvmeib_intr_shaper *shaper);
 
 enum nvmeib_intr_shaper_calc_ret {
 	NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP = 0,
 	NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST = 1,
 	NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES = 2,
+	NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME = 3,
 };
 
-int nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
-				    int n_polled,
-				    cycles_t n_cycles);
+inline static const char *nvmeib_intr_shaper_calc_ret_to_str(int ret)
+{
+	switch (ret) {
+	case NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP: return "DONT_WAKE_UP";
+	case NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST: return "WAKE_UP_BURST";
+	case NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES: return "WAKE_UP_CYCLES";
+	case NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME: return "WAKE_UP_IRQ_TIME";
+	default: return "UNKNOWN";
+	}
+}
+
+#define NVMEIB_INTR_SHAPER_OVERLOAD_PCT_MARGIN 3
+
+struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void);
+void nvmeib_intr_shaper_intr_enter(struct nvmeib_intr_shaper *shaper, enum intr_shaper_intr_type intr_type);
+void nvmeib_intr_shaper_intr_exit(struct nvmeib_intr_shaper *shaper);
+void nvmeib_intr_shaper_intr_polled(struct nvmeib_intr_shaper *shaper, int n_polled);
+bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *shaper, enum nvmeib_intr_shaper_calc_ret *wake_up_reason);
+#define nvmeib_intr_shaper_intr_should_wake_up(shaper) nvmeib_intr_shaper_intr_should_wake_up_reason(shaper, NULL)
+
+bool nvmeib_intr_shaper_in_intr(struct nvmeib_intr_shaper *shaper);
 
 /* cpu version of volume_client_config_jrange_cache */
 struct nvmeib_jrange_cache
