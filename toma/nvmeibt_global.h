@@ -90,7 +90,7 @@ struct nvmeibt_topology {
 	int									n_pending_JGC_rebuild;
 	int									n_pending_scrubbing; // Total scrubbing tasks in the heap, equal to next_scrub_timeout_heap.n_elements
 
-	XHASHTABLE_DECLARE(, struct nvmeibt_client, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_CLIENTS_PER_NODE))		clients_hash;
+	struct nvmeib_hash_table			*clients_hash_by_cid;
 	struct nvmeib_hash_table			*block_devices_hash_by_uuid;
 	struct nvmeib_hash_table			*nics_hash_by_uuid;
 	struct nvmeib_hash_table			*disks_hash_by_uuid;

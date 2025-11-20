@@ -312,8 +312,8 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 		struct nvmeibt_client *cl;
 		int i = 0;
 		int n_clnts_to_print = (argc>2) ? atoi(argv[2]) : 100;		// Default: print first 100 clients
-		nvmeibt_Str_sprintf(out, "n_clients=%d\n", XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->clients_hash));
-		XHASHTABLE_FOR_EACH_SAFE(cl, &nvmeibt_global_get_global()->clients_hash) {
+		nvmeibt_Str_sprintf(out, "n_clients=%d\n", nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->clients_hash_by_cid));
+		NVMEIB_HASH_FOREACH(cl, nvmeibt_global_get_global()->clients_hash_by_cid) {
 			nvmeibt_Str_sprintf(out, "uuid=%s host=%s disk=%s cid=0x%x, n_reg=%d, con=%d\n", cl->client_provided_urn_uuid.str, cl->net.host_name, cl->ldisk_id.str, cl->cid, cl->n_reg_ctx_refs, cl->is_connected);
 			if (i >= n_clnts_to_print)
 				return 0;

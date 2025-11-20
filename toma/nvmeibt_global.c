@@ -46,7 +46,7 @@ void nvmeibt_global_init(void)
 	global_ctx.praids_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw5, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 4), "praids_hash", 16);
 	global_ctx.nodes_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw6, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "nodes_hash", 16);
 	global_ctx.chunks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw7, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "chunks_hash", 16);
-	XHASHTABLE_INIT(&(global_ctx.clients_hash));
+	global_ctx.clients_hash_by_cid = NVMEIB_HASH_CREATE(vhghnw8, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 6), "clients_hash", 4);
 	global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnw9, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_disks_hash", -1);
 	global_ctx.stock_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnwa, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_local_disks_hash", -1);
 	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1);

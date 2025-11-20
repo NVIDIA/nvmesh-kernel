@@ -749,7 +749,6 @@ static int connect_disk_with_node_by_config(void)
 	struct nvmeibt_node			*node;
 
 	NFIN;
-
 	// Redo from scratch
 	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		node->n_disks_config = 0;
@@ -1998,7 +1997,7 @@ static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
 		nvmeibt_abort(ES_FATAL);
 	}
 	if (op == 'r') {
-		XHASHTABLE_FOR_EACH_SAFE(client, &(nvmeibt_global_get_global()->clients_hash)) {	// By clients and not by reg_ctx, for new reg req
+		NVMEIB_HASH_FOREACH(client, nvmeibt_global_get_global()->clients_hash_by_cid) {	// By clients and not by reg_ctx, for new reg req
 			if (client->local_disk == local_disk) {
 				client->local_disk = NULL;
 				n_clients_affected += !(client->is_delete_in_the_air);
