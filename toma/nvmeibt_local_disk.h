@@ -115,7 +115,7 @@ struct nvmeibt_local_disk {
 	unsigned int										active_format_request_counter;
 	unsigned int										reappearing_counter;
 	struct nvmeibt_local_disk_CHANGE_EVENT_counters		CHANGE_EVENT_counters;
-	XHASHTABLE_DECLARE(seg_active_hash, struct nvmeibt_seg_active, disk_seg_active_link, NVMEIB_XHASHTABLE_N_BITS(MAX_NUM_GPT_ENTRIES));
+	struct nvmeib_hash_table							*seg_active_hash_by_uuid;
 };
 
 #define LOCAL_DISK_LOG_FMT "disk=@STR(@STR.@INT)"

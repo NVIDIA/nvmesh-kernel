@@ -486,7 +486,7 @@ static int add_segments_to_local_disks_gpt(void)
 			N_Tf(kiuht76, "Skipping local_disk=@STR. is_being_deleted", nvmeibt_local_disk_display(local_disk));
 			continue;
 		}
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (nvmeibt_seg_active_get_metadata_gpt_entry(seg_active)) {
 				continue;	// Already in, at least in the memory copy, on its way to the disk
 			}
@@ -794,7 +794,7 @@ int update_liveliness_of_seg_actives_of_specific_local_disk(struct nvmeibt_local
 	}
 	N_Tf(cbdhyw0, "updating local_disk=@STR disk=@UUID_LE n_segs=@N_SEGS", nvmeibt_local_disk_display(local_disk), nvmeibt_disk_UUID(disk), disk->n_segments);
 	local_disk->prev_is_ready_for_segments = new_is_ready_for_segments;
-	XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+	NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 		nvmeibt_seg_active_upd_liveliness_according_to_local_disk(seg_active);
 	}
 

@@ -197,7 +197,7 @@ void nvmeibt_register_validate_n_active_vs_n_applied(void)
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (nvmeibt_seg_active_n_active_registrants(seg_active) < nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(seg_active)) {
 				N_Ef(t_fk_tomareg, "seg=@UUID_8 n_active=@N_ACTIVE n_applied=@N_APPLIED",
 					nvmeibt_seg_active_UUID_8(seg_active),
@@ -808,7 +808,7 @@ void calc_next_wait_for_registrant_timeout(void)
 	cur_topo->is_need_calc_next_wait_for_registrant_timeout = 0;
 	// Go over the local disk_segments find the minimal timeout
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			struct nvmeibt_registrant_ctx	*reg_ctx;
 
 			XDLIST_FOREACH(reg_ctx, &(seg_active->registrants_on_timeout)) {
@@ -2327,7 +2327,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int cl
 	N_Tf(heu44ns, "handle=@HANDLE node=@UUID_LE", tmp_reg_ctx.client_messaging_handle, nvmeibt_node_UUID(registrant_node));
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
 		n_local_disk = XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash);
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			tmp_reg_ctx.seg_active = seg_active;
 			// Go over all the segments active registrants and notify recovery about those that match by client handle + type.
 			// We can't notify only with the tmp registrant as it has no lock id, and we need the lockid for for the recovery.
@@ -2830,7 +2830,7 @@ void nvmeibt_register_close_all_seg_actives_for_registration(void)
 		disk = local_disk->its_disk;
 		if (!disk)
 			continue;
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 0);
 			// The previous func can remove the local disk
 			if (nvmeibt_disk_get_local_disk(disk) == NULL) {
@@ -2849,7 +2849,7 @@ void nvmeibt_register_open_disk_eligible_seg_actives_for_use(struct nvmeibt_loca
 	if (!nvmeibt_local_disk_is_ready_for_segments(local_disk) || !nvmeibt_local_disk_is_connected_to_disk(local_disk)) {
 		return;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+	NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 		if (seg_active->prev_successful_open_for_use_praid_major == nvmeibt_seg_active_get_active_praid_version_major(seg_active)) {
 			continue;
 		}
@@ -2923,7 +2923,7 @@ int nvmeibt_register_timeout_occurred(void)
 	getnstimeofday_boot(&now);
 	// Go over the local disk_segments, and locate the expired registrants' timeout
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			struct nvmeibt_registrant_ctx	*reg_ctx;
 			XDLIST_FOREACH_SAFE(reg_ctx, &(seg_active->registrants_on_timeout)) {
 				if (!(reg_ctx->is_force_cmd_called) && timespec_lt(reg_ctx->timeout_time, now)) {

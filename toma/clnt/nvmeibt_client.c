@@ -304,7 +304,7 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 			if (strcmp(msg->disk_name, nvmeibt_local_disk_UUID_str(local_disk)) != 0)
 				continue;
 			n_local_disk = XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash);
-			XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 				// TODO: need to get the segment UUID from the client somehow, and use a hash-table to go
 				// directly to that segment. For now, we're doing a simple search on all segments.
 				tmp_reg_ctx.seg_active = seg_active;

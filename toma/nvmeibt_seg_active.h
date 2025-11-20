@@ -98,7 +98,7 @@ struct nvmeibt_seg_active {
 	XDLIST_DECLARE(, struct nvmeibt_wq_entry, link) owner_lock_ids_to_release;
 	//
 	struct xdlist								global_seg_active_post_update_action_link;
-	struct xdlist								disk_seg_active_link;
+//	struct xdlist								disk_seg_active_link;
 	//
 	struct nvmeibt_disk_segment_topo_ctx		active_seg_topo;
 	struct nvmeibt_serialized_seg_active_topo	prev_serialized_topo;

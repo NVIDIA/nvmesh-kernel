@@ -735,7 +735,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	new_local_disk = NNVMEIBT_TOMA_CALLOC(trace_local_disk_nvmeibt_local_disk_add_from_config, 1, sizeof(*new_local_disk)); // Read into it, maybe use it.
 	XDLIST_INIT_LINK(&new_local_disk->topo_link, NULL);
 	XDLIST_INIT_LINK(&new_local_disk->controller_local_disks_list_link, NULL);
-	XHASHTABLE_INIT(&new_local_disk->seg_active_hash);
+	new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(4vghs8d, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16);
 
 	new_local_disk->dev_file_fd = -1;
 	new_local_disk->are_partitions_setup_in_mem = false;
@@ -1313,7 +1313,7 @@ int nvmeibt_local_disk_add_from_stock_driver(struct nvmeibt_udev_event_info *ude
 	wqe->new_local_disk->from_config.disk_type = udev_event_info->disk_type;
 	XDLIST_INIT_LINK(&wqe->new_local_disk->topo_link, NULL);
 	XDLIST_INIT_LINK(&wqe->new_local_disk->controller_local_disks_list_link, NULL);
-	XHASHTABLE_INIT(&wqe->new_local_disk->seg_active_hash);
+	wqe->new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(5vgd7j0, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16);
 
 	wqe->new_local_disk->are_partitions_setup_in_mem = false;
 	if ((wqe->new_local_disk->dev_file_fd = NNVMEIBT_OPEN_READ_EXCL(rcgdh2k, dev_file_name, 0)) < 0) {
@@ -1393,7 +1393,7 @@ void nvmeibt_local_disk_munmap_and_rm_if_should_be_removed_and_unused(struct nvm
 			N_Tf(fhyru11, "disk=@STR has_registrants", nvmeibt_local_disk_display(local_disk));
 			goto out;
 		}
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			NVMEIBT_SEG_ACTIVE_FREE_MEM_AND_PROCESSES(seg_active);
 		}
 		local_disk_remove_from_nvmeibs(local_disk);
@@ -1564,7 +1564,7 @@ void nvmeibt_local_disk_mark_segs_post_update_actions_required(struct nvmeibt_lo
 	struct nvmeibt_seg_active			*seg_active;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+	NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 		NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(ui87yt6, seg_active);
 	}
 	NFOUT;
@@ -2972,7 +2972,7 @@ void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk)
 
 	NFIN;
 	if (local_disk && local_disk->is_owned_by_nvmeibs_driver) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1);
 			// The previous func can remove the local disk
 			if (nvmeibt_disk_get_local_disk(disk) == NULL) {

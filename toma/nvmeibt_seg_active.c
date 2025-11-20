@@ -155,7 +155,7 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 
 	local_disk = seg_active->local_disk;
 	if (local_disk)
-		XHASHTABLE_DEL(&(local_disk->seg_active_hash), &seg_active->disk_seg_active_link);
+		nvmeib_hash_delete_uuid(local_disk->seg_active_hash_by_uuid, nvmeibt_seg_active_UUID(seg_active));
 
 	nvmeibt_seg_active_clear_dirty_rebuild_required(seg_active);
 	nvmeibt_seg_active_clear_stale_rebuild_required(seg_active);
@@ -517,7 +517,6 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);
 	XDLIST_HEAD_INIT(&seg_active->owner_lock_ids_to_release);
 	XDLIST_INIT_LINK(&seg_active->global_seg_active_post_update_action_link, NULL);
-	XDLIST_INIT_LINK(&seg_active->disk_seg_active_link, NULL);
 	seg_active->n_registrants_on_timeout = 0;
 	seg_active->n_active_registrants_on_active_praid_version = 0;
 
@@ -548,7 +547,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 		N_Ef(5vgsywk, "Failed to init metadata ctrl for seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 	}
 	seg_active->local_disk = local_disk;
-	XHASHTABLE_ADD(&(seg_active->local_disk->seg_active_hash), seg_active, UUID_TO_64_HASH_KEY(nvmeibt_seg_active_UUID(seg_active)));
+	nvmeib_hash_add_uuid(local_disk->seg_active_hash_by_uuid, nvmeibt_seg_active_UUID(seg_active), seg_active);
 	nvmeibt_seg_active_upd_metadata_gpt_entry_and_ctrl(seg_active, metadata_gpt_entry, metadata_ctrl_fr_persist);
 
 	nvmeibt_seg_active_topo_reset(seg_active);
@@ -1246,7 +1245,7 @@ void stop_all_stale_and_txid_rebuild_tasks(void)
 		goto out;
 
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			stop_stale_rebuild(seg_active);
 			stop_txid_rebuild(seg_active);
 		}
@@ -1274,7 +1273,7 @@ void stop_all_JGC_rebuild_tasks(void)
 		goto out;
 
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			stop_JGC_rebuild(seg_active);
 		}
 	}
@@ -1331,7 +1330,7 @@ static void stop_all_scrubbing_tasks(void)
 		goto out;
 
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			stop_scrubbing(seg_active);
 		}
 	}
@@ -1409,7 +1408,7 @@ void nvmeibt_recovery_execute_dirty_rebuilds_as_needed(void)
 		// Enable double amount of RAID1 rebuilds
 		max_n_simultaneous_dirty_rebuild = nvmeibt_recovery_get_max_n_simultaneous_dirty_rebuild() * (2 - i);
 		XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-			XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 				// The following is inside the loop since N_RUNNING_TASKS might change.
 				if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild) >= max_n_simultaneous_dirty_rebuild) {
 					N_Tf(ddu8760, "Skipping dirty rebuilds, n_running_dirty_rebuild=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild));
@@ -1493,7 +1492,7 @@ void nvmeibt_recovery_execute_cold_recoveries_as_needed(void)
 		goto out;
 
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (!nvmeibt_seg_active_is_cold_recovery_required(seg_active)) {
 				continue;
 			}
@@ -1626,7 +1625,7 @@ void nvmeibt_recovery_execute_stale_and_txid_rebuilds_as_needed(void)
 	}
 
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (!nvmeibt_seg_active_is_stale_rebuild_required(seg_active) &&
 				!nvmeibt_seg_active_is_txid_rebuild_required(seg_active)) {
 				continue;	// Not needed or already running properly
@@ -1768,7 +1767,7 @@ void nvmeibt_recovery_execute_JGC_rebuilds_as_needed(void)
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
 		if (!nvmeibt_local_disk_is_ready_for_segments(local_disk) || !nvmeibt_local_disk_is_connected_to_disk(local_disk))
 			continue;
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (!nvmeibt_seg_active_is_JGC_rebuild_required(seg_active)) {
 				continue;	// Not needed or already running properly
 			}
@@ -2156,7 +2155,7 @@ void adjust_next_scrub_timeout_heap_following_params_change(void)
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			seg_active_scrub_reset(seg_active, 0);
 		}
 	}
@@ -2297,7 +2296,7 @@ void nvmeibt_seg_active_stop_all_recoveries_and_registrations_on_deleted_segs(vo
 		disk = local_disk->its_disk;
 		if (!disk)
 			continue;
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (nvmeibt_seg_lot_is_X_in_config(nvmeibt_seg_active_get_applied_seg_lot(seg_active))) {
 				nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1);
 				// The previous func can remove the local disk
@@ -2764,7 +2763,7 @@ BOOL nvmeibt_seg_active_is_any_seg_active_during_metadata_store(void)
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (nvmeibt_seg_active_is_during_persistency_store(seg_active)) {
 				is_during_metadata_store = 1;
 				goto out;
@@ -2784,7 +2783,7 @@ void nvmeibt_seg_active_launch_store_of_all_seg_actives_metadata(void)
 
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (!nvmeibt_disk_segment_is_competent_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
 				N_Tf(5v6djiw, "seg=@UUID_8 Skipping metadata_store - not a competent owner", nvmeibt_seg_active_UUID_8(seg_active));
 			} else if (!nvmeibt_disk_segment_is_mem_tbl_init_done_fully(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
@@ -2967,17 +2966,7 @@ out:
 
 struct nvmeibt_seg_active *nvmeibt_find_seg_active_of_specific_local_disk_by_uuid(struct nvmeibt_local_disk *local_disk, const union nvmeib_uuid *seg_uuid)
 {
-	struct nvmeibt_seg_active				*seg_active;
-
-	if (!local_disk)
-		return NULL;
-
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(seg_active, &local_disk->seg_active_hash, UUID_TO_64_HASH_KEY(seg_uuid)) {
-		if (ARE_UUID_EQ(nvmeibt_seg_active_UUID(seg_active), seg_uuid)) {
-			return seg_active;
-		}
-	}
-	return NULL;
+	return (local_disk ? nvmeib_hash_search_uuid(local_disk->seg_active_hash_by_uuid, seg_uuid) : NULL);
 }
 
 struct nvmeibt_seg_active *nvmeibt_find_seg_active_on_all_local_disks_by_uuid(const union nvmeib_uuid *seg_uuid)
@@ -3075,12 +3064,10 @@ int nvmeibt_seg_active_print_all_seg_actives_status(int (*printf_fn)(void *ctx, 
 	struct nvmeibt_seg_active	*seg_active;
 	NFIN;
 	(*printf_fn)(printf_ctx, "APPLIED_DISK_SEGMENTS\n");
-	if (XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->local_disks_hash) > 0) {
-		XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
-			nvmeibt_disk_print_status_line(printf_fn, printf_ctx, NNVMEIBT_LOCAL_DISK_GET_DISK(iersp4m, local_disk), 1);
-			XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
-				nvmeibt_seg_active_print_status(printf_fn, printf_ctx, seg_active, 1);
-			}
+	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+		nvmeibt_disk_print_status_line(printf_fn, printf_ctx, NNVMEIBT_LOCAL_DISK_GET_DISK(iersp4m, local_disk), 1);
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+			nvmeibt_seg_active_print_status(printf_fn, printf_ctx, seg_active, 1);
 		}
 		nvmeibt_register_print_status(printf_fn, printf_ctx, NULL);
 	}
