@@ -32,7 +32,6 @@ struct nvmeibt_disk {
 	int								n_segments;
 	int								n_allocated_segments;
 	struct nvmeibt_local_disk		*its_local_disk;
-	struct xdlist					topo_link;
 	int								config_tag;
 	int								serialization_signature;
 	BOOL							is_drive_write_error;

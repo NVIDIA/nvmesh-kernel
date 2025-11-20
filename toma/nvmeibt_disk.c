@@ -61,7 +61,7 @@ struct nvmeibt_disk* nvmeibt_disk_get_disk_by_ldisk_id(const struct nvmeibt_asci
 	if (ldisk_id == NULL) {
 		goto out;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(disk, &nvmeibt_global_get_global()->disks_hash) {
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
 		if (is_ascii_uuid_eq(ldisk_id, nvmeibt_disk_get_ldisk_id(disk))) {
 			goto out;
 		}
@@ -93,7 +93,7 @@ static void disk_remove(struct nvmeibt_disk *disk)
 
 	N_Tf(trace_disk_disk_remove, "Removing disk=@UUID_LE", nvmeibt_disk_UUID(disk));
 
-	NNVMEIBT_HASH_DEL_OBJ(trace_1_disk_disk_remove, &nvmeibt_global_get_global()->disks_hash, disk, disk);
+	NNVMEIBT_HASH_DEL_OBJ_new(trace_1_disk_disk_remove, nvmeibt_global_get_global()->disks_hash_by_uuid, disk, disk);
 	NNVMEIBT_BM_FREE(trace_2_disk_disk_remove, disk);
 
 out:
@@ -109,7 +109,6 @@ enum nvmeibt_add_rv nvmeibt_disk_add(struct mm_disk_conf *conf, int config_tag)
 	NFIN;
 
 	new_disk = NNVMEIBT_BM_CALLOC(trace_disk_nvmeibt_disk_add, sizeof *new_disk);
-	XDLIST_INIT_LINK(&new_disk->topo_link, NULL);
 
 	f = &(new_disk->from_config);
 
@@ -128,8 +127,8 @@ enum nvmeibt_add_rv nvmeibt_disk_add(struct mm_disk_conf *conf, int config_tag)
 		goto out;
 	}
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(trace_1_disk_nvmeibt_disk_add,
-					&nvmeibt_global_get_global()->disks_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(trace_1_disk_nvmeibt_disk_add,
+					nvmeibt_global_get_global()->disks_hash_by_uuid,
 					new_disk,
 					config_tag,
 					NVMEIBT_MAX_N_DISKS, disk, disk);
@@ -177,15 +176,14 @@ void nvmeibt_disk_leader_detach_all_disks_from_raft_members(void)
 {
 	struct nvmeibt_disk			*disk;
 	struct nvmeibt_raft_member	*member;
-	struct nvmeibt_topology				*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(disk, &cur_topo->disks_hash) {
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
 		disk->leader_its_raft_member = NULL;
 		for (int i = 0; i < disk->n_segments; i++)
 			nvmeibt_seg_remote_reset(&(disk->disk_segments[i]->seg_leader.remote_seg_topo), disk->disk_segments[i]);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(member, &(nvmeibt_raft_get_my_raft()->raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, nvmeibt_raft_get_my_raft()->raft_members_hash_by_uuid) {
 		member->n_disks_leader = 0;
 	}
 	NFOUT;
@@ -241,7 +239,7 @@ void nvmeibt_disk_trim_unused_entries(int config_tag)
 	int							seg_idx;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(disk, &nvmeibt_global_get_global()->disks_hash) {
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(disk, config_tag)) {
 			struct nvmeibt_local_disk *local_disk = disk->its_local_disk;
 
@@ -273,8 +271,8 @@ void nvmeibt_disk_trim_unused_entries(int config_tag)
 void nvmeibt_disk_free_all_at_exit(void)
 {
 	struct nvmeibt_disk			*disk;
-	XHASHTABLE_FOR_EACH_SAFE(disk, &nvmeibt_global_get_global()->disks_hash) {
-		disk_remove(disk);
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
+		NNVMEIBT_BM_FREE(vvtys8k, disk);
 	}
 }
 
@@ -300,11 +298,9 @@ int nvmeibt_disk_print_disks_status(int (*printf_fn)(void *ctx, const char *fmt,
 	struct nvmeibt_node		*node;
 	struct nvmeibt_disk		*disk;
 	int						j, k;
-	struct nvmeibt_topology	*cur_topo = nvmeibt_global_get_global();
 
 	(*printf_fn)(printf_ctx, "DISKS (%sleader)\n", (nvmeibt_raft_is_leader() ? "" : "NOTE: I am not the "));
-	if (XHASHTABLE_N_ELEMENTS(&cur_topo->nodes_hash) > 0) {
-	XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		(*printf_fn)(printf_ctx, "\t-%s%s%s\n", nvmeibt_node_name(node),
 					 (node->is_my_node ? " (Me)" : ""), (nvmeibt_node_get_raft_member(node) ? "" : " - Not a member"));
 		for (j = 0; j < node->n_disks_config; j++) {
@@ -327,10 +323,9 @@ int nvmeibt_disk_print_disks_status(int (*printf_fn)(void *ctx, const char *fmt,
 			}
 
 		}
-	}}
+	}
 	(*printf_fn)(printf_ctx, "\t-Unknown node\n");
-	if (XHASHTABLE_N_ELEMENTS(&cur_topo->disks_hash) > 0) {
-	XHASHTABLE_FOR_EACH_SAFE(disk, &cur_topo->disks_hash) {
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
 		if ((nvmeibt_raft_is_leader() && !!(disk->leader_its_raft_member)) || !!(disk->its_node_config)) {
 			continue;	// Skip disks with known node
 		}
@@ -349,7 +344,7 @@ int nvmeibt_disk_print_disks_status(int (*printf_fn)(void *ctx, const char *fmt,
 					mem_tbl_init_mode_str(topo_ctx->txid_init_mode));
 		}
 
-	}}
+	}
 	return 0;
 }
 

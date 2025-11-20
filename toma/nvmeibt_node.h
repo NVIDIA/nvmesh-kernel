@@ -45,7 +45,6 @@ struct nvmeibt_node {
 	int									n_disks_needed_for_vol;
 	bool 								is_my_node;
 	bool								append_entries_rep_was_not_sent;
-	struct xdlist						topo_link;
 	int									config_tag;
 	int									serialization_signature;
 	struct nvmeibt_raft_member			*raft_member;

@@ -37,7 +37,7 @@ static void nic_remove(struct nvmeibt_nic *nic)
 
 	N_Tf(djuiry5, "Removing nic=@UUID_LE", nvmeibt_nic_UUID(nic));
 
-	NNVMEIBT_HASH_DEL_OBJ(yaioqle, &nvmeibt_global_get_global()->nics_hash, nic, nic);
+	NNVMEIBT_HASH_DEL_OBJ_new(yaioqle, nvmeibt_global_get_global()->nics_hash_by_uuid, nic, nic);
 	NNVMEIBT_TOMA_FREE(gjiuy86, nic);
 
 out:
@@ -54,7 +54,6 @@ enum nvmeibt_add_rv nvmeibt_nic_add(struct mm_nic_conf *conf, struct mm_node_con
 	NFIN;
 
 	new_nic = NNVMEIBT_TOMA_CALLOC(trace_1_nic_nvmeibt_nic_add, 1, sizeof *new_nic);
-	XDLIST_INIT_LINK(&new_nic->topo_link, NULL);
 
 	// "uuid","version","node_uuid","guid","partition_key","protocol"
 	// fe800000-0000-0000-e41d-2d03001f9341,77777,44444444-4444-4444-4444-444444444444,0xfe80000000000000e41d2d03001f9341,65535,Infiniband
@@ -75,8 +74,8 @@ enum nvmeibt_add_rv nvmeibt_nic_add(struct mm_nic_conf *conf, struct mm_node_con
 	default: nvmeibt_strlcpy(f->protocol, "Unknown", sizeof(f->protocol));  break;
 	}
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(fkiut86,
-					&nvmeibt_global_get_global()->nics_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(fkiut86,
+					nvmeibt_global_get_global()->nics_hash_by_uuid,
 					new_nic,
 					config_tag,
 					NVMEIBT_MAX_N_NICS, nic, nic);
@@ -120,7 +119,7 @@ void nvmeibt_nic_trim_unused_entries(int config_tag)
 {
 	struct nvmeibt_nic		*nic;
 
-	XHASHTABLE_FOR_EACH_SAFE(nic, &nvmeibt_global_get_global()->nics_hash) {
+	NVMEIB_HASH_FOREACH(nic, nvmeibt_global_get_global()->nics_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(nic, config_tag)) {
 			N_Tf(tt922bx, "drop nic: @UUID_LE with config tag @INT<@INT", nvmeibt_nic_UUID(nic), nic->config_tag, config_tag);
 			NVMEIBT_OBJ_MARK_OUTDATED(fhy76r5, nic, nic);
@@ -138,7 +137,7 @@ bool nvmeibt_nic_is_roce(enum nvmeib_rdma_transport transport)
 void nvmeibt_nic_free_all_at_exit(void)
 {
 	struct nvmeibt_nic		*nic;
-	XHASHTABLE_FOR_EACH_SAFE(nic, &nvmeibt_global_get_global()->nics_hash) {
-		nic_remove(nic);
+	NVMEIB_HASH_FOREACH(nic, nvmeibt_global_get_global()->nics_hash_by_uuid) {
+		NNVMEIBT_TOMA_FREE(ka90kxq, nic);
 	}
 }

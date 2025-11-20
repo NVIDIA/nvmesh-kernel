@@ -2455,7 +2455,7 @@ static bool is_srm_ready_to_accept_the_new_msgs(bool is_with_raft_log)
 		goto out;
 	}
 	N_Tf(ysb38kw, "Timeout expired. Canceling all prev sends. tx_remained=@INT, timeout=@INT64 ms", cur_topo->in_transmission_cnt, NSEC_TO_MSEC(diff_timeout_nsec));
-	XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
+	NVMEIB_HASH_FOREACH(node, cur_topo->nodes_hash_by_uuid) {
 		if (!nvmeibt_node_is_my_node(node)) {
 			nvmeibt_node_cancel_send(node);
 		}
@@ -3706,7 +3706,7 @@ void nvmeibt_raft_calc_timeouts_based_on_IIRs(void)
 	nvmeib_basic_statistics_reset(&append_entries_scaling_stats, "APPEND_ENTRIES_scaling");
 	nvmeib_basic_statistics_reset(&append_entries_degrading_stats, "APPEND_ENTRIES_degrading");
 	nvmeib_basic_statistics_reset(&append_entries_exceptional_stats, "APPEND_ENTRIES_exceptional");
-	XHASHTABLE_FOR_EACH_SAFE(node, &(nvmeibt_global_get_global()->nodes_hash)) {  // Go over all the nodes (except for me)
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {  // Go over all the nodes (except for me)
 		n_nodes++;
 		if (nvmeibt_node_is_my_node(node)) {	// Exclude myself. Both the ping and the append_entries should be shorter for self
 			continue;
@@ -3840,7 +3840,7 @@ void nvmeibt_raft_reset_leader_calculated_IIRs(void)
 	struct nvmeibt_node		*node;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(node, &(nvmeibt_global_get_global()->nodes_hash)) {
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		// Re learn the append_entries stats. It might be that many volumes were added since the last time I was a leader
 		nvmeibt_node_reset_IIRs(node, 0);
 	}

@@ -40,7 +40,7 @@ static void nvmeibt_node_remove(struct nvmeibt_node *node)
 	N_Tf(jeu2291, "Removing node=@UUID_LE", nvmeibt_node_UUID(node));
 	nvmeibt_raft_unlink_member_from_node(NULL, node);
 
-	NNVMEIBT_HASH_DEL_OBJ(trace_1_node_nvmeibt_node_remove, &cur_topo->nodes_hash, node, node);
+	NNVMEIBT_HASH_DEL_OBJ_new(vts5unc, cur_topo->nodes_hash_by_uuid, node, node);
 	NNVMEIBT_BM_FREE(trace_2_node_nvmeibt_node_remove, node);
 
 out:
@@ -56,7 +56,6 @@ enum nvmeibt_add_rv nvmeibt_node_add(struct mm_node_conf *conf, int config_tag)
 	NFIN;
 
 	new_node = NNVMEIBT_BM_CALLOC(trace_node_nvmeibt_node_add, sizeof *new_node);
-	XDLIST_INIT_LINK(&new_node->topo_link, NULL);
 
 	f = &(new_node->from_config);
 
@@ -71,8 +70,8 @@ enum nvmeibt_add_rv nvmeibt_node_add(struct mm_node_conf *conf, int config_tag)
 		goto out;
 	}
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(trace_1_node_nvmeibt_node_add,
-					&nvmeibt_global_get_global()->nodes_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(4vnfcus,
+					nvmeibt_global_get_global()->nodes_hash_by_uuid,
 					new_node,
 					config_tag,
 					NVMEIBT_MAX_N_NODES, node, node);
@@ -121,11 +120,11 @@ void nvmeibt_node_locate_my_node(void)
 
 	NFIN;
 
-	N_Tf(trace_node_nvmeibt_node_locate_my_node, "n_nodes=@N_ELEMENTS", NVMEIBT_HASH_N_OBJS(&cur_topo->nodes_hash));
-	if (NVMEIBT_HASH_N_OBJS(&cur_topo->nodes_hash) == 0) {
+	N_Tf(trace_node_nvmeibt_node_locate_my_node, "n_nodes=@N_ELEMENTS", nvmeib_hash_get_n_elements(cur_topo->nodes_hash_by_uuid));
+	if (nvmeib_hash_get_n_elements(cur_topo->nodes_hash_by_uuid) == 0) {
 		goto out;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
+	NVMEIB_HASH_FOREACH(node, cur_topo->nodes_hash_by_uuid) {
 		f = &node->from_config;
 		N_Tf(nvmeibt_node_locate_my_node_1, "comparing @STR to @STR", f->name, nvmeibt_get_my_hostname());
 		if (!strncmp(f->name, nvmeibt_get_my_hostname(), sizeof(f->name))) {
@@ -197,7 +196,7 @@ struct nvmeibt_node *nvmeibt_node_get_node_by_id(const union nvmeib_uuid *id)
 {
 	struct nvmeibt_node *node;
 
-	node = NNVMEIBT_HASH_GET_OBJ_BY_UUID(trace_node_nvmeibt_node_get_node_by_id, &nvmeibt_global_get_global()->nodes_hash, id, node);
+	node =  nvmeib_hash_search_uuid(nvmeibt_global_get_global()->nodes_hash_by_uuid, id);
 
 	if (node == NULL) {
 		N_Tf(jiy9336, "Node not found id=@UUID_LE", id);
@@ -235,10 +234,9 @@ int conn_state_switch_cb_wrapper(struct nvmeibt_node *node, void *arg,
 void nvmeibt_node_trim_unused_entries(int config_tag)
 {
 	struct nvmeibt_node		*node;
-	struct nvmeibt_topology	*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(node, config_tag)) {
 			N_Tf(skqo227, "drop node: @UUID_LE with config tag @INT<@INT", nvmeibt_node_UUID(node), node->config_tag, config_tag);
 			/*
@@ -255,7 +253,7 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 			nvmeibt_topology_detach_all_disks_from_node(node);
 			nvmeibt_topology_detach_all_nics_from_node(node);
 			//			nvmeibt_raft_node_was_removed(node);
-			if (cur_topo->my_node == node) {
+			if (nvmeibt_global_get_my_node() == node) {
 				node->is_my_node = 0;
 				nvmeibt_global_set_my_node(NULL);
 			}
@@ -269,8 +267,8 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 void nvmeibt_node_free_all_at_exit(void)
 {
 	struct nvmeibt_node		*node;
-	XHASHTABLE_FOR_EACH_SAFE(node, &nvmeibt_global_get_global()->nodes_hash) {
-		nvmeibt_node_remove(node);
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
+		NNVMEIBT_BM_FREE(wixjby2, node);
 	}
 }
 

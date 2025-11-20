@@ -24,7 +24,6 @@ struct nvmeibt_nic {
 	struct nvmeibt_node				*its_node;
 	void							*tx_conn_ctx;	// Used by ib to send messages to this nic
 	enum nvmeib_rdma_transport		transport;
-	struct xdlist					topo_link;
 	int								config_tag;
 };
 
