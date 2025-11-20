@@ -743,6 +743,7 @@ static void terminate_toma(int rv)
 		if (srvr_rv)
 			syslog(LOG_INFO, "TOMA attempt to stop nvmesh target failed, rv=%d\n", rv);
 	}
+	nvmeib_hash_free_all_tables();
 
 	syslog(LOG_INFO, "TOMA Exit\n");
 	fprintf(stderr, "TOMA Exit\n");
