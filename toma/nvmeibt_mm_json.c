@@ -1074,7 +1074,6 @@ void serialize_mm_mgmt_conf_itself(struct mm_mgmt_conf *mgmt_conf, char *eyecatc
 
 static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vols, void *end_of_buf_p)
 {
-	struct nvmeibt_topology							*cur_topo = nvmeibt_global_get_global();
 	int												i, j;
 	int												n_vols, n_chunks, n_praids, n_segs;
 	struct nvmeibt_block_device						*blkdev;
@@ -1088,7 +1087,7 @@ static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vo
 	n_praids = 0;
 	n_segs = 0;
 
-	XHASHTABLE_FOR_EACH_SAFE(blkdev, &cur_topo->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev))
 			continue;
 		n_vols++;
@@ -1154,7 +1153,7 @@ static int generate_vols_kafka_mgmt_config_wire(void *wire_out_p, uint32_t *tota
 	int												total_size = 0;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(vol, &nvmeibt_global_get_global()->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(vol, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(vol) || nvmeibt_blkdev_is_being_deleted(vol))
 			continue;
 		n_vols++;
