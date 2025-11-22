@@ -533,13 +533,6 @@ enum can_handle_res {
 	NORDDA_DEFER,
 };
 
-struct nordda_io_cmd_work {
-	struct workqe_struct work;
-	struct nvmeibs_nr_channel *nrch;
-	struct nvmeib_iu *send_ioctx;
-	struct nvmeib_iu *recv_ioctx;
-};
-
 int nvmeibs_nordda_add_work(struct nvmeibs_nr_channel *nrch,
 	struct workqe_struct *work)
 {
@@ -2925,10 +2918,9 @@ static void attempt_handle_pending_recv(struct nvmeibs_nr_channel *nrch)
 
 static void io_cmd_process_work(struct workqe_struct *work)
 {
-	struct nordda_io_cmd_work *w =
-		container_of(work, struct nordda_io_cmd_work, work);
-	struct nvmeibs_nr_channel *nrch = w->nrch;
-	struct nvmeib_iu *recv_ioctx = w->recv_ioctx;
+	struct nvmeib_iu *recv_ioctx = container_of(work, struct nvmeib_iu, work);
+	struct nvmeibs_net *net = recv_ioctx->owner_ptr;
+	struct nvmeibs_nr_channel *nrch = net->params.nrch;
 	struct volume_client_req *req = recv_ioctx->buf;
 	NFIN;
 
@@ -2940,34 +2932,22 @@ static void io_cmd_process_work(struct workqe_struct *work)
 		post_recv_iu(nrch, recv_ioctx);
 	}
 
-	kfree(w);
 	NFOUT;
 }
 
 static inline void io_cmd_defer(struct nvmeibs_nr_channel *nrch,
 	struct nvmeib_iu *recv_ioctx)
 {
-	struct nordda_io_cmd_work *w = NULL;
 	NFIN;
 
-	w = kzalloc(sizeof(*w), GFP_ATOMIC);
-	if (!w) {
-		_NE(error_nordda_io_cmd_defer, "Memory Allocation Failure");
-		goto err;
-	}
-
-	WQ_INIT_WORK(&w->work, io_cmd_process_work);
-	w->nrch = nrch;
-	w->recv_ioctx = recv_ioctx;
-	if (nvmeibs_nordda_add_work(nrch, &w->work) < 0) {
+	WQ_INIT_WORK(&recv_ioctx->work, io_cmd_process_work);
+	if (nvmeibs_nordda_add_work(nrch, &recv_ioctx->work) < 0) {
 		_NE(error_1_nordda_io_cmd_defer, "Fail to add work");
 		goto err;
 	}
 	goto out;
 
 err:
-	if (w)
-		kfree(w);
 
 	post_recv_iu(nrch, recv_ioctx);
 
