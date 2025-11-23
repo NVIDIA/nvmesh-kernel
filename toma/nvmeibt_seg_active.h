@@ -40,7 +40,7 @@ struct stale_lock_ctx {
  */
 struct nvmeibt_seg_active_awaited_lockid {
 	XDLIST_DECLARE(, struct nvmeibt_registrant_awaiting_lockid, awaiting_lockid_link) awaiting_registrants;
-	struct xdlist 								awaited_lockids_link;
+//	struct xdlist 								awaited_lockids_link;
 	union nvmeib_lock_id						lockid_key;
 };
 
@@ -77,8 +77,6 @@ enum SERJIO_CLEAN_RANGE_STATE {
 	SERJIO_CLEAN_RANGE_STATE_DONE_DELETED	= (0x1 << 4),
 };
 
-#define REGISTRANTS_HASH_SIZE (NVMEIBT_MAX_N_CLIENTS_PER_DISK_SEGMENT >> 2)
-
 /*
  * Holds the live state of an active local segments:
  * registrants, ongoing recoveries, FILL MORE HERE
@@ -93,8 +91,8 @@ struct nvmeibt_seg_active {
 	struct nvmeib_hash_table					*active_registrants_hash_by_handle;	// Why by cid and not by client_messaging_handle
 																					// There should be at most one with the cid. Still need to verify identical client_messaging_handle
 	struct nvmeib_hash_table					*stale_registrants_hash_by_purified_lockid;
-	XHASHTABLE_DECLARE(stale_locks_hash_by_seg_blkset_no,           struct stale_lock_ctx,                    seg_active_link,      NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE) + 1);	// EC after unreg, record all registrants' stale-locks
-	XHASHTABLE_DECLARE(awaited_lockids_hash_by_lockid,            struct nvmeibt_seg_active_awaited_lockid, awaited_lockids_link, NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
+	struct nvmeib_hash_table					*stale_locks_hash_by_seg_blkset_no;
+	struct nvmeib_hash_table					*awaited_lockids_hash_by_lockid;
 	XDLIST_DECLARE(, struct nvmeibt_registrant_ctx, registrant_on_timeout_link) registrants_on_timeout;	// Always add last
 	XDLIST_DECLARE(, struct nvmeibt_wq_entry, link) owner_lock_ids_to_release;
 	//
@@ -560,7 +558,7 @@ static inline int nvmeibt_seg_active_n_longing_registrants(const struct nvmeibt_
 	{ return (seg_active ? nvmeib_hash_get_n_elements(seg_active->longing_registrants_hash_by_handle) : 0); }
 
 static inline int nvmeibt_seg_active_n_awaited_lockids(const struct nvmeibt_seg_active *seg_active)
-	{ return (seg_active ? XHASHTABLE_N_ELEMENTS(&seg_active->awaited_lockids_hash_by_lockid) : 0); }
+	{ return (seg_active ? nvmeib_hash_get_n_elements(seg_active->awaited_lockids_hash_by_lockid) : 0); }
 
 static inline BOOL nvmeibt_seg_active_is_any_recovery_in_the_air(struct nvmeibt_seg_active *seg_active)
 {

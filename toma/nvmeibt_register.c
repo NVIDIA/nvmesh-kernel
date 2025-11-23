@@ -1301,18 +1301,12 @@ void add_awaiting_lockid_recipient(
 		nvmeib_lockid_purify(stale_lock_id), registrant_ctx->client_messaging_handle, registrant_ctx);
 
 	// Check if we have this lockid in the hash, if so add this reigstrant as ANOTHER recipient in the list.
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(awaited_lockid, &seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(stale_lock_id)) {
-		if (nvmeib_lockid_are_purified_eq(awaited_lockid->lockid_key, stale_lock_id)) {
-			N_Tf(fjui8t2, "Found @SEG_ACTIVE_N_AWAITED_LOCKIDS recipients awaiting lockid=@T_LID already, adding handle=@HANDLE to it's list",
-				nvmeibt_seg_active_n_awaited_lockids(seg_active),
-				nvmeib_lockid_purify(stale_lock_id),
-				registrant_ctx->client_messaging_handle);
-			break; // We got the current recipients list for the given lock_id.
-		}
-	}
-
-	if (!nvmeib_lockid_are_purified_eq(awaited_lockid->lockid_key, stale_lock_id)) {
-		awaited_lockid = NULL; // Must nullify explicitly, otherwise we can exit loop with invalid pointer...
+	awaited_lockid = nvmeib_hash_search_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(stale_lock_id));
+	if (awaited_lockid) {
+		N_Tf(fjui8t2, "Found @SEG_ACTIVE_N_AWAITED_LOCKIDS recipients awaiting lockid=@T_LID already, adding handle=@HANDLE to it's list",
+			nvmeibt_seg_active_n_awaited_lockids(seg_active),
+			nvmeib_lockid_purify(stale_lock_id),
+			registrant_ctx->client_messaging_handle);
 	}
 
 	// If this is the first recipient to currently wait for this lock_id, we need to initialize the recipients list.
@@ -1320,7 +1314,7 @@ void add_awaiting_lockid_recipient(
 		awaited_lockid = NNVMEIBT_BM_ALLOC(trace_2_register_add_awaiting_lockid_recipient, sizeof(*awaited_lockid));
 		awaited_lockid->lockid_key = stale_lock_id;
 		XDLIST_HEAD_INIT(&awaited_lockid->awaiting_registrants);
-		XHASHTABLE_ADD(&seg_active->awaited_lockids_hash_by_lockid, awaited_lockid, nvmeib_lockid_purify(stale_lock_id));
+		nvmeib_hash_add_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(stale_lock_id), awaited_lockid);
 		N_Tf(trace_3_register_add_awaiting_lockid_recipient, "init recipients list for lock_id=@T_LID", nvmeib_lockid_purify(stale_lock_id));
 	}
 
@@ -1353,7 +1347,7 @@ static void search_stale_lock_hash_and_fill_response_cuuid(
 	// For now, we simply scan all the stale_locks of a seg. If needed, we can add a hash by lockid for this
 	lock_stale_locks_hash(seg_active);
 	TODO(Add seg_active->stale_locks_hash_by_seg_blkset_no and search directly);
-	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &(seg_active->stale_locks_hash_by_seg_blkset_no)) {
+	NVMEIB_HASH_FOREACH(stale_lock, seg_active->stale_locks_hash_by_seg_blkset_no) {
 		N_Tf(gkit954, "seg=@UUID_8 comparing @X with @X",
 			nvmeibt_seg_active_UUID_8(seg_active),
 			nvmeib_lockid_purify(stale_lock->reg_ctx->reg_lock_id),
@@ -1984,51 +1978,46 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 		nvmeib_lockid_purify(reg_ctx->reg_lock_id),
 		nvmeibt_seg_active_n_awaited_lockids(seg_active));
 
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(awaited_lockid, &seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id)) {
+	awaited_lockid = nvmeib_hash_search_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+	if (awaited_lockid) {
 		N_Tf(bvhht73, "client handle=@HANDLE reg_lock_id=@C_LID pending list size=@SIZE",
-			reg_ctx->client_messaging_handle,
-			nvmeib_lockid_purify(reg_ctx->reg_lock_id),
-			XDLIST_N_ELEMNTS(&(awaited_lockid->awaiting_registrants)));
-		if (nvmeib_lockid_are_purified_eq(awaited_lockid->lockid_key, reg_ctx->reg_lock_id)) {
-			// Go over the list of all the recipients that are expected to know that this given lockid was dropped.
-			XDLIST_FOREACH_SAFE(awaiting_registrant_wrapper, &(awaited_lockid->awaiting_registrants)) {
-				struct nvmeibt_registrant_ctx *awaiting_reg_ctx = awaiting_registrant_wrapper->reg_ctx;
+			 reg_ctx->client_messaging_handle, nvmeib_lockid_purify(reg_ctx->reg_lock_id), XDLIST_N_ELEMNTS(&(awaited_lockid->awaiting_registrants)));
 
-				// Create a response payload - containing the original lock_id that the registrant complained about. (with stale bits on)
-				struct nvmeibt_cleaned_stalock_info response_payload;
-				response_payload.lock_id = awaiting_registrant_wrapper->stale_lockid_provided_by_registrant.all;
-				search_stale_lock_hash_and_fill_response_cuuid(seg_active, &response_payload, reg_ctx->reg_lock_id);
+		// Go over the list of all the recipients that are expected to know that this given lockid was dropped.
+		XDLIST_FOREACH_SAFE(awaiting_registrant_wrapper, &(awaited_lockid->awaiting_registrants)) {
+			struct nvmeibt_registrant_ctx *awaiting_reg_ctx = awaiting_registrant_wrapper->reg_ctx;
 
-				N_Tf(ddhhuu5, "Sending NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED to handle=@HANDLE on seg=@UUID_8 lock_id=@T_LID",
-					awaiting_reg_ctx->client_messaging_handle, nvmeibt_seg_active_UUID_8(seg_active), response_payload.lock_id);
-				TODO(actually, we can send the LOCK_CLEANED right after we know the client is unregistered. But make sure that the client only work with stale-locks);
-				if (nvmeibt_register_send_msg_to_registrant(awaiting_reg_ctx,
-															NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED,
-															NVMEIBT_CLIENT_TR_REASON_NONE,
-															sizeof(response_payload),
-															&response_payload) < 0) {
-					N_Wf(cc667qs, "Unable to send lockid_dropped for @LOCKID on seg=@UUID_8 clnt_host=@STR",
-						nvmeib_lockid_purify(awaiting_reg_ctx->reg_lock_id),
-						nvmeibt_seg_active_UUID_8(seg_active),
-						awaiting_reg_ctx->client->net.host_name);
-				}
-				// Delete the wrapper from both lists in the registrant and in the list of those awaiting lockid X removal.
-				XDLIST_DEL(&awaiting_registrant_wrapper->awaiting_lockid_link);
-				XDLIST_DEL(&awaiting_registrant_wrapper->registrant_link);
-				// Free the wrapper struct as it is no longer needed.
-				NNVMEIBT_BM_FREE(trace_4_register_registrant_disconnect_finalize, awaiting_registrant_wrapper);
+			// Create a response payload - containing the original lock_id that the registrant complained about. (with stale bits on)
+			struct nvmeibt_cleaned_stalock_info response_payload;
+			response_payload.lock_id = awaiting_registrant_wrapper->stale_lockid_provided_by_registrant.all;
+			search_stale_lock_hash_and_fill_response_cuuid(seg_active, &response_payload, reg_ctx->reg_lock_id);
+
+			N_Tf(ddhhuu5, "Sending NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED to handle=@HANDLE on seg=@UUID_8 lock_id=@T_LID",
+				 awaiting_reg_ctx->client_messaging_handle, nvmeibt_seg_active_UUID_8(seg_active), response_payload.lock_id);
+			TODO(actually, we can send the LOCK_CLEANED right after we know the client is unregistered. But make sure that the client only work with stale-locks);
+			if (nvmeibt_register_send_msg_to_registrant(awaiting_reg_ctx,
+														NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED,
+														NVMEIBT_CLIENT_TR_REASON_NONE,
+														sizeof(response_payload),
+														&response_payload) < 0) {
+				N_Wf(cc667qs, "Unable to send lockid_dropped for @LOCKID on seg=@UUID_8 clnt_host=@STR",
+					 nvmeib_lockid_purify(awaiting_reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active),
+					 awaiting_reg_ctx->client->net.host_name);
 			}
-			XHASHTABLE_DEL(&seg_active->awaited_lockids_hash_by_lockid, &awaited_lockid->awaited_lockids_link);
-			NNVMEIBT_BM_FREE(trace_5_register_registrant_disconnect_finalize, awaited_lockid);
-
-			break;
+			// Delete the wrapper from both lists in the registrant and in the list of those awaiting lockid X removal.
+			XDLIST_DEL(&awaiting_registrant_wrapper->awaiting_lockid_link);
+			XDLIST_DEL(&awaiting_registrant_wrapper->registrant_link);
+			// Free the wrapper struct as it is no longer needed.
+			NNVMEIBT_BM_FREE(trace_4_register_registrant_disconnect_finalize, awaiting_registrant_wrapper);
 		}
+		nvmeib_hash_delete_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+		NNVMEIBT_BM_FREE(trace_5_register_registrant_disconnect_finalize, awaited_lockid);
 	}
 
 	// go over all the hash and all the lists inside and delete disconnected registrant from
 	// all the waiting lists - since it is now disconnected and won't be able to get any reply - EVER!
 	awaited_lockid = NULL;
-	XHASHTABLE_FOR_EACH_SAFE(awaited_lockid, &seg_active->awaited_lockids_hash_by_lockid) {
+	NVMEIB_HASH_FOREACH(awaited_lockid, seg_active->awaited_lockids_hash_by_lockid) {
 		N_Tf(registrant_disconnect_finalize_1, "Clearing disconnected registrants for lockid=@T_LID num_recipients=@INT",
 			nvmeib_lockid_purify(awaited_lockid->lockid_key), XDLIST_N_ELEMNTS(&(awaited_lockid->awaiting_registrants)));
 		TODO(Convert XDLIST awaited_lockid->awaiting_registrants to awaited_lockid->awaiting_registrants_hash_by_client_messaging_handle. Well, usually there are very few);
@@ -2046,7 +2035,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 		}
 		// If this was the last recipient for some lockid - we remove its entry from the hash.
 		if (XDLIST_EMPTY(&(awaited_lockid->awaiting_registrants))) {
-			XHASHTABLE_DEL(&seg_active->awaited_lockids_hash_by_lockid, &awaited_lockid->awaited_lockids_link);
+			nvmeib_hash_delete_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(awaited_lockid->lockid_key));
 		}
 	}
 
