@@ -94,7 +94,7 @@ struct nvmeibt_topology {
 	XHASHTABLE_DECLARE(, struct nvmeibt_block_device, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_BLOCK_DEVICES))	block_devices_hash;
 	XHASHTABLE_DECLARE(, struct nvmeibt_nic, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_NICS))			nics_hash;
 	XHASHTABLE_DECLARE(, struct nvmeibt_disk, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_DISKS))			disks_hash;
-	XHASHTABLE_DECLARE(, struct nvmeibt_disk_segment, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_DISK_SEGMENTS))	disk_segments_hash;
+	struct nvmeib_hash_table			*disk_segments_hash_by_uuid;
 	XHASHTABLE_DECLARE(, struct nvmeibt_praid, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_PRAIDS))		praids_hash;
 	XHASHTABLE_DECLARE(, struct nvmeibt_node, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_NODES))			nodes_hash;
 	XHASHTABLE_DECLARE(, struct nvmeibt_chunk, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_CHUNKS))		chunks_hash;
@@ -165,7 +165,7 @@ int nvmeibt_global_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...
 enum nvmeibt_add_rv nvmeibt_global_parse_MGMT_CONFIG_VERSION(struct mm_mgmt_conf *conf, bool is_updating_leader);
 
 #define NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(name, _counter_name) do {		\
-	int max_counter_threshold = XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->disk_segments_hash);	\
+	int max_counter_threshold = nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->disk_segments_hash_by_uuid);	\
 	int	*p_counter = &(nvmeibt_global_get_global()->_counter_name);			\
 	(*p_counter)++;															\
 	N_Tf(name ## _trace, #_counter_name"=@INT", *p_counter);				\

@@ -580,7 +580,7 @@ static int connect_disks_with_disk_segments(void)
 	XHASHTABLE_FOR_EACH_SAFE(disk, &cur_topo->disks_hash) {
 		disk->n_segments = 0;	// Reinitialize
 	}
-	XHASHTABLE_FOR_EACH_SAFE(disk_segment, &cur_topo->disk_segments_hash) {
+	NVMEIB_HASH_FOREACH(disk_segment, cur_topo->disk_segments_hash_by_uuid) {
 		struct nvmeibt_disk			*prev_disk = disk_segment->seg_mgmt.its_disk;
 
 		disk = NNVMEIBT_HASH_GET_OBJ_BY_UUID(dr56gr7, &cur_topo->disks_hash, &disk_segment->seg_mgmt.disk_id, disk);
@@ -936,7 +936,7 @@ void reset_all_conf_corrupted_flags(void) {
 
 	NFIN;
 	nvmeibt_clear_conf_corrupted();
-	XHASHTABLE_FOR_EACH_SAFE(disk_segment, &cur_topo->disk_segments_hash) {
+	NVMEIB_HASH_FOREACH(disk_segment, cur_topo->disk_segments_hash_by_uuid) {
 		disk_segment->is_conf_corrupted = 0;
 	}
 	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
@@ -1521,7 +1521,7 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 
 	NFIN;
 #if  0 // always take from the baseline, no need to reset. maybe take committed to baseline here (if not done by the prev func
-	XHASHTABLE_FOR_EACH_SAFE(disk_segment, &cur_topo->disk_segments_hash) {
+	NVMEIB_HASH_FOREACH(disk_segment, cur_topo->disk_segments_hash_by_uuid) {
 		nvmeibt_seg_lot_reset_topo_ctx(&disk_segment->seg_leader.calculated_seg_lot);
 	}
 #endif

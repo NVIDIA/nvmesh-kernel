@@ -158,7 +158,6 @@ enum nvmeibt_add_rv nvmeibt_disk_segment_add(struct mm_segment_conf *conf,
 	disk_segment = NULL;
 
 	new_disk_segment = NNVMEIBT_BM_CALLOC(fh57uw2, sizeof *new_disk_segment);
-	XDLIST_INIT_LINK(&new_disk_segment->topo_link, NULL);
 
 	f = &(new_disk_segment->from_config);
 	build_seg_from_config(f, conf, vol);
@@ -181,8 +180,8 @@ enum nvmeibt_add_rv nvmeibt_disk_segment_add(struct mm_segment_conf *conf,
 		goto out;
 	}
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(uy7uy43,
-							   &cur_topo->disk_segments_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(uy7uy43,
+							   cur_topo->disk_segments_hash_by_uuid,
 							   new_disk_segment,
 							   config_tag,
 							   NVMEIBT_MAX_N_DISK_SEGMENTS,
@@ -265,7 +264,7 @@ struct nvmeibt_disk_segment *nvmeibt_disk_segment_get_disk_segment_by_id(const u
 {
 	struct nvmeibt_disk_segment 	*disk_segment;
 
-	disk_segment = NNVMEIBT_HASH_GET_OBJ_BY_UUID(dcvt678, &nvmeibt_global_get_global()->disk_segments_hash, id, seg);
+	disk_segment = nvmeib_hash_search_uuid(nvmeibt_global_get_global()->disk_segments_hash_by_uuid, id);
 
 	if (disk_segment == NULL) {
 		N_Tf(p0o9w72, "Segment not found id=@UUID_LE", id);
@@ -683,7 +682,7 @@ enum nvmeibt_seg_remove_rv nvmeibt_disk_segment_remove(struct nvmeibt_disk_segme
 	}
 
 	// Remove from cur_topo
-	NNVMEIBT_HASH_DEL_OBJ(vf6789w, &nvmeibt_global_get_global()->disk_segments_hash, disk_segment, seg);
+	nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->disk_segments_hash_by_uuid, &(disk_segment->from_config.id));
 
 	if (!praid)
 		goto out_and_remove;
@@ -716,7 +715,7 @@ void nvmeibt_disk_segment_garbage_collect_old_segments(bool *is_any_garbage_coll
     *is_any_garbage_collected = 0;
     *is_all_garbage_collected = 1;
 	// Look for old segs, including orphans (not connected to praid, not even as replacement_topo_segs). Scan all segs.
-	XHASHTABLE_FOR_EACH_SAFE(seg, &nvmeibt_global_get_global()->disk_segments_hash) {
+	NVMEIB_HASH_FOREACH(seg, nvmeibt_global_get_global()->disk_segments_hash_by_uuid) {
 		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(seg)) {
 			continue;   // Only segments that were removed from config can be removed. Otherwise, we still need to report them to mgmt
 		}
@@ -763,7 +762,7 @@ void nvmeibt_disk_segment_trim_unused_entries(int config_tag, uint8_t trim_flag)
 	struct nvmeibt_disk_segment		*disk_segment;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(disk_segment, &nvmeibt_global_get_global()->disk_segments_hash) {
+	NVMEIB_HASH_FOREACH(disk_segment, nvmeibt_global_get_global()->disk_segments_hash_by_uuid) {
 		if (NVMEIBT_HASH_IS_OLDER_OBJ(disk_segment, config_tag)) {
 			nvmeibt_disk_segment_trim_specific_seg(disk_segment, trim_flag);
 		}

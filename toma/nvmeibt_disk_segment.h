@@ -83,7 +83,6 @@ struct nvmeibt_disk_segment {
 	struct nvmeibt_seg_mgmt						seg_mgmt;		
 	struct nvmeibt_seg_leader					seg_leader;		
 	struct nvmeibt_seg_follower					seg_follower;		
-	struct xdlist								topo_link;
 	struct xdlist								praid_all_segs_link;
 	int											config_tag;
 	BOOL										is_conf_corrupted;

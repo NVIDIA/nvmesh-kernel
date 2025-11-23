@@ -42,7 +42,7 @@ void nvmeibt_global_init(void)
 	XHASHTABLE_INIT(&(global_ctx.block_devices_hash));
 	XHASHTABLE_INIT(&(global_ctx.nics_hash));
 	XHASHTABLE_INIT(&(global_ctx.disks_hash));
-	XHASHTABLE_INIT(&(global_ctx.disk_segments_hash));
+	global_ctx.disk_segments_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw2, 3, "disk_segments_hash", 16);
 	XHASHTABLE_INIT(&(global_ctx.praids_hash));
 	XHASHTABLE_INIT(&(global_ctx.nodes_hash));
 	XHASHTABLE_INIT(&(global_ctx.chunks_hash));
