@@ -285,22 +285,22 @@ int start_trace_channel(trace_channel_t* self)
 	if ((self->meta.max_logs / 2) < self->priv.ncpus){
 		//a single file per CPU does not allow to have history. Let's stay wih the same disk usage, but smaller files.
 		//see INIT_TRACE_CFG documentation
-		uint32_t const MIN_LOG_FILES = 4; //on log rotate, preserve 75% of information
+		uint32_t const MIN_LOG_FILES_PER_CPU = 4; //on log rotate, preserve 75% of information
 		uint32_t const MIN_BUFS_PER_LOG = 64;
 		uint32_t const MAX_BUFS_PER_LOG = 4096;
 
 		uint32_t const total_bufs = self->meta.max_logs * self->meta.bufs_per_log;
 		uint32_t const total_bufs_per_cpu = total_bufs / self->priv.ncpus;
-		uint32_t const bufs_per_log = total_bufs_per_cpu / MIN_LOG_FILES;
+		uint32_t const bufs_per_log = total_bufs_per_cpu / MIN_LOG_FILES_PER_CPU;
 		
 		if (bufs_per_log < MIN_BUFS_PER_LOG){
-			self->meta.max_logs = MIN_LOG_FILES;
+			self->meta.max_logs = MIN_LOG_FILES_PER_CPU * self->priv.ncpus;
 			self->meta.bufs_per_log = MIN_BUFS_PER_LOG;
 		} else if (bufs_per_log <= MAX_BUFS_PER_LOG){
-			self->meta.max_logs = MIN_LOG_FILES;
+			self->meta.max_logs = MIN_LOG_FILES_PER_CPU * self->priv.ncpus;
 			self->meta.bufs_per_log = bufs_per_log;
 		} else { //unlikely - in this case we have small amount of huge files
-			self->meta.max_logs = total_bufs_per_cpu / MAX_BUFS_PER_LOG;
+			self->meta.max_logs = (total_bufs_per_cpu / MAX_BUFS_PER_LOG) * self->priv.ncpus;
 			self->meta.bufs_per_log = MAX_BUFS_PER_LOG;
 		}
 	}
