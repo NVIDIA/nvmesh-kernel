@@ -42,6 +42,7 @@ import os
 import sys
 import logging
 import heapq
+import glob
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -249,11 +250,39 @@ class PagerLog(BaseLogSource):
     """
     Implements the command-building and line-parsing for pager.py.
     """
-    def __init__(self, debug: bool = False):
+
+    def __init__(self, debug: bool = False, logs_dir: Optional[str] = None, custom_pager: Optional[str] = None):
         super().__init__(debug)
-        self.pager_path = '/var/log/nvmesh/trace_daemon/pager.py'
-        self.pager_cwd = '/var/log/nvmesh/trace_daemon'
         self.pager_time_format = "%Y-%m-%d %H:%M:%S"
+
+        # Define the standard relative path once
+        trace_daemon_rel_path = 'var/log/nvmesh/trace_daemon'
+
+        if logs_dir:
+            # Case 1: Offline Mode
+            # Construct full path: <logs_dir>/var/log/nvmesh/trace_daemon
+            base_path = os.path.join(logs_dir, trace_daemon_rel_path)
+
+            if os.path.isdir(base_path):
+                self.pager_cwd = base_path
+                # Default to pager.py inside this directory (unless overridden below)
+                default_pager_path = os.path.join(base_path, 'pager.py')
+            else:
+                # Fallback: Flat directory or non-standard structure
+                logger.warning(f"Standard log structure not found at {base_path}. Using logs_dir root.")
+                self.pager_cwd = logs_dir
+                default_pager_path = os.path.join(logs_dir, 'pager.py')
+
+            # Use custom pager if provided, otherwise use the default we resolved above
+            self.pager_path = custom_pager if custom_pager else default_pager_path
+
+            if self.debug:
+                logger.debug(f"Using offline pager: {self.pager_path} (CWD: {self.pager_cwd})")
+        else:
+            # Case 2: Live System
+            # Add leading slash to make it absolute: /var/log/nvmesh/trace_daemon
+            self.pager_cwd = f'/{trace_daemon_rel_path}'
+            self.pager_path = os.path.join(self.pager_cwd, 'pager.py')
 
     def fetch_logs(self, since: datetime, until: datetime) -> Generator[BaseLogEntry, None, None]:
         # Formats datetimes to strings
@@ -279,6 +308,117 @@ class PagerLog(BaseLogSource):
 
         ts = datetime.fromtimestamp(ts_nanoseconds / 1_000_000_000, tz=timezone.utc)
         return PagerLogEntry(timestamp=ts, raw_data=log_json)
+
+
+class JournalctlFileLog(BaseLogSource):
+    """
+    Parses an offline text file containing journalctl output.
+    Filters logs based on the provided 'identifiers' list.
+    """
+    def __init__(self, logs_dir: str, identifiers: List[str], debug: bool = False):
+        super().__init__(debug)
+        self.logs_dir = logs_dir
+        self.identifiers = identifiers  # store the allow-list
+        self.log_file = self._find_journal_file(logs_dir)
+
+        # Regex for: "Nov 23 09:28:12.421787 hostname identifier: message"
+        self.line_regex = re.compile(r'^([A-Z][a-z]{2}\s+\d+\s\d{2}:\d{2}:\d{2}\.\d{6})\s+\S+\s+([^:]+):\s+(.*)$')
+
+        # Regex to extract unit from systemd messages
+        self.systemd_unit_regex = re.compile(r'(Stopping|Stopped|Starting|Started)\s+([a-zA-Z0-9@_\-\.]+service)')
+
+    def _find_journal_file(self, logs_dir: str) -> Optional[str]:
+        # Prioritize current boot log
+        patterns = [
+            os.path.join(logs_dir, 'journalctl_curr_boot_log*'),
+            os.path.join(logs_dir, 'journalctl_prev_boot_log*'),
+            os.path.join(logs_dir, 'journalctl*')
+        ]
+        for pattern in patterns:
+            files = glob.glob(pattern)
+            if files:
+                return max(files, key=os.path.getsize)
+        return None
+
+    def fetch_logs(self, since: datetime, until: datetime) -> Generator[BaseLogEntry, None, None]:
+        if not self.log_file:
+            logger.error(f"No journalctl log file found in {self.logs_dir}")
+            return
+
+        logger.debug(f"Parsing offline journal log: {self.log_file}")
+
+        inferred_year = since.year
+
+        try:
+            with open(self.log_file, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    # [OPTIMIZATION] We now receive a 'stop' signal
+                    entry, should_stop = self._parse_line_context(line, since, until, inferred_year)
+
+                    if should_stop:
+                        # We passed the 'until' time, so we can stop reading the file entirely.
+                        break
+
+                    if entry:
+                        yield entry
+
+        except Exception as e:
+            logger.error(f"Error parsing journal file: {e}")
+
+    def _parse_line_context(self, line: str, since: datetime, until: datetime, year: int) -> tuple[
+        Optional[BaseLogEntry], bool]:
+        match = self.line_regex.match(line.strip())
+        if not match:
+            return None, False
+
+        ts_str, ident_raw, msg = match.groups()
+
+        # 1. Filter by Identifier
+        # Clean "systemd[1]" -> "systemd"
+        identifier = ident_raw.split('[')[0] if '[' in ident_raw else ident_raw
+
+        # Check against the passed identifiers list
+        if identifier not in self.identifiers:
+            return None, False
+
+        # 2. Parse Timestamp
+        try:
+            dt = datetime.strptime(ts_str, "%b %d %H:%M:%S.%f")
+            dt = dt.replace(year=year).astimezone()
+
+            if dt > until + timedelta(days=1):
+                dt = dt.replace(year=year - 1)
+
+            # 3. Time Window Filtering
+            if dt < since:
+                return None, False
+            if dt > until:
+                return None, True  # Stop reading
+
+        except ValueError:
+            return None, False
+
+        # 4. Construct Mock JSON Data
+        raw_data = {
+            'SYSLOG_IDENTIFIER': identifier,
+            'MESSAGE': msg,
+            '__REALTIME_TIMESTAMP': int(dt.timestamp() * 1_000_000),
+            'UNIT': None
+        }
+
+        #if self.debug: logger.debug(f"[_parse_line_context]: raw data is {raw_data}")
+
+        # 5. Extract UNIT for systemd
+        if identifier == 'systemd':
+            unit_match = self.systemd_unit_regex.search(msg)
+            if unit_match:
+                raw_data['UNIT'] = unit_match.group(2)
+
+        return JournalCTLLogEntry(timestamp=dt, raw_data=raw_data), False
+
+    def _parse_line(self, line: str) -> Optional[BaseLogEntry]:
+        # Not used directly because we utilize _parse_line_context inside fetch_logs
+        return None
 
 # ---------------------------------------------------------------------------
 #  LEVEL 4: NDU PHASE CLASSES (Composite Design)
@@ -919,6 +1059,11 @@ def init_argparse() -> argparse.ArgumentParser:
     analyze_parser = subparsers.add_parser('analyze', help='Analyze a past run from a given time window.')
     analyze_parser.add_argument('--since', required=True, help='Start timestamp (e.g., "HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS").')
     analyze_parser.add_argument('--until', help=f'Optional end timestamp. If not provided, defaults to {DEFAULT_ANALYSIS_WINDOW_SECONDS} seconds after --since.')
+
+    # offline analysis Arguments
+    analyze_parser.add_argument('--logs-dir', help='Path to collected logs directory (activates offline mode).')
+    analyze_parser.add_argument('--pager', help='Explicit path to pager executable (overrides default).')
+
     analyze_parser.set_defaults(func=handle_analyze_command)
 
     # --- Global arguments for all commands ---
@@ -946,51 +1091,53 @@ def parse_flexible_timestamp(timestamp_str: str, arg_name: str = "timestamp") ->
             logger.error("  Please use 'HH:MM:SS' or 'YYYY-MM-DDTHH:MM:SS'")
             sys.exit(1)
 
-def handle_analyze_command(args: argparse.Namespace) -> tuple[datetime, datetime]:
+def handle_analyze_command(args: argparse.Namespace) -> tuple[datetime, datetime, Optional[str], Optional[str]]:
     """
     Called by argparse if the 'analyze' command is used.
     Validates and parses the --since and --until timestamps.
-    Returns (since_dt, until_dt).
+    Returns (since_dt, until_dt, logs_dir, pager_path).
     """
-
     # 1. Parse --since (required=True by the parser)
     since_dt = parse_flexible_timestamp(args.since, arg_name="since")
 
     # 2. Calculate or parse --until
     if not args.until:
         until_dt = since_dt + timedelta(seconds=DEFAULT_ANALYSIS_WINDOW_SECONDS)
-    else:  # User provided --until
+    else:
         until_dt = parse_flexible_timestamp(args.until, arg_name="until")
 
-    return since_dt, until_dt
+    # 3. Extract offline args
+    logs_dir = args.logs_dir
+    pager_path = args.pager
 
-def handle_run_command(args: argparse.Namespace) -> tuple[None, None]:
+    return since_dt, until_dt, logs_dir, pager_path
+
+def handle_run_command(args: argparse.Namespace) -> tuple[None, None, None, None]:
     """
     Called by argparse if the 'run' command is used.
     Timestamps will be generated later in main().
     """
     # For 'run' mode, timestamps are determined *after*
     # the NDU commands execute, so we return None here.
-    return None, None
+    return None, None, None, None
 
-def parse_args_and_setup_logging(parser: argparse.ArgumentParser) -> tuple[argparse.Namespace, Optional[datetime], Optional[datetime]]:
+def parse_args_and_setup_logging(parser: argparse.ArgumentParser) -> tuple[argparse.Namespace, Optional[datetime], Optional[datetime], Optional[str], Optional[str]]:
     """
-    Parses args, sets up logging, and calls the command-specific handler
-    (attached via set_defaults) to get the timestamps. If --run is used, timestamps will be None.
+    Parses args, sets up logging, and calls the command-specific handler.
+    Returns args, since, until, logs_dir, pager_path.
     """
     args = parser.parse_args()
 
     # --- Setup Logging ---
-    log_level = logging.DEBUG if args.debug else logging.INFO
     # Use force=True to override any default config and ensure --debug level is set
+    log_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s', stream=sys.stderr, force=True)
 
     # --- Argument Validation & Time Setup ---
     # Call the function that argparse stored in 'args.func'.
-    # This will be either handle_analyze_command() or handle_run_command().
-    since_dt, until_dt = args.func(args)
+    since_dt, until_dt, logs_dir, pager_path = args.func(args)
 
-    return args, since_dt, until_dt
+    return args, since_dt, until_dt, logs_dir, pager_path
 
 def execute_ndu_and_get_times(poll_timeout_seconds: int) -> tuple[datetime, datetime]:
     """
@@ -1040,17 +1187,37 @@ def process_log_stream(
 
 def main():
     parser = init_argparse()
-    args, since_dt, until_dt = parse_args_and_setup_logging(parser)
+    # Unpack the new variables
+    args, since_dt, until_dt, logs_dir, pager_path = parse_args_and_setup_logging(parser)
 
     # --- This is the new "root" object of the hierarchy ---
     ndu_analysis = setup_ndu_phases(args)
 
+    # These are the only identifiers we care about for the analysis
+    target_identifiers = ['systemd', 'nvmeshclient']
     # --- Get Log Sources ---
-    journal_source = JournalctlLog(
-        identifiers=['systemd', 'nvmeshclient'],
-        debug=args.debug
+    if logs_dir:
+        logger.info(f"Using offline mode with logs directory: {logs_dir}")
+        # Use the file parser for journalctl
+        journal_source = JournalctlFileLog(
+            logs_dir=logs_dir,
+            identifiers=target_identifiers,
+            debug=args.debug
+        )
+    else:
+        # Use the live command line parser
+        journal_source = JournalctlLog(
+            identifiers=target_identifiers,
+            debug=args.debug
+        )
+
+    # Pass the offline args to PagerLog
+    pager_source = PagerLog(
+        debug=args.debug,
+        logs_dir=logs_dir,
+        custom_pager=pager_path
     )
-    pager_source = PagerLog(debug=args.debug)
+
     log_sources = [journal_source, pager_source]
 
     # --- Run/Analyze Logic ---
