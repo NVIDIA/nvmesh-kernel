@@ -246,6 +246,25 @@ static void add_seg_lot_to_praid_lot(struct nvmeibt_seg_lot *seg_lot)
 	}																					\
 })
 
+#define UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG_new(_name, _conf, _config_tag, _obj_hash, _rv, _obj_to_upd_type)        \
+({																						\
+	_obj_to_upd_type					*_obj;											\
+																						\
+	_obj = nvmeib_hash_search_uuid(_obj_hash, &_conf->uuid);							\
+	if (_obj) {																			\
+		if (!NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(_obj)) {								\
+			_obj->config_tag = _config_tag;												\
+			_obj->trim_flags &= ~CONFIG_TRIM_TOPO;										\
+			_rv = NVMEIBT_ADD_MODIFIED;													\
+		} else {																		\
+			_rv = NVMEIBT_ADD_SKIPPED;													\
+		}																				\
+	}																					\
+	else {																				\
+		_rv = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;										\
+	}																					\
+})
+
 int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is_updating_leader)
 {
 	int								i, j, k;
@@ -472,7 +491,7 @@ int nvmeibt_read_config_apply_vol_committed_topo_conf(struct mm_mgmt_conf *conf,
 
 					nvmeibt_seg_update_committed_lot_config(seg, praid, vol, praid_out, &seg_out);
 					if (seg_out) {
-						UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG(y57dnj2, seg, vol_config_tag, &cur_topo->disk_segments_hash, add_rv, seg);
+						UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG_new(y57dnj2, seg, vol_config_tag, cur_topo->disk_segments_hash_by_uuid, add_rv, struct nvmeibt_disk_segment);
 						VALIDATE_ADD_RV(9sa93op, add_rv, seg);
 						add_seg_lot_to_praid_lot(&seg_out->seg_follower.committed_seg_lot);
 					}
