@@ -81,12 +81,14 @@ int nvmeib_srq_pool_create(struct nvmeib_dev *dev, int pool_size, struct nvmeib_
 	(void)dev; (void)pool_size; (void)prim_q_params; (void)sec_qs_params; (void)memmgr_metrics_ctx; return 0;
 }
 
-struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs, u64 max_burst_size, int max_percent_cpu){
-	struct nvmeib_intr_shaper *shaper = kzalloc(sizeof(*shaper), GFP_KERNEL);
-	(void)frame_size_usecs; (void)max_burst_size; (void)max_percent_cpu;
-	return shaper;
+static struct nvmeib_intr_shaper intr_shaper;
+
+struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs){
+	(void)frame_size_usecs;
+	return &intr_shaper;
 }
-void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper){ kfree(shaper); }
+struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void){ return &intr_shaper; }
+void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper){ BUG_ON(shaper != &intr_shaper); }
 void nvmeib_dump_buf(const void *buf, int len){ (void)buf; (void)len; BUG(); }
 
 /*************************** common/nvmeib_wd.h *******************************/
