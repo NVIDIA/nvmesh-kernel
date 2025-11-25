@@ -3111,7 +3111,7 @@ static void __nordda_recv_completion(struct ib_cq *cq,
 	__NFIN;
 
 	BUG_ON(nvmeibs_use_pcpu_cq);
-	if (nvmeibs_defer_recv_comps && nvmeib_intr_shaper_in_intr(s_intr_shaper)) {
+	if (nvmeibs_defer_recv_comps) {
 		defer = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 	}
 poll_again:
@@ -3135,7 +3135,7 @@ poll_again:
 					_NE(error_nordda_nordda_recv_completion, "Got null recv_ioctx");
 			}
 		}
-		if (nvmeibs_defer_recv_comps && nvmeib_intr_shaper_in_intr(s_intr_shaper)) {
+		if (nvmeibs_defer_recv_comps) {
 			nvmeib_intr_shaper_intr_polled(s_intr_shaper, n);
 			defer = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 		}

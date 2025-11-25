@@ -1,4 +1,5 @@
 #include "nvmeib.h"
+#include "linux/preempt.h"
 #include "nvmeib_wd.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
@@ -4063,6 +4064,7 @@ EXPORT_SYMBOL(nvmeib_intr_shaper_destroy);
 #define NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT 4
 
 static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
+					int n_polled,
 				    u64 n_ns_spent)
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
@@ -4077,6 +4079,7 @@ static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
 	/* Allow it to work with soft-irqs too */
 	local_irq_save(flags);
 
+	pcpu->last_burst_size = n_polled;
 	pcpu->busy_since_last_ns += n_ns_spent;
 
 	if (unlikely(!pcpu->last_update_ns)) {
@@ -4153,11 +4156,23 @@ void nvmeib_intr_shaper_intr_enter(struct nvmeib_intr_shaper *shaper, enum intr_
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
 		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
-	BUG_ON(pcpu->intr_type != INTR_SHAPER_INTR_TYPE_NONE);
-	BUG_ON(pcpu->intr_start_ns);
-	BUG_ON(pcpu->intr_n_polled);
-	pcpu->intr_type = intr_type;
-	pcpu->intr_start_ns = nvmeib_public_local_clock();
+
+	if (in_irq()) {
+		BUG_ON(pcpu->hw_intr_type != INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->hw_intr_start_ns);
+		BUG_ON(pcpu->hw_intr_n_polled);
+		pcpu->hw_intr_type = intr_type;
+		pcpu->hw_intr_start_ns = nvmeib_public_local_clock();
+	}
+	else if (in_softirq()) {
+		BUG_ON(pcpu->sw_intr_type != INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->sw_intr_start_ns);
+		BUG_ON(pcpu->sw_intr_n_polled);
+		pcpu->sw_intr_type = intr_type;
+		pcpu->sw_intr_start_ns = nvmeib_public_local_clock();
+	} else {
+		/* This can happen for SIW when flushing the queue */
+	}
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_intr_enter);
 
@@ -4165,15 +4180,32 @@ void nvmeib_intr_shaper_intr_exit(struct nvmeib_intr_shaper *shaper)
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
 		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
-	struct intr_shaper_percpu_stats *pcpu_stats = &pcpu->stats_per_intr_type[pcpu->intr_type];
-	u64 busy_ns = nvmeib_public_local_clock() - pcpu->intr_start_ns;
-	BUG_ON(!pcpu->intr_start_ns);
+	struct intr_shaper_percpu_stats *pcpu_stats;
+	u64 busy_ns;
+	int n_polled;
+	unsigned long flags;
 
-	BUG_ON(pcpu->intr_type == INTR_SHAPER_INTR_TYPE_NONE);
-	BUG_ON(pcpu->intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+	if (in_irq()) {
+		BUG_ON(!pcpu->hw_intr_start_ns);
+		BUG_ON(pcpu->hw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->hw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+		busy_ns = nvmeib_public_local_clock() - pcpu->hw_intr_start_ns;
+		n_polled = pcpu->hw_intr_n_polled;
+		pcpu_stats = &pcpu->stats_per_intr_type[pcpu->hw_intr_type];
+	} else if (in_softirq()) {
+		BUG_ON(!pcpu->sw_intr_start_ns);
+		BUG_ON(pcpu->sw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->sw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+		busy_ns = nvmeib_public_local_clock() - pcpu->sw_intr_start_ns;
+		n_polled = pcpu->sw_intr_n_polled;
+		pcpu_stats = &pcpu->stats_per_intr_type[pcpu->sw_intr_type];
+	} else {
+		/* This can happen for SIW when flushing the queue */
+		return;
+	}
 
-	/* Store last-burst-size and update statistics */
-	pcpu->last_burst_size = pcpu->intr_n_polled;
+	/* Update statistics */
+	local_irq_save(flags);
 	pcpu_stats->total_burst_size += pcpu->last_burst_size;
 	if (pcpu->last_burst_size > pcpu_stats->max_burst_size)
 		pcpu_stats->max_burst_size = pcpu->last_burst_size;
@@ -4185,14 +4217,22 @@ void nvmeib_intr_shaper_intr_exit(struct nvmeib_intr_shaper *shaper)
 	if (pcpu_stats->min_intr_time_ns == 0 || busy_ns < pcpu_stats->min_intr_time_ns)
 	pcpu_stats->min_intr_time_ns = busy_ns;
 	pcpu_stats->n_intrs++;
+	local_irq_restore(flags);
 
 	/* Calculate EWMA of CPU load */
-	nvmeib_intr_shaper_calc_percpu(shaper, busy_ns);
+	nvmeib_intr_shaper_calc_percpu(shaper, n_polled, busy_ns);
 
 	/* Reset current interrupt status */
-	pcpu->intr_start_ns = 0;
-	pcpu->intr_n_polled = 0;
-	pcpu->intr_type = INTR_SHAPER_INTR_TYPE_NONE;
+	if (in_irq()) {
+		pcpu->hw_intr_start_ns = 0;
+		pcpu->hw_intr_n_polled = 0;
+		pcpu->hw_intr_type = INTR_SHAPER_INTR_TYPE_NONE;
+	} else {
+		BUG_ON(!in_softirq());
+		pcpu->sw_intr_start_ns = 0;
+		pcpu->sw_intr_n_polled = 0;
+		pcpu->sw_intr_type = INTR_SHAPER_INTR_TYPE_NONE;
+	}
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_intr_exit);
 
@@ -4200,7 +4240,17 @@ void nvmeib_intr_shaper_intr_polled(struct nvmeib_intr_shaper *shaper, int n_pol
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
 		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
-	pcpu->intr_n_polled += n_polled;
+	if (in_irq()) {
+		BUG_ON(pcpu->hw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->hw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+		pcpu->hw_intr_n_polled += n_polled;
+	} else if (in_softirq()) {
+		BUG_ON(pcpu->sw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->sw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+		pcpu->sw_intr_n_polled += n_polled;
+	} else {
+		/* This can happen for SIW when flushing the queue */
+	}
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_intr_polled);
 
@@ -4208,17 +4258,33 @@ bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *sh
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
 		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
-	struct intr_shaper_percpu_stats *pcpu_stats = &pcpu->stats_per_intr_type[pcpu->intr_type];
+	struct intr_shaper_percpu_stats *pcpu_stats = &pcpu->stats_per_intr_type[pcpu->hw_intr_type];
 	enum nvmeib_intr_shaper_calc_ret local_wake_up_reason = NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
+	u64 dt;
+	int n_polled;
+	unsigned long flags;
 
-	BUG_ON(pcpu->intr_type == INTR_SHAPER_INTR_TYPE_NONE);
-	BUG_ON(pcpu->intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+	if (in_irq()) {
+		BUG_ON(pcpu->hw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->hw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+		n_polled = pcpu->hw_intr_n_polled;
+		dt = nvmeib_public_local_clock() - pcpu->hw_intr_start_ns;
+	} else if (in_softirq()) {
+		BUG_ON(pcpu->sw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
+		BUG_ON(pcpu->sw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
+		n_polled = pcpu->sw_intr_n_polled;
+		dt = nvmeib_public_local_clock() - pcpu->sw_intr_start_ns;
+	} else {
+		/* This can happen for SIW when flushing the queue */
+		return false;
+	}
 
-	if (pcpu->intr_n_polled > pcpu->max_burst_size_local) {
+	local_irq_save(flags);
+	if (n_polled > pcpu->max_burst_size_local) {
 		local_wake_up_reason = NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST;
 		goto out;
 	}
-	if (nvmeib_public_local_clock() - pcpu->intr_start_ns > pcpu->max_irq_time_usecs_local * 1000ULL) {
+	if (dt > pcpu->max_irq_time_usecs_local * 1000ULL) {
 		local_wake_up_reason = NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME;
 		goto out;
 	}
@@ -4235,6 +4301,7 @@ out:
 		else if (local_wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
 			pcpu_stats->n_wakeups_cycles++;
 	}
+	local_irq_restore(flags);
 	return local_wake_up_reason != NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_intr_should_wake_up_reason);
@@ -4250,7 +4317,7 @@ bool nvmeib_intr_shaper_should_continue_polling(struct nvmeib_intr_shaper *shape
 	local_irq_save(flags);
 
 	/* Calculate EWMA of CPU load */
-	nvmeib_intr_shaper_calc_percpu(shaper, busy_ns);
+	nvmeib_intr_shaper_calc_percpu(shaper, n_polled, busy_ns);
 
 	if (n_polled > pcpu->max_burst_size_local) {
 		continue_polling = true;
@@ -4266,19 +4333,20 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_should_continue_polling);
 
-bool nvmeib_intr_shaper_in_intr(struct nvmeib_intr_shaper *shaper)
-{
-	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
-		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
-	return pcpu->intr_start_ns != 0;
-}
-EXPORT_SYMBOL(nvmeib_intr_shaper_in_intr);
-
 unsigned int nvmeib_intr_shaper_get_max_burst(struct nvmeib_intr_shaper *shaper)
 {
+	int cpu = get_cpu();
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
-		(shaper->percpu + smp_processor_id()*shaper->percpu_size);
-	return pcpu->max_burst_size_local;
+		(shaper->percpu + cpu*shaper->percpu_size);
+	unsigned int max_burst_size_local;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	max_burst_size_local = pcpu->max_burst_size_local;
+	local_irq_restore(flags);
+	put_cpu();
+
+	return max_burst_size_local;
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_get_max_burst);
 

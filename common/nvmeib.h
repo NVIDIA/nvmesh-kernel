@@ -808,9 +808,13 @@ struct intr_shaper_percpu {
 	int last_result;
 
 	/* Status of current interrupt*/
-	enum intr_shaper_intr_type intr_type;
-	u64 intr_start_ns;
-	int intr_n_polled;
+	enum intr_shaper_intr_type hw_intr_type;
+	u64 hw_intr_start_ns;
+	int hw_intr_n_polled;
+
+	enum intr_shaper_intr_type sw_intr_type;
+	u64 sw_intr_start_ns;
+	int sw_intr_n_polled;
 
 	/* Local copy of the shaper parameters */
 	unsigned int max_burst_size_local;
@@ -1215,7 +1219,6 @@ bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *sh
 
 bool nvmeib_intr_shaper_should_continue_polling(struct nvmeib_intr_shaper *shaper, int n_polled, u64 busy_ns);
 
-bool nvmeib_intr_shaper_in_intr(struct nvmeib_intr_shaper *shaper);
 
 /* cpu version of volume_client_config_jrange_cache */
 struct nvmeib_jrange_cache
