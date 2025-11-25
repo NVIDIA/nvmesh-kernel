@@ -76,7 +76,7 @@ struct nvmeibt_raft_member {
 	BOOL									is_ignored;
 	int										config_tag;
 	//
-	struct xdlist							members_link;
+//	struct xdlist							members_link;
 };
 
 static inline char *nvmeibt_raft_member_name(struct nvmeibt_raft_member *member)
@@ -172,7 +172,7 @@ struct nvmeibt_raft_ctx {
 	struct timespec			next_leader_heartbeat_timespec;
 	int64_t					last_recieved_append_entries_timestamp_sec;	// Initialized to TOMA "boot" time
 	struct timespec			time_converted_to_leader;
-	XHASHTABLE_DECLARE(, struct nvmeibt_raft_member, members_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_NODES))	raft_members_hash;
+	struct nvmeib_hash_table	*raft_members_hash_by_uuid;
 	int						n_raft_members;
 	int						n_raft_active_members;
 	uint32_t				guaranteed_sw_ver;

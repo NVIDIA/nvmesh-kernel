@@ -830,7 +830,7 @@ void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void)
 	members_wire_buf = (struct all_members_wire_buf_ctx *)(wire_conf_buf->data_buf);
 	// Fill in
 	members_wire_buf->n_raft_members = LE_SWAP32(my_raft_global.n_raft_members);
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		// Note that this is not ordered in any way. Those members are in!
 		members_wire_buf->members[i++] = member->this_member_leader_serialized_wire_buf;
 	}
@@ -932,9 +932,8 @@ void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add
 	member->uuid = *uuid;
 	member->urn_uuid = nvmeibt_union_uuid_to_urn_uuid(uuid);
 	member->kafka_offset = kafka_offset;
-	XDLIST_INIT_LINK(&(member->members_link), NULL);
 	//
-	XHASHTABLE_ADD(&(my_raft_global.raft_members_hash), member, UUID_TO_64_HASH_KEY(nvmeibt_raft_member_id(member)));
+	nvmeib_hash_add_uuid(my_raft_global.raft_members_hash_by_uuid, nvmeibt_raft_member_id(member), member);
 	(my_raft_global.n_raft_members)++;
 	(my_raft_global.n_raft_active_members)++;
 	//
@@ -947,7 +946,7 @@ void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add
 	nvmeibt_raft_leader_generate_member_wire_from_member(member);
 	raft_reset_member_ctx(member);
 	N_Tf(d4v39sa, "Added member hostname=@STR n_members_after=@INT uuid=@UUID_LE k_offset=@LD",
-		 nvmeibt_raft_member_name(member), XHASHTABLE_N_ELEMENTS(&(my_raft_global.raft_members_hash)), nvmeibt_raft_member_id(member), kafka_offset);
+		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset);
 	convert_to_follower_if_majority_is_lost();
 	// If I am the first and only member, then convert to candidate that starts from the committed members_list
 out:
@@ -981,7 +980,7 @@ void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add
 			goto out;
 		}
 	}
-	XHASHTABLE_DEL(&(my_raft_global.raft_members_hash), &(member->members_link));
+	nvmeib_hash_delete_uuid(my_raft_global.raft_members_hash_by_uuid, nvmeibt_raft_member_id(member));
 	--(my_raft_global.n_raft_members);
 	if (!member->is_ignored)
 		--(my_raft_global.n_raft_active_members);
@@ -998,7 +997,7 @@ void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add
 	}
 	nvmeibt_raft_unlink_member_from_node(member, NULL);
 	N_Tf(vnhve8w, "Del member hostname=@STR n_members_after=@INT uuid=@UUID_LE k_offset=@LD",
-		 nvmeibt_raft_member_name(member), XHASHTABLE_N_ELEMENTS(&(my_raft_global.raft_members_hash)), nvmeibt_raft_member_id(member), kafka_offset);
+		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset);
 	convert_to_follower_if_majority_is_lost();
 	NNVMEIBT_TOMA_FREE(cvgsuyg, member);
 out:
@@ -1010,7 +1009,7 @@ static struct nvmeibt_raft_member *raft_get_member_by_name(char *name)
 	struct nvmeibt_raft_member	*member;
 	bool						is_found = 0;
 
-	XHASHTABLE_FOR_EACH_SAFE(member, &my_raft_global.raft_members_hash) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		if (!strcmp(nvmeibt_raft_member_name(member), name)) {
 			is_found = 1;
 			break;
@@ -1125,7 +1124,7 @@ void nvmeibt_raft_align_members_with_committed_wire_buf(struct nvmeibt_Str *JSON
 		nvmeibt_raft_add_member(member_conf.hostname, i, &(member_conf.uuid), 0, kafka_offset, config_tag);
 	}
 	// Remove the members that were not in the members_wire_buf
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		if (member->config_tag != config_tag) {
 			nvmeibt_raft_del_member(nvmeibt_raft_member_name(member), i--, nvmeibt_raft_member_id(member), 0, kafka_offset);
 		}
@@ -1141,18 +1140,12 @@ out:
 struct nvmeibt_raft_member *nvmeibt_raft_get_member_by_id(const union nvmeib_uuid *id)
 {
 	struct nvmeibt_raft_member	*member;
-	bool						is_found = 0;
 
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(member, &my_raft_global.raft_members_hash, UUID_TO_64_HASH_KEY(id)) {
-		if (ARE_UUID_EQ(nvmeibt_raft_member_id(member), id)) {
-			is_found = 1;
-			break;
-		}
-	}
-	if (!is_found) {
+	member = nvmeib_hash_search_uuid(my_raft_global.raft_members_hash_by_uuid, id);
+	if (!member) {
 		N_Tf(vnekfyx, "Member not found id='@UUID_LE'", id);
 	}
-	return (is_found ? member : NULL);
+	return member;
 }
 
 static BOOL is_req_vote_rep_or_append_entries_rep(enum nvmeibt_raft_msg_type msg_type)
@@ -1991,7 +1984,7 @@ static void raft_leader_reset_counters_upon_last_LOG_change(void)
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(0h27ska, TOPO_CONFIG,       leader_n_peers_committed, 0);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(irncah5, KAFKA_MGMT_CONFIG, leader_n_peers_committed, 0);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(virypm4, RAFT_MEMBERS,      leader_n_peers_committed, 0);
-	XHASHTABLE_FOR_EACH_SAFE(peer, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(peer, my_raft_global.raft_members_hash_by_uuid) {
 		peer_buf = &(peer->committed_persist_and_wire_buf_hdr);
 		UPD_N_PEERS_COMMITTED(nvmeibt_tlv_get_idx(&(peer_buf->topo_ctx)),              NULL, topo_ctx,              TOPO);
 		UPD_N_PEERS_COMMITTED(nvmeibt_tlv_get_idx(&(peer_buf->topo_config_ctx)),       NULL, topo_config_ctx,       TOPO_CONFIG);
@@ -2215,7 +2208,7 @@ static void raft_reset_voted_for_me(void)
 	struct nvmeibt_raft_member	*member;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		member->is_vote_valid = 0;
 		member->last_received_voted_for_me_timespec = TIMESPEC_ZERO;
 	}
@@ -2316,7 +2309,7 @@ static void raft_leader_check_validity_of_all_peers(void)
 	struct nvmeibt_raft_member	*peer_member;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(peer_member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
 		if (!peer_member->is_me) {
 			leader_upd_is_vote_valid_and_is_alive_for_topo(peer_member);
 		}
@@ -2331,7 +2324,7 @@ static void set_guaranteed_sw_ver(void)
 	int							n_members = my_raft_global.n_raft_members;
 	int							n_new_ver = 0;
 
-	XHASHTABLE_FOR_EACH_SAFE(peer_member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
 		if (peer_member->toma_software_version > my_raft_global.guaranteed_sw_ver) {
 			new_guaranteed_sw_ver = peer_member->toma_software_version;
 			N_Tf(u87b443, "peer=@STR, has higher SW ver=@SOFTWARE_VERSION", peer_member->hostname, new_guaranteed_sw_ver);
@@ -2518,7 +2511,7 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 			prev_topo_to_apply = RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_committed_by_majority);
 			my_raft_global.leader_first_APPEND_ENTRIES_with_cur_committed_and_applied_topo_timespec = nvmeibt_global_get_global()->last_raft_distribution_timestamp;
 		}
-		XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+		NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 			its_node = nvmeibt_raft_member_get_node(member);
 			if (its_node) {
 				raft_leader_send_appendentries_to_a_peer(member, is_with_raft_log);
@@ -2554,7 +2547,7 @@ static void leader_reset_peers_committed_values(void)
 	struct nvmeibt_raft_member					*member;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		init_persist_and_wire_buf(&(member->committed_persist_and_wire_buf_hdr));
 		// member->raft_ctx.last_append_entries_rep_msg_num = 0;
 	}
@@ -2565,7 +2558,7 @@ static void raft_leader_reset_all_members_raft_ctx(void)
 {
 	struct nvmeibt_raft_member	*member;
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		raft_reset_member_ctx(member);
 	}
 	NFOUT;
@@ -2577,7 +2570,7 @@ static int get_n_connected_members(void)
 	struct nvmeibt_nm_local_node		*local_node = nvmeibt_get_nw_node();
 	struct nvmeibt_raft_member			*member;
 
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		n_connected_members += nvmeibt_nm_is_remote_node_connected(local_node, member->its_node);
 	}
 	return n_connected_members;
@@ -2600,7 +2593,7 @@ void nvmeibt_raft_convert_to_leader(void)
 		my_raft_global.is_leader_ever_committed_by_majority = 0;
 		my_raft_global.last_tx_append_entries_msg_num = 0;
 		nvmeibt_disk_leader_detach_all_disks_from_raft_members();
-		XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+		NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 			// Start assuming that the old global_topology is valid, and then detect disconnects
 			mark_that_we_just_heard_from_peer(member);
 		}
@@ -2687,7 +2680,7 @@ static void raft_convert_to_candidate(char flags)
 	nvmeibt_topology_mark_update_csv_of_config_and_topo_required();
 	raft_leader_regenerate_the_two_to_commit_persist_and_wire_bufs_as_needed();
 	//
-	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		if (!(member->is_me)) {
 			raft_send_msg_to_peer(RAFT_MSG_REQ_VOTE, nvmeibt_raft_member_get_node(member), 0, 0, my_raft_global.leader_to_commit_persist_and_wire_buf_full, flags, 0);  // Only the header
 		}
@@ -3414,7 +3407,7 @@ int nvmeibt_raft_one_time_init(void)
 	int							rv = 0;
 
 	NFIN;
-	XHASHTABLE_INIT(&(my_raft_global.raft_members_hash));
+	my_raft_global.raft_members_hash_by_uuid = NVMEIB_HASH_CREATE(a7y2k49, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "raft_members_hash", 16);
 	my_raft_global.n_raft_members = 0;
 	nvmeibt_raft_recalc_timeout_constants();
 	getnstimeofday_boot(&(my_raft_global.next_election_time));
@@ -3890,7 +3883,7 @@ int nvmeibt_raft_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...),
 			(*printf_fn)(printf_ctx, "\t- Status=CANDIDATE\n");
 		}
 		(*printf_fn)(printf_ctx, "\t- Peer members\n");
-		XHASHTABLE_FOR_EACH_SAFE(peer_member, &(my_raft_global.raft_members_hash)) {
+		NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
 
 			elapsed = timespec_sub(nvmeibt_global_get_cur_event_start_time(), peer_member->last_received_voted_for_me_timespec);
 			(*printf_fn)(printf_ctx, "\t\t- %s: time_since_voted_for_me_on_cur_term=%lld.%09lld is_alive_for_topo_msec=ll%d committed(topo_version=%llx kafka_offset=%lld)\n", nvmeibt_raft_member_name(peer_member),
@@ -3922,10 +3915,10 @@ int nvmeibt_raft_print_status_json(int (*printf_fn)(void *ctx, const char *fmt, 
 		} else {
 			(*printf_fn)(printf_ctx, "\"candidate\", ");
 		}
-		n_members = XHASHTABLE_N_ELEMENTS(&(my_raft_global.raft_members_hash));
+		n_members = nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid);
 		i = 1;
 		(*printf_fn)(printf_ctx, "\"peer_members\": [");
-		XHASHTABLE_FOR_EACH_SAFE(peer_member, &(my_raft_global.raft_members_hash)) {
+		NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
 			elapsed = timespec_sub(nvmeibt_global_get_cur_event_start_time(), peer_member->last_received_voted_for_me_timespec);
 			(*printf_fn)(printf_ctx, "{\"member\": \"%s\", \"time_since_voted_for_me_on_cur_term\": %lld.%09lld, \"is_alive_for_topo\": %d, "
 						             "\"topo_version\": %llu, \"kafka_offset\": %lld}",
