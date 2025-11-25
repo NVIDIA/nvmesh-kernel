@@ -5113,7 +5113,7 @@ static int kthread_process_drive_cq(void *arg)
 	int total = 0, i;
 	unsigned long max_time;
 	bool enb_irq = false;
-	int d_max_completions = d->max_completions;
+	u64 start_ns, busy_ns;
 
 	set_current_state(TASK_INTERRUPTIBLE);
 	complete(&q->th_ready);
@@ -5135,11 +5135,13 @@ static int kthread_process_drive_cq(void *arg)
 					break;
 				spin_lock_irqsave(&q->q_lock, flags);
 				nvmeib_qp_stats_on_offth_iter(q->qp_stats);
+				start_ns = nvmeib_public_local_clock();
 				i = nvmeibs_process_cq(q);
+				busy_ns = nvmeib_public_local_clock() - start_ns;
 				enb_irq = (q->state == LOCAL_Q_ON ||
 						   q->state == LOCAL_Q_STOP_NEW_IO);
 				spin_unlock_irqrestore(&q->q_lock, flags);
-				cont = (i == d_max_completions);
+				cont = i > 0 && nvmeib_intr_shaper_should_continue_polling(s_intr_shaper, i, busy_ns);
 				total += i;
 			} while (cont && time_before(jiffies, max_time));
 

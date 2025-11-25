@@ -4239,6 +4239,33 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_intr_should_wake_up_reason);
 
+bool nvmeib_intr_shaper_should_continue_polling(struct nvmeib_intr_shaper *shaper, int n_polled, u64 busy_ns)
+{
+	int cpu = get_cpu();
+	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
+		(shaper->percpu + cpu*shaper->percpu_size);
+	bool continue_polling;
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	/* Calculate EWMA of CPU load */
+	nvmeib_intr_shaper_calc_percpu(shaper, busy_ns);
+
+	if (n_polled > pcpu->max_burst_size_local) {
+		continue_polling = true;
+		goto out;
+	}
+
+	continue_polling = pcpu->last_result != NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
+
+out:
+	local_irq_restore(flags);
+	put_cpu();
+	return continue_polling;
+}
+EXPORT_SYMBOL(nvmeib_intr_shaper_should_continue_polling);
+
 bool nvmeib_intr_shaper_in_intr(struct nvmeib_intr_shaper *shaper)
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)

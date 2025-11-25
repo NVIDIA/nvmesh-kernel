@@ -1213,6 +1213,8 @@ void nvmeib_intr_shaper_intr_polled(struct nvmeib_intr_shaper *shaper, int n_pol
 bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *shaper, enum nvmeib_intr_shaper_calc_ret *wake_up_reason);
 #define nvmeib_intr_shaper_intr_should_wake_up(shaper) nvmeib_intr_shaper_intr_should_wake_up_reason(shaper, NULL)
 
+bool nvmeib_intr_shaper_should_continue_polling(struct nvmeib_intr_shaper *shaper, int n_polled, u64 busy_ns);
+
 bool nvmeib_intr_shaper_in_intr(struct nvmeib_intr_shaper *shaper);
 
 /* cpu version of volume_client_config_jrange_cache */

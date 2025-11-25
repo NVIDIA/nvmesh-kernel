@@ -1016,6 +1016,8 @@ static int scq_kthread_func(void *arg)
 	unsigned long flags;
 	enum cq_poll_mode new_mode;
 	int n;
+	u64 start_ns, busy_ns;
+	bool continue_polling;
 
 	_NTn(trace_ib_net_scq_kthread_func, net, "scq thread ready");
 	set_current_state(TASK_INTERRUPTIBLE);
@@ -1035,21 +1037,23 @@ static int scq_kthread_func(void *arg)
 		}
 
 		//process_send_cq_offload_enb_
+		start_ns = nvmeib_public_local_clock();
 		n = polling_process_send_cq_(net, REQ_NOTIFY_FALSE);
-		if (n > 0) {
+		busy_ns = nvmeib_public_local_clock() - start_ns;
+
+		continue_polling = n > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, n, busy_ns);
+		if (continue_polling) {
 			/* prevent soft lockup */
 			cond_resched();
 			continue;
 		}
 
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (!n) {
-			/* re-enable IRQ then poll CEs that were already queued */
-			_NDn(trace_2_ib_net_scq_kthread_func, net, "transition back to IRQ");
+		/* re-enable IRQ then poll CEs that were already queued */
+		_NDn(trace_2_ib_net_scq_kthread_func, net, "transition back to IRQ");
 
-			//process_send_cq_offload_enb_
-			n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE);
-		}
+		//process_send_cq_offload_enb_
+		n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE);
 
 		/* OL: update poll-mode within the if (!n), this also saves lock-unlock */
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
@@ -1675,6 +1679,8 @@ static int rcq_kthread_func(void *arg)
 	unsigned long flags;
 	enum cq_poll_mode new_mode;
 	int n, tot;
+	u64 start_ns, busy_ns;
+	bool continue_polling;
 
 	_NTn(trace_ib_net_rcq_kthread_func, net, "rcq thread ready");
 	set_current_state(TASK_INTERRUPTIBLE);
@@ -1694,21 +1700,25 @@ static int rcq_kthread_func(void *arg)
 			BUG();
 		}
 
+		start_ns = nvmeib_public_local_clock();
 		n = polling_process_recv_cq_(net, REQ_NOTIFY_FALSE);
-		if (n > 0) {
+		busy_ns = nvmeib_public_local_clock() - start_ns;
+
+		if (n >= 0) {
 			tot += n;
-			/* prevent soft lockup */
-			cond_resched();
-			continue;
+			continue_polling = n > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, tot, busy_ns);
+			if (continue_polling) {
+				/* prevent soft lockup */
+				cond_resched();
+				continue;
+			}
 		}
 
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (!n) {
-			/* re-enable IRQ then poll CEs that were already queued */
-			_NDn(trace_2_ib_net_rcq_kthread_func, net, "transition back to IRQ");
-			n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE);
-			tot += n;
-		}
+		/* re-enable IRQ then poll CEs that were already queued */
+		_NDn(trace_2_ib_net_rcq_kthread_func, net, "transition back to IRQ");
+		n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE);
+		tot += n;
 
 		/* OL: update poll-mode within the if (!n), this also saves lock-unlock */
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
@@ -2013,6 +2023,7 @@ static inline void poll_cq_and_process_work(struct workqe_struct *work)
 	struct nvmeibc_ib_net *net = container_of(
 		work, struct nvmeibc_ib_net, defer_recv_work);
 	bool resched = false;
+	u64 start_ns, busy_ns;
 	int rv;
 	__NFIN;
 
@@ -2023,7 +2034,11 @@ static inline void poll_cq_and_process_work(struct workqe_struct *work)
 	nvmeib_qp_stats_on_offth_iter(net->qp_stats);
 
 	/* poll upto net->n_wc_mixed CQEs into net->wc_mixed */
+	start_ns = nvmeib_public_local_clock();
 	rv = poll_cq_and_process(net, &resched);
+	busy_ns = nvmeib_public_local_clock() - start_ns;
+
+	resched = rv > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, rv, busy_ns);
 
 	/* before we may rearm interrupts we must change state such that
 	   interrupt-handler will be able to add another defer-recv work.
