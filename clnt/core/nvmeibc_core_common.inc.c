@@ -29,6 +29,7 @@ int t_core_clnt_globals_create(const struct nvmeibc_cinst_params_core *p, const 
 	int rv = -ENOMEM, cpu;
 	extern void* nvmeibc_jam_init(const struct nvmeibc_cinst_params_core *p);
 	struct t_core_clnt_globals *cg = kzalloc(sizeof(*cg), GFP_KERNEL);
+	_NI(t_00_coreg, "@NDU client globals create (core) - start", 0);
 	if (!cg)
 		goto _out;
 	(*p->_private) = cg;
@@ -77,6 +78,7 @@ int t_core_clnt_globals_create(const struct nvmeibc_cinst_params_core *p, const 
 	nvmeibc_core_set_local_server_notification(p, true);
 	rv = 0;
 _out:
+	_NI(t_07_coreg, "@NDU client globals create (core) - done", 0);
 	return rv;
 }
 
@@ -86,6 +88,7 @@ void t_core_clnt_globals_destroy(const struct nvmeibc_cinst_params_core *p)
 	extern void nvmeibc_jam_exit(const struct nvmeibc_cinst_params_core *p);
 	struct t_core_clnt_globals *cg = get_core_cints(p);
 	int cpu;
+	_NI(trace_1_c_core_destroy, "@NDU client globals destroy (core) - start", 0);
 	if (cg) {
 		remove_ib(p);
 		/* [NVMESH-4452]: Check for NULL cg->pcpu_wds before deref */
@@ -111,6 +114,7 @@ void t_core_clnt_globals_destroy(const struct nvmeibc_cinst_params_core *p)
 		get_core_cints(p) = NULL;
 	}
 	t_core_clnt_globals_params_free((struct nvmeibc_cinst_params_core *)p);
+	_NI(trace_2_c_core_destroy, "@NDU client globals destroy (core) - end", 0);
 }
 
 /************************* Free/Update Params IOctls **************************/

@@ -16893,6 +16893,14 @@
             "%d": 3
         }
     },
+    "@CURR_STATE": {
+        "size": 32,
+        "type": "s32",
+        "fmt": "state=%d",
+        "final": true,
+        "__split": true,
+        "__collision": true
+    },
     "@STATE": {
         "size": 32,
         "type": "s32",
