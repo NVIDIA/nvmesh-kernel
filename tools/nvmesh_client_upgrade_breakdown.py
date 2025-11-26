@@ -1,36 +1,101 @@
 #!/usr/bin/env python3
 
 """
-client_ndu_breakdown.py
+nvmesh_client_upgrade_breakdown.py
 
-Runs or analyzes a Non-Disruptive Update (NDU) of the NVMesh client,
-providing a millisecond-precision breakdown of the NDU's distinct phases.
+A performance analysis tool for NVMesh Client Non-Disruptive Updates (NDU).
+It parses system logs to construct a precise, millisecond-level timeline of the
+upgrade process, distinguishing between Service Control Plane (systemd/scripts)
+and Data Plane (IO connectivity) latency.
 
-This script uses a "Phase-Oriented" composite design. Each "Phase" object is
-responsible for finding its own start and end timestamps and can contain
-child phases to create a time hierarchy.
+modes:
+  1. run:     Executes the NDU commands live and monitors the process.
+  2. analyze: Parses past NDU events from system logs. Supports both live
+              system journal/pager and offline logs via --logs-dir.
 
-Modes of Operation:
-  1. --run:     Executes the NDU commands and then analyzes the run.
-  2. --analyze: Analyzes a past NDU event from a given time window.
+ARCHITECTURE & DESIGN PATTERNS:
 
-Object Design:
-  - LogEntry (Hierarchy): "Smart" objects that parse themselves from raw JSON.
-    - BaseLogEntry (ABC)
-    - JournalCTLLogEntry
-    - PagerLogEntry
-  - LogSource (Hierarchy): "Template Method" pattern. Base class handles
-    subprocess execution and pipelining.
-    - BaseLogSource (ABC)
-    - JournalctlLog
-    - PagerLog
-  - Phase (Hierarchy): "Phase-Oriented" composite design.
-    - BasePhase (ABC): The "leaf" node. Finds its own interval.
-    - CompositePhase: A "branch" node. Contains children and calculates its
-      "self-time" (delta) by subtracting children's time from its own.
-    - SimpleSystemdPhase: A "smart" composite for systemd services.
-    - NDUPhase: The "root" composite, which has special rules for
-      its interval (based on volumes) and completeness (our stop condition).
+1. Phase-Oriented Composite Design
+   The core abstraction is a 'Phase'. Phases form a hierarchy (Tree Structure).
+   - BasePhase (Leaf):
+     Tracks a single event with specific Start/End signatures. Validates its own
+     completeness and reports warnings if logs are missing.
+   - CompositePhase (Branch):
+     Contains child phases. Recursively calculates total duration and, crucially,
+     "Self-Time" (Overhead) by subtracting children's duration from its own.
+   - ContainerPhase (Grouping):
+     A specialized CompositePhase that acts purely as a logical container. It does
+     not have its own log events; its interval and completeness are determined
+     entirely by the aggregate state of its children. (Used for Dynamic Volumes,
+     Parallel Service Restarts, etc.)
+   - NDUPhase (Root):
+     The coordinator. It determines the final NDU duration by comparing the
+     Service Timeline vs. the Data (IO) Timeline.
+
+2. Dynamic Volume Discovery
+   Classes inheriting from 'DynamicVolumesPhase' (e.g., VolumesAttachPhase,
+   VolumesDetachPhase) parse logs to dynamically discover which volumes were
+   present. They act as factories, creating specific child phases for every
+   discovered device.
+
+3. Derived Logical Phases (The Data Plane)
+   The 'VolumesIODisabledPhase' is a "Passive" phase. It does not parse logs directly.
+   Instead, it derives the exact IO-down window for each volume by linking data
+   from the Detach and Attach trees.
+   - Per Volume: Defined as the span from "Disabling I/O" (Start of Detach phase)
+     to "Enabling I/O" (End of Attach phase).
+   - Aggregate NDU: Defined as min("Disabling I/O") .. max("Enabling I/O") across
+     all volumes.
+
+4. Execution Lifecycle (Four-Step Process)
+   - Step 1: Static Tree Construction
+     The tool initializes the static skeleton of the phase hierarchy (NDUPhase ->
+     ClientStop/Start -> ModulesLoad, etc.) before processing any logs. This
+     defines the known structure of the NDU process.
+
+   - Step 2: Stream Processing & Dynamic Population
+     A single pass over merged, chronological logs (Journal + Pager). During this
+     phase, log entries are fed into the tree. This sets start/end timestamps for
+     static phases and dynamically creates new child phases (e.g., specific Volume
+     instances) as they are discovered in the logs.
+
+   - Step 3: Finalization (Recursive Freeze)
+     Once the stream ends (or NDU is complete), a recursive pass traverses the
+     tree to freeze the state. It calculates final intervals, aggregates durations
+     from children (for ContainerPhases), validates logical consistency (e.g.,
+     Start < End), and determines the final status (Valid/Incomplete/Empty).
+
+   - Step 4: Reporting
+     The fully populated and validated tree is traversed one last time to generate
+     the hierarchical text report, printing durations, self-times, and any
+     warnings collected during finalization.
+
+CLASS GROUPS:
+
+  * Infrastructure:
+    - LogEntry (Hierarchy): "Smart" objects that parse themselves from raw JSON.
+      - BaseLogEntry (ABC)
+      - JournalCTLLogEntry
+      - PagerLogEntry
+    - LogSource (Hierarchy): "Template Method" pattern. Base class handles
+      subprocess execution and pipelining.
+      - BaseLogSource (ABC)
+      - JournalctlLog (Live JSON output)
+      - PagerLog (Live or Offline pager.py)
+      - JournalctlFileLog (Parses offline text files for offline analysis)
+
+  * Service Phases (Control Plane):
+    - ClientStopPhase: Includes Shutdown script, Module Unload, Volume Detach.
+    - DependencyRestartPhase: Tracks concurrent CM/TD service restarts.
+    - ClientStartPhase: Includes Module Load, Volumes Attach.
+
+  * Module Loading Breakdown:
+    - Tracks Pre-Init (User space/Linking), Core Init (Kernel), and Finalize.
+
+  * Volume State Phases (Data Plane):
+    - VolumeDetachPhase: Disabling I/O -> Detach Finished/Failed.
+    - VolumeAttachPhase: Attach Finished -> CONT -> Enabling I/O.
+    - VolumeIODisabledPhase: The derived IO-down span (Disabling I/O -> Enabling I/O).
 """
 
 import argparse
@@ -50,6 +115,9 @@ from typing import Generator, List, Dict, Optional, Any, Iterable
 
 # Default window to analyze in --analyze mode if --until is omitted
 DEFAULT_ANALYSIS_WINDOW_SECONDS = 300
+
+# traces are flushed towards the trace daemon at most every two seconds
+TRACE_FLUSH_SECONDS = 2
 
 # Setup logger. All diagnostic output goes to stderr.
 # Report data will be sent to stdout via print().
@@ -293,7 +361,7 @@ class PagerLog(BaseLogSource):
             self.pager_path, '--client', '--nogreet',
             '--since', since_str, '--until', until_str,
             '--mode', 'msg-stream-json',
-            '-f', 'func=__error_state_update and has @DEV_NAME'
+            '-f', 'has @NDU'
         ]
 
         # Calls the *base class* method
@@ -423,6 +491,14 @@ class JournalctlFileLog(BaseLogSource):
 # ---------------------------------------------------------------------------
 #  LEVEL 4: NDU PHASE CLASSES (Composite Design)
 # ---------------------------------------------------------------------------
+from enum import Enum
+
+class PhaseStatus(Enum):
+    PENDING = "PENDING"
+    VALID = "VALID"
+    INCOMPLETE = "INCOMPLETE"
+    EMPTY = "EMPTY"
+    INVALID = "INVALID"  # for logical contradictions
 
 class BasePhase(ABC):
     """
@@ -433,6 +509,13 @@ class BasePhase(ABC):
         self.debug: bool = debug
         self._start: Optional[datetime] = None
         self._end: Optional[datetime] = None
+
+        # Finalization State
+        self.status = PhaseStatus.PENDING
+        self.warnings: List[str] = []
+        self._final_interval: Optional[TimeInterval] = None
+        self._final_duration: int = 0
+        self._self_time_ms: int = 0  # Cached self time
 
     @abstractmethod
     def process_entry(self, entry: BaseLogEntry) -> bool:
@@ -445,7 +528,7 @@ class BasePhase(ABC):
     @property
     def is_complete(self) -> bool:
         """
-        [NEW] Default implementation for completeness.
+        Default implementation for completeness.
         Returns True if the phase has found both its start and end.
         """
         return bool(self._start and self._end)
@@ -457,31 +540,81 @@ class BasePhase(ABC):
         """
         if self._start and self._end and self._end >= self._start:
             return TimeInterval(self._start, self._end)
-        elif self.debug and self._start and self._end:
-             logger.debug(f"Phase '{self.name}' has invalid interval. Start: {self._start}, End: {self._end}")
+        elif self._start and self._end:
+            # convert to local time for display consistency with the report
+            s_local = self._start.astimezone()
+            e_local = self._end.astimezone()
+            logger.error(f"Phase '{self.name}' has invalid interval. Start: {s_local}, End: {e_local}")
         return None
 
-    def get_report_data(self) -> Dict[str, Any]:
-        """
-        [NEW] Recursively builds a dictionary of timing data.
-        For a BasePhase (a leaf), self_time is the same as duration.
-        """
-        my_interval = self.interval
-        my_duration = my_interval.duration_ms if my_interval else 0
+    @property
+    def has_warnings(self) -> bool:
+        """Returns True if this phase has any warnings."""
+        return len(self.warnings) > 0
 
-        return {
-            "name": self.name,
-            "duration_ms": my_duration,
-            "self_time_ms": my_duration,  # For a leaf, self_time IS the duration
-            "interval": my_interval,
-            "children": [] # BasePhase has no children
-        }
+    def finalize(self):
+        """
+        Freezes the state of the phase.
+        Calculates duration, validates timestamps, and sets status.
+        """
+        # 1. Get the interval (polymorphic call to property)
+        interval = self.interval
 
+        # 2. Validate and Freeze
+        if interval:
+            self._final_interval = interval
+            self._final_duration = interval.duration_ms
+            self._self_time_ms = self._final_duration  # Default for leaf
+            self.status = PhaseStatus.VALID
+        else:
+            # If we have a start but no end (or vice versa), it's incomplete
+            if self._start or self._end:
+                self.status = PhaseStatus.INCOMPLETE
+                missing = "end" if self._start else "start"
+                self.warnings.append(f"Missing {missing} timestamp")
+            else:
+                self.status = PhaseStatus.EMPTY
+                if self.name != "some_optional_phase":  # Optional check
+                    self.warnings.append("Phase completely missing (no start/end found)")
+
+    def print_report(self, level: int = 0):
+        """
+        Prints the finalized report for this phase.
+        """
+        indent = "  " * level
+
+        # Format Duration
+        if self.status == PhaseStatus.EMPTY:
+            duration_str = "N/A"
+            interval_str = ""
+        else:
+            duration_str = f"{self._final_duration} ms"
+            interval_str = ""
+            # Only print interval details if we have them (even if incomplete)
+            if self._final_interval:
+                # format directly instead of splitting to_str() output
+                begin_str = self._final_interval.begin.astimezone().strftime('%H:%M:%S.%f')[:-3]
+                end_str = self._final_interval.end.astimezone().strftime('%H:%M:%S.%f')[:-3]
+                interval_str = f"({begin_str} .. {end_str})"
+            elif self._start:
+                # Print partial info if available
+                ts = self._start.astimezone().strftime('%H:%M:%S.%f')[:-3]
+                interval_str = f"({ts} .. ???)"
+
+        # Print the line
+        # Note: self_time_ms will be updated by CompositePhase for branches
+        self_time_str = f"(Self: {self._self_time_ms} ms)" if self._self_time_ms != self._final_duration else ""
+
+        print(f"{indent}- {self.name:<22} {duration_str:<10} {self_time_str:<16} {interval_str}")
+
+        # Print Warnings
+        for warning in self.warnings:
+            print(f"{indent}  !! WARNING: {warning} !!")
 # ---
 
 class CompositePhase(BasePhase):
     """
-    [NEW] A BasePhase that can contain a collection of child BasePhase objects.
+    A BasePhase that can contain a collection of child BasePhase objects.
     Its own interval/completeness is independent of its children.
     """
     def __init__(self, name: str, debug: bool = False):
@@ -496,60 +629,133 @@ class CompositePhase(BasePhase):
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         """
-        [NEW] Fans out the log entry to all children.
+        Fans out the log entry to all children.
         The parent phase (e.g., SimpleSystemdPhase) is responsible for
         calling this *and* processing the entry for its *own* _start/_end.
         """
         consumed_by_child = False
         for child in self.children.values():
-            # Only send to children that are not yet complete
-            if not child.is_complete:
-                if child.process_entry(entry):
-                    consumed_by_child = True
+            if child.process_entry(entry):
+                consumed_by_child = True
 
         # Returns True if any child consumed the log.
         return consumed_by_child
 
     # --- NO is_complete override ---
     # composite will use the BasePhase default (bool(self._start and self._end))
-    # as some child phases (e.g. module unload (client stop) or module load (client start)) may not be logged
+    # as some child phases (e.g. modules unload (client stop) or modules load (client start)) may not be logged
 
     # --- NO interval override ---
     # composite uses its own _start and _end, as the interval sum of child phases may not fully span the parent
     # The *one exception* will be NDUPhase, which *will* override this to be the min/max of its volume children
 
-    def get_report_data(self) -> Dict[str, Any]:
+    def _calculate_min_max_from_list(self, phases: Iterable[BasePhase]) -> Optional[TimeInterval]:
         """
-        [NEW & OVERRIDDEN] Recursively builds a dictionary, calculating
-        its 'self_time' (overhead) by subtracting children's time.
+        Internal Helper: Calculates the interval spanning the min start and max end
+        of the provided collection of phases.
+
+        Side Effect: Updates self._start and self._end to match the calculated window.
         """
-        my_interval = self.interval
-        my_duration = my_interval.duration_ms if my_interval else 0
+        valid_intervals = [p.interval for p in phases if p.interval is not None]
+        if not valid_intervals:
+            return None
 
-        child_reports = []
-        children_total_duration = 0
+        # Update internal state
+        self._start = min(i.begin for i in valid_intervals)
+        self._end = max(i.end for i in valid_intervals)
 
-        for child in self.children.values():
-            child_report = child.get_report_data()
-            children_total_duration += child_report["duration_ms"]
-            child_reports.append(child_report)
+        return TimeInterval(self._start, self._end)
 
-        # This is the "overhead" or "delta" calculation for this level
-        self_time = my_duration - children_total_duration
+    @property
+    def min_max_interval(self) -> Optional[TimeInterval]:
+        """
+        Calculates the interval based on the min/max of all CHILDREN.
+        Derived classes can return this property in their 'interval' override.
+        """
+        return self._calculate_min_max_from_list(self.children.values())
 
-        return {
-            "name": self.name,
-            "duration_ms": my_duration,
-            "self_time_ms": max(0, self_time), # Self-time can't be negative
-            "interval": my_interval,
-            "children": child_reports
-        }
+    @property
+    def has_warnings(self) -> bool:
+        """Returns True if this phase OR any child has warnings."""
+        if super().has_warnings:
+            return True
+        return any(c.has_warnings for c in self.children.values())
 
     def get_all_child_phases(self) -> List[BasePhase]:
         """A helper to return all child phases for verbose reporting."""
         return sorted(self.children.values(), key=lambda p: p.name)
 
+    def finalize(self):
+        """
+        Recursive finalization.
+        1. Finalize all children.
+        2. Calculate aggregates (children duration sum).
+        3. Calculate own interval/duration.
+        4. Calculate self_time (Own - Children).
+        """
+        children_duration_sum = 0
+
+        # 1. Finalize Children first
+        for child in self.children.values():
+            child.finalize()
+            if child.status == PhaseStatus.VALID:
+                children_duration_sum += child._final_duration
+
+        # 2. Finalize Self (Calculate Interval & Duration)
+        # This calls BasePhase.finalize() logic to freeze _final_duration
+        super().finalize()
+
+        # 3. Calculate Self Time (Delta)
+        if self.status == PhaseStatus.VALID:
+            self._self_time_ms = max(0, self._final_duration - children_duration_sum)
+        else:
+            self._self_time_ms = 0
+
+        # 4. Composite Validation (Optional)
+        # Example: If I have children but I am incomplete, that's weird.
+        if self.children and self.status == PhaseStatus.EMPTY:
+            # This might happen if children found data but parent didn't find its own start/end
+            # We might want to auto-expand interval here?
+            # For now, just leave as is.
+            pass
+
+    def print_report(self, level: int = 0):
+        """
+        Recursive print.
+        """
+        # 1. Print Self
+        super().print_report(level)
+
+        # 2. Print Children (Sorted by start time)
+        # We need to handle cases where interval is None for sorting
+        def sort_key(c):
+            if c._final_interval: return c._final_interval.begin
+            if c._start: return c._start
+            return datetime.max.replace(tzinfo=timezone.utc)
+
+        sorted_children = sorted(self.children.values(), key=sort_key)
+
+        for child in sorted_children:
+            child.print_report(level + 1)
 # ---
+class ContainerPhase(CompositePhase):
+    """
+    A Composite Phase that acts purely as a container.
+    It does not have its own Start/End log events.
+    Its completion is determined solely by the state of its children.
+    """
+    @property
+    def is_complete(self) -> bool:
+        # If no children, we assume we are waiting for discovery or initialization.
+        # This keeps the phase "Incomplete" to prevent premature cutoff.
+        if not self.children:
+            return False
+        return all(c.is_complete for c in self.children.values())
+
+    @property
+    def interval(self) -> Optional[TimeInterval]:
+        # Containers define their span by the min/max of their children.
+        return self.min_max_interval
 
 # Inherits from CompositePhase
 class SimpleSystemdPhase(CompositePhase):
@@ -589,106 +795,99 @@ class SimpleSystemdPhase(CompositePhase):
                     consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
+
 class ClientStopPhase(SimpleSystemdPhase):
     """Tracks the 'client stop' phase (Stopping... to Stopped...)."""
     def __init__(self, debug: bool = False):
         super().__init__("client stop", "nvmeshclient.service", "Stopping", "Stopped", debug)
-        # Add a child phase for module unloading
         self.add_child(ShutdownPhase(debug=debug))
-        self.add_child(ModuleUnLoadPhase(debug=debug))
+        self.add_child(ModulesUnLoadPhase(debug=debug))
 
 class ClientStartPhase(SimpleSystemdPhase):
     """Tracks the 'client start' phase (Starting... to Started...)."""
     def __init__(self, debug: bool = False):
         super().__init__("client start", "nvmeshclient.service", "Starting", "Started", debug)
-        # Add a child phase for module loading
-        self.add_child(ModuleLoadPhase(debug=debug))
+        self.add_child(ModulesLoadPhase(debug=debug))
+        # Volume Attaching (Dynamic Discovery)
+        self.add_child(VolumesAttachPhase(debug=debug))
 
-class DependencyRestartPhase(CompositePhase):
+    @property
+    def interval(self) -> Optional[TimeInterval]:
+        """
+        [OVERRIDDEN] Sets the phase end time to the completion of 'Volumes Attach'.
+        This ensures the phase duration accurately reflects the time until
+        I/O was restored, ignoring any subsequent systemd overhead.
+        """
+        # 1. Get the standard interval to establish the START time
+        standard_interval = super().interval
+        if not standard_interval:
+            return None
+
+        # 2. Look up the 'Volumes Attach' child phase
+        vol_attach = self.children.get("Volumes Attach")
+
+        # 3. If Volumes Attach exists and has a valid interval, use its end time
+        if vol_attach and vol_attach.interval:
+            # The phase ends exactly when the last volume is enabled.
+            # We use the systemd start time, but the volumes' end time.
+            return TimeInterval(standard_interval.begin, vol_attach.interval.end)
+
+        # Fallback: If no volumes attached, return the standard systemd interval
+        return standard_interval
+
+    @property
+    def is_complete(self) -> bool:
+        # Must wait for BOTH the service to start AND all volume attach operations to finish.
+        return super().is_complete and all(c.is_complete for c in self.children.values())
+
+class DependencyRestartPhase(ContainerPhase):
     """
     Tracks the full restart of parallel services (CM and TD).
     Interval is from the *first* service stopping to the *last* service started.
     """
     def __init__(self, debug: bool = False):
         super().__init__("CM/TD restart", debug)
-        # We need to find all four of these timestamps
-        self._cm_stop_t: Optional[datetime] = None
-        self._cm_start_t: Optional[datetime] = None
-        self._td_stop_t: Optional[datetime] = None
-        self._td_start_t: Optional[datetime] = None
+        self.add_child(SimpleSystemdPhase("NVMesh CM Stop", "nvmeshcm.service", "Stopping", "Stopped", debug=debug))
+        self.add_child(SimpleSystemdPhase("NVMesh CM Start", "nvmeshcm.service", "Starting", "Started", debug=debug))
+        self.add_child(SimpleSystemdPhase("NVMesh TD Stop", "nvmeshtrace@trace_daemon.service", "Stopping", "Stopped", debug=debug))
+        self.add_child(SimpleSystemdPhase("NVMesh TD Start", "nvmeshtrace@trace_daemon.service", "Starting", "Started", self.debug))
 
-    def process_entry(self, entry: BaseLogEntry) -> bool:
-        # Fan out to children (e..g, "NVMesh CM Stop")
-        consumed_by_child = super().process_entry(entry)
+# Enum: nvmeibc_mod_state
+# Maps internal kernel module states to their integer values in the trace logs.
+NVMEIBC_STATE_INITIALIZING = '0'  # Module is initializing, first instance created
+NVMEIBC_STATE_READY        = '1'  # Module completed initialization & is operational
+NVMEIBC_STATE_PREP_RM      = '2'  # Preparing for removal (cannot attach new vols)
+NVMEIBC_STATE_RM_RDY       = '3'  # Ready to be removed (no vols attached)
+NVMEIBC_STATE_EXITING      = '4'  # Exiting (memory kfree, proc removal)
 
-        consumed_by_self = False
-        if not isinstance(entry, JournalCTLLogEntry):
-            return consumed_by_child
-
-        if entry.syslog_id == 'systemd':
-            if entry.unit == 'nvmeshcm.service':
-                if entry.message and entry.message.startswith('Stopping') and not self._cm_stop_t:
-                    self._cm_stop_t = entry.timestamp
-                    consumed_by_self = True
-                elif entry.message and entry.message.startswith('Started') and not self._cm_start_t:
-                    self._cm_start_t = entry.timestamp
-                    consumed_by_self = True
-            elif entry.unit == 'nvmeshtrace@trace_daemon.service':
-                if entry.message and entry.message.startswith('Stopping') and not self._td_stop_t:
-                    self._td_stop_t = entry.timestamp
-                    consumed_by_self = True
-                elif entry.message and entry.message.startswith('Started') and not self._td_start_t:
-                    self._td_start_t = entry.timestamp
-                    consumed_by_self = True
-
-        return consumed_by_self or consumed_by_child
-
-    @property
-    def interval(self) -> Optional[TimeInterval]:
-        """Custom interval calculation for this complex phase."""
-        all_timestamps_found = all([self._cm_stop_t, self._cm_start_t, self._td_stop_t, self._td_start_t])
-
-        if all_timestamps_found:
-            self._start = min(self._cm_stop_t, self._td_stop_t)
-            self._end = max(self._cm_start_t, self._td_start_t)
-            if self._end >= self._start:
-                return TimeInterval(self._start, self._end)
-        elif self.debug and (self._cm_stop_t or self._cm_start_t or self._td_stop_t or self._td_start_t):
-            logger.debug(f"Phase '{self.name}' is incomplete. CM_Stop:{bool(self._cm_stop_t)}, CM_Start:{bool(self._cm_start_t)}, TD_Stop:{bool(self._td_stop_t)}, TD_Start:{bool(self._td_start_t)}")
-        return None
-
-    @property
-    def is_complete(self) -> bool:
-        """
-        This composite phase is complete when its 4 markers are found.
-        We do NOT check children, as per your last request.
-        """
-        self_complete = all([self._cm_stop_t, self._cm_start_t, self._td_stop_t, self._td_start_t])
-        return self_complete
-
-class ShutdownPhase(BasePhase):
+class ShutdownPhase(CompositePhase):
     """Tracks the duration of the nvmesh_clnt_shutdown script."""
     def __init__(self, debug: bool = False):
         super().__init__("client shutdown", debug)
+        # Volume Detaching (Dynamic Discovery)
+        self.add_child(VolumesDetachPhase(debug=debug))
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete or not isinstance(entry, JournalCTLLogEntry):
+        if self.is_complete:
             return False
 
+        consumed_by_child = super().process_entry(entry)
+        consumed_by_self = False
         msg = entry.message
-        if entry.syslog_id == 'nvmeshclient' and msg and "NDU" in msg:
+        if isinstance(entry, JournalCTLLogEntry) and entry.syslog_id == 'nvmeshclient' and msg and "NDU" in msg:
             if not self._start and "client shutdown script invoked" in msg:
                 self._start = entry.timestamp
-                return True
+                consumed_by_self = True
             if not self._end and "client shutdown script done" in msg:
                 self._end = entry.timestamp
-                return True
-        return False
+                consumed_by_self = True
 
-class ModuleUnLoadPhase(BasePhase):
+        return consumed_by_self or consumed_by_child
+
+class ModulesUnLoadPhase(BasePhase):
     """A child-phase that finds the "Starting to unload" and "Done unloading" messages from the nvmeshclient log."""
     def __init__(self, debug: bool = False):
-        super().__init__("module unload", debug)
+        super().__init__("modules unload", debug)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         if self.is_complete or not isinstance(entry, JournalCTLLogEntry):
@@ -704,163 +903,582 @@ class ModuleUnLoadPhase(BasePhase):
                 return True
         return False
 
-class ModuleLoadPhase(BasePhase):
-    """A child-phase that finds the "Starting to load" and "Done loading" messages from the nvmeshclient log."""
+class ModulesLoadPreClientInitPhase(BasePhase):
+    """
+    Child Phase 1: Pre-Initialization ($t1 \to t2$).
+
+    Definitions:
+      t1: "Starting to load modules" (User Space Start)
+      t2: "MODULE_STATE_CHANGE state=0->0" (Kernel Init Start)
+
+    Interval: Script execution start -> Kernel client module first instruction.
+    Covers: dependency (common module) loading, modprobe overhead and kernel linking/relocation.
+    """
+
     def __init__(self, debug: bool = False):
-        super().__init__("module load", debug)
+        super().__init__("Pre-Initialization", debug)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete or not isinstance(entry, JournalCTLLogEntry):
+        if self.is_complete:
             return False
-        msg = entry.message
-        # Look for the log lines from the nvmeshclient script
-        if entry.syslog_id == 'nvmeshclient' and msg and "NDU" in msg:
-            if not self._start and "Starting to load modules" in msg:
+
+        # Start ($t1): "Starting to load modules"
+        if isinstance(entry, JournalCTLLogEntry) and \
+                entry.syslog_id == 'nvmeshclient' and entry.message:
+            if not self._start and "Starting to load modules" in entry.message:
                 self._start = entry.timestamp
                 return True
-            elif not self._end and "Done loading modules" in msg:
+
+        # End ($t2): State 0->0 (Entering INITIALIZING)
+        if isinstance(entry, PagerLogEntry) and entry.message:
+            # Logic: module state=0->state=0
+            target_state = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_INITIALIZING}"
+
+            if not self._end and "MODULE_STATE_CHANGE" in entry.message and target_state in entry.message:
                 self._end = entry.timestamp
                 return True
+
         return False
 
-class VolumePhase(BasePhase):
+class ModulesLoadClientInitCorePhase(BasePhase):
     """
-    A phase tracking the IO disabled interval for a *single* volume.
-    Inherits from BasePhase, using _start for 'Disabling' and _end for 'Enabling.
+    Child of Client Init.
+    Interval: "client globals create (core) - start" -> "done".
     """
-    def __init__(self, name: str, debug: bool = False):
-        # The 'name' will be the volume's device name (e.g., 'v1')
-        super().__init__(name, debug)
+    def __init__(self, debug: bool = False):
+        super().__init__("Client Core Init", debug)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        """Processes a PagerLogEntry to find this volume *own* start (disabled) and end (enabled)."""
         if self.is_complete or not isinstance(entry, PagerLogEntry):
             return False
 
+        msg = entry.message
+        if not msg:
+            return False
+
+        # Start Trigger
+        if not self._start and "client globals create (core) - start" in msg:
+            self._start = entry.timestamp
+            return True
+
+        # End Trigger
+        if not self._end and "client globals create (core) - done" in msg:
+            self._end = entry.timestamp
+            return True
+
+        return False
+
+
+
+class ModulesLoadClientInitPhase(CompositePhase):
+    """
+    Child Phase 2: Kernel client initialization ($t2 \to t3$).
+
+    Definitions:
+      t2: "MODULE_STATE_CHANGE state=0->0" (Kernel Init Start)
+      t3: "MODULE_STATE_CHANGE state=0->1" (Kernel Ready)
+
+    Interval: Kernel client module init() execution -> Module Ready.
+    Covers: The execution of the module's __init function (e.g., nvmeibc_init).
+    """
+
+    def __init__(self, debug: bool = False):
+        super().__init__("Client Init", debug)
+        self.add_child(ModulesLoadClientInitCorePhase(debug))
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        if self.is_complete or not isinstance(entry, PagerLogEntry):
+            return False
+
+        consumed_by_child = super().process_entry(entry)
+        consumed_by_self = False
+        msg = entry.message
+        if not msg or "MODULE_STATE_CHANGE" not in msg:
+            return False
+
+        # Start ($t2): State 0->0 (Entering INITIALIZING)
+        start_signature = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_INITIALIZING}"
+        if not self._start and start_signature in msg:
+            self._start = entry.timestamp
+            consumed_by_self = True
+
+        # End ($t3): State 0->1 (Transition to READY)
+        end_signature = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_READY}"
+        if not self._end and end_signature in msg:
+            self._end = entry.timestamp
+            return True
+
+        return consumed_by_self or consumed_by_child
+
+class ModulesLoadPhase(CompositePhase):
+    """
+    Tracks the full 'modules load' phase.
+    Parent Interval: "Starting to load" ($t1$) -> "Done loading".
+
+    Timeline:
+      t1 .... (Pre-Init) .... t2 .... (Client Init) .... t3 .... (Cleanup) .... Done
+    """
+
+    def __init__(self, debug: bool = False):
+        super().__init__("modules load", debug)
+        # Add the new breakdown phases
+        self.add_child(ModulesLoadPreClientInitPhase(debug))
+        self.add_child(ModulesLoadClientInitPhase(debug))
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        # 1. Feed children first (so they can catch t1, t2, t3)
+        consumed_by_child = super().process_entry(entry)
+
+        # 2. Check for Parent boundaries (t1 -> Done)
+        consumed_by_self = False
+
+        if not self.is_complete and isinstance(entry, JournalCTLLogEntry):
+            if entry.syslog_id == 'nvmeshclient' and entry.message:
+
+                # Parent Start ($t1) - Same as PreInit Start
+                if not self._start and "Starting to load modules" in entry.message:
+                    self._start = entry.timestamp
+                    consumed_by_self = True
+
+                # Parent End ("Done") - Happens after t3 (script cleanup)
+                elif not self._end and "Done loading modules" in entry.message:
+                    self._end = entry.timestamp
+                    consumed_by_self = True
+
+        return consumed_by_self or consumed_by_child
+
+class VolumeDetachPhase(BasePhase):
+    """
+    Tracks the detach operation for a single volume.
+    Start: "Detach started"
+    End:   "Detach ended" or "Detach failed"
+    """
+
+    def __init__(self, name: str, debug: bool = False):
+        super().__init__(name, debug)
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        # 1. Safety and Relevance Checks
+        if self.is_complete or not isinstance(entry, PagerLogEntry):
+            return False
+
+        # Only process logs belonging to this specific volume
         if entry.dev_name != self.name:
             return False
 
-        consumed = False
-        if not self._start and entry.message and 'Disabling I/O' in entry.message:
-            logger.debug(f"[pager]: Found 'Disabling I/O' for {self.name}")
+        msg = entry.message
+        if not msg:
+            return False
+
+        #logger.debug(f"[{self.name}]: observing msg {msg}")
+        # 2. Logic
+        if not self._start and "Disabling I/O" in msg:
+            logger.debug(f"[{self.name}]: matched start - msg {msg}")
             self._start = entry.timestamp
-            consumed = True
-        elif not self._end and entry.message and 'Enabling I/O' in entry.message:
-            logger.debug(f"[pager]: Found 'Enabling I/O' for {self.name}")
+            return True
+
+        if not self._end and ("Detach finished" in msg or "Detach failed" in msg):
+            logger.debug(f"[{self.name}]: matched end - msg {msg}")
             self._end = entry.timestamp
-            consumed = True
+            return True
 
-        return consumed
+        return False
 
-
-# [REVISED] Renamed from IODisabledPhase, inherits from CompositePhase
-class NDUPhase(CompositePhase):
+class DynamicVolumesPhase(ContainerPhase):
     """
-    A special composite phase that tracks the *entire* NDU process.
-    Its interval is defined by the min/max of all discovered volumes.
-    Its completeness is *only* defined by all volumes being complete.
+    Base class for top-level phases that dynamically discover volumes from Pager logs.
+    Handles the discovery logic and interval calculation.
     """
-    def __init__(self, debug: bool = False):
-        super().__init__('NDU', debug)
-        # self.children will hold *service* phases (Stop, Start, etc.)
-        self.volumes: Dict[str, VolumePhase] = {} # Tracks *volume* sub-phases
+    def __init__(self, name: str, debug: bool = False):
+        super().__init__(name, debug)
+
+    @abstractmethod
+    def _create_volume_child(self, vol_name: str) -> BasePhase:
+        """Factory method: Subclasses must return the specific child object."""
+        pass
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        # 1. Fan out to all *service* children (Stop, Start, etc.)
-        consumed_by_service_child = super().process_entry(entry)
-
-        # 2. Do its *own* work (managing volumes)
-        consumed_by_volume = False
-        if isinstance(entry, PagerLogEntry):
+        # 1. Dynamic Discovery Logic
+        if isinstance(entry, PagerLogEntry) and entry.dev_name:
             vol_name = entry.dev_name
-            if vol_name:
-                if vol_name not in self.volumes:
-                    self.volumes[vol_name] = VolumePhase(name=vol_name, debug=self.debug)
-                    logger.debug(f"[NDUPhase]: Discovered new volume from logs: {vol_name}")
+            if self.debug:
+                logger.debug(f"[{self.name}]: volume: {vol_name} msg: {entry.message}")
 
-                # Delegate to the specific volume
-                # Only send if the volume phase is not yet complete
-                if not self.volumes[vol_name].is_complete:
-                    if self.volumes[vol_name].process_entry(entry):
-                        consumed_by_volume = True
+            # Check if we already track this volume
+            if vol_name not in self.children:
+                # Use the factory method to create the specific type of child
+                new_child = self._create_volume_child(vol_name)
+                self.add_child(new_child)
 
-        return consumed_by_service_child or consumed_by_volume
+                if self.debug:
+                    logger.debug(f"[{self.name}]: Discovered new volume: {vol_name}")
 
-    @property
-    def is_complete(self) -> bool:
+        # 2. Standard Composite processing (fan-out to children)
+        return super().process_entry(entry)
+
+    def finalize(self):
         """
-        The NDU is "complete" (for polling) only when:
-        1. All dynamically discovered volumes are complete (I/O re-enabled).
-        2. All main service phases are complete (e.g., Client Start is "Started").
+        [OVERRIDDEN] Custom finalization to handle the 'no volumes' case gracefully.
         """
-        # We can't be complete if we haven't even found the volumes yet.
-        if not self.volumes:
+        # 1. Run standard logic (calculates interval, sets status, adds generic warnings)
+        super().finalize()
+
+        # 2. Check for the specific "Empty Discovery" case
+        if not self.children:
+            # We found no volumes. This explains why the interval is missing.
+            # Replace the generic "Phase completely missing" warning with a specific one.
+            self.warnings = ["No volumes discovered"]
+
+            # Optional: If you prefer the report to show "0 ms" instead of "N/A",
+            # you can force the status to VALID here.
+            # For now, we leave it as EMPTY (N/A) but with the better warning.
+            self.status = PhaseStatus.VALID
+#
+class VolumesDetachPhase(DynamicVolumesPhase):
+    """
+    Top-level phase that tracks Detach operations across ALL volumes.
+    """
+    def __init__(self, debug: bool = False):
+        super().__init__("Volumes Detach", debug)
+
+    def _create_volume_child(self, vol_name: str) -> BasePhase:
+        return VolumeDetachPhase(vol_name, debug=self.debug)
+
+class VolumeAttachConf2Cont(BasePhase):
+    """
+    Child phase 1: From 'Attach finished' to the LAST 'CONT disk'.
+    """
+
+    def __init__(self, vol_name: str, debug: bool = False):
+        super().__init__(f"Config->Cont", debug)
+        self.vol_name = vol_name
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        if not isinstance(entry, PagerLogEntry):
             return False
-        volumes_complete = all(v.is_complete for v in self.volumes.values())
 
-        # we can't be complete if any of the service phases are still running
-        children_complete = all(c.is_complete for c in self.children.values())
+        if entry.dev_name != self.vol_name:
+            return False
 
-        return volumes_complete and children_complete
+        msg = entry.message
+        if not msg:
+            return False
+
+        # Start condition
+        if not self._start and "Attach finished" in msg:
+            self._start = entry.timestamp
+            return True
+
+        # End condition (Update repeatedly to find the *last* one)
+        if "CONT disk" in msg:
+            self._end = entry.timestamp
+            # We return True because we matched, but we rely on the parent
+            # to keep feeding us so we can update _end if another CONT appears.
+            return True
+
+        return False
+
+class VolumeAttachCont2IOEnabled(BasePhase):
+    """
+    Child phase 2: From LAST 'CONT disk' to 'Enabling I/O'.
+    """
+
+    def __init__(self, vol_name: str, debug: bool = False):
+        super().__init__(f"Cont->Enabled", debug)
+        self.vol_name = vol_name
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        if not isinstance(entry, PagerLogEntry):
+            return False
+
+        if entry.dev_name != self.vol_name:
+            return False
+
+        msg = entry.message
+        if not msg:
+            return False
+
+        # Start condition (Update repeatedly to match the *last* CONT disk)
+        # This ensures this phase starts exactly where the previous one ended
+        if "CONT disk" in msg:
+            self._start = entry.timestamp
+            return True
+
+        # End condition
+        if not self._end and "Enabling I/O" in msg:
+            self._end = entry.timestamp
+            return True
+
+        return False
+
+class VolumeAttachPhase(ContainerPhase):
+    """
+    Composite phase for a SINGLE volume's attach process.
+    Contains the two sub-phases defined above.
+    """
+
+    def __init__(self, vol_name: str, debug: bool = False):
+        super().__init__(vol_name, debug)
+        self.vol_name = vol_name
+        # Add the two specific children
+        self.add_child(VolumeAttachConf2Cont(vol_name, debug))
+        self.add_child(VolumeAttachCont2IOEnabled(vol_name, debug))
 
     @property
     def interval(self) -> Optional[TimeInterval]:
         """
-        [OVERRIDDEN] The NDU "IO disabled" interval is the
-        min/max window of all its volume children.
+        Overridden interval: min/max of all child phases.
+        (Using explicit logic since refactor is not applied yet)
         """
-        valid_intervals = [v.interval for v in self.volumes.values() if v.interval is not None]
+        valid_intervals = [c.interval for c in self.children.values() if c.interval is not None]
         if not valid_intervals:
             return None
 
-        # Find the earliest start time and latest end time across all volumes
         self._start = min(i.begin for i in valid_intervals)
         self._end = max(i.end for i in valid_intervals)
 
         return TimeInterval(self._start, self._end)
 
-    def get_report_data(self) -> Dict[str, Any]:
+
+class VolumesAttachPhase(DynamicVolumesPhase):
+    """
+    Top-level phase that tracks Attach operations across ALL volumes.
+    """
+    def __init__(self, debug: bool = False):
+        super().__init__("Volumes Attach", debug)
+
+    def _create_volume_child(self, vol_name: str) -> BasePhase:
+        return VolumeAttachPhase(vol_name, debug=self.debug)
+
+class VolumeIODisabledPhase(BasePhase):
+    """
+    Tracks the IO disabled interval for a *single* volume.
+    Passive Phase: State is populated strictly from finalized Detach/Attach data.
+    """
+    def __init__(self, name: str, debug: bool = False):
+        super().__init__(name, debug)
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        # Passive phase; does not consume logs.
+        return False
+
+class VolumesIODisabledPhase(ContainerPhase):
+    """
+    Composite phase that tracks I/O Disabled state across ALL volumes.
+    Passive Phase: Populated by bridging FINALIZED data from Detach and Attach phases.
+    Interval: min(disabling) .. max(enabling)
+    """
+
+    def __init__(self, debug: bool = False):
+        super().__init__("IO Disabled", debug)
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        # Passive phase; does not consume logs.
+        return False
+
+    def populate_from_phases(self, detach_phase: BasePhase, attach_phase: BasePhase):
         """
-        [OVERRIDDEN] Builds the final report dictionary.
-        This calculates the two main timelines and the final NDU time.
+        Creates IO phases using the FROZEN state of the source phases.
+        This ensures consistency with earlier processing of logs/traces.
         """
-        # 1. Get the data for the service phases (Stop, Start, etc.)
-        service_children_reports = []
-        service_phases_sum_ms = 0
+        # Ensure we are working with CompositePhases that have children
+        if not isinstance(detach_phase, CompositePhase):
+            return
 
-        # self.children holds service phases
-        for child in self.children.values():
-            child_report = child.get_report_data()
-            service_phases_sum_ms += child_report["duration_ms"]
-            service_children_reports.append(child_report)
+        # Iterate over Detach phases (The Source of Truth for volume existence)
+        for vol_name, detach_child in detach_phase.children.items():
+            io_child = VolumeIODisabledPhase(vol_name, debug=self.debug)
 
-        # 2. Get the data for the volume phases
-        volume_children_reports = []
-        io_interval = self.interval # This calculates the min/max volume interval
-        io_duration_ms = io_interval.duration_ms if io_interval else 0
+            # --- 1. Strict Start Time (From Detach) ---
+            # We check the finalized status, not the dynamic property.
+            if detach_child.status == PhaseStatus.VALID and detach_child._final_interval:
+                # Best case: Detach completed successfully.
+                io_child._start = detach_child._final_interval.begin
+            elif detach_child._start:
+                # Fallback: Detach incomplete, but we have a start timestamp.
+                io_child._start = detach_child._start
+            # If detach_child is EMPTY, io_child._start remains None.
 
-        for vol_phase in self.volumes.values():
-            volume_children_reports.append(vol_phase.get_report_data())
+            # --- 2. Strict End Time (From Attach) ---
+            if isinstance(attach_phase, CompositePhase):
+                attach_child = attach_phase.children.get(vol_name)
 
-        # 3. Calculate final NDU Time (as per your logic)
-        # we consider the final ndu time the IO disabled duration if available to us
-        final_ndu_time = io_duration_ms if io_duration_ms else service_phases_sum_ms
+                if attach_child:
+                    if attach_child.status == PhaseStatus.VALID and attach_child._final_interval:
+                        # Best case: Attach completed successfully.
+                        io_child._end = attach_child._final_interval.end
+                    elif attach_child._end:
+                        # Fallback: Attach incomplete/broken, but we have an end timestamp.
+                        io_child._end = attach_child._end
 
-        # Build the final report structure
-        return {
-            "name": self.name,
-            "total_ndu_time_ms": final_ndu_time,
-            "service_phases_sum_ms": service_phases_sum_ms,
-            "io_disabled_duration_ms": io_duration_ms,
-            "io_disabled_interval": io_interval,
-            "service_phases": service_children_reports,
-            "volume_phases": sorted(volume_children_reports, key=lambda x: x.get("name")),
-            # BasePhase properties (for consistency)
-            "duration_ms": io_duration_ms,
-            "self_time_ms": 0, # NDUPhase itself has no "self time"
-            "interval": io_interval,
-            "children": service_children_reports # for consistency
-        }
+            self.add_child(io_child)
+
+class NDUPhase(CompositePhase):
+    """
+    The root phase.
+    Children: Service phases (client stop, deps restart, client start).
+    Member: io_disabled_phase (derived from volumes detach/attach phases).
+    """
+    def __init__(self, debug: bool = False):
+        super().__init__('NDU', debug)
+        # 1. Standard Children (Service Phases)
+        # (These are added via setup_ndu_phases using add_child)
+
+        # 2. Special Member (volumes IO disabled phase)
+        # This is a PASSIVE container. It is populated during finalize().
+        self.io_disabled_phase = VolumesIODisabledPhase(debug)
+
+    def process_entry(self, entry: BaseLogEntry) -> bool:
+        # Only feed Service Phases.
+        return super().process_entry(entry)
+
+    @property
+    def is_complete(self) -> bool:
+        """
+        The NDU is complete when all Service phases are complete.
+        """
+        # Iterate directly to check all service children (Stop, Restart, Start)
+        return all(c.is_complete for c in self.children.values())
+
+    @property
+    def interval(self) -> Optional[TimeInterval]:
+        """
+        [OVERRIDDEN] Determines the overall NDU time window.
+
+        Primary: Returns the "IO Disabled" interval (if populated).
+        Fallback: Returns the Service interval.
+        """
+        # 1. Priority: IO Disabled Interval (available after finalize)
+        io_interval = self.io_disabled_phase.interval
+        if io_interval:
+            return io_interval
+
+        # 2. Fallback: Service Interval
+        # If no volumes, the NDU interval is the span of all service phases
+        return self.min_max_interval
+
+    @property
+    def has_warnings(self) -> bool:
+        """Check services (children) AND derived volumes (member)."""
+        if super().has_warnings:
+            return True
+        return self.io_disabled_phase.has_warnings
+
+    def _find_phase_recursive(self, start_phase: BasePhase, target_name: str) -> Optional[BasePhase]:
+        """Helper to find a specific phase deep in the hierarchy."""
+        if start_phase.name == target_name:
+            return start_phase
+
+        if isinstance(start_phase, CompositePhase):
+            for child in start_phase.children.values():
+                found = self._find_phase_recursive(child, target_name)
+                if found:
+                    return found
+        return None
+
+    def finalize(self):
+        """
+        Coordinator Finalization.
+        1. Finalize Services.
+        2. Derive IO Disabled phase from Detach/Attach phases.
+        3. Finalize IO.
+        4. Compute Grand Total.
+        """
+        # 1. Finalize Services (children)
+        # This calculates timestamps for Client Stop, Start, etc.
+        super().finalize()
+
+        # 2. Locate Source Phases for Derivation
+        detach_phase = self._find_phase_recursive(self, "Volumes Detach")
+        attach_phase = self._find_phase_recursive(self, "Volumes Attach")
+
+        if detach_phase and attach_phase:
+            if self.debug:
+                logger.debug("Deriving IO Disabled phase from Detach/Attach...")
+            # 3. Populate IO (The Data Transfer)
+            self.io_disabled_phase.populate_from_phases(detach_phase, attach_phase)
+        else:
+            if self.debug:
+                logger.debug("Could not find Detach/Attach phases for derivation.")
+
+        # 4. Finalize IO (The Calculation)
+        # Calculates durations and warnings for the newly created volume phases
+        self.io_disabled_phase.finalize()
+
+        # 5. Compute Grand Total NDU Time
+        # Explicitly calculate Service Time from the children (Services)
+        # This is safer than relying on self._final_duration from step 1
+        service_interval = self.min_max_interval
+        service_time = service_interval.duration_ms if service_interval else 0
+
+        io_time = self.io_disabled_phase._final_duration
+
+        # Logic: Use IO time if available/valid, otherwise fallback to Service time
+        self._final_duration = io_time if io_time > 0 else service_time
+
+        # 6. Set Status
+        if service_time > 0 or io_time > 0:
+            self.status = PhaseStatus.VALID
+
+        # Topological Validation (Split-Brain Protection)
+        # Check if Client Start appears BEFORE Client Stop (impossible in a single valid NDU)
+        client_stop = self.children.get("client stop")
+        client_start = self.children.get("client start")
+
+        if client_stop and client_start and client_stop._start and client_start._start:
+            if client_start._start < client_stop._start:
+                # We found the tail of NDU #1 and the head of NDU #2.
+                msg = (f"Logical Error: 'Client Start' ({client_start._start.astimezone().strftime('%H:%M:%S')}) "
+                       f"detected before 'Client Stop' ({client_stop._start.astimezone().strftime('%H:%M:%S')}). "
+                       f"Analysis likely spans two different NDU runs.")
+                self.warnings.insert(0, msg)  # Prepend as high priority
+                self.status = PhaseStatus.INVALID
+
+    def print_report(self, level: int = 0, verbose: bool = False):
+        # Guard Clause for Invalid State
+        if self.status == PhaseStatus.INVALID:
+            print("\n" + "=" * 30)
+            print("  NVMesh NDU Analysis (INVALID)")
+            print("=" * 30 + "\n")
+            for warning in self.warnings:
+                print(f"!! CRITICAL FAILURE: {warning} !!")
+            print("\n(Report suppressed due to logical errors)")
+            return  # <--- Stop printing here
+
+        print("\n" + "=" * 30)
+        print("  NVMesh NDU Analysis Report")
+        print("=" * 30 + "\n")
+        print("--- NDU Phase Breakdown ---")
+
+        def sort_key(c):
+            if c._final_interval: return c._final_interval.begin
+            if c._start: return c._start
+            return datetime.max.replace(tzinfo=timezone.utc)
+
+        for child in sorted(self.children.values(), key=sort_key):
+            child.print_report(level=0)
+
+        print("---------------------------")
+        service_sum = sum(c._final_duration for c in self.children.values())
+        print(f"{'total NDU services:':<22} {service_sum} ms")
+
+        io_str = f"{self.io_disabled_phase._final_duration} ms"
+        if self.io_disabled_phase._final_interval:
+            # Use robust formatting instead of splitting
+            begin_str = self.io_disabled_phase._final_interval.begin.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            end_str = self.io_disabled_phase._final_interval.end.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            io_str += f"    ({begin_str} .. {end_str})"
+
+        print(f"{'IO disabled:':<22} {io_str}")
+
+        print("---------------------------")
+        print(f"{'Total NDU Time (max):':<22} {self._final_duration} ms")
+        print("---------------------------\n")
+
+        if self.io_disabled_phase.children:
+            print("--- verbose volume IO disabled details () ---")
+            self.io_disabled_phase.print_report(level=1)  # This will print the tree of volumes
+#
 
 # ---------------------------------------------------------------------------
 #  MAIN APPLICATION LOGIC
@@ -898,19 +1516,8 @@ def setup_ndu_phases(args: argparse.Namespace) -> NDUPhase:
 
     # 2. Create and add the main service phases as children
     ndu_phase.add_child(ClientStopPhase(debug=args.debug)) # ClientStop is now a composite
-
-    dep_phase = DependencyRestartPhase(debug=args.debug)
-    ndu_phase.add_child(dep_phase)
-
+    ndu_phase.add_child(DependencyRestartPhase(debug=args.debug))
     ndu_phase.add_child(ClientStartPhase(debug=args.debug))
-
-    # 3. Add verbose-only sub-phases
-    if args.verbose:
-        # Add children to the dependency phase
-        dep_phase.add_child(SimpleSystemdPhase("NVMesh CM Stop", "nvmeshcm.service", "Stopping", "Stopped", debug=args.debug))
-        dep_phase.add_child(SimpleSystemdPhase("NVMesh CM Start", "nvmeshcm.service", "Starting", "Started", debug=args.debug))
-        dep_phase.add_child(SimpleSystemdPhase("NVMesh TD Stop", "nvmeshtrace@trace_daemon.service", "Stopping", "Stopped", debug=args.debug))
-        dep_phase.add_child(SimpleSystemdPhase("NVMesh TD Start", "nvmeshtrace@trace_daemon.service", "Starting", "Started", debug=args.debug))
 
     return ndu_phase
 
@@ -946,98 +1553,6 @@ def combined_log_stream(
 
     yield from merged_stream
 
-def print_report_hierarchical(report_data: Dict[str, Any], verbose: bool, level: int = 0):
-    """
-    [NEW] Recursively prints the hierarchical report.
-    """
-    indent = "  " * level
-
-    # --- 1. Print Self ---
-    name = report_data.get("name", "Unknown")
-    duration = report_data.get("duration_ms", 0)
-    self_time = report_data.get("self_time_ms", 0)
-    interval = report_data.get("interval")
-
-    # Don't print 0 duration for base phases, but do print 0 self_time for composites
-    if duration == 0 and not report_data.get("children"):
-         duration_str = "N/A"
-         # Don't show interval if duration is 0
-         interval_str = ""
-    else:
-        duration_str = f"{duration} ms"
-        # Format the interval string (if verbose)
-        interval_str = ""
-        if verbose and interval:
-            begin_str = interval.begin.astimezone().strftime('%H:%M:%S.%f')[:-3]
-            end_str = interval.end.astimezone().strftime('%H:%M:%S.%f')[:-3]
-            interval_str = f"({begin_str} .. {end_str})"
-
-    # Print the line for the current phase
-    label = f"{indent}- {name}:"
-
-    # For composites, show self-time (delta). For leaves, don't.
-    if report_data.get("children"):
-        delta_str = f"(Self: {self_time} ms)"
-        print(f"{label:<26} {duration_str:<10} {delta_str:<18} {interval_str}")
-    else:
-        print(f"{label:<26} {duration_str:<10} {'':<18} {interval_str}")
-
-    # --- 2. Recurse for Children ---
-    # Sort children by their interval start time, if available
-    child_reports = report_data.get("children", [])
-    try:
-        sorted_children = sorted(child_reports, key=lambda r: r.get("interval").begin if r.get("interval") else datetime.max.replace(tzinfo=timezone.utc))
-    except Exception:
-        sorted_children = child_reports # Fallback if sorting fails
-
-    for child_report in sorted_children:
-        print_report_hierarchical(child_report, verbose, level + 1)
-
-
-def print_report(analysis: NDUPhase, verbose: bool):
-    """
-    [REVISED] Main print function that orchestrates the hierarchical report.
-    """
-
-    # Get the single, consolidated data structure
-    report_data = analysis.get_report_data()
-
-    print("\n" + "="*30)
-    print("  NVMesh NDU Analysis Report")
-    print("="*30 + "\n")
-    print("--- NDU Phase Breakdown ---")
-
-    # --- Print Hierarchical Service Phases ---
-    service_phases = report_data.get("service_phases", [])
-    for phase_data in service_phases:
-        print_report_hierarchical(phase_data, verbose, level=0)
-
-    print("---------------------------")
-
-    # --- Print Totals (from NDUPhase report) ---
-    service_sum_str = f"{report_data['service_phases_sum_ms']} ms"
-    print(f"{'total NDU services:':<22} {service_sum_str}")
-
-    io_interval = report_data["io_disabled_interval"]
-    io_disabled_str = io_interval.to_str(verbose) if io_interval else "N/A"
-    print(f"{'IO disabled:':<22} {io_disabled_str}")
-
-    print("---------------------------")
-    ndu_time_str = f"{report_data['total_ndu_time_ms']} ms"
-    print(f"{'Total NDU Time:':<22} {ndu_time_str}")
-    print("---------------------------\n")
-
-    # --- Print Verbose Volume Details ---
-    if verbose:
-        print("--- Verbose Volume Details (IO Disabled) ---")
-        volume_phases = report_data.get("volume_phases", [])
-        if not volume_phases:
-            print("    (no volumes discovered)")
-        for vol_data in volume_phases:
-            # Use the simple recursive printer for volumes too
-            print_report_hierarchical(vol_data, verbose, level=1)
-
-
 def init_argparse() -> argparse.ArgumentParser:
     """
     Initializes and returns the argument parser.
@@ -1069,6 +1584,7 @@ def init_argparse() -> argparse.ArgumentParser:
     # --- Global arguments for all commands ---
     parser.add_argument('--verbose', '-v', action='store_true', help='Print full begin/end timestamps and sub-phases.')
     parser.add_argument('--debug', action='store_true', help='Print debug info (sent to stderr).')
+    parser.add_argument('--non-strict', action='store_true', help='Be strict w.r.t report printing.')
     return parser
 
 def parse_flexible_timestamp(timestamp_str: str, arg_name: str = "timestamp") -> datetime:
@@ -1225,8 +1741,11 @@ def main():
     journal_time_format = "%Y-%m-%d %H:%M:%S.%f"
 
     if args.command == 'run':
-        # Call the new function to get the timestamps
+        # issue the ndu and get timestamps
         since_dt, until_dt = execute_ndu_and_get_times(poll_timeout_seconds)
+        # wait for the traces to be flushed to files (note: compression might delay this)
+        logger.info("Waiting for traces to be flushed.")
+        time.sleep(TRACE_FLUSH_SECONDS+0.5)
 
     logger.info(
         f"Analyzing logs from {since_dt.strftime(journal_time_format)} to {until_dt.strftime(journal_time_format)}...")
@@ -1272,8 +1791,31 @@ def main():
         # This will catch the 'raise' from process_log_stream
         logger.info("\nMain processing loop interrupted.")
 
+    logger.debug("Log processing finished.")
+
+    # --- Finalize Step ---
+    # Calculate all intervals, durations, and validations once.
+    ndu_analysis.finalize()
+
+    # 1. Critical Logic Check (Always Enforced)
+    # If the analysis found logical contradictions (e.g. Start before Stop),
+    # we must fail immediately, regardless of strict mode.
+    if ndu_analysis.status == PhaseStatus.INVALID:
+        logger.error("Analysis failed due to critical logical errors.")
+        ndu_analysis.print_report(verbose=args.verbose)  # This prints the "CRITICAL FAILURE" msg
+        sys.exit(1)
+
+    # 2. strict policy check - fail if warnings exist unless user asked for --non-strict
+    if not args.non_strict and ndu_analysis.has_warnings:
+        logger.error("Analysis failed validation checks:")
+        # We can temporarily reuse print_report to show the warnings,
+        # or write a specific print_warnings method.
+        ndu_analysis.print_report()
+        sys.exit(1)
+
     # --- Reporting Phase ---
-    print_report(ndu_analysis, args.verbose)
+    # Now we just call print on the object itself.
+    ndu_analysis.print_report()
 
 if __name__ == "__main__":
     # DO NOT set a default basicConfig here.
