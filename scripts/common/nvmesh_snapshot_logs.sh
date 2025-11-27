@@ -126,7 +126,9 @@ cd ${snapshot_dir}
 link_or_copy_file_to_cwd /opt/nvmesh/common-repo/tools/traces_post_processor/pager
 link_or_copy_file_to_cwd /opt/nvmesh/common-repo/tools/traces_post_processor/cpager
 link_or_copy_file_to_cwd /opt/nvmesh/common-repo/tools/traces_post_processor/pager.py
-link_or_copy_file_to_cwd /etc/nvmesh/.nvmesh.conf
+cp --sparse=always /etc/nvmesh/.nvmesh.conf ./
+cp --sparse=always /opt/NVMesh/common-repo/tools/toma_rpc.config ./
+cp --sparse=always ${nvmesh_log_dir}/toma_trace.config ./
 #
 if ((${is_toma})); then
 	sudo pkill -10 nvmeibt_toma
