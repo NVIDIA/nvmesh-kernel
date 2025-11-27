@@ -14,6 +14,7 @@ import uuid
 from timeit import default_timer as timer
 import re
 import time
+import shutil
 
 from CMSocket import CMSocket, FileSocket, NvmeshUMSocket, process_scheme
 from CMSocket import JsonSocket
@@ -29,6 +30,7 @@ MESSAGES_TO_CONSUME = 5
 CLIENT_INSTANCES_CHECK_INTERVAL = 5
 MCS_MANAGEMENT_TIMEOUT = 300
 EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
+TLS_CERTS_DIR = '/var/run/nvmesh/tls/nvmeshcm'
 
 schemePath = '/opt/nvmesh/client-repo/management_cm/clnt/'
 
@@ -75,6 +77,13 @@ class ManagementCM(Daemon):
 		self.logger.debug("Received close signal, exiting. PID {}".format(os.getpid()))
 		self.closing = True
 		os.close(self.select_wakeup_p_write) # wakeup select
+
+	def handleSIGHUP(self, signum, frame):
+		self.logger.debug(f'Received SIGHUP signal - reloading certificates and Kafka connections')
+		if not self.isReloadingKafkaConnections:
+			self.needsReload = True
+		else:
+			self.logger.warning("Reload already in progress, ignoring SIGHUP")
 
 	def reloadConfig(self, signum, frame):
 		self.logger.debug("Received reload config signal.")
@@ -229,6 +238,60 @@ class ManagementCM(Daemon):
 
 		return topicsToSubscribeOn
 
+	def copyCertificates(self):
+		"""
+		Copy TLS certificates to runtime directory.
+		"""
+		certConfigKeys = ['cert', 'key', 'CA']
+
+		# Verify that the certificate files exist
+		for certConfigKey in certConfigKeys:
+			certFile = getattr(CMConfig, certConfigKey)
+			if not certFile:
+				self.logger.error(f'Config key {certConfigKey} is missing')
+				sys.exit(1)
+
+			if not os.path.exists(certFile):
+				self.logger.error(f'Certificate file {certFile} does not exist')
+				sys.exit(1)
+
+		# Copy certificates to runtime directory
+		try:
+			if not os.path.exists(TLS_CERTS_DIR):
+				self.logger.debug(f'Creating TLS certificates directory: {TLS_CERTS_DIR}')
+				os.makedirs(TLS_CERTS_DIR, mode=0o700, exist_ok=True)
+
+			srcCertFiles = [CMConfig.cert, CMConfig.key, CMConfig.CA]
+
+			for srcCertFile in srcCertFiles:
+				destCertFile = os.path.join(TLS_CERTS_DIR, os.path.basename(srcCertFile))
+				shutil.copy2(srcCertFile, destCertFile)
+				os.chmod(destCertFile, 0o600)
+
+			self.logger.debug(f'Successfully copied TLS certificates to TLS certificates directory {TLS_CERTS_DIR}')
+
+		except Exception as e:
+			self.logger.error(f'Failed to copy certificates: {e}')
+			raise
+
+	def getKafkaSSLConfig(self):
+		kafkaSslCertFilePath = os.path.join(TLS_CERTS_DIR, os.path.basename(CMConfig.cert))
+		kafkaSslKeyFilePath = os.path.join(TLS_CERTS_DIR, os.path.basename(CMConfig.key))
+		kafkaSslCaFilePath = os.path.join(TLS_CERTS_DIR, os.path.basename(CMConfig.CA))
+
+		conf = {
+			'security.protocol': 'SSL',
+			'enable.ssl.certificate.verification': 'true',
+			'ssl.certificate.location': kafkaSslCertFilePath,
+			'ssl.key.location': kafkaSslKeyFilePath,
+			'ssl.ca.location': kafkaSslCaFilePath,
+		}
+
+		if CMConfig.keyPass:
+			conf['ssl.key.password'] = CMConfig.keyPass
+
+		return conf
+
 	def getKafkaConfig(self):
 		mandatoryConfigsForTLS = [CMConfig.CA, CMConfig.cert, CMConfig.key]
 
@@ -241,14 +304,8 @@ class ManagementCM(Daemon):
 		}
 
 		if CMConfig.TLSEnabled:
-			conf['security.protocol'] = 'SSL'
-			conf['enable.ssl.certificate.verification'] = 'true'
-			conf['ssl.certificate.location'] = CMConfig.cert
-			conf['ssl.ca.location'] = CMConfig.CA
-			conf['ssl.key.location'] = CMConfig.key
-
-			if CMConfig.keyPass:
-				conf['ssl.key.password'] = CMConfig.keyPass
+			sslConf = self.getKafkaSSLConfig()
+			conf.update(sslConf)
 
 		return conf
 
@@ -441,10 +498,19 @@ class ManagementCM(Daemon):
 			self.consumer.close()
 
 	def reloadKafkaConnections(self):
-		self.logger.debug(f"Reloading kafka connections...")
+		self.logger.debug(f"Reloading TLS Certificates & Kafka connections...")
 		self.isReloadingKafkaConnections = True
 
+		self.logger.debug("Closing Kafka connections...")
 		self.closeKafkaConnection()
+
+		# Copy certificates on reload if TLS is enabled
+		if CMConfig.TLSEnabled:
+			self.logger.debug("Reloading TLS certificates...")
+			self.copyCertificates()
+
+		# Reload Kafka connections
+		self.logger.debug("Starting Kafka connections...")
 
 		conf = self.getKafkaConfig()
 		self.kafkaAdminClient = AdminClient(conf)
@@ -524,7 +590,12 @@ class ManagementCM(Daemon):
 		signal.signal(signal.SIGTERM, self.stopSignalHandler)
 		signal.signal(signal.SIGABRT, self.stopSignalHandler)
 		signal.signal(signal.SIGUSR1, self.reloadConfig)
+		signal.signal(signal.SIGHUP, self.handleSIGHUP)
 		logger.info("Registered to signals")
+
+		# Copy TLS certificates to runtime directory if TLS is enabled
+		if CMConfig.TLSEnabled:
+			self.copyCertificates()
 
 		# singaling the main process so it can exit and let systemd know that the service has fully started
 		if self.notifyMainProcessOnStartup:
@@ -584,9 +655,9 @@ class ManagementCM(Daemon):
 					self.shouldClose = True
 					continue
 
+				self.checkAndPerformReload()
 				self.flushOutbox()
 				self.consumeTopics()
-				self.checkAndPerformReload()
 
 				readable, writable, errored = select.select(self.readList, self.writeList, errList, Timeout)
 
@@ -892,6 +963,12 @@ class CMConfig(object):
 	MULTI_INSTANCE_ENABLED = False
 	remoteDebug = False
 
+ 	# TLS configs for Kafka
+	TLSEnabled = False
+	CA = None
+	cert = None
+	key = None
+	keyPass = None
 
 if __name__ == "__main__":
 	SYSLOG_PATH = '/dev/log'
