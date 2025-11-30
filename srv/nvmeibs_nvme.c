@@ -1677,7 +1677,9 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	if (((num_handled == d_max_completions && d_max_completions) || d_defer_process_io_cq) && q->thread) {
 		nvmeib_qp_stats_on_offload_sched(q->qp_stats);
 		local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
-		q->polling = true;
+		/* Set polling=true before wake_up_process to ensure the woken thread sees it.
+		 * The smp_mb__before_atomic in wake_up_process provides the necessary barrier. */
+		WRITE_ONCE(q->polling, true);
 		wake_up_process(q->thread);
 		if (q->irq_debug < 1 || jiffies > last_time + 5 * HZ) {
 			last_time = jiffies;
@@ -1689,7 +1691,11 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	nvmeib_completion_noise_end(NVMEIB_NOISE_INTERRUPT, NULL, 0, NVMEIB_NOISE_CTRS_NVMEIBS_INTR);
 
 	nvmeib_intr_shaper_intr_exit(s_intr_shaper);
-	return ((num_handled > 0) || d_defer_process_io_cq) ? IRQ_HANDLED : IRQ_NONE;
+	/* Always return IRQ_HANDLED to avoid "nobody cared" errors.
+	 * We may get spurious interrupts due to race conditions when switching
+	 * between interrupt and polling modes (disable_irq_nosync doesn't wait
+	 * for in-flight interrupts to be masked by hardware). */
+	return IRQ_HANDLED;
 }
 
 struct cmd_result {
@@ -4707,7 +4713,7 @@ static inline int reuse_local_q_(struct nvme_qp *q)
 	WARN_ON_ONCE(q->irq_state != LOCAL_Q_IRQ_ENABLE);
 
 	/* start polling kthread */
-	q->polling = false;
+	WRITE_ONCE(q->polling, false);
 	if (local_q_kthread_start_(q) < 0)
 		goto free_irq;
 
@@ -5121,7 +5127,7 @@ static int kthread_process_drive_cq(void *arg)
 	_NT(trace_nvme_kthread_process_drive_cq, "Thread started for drive @SERIAL qid=@QID", d->serial, qid);
 	while (!kthread_should_stop()) {
 		q = d->local_ioq[qid];
-		if (q && q->polling) {
+		if (q && READ_ONCE(q->polling)) {
 			max_time = jiffies + HZ;
 
 			do {
@@ -5130,7 +5136,7 @@ static int kthread_process_drive_cq(void *arg)
 				cont = false;
 				enb_irq = false;
 				q = d->local_ioq[qid];
-				if (!q || !q->polling || d->removed || d->reset_pending
+				if (!q || !READ_ONCE(q->polling) || d->removed || d->reset_pending
 					|| d->need_reset)
 					break;
 				spin_lock_irqsave(&q->q_lock, flags);
@@ -5145,9 +5151,27 @@ static int kthread_process_drive_cq(void *arg)
 				total += i;
 			} while (cont && time_before(jiffies, max_time));
 
-			if (!cont && !d->removed && q->polling) {
-				q->polling = false;
-				//OM: review (shall we check if reset-needed/pedning
+			if (!cont && !d->removed && READ_ONCE(q->polling)) {
+				/* The correct sequence to prevent lost-wakeups is: 
+				* 1. Set state for interrupt to see
+				* 2. Set_current_state(TASK_INTERRUPTIBLE);
+				* 3. Write Barrier
+				* 4. Enable interrupts
+				* 5. Read Barrier
+				* 6. Check state if interrupt has changed it to polling mode
+				* 7. Schedule if state has not changed, otherwise continue polling
+				*/
+
+				/* Step 1: update poll-mode */
+				WRITE_ONCE(q->polling, false);
+
+				/* Step 2: set task state to INTERRUPTIBLE */
+				set_current_state(TASK_INTERRUPTIBLE);
+
+				/* Step 3: write barrier */
+				smp_mb();
+				
+				/* Step 4: enable interrupts */
 				if (enb_irq) {
 					local_q_modify_irq(q, LOCAL_Q_IRQ_ENABLE);
 					_ND(trace_1_nvme_kthread_process_drive_cq, "Switch local IRQ back after @TOTAL completions", total);
@@ -5155,15 +5179,19 @@ static int kthread_process_drive_cq(void *arg)
 					total = 0;
 				}
 
-				/* prevent lost wakeup from kthread-stop */
-				set_current_state(TASK_INTERRUPTIBLE);
-				/* check polling again in case the just enabled interrupt sets it to true */
-				barrier();
-				if (!q->polling && !kthread_should_stop()) {
-					/* main kthread handles lost interrupts
+				/* Step 5: read barrier */
+				smp_mb();
+
+				/* Step 6: Check polling again in case interrupt set it to true. This is not a must as
+				the interrupt would have changed the state to READY so the schedule() will not really sleep,
+				but it's a good practice to check again.
+				* Also check kthread_should_stop() to prevent lost wakeup from kthread-stop */
+				if (!READ_ONCE(q->polling) && !kthread_should_stop()) {
+					/* Step 7: call schedule(), main kthread handles lost interrupts
 						(changed from schedule_timeout()) */
 					schedule();
 				}
+				/* This is redundant as the task state is already set to RUNNING after schedule() */
 				__set_current_state(TASK_RUNNING);
 			}
 		}
