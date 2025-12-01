@@ -2070,7 +2070,7 @@ struct netlink_queue_elem_t {
 	};
 };
 
-static XDLIST_DECLARE(, struct netlink_queue_elem_t, link) nl_head;
+static XDLIST_DECLARE(, struct netlink_queue_elem_t, link) nl_head = XDLIST_INIT(nl_head);
 static pthread_mutex_t nl_guard_mutex;
 static bool nl_queue_initialized = false;
 

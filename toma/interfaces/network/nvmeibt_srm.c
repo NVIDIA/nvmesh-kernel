@@ -1906,7 +1906,7 @@ static inline bool srm_fault__stash_ack(
 #endif
 }
 
-static XDLIST_DECLARE(, struct nvmeibt_srm, resend_ack_link) rsrm_resend_ack_q;
+static XDLIST_DECLARE(, struct nvmeibt_srm, resend_ack_link) rsrm_resend_ack_q = XDLIST_INIT(rsrm_resend_ack_q);
 
 void srm_post_recv_cmpl(struct nvmeibt_srm *srm)
 {
@@ -2062,7 +2062,7 @@ void nvmeibt_srm_post_cmpl(struct nvmeibt_srm *srm)
 	srm_post_send_cmpl(srm);
 }
 
-static XDLIST_DECLARE(, struct nvmeibt_srm, resend_link) rsrm_resend_q;
+static XDLIST_DECLARE(, struct nvmeibt_srm, resend_link) rsrm_resend_q = XDLIST_INIT(rsrm_resend_q);
 
 static void rsrm_cancel_srm_timers(struct nvmeibt_srm *srm)
 {
