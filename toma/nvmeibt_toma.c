@@ -2721,9 +2721,9 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		goto out;
 	}
 	if (1) {				// Just varify that full stats dump can operate at any moment startign from this point, Even when some objects are uninitialized
-		char buf[1<<12];
-		struct nvmeibt_Str dummy_print = {.str_len = 0UL, .allocated_size = sizeof(buf), .text_buf = buf, .__this_addr = &dummy_print };
-		print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, &dummy_print);
+		struct nvmeibt_Str		*dummy_print = NNVMEIBT_STR_ALLOC(ufkwl42);
+		print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, dummy_print);
+		NNVMEIBT_STR_FREE(ctah81k, dummy_print);
 	}
 
 	signals_fd = init_signal_handling(executable_name);
