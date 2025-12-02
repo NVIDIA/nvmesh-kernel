@@ -3335,14 +3335,16 @@ void *nvmeib_map_fr(struct nvmeib_dev *nvdev, struct nvmeib_mr_info *info)
 			   goto ret_desc;
 		}
 
-		_NT(trace_nvmeib_map_mr_map_mr_sg,
-			"Mapped SGL @PTR with @COUNT nents and sg_offset @OFFSET to MR with "
+		_ND(trace_nvmeib_map_mr_map_mr_sg,
+			"Mapped SGL @PTR with @COUNT/@COUNT nents and sg_offset @OFFSET to MR with "
 			"rkey @RKEY, iova @IOADDR, offset @OFFSET, length @LENGTH, entries @COUNT",
-			info->sg, info->count, sg_offset, desc->mr->rkey, desc->mr->iova, sg_offset, desc->mr->length, rv);
+			info->sg, rv, info->count, sg_offset, desc->mr->rkey, desc->mr->iova, sg_offset, desc->mr->length, rv);
 		
 		addr = desc->mr->iova;
 		info->dma_len = desc->mr->length;
 		info->offset = sg_offset;
+		/* Return the number of entries mapped to the caller */
+		info->count = rv;
 	} else {
 		/* In 512 byte sectors we have an offset in the first page */
 		addr = info->pages[0] + info->offset;

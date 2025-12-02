@@ -49,7 +49,12 @@ enum nvmeibc_map_sg_modes {
 	   map-sg() will NOT use IB_WR_REG_MR and each sg-entry
 	   will use a dedicated rdma-write WR from/to client
 	   use case: azure IB cluster with 8k < bs < 32k  */
-	MAP_SG_MR_GLOBAL_ONLY = 2
+	MAP_SG_MR_GLOBAL_ONLY = 2,
+
+	/* use ib_dma_map_sg() to map the sg-list, combined with global-key */
+	MAP_SG_MR_COMBINED_USE_IB_DMA_MAP_SG = 3,
+	/* use ib_dma_map_sg() only */
+	MAP_SG_MR_USE_IB_DMA_MAP_SG_ONLY = 4,
 };
 
 #define NVMEIBC_IB_NET_WC_ARR_SIZE NVMEIB_MAX_NORDDA_IO_REQ

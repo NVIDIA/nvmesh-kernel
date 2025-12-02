@@ -65,12 +65,14 @@ bool nvmeibc_map_each_sg_entry = false;
 module_param_named(map_each_sg_entry, nvmeibc_map_each_sg_entry, bool, 0644);
 MODULE_PARM_DESC(map_each_sg_entry, "IB DMA map each SG-entry separately.");
 
-uint nvmeibc_map_sg_mode = NVMEIB_DEBUG_RDMA_CORRUPTION ? MAP_SG_MR_REG_WR_ONLY : MAP_SG_MR_COMBINED;
+uint nvmeibc_map_sg_mode = NVMEIB_DEBUG_RDMA_CORRUPTION ? MAP_SG_MR_USE_IB_DMA_MAP_SG_ONLY : MAP_SG_MR_COMBINED_USE_IB_DMA_MAP_SG;
 module_param_named(map_sg_mode, nvmeibc_map_sg_mode, uint, 0644);
 MODULE_PARM_DESC(map_sg_mode, "Defines the mode for mapping data SG lists: "
 							  "0 = Combined, use global key when able to collapse all sg-entries to one, otherwise map-mr (map WR and rdma-write WR). "
 							  "1 = Use only map-mr (IB_WR_REG_MR, IB_WR_FAST_REG_MR). "
-							  "2 = Use only the global dma key, which means that multiple rdma-write WRs from clnt/srv in wr/rd, respectively, may be needed. The target must have enough WRs to write the data back for read operations.");
+							  "2 = Use only the global dma key, which means that multiple rdma-write WRs from clnt/srv in wr/rd, respectively, may be needed. The target must have enough WRs to write the data back for read operations. "
+							  "3 = Combined, but use ib_map_mr_sg when mapping MR. "
+							  "4 = Use only map-mr, but use ib_map_mr_sg() for the mapping");
 
 uint nvmeibc_map_sg_result_trace = 0;
 module_param_named(map_sg_result_trace, nvmeibc_map_sg_result_trace, uint, 0644);
@@ -4305,7 +4307,7 @@ int nvmeibc_ib_net_map_data(struct nvmeibc_ib_net *net,
 	len = sizeof(struct volume_client_req) + sizeof(struct nvmeib_direct_buf);
 	_ND(trace_2_ib_net_nvmeibc_ib_net_map_data, "OTW max len @LEN", len);
 
-	if (req->sgcount == 1 && req->map_sg_mode != MAP_SG_MR_REG_WR_ONLY &&
+	if (req->sgcount == 1 && req->map_sg_mode != MAP_SG_MR_REG_WR_ONLY && req->map_sg_mode != MAP_SG_MR_USE_IB_DMA_MAP_SG_ONLY &&
 		!(req->bcmd->reqs->op != NVMEIB_BLOCK_IO_OP_DISCARD && req->md.has && req->md.has_inline)) {
 		/*
 		 * The block layer only generated a single gather/scatter
@@ -4324,16 +4326,78 @@ int nvmeibc_ib_net_map_data(struct nvmeibc_ib_net *net,
 		goto map_complete;
 	}
 
-	/* We have more than one scatter/gather entry, so build our indirect
-	 * descriptor table, trying to merge as many entries with FR as we
-	 * can.
-	 */
+	if (req->map_sg_mode == MAP_SG_MR_COMBINED_USE_IB_DMA_MAP_SG || 
+		req->map_sg_mode == MAP_SG_MR_USE_IB_DMA_MAP_SG_ONLY) {
+		struct nvmeib_mr_info mri = {};
+		void *fmr;
+		struct nvmeib_direct_buf *buf;
+		struct nvmeib_dev *nvdev = P2NV(net->port);
 
-	/* Map the block's SG to IB device using as less map-fr(s) as poissible.
-	   The mapping description is filled in @req->indirect_desc and will be
-	   used to build the rdma-write WRs of the request, on Write op, or of
-	   the response, on Read op */
-	map_sg(net, req, sg, req->sgcount, key, okey);
+		BUG_ON(!nvdev->use_fast_reg);
+
+		for (sg = req->bcmd->reqs[0].ndb->table.sgl;nents > 0;) {
+			int i;
+
+			mri.fmr_pool = nvdev->fmr_pool;
+			mri.iu = NULL;
+			mri.null_iu_idx = -1; /* TBD(Put something more meaningful in here) */
+			mri.qp = net->qp;
+			mri.use_sg = true;
+			mri.sg = sg;
+			mri.count = nents;
+			mri.offset = 0;
+			mri.dma_len = 0; /* Will be set by ib_map_mr_sg */
+			mri.owner = net;
+
+			if (!(fmr = nvmeib_map_mr(nvdev, &mri))) {
+				goto unmap_data;
+			}
+			
+			BUG_ON(req->nmdesc >= NVMEIBS_MAX_IO_CHANNEL_MSGS);
+
+			req->fmr_list[req->nmdesc++] = fmr;
+
+			req->total_dma_len += mri.dma_len;
+
+			/* map_mr returns the number of SG entries it was able to map in one FR in mri.count
+			* so we need to move the sg pointer ahead by mri.count entries and decrement the nents by the mri.count
+			*/
+
+			BUG_ON(mri.count <= 0 || mri.count > nents);
+			nents -= mri.count;
+			
+			/* SGL might be chained. The only safe-way to advance it is with a loop */
+			for (i = 0; i < mri.count && sg; i++) {
+				sg = sg_next(sg);
+			}
+			BUG_ON(nents > 0 && !sg);
+
+			/* Set the mapped output into the descriptor table */
+			buf = &req->indirect_desc[req->ndesc++];
+			buf->va  = mri.io_addr;
+			buf->len = mri.dma_len;
+			if (dir == DMA_FROM_DEVICE) {
+				buf->key = mri.rkey;
+				buf->okey = mri.lkey;
+			} else {
+				buf->key = mri.lkey;
+				buf->okey = mri.rkey;
+			}
+		}
+	} else {
+		/* This is the original technique of mapping the SGL */
+
+		/* We have more than one scatter/gather entry, so build our indirect
+		* descriptor table, trying to merge as many entries with FR as we
+		* can.
+		*/
+
+		/* Map the block's SG to IB device using as less map-fr(s) as poissible.
+		The mapping description is filled in @req->indirect_desc and will be
+		used to build the rdma-write WRs of the request, on Write op, or of
+		the response, on Read op */
+		map_sg(net, req, sg, req->sgcount, key, okey);
+	}
 
 	if (unlikely(n_msgs && (n_msgs < req->ndesc))) {
 		_NE(error_2_ib_net_nvmeibc_ib_net_map_data, "Could not fit block dev S/G list into NVMEIB_CMD: "
