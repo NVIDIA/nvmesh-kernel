@@ -107,7 +107,7 @@ int nvmeibc_pd_reused_bb_release(struct nvmeibc_disk *disk,struct nvmeib_data_re
 /***************************** JAM - glue to vfunc **************************/
 #include "nvmeibc_jam.h"
 struct nvmeib_cpu_mask_info;
-int  nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid, u64 dlbas[], u64 res_jlbas[], bool w, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long timeout_jiffies, void *ctx) { (void)n_disks; (void)disks; (void)txid; (void)dlbas; (void)res_jlbas; (void)w; (void)cpu_mask_info; (void)timeout_jiffies; (void)ctx; BUG(); return 0; }
+int  nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid, u64 dlbas[], u64 res_jlbas[], bool w, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jiffies, unsigned long priority, void *ctx) { (void)n_disks; (void)disks; (void)txid; (void)dlbas; (void)res_jlbas; (void)w; (void)cpu_mask_info; (void)deadline_jiffies; (void)priority; (void)ctx; BUG(); return 0; }
 void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[], u32 wr_sts_bm) { (void)n_disks; (void)disks; (void)jlbas; (void)wr_sts_bm; BUG(); return; }
 int  nvmeibc_jam_abandon_lba(struct nvmeibc_disk *disk, u64 jlba, u8 *gen_id) { (void)disk; (void)jlba; (void)gen_id; BUG(); return 0; }
 // Loser: Todo, make vritual function

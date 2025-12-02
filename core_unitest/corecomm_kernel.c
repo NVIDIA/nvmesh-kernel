@@ -1899,6 +1899,7 @@ NLRPC_SRV_SYNC(corecomm_alloc_jrnls_, struct corecomm_lbas_set, rsp, ctx,
                (int, n_disks), (struct corecomm_disks_set, disks), (int, txid),
                (struct corecomm_lbas_set, dlbas)) {
 	struct nvmeibc_disk *cdisks[ARRAY_SIZE(disks.disks)];
+	static unsigned long priority = 1;
 	int i;
 	if (n_disks > ARRAY_SIZE(disks.disks)) {
 		printk(KERN_ALERT "Error, not enough space for n_disks=%d\n", n_disks);
@@ -1913,7 +1914,7 @@ NLRPC_SRV_SYNC(corecomm_alloc_jrnls_, struct corecomm_lbas_set, rsp, ctx,
 		cdisks[i] = dinfo->disk;
 	}
 	return nvmeibc_jam_lbas_alloc(n_disks, cdisks, txid, dlbas.lbas, rsp->lbas,
-	                              true, NULL, NULL, HZ, NULL);
+	                              true, NULL, NULL, jiffies + HZ, priority++, NULL);
 }
 
 NLRPC_SRV_SYNC(corecomm_free_jrnls_, int, dummy, ctx, (int, n_disks),

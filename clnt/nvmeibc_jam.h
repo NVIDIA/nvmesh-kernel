@@ -32,7 +32,7 @@ void nvmeibc_jam_disk_del(struct nvmeibc_disk *disk);
  *                    if any entry to be bound is ABANDONED. */
 struct nvmeib_cpu_mask_info;
 int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
-	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long timeout_jiffies, void *ctx);
+	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jiffies, unsigned long priority, void *ctx);
 
 /* @wr_sts_bm - bit i is O if journal-write of jlba=jlbas[i]
  *  		    (on disk=disks[i]) was issued && completed OK.

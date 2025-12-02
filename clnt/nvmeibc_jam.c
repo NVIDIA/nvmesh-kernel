@@ -493,8 +493,8 @@ struct nvmeibc_jam_disk {
 	DECLARE_HASHTABLE(uniqj2b_htable, 8);
 	struct list_head uniqj2b_trans_list;
 
-	/* Pending reqs list */
-	struct list_head pending_list;
+	/* Pending reqs rbtree (ordered by priority) */
+	struct rb_root pending_root;
 	int n_pending;
 
 	/* wq for resume-work,
@@ -547,7 +547,7 @@ struct nvmeibc_jam_pending_req {
 	 */
 	int bound_idx;
 
-	struct list_head pending_link;
+	struct rb_node pending_node;
 
 	/* timeout timer */
 	TIMER_LIST_INSTANCE(timeout_timer);
@@ -555,6 +555,7 @@ struct nvmeibc_jam_pending_req {
 	void *timeout_ctx;
 	unsigned long pend_jif;	/* for debugging only */
 	unsigned long deadline_jif;
+	unsigned long priority;
 
 	/* defer resume if called from
 	   rollback-partial-allocation */
@@ -819,7 +820,7 @@ int nvmeibc_jam_lba_2_idx(struct nvmeibc_disk *disk, u64 lba) {
 TIMER_CALLBACK_DECL(pending_req_timeout_timer_fn);
 
 static struct nvmeibc_jam_pending_req *pending_req_alloc(
-	int n_disks, struct jalloc *sorted, u64 *onstack_jlbas, u32 txid, bool wait_bound_abnd, unsigned long deadline_jif, void *ctx)
+	int n_disks, struct jalloc *sorted, u64 *onstack_jlbas, u32 txid, bool wait_bound_abnd, unsigned long deadline_jif, unsigned long priority, void *ctx)
 {
 	struct nvmeibc_jam_pending_req *jreq = NULL;
 	u64 *res_jlbas = NULL;
@@ -839,7 +840,7 @@ static struct nvmeibc_jam_pending_req *pending_req_alloc(
 	jreq->wait_bound_abnd = wait_bound_abnd;
 	jreq->ctx = ctx;
 	atomic_set(&jreq->resume_wip, 0);
-	INIT_LIST_HEAD(&jreq->pending_link);
+	RB_CLEAR_NODE(&jreq->pending_node);
 	jreq->curr = -1;
 	SETUP_TIMER(&jreq->timeout_timer, pending_req_timeout_timer_fn,
 				(unsigned long)jreq, TIMER_IRQSAFE);
@@ -848,6 +849,7 @@ static struct nvmeibc_jam_pending_req *pending_req_alloc(
 	jreq->timeout_ctx = NULL;
 	jreq->pend_jif = 0;
 	jreq->deadline_jif = deadline_jif;
+	jreq->priority = priority;
 	goto out;
 
 err:
@@ -1047,7 +1049,7 @@ static inline int unlink_jidx_from_any_jreq(struct nvmeibc_jam_jidx *jidx)
 	jreq = jidx->jreq_bound_via_committed;
 	if (jreq) {
 		BUG_ON(jreq->bound_idx != jidx->idx);
-		BUG_ON(list_empty(&jreq->pending_link));
+		BUG_ON(RB_EMPTY_NODE(&jreq->pending_node));
 		BUG_ON(jreq->hkey.raw != jidx->hkeys.committed.raw);
 		jreq->bound_idx = NVMEIBC_JAM_INVALID_BOUND_IDX;
 		jidx->jreq_bound_via_committed = NULL;
@@ -1057,7 +1059,7 @@ static inline int unlink_jidx_from_any_jreq(struct nvmeibc_jam_jidx *jidx)
 	jreq = jidx->jreq_bound_via_transient;
 	if (jreq) {
 		BUG_ON(jreq->bound_idx != jidx->idx);
-		BUG_ON(list_empty(&jreq->pending_link));
+		BUG_ON(RB_EMPTY_NODE(&jreq->pending_node));
 		BUG_ON(jreq->hkey.raw != jidx->hkeys.transient.raw);
 		BUG_ON(jidx->state != NVMEIBC_JIDX_STS_ERASING);
 		jreq->bound_idx = NVMEIBC_JAM_INVALID_BOUND_IDX;
@@ -1067,6 +1069,23 @@ static inline int unlink_jidx_from_any_jreq(struct nvmeibc_jam_jidx *jidx)
 
 	NFOUT;
 	return n_jreqs;
+}
+
+static void pending_req_tree_insert(struct nvmeibc_jam_disk *jam_disk, struct nvmeibc_jam_pending_req *jreq)
+{
+	struct rb_root *root = &jam_disk->pending_root;
+	struct rb_node **node = &(root->rb_node), *parent = NULL;
+	while (*node) {				// Figure out where to put new node
+		struct nvmeibc_jam_pending_req *cur = container_of(*node, struct nvmeibc_jam_pending_req, pending_node);
+		parent = *node;
+		if (jreq->priority < cur->priority)
+			node = &((*node)->rb_left);
+		else
+			node = &((*node)->rb_right);
+	}
+
+	rb_link_node(&jreq->pending_node, parent, node);
+	rb_insert_color(&jreq->pending_node, root);
 }
 
 /* Function must be PD protected */
@@ -1081,14 +1100,14 @@ static void pending_req_list_add_(struct nvmeibc_jam_pending_req *jreq)
 		WARN_ON_ONCE(1);
 		goto out;
 	}
-	if (!list_empty(&jreq->pending_link)) {
+	if (!RB_EMPTY_NODE(&jreq->pending_node)) {
 		_NW(warn_1_jam_pending_req_list_add, "jreq already linked");
 		WARN_ON_ONCE(1);
 		goto out;
 	}
 
 	jam_disk = jreq->sorted[jreq->curr].disk->jam_disk;
-	list_add_tail(&jreq->pending_link, &jam_disk->pending_list);
+	pending_req_tree_insert(jam_disk, jreq);
 	jam_disk->n_pending++;
 	jreq->timeout_ctx = jam_disk;
 	jreq->pend_jif = jiffies;
@@ -1116,7 +1135,8 @@ static void pending_req_list_del_(struct nvmeibc_jam_pending_req *jreq,
 	NFIN;
 
 	BUG_ON(jreq->sorted[jreq->curr].disk->jam_disk != jam_disk);
-	list_del_init(&jreq->pending_link);
+	rb_erase(&jreq->pending_node, &jam_disk->pending_root);
+	RB_CLEAR_NODE(&jreq->pending_node);
 	jam_disk->n_pending--;
 
 	NFOUT;
@@ -1132,7 +1152,7 @@ TIMER_CALLBACK(pending_req_timeout_timer_fn, struct nvmeibc_jam_pending_req, tim
 		goto _out;
 	}
 	jam_disk_spin_lock_irqsave(jam_disk, &flags);
-	if (!list_empty(&jreq->pending_link)) {
+	if (!RB_EMPTY_NODE(&jreq->pending_node)) {
 		/* see n_pending.* counters for details */
 		_NDj(t_01_jttofn, jam_disk->disk, "Timeout: jrep @JREQ (c=@CURR_INT, b=@BOUND_IDX) dequeue and resume for abort",
 			jreq, jreq->curr, jreq->bound_idx);
@@ -1355,6 +1375,7 @@ static struct nvmeibc_jam_pending_req *find_jreq_to_resume_(
 {
 	struct nvmeibc_jam_pending_req *jreq;
 	struct nvmeibc_jam_jidx *jidx = NULL;
+	struct rb_node *node;
 	int idx;
 	int rv;
 	NFIN;
@@ -1364,10 +1385,9 @@ static struct nvmeibc_jam_pending_req *find_jreq_to_resume_(
 		goto out;
 	}
 
-	/* search for pending jreq, by the order they were queued,
-	   meaning that we'll resume older jreq than the one that
-	   was just unbound, if any */
-	list_for_each_entry(jreq, &jam_disk->pending_list, pending_link) {
+	/* search for pending jreq, in the pending rbtree order, i.e. by priority */
+	for (node = rb_first(&jam_disk->pending_root); node; node = rb_next(node)) {
+		jreq = container_of(node, struct nvmeibc_jam_pending_req, pending_node);
 		if (jreq->bound_idx == NVMEIBC_JAM_INVALID_BOUND_IDX) {
 			/* This jreq was either added while free-pool was empty, or;
 			   It was bound but then unbound (end-use/abnd/a2f/erase-comp) */
@@ -2014,7 +2034,7 @@ static int jidx_event_vec(struct nvmeibc_disk *disk,
 			}
 			/* We have n_jreqs(0-2) due to collision and 1 for the case there wasn't a free jentry */
 			for (j = 0; j < n_jreqs + 1; j++) {
-				if (!list_empty(&jam_disk->pending_list) &&
+				if (!RB_EMPTY_ROOT(&jam_disk->pending_root) &&
 					(jreq = find_jreq_to_resume_(jam_disk))) {
 					list_add_tail(&jreq->tmp_link, &resume_list);
 				}
@@ -2481,7 +2501,7 @@ void pd_rollback_partial_allocation(struct nvmeibc_jam_pending_req *jreq)
 
 /* This func can be called after passing pausable for ALL disks in @sorted */
 static int lbas_alloc(int n_disks, struct jalloc *sorted, u64 res_jlbas[],
-	u32 txid, bool wait_bound_abnd, void *ctx, struct nvmeibc_jam_pending_req *jreq, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jif)
+	u32 txid, bool wait_bound_abnd, void *ctx, struct nvmeibc_jam_pending_req *jreq, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jif, unsigned long priority)
 {
 	struct nvmeibc_jam_disk *jam_disk;
 	ulong flags;
@@ -2556,7 +2576,7 @@ static int lbas_alloc(int n_disks, struct jalloc *sorted, u64 res_jlbas[],
 				rv = -ENOMEM;
 			}
 			else if (!jreq && !(jreq = pending_req_alloc(
-				n_disks, sorted, res_jlbas, txid, wait_bound_abnd, deadline_jif, ctx))) {
+				n_disks, sorted, res_jlbas, txid, wait_bound_abnd, deadline_jif, priority, ctx))) {
 				_NT(trace_2_jam_lbas_alloc, "Fail to alloc pending req, rollback alloc...");
 				rv = -ENOMEM;
 			}
@@ -2614,7 +2634,7 @@ static void pending_req_resume_bh(struct nvmeibc_jam_pending_req *jreq)
 		WARN_ON_ONCE(1);
 		goto out;
 	}
-	if (!list_empty(&jreq->pending_link)) {
+	if (!RB_EMPTY_NODE(&jreq->pending_node)) {
 		_NW(warn_jam_pending_req_resume_bh, "oops, jreq still linked");
 		WARN_ON_ONCE(1);
 		goto out;
@@ -2658,7 +2678,7 @@ static void pending_req_resume_bh(struct nvmeibc_jam_pending_req *jreq)
 		jam_cnts_on_alloc_ok(n_disks, sorted);
 	}
 	rv = (jreq->curr < n_disks) ?
-		lbas_alloc(n_disks, sorted, res_jlbas, jreq->txid, jreq->wait_bound_abnd, jreq->ctx, jreq, jreq->cpu_mask_info, jreq->deadline_jif) : 0;
+		lbas_alloc(n_disks, sorted, res_jlbas, jreq->txid, jreq->wait_bound_abnd, jreq->ctx, jreq, jreq->cpu_mask_info, jreq->deadline_jif, jreq->priority) : 0;
 	nvmeibc_pd_jam_put_all(n_disks, disks);
 
 	if (rv == -EINPROGRESS)
@@ -2685,16 +2705,15 @@ out:
 }
 
 int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
-	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long timeout_jif, void *ctx)
+	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jif, unsigned long priority, void *ctx)
 {
 	struct nvmeibc_jam *c_jam = cdisk2cj(disks[0]);
 	struct jalloc *sorted = NULL;
 	const unsigned long max_timeout_jif = (nvmeibc_jam_pending_req_timeout_jif ? : NVMEIBC_PENDING_REQ_TIMEOUT);
+	const unsigned long now_jif = jiffies;
+	const unsigned long capped_deadline_jif = (deadline_jif > now_jif + max_timeout_jif) ? now_jif + max_timeout_jif : deadline_jif;
 	int rv = -1;
 	NFIN;
-
-	if (timeout_jif > max_timeout_jif)
-		timeout_jif = max_timeout_jif;
 
 	jam_cnts_on_ulp_req_alloc(c_jam, n_disks);
 
@@ -2712,7 +2731,7 @@ int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
 		goto done;
 	}
 
-	rv = lbas_alloc(n_disks, sorted, res_jlbas, txid, wait_bound_abnd, ctx, NULL, cpu_mask_info, jiffies + timeout_jif);
+	rv = lbas_alloc(n_disks, sorted, res_jlbas, txid, wait_bound_abnd, ctx, NULL, cpu_mask_info, capped_deadline_jif, priority);
 	nvmeibc_pd_jam_put_all(n_disks, disks);
 
 	if (rv == -EINPROGRESS)
@@ -2781,6 +2800,7 @@ static int __jam_disk_locked_to_string(const struct nvmeibc_jam_disk *J, int d, 
 	int n_pending = 0;
 	struct nvmeibc_jam_jidx *jidx = NULL;
 	struct nvmeibc_jam_pending_req *jreq;
+	struct rb_node *node;
 	struct nvmeibc_disk *cdisk = J->disk;
 	struct nvmeibc_jam_disk_percpu_cnts sum = {0};
 	u64 alloced_avg = J->n_alloced_avg_cnt ?
@@ -2853,7 +2873,8 @@ static int __jam_disk_locked_to_string(const struct nvmeibc_jam_disk *J, int d, 
 				J->n_pending_bound_unexp_cnt);
 
 		e = 0;
-		list_for_each_entry(jreq, &J->pending_list, pending_link) {
+		for (node = rb_first(&J->pending_root); node; node = rb_next(node)) {
+			jreq = container_of(node, struct nvmeibc_jam_pending_req, pending_node);
 			BUF_ADD("[%03d] jreq %p : {hkey=%llx, bound_idx=%03d}\n", e, jreq, jreq->hkey.raw, jreq->bound_idx);
 			if (e++ == J->n_pending) {
 				BUF_ADD("ERR: Too many elements in pending-list, Exp %d\n", J->n_pending);
@@ -3214,7 +3235,8 @@ int nvmeibc_jam_disk_add(struct nvmeibc_disk *disk,
 	jam_disk->pcpu_cnts = pcpu;
 	spin_lock_init(&jam_disk->lock);
 	INIT_LIST_HEAD(&jam_disk->free_list);
-	INIT_LIST_HEAD(&jam_disk->pending_list);
+	jam_disk->pending_root = RB_ROOT;
+
 	hash_init(jam_disk->uniqj2b_htable);
 	INIT_LIST_HEAD(&jam_disk->uniqj2b_trans_list);
 	init_waitqueue_head(&jam_disk->deferred_jreqs);
@@ -3404,7 +3426,7 @@ void nvmeibc_jam_disk_del(struct nvmeibc_disk *disk)
 	struct nvmeibc_jam *c_jam = cdisk2cj(disk);
 	struct nvmeibc_jam_disk *jam_disk = disk->jam_disk;
 	struct nvmeibc_jam_disk *jdisk;
-	struct nvmeibc_jam_pending_req *jreq, *t;
+	struct nvmeibc_jam_pending_req *jreq;
 	struct nvmeibc_jam_disk_percpu_cnts sum = {0};
 	LIST_HEAD(cancel_list);
 	int i, n_cancel = 0;
@@ -3425,19 +3447,25 @@ void nvmeibc_jam_disk_del(struct nvmeibc_disk *disk)
 
 	/* Dequeue every pending-req that @disk is part-of (into a local list) */
 	list_for_each_entry(jdisk, &c_jam->disks, jam_link) {
+		LIST_HEAD(del_list);
+		struct rb_node *node;
 		jam_disk_spin_lock(jdisk);
-		list_for_each_entry_safe(jreq, t, &jdisk->pending_list, pending_link) {
+		for (node = rb_first(&jdisk->pending_root); node; node = rb_next(node)) {
+			jreq = container_of(node, struct nvmeibc_jam_pending_req, pending_node);
 			for (i = 0; i < jreq->n_disks; i++) {
 				if (jreq->sorted[i].disk == disk) {
-					unlink_jreq_jidx(jdisk, jreq);
-					pending_req_list_del_(jreq, jdisk);
-					list_add_tail(&jreq->tmp_link, &cancel_list);
-					n_cancel++;
+					list_add_tail(&jreq->tmp_link, &del_list);
 					break;
 				}
 			}
 		}
+		list_for_each_entry(jreq, &del_list, tmp_link) {
+			unlink_jreq_jidx(jdisk, jreq);
+			pending_req_list_del_(jreq, jdisk);
+			n_cancel++;
+		}
 		jam_disk_spin_unlock(jdisk);
+		list_splice(&del_list, &cancel_list);
 	}
 	_NT(trace_jam_nvmeibc_jam_disk_del,
 		"Found @N_CANCEL pending-reqs disk @DISK_NAME is part of "
