@@ -2990,7 +2990,7 @@ mark_applied_post_update_actions_required:
 	// Set the are_praid_registrants_synced, for non-synchronizer, where all is good
 	is_accepting_registrations = nvmeibt_register_is_seg_active_accepting_registrations(seg_active, NULL);
 	TODO(Is the following set_registrants_aligned_with_sync_cmd needed? If needed then why not check for real?);
-	nvmeibt_seg_active_set_registrants_aligned_with_sync_cmd(seg_active, (!(applied_topo->is_registrants_synchronizer) &&
+	nvmeibt_seg_active_set_registrants_aligned_with_sync_cmd(seg_active, (!(applied_topo->is_registrants_synchronizer) ||
 																		  is_accepting_registrations));	// Not registrable --> Need to UNREG all registrants, for evict, and regardless
 	if (nvmeibt_disk_segment_is_competent_owner(&prev_active_topo) && nvmeibt_disk_segment_is_competent_owner(active_topo)) {
 		// I was owner in applied, and owner now. I.e., Keeping the old stale & dirty in mem.
