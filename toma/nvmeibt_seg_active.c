@@ -523,6 +523,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	XDLIST_INIT_LINK(&seg_active->global_seg_active_post_update_action_link, NULL);
 	XDLIST_INIT_LINK(&seg_active->disk_seg_active_link, NULL);
 	seg_active->n_registrants_on_timeout = 0;
+	seg_active->n_active_registrants_on_active_praid_version = 0;
 
 	if (pthread_mutex_init(&seg_active->stale_locks_hash_mutex, NULL)) {
 		N_Ef(ry876ha, "Failed to create stale locks mutex (@AUTO_ERRNO)");
