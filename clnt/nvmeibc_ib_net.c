@@ -3921,7 +3921,7 @@ static void map_desc(struct nvmeibc_map_state *state, dma_addr_t dma_addr,
 	NFOUT;
 }
 
-static int finish_mapping(struct nvmeibc_ib_net *net,
+static int finish_mapping(struct nvmeibc_ib_net *net, struct nvmeibc_volume_request *req,
 	struct nvmeibc_map_state *state, u32 key, u32 okey)
 {
 	struct nvmeib_dev *nvdev = P2NV(net->port);
@@ -3938,7 +3938,7 @@ static int finish_mapping(struct nvmeibc_ib_net *net,
 	else {
 		mri.fmr_pool = P2NV(net->port)->fmr_pool;
 		mri.iu = NULL;
-		mri.null_iu_idx = -1; /* TBD(Put something more meaningful in here) */
+		mri.null_iu_idx = req->index;
 		mri.qp = net->qp;
 		mri.use_sg = false;
 		mri.pages = state->pages;
@@ -3984,7 +3984,7 @@ static void map_update_start(struct nvmeibc_map_state *state,
 	NFOUT;
 }
 
-static int map_sg_entry(struct nvmeibc_ib_net *net,
+static int map_sg_entry(struct nvmeibc_ib_net *net, struct nvmeibc_volume_request *req,
 	struct nvmeibc_map_state *state, struct scatterlist *sg, int sg_index,
 	bool use_fmr, u32 key, u32 okey, bool inline_md)
 {
@@ -4054,7 +4054,7 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 		_ND(trace_4_ib_net_map_sg_entry, "Finish entry - "
 		    "addr=@DMA_ADDR len=@DMA_LEN dma_addr=@DMA_ADDR",
 		    state->unmapped_addr, state->dma_len, dma_addr);
-		if ((rv = finish_mapping(net, state, key, okey))) {
+		if ((rv = finish_mapping(net, req, state, key, okey))) {
 			_NT(trace_5_ib_net_map_sg_entry,
 			    "Finish mapping failed - @RV", rv);
 			goto out;
@@ -4075,7 +4075,7 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 			_ND(trace_7_ib_net_map_sg_entry, "Must leave - "
 			    "dma_addr=@DMA_ADDR offset=@OFFSET",
 			    dma_addr, offset);
-			if ((rv = finish_mapping(net, state, key, okey))) {
+			if ((rv = finish_mapping(net, req, state, key, okey))) {
 				_NT(trace_8_ib_net_map_sg_entry,
 				    "Finish mapping failed - @RV", rv);
 				goto out;
@@ -4092,7 +4092,7 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 			_ND(trace_9_ib_net_map_sg_entry, "Start page - "
 				"dma_addr=@DMA_ADDR len=@DMA_LEN",
 				dma_addr, dma_len);
-			if ((rv = finish_mapping(net, state, key, okey))) {
+			if ((rv = finish_mapping(net, req, state, key, okey))) {
 				_NT(trace_10_ib_net_map_sg_entry,
 				    "Finish mapping failed - @RV", rv);
 				goto out;
@@ -4152,7 +4152,7 @@ static int map_sg(struct nvmeibc_ib_net *net,
 	}
 
 	for_each_sg(scat, sg, count, i) {
-		if (map_sg_entry(net, state, sg, i, use_mr, key, okey, inline_md)) {
+		if (map_sg_entry(net, req, state, sg, i, use_mr, key, okey, inline_md)) {
 			/*
 			 * Memory registration failed, so backtrack to the
 			 * first unmapped entry and continue on without using
@@ -4175,7 +4175,7 @@ backtrack:
 	}
 
 	/* do not forget to register the last mapping */
-	if (use_mr && finish_mapping(net, state, key, okey))
+	if (use_mr && finish_mapping(net, req, state, key, okey))
 		goto backtrack;
 
 	req->ndesc = state->ndesc;
@@ -4340,7 +4340,7 @@ int nvmeibc_ib_net_map_data(struct nvmeibc_ib_net *net,
 
 			mri.fmr_pool = nvdev->fmr_pool;
 			mri.iu = NULL;
-			mri.null_iu_idx = -1; /* TBD(Put something more meaningful in here) */
+			mri.null_iu_idx = req->index;
 			mri.qp = net->qp;
 			mri.use_sg = true;
 			mri.sg = sg;
@@ -5319,10 +5319,6 @@ nvmeibc_ib_net_unmap_data(struct nvmeibc_ib_net *net,
 			struct nvmeib_fr_pool *fr_pool = P2NV(net->port)->fr_pool;
 			nvmeib_fast_reg_pool_put(fr_pool, req->fr_list,
 				req->nmdesc);
-			if (fr_pool->n_error) {	/* Schedule maintenance on main wq */
-				nvmeibc_run_on_main_wq1(nvmeibc_cinst_get_core_m(&net->admin_ch->base),
-										(nvmeibc_main_wq_fn_type)nvmeib_fast_reg_pool_rereg, fr_pool);
-			}
 		}
 	}
 #if KS_IB_VERBS_SUPPORTS_FMR
@@ -5654,7 +5650,7 @@ int nvmeibc_ib_net_map_gen_data(struct nvmeibc_ib_net *net,
 
 		mri.fmr_pool = nvdev->fmr_pool;
 		mri.iu = NULL;
-		mri.null_iu_idx = -1; /* TBD(Put something more meaningful in here) */
+		mri.null_iu_idx = req->index; /* TBD(Put something more meaningful in here) */
 		mri.qp = net->qp;
 		mri.use_sg = true;
 		mri.sg = gen_sink_buf->sgt.sgl;

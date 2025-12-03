@@ -8,6 +8,7 @@
 
 #include "kr_incs.h"
 #include "kr_version.h"
+#include "nvmeib_public_procfs.h"
 #include "nvmeib_types.h"
 #include "ib_incs.h"
 #include "nvmeibs_trend_types.h"
@@ -658,6 +659,36 @@ struct nvmeib_fr_desc {
 	void *owner;
 };
 
+struct nvmeib_fr_pool_percpu_cache {
+	struct nvmeib_fr_pool *pool;
+	struct list_head free_list;
+	int n_free;
+	struct timer_list idle_timer;
+	unsigned long last_get_jif;
+	int cpu;
+
+	/* Statistics */
+	struct {
+		u64 n_get_from_cache_success;
+		u64 n_get_from_cache_fail;
+		u64 n_get_from_cache_fail_after_refill;
+		u64 total_get_n_free;
+		u64 n_put_to_cache;
+		u64 n_spills_to_excess_list;
+		u64 total_spilled_to_excess_list;
+		u64 n_refills_from_global_pool;
+		u64 total_refilled_from_global_pool;
+		u64 n_bind_errors;
+		u64 n_rereg_scheduled;
+		u64 n_spills_idle_timer;
+		u64 total_spills_idle_timer;
+		u64 n_rebalance_scheduled;
+		u64 n_spills_rebalance;
+		u64 total_spilled_rebalance;
+		u64 max_n_free;
+	} stats;
+};
+
 /**
  * struct nvmeib_fr_pool - pool of fast registration descriptors
  *
@@ -677,8 +708,37 @@ struct nvmeib_fr_pool {
 	int n_free;
 	struct list_head err_list;
 	int n_error;
+
+	struct work_struct rereg_work;
+
+	struct nvmeib_fr_pool_percpu_cache __percpu *percpu_cache;
+	struct work_struct rebalance_pcpu_cache_work;
+	unsigned long rebalance_pcpu_cache_scheduled_jif;
+	/* refill target for per-cpu cache */
+	unsigned pcpu_low;
+	/* spill threshold for per-cpu cache */
+	unsigned pcpu_high;
+
+#ifdef NVMEIBC_DEBUG_FR_LEAK
 	struct list_head used_list;
+#endif
+
 	struct ib_pd *pd;
+
+	struct nvmeib_public_procfs_ent *proc_ent;
+
+	struct {
+		u64 n_get_success;
+		u64 n_get_fail;
+		u64 total_get_n_free;
+		u64 n_puts;
+		u64 n_bind_errors;
+		u64 n_rereg_scheduled;
+		u64 total_rereg_mr_success;
+		u64 total_rereg_mr_fail;
+		u64 min_n_free;
+		u64 max_n_error;
+	} stats;
 };
 
 #define CQ_POLL_BATCH 64
@@ -1163,8 +1223,7 @@ void nvmeib_destroy_fast_reg_pool(struct nvmeib_fr_pool *pool, struct ib_mr **ke
 struct nvmeib_fr_desc *nvmeib_fast_reg_pool_get(struct nvmeib_fr_pool *pool);
 void nvmeib_fast_reg_pool_put(struct nvmeib_fr_pool *pool,
 	struct nvmeib_fr_desc **desc, int n);
-int nvmeib_fast_reg_pool_handle_bind_err(struct nvmeib_fr_pool *pool, u32 rkey);
-int nvmeib_fast_reg_pool_rereg(struct nvmeib_fr_pool *pool);
+int nvmeib_fast_reg_pool_handle_bind_err(struct nvmeib_fr_desc **desc, int n, u32 rkey);
 void nvmeib_fast_reg_pool_trace(struct nvmeib_fr_pool *pool);
 
 void *nvmeib_map_fr(struct nvmeib_dev *nvdev, struct nvmeib_mr_info *info);

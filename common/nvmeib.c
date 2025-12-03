@@ -16,6 +16,7 @@
 #include "nvmeib_version_shared.h"
 #include "nvmeib_version_kernel.h"
 #include "nvmeib_rdma.h"
+#include "nvmeibc_disk.h"
 #include "poll/nvmeib_public_intr_poll.h"
 #include "nvmeibm_trace.h"
 #include "nvmeib_public.h"
@@ -28,6 +29,7 @@
 #include "common_public/nvmeib_public_keeper.h"
 #include "nvmeib_json.h"
 #include "nvmeib_jdr.h"
+#include "nvmeib_io_stats.h"
 
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
@@ -2688,6 +2690,33 @@ static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 	return sz;
 }
 
+static struct kmem_cache *fr_pool_desc_cache;
+
+static int fr_pool_cache_init(void)
+{
+	int rv;
+	NFIN;
+	if (!(fr_pool_desc_cache = KMEM_CACHE(nvmeib_fr_desc, 0))) {
+		_NE(error_nvmeib_fr_pool_cache_init, "Failed to allocate kmem cache for nvmeib_fr_desc");
+		rv = -ENOMEM;
+		goto out;
+	}
+	rv = 0;
+out:
+	NFOUT;
+	return rv;
+}
+
+static void fr_pool_cache_exit(void)
+{
+	NFIN;
+	if (fr_pool_desc_cache) {
+		kmem_cache_destroy(fr_pool_desc_cache);
+		fr_pool_desc_cache = NULL;
+	}
+	NFOUT;
+}
+
 /**
  * nvmeib_destroy_fast_reg_pool() - free the resources owned by
  * a pool
@@ -2706,6 +2735,29 @@ void nvmeib_destroy_fast_reg_pool(struct nvmeib_fr_pool *pool, struct ib_mr **ke
 		return;
 	}
 
+	if (pool->percpu_cache) {
+		int cpu;
+		cancel_work_sync(&pool->rebalance_pcpu_cache_work);
+		for_each_possible_cpu(cpu) {
+			struct nvmeib_fr_pool_percpu_cache *pcpu_cache = per_cpu_ptr(pool->percpu_cache, cpu);
+			struct nvmeib_fr_desc *desc;
+
+			del_timer_sync(&pcpu_cache->idle_timer);
+
+			while ((desc = list_first_entry_or_null(&pcpu_cache->free_list, struct nvmeib_fr_desc, entry))) {
+				list_del(&desc->entry);
+				BUG_ON(pcpu_cache->n_free <= 0);
+				pcpu_cache->n_free--;
+
+				list_add(&desc->entry, &pool->free_list);
+				pool->n_free++;
+			}
+			BUG_ON(pcpu_cache->n_free != 0);
+		}
+		nvmeib_public_free_percpu(pool->percpu_cache);
+		pool->percpu_cache = NULL;
+	}
+
 	if (pool->n_free != pool->size) {
 		_NW_dmesg(trace_nvmeib_nvmeib_destroy_fast_reg_pool, "FR pool (@POOL): exp=@EXP, found=@FOUND",
 			pool, pool->size, pool->n_free);
@@ -2719,6 +2771,9 @@ void nvmeib_destroy_fast_reg_pool(struct nvmeib_fr_pool *pool, struct ib_mr **ke
 	}
 
 	while ((d = list_first_entry_or_null(&pool->free_list, struct nvmeib_fr_desc, entry))) {
+		BUG_ON(pool->n_free <= 0);
+		pool->n_free--;
+		list_del(&d->entry);
 #if !IB_NEW_FR
 		if (d->frpl)
 			ib_free_fast_reg_page_list(d->frpl);
@@ -2734,18 +2789,50 @@ void nvmeib_destroy_fast_reg_pool(struct nvmeib_fr_pool *pool, struct ib_mr **ke
 				ib_dereg_mr(d->mr);
 			}
 		}
-		list_del(&d->entry);
-		kfree(d);
+		kmem_cache_free(fr_pool_desc_cache, d);
 	}
+	BUG_ON(pool->n_free != 0);
+
 	if (use_keeper)
 		*keep_mrs_arr_sz = keep_mrs_idx;
 	if (memmgr_metrics_ctx && pool_size > 0 && pool->size == pool_size /* as only in this case it is considered to be allocated by the memmgr*/) {
 		nvmesh_memmgr_metric_on_free_update(memmgr_metrics_ctx, calc_fr_pool_alloc_sz(pool));
 	}
+
+	if (pool->proc_ent) {
+		nvmeib_public_proc_remove(pool->proc_ent);
+		pool->proc_ent = NULL;
+	}
+
 	kfree(pool);
 	NFOUT;
 }
 EXPORT_SYMBOL(nvmeib_destroy_fast_reg_pool);
+
+bool nvmeib_fr_pool_percpu_cache = true;
+module_param_named(fr_pool_percpu_cache, nvmeib_fr_pool_percpu_cache, bool, 0444);
+MODULE_PARM_DESC(fr_pool_percpu_cache, "Enable per-cpu cache for fast registration pool");
+
+unsigned nvmeib_fr_pool_percpu_low = 64;
+module_param_named(fr_pool_percpu_low, nvmeib_fr_pool_percpu_low, uint, 0444);
+MODULE_PARM_DESC(fr_pool_percpu_low, "Refill target for per-cpu cache for fast registration pool");
+
+unsigned nvmeib_fr_pool_percpu_high = 128;
+module_param_named(fr_pool_percpu_high, nvmeib_fr_pool_percpu_high, uint, 0444);
+MODULE_PARM_DESC(fr_pool_percpu_high, "Spill threshold for per-cpu cache for fast registration pool");
+
+unsigned nvmeib_fr_pool_percpu_idle_timeout_ms = 1000;
+module_param_named(fr_pool_percpu_idle_timeout_ms, nvmeib_fr_pool_percpu_idle_timeout_ms, uint, 0444);
+MODULE_PARM_DESC(fr_pool_percpu_idle_timeout_ms, "Idle timeout for per-cpu cache for fast registration pool in milliseconds");
+
+unsigned nvmeib_fr_pool_percpu_rebalance_min_interval_ms = 1000;
+module_param_named(fr_pool_percpu_rebalance_min_interval_ms, nvmeib_fr_pool_percpu_rebalance_min_interval_ms, uint, 0444);
+MODULE_PARM_DESC(fr_pool_percpu_rebalance_min_interval_ms, "Rebalance per-cpu cache minimum interval in milliseconds");
+
+static void fr_pool_percpu_idle_timer_fn(struct timer_list *);
+static void rebalance_fr_pool_percpu_cache_work(struct work_struct *work);
+static ssize_t fill_fr_pool_proc_buf(void *arg, char *buf, size_t len);
+static void fr_pool_rereg_work(struct work_struct *work);
 
 /**
  * nvmeib_fr_pool() - allocate and initialize a pool for fast
@@ -2760,7 +2847,7 @@ static struct nvmeib_fr_pool *create_fr_pool(struct nvmeib_dev *dev,
 	bool *c_retry, bool *cc_retry, void *memmgr_metrics_ctx)
 {
 	struct nvmeib_fr_pool *pool;
-	struct nvmeib_fr_desc *d;
+	struct nvmeib_fr_desc *d = NULL;
 	struct ib_mr *mr;
 #if !IB_NEW_FR
 	struct ib_fast_reg_page_list *frpl;
@@ -2770,32 +2857,65 @@ static struct nvmeib_fr_pool *create_fr_pool(struct nvmeib_dev *dev,
 	NFIN;
 	if (pool_size <= 0)
 		goto err;
+	rv = -ENOMEM;
 	pool = kzalloc(sizeof(struct nvmeib_fr_pool), GFP_KERNEL);
-	if (!pool) {
-		rv = -ENOMEM;
-		_NT(trace_nvmeib_create_fr_pool_oom_alloc_pool, "OOM");
+	if (!pool)
 		goto err;
+	if (!(pool->proc_ent = nvmeib_public_proc_create("fr_pool.json", dev->proc_dir, 
+		fill_fr_pool_proc_buf, NULL, pool))) 
+	{
+		_NE(error_nvmeib_create_fr_pool, "Failed to create proc entry for FR pool");
+		goto destroy_pool;
 	}
+
+#ifndef NVMEIBC_DEBUG_FR_LEAK
+	if (nvmeib_fr_pool_percpu_cache) {
+		int cpu;
+		pool->percpu_cache = nvmeib_public_alloc_percpu_cacheline(struct nvmeib_fr_pool_percpu_cache);
+		if (!pool->percpu_cache)
+			goto destroy_pool;
+		pool->pcpu_low = nvmeib_fr_pool_percpu_low;
+		pool->pcpu_high = nvmeib_fr_pool_percpu_high;
+		INIT_WORK(&pool->rebalance_pcpu_cache_work, rebalance_fr_pool_percpu_cache_work);
+		for_each_possible_cpu(cpu) {
+			struct nvmeib_fr_pool_percpu_cache *pcpu_cache = per_cpu_ptr(pool->percpu_cache, cpu);
+			pcpu_cache->pool = pool;
+			pcpu_cache->cpu = cpu;
+			INIT_LIST_HEAD(&pcpu_cache->free_list);
+			pcpu_cache->n_free = 0;
+			pcpu_cache->last_get_jif = jiffies;
+			timer_setup(&pcpu_cache->idle_timer, fr_pool_percpu_idle_timer_fn, TIMER_DEFERRABLE);
+			pcpu_cache->idle_timer.expires = jiffies + nvmeib_fr_pool_percpu_idle_timeout_ms * HZ / 1000;
+			add_timer_on(&pcpu_cache->idle_timer, cpu);
+		}
+	}
+#endif
+
 	pool->pd = pd;
 	pool->max_page_list_len = max_page_list_len;
 	spin_lock_init(&pool->lock);
 	INIT_LIST_HEAD(&pool->free_list);
 	INIT_LIST_HEAD(&pool->err_list);
+#ifdef NVMEIBC_DEBUG_FR_LEAK
 	INIT_LIST_HEAD(&pool->used_list);
+#endif
+	INIT_WORK(&pool->rereg_work, fr_pool_rereg_work);
 
 	for (i = 0; i < pool_size; ++i) {
-		if (!(d = kzalloc(sizeof(*d), GFP_KERNEL))) {
+		d = kmem_cache_alloc(fr_pool_desc_cache, GFP_KERNEL | __GFP_ZERO);
+		if (!d) {
+			_NE(error_1_nvmeib_create_fr_pool, "i=@IDX: kmem_cache_alloc() failed",	i);
 			rv = -ENOMEM;
-			_NT(trace_nvmeib_create_fr_pool_oom_alloc_desc, "OOM");
 			goto destroy_pool;
 		}
+		list_add_tail(&d->entry, &pool->free_list);
+		pool->n_free++;
+		pool->size++;
 		if (kept_mr_arr_sz && i < kept_mr_arr_sz) {
-			/* Some sanity checks */
 			BUG_ON(!kept_mr_arr[i]);
 			BUG_ON(kept_mr_arr[i]->pd != pd);
 
 			mr = kept_mr_arr[i];
-			/* Clear the entry in the array to prevent double-free in case of error */
 			kept_mr_arr[i] = NULL;
 		} else {
 #if IB_NEW_FR
@@ -2805,7 +2925,7 @@ static struct nvmeib_fr_pool *create_fr_pool(struct nvmeib_dev *dev,
 #endif
 			if (IS_ERR_OR_NULL(mr)) {
 				rv = PTR_ERR(mr);
-				_NE(error_nvmeib_create_fr_pool, "i=@IDX: ib_alloc_fast_reg_mr() returned with error @MAX_PAGE_LIST_LEN (@RV)",
+				_NE(error_2_nvmeib_create_fr_pool, "i=@IDX: ib_alloc_fast_reg_mr() returned with error @MAX_PAGE_LIST_LEN (@RV)",
 					i, max_page_list_len, rv);
 				mr = NULL;
 				if (cc_retry)
@@ -2818,7 +2938,7 @@ static struct nvmeib_fr_pool *create_fr_pool(struct nvmeib_dev *dev,
 		frpl = ib_alloc_fast_reg_page_list(dev->ib_dev, max_page_list_len);
 		if (IS_ERR_OR_NULL(frpl)) {
 			rv = PTR_ERR(frpl);
-			_NE(error_1_nvmeib_create_fr_pool, "i=@IDX: ib_alloc_fast_reg_page_list() "
+			_NE(error_4_nvmeib_create_fr_pool, "i=@IDX: ib_alloc_fast_reg_page_list() "
 			   "returned with error @MAX_PAGE_LIST_LEN (@RV)", i, max_page_list_len, rv);
 			frpl = NULL;
 			if (c_retry)
@@ -2838,9 +2958,6 @@ static struct nvmeib_fr_pool *create_fr_pool(struct nvmeib_dev *dev,
 		d->map_sgl_pages = NVMEIB_FMR_MIN_SIZE;
 #endif
 		d->valid = !mr->need_inval;
-		list_add_tail(&d->entry, &pool->free_list);
-		pool->n_free++;
-		pool->size++;
 	}
 	BUG_ON(pool->size != pool->n_free);
 	BUG_ON(pool->size != pool_size);
@@ -3056,6 +3173,213 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_alloc_fast_reg_pool);
 
+static void fr_pool_percpu_idle_timer_fn(struct timer_list *timer)
+{
+	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = from_timer(pcpu_cache, timer, idle_timer);
+	struct nvmeib_fr_pool *pool = pcpu_cache->pool;
+	unsigned long jif = jiffies;
+	unsigned long flags;
+	int n_spilled = 0;
+
+	local_irq_save(flags);
+	if (pcpu_cache->n_free > 0 && time_after(jif, pcpu_cache->last_get_jif + nvmeib_fr_pool_percpu_idle_timeout_ms * HZ / 1000)) {
+		/* Per-cpu cache idle timeout, spill all descriptors to global pool */
+		_ND(debug_fr_pool_percpu_idle_timer_fn, "Per-cpu cache idle timeout, spilling all descriptors to global pool");
+		pcpu_cache->stats.n_spills_idle_timer++;
+		spin_lock(&pool->lock);
+		list_splice_init(&pcpu_cache->free_list, &pool->free_list);
+		n_spilled = pcpu_cache->n_free;
+		pool->n_free += pcpu_cache->n_free;
+		pcpu_cache->stats.total_spills_idle_timer += pcpu_cache->n_free;
+		pcpu_cache->n_free = 0;
+		spin_unlock(&pool->lock);
+		_ND(debug_1_fr_pool_percpu_idle_timer_fn, 
+			"Spilled @COUNT descriptors from per-cpu cache to global pool", n_spilled);
+	}
+	local_irq_restore(flags);
+
+	/* Restart timer to check again after timeout */
+	timer->expires = jif + nvmeib_fr_pool_percpu_idle_timeout_ms * HZ / 1000;
+	add_timer_on(timer, pcpu_cache->cpu);
+}
+
+static void rebalance_fr_pool_percpu_cache_percpu_fn(void *data)
+{
+	struct nvmeib_fr_pool *pool = (struct nvmeib_fr_pool *)data;
+	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = this_cpu_ptr(pool->percpu_cache);
+	struct nvmeib_fr_desc *d;
+	LIST_HEAD(spill_list);
+	int n_spilled = 0;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	while (pcpu_cache->n_free > pool->pcpu_low &&
+		(d = list_first_entry_or_null(&pcpu_cache->free_list, struct nvmeib_fr_desc, entry))) 
+	{
+		BUG_ON(pcpu_cache->n_free <= 0);
+		list_del(&d->entry);
+		pcpu_cache->n_free--;
+		list_add(&d->entry, &spill_list);
+		n_spilled++;
+	}
+
+	if (n_spilled > 0) {
+		pcpu_cache->stats.n_spills_rebalance++;
+		pcpu_cache->stats.total_spilled_rebalance += n_spilled;
+		spin_lock(&pool->lock);
+		list_splice(&spill_list, &pool->free_list);
+		pool->n_free += n_spilled;
+		spin_unlock(&pool->lock);
+	}
+	_ND(debug_1_rebalance_fr_pool_percpu_cache_percpu_fn, 
+		"Spilled @COUNT descriptors from per-cpu cache to global pool", n_spilled);
+	local_irq_restore(flags);
+}
+
+static void rebalance_fr_pool_percpu_cache_work(struct work_struct *work)
+{
+	struct nvmeib_fr_pool *pool = container_of(work, struct nvmeib_fr_pool, rebalance_pcpu_cache_work);
+
+	/* spill descriptors from each per-cpu cache to the global pool */
+	on_each_cpu(rebalance_fr_pool_percpu_cache_percpu_fn, pool, true);
+}
+
+static ssize_t fill_fr_pool_proc_buf(void *arg, char *buf, size_t len)
+{
+	struct nvmeib_fr_pool *pool = (struct nvmeib_fr_pool *)arg;
+	struct {
+		char *buf;
+		size_t len;
+		int count;
+		int ntabs;
+		const struct nvmeib_json_ops *jops;
+	} data = {
+		.buf = buf,
+		.len = len,
+		.count = 0,
+		.ntabs = 0,
+		.jops = &nvmeib_json_ops,
+	};
+	u64 n_gets;
+	int cpu;
+
+	NFIN;
+	CALL_JSON_START_OBJ(&data, NULL);
+	CALL_JSON_START_OBJ(&data, "params");
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "size", pool->size);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_free", pool->n_free);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_error", pool->n_error);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "rebalance_pcpu_cache_scheduled_jif", pool->rebalance_pcpu_cache_scheduled_jif);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "jiffies", jiffies);
+	CALL_JSON_DATA_UVAL(&data, pool->percpu_cache ? !JSON_LAST_ELEM : JSON_LAST_ELEM, "max_page_list_len", pool->max_page_list_len);
+	if (pool->percpu_cache) {
+		CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "pcpu_low", pool->pcpu_low);
+		CALL_JSON_DATA_UVAL(&data, JSON_LAST_ELEM, "pcpu_high", pool->pcpu_high);
+	}
+	CALL_JSON_END_OBJ(&data, !JSON_LAST_ELEM);
+	CALL_JSON_START_OBJ(&data, "stats");
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_get_success", pool->stats.n_get_success);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_get_fail", pool->stats.n_get_fail);
+	n_gets = pool->stats.n_get_success + pool->stats.n_get_fail;
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "average_get_n_free", n_gets > 0 ? pool->stats.total_get_n_free / n_gets : 0);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_puts", pool->stats.n_puts);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_bind_errors", pool->stats.n_bind_errors);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_reregs_scheduled", pool->stats.n_rereg_scheduled);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_rereg_mr_success", pool->stats.total_rereg_mr_success);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_rereg_mr_fail", pool->stats.total_rereg_mr_fail);
+	CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "min_n_free", pool->stats.min_n_free);
+	CALL_JSON_DATA_UVAL(&data, JSON_LAST_ELEM, "max_n_error", pool->stats.max_n_error);
+	CALL_JSON_END_OBJ(&data, pool->percpu_cache ? !JSON_LAST_ELEM : JSON_LAST_ELEM);
+	if (pool->percpu_cache) {
+		CALL_JSON_START_ARRAY(&data, "percpu_cache");
+		for_each_possible_cpu(cpu) {
+			struct nvmeib_fr_pool_percpu_cache *pcpu_cache = per_cpu_ptr(pool->percpu_cache, cpu);
+			CALL_JSON_START_OBJ(&data, NULL);
+			CALL_JSON_START_OBJ(&data, "params");
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "cpu_id", cpu);
+			CALL_JSON_DATA_UVAL(&data, JSON_LAST_ELEM, "last_get_jif", pcpu_cache->last_get_jif);
+			CALL_JSON_END_OBJ(&data, !JSON_LAST_ELEM);
+			CALL_JSON_START_OBJ(&data, "stats");
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_free", pcpu_cache->n_free);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_get_from_cache_success", pcpu_cache->stats.n_get_from_cache_success);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_get_from_cache_fail", pcpu_cache->stats.n_get_from_cache_fail);
+			n_gets = pcpu_cache->stats.n_get_from_cache_success + pcpu_cache->stats.n_get_from_cache_fail;
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "average_get_n_free", n_gets > 0 ? pcpu_cache->stats.total_get_n_free / n_gets : 0);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_get_from_cache_fail_after_refill", pcpu_cache->stats.n_get_from_cache_fail_after_refill);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_put_to_cache", pcpu_cache->stats.n_put_to_cache);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_spills_to_excess_list", pcpu_cache->stats.n_spills_to_excess_list);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_spilled_to_excess_list", pcpu_cache->stats.total_spilled_to_excess_list);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_refills_from_global_pool", pcpu_cache->stats.n_refills_from_global_pool);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_refilled_from_global_pool", pcpu_cache->stats.total_refilled_from_global_pool);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_bind_errors", pcpu_cache->stats.n_bind_errors);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_rereg_scheduled", pcpu_cache->stats.n_rereg_scheduled);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_spills_idle_timer", pcpu_cache->stats.n_spills_idle_timer);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_spills_idle_timer", pcpu_cache->stats.total_spills_idle_timer);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_rebalance_scheduled", pcpu_cache->stats.n_rebalance_scheduled);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "n_spills_rebalance", pcpu_cache->stats.n_spills_rebalance);
+			CALL_JSON_DATA_UVAL(&data, !JSON_LAST_ELEM, "total_spilled_rebalance", pcpu_cache->stats.total_spilled_rebalance);
+			CALL_JSON_DATA_UVAL(&data, JSON_LAST_ELEM, "max_n_free", pcpu_cache->stats.max_n_free);
+			CALL_JSON_END_OBJ(&data, JSON_LAST_ELEM);
+			CALL_JSON_END_OBJ(&data, cpu == cpumask_last(&__cpu_possible_mask) ? JSON_LAST_ELEM : !JSON_LAST_ELEM);
+		}
+		CALL_JSON_END_ARRAY(&data, JSON_LAST_ELEM);
+	}
+	CALL_JSON_END_OBJ(&data, JSON_LAST_ELEM);
+	NFOUT;
+	return data.count;
+}
+
+/* NOTE: Caller must disable preemption */
+static struct nvmeib_fr_desc *get_fr_desc_from_percpu_cache(struct nvmeib_fr_pool *pool)
+{
+	struct nvmeib_fr_desc *d = NULL;
+	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = this_cpu_ptr(pool->percpu_cache);
+	unsigned long flags;
+	unsigned long jif = jiffies;
+
+	NFIN;
+	local_irq_save(flags);
+	pcpu_cache->last_get_jif = jif;
+	if ((d = list_first_entry_or_null(&pcpu_cache->free_list, struct nvmeib_fr_desc, entry))) {
+		list_del_init(&d->entry);
+		BUG_ON(pcpu_cache->n_free <= 0);
+		pcpu_cache->n_free--;
+		pcpu_cache->stats.n_get_from_cache_success++;
+	} else {
+		pcpu_cache->stats.n_get_from_cache_fail++;
+	}
+	pcpu_cache->stats.total_get_n_free += pcpu_cache->n_free;
+	local_irq_restore(flags);
+	NFOUT;
+	return d;
+}
+
+static int refill_fr_pool_percpu_cache(struct nvmeib_fr_pool *pool)
+{
+	struct nvmeib_fr_desc *d;
+	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = this_cpu_ptr(pool->percpu_cache);
+	unsigned long flags;
+	int n_refilled = 0;
+
+	NFIN;
+	spin_lock_irqsave(&pool->lock, flags);
+	pcpu_cache->stats.n_refills_from_global_pool++;
+	while (pcpu_cache->n_free < pool->pcpu_low && 
+		(d = list_first_entry_or_null(&pool->free_list, struct nvmeib_fr_desc, entry))) 
+	{
+		list_del(&d->entry);
+		pool->n_free--;
+		list_add(&d->entry, &pcpu_cache->free_list);
+		pcpu_cache->n_free++;
+		n_refilled++;
+		pcpu_cache->stats.total_refilled_from_global_pool++;
+		if (pcpu_cache->n_free > pcpu_cache->stats.max_n_free)
+			pcpu_cache->stats.max_n_free = pcpu_cache->n_free;
+	}
+	spin_unlock_irqrestore(&pool->lock, flags);
+	NFOUT;
+	return n_refilled;
+}
 /**
  * nvmeib_fast_reg_pool_get() - obtain a descriptor suitable for
  * fast registration
@@ -3067,18 +3391,139 @@ struct nvmeib_fr_desc *nvmeib_fast_reg_pool_get(struct nvmeib_fr_pool *pool)
 	unsigned long flags;
 
 	NFIN;
+	if (pool->percpu_cache) {
+		int n_refilled;
+		get_cpu();
+		if ((d = get_fr_desc_from_percpu_cache(pool))) {
+			_ND(debug_nvmeib_fast_reg_pool_get_percpu_cache, 
+				"Got descriptor @PTR from per-cpu cache", d);
+			put_cpu();
+			goto out;
+		}
+		_ND(debug_2_nvmeib_fast_reg_pool_get_percpu_cache, "No descriptor found in per-cpu cache, refilling");
+		n_refilled = refill_fr_pool_percpu_cache(pool);
+		_ND(debug_3_nvmeib_fast_reg_pool_get_percpu_cache, 
+			"Refilled @COUNT descriptors from global pool to per-cpu cache", n_refilled);
+		if ((d = get_fr_desc_from_percpu_cache(pool))) {
+			_ND(debug_4_nvmeib_fast_reg_pool_get_percpu_cache, 
+				"Got descriptor @PTR from per-cpu cache after refill", d);
+		} else {
+			_NT(error_nvmeib_fast_reg_pool_get_percpu_cache, 
+				"@IB_DEV_NAME FR Pool: Failed to get descriptor from per-cpu cache after refill",
+				pool->pd->device->name);
+			spin_lock_irqsave(&pool->lock, flags);
+			if (time_after(jiffies, pool->rebalance_pcpu_cache_scheduled_jif + nvmeib_fr_pool_percpu_rebalance_min_interval_ms * HZ / 1000)) {
+				struct nvmeib_fr_pool_percpu_cache *pcpu_cache = this_cpu_ptr(pool->percpu_cache);
+				/* schedule a work to rebalance the per-cpu caches */
+				pool->rebalance_pcpu_cache_scheduled_jif = jiffies;
+				pcpu_cache->stats.n_get_from_cache_fail_after_refill++;
+				_ND(debug_5_nvmeib_fast_reg_pool_get_percpu_cache, 
+					"@IB_DEV_NAME FR Pool: Scheduling rebalance of per-cpu caches", pool->pd->device->name);
+				if (schedule_work_on_sys_wq_rand_cpu(&pool->rebalance_pcpu_cache_work)) {
+					pcpu_cache->stats.n_rebalance_scheduled++;
+				}
+			}
+			spin_unlock_irqrestore(&pool->lock, flags);
+		}
+		put_cpu();
+		goto out;
+	}
 	spin_lock_irqsave(&pool->lock, flags);
 	if (!list_empty(&pool->free_list)) {
 		d = list_first_entry(&pool->free_list, typeof(*d), entry);
 		list_del_init(&d->entry);
 		pool->n_free--;
+		pool->stats.n_get_success++;
+		if (pool->n_free < pool->stats.min_n_free)
+			pool->stats.min_n_free = pool->n_free;
+#ifdef NVMEIBC_DEBUG_FR_LEAK
 		list_add(&d->used_entry, &pool->used_list);
+#endif
+	} else {
+		pool->stats.n_get_fail++;
 	}
+	pool->stats.total_get_n_free += pool->n_free;
 	spin_unlock_irqrestore(&pool->lock, flags);
+
+out:
 	NFOUT;
 	return d;
 }
 EXPORT_SYMBOL(nvmeib_fast_reg_pool_get);
+
+/* NOTE: Caller must disable preemption */
+static void put_fr_desc_to_percpu_cache(struct nvmeib_fr_pool *pool, struct nvmeib_fr_desc **desc, int n)
+{
+	int i;
+	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = this_cpu_ptr(pool->percpu_cache);
+	LIST_HEAD(excess_list);
+	LIST_HEAD(bind_err_list);
+	unsigned long flags;
+	int n_returned = 0;
+	int n_bind_err = 0;
+	int n_spilled = 0;
+	bool schedule_rereg = false;
+
+	NFIN;
+
+	local_irq_save(flags);
+
+	for (i = 0; i < n; i++) {
+		if (!list_empty(&desc[i]->entry)) {
+			_NE(error_2_nvmeib_nvmeib_fast_reg_pool_put, "OOPS, desc @POOL already linked", &desc[i]);
+			BUG_ON(1);
+		}
+		desc[i]->owner = NULL;
+		if (desc[i]->bind_err) {
+			list_add(&desc[i]->entry, &bind_err_list);
+			n_bind_err++;
+			pcpu_cache->stats.n_bind_errors++;
+			schedule_rereg = true;
+		} else {
+			list_add(&desc[i]->entry, &pcpu_cache->free_list);
+			pcpu_cache->stats.n_put_to_cache++;
+			pcpu_cache->n_free++;
+			if (pcpu_cache->n_free > pcpu_cache->stats.max_n_free)
+				pcpu_cache->stats.max_n_free = pcpu_cache->n_free;
+			n_returned++;
+		}
+		desc[i] = NULL;
+	}
+	_ND(debug_put_fr_desc_to_percpu_cache, 
+		"Returned @COUNT descriptors to per-cpu cache. @COUNT bind errors", n_returned, n_bind_err);
+
+	if (pcpu_cache->n_free > pool->pcpu_high) {
+		/* Spill excess descriptors to excess list */
+		struct nvmeib_fr_desc *d;
+		pcpu_cache->stats.n_spills_to_excess_list++;
+		while (pcpu_cache->n_free > pool->pcpu_low &&
+		(d = list_first_entry_or_null(&pcpu_cache->free_list, struct nvmeib_fr_desc, entry))) 
+		{
+			list_del(&d->entry);
+			pcpu_cache->n_free--;
+			list_add_tail(&d->entry, &excess_list);
+			n_spilled++;
+			pcpu_cache->stats.total_spilled_to_excess_list++;
+		}
+		_ND(debug_1_put_fr_desc_to_percpu_cache, 
+			"Spilled @COUNT descriptors from per-cpu cache to excess list", n_spilled);
+	}
+
+	if (!list_empty(&excess_list) || !list_empty(&bind_err_list)) {
+		spin_lock(&pool->lock);
+		list_splice(&excess_list, &pool->free_list);
+		pool->n_free += n_spilled;
+		list_splice(&bind_err_list, &pool->err_list);
+		pool->n_error += n_bind_err;
+		spin_unlock(&pool->lock);
+	}
+	if (schedule_rereg && schedule_work_on_sys_wq_rand_cpu(&pool->rereg_work)) {
+		pcpu_cache->stats.n_rereg_scheduled++;
+	}
+	local_irq_restore(flags);
+
+	NFOUT;
+}
 
 /**
  * nvmeib_fast_reg_pool_put() - put an FR descriptor back in the
@@ -3094,11 +3539,20 @@ void nvmeib_fast_reg_pool_put(struct nvmeib_fr_pool *pool,
 	struct nvmeib_fr_desc **desc, int n)
 {
 	unsigned long flags;
-	int i;
+	int i = 0;
+	bool schedule_rereg = false;
 
 	NFIN;
+	if (pool->percpu_cache) {
+		get_cpu();
+		put_fr_desc_to_percpu_cache(pool, desc, n);
+		put_cpu();
+		goto out;
+	}
 	spin_lock_irqsave(&pool->lock, flags);
 	for (i = 0; i < n; i++) {
+		if (!desc[i])
+			continue;
 		if (!list_empty(&desc[i]->entry)) {
 			_NE(error_nvmeib_nvmeib_fast_reg_pool_put, "OOPS, desc @POOL already linked", &desc[i]);
 			BUG_ON(1);
@@ -3106,10 +3560,15 @@ void nvmeib_fast_reg_pool_put(struct nvmeib_fr_pool *pool,
 		if (!desc[i]->bind_err) {
 			list_add_tail(&desc[i]->entry, &pool->free_list);
 			pool->n_free++;
+			pool->stats.n_puts++;
 		} else {
 			/* Bind error happened so add to error list for later maintenance */
 			list_add(&desc[i]->entry, &pool->err_list);
 			pool->n_error++;
+			if (pool->n_error > pool->stats.max_n_error)
+				pool->stats.max_n_error = pool->n_error;
+			pool->stats.n_bind_errors++;
+			schedule_rereg = true;
 		}
 	#ifdef NVMEIBC_DEBUG_FR_LEAK
 		list_del_init(&desc[i]->used_entry);
@@ -3117,7 +3576,11 @@ void nvmeib_fast_reg_pool_put(struct nvmeib_fr_pool *pool,
 		desc[i]->owner = NULL;
 		desc[i] = NULL;
 	}
+	if (schedule_rereg && schedule_work_on_sys_wq_rand_cpu(&pool->rereg_work)) {
+		pool->stats.n_rereg_scheduled++;
+	}
 	spin_unlock_irqrestore(&pool->lock, flags);
+out:
 	NFOUT;
 }
 EXPORT_SYMBOL(nvmeib_fast_reg_pool_put);
@@ -3128,30 +3591,19 @@ EXPORT_SYMBOL(nvmeib_fast_reg_pool_put);
  * @rkey: rkey of the MR
  *
  */
-int nvmeib_fast_reg_pool_handle_bind_err(struct nvmeib_fr_pool *pool, u32 rkey)
+int nvmeib_fast_reg_pool_handle_bind_err(struct nvmeib_fr_desc **desc, int n, u32 rkey)
 {
-	struct nvmeib_fr_desc *d;
-	unsigned long flags;
-	int rv = -ENOENT;
+	int i, rv = -ENOENT;
 
 	NFIN;
-	if (!pool) {
-		rv = -EINVAL;
-		goto out;
-	}
-
-	spin_lock_irqsave(&pool->lock, flags);
-	list_for_each_entry(d, &pool->used_list, entry) {
-		if (d->mr->rkey == rkey) {
-			/* Found it - set the bind error flag */
-			d->bind_err = 1;
+	for (i = 0; i < n; i++) {
+		if (desc[i]->mr->rkey == rkey) {
+			desc[i]->bind_err = 1;
 			rv = 0;
 			break;
 		}
 	}
-	spin_unlock_irqrestore(&pool->lock, flags);
 
-out:
 	NFOUT;
 	return rv;
 }
@@ -3198,8 +3650,9 @@ static int fr_desc_mr_rereg(struct nvmeib_fr_pool *pool, struct nvmeib_fr_desc *
  * @pool: Pool the descriptor was allocated from.
  *
  */
-int nvmeib_fast_reg_pool_rereg(struct nvmeib_fr_pool *pool)
+static void fr_pool_rereg_work(struct work_struct *work)
 {
+	struct nvmeib_fr_pool *pool = container_of(work, struct nvmeib_fr_pool, rereg_work);
 	struct nvmeib_fr_desc *d, *t;
 	unsigned long flags;
 	LIST_HEAD(loop_list);
@@ -3210,6 +3663,7 @@ int nvmeib_fast_reg_pool_rereg(struct nvmeib_fr_pool *pool)
 	int i = 0;
 	int n_err;
 	int rv;
+	bool schedule_rereg = false;
 	NFIN;
 
 	/* splice out from err-list */
@@ -3234,10 +3688,12 @@ int nvmeib_fast_reg_pool_rereg(struct nvmeib_fr_pool *pool)
 			d->bind_err = 0;
 			list_move(&d->entry, &pass_list);
 			n_pass++;
+			pool->stats.total_rereg_mr_success++;
 		}
 		else {
 			list_move(&d->entry, &fail_list);
 			n_fail++;
+			pool->stats.total_rereg_mr_fail++;
 		}
 		i++;
 	}
@@ -3254,12 +3710,16 @@ int nvmeib_fast_reg_pool_rereg(struct nvmeib_fr_pool *pool)
 	pool->n_free += n_pass;
 	list_splice_tail(&fail_list, &pool->err_list);
 	pool->n_error += n_fail;
+	schedule_rereg = pool->n_error > 0;
+	
+	if (schedule_rereg && schedule_work_on_sys_wq_rand_cpu(&pool->rereg_work)) {
+		pool->stats.n_rereg_scheduled++;
+	}
+
 	spin_unlock_irqrestore(&pool->lock, flags);
 
 	NFOUT;
-	return 0;
 }
-EXPORT_SYMBOL(nvmeib_fast_reg_pool_rereg);
 
 void nvmeib_fast_reg_pool_trace(struct nvmeib_fr_pool *pool)
 {
@@ -5948,9 +6408,13 @@ static int __init nvmeib_module_init(void) /* Constructor */
 	nvmeib_public_intr_poller_fill_ft(&intr_poller_ft);
 #endif
 
-	ret = nvmeib_rdma_register_net_notifiers();
+	ret = fr_pool_cache_init();
 	if (ret)
 		goto err_out;
+	
+	ret = nvmeib_rdma_register_net_notifiers();
+	if (ret)
+		goto err_fr_pool_cache;
 
 	/*
 	module-init of common-public - init &public_hwdev list
@@ -6031,6 +6495,9 @@ err_shaper:
 err_net_notify:
 	nvmeib_rdma_unregister_net_notifiers();
 
+err_fr_pool_cache:
+	fr_pool_cache_exit();
+
 err_out:
 	nvmeib_numa_iter_diag_store_destroy();
 	return ret;
@@ -6050,6 +6517,7 @@ static void __exit nvmeib_module_exit(void) /* Destructor */
 	nvmeib_numa_iter_diag_store_destroy();
 	nvmeib_ibdr_dev_cleanup();
 	nvmeib_rdma_unregister_net_notifiers();
+	fr_pool_cache_exit();
 	__print_hooray(false, PROCFS_COMMON_STR);
 
 #ifdef NVMEIB_COUNT_MEM_USAGE

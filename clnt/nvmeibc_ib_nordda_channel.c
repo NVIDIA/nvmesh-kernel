@@ -261,13 +261,22 @@ static void nordda_handle_qp_err(struct ib_wc *wc,
 	if ((u32)op_code == NVMEIB_LOCAL_INV_WR_ID) {
 		_NT(trace_1_ib_nordda_channel_nordda_handle_qp_err, "LOCAL_INV failed with status @WC_STATUS", wc_status);
 		if (wc_status == IB_WC_MW_BIND_ERR) {
+			/* Index is encoded in nvmeib_map_fr */
+			int index = nvmeib_idx_from_wc(wc);
+			struct nvmeibc_volume_request *req = &ch->reqs[index].req;
 			/* Tell pool to set MR as having a bind error */
-			nvmeib_fast_reg_pool_handle_bind_err(
-				P2NV(ch->net.base.port)->fr_pool, wc->ex.invalidate_rkey);
+			nvmeib_fast_reg_pool_handle_bind_err(req->fr_list, req->nmdesc, wc->ex.invalidate_rkey);
 		}
 	}
-	else if ((u32)op_code == NVMEIB_FAST_REG_WR_ID)
+	else if ((u32)op_code == NVMEIB_FAST_REG_WR_ID) {
 		_NT(trace_2_ib_nordda_channel_nordda_handle_qp_err, "FAST_REG_MR failed status @WC_STATUS", wc_status);
+		if (wc_status == IB_WC_MW_BIND_ERR) {
+			int index = nvmeib_idx_from_wc(wc);
+			struct nvmeibc_volume_request *req = &ch->reqs[index].req;
+			/* Tell pool to set MR as having a bind error */
+			nvmeib_fast_reg_pool_handle_bind_err(req->fr_list, req->nmdesc, wc->ex.invalidate_rkey);
+		}
+	}
 	else if ((u32)op_code == NVMEIB_RDMA_IO_KA) {
 		_NT(trace_3_ib_nordda_channel_nordda_handle_qp_err, "Keep-Alive Failed on Channel @BASE_NAME with status @WC_STATUS", ch->base.name, wc_status);
 	}
