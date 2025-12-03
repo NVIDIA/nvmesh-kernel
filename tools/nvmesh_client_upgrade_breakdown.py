@@ -1507,6 +1507,65 @@ class NDUPhase(CompositePhase):
         if self.io_disabled_phase.children:
             print("--- verbose volume IO disabled details () ---")
             self.io_disabled_phase.print_report(level=1)  # This will print the tree of volumes
+
+    def generate_chrome_trace(self) -> List[Dict[str, Any]]:
+        trace_events = []
+
+        # Helper to traverse the Service tree (PID 1)
+        def traverse_service(phase: BasePhase):
+            if phase.status == PhaseStatus.VALID and phase._final_interval:
+                # Chrome Tracing uses microseconds
+                ts_micros = int(phase._final_interval.begin.timestamp() * 1_000_000)
+                dur_micros = int(phase._final_duration * 1000)
+
+                trace_events.append({
+                    "name": phase.name,
+                    "cat": "service",
+                    "ph": "X",  # Complete Event (has duration)
+                    "ts": ts_micros,
+                    "dur": dur_micros,
+                    "pid": 1,  # Process 1: Control Plane
+                    "tid": 1,
+                    "args": {"warnings": phase.warnings}
+                })
+
+            if isinstance(phase, CompositePhase):
+                for child in phase.children.values():
+                    traverse_service(child)
+
+        # Helper to traverse the Data tree (PID 2)
+        def traverse_data(phase: BasePhase):
+            if phase.status == PhaseStatus.VALID and phase._final_interval:
+                ts_micros = int(phase._final_interval.begin.timestamp() * 1_000_000)
+                dur_micros = int(phase._final_duration * 1000)
+
+                trace_events.append({
+                    "name": phase.name,
+                    "cat": "io",
+                    "ph": "X",
+                    "ts": ts_micros,
+                    "dur": dur_micros,
+                    "pid": 2,  # Process 2: Data Plane
+                    "tid": 1,
+                    "args": {"vol": phase.name}
+                })
+
+            if isinstance(phase, CompositePhase):
+                for child in phase.children.values():
+                    traverse_data(child)
+
+        # 1. Walk the Main Service Tree
+        for child in self.children.values():
+            traverse_service(child)
+
+        # 2. Walk the Derived IO Tree
+        traverse_data(self.io_disabled_phase)
+
+        # Metadata for the viewer
+        trace_events.append({"name": "process_name", "ph": "M", "pid": 1, "args": {"name": "Control Plane (Systemd)"}})
+        trace_events.append({"name": "process_name", "ph": "M", "pid": 2, "args": {"name": "Data Plane (IO Latency)"}})
+
+        return trace_events
 #
 
 # ---------------------------------------------------------------------------
@@ -1615,6 +1674,7 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument('--debug', action='store_true', help='Print debug info (sent to stderr).')
     parser.add_argument('--non-strict', action='store_true', help='Be strict w.r.t report printing.')
     parser.add_argument('--json', action='store_true', help="Output analysis result as JSON to stdout")
+    parser.add_argument('--trace', metavar='FILE', help="Export Chrome Trace (Flame Graph) to the specified JSON file")
     return parser
 
 def parse_flexible_timestamp(timestamp_str: str, arg_name: str = "timestamp") -> datetime:
@@ -1844,6 +1904,12 @@ def main():
         sys.exit(1)
 
     # --- Reporting Phase ---
+    if args.trace:
+        trace_data = ndu_analysis.generate_chrome_trace()
+        with open(args.trace, 'w') as f:
+            json.dump(trace_data, f)
+        logger.info(f"Trace exported to {args.trace}. Load this in ui.perfetto.dev")
+
     if args.json:
         print(json.dumps(ndu_analysis.to_dict(), indent=2))
         # If JSON is requested, we might want to skip the text report or print it to stderr
