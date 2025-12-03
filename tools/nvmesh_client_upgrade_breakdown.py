@@ -610,6 +610,29 @@ class BasePhase(ABC):
         # Print Warnings
         for warning in self.warnings:
             print(f"{indent}  !! WARNING: {warning} !!")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the phase to a dictionary."""
+
+        def format_ts(dt: datetime) -> Optional[str]:
+            if not dt:
+                return None
+            # 1. Convert to Local Time (matches the text report)
+            local_dt = dt.astimezone()
+
+            # 2. Format as "YYYY-MM-DD HH:MM:SS.mmm"
+            # %f gives microseconds (6 digits), so we slice [:-3] to get milliseconds
+            return local_dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+        return {
+            "name": self.name,
+            "status": self.status.value,
+            "duration_ms": self._final_duration,
+            "self_time_ms": self._self_time_ms,
+            "start": format_ts(self._final_interval.begin) if self._final_interval else None,
+            "end": format_ts(self._final_interval.end) if self._final_interval else None,
+            "warnings": self.warnings
+        }
 # ---
 
 class CompositePhase(BasePhase):
@@ -737,6 +760,12 @@ class CompositePhase(BasePhase):
 
         for child in sorted_children:
             child.print_report(level + 1)
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = super().to_dict()
+        # Recursively serialize children
+        data["children"] = [c.to_dict() for c in self.children.values()]
+        return data
 # ---
 class ContainerPhase(CompositePhase):
     """
@@ -1585,6 +1614,7 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument('--verbose', '-v', action='store_true', help='Print full begin/end timestamps and sub-phases.')
     parser.add_argument('--debug', action='store_true', help='Print debug info (sent to stderr).')
     parser.add_argument('--non-strict', action='store_true', help='Be strict w.r.t report printing.')
+    parser.add_argument('--json', action='store_true', help="Output analysis result as JSON to stdout")
     return parser
 
 def parse_flexible_timestamp(timestamp_str: str, arg_name: str = "timestamp") -> datetime:
@@ -1814,6 +1844,11 @@ def main():
         sys.exit(1)
 
     # --- Reporting Phase ---
+    if args.json:
+        print(json.dumps(ndu_analysis.to_dict(), indent=2))
+        # If JSON is requested, we might want to skip the text report or print it to stderr
+        return
+
     # Now we just call print on the object itself.
     ndu_analysis.print_report()
 
