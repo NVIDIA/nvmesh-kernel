@@ -1060,7 +1060,6 @@ static void remove_longing_registrant_on_seg(struct nvmeibt_seg_active *seg_acti
 	NFIN;
 	N_Tf(kiru834, "Remove the longing_registrant seg=@UUID_8 handle=@HANDLE",
 		nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->client_messaging_handle);
-	nvmeib_hash_delete_uint32_t(seg_active->longing_registrants_hash_by_cid, client_messaging_handle_to_cid(reg_ctx->client_messaging_handle));
 	free_reg_ctx(reg_ctx);
 	NFOUT;
 }
