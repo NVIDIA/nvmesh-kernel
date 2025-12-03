@@ -210,10 +210,10 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_ASSIGN_PLAIN(bvnsjkf, "blocks", vol->blocks, kv->value->num);
 			JSON_ASSIGN_PLAIN(kxme9j5, "blockSize", vol->blockSize, kv->value->num);
 			JSON_ASSIGN_PLAIN(cujs03p, "relativeRebuildPriority", vol->relativeRebuildPriority, kv->value->num);
-			JSON_ASSIGN_PLAIN(og7xne3, "enableCrcCheck", vol->enableCrcCheck, kv->value->num);
+			JSON_ASSIGN_PLAIN_OPTIONAL(og7xne3, "enableCrcCheck", vol->enableCrcCheck, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnmc903, "use_debug_di", vol->use_debug_di, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(byxbdoe, "stripeWidth", vol->stripeWidth, kv->value->num);	// MGMT sends depending on raidType (Dec 24)
-			JSON_ASSIGN_PLAIN(92locla, "stripeSize", vol->stripeSize, kv->value->num);
+			JSON_ASSIGN_PLAIN_OPTIONAL(92locla, "stripeSize", vol->stripeSize, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnjkx93, "kafka_offset_or_idx", vol->kafka_offset_or_idx, kv->value->num);	// Exists in persistence->JSON
 			JSON_ASSIGN_PLAIN(7xj30ls, "action", vol->action, ((!strcmp(s, "markedForDeletion") || s[0] == 'X') ? 'X' : 'N'));
 			JSON_ASSIGN_PLAIN(zkw94j2, "RAIDLevel", vol->raidType, (!strcmp(s, "Mirrored RAID-1") ? 1 :
