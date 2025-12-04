@@ -850,20 +850,19 @@ class SimpleSystemdPhase(CompositePhase):
 
         # 2. Do its *own* work to find its start/end boundaries
         consumed_by_self = False
-        if not self.is_complete: # Only check if phase isn't already done
-            if isinstance(entry, JournalCTLLogEntry) and \
-               entry.syslog_id == 'systemd' and \
-               entry.unit == self.service_name and \
-               entry.message:
+        if isinstance(entry, JournalCTLLogEntry) and \
+                entry.syslog_id == 'systemd' and \
+                entry.unit == self.service_name and \
+                entry.message:
 
-                if entry.message.startswith(self.start_msg_prefix):
-                    if self.debug: logger.debug(f"[{self.name}]: Matched start log: {entry.message.strip()}")
-                    self.set_start(entry.timestamp)
-                    consumed_by_self = True
-                elif entry.message.startswith(self.end_msg_prefix):
-                    if self.debug: logger.debug(f"[{self.name}]: Matched stop log: {entry.message.strip()}")
-                    self.set_end(entry.timestamp)
-                    consumed_by_self = True
+            if entry.message.startswith(self.start_msg_prefix):
+                if self.debug: logger.debug(f"[{self.name}]: Matched start log: {entry.message.strip()}")
+                self.set_start(entry.timestamp)
+                consumed_by_self = True
+            elif entry.message.startswith(self.end_msg_prefix):
+                if self.debug: logger.debug(f"[{self.name}]: Matched stop log: {entry.message.strip()}")
+                self.set_end(entry.timestamp)
+                consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
 
@@ -939,9 +938,6 @@ class ShutdownPhase(CompositePhase):
         self.add_child(VolumesDetachPhase(debug=debug))
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete:
-            return False
-
         consumed_by_child = super().process_entry(entry)
         consumed_by_self = False
         msg = entry.message
@@ -966,7 +962,7 @@ class ModulesUnLoadPhase(BasePhase):
         super().__init__("modules unload", debug)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete or not isinstance(entry, JournalCTLLogEntry):
+        if not isinstance(entry, JournalCTLLogEntry):
             return False
         msg = entry.message
         # Look for the log lines from the nvmeshclient script
@@ -995,9 +991,6 @@ class ModulesLoadPreClientInitPhase(BasePhase):
         super().__init__("Pre-Initialization", debug)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete:
-            return False
-
         # Start ($t1): "Starting to load modules"
         if isinstance(entry, JournalCTLLogEntry) and \
                 entry.syslog_id == 'nvmeshclient' and entry.message:
@@ -1025,7 +1018,7 @@ class ModulesLoadClientInitCorePhase(BasePhase):
         super().__init__("Client Core Init", debug)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete or not isinstance(entry, PagerLogEntry):
+        if not isinstance(entry, PagerLogEntry):
             return False
 
         msg = entry.message
@@ -1063,7 +1056,7 @@ class ModulesLoadClientInitPhase(CompositePhase):
         self.add_child(ModulesLoadClientInitCorePhase(debug))
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
-        if self.is_complete or not isinstance(entry, PagerLogEntry):
+        if not isinstance(entry, PagerLogEntry):
             return False
 
         consumed_by_child = super().process_entry(entry)
@@ -1108,7 +1101,7 @@ class ModulesLoadPhase(CompositePhase):
         # 2. Check for Parent boundaries (t1 -> Done)
         consumed_by_self = False
 
-        if not self.is_complete and isinstance(entry, JournalCTLLogEntry):
+        if isinstance(entry, JournalCTLLogEntry):
             if entry.syslog_id == 'nvmeshclient' and entry.message:
 
                 # Parent Start ($t1) - Same as PreInit Start
@@ -1135,7 +1128,7 @@ class VolumeDetachPhase(BasePhase):
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # 1. Safety and Relevance Checks
-        if self.is_complete or not isinstance(entry, PagerLogEntry):
+        if not isinstance(entry, PagerLogEntry):
             return False
 
         # Only process logs belonging to this specific volume
