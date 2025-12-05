@@ -330,11 +330,19 @@ void sandbox_force_file_persist(const char *filepath)
 static const char* sbfd_get_open_mode(const struct t_sandbox_sock* s) {
 	if (!sbfd_is_a_file(s))
 		return "w+";
+	// Creating or truncating: use "w+" (safe - explicit intent to overwrite)
 	if ((s->proto & (O_CREAT | O_TRUNC)) != 0)
 		return "w+";
+	// Read-only: use "r" (safe - no modification)
 	if ((s->proto & O_ACCMODE) == O_RDONLY)
 		return "r";
-	return "a+";
+	// Explicit append mode requested: use "a+" (safe - caller wants append)
+	if (s->proto & O_APPEND)
+		return "a+";
+	// O_RDWR on existing file without O_APPEND: use "r+"
+	// This allows pwrite() to work at any offset (needed for GPT, etc.)
+	// Safe because: file must already exist, no truncation, no append
+	return "r+";
 }
 
 int socket(int __domain, int __type, int __protocol) {
