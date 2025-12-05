@@ -33,7 +33,8 @@ enum GPT_UTIL_ACTION {
 	ACTION_DISPLAY_MBR,			// -m: display MBR only
 	ACTION_FIX_GPT,				// -f: fix GPT from alternate copy
 	ACTION_FIX_MBR,				// -F: fix MBR
-	ACTION_CHECK_EXCELERO		// -i: check if EXCELERO_METADATA exists
+	ACTION_CHECK_EXCELERO,		// -i: check if EXCELERO_METADATA exists
+	ACTION_UPGRADE_GPT			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
 };
 
 // Configuration structure for gpt_util operation
@@ -78,6 +79,8 @@ struct gpt_util_config {
 #define NFIN
 #define NFOUT
 
+// Forward declarations
+static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt);
 
 int get_device_info(const char* dev_name, int* pblk_size, uint64_t* pba_e)
 {
@@ -390,6 +393,125 @@ static int SELF_TEST_corrupt_alternate_gpt_for_mismatch_test(int fd, int pblk_si
 
 	fprintf(stdout, "  - Corrupted alternate GPT (different UUID and partition name)\n");
 	fprintf(stdout, "  - Both copies have VALID CRCs but MISMATCHED content\n");
+
+	rv = 0;
+
+out:
+	return rv;
+}
+
+/**
+ * Write GPT header to disk at specified position (SELF-TEST ONLY)
+ * Uses direct pwrite for self-test corruption scenarios
+ */
+static int SELF_TEST_write_gpt_header_at_position(int disk_fd, int pblk_size,
+												  const struct nvmeibt_disk_gpt_header *header,
+												  uint64_t header_pba)
+{
+	int			rv = -1;
+	int			n_bytes;
+	char		*dma_buffer = NULL;
+	uint64_t	pbyte_s;
+	ssize_t		written;
+
+	n_bytes = roundup(sizeof(*header), pblk_size);
+	pbyte_s = header_pba * pblk_size;
+
+	dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_write_hdr, PAGE_SIZE, n_bytes);
+	memcpy(dma_buffer, header, sizeof(*header));
+
+	written = pwrite(disk_fd, dma_buffer, n_bytes, pbyte_s);
+	if (written != n_bytes) {
+		fprintf(stderr, "Error: pwrite returned %zd (expected %d) at PBA 0x%lx: %s\n",
+				written, n_bytes, header_pba, strerror(errno));
+		goto out;
+	}
+
+	rv = 0;
+
+out:
+	NNVMEIBT_BM_FREE(trace_selftest_write_hdr_free, dma_buffer);
+	return rv;
+}
+
+/**
+ * Corrupt Main GPT by setting n_partition_entries to a wrong value (e.g., 128)
+ * but keeping CRC calculated with LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192)
+ * This simulates the old buggy behavior where n_partition_entries was wrong
+ * (but CRC was correctly calculated with the max value)
+ * Returns 0 on success, -1 on error
+ */
+static int SELF_TEST_corrupt_gpt_n_partition_entries(int fd, int pblk_size, uint64_t pba_s, uint64_t pba_hw_e,
+													 int wrong_n_partition_entries)
+{
+	int							rv = -1;
+	struct nvmeibt_disk_gpt		gpt;
+	struct nvmeibt_disk_gpt_header	primary_header;
+	struct nvmeibt_disk_gpt_header	alternate_header;
+	uint32_t					crc_with_max_entries;
+	int							nbytes;
+	int							original_n_partition_entries;
+
+	memset(&gpt, 0, sizeof(gpt));
+	nvmeibt_strlcpy(gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(gpt.main_or_metadata));
+
+	// 1. Read the existing GPT
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, pblk_size, &gpt,
+										  pba_s, pba_hw_e, false) < 0) {
+		fprintf(stderr, "Failed to read GPT for n_partition_entries corruption\n");
+		goto out;
+	}
+
+	original_n_partition_entries = gpt.header.n_partition_entries;
+
+	// 2. Calculate CRC using LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192) - the correct/max value
+	nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt.header.size_of_partition_entry;
+	crc_with_max_entries = crc32_seedless(gpt.entries, nbytes);
+
+	fprintf(stdout, "  - Corrupting GPT n_partition_entries:\n");
+	fprintf(stdout, "    Setting n_partition_entries: %d -> %d (wrong)\n",
+			original_n_partition_entries, wrong_n_partition_entries);
+	fprintf(stdout, "    CRC calculated with %d entries (correct max): 0x%08x\n",
+			LARGE_GPT_MAX_NUM_GPT_ENTRIES, crc_with_max_entries);
+
+	// 3. Prepare primary header with wrong n_partition_entries but CRC from max entries
+	memcpy(&primary_header, &gpt.header, sizeof(primary_header));
+	primary_header.n_partition_entries = wrong_n_partition_entries;
+	primary_header.partition_entry_array_crc32 = crc_with_max_entries;
+	primary_header.header_crc32 = 0;
+	primary_header.header_crc32 = crc32_seedless(&primary_header, sizeof(primary_header));
+
+	// 4. Prepare alternate header with wrong n_partition_entries but CRC from max entries
+	memcpy(&alternate_header, &gpt.header, sizeof(alternate_header));
+	alternate_header.n_partition_entries = wrong_n_partition_entries;
+	alternate_header.partition_entry_array_crc32 = crc_with_max_entries;
+	alternate_header.my_pba = gpt.header.alternate_pba;
+	alternate_header.alternate_pba = gpt.header.my_pba;
+	{
+		int64_t	primary_entries_offset = (int64_t)gpt.header.partition_entry_pba - (int64_t)gpt.header.my_pba;
+		alternate_header.partition_entry_pba = gpt.header.alternate_pba + primary_entries_offset;
+		if (alternate_header.partition_entry_pba >= alternate_header.my_pba) {
+			int entries_n_pblks = divroundup(nbytes, pblk_size);
+			alternate_header.partition_entry_pba = alternate_header.my_pba - entries_n_pblks;
+		}
+	}
+	alternate_header.header_crc32 = 0;
+	alternate_header.header_crc32 = crc32_seedless(&alternate_header, sizeof(alternate_header));
+
+	// 5. Write corrupted primary header
+	if (SELF_TEST_write_gpt_header_at_position(fd, pblk_size, &primary_header, gpt.header.my_pba) < 0) {
+		fprintf(stderr, "Failed to write corrupted primary header\n");
+		goto out;
+	}
+
+	// 6. Write corrupted alternate header
+	if (SELF_TEST_write_gpt_header_at_position(fd, pblk_size, &alternate_header, gpt.header.alternate_pba) < 0) {
+		fprintf(stderr, "Failed to write corrupted alternate header\n");
+		goto out;
+	}
+	fsync(fd);
+	fprintf(stdout, "  - GPT now has n_partition_entries=%d but CRC calculated with %d entries\n",
+			wrong_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 
 	rv = 0;
 
@@ -930,10 +1052,166 @@ static int run_self_test(void)
 		fprintf(stdout, "\n>>> SELF-TEST 5: PASSED <<<\n");
 	}
 
+	// ===== TEST 6: GPT Upgrade (fix n_partition_entries from 128 to 8192) =====
+	// Tests both scenarios:
+	// 1. Fresh device has correct n_partition_entries (8192) - no upgrade needed
+	// 2. Corrupt main GPT n_partition_entries to 128, upgrade, verify it's fixed to 8192
+	if (1) {
+		struct nvmeibt_disk_gpt		main_gpt;
+		struct nvmeibt_disk_gpt		verify_gpt;
+		uint32_t					expected_crc;
+		int							nbytes;
+		int							wrong_n_partition_entries = 128;
+
+		fprintf(stdout, "\n");
+		fprintf(stdout, "============================================================\n");
+		fprintf(stdout, "SELF-TEST 6: GPT Upgrade (n_partition_entries fix)\n");
+		fprintf(stdout, "  Part A: Verify fresh device has n_partition_entries=%d (no upgrade needed)\n",
+				LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		fprintf(stdout, "  Part B: Corrupt Main GPT to n_partition_entries=%d, upgrade, verify fixed to %d\n",
+				wrong_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		fprintf(stdout, "============================================================\n");
+
+		// Create fresh device
+		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
+		if (disk_fd < 0) {
+			fprintf(stderr, "Failed to generate test device for GPT upgrade\n");
+			goto out;
+		}
+
+		// === Part A: Verify fresh device has correct n_partition_entries ===
+		fprintf(stdout, "\n--- Part A: Verify fresh device has n_partition_entries=%d ---\n",
+				LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		memset(&main_gpt, 0, sizeof(main_gpt));
+		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+											  &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			fprintf(stderr, "Failed to read fresh Main GPT\n");
+			close(disk_fd);
+			goto out;
+		}
+
+		fprintf(stdout, "  Main GPT n_partition_entries=%d (expected %d)\n",
+				main_gpt.header.n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+		if (main_gpt.header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
+			fprintf(stderr, "FAIL: Fresh device doesn't have correct n_partition_entries!\n");
+			fprintf(stdout, "\n>>> SELF-TEST 6: FAILED (Part A) <<<\n");
+			close(disk_fd);
+			goto out;
+		}
+		fprintf(stdout, "  PASS: Fresh device has correct n_partition_entries (no upgrade needed)\n");
+
+		// === Part B: Corrupt Main GPT n_partition_entries, upgrade, verify ===
+		fprintf(stdout, "\n--- Part B: Corrupt Main GPT n_partition_entries, upgrade, and verify ---\n");
+
+		// Corrupt Main GPT by setting n_partition_entries to 128
+		if (SELF_TEST_corrupt_gpt_n_partition_entries(disk_fd,
+													  SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+													  1,
+													  SELF_TEST_MOCK_DEVICE_BLOCKS - 1,
+													  wrong_n_partition_entries) < 0) {
+			fprintf(stderr, "Failed to corrupt Main GPT n_partition_entries\n");
+			close(disk_fd);
+			goto out;
+		}
+
+		// Read the corrupted GPT
+		fprintf(stdout, "\nReading corrupted GPT...\n");
+		memset(&main_gpt, 0, sizeof(main_gpt));
+		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+											  &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			fprintf(stderr, "Failed to read corrupted GPT\n");
+			close(disk_fd);
+			goto out;
+		}
+
+		// Verify corruption: n_partition_entries should be wrong, but CRC should match max entries
+		nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * main_gpt.header.size_of_partition_entry;
+		expected_crc = crc32_seedless(main_gpt.entries, nbytes);
+
+		fprintf(stdout, "  Before upgrade:\n");
+		fprintf(stdout, "    n_partition_entries=%d (wrong, should be %d)\n",
+				main_gpt.header.n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		fprintf(stdout, "    CRC=0x%08x (calculated with %d entries: 0x%08x)\n",
+				main_gpt.header.partition_entry_array_crc32, LARGE_GPT_MAX_NUM_GPT_ENTRIES, expected_crc);
+
+		if (main_gpt.header.n_partition_entries != wrong_n_partition_entries) {
+			fprintf(stderr, "GPT doesn't have wrong n_partition_entries - corruption failed\n");
+			fprintf(stderr, "  Expected %d, got %d\n", wrong_n_partition_entries, main_gpt.header.n_partition_entries);
+			close(disk_fd);
+			goto out;
+		}
+
+		if (main_gpt.header.partition_entry_array_crc32 != expected_crc) {
+			fprintf(stderr, "CRC doesn't match max entries calculation - corruption failed\n");
+			close(disk_fd);
+			goto out;
+		}
+
+		// Perform the upgrade
+		fprintf(stdout, "\nPerforming GPT upgrade...\n");
+		if (upgrade_gpt_in_place(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt) < 0) {
+			fprintf(stderr, "GPT upgrade failed\n");
+			close(disk_fd);
+			goto out;
+		}
+
+		// Re-read GPT to verify upgrade
+		fprintf(stdout, "\nVerifying GPT upgrade...\n");
+		memset(&verify_gpt, 0, sizeof(verify_gpt));
+		nvmeibt_strlcpy(verify_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(verify_gpt.main_or_metadata));
+
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+											  &verify_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			fprintf(stderr, "Failed to read GPT for verification\n");
+			close(disk_fd);
+			goto out;
+		}
+
+		SELF_TEST_mark_file_persistent(test_device_path);
+		close(disk_fd);
+		disk_fd = -1;
+
+		fprintf(stdout, "  After upgrade: n_partition_entries=%d (expected %d)\n",
+				verify_gpt.header.n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+		// Check 1: n_partition_entries should be fixed to LARGE_GPT_MAX_NUM_GPT_ENTRIES
+		if (verify_gpt.header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
+			fprintf(stderr, "FAIL: n_partition_entries not fixed!\n");
+			fprintf(stderr, "      Expected %d, got %d\n",
+					LARGE_GPT_MAX_NUM_GPT_ENTRIES, verify_gpt.header.n_partition_entries);
+			fprintf(stdout, "\n>>> SELF-TEST 6: FAILED (n_partition_entries not fixed) <<<\n");
+			goto out;
+		}
+		fprintf(stdout, "  PASS: n_partition_entries fixed to %d\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+		// Check 2: CRC should be correct for the new n_partition_entries
+		nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * verify_gpt.header.size_of_partition_entry;
+		expected_crc = crc32_seedless(verify_gpt.entries, nbytes);
+
+		fprintf(stdout, "  CRC check: Stored=0x%08x, Expected=0x%08x\n",
+				verify_gpt.header.partition_entry_array_crc32, expected_crc);
+
+		if (verify_gpt.header.partition_entry_array_crc32 != expected_crc) {
+			fprintf(stderr, "FAIL: CRC mismatch after upgrade!\n");
+			fprintf(stdout, "\n>>> SELF-TEST 6: FAILED (CRC mismatch) <<<\n");
+			goto out;
+		}
+		fprintf(stdout, "  PASS: CRC is correct for n_partition_entries=%d\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+		fprintf(stdout, "\n  GPT upgrade verified: n_partition_entries fixed from %d to %d!\n",
+				wrong_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		fprintf(stdout, "\n>>> SELF-TEST 6: PASSED <<<\n");
+	}
+
 	// ===== SUMMARY =====
 	fprintf(stdout, "\n");
 	fprintf(stdout, "============================================================\n");
-	fprintf(stdout, "ALL SELF-TESTS PASSED (5/5)\n");
+	fprintf(stdout, "ALL SELF-TESTS PASSED (6/6)\n");
 	fprintf(stdout, "============================================================\n");
 
 	rv = 0;
@@ -965,6 +1243,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -i, --check-excelero        Check if EXCELERO_METADATA partition exists\n");
 	fprintf(stdout, "  -f, --fix-gpt               Fix GPT from alternate copy (and display)\n");
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
+	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
 
 	fprintf(stdout, "Display Options:\n");
@@ -999,13 +1278,14 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"print-mbr",				no_argument,		0,	'm'},
 		{"fix-gpt",					no_argument,		0,	'f'},
 		{"fix-mbr",					no_argument,		0,	'F'},
+		{"upgrade-gpt",				no_argument,		0,	'U'},
 		{"gpt-copy",				required_argument,	0,	'c'},
 		{"filter-uuid",				required_argument,	0,	'u'},
 		{"filter-lba",				required_argument,	0,	'l'},
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:imfF";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:imfFU";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1176,6 +1456,16 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			}
 			config->action = ACTION_CHECK_EXCELERO;
 			fprintf(stdout, "Action: Check for EXCELERO_METADATA partition\n");
+			break;
+		case 'U':
+			if (config->action != ACTION_DISPLAY_GPT) {
+				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				rv = -1;
+				goto out;
+			}
+			config->action = ACTION_UPGRADE_GPT;
+			fprintf(stdout, "Action: Fix n_partition_entries to %d and recalculate CRC\n",
+					LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 			break;
 		case 'c':
 			nvmeibt_strlcpy(config->gpt_copy_option, optarg, sizeof(config->gpt_copy_option));
@@ -1370,6 +1660,172 @@ static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 }
 
 /**
+ * Check if GPT needs upgrade (n_partition_entries != 8192 or CRC calculated incorrectly)
+ * Returns: 1 if upgrade needed, 0 if already correct, -1 on error
+ */
+static int check_gpt_needs_upgrade(const struct nvmeibt_disk_gpt *gpt, const char *gpt_name)
+{
+	uint32_t	correct_crc;
+	uint32_t	buggy_crc;
+	int			nbytes_correct;
+	int			nbytes_buggy;
+
+	// Check if n_partition_entries needs to be fixed to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192)
+	if (gpt->header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
+		fprintf(stdout, "%s GPT: n_partition_entries=%d (needs upgrade to %d)\n",
+				gpt_name, gpt->header.n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+		// Check CRC status for additional info
+		nbytes_correct = gpt->header.n_partition_entries * gpt->header.size_of_partition_entry;
+		correct_crc = crc32_seedless(gpt->entries, nbytes_correct);
+		nbytes_buggy = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt->header.size_of_partition_entry;
+		buggy_crc = crc32_seedless(gpt->entries, nbytes_buggy);
+
+		if (gpt->header.partition_entry_array_crc32 == buggy_crc) {
+			fprintf(stdout, "  CRC was calculated with %d entries (buggy)\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		} else if (gpt->header.partition_entry_array_crc32 == correct_crc) {
+			fprintf(stdout, "  CRC matches n_partition_entries=%d\n", gpt->header.n_partition_entries);
+		} else {
+			fprintf(stdout, "  CRC mismatch (stored=0x%08x, expected=0x%08x)\n",
+					gpt->header.partition_entry_array_crc32, correct_crc);
+		}
+		return 1;
+	}
+
+	// n_partition_entries is already 8192, check if CRC is correct
+	nbytes_correct = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt->header.size_of_partition_entry;
+	correct_crc = crc32_seedless(gpt->entries, nbytes_correct);
+
+	if (gpt->header.partition_entry_array_crc32 == correct_crc) {
+		fprintf(stdout, "%s GPT: Already correct (n_partition_entries=%d, CRC=0x%08x)\n",
+				gpt_name, LARGE_GPT_MAX_NUM_GPT_ENTRIES, correct_crc);
+		return 0;
+	}
+
+	// n_partition_entries is 8192 but CRC doesn't match - this is an error
+	fprintf(stderr, "%s GPT: CRC mismatch (n_partition_entries=%d but CRC invalid)\n",
+			gpt_name, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+	fprintf(stdout, "  Stored CRC=0x%08x, Expected CRC=0x%08x\n",
+			gpt->header.partition_entry_array_crc32, correct_crc);
+	return -1;
+}
+
+/**
+ * Upgrade GPT in place: fix n_partition_entries to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192) and recalculate CRC
+ * Uses TOMA API nvmeibt_disk_metadata_store_gpt which internally calls update_gpt_crcs()
+ * to recalculate CRCs correctly using n_partition_entries (UEFI-compliant)
+ */
+static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt)
+{
+	int old_n_partition_entries = gpt->header.n_partition_entries;
+
+	// Fix n_partition_entries to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192)
+	gpt->header.n_partition_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+	fprintf(stdout, "  Setting n_partition_entries: %d -> %d\n",
+			old_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+	fprintf(stdout, "  Writing GPT via TOMA API (CRC recalculated correctly)...\n");
+	if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, pblk_size, gpt, false) < 0) {
+		fprintf(stderr, "Error: Failed to write GPT with upgraded CRC\n");
+		return -1;
+	}
+	return 0;
+}
+
+/**
+ * Phase 3: Execute UPGRADE_GPT action
+ * Fixes n_partition_entries to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192) and recalculates CRC
+ */
+static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
+{
+	int										rv = -1;
+	struct nvmeibt_disk_gpt					main_gpt;
+	struct nvmeibt_disk_gpt					metadata_gpt;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_entry;
+	int										main_needs_upgrade = 0;
+	int										metadata_needs_upgrade = 0;
+	int										check_result;
+
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+
+	fprintf(stdout, "\n=== GPT Upgrade Check (n_partition_entries -> %d) ===\n\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+	// Step 1: Read Main GPT (with backward compatibility validation)
+	fprintf(stdout, "Reading Main GPT...\n");
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &main_gpt,
+										  config->pba_s, config->pba_hw_e, false) < 0) {
+		fprintf(stderr, "Error: Failed to read Main GPT. GPT may be corrupted.\n");
+		fprintf(stderr, "       Use --fix-gpt first to recover from alternate copy.\n");
+		goto out;
+	}
+	fprintf(stdout, "Main GPT read successfully (n_partition_entries=%d, max_n_entries=%d)\n",
+			main_gpt.header.n_partition_entries, main_gpt.max_n_entries);
+
+	// Step 2: Check if Main GPT needs upgrade
+	check_result = check_gpt_needs_upgrade(&main_gpt, "Main");
+	if (check_result < 0) {
+		goto out;
+	}
+	main_needs_upgrade = check_result;
+
+	// Step 3: Check for Metadata GPT
+	metadata_entry = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+	if (metadata_entry) {
+		fprintf(stdout, "\nReading Metadata GPT...\n");
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &metadata_gpt,
+											  metadata_entry->pba_s, metadata_entry->pba_e, false) < 0) {
+			fprintf(stderr, "Warning: Failed to read Metadata GPT. Skipping metadata upgrade.\n");
+		} else {
+			fprintf(stdout, "Metadata GPT read successfully (n_partition_entries=%d, max_n_entries=%d)\n",
+					metadata_gpt.header.n_partition_entries, metadata_gpt.max_n_entries);
+
+			check_result = check_gpt_needs_upgrade(&metadata_gpt, "Metadata");
+			if (check_result >= 0) {
+				metadata_needs_upgrade = check_result;
+			}
+		}
+	} else {
+		fprintf(stdout, "\nNo Metadata GPT found (non-NVMesh disk or no excelero_metadata partition)\n");
+	}
+
+	// Step 4: Perform upgrades if needed
+	fprintf(stdout, "\n=== GPT Upgrade Summary ===\n");
+	if (!main_needs_upgrade && !metadata_needs_upgrade) {
+		fprintf(stdout, "No upgrades needed. All GPTs already have n_partition_entries=%d.\n",
+				LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		rv = 0;
+		goto out;
+	}
+
+	if (main_needs_upgrade) {
+		fprintf(stdout, "Upgrading Main GPT...\n");
+		if (upgrade_gpt_in_place(disk_fd, config->pblk_size, &main_gpt) < 0) {
+			fprintf(stderr, "Error: Failed to write Main GPT\n");
+			goto out;
+		}
+		fprintf(stdout, "Main GPT upgraded successfully.\n");
+	}
+
+	if (metadata_needs_upgrade && metadata_entry) {
+		fprintf(stdout, "Upgrading Metadata GPT...\n");
+		if (upgrade_gpt_in_place(disk_fd, config->pblk_size, &metadata_gpt) < 0) {
+			fprintf(stderr, "Error: Failed to write Metadata GPT\n");
+			goto out;
+		}
+		fprintf(stdout, "Metadata GPT upgraded successfully.\n");
+	}
+
+	fprintf(stdout, "\n=== GPT Upgrade Complete ===\n");
+	rv = 0;
+
+out:
+	return rv;
+}
+
+/**
  * Phase 3: Execute DISPLAY_GPT action
  */
 static int execute_display_gpt(int disk_fd, struct gpt_util_config *config)
@@ -1442,6 +1898,10 @@ static int run_gpt_util_op(int argc, char *argv[])
 
 	case ACTION_CHECK_EXCELERO:
 		rv = execute_check_excelero(disk_fd, &config);
+		break;
+
+	case ACTION_UPGRADE_GPT:
+		rv = execute_upgrade_gpt(disk_fd, &config);
 		break;
 
 	default:
