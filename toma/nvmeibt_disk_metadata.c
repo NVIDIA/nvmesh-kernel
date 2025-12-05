@@ -515,6 +515,7 @@ void nvmeibt_disk_metadata_print_all_gpt_entries(const struct nvmeibt_disk_gpt_p
 static void update_gpt_crcs(struct nvmeibt_disk_gpt *gpt)
 {
 	// First calculate the partition entries CRC.
+	// TODO: CRC should be calculated on n_partition_entries, not max_n_entries. However, old code incorrectly set n_partition_entries to 128 instead of the correct LARGE_GPT_MAX_NUM_GPT_ENTRIES, so we keep using max_n_entries for now. Once all nodes and disks are upgraded, we can fix this.
 	gpt->header.partition_entry_array_crc32 = crc32_seedless(gpt->entries, gpt->max_n_entries * gpt->header.size_of_partition_entry);
 	// Now set the header crc to be 0.
 	gpt->header.header_crc32 = 0;
@@ -558,11 +559,14 @@ static BOOL is_gpt_entries_crc_OK(const struct nvmeibt_disk_gpt_partition_entry 
 	int			nbytes;
 	uint32_t	upgrade_calculated_crc;
 
+	// TODO: CRC should be calculated on n_partition_entries, not max_n_entries. However, old code incorrectly set n_partition_entries to 128 instead of the correct LARGE_GPT_MAX_NUM_GPT_ENTRIES, so we keep using max_n_entries for now. Once all nodes and disks are upgraded, we can fix this.
 	nbytes = (gpt->max_n_entries * gpt_header->size_of_partition_entry);
 	NTOMA_ASSERT(85hs7h4, nbytes <= (int)allocated_n_bytes_entries, "CRC is calculated on @INT > @SIZE_T bytes. More than allocated", nbytes, allocated_n_bytes_entries);
 
 	calculated_crc = crc32_seedless(gpt_entries, nbytes);
 	result = (gpt_header->partition_entry_array_crc32 == calculated_crc);
+
+	// Backward compatibility check 1: 128-entry GPT upgrade (v1.3)
 	if (!result && gpt->max_n_entries == LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
 		// check if this is an upgrade from a 128-entry GPT (v1.3)
 		nbytes = (128 * gpt_header->size_of_partition_entry);
@@ -570,12 +574,20 @@ static BOOL is_gpt_entries_crc_OK(const struct nvmeibt_disk_gpt_partition_entry 
 		upgrade_calculated_crc = crc32_seedless(gpt_entries, nbytes);
 		if (gpt_header->partition_entry_array_crc32 == upgrade_calculated_crc) {
 			N_Tf(trace_disk_metadata_check_gpt_entries_crc,
-				 "@STR-@STR-GPT on @STR upgrade detected via CRC check. max_n_entries reset to 128",
+				 "@STR-@STR-GPT on @STR upgrade from 128-entry GPT detected via CRC check. max_n_entries reset to 128",
 				 gpt->main_or_metadata, gpt_primary_or_alternate_or_mem_str,
 				 gpt->ldisk_id.str);
 			gpt->max_n_entries = 128;
 			result = true;
 		}
+	}
+
+	// Backward compatibility check 2: buggy n_partition_entries in gpt header; should be max_n_entries
+	if (gpt->max_n_entries == LARGE_GPT_MAX_NUM_GPT_ENTRIES && gpt_header->n_partition_entries != gpt->max_n_entries) {
+		N_Wf(trace_disk_metadata_buggy_n_partition_entries_detected,
+				"@STR-@STR-GPT on @STR has n_partition_entries=@INT instead of max_n_entries=@INT. This may fail external tools. Consider updating n_partition_entries via `nvmeibt_toma gpt_util --upgrade-gpt`.",
+				gpt->main_or_metadata, gpt_primary_or_alternate_or_mem_str,
+				gpt->ldisk_id.str, gpt_header->n_partition_entries, gpt->max_n_entries);
 	}
 
 	if (!result) {
