@@ -252,43 +252,46 @@ void handle_client_disconnect_event(const struct nvmeibs_msg_s2t_client_disconne
 
 void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 {
-	struct nvmeibt_client		*client;
-	int							n_local_disk;
+	struct nvmeibt_client			*client;
+	struct nvmeibt_registrant_ctx	*reg_ctx;
+	struct nvmeibt_registrant_ctx	*longing_reg_ctx;
+	struct nvmeibt_local_disk		*local_disk;
+	struct nvmeibt_seg_active		*seg_active;
+	bool							is_found = 0;
 
 	NFIN;
-	N_Tf(trace_client_handle_subscriber_event, "cid=@CID handle=@HANDLE host_name=@HOSTNAME disk=@STR",
-			msg->cid,
-			msg->toma_conn_proc_handle,
-			msg->host_name,
-			msg->disk_name);
+	N_Tf(trace_client_handle_subscriber_event, "cid=@CID handle=@HANDLE host_name=@HOSTNAME disk=@STR is_subscribe=@BOOL",
+		 msg->cid, msg->toma_conn_proc_handle, msg->host_name, msg->disk_name, msg->is_subscribe);
 
 	if (msg->is_subscribe) {
-		client = nvmeibt_client_add(msg);		// 25.06.2019 - This function is a preliminary code, not 100% implemented, not well debugged
+		client = nvmeibt_client_add(msg);
 		if (client) {
 			client->is_connected = 1;
 			client->is_delete_in_the_air = 0;
 		}
 	} else {
-		// handle_client_remove(msg->cid);
-		struct nvmeibt_registrant_ctx	tmp_reg_ctx;
-		struct nvmeibt_local_disk		*local_disk;
-		struct nvmeibt_seg_active		*seg_active;
-
-		memset(&tmp_reg_ctx, 0, sizeof(tmp_reg_ctx));
-		tmp_reg_ctx.client_messaging_handle = msg->toma_conn_proc_handle;
-		tmp_reg_ctx.registrant_node = NULL;
-		tmp_reg_ctx.is_client_waiting_for_ack = 0;
 		local_disk = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, msg->disk_name);
 		if (local_disk) {
-			n_local_disk = nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
+			TODO(Once we have the seg_uuid, locate it in the local_disks hash of seg_actives);
 			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-				// TODO: need to get the segment UUID from the client somehow, and use a hash-table to go
-				// directly to that segment. For now, we're doing a simple search on all segments.
-				tmp_reg_ctx.seg_active = seg_active;
-				// implicitly unregister the registrant and remove it from longing registrants list
-				nvmeibt_register_remove_unsubscribed_registrant(&tmp_reg_ctx);
-				if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
-					N_Tf(fst6645, "Local disk removed");
+				// The HANDLE is unique (handle per subscribe).
+				// FYI, The same CID is used also for other segs on this disk (with a different client_messaging_handle)
+				// We might have two+ active handles from the same client (say recoverer + encrypt + attach). same CID different handles
+				reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_hash_by_cid, client_messaging_handle_to_cid(msg->toma_conn_proc_handle));
+				longing_reg_ctx = nvmeib_hash_search_uint32_t(seg_active->longing_registrants_hash_by_cid, client_messaging_handle_to_cid(msg->toma_conn_proc_handle));
+				if (!reg_ctx && !longing_reg_ctx) {
+					continue;
+				}
+				if (longing_reg_ctx && (longing_reg_ctx->client_messaging_handle == msg->toma_conn_proc_handle)) {
+					remove_longing_registrant_on_seg_by_ctx(longing_reg_ctx);
+					is_found = 1;
+				}
+				if (reg_ctx && (reg_ctx->client_messaging_handle == msg->toma_conn_proc_handle)) {
+					// Found the right seg for this client_messaging_handle, remove all traces of the reg_ctx
+					nvmeibt_register_remove_unsubscribed_registrant(reg_ctx);
+					is_found = 1;
+				}
+				if (is_found) {
 					break;
 				}
 			}
