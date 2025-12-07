@@ -530,7 +530,7 @@ class PhaseStatus(Enum):
     VALID = "VALID"
     INCOMPLETE = "INCOMPLETE"
     EMPTY = "EMPTY"
-    INVALID = "INVALID"  # for logical contradictions
+    INVALID = "INVALID"  # for logical contradictions and composite status
 
 class BasePhase(ABC):
     """
@@ -784,19 +784,29 @@ class CompositePhase(BasePhase):
 
     def finalize(self):
         """
-        Recursive finalization.
+        Recursive finalization with strict child validation.
         1. Finalize all children.
         2. Calculate aggregates (children duration sum).
-        3. Calculate own interval/duration.
-        4. Calculate self_time (Own - Children).
+        3. Calculate self_time (Own - Children).
+        4. Composite Validation
         """
         children_duration_sum = 0
+        has_invalid_child = False
+        invalid_child_reason = None
 
         # 1. Finalize Children first
         for child in self.children.values():
             child.finalize()
+
             if child.status == PhaseStatus.VALID:
                 children_duration_sum += child._final_duration
+            else:
+                # strict validation: capture the first child that isn't VALID
+                # This covers EMPTY, INCOMPLETE, and INVALID states.
+                has_invalid_child = True
+                if not invalid_child_reason:
+                    invalid_child_reason = f"Child '{child.name}' is {child.status.value}"
+                    logger.error(f"[{self.name}] failure detected: {invalid_child_reason}")
 
         # 2. Finalize Self (Calculate Interval & Duration)
         # This calls BasePhase.finalize() logic to freeze _final_duration
@@ -808,13 +818,13 @@ class CompositePhase(BasePhase):
         else:
             self._self_time_ms = 0
 
-        # 4. Composite Validation (Optional)
-        # Example: If I have children but I am incomplete, that's weird.
-        if self.children and self.status == PhaseStatus.EMPTY:
-            # This might happen if children found data but parent didn't find its own start/end
-            # We might want to auto-expand interval here?
-            # For now, just leave as is.
-            pass
+        # 4. Composite Validation - propagate invalidity
+        # If any child failed (is not VALID), the parent must also be INVALID.
+        if has_invalid_child:
+            # Downgrade status to INVALID (unless we were already INVALID/EMPTY?)
+            # Actually, INVALID takes precedence over everything.
+            self.status = PhaseStatus.INVALID
+            self.warnings.append(f"Marked INVALID because: {invalid_child_reason}")
 
     def print_report(self, level: int = 0):
         """
@@ -1226,8 +1236,8 @@ class DynamicVolumesPhase(ContainerPhase):
 
             # Optional: If you prefer the report to show "0 ms" instead of "N/A",
             # you can force the status to VALID here.
-            # For now, we leave it as EMPTY (N/A) but with the better warning.
-            self.status = PhaseStatus.VALID
+            # For now, we leave it as EMPTY (N/A) but with the warning.
+            # self.status = PhaseStatus.VALID
 #
 class VolumesDetachPhase(DynamicVolumesPhase):
     """
@@ -1475,8 +1485,7 @@ class NDUPhase(CompositePhase):
         3. Finalize IO.
         4. Compute Grand Total.
         """
-        # 1. Finalize Services (children)
-        # This calculates timestamps for Client Stop, Start, etc.
+        # 1. Finalize Services (children) - this might set status=INVALID via composite logic
         super().finalize()
 
         # 2. Locate Source Phases for Derivation
@@ -1508,7 +1517,8 @@ class NDUPhase(CompositePhase):
         self._final_duration = io_time if io_time > 0 else service_time
 
         # 6. Set Status
-        if service_time > 0 or io_time > 0:
+        # Only set to VALID if we aren't already INVALID from step 1
+        if (service_time > 0 or io_time > 0) and self.status != PhaseStatus.INVALID:
             self.status = PhaseStatus.VALID
 
         # Topological Validation (Split-Brain Protection)
@@ -1533,8 +1543,6 @@ class NDUPhase(CompositePhase):
             print("=" * 30 + "\n")
             for warning in self.warnings:
                 print(f"!! CRITICAL FAILURE: {warning} !!")
-            print("\n(Report suppressed due to logical errors)")
-            return  # <--- Stop printing here
 
         print("\n" + "=" * 30)
         print("  NVMesh NDU Analysis Report")
@@ -1961,36 +1969,42 @@ def main():
     # Calculate all intervals, durations, and validations once.
     ndu_analysis.finalize()
 
-    # 1. Critical Logic Check (Always Enforced)
+    # --- Determine Exit Code ---
+    exit_code = 0
+
+    # 1. Critical Failure (Logical Contradictions)
     # If the analysis found logical contradictions (e.g. Start before Stop),
     # we must fail immediately, regardless of strict mode.
     if ndu_analysis.status == PhaseStatus.INVALID:
         logger.error("Analysis failed due to critical logical errors.")
-        ndu_analysis.print_report(verbose=args.verbose)  # This prints the "CRITICAL FAILURE" msg
-        sys.exit(1)
-
+        exit_code = 1
     # 2. strict policy check - fail if warnings exist unless user asked for --non-strict
-    if not args.non_strict and ndu_analysis.has_warnings:
-        logger.error("Analysis failed validation checks:")
-        # We can temporarily reuse print_report to show the warnings,
-        # or write a specific print_warnings method.
-        ndu_analysis.print_report()
-        sys.exit(1)
+    elif ndu_analysis.has_warnings:
+        logger.error("Analysis failed validation checks.")
+        # strict mode (default): exit 1
+        # non-strict mode: keep exit 0 (allow pass)
+        if not args.non_strict:
+            exit_code = 1
 
     # --- Reporting Phase ---
+    # Generate trace if requested
     if args.trace:
         trace_data = ndu_analysis.generate_chrome_trace()
         with open(args.trace, 'w') as f:
             json.dump(trace_data, f)
         logger.info(f"Trace exported to {args.trace}. Load this in ui.perfetto.dev")
 
+    # Output Main Report (JSON or Text)
     if args.json:
+        # JSON output includes status and warnings fields, so it is complete.
         print(json.dumps(ndu_analysis.to_dict(), indent=2))
-        # If JSON is requested, we might want to skip the text report or print it to stderr
-        return
+    else:
+        # Text output
+        ndu_analysis.print_report(verbose=args.verbose)
 
-    # Now we just call print on the object itself.
-    ndu_analysis.print_report()
+    # --- Exit ---
+    if exit_code != 0:
+        sys.exit(exit_code)
 
 if __name__ == "__main__":
     # DO NOT set a default basicConfig here.
