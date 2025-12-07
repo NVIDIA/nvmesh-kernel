@@ -770,7 +770,8 @@ enum intr_shaper_intr_type {
 	INTR_SHAPER_INTR_TYPE_SERVER_SCQ = 3,
 	INTR_SHAPER_INTR_TYPE_SERVER_RCQ = 4,
 	INTR_SHAPER_INTR_TYPE_SERVER_NVME = 5,
-	MAX_INTR_SHAPER_INTR_TYPE = 6,
+	INTR_SHAPER_INTR_TYPE_DEV_CQ = 6,
+	MAX_INTR_SHAPER_INTR_TYPE = 7,
 };
 
 inline static const char *intr_shaper_intr_type_to_str(enum intr_shaper_intr_type type, bool lower_case)
@@ -782,6 +783,7 @@ inline static const char *intr_shaper_intr_type_to_str(enum intr_shaper_intr_typ
 	case INTR_SHAPER_INTR_TYPE_SERVER_SCQ: return lower_case ? "server_scq" : "SERVER_SCQ";
 	case INTR_SHAPER_INTR_TYPE_SERVER_RCQ: return lower_case ? "server_rcq" : "SERVER_RCQ";
 	case INTR_SHAPER_INTR_TYPE_SERVER_NVME: return lower_case ? "server_nvme" : "SERVER_NVME";
+	case INTR_SHAPER_INTR_TYPE_DEV_CQ: return lower_case ? "dev_cq" : "DEV_CQ";
 	default: return lower_case ? "unknown" : "UNKNOWN";
 	}
 }

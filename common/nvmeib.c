@@ -95,7 +95,7 @@ MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "Time window (us) to keep polling 
 #define NVMEIB_INT_SHAPER_PROC_NAME "intr_shaper.json"
 #define NVMEIB_FRAME_SIZE_USECS (1000)
 #define NVMEIB_MAX_BURST (64)
-#define NVMEIB_MAX_IRQ_TIME_USECS (500)
+#define NVMEIB_MAX_IRQ_TIME_USECS (2000)
 #define NVMEIB_MAX_COMP_INTR_PCT_CPU (20)
 
 
@@ -334,6 +334,7 @@ unsigned nvmeib_pcpu_cq_user_poll_budget = USER_POLL_BUDGET;
 module_param_named(pcpu_cq_user_poll_budget, nvmeib_pcpu_cq_user_poll_budget, uint, 0644);
 MODULE_PARM_DESC(pcpu_cq_user_poll_budget, "percpu cqs user-mode polling budget");
 
+/* Deprecated by intr-shaper - use NVMEIB_MAX_IRQ_TIME_USECS instead */
 #define CQ_INTR_PROCESS_MAX_TIME msecs_to_jiffies(2)
 #define CQ_INTR_PROCESS_MAX_RESTART 10
 
@@ -425,6 +426,9 @@ struct nvmeib_dev_cq {
 	u64 n_user_poll_arm;
 	u64 n_user_poll_wd;
 	u64 n_slow_poll_disable;
+	u64 n_wakeups_burst;
+	u64 n_wakeups_cycles;
+	u64 n_wakeups_irq_time;
 
 
 	/* manage cq's qps */
@@ -727,7 +731,7 @@ int nvmeib_dev_cq_stat(
 		//Add num comps in softirq
 		//Add duration of ipoller sched-out vs. poll-handler
 
-		BUF_ADD("%03d@%-*s| %*d | %*d | %*d | %*d | %*d | %*d | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu",
+		BUF_ADD("%03d@%-*s| %*d | %*d | %*d | %*d | %*d | %*d | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu | %*llu",
 				i, 12 ,s,
 				SCQ_STATS_PAD_BLANKS_LEN_INT, cq->intr,
 				SCQ_STATS_PAD_BLANKS_LEN_INT, nvmeib_pcpu_cq_all_cpus ? cq->cpu_id_sched : cq->cpu_id,
@@ -753,7 +757,10 @@ int nvmeib_dev_cq_stat(
 				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_prev_comps_user,
 				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_user_poll_arm,
 				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_user_poll_wd,
-				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_slow_poll_disable
+				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_slow_poll_disable,
+				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_wakeups_burst,
+				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_wakeups_cycles,
+				SCQ_STATS_PAD_BLANKS_LEN_LLU, cq->n_wakeups_irq_time
 			);
 
 		for (j = ct_base + 1; j < ct_other; j++)
@@ -1376,6 +1383,7 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 	struct nvmeib_dev_cq *cq = container_of(nviop, struct nvmeib_dev_cq, iop);
 	int completed;
 	bool poll_linger = false;
+	u64 start_ns, busy_ns;
 	
 	nviop->poll_linger = false;
 	
@@ -1390,7 +1398,9 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 		iop->weight = weight; //SCQ-TODO: move this to nvmeib_public_intr_poll_modify
 		budget = iop->weight; //update before using so it is in sync with caller's complementary cond
 	}
+	start_ns = nvmeib_public_local_clock();
 	completed = process_cq(cq, budget);
+	busy_ns = nvmeib_public_local_clock() - start_ns;
 	if (completed)
 		nviop->last_nonempty_comp_jif = jiffies;
 	cq->n_comps_poll += completed;
@@ -1421,7 +1431,7 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 
 	if (poll_linger) {
 		nviop->poll_linger = true;
-	} else if (!completed || (completed < budget && cq->budget_intr > 0)) {
+	} else if (!completed || (!nvmeib_intr_shaper_should_continue_polling(nvmeib_intr_shaper, completed, busy_ns) && cq->budget_intr > 0)) {
 		/* cq is not busy, try to switch back to interrupt-mode */
 		__poll_complete(&cq->iop);
 		rearm_or_resched(cq, NVMEIB_DEV_CQ_POLL_MODE);
@@ -1565,13 +1575,14 @@ static void cq_completion_intr(struct ib_cq *cq, void *v)
 #ifdef CQ_POLL_INTR
 	struct nvmeib_dev_cq *cqw = v;
 #	if defined(IO_POLL_THREAD) && IO_POLL_THREAD
-	unsigned long end = jiffies + CQ_INTR_PROCESS_MAX_TIME;
 	int max_restart = CQ_INTR_PROCESS_MAX_RESTART;
 	int completed;
 	bool cq_not_empty;
 	int budget;
+	enum nvmeib_intr_shaper_calc_ret wake_up_reason = NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP;
 	unsigned long flags;
 
+	nvmeib_intr_shaper_intr_enter(nvmeib_intr_shaper, INTR_SHAPER_INTR_TYPE_DEV_CQ);
 	nvmeib_completion_noise_start(NVMEIB_NOISE_INTERRUPT);
 
 	++cqw->n_intrs;
@@ -1650,10 +1661,11 @@ static void cq_completion_intr(struct ib_cq *cq, void *v)
 restart:
 
 	cqw->budget_intr = budget = nvmeib_pcpu_cq_intr_budget;
-	if (budget) {
+	if (budget && !nvmeib_intr_shaper_intr_should_wake_up_reason(nvmeib_intr_shaper, &wake_up_reason)) {
 		completed = ib_poll_handler_intr(&cqw->iop, budget);
+		nvmeib_intr_shaper_intr_polled(nvmeib_intr_shaper, completed);
 		while ((cq_not_empty = (completed >= budget)) &&
-			time_before(jiffies, end) &&
+			!nvmeib_intr_shaper_intr_should_wake_up_reason(nvmeib_intr_shaper, &wake_up_reason) &&
 			--max_restart)
 			goto restart;
 	} else {
@@ -1668,6 +1680,20 @@ restart:
 		*/
 
 		cq_lock(cqw, flags);
+		switch (wake_up_reason) {
+		case NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST:
+			cqw->n_wakeups_burst++;
+			break;
+		case NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME:
+			cqw->n_wakeups_irq_time++;
+			break;
+		case NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES:
+			cqw->n_wakeups_cycles++;
+			break;
+		default:
+			BUG_ON(max_restart > 0);
+			break;
+		}
 		if (cqw->poll_mode == NVMEIB_DEV_CQ_POLL_DISABLED) {
 			cqw->n_rearm_fail++;
 			cq_unlock(cqw, flags);
@@ -1702,6 +1728,7 @@ restart:
 
 out:
 	nvmeib_completion_noise_end(NVMEIB_NOISE_INTERRUPT, NULL, 0, NVMEIB_NOISE_CTRS_CQ_INTR);
+	nvmeib_intr_shaper_intr_exit(nvmeib_intr_shaper);
 }
 
 static void print_cq(struct nvmeib_dev_cq *cq, int ii)
