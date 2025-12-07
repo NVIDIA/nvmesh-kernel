@@ -533,6 +533,32 @@ class BasePhase(ABC):
         """
         return bool(self._start and self._end)
 
+    def set_start(self, ts: datetime, overwrite: bool = False):
+        """
+        Strict setter for Start Timestamp.
+        Raises RuntimeError if attempting to overwrite an existing value,
+        unless overwrite=True is passed.
+        """
+        if self._start is not None and not overwrite:
+            self_start_str = self._start.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            raise RuntimeError(f"[{self.name}] start timestamp overwrite! Old: {self_start_str}, New: {ts_str}")
+
+        self._start = ts
+
+    def set_end(self, ts: datetime, overwrite: bool = False):
+        """
+        Strict setter for End Timestamp.
+        Raises RuntimeError if attempting to overwrite an existing value,
+        unless overwrite=True is passed.
+        """
+        if self._end is not None and not overwrite:
+            self_end_str = self._end.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            raise RuntimeError(f"[{self.name}] end timestamp overwrite! Old: {self_end_str}, New: {ts_str}")
+        
+        self._end = ts
+
     @property
     def interval(self) -> Optional[TimeInterval]:
         """
@@ -830,13 +856,13 @@ class SimpleSystemdPhase(CompositePhase):
                entry.unit == self.service_name and \
                entry.message:
 
-                if not self._start and entry.message.startswith(self.start_msg_prefix):
+                if entry.message.startswith(self.start_msg_prefix):
                     if self.debug: logger.debug(f"[{self.name}]: Matched start log: {entry.message.strip()}")
-                    self._start = entry.timestamp
+                    self.set_start(entry.timestamp)
                     consumed_by_self = True
-                elif not self._end and entry.message.startswith(self.end_msg_prefix):
+                elif entry.message.startswith(self.end_msg_prefix):
                     if self.debug: logger.debug(f"[{self.name}]: Matched stop log: {entry.message.strip()}")
-                    self._end = entry.timestamp
+                    self.set_end(entry.timestamp)
                     consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
@@ -919,12 +945,12 @@ class ShutdownPhase(CompositePhase):
         consumed_by_child = super().process_entry(entry)
         consumed_by_self = False
         msg = entry.message
-        if isinstance(entry, JournalCTLLogEntry) and entry.syslog_id == 'nvmeshclient' and msg and "NDU" in msg:
-            if not self._start and "client shutdown script invoked" in msg:
-                self._start = entry.timestamp
+        if isinstance(entry, JournalCTLLogEntry) and entry.syslog_id == 'nvmeshclient' and msg:
+            if "client shutdown script invoked" in msg:
+                self.set_start(entry.timestamp)
                 consumed_by_self = True
-            if not self._end and "client shutdown script done" in msg:
-                self._end = entry.timestamp
+            if "client shutdown script done" in msg:
+                self.set_end(entry.timestamp)
                 consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
@@ -944,12 +970,12 @@ class ModulesUnLoadPhase(BasePhase):
             return False
         msg = entry.message
         # Look for the log lines from the nvmeshclient script
-        if entry.syslog_id == 'nvmeshclient' and msg and "NDU" in msg:
-            if not self._start and "Starting to unload modules" in msg:
-                self._start = entry.timestamp
+        if entry.syslog_id == 'nvmeshclient' and msg:
+            if "Starting to unload modules" in msg:
+                self.set_start(entry.timestamp)
                 return True
-            elif not self._end and "Done unloading modules" in msg:
-                self._end = entry.timestamp
+            elif "Done unloading modules" in msg:
+                self.set_end(entry.timestamp)
                 return True
         return False
 
@@ -975,8 +1001,8 @@ class ModulesLoadPreClientInitPhase(BasePhase):
         # Start ($t1): "Starting to load modules"
         if isinstance(entry, JournalCTLLogEntry) and \
                 entry.syslog_id == 'nvmeshclient' and entry.message:
-            if not self._start and "Starting to load modules" in entry.message:
-                self._start = entry.timestamp
+            if "Starting to load modules" in entry.message:
+                self.set_start(entry.timestamp)
                 return True
 
         # End ($t2): State 0->0 (Entering INITIALIZING)
@@ -984,8 +1010,8 @@ class ModulesLoadPreClientInitPhase(BasePhase):
             # Logic: module state=0->state=0
             target_state = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_INITIALIZING}"
 
-            if not self._end and "MODULE_STATE_CHANGE" in entry.message and target_state in entry.message:
-                self._end = entry.timestamp
+            if "MODULE_STATE_CHANGE" in entry.message and target_state in entry.message:
+                self.set_end(entry.timestamp)
                 return True
 
         return False
@@ -1007,13 +1033,13 @@ class ModulesLoadClientInitCorePhase(BasePhase):
             return False
 
         # Start Trigger
-        if not self._start and "client globals create (core) - start" in msg:
-            self._start = entry.timestamp
+        if "client globals create (core) - start" in msg:
+            self.set_start(entry.timestamp)
             return True
 
         # End Trigger
-        if not self._end and "client globals create (core) - done" in msg:
-            self._end = entry.timestamp
+        if "client globals create (core) - done" in msg:
+            self.set_end(entry.timestamp)
             return True
 
         return False
@@ -1048,14 +1074,14 @@ class ModulesLoadClientInitPhase(CompositePhase):
 
         # Start ($t2): State 0->0 (Entering INITIALIZING)
         start_signature = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_INITIALIZING}"
-        if not self._start and start_signature in msg:
-            self._start = entry.timestamp
+        if start_signature in msg:
+            self.set_start(entry.timestamp)
             consumed_by_self = True
 
         # End ($t3): State 0->1 (Transition to READY)
         end_signature = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_READY}"
-        if not self._end and end_signature in msg:
-            self._end = entry.timestamp
+        if end_signature in msg:
+            self.set_end(entry.timestamp)
             return True
 
         return consumed_by_self or consumed_by_child
@@ -1086,13 +1112,13 @@ class ModulesLoadPhase(CompositePhase):
             if entry.syslog_id == 'nvmeshclient' and entry.message:
 
                 # Parent Start ($t1) - Same as PreInit Start
-                if not self._start and "Starting to load modules" in entry.message:
-                    self._start = entry.timestamp
+                if "Starting to load modules" in entry.message:
+                    self.set_start(entry.timestamp)
                     consumed_by_self = True
 
                 # Parent End ("Done") - Happens after t3 (script cleanup)
-                elif not self._end and "Done loading modules" in entry.message:
-                    self._end = entry.timestamp
+                elif "Done loading modules" in entry.message:
+                    self.set_end(entry.timestamp)
                     consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
@@ -1122,14 +1148,14 @@ class VolumeDetachPhase(BasePhase):
 
         #logger.debug(f"[{self.name}]: observing msg {msg}")
         # 2. Logic
-        if not self._start and "Disabling I/O" in msg:
+        if "Disabling I/O" in msg:
             logger.debug(f"[{self.name}]: matched start - msg {msg}")
-            self._start = entry.timestamp
+            self.set_start(entry.timestamp)
             return True
 
-        if not self._end and ("Detach finished" in msg or "Detach failed" in msg):
+        if "Detach finished" in msg or "Detach failed" in msg:
             logger.debug(f"[{self.name}]: matched end - msg {msg}")
-            self._end = entry.timestamp
+            self.set_end(entry.timestamp)
             return True
 
         return False
@@ -1194,7 +1220,7 @@ class VolumesDetachPhase(DynamicVolumesPhase):
     def _create_volume_child(self, vol_name: str) -> BasePhase:
         return VolumeDetachPhase(vol_name, debug=self.debug)
 
-class VolumeAttachConf2Cont(BasePhase):
+class VolumeAttachConf2LastCont(BasePhase):
     """
     Child phase 1: From 'Attach finished' to the LAST 'CONT disk'.
     """
@@ -1215,20 +1241,20 @@ class VolumeAttachConf2Cont(BasePhase):
             return False
 
         # Start condition
-        if not self._start and "Attach finished" in msg:
-            self._start = entry.timestamp
+        if "Attach finished" in msg:
+            self.set_start(entry.timestamp)
             return True
 
         # End condition (Update repeatedly to find the *last* one)
         if "CONT disk" in msg:
-            self._end = entry.timestamp
+            self.set_end(entry.timestamp, overwrite=True)
             # We return True because we matched, but we rely on the parent
             # to keep feeding us so we can update _end if another CONT appears.
             return True
 
         return False
 
-class VolumeAttachCont2IOEnabled(BasePhase):
+class VolumeAttachLastCont2IOEnabled(BasePhase):
     """
     Child phase 2: From LAST 'CONT disk' to 'Enabling I/O'.
     """
@@ -1251,12 +1277,12 @@ class VolumeAttachCont2IOEnabled(BasePhase):
         # Start condition (Update repeatedly to match the *last* CONT disk)
         # This ensures this phase starts exactly where the previous one ended
         if "CONT disk" in msg:
-            self._start = entry.timestamp
+            self.set_start(entry.timestamp, overwrite=True)
             return True
 
         # End condition
-        if not self._end and "Enabling I/O" in msg:
-            self._end = entry.timestamp
+        if "Enabling I/O" in msg:
+            self.set_end(entry.timestamp)
             return True
 
         return False
@@ -1271,8 +1297,8 @@ class VolumeAttachPhase(ContainerPhase):
         super().__init__(vol_name, debug)
         self.vol_name = vol_name
         # Add the two specific children
-        self.add_child(VolumeAttachConf2Cont(vol_name, debug))
-        self.add_child(VolumeAttachCont2IOEnabled(vol_name, debug))
+        self.add_child(VolumeAttachConf2LastCont(vol_name, debug))
+        self.add_child(VolumeAttachLastCont2IOEnabled(vol_name, debug))
 
     @property
     def interval(self) -> Optional[TimeInterval]:
@@ -1803,6 +1829,14 @@ def process_log_stream(
             if stop_on_complete and ndu_analysis.is_complete:
                 logger.info("NDU complete. Stopping log processing.")
                 return True  # NDU is complete
+
+    except RuntimeError as e:
+        # handle the Strict Setter violation
+        msg = f"Fatal Analysis Error: {e}"
+        logger.error(msg)
+        ndu_analysis.warnings.append(msg)
+        ndu_analysis.status = PhaseStatus.INVALID
+        return True  # Stop processing this stream immediately
 
     except KeyboardInterrupt:
         logger.info("\nLog processing interrupted.")
