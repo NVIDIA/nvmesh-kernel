@@ -93,12 +93,10 @@ void disk_id_allocator_mark(struct disk_id_allocator_t* al, struct gendisk *disk
 
 #define __is_kernel_dev_err(bdev) 	((bdev == NULL) || IS_ERR(bdev))
 
-static int bdev_holder = 1;
-
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
 static struct file * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 {
-	struct file *f = bdev_file_open_by_path(path, mode, &bdev_holder, NULL);
+	struct file *f = bdev_file_open_by_path(path, mode, NULL /* holder */, NULL);
 	struct block_device *bdev = IS_ERR(f) ? (struct block_device *)f : file_bdev(f);
 	if (__is_kernel_dev_err(bdev)) {
 		_NT(t_gskvae_00, "path lookup for @STR found @PTR and it is@YES_NO_STATUS err, @YES_NO_STATUS null",
@@ -114,7 +112,7 @@ static struct file * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 // Note: This function does open() on our os.
 static struct bdev_handle * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 {
-	struct bdev_handle *bdh = bdev_open_by_path( path, mode, &bdev_holder, NULL);
+	struct bdev_handle *bdh = bdev_open_by_path( path, mode, NULL /* holder */, NULL);
 	struct block_device *bdev = IS_ERR(bdh) ? (struct block_device *)bdh : bdh->bdev;
 	if (__is_kernel_dev_err(bdev)) {
 		_NT(t_gskvae_00, "path lookup for @STR found @PTR and it is@YES_NO_STATUS err, @YES_NO_STATUS null",
@@ -125,6 +123,8 @@ static struct bdev_handle * __get_safe_kern_dev(const char *path, BLK_MODE_T mod
 }
 
 #else // KS_HAS_BDEV_OPEN_BY_PATH
+
+static int bdev_holder = 1;
 
 static struct block_device * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 {
