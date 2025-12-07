@@ -52,9 +52,7 @@ static bool is_RD_KAFKA_OFFSET_VALID(int64_t offset) {
 }
 
 /******************************************************************************/
-
-char *kafka_event_type_str(enum KAFKA_EVENT_TYPE event_type)
-{
+static char *kafka_event_type_str(enum KAFKA_EVENT_TYPE event_type) {
 	switch (event_type) {
 	case KAFKA_EVENT_TYPE_UNKNOWN: return "KAFKA_EVENT_TYPE_UNKNOWN";
 	case KAFKA_EVENT_TYPE_VOL_ADD: return "KAFKA_EVENT_TYPE_VOL_ADD";
@@ -176,7 +174,6 @@ static void __t_certificate_storage_print(const struct __t_certificate_storage *
 }
 
 /*************************           Globals          *************************/
-
 extern int64_t nvmeibt_follower_keep_alive_secs;
 extern int64_t nvmeibt_leader_keep_alive_secs;
 
@@ -245,9 +242,8 @@ int64_t nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt(void)
 {
 	return kafka_follower_keepalive_token_provided_by_mgmt;
 }
-static void kafka_set_follower_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval)
-{
-	N_Tf(kdiw5ma, "follower_keepalive_token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
+static void kafka_set_follower_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval) {
+	N_Tf(kdiw5ma, "token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
 		 kafka_follower_keepalive_token_provided_by_mgmt, new_token,
 		 nvmeibt_follower_keep_alive_secs, keepaliveInterval);
 	if ((new_token > kafka_follower_keepalive_token_provided_by_mgmt) ||
@@ -258,13 +254,12 @@ static void kafka_set_follower_keepalive_token_provided_by_mgmt(int64_t new_toke
 	}
 }
 
-int64_t nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(void)
-{
+int64_t nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(void) {	// Called from multiple threads
 	return kafka_leader_keepalive_token_provided_by_mgmt;
 }
-static void kafka_set_leader_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval)
-{
-	N_Tf(4vs8skl, "kafka_leader_keepalive_token_provided_by_mgmt=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX ",
+
+static void kafka_set_leader_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval) {
+	N_Tf(4vs8skl, "token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
 		 kafka_leader_keepalive_token_provided_by_mgmt, new_token, nvmeibt_leader_keep_alive_secs, keepaliveInterval);
 	kafka_leader_keepalive_token_provided_by_mgmt = max(kafka_leader_keepalive_token_provided_by_mgmt, new_token);
 	nvmeibt_leader_keep_alive_secs = keepaliveInterval;
@@ -959,9 +954,8 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		check_if_kafka_init_preserve_state_vars_required(k_msg->err);
 	}
 out:
-	if (k_msg) {
+	if (k_msg)
 		rd_kafka_message_destroy(k_msg);	// Done with this message
-	}
 	return rv;
 }
 
@@ -1015,9 +1009,7 @@ static int parse_name_and_uuid(struct mm_json_elem *root, struct name_and_uuid_p
 /******************************************************************************/
 /*********************             CMD_consumer           *********************/
 /******************************************************************************/
-
 atomic_t			CMD_consumer_n_msgs_awaiting_toma_processing;		// Ronen Hod: This is a simple criteria. Commit is not mandatory or urgent. It is used only on the next restart, and it is an optimization.
-
 struct keepAliveToken_params_ctx {
 	char			nodeID[64];
 	int64_t			zone_number;
@@ -1112,8 +1104,7 @@ struct generic_CMD_params_ctx {
 	char							native_nguid[32];
 };
 
-static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params)
-{
+static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
 	// Somewhat slopy. Parse all the commands parameters at once
 	int						i, j, k, l;
 	struct mm_json_kv_pair	*root_kv;
@@ -1377,11 +1368,10 @@ out:
 /******************************************************************************/
 // All the TOMAs consume from the same queue.
 // We do not really care that this is a queue, and we only consume the last message (config)
-
 static int64_t		HW_full_config_consumer_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
 static int64_t		HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
-static int64_t								HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
-static int64_t								HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
+static int64_t		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
+static int64_t		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
 
 static int HW_full_config_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".TOMA.hardwareConfiguration.1.0.0";
@@ -1493,8 +1483,6 @@ static int HW_full_config_consume(void) {
 /******************************************************************************/
 /***  incremental_VOL_updates_consumer (add/del VOLUME & updateLeaderKeepaliveToken)  ***/
 /******************************************************************************/
-static int64_t								incremental_VOL_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
-
 static int incremental_VOL_updates_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".leader.incrementalUpdates.1.0.0";
 	char group_id_str[24];	// All leaders commit/store/consume using the same group_id
@@ -1511,7 +1499,6 @@ static int incremental_VOL_updates_consumer_init(bool is_full_init) {
 	}
 	if (is_full_init) {
 		k->consumer_offset = RD_KAFKA_OFFSET_INVALID;
-		incremental_VOL_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 	} else if (is_RD_KAFKA_OFFSET_VALID(k->consumer_offset)) {
 		// Reinit requested_incremental_VOL_updates_consumer_offset only if we succeeded to read a message from the topic
 		// If we didn't even start, use the initial value
@@ -1564,7 +1551,6 @@ static int incremental_VOL_updates_consume(void) {
 		wakeup_params->event_data = (void *)mgmt_conf;
 		wakeup_params->kafka_offset = k_incremental_VOL_updates.consumer_offset;
 		wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs = kafka_applied_consuming_leader_VOL_msgs_raft_term;
-		incremental_VOL_updates_consumer_offset_submitted_to_toma = k_incremental_VOL_updates.consumer_offset;
 		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
 	} else {
 		N_Ef(ajk348z, "Unexpected messageType=@STR", msg_param.messageType);
@@ -1578,7 +1564,6 @@ out:
 /******************************************************************************/
 /********    incremental_TARGET_updates_consumer  (add/del TARGET)   **********/
 /******************************************************************************/
-
 XDLIST_DECLARE(, struct kafka_wakeup_params, kafka_raft_members_sorted_msgs_queue_link)			kafka_raft_members_sorted_msgs_queue = XDLIST_INIT(kafka_raft_members_sorted_msgs_queue);
 #define FREE_RAFT_MEMBERS_WAKEUP_PARAMS(name, wakeup_p)			\
 		NNVMEIBT_BM_FREE(name ## _1, wakeup_p->event_data);		\
@@ -1663,9 +1648,6 @@ out:
 }
 
 /******************************************************************************/
-static int64_t								incremental_TARGET_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
-static int64_t								incremental_TARGET_updates_consumer_offset_commitetd_by_toma = RD_KAFKA_OFFSET_INVALID;
-
 static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".leader.incrementalTargetUpdates.1.0.0";
 	char group_id_str[24];	// All leaders commit/store/consume using the same group_id
@@ -1683,8 +1665,6 @@ static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 	if (is_full_init) {
 		last_sent_to_toma_targets_updates_seq_no = -1;
 		k->consumer_offset = RD_KAFKA_OFFSET_INVALID;
-		incremental_TARGET_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
-		incremental_TARGET_updates_consumer_offset_commitetd_by_toma = RD_KAFKA_OFFSET_INVALID;
 	} else {
 		if (is_RD_KAFKA_OFFSET_VALID(k->consumer_offset)) {
 			// Reinit requested_incremental_VOL_updates_consumer_offset only if we succeeded to read a message from the topic
@@ -1933,11 +1913,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			}
 			N_Tf(6visumr, "starting VOL consumption with raft_term=@LLX", sampled_req_VOL_raft_term);
 			kafka_applied_consuming_leader_VOL_msgs_raft_term = sampled_req_VOL_raft_term;
-			//k->consumer_offset = sampled_req_offset_VOL;
-			//
-			incremental_VOL_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 			k->offset_committed = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed);
-			//
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_VOL,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->kafka_mgmt_config_ctx)));
 			k_err = __consumer_assign_partition_and_offset(k, purify_offset(sampled_req_offset_VOL));
@@ -1960,11 +1936,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			N_Tf(yvbo3le, "starting TARGET consumption with raft_term=@LLX", sampled_req_TARGET_raft_term);
 			kafka_raft_members_sorted_msgs_queue_init();
 			kafka_applied_consuming_leader_TARGET_msgs_raft_term = sampled_req_TARGET_raft_term;
-			// k->consumer_offset = sampled_req_offset_TARGET;
-			//
-			incremental_TARGET_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 			k->offset_committed = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, follower_committed);
-			//
 			NVMEIBT_KAFKA_SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(rygba82, nvmeibt_offset_and_idx_uninitialized);	// A new leader starts from committed and is not in the middle of adding a target node to raft
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_TARGET,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->raft_members_ctx)));
@@ -2076,7 +2048,7 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
 		const int64_t offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
 		if (purify_offset(offset_to_commit) > purify_offset(k_incremental_VOL_updates.offset_committed)) {
-			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD incremental_VOL_updates_consumer_offset_submitted_to_toma=@INT64_TD", purify_offset(offset_to_commit), purify_offset(incremental_VOL_updates_consumer_offset_submitted_to_toma));
+			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD latest=@INT64_TD", purify_offset(offset_to_commit), purify_offset(k_incremental_VOL_updates.consumer_offset));
 			kafka_commit_by_offset_async(&k_incremental_VOL_updates, offset_to_commit);
 		}
 	}
