@@ -218,6 +218,8 @@ class BaseLogSource(ABC):
     """
     def __init__(self, debug: bool = False):
         self.debug = debug
+        # use a safe past default (Jan 1, 2025)
+        self.last_seen_timestamp = datetime(2025, 1, 1).astimezone()  # track state
 
     def get_entries(self, cmd: List[str], cwd: Optional[str] = None) -> Generator[BaseLogEntry, None, None]:
         """
@@ -242,6 +244,7 @@ class BaseLogSource(ABC):
                     # Call the abstract method to do the parsing
                     entry = self._parse_line(line)
                     if entry:
+                        self.last_seen_timestamp = entry.timestamp  # update
                         yield entry
                 except Exception as e:
                     # Use logging for errors
@@ -1907,8 +1910,8 @@ def main():
             logger.info("Starting polling for I/O re-enable events...")
             poll_start_time = datetime.now()
             poll_interval_seconds = 0.5
-            # Start polling from the *original* start time, this is safer to catch any events we might have missed.
-            poll_since_dt = since_dt
+            # Start from where we left off to catch late I/O events
+            poll_since_dt = pager_source.last_seen_timestamp.astimezone()
 
             while not ndu_analysis.is_complete:
                 if (datetime.now() - poll_start_time).total_seconds() > poll_timeout_seconds:
@@ -1917,11 +1920,15 @@ def main():
 
                 poll_until_dt = datetime.now().astimezone()
 
+                logger.info(f"Fetching more pager logs from {poll_since_dt.strftime(journal_time_format)} to {poll_until_dt.strftime(journal_time_format)}...")
                 # Create the stream for *this* poll iteration
                 poll_stream = pager_source.fetch_logs(poll_since_dt, poll_until_dt)
 
                 # Process this small stream.
                 process_log_stream(poll_stream, ndu_analysis, stop_on_complete=False)
+
+                # Advance the cursor for the next iteration
+                poll_since_dt = pager_source.last_seen_timestamp.astimezone()
 
                 time.sleep(poll_interval_seconds)
 
