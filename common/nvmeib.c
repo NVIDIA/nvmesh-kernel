@@ -334,8 +334,9 @@ unsigned nvmeib_pcpu_cq_user_poll_budget = USER_POLL_BUDGET;
 module_param_named(pcpu_cq_user_poll_budget, nvmeib_pcpu_cq_user_poll_budget, uint, 0644);
 MODULE_PARM_DESC(pcpu_cq_user_poll_budget, "percpu cqs user-mode polling budget");
 
-/* Deprecated by intr-shaper - use NVMEIB_MAX_IRQ_TIME_USECS instead */
-#define CQ_INTR_PROCESS_MAX_TIME msecs_to_jiffies(2)
+/* Deprecated by intr-shaper - use NVMEIB_MAX_IRQ_TIME_USECS instead
+* #define CQ_INTR_PROCESS_MAX_TIME msecs_to_jiffies(2)
+*/
 #define CQ_INTR_PROCESS_MAX_RESTART 10
 
 #define cq_index(cq) (((char *)cq - (char *)cq->dev->cqs) / sizeof(*cq))
@@ -1384,6 +1385,7 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 	int completed;
 	bool poll_linger = false;
 	u64 start_ns, busy_ns;
+	bool continue_polling = false;
 	
 	nviop->poll_linger = false;
 	
@@ -1429,10 +1431,13 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 		}
 	}
 
+	/* Continue polling if: interrupt budget is 0 OR shaper says continue polling */
+	continue_polling = cq->budget_intr == 0 || nvmeib_intr_shaper_should_continue_polling(nvmeib_intr_shaper, completed, busy_ns);
+
 	if (poll_linger) {
 		nviop->poll_linger = true;
-	} else if (!completed || (!nvmeib_intr_shaper_should_continue_polling(nvmeib_intr_shaper, completed, busy_ns) && cq->budget_intr > 0)) {
-		/* Stop polling if: no completions OR (shaper says stop polling AND we are processing CQs in interrupt mode) */
+	} else if (!completed || !continue_polling) {
+		/* Stop polling if: no completions OR continue_polling is false */
 		__poll_complete(&cq->iop);
 		rearm_or_resched(cq, NVMEIB_DEV_CQ_POLL_MODE);
 		cq->n_rearm_poll++;
@@ -4058,7 +4063,7 @@ struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs)
 	_NT(trace_2_nvmeib_nvmeib_intr_shaper_create, "loops_per_jiffy @LOOPS_PER_JIFFY, HZ @INT", loops_per_jiffy, HZ);
 	shaper->frame_size_nsecs = frame_size_usecs * 1000ULL;
 
-	for_each_online_cpu(i) {
+	for_each_possible_cpu(i) {
 		pcpu = (struct intr_shaper_percpu *)(shaper->percpu + i *shaper->percpu_size);
 		pcpu->max_burst_size_local = nvmeib_intr_shaper_max_burst;
 		pcpu->max_percent_cpu_local = nvmeib_intr_shaper_max_pct_cpu;
