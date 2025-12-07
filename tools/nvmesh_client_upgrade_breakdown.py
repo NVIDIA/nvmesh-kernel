@@ -698,6 +698,22 @@ class CompositePhase(BasePhase):
         return self._calculate_min_max_from_list(self.children.values())
 
     @property
+    def extended_interval(self) -> Optional[TimeInterval]:
+        """
+        Calculates an interval that starts at the Parent's own start time,
+        but extends the End time to cover the latest completing child.
+        """
+        if not (self._start and self._end):
+            return None
+
+        final_end = max(
+            [self._end] +
+            [c.interval.end for c in self.children.values() if c.status == PhaseStatus.VALID and c.interval]
+        )
+
+        return TimeInterval(self._start, final_end)
+
+    @property
     def has_warnings(self) -> bool:
         """Returns True if this phase OR any child has warnings."""
         if super().has_warnings:
@@ -912,6 +928,11 @@ class ShutdownPhase(CompositePhase):
                 consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
+
+    @property
+    def interval(self) -> Optional[TimeInterval]:
+        # Use the reusable "Async Parent" logic
+        return self.extended_interval
 
 class ModulesUnLoadPhase(BasePhase):
     """A child-phase that finds the "Starting to unload" and "Done unloading" messages from the nvmeshclient log."""
