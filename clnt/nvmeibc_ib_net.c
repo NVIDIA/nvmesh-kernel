@@ -1238,13 +1238,6 @@ static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
 			break;
 		}
 
-		if (!in_interrupt)
-			net->scq_stats.n_poll += n;
-		else
-			net->scq_stats.n_intr += n;
-
-		//Shall we consider 'net->drain_sq_done' ???
-
 		if (in_interrupt)
 			net->scq_stats.n_intr += n;
 		else

@@ -1432,7 +1432,7 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 	if (poll_linger) {
 		nviop->poll_linger = true;
 	} else if (!completed || (!nvmeib_intr_shaper_should_continue_polling(nvmeib_intr_shaper, completed, busy_ns) && cq->budget_intr > 0)) {
-		/* cq is not busy, try to switch back to interrupt-mode */
+		/* Stop polling if: no completions OR (shaper says stop polling AND we are processing CQs in interrupt mode) */
 		__poll_complete(&cq->iop);
 		rearm_or_resched(cq, NVMEIB_DEV_CQ_POLL_MODE);
 		cq->n_rearm_poll++;

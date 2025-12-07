@@ -1680,6 +1680,8 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 		/* Set polling=true before wake_up_process to ensure the woken thread sees it.
 		 * The smp_mb__before_atomic in wake_up_process provides the necessary barrier. */
 		WRITE_ONCE(q->polling, true);
+		/* Ensure the polling mode is visible before waking up the thread */
+		smp_mb();
 		wake_up_process(q->thread);
 		if (q->irq_debug < 1 || jiffies > last_time + 5 * HZ) {
 			last_time = jiffies;
