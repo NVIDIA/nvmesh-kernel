@@ -216,8 +216,7 @@ class BaseLogSource(ABC):
     Base class for log providers. Handles the subprocess execution,
     streaming (pipelining), and error handling.
     """
-    def __init__(self, debug: bool = False):
-        self.debug = debug
+    def __init__(self):
         # use a safe past default (Jan 1, 2025)
         self.last_seen_timestamp = datetime(2025, 1, 1).astimezone()  # track state
 
@@ -287,8 +286,8 @@ class JournalctlLog(BaseLogSource):
     """
     Implements the command-building and line-parsing for journalctl.
     """
-    def __init__(self, identifiers: List[str], debug: bool = False):
-        super().__init__(debug)
+    def __init__(self, identifiers: List[str]):
+        super().__init__()
         self.identifiers = identifiers
         self.journal_time_format = "%Y-%m-%d %H:%M:%S.%f"
 
@@ -336,8 +335,8 @@ class PagerLog(BaseLogSource):
     Implements the command-building and line-parsing for pager.py.
     """
 
-    def __init__(self, debug: bool = False, logs_dir: Optional[str] = None, custom_pager: Optional[str] = None):
-        super().__init__(debug)
+    def __init__(self, logs_dir: Optional[str] = None, custom_pager: Optional[str] = None):
+        super().__init__()
         self.pager_time_format = "%Y-%m-%d %H:%M:%S"
 
         # Define the standard relative path once
@@ -360,9 +359,7 @@ class PagerLog(BaseLogSource):
 
             # Use custom pager if provided, otherwise use the default we resolved above
             self.pager_path = custom_pager if custom_pager else default_pager_path
-
-            if self.debug:
-                logger.debug(f"Using offline pager: {self.pager_path} (CWD: {self.pager_cwd})")
+            logger.debug(f"Using offline pager: {self.pager_path} (CWD: {self.pager_cwd})")
         else:
             # Case 2: Live System
             # Add leading slash to make it absolute: /var/log/nvmesh/trace_daemon
@@ -411,8 +408,8 @@ class JournalctlFileLog(BaseLogSource):
     Parses an offline text file containing journalctl output.
     Filters logs based on the provided 'identifiers' list.
     """
-    def __init__(self, logs_dir: str, identifiers: List[str], debug: bool = False):
-        super().__init__(debug)
+    def __init__(self, logs_dir: str, identifiers: List[str]):
+        super().__init__()
         self.logs_dir = logs_dir
         self.identifiers = identifiers  # store the allow-list
         self.log_file = self._find_journal_file(logs_dir)
@@ -536,9 +533,8 @@ class BasePhase(ABC):
     """
     [REVISED] Abstract Base Class for a single, measurable NDU phase.
     """
-    def __init__(self, name: str, debug: bool = False):
+    def __init__(self, name: str):
         self.name: str = name
-        self.debug: bool = debug
         self._start: Optional[datetime] = None
         self._end: Optional[datetime] = None
 
@@ -698,8 +694,8 @@ class CompositePhase(BasePhase):
     A BasePhase that can contain a collection of child BasePhase objects.
     Its own interval/completeness is independent of its children.
     """
-    def __init__(self, name: str, debug: bool = False):
-        super().__init__(name, debug)
+    def __init__(self, name: str):
+        super().__init__(name)
         self.children: Dict[str, BasePhase] = {}
 
     def add_child(self, child_phase: BasePhase):
@@ -876,8 +872,8 @@ class SimpleSystemdPhase(CompositePhase):
     A reusable phase defined by systemd messages.
     It can now also contain child phases to break down its own interval.
     """
-    def __init__(self, name: str, service_name: str, start_msg_prefix: str, end_msg_prefix: str, debug: bool = False):
-        super().__init__(name, debug) # This initializes self.children = {}
+    def __init__(self, name: str, service_name: str, start_msg_prefix: str, end_msg_prefix: str):
+        super().__init__(name) # This initializes self.children = {}
         self.service_name = service_name
         self.start_msg_prefix = start_msg_prefix
         self.end_msg_prefix = end_msg_prefix
@@ -898,11 +894,11 @@ class SimpleSystemdPhase(CompositePhase):
                 entry.message:
 
             if entry.message.startswith(self.start_msg_prefix):
-                if self.debug: logger.debug(f"[{self.name}]: Matched start log: {entry.message.strip()}")
+                logger.debug(f"[{self.name}]: Matched start log: {entry.message.strip()}")
                 self.set_start(entry.timestamp)
                 consumed_by_self = True
             elif entry.message.startswith(self.end_msg_prefix):
-                if self.debug: logger.debug(f"[{self.name}]: Matched stop log: {entry.message.strip()}")
+                logger.debug(f"[{self.name}]: Matched stop log: {entry.message.strip()}")
                 self.set_end(entry.timestamp)
                 consumed_by_self = True
 
@@ -910,18 +906,18 @@ class SimpleSystemdPhase(CompositePhase):
 
 class ClientStopPhase(SimpleSystemdPhase):
     """Tracks the 'client stop' phase (Stopping... to Stopped...)."""
-    def __init__(self, debug: bool = False):
-        super().__init__("client stop", "nvmeshclient.service", "Stopping", "Stopped", debug)
-        self.add_child(ShutdownPhase(debug=debug))
-        self.add_child(ModulesUnLoadPhase(debug=debug))
+    def __init__(self):
+        super().__init__("client stop", "nvmeshclient.service", "Stopping", "Stopped")
+        self.add_child(ShutdownPhase())
+        self.add_child(ModulesUnLoadPhase())
 
 class ClientStartPhase(SimpleSystemdPhase):
     """Tracks the 'client start' phase (Starting... to Started...)."""
-    def __init__(self, debug: bool = False):
-        super().__init__("client start", "nvmeshclient.service", "Starting", "Started", debug)
-        self.add_child(ModulesLoadPhase(debug=debug))
+    def __init__(self):
+        super().__init__("client start", "nvmeshclient.service", "Starting", "Started")
+        self.add_child(ModulesLoadPhase())
         # Volume Attaching (Dynamic Discovery)
-        self.add_child(VolumesAttachPhase(debug=debug))
+        self.add_child(VolumesAttachPhase())
 
     @property
     def interval(self) -> Optional[TimeInterval]:
@@ -957,12 +953,12 @@ class DependencyRestartPhase(ContainerPhase):
     Tracks the full restart of parallel services (CM and TD).
     Interval is from the *first* service stopping to the *last* service started.
     """
-    def __init__(self, debug: bool = False):
-        super().__init__("CM/TD restart", debug)
-        self.add_child(SimpleSystemdPhase("NVMesh CM Stop", "nvmeshcm.service", "Stopping", "Stopped", debug=debug))
-        self.add_child(SimpleSystemdPhase("NVMesh CM Start", "nvmeshcm.service", "Starting", "Started", debug=debug))
-        self.add_child(SimpleSystemdPhase("NVMesh TD Stop", "nvmeshtrace@trace_daemon.service", "Stopping", "Stopped", debug=debug))
-        self.add_child(SimpleSystemdPhase("NVMesh TD Start", "nvmeshtrace@trace_daemon.service", "Starting", "Started", self.debug))
+    def __init__(self):
+        super().__init__("CM/TD restart")
+        self.add_child(SimpleSystemdPhase("NVMesh CM Stop", "nvmeshcm.service", "Stopping", "Stopped"))
+        self.add_child(SimpleSystemdPhase("NVMesh CM Start", "nvmeshcm.service", "Starting", "Started"))
+        self.add_child(SimpleSystemdPhase("NVMesh TD Stop", "nvmeshtrace@trace_daemon.service", "Stopping", "Stopped"))
+        self.add_child(SimpleSystemdPhase("NVMesh TD Start", "nvmeshtrace@trace_daemon.service", "Starting", "Started"))
 
 # Enum: nvmeibc_mod_state
 # Maps internal kernel module states to their integer values in the trace logs.
@@ -974,10 +970,10 @@ NVMEIBC_STATE_EXITING      = '4'  # Exiting (memory kfree, proc removal)
 
 class ShutdownPhase(CompositePhase):
     """Tracks the duration of the nvmesh_clnt_shutdown script."""
-    def __init__(self, debug: bool = False):
-        super().__init__("client shutdown", debug)
+    def __init__(self):
+        super().__init__("client shutdown")
         # Volume Detaching (Dynamic Discovery)
-        self.add_child(VolumesDetachPhase(debug=debug))
+        self.add_child(VolumesDetachPhase())
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         consumed_by_child = super().process_entry(entry)
@@ -1000,8 +996,8 @@ class ShutdownPhase(CompositePhase):
 
 class ModulesUnLoadPhase(BasePhase):
     """A child-phase that finds the "Starting to unload" and "Done unloading" messages from the nvmeshclient log."""
-    def __init__(self, debug: bool = False):
-        super().__init__("modules unload", debug)
+    def __init__(self):
+        super().__init__("modules unload")
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         if not isinstance(entry, JournalCTLLogEntry):
@@ -1029,8 +1025,8 @@ class ModulesLoadPreClientInitPhase(BasePhase):
     Covers: dependency (common module) loading, modprobe overhead and kernel linking/relocation.
     """
 
-    def __init__(self, debug: bool = False):
-        super().__init__("Pre-Initialization", debug)
+    def __init__(self):
+        super().__init__("Pre-Initialization")
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # Start ($t1): "Starting to load modules"
@@ -1056,8 +1052,8 @@ class ModulesLoadClientInitCorePhase(BasePhase):
     Child of Client Init.
     Interval: "client globals create (core) - start" -> "done".
     """
-    def __init__(self, debug: bool = False):
-        super().__init__("Client Core Init", debug)
+    def __init__(self):
+        super().__init__("Client Core Init")
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         if not isinstance(entry, PagerLogEntry):
@@ -1090,9 +1086,9 @@ class ModulesLoadClientInitPhase(CompositePhase):
     Covers: The execution of the module's __init function (e.g., nvmeibc_init).
     """
 
-    def __init__(self, debug: bool = False):
-        super().__init__("Client Init", debug)
-        self.add_child(ModulesLoadClientInitCorePhase(debug))
+    def __init__(self):
+        super().__init__("Client Init")
+        self.add_child(ModulesLoadClientInitCorePhase())
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         if not isinstance(entry, PagerLogEntry):
@@ -1127,11 +1123,11 @@ class ModulesLoadPhase(CompositePhase):
       t1 .... (Pre-Init) .... t2 .... (Client Init) .... t3 .... (Cleanup) .... Done
     """
 
-    def __init__(self, debug: bool = False):
-        super().__init__("modules load", debug)
+    def __init__(self):
+        super().__init__("modules load")
         # Add the new breakdown phases
-        self.add_child(ModulesLoadPreClientInitPhase(debug))
-        self.add_child(ModulesLoadClientInitPhase(debug))
+        self.add_child(ModulesLoadPreClientInitPhase())
+        self.add_child(ModulesLoadClientInitPhase())
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # 1. Feed children first (so they can catch t1, t2, t3)
@@ -1162,8 +1158,8 @@ class VolumeDetachPhase(BasePhase):
     End:   "Detach ended" or "Detach failed"
     """
 
-    def __init__(self, name: str, debug: bool = False):
-        super().__init__(name, debug)
+    def __init__(self, name: str):
+        super().__init__(name)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # 1. Safety and Relevance Checks
@@ -1194,8 +1190,8 @@ class DynamicVolumesPhase(ContainerPhase):
     Base class for top-level phases that dynamically discover volumes from Pager logs.
     Handles the discovery logic and interval calculation.
     """
-    def __init__(self, name: str, debug: bool = False):
-        super().__init__(name, debug)
+    def __init__(self, name: str):
+        super().__init__(name)
 
     @abstractmethod
     def _create_volume_child(self, vol_name: str) -> BasePhase:
@@ -1206,17 +1202,14 @@ class DynamicVolumesPhase(ContainerPhase):
         # 1. Dynamic Discovery Logic
         if isinstance(entry, PagerLogEntry) and entry.dev_name:
             vol_name = entry.dev_name
-            if self.debug:
-                logger.debug(f"[{self.name}]: volume: {vol_name} msg: {entry.message}")
+            logger.debug(f"[{self.name}]: volume: {vol_name} msg: {entry.message}")
 
             # Check if we already track this volume
             if vol_name not in self.children:
                 # Use the factory method to create the specific type of child
                 new_child = self._create_volume_child(vol_name)
                 self.add_child(new_child)
-
-                if self.debug:
-                    logger.debug(f"[{self.name}]: Discovered new volume: {vol_name}")
+                logger.debug(f"[{self.name}]: Discovered new volume: {vol_name}")
 
         # 2. Standard Composite processing (fan-out to children)
         return super().process_entry(entry)
@@ -1243,19 +1236,19 @@ class VolumesDetachPhase(DynamicVolumesPhase):
     """
     Top-level phase that tracks Detach operations across ALL volumes.
     """
-    def __init__(self, debug: bool = False):
-        super().__init__("Volumes Detach", debug)
+    def __init__(self):
+        super().__init__("Volumes Detach")
 
     def _create_volume_child(self, vol_name: str) -> BasePhase:
-        return VolumeDetachPhase(vol_name, debug=self.debug)
+        return VolumeDetachPhase(vol_name)
 
 class VolumeAttachConf2LastCont(BasePhase):
     """
     Child phase 1: From 'Attach finished' to the LAST 'CONT disk'.
     """
 
-    def __init__(self, vol_name: str, debug: bool = False):
-        super().__init__(f"Config->Cont", debug)
+    def __init__(self, vol_name: str):
+        super().__init__(f"Config->Cont")
         self.vol_name = vol_name
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
@@ -1286,8 +1279,8 @@ class VolumeAttachLastCont2IOEnabled(BasePhase):
     Child phase 2: From LAST 'CONT disk' to 'Enabling I/O'.
     """
 
-    def __init__(self, vol_name: str, debug: bool = False):
-        super().__init__(f"Cont->Enabled", debug)
+    def __init__(self, vol_name: str):
+        super().__init__(f"Cont->Enabled")
         self.vol_name = vol_name
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
@@ -1318,12 +1311,12 @@ class VolumeAttachPhase(ContainerPhase):
     Contains the two sub-phases defined above.
     """
 
-    def __init__(self, vol_name: str, debug: bool = False):
-        super().__init__(vol_name, debug)
+    def __init__(self, vol_name: str):
+        super().__init__(vol_name)
         self.vol_name = vol_name
         # Add the two specific children
-        self.add_child(VolumeAttachConf2LastCont(vol_name, debug))
-        self.add_child(VolumeAttachLastCont2IOEnabled(vol_name, debug))
+        self.add_child(VolumeAttachConf2LastCont(vol_name))
+        self.add_child(VolumeAttachLastCont2IOEnabled(vol_name))
 
     @property
     def interval(self) -> Optional[TimeInterval]:
@@ -1345,19 +1338,19 @@ class VolumesAttachPhase(DynamicVolumesPhase):
     """
     Top-level phase that tracks Attach operations across ALL volumes.
     """
-    def __init__(self, debug: bool = False):
-        super().__init__("Volumes Attach", debug)
+    def __init__(self):
+        super().__init__("Volumes Attach")
 
     def _create_volume_child(self, vol_name: str) -> BasePhase:
-        return VolumeAttachPhase(vol_name, debug=self.debug)
+        return VolumeAttachPhase(vol_name)
 
 class VolumeIODisabledPhase(BasePhase):
     """
     Tracks the IO disabled interval for a *single* volume.
     Passive Phase: State is populated strictly from finalized Detach/Attach data.
     """
-    def __init__(self, name: str, debug: bool = False):
-        super().__init__(name, debug)
+    def __init__(self, name: str, ):
+        super().__init__(name)
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # Passive phase; does not consume logs.
@@ -1370,8 +1363,8 @@ class VolumesIODisabledPhase(ContainerPhase):
     Interval: min(disabling) .. max(enabling)
     """
 
-    def __init__(self, debug: bool = False):
-        super().__init__("IO Disabled", debug)
+    def __init__(self):
+        super().__init__("IO Disabled")
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # Passive phase; does not consume logs.
@@ -1388,7 +1381,7 @@ class VolumesIODisabledPhase(ContainerPhase):
 
         # Iterate over Detach phases (The Source of Truth for volume existence)
         for vol_name, detach_child in detach_phase.children.items():
-            io_child = VolumeIODisabledPhase(vol_name, debug=self.debug)
+            io_child = VolumeIODisabledPhase(vol_name)
 
             # --- 1. Strict Start Time (From Detach) ---
             # We check the finalized status, not the dynamic property.
@@ -1420,14 +1413,14 @@ class NDUPhase(CompositePhase):
     Children: Service phases (client stop, deps restart, client start).
     Member: io_disabled_phase (derived from volumes detach/attach phases).
     """
-    def __init__(self, debug: bool = False):
-        super().__init__('NDU', debug)
+    def __init__(self):
+        super().__init__('NDU')
         # 1. Standard Children (Service Phases)
         # (These are added via setup_ndu_phases using add_child)
 
         # 2. Special Member (volumes IO disabled phase)
         # This is a PASSIVE container. It is populated during finalize().
-        self.io_disabled_phase = VolumesIODisabledPhase(debug)
+        self.io_disabled_phase = VolumesIODisabledPhase()
 
     def process_entry(self, entry: BaseLogEntry) -> bool:
         # Only feed Service Phases.
@@ -1493,13 +1486,11 @@ class NDUPhase(CompositePhase):
         attach_phase = self._find_phase_recursive(self, "Volumes Attach")
 
         if detach_phase and attach_phase:
-            if self.debug:
-                logger.debug("Deriving IO Disabled phase from Detach/Attach...")
+            logger.debug("Deriving IO Disabled phase from Detach/Attach...")
             # 3. Populate IO (The Data Transfer)
             self.io_disabled_phase.populate_from_phases(detach_phase, attach_phase)
         else:
-            if self.debug:
-                logger.debug("Could not find Detach/Attach phases for derivation.")
+            logger.debug("Could not find Detach/Attach phases for derivation.")
 
         # 4. Finalize IO (The Calculation)
         # Calculates durations and warnings for the newly created volume phases
@@ -1670,12 +1661,12 @@ def setup_ndu_phases(args: argparse.Namespace) -> NDUPhase:
     """Creates and returns the root NDUPhase object with all phases."""
 
     # 1. Create the root NDU object
-    ndu_phase = NDUPhase(debug=args.debug)
+    ndu_phase = NDUPhase()
 
     # 2. Create and add the main service phases as children
-    ndu_phase.add_child(ClientStopPhase(debug=args.debug)) # ClientStop is now a composite
-    ndu_phase.add_child(DependencyRestartPhase(debug=args.debug))
-    ndu_phase.add_child(ClientStartPhase(debug=args.debug))
+    ndu_phase.add_child(ClientStopPhase()) # ClientStop is now a composite
+    ndu_phase.add_child(DependencyRestartPhase())
+    ndu_phase.add_child(ClientStartPhase())
 
     return ndu_phase
 
@@ -1886,18 +1877,15 @@ def main():
         journal_source = JournalctlFileLog(
             logs_dir=logs_dir,
             identifiers=target_identifiers,
-            debug=args.debug
         )
     else:
         # Use the live command line parser
         journal_source = JournalctlLog(
             identifiers=target_identifiers,
-            debug=args.debug
         )
 
     # Pass the offline args to PagerLog
     pager_source = PagerLog(
-        debug=args.debug,
         logs_dir=logs_dir,
         custom_pager=pager_path
     )
