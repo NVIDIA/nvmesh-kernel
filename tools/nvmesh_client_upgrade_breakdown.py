@@ -229,7 +229,6 @@ class BaseLogSource(ABC):
 
         process = None
         try:
-            # process is now a local variable
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -240,25 +239,29 @@ class BaseLogSource(ABC):
             )
 
             for line in process.stdout:
-                try:
-                    # Call the abstract method to do the parsing
-                    entry = self._parse_line(line)
-                    if entry:
-                        self.last_seen_timestamp = entry.timestamp  # update
-                        yield entry
-                except Exception as e:
-                    # Use logging for errors
-                    logger.debug(f"Skipping malformed line: {line.strip()} | Error: {e}")
-                    continue
+                # 1. _parse_line handles garbage (catches JSONDecodeError -> returns None).
+                # 2. _parse_line handles fatal errors (raises ValueError).
+                # 3. get_entries simply yields valid results.
+                # Call the abstract method to do the parsing
+                entry = self._parse_line(line)
+                if entry:
+                    self.last_seen_timestamp = entry.timestamp
+                    yield entry
 
-            # Read stderr after stdout is exhausted
+            # read stderr after stdout is exhausted
             stderr_output, stderr_error = process.communicate()
             if stderr_output:
-                # Use logging for warnings
+                # use logging for warnings
                 logger.warning(f"{cmd[0]} stderr: {stderr_output.strip()}")
 
         except FileNotFoundError:
             logger.error(f"Command not found: {cmd[0]}")
+
+        except ValueError as e:
+            # catch fatal errors raised by _parse_line (e.g. empty message)
+            logger.error(f"Fatal Log Parsing Error: {e}")
+            raise
+
         except Exception as e:
             logger.error(f"Failed to run {cmd[0]}: {e}")
 
@@ -304,8 +307,19 @@ class JournalctlLog(BaseLogSource):
         yield from self.get_entries(cmd)
 
     def _parse_line(self, line: str) -> Optional[BaseLogEntry]:
-        log_json = json.loads(line.strip()) # Can raise JSONDecodeError
+        # 1. attempt parse (is it valid JSON?)
+        try:
+            log_json = json.loads(line.strip())
+        except json.JSONDecodeError as e:
+            logger.debug(f"Skipping malformed JSON line: {line.strip()} | Error: {e}")
+            return None
 
+        # 2. strict validation (Does it have the required data?)
+        # this runs outside the try/catch because we want explicit ValueErrors to bubble up as fatal
+        if not log_json.get("MESSAGE"):
+            raise ValueError(f"Invalid Log Entry (empty message) from {type(self).__name__}. Raw: {line.strip()}")
+
+        # 3. parse timestamp
         ts_microseconds = int(log_json.get('_SOURCE_REALTIME_TIMESTAMP', 0))
         if not ts_microseconds:
             ts_microseconds = int(log_json.get('__REALTIME_TIMESTAMP', 0))
@@ -371,8 +385,19 @@ class PagerLog(BaseLogSource):
         yield from self.get_entries(cmd, cwd=self.pager_cwd)
 
     def _parse_line(self, line: str) -> Optional[BaseLogEntry]:
-        log_json = json.loads(line.strip()) # Can raise JSONDecodeError
+        # 1. attempt parse (is it valid JSON?)
+        try:
+            log_json = json.loads(line.strip())
+        except json.JSONDecodeError as e:
+            logger.debug(f"Skipping malformed JSON line: {line.strip()} | Error: {e}")
+            return None
 
+        # 2. strict validation (fatal error)
+        # ensure the log has content
+        if not log_json.get('message'):
+            raise ValueError(f"Invalid Log Entry (empty message) from {type(self).__name__}. Raw: {line.strip()}")
+
+        # 3. parse timestamp (skip if missing)
         ts_nanoseconds = int(log_json.get('nanoseconds', 0))
         if not ts_nanoseconds:
             return None
@@ -468,6 +493,10 @@ class JournalctlFileLog(BaseLogSource):
 
         except ValueError:
             return None, False
+
+        # strict validation: Fatal if one of "our" logs has an empty message
+        if not msg or not msg.strip():
+            raise ValueError(f"Invalid Log Entry (empty message) from {type(self).__name__} for identifier '{identifier}'. Raw: {line.strip()}")
 
         # 4. Construct Mock JSON Data
         raw_data = {
@@ -1025,9 +1054,6 @@ class ModulesLoadClientInitCorePhase(BasePhase):
             return False
 
         msg = entry.message
-        if not msg:
-            return False
-
         # Start Trigger
         if "client globals create (core) - start" in msg:
             self.set_start(entry.timestamp)
@@ -1065,7 +1091,7 @@ class ModulesLoadClientInitPhase(CompositePhase):
         consumed_by_child = super().process_entry(entry)
         consumed_by_self = False
         msg = entry.message
-        if not msg or "MODULE_STATE_CHANGE" not in msg:
+        if "MODULE_STATE_CHANGE" not in msg:
             return False
 
         # Start ($t2): State 0->0 (Entering INITIALIZING)
@@ -1139,10 +1165,7 @@ class VolumeDetachPhase(BasePhase):
             return False
 
         msg = entry.message
-        if not msg:
-            return False
 
-        #logger.debug(f"[{self.name}]: observing msg {msg}")
         # 2. Logic
         if "Disabling I/O" in msg:
             logger.debug(f"[{self.name}]: matched start - msg {msg}")
@@ -1233,8 +1256,6 @@ class VolumeAttachConf2LastCont(BasePhase):
             return False
 
         msg = entry.message
-        if not msg:
-            return False
 
         # Start condition
         if "Attach finished" in msg:
@@ -1267,8 +1288,6 @@ class VolumeAttachLastCont2IOEnabled(BasePhase):
             return False
 
         msg = entry.message
-        if not msg:
-            return False
 
         # Start condition (Update repeatedly to match the *last* CONT disk)
         # This ensures this phase starts exactly where the previous one ended
