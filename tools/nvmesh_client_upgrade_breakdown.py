@@ -561,31 +561,49 @@ class BasePhase(ABC):
         """
         return bool(self._start and self._end)
 
-    def set_start(self, ts: datetime, overwrite: bool = False):
+    def set_start(self, ts: datetime, source_msg: Optional[str] = None, overwrite: bool = False):
         """
         Strict setter for Start Timestamp.
         Raises RuntimeError if attempting to overwrite an existing value,
         unless overwrite=True is passed.
+        If 'source_msg' is provided, it logs the debug match message automatically.
         """
         if self._start is not None and not overwrite:
+            # idempotency check: if exact same time, ignore (and don't spam logs)
+            if self._start == ts:
+                return
             self_start_str = self._start.astimezone().strftime('%H:%M:%S.%f')[:-3]
             ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
             raise RuntimeError(f"[{self.name}] start timestamp overwrite! Old: {self_start_str}, New: {ts_str}")
 
         self._start = ts
 
-    def set_end(self, ts: datetime, overwrite: bool = False):
+        # centralized Logging
+        if source_msg:
+            ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            logger.debug(f"[{self.name}]: matched start: {source_msg.strip()} ({ts_str})")
+
+    def set_end(self, ts: datetime, source_msg: Optional[str] = None, overwrite: bool = False):
         """
         Strict setter for End Timestamp.
         Raises RuntimeError if attempting to overwrite an existing value,
         unless overwrite=True is passed.
+        If 'source_msg' is provided, it logs the debug match message automatically.
         """
         if self._end is not None and not overwrite:
+            # idempotency check
+            if self._end == ts:
+                return
             self_end_str = self._end.astimezone().strftime('%H:%M:%S.%f')[:-3]
             ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
             raise RuntimeError(f"[{self.name}] end timestamp overwrite! Old: {self_end_str}, New: {ts_str}")
-        
+
         self._end = ts
+
+        # centralized Logging
+        if source_msg:
+            ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
+            logger.debug(f"[{self.name}]: matched stop: {source_msg.strip()} ({ts_str})")
 
     @property
     def interval(self) -> Optional[TimeInterval]:
@@ -894,12 +912,10 @@ class SimpleSystemdPhase(CompositePhase):
                 entry.message:
 
             if entry.message.startswith(self.start_msg_prefix):
-                logger.debug(f"[{self.name}]: Matched start log: {entry.message.strip()}")
-                self.set_start(entry.timestamp)
+                self.set_start(entry.timestamp, source_msg=entry.message)
                 consumed_by_self = True
             elif entry.message.startswith(self.end_msg_prefix):
-                logger.debug(f"[{self.name}]: Matched stop log: {entry.message.strip()}")
-                self.set_end(entry.timestamp)
+                self.set_end(entry.timestamp, source_msg=entry.message)
                 consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
@@ -981,10 +997,10 @@ class ShutdownPhase(CompositePhase):
         msg = entry.message
         if isinstance(entry, JournalCTLLogEntry) and entry.syslog_id == 'nvmeshclient' and msg:
             if "client shutdown script invoked" in msg:
-                self.set_start(entry.timestamp)
+                self.set_start(entry.timestamp, source_msg=entry.message)
                 consumed_by_self = True
             if "client shutdown script done" in msg:
-                self.set_end(entry.timestamp)
+                self.set_end(entry.timestamp, source_msg=entry.message)
                 consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
@@ -1006,10 +1022,10 @@ class ModulesUnLoadPhase(BasePhase):
         # Look for the log lines from the nvmeshclient script
         if entry.syslog_id == 'nvmeshclient' and msg:
             if "Starting to unload modules" in msg:
-                self.set_start(entry.timestamp)
+                self.set_start(entry.timestamp, source_msg=entry.message)
                 return True
             elif "Done unloading modules" in msg:
-                self.set_end(entry.timestamp)
+                self.set_end(entry.timestamp, source_msg=entry.message)
                 return True
         return False
 
@@ -1033,7 +1049,7 @@ class ModulesLoadPreClientInitPhase(BasePhase):
         if isinstance(entry, JournalCTLLogEntry) and \
                 entry.syslog_id == 'nvmeshclient' and entry.message:
             if "Starting to load modules" in entry.message:
-                self.set_start(entry.timestamp)
+                self.set_start(entry.timestamp, source_msg=entry.message)
                 return True
 
         # End ($t2): State 0->0 (Entering INITIALIZING)
@@ -1042,7 +1058,7 @@ class ModulesLoadPreClientInitPhase(BasePhase):
             target_state = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_INITIALIZING}"
 
             if "MODULE_STATE_CHANGE" in entry.message and target_state in entry.message:
-                self.set_end(entry.timestamp)
+                self.set_end(entry.timestamp, source_msg=entry.message)
                 return True
 
         return False
@@ -1062,12 +1078,12 @@ class ModulesLoadClientInitCorePhase(BasePhase):
         msg = entry.message
         # Start Trigger
         if "client globals create (core) - start" in msg:
-            self.set_start(entry.timestamp)
+            self.set_start(entry.timestamp, source_msg=entry.message)
             return True
 
         # End Trigger
         if "client globals create (core) - done" in msg:
-            self.set_end(entry.timestamp)
+            self.set_end(entry.timestamp, source_msg=entry.message)
             return True
 
         return False
@@ -1103,13 +1119,13 @@ class ModulesLoadClientInitPhase(CompositePhase):
         # Start ($t2): State 0->0 (Entering INITIALIZING)
         start_signature = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_INITIALIZING}"
         if start_signature in msg:
-            self.set_start(entry.timestamp)
+            self.set_start(entry.timestamp, source_msg=entry.message)
             consumed_by_self = True
 
         # End ($t3): State 0->1 (Transition to READY)
         end_signature = f"state={NVMEIBC_STATE_INITIALIZING}->state={NVMEIBC_STATE_READY}"
         if end_signature in msg:
-            self.set_end(entry.timestamp)
+            self.set_end(entry.timestamp, source_msg=entry.message)
             return True
 
         return consumed_by_self or consumed_by_child
@@ -1141,12 +1157,12 @@ class ModulesLoadPhase(CompositePhase):
 
                 # Parent Start ($t1) - Same as PreInit Start
                 if "Starting to load modules" in entry.message:
-                    self.set_start(entry.timestamp)
+                    self.set_start(entry.timestamp, source_msg=entry.message)
                     consumed_by_self = True
 
                 # Parent End ("Done") - Happens after t3 (script cleanup)
                 elif "Done loading modules" in entry.message:
-                    self.set_end(entry.timestamp)
+                    self.set_end(entry.timestamp, source_msg=entry.message)
                     consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
@@ -1174,13 +1190,11 @@ class VolumeDetachPhase(BasePhase):
 
         # 2. Logic
         if "Disabling I/O" in msg:
-            logger.debug(f"[{self.name}]: matched start - msg {msg}")
-            self.set_start(entry.timestamp)
+            self.set_start(entry.timestamp, source_msg=entry.message)
             return True
 
         if "Detach finished" in msg or "Detach failed" in msg:
-            logger.debug(f"[{self.name}]: matched end - msg {msg}")
-            self.set_end(entry.timestamp)
+            self.set_end(entry.timestamp, source_msg=entry.message)
             return True
 
         return False
@@ -1202,7 +1216,6 @@ class DynamicVolumesPhase(ContainerPhase):
         # 1. Dynamic Discovery Logic
         if isinstance(entry, PagerLogEntry) and entry.dev_name:
             vol_name = entry.dev_name
-            logger.debug(f"[{self.name}]: volume: {vol_name} msg: {entry.message}")
 
             # Check if we already track this volume
             if vol_name not in self.children:
@@ -1262,12 +1275,12 @@ class VolumeAttachConf2LastCont(BasePhase):
 
         # Start condition
         if "Attach finished" in msg:
-            self.set_start(entry.timestamp)
+            self.set_start(entry.timestamp, source_msg=entry.message)
             return True
 
         # End condition (Update repeatedly to find the *last* one)
         if "CONT disk" in msg:
-            self.set_end(entry.timestamp, overwrite=True)
+            self.set_end(entry.timestamp, source_msg=entry.message, overwrite=True)
             # We return True because we matched, but we rely on the parent
             # to keep feeding us so we can update _end if another CONT appears.
             return True
@@ -1295,12 +1308,12 @@ class VolumeAttachLastCont2IOEnabled(BasePhase):
         # Start condition (Update repeatedly to match the *last* CONT disk)
         # This ensures this phase starts exactly where the previous one ended
         if "CONT disk" in msg:
-            self.set_start(entry.timestamp, overwrite=True)
+            self.set_start(entry.timestamp, source_msg=entry.message, overwrite=True)
             return True
 
         # End condition
         if "Enabling I/O" in msg:
-            self.set_end(entry.timestamp)
+            self.set_end(entry.timestamp, source_msg=entry.message)
             return True
 
         return False
