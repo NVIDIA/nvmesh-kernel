@@ -1279,6 +1279,7 @@ static void search_stale_lock_hash_and_fill_response_cuuid(
 	// If the client disconnected (not active), left a stale lock behind, and the stale lock is not fully cleaned yet
 	// For now, we simply scan all the stale_locks of a seg. If needed, we can add a hash by lockid for this
 	lock_stale_locks_hash(seg_active);
+	TODO(Add seg_active->stale_locks_hash_by_lockid and search directly);
 	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &(seg_active->stale_locks_hash)) {
 		N_Tf(gkit954, "seg=@UUID_8 comparing @X with @X",
 			nvmeibt_seg_active_UUID_8(seg_active),
@@ -1441,7 +1442,7 @@ void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ct
 		// inactive. I.e., remove from the timeout list
 		upd_registrant_sync_timeout(reg_ctx, REG_TIMEOUT_REASON_DEL_ME);
 
-		remove_active_registrant(seg_active, reg_ctx);
+		remove_active_registrant(seg_active, reg_ctx);	TODO(A mess? As if not needed since will be called from free_reg_ctx(reg_ctx) below, but added to stale_registrants_hash_by_lockid, not yet reg_ctx->n_stale_locks);
 
 		// notify recovery tasks of a registrant removal
 		if (reg_ctx->is_recoverer)
@@ -1452,6 +1453,7 @@ void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ct
 		NDUMP_N_ACTIVE_REGISTRANTS(trace_3_register_nvmeibt_register_terminate_registrant, seg_active);
 	}
 	// Now in stale_registrants. If still has stale locks then skip it, stale-recovery will retry
+	TODO(If we just added the reg_ctx to stale_registrants_hash_by_lockid then we didnt have the opportunity to scan and increase its reg_ctx->n_stale_locks. What id this code doing?);
 	if (reg_ctx->n_stale_locks) {
 		if (!is_force) {
 			N_Tf(djur843, "Skipping. lockid=@T_LID seg=@UUID_8 still has stale_locks is_active_registrant=@BOOL",
@@ -1945,6 +1947,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 				N_Tf(ddhhuu5, "Sending NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED to handle=@HANDLE on seg=@UUID_8 lock_id=@T_LID",
 					awaiting_reg_ctx->client_messaging_handle, nvmeibt_seg_active_UUID_8(seg_active), response_payload.lock_id);
+				TODO(actually, we can send the LOCK_CLEANED right after we know the client is unregistered. But make sure that the client only work with stale-locks);
 				if (nvmeibt_register_send_msg_to_registrant(awaiting_reg_ctx,
 															NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED,
 															NVMEIBT_CLIENT_TR_REASON_NONE,
@@ -1974,6 +1977,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 	XHASHTABLE_FOR_EACH_SAFE(awaited_lockid, &seg_active->awaited_lockids) {
 		N_Tf(registrant_disconnect_finalize_1, "Clearing disconnected registrants for lockid=@T_LID num_recipients=@INT",
 			nvmeib_lockid_purify(awaited_lockid->lockid_key), XDLIST_N_ELEMNTS(&(awaited_lockid->awaiting_registrants)));
+		TODO(Convert XDLIST awaited_lockid->awaiting_registrants to awaited_lockid->awaiting_registrants_hash_by_client_messaging_handle. Well, usually there are very few);
 		XDLIST_FOREACH_SAFE(awaiting_registrant_wrapper, &(awaited_lockid->awaiting_registrants)) {
 			struct nvmeibt_registrant_ctx *awaiting_reg_ctx = awaiting_registrant_wrapper->reg_ctx;
 			if (awaiting_reg_ctx->client_messaging_handle == reg_ctx->client_messaging_handle) {
@@ -2767,6 +2771,7 @@ int nvmeibt_register_timeout_occurred(void)
 	NFIN;
 	getnstimeofday_boot(&now);
 	// Go over the local disk_segments, and locate the expired registrants' timeout
+	TODO(Although this function is called rarely, maybe better add a heap for it);
 	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			struct nvmeibt_registrant_ctx	*reg_ctx;
