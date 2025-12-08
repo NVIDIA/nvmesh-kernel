@@ -4,11 +4,6 @@
 #include <netinet/in.h>
 #include <time.h>
 #include <sys/timerfd.h>
-#if 0
-#ifdef TOMA_DEBUG
-#	undef TOMA_DEBUG
-#endif
-#endif
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
 #include "nvmeibt_srm.h"
