@@ -852,9 +852,9 @@ static void __stop_sw(struct nvmeibc_recovery *recov, struct nvmeibc_recov_sync_
 {
 	int n_sw_running, i = (int)(sw-recov->sw);
 	sw->job.err = rv;
+	_NDRR(tr_1_sttop_sw, "sw=@INT stop, still running=@INT", i, atomic_read(&recov->n_sw_running) - 1);
 	n_sw_running = atomic_dec_return(&recov->n_sw_running);		// here if (n_sw_running != 0) everything can get free. So we set rv before dec, otherwise this is data corruption
-	_NDRR(tr_1_sttop_sw, "sw=@INT stop, still running=@INT", i, n_sw_running);
-	WARN_RR(n_sw_running < 0, "Recov, Wrong counting of workers, sw=%d stop, still running=%d!\n", i, n_sw_running);
+	WARN(n_sw_running < 0, "Recov, Wrong counting of workers, sw=%d stop, still running=%d!\n", i, n_sw_running);
 	if (n_sw_running == 0) {
 		BLKCMP_RC_ASYNC_RESUME_SYN(__extract_worst_error_from_sync_workers_and_finish_batch(recov));
 	} // Else: dont touch, workers can get kfree(). The last sync that will finish do the above line
