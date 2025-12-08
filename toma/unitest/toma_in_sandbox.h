@@ -64,6 +64,7 @@ ssize_t override_read(  int fd,       void *buf, size_t nbytes);
 ssize_t override_write( int fd, const void *buf, size_t count);
 ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset);
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset);
+int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restrict __writefds, fd_set *__restrict __exceptfds, struct timeval *__restrict __timeout);
 
 #define open    override_open
 #define close   override_close
@@ -73,6 +74,7 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset);
 #define write   override_write
 #define pread   override_pread
 #define pwrite  override_pwrite
+#define select  override_select
 
 /************************************* syslog *************************************/
 #define _SYS_SYSLOG_H 1

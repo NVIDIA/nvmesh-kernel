@@ -456,6 +456,7 @@ int accept(int fd, struct sockaddr* addr, unsigned int *addr_len) {
 #undef write
 #undef pread
 #undef pwrite
+#undef select
 int override_open(const char *path, int flags, ... /*int mode*/) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	sprintf(addr.sun_path, "%s", path);
@@ -539,6 +540,11 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 	} else {
 		return pwrite(fd, buf, count, offset);
 	}
+}
+
+int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
+	msleep(100);	// Throttled km_comm select
+	return select(nfds, readfds, writefds, exceptfds, timeout);
 }
 
 /************************************* Epoll ********************************/
