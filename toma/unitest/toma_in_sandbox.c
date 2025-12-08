@@ -974,8 +974,7 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (key == NULL) || (len == 0) || (keylen == 0));
 	(void)msgflags;
-	if (0) SANDBOX_PRINT("> |%s|  :  |%s|\n", (char*)key, (char*)payload);
-	SANDBOX_PRINT_TMP("---------------------------------------------------- %d\n", fail_once_every);
+	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (char*)key, (char*)payload);
 	// No, put this on to kt, in a list and then poll_cb will return the callbacks
 	sys->kafka_simu.notify_producer_msg_accepted(ko, &km, NULL);
 	// Todo: Here, submit msg to management simulator

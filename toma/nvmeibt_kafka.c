@@ -1943,29 +1943,26 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 }
 
 static void kafka_poll_all_producers_in_order_to_get_their_cb(int timeout_ms) {
-	if (kafka_applied_init_counter) {		// Poll all the producers. This is the way to trigger their CB
-		if (k_high_priority.msg_to_mgmt_producer) {
-			const int n_events_served = rd_kafka_poll(k_high_priority.msg_to_mgmt_producer, timeout_ms);
-			if (n_events_served > 0)													// Otherwise clutters the log
-				N_Tf(bse3kjb, "Poll k_high_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
-		}
-		if (k_low_priority.msg_to_mgmt_producer) {
-			const int n_events_served = rd_kafka_poll(k_low_priority.msg_to_mgmt_producer, timeout_ms);
-			if (n_events_served > 0)
-				N_Tf(uxjdn3k, "Poll k_low_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
-		}
+	if (k_high_priority.msg_to_mgmt_producer) {
+		const int n_events_served = rd_kafka_poll(k_high_priority.msg_to_mgmt_producer, timeout_ms);
+		if (n_events_served > 0)													// Otherwise clutters the log
+			N_Tf(bse3kjb, "Poll k_high_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
+	}
+	if (k_low_priority.msg_to_mgmt_producer) {
+		const int n_events_served = rd_kafka_poll(k_low_priority.msg_to_mgmt_producer, timeout_ms);
+		if (n_events_served > 0)
+			N_Tf(uxjdn3k, "Poll k_low_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
 	}
 }
 
 static void kafka_commit_done_offsets_of_all_consumer_queues(void);
 static void kafka_close_all_blocking(void) {
 	NFIN;
- _wait_loop:
 	kafka_commit_done_offsets_of_all_consumer_queues();	// Commit whatever we can (An optimization)
-	if (atomic_read(&kafka_n_sends_in_the_air) > 0) {	// Do not close things when still in use
-		N_Tf(jsnewij, "n_sends_in_the_air=@INT. Waiting.", atomic_read(&kafka_n_sends_in_the_air));
-		kafka_poll_all_producers_in_order_to_get_their_cb(10 /*msec*/);
-		goto _wait_loop;
+	for (int msec = 100; atomic_read(&kafka_n_sends_in_the_air) > 0; msec++) {		// Do not close things when still in use, Linear backoff
+		N_Tf(jsnewij, "n_sends_in_the_air=@INT. Waiting @INT[msec]", atomic_read(&kafka_n_sends_in_the_air), msec);
+		kafka_poll_all_producers_in_order_to_get_their_cb(min(msec, 1000));			// After 90[sec] start polling at 1[hz]
+		kafka_commit_done_offsets_of_all_consumer_queues();	// Commit whatever we can (An optimization)
 	}
 	N_Tf(5nduq93, "n_sends_in_the_air=0. Closing.");
 	producer_close(&k_high_priority);
