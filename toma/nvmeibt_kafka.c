@@ -203,7 +203,7 @@ static volatile int64_t			requested_incremental_VOL_updates_consumer_offset = RD
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_offset = RD_KAFKA_OFFSET_INVALID;   // For a new node, start reading from whatever was committed
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_seq_no = -1;   // For a new node, start reading from whatever was committed
 static volatile bool			kafka_requested_is_kafka_shutdown = 0;
-static volatile bool			kafka_is_done_shutdown = 0;
+static volatile bool			kafka_is_done_shutdown = 0;			// Set from kafka thread, read from other threads
 static atomic_t					kafka_n_sends_in_the_air;			// inc/dec from kafka thread, print from stats/main thread
 //
 static unsigned long long		kafka_requested_consuming_leader_VOL_msgs_raft_term = 0;
@@ -2053,8 +2053,7 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	}
 }
 
-static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__)))
-{
+static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__))) {
 	unsigned long long		nsec_sleep_when_producer_msgs_in_the_air = MSEC_TO_NSEC(5);
 	unsigned long long		nsec_sleep_when_nothing_to_do = MSEC_TO_NSEC(10);
 	unsigned long long		nsec_sleep_when_CMD_awaiting_toma_processing = 100000;
@@ -2386,9 +2385,9 @@ out:
 	return rv;
 }
 
-void nvmeibt_kafka_send_encrypt_cmd_response(char *vol_name, struct nvmeibt_urn_uuid *vol_uuid,
+void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct nvmeibt_urn_uuid *vol_uuid,
 											 int encrypt_idx, enum ENCRYPT_CMD_RESPONSE error_code,
-											 bool is_retryable, char *error_str) {
+											 bool is_retryable, const char *error_str) {
 	static struct nvmeibt_Str				*json_payload = NULL;
 	char									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Encript_res_";
 	if (!json_payload)
@@ -2411,46 +2410,39 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 	struct nvmeibt_block_device			*vol;
 	struct nvmeibt_encrypt_params		*encrypt_params = NULL;
 	bool								rv = 1;
-	struct nvmeibt_urn_uuid				urn_uuid;
 	char								shadow_vol_name[32];
 	int									n_written;
 
 	NFIN;
 	N_Tf(nzzxgt6, "cmd='@STR', args='@STR'", encrypt_cmd, encrypt_args);
 	if (CMD_params->bootTime != nvmeibt_global_get_startup_timestamp_msec()) {
-		urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("", &urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 1, "Boot time mismatch");
+		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+		nvmeibt_kafka_send_encrypt_cmd_response("", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 1, "Boot time mismatch");
 		goto out;
 	}
 	vol = nvmeibt_block_device_get_block_device_by_id(vol_uuid);
 	if (!vol) {
-		urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
+		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
 		goto out;
 	}
 	if (encrypt_idx <= vol->encrypt_idx) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Old or duplicate command");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Old or duplicate command");
 		goto out;
 	}
 	if (vol->encrypt_params) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Prev command didn't complete");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Prev command didn't complete");
 		goto out;
 	}
 	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(vol)) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume already deleted");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume already deleted");
 		goto out;
 	}
 	//
 	n_written = snprintf(shadow_vol_name, sizeof(shadow_vol_name), "e_%s", vol->from_config.client_blkdev_name);
 	if (n_written >= (int)sizeof(shadow_vol_name)) {
 		N_Ef(cbs7uuj2, "vol_name='@STR' is too long", vol->from_config.client_blkdev_name);
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume name is too long");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume name is too long");
 		goto out;
 	}
 	//
@@ -2492,31 +2484,21 @@ out:
 	return rv;
 }
 
-static bool encrypt_command_request_response(struct generic_CMD_params_ctx *CMD_params)
-{
+static bool encrypt_command_request_response(struct generic_CMD_params_ctx *CMD_params) {
 	union nvmeib_uuid					*vol_uuid = &CMD_params->volumeUUID;
 	int									encrypt_idx = CMD_params->encryptionCommandIndex;
 	struct nvmeibt_block_device			*vol;
-	struct nvmeibt_urn_uuid				urn_uuid;
-
 	NFIN;
 	vol = nvmeibt_block_device_get_block_device_by_id(vol_uuid);
 	if (!vol) {
-		urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
-		goto out;
-	}
-	if (vol->encrypt_idx == NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 0, "Vol index is uninitialized");
+		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
+	} else if (vol->encrypt_idx == NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX) {
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 0, "Vol index is uninitialized");
 	} else if (encrypt_idx > vol->encrypt_idx) {
 		vol->encrypt_idx = encrypt_idx; // Ignore all commands with less encrypt_idx
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
-												encrypt_idx, ENCRYPT_CMD_RESPONSE_UNSEEN, 1, "Index has never been seen");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_UNSEEN, 1, "Index has never been seen");
 	}
-
-out:
 	NFOUT;
 	return 1;
 }
@@ -2590,8 +2572,7 @@ static inline bool is_event_type_incremental(enum KAFKA_EVENT_TYPE event_type)
 			event_type == KAFKA_EVENT_TYPE_TARGET_ADD || event_type == KAFKA_EVENT_TYPE_TARGET_DEL);
 }
 
-void nvmeibt_kafka_toma_wakeup_dispatcher(struct kafka_wakeup_params *wakeup_params)
-{
+void nvmeibt_kafka_toma_wakeup_dispatcher(struct kafka_wakeup_params *wakeup_params) {
 	NFIN;
 	if (	(is_event_type_incremental(wakeup_params->event_type) &&
 			 (wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs != nvmeibt_raft_get_current_term()) &&
@@ -2690,5 +2671,3 @@ int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt,
 	(*printf_fn)(printf_ctx, "./kafka-console-consumer.sh --bootstrap-server <machine>:9092 --topic zone1.leader.incrementalUpdates.1.0.0 --from-beginning\n");
 	return 0;
 }
-
-/******************************************************************************/

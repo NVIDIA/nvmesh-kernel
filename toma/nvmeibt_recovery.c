@@ -1077,19 +1077,14 @@ static void encrypt_action_end_process(struct nvmeibt_block_device *shadow_vol)
 }
 
 static void attach_shadow_vol_for_encryption_finalize(int attach_detact_rv, struct nvmeibt_block_device *shadow_vol,
-													  __attribute__((__unused__)) enum RECOVERY_ATTACH_CMD attach_cmd)
-{
-	struct nvmeibt_encrypt_params					*encrypt_params = shadow_vol->encrypt_params;
-	struct run_exec_on_blkdev_ctx					*exec_ctx = &encrypt_params->exec_ctx;
-	struct nvmeibt_block_device						*origin_vol;
-
+													  __attribute__((__unused__)) enum RECOVERY_ATTACH_CMD attach_cmd) {
+	struct nvmeibt_encrypt_params					*ep = shadow_vol->encrypt_params;
+	struct run_exec_on_blkdev_ctx					*exec_ctx = &ep->exec_ctx;
 	NFIN;
 	if (attach_detact_rv) {
-		origin_vol = encrypt_params->origin_vol;
+		const struct nvmeibt_block_device *vol = ep->origin_vol;
 		N_Wf(soo01x6, "vol=@STR attach failed", shadow_vol->from_config.client_blkdev_name);
-		nvmeibt_kafka_send_encrypt_cmd_response(origin_vol->from_config.client_blkdev_name, &origin_vol->urn_uuid,
-												encrypt_params->encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 1,
-												"TOMA vol attach error");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 1, "TOMA vol attach error");
 		encrypt_action_end_process(shadow_vol);
 		goto out;
 	}
@@ -1104,7 +1099,6 @@ static void attach_shadow_vol_for_encryption_finalize(int attach_detact_rv, stru
 	exec_ctx->exec_rv = 0;
 	nvmeibt_detach_vol_for_encryption(exec_ctx);
 #endif
-
 out:
 	NFOUT;
 }
@@ -1189,12 +1183,11 @@ static bool is_cryptsetup_error_retryable(int err)
 }
 
 static void detach_shadow_vol_for_encryption_finalize(int attach_detact_rv, struct nvmeibt_block_device *shadow_vol,
-													  __attribute__((__unused__)) enum RECOVERY_ATTACH_CMD attach_cmd)
-{
-	struct nvmeibt_encrypt_params					*encrypt_params = shadow_vol->encrypt_params;
-	struct nvmeibt_block_device						*origin_vol = encrypt_params->origin_vol;
-	struct run_exec_on_blkdev_ctx					*exec_ctx = &encrypt_params->exec_ctx;
-
+													  __attribute__((__unused__)) enum RECOVERY_ATTACH_CMD attach_cmd) {
+	struct nvmeibt_encrypt_params					*ep = shadow_vol->encrypt_params;
+	const struct nvmeibt_block_device				*vol = ep->origin_vol;
+	struct run_exec_on_blkdev_ctx					*exec_ctx = &ep->exec_ctx;
+	const char *bdev_name = vol->from_config.client_blkdev_name;
 	if (attach_detact_rv)
 		N_Wf(su801x6, "vol=@STR detach failed", shadow_vol->from_config.client_blkdev_name);
 
@@ -1202,28 +1195,20 @@ static void detach_shadow_vol_for_encryption_finalize(int attach_detact_rv, stru
 	NVMEIBT_LONG_TRACE_WRAPPER(1c7sjir, "STDERR", nvmeibt_Str_str(exec_ctx->child_stderr_buf), nvmeibt_Str_strlen(exec_ctx->child_stderr_buf));
 	sanitize_str(&exec_ctx->child_stdout_buf);
 	sanitize_str(&exec_ctx->child_stderr_buf);
-
 	if (exec_ctx->toma_rv)
-		nvmeibt_kafka_send_encrypt_cmd_response(origin_vol->from_config.client_blkdev_name, &origin_vol->urn_uuid,
-												encrypt_params->encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 1,
-												(char *)nvmeibt_Str_str(exec_ctx->child_stderr_buf));
+		nvmeibt_kafka_send_encrypt_cmd_response(bdev_name, &vol->urn_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 1, nvmeibt_Str_str(exec_ctx->child_stderr_buf));
 	else if (exec_ctx->exec_rv)
-		nvmeibt_kafka_send_encrypt_cmd_response(origin_vol->from_config.client_blkdev_name, &origin_vol->urn_uuid,
-												encrypt_params->encrypt_idx, ENCRYPT_CMD_RESPONSE_CMD_ERR, is_cryptsetup_error_retryable(exec_ctx->exec_rv),
-												(char *)nvmeibt_Str_str(exec_ctx->child_stderr_buf));
+		nvmeibt_kafka_send_encrypt_cmd_response(bdev_name, &vol->urn_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_CMD_ERR, is_cryptsetup_error_retryable(exec_ctx->exec_rv), nvmeibt_Str_str(exec_ctx->child_stderr_buf));
 	else
-		nvmeibt_kafka_send_encrypt_cmd_response(origin_vol->from_config.client_blkdev_name, &origin_vol->urn_uuid,
-												encrypt_params->encrypt_idx, ENCRYPT_CMD_RESPONSE_SUCCESS, 0, "");
+		nvmeibt_kafka_send_encrypt_cmd_response(bdev_name, &vol->urn_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_SUCCESS, 0, "");
 
 	NNVMEIBT_STR_FREE(vwi43k3, exec_ctx->child_stdout_buf);
 	NNVMEIBT_STR_FREE(w9ak20m, exec_ctx->child_stderr_buf);
-
 	if (nvmeibt_encrypt_delay == ENCRYPT_DELAY_BEFORE_COMMIT) {
 		sleep(1);
 		N_Ef(wu8334n, "ENCRYPT DEBUG");
 		nvmeibt_abort(ES_FATAL);
 	}
-
 	encrypt_action_end_process(shadow_vol);
 }
 
