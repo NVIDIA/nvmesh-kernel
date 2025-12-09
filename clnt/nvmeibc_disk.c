@@ -9398,14 +9398,13 @@ static void ioch_drained_complete_cmds(struct nvmeibc_disk *disk,
 			dcmd->cmd_type);
 
 		if (dcmd->cmd_type == NVMEIBC_DISK_CMD_IO) {
-			dcmd->stats_done.type = STATS_DONE_LLP_COMPLETE_IOCH_DRAINED;
-			nvmeibc_ib_net_complete_bcmd(dcmd, NULL);
+			nvmeibc_ib_net_complete_bcmd(dcmd, STATS_DONE_LLP_COMPLETE_IOCH_DRAINED, NULL);
 		}
 		else if (dcmd->cmd_type == NVMEIBC_DISK_CMD_GEN) {
-			nvmeibc_ib_net_nordda_complete_gcmd(dcmd, NULL);
+			nvmeibc_ib_net_nordda_complete_gcmd(dcmd, STATS_DONE_LLP_COMPLETE_IOCH_DRAINED, NULL);
 		}
 		else if (dcmd->cmd_type == NVMEIBC_DISK_CMD_LOCK) {
-			nvmeibc_ib_net_nordda_complete_lcmd(disk_to_lock(dcmd), -EIO);
+			nvmeibc_ib_net_nordda_complete_lcmd(disk_to_lock(dcmd), STATS_DONE_LLP_COMPLETE_IOCH_DRAINED, -EIO);
 		}
 		else {
 			BUG();

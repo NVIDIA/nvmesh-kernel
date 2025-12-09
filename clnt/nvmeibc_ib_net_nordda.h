@@ -98,10 +98,11 @@ void nvmeibc_ib_net_nordda_unmap_and_unlink_gcmd(
 	struct nvmeibc_volume_request *req, int comp_code);
 void nvmeibc_ib_net_nordda_complete_gcmd(
 	struct nvmeibc_disk_command *dcmd,
+	enum stats_done_info_type done_type,
 	struct nvmeibc_dev *local_dev);
 void nvmeibc_ib_net_nordda_complete_gen_cmd(
 	struct nvmeibc_ib_net_nordda *net,
-	struct nvmeibc_volume_request *req, int comp_code);
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code);
 
 /* lock-cmd */
 struct nvmeibc_disk_lock_cmd;
@@ -113,9 +114,9 @@ void nvmeibc_ib_net_nordda_unlink_lcmd(
 	struct nvmeibc_ib_net_nordda *net,
 	struct nvmeibc_volume_request *req);
 void nvmeibc_ib_net_nordda_complete_lcmd(
-	struct nvmeibc_disk_lock_cmd *lock_cmd, int comp_code);
+	struct nvmeibc_disk_lock_cmd *lock_cmd, enum stats_done_info_type done_type, int comp_code);
 void nvmeibc_ib_net_nordda_complete_lock_cmd(
 	struct nvmeibc_ib_net_nordda *net,
-	struct nvmeibc_volume_request *req, int comp_code);
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code);
 
 #endif

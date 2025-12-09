@@ -489,7 +489,7 @@ enum stats_done_info_type {
 	STATS_DONE_LLP_COMPLETE_IO_RESPONSE,
 	STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_SAVE,
 	STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_REUSE,
-	STATS_DONE_LLP_COMPLETE_IO_RESPONSE_WAIT_RECV_COMP,
+	STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_REUSE_DEL,
 	STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE,
 	STATS_DONE_LLP_COMPLETE_LLP_LOCAL_IO_CB,
 	STATS_DONE_LLP_COMPLETE_LLP_LOCAL_LOCK_WORK,
@@ -497,6 +497,10 @@ enum stats_done_info_type {
 	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_GEN_CMD_NO_RDDA,
 	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_IO_CHANNEL,
 	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_LOCK_CMD_NO_RDDA,
+	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_OE_FINISH_WRITE_BUF_SAVE,
+	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_OE_FINISH_WRITE_BUF_REUSE,
+	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_OE_FINISH_WRITE_BUF_REUSE_DEL,
+	STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_OE_FINISH_READ,
 };
 
 struct stats_done_info {
@@ -523,6 +527,7 @@ struct nvmeibc_dev;
 struct nvmeibc_disk_command_workqe {
 	struct workqe_struct work;
 	struct nvmeibc_dev *dev;
+	enum stats_done_info_type done_type;
 };
 
 struct nvmeibc_disk_command {
@@ -566,7 +571,8 @@ struct nvmeibc_disk_command {
 #endif
 
 	bool defer_cb;							/* defer running cb helper */
-	void (*ulp_cb)(struct nvmeibc_disk_command *, struct nvmeibc_dev *);
+	void (*ulp_cb)(struct nvmeibc_disk_command *, enum stats_done_info_type, struct nvmeibc_dev *);
+	enum stats_done_info_type ulp_cb_done_type;
 	const struct nvmeib_cpu_mask_info *cpu_mask_info;
 	struct nvmeibc_disk_command_workqe work; /* for deferring on pcpu wq */
 	bool local_cmd;							/* bool, is the command local or remote */

@@ -1771,8 +1771,8 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 			nvmeibc_ib_net_free_req(&ch->net.base, &req->req);
 			nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
 			
-			bcmd->disk_cmd.stats_done.type = STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_SAVE;
-			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, req->comp_code);
+			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, 
+				STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_SAVE,req->comp_code);
 			goto out;
 		}
 		if (req->req.reused_bb) {
@@ -1783,8 +1783,8 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 		}
 		del_reuse_request(&req->req, ch->base.disk);
 		nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
-		bcmd->disk_cmd.stats_done.type = STATS_DONE_LLP_COMPLETE_IO_RESPONSE_WAIT_RECV_COMP;
-		nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, req->comp_code);
+		nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, 
+			STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_REUSE_DEL, req->comp_code);
 	}
 
 	/* Dont do this before send-comp of the fast-reg (of this IO) arrives.
@@ -1820,7 +1820,8 @@ static void process_lock_rsp(struct nvmeibc_ib_nordda_channel *ch,
 
 	if (!ch->wait_release_zero_before_cb)
 	{
-		nvmeibc_ib_net_nordda_complete_lock_cmd(&ch->net, &req->req, req->comp_code);
+		nvmeibc_ib_net_nordda_complete_lock_cmd(&ch->net, &req->req, 
+			STATS_DONE_LLP_COMPLETE_IO_RESPONSE, req->comp_code);
 	}
 
 	NFOUT;
@@ -1853,7 +1854,7 @@ static int process_gen_rsp(struct nvmeibc_ib_nordda_channel *ch,
 	}
 	if (!ch->wait_release_zero_before_cb)
 	{
-		nvmeibc_ib_net_nordda_complete_gen_cmd(&ch->net, &req->req, req->comp_code);
+		nvmeibc_ib_net_nordda_complete_gen_cmd(&ch->net, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE, req->comp_code);
 	}
 
 	NFOUT;
@@ -1887,17 +1888,16 @@ static inline void process_rsp_finalize(struct nvmeibc_ib_nordda_channel *ch,
 				del_reuse_request(&req->req, ch->base.disk);
 			}
 			nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
-			req->req.dcmd->stats_done.type = STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE;
-			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, req->comp_code);
+			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
 
 			break;
 
 		case NVMEIBC_DISK_CMD_GEN:
-			nvmeibc_ib_net_nordda_complete_gen_cmd(&ch->net, &req->req, req->comp_code);
+			nvmeibc_ib_net_nordda_complete_gen_cmd(&ch->net, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
 			break;
 
 		case NVMEIBC_DISK_CMD_LOCK:
-			nvmeibc_ib_net_nordda_complete_lock_cmd(&ch->net, &req->req, req->comp_code);
+			nvmeibc_ib_net_nordda_complete_lock_cmd(&ch->net, &req->req, STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE, req->comp_code);
 			break;
 
 		default:
@@ -1957,7 +1957,7 @@ out:
 			BUG_ON((_ch)->wait_release_zero_before_cb);\
 			if (_cpu_mask_info) \
 				__cpu_mask = (_cpu_mask_info)->mask; \
-			(_iocmd)->ulp_cb(_iocmd, _nic); \
+			(_iocmd)->ulp_cb(_iocmd, (_iocmd)->ulp_cb_done_type, _nic); \
 			nvmeib_completion_noise_end(NVMEIB_NOISE_COMPLETION, __cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS, \
 										NVMEIB_NOISE_CTRS_DEFER_COMPLETE_IOCMD); \
 		} \

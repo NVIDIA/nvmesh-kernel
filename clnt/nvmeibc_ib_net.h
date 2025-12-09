@@ -590,14 +590,14 @@ void nvmeibc_ib_net_complete_iocmd_sg(struct nvmeibc_ib_net *net,
 	struct nvmeibc_volume_request *req);
 void nvmeibc_ib_net_unmap_sg_to_ib_sge(struct nvmeib_iu *iu);
 void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code);
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code);
 void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code);
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code);
 void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
 	struct nvmeibc_volume_request *req, int comp_code);
 
 struct nvmeibc_dev;
-void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, struct nvmeibc_dev *local_dev);
+void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, enum stats_done_info_type done_type, struct nvmeibc_dev *local_dev);
 
 void nvmeibc_ib_net_unmap_data(struct nvmeibc_ib_net *net,
 	struct nvmeibc_volume_request *req);

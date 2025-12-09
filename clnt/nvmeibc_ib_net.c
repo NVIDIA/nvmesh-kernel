@@ -4735,7 +4735,7 @@ dp_dbgdi_add_info_core_post_with_magic(struct nvmeibc_ib_net *net,
 
 //[IOCH-DRAINED TBD]: merge to new funcs below, still used by rdda-oe-finish-write
 void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code)
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code)
 {
 	struct nvmeibc_d_iocmd_comp *comp = &req->bcmd->comp;
 
@@ -4756,7 +4756,7 @@ void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
 
 	if (req->bcmd->disk_cmd.complete_w_error)
 		comp_code = -EIO;
-	nvmeibc_disk_cmds_stats_llp_complete(net->admin_ch->base.disk, &req->bcmd->disk_cmd, STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_IO_CHANNEL, comp_code);
+	nvmeibc_disk_cmds_stats_llp_complete(net->admin_ch->base.disk, &req->bcmd->disk_cmd, done_type, comp_code);
 
 	nvmeibc_ib_net_poison_verify(net, req, &comp_code);
 	dp_dbgdi_add_info_core_post_with_magic(net, req, comp_code);
@@ -4796,7 +4796,7 @@ void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
 	bcmd->comp.comp_code = comp_code;
 }
 
-void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, struct nvmeibc_dev *local_dev)
+void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, enum stats_done_info_type done_type, struct nvmeibc_dev *local_dev)
 {
 	struct nvmeibc_disk_io_command *bcmd = disk_to_block(dcmd);
 	//logic we've skipped @ nvmeibc_ib_net_complete_iocmd
@@ -4824,7 +4824,7 @@ void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, struct nvme
 		_NT(trace_1_complete_bcmd,
 			"complete bcdm with comp-code=@COMP_CODE", bcmd->comp.comp_code);
 	nvmeibc_block_cmd_status_debug(bcmd, NVMEIBC_BLOCK_CMD_COMPLETED);
-	nvmeibc_disk_cmds_stats_llp_complete(bcmd->disk, &bcmd->disk_cmd, bcmd->disk_cmd.stats_done.type, bcmd->comp.comp_code);
+	nvmeibc_disk_cmds_stats_llp_complete(bcmd->disk, &bcmd->disk_cmd, done_type, bcmd->comp.comp_code);
 	nvmeibc_block_completion(&bcmd->comp); //Any IO channel NO/RDDA completed IO
 }
 
@@ -4836,13 +4836,13 @@ static void nvmeibc_ib_net_complete_bcmd_work(struct workqe_struct *work)
 	const struct nvmeib_cpu_mask cpu_mask = bcmd->reqs[0].cpu_mask_info->mask;
 
 	nvmeib_completion_noise_start(NVMEIB_NOISE_COMPLETION);
-	nvmeibc_ib_net_complete_bcmd(dcmd, workqe->dev);
+	nvmeibc_ib_net_complete_bcmd(dcmd, workqe->done_type, workqe->dev);
 	nvmeib_completion_noise_end(NVMEIB_NOISE_COMPLETION, cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS,
 			NVMEIB_NOISE_CTRS_IO_COMPLETE_CB_PCPU_WQ);
 }
 
 void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code)
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code)
 {
 	struct nvmeibc_disk_io_command *bcmd = req->bcmd;
 	const struct nvmeib_cpu_mask cpu_mask = req->bcmd->reqs[0].cpu_mask_info->mask;
@@ -4855,13 +4855,15 @@ void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
 		!NVMEIBC_DISK_SAFE_TEST_CURRENT_CPU_IN_BITMAP(&cpu_mask), cpu_mask)) {
 			unsigned int resched_cpu = NVMEIBC_DISK_GET_RESCHED_CPU(cpu_mask.cpus, pcpu_cntr);
 			WQ_INIT_WORK(&bcmd->disk_cmd.work.work, nvmeibc_ib_net_complete_bcmd_work);
+			bcmd->disk_cmd.ulp_cb_done_type = done_type;
 			nvmeib_pcpu_wq_add_work_on_core(nvmeib_get_system_wq(), resched_cpu, &bcmd->disk_cmd.work.work);
 			nvmeib_completion_noise_end(NVMEIB_NOISE_COMPLETION, cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS,
 										NVMEIB_NOISE_CTRS_IO_PCPU_CHANNEL_NOT_IN_MASK);
 	} else if (NVMEIBC_NRCH_DEFER_COMPLETE_IOCMD && bcmd->disk_cmd.defer_cb) {
 		bcmd->disk_cmd.ulp_cb = nvmeibc_ib_net_complete_bcmd;
+		bcmd->disk_cmd.ulp_cb_done_type = done_type;
 	} else {
-		nvmeibc_ib_net_complete_bcmd(&bcmd->disk_cmd, net->port->nic_dev);
+		nvmeibc_ib_net_complete_bcmd(&bcmd->disk_cmd, done_type, net->port->nic_dev);
 		nvmeib_completion_noise_end(NVMEIB_NOISE_COMPLETION, cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS,
 										NVMEIB_NOISE_CTRS_IO_COMPLETE_CB);
 	}

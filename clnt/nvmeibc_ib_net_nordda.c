@@ -1716,7 +1716,7 @@ void nvmeibc_ib_net_nordda_unmap_and_unlink_gcmd(
 	NFOUT;
 }
 
-void nvmeibc_ib_net_nordda_complete_gcmd(struct nvmeibc_disk_command *dcmd, struct nvmeibc_dev *local_dev)
+void nvmeibc_ib_net_nordda_complete_gcmd(struct nvmeibc_disk_command *dcmd, enum stats_done_info_type done_type, struct nvmeibc_dev *local_dev)
 {
 	struct nvmeibc_disk_gen_cmd *gen_cmd = disk_to_gen(dcmd);
 	NFIN;
@@ -1742,7 +1742,7 @@ void nvmeibc_ib_net_nordda_complete_gcmd(struct nvmeibc_disk_command *dcmd, stru
 
 void nvmeibc_ib_net_nordda_complete_gen_cmd(
 	struct nvmeibc_ib_net_nordda *net,
-	struct nvmeibc_volume_request *req, int comp_code)
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code)
 {
 	struct nvmeibc_disk_gen_cmd *gen_cmd = disk_to_gen(req->dcmd);
 	NFIN;
@@ -1752,8 +1752,9 @@ void nvmeibc_ib_net_nordda_complete_gen_cmd(
 
 	if (NVMEIBC_NRCH_DEFER_COMPLETE_IOCMD && gen_cmd->disk_cmd.defer_cb) {
 		gen_cmd->disk_cmd.ulp_cb = nvmeibc_ib_net_nordda_complete_gcmd;
+		gen_cmd->disk_cmd.ulp_cb_done_type = done_type;
 	} else {
-		nvmeibc_ib_net_nordda_complete_gcmd(&gen_cmd->disk_cmd, net->base.port->nic_dev);
+		nvmeibc_ib_net_nordda_complete_gcmd(&gen_cmd->disk_cmd, done_type, net->base.port->nic_dev);
 	}
 
 	NFOUT;
@@ -1803,14 +1804,14 @@ void nvmeibc_ib_net_nordda_unlink_lcmd(
 }
 
 void nvmeibc_ib_net_nordda_complete_lcmd(
-	struct nvmeibc_disk_lock_cmd *lock_cmd, int comp_code)
+	struct nvmeibc_disk_lock_cmd *lock_cmd, enum stats_done_info_type done_type, int comp_code)
 {
 	struct nvmeibc_disk_command *dcmd = &lock_cmd->disk_cmd;
 	NFIN;
 
 	nvmeibc_block_cmd_status_debug(dcmd, NVMEIBC_BLOCK_CMD_COMPLETED);
 	nvmeibc_disk_cmd_status_debug(dcmd, NVMEIBC_DISK_CMD_COMPLETED);
-	nvmeibc_disk_cmds_stats_llp_complete(lock_cmd->ch->base.disk, dcmd, STATS_DONE_LLP_COMPLETE_LLP_COMPLETE_LOCK_CMD_NO_RDDA, comp_code);
+	nvmeibc_disk_cmds_stats_llp_complete(lock_cmd->ch->base.disk, dcmd, done_type, comp_code);
 	nvmeibc_locks_channel_lock_cmd_completion(lock_cmd, comp_code, LOCK_OPR_BYPASS_POSTED); //No-RDDA: recv-comp + free-vol-reqs (remove-work)
 
 	NFOUT;
@@ -1818,14 +1819,14 @@ void nvmeibc_ib_net_nordda_complete_lcmd(
 
 void nvmeibc_ib_net_nordda_complete_lock_cmd(
 	struct nvmeibc_ib_net_nordda *net,
-	struct nvmeibc_volume_request *req, int comp_code)
+	struct nvmeibc_volume_request *req, enum stats_done_info_type done_type, int comp_code)
 {
 	struct nvmeibc_disk_lock_cmd *lock_cmd = disk_to_lock(req->dcmd);
 	NFIN;
 
 	nvmeibc_in_net_warn_on_remote_cmd_wip((&net->base), comp_code);
 	nvmeibc_ib_net_nordda_unlink_lcmd(net, req);
-	nvmeibc_ib_net_nordda_complete_lcmd(lock_cmd, comp_code);
+	nvmeibc_ib_net_nordda_complete_lcmd(lock_cmd, done_type, comp_code);
 
 	NFOUT;
 }
