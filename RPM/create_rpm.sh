@@ -296,6 +296,15 @@ for rpm_kind in $rpms_to_build; do
 
 		#filtering out upgrade scripts not in the correct version format
 		find "$rpm_source_path/upgrade_scripts/" -maxdepth 2 ! -name '[0-9a-zA-Z]*' -type f -exec rm -f {} +
+
+		echo "Changing ko.xz suffix to ko.xz.bcp to avoid kernel xz recognition"
+		compressed_kos=`find $rpm_source_path -name '*.ko.xz' -type f 2>/dev/null`
+		if [ ! -z "$compressed_kos" ]; then
+			# renaming the ko.xz to ko.xz.bcp so the kernel would not be able to load it (allow only ko load while making the decompress only one time)
+			for ko_xz in $compressed_kos; do
+				mv "$ko_xz" "$ko_xz.bcp"
+			done
+		fi
 	fi
 
 	echo Copying specfile

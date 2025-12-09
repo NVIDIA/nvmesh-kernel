@@ -116,7 +116,7 @@ echo "/opt/nvmesh
 # an upgrade
 if [ $1 -gt 1 ] || [ "$1" == "upgrade" ]; then
 	MDIRS="/opt/nvmesh/client-repo /opt/nvmesh/common-repo"
-	compressed_kos=`find -L $MDIRS -name '*.ko.xz' -type f 2>/dev/null`
+	compressed_kos=`find -L $MDIRS -name '*.ko.xz*' -type f 2>/dev/null`
 	# if compressed kos found then remove old decompressed kos
 	if [ ! -z "$compressed_kos" ]; then
 		find -L $MDIRS -name '*.ko' -type f -exec rm -f {} +
@@ -125,7 +125,8 @@ fi
 
 %post
 /opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}/post_install "$1" "$2" "%{version}" "%{release}" "client"
-modinfo $(find -L /opt/nvmesh/client-repo/ -name 'nvmeibc.ko' -o -name 'nvmeibc.ko.xz' -type f) -F nvmeibc_capabilities > /opt/nvmesh/client-repo/.capabilities
+# this should either move to the infra post install phase or the rpm creation phase (since we now work with xz.bcp which is not recognized by modinfo)
+# modinfo $(find -L /opt/nvmesh/client-repo/ -name 'nvmeibc.ko' -o -name 'nvmeibc.ko.xz' -type f) -F nvmeibc_capabilities > /opt/nvmesh/client-repo/.capabilities
 
 
 %preun
