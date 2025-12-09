@@ -148,8 +148,10 @@ static inline bool is_registrant_in_active_hash(struct nvmeibt_seg_active *seg_a
 {
 	struct nvmeibt_registrant_ctx		*candidate_reg_ctx;
 
-	candidate_reg_ctx = nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, reg_ctx->client_messaging_handle);
-	return (nvmeibt_register_is_same_registrant(candidate_reg_ctx, reg_ctx));
+	candidate_reg_ctx = (seg_active ?
+						 nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, reg_ctx->client_messaging_handle) :
+						 NULL);
+	return (!!candidate_reg_ctx);
 }
 
 static void remove_active_registrant(struct nvmeibt_seg_active *seg_active, struct nvmeibt_registrant_ctx *reg_ctx)
@@ -914,13 +916,6 @@ static struct nvmeibt_registrant_ctx *get_active_registrant_by_client_messaging_
 	NFIN;
 	reg_ctx = nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, input_reg_ctx->client_messaging_handle);
 	if (reg_ctx) {
-		if (!nvmeibt_register_is_same_registrant(reg_ctx, input_reg_ctx)) {
-			N_Ef(vyt0mt, "!(nvmeibt_register_is_same_registrant) @NODE,@HANDLE,reg_@LOCKID != @NODE,@HANDLE,reg_@LOCKID",
-				 input_reg_ctx->registrant_node_id.str, input_reg_ctx->client_messaging_handle,
-				 nvmeib_lockid_purify(input_reg_ctx->reg_lock_id),
-				 reg_ctx->registrant_node_id.str, reg_ctx->client_messaging_handle,
-				 nvmeib_lockid_purify(reg_ctx->reg_lock_id));
-		}
 		N_Tf(v6xjko2, "Found active registrant lockid=@LOCKID messaging_handle=@HANDLE node=@NODE registrant_disconnect_time=@ZU",
 			 nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx->client_messaging_handle,
 			 nvmeibt_client_get_hostname(reg_ctx->client), reg_ctx->reg_disconnect_time.tv_sec);
@@ -1548,12 +1543,8 @@ static void add_longing_registrant_on_seg(struct nvmeibt_registrant_ctx *input_r
 	}
 	longing_registrant = nvmeib_hash_search_uint64_t(seg_active->longing_registrants_hash_by_handle, input_reg_ctx->client_messaging_handle);
 	if (longing_registrant) {
-		if (!nvmeibt_register_is_same_registrant(longing_registrant, input_reg_ctx)) {
-			N_Ef(oakmwi2, "Already exists but differ seg=@UUID_8 longing=(@LLX,@X) new=(@LLX,@X)", nvmeibt_seg_active_UUID_8(seg_active),
-				 longing_registrant->client_messaging_handle, nvmeib_lockid_purify(longing_registrant->reg_lock_id),
-				 input_reg_ctx->client_messaging_handle, nvmeib_lockid_purify(input_reg_ctx->reg_lock_id));
-		}
-		N_Tf(dkiru43, "Already exists");
+		N_Tf(dkiru43, "Already exists seg=@UUID_8 longing=(@LLX,@X)", nvmeibt_seg_active_UUID_8(seg_active),
+			 longing_registrant->client_messaging_handle, nvmeib_lockid_purify(longing_registrant->reg_lock_id));
 		goto out;
 	}
 	if (nvmeibt_seg_active_n_longing_registrants(seg_active) >= NVMEIBT_MAX_N_CLIENTS_PER_DISK_SEGMENT) {
@@ -1585,7 +1576,7 @@ bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *inpu
 	// is_remove_from_all_segs_by_cid=true -> The caller is removing longing client from all segments on disk. Otherwise Only for specific segment
 	// In any case, here it is a CID that fully identifies the client
 	longing_registrant = nvmeib_hash_search_uint64_t(input_reg_ctx->seg_active->longing_registrants_hash_by_handle, input_reg_ctx->client_messaging_handle);
-	if (nvmeibt_register_is_same_registrant(longing_registrant, input_reg_ctx)) {
+	if (longing_registrant) {
 		remove_longing_registrant_on_seg(input_reg_ctx->seg_active, longing_registrant);
 	}
 	return 0;
@@ -2153,7 +2144,7 @@ static enum UNREGISTER_RV launch_unregistered_registrant_removal(
 		remove_longing_registrant_on_seg_by_ctx(input_registrant_ctx);
 	}
 	reg_ctx = nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, input_registrant_ctx->client_messaging_handle);
-	if (nvmeibt_register_is_same_registrant(reg_ctx, input_registrant_ctx)) {
+	if (reg_ctx) {
 		reg_ctx->client_conversation_index = input_registrant_ctx->client_conversation_index;	// So that a reply would match
 		if (nvmeibt_register_is_processing_registrant_removal(reg_ctx)) {
 		   goto out;
