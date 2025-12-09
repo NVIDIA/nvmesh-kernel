@@ -2500,12 +2500,6 @@ out:
 	return rv;
 }
 
-static BOOL is_registrant_match_both_handle_and_lockid(struct nvmeibt_registrant_ctx *reg_ctx_1, struct nvmeibt_registrant_ctx *reg_ctx_2)
-{
-	return (nvmeib_lockid_are_purified_eq(reg_ctx_1->reg_lock_id, reg_ctx_2->reg_lock_id) &&
-			(reg_ctx_1->client_messaging_handle == reg_ctx_2->client_messaging_handle));
-}
-
 static void upd_seg_and_registrant_on_reregister_or_sw_topo_ack(
 				struct nvmeibt_registrant_ctx *reg_ctx,
 				struct nvmeibt_registrant_ctx *new_reg_ctx)
@@ -2618,7 +2612,7 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_LOCKID_ALREADY_TAKEN;
 		goto nack;
 	}
-	if (existing_reg_ctx && !is_registrant_match_both_handle_and_lockid(existing_reg_ctx, incoming_reg_ctx)) {
+	if (existing_reg_ctx && !nvmeibt_register_is_same_registrant(existing_reg_ctx, incoming_reg_ctx)) {
 		if (incoming_reg_ctx->is_client_warrant_safe_to_rereg) {
 			existing_reg_ctx->is_client_warrant_safe_to_rereg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
 			nvmeibt_register_terminate_registrant(existing_reg_ctx, 1);
