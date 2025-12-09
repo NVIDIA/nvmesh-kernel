@@ -2614,7 +2614,6 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		if (incoming_reg_ctx->is_client_warrant_safe_to_rereg) {
 			existing_reg_ctx->is_client_warrant_safe_to_rereg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
 			nvmeibt_register_terminate_registrant(existing_reg_ctx, 1);
-			existing_reg_ctx = NULL;
 		} else {
 			N_Tf(t_fg_tomareg, "We have a mess, there is an existing registrant, but with a different handle or lock id: "
 				"@NODE,@HANDLE,reg_@LOCKID  &  @NODE,@HANDLE,reg_@LOCKID",
