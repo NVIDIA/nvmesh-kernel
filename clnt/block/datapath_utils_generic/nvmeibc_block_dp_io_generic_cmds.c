@@ -554,7 +554,7 @@ void nvmeibc_operation_put(struct operation *o, int n_refs)
 	WARN((remain_o < 0), "Suspected bug in nvmeibc rem=%d!\n", remain_o);
 	if (nvmeibc_operation_is_bio_copy_needed_for_read(o) && get_tcp_mode_of_operation(o)){
 		WQ_INIT_WORK(&o->work_copy_to_bio, __nvmeibc_operation_wq_copy_and_comp);
-		dp_block_schedule_operation_work(o, &o->work_copy_to_bio);
+		dp_block_schedule_work(o->cpu_id, &o->work_copy_to_bio);
 	} else {
 		vv_bio_inter_copy_private_read_blocks_to_bio_if_needed(o);
 		__nvmeibc_operation_comp(o);

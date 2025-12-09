@@ -97,4 +97,6 @@ struct nvmeib_cpu_mask_info {
 	u64 gen;	// Mask generation number (if mask is not empty, zero otherwise)
 };
 
+#define NVMEIB_CPU_MASK_INFO_IS_EMPTY(_mask_info) (!(_mask_info).gen)
+
 #endif//NVMEIB_CPU_MASKS_H

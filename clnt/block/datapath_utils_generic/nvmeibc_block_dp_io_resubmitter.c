@@ -24,8 +24,12 @@ static void __repeat_op_execution(struct operation* o, bool by_resubmitter)
 		WARN_ON(!nvmeib_stop_watch_is_start(&o->time.exec));
 	#endif
 
-	WQ_INIT_WORK(&o->work_resubmitted, __execute_resubmitted_on_wq);
-	dp_block_schedule_operation_work(o, &o->work_resubmitted);
+	if (!by_resubmitter || !NVMEIB_CPU_MASK_INFO_IS_EMPTY(o->cpu_mask_info)) {
+		WQ_INIT_WORK(&o->work_resubmitted, __execute_resubmitted_on_wq);
+		dp_block_schedule_operation_work(o, &o->work_resubmitted);
+	} else {
+		nvmeibc_operation_execute(o, false);
+	}
 }
 
 int nvmeibc_io_resubmitter_retry_op(struct operation *o)

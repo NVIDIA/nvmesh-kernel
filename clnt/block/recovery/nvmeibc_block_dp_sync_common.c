@@ -1648,9 +1648,9 @@ int nvmeibc_sync_submit(struct nvmeibc_block_device *nd)
 	nvmeibc_operation_alloc_dbg_id(so->o);
 	if (should_autofail) {
 		__free_sync_op(so, true);
-	} else if (so->o->cpu_id != NR_CPUS) {
+	} else if (!NVMEIB_CPU_MASK_INFO_IS_EMPTY(so->o->cpu_mask_info)) {
 		WQ_INIT_WORK(&so->o->work_rso_execute, __execute_sync_operation_work);
-		dp_block_schedule_operation_work(so->o, &so->o->work_rso_execute);
+		dp_block_schedule_work(so->o->cpu_id, &so->o->work_rso_execute);
 	} else {
 		__execute_sync_operation(so);
 	}

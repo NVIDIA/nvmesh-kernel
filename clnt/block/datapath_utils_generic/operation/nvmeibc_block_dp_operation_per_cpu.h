@@ -188,7 +188,7 @@ static void __wq_execute_elevator(struct workqe_struct *work)
 static void __operation_schedule_execute_no_cache(struct operation *o)
 {
 	WQ_INIT_WORK(&o->work_elev, __wq_execute_elevator);
-	dp_block_schedule_operation_work(o, &o->work_elev);
+	dp_block_schedule_work(o->cpu_id, &o->work_elev);
 }
 
 #if ELEVATOR_TIMERS_IMPLEMENTATION

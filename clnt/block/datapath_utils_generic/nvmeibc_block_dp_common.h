@@ -196,7 +196,7 @@ inline static bool dp_block_schedule_work(int cpu_id, struct workqe_struct *work
 inline static bool dp_block_schedule_operation_work(const struct operation *o, struct workqe_struct *work)
 {
 	BUILD_BUG_ON(NR_CPUS != WORK_CPU_UNBOUND);	// Linux defines WORK_CPU_UNBOUND as NR_CPUS; non-IO operations define their cpu_id as NR_CPUS as a "don't care" value; work queues expect WORK_CPU_UNBOUND as a "don't care" value; make sure these are indeed the same
-	return dp_block_schedule_work(o->cpu_id, work);
+	return dp_block_schedule_work(!NVMEIB_CPU_MASK_INFO_IS_EMPTY(o->cpu_mask_info) ? o->cpu_id : WORK_CPU_UNBOUND, work);
 }
 
 /************************** Datapath Virtual functions ************************/
