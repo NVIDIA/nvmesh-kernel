@@ -89,11 +89,29 @@ enum {
 	NVMEIB_FMR_SIZE       = 512,
 	NVMEIB_FMR_MIN_SIZE	  = 127,
 	NVMEIB_FMR_POOL_SIZE  = 5000,
+
+	/* [NVMESH-7594]: Increase max FR Pool Size and 
+		Change FR Pool Size to be calculated based on:
+		- Number of CPUs, 
+		- Max IOs per CPU, 
+		- Max Disk Operations per IO (for EC 8 + 2)
+		
+		Example: For 32 CPUs, 64 Max IOs per CPU, and 10 Max Disk Operations per IO, the FR Pool Size will be: 
+		32 CPUs * 64 Max IOs per CPU * 10 Max Disk Operations per IO = 20k MRs
+
+		For 128 CPUs, the FR Pool Size will be: 80k MRs
+	*/
+
 #ifndef LOW_MEM
-	NVMEIB_FR_POOL_SIZE  = (1 << 14),
+	NVMEIB_MAX_FR_POOL_SIZE  = (1 << 17),
+	NVMEIB_BLOCK_DFLT_MAX_IOS_PER_CPU = 64,
+	NVMEIB_BLOCK_MAX_DISK_OPS_PER_IO = 10,
 #else
-	NVMEIB_FR_POOL_SIZE  = (1 << 10),
+	NVMEIB_MAX_FR_POOL_SIZE  = (1 << 13),
+	NVMEIB_BLOCK_DFLT_MAX_IOS_PER_CPU = 16,
+	NVMEIB_BLOCK_MAX_DISK_OPS_PER_IO = 10,
 #endif
+
 	NVMEIB_MAP_ALLOW_FMR  = 0,
 	NVMEIB_MAP_NO_FMR     = 1,
 

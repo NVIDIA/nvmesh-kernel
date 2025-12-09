@@ -3022,8 +3022,8 @@ int nvmeib_alloc_fast_reg_pool(struct nvmeib_dev *dev,
 	int rv = 0;
 
 	NFIN;
-	if ((unsigned)pool_size > NVMEIB_FR_POOL_SIZE)
-		pool_size = NVMEIB_FR_POOL_SIZE;
+	if ((unsigned)pool_size > NVMEIB_MAX_FR_POOL_SIZE)
+		pool_size = NVMEIB_MAX_FR_POOL_SIZE;
 	if (dev->use_fast_reg && dev->has_fr) {
 		if (dev->init_from_keeper) {
 			_NT(trace_nvmeib_nvmeib_alloc_fast_reg_pool_init_kept, "Init FR pool from @COUNT kept MRs", dev->keeper_frs_info.n_mr);

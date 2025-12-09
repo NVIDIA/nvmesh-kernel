@@ -638,6 +638,7 @@ static int allocate_fmr(struct nvmeibc_dev *nic_dev)
 	struct ib_fmr_pool *fmr_pool = NULL;
 	struct nvmeib_fr_pool *fr_pool = NULL;
 	int rv = 0;
+	int pool_size = NVMEIB_BLOCK_DFLT_MAX_IOS_PER_CPU * num_online_cpus() * NVMEIB_BLOCK_MAX_DISK_OPS_PER_IO;
 	NFIN;
 
 	if (nic_dev->dev->fmr_pool || nic_dev->dev->fr_pool) {
@@ -646,7 +647,7 @@ static int allocate_fmr(struct nvmeibc_dev *nic_dev)
 	}
 
 	/* allocate fast memory registration pool */
-	if (!nvmeib_alloc_fast_reg_pool(nic_dev->dev, &fmr_pool, &fr_pool, -1, c_dev_fr_pool)) {
+	if (!nvmeib_alloc_fast_reg_pool(nic_dev->dev, &fmr_pool, &fr_pool, pool_size, c_dev_fr_pool)) {
 		if (fmr_pool)
 			nic_dev->dev->fmr_pool = fmr_pool;
 		else if (fr_pool)
