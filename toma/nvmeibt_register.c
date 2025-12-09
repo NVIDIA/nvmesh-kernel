@@ -2567,7 +2567,7 @@ out:
 	return existing_reg_ctx;
 }
 
-static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ctx, struct nvmeibt_registrant_ctx *existing_reg_ctx)
+static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ctx, struct nvmeibt_registrant_ctx *existing_reg_ctx_same_lockid)
 {
 	int								rv = 0;
 	struct nvmeibt_seg_active		*seg_active = incoming_reg_ctx->seg_active;
@@ -2605,20 +2605,20 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		goto toma_not_ready;
 	}
 
-	if (!existing_reg_ctx && lock_id_cache_is_lockid_taken(seg_active, incoming_reg_ctx->reg_lock_id)) {
+	if (!existing_reg_ctx_same_lockid && lock_id_cache_is_lockid_taken(seg_active, incoming_reg_ctx->reg_lock_id)) {
 		// No active registrant, but its journal entries were not fully cleaned yet
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_LOCKID_ALREADY_TAKEN;
 		goto nack;
 	}
-	if (existing_reg_ctx && !nvmeibt_register_is_same_registrant(existing_reg_ctx, incoming_reg_ctx)) {
+	if (existing_reg_ctx_same_lockid && !nvmeibt_register_is_same_registrant(existing_reg_ctx_same_lockid, incoming_reg_ctx)) {
 		if (incoming_reg_ctx->is_client_warrant_safe_to_rereg) {
-			existing_reg_ctx->is_client_warrant_safe_to_rereg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
-			nvmeibt_register_terminate_registrant(existing_reg_ctx, 1);
+			existing_reg_ctx_same_lockid->is_client_warrant_safe_to_rereg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
+			nvmeibt_register_terminate_registrant(existing_reg_ctx_same_lockid, 1);
 		} else {
 			N_Tf(t_fg_tomareg, "We have a mess, there is an existing registrant, but with a different handle or lock id: "
 				"@NODE,@HANDLE,reg_@LOCKID  &  @NODE,@HANDLE,reg_@LOCKID",
-				existing_reg_ctx->registrant_node_id.str, existing_reg_ctx->client_messaging_handle,
-				nvmeib_lockid_purify(existing_reg_ctx->reg_lock_id),
+				existing_reg_ctx_same_lockid->registrant_node_id.str, existing_reg_ctx_same_lockid->client_messaging_handle,
+				nvmeib_lockid_purify(existing_reg_ctx_same_lockid->reg_lock_id),
 				incoming_reg_ctx->registrant_node_id.str, incoming_reg_ctx->client_messaging_handle,
 				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id));
 			// We have a mess, possibly on the client side too
@@ -2632,12 +2632,12 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 toma_not_ready:
 	nvmeibt_register_send_toma_not_ready(incoming_reg_ctx, refusal_reason, NULL);
 	if (refusal_reason == NVMEIBT_CLIENT_TR_REASON_LOCKID_MESS) {
-		if (!nvmeibt_register_is_processing_registrant_removal(existing_reg_ctx) && !is_force_cmd_called(existing_reg_ctx)) {
+		if (!nvmeibt_register_is_processing_registrant_removal(existing_reg_ctx_same_lockid) && !is_force_cmd_called(existing_reg_ctx_same_lockid)) {
 			N_Wf(jiut853, "Surprise REGISTER from a registered registrant lockid=@T_LID(@LOCKID) handle=@HANDLE(@HANDLE)",
-				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id), nvmeib_lockid_purify(existing_reg_ctx->reg_lock_id),
-				incoming_reg_ctx->client_messaging_handle, existing_reg_ctx->client_messaging_handle);
+				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id), nvmeib_lockid_purify(existing_reg_ctx_same_lockid->reg_lock_id),
+				incoming_reg_ctx->client_messaging_handle, existing_reg_ctx_same_lockid->client_messaging_handle);
 			brute_force_disconnect_registrant_client(incoming_reg_ctx, 0);
-			brute_force_disconnect_registrant_client(existing_reg_ctx, 0);
+			brute_force_disconnect_registrant_client(existing_reg_ctx_same_lockid, 0);
 		}
 	}
 	goto out;
