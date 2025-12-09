@@ -1309,28 +1309,21 @@ out:
 	return rv;
 }
 
-int nvmeibt_topology_parse_committed_topology(void)
-{
+int nvmeibt_topology_parse_committed_topology(void) {
 	int			rv = 0;
 	char		*topo_buf;
 	int			topo_buf_len;
 
 	NFIN;
-    if (TOPO_RECORD) {
-		print_stack();
-    }
 	topo_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_FULL, &topo_buf);
 	if (topo_buf_len == 0) {
 		N_Tf(5vsjhs8, "Empty topo. Ignoring.");
-		goto out;
-	}
-	if (topo_buf_len < (int)sizeof(struct nvmeibt_topology_serialized_topo_header)) {
+	} else if (topo_buf_len < (int)sizeof(struct nvmeibt_topology_serialized_topo_header)) {
 		N_Ef(siunneo, "Corrupted topo len=@INT", topo_buf_len);
 		rv = -1;
-		goto out;
+	} else {
+		rv = nvmeibt_parse_buf(topo_buf, topo_buf_len, 0, NVMEIBT_NOT_INITIALIZED_SER_VER, NULL, NVMEIBT_CSV_TYPE_TOPO, NULL);
 	}
-	rv = nvmeibt_parse_buf(topo_buf, topo_buf_len, 0, NVMEIBT_NOT_INITIALIZED_SER_VER, NULL, NVMEIBT_CSV_TYPE_TOPO, NULL);
-out:
 	NFOUT;
 	return rv;
 }

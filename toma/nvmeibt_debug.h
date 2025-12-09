@@ -7,22 +7,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#ifndef unlikely
-#ifdef __GNUC__
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#else
-#define unlikely(x) (x)
-#endif
-#endif
-
-#ifndef likely
-#ifdef __GNUC__
-#define likely(x) __builtin_expect(!!(x), 1)
-#else
-#define likely(x) (x)
-#endif
-#endif
-
 // API VS local file system
 #define TOMA_ROOT_DIR "/"			// Toma is sudo, using root directory
 #define TOMA_DIR_RUN_NVMESH TOMA_ROOT_DIR "var/run/nvmesh"	// Runtime vars directory
@@ -31,9 +15,7 @@
 #define TOMA_BINLOG_DIR     TOMA_LOG_DIR  "/trace_daemon"
 
 #define TOMA_SW_COMPATIBILITY_VER					0x00000310
-
 #define WARN(x...) ({})		// Just in order to compile
-#define INFO(x...) ({})		// Just in order to compile with nvmeibt_dumper
 
 /*
  * The behavior of logging and trace-logging depends on the compilation mode:
@@ -79,9 +61,6 @@
 
 // default logging settings
 
-#define TOPO_RECORD             0
-#define FINFOUT_DBG  			1
-
 #define is_block_device_stat(s)  S_ISBLK((s).st_mode)		// const struct stat s
 
 // convenience log levels. Daniel: Todo: Delete most of the code below and use
@@ -90,8 +69,7 @@
 	#include "unitest/toma_in_sandbox.h"
 #endif
 #include <syslog.h>
-#include "interfaces/log/log_incs.h"		// Must apper after definition of USE_TOMA_LOGGER
-
+#include "interfaces/log/log_incs.h"
 #include "../common/nvmeib_macro_utils.h"
 
 	// config params defaults
@@ -177,13 +155,9 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 })
 
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
-
-#define _CALL_SYSLOG(__syslog_lvl, __printf_fmt, ...) syslog(__syslog_lvl, __printf_fmt, ## __VA_ARGS__)
-
-#define PRINTF_FMT_SIZE 2000
 #define SEND_TO_SYSLOG(_syslog_lvl, auto_generated_printf_fmt, ...) ({							\
 	int __errno_save = errno;																	\
-	static char printf_fmt[PRINTF_FMT_SIZE];													\
+	static char printf_fmt[2000];																\
 	if (!printf_fmt[0]) {																		\
 		TRACE_TO_PRINTF_FMT(printf_fmt, sizeof(printf_fmt), auto_generated_printf_fmt);			\
 	}																							\
@@ -199,26 +173,13 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 #define _NLOGLEVEL_NO_PREFIX(LVL, name, fmt, ...) NVMEIB_LOG_LONGTERM(fmt, NVMEIB_CONCAT2(_,LVL) & no_prefix, /*Default scope*/, name, ##__VA_ARGS__)
 #define AUTO_GENERATED_FMT_FOR_PRINTF(name)       ___trace_fmt_ ## name
 
-#ifdef TOMA_ECLIPSE
-# 	undef AUTO_GENERATED_FMT_FOR_PRINTF
-#	define AUTO_GENERATED_FMT_FOR_PRINTF(...)
-#	undef LOG_TO_TRACE
-# 	define LOG_TO_TRACE(...)
-#	undef SEND_TO_SYSLOG
-#	define SEND_TO_SYSLOG(...)
-#	undef _NLOGLEVEL_NO_PREFIX
-#	define _NLOGLEVEL_NO_PREFIX(...)
-#	undef NVMEIBT_THROTTLED_SYSLOG
-#	define NVMEIBT_THROTTLED_SYSLOG(...)
-#endif	// #ifdef TOMA_ECLIPSE
-
 #define _NMIRROR_LOGLEVEL(LVL, _syslog_lvl, name, ch, toma_lvl_str, fmt, ...) ({						\
 	LOG_TO_TRACE(LVL, name, ch, toma_lvl_str, fmt, ## __VA_ARGS__);										\
 	SEND_TO_SYSLOG(_syslog_lvl, AUTO_GENERATED_FMT_FOR_PRINTF(name), get_my_tid(), ## __VA_ARGS__);		\
 })
 
-#define TOMA_ERR_STR "*TOMAerr* "
-#define TOMA_WARN_STR "*TOMAwarn* "
+#define TOMA_ERR_STR        "*TOMAerr* "
+#define TOMA_WARN_STR       "*TOMAwarn* "
 #define TOMA_INFO_MAJOR_STR "*TOMAinfo* "
 
 #define N_Df(name, fmt, ...)  LOG_TO_TRACE(Df, name, NVMEIB_LOG_LONGTERM, "", fmt, ## __VA_ARGS__)
@@ -245,8 +206,7 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 // assert and abort
 
 #ifdef TOMA_DEBUG
-	#define TOMA_ABORT_IF_DEBUG(__nvmeibt_error_severity_es) \
-			nvmeibt_abort(__nvmeibt_error_severity_es);
+	#define TOMA_ABORT_IF_DEBUG(__nvmeibt_error_severity_es) nvmeibt_abort(__nvmeibt_error_severity_es);
 #else
 	#define TOMA_ABORT_IF_DEBUG(__nvmeibt_error_severity_es)
 #endif
@@ -296,7 +256,6 @@ struct _tracer {
 		.is_on = TRACE_METADATA_is_on_DEFAULT				\
 	}
 
-#ifdef _NVMEIB_TRACE_BACKEND_USER
 #define NVMEIBT_LONG_TRACE_WRAPPER(__name__, __info__, __str_in__, __strlen_in__)	({				\
 	int	MAX_PRINT_SIZE = (TRACE_BUFFER_SIZE - 128);													\
 	char	*__p = (char *)__str_in__;																\
@@ -337,9 +296,6 @@ struct _tracer {
 		N_IMf(__name__ ## _3, "String was too long @SIZE_T", (__strlen_in__));						\
 	}																								\
 })
-#else
-#define NVMEIBT_LONG_TRACE_WRAPPER(__name__, __info__, __str__, __strlen__) N_Tf(__name__, "@STR:\n@STR\n", __info__, __str__);
-#endif
 
 /* Auto binary trace ID, resolved to filename_line, requires __FILE_LITERAL__ infra */
 #ifndef __FILE_LITERAL__
@@ -348,13 +304,8 @@ struct _tracer {
 #define __AUTOID__ NVMEIB_CONCAT2(__FILE_LITERAL__, NVMEIB_CONCAT2(_, __LINE__))
 
 #ifndef NFIN
-	#if FINFOUT_DBG
-		#define NFIN  N_Tf(__AUTOID__, "-->")
-		#define NFOUT N_Tf(__AUTOID__, "<--")
-	#else
-		#define NFIN
-		#define NFOUT
-	#endif
+	#define NFIN  N_Tf(__AUTOID__, "-->")
+	#define NFOUT N_Tf(__AUTOID__, "<--")
 #endif
 
 #define NFOUT_rv N_Tf(__AUTOID__, "<--(rv=@RV)", rv);

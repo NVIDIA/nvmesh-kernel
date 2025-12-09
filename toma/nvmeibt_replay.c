@@ -19,7 +19,8 @@
 #include "nvmeibt_global.h"
 #include "interfaces/log/nvmeibt_dumper.h"
 #include "nvmeibt_topo_bin.h"
-
+#define TOPO_RECORD             0
+#define INFO(x...) ({})		// Just in order to compile with nvmeibt_dumper
 /*
  * record-replay: during replay we need a private location for logs/files, to
  * avoid dependency on recording environment and to avoid ovewriting existing
