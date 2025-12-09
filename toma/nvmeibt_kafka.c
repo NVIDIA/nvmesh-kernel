@@ -1336,6 +1336,7 @@ static int CMD_consume(void) {
 		N_Tf(koo0o09, "old msg received (token @INT<@INT), skipping", CMD_params->tomaToken, nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt());
 		commit_it_now = 1;
 		rv = 0;
+		NNVMEIBT_BM_FREE(uzxhn2k1, CMD_params);
 	} else {
 		struct kafka_wakeup_params *wap = NNVMEIBT_BM_ALLOC(sueklwl, sizeof(*wap));
 		wap->messageType_params = messageType_params;
