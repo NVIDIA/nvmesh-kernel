@@ -143,7 +143,7 @@ decompress_modules_if_needed() {
 		exit 1
 	fi
 
-	kos_to_decompress=`find -L $mdir -name '*.ko.xz'`
+	kos_to_decompress=`find -L $mdir -name '*.ko.xz.bcp'`
 
 	if [ -z "$kos_to_decompress" ]; then
 		return
@@ -151,10 +151,13 @@ decompress_modules_if_needed() {
 
 	should_run_depmod=false
         for ko in $kos_to_decompress; do
-		ko_without_xz=${ko%.xz}
+		ko_without_xz=${ko%.xz.bcp}
 
 		if [ ! -e "$ko_without_xz" ]; then
-			xz -d --keep $ko
+			# use the pipe/redirect method which works for ANY suffix.
+			# this avoids the "Filename has an unknown suffix, skipping" error.
+			# this method also keeps the original compressed file, just like --keep.
+			xz -d < "$ko" > "$ko_without_xz"
         	        if [ $? -ne 0 ]; then
                 	        echo "ERROR: could not decompress $ko with xz"
                         	exit 1
