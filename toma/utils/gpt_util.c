@@ -18,6 +18,7 @@
 #include "../nvmeibt_str.h"
 #include "../nvmeibt_local_disk.h"
 #include "../nvmeibt_uuid.h"
+#include "../nvmeibt_mm_json.h"
 #include "../interfaces/srvr/nvmeibt_srvr_proc.h"	// DISKS_INFO_FILE
 
 #define GPT_UTIL_VERSION	"2.0.0-dev"
@@ -34,6 +35,7 @@ enum GPT_UTIL_ACTION {
 	ACTION_FIX_GPT,				// -f: fix GPT from alternate copy
 	ACTION_FIX_MBR,				// -F: fix MBR
 	ACTION_CHECK_EXCELERO,		// -i: check if EXCELERO_METADATA exists
+	ACTION_EXPORT_JSON,			// --output-json: export GPT to JSON
 	ACTION_UPGRADE_GPT			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
 };
 
@@ -50,14 +52,17 @@ struct gpt_util_config {
 	uint64_t				pba_hw_e;
 	int						pblk_size;
 
-	// Display options (for ACTION_DISPLAY_GPT only)
-	char					gpt_copy_option[16];	// primary|alternate|both
+	// Display/export options
+	char					gpt_copy_option[16];	// primary|alternate|both (for both display and export)
 
 	// Filtering options
 	char					filter_uuid_str[64];	// Filter by UUID (empty = no filter)
 	uint64_t				filter_lba;				// Filter by LBA (0 = no filter)
 	BOOL					has_uuid_filter;
 	BOOL					has_lba_filter;
+
+	// JSON export options (for ACTION_EXPORT_JSON)
+	char					output_json_file[256];	// Output JSON filename
 };
 
 
@@ -81,6 +86,168 @@ struct gpt_util_config {
 
 // Forward declarations
 static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt);
+static void SELF_TEST_mark_file_persistent(const char *filepath);
+
+/**
+ * Export one GPT copy to JSON (helper function)
+ */
+static void export_gpt_copy_entries_to_json(const char *copy_name,
+											  const struct nvmeibt_disk_gpt_header *header,
+											  const struct nvmeibt_disk_gpt_partition_entry *entries,
+											  int max_n_entries,
+											  struct nvmeibt_Str *json_output,
+											  BOOL is_last_section)
+{
+	struct nvmeibt_urn_uuid	urn_uuid;
+	int						i;
+	int						entry_count = 0;
+
+	nvmeibt_Str_sprintf(json_output, "  \"main_gpt_%s\": {\n", copy_name);
+	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&header->disk_obj_uuid);
+	nvmeibt_Str_sprintf(json_output, "    \"disk_uuid\": \"%s\",\n", urn_uuid.str);
+	nvmeibt_Str_sprintf(json_output, "    \"n_partition_entries\": %d,\n", header->n_partition_entries);
+	nvmeibt_Str_sprintf(json_output, "    \"first_usable_pba\": %lu,\n", header->first_usable_pba);
+	nvmeibt_Str_sprintf(json_output, "    \"last_usable_pba\": %lu,\n", header->last_usable_pba);
+	nvmeibt_Str_sprintf(json_output, "    \"entries\": [\n");
+
+	// Export partition entries
+	for (i = 0; i < max_n_entries; i++) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[i])) {
+			const struct nvmeibt_disk_gpt_partition_entry *entry = &entries[i];
+			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
+			struct nvmeibt_urn_uuid part_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_guid);
+
+			if (entry_count > 0) {
+				nvmeibt_Str_sprintf(json_output, ",\n");
+			}
+			nvmeibt_Str_sprintf(json_output, "      {\n");
+			nvmeibt_Str_sprintf(json_output, "        \"index\": %d,\n", i);
+			nvmeibt_Str_sprintf(json_output, "        \"type_guid\": \"%s\",\n", type_urn.str);
+			nvmeibt_Str_sprintf(json_output, "        \"partition_guid\": \"%s\",\n", part_urn.str);
+			nvmeibt_Str_sprintf(json_output, "        \"pba_s\": %lu,\n", entry->pba_s);
+			nvmeibt_Str_sprintf(json_output, "        \"pba_e\": %lu,\n", entry->pba_e);
+			nvmeibt_Str_sprintf(json_output, "        \"attributes\": %lu,\n", entry->attributes);
+			nvmeibt_Str_sprintf(json_output, "        \"name\": \"%.72s\"\n", entry->partition_name);
+			nvmeibt_Str_sprintf(json_output, "      }");
+			entry_count++;
+		}
+	}
+
+	nvmeibt_Str_sprintf(json_output, "\n    ]\n");
+	nvmeibt_Str_sprintf(json_output, "  }%s\n", is_last_section ? "" : ",");
+}
+
+/**
+ * Export GPT to JSON (following nvmeibt_mm_json.c patterns)
+ * Uses nvmeibt_Str_sprintf() for JSON serialization
+ * Respects --gpt-copy option to export primary, alternate, or both
+ */
+static int export_gpt_to_json(int disk_fd,
+							   struct gpt_util_config *config,
+							   const char *output_file)
+{
+	int										rv = -1;
+	struct nvmeibt_Str						*json_output = NULL;
+	struct nvmeibt_disk_gpt					temp_gpt;
+	struct nvmeibt_disk_gpt_header			*primary_header = NULL;
+	struct nvmeibt_disk_gpt_header			*alternate_header = NULL;
+	struct nvmeibt_disk_gpt_partition_entry	*primary_entries = NULL;
+	struct nvmeibt_disk_gpt_partition_entry	*alternate_entries = NULL;
+	enum GPT_VALIDITY						primary_header_validity;
+	enum GPT_VALIDITY						alternate_header_validity;
+	enum GPT_VALIDITY						primary_entries_validity;
+	enum GPT_VALIDITY						alternate_entries_validity;
+	time_t									now;
+	char									timestamp[64];
+	int										output_fd = -1;
+	int										n_bytes_header;
+	int										n_bytes_entries;
+
+	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
+
+	// Allocate buffers
+	n_bytes_header = roundup(sizeof(struct nvmeibt_disk_gpt_header), config->pblk_size);
+	n_bytes_entries = roundup(sizeof(struct nvmeibt_disk_gpt_partition_entry) * LARGE_GPT_MAX_NUM_GPT_ENTRIES, config->pblk_size);
+
+	primary_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_pri_hdr, PAGE_SIZE, n_bytes_header);
+	alternate_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_alt_hdr, PAGE_SIZE, n_bytes_header);
+	primary_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_pri_ent, PAGE_SIZE, n_bytes_entries);
+	alternate_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_alt_ent, PAGE_SIZE, n_bytes_entries);
+
+	memset(&temp_gpt, 0, sizeof(temp_gpt));
+	temp_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+	nvmeibt_strlcpy(temp_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(temp_gpt.main_or_metadata));
+
+	// Read all 4 structures
+	nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
+		NULL, disk_fd, config->pblk_size, &temp_gpt,
+		config->pba_s, config->pba_hw_e,
+		&primary_header_validity, &alternate_header_validity,
+		&primary_entries_validity, &alternate_entries_validity,
+		primary_header, alternate_header,
+		primary_entries, alternate_entries);
+
+	// Get timestamp
+	time(&now);
+	strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+
+	// Start JSON
+	nvmeibt_Str_sprintf(json_output, "{\n");
+	nvmeibt_Str_sprintf(json_output, "  \"backup_timestamp\": \"%s\",\n", timestamp);
+	nvmeibt_Str_sprintf(json_output, "  \"device_path\": \"%s\",\n", config->device_path);
+	nvmeibt_Str_sprintf(json_output, "  \"_human_edited\": false,\n");
+	nvmeibt_Str_sprintf(json_output, "  \"_recalculate_crc\": false");
+
+	// Export based on --gpt-copy option
+	if (strcmp(config->gpt_copy_option, "primary") == 0) {
+		nvmeibt_Str_sprintf(json_output, ",\n");
+		export_gpt_copy_entries_to_json("primary", primary_header, primary_entries,
+										temp_gpt.max_n_entries, json_output, true);
+	} else if (strcmp(config->gpt_copy_option, "alternate") == 0) {
+		nvmeibt_Str_sprintf(json_output, ",\n");
+		export_gpt_copy_entries_to_json("alternate", alternate_header, alternate_entries,
+										temp_gpt.max_n_entries, json_output, true);
+	} else {
+		// both
+		nvmeibt_Str_sprintf(json_output, ",\n");
+		export_gpt_copy_entries_to_json("primary", primary_header, primary_entries,
+										temp_gpt.max_n_entries, json_output, false);
+		nvmeibt_Str_sprintf(json_output, ",\n");
+		export_gpt_copy_entries_to_json("alternate", alternate_header, alternate_entries,
+										temp_gpt.max_n_entries, json_output, true);
+	}
+
+	nvmeibt_Str_sprintf(json_output, "}\n");
+
+	// Write JSON to file
+	output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (output_fd < 0) {
+		fprintf(stderr, "Error: Failed to create JSON output file: %s (%s)\n", output_file, strerror(errno));
+		goto out;
+	}
+
+	if (write(output_fd, nvmeibt_Str_str(json_output), nvmeibt_Str_strlen(json_output)) < 0) {
+		fprintf(stderr, "Error: Failed to write JSON to file: %s (%s)\n", output_file, strerror(errno));
+		goto out;
+	}
+
+	// Mark file persistent BEFORE closing (sandbox: prevents auto-deletion)
+	SELF_TEST_mark_file_persistent(output_file);
+
+	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
+	rv = 0;
+
+out:
+	if (output_fd >= 0) {
+		close(output_fd);
+	}
+	NNVMEIBT_BM_FREE(trace_json_cleanup_pri_hdr, primary_header);
+	NNVMEIBT_BM_FREE(trace_json_cleanup_alt_hdr, alternate_header);
+	NNVMEIBT_BM_FREE(trace_json_cleanup_pri_ent, primary_entries);
+	NNVMEIBT_BM_FREE(trace_json_cleanup_alt_ent, alternate_entries);
+	NNVMEIBT_STR_FREE(trace_gpt_json_export_free, json_output);
+	return rv;
+}
 
 int get_device_info(const char* dev_name, int* pblk_size, uint64_t* pba_e)
 {
@@ -1244,6 +1411,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -f, --fix-gpt               Fix GPT from alternate copy (and display)\n");
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
+	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON file\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
 
 	fprintf(stdout, "Display Options:\n");
@@ -1282,10 +1450,11 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"gpt-copy",				required_argument,	0,	'c'},
 		{"filter-uuid",				required_argument,	0,	'u'},
 		{"filter-lba",				required_argument,	0,	'l'},
+		{"output-json",				required_argument,	0,	'J'},
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:imfFU";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:J:imfFU";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1487,6 +1656,16 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->filter_lba = (uint64_t)atoll(optarg);
 			config->has_lba_filter = true;
 			fprintf(stdout, "Filter by LBA: 0x%lx\n", config->filter_lba);
+			break;
+		case 'J':
+			if (config->action != ACTION_DISPLAY_GPT) {
+				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				rv = -1;
+				goto out;
+			}
+			config->action = ACTION_EXPORT_JSON;
+			nvmeibt_strlcpy(config->output_json_file, optarg, sizeof(config->output_json_file));
+			fprintf(stdout, "Action: Export GPT to JSON file: %s\n", config->output_json_file);
 			break;
 		case 'a':
 			nvmeibt_strlcpy(config->device_path, optarg, sizeof(config->device_path));
@@ -1826,6 +2005,24 @@ out:
 }
 
 /**
+ * Phase 3: Execute EXPORT_JSON action
+ */
+static int execute_export_json(int disk_fd, struct gpt_util_config *config)
+{
+	int		rv;
+
+	fprintf(stdout, "\nExporting GPT to JSON...\n");
+
+	rv = export_gpt_to_json(disk_fd, config, config->output_json_file);
+
+	if (rv == 0) {
+		fprintf(stdout, "\nJSON export complete. Edit the file and use --apply-from to restore.\n");
+	}
+
+	return rv;
+}
+
+/**
  * Phase 3: Execute DISPLAY_GPT action
  */
 static int execute_display_gpt(int disk_fd, struct gpt_util_config *config)
@@ -1902,6 +2099,10 @@ static int run_gpt_util_op(int argc, char *argv[])
 
 	case ACTION_UPGRADE_GPT:
 		rv = execute_upgrade_gpt(disk_fd, &config);
+		break;
+
+	case ACTION_EXPORT_JSON:
+		rv = execute_export_json(disk_fd, &config);
 		break;
 
 	default:
