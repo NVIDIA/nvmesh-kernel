@@ -1549,9 +1549,7 @@ out:
 	NFOUT;
 }
 
-static void remove_client_active_registrant_by_lockid(
-	struct nvmeibt_seg_active	*seg_active,
-	union nvmeib_lock_id		reg_lock_id)
+static void remove_disconnected_client_active_registrant_by_lockid(struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id)
 {
 	bool	found = false;
 	struct nvmeibt_registrant_ctx	*reg_ctx;
@@ -2710,7 +2708,7 @@ static int handle_register_registrant_on_disk_segment(struct nvmeibt_registrant_
 		if (!existing_reg_ctx) {
 			// The client is not aware of this registration. Remove it.
 			// It solves the problem of TR_REGISTER that is handled after the registrant_disconnect. Failing to send ACK
-			remove_client_active_registrant_by_lockid(seg_active, new_ctx->reg_lock_id);
+			remove_disconnected_client_active_registrant_by_lockid(seg_active, new_ctx->reg_lock_id);
 		}
 		goto out;
 	}
