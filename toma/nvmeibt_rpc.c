@@ -311,19 +311,18 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 			i++;
 		}
 		return 0;
-	} else if (strcmp("resend-praids-report", argv[1])==0 && argc==3) {
+	} else if ((strcmp("resend-praids-report", argv[1])==0) && (argc==3)) {
 		if (nvmeibt_raft_is_leader()) {
-			if (strcmp("all", argv[2])==0) {
+			if ((strcmp("all", argv[2])==0) || (strcmp("*", argv[2])==0)) {
 				nvmeibt_topology_leader_resend_all_praids_report_to_mgmt();
-				nvmeibt_Str_sprintf(out, "Resended for all volumes.\n");
+				nvmeibt_Str_sprintf(out, "Resent for all volumes\n");
+			} else if (nvmeibt_topology_leader_resend_specific_vol_praids_report_to_mgmt(argv[2])) {
+				nvmeibt_Str_sprintf(out, "volume=%s not found.\n", argv[2]);
 			} else {
-				if (nvmeibt_topology_leader_resend_specific_vol_praids_report_to_mgmt(argv[2]))
-					nvmeibt_Str_sprintf(out, "volume=%s not found.\n", argv[2]);
-				else
-					nvmeibt_Str_sprintf(out, "Resended for volume=%s\n", argv[2]);
+				nvmeibt_Str_sprintf(out, "Resent for volume=%s\n", argv[2]);
 			}
 		} else {
-			nvmeibt_Str_sprintf(out, "I'm not a leader.\n");
+			nvmeibt_Str_sprintf(out, "Rpc rejected. I'm not a leader.\n");
 		}
 		return 0;
 	} else if (strcmp("reelect", argv[1])==0) {
