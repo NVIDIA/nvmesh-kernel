@@ -155,11 +155,12 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 })
 
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
+int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_fmt, const char *filename, int line, const char *func_name);
 #define SEND_TO_SYSLOG(_syslog_lvl, auto_generated_printf_fmt, ...) ({							\
-	int __errno_save = errno;																	\
+	const int __errno_save = errno;																	\
 	static char printf_fmt[2000];																\
 	if (!printf_fmt[0]) {																		\
-		TRACE_TO_PRINTF_FMT(printf_fmt, sizeof(printf_fmt), auto_generated_printf_fmt);			\
+		trace_to_printf_fmt(printf_fmt, sizeof(printf_fmt), auto_generated_printf_fmt, nvmeibt_basename(__FILE__), __LINE__, __FUNCTION__); \
 	}																							\
 	NVMEIBT_THROTTLED_SYSLOG(_syslog_lvl, printf_fmt, ## __VA_ARGS__);							\
 	errno = __errno_save;																		\
@@ -171,11 +172,9 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 			ch("@TID_INT_NOFMT " toma_lvl_str fmt, NVMEIB_CONCAT2(_,LVL), /*Default scope*/, name, get_my_tid(), ##__VA_ARGS__);	\
 	})
 #define _NLOGLEVEL_NO_PREFIX(LVL, name, fmt, ...) NVMEIB_LOG_LONGTERM(fmt, NVMEIB_CONCAT2(_,LVL) & no_prefix, /*Default scope*/, name, ##__VA_ARGS__)
-#define AUTO_GENERATED_FMT_FOR_PRINTF(name)       ___trace_fmt_ ## name
-
 #define _NMIRROR_LOGLEVEL(LVL, _syslog_lvl, name, ch, toma_lvl_str, fmt, ...) ({						\
 	LOG_TO_TRACE(LVL, name, ch, toma_lvl_str, fmt, ## __VA_ARGS__);										\
-	SEND_TO_SYSLOG(_syslog_lvl, AUTO_GENERATED_FMT_FOR_PRINTF(name), get_my_tid(), ## __VA_ARGS__);		\
+	SEND_TO_SYSLOG(_syslog_lvl, ___trace_fmt_ ## name , get_my_tid(), ## __VA_ARGS__);		\
 })
 
 #define TOMA_ERR_STR        "*TOMAerr* "
@@ -211,27 +210,14 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 	#define TOMA_ABORT_IF_DEBUG(__nvmeibt_error_severity_es)
 #endif
 
-#define NTOMA_ASSERT(name, cond, fmt, ...)             	\
-	do {                                               	\
+#define NTOMA_ASSERT(name, cond, fmt, ...) do {     	\
 		if (!(cond)) {                                 	\
 			N_ETf(name, fmt, ## __VA_ARGS__);			\
 			TOMA_ABORT_IF_DEBUG(ES_FATAL);          	\
 		}                                              	\
 	} while (0)
 
-// helpers
-
 void print_stack(void);
-void print_stack_warn(void);
-int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_fmt, const char *filename, int line, const char *func_name);
-
-// TODO - Make this faster by macro
-
-#define FILENAME nvmeibt_basename(__FILE__)
-#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-
-#define TRACE_TO_PRINTF_FMT(printf_fmt, printf_fmt_len, trace_fmt)										\
-	trace_to_printf_fmt(printf_fmt, printf_fmt_len, trace_fmt, __FILENAME__, __LINE__, __FUNCTION__)
 
 struct _tracer {
 	const char *function;

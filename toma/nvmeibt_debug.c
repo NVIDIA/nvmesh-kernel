@@ -52,10 +52,8 @@ int nvmeibt_debug_config_params_parse(char *line, int *n_matches);
 		while (((str[len - 1] == '\n') || (str[len - 1] == '\r')) && (len > 0)) \
 			str[--len] = '\0'
 
-static void try_to_read_sw_ver(char *str, uint32_t *sw_ver)
-{
+static void try_to_read_sw_ver(char *str, uint32_t *sw_ver) {
 	size_t	line_len;
-
 	if (!strncmp(str, TOMA_SW_VER_STRING, sizeof(TOMA_SW_VER_STRING) - 1)) {
 		SANITIZE_STR_END(str, line_len);
 		if (line_len > (strlen(TOMA_SW_VER_STRING) + 3))
@@ -111,7 +109,6 @@ void read_rpc_config_from_persist(bool is_initial_read)
 
 	if (stat(config_params_full_path, &config_stat))
 		goto out;
-
 	if (config_stat.st_mtime == config_stat_last.st_mtime)
 		goto out;
 
@@ -124,7 +121,6 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	__MEASURE_TOOK(N_IMf(nr5e38m, "fopen() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
 	if (!f)
 		goto out;
-
 	if (!fgets(config, sizeof(config), f)) {
 		N_Wf(ga19a6b, "file=@STR is empty", config_params_full_path);
 		goto out;
@@ -171,7 +167,6 @@ continue_reading:
 		else if (nvmeibt_debug_config_params_parse(config + 2, &n_matches)) {
 			// line consumed
 		}
-
 		if (!n_matches) {
 			N_WTf(ploi98c, "No config param matches '@BUFFER_DUMP'", config + 2);
 		}
@@ -181,7 +176,7 @@ continue_reading:
 out:
 	if (f)
 		fclose(f);
-    return;
+	return;
 }
 
 static const uint8_t			explicit_plus = 0x10;
@@ -215,13 +210,7 @@ int update_traces_turn_all_on_or_off(char plus_or_minus, bool is_forced)
 
 char	std_trace_config_file_name[512] = "";
 
-static const char *basename_const(const char *path) {
-    const char *slash = strrchr(path, '/');
-    return slash ? slash + 1 : path;
-}
-
-void update_traces(void)
-{
+void update_traces(void) {
 	struct _tracer			*t;
 	uint8_t					explicit_change;
 	char					config[1024];
@@ -309,7 +298,7 @@ continue_reading:
 			const char *filename = config + 11;
 			FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
 				// fprintf(stderr, "%d cmp '%s' '%s'\n", __LINE__, t->filename, filename);
-				if (!strcmp(basename_const(t->filename), filename)) {
+				if (!strcmp(nvmeibt_basename(t->filename), filename)) {
 					t->plus_minus_flag = explicit_change;
 					n_matches++;
 				}
@@ -582,40 +571,21 @@ void print_stack(void) {
 	strings = backtrace_symbols(buffer, nptrs);
 	for (j = 0; j < nptrs; j++) {
 		syslog(LOG_ERR," %s\n", strrchr(strings[j], '/'));
+		//N_Wf(teps01, " @STRRCHR", strrchr(strings[j], '/'));	// Dont trust this as bin traces may not work, so can stuck in infinite loop
 	}
 }
 
-void print_stack_warn(void) {
-	int j, nptrs;
-	void *buffer[STACK_SIZE];
-	char **strings;
-	nptrs = backtrace(buffer, STACK_SIZE);
-	strings = backtrace_symbols(buffer, nptrs);
-	for (j = 0; j < nptrs; j++) {
-		N_Wf(warn_debug_print_stack_warn, " @STRRCHR", strrchr(strings[j], '/'));
-	}
-}
-
-// Not thread safe but who cares, as long as messages under 5000 will not crash process
-// Temporary (TODO)
-int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* auto_generated_printf_fmt, const char *filename, int line, const char *func_name)
-{
-	int		rv = -1;
-    char 	*p = printf_fmt;
-	int		auto_generated_printf_fmt_len = (int)strlen(auto_generated_printf_fmt);
+int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* auto_generated_printf_fmt, const char *filename, int line, const char *func_name) {
+	char *p = printf_fmt;
+	const int auto_generated_printf_fmt_len = (int)strlen(auto_generated_printf_fmt);
     // keep 100 for safety, and needs at least 120
     if ((printf_fmt_len > 10) && (auto_generated_printf_fmt_len > (int)(printf_fmt_len - 100))) {
     	p += sprintf(p, "STRING TOO LONG!");
-        goto out;
+        return -1;
     }
     p += sprintf(p, "%s[%d]:%s:%s", filename, line, func_name, auto_generated_printf_fmt);
-	// remove last "\n"
-	if (*(p - 1) == '\n') {
-		--p;
-    }
+	if (*(p - 1) == '\n')
+		--p;	// remove last "\n"
 	*p = '\0';
-	rv = 0;
-out:
-    return rv;
+	return 0;
 }
-

@@ -1366,7 +1366,7 @@ static void replay_watchdog_fire(sigval_t sigval __attribute__((unused)))
 	if (watchdog_tick == last_tick) {
 		fprintf(stderr, "%s %s (%ld) %s[%d]: %s\n",
 				get_8_plus_3_char_str_of_now(),
-				__FILENAME__, get_my_tid(), __FUNCTION__, __LINE__,
+				__FILE__, get_my_tid(), __FUNCTION__, __LINE__,
 				"REPLAY WATCHDOG TIMEOUT DETECTED ... ABORTING\n");
 		_exit(1);
 	}
