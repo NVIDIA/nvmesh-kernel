@@ -232,6 +232,7 @@ class ManagementCM(Daemon):
 					self.topicsToSubscribeOn[topic] = True
 
 		if shouldSubscribe:
+			self.logger.debug(f"Subscribing on topics: {topicsToSubscribeOn}")
 			self.consumer.subscribe(topicsToSubscribeOn)
 			if allTopicsInitiated:
 				self.consumableTopicsInitiated = True
@@ -496,6 +497,9 @@ class ManagementCM(Daemon):
 
 		if self.consumer:
 			self.consumer.close()
+			self.consumableTopicsInitiated = False
+			for topic in self.topicsToSubscribeOn:
+				self.topicsToSubscribeOn[topic] = False
 
 	def reloadKafkaConnections(self):
 		self.logger.debug(f"Reloading TLS Certificates & Kafka connections...")
