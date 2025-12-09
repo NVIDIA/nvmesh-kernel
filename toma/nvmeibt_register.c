@@ -99,7 +99,7 @@ static enum UNREGISTER_RV launch_unregistered_registrant_removal(
 										int is_removing_longing,
 										bool is_by_cid);
 
-static void brute_force_disconnect_registrant(
+static void brute_force_disconnect_registrant_client(
 										struct nvmeibt_registrant_ctx *reg_ctx,
 										BOOL is_on_timeout);
 
@@ -342,7 +342,7 @@ static void lock_id_cache_zone_purge_finish(struct nvmeibt_seg_active *seg_activ
 				 nvmeibt_seg_active_UUID_8(seg_active),
 				 seg_active->reg_lock_id_cache_purge_seqno,
 				 seg_active->reg_lock_id_cache_purge_zone);
-			brute_force_disconnect_registrant(reg_ctx, 0);
+			brute_force_disconnect_registrant_client(reg_ctx, 0);
 		}
 	}
 
@@ -2416,7 +2416,7 @@ static void brute_force_disconnect_client(struct nvmeibt_registrant_ctx *reg_ctx
 	NFOUT;
 }
 
-static void brute_force_disconnect_registrant(struct nvmeibt_registrant_ctx *reg_ctx,
+static void brute_force_disconnect_registrant_client(struct nvmeibt_registrant_ctx *reg_ctx,
 											  BOOL is_on_timeout)
 {
 	BOOL was_timeout_active;
@@ -2432,7 +2432,7 @@ static void brute_force_disconnect_registrant(struct nvmeibt_registrant_ctx *reg
 			nvmeibt_abort(ES_FATAL);
 		}
 		N_Tf(do3by0a, "handle=@HANDLE", reg_ctx->client_messaging_handle);
-		TODO(try to merge brute_force_disconnect_client() and brute_force_disconnect_registrant())
+		TODO(try to merge brute_force_disconnect_client() and brute_force_disconnect_registrant_client())
 		brute_force_disconnect_client(reg_ctx);
 	}
 
@@ -2636,8 +2636,8 @@ toma_not_ready:
 			N_Wf(jiut853, "Surprise REGISTER from a registered registrant lockid=@T_LID(@LOCKID) handle=@HANDLE(@HANDLE)",
 				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id), nvmeib_lockid_purify(existing_reg_ctx->reg_lock_id),
 				incoming_reg_ctx->client_messaging_handle, existing_reg_ctx->client_messaging_handle);
-			brute_force_disconnect_registrant(incoming_reg_ctx, 0);
-			brute_force_disconnect_registrant(existing_reg_ctx, 0);
+			brute_force_disconnect_registrant_client(incoming_reg_ctx, 0);
+			brute_force_disconnect_registrant_client(existing_reg_ctx, 0);
 		}
 	}
 	goto out;
@@ -2859,7 +2859,7 @@ void nvmeibt_register_close_seg_active_for_registration(struct nvmeibt_seg_activ
 			if (nvmeibt_register_is_processing_registrant_removal(reg_ctx) || is_registrant_on_timeout(reg_ctx)) {
 				continue;
 			}
-			brute_force_disconnect_registrant(reg_ctx, 0);
+			brute_force_disconnect_registrant_client(reg_ctx, 0);
 		}
 	}
 out:
@@ -2978,7 +2978,7 @@ int nvmeibt_register_timeout_occurred(void)
 					nvmeibt_register_send_msg_to_registrant(reg_ctx, NVMEIBT_CLIENT_MSG_TR_UNREGISTER_DISK_SEGMENT_ACK,
 															NVMEIBT_CLIENT_TR_REASON_AWAITING_CLIENTS_SYNC, 0, NULL);
 					// Ask to brutally disconnect registrants that failed to unregister voluntarily
-					brute_force_disconnect_registrant(reg_ctx, 1);
+					brute_force_disconnect_registrant_client(reg_ctx, 1);
 				}
 			}
 		}
