@@ -1289,31 +1289,25 @@ static void mark_CMD_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_called
 	}
 }
 
-void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset)
-{
+void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset) {
 	mark_CMD_k_msg_for_kafka_commit(kafka_offset, 1);
 }
 
 static int CMD_consume(void) {
 	struct messageType_params_ctx		messageType_params;
-	struct keepAliveToken_params_ctx	keepAliveToken_params;
 	struct mm_json_elem 				*json_tree_root = NULL;
-	struct kafka_wakeup_params			*wakeup_params;
 	int									rv;		// -1: err, 0:consumed something, 1:OK_skipped
-	bool								is_updateTomaKeepaliveToken_msg;
 	struct generic_CMD_params_ctx		*CMD_params;
 	bool								commit_it_now = 0;
 
 	if (!k_CMD.consumer) {
-		rv = 1;
 		N_Tf(y788u22, "Not initialized");
-		goto out;
+		return 1;
 	}
 	if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) > 0) {
 		// In order to have 100% control of the offset of the consumed CMDs, we run one at a time
 		N_Tf(kd94md6, "Skipping is_CMD_processing_and_blocking_other_CMDs");
-		rv = 2000;
-		goto out;
+		return 2000;
 	}
 	rv = consumer_read_msg_from_kafka(&k_CMD, &messageType_params, &json_tree_root);
 	if (rv != 0) {
@@ -1321,19 +1315,17 @@ static int CMD_consume(void) {
 			N_Tf(y7k1u22, "rv=@INT", rv);
 		goto out;
 	}
-	//
-	is_updateTomaKeepaliveToken_msg = (strcmp(messageType_params.messageType, "updateTomaKeepaliveToken") == 0);
-	if (is_updateTomaKeepaliveToken_msg) {
-		// The token-update messages are internal to toma_kafka. No need for wakeup
+	if (strcmp(messageType_params.messageType, "updateTomaKeepaliveToken") == 0) {
+		struct keepAliveToken_params_ctx kap; // The token-update messages are internal to toma_kafka. No need for wakeup
 		commit_it_now = 1;
-		rv = parse_updateTomaKeepaliveToken(json_tree_root, &keepAliveToken_params, 1);
-		if (strcmp(keepAliveToken_params.nodeID, nvmeibt_get_my_hostname()) != 0) {
-			N_Ef(5a82nas, "OOOOPS, this msg nodeID='@STR' != @STR", keepAliveToken_params.nodeID, nvmeibt_get_my_hostname());
+		rv = parse_updateTomaKeepaliveToken(json_tree_root, &kap, 1);
+		if (strcmp(kap.nodeID, nvmeibt_get_my_hostname()) != 0) {
+			N_Ef(5a82nas, "OOOOPS, this msg nodeID='@STR' != @STR", kap.nodeID, nvmeibt_get_my_hostname());
 			rv = -1;
 			goto out;
 		}
-		nvmeibt_kafka_new_kafka_mgmt_zone_number_received(keepAliveToken_params.zone_number);
-		kafka_set_follower_keepalive_token_provided_by_mgmt(keepAliveToken_params.token, keepAliveToken_params.keepaliveInterval);
+		nvmeibt_kafka_new_kafka_mgmt_zone_number_received(kap.zone_number);
+		kafka_set_follower_keepalive_token_provided_by_mgmt(kap.token, kap.keepaliveInterval);
 		rv = 0;
 		goto out;
 	}
@@ -1344,21 +1336,18 @@ static int CMD_consume(void) {
 		N_Tf(koo0o09, "old msg received (token @INT<@INT), skipping", CMD_params->tomaToken, nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt());
 		commit_it_now = 1;
 		rv = 0;
-		goto out;
+	} else {
+		struct kafka_wakeup_params *wap = NNVMEIBT_BM_ALLOC(sueklwl, sizeof(*wap));
+		wap->messageType_params = messageType_params;
+		wap->event_type = KAFKA_EVENT_TYPE_CMD;
+		wap->event_data = CMD_params;
+		wap->kafka_offset = k_CMD.consumer_offset;
+		atomic_add(1, &CMD_consumer_n_msgs_awaiting_toma_processing);
+		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wap);
 	}
-	//
-	wakeup_params = NNVMEIBT_BM_ALLOC(sueklwl, sizeof(*wakeup_params));
-	wakeup_params->messageType_params = messageType_params;
-	wakeup_params->event_type = KAFKA_EVENT_TYPE_CMD;
-	wakeup_params->event_data = CMD_params;
-	wakeup_params->kafka_offset = k_CMD.consumer_offset;
-	atomic_add(1, &CMD_consumer_n_msgs_awaiting_toma_processing);
-	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
 out:
-	if (commit_it_now) {
-		// Progress the offset. Avoid re-reading already processed messages
-		mark_CMD_k_msg_for_kafka_commit(k_CMD.consumer_offset, 0);
-	}
+	if (commit_it_now)
+		mark_CMD_k_msg_for_kafka_commit(k_CMD.consumer_offset, 0);	// Progress the offset. Avoid re-reading already processed messages
 	nvmeibt_mm_json_free_kv_tree(json_tree_root);      // No other consumers
 	return rv;
 }
