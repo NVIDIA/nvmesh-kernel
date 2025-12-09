@@ -3239,7 +3239,7 @@ exit:
 	return rv;
 }
 
-#if !defined(TOMA_REPLAY) && !defined(GPT_UTIL)
+#if !defined(TOMA_REPLAY)
 extern int gpt_util_main(int argc, char *argv[]);
 
 struct {
@@ -3250,8 +3250,7 @@ struct {
 		{ "gpt_util", gpt_util_main },
 };
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
 	char *base;
 	int i, arg_shift = 0, subprog = 0;
 

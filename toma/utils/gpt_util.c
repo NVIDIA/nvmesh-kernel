@@ -1506,12 +1506,3 @@ int gpt_util_main(int argc, char *argv[])
 	return rv;
 }
 
-#ifdef GPT_UTIL
-
-int main(int argc, char *argv[])
-{
-	return gpt_util_main(argc, argv);
-}
-
-#endif //GPT_UTIL
-
