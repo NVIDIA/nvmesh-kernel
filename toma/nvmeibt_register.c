@@ -512,11 +512,11 @@ static BOOL __lock_id_cache_alloc(
 
 		reg_lock_id->bits.lock_id = lock_id;
 
-		N_Tf(fgtr229, "seg=@UUID_8 try? new lock_id=@T_LID reg_lock_id=@C_LID",
-			nvmeibt_seg_active_UUID_8(seg_active), lock_id, nvmeib_lockid_purify(*reg_lock_id));
-
-		if (!lock_id_cache_is_lockid_taken(seg_active, *reg_lock_id)) {
-			N_Tf(gjiu4336, "seg=@UUID_8 alloc have new lockid=@T_LID reg_lock_id=@C_LID",
+		if (lock_id_cache_is_lockid_taken(seg_active, *reg_lock_id)) {
+			N_Tf(ubs4nkg, "seg=@UUID_8 lockid=@T_LID reg_lock_id=@C_LID already taken",
+				nvmeibt_seg_active_UUID_8(seg_active), lock_id, nvmeib_lockid_purify(*reg_lock_id));
+		} else {
+			N_Tf(gjiu4336, "seg=@UUID_8 lockid=@T_LID reg_lock_id=@C_LID is good to go",
 				nvmeibt_seg_active_UUID_8(seg_active), lock_id, nvmeib_lockid_purify(*reg_lock_id));
 			is_found = 1;
 			seg_active->reg_lock_id_cache_last_allocated_lockid = lock_id;
