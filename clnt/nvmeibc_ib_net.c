@@ -5614,7 +5614,7 @@ static void process_per_dev_cq(struct ib_wc *wc, void *ctx)
 {
 	struct nvmeibc_ib_net *net = ctx;
 	struct nvmeibc_channel *ioch = net->ioch;
-	//unsigned long flags;
+	unsigned long flags;
 	u64 start, delta;
 
 	__NFIN;
@@ -5636,7 +5636,7 @@ static void process_per_dev_cq(struct ib_wc *wc, void *ctx)
 	}
 
 	start = jiffies;
-	//nvmeibc_channel_spin_lock_irqsave(ioch, &flags);
+	nvmeibc_channel_spin_lock_irqsave(ioch, &flags);
 	//if (wc->opcode & IB_WC_RECV)
 	if (nvmeib_opcode_from_wc(wc) == NVMEIB_RECV) {
 		nvmeibc_disk_net_intrs_stats_inc(net->ioch->disk, true);
@@ -5651,7 +5651,7 @@ static void process_per_dev_cq(struct ib_wc *wc, void *ctx)
 		else 				net->scq_stats.n_poll++;
 
 	}
-	//nvmeibc_channel_spin_unlock_irqrestore(ioch, flags);
+	nvmeibc_channel_spin_unlock_irqrestore(ioch, flags);
 	delta = jiffies - start;
 	_ND(process_per_dev_cq_e23, "processing time = @INT64", delta);
 	__NFOUT;
