@@ -137,7 +137,7 @@ struct nvmeibt_seg_active {
 	struct nvmeibt_disk_gpt_partition_entry		*metadata_gpt_entry;
 	union nvmeib_lock_blkset_entry				*mmap_locks_tbl;
 	//
-	unsigned int								reg_lock_id_cache_counter;
+	unsigned int								reg_lock_id_cache_last_allocated_lockid;
 	unsigned long								reg_lock_id_cache_purge_seqno;
 	int											reg_lock_id_cache_purge_zone;
 	int											reg_lock_id_cache_purge_n_purges_in_fly;

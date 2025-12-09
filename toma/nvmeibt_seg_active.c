@@ -541,7 +541,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->applied_zeroing_state = NVMEIBT_ZEROING_STATE_UNINITIALIZED;
 	//nvmeibt_seg_active_mark_zeroing_required_as_needed(seg_active);
 
-	seg_active->reg_lock_id_cache_counter = 0;
+	seg_active->reg_lock_id_cache_last_allocated_lockid = 0;
 	seg_active->reg_lock_id_cache_purge_seqno = 0;
 	seg_active->reg_lock_id_cache_purge_zone = -1;
 	seg_active->reg_lock_id_cache_purge_n_purges_in_fly = 0;

@@ -475,7 +475,7 @@ static BOOL __lock_id_cache_alloc(
 	int		zone_no, new_zone_no;
 	BOOL	is_found = 0;
 
-	start_id = seg_active->reg_lock_id_cache_counter;
+	start_id = seg_active->reg_lock_id_cache_last_allocated_lockid;
 	lock_id = start_id;
 	zone_no = NVMEIB_REG_LOCK_ID_TO_ZONE(lock_id);
 
@@ -519,7 +519,7 @@ static BOOL __lock_id_cache_alloc(
 			N_Tf(gjiu4336, "seg=@UUID_8 alloc have new lockid=@T_LID reg_lock_id=@C_LID",
 				nvmeibt_seg_active_UUID_8(seg_active), lock_id, nvmeib_lockid_purify(*reg_lock_id));
 			is_found = 1;
-			seg_active->reg_lock_id_cache_counter = lock_id;
+			seg_active->reg_lock_id_cache_last_allocated_lockid = lock_id;
 			break;
 		}
 	} while (1);
