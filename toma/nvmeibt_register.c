@@ -40,13 +40,6 @@
 
 static struct timespec next_wait_for_registrant_timeout = TIMESPEC_MAX_C99;
 
-enum UNREGISTER_RV {
-	UNREGISTER_RV_OK = 1,
-	UNREGISTER_RV_FAILED = 2,
-	UNREGISTER_RV_IN_WORK = 3,
-	UNREGISTER_RV_SKIPPED = 4,
-};
-
 enum REGISTRANT_DISCONNECT_LAUNCH_STATUS {
 	REGISTRANT_DISCONNECT_LAUNCH_OK			= 1,
 	REGISTRANT_DISCONNECT_LAUNCH_SKIPPED	= 2,
@@ -101,10 +94,6 @@ struct owner_locks_release_wq_entry {
 };
 
 static bool brute_force_test = false;
-
-static enum UNREGISTER_RV launch_unregistered_registrant_removal(
-										struct nvmeibt_registrant_ctx *input_registrant_ctx,
-										int is_removing_longing);
 
 static void brute_force_disconnect_registrant_client(
 										struct nvmeibt_registrant_ctx *reg_ctx,
@@ -2180,7 +2169,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int ci
 					continue;
 				}
 				lock_id_cache_registrant_unregistered(unregistering_reg_ctx);
-				if (launch_unregistered_registrant_removal(unregistering_reg_ctx, 1) == UNREGISTER_RV_FAILED)
+				if (nvmeibt_register_launch_unsubscribed_registrant_removal(unregistering_reg_ctx) == UNREGISTER_RV_FAILED)
 					rv = -1;
 			}
 			if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
@@ -2533,9 +2522,9 @@ static int handle_unregister_registrant_from_disk_segment(struct nvmeibt_registr
 	return rv;
 }
 
-void nvmeibt_register_remove_unsubscribed_registrant(struct nvmeibt_registrant_ctx *input_registrant_ctx)
+enum UNREGISTER_RV nvmeibt_register_launch_unsubscribed_registrant_removal(struct nvmeibt_registrant_ctx *input_registrant_ctx)
 {
-	launch_unregistered_registrant_removal(input_registrant_ctx, 1);
+	return launch_unregistered_registrant_removal(input_registrant_ctx, 1);
 }
 
 /******************          Register      ***********************/

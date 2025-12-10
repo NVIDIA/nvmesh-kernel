@@ -19,6 +19,13 @@ enum REG_TIMEOUT_REASON {
 	REG_TIMEOUT_REASON_DEL_ME	= 0x1 << 2,
 };
 
+enum UNREGISTER_RV {
+	UNREGISTER_RV_OK = 1,
+	UNREGISTER_RV_FAILED = 2,
+	UNREGISTER_RV_IN_WORK = 3,
+	UNREGISTER_RV_SKIPPED = 4,
+};
+
 struct nvmeibt_seg_active;
 struct nvmeibt_topology;
 struct nvmeibt_registrant_ctx;
@@ -140,7 +147,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_l
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
 struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_reg_lock_id(
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
-void nvmeibt_register_remove_unsubscribed_registrant(struct nvmeibt_registrant_ctx *input_registrant_ctx);
+enum UNREGISTER_RV nvmeibt_register_launch_unsubscribed_registrant_removal(struct nvmeibt_registrant_ctx *input_registrant_ctx);
 void nvmeibt_register_make_all_seg_active_registrants_sync_praid_topology(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_clients_sync_check_and_act_upon(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longing(struct nvmeibt_seg_active *seg_active);
