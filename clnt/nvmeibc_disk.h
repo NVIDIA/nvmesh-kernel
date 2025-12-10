@@ -271,10 +271,7 @@ struct nvmeibc_disk_info {
 	/* the used part of my_rscs */
 	int used;
 	/* a list of channels for disk io */
-	struct list_head *priority_heads[32];
-	struct list_head *priority_tails[32];
-	struct list_head available_norddas;
-
+	struct plist_head available_norddas;
 	struct list_head available_channels;
 	struct list_head free_rscs;
 	/* a list to hold block commands that wait for free io channel */
@@ -300,6 +297,8 @@ struct nvmeibc_disk_info {
 
 	struct nvmeibc_ib_nordda_channel *avail_nordda_for_cpu[NVMEIB_DFLT_MAX_CPUS];
 	unsigned n_avail_norddas;
+
+	struct plist_head *avail_norddas_per_numa_node;
 
 	struct nvmeibc_disk_pcpu_nrch pcpu_nrchs[NVMEIB_DFLT_MAX_CPUS];
 
@@ -782,6 +781,7 @@ struct nvmeibc_disk {
 	struct nvmeib_trend peer_release_reason_trend;
 
 	uint nr_get_by_cpu_index;
+	uint nr_get_by_numa_node;
 	uint prio_pending;
 
 	/* time in jiffies where we last had 0 io chans connected */

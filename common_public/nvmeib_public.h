@@ -493,4 +493,8 @@ int nvmeib_public_kasan_test(void);
 #define nvmeib_public_symbol_get(x) ((typeof(&x))(__symbol_get(NVMEIB_PUBLIC_SYMBOL_STR(x))))
 #define nvmeib_public_symbol_put(x) __symbol_put(NVMEIB_PUBLIC_SYMBOL_STR(x))
 
+void nvmeib_public_plist_add(struct plist_node *node, struct plist_head *head);
+void nvmeib_public_plist_del(struct plist_node *node, struct plist_head *head);
+void nvmeib_public_plist_requeue(struct plist_node *node, struct plist_head *head);
+
 #endif

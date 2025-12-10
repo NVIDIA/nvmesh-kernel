@@ -22,7 +22,9 @@ static void ioch_drained_init(struct nvmeibc_channel *ch)
 	INIT_LIST_HEAD(&ch->bailed_cmds.list);
 }
 
-int nvmeibc_channel_init(struct nvmeibc_channel *ch, const struct nvmeibc_cinst_params_core *p)
+int nvmeibc_channel_init(struct nvmeibc_channel *ch, 
+	const struct nvmeibc_cinst_params_core *p,
+	int numa_node)
 {
 	int rv = 0;
 
@@ -46,6 +48,7 @@ int nvmeibc_channel_init(struct nvmeibc_channel *ch, const struct nvmeibc_cinst_
 	ch->reused_bb_cnt = 0;
 	ch->reused_bb_lru_jif = 0;
 	ch->comp_cpu = NVMEIB_CPU_INVALID;
+	ch->numa_node = numa_node;
 	
 	NFOUT;
 	return rv;

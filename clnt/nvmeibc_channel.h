@@ -116,6 +116,7 @@ struct nvmeibc_channel {
 	 * >= 0 - CPU to run completions on.
 	 */
 	int comp_cpu;
+	int numa_node;
 
 	/**************************************************************************************************
 	 * Make the completion processing lockless:
@@ -210,7 +211,9 @@ struct nvmeibc_channel {
 bool nvmeibc_channel_rm_work_get(void);
 void nvmeibc_channel_rm_work_put(void);
 
-int nvmeibc_channel_init(struct nvmeibc_channel *ch, const struct nvmeibc_cinst_params_core *p);
+int nvmeibc_channel_init(struct nvmeibc_channel *ch, 
+	const struct nvmeibc_cinst_params_core *p,
+	int numa_node);
 bool nvmeibc_channel_alive(struct nvmeibc_channel *ch);
 
 void nvmeibc_channel_reset(struct nvmeibc_channel *ch);

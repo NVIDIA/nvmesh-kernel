@@ -1191,5 +1191,85 @@ EXPORT_SYMBOL(nvmeib_kthread_create_on_cpu);
 
 /* symbol_get/put convenience wrappers remain for type casting */
 
+void nvmeib_public_plist_add(struct plist_node *node, struct plist_head *head)
+{
+	struct plist_node *first, *iter, *prev = NULL;
+	struct list_head *node_next = &head->node_list;
+
+	WARN_ON(!plist_node_empty(node));
+	WARN_ON(!list_empty(&node->prio_list));
+
+	if (plist_head_empty(head))
+		goto ins_node;
+
+	first = iter = plist_first(head);
+
+	do {
+		if (node->prio < iter->prio) {
+			node_next = &iter->node_list;
+			break;
+		}
+
+		prev = iter;
+		iter = list_entry(iter->prio_list.next,
+				struct plist_node, prio_list);
+	} while (iter != first);
+
+	if (!prev || prev->prio != node->prio)
+		list_add_tail(&node->prio_list, &iter->prio_list);
+
+ins_node:
+	list_add_tail(&node->node_list, node_next);
+}
+EXPORT_SYMBOL(nvmeib_public_plist_add);
+
+void nvmeib_public_plist_del(struct plist_node *node, struct plist_head *head)
+{
+	if (!list_empty(&node->prio_list)) {
+		if (node->node_list.next != &head->node_list) {
+			struct plist_node *next;
+
+			next = list_entry(node->node_list.next,
+					struct plist_node, node_list);
+
+			/* add the next plist_node into prio_list */
+			if (list_empty(&next->prio_list))
+				list_add(&next->prio_list, &node->prio_list);
+		}
+		list_del_init(&node->prio_list);
+	}
+
+	list_del_init(&node->node_list);
+}
+EXPORT_SYMBOL(nvmeib_public_plist_del);
+
+void nvmeib_public_plist_requeue(struct plist_node *node, struct plist_head *head)
+{
+	struct plist_node *iter;
+	struct list_head *node_next = &head->node_list;
+
+	BUG_ON(plist_head_empty(head));
+	BUG_ON(plist_node_empty(node));
+
+	if (node == plist_last(head))
+		return;
+
+	iter = plist_next(node);
+
+	if (node->prio != iter->prio)
+		return;
+
+	nvmeib_public_plist_del(node, head);
+
+	plist_for_each_continue(iter, head) {
+		if (node->prio != iter->prio) {
+			node_next = &iter->node_list;
+			break;
+		}
+	}
+	list_add_tail(&node->node_list, node_next);
+}
+EXPORT_SYMBOL(nvmeib_public_plist_requeue);
+
 module_init(nvmeib_public_module_init);
 module_exit(nvmeib_public_module_exit);

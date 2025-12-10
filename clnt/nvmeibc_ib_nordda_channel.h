@@ -147,7 +147,8 @@ struct nvmeibc_ib_nordda_channel {
 	   toward this disk via nordda */
 	/* int index; ----- now in the base class ----- */
 	/* link in disk's norddas list */
-	struct list_head available_link;
+	struct plist_node available_link;
+	struct plist_node per_numa_node_link;
 	bool inuse;
 	/* private 'shared' recvq */
 	struct nvmeib_srq_info *priv_srq;

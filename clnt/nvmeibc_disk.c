@@ -472,17 +472,6 @@ static int arnic_prio_cmp_fn(void *priv, struct list_head *a, struct list_head *
 	return 1;
 }
 
-static int nrch_avail_prio_cmp_fn(void *priv, struct list_head *a, struct list_head *b)
-{
-	struct nvmeibc_ib_nordda_channel *nrch_a = container_of(a, struct nvmeibc_ib_nordda_channel, available_link);
-	struct nvmeibc_ib_nordda_channel *nrch_b = container_of(b, struct nvmeibc_ib_nordda_channel, available_link);
-	if (nrch_a->priority.raw < nrch_b->priority.raw)
-		return -1;
-	if (nrch_a->priority.raw == nrch_b->priority.raw)
-		return 0;
-	return 1;
-}
-
 /* coremask channels */
 struct nvmeibc_disk_coremask_chs {
 	struct list_head link; /* link to list head in c_disk */
@@ -2418,7 +2407,7 @@ int nvmeibc_disk_create_remote(struct nvmeibc_ib_admin_channel *ach,
 		info->hcaa = hcaa;
 		info->rscs = rscs;
 		INIT_LIST_HEAD(&info->my_rscs);
-		INIT_LIST_HEAD(&info->available_norddas);
+		plist_head_init(&info->available_norddas);
 		INIT_LIST_HEAD(&info->available_channels);
 		INIT_LIST_HEAD(&info->free_rscs);
 		for (i = 0; i < DISK_PEND_PRIO_MAX; i++)
@@ -3512,11 +3501,11 @@ inline static void update_avail_nordda_for_cpu_locked(struct nvmeibc_disk *disk)
 	unsigned cpu, max_cpu = min_t(unsigned, NVMEIB_DFLT_MAX_CPUS, nr_cpu_ids);
 
 	/* Divide the available norddas into the per-cpu array */
-	if (unlikely(list_empty(&disk->info->available_norddas))) {
+	if (unlikely(plist_head_empty(&disk->info->available_norddas))) {
 		for (cpu = 0; cpu < NVMEIB_DFLT_MAX_CPUS; cpu++)
 			disk->info->avail_nordda_for_cpu[cpu] = NULL;
 	} else {
-		nrch_iter = list_first_entry(&disk->info->available_norddas, typeof(*nrch_iter), available_link);
+		nrch_iter = plist_first_entry(&disk->info->available_norddas, typeof(*nrch_iter), available_link);
 		for (cpu = 0; cpu < max_cpu; cpu++) {
 			if (!cpu_online(cpu)) {
 				disk->info->avail_nordda_for_cpu[cpu] = NULL;
@@ -3531,11 +3520,11 @@ inline static void update_avail_nordda_for_cpu_locked(struct nvmeibc_disk *disk)
 			if (cpu < disk->info->n_avail_norddas)
 				nrch_iter->cpu = cpu;
 
-			if (nrch_iter->available_link.next == &disk->info->available_norddas) {
+			if (nrch_iter == plist_last_entry(&disk->info->available_norddas, typeof(*nrch_iter), available_link)) {
 				/* End of the list - Wrap */
-				nrch_iter = list_first_entry(&disk->info->available_norddas, typeof(*nrch_iter), available_link);
+				nrch_iter = plist_first_entry(&disk->info->available_norddas, typeof(*nrch_iter), available_link);
 			} else {
-				nrch_iter = list_next_entry(nrch_iter, available_link);
+				nrch_iter = plist_next_entry(nrch_iter, available_link);
 			}
 		}
 	}
@@ -3571,76 +3560,6 @@ int nvmeibc_disk_prefix_priority_masks_validate_module_params(void)
 	return 0;
 }
 
-static void prefix_priority_masks_add_nrch(struct nvmeibc_disk *disk, struct nvmeibc_ib_nordda_channel *nrch)
-{
-	struct nvmeibc_disk_info *info = disk->info;
-	int priority = (int)(nrch->priority.raw);
-	int i;
-
-	/* Add to the head of the priority list */
-	if (info->priority_heads[priority] == NULL) {
-		if (list_empty(&info->available_norddas)) {
-			/* Shortcut - main list is empty so just add it */
-			list_add(&nrch->available_link, &info->available_norddas);
-		} else {
-			/* Find the next higer priority with entries */
-			for (i = priority - 1; i >= 0; i--) {
-				if (info->priority_tails[i] != NULL) {
-					/* Add to the tail of the next higher priority */
-					list_add(&nrch->available_link, info->priority_tails[i]);
-					break;
-				}
-			}
-			if (i == -1)
-				/* this is the highest priority - just add to start of the main list */
-				list_add(&nrch->available_link, &info->available_norddas);
-		}
-		/* Set to head&tail of priority list*/
-		info->priority_heads[priority] = &nrch->available_link;
-		info->priority_tails[priority] = &nrch->available_link;
-	} else {
-		list_add_tail(&nrch->available_link, info->priority_heads[priority]);
-		info->priority_heads[priority] = &nrch->available_link;
-	}
-}
-
-static void prefix_priority_masks_del_nrch(struct nvmeibc_disk *disk, struct nvmeibc_ib_nordda_channel *nrch)
-{
-	u32 priority = nrch->priority.raw;
-	struct nvmeibc_disk_info *info = disk->info;
-
-	if (&nrch->available_link == info->priority_heads[priority] && &nrch->available_link == info->priority_tails[priority]) {
-		/* Head and tail - just reset them both */
-		info->priority_heads[priority] = info->priority_tails[priority] = NULL;
-	} else if (&nrch->available_link == info->priority_heads[priority]) {
-		/* it is only the head - move head to next element */
-		info->priority_heads[priority] = nrch->available_link.next;
-	} else if (&nrch->available_link == info->priority_tails[priority]) {
-		/* if its the tail - move tail to prev element */
-		info->priority_tails[priority] = nrch->available_link.prev;
-	} /* else it's in the middle so we can just delete the link */
-
-	list_del_init(&nrch->available_link);
-}
-
-static void prefix_priority_masks_move_tail(struct nvmeibc_disk *disk, struct nvmeibc_ib_nordda_channel *nrch)
-{
-	u32 priority = nrch->priority.raw;
-	struct nvmeibc_disk_info *info = disk->info;
-
-	BUG_ON(info->priority_heads[priority] == NULL);
-	BUG_ON(info->priority_tails[priority] == NULL);
-
-	/* excludes the case where the list has 1 entry */
-	if (&nrch->available_link != info->priority_tails[priority]) {
-		if (&nrch->available_link == info->priority_heads[priority])
-			info->priority_heads[priority] = nrch->available_link.next;
-		list_move(&nrch->available_link, info->priority_tails[priority]);
-		/* set itself to tail of prio */
-		info->priority_tails[priority] = &nrch->available_link;
-	}
-}
-
 inline static void nvmeibc_disk_available_norddas_add(struct nvmeibc_disk *disk,
 	struct nvmeibc_ib_nordda_channel *nrch)
 {
@@ -3648,7 +3567,7 @@ inline static void nvmeibc_disk_available_norddas_add(struct nvmeibc_disk *disk,
 
 	__NFIND;
 
-	if (!list_empty(&nrch->available_link)) {
+	if (!plist_node_empty(&nrch->available_link)) {
 		_NW(warn_disk_nvmeibc_disk_available_norddas_add, "nrch @NRCH, already using available_link", nrch);
 		WARN_ON(1);
 	}
@@ -3659,12 +3578,11 @@ inline static void nvmeibc_disk_available_norddas_add(struct nvmeibc_disk *disk,
 	else {
 		_NT(trace_disk_nvmeibc_disk_available_norddas_add, "Add nrch @NRCH to available norddas list", nrch);
 		spin_lock_irqsave(&disk->spinlock, flags);
-		if (!NVMEIBC_SORT_NRCHS_BY_PRIO && !nvmeibc_disk_prefix_priority_masks_len)
-			list_add_tail(&nrch->available_link, &disk->info->available_norddas);
-		else if (!nvmeibc_disk_prefix_priority_masks_len)
-			prio_list_add_tail(&nrch->available_link, &disk->info->available_norddas, nrch_avail_prio_cmp_fn, NULL);
-		else
-			prefix_priority_masks_add_nrch(disk, nrch);
+		nvmeib_public_plist_add(&nrch->available_link, &disk->info->available_norddas);
+		
+		if (disk->info->avail_norddas_per_numa_node) {
+			nvmeib_public_plist_add(&nrch->per_numa_node_link, &disk->info->avail_norddas_per_numa_node[nrch->base.numa_node]);
+		}
 		disk->info->n_avail_norddas++;
 		update_avail_nordda_for_cpu_locked(disk);
 		spin_unlock_irqrestore(&disk->spinlock, flags);
@@ -3680,14 +3598,14 @@ void nvmeibc_disk_available_norddas_del(struct nvmeibc_disk *disk,
 	unsigned long flags;
 	__NFIND;
 
-	if (!is_pcpu_nrch(nrch) && !list_empty(&nrch->available_link)) {
+	if (!plist_node_empty(&nrch->available_link)) {
 		_NT(trace_disk_nvmeibc_disk_available_norddas_del, "Del nrch @NRCH from available norddas list", nrch);
 		WARN_ON(is_pcpu_nrch(nrch));
 		spin_lock_irqsave(&disk->spinlock, flags);
-		if (!nvmeibc_disk_prefix_priority_masks_len)
-			list_del_init(&nrch->available_link);
-		else
-			prefix_priority_masks_del_nrch(disk, nrch);
+		nvmeib_public_plist_del(&nrch->available_link, &disk->info->available_norddas);
+		if (disk->info->avail_norddas_per_numa_node) {
+			nvmeib_public_plist_del(&nrch->per_numa_node_link, &disk->info->avail_norddas_per_numa_node[nrch->base.numa_node]);
+		}
 		disk->info->n_avail_norddas--;
 		update_avail_nordda_for_cpu_locked(disk);
 		spin_unlock_irqrestore(&disk->spinlock, flags);
@@ -5380,11 +5298,21 @@ MODULE_PARM_DESC(nr_get_least_used, "Get least used nrch (preceded by nr_get_by_
 
 uint nvmeibc_nr_get_by_cpu_index = 0;
 module_param_named(nr_get_by_cpu_index, nvmeibc_nr_get_by_cpu_index, uint, 0644);
-MODULE_PARM_DESC(nr_get_by_cpu_index_tcp, "Get nrch based on CPU-index: 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
+MODULE_PARM_DESC(nr_get_by_cpu_index, "Get nrch based on CPU-index: 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
 
-uint nvmeibc_nr_get_by_cpu_index_tcp = 1;
+uint nvmeibc_nr_get_by_cpu_index_tcp = 2;
 module_param_named(nr_get_by_cpu_index_tcp, nvmeibc_nr_get_by_cpu_index_tcp, uint, 0644);
 MODULE_PARM_DESC(nr_get_by_cpu_index_tcp, "Get nrch based on CPU-index (for TCP): 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
+
+#ifdef CONFIG_NUMA
+uint nvmeibc_nr_get_by_numa_node = 1;
+module_param_named(nr_get_by_numa_node, nvmeibc_nr_get_by_numa_node, uint, 0644);
+MODULE_PARM_DESC(nr_get_by_numa_node, "Get nrch based on NUMA-node: 0 - False, 1 - True and allow fallback to other select schemes");
+
+uint nvmeibc_nr_get_by_numa_node_tcp = 1;
+module_param_named(nr_get_by_numa_node_tcp, nvmeibc_nr_get_by_numa_node_tcp, uint, 0644);
+MODULE_PARM_DESC(nr_get_by_numa_node_tcp, "Get nrch based on NUMA-node (for TCP): 0 - False, 1 - True and allow fallback to other select schemes");
+#endif
 
 static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *disk,
 	int use_nrch_only, void **context, struct nvmeibc_disk_command *disk_cmd)
@@ -5406,6 +5334,40 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 			 use_nrch_only) {
 		*context = NULL;
 
+		if (info->avail_norddas_per_numa_node) {
+			struct plist_head *avail_norddas_this_node;
+			int node = cpu_to_node(raw_smp_processor_id());
+
+			if (disk_cmd->cmd_type == NVMEIBC_DISK_CMD_IO) {
+				/* For IO cmd, get the numa-node of the actual data */
+				struct nvmeibc_disk_io_command *block_cmd = disk_to_block(disk_cmd);
+				if (block_cmd->reqs[0].ndb->table.nents > 0) {
+					struct page *page = sg_page(block_cmd->reqs[0].ndb->table.sgl);
+					int sg_pg_node = page_to_nid(page);
+					if (sg_pg_node != NUMA_NO_NODE)
+						node = sg_pg_node;
+				}
+			}
+
+			avail_norddas_this_node = &info->avail_norddas_per_numa_node[node];
+			if (!plist_head_empty(avail_norddas_this_node)) {
+				plist_for_each_entry(nrch, avail_norddas_this_node, per_numa_node_link) {
+					_ND(trace_4_disk_nvmeibc_disk_get_channel, "nrch=@NRCH @BASE_NAME info=@INFO_PTR", 
+						nrch, nrch->base.name, info);
+					req_reused_bb_lru_is_timeout_stats(&nrch->base);
+					if ((*context = nvmeibc_ib_nordda_channel_get_io_context(nrch))) {
+						ch = &nrch->base;
+						/* rotate for load balancing */
+						nvmeib_public_plist_requeue(&nrch->per_numa_node_link, avail_norddas_this_node);
+			
+						_ND(trace_5_disk_nvmeibc_disk_get_channel, 
+							"Using NORDDA channel @CH_PTR on NUMA node @NODE_ID", ch, numa_node);
+						goto found;
+					}
+				}
+			}
+		}
+
 		if (disk->nr_get_by_cpu_index && smp_processor_id() < NVMEIB_DFLT_MAX_CPUS) {
 			nrch = info->avail_nordda_for_cpu[smp_processor_id()];
 			if (nrch && (*context = nvmeibc_ib_nordda_channel_get_io_context(nrch))) {
@@ -5422,9 +5384,9 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 			/* naive approach, alternatively:
 			   hold per-CQ-buckets or
 			   traveres first subset of fixed num of nrch each time and move it to list-tail */
-			struct nvmeibc_ib_nordda_channel *min_ch = list_first_entry_or_null(
+			struct nvmeibc_ib_nordda_channel *min_ch = plist_first_entry_or_null(
 				&info->available_norddas, struct nvmeibc_ib_nordda_channel, available_link);
-			list_for_each_entry(nrch, &info->available_norddas, available_link) {
+			plist_for_each_entry(nrch, &info->available_norddas, available_link) {
 				if (nrch->n_used_reqs < min_ch->n_used_reqs) {
 					min_ch = nrch;
 				}
@@ -5437,21 +5399,13 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 			}
 		}
 		else {
-			list_for_each_entry(nrch, &info->available_norddas, available_link) {
+			plist_for_each_entry(nrch, &info->available_norddas, available_link) {
 				_ND(trace_1_disk_nvmeibc_disk_get_channel, "nrch=@NRCH @BASE_NAME info=@INFO_PTR", nrch, nrch->base.name, info);
 				req_reused_bb_lru_is_timeout_stats(&nrch->base);
 				if ((*context = nvmeibc_ib_nordda_channel_get_io_context(nrch))) {
 					ch = &nrch->base;
-					if (!nvmeibc_disk_prefix_priority_masks_len) {
-						/* rotate for load balancing */
-						list_del(&nrch->available_link);
-						if (!NVMEIBC_SORT_NRCHS_BY_PRIO)
-							list_add_tail(&nrch->available_link, &disk->info->available_norddas);
-						else
-							prio_list_add_tail(&nrch->available_link, &disk->info->available_norddas, nrch_avail_prio_cmp_fn, NULL);
-					} else {
-						prefix_priority_masks_move_tail(disk, nrch);
-					}
+					/* rotate for load balancing */
+					nvmeib_public_plist_requeue(&nrch->available_link, &info->available_norddas);
 
 					_ND(trace_2_disk_nvmeibc_disk_get_channel, "No available IO channels, using NORDDA channel ...");
 					goto found;
@@ -5537,16 +5491,7 @@ struct nvmeibc_disk_command *nvmeibc_disk_get_disk_cmd_nordda(
 			}
 
 			if (nvmeibc_nr_rotate_in_pending) {
-				if (!NVMEIBC_SORT_NRCHS_BY_PRIO && !nvmeibc_disk_prefix_priority_masks_len) {
-					list_del(&ch->available_link);
-					list_add_tail(&ch->available_link, &info->available_norddas);
-				}
-				else if (!nvmeibc_disk_prefix_priority_masks_len) {
-					list_del(&ch->available_link);
-					prio_list_add_tail(&ch->available_link, &info->available_norddas, nrch_avail_prio_cmp_fn, NULL);
-				}
-				else
-					prefix_priority_masks_move_tail(disk, ch);
+				nvmeib_public_plist_requeue(&ch->available_link, &info->available_norddas);
 			}
 		}
 		else
@@ -8032,7 +7977,23 @@ static int request_disks_resources(struct nvmeibc_disk *disk)
 			disk->main_ach_wq_pid = wq_pid(arnic->channel->remove_wq);
 			disk->cid = arnic->channel->cid;
 			disk->nr_get_by_cpu_index = disk->is_tcp ? nvmeibc_nr_get_by_cpu_index_tcp : nvmeibc_nr_get_by_cpu_index;
+		
+#ifdef CONFIG_NUMA
+			disk->nr_get_by_numa_node = disk->is_tcp ? nvmeibc_nr_get_by_numa_node_tcp : nvmeibc_nr_get_by_numa_node;
+#endif
 			disk->prio_pending = nvmeibc_disk_prio_pending;
+
+			if (disk->nr_get_by_numa_node) {
+				int i;
+				disk->info->avail_norddas_per_numa_node = kmalloc_array(nr_node_ids, sizeof(struct plist_head), GFP_KERNEL);
+				if (!disk->info->avail_norddas_per_numa_node) {
+					rv = -ENOMEM;
+					goto out;
+				}
+				for_each_node(i) {
+					plist_head_init(&disk->info->avail_norddas_per_numa_node[i]);
+				}
+			}
 
 			n_rscs++;
 			_NT(trace_1_disk_request_disks_resources, "disk @DISK_NAME (@POSITION_STR), main admin-ch @BASE_NAME (@CHANNEL_PTR, wq=@NVMEIB_QPID), cid=@CID",
@@ -8051,6 +8012,7 @@ static int request_disks_resources(struct nvmeibc_disk *disk)
 		DISK_DISCOVER_STATUS(disk, NVMEIBC_DISK_DISCOVER_REQUEST_RDDA_RESOUCES_FAILED);
 		rv = -EIO;
 	}
+out:
 	DD_STG_END(disk, DD_STG_REQUEST_DISKS_RESOURCES, rv, -1);
 	__NFOUTD;
 	return rv;
@@ -10047,6 +10009,8 @@ static void free_disk_rsc(struct nvmeibc_disk *disk)
 	spin_unlock_irqrestore(&disk->spinlock, flags);
 
 	if (info) {
+		kfree(info->avail_norddas_per_numa_node);
+		info->avail_norddas_per_numa_node = NULL;
 		free_disc_rscs(ac_to_iac(info->ch), info);
 		kfree(info->hcaa);
 		//EC-5789

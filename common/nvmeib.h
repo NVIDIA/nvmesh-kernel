@@ -182,7 +182,6 @@ enum {
 
 	NVMEIBC_USE_BOTH_ROCE_AND_TCP_LOCK_CH = 0,	/* Future: curently unused */
 	NVMEIBC_USE_BOTH_ROCE_AND_TCP_IO_CH = 0, 	/* Future: curently unused */
-	NVMEIBC_SORT_NRCHS_BY_PRIO = 0, 			/* Future: curently unused ; should also consider prio when connecting disk-iopaths */
 
 	NVMEIB_MAX_NR_TCP_CHANNELS_PER_PATH = 16,
 	NVMEIB_DEFAULT_ANY_CPU_NRCH = 4,

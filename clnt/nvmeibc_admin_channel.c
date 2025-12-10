@@ -22,14 +22,15 @@
 #define __NFOUT NFOUTS(ch->base.name)
 
 int nvmeibc_admin_channel_init(
-	const struct nvmeibc_cinst_params_core *p, struct nvmeibc_admin_channel *ch)
+	const struct nvmeibc_cinst_params_core *p, 
+	struct nvmeibc_admin_channel *ch)
 {
 	int rv = 0;
 	proc_name_t pname;
 
 	__NFIN;
 	ch->base.ct = ct_admin;
-	if (!(rv = nvmeibc_channel_init(&ch->base, p))) {
+	if (!(rv = nvmeibc_channel_init(&ch->base, p, NUMA_NO_NODE))) {
 		INIT_LIST_HEAD(&ch->rionics);
 		INIT_LIST_HEAD(&ch->periodics);
 		spin_lock_init(&ch->periodics_guard);

@@ -89,7 +89,8 @@ static inline struct nvmeibc_admin_channel *rionics_to_ac(
 
 struct nvmeibc_cinst_params_core;
 int nvmeibc_admin_channel_init(
-	const struct nvmeibc_cinst_params_core *p, struct nvmeibc_admin_channel *ch);
+	const struct nvmeibc_cinst_params_core *p, 
+	struct nvmeibc_admin_channel *ch);
 void nvmeibc_admin_channel_free(struct nvmeibc_admin_channel *ch);
 int nvmeibc_admin_channel_add_work(struct nvmeibc_admin_channel *ch,
 	struct workqe_struct *work);

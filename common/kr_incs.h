@@ -98,6 +98,11 @@
 #include <linux/seqlock.h>
 #include <linux/bitmap.h>
 #include <linux/sched/clock.h>
+#include <linux/plist.h>
+
+#define plist_next_entry(pos, member) container_of(plist_next(&pos->member), typeof(*(pos)), member)
+#define plist_first_entry_or_null(head, type, member) (plist_head_empty(head) ? NULL : plist_first_entry((head), type, member))
+
 #if KS_HAS_GENHD_H
 	#include <linux/genhd.h>
 #else

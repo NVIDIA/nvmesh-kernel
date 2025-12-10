@@ -553,11 +553,10 @@ static void on_disconnect_lock_ch(struct nvmeibc_ib_net *net)
 }
 
 static struct nvmeibc_locks_channel *alloc(
-	struct nvmeibc_admin_channel *admin_ch)
+	struct nvmeibc_admin_channel *admin_ch, int numa_node)
 {
 	int rv = 0;
 	struct nvmeibc_locks_channel *ch = NULL;
-
 	NFIN;
 	ch = kzalloc(sizeof(*ch), GFP_KERNEL);
 	if (!ch ||
@@ -570,7 +569,7 @@ static struct nvmeibc_locks_channel *alloc(
 	nvmeibc_locks_channel_spin_lock_init(ch);
 	ch->locking_cpu = -1;
 	nvmeibc_lock_ch_metrics_init(&ch->metrics);
-	if ((rv = nvmeibc_channel_init(&ch->base, nvmeibc_cinst_get_core_p(&admin_ch->base)))) {
+	if ((rv = nvmeibc_channel_init(&ch->base, nvmeibc_cinst_get_core_p(&admin_ch->base), NUMA_NO_NODE))) {
 		_NE(error_1_locks_channel_alloc, "cannot init base channel");
 		goto out_err;
 	}
@@ -702,6 +701,7 @@ static struct nvmeibc_locks_channel *try_connect_with_lport(
 	int rv = -ENODEV;
 	struct nvmeibc_locks_channel *locks_channel = NULL;
 	struct nvmeibc_disk *disk = admin_ch->base.disk;
+	int numa_node = lport->ib_port->nic_dev->dev->ib_dev->dma_device->numa_node;
 
 	NFIN;
 
@@ -725,7 +725,7 @@ static struct nvmeibc_locks_channel *try_connect_with_lport(
 		goto out;
 	}
 
-	if ((locks_channel = alloc(admin_ch)) == NULL) {
+	if ((locks_channel = alloc(admin_ch, numa_node)) == NULL) {
 		goto out;
 	}
 
@@ -752,10 +752,14 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 	struct nvmeibc_local_nic_port *lport;
 	int rv = -ENODEV;
 	struct nvmeibc_locks_channel *locks_channel = NULL;
+	int numa_node = ln->nic_dev->dev->ib_dev->dma_device->numa_node;
 	int i = 0;
 
 	NFIN;
 	BUG_ON(admin_ch == NULL);
+	if ((locks_channel = alloc(admin_ch, numa_node)) == NULL) {
+		goto out;
+	}
 
 	/* try to check if user nics is local using the local ports of the local nic */
 	list_for_each_entry(lport, &ln->ports, link) {
@@ -772,6 +776,7 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 		_NT(trace_locks_channel_try_connect_with_dev_no_ports, "No valid local ports found");
 	}
 
+out:
 	NFOUT;
 	return locks_channel;
 }
@@ -1742,7 +1747,9 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	nvmeibc_locks_channel_spin_lock_init(ch);
 	ch->locking_cpu = -1;
 
-	if ((rv = nvmeibc_channel_init(&ch->base, nvmeibc_cinst_get_core_p(&primary_ch->base)))) {
+	if ((rv = nvmeibc_channel_init(&ch->base, 
+		nvmeibc_cinst_get_core_p(&primary_ch->base), primary_ch->base.numa_node))) 
+	{
 		_NE(error_2_locks_channel_init_2nd_ch, "cannot init base channel");
 		goto free_ch;
 	}

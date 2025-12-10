@@ -271,6 +271,7 @@ static void nordda_handle_qp_err(struct ib_wc *wc,
 	else if ((u32)op_code == NVMEIB_FAST_REG_WR_ID) {
 		_NT(trace_2_ib_nordda_channel_nordda_handle_qp_err, "FAST_REG_MR failed status @WC_STATUS", wc_status);
 		if (wc_status == IB_WC_MW_BIND_ERR) {
+			/* Index is encoded in nvmeib_map_fr */
 			int index = nvmeib_idx_from_wc(wc);
 			struct nvmeibc_volume_request *req = &ch->reqs[index].req;
 			/* Tell pool to set MR as having a bind error */
@@ -549,10 +550,11 @@ struct nvmeibc_ib_nordda_channel *nvmeibc_ib_nordda_channel_create(
 {
 	struct nvmeibc_ib_nordda_channel *ch = lionic->nr_channels + qpn;
 	struct nvmeibc_ib_admin_channel *ach = ac_to_iac(lionic->rionic->ch);
+	int numa_node = P2IB(lionic->port)->dma_device->numa_node;
 	int rv = -1;
 	NFIN;
 
-	if (nvmeibc_channel_init(&ch->base, p) < 0) {
+	if (nvmeibc_channel_init(&ch->base, p, numa_node) < 0) {
 		_NE(error_ib_nordda_channel_nvmeibc_ib_nordda_channel_create, "Fail to init base-channel");
 		goto out;
 	}
@@ -584,7 +586,8 @@ struct nvmeibc_ib_nordda_channel *nvmeibc_ib_nordda_channel_create(
 	nvmeibc_channel_init_dbgdi_uniq(&ch->base, p, lionic_index, rionic_index, qpn);
 
 	spin_lock_init(&ch->guard);
-	INIT_LIST_HEAD(&ch->available_link);
+	plist_node_init(&ch->available_link, lionic->rionic->priority.raw);
+	plist_node_init(&ch->per_numa_node_link, lionic->rionic->priority.raw);
 	INIT_LIST_HEAD(&ch->free_reqs);
 	init_completion(&ch->init_comp);
 	ch->inuse = false;
@@ -2550,9 +2553,7 @@ void nvmeibc_ib_nordda_channel_free(struct nvmeibc_ib_nordda_channel *ch)
 		WARN_ON(1);
 	}
 
-	if ((ch->available_link.next ||
-		 ch->available_link.prev) && /* if here before init-list-head */
-		!list_empty(&ch->available_link)) {
+	if (!plist_node_empty(&ch->available_link)) {
 		_NT(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_free, "nrch @BASE_NAME (@CH_PTR), still linked to available list", ch->base.name, ch);
 		WARN_ON(1);
 	}

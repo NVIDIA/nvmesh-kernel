@@ -68,7 +68,8 @@ static bool is_ach_dying(struct nvmeibc_ib_admin_channel *ch)
 	return dying;
 }
 
-static int init(const struct nvmeibc_cinst_params_core *p, struct nvmeibc_ib_admin_channel *ch)
+static int init(const struct nvmeibc_cinst_params_core *p, 
+	struct nvmeibc_ib_admin_channel *ch)
 {
 	int rv = 0;
 
@@ -1332,6 +1333,7 @@ static int login(struct nvmeibc_ib_admin_channel *ch, bool access_local)
 		rv = -ENOMEM;
 		goto out;
 	}
+	ch->base.base.numa_node = P2IB(ch->net.base.port)->dma_device->numa_node;
 	ch->tx_ring_size = NVMEIBC_CHANNEL_MAX_MAIN_ADMIN_MSGS;
 	ch->net.base.pkey = ch->net.base.port->pkey;
 	ch->net.base.admin_ch = &ch->base;
@@ -2340,7 +2342,6 @@ struct nvmeibc_ib_admin_channel *nvmeibc_ib_admin_channel_create(
 	const struct nvmeibc_cinst_params_core *p, struct nvmeibc_admin_rnic *arnic)
 {
 	struct nvmeibc_ib_admin_channel *ch;
-
 	NFIN;
 	if (!(ch = kzalloc(sizeof(struct nvmeibc_ib_admin_channel), GFP_KERNEL))) {
 		_NE(error_ib_admin_channel_nvmeibc_ib_admin_channel_create, "Fail to allocate initial admin channels");
