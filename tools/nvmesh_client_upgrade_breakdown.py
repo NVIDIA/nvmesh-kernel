@@ -1471,17 +1471,23 @@ class NDUPhase(CompositePhase):
             return True
         return self.io_disabled_phase.has_warnings
 
-    def _find_phase_recursive(self, start_phase: BasePhase, target_name: str) -> Optional[BasePhase]:
-        """Helper to find a specific phase deep in the hierarchy."""
-        if start_phase.name == target_name:
-            return start_phase
+    def find_phase(self, target_name: str) -> Optional[BasePhase]:
+        """
+        Public API: Find a phase by name starting from this root.
+        """
+        # Internal recursive helper to traverse the tree
+        def _search(node: BasePhase) -> Optional[BasePhase]:
+            if node.name == target_name:
+                return node
 
-        if isinstance(start_phase, CompositePhase):
-            for child in start_phase.children.values():
-                found = self._find_phase_recursive(child, target_name)
-                if found:
-                    return found
-        return None
+            if isinstance(node, CompositePhase):
+                for child in node.children.values():
+                    found = _search(child)
+                    if found:
+                        return found
+            return None
+
+        return _search(self)
 
     def finalize(self):
         """
@@ -1495,8 +1501,8 @@ class NDUPhase(CompositePhase):
         super().finalize()
 
         # 2. Locate Source Phases for Derivation
-        detach_phase = self._find_phase_recursive(self, "Volumes Detach")
-        attach_phase = self._find_phase_recursive(self, "Volumes Attach")
+        detach_phase = self.find_phase("Volumes Detach")
+        attach_phase = self.find_phase("Volumes Attach")
 
         if detach_phase and attach_phase:
             logger.debug("Deriving IO Disabled phase from Detach/Attach...")
@@ -1931,10 +1937,17 @@ def main():
 
         logger.debug("Historical log processing finished.")
 
+        # detect if there were no volumes attached at the start
+        volumes_detach = ndu_analysis.find_phase("Volumes Detach")
+        no_volumes_detected = False
+        if volumes_detach and len(volumes_detach.children) == 0:
+            logger.info("No volumes detected in 'Volumes Detach' phase. Skipping I/O polling.")
+            no_volumes_detected = True
+
         # 2. Conditional Polling
-        # This block is *only* entered in --run mode, and *only* if the
-        # historical pass didn't find all the "I/O Enabled" events.
-        if args.command == 'run' and not ndu_analysis.is_complete:
+        # This block is *only* entered in --run mode, and *only* if the historical pass
+        # didn't find all the "I/O Enabled" events and we actually have volumes to wait for
+        if args.command == 'run' and not ndu_analysis.is_complete and not no_volumes_detected:
             logger.info("Starting polling for I/O re-enable events...")
             poll_start_time = datetime.now()
             poll_interval_seconds = 0.5
