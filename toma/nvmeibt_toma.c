@@ -2278,7 +2278,7 @@ static void print_status_str(enum nvmeibs_toma_status_type status_type, int (*pr
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL_JSON)
 		nvmeibt_raft_print_status_json(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_KAFKA_INFO)
-		nvmeibt_raft_print_kafka_status(printf_fn, printf_ctx);
+		nvmeibt_kafka_print_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_NM_JSON)
 		nvmeibt_nm_print_status_json(nw_node, printf_fn, printf_ctx);
 

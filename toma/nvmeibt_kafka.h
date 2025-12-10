@@ -145,7 +145,7 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name,
 											 const char *error_str);
 void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset);
 
-int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 
 /******* Static inline forward declarations ********/
 /******* Static inline with no external dependencies ********/

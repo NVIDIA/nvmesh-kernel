@@ -2636,7 +2636,7 @@ out:
 	NFOUT;
 }
 
-int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) {
+int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) {
 	struct tm					timeinfo;
 	char						time_str[64];
 
