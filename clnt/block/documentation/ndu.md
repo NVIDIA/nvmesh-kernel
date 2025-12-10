@@ -99,3 +99,100 @@ The logical errors could be found by adding `set -x` directive to the `nvmeshcli
 
 The performance analysis should be done with `nvmesh_client_upgrade_breakdown.py`.
 It is possible to use the script for online (on the node) and offline (only logs are available) modes.
+
+## NDU Breakdown Tool
+
+The `nvmesh_client_upgrade_breakdown.py` tool provides a precise, millisecond-level timeline of the NDU process.
+It covers both the service control plane (systemd/scripts) and the data plane (I/O connectivity) to  help
+pinpoint latency sources.
+
+### Usage
+
+**Live Execution**
+
+Run the NDU commands and monitor the process in real-time.
+
+```bash
+sudo nvmesh_client_upgrade_breakdown.py run
+```
+
+**Post-Mortem Analysis**
+
+Analyze a past NDU run using a specific time window.
+
+```bash
+sudo nvmesh_client_upgrade_breakdown.py analyze --since "14:00:00"
+```
+
+**Offline Analysis**
+
+Analyze a log bundle collected from another machine.
+
+```bash
+sudo nvmesh_client_upgrade_breakdown.py analyze --since "2025-12-07 14:00" --logs-dir /path/to/logs
+```
+
+### Data Sources & Event Collection
+
+The breakdown tool builds its timeline by correlating timestamped events from two distinct logging subsystems:
+
+**1. Journalctl (services control plane)**
+
+Captures high-level service orchestration and script execution flow.
+
+* **systemd service manager:** logs the precise start and stop times of NVMesh services (`nvmeshclient`, `nvmeshcm`, `nvmeshtrace`).
+
+* **service control scripts:** captures custom status messages printed by the `nvmeshclient` service script during NDU
+(e.g., "Starting to load modules", "Unloading modules").
+
+**2. Pager (kernel control plane and data plane)**
+
+Captures kernel client driver volume state changes and other low level activities.
+
+* **Scope:** primarily focuses on per-volume connectivity states, specifically detecting when a volume becomes **IO Disabled** (Detaching) and **IO Enabled** (Attached & Ready).
+
+* **Filtering:** The tool exclusively processes pager traces tagged with the **`@NDU`** token. This ensures that only state transitions related to NDU
+are analyzed, ignoring unrelated traces.
+
+
+### Phase Hierarchy & Definitions
+
+The tool structures the upgrade timeline into a hierarchical tree of 'Phases.' A phase is defined as a specific time
+interval bounded by two distinct log events: a Start Event (e.g., a service stopping) and an End Event (e.g., a process
+completing). The root NDU phase encapsulates the entire operation, spanning from the initial service activity to the final
+restoration of I/O connectivity."
+
+
+**1. Client Stop**
+
+* **Start/End:** `nvmeshclient` service stopping $\to$ stopped.
+
+* **Client Shutdown:** script invoked $\to$ script done.
+    * **Volumes Detach:** spans from the first "disabling i/o" event to the last "detach finished" (or failed) event of any attached volume.
+    * *Note: contains individual Volume Detach phase per volume.*
+
+* **Modules Unload:** script starts unloading modules $\to$ finishes unloading.
+
+**2. CM/TD Restart**
+
+* **Start/End:** first service stopping (Management CM or Trace Daemon) $\to$ last service started.
+* *Note: tracks parallel restarts of CM and Trace Daemon.*
+
+**3. Client Start**
+
+* **Start/End:** `nvmeshclient` service starting $\to$ last volume I/O enabled.
+
+* **Modules Load:** script starts loading modules $\to$ finishes loading.
+    * **Breakdown:** pre-initialization $\to$ client init (kernel module init $\to$ ready) $\to$ core init (global core resources creation).
+
+* **Volumes Attach:** First "attach finished" $\to$ last "enabling i/o" of any previously attached volume.
+    * *Note: aggregates individual volume attach phases.*
+    * **Per-Volume Flow:** config $\to$ last cont (last "cont disk") $\to$ I/O enabled.
+
+**4. IO Disabled (Derived Phase)**
+
+* **Start:** earliest "disabling i/o" timestamp (from *Volumes Detach*).
+
+* **End:** latest "enabling i/o" timestamp (from *Volumes Attach*).
+
+* *Note: represents the actual window of I/O unavailability for the application.*
