@@ -1677,7 +1677,9 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 	struct nvmeibt_restored_seg_metadata_container	*seg_metadata_container;
 	union nvmeib_uuid								seg_uuid;
 	int												validate_rv;
-	const int n_entries = MAX_NUM_GPT_ENTRIES;
+	const int										n_entries = MAX_NUM_GPT_ENTRIES;
+	struct nvmeibt_disk_metadata					aligned_disk_metadata __attribute__((aligned(PAGE_SIZE)));
+
 	NFIN;
 	// Go over all the segments we have in the metadata GPT and read the configuration that is stored inside them.
 	N_Tf(wreqygs, "Looping over #@INT and not @INT", n_entries, entry->metadata_gpt.header.n_partition_entries);
@@ -1690,10 +1692,11 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 			if (nvmeibt_disk_metadata_read_disk_metadata(entry->nl_ctx, entry->fd,
 														 entry->from_config.pblk_size,
 														 gpt_entry->pba_s * entry->from_config.pblk_size,
-														 &entry->from_config.disk_metadata) < 0) {
+														 &aligned_disk_metadata) < 0) {
 				N_Ef(h218dos, "Unable to read disk metadata from disk=@STR, partition is corrupt", nvmeibt_local_disk_config_display(&(entry->from_config)));
 				goto out;
 			}
+			entry->from_config.disk_metadata = aligned_disk_metadata;
 			nvmeibt_local_disk_recover_missing_ldisk_id_in_upgraded_disk_metadata(&(entry->from_config));
 			N_Tf(chiled8, "Successfully read disk_metadata from disk=@STR ec_supported=@EC_SUPPORTED",
 				 nvmeibt_local_disk_config_display(&(entry->from_config)), entry->from_config.disk_metadata.is_md_supported);
