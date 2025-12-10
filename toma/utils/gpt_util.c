@@ -732,9 +732,8 @@ static void SELF_TEST_mark_file_persistent(const char *filepath)
 #ifdef TOMA_SIMULATOR_SANDBOX
 	extern void sandbox_force_file_persist(const char *filepath);
 	sandbox_force_file_persist(filepath);
-#else
-	(void)filepath;		// Unused in production
 #endif
+	(void)filepath;		// Unused in production
 }
 
 static int run_gpt_util_op(int argc, char *argv[]); // Forward declaration
@@ -752,11 +751,7 @@ static int run_self_test(void)
 	char		*test_argv[10];
 	int			test_argc;
 
-#ifdef TOMA_SIMULATOR_SANDBOX
-	test_device_path = "_root/dev/gpt_util_self_test";
-#else
-	test_device_path = "/tmp/gpt_util_self_test";
-#endif
+	test_device_path = TOMA_ROOT_DIR "tmp/gpt_util_self_test";
 
 	// ===== TEST 1: Normal GPT (no mismatch expected) =====
 	if (1) {
