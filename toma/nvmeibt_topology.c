@@ -1896,8 +1896,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 	NLOCAL_SERVER_MSG_DUMP(trace_topology_server_handle_local_event, msg_buf);
 
 	switch (msg_buf->type) {
-	case NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE:
-		{
+	case NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE: {
 			N_Tf(agty675, "got EVENT_DISK_CHANGE disk=@STR op=@OP_CHR - pre-netlink-code - ignoring", msg_buf->disk_change_msg.disk_id, msg_buf->disk_change_msg.op);
 			// Ignored - moved to netlink-based drive flow
 			break;
@@ -1905,13 +1904,10 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 	case NVMEIBS_TOMA_REPORT_EVENT_SERJIO_RANGE_CLEANED:
 		nvmeibt_seg_active_update_serjio_range_cleaned(msg_buf->serjio_range_cleaned_msg.seg_id);
 		break;
-	case NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE:
-		{
-			struct nvmeibt_csv_file_ctx	config_files_list[] = {
-				{"/proc/nvmeibs/nics.csv", NVMEIBT_CSV_TYPE_LOCAL_NICS}};
-
+	case NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE: {
+			struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
 			N_IMf(jjuu88w, "EVENT_GID_CHANGE gid=@GID_STR", msg_buf->port_gid_change_msg.gid_str);
-			if (nvmeibt_topology_probe_local_hardware(config_files_list, ARRAY_SIZE(config_files_list)) < 0) {
+			if (nvmeibt_topology_probe_local_hardware(&cfg_file, 1) < 0) {
 				// Failed reading hardware config.
 				nvmeibt_abort(ES_FATAL);
 			}
@@ -1930,14 +1926,11 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 			NVMEIBT_GLOBAL_MARK_REPORT_TARGET_HAS_NEW_DATA(snjwu4i);
 		}
 		break;
-	case NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE:
-		{
-			struct nvmeibt_csv_file_ctx	config_files_list[] = {
-				{"/proc/nvmeibs/nics.csv", NVMEIBT_CSV_TYPE_LOCAL_NICS}};
-
+	case NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE: {
+			struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
 			N_IMf(dfrt654, "EVENT_NIC_CHANGE nic=@NIC_STR active=@ACTIVE",
 				msg_buf->nic_change_msg.ib_dev, msg_buf->nic_change_msg.add);
-			if (nvmeibt_topology_probe_local_hardware(config_files_list, ARRAY_SIZE(config_files_list)) < 0) {
+			if (nvmeibt_topology_probe_local_hardware(&cfg_file, 1) < 0) {
 				// Failed reading hardware config.
 				nvmeibt_abort(ES_FATAL);
 			}

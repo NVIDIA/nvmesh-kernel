@@ -2552,24 +2552,20 @@ out:
 	NFOUT;
 }
 
-static void format_disk_freer(struct nvmeibt_wq_entry *wq_entry)
-{
+static void format_disk_freer(struct nvmeibt_wq_entry *wq_entry) {
 	struct local_disk_format_wq_entry *entry;
-
 	NFIN;
 
 	entry = container_of(wq_entry, struct local_disk_format_wq_entry, wq_entry);
 	// It is a pitty that the use-case that led to the following (very rare?) use case is not documented
 	if (entry->rescan_after_format) {
-		struct nvmeibt_csv_file_ctx     config_files_list[] = {
-			{DISKS_INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_DISKS}
-		};
+		struct nvmeibt_csv_file_ctx cfg_file = {DISKS_INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_DISKS};
 		struct nvmeibt_Str			*new_config = NULL;
 		struct nvmeibt_Str			*edited_new_config = NULL;
 
 		new_config = NNVMEIBT_STR_ALLOC(trace_format_disk_freer_2);
 		edited_new_config = NNVMEIBT_STR_ALLOC(trace_format_disk_freer_4);
-		if (nvmeibt_read_config_file(new_config, &(config_files_list[0])) < 0) {
+		if (nvmeibt_read_config_file(new_config, &cfg_file) < 0) {
 			N_Ef(trace_format_disk_freer_1, "Failed reading disks.csv after format");
 		}
 		else {
@@ -2599,7 +2595,6 @@ static void format_disk_freer(struct nvmeibt_wq_entry *wq_entry)
 		NNVMEIBT_STR_FREE(trace_format_disk_freer_5, edited_new_config);
 	}
 	NNVMEIBT_BM_FREE(trace_local_disk_format_disk_freer, entry);
-
 	NFOUT;
 }
 

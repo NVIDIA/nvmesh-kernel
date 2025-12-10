@@ -31,6 +31,7 @@ int nvmeibt_toma_send_buf_to_client(      const char *buf, int buf_len, const st
 
 /***************************** Probe Local Hardware *******************************/
 #define DISKS_INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"
+#define NICS__INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/nics.csv"
 #define LOCKS_INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s"          	// uuid of disk
 
 #define PCI_DISK_FILE_DO_BIND TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/bind"   	// "nvme" / "nvmeibs"

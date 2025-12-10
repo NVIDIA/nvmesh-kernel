@@ -2957,11 +2957,9 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 
 	// Read the nics.csv file
 	{
-		struct nvmeibt_csv_file_ctx		config_files_list[] = {{TOMA_ROOT_DIR "proc/nvmeibs/nics.csv", NVMEIBT_CSV_TYPE_LOCAL_NICS}};
-
-		if (nvmeibt_topology_probe_local_hardware(config_files_list, ARRAY_SIZE(config_files_list)) < 0) {
+		struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
+		if (nvmeibt_topology_probe_local_hardware(&cfg_file, 1) < 0)
 			nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.
-		}
 	}
 	if (!nvmeibt_toma_is_running_as_a_utility()) {
 		if (nvmeibt_raft_read_persistence_and_upd_committed(toma_persistency_file_name, NULL) != 0) {

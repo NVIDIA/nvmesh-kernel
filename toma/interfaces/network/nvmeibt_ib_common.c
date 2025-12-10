@@ -1,11 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
 #include "nvmeibt_debug.h"
 #include "nvmeibt_ib_common.h"
-
-#define NVMEIBT_SRV_NICS_CSV_PATH "/proc/nvmeibs/nics.csv"
+#include "../srvr/nvmeibt_srvr_proc.h"
 
 int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 {
@@ -18,9 +16,8 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 	__MEASURE_TOOK_INIT();
 
 	NFIN;
-	if (!(file = fopen(NVMEIBT_SRV_NICS_CSV_PATH, "r"))) {
-		N_Ef(nvmeibt_ib_read_local_nics_e1, "Error (@ERRNO @AUTO_ERRNO) opening local server nics.csv string=@STR", errno,
-		    NVMEIBT_SRV_NICS_CSV_PATH);
+	if (!(file = fopen(NICS__INFO_FILE, "r"))) {
+		N_Ef(nvmeibt_ib_read_local_nics_e1, "Error (@ERRNO @AUTO_ERRNO) opening local server nics.csv string=@STR", errno, NICS__INFO_FILE);
 		goto out;
 	}
 	__MEASURE_TOOK(N_IMf(4cfghw8, "fopen() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
@@ -196,7 +193,7 @@ int nvmeibt_ib_common_ib_is_dev_allowed(struct local_nics_data *lnd, char *dev_n
 	for (i = 0; i < lnd->n_nics; i++) {
 		nic = &lnd->nics[i];
 		if (strncmp(dev_name, nic->ibv_devname, NVMEIB_IB_DEVICE_NAME_MAX) == 0 ||
-			/* For TCP we must check the ndev_name as siw wraps it with a new name*/ 
+			/* For TCP we must check the ndev_name as siw wraps it with a new name*/
 			strncmp(dev_name, nic->ports[1].ndev_name, NVMEIB_IB_DEVICE_NAME_MAX) == 0) {
 			ret = 1;
 			break;
