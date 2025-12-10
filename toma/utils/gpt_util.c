@@ -87,6 +87,7 @@ struct gpt_util_config {
 // Forward declarations
 static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt);
 static void SELF_TEST_mark_file_persistent(const char *filepath);
+static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries, int max_n_entries);
 
 /**
  * Export one GPT copy to JSON (helper function)
@@ -162,6 +163,8 @@ static int export_gpt_to_json(int disk_fd,
 	int										output_fd = -1;
 	int										n_bytes_header;
 	int										n_bytes_entries;
+	BOOL									is_mismatch = false;
+	BOOL									has_overlaps = false;
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
@@ -187,16 +190,41 @@ static int export_gpt_to_json(int disk_fd,
 		primary_header, alternate_header,
 		primary_entries, alternate_entries);
 
+	// Detect mismatch (only if exporting both copies)
+	if (strcmp(config->gpt_copy_option, "both") == 0 &&
+		primary_header_validity == GPT_VALIDITY_OK && alternate_header_validity == GPT_VALIDITY_OK &&
+		primary_entries_validity == GPT_VALIDITY_OK && alternate_entries_validity == GPT_VALIDITY_OK) {
+		BOOL is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(primary_header, alternate_header);
+		BOOL is_entries_mismatch = !nvmeibt_disk_metadata_are_gpt_entries_equal(
+			primary_entries, alternate_entries,
+			primary_header->n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
+		is_mismatch = is_header_mismatch || is_entries_mismatch;
+	}
+
+	// Detect overlaps in exported entries
+	if (strcmp(config->gpt_copy_option, "both") != 0) {
+		// Single copy - check for overlaps
+		const struct nvmeibt_disk_gpt_partition_entry *entries_to_check =
+			(strcmp(config->gpt_copy_option, "primary") == 0) ? primary_entries : alternate_entries;
+		has_overlaps = (detect_overlaps(entries_to_check, temp_gpt.max_n_entries) > 0);
+	} else {
+		// Both copies - check both for overlaps
+		has_overlaps = (detect_overlaps(primary_entries, temp_gpt.max_n_entries) > 0) ||
+					   (detect_overlaps(alternate_entries, temp_gpt.max_n_entries) > 0);
+	}
+
 	// Get timestamp
 	time(&now);
 	strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
 
-	// Start JSON
+	// Start JSON with metadata
 	nvmeibt_Str_sprintf(json_output, "{\n");
 	nvmeibt_Str_sprintf(json_output, "  \"backup_timestamp\": \"%s\",\n", timestamp);
 	nvmeibt_Str_sprintf(json_output, "  \"device_path\": \"%s\",\n", config->device_path);
 	nvmeibt_Str_sprintf(json_output, "  \"_human_edited\": false,\n");
-	nvmeibt_Str_sprintf(json_output, "  \"_recalculate_crc\": false");
+	nvmeibt_Str_sprintf(json_output, "  \"_recalculate_crc\": false,\n");
+	nvmeibt_Str_sprintf(json_output, "  \"_mismatch_detected\": %s,\n", is_mismatch ? "true" : "false");
+	nvmeibt_Str_sprintf(json_output, "  \"_overlaps_detected\": %s", has_overlaps ? "true" : "false");
 
 	// Export based on --gpt-copy option
 	if (strcmp(config->gpt_copy_option, "primary") == 0) {
@@ -235,6 +263,22 @@ static int export_gpt_to_json(int disk_fd,
 	SELF_TEST_mark_file_persistent(output_file);
 
 	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
+
+	// Warn if mismatch or overlaps detected
+	if (is_mismatch) {
+		fprintf(stdout, "\n");
+		fprintf(stdout, "*** WARNING: Primary and alternate copies differ! ***\n");
+		fprintf(stdout, "    JSON marked with '_mismatch_detected: true'\n");
+		fprintf(stdout, "    Apply will be BLOCKED until you choose one copy.\n");
+		fprintf(stdout, "    Suggestion: Re-export with --gpt-copy=primary or --gpt-copy=alternate\n");
+	}
+	if (has_overlaps) {
+		fprintf(stdout, "\n");
+		fprintf(stdout, "*** WARNING: Overlapping partitions detected! ***\n");
+		fprintf(stdout, "    JSON marked with '_overlaps_detected: true'\n");
+		fprintf(stdout, "    Apply will be BLOCKED until overlaps are fixed.\n");
+	}
+
 	rv = 0;
 
 out:
