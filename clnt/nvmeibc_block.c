@@ -195,7 +195,8 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			}
 		} else if (old_io_perm_is_pok) {						// disabling bio
 			const char *reason = __get_reason_for_io_disable(nd, nt, ctx);
-			_NI(tr_3_block_bling, "@NDU @DEV_NAME: Disabling I/O@STR for a volume. Error code: 1049. Internal IO permissions: @IO_PERM. Internal additional info: @STR", 0, nd->name, (can_do_syncs? ", recoveries enabled" : " and recoveries"), new_io_perm, reason);
+			_NI(tr_3_block_bling, "@NDU @EVENT_TAG @DEV_NAME: Disabling I/O@STR for a volume. Error code: 1049. Internal IO permissions: @IO_PERM. Internal additional info: @STR",
+			    0, EV_VOLUME_IO_DISABLED(), nd->name, (can_do_syncs? ", recoveries enabled" : " and recoveries"), new_io_perm, reason);
 			__notify_all_riders_about_io_perm_change(nd);
 			WARN(nt->dbg_disabling_ts, wrong_ctr_msg, nd->name, new_io_perm);	//
 			nt->dbg_disabling_ts = jiffies;
@@ -217,7 +218,8 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			is_first_bio_enabled = nvmeibc_block_update_status(nd, 'I');
 			WARN(!nt->dbg_disabling_ts, wrong_ctr_msg, nd->name, new_io_perm);	//
 			nt->dbg_disabling_ts = 0;
-			_NI(tr_5_block_bling, "@NDU @DEV_NAME:Enabling I/O and recoveries for a volume after @SECONDS. Internal information (toggles=@DBG_NUM_ENABLING_IO_TOGGLES, IO permissions: @IO_PERM).", 0, nd->name, (size_t)(dt/HZ), nt->dbg_num_enabling_io_toggles, new_io_perm);  //. Error code: 0
+			_NI(tr_5_block_bling, "@NDU @EVENT_TAG @DEV_NAME:Enabling I/O and recoveries for a volume after @SECONDS. Internal information (toggles=@DBG_NUM_ENABLING_IO_TOGGLES, IO permissions: @IO_PERM).",
+			    0, EV_VOLUME_IO_ENABLED(), nd->name, (size_t)(dt/HZ), nt->dbg_num_enabling_io_toggles, new_io_perm);  //. Error code: 0
 			block_api_os_change_size(nd, is_first_bio_enabled);
 			__notify_all_riders_about_io_perm_change(nd);
 			if (unlikely(nt->debug_on_io_enabled.cb))
