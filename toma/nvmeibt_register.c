@@ -2151,7 +2151,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
  * Note: we assume that that registrant (client) will not access the local
  * segment anymore. See launch_unregistered_registrant_removal() for details.
  */
-static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_class_client_removal(struct nvmeibt_registrant_ctx *active_registrant_entry)
+static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_removal(struct nvmeibt_registrant_ctx *active_registrant_entry)
 {
 	int cid = client_messaging_handle_to_cid(active_registrant_entry->client_messaging_handle);
 	struct registrant_disconnect_wq_entry *registrant_disconnect_task = NULL;
@@ -2178,7 +2178,7 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_class_client_r
 	N_Tf(hhus662, "Handle client reg=@LOCKID seg=@UUID_8",
 		nvmeib_lockid_purify(active_registrant_entry->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
 
-	registrant_disconnect_task = NNVMEIBT_BM_CALLOC(trace_5_register_launch_registrant_class_client_removal, sizeof(*registrant_disconnect_task));
+	registrant_disconnect_task = NNVMEIBT_BM_CALLOC(karytx3, sizeof(*registrant_disconnect_task));
 
 	registrant_disconnect_task->wq_entry.type = "REGISTRANT_DISCONNECT";
 	registrant_disconnect_task->wq_entry.execute = registrant_disconnect_wrapper;
@@ -2222,7 +2222,7 @@ static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmei
 		upd_registrant_sync_timeout(reg_ctx, REG_TIMEOUT_REASON_DEL_ME);	// Not waiting for RT_UNREG
 	}
 	if (!nvmeibt_praid_is_jbod(nvmeibt_seg_active_get_praid(seg_active))) {
-		rvu = launch_registrant_class_client_removal(reg_ctx);
+		rvu = launch_registrant_removal(reg_ctx);
 
 		if (rvu == REGISTRANT_DISCONNECT_LAUNCH_FAILED) {
 			rv = UNREGISTER_RV_FAILED;
@@ -2955,7 +2955,7 @@ int nvmeibt_register_timeout_occurred(void)
 			struct nvmeibt_registrant_ctx	*reg_ctx;
 			XDLIST_FOREACH_SAFE(reg_ctx, &(seg_active->registrants_on_timeout)) {
 				if (!(reg_ctx->is_force_cmd_called) && timespec_lt(reg_ctx->timeout_time, now)) {
-					// Send yet another TR_UNREG. It can only do good for reg_class=RECOVERY
+					// Send yet another TR_UNREG.
 					nvmeibt_register_send_msg_to_registrant(reg_ctx, NVMEIBT_CLIENT_MSG_TR_UNREGISTER_DISK_SEGMENT_ACK,
 															NVMEIBT_CLIENT_TR_REASON_AWAITING_CLIENTS_SYNC, 0, NULL);
 					// Ask to brutally disconnect registrants that failed to unregister voluntarily
