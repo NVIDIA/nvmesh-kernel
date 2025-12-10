@@ -930,7 +930,7 @@ enum nvmeibs_toma_status_type {
 	NVMEIBS_TOMA_STATUS_ALL_JSON,
 	NVMEIBS_TOMA_STATUS_NM_JSON,
 	NVMEIBS_TOMA_STATUS_KAFKA_INFO,
-	NVMEIBS_TOMA_STATUS_AUTO_MAX, // The statuses after this will not be generated automatically
+	NVMEIBS_TOMA_STATUS_AUTO_MAX, // The statuses after this will not be generated automatically by the server
 	NVMEIBS_TOMA_STATUS_ZEROING,
 };
 

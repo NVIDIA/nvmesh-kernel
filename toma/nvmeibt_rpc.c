@@ -31,7 +31,7 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 	const struct status_type {
 		char *name;
 		enum nvmeibs_toma_status_type type;
-	} status_types[] = {
+	} status_types[] = {						// DHsH: Unify the strings here with toma_stat_proc_fname[] array
 			{ "all", NVMEIBS_TOMA_STATUS_ALL },
 			{ "raft", NVMEIBS_TOMA_STATUS_RAFT },
 			{ "disk_segments", NVMEIBS_TOMA_STATUS_DSEG },
@@ -44,8 +44,10 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 			{ "leader", NVMEIBS_TOMA_STATUS_LEADER },
 			{ "local_disks", NVMEIBS_TOMA_STATUS_LOCAL_DISKS },
 			{ "memory", NVMEIBS_TOMA_STATUS_MEM_ALLOC },
-			{ "zeroing", NVMEIBS_TOMA_STATUS_ZEROING },
+			{ "all.json", NVMEIBS_TOMA_STATUS_ALL_JSON },
 			{ "nm_json", NVMEIBS_TOMA_STATUS_NM_JSON },
+			{ "kafka",   NVMEIBS_TOMA_STATUS_KAFKA_INFO },
+			{ "zeroing", NVMEIBS_TOMA_STATUS_ZEROING },
 	};
 
 	if (argc<2) {
