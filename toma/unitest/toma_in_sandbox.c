@@ -101,7 +101,7 @@ static ssize_t _recv_empty(int fd, void *buf, size_t n, int flags) {
 
 static ssize_t _rpc_inject(int fd, void *buf, size_t n, int flags) {
 	static int n_rpcs_sent = 0;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
-	static const char* cmds[3] = {"simulate dump-clnt-hash 20\n" ,"simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
+	static const char* cmds[] = {"simulate dump-clnt-hash 20\n" ,"simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n", "status all\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
 	const bool only_checking = (flags & MSG_PEEK);
 	(void)fd;
 	if (n_rpcs_sent < (int)ARRAY_SIZE(cmds)) {
@@ -118,8 +118,9 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, int flags) {
 }
 
 static ssize_t _rpc_accept(int fd, const void *buf, size_t n, int flags) {
+	const int print_n_bytes = min(n, (size_t)64);
 	BUG_ON((fd < 2) || (n == 0)); (void)flags;
-	SANDBOX_PRINT("RPC reply %u[b]: " COL_PURPL "%s" COL_RESET, (unsigned)n, (const char*)buf);
+	SANDBOX_PRINT("RPC reply %u[b]: " COL_PURPL "%.*s\n" COL_RESET, (unsigned)n, print_n_bytes, (const char*)buf);
 	return n;
 }
 
