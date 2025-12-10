@@ -556,22 +556,36 @@ static inline void prio_list_add_tail(struct list_head *new, struct list_head *h
 	struct list_head *iter = head;
 
 	/* Shortcuts 1: List is empty so can add directly to tail */
-	if (list_empty(head))
-		goto add;
+	if (list_empty(head)) {
+		goto add_tail;
+	}
 
 	/* Shortcuts 2: Tail of list has same priority or less than new so we can directly to the tail */
 	if ((*cmp_fn)(priv, head->prev, new) <= 0)
-		goto add;
+		goto add_tail;
 
-	/* Loop over list looking for place to insert new */
-	list_for_each(iter, head) {
-		if ((*cmp_fn)(priv, iter, new) > 0)
-			break;
+	/*
+	 * Slow-path: new < tail.
+	 * Walk backwards from the tail until we find the last element
+	 * with priority <= new and insert after it.
+	 */
+	 list_for_each_prev(iter, head) {
+		if ((*cmp_fn)(priv, iter, new) <= 0) {
+			/* insert just after iter */
+			list_add(new, iter);
+			goto out;
+		}
 	}
 
-add:
+	/* If we reached head, new is the smallest: insert at the front */
+	list_add(new, head);
+	goto out;
+
+add_tail:
 	/* iter will either be the first entry where the cmp_fn returns > 0 or the head of the list */
 	list_add_tail(new, iter);
+out:
+	return;
 }
 
 /* Add to head of priority group in list */
