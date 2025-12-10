@@ -67,7 +67,7 @@ struct gpt_util_config {
 };
 
 // Forward declarations
-static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt);
+static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
 static void SELF_TEST_mark_file_persistent(const char *filepath);
 static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries, int max_n_entries);
 
@@ -232,12 +232,12 @@ static int export_gpt_to_json(int disk_fd,
 	// Write JSON to file
 	output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (output_fd < 0) {
-		fprintf(stderr, "Error: Failed to create JSON output file: %s (%s)\n", output_file, strerror(errno));
+		N_Ef(gpt_json_create_failed, "Failed to create JSON output file @STR @AUTO_ERRNO", output_file);
 		goto out;
 	}
 
 	if (write(output_fd, nvmeibt_Str_str(json_output), nvmeibt_Str_strlen(json_output)) < 0) {
-		fprintf(stderr, "Error: Failed to write JSON to file: %s (%s)\n", output_file, strerror(errno));
+		N_Ef(gpt_json_write_failed, "Failed to write JSON to file @STR @AUTO_ERRNO", output_file);
 		goto out;
 	}
 
@@ -285,7 +285,7 @@ int get_device_info(const char* dev_name, int* pblk_size, uint64_t* pba_e)
 
 	rv = NNVMEIBT_OPEN_READ(trace_gpt_util_get_device_info, dev_name, 1);
 	if (rv < 0) {
-		fprintf(stderr, "Failed opening device=%s  %d %m\n", dev_name, errno);
+		N_Ef(gpt_util_open_failed, "Failed opening device=@STR @AUTO_ERRNO", dev_name);
 		goto out;
 	}
 	fd = rv;
@@ -293,7 +293,7 @@ int get_device_info(const char* dev_name, int* pblk_size, uint64_t* pba_e)
 	// Detect file type first
 	rv = fstat(fd, &st);
 	if (rv < 0) {
-		fprintf(stderr, "Failed to stat=%s  %d %m\n", dev_name, errno);
+		N_Ef(gpt_util_fstat_failed, "Failed to stat=@STR @AUTO_ERRNO", dev_name);
 		goto out;
 	}
 
@@ -306,17 +306,17 @@ int get_device_info(const char* dev_name, int* pblk_size, uint64_t* pba_e)
 		// Block device - use ioctl
 		rv = ioctl(fd, BLKSSZGET, &pblk_size_dev);
 		if (rv < 0) {
-			fprintf(stderr, "Failed fetching block size=%s  %d %m\n", dev_name, errno);
+			N_Ef(gpt_util_ioctl_blksz_failed, "Failed fetching block size=@STR @AUTO_ERRNO", dev_name);
 			goto out;
 		}
 
 		rv = ioctl(fd, BLKGETSIZE64, &n_bytes_dev);
 		if (rv < 0) {
-			fprintf(stderr, "Failed fetching disk size=%s  %d %m\n", dev_name, errno);
+			N_Ef(gpt_util_ioctl_size_failed, "Failed fetching disk size=@STR @AUTO_ERRNO", dev_name);
 			goto out;
 		}
 	} else {
-		fprintf(stderr, "Unsupported file type for %s\n", dev_name);
+		N_Ef(gpt_util_unsupported_file_type, "Unsupported file type for @STR", dev_name);
 		rv = -1;
 		goto out;
 	}
@@ -361,14 +361,14 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 
 	fd = open(filepath, O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
-		fprintf(stderr, "Failed to create mock device %s: %s\n", filepath, strerror(errno));
+		N_Ef(selftest_create_failed, "Failed to create mock device @STR @AUTO_ERRNO", filepath);
 		return -1;
 	}
 
 	// 1. Initialize protective MBR
 	nvmeibt_disk_metadata_init_pmbr(&mbr, n_disk_blocks, pblk_size);
 	if (nvmeibt_disk_metadata_write_mbr(NULL, fd, pblk_size, &mbr) < 0) {
-		fprintf(stderr, "Failed to write MBR\n");
+		N_Ef(selftest_write_mbr_failed, "Failed to write MBR to mock device");
 		goto out;
 	}
 
@@ -395,14 +395,14 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 			strlen(EXCELERO_METADATA_PARTITION_NAME));
 
 		if (!metadata_partition) {
-			fprintf(stderr, "Failed to add metadata partition\n");
+			N_Ef(selftest_add_metadata_failed, "Failed to add metadata partition to mock device");
 			goto out;
 		}
 	}
 
 	// 4. Write Main GPT to disk using existing TOMA function
 	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &main_gpt, false) < 0) {
-		fprintf(stderr, "Failed to store Main GPT\n");
+		N_Ef(selftest_store_main_gpt_failed, "Failed to store Main GPT to mock device");
 		goto out;
 	}
 
@@ -426,13 +426,13 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 												 metadata_gpt.header.last_usable_pba,
 												 DISK_METADATA_PARTITION_NAME,
 												 strlen(DISK_METADATA_PARTITION_NAME))) {
-		fprintf(stderr, "Failed to add disk_metadata partition\n");
+		N_Ef(selftest_add_disk_metadata_failed, "Failed to add disk_metadata partition to nested GPT");
 		goto out;
 	}
 
 	// 6. Write Metadata GPT to disk
 	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &metadata_gpt, false) < 0) {
-		fprintf(stderr, "Failed to store Metadata GPT\n");
+		N_Ef(selftest_store_metadata_gpt_failed, "Failed to store Metadata GPT to mock device");
 		goto out;
 	}
 
@@ -478,14 +478,14 @@ static int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 
 	fd = open(filepath, O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
-		fprintf(stderr, "Failed to create mock device %s: %s\n", filepath, strerror(errno));
+		N_Ef(selftest_overlap_create_failed, "Failed to create overlap test device @STR @AUTO_ERRNO", filepath);
 		return -1;
 	}
 
 	// Initialize protective MBR
 	nvmeibt_disk_metadata_init_pmbr(&mbr, n_disk_blocks, pblk_size);
 	if (nvmeibt_disk_metadata_write_mbr(NULL, fd, pblk_size, &mbr) < 0) {
-		fprintf(stderr, "Failed to write MBR\n");
+		N_Ef(selftest_overlap_write_mbr_failed, "Failed to write MBR to overlap test device");
 		goto out;
 	}
 
@@ -507,7 +507,7 @@ static int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 												 main_gpt.header.first_usable_pba + 1242,  // 1500 - 258
 												 "partition_1",
 												 strlen("partition_1"))) {
-		fprintf(stderr, "Failed to add partition 1\n");
+		N_Ef(selftest_add_part1_failed, "Failed to add partition 1 to overlap test device");
 		goto out;
 	}
 
@@ -525,13 +525,13 @@ static int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 												 overlap_end,
 												 "partition_2_OVERLAP",
 												 strlen("partition_2_OVERLAP"))) {
-		fprintf(stderr, "Failed to add partition 2 (overlap)\n");
+		N_Ef(selftest_add_part2_failed, "Failed to add partition 2 (overlap) to test device");
 		goto out;
 	}
 
 	// Write Main GPT
 	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &main_gpt, false) < 0) {
-		fprintf(stderr, "Failed to store Main GPT with overlaps\n");
+		N_Ef(selftest_store_overlap_gpt_failed, "Failed to store Main GPT with overlaps");
 		goto out;
 	}
 
@@ -565,7 +565,7 @@ static int SELF_TEST_corrupt_alternate_gpt_for_mismatch_test(int fd, int pblk_si
 	// 1. Read the existing GPT (uses existing TOMA API)
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, pblk_size, &corrupted_gpt,
 										  pba_s, pba_hw_e, false) < 0) {
-		fprintf(stderr, "Failed to read GPT for corruption\n");
+		N_Ef(selftest_read_for_corrupt_failed, "Failed to read GPT for mismatch corruption test");
 		goto out;
 	}
 
@@ -580,7 +580,7 @@ static int SELF_TEST_corrupt_alternate_gpt_for_mismatch_test(int fd, int pblk_si
 
 	// 4. Write ONLY the alternate copy with corrupted data (uses TOMA API)
 	if (nvmeibt_disk_metadata_store_gpt_one_copy(NULL, fd, pblk_size, &corrupted_gpt, true, false) < 0) {
-		fprintf(stderr, "Failed to write corrupted alternate GPT\n");
+		N_Ef(selftest_write_corrupt_alt_failed, "Failed to write corrupted alternate GPT for mismatch test");
 		goto out;
 	}
 
@@ -615,8 +615,8 @@ static int SELF_TEST_write_gpt_header_at_position(int disk_fd, int pblk_size,
 
 	written = pwrite(disk_fd, dma_buffer, n_bytes, pbyte_s);
 	if (written != n_bytes) {
-		fprintf(stderr, "Error: pwrite returned %zd (expected %d) at PBA 0x%lx: %s\n",
-				written, n_bytes, header_pba, strerror(errno));
+		N_Ef(selftest_pwrite_header_failed, "pwrite returned @RV_SSIZE_T (expected @INT) at PBA @ZX @AUTO_ERRNO",
+			 written, n_bytes, header_pba);
 		goto out;
 	}
 
@@ -651,7 +651,7 @@ static int SELF_TEST_corrupt_gpt_n_partition_entries(int fd, int pblk_size, uint
 	// 1. Read the existing GPT
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, pblk_size, &gpt,
 										  pba_s, pba_hw_e, false) < 0) {
-		fprintf(stderr, "Failed to read GPT for n_partition_entries corruption\n");
+		N_Ef(selftest_read_for_n_part_corrupt_failed, "Failed to read GPT for n_partition_entries corruption test");
 		goto out;
 	}
 
@@ -693,13 +693,13 @@ static int SELF_TEST_corrupt_gpt_n_partition_entries(int fd, int pblk_size, uint
 
 	// 5. Write corrupted primary header
 	if (SELF_TEST_write_gpt_header_at_position(fd, pblk_size, &primary_header, gpt.header.my_pba) < 0) {
-		fprintf(stderr, "Failed to write corrupted primary header\n");
+		N_Ef(selftest_write_corrupt_pri_hdr_failed, "Failed to write corrupted primary header for n_part test");
 		goto out;
 	}
 
 	// 6. Write corrupted alternate header
 	if (SELF_TEST_write_gpt_header_at_position(fd, pblk_size, &alternate_header, gpt.header.alternate_pba) < 0) {
-		fprintf(stderr, "Failed to write corrupted alternate header\n");
+		N_Ef(selftest_write_corrupt_alt_hdr_failed, "Failed to write corrupted alternate header for n_part test");
 		goto out;
 	}
 	fsync(fd);
@@ -993,7 +993,7 @@ static int display_all_gpts(int disk_fd,
 	// For metadata GPT reading, need the best Main GPT copy
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, pblk_size, &main_gpt,
 										  pba_s, pba_hw_e, fix_gpt) < 0) {
-		fprintf(stderr, "Unable to fix Main-GPT for metadata access. dev_file_name=%s\n", dev_name);
+		N_Ef(display_restore_main_gpt_failed, "Unable to restore Main-GPT for metadata access. dev=@STR", dev_name);
 		goto out;
 	}
 
@@ -1079,7 +1079,7 @@ static int run_self_test(void)
 		// Create mock device
 		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
 		if (disk_fd < 0) {
-			fprintf(stderr, "Failed to generate self-test device\n");
+			N_Ef(selftest1_gen_device_failed, "Failed to generate self-test device for test 1");
 			goto out;
 		}
 
@@ -1117,7 +1117,7 @@ static int run_self_test(void)
 		// Reuse same path - recreate device with corruption
 		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
 		if (disk_fd < 0) {
-			fprintf(stderr, "Failed to generate mismatch test device\n");
+			N_Ef(selftest2_gen_device_failed, "Failed to generate mismatch test device for test 2");
 			goto out;
 		}
 
@@ -1125,7 +1125,7 @@ static int run_self_test(void)
 															SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
 															1,
 															SELF_TEST_MOCK_DEVICE_BLOCKS - 1) < 0) {
-			fprintf(stderr, "Failed to corrupt alternate GPT for mismatch test\n");
+			N_Ef(selftest2_corrupt_failed, "Failed to corrupt alternate GPT for mismatch test");
 			close(disk_fd);
 			goto out;
 		}
@@ -1157,7 +1157,7 @@ static int run_self_test(void)
 		// Recreate normal device
 		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
 		if (disk_fd < 0) {
-			fprintf(stderr, "Failed to generate test device for UUID filter\n");
+			N_Ef(selftest3_gen_device_failed, "Failed to generate test device for UUID filter test");
 			goto out;
 		}
 
@@ -1220,7 +1220,7 @@ static int run_self_test(void)
 		// Create device with overlapping partitions
 		disk_fd = SELF_TEST_generate_mock_device_with_overlaps(test_device_path);
 		if (disk_fd < 0) {
-			fprintf(stderr, "Failed to generate device with overlaps\n");
+			N_Ef(selftest5_gen_overlap_device_failed, "Failed to generate device with overlaps for test 5");
 			goto out;
 		}
 
@@ -1268,7 +1268,7 @@ static int run_self_test(void)
 		// Create fresh device
 		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
 		if (disk_fd < 0) {
-			fprintf(stderr, "Failed to generate test device for GPT upgrade\n");
+			N_Ef(selftest6_gen_device_failed, "Failed to generate test device for GPT upgrade test");
 			goto out;
 		}
 
@@ -1280,7 +1280,7 @@ static int run_self_test(void)
 
 		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
 											  &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-			fprintf(stderr, "Failed to read fresh Main GPT\n");
+			N_Ef(selftest6_read_fresh_failed, "Failed to read fresh Main GPT for test 6 Part A");
 			close(disk_fd);
 			goto out;
 		}
@@ -1305,7 +1305,7 @@ static int run_self_test(void)
 													  1,
 													  SELF_TEST_MOCK_DEVICE_BLOCKS - 1,
 													  wrong_n_partition_entries) < 0) {
-			fprintf(stderr, "Failed to corrupt Main GPT n_partition_entries\n");
+			N_Ef(selftest6_corrupt_n_part_failed, "Failed to corrupt Main GPT n_partition_entries for test 6");
 			close(disk_fd);
 			goto out;
 		}
@@ -1317,7 +1317,7 @@ static int run_self_test(void)
 
 		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
 											  &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-			fprintf(stderr, "Failed to read corrupted GPT\n");
+			N_Ef(selftest6_read_corrupt_failed, "Failed to read corrupted GPT for test 6 Part B");
 			close(disk_fd);
 			goto out;
 		}
@@ -1347,8 +1347,8 @@ static int run_self_test(void)
 
 		// Perform the upgrade
 		fprintf(stdout, "\nPerforming GPT upgrade...\n");
-		if (upgrade_gpt_in_place(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt) < 0) {
-			fprintf(stderr, "GPT upgrade failed\n");
+		if (upgrade_gpt_if_needed(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, "Main") < 0) {
+			N_Ef(selftest6_upgrade_failed, "GPT upgrade failed in test 6 Part B");
 			close(disk_fd);
 			goto out;
 		}
@@ -1360,7 +1360,7 @@ static int run_self_test(void)
 
 		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
 											  &verify_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-			fprintf(stderr, "Failed to read GPT for verification\n");
+			N_Ef(selftest6_verify_read_failed, "Failed to read GPT for verification in test 6");
 			close(disk_fd);
 			goto out;
 		}
@@ -1508,7 +1508,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			fprintf(stdout, "Device: %s (NVMesh managed)\n", config->device_path);
 			// Read disks.csv
 			if ((fd = NNVMEIBT_OPEN_READ(trace_12_main, file_name, 1)) < 0) {
-				fprintf(stderr, "OOPS! Invalid file descriptor=%d file_name=%s err=%m", fd, file_name);
+				N_Ef(parse_args_open_csv_failed, "Failed to open @FILE_ENTRY_NAME @AUTO_ERRNO", file_name);
 				rv = -1;
 				goto out;
 			}
@@ -1547,12 +1547,12 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 				if (is_expecting_csv_header_line) {
 					char *ref_header = (char *)nvmeibt_get_csv_header_by_section_type(section_type);
 					if (ref_header == NULL) {
-						fprintf(stdout,"Wrong section_type=%d given\n", section_type);
+						N_Ef(parse_csv_bad_section_type, "Wrong section_type=@INT", section_type);
 						rv = -1;
 						goto out;
 					}
 					if (memcmp(line, ref_header, line_len) != 0) {
-						fprintf(stderr, "Expecting csv header '%s'. Got '%s'\n", ref_header, line);
+						N_Ef(parse_csv_header_mismatch, "Expecting csv header '@STR'. Got '@STR'", ref_header, line);
 						rv = -1;
 						goto out;
 					}
@@ -1579,7 +1579,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 						's', sizeof(disk_config.native_serial.str), &disk_config.native_serial.str,
 						'\0');
 					if (r < 0) {
-						fprintf(stderr,"Failed to parse line: %s\n",  line);
+						N_Wf(parse_csv_line_failed, "Failed to parse CSV line: @STR", line);
 					}
 
 					// Check if this is the device we are looking for
@@ -1618,7 +1618,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'm':
 			if (config->action != ACTION_DISPLAY_GPT) {
-				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				N_Ef(parse_multiple_actions, "Multiple actions specified (only one allowed)");
 				rv = -1;
 				goto out;
 			}
@@ -1627,7 +1627,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'f':
 			if (config->action != ACTION_DISPLAY_GPT) {
-				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				N_Ef(parse_multiple_actions_fix_gpt, "Multiple actions specified (only one allowed)");
 				rv = -1;
 				goto out;
 			}
@@ -1636,7 +1636,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'F':
 			if (config->action != ACTION_DISPLAY_GPT) {
-				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				N_Ef(parse_multiple_actions_fix_mbr, "Multiple actions specified (only one allowed)");
 				rv = -1;
 				goto out;
 			}
@@ -1645,7 +1645,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'i':
 			if (config->action != ACTION_DISPLAY_GPT) {
-				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				N_Ef(parse_multiple_actions_check, "Multiple actions specified (only one allowed)");
 				rv = -1;
 				goto out;
 			}
@@ -1654,7 +1654,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'U':
 			if (config->action != ACTION_DISPLAY_GPT) {
-				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				N_Ef(parse_multiple_actions_upgrade, "Multiple actions specified (only one allowed)");
 				rv = -1;
 				goto out;
 			}
@@ -1667,7 +1667,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			if (strcmp(config->gpt_copy_option, "primary") != 0 &&
 				strcmp(config->gpt_copy_option, "alternate") != 0 &&
 				strcmp(config->gpt_copy_option, "both") != 0) {
-				fprintf(stderr, "Invalid --gpt-copy value: %s (use: primary|alternate|both)\n", config->gpt_copy_option);
+				N_Ef(parse_invalid_gpt_copy, "Invalid --gpt-copy value @STR (use: primary|alternate|both)", config->gpt_copy_option);
 				rv = -1;
 				goto out;
 			}
@@ -1685,7 +1685,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'J':
 			if (config->action != ACTION_DISPLAY_GPT) {
-				fprintf(stderr, "Error: Multiple actions specified (only one allowed)\n");
+				N_Ef(parse_multiple_actions_export, "Multiple actions specified (only one allowed)");
 				rv = -1;
 				goto out;
 			}
@@ -1699,6 +1699,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			fprintf(stdout, "Device: %s (any device)\n", config->device_path);
 			// Get device info immediately to fill config
 			if (get_device_info(config->device_path, &config->pblk_size, &config->pba_e) < 0) {
+				N_Ef(parse_get_device_info_failed, "Failed to get device info for @STR", config->device_path);
 				rv = -1;
 				goto out;
 			}
@@ -1706,7 +1707,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->pba_hw_e = config->pba_e;
 			break;
 		default:
-			fprintf(stderr, "Error: Unknown option\n");
+			N_Ef(parse_unknown_option, "Unknown command-line option");
 			print_usage(argv);
 			rv = -1;
 			goto out;
@@ -1728,7 +1729,7 @@ static int validate_config(struct gpt_util_config *config)
 {
 	// Must specify device
 	if (config->device_path[0] == '\0') {
-		fprintf(stderr, "Error: Must specify device with -d or -a\n");
+		N_Ef(validate_no_device, "Must specify device with -d or -a");
 		return -1;
 	}
 
@@ -1737,7 +1738,7 @@ static int validate_config(struct gpt_util_config *config)
 		if (strcmp(config->gpt_copy_option, "primary") != 0 &&
 			strcmp(config->gpt_copy_option, "alternate") != 0 &&
 			strcmp(config->gpt_copy_option, "both") != 0) {
-			fprintf(stderr, "Error: Invalid gpt_copy_option=%s\n", config->gpt_copy_option);
+			N_Ef(validate_bad_gpt_copy, "Invalid gpt_copy_option=@STR", config->gpt_copy_option);
 			return -1;
 		}
 	}
@@ -1764,7 +1765,7 @@ static int execute_check_excelero(int disk_fd, struct gpt_util_config *config)
 			rv = 0;
 		}
 	} else {
-		fprintf(stderr, "Error: Failed to read GPT from device\n");
+		N_Ef(check_excelero_read_failed, "Failed to read GPT from device @STR", config->device_path);
 		rv = -1;
 	}
 
@@ -1784,8 +1785,8 @@ static int execute_display_mbr(int disk_fd, struct gpt_util_config *config)
 
 	if (nvmeibt_disk_metadata_read_mbr_blk(NULL, disk_fd, config->pblk_size, &mbr,
 										   config->device_path, NULL) < 0) {
-		fprintf(stderr, "Unable to read MBR. dev_file_name=%s block_size=%d\n",
-				config->device_path, config->pblk_size);
+		N_Ef(display_mbr_read_failed, "Unable to read MBR dev=@STR block_size=@INT",
+			 config->device_path, config->pblk_size);
 		goto out;
 	}
 
@@ -1814,8 +1815,8 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 	// Read current MBR
 	if (nvmeibt_disk_metadata_read_mbr_blk(NULL, disk_fd, config->pblk_size, &mbr,
 										   config->device_path, NULL) < 0) {
-		fprintf(stderr, "Unable to read MBR. dev_file_name=%s block_size=%d\n",
-				config->device_path, config->pblk_size);
+		N_Ef(fix_mbr_read_failed, "Unable to read MBR dev=@STR block_size=@INT",
+			 config->device_path, config->pblk_size);
 		goto out;
 	}
 
@@ -1829,13 +1830,13 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 	if (mbr.signature != (short)MBR_SIGNATURE) {
 		fprintf(stdout, "MBR signature invalid, attempting fix...\n");
 		if (config->pba_e == 0) {
-			fprintf(stderr, "Error: Disk size not detected, please specify with -e\n");
+			N_Ef(fix_mbr_no_size, "Disk size not detected, please specify with -e");
 			goto out;
 		}
 
 		nvmeibt_disk_metadata_init_pmbr(&mbr, config->pba_e + 1, config->pblk_size);
 		if (nvmeibt_disk_metadata_write_mbr(NULL, disk_fd, config->pblk_size, &mbr) < 0) {
-			fprintf(stderr, "MBR write failed\n");
+			N_Ef(fix_mbr_write_failed, "MBR write failed for dev=@STR", config->device_path);
 			goto out;
 		}
 
@@ -1865,75 +1866,51 @@ static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 }
 
 /**
- * Check if GPT needs upgrade (n_partition_entries != 8192 or CRC calculated incorrectly)
- * Returns: 1 if upgrade needed, 0 if already correct, -1 on error
+ * Upgrade GPT in place: check if needed, fix n_partition_entries, recalculate CRC
+ * Uses TOMA API nvmeibt_disk_metadata_store_gpt which internally calls update_gpt_crcs()
+ * Returns: 0 on success (upgraded or no upgrade needed), -1 on error
  */
-static int check_gpt_needs_upgrade(const struct nvmeibt_disk_gpt *gpt, const char *gpt_name)
+static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name)
 {
-	uint32_t	correct_crc;
-	uint32_t	buggy_crc;
-	int			nbytes_correct;
-	int			nbytes_buggy;
+	uint32_t	expected_crc;
+	int			nbytes;
+	int			old_n_partition_entries;
 
-	// Check if n_partition_entries needs to be fixed to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192)
-	if (gpt->header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
-		fprintf(stdout, "%s GPT: n_partition_entries=%d (needs upgrade to %d)\n",
-				gpt_name, gpt->header.n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-
-		// Check CRC status for additional info
-		nbytes_correct = gpt->header.n_partition_entries * gpt->header.size_of_partition_entry;
-		correct_crc = crc32_seedless(gpt->entries, nbytes_correct);
-		nbytes_buggy = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt->header.size_of_partition_entry;
-		buggy_crc = crc32_seedless(gpt->entries, nbytes_buggy);
-
-		if (gpt->header.partition_entry_array_crc32 == buggy_crc) {
-			fprintf(stdout, "  CRC was calculated with %d entries (buggy)\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-		} else if (gpt->header.partition_entry_array_crc32 == correct_crc) {
-			fprintf(stdout, "  CRC matches n_partition_entries=%d\n", gpt->header.n_partition_entries);
-		} else {
-			fprintf(stdout, "  CRC mismatch (stored=0x%08x, expected=0x%08x)\n",
-					gpt->header.partition_entry_array_crc32, correct_crc);
-		}
-		return 1;
-	}
-
-	// n_partition_entries is already 8192, check if CRC is correct
-	nbytes_correct = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt->header.size_of_partition_entry;
-	correct_crc = crc32_seedless(gpt->entries, nbytes_correct);
-
-	if (gpt->header.partition_entry_array_crc32 == correct_crc) {
-		fprintf(stdout, "%s GPT: Already correct (n_partition_entries=%d, CRC=0x%08x)\n",
-				gpt_name, LARGE_GPT_MAX_NUM_GPT_ENTRIES, correct_crc);
+	// Only upgrade LARGE GPTs
+	if (gpt->max_n_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
+		fprintf(stdout, "%s GPT: max_n_entries=%d (not LARGE GPT, skipping)\n",
+				gpt_name, gpt->max_n_entries);
 		return 0;
 	}
 
-	// n_partition_entries is 8192 but CRC doesn't match - this is an error
-	fprintf(stderr, "%s GPT: CRC mismatch (n_partition_entries=%d but CRC invalid)\n",
-			gpt_name, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-	fprintf(stdout, "  Stored CRC=0x%08x, Expected CRC=0x%08x\n",
-			gpt->header.partition_entry_array_crc32, correct_crc);
-	return -1;
-}
-
-/**
- * Upgrade GPT in place: fix n_partition_entries to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192) and recalculate CRC
- * Uses TOMA API nvmeibt_disk_metadata_store_gpt which internally calls update_gpt_crcs()
- * to recalculate CRCs correctly using n_partition_entries (UEFI-compliant)
- */
-static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt)
-{
-	int old_n_partition_entries = gpt->header.n_partition_entries;
-
-	// Fix n_partition_entries to LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192)
-	gpt->header.n_partition_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
-	fprintf(stdout, "  Setting n_partition_entries: %d -> %d\n",
-			old_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-
-	fprintf(stdout, "  Writing GPT via TOMA API (CRC recalculated correctly)...\n");
-	if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, pblk_size, gpt, false) < 0) {
-		fprintf(stderr, "Error: Failed to write GPT with upgraded CRC\n");
+	// Validate CRC. For LARGE GPT, CRC always uses 8192 entries.
+	nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt->header.size_of_partition_entry;
+	expected_crc = crc32_seedless(gpt->entries, nbytes);
+	if (gpt->header.partition_entry_array_crc32 != expected_crc) {
+		N_Ef(upgrade_gpt_crc_corrupt, "@STR GPT: CRC invalid (corruption?). Will not upgrade.", gpt_name);
 		return -1;
 	}
+
+	// Already correct?
+	if (gpt->header.n_partition_entries == LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
+		fprintf(stdout, "%s GPT: Already correct (n_partition_entries=%d)\n",
+				gpt_name, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		return 0;
+	}
+
+	// Perform upgrade
+	old_n_partition_entries = gpt->header.n_partition_entries;
+	gpt->header.n_partition_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+
+	fprintf(stdout, "%s GPT: Upgrading (n_partition_entries: %d -> %d)\n",
+			gpt_name, old_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+	if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, pblk_size, gpt, false) < 0) {
+		N_Ef(upgrade_gpt_write_failed, "Failed to write @STR GPT", gpt_name);
+		return -1;
+	}
+
+	fprintf(stdout, "%s GPT: Upgrade complete\n", gpt_name);
 	return 0;
 }
 
@@ -1947,9 +1924,6 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 	struct nvmeibt_disk_gpt					main_gpt;
 	struct nvmeibt_disk_gpt					metadata_gpt;
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_entry;
-	int										main_needs_upgrade = 0;
-	int										metadata_needs_upgrade = 0;
-	int										check_result;
 
 	memset(&main_gpt, 0, sizeof(main_gpt));
 	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
@@ -1962,65 +1936,37 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "Reading Main GPT...\n");
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &main_gpt,
 										  config->pba_s, config->pba_hw_e, false) < 0) {
-		fprintf(stderr, "Error: Failed to read Main GPT. GPT may be corrupted.\n");
-		fprintf(stderr, "       Use --fix-gpt first to recover from alternate copy.\n");
+		N_Ef(upgrade_gpt_read_main_failed, "Failed to read Main GPT dev=@STR. GPT may be corrupted.",
+			 config->device_path);
+		fprintf(stdout, "Use --fix-gpt first to recover from alternate copy.\n");
 		goto out;
 	}
 	fprintf(stdout, "Main GPT read successfully (n_partition_entries=%d, max_n_entries=%d)\n",
 			main_gpt.header.n_partition_entries, main_gpt.max_n_entries);
 
-	// Step 2: Check if Main GPT needs upgrade
-	check_result = check_gpt_needs_upgrade(&main_gpt, "Main");
-	if (check_result < 0) {
+	// Step 2: Upgrade Main GPT if needed
+	if (upgrade_gpt_if_needed(disk_fd, config->pblk_size, &main_gpt, "Main") < 0) {
 		goto out;
 	}
-	main_needs_upgrade = check_result;
 
 	// Step 3: Check for Metadata GPT
 	metadata_entry = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-	if (metadata_entry) {
-		fprintf(stdout, "\nReading Metadata GPT...\n");
-		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &metadata_gpt,
-											  metadata_entry->pba_s, metadata_entry->pba_e, false) < 0) {
-			fprintf(stderr, "Warning: Failed to read Metadata GPT. Skipping metadata upgrade.\n");
-		} else {
-			fprintf(stdout, "Metadata GPT read successfully (n_partition_entries=%d, max_n_entries=%d)\n",
-					metadata_gpt.header.n_partition_entries, metadata_gpt.max_n_entries);
-
-			check_result = check_gpt_needs_upgrade(&metadata_gpt, "Metadata");
-			if (check_result >= 0) {
-				metadata_needs_upgrade = check_result;
-			}
-		}
-	} else {
+	if (!metadata_entry) {
 		fprintf(stdout, "\nNo Metadata GPT found (non-NVMesh disk or no excelero_metadata partition)\n");
-	}
-
-	// Step 4: Perform upgrades if needed
-	fprintf(stdout, "\n=== GPT Upgrade Summary ===\n");
-	if (!main_needs_upgrade && !metadata_needs_upgrade) {
-		fprintf(stdout, "No upgrades needed. All GPTs already have n_partition_entries=%d.\n",
-				LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-		rv = 0;
 		goto out;
 	}
-
-	if (main_needs_upgrade) {
-		fprintf(stdout, "Upgrading Main GPT...\n");
-		if (upgrade_gpt_in_place(disk_fd, config->pblk_size, &main_gpt) < 0) {
-			fprintf(stderr, "Error: Failed to write Main GPT\n");
-			goto out;
-		}
-		fprintf(stdout, "Main GPT upgraded successfully.\n");
+	fprintf(stdout, "\nReading Metadata GPT...\n");
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &metadata_gpt, metadata_entry->pba_s, metadata_entry->pba_e, false) < 0) {
+		N_Wf(upgrade_gpt_read_metadata_failed, "Failed to read Metadata GPT dev=@STR. Skipping metadata upgrade.", config->device_path);
+		goto out;
 	}
+	fprintf(stdout, "Metadata GPT read successfully (n_partition_entries=%d, max_n_entries=%d)\n",
+			metadata_gpt.header.n_partition_entries, metadata_gpt.max_n_entries);
 
-	if (metadata_needs_upgrade && metadata_entry) {
-		fprintf(stdout, "Upgrading Metadata GPT...\n");
-		if (upgrade_gpt_in_place(disk_fd, config->pblk_size, &metadata_gpt) < 0) {
-			fprintf(stderr, "Error: Failed to write Metadata GPT\n");
-			goto out;
-		}
-		fprintf(stdout, "Metadata GPT upgraded successfully.\n");
+	// Upgrade Metadata GPT if needed
+	if (upgrade_gpt_if_needed(disk_fd, config->pblk_size, &metadata_gpt, "Metadata") < 0) {
+		N_Ef(upgrade_metadata_gpt_failed, "Failed to upgrade Metadata GPT dev=@STR", config->device_path);
+		// Don't fail entire operation if only metadata upgrade fails
 	}
 
 	fprintf(stdout, "\n=== GPT Upgrade Complete ===\n");
@@ -2095,7 +2041,7 @@ static int run_gpt_util_op(int argc, char *argv[])
 
 	// ==================== PHASE 3: SETUP (OPEN DEVICE) ====================
 	if ((disk_fd = open(config.device_path, O_RDWR | O_EXCL | __O_DIRECT)) < 0) {
-		fprintf(stderr, "Unable to open=%s with O_EXCL err=%m\n", config.device_path);
+		N_Ef(run_gpt_util_open_failed, "Unable to open @STR with O_EXCL @AUTO_ERRNO", config.device_path);
 		goto out;
 	}
 
@@ -2132,7 +2078,7 @@ static int run_gpt_util_op(int argc, char *argv[])
 		break;
 
 	default:
-		fprintf(stderr, "Error: Unknown action=%d\n", config.action);
+		N_Ef(run_gpt_util_unknown_action, "Unknown action=@INT", config.action);
 		rv = -1;
 		break;
 	}
@@ -2173,7 +2119,7 @@ int gpt_util_main(int argc, char *argv[])
 
 	// Buffer Manager
 	if (nvmeibt_bm_create()) {
-		fprintf(stderr, "Fail to create buffer manager\n");
+		N_Ef(gpt_util_bm_create_failed, "Failed to create buffer manager");
 		return 1;
 	}
 
