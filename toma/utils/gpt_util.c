@@ -19,6 +19,7 @@
 #include "../nvmeibt_local_disk.h"
 #include "nvmeibt_uuid.h"
 #include "../nvmeibt_mm_json.h"
+#include "../interfaces/log/nvmeibt_binary_tracing.h"
 #include "../interfaces/srvr/nvmeibt_srvr_proc.h"	// DISKS_INFO_FILE
 
 #define GPT_UTIL_VERSION	"2.0.0-dev"
@@ -64,25 +65,6 @@ struct gpt_util_config {
 	// JSON export options (for ACTION_EXPORT_JSON)
 	char					output_json_file[256];	// Output JSON filename
 };
-
-
-#undef N_Df
-#undef N_Tf
-#undef N_If
-#undef N_IMf
-#undef N_Wf
-#undef N_Ef
-#undef NFIN
-#undef NFOUT
-#define N_Df(name, fmt, ...) do {} while (0)
-//#define N_Tf(name, fmt, ...) do { NVMEIB_LOG_LONGTERM(fmt, _Tf, /*Default Scope*/, name, ##__VA_ARGS__); printf(N_FORMAT_STRING(name), ## __VA_ARGS__); printf("\n");} while (0)
-#define N_Tf(name, fmt, ...) do {} while (0)
-#define N_If(name, fmt, ...) do {} while (0)
-#define N_IMf(name, fmt, ...) do {} while (0)
-#define N_Wf(name, fmt, ...) do {} while (0)
-#define N_Ef(name, fmt, ...) do {} while (0)
-#define NFIN
-#define NFOUT
 
 // Forward declarations
 static int upgrade_gpt_in_place(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt);
@@ -2181,6 +2163,9 @@ int gpt_util_main(int argc, char *argv[])
 		}
 	}
 
+	// Start trace pollers (gpt_util is a utility, routes traces properly)
+	nvmeibt_start_all_trace_pollers(true);
+
 #ifdef TOMA_SIMULATOR_SANDBOX
 	// Initialize sandbox environment for subprogram execution
 	{ extern void toma_unitest_env_start(void); toma_unitest_env_start(); }
@@ -2203,6 +2188,8 @@ int gpt_util_main(int argc, char *argv[])
 	}
 
 	nvmeibt_bm_destroy();
+	nvmeibt_join_all_trace_pollers();		// Clean shutdown of trace threads; beyond this point, no more traces
+
 	return rv;
 }
 
