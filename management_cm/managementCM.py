@@ -689,8 +689,11 @@ class ManagementCM(Daemon):
 						JsonSocket(connection, self.readList, self.writeList, self.concurrentConnections, self.kafkaOutbox, self.logger)
 					elif CMConfig.nvmeshUMClient and s is nvmeshUMListener:
 						self.logger.debug('accepting mcs NvmeshUMSocket')
-						connection, address = s.accept()
-						self.createNvmeshUMSocket(cmSocket=connection, jsonScheme=os.path.join(schemePath, "clnt_scheme.json"), ftype='c')
+						try:
+							connection, address = s.accept()
+							self.createNvmeshUMSocket(cmSocket=connection, jsonScheme=os.path.join(schemePath, "clnt_scheme.json"), ftype='c')
+						except (socket.error, IOError) as e:
+							self.handleSocketErrorException(e, s)
 						clientConnectedDuringStartup = True
 						self.logger.debug('created mcs NvmeshUMSocket')
 					elif any([isinstance(s, socketType) for socketType in [JsonSocket, FileSocket, NvmeshUMSocket]]):
