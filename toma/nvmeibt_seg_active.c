@@ -2136,54 +2136,6 @@ void nvmeibt_seg_active_recovery_done(
 
 /* client disconnect */
 
-int nvmeibt_seg_active_record_registrant_disconnect(
-	struct nvmeibt_seg_active *seg_active, struct nvmeibt_registrant_ctx *reg_ctx)
-{
-	struct nvmeibt_seg_active_recovery_ctx			*registrant_disconnect_ctx;
-	int												rv = -1;
-
-	NFIN;
-	if (seg_active->n_registrants_removal > NVMEIBT_MAX_N_CLIENTS_PER_DISK_SEGMENT) {
-		N_Wf(o9i3521, "Too many stale_locks @N_REGISTRANTS_REMOVAL", seg_active->n_registrants_removal);
-	}
-	registrant_disconnect_ctx = NNVMEIBT_TOMA_MALLOC(trace_seg_active_nvmeibt_seg_active_record_registrant_disconnect, sizeof(*registrant_disconnect_ctx));
-	registrant_disconnect_ctx->reg_lock_id = reg_ctx->reg_lock_id;
-	registrant_disconnect_ctx->praid_version = reg_ctx->praid_version;
-	seg_active->clients_disconnect_ctx[seg_active->n_registrants_removal++] = registrant_disconnect_ctx;
-	N_Tf(go97dr4, "reg_lock_id=@C_LID n=@N_REGISTRANTS_REMOVAL", nvmeib_lockid_purify(reg_ctx->reg_lock_id), seg_active->n_registrants_removal);
-
-	rv = 0;
-	NFOUT;
-	return rv;
-}
-
-void nvmeibt_seg_active_remove_registrant_disconnect_record_from_seg(struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id, bool is_force)
-{
-	BOOL							is_found = false;
-	int								i;
-
-	NFIN;
-	for (i = seg_active->n_registrants_removal - 1; i >= 0; --i) {
-		struct nvmeibt_seg_active_recovery_ctx		*registrant_disconnect_ctx;
-
-		registrant_disconnect_ctx = seg_active->clients_disconnect_ctx[i];
-		if (nvmeib_lockid_are_purified_eq(registrant_disconnect_ctx->reg_lock_id, reg_lock_id)) {
-			N_Tf(o09iei9, "Done registrant_disconnect reg_lock_id=@C_LID", nvmeib_lockid_purify(reg_lock_id));
-			// Erase the entry, and overide it
-			NNVMEIBT_TOMA_FREE(ar54e02, registrant_disconnect_ctx);
-			seg_active->clients_disconnect_ctx[i] =
-					seg_active->clients_disconnect_ctx[--(seg_active->n_registrants_removal)];
-			seg_active->clients_disconnect_ctx[seg_active->n_registrants_removal] = NULL;
-			is_found = 1;
-			break;
-		}
-	}
-	if (!is_found && !is_force) {	// force did not add it to clients_disconnect_ctx[]
-		N_Tf(adr5402, "OOPS! couldn't find reg_lock_id=@C_LID", nvmeib_lockid_purify(reg_lock_id));
-	}
-	NFOUT;
-}
-
 void nvmeibt_recovery_set_is_stale_rebuild_enabled(bool is_enabled)
 {
 	if (is_stale_rebuild_enabled != is_enabled) {

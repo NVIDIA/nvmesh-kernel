@@ -1516,7 +1516,6 @@ void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ct
 			 nvmeibt_seg_active_UUID_8(seg_active), reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 		// inactive. I.e., remove from the timeout list
 		upd_registrant_sync_timeout(reg_ctx, REG_TIMEOUT_REASON_DEL_ME);
-		nvmeibt_seg_active_remove_registrant_disconnect_record_from_seg(seg_active, reg_ctx->reg_lock_id, is_force);
 
 		remove_active_registrant(seg_active, reg_ctx);
 
@@ -2200,8 +2199,6 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_class_client_r
 		goto free_resources;
 	}
 
-	nvmeibt_seg_active_record_registrant_disconnect(seg_active, active_registrant_entry);
-
 	rv = REGISTRANT_DISCONNECT_LAUNCH_OK;
 	goto out;
 
@@ -2257,22 +2254,6 @@ static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmei
 	NFOUT;
 	return rv;
 }
-
-#ifdef TOMA_DEBUG
-static void debug_validate_no_duplicate_lockid_removal(struct nvmeibt_registrant_ctx *input_registrant_ctx)
-{
-	int								i;
-	struct nvmeibt_seg_active		*seg_active = input_registrant_ctx->seg_active;
-
-	for (i = 0; i < seg_active->n_registrants_removal; i++) {
-		if (nvmeib_lockid_are_purified_eq(seg_active->clients_disconnect_ctx[i]->reg_lock_id, input_registrant_ctx->reg_lock_id)) {
-			N_Ef(error_register_debug_validate_no_duplicate_lockid_removal, "About to lounch a duplicate client-disconnect for lock_id=@T_LID",
-				nvmeib_lockid_purify(input_registrant_ctx->reg_lock_id));
-			nvmeibt_abort(ES_FATAL);
-		}
-	}
-}
-#endif	// #ifdef TOMA_DEBUG
 
 /*
  * Every unregister gets here after we know that the registrant will not

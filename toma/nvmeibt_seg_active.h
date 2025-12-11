@@ -116,9 +116,6 @@ struct nvmeibt_seg_active {
 	//
 	struct seg_active_required_recovery_action	required_recovery_action;
 	//
-	struct nvmeibt_seg_active_recovery_ctx		*clients_disconnect_ctx[NVMEIBT_MAX_N_CLIENTS_PER_DISK_SEGMENT];
-	int											n_registrants_removal;
-	//
 	int											prev_successful_open_for_use_praid_major;
 	int											last_post_update_praid_version_major;
 	//
