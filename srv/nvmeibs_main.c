@@ -1227,7 +1227,7 @@ static int nvmeibs_register_disk_resources(struct nvmeibs_dev *nis_dev,
 	}
 
 	mem = kzalloc(sizeof(*mem), GFP_KERNEL);
-	ib_dma = kcalloc(sizeof(*ib_dma), disk->n_qs, GFP_KERNEL);
+	ib_dma = kcalloc(disk->n_qs, sizeof(*ib_dma), GFP_KERNEL);
 	bb_maps = kzalloc(sizeof(*bb_maps) * disk->n_qs, GFP_KERNEL);
 	/* allocate memory info array */
 	if (!mem || (disk->n_qs && (!bb_maps || !ib_dma))) {
