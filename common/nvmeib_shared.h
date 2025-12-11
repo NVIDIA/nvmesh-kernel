@@ -622,7 +622,8 @@ enum nvmeibs_serjio_status {
 	NVMEIBS_SERJIO_STATUS_NO_GPT		= 5,	/* Disk is missing GPT */
 	NVMEIBS_SERJIO_STATUS_NO_JOURNAL	= 6,	/* Journal partition does not exist */
 	NVMEIBS_SERJIO_STATUS_NO_DB			= 7,	/* SERJIO Database partition does not exist */
-	NVMEIBS_SERJIO_STATUS_MAX			= 8,
+	NVMEIBS_SERJIO_STATUS_NOT_SUPP		= 8,	/* Not supported */
+	NVMEIBS_SERJIO_STATUS_MAX			= 9,
 } __attribute__((packed));
 
 static inline const char *nvmeib_shared_serjio_status_to_str(enum nvmeibs_serjio_status serjio_status)
@@ -644,6 +645,8 @@ static inline const char *nvmeib_shared_serjio_status_to_str(enum nvmeibs_serjio
 		return "NO_JOURNAL";
 	case NVMEIBS_SERJIO_STATUS_NO_DB:
 		return "NO_DB";
+	case NVMEIBS_SERJIO_STATUS_NOT_SUPP:
+		return "NOT_SUPPORTED";
 	default:
 		break;
 	}
