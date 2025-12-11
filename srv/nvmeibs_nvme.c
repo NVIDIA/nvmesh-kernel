@@ -1629,7 +1629,7 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 			callback = 0;
 		}
 	}
-	num_handled--;
+
 	if (num_handled != 0) {
 		wake_up(&q->waiting);
 		if (q->complete_fn != NULL)
