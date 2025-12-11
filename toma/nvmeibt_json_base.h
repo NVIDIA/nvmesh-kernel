@@ -123,7 +123,7 @@ struct JSON_idx_token {
 #define JSON_LOOP_ITERATION_START(__name, __JSON_token)							\
 	is_found = 0;																\
 	json_n = 0;																	\
-	DUMP_kv_TO_LOG(__name ## KV, kv);
+	/* DUMP_kv_TO_LOG(__name ## KV, kv); */
 
 #define JSON_LOOP_ITERATION_END(__name, __JSON_token)							\
 	if (!is_found) {															\
@@ -144,7 +144,7 @@ struct JSON_idx_token {
 	}																			\
 	if (__json_iter == 0) {														\
 		JSON_ARR[json_n].token = (__JSON_token);								\
-		N_Tf(__name ## 3, "token[@INT]=@STR", json_n, JSON_ARR[json_n].token);	\
+		/*N_Tf(__name ## 3, "token[@INT]=@STR", json_n, JSON_ARR[json_n].token);*/	\
 		n_json_tokens++;														\
 	}																			\
 	json_n++;

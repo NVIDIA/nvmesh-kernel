@@ -13,7 +13,6 @@
 // #define MM_STRUCT_VER_2012 2012		// ELECT
 #define MM_STRUCT_VER_2067 2067		// Kafka
 
-
 static void _mm_uuid_binary_to_str(const union nvmeib_uuid *uuid, char *s)
 {
 	nvmeibt_union_uuid_to_urn_uuid_in_place(uuid, s);
@@ -242,7 +241,7 @@ static void _HW_nic_from_json(struct mm_nic_conf *nic, struct mm_json_elem *elem
 	char						*s;
 	JSON_ASSIGN_AND_CALL_INIT();
 
-	NFIN;
+//	NFIN;
 	memset(nic, 0, sizeof(struct mm_nic_conf));
 	if (elem->type != JSON_E_DICT)
 		return;
@@ -263,7 +262,7 @@ static void _HW_nic_from_json(struct mm_nic_conf *nic, struct mm_json_elem *elem
 		JSON_LOOP_ITERATION_END(vnjxls0, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(n3bus03);
-	NFOUT;
+//	NFOUT;
 }
 
 static void _HW_node_nics_from_json(struct mm_node_conf *node, struct mm_json_elem *nics_arr_json)
@@ -285,7 +284,7 @@ static void _HW_node_from_json(struct HW_mgmt_conf *conf, struct mm_node_conf *n
 	struct mm_json_dict			*dict = &(elem->dict);
 	JSON_ASSIGN_AND_CALL_INIT();
 
-	NFIN;
+//	NFIN;
 	memset(node, 0, sizeof(struct mm_node_conf));
 	if (elem->type != JSON_E_DICT)
 		return;
@@ -301,7 +300,7 @@ static void _HW_node_from_json(struct HW_mgmt_conf *conf, struct mm_node_conf *n
 		JSON_LOOP_ITERATION_END(rvshiwl, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(48jsiwl);
-	NFOUT;
+//	NFOUT;
 }
 
 static void _HW_disk_from_json(struct mm_disk_conf *disk, struct mm_json_elem *elem)
@@ -310,7 +309,7 @@ static void _HW_disk_from_json(struct mm_disk_conf *disk, struct mm_json_elem *e
 	struct mm_json_dict			*dict = &(elem->dict);
 	JSON_ASSIGN_AND_CALL_INIT();
 
-	NFIN;
+//	NFIN;
 	memset(disk, 0, sizeof(*disk));
 	if (elem->type != JSON_E_DICT)
 		return;
@@ -327,7 +326,7 @@ static void _HW_disk_from_json(struct mm_disk_conf *disk, struct mm_json_elem *e
 		JSON_LOOP_ITERATION_END(fbuw03l, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(5xx6sjh);
-	NFOUT;
+//	NFOUT;
 }
 
 static int _HW_add_disks_from_node_json(struct mm_disk_conf *disks, struct mm_node_conf *node, struct mm_json_elem *elem)
@@ -335,7 +334,7 @@ static int _HW_add_disks_from_node_json(struct mm_disk_conf *disks, struct mm_no
 	int num_added = 0;
 	int i;
 
-	NFIN;
+//	NFIN;
 	if (elem->type != JSON_E_DICT)
 		return 0;
 	for (i=0; i<elem->dict.len; i++) {
@@ -353,7 +352,7 @@ static int _HW_add_disks_from_node_json(struct mm_disk_conf *disks, struct mm_no
 			}
 		}
 	}
-	NFOUT;
+//	NFOUT;
 	return num_added;
 }
 
