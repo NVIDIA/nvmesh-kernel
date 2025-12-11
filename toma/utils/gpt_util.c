@@ -70,6 +70,89 @@ struct gpt_util_config {
 static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
 static void SELF_TEST_mark_file_persistent(const char *filepath);
 static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries, int max_n_entries);
+static int run_gpt_util_op(int argc, char *argv[]);
+
+// Print test header banner (SELF-TEST only)
+static void SELF_TEST_print_test_header(int test_idx, const char *description, const char *command)
+{
+	fprintf(stdout, "\n");
+	fprintf(stdout, "============================================================\n");
+	fprintf(stdout, "SELF-TEST %d: %s\n", test_idx, description);
+	fprintf(stdout, "Emulated command: %s\n", command);
+	fprintf(stdout, "============================================================\n");
+}
+
+/**
+ * Run a single test case (SELF-TEST only)
+ * Creates device, marks persistent, runs gpt_util_op, reports PASSED/FAILED
+ * Returns 0 on success, -1 on failure
+ */
+static int SELF_TEST_run_test_case(int *test_idx,
+								   const char *description,
+								   const char *test_device_path,
+								   int (*setup_device)(const char *),
+								   char **test_argv,
+								   int test_argc)
+{
+	int		disk_fd;
+	int		current_test = ++(*test_idx);		// Auto-increment counter
+
+	// Use full command in test_argv[0] for display
+	SELF_TEST_print_test_header(current_test, description, test_argv[0]);
+
+	// Create/setup test device
+	disk_fd = setup_device(test_device_path);
+	if (disk_fd < 0) {
+		N_Ef(run_test_setup_failed, "Failed to setup device for test @INT", current_test);
+		fprintf(stdout, "\n>>> SELF-TEST %d: FAILED <<<\n", current_test);
+		return -1;
+	}
+
+	SELF_TEST_mark_file_persistent(test_device_path);
+	close(disk_fd);
+
+	// Run the test
+	optind = 1;		// Reset getopt state
+	if (run_gpt_util_op(test_argc, test_argv) != 0) {
+		fprintf(stdout, "\n>>> SELF-TEST %d: FAILED <<<\n", current_test);
+		return -1;
+	}
+
+	fprintf(stdout, "\n>>> SELF-TEST %d: PASSED <<<\n", current_test);
+	return 0;
+}
+
+// GPT buffer set for reading both primary and alternate copies
+struct gpt_buffers {
+	struct nvmeibt_disk_gpt_header			*primary_header;
+	struct nvmeibt_disk_gpt_header			*alternate_header;
+	struct nvmeibt_disk_gpt_partition_entry	*primary_entries;
+	struct nvmeibt_disk_gpt_partition_entry	*alternate_entries;
+};
+
+// Allocate GPT buffers for reading both copies
+static void alloc_gpt_buffers(struct gpt_buffers *bufs, int pblk_size, int max_n_entries)
+{
+	int		n_bytes_header;
+	int		n_bytes_entries;
+
+	n_bytes_header = roundup(sizeof(struct nvmeibt_disk_gpt_header), pblk_size);
+	n_bytes_entries = roundup(sizeof(struct nvmeibt_disk_gpt_partition_entry) * max_n_entries, pblk_size);
+
+	bufs->primary_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_buf_pri_hdr, PAGE_SIZE, n_bytes_header);
+	bufs->alternate_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_buf_alt_hdr, PAGE_SIZE, n_bytes_header);
+	bufs->primary_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_buf_pri_ent, PAGE_SIZE, n_bytes_entries);
+	bufs->alternate_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_buf_alt_ent, PAGE_SIZE, n_bytes_entries);
+}
+
+// Free GPT buffers
+static void free_gpt_buffers(struct gpt_buffers *bufs)
+{
+	NNVMEIBT_BM_FREE(trace_gpt_buf_cleanup_pri_hdr, bufs->primary_header);
+	NNVMEIBT_BM_FREE(trace_gpt_buf_cleanup_alt_hdr, bufs->alternate_header);
+	NNVMEIBT_BM_FREE(trace_gpt_buf_cleanup_pri_ent, bufs->primary_entries);
+	NNVMEIBT_BM_FREE(trace_gpt_buf_cleanup_alt_ent, bufs->alternate_entries);
+}
 
 /**
  * Export one GPT copy to JSON (helper function)
@@ -132,10 +215,7 @@ static int export_gpt_to_json(int disk_fd,
 	int										rv = -1;
 	struct nvmeibt_Str						*json_output = NULL;
 	struct nvmeibt_disk_gpt					temp_gpt;
-	struct nvmeibt_disk_gpt_header			*primary_header = NULL;
-	struct nvmeibt_disk_gpt_header			*alternate_header = NULL;
-	struct nvmeibt_disk_gpt_partition_entry	*primary_entries = NULL;
-	struct nvmeibt_disk_gpt_partition_entry	*alternate_entries = NULL;
+	struct gpt_buffers						bufs;
 	enum GPT_VALIDITY						primary_header_validity;
 	enum GPT_VALIDITY						alternate_header_validity;
 	enum GPT_VALIDITY						primary_entries_validity;
@@ -143,21 +223,13 @@ static int export_gpt_to_json(int disk_fd,
 	time_t									now;
 	char									timestamp[64];
 	int										output_fd = -1;
-	int										n_bytes_header;
-	int										n_bytes_entries;
 	BOOL									is_mismatch = false;
 	BOOL									has_overlaps = false;
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
 	// Allocate buffers
-	n_bytes_header = roundup(sizeof(struct nvmeibt_disk_gpt_header), config->pblk_size);
-	n_bytes_entries = roundup(sizeof(struct nvmeibt_disk_gpt_partition_entry) * LARGE_GPT_MAX_NUM_GPT_ENTRIES, config->pblk_size);
-
-	primary_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_pri_hdr, PAGE_SIZE, n_bytes_header);
-	alternate_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_alt_hdr, PAGE_SIZE, n_bytes_header);
-	primary_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_pri_ent, PAGE_SIZE, n_bytes_entries);
-	alternate_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_json_alt_ent, PAGE_SIZE, n_bytes_entries);
+	alloc_gpt_buffers(&bufs, config->pblk_size, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 
 	memset(&temp_gpt, 0, sizeof(temp_gpt));
 	temp_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
@@ -169,17 +241,17 @@ static int export_gpt_to_json(int disk_fd,
 		config->pba_s, config->pba_hw_e,
 		&primary_header_validity, &alternate_header_validity,
 		&primary_entries_validity, &alternate_entries_validity,
-		primary_header, alternate_header,
-		primary_entries, alternate_entries);
+		bufs.primary_header, bufs.alternate_header,
+		bufs.primary_entries, bufs.alternate_entries);
 
 	// Detect mismatch (only if exporting both copies)
 	if (strcmp(config->gpt_copy_option, "both") == 0 &&
 		primary_header_validity == GPT_VALIDITY_OK && alternate_header_validity == GPT_VALIDITY_OK &&
 		primary_entries_validity == GPT_VALIDITY_OK && alternate_entries_validity == GPT_VALIDITY_OK) {
-		BOOL is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(primary_header, alternate_header);
+		BOOL is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(bufs.primary_header, bufs.alternate_header);
 		BOOL is_entries_mismatch = !nvmeibt_disk_metadata_are_gpt_entries_equal(
-			primary_entries, alternate_entries,
-			primary_header->n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
+			bufs.primary_entries, bufs.alternate_entries,
+			bufs.primary_header->n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
 		is_mismatch = is_header_mismatch || is_entries_mismatch;
 	}
 
@@ -187,12 +259,12 @@ static int export_gpt_to_json(int disk_fd,
 	if (strcmp(config->gpt_copy_option, "both") != 0) {
 		// Single copy - check for overlaps
 		const struct nvmeibt_disk_gpt_partition_entry *entries_to_check =
-			(strcmp(config->gpt_copy_option, "primary") == 0) ? primary_entries : alternate_entries;
+			(strcmp(config->gpt_copy_option, "primary") == 0) ? bufs.primary_entries : bufs.alternate_entries;
 		has_overlaps = (detect_overlaps(entries_to_check, temp_gpt.max_n_entries) > 0);
 	} else {
 		// Both copies - check both for overlaps
-		has_overlaps = (detect_overlaps(primary_entries, temp_gpt.max_n_entries) > 0) ||
-					   (detect_overlaps(alternate_entries, temp_gpt.max_n_entries) > 0);
+		has_overlaps = (detect_overlaps(bufs.primary_entries, temp_gpt.max_n_entries) > 0) ||
+					   (detect_overlaps(bufs.alternate_entries, temp_gpt.max_n_entries) > 0);
 	}
 
 	// Get timestamp
@@ -211,19 +283,19 @@ static int export_gpt_to_json(int disk_fd,
 	// Export based on --gpt-copy option
 	if (strcmp(config->gpt_copy_option, "primary") == 0) {
 		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("primary", primary_header, primary_entries,
+		export_gpt_copy_entries_to_json("primary", bufs.primary_header, bufs.primary_entries,
 										temp_gpt.max_n_entries, json_output, true);
 	} else if (strcmp(config->gpt_copy_option, "alternate") == 0) {
 		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("alternate", alternate_header, alternate_entries,
+		export_gpt_copy_entries_to_json("alternate", bufs.alternate_header, bufs.alternate_entries,
 										temp_gpt.max_n_entries, json_output, true);
 	} else {
 		// both
 		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("primary", primary_header, primary_entries,
+		export_gpt_copy_entries_to_json("primary", bufs.primary_header, bufs.primary_entries,
 										temp_gpt.max_n_entries, json_output, false);
 		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("alternate", alternate_header, alternate_entries,
+		export_gpt_copy_entries_to_json("alternate", bufs.alternate_header, bufs.alternate_entries,
 										temp_gpt.max_n_entries, json_output, true);
 	}
 
@@ -267,10 +339,7 @@ out:
 	if (output_fd >= 0) {
 		close(output_fd);
 	}
-	NNVMEIBT_BM_FREE(trace_json_cleanup_pri_hdr, primary_header);
-	NNVMEIBT_BM_FREE(trace_json_cleanup_alt_hdr, alternate_header);
-	NNVMEIBT_BM_FREE(trace_json_cleanup_pri_ent, primary_entries);
-	NNVMEIBT_BM_FREE(trace_json_cleanup_alt_ent, alternate_entries);
+	free_gpt_buffers(&bufs);
 	NNVMEIBT_STR_FREE(trace_gpt_json_export_free, json_output);
 	return rv;
 }
@@ -875,29 +944,18 @@ static void display_gpt_copies_one_level(const char *gpt_level,
 										 int max_n_entries,
 										 const struct gpt_util_config *config)
 {
-	struct nvmeibt_disk_gpt_header			*primary_header;
-	struct nvmeibt_disk_gpt_header			*alternate_header;
-	struct nvmeibt_disk_gpt_partition_entry	*primary_entries;
-	struct nvmeibt_disk_gpt_partition_entry	*alternate_entries;
+	struct gpt_buffers						bufs;
 	enum GPT_VALIDITY						primary_header_validity;
 	enum GPT_VALIDITY						alternate_header_validity;
 	enum GPT_VALIDITY						primary_entries_validity;
 	enum GPT_VALIDITY						alternate_entries_validity;
 	struct nvmeibt_disk_gpt					temp_gpt;
-	int										n_bytes_header;
-	int										n_bytes_entries;
 	BOOL									is_header_mismatch;
 	BOOL									is_entries_mismatch;
 	BOOL									is_mismatch;
 
-	// Allocate buffers in same scope where we free them
-	n_bytes_header = roundup(sizeof(struct nvmeibt_disk_gpt_header), pblk_size);
-	n_bytes_entries = roundup(sizeof(struct nvmeibt_disk_gpt_partition_entry) * max(LARGE_GPT_MAX_NUM_GPT_ENTRIES, MAX_NUM_GPT_ENTRIES), pblk_size);
-
-	primary_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_util_pri_hdr, PAGE_SIZE, n_bytes_header);
-	alternate_header = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_util_alt_hdr, PAGE_SIZE, n_bytes_header);
-	primary_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_util_pri_ent, PAGE_SIZE, n_bytes_entries);
-	alternate_entries = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_util_alt_ent, PAGE_SIZE, n_bytes_entries);
+	// Allocate buffers
+	alloc_gpt_buffers(&bufs, pblk_size, max(LARGE_GPT_MAX_NUM_GPT_ENTRIES, MAX_NUM_GPT_ENTRIES));
 
 	memset(&temp_gpt, 0, sizeof(temp_gpt));
 	temp_gpt.max_n_entries = max_n_entries;
@@ -908,8 +966,8 @@ static void display_gpt_copies_one_level(const char *gpt_level,
 		NULL, disk_fd, pblk_size, &temp_gpt, pba_s, pba_e,
 		&primary_header_validity, &alternate_header_validity,
 		&primary_entries_validity, &alternate_entries_validity,
-		primary_header, alternate_header,
-		primary_entries, alternate_entries);
+		bufs.primary_header, bufs.alternate_header,
+		bufs.primary_entries, bufs.alternate_entries);
 
 	// Detect mismatch: both copies valid but differ in content
 	is_header_mismatch = false;
@@ -917,14 +975,14 @@ static void display_gpt_copies_one_level(const char *gpt_level,
 
 	if (primary_header_validity == GPT_VALIDITY_OK &&
 		alternate_header_validity == GPT_VALIDITY_OK) {
-		is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(primary_header, alternate_header);
+		is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(bufs.primary_header, bufs.alternate_header);
 	}
 
 	if (primary_entries_validity == GPT_VALIDITY_OK &&
 		alternate_entries_validity == GPT_VALIDITY_OK &&
-		primary_header->n_partition_entries > 0) {
+		bufs.primary_header->n_partition_entries > 0) {
 		is_entries_mismatch = !nvmeibt_disk_metadata_are_gpt_entries_equal(
-			primary_entries, alternate_entries, primary_header->n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
+			bufs.primary_entries, bufs.alternate_entries, bufs.primary_header->n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
 	}
 
 	is_mismatch = (is_header_mismatch || is_entries_mismatch);
@@ -932,27 +990,24 @@ static void display_gpt_copies_one_level(const char *gpt_level,
 	// Display based on --gpt-copy option
 	if (strcmp(gpt_copy_option, "both") == 0) {
 		display_gpt_one_copy(gpt_level, "Primary", primary_header_validity,
-						primary_entries_validity, primary_entries, temp_gpt.max_n_entries,
+						primary_entries_validity, bufs.primary_entries, temp_gpt.max_n_entries,
 						is_mismatch, config);
 		display_gpt_one_copy(gpt_level, "Alternate", alternate_header_validity,
-						alternate_entries_validity, alternate_entries, temp_gpt.max_n_entries,
+						alternate_entries_validity, bufs.alternate_entries, temp_gpt.max_n_entries,
 						is_mismatch, config);
 	} else if (strcmp(gpt_copy_option, "alternate") == 0) {
 		display_gpt_one_copy(gpt_level, "Alternate", alternate_header_validity,
-						alternate_entries_validity, alternate_entries, temp_gpt.max_n_entries,
+						alternate_entries_validity, bufs.alternate_entries, temp_gpt.max_n_entries,
 						is_mismatch, config);
 	} else {
 		// primary (default)
 		display_gpt_one_copy(gpt_level, "Primary", primary_header_validity,
-						primary_entries_validity, primary_entries, temp_gpt.max_n_entries,
+						primary_entries_validity, bufs.primary_entries, temp_gpt.max_n_entries,
 						is_mismatch, config);
 	}
 
-	// Free buffers in same scope where allocated
-	NNVMEIBT_BM_FREE(trace_gpt_util_cleanup_pri_hdr, primary_header);
-	NNVMEIBT_BM_FREE(trace_gpt_util_cleanup_alt_hdr, alternate_header);
-	NNVMEIBT_BM_FREE(trace_gpt_util_cleanup_pri_ent, primary_entries);
-	NNVMEIBT_BM_FREE(trace_gpt_util_cleanup_alt_ent, alternate_entries);
+	// Free buffers
+	free_gpt_buffers(&bufs);
 }
 
 /**
@@ -1051,7 +1106,24 @@ static void SELF_TEST_mark_file_persistent(const char *filepath)
 	(void)filepath;		// Unused in production
 }
 
-static int run_gpt_util_op(int argc, char *argv[]); // Forward declaration
+// Setup device with mismatch (for test 2)
+static int SELF_TEST_setup_device_with_mismatch(const char *filepath)
+{
+	int		fd;
+
+	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(filepath);
+	if (fd < 0) {
+		return -1;
+	}
+	if (SELF_TEST_corrupt_alternate_gpt_for_mismatch_test(fd,
+														  SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+														  1,
+														  SELF_TEST_MOCK_DEVICE_BLOCKS - 1) < 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
 
 /**
  * Run comprehensive self-test suite
@@ -1062,208 +1134,112 @@ static int run_self_test(void)
 {
 	int			rv = 1;
 	int			disk_fd = -1;
+	int			test_idx = 0;		// Auto-incrementing test counter
 	const char	*test_device_path;
 	char		*test_argv[10];
 	int			test_argc;
 
 	test_device_path = TOMA_ROOT_DIR "tmp/gpt_util_self_test";
 
-	// ===== TEST 1: Normal GPT (no mismatch expected) =====
+	// ===== TEST 1: Normal GPT =====
 	if (1) {
-		fprintf(stdout, "\n");
-		fprintf(stdout, "============================================================\n");
-		fprintf(stdout, "SELF-TEST 1: Normal GPT (Primary == Alternate)\n");
-		fprintf(stdout, "Emulated command: gpt_util -a %s -c both\n", test_device_path);
-		fprintf(stdout, "============================================================\n");
-
-		// Create mock device
-		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
-		if (disk_fd < 0) {
-			N_Ef(selftest1_gen_device_failed, "Failed to generate self-test device for test 1");
-			goto out;
-		}
-
-		// Mark as persistent BEFORE closing (sandbox: clears O_CREAT flag)
-		SELF_TEST_mark_file_persistent(test_device_path);
-
-		close(disk_fd);
-		disk_fd = -1;
-
-		// Simulate: ./gpt_util -a <path> -c both
-		test_argc = 5;
-		test_argv[0] = "gpt_util";
+		test_argv[0] = "gpt_util -a <path> -c both";
 		test_argv[1] = "-a";
 		test_argv[2] = (char *)test_device_path;
 		test_argv[3] = "-c";
 		test_argv[4] = "both";
+		test_argc = 5;
 
-		optind = 1;		// Reset getopt state for clean parse
-		if (run_gpt_util_op(test_argc, test_argv) != 0) {
-			fprintf(stdout, "\n>>> SELF-TEST 1: FAILED <<<\n");
+		if (SELF_TEST_run_test_case(&test_idx, "Normal GPT (Primary == Alternate)",
+									 test_device_path,
+									 SELF_TEST_generate_and_open_mock_nvmesh_disk,
+									 test_argv, test_argc) < 0) {
 			goto out;
 		}
-
-		fprintf(stdout, "\n>>> SELF-TEST 1: PASSED <<<\n");
 	}
 
 	// ===== TEST 2: Mismatched GPT (mismatch expected) =====
 	if (1) {
-		fprintf(stdout, "\n");
-		fprintf(stdout, "============================================================\n");
-		fprintf(stdout, "SELF-TEST 2: Mismatched GPT (Primary != Alternate)\n");
-		fprintf(stdout, "Emulated command: gpt_util -a %s -c both\n", test_device_path);
-		fprintf(stdout, "============================================================\n");
-
-		// Reuse same path - recreate device with corruption
-		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
-		if (disk_fd < 0) {
-			N_Ef(selftest2_gen_device_failed, "Failed to generate mismatch test device for test 2");
-			goto out;
-		}
-
-		if (SELF_TEST_corrupt_alternate_gpt_for_mismatch_test(disk_fd,
-															SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-															1,
-															SELF_TEST_MOCK_DEVICE_BLOCKS - 1) < 0) {
-			N_Ef(selftest2_corrupt_failed, "Failed to corrupt alternate GPT for mismatch test");
-			close(disk_fd);
-			goto out;
-		}
-
-		// Mark as persistent BEFORE closing (sandbox: clears O_CREAT flag)
-		SELF_TEST_mark_file_persistent(test_device_path);
-
-		close(disk_fd);
-		disk_fd = -1;
-
-		// Simulate: ./gpt_util -a <path> -c both (same argv setup)
-		optind = 1;		// Reset getopt state for clean parse
-		if (run_gpt_util_op(test_argc, test_argv) != 0) {
-			fprintf(stdout, "\n>>> SELF-TEST 2: FAILED <<<\n");
-			goto out;
-		}
-
-		fprintf(stdout, "\n>>> SELF-TEST 2: PASSED <<<\n");
-	}
-
-	// ===== TEST 3: UUID Filtering =====
-	if (1) {
-		fprintf(stdout, "\n");
-		fprintf(stdout, "============================================================\n");
-		fprintf(stdout, "SELF-TEST 3: UUID Filtering\n");
-		fprintf(stdout, "Emulated command: gpt_util -a %s --filter-uuid aabbccdd-1122-3344-5566-778899aabbcc\n", test_device_path);
-		fprintf(stdout, "============================================================\n");
-
-		// Recreate normal device
-		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
-		if (disk_fd < 0) {
-			N_Ef(selftest3_gen_device_failed, "Failed to generate test device for UUID filter test");
-			goto out;
-		}
-
-		SELF_TEST_mark_file_persistent(test_device_path);
-		close(disk_fd);
-		disk_fd = -1;
-
-		// Simulate: ./gpt_util -a <path> --filter-uuid <UUID>
-		test_argc = 5;
-		test_argv[0] = "gpt_util";
-		test_argv[1] = "-a";
-		test_argv[2] = (char *)test_device_path;
-		test_argv[3] = "--filter-uuid";
-		test_argv[4] = "aabbccdd-1122-3344-5566-778899aabbcc";		// EXCELERO_METADATA partition UUID
-
-		optind = 1;
-		if (run_gpt_util_op(test_argc, test_argv) != 0) {
-			fprintf(stdout, "\n>>> SELF-TEST 3: FAILED <<<\n");
-			goto out;
-		}
-
-		fprintf(stdout, "\n>>> SELF-TEST 3: PASSED <<<\n");
-	}
-
-	// ===== TEST 4: LBA Filtering =====
-	if (1) {
-		fprintf(stdout, "\n");
-		fprintf(stdout, "============================================================\n");
-		fprintf(stdout, "SELF-TEST 4: LBA Filtering\n");
-		fprintf(stdout, "Emulated command: gpt_util -a %s --filter-lba 1000\n", test_device_path);
-		fprintf(stdout, "============================================================\n");
-
-		// Use existing device (no need to recreate)
-
-		// Simulate: ./gpt_util -a <path> --filter-lba <LBA>
-		test_argc = 5;
-		test_argv[0] = "gpt_util";
-		test_argv[1] = "-a";
-		test_argv[2] = (char *)test_device_path;
-		test_argv[3] = "--filter-lba";
-		test_argv[4] = "1000";		// LBA inside EXCELERO_METADATA partition
-
-		optind = 1;
-		if (run_gpt_util_op(test_argc, test_argv) != 0) {
-			fprintf(stdout, "\n>>> SELF-TEST 4: FAILED <<<\n");
-			goto out;
-		}
-
-		fprintf(stdout, "\n>>> SELF-TEST 4: PASSED <<<\n");
-	}
-
-	// ===== TEST 5: Overlap Detection =====
-	if (1) {
-		fprintf(stdout, "\n");
-		fprintf(stdout, "============================================================\n");
-		fprintf(stdout, "SELF-TEST 5: Overlap Detection\n");
-		fprintf(stdout, "Emulated command: gpt_util -a %s -c both\n", test_device_path);
-		fprintf(stdout, "============================================================\n");
-
-		// Create device with overlapping partitions
-		disk_fd = SELF_TEST_generate_mock_device_with_overlaps(test_device_path);
-		if (disk_fd < 0) {
-			N_Ef(selftest5_gen_overlap_device_failed, "Failed to generate device with overlaps for test 5");
-			goto out;
-		}
-
-		SELF_TEST_mark_file_persistent(test_device_path);
-		close(disk_fd);
-		disk_fd = -1;
-
-		// Simulate: ./gpt_util -a <path> -c both
-		test_argc = 5;
-		test_argv[0] = "gpt_util";
+		test_argv[0] = "gpt_util -a <path> -c both";
 		test_argv[1] = "-a";
 		test_argv[2] = (char *)test_device_path;
 		test_argv[3] = "-c";
 		test_argv[4] = "both";
+		test_argc = 5;
 
-		optind = 1;
-		if (run_gpt_util_op(test_argc, test_argv) != 0) {
-			fprintf(stdout, "\n>>> SELF-TEST 5: FAILED <<<\n");
+		if (SELF_TEST_run_test_case(&test_idx, "Mismatched GPT (Primary != Alternate)",
+									 test_device_path,
+									 SELF_TEST_setup_device_with_mismatch,
+									 test_argv, test_argc) < 0) {
 			goto out;
 		}
-
-		fprintf(stdout, "\n>>> SELF-TEST 5: PASSED <<<\n");
 	}
 
-	// ===== TEST 6: GPT Upgrade (fix n_partition_entries from 128 to 8192) =====
-	// Tests both scenarios:
-	// 1. Fresh device has correct n_partition_entries (8192) - no upgrade needed
-	// 2. Corrupt main GPT n_partition_entries to 128, upgrade, verify it's fixed to 8192
+	// ===== TEST 3: UUID Filtering =====
+	if (1) {
+		test_argv[0] = "gpt_util -a <path> --filter-uuid <UUID>";
+		test_argv[1] = "-a";
+		test_argv[2] = (char *)test_device_path;
+		test_argv[3] = "--filter-uuid";
+		test_argv[4] = "aabbccdd-1122-3344-5566-778899aabbcc";		// EXCELERO_METADATA partition UUID
+		test_argc = 5;
+
+		if (SELF_TEST_run_test_case(&test_idx, "UUID Filtering",
+									 test_device_path,
+									 SELF_TEST_generate_and_open_mock_nvmesh_disk,
+									 test_argv, test_argc) < 0) {
+			goto out;
+		}
+	}
+
+	// ===== TEST 4: LBA Filtering =====
+	if (1) {
+		test_argv[0] = "gpt_util -a <path> --filter-lba 1000";
+		test_argv[1] = "-a";
+		test_argv[2] = (char *)test_device_path;
+		test_argv[3] = "--filter-lba";
+		test_argv[4] = "1000";
+		test_argc = 5;
+
+		if (SELF_TEST_run_test_case(&test_idx, "LBA Filtering",
+									 test_device_path,
+									 SELF_TEST_generate_and_open_mock_nvmesh_disk,
+									 test_argv, test_argc) < 0) {
+			goto out;
+		}
+	}
+
+	// ===== TEST 5: Overlap Detection =====
+	if (1) {
+		test_argv[0] = "gpt_util -a <path> -c both";
+		test_argv[1] = "-a";
+		test_argv[2] = (char *)test_device_path;
+		test_argv[3] = "-c";
+		test_argv[4] = "both";
+		test_argc = 5;
+
+		if (SELF_TEST_run_test_case(&test_idx, "Overlap Detection",
+									 test_device_path,
+									 SELF_TEST_generate_mock_device_with_overlaps,
+									 test_argv, test_argc) < 0) {
+			goto out;
+		}
+	}
+
+	// ===== TEST 6: GPT Upgrade (corrupt → upgrade → verify) =====
 	if (1) {
 		struct nvmeibt_disk_gpt		main_gpt;
 		struct nvmeibt_disk_gpt		verify_gpt;
 		uint32_t					expected_crc;
 		int							nbytes;
 		int							wrong_n_partition_entries = 128;
+		char						description[128];
 
-		fprintf(stdout, "\n");
-		fprintf(stdout, "============================================================\n");
-		fprintf(stdout, "SELF-TEST 6: GPT Upgrade (n_partition_entries fix)\n");
-		fprintf(stdout, "  Part A: Verify fresh device has n_partition_entries=%d (no upgrade needed)\n",
-				LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-		fprintf(stdout, "  Part B: Corrupt Main GPT to n_partition_entries=%d, upgrade, verify fixed to %d\n",
-				wrong_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-		fprintf(stdout, "============================================================\n");
+		test_idx++;		// Increment for test 6
+		snprintf(description, sizeof(description),
+				 "GPT Upgrade (corrupt n_partition_entries to %d, upgrade to %d)",
+				 wrong_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+		SELF_TEST_print_test_header(test_idx, description, "Internal API test (corrupt → upgrade → verify)");
 
 		// Create fresh device
 		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
@@ -1271,33 +1247,6 @@ static int run_self_test(void)
 			N_Ef(selftest6_gen_device_failed, "Failed to generate test device for GPT upgrade test");
 			goto out;
 		}
-
-		// === Part A: Verify fresh device has correct n_partition_entries ===
-		fprintf(stdout, "\n--- Part A: Verify fresh device has n_partition_entries=%d ---\n",
-				LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-		memset(&main_gpt, 0, sizeof(main_gpt));
-		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-
-		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-											  &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-			N_Ef(selftest6_read_fresh_failed, "Failed to read fresh Main GPT for test 6 Part A");
-			close(disk_fd);
-			goto out;
-		}
-
-		fprintf(stdout, "  Main GPT n_partition_entries=%d (expected %d)\n",
-				main_gpt.header.n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-
-		if (main_gpt.header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
-			fprintf(stderr, "FAIL: Fresh device doesn't have correct n_partition_entries!\n");
-			fprintf(stdout, "\n>>> SELF-TEST 6: FAILED (Part A) <<<\n");
-			close(disk_fd);
-			goto out;
-		}
-		fprintf(stdout, "  PASS: Fresh device has correct n_partition_entries (no upgrade needed)\n");
-
-		// === Part B: Corrupt Main GPT n_partition_entries, upgrade, verify ===
-		fprintf(stdout, "\n--- Part B: Corrupt Main GPT n_partition_entries, upgrade, and verify ---\n");
 
 		// Corrupt Main GPT by setting n_partition_entries to 128
 		if (SELF_TEST_corrupt_gpt_n_partition_entries(disk_fd,
@@ -1317,7 +1266,7 @@ static int run_self_test(void)
 
 		if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
 											  &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-			N_Ef(selftest6_read_corrupt_failed, "Failed to read corrupted GPT for test 6 Part B");
+			N_Ef(selftest6_read_corrupt_failed, "Failed to read corrupted GPT for test 6");
 			close(disk_fd);
 			goto out;
 		}
@@ -1348,7 +1297,7 @@ static int run_self_test(void)
 		// Perform the upgrade
 		fprintf(stdout, "\nPerforming GPT upgrade...\n");
 		if (upgrade_gpt_if_needed(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, "Main") < 0) {
-			N_Ef(selftest6_upgrade_failed, "GPT upgrade failed in test 6 Part B");
+			N_Ef(selftest6_upgrade_failed, "GPT upgrade failed in test 6");
 			close(disk_fd);
 			goto out;
 		}
@@ -1377,7 +1326,7 @@ static int run_self_test(void)
 			fprintf(stderr, "FAIL: n_partition_entries not fixed!\n");
 			fprintf(stderr, "      Expected %d, got %d\n",
 					LARGE_GPT_MAX_NUM_GPT_ENTRIES, verify_gpt.header.n_partition_entries);
-			fprintf(stdout, "\n>>> SELF-TEST 6: FAILED (n_partition_entries not fixed) <<<\n");
+			fprintf(stdout, "\n>>> SELF-TEST %d: FAILED (n_partition_entries not fixed) <<<\n", test_idx);
 			goto out;
 		}
 		fprintf(stdout, "  PASS: n_partition_entries fixed to %d\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
@@ -1391,20 +1340,20 @@ static int run_self_test(void)
 
 		if (verify_gpt.header.partition_entry_array_crc32 != expected_crc) {
 			fprintf(stderr, "FAIL: CRC mismatch after upgrade!\n");
-			fprintf(stdout, "\n>>> SELF-TEST 6: FAILED (CRC mismatch) <<<\n");
+			fprintf(stdout, "\n>>> SELF-TEST %d: FAILED (CRC mismatch) <<<\n", test_idx);
 			goto out;
 		}
 		fprintf(stdout, "  PASS: CRC is correct for n_partition_entries=%d\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 
 		fprintf(stdout, "\n  GPT upgrade verified: n_partition_entries fixed from %d to %d!\n",
 				wrong_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
-		fprintf(stdout, "\n>>> SELF-TEST 6: PASSED <<<\n");
+		fprintf(stdout, "\n>>> SELF-TEST %d: PASSED <<<\n", test_idx);
 	}
 
 	// ===== SUMMARY =====
 	fprintf(stdout, "\n");
 	fprintf(stdout, "============================================================\n");
-	fprintf(stdout, "ALL SELF-TESTS PASSED (6/6)\n");
+	fprintf(stdout, "ALL SELF-TESTS PASSED (%d/%d)\n", test_idx, test_idx);
 	fprintf(stdout, "============================================================\n");
 
 	rv = 0;
