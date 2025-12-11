@@ -1024,7 +1024,7 @@ static void lock_opr_prepare(struct nvmeibc_locks_channel *ch,
 	rkey = record->rkey;
 	_ND(trace_disk_locks_lock_opr_prepare, "LOCKS: preparing wd for compid @SEND_ID", comp->send_id);
 
-	ret->list.addr = ret->val_phys;
+	ret->list.addr = ch->opr_ip_buffer_phys + ret->opr_ip_buffer_offset;
 	ret->list.length = sizeof(u64);
 	if (opr == NVMEIBC_LOCK_BLKSET_INFO_READ ||
 		opr == NVMEIBC_LOCK_BLKSET_INFO_WRITE)
@@ -2689,7 +2689,7 @@ static int lock_opr_rdma_to_disk_cmd(
 		goto out;
 	}
 
-	lock_param->rdma.data = (void *)opr->val + (ib_sge->addr - opr->val_phys);
+	lock_param->rdma.data = (void *)opr->val + (ib_sge->addr - opr->opr_ip_buffer_offset - opr->ch->opr_ip_buffer_phys);
 	lock_param->rdma.len = ib_sge->length;
 
 	{

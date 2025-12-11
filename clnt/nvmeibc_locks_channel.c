@@ -254,8 +254,6 @@ static void free_dma_resources(struct nvmeibc_locks_channel *ch)
 			&opr_ip->state, LOCK_OPR_ABORTED);
 		nvmeib_wd_remove_wdc(&opr_ip->wdc);
 		ch->num_aborted--;
-		ib_dma_unmap_single(P2IB(ch->net.port), opr_ip->val_phys,
-				2 * sizeof(u64), DMA_BIDIRECTIONAL);
 		list_del_init(&opr_ip->link);
 	}
 
@@ -266,9 +264,12 @@ static void free_dma_resources(struct nvmeibc_locks_channel *ch)
 			&opr_ip->state, LOCK_OPR_IN_FREE_LIST);
 		nvmeib_wd_remove_wdc(&opr_ip->wdc);
 		ch->num_of_free--;
-		ib_dma_unmap_single(P2IB(ch->net.port), opr_ip->val_phys,
-				2 * sizeof(u64), DMA_BIDIRECTIONAL);
 		list_del_init(&opr_ip->link);
+	}
+	if (ch->opr_ip_buffer_phys) {
+		ib_dma_unmap_page(P2IB(ch->net.port), ch->opr_ip_buffer_phys,
+			ch->opr_ip_buffer_size, DMA_BIDIRECTIONAL);
+		ch->opr_ip_buffer_phys = 0;
 	}
 	if (ch->atomic_test_zone_laddr) {
 		ib_dma_unmap_single(P2IB(ch->net.port),
@@ -504,6 +505,11 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 			}
 		}
 		kfree(ch->_2nd_net_params);
+		if (ch->opr_ip_buffer_page) {	
+			__free_pages(ch->opr_ip_buffer_page, get_order(ch->opr_ip_buffer_size));
+			ch->opr_ip_buffer_page = NULL;
+			ch->opr_ip_buffer = NULL;
+		}
 		kfree(ch->locks_ip_buffer);
 
 		if (ch->atomic_test_src)
@@ -557,14 +563,19 @@ static struct nvmeibc_locks_channel *alloc(
 {
 	int rv = 0;
 	struct nvmeibc_locks_channel *ch = NULL;
+	size_t opr_ip_buffer_size = sizeof(*ch->opr_ip_buffer) * NVMEIB_LOCK_DATA_BUFFERS * NVMEIBC_CHANNEL_NUM_OF_ALLOC_APR;
 	NFIN;
 	ch = kzalloc(sizeof(*ch), GFP_KERNEL);
 	if (!ch ||
 		!(ch->locks_ip_buffer = kzalloc(
-				sizeof(*ch->locks_ip_buffer) * NVMEIBC_CHANNEL_NUM_OF_ALLOC_APR, GFP_KERNEL))) {
+				sizeof(*ch->locks_ip_buffer) * NVMEIBC_CHANNEL_NUM_OF_ALLOC_APR, GFP_KERNEL)) ||
+			!(ch->opr_ip_buffer_page = alloc_pages_node(numa_node, GFP_KERNEL, get_order(opr_ip_buffer_size)))) 
+	{
 		_NE(error_locks_channel_alloc, "failed to allocate memory for locks channel");
 		goto out_err;
 	}
+	ch->opr_ip_buffer = page_address(ch->opr_ip_buffer_page);
+	ch->opr_ip_buffer_size = opr_ip_buffer_size;
 	ch->total_num_opr = 0;
 	nvmeibc_locks_channel_spin_lock_init(ch);
 	ch->locking_cpu = -1;
@@ -640,6 +651,10 @@ out_err:
 #else
 			wq_destroy(ch->callback_wq);
 #endif
+		}
+		if (ch->opr_ip_buffer_page) {
+			__free_pages(ch->opr_ip_buffer_page, get_order(ch->opr_ip_buffer_size));
+			ch->opr_ip_buffer_page = NULL;
 		}
 		kfree(ch->locks_ip_buffer);
 		kfree(ch);
@@ -1615,20 +1630,24 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	/*now that we are connected we can allocate all local resources*/
 	INIT_LIST_HEAD(&ch->free_ip_pool);
 	INIT_LIST_HEAD(&ch->aborted);
+
+	ch->opr_ip_buffer_phys = ib_dma_map_page(P2IB(ch->net.port), ch->opr_ip_buffer_page, 
+	0, ch->opr_ip_buffer_size, DMA_BIDIRECTIONAL);
+	if (ib_dma_mapping_error(P2IB(ch->net.port), ch->opr_ip_buffer_phys)) {
+		_NE(error_6_locks_channel_try_connect, "dma mapping opr_ip_buffer failed");
+		ch->opr_ip_buffer_phys = 0;
+		rv = -1;
+		goto out_err;
+	}
 	for (i = 0; i < NVMEIBC_CHANNEL_NUM_OF_ALLOC_APR; ++i) {
 		opr_ip = &ch->locks_ip_buffer[i];
 		opr_ip->index = i;
 		opr_ip->ch = ch;
+		opr_ip->val = &ch->opr_ip_buffer[i * NVMEIB_LOCK_DATA_BUFFERS];
+		opr_ip->opr_ip_buffer_offset = i * sizeof(*ch->opr_ip_buffer) * NVMEIB_LOCK_DATA_BUFFERS;
 		opr_ip->val[0] = 0;
 		opr_ip->val[1] = 0;
 		opr_ip->comp = NULL;
-		opr_ip->val_phys = ib_dma_map_single(P2IB(ch->net.port), &opr_ip->val,
-			2 * sizeof(u64), DMA_BIDIRECTIONAL);
-		if (ib_dma_mapping_error(P2IB(ch->net.port), opr_ip->val_phys)) {
-			_NE(error_2_locks_channel_try_connect, "dma mapping failed");
-			rv = -1;
-			goto out_err;
-		}
 		NVMEIBC_LOCK_GUARD_INIT(&opr_ip->state, LOCK_OPR_IN_FREE_LIST);
 		NVMEIBC_LOCK_GUARD_INIT(&opr_ip->bypass_state, LOCK_OPR_NO_BYPASS);
 		list_add_tail(&opr_ip->link, &ch->free_ip_pool);
@@ -1707,6 +1726,11 @@ static void free_2nd_ch(struct nvmeibc_locks_channel *ch)
 		ch->callback_wq = NULL;
 	}
 	kfree(ch->_2nd_net_params);
+	if (ch->opr_ip_buffer_page) {
+		__free_pages(ch->opr_ip_buffer_page, get_order(ch->opr_ip_buffer_size));
+		ch->opr_ip_buffer_page = NULL;
+		ch->opr_ip_buffer = NULL;
+	}
 	kfree(ch->locks_ip_buffer);
 	kfree(ch);
 }
@@ -1731,11 +1755,15 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 		goto out;
 	}
 	ch = primary_ch->_2nd_ch[n_idx];
-	if (!(ch->locks_ip_buffer = kzalloc(sizeof(*ch->locks_ip_buffer) * NVMEIBC_LOCK_2ND_CH_NUM_OF_OPR, GFP_KERNEL))) {
+	ch->opr_ip_buffer_size = sizeof(*ch->opr_ip_buffer) * NVMEIB_LOCK_DATA_BUFFERS * NVMEIBC_LOCK_2ND_CH_NUM_OF_OPR;
+	if (!(ch->locks_ip_buffer = kzalloc(sizeof(*ch->locks_ip_buffer) * NVMEIBC_LOCK_2ND_CH_NUM_OF_OPR, GFP_KERNEL)) ||
+		!(ch->opr_ip_buffer_page = alloc_pages_node(primary_ch->base.numa_node, GFP_KERNEL, get_order(ch->opr_ip_buffer_size)))) 
+	{
 		_NE(error_1_locks_channel_init_2nd_ch, "Memory allocation error");
 		rv = -ENOMEM;
 		goto free_ch;
 	}
+	ch->opr_ip_buffer = page_address(ch->opr_ip_buffer_page);
 	ch->total_num_opr = 0;
 	ch->primary_ch = primary_ch;
 	nvmeibc_lock_ch_metrics_init(&ch->metrics);
@@ -1885,20 +1913,22 @@ static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch) {
 	bitmap_copy(ch->local_bypass_bmp, primary_ch->local_bypass_bmp, NVMEIBC_LOCK_NUM_OPR);
 #endif
 
+	ch->opr_ip_buffer_phys = ib_dma_map_page(P2IB(ch->net.port), ch->opr_ip_buffer_page, 
+		0, ch->opr_ip_buffer_size, DMA_BIDIRECTIONAL);
+	if (ib_dma_mapping_error(P2IB(ch->net.port), ch->opr_ip_buffer_phys)) {
+		_NE(error_8_locks_channel_try_connect_2nd_ch, "dma mapping opr_ip_buffer failed");
+		ch->opr_ip_buffer_phys = 0;
+		rv = -1;
+		goto out_err;
+	}
 	/* Allocate opr_ip entries */
 	for (i = 0; i < NVMEIBC_LOCK_2ND_CH_NUM_OF_OPR; ++i) {
 		opr_ip = &ch->locks_ip_buffer[i];
 		opr_ip->index = i;
 		opr_ip->ch = ch;
-		opr_ip->val[0] = 0;
-		opr_ip->val[1] = 0;
+		opr_ip->opr_ip_buffer_offset = i * sizeof(*ch->opr_ip_buffer) * NVMEIB_LOCK_DATA_BUFFERS;
+		opr_ip->val = &ch->opr_ip_buffer[i * NVMEIB_LOCK_DATA_BUFFERS];
 		opr_ip->comp = NULL;
-		opr_ip->val_phys = ib_dma_map_single(P2IB(ch->net.port), &opr_ip->val,
-			2 * sizeof(u64), DMA_BIDIRECTIONAL);
-		if (ib_dma_mapping_error(P2IB(ch->net.port), opr_ip->val_phys)) {
-			_NE(error_4_locks_channel_try_connect_2nd_ch, "dma mapping failed");
-			goto out_err;
-		}
 		NVMEIBC_LOCK_GUARD_INIT(&ch->locks_ip_buffer[i].state, LOCK_OPR_IN_FREE_LIST);
 		NVMEIBC_LOCK_GUARD_INIT(&ch->locks_ip_buffer[i].bypass_state, LOCK_OPR_NO_BYPASS);
 		ch->locks_ip_buffer[i].comp = (void *)CONFIG_ILLEGAL_POINTER_VALUE;

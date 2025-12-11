@@ -6,6 +6,7 @@
 #ifndef NVMEIBC_LOCKS_CHANNEL_H
 #define NVMEIBC_LOCKS_CHANNEL_H
 
+#include "linux/types.h"
 #include "nvmeibc_main.h"
 #include "nvmeibc_channel.h"
 #include "nvmeibc_admin_channel.h"
@@ -114,8 +115,8 @@ struct nvmeibc_lock_opr_in_progress
 	struct nvmeibc_locks_channel *ch;
 	int index;
 	/*pointer to a mapped value*/
-	u64 val[NVMEIB_LOCK_DATA_BUFFERS];
-	dma_addr_t val_phys;
+	u64 *val;
+	off_t opr_ip_buffer_offset;
 	/*linked to list that maintain the value*/
 	struct list_head link;
 	/*comperator under process*/
@@ -319,6 +320,11 @@ struct nvmeibc_locks_channel {
 	int conn_rv;
 
 	struct nvmeibc_login_request lreq;
+
+	struct page *opr_ip_buffer_page;
+	u64 *opr_ip_buffer;
+	dma_addr_t opr_ip_buffer_phys;
+	size_t opr_ip_buffer_size;
 };
 
 #ifndef DEBUG_LOCK_CH_SPINLOCK
