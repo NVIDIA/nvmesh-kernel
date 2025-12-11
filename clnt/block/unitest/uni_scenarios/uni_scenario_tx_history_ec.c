@@ -2883,7 +2883,7 @@ static int __unitest_EC_Recovery(bunitest_s* B, const enum NVMEIBT_RECOVERY_TYPE
 		NVMeshSystem_gen_cmd_hooks_setup_all_disks(sys, &hist.disk_hooks);
 	}
 	_hist = &hist;
-	topos = create_all_topo_random_enum(sraid, 20, false);
+	topos = create_topo_random_enum(sraid, 1, 10, 10);
 	__dd_clean_dlba_pointers(env);  /* Todo: remove after dbits rebuild wont turn on dbits on all blockset slices  */
 
 	while (topos.move_next(&topos)) {  // iterate on random topologies - all topologies are possible //__topo_enum_move_2_index(&topos, 19)) {

@@ -3584,7 +3584,7 @@ TEST_FUNC int unitest_ECHotJgcRecovery(bunitest_s *B) {
 	char iter_descript[64], *itr_txt_cur;
 	u8* mem = sim_kmalloc(env.sraid.cpr->slice_size * NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 	u64 magic_pattern;
-	struct topologies_enumerator topos = create_all_topo_random_enum(env.sraid, 20, false);
+	struct topologies_enumerator topos = create_topo_random_enum(env.sraid, 1, 10, 10);
 	bunitest_tic(B);
 	nvmeibc_htr_stats_reset();
 
