@@ -345,6 +345,8 @@ do { 												\
 })
 
 #define wc_to_qp_key(_wc) ((u64)wc->qp)
+#define clear_wc_qp_key(_wc) ((_wc)->qp = NULL)
+#define is_wc_qp_key_cleared(_wc) ((_wc)->qp == NULL)
 
 #define CQ_QP_CTX_INVALID (0xcccccccc)
 #define CQ_QP_DEL_STAGE_MAX_DESTROYS (8)
@@ -360,7 +362,7 @@ struct nvmeib_dev_cq {
 	spinlock_t lock;
 	int locking_cpu;
 	struct ib_wc wcs[CQ_POLL_BATCH];
-	void (*process)(struct ib_wc *wcs, void *ctx);
+	void (*process)(struct ib_wc *wcs, int n_wcs, unsigned long *wcs_mask, void *ctx);
 	union {
 		struct nvmeib_irq_poll	iop;
 		struct work_struct work; //omril: what is it used for?
@@ -1143,40 +1145,73 @@ static void post_orphan_recv(struct nvmeib_dev_cq *cq, struct ib_wc *wc)
 
 }
 
-static void process_wc(struct nvmeib_dev_cq *cq, struct ib_wc *wc)
+static void process_wcs(struct nvmeib_dev_cq *cq, struct ib_wc *wcs, int n_wcs)
 {
 	struct nvmeib_cq_qp_info *qpi;
-	bool is_drain = nvmeib_opcode_from_wr_id(wc->wr_id) == NVMEIB_DRAIN_QUEUE;
+	struct ib_wc *wc;
+	bool is_drain;
 
-	BUG_ON(!NVMEIB_PCPU_CQ_DO_SQ_DRAIN_ON_QP_STOP && is_drain);
+	/* Use a sliding window approach to process the completions.
+	Each iteration moves wc forward by 1 and reduces n_wcs by 1.
+	Additionally we use a look-forward loop and bitmask to batch all WCs for a single qp to the process function.
+	For simplicity, we stop the look-forward when we encounter a Drain WC.
+	*/
 
-	qpi = cq_qp_ref_get(cq, wc, is_drain);
-	if (qpi) {
-		if (!is_drain) {
-			/* Start Dev-CQ interrupt measurement - assume all noise since core-mask is not known */
-			nvmeib_completion_noise_start(NVMEIB_NOISE_COMPLETION);
-			/* process_per_dev_cq */
-			cq->process(wc, qpi->qp_ctx);
-		} else {
-			_NT(nvmeib_cq_process_wc, "cq=@DEV_CQ, qpi=@QPI, qp=@QP, qpn=@QP_NUM, got sq drain",
-			    cq, qpi, wc->qp, wc->qp->qp_num);
+	for (wc = wcs; n_wcs > 0; n_wcs--, wc++) {
+		if (is_wc_qp_key_cleared(wc)) {
+			/* Skip completions that are already processed */
+			continue;
 		}
-		cq_qp_ref_put(qpi);
-	}
-	else {
-		if (is_drain) {
-			_NE(err_nvmeib_cq_process_wc, "cq=@DEV_CQ, qp=@QP, qpn=@QP_NUM, no qpi for sq drain",
-			    cq, wc->qp, wc->qp->qp_num);
+
+		is_drain = nvmeib_opcode_from_wr_id(wc->wr_id) == NVMEIB_DRAIN_QUEUE;
+		BUG_ON(!NVMEIB_PCPU_CQ_DO_SQ_DRAIN_ON_QP_STOP && is_drain);
+
+		qpi = cq_qp_ref_get(cq, wc, is_drain);
+
+		if (qpi) {
+			if (!is_drain) {
+				DECLARE_BITMAP(wcs_mask, CQ_POLL_BATCH) = {0};
+				int i;
+				/* Start Dev-CQ interrupt measurement - assume all noise since core-mask is not known */
+				nvmeib_completion_noise_start(NVMEIB_NOISE_COMPLETION);
+				/* Look forward to see how many completions we have for this qp and set the mask */
+				set_bit(0, wcs_mask);
+				for (i = 1; i < n_wcs; i++) {
+					if (wc[i].qp == wc->qp) {
+						if (nvmeib_opcode_from_wr_id(wc[i].wr_id) == NVMEIB_DRAIN_QUEUE) {
+							break;
+						}
+						set_bit(i, wcs_mask);
+					}
+				}
+				/* process_per_dev_cq processes all completions in the mask */
+				cq->process(wc, n_wcs, wcs_mask, qpi->qp_ctx);
+
+				/* Clear all completions processed from the mask */
+				for_each_set_bit(i, wcs_mask, n_wcs) {
+					clear_wc_qp_key(&wc[i]);
+				}
+			} else {
+				_NT(nvmeib_cq_process_wc, "cq=@DEV_CQ, qpi=@QPI, qp=@QP, qpn=@QP_NUM, got sq drain",
+					cq, qpi, wc->qp, wc->qp->qp_num);
+			}
+			cq_qp_ref_put(qpi);
 		}
-		else if (is_wc_recv(wc)) {
-			post_orphan_recv(cq, wc);
+		else {
+			if (is_drain) {
+				_NE(err_nvmeib_cq_process_wc, "cq=@DEV_CQ, qp=@QP, qpn=@QP_NUM, no qpi for sq drain",
+					cq, wc->qp, wc->qp->qp_num);
+			}
+			else if (is_wc_recv(wc)) {
+				post_orphan_recv(cq, wc);
+			}
 		}
 	}
 }
 
 static int process_cq(struct nvmeib_dev_cq *cq, int budget)
 {
-	int n, i, completed = 0;
+	int n, completed = 0;
 	int batch_size = ARRAY_SIZE(cq->wcs);
 
 	if (budget < batch_size)
@@ -1187,8 +1222,7 @@ static int process_cq(struct nvmeib_dev_cq *cq, int budget)
 		for (i = 0; i < n ; i++)
 			iu_owner_switch(&cq->wcs[i], cq->srq_info);
 #endif
-		for (i = 0; i < n ; i++)
-			process_wc(cq, &cq->wcs[i]);
+		process_wcs(cq, cq->wcs, n);
 
 		completed += n;
 #ifdef CQ_DEBUG
@@ -1662,7 +1696,7 @@ static void print_cq(struct nvmeib_dev_cq *cq, int ii)
 }
 
 struct nvmeib_dev_cq *nvmeib_cq_get(struct nvmeib_dev *dev,
-	enum channel_type type, void (*process)(struct ib_wc *wcs, void *ctx), bool is_mostly_idle, int comp_cpu)
+	enum channel_type type, DEV_CQ_PROCESS_FUNC((*process)), bool is_mostly_idle, int comp_cpu)
 {
 	struct nvmeib_dev_cq *cq, *next_cq = NULL;
 	unsigned min_n_qps = -1;

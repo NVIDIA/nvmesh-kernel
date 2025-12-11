@@ -1236,7 +1236,7 @@ module_param_named(mostly_idle_ch, nvmeibs_mostly_idle_ch, bool, 0644);
 MODULE_PARM_DESC(mostly_idle_ch, "Use first shared CQ for mostly idle channels");
 
 
-static void process_per_dev_cq(struct ib_wc *wcs, void *ctx);
+static DEV_CQ_PROCESS_FUNC(process_per_dev_cq);
 static int create_ib_per_dev_cq(struct nvmeibs_net *net)
 {
 	struct nvmeibs_net_init *params = &net->params;
@@ -1850,35 +1850,38 @@ static void handle_send(struct nvmeibs_net *net, struct ib_wc *wc)
 	NFOUT;
 }
 
-static void process_per_dev_cq(struct ib_wc *wc, void *ctx)
+static DEV_CQ_PROCESS_FUNC(process_per_dev_cq)
 {
 	struct nvmeibs_net *net = ctx;
 	u64 start, delta;
+	int i;
 
 	NFIN;
 
-	if (wc->status != IB_WC_SUCCESS) {
-		_NE(s_process_per_dev_cq, "wc=@PTR wc-status=@NVMEIB_STATUS_STR(@WC_STATUS): "
-			"wc->wr_id=@LLX={ver=@X, opc=@X, idx=@X (is_recv=@BOOL)}, "
-			"wc->opcode=@WC_OPCODE, "
-			"wc->qp=@QP, net=@NET, ct=(@INT, @STR)",
-			wc, nvmeib_status_str(&wc->status), wc->status,
-			wc->wr_id,
-			nordda_wr_id_decode_version(nvmeib_wr_id_from_wc(wc)),
-			nvmeib_opcode_from_wc(wc),
-			nvmeib_idx_from_wc(wc),
-			nvmeib_opcode_from_wc(wc) == NVMEIB_RECV,
-			wc->opcode,
-			wc->qp, net,
-			nt_to_ct(net->params.net_type), ch_type_to_str(nt_to_ct(net->params.net_type)));
-	}
-
 	start = jiffies;
-	//if (wc->opcode & IB_WC_RECV)
-	if (nvmeib_opcode_from_wc(wc) == NVMEIB_RECV)
-		handle_recv(net, wc);
-	else
-		handle_send(net, wc);
+	for_each_set_bit(i, wcs_mask, n_wcs) {
+		struct ib_wc *wc = &wcs[i];
+		if (wc->status != IB_WC_SUCCESS) {
+			_NE(s_process_per_dev_cq, "wc=@PTR wc-status=@NVMEIB_STATUS_STR(@WC_STATUS): "
+				"wc->wr_id=@LLX={ver=@X, opc=@X, idx=@X (is_recv=@BOOL)}, "
+				"wc->opcode=@WC_OPCODE, "
+				"wc->qp=@QP, net=@NET, ct=(@INT, @STR)",
+				wc, nvmeib_status_str(&wc->status), wc->status,
+				wc->wr_id,
+				nordda_wr_id_decode_version(nvmeib_wr_id_from_wc(wc)),
+				nvmeib_opcode_from_wc(wc),
+				nvmeib_idx_from_wc(wc),
+				nvmeib_opcode_from_wc(wc) == NVMEIB_RECV,
+				wc->opcode,
+				wc->qp, net,
+				nt_to_ct(net->params.net_type), ch_type_to_str(nt_to_ct(net->params.net_type)));
+		}
+		//if (wc->opcode & IB_WC_RECV)
+		if (nvmeib_opcode_from_wc(wc) == NVMEIB_RECV)
+			handle_recv(net, wc);
+		else
+			handle_send(net, wc);
+	}
 	delta = jiffies - start;
 	_ND(process_per_dev_cq_d1, "processing time = @INT64", delta);
 	NFOUT;

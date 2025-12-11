@@ -647,7 +647,7 @@ struct nvmeib_fr_pool {
 	struct ib_pd *pd;
 };
 
-#define CQ_POLL_BATCH 16
+#define CQ_POLL_BATCH 64
 
 #ifdef CQ_DEBUG
 #	define CQ_N_COMP_TRACE (100000ULL)
@@ -1397,8 +1397,11 @@ struct nvmeib_intr_pollers_ft;
 void nvmeib_intr_poller_set_ft(struct nvmeib_intr_pollers_ft *ft);
 void nvmeib_intr_poller_unset_ft(void);
 #endif
+
+#define DEV_CQ_PROCESS_FUNC(name) void name(struct ib_wc *wcs, int n_wcs, unsigned long *wcs_mask, void *ctx)
+
 struct nvmeib_dev_cq * nvmeib_cq_get(struct nvmeib_dev *dev,
-	enum channel_type type, void (*process)(struct ib_wc *wcs, void *ctx), bool is_mostly_idle, int comp_cpu);
+	enum channel_type type, DEV_CQ_PROCESS_FUNC((*process)), bool is_mostly_idle, int comp_cpu);
 void nvmeib_cq_put(struct nvmeib_dev *dev, struct nvmeib_dev_cq *cq,
 	enum channel_type type);
 

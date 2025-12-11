@@ -2440,7 +2440,7 @@ out:
 	return rv;
 }
 
-static void process_per_dev_cq(struct ib_wc *wcs, void *ctx);
+static DEV_CQ_PROCESS_FUNC(process_per_dev_cq);
 static int create_qp_per_dev_cq(struct nvmeibc_ib_net *net,
 	struct nvmeibc_ib_net_params *params)
 {
@@ -5610,47 +5610,54 @@ out:
 	__NFOUT;
 }
 
-static void process_per_dev_cq(struct ib_wc *wc, void *ctx)
+static DEV_CQ_PROCESS_FUNC(process_per_dev_cq)
 {
 	struct nvmeibc_ib_net *net = ctx;
 	struct nvmeibc_channel *ioch = net->ioch;
 	unsigned long flags;
 	u64 start, delta;
+	int i;
 
 	__NFIN;
 
-	if (wc->status != IB_WC_SUCCESS) {
-		_NE(c_process_per_dev_cq, "wc=@PTR, wc-status=@NVMEIB_STATUS_STR(@WC_STATUS): "
-			"wc->wr_id=@LLX={ver=@X, opc=@X, idx=@X (is_recv=@BOOL)}, "
-			"wc->opcode=@WC_OPCODE, "
-			"wc->qp=@QP, net=@NET, ct=(@INT, @STR)",
-			wc, nvmeib_status_str(&wc->status), wc->status,
-			nvmeib_wr_id_from_wc(wc),
-			nordda_wr_id_decode_version(nvmeib_wr_id_from_wc(wc)),
-			nvmeib_opcode_from_wc(wc),
-			nvmeib_idx_from_wc(wc),
-			nvmeib_opcode_from_wc(wc) == NVMEIB_RECV,
-			wc->opcode,
-			wc->qp, net,
-			ioch ? ioch->ct : -1, ch_type_to_str(ioch ? ioch->ct : -1));
-	}
-
 	start = jiffies;
 	nvmeibc_channel_spin_lock_irqsave(ioch, &flags);
-	//if (wc->opcode & IB_WC_RECV)
-	if (nvmeib_opcode_from_wc(wc) == NVMEIB_RECV) {
-		nvmeibc_disk_net_intrs_stats_inc(net->ioch->disk, true);
-		handle_recv(net, wc);
-		if (in_interrupt()) net->rcq_stats.n_intr++;
-		else 				net->rcq_stats.n_poll++;
-	}
-	else {
-		nvmeibc_disk_net_intrs_stats_inc(net->ioch->disk, false);
-		handle_send(net, wc);
-		if (in_interrupt()) net->scq_stats.n_intr++;
-		else 				net->scq_stats.n_poll++;
 
+	for_each_set_bit(i, wcs_mask, n_wcs) {
+		struct ib_wc *wc = &wcs[i];
+		if (wc->status != IB_WC_SUCCESS) {
+			_NE(c_process_per_dev_cq, "wc=@PTR, wc-status=@NVMEIB_STATUS_STR(@WC_STATUS): "
+				"wc->wr_id=@LLX={ver=@X, opc=@X, idx=@X (is_recv=@BOOL)}, "
+				"wc->opcode=@WC_OPCODE, "
+				"wc->qp=@QP, net=@NET, ct=(@INT, @STR)",
+				wc, nvmeib_status_str(&wc->status), wc->status,
+				nvmeib_wr_id_from_wc(wc),
+				nordda_wr_id_decode_version(nvmeib_wr_id_from_wc(wc)),
+				nvmeib_opcode_from_wc(wc),
+				nvmeib_idx_from_wc(wc),
+				nvmeib_opcode_from_wc(wc) == NVMEIB_RECV,
+				wc->opcode,
+				wc->qp, net,
+				ioch ? ioch->ct : -1, ch_type_to_str(ioch ? ioch->ct : -1));
+		}
+
+		
+		//if (wc->opcode & IB_WC_RECV)
+		if (nvmeib_opcode_from_wc(wc) == NVMEIB_RECV) {
+			nvmeibc_disk_net_intrs_stats_inc(net->ioch->disk, true);
+			handle_recv(net, wc);
+			if (in_interrupt()) net->rcq_stats.n_intr++;
+			else 				net->rcq_stats.n_poll++;
+		}
+		else {
+			nvmeibc_disk_net_intrs_stats_inc(net->ioch->disk, false);
+			handle_send(net, wc);
+			if (in_interrupt()) net->scq_stats.n_intr++;
+			else 				net->scq_stats.n_poll++;
+
+		}
 	}
+
 	nvmeibc_channel_spin_unlock_irqrestore(ioch, flags);
 	delta = jiffies - start;
 	_ND(process_per_dev_cq_e23, "processing time = @INT64", delta);
