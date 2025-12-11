@@ -316,10 +316,14 @@ static int export_gpt_to_json(int disk_fd,
 	// Mark file persistent BEFORE closing (sandbox: prevents auto-deletion)
 	SELF_TEST_mark_file_persistent(output_file);
 
+	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR",
+		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), config->gpt_copy_option);
 	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
 
 	// Warn if mismatch or overlaps detected
 	if (is_mismatch) {
+		N_Wf(gpt_json_mismatch_detected, "Mismatch detected in exported GPT: dev=@STR file=@STR",
+			 config->device_path, output_file);
 		fprintf(stdout, "\n");
 		fprintf(stdout, "*** WARNING: Primary and alternate copies differ! ***\n");
 		fprintf(stdout, "    JSON marked with '_mismatch_detected: true'\n");
@@ -327,6 +331,8 @@ static int export_gpt_to_json(int disk_fd,
 		fprintf(stdout, "    Suggestion: Re-export with --gpt-copy=primary or --gpt-copy=alternate\n");
 	}
 	if (has_overlaps) {
+		N_Wf(gpt_json_overlaps_detected, "Overlapping partitions detected in exported GPT: dev=@STR file=@STR",
+			 config->device_path, output_file);
 		fprintf(stdout, "\n");
 		fprintf(stdout, "*** WARNING: Overlapping partitions detected! ***\n");
 		fprintf(stdout, "    JSON marked with '_overlaps_detected: true'\n");
@@ -1783,14 +1789,18 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 			goto out;
 		}
 
+		N_IMf(fix_mbr_before, "Fixing MBR on dev=@STR old_signature=@X new_signature=@X pba_e=@ZX",
+			  config->device_path, mbr.signature, (short)MBR_SIGNATURE, config->pba_e);
+
 		nvmeibt_disk_metadata_init_pmbr(&mbr, config->pba_e + 1, config->pblk_size);
 		if (nvmeibt_disk_metadata_write_mbr(NULL, disk_fd, config->pblk_size, &mbr) < 0) {
 			N_Ef(fix_mbr_write_failed, "MBR write failed for dev=@STR", config->device_path);
 			goto out;
 		}
-
+		N_IMf(fix_mbr_success, "MBR fix successful on dev=@STR", config->device_path);
 		fprintf(stdout, "MBR fix successful\n");
 	} else {
+		N_Tf(fix_mbr_already_valid, "MBR is valid on dev=@STR (no fix needed)", config->device_path);
 		fprintf(stdout, "MBR is valid, no fix needed\n");
 	}
 
@@ -1807,9 +1817,16 @@ static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 {
 	int		rv;
 
+	N_IMf(fix_gpt_start, "Fixing GPT from another copy: dev=@STR pba_s=@ZX pba_hw_e=@ZX",
+		  config->device_path, config->pba_s, config->pba_hw_e);
+
 	// display_all_gpts() with fix_gpt=true will fix from alternate and display
 	rv = display_all_gpts(disk_fd, config->pblk_size, config->pba_s, config->pba_hw_e,
 						  config->gpt_copy_option, config->device_path, true, config);
+
+	if (rv == 0) {
+		N_IMf(fix_gpt_success, "GPT fix complete: dev=@STR", config->device_path);
+	}
 
 	return rv;
 }
@@ -1824,6 +1841,8 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 	uint32_t	expected_crc;
 	int			nbytes;
 	int			old_n_partition_entries;
+	uint32_t	old_entries_crc = gpt->header.partition_entry_array_crc32;
+	uint32_t	old_header_crc = gpt->header.header_crc32;
 
 	// Only upgrade LARGE GPTs
 	if (gpt->max_n_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES) {
@@ -1835,7 +1854,7 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 	// Validate CRC. For LARGE GPT, CRC always uses 8192 entries.
 	nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * gpt->header.size_of_partition_entry;
 	expected_crc = crc32_seedless(gpt->entries, nbytes);
-	if (gpt->header.partition_entry_array_crc32 != expected_crc) {
+	if (old_entries_crc != expected_crc) {
 		N_Ef(upgrade_gpt_crc_corrupt, "@STR GPT: CRC invalid (corruption?). Will not upgrade.", gpt_name);
 		return -1;
 	}
@@ -1851,6 +1870,9 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 	old_n_partition_entries = gpt->header.n_partition_entries;
 	gpt->header.n_partition_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
 
+	N_IMf(upgrade_gpt_before, "Upgrading @STR GPT: n_part @INT -> @INT disk_uuid=@UUID_LE CRC_before: hdr=@CRC ent=@CRC",
+		  gpt_name, old_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES, &gpt->header.disk_obj_uuid,
+		  old_header_crc, old_entries_crc);
 	fprintf(stdout, "%s GPT: Upgrading (n_partition_entries: %d -> %d)\n",
 			gpt_name, old_n_partition_entries, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 
@@ -1859,6 +1881,8 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 		return -1;
 	}
 
+	// Log new CRCs (store_gpt recalculates them)
+	N_IMf(upgrade_gpt_success, "@STR GPT upgrade complete", gpt_name);
 	fprintf(stdout, "%s GPT: Upgrade complete\n", gpt_name);
 	return 0;
 }
