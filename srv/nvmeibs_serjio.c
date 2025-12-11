@@ -2995,6 +2995,12 @@ int nvmeibs_serjio_disk_init(struct nvmeibs_disk_info *di)
 		ret = -ENOTSUPP;
 		goto out;
 	}
+	if (di->block_size != NVMEIBC_SECTOR_SIZE) {
+		_NE(error_serjio_nvmeibs_serjio_disk_init_block_size, "SERJIO FATAL: disk @DISK_ID_STR has block size @BLOCK_SIZE which is not supported",
+		    nvmeibs_disk_info_get_disk_id(di), di->block_size);
+		ret = -ENOTSUPP;
+		goto out;
+	}
 	/* Init serjio private data struct */
 	if (!(serjio_pd = kzalloc(sizeof(*serjio_pd), GFP_KERNEL))) {
 		_NE(error_1_serjio_nvmeibs_serjio_disk_init, "SERJIO FATAL: Memory Allocation Error");
@@ -3302,6 +3308,10 @@ enum nvmeibs_serjio_status nvmeibs_serjio_get_status(struct nvmeibs_disk_info *d
 
 	if (!nvmeibs_disk_info_get_md_size(di)) {
 		rv = NVMEIBS_SERJIO_STATUS_NO_MD;
+		goto out;
+	}
+	if (nvmeibs_disk_info_has_mtdt_extd(di) || di->block_size != NVMEIBC_SECTOR_SIZE) {
+		rv = NVMEIBS_SERJIO_STATUS_NOT_SUPP;
 		goto out;
 	}
 
