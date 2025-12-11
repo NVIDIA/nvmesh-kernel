@@ -9,7 +9,6 @@
 
 struct nvmeibt_topology;
 struct nvmeibt_chunk;
-enum NVMEIBT_CSV_TYPE;
 #define NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX				(-1)
 
 struct nvmeibt_block_device_atributes {
@@ -78,14 +77,8 @@ struct nvmeibt_block_device {
 	struct xdlist							topo_link;
 };
 
-static inline const char *nvmeibt_blkdev_name(struct nvmeibt_block_device *block_device)
-{
+static inline const char *nvmeibt_blkdev_name(const struct nvmeibt_block_device *block_device) {
 	return (block_device ? block_device->from_config.client_blkdev_name : "???");
-}
-
-static inline BOOL nvmeibt_block_device_is_conf_corrupted(struct nvmeibt_block_device *blkdev)
-{
-	return (blkdev && blkdev->is_conf_corrupted);
 }
 
 static inline BOOL nvmeibt_blkdev_is_being_deleted(struct nvmeibt_block_device *blkdev)

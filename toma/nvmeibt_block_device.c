@@ -19,30 +19,8 @@ const char *nvmeibt_block_device_id_str(const struct nvmeibt_block_device *block
 	return (block_device ? block_device->urn_uuid.str : "");
 }
 
-void nvmeibt_block_device_dump(struct nvmeibt_block_device *block_device)
-{
-#ifdef TOMA_DEBUG
-	struct nvmeibt_block_device_config *f = &block_device->from_config;
-
-	N_Tf(vghs83o, "Config data: id=@UUID_LE version=@VERSION name=@NAME "
-		 "n_chunks=@N_CHUNKS size=@SIZE_LLONG blksize=@INT attr={ver=@INT relative_rebuild_priority=@INT} is_deprecated=@BOOL kafka_offset=@INT64_TD",
-		 &f->id, f->version, f->client_blkdev_name,
-		 f->n_chunks, f->size_lblks, f->blk_size_bytes, f->attr.version, f->attr.relative_rebuild_priority, f->is_deprecated, f->mgmt_config_kafka_offset_or_idx);
-#else	// #ifdef TOMA_DEBUG
-	(void)block_device;
-#endif	// #ifdef TOMA_DEBUG
-}
-
-static int block_device_remove(struct nvmeibt_block_device *block_device)
-{
-	int rv = -1;
-
-	NFIN;
-	if (block_device == NULL)
-		goto out;
-
+static int block_device_remove(struct nvmeibt_block_device *block_device) {
 	N_Tf(fhu8236, "Removing block_device=@UUID_LE", nvmeibt_block_device_UUID(block_device));
-
 	NNVMEIBT_HASH_DEL_OBJ(fhuu87w, &nvmeibt_global_get_global()->block_devices_hash, block_device, block_device);
 	if (block_device->encrypt_params) { // Don't del the block_device if in the middle of encrypt operation
 		block_device->encrypt_params = NULL;
@@ -52,12 +30,7 @@ static int block_device_remove(struct nvmeibt_block_device *block_device)
 		NNVMEIBT_TOMA_FREE(skmnju7, block_device);
 	}
 	// The assumption is that the surrounding objects (block_device & chunk) are also removed
-
-	rv = 0;
-
-out:
-	NFOUT;
-	return rv;
+	return 0;
 }
 
 static void blkdev_upd_config_tag_recursively(struct nvmeibt_block_device *blkdev, int config_tag)
