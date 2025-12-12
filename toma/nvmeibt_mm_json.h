@@ -10,45 +10,12 @@
 
 static const char EYECATCHER_CNF_END[] = "CNFEnd";	// Duplicated, but same and can use sizeof()
 
+#include "nvmeibt_json_base.h"
 #include "../common/nvmeib_shared.h"
-struct mm_json_elem;
-struct mm_json_kv_pair {
-	char *key;
-	struct mm_json_elem *value;
-};
 
-struct mm_json_dict {
-	int len;
-	struct mm_json_kv_pair *elements;
-};
-
-struct mm_json_array {
-	int len;
-	struct mm_json_elem **elements;
-};
-
-enum mm_json_type {
-	JSON_E_UNKNOWN,
-	JSON_E_STR,
-	JSON_E_NUM,
-	JSON_E_NUM_FLOAT,
-	JSON_E_DICT,
-	JSON_E_ARRAY,
-	JSON_E_BOOL,
-	JSON_E_NULL
-};
-
-struct mm_json_elem {
-	enum mm_json_type type;
-	struct mm_json_elem *parent;
-	union {
-		char *str;
-		int64_t num;
-		double	num_float;
-		struct mm_json_dict dict;
-		struct mm_json_array array;
-	};
-};
+/******************************************************************************/
+// Management and Configuration Specific Structures
+/******************************************************************************/
 
 struct mm_segment_conf {
 	char eyecatcher[4];					// 4
@@ -82,7 +49,7 @@ struct mm_chunk_conf {
 	uint8_t num_praids;					// 5
 	char	filler_1[3];				// 8
 	uint64_t vlbs;						// 16
-	uint64_t vlbe;						// 24	
+	uint64_t vlbe;						// 24
 	struct mm_praid_conf *praids;		// 32
 	union nvmeib_uuid uuid;				// 48
 	char	align[0] __attribute__((aligned(16)));
@@ -222,9 +189,11 @@ struct _packed_mm_mgmt_conf {
 	char						align[0] __attribute__((aligned(16)));
 }__attribute__((__packed__, aligned(16)));
 
-
 void nvmeibt_mm_json_free_kv_tree(struct mm_json_elem *root);
 struct mm_json_elem *parse_json_txt_into_kv_tree(const char *in, int buff_len);
+
+// Wrapper that reports failures to management via Kafka - use for Kafka message parsing
+struct mm_json_elem *parse_mgmt_json_txt_into_kv_tree_or_report_failure(const char *in, int buff_len);
 
 uint16_t nvmeibt_raft_member_conf_convert_le_be(struct mm_raft_member_conf *dst, struct mm_raft_member_conf *src);
 int nvmeibt_mgmt_msg_json_tree_to_mgmt_conf(struct mm_mgmt_conf *conf, struct mm_json_elem *root, int64_t kafka_offset, bool is_new_or_upd, bool is_deleteVolumeCompleted);

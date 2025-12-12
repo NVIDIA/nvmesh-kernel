@@ -29,147 +29,27 @@
 #define JSON_PARSING_REALLOC(name, ptr, size) 	realloc(ptr, size)
 #define JSON_PARSING_FREE(name, ptr) 			free(ptr)
 
-#define DUMP_kv_TO_LOG(__name, __kv) ({											\
-	struct mm_json_elem			*__v = (__kv)->value;							\
-	char						*__key = (__kv)->key;							\
-	if (!__key) N_Tf(__name ## 20, "__key=NULL");								\
-	if (__v->type == JSON_E_NUM) {												\
-		N_Tf(__name ## 11, "'@STR' num=@INT64_TD", __key, __v->num);			\
-	} else if (__v->type == JSON_E_STR) {										\
-		N_Tf(__name ## 12, "'@STR' str='@STR'", __key, __v->str);				\
-	} else if (__v->type == JSON_E_DICT) {										\
-		N_Tf(__name ## 13, "'@STR' dict.len=@INT", __key, __v->dict.len);		\
-	} else if (__v->type == JSON_E_ARRAY) {										\
-		N_Tf(__name ## 14, "'@STR' array.len=@INT", __key, __v->array.len);		\
-	} else if (__v->type == JSON_E_NUM_FLOAT) {									\
-		N_Tf(__name ## 15, "'@STR' (FLOAT)", __key);							\
-	} else if (__v->type == JSON_E_BOOL) {										\
-		N_Tf(__name ## 16, "'@STR' bool=@INT64_TD", __key, __v->num);			\
-	} else if (__v->type == JSON_E_NULL) {										\
-		N_Tf(__name ## 17, "'@STR' JSON_E_NULL", __key);						\
-	} else if (__v->type == JSON_E_UNKNOWN) {									\
-		N_Tf(__name ## 18, "'@STR' JSON_E_UNKNOWN", __key);						\
-	}																			\
-})
-
-/******************************************************************************/
-
-struct JSON_idx_token {
-	bool		is_found;
-	bool		is_avoid_warning_when_missing;		// The name is "Negative" for easy init to 0
-	char		*token;
-};
-
-#define JSON_ASSIGN_AND_CALL_INIT()							\
-	struct JSON_idx_token		JSON_ARR[50] = {0};			\
-	int							json_n = 0;					\
-	bool						is_found = 0;				\
-	int							__json_iter;				\
-	int							n_json_tokens = 0;
-
-#define JSON_LOOP_FOR_DICT(__kv, __dict)																				\
-	for (__json_iter = 0; ((__kv) = &(__dict)->elements[__json_iter]) && __json_iter < (__dict)->len; __json_iter++)
-
-#define JSON_ASSIGN_AND_CALL_VALIDATE(name) ({																\
-	for (__json_iter = 0; __json_iter < n_json_tokens; __json_iter++) {										\
-		if (!JSON_ARR[__json_iter].is_found) {																\
-			if (JSON_ARR[__json_iter].is_avoid_warning_when_missing) {										\
-				N_Tf(name ## T1, "Missing token n=@INT '@STR'", __json_iter, JSON_ARR[__json_iter].token);	\
-			} else {																						\
-				N_WTf(name ## W1, "Missing token n=@INT '@STR'", __json_iter, JSON_ARR[__json_iter].token);	\
-			}																								\
-		}																									\
-	}																										\
-})
-
-#define JSON_LOOP_ITERATION_START(__name, __JSON_token)							\
-	is_found = 0;																\
-	json_n = 0;																	\
-	DUMP_kv_TO_LOG(__name ## KV, kv);
-
-#define JSON_LOOP_ITERATION_END(__name, __JSON_token)							\
-	if (!is_found) {															\
-		N_WTf(__name ## 1, "Extra key '@STR'", (__JSON_token));					\
-	}
-
-// The PROLOGUE handle the case where the input matches the token
-#define JSON_ASSIGN_PROLOGUE(__name, __JSON_token)							\
-	if (!strcmp(kv->key, (__JSON_token))) {									\
-		if (JSON_ARR[json_n].is_found) {									\
-			N_ETf(__name ## 1, "key @STR already exists", (__JSON_token));	\
-		}																	\
-		JSON_ARR[json_n].is_found = 1;										\
-		is_found = 1;
-
-// The Epilogue is mostly for updating the JSON_ARR of possible tokens
-#define JSON_ASSIGN_EPILOGUE(__name, __JSON_token)								\
-	}																			\
-	if (__json_iter == 0) {														\
-		JSON_ARR[json_n].token = (__JSON_token);								\
-		N_Tf(__name ## 3, "token[@INT]=@STR", json_n, JSON_ARR[json_n].token);	\
-		n_json_tokens++;														\
-	}																			\
-	json_n++;
-
-
-#define JSON_ASSIGN_PLAIN(name, JSON_token, JSON_dst, JSON_src) ({				\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))									\
-	(JSON_dst) = (JSON_src);													\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))									\
-})
-
-#define JSON_ASSIGN_PLAIN_OPTIONAL(name, JSON_token, JSON_dst, JSON_src) ({		\
-	JSON_ARR[json_n].is_avoid_warning_when_missing = 1;							\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))									\
-	(JSON_dst) = (JSON_src);													\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))									\
-})
-
-#define JSON_ASSIGN_STR(name, JSON_token, JSON_dst, JSON_src) ({				\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))									\
-	nvmeibt_strlcpy((JSON_dst), (JSON_src), sizeof(JSON_dst));					\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))									\
-})
-
-#define JSON_ASSIGN_CALL(name, JSON_token, JSON_func, JSON_args...) ({			\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))									\
-	JSON_func(JSON_args);														\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))									\
-})
-
-#define JSON_ASSIGN_OPTIONAL(name, JSON_token) ({				\
-	JSON_ARR[json_n].is_avoid_warning_when_missing = 1;		\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))				\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))				\
-})
-
-#define JSON_ASSIGN_VALIDATE_STR(name, JSON_token, JSON_expected, JSON_src) ({	\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))									\
-	if (strcmp(JSON_expected, JSON_src)) {										\
-		N_Wf(name ## validate, "OOPS @STR='@STR'", JSON_token, JSON_src);		\
-	}																			\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))									\
-})
-
-#define JSON_ASSIGN_VALIDATE_STR_OPTIONAL(name, JSON_token, JSON_expected, JSON_src) ({	\
-	JSON_ARR[json_n].is_avoid_warning_when_missing = 1;									\
-	JSON_ASSIGN_PROLOGUE(name, (JSON_token))											\
-	if (strcmp(JSON_expected, JSON_src)) {												\
-		N_Wf(name ## validate, "OOPS @STR='@STR'", JSON_token, JSON_src);				\
-	}																					\
-	JSON_ASSIGN_EPILOGUE(name, (JSON_token))											\
-})
-
-#define JSON_WARN_and_FIX(name, __relevant_key, __var, __badval, __fix, __log_args...) ({	\
-	if ((__var) == (__badval) && (!strcmp(kv->key, __relevant_key))) {						\
-		N_Wf(name ## warn_once, __log_args);												\
-		(__var) = (__fix);																	\
-	}																						\
-})
-
-/******************************************************************************/
-
 #include "nvmeibt_mm_json.h"
+#include "nvmeibt_json_base.h"
+#include "nvmeibt_kafka.h"
+
+/**
+ * Wrapper for parse_json_txt_into_kv_tree() that reports failures to management via Kafka.
+ * Use this for parsing JSON messages received from management (Kafka).
+ * For local file parsing (e.g., gpt_util), use parse_json_txt_into_kv_tree() directly.
+ */
+struct mm_json_elem *parse_mgmt_json_txt_into_kv_tree_or_report_failure(const char *in, int buff_len)
+{
+	struct mm_json_elem		*root;
+
+	root = parse_json_txt_into_kv_tree(in, buff_len);
+	if (!root) {
+		char msg[MGMT_LOG_MSG_MSG_LEN];
+		snprintf(msg, sizeof(msg), "Failed parsing of msg from MGMT %.200s", in);
+		nvmeibt_kafka_generic_log_msg_to_mgmt_send(NULL, NULL, msg, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+	}
+	return root;
+}
 
 // forward compatibility. If updating the structs, add an unpack handler for the old struct version.
 // #define MM_STRUCT_VER_2008 2008
@@ -2283,7 +2163,8 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	N_Tf(b8ski4x, "@STR JSON_len=@SIZE_T", JSON_file_name, JSON_len);
 
 	// parse the JSON into a kv_tree
-	json_tree_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(JSON_buf), nvmeibt_Str_strlen(JSON_buf));
+	// TODO(Wentao): I believe parse_json_txt_into_kv_tree() suffices here, with no need to report to mgmt, but to play safe I use this wrapper to exactly match old behavior.
+	json_tree_root = parse_mgmt_json_txt_into_kv_tree_or_report_failure(nvmeibt_Str_str(JSON_buf), nvmeibt_Str_strlen(JSON_buf));
 	if (!json_tree_root) {
 		N_Ef(cbjw9k3, "Failed parsing JSON");
 		goto out;

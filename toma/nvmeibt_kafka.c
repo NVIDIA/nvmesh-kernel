@@ -926,7 +926,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, "", (char *)(k_msg->payload), k_msg->len);
 		}
 		// Parse as much as possible in this thread, and not in TOMA's main thread
-		*out_json_tree_root = parse_json_txt_into_kv_tree(k_msg->payload, k_msg->len);
+		*out_json_tree_root = parse_mgmt_json_txt_into_kv_tree_or_report_failure(k_msg->payload, k_msg->len);
 		if (!*out_json_tree_root) {
 			rv = -1;
 			goto out;
