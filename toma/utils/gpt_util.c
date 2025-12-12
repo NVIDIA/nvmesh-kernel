@@ -18,7 +18,7 @@
 #include "../nvmeibt_str.h"
 #include "../nvmeibt_local_disk.h"
 #include "nvmeibt_uuid.h"
-#include "../nvmeibt_mm_json.h"
+#include "../nvmeibt_json_base.h"
 #include "../interfaces/log/nvmeibt_binary_tracing.h"
 #include "../interfaces/srvr/nvmeibt_srvr_proc.h"	// DISKS_INFO_FILE
 
@@ -37,6 +37,7 @@ enum GPT_UTIL_ACTION {
 	ACTION_FIX_MBR,				// -F: fix MBR
 	ACTION_CHECK_EXCELERO,		// -i: check if EXCELERO_METADATA exists
 	ACTION_EXPORT_JSON,			// --output-json: export GPT to JSON
+	ACTION_APPLY_JSON,			// --apply-from: apply GPT from JSON (dry-run by default)
 	ACTION_UPGRADE_GPT			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
 };
 
@@ -64,6 +65,10 @@ struct gpt_util_config {
 
 	// JSON export options (for ACTION_EXPORT_JSON)
 	char					output_json_file[256];	// Output JSON filename
+
+	// JSON apply options (for ACTION_APPLY_JSON)
+	char					apply_json_file[256];	// Input JSON filename to apply
+	BOOL					write_mode;				// true = write changes, false = dry-run (default)
 };
 
 // Forward declarations
@@ -71,6 +76,7 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 static void SELF_TEST_mark_file_persistent(const char *filepath);
 static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries, int max_n_entries);
 static int run_gpt_util_op(int argc, char *argv[]);
+static int execute_apply_json(int disk_fd, struct gpt_util_config *config);
 
 // Print test header banner (SELF-TEST only)
 static void SELF_TEST_print_test_header(int test_idx, const char *description, const char *command)
@@ -1393,12 +1399,16 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
 	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON file\n");
+	fprintf(stdout, "  --apply-from=FILE           Apply GPT from JSON file (dry-run by default)\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
 
 	fprintf(stdout, "Display Options:\n");
 	fprintf(stdout, "  -c, --gpt-copy=WHICH        Which copy: primary|alternate|both (default: primary)\n");
 	fprintf(stdout, "  --filter-uuid=UUID          Show only entries matching UUID\n");
 	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n\n");
+
+	fprintf(stdout, "Apply Options:\n");
+	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n\n");
 
 	fprintf(stdout, "Testing:\n");
 	fprintf(stdout, "  -T, --self-test             Run comprehensive self-test suite\n");
@@ -1432,10 +1442,12 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"filter-uuid",				required_argument,	0,	'u'},
 		{"filter-lba",				required_argument,	0,	'l'},
 		{"output-json",				required_argument,	0,	'J'},
+		{"apply-from",				required_argument,	0,	'A'},
+		{"write",					no_argument,		0,	'W'},
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:J:imfFU";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:imfFUW";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1647,6 +1659,20 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->action = ACTION_EXPORT_JSON;
 			nvmeibt_strlcpy(config->output_json_file, optarg, sizeof(config->output_json_file));
 			fprintf(stdout, "Action: Export GPT to JSON file: %s\n", config->output_json_file);
+			break;
+		case 'A':
+			if (config->action != ACTION_DISPLAY_GPT) {
+				N_Ef(parse_multiple_actions_apply, "Multiple actions specified (only one allowed)");
+				rv = -1;
+				goto out;
+			}
+			config->action = ACTION_APPLY_JSON;
+			nvmeibt_strlcpy(config->apply_json_file, optarg, sizeof(config->apply_json_file));
+			fprintf(stdout, "Action: Apply GPT from JSON file: %s (dry-run by default)\n", config->apply_json_file);
+			break;
+		case 'W':
+			config->write_mode = true;
+			fprintf(stdout, "Write mode: ENABLED (changes will be written to disk)\n");
 			break;
 		case 'a':
 			nvmeibt_strlcpy(config->device_path, optarg, sizeof(config->device_path));
@@ -1950,6 +1976,151 @@ out:
 }
 
 /**
+ * Parse one GPT entry from JSON dict element
+ * Fills in the provided entry structure
+ * Returns 0 on success, -1 on error
+ */
+static int parse_gpt_entry_from_json(struct nvmeibt_disk_gpt_partition_entry *entry,
+									  struct mm_json_elem *entry_elem)
+{
+	int							rv = -1;
+	struct mm_json_kv_pair		*kv = NULL;
+	struct mm_json_dict			*dict = NULL;
+	char						*type_guid_str = NULL;
+	char						*partition_guid_str = NULL;
+	char						*name_str = NULL;
+	JSON_ASSIGN_AND_CALL_INIT();
+
+	if (!entry_elem || entry_elem->type != JSON_E_DICT) {
+		N_Ef(parse_entry_not_dict, "Entry element is not a dict type=@INT", entry_elem ? (int)entry_elem->type : -1);
+		return -1;
+	}
+
+	memset(entry, 0, sizeof(*entry));
+
+	dict = &entry_elem->dict;
+	JSON_LOOP_FOR_DICT(kv, dict) {
+		JSON_LOOP_ITERATION_START(parse_entry, kv->key);
+		JSON_ASSIGN_PLAIN(parse_type_guid, "type_guid", type_guid_str, kv->value->str);
+		JSON_ASSIGN_PLAIN(parse_part_guid, "partition_guid", partition_guid_str, kv->value->str);
+		JSON_ASSIGN_PLAIN(parse_pba_s, "pba_s", entry->pba_s, (uint64_t)kv->value->num);
+		JSON_ASSIGN_PLAIN(parse_pba_e, "pba_e", entry->pba_e, (uint64_t)kv->value->num);
+		JSON_ASSIGN_PLAIN(parse_attr, "attributes", entry->attributes, (uint64_t)kv->value->num);
+		JSON_ASSIGN_PLAIN(parse_name, "name", name_str, kv->value->str);
+		JSON_ASSIGN_OPTIONAL(parse_index, "index");		// Optional, just for display
+		JSON_LOOP_ITERATION_END(parse_entry_end, kv->key);
+	}
+	JSON_ASSIGN_AND_CALL_VALIDATE(parse_entry_validate);
+
+	// Convert UUIDs from strings
+	if (type_guid_str) {
+		nvmeibt_urn_uuid_str_to_union_uuid(&entry->partition_type_guid, type_guid_str);
+	}
+	if (partition_guid_str) {
+		nvmeibt_urn_uuid_str_to_union_uuid(&entry->partition_guid, partition_guid_str);
+	}
+	if (name_str) {
+		str_to_char16_str(name_str, strlen(name_str), entry->partition_name);
+	}
+
+	rv = 0;
+	return rv;
+}
+
+/**
+ * Parse GPT from JSON section (main_gpt_primary or main_gpt_alternate)
+ * Builds a complete nvmeibt_disk_gpt structure from JSON
+ * Caller must allocate gpt->entries buffer before calling
+ * Returns 0 on success, -1 on error
+ */
+static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
+										struct mm_json_elem *gpt_section_elem,
+										const char *section_name)
+{
+	int							rv = -1;
+	int							i;
+	int							j;
+	struct mm_json_kv_pair		*kv = NULL;
+	struct mm_json_dict			*dict = NULL;
+	struct mm_json_elem			*entries_array = NULL;
+	int							n_entries_in_json = 0;
+	char						*disk_uuid_str = NULL;
+	JSON_ASSIGN_AND_CALL_INIT();
+
+	if (!gpt_section_elem || gpt_section_elem->type != JSON_E_DICT) {
+		N_Ef(parse_gpt_not_dict, "GPT section @STR is not a dict", section_name);
+		return -1;
+	}
+
+	// Extract fields from GPT section using JSON macros
+	dict = &gpt_section_elem->dict;
+	JSON_LOOP_FOR_DICT(kv, dict) {
+		JSON_LOOP_ITERATION_START(parse_gpt_sec, kv->key);
+		JSON_ASSIGN_PLAIN(parse_disk_uuid, "disk_uuid", disk_uuid_str, kv->value->str);
+		JSON_ASSIGN_PLAIN(parse_n_part, "n_partition_entries", gpt->header.n_partition_entries, (uint32_t)kv->value->num);
+		JSON_ASSIGN_PLAIN(parse_first_pba, "first_usable_pba", gpt->header.first_usable_pba, (uint64_t)kv->value->num);
+		JSON_ASSIGN_PLAIN(parse_last_pba, "last_usable_pba", gpt->header.last_usable_pba, (uint64_t)kv->value->num);
+		JSON_ASSIGN_PLAIN(parse_entries_arr, "entries", entries_array, kv->value);
+		JSON_LOOP_ITERATION_END(parse_gpt_sec_end, kv->key);
+	}
+	JSON_ASSIGN_AND_CALL_VALIDATE(parse_gpt_sec_validate);
+
+	// Parse disk UUID string
+	if (disk_uuid_str) {
+		nvmeibt_urn_uuid_str_to_union_uuid(&gpt->header.disk_obj_uuid, disk_uuid_str);
+	}
+
+	if (!entries_array) {
+		N_Ef(parse_gpt_no_entries, "GPT section @STR has no entries array", section_name);
+		return -1;
+	}
+
+	// Parse entries array
+	n_entries_in_json = entries_array->array.len;
+	fprintf(stdout, "  %s: %d entries in JSON\n", section_name, n_entries_in_json);
+
+	for (j = 0; j < n_entries_in_json; j++) {
+		struct mm_json_elem						*entry_elem = entries_array->array.elements[j];
+		struct mm_json_dict						*entry_dict = NULL;
+		int										entry_index = -1;
+		struct nvmeibt_disk_gpt_partition_entry	temp_entry;
+
+		if (entry_elem->type != JSON_E_DICT) {
+			N_Wf(parse_entry_skip_not_dict, "Skipping entry @INT (not a dict)", j);
+			continue;
+		}
+
+		// Get the index field to know where to place this entry
+		entry_dict = &entry_elem->dict;
+		for (i = 0; i < entry_dict->len; i++) {
+			if (strcmp(entry_dict->elements[i].key, "index") == 0 &&
+				entry_dict->elements[i].value->type == JSON_E_NUM) {
+				entry_index = (int)entry_dict->elements[i].value->num;
+				break;
+			}
+		}
+
+		if (entry_index < 0 || entry_index >= gpt->max_n_entries) {
+			N_Wf(parse_entry_bad_index, "Entry @INT has invalid index=@INT (max=@INT), skipping",
+				 j, entry_index, gpt->max_n_entries);
+			continue;
+		}
+
+		// Parse the entry
+		if (parse_gpt_entry_from_json(&temp_entry, entry_elem) < 0) {
+			N_Wf(parse_entry_failed, "Failed to parse entry @INT, skipping", j);
+			continue;
+		}
+
+		// Copy to correct position in entries array
+		memcpy(&gpt->entries[entry_index], &temp_entry, sizeof(temp_entry));
+	}
+
+	rv = 0;
+	return rv;
+}
+
+/**
  * Phase 3: Execute EXPORT_JSON action
  */
 static int execute_export_json(int disk_fd, struct gpt_util_config *config)
@@ -1964,6 +2135,233 @@ static int execute_export_json(int disk_fd, struct gpt_util_config *config)
 		fprintf(stdout, "\nJSON export complete. Edit the file and use --apply-from to restore.\n");
 	}
 
+	return rv;
+}
+
+/**
+ * Phase 3: Execute APPLY_JSON action
+ * Parse JSON file, validate safety checks, and apply GPT changes
+ * Default: dry-run (show changes without writing)
+ * With --write: actually apply changes after confirmation
+ */
+static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
+{
+	int							rv = -1;
+	struct nvmeibt_Str			*json_content = NULL;
+	struct mm_json_elem			*json_root = NULL;
+	struct mm_json_kv_pair		*kv = NULL;
+	struct mm_json_dict			*dict = NULL;
+	int							json_fd = -1;
+	BOOL						mismatch_detected = false;
+	BOOL						overlaps_detected = false;
+	BOOL						human_edited = false;
+	BOOL						recalculate_crc = false;
+	const char					*device_path_in_json = NULL;
+	struct mm_json_elem			*main_gpt_primary_elem = NULL;
+	struct mm_json_elem			*main_gpt_alternate_elem = NULL;
+	int							n_gpt_sections_found = 0;
+	struct nvmeibt_disk_gpt		current_gpt;
+	struct nvmeibt_disk_gpt		json_gpt;
+	JSON_ASSIGN_AND_CALL_INIT();		// Declares: JSON_ARR, json_n, is_found, __json_iter, n_json_tokens
+
+	(void)disk_fd;		// Will be used in next step
+
+	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
+
+	if (config->write_mode) {
+		fprintf(stdout, "Mode: WRITE (changes will be applied to disk)\n");
+	} else {
+		fprintf(stdout, "Mode: DRY-RUN (showing changes, use --write to apply)\n");
+	}
+	fprintf(stdout, "\n");
+
+	// Step 1: Read JSON file
+	json_fd = NNVMEIBT_OPEN_READ(trace_apply_json_open, config->apply_json_file, 1);
+	if (json_fd < 0) {
+		N_Ef(apply_json_open_failed, "Failed to open JSON file @STR @AUTO_ERRNO", config->apply_json_file);
+		goto out;
+	}
+
+	json_content = NNVMEIBT_STR_ALLOC(trace_apply_json_read);
+	rv = NNVMEIBT_STR_FREAD_ATOMIC(trace_apply_json_fread, json_content, json_fd);
+	if (rv < 0) {
+		N_Ef(apply_json_read_failed, "Failed to read JSON file @STR @AUTO_ERRNO", config->apply_json_file);
+		goto out;
+	}
+	NNVMEIBT_CLOSE(trace_apply_json_close, json_fd);
+	json_fd = -1;
+
+	fprintf(stdout, "JSON file read successfully (%zu bytes)\n\n", nvmeibt_Str_strlen(json_content));
+
+	// Step 2: Parse JSON into key-value tree
+	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(json_content), nvmeibt_Str_strlen(json_content));
+	if (!json_root) {
+		N_Ef(apply_json_parse_failed, "Failed to parse JSON file @STR", config->apply_json_file);
+		rv = -1;
+		goto out;
+	}
+
+	if (json_root->type != JSON_E_DICT) {
+		N_Ef(apply_json_not_dict, "JSON root is not a dictionary type=@INT", json_root->type);
+		rv = -1;
+		goto out;
+	}
+
+	fprintf(stdout, "JSON parsed successfully\n\n");
+
+	// Step 3: Extract and validate metadata using JSON macros
+	fprintf(stdout, "=== Validating JSON metadata ===\n");
+
+	dict = &json_root->dict;
+	JSON_LOOP_FOR_DICT(kv, dict) {
+		JSON_LOOP_ITERATION_START(apply_json_meta, kv->key);
+		JSON_ASSIGN_PLAIN(apply_dev_path, "device_path", device_path_in_json, kv->value->str);
+		JSON_ASSIGN_PLAIN(apply_mismatch, "_mismatch_detected", mismatch_detected, (kv->value->num != 0));
+		JSON_ASSIGN_PLAIN(apply_overlaps, "_overlaps_detected", overlaps_detected, (kv->value->num != 0));
+		JSON_ASSIGN_PLAIN(apply_human_ed, "_human_edited", human_edited, (kv->value->num != 0));
+		JSON_ASSIGN_PLAIN(apply_recalc, "_recalculate_crc", recalculate_crc, (kv->value->num != 0));
+		JSON_ASSIGN_OPTIONAL(apply_timestamp, "backup_timestamp");
+		JSON_ASSIGN_PLAIN(apply_main_pri, "main_gpt_primary", main_gpt_primary_elem, kv->value);
+		JSON_ASSIGN_PLAIN(apply_main_alt, "main_gpt_alternate", main_gpt_alternate_elem, kv->value);
+		JSON_LOOP_ITERATION_END(apply_json_meta_end, kv->key);
+	}
+	JSON_ASSIGN_AND_CALL_VALIDATE(apply_json_meta_validate);
+
+	// Device path validation
+	if (device_path_in_json) {
+		fprintf(stdout, "Device in JSON: %s\n", device_path_in_json);
+		fprintf(stdout, "Device in config: %s\n", config->device_path);
+		if (strcmp(device_path_in_json, config->device_path) != 0) {
+			N_Ef(apply_json_device_mismatch, "Device path mismatch: JSON=@STR config=@STR",
+				 device_path_in_json, config->device_path);
+			rv = -1;
+			goto out;
+		}
+	}
+
+	// Display detected flags
+	if (mismatch_detected) {
+		fprintf(stdout, "_mismatch_detected: true\n");
+	}
+	if (overlaps_detected) {
+		fprintf(stdout, "_overlaps_detected: true\n");
+	}
+	if (human_edited) {
+		fprintf(stdout, "_human_edited: true\n");
+	}
+	if (recalculate_crc) {
+		fprintf(stdout, "_recalculate_crc: true\n");
+	}
+
+	// Safety check: Block if mismatch detected and not resolved
+	if (mismatch_detected) {
+		N_Ef(apply_json_mismatch_block, "JSON has _mismatch_detected=true, blocking apply. file=@STR",
+			 config->apply_json_file);
+		rv = -1;
+		goto out;
+	}
+
+	// Safety check: Block if overlaps detected
+	if (overlaps_detected) {
+		N_Ef(apply_json_overlap_block, "JSON has _overlaps_detected=true, blocking apply. file=@STR",
+			 config->apply_json_file);
+		rv = -1;
+		goto out;
+	}
+
+	fprintf(stdout, "\n=== Metadata validation: PASSED ===\n\n");
+
+	// Step 4: Parse GPT sections and prepare for apply
+	memset(&current_gpt, 0, sizeof(current_gpt));
+	memset(&json_gpt, 0, sizeof(json_gpt));
+	nvmeibt_strlcpy(current_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(current_gpt.main_or_metadata));
+	nvmeibt_strlcpy(json_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(json_gpt.main_or_metadata));
+	json_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+
+	fprintf(stdout, "=== Parsing GPT sections ===\n");
+
+	// Determine which GPT section(s) to apply (already extracted in Step 3)
+	if (main_gpt_primary_elem) {
+		n_gpt_sections_found++;
+		fprintf(stdout, "Found: main_gpt_primary\n");
+	}
+	if (main_gpt_alternate_elem) {
+		n_gpt_sections_found++;
+		fprintf(stdout, "Found: main_gpt_alternate\n");
+	}
+
+	if (n_gpt_sections_found == 0) {
+		N_Ef(apply_json_no_gpt_sections, "No GPT sections found in JSON file=@STR", config->apply_json_file);
+		rv = -1;
+		goto out;
+	}
+
+	if (n_gpt_sections_found == 2) {
+		// Both primary and alternate present - this shouldn't happen if mismatch check passed
+		N_Wf(apply_json_both_sections, "JSON has both primary and alternate sections (will apply both) file=@STR",
+			 config->apply_json_file);
+	}
+
+	fprintf(stdout, "\n");
+
+	// Step 5: Read current GPT from disk
+	fprintf(stdout, "=== Reading current GPT from disk ===\n");
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_gpt,
+										  config->pba_s, config->pba_hw_e, false) < 0) {
+		N_Ef(apply_json_read_current_failed, "Failed to read current GPT from disk dev=@STR", config->device_path);
+		goto out;
+	}
+	fprintf(stdout, "Current GPT: n_entries=%d, first_usable=%lu, last_usable=%lu\n",
+			current_gpt.header.n_partition_entries,
+			current_gpt.header.first_usable_pba,
+			current_gpt.header.last_usable_pba);
+
+	// Step 6: Parse GPT from JSON
+	fprintf(stdout, "\n=== Parsing GPT from JSON ===\n");
+
+	// Parse the GPT section(s) - entries are already part of struct, no separate allocation needed
+	if (main_gpt_primary_elem) {
+		if (parse_gpt_from_json_section(&json_gpt, main_gpt_primary_elem, "main_gpt_primary") < 0) {
+			N_Ef(apply_json_parse_primary_failed, "Failed to parse main_gpt_primary from JSON");
+			goto out;
+		}
+	} else if (main_gpt_alternate_elem) {
+		if (parse_gpt_from_json_section(&json_gpt, main_gpt_alternate_elem, "main_gpt_alternate") < 0) {
+			N_Ef(apply_json_parse_alternate_failed, "Failed to parse main_gpt_alternate from JSON");
+			goto out;
+		}
+	}
+
+	// Step 7: Compare and show diff
+	fprintf(stdout, "\n=== Comparing GPT changes ===\n");
+	fprintf(stdout, "TODO: Implement detailed diff\n");
+	fprintf(stdout, "TODO: Count additions, deletions, modifications\n");
+	fprintf(stdout, "\n");
+
+	// Step 8: Write changes if in write mode
+	if (config->write_mode) {
+		fprintf(stdout, "=== Would apply changes (NOT IMPLEMENTED YET) ===\n");
+		fprintf(stdout, "TODO: Prompt for confirmation\n");
+		fprintf(stdout, "TODO: Copy json_gpt to current_gpt\n");
+		fprintf(stdout, "TODO: Call nvmeibt_disk_metadata_store_gpt()\n");
+		fprintf(stdout, "TODO: Log audit trail with N_IMf (before/after CRCs)\n");
+	} else {
+		fprintf(stdout, "=== Dry-run complete ===\n");
+		fprintf(stdout, "No changes written to disk.\n");
+		fprintf(stdout, "Use --write flag to actually apply changes.\n");
+	}
+
+	rv = 0;
+
+out:
+	if (json_fd >= 0) {
+		NNVMEIBT_CLOSE(trace_apply_json_cleanup_fd, json_fd);
+	}
+	// json_gpt.entries is a fixed array in the struct, not dynamically allocated
+	if (json_root) {
+		nvmeibt_mm_json_free_kv_tree(json_root);
+	}
+	NNVMEIBT_STR_FREE(trace_apply_json_cleanup_str, json_content);
 	return rv;
 }
 
@@ -2048,6 +2446,10 @@ static int run_gpt_util_op(int argc, char *argv[])
 
 	case ACTION_EXPORT_JSON:
 		rv = execute_export_json(disk_fd, &config);
+		break;
+
+	case ACTION_APPLY_JSON:
+		rv = execute_apply_json(disk_fd, &config);
 		break;
 
 	default:
