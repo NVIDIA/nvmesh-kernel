@@ -103,6 +103,7 @@ $(TDIR)/nvmeibt_local_disk_util.c \
 $(TDIR)/nvmeibt_local_disk.c \
 $(TDIR)/nvmeibt_local_nic.c \
 $(TDIR)/nvmeibt_mm_json.c \
+$(TDIR)/nvmeibt_json_base.c \
 $(TDIR)/nvmeibt_nic.c \
 $(TDIR)/nvmeibt_node.c \
 $(TDIR)/nvmeibt_praid_basics.c \
