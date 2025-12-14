@@ -2,10 +2,8 @@
 #define NVMEIBT_NODE
 
 #include <pthread.h>
-
 #include "nvmeibt_common.h"
 #include "nvmeibt_params.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_ds.h"
 #include "interfaces/network/network_incs.h"
 #include "nvmeibt_raft.h"

@@ -2,7 +2,6 @@
 #define NVMEIBR_DS_METADATA_H
 
 #include "nvmeibt_common.h"
-#include "nvmeibt_str.h"
 
 /*
  * The sizeof metadata magic string is 59 bytes (including '\0').

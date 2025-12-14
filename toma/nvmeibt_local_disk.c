@@ -125,7 +125,6 @@
 #include "../srv/nvmeibs_srv_toma_messages.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_read_config.h"
 #include "nvmeibt_persistency_info.h"
 #include "nvmeibt_kafka.h"

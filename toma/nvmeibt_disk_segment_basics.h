@@ -4,7 +4,6 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_mm_json.h"
 #include "nvmeibt_ds.h"
-#include "nvmeibt_str.h"
 
 /****************************  MR Rename later on  ****************************/
 // TODO(Rename)
@@ -109,7 +108,7 @@ struct nvmeibt_serialized_seg_leader_topo {
     // int										active_seg_ser_ver;	// Removed in disk_segment.h
 	union {
 		struct nvmeibt_leader_seg_flags		leader_seg_flags;
-		int									leader_seg_flags_int;	
+		int									leader_seg_flags_int;
 	};
 	enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE	dirty_bits_state:32;
 	enum NVMEIBT_MEM_TBL_INIT_MODE			dirty_bits_init_mode:32;

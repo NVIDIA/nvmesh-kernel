@@ -3,7 +3,6 @@
 
 #include "nvmeibt_common.h"
 #include "nvmeibt_mm_json.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_kafka.h"
 
 #define NVMEIBT_MAX_NODE_NAME_LENGTH 256

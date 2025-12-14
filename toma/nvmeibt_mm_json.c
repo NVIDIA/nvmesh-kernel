@@ -6,7 +6,6 @@
 #include "nvmeibt_global.h"
 #include "nvmeibt_praid_basics.h"
 #include "nvmeibt_ds.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_mm_json.h"
 
 // forward compatibility. If updating the structs, add an unpack handler for the old struct version.

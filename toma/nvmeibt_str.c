@@ -3,7 +3,6 @@
 #include <string.h>
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
-#include "nvmeibt_str.h"
 
 static inline size_t Str_get_allocated_size(const struct nvmeibt_Str *this) {
 	return this->allocated_size;

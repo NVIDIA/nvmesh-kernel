@@ -21,6 +21,7 @@
 #include <malloc.h>
 
 #include "nvmeibt_utils.h"
+#include "nvmeibt_str.h"
 
 typedef __CHAR16_TYPE__ char16_t;
 

@@ -4,7 +4,6 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_block_device.h"
 
 struct nvmeibt_chunk_config {

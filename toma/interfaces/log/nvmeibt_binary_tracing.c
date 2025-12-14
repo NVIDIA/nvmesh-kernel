@@ -19,7 +19,6 @@ static bool is_logging_on = 1;
 #include <unistd.h>
 #include <sys/syscall.h>
 #include "nvmeibt_common.h"
-#include "nvmeibt_str.h"
 
 static void* trace_poller_thread(void *param) {
 	sigset_t mask;

@@ -14,7 +14,6 @@
 #include "nvmeibt_toma.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_topology.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_global.h"
 #include "clnt/nvmeibt_client_protocol.h"
 

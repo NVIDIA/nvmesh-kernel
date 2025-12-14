@@ -5,7 +5,6 @@
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_mm_json.h"
-#include "nvmeibt_str.h"
 
 struct nvmeibt_chunk;
 #define NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX				(-1)

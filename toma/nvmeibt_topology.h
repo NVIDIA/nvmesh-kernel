@@ -12,15 +12,12 @@
 #define NVMEIBT_TOPOLOGY
 
 #include <sys/select.h>
-
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
-
 #include "nvmeibt_params.h"
 #include "nvmeibt_common.h"
 #include "../common/nvmeib_shared.h"
-#include "nvmeibt_str.h"
 #include "interfaces/network/network_incs.h"
 #include "clnt/nvmeibt_client_protocol.h"
 #include "nvmeibt_mm_json.h"

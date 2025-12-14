@@ -5,7 +5,6 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_disk_segment_basics.h"
 #include "nvmeibt_ds_metadata.h"
 #include "nvmeibt_wq.h"

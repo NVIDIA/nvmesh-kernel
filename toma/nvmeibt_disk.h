@@ -5,7 +5,6 @@
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_mm_json.h"
-#include "nvmeibt_str.h"
 #include "nvmeibt_seg_active.h"
 
 struct nvmeibt_disk_config {

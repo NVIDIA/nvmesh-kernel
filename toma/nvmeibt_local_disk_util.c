@@ -6,7 +6,6 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <ctype.h>
-#include "nvmeibt_str.h"
 #include "nvmeibt_local_disk.h"
 #include <fcntl.h>
 #include <linux/fs.h>
