@@ -1979,7 +1979,7 @@ int siw_do_rx_work(struct siw_qp* qp)
 			if (tcp_inq(sk) < 1) {
 				/* Nothing to receive */
 				up_read(&qp->state_lock);
-				dprint(DBG_RX | DBG_ON, "(QP%d): Nothing to receive\n", QP_ID(qp));
+				dprint(DBG_RX, "(QP%d): Nothing to receive\n", QP_ID(qp));
 				rv = 0;
 				goto done;
 			}
