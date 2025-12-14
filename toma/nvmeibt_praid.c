@@ -2705,21 +2705,13 @@ static int8_t recalc_praid_report_to_mgmt_json(struct nvmeibt_praid *praid, stru
 	return (int8_t)XDLIST_N_ELEMNTS(&(to_report_praid_lot->all_seg_lot_list));
 }
 
-int8_t nvmeibt_praid_append_to_report_to_mgmt(struct nvmeibt_praid *praid, struct nvmeibt_Str *json_payload)
-{
-//	long long int							report_time_diff;
-	int8_t									n_segs_in_report = 0;
-	int										pre_len = nvmeibt_Str_strlen(json_payload);
-
-//	NFIN;
-
-	n_segs_in_report = recalc_praid_report_to_mgmt_json(praid, json_payload);
+int8_t nvmeibt_praid_append_to_report_to_mgmt(struct nvmeibt_praid *praid, struct nvmeibt_Str *json_payload) {
+	const int8_t n_segs_in_report = recalc_praid_report_to_mgmt_json(praid, json_payload);
+	const int pre_len = nvmeibt_Str_strlen(json_payload);
 	NVMEIBT_IMPORTANT_LOGS_DUMP_LEADER_REPORT_LINE_FOR_VOLUME(5vhjsi8, praid->praid_mgmt.its_chunk->its_block_device->from_config.client_blkdev_name,
 															  nvmeibt_Str_str(json_payload) + pre_len);
 	TODO(With KAFKA we would like to give each praid report a praid_id key, so that KAFKA can delete old praid reports. Need to separate them for this);
 	praid_just_did_report_to_mgmt(praid);
-
-//	NFOUT;
 	return n_segs_in_report;
 }
 
@@ -3067,4 +3059,3 @@ int nvmeibt_praid_validate_replacement_segs(struct nvmeibt_praid *praid)
 out:
 	return 0;
 }
-
