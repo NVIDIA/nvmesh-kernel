@@ -23,8 +23,6 @@
 #include "nvmeibt_praid_basics.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_str.h"
-
-#include "nvmeibt_uuid.h"
 #include "nvmeibt_utils.h"
 
 #define JSON_PARSING_ALLOC(name, size) \

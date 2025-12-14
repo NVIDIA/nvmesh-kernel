@@ -191,6 +191,7 @@
 		"nvmeibt_praid.h": "c",
 		"nvmeibt_chunk.h": "c",
 		"nvmeibt_node.h": "c",
-		"nvmeib_jdr.h": "c"
+		"nvmeib_jdr.h": "c",
+		"nvmeibt_msg_queue_api.h": "c"
 	}
 }

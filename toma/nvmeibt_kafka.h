@@ -4,7 +4,6 @@
 #include "nvmeibt_common.h"
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_params.h"
-#include "nvmeibt_uuid.h"
 #include "nvmeibt_ds.h"
 #include "interfaces/nvmeibt_msg_queue_api.h"
 
