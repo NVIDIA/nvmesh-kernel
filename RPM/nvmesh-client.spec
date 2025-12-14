@@ -73,6 +73,7 @@ mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/read_dwarf.py %{buildro
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/the-calculator.py %{buildroot}/opt/nvmesh/common-repo/tools/
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_memmgr_monitor.py %{buildroot}/opt/nvmesh/common-repo/tools/
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_metrics.py %{buildroot}/opt/nvmesh/common-repo/tools/
+mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_client_upgrade_breakdown.py %{buildroot}/opt/nvmesh/common-repo/tools/
 cp -rf %{_builddir}/%{name}/bin_client/* %{buildroot}/usr/bin/
 #backward compatible
 mv -n %{buildroot}/usr/bin/nvmesh_clnt_shutdown.py %{buildroot}/usr/bin/nvmesh_clnt_shutdown
