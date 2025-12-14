@@ -20,8 +20,8 @@
 #include <fcntl.h>
 #include <malloc.h>
 
-#include "nvmeibt_utils.h"
-#include "nvmeibt_str.h"
+#include "utils/nvmeibt_utils.h"
+#include "utils/nvmeibt_str.h"
 
 typedef __CHAR16_TYPE__ char16_t;
 

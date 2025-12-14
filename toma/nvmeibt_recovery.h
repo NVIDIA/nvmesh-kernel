@@ -1,7 +1,6 @@
 #ifndef _NVMEIBT_RECOVERY_H_
 #define _NVMEIBT_RECOVERY_H_
 
-#include "toma/nvmeibt_str.h"
 #include "toma/nvmeibt_disk_segment.h"
 #include "toma/clnt/nvmeibt_client_protocol.h"
 #include "toma/nvmeibt_wq.h"

@@ -115,11 +115,11 @@ $(TDIR)/nvmeibt_recovery.c \
 $(TDIR)/nvmeibt_register.c \
 $(TDIR)/nvmeibt_rpc.c \
 $(TDIR)/nvmeibt_seg_active.c \
-$(TDIR)/nvmeibt_str.c \
+$(TDIR)/utils/nvmeibt_str.c \
 $(TDIR)/nvmeibt_toma.c \
 $(TDIR)/nvmeibt_topo_bin.c \
 $(TDIR)/nvmeibt_topology.c \
-$(TDIR)/nvmeibt_utils.c \
+$(TDIR)/utils/nvmeibt_utils.c \
 $(TDIR)/utils/nvmeibt_uuid.c \
 $(TDIR)/nvmeibt_wq.c \
 $(TDIR)/clnt/nvmeibt_client_protocol.c \
