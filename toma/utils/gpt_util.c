@@ -41,6 +41,46 @@ enum GPT_UTIL_ACTION {
 	ACTION_UPGRADE_GPT			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
 };
 
+// GPT level (Main or Metadata)
+enum GPT_LEVEL {
+	GPT_LEVEL_MAIN = 0,
+	GPT_LEVEL_METADATA
+};
+
+// GPT copy (Primary or Alternate)
+enum GPT_COPY {
+	GPT_COPY_PRIMARY = 0,
+	GPT_COPY_ALTERNATE
+};
+
+// GPT copy option for the execution
+enum GPT_COPY_OPTION {
+	GPT_COPY_OPTION_PRIMARY = 0x1,		// Bit 0
+	GPT_COPY_OPTION_ALTERNATE = 0x2,	// Bit 1
+	GPT_COPY_OPTION_BOTH = 0x3			// Both bits (PRIMARY | ALTERNATE)
+};
+
+// Enum-to-string conversions (ternary for binary choices - better for branch predictor)
+static const char *gpt_level_str(enum GPT_LEVEL level)
+{
+	return (level == GPT_LEVEL_MAIN) ? "main" : "metadata";
+}
+
+static const char *gpt_copy_str(enum GPT_COPY copy)
+{
+	return (copy == GPT_COPY_PRIMARY) ? "primary" : "alternate";
+}
+
+static const char *gpt_copy_option_str(enum GPT_COPY_OPTION option)
+{
+	switch (option) {
+	case GPT_COPY_OPTION_PRIMARY:	return "primary";
+	case GPT_COPY_OPTION_ALTERNATE:	return "alternate";
+	case GPT_COPY_OPTION_BOTH:		return "both";
+	default:						return "unknown";
+	}
+}
+
 // Configuration structure for gpt_util operation
 struct gpt_util_config {
 	// Action
@@ -55,7 +95,7 @@ struct gpt_util_config {
 	int						pblk_size;
 
 	// Display/export options
-	char					gpt_copy_option[16];	// primary|alternate|both (for both display and export)
+	enum GPT_COPY_OPTION	gpt_copy_option;		// primary|alternate|both (for both display and export)
 
 	// Filtering options
 	char					filter_uuid_str[64];	// Filter by UUID (empty = no filter)
@@ -160,21 +200,22 @@ static void free_gpt_buffers(struct gpt_buffers *bufs)
 	NNVMEIBT_BM_FREE(trace_gpt_buf_cleanup_alt_ent, bufs->alternate_entries);
 }
 
-/**
- * Export one GPT copy to JSON (helper function)
- */
-static void export_gpt_copy_entries_to_json(const char *copy_name,
-											  const struct nvmeibt_disk_gpt_header *header,
-											  const struct nvmeibt_disk_gpt_partition_entry *entries,
-											  int max_n_entries,
-											  struct nvmeibt_Str *json_output,
-											  BOOL is_last_section)
+// Export one GPT copy to JSON (helper function)
+static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
+											enum GPT_COPY copy,
+											const struct nvmeibt_disk_gpt_header *header,
+											const struct nvmeibt_disk_gpt_partition_entry *entries,
+											int max_n_entries,
+											struct nvmeibt_Str *json_output,
+											BOOL is_last_section)
 {
 	struct nvmeibt_urn_uuid	urn_uuid;
 	int						i;
 	int						entry_count = 0;
 
-	nvmeibt_Str_sprintf(json_output, "  \"main_gpt_%s\": {\n", copy_name);
+	// Build section name from enums using helper functions
+	nvmeibt_Str_sprintf(json_output, "  \"%s_gpt_%s\": {\n",
+						gpt_level_str(level), gpt_copy_str(copy));
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&header->disk_obj_uuid);
 	nvmeibt_Str_sprintf(json_output, "    \"disk_uuid\": \"%s\",\n", urn_uuid.str);
 	nvmeibt_Str_sprintf(json_output, "    \"n_partition_entries\": %d,\n", header->n_partition_entries);
@@ -221,16 +262,28 @@ static int export_gpt_to_json(int disk_fd,
 	int										rv = -1;
 	struct nvmeibt_Str						*json_output = NULL;
 	struct nvmeibt_disk_gpt					temp_gpt;
+	struct nvmeibt_disk_gpt					main_gpt_for_metadata;
+	struct nvmeibt_disk_mbr					mbr;
 	struct gpt_buffers						bufs;
+	struct gpt_buffers						metadata_bufs;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_metadata_partition = NULL;
+	struct nvmeibt_disk_metadata			disk_md;
 	enum GPT_VALIDITY						primary_header_validity;
 	enum GPT_VALIDITY						alternate_header_validity;
 	enum GPT_VALIDITY						primary_entries_validity;
 	enum GPT_VALIDITY						alternate_entries_validity;
+	enum GPT_VALIDITY						meta_primary_header_validity;
+	enum GPT_VALIDITY						meta_alternate_header_validity;
+	enum GPT_VALIDITY						meta_primary_entries_validity;
+	enum GPT_VALIDITY						meta_alternate_entries_validity;
 	time_t									now;
 	char									timestamp[64];
 	int										output_fd = -1;
 	BOOL									is_mismatch = false;
 	BOOL									has_overlaps = false;
+	BOOL									has_metadata_gpt = false;
+	BOOL									has_device_identifiers = false;
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
@@ -251,7 +304,7 @@ static int export_gpt_to_json(int disk_fd,
 		bufs.primary_entries, bufs.alternate_entries);
 
 	// Detect mismatch (only if exporting both copies)
-	if (strcmp(config->gpt_copy_option, "both") == 0 &&
+	if (config->gpt_copy_option == GPT_COPY_OPTION_BOTH &&
 		primary_header_validity == GPT_VALIDITY_OK && alternate_header_validity == GPT_VALIDITY_OK &&
 		primary_entries_validity == GPT_VALIDITY_OK && alternate_entries_validity == GPT_VALIDITY_OK) {
 		BOOL is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(bufs.primary_header, bufs.alternate_header);
@@ -261,21 +314,21 @@ static int export_gpt_to_json(int disk_fd,
 		is_mismatch = is_header_mismatch || is_entries_mismatch;
 	}
 
-	// Detect overlaps in exported entries
-	if (strcmp(config->gpt_copy_option, "both") != 0) {
-		// Single copy - check for overlaps
-		const struct nvmeibt_disk_gpt_partition_entry *entries_to_check =
-			(strcmp(config->gpt_copy_option, "primary") == 0) ? bufs.primary_entries : bufs.alternate_entries;
-		has_overlaps = (detect_overlaps(entries_to_check, temp_gpt.max_n_entries) > 0);
-	} else {
-		// Both copies - check both for overlaps
-		has_overlaps = (detect_overlaps(bufs.primary_entries, temp_gpt.max_n_entries) > 0) ||
-					   (detect_overlaps(bufs.alternate_entries, temp_gpt.max_n_entries) > 0);
+	// Detect overlaps in exported entries (check each bit)
+	if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
+		has_overlaps = (detect_overlaps(bufs.primary_entries, temp_gpt.max_n_entries) > 0);
+	}
+	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
+		has_overlaps = has_overlaps || (detect_overlaps(bufs.alternate_entries, temp_gpt.max_n_entries) > 0);
 	}
 
 	// Get timestamp
 	time(&now);
 	strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+
+	// Read pMBR
+	memset(&mbr, 0, sizeof(mbr));
+	nvmeibt_disk_metadata_read_mbr_blk(NULL, disk_fd, config->pblk_size, &mbr, config->device_path, NULL);
 
 	// Start JSON with metadata
 	nvmeibt_Str_sprintf(json_output, "{\n");
@@ -284,28 +337,103 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "  \"_human_edited\": false,\n");
 	nvmeibt_Str_sprintf(json_output, "  \"_recalculate_crc\": false,\n");
 	nvmeibt_Str_sprintf(json_output, "  \"_mismatch_detected\": %s,\n", is_mismatch ? "true" : "false");
-	nvmeibt_Str_sprintf(json_output, "  \"_overlaps_detected\": %s", has_overlaps ? "true" : "false");
+	nvmeibt_Str_sprintf(json_output, "  \"_overlaps_detected\": %s,\n", has_overlaps ? "true" : "false");
 
-	// Export based on --gpt-copy option
-	if (strcmp(config->gpt_copy_option, "primary") == 0) {
-		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("primary", bufs.primary_header, bufs.primary_entries,
-										temp_gpt.max_n_entries, json_output, true);
-	} else if (strcmp(config->gpt_copy_option, "alternate") == 0) {
-		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("alternate", bufs.alternate_header, bufs.alternate_entries,
-										temp_gpt.max_n_entries, json_output, true);
-	} else {
-		// both
-		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("primary", bufs.primary_header, bufs.primary_entries,
-										temp_gpt.max_n_entries, json_output, false);
-		nvmeibt_Str_sprintf(json_output, ",\n");
-		export_gpt_copy_entries_to_json("alternate", bufs.alternate_header, bufs.alternate_entries,
-										temp_gpt.max_n_entries, json_output, true);
+	memset(&main_gpt_for_metadata, 0, sizeof(main_gpt_for_metadata));
+	nvmeibt_strlcpy(main_gpt_for_metadata.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt_for_metadata.main_or_metadata));
+
+	// Check if metadata GPT exists first (determines is_last_section for later exports)
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &main_gpt_for_metadata,
+										  config->pba_s, config->pba_hw_e, false) == 0) {
+		metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt_for_metadata);
+		has_metadata_gpt = (metadata_partition != NULL);
 	}
 
-	nvmeibt_Str_sprintf(json_output, "}\n");
+	// Export pMBR
+	nvmeibt_Str_sprintf(json_output, "  \"pmbr\": {\n");
+	nvmeibt_Str_sprintf(json_output, "    \"signature\": \"0x%04x\",\n", mbr.signature);
+	nvmeibt_Str_sprintf(json_output, "    \"os_type\": \"0x%02x\",\n", mbr.partitions[0].os_type);
+	nvmeibt_Str_sprintf(json_output, "    \"pba_s\": %d,\n", mbr.partitions[0].pba_s);
+	nvmeibt_Str_sprintf(json_output, "    \"n_pblk\": %d\n", mbr.partitions[0].n_pblk);
+	nvmeibt_Str_sprintf(json_output, "  }");
+
+	// Export Main GPT based on --gpt-copy option
+	nvmeibt_Str_sprintf(json_output, ",\n");
+	if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
+		BOOL is_last = !(config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) && !has_metadata_gpt;
+		export_gpt_copy_entries_to_json(GPT_LEVEL_MAIN, GPT_COPY_PRIMARY,
+										bufs.primary_header, bufs.primary_entries,
+										temp_gpt.max_n_entries, json_output, is_last);
+	}
+	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
+		BOOL is_last = !has_metadata_gpt;
+		export_gpt_copy_entries_to_json(GPT_LEVEL_MAIN, GPT_COPY_ALTERNATE,
+										bufs.alternate_header, bufs.alternate_entries,
+										temp_gpt.max_n_entries, json_output, is_last);
+	}
+
+	// Export Metadata GPT (if exists)
+	if (has_metadata_gpt) {
+		struct nvmeibt_disk_gpt	metadata_temp_gpt;
+
+		alloc_gpt_buffers(&metadata_bufs, config->pblk_size, MAX_NUM_GPT_ENTRIES);
+		memset(&metadata_temp_gpt, 0, sizeof(metadata_temp_gpt));
+		metadata_temp_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
+		nvmeibt_strlcpy(metadata_temp_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_temp_gpt.main_or_metadata));
+
+		// Read all 4 Metadata GPT structures
+		nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
+			NULL, disk_fd, config->pblk_size, &metadata_temp_gpt,
+			metadata_partition->pba_s, metadata_partition->pba_e,
+			&meta_primary_header_validity, &meta_alternate_header_validity,
+			&meta_primary_entries_validity, &meta_alternate_entries_validity,
+			metadata_bufs.primary_header, metadata_bufs.alternate_header,
+			metadata_bufs.primary_entries, metadata_bufs.alternate_entries);
+
+		// Try to read disk metadata for serial ID/NGUID first (to know if we need it)
+		disk_metadata_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_temp_gpt);
+		if (disk_metadata_partition) {
+			uint64_t pbyte_s = disk_metadata_partition->pba_s * config->pblk_size;
+
+			memset(&disk_md, 0, sizeof(disk_md));
+			if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
+														 pbyte_s, &disk_md) == 0) {
+				has_device_identifiers = true;
+			}
+		}
+
+		// Export Metadata GPT
+		if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
+			BOOL is_last = !(config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) && !has_device_identifiers;
+			export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_PRIMARY,
+											metadata_bufs.primary_header,
+											metadata_bufs.primary_entries,
+											metadata_temp_gpt.max_n_entries, json_output, is_last);
+		}
+		if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
+			BOOL is_last = !has_device_identifiers;
+			export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_ALTERNATE,
+											metadata_bufs.alternate_header,
+											metadata_bufs.alternate_entries,
+											metadata_temp_gpt.max_n_entries, json_output, is_last);
+		}
+
+		// Export device identifiers (if available)
+		if (has_device_identifiers) {
+			struct nvmeibt_urn_uuid nguid_urn;
+
+			nvmeibt_Str_sprintf(json_output, "  \"device_identifiers\": {\n");
+			nvmeibt_Str_sprintf(json_output, "    \"serial_id\": \"%s\",\n", disk_md.native_serial_str);
+
+			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md.native_nguid_unused);
+			nvmeibt_Str_sprintf(json_output, "    \"nguid\": \"%s\"\n", nguid_urn.str);
+			nvmeibt_Str_sprintf(json_output, "  }");
+		}
+
+		free_gpt_buffers(&metadata_bufs);
+	}
+
+	nvmeibt_Str_sprintf(json_output, "\n}\n");
 
 	// Write JSON to file
 	output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -322,9 +450,14 @@ static int export_gpt_to_json(int disk_fd,
 	// Mark file persistent BEFORE closing (sandbox: prevents auto-deletion)
 	SELF_TEST_mark_file_persistent(output_file);
 
-	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR",
-		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), config->gpt_copy_option);
+	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT",
+		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt);
 	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
+	if (has_metadata_gpt) {
+		fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, Device Identifiers\n");
+	} else {
+		fprintf(stdout, "  - Exported: pMBR, Main GPT (no Metadata GPT found)\n");
+	}
 
 	// Warn if mismatch or overlaps detected
 	if (is_mismatch) {
@@ -948,7 +1081,7 @@ static void display_gpt_one_copy(const char *gpt_level,
  * Read and display GPT copies (primary and/or alternate) for one GPT level
  */
 static void display_gpt_copies_one_level(const char *gpt_level,
-										 const char *gpt_copy_option,
+										 enum GPT_COPY_OPTION gpt_copy_option,
 										 int disk_fd,
 										 int pblk_size,
 										 uint64_t pba_s,
@@ -1000,21 +1133,14 @@ static void display_gpt_copies_one_level(const char *gpt_level,
 	is_mismatch = (is_header_mismatch || is_entries_mismatch);
 
 	// Display based on --gpt-copy option
-	if (strcmp(gpt_copy_option, "both") == 0) {
+	if (gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
 		display_gpt_one_copy(gpt_level, "Primary", primary_header_validity,
 						primary_entries_validity, bufs.primary_entries, temp_gpt.max_n_entries,
 						is_mismatch, config);
+	}
+	if (gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
 		display_gpt_one_copy(gpt_level, "Alternate", alternate_header_validity,
 						alternate_entries_validity, bufs.alternate_entries, temp_gpt.max_n_entries,
-						is_mismatch, config);
-	} else if (strcmp(gpt_copy_option, "alternate") == 0) {
-		display_gpt_one_copy(gpt_level, "Alternate", alternate_header_validity,
-						alternate_entries_validity, bufs.alternate_entries, temp_gpt.max_n_entries,
-						is_mismatch, config);
-	} else {
-		// primary (default)
-		display_gpt_one_copy(gpt_level, "Primary", primary_header_validity,
-						primary_entries_validity, bufs.primary_entries, temp_gpt.max_n_entries,
 						is_mismatch, config);
 	}
 
@@ -1031,7 +1157,7 @@ static void display_gpt_copies_one_level(const char *gpt_level,
  * @param pblk_size     Physical block size
  * @param pba_s         Start PBA
  * @param pba_hw_e      Hardware end PBA
- * @param gpt_copy_option  "primary", "alternate", or "both"
+ * @param gpt_copy_option  Which copy to display (primary, alternate, or both)
  * @param dev_name      Device name for error messages
  * @param fix_gpt       Whether to attempt GPT fix
  * @param config        Config for filtering (can be NULL for no filtering)
@@ -1041,7 +1167,7 @@ static int display_all_gpts(int disk_fd,
 							int pblk_size,
 							uint64_t pba_s,
 							uint64_t pba_hw_e,
-							const char *gpt_copy_option,
+							enum GPT_COPY_OPTION gpt_copy_option,
 							const char *dev_name,
 							BOOL fix_gpt,
 							const struct gpt_util_config *config)
@@ -1630,15 +1756,18 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 					LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 			break;
 		case 'c':
-			nvmeibt_strlcpy(config->gpt_copy_option, optarg, sizeof(config->gpt_copy_option));
-			if (strcmp(config->gpt_copy_option, "primary") != 0 &&
-				strcmp(config->gpt_copy_option, "alternate") != 0 &&
-				strcmp(config->gpt_copy_option, "both") != 0) {
-				N_Ef(parse_invalid_gpt_copy, "Invalid --gpt-copy value @STR (use: primary|alternate|both)", config->gpt_copy_option);
+			if (strcmp(optarg, "primary") == 0) {
+				config->gpt_copy_option = GPT_COPY_OPTION_PRIMARY;
+			} else if (strcmp(optarg, "alternate") == 0) {
+				config->gpt_copy_option = GPT_COPY_OPTION_ALTERNATE;
+			} else if (strcmp(optarg, "both") == 0) {
+				config->gpt_copy_option = GPT_COPY_OPTION_BOTH;
+			} else {
+				N_Ef(parse_invalid_gpt_copy, "Invalid --gpt-copy value @STR (use: primary|alternate|both)", optarg);
 				rv = -1;
 				goto out;
 			}
-			fprintf(stdout, "GPT copy selection: %s\n", config->gpt_copy_option);
+			fprintf(stdout, "GPT copy selection: %s\n", gpt_copy_option_str(config->gpt_copy_option));
 			break;
 		case 'u':
 			nvmeibt_strlcpy(config->filter_uuid_str, optarg, sizeof(config->filter_uuid_str));
@@ -1712,16 +1841,6 @@ static int validate_config(struct gpt_util_config *config)
 	if (config->device_path[0] == '\0') {
 		N_Ef(validate_no_device, "Must specify device with -d or -a");
 		return -1;
-	}
-
-	// For display GPT action, validate gpt_copy_option
-	if (config->action == ACTION_DISPLAY_GPT) {
-		if (strcmp(config->gpt_copy_option, "primary") != 0 &&
-			strcmp(config->gpt_copy_option, "alternate") != 0 &&
-			strcmp(config->gpt_copy_option, "both") != 0) {
-			N_Ef(validate_bad_gpt_copy, "Invalid gpt_copy_option=@STR", config->gpt_copy_option);
-			return -1;
-		}
 	}
 
 	return 0;
@@ -2127,7 +2246,7 @@ static int execute_export_json(int disk_fd, struct gpt_util_config *config)
 {
 	int		rv;
 
-	fprintf(stdout, "\nExporting GPT to JSON...\n");
+	fprintf(stdout, "\nExporting GPT to JSON (copy=%s)...\n", gpt_copy_option_str(config->gpt_copy_option));
 
 	rv = export_gpt_to_json(disk_fd, config, config->output_json_file);
 
@@ -2392,7 +2511,7 @@ static int run_gpt_util_op(int argc, char *argv[])
 	// Initialize config with defaults
 	memset(&config, 0, sizeof(config));
 	config.action = ACTION_DISPLAY_GPT;		// Default action
-	nvmeibt_strlcpy(config.gpt_copy_option, "primary", sizeof(config.gpt_copy_option));
+	config.gpt_copy_option = GPT_COPY_OPTION_PRIMARY;
 
 	if (argc < 2) {
 		print_usage(argv);
