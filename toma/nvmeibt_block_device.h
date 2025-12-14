@@ -81,15 +81,12 @@ static inline const char *nvmeibt_blkdev_name(const struct nvmeibt_block_device 
 	return (block_device ? block_device->from_config.client_blkdev_name : "???");
 }
 
-static inline BOOL nvmeibt_blkdev_is_being_deleted(struct nvmeibt_block_device *blkdev)
-{
+static inline bool nvmeibt_blkdev_is_being_deleted(const struct nvmeibt_block_device *blkdev) {
 	return (!blkdev || blkdev->is_being_deleted);
 }
 
-void nvmeibt_block_device_mark_conf_corrupted(struct nvmeibt_block_device *blkdev);
-
-BOOL nvmeibt_block_device_is_deprecated_in_config(struct nvmeibt_block_device *block_device);
-const union nvmeib_uuid *nvmeibt_block_device_UUID(struct nvmeibt_block_device *block_device);
+bool nvmeibt_block_device_is_deprecated_in_config( const struct nvmeibt_block_device *block_device);
+const union nvmeib_uuid *nvmeibt_block_device_UUID(const struct nvmeibt_block_device *block_device);
 const char *nvmeibt_block_device_id_str(const struct nvmeibt_block_device *block_device);
 enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config_tag, struct nvmeibt_block_device **output_block_device, bool is_topo_config);
 struct nvmeibt_block_device *nvmeibt_block_device_get_block_device_by_id(const union nvmeib_uuid *block_device_id);
