@@ -87,7 +87,7 @@ CMDIR= ./../../common
 # Production code: /toma/, Generated with 'ls -1a *.c'
 SOURCES += \
 $(TDIR)/vol/nvmeibt_block_device.c \
-$(TDIR)/nvmeibt_bm.c \
+$(TDIR)/utils/nvmeibt_bm.c \
 $(TDIR)/vol/nvmeibt_chunk.c \
 $(TDIR)/nvmeibt_common.c \
 $(TDIR)/nvmeibt_debug.c \

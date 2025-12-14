@@ -205,7 +205,7 @@ struct nvmeibt_initiator_ctx {
 int nvmeibt_nonblock_fd(int fd);
 int nvmeibt_fd_set_blocking(int fd, int blocking);
 
-#include "nvmeibt_bm.h"
+#include "utils/nvmeibt_bm.h"
 static inline void *nvmeibt_toma_malloc(size_t size)
 	{void *p; p = malloc((size)); if (!p) {nvmeibt_abort(ES_FATAL);} return p;}
 static inline void *nvmeibt_toma_calloc(size_t nmemb, size_t size)

@@ -1,7 +1,7 @@
 #ifndef NVMEIBT_BM_H
 #define NVMEIBT_BM_H
 
-/* Buffer Manager */
+/* Buffer Manager (Internal memory allocation, Todo: May just replacing it with malloc improves results) */
 
 int nvmeibt_bm_create(void);
 void nvmeibt_bm_destroy(void);

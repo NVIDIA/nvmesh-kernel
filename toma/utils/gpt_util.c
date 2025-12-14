@@ -13,7 +13,7 @@
 
 #include "../nvmeibt_debug.h"
 #include "../nvmeibt_disk_metadata.h"
-#include "../nvmeibt_bm.h"
+#include "nvmeibt_bm.h"
 #include "../nvmeibt_read_config.h"
 #include "../nvmeibt_str.h"
 #include "../nvmeibt_local_disk.h"
