@@ -2978,6 +2978,8 @@ int nvmeibs_serjio_disk_init(struct nvmeibs_disk_info *di)
 		_NE(error_serjio_nvmeibs_serjio_disk_init, "SERJIO FATAL: empty disk info of disk @DISK_ID_STR", nvmeibs_disk_info_get_disk_id(di));
 		goto out;
 	}
+#ifndef BLKDEV_SIMULATOR
+	/* Not relevant for simulator */
 	if (nvmeibs_disk_info_has_mtdt_extd(di)) {
 		_NE(error_serjio_nvmeibs_serjio_disk_init_md_extd, "SERJIO FATAL: disk @DISK_ID_STR has extended MD which is not supported",
 		    nvmeibs_disk_info_get_disk_id(di));
@@ -2990,6 +2992,7 @@ int nvmeibs_serjio_disk_init(struct nvmeibs_disk_info *di)
 		ret = -ENOTSUPP;
 		goto out;
 	}
+#endif
 	/* Init serjio private data struct */
 	if (!(serjio_pd = kzalloc(sizeof(*serjio_pd), GFP_KERNEL))) {
 		_NE(error_1_serjio_nvmeibs_serjio_disk_init, "SERJIO FATAL: Memory Allocation Error");
@@ -3299,10 +3302,13 @@ enum nvmeibs_serjio_status nvmeibs_serjio_get_status(struct nvmeibs_disk_info *d
 		rv = NVMEIBS_SERJIO_STATUS_NO_MD;
 		goto out;
 	}
+#ifndef BLKDEV_SIMULATOR
+	/* Not relevant for simulator */
 	if (nvmeibs_disk_info_has_mtdt_extd(di) || di->block_size != NVMEIBC_SECTOR_SIZE) {
 		rv = NVMEIBS_SERJIO_STATUS_NOT_SUPP;
 		goto out;
 	}
+#endif
 
 	if (!serjio_pd) {
 		_NT(trace_serjio_nvmeibs_serjio_get_state, "SERJIO: Disk has NULL serjio_pd");
