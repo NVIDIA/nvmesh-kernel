@@ -6,7 +6,6 @@
 #include "nvmeibt_common.h"
 #include "interfaces/network/network_incs.h"
 #include "nvmeibt_important_logs.h"
-#include "interfaces/log/nvmeibt_dumper.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_disk_metadata.h"
 #include "nvmeibt_ds_metadata.h"

@@ -114,28 +114,6 @@ endif
 
 COMPILER_DEFINES_nvmeibt_toma += GIT_COMMIT_ID=\"$(GIT_COMMIT_ID)\" GIT_BRANCH=\"$(BRANCH_NAME)\" BUILD_VERSION_FOR_MGMT=\"$(VERSION)-$(RELEASE)\" BUILD_NUMBER_FOR_MGMT=\"$(BUILD_NUMBER)\"
 
-ifeq (0, 1)	# Comment out TOMA REPLAY alltogether
-	# nvmeibt_toma_replay specifics...
-	#
-	# the binary name
-	BINS += nvmeibt_toma_replay
-	# the source directories, space separated
-	PROJECT_DIRS_nvmeibt_toma_replay = $(PROJECT_DIRS_nvmeibt_toma)
-	# shared with kernel dirs...
-	SHARED_DIRS_nvmeibt_toma_replay = $(SHARED_DIRS_nvmeibt_toma)
-	# files we would like to exclude from the above dir list
-	PROJECT_DIRS_EXCLUDES_nvmeibt_toma_replay = $(PROJECT_DIRS_EXCLUDES_nvmeibt_toma)
-	# the binary compiler defines
-	COMPILER_DEFINES_nvmeibt_toma_replay = $(COMPILER_DEFINES_nvmeibt_toma)
-	COMPILER_DEFINES_nvmeibt_toma_replay += TOMA_REPLAY
-	# the binary header dires - thise we add with the -I
-	HEADERS_nvmeibt_toma_replay = $(HEADERS_nvmeibt_toma)
-	# the linker defines - currently only pthread but we may also e.g. static
-	LINKER_DEFINES_nvmeibt_toma_replay = $(LINKER_DEFINES_nvmeibt_toma)
-	# external libraries we would link with
-	LDLIBS_DEFINES_nvmeibt_toma_replay = $(LDLIBS_DEFINES_nvmeibt_toma)
-endif
-
 LINKER_CMDS_nvmeibt_toma_replay = $(LINKER_CMDS_nvmeibt_toma)
 
 # End of user stuff - below this line it is all internal.

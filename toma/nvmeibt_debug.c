@@ -4,17 +4,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <execinfo.h>
-
 #include <linux/types.h>
 #include <time.h>
 #include <syslog.h>
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <inttypes.h>
-
-#include "interfaces/log/nvmeibt_dumper.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_topology.h"

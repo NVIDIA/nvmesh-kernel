@@ -25,7 +25,6 @@
 #include "nvmeibt_raft.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_toma.h"
-#include "interfaces/log/nvmeibt_dumper.h"
 #include "interfaces/nvme/nvmeibt_udev.h"
 #include "nvmeibt_recovery.h"
 #include "clnt/nvmeibt_client.h"
@@ -3237,7 +3236,6 @@ exit:
 	return rv;
 }
 
-#if !defined(TOMA_REPLAY)
 extern int gpt_util_main(int argc, char *argv[]);
 
 struct {
@@ -3273,5 +3271,4 @@ int main(int argc, char *argv[]) {
 	// will call "run()" for main toma
 	return toma_subprogs[subprog].func(argc-arg_shift, argv+arg_shift);
 }
-#endif
 
