@@ -377,7 +377,7 @@ static RP_RETURN_TYPE __read_partitions_work(RP_ARG_TYPE *param)
 	struct work_struct *_work = (struct work_struct *)param;
 	struct _read_part_t *rp = container_of(_work, struct _read_part_t, work);
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
-	const BLK_MODE_T mode = FMODE_READ|FMODE_LSEEK|FMODE_PREAD|FMODE_PWRITE; // 0x1d //FMODE_NDELAY| FMODE_WRITE;
+	const BLK_MODE_T mode = BLK_OPEN_READ | BLK_OPEN_WRITE;
 	struct file *bdev_file = __get_safe_kern_dev(rp->path, mode);
 	struct block_device *bdev = __is_kernel_dev_err(bdev_file) ? (void *)bdev_file : file_bdev(bdev_file);
 #elif KS_HAS_BDEV_OPEN_BY_PATH
