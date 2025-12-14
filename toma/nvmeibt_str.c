@@ -1,27 +1,18 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
-
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
 #include "nvmeibt_str.h"
 
-/************************  nvmeibt_str ***************/
-
-//#define two_mebibyte 2097000
-#define hundred_mebibyte (100*1024*1024) 		// Added due to scale branch
-
-static inline size_t Str_get_allocated_size(const struct nvmeibt_Str *this)
-{
+static inline size_t Str_get_allocated_size(const struct nvmeibt_Str *this) {
 	return this->allocated_size;
 }
 
-#define N_VERIFY_SIZE(name, this) NTOMA_ASSERT(name, Str_get_allocated_size(this) < hundred_mebibyte,	\
-											   "nvmeibt_str->allocated_size=@SIZEOF",					\
-									           Str_get_allocated_size(this));
+#define N_VERIFY_SIZE(name, this) \
+	NTOMA_ASSERT(name, Str_get_allocated_size(this) < (100 << 20), "nvmeibt_str->allocated_size=@SIZEOF", Str_get_allocated_size(this));
 
-void nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src)
-{
+void nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src) {
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_clone, dst);
 	if (dst != src) {
 		nvmeibt_Str_strcpy(dst, nvmeibt_Str_str(src));
@@ -29,8 +20,7 @@ void nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src)
 	N_VERIFY_SIZE(error_1_str_nvmeibt_Str_clone, dst);
 }
 
-void nvmeibt_Str_chop_last_char(struct nvmeibt_Str *this)
-{
+void nvmeibt_Str_chop_last_char(struct nvmeibt_Str *this) {
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_chop_last_char, this);
 	if (this->str_len >= 1) {
 		--(this->str_len);
@@ -39,80 +29,64 @@ void nvmeibt_Str_chop_last_char(struct nvmeibt_Str *this)
 }
 
 int nvmeibt_Str_strcmp(const struct nvmeibt_Str *str_ctx1,
-					   const struct nvmeibt_Str *str_ctx2)
-{
+					   const struct nvmeibt_Str *str_ctx2) {
 	return strcmp(nvmeibt_Str_str(str_ctx1), nvmeibt_Str_str(str_ctx2));
 }
 
-void nvmeibt_Str_reuse(struct nvmeibt_Str *this)
-{
-	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_reuse, this);
+void nvmeibt_Str_reuse(struct nvmeibt_Str *this) {
 	if (nvmeibt_Str_strlen(this)) {
 		this->str_len = 0;
 		*(this->text_buf) = '\0';
 	}
 }
 
-size_t nvmeibt_Str_strlen(const struct nvmeibt_Str *this)
-{
+size_t nvmeibt_Str_strlen(const struct nvmeibt_Str *this) {
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_strlen, this);
 	return this->str_len;
 }
 
-const char *nvmeibt_Str_str(const struct nvmeibt_Str *this)
-{
+const char *nvmeibt_Str_str(const struct nvmeibt_Str *this) {
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_str, this);
 	return this->text_buf ? this->text_buf : "\0";
 }
 
-static inline char *_nvmeibt_Str_str(struct nvmeibt_Str *this)
-{
+static inline char *_nvmeibt_Str_str(struct nvmeibt_Str *this) {
 	return this->text_buf;
 }
 
 /* NOTE: appends the output to the existing content in the buffer */
-int nvmeibt_Str_sprintf(struct nvmeibt_Str *this, const char *format, ...)
-{
+int nvmeibt_Str_sprintf(struct nvmeibt_Str *this, const char *format, ...) {
 	va_list     arglist;
-	size_t      size_needed, len, allocated_size;
-	BOOL        is_enough_allocated;
-	size_t      new_size;
-
+	size_t      size_needed;
+	bool        is_enough_allocated;
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_sprintf, this);
 	do {
-		allocated_size = Str_get_allocated_size(this);
-		len = nvmeibt_Str_strlen(this);
-
+		const size_t allocated_size = Str_get_allocated_size(this);
+		const size_t len = nvmeibt_Str_strlen(this);
 		va_start(arglist, format);
-		size_needed = vsnprintf(_nvmeibt_Str_str(this) + len,\
-							   allocated_size - len, format, arglist) + 1;
+		size_needed = vsnprintf(_nvmeibt_Str_str(this) + len, allocated_size - len, format, arglist) + 1;
 		va_end(arglist);
 
 		is_enough_allocated = (len + size_needed <= allocated_size);
 		if (!is_enough_allocated) {
-			new_size = (len + size_needed + 1) * 110 / 100;  // 10% larger
+			const size_t new_size = (len + size_needed + 1) * 110 / 100;  // 10% larger
 			this->text_buf = NNVMEIBT_BM_REALLOC(trace_str_nvmeibt_Str_sprintf, this->text_buf, new_size);
 			this->allocated_size = new_size;
 		}
 	} while (!is_enough_allocated);
 
 	this->str_len += size_needed - 1;
-
 	N_VERIFY_SIZE(error_1_str_nvmeibt_Str_sprintf, this);
-
 	return size_needed - 1;
 }
 
 /* NOTE: appends the output to the existing content in the buffer */
-int nvmeibt_Str_strncat(struct nvmeibt_Str *this, const char *str, size_t size)
-{
+int nvmeibt_Str_strncat(struct nvmeibt_Str *this, const char *str, size_t size) {
 	size_t		size_needed, len, allocated_size;
 	BOOL		is_enough_allocated;
 	size_t		new_size;
-
-	if (!str) {
-		goto out;
-	}
+	if (!str)
+		return 0;
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_strncat, this);
 	allocated_size = Str_get_allocated_size(this);
 	len = nvmeibt_Str_strlen(this);
@@ -123,62 +97,48 @@ int nvmeibt_Str_strncat(struct nvmeibt_Str *this, const char *str, size_t size)
 		new_size = (len + size_needed + 1) * 110 / 100;	// 10% larger
 		this->text_buf = NNVMEIBT_BM_REALLOC(trace_str_nvmeibt_Str_strncat, this->text_buf, new_size);
 		this->allocated_size = new_size;
-		// _IMf("REALLOC(%zd) max=%zd\n", new_size, max);
 	}
 
 	nvmeibt_strlcpy(_nvmeibt_Str_str(this) + len, str, size_needed);
-
 	this->str_len += size_needed - 1;
-
 	N_VERIFY_SIZE(error_1_str_nvmeibt_Str_strncat, this);
-out:
 	return 0;
 }
 
 /* NOTE: appends the output to the existing content in the buffer */
-int nvmeibt_Str_strcat(struct nvmeibt_Str *this, const char *str)
-{
+int nvmeibt_Str_strcat(struct nvmeibt_Str *this, const char *str) {
 	return nvmeibt_Str_strncat(this, str, SIZE_MAX);
 }
 
 /* NOTE: appends the input to the existing content in the buffer */
-ssize_t _Str_fread(struct nvmeibt_Str *this, int fd)
-{
-	ssize_t		nread;
+ssize_t _Str_fread(struct nvmeibt_Str *this, int fd) {
 	char		*buf;
 	int			n_read_total = 0;
-	size_t		buffer_size = 16 * PAGE_SIZE;
+	const size_t buffer_size = 16 * PAGE_SIZE;
 
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_1_str_Str_fread, this);
-
 	buf = NNVMEIBT_BM_ALIGNED_ALLOC(trace_1_str_Str_fread, PAGE_SIZE, buffer_size);
-
-	do {
-		nread = NNVMEIBT_PREAD(warn_str_Str_fread, fd, buf, buffer_size, n_read_total, false);
+	while (true) {
+		const ssize_t nread = NNVMEIBT_PREAD(warn_str_Str_fread, fd, buf, buffer_size, n_read_total, false);
 		if (nread > 0) {
 			nvmeibt_Str_strncat(this, buf, nread);
 			n_read_total += nread;
-		}
-		else {
+		} else {
 			if (nread < 0) {
 				N_Ef(error_2_str_Str_fread, "Error reading from fd=@FD, @AUTO_ERRNO",  fd);
 				n_read_total = -1;
 			}
+			break;
 		}
-	} while (nread > 0);
-
+	};
 	NNVMEIBT_BM_FREE(trace_2_str_Str_fread, buf);
 	return n_read_total;
 }
 
-ssize_t nvmeibt_str_read_from_pipe_fd(struct nvmeibt_Str *this, int fd, const char* pipe_name)
-{
+ssize_t nvmeibt_str_read_from_pipe_fd(struct nvmeibt_Str *this, int fd, const char* pipe_name) {
 	ssize_t		read_max_size;
 	ssize_t		nread;
-	ssize_t		orig_len;
-
-	N_VERIFY_NVMEIBT_STR_INITIALIZED(ecrs93l, this);
-	orig_len = nvmeibt_Str_strlen(this);
+	ssize_t		orig_len = nvmeibt_Str_strlen(this);
 	do {
 		read_max_size = nvmeibt_Str_strlen(this) + 1000;
 		NNVMEIBT_STR_RESIZE_BUF(vsghdje, this, max(Str_get_allocated_size(this), nvmeibt_Str_strlen(this) + read_max_size + 1));
@@ -197,20 +157,15 @@ ssize_t nvmeibt_str_read_from_pipe_fd(struct nvmeibt_Str *this, int fd, const ch
 }
 
 
-ssize_t _Str_fread_atomic(struct nvmeibt_Str *this, int fd)
-{
+ssize_t _Str_fread_atomic(struct nvmeibt_Str *this, int fd) {
 	ssize_t		nread;
-	size_t		text_buf_preloaded_len;	// existing content (if any)
-	ssize_t		free_space_len;
-	size_t		buffer_size = 4 * PAGE_SIZE;
-
-	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_1_str_Str_fread_atomic, this);
-	text_buf_preloaded_len = nvmeibt_Str_strlen(this);
+	size_t		text_buf_preloaded_len = nvmeibt_Str_strlen(this);
+	const size_t	buffer_size = 4 * PAGE_SIZE;
 	NNVMEIBT_STR_RESIZE_BUF(t_zzz_23, this, max(Str_get_allocated_size(this), buffer_size));
 	// iterate with increasing buf size until all data is read in one shot
 	while (1) {
+		const ssize_t free_space_len = Str_get_allocated_size(this) - text_buf_preloaded_len - 1;
 		N_VERIFY_SIZE(error_2_str_Str_fread_atomic, this);
-		free_space_len = Str_get_allocated_size(this) - text_buf_preloaded_len - 1;
 		nread = NNVMEIBT_PREAD_ATOMIC(t_zzz_24, fd,
 									  (char *)nvmeibt_Str_str(this) + text_buf_preloaded_len,
 									  free_space_len, (off_t)0, false);
@@ -230,79 +185,45 @@ ssize_t _Str_fread_atomic(struct nvmeibt_Str *this, int fd)
 	return nread;
 }
 
-ssize_t _Str_fwrite(struct nvmeibt_Str *this, int fd)
-{
-	size_t	this_strlen;
-	ssize_t	n_written;
-
-	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_Str_fwrite, this);
-
-	this_strlen = nvmeibt_Str_strlen(this);
-	n_written = nvmeibt_write(fd, nvmeibt_Str_str(this), this_strlen);
-	if (n_written < 0) {
+ssize_t _Str_fwrite(struct nvmeibt_Str *this, int fd) {
+	const size_t this_strlen = nvmeibt_Str_strlen(this);
+	const ssize_t n_written = nvmeibt_write(fd, nvmeibt_Str_str(this), this_strlen);
+	if (n_written < 0)
 		N_Ef(error_1_str_Str_fwrite, "csv buffer no full write (asked @STRLEN)", this_strlen);
-	}
-
 	N_VERIFY_SIZE(error_2_str_Str_fwrite, this);
-
 	return n_written;
 }
 
-ssize_t _Buf_fwrite(struct nvmeibt_Buf *this, int fd)
-{
-	ssize_t	n_written;
-
-	n_written = nvmeibt_write(fd, this->data_buf, this->buf_len);
-	if (n_written < 0) {
+ssize_t _Buf_fwrite(struct nvmeibt_Buf *this, int fd) {
+	const ssize_t n_written = nvmeibt_write(fd, this->data_buf, this->buf_len);
+	if (n_written < 0)
 		N_Ef(tqmut37, "csv buffer no full write (asked @STRLEN)", this->buf_len);
-	}
-
 	return n_written;
 }
 
 TODO("is this needed?");
-int nvmeibt_Str_fwrite(struct nvmeibt_Str *this, FILE *file)
-{
-	size_t	this_strlen;
-	size_t	nwrite;
-	int		rv;
-
-	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_fwrite, this);
-	this_strlen = nvmeibt_Str_strlen(this);
-	nwrite = fwrite(nvmeibt_Str_str(this), 1, this_strlen, file);
-
-	if (nwrite != this_strlen) {
-		N_Ef(error_1_str_nvmeibt_Str_fwrite, "csv buffer no full write (asked @STRLEN, done @NWRITE)", this_strlen, nwrite);
-		rv = -1;
-		goto out;
+int nvmeibt_Str_fwrite(struct nvmeibt_Str *this, FILE *file) {
+	const size_t this_strlen = nvmeibt_Str_strlen(this);
+	const size_t nwrite = fwrite(nvmeibt_Str_str(this), 1, this_strlen, file);
+	if ((nwrite != this_strlen) || ferror(file)) {
+		N_Ef(tmstrfwr1, "csv buffer no full write (asked @STRLEN, done @SIZEOF), (@AUTO_ERRNO)", this_strlen, nwrite);
+		return -1;
 	}
-
-	if (ferror(file)) {
-		N_Ef(error_2_str_nvmeibt_Str_fwrite, "error writing cvs buf to file (@AUTO_ERRNO)");
-		rv = -1;
-		goto out;
-	}
-
-	rv = nwrite;
-out:
 	N_VERIFY_SIZE(error_3_str_nvmeibt_Str_fwrite, this);
-	return rv;
+	return nwrite;
 }
 
 static inline int is_str_overlapping_nvmeibt_Str(const struct nvmeibt_Str *this, const char *str) {
-	return this->text_buf && nvmeibt_do_ranges_overlap((unsigned long long) nvmeibt_Str_str(this),\
-													   (unsigned long long) (nvmeibt_Str_str(this) + nvmeibt_Str_strlen(this)),\
-													   (unsigned long long) str,\
-													   (unsigned long long) (str + strlen(str)));
+	return this->text_buf && nvmeibt_do_ranges_overlap((unsigned long long)nvmeibt_Str_str(this),
+													   (unsigned long long)(nvmeibt_Str_str(this) + nvmeibt_Str_strlen(this)),
+													   (unsigned long long)str,
+													   (unsigned long long)(str + strlen(str)));
 }
 
-int nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size)
-{
+int nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size) {
 	int rv = -1;
-
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_strncpy, this);
-
-	if (this->text_buf == str && this->text_buf) {
+	if ((this->text_buf == str) && (this->text_buf)) {
 		rv = 0;
 		if (size != this->str_len) {
 			N_Wf(warn_str_nvmeibt_Str_strncpy, "Copying string into itself but attempted to modify size, old size=@SIZEOF, new requested size=@SIZEOF, string=\n{@TEXT_BUF}.", this->str_len, size, this->text_buf);
@@ -326,13 +247,11 @@ int nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size)
 	return rv;
 }
 
-int nvmeibt_Str_strcpy(struct nvmeibt_Str *this, const char *str)
-{
+int nvmeibt_Str_strcpy(struct nvmeibt_Str *this, const char *str) {
 	return nvmeibt_Str_strncpy(this, str, SIZE_MAX);
 }
 
 /************************  nvmesh.conf interface *****************************/
-
 static uint8_t		nvmeibt_KVP_char_type[256];
 static uint8_t		char_type_space = ' ';
 static uint8_t		char_type_word = 'w';
@@ -341,8 +260,7 @@ static uint8_t		char_type_EQ = '=';
 static uint8_t		char_type_EOL = '\n';
 static uint8_t		char_type_TERMINATING_NULL = '\0';
 
-static void nvmeibt_tokenize_KVP_init(void)
-{
+static void nvmeibt_tokenize_KVP_init(void) {
 	int		i;
 
 	for (i = 1; i <= ' '; i++) {
@@ -372,8 +290,7 @@ enum PARSE_STATE {
 	PARSE_STATE_IN_VAL = 6,
 };
 
-int	nvmeibt_tokenize_KVP(char *in_str_null_terminated, size_t in_str_len_incl_null, struct nvmeibt_KVP *output_KVP_arr, int n_entries_output_KVP_arr)
-{
+int	nvmeibt_tokenize_KVP(char *in_str_null_terminated, size_t in_str_len_incl_null, struct nvmeibt_KVP *output_KVP_arr, int n_entries_output_KVP_arr) {
 	int						rv = 0;
 	size_t					i;
 	int						output_KVP_arr_entry_no = 0;
@@ -479,9 +396,7 @@ out:
 	return rv;
 }
 
-bool nvmeibt_toma_is_running_as_a_utility(void);
-nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in)
-{
+nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in) {
 	nvmeibt_str_with_escape_chars_t		out_buf;
 	char								*out = &(out_buf.s[0]);
 	const char							*p = in - 1;
@@ -490,43 +405,19 @@ nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in
 		if ((out - out_buf.s) > ((long int)sizeof(out_buf.s) - 10)) {
 			NVMEIBT_LONG_TRACE_WRAPPER(crshjwe, "String is too long", in, sizeof(out_buf.s));
 			N_Ef(v0wj4iw, "String is too long");
-    		nvmeibt_abort(ES_FATAL);
+			nvmeibt_abort(ES_FATAL);
 		}
 		switch (*p) {
-		case '"':
-			*(out++) = '\\';
-			*(out++) = '"';
-			continue;
-		case '\b':
-			*(out++) = '\\';
-			*(out++) = 'b';
-			continue;
-		case '\f':
-			*(out++) = '\\';
-			*(out++) = 'f';
-			continue;
-		case '\n':
-			*(out++) = '\\';
-			*(out++) = 'n';
-			continue;
-		case '\r':
-			*(out++) = '\\';
-			*(out++) = 'r';
-			continue;
-		case '\t':
-			*(out++) = '\\';
-			*(out++) = 't';
-			continue;
-		case '\\':
-			*(out++) = '\\';
-			*(out++) = '\\';
-			continue;
-		default:
-			*(out++) = *p;
-			continue;
+		case '"':	*(out++) = '\\';	*(out++) = '"';		continue;
+		case '\b':	*(out++) = '\\';	*(out++) = 'b';		continue;
+		case '\f':	*(out++) = '\\';	*(out++) = 'f';		continue;
+		case '\n':	*(out++) = '\\';	*(out++) = 'n';		continue;
+		case '\r':	*(out++) = '\\';	*(out++) = 'r';		continue;
+		case '\t':	*(out++) = '\\';	*(out++) = 't';		continue;
+		case '\\':	*(out++) = '\\';	*(out++) = '\\';	continue;
+		default:	*(out++) = *p;							continue;
 		}
 	}
 	*out = 0;
 	return out_buf;
 }
-

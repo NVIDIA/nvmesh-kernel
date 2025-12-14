@@ -101,6 +101,7 @@ int nvmeibt_Str_strcmp(const struct nvmeibt_Str *str_ctx1,
 void nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src);
 void nvmeibt_Str_chop_last_char(struct nvmeibt_Str *this);
 
+/* Note: Function below is doing a destructive string parsing*/
 int	nvmeibt_tokenize_KVP(char *in_str_null_terminated, size_t in_str_len_incl_null, struct nvmeibt_KVP *output_KVP_arr, int n_entries_output_KVP_arr);
 
 typedef struct nvmeibt_str_with_escape_chars {
