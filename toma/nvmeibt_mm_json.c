@@ -1279,8 +1279,6 @@ void nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire(void)
 
 	NFIN;
 	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config);
-	wire_out_p = wire_conf_buf->data_buf;
-
 	size = generate_vols_kafka_mgmt_config_wire(NULL, &n_vols, NULL) + sizeof(struct _packed_mm_mgmt_conf);
 	NNVMEIBT_BUF_RESIZE(viem2ms, wire_conf_buf, size);
 	memset(wire_conf_buf->data_buf, 0, wire_conf_buf->buf_len);

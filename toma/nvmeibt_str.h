@@ -66,6 +66,19 @@ struct nvmeibt_Buf {
 	size_t						buf_len;
 	void						*data_buf;
 };
+#define NVMEIBT_BUF_INIT(t)	({ (t)->data_buf = NULL; (t)->buf_len = 0; })
+#define NNVMEIBT_BUF_FREE(name, t) ({										\
+	if ((t)->data_buf) {													\
+		NNVMEIBT_BM_FREE(name ## _free, (t)->data_buf);						\
+		NVMEIBT_BUF_INIT(t); 												\
+	};																		\
+})
+#define NNVMEIBT_BUF_RESIZE(name, t, new_len) ({										\
+	if ((t)->buf_len < (new_len)) {														\
+		(t)->data_buf = NNVMEIBT_BM_REALLOC(name ## _realloc, (t)->data_buf, new_len);	\
+	};																					\
+	(t)->buf_len = new_len;	/*Enlarge / shrink */										\
+})
 
 struct nvmeibt_KVP {	// Key-Value-Paid. Points into the parsed string
 	char	*key;
@@ -95,36 +108,10 @@ typedef struct nvmeibt_str_with_escape_chars {
 } nvmeibt_str_with_escape_chars_t;
 nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in);
 
-#define N_VERIFY_NVMEIBT_STR_INITIALIZED(name, this) 						\
-({																			\
-		NTOMA_ASSERT(name, (this) && (this)->__this_addr == (this),			\
-					 "Badly initialized nvmeibt_Str, was initialized at "	\
-					 "ptr=@PPP, now at ptr=@PPP",							\
-					 (this)->__this_addr, (this));							\
-})
-
-#define NVMEIBT_BUF_INIT(this)													\
-({																				\
-	(this)->data_buf = NULL;													\
-	(this)->buf_len = 0;														\
-})
-
-#define NNVMEIBT_BUF_FREE(name, this)											\
-({																				\
-	if ((this)->data_buf) {														\
-		NNVMEIBT_BM_FREE(name ## _free,  (this)->data_buf);						\
-		(this)->data_buf = NULL;												\
-		(this)->buf_len = 0;													\
-	}																			\
-})
-
-#define NNVMEIBT_BUF_RESIZE(name, this, required_len)							\
-({																				\
-	if ((this)->buf_len < (required_len)) {									    \
-		(this)->data_buf = NNVMEIBT_BM_REALLOC(name ## _realloc, 				\
-								(this)->data_buf, required_len);				\
-	}																			\
-	(this)->buf_len = required_len;												\
+#define N_VERIFY_NVMEIBT_STR_INITIALIZED(name, this) ({						\
+	NTOMA_ASSERT(name, (this) && (this)->__this_addr == (this),			\
+		"Badly initialized nvmeibt_Str, was initialized at ptr=@PPP, now at ptr=@PPP",	\
+		(this)->__this_addr, (this));							\
 })
 
 /* sets the size of the buffer containing the string
@@ -151,18 +138,14 @@ nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in
 /* Allocates and initializes struct nvmeibt_Str
    Return Value: new allocated and initialized struct nvmeibt_Str*
    should be matched with a NVMEIBT_STR_FREE()		               */
-#define NNVMEIBT_STR_ALLOC(name)											\
-({																			\
-	struct nvmeibt_Str *NSA__ret =											\
-						NNVMEIBT_BM_CALLOC(name,	 						\
-						sizeof(struct nvmeibt_Str));						\
+#define NNVMEIBT_STR_ALLOC(name) ({											\
+	struct nvmeibt_Str *NSA__ret = NNVMEIBT_BM_CALLOC(name, sizeof(*NSA__ret));	\
 	(NSA__ret)->__this_addr = (NSA__ret);									\
 	(NSA__ret);																\
 })
 
 /* Frees anything allocated with NVMEIBT_STR_ALLOC(_WITH_BUF)?() */
-#define NNVMEIBT_STR_FREE(name, to_free)									\
-({																			\
+#define NNVMEIBT_STR_FREE(name, to_free) ({									\
 	if (to_free) {															\
 		(to_free)->str_len = 0xDEADBEEF;									\
 		NNVMEIBT_BM_FREE(name ## _1, (to_free)->text_buf);					\
