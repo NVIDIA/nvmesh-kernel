@@ -1792,7 +1792,7 @@ static void owner_locks_release_group_free(struct nvmeibt_wq_entry *wq_entry)
 }
 
 
-static void owner_locks_release_group(struct nvmeibt_wq_entry *wq_entry);
+static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *wq_entry);
 void owner_locks_set_to_release(struct registrant_disconnect_wq_entry *entry)
 {
 	struct owner_locks_release_wq_entry *owner_locks_release_group_task;
@@ -1802,7 +1802,7 @@ void owner_locks_set_to_release(struct registrant_disconnect_wq_entry *entry)
 	if (XDLIST_N_ELEMNTS(&seg_active->owner_lock_ids_to_release) == 1) {
 		owner_locks_release_group_task = NNVMEIBT_BM_CALLOC(trace_owner_locks_set_to_release, sizeof *owner_locks_release_group_task);
 		owner_locks_release_group_task->wq_entry.type = "OWNER_LOCKS_RELEASE_GROUP";
-		owner_locks_release_group_task->wq_entry.execute = owner_locks_release_group;
+		owner_locks_release_group_task->wq_entry.execute = owner_locks_release_group_wrapper;
 		// This owner_locks_release_group_task is not created in TOMA's main thread like
 		//  all the other WQ tasks. It also does not relate to a specific TOMA object
 		//  that has anything to do on finalize.
@@ -1820,7 +1820,7 @@ void owner_locks_set_to_release(struct registrant_disconnect_wq_entry *entry)
 }
 
 #define nvmeib_lock_id_set_is_stale(lid) (lid)->bits.is_stale = 1
-static void owner_locks_release_group(struct nvmeibt_wq_entry *owner_locks_release_group_task_wq_entry)
+static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_locks_release_group_task_wq_entry)
 {
 	struct nvmeibt_wq_entry						*wq_entry;
 	struct nvmeibt_seg_active					*seg_active;
