@@ -242,7 +242,6 @@ static void _HW_nic_from_json(struct mm_nic_conf *nic, struct mm_json_elem *elem
 	JSON_ASSIGN_AND_CALL_INIT();
 
 //	NFIN;
-	memset(nic, 0, sizeof(struct mm_nic_conf));
 	if (elem->type != JSON_E_DICT)
 		return;
 	nvmeibt_strlcpy(nic->eyecatcher, "NIC", sizeof(nic->eyecatcher));
@@ -268,11 +267,10 @@ static void _HW_nic_from_json(struct mm_nic_conf *nic, struct mm_json_elem *elem
 static void _HW_node_nics_from_json(struct mm_node_conf *node, struct mm_json_elem *nics_arr_json)
 {
 	int		i;
-
 	if (nics_arr_json->type != JSON_E_ARRAY)
 		return;
 	node->num_nics = nics_arr_json->array.len;
-	node->nics = (struct mm_nic_conf *)NNVMEIBT_BM_ALLOC(mem_mgmt_12, sizeof(struct mm_nic_conf) * node->num_nics);
+	node->nics = (struct mm_nic_conf *)NNVMEIBT_BM_CALLOC(mem_mgmt_12, sizeof(struct mm_nic_conf) * node->num_nics);
 	for (i = 0; i < node->num_nics; i++) {
 		_HW_nic_from_json(&node->nics[i], nics_arr_json->array.elements[i]);
 	}

@@ -536,16 +536,9 @@ static void clear_receive(struct nvmeibt_srm *srm)
 	NFOUT;
 }
 
-static int allocate_rcv_buffer(struct nvmeibt_srm *srm, int len)
-{
-	void *p;
-
-	NFIN;
-	p = NNVMEIBT_BM_ALLOC(trace_srm_allocate_rcv_buffer, len);
-	srm->rcv_buffer = (char *)p;
+static int allocate_rcv_buffer(struct nvmeibt_srm *srm, int len) {
+	srm->rcv_buffer = (char *)NNVMEIBT_BM_CALLOC(trace_srm_allocate_rcv_buffer, len);
 	srm->rcv_buffer_len = len;
-	memset(srm->rcv_buffer, 0, srm->rcv_buffer_len);
-	NFOUT;
 	return srm->rcv_buffer ? 0 : -1;
 }
 

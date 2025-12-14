@@ -1779,7 +1779,7 @@ static int raft_send_msg_to_peer(
 		dst_node->append_entries_rep_was_not_sent = false;
 	// alloc msg
 	total_msg_size = offsetof(typeof(*msg), persist_and_wire_buf) + persist_and_wire_buf_get_total_len(persist_and_wire_buf);
-	msg = NNVMEIBT_BM_ALLOC(6gwuyj3, total_msg_size);
+	msg = NNVMEIBT_BM_CALLOC(6gwuyj3, total_msg_size);
 	// My_raft state
 	msg->software_version = TOMA_SW_COMPATIBILITY_VER;
 	nvmeibt_strlcpy(msg->git_commit_id, GIT_COMMIT_ID, sizeof(msg->git_commit_id));

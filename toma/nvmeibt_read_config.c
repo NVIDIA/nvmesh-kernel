@@ -1705,7 +1705,7 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 			seg_metadata_pbyte_s = gpt_entry->pba_s * entry->from_config.pblk_size;
 			N_Tf(5h38sjo, "Restoring seg=@UUID_8 metadata from entry#@INT", nvmeib_uuid_first_4_bytes(&seg_uuid), i);
 
-			seg_metadata_container = NNVMEIBT_BM_ALLOC(3hs8vnv, sizeof (*seg_metadata_container));
+			seg_metadata_container = NNVMEIBT_BM_CALLOC(3hs8vnv, sizeof (*seg_metadata_container));
 			seg_metadata_container->metadata_ctrl = NNVMEIBT_BM_ALIGNED_CALLOC(49mws9k, PAGE_SIZE, sizeof(*(seg_metadata_container->metadata_ctrl)));
 			seg_metadata_container->is_valid = 0;
 			seg_metadata_container->metadata_gpt_entry_idx = i;

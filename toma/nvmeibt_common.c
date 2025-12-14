@@ -365,7 +365,7 @@ int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *ldisk,
 
 	N_Tf(iemxjud, "disk=@STR zeroing pba_s=@PBA_S n_pblk=@N_PBLK", ldisk->ldisk_id.str, pba_s, n_pblk_to_zero);
 
-	zero_msg = NNVMEIBT_BM_ALLOC(trace_common_nvmeibt_zero_disk_pblks, sizeof(*zero_msg) + sizeof(*zero_msg_payload));
+	zero_msg = NNVMEIBT_BM_CALLOC(trace_common_nvmeibt_zero_disk_pblks, sizeof(*zero_msg) + sizeof(*zero_msg_payload));	// Disk zeroing does not work with malloc, must use calloc!
 	zero_msg_payload = (struct nvmeib_zero_disk *)(zero_msg->data);
 	zero_ctx = NNVMEIBT_BM_CALLOC(trace_1_common_nvmeibt_zero_disk_pblks, sizeof(*zero_ctx));
 

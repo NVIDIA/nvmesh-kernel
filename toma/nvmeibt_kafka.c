@@ -1337,7 +1337,7 @@ static int CMD_consume(void) {
 		rv = 0;
 		NNVMEIBT_BM_FREE(uzxhn2k1, CMD_params);
 	} else {
-		struct kafka_wakeup_params *wap = NNVMEIBT_BM_ALLOC(sueklwl, sizeof(*wap));
+		struct kafka_wakeup_params *wap = NNVMEIBT_BM_CALLOC(sueklwl, sizeof(*wap));
 		wap->messageType_params = messageType_params;
 		wap->event_type = KAFKA_EVENT_TYPE_CMD;
 		wap->event_data = CMD_params;
@@ -1457,7 +1457,7 @@ static int HW_full_config_consume(void) {
 		highest_version_messageType_params = messageType_params;
 	}	// while()
 	if (highest_HW_mgmt_conf) {	// If we received a higher than ever before
-		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_ALLOC(djaioqk, sizeof(*wakeup_params));
+		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_CALLOC(djaioqk, sizeof(*wakeup_params));
 		wakeup_params->messageType_params = highest_version_messageType_params;
 		wakeup_params->event_type = KAFKA_EVENT_TYPE_HW_FULL_CONFIG;
 		wakeup_params->event_data = highest_HW_mgmt_conf;
@@ -1533,7 +1533,7 @@ static int incremental_VOL_updates_consume(void) {
 		rv = 0;
 	} else if (k_event != KAFKA_EVENT_TYPE_UNKNOWN) {
 		struct mm_mgmt_conf *mgmt_conf = NNVMEIBT_BM_CALLOC(rygaj4l,  sizeof(*mgmt_conf));					// Parse them just the same, although deleteVolume has just two fields
-		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_ALLOC(5vsyc8e, sizeof(*wakeup_params));
+		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_CALLOC(5vsyc8e, sizeof(*wakeup_params));
 		rv = nvmeibt_mgmt_msg_json_tree_to_mgmt_conf(mgmt_conf, json_tree_root, k_incremental_VOL_updates.consumer_offset, is_new_or_updateVol, is_delVolCompleted);	// Do as much processing as possible before TOMA's main thread
 		wakeup_params->messageType_params = msg_param;
 		wakeup_params->event_type = k_event;
@@ -1703,7 +1703,7 @@ static int incremental_TARGET_updates_consume(void) {
 		rv = -1;
 	} else {
 		struct name_and_uuid_params_ctx *data = NNVMEIBT_BM_CALLOC(bxhs83j, sizeof(*data));
-		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_ALLOC(c6shnse, sizeof(*wakeup_params));		// Only add/delete_target are done one-by-one, and need to wait for the leader to commit the change with the majority
+		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_CALLOC(c6shnse, sizeof(*wakeup_params));		// Only add/delete_target are done one-by-one, and need to wait for the leader to commit the change with the majority
 		rv = parse_name_and_uuid(json_tree_root, data);
 		wakeup_params->messageType_params = msg_param;
 		wakeup_params->event_type = k_event;

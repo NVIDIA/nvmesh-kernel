@@ -2418,7 +2418,7 @@ struct nvmeibt_udev_event_info *find_udev_event_info_by_dev_file_name(const char
 		}
 	}
 
-	udev_event_info = NNVMEIBT_BM_ALLOC(hyrb12s, sizeof(struct nvmeibt_udev_event_info));
+	udev_event_info = NNVMEIBT_BM_CALLOC(hyrb12s, sizeof(struct nvmeibt_udev_event_info));
 	XDLIST_ADD_TAIL(&(cur_topo->udev_events_info), udev_event_info);
 	*is_new = true;
 	return udev_event_info;

@@ -2323,7 +2323,7 @@ static void format_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	if (entry->format_details.is_nvme) {
-		format_msg = NNVMEIBT_BM_ALLOC(trace_format_disk_wrapper_nl_1, sizeof(*format_msg) + sizeof(*format_msg_payload));
+		format_msg = NNVMEIBT_BM_CALLOC(trace_format_disk_wrapper_nl_1, sizeof(*format_msg) + sizeof(*format_msg_payload));
 		format_msg_payload = (struct nvmeib_format_disk *)(format_msg->data);
 		format_ctx = NNVMEIBT_BM_CALLOC(trace_format_disk_wrapper_nl_2, sizeof(*format_ctx));
 
