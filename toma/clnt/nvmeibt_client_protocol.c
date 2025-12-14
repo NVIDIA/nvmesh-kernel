@@ -7,7 +7,6 @@
 	#include "common/nvmeib_utils.h"	// Kernel client code, For prints
 	#include "nvmeibc_trace.h"
 #elif defined(TOMA)
-	#include "nvmeibt_utils.h"
 	#include "nvmeibt_common.h"
 	#include <arpa/inet.h>
 	#define NCLIENT_PROTO_ASSERT(name, cond, logging...) ({ const bool _rvc = (cond); NTOMA_ASSERT(name, _rvc, logging); _rvc; })
