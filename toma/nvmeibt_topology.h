@@ -20,7 +20,6 @@
 #include "nvmeibt_params.h"
 #include "nvmeibt_common.h"
 #include "../common/nvmeib_shared.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_str.h"
 #include "interfaces/network/network_incs.h"
 #include "clnt/nvmeibt_client_protocol.h"

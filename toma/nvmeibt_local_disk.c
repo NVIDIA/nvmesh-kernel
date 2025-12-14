@@ -119,7 +119,6 @@
 #include "nvmeibt_ds_metadata.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_toma.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_wq.h"
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_km_comm.h"

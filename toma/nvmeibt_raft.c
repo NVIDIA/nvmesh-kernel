@@ -59,7 +59,6 @@
 #include <sys/stat.h>
 #include <linux/unistd.h>
 #include "nvmeibt_common.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_raft.h"
@@ -67,7 +66,6 @@
 #include "nvmeibt_toma.h"
 #include "nvmeibt_node.h"
 #include "nvmeibt_important_logs.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_disk_segment.h"
 #include "nvmeibt_ds_metadata.h"
 #include "nvmeibt_disk_metadata.h"

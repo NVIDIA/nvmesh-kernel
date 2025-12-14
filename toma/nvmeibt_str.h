@@ -12,7 +12,6 @@
 #include "nvmeibt_params.h"
 #include <string.h>
 #include "nvmeibt_common.h"
-#include "nvmeibt_bm.h"
 
 /************************  nvmeibt_str ***************/
 /*

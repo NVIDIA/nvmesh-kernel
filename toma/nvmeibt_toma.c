@@ -31,7 +31,6 @@
 #include "clnt/nvmeibt_client_protocol.h"
 #include "./interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "./interfaces/os/nvmeibt_os_signal.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_wq.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_local_disk.h"

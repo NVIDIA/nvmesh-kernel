@@ -1,5 +1,4 @@
 #include "nvmeibt_common.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_important_logs.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_topology.h"

@@ -15,7 +15,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include "nvmeibt_bm.h"
 #include "nvmeibt_debug.h"
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_common.h"
@@ -25,14 +24,10 @@
 #include "nvmeibt_str.h"
 #include "nvmeibt_utils.h"
 
-#define JSON_PARSING_ALLOC(name, size) \
-	malloc(size)
-#define JSON_PARSING_CALLOC(name, size) \
-	calloc(1, size)
-#define JSON_PARSING_REALLOC(name, ptr, size) \
-	realloc(ptr, size)
-#define JSON_PARSING_FREE(name, ptr) \
-	free(ptr)
+#define JSON_PARSING_ALLOC(name, size) 			malloc(size)
+#define JSON_PARSING_CALLOC(name, size) 		calloc(1, size)
+#define JSON_PARSING_REALLOC(name, ptr, size) 	realloc(ptr, size)
+#define JSON_PARSING_FREE(name, ptr) 			free(ptr)
 
 #define DUMP_kv_TO_LOG(__name, __kv) ({											\
 	struct mm_json_elem			*__v = (__kv)->value;							\

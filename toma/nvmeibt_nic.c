@@ -2,7 +2,6 @@
 #include <ctype.h>
 
 #include "nvmeibt_common.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_nic.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_node.h"

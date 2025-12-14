@@ -5,7 +5,6 @@
 #include "nvmeibt_recovery.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_raft.h"
-#include "nvmeibt_bm.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_local_disk.h"
 #include "nvmeibt_topo_bin.h"

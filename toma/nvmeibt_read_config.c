@@ -14,7 +14,6 @@
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_disk.h"
-#include "nvmeibt_bm.h"
 #include "./interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "nvmeibt_disk_metadata.h"
 #include "nvmeibt_ds_metadata.h"
