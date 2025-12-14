@@ -390,13 +390,13 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_BM_ALIGNED_ALLOC, nvmeibt_toma_alloc_common_idx, _myP_, 0, (_size_));		\
 		_myP_;																													\
 	})
-#define NNVMEIBT_BM_ALIGNED_CALLOC(__name__, _alignment_, _size_) 																\
+#define NNVMEIBT_BM_ALIGNED_CALLOC(name, _alignment_, _size_) 																\
 	({																															\
 		void	*_myP_;																											\
 		NVMEIBT_TOMA_ALLOC_COMMON('m');																							\
 		_myP_ = nvmeibt_bm_allocate_dma_buffer((_alignment_), (_size_));														\
 		memset(_myP_, 0, (_size_));																								\
-		N_Tf(__name__, "BM_ALIGNED_CALLOC p=@PPP size=@SIZE", _myP_, nvmeibt_bm_get_buf_alloc_size(_myP_));						\
+		N_Tf(name, "BM_ALIGNED_CALLOC p=@PPP size=@SIZE", _myP_, nvmeibt_bm_get_buf_alloc_size(_myP_));						\
 		nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_BM_ALIGNED_CALLOC, nvmeibt_toma_alloc_common_idx, _myP_, 0, (_size_));		\
 		_myP_;																													\
 	})
