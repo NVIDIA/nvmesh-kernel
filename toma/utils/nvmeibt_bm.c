@@ -16,7 +16,6 @@ typedef XDLIST_DECLARE(buffer_pool, struct memory_buffer, link) buffer_pool_t;
 
 #define BM_DMA_ALIGNMENT_BITS 12
 #define BM_DMA_ALIGNMENT_SIZE (1 << BM_DMA_ALIGNMENT_BITS)
-#define BM_DMA_ALIGNMENT_MASK (~((uint64_t)(BM_DMA_ALIGNMENT_SIZE - 1)))
 #define BM_BUFFER_POOL_SIZE 31
 #define BM_MAX_BUFFER_SIZE (1 << (BM_BUFFER_POOL_SIZE - 1))
 
@@ -200,7 +199,7 @@ static struct memory_buffer *allocate_dma_buffer_unsafe(int requested_len) {
 	if (XDLIST_EMPTY(head)) {
 		void *q = 0;
 		NNVMEIBT_TOMA_POSIX_MEMALIGN(trace_bm_allocate_dma_buffer, &q, BM_DMA_ALIGNMENT_SIZE, len + BM_DMA_ALIGNMENT_SIZE);
-		b = (struct memory_buffer *)(q + BM_DMA_ALIGNMENT_SIZE - offsetof(struct memory_buffer, data) );
+		b = (struct memory_buffer *)(q + BM_DMA_ALIGNMENT_SIZE - offsetof(struct memory_buffer, data));
 		N_Tf(tbmblj, "POSIX_MEMALIGN: log2_len=@LOG2_LEN len=@LEN", log2_len, len);
 	} else {
 		b = XDLIST_FIRST(head);
@@ -267,7 +266,7 @@ static void free_buffer_pools(void) {
 	}
 	for (i = 0; i < ARRAY_SIZE(bm->dma_buffer_pool); ++i) {
 		XDLIST_FOREACH_SAFE(p, &bm->dma_buffer_pool[i]) {
-			void *pp = (void *) ((uint64_t) p & BM_DMA_ALIGNMENT_MASK);
+			void *pp = (void *)((void *)p - (BM_DMA_ALIGNMENT_SIZE - offsetof(struct memory_buffer, data)));
 			XDLIST_DEL(&p->link);
 			NNVMEIBT_TOMA_FREE(trace_1_bm_free_buffer_pools, pp);
 		}
