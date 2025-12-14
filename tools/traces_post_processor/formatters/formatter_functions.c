@@ -117,6 +117,19 @@ int fmt_serjio_jentry_state(char *buf, int len, long arg, int datalen) {
 	return scnprintf(buf, len, "%s(%d)", nvmeib_shared_serjio_jentry_state_to_str((int)arg), (int)arg);
 }
 
+int fmt_serjio_jentry_state_mask(char *buf, int len, long arg, int datalen) {
+	int i, count = 0;
+	(void)datalen;
+	for (i = 0; i < MAX_JENTRY_STATE; i++) {
+		if ((1 << i) & (unsigned int)arg) {
+			count += scnprintf(buf + count, len - count, "%s|", nvmeib_shared_serjio_jentry_state_to_str(i));
+		}
+	}
+	/* Remove the last '|' */
+	buf[count - 1] = '\0';
+	return count - 1;
+}
+
 int fmt_serjio_jentry_state_chng_reason(char *buf, int len, long arg, int datalen) {
 	(void)datalen;
 	return scnprintf(buf, len, "%s(%d)", nvmeib_shared_serjio_jentry_state_chng_reason_to_str((int)arg), (int)arg);

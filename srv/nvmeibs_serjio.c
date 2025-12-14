@@ -5,6 +5,7 @@
  */
 
 #include "nvmeibs_serjio.h"
+#include "nvmeib_trace_warns.h"
 #include "nvmeibs_serjio_deps.h"
 #include "nvmeibs_serjio_gpt.h"
 #include "nvmeibs_nvme.h"
@@ -156,6 +157,10 @@ MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range inde
 
 #define _NEs(name, _pd, fmt, ...) \
 	_NE(name, "SERJIO (@SERJIO_PD): Disk @DISK_ID_STR (@DISK): " fmt, \
+		_pd, nvmeibs_disk_info_get_disk_id(_pd->di), _pd->di, ## __VA_ARGS__)
+	
+#define _NEs_dmesg(name, _pd, fmt, ...) \
+	_NE_dmesg(name, "SERJIO (@SERJIO_PD): Disk @DISK_ID_STR (@DISK): " fmt, \
 		_pd, nvmeibs_disk_info_get_disk_id(_pd->di), _pd->di, ## __VA_ARGS__)
 
 #define _NDs(name, _pd, fmt, ...) \
@@ -6161,6 +6166,20 @@ static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				(!read_ent_bmp || test_bit(entry, read_ent_bmp)))
 			set_bit(entry, rd_ents_bmp);
 	}
+	/* [NVMESH-7216]: Check for unexpected empty bitmap when unsynced entries exist */
+	if (bitmap_empty(rd_ents_bmp, jrng->n_ents) && 
+		(jrng->jentry_state_cnt[JENTRY_UNKNOWN] > 0 || 
+		 jrng->jentry_state_cnt[JENTRY_TAKEN] > 0 || 
+		 jrng->jentry_state_cnt[JENTRY_WAIT_RET] > 0)) {
+		_NEs_dmesg(warn_serjio_rd_jrange_empty_bmp_with_unsynced, serjio_pd,
+			"Range @JRNL_RNG_IDX: Empty rd_ents_bmp despite unsynced entries - "
+			"mask=@JENTRY_STATE_MASK entries=@JENTRY_STATE_CNT cnt[UNKNOWN]=@JENTRY_STATE_CNT cnt[TAKEN]=@JENTRY_STATE_CNT cnt[WAIT_RET]=@JENTRY_STATE_CNT",
+			jrng->range_idx, read_ent_state_mask, jrng->n_ents,
+			jrng->jentry_state_cnt[JENTRY_UNKNOWN], 
+			jrng->jentry_state_cnt[JENTRY_TAKEN],
+			jrng->jentry_state_cnt[JENTRY_WAIT_RET]);
+		BUG_NON_PRODUCTION(7216);
+	}
 	spin_unlock_irqrestore(&jrng->lock, flags);
 	_NTs(trace_serjio_rd_jrange_ents, serjio_pd,
 		 "Reading Range @JRNL_RNG_IDX Entries: "
@@ -8382,7 +8401,7 @@ static DECLARE_IO_WQ_FN(io_cln_jrnl_disk_rng_fn)
 		for (entry = 0; entry < jrange->n_ents; entry++) {
 			const union jblock_md *jmdc_entry = get_jmdc_entry(jrange, entry);
 			jentry_state = GET_JENTRY_STATE_FROM_BMP(jrange->jentry_state_bmp, entry);
-			if (JENTRY_OWNED_BY_SERJIO(jentry_state)) {
+			if (JENTRY_OWNED_BY_SERJIO(jentry_state) && !JENTRY_UNSYNCED(jentry_state)) {
 				u64 j2d_start = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
 				u64 j2d_end = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
 				int chain_err;
