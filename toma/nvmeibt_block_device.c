@@ -257,52 +257,6 @@ void nvmeibt_block_device_trim_unused_entries(int config_tag, uint8_t trim_flag)
 	NFOUT;
 }
 
-#if 0
-static void nvmeibt_block_device_mark_conf_corrupted(struct nvmeibt_block_device *blkdev) {
-	N_Wf(tbdmcc1, "blkdev=@UUID_LE", nvmeibt_block_device_UUID(blkdev));
-	blkdev->is_conf_corrupted = 1;
-	nvmeibt_mark_conf_corrupted();
-}
-int nvmeibt_block_device_validate_blkdevs_config(void) {
-	struct nvmeibt_block_device	*blkdev;
-	int j, k;
-	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(blkdev, &nvmeibt_global_get_global()->block_devices_hash) {
-		long long sum = 0;
-		long long min_lblk = LLONG_MAX;
-		long long max_lblk = LLONG_MIN;
-		for (j = 0; j < blkdev->n_chunks; j++) {
-			struct nvmeibt_chunk *chunk0 = blkdev->chunks[j];
-			const struct nvmeibt_chunk_config *f0 = &(chunk0->from_config);
-			N_Tf(kffi220s, "@UUID_LE vlb_s=@LLD vlb_e=@LLD", &f0->id, f0->vlb_s, f0->vlb_e);
-			min_lblk = min(min_lblk, f0->vlb_s);
-			max_lblk = max(max_lblk, f0->vlb_e);
-			sum += (f0->vlb_e - f0->vlb_s + 1);
-			for (k = j + 1; k < blkdev->n_chunks; k++) {
-				struct nvmeibt_chunk *chunk1 = blkdev->chunks[k];
-				const struct nvmeibt_chunk_config *f1 = &(chunk1->from_config);
-				if (nvmeibt_do_ranges_overlap(f0->vlb_s, f0->vlb_e, f1->vlb_s, f1->vlb_e)) {
-					N_Ef(uee3811, "@DEVICE_NAME: blkset_allocations overlap @UUID_LE @LLD-@LLD, @UUID_LE @LLD-@LLD", nvmeibt_blkdev_name(blkdev), &f0->id, f0->vlb_s, f0->vlb_e, &f1->id, f1->vlb_s, f1->vlb_e);
-					nvmeibt_chunk_mark_conf_corrupted(chunk0);
-					nvmeibt_chunk_mark_conf_corrupted(chunk1);
-					nvmeibt_block_device_mark_conf_corrupted(blkdev);
-				}
-			}
-		}
-		if ((sum != blkdev->from_config.size_lblks) ||
-			(min_lblk != 0) ||
-			(max_lblk != (blkdev->from_config.size_lblks - 1))) {
-			N_Ef(tbdvbcg0, "@DEVICE_NAME size=@LLD sum=@LLD min_lblk=@LLD max_lblk=@LLD", blkdev->from_config.client_blkdev_name, blkdev->from_config.size_lblks, sum, min_lblk, max_lblk);
-			nvmeibt_block_device_mark_conf_corrupted(blkdev);
-		} else {
-			N_Tf(tbdvbcg1, "Validated blkdev=@BLKDEV size=@SIZE_LLONG", blkdev->from_config.client_blkdev_name, blkdev->from_config.size_lblks);
-		}
-	}
-	NFOUT;
-	return 0;
-}
-#endif
-
 void nvmeibt_block_device_reservation_mode_change(const union nvmeib_uuid *vol_uuid, uint64_t reservation_version) {
 	int									j, k, i;
 	struct nvmeibt_block_device			*blkdev;

@@ -27,7 +27,6 @@ struct nvmeibt_chunk {
 	int								its_idx_in_block_device;
 	int								n_praids;
 	struct nvmeibt_praid			*praids[NVMEIBT_MAX_STRIPE_WIDTH_PER_CHUNK];
-	BOOL							is_conf_corrupted;
 	uint8_t							trim_flags;
 	struct xdlist					topo_link;
 	int								config_tag;
@@ -35,10 +34,6 @@ struct nvmeibt_chunk {
 
 static inline struct nvmeibt_block_device *nvmeibt_chunk_get_blkdev(const struct nvmeibt_chunk *c) {
 	return (c ? c->its_block_device : NULL);
-}
-
-static inline bool nvmeibt_chunk_is_conf_corrupted(const struct nvmeibt_chunk *c) {
-	return (c && c->is_conf_corrupted);
 }
 
 static inline bool nvmeibt_chunk_is_being_deleted(const struct nvmeibt_chunk *c) {
@@ -51,7 +46,6 @@ static inline const char *nvmeibt_chunk_id_str(const struct nvmeibt_chunk *c) { 
 static inline const char *nvmeibt_chunk_get_blkdev_name(const struct nvmeibt_chunk *c) { return (c ? nvmeibt_blkdev_name(c->its_block_device) : "???"); }
 enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt_block_device *blkdev, int idx_in_vol, int config_tag, struct nvmeibt_chunk **output_chunk);
 int nvmeibt_chunk_remove(struct nvmeibt_chunk *c);
-void nvmeibt_chunk_mark_conf_corrupted(struct nvmeibt_chunk *c);
 void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *c, uint8_t trim_flag);
 void nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag);
 

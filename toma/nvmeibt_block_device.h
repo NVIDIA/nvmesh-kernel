@@ -7,7 +7,6 @@
 #include "nvmeibt_mm_json.h"
 #include "nvmeibt_str.h"
 
-struct nvmeibt_topology;
 struct nvmeibt_chunk;
 #define NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX				(-1)
 
@@ -25,9 +24,9 @@ struct nvmeibt_block_device_config {
 	int							blk_size_bytes;
 	BOOL						is_deprecated;
 	int64_t						mgmt_config_kafka_offset_or_idx;
+	struct nvmeibt_block_device_atributes attr;
 	bool						enableCrcCheck;
 	bool						use_debug_di;
-	struct nvmeibt_block_device_atributes attr;
 	uint8_t 					stripe_size;
 	uint8_t 					stripe_width;
 };
@@ -69,7 +68,6 @@ struct nvmeibt_block_device {
 	struct nvmeibt_Buf						kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf;
 	int										n_chunks;
 	BOOL									is_being_deleted;
-	BOOL									is_conf_corrupted;
 	uint8_t									trim_flags;
 	int										config_tag;
 	int										encrypt_idx;
@@ -77,12 +75,12 @@ struct nvmeibt_block_device {
 	struct xdlist							topo_link;
 };
 
-static inline const char *nvmeibt_blkdev_name(const struct nvmeibt_block_device *block_device) {
-	return (block_device ? block_device->from_config.client_blkdev_name : "???");
+static inline const char *nvmeibt_blkdev_name(const struct nvmeibt_block_device *b) {
+	return (b ? b->from_config.client_blkdev_name : "???");
 }
 
-static inline bool nvmeibt_blkdev_is_being_deleted(const struct nvmeibt_block_device *blkdev) {
-	return (!blkdev || blkdev->is_being_deleted);
+static inline bool nvmeibt_blkdev_is_being_deleted(const struct nvmeibt_block_device *b) {
+	return (!b || b->is_being_deleted);
 }
 
 bool nvmeibt_block_device_is_deprecated_in_config( const struct nvmeibt_block_device *block_device);

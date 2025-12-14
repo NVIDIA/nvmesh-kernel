@@ -82,12 +82,6 @@ out:
 	return rv;
 }
 
-void nvmeibt_chunk_mark_conf_corrupted(struct nvmeibt_chunk *chunk) {
-	N_Wf(warn_chunk_nvmeibt_chunk_mark_conf_corrupted, "chunk=@UUID_LE", nvmeibt_chunk_UUID(chunk));
-	chunk->is_conf_corrupted = 1;
-	nvmeibt_mark_conf_corrupted();
-}
-
 void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *chunk, uint8_t trim_flag) {
 	if (is_trim_needed(&chunk->trim_flags, trim_flag)) {
 		NVMEIBT_HASH_MARK_OBJ_OUTDATED(nvmeibt_chunk_trim_unused_entries_trace, chunk, chunk);

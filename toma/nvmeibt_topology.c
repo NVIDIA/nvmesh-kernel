@@ -957,12 +957,9 @@ static int check_local_segments_validity(void)
 	return rv;
 }
 
-void reset_all_conf_corrupted_flags(void)
-{
-	struct nvmeibt_block_device	*block_device;
+void reset_all_conf_corrupted_flags(void) {
 	struct nvmeibt_disk_segment	*disk_segment;
 	struct nvmeibt_praid		*praid;
-	struct nvmeibt_chunk		*chunk;
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
@@ -972,12 +969,6 @@ void reset_all_conf_corrupted_flags(void)
 	}
 	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
 		praid->praid_mgmt.is_conf_corrupted = 0;
-	}
-	XHASHTABLE_FOR_EACH_SAFE(chunk, &cur_topo->chunks_hash) {
-		chunk->is_conf_corrupted = 0;
-	}
-	XHASHTABLE_FOR_EACH_SAFE(block_device, &cur_topo->block_devices_hash) {
-		block_device->is_conf_corrupted = 0;
 	}
 	NFOUT;
 }
