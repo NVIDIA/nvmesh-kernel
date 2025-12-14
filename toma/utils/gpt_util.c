@@ -381,7 +381,7 @@ static int export_gpt_to_json(int disk_fd,
 		metadata_temp_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
 		nvmeibt_strlcpy(metadata_temp_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_temp_gpt.main_or_metadata));
 
-		// Read all 4 Metadata GPT structures
+		// Read all 4 Metadata GPT structures to metadata_bufs
 		nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
 			NULL, disk_fd, config->pblk_size, &metadata_temp_gpt,
 			metadata_partition->pba_s, metadata_partition->pba_e,
@@ -390,11 +390,19 @@ static int export_gpt_to_json(int disk_fd,
 			metadata_bufs.primary_header, metadata_bufs.alternate_header,
 			metadata_bufs.primary_entries, metadata_bufs.alternate_entries);
 
-		// Try to read disk metadata for serial ID/NGUID first (to know if we need it)
-		disk_metadata_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_temp_gpt);
+		// Try to locate EXCELERO_DISK_METADATA partition in the primary entries
+		// buffer, and read serial ID/NGUID into disk_md
+		for (int k = 0; k < metadata_temp_gpt.max_n_entries; k++) {
+			if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_bufs.primary_entries[k])) {
+				if (ARE_UUID_EQ(&metadata_bufs.primary_entries[k].partition_type_guid,
+								&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
+					disk_metadata_partition = &metadata_bufs.primary_entries[k];
+					break;
+				}
+			}
+		}
 		if (disk_metadata_partition) {
 			uint64_t pbyte_s = disk_metadata_partition->pba_s * config->pblk_size;
-
 			memset(&disk_md, 0, sizeof(disk_md));
 			if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
 														 pbyte_s, &disk_md) == 0) {
@@ -450,8 +458,8 @@ static int export_gpt_to_json(int disk_fd,
 	// Mark file persistent BEFORE closing (sandbox: prevents auto-deletion)
 	SELF_TEST_mark_file_persistent(output_file);
 
-	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT",
-		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt);
+	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT",
+		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers);
 	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
 	if (has_metadata_gpt) {
 		fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, Device Identifiers\n");
@@ -650,12 +658,55 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 		goto out;
 	}
 
+	// 7. Write disk metadata structure (for serial ID/NGUID testing)
+	{
+		const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+		struct nvmeibt_disk_metadata	disk_metadata;
+		char							*dma_buffer = NULL;
+		int								n_bytes_write;
+		uint64_t						pbyte_s;
+
+		disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+		if (disk_md_partition) {
+			// Initialize disk metadata with test values
+			memset(&disk_metadata, 0, sizeof(disk_metadata));
+			disk_metadata.signature = DISK_METADATA_SIGNATURE;
+			disk_metadata.format_pblk_size = pblk_size;
+			disk_metadata.format_request_counter = 1;
+
+			// Test serial ID and NGUID
+			nvmeibt_strlcpy(disk_metadata.native_serial_str, "MOCK-SERIAL-12345678", sizeof(disk_metadata.native_serial_str));
+			disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
+			disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
+
+			// Calculate CRC
+			disk_metadata.crc32 = 0;
+			disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
+
+			// Write to disk
+			pbyte_s = disk_md_partition->pba_s * pblk_size;
+			n_bytes_write = roundup(sizeof(disk_metadata), pblk_size);
+			dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_disk_md, PAGE_SIZE, n_bytes_write);
+			memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
+
+			if (pwrite(fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
+				N_Ef(selftest_write_disk_md_failed, "Failed to write disk metadata to mock device @AUTO_ERRNO");
+				NNVMEIBT_BM_FREE(trace_selftest_disk_md_free, dma_buffer);
+				goto out;
+			}
+
+			NNVMEIBT_BM_FREE(trace_selftest_disk_md_free2, dma_buffer);
+			fprintf(stdout, "  - Disk metadata written (serial=%s)\n", disk_metadata.native_serial_str);
+		}
+	}
+
 	fsync(fd);
 	fprintf(stdout, "Mock NVMesh device created: %s (%lu blocks, %d KB)\n",
 			filepath, n_disk_blocks, (int)(n_disk_blocks * pblk_size / 1024));
 	fprintf(stdout, "  - Main GPT with EXCELERO_METADATA partition (LBA %lu-%lu)\n",
 			metadata_partition->pba_s, metadata_partition->pba_e);
-	fprintf(stdout, "  - Nested Metadata GPT with EXCELERO_DISK_METADATA partition\n\n");
+	fprintf(stdout, "  - Nested Metadata GPT with EXCELERO_DISK_METADATA partition\n");
+	fprintf(stdout, "  - Disk metadata with test serial ID and NGUID\n\n");
 
 	// Return the fd - caller will close it (which triggers sandbox auto-deletion)
 	rv = fd;
