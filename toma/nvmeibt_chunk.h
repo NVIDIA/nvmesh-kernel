@@ -33,32 +33,27 @@ struct nvmeibt_chunk {
 	int								config_tag;
 };
 
-static inline struct nvmeibt_block_device *nvmeibt_chunk_get_blkdev(struct nvmeibt_chunk *chunk)
-{
-	return (chunk ? chunk->its_block_device : NULL);
+static inline struct nvmeibt_block_device *nvmeibt_chunk_get_blkdev(const struct nvmeibt_chunk *c) {
+	return (c ? c->its_block_device : NULL);
 }
 
-static inline BOOL nvmeibt_chunk_is_conf_corrupted(struct nvmeibt_chunk *chunk)
-{
-	return (chunk && chunk->is_conf_corrupted);
+static inline bool nvmeibt_chunk_is_conf_corrupted(const struct nvmeibt_chunk *c) {
+	return (c && c->is_conf_corrupted);
 }
 
-static inline BOOL nvmeibt_chunk_is_being_deleted(struct nvmeibt_chunk *chunk)
-{
-	return (!chunk || nvmeibt_blkdev_is_being_deleted(chunk->its_block_device));
+static inline bool nvmeibt_chunk_is_being_deleted(const struct nvmeibt_chunk *c) {
+	return (!c || nvmeibt_blkdev_is_being_deleted(c->its_block_device));
 }
 
-BOOL nvmeibt_chunk_is_deprecated_in_config(struct nvmeibt_chunk *chunk);
-const union nvmeib_uuid *nvmeibt_chunk_UUID(struct nvmeibt_chunk *chunk);
-const char *nvmeibt_chunk_id_str(struct nvmeibt_chunk *chunk);
-const char *nvmeibt_chunk_get_blkdev_name(const struct nvmeibt_chunk *chunk);
-struct nvmeibt_chunk *nvmeibt_chunk_get_chunk_by_id(const union nvmeib_uuid *id, bool might_fail);
+bool nvmeibt_chunk_is_deprecated_in_config(struct nvmeibt_chunk *c);
+const union nvmeib_uuid *nvmeibt_chunk_UUID(struct nvmeibt_chunk *c);
+static inline const char *nvmeibt_chunk_id_str(const struct nvmeibt_chunk *c) { return (c ? c->urn_uuid.str : ""); }
+static inline const char *nvmeibt_chunk_get_blkdev_name(const struct nvmeibt_chunk *c) { return (c ? nvmeibt_blkdev_name(c->its_block_device) : "???"); }
 enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt_block_device *blkdev, int idx_in_vol, int config_tag, struct nvmeibt_chunk **output_chunk);
-int nvmeibt_chunk_remove(struct nvmeibt_chunk *chunk);
-void nvmeibt_chunk_mark_conf_corrupted(struct nvmeibt_chunk *chunk);
-void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *chunk, uint8_t trim_flag);
+int nvmeibt_chunk_remove(struct nvmeibt_chunk *c);
+void nvmeibt_chunk_mark_conf_corrupted(struct nvmeibt_chunk *c);
+void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *c, uint8_t trim_flag);
 void nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag);
-void nvmeibt_chunk_serialize_config_section(struct mm_chunk_conf *chunk_conf, struct nvmeibt_chunk *chunk);
 
 #endif // #ifndef NVMEIBT_CHUNK
 

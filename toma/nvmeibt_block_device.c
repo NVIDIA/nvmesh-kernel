@@ -177,7 +177,6 @@ void nvmeibt_block_devices_garbage_collect(bool *is_any_garbage_collected, bool 
 	struct nvmeibt_block_device	*block_device, *blkdev_for_GC = NULL;
 	int							n_blkdevs_needing_garbage_collection = 0;
 	int							i, j;
-	bool						is_praid_removable;
 	bool						is_blkdev_removable;
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
@@ -204,9 +203,9 @@ void nvmeibt_block_devices_garbage_collect(bool *is_any_garbage_collected, bool 
 		for (j = chunk->n_praids - 1; j >= 0; j--) {
 			struct nvmeibt_praid *praid = chunk->praids[j];
 			struct nvmeibt_disk_segment	*disk_segment;
+			bool is_praid_removable = true;
 			if (!praid)
 				continue;
-			is_praid_removable = 1;
 			XDLIST_FOREACH(disk_segment, &praid->praid_mgmt.all_segs_list) { // Not removing segs, happened before the call to this func.
 				N_Tf(t_h1_tmbdv, "praid=@UUID_LE has seg=@UUID_8. Cannot remove blkdev", nvmeibt_praid_UUID(praid), nvmeibt_seg_UUID_8(disk_segment));
 				is_praid_removable = false;

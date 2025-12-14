@@ -2332,27 +2332,19 @@ void nvmeibt_praid_dump(__attribute__((__unused__)) struct nvmeibt_praid *praid)
 	}																								\
 })
 
-int nvmeibt_praid_remove(struct nvmeibt_praid *praid)
-{
+int nvmeibt_praid_remove(struct nvmeibt_praid *praid) {
 	int rv = -1;
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
-
 	NFIN;
-
-	if (praid == NULL)
-		goto out;
-
-	N_Tf(jiu87yt, "Removing praid=@UUID_LE", nvmeibt_praid_UUID(praid));
-	nvmeibt_topology_leader_mark_recalc_required();
-	SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cybajh2);
-
-	NNVMEIBT_HASH_DEL_OBJ(bhuy763, &cur_topo->praids_hash, praid, praid);
-	// The assumption is that the surrounding objects (disk_segment & chunk) are also removed
-
-	NFREE_PRAID(sdr43e9, praid);
-	rv = 0;
-
-out:
+	if (praid) {
+		N_Tf(jiu87yt, "Removing praid=@UUID_LE", nvmeibt_praid_UUID(praid));
+		nvmeibt_topology_leader_mark_recalc_required();
+		SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cybajh2);
+		NNVMEIBT_HASH_DEL_OBJ(bhuy763, &cur_topo->praids_hash, praid, praid);
+		// The assumption is that the surrounding objects (disk_segment & chunk) are also removed
+		NFREE_PRAID(sdr43e9, praid);
+		rv = 0;
+	}
 	NFOUT;
 	return rv;
 }
