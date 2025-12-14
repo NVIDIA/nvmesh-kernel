@@ -1,12 +1,8 @@
-/* included for container_of */
 #include <pthread.h>
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
 #include "nvmeibt_bm.h"
 #include "nvmeibt_ds.h"
-
-#define USE_ABORT 1
-#define TERMINATE(x) if (USE_ABORT) nvmeibt_abort(ES_FATAL); else goto x
 
 struct memory_buffer {
 	struct xdlist	link;
@@ -32,12 +28,9 @@ struct nvmeibt_bm {
 	unsigned long allocated_size;
 	unsigned long report_size;
 	unsigned long report_step_size;
-};
+} *bm;									// Static root of memory allocator
 
-struct nvmeibt_bm *bm;
-
-static inline void update_allocated(int size)
-{
+static inline void update_allocated(int size) {
 	bm->allocated_size += size;
 	if (bm->allocated_size > bm->report_size) {
 		bm->report_size += bm->report_step_size;
@@ -45,30 +38,25 @@ static inline void update_allocated(int size)
 	}
 }
 
-static int lock(void)
-{
-	int rv;
-	if ((rv = pthread_mutex_lock(&bm->guard)) < 0) {
+static int lock(void) {
+	const int rv = pthread_mutex_lock(&bm->guard);
+	if (rv < 0) {
 		N_Ef(error_bm_lock, "Failed to lock buffer manager (@RV)", rv);
-		TERMINATE(out);
+		nvmeibt_abort(ES_FATAL);
 	}
-out:
 	return rv;
 }
 
-static int unlock(void)
-{
-	int rv;
-	if ((rv = pthread_mutex_unlock(&bm->guard)) < 0) {
+static int unlock(void) {
+	const int rv = pthread_mutex_unlock(&bm->guard);
+	if (rv < 0) {
 		N_Ef(error_bm_unlock, "Failed to unlock buffer manager (@RV)", rv);
-		TERMINATE(out);
+		nvmeibt_abort(ES_FATAL);
 	}
-out:
 	return rv;
 }
 
-static void free_buffer(struct memory_buffer *b)
-{
+static void free_buffer(struct memory_buffer *b) {
 	const int log2_len = nvmeibt_log2_int(b->len);
 	if (!b->is_in_use) {
 		N_Ef(psk2j4n, "!b->is_in_use b=@PTR b->data=@PTR", b, b->data);
@@ -85,8 +73,7 @@ static void free_buffer(struct memory_buffer *b)
 	// nvmeibt_bm_garbage_collect(1);	// NOTE: When debugging memory leak enable this line, otherwise you will not find who leaked it but the one who first used the buffer
 }
 
-void nvmeibt_bm_garbage_collect(int min_log_bytes)
-{
+void nvmeibt_bm_garbage_collect(int min_log_bytes) {
 	int log2_len = (min_log_bytes >= 1) ? min_log_bytes : 10;	// Default > 1[kb]
 	NFIN;
 	for (; log2_len < BM_BUFFER_POOL_SIZE; log2_len++) {
@@ -120,82 +107,39 @@ void nvmeibt_bm_garbage_collect(int min_log_bytes)
 	NFOUT;
 }
 
-int nvmeibt_bm_buffer_len(void *buffer)
-{
-	struct memory_buffer *b;
-	int rv = 0;
-
+int nvmeibt_bm_get_buf_alloc_size(const void *buffer) {
 	if (!buffer) {
-		N_Tf(trace_bm_nvmeibt_bm_buffer_len, "buffer=NULL");
-		goto out;
+		N_Tf(tbmbl0, "buffer=NULL");
+		return 0;
 	}
-
-	b = container_of(buffer, struct memory_buffer, data);
-	rv = b->len;
-
-out:
-	return rv;
-}
-
-int nvmeibt_bm_get_buf_alloc_size(void *buffer)
-{
-	struct memory_buffer	*b;
-	int						size = 0;
-	if (!buffer) {
-		N_Tf(trace_bm_nvmeibt_bm_get_buf_alloc_size, "buffer=NULL");
-		goto out;
-	}
-	b = (buffer ? container_of(buffer, struct memory_buffer, data) : NULL);
 	if (!bm) {
-		N_Ef(error_bm_nvmeibt_bm_get_buf_alloc_size, "No bm - potential memory leakage");
-		goto out;
+		N_Ef(tbmbl1, "No bm - potential memory leakage");
+		return 0;
 	}
-	if (b) {
-		size = b->len;
-	}
-out:
-	return size;
+	return (container_of(buffer, struct memory_buffer, data))->len;
 }
 
-void nvmeibt_bm_free_buffer(void *buffer)
-{
-	struct memory_buffer *b;
+void nvmeibt_bm_free_buffer(void *buffer) {
+	struct memory_buffer *b = container_of(buffer, struct memory_buffer, data);
 	if (!buffer) {
-		N_Tf(trace_bm_nvmeibt_bm_free_buffer, "buffer=NULL");
-		goto out;
+		N_Tf(tbmbl2, "buffer=NULL");
+		return;
 	}
-	b = (buffer ? container_of(buffer, struct memory_buffer, data) : NULL);
 	if (!bm) {
-		N_Ef(error_bm_nvmeibt_bm_free_buffer, "No bm - potential memory leakage");
-		goto out;
+		N_Ef(tbmbl3, "No bm - potential memory leakage");
+		return;
 	}
-	if (b) {
-		N_Tf(trace_1_bm_nvmeibt_bm_free_buffer, "return address=@ADDRESS_PTR to pool=@POOL", buffer, b);
-		free_buffer(b);
-	}
-	else {
-		N_Ef(error_1_bm_nvmeibt_bm_free_buffer, "container_of(@BUFFER)=NULL", buffer);
-	}
-
-out:
-	if (0) {
-		NFOUT;
-	}
+	N_Tf(tbmbl4, "return address=@ADDRESS_PTR to pool=@POOL", buffer, b);
+	free_buffer(b);
 }
 
-static struct memory_buffer *allocate_buffer(int unaligned_len)
-{
-	buffer_pool_t			*head;
+static struct memory_buffer *allocate_buffer_unsafe(int unaligned_len) {
 	struct memory_buffer	*b;
-	int						size;
-	int						log2_len;
-	int 					len;
-
-	log2_len = nvmeibt_log2_int(unaligned_len);
-	len = (1 << log2_len);
-	head = &bm->buffer_pool[log2_len];
+	const int				log2_len = nvmeibt_log2_int(unaligned_len);
+	const int 				len = (1 << log2_len);
+	buffer_pool_t *			head = &bm->buffer_pool[log2_len];
 	if (XDLIST_EMPTY(head)) {
-		size = offsetof(struct memory_buffer, data) + len;
+		const int size = offsetof(struct memory_buffer, data) + len;
 		b = NNVMEIBT_TOMA_MALLOC(trace_bm_allocate_buffer, size);
 		update_allocated(size);
 		N_Tf(trace_1_bm_allocate_buffer, "MALLOC: log2_len=@LOG2_LEN len=@LEN", log2_len, len);
@@ -213,68 +157,53 @@ static struct memory_buffer *allocate_buffer(int unaligned_len)
 	return b;
 }
 
-void *nvmeibt_bm_allocate_buffer_(int len)
-{
+static void *nvmeibt_bm_allocate_buffer_(int len) {
 	struct memory_buffer *b;
-	void *p;
-
 	lock();
-	b = allocate_buffer(len);
+	b = allocate_buffer_unsafe(len);
 	unlock();
 	if (b) {
-		p = b->data;
+		void *p = (void *)b->data;
 		memset(p, 0, len);
+		return p;
 	}
-	else {
-		p = NULL;
-	}
-	return p;
+	return NULL;
 }
 
-void *nvmeibt_bm_allocate_buffer(int len)
-{
-	void *p = NULL;
+void *nvmeibt_bm_allocate_buffer(int len) {
+	void *p;
 	if (len > BM_MAX_BUFFER_SIZE) {
-		N_Ef(error_bm_nvmeibt_bm_allocate_buffer, "len=@LEN > @LEN)", len, BM_MAX_BUFFER_SIZE);
+		N_Ef(tbmbla, "len=@LEN > @LEN)", len, BM_MAX_BUFFER_SIZE);
 		nvmeibt_abort(ES_FATAL);
 	}
 	if (!bm) {
-		N_Ef(error_1_bm_nvmeibt_bm_allocate_buffer, "No bm");
+		N_Ef(tbmblb, "No bm");
 		nvmeibt_abort(ES_FATAL);
 	}
-
 	p = nvmeibt_bm_allocate_buffer_(len);
-	N_Tf(trace_bm_nvmeibt_bm_allocate_buffer, "allocate @PPP len @LEN", p, len);
+	N_Tf(tbmblc, "allocate @PPP len @LEN", p, len);
 	return p;
 }
 
-void* nvmeibt_bm_calloc_buffer(int len)
-{
+void* nvmeibt_bm_calloc_buffer(int len) {
 	void *p = nvmeibt_bm_allocate_buffer(len);
-	if (p) {
+	if (p)
 		memset(p, 0, len);
-	}
 	return p;
 }
 
-static struct memory_buffer *allocate_dma_buffer(int requested_len)
-{
-	buffer_pool_t			*head;
-	struct memory_buffer	*b = NULL;
-	void					*q = 0;
-	int						log2_len;
-	int 					len;
-
-	log2_len = max(nvmeibt_log2_int(requested_len), BM_DMA_ALIGNMENT_BITS);
-	len = (1 << log2_len);
-	head = &bm->dma_buffer_pool[log2_len];
+static struct memory_buffer *allocate_dma_buffer_unsafe(int requested_len) {
+	struct memory_buffer	*b;
+	const int				log2_len = max(nvmeibt_log2_int(requested_len), BM_DMA_ALIGNMENT_BITS);
+	const int				len = (1 << log2_len);
+	buffer_pool_t *			head = &bm->dma_buffer_pool[log2_len];
 	if (XDLIST_EMPTY(head)) {
+		void *q = 0;
 		NNVMEIBT_TOMA_POSIX_MEMALIGN(trace_bm_allocate_dma_buffer, &q, BM_DMA_ALIGNMENT_SIZE, len + BM_DMA_ALIGNMENT_SIZE);
 		b = (struct memory_buffer *)(q + BM_DMA_ALIGNMENT_SIZE - offsetof(struct memory_buffer, data) );
-		N_Tf(trace_1_bm_allocate_dma_buffer, "POSIX_MEMALIGN: log2_len=@LOG2_LEN len=@LEN", log2_len, len);
+		N_Tf(tbmblj, "POSIX_MEMALIGN: log2_len=@LOG2_LEN len=@LEN", log2_len, len);
 	} else {
 		b = XDLIST_FIRST(head);
-		//b = (q + ALIGNMENT_SIZE - sizeof(*b));
 		XDLIST_DEL(&b->link);
 	}
 	if (b) {
@@ -282,50 +211,44 @@ static struct memory_buffer *allocate_dma_buffer(int requested_len)
 		b->is_dma = 1;
 		b->is_in_use = 1;
 	} else {
-		N_Ef(error_bm_allocate_dma_buffer, "Failed to allocate small buffer");
+		N_Ef(tbmblk, "Failed to allocate small buffer");
 	}
 	return b;
 }
 
-void *nvmeibt_bm_allocate_dma_buffer_(int len)
-{
+void *nvmeibt_bm_allocate_dma_buffer_(int len) {
 	struct memory_buffer *b;
-	if ((b = allocate_dma_buffer(len))) {
-		void *p = b->data;
+	lock();
+	b = allocate_dma_buffer_unsafe(len);
+	unlock();
+	if (b) {
+		void *p = (void *)b->data;
 		memset(p, 0, len);
 		return p;
 	}
 	return NULL;
 }
 
-void *nvmeibt_bm_allocate_dma_buffer(int alignment, int len)
-{
-	void *p = NULL;
+void *nvmeibt_bm_allocate_dma_buffer(int alignment, int len) {
+	void *p;
 	if (!bm) {
-		N_Ef(error_bm_nvmeibt_bm_allocate_dma_buffer, "No bm");
-		goto out;
+		N_Ef(tbmbll, "No bm");
+		return NULL;
 	}
 	if (len > BM_MAX_BUFFER_SIZE) {
-		N_Ef(error_1_bm_nvmeibt_bm_allocate_dma_buffer, "len=@LEN > @LEN)", len, BM_MAX_BUFFER_SIZE);
-		goto out;
+		N_Ef(tbmblm, "len=@LEN > @LEN)", len, BM_MAX_BUFFER_SIZE);
+		return NULL;
 	}
 	if (alignment > BM_DMA_ALIGNMENT_SIZE) {
-		N_Ef(error_2_bm_nvmeibt_bm_allocate_dma_buffer, "bm dma alignment is @ALIGNMENT (requested @ALIGNMENT)", BM_DMA_ALIGNMENT_SIZE, alignment);
-		goto out;
+		N_Ef(tbmbln, "bm dma alignment is @ALIGNMENT (requested @ALIGNMENT)", BM_DMA_ALIGNMENT_SIZE, alignment);
+		return NULL;
 	}
-
-	lock();
 	p = nvmeibt_bm_allocate_dma_buffer_(len);
-	N_Tf(trace_bm_nvmeibt_bm_allocate_dma_buffer, "allocate @PPP, len @LEN", p, len);
-	unlock();
-
-out:
-	// FOUT;
+	N_Tf(tbmblo, "allocate @PPP, len @LEN", p, len);
 	return p;
 }
 
-static void init_buffer_pools(void)
-{
+static void init_buffer_pools(void) {
 	unsigned int i;
 	NFIN;
 	for (i = 0; i < ARRAY_SIZE(bm->buffer_pool); ++i) {
@@ -337,8 +260,7 @@ static void init_buffer_pools(void)
 	NFOUT;
 }
 
-static void free_buffer_pools(void)
-{
+static void free_buffer_pools(void) {
 	struct memory_buffer *p;
 	unsigned int i;
 	NFIN;
@@ -358,41 +280,30 @@ static void free_buffer_pools(void)
 	NFOUT;
 }
 
-int nvmeibt_bm_create(void)
-{
+int nvmeibt_bm_create(void) {
 	int rv = -1;
 	pthread_mutexattr_t attr;
-
 	NFIN;
-
 	if (bm) {
 		N_Ef(error_bm_nvmeibt_bm_create, "bm already exist");
 		goto out;
 	}
-
 	bm = NNVMEIBT_TOMA_CALLOC(trace_bm_nvmeibt_bm_create, 1, sizeof(*bm));
-
 	pthread_mutexattr_init(&attr);
 	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 	if (pthread_mutex_init(&bm->guard, &attr) < 0) {
 		N_Ef(error_1_bm_nvmeibt_bm_create, "Failed to create beffer manager guard");
-		goto free_bm;
+		NNVMEIBT_TOMA_FREE(trace_1_bm_nvmeibt_bm_create, bm);
+	} else {
+		init_buffer_pools();
+		rv = 0;
 	}
-
-	init_buffer_pools();
-	rv = 0;
-	goto out;
-
-free_bm:
-	NNVMEIBT_TOMA_FREE(trace_1_bm_nvmeibt_bm_create, bm);
-
 out:
 	NFOUT;
 	return rv;
 }
 
-void nvmeibt_bm_destroy(void)
-{
+void nvmeibt_bm_destroy(void) {
 	if (bm) {
 		free_buffer_pools();
 		NNVMEIBT_TOMA_FREE(tombmd2, bm);
