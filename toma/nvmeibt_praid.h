@@ -8,7 +8,7 @@
 #include "clnt/nvmeibt_client_protocol.h"
 #include "nvmeibt_praid_basics.h"
 #include "nvmeibt_disk_segment.h"
-#include "nvmeibt_chunk.h"
+#include "vol/nvmeibt_chunk.h"
 
 struct nvmeibt_praid_mgmt {
 	XDLIST_DECLARE(, struct nvmeibt_disk_segment, praid_all_segs_link) all_segs_list;

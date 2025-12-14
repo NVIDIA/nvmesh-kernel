@@ -75,11 +75,9 @@ struct nvmeibt_topology;
 #include "clnt/nvmeibt_client.h"
 #include "nvmeibt_praid.h"
 #include "nvmeibt_raft.h"
-#include "nvmeibt_block_device.h"
 #include "nvmeibt_nic.h"
 #include "nvmeibt_disk.h"
 #include "nvmeibt_node.h"
-#include "nvmeibt_chunk.h"
 #include "nvmeibt_local_disk.h"
 #include "nvmeibt_local_nic.h"
 

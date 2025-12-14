@@ -187,6 +187,10 @@
 		"nvmeibt_nvme_defines.h": "c",
 		"nvmeib_trace.h": "c",
 		"gen_events.h": "c",
-		"nvmeib_trace_userspace.h": "c"
+		"nvmeib_trace_userspace.h": "c",
+		"nvmeibt_praid.h": "c",
+		"nvmeibt_chunk.h": "c",
+		"nvmeibt_node.h": "c",
+		"nvmeib_jdr.h": "c"
 	}
 }

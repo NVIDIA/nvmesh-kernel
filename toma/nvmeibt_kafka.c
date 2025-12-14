@@ -9,7 +9,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_params.h"
 #include "nvmeibt_uuid.h"
-#include "nvmeibt_block_device.h"
+#include "vol/nvmeibt_block_device.h"
 #include "nvmeibt_kafka.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_raft.h"
