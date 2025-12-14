@@ -9,7 +9,7 @@
 #		define FOUND_SYS_RANDOM_H
 #	endif
 #endif
-#include "../common/nvmeib_shared.h"
+#include "../../common/nvmeib_shared.h"
 #include "nvmeibt_uuid.h"
 
 union nvmeib_uuid nvmeibt_dummy_uuid = {.ll[0]=0, .ll[1]=0xfff1fff2fff3fff4};

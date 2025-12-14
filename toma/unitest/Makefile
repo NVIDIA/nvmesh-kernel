@@ -118,7 +118,7 @@ $(TDIR)/nvmeibt_toma.c \
 $(TDIR)/nvmeibt_topo_bin.c \
 $(TDIR)/nvmeibt_topology.c \
 $(TDIR)/nvmeibt_utils.c \
-$(TDIR)/nvmeibt_uuid.c \
+$(TDIR)/utils/nvmeibt_uuid.c \
 $(TDIR)/nvmeibt_wq.c \
 $(TDIR)/clnt/nvmeibt_client_protocol.c \
 $(TDIR)/clnt/nvmeibt_client.c \

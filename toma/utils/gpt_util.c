@@ -17,7 +17,7 @@
 #include "../nvmeibt_read_config.h"
 #include "../nvmeibt_str.h"
 #include "../nvmeibt_local_disk.h"
-#include "../nvmeibt_uuid.h"
+#include "nvmeibt_uuid.h"
 #include "../nvmeibt_mm_json.h"
 #include "../interfaces/srvr/nvmeibt_srvr_proc.h"	// DISKS_INFO_FILE
 
