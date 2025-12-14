@@ -221,12 +221,7 @@ void *nvmeibt_bm_allocate_dma_buffer_(int len) {
 	lock();
 	b = allocate_dma_buffer_unsafe(len);
 	unlock();
-	if (b) {
-		void *p = (void *)b->data;
-		memset(p, 0, len);
-		return p;
-	}
-	return NULL;
+	return b ? (void *)b->data : NULL;
 }
 
 void *nvmeibt_bm_allocate_dma_buffer(int alignment, int len) {

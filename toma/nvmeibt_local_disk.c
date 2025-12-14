@@ -2306,8 +2306,7 @@ static void format_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	// Clear out the MBR
-	dma_buffer = NNVMEIBT_BM_ALIGNED_ALLOC(trace_local_disk_format_disk_wrapper, PAGE_SIZE, PAGE_SIZE*2);
-	memset(dma_buffer, 0, PAGE_SIZE*2);
+	dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_local_disk_format_disk_wrapper, PAGE_SIZE, PAGE_SIZE*2);
 
 	if (NNVMEIBT_PWRITE(warn_1_local_disk_format_disk_wrapper, entry->fd, dma_buffer, PAGE_SIZE*2, 0, 0) < 0) {
 		N_Wf(humedy4, "Failed to write size @SIZEOF at offset 0x0 fd=@FD disk=@STR buff=@BUFFER (@AUTO_ERRNO)", PAGE_SIZE*2, entry->fd, entry->ld_display, (void *) dma_buffer);
