@@ -245,7 +245,7 @@ set $i=$i+1
 end
 ```
 5. `cd /tmp/logs && ./pager.py --toma | less`
-6. Daniel HsH: there is a script [here](./extract_log_from_core.sh) Not sure how to use it in this section
+6. Daniel HsH: there is a script [here](./scripts/extract_log_from_core.sh) Not sure how to use it in this section
 
 #### Convert TOMA persistence to json
 1. Use `scripts/toma_persistence_to_JSON.sh`
