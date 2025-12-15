@@ -142,7 +142,7 @@ echo "Starting container using nvmesh-build-$DISTRO image"
 CONT_UUID=`docker run -dit nvmesh-build-$DISTRO bash`
 echo "UUID: $CONT_UUID"
 # Get kernel version
-KERN_VER=`docker exec $CONT_UUID bash -c "ls /lib/modules" | tr -d '\r\n'`
+KERN_VER=`docker exec $CONT_UUID bash -c "ls /lib/modules | head -1" | tr -d '\r\n'`
 # Make the build dir
 docker exec $CONT_UUID bash -c "mkdir -p $BUILD_DIR"
 # Rsync into docker container
