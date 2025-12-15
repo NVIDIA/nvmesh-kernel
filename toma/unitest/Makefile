@@ -12,6 +12,7 @@ ifeq ($(USE_CLANG)_$(shell clang -v 2>&1 | grep -c "clang version"), 1_1)
 	CC=clang
 else
 	CC=gcc
+	CXX=g++
 	CFLAGS += -Wno-old-style-declaration
 endif
 
@@ -75,6 +76,8 @@ ifeq ($(USE_SANITIZERS),1)
 	LDFLAGS += -fno-sanitize=alignment
 endif
 
+CXXFLAGS = -std=gnu++20 $(filter-out -std=% -Wstrict-prototypes -Wno-old-style-declaration -Wdeclaration-after-statement, $(CFLAGS))
+
 # ********** Define Files participating in the build *********
 # Simulator files
 SOURCES :=
@@ -136,7 +139,6 @@ $(TDIR)/interfaces/network/nvmeibt_event_tracker.c \
 
 #$(TDIR)/interfaces/os/nvmeibt_os_signal.c
 
-BACKUPS =$(SOURCES:.c=.~)
 EXE_NAME = nvmeibt_toma
 
 OBJ_DIR_ROOT=99bin
@@ -147,7 +149,11 @@ else
     OBJ_DIR=./$(OBJ_DIR_ROOT)/debug/obj
 endif
 $(shell mkdir -p $(OBJ_DIR))
-OBJECTS =$(patsubst %.c, $(OBJ_DIR)/%.o, $(SOURCES))
+C_SOURCES = $(filter %.c, $(SOURCES))
+CXX_SOURCES = $(filter %.cpp, $(SOURCES))
+C_OBJECTS =$(patsubst %.c, $(OBJ_DIR)/%.o, $(C_SOURCES))
+CXX_OBJECTS =$(patsubst %.cpp, $(OBJ_DIR)/%.o, $(CXX_SOURCES))
+OBJECTS = $(C_OBJECTS) $(CXX_OBJECTS)
 DEPEND_FILES_ALL = $(OBJECTS:.o=.d)
 
 # Generated disk images - uncompressed as part of the build process, and read by sandbox code at runtime.
@@ -164,6 +170,7 @@ define print_compilation_info
 	@printf "\e[0;32mCompilation info\e[0;0m: Release=$(BUILD_RELEASE), COMMIT_ID=$(COMMIT_ID), $(CC), TRACE_LEVEL=$(TRACE_LEVEL) HT=$(HT)|\n"
     @printf "\t* Proj    | $(ROOT_DIR_ABS) [$(ROOT_DIR_RLTV)]\n"
     @printf "\t* CFLAGS  | $(CFLAGS)\n"
+    @printf "\t* CXXFLAGS| $(CXXFLAGS)\n"
     @printf "\t* INCLUDS | $(INCLUDES)\n"
     @printf "\t* DFLAGS  | $(LDFLAGS)\n"
     @printf "===========================================\n"
@@ -186,12 +193,16 @@ MERGE_DICTIONARY := $(abspath $(SSDA)/tools/merge_dictionary.sh)
 FILE_TR_JSON=$(OBJ_DIR)/nvmeibt.trace.json
 PWD=$(shell pwd)
 
-define set_per_file_cflags =
+define set_per_file_flags =
 	CFLAGS_$1 += -D__FILE_LITERAL__=$(1:.c=_c)
+	CXXFLAGS_$1 += -D__FILE_LITERAL__=$(1:.cpp=_cpp)
 endef
-$(foreach prog,$(SOURCES),$(eval $(call set_per_file_cflags,$(shell basename $(prog)))))
+$(foreach prog,$(SOURCES),$(eval $(call set_per_file_flags,$(shell basename $(prog)))))
 define per_file_cflags_varval =
 	$(CFLAGS_$(shell basename $1))
+endef
+define per_file_cxxflags_varval =
+	$(CXXFLAGS_$(shell basename $1))
 endef
 
 FMTLIB := libfmtrs.so
@@ -203,6 +214,11 @@ $(OBJ_DIR)/%.i: %.c
 	@echo "Preprocessing $< -> $@"
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) $(call per_file_cflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
+
+$(OBJ_DIR)/%.i: %.cpp
+	@echo "Preprocessing $< -> $@"
+	@mkdir -p $(dir $@)
+	@$(CXX) $(CXXFLAGS) $(call per_file_cxxflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
 
 %.trace.json: %.i $(MERGE_DICTIONARY) $(TRACER_PP)
 	@echo "Generating trace JSON $@"
@@ -267,10 +283,17 @@ $(foreach obj,$(OBJECTS),$(eval $(call obj_dep_template,$(obj))))
 
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	@echo "Compiling $< -> $@"
+	@echo "Compiling C   $< -> $@"
 	@OBJ_REAL=$$(cd $(dir $@) && pwd)/$(notdir $@); \
 	GEN_HEADER=$$(echo "$$OBJ_REAL" | sed 's/\.o$$/\.c_gen_events.h/'); \
 	$(CC) $(CFLAGS) $(call per_file_cflags_varval,$<) $(INCLUDES) -include $$GEN_HEADER -c $< -MD -MP -o $@
+
+$(OBJ_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	@echo "Compiling C++ $< -> $@"
+	@OBJ_REAL=$$(cd $(dir $@) && pwd)/$(notdir $@); \
+	GEN_HEADER=$$(echo "$$OBJ_REAL" | sed 's/\.o$$/\.c_gen_events.h/'); \
+	$(CXX) $(CXXFLAGS) $(call per_file_cxxflags_varval,$<) $(INCLUDES) -include $$GEN_HEADER -c $< -MD -MP -o $@
 
 define clean_compilation_intermediate
 	@printf "+-->Cleaning recursive dir |\e[1;45m${1}/*/.[oda]\e[0;0m|\n"
@@ -287,7 +310,7 @@ endef
 clean:
 	@printf "+-->Cleaning |\e[1;45mall\e[0;0m|\n"
 	$(call clean_compilation_intermediate,$(OBJ_DIR_ROOT))
-	@rm -f $(OBJECTS) $(BACKUPS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
+	@rm -f $(OBJECTS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 	@rm -f $(AUTOGEN_TARGETS)
 	@printf "+-->Removing |\e[1;45mgenerated trace files\e[0;0m|\n"
 	@find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
