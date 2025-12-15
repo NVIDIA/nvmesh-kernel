@@ -555,11 +555,16 @@ static int export_gpt_to_json(int disk_fd,
 	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT",
 		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers);
 	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
+
+	// Build status message based on what was actually exported
+	fprintf(stdout, "  - Exported: pMBR, Main GPT");
 	if (has_metadata_gpt) {
-		fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, Device Identifiers\n");
-	} else {
-		fprintf(stdout, "  - Exported: pMBR, Main GPT (no Metadata GPT found)\n");
+		fprintf(stdout, ", Metadata GPT");
 	}
+	if (has_device_identifiers) {
+		fprintf(stdout, ", Device Identifiers");
+	}
+	fprintf(stdout, "\n");
 
 	// Warn if mismatch or overlaps detected
 	if (is_mismatch) {
