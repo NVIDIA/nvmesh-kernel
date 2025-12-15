@@ -81,6 +81,13 @@ static const char *gpt_copy_option_str(enum GPT_COPY_OPTION option)
 	}
 }
 
+// O_DIRECT mode (for device I/O)
+enum O_DIRECT_MODE {
+	O_DIRECT_AUTO = 0,			// Auto-detect: block device=yes, regular file=no
+	O_DIRECT_FORCE_ON,			// Force O_DIRECT even for files (may fail with EINVAL)
+	O_DIRECT_FORCE_OFF			// Disable O_DIRECT even for block devices
+};
+
 // Configuration structure for gpt_util operation
 struct gpt_util_config {
 	// Action
@@ -109,7 +116,94 @@ struct gpt_util_config {
 	// JSON apply options (for ACTION_APPLY_JSON)
 	char					apply_json_file[256];	// Input JSON filename to apply
 	BOOL					write_mode;				// true = write changes, false = dry-run (default)
+
+	// I/O options
+	enum O_DIRECT_MODE		o_direct_mode;			// O_DIRECT behavior
 };
+
+// Check if operation is read-only (no disk modifications)
+// Considers both action type and mode (e.g., dry-run vs write)
+static BOOL is_action_read_only(struct gpt_util_config *config)
+{
+	switch (config->action) {
+	case ACTION_DISPLAY_GPT:
+	case ACTION_DISPLAY_MBR:
+	case ACTION_CHECK_EXCELERO:
+	case ACTION_EXPORT_JSON:
+		return true;
+	case ACTION_APPLY_JSON:
+		return !config->write_mode;		// Dry-run = readonly, write = readwrite
+	case ACTION_FIX_GPT:
+	case ACTION_FIX_MBR:
+	case ACTION_UPGRADE_GPT:
+		return false;
+	default:
+		return false;
+	}
+}
+
+// Determine if we should use O_DIRECT based on file type and user preference
+static BOOL should_use_o_direct(const char *dev_path, enum O_DIRECT_MODE mode)
+{
+	struct stat st;
+
+	// Explicit override
+	if (mode == O_DIRECT_FORCE_ON) {
+		return true;
+	}
+	if (mode == O_DIRECT_FORCE_OFF) {
+		return false;
+	}
+
+	// Auto-detect based on file type
+	if (stat(dev_path, &st) < 0) {
+		// If stat fails, default to safe choice (no O_DIRECT)
+		return false;
+	}
+
+	// Block device: use O_DIRECT (preserves production behavior)
+	if (S_ISBLK(st.st_mode)) {
+		return true;
+	}
+
+	// Regular file: don't use O_DIRECT (avoids EINVAL due to alignment issues)
+	return false;
+}
+
+/**
+ * Open target device with appropriate flags based on action and file type
+ * Returns fd on success, -1 on error
+ */
+static int open_target_device(struct gpt_util_config *config)
+{
+	int		open_flags = O_EXCL;
+	BOOL	use_o_direct;
+	BOOL	is_readonly;
+	int		fd;
+
+	use_o_direct = should_use_o_direct(config->device_path, config->o_direct_mode);
+	is_readonly = is_action_read_only(config);
+
+	// Determine access mode
+	open_flags |= (is_readonly ? O_RDONLY : O_RDWR);
+
+	// Add O_DIRECT if appropriate
+	if (use_o_direct) {
+		open_flags |= __O_DIRECT;
+	}
+
+	N_Tf(open_device_flags, "Opening dev=@STR flags=@X (readonly=@INT o_direct=@INT)",
+		 config->device_path, open_flags, is_readonly, use_o_direct);
+
+	fd = open(config->device_path, open_flags);
+	if (fd < 0) {
+		N_Ef(run_gpt_util_open_failed, "Unable to open @STR flags=@X @AUTO_ERRNO",
+			 config->device_path, open_flags);
+		return -1;
+	}
+
+	return fd;
+}
 
 // Forward declarations
 static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
@@ -1587,6 +1681,11 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "Apply Options:\n");
 	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n\n");
 
+	fprintf(stdout, "I/O Options:\n");
+	fprintf(stdout, "  --direct                    Force O_DIRECT even for regular files (may fail)\n");
+	fprintf(stdout, "  --no-direct                 Disable O_DIRECT even for block devices\n");
+	fprintf(stdout, "  (default: auto)             Block devices use O_DIRECT, files don't\n\n");
+
 	fprintf(stdout, "Testing:\n");
 	fprintf(stdout, "  -T, --self-test             Run comprehensive self-test suite\n");
 }
@@ -1621,6 +1720,8 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"output-json",				required_argument,	0,	'J'},
 		{"apply-from",				required_argument,	0,	'A'},
 		{"write",					no_argument,		0,	'W'},
+		{"direct",					no_argument,		0,	'D'},
+		{"no-direct",				no_argument,		0,	'N'},
 
 		{0, 0, 0, 0}
 	};
@@ -1853,6 +1954,14 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		case 'W':
 			config->write_mode = true;
 			fprintf(stdout, "Write mode: ENABLED (changes will be written to disk)\n");
+			break;
+		case 'D':
+			config->o_direct_mode = O_DIRECT_FORCE_ON;
+			fprintf(stdout, "I/O mode: Force O_DIRECT (may fail for regular files)\n");
+			break;
+		case 'N':
+			config->o_direct_mode = O_DIRECT_FORCE_OFF;
+			fprintf(stdout, "I/O mode: Disable O_DIRECT\n");
 			break;
 		case 'a':
 			nvmeibt_strlcpy(config->device_path, optarg, sizeof(config->device_path));
@@ -2563,6 +2672,7 @@ static int run_gpt_util_op(int argc, char *argv[])
 	memset(&config, 0, sizeof(config));
 	config.action = ACTION_DISPLAY_GPT;		// Default action
 	config.gpt_copy_option = GPT_COPY_OPTION_PRIMARY;
+	config.o_direct_mode = O_DIRECT_AUTO;	// Auto-detect O_DIRECT based on file type
 
 	if (argc < 2) {
 		print_usage(argv);
@@ -2581,8 +2691,8 @@ static int run_gpt_util_op(int argc, char *argv[])
 	}
 
 	// ==================== PHASE 3: SETUP (OPEN DEVICE) ====================
-	if ((disk_fd = open(config.device_path, O_RDWR | O_EXCL | __O_DIRECT)) < 0) {
-		N_Ef(run_gpt_util_open_failed, "Unable to open @STR with O_EXCL @AUTO_ERRNO", config.device_path);
+	disk_fd = open_target_device(&config);
+	if (disk_fd < 0) {
 		goto out;
 	}
 
