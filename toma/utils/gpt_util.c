@@ -1638,6 +1638,40 @@ static int run_self_test(void)
 		fprintf(stdout, "\n>>> SELF-TEST %d: PASSED <<<\n", test_idx);
 	}
 
+	if (1) {
+		// ===== TEST 7: JSON Export =====
+		test_argv[0] = "gpt_util -a <path> -J <file>";
+		test_argv[1] = "-a";
+		test_argv[2] = (char *)test_device_path;
+		test_argv[3] = "-J";
+		test_argv[4] = "./test_export.json";
+		test_argc = 5;
+
+		if (SELF_TEST_run_test_case(&test_idx, "JSON Export",
+									 test_device_path,
+									 SELF_TEST_generate_and_open_mock_nvmesh_disk,
+									 test_argv, test_argc) < 0) {
+			goto out;
+		}
+		SELF_TEST_mark_file_persistent("./test_export.json");
+
+		// ===== TEST 8: JSON Apply (Dry-Run) =====
+		test_argv[0] = "gpt_util -a <path> --apply-from <file>";
+		test_argv[1] = "-a";
+		test_argv[2] = (char *)test_device_path;
+		test_argv[3] = "--apply-from";
+		test_argv[4] = "./test_export.json";
+		test_argc = 5;
+
+		// Relies on Test 7's JSON file, but creates fresh device (tests idempotence)
+		if (SELF_TEST_run_test_case(&test_idx, "JSON Apply - Dry-Run",
+									 test_device_path,
+									 SELF_TEST_generate_and_open_mock_nvmesh_disk,
+									 test_argv, test_argc) < 0) {
+			goto out;
+		}
+	}
+
 	// ===== SUMMARY =====
 	fprintf(stdout, "\n");
 	fprintf(stdout, "============================================================\n");
