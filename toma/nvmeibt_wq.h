@@ -60,7 +60,7 @@ struct nvmeibt_wq_entry {
 	struct xdlist 			link;			/* Temp: During exec, Attach to work queue linked list */
 
 	// User extension (extra params, below). Not part of basic work-queue design
-	struct nvmeibt_wq_entry	*once_wq_entry;	/* if submitted via run_once, stores the pointer to the once_wq_entry */
+	struct nvmeibt_wq_entry	*chained;		/* Allow work to depend on another work. (Used when work submitted via run_once, stores the pointer to the once_wq_entry) */
 	unsigned int			last_CHANGE_no; /* Needed for WQ's that chain as a result other WQ's to continue their logical execution*/
 };
 

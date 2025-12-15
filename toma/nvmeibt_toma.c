@@ -903,8 +903,7 @@ static void udev_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-void wq_entry_free_after_wakeup(struct nvmeibt_wq_entry *wq_entry)
-{
+static void wq_entry_free_after_wakeup(struct nvmeibt_wq_entry *wq_entry) {
 	/* finalize() called even if canceled: should test and handle */
 	if (wq_entry->finalize)
 		wq_entry->finalize(wq_entry);
@@ -919,14 +918,10 @@ static void toma_wakeup_wq(void *ptr)
 
 	NFIN;
 
-	N_Tf(trace_toma_toma_wakeup_wq, "Handling event type=@TYPE_STR is_cancel=@IS_CANCEL",
-		 wq_entry->type, wq_entry->is_canceled);
-
+	while (wq_entry->chained)
+		wq_entry = wq_entry->chained;		// Actually does only 1 loop for once_wq_entry
+	N_Tf(ttwuwq0, "Handling event type=@TYPE_STR is_cancel=@IS_CANCEL", wq_entry->type, wq_entry->is_canceled);
 	last_wq_event_timespec = nvmeibt_global_get_cur_event_start_time();
-
-	if (wq_entry->once_wq_entry)
-		wq_entry = wq_entry->once_wq_entry;
-
 	wq_entry_free_after_wakeup(wq_entry);
 	NFOUT;
 }
@@ -1100,7 +1095,7 @@ out_unlocked:
 void nvmeibt_toma_trigger_wakeup_handle_err(struct nvmeibt_wq_entry *wq_entry) {
 	const int wakeup_rv = nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, (void *)wq_entry);
 	if (wakeup_rv < 0) {
-		wq_entry_free_after_wakeup(wq_entry);		// Just free the memory, toma main thread cannot wakeup
+		wq_entry_free_after_wakeup(wq_entry);		// Just free the memory, toma main thread cannot wakeup, This is dangerous as finalize/free is called from wq context, and for run once wq this will actually get stuck
 	}
 }
 

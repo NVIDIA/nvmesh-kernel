@@ -258,7 +258,7 @@ out:
 
 int nvmeibt_wq_addw(struct nvmeibt_wq *wq, struct nvmeibt_wq_entry *entry) {
 	int rv = -1;
-	NTOMA_ASSERT(error_wq_nvmeibt_wq_addw, entry != NULL, "wq entry is NULL");
+	NTOMA_ASSERT(error_wq_nvmeibt_wq_addw, (entry != NULL) && (!entry->is_canceled) && (!entry->chained), "Invalid input wq entry");
 	if (lock(wq)) {
 		goto out;
 	}
@@ -367,8 +367,8 @@ void nvmeibt_wq_drain(struct nvmeibt_wq *wq) {
 /*****************************************************************************/
 struct once_wq_entry {						// wrap wq_entry that is intended to be run once using an ad-hoc dedicated workqueue (see below).
 	char						type[32];
-	struct nvmeibt_wq_entry		*orig_entry;
-	struct nvmeibt_wq_entry		wq_entry;
+	struct nvmeibt_wq_entry		*orig_entry;	// Pointer to original entry
+	struct nvmeibt_wq_entry		wq_entry;		// Run once work queue entry, will be pointed to as (orig_entry->chained)
 };
 
 static void wq_run_once_execute(struct nvmeibt_wq_entry *wq_entry) {
@@ -381,6 +381,7 @@ static void wq_run_once_finalize(struct nvmeibt_wq_entry *wq_entry) {
 	struct once_wq_entry	*w = container_of(wq_entry, struct once_wq_entry, wq_entry);
 	struct nvmeibt_wq_entry	*o = w->orig_entry;
 	NFIN;
+	o->is_canceled = w->wq_entry.is_canceled;	// Propagate canceled to caller
 	if (o->finalize != NULL)
 		o->finalize(o);
 	nvmeibt_wq_destroy(w->wq_entry.wq);			/* finalize() always runs in main toma thread, so we can now safely destroy the run_once workqueue we had created - it cannot be running now. */
@@ -421,7 +422,7 @@ struct nvmeibt_wq *nvmeibt_wq_run_once(struct nvmeibt_wq_entry *o /*orig*/) {
 	once_wq->is_one_time = true;
 	w->wq_entry.wq = once_wq;
 	w->orig_entry = o;
-	o->once_wq_entry = &w->wq_entry;
+	o->chained = &w->wq_entry;
 	if (nvmeibt_wq_addw(once_wq, &w->wq_entry) < 0) {
 		N_Ef(e2_wq_run_once, "failed to add entry type=@TYPE_STR PTR=@PTR", o->type, o);
 		nvmeibt_abort(ES_FATAL);
