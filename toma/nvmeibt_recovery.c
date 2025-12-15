@@ -833,10 +833,9 @@ size_t nvmeibt_recovery_serialize_detach_msg(struct attach_detach_wq_entry *atta
 static XDLIST_DECLARE(, struct attach_detach_wq_entry, attach_detach_list_link) attach_detach_list = XDLIST_INIT(attach_detach_list);
 struct nvmeibt_wq *attach_detach_wq;
 
-static void attach_detach_wq_init(void)
-{
+static void attach_detach_wq_init(void) {
 	NFIN;
-	attach_detach_wq = nvmeibt_wq_create("attach_detach_wq");
+	attach_detach_wq = nvmeibt_wq_create("attach_detach");
 	NFOUT;
 }
 

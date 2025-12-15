@@ -2872,32 +2872,32 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	// Init disk_wqs hash table.
 	XHASHTABLE_INIT(&ldisks_wq_hash);
 	XHASHTABLE_INIT(&stock_ldisks_wq_hash);
-	toma_persistency_wq = nvmeibt_wq_create("Toma_Persistency_offload");
+	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");
 		goto out;
 	}
-	local_disk_format_wq = nvmeibt_wq_create("Local_Disk_Format");
+	local_disk_format_wq = nvmeibt_wq_create("LocalDiskFmt");
 	if (!local_disk_format_wq) {
 		N_Ef(dloi795, "Failed to create wq local_disk_format offload");
 		goto out;
 	}
-	recoveries_progress_wq = nvmeibt_wq_create("Toma_recoveries_offload");
+	recoveries_progress_wq = nvmeibt_wq_create("Recoveries");
 	if (!recoveries_progress_wq) {
 		N_Ef(trace_11_toma_nvmeibt_toma_init, "Failed to create wq recoveries-offload");
 		goto out;
 	}
-	leader_wq = nvmeibt_wq_create("Toma_leader_offload");
+	leader_wq = nvmeibt_wq_create("Toma_leader");
 	if (!leader_wq) {
 		N_Ef(skfji76, "Failed to create wq leader-offload");
 		goto out;
 	}
-	stat_wq = nvmeibt_wq_create("Toma_stat_offload");
+	stat_wq = nvmeibt_wq_create("Toma_stat");
 	if (!stat_wq) {
 		N_Ef(dkiyjgt, "Failed to create wq stat-offload");
 		goto out;
 	}
-	read_disk_from_smart_wq = nvmeibt_wq_create("Read_disk_from_smart");
+	read_disk_from_smart_wq = nvmeibt_wq_create("ReadDiskSmart");
 	if (!read_disk_from_smart_wq) {
 		N_Ef(ddko094, "Failed to create wq Read_disk_from_smart");
 		goto out;
