@@ -1427,6 +1427,7 @@ static int run_self_test(void)
 	char		*test_argv[10];
 	int			test_argc;
 
+	mkdir(TOMA_ROOT_DIR "tmp", 0755);
 	test_device_path = TOMA_ROOT_DIR "tmp/gpt_util_self_test";
 
 	// ===== TEST 1: Normal GPT =====
