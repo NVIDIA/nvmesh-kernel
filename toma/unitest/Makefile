@@ -99,7 +99,6 @@ $(TDIR)/nvmeibt_disk.c \
 $(TDIR)/nvmeibt_ds_metadata.c \
 $(TDIR)/nvmeibt_global.c \
 $(TDIR)/nvmeibt_kafka.c \
-$(TDIR)/nvmeibt_km_comm.c \
 $(TDIR)/nvmeibt_local_disk_util.c \
 $(TDIR)/nvmeibt_local_disk.c \
 $(TDIR)/nvmeibt_local_nic.c \
@@ -132,6 +131,7 @@ $(TDIR)/interfaces/log/nvmeibt_binary_tracing.c \
 $(TDIR)/../tools/nvmeib_trace_userspace.c \
 $(TDIR)/../tools/nvmeib_trace_userspace_poller.c \
 $(TDIR)/interfaces/srvr/nvmeibt_srvr_proc.c \
+$(TDIR)/interfaces/srvr/nvmeibt_km_comm.c \
 $(TDIR)/interfaces/network/nvmeibt_event_tracker.c \
 
 #$(TDIR)/interfaces/os/nvmeibt_os_signal.c

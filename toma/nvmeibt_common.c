@@ -15,8 +15,6 @@
 #include "nvmeibt_local_disk.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_toma.h"
-#include "nvmeibt_km_comm.h"
-#include "../srv/nvmeibs_srv_toma_messages.h"
 #include "nvmeibt_topology.h"
 #include "../common/nvmeib_heap.c"     // Compiling the shared heap code for TOMA without duplicating it
 

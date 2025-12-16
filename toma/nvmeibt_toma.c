@@ -36,7 +36,6 @@
 #include "nvmeibt_local_disk.h"
 #include "nvmeibt_local_disk_util.h"
 #include "nvmeibt_ds_metadata.h"
-#include "nvmeibt_km_comm.h"
 #include "nvmeibt_rpc.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_kafka.h"

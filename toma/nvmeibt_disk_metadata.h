@@ -3,8 +3,7 @@
 
 #include "nvmeibt_params.h"
 #include "nvmeibt_common.h"
-#include "nvmeibt_km_comm.h"
-#include "../srv/nvmeibs_srv_toma_messages.h"
+#include "interfaces/srvr/nvmeibt_km_comm.h"
 
 struct nvmeibt_mbr_partition_record
 {

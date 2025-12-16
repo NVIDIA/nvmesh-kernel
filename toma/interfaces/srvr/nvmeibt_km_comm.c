@@ -22,8 +22,6 @@
 #include "nvmeibt_ds.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_topology.h"
-#include "../common/nvmeib_shared.h"
-#include "../srv/nvmeibs_srv_toma_messages.h"
 
 struct srv_comm_msg {
 	unsigned long time;

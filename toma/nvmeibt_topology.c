@@ -11,7 +11,6 @@
 #include "nvmeibt_ds_metadata.h"
 #include "nvmeibt_persistency_info.h"
 #include "./interfaces/srvr/nvmeibt_srvr_proc.h"
-#include "nvmeibt_km_comm.h"
 #include "nvmeibt_topo_bin.h"
 #include "common/nvmeib_types.h"
 #include "nvmeibt_kafka.h"

@@ -21,4 +21,5 @@ void nvmeibt_km_comm_ack_disk_remove(struct nvmeibt_km_comm *p, unsigned long ac
 struct nvmeib_disk_info;
 int nvmeibt_km_comm_get_disk_info(struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);
 
+#include "srv/nvmeibs_srv_toma_messages.h"		// Global nvmesh dir: ../../../
 #endif
