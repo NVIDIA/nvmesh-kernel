@@ -360,7 +360,7 @@ static int export_gpt_to_json(int disk_fd,
 	struct gpt_buffers						metadata_bufs;
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_metadata_partition = NULL;
-	struct nvmeibt_disk_metadata			disk_md;
+	struct nvmeibt_disk_metadata			*disk_md = NULL;
 	enum GPT_VALIDITY						primary_header_validity;
 	enum GPT_VALIDITY						alternate_header_validity;
 	enum GPT_VALIDITY						primary_entries_validity;
@@ -495,9 +495,9 @@ static int export_gpt_to_json(int disk_fd,
 		}
 		if (disk_metadata_partition) {
 			uint64_t pbyte_s = disk_metadata_partition->pba_s * config->pblk_size;
-			memset(&disk_md, 0, sizeof(disk_md));
+			disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_export_disk_md, PAGE_SIZE, sizeof(*disk_md));
 			if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
-														 pbyte_s, &disk_md) == 0) {
+														 pbyte_s, disk_md) == 0) {
 				has_device_identifiers = true;
 			}
 		}
@@ -523,14 +523,15 @@ static int export_gpt_to_json(int disk_fd,
 			struct nvmeibt_urn_uuid nguid_urn;
 
 			nvmeibt_Str_sprintf(json_output, "  \"device_identifiers\": {\n");
-			nvmeibt_Str_sprintf(json_output, "    \"serial_id\": \"%s\",\n", disk_md.native_serial_str);
+			nvmeibt_Str_sprintf(json_output, "    \"serial_id\": \"%s\",\n", disk_md->native_serial_str);
 
-			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md.native_nguid_unused);
+			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
 			nvmeibt_Str_sprintf(json_output, "    \"nguid\": \"%s\"\n", nguid_urn.str);
 			nvmeibt_Str_sprintf(json_output, "  }");
 		}
 
 		free_gpt_buffers(&metadata_bufs);
+		NNVMEIBT_BM_FREE(trace_gpt_export_disk_md_free, disk_md);
 	}
 
 	nvmeibt_Str_sprintf(json_output, "\n}\n");
