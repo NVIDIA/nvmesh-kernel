@@ -12,8 +12,9 @@
 void syslog(int priority, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
+	fprintf(stderr, COL_PURPL);
 	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, "\n");
+	fprintf(stderr, COL_RESET "\n");
 	va_end(ap);
 	(void)priority;
 }
