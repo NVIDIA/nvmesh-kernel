@@ -46,7 +46,7 @@ if [[ "`hostname`" =~ nvme.* ]]; then
 	tabs=' 									'
 	alias unbuffered="stdbuf -i0 -o0 -e0"
 	alias trigger_crash='sudo bash -c "echo c > /proc/sysrq-trigger"'
-	alias valgrind_toma="sudo valgrind --suppressions=./nvmeibt_valgrind_suppress.conf --max-stackframe=2483352 ./bin/release/nvmeibt_toma.with_symbols"
+	alias valgrind_toma="sudo valgrind --suppressions=./scripts/nvmeibt_valgrind_suppress.conf --max-stackframe=2483352 ./bin/release/nvmeibt_toma.with_symbols"
 	alias restore_mgt_db='sudo mongo management /opt/nvmesh/management/clearDB.js; mongorestore -d management ~/mgt_dump/management/'
 	alias dropDB='sudo mongo management --eval "db.dropDatabase()"'
 	alias save_mgt_db='mongodump -d management -o mgt_dump'
