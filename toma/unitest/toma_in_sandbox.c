@@ -295,28 +295,10 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 static bool sbfd_is_a_file(     const struct t_sandbox_sock* s) {
 	return (s->type == 'f');
 }
-static bool sbfd_should_persist(const struct t_sandbox_sock* s) {
-	const bool was_created_by_toma = (s->proto & O_CREAT);
-	return sbfd_is_a_file(s) && !was_created_by_toma;
-}
 
-// Force a file to persist beyond close. Caller must manually unlink() when done
-void sandbox_force_file_persist(const char *filepath)
-{
-	struct t_sandbox_sock_tbl	*TS = &sys->TS;
-	int							i;
-
-	// Find the socket for this filepath
-	for (i = 0; i < TS->n_socks; i++) {
-		struct t_sandbox_sock *s = &TS->socks[i];
-		if (sbfd_is_used(s) && strcmp(s->addr.sun_path, filepath) == 0) {
-			// Clear O_CREAT flag to mark as persistent
-			s->proto &= ~O_CREAT;
-			SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, marked PERSISTENT\n",
-						  i, s->fd, filepath);
-			return;
-		}
-	}
+static bool sbfd_should_persist_after_close(const struct t_sandbox_sock* s) {
+	// Only regular files should persist after close, but socket/pipe are non-persistent.
+	return sbfd_is_a_file(s);
 }
 
 static const char* sbfd_get_open_mode(const struct t_sandbox_sock* s) {
@@ -348,16 +330,18 @@ int socket(int __domain, int __type, int __protocol) {
 }
 
 static void socket_destroy(struct t_sandbox_sock *s) {
-	const bool should_del = !sbfd_should_persist(s);
+	const bool should_del = !sbfd_should_persist_after_close(s);
 	s->ref_cnt--;
 	if (s->ref_cnt > 0)
 		return;
 	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
+	// N_Df(sbd8465, "sandbox file: close path=@STR fd=@INT mode=@STR delete=@BOOL", s->addr.sun_path, s->fd, sbfd_get_open_mode(s), should_del);
 	if (s->f != NULL) {
 		fclose(s->f);
 	}
-	if (should_del)
+	if (should_del) {
 		unlink(s->addr.sun_path);
+	}
 	if (s->other_side)
 		memset(s->other_side, 0, sizeof(*s->other_side));
 	memset(s, 0, sizeof(*s));

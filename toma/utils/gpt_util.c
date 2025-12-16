@@ -1387,10 +1387,6 @@ static void print_version_banner(void)
  */
 static void SELF_TEST_mark_file_persistent(const char *filepath)
 {
-#ifdef TOMA_SIMULATOR_SANDBOX
-	extern void sandbox_force_file_persist(const char *filepath);
-	sandbox_force_file_persist(filepath);
-#endif
 	(void)filepath;		// Unused in production
 }
 
