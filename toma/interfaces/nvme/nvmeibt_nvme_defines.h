@@ -167,7 +167,8 @@ struct nvme_id_power_state {
         __u8                    rsvd23[9];
 };
 
-
+// Defined in section 5.2.13.2.1 Identify Controller Data Structure (CNS 01h)
+// of NVM-Express-Base-Specification-Revision-2.3-2025.08.01, p. 321-353 (PDF p. 345ff).
 struct nvme_id_ctrl {
         __le16                  vid;
         __le16                  ssvid;
