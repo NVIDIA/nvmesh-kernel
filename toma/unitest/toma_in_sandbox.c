@@ -189,7 +189,25 @@ struct t_sandbox_all {
 	char my_hostname[64];
 } *sys;
 
+static void unlink_and_log(const char* path) {
+	if (unlink(path) != 0) {
+		if (errno != ENOENT) {
+			N_Ef(kji8566, "delete file failed: path=@STR err=@STR\n", path, strerror(errno));
+		} else {
+			N_Tf(jgf6559, "nothing to do path=@STR", path);
+		}
+	} else {
+		N_Tf(dls3390, "deleted path=@STR", path);
+	}
+}
+
+static void sandbox_delete_generated_files(void) {
+	N_Df(fgp9587, "cleaning up sandbox generated files");
+	unlink_and_log(TOMA_ROOT_DIR "var/log/nvmesh/toma_leader_name");
+}
+
 void t_sandbox_all_init(void) {
+	sandbox_delete_generated_files();
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
