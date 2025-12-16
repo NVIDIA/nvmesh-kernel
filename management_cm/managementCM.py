@@ -700,7 +700,7 @@ class ManagementCM(Daemon):
 					kernelClientConnected = self.tryConnectKernelClient(clientFD)
 
 			except select.error as e:
-				if e[0] == errno.EINTR:
+				if e.errno == errno.EINTR:
 					self.logger.debug("Received EINTR, retrying...")
 				else:
 					self.logger.exception("Received Exception %s, retrying...", e.__class__.__name__)
