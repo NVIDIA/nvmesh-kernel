@@ -322,6 +322,10 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 			const struct nvmeibt_disk_gpt_partition_entry *entry = &entries[i];
 			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
 			struct nvmeibt_urn_uuid part_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_guid);
+			char partition_name_str[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+
+			// Convert UTF-16 partition name to regular string
+			char16_str_to_str(entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, partition_name_str);
 
 			if (entry_count > 0) {
 				nvmeibt_Str_sprintf(json_output, ",\n");
@@ -333,7 +337,7 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 			nvmeibt_Str_sprintf(json_output, "        \"pba_s\": %lu,\n", entry->pba_s);
 			nvmeibt_Str_sprintf(json_output, "        \"pba_e\": %lu,\n", entry->pba_e);
 			nvmeibt_Str_sprintf(json_output, "        \"attributes\": %lu,\n", entry->attributes);
-			nvmeibt_Str_sprintf(json_output, "        \"name\": \"%.72s\"\n", entry->partition_name);
+			nvmeibt_Str_sprintf(json_output, "        \"name\": \"%s\"\n", partition_name_str);
 			nvmeibt_Str_sprintf(json_output, "      }");
 			entry_count++;
 		}
