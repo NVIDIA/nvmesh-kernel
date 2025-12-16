@@ -1383,7 +1383,4 @@ void nvmeibt_km_comm_test(void)
 	}
 	pthread_setname_np(tid.thread, "km_comm_run_test_srv_comm");
 }
-
-#else
-void nvmeibt_km_comm_test(void) {}
 #endif
