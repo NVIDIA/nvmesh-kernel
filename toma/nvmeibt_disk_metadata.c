@@ -1481,7 +1481,10 @@ int nvmeibt_disk_metadata_read_disk_metadata(struct netlink_io_context *nl_ctx, 
 		N_Ef(bd8954u, "disk_metadata signature mismatch. Expected=@GPT_SIGNATURE got=@GPT_SIGNATURE pbyte_s=@POS", DISK_METADATA_SIGNATURE, disk_metadata->signature, pbyte_s);
 		goto out;
 	}
-	//
+
+	// Restore crc32 to original value after validation passed
+	disk_metadata->crc32 = read_crc32;
+
 	rv = 0;
 	N_Tf(vbyhduy, "Restored disk_metadata fd=@FD", fd);
 out:
