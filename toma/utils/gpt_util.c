@@ -112,6 +112,7 @@ struct gpt_util_config {
 
 	// JSON export options (for ACTION_EXPORT_JSON)
 	char					output_json_file[256];	// Output JSON filename
+	BOOL					include_disk_metadata;	// Export full disk_metadata struct (read-only, for inspection)
 
 	// JSON apply options (for ACTION_APPLY_JSON)
 	char					apply_json_file[256];	// Input JSON filename to apply
@@ -528,6 +529,37 @@ static int export_gpt_to_json(int disk_fd,
 			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
 			nvmeibt_Str_sprintf(json_output, "    \"nguid\": \"%s\"\n", nguid_urn.str);
 			nvmeibt_Str_sprintf(json_output, "  }");
+
+			// Extended export: full disk_metadata (if requested)
+			if (config->include_disk_metadata) {
+				struct nvmeibt_urn_uuid mgmt_uuid_urn;
+
+				N_Wf(gpt_export_disk_md_readonly, "Exporting full disk_metadata (READ-ONLY, will be ignored on apply)");
+
+				nvmeibt_Str_sprintf(json_output, ",\n");
+				nvmeibt_Str_sprintf(json_output, "  \"_disk_metadata_READONLY\": {\n");
+				nvmeibt_Str_sprintf(json_output, "    \"_NOTE\": \"READ-ONLY: This section is for inspection only, ignored on --apply-from\",\n");
+				nvmeibt_Str_sprintf(json_output, "    \"signature\": \"0x%lx\",\n", disk_md->signature);
+				nvmeibt_Str_sprintf(json_output, "    \"last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
+
+				mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
+				nvmeibt_Str_sprintf(json_output, "    \"mgmt_db_uuid\": \"%s\",\n", mgmt_uuid_urn.str);
+				nvmeibt_Str_sprintf(json_output, "    \"disk_metadata_version\": %u,\n", disk_md->disk_metadata_version);
+				nvmeibt_Str_sprintf(json_output, "    \"format_pblk_size\": %u,\n", disk_md->format_pblk_size);
+				nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
+				nvmeibt_Str_sprintf(json_output, "    \"format_request_counter\": %u,\n", disk_md->format_request_counter);
+				nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
+				nvmeibt_Str_sprintf(json_output, "    \"nsid\": %d,\n", disk_md->nsid);
+				nvmeibt_Str_sprintf(json_output, "    \"native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
+
+				nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
+				nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
+				nvmeibt_Str_sprintf(json_output, "    \"crc32\": \"0x%08x\"\n", disk_md->crc32);
+				nvmeibt_Str_sprintf(json_output, "  }");
+
+				fprintf(stdout, COL_YELLOW "  - WARNING: disk_metadata exported in READ-ONLY mode" COL_RESET "\n");
+				fprintf(stdout, "             Changes to this section will be IGNORED on apply\n");
+			}
 		}
 
 		free_gpt_buffers(&metadata_bufs);
@@ -548,8 +580,8 @@ static int export_gpt_to_json(int disk_fd,
 		goto out;
 	}
 
-	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT",
-		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers);
+	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT include_disk_md=@INT",
+		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers, config->include_disk_metadata);
 	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
 
 	// Build status message based on what was actually exported
@@ -559,6 +591,9 @@ static int export_gpt_to_json(int disk_fd,
 	}
 	if (has_device_identifiers) {
 		fprintf(stdout, ", Device Identifiers");
+		if (config->include_disk_metadata) {
+			fprintf(stdout, ", " COL_YELLOW "disk_metadata (READ-ONLY)" COL_RESET);
+		}
 	}
 	fprintf(stdout, "\n");
 
@@ -1698,6 +1733,11 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  --filter-uuid=UUID          Show only entries matching UUID\n");
 	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n\n");
 
+	fprintf(stdout, "JSON Export Options:\n");
+	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON file\n");
+	fprintf(stdout, "  --include-disk-metadata     Include full disk_metadata struct (read-only, for inspection)\n");
+	fprintf(stdout, "                              WARNING: Exported disk_metadata is IGNORED on apply\n\n");
+
 	fprintf(stdout, "Apply Options:\n");
 	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n\n");
 
@@ -1738,6 +1778,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"filter-uuid",				required_argument,	0,	'u'},
 		{"filter-lba",				required_argument,	0,	'l'},
 		{"output-json",				required_argument,	0,	'J'},
+		{"include-disk-metadata",	no_argument,		0,	'M'},
 		{"apply-from",				required_argument,	0,	'A'},
 		{"write",					no_argument,		0,	'W'},
 		{"direct",					no_argument,		0,	'D'},
@@ -1960,6 +2001,10 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->action = ACTION_EXPORT_JSON;
 			nvmeibt_strlcpy(config->output_json_file, optarg, sizeof(config->output_json_file));
 			fprintf(stdout, "Action: Export GPT to JSON file: %s\n", config->output_json_file);
+			break;
+		case 'M':
+			config->include_disk_metadata = true;
+			fprintf(stdout, COL_YELLOW "Include disk_metadata: ENABLED (read-only export, ignored on apply)" COL_RESET "\n");
 			break;
 		case 'A':
 			if (config->action != ACTION_DISPLAY_GPT) {
