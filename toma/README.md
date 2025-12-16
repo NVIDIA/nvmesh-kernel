@@ -269,3 +269,14 @@ end
 
 ***
 
+### Version release checklist
+1. Run Correctness tests (toma sandbox): `toma/unitestl make clean; make all -j; ./nvmeibt_toma`;
+2. Verify CI passed in gitlab
+4. Update the [change log](./CHANGELOG.md)
+#### Format the code properly (coding style)
+- `apt install -y clang-format`;
+- `clang-format -style=file -i file/you/changed*.[ch]`
+- Example how to observe the style required fixup in nvmeibt_debug.h file:
+	- `cd toma/scripts`
+	- `git checkout ../nvmeibt_debug.h; clang-format -style=file -i ../nvmeibt_debug.h`
+	- see differences with `git diff`

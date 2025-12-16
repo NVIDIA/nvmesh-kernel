@@ -1,0 +1,139 @@
+---
+#See: https://clang.llvm.org/docs/ClangFormatStyleOptions.html, DHsH: Tested on clang 18.1.13
+Language: Cpp
+#BasedOnStyle: LLVM  GNU  Google
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: true
+AlignOperands: DontAlign
+AlignTrailingComments: false
+
+# Ronen, prefers aligned macros with multiple spaces   #define a1 \t\t\t 1 \n #define a2 \t\t\t 2
+AlignConsecutiveMacros:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: false
+
+# Packing short expressions to a single line
+AllowShortBlocksOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortCompoundRequirementOnASingleLine: true
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+
+# Long function calls, do not break parameters/arguments to 1 per line.
+AlwaysBreakTemplateDeclarations: false
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackArguments: true
+BinPackParameters: true
+PackConstructorInitializers: CurrentLine
+
+# Insert '\n' before {
+BreakBeforeBraces: Linux    # Ronen likes it as linux kernel, Can use Custom
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  IndentBraces: false
+  AfterCaseLabel: false
+  BeforeWhile : false
+  # Dont confuse our loop macros with function calls, dont add { before them
+ForEachMacros: [XDLIST_FOREACH, XDLIST_FOREACH_SAFE, XHASHTABLE_FOR_EACH, XHASHTABLE_FOR_EACH_SAFE, XDLIST_FOREACH_REVERSE, XDLIST_FOREACH_REVERSE_SAFE]
+
+# Insert '\n' in other cases
+BreakAfterAttributes: Leave
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: false
+BreakConstructorInitializers: AfterColon
+BreakStringLiterals: true
+ColumnLimit: 240
+CompactNamespaces: false
+NamespaceIndentation: Inner
+DerivePointerAlignment: false
+IndentCaseLabels: false
+IndentPPDirectives: None
+IndentWrappedFunctionNames: false
+MaxEmptyLinesToKeep: 2
+SeparateDefinitionBlocks: Always
+
+# Spaces and alignment of operators
+PointerAlignment: Right
+ReferenceAlignment: Right
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatementsExceptForEachMacros
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyParentheses: false
+SpacesInAngles: false
+SpacesInContainerLiterals: false
+SpacesInSquareBrackets: false
+SpaceAfterLogicalNot: false
+
+# Use default Tabs, not spaces
+TabWidth: 4
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+IndentWidth: 4
+SpacesBeforeTrailingComments: 4
+#BracedInitializerIndentWidth: 4
+UseTab: Always
+
+# Comments, don't break long lines
+ReflowComments: false
+
+# Aligning backslashes (multi-line strings / defines)
+AlignEscapedNewlines: DontAlign
+AlwaysBreakBeforeMultilineStrings: false
+BreakAdjacentStringLiterals: false
+
+#Sorting is off
+SortIncludes: false
+SortUsingDeclarations: false
+...
+# Additional non auto enforced coding style:
+#  Comment-out code:
+#     Preferably use macro #if (0) or if(0)
+#  Conditional macro: #else #endif should mention their #if condition, Example
+#     #if (xxxxxxxxx)
+#     #else	// #if (xxxxxxxxx)
+#     #endif	// #if (xxxxxxxxx)
+#  Assignments inside an "if": Better avoid,  E.g., prefer
+#         x = xxxx();
+#         if (x) {
+#     over
+#        if (x = xxxx())
+#     We are good with    if (xxxx()) {     and     if (xxxx() < 0) {
+#  Booleans (bool):
+#     Name starts with a question word, preferably "is", such as: is_valid_condition
+#     Take the effort to give booleans a positive names. It is easier to understand if (!is_good_to_go) than if (!is_not_good_to_go)
+#  Logging:
+#     _Ef(): An error (event) that should never happen
+#     _Wf(): A warning. Note that it goes to Syslog, so should not be used for expected and well handled use cases
+#     _IMf(): Info Major, goes to Syslog!
+#      _Tf(): A standard debug msg
+#  FIN/FOUT:
+#     Important to put in function that may get stuck or spend a lot of time
+#     Variables declaration+Initialization (code that runs before the "FIN"): Usually, avoid initialization as part of the declaration if it may fail (like null pointer dereference)
+#     Short functions that anyhow write a meaningful log msg, often avoid the FIN/FOUT
+#  Naming (of functions, variables, ...):
+#     Names should be meaningful, and practically "document" its role.
+#     Names that are used in mathematical calculations should always include units, and be fully explicit: n_4K_pages, n_bytes_in_block, n_msec.
+#       Example: 'offset' is a bad name. Ofset from what and in which units?  Adding suffix solves the problem: offset_DLBA (disk logical block address), offset_from_seg_start_in_bytes
+#     Prefer the representation of <start, length> over <start, end> it does better in avoiding the "+1" noise.
+#  Return value:
+#     Try to use the name "rv" for the return value (Its role is clear even in a  1 line diff)
+#     Always rv: 0=OK, <0=Err, >0=???
