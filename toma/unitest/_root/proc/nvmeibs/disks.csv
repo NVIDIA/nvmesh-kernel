@@ -1,3 +1,3 @@
 id,blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor
-S3HCNX0JC01929.1,195353046,4096,32,1,1,/dev/nvme1001n1,8,Ok,5197
-S3HCNX0JC01991.1,195353046,4096,32,0,1,/dev/nvme1000n1,8,Ok,519 
+NVMD_SN_002.1,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122
+NVMD_SN_003.1,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123
