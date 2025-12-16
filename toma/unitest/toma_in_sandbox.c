@@ -1,5 +1,4 @@
 #include "nvmeibt_debug.h"
-#include "nvmeibt_utils.h"
 #include "toma_in_sandbox.h"
 
 /************************************* Logging ********************************/
@@ -584,7 +583,7 @@ void toma_unitest_env_start(void) {
 /************************************* logging ********************************/
 int init_signal_handling(const char *exe_name) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
-	nvmeibt_strlcpy(addr.sun_path, _PATH_LOG, sizeof(addr.sun_path));
+	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", _PATH_LOG);
 	__connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
 	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_signal_%s", exe_name);
 	return __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
