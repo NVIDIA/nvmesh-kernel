@@ -3,15 +3,18 @@
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
 
-bool nvmeibt_chunk_is_deprecated_in_config(struct nvmeibt_chunk *chunk) {
+bool nvmeibt_chunk_is_deprecated_in_config(struct nvmeibt_chunk *chunk)
+{
 	return (chunk && nvmeibt_block_device_is_deprecated_in_config(chunk->its_block_device));
 }
 
-const union nvmeib_uuid *nvmeibt_chunk_UUID(struct nvmeibt_chunk *chunk) {
+const union nvmeib_uuid *nvmeibt_chunk_UUID(struct nvmeibt_chunk *chunk)
+{
 	return (chunk ? &chunk->from_config.id : &nvmeib_uuid_null_val);
 }
 
-int nvmeibt_chunk_remove(struct nvmeibt_chunk *chunk) {
+int nvmeibt_chunk_remove(struct nvmeibt_chunk *chunk)
+{
 	N_Tf(tchrem0, "Removing chunk=@UUID_LE", nvmeibt_chunk_UUID(chunk));
 	NNVMEIBT_HASH_DEL_OBJ(tchrem1, &nvmeibt_global_get_global()->chunks_hash, chunk, chunk);
 	// The assumption is that the surrounding objects (block_device & chunk) are also removed
@@ -19,10 +22,11 @@ int nvmeibt_chunk_remove(struct nvmeibt_chunk *chunk) {
 	return 0;
 }
 
-enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt_block_device *blkdev, int idx_in_vol, int config_tag, struct nvmeibt_chunk **output_chunk) {
-	const union nvmeib_uuid *id = &(conf->uuid);
-	enum nvmeibt_add_rv			rv = NVMEIBT_ADD_UNINITIALIZED;
-	struct nvmeibt_chunk		*new_chunk = NULL;	// Read into it, maybe use it.
+enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt_block_device *blkdev, int idx_in_vol, int config_tag, struct nvmeibt_chunk **output_chunk)
+{
+	const union nvmeib_uuid		*id = &(conf->uuid);
+	enum nvmeibt_add_rv			 rv = NVMEIBT_ADD_UNINITIALIZED;
+	struct nvmeibt_chunk		*new_chunk = NULL;	  // Read into it, maybe use it.
 	struct nvmeibt_chunk		*chunk;
 	struct nvmeibt_chunk_config *f = NULL;
 
@@ -82,7 +86,8 @@ out:
 	return rv;
 }
 
-void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *chunk, uint8_t trim_flag) {
+void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *chunk, uint8_t trim_flag)
+{
 	if (is_trim_needed(&chunk->trim_flags, trim_flag)) {
 		NVMEIBT_HASH_MARK_OBJ_OUTDATED(nvmeibt_chunk_trim_unused_entries_trace, chunk, chunk);
 	} else {
@@ -90,8 +95,9 @@ void nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *chunk, uint8_t trim
 	}
 }
 
-void nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag) {
-	struct nvmeibt_chunk	*chunk;
+void nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag)
+{
+	struct nvmeibt_chunk *chunk;
 	NFIN;
 	XHASHTABLE_FOR_EACH_SAFE(chunk, &nvmeibt_global_get_global()->chunks_hash) {
 		if (NVMEIBT_HASH_IS_OLDER_OBJ(chunk, config_tag)) {
