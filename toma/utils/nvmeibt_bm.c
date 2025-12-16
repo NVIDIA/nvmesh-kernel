@@ -5,31 +5,32 @@
 #include "nvmeibt_ds.h"
 
 struct memory_buffer {
-	struct xdlist	link;
-	int				len;
-	BOOL			is_dma;
-	BOOL			is_in_use;
-	long long		data[0];	// Align to 8
+	struct xdlist link;
+	int			  len;
+	BOOL		  is_dma;
+	BOOL		  is_in_use;
+	long long	  data[0];	  // Align to 8
 } /*__attribute((packed))*/;
 
 typedef XDLIST_DECLARE(buffer_pool, struct memory_buffer, link) buffer_pool_t;
 
 #define BM_DMA_ALIGNMENT_BITS 12
 #define BM_DMA_ALIGNMENT_SIZE (1 << BM_DMA_ALIGNMENT_BITS)
-#define BM_BUFFER_POOL_SIZE 31
-#define BM_MAX_BUFFER_SIZE (1 << (BM_BUFFER_POOL_SIZE - 1))
+#define BM_BUFFER_POOL_SIZE	  31
+#define BM_MAX_BUFFER_SIZE	  (1 << (BM_BUFFER_POOL_SIZE - 1))
 
 struct nvmeibt_bm {
 	pthread_mutex_t guard;
-	buffer_pool_t buffer_pool[BM_BUFFER_POOL_SIZE];
-	buffer_pool_t dma_buffer_pool[BM_BUFFER_POOL_SIZE];
+	buffer_pool_t	buffer_pool[BM_BUFFER_POOL_SIZE];
+	buffer_pool_t	dma_buffer_pool[BM_BUFFER_POOL_SIZE];
 
 	unsigned long allocated_size;
 	unsigned long report_size;
 	unsigned long report_step_size;
-} *bm;									// Static root of memory allocator
+} *bm;	  // Static root of memory allocator
 
-static inline void update_allocated(int size) {
+static inline void update_allocated(int size)
+{
 	bm->allocated_size += size;
 	if (bm->allocated_size > bm->report_size) {
 		bm->report_size += bm->report_step_size;
@@ -37,7 +38,8 @@ static inline void update_allocated(int size) {
 	}
 }
 
-static int lock(void) {
+static int lock(void)
+{
 	const int rv = pthread_mutex_lock(&bm->guard);
 	if (rv != 0) {
 		N_Ef(error_bm_lock, "Failed to lock buffer manager (@RV)", rv);
@@ -46,7 +48,8 @@ static int lock(void) {
 	return rv;
 }
 
-static int unlock(void) {
+static int unlock(void)
+{
 	const int rv = pthread_mutex_unlock(&bm->guard);
 	if (rv != 0) {
 		N_Ef(error_bm_unlock, "Failed to unlock buffer manager (@RV)", rv);
@@ -55,7 +58,8 @@ static int unlock(void) {
 	return rv;
 }
 
-static void free_buffer(struct memory_buffer *b) {
+static void free_buffer(struct memory_buffer *b)
+{
 	const int log2_len = nvmeibt_log2_int(b->len);
 	if (!b->is_in_use) {
 		N_Ef(psk2j4n, "!b->is_in_use b=@PTR b->data=@PTR", b, b->data);
@@ -72,16 +76,17 @@ static void free_buffer(struct memory_buffer *b) {
 	// nvmeibt_bm_garbage_collect(1);	// NOTE: When debugging memory leak enable this line, otherwise you will not find who leaked it but the one who first used the buffer
 }
 
-void nvmeibt_bm_garbage_collect(int min_log_bytes) {
-	int log2_len = (min_log_bytes >= 1) ? min_log_bytes : 10;	// Default > 1[kb]
+void nvmeibt_bm_garbage_collect(int min_log_bytes)
+{
+	int log2_len = (min_log_bytes >= 1) ? min_log_bytes : 10;	 // Default > 1[kb]
 	NFIN;
 	for (; log2_len < BM_BUFFER_POOL_SIZE; log2_len++) {
-		buffer_pool_t			*head;
+		buffer_pool_t *head;
 		head = &bm->buffer_pool[log2_len];
 		if (!(XDLIST_EMPTY(head))) {
 			lock();
 			while (!(XDLIST_EMPTY(head))) {
-				int size;
+				int					  size;
 				struct memory_buffer *b = XDLIST_FIRST(head);
 				XDLIST_DEL(&b->link);
 				size = offsetof(struct memory_buffer, data) + b->len;
@@ -94,7 +99,7 @@ void nvmeibt_bm_garbage_collect(int min_log_bytes) {
 		if (!(XDLIST_EMPTY(head))) {
 			lock();
 			while (!(XDLIST_EMPTY(head))) {
-				void *q;
+				void				 *q;
 				struct memory_buffer *b = XDLIST_FIRST(head);
 				XDLIST_DEL(&b->link);
 				q = ((void *)b - (BM_DMA_ALIGNMENT_SIZE - offsetof(struct memory_buffer, data)));
@@ -106,7 +111,8 @@ void nvmeibt_bm_garbage_collect(int min_log_bytes) {
 	NFOUT;
 }
 
-int nvmeibt_bm_get_buf_alloc_size(const void *buffer) {
+int nvmeibt_bm_get_buf_alloc_size(const void *buffer)
+{
 	if (!buffer) {
 		N_Tf(tbmbl0, "buffer=NULL");
 		return 0;
@@ -118,7 +124,8 @@ int nvmeibt_bm_get_buf_alloc_size(const void *buffer) {
 	return (container_of(buffer, struct memory_buffer, data))->len;
 }
 
-void nvmeibt_bm_free_buffer(void *buffer) {
+void nvmeibt_bm_free_buffer(void *buffer)
+{
 	struct memory_buffer *b = container_of(buffer, struct memory_buffer, data);
 	if (!buffer) {
 		N_Tf(tbmbl2, "buffer=NULL");
@@ -132,11 +139,12 @@ void nvmeibt_bm_free_buffer(void *buffer) {
 	free_buffer(b);
 }
 
-static struct memory_buffer *allocate_buffer_unsafe(int unaligned_len) {
-	struct memory_buffer	*b;
-	const int				log2_len = nvmeibt_log2_int(unaligned_len);
-	const int 				len = (1 << log2_len);
-	buffer_pool_t *			head = &bm->buffer_pool[log2_len];
+static struct memory_buffer *allocate_buffer_unsafe(int unaligned_len)
+{
+	struct memory_buffer *b;
+	const int			  log2_len = nvmeibt_log2_int(unaligned_len);
+	const int			  len = (1 << log2_len);
+	buffer_pool_t		 *head = &bm->buffer_pool[log2_len];
 	if (XDLIST_EMPTY(head)) {
 		const int size = offsetof(struct memory_buffer, data) + len;
 		b = NNVMEIBT_TOMA_MALLOC(trace_bm_allocate_buffer, size);
@@ -156,7 +164,8 @@ static struct memory_buffer *allocate_buffer_unsafe(int unaligned_len) {
 	return b;
 }
 
-static void *nvmeibt_bm_allocate_buffer_(int len) {
+static void *nvmeibt_bm_allocate_buffer_(int len)
+{
 	struct memory_buffer *b;
 	lock();
 	b = allocate_buffer_unsafe(len);
@@ -164,7 +173,8 @@ static void *nvmeibt_bm_allocate_buffer_(int len) {
 	return b ? (void *)b->data : NULL;
 }
 
-void *nvmeibt_bm_allocate_buffer(int len) {
+void *nvmeibt_bm_allocate_buffer(int len)
+{
 	void *p;
 	if (len > BM_MAX_BUFFER_SIZE) {
 		N_Ef(tbmbla, "len=@LEN > @LEN)", len, BM_MAX_BUFFER_SIZE);
@@ -179,18 +189,19 @@ void *nvmeibt_bm_allocate_buffer(int len) {
 	return p;
 }
 
-void* nvmeibt_bm_calloc_buffer(int len) {
+void *nvmeibt_bm_calloc_buffer(int len)
+{
 	void *p = nvmeibt_bm_allocate_buffer(len);
-	if (p)
-		memset(p, 0, len);
+	if (p) memset(p, 0, len);
 	return p;
 }
 
-static struct memory_buffer *allocate_dma_buffer_unsafe(int requested_len) {
-	struct memory_buffer	*b;
-	const int				log2_len = max(nvmeibt_log2_int(requested_len), BM_DMA_ALIGNMENT_BITS);
-	const int				len = (1 << log2_len);
-	buffer_pool_t *			head = &bm->dma_buffer_pool[log2_len];
+static struct memory_buffer *allocate_dma_buffer_unsafe(int requested_len)
+{
+	struct memory_buffer *b;
+	const int			  log2_len = max(nvmeibt_log2_int(requested_len), BM_DMA_ALIGNMENT_BITS);
+	const int			  len = (1 << log2_len);
+	buffer_pool_t		 *head = &bm->dma_buffer_pool[log2_len];
 	if (XDLIST_EMPTY(head)) {
 		void *q = 0;
 		NNVMEIBT_TOMA_POSIX_MEMALIGN(trace_bm_allocate_dma_buffer, &q, BM_DMA_ALIGNMENT_SIZE, len + BM_DMA_ALIGNMENT_SIZE);
@@ -210,7 +221,8 @@ static struct memory_buffer *allocate_dma_buffer_unsafe(int requested_len) {
 	return b;
 }
 
-void *nvmeibt_bm_allocate_dma_buffer_(int len) {
+void *nvmeibt_bm_allocate_dma_buffer_(int len)
+{
 	struct memory_buffer *b;
 	lock();
 	b = allocate_dma_buffer_unsafe(len);
@@ -218,7 +230,8 @@ void *nvmeibt_bm_allocate_dma_buffer_(int len) {
 	return b ? (void *)b->data : NULL;
 }
 
-void *nvmeibt_bm_allocate_dma_buffer(int alignment, int len) {
+void *nvmeibt_bm_allocate_dma_buffer(int alignment, int len)
+{
 	void *p;
 	if (!bm) {
 		N_Ef(tbmbll, "No bm");
@@ -237,7 +250,8 @@ void *nvmeibt_bm_allocate_dma_buffer(int alignment, int len) {
 	return p;
 }
 
-static void init_buffer_pools(void) {
+static void init_buffer_pools(void)
+{
 	unsigned int i;
 	NFIN;
 	for (i = 0; i < ARRAY_SIZE(bm->buffer_pool); ++i) {
@@ -249,9 +263,10 @@ static void init_buffer_pools(void) {
 	NFOUT;
 }
 
-static void free_buffer_pools(void) {
+static void free_buffer_pools(void)
+{
 	struct memory_buffer *p;
-	unsigned int i;
+	unsigned int		  i;
 	NFIN;
 	for (i = 0; i < ARRAY_SIZE(bm->buffer_pool); ++i) {
 		XDLIST_FOREACH_SAFE(p, &bm->buffer_pool[i]) {
@@ -269,8 +284,9 @@ static void free_buffer_pools(void) {
 	NFOUT;
 }
 
-int nvmeibt_bm_create(void) {
-	int rv = -1;
+int nvmeibt_bm_create(void)
+{
+	int					rv = -1;
 	pthread_mutexattr_t attr;
 	NFIN;
 	if (bm) {
@@ -292,7 +308,8 @@ out:
 	return rv;
 }
 
-void nvmeibt_bm_destroy(void) {
+void nvmeibt_bm_destroy(void)
+{
 	if (bm) {
 		free_buffer_pools();
 		NNVMEIBT_TOMA_FREE(tombmd2, bm);
