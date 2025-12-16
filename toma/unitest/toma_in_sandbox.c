@@ -26,6 +26,7 @@ void syslog(int priority, const char *fmt, ...) {
 #include <signal.h>
 #include <sys/un.h>
 #include <errno.h>
+
 #define BUG_ON(condition)	do { const int hit__ = !!(condition); if (hit__) {fprintf(stderr, "************************** BUG!!!! at %s, %s() line %d, val=%d, condition=%s\n", __FILE__, __FUNCTION__, __LINE__, hit__, #condition); raise(SIGABRT);} } while(0)
 //#define WARN(condition, fmt, ...) 	do { const int hit = !!(condition); if (hit) {/*dump_stack(); */SANDBOX_PRINT("************************** BUG!!!! at %s() line %d, val=%d, condition=%s\n", __FUNCTION__, __LINE__, hit, #condition); raise(SIGABRT);} } while(0)
 
@@ -71,30 +72,38 @@ void syslog(int priority, const char *fmt, ...) {
 #include <stdarg.h>
 #include <linux/fs.h>		// For BLKGETSIZE64, BLKSSZGET
 
+// Offset used to indicate a non-random-access operation like send()/recv() or read()/write(),
+// rather than a random access operation like pread()/pwrite().
+#define OFFSET_NONE ((off_t) -1)
+
 /************************************* srvr ***********************************/
 struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "common/nvmeib_shared.h"
-ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, int flags) {
+ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
-	(void)flags; (void)fd;
+	(void)fd; (void)offset; (void)flags;
+	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON(n <= sizeof(struct nvmeibs_toma_server_proc_buf));
 	msg_buf->type = 0x22;	// Trigger JGC == NVMEIBS_TOMA_TRIGGER_JGC, use NVMEIBS_TOMA_WRITE_STATUS_REQ to inject server msg
 	return sizeof(struct nvmeibs_toma_server_proc_buf);
 }
 
 /************************************* FD/Sockets ********************************/
-static ssize_t _recv_empty(int fd, void *buf, size_t n, int flags) {
+static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags) {
+	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON((fd < 2) || (n == 0));
-	(void)buf; (void)n; (void)flags;
+	(void)buf; (void)n; (void)offset; (void)flags;
 	return 0;
 }
 
-static ssize_t _rpc_inject(int fd, void *buf, size_t n, int flags) {
+static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags) {
 	static int n_rpcs_sent = 0;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
 	static const char* cmds[] = {"simulate dump-clnt-hash 20\n" ,"simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n", "status kafka\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
 	const bool only_checking = (flags & MSG_PEEK);
 	(void)fd;
+	(void)offset;
+	BUG_ON(offset != OFFSET_NONE);
 	if (n_rpcs_sent < (int)ARRAY_SIZE(cmds)) {
 		const char* cmd = cmds[n_rpcs_sent];
 		const size_t rv = strlen(cmd);
@@ -108,22 +117,27 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, int flags) {
 	return 0;
 }
 
-static ssize_t _rpc_accept(int fd, const void *buf, size_t n, int flags) {
+static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	const int print_n_bytes = min(n, (size_t)64);
+	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON((fd < 2) || (n == 0)); (void)flags;
 	SANDBOX_PRINT("RPC reply %u[b]: " COL_PURPL "%.*s\n" COL_RESET, (unsigned)n, print_n_bytes, (const char*)buf);
 	return n;
 }
 
-static ssize_t _send_empty(int fd, const void *buf, size_t n, int flags) {
+static ssize_t _send_empty(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	BUG_ON((fd < 2) || (n == 0));
-	(void)buf; (void)n; (void)flags;
+	(void)buf; (void)n; (void)offset; (void)flags;
 	return n;
 }
 
 struct TSB_sock_otherside {		// Every implementation must derive from this sub class. Sandbox injects data to Toma via those functions
-	ssize_t (*send)(int fd, const void *buf, size_t n , int flags);	// Toma sends msg to simulator
-	ssize_t (*recv)(int fd,       void *buf, size_t n , int flags);	// Toma receives msg from simulator
+	// The send()/recv() operations act as a generic I/O interface that is common to both
+	// seekable like a block device or a local file, and non-seekable resources like a pipe, socket, or FIFO.
+	// Use offset == OFFSET_NONE to indicate a non-random I/O operation like read()/write() or send()/recv().
+	// When offset != OFFSET_NONE (i.e. > 0) this indicates a pread()/pwrite() operation.
+	ssize_t (*send)(int fd, const void *buf, size_t n, off_t offset, int flags);	// Toma sends data to simulator
+	ssize_t (*recv)(int fd,       void *buf, size_t n, off_t offset, int flags);	// Toma receives data from simulator
 	struct t_sandbox_sock *sock;								// Pointer to the socket structure which uses me
 };
 
@@ -373,6 +387,7 @@ int TSB_sock_open(struct t_sandbox_sock *s) {
 	}
 	s->fd = fileno(s->f);
 	TSB_connect_sock_to_listener(s);
+	N_Df(sbo0564, "sandbox file: open path=@STR fd=@INT mode=@STR", s->addr.sun_path, s->fd, open_mode);
 	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, mode=%s, listener=%c\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, open_mode, ((s->other_side) ? 'Y' : 'N'));
 	return s->fd;
 }
@@ -423,12 +438,12 @@ ssize_t recvmsg(int __fd,       struct msghdr *__msg, int __flags) {
 
 ssize_t send(int fd, const void *buf, size_t n , int flags) {
 	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-	return s->other_side->send(fd,buf,n,flags);
+	return s->other_side->send(fd, buf, n, OFFSET_NONE, flags);
 }
 
 ssize_t recv(int fd,       void *buf, size_t n , int flags) {
 	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-	return s->other_side->recv(fd, buf, n, flags);
+	return s->other_side->recv(fd, buf, n, OFFSET_NONE, flags);
 }
 
 int setsockopt(int fd, int lvl, int name, const void *val, unsigned int optlen) {
@@ -521,24 +536,32 @@ ssize_t override_read(int fd, void *buf, size_t nbytes) {
 	}
 	s = TSB_socket_find_by_fd(fd);
 	if (s->other_side && s->other_side->recv) {
-		return s->other_side->recv(fd, buf, nbytes, 0);
+		return s->other_side->recv(fd, buf, nbytes, OFFSET_NONE, 0);
 	} else {
 		return read(fd, buf, nbytes);		// Backward compatibility for fd's without backend simulator
 	}
 }
 
 ssize_t override_write( int fd, const void *buf, size_t count) {
+	// Pass through to real file.
 	return write(fd, buf, count);
 }
+
 ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset) {
-	return pread(fd, buf, count, offset);
+	struct t_sandbox_sock *s;
+	s = TSB_socket_find_by_fd(fd);
+	if (s->other_side && s->other_side->recv) {
+		return s->other_side->recv(fd, buf, count, offset, 0);
+	} else {
+		return pread(fd, buf, count, offset);
+	}
 }
+
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 	struct t_sandbox_sock *s;
 	s = TSB_socket_find_by_fd(fd);
 	if (s->other_side && s->other_side->send) {
-		BUG_ON(offset != 0);
-		return s->other_side->send(fd, buf, count, 0);
+		return s->other_side->send(fd, buf, count, offset, 0);
 	} else {
 		return pwrite(fd, buf, count, offset);
 	}
