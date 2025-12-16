@@ -20,6 +20,12 @@
 #define MACRO_DEF_TO_STR(s) _MACRO_DEF_TO_STR(s)
 #define _MACRO_DEF_TO_STR(s) #s
 
+static inline const char *nvmeibt_basename(const char *path)
+{
+	const char *tail = strrchr(path, '/');
+	return tail ? tail + 1 : path;
+}
+
 /*
  * The behavior of logging and trace-logging depends on the compilation mode:
  *

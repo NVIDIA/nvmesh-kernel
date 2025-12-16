@@ -139,12 +139,6 @@ enum nvmeibt_add_rv {
 #define ERR_FILE stderr
 
 
-static inline const char *nvmeibt_basename(const char *path)
-{
-	const char *tail = strrchr(path, '/');
-	return tail ? tail + 1 : path;
-}
-
 #define sizeof_member(type, member) (sizeof((type *)0)->member)
 
 /* named code blocks */
