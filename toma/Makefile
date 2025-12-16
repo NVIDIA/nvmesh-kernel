@@ -4,8 +4,6 @@
 # Supported command line options (the default is in ()):
 # MOD=<(debug),release> for compilation mode
 # DEBUG=<yes,(no)> if yes in release compilation it adds the TOMA_DEBUG define
-# COMPRESSED=<yes,(no)> if logs should be compressed (defa
-# SYSLOG=<(yes),no>
 # FILE_SIZE_BITS=<bits> the size of TOMA log file (1 << FILE_SIZE_BITS)
 #
 
@@ -75,12 +73,6 @@ COMPILER_DEFINES_nvmeibt_toma += TOMA_DEBUG
 endif
 endif
 LINKER_CMDS_nvmeibt_toma = -T,tracer.ld
-ifeq ($(COMPRESSED),yes)
-COMPILER_DEFINES_nvmeibt_toma += COMPRESS_TOMA_LOGS
-endif
-ifeq ($(SYSLOG),no)
-COMPILER_DEFINES_nvmeibt_toma += TOMA_LOG_PRINT_STDERR=1 TOMA_USE_SYSLOG=0
-endif
 
 # the binary header dirs - these we add with the -I
 HEADERS_nvmeibt_toma = rcvr /usr/include/infiniband $(AUTOGEN_HEADERS)
@@ -93,12 +85,6 @@ ifeq ($(BUILD_ASAN),1)
 	LDLIBS_DEFINES_nvmeibt_toma += asan
 endif
 
-ifeq ($(LTTNG_UST),1)
-	LDLIBS_DEFINES_nvmeibt_toma += lttng-ust
-endif
-ifeq ($(COMPRESSED),yes)
-LDLIBS_DEFINES_nvmeibt_toma += bz2
-endif
 ifeq ($(MEM),low)
 COMPILER_DEFINES_nvmeibt_toma += LOW_MEM
 endif
