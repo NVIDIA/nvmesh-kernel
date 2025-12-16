@@ -24,8 +24,6 @@
 
 typedef __CHAR16_TYPE__ char16_t;
 
-#define MACRO_DEF_TO_STR(s) _MACRO_DEF_TO_STR(s)
-#define _MACRO_DEF_TO_STR(s) #s
 #define BOOL signed char
 #define TODO(x...)
 #define PAGE_SHIFT		12

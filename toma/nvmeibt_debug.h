@@ -17,6 +17,9 @@
 #define TOMA_SW_COMPATIBILITY_VER					0x00000310
 #define WARN(x...) ({})		// Just in order to compile
 
+#define MACRO_DEF_TO_STR(s) _MACRO_DEF_TO_STR(s)
+#define _MACRO_DEF_TO_STR(s) #s
+
 /*
  * The behavior of logging and trace-logging depends on the compilation mode:
  *
