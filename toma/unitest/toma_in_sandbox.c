@@ -3,18 +3,9 @@
 #include "toma_in_sandbox.h"
 
 /************************************* Logging ********************************/
-#define COL_RED         "\x1b[31m"	// Colors description is here https://telepathy.freedesktop.org/doc/telepathy-glib/telepathy-glib-debug-ansi.html
-#define COL_GREEN       "\x1b[32m"
-#define COL_YELLOW      "\x1b[1;33m"
-#define COL_RED_BOLD    "\x1b[1;31m"	// Bold format is 1;
-#define COL_WHITE_BOLD  "\x1b[1;37m"
-#define COL_RESET       "\x1b[0;0m"
-#define COL_PURPL       "\x1b[1;35m" // Purple
-#define COL_BLUE        "\x1b[16;34m" // Blue
-#define COL_WHITE_UNDER "\x1b[4m"
 
 #define SANDBOX_PRINT(fmt, ...) fprintf(stderr, "SANDBOX: " fmt, __VA_ARGS__)
-#define SANDBOX_PRINT_TMP(fmt, ...)  fprintf(stderr, "SANDBOX: "  "\x1b[1;35m" fmt "\x1b[0;0m", __VA_ARGS__)
+#define SANDBOX_PRINT_TMP(fmt, ...)  fprintf(stderr, "SANDBOX: " COL_PURPL fmt COL_RESET, __VA_ARGS__)
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
 #include <stdarg.h>				// va_list
