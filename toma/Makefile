@@ -56,7 +56,7 @@ BINS =
 # the binary name
 BINS += nvmeibt_toma
 # the source directories, space separated
-PROJECT_DIRS_nvmeibt_toma = . clnt ./local/ram ./interfaces/network ./interfaces/log ./interfaces/nvme ./interfaces/os ./interfaces/srvr ./utils
+PROJECT_DIRS_nvmeibt_toma = . clnt ./local/ram ./interfaces/network ./interfaces/log ./interfaces/nvme ./interfaces/os ./interfaces/srvr ./utils ./vol
 # shared with kernel dirs...
 SHARED_DIRS_nvmeibt_toma =
 # files we would like to exclude from the above dir list
