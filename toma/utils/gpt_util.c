@@ -216,10 +216,10 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config);
 static void SELF_TEST_print_test_header(int test_idx, const char *description, const char *command)
 {
 	fprintf(stdout, "\n");
-	fprintf(stdout, "============================================================\n");
-	fprintf(stdout, "SELF-TEST %d: %s\n", test_idx, description);
-	fprintf(stdout, "Emulated command: %s\n", command);
-	fprintf(stdout, "============================================================\n");
+	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
+	fprintf(stdout, COL_WHITE_BOLD "SELF-TEST %d: %s" COL_RESET "\n", test_idx, description);
+	fprintf(stdout, "Emulated command: " COL_YELLOW "%s" COL_RESET "\n", command);
+	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
 }
 
 /**
@@ -244,7 +244,7 @@ static int SELF_TEST_run_test_case(int *test_idx,
 	disk_fd = setup_device(test_device_path);
 	if (disk_fd < 0) {
 		N_Ef(run_test_setup_failed, "Failed to setup device for test @INT", current_test);
-		fprintf(stdout, "\n>>> SELF-TEST %d: FAILED <<<\n", current_test);
+		fprintf(stdout, "\n" COL_RED_BOLD ">>> SELF-TEST %d: FAILED <<<" COL_RESET "\n", current_test);
 		return -1;
 	}
 
@@ -254,11 +254,11 @@ static int SELF_TEST_run_test_case(int *test_idx,
 	// Run the test
 	optind = 1;		// Reset getopt state
 	if (run_gpt_util_op(test_argc, test_argv) != 0) {
-		fprintf(stdout, "\n>>> SELF-TEST %d: FAILED <<<\n", current_test);
+		fprintf(stdout, "\n" COL_RED_BOLD ">>> SELF-TEST %d: FAILED <<<" COL_RESET "\n", current_test);
 		return -1;
 	}
 
-	fprintf(stdout, "\n>>> SELF-TEST %d: PASSED <<<\n", current_test);
+	fprintf(stdout, "\n" COL_GREEN ">>> SELF-TEST %d: PASSED <<<" COL_RESET "\n", current_test);
 	return 0;
 }
 
@@ -554,7 +554,7 @@ static int export_gpt_to_json(int disk_fd,
 
 	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT",
 		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers);
-	fprintf(stdout, "GPT exported to JSON: %s (%lu bytes)\n", output_file, nvmeibt_Str_strlen(json_output));
+	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
 
 	// Build status message based on what was actually exported
 	fprintf(stdout, "  - Exported: pMBR, Main GPT");
@@ -571,16 +571,16 @@ static int export_gpt_to_json(int disk_fd,
 		N_Wf(gpt_json_mismatch_detected, "Mismatch detected in exported GPT: dev=@STR file=@STR",
 			 config->device_path, output_file);
 		fprintf(stdout, "\n");
-		fprintf(stdout, "*** WARNING: Primary and alternate copies differ! ***\n");
+		fprintf(stdout, COL_YELLOW "*** WARNING: Primary and alternate copies differ! ***" COL_RESET "\n");
 		fprintf(stdout, "    JSON marked with '_mismatch_detected: true'\n");
 		fprintf(stdout, "    Apply will be BLOCKED until you choose one copy.\n");
-		fprintf(stdout, "    Suggestion: Re-export with --gpt-copy=primary or --gpt-copy=alternate\n");
+		fprintf(stdout, "    " COL_GREEN "Suggestion: Re-export with --gpt-copy=primary or --gpt-copy=alternate" COL_RESET "\n");
 	}
 	if (has_overlaps) {
 		N_Wf(gpt_json_overlaps_detected, "Overlapping partitions detected in exported GPT: dev=@STR file=@STR",
 			 config->device_path, output_file);
 		fprintf(stdout, "\n");
-		fprintf(stdout, "*** WARNING: Overlapping partitions detected! ***\n");
+		fprintf(stdout, COL_YELLOW "*** WARNING: Overlapping partitions detected! ***" COL_RESET "\n");
 		fprintf(stdout, "    JSON marked with '_overlaps_detected: true'\n");
 		fprintf(stdout, "    Apply will be BLOCKED until overlaps are fixed.\n");
 	}
@@ -1115,7 +1115,7 @@ static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entrie
 			}
 
 			if (entries_overlap(&entries[i], &entries[j])) {
-				fprintf(stdout, "WARNING: Overlap detected between entry %d and entry %d\n", i, j);
+				fprintf(stdout, COL_YELLOW "WARNING: Overlap detected between entry %d and entry %d" COL_RESET "\n", i, j);
 				fprintf(stdout, "  Entry %d: LBA %lu-%lu\n", i, entries[i].pba_s, entries[i].pba_e);
 				fprintf(stdout, "  Entry %d: LBA %lu-%lu\n", j, entries[j].pba_s, entries[j].pba_e);
 				n_overlaps++;
@@ -1221,7 +1221,7 @@ static void display_gpt_one_copy(const char *gpt_level,
 	if (entries_validity == GPT_VALIDITY_OK) {
 		int n_overlaps = detect_overlaps(entries, max_n_entries);
 		if (n_overlaps > 0) {
-			fprintf(stdout, "\n*** WARNING: %d overlap(s) detected in %s %s ***\n",
+			fprintf(stdout, "\n" COL_YELLOW "*** WARNING: %d overlap(s) detected in %s %s ***" COL_RESET "\n",
 					n_overlaps, gpt_level, copy_name);
 		}
 	}
@@ -1360,9 +1360,9 @@ out:
 
 static void print_version_banner(void)
 {
-	fprintf(stdout, "============================================================\n");
-	fprintf(stdout, "gpt_util - NVMesh GPT/MBR Utility\n");
-	fprintf(stdout, "Tool Version: %s\n", GPT_UTIL_VERSION);
+	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
+	fprintf(stdout, COL_WHITE_BOLD "gpt_util - NVMesh GPT/MBR Utility" COL_RESET "\n");
+	fprintf(stdout, "Tool Version: " COL_GREEN "%s" COL_RESET "\n", GPT_UTIL_VERSION);
 #ifdef BUILD_VERSION_FOR_MGMT
 	fprintf(stdout, "TOMA Version: %s", BUILD_VERSION_FOR_MGMT);
 #ifdef BUILD_NUMBER_FOR_MGMT
@@ -1377,7 +1377,7 @@ static void print_version_banner(void)
 #endif // #ifdef GIT_COMMIT_ID
 	fprintf(stdout, "\n");
 #endif // #ifdef GIT_BRANCH
-	fprintf(stdout, "============================================================\n");
+	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
 }
 
 /**
@@ -1674,9 +1674,9 @@ static int run_self_test(void)
 
 	// ===== SUMMARY =====
 	fprintf(stdout, "\n");
-	fprintf(stdout, "============================================================\n");
-	fprintf(stdout, "ALL SELF-TESTS PASSED (%d/%d)\n", test_idx, test_idx);
-	fprintf(stdout, "============================================================\n");
+	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
+	fprintf(stdout, COL_GREEN "ALL SELF-TESTS PASSED (%d/%d)" COL_RESET "\n", test_idx, test_idx);
+	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
 
 	rv = 0;
 
@@ -2450,7 +2450,7 @@ static int execute_export_json(int disk_fd, struct gpt_util_config *config)
 	rv = export_gpt_to_json(disk_fd, config, config->output_json_file);
 
 	if (rv == 0) {
-		fprintf(stdout, "\nJSON export complete. Edit the file and use --apply-from to restore.\n");
+		fprintf(stdout, "\n" COL_GREEN "JSON export complete." COL_RESET " Edit the file and use --apply-from to restore.\n");
 	}
 
 	return rv;
@@ -2587,7 +2587,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	fprintf(stdout, "\n=== Metadata validation: PASSED ===\n\n");
+	fprintf(stdout, "\n" COL_GREEN "=== Metadata validation: PASSED ===" COL_RESET "\n\n");
 
 	// Step 4: Parse GPT sections and prepare for apply
 	memset(&current_gpt, 0, sizeof(current_gpt));
@@ -2664,9 +2664,9 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		fprintf(stdout, "TODO: Call nvmeibt_disk_metadata_store_gpt()\n");
 		fprintf(stdout, "TODO: Log audit trail with N_IMf (before/after CRCs)\n");
 	} else {
-		fprintf(stdout, "=== Dry-run complete ===\n");
+		fprintf(stdout, COL_GREEN "=== Dry-run complete ===" COL_RESET "\n");
 		fprintf(stdout, "No changes written to disk.\n");
-		fprintf(stdout, "Use --write flag to actually apply changes.\n");
+		fprintf(stdout, COL_YELLOW "Use --write flag to actually apply changes." COL_RESET "\n");
 	}
 
 	rv = 0;
