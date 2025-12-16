@@ -207,7 +207,6 @@ static int open_target_device(struct gpt_util_config *config)
 
 // Forward declarations
 static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
-static void SELF_TEST_mark_file_persistent(const char *filepath);
 static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries, int max_n_entries);
 static int run_gpt_util_op(int argc, char *argv[]);
 static int execute_apply_json(int disk_fd, struct gpt_util_config *config);
@@ -248,7 +247,6 @@ static int SELF_TEST_run_test_case(int *test_idx,
 		return -1;
 	}
 
-	SELF_TEST_mark_file_persistent(test_device_path);
 	close(disk_fd);
 
 	// Run the test
@@ -548,9 +546,6 @@ static int export_gpt_to_json(int disk_fd,
 		N_Ef(gpt_json_write_failed, "Failed to write JSON to file @STR @AUTO_ERRNO", output_file);
 		goto out;
 	}
-
-	// Mark file persistent BEFORE closing (sandbox: prevents auto-deletion)
-	SELF_TEST_mark_file_persistent(output_file);
 
 	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT",
 		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers);
@@ -1380,16 +1375,6 @@ static void print_version_banner(void)
 	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
 }
 
-/**
- * Mark a sandbox file as persistent (so it survives close and can be re-opened)
- * In sandbox: Calls sandbox API to clear O_CREAT flag
- * In production: No-op (files already persist)
- */
-static void SELF_TEST_mark_file_persistent(const char *filepath)
-{
-	(void)filepath;		// Unused in production
-}
-
 // Setup device with mismatch (for test 2)
 static int SELF_TEST_setup_device_with_mismatch(const char *filepath)
 {
@@ -1599,7 +1584,6 @@ static int run_self_test(void)
 			goto out;
 		}
 
-		SELF_TEST_mark_file_persistent(test_device_path);
 		close(disk_fd);
 		disk_fd = -1;
 
@@ -1650,7 +1634,6 @@ static int run_self_test(void)
 									 test_argv, test_argc) < 0) {
 			goto out;
 		}
-		SELF_TEST_mark_file_persistent("./test_export.json");
 
 		// ===== TEST 8: JSON Apply (Dry-Run) =====
 		test_argv[0] = "gpt_util -a <path> --apply-from <file>";
@@ -1682,7 +1665,7 @@ out:
 		close(disk_fd);
 	}
 
-	// Always clean up test file (even on failure - we marked it persistent)
+	// Always clean up test file (even on failure)
 	unlink(test_device_path);
 
 	return rv;
