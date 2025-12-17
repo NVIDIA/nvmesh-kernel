@@ -2974,9 +2974,7 @@ out:
 
 static int __attribute__ ((used)) run(int argc, char *argv[])
 {
-	struct timespec					now;
 	int64_t 						epoll_timeout_ms;
-	int64_t 						raft_diff_ms, register_diff_ms, recovery_diff_ms;
 	int64_t							now_millisec;
 	int64_t							pselect_time_ms;
 	struct timespec					last_idle_time_activities_time = TIMESPEC_ZERO;
@@ -3059,6 +3057,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	}
 
 	do {
+		struct timespec now;
 		int select_errno;
 
 		if (is_need_to_update_the_main_select_fds) {
@@ -3074,11 +3073,13 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		epoll_timeout_ms = 1000;	// Start from max of 1 sec. Probably the other timeouts will pull it down
 
 		if (nvmeibt_topology_is_HW_config_functional()) {
-			raft_diff_ms = timespec_diff_ms(nvmeibt_raft_get_next_timeout_timespec(), now);
-			register_diff_ms = timespec_diff_ms(nvmeibt_register_get_next_timeout_timespec(), now);
-			recovery_diff_ms = timespec_diff_ms(nvmeibt_recovery_get_next_timeout_timespec(), now);
+			const int64_t raft_diff_ms =     timespec_diff_ms(nvmeibt_raft_get_next_timeout_timespec(),     now);
+			const int64_t register_diff_ms = timespec_diff_ms(nvmeibt_register_get_next_timeout_timespec(), now);
+			const int64_t recovery_diff_ms = timespec_diff_ms(nvmeibt_recovery_get_next_timeout_timespec(), now);
 			N_Tf(hdt6g4d, "timeouts-ms: raft=@LLD register=@LLD recovery=@LLD", raft_diff_ms, register_diff_ms, recovery_diff_ms);
-			epoll_timeout_ms = min(epoll_timeout_ms, min(raft_diff_ms, min(register_diff_ms, recovery_diff_ms)));
+			epoll_timeout_ms = min(epoll_timeout_ms, raft_diff_ms);
+			epoll_timeout_ms = min(epoll_timeout_ms, register_diff_ms);
+			epoll_timeout_ms = min(epoll_timeout_ms, recovery_diff_ms);
 			epoll_timeout_ms = max(epoll_timeout_ms, 1);	// Clip to 1ms..1sec
 		}
 		N_Tf(trace_9_toma_run, "epoll_timeout=@LLU", epoll_timeout_ms);
