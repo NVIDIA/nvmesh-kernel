@@ -27,24 +27,6 @@
 #include "nvmeibt_json_base.h"
 #include "nvmeibt_kafka.h"
 
-/**
- * Wrapper for parse_json_txt_into_kv_tree() that reports failures to management via Kafka.
- * Use this for parsing JSON messages received from management (Kafka).
- * For local file parsing (e.g., gpt_util), use parse_json_txt_into_kv_tree() directly.
- */
-struct mm_json_elem *parse_mgmt_json_txt_into_kv_tree_or_report_failure(const char *in, int buff_len)
-{
-	struct mm_json_elem		*root;
-
-	root = parse_json_txt_into_kv_tree(in, buff_len);
-	if (!root) {
-		char msg[MGMT_LOG_MSG_MSG_LEN];
-		snprintf(msg, sizeof(msg), "Failed parsing of msg from MGMT %.200s", in);
-		nvmeibt_kafka_generic_log_msg_to_mgmt_send(NULL, NULL, msg, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
-	}
-	return root;
-}
-
 // forward compatibility. If updating the structs, add an unpack handler for the old struct version.
 // #define MM_STRUCT_VER_2008 2008
 // #define MM_STRUCT_VER_2012 2012		// ELECT
@@ -1804,8 +1786,7 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	N_Tf(b8ski4x, "@STR JSON_len=@SIZE_T", JSON_file_name, JSON_len);
 
 	// parse the JSON into a kv_tree
-	// TODO(Wentao): I believe parse_json_txt_into_kv_tree() suffices here, with no need to report to mgmt, but to play safe I use this wrapper to exactly match old behavior.
-	json_tree_root = parse_mgmt_json_txt_into_kv_tree_or_report_failure(nvmeibt_Str_str(JSON_buf), nvmeibt_Str_strlen(JSON_buf));
+	json_tree_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(JSON_buf), nvmeibt_Str_strlen(JSON_buf));
 	if (!json_tree_root) {
 		N_Ef(cbjw9k3, "Failed parsing JSON");
 		goto out;

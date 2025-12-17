@@ -192,9 +192,6 @@ struct _packed_mm_mgmt_conf {
 void nvmeibt_mm_json_free_kv_tree(struct mm_json_elem *root);
 struct mm_json_elem *parse_json_txt_into_kv_tree(const char *in, int buff_len);
 
-// Wrapper that reports failures to management via Kafka - use for Kafka message parsing
-struct mm_json_elem *parse_mgmt_json_txt_into_kv_tree_or_report_failure(const char *in, int buff_len);
-
 uint16_t nvmeibt_raft_member_conf_convert_le_be(struct mm_raft_member_conf *dst, struct mm_raft_member_conf *src);
 int nvmeibt_mgmt_msg_json_tree_to_mgmt_conf(struct mm_mgmt_conf *conf, struct mm_json_elem *root, int64_t kafka_offset, bool is_new_or_upd, bool is_deleteVolumeCompleted);
 int nvmeibt_mm_json_tree_to_HW_mgmt_conf(struct HW_mgmt_conf *conf, struct mm_json_elem *elem, int64_t kafka_offset);
