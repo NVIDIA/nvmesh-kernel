@@ -110,6 +110,9 @@ struct gpt_util_config {
 	BOOL					has_uuid_filter;
 	BOOL					has_lba_filter;
 
+	// Zeroing verification
+	BOOL					print_zero_verify_cmds;	// -Z: print zeroing verification commands
+
 	// JSON export options (for ACTION_EXPORT_JSON)
 	char					output_json_file[256];	// Output JSON filename
 
@@ -1164,6 +1167,41 @@ static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entrie
 }
 
 /**
+ * Print commands to verify a partition range is properly deleted/zeroed
+ * Includes both data payload and data metadata (DMD) verification
+ * Useful after segment deletion or for troubleshooting
+ */
+static void print_zero_verify_commands(const char *device_path,
+									   const struct nvmeibt_disk_gpt_partition_entry *entry,
+									   int entry_idx,
+									   const char *gpt_level)
+{
+	uint64_t	first_lba = entry->pba_s;
+	uint64_t	mid_lba = (entry->pba_s + entry->pba_e) / 2;
+	uint64_t	last_lba = entry->pba_e;
+	char		partition_name[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+
+	// Convert partition name from UTF-16
+	char16_str_to_str(entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, partition_name);
+
+	fprintf(stdout, "\n");
+	fprintf(stdout, COL_BLUE "--- Deletion Verification: %s Entry %d (%s) ---" COL_RESET "\n",
+			gpt_level, entry_idx, partition_name);
+	fprintf(stdout, COL_YELLOW "# Step 1: Verify Data Metadata (DMD) is cleared (quick spot-check):" COL_RESET "\n");
+	fprintf(stdout, "# Checks: Version/EDIC/TxID/JRI Metadata fields are reset\n");
+	fprintf(stdout, "tools/rw_dmd.sh %s %lu           # First block metadata\n", device_path, first_lba);
+	fprintf(stdout, "tools/rw_dmd.sh %s %lu          # Middle block metadata\n", device_path, mid_lba);
+	fprintf(stdout, "tools/rw_dmd.sh %s %lu          # Last block metadata\n", device_path, last_lba);
+	fprintf(stdout, "\n");
+	fprintf(stdout, COL_YELLOW "# Step 2: Verify Data Payload is zeroed (thorough full-range check):" COL_RESET "\n");
+	fprintf(stdout, "# Checks: Actual block content is all zeros\n");
+	fprintf(stdout, "source tools/block_team_bashrc.sh\n");
+	fprintf(stdout, "NVMESH_io_check_zero %s %lx %lx   # LBA %lu-%lu (%lu blocks)\n",
+			device_path, first_lba, last_lba, first_lba, last_lba, (last_lba - first_lba + 1));
+	fprintf(stdout, "\n");
+}
+
+/**
  * Check if partition entry matches filter criteria
  * Returns true if entry should be displayed
  */
@@ -1241,6 +1279,11 @@ static void display_gpt_one_copy(const char *gpt_level,
 				fprintf(stdout, "%s", nvmeibt_Str_str(outstr));
 				NNVMEIBT_STR_FREE(trace_gpt_util_display_filtered_free, outstr);
 				n_displayed++;
+
+				// Print zeroing verification commands if requested
+				if (config && config->print_zero_verify_cmds) {
+					print_zero_verify_commands(config->device_path, &entries[i], i, gpt_level);
+				}
 			}
 		}
 
@@ -1252,6 +1295,15 @@ static void display_gpt_one_copy(const char *gpt_level,
 													   outstr, gpt_level, copy_name);
 		fprintf(stdout, "%s\n", nvmeibt_Str_str(outstr));
 		NNVMEIBT_STR_FREE(trace_gpt_util_display_copy_free, outstr);
+
+		// Print zeroing verification commands if requested
+		if (config && config->print_zero_verify_cmds) {
+			for (i = 0; i < max_n_entries; i++) {
+				if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[i])) {
+					print_zero_verify_commands(config->device_path, &entries[i], i, gpt_level);
+				}
+			}
+		}
 	}
 
 	// Detect and display overlaps (only if entries are valid)
@@ -1694,6 +1746,22 @@ static int run_self_test(void)
 		}
 	}
 
+	// ===== TEST 9: Zeroing Verification Commands =====
+	if (1) {
+		test_argv[0] = "gpt_util -a <path> -Z";
+		test_argv[1] = "-a";
+		test_argv[2] = (char *)test_device_path;
+		test_argv[3] = "-Z";
+		test_argc = 4;
+
+		if (SELF_TEST_run_test_case(&test_idx, "Zeroing Verification Commands (-Z)",
+									 test_device_path,
+									 SELF_TEST_generate_and_open_mock_nvmesh_disk,
+									 test_argv, test_argc) < 0) {
+			goto out;
+		}
+	}
+
 	// ===== SUMMARY =====
 	fprintf(stdout, "\n");
 	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
@@ -1737,7 +1805,8 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "Display Options:\n");
 	fprintf(stdout, "  -c, --gpt-copy=WHICH        Which copy: primary|alternate|both (default: primary)\n");
 	fprintf(stdout, "  --filter-uuid=UUID          Show only entries matching UUID\n");
-	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n\n");
+	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n");
+	fprintf(stdout, "  -Z, --print-zero-verify     Print commands that verify zeroed ranges\n\n");
 
 	fprintf(stdout, "JSON Export Options:\n");
 	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON\n\n");
@@ -1781,6 +1850,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"gpt-copy",				required_argument,	0,	'c'},
 		{"filter-uuid",				required_argument,	0,	'u'},
 		{"filter-lba",				required_argument,	0,	'l'},
+		{"print-zero-verify",		no_argument,		0,	'Z'},
 		{"output-json",				required_argument,	0,	'J'},
 		{"apply-from",				required_argument,	0,	'A'},
 		{"write",					no_argument,		0,	'W'},
@@ -1789,7 +1859,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:imfFUW";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:ZimfFUWDN";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1994,6 +2064,10 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->filter_lba = (uint64_t)atoll(optarg);
 			config->has_lba_filter = true;
 			fprintf(stdout, "Filter by LBA: 0x%lx\n", config->filter_lba);
+			break;
+		case 'Z':
+			config->print_zero_verify_cmds = true;
+			fprintf(stdout, "Print zeroing verification commands: ENABLED\n");
 			break;
 		case 'J':
 			if (config->action != ACTION_DISPLAY_GPT) {
