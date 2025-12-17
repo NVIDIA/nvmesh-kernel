@@ -193,5 +193,15 @@
 		"nvmeibt_node.h": "c",
 		"nvmeib_jdr.h": "c",
 		"nvmeibt_msg_queue_api.h": "c"
+	},
+	"C_Cpp.files.exclude": {
+		"build": true,
+		"build-*": true,
+		"cmake-build-*": true,
+		"toma/unitest/99bin": true,
+		"tools/pipe_tracer/build": true,
+		"tools/traces_post_processor/formatters/build": true,
+		"**/.vscode": true,
+		"**/.vs": true
 	}
 }
