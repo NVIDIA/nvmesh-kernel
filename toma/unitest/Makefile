@@ -1,4 +1,11 @@
+# Usage:
+#
+# make all      - Build everything
+# make clean    - Remove generated files
+# make all V=1  - Build everything and print all commands executed
+#
 # Make files tutorial: http://www.cs.swarthmore.edu/~newhall/unixhelp/howto_makefiles.html
+
 # ********** Define compiler and compilation flags *********
 ARCH := $(shell uname -m)
 BUILD_RELEASE?=0
@@ -212,24 +219,24 @@ $(OBJ_DIR)/$(FMTLIB):
 
 $(OBJ_DIR)/%.i: %.c
 	@echo "Preprocessing $< -> $@"
-	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) $(call per_file_cflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(call per_file_cflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
 
 $(OBJ_DIR)/%.i: %.cpp
 	@echo "Preprocessing $< -> $@"
-	@mkdir -p $(dir $@)
-	@$(CXX) $(CXXFLAGS) $(call per_file_cxxflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(call per_file_cxxflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
 
 %.trace.json: %.i $(MERGE_DICTIONARY) $(TRACER_PP)
 	@echo "Generating trace JSON $@"
-	@mkdir -p $(dir $@)
-	@$(TRACER_PP) -j 1 $@ $<
-	@$(MERGE_DICTIONARY) $@ $(SSDA)/tools/dictionary.json
+	mkdir -p $(dir $@)
+	$(TRACER_PP) -j 1 $@ $<
+	$(MERGE_DICTIONARY) $@ $(SSDA)/tools/dictionary.json
 
 %.c_gen_events.h: %.trace.json $(TRACE_GEN_SCRIPT)
 	@echo "Generating gen_events header $@"
-	@mkdir -p $(dir $@)
-	@cd $(dir $@); $(TRACE_GEN_SCRIPT) $(PWD)/$< nvmeibt --userspace -o $(PWD)/$@
+	mkdir -p $(dir $@)
+	cd $(dir $@); $(TRACE_GEN_SCRIPT) $(PWD)/$< nvmeibt --userspace -o $(PWD)/$@
 
 # Note: the tgz image uses tar's sparse file handling.
 # Created with: tar --sparse -c -z -f ./disk_nvmesh.img.tgz ./disk_nvmesh.img
@@ -250,12 +257,12 @@ PROC_SCHEME_PATH=$(AUTOGEN_DIR)/$(PROC_SCHEME_FILE)
 AUTOGEN_TARGETS = $(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h $(AUTOGEN_DIR)/clnt/nvmeibc_mcs_stub.h
 
 $(AUTOGEN_DIR)/clnt/nvmeibc_mcs_stub.h: $(PROC_SCHEME_PATH) $(AUTOGEN_DIR)/$(CLNT_SCHEME_FILE)
-	@echo $@
-	@cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) $(CLNT_SCHEME_FILE) ./clnt/nvmeibc_mcs_stub.h
+	@echo "Generating $@"
+	cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) $(CLNT_SCHEME_FILE) ./clnt/nvmeibc_mcs_stub.h
 
 $(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h: $(PROC_SCHEME_PATH) $(AUTOGEN_DIR)/$(TOMA_SCHEME_FILE)
-	@echo $@
-	@cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) $(TOMA_SCHEME_FILE) ./toma/nvmeibt_mcs_stub.h
+	@echo "Generating $@"
+	cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) $(TOMA_SCHEME_FILE) ./toma/nvmeibt_mcs_stub.h
 
 autogen: $(AUTOGEN_TARGETS)
 	@printf "Autogen code \e[0;32m Done\e[0;0m\n"
@@ -263,17 +270,17 @@ autogen: $(AUTOGEN_TARGETS)
 # ********** Autogen done *********
 $(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 # Merge all individual trace JSONs
-	@printf "Merging all trace JSONs to \e[0;32m $(FILE_TR_JSON)\e[0;0m\n"
-	@$(MERGE_MULTI_GEN) $(FILE_TR_JSON) $(OBJ_DIR_ROOT)/$(BDIR) $(OBJECTS)
+	@printf "Merging all trace JSONs to \e[0;32m$(FILE_TR_JSON)\e[0;0m\n"
+	$(MERGE_MULTI_GEN) $(FILE_TR_JSON) $(OBJ_DIR_ROOT)/$(BDIR) $(OBJECTS)
 # Generate final gen_events.h for traces_ids.c (with only trace IDs)
-	@printf "Making \e[0;32m gen_events.h\e[0;0m for trace IDs\n"
-	@$(TRACE_GEN_SCRIPT) $(FILE_TR_JSON) nvmeibt --userspace -o $(OBJ_DIR)/gen_events.h --only_trace_ids
+	@printf "Generating \e[0;32mgen_events.h\e[0;0m for trace IDs\n"
+	$(TRACE_GEN_SCRIPT) $(FILE_TR_JSON) nvmeibt --userspace -o $(OBJ_DIR)/gen_events.h --only_trace_ids
 # Compile traces_ids.c
-	@printf "Making \e[0;32m traces_ids.o\e[0;0m\n"
-	@$(CC) $(CFLAGS) $(INCLUDES) -c $(OBJ_DIR)/traces_ids.c -o $(OBJ_DIR)/traces_ids.o
+	@printf "Compiling \e[0;32mtraces_ids.o\e[0;0m\n"
+	$(CC) $(CFLAGS) $(INCLUDES) -c $(OBJ_DIR)/traces_ids.c -o $(OBJ_DIR)/traces_ids.o
 # Link everything
 	@$(CC) $(LDFLAGS) -T$(TDIR)/tracer.ld $(OBJECTS) $(OBJ_DIR)/traces_ids.o -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
-	@printf "Making \e[0;32m $@\e[0;0m done\n"
+	printf "Linking \e[0;32m$@\e[0;0m done\n"
 
 # Make each object depend on its corresponding gen_events header, This creates the dependency so headers are built before objects in parallel builds
 define obj_dep_template
@@ -282,39 +289,39 @@ endef
 $(foreach obj,$(OBJECTS),$(eval $(call obj_dep_template,$(obj))))
 
 $(OBJ_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	@echo "Compiling C   $< -> $@"
-	@OBJ_REAL=$$(cd $(dir $@) && pwd)/$(notdir $@); \
+	mkdir -p $(dir $@)
+	@echo "Compiling $< -> $@"
+	OBJ_REAL=$$(cd $(dir $@) && pwd)/$(notdir $@); \
 	GEN_HEADER=$$(echo "$$OBJ_REAL" | sed 's/\.o$$/\.c_gen_events.h/'); \
 	$(CC) $(CFLAGS) $(call per_file_cflags_varval,$<) $(INCLUDES) -include $$GEN_HEADER -c $< -MD -MP -o $@
 
 $(OBJ_DIR)/%.o: %.cpp
-	@mkdir -p $(dir $@)
-	@echo "Compiling C++ $< -> $@"
-	@OBJ_REAL=$$(cd $(dir $@) && pwd)/$(notdir $@); \
+	mkdir -p $(dir $@)
+	@echo "Compiling $< -> $@"
+	OBJ_REAL=$$(cd $(dir $@) && pwd)/$(notdir $@); \
 	GEN_HEADER=$$(echo "$$OBJ_REAL" | sed 's/\.o$$/\.c_gen_events.h/'); \
 	$(CXX) $(CXXFLAGS) $(call per_file_cxxflags_varval,$<) $(INCLUDES) -include $$GEN_HEADER -c $< -MD -MP -o $@
 
 define clean_compilation_intermediate
 	@printf "+-->Cleaning recursive dir |\e[1;45m${1}/*/.[oda]\e[0;0m|\n"
-	@find ./${1} -type f -name '*.[oda]' -delete
+	find ./${1} -type f -name '*.[oda]' -delete
 endef
 define clean_prev_run
 	@printf "+-->Cleaning previous run logs |\e[1;45mlogs\e[0;0m|\n"
-	@rm -f ./_root/var/log/nvmesh/trace_daemon/toma.*;
-	@rm -f ./_root/var/log/nvmesh/toma_2*;
-	@rm -f ./_root/var/log/nvmesh/tracelist.txt;
-	@rm -f ./_root/var/run/nvmesh/sandbox_*;
-	@rm -f ./_root/etc/nvmesh/tls/*.[ct][rx]_
+	rm -f ./_root/var/log/nvmesh/trace_daemon/toma.*;
+	rm -f ./_root/var/log/nvmesh/toma_2*;
+	rm -f ./_root/var/log/nvmesh/tracelist.txt;
+	rm -f ./_root/var/run/nvmesh/sandbox_*;
+	rm -f ./_root/etc/nvmesh/tls/*.[ct][rx]_
 endef
 clean:
 	@printf "+-->Cleaning |\e[1;45mall\e[0;0m|\n"
 	$(call clean_compilation_intermediate,$(OBJ_DIR_ROOT))
-	@rm -f $(OBJECTS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
-	@rm -f $(AUTOGEN_TARGETS)
+	rm -f $(OBJECTS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
+	rm -f $(AUTOGEN_TARGETS)
 	@printf "+-->Removing |\e[1;45mgenerated trace files\e[0;0m|\n"
-	@find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
-	@rm -rf $(OBJ_DIR_ROOT)
+	find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
+	rm -rf $(OBJ_DIR_ROOT)
 	$(call clean_prev_run)
 
 clean_run:
@@ -324,4 +331,8 @@ clean_run:
 .PRECIOUS: $(patsubst %.o,%.c_gen_events.h,$(OBJECTS)) $(patsubst %.o,%.trace.json,$(OBJECTS)) $(patsubst %.o,%.i,$(OBJECTS))
 
 .PHONY: clean all clean_run autogen help depend
+
+# Use GNU Make special ".SILENT" target (no echoing commands), plus a trick from https://make.mad-scientist.net/managing-recipe-echoing/ for making "V=1" disable the silent mode.
+$(V).SILENT:
+
 -include $(DEPEND_FILES_ALL)
