@@ -590,8 +590,6 @@ static void alloc_reg_ctx(struct nvmeibt_registrant_ctx **reg_ctx, struct nvmeib
 	XDLIST_INIT_LINK(&((*reg_ctx)->longing_link), NULL);
 	XDLIST_HEAD_INIT(&((*reg_ctx)->locks_awaited_by_registrant));
 	(*reg_ctx)->n_stale_locks = 0;
-	(*reg_ctx)->ref_cnt = 0;
-	(*reg_ctx)->is_deleted = 0;
 	nvmeibt_client_reg_ctx_ref_added((*reg_ctx)->client, *reg_ctx);
 }
 
@@ -608,10 +606,7 @@ void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx)
 			XHASHTABLE_DEL(&(seg_active->stale_registrants), &(reg_ctx->stale_link));
 		}
 		nvmeibt_client_reg_ctx_ref_removed(reg_ctx->client, reg_ctx);
-		if (reg_ctx->ref_cnt)
-			reg_ctx->is_deleted = 1;
-		else
-			NNVMEIBT_TOMA_FREE(trace_free_reg_ctx, reg_ctx);
+		NNVMEIBT_TOMA_FREE(trace_free_reg_ctx, reg_ctx);
 	}
 }
 

@@ -48,8 +48,6 @@ struct nvmeibt_registrant_ctx {
 	BOOL								is_purging_lock_id_cache;
 	BOOL								is_register_for_cold_recovery;
 	BOOL								is_client_waiting_for_ack;
-	BOOL								is_deleted;
-	BOOL								ref_cnt;
 	BOOL								is_recoverer;
 	u8									is_client_warrant_safe_to_rereg;
 	struct timespec						reg_disconnect_time;
