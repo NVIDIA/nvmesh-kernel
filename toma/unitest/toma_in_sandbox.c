@@ -127,9 +127,22 @@ static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int 
 
 static ssize_t _send_empty(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	BUG_ON((fd < 2) || (n == 0));
-	(void)buf; (void)n; (void)offset; (void)flags;
+	(void)buf; (void)offset; (void)flags;
 	return n;
 }
+
+static ssize_t _srvr_simu_from_toma_recv_msg(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	const struct nvmeibs_toma_server_proc_buf *m = buf;
+	BUG_ON((fd < 2) || (n < sizeof(*m)));
+	(void)buf; (void)offset; (void)flags;
+	switch (m->type) {
+		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Toma_Hello %lu[b]\n", n); break;
+		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->TomaByeBye %lu[b]\n", n); break;
+		default: BUG_ON(true);		// Not supported yet
+	}
+	return n;
+}
+
 
 struct TSB_sock_otherside {		// Every implementation must derive from this sub class. Sandbox injects data to Toma via those functions
 	// The send()/recv() operations act as a generic I/O interface that is common to both
@@ -314,9 +327,10 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		s->other_side->send = _send_empty;
 	} else if (strstr(s->addr.sun_path, "toma_server")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2srvr.o;
-		s->other_side->send = _send_empty;
+		s->other_side->send = _srvr_simu_from_toma_recv_msg;
 	} else if (strstr(s->addr.sun_path, "toma_clients")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
+		s->other_side->send = _send_empty;
 	} else {
 		return;
 	}
@@ -366,7 +380,7 @@ static void socket_destroy(struct t_sandbox_sock *s) {
 	if (s->ref_cnt > 0)
 		return;
 	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
-	// N_Df(sbd8465, "sandbox file: close path=@STR fd=@INT mode=@STR delete=@BOOL", s->addr.sun_path, s->fd, sbfd_get_open_mode(s), should_del);
+	N_Df(sbd8465, "sandbox file: close path=@STR fd=@INT mode=@STR delete=@BOOL", s->addr.sun_path, s->fd, sbfd_get_open_mode(s), should_del);
 	if (s->f != NULL) {
 		fclose(s->f);
 	}
