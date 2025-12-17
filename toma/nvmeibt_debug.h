@@ -289,7 +289,7 @@ struct _tracer {
 
 /* Auto binary trace ID, resolved to filename_line, requires __FILE_LITERAL__ infra */
 #ifndef __FILE_LITERAL__
-#pragma GCC error "__FILE_LITERAL__ not defined, Makefile error, should not happen"
+#error "__FILE_LITERAL__ not defined, Makefile error, should not happen"
 #endif
 #define __AUTOID__ NVMEIB_CONCAT2(__FILE_LITERAL__, NVMEIB_CONCAT2(_, __LINE__))
 

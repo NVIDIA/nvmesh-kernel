@@ -13,8 +13,6 @@
 #define MBR_OFFSET    0
 #define MIDST_WRITE_GPT_SIGNATURE	0xdeadbeafdeadbeaf
 
-#pragma GCC diagnostic ignored "-Wshadow"
-
 char *gpt_validity_str(enum GPT_VALIDITY validity)
 {
 	switch (validity) {
