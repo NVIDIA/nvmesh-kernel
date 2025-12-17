@@ -149,6 +149,10 @@ class Ctx:
         writer.writeln('#ifndef {0}\n#define {0}'.format(caption))
         writer.skipline(2)
 
+        # C++ compatibility - begin
+        writer.writeln('#ifdef __cplusplus\nextern "C" {\n#endif')
+        writer.skipline()
+
         self.__render_header(writer)
 
         # Typedefs
@@ -162,6 +166,10 @@ class Ctx:
             self.__render_single_trace(trace, writer)
 
         writer.jumbo('Formats')
+
+        # C++ compatibility - end
+        writer.writeln('#ifdef __cplusplus\n} // End extern "C"\n#endif')
+        writer.skipline()
 
         # Footer
         writer.skipline(2)
