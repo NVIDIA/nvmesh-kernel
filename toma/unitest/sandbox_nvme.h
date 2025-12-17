@@ -1,6 +1,10 @@
 #ifndef TOMA_SANDBOX_NVME_H_INCLUDED
 #define TOMA_SANDBOX_NVME_H_INCLUDED
 
+#include <stdbool.h>
+
+void sandbox_nvme_init(void);
+
 struct sandbox_nvme_device {
 	int vendor_id;
 	const char *serial_number;

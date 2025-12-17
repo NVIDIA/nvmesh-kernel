@@ -2,6 +2,12 @@
 
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
+#include "sandbox_nvme.h"
+
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
 
 /************************************* Logging ********************************/
 
@@ -218,28 +224,11 @@ struct t_sandbox_all {
 	char my_hostname[64];
 } *sys;
 
-static void unlink_and_log(const char* path) {
-	if (unlink(path) != 0) {
-		if (errno != ENOENT) {
-			N_Ef(kji8566, "delete file failed: path=@STR err=@STR\n", path, strerror(errno));
-		} else {
-			N_Tf(jgf6559, "nothing to do path=@STR", path);
-		}
-	} else {
-		N_Tf(dls3390, "deleted path=@STR", path);
-	}
-}
-
-static void sandbox_delete_generated_files(void) {
-	N_Df(fgp9587, "cleaning up sandbox generated files");
-	unlink_and_log(TOMA_ROOT_DIR "var/log/nvmesh/toma_leader_name");
-}
-
 void t_sandbox_all_init(void) {
-	sandbox_delete_generated_files();
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
+	sandbox_nvme_init();
 }
 
 struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
@@ -258,13 +247,43 @@ struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
 int ioctl(int fd, unsigned long int req, ...) {
 	va_list ap;
 	int rv = 0;
+	struct t_sandbox_sock *tsb;
+	const char *path;
 	va_start(ap, req);
+
+	tsb = TSB_socket_find_by_fd(fd);
+	assert(tsb);
+
+	path = tsb->addr.sun_path;
+	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
+		struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
 		struct nvme_admin_cmd *cmd =  va_arg(ap, struct nvme_admin_cmd*);
+		BUG_ON(!nvme_dev);
+		N_Df(sbioctnv, "ioctl:nvme:admin opcode=@INT", cmd->opcode);
 		if (cmd->opcode == nvme_admin_identify) {
-			struct nvme_id_ctrl *fill = (void*)cmd->addr;
-			BUG_ON(cmd->data_len != sizeof(*fill));
-			memset(fill, 0, cmd->data_len);
+			if (cmd->nsid == 0) {
+				// NSID 0 is special - controller identify command.
+				struct nvme_id_ctrl *idctrl = (void*)cmd->addr;
+				BUG_ON(cmd->data_len != sizeof(*idctrl));
+				memset(idctrl, 0, cmd->data_len);
+				idctrl->vid = nvme_dev->vendor_id;
+				snprintf(idctrl->sn, sizeof(idctrl->sn), "%s", nvme_dev->serial_number);
+				snprintf(idctrl->mn, sizeof(idctrl->mn), "%s", nvme_dev->model_number);
+				snprintf(idctrl->fr, sizeof(idctrl->fr), "0.0.1");
+				N_Tf(sbk3456, "ioctl:nvme:id controller fd=@INT reporting sn=@STR mn=@STR", fd, idctrl->sn, idctrl->mn);
+			} else {
+				// NSID > 0 is the NVME storage namespace query.
+				struct nvme_id_ns *response = (void*)cmd->addr;
+				BUG_ON(cmd->data_len < sizeof(*response));
+				memset(response, 0, cmd->data_len);
+				response->flbas = 5; // Choosing index 5 arbitrarily. Range is 0..15.
+				response->lbaf[5].ds = 12; // LBA data size (logical sector size) as exponent of 2 (2**12 = 4096 bytes).
+				// Note that LBAF { ms, ds, rp } are defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01
+				// Figure 116: LBA Format Data Structure, NVM Command Set Specific (PDF p. 91).
+				response->nsze = 2000; // Our sandbox drives have 2000 blocks of 4 KiB.
+				N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT reporting ds=4K nsze=@INT64_TD", cmd->nsid, fd, response->nsze);
+			}
 		} else if (cmd->opcode == nvme_admin_get_log_page) {
 			struct nvme_smart_log *fill =  (void*)cmd->addr;
 			BUG_ON(cmd->data_len != sizeof(*fill));
@@ -404,7 +423,8 @@ int TSB_sock_open(struct t_sandbox_sock *s) {
 	s->fd = fileno(s->f);
 	TSB_connect_sock_to_listener(s);
 	N_Df(sbo0564, "sandbox file: open path=@STR fd=@INT mode=@STR", s->addr.sun_path, s->fd, open_mode);
-	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, mode=%s, listener=%c\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, open_mode, ((s->other_side) ? 'Y' : 'N'));
+	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, mode=%s (%o), listener=%c\n",
+		 (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, open_mode, s->proto, ((s->other_side) ? 'Y' : 'N'));
 	return s->fd;
 }
 
@@ -669,23 +689,6 @@ int nvmeibt_udev_get_fd( void) {
 }
 enum nvmeibt_disk_type nvmeibt_udev_get_event(struct nvmeibt_udev_event *rv) { memset(rv, 0, sizeof(*rv)); return NVMEIBT_NVME_DISK_TYPE; }
 void nvmeibt_udev_put_event(struct nvmeibt_udev_event *rv) { memset(rv, 0, sizeof(*rv));}
-
-struct udev* udev_new(void) {
-	struct udev* u = (struct udev*)calloc(1, sizeof(*u));
-	u->ref++;
-	u->ent[0].name = TOMA_ROOT_DIR "dev/nvme0n1";
-	u->ent[0].path = "0";
-	u->ent[0].next = &u->ent[1];
-	u->ent[1].name = TOMA_ROOT_DIR "dev/nvme3n1";
-	u->ent[1].path = "1";
-	return u;
-}
-
-struct udev_device* udev_device_new_from_syspath(struct udev *u, const char*path) {
-	struct udev_device *d = malloc(sizeof(*d));
-	d->e = &u->ent[path[0]-'0'];
-	return d;
-}
 
 /************************************* network ********************************/
 int64_t ibud_enable_periodic_traces = 0;

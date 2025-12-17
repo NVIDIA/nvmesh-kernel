@@ -306,7 +306,7 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 #define NVMEIBT_TOMA_LIB_UDEV_API_H // #include "interfaces/nvme/nvmeibt_lib_udev_api.h"
 // Code below replaces: #include <libudev.h>
 struct udev_list_entry { const char *name; const char* path; struct udev_list_entry* next; };
-struct udev { int ref; struct udev_list_entry ent[2]; /* amount of local nvme disks */ };
+struct udev { int ref; struct udev_list_entry ent[3]; /* amount of local nvme disks */ };
 struct udev* udev_new(void);
 static inline void udev_unref(struct udev* u) { u->ref--; if (u->ref == 0) free(u); }
 
@@ -323,7 +323,9 @@ static inline const char* udev_list_entry_get_name(struct udev_list_entry *u) { 
 
 struct udev_device { struct udev_list_entry *e; };
 struct udev_device* udev_device_new_from_syspath(struct udev *u, const char *path);
+/// The devpath is the path under /sys to the device. E.g. `/devices/ACPI0004:00/0/host0/block/sda`
 static inline const char* udev_device_get_devpath(struct udev_device* d) { return d->e->path; }
+/// The devnode is the name of the device (full path to the /dev node). E.g. `/dev/sda `
 static inline const char* udev_device_get_devnode(struct udev_device* d) { return d->e->name; }
 static inline void udev_device_unref(             struct udev_device* d) { free(d); }
 

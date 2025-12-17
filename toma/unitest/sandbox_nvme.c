@@ -1,8 +1,7 @@
-#include "sandbox_nvme.h"
+#define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module
 
-#include "nvmeibt_common.h"
+#include "sandbox_nvme.h"
 #include "nvmeibt_debug.h"
-#include "nvmeibt_utils.h"
 #include "toma_in_sandbox.h"
 
 #include <stdio.h>
@@ -11,14 +10,26 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+// Forward declarations
+
 static int disk_init(const char *dest_path, const char *src_path);
 static int copy_file(const char *source_path, const char *dest_path);
 static int copy_between_fds(int srcfd, int dstfd);
 
-static const char stock_disk_template_file_path[] = "disk_stock.img";
-static const char local_disk_template_file_path[] = "disk_nvmesh.img";
+// Constants
 
+// Where the build system puts the uncompressed disk image templates.
+#define TEST_DATA_BUILD_DIR "99bin/testdata/"
+
+static const char stock_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_stock.img";
+static const char local_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_nvmesh.img";
+
+#define TARGET_DEVICES_FILE TOMA_ROOT_DIR "var/opt/nvmesh/.target_devices"
+#define DISKS_CSV_FILE TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"
+
+// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"
+
 static struct sandbox_nvme_device nvme_devices[] = {
 	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme0n1", SANDBOX_DEV_DIR "nvme0n1", true },
 	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false },
@@ -27,23 +38,65 @@ static struct sandbox_nvme_device nvme_devices[] = {
 
 #define NVME_DEVICE_COUNT (sizeof(nvme_devices) / sizeof(nvme_devices[0]))
 
-static void sandbox_nvme_init(void)
-{
-	int i;
+static void mkdir_if_not_exists(const char *path);
+static void write_file(const char *path, const char *content);
 
-	N_Tf(sbu3401, "initializing udev");
-	if (mkdir(TOMA_ROOT_DIR "dev", 0755) != 0) {
-		if (errno != EEXIST) {
-			BUG_ON(errno);
+/// Set up the NVMe disk data. Currently just a static configuration,
+/// but ultimately we'll add dynamic modification adding and removing disks.
+void sandbox_nvme_init(void)
+{
+	N_Tf(sbu3401, "initializing static simulated NVMe disks");
+	mkdir_if_not_exists(SANDBOX_DEV_DIR);
+
+	// Create mock NVMe block device files.
+	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+		struct sandbox_nvme_device *d = &nvme_devices[i];
+		const char *template_src = d->stock_disk ? stock_disk_template_file_path :
+							   local_disk_template_file_path;
+		if (disk_init(d->device_path, template_src) != 0) {
+			N_Ef(kdj3994, "failed to initialize disk @INT", i);
 		}
 	}
 
-	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		struct sandbox_nvme_device *d = &nvme_devices[i];
-		if (disk_init(d->device_path,
-			      d->stock_disk ? stock_disk_template_file_path : local_disk_template_file_path) != 0) {
-			N_Ef(kdj3994, "failed to initialize disk @INT", i);
+	// Create the parent directories if needed.
+	mkdir_if_not_exists(TOMA_ROOT_DIR "proc");
+	mkdir_if_not_exists(TOMA_ROOT_DIR "proc/nvmeibs");
+	mkdir_if_not_exists(TOMA_ROOT_DIR "var");
+	mkdir_if_not_exists(TOMA_ROOT_DIR "var/opt");
+	mkdir_if_not_exists(TOMA_ROOT_DIR "var/opt/nvmesh");
+
+	// Generate the disk data files.
+	write_file(TARGET_DEVICES_FILE, "nvme,STKD_SN_001,5121,STKD_MN_001,1\n");
+	write_file(DISKS_CSV_FILE, "id,blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor\n"
+				   "NVMD_SN_002.1,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122\n"
+				   "NVMD_SN_003.1,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123\n");
+	N_Tf(sbu3402, "done initializing NVMe disks");
+}
+
+static void mkdir_if_not_exists(const char *path)
+{
+	if (mkdir(path, 0755) != 0) {
+		if (errno != EEXIST) {
+			N_Ef(gjl3965, "mkdir failed for path=@STR error=@STR", path, strerror(errno));
 		}
+	}
+}
+
+static void write_file(const char *path, const char *content)
+{
+	FILE *fp = fopen(path, "w");
+	if (!fp) {
+		N_Ef(fsd3964, "failed to open file path=@STR error=@STR", path, strerror(errno));
+		return;
+	}
+	if (fputs(content, fp) == EOF) {
+		N_Ef(fsd3965, "write error path=@STR error=@STR", path, strerror(errno));
+	} else {
+		N_Tf(fsd5640, "wrote path=@STR", path);
+	}
+
+	if (fclose(fp) != 0) {
+		N_Ef(fsd5441, "failed to close file path=@STR error=@STR", path, strerror(errno));
 	}
 }
 
@@ -65,19 +118,11 @@ struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path)
 
 struct udev *udev_new(void)
 {
-	static volatile int udev_new_calls = 0;
-
-	int call_count;
 	int i;
 	struct udev *u = (struct udev *)calloc(1, sizeof(*u));
 	u->ref++;
 
-	call_count = ++udev_new_calls;
-	N_Tf(dfi1053, "udev_new called @INT times", call_count);
-	if (call_count == 1) {
-		// We should not re-init the disks more than once during a test suite execution.
-		sandbox_nvme_init();
-	}
+	N_Tf(dfi1053, "udev_new");
 
 	assert(sizeof(u->ent) / sizeof(u->ent[0]) >= NVME_DEVICE_COUNT);
 
@@ -121,6 +166,8 @@ static int disk_init(const char *dest_path, const char *src_path)
 	// const off_t size_bytes = 2000 * sector_size;
 	// int templatefd;
 	// int fd;
+
+	N_Tf(lkg3946, "creating block device=@STR", dest_path);
 
 	// **Initial implementation**
 	// Copy the template disk image.

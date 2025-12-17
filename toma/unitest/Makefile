@@ -79,6 +79,7 @@ endif
 # Simulator files
 SOURCES :=
 SOURCES += ./toma_in_sandbox.c
+SOURCES += ./sandbox_nvme.c
 
 TDIR=./..
 #TDIR=$(realpath ./..)
@@ -139,6 +140,7 @@ BACKUPS =$(SOURCES:.c=.~)
 EXE_NAME = nvmeibt_toma
 
 OBJ_DIR_ROOT=99bin
+TESTDATA_BUILD_DIR = $(OBJ_DIR_ROOT)/testdata
 ifeq ($(BUILD_RELEASE),1)
     OBJ_DIR=./$(OBJ_DIR_ROOT)/release/obj
 else
@@ -147,6 +149,14 @@ endif
 $(shell mkdir -p $(OBJ_DIR))
 OBJECTS =$(patsubst %.c, $(OBJ_DIR)/%.o, $(SOURCES))
 DEPEND_FILES_ALL = $(OBJECTS:.o=.d)
+
+# Generated disk images - uncompressed as part of the build process, and read by sandbox code at runtime.
+TEST_NVMESH_DISK_IMAGE_NAME = disk_nvmesh.img
+TEST_NVMESH_DISK_IMAGE_INPUT = $(TEST_NVMESH_DISK_IMAGE_NAME).tgz
+TEST_NVMESH_DISK_IMAGE_OUTPUT = $(TESTDATA_BUILD_DIR)/$(TEST_NVMESH_DISK_IMAGE_NAME)
+TEST_STOCK_DISK_IMAGE_NAME = disk_stock.img
+TEST_STOCK_DISK_IMAGE_OUTPUT = $(TESTDATA_BUILD_DIR)/$(TEST_STOCK_DISK_IMAGE_NAME)
+TEST_STOCK_DISK_IMAGE_INPUT = $(TEST_STOCK_DISK_IMAGE_NAME).tgz
 
 # ********** Define Rules for building *********
 define print_compilation_info
@@ -205,6 +215,16 @@ $(OBJ_DIR)/%.i: %.c
 	@mkdir -p $(dir $@)
 	@cd $(dir $@); $(TRACE_GEN_SCRIPT) $(PWD)/$< nvmeibt --userspace -o $(PWD)/$@
 
+# Note: the tgz image uses tar's sparse file handling.
+# Created with: tar --sparse -c -z -f ./disk_nvmesh.img.tgz ./disk_nvmesh.img
+$(TEST_NVMESH_DISK_IMAGE_OUTPUT): $(TEST_NVMESH_DISK_IMAGE_INPUT)
+	mkdir -p $(TESTDATA_BUILD_DIR)
+	tar -mxz -C $(TESTDATA_BUILD_DIR) < $<
+
+$(TEST_STOCK_DISK_IMAGE_OUTPUT): $(TEST_STOCK_DISK_IMAGE_INPUT)
+	mkdir -p $(TESTDATA_BUILD_DIR)
+	tar -mxz -C $(TESTDATA_BUILD_DIR) < $<
+
 # ********** Define Rules for Autogen *********
 AUTOGEN_DIR=$(abspath $(SSDA)/autogen)
 PROC_SCHEME_FILE=../management_cm/clnt/process_scheme.py
@@ -225,7 +245,7 @@ autogen: $(AUTOGEN_TARGETS)
 	@printf "Autogen code \e[0;32m Done\e[0;0m\n"
 
 # ********** Autogen done *********
-$(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB)
+$(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 # Merge all individual trace JSONs
 	@printf "Merging all trace JSONs to \e[0;32m $(FILE_TR_JSON)\e[0;0m\n"
 	@$(MERGE_MULTI_GEN) $(FILE_TR_JSON) $(OBJ_DIR_ROOT)/$(BDIR) $(OBJECTS)
@@ -267,7 +287,7 @@ endef
 clean:
 	@printf "+-->Cleaning |\e[1;45mall\e[0;0m|\n"
 	$(call clean_compilation_intermediate,$(OBJ_DIR_ROOT))
-	@rm -f $(OBJECTS) $(BACKUPS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err
+	@rm -f $(OBJECTS) $(BACKUPS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 	@rm -f $(AUTOGEN_TARGETS)
 	@printf "+-->Removing |\e[1;45mgenerated trace files\e[0;0m|\n"
 	@find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
@@ -280,5 +300,5 @@ clean_run:
 # Prevent the deletion of our tracer intermediate files
 .PRECIOUS: $(patsubst %.o,%.c_gen_events.h,$(OBJECTS)) $(patsubst %.o,%.trace.json,$(OBJECTS)) $(patsubst %.o,%.i,$(OBJECTS))
 
-.PHONY: depend
+.PHONY: clean all clean_run autogen help depend
 -include $(DEPEND_FILES_ALL)
