@@ -74,6 +74,7 @@
 #include <syslog.h>
 #include "interfaces/log/log_incs.h"
 #include "../common/nvmeib_macro_utils.h"
+#include "../common/compat/kr_incs_time.h"  // getnstimeofday, MSEC_TO_NSEC, timespec_diff_ns, etc.
 
 	// config params defaults
 #define RAFT_LEADER_HEARTBEAT_TIMEOUT_NSEC_DEFAULT				MSEC_TO_NSEC(200)
