@@ -17,14 +17,8 @@
 #define TOMA_SW_COMPATIBILITY_VER					0x00000310
 #define WARN(x...) ({})		// Just in order to compile
 
-#define MACRO_DEF_TO_STR(s) _MACRO_DEF_TO_STR(s)
-#define _MACRO_DEF_TO_STR(s) #s
-
-static inline const char *nvmeibt_basename(const char *path)
-{
-	const char *tail = strrchr(path, '/');
-	return tail ? tail + 1 : path;
-}
+#include "common/nvmeib_str.h"
+#define MACRO_DEF_TO_STR(s) __stringify(s)
 
 /*
  * The behavior of logging and trace-logging depends on the compilation mode:
@@ -169,7 +163,7 @@ int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_
 	const int __errno_save = errno;																	\
 	static char printf_fmt[2000];																\
 	if (!printf_fmt[0]) {																		\
-		trace_to_printf_fmt(printf_fmt, sizeof(printf_fmt), auto_generated_printf_fmt, nvmeibt_basename(__FILE__), __LINE__, __FUNCTION__); \
+		trace_to_printf_fmt(printf_fmt, sizeof(printf_fmt), auto_generated_printf_fmt, kbasename(__FILE__), __LINE__, __FUNCTION__); \
 	}																							\
 	NVMEIBT_THROTTLED_SYSLOG(_syslog_lvl, printf_fmt, ## __VA_ARGS__);							\
 	errno = __errno_save;																		\

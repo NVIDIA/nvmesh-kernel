@@ -294,7 +294,7 @@ continue_reading:
 			const char *filename = config + 11;
 			FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
 				// fprintf(stderr, "%d cmp '%s' '%s'\n", __LINE__, t->filename, filename);
-				if (!strcmp(nvmeibt_basename(t->filename), filename)) {
+				if (!strcmp(kbasename(t->filename), filename)) {
 					t->plus_minus_flag = explicit_change;
 					n_matches++;
 				}
