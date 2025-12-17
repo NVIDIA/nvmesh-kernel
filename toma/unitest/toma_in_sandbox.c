@@ -1,3 +1,5 @@
+#define TOMA_SANDBOX_BYPASS_REDIRECTS  // allow calling real OS I/O functions from this module
+
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
 
@@ -479,15 +481,6 @@ int accept(int fd, struct sockaddr* addr, unsigned int *addr_len) {
 	return fd;
 }
 
-#undef open
-#undef close
-#undef pipe
-#undef fcntl
-#undef read
-#undef write
-#undef pread
-#undef pwrite
-#undef select
 int override_open(const char *path, int flags, ... /*int mode*/) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	sprintf(addr.sun_path, "%s", path);

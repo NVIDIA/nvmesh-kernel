@@ -66,6 +66,7 @@ ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset);
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset);
 int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restrict __writefds, fd_set *__restrict __exceptfds, struct timeval *__restrict __timeout);
 
+#ifndef TOMA_SANDBOX_BYPASS_REDIRECTS
 #define open    override_open
 #define close   override_close
 #define pipe    override_pipe
@@ -75,6 +76,7 @@ int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restric
 #define pread   override_pread
 #define pwrite  override_pwrite
 #define select  override_select
+#endif // TOMA_SANDBOX_BYPASS_REDIRECTS
 
 /************************************* syslog *************************************/
 #define _SYS_SYSLOG_H 1
