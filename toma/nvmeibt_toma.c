@@ -41,8 +41,6 @@
 #include "nvmeibt_global.h"
 #include "nvmeibt_kafka.h"
 
-#pragma GCC diagnostic ignored "-Wshadow"
-
 /*
  * Overview:
  * The TOpology MAnager is a process that runs on every server node
@@ -498,7 +496,7 @@ struct udev_event_wq_entry {
 };
 
 typedef XHASHTABLE_DECLARE(ldisks_wq_hash_t, struct local_disk_wq_hash_ctx, link, 8);
-static ldisks_wq_hash_t ldisks_wq_hash;
+static ldisks_wq_hash_t local_ldisks_wq_hash;
 static ldisks_wq_hash_t stock_ldisks_wq_hash;
 
 #if defined(COMPILE_DEBUG)
@@ -673,11 +671,11 @@ static void terminate_toma(int rv)
 	// as at this point of shutdown we cannot in any way wait for the threads signaling that they finished their
 	// work (and decreased the used counter of each memtbl), since we are outside the event loop already.
 
-	XHASHTABLE_FOR_EACH_SAFE(specific_disk_wq_ctx, &(ldisks_wq_hash)) {
+	XHASHTABLE_FOR_EACH_SAFE(specific_disk_wq_ctx, &(local_ldisks_wq_hash)) {
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
 		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
 		specific_disk_wq_ctx->wq = NULL;
-		XHASHTABLE_DEL(&(ldisks_wq_hash), &(specific_disk_wq_ctx->link));
+		XHASHTABLE_DEL(&(local_ldisks_wq_hash), &(specific_disk_wq_ctx->link));
 		NNVMEIBT_BM_FREE(terminate_toma_trace, specific_disk_wq_ctx);
 	}
 
@@ -1355,7 +1353,7 @@ int nvmeibt_toma_stock_local_disk_specific_add_work(const struct nvmeibt_ascii_u
 
 int nvmeibt_toma_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
 {
-	return local_disk_specific_add_work(&ldisks_wq_hash, ldisk_id, ld_display, e);
+	return local_disk_specific_add_work(&local_ldisks_wq_hash, ldisk_id, ld_display, e);
 }
 
 /**
@@ -1375,7 +1373,7 @@ void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(specific_disk_wq_ctx, &(ldisks_wq_hash), calculated_hash_val) {
+	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(specific_disk_wq_ctx, &(local_ldisks_wq_hash), calculated_hash_val) {
 		if (is_ascii_uuid_eq(&(specific_disk_wq_ctx->ldisk_id), ldisk_id)) {
 			// drain the wq of this disk, to avoid anything from attempting execution on it.
 			nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
@@ -1383,7 +1381,7 @@ void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
 			specific_disk_wq_ctx->wq = NULL;
 
 			// remove the local disk_wq from the wq's hash
-			XHASHTABLE_DEL(&(ldisks_wq_hash), &(specific_disk_wq_ctx->link));
+			XHASHTABLE_DEL(&(local_ldisks_wq_hash), &(specific_disk_wq_ctx->link));
 			NNVMEIBT_BM_FREE(nvmeibt_toma_stop_local_disk_wq_trace_bm_free, specific_disk_wq_ctx);
 		}
 	}
@@ -2870,7 +2868,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	/* create work-queues */
 	// Init disk_wqs hash table.
-	XHASHTABLE_INIT(&ldisks_wq_hash);
+	XHASHTABLE_INIT(&local_ldisks_wq_hash);
 	XHASHTABLE_INIT(&stock_ldisks_wq_hash);
 	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
