@@ -1,7 +1,8 @@
 #ifndef NVMEIBT_KM_COMM_H
 #define NVMEIBT_KM_COMM_H
 
-struct nvmeib_nl_uk_comm_rep;
+/* Netlink: New Toma-API vs kernel server, used for disk related communication */
+#include "srv/nvmeibs_srv_toma_messages.h"		// Global nvmesh dir: ../../../
 
 struct km_comm_msg_hdr {
 	int len; /* the len of data[0] */
@@ -14,12 +15,10 @@ struct km_comm_msg_hdr {
 struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeibt_km_comm_create(void);
 void					nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p);
-int						nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, struct km_comm_msg_hdr *hdr);
+int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, struct km_comm_msg_hdr *hdr);
 struct nvmeib_register_change_disk;
-int	 nvmeibt_km_comm_register_disk_events(struct nvmeibt_km_comm *p, struct nvmeib_register_change_disk *cbs);
-void nvmeibt_km_comm_ack_disk_remove(struct nvmeibt_km_comm *p, unsigned long ack_id);
-struct nvmeib_disk_info;
-int nvmeibt_km_comm_get_disk_info(struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);
+int	 nvmeibt_km_comm_register_disk_events(     struct nvmeibt_km_comm *p, struct nvmeib_register_change_disk *cbs);
+void nvmeibt_km_comm_ack_disk_remove(          struct nvmeibt_km_comm *p, unsigned long ack_id);
+int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);
 
-#include "srv/nvmeibs_srv_toma_messages.h"		// Global nvmesh dir: ../../../
 #endif
