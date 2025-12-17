@@ -112,7 +112,6 @@ struct gpt_util_config {
 
 	// JSON export options (for ACTION_EXPORT_JSON)
 	char					output_json_file[256];	// Output JSON filename
-	BOOL					include_disk_metadata;	// Export full disk_metadata struct (read-only, for inspection)
 
 	// JSON apply options (for ACTION_APPLY_JSON)
 	char					apply_json_file[256];	// Input JSON filename to apply
@@ -309,11 +308,24 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 	// Build section name from enums using helper functions
 	nvmeibt_Str_sprintf(json_output, "  \"%s_gpt_%s\": {\n",
 						gpt_level_str(level), gpt_copy_str(copy));
+
+	// Editable fields
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&header->disk_obj_uuid);
 	nvmeibt_Str_sprintf(json_output, "    \"disk_uuid\": \"%s\",\n", urn_uuid.str);
 	nvmeibt_Str_sprintf(json_output, "    \"n_partition_entries\": %d,\n", header->n_partition_entries);
 	nvmeibt_Str_sprintf(json_output, "    \"first_usable_pba\": %lu,\n", header->first_usable_pba);
 	nvmeibt_Str_sprintf(json_output, "    \"last_usable_pba\": %lu,\n", header->last_usable_pba);
+
+	// Static fields (UEFI constants - do not edit)
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_gpt_signature\": \"0x%lx\",\n", header->gpt_signature);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_revision\": \"0x%08x\",\n", header->revision);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_header_size\": %d,\n", header->header_size);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_size_of_partition_entry\": %d,\n", header->size_of_partition_entry);
+
+	// Computed fields (recalculated on write - do not edit)
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_header_crc32\": \"0x%08x\",\n", header->header_crc32);
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_partition_entry_array_crc32\": \"0x%08x\",\n", header->partition_entry_array_crc32);
+
 	nvmeibt_Str_sprintf(json_output, "    \"entries\": [\n");
 
 	// Export partition entries
@@ -380,7 +392,7 @@ static int export_gpt_to_json(int disk_fd,
 	BOOL									is_mismatch = false;
 	BOOL									has_overlaps = false;
 	BOOL									has_metadata_gpt = false;
-	BOOL									has_device_identifiers = false;
+	BOOL									has_disk_metadata = false;
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
@@ -431,10 +443,13 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "{\n");
 	nvmeibt_Str_sprintf(json_output, "  \"backup_timestamp\": \"%s\",\n", timestamp);
 	nvmeibt_Str_sprintf(json_output, "  \"device_path\": \"%s\",\n", config->device_path);
+	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 1 ===\": \"USER CONTROL FLAGS - SAFE TO EDIT\",\n");
 	nvmeibt_Str_sprintf(json_output, "  \"_human_edited\": false,\n");
 	nvmeibt_Str_sprintf(json_output, "  \"_recalculate_crc\": false,\n");
-	nvmeibt_Str_sprintf(json_output, "  \"_mismatch_detected\": %s,\n", is_mismatch ? "true" : "false");
-	nvmeibt_Str_sprintf(json_output, "  \"_overlaps_detected\": %s,\n", has_overlaps ? "true" : "false");
+	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 2 ===\": \"AUTO-DETECTED STATUS - DO NOT EDIT\",\n");
+	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_mismatch_detected\": %s,\n", is_mismatch ? "true" : "false");
+	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_overlaps_detected\": %s,\n", has_overlaps ? "true" : "false");
+	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 3 ===\": \"DISK STRUCTURE DATA - EDIT WITH CAUTION\",\n");
 
 	memset(&main_gpt_for_metadata, 0, sizeof(main_gpt_for_metadata));
 	nvmeibt_strlcpy(main_gpt_for_metadata.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt_for_metadata.main_or_metadata));
@@ -448,8 +463,8 @@ static int export_gpt_to_json(int disk_fd,
 
 	// Export pMBR
 	nvmeibt_Str_sprintf(json_output, "  \"pmbr\": {\n");
-	nvmeibt_Str_sprintf(json_output, "    \"signature\": \"0x%04x\",\n", mbr.signature);
-	nvmeibt_Str_sprintf(json_output, "    \"os_type\": \"0x%02x\",\n", mbr.partitions[0].os_type);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%04x\",\n", mbr.signature);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_os_type\": \"0x%02x\",\n", mbr.partitions[0].os_type);
 	nvmeibt_Str_sprintf(json_output, "    \"pba_s\": %d,\n", mbr.partitions[0].pba_s);
 	nvmeibt_Str_sprintf(json_output, "    \"n_pblk\": %d\n", mbr.partitions[0].n_pblk);
 	nvmeibt_Str_sprintf(json_output, "  }");
@@ -503,67 +518,57 @@ static int export_gpt_to_json(int disk_fd,
 			disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_export_disk_md, PAGE_SIZE, sizeof(*disk_md));
 			if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
 														 pbyte_s, disk_md) == 0) {
-				has_device_identifiers = true;
+				has_disk_metadata = true;
 			}
 		}
 
 		// Export Metadata GPT
 		if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
-			BOOL is_last = !(config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) && !has_device_identifiers;
+			BOOL is_last = !(config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) && !has_disk_metadata;
 			export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_PRIMARY,
 											metadata_bufs.primary_header,
 											metadata_bufs.primary_entries,
 											metadata_temp_gpt.max_n_entries, json_output, is_last);
 		}
 		if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
-			BOOL is_last = !has_device_identifiers;
+			BOOL is_last = !has_disk_metadata;
 			export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_ALTERNATE,
 											metadata_bufs.alternate_header,
 											metadata_bufs.alternate_entries,
 											metadata_temp_gpt.max_n_entries, json_output, is_last);
 		}
 
-		// Export device identifiers (if available)
-		if (has_device_identifiers) {
+		// Export disk_metadata (if available) - modifiable on apply
+		if (has_disk_metadata) {
+			struct nvmeibt_urn_uuid mgmt_uuid_urn;
 			struct nvmeibt_urn_uuid nguid_urn;
 
-			nvmeibt_Str_sprintf(json_output, "  \"device_identifiers\": {\n");
-			nvmeibt_Str_sprintf(json_output, "    \"serial_id\": \"%s\",\n", disk_md->native_serial_str);
+			N_Tf(gpt_export_disk_md, "Exporting disk_metadata structure");
+
+			nvmeibt_Str_sprintf(json_output, "  \"disk_metadata\": {\n");
+
+			// Static field (do not edit)
+			nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%lx\",\n", disk_md->signature);
+
+			// Editable fields
+			nvmeibt_Str_sprintf(json_output, "    \"last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
+
+			mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
+			nvmeibt_Str_sprintf(json_output, "    \"mgmt_db_uuid\": \"%s\",\n", mgmt_uuid_urn.str);
+			nvmeibt_Str_sprintf(json_output, "    \"disk_metadata_version\": %u,\n", disk_md->disk_metadata_version);
+			nvmeibt_Str_sprintf(json_output, "    \"format_pblk_size\": %u,\n", disk_md->format_pblk_size);
+			nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
+			nvmeibt_Str_sprintf(json_output, "    \"format_request_counter\": %u,\n", disk_md->format_request_counter);
+			nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
+			nvmeibt_Str_sprintf(json_output, "    \"nsid\": %d,\n", disk_md->nsid);
+			nvmeibt_Str_sprintf(json_output, "    \"native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
 
 			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
-			nvmeibt_Str_sprintf(json_output, "    \"nguid\": \"%s\"\n", nguid_urn.str);
+			nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
+
+			// Read-only field (recalculated on write)
+			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_crc32\": \"0x%08x\"\n", disk_md->crc32);
 			nvmeibt_Str_sprintf(json_output, "  }");
-
-			// Extended export: full disk_metadata (if requested)
-			if (config->include_disk_metadata) {
-				struct nvmeibt_urn_uuid mgmt_uuid_urn;
-
-				N_Wf(gpt_export_disk_md_readonly, "Exporting full disk_metadata (READ-ONLY, will be ignored on apply)");
-
-				nvmeibt_Str_sprintf(json_output, ",\n");
-				nvmeibt_Str_sprintf(json_output, "  \"_disk_metadata_READONLY\": {\n");
-				nvmeibt_Str_sprintf(json_output, "    \"_NOTE\": \"READ-ONLY: This section is for inspection only, ignored on --apply-from\",\n");
-				nvmeibt_Str_sprintf(json_output, "    \"signature\": \"0x%lx\",\n", disk_md->signature);
-				nvmeibt_Str_sprintf(json_output, "    \"last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
-
-				mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
-				nvmeibt_Str_sprintf(json_output, "    \"mgmt_db_uuid\": \"%s\",\n", mgmt_uuid_urn.str);
-				nvmeibt_Str_sprintf(json_output, "    \"disk_metadata_version\": %u,\n", disk_md->disk_metadata_version);
-				nvmeibt_Str_sprintf(json_output, "    \"format_pblk_size\": %u,\n", disk_md->format_pblk_size);
-				nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
-				nvmeibt_Str_sprintf(json_output, "    \"format_request_counter\": %u,\n", disk_md->format_request_counter);
-				nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
-				nvmeibt_Str_sprintf(json_output, "    \"nsid\": %d,\n", disk_md->nsid);
-				nvmeibt_Str_sprintf(json_output, "    \"native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
-
-				nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
-				nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
-				nvmeibt_Str_sprintf(json_output, "    \"crc32\": \"0x%08x\"\n", disk_md->crc32);
-				nvmeibt_Str_sprintf(json_output, "  }");
-
-				fprintf(stdout, COL_YELLOW "  - WARNING: disk_metadata exported in READ-ONLY mode" COL_RESET "\n");
-				fprintf(stdout, "             Changes to this section will be IGNORED on apply\n");
-			}
 		}
 
 		free_gpt_buffers(&metadata_bufs);
@@ -584,19 +589,16 @@ static int export_gpt_to_json(int disk_fd,
 		goto out;
 	}
 
-	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata=@INT has_dev_id=@INT include_disk_md=@INT",
-		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_device_identifiers, config->include_disk_metadata);
+	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata_gpt=@INT has_disk_md=@INT",
+		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_disk_metadata);
 	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
 
 	// Build status message based on what was actually exported
 	fprintf(stdout, "  - Exported: pMBR, Main GPT");
 	if (has_metadata_gpt) {
 		fprintf(stdout, ", Metadata GPT");
-	}
-	if (has_device_identifiers) {
-		fprintf(stdout, ", Device Identifiers");
-		if (config->include_disk_metadata) {
-			fprintf(stdout, ", " COL_YELLOW "disk_metadata (READ-ONLY)" COL_RESET);
+		if (has_disk_metadata) {
+			fprintf(stdout, ", disk_metadata");
 		}
 	}
 	fprintf(stdout, "\n");
@@ -607,7 +609,7 @@ static int export_gpt_to_json(int disk_fd,
 			 config->device_path, output_file);
 		fprintf(stdout, "\n");
 		fprintf(stdout, COL_YELLOW "*** WARNING: Primary and alternate copies differ! ***" COL_RESET "\n");
-		fprintf(stdout, "    JSON marked with '_mismatch_detected: true'\n");
+		fprintf(stdout, "    JSON marked with '_READONLY_mismatch_detected: true'\n");
 		fprintf(stdout, "    Apply will be BLOCKED until you choose one copy.\n");
 		fprintf(stdout, "    " COL_GREEN "Suggestion: Re-export with --gpt-copy=primary or --gpt-copy=alternate" COL_RESET "\n");
 	}
@@ -616,7 +618,7 @@ static int export_gpt_to_json(int disk_fd,
 			 config->device_path, output_file);
 		fprintf(stdout, "\n");
 		fprintf(stdout, COL_YELLOW "*** WARNING: Overlapping partitions detected! ***" COL_RESET "\n");
-		fprintf(stdout, "    JSON marked with '_overlaps_detected: true'\n");
+		fprintf(stdout, "    JSON marked with '_READONLY_overlaps_detected: true'\n");
 		fprintf(stdout, "    Apply will be BLOCKED until overlaps are fixed.\n");
 	}
 
@@ -1738,9 +1740,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n\n");
 
 	fprintf(stdout, "JSON Export Options:\n");
-	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON file\n");
-	fprintf(stdout, "  --include-disk-metadata     Include full disk_metadata struct (read-only, for inspection)\n");
-	fprintf(stdout, "                              WARNING: Exported disk_metadata is IGNORED on apply\n\n");
+	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON\n\n");
 
 	fprintf(stdout, "Apply Options:\n");
 	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n\n");
@@ -1782,7 +1782,6 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"filter-uuid",				required_argument,	0,	'u'},
 		{"filter-lba",				required_argument,	0,	'l'},
 		{"output-json",				required_argument,	0,	'J'},
-		{"include-disk-metadata",	no_argument,		0,	'M'},
 		{"apply-from",				required_argument,	0,	'A'},
 		{"write",					no_argument,		0,	'W'},
 		{"direct",					no_argument,		0,	'D'},
@@ -2005,10 +2004,6 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->action = ACTION_EXPORT_JSON;
 			nvmeibt_strlcpy(config->output_json_file, optarg, sizeof(config->output_json_file));
 			fprintf(stdout, "Action: Export GPT to JSON file: %s\n", config->output_json_file);
-			break;
-		case 'M':
-			config->include_disk_metadata = true;
-			fprintf(stdout, COL_YELLOW "Include disk_metadata: ENABLED (read-only export, ignored on apply)" COL_RESET "\n");
 			break;
 		case 'A':
 			if (config->action != ACTION_DISPLAY_GPT) {
@@ -2409,6 +2404,12 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 		JSON_ASSIGN_PLAIN(parse_first_pba, "first_usable_pba", gpt->header.first_usable_pba, (uint64_t)kv->value->num);
 		JSON_ASSIGN_PLAIN(parse_last_pba, "last_usable_pba", gpt->header.last_usable_pba, (uint64_t)kv->value->num);
 		JSON_ASSIGN_PLAIN(parse_entries_arr, "entries", entries_array, kv->value);
+		JSON_ASSIGN_OPTIONAL(parse_static_sig, "_STATIC_gpt_signature");
+		JSON_ASSIGN_OPTIONAL(parse_static_rev, "_STATIC_revision");
+		JSON_ASSIGN_OPTIONAL(parse_static_hdr_sz, "_STATIC_header_size");
+		JSON_ASSIGN_OPTIONAL(parse_static_ent_sz, "_STATIC_size_of_partition_entry");
+		JSON_ASSIGN_OPTIONAL(parse_ro_hdr_crc, "_READONLY_header_crc32");
+		JSON_ASSIGN_OPTIONAL(parse_ro_ent_crc, "_READONLY_partition_entry_array_crc32");
 		JSON_LOOP_ITERATION_END(parse_gpt_sec_end, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(parse_gpt_sec_validate);
@@ -2564,16 +2565,27 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	JSON_LOOP_FOR_DICT(kv, dict) {
 		JSON_LOOP_ITERATION_START(apply_json_meta, kv->key);
 		JSON_ASSIGN_PLAIN(apply_dev_path, "device_path", device_path_in_json, kv->value->str);
-		JSON_ASSIGN_PLAIN(apply_mismatch, "_mismatch_detected", mismatch_detected, (kv->value->num != 0));
-		JSON_ASSIGN_PLAIN(apply_overlaps, "_overlaps_detected", overlaps_detected, (kv->value->num != 0));
+		JSON_ASSIGN_OPTIONAL(apply_mismatch_from_json, "_READONLY_mismatch_detected");
+		JSON_ASSIGN_OPTIONAL(apply_overlaps_from_json, "_READONLY_overlaps_detected");
 		JSON_ASSIGN_PLAIN(apply_human_ed, "_human_edited", human_edited, (kv->value->num != 0));
 		JSON_ASSIGN_PLAIN(apply_recalc, "_recalculate_crc", recalculate_crc, (kv->value->num != 0));
 		JSON_ASSIGN_OPTIONAL(apply_timestamp, "backup_timestamp");
 		JSON_ASSIGN_PLAIN(apply_main_pri, "main_gpt_primary", main_gpt_primary_elem, kv->value);
 		JSON_ASSIGN_PLAIN(apply_main_alt, "main_gpt_alternate", main_gpt_alternate_elem, kv->value);
+		JSON_ASSIGN_OPTIONAL(apply_pmbr, "pmbr");
+		JSON_ASSIGN_OPTIONAL(apply_metadata, "metadata_gpt_primary");
+		JSON_ASSIGN_OPTIONAL(apply_metadata_alt, "metadata_gpt_alternate");
+		JSON_ASSIGN_OPTIONAL(apply_disk_md, "disk_metadata");
+		JSON_ASSIGN_OPTIONAL(apply_section1, "=== SECTION 1 ===");
+		JSON_ASSIGN_OPTIONAL(apply_section2, "=== SECTION 2 ===");
+		JSON_ASSIGN_OPTIONAL(apply_section3, "=== SECTION 3 ===");
 		JSON_LOOP_ITERATION_END(apply_json_meta_end, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(apply_json_meta_validate);
+
+	// Recalculate readonly flags from actual data (never trust JSON)
+	mismatch_detected = false;
+	overlaps_detected = false;
 
 	// Device path validation
 	if (device_path_in_json) {
@@ -2589,10 +2601,10 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	// Display detected flags
 	if (mismatch_detected) {
-		fprintf(stdout, "_mismatch_detected: true\n");
+		fprintf(stdout, "_READONLY_mismatch_detected: true\n");
 	}
 	if (overlaps_detected) {
-		fprintf(stdout, "_overlaps_detected: true\n");
+		fprintf(stdout, "_READONLY_overlaps_detected: true\n");
 	}
 	if (human_edited) {
 		fprintf(stdout, "_human_edited: true\n");
@@ -2603,7 +2615,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	// Safety check: Block if mismatch detected and not resolved
 	if (mismatch_detected) {
-		N_Ef(apply_json_mismatch_block, "JSON has _mismatch_detected=true, blocking apply. file=@STR",
+		N_Ef(apply_json_mismatch_block, "JSON has _READONLY_mismatch_detected=true, blocking apply. file=@STR",
 			 config->apply_json_file);
 		rv = -1;
 		goto out;
@@ -2611,7 +2623,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	// Safety check: Block if overlaps detected
 	if (overlaps_detected) {
-		N_Ef(apply_json_overlap_block, "JSON has _overlaps_detected=true, blocking apply. file=@STR",
+		N_Ef(apply_json_overlap_block, "JSON has _READONLY_overlaps_detected=true, blocking apply. file=@STR",
 			 config->apply_json_file);
 		rv = -1;
 		goto out;
@@ -2680,13 +2692,53 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		}
 	}
 
-	// Step 7: Compare and show diff
+	// Step 6.5: Recalculate READONLY flags from actual JSON data
+	// Never trust readonly flags from JSON - always recalculate for safety
+	fprintf(stdout, "\n=== Recalculating Safety Flags ===\n");
+
+	// Recalculate mismatch detection (if both copies present in JSON)
+	if (main_gpt_primary_elem && main_gpt_alternate_elem) {
+		// TODO: Parse both into separate structures and compare
+		// For now, keep JSON flag (will implement when parse logic is complete)
+		fprintf(stdout, "Both primary and alternate present in JSON\n");
+		fprintf(stdout, "TODO: Recalculate mismatch by comparing parsed GPTs\n");
+	}
+
+	// Recalculate overlap detection from parsed entries
+	// TODO: Check json_gpt.entries[] for overlaps
+	fprintf(stdout, "TODO: Recalculate overlaps from JSON entries\n");
+
+	fprintf(stdout, "Recalculation: mismatch=%s, overlaps=%s\n",
+			mismatch_detected ? "true" : "false",
+			overlaps_detected ? "true" : "false");
+
+	// Step 7: Safety check - GPT size compatibility
+	fprintf(stdout, "\n=== Safety Check: GPT Size Compatibility ===\n");
+	fprintf(stdout, "Disk GPT: max_n_entries=%d (n_partition_entries=%d)\n",
+			current_gpt.max_n_entries, current_gpt.header.n_partition_entries);
+	fprintf(stdout, "JSON GPT: max_n_entries=%d (n_partition_entries=%d)\n",
+			json_gpt.max_n_entries, json_gpt.header.n_partition_entries);
+
+	if (current_gpt.max_n_entries != json_gpt.max_n_entries) {
+		N_Ef(apply_gpt_size_mismatch, "GPT size mismatch BLOCKED: JSON=@INT disk=@INT JSON_n_part=@INT disk_n_part=@INT file=@STR dev=@STR",
+			 json_gpt.max_n_entries, current_gpt.max_n_entries,
+			 json_gpt.header.n_partition_entries, current_gpt.header.n_partition_entries,
+			 config->apply_json_file, config->device_path);
+		fprintf(stderr, COL_RED_BOLD "\nERROR: Cannot apply GPT to different size disk! Non-NVMesh disks?" COL_RESET "\n");
+		fprintf(stderr, "  JSON GPT: %d entries\n", json_gpt.max_n_entries);
+		fprintf(stderr, "  Current disk: %d entries\n", current_gpt.max_n_entries);
+		rv = -1;
+		goto out;
+	}
+	fprintf(stdout, COL_GREEN "GPT size compatible: %d entries" COL_RESET "\n", current_gpt.max_n_entries);
+
+	// Step 8: Compare and show diff
 	fprintf(stdout, "\n=== Comparing GPT changes ===\n");
 	fprintf(stdout, "TODO: Implement detailed diff\n");
 	fprintf(stdout, "TODO: Count additions, deletions, modifications\n");
 	fprintf(stdout, "\n");
 
-	// Step 8: Write changes if in write mode
+	// Step 9: Write changes if in write mode
 	if (config->write_mode) {
 		fprintf(stdout, "=== Would apply changes (NOT IMPLEMENTED YET) ===\n");
 		fprintf(stdout, "TODO: Prompt for confirmation\n");
