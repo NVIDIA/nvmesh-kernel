@@ -301,10 +301,10 @@ typedef long long int s64;
 
     def __render_start_write_trace(self, trace, writer):
         if self.userspace:
-            writer.writeln('ptr = nvmeib_start_trace_write({1}, {0}, NVMEIB_DICTIONARY_CKSUM);\nif (!ptr) {{ if (!nvmeib_trace_is_terminated({1}))\n\tfprintf(stderr, "trace {2} too long\\n");\n return; }}'.format(
+            writer.writeln('ptr = (char *) nvmeib_start_trace_write({1}, {0}, NVMEIB_DICTIONARY_CKSUM);\nif (!ptr) {{ if (!nvmeib_trace_is_terminated({1}))\n\tfprintf(stderr, "trace {2} too long\\n");\n return; }}'.format(
                 trace.size_formula, self._get_channel_var_userspace(trace), trace.name))
         else:
-            writer.writeln('ptr = nvmeib_add_trace({0}, get_cpu_var({1}_trace_{2}_percpu), NVMEIB_DICTIONARY_CKSUM);\nif (!ptr) {{ put_cpu_var({1}_trace_{2}_percpu); return; }}'.format(
+            writer.writeln('ptr = (char *) nvmeib_add_trace({0}, get_cpu_var({1}_trace_{2}_percpu), NVMEIB_DICTIONARY_CKSUM);\nif (!ptr) {{ put_cpu_var({1}_trace_{2}_percpu); return; }}'.format(
                 trace.size_formula, self.module, trace.channel.lower()))
 
     def __render_end_write_trace(self, trace, writer):
