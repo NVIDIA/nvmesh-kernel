@@ -60,7 +60,7 @@
 		int tm_sec, tm_min, tm_hour, tm_mday, tm_mon, tm_year, tm_wday, tm_yday, tm_isdst;
 	};
 	static inline void rtc_time64_to_tm(unsigned long time, struct rtc_time *rtc_tm) {
-		struct timeval tv = {.tv_sec = time, .tv_usec = 0};
+		struct timeval tv = {.tv_sec = (time_t) time, .tv_usec = 0};
 		struct tm result; //tm contains time zone information tm == {rtc_time + timezone information, so, will copy only the rtc_time variables
 		localtime_r(&tv.tv_sec, &result);
 		memcpy(rtc_tm, &result, sizeof(*rtc_tm));
