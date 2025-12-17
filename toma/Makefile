@@ -49,12 +49,8 @@ DICT_JSON  := $(shell pwd)/../tools/dictionary.json
 EXTRA_SOURCES=$(TOOLS_DIR)/nvmeib_trace_userspace.o $(TOOLS_DIR)/nvmeib_trace_userspace_poller.o  $(TOOLS_DIR)/nvmeib_jdr_userspace.o
 
 # The programs to create
-BINS =
+BINS = nvmeibt_toma
 
-# nvmeibt_toma spesifics...
-#
-# the binary name
-BINS += nvmeibt_toma
 # the source directories, space separated
 PROJECT_DIRS_nvmeibt_toma = . clnt ./local/ram ./interfaces/network ./interfaces/log ./interfaces/nvme ./interfaces/os ./interfaces/srvr ./utils ./vol
 # shared with kernel dirs...
@@ -62,25 +58,20 @@ SHARED_DIRS_nvmeibt_toma =
 # files we would like to exclude from the above dir list
 PROJECT_DIRS_EXCLUDES_nvmeibt_toma = ./interfaces/network/nvmeibt_nm_udp.c ./interfaces/network/nvmeibt_nm_ibud.c
 # the binary compiler defines
-COMPILER_DEFINES_nvmeibt_toma = TOMA
-COMPILER_DEFINES_nvmeibt_toma += TOMA_IB_ROCE
+COMPILER_DEFINES_nvmeibt_toma = TOMA TOMA_IB_ROCE
 
 # set the log file size
 ifneq ($(LOGSIZEB),)
-COMPILER_DEFINES_nvmeibt_toma += FILE_SIZE_BITS=$(LOGSIZEB)
 else
 # make the default in debug mode to be 1GB
 LOGSIZEB=30
 endif
-ifeq ($(MOD),)
-endif
+COMPILER_DEFINES_nvmeibt_toma += FILE_SIZE_BITS=$(LOGSIZEB)
 ifeq ($(MOD),$(DEBUG_STR))
 COMPILER_DEFINES_nvmeibt_toma += TOMA_DEBUG
-COMPILER_DEFINES_nvmeibt_toma += FILE_SIZE_BITS=$(LOGSIZEB)
 else ifeq ($(MOD),$(RELEASE_STR))
 ifeq ($(DEBUG),yes)
 COMPILER_DEFINES_nvmeibt_toma += TOMA_DEBUG
-COMPILER_DEFINES_nvmeibt_toma += FILE_SIZE_BITS=$(LOGSIZEB)
 endif
 endif
 LINKER_CMDS_nvmeibt_toma = -T,tracer.ld
@@ -113,8 +104,6 @@ COMPILER_DEFINES_nvmeibt_toma += LOW_MEM
 endif
 
 COMPILER_DEFINES_nvmeibt_toma += GIT_COMMIT_ID=\"$(GIT_COMMIT_ID)\" GIT_BRANCH=\"$(BRANCH_NAME)\" BUILD_VERSION_FOR_MGMT=\"$(VERSION)-$(RELEASE)\" BUILD_NUMBER_FOR_MGMT=\"$(BUILD_NUMBER)\"
-
-LINKER_CMDS_nvmeibt_toma_replay = $(LINKER_CMDS_nvmeibt_toma)
 
 # End of user stuff - below this line it is all internal.
 # Changes below this comments are rarely needed so be sure
@@ -190,9 +179,7 @@ ifeq ($(MOD),$(RELEASE_STR))
 CFLAGS_$(RELEASE_STR) = $(PROF_FLAGS)
 endif
 
-#CFLAGS_COMMON = -std=gnu99 -Wall -Werror -Wno-format-security -fstack-protector -pipe -I. -I$(SHARED_PATH)
 CFLAGS_COMMON += -std=gnu99 -Wall -Werror -Wno-deprecated -Wdeclaration-after-statement -Wno-format-security -Wformat -Wshadow -Wstrict-prototypes -fstack-protector -pipe -I. -I$(SHARED_PATH)
-#CFLAGS_COMMON += -Wno-address-of-packed-member
 
 # -Wextra and -Wstrict-aliasing (part of -Wall) causes compilation to fail on GCC 4.4.x
 GCC_VER_GT44 := $(shell echo `gcc -dumpversion | cut -f1-2 -d.` \> 4.4 | bc )
