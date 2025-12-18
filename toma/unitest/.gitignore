@@ -1,6 +1,7 @@
 /_root/dev/nvme*
 /_root/opt/nvmesh/common-repo/tools/toma_rpc.config
 /_root/proc/nvmeibs/disks.csv
+/_root/var/run/nvmesh/sandbox_fd_*
 /_root/var/log/nvmesh/toma_2*
 /_root/var/log/nvmesh/toma_leader_name
 /_root/var/log/nvmesh/trace_daemon/toma.*
