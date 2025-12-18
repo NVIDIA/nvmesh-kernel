@@ -1443,19 +1443,14 @@ int nvmeibt_disk_metadata_read_disk_metadata(struct netlink_io_context *nl_ctx, 
 											 struct nvmeibt_disk_metadata *disk_metadata)
 {
 	int				rv = -1;
-//	char *dma_buffer = NULL;
-//	int read_size_bytes = sizeof(struct nvmeibt_disk_metadata);
 	int				read_crc32;
 	int				calculated_crc32;
 
 	NFIN;
-//	read_size_bytes = roundup(read_size_bytes, pblk_size);
-//	dma_buffer = NNVMEIBT_BM_ALIGNED_ALLOC(trace_disk_metadata_nvmeibt_disk_metadata_restore_disk_metadata_partition, PAGE_SIZE, read_size_bytes);
 	N_Tf(ywbsd93, "Trying to read disk_metadata from pbyte_s=@OFFSET_INT read_size=@LD", pbyte_s, sizeof(*disk_metadata));
 	if (nvmeibt_disk_metadata_do_sync_IO_with_disk_netlink_or_not(nl_ctx, fd, disk_metadata, pbyte_s, pblk_size, sizeof(*disk_metadata), NULL, 0, NVMEIB_IO_IS_READ, 0, pblk_size*4) < 0) {
 		goto out;
-    }
-//	memcpy(disk_metadata, dma_buffer, sizeof(struct nvmeibt_disk_metadata));
+	}
 	print_disk_metadata(disk_metadata);
 	read_crc32 = disk_metadata->crc32;
 	disk_metadata->crc32 = 0; // Need to set crc to 0 in struct, before calculation
@@ -1472,8 +1467,7 @@ int nvmeibt_disk_metadata_read_disk_metadata(struct netlink_io_context *nl_ctx, 
 	}
 	// Check crc.
 	if (read_crc32 != calculated_crc32) {
-		N_Ef(rtb4yu4, "Error while reading disk_metadata pbyte_s=@OFFSET_INT read_crc=@READ_CRC calculated=@CALCULATED",
-			 pbyte_s, read_crc32, calculated_crc32);
+		N_Ef(rtb4yu4, "Error: pbyte_s=@POS read_crc=@X calculated=@X", pbyte_s, read_crc32, calculated_crc32);
 		goto out;
 	}
 	// Check if the disk_metadata header is valid.
@@ -1481,14 +1475,10 @@ int nvmeibt_disk_metadata_read_disk_metadata(struct netlink_io_context *nl_ctx, 
 		N_Ef(bd8954u, "disk_metadata signature mismatch. Expected=@GPT_SIGNATURE got=@GPT_SIGNATURE pbyte_s=@POS", DISK_METADATA_SIGNATURE, disk_metadata->signature, pbyte_s);
 		goto out;
 	}
-
-	// Restore crc32 to original value after validation passed
-	disk_metadata->crc32 = read_crc32;
-
+	disk_metadata->crc32 = read_crc32;		// Restore crc32 to original value after validation passed
 	rv = 0;
 	N_Tf(vbyhduy, "Restored disk_metadata fd=@FD", fd);
 out:
-//	NNVMEIBT_BM_FREE(uvw0943, dma_buffer);
 	NFOUT;
 	return rv;
 }
