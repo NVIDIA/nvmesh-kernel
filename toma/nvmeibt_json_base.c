@@ -375,3 +375,51 @@ out:
 	return root;
 }
 
+/******************************************************************************/
+// JSON Query Functions - For querying already-parsed JSON trees
+/******************************************************************************/
+
+/**
+ * Get value element for a key from a dict element
+ * Returns the value element, or NULL if key not found or not a dict
+ */
+struct mm_json_elem *json_get_dict_value(struct mm_json_elem *dict_elem, const char *key)
+{
+	int		i;
+	if (!dict_elem || dict_elem->type != JSON_E_DICT || !key) {
+		return NULL;
+	}
+	for (i = 0; i < dict_elem->dict.len; i++) {
+		if (strcmp(dict_elem->dict.elements[i].key, key) == 0) {
+			return dict_elem->dict.elements[i].value;
+		}
+	}
+	return NULL;
+}
+
+bool json_get_dict_bool(struct mm_json_elem *dict_elem, const char *key, bool default_val)
+{
+	struct mm_json_elem *value = json_get_dict_value(dict_elem, key);
+	if (value && value->type == JSON_E_BOOL) {
+		return (value->num != 0);
+	}
+	return default_val;
+}
+
+const char *json_get_dict_str(struct mm_json_elem *dict_elem, const char *key, const char *default_val)
+{
+	struct mm_json_elem *value = json_get_dict_value(dict_elem, key);
+	if (value && value->type == JSON_E_STR) {
+		return value->str;
+	}
+	return default_val;
+}
+
+int64_t json_get_dict_num(struct mm_json_elem *dict_elem, const char *key, int64_t default_val)
+{
+	struct mm_json_elem *value = json_get_dict_value(dict_elem, key);
+	if (value && value->type == JSON_E_NUM) {
+		return value->num;
+	}
+	return default_val;
+}

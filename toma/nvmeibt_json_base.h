@@ -71,6 +71,15 @@ void nvmeibt_mm_json_free_kv_tree(struct mm_json_elem *root);
 struct mm_json_elem *parse_json_txt_into_kv_tree(const char *in, int buff_len);
 
 /******************************************************************************/
+// JSON Query Functions (for querying already-parsed trees)
+/******************************************************************************/
+
+struct mm_json_elem *json_get_dict_value(struct mm_json_elem *dict_elem, const char *key);
+bool json_get_dict_bool(struct mm_json_elem *dict_elem, const char *key, bool default_val);
+const char *json_get_dict_str(struct mm_json_elem *dict_elem, const char *key, const char *default_val);
+int64_t json_get_dict_num(struct mm_json_elem *dict_elem, const char *key, int64_t default_val);
+
+/******************************************************************************/
 // JSON Parsing Macros - Reusable across all files that need JSON parsing
 /******************************************************************************/
 
