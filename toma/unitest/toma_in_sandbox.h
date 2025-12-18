@@ -120,25 +120,6 @@ int epoll_create1(int __flags);
 int epoll_ctl( int efd, enum EPOLL_CTL __op, int __fd, struct epoll_event *ev_ptr);
 int epoll_wait(int efd,                                struct epoll_event *ev_arr, int arr_size, int time_out_ns);
 
-/************************************* logging ********************************/
-#include "interfaces/log/log_incs.h"
-#include "common/compat/kr_incs_types.h"
-#include "common/nvmeib_str.h"
-#include "common/compat/kr_incs_compiler_types.h"
-
-#define NVMEIBT_DUMPER
-#define nvmeibt_dumper_enable(...)
-static inline bool nvmeibt_replay_is_enabled(void){ return false; }
-
-#define nvmeibt_dumper_change_of_leader(...)
-#define nvmeibt_dumper_event_mgmt_config(...)
-#define nvmeibt_dumper_event_raft_persist(...)
-#define nvmeibt_dumper_event_global_topo(...)
-#define nvmeibt_dumper_event_peer_applied(...)
-#define nvmeibt_dumper_event_remove_disk(...)
-static inline int nvmeibt_dumper_init(void) { return 0;}
-static inline void nvmeibt_dumper_exit(void) { return;}
-
 /************************************* network ********************************/
 #define NVMEIBT_NETWORK_INCS_H			//#include "interfaces/network/network_incs.h"
 

@@ -313,4 +313,16 @@ void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values,
 int nvmeibt_debug_register_tracer_section(struct _tracer *start, struct _tracer *end);
 void nvmeibt_debug_init_tracer_sections(void);
 
+#if 1
+	// Deprecated dumper of important logs functionality (replay, topology change etc). Todo: Decide what to do, remove it or replace with sandbox
+	static inline bool nvmeibt_replay_is_enabled(void){ return false; }
+	#define nvmeibt_dumper_change_of_leader(...)
+	#define nvmeibt_dumper_event_mgmt_config(...)
+	#define nvmeibt_dumper_event_raft_persist(...)
+	#define nvmeibt_dumper_event_global_topo(...)
+	#define nvmeibt_dumper_event_peer_applied(...)
+	#define nvmeibt_dumper_event_remove_disk(...)
+	static inline int nvmeibt_dumper_init(void) { return 0;}
+	static inline void nvmeibt_dumper_exit(void) { return;}
+#endif 	// Dumper functionality
 #endif // NVMEIBT_DEBUG_H
