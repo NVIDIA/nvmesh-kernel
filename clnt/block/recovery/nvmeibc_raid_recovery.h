@@ -8,6 +8,7 @@
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_async_mode.h"
 
 struct nvmeibc_recovery;
+struct nvmeib_txt;
 
 struct nvmeibc_recovery_hooks{
 	void (*on_finish_one_sync)(     struct nvmeibc_recovery_hooks* self, struct nvmeibc_recovery* recov);
@@ -144,8 +145,8 @@ void nvmeibc_recoveries_handle_ioctl_request(const struct nvmeibc_subscription_c
 void nvmeibc_recoveries_cancel(              struct nvmeibc_raid_topo_persistent *hdr); /* Externally cancels all running recoveries */
 
 //helper fuction to print recovery information to buffer
-int nvmeibc_recovery_info_to_str(struct nvmeibc_recovery *recov, bool with_stats, char *buf, int len);
-int nvmeibc_recovery_stats_to_str(struct nvmeibc_recovery *recov, char *buf, int len);
+void nvmeibc_recovery_info_to_str(struct nvmeibc_recovery *recov, bool with_stats, struct nvmeib_txt *txt);
+void nvmeibc_recovery_stats_to_str(struct nvmeibc_recovery *recov, struct nvmeib_txt *txt);
 
 void nvmeibc_recovery_stats_clear(struct nvmeibc_recovery *recov);
 void nvmeibc_recovery_set_num_sw(        struct nvmeibc_recovery *recov, u32 n);	// n==0 means default value

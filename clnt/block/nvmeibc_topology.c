@@ -1,3 +1,4 @@
+#include "nvmeib_txt.h"
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "nvmeib_public.h"
 #include "nvmeib_types.h"
@@ -32,7 +33,7 @@ static int __segment_register(struct nvmeibc_disk_segment *seg);
 static int nvmeibc_warm_raid1_apply_conf_diffs(struct nvmeibc_topologies *nt, struct nvmeibc_subscription_ctx *tr);
 static inline int __toma_disconnect_segment(struct nvmeibc_disk_segment *seg);
 extern void nvmeibc_volume_update_volume_single_segment(void *context, const struct nvmeibc_cinst_params_main *p);
-static int __topo_status_tostring(const struct nvmeibc_topology *t, char *buf, int buf_len);
+static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvmeib_txt *txt);
 
 static void *topo_kzalloc(size_t size, gfp_t flags)
 {
@@ -750,7 +751,7 @@ static struct nvmeibc_topology *__nvmeibc_topology_get_regardless_boot_state(str
 {
 	struct nvmeibc_topology *t;
 	get_topo_noupdate(nt);
-	
+
 	t = list_first_entry_or_null(&nt->topologies, struct nvmeibc_topology, list_n);
 	inc_topo_cntr(t);
 
@@ -4156,7 +4157,10 @@ static void __print_incoming_topology(const struct nvmeibc_topology *t)
 {
 	char *buf = topo_kmalloc(PAGE_SIZE, GFP_KERNEL), *print_pos = buf;
 	if (buf) {
-		int len = __topo_status_tostring(t, buf, PAGE_SIZE);
+		int len;
+		struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = PAGE_SIZE});
+		__topo_status_tostring(t, &txt);
+		len = nvmeib_txt_finalize(&txt).len;
 		_NI_TOPO(t_01_topo_pic, t, "Reconf Topo len=@LEN", len);
 		while (true) {
 			char *next = strchr(print_pos, '\n');
@@ -4637,8 +4641,8 @@ out:
 }
 
 #define BLKDEV_PROFILING_PROC_FRMT_VER 1
-int nvmeibc_topologies_profilers_tostring(struct nvmeibc_topologies *nt,
-									  char *buf, int len)
+void nvmeibc_topologies_profilers_tostring(struct nvmeibc_topologies *nt,
+									  struct nvmeib_txt *txt)
 {
 	struct nvmeibc_block_device *dev = nvmeibc_block_nt_to_b(nt);
 	struct nvmeibc_topology *t;
@@ -4646,39 +4650,36 @@ int nvmeibc_topologies_profilers_tostring(struct nvmeibc_topologies *nt,
 	struct nvmeibc_raid1 *r1;
 	struct nvmeibc_disk_segment *seg;
 	unsigned long flags, verb;
-	int pos = 0;
 	int c, r, s;
 	/* Print the general header */
 	spin_lock_irqsave(&nt->lock, flags);
 	t = nvmeibc_topology_get(nt);
 	if (unlikely(!t)) {
 		spin_unlock_irqrestore(&nt->lock, flags);
-		pos += scnprintf(buf + pos, len-pos, "Topology already free, possible race");
+		nvmeib_txt_append(txt, "Topology already free, possible race");
 		goto out;
 	}
 
 	if (t) {
-		pos += nvmeibc_profiling_stats_tostring(dev->preparation_profiler, buf+pos, len-pos);
+		nvmeibc_profiling_stats_tostring(dev->preparation_profiler, txt);
 		topo_for_each_raid1(t, chunk, c, r1, r) {
 			for (verb = 0; verb < VERB_RW_NUM; verb++) {
-				pos += nvmeibc_profiling_stats_tostring(r1->hdr->good_path_profile[verb], buf+pos, len-pos);
+				nvmeibc_profiling_stats_tostring(r1->hdr->good_path_profile[verb], txt);
 			}
 			raid1_for_each_seg(r1, seg, s) {
-				pos += nvmeibc_profiling_stats_tostring(seg->disk_operation_profiler, buf+pos, len-pos);
-				pos += nvmeibc_profiling_stats_tostring(seg->lock_operation_profiler, buf+pos, len-pos);
+				nvmeibc_profiling_stats_tostring(seg->disk_operation_profiler, txt);
+				nvmeibc_profiling_stats_tostring(seg->lock_operation_profiler, txt);
 			}
-			pos += nvmeibc_profiling_stats_tostring(r1->hdr->sync_profile, buf+pos, len-pos);
+			nvmeibc_profiling_stats_tostring(r1->hdr->sync_profile, txt);
 		}
 		nvmeibc_topology_put(t);
 	}
 	spin_unlock_irqrestore(&nt->lock, flags);
 out:
-	pos += nvmeib_proc_add_txt_proc_epilog(BLKDEV_PROFILING_PROC_FRMT_VER, buf + pos, len - pos);
-
-	return pos;
+	nvmeib_proc_add_txt_proc_epilog_txt(BLKDEV_PROFILING_PROC_FRMT_VER, txt);
 }
 
-int nvmeibc_topologies_profilers_tocsv(struct nvmeibc_topologies *nt, char *buf, int len)
+void nvmeibc_topologies_profilers_tocsv(struct nvmeibc_topologies *nt, struct nvmeib_txt *txt)
 {
 	struct nvmeibc_block_device *dev = nvmeibc_block_nt_to_b(nt);
 	struct nvmeibc_topology *t;
@@ -4686,63 +4687,61 @@ int nvmeibc_topologies_profilers_tocsv(struct nvmeibc_topologies *nt, char *buf,
 	struct nvmeibc_raid1 *r1;
 	struct nvmeibc_disk_segment *seg;
 	unsigned long flags, verb;
-	int pos = 0;
 	int c, r, s;
 	/* Print the general header */
 	spin_lock_irqsave(&nt->lock, flags);
 	t = nvmeibc_topology_get(nt);
 	if (unlikely(!t)) {
 		spin_unlock_irqrestore(&nt->lock, flags);
-		pos += scnprintf(buf + pos, len-pos, "Topology already free, possible race");
+		nvmeib_txt_append(txt, "Topology already free, possible race");
 	} else {
-		pos += nvmeibc_profiler_tocsv(dev->preparation_profiler, buf+pos, len-pos);
+		nvmeibc_profiler_tocsv(dev->preparation_profiler, txt);
 		topo_for_each_raid1(t, chunk, c, r1, r) {
 			for (verb = 0; verb < VERB_RW_NUM; verb++) {
-				pos += nvmeibc_profiler_tocsv(r1->hdr->good_path_profile[verb], buf+pos, len-pos);
+				nvmeibc_profiler_tocsv(r1->hdr->good_path_profile[verb], txt);
 			}
 			raid1_for_each_seg(r1, seg, s) {
-				pos += nvmeibc_profiler_tocsv(seg->disk_operation_profiler, buf+pos, len-pos);
-				pos += nvmeibc_profiler_tocsv(seg->lock_operation_profiler, buf+pos, len-pos);
+				nvmeibc_profiler_tocsv(seg->disk_operation_profiler, txt);
+				nvmeibc_profiler_tocsv(seg->lock_operation_profiler, txt);
 			}
-			pos += nvmeibc_profiler_tocsv(r1->hdr->sync_profile, buf+pos, len-pos);
+			nvmeibc_profiler_tocsv(r1->hdr->sync_profile, txt);
 		}
 		spin_unlock_irqrestore(&nt->lock, flags);
 		nvmeibc_topology_put(t);
 	}
-	return pos;
 }
 
 
-int nvmeibc_topologies_stalocks_tostring(struct nvmeibc_topologies *nt, char *buf, int len)
+void nvmeibc_topologies_stalocks_tostring(struct nvmeibc_topologies *nt, struct nvmeib_txt *txt)
 {
-	#define BUF_ADD(...) pos += scnprintf(buf + pos, len - pos, __VA_ARGS__)
 	struct nvmeibc_topology *t = nvmeibc_topology_get(nt);
 	const struct nvmeibc_chunk *chunk;
 	const struct nvmeibc_raid1 *r1;
 	const bool with_stats = false;
-	int c, r, pos = 0;
+	int c, r;
 	u32 i = 0, rcvr_start = NVMEIBT_RECOVERY_TYPE_INVALID+1, rcvr_end = ARRAY_SIZE(r1->hdr->recoveries);
 	if (unlikely(!t)) {
-		BUF_ADD("Unable to obtain additional information...\n");
+		nvmeib_txt_append(txt, "Unable to obtain additional information...\n");
 		goto _out;
 	}
 	topo_for_each_raid1(t, chunk, c, r1, r) {
 		struct nvmeibc_raid_topo_persistent *hdr = r1->hdr;
-		BUF_ADD("Raid (%d,%d): ", c, r);	 /* Deliberately no '\n' suffix */
-		pos += stale_lock_resolver_to_str(&hdr->slr, buf+pos, len-pos);
+		nvmeib_txt_append(txt, "Raid (%d,%d): ", c, r);	 /* Deliberately no '\n' suffix */
+		stale_lock_resolver_to_str(&hdr->slr, txt);
 
-		BUF_ADD("{Job Stats:");
-		for (i = rcvr_start; i < rcvr_end; i++)
-			pos += nvmeibc_recovery_stats_to_str(hdr->recoveries[i], buf+pos, len-pos);
-		BUF_ADD("}\n");
-		for (i = rcvr_start; i < rcvr_end; i++)
-			pos += nvmeibc_recovery_info_to_str(hdr->recoveries[i], with_stats, buf+pos, len-pos);
+		nvmeib_txt_append(txt, "{Job Stats:");
+		for (i = rcvr_start; i < rcvr_end; i++) {
+			nvmeibc_recovery_stats_to_str(hdr->recoveries[i], txt);
+		}
+		nvmeib_txt_append(txt, "}\n");
+		for (i = rcvr_start; i < rcvr_end; i++) {
+			nvmeibc_recovery_info_to_str(hdr->recoveries[i], with_stats, txt);
+		}
 
 	}
 	nvmeibc_topology_put(t);
 _out:
-	return pos;
-	#undef BUF_ADD
+	return;
 }
 
 static const char *__volume_type(const struct nvmeibc_topology *t)
@@ -4949,55 +4948,49 @@ static inline const char *__nt_status_str(const struct nvmeibc_topologies *nt,
 }
 
 #define __dbg_sts(dev, dev_sts_int)  (((dev)->status<<8) + (dev_sts_int))
-int nvmeibc_topologies_status_tostring(struct nvmeibc_topologies *nt, char *buf, int buf_len)
+void nvmeibc_topologies_status_tostring(struct nvmeibc_topologies *nt, struct nvmeib_txt *txt)
 {
-#define BUF_ADD(...) buf_pos += \
-	scnprintf(buf + buf_pos, buf_len - buf_pos, __VA_ARGS__)
-
 	const struct nvmeibc_block_device *dev = nvmeibc_block_nt_to_b(nt);
 	struct nvmeibc_topology *t;
 	unsigned long flags;
-	int buf_pos = 0;
 	const char *dev_status_str = NULL, *dev_attach_status = NULL;
 	int         dev_status_int = 0;		// For QA, auto parsing scripts
 
 	/* Print the general header */
-	BUF_ADD("RVMS=0x%llx\n", nt->reservation_version_max_seen);
+	nvmeib_txt_append(txt, "RVMS=0x%llx\n", nt->reservation_version_max_seen);
 	dev_attach_status = nvmeibc_block_status_to_string(dev->status);
 	spin_lock_irqsave(&nt->lock, flags);
 	dev_status_str = __nt_status_str(nt, &dev_status_int);
-	BUF_ADD("Device status: %s, %s (debug:0x%x, %llu)\n", dev_attach_status,
+	nvmeib_txt_append(txt, "Device status: %s, %s (debug:0x%x, %llu)\n", dev_attach_status,
 			dev_status_str, __dbg_sts(dev, dev_status_int),
 			nt->dbg_num_enabling_io_toggles);
 	if (dev_status_int==0)
-		BUF_ADD("IO is currently enabled.\n");
+		nvmeib_txt_append(txt, "IO is currently enabled.\n");
 	else
-		BUF_ADD("IO is currently disabled for %llu[msec].\n", (jiffies - nt->dbg_disabling_ts) * 1000 / HZ);
+		nvmeib_txt_append(txt, "IO is currently disabled for %llu[msec].\n", (jiffies - nt->dbg_disabling_ts) * 1000 / HZ);
 
 	t = nvmeibc_topology_get(nt);
 	if (unlikely(!t)) {
-		BUF_ADD("Unable to obtain additional information...\n");
+		nvmeib_txt_append(txt, "Unable to obtain additional information...\n");
 		goto _out;
 	}
-	BUF_ADD("Raid Type: %s\n", __volume_type(t));
-	buf_pos += __topo_status_tostring(t, buf+buf_pos, buf_len-buf_pos);
+	nvmeib_txt_append(txt, "Raid Type: %s\n", __volume_type(t));
+	__topo_status_tostring(t, txt);
 _out:
 	nvmeibc_topology_put(t);
 	spin_unlock_irqrestore(&nt->lock, flags);
-	return buf_pos;
 }
 
 #define __host_of(disk) \
 	((disk)->disk_host[0] == '?' ? "Unknown" : (disk)->disk_host)
 
-static int __topo_status_tostring(const struct nvmeibc_topology *t,
-									  char *buf, int buf_len)
+static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvmeib_txt *txt)
 {
-	int c, r, si, buf_pos = 0;
+	int c, r, si;
 	struct nvmeibc_chunk *chunk;
 	struct nvmeibc_raid1 *r1;
 	struct nvmeibc_disk_segment *seg;
-	BUF_ADD("Topology Debug: i=[%llu..%llu), ver=%llu, "
+	nvmeib_txt_append(txt, "Topology Debug: i=[%llu..%llu), ver=%llu, "
 			"io_perm=%d nr=%d ns=%llu[blks], vl=%d\n",
 			t->debug_unique_index, t->nt->topo_debug_last_freed_version,
 			t->configuration_version, t->io_perm,
@@ -5007,18 +5000,18 @@ static int __topo_status_tostring(const struct nvmeibc_topology *t,
 	topo_for_each_chunk(t, chunk, c) {
 		const bool is_eras_code = (chunk->raid1s->slice_size > 1);
 		const char *slice_name  = (!is_eras_code ? "Replica" : "Slice");
-		BUF_ADD("Chunk #%d: Stripe{Size=%d, Width=%d} ",
+		nvmeib_txt_append(txt, "Chunk #%d: Stripe{Size=%d, Width=%d} ",
 		c, chunk->stripe_size, t->stripe_width);
 		if (is_eras_code) {
 			const uint n_data = chunk->raid1s->slice_size;
 			const uint n_pari = (chunk->raid1s->replicas - n_data);
-			BUF_ADD("Slice{%d+%d} ",n_data, n_pari);
+			nvmeib_txt_append(txt, "Slice{%d+%d} ",n_data, n_pari);
 		} else {
-			BUF_ADD("Replicas=%d ",chunk->raid1s->replicas);
+			nvmeib_txt_append(txt, "Replicas=%d ",chunk->raid1s->replicas);
 		}
-		BUF_ADD("Vol Blocks [%lld..%lld]\n",
+		nvmeib_txt_append(txt, "Vol Blocks [%lld..%lld]\n",
 				chunk->first_vlba, chunk[1].first_vlba - 1);
-		BUF_ADD("\t%-6s %-7s %-26s %-21s %-12s %-12s %-32s Debug-info\n",
+		nvmeib_txt_append(txt, "\t%-6s %-7s %-26s %-21s %-12s %-12s %-32s Debug-info\n",
 			"Stripe", slice_name, "Status", "Disk NVMe ID", "0xLBA Start", "0xLBA End",
 			"Last Known Target");
 		chunk_for_each_raid1(chunk, r1, r) {
@@ -5027,7 +5020,7 @@ static int __topo_status_tostring(const struct nvmeibc_topology *t,
 				is_r1_broken |= (seg->disk == NULL); // Should not happen!
 			if (is_r1_broken) {
 				raid1_for_each_seg(r1, seg, si)
-					BUF_ADD("\t%-6d %-7d %-36s Disk Error\n",
+					nvmeib_txt_append(txt, "\t%-6d %-7d %-36s Disk Error\n",
 							r, si, INTERNAL_ERR_STR);
 				continue;							// To next r1 in chunk
 			}
@@ -5037,7 +5030,7 @@ static int __topo_status_tostring(const struct nvmeibc_topology *t,
 				char slmap[LOCK_OWNERSHIP_MAP_STRING_LEN];
 				const int disk_p_state = __disk_p_state2num(disk);
 				lock_ownership_map_to_string(&seg->lmap, slmap);
-				BUF_ADD("\t%-6d %-7d %-26s %-21s %-12llx %-12llx %-32.32s [a=%d p=%d acm=%s sy=%d lm(%s) r1v=0x%x lid=0x%x|%c uid=%-.8s]",
+				nvmeib_txt_append(txt, "\t%-6d %-7d %-26s %-21s %-12llx %-12llx %-32.32s [a=%d p=%d acm=%s sy=%d lm(%s) r1v=0x%x lid=0x%x|%c uid=%-.8s]",
 					r, si, __segment_state(r1, si), disk->name,
 					seg->first_lba, seg->first_lba + seg->length -1,
 					__host_of(disk),
@@ -5046,112 +5039,121 @@ static int __topo_status_tostring(const struct nvmeibc_topology *t,
 					__segment_reconf_state(seg), seg->uuid);
 				if ((disk_p_state) && (!NVMEIB_TREND_IS_EMPTY(disk->discover_trend))) {
 					// char disk_pause_reason[DISK_DISCOVER_STATUS_LEN]; scnprintf(disk_pause_reason, disk->discover_status, DISK_DISCOVER_STATUS_LEN); // No need to copy on stack. A race can cause the reason to be displayed improperly, but who cares...
-					//BUF_ADD(" %s", disk->discover_status);
+					//nvmeib_txt_append(txt, " %s", disk->discover_status);
 				}
 				if ((seg->toma_reg) && (seg->toma_reg->protocol_version != NVMEIBT_CLIENT_PROTO_VERSION)) {
-					BUF_ADD(" proto=0x%x", seg->toma_reg->protocol_version);
+					nvmeib_txt_append(txt, " proto=0x%x", seg->toma_reg->protocol_version);
 				}
-				BUF_ADD("\n");
+				nvmeib_txt_append(txt, "\n");
 			}
 		}
 	}
 	if (__topo_num_last_chunks_disabled(t)) {
-		BUF_ADD("Important: %d last chunks are disabled, does not affect IO\n",
+		nvmeib_txt_append(txt, "Important: %d last chunks are disabled, does not affect IO\n",
 				__topo_num_last_chunks_disabled(t));
 	}
-	return buf_pos;
 }
 
-static int __topo_status_tojson(const struct nvmeibc_topology *t, char *buf, int buf_len)
+static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *jdr)
 {
-	int c, r, si, buf_pos = 0;
+	int c, r, si;
 	struct nvmeibc_chunk *chunk;
 	struct nvmeibc_raid1 *r1;
 	struct nvmeibc_disk_segment *seg;
 
-	BUF_ADD("\"topo\":{\n");
-	BUF_ADD("\t\"cur\": %llu, \"freed\": %llu, \"conf_ver\": %llu,"
-			"\"io_perm\": %d, \"nr\": %d,\"ns\": %llu, \"can_view_lock\": %d,\n",
-			t->debug_unique_index, t->nt->topo_debug_last_freed_version,
-			t->configuration_version, t->io_perm,
-			t->num_reconfing_segs, t->resize.size, t->is_safe_for_view_lock);
-	BUF_ADD("\t\"verbose_status\": \"%s\",\n", nvmeib_io_type_permission_to_string(t->io_perm));
+	jdr_object_scope(jdr, "topo");
+	jdr_write_var(jdr, cur, t->debug_unique_index);
+	jdr_write_var(jdr, freed, t->nt->topo_debug_last_freed_version);
+	jdr_write_var(jdr, conf_ver, t->configuration_version);
+	jdr_write_var(jdr, io_perm, t->io_perm);
+	jdr_write_var(jdr, nr, t->num_reconfing_segs);
+	jdr_write_var(jdr, ns, t->resize.size);
+	jdr_write_var(jdr, can_view_lock, t->is_safe_for_view_lock);
+	jdr->ops.ascii(jdr, "verbose_status", nvmeib_io_type_permission_to_string(t->io_perm));
 
-	BUF_ADD("\t\"chunks\":[\n");
-	topo_for_each_chunk(t, chunk, c) {
-		BUF_ADD("\t\t\{ \"ci\": %d, \"vlba_start\": %lld, "
-				"\"vlba_end\": %lld,\n",
-				c, chunk->first_vlba, chunk[1].first_vlba - 1);
-		BUF_ADD("\t\t\t\"prs\":[\n");
-		chunk_for_each_raid1(chunk, r1, r) {
-			BUF_ADD("\t\t\t\t\{\"ri\": %d, \"version\": %d, "
-					"\"lock\":\"0x%x\",\n", r, r1->version, r1->lid.all);
-			BUF_ADD("\t\t\t\t\t\"dbits_off_mask\": %d, \"dbits_on_mask\": %d,\n",
-					nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_off_mask), nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_on_mask));
-			BUF_ADD("\t\t\t\t\t\"segs\":[\n");
-			raid1_for_each_seg(r1, seg, si) {
-				const struct nvmeibc_disk *disk = seg->disk;
-				const char *acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
-				char slmap[LOCK_OWNERSHIP_MAP_STRING_LEN];
-				lock_ownership_map_to_string(&seg->lmap, slmap);
-				BUF_ADD("\t\t\t\t\t\t{\"si\": %d,", si);
-				BUF_ADD("\"dlba_start\": %lld, \"dlba_end\": %lld,",
-						seg->first_lba, seg->first_lba + seg->length - 1);
-				BUF_ADD("\"uuid\":\"%-.8s\", \"act\": %d,", seg->uuid, seg->registration_status);
-				BUF_ADD("\"acm\":\"%s\", \"locks_on_read\":\"%d\",", acm, seg->sync_safety);
-				BUF_ADD("\"lmap\":\"%s\",\"reconf\":\"%c\",\n", slmap, __segment_reconf_state(seg));
-				BUF_ADD("\t\t\t\t\t\t\t\t\"disk\":{");
-				BUF_ADD("\"name\":\"%s\", \"host\": \"%s\", \"paused\": %d}\n",
-						 disk->name, __host_of(disk), __disk_p_state2num(disk));
-				BUF_ADD("\t\t\t\t\t\t},\n");	// Segment
+	{
+		jdr_array_scope(jdr, "chunks");
+		topo_for_each_chunk(t, chunk, c) {
+			{
+				jdr_object_scope(jdr, NULL);
+				jdr_write_var(jdr, ci, c);
+				jdr_write_var(jdr, vlba_start, chunk->first_vlba);
+				jdr_write_var(jdr, vlba_end, chunk[1].first_vlba - 1);
+				{
+					jdr_array_scope(jdr, "prs");
+					chunk_for_each_raid1(chunk, r1, r) {
+						{
+							jdr_object_scope(jdr, NULL);
+							jdr_write_var(jdr, ri, r);
+							jdr_write_var(jdr, version, r1->version);
+							jdr->ops.ascii_format(jdr, "lock", "0x%x", r1->lid.all);
+							jdr_write_var(jdr, dbits_off_mask, nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_off_mask));
+							jdr_write_var(jdr, dbits_on_mask, nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_on_mask));
+							{
+								jdr_array_scope(jdr, "segs");
+								raid1_for_each_seg(r1, seg, si) {
+									const struct nvmeibc_disk *disk = seg->disk;
+									const char *acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
+									char slmap[LOCK_OWNERSHIP_MAP_STRING_LEN];
+									lock_ownership_map_to_string(&seg->lmap, slmap);
+									{
+										jdr_object_scope(jdr, NULL);
+										jdr_write_var(jdr, si, si);
+										jdr_write_var(jdr, dlba_start, seg->first_lba);
+										jdr_write_var(jdr, dlba_end, seg->first_lba + seg->length - 1);
+										jdr->ops.ascii_format(jdr, "uuid", "%-.8s", seg->uuid);
+										jdr_write_var(jdr, act, seg->registration_status);
+										jdr->ops.ascii(jdr, "acm", acm);
+										jdr_write_var(jdr, locks_on_read, seg->sync_safety);
+										jdr->ops.ascii(jdr, "lmap", slmap);
+										jdr->ops.ascii_format(jdr, "reconf", "%c", __segment_reconf_state(seg));
+										{
+											jdr_object_scope(jdr, "disk");
+											jdr->ops.ascii(jdr, "name", disk->name);
+											jdr->ops.ascii(jdr, "host", __host_of(disk));
+											jdr_write_var(jdr, paused, __disk_p_state2num(disk));
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 			}
-			buf_pos-=2;					// Delete last unneeded ',\n' in array
-			BUF_ADD("\t\t\t\t\t]\n"); 	// Segments
-			BUF_ADD("\t\t\t\t},\n");	// Raid
 		}
-		buf_pos-=2;						// Delete last unneeded ',\n' in array
-		BUF_ADD("\t\t\t]\n");
-		BUF_ADD("\t\t},\n");	// Chunk
 	}
-	// MTV has no chunks
-	if (__get_topo_num_chunks(t)) buf_pos-=2;	// Delete last unneeded ',\n' in array
-	BUF_ADD("\t]\n"); //chunks
-	BUF_ADD("}\n");	// Topo
-	return buf_pos;
 }
 
 #define get_io_enabled(dev) ((int)(nvmeibc_get_io_perm_for_reporting((struct nvmeibc_block_device *)(dev)) == NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL))
 
-int nvmeibc_topologies_status_tojson(struct nvmeibc_topologies *nt,
-									  char *buf, int buf_len)
+void nvmeibc_topologies_status_tojson(struct nvmeibc_topologies *nt, struct jdr *jdr)
 {
 	const struct nvmeibc_block_device *dev = nvmeibc_block_nt_to_b(nt);
 	struct nvmeibc_topology *t;
 	unsigned long flags;
-	int buf_pos = 0;
 	const char *dev_status_str = NULL;
 	int         dev_status_int = 0;		// For QA, auto parsing scripts
 
 	/* Print the general header */
 	spin_lock_irqsave(&nt->lock, flags);
-	BUF_ADD("\"RVMS\":\"%lld\", \"attach_status\":\"%s\",", nt->reservation_version_max_seen, nvmeibc_block_status_to_string(dev->status));
+	jdr_write_var(jdr, RVMS, nt->reservation_version_max_seen);
+	jdr->ops.ascii(jdr, "attach_status", nvmeibc_block_status_to_string(dev->status));
 	dev_status_str = __nt_status_str(nt, &dev_status_int);
 	t = nvmeibc_topology_get(nt);
 	if (t) {
-		const struct nvmeibc_volume_attach_t *vat = nvmeibc_block_get_res_vat(dev); // Daniel: Simplify line below. Use: nvmeibc_volume_attach_t_tostring()
-		BUF_ADD("\"raid_type\":\"%s\",\n\"reservation\":\"%s\",\n\"reservation_version\":\"%llu\",\n\"preempt\":\"%s\",\n\"status\":\"%s\",\n\"dbg\":\"0x%x\",\n"
-				"\"io-toggles\":\"%lld\",\"io_enabled\":\"%d\",\n",
-				__volume_type(t),
-				nvmeibc_volume_attach_t_mode_to_string(vat->res.mode),vat->res.version, nvmeibc_volume_attach_t_preempt_to_string(vat->res.preempt),
-				dev_status_str,
-				__dbg_sts(dev, dev_status_int),nt->dbg_num_enabling_io_toggles,
-				get_io_enabled(dev));
-		buf_pos += __topo_status_tojson(t, buf+buf_pos, buf_len-buf_pos);
+		const struct nvmeibc_volume_attach_t *vat = nvmeibc_block_get_res_vat(dev);
+		jdr->ops.ascii(jdr, "raid_type", __volume_type(t));
+		jdr->ops.ascii(jdr, "reservation", nvmeibc_volume_attach_t_mode_to_string(vat->res.mode));
+		jdr_write_var(jdr, reservation_version, vat->res.version);
+		jdr->ops.ascii(jdr, "preempt", nvmeibc_volume_attach_t_preempt_to_string(vat->res.preempt));
+		jdr->ops.ascii(jdr, "status", dev_status_str);
+		jdr_write_var(jdr, dbg, __dbg_sts(dev, dev_status_int));
+		jdr_write_var(jdr, io-toggles, nt->dbg_num_enabling_io_toggles);
+		jdr_write_var(jdr, io_enabled, get_io_enabled(dev));
+		__topo_status_tojson(t, jdr);
 		nvmeibc_topology_put(t);
 	}
 	spin_unlock_irqrestore(&nt->lock, flags);
-	return buf_pos;
-#undef BUF_ADD
 }
 
 #if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)

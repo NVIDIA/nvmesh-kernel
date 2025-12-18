@@ -59,6 +59,7 @@ struct jdr{
 		void (*s32)(struct jdr* self, char const * name, int32_t value);
 		void (*u64)(struct jdr* self, char const * name, uint64_t value);
 		void (*s64)(struct jdr* self, char const * name, int64_t value);
+		void (*ul)(struct jdr* self, char const * name, unsigned long value);
 		void (*ull)(struct jdr* self, char const * name, unsigned long long value);
 		void (*sll)(struct jdr* self, char const * name, long long value);
 		void (*ptr)(struct jdr* self, char const * name, void const * value);
@@ -145,6 +146,8 @@ __attribute__((cleanup(__jdr_on_array_done))) struct jdr* UNIQUE_NAME(jdr_array_
 			(jdr_inst)->ops.u64,																	\
 		__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), int64_t),				\
 			(jdr_inst)->ops.s64,																	\
+		__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned long),	    \
+			(jdr_inst)->ops.ul,																	\
 		__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned long long),	\
 			(jdr_inst)->ops.ull,																	\
 		__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), long long),			\
@@ -155,7 +158,7 @@ __attribute__((cleanup(__jdr_on_array_done))) struct jdr* UNIQUE_NAME(jdr_array_
 			(jdr_inst)->ops.ascii,																\
 		__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), uuid_be),				\
 			(jdr_inst)->ops.uuid_be,																\
-		(void)0 ))))))))))))));																	\
+		(void)0 )))))))))))))));																	\
  	__jdr_func;																					\
 })
 

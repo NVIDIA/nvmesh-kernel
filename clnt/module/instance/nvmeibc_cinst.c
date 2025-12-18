@@ -5,6 +5,7 @@
 #include "nvmeibc_cinst_max.h"
 #include "nvmeib_str.h"
 #include "common/proc_epilog.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 static char default_dir_lsblk[CINST_NAME_LEN] = "nvmesh"; // will have no affect if after module init
 module_param_string(default_dir_lsblk, default_dir_lsblk, CINST_NAME_LEN, 0644);
@@ -83,46 +84,52 @@ void nvmeibc_cinst_array_init(void)
 }
 
 #define INST_LIST_PROC_FRMT_VER 1
-int nvmeibc_cinst_array_debug_print(void *ctx, char *buffer, size_t len)
+void nvmeibc_cinst_array_debug_print(void *ctx, struct jdr *jdr)
 {
 	struct t_nvmeibc_cinst_arr *C = &cinst;
 	const ulong now = jiffies;
-	int count = 0;
 	struct nvmeibc_cinst *c;
-	#define BUF_ADD(...) count += scnprintf(buffer+count, len-count, __VA_ARGS__)
 	(void)ctx;
 	mutex_lock(&C->lock);
-	BUF_ADD("{\t\"n_inst\" : %u, \"n_free\" : %u,\n", C->n_alloc, C->n_free);
-	BUF_ADD("%s","\t\"instances\" : [\n");
-	list_for_each_entry(c, &C->aloc_list, pool_link) {
-		struct nvmeibc_cinst_params_main *pm = &c->p.main;
-		ulong flags;
-		BUF_ADD("\t\t{\"index\":%d, \"name\":\"%s\", \"dev_dir\":\"%s\", ", c->p.index, c->p.blok.dev_name.str, c->p.blok.dir_lsblk.str);
-		// ---- main params ----
-		BUF_ADD("\"auto_generated\":\"%d\", ", pm->mgmt.is_auto_generated);			// 0/1 == true/false
-		spin_lock_irqsave(&pm->param_change_lock, flags);
-		BUF_ADD("\"management\" : {\"cluster\":\"%s\", \"protocol\":\"htt%s\", \"db_uuid\":\"%s\" }, ", pm->mgmt.cluster, ((pm->mgmt.use_https) ? "ps" : "p"), &pm->mgmt.db_uuid[0]);
-		spin_unlock_irqrestore(&pm->param_change_lock, flags);
-		BUF_ADD("\"cfg_profile\" : {\"id\":\"%s\", \"name\":\"%s\", \"ver\":\"%d\" }, ", pm->cfg_profile.id, pm->cfg_profile.name, pm->cfg_profile.version);
-		BUF_ADD("\"age[sec]\" : %llu},\n", (u64)(now - c->creation_jiffies)/HZ);
-	}
-	if (C->n_alloc > 0)
-		count -= 2;					// Remove prev ",\n"
-	BUF_ADD("\n\t]");
-	if (0) {						// For debug, print the free list
-		BUF_ADD("%s", ",\n\t\"free\" : [\n");
-		list_for_each_entry(c, &C->free_list, pool_link) {
-			BUF_ADD("\t\t{\"index\" :%d},\n", c->p.index);
+	jdr_write_var(jdr, n_inst, C->n_alloc);
+	jdr_write_var(jdr, n_free, C->n_free);
+	{
+		jdr_array_scope(jdr, "instances");
+		list_for_each_entry(c, &C->aloc_list, pool_link) {
+			struct nvmeibc_cinst_params_main *pm = &c->p.main;
+			ulong flags;
+			jdr_object_scope(jdr, NULL);
+			jdr_write_var(jdr, index, c->p.index);
+			jdr_write_var(jdr, name, (char const *)c->p.blok.dev_name.str);
+			jdr_write_var(jdr, dev_dir, (char const *)c->p.blok.dir_lsblk.str);
+			// ---- main params ----
+			jdr_write_var(jdr, auto_generated, pm->mgmt.is_auto_generated);
+			spin_lock_irqsave(&pm->param_change_lock, flags);
+			{
+				jdr_object_scope(jdr, "management");
+				jdr_write_var(jdr, cluster, pm->mgmt.cluster);
+				jdr_write_var(jdr, protocol, (char const *)(((pm->mgmt.use_https) ? "https" : "http")));
+				jdr_write_var(jdr, db_uuid, (char const *)&pm->mgmt.db_uuid[0]);
+			}
+			spin_unlock_irqrestore(&pm->param_change_lock, flags);
+			{
+				jdr_object_scope(jdr, "cfg_profile");
+				jdr_write_var(jdr, id, (const char *)pm->cfg_profile.id);
+				jdr_write_var(jdr, name, (char const *)pm->cfg_profile.name);
+				jdr_write_var(jdr, ver, (int)pm->cfg_profile.version);
+			}
+			jdr_write_var(jdr, age_sec, (u64)(now - c->creation_jiffies) / HZ);
 		}
-		if (C->n_free > 0)
-			count -= 2;				// Remove prev ",\n"
-		BUF_ADD("\n\t]");
 	}
-	count += nvmeib_proc_add_json_proc_epilog(INST_LIST_PROC_FRMT_VER, buffer + count, len - count);
-	BUF_ADD("\n}\n");
+	if (0) {						// For debug, print the free list
+		jdr_array_scope(jdr, "free");
+		list_for_each_entry(c, &C->free_list, pool_link) {
+			jdr_object_scope(jdr, NULL);
+			jdr_write_var(jdr, index, c->p.index);
+		}
+	}
+	nvmeib_proc_add_json_proc_epilog_jdr(INST_LIST_PROC_FRMT_VER, jdr);
 	mutex_unlock(&C->lock);
-	#undef BUF_ADD
-	return count;
 }
 
 const struct nvmeibc_cinst_params* nvmeibc_cinst_array_get_itr_next(const struct nvmeibc_cinst_params* p)

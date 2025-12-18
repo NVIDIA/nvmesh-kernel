@@ -1,6 +1,8 @@
 #ifndef NVMEIBC_DP_EC_RECOV_ALL_STATS_H
 #define NVMEIBC_DP_EC_RECOV_ALL_STATS_H
 
+struct jdr;
+
 /******************** Journal recoveries stats counter ************************/
 struct nvmeibc_cold_stats {
 	atomic_t n_syncs;			// Number of blocksets with candidates
@@ -10,7 +12,7 @@ struct nvmeibc_cold_stats {
 	atomic_t n_jgc_freed;		// Number of jentries, jgc freed,		Optimization: not filled by each sync() doing++, but by recovery doing add()
 	atomic_t n_resets;			// Number of times this structure was reset. Without this field one cannot know of counters are 0 because they were cleaned or nothing happened in the past
 };
-int  nvmeibc_cold_stats_to_string(char* buf, int len);
+void nvmeibc_cold_stats_tojson(struct jdr *jdr);
 void nvmeibc_cold_stats_reset(void);
 void nvmeibc_cold_stats_get(struct nvmeibc_cold_stats *rv);
 
@@ -36,7 +38,7 @@ struct htr_stats {
 	atomic_t n_ext_sm;						// The number of HTR calls which called external sm.
 	atomic_t n_resets;						// The number of times the stats been cleaned(reseted).
 };
-int  nvmeibc_htr_fill_status(char* buf, int len);
+void nvmeibc_htr_status_tojson(struct jdr *jdr);
 void nvmeibc_htr_stats_reset(void);
 void nvmeibc_htr_stats_get(struct htr_stats *rv);
 
@@ -49,7 +51,7 @@ struct nvmeibc_maintain_sync_stats {
 	atomic_t n_dconvict_turnon;
 	atomic_t n_resets;					// Number of times this structure was reset. Without this field one cannot know of counters are 0 because they were cleaned or nothing happened in the past
 };
-int nvmeibc_maintain_sync_stats_to_string(char* buf, int len);
+void nvmeibc_maintain_sync_stats_tojson(struct jdr *jdr);
 void nvmeibc_maintain_sync_stats_reset(void);
 void nvmeibc_maintain_sync_stats_get(struct nvmeibc_maintain_sync_stats *rv);
 

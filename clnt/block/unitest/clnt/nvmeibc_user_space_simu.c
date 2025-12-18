@@ -268,9 +268,8 @@ static void __pop_path_components(char *path, int count) {
 static bool __write_proc_file_to_disk(struct proc_dir_entry *e, const char *current_path) {
 	char file_path[PATH_MAX];
 	char buff[4096*64];
-	FILE *fp = NULL;
 	loff_t offset = 0;
-	int bytes_read, written;
+	int bytes_read, rv;
 
 	/* Build file path */
 	if ((size_t)scnprintf(file_path, sizeof(file_path), "%s/%s", current_path, e->name) >= sizeof(file_path)) {
@@ -278,27 +277,16 @@ static bool __write_proc_file_to_disk(struct proc_dir_entry *e, const char *curr
 		return true; /* Continue with other files */
 	}
 
-	/* Open file for writing */
-	fp = fopen(file_path, "w");
-	if (!fp) {
-		unitest_print("Error: Failed to create file %s: %s\n", file_path, strerror(errno));
-		return true; /* Continue with other files */
-	}
-
 	/* Read proc file content in chunks and write to disk */
 	bytes_read = e->fops->read((void *)e->data, buff, sizeof(buff), &offset);
 	if (bytes_read > 0) {
-		nvmeib_write_file(file_path, buff, bytes_read);
-		written = fwrite(buff, 1, bytes_read, fp);
-		if (written != bytes_read) {
-			unitest_print("Error: Failed to write to %s\n", file_path);
-			fclose(fp);
+		rv = nvmeib_write_file(file_path, buff, bytes_read);
+		if (rv < 0) {
+			unitest_print("Error: Failed to write to %s: %s\n", file_path, strerror(errno));
 			return true; /* Continue with other files */
 		}
 	}
 
-	fclose(fp);
-	unitest_print("Wrote %d bytes to: %s\n", written, file_path);
 	return true; /* Continue traversal */
 }
 
@@ -353,7 +341,8 @@ void clientSimulator_dump_procfs_to_disk(struct clientSimulator *client, const c
 	int n;
 	struct proc_dump_to_fs_ctx ctx;
 	if (!rootPath || strlen(rootPath) == 0 || rootPath[0] == '/') {
-		unitest_print("Error: Invalid procfs dump root path %s\n", rootPath);
+		unitest_print("Error: Invalid procfs dump root path %s\n",
+		              rootPath ? rootPath : "<null>");
 		return;
 	}
 	/* Initialize context */

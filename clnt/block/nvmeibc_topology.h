@@ -16,6 +16,8 @@
 #include "datapath_utils_generic/profiling/nvmeibc_block_dp_profiling_generic.h"
 #include "block/recovery/nvmeibc_block_sync_profiling_stages.h"
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 /************ Todo: Move the generic stuff below to somwhere else *************/
 #define UUID_LEN  (sizeof(((struct nvmeibt_client_topo_disk_segment*)0)->uuid))	// Todo: Remove it, use centralized define
@@ -478,11 +480,11 @@ void nvmeibc_topology_cont( struct nvmeibc_topologies *nt, struct nvmeibc_disk *
 /* Generate a string describing the current topology. Write it into the buffer
    and return the numb of written bytes. 'nt' not const beacause we take
    spinlock */
-int nvmeibc_topologies_status_tostring(   struct nvmeibc_topologies *nt, char* res_buf, int buf_len);
-int nvmeibc_topologies_status_tojson(     struct nvmeibc_topologies *nt, char* res_buf, int buf_len);
-int nvmeibc_topologies_stalocks_tostring( struct nvmeibc_topologies *nt, char* res_buf, int buf_len);
-int nvmeibc_topologies_profilers_tostring(struct nvmeibc_topologies *nt, char* res_buf, int buf_len);
-int nvmeibc_topologies_profilers_tocsv(   struct nvmeibc_topologies *nt, char *buf    , int len);
+void nvmeibc_topologies_status_tostring(   struct nvmeibc_topologies *nt, struct nvmeib_txt *txt);
+void nvmeibc_topologies_status_tojson(     struct nvmeibc_topologies *nt, struct jdr *jdr);
+void nvmeibc_topologies_stalocks_tostring( struct nvmeibc_topologies *nt, struct nvmeib_txt *txt);
+void nvmeibc_topologies_profilers_tostring(struct nvmeibc_topologies *nt, struct nvmeib_txt *txt);
+void nvmeibc_topologies_profilers_tocsv(   struct nvmeibc_topologies *nt, struct nvmeib_txt *txt);
 
 #if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)
 /* For debugging, while there is no IO. Checks there is no corruption. Return true if everything is OK, otherwise invokes bug (if do_assert==true) or return false */

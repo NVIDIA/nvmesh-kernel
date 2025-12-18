@@ -589,7 +589,7 @@ void __bio_track_end(struct bio *b, int rv) {
 }
 
 
-static void __dump_workqueue_emerg(struct workq_struct* wq, struct charvec buffer)
+static void __dump_workqueue_emerg(struct workqueue_struct* wq, struct charvec buffer)
 {
 	struct charvec txt_result = {0};
 	struct nvmeib_txt txt = nvmeib_txt_make(buffer);
@@ -604,6 +604,7 @@ void kernel_sim_dump_state(void) {
 	struct workq_struct	*wq;
 	char *buf = sim_kmalloc(KERN_DUMP_SIZE, 0);
 	struct charvec txt_buf = {.base=buf, .len=KERN_DUMP_SIZE};
+	BUG_ON(!txt_buf.base);
 
 	pr_emerg("------------Kernel Simulator Dump start -------------------\n");
 	ecpu_set_dump_queues(&kernel_sim.ecpu_set, buf, KERN_DUMP_SIZE);

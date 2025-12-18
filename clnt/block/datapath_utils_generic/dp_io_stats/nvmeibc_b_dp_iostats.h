@@ -5,6 +5,8 @@
 //#include "kr_incs.h"
 #include "common/nvmeib_types.h"
 #include "nvmeibc_block.h"		/* external API of the block */
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 /************************** nvmeibcb_dp_io_fail_mgr ***************************/
 /* When critical errors occur blockdevice must return IO error to userspace
@@ -31,7 +33,6 @@ void nvmeibcb_dp_io_fail_mgr_init(          struct nvmeibcb_dp_io_fail_mgr *);
 void nvmeibcb_dp_io_fail_mgr_disable(       struct nvmeibcb_dp_io_fail_mgr *);				// Dangerous, disable the mechanism of auto suspension. Called by L1 support/Testing environment
 int  nvmeibcb_dp_io_fail_mgr_set_limit(     struct nvmeibcb_dp_io_fail_mgr *, int n_ios);	// Set a new limit (and enable mgr if disabled). Returns the previous limit
 void nvmeibcb_dp_io_fail_mgr_reset_limit(   struct nvmeibcb_dp_io_fail_mgr *);				// Reset the counter to default limit (relevant only if mgr is enabled). Used by L1 support. Gives bdev a second chance to retry the failed IO's
-int  nvmeibcb_dp_io_fail_mgr_tostring(const struct nvmeibcb_dp_io_fail_mgr *, char *buf, int buf_len, char fmt);		// fmt: 'H'=Human, 'J'=json
 
 /* Upon IO failure (disk cmd with critical error code:
    {unhandled positive NVME error or negative internal error}, let manager act
@@ -91,7 +92,8 @@ struct dp_io_stats {
 
 void dp_io_stats_init(		struct dp_io_stats *t);
 void dp_io_stats_clear(		struct dp_io_stats *t);
-int  dp_io_stats_tostring(	const struct dp_io_stats *t,char *buf, int buf_len, char fmt);		// fmt: 'H'=Human, 'J'=json
+void dp_io_stats_tostring(	const struct dp_io_stats *t, struct nvmeib_txt *txt);
+void dp_io_stats_tojson(	const struct dp_io_stats *t, struct jdr *jdr);
 													//
 u64 dp_io_stats_get_counter(const struct dp_io_stats *t, enum dp_iostats_names name);
 void dp_io_stats_clear_counter(struct dp_io_stats *t, enum dp_iostats_names name);

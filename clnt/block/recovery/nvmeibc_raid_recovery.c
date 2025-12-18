@@ -5,6 +5,7 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "common/compat/kr_incs_compiler_types.h"
 #include "nvmeib_event.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
 
 struct __fake_recovery{ struct{ u64 task_id; const struct nvmeibc_subscription_ctx *tr; } args; enum NVMEIBT_RECOVERY_TYPE type; };
 #define DECL_FAKE_RECOVERY(id, type, tr) struct __fake_recovery __fake_rcvr = {{(id), (tr)}, (type)}, *recov = &__fake_rcvr;	// For prints/traces, when recovery context does not exist
@@ -618,41 +619,35 @@ static const char *recov_status_to_string(struct nvmeibc_recovery *recov)
 }
 
 //helper fuction to print recovery information to buffer
-int nvmeibc_recovery_info_to_str(struct nvmeibc_recovery *recov, bool with_stats, char *buf,
-	int len)
+void nvmeibc_recovery_info_to_str(struct nvmeibc_recovery *recov, bool with_stats, struct nvmeib_txt *txt)
 {
-	#define BUF_ADD(...) pos += scnprintf(buf+pos, len-pos, __VA_ARGS__)
 	u64 done = 0, total = 0;
 	ulong flags;
-	int pos=0;
 
 	spin_lock_irqsave(&recov->guard, flags);
 	if (recov->status != RCVR_READY) {
-		BUF_ADD("recov info: {status=%s, n_max_sw=%u}", recov_status_to_string(recov), recov->n_sw_to_use);
-		BUF_ADD("{task_id=0x%llx type=%d ver=%d}, ", recov->args.task_id,
+		nvmeib_txt_append(txt, "recov info: {status=%s, n_max_sw=%u}", recov_status_to_string(recov), recov->n_sw_to_use);
+		nvmeib_txt_append(txt, "{task_id=0x%llx type=%d ver=%d}, ", recov->args.task_id,
 				recov->type, recov->args.praid_version);
-		BUF_ADD("{Rlba=[%lld..[%lld..%lld)...%lld), apdx=%d, n_sw=%d, batch_size=%u, recov_ptr=%p}, ",
+		nvmeib_txt_append(txt, "{Rlba=[%lld..[%lld..%lld)...%lld), apdx=%d, n_sw=%d, batch_size=%u, recov_ptr=%p}, ",
 				RECOVERY_RLBA_BLKSTS_RANGE_4_u64(recov), recov->has_appendix_task, atomic_read(&recov->n_sw_running), recov->max_batch_size, recov);
 		__recov_get_global_progress(recov, &done, &total);
-		BUF_ADD("{Progress: %lld/%lld}, ", done, total);
+		nvmeib_txt_append(txt, "{Progress: %lld/%lld}, ", done, total);
 		if (with_stats){
-			BUF_ADD("{Job Stats: %lld/%lld}", recov->stats.n_success, recov->stats.n_total_tasks);
-			BUF_ADD("{Delayed jobs: %lld}", recov->stats.n_delayed_jobs);
+			nvmeib_txt_append(txt, "{Job Stats: %lld/%lld}", recov->stats.n_success, recov->stats.n_total_tasks);
+			nvmeib_txt_append(txt, "{Delayed jobs: %lld}", recov->stats.n_delayed_jobs);
 		}
-		BUF_ADD("\n");
+		nvmeib_txt_append(txt, "\n");
 	}
 	spin_unlock_irqrestore(&recov->guard, flags);
-	return pos;
 }
 
-int nvmeibc_recovery_stats_to_str(struct nvmeibc_recovery *recov, char *buf, int len)
+void nvmeibc_recovery_stats_to_str(struct nvmeibc_recovery *recov, struct nvmeib_txt *txt)
 {
 	ulong flags;
-	int pos=0;
 	spin_lock_irqsave(&recov->guard, flags);
-	BUF_ADD("{%s:%lld/%lld|n_sw=%d|n_dj=%lld}", nvmeibt_recov_type_to_3str(recov->type), recov->stats.n_success, recov->stats.n_total_tasks, recov->n_sw_to_use, recov->stats.n_delayed_jobs);
+	nvmeib_txt_append(txt, "{%s:%lld/%lld|n_sw=%d|n_dj=%lld}", nvmeibt_recov_type_to_3str(recov->type), recov->stats.n_success, recov->stats.n_total_tasks, recov->n_sw_to_use, recov->stats.n_delayed_jobs);
 	spin_unlock_irqrestore(&recov->guard, flags);
-	return pos;
 }
 
 void nvmeibc_recovery_stats_clear(struct nvmeibc_recovery *recov)

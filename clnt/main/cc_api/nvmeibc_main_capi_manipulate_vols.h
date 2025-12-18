@@ -59,7 +59,8 @@ void nvmeibc_volume_attach_t_init_from_conf( struct nvmeibc_volume_attach_t *vat
 void nvmeibc_volume_attach_t_init(           struct nvmeibc_volume_attach_t *vat);
 void nvmeibc_volume_attach_t_copy(           struct nvmeibc_volume_attach_t *vat, const struct nvmeibc_volume_attach_t *src);
 bool nvmeibc_volume_attach_t_are_equal(const struct nvmeibc_volume_attach_t *v1 , const struct nvmeibc_volume_attach_t *v2 );
-ssize_t nvmeibc_volume_attach_t_tostring(const struct nvmeibc_volume_attach_t *vat, char *buf, size_t len);
+struct nvmeib_txt;
+void nvmeibc_volume_attach_t_tostring(const struct nvmeibc_volume_attach_t *vat, struct nvmeib_txt *txt);
 char *nvmeibc_volume_attach_t_mode_to_string(enum_reservation_mode mode);
 char *nvmeibc_volume_attach_t_preempt_to_string(enum_preempt_status preempt);
 

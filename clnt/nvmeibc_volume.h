@@ -162,7 +162,11 @@ void nvmeibc_volume_dump_disk_ids(struct nvmeibc_volume *vol);
 
 void nvmeibc_volume_trace_stats(const struct nvmeibc_volume *volume);
 
-ssize_t nvmeibc_volume_tostring(const struct nvmeibc_volume *volume, char *buf, size_t len, char fmt);
+struct nvmeib_txt;
+void nvmeibc_volume_to_text(const struct nvmeibc_volume *volume, struct nvmeib_txt* txt);
+
+struct jdr;
+void nvmeibc_volume_to_json(const struct nvmeibc_volume *volume, struct jdr* jdr);
 
 /* Calls call_fn for all volume disks. Stops if call_fn returns < 0
  * NOTE: volume spinlock is held while calling call_fn.

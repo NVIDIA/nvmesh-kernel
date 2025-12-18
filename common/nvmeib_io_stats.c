@@ -4,6 +4,8 @@
 #include "nvmeib_utils.h"
 #include "nvmeibm_trace.h"
 #include "nvmeib_json.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 /* Simulator does not support lockless per-cpu so we acquire/release the spinlock rather than just disabling irqs
  *
@@ -210,7 +212,7 @@ struct nvmeib_io_stats *nvmeib_io_stats_create(const char *name, unsigned long v
 	ds->percpu_traced = NULL;
 	ds->n_percpu_ctrs = NUM_IO_COUNTERS_PER_CPU(verbs_bitmask, io_sizes_hist_n_bins);
 	if ((ds->percpu = __nvmeib_public_alloc_percpu_zeroed(
-		ds->n_percpu_ctrs * sizeof(struct nvmeib_io_counters), CACHELINE_SIZE)) == NULL) 
+		ds->n_percpu_ctrs * sizeof(struct nvmeib_io_counters), CACHELINE_SIZE)) == NULL)
 	{
 		_NE(error_1_nvmeib_io_stats_nvmeib_io_stats_create, "Failed to allocate per_cpu stats for @NAME", name);
 		goto free_ds;
@@ -237,7 +239,7 @@ struct nvmeib_io_stats *nvmeib_io_stats_create_traced(const char *name, unsigned
 	}
 	ds->n_percpu_traced_ctrs = NUM_IO_COUNTERS_PER_CPU_TRACED(verbs_bitmask);
 	if ((ds->percpu_traced = __nvmeib_public_alloc_percpu_zeroed(
-		ds->n_percpu_traced_ctrs * sizeof(struct nvmeib_io_counters), CACHELINE_SIZE)) == NULL) 
+		ds->n_percpu_traced_ctrs * sizeof(struct nvmeib_io_counters), CACHELINE_SIZE)) == NULL)
 	{
 		_NE(error_1_nvmeib_io_stats_nvmeib_io_stats_create_traced, "Failed to allocate per_cpu_traced stats for @NAME", name);
 		goto free_ds;
@@ -489,7 +491,7 @@ DECLARE_IO_VERBS_ON_EACH_CPU_FN(io_stats_cpu_clear_worst_case, arg)
 
 	for_each_set_bit(verb, &ds->verbs_bitmask, N_IO_STAT_VERBS) {
 		for (s = 0; s < IO_COUNTERS_NUM_BINS(io_sizes_hist_n_bins); s++) {
-			struct nvmeib_io_counters *c = IO_COUNTERS_PER_CPU_VERB_BIN(cpu_ctrs, ds->n_percpu_ctrs, 
+			struct nvmeib_io_counters *c = IO_COUNTERS_PER_CPU_VERB_BIN(cpu_ctrs, ds->n_percpu_ctrs,
 										    ds->verbs_bitmask, io_sizes_hist_n_bins, verb, s);
 			c->worst_latency = c->worst_io_exec = c->worst_e2e_exec = 0ULL;
 		}
@@ -509,7 +511,7 @@ DECLARE_IO_VERBS_ON_EACH_CPU_FN(io_stats_cpu_clear_totals, arg)
 
 	for_each_set_bit(verb, &ds->verbs_bitmask, N_IO_STAT_VERBS) {
 		for (s = 0; s < IO_COUNTERS_NUM_BINS(io_sizes_hist_n_bins); s++) {
-			struct nvmeib_io_counters *c = IO_COUNTERS_PER_CPU_VERB_BIN(cpu_ctrs, ds->n_percpu_ctrs, 
+			struct nvmeib_io_counters *c = IO_COUNTERS_PER_CPU_VERB_BIN(cpu_ctrs, ds->n_percpu_ctrs,
 										    ds->verbs_bitmask, io_sizes_hist_n_bins, verb, s);
 			c->total_ops = c->total_executions = c->total_size = c->total_latency = c->total_latency_sqr = c->total_io_exec = c->total_e2e_exec = 0ULL;
 		}
@@ -544,7 +546,7 @@ ssize_t nvmeib_io_stats_to_json(struct nvmeib_io_stats *ds,
 	struct nvmeib_io_counters *c, *ci;
 	unsigned n_ctrs = NUM_IO_COUNTERS_PER_BIN(ds->verbs_bitmask);
 	size_t ctrs_sz = n_ctrs * sizeof(*c);
-	
+
 	if (!(c = kzalloc(ctrs_sz, GFP_KERNEL))) {
 		_NW(warn_nvmeib_io_stats_to_json_oom, "OOM");
 		return -ENOMEM;
@@ -580,6 +582,85 @@ ssize_t nvmeib_io_stats_to_json(struct nvmeib_io_stats *ds,
 	return count;
 }
 EXPORT_SYMBOL(nvmeib_io_stats_to_json);
+
+static void nvmeib_jdr_io_stats(struct jdr *jdr, const char *obj_name,
+				unsigned long verbs_bitmask,
+				const struct nvmeib_io_counters *c)
+{
+	const struct nvmeib_io_counters *ci;
+	unsigned verb;
+
+	jdr_object_scope(jdr, obj_name);
+
+	/* ops object */
+	{
+		jdr_object_scope(jdr, "ops");
+		jdr_write_var(jdr, units, (const char *)"operations");
+		ci = c;
+		for_each_set_bit(verb, &verbs_bitmask, N_IO_STAT_VERBS) {
+			jdr->ops.u64(jdr, verb_to_string(verb, true), ci->total_ops);
+			ci++;
+		}
+	}
+
+	/* size object */
+	{
+		jdr_object_scope(jdr, "size");
+		jdr_write_var(jdr, units, (const char *)"bytes");
+		ci = c;
+		for_each_set_bit(verb, &verbs_bitmask, N_IO_STAT_VERBS) {
+			jdr->ops.u64(jdr, verb_to_string(verb, true), ci->total_size);
+			ci++;
+		}
+	}
+
+	/* latency object */
+	{
+		jdr_object_scope(jdr, "latency");
+		jdr_write_var(jdr, units, (const char *)"100ns");
+		ci = c;
+		for_each_set_bit(verb, &verbs_bitmask, N_IO_STAT_VERBS) {
+			jdr->ops.ascii_float(jdr, verb_to_string(verb, true), ci->total_latency, 10, 1);
+			ci++;
+		}
+	}
+}
+
+void nvmeib_io_stats_tojson_jdr(struct nvmeib_io_stats *ds, const ulong uptime_jiff, struct jdr *jdr)
+{
+	char tmp_str[32];
+	unsigned verb, bin, lim = IO_COUNTERS_NUM_BINS(io_sizes_hist_n_bins);
+	struct nvmeib_io_counters *c, *ci;
+	unsigned n_ctrs = NUM_IO_COUNTERS_PER_BIN(ds->verbs_bitmask);
+	size_t ctrs_sz = n_ctrs * sizeof(*c);
+
+	if (!(c = kzalloc(ctrs_sz, GFP_KERNEL))) {
+		_NW(warn_nvmeib_io_stats_tojson_jdr_oom, "OOM");
+		return;
+	}
+
+	sprintf(tmp_str, "%ld.%03ld", uptime_jiff/HZ, 1000*(uptime_jiff%HZ)/HZ);
+	jdr_write_var(jdr, uptime_secs, (const char *)tmp_str);
+	jdr_write_var(jdr, block_size_bytes, ds->block_size);
+
+	{
+		jdr_object_scope(jdr, "stats");
+		for (bin = 0; bin < lim; bin++) {
+			memset(c, 0, ctrs_sz);
+			ci = c;
+			for_each_set_bit(verb, &ds->verbs_bitmask, N_IO_STAT_VERBS) {
+				nvmeib_io_stats_readc_bin(ds, verb, bin, ci);
+				ci++;
+			}
+			nvmeib_jdr_io_stats(jdr, io_sizes_name(tmp_str, sizeof(tmp_str), bin, ds->block_size),
+					    ds->verbs_bitmask, c);
+		}
+	}
+
+	kfree(c);
+}
+EXPORT_SYMBOL(nvmeib_io_stats_tojson_jdr);
+
 static ssize_t nvmeib_json_io_stats(char *buf, size_t len,
 							 const char *obj_name, const struct nvmeib_json_ops *jops,
 							 size_t indent, const int is_last, unsigned long verbs_bitmask,
@@ -696,44 +777,51 @@ static inline u64 _diff_sec(u64 exec_time_msec, u64 io_prob_msec)
 	return (diff < 0LL) ? 0 : (diff/1000);
 }
 
-/* dumps IO statistics into a buffer */
-ssize_t nvmeib_iostats_sum_to_string(struct nvmeib_io_stats *stats, const ulong up_time, const u64 io_prob,
-				     char *buf, size_t len)
+static void txt_append_dot0(struct nvmeib_txt *txt, u64 value)
 {
-	#define BUF_ADD(...) count += scnprintf(buf+count, len-count, __VA_ARGS__)
-	#define BUF_ADD_DOT0(v)	BUF_ADD("%20llu"   , v);
-	#define BUF_ADD_DOT1(v)	BUF_ADD("%18llu.%d", (v)/10, (int)((v)%10))
-	#define BUF_ADD_DOT2(v)	BUF_ADD("%20d"   , v);
+	nvmeib_txt_append(txt, "%20llu", value);
+}
+
+static void txt_append_dot1(struct nvmeib_txt *txt, u64 value)
+{
+	nvmeib_txt_append(txt, "%18llu.%d", value/10, (int)(value%10));
+}
+
+static void txt_append_dot2(struct nvmeib_txt *txt, int value)
+{
+	nvmeib_txt_append(txt, "%20d", value);
+}
+
+/* dumps IO statistics into a buffer */
+void nvmeib_iostats_sum_to_string(struct nvmeib_io_stats *stats, const ulong up_time, const u64 io_prob,
+				     struct nvmeib_txt *txt)
+{
 	struct nvmeib_io_counters c[N_IO_STAT_VERBS];
-	ssize_t count = 0;
 	int i;
 	/* Print in units of micro-seconds. Latency/factor is in units of 1/10^7 of
 	   a second and we also do /10 when printing. so total of 1/10^6 sec */
-	BUF_ADD("up_time=%ld.%01ld[sec]\n", up_time / HZ, (10 * (up_time % HZ))/HZ);
+	nvmeib_txt_append(txt, "up_time=%ld.%01ld[sec]\n", up_time / HZ, (10 * (up_time % HZ))/HZ);
 	if (unlikely(!stats)) {			/* No IO API supported (Carrier Volume)*/
-		BUF_ADD("Stats not supported for this object!\n");
+		nvmeib_txt_append(txt, "Stats not supported for this object!\n");
 		goto _out;
 	}
 
 	memset(c, 0, sizeof(c));			/* Fill IO stats lists */
 	for (i = 0; i < N_IO_STAT_VERBS; i++)
 		nvmeib_io_stats_readc(stats, i, 0 /* All sizes */, &c[i]);
-	BUF_ADD("%-16s|%20s%20s%20s\n", "*", verb_to_string(IO_STAT_VERB_READ, false), verb_to_string(IO_STAT_VERB_WRITE, false), verb_to_string(IO_STAT_VERB_DISCARD, false));
-	BUF_ADD("%-16s|","num_ops");         for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT0(c[i].total_ops);           BUF_ADD("\n");
-	BUF_ADD("%-16s|","size");            for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT0(c[i].total_size);          BUF_ADD(" [bytes]\n");
-	BUF_ADD("%-16s|","inflight");        for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT2(c[i].inflight_ops);       BUF_ADD("\n");
-	BUF_ADD("%-16s|","total_latency");   for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT1(c[i].total_latency);       BUF_ADD(" [usec]\n");
-	BUF_ADD("%-16s|","total_execution"); for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT1(c[i].total_io_exec);       BUF_ADD(" [usec]\n");
-	BUF_ADD("%-16s|","total_e2e");       for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT1(c[i].total_e2e_exec);      BUF_ADD(" [usec]\n");
-	BUF_ADD("%-16s|","total_executions");for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT0(c[i].total_executions);    BUF_ADD("\n");
-	BUF_ADD("%-16s|","latency^2");       for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT1(c[i].total_latency_sqr);   BUF_ADD("\n");
-	BUF_ADD("%-16s|","worst_latency");   for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT1(c[i].worst_io_exec);       BUF_ADD(" [usec]\n");
-	BUF_ADD("%-16s|","worst_e2e");       for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT0(c[i].worst_e2e_exec/USEC_PER_SEC); BUF_ADD(" [msec]\n");
-	BUF_ADD("%-16s|","worst_e2e_enbl");  for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) BUF_ADD_DOT0(_diff_sec(c[i].worst_e2e_exec/USEC_PER_SEC, io_prob)); BUF_ADD(" [sec]\n");
+	nvmeib_txt_append(txt, "%-16s|%20s%20s%20s\n", "*", verb_to_string(IO_STAT_VERB_READ, false), verb_to_string(IO_STAT_VERB_WRITE, false), verb_to_string(IO_STAT_VERB_DISCARD, false));
+	nvmeib_txt_append(txt, "%-16s|","num_ops");         for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot0(txt, c[i].total_ops);           nvmeib_txt_append(txt, "\n");
+	nvmeib_txt_append(txt, "%-16s|","size");            for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot0(txt, c[i].total_size);          nvmeib_txt_append(txt, " [bytes]\n");
+	nvmeib_txt_append(txt, "%-16s|","inflight");        for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot2(txt, c[i].inflight_ops);       nvmeib_txt_append(txt, "\n");
+	nvmeib_txt_append(txt, "%-16s|","total_latency");   for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot1(txt, c[i].total_latency);       nvmeib_txt_append(txt, " [usec]\n");
+	nvmeib_txt_append(txt, "%-16s|","total_execution"); for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot1(txt, c[i].total_io_exec);       nvmeib_txt_append(txt, " [usec]\n");
+	nvmeib_txt_append(txt, "%-16s|","total_e2e");       for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot1(txt, c[i].total_e2e_exec);      nvmeib_txt_append(txt, " [usec]\n");
+	nvmeib_txt_append(txt, "%-16s|","total_executions");for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot0(txt, c[i].total_executions);    nvmeib_txt_append(txt, "\n");
+	nvmeib_txt_append(txt, "%-16s|","latency^2");       for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot1(txt, c[i].total_latency_sqr);   nvmeib_txt_append(txt, "\n");
+	nvmeib_txt_append(txt, "%-16s|","worst_latency");   for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot1(txt, c[i].worst_io_exec);       nvmeib_txt_append(txt, " [usec]\n");
+	nvmeib_txt_append(txt, "%-16s|","worst_e2e");       for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot0(txt, c[i].worst_e2e_exec/USEC_PER_SEC); nvmeib_txt_append(txt, " [msec]\n");
+	nvmeib_txt_append(txt, "%-16s|","worst_e2e_enbl");  for (i=IO_STAT_VERB_READ; i<=IO_STAT_VERB_DISCARD; i++) txt_append_dot0(txt, _diff_sec(c[i].worst_e2e_exec/USEC_PER_SEC, io_prob)); nvmeib_txt_append(txt, " [sec]\n");
 _out:
-	return count;
-	#undef BUF_ADD
-	#undef BUF_ADD_DOT0
-	#undef BUF_ADD_DOT1
+	(void)0; /* Label must be followed by a statement */
 }
 EXPORT_SYMBOL(nvmeib_iostats_sum_to_string);

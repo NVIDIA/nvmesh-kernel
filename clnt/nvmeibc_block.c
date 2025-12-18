@@ -12,6 +12,9 @@
 #include "common/proc_epilog.h"
 #include "common/nvmeib_cpu_masks.h"
 
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+
 #ifdef KR_UNDEF_H
 #	undef KR_UNDEF_H
 #endif
@@ -98,7 +101,7 @@ void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp)
 	DEBUG_TRANSFERS_detect_double_callback(comp);
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
 	nvmeibc_pd_cb_called_cmd(disk, disk_cmd);
-	
+
 	o->nd->dp.cmd_comp_cb(comp);
 }
 
@@ -258,27 +261,26 @@ const char *nvmeibc_block_status_to_string(enum nvmeibc_block_status s)
 	}
 }
 
-#define BUF_ADD(...) pos += scnprintf(buf+pos, len-pos, __VA_ARGS__)
 #if defined(BLKDEV_PROFILING)
 static ssize_t __export_profilers(char format, void *_dev, char *buf, size_t len)
 {
 	struct nvmeibc_block_device *dev = _dev;
-	ssize_t pos = 0;
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = len});
 	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
-		BUF_ADD("Detaching...\n");
+		nvmeib_txt_append(&txt, "Detaching...\n");
 	} else {
-		if ('J' == format){
-			pos += nvmeibc_topologies_profilers_tostring(&dev->topologies, buf, len);
+		if ('S' == format){
+			nvmeibc_topologies_profilers_tostring(&dev->topologies, &txt);
 		} else {
-			pos += nvmeibc_topologies_profilers_tocsv(&dev->topologies, buf, len);
+			nvmeibc_topologies_profilers_tocsv(&dev->topologies, &txt);
 		}
 	}
-	return pos;
+	return nvmeib_txt_finalize(&txt).len;
 }
 
 static ssize_t __profilers_tostring(void *_dev, char *buf, size_t len)
 {
-	return __export_profilers('J', _dev, buf, len);
+	return __export_profilers('S', _dev, buf, len);
 }
 
 static ssize_t __profilers_tocsv(void *_dev, char *buf, size_t len)
@@ -312,74 +314,115 @@ bool nvmeibc_block_dev_is_shadow(struct nvmeibc_block_device *dev)
 	return nvmeibc_block_is_shadow(&dev->volume->hdr);
 }
 
-static ssize_t __data_path_flags_tostring(const struct nvmeibc_datapath *dp, char *buf, size_t len)
+static void __data_path_flags_tostring(const struct nvmeibc_datapath *dp, struct nvmeib_txt *txt)
 {
-	ssize_t pos = 0;
-	BUF_ADD("\"dp_flags\" : {\"edic\": %d, \"local_read\": %d, \"mutable_r_bio\": %d", dp->enable_edic_check, dp->enable_local_read_optimization, dp->read_has_mutable_bio_buffers);
-	BUF_ADD(", \"alw\": %u, \"alr\": %u", (dp->alignment_sectors.write >> KERNEL_SECTOR_TO_SECTOR_SHIFT), (dp->alignment_sectors.read >> KERNEL_SECTOR_TO_SECTOR_SHIFT));
-	BUF_ADD(", \"elev\": %u, \"snake\": %u, \"jent\": %u}", dp->elevator.max_elev_write, dp->p.snake_size, dp->p.binje);
-	return pos;
+	nvmeib_txt_append(txt, "DP Flags: edic=%d, local_read=%d, mutable_r_bio=%d, alw=%ul, alr=%ul, elev=%u, snake=%u, jent=%u",
+		dp->enable_edic_check, dp->enable_local_read_optimization, dp->read_has_mutable_bio_buffers,
+		(dp->alignment_sectors.write >> KERNEL_SECTOR_TO_SECTOR_SHIFT),
+		(dp->alignment_sectors.read >> KERNEL_SECTOR_TO_SECTOR_SHIFT),
+		dp->elevator.max_elev_write, dp->p.snake_size, dp->p.binje);
 }
 
-static ssize_t __nvmeibc_sync_stats_tostring(const struct nvmeibc_sync_stats *ss, spinlock_t *lock, char *buf, size_t len, char fmt)
+static void __data_path_flags_tojson(const struct nvmeibc_datapath *dp, struct jdr *jdr)
 {
-	ssize_t pos = 0;
+	jdr_object_scope(jdr, "dp_flags");
+	jdr_write_var(jdr, edic, dp->enable_edic_check);
+	jdr_write_var(jdr, local_read, dp->enable_local_read_optimization);
+	jdr_write_var(jdr, mutable_r_bio, dp->read_has_mutable_bio_buffers);
+	jdr_write_var(jdr, alw, (dp->alignment_sectors.write >> KERNEL_SECTOR_TO_SECTOR_SHIFT));
+	jdr_write_var(jdr, alr, (dp->alignment_sectors.read >> KERNEL_SECTOR_TO_SECTOR_SHIFT));
+	jdr_write_var(jdr, elev, dp->elevator.max_elev_write);
+	jdr_write_var(jdr, snake, dp->p.snake_size);
+	jdr_write_var(jdr, jent, dp->p.binje);
+}
+
+static void __nvmeibc_sync_stats_tostring(const struct nvmeibc_sync_stats *ss, spinlock_t *lock, struct nvmeib_txt *txt)
+{
 	unsigned long flags;
 	spin_lock_irqsave(lock, flags);
-	if (fmt == 'H') {
-		BUF_ADD("Sync Stats: r=%d/p=%d/u=%d, OK:f=%llu/p=%llu Done:t=%llu/m=%llu/ds=%llu, L=%u[msec], rr=%u",
-				ss->num_running, ss->num_pending, ss->num_el_in_resources_reuse_list,
-				ss->num_full_blockset_ok, ss->num_part_blockset_ok,
-				ss->num_total, ss->num_total_maintainance, ss->num_dirty_bit_suspect,
-				ss->longest_sync_time, ss->n_resources_reused);
-	} else {
-		BUF_ADD("\"sync_stas\": {\"n_running\":%d, \"n_pending\":%d, \"n_reuse_elems\":%d,", ss->num_running, ss->num_pending, ss->num_el_in_resources_reuse_list);
-		BUF_ADD("\"finished_ok\": {\"full_blkst\":%llu, \"partial_blkst\":%llu}, ", ss->num_full_blockset_ok, ss->num_part_blockset_ok);
-		BUF_ADD("\"finished\": {\"n_all\":%llu, \"n_maintanance\":%llu, \"n_db_suspect\":%llu, \"n_commit_stale\":%llu, \"n_commit_binfo\":%llu}, ", ss->num_total, ss->num_total_maintainance, ss->num_dirty_bit_suspect, ss->num_commit_stale, ss->num_commit_binfo);
-		BUF_ADD("\"longest_sec\":%u, \"num_res_reused\":%u}", ss->longest_sync_time, ss->n_resources_reused);
+	nvmeib_txt_append(txt, "Sync Stats: r=%d/p=%d/u=%d, OK:f=%llu/p=%llu Done:t=%llu/m=%llu/ds=%llu, L=%u[msec], rr=%u",
+			ss->num_running, ss->num_pending, ss->num_el_in_resources_reuse_list,
+			ss->num_full_blockset_ok, ss->num_part_blockset_ok,
+			ss->num_total, ss->num_total_maintainance, ss->num_dirty_bit_suspect,
+			ss->longest_sync_time, ss->n_resources_reused);
+	spin_unlock_irqrestore(lock, flags);
+	#ifdef AUTONOMOUS_SYNCS_STATS
+		nvmeib_txt_append(txt, ", auto:{OK=%llu/Err=%llu}", (u64)atomic64_read(&ss->num_autonomous_ok), (u64)atomic64_read(&ss->num_autonomous_err));
+	#endif
+}
+
+static void __nvmeibc_sync_stats_tojson(const struct nvmeibc_sync_stats *ss, spinlock_t *lock, struct jdr *jdr)
+{
+	unsigned long flags;
+	spin_lock_irqsave(lock, flags);
+	{
+		jdr_object_scope(jdr, "sync_stas");
+		jdr_write_var(jdr, n_running, ss->num_running);
+		jdr_write_var(jdr, n_pending, ss->num_pending);
+		jdr_write_var(jdr, n_reuse_elems, ss->num_el_in_resources_reuse_list);
+		{
+			jdr_object_scope(jdr, "finished_ok");
+			jdr_write_var(jdr, full_blkst, ss->num_full_blockset_ok);
+			jdr_write_var(jdr, partial_blkst, ss->num_part_blockset_ok);
+		}
+		{
+			jdr_object_scope(jdr, "finished");
+			jdr_write_var(jdr, n_all, ss->num_total);
+			jdr_write_var(jdr, n_maintanance, ss->num_total_maintainance);
+			jdr_write_var(jdr, n_db_suspect, ss->num_dirty_bit_suspect);
+			jdr_write_var(jdr, n_commit_stale, ss->num_commit_stale);
+			jdr_write_var(jdr, n_commit_binfo, ss->num_commit_binfo);
+		}
+		jdr_write_var(jdr, longest_sec, ss->longest_sync_time);
+		jdr_write_var(jdr, num_res_reused, ss->n_resources_reused);
 	}
 	spin_unlock_irqrestore(lock, flags);
 	#ifdef AUTONOMOUS_SYNCS_STATS
-		if (fmt == 'H')
-			BUF_ADD(", auto:{OK=%llu/Err=%llu}", (u64)atomic64_read(&ss->num_autonomous_ok), (u64)atomic64_read(&ss->num_autonomous_err));
-		else
-			BUF_ADD(", \"autonomous_syncs\": {\"OK\":%llu, \"Fail\":%llu}", (u64)atomic64_read(&ss->num_autonomous_ok), (u64)atomic64_read(&ss->num_autonomous_err));
-	#endif
-	return pos;
-}
-
-static ssize_t __topo_stats_tostring(const struct topo_stats_t *ts, char *buf, size_t len, char fmt)
-{
-	ssize_t pos = 0;
-	if (fmt == 'H') {
-		BUF_ADD(",\tTopoSt:{n_Mdeg=%llu, n_1deg=%llu}\n", ts->n_multiple_deg, ts->n_single_deg);
-	} else {
-		BUF_ADD("\"topo_stats\": {\"n_multi_degraded\":%llu, \"n_single_degraded\":%llu}", ts->n_multiple_deg, ts->n_single_deg);
+	{
+		jdr_object_scope(jdr, "autonomous_syncs");
+		jdr_write_var(jdr, OK, (u64)atomic64_read(&ss->num_autonomous_ok));
+		jdr_write_var(jdr, Fail, (u64)atomic64_read(&ss->num_autonomous_err));
 	}
-	return pos;
+	#endif
 }
 
-static ssize_t __dev_unsorted_tostring(const struct nvmeibc_block_device *dev, char *buf, size_t len, char fmt)
+static void __topo_stats_tostring(const struct topo_stats_t *ts, struct nvmeib_txt *txt)
+{
+	nvmeib_txt_append(txt, ",\tTopoSt:{n_Mdeg=%llu, n_1deg=%llu}\n", ts->n_multiple_deg, ts->n_single_deg);
+}
+
+static void __topo_stats_tojson(const struct topo_stats_t *ts, struct jdr *jdr)
+{
+	jdr_object_scope(jdr, "topo_stats");
+	jdr_write_var(jdr, n_multi_degraded, ts->n_multiple_deg);
+	jdr_write_var(jdr, n_single_degraded, ts->n_single_deg);
+}
+
+static void __dev_unsorted_tostring(const struct nvmeibc_block_device *dev, struct nvmeib_txt *txt)
 {
 	const bool deprecated = dev->os->atom.conf.enforce_readonly;	// Safe access to os! os has proc files through which this function is called so, 'os' was not destroyed yet and block device exists.
-	ssize_t pos = 0;
-	if (fmt == 'H') {
-		BUF_ADD("Enforce Read Only: %c, Retry Timeout: %u[sec], ext_car_io=%c\n", (deprecated ? 'Y' : 'N'), (u32)(dev->max_retry_jiffies/HZ), (dev->allow_external_io_on_carrier ? 'Y' : 'N'));
-	} else {
-		BUF_ADD("\"enforce_read_only\": %u, \"retry_timeout_sec\": %u, \"allow_extern_carrier_io\": %u", deprecated, (u32)(dev->max_retry_jiffies/HZ), dev->allow_external_io_on_carrier);
-	}
-	return pos;
+	nvmeib_txt_append(txt, "Enforce Read Only: %c, Retry Timeout: %u[sec], ext_car_io=%c\n", (deprecated ? 'Y' : 'N'), (u32)(dev->max_retry_jiffies/HZ), (dev->allow_external_io_on_carrier ? 'Y' : 'N'));
 }
 
-static ssize_t __nvmeibc_dev_flags_to_string(const struct nvmeibc_block_device *dev, char *buf, size_t len, char fmt)
+static void __dev_unsorted_tojson(const struct nvmeibc_block_device *dev, struct jdr *jdr)
 {
-	ssize_t pos = 0;
-	if (fmt == 'H') {
-		BUF_ADD("Flags: itm={%d/r=%d/%%=%d}", dev->ignore_all_toma_msgs, dev->ignore_all_recov_requests, dev->ignore_all_recov_toma_speed_req);
-	} else {
-		BUF_ADD("\"flags\": {\"ign_toma_msg\":%d, \"ign_toma_recov\":%d, \"ign_toma_rec_speed\":%d}", dev->ignore_all_toma_msgs, dev->ignore_all_recov_requests, dev->ignore_all_recov_toma_speed_req);
-	}
-	return pos;
+	const bool deprecated = dev->os->atom.conf.enforce_readonly;
+	jdr_write_var(jdr, enforce_read_only, deprecated);
+	jdr_write_var(jdr, retry_timeout_sec, (u32)(dev->max_retry_jiffies/HZ));
+	jdr_write_var(jdr, allow_extern_carrier_io, dev->allow_external_io_on_carrier);
+}
+
+static void __nvmeibc_dev_flags_tostring(const struct nvmeibc_block_device *dev, struct nvmeib_txt *txt)
+{
+	nvmeib_txt_append(txt, "Flags: itm={%d/r=%d/%%=%d}", dev->ignore_all_toma_msgs, dev->ignore_all_recov_requests, dev->ignore_all_recov_toma_speed_req);
+}
+
+static void __nvmeibc_dev_flags_tojson(const struct nvmeibc_block_device *dev, struct jdr *jdr)
+{
+	jdr_object_scope(jdr, "flags");
+	jdr_write_var(jdr, ign_toma_msg, dev->ignore_all_toma_msgs);
+	jdr_write_var(jdr, ign_toma_recov, dev->ignore_all_recov_requests);
+	jdr_write_var(jdr, ign_toma_rec_speed, dev->ignore_all_recov_toma_speed_req);
 }
 
 static inline int get_vol_size_best_units_log1024(ulong val) {
@@ -393,92 +436,105 @@ static inline int get_vol_size_best_units_log1024(ulong val) {
 static ssize_t __block_tostring(void *_dev, char *buf, size_t len)
 {
 	struct nvmeibc_block_device *dev = _dev;
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = len});
 	const ulong size_bytes = (dev->size << NVMEIBC_SECTOR_SHIFT);
 	const int unit_indx = get_vol_size_best_units_log1024(size_bytes);
 	const char unit_name[] = " KMGTPE";	// bytes, kilobytes, mega, giga, tera, peta, exa
 	const int size_in_units = (int)(size_bytes >> (10*unit_indx));
-	ssize_t pos = 0;
 	extern bool qa_ec_stress_debug;
-	BUF_ADD("Name=%s, UUID=%s, size=%ld[blocks], %u[%cb], short_id=%d, ", dev->name, dev->uuid, dev->size, size_in_units, unit_name[unit_indx], nvmeibc_volume_short_id(dev));
-	BUF_ADD("Sector Size=%d[bytes], ptr=0x%llx, type=%s (0x%x)\n", get_logical_block_size_from_os(dev->os), (u64)dev, __dev_type_2_string(dev), dev->type);
-	pos += nvmeibc_volume_attach_t_tostring(nvmeibc_block_get_res_vat(dev), buf+pos, len-pos);
-	BUF_ADD(", \t"); pos += nvmeibc_volume_tostring(   dev->volume, buf+pos, len-pos, 'H');
-	BUF_ADD(", \t"); pos += __data_path_flags_tostring(&dev->dp   , buf+pos, len-pos);
-	BUF_ADD(", \t"); pos += __nvmeibc_dev_flags_to_string(dev, buf+pos, len-pos, 'H');
-	BUF_ADD("\n");
+	nvmeib_txt_append(&txt, "Name=%s, UUID=%s, size=%ld[blocks], %u[%cb], short_id=%d, ", dev->name, dev->uuid, dev->size, size_in_units, unit_name[unit_indx], nvmeibc_volume_short_id(dev));
+	nvmeib_txt_append(&txt, "Sector Size=%d[bytes], ptr=0x%llx, type=%s (0x%x)\n", get_logical_block_size_from_os(dev->os), (u64)dev, __dev_type_2_string(dev), dev->type);
+	nvmeibc_volume_attach_t_tostring(nvmeibc_block_get_res_vat(dev), &txt);
+	nvmeib_txt_append(&txt, ", \t");
+	nvmeibc_volume_to_text(   dev->volume, &txt);
+	nvmeib_txt_append(&txt, ", \t");
+	__data_path_flags_tostring(&dev->dp, &txt);
+	nvmeib_txt_append(&txt, ", \t");
+	__nvmeibc_dev_flags_tostring(dev, &txt);
+	nvmeib_txt_append(&txt, "\n");
 
 	if (dev->dp.enable_di_debug_mode) {
 		extern int dp_dbgdi_get_sizeof_injected_data(void);
-		BUF_ADD("!!! WARNING !!!\tData is NOT written! debug di mode is active, inject=%d[b]!\n", dp_dbgdi_get_sizeof_injected_data());
+		nvmeib_txt_append(&txt, "!!! WARNING !!!\tData is NOT written! debug di mode is active, inject=%d[b]!\n", dp_dbgdi_get_sizeof_injected_data());
 	}
 	if (qa_ec_stress_debug) {
-		BUF_ADD("!!! WARNING !!!\tStress mode activated, IO is slowed!\n");
+		nvmeib_txt_append(&txt, "!!! WARNING !!!\tStress mode activated, IO is slowed!\n");
 	}
 	if (dev->autoext.is_api_enabled) { // Daniel, Todo: Move to separate function
-		BUF_ADD("allocated_size=%lu[blocks, ", dev->autoext.allocated_size);
-		BUF_ADD("max_write_lba=%lu[blocks]\n", dev->autoext.max_write_lba);
+		nvmeib_txt_append(&txt, "allocated_size=%lu[blocks, ", dev->autoext.allocated_size);
+		nvmeib_txt_append(&txt, "max_write_lba=%lu[blocks]\n", dev->autoext.max_write_lba);
 	}
 	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
-		BUF_ADD("Detaching...\n");
+		nvmeib_txt_append(&txt, "Detaching...\n");
 		goto _out;
 	}
-	pos += nvmeibc_topologies_status_tostring(&dev->topologies,buf+pos,len-pos);
-	pos += __dev_unsorted_tostring(dev,buf+pos,len-pos, 'H');
-	pos += __nvmeibc_sync_stats_tostring(&dev->dp.sync_rsrcs.stats, &dev->dp.resub.lock, buf+pos, len-pos, 'H');
-	pos += __topo_stats_tostring(&dev->topo_stats, buf+pos, len-pos, 'H');
-	pos += nvmeibc_blk_op_elevator_string(&dev->merge_op, buf+pos, len-pos, 'H');
+	nvmeibc_topologies_status_tostring(&dev->topologies, &txt);
+	__dev_unsorted_tostring(dev, &txt);
+	__nvmeibc_sync_stats_tostring(&dev->dp.sync_rsrcs.stats, &dev->dp.resub.lock, &txt);
+	__topo_stats_tostring(&dev->topo_stats, &txt);
+	nvmeibc_blk_op_elevator_tostring(&dev->merge_op, &txt);
 
 _out:
-	pos += dp_io_stats_tostring(  &dev->dp.io_stats,        buf+pos, len-pos, 'H');
-	pos += nvmeibc_io_perm_alert_tostring(&dev->dp.io_perm_alert, buf+pos, len-pos, 'H');
-	pos += slow_io_stats_t_tostring(    &dev->dp.io_slow,         buf+pos, len-pos, 'H');
-	pos += nvmeib_proc_add_txt_proc_epilog(BLK_STATUS_PROC_FRMT_VER,
-						buf + pos, len - pos);
-	return pos;
+	dp_io_stats_tostring(&dev->dp.io_stats, &txt);
+	nvmeibc_io_perm_alert_tostring(&dev->dp.io_perm_alert, &txt);
+	slow_io_stats_t_tostring(&dev->dp.io_slow, &txt);
+	nvmeib_proc_add_txt_proc_epilog_txt(BLK_STATUS_PROC_FRMT_VER, &txt);
+	return nvmeib_txt_finalize(&txt).len;
+}
+
+static void __block_tojson_header(const struct nvmeibc_block_device *dev, struct jdr *jdr)
+{
+	jdr->ops.ascii(jdr, "name", dev->name);
+	jdr->ops.ascii(jdr, "uuid", dev->uuid);
+	jdr->ops.ascii(jdr, "type", __dev_type_2_string(dev));
+	jdr->ops.u32(jdr, "type_num", dev->type);
+	jdr_write_var(jdr, size_blks, dev->size);
+	jdr_write_var(jdr, block_b, get_logical_block_size_from_os(dev->os));
+	jdr_write_var(jdr, short_id, nvmeibc_volume_short_id(dev));
+	jdr->ops.ptr(jdr, "ptr", (void*)dev);
+	jdr_write_var(jdr, debug_di, (int)dev->dp.enable_di_debug_mode);
 }
 
 static ssize_t __block_tojson(void *_dev, char *buf, size_t len)
 {
-	#define BUF_ADD(...) pos += scnprintf(buf+pos, len-pos, __VA_ARGS__)
+	struct jdr jdr = jdr_make((struct charvec){.base=buf,.len=len});
 	struct nvmeibc_block_device *dev = _dev;
-	ssize_t pos = 0;
-	BUF_ADD("{\n\"name\": \"%s\",\n\"uuid\": \"%s\",\n\"type\": \"%s\", \"type_num\": \"0x%x\",\n\"size[blks]\": %ld,\n\"block[b]\": %d,\"short_id\": %d,\n\"ptr\": \"%p\",\n \"debug_di\": %d,\n",
-			dev->name, dev->uuid, __dev_type_2_string(dev), dev->type, dev->size, get_logical_block_size_from_os(dev->os), nvmeibc_volume_short_id(dev), dev, (int)dev->dp.enable_di_debug_mode);
-	pos += nvmeibc_volume_tostring(   dev->volume, buf+pos, len-pos, 'J'); BUF_ADD(",\n");
-	pos += __data_path_flags_tostring(&dev->dp   , buf+pos, len-pos     ); BUF_ADD(",\n");
-	pos += __nvmeibc_dev_flags_to_string(dev,      buf+pos, len-pos, 'J'); BUF_ADD(",\n");
+
+	__block_tojson_header(dev, &jdr);
+	nvmeibc_volume_to_json(   dev->volume, &jdr);
+	__data_path_flags_tojson(&dev->dp, &jdr);
+	__nvmeibc_dev_flags_tojson(dev, &jdr);
 
 	if (nvmeibc_block_status_is_detaching(dev->status))
 		goto _out;
 
-	pos += nvmeibc_topologies_status_tojson(&dev->topologies,buf+pos,len-pos); BUF_ADD(",\n");
-	pos += __dev_unsorted_tostring(dev,buf+pos,len-pos, 'J'); BUF_ADD(",\n");
-	pos += __nvmeibc_sync_stats_tostring(&dev->dp.sync_rsrcs.stats, &dev->dp.resub.lock, buf+pos, len-pos, 'J'); BUF_ADD(",\n");
-	pos += __topo_stats_tostring(&dev->topo_stats, buf+pos, len-pos, 'J'); BUF_ADD(",\n");
-	pos += nvmeibc_blk_op_elevator_string(&dev->merge_op, buf+pos, len-pos, 'J'); BUF_ADD(",\n");
+	nvmeibc_topologies_status_tojson(&dev->topologies, &jdr);
+	__dev_unsorted_tojson(dev, &jdr);
+	__nvmeibc_sync_stats_tojson(&dev->dp.sync_rsrcs.stats, &dev->dp.resub.lock, &jdr);
+	__topo_stats_tojson(&dev->topo_stats, &jdr);
+	nvmeibc_blk_op_elevator_tojson(&dev->merge_op, &jdr);
 
 _out:
-	pos += dp_io_stats_tostring(  &dev->dp.io_stats,        buf+pos, len-pos, 'J'); BUF_ADD(",\n");
-	pos += nvmeibc_io_perm_alert_tostring(&dev->dp.io_perm_alert, buf+pos, len-pos, 'J'); BUF_ADD(",\n");
-	pos += slow_io_stats_t_tostring(    &dev->dp.io_slow,         buf+pos, len-pos, 'J');
-	pos += nvmeib_proc_add_json_proc_epilog(BLK_STATUS_PROC_FRMT_VER, buf + pos, len - pos);
-	BUF_ADD("}\n");		// Replace the last ",\n" with "}\n"
-	return pos;
+	dp_io_stats_tojson(&dev->dp.io_stats, &jdr);
+	nvmeibc_io_perm_alert_tojson(&dev->dp.io_perm_alert, &jdr);
+	slow_io_stats_t_tojson(&dev->dp.io_slow, &jdr);
+	nvmeib_proc_add_json_proc_epilog_jdr(BLK_STATUS_PROC_FRMT_VER, &jdr);
+	return jdr_finalize(&jdr).len;
 }
 
 #define RECOV_STATS_PROC_FRMT_VWR 1
 static ssize_t __stalocks_tostring(void *_dev, char *buf, size_t len)
 {
 	struct nvmeibc_block_device *dev = _dev;
-	ssize_t pos   					 = 0;
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = len});
 	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
-		BUF_ADD("Detaching...\n");
+		nvmeib_txt_append(&txt, "Detaching...\n");
 		goto _out;
 	}
-	pos += nvmeibc_topologies_stalocks_tostring(&dev->topologies,buf+pos,len-pos);
-	pos += nvmeib_proc_add_txt_proc_epilog(RECOV_STATS_PROC_FRMT_VWR, buf + pos, len - pos);
+	nvmeibc_topologies_stalocks_tostring(&dev->topologies, &txt);
+	nvmeib_proc_add_txt_proc_epilog_txt(RECOV_STATS_PROC_FRMT_VWR, &txt);
 _out:
-	return pos;
+	return nvmeib_txt_finalize(&txt).len;
 }
 
 #define BLOB_TXT_PROC_FRMT_VER 1
@@ -487,20 +543,20 @@ static ssize_t __ext_blob_to_txt_fill(const struct nvmeibc_block_device *dev, ch
 {
 	const struct nvmeibc_volume_header *hdr = &dev->volume->hdr;
 	const struct ext_blob_t *ext = &hdr->ext_blob;
-	ssize_t pos = 0;
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = len});
 	int i;
 	if (true || !nvmeibc_block_status_is_detaching(dev->status)) {	// For debug, print even when detaching
 		const int max_ref_len = sizeof(ext->referenceIDs[i].val);
-		BUF_ADD("encoding_version = %d\n", 1);		// External scripts, like Kubernetes, csi drivers parse this file. Future compatibility
-		BUF_ADD("attach_version_global = %d\n", hdr->attachment_version);
-		BUF_ADD("attach_version_pervol = %llu\n", hdr->attachment_version_per_volume);
-		BUF_ADD("n_strings = %d\n", ext->n_ref_ids);
+		nvmeib_txt_append(&txt, "encoding_version = %d\n", 1);		// External scripts, like Kubernetes, csi drivers parse this file. Future compatibility
+		nvmeib_txt_append(&txt, "attach_version_global = %d\n", hdr->attachment_version);
+		nvmeib_txt_append(&txt, "attach_version_pervol = %llu\n", hdr->attachment_version_per_volume);
+		nvmeib_txt_append(&txt, "n_strings = %d\n", ext->n_ref_ids);
 		for (i = 0; i < ext->n_ref_ids; i++) {
-			BUF_ADD("%.*s\n", max_ref_len, &ext->referenceIDs[i].val[0]);
+			nvmeib_txt_append(&txt, "%.*s\n", max_ref_len, &ext->referenceIDs[i].val[0]);
 		}
-		pos += nvmeib_proc_add_txt_proc_epilog(BLOB_TXT_PROC_FRMT_VER, buf+pos, len-pos);
+		nvmeib_proc_add_txt_proc_epilog_txt(BLOB_TXT_PROC_FRMT_VER, &txt);
 	} // pr_emerg("%s", buf);
-	return pos;
+	return nvmeib_txt_finalize(&txt).len;
 }
 
 static ssize_t __ext_blob_to_txt(void *_dev, char *buf, size_t len)
@@ -519,60 +575,46 @@ static ssize_t __ext_blob_to_txt(void *_dev, char *buf, size_t len)
 static ssize_t __flow_counters_to_json(void *_dev, char *buf, size_t len)
 {
 	struct nvmeibc_block_device *dev = _dev;
-	ssize_t pos   					 = 0;
-	BUF_ADD("{");			// JSON start
+	struct jdr jdr = jdr_make((struct charvec){.base=buf,.len=len});
+
 	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
 		goto _out;
 	}
-	BUF_ADD("\"syncs\" : {\n");
-	pos += nvmeibc_htr_fill_status(              buf+pos, len-pos); BUF_ADD(",\n");
-	pos += nvmeibc_cold_stats_to_string(         buf+pos, len-pos); BUF_ADD(",\n");
-	pos += nvmeibc_maintain_sync_stats_to_string(buf+pos, len-pos); BUF_ADD(",\n");
-	pos += nvmeibc_nowhole_stats_to_string(      buf+pos, len-pos); BUF_ADD("}\n");
-	pos += nvmeib_proc_add_json_proc_epilog(PROFILING_PROC_FRMT_VER, buf+pos, len-pos);
+	{
+		jdr_object_scope(&jdr, "syncs");
+		nvmeibc_htr_status_tojson(&jdr);
+		nvmeibc_cold_stats_tojson(&jdr);
+		nvmeibc_maintain_sync_stats_tojson(&jdr);
+		nvmeibc_nowhole_stats_tojson(&jdr);
+	}
+	nvmeib_proc_add_json_proc_epilog_jdr(PROFILING_PROC_FRMT_VER, &jdr);
+
 _out:
-	BUF_ADD("}");		// JSON END
-	return pos;
+	return jdr_finalize(&jdr).len;
 }
 
 #define BLK_CPU_MASKS_PROC_FRMT_VER 1
 ssize_t nvmeibc_block_cpu_masks_to_json(const struct nvmeibc_cinst_params_blk *p, char *buf, size_t len)
 {
-	ssize_t pos = 0;
-
-	BUF_ADD("{");	// JSON start
-
-	BUF_ADD("\"cpu_masks\" : ");
-	pos += nvmeibc_b_cp_cpu_masks_to_json(__get_from_params_blok_globals_container(p)->cpu_masks, buf + pos, len - pos);
-	pos += nvmeib_proc_add_json_proc_epilog(BLK_CPU_MASKS_PROC_FRMT_VER, buf + pos, len - pos);
-
-	BUF_ADD("}");	// JSON END
-
-	return pos;
+	struct jdr jdr = jdr_make((struct charvec){.base=buf,.len=len});
+	nvmeibc_b_cp_cpu_masks_tojson(__get_from_params_blok_globals_container(p)->cpu_masks, &jdr);
+	nvmeib_proc_add_json_proc_epilog_jdr(BLK_CPU_MASKS_PROC_FRMT_VER, &jdr);
+	return jdr_finalize(&jdr).len;
 }
 
 #define BLK_VOLUME_CPU_MASKS_PROC_FRMT_VER 1
 static ssize_t __cpu_masks_to_json(void *_dev, char *buf, size_t len)
 {
 	struct nvmeibc_block_device *dev = _dev;
-	ssize_t pos = 0;
-
-	BUF_ADD("{");	// JSON start
+	struct jdr jdr = jdr_make((struct charvec){.base=buf,.len=len});
 
 	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
 		goto out;
 	}
-
-	BUF_ADD("\"cpu_masks\" : ");
-	pos += nvmeibc_b_cp_cpu_masks_volume_masks_to_json(__get_from_params_blok_globals_container(dev->cips)->cpu_masks, &dev->cpu_masks , buf + pos, len - pos);
-	pos += nvmeib_proc_add_json_proc_epilog(BLK_VOLUME_CPU_MASKS_PROC_FRMT_VER, buf + pos, len - pos);
-
+	nvmeibc_b_cp_cpu_masks_volume_masks_tojson(__get_from_params_blok_globals_container(dev->cips)->cpu_masks, &dev->cpu_masks, &jdr);
+	nvmeib_proc_add_json_proc_epilog_jdr(BLK_VOLUME_CPU_MASKS_PROC_FRMT_VER, &jdr);
 out:
-	BUF_ADD("}");	// JSON END
-
-	#undef BUF_ADD
-
-	return pos;
+	return jdr_finalize(&jdr).len;
 }
 
 struct __cpu_mask_add_del_ctx {

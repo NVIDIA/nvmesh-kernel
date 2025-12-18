@@ -33,7 +33,8 @@ struct slow_io_stats_t {
 void slow_io_stats_t_init( struct slow_io_stats_t *t);
 void slow_io_stats_t_clear(struct slow_io_stats_t *t);
 /* To string to debug in proc file */
-int slow_io_stats_t_tostring(const struct slow_io_stats_t *t,char *buf, int buf_len, char fmt);		// fmt: 'H'=Human, 'J'=json
+void slow_io_stats_t_tostring(const struct slow_io_stats_t *t, struct nvmeib_txt *txt);
+void slow_io_stats_t_tojson(const struct slow_io_stats_t *t, struct jdr *jdr);
 
 struct nvmeibc_cmd_lock;
 void slow_io_stats_t_log_over_retry(struct slow_io_stats_t *t,const struct nvmeibc_cmd_lock *l, u64 lockid);
@@ -132,8 +133,8 @@ void nvmeibc_profiling_start_take_cmd_stats_for_op(struct nvmeibc_profiler *hdr,
 
 void nvmeibc_profiling_add_retry_count_and_delay(struct nvmeibc_profiler *prof, const ulong delay, const int stage, const u32 retry);
 
-int nvmeibc_profiling_stats_tostring(const struct nvmeibc_profiler *prof, char *buf, int len);
-int nvmeibc_profiler_tocsv(          const struct nvmeibc_profiler *prof, char *buf, int len);
+void nvmeibc_profiling_stats_tostring(const struct nvmeibc_profiler *prof, struct nvmeib_txt *txt);
+void nvmeibc_profiler_tocsv(          const struct nvmeibc_profiler *prof, struct nvmeib_txt *txt);
 
 int  nvmeibc_profiling_put(struct nvmeibc_profiler *prof);
 void nvmeibc_profiling_get(struct nvmeibc_profiler *prof);

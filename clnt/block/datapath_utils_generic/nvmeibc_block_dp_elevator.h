@@ -1,6 +1,9 @@
 #ifndef NVMEIBC_DP_ELEVATOR_H
 #define NVMEIBC_DP_ELEVATOR_H
 
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
+
 #define ND_OP_CACHE_LEN 16
 #define ELEVATOR_TIMERS_IMPLEMENTATION (0)					// No need for timers, we use the even of scheduling out the user space task which issues IO's as async event to start io execution
 #define USE_1_ELEV_HASH_TO_ALL_BDEVS 	(ELEVATOR_TIMERS_IMPLEMENTATION)	// Coz timers dont support yet a separated hash for each bdev
@@ -27,9 +30,10 @@ struct nvmeibc_blk_op_elevator {
 	#endif
 };
 
-void    nvmeibc_blk_op_elevator_init(   struct nvmeibc_blk_op_elevator *);
-void    nvmeibc_blk_op_elevator_destroy(struct nvmeibc_blk_op_elevator *);
-ssize_t nvmeibc_blk_op_elevator_string( struct nvmeibc_blk_op_elevator *, char *buf, size_t len, char fmt);
+void nvmeibc_blk_op_elevator_init(     struct nvmeibc_blk_op_elevator *);
+void nvmeibc_blk_op_elevator_destroy(  struct nvmeibc_blk_op_elevator *);
+void nvmeibc_blk_op_elevator_tostring( struct nvmeibc_blk_op_elevator *, struct nvmeib_txt *txt);
+void nvmeibc_blk_op_elevator_tojson(   struct nvmeibc_blk_op_elevator *, struct jdr *jdr);
 
 #endif  // H beginning
 

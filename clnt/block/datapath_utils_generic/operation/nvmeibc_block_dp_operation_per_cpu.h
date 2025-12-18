@@ -449,36 +449,46 @@ void nvmeibc_blk_op_elevator_destroy(__attribute__ ((unused)) struct nvmeibc_blk
 	__nvmeibc_elevator_operation_hash_destroy(mo);
 }
 
-ssize_t nvmeibc_blk_op_elevator_string(struct nvmeibc_blk_op_elevator *mo, char *buf, size_t len, char fmt)
+void nvmeibc_blk_op_elevator_tostring(struct nvmeibc_blk_op_elevator *mo, struct nvmeib_txt *txt)
 {
 	struct nvmeibc_elevator_operation_hash *h = __elev_hash_ptr(mo);
-	#define BUF_ADD(...) pos += scnprintf(buf + pos, len - pos, __VA_ARGS__)
-	int i;
+	int i, last_inplug_cpu = -1;
 	unsigned long flags;
-	ssize_t pos	 = 0;
-	if (fmt != 'H') {
-		BUF_ADD("\"mini_elevator\": \"unsupported yet\"");
-		return pos;
-	}
-	BUF_ADD("mini_elevator: in_plug={");
+
+	nvmeib_txt_append(txt, "mini_elevator: in_plug={");
+
+	// Find the last CPU with in_plug set
 	for_each_allocated_cpu(i) {
 		if (o_cpu[i].in_plug)
-			BUF_ADD("%d,",i);
+			last_inplug_cpu = i;
 	}
-	if (buf[pos-1] == ',')
-		pos--;					// Remove last ','
-	BUF_ADD("} cache={");
+
+	// Print CPUs with in_plug, omitting comma after the last one
+	for_each_allocated_cpu(i) {
+		if (!o_cpu[i].in_plug) continue;
+		if (i == last_inplug_cpu)
+			nvmeib_txt_append(txt, "%d", i);
+		else
+			nvmeib_txt_append(txt, "%d,", i);
+	}
+
+	nvmeib_txt_append(txt, "} cache={");
 
 	spin_lock_irqsave(&h->lock, flags);
 	for (i = 0; i < ND_OP_CACHE_LEN; ++i) {
 		struct operation *o = mo->cache[i].op;
 		if (o) {
-			BUF_ADD("{%d) op=%p, %ld[msec], cpu=%d},", i, o, (long)(1000 * (jiffies - o->jiffies1) / HZ), o->cpu_id);
+			nvmeib_txt_append(txt, "{%d) op=%p, %ld[msec], cpu=%d},", i, o, (long)(1000 * (jiffies - o->jiffies1) / HZ), o->cpu_id);
 		}
 	}
 	spin_unlock_irqrestore(&h->lock, flags);
-	BUF_ADD("}\n");
-	return pos;
+	nvmeib_txt_append(txt, "}\n");
+}
+
+void nvmeibc_blk_op_elevator_tojson(struct nvmeibc_blk_op_elevator *mo, struct jdr *jdr)
+{
+	(void)mo;
+	jdr->ops.ascii(jdr, "mini_elevator", "unsupported yet");
 }
 
 #endif	// H file

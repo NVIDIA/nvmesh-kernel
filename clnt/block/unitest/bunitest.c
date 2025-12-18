@@ -6783,6 +6783,7 @@ TEST_FUNC int unitest_io_stats(__attribute__((__unused__)) struct NVMeshSystem *
 	struct nvmeib_io_stats *stats;
 	struct nvmeib_io_counters counters = { 0 };
 	char buf[4096];
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = sizeof(buf)});
 	struct nvmeib_io_counters upd_counters = {
 		.total_ops = 1,
 		.total_executions = 1,
@@ -6799,7 +6800,8 @@ TEST_FUNC int unitest_io_stats(__attribute__((__unused__)) struct NVMeshSystem *
 	stats = nvmeib_io_stats_create_traced("testing_123", VERB_RW_T_BITMASK, NVMEIBC_SECTOR_SIZE);
 
 	nvmeib_io_stats_update_one(stats, NULL, IO_STAT_VERB_WRITE, upd_counters);
-	nvmeib_iostats_sum_to_string(stats, 1, 1, buf, sizeof(buf));
+	nvmeib_iostats_sum_to_string(stats, 1, 1, &txt);
+	BUG_ON(nvmeib_txt_finalize(&txt).len >= sizeof(buf));
 	nvmeib_io_stats_readc(stats, IO_STAT_VERB_WRITE, 0 /* All sizes */, &counters);
 	BUG_ON(counters.total_ops != upd_counters.total_ops);
 

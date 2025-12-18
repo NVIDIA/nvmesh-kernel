@@ -7,5 +7,10 @@ ssize_t nvmeib_proc_add_yaml_proc_epilog(int version, char *buf, size_t buf_len)
 ssize_t nvmeib_proc_add_smart_proc_epilog(int version, char *buf, size_t buf_len);
 struct jdr;
 void nvmeib_proc_add_jdr_proc_epilog(int version, struct jdr *jdr);
+// serializing to json using jdr
+void nvmeib_proc_add_json_proc_epilog_jdr(int version, struct jdr *jdr);
+// serializing to txt using txt
+struct nvmeib_txt;
+void nvmeib_proc_add_txt_proc_epilog_txt( int version, struct nvmeib_txt *txt);
 
 #endif //_PROC_EPILOG

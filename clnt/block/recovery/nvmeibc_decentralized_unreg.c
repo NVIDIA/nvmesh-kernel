@@ -1,5 +1,6 @@
 #include "nvmeibc_decentralized_unreg.h"
 #include "block/nvmeibc_block_common.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
 #define N_MAX_LOCKS_IN_CACHE (64)	// Daniel: Todo, make larger / param ??
 extern bool qa_ec_stress_debug;
 #define is_cache_full(c) ((c)->size >= (qa_ec_stress_debug ? 2 : N_MAX_LOCKS_IN_CACHE))		// Reduce LRU cache size to be only a few entires
@@ -169,34 +170,31 @@ void stale_lock_resolver_cache_t_to_log(const struct stale_lock_resolver_cache_t
 	spin_unlock_irqrestore((spinlock_t*)&c->lock, flags);
 }
 
-static int stale_lock_resolver_cache_t_to_str(const struct stale_lock_resolver_cache_t *c, char *buf, int len)
+static void stale_lock_resolver_cache_t_to_str(const struct stale_lock_resolver_cache_t *c, struct nvmeib_txt *txt)
 {
-	#define BUF_ADD(...) pos += scnprintf(buf + pos, len - pos, __VA_ARGS__)
 	unsigned long flags;
 	const lock_elem *el;
 	struct rb_node *n;
 	const ulong now = jiffies;
-	int pos = 0, i = 0;
+	int i = 0;
 
 	spin_lock_irqsave((spinlock_t*)&c->lock, flags);
-	BUF_ADD("%d stale locks\n", c->size);
+	nvmeib_txt_append(txt, "%d stale locks\n", c->size);
 	if (c->size == 0)
 		goto _out;
 	for (n = rb_first(&c->cache_root); n; n = rb_next(n)) { // Sort by locks
 		el = container_of(n, lock_elem, rb);
-		BUF_ADD("\t%3d) 0x%x %s, wait_mask=0x%x uuid=%pUB %d[msec]\n", i++, el->lock_id,
+		nvmeib_txt_append(txt, "\t%3d) 0x%x %s, wait_mask=0x%x uuid=%pUB %d[msec]\n", i++, el->lock_id,
 			  _resolve_status_to_string(el->status), el->awaiting_answers, &el->cuuid,
 				JIFF_2_MILSEC(now - el->jif_init));
 	}
-	BUF_ADD("\t-------- LRU: \n");
+	nvmeib_txt_append(txt, "\t-------- LRU: \n");
 	i = 0;
 	list_for_each_entry(el, &c->head, link) {		// Sort by LRU
-		BUF_ADD("\t%3d) 0x%x %s, wait_mask=0x%x\n", i++, el->lock_id, _resolve_status_to_string(el->status), el->awaiting_answers);
+		nvmeib_txt_append(txt, "\t%3d) 0x%x %s, wait_mask=0x%x\n", i++, el->lock_id, _resolve_status_to_string(el->status), el->awaiting_answers);
 	}
 _out:
 	spin_unlock_irqrestore((spinlock_t*)&c->lock, flags);
-	return pos;
-	#undef BUF_ADD
 }
 
 void stale_lock_resolver_cache_t_destroy(struct stale_lock_resolver_cache_t *c)
@@ -313,14 +311,18 @@ void stale_lock_resolver_clear_all(struct stale_lock_resolver_t *slr)
 	stale_lock_resolver_cache_t_clear(&slr->cache);
 }
 
-int stale_lock_resolver_to_str(const struct stale_lock_resolver_t *slr, char *buf, int len)
+void stale_lock_resolver_to_str(const struct stale_lock_resolver_t *slr, struct nvmeib_txt *txt)
 {
 	if (slr) {
-		if (buf)
-			return stale_lock_resolver_cache_t_to_str(&slr->cache, buf, len);
+		stale_lock_resolver_cache_t_to_str(&slr->cache, txt);
+	}
+}
+
+void stale_lock_resolver_to_log(const struct stale_lock_resolver_t *slr)
+{
+	if (slr) {
 		stale_lock_resolver_cache_t_to_log(&slr->cache);
 	}
-	return 0;
 }
 
 enum stale_lock_resolve_status stale_lock_resolver_get_status(struct stale_lock_resolver_t *slr, u32 lock_id, const struct nvmeibc_cmd_lock *l)

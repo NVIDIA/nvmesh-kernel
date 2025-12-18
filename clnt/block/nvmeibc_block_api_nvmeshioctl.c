@@ -199,7 +199,7 @@ static int __max_retry_secs(const struct nvmeibc_cinst_params_blk *p, struct nvm
 			#else
 				rv =  -EINVAL;
 			#endif
-		} 
+		}
 		if (rv == 0) {
 			new_retry *= HZ;	// Convert to jiffies
 			do_for_bdev(p, dev, { dev->max_retry_jiffies = new_retry; nvmeibc_io_resubmitter_wakeup(&dev->dp.resub); });
@@ -344,7 +344,7 @@ static int __get_read_has_mutable_bio_buffers_from_cmd(const char *cmd)
 	if (cmd[1] == '1' || cmd[1] == 'y' || cmd[1] == 'Y'){
 		return 1;
 	}
-	
+
 	if (cmd[1] == '2'){
 		return 2;
 	}
@@ -910,7 +910,7 @@ static int __stale_lock_resolver(const struct nvmeibc_cinst_params_blk *unused_p
 	switch (p.action) {
 		case 'c': stale_lock_resolver_clear_all(slr); /*break;*/
 		FALLTHRU;
-		case 'p': stale_lock_resolver_to_str(slr, NULL, 0); break;
+		case 'p': stale_lock_resolver_to_log(slr); break;
 	}
 	rv = 0;
 _out:

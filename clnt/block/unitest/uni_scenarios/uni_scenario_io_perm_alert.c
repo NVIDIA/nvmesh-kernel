@@ -193,12 +193,14 @@ static void __test_to_string(struct nvmeibc_block_device *dev){
 	struct nvmeibc_io_perm_alert *iod = &dev->dp.io_perm_alert;
 	int written = 0;
 	char buf[4096] = { [0 ... 4095] = 0};
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buf, .len = sizeof(buf)});
 
 	nvmeibc_io_perm_alert_create(iod, (u64)dev);
 	nvmeibc_io_perm_alert_switch(iod, NVMEIBC_IO_PERM_ARM_BIO_OK_FIRST);
 	nvmeibc_io_perm_alert_switch(iod, NVMEIBC_IO_PERM_ARM_BIO_NO_PROTECTION);
 
-	written = nvmeibc_io_perm_alert_tostring(iod, buf, sizeof(buf));
+	nvmeibc_io_perm_alert_tostring(iod, &txt);
+	written = nvmeib_txt_finalize(&txt).len;
 	BUG_ON(written < 180 /* Daniel: What is this constant? */);
 #else
 	(void)dev; // Daniel: Disabled the test, dont understant what it tests. 2string method is already tested by clientSimulator_print_proc_file_by_path() clientSimulator_print_proc_dir() etc.

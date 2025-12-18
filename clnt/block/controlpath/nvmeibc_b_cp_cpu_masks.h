@@ -5,6 +5,8 @@
 #include "nvmeib_cpu_masks.h"
 #include "kr_incs.h"
 
+struct jdr;
+
 // The max number of possible non-overlapping masks in a set is the number of CPUs
 #define NVMEIB_CPU_MASK_MAX_MASKS NVMEIB_CPU_MASK_MAX_CPUS
 
@@ -12,12 +14,12 @@
 See: Disjoint-set data structure - Wikipedia
 
 b - block
-cp - control path 
+cp - control path
 
-struct nvmeibc_b_cp_cpu_masks represents a collection of disjoint CPU masks. 
+struct nvmeibc_b_cp_cpu_masks represents a collection of disjoint CPU masks.
 For every mask, we can select a representative, which will identify the whole mask. For this purpose, we use the CPU, with the minimal.
 
-And now the recursion: how can we represent a set of representatives? Using the bitmap, where the representative bit is turned on. 
+And now the recursion: how can we represent a set of representatives? Using the bitmap, where the representative bit is turned on.
 struct nvmeibc_b_cp_volume_cpu_masks - implemented a "representatives set".
 */
 
@@ -46,7 +48,7 @@ void nvmeibc_b_cp_cpu_masks_del_all_volume_masks(struct nvmeibc_b_cp_cpu_masks *
 
 int nvmeibc_b_cp_cpu_masks_get_all_for_volume(struct nvmeibc_b_cp_cpu_masks *cpu_masks, const struct nvmeibc_b_cp_volume_cpu_masks *volume_cpu_masks, struct nvmeib_cpu_mask_info *mask_infos, int max_masks);
 
-ssize_t nvmeibc_b_cp_cpu_masks_to_json(struct nvmeibc_b_cp_cpu_masks *cpu_masks, char *buffer, size_t len);
-ssize_t nvmeibc_b_cp_cpu_masks_volume_masks_to_json(struct nvmeibc_b_cp_cpu_masks *cpu_masks, const struct nvmeibc_b_cp_volume_cpu_masks *volume_cpu_masks, char *buffer, size_t len);
+void nvmeibc_b_cp_cpu_masks_tojson(struct nvmeibc_b_cp_cpu_masks *cpu_masks, struct jdr *jdr);
+void nvmeibc_b_cp_cpu_masks_volume_masks_tojson(struct nvmeibc_b_cp_cpu_masks *cpu_masks, const struct nvmeibc_b_cp_volume_cpu_masks *volume_cpu_masks, struct jdr *jdr);
 
 #endif /* NVMEIBC_B_CP_CPU_MASKS_H_ */

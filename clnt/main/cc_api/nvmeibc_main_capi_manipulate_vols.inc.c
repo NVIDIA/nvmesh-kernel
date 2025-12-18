@@ -1,6 +1,8 @@
 #include "main/cc_api/nvmeibc_main_capi_manipulate_vols.h"
 #include "main/cc_api/nvmeibc_main_capi_parse_conf.h"
 #include "block/nvmeibc_block_common.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 #pragma push_macro("__FILE_LITERAL__")
 #undef __FILE_LITERAL__
@@ -209,7 +211,8 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	nvmeibc_volume_header_create_from_msg(&reply_hdr, hdr, msg->attachmentsVersion, false);	// Reply info is taken from the request, no need to print
 	{	// Print the incomming cmd - reservation info now in reply_hdr
 		char vat_str[128];
-		nvmeibc_volume_attach_t_tostring(&reply_hdr.vat, vat_str, sizeof(vat_str));
+		struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = vat_str, .len = sizeof(vat_str)});
+		nvmeibc_volume_attach_t_tostring(&reply_hdr.vat, &txt);
 		_NI(i_tsbd02, "volume @DEV_NAME @HDR_UUID @C_VOL_VER - got command @STR. @STR.", hdr->name, hdr->uuid, hdr->version, __action(found), vat_str);
 		_NT(t_tsbd08, "referenceIDs=@INT", hdr->attachment.n_ref_ids);
 	}
@@ -419,18 +422,14 @@ bool nvmeibc_volume_attach_t_are_equal(const struct nvmeibc_volume_attach_t *v1,
 	return (memcmp(v1, v2, sizeof(*v1)) == 0);
 }
 
-ssize_t nvmeibc_volume_attach_t_tostring(const struct nvmeibc_volume_attach_t *_vat, char *buf, size_t len) {
-	#define BUF_ADD(...) pos += scnprintf(buf+pos, len-pos, __VA_ARGS__)
-	ssize_t pos = 0;
+void nvmeibc_volume_attach_t_tostring(const struct nvmeibc_volume_attach_t *_vat, struct nvmeib_txt *txt) {
 	struct nvmeibc_volume_attach_t vat;
 	nvmeibc_volume_attach_t_copy(&vat, _vat);		// Deal with cases of vat == NULL;
 	{
 		const char* mode_str = nvmeibc_volume_attach_t_mode_to_string(vat.res.mode);
 		const char* preempt_str = nvmeibc_volume_attach_t_preempt_to_string(vat.res.preempt);
-		BUF_ADD("Reservation Mode: {%s, version=0x%llx, preempt=%s, rby=%.*s}", mode_str, vat.res.version, preempt_str, (int)sizeof(vat.res.reservedBy), vat.res.reservedBy);
+		nvmeib_txt_append(txt, "Reservation Mode: {%s, version=0x%llx, preempt=%s, rby=%.*s}", mode_str, vat.res.version, preempt_str, (int)sizeof(vat.res.reservedBy), vat.res.reservedBy);
 	}
-	#undef BUF_ADD
-	return pos;
 }
 
 char *nvmeibc_volume_attach_t_mode_to_string(enum_reservation_mode mode) {

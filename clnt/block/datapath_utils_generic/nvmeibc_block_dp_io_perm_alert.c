@@ -201,21 +201,44 @@ void nvmeibc_io_perm_alert_set_stucked_detach_alert_freq(struct nvmeibc_io_perm_
 		iod->config.stucked_detach_alert_freq = freq*HZ;
 }
 
-int nvmeibc_io_perm_alert_tostring(const struct nvmeibc_io_perm_alert *_iod, char *buf, int buf_len, char fmt)
+void nvmeibc_io_perm_alert_tostring(const struct nvmeibc_io_perm_alert *_iod, struct nvmeib_txt *txt)
 {
 	struct nvmeibc_io_perm_alert iod = *_iod;	// Copy to stack to prevent change
 	const char *cur = nvmeibc_io_perm_arm_tostring(iod.arm), *stbl = nvmeibc_io_perm_arm_tostring(iod.arm_stable);
-	int pos = 0;
-	if (fmt == 'H') {
-		BUF_ADD("MgmtAlert: {arm=%s stable=%s}", cur, stbl);
-		BUF_ADD(" last_armed: {at=%llu, uw2ro=%llu}[sec]", jfs2secs(iod.last_armed_at), jfs2secs(iod.unprotected_write_to_read_only_at));
-		BUF_ADD(" {n=%u, long=%u[sec]}", iod.stats.n_stucked_detach_alert_sent, iod.stats.longest_io_problem_duration_msec/1000);
-		BUF_ADD(" conf={stab=%u, unpW=%llu, detStu=%u}[sec]\n", j2s(iod.config.stabilization_period), jfs2secs(iod.config.unprotected_write_period), j2s(iod.config.stucked_detach_alert_freq));
-	} else {
-		BUF_ADD("\"mgmt_alerts\": {\"armed\": {\"current\":\"%s\", \"stable\":\"%s\"},", cur, stbl);
-		BUF_ADD("\"last_armed_sec\": {\"at\":%llu, \"unpw2ro\":%llu},", jfs2secs(iod.last_armed_at), jfs2secs(iod.unprotected_write_to_read_only_at));
-		BUF_ADD("\"stats\": {\"n_sent\":%u, \"longest_sec\":%u},", iod.stats.n_stucked_detach_alert_sent, iod.stats.longest_io_problem_duration_msec/1000);
-		BUF_ADD("\"conf_sec\": {\"stab\":%u, \"unpW\":%llu, \"det_stuck\":%u}}", j2s(iod.config.stabilization_period), jfs2secs(iod.config.unprotected_write_period), j2s(iod.config.stucked_detach_alert_freq));
+	nvmeib_txt_append(txt, "MgmtAlert: {arm=%s stable=%s}", cur, stbl);
+	nvmeib_txt_append(txt, " last_armed: {at=%llu, uw2ro=%llu}[sec]", jfs2secs(iod.last_armed_at), jfs2secs(iod.unprotected_write_to_read_only_at));
+	nvmeib_txt_append(txt, " {n=%u, long=%u[sec]}", iod.stats.n_stucked_detach_alert_sent, iod.stats.longest_io_problem_duration_msec/1000);
+	nvmeib_txt_append(txt, " conf={stab=%u, unpW=%llu, detStu=%u}[sec]\n", j2s(iod.config.stabilization_period), jfs2secs(iod.config.unprotected_write_period), j2s(iod.config.stucked_detach_alert_freq));
+}
+
+void nvmeibc_io_perm_alert_tojson(const struct nvmeibc_io_perm_alert *_iod, struct jdr *jdr)
+{
+	struct nvmeibc_io_perm_alert iod = *_iod;	// Copy to stack to prevent change
+	const char *cur = nvmeibc_io_perm_arm_tostring(iod.arm), *stbl = nvmeibc_io_perm_arm_tostring(iod.arm_stable);
+
+	{
+		jdr_object_scope(jdr, "mgmt_alerts");
+
+		{
+			jdr_object_scope(jdr, "armed");
+			jdr->ops.ascii(jdr, "current", cur);
+			jdr->ops.ascii(jdr, "stable", stbl);
+		}
+		{
+			jdr_object_scope(jdr, "last_armed_sec");
+			jdr_write_var(jdr, at, jfs2secs(iod.last_armed_at));
+			jdr_write_var(jdr, unpw2ro, jfs2secs(iod.unprotected_write_to_read_only_at));
+		}
+		{
+			jdr_object_scope(jdr, "stats");
+			jdr_write_var(jdr, n_sent, iod.stats.n_stucked_detach_alert_sent);
+			jdr_write_var(jdr, longest_sec, iod.stats.longest_io_problem_duration_msec/1000);
+		}
+		{
+			jdr_object_scope(jdr, "conf_sec");
+			jdr_write_var(jdr, stab, j2s(iod.config.stabilization_period));
+			jdr_write_var(jdr, unpW, jfs2secs(iod.config.unprotected_write_period));
+			jdr_write_var(jdr, det_stuck, j2s(iod.config.stucked_detach_alert_freq));
+		}
 	}
-	return pos;
 }

@@ -1,5 +1,6 @@
 #include "common/proc_epilog.h"
-#include "nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
 
 static ssize_t __get_time_of_day(char *time_str, size_t size)
 {
@@ -74,5 +75,24 @@ void nvmeib_proc_add_jdr_proc_epilog(int version, struct jdr *jdr)
 }
 EXPORT_SYMBOL(nvmeib_proc_add_jdr_proc_epilog);
 
+#define __PROC_TIME_STR_LEN 23
+void nvmeib_proc_add_json_proc_epilog_jdr(int version, struct jdr *jdr)
+{
+	char time_str[__PROC_TIME_STR_LEN + 1] = {0};
+	jdr_write_var(jdr, format_version, version);
+	__get_time_of_day(time_str, sizeof(time_str));
+	jdr_write_var(jdr, time, (const	char *)time_str);
+}
+EXPORT_SYMBOL(nvmeib_proc_add_json_proc_epilog_jdr);
+
+void nvmeib_proc_add_txt_proc_epilog_txt(int version, struct nvmeib_txt *txt)
+{
+	char time_str[__PROC_TIME_STR_LEN + 1] = {0};
+	nvmeib_txt_append(txt, "format_version: %d\n", version);
+	nvmeib_txt_append(txt, "time: ");
+	__get_time_of_day(time_str, sizeof(time_str));
+	nvmeib_txt_append(txt, "%s\n", time_str);
+}
+EXPORT_SYMBOL(nvmeib_proc_add_txt_proc_epilog_txt);
 #undef BUF_ADD
 

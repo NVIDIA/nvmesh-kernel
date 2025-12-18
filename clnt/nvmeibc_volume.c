@@ -19,6 +19,8 @@
 #include "nvmeib_utils.h"
 #include "management_utils_common/nvmeibc_management_volume_conf_checks.h"
 #include "block/controlpath/nvmeibc_b_cp_cpu_masks.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 #define __NFIN NFINS(volume->hdr.devname)
 #define __NFOUT NFOUTS(volume->hdr.devname)
@@ -440,52 +442,53 @@ static ssize_t v_disk_stats_fill_buf_json(void *priv, char *buf, size_t len)
 #undef BUF_ADD
 }
 
+static void txt_append_dot1(struct nvmeib_txt *txt, const char *name, s64 value)
+{
+	nvmeib_txt_append(txt, "%s=%lld.%d\n", name, value/10, (int)(value%10));
+}
+
 static ssize_t v_disk_stats_fill_buf(void *priv, char *buf, size_t len)
 {
-#define BUF_ADD(...)	count += scnprintf(buf+count, len-count, __VA_ARGS__)
-#define BUF_ADD_DOT1(s, t)	BUF_ADD(s "=%lld.%d\n", (t)/10, (int)((t)%10))
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base=buf,.len=len});
 	const struct nvmeibc_disk_id *disk = priv;
 	struct nvmeib_io_stats *stats = disk->v_disk_stats;
 	struct nvmeib_io_counters c;
-	ssize_t count = 0;
 	const ulong cur_time = get_disk_uptime(disk);
 	int factor = nvmeib_public_tsc_khz() / 10000;
 	int factor2 = factor*factor >> 8;
 	/* Print in units of micro-seconds. Latency/factor is in units of 1/10^7 of
 	   a second and we also do /10 when printing. so total of 1/10^6 sec */
 	NFIN;
-	BUF_ADD("uptime=%ld.%03ld\n", cur_time/HZ, 1000*(cur_time%HZ)/HZ);
+	nvmeib_txt_append(&txt, "uptime=%ld.%03ld\n", cur_time/HZ, 1000*(cur_time%HZ)/HZ);
 	memset(&c, 0, sizeof c);
 	nvmeib_io_stats_readc(stats, IO_STAT_VERB_READ, -1 /* All sizes */, &c);
-	BUF_ADD("read_ops=%lld\n", c.total_ops);
-	BUF_ADD("read_sub_block_ops=%lld\n", c.total_sub_block);
-	BUF_ADD("read_size=%lld\n", c.total_size);
-	BUF_ADD_DOT1("read_latency", c.total_latency/factor);
-	BUF_ADD_DOT1("read_latency^2", c.total_latency_sqr/factor2);
-	BUF_ADD_DOT1("read_worst_latency", c.worst_latency/factor);
+	nvmeib_txt_append(&txt, "read_ops=%lld\n", c.total_ops);
+	nvmeib_txt_append(&txt, "read_sub_block_ops=%lld\n", c.total_sub_block);
+	nvmeib_txt_append(&txt, "read_size=%lld\n", c.total_size);
+	txt_append_dot1(&txt, "read_latency", c.total_latency/factor);
+	txt_append_dot1(&txt, "read_latency^2", c.total_latency_sqr/factor2);
+	txt_append_dot1(&txt, "read_worst_latency", c.worst_latency/factor);
 
 	memset(&c, 0, sizeof c);
 	nvmeib_io_stats_readc(stats, IO_STAT_VERB_WRITE, -1 /* All sizes */, &c);
-	BUF_ADD("write_ops=%lld\n", c.total_ops);
-	BUF_ADD("write_sub_block_ops=%lld\n", c.total_sub_block);
-	BUF_ADD("write_size=%lld\n", c.total_size);
-	BUF_ADD_DOT1("write_latency", c.total_latency/factor);
-	BUF_ADD_DOT1("write_latency^2", c.total_latency_sqr/factor2);
-	BUF_ADD_DOT1("write_worst_latency", c.worst_latency/factor);
+	nvmeib_txt_append(&txt, "write_ops=%lld\n", c.total_ops);
+	nvmeib_txt_append(&txt, "write_sub_block_ops=%lld\n", c.total_sub_block);
+	nvmeib_txt_append(&txt, "write_size=%lld\n", c.total_size);
+	txt_append_dot1(&txt, "write_latency", c.total_latency/factor);
+	txt_append_dot1(&txt, "write_latency^2", c.total_latency_sqr/factor2);
+	txt_append_dot1(&txt, "write_worst_latency", c.worst_latency/factor);
 
 	memset(&c, 0, sizeof c);
 	nvmeib_io_stats_readc(stats, IO_STAT_VERB_DISCARD, -1 /* All sizes */, &c);
-	BUF_ADD("trim_ops=%lld\n", c.total_ops);
-	BUF_ADD("trim_sub_block_ops=%lld\n", c.total_sub_block);
-	BUF_ADD("trim_size=%lld\n", c.total_size);
-	BUF_ADD_DOT1("trim_latency", c.total_latency/factor);
-	BUF_ADD_DOT1("trim_latency^2", c.total_latency_sqr/factor2);
-	BUF_ADD_DOT1("trim_worst_latency", c.worst_latency/factor);
+	nvmeib_txt_append(&txt, "trim_ops=%lld\n", c.total_ops);
+	nvmeib_txt_append(&txt, "trim_sub_block_ops=%lld\n", c.total_sub_block);
+	nvmeib_txt_append(&txt, "trim_size=%lld\n", c.total_size);
+	txt_append_dot1(&txt, "trim_latency", c.total_latency/factor);
+	txt_append_dot1(&txt, "trim_latency^2", c.total_latency_sqr/factor2);
+	txt_append_dot1(&txt, "trim_worst_latency", c.worst_latency/factor);
 
 	NFOUT;
-	return count;
-#undef BUF_ADD_DOT1
-#undef BUF_ADD
+	return txt.impl.total;
 }
 
 static void nvmeibc_volume_disk_stats_destroy(struct nvmeibc_disk_id *disk, struct proc_dir_entry *disks_dir)
@@ -1267,18 +1270,19 @@ static const char * __vol_type_2_string(const struct nvmeibc_volume *vol)
 	return "visible";
 }
 
-ssize_t nvmeibc_volume_tostring(const struct nvmeibc_volume *volume, char *buf, size_t len, char fmt)
+void nvmeibc_volume_to_text(const struct nvmeibc_volume *volume, struct nvmeib_txt* txt)
 {
-	#define BUF_ADD(...) pos += scnprintf(buf+pos, len-pos, __VA_ARGS__)
-	ssize_t pos = 0;
 	const struct nvmeibc_volume_header *h = &volume->hdr;
-	if (fmt == 'H') {
-		BUF_ADD("Mgmt Report: {fioe_cli=%d, last_io_perm=%d, attachment_version=%d, type=%s}", h->first_io_enabled_was_sent_to_cli, h->last_sent_io_perm, h->attachment_version, __vol_type_2_string(volume));
-	} else {
-		BUF_ADD("\"Reports status\" : {\"fioe_cli\": %d, \"last_mgmt_io_perm\": %d, \"attachment_version\": %d}", h->first_io_enabled_was_sent_to_cli, h->last_sent_io_perm, h->attachment_version); // If needed, can use nvmeib_io_type_permission_to_string() here as well
-	}
-	#undef BUF_ADD
-	return pos;
+	nvmeib_txt_append(txt, "Mgmt Report: {fioe_cli=%d, last_io_perm=%d, attachment_version=%d, type=%s}", h->first_io_enabled_was_sent_to_cli, h->last_sent_io_perm, h->attachment_version, __vol_type_2_string(volume));
+}
+
+void nvmeibc_volume_to_json(const struct nvmeibc_volume *volume, struct jdr *jdr)
+{
+	const struct nvmeibc_volume_header *h = &volume->hdr;
+	jdr_object_scope(jdr, "Reports status");
+	jdr_write_var(jdr, fioe_cli, h->first_io_enabled_was_sent_to_cli);
+	jdr_write_var(jdr, last_mgmt_io_perm, h->last_sent_io_perm);
+	jdr_write_var(jdr, attachment_version, h->attachment_version);
 }
 
 int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume,

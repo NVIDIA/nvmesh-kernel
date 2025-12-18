@@ -1,4 +1,5 @@
 #include "nvmeib_error_report.h"
+#include "nvmeib_txt.h"
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_block.h"		/* external API of the block */
 #include "nvmeibc_block_api_os.h"
@@ -1741,38 +1742,31 @@ static ssize_t iostats_to_non_json(void *_os, char *buf, size_t len)
 	const struct nvmeibc_os_api *os = _os;
 	const u64 io_prob = ((u64)((struct nvmeibc_block_device *)os->dev)->dp.io_perm_alert.stats.longest_io_problem_duration_msec);	// Daniel: This is very ugly, think of a better solution
 	const ulong cur_time = get_nvmeibc_os_api_uptime(os);
-	ssize_t count = 0;
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base=buf,.len=len});
 
-	count = nvmeib_iostats_sum_to_string(os->stats, cur_time, io_prob, buf, len);
+	nvmeib_iostats_sum_to_string(os->stats, cur_time, io_prob, &txt);
 
-	count += nvmeib_proc_add_txt_proc_epilog(IOSTATS_PROC_FRMT_VER, buf + count, len - count);
+	nvmeib_proc_add_txt_proc_epilog_txt(IOSTATS_PROC_FRMT_VER, &txt);
 
-	return count;
+	return nvmeib_txt_finalize(&txt).len;
 }
 
 static ssize_t iostats_detailed_to_json(void *_os, char *buf, size_t len)
 {
-	#define BUF_ADD(...) count += scnprintf(buf+count, len-count, __VA_ARGS__)
 	const struct nvmeibc_os_api *os	= _os;
-	ssize_t count  = 0, indent = 0;	//, max_padd = (ssize_t)3600; 	// Padd to 3.6[KB], coz why not?
-	const struct nvmeib_json_ops *jops = &nvmeib_json_ops;
-	const u32 hex_type = ((struct nvmeibc_block_device *)os->dev)->type;	// Daniel: This is very ugly, think of a better solution
+	struct jdr jdr = jdr_make((struct charvec){ .base = buf, .len = len });
+	const u32 hex_type =
+		((struct nvmeibc_block_device *)os->dev)->type; // Daniel: This is very ugly, think of a better solution
 	if (unlikely(!os->stats)) {
-		BUF_ADD("{}\n");	/* Empty JSON */
 		goto _out;
 	}
-	count += jops->start_obj( buf + count, len - count, NULL,                                   indent++);
-	count += nvmeib_io_stats_to_json(os->stats, buf+count, len-count, get_nvmeibc_os_api_uptime(os), jops, indent,
-										false);
-	count += jops->data_uval( buf + count, len - count, "type", hex_type    , false         ,   indent);
-	count += jops->data_str(  buf + count, len - count, "uuid", os->dev_uuid, JSON_LAST_ELEM,   indent);
-	count += nvmeib_proc_add_json_proc_epilog(IOSTATS_PROC_FRMT_VER, buf + count, len - count);
-	count += jops->end_obj(   buf + count, len - count,                       JSON_LAST_ELEM, --indent);
+	nvmeib_io_stats_tojson_jdr(os->stats, get_nvmeibc_os_api_uptime(os), &jdr);
+	jdr_write_var(&jdr, type, hex_type);
+	jdr_write_var(&jdr, uuid, (const char *)os->dev_uuid);
+	nvmeib_proc_add_json_proc_epilog_jdr(IOSTATS_PROC_FRMT_VER, &jdr);
+
 _out:
-	//WARN(count > max_padd, "nvmeibc wrong padding: %lld > %lld\n", (s64)count, (s64)max_padd);
-	//count += jops->right_padd(buf + count, len - count, max_padd - count);
-	return count;
-	#undef BUF_ADD
+	return jdr_finalize(&jdr).len;
 }
 
 #define IO_THROTTLE_PROC_FRMT_VER 1

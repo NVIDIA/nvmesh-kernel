@@ -7,6 +7,8 @@
 #include "nvmeibc_block.h"		/* external API of the block */
 #include "nvmeibc_decentralized_unreg_algo.h"
 
+struct nvmeib_txt;
+
 // Daniel, Todo: After cache is well debugged, close it in .c file, not .h
 struct _lock_cache_elem_t;
 struct stale_lock_resolver_cache_t {// LRU type cache for already resolved stale locks
@@ -68,7 +70,7 @@ int stale_lock_resolver_set_resolved(struct stale_lock_resolver_t *slr,
 
 /* Clear the cache of all the resolved locks (speeds up the search in cache) */
 void stale_lock_resolver_clear_all(struct stale_lock_resolver_t *slr);
-int  stale_lock_resolver_to_str(const struct stale_lock_resolver_t *slr,
-								char *buf, int len);
-
+void stale_lock_resolver_to_str(const struct stale_lock_resolver_t *slr,
+								struct nvmeib_txt *txt);
+void stale_lock_resolver_to_log(const struct stale_lock_resolver_t *slr);
 #endif // NVMEIBC_DECENTRALIZED_UNREG_H

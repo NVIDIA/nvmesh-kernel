@@ -8,7 +8,8 @@
 
 void nvmeibc_cinst_array_init(   void);
 void nvmeibc_cinst_array_destroy(void);
-int nvmeibc_cinst_array_debug_print(void *ctx, char *buffer, size_t len);
+struct jdr;
+void nvmeibc_cinst_array_debug_print(void *ctx, struct jdr *jdr);
 
 // Iterator to traverse the array of instances. Note: This can be done only from main-wq of module to prevent race conditions with add-remove instance
 const struct nvmeibc_cinst_params* nvmeibc_cinst_array_get_itr_next(const struct nvmeibc_cinst_params*);

@@ -1,6 +1,8 @@
 #ifndef NVMEIBC_DP_ALL_RECOV_NO_WHOLE_STATS_H
 #define NVMEIBC_DP_ALL_RECOV_NO_WHOLE_STATS_H
 
+struct jdr;
+
 /********************* Nowritehole syncs stats counter ************************/
 struct nvmeibc_nowhole_stats {
 	atomic_t n_dbits_fix;	// Number of dbits fix syncs
@@ -13,7 +15,7 @@ struct nvmeibc_nowhole_stats {
 	atomic_t n_resets;		// Number of times this structure was reset. Without this field one cannot know of counters are 0 because they were cleaned or nothing happened in the past
 };
 
-int  nvmeibc_nowhole_stats_to_string(char* buf, int len);         // Convert interal stats to string
+void nvmeibc_nowhole_stats_tojson(struct jdr *jdr);               // Convert interal stats to JSON
 void nvmeibc_nowhole_stats_reset(void);                           // Reset internal statrs
 void nvmeibc_nowhole_stats_get(struct nvmeibc_nowhole_stats *rv); // Take a snapshot (copy) internal stats to 'rv'
 

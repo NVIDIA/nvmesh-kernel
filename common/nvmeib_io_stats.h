@@ -194,8 +194,10 @@ ssize_t nvmeib_io_stats_to_json(struct nvmeib_io_stats *ds,
 
 void nvmeib_io_stats_trace(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx);
 
-ssize_t nvmeib_iostats_sum_to_string(struct nvmeib_io_stats *stats, const ulong up_time, const u64 io_prob,
-				     char *buf, size_t len);
-
+struct nvmeib_txt;
+void nvmeib_iostats_sum_to_string(struct nvmeib_io_stats *stats, const ulong up_time, const u64 io_prob,
+				     struct nvmeib_txt *txt);
+struct jdr;
+void nvmeib_io_stats_tojson_jdr(struct nvmeib_io_stats *ds, const ulong uptime_jiff, struct jdr *jdr);
 #endif
 

@@ -1,5 +1,6 @@
 #include "nvmeibc_block.h"
 #include "nvmeibc_b_cp_cpu_masks.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 struct nvmeibc_b_cp_cpu_masks *nvmeibc_b_cp_cpu_masks_create(void)
 {
@@ -178,57 +179,48 @@ int nvmeibc_b_cp_cpu_masks_get_all_for_volume(struct nvmeibc_b_cp_cpu_masks *cpu
 	return n_masks;
 }
 
-ssize_t nvmeibc_b_cp_cpu_masks_volume_masks_to_json(struct nvmeibc_b_cp_cpu_masks *cpu_masks, const struct nvmeibc_b_cp_volume_cpu_masks *volume_cpu_masks, char *buffer, size_t len)
+void nvmeibc_b_cp_cpu_masks_volume_masks_tojson(struct nvmeibc_b_cp_cpu_masks *cpu_masks, const struct nvmeibc_b_cp_volume_cpu_masks *volume_cpu_masks, struct jdr *jdr)
 {
-	int count = 0;
-	bool first = true;
 	int i;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cpu_masks->lock, flags);
+	{
+		jdr_array_scope(jdr, "cpu_masks"); // Anonymous array
+		for_each_set_bit(i, volume_cpu_masks->masks_ids, NVMEIB_CPU_MASK_MAX_MASKS) {
+			const struct nvmeib_cpu_mask_info *mask_info = &cpu_masks->per_mask[i].mask_info;
 
-	count += scnprintf(buffer + count, len - count, "[\n");
-	for_each_set_bit(i, volume_cpu_masks->masks_ids, NVMEIB_CPU_MASK_MAX_MASKS) {
-		const struct nvmeib_cpu_mask_info *mask_info = &cpu_masks->per_mask[i].mask_info;
-
-		if (!first)
-			count += scnprintf(buffer + count, len - count, ",");
-		first = false;
-
-		count += scnprintf(buffer + count, len - count,	"{\"mask\": \"%*pb\", \"gen\": %llu}\n", NVMEIB_CPU_MASK_MAX_CPUS, mask_info->mask.cpus, mask_info->gen);
+			{
+				jdr_object_scope(jdr, NULL);
+				jdr->ops.ascii_format(jdr, "mask", "%*pb", NVMEIB_CPU_MASK_MAX_CPUS, mask_info->mask.cpus);
+				jdr_write_var(jdr, gen, mask_info->gen);
+			}
+		}
 	}
-	count += scnprintf(buffer + count, len - count, "]\n");
-
 	spin_unlock_irqrestore(&cpu_masks->lock, flags);
-
-	return count;
 }
 
-ssize_t nvmeibc_b_cp_cpu_masks_to_json(struct nvmeibc_b_cp_cpu_masks *cpu_masks, char *buffer, size_t len)
+void nvmeibc_b_cp_cpu_masks_tojson(struct nvmeibc_b_cp_cpu_masks *cpu_masks, struct jdr *jdr)
 {
-	int count = 0;
-	bool first = true;
 	int i;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cpu_masks->lock, flags);
+	{
+		jdr_array_scope(jdr, "cpu_masks");
+		for (i = 0; i < NVMEIB_CPU_MASK_MAX_MASKS; i++) {
+			const struct nvmeib_cpu_mask_info_and_refs *m = &cpu_masks->per_mask[i];
 
-	count += scnprintf(buffer + count, len - count, "[\n");
-	for (i = 0; i < NVMEIB_CPU_MASK_MAX_MASKS; i++) {
-		const struct nvmeib_cpu_mask_info_and_refs *m =	&cpu_masks->per_mask[i];
-
-		if (NVMEIB_CPU_MASK_IS_EMPTY(m->mask_info.mask) || (__cpu_mask_get_index(&m->mask_info.mask) != i))
-			continue;
-
-		if (!first)
-			count += scnprintf(buffer + count, len - count, ",");
-		first = false;
-
-		count += scnprintf(buffer + count, len - count,	"{\"mask\":\"%*pb\", \"gen\": %llu, \"volume_count\": %d}\n", NVMEIB_CPU_MASK_MAX_CPUS, m->mask_info.mask.cpus, m->mask_info.gen, m->n_refs);
+			if (NVMEIB_CPU_MASK_IS_EMPTY(m->mask_info.mask) ||
+			    (__cpu_mask_get_index(&m->mask_info.mask) != i))
+				continue;
+			{
+				jdr_object_scope(jdr, NULL);
+				jdr->ops.ascii_format(jdr, "mask", "%*pb", NVMEIB_CPU_MASK_MAX_CPUS, m->mask_info.mask.cpus);
+				jdr_write_var(jdr, gen, m->mask_info.gen);
+				jdr_write_var(jdr, volume_count, m->n_refs);
+			}
+		}
 	}
-	count += scnprintf(buffer + count, len - count, "]\n");
-
 	spin_unlock_irqrestore(&cpu_masks->lock, flags);
-
-	return count;
 }

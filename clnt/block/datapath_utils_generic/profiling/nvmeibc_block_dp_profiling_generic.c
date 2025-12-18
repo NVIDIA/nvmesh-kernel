@@ -4,7 +4,6 @@
 
 extern bool profiling_enabled;			// Module param
 
-#define BUF_ADD(...) pos += scnprintf(buf + pos, len - pos, __VA_ARGS__)
 /*************** Real-time Datapath statistics of slow IO's **************/
 void topo_stats_t_clear(struct topo_stats_t *t) {
 	memset(t,0, sizeof(*t));
@@ -21,25 +20,42 @@ void slow_io_stats_t_clear(struct slow_io_stats_t *t)
 }
 
 #define SLOW_LOCK_TIME_MSEC  (2000)						// 2[sec]
-int slow_io_stats_t_tostring(const struct slow_io_stats_t *_t, char *buf, int len, char fmt)
+void slow_io_stats_t_tostring(const struct slow_io_stats_t *_t, struct nvmeib_txt *txt)
 {
 	struct slow_io_stats_t t = *_t;	// Snapshot, coz it changes in real time
 	struct slow_io_stats_lock_retry_t *o = &t.over_retried;
-	int pos = 0;
-	if (fmt == 'H') {
-		BUF_ADD("Slow Locks %d[msec]: num_locks=%u, ", SLOW_LOCK_TIME_MSEC, atomic_read(&o->num_l));
-		BUF_ADD("last={lock_id=0x%x n_tries=%u, n_msec=%u, op=%s, dlba[blkst]=0x%llx, ", o->lockid, o->n_retries, o->n_msecs, nvmeibc_rdma_intent_to_string(o->intent), o->dlba_blkset);
-		BUF_ADD("seg=(%d,%d,%d)}", o->ci, o->ri, o->si);
-		#ifdef DEBUG_LOCK_RETRY
-			BUF_ADD(", pending_retry{RD=%u/WR=%u}", atomic_read(&t.pend_retry_rdl), atomic_read(&t.pend_retry_wrl));
-		#endif
-		BUF_ADD("\n");
-	} else {
-		BUF_ADD("\"slow_locks\": {\"t_msec\": %d, \"num_locks\": %d", SLOW_LOCK_TIME_MSEC, atomic_read(&o->num_l));
-		BUF_ADD(", \"last\":{\"lock_id\": \"0x%x\", \"n_tries\": %u, \"n_msec\": %u, \"op\": \"%s\", \"dlba_blksts\": \"0x%llx\"", o->lockid, o->n_retries, o->n_msecs, nvmeibc_rdma_intent_to_string(o->intent), o->dlba_blkset);
-		BUF_ADD(", \"seg\":{\"ci\": %u, \"ri\": %u, \"si\": %u}}}",  o->ci, o->ri, o->si);
+	nvmeib_txt_append(txt, "Slow Locks %d[msec]: num_locks=%u, ", SLOW_LOCK_TIME_MSEC, atomic_read(&o->num_l));
+	nvmeib_txt_append(txt, "last={lock_id=0x%x n_tries=%u, n_msec=%u, op=%s, dlba[blkst]=0x%llx, ", o->lockid, o->n_retries, o->n_msecs, nvmeibc_rdma_intent_to_string(o->intent), o->dlba_blkset);
+	nvmeib_txt_append(txt, "seg=(%d,%d,%d)}", o->ci, o->ri, o->si);
+	#ifdef DEBUG_LOCK_RETRY
+		nvmeib_txt_append(txt, ", pending_retry{RD=%u/WR=%u}", atomic_read(&t.pend_retry_rdl), atomic_read(&t.pend_retry_wrl));
+	#endif
+	nvmeib_txt_append(txt, "\n");
+}
+
+void slow_io_stats_t_tojson(const struct slow_io_stats_t *_t, struct jdr *jdr)
+{
+	struct slow_io_stats_t t = *_t;	// Snapshot, coz it changes in real time
+	struct slow_io_stats_lock_retry_t *o = &t.over_retried;
+	{
+		jdr_object_scope(jdr, "slow_locks");
+		jdr_write_var(jdr, t_msec, SLOW_LOCK_TIME_MSEC);
+		jdr_write_var(jdr, num_locks, atomic_read(&o->num_l));
+		{
+			jdr_object_scope(jdr, "last");
+			jdr->ops.u64(jdr, "lock_id", o->lockid);
+			jdr_write_var(jdr, n_tries, o->n_retries);
+			jdr_write_var(jdr, n_msec, o->n_msecs);
+			jdr->ops.ascii(jdr, "op", nvmeibc_rdma_intent_to_string(o->intent));
+			jdr->ops.u64(jdr, "dlba_blksts", o->dlba_blkset);
+			{
+				jdr_object_scope(jdr, "seg");
+				jdr_write_var(jdr, ci, o->ci);
+				jdr_write_var(jdr, ri, o->ri);
+				jdr_write_var(jdr, si, o->si);
+			}
+		}
 	}
-	return pos;
 }
 
 void slow_io_stats_t_log_over_retry(struct slow_io_stats_t *_t, const struct nvmeibc_cmd_lock *l, u64 lockid)
@@ -101,81 +117,75 @@ static inline void __end_measureq(struct nvmeibc_profiling_stats_stage *stg, con
 	++stg->buckets[__find_bucket(delta_time)];
 }
 
-static int __stage_stats_tostring(const struct nvmeibc_profiling_stats_stage* stg, const char* stg_name, char *buf, int len)
+static void __stage_stats_tostring(const struct nvmeibc_profiling_stats_stage* stg, const char* stg_name, struct nvmeib_txt *txt)
 {
-	int pos = 0, i = 0;
+	int i = 0;
 	const int factor = loops_per_jiffy * HZ / 1000000;
 	const u64 avg0     = stg->count       ? DIV_ROUND_CLOSEST(stg->exact_time, stg->count      ) : 0;
 	const u64 avg0_err = stg->error_count ? DIV_ROUND_CLOSEST(stg->error_time, stg->error_count) : 0;
-	BUF_ADD("Stage %s: count=%u, average=%llu [usec], error count=%u, error average=%llu [usec]\n",
+	nvmeib_txt_append(txt, "Stage %s: count=%u, average=%llu [usec], error count=%u, error average=%llu [usec]\n",
 		stg_name, stg->count, avg0/factor, stg->error_count, avg0_err/factor);
-	BUF_ADD("Retries:\n");
-	for (i=0;i<PROFILING_RETRY_COUNT;i++)       BUF_ADD("Retry %d: retry count=%u, retry time=%llu [usec]\n", i+1, stg->retry[i], stg->retry_time[i]);
-	BUF_ADD("Bucket info:\n");
-	for (i=0;i<PROFILING_INTERVALS_COUNT;i++) BUF_ADD("Bucket %d: %llu\n", 1 << i, stg->buckets[i]);
-	return pos;
+	nvmeib_txt_append(txt, "Retries:\n");
+	for (i=0;i<PROFILING_RETRY_COUNT;i++)       nvmeib_txt_append(txt, "Retry %d: retry count=%u, retry time=%llu [usec]\n", i+1, stg->retry[i], stg->retry_time[i]);
+	nvmeib_txt_append(txt, "Bucket info:\n");
+	for (i=0;i<PROFILING_INTERVALS_COUNT;i++) nvmeib_txt_append(txt, "Bucket %d: %llu\n", 1 << i, stg->buckets[i]);
 }
 #endif/*BLKDEV_PROFILING*/
 
 
-int nvmeibc_profiling_stats_tostring(const struct nvmeibc_profiler *prof, char *buf, int len)
+void nvmeibc_profiling_stats_tostring(const struct nvmeibc_profiler *prof, struct nvmeib_txt *txt)
 {
 	#if defined(BLKDEV_PROFILING)
-	int pos = 0;
 	if (prof){
 		int stg;
 		int n_stages = prof->info.translate(PROFILING_GET_N_STAGES);
-		BUF_ADD("%s Profiler:\n", prof->desc);
+		nvmeib_txt_append(txt, "%s Profiler:\n", prof->desc);
 		if (prof->end2end_stats){
-			pos += __stage_stats_tostring(prof->end2end_stats, "end2end", buf+pos, len-pos);
+			__stage_stats_tostring(prof->end2end_stats, "end2end", txt);
 		}
 		for (stg = 0; stg < n_stages; ++stg){
-			pos += __stage_stats_tostring(&prof->stats[stg], prof->info.stage2name(stg), buf+pos, len-pos);
+			__stage_stats_tostring(&prof->stats[stg], prof->info.stage2name(stg), txt);
 		}
 	}
-	return pos;
 	#else
-	(void)prof; (void)buf; (void)len; return 0;
+	(void)prof; (void)txt;
 	#endif/*BLKDEV_PROFILING*/
 }
 
 #if defined(BLKDEV_PROFILING)
-static int __profiler_stage_stats_tocsv(struct nvmeibc_profiling_stats_stage* stg, const char* stg_name, char *buf, int len)
+static void __profiler_stage_stats_tocsv(struct nvmeibc_profiling_stats_stage* stg, const char* stg_name, struct nvmeib_txt *txt)
 {
-	int pos = 0, i = 0;
+	int i = 0;
 	const int factor = loops_per_jiffy * HZ / 1000000;
 	const u64 avg0     = stg->count       ? DIV_ROUND_CLOSEST(stg->exact_time, stg->count      ) : 0;
 	const u64 avg0_err = stg->error_count ? DIV_ROUND_CLOSEST(stg->error_time, stg->error_count) : 0;
-	BUF_ADD("stage_name,count,average,error_count,error_average");
-	for (i=0;i<PROFILING_INTERVALS_COUNT;i++) BUF_ADD(",bucket%dusec", 1 << i);
-	for (i=0;i<PROFILING_RETRY_COUNT;i++)     BUF_ADD(",%d_retry,%d_total_time", i+1,i+1);
-	BUF_ADD("\n");
-	BUF_ADD("%s,%u,%llu,%u,%llu", stg_name,stg->count,avg0/factor,stg->error_count,avg0_err/factor);
-	for (i=0;i<PROFILING_INTERVALS_COUNT;i++)  BUF_ADD(",%llu", stg->buckets[i]);
-	for (i=0;i<PROFILING_RETRY_COUNT;i++)      BUF_ADD(",%u,%llu", stg->retry[i], stg->retry_time[i]);
-	BUF_ADD("\n");
-	return pos;
+	nvmeib_txt_append(txt, "stage_name,count,average,error_count,error_average");
+	for (i=0;i<PROFILING_INTERVALS_COUNT;i++) nvmeib_txt_append(txt, ",bucket%dusec", 1 << i);
+	for (i=0;i<PROFILING_RETRY_COUNT;i++)     nvmeib_txt_append(txt, ",%d_retry,%d_total_time", i+1,i+1);
+	nvmeib_txt_append(txt, "\n");
+	nvmeib_txt_append(txt, "%s,%u,%llu,%u,%llu", stg_name,stg->count,avg0/factor,stg->error_count,avg0_err/factor);
+	for (i=0;i<PROFILING_INTERVALS_COUNT;i++)  nvmeib_txt_append(txt, ",%llu", stg->buckets[i]);
+	for (i=0;i<PROFILING_RETRY_COUNT;i++)      nvmeib_txt_append(txt, ",%u,%llu", stg->retry[i], stg->retry_time[i]);
+	nvmeib_txt_append(txt, "\n");
 }
 #endif/*BLKDEV_PROFILING*/
 
-int nvmeibc_profiler_tocsv(const struct nvmeibc_profiler *prof, char *buf, int len)
+void nvmeibc_profiler_tocsv(const struct nvmeibc_profiler *prof, struct nvmeib_txt *txt)
 {
 	#if defined(BLKDEV_PROFILING)
-	int pos = 0;
 	if (prof){
 		int stage;
 		const int n_stages = prof->info.translate(PROFILING_GET_N_STAGES);
-		BUF_ADD("profiler_description,number_of_stages\n%s,%d\n", prof->desc, n_stages + ((prof->end2end_stats) ? 1 : 0));
+		nvmeib_txt_append(txt, "profiler_description,number_of_stages\n%s,%d\n", prof->desc, n_stages + ((prof->end2end_stats) ? 1 : 0));
 		if (prof->end2end_stats) {
-			pos += __profiler_stage_stats_tocsv(prof->end2end_stats, "end2end", buf+pos,len-pos);
+			__profiler_stage_stats_tocsv(prof->end2end_stats, "end2end", txt);
 		}
 		for (stage=0;stage<n_stages;stage++) {
-			pos += __profiler_stage_stats_tocsv(&prof->stats[stage], prof->info.stage2name(stage), buf+pos, len-pos);
+			__profiler_stage_stats_tocsv(&prof->stats[stage], prof->info.stage2name(stage), txt);
 		}
 	}
-	return pos;
 	#else
-	(void)prof; (void)buf; (void)len; return 0;
+	(void)prof; (void)txt;
 	#endif/*BLKDEV_PROFILING*/
 }
 

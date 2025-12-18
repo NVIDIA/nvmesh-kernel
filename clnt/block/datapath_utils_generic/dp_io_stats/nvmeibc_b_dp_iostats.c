@@ -76,17 +76,22 @@ void nvmeibcb_dp_io_fail_mgr_reset_limit(struct nvmeibcb_dp_io_fail_mgr *m)
 	(void)m;
 }
 
-#define BUF_ADD(...) pos += scnprintf(buf + pos, len - pos, __VA_ARGS__)
-int nvmeibcb_dp_io_fail_mgr_tostring(const struct nvmeibcb_dp_io_fail_mgr *m, char *buf, int len, char fmt)
+static void nvmeibcb_dp_io_fail_mgr_tostring(const struct nvmeibcb_dp_io_fail_mgr *m, struct nvmeib_txt *txt)
 {
 	const int warns = atomic_read(&warn_on_io_err_cntr); // Todo: Store counter per block device per disk and not globally
-	int pos = 0;
-	if (fmt == 'H') {
-		BUF_ADD("{sus_thresh=%d, n_binfo=%d/%d, n_htr0=%d, EC4571=%d}\n"                                                                  , warns, m->n_binfo_errors, m->n_htr_null_uuids, m->n_binfo_copy_owner_error, m->n_blocked_cont_EC_4571);
-	} else {
-		BUF_ADD("\"internal_err\":{\"sus_thresh\":%d, \"n_binfo_err\":%d, \"n_cpbinfo_fix\":%d, \"n_htr_null_uuids\":%d, \"n_EC4571\":%d}", warns, m->n_binfo_errors, m->n_htr_null_uuids, m->n_binfo_copy_owner_error, m->n_blocked_cont_EC_4571);
-	}
-	return pos;
+	nvmeib_txt_append(txt, "{sus_thresh=%d, n_binfo=%d/%d, n_htr0=%d, EC4571=%d}\n",
+		warns, m->n_binfo_errors, m->n_htr_null_uuids, m->n_binfo_copy_owner_error, m->n_blocked_cont_EC_4571);
+}
+
+static void nvmeibcb_dp_io_fail_mgr_tojson(const struct nvmeibcb_dp_io_fail_mgr *m, struct jdr *jdr)
+{
+	const int warns = atomic_read(&warn_on_io_err_cntr); // Todo: Store counter per block device per disk and not globally
+	jdr_object_scope(jdr, "internal_err");
+	jdr_write_var(jdr, sus_thresh, warns);
+	jdr_write_var(jdr, n_binfo_err, m->n_binfo_errors);
+	jdr_write_var(jdr, n_cpbinfo_fix, m->n_htr_null_uuids);
+	jdr_write_var(jdr, n_htr_null_uuids, m->n_binfo_copy_owner_error);
+	jdr_write_var(jdr, n_EC4571, m->n_blocked_cont_EC_4571);
 }
 
 void nvmeibcb_dp_io_fail_mgr_binfo_err(struct nvmeibcb_dp_io_fail_mgr *m)
@@ -224,25 +229,42 @@ void dp_io_stats_clear_counter(struct dp_io_stats *t, enum dp_iostats_names name
 	__get_cnt_val(t, DP_IO_STATS_LOCKSET_FAILED), __get_cnt_val(t, DP_IO_STATS_RESUBMITTED_STARTED),       \
 	__get_cnt_val(t, DP_IO_STATS_RESUBMITTED), __get_cnt_val(t, DP_IO_STATS_TIMED_OUT)
 
-int dp_io_stats_tostring(const struct dp_io_stats *_t, char *buf, int len, char fmt)
+void dp_io_stats_tostring(const struct dp_io_stats *_t, struct nvmeib_txt *txt)
 {
 	const struct dp_io_stats_cntrs *t = &_t->n; // Cast to non-const for easier access
-	int pos = 0;
 
-	if (fmt == 'H') {
-		BUF_ADD("Failed IO: crit=%llu, detach=%llu, ignore=%llu, rider=%llu, trim=%llu, other=%llu,"
-			" bad_sectors=%llu, metadata_marked_invalid_err=%llu, edic_discrepencies=%llu, "
-                        "lock_cmds_failed=%llu, lockset_failed=%llu, (resub: in=%llu, out=%llu, tout=%llu)",
-			IO_ERRS_VALS);
-	} else {
-		BUF_ADD("\"failed_io\": {\"critical\":%llu, \"detach\":%llu, \"ignore\":%llu, \"rider_cancel\":%llu,"
-			" \"illegal_trims\":%llu, \"other\": %llu}, \"bad_sectors\":%llu, \"metadata_mark_invalid_errors\":%llu, "
-                        "\"edic_discrepencies\":%llu, \"lock_cmds_failed\":%llu, \"lockset_failed\":%llu, "
-			"\"resubmittion\": {\"in\":%llu, \"out\":%llu, \"timed_out\":%llu},",
-			IO_ERRS_VALS);
+	nvmeib_txt_append(txt, "Failed IO: crit=%llu, detach=%llu, ignore=%llu, rider=%llu, trim=%llu, other=%llu,"
+		" bad_sectors=%llu, metadata_marked_invalid_err=%llu, edic_discrepencies=%llu, "
+		"lock_cmds_failed=%llu, lockset_failed=%llu, (resub: in=%llu, out=%llu, tout=%llu)",
+		IO_ERRS_VALS);
+	nvmeibcb_dp_io_fail_mgr_tostring(&_t->mgr, txt);
+}
+
+void dp_io_stats_tojson(const struct dp_io_stats *_t, struct jdr *jdr)
+{
+	const struct dp_io_stats_cntrs *t = &_t->n; // Cast to non-const for easier access
+
+	{
+		jdr_object_scope(jdr, "failed_io");
+		jdr_write_var(jdr, critical, __get_cnt_val(t, DP_IO_STATS_CRITICAL_FAIL));
+		jdr_write_var(jdr, detach, __get_cnt_val(t, DP_IO_STATS_SUSPED_FAIL));
+		jdr_write_var(jdr, ignore, __get_cnt_val(t, DP_IO_STATS_IGNORED_ERR));
+		jdr_write_var(jdr, rider_cancel, __get_cnt_val(t, DP_IO_STATS_CANCELED_BY_RIDER));
+		jdr_write_var(jdr, illegal_trims, __get_cnt_val(t, DP_IO_STATS_ILLEGAL_TRIMS));
+		jdr_write_var(jdr, other, __get_cnt_val(t, DP_IO_STATS_OTHER));
 	}
-	pos += nvmeibcb_dp_io_fail_mgr_tostring(&_t->mgr, buf+pos, len-pos, fmt);
-	return pos;
+	jdr_write_var(jdr, bad_sectors, __get_cnt_val(t, DP_IO_STATS_DNR_BAD_SECTORS));
+	jdr_write_var(jdr, metadata_mark_invalid_errors, __get_cnt_val(t, DP_IO_STATS_MD_MARKED_INVALID_ERRORS));
+	jdr_write_var(jdr, edic_discrepencies, __get_cnt_val(t, DP_IO_STATS_MD_EDIC_CHECK_ERRORS));
+	jdr_write_var(jdr, lock_cmds_failed, __get_cnt_val(t, DP_IO_STATS_LOCK_OP_FAILED));
+	jdr_write_var(jdr, lockset_failed, __get_cnt_val(t, DP_IO_STATS_LOCKSET_FAILED));
+	{
+		jdr_object_scope(jdr, "resubmittion");
+		jdr_write_var(jdr, in, __get_cnt_val(t, DP_IO_STATS_RESUBMITTED_STARTED));
+		jdr_write_var(jdr, out, __get_cnt_val(t, DP_IO_STATS_RESUBMITTED));
+		jdr_write_var(jdr, timed_out, __get_cnt_val(t, DP_IO_STATS_TIMED_OUT));
+	}
+	nvmeibcb_dp_io_fail_mgr_tojson(&_t->mgr, jdr);
 }
 
 static bool __is_counter_in_use(const char *name)

@@ -1,7 +1,6 @@
 #include "nvmeiba_main.h"
 #include "nvmeiba_nvmesh_api.h"
 #include "common/compat/kr_incs_time.h"
-#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("nvmesh client hot upgrade core");
@@ -13,25 +12,18 @@ static struct nvmeiba_all_os_apis all;
 /******************************* Proc files ***********************************/
 #define PROCFS_ATOM_STR "nvmeiba"
 #define VERSION_PROC_FRMT_VER 1
-#define __char_const(_s) ((char const *)(_s))
-#define __const_stringfy(_s) __char_const(__stringify(_s))
 static ssize_t fill_version_json(void *a, char *buffer, size_t len)
 {
-	struct charvec buf = {.base = buffer, .len = len};
-	struct jdr jdr;
-	struct charvec json;
+	int count = 0;
 	(void)a;
+	count += scnprintf(
+		buffer + count, len - count,
+		"{\"module\" : \"atom\", \"commit\" : \"%llx\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
+		(u64)COMMIT_ID, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER),
+		__stringify(BUILD_DISTRO));
+	count += scnprintf(buffer + count, len - count, "}\n");
 
-	jdr = jdr_make(buf);
-	jdr_write_var(&jdr, module, (char const *)("atom"));
-	jdr.ops.ascii_format(&jdr, "commit", "%llx", (u64)COMMIT_ID);
-	jdr_write_var(&jdr, release, __const_stringfy(NVMESH_RELEASE));
-	jdr_write_var(&jdr, version, __const_stringfy(NVMESH_VERSION));
-	jdr_write_var(&jdr, build_number, __const_stringfy(BUILD_NUMBER));
-	jdr_write_var(&jdr, distro, __const_stringfy(BUILD_DISTRO));
-	json = jdr_finalize(&jdr);
-
-	return json.len;
+	return count;
 }
 
 static ssize_t fill_users(void *a, char *buf, size_t len)

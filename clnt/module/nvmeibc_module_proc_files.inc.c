@@ -3,6 +3,7 @@
 #define __FILE_LITERAL__  nvmeibc_module_proc_files_inc_c
 
 #include "../core_unitest/corecomm_injections.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 #define VERSION_PROC_FRMT_VER 1
 /********************* Shared proc files for all clnt-instances ***************/
@@ -37,9 +38,9 @@ static ssize_t fill_dict_sign(void *dummy, char *buffer, size_t len) {
 #include "module/instance/nvmeibc_cinst.h"
 static ssize_t fill_isntances_info(void *dummy, char *buffer, size_t len)
 {
-	int count = 0;
-	count += nvmeibc_cinst_array_debug_print(dummy, buffer, len);
-	return count;
+	struct jdr jdr = jdr_make((struct charvec){.base=buffer,.len=len});
+	nvmeibc_cinst_array_debug_print(dummy, &jdr);
+	return jdr_finalize(&jdr).len;
 }
 
 void __change_memory(char *buf);

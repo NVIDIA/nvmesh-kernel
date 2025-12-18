@@ -2,6 +2,8 @@
 #define NVMEIBC_DP_IO_PERM_ALERT_H
 
 #include "nvmeibc_block.h"		/* external API of the block */
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 struct nvmeibc_block_device;
 
@@ -80,7 +82,8 @@ void nvmeibc_io_perm_alert_set_unprotect_period(               struct nvmeibc_io
 void nvmeibc_io_perm_alert_clear_stats(                        struct nvmeibc_io_perm_alert *iod);
 
 /* To string to debug in proc file */
-int nvmeibc_io_perm_alert_tostring(const struct nvmeibc_io_perm_alert *iod, char *buf, int buf_len, char fmt);		// fmt: 'H'=Human, 'J'=json
+void nvmeibc_io_perm_alert_tostring(const struct nvmeibc_io_perm_alert *iod, struct nvmeib_txt *txt);
+void nvmeibc_io_perm_alert_tojson(const struct nvmeibc_io_perm_alert *iod, struct jdr *jdr);
 
 static inline bool nvmeibc_io_perm_alert_is_no_bio_for_long_time(const struct nvmeibc_io_perm_alert *iod)
 {
