@@ -1,20 +1,5 @@
-/*
- * nvmeibt_mm_json.c
- *
- * Read management config in JSON, and convert to usable structure.
- *
- *  Created on: Aug 6, 2020
- *      Author: yair
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <memory.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-
 #include "nvmeibt_debug.h"
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_common.h"
@@ -24,8 +9,6 @@
 #include "nvmeibt_str.h"
 #include "nvmeibt_utils.h"
 #include "nvmeibt_mm_json.h"
-#include "nvmeibt_json_base.h"
-#include "nvmeibt_kafka.h"
 
 // forward compatibility. If updating the structs, add an unpack handler for the old struct version.
 // #define MM_STRUCT_VER_2008 2008
@@ -1836,4 +1819,3 @@ out:
 	NFOUT;
 	return rv;
 }
-
