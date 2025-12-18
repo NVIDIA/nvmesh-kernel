@@ -245,16 +245,12 @@ struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
 }
 
 int ioctl(int fd, unsigned long int req, ...) {
+	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd(fd);
+	const char *path = tsb->addr.sun_path;
 	va_list ap;
 	int rv = 0;
-	struct t_sandbox_sock *tsb;
-	const char *path;
 	va_start(ap, req);
 
-	tsb = TSB_socket_find_by_fd(fd);
-	assert(tsb);
-
-	path = tsb->addr.sun_path;
 	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
 		struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
