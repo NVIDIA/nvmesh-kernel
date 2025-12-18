@@ -929,7 +929,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		*out_json_tree_root = parse_json_txt_into_kv_tree(k_msg->payload, k_msg->len);
 		if (!*out_json_tree_root) {
 			char msg[MGMT_LOG_MSG_MSG_LEN];
-			snprintf(msg, sizeof(msg), "Failed parsing of msg from MGMT %.200s", k_msg->payload);
+			snprintf(msg, sizeof(msg), "Failed parsing of msg from MGMT %.200s", (char*)k_msg->payload);
 			nvmeibt_kafka_generic_log_msg_to_mgmt_send(NULL, NULL, msg, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH); // no-op; for future proof
 			rv = -1;
 			goto out;
