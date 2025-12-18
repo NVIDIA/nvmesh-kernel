@@ -155,7 +155,7 @@ static int lock(struct nvmeibt_node *node)
 	int rv;
 
 	NFIN;
-	if ((rv = pthread_mutex_lock(&node->guard)) < 0) {
+	if ((rv = pthread_mutex_lock(&node->guard)) != 0) {
 		N_Ef(error_node_lock, "Failed to lock node @NODE_NAME guard @AUTO_ERRNO", nvmeibt_node_name(node));
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -168,7 +168,7 @@ static int unlock(struct nvmeibt_node *node)
 	int rv;
 
 	NFIN;
-	if ((rv = pthread_mutex_unlock(&node->guard)) < 0) {
+	if ((rv = pthread_mutex_unlock(&node->guard)) != 0) {
 		N_Ef(error_node_unlock, "Failed to unlock node @NODE_NAME guard @AUTO_ERRNO", nvmeibt_node_name(node));
 		nvmeibt_abort(ES_FATAL);
 	}

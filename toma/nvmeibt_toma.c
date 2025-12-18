@@ -1028,7 +1028,7 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 
 	NFIN;
 
-	if (pthread_mutex_lock(&toma_wakeup_pending_mutex) < 0) {
+	if (pthread_mutex_lock(&toma_wakeup_pending_mutex) != 0) {
 		N_Ef(trace_toma_toma_wakeup_test_and_set, "Failed to lock toma wakeup pending mutex (@AUTO_ERRNO)");
 		self_inflicted_death_on_error();
 	}
@@ -1036,7 +1036,7 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 	ret = toma_wakeup_pending_by_type[type];
 	toma_wakeup_pending_by_type[type] = val;
 
-	if (pthread_mutex_unlock(&toma_wakeup_pending_mutex) < 0) {
+	if (pthread_mutex_unlock(&toma_wakeup_pending_mutex) != 0) {
 		N_Ef(trace_1_toma_toma_wakeup_test_and_set, "Failed to unlock toma wakeup pending mutex (@AUTO_ERRNO)");
 		self_inflicted_death_on_error();
 	}
@@ -1061,7 +1061,7 @@ int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
 
 	N_Tf(trace_toma_nvmeibt_toma_wakeup, "wakeup request type @TOMA_WAKEUP_TYPE_TO_STR ptr @PTR", toma_wakeup_type_to_str(type), ptr);
 
-	if (pthread_mutex_lock(&toma_wakeup_mutex) < 0) {
+	if (pthread_mutex_lock(&toma_wakeup_mutex) != 0) {
 		N_Ef(trace_1_toma_nvmeibt_toma_wakeup, "Failed to lock toma wakeup mutex (@AUTO_ERRNO)");
 		goto out_unlocked;
 	}
@@ -1087,7 +1087,7 @@ int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
 skip:
 	ret = 0;
 out:
-	if (pthread_mutex_unlock(&toma_wakeup_mutex) < 0) {
+	if (pthread_mutex_unlock(&toma_wakeup_mutex) != 0) {
 		N_Ef(trace_5_toma_nvmeibt_toma_wakeup, "Failed to unlock toma wakeup mutex (@AUTO_ERRNO)");
 	}
 out_unlocked:

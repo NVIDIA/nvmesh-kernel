@@ -40,7 +40,7 @@ static inline void update_allocated(int size) {
 
 static int lock(void) {
 	const int rv = pthread_mutex_lock(&bm->guard);
-	if (rv < 0) {
+	if (rv != 0) {
 		N_Ef(error_bm_lock, "Failed to lock buffer manager (@RV)", rv);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -49,7 +49,7 @@ static int lock(void) {
 
 static int unlock(void) {
 	const int rv = pthread_mutex_unlock(&bm->guard);
-	if (rv < 0) {
+	if (rv != 0) {
 		N_Ef(error_bm_unlock, "Failed to unlock buffer manager (@RV)", rv);
 		nvmeibt_abort(ES_FATAL);
 	}

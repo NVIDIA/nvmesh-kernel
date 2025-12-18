@@ -244,7 +244,7 @@ static int lock(struct nvmeibt_srm *srm)
 	int rv;
 
 //	FIN_9;
-	if ((rv = pthread_mutex_lock(&srm->guard)) < 0) {
+	if ((rv = pthread_mutex_lock(&srm->guard)) != 0) {
 		N__E(error_srm_lock, "Failed to lock send/receive manager guard for context @SRM_CARRIER (@RV)",
 			srm_carrier(srm), rv);
 		TERMINATE(out);
@@ -265,7 +265,7 @@ static int unlock(struct nvmeibt_srm *srm)
 //	FIN_9;
 	srm->guard_locked = false;
 	srm->guard_tid = 0xdeadbeef;
-	if ((rv = pthread_mutex_unlock(&srm->guard)) < 0) {
+	if ((rv = pthread_mutex_unlock(&srm->guard)) != 0) {
 		N__E(error_srm_unlock, "Failed to unlock send/receive manager guard for context @SRM_CARRIER (@RV)",
 			srm_carrier(srm), rv);
 		TERMINATE(out);

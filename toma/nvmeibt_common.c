@@ -52,10 +52,9 @@ char *get_8_plus_3_char_str_of_now(void)
 static pthread_mutex_t alloc_free_guard;
 static int lock_alloc_free_table(void)
 {
-	int rv;
-
-	if ((rv = pthread_mutex_lock(&alloc_free_guard)) < 0) {
-		N_Ef(error_common_lock_alloc_free_table, "Failed to lock @AUTO_ERRNO");
+	const int rv = pthread_mutex_lock(&alloc_free_guard);
+	if (rv != 0) {
+		N_Ef(error_common_lock_alloc_free_table, "Failed to lock rv=@RV, @AUTO_ERRNO", rv);
 		nvmeibt_abort(ES_FATAL);
 	}
 	return rv;
@@ -63,10 +62,9 @@ static int lock_alloc_free_table(void)
 
 static int unlock_alloc_free_table(void)
 {
-	int rv;
-
-	if ((rv = pthread_mutex_unlock(&alloc_free_guard)) < 0) {
-		N_Ef(error_common_unlock_alloc_free_table, "Failed to unlock @AUTO_ERRNO");
+	const int rv = pthread_mutex_unlock(&alloc_free_guard);
+	if (rv != 0) {
+		N_Ef(error_common_unlock_alloc_free_table, "Failed to unlock rv=@RV, @AUTO_ERRNO", rv);
 		nvmeibt_abort(ES_FATAL);
 	}
 	return rv;

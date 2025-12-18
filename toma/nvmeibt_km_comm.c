@@ -274,10 +274,9 @@ static int build_fd_sets(struct nvmeibt_km_comm *p, fd_set *read_fds,
 
 static int lock(pthread_mutex_t *m)
 {
-	int rv;
-
-	if ((rv = pthread_mutex_lock(m)) != 0) {
-		N_Ef(error_km_comm_lock, "Failed to lock srv comm guard @AUTO_ERRNO");
+	int rv = pthread_mutex_lock(m);
+	if (rv != 0) {
+		N_Ef(error_km_comm_lock, "Failed to lock srv comm guard rv=@RV @AUTO_ERRNO", rv);
 		rv = -1;
 	}
 	return rv;
@@ -285,10 +284,9 @@ static int lock(pthread_mutex_t *m)
 
 static int unlock(pthread_mutex_t *m)
 {
-	int rv;
-
-	if ((rv = pthread_mutex_unlock(m)) < 0) {
-		N_Ef(error_km_comm_unlock, "Failed to unlock srv comm guard @AUTO_ERRNO");
+	int rv = pthread_mutex_unlock(m);
+	if (rv != 0) {
+		N_Ef(error_km_comm_unlock, "Failed to unlock srv comm guard rv=@RV @AUTO_ERRNO", rv);
 		rv = -1;
 	}
 	return rv;
