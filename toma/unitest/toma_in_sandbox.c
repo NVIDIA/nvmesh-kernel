@@ -231,7 +231,8 @@ void t_sandbox_all_init(void) {
 	sandbox_nvme_init();
 }
 
-struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
+/// Look up and return a socket object by fd. Returns null if not found.
+static struct t_sandbox_sock * TSB_socket_find_by_fd_opt(int fd) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	int i;
 	if (fd > sys->TS.debug_offset)
@@ -240,16 +241,33 @@ struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
 		if (TS->socks[i].fd == fd)
 			return &TS->socks[i];
 	}
-	BUG_ON(true);
 	return NULL;
 }
 
+/// Look up and return a socket object by fd. Requires fd to valid: aborts the program if not.
+static struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
+	if (s)
+		return s;
+	fprintf(stderr, "sandbox: no such fd %d\n", fd);
+	abort();
+	return NULL; // not reached
+}
+
 int ioctl(int fd, unsigned long int req, ...) {
-	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd(fd);
-	const char *path = tsb->addr.sun_path;
+	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd_opt(fd);
+	const char *path;
 	va_list ap;
 	int rv = 0;
 	va_start(ap, req);
+
+	if (!tsb) {
+		N_Ef(ioc5734, "no such fd=@INT", fd);
+		rv = -1;
+		goto done;
+	}
+
+	path = tsb->addr.sun_path;
 
 	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
@@ -298,8 +316,7 @@ int ioctl(int fd, unsigned long int req, ...) {
 		// Return device size in bytes
 		uint64_t *size_bytes = va_arg(ap, uint64_t*);
 		struct stat st;
-		struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-		int real_fd = s->fd;
+		int real_fd = tsb->fd;
 		if (real_fd < 0) {
 			rv = -1;
 		} else if (fstat(real_fd, &st) == 0) {
@@ -311,6 +328,8 @@ int ioctl(int fd, unsigned long int req, ...) {
 	} else {
 		BUG_ON(true);
 	}
+
+done:
 	va_end(ap);
 	return rv;
 }
@@ -514,8 +533,12 @@ int override_close(int fd) {
 		pipe_fds[1] = -1;
 		socket_destroy(sys->TSB_wake_pip.o.sock);
 	} else {
-		struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-		socket_destroy(s);
+		struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
+		if (s) {
+			socket_destroy(s);
+		} else {
+			N_Df(ovc5786, "close on untracked fd=@INT", fd);
+		}
 	}
 	return 0;
 }
