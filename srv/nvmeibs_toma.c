@@ -753,7 +753,7 @@ static void prepare_subscriber_evt_msg(struct nvmeibs_client *cl,
 								struct nvmeibs_toma_server_proc_buf *proc_buf,
 								bool is_subscribe)
 {
-	struct nvmeibs_toma_subscriber_change_msg *msg;
+	struct nvmeibs_msg_s2t_subscriber_change *msg;
 	NFIN;
 
 	memset(proc_buf, 0, sizeof(*proc_buf));
@@ -991,7 +991,7 @@ static void prepare_client_disconnect_msg(
 }
 
 static int process_client_disconnect_force_cmd(
-	struct nvmeibs_t2s_msg_client_disconnect_force_cmd *cmd)
+	struct nvmeibs_msg_t2s_client_disconnect_force_cmd *cmd)
 {
 	struct nvmeibs_ib_port *ib_port = NULL;
 	struct nvmeibs_client *cl = nvmeibs_find_client(cmd->cid, &ib_port);

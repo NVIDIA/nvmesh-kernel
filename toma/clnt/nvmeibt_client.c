@@ -47,7 +47,7 @@ out:
 	return client;
 }
 
-static struct nvmeibt_client *nvmeibt_client_add(struct nvmeibs_toma_subscriber_change_msg *msg)
+static struct nvmeibt_client *nvmeibt_client_add(struct nvmeibs_msg_s2t_subscriber_change *msg)
 {
 	struct nvmeibt_client	*client;
 	struct nvmeibt_topology	*cur_topo = nvmeibt_global_get_global();
@@ -261,7 +261,7 @@ out:
 	NFOUT;
 }
 
-void handle_client_disconnect_event(int srv_events_fd, struct nvmeibs_toma_client_disconnect_msg_hdr *h)
+void handle_client_disconnect_event(int srv_events_fd, const struct nvmeibs_msg_s2t_client_disconnect *h)
 {
 	(void)srv_events_fd;
 	if (h->payload_len) {
@@ -272,7 +272,7 @@ void handle_client_disconnect_event(int srv_events_fd, struct nvmeibs_toma_clien
 	handle_client_remove(h->cid);
 }
 
-void handle_subscriber_event(struct nvmeibs_toma_subscriber_change_msg *msg)
+void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 {
 	struct nvmeibt_client		*client;
 	int							n_local_disk;

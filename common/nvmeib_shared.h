@@ -470,12 +470,6 @@ struct nvmeib_lock_entry_constants {
 	(!(c)->w_blkset_info || !(c)->blkset_info_dbits_mask)
 
 /*****************************************************************************/
-/* client disconnect msg is split to header and payload.
-   Two consecutive reads allow the user to get the entire msg */
-struct nvmeibs_toma_client_disconnect_msg_hdr {
-	u32 cid;
-	u32 payload_len;
-}__attribute__((packed));
 
 #define NVMEIB_IB_DEVICE_NAME_MAX 64
 #define NVMEIB_GID_STR_MAX (URN_UUID_STR_LENGTH+4)	// 37 bytes is enough, typically use 40 for nice allignemnt

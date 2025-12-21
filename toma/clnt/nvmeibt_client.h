@@ -34,10 +34,10 @@ const char *nvmeibt_client_get_urn_uuid_str(struct nvmeibt_client *client);
 const char *nvmeibt_client_get_hostname(struct nvmeibt_client *client);
 int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *msg_buf, int size);
 
-void handle_subscriber_event(struct nvmeibs_toma_subscriber_change_msg *msg);
+void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg);
 struct nvmeibt_registrant_ctx;
 void handle_client_remove(int cid);
-void handle_client_disconnect_event(int srv_events_fd, struct nvmeibs_toma_client_disconnect_msg_hdr *h);
+void handle_client_disconnect_event(int srv_events_fd, const struct nvmeibs_msg_s2t_client_disconnect *h);
 void nvmeibt_client_reg_ctx_ref_added(struct nvmeibt_client *client, struct nvmeibt_registrant_ctx *reg_ctx_for_logging);
 void nvmeibt_client_reg_ctx_ref_removed(struct nvmeibt_client *client, struct nvmeibt_registrant_ctx *reg_ctx_for_logging);
 

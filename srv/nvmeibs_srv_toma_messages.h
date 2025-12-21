@@ -75,7 +75,7 @@ struct nvmeibs_msg_s2t_launch_JGC {			// Server instructs Toma to start journal 
 	char	disk_id_str[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 };
 
-struct nvmeibs_toma_subscriber_change_msg {
+struct nvmeibs_msg_s2t_subscriber_change {				// Subscribe/Unsubscribe event
 	union nvmeib_uuid	client_uuid;
 	u32					cid __attribute__ ((packed));	// client id
 	char				disk_name[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
@@ -88,7 +88,7 @@ struct nvmeibs_msg_s2t_serjio_range_cleaned {
 	char seg_id[URN_UUID_STR_LENGTH + 1];
 };
 
-struct nvmeibs_t2s_msg_client_disconnect_force_cmd {
+struct nvmeibs_msg_t2s_client_disconnect_force_cmd {
 	u32 cid;
 }__attribute__((packed));
 
@@ -120,6 +120,12 @@ struct nvmeibs_msg_s2t_disk_change {
 	char native_serial_str[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 }__attribute__((packed));
 
+struct nvmeibs_msg_s2t_client_disconnect {	// Server notifies toma that client has disconnected
+	u32 cid;
+	u32 payload_len;						// Deprecated, always no payload. Payload was related to active locks.
+}__attribute__((packed));					// Deprecated payload functionality client disconnect msg is split to header and payload. Two consecutive reads allow the user to get the entire msg */
+
+
 /* Toma <--> Server message format. Both directions */
 struct nvmeibs_toma_server_proc_buf {
 	union {
@@ -130,10 +136,10 @@ struct nvmeibs_toma_server_proc_buf {
 		u64 handle;
 	};
 	union {
-		struct nvmeibs_toma_subscriber_change_msg subscriber_change_msg;
-		struct nvmeibs_toma_client_disconnect_msg_hdr client_disconnect_msg_hdr;
+		struct nvmeibs_msg_s2t_subscriber_change subscriber_change_msg;
+		struct nvmeibs_msg_s2t_client_disconnect client_disconnect_msg_hdr;
 		struct nvmeibs_msg_s2t_disk_change disk_change_msg;
-		struct nvmeibs_t2s_msg_client_disconnect_force_cmd client_disconnect_force_cmd;
+		struct nvmeibs_msg_t2s_client_disconnect_force_cmd client_disconnect_force_cmd;
 		struct nvmeibs_msg_s2t_port_gid_change port_gid_change_msg;
 		struct nvmeibs_msg_s2t_nic_change nic_change_msg;
 		struct nvmeibs_msg_s2t_toma_status_req status_req_msg;
@@ -148,7 +154,7 @@ struct nvmeibs_toma_server_proc_buf {
 	};
 }__attribute__((packed));
 
-/* Server:Toma msg type */
+/* Server:Toma msg type For the above payloads */
 enum nvmeibs_toma_server_msg_type {
 	/* Toma requests to Server and corresponding responses */
 	// NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_REQ		= 0x00,  Deprecated
@@ -157,11 +163,8 @@ enum nvmeibs_toma_server_msg_type {
 	/*Toma login*/
 	NVMEIBS_TOMA_LOGIN							= 0x02,
 	NVMEIBS_TOMA_LOGOUT							= 0x03,
-
 	NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD	= 0x08,
-
 	NVMEIBS_TOMA_JOURNAL_INFO					= 0x09,
-
 	NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE	= 0x16,
 
 	/* Server event notifications to Toma */
