@@ -688,7 +688,8 @@ out:
 	return rv;
 }
 
-int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_active *seg_active, bool seg_deleted)
+static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_active *seg_active, bool seg_deleted);
+static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_active *seg_active, bool seg_deleted)
 {
 	int									srv_fd;
 	struct nvmeibs_toma_server_proc_buf buf;

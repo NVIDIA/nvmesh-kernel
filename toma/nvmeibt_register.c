@@ -2407,6 +2407,24 @@ out:
 	return rv;
 }
 
+
+/* cid - identifier of client's connection with server per specific disk, Command server to force disconnect clinet (cid) from disk */
+static inline int nvmeibt_client_disconnect_force_cmd(int cid)
+{
+	const int srv_fd = nvmeibt_toma_get_local_server_fd();
+	struct nvmeibs_toma_server_proc_buf buf;
+	ZEROINIT(buf);
+	buf.type = NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD;
+	buf.client_disconnect_force_cmd.cid = cid;
+	if (NNVMEIBT_PWRITE_ATOMIC(t_31_nvmeibt_disconnect_clnt, srv_fd, &buf, sizeof(buf), 0, 0, 0) < 0) {
+		N_Ef(t_32_nvmeibt_disconnect_clnt, "cid=@CID failed write (@AUTO_ERRNO)", cid);
+		return -1;
+	} else {
+		N_Df(t_33_nvmeibt_disconnect_clnt, "cid=@CID", cid);
+		return 0;
+	}
+}
+
 static void brute_force_disconnect_client(struct nvmeibt_registrant_ctx *reg_ctx)
 {
 	int		cid;

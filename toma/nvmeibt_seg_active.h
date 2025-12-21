@@ -353,7 +353,6 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 int nvmeibt_seg_active_global_scrubbing_one_time_init(void);
 
 void nvmeibt_seg_active_reset_serjio_clean_range_state_on_new_config_or_topo(struct nvmeibt_seg_active *seg_active);
-int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_active *seg_active, bool seg_deleted);
 int nvmeibt_seg_active_update_serjio_range_cleaned(char *seg_id);
 //bool nvmeibt_seg_active_is_different_topo_for_leader(struct nvmeibt_disk_segment_topo_ctx *new_t, struct nvmeibt_disk_segment_topo_ctx *old_t);
 void nvmeibt_seg_active_notify_serjio_if_seg_is_being_deleted(struct nvmeibt_seg_active *seg_active);

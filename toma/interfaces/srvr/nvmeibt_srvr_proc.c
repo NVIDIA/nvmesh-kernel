@@ -97,67 +97,6 @@ int nvmeibt_toma_announce_ready(int is_on)
 	return rv;
 }
 
-int nvmeibt_client_disconnect_force_cmd(int cid)
-{
-	int srv_fd = nvmeibt_toma_get_local_server_fd();
-	struct nvmeibs_toma_server_proc_buf buf;
-	int rv = -1;
-
-	NFIN;
-	ZEROINIT(buf);
-
-	//build the req
-	buf.type = NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD;
-	buf.client_disconnect_force_cmd.cid = cid;
-
-	//write
-	if (NNVMEIBT_PWRITE_ATOMIC(t_31_nvmeibt_disconnect_clnt, srv_fd, &buf, sizeof(buf), 0, 0, 0) < 0) {
-		N_Ef(t_32_nvmeibt_disconnect_clnt, "cid=@CID failed write (@AUTO_ERRNO)", cid);
-		goto out;
-	}
-	N_Df(t_33_nvmeibt_disconnect_clnt, "cid=@CID", cid);
-	rv = 0;
-
-out:
-	NFOUT;
-	return rv;
-}
-
-int nvmeibr_proc_notify_journal_info(const char* ldisk_id, uint64_t journal_pba, uint64_t journal_length, uint64_t serjio_db_pba, uint64_t serjio_db_length)
-{
-	int srv_fd = nvmeibt_toma_get_local_server_fd();
-	struct nvmeibs_toma_server_proc_buf buf;
-	int rv = -1;
-
-	NFIN;
-	/* Jared: SERJIO still needs to know when the partition table changes.
-			So this needs to stay for now. */
-
-	ZEROINIT(buf);
-
-	//build the req
-	buf.type = NVMEIBS_TOMA_JOURNAL_INFO;
-	nvmeibt_strlcpy(buf.journal_msg.disk_id, ldisk_id, sizeof(buf.journal_msg.disk_id));
-	buf.journal_msg.lba = journal_pba;
-	buf.journal_msg.length = journal_length;
-	buf.journal_msg.serjio_db_lba = serjio_db_pba;
-	buf.journal_msg.serjio_db_length = serjio_db_length;
-
-	N_Tf(t_01_nvmeibt_notify_jour_info, "disk=@STR journal_pba=@JOURNAL_PBA, length=@ZU, serjio_pba=@SERJIO_PBA, len=@ZU", ldisk_id, journal_pba, journal_length, serjio_db_pba, serjio_db_length);
-
-	//write
-	if (NNVMEIBT_PWRITE_ATOMIC(t_02_nvmeibt_notify_jour_info, srv_fd, &buf, sizeof(buf), 0, 0, 0) < 0) {
-		N_Ef(t_03_nvmeibt_notify_jour_info, "failed write to local server (@AUTO_ERRNO)");
-		rv = 0; N_Ef(t_04_nvmeibt_notify_jour_info, "************ Remove me once the server stops issueing an error ****************");	// LKJ
-		goto out;
-	}
-	rv = 0;
-
-out:
-	NFOUT;
-	return rv;
-}
-
 /***************************** Generic messages *******************************/
 int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg)
 {
