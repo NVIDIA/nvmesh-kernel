@@ -27,7 +27,7 @@ enum replacement_action_t {
 
 struct disk_event_wq_entry {
 	struct nvmeibt_wq_entry 	wq_entry;
-	struct nvmeibs_toma_disk_change_msg disk_change_msg;
+	struct nvmeibs_msg_s2t_disk_change disk_change_msg;
 };
 
 static const char *nvmeibs_toma_server_msg_type_to_str(
@@ -1742,14 +1742,13 @@ static void disk_change_event_freer(struct nvmeibt_wq_entry *wq_entry)
 
 static void disk_change_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 {
-	struct disk_event_wq_entry *entry;
+	struct disk_event_wq_entry *entry = container_of(wq_entry, struct disk_event_wq_entry, wq_entry);
+	const struct nvmeibs_msg_s2t_disk_change *dc = &entry->disk_change_msg;
 	struct nvmeibt_local_disk *local_disk = NULL;
 	struct nvmeibt_ascii_uuid	ldisk_id;
 
 	NFIN;
-
-	entry = container_of(wq_entry, struct disk_event_wq_entry, wq_entry);
-	nvmeibt_strlcpy(ldisk_id.str, entry->disk_change_msg.disk_id, sizeof(ldisk_id.str));
+	nvmeibt_strlcpy(ldisk_id.str, dc->disk_id, sizeof(ldisk_id.str));
 
 	/* if wq_entry was canceled, then set wq_entry->rv = -1 to be treated like error */
 	if (wq_entry->is_canceled) {
@@ -1768,24 +1767,22 @@ static void disk_change_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 		local_disk->CHANGE_EVENT_counters.active_zeroing_CHANGE_no = local_disk->CHANGE_EVENT_counters.last_CHANGE_no;
 	}
 
-	N_Tf(nju8887, "Handling DISK_CHANGE_EVENT on " LOCAL_DISK_LOG_FMT " op=@OP_CHR",
-		 entry->disk_change_msg.disk_id, entry->disk_change_msg.native_serial_str, entry->disk_change_msg.nsid, entry->disk_change_msg.op);
-
-	if (entry->disk_change_msg.op == 'a' || entry->disk_change_msg.op == 'c') {
+	N_Tf(nju8887, "Handling DISK_CHANGE_EVENT on " LOCAL_DISK_LOG_FMT " op=@OP_CHR", dc->disk_id, dc->native_serial_str, dc->nsid, dc->op);
+	if (dc->op == 'a' || dc->op == 'c') {
 		enum nvmeibt_add_rv rv;
 		char config_str[NVMEIBT_MAX_CSV_LINE_LENGTH];
 		int n_written =
-			snprintf(config_str, sizeof(config_str), "%s,%llu,%llu,%u,%u,%u,%u,%s,%u,%s,%llu,%s,%s", entry->disk_change_msg.disk_id, entry->disk_change_msg.n_blocks, entry->disk_change_msg.n_hw_blocks, entry->disk_change_msg.block_size,
-					 entry->disk_change_msg.max_request_size, entry->disk_change_msg.seq, entry->disk_change_msg.nsid, entry->disk_change_msg.dev_name,
-					 entry->disk_change_msg.metadata, entry->disk_change_msg.status, entry->disk_change_msg.vendor_id, entry->disk_change_msg.model_str,
-					 entry->disk_change_msg.native_serial_str);
+			snprintf(config_str, sizeof(config_str), "%s,%llu,%llu,%u,%u,%u,%u,%s,%u,%s,%llu,%s,%s", dc->disk_id, dc->n_blocks, dc->n_hw_blocks, dc->block_size,
+					 dc->max_request_size, dc->seq, dc->nsid, dc->dev_name,
+					 dc->metadata, dc->status, dc->vendor_id, dc->model_str,
+					 dc->native_serial_str);
 		NTOMA_ASSERT(trace_03_topology_disk_change_event_finalize, n_written < (int)sizeof(config_str), "incorrect usage of csv, long lines?");
 
 		N_Tf(aast656, "Add with config str @STR", config_str);
 		rv = nvmeibt_local_disk_add_from_config(config_str, 0);
 		if (rv ==  NVMEIBT_ADD_FAILED || rv ==  NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL) {
 			N_Ef(4bah5n2, "Error handling DISK_CHANGE_EVENT " LOCAL_DISK_LOG_FMT " op=@OP_CHR rv=@RV",
-				 entry->disk_change_msg.disk_id, entry->disk_change_msg.native_serial_str, entry->disk_change_msg.nsid, entry->disk_change_msg.op, rv);
+				 dc->disk_id, dc->native_serial_str, dc->nsid, dc->op, rv);
 			if (rv ==  NVMEIBT_ADD_FAILED) {
 				N_Ef(error_01_topology_disk_change_event_finalize, "@STR", config_str);
 				nvmeibt_abort(ES_FATAL);
@@ -1793,28 +1790,22 @@ static void disk_change_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 			goto out;
 		}
 	}
-	else if (entry->disk_change_msg.op == 'r') {
+	else if (dc->op == 'r') {
 		// Disk removed
 		nvmeibt_local_disk_remove_by_ldisk_id_str(ldisk_id.str);
 	}
-	else if (entry->disk_change_msg.op == 's') {
-		nvmeibt_local_disk_update_serjio_state(
-				entry->disk_change_msg.disk_id,
-				entry->disk_change_msg.native_serial_str,
-				entry->disk_change_msg.nsid,
-				entry->disk_change_msg.metadata);
+	else if (dc->op == 's') {
+		nvmeibt_local_disk_update_serjio_state(dc->disk_id, dc->native_serial_str, dc->nsid, dc->metadata);
 	}
 	else {
-		N_Ef(mkmki98, "Unsupported DISK_CHANGE_EVENT " LOCAL_DISK_LOG_FMT " op=@OP_CHR",
-			 entry->disk_change_msg.disk_id, entry->disk_change_msg.native_serial_str, entry->disk_change_msg.nsid, entry->disk_change_msg.op);
+		N_Ef(mkmki98, "Unsupported DISK_CHANGE_EVENT " LOCAL_DISK_LOG_FMT " op=@OP_CHR", dc->disk_id, dc->native_serial_str, dc->nsid, dc->op);
 		nvmeibt_abort(ES_FATAL);
 	}
 
 	nvmeibt_topology_setup_relationships();
 	NVMEIBT_GLOBAL_MARK_REPORT_TARGET_HAS_NEW_DATA(5ghs83j);
 	//nvmeibt_global_get_global()->should_send_segment_report = true;
-	N_IMf(shyhu76, "EVENT_DISK_CHANGE " LOCAL_DISK_LOG_FMT " op=@OP_CHR",
-		  entry->disk_change_msg.disk_id, entry->disk_change_msg.native_serial_str, entry->disk_change_msg.nsid, entry->disk_change_msg.op);
+	N_IMf(shyhu76, "EVENT_DISK_CHANGE " LOCAL_DISK_LOG_FMT " op=@OP_CHR", dc->disk_id, dc->native_serial_str, dc->nsid, dc->op);
 
 out:
 	NFOUT;
@@ -1824,7 +1815,7 @@ static void handle_serjio_state_changed(const char* ldisk_id_str, u16 vendor_id,
 {
 	// serialize the event
 	struct disk_event_wq_entry* event_serjio_state_task;
-	struct nvmeibs_toma_disk_change_msg* msg;
+	struct nvmeibs_msg_s2t_disk_change *msg;
 	char	ld_display[100];
 	struct nvmeibt_ascii_uuid		ldisk_id;
 
@@ -1992,7 +1983,7 @@ static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
     struct nvmeibt_local_disk *local_disk;
     struct nvmeibt_local_disk *stock_local_disk;
 	struct disk_event_wq_entry	*event_disk_change_task;
-	struct nvmeibs_toma_disk_change_msg *msg;
+	struct nvmeibs_msg_s2t_disk_change *msg;
 	BOOL is_formatted_with_md;
 	BOOL							is_binding_to_nvmeibs;
 	struct nvmeibt_client			*client;

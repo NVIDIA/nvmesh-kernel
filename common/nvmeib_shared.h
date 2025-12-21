@@ -493,23 +493,6 @@ enum {
 	NVMEIB_MAX_OFED_VER_STRLEN = 64,
 };
 
-struct nvmeibs_toma_disk_change_msg {
-	u64 n_blocks;
-	u64 n_hw_blocks;
-	u64 vendor_id;
-	char model_str[NVMEIB_DISK_MAX_MODEL_STR_SIZE];
-	char dev_name[DISK_NAME_LEN*4];				// EC-3152: *2 is very fishy
-	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
-	char status[LOCAL_DISK_STATUS_STR_LEN];
-	u32 block_size;
-	u32 max_request_size;
-	u32 seq;
-	u32 nsid;
-	u32 metadata;
-	char op;
-	char native_serial_str[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
-}__attribute__((packed));
-
 #define MAX_PORTS_FOR_LOCKS_GIDS (8)
 
 enum nvmeibs_serjio_state {

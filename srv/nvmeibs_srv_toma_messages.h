@@ -103,6 +103,23 @@ struct nvmeibs_msg_s2t_nic_change {
 	bool add;
 }__attribute__((packed));
 
+struct nvmeibs_msg_s2t_disk_change {
+	u64 n_blocks;
+	u64 n_hw_blocks;
+	u64 vendor_id;
+	char model_str[NVMEIB_DISK_MAX_MODEL_STR_SIZE];
+	char dev_name[DISK_NAME_LEN*4];				// EC-3152: *2 is very fishy
+	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
+	char status[LOCAL_DISK_STATUS_STR_LEN];
+	u32 block_size;
+	u32 max_request_size;
+	u32 seq;
+	u32 nsid;
+	u32 metadata;
+	char op;									// 'a' = add, 'r' = remove, 'c', 's' ???
+	char native_serial_str[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
+}__attribute__((packed));
+
 /* Toma <--> Server message format. Both directions */
 struct nvmeibs_toma_server_proc_buf {
 	union {
@@ -115,7 +132,7 @@ struct nvmeibs_toma_server_proc_buf {
 	union {
 		struct nvmeibs_toma_subscriber_change_msg subscriber_change_msg;
 		struct nvmeibs_toma_client_disconnect_msg_hdr client_disconnect_msg_hdr;
-		struct nvmeibs_toma_disk_change_msg disk_change_msg;
+		struct nvmeibs_msg_s2t_disk_change disk_change_msg;
 		struct nvmeibs_t2s_msg_client_disconnect_force_cmd client_disconnect_force_cmd;
 		struct nvmeibs_msg_s2t_port_gid_change port_gid_change_msg;
 		struct nvmeibs_msg_s2t_nic_change nic_change_msg;
