@@ -472,7 +472,6 @@ struct device_data {
 	dma_addr_t test_meta_dma;
 	struct nvmeib_public_procfs_ent *proc_smart;
 	struct nvmeib_public_procfs_ent *proc_log;
-//	struct nvmeib_public_procfs_ent *proc_freeze;
 	struct completion reset_done;
 	struct kref kref;
 
@@ -601,7 +600,6 @@ struct external_drive {
 	struct block_device *block_dev;
 #endif
 	struct nvmeib_public_procfs_ent *proc_smart;
-//	struct nvmeib_public_procfs_ent *proc_freeze;
 	bool frozen;
 	u16 vendor;
 	char model[NVMEIB_DISK_MAX_MODEL_STR_SIZE];
@@ -2862,19 +2860,6 @@ static ssize_t ext_smart_fill(void *arg, char *buf, size_t len)
 	return filled;
 }
 
-#if 0
-static ssize_t freeze_fill_buf(void *arg, char *buf, size_t len)
-{
-	struct device_data *d = arg;
-	struct drive_params *drv;
-	ssize_t filled = 0;
-
-	for (drv = d->drives; drv != NULL; drv = drv->next)
-		filled += scnprintf(buf+filled, len-filled, "%d\n", drv->frozen ? 1 : 0);
-	return filled;
-}
-#endif
-
 static LIST_HEAD(freeze_wait_list);
 static DEFINE_MUTEX(freeze_wait_lock);
 
@@ -2933,167 +2918,6 @@ void nvmeibs_remove_done(const char *id)
 {
 	freeze_wait_done(id);
 }
-
-#if 0
-static ssize_t freeze_chng(void *arg, char *buf, size_t len)
-{
-	struct device_data *d = arg;
-	struct drive_params *drv = d->drives;
-	bool freeze;
-	struct completion *wait_for = NULL;
-
-	if (len < 1)
-		return -EINVAL;
-	_NT(trace_nvme_freeze_chng, "@SERIAL @ACTION", d->serial, buf[0]);
-
-	if ((buf[0] == 'd' || buf[0] == 'D')) {
-		init_completion(&d->reset_done);
-		initaite_dev_rst(trace_dev_rst_0_nvme_freeze_chng, d);
-		/* Add 2 seconds for polling delay in out thread */
-		_NI(trace_x1_nvme_freeze_chng, "nvme-reset to @SERIAL @ACTION - Wait upto @WAIT_TIME sec", d->serial, buf[0], (long)(4+NVMEIB_CAP_TIMEOUT(d->cap))/2);
-		if (wait_for_completion_timeout(&d->reset_done,
-								(4+NVMEIB_CAP_TIMEOUT(d->cap))*HZ/2) <= 0)
-			return -ETIMEDOUT;
-		else {
-			_NI(trace_x3_nvme_freeze_chng, "sleep 5");
-			msleep(5000);
-			_NI(trace_x4_nvme_freeze_chng, "return @INT", (int)len);
-			return len;
-		}
-	}
-
-
-
-	if (d->frozen && (buf[0] == 'r' || buf[0] == 'R')) {
-		int err;
-		init_completion(&d->reset_done);
-		initaite_dev_rst(trace_dev_rst_1_nvme_freeze_chng, d);
-		/* Add 2 seconds for polling delay in out thread */
-		_NT(trace_1_nvme_freeze_chng, "Will wait @WAIT_TIME sec", (long)(4+NVMEIB_CAP_TIMEOUT(d->cap))/2);
-		if (wait_for_completion_timeout(&d->reset_done,
-								(4+NVMEIB_CAP_TIMEOUT(d->cap))*HZ/2) <= 0)
-			return -ETIMEDOUT;
-		mutex_lock(&d->dev_lock);
-		err = re_ident_ns(d);
-		mutex_unlock(&d->dev_lock);
-		if (err < 0)
-			return err;
-		return len;
-	}
-	mutex_lock(&d->dev_lock);
-	for (drv = d->drives; drv != NULL; drv = drv->next) {
-		if (drv->info.status_str) {
-			kfree(drv->info.status_str);
-			drv->info.status_str = NULL;
-		}
-		if (len > 1 && buf[1] != '\n')
-			drv->info.status_str = kstrdup(buf+1, GFP_KERNEL);
-		if (buf[0] == 's' || buf[0] == 'S')
-			nvmeibs_toma_report_event_disk_change(drv->id_str, drv->info.blocks, drv->info.block_size, drv->info.max_request_size,
-											  drv->info.seq, drv->info.nsid, drv->gendisk->disk_name,
-											  drv->info.metadata, nvmeibs_get_status(&drv->info),
-											  nvmeibs_nvme_get_vendor(&drv->info), 'c');
-	}
-	if (buf[0] == 's' || buf[0] == 'S')
-		goto unlock;
-	if (buf[0] != '0' && buf[0] != '1') {
-		len = -EINVAL;
-		goto unlock;
-	}
-	freeze = buf[0] != '0';
-	if (freeze != d->frozen) {
-		d->frozen = freeze;
-		for (drv = d->drives; drv != NULL; drv = drv->next) {
-			if (freeze) {
-				if (atomic_read(&drv->info.nref.cnt) > 1) {
-					d->frozen = !freeze;
-					len = -EBUSY;
-					goto unlock;
-				}
-				if (drv == d->drives) {	/* Only first time */
-					wait_for = &drv->info.remove_done;
-					init_completion(wait_for);
-				}
-				freeze_wait_add(drv);
-				nvme_remove_disk(drv);
-			}
-			else {
-				if (!d->need_reset && !d->removed && !d->reset_pending) {
-					nvme_add_disk(drv);
-				}
-				else {
-					_NT(trace_2_nvme_freeze_chng, "Cannot add unfrozen disk @SERIAL (@DEVICE_PTR) to srv while rst/rm, "
-					   "(nr=@NEED_RESET, rm=@REMOVED, rp=@RESET_PENDING)", d->serial, d,
-					   d->need_reset, d->removed, d->reset_pending);
-				}
-			}
-		}
-	}
-unlock:
-	mutex_unlock(&d->dev_lock);
-	if (wait_for) {
-		_NT(trace_3_nvme_freeze_chng, "wait for remove completion");
-		wait_for_completion_interruptible(wait_for);
-		_NT(trace_4_nvme_freeze_chng, "remove complete");
-		freeze_wait_del(d);
-	}
-
-	if (d && !list_empty(&d->freeze_link)) {
-		_NE(error_nvme_freeze_chng, "OOPS, dev @SERIAL (@DEVICE_PTR) still linked in freeze-list ", d->serial, d);
-		BUG();
-	}
-	return len;
-}
-
-static ssize_t ext_freeze_fill_buf(void *arg, char *buf, size_t len)
-{
-	struct external_drive *d = arg;
-	ssize_t filled = 0;
-
-	filled = scnprintf(buf, len, "%d\n", d->frozen ? 1 : 0);
-	return filled;
-}
-
-static ssize_t ext_freeze_chng(void *arg, char *buf, size_t len)
-{
-	struct external_drive *d = arg;
-	bool freeze;
-
-	if (len < 1)
-		return -EINVAL;
-	if (d->info.status_str) {
-		kfree(d->info.status_str);
-		d->info.status_str = NULL;
-	}
-	if (buf[0] == 's' || buf[0] == 'S') {
-		d->info.status_str = kstrdup(buf+1, GFP_KERNEL);
-		nvmeibs_toma_report_event_disk_change(d->info.disk_id, d->info.blocks, d->info.block_size,
-											  d->info.max_request_size, d->info.seq, d->info.nsid,
-											  d->info.drv->gendisk->disk_name, d->info.metadata,
-											  nvmeibs_get_status(&d->info),
-											  nvmeibs_nvme_get_vendor(&d->info), 'c');
-		return len;
-	}
-	if (len > 1 && buf[1] != '\n' && buf[1] != '\0')
-		return -EINVAL;
-	if (buf[0] != '0' && buf[0] != '1')
-		return -EINVAL;
-	freeze = buf[0] != '0';
-	if (freeze != d->frozen) {
-		d->frozen = freeze;
-		if (freeze) {
-			if (atomic_read(&d->info.nref.cnt) > 1) {
-				d->frozen = !freeze;
-				return -EBUSY;
-			}
-			nvmeibs_disk_nvme_remove_disk(&d->info);
-		}
-		else
-			nvmeibs_disk_nvme_add_disk(&d->info);
-	}
-	return len;
-}
-#endif
 
 extern void print_separated_lines(const char *prefix, char *p, int count);
 
@@ -3307,9 +3131,6 @@ static void set_external_info(struct external_drive *p)
 	snprintf(name_buf, sizeof name_buf, "smart%d", info->seq);
 	p->proc_smart =
 		nvmeib_public_proc_create(name_buf, nvmeibs_proc_dir, ext_smart_fill, NULL, p);
-//	snprintf(name_buf, sizeof name_buf, "freeze%d", info->seq);
-//	p->proc_freeze = nvmeib_public_proc_create(name_buf, nvmeibs_proc_dir,
-//									ext_freeze_fill_buf, ext_freeze_chng, p);
 }
 
 static void _dev_shutdown(struct device_data *d)
@@ -6186,7 +6007,6 @@ static bool nvmeibs_remove1(struct pci_dev *pdev, bool do_shutdown)
 	_NT(trace_7_nvme_nvmeibs_remove1, "remove /proc files");
 	nvmeib_public_proc_remove(d->proc_smart);
 	nvmeib_public_proc_remove(d->proc_log);
-//	nvmeib_public_proc_remove(d->proc_freeze);
 
 	_NT(trace_8_nvme_nvmeibs_remove1, "remove from dev list");
 	down_write(&global_lock);
@@ -6856,10 +6676,6 @@ static void nvmeibs_probe1(struct work_struct *arg)
 	snprintf(name_buf, sizeof name_buf, "log%d", d->seq);
 	d->proc_log =
 		nvmeib_public_proc_create(name_buf, nvmeibs_proc_dir, log_fill_buf, NULL, d);
-//	snprintf(name_buf, sizeof name_buf, "freeze%d", d->seq);
-//	d->proc_freeze = nvmeib_public_proc_create(name_buf, nvmeibs_proc_dir,
-//										freeze_fill_buf, freeze_chng, d);
-//	if (d->proc_smart == NULL || d->proc_log == NULL || d->proc_freeze == NULL)
 	if (d->proc_smart == NULL || d->proc_log == NULL)
 		_NE(error_1_nvme_nvmeibs_probe1, "Cannot create /proc files");
 
@@ -7010,7 +6826,6 @@ static ssize_t nvmeof_chng(void *arg, char *buf, size_t len)
 			return -ENXIO;
 		_ND(trace_nvme_nvmeof_chng, "removing @DISK_NAME id=@DISK_ID_STR", p->info.gendisk->disk_name, p->info.disk_id);
 		nvmeib_public_proc_remove(p->proc_smart);
-//		nvmeib_public_proc_remove(p->proc_freeze);
 		nvmeibs_disk_nvme_remove_disk(&p->info);
 		/* wait for all commands to complete */
 		kref_put(&p->done_kref, done_kref_release);
@@ -7492,7 +7307,6 @@ void nvmeibs_nvme_free_all_nvmeof(void)
 		external_drives = p->next;
 		up_write(&global_lock);
 		nvmeib_public_proc_remove(p->proc_smart);
-//		nvmeib_public_proc_remove(p->proc_freeze);
 		nvmeibs_disk_nvme_remove_disk(&p->info);
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
 		bdev_fput(p->block_dev);

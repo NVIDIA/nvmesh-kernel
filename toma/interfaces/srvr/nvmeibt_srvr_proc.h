@@ -36,7 +36,6 @@ int nvmeibt_toma_send_buf_to_client(      const char *buf, int buf_len, const st
 
 #define PCI_DISK_FILE_DO_BIND TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/bind"   	// "nvme" / "nvmeibs"
 #define PCI_DISK_FILE_UN_BIND TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/unbind" 	// "nvme" / "nvmeibs"
-#define PCI_DISK_FILE_FREEZE  TOMA_ROOT_DIR "proc/nvmeibs/freeze%u"         	// sequence number
 
 // Other server procs "/proc/nvmeibs"
 // TOMA_STATUS_PROC_PATH - directory for toa output

@@ -2276,20 +2276,6 @@ static int nvme_identify(int fd, __u32 nsid, __u32 cdw10, void *data)
 	return nvme_submit_admin_passthru(fd, &cmd);
 }
 
-static int freeze_disk(int seq, char *msg)
-{
-	char fname[NVMEIBT_LOCAL_DISK_DEV_FILE_NAME_LEN];
-	int fd;
-
-	snprintf(fname, sizeof(fname), PCI_DISK_FILE_FREEZE, seq);
-	fd = NNVMEIBT_OPEN(tfgajh4, fname, O_RDWR);
-	if (fd < 0)
-		return -1;
-	NNVMEIBT_PWRITE(hsy3uze, fd, msg, strlen(msg), 0, 0);
-	NNVMEIBT_CLOSE(xr74jka, fd);
-	return 0;
-}
-
 struct format_ctx_data {
 	pthread_mutex_t guard_mutex;
 	pthread_cond_t 	completion_signal;
@@ -2495,34 +2481,25 @@ mark_disk_as_nvmesh_formatted:
 			 entry->format_details.ldisk_id.str, nvmeibt_union_uuid_to_urn_uuid(&(entry->format_details.disk_obj_uuid)).str, entry->format_details.format_request_counter);
 	if (NNVMEIBT_PWRITE(warn_3_local_disk_format_disk_wrapper, entry->fd, dma_buffer, PAGE_SIZE, 0, 0) < 0) {
 		N_Ef(error_5_local_disk_format_disk_wrapper, "Failed to write size @SIZEOF at offset 0x0 fd=@FD buff=@BUFFER (@AUTO_ERRNO)", PAGE_SIZE, entry->fd, (void *) dma_buffer);
-
 		if (params && params->reset_after_format && bdf[0]) {
 			int fd;
-
 			N_Tf(trace_format_disk_wrapper_nl_9, "Rebinding disk due to write error");
 			close(entry->fd);
 			entry->fd = -1;
-			fd = open("/sys/bus/pci/drivers/nvmeibs/unbind", O_WRONLY);
+			fd = open("/sys/bus/pci/drivers/nvmeibs/unbind", O_WRONLY);	// Todo: cahnge to PCI_DISK_FILE_UN_BIND
 			if (fd >= 0) {
 				write(fd, bdf, strlen(bdf));
 				close(fd);
 			}
-			fd = open("/sys/bus/pci/drivers/nvmeibs/bind", O_WRONLY);
+			fd = open("/sys/bus/pci/drivers/nvmeibs/bind", O_WRONLY);	// Todo: cahnge to PCI_DISK_FILE_DO_BIND
 			if (fd >= 0) {
 				write(fd, bdf, strlen(bdf));
 				close(fd);
 			}
-			goto out;
 		}
-		// Probably if we got here, we consider the disk unusable, so freeze it.
-		if (freeze_disk(entry->seq, "0Format_Error\n") < 0) {
-			N_Ef(2fvyjgq, "Error writing Format_Error freeze state disk=@STR (@AUTO_ERRNO)", entry->ld_display);
-		}
-		goto out;
+	} else {
+		entry->rv = 0;
 	}
-
-	entry->rv = 0;
-
 out:
 	if (format_ctx) {
 		if (pthread_mutex_unlock(&format_ctx->guard_mutex)) {
