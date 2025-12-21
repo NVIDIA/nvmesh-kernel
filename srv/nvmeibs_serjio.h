@@ -43,7 +43,7 @@ int nvmeibs_serjio_map_disk_jmd_cache(struct nvmeibs_disk_info *di, struct nvmei
 /* Roman:
  * checks and sets (if needed) serjio data for the disk
  */
-int nvmeibs_serjio_set_journal_info(struct nvmeibs_disk_info* di, struct nvmeibs_toma_journal_msg* journal_msg);
+int nvmeibs_serjio_set_journal_info(struct nvmeibs_disk_info* di, struct nvmeibs_msg_t2s_journal* journal_msg);
 
 /* Roman
  * initializes serjio data on disk in the private area

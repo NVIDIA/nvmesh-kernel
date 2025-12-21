@@ -3193,7 +3193,7 @@ void nvmeibs_serjio_unmap_jmd_cache_on_dev(struct nvmeibs_dev *nic)
 }
 
 int nvmeibs_serjio_set_journal_info(struct nvmeibs_disk_info *di,
-				     struct nvmeibs_toma_journal_msg* journal_msg)
+				     struct nvmeibs_msg_t2s_journal* journal_msg)
 {
 	struct nvmeibs_serjio_disk_private_data *serjio_pd =
 		nvmeibs_disk_info_get_serjio_private_data(di);

@@ -696,7 +696,7 @@ static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_activ
 	int									wr_cnt;
 	int									rv = -1;
 	const struct nvmeibt_local_disk		*local_disk;
-	struct nvmeibs_toma_clean_journal_for_range_msg		*msg = &buf.clean_journal_msg;
+	struct nvmeibs_msg_t2s_clean_journal_for_range		*msg = &buf.clean_journal_msg;
 
 	NFIN;
 	if (!seg_active) {
@@ -952,7 +952,7 @@ out:
 	return reg_ctx_to_restore;
 }
 
-int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_toma_blkset_recovered_msg *blkset_recovered_msg)
+int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_msg_s2t_blkset_recovered *blkset_recovered_msg)
 {
 	struct stale_lock_ctx			*stale_lock;
 	struct nvmeibt_seg_active		*seg_active;

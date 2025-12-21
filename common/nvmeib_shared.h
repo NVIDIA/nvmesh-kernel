@@ -529,24 +529,6 @@ struct nvmeibs_toma_disk_segment_lock_gid_rsp {
 	u8 gids[MAX_PORTS_FOR_LOCKS_GIDS][16];
 }__attribute__((packed));
 
-struct nvmeibs_toma_client_disconnect_msg_req {
-	u32 cid;
-}__attribute__((packed));
-
-struct nvmeibs_toma_client_disconnect_force_cmd {
-	u32 cid;
-}__attribute__((packed));
-
-struct nvmeibs_toma_port_gid_change_msg {
-	char ib_dev[NVMEIB_IB_DEVICE_NAME_MAX];
-	u8 port;
-	char gid_str[NVMEIB_GID_STR_MAX];
-}__attribute__((packed));
-
-struct nvmeibs_toma_nic_change_msg {
-	char ib_dev[NVMEIB_IB_DEVICE_NAME_MAX];
-	bool add;
-}__attribute__((packed));
 
 enum nvmeibs_serjio_state {
 	/* Boot states */
@@ -896,16 +878,6 @@ static inline const char * rdma_trasport_to_string(enum nvmeib_rdma_transport t)
 		default:			return "UNKNOWN";
 	}
 }
-
-struct nvmeibs_toma_serjio_state_change_msg {
-	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
-	u16 vendor_id;
-	enum nvmeibs_serjio_status serjio_status;
-};
-
-struct nvmeibs_toma_serjio_range_cleaned_msg {
-	char seg_id[URN_UUID_STR_LENGTH + 1];
-};
 
 #define TOMA_THREAD_NAME                "nvmeibt_toma"
 #define TOMA_STATUS_PROC_DIR 			"toma_status"

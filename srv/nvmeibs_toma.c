@@ -1055,7 +1055,7 @@ static void prepare_client_disconnect_msg(
 }
 
 static int process_client_disconnect_force_cmd(
-	struct nvmeibs_toma_client_disconnect_force_cmd *cmd)
+	struct nvmeibs_t2s_msg_client_disconnect_force_cmd *cmd)
 {
 	struct nvmeibs_ib_port *ib_port = NULL;
 	struct nvmeibs_client *cl = nvmeibs_find_client(cmd->cid, &ib_port);
@@ -1078,7 +1078,7 @@ static int process_client_disconnect_force_cmd(
 }
 
 
-static int process_journal_info(struct nvmeibs_toma_journal_msg* journal_msg)
+static int process_journal_info(struct nvmeibs_msg_t2s_journal* journal_msg)
 {
 	struct list_head* disks;
 	struct nvmeibs_disk_info *di;
@@ -1108,7 +1108,7 @@ static int process_journal_info(struct nvmeibs_toma_journal_msg* journal_msg)
 	return rv;
 }
 
-static int process_clean_journal_msg(struct nvmeibs_toma_clean_journal_for_range_msg* clean_journal_msg)
+static int process_clean_journal_msg(struct nvmeibs_msg_t2s_clean_journal_for_range* clean_journal_msg)
 {
 	struct list_head* disks;
 	struct nvmeibs_disk_info *di;

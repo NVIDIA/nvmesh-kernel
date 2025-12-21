@@ -5,7 +5,7 @@
 #include "../toma/clnt/nvmeibt_client_protocol.h"
 
 /******************************** Old proc API ****************************/
-enum nvmeibs_toma_status_type {
+enum nvmeibs_toma_status_type {		// Server requests Toma for the current status specific of s specific component
 	NVMEIBS_TOMA_STATUS_ALL = 0,
 	NVMEIBS_TOMA_STATUS_RAFT,
 	NVMEIBS_TOMA_STATUS_DSEG,
@@ -25,24 +25,22 @@ enum nvmeibs_toma_status_type {
 	NVMEIBS_TOMA_STATUS_ZEROING,
 };
 
-
-struct nvmeibs_toma_status_req_msg {
+struct nvmeibs_msg_s2t_toma_status_req {	// s2t means Server to Toma, t2s is Toma to Server
 	enum nvmeibs_toma_status_type type;
-	int handle;
-	size_t max_length;
-	char fname[16];
-	int handle_req; /* when we have more than one caller, we need to differentiate between them */
+	int handle;								// Cookie passed from srvr to Toma and returned in the reply
+	size_t max_length;						// Max byte length of the reply inlcuding terminating \0
+	char fname[16];							// The proc file name that Toma should fill
+	int handle_req; /* Cookie passed from srvr to Toma and returned in the reply. When we have more than one caller, we need to differentiate between them */
 };
 
-struct nvmeibs_toma_status_resp_msg {
-	int handle;
-	size_t length;
-	int is_overflow;
-	int handle_req; /* when we have more than one caller, we need to differentiate between them */
+struct nvmeibs_msg_t2s_toma_status_resp {
+	int handle;								// Copied from the request
+	size_t length;							// Actual byte length of the reply
+	int is_overflow;						// was req->max_length too short for the reply buffer and it was truncated
+	int handle_req; 						// Copied from the request
 };
 
-
-struct nvmeibs_toma_journal_msg {
+struct nvmeibs_msg_t2s_journal {				// Toma notifies server about the location of partitions a disk's (journal/serjio-db)
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	u64 lba;
 	u64 length;
@@ -50,7 +48,7 @@ struct nvmeibs_toma_journal_msg {
 	u64 serjio_db_length;
 };
 
-struct nvmeibs_toma_clean_journal_for_range_msg {
+struct nvmeibs_msg_t2s_clean_journal_for_range {
 	char	disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	u16		vendor_id;
 	char    seg_uuid[URN_UUID_STR_LENGTH + 1];
@@ -59,7 +57,7 @@ struct nvmeibs_toma_clean_journal_for_range_msg {
 	u8		seg_deleted;
 };
 
-struct nvmeibs_toma_blkset_recovered_msg {
+struct nvmeibs_msg_s2t_blkset_recovered {		// Server, pass client notification about recovered blockset to toma
 	char	disk_segment_urn_uuid_str[NVMEIB_GID_STR_MAX];
 	u64		blkset_no;			// Blockset number in praid, used by Toma
 	u64		blkset_slba;		// Disk lba of first block in blockset (used by serjio)
@@ -67,12 +65,12 @@ struct nvmeibs_toma_blkset_recovered_msg {
 	u64		cookie; /* used to get ack on a specific message */
 };
 
-struct nvmeibs_toma_blkset_recovered_ack_msg {
-	u64 cookie; /* must be a copy of the cookie from nvmeibs_toma_blkset_recovered_msg */
+struct nvmeibs_msg_t2s_blkset_recovered_ack {
+	u64 cookie; /* must be a copy of the cookie from the above request */
 	u32 toma_rv; /* In case the operation was a failure will contain an error code */
 };
 
-struct nvmeibs_toma_trigger_JGC_cmd {
+struct nvmeibs_msg_s2t_launch_JGC {			// Server instructs Toma to start journal garbage collection recovery
 	char	disk_segment_urn_uuid_str[NVMEIB_GID_STR_MAX];
 	char	disk_id_str[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 };
@@ -86,22 +84,31 @@ struct nvmeibs_toma_subscriber_change_msg {
 	u64					toma_conn_proc_handle;		// Highest 32bits is client id, Lower 32 is identifier of segment. Together they identify conenction of client per segment. Higher 32 bits may be use to disconnect client from all segment on disk
 }__attribute__((packed));
 
-/* toma:server buffer format as
-   received/sent in proc file's
-   write/read methods */
+struct nvmeibs_msg_s2t_serjio_range_cleaned {
+	char seg_id[URN_UUID_STR_LENGTH + 1];
+};
+
+struct nvmeibs_t2s_msg_client_disconnect_force_cmd {
+	u32 cid;
+}__attribute__((packed));
+
+struct nvmeibs_msg_s2t_port_gid_change {
+	char ib_dev[NVMEIB_IB_DEVICE_NAME_MAX];
+	u8 port;
+	char gid_str[NVMEIB_GID_STR_MAX];
+}__attribute__((packed));
+
+struct nvmeibs_msg_s2t_nic_change {
+	char ib_dev[NVMEIB_IB_DEVICE_NAME_MAX];
+	bool add;
+}__attribute__((packed));
+
+/* Toma <--> Server message format. Both directions */
 struct nvmeibs_toma_server_proc_buf {
-	/*
-	 * The first u64 decides between server event or client message to TOMA:
-	 * For server event, the zero member must be 0, and then the type member
-	 * indicates the server event type.
-	 * For client messages, the client-uid (cid) - which occupies the higher
-	 * half of the handle- may not be zero.
-	 * (see also toma/nvmeibt_topology.c)
-	 */
 	union {
-		struct {
-			u32 type;
-			u32 zero;
+		struct {		// The first u64 decides between server event or client message to TOMA
+			u32 type;	// For server event, the zero member must be 0, and then the type member indicates the server event type.
+			u32 zero;	// For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero.
 		};
 		u64 handle;
 	};
@@ -111,19 +118,17 @@ struct nvmeibs_toma_server_proc_buf {
 		struct nvmeibs_toma_disk_change_msg disk_change_msg;
 		struct nvmeibs_toma_disk_segment_lock_gid_req lock_gid_req;
 		struct nvmeibs_toma_disk_segment_lock_gid_rsp lock_gid_rsp;
-		struct nvmeibs_toma_client_disconnect_msg_req client_disconnect_msg_req;
-		struct nvmeibs_toma_client_disconnect_force_cmd client_disconnect_force_cmd;
-		struct nvmeibs_toma_port_gid_change_msg port_gid_change_msg;
-		struct nvmeibs_toma_nic_change_msg nic_change_msg;
-		struct nvmeibs_toma_status_req_msg status_req_msg;
-		struct nvmeibs_toma_status_resp_msg status_resp_msg;
-		struct nvmeibs_toma_journal_msg journal_msg;
-		struct nvmeibs_toma_clean_journal_for_range_msg clean_journal_msg;
-		struct nvmeibs_toma_blkset_recovered_msg blkset_recovered_msg;
-		struct nvmeibs_toma_blkset_recovered_ack_msg blkset_recovered_ack_msg;
-		struct nvmeibs_toma_trigger_JGC_cmd					trigger_JGC_cmd;
-		struct nvmeibs_toma_serjio_state_change_msg serjio_state_change_msg;
-		struct nvmeibs_toma_serjio_range_cleaned_msg serjio_range_cleaned_msg;
+		struct nvmeibs_t2s_msg_client_disconnect_force_cmd client_disconnect_force_cmd;
+		struct nvmeibs_msg_s2t_port_gid_change port_gid_change_msg;
+		struct nvmeibs_msg_s2t_nic_change nic_change_msg;
+		struct nvmeibs_msg_s2t_toma_status_req status_req_msg;
+		struct nvmeibs_msg_t2s_toma_status_resp status_resp_msg;
+		struct nvmeibs_msg_t2s_journal journal_msg;
+		struct nvmeibs_msg_t2s_clean_journal_for_range clean_journal_msg;
+		struct nvmeibs_msg_s2t_blkset_recovered blkset_recovered_msg;
+		struct nvmeibs_msg_t2s_blkset_recovered_ack blkset_recovered_ack_msg;
+		struct nvmeibs_msg_s2t_launch_JGC trigger_JGC_cmd;
+		struct nvmeibs_msg_s2t_serjio_range_cleaned serjio_range_cleaned_msg;
 		u8 buf[0];
 	};
 }__attribute__((packed));

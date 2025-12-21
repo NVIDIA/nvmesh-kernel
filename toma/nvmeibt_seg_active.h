@@ -422,7 +422,7 @@ void nvmeibt_seg_active_set_n_txid_remaining(struct nvmeibt_seg_active *, uint64
 void nvmeibt_seg_active_stop_recovery_tasks(struct nvmeibt_seg_active *seg_active);
 
 /* miscelaneous */
-int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_toma_blkset_recovered_msg *blkset_recovered_msg);
+int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_msg_s2t_blkset_recovered *blkset_recovered_msg);
 
 void nvmeibt_recovery_set_scrub_default_period_days(int64_t period_days);
 int64_t nvmeibt_recovery_get_scrub_default_period_days(void);

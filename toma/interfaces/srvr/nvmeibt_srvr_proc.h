@@ -12,8 +12,8 @@ int nvmeibt_toma_announce_ready(int is_on);			// Login/Logout into local server
 
 /***************************** Generic messages *******************************/
 int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg);
-int nvmeibt_toma_get_msg_from_local_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
-int nvmeibt_toma_send_buf_to_client(      const char *buf, int buf_len, const struct nvmeibt_host_name *dst);
+int nvmeibt_toma_get_msg_from_local_server(     struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
+int nvmeibt_toma_send_buf_to_client(      const /* nvmeibt_client_msg */ char *buf, int buf_len, const struct nvmeibt_host_name *dst);
 
 /***************************** Netlink: New Toma-API vs kernel server, used for disk related communication */
 struct km_comm_msg_hdr {
@@ -28,7 +28,6 @@ struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeibt_km_comm_create(void);
 void					nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p);
 int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, struct km_comm_msg_hdr *hdr);
-struct nvmeib_register_change_disk;
 int	 nvmeibt_km_comm_register_disk_events(     struct nvmeibt_km_comm *p, struct nvmeib_register_change_disk *cbs);
 void nvmeibt_km_comm_ack_disk_remove(          struct nvmeibt_km_comm *p, unsigned long ack_id);
 int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);
