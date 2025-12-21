@@ -550,14 +550,11 @@ int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(void *msg_fr_local_clnt);
 static void handle_pushed_msg(
 	struct nvmeibt_km_comm *p, struct nvmeib_nl_uk_comm_msg *rcv_msg)
 {
-	struct nvmeib_nl_uk_comm_rep *rep =
-		(struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
-	struct nvmeib_push_msg_process *msg =
-		container_of(rep, struct nvmeib_push_msg_process, base);
+	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
+	struct nvmeib_push_msg_process *msg = container_of(rep, struct nvmeib_push_msg_process, base);
 	void *data = msg->start;
-
 	NFIN;
-N_Tf(wgydyqwdgdugy, "p=@PTR", p);
+	N_Tf(wgydyqwdgdugy, "p=@PTR", p);
 	nvmeibt_add_local_clnt_msg_to_toma_nl_queue(data);
 	NFOUT;
 }

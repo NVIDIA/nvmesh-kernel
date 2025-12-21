@@ -51,12 +51,12 @@ struct nvmeib_format_disk {
 
 enum nvmeib_main_gpt_update_flags {
 	NO_MAIN_GPT_UPDATE 				=	0x0,
-	
+
 	MAIN_GPT_UPDATE_STAGE_MASK			=	0x3,
 	MAIN_GPT_UPDATE_STAGE_HEADER_PRE_UPDATE 	= 	0x1,
 	MAIN_GPT_UPDATE_STAGE_ENTRIES 			=	0x2,
 	MAIN_GPT_UPDATE_STAGE_HEADER_POST_UPDATE 	= 	0x3,
-	
+
 	MAIN_GPT_UPDATE_SERJIO_MASK			=	0x4,
 	MAIN_GPT_UPDATE_SERJIO_INIT			=	0x4,
 };
@@ -107,16 +107,6 @@ struct nvmeib_io_to_disk {
 		unsigned long v;
 	};
 };
-
-static inline void nvmeib_clear_io_to_disk(struct nvmeib_io_to_disk *io_to_disk)
-{
-	io_to_disk->start_sector = 0;
-	io_to_disk->data = NULL;
-	io_to_disk->md = NULL;
-	io_to_disk->data_len = 0;
-	io_to_disk->md_len = 0;
-	io_to_disk->v = 0;
-}
 
 enum nvmeib_io_is_read {
 	NVMEIB_IO_IS_WRITE = 0,
@@ -292,26 +282,6 @@ struct nvmeib_push_msg_process {
 	char start[0];
 };
 
-static inline int nvmeibs_max_nl_reply(void)
-{
-	return
-		sizeof(struct nvmeib_nl_uk_comm_msg) +
-		sizeof(
-				union {
-						char _1[sizeof(struct nvmeib_nl_uk_comm_rep)];
-						char _2[sizeof(struct nvmeib_test_zero_reply)];
-						char _3[sizeof(struct nvmeib_ack_disk_event)];
-						char _4[sizeof(struct nvmeib_format_disk_reply)];
-						char _5[sizeof(struct nvmeib_io_to_disk_reply)];
-						char _6[sizeof(struct nvmeib_get_disk_names_reply)];
-						char _7[sizeof(struct nvmeib_disk_info_reply)];
-						char _8[sizeof(struct nvmeib_identify_disk_reply)];
-						char _9[sizeof(struct nvmeib_push_msg_process)];
-						char _a[sizeof(struct nvmeib_copied_rscs_reply)];
-				}
-		);
-}
-
 struct nvmeib_nl_toma_msg_hdr {		// Use the same header msg_to_toma and msg_from_toma. No real reason
 	int							opcode;
 	char						caller_type;
@@ -320,7 +290,7 @@ struct nvmeib_nl_toma_msg_hdr {		// Use the same header msg_to_toma and msg_from
 
 struct nvmeib_nl_msg_to_toma {
 	struct nvmeib_nl_toma_msg_hdr	hdr;
-	union {
+	union srvr2toma_payload_t {
 		struct nvmeib_nl_uk_comm_rep			nl_uk_comm_rep;
 		struct nvmeib_test_zero_reply			test_zero_reply;
 		struct nvmeib_ack_disk_event			ack_disk_event;
@@ -332,6 +302,11 @@ struct nvmeib_nl_msg_to_toma {
 		struct nvmeib_copied_rscs_reply			copied_rscs_reply;
 	} payload;
 };
+
+static inline int nvmeibs_max_nl_reply(void)
+{
+	return sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union srvr2toma_payload_t);
+}
 
 /* message from toma to ... */
 struct nvmeib_nl_msg_from_toma {
