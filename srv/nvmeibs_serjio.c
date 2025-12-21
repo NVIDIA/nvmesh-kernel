@@ -1786,8 +1786,8 @@ static int fill_ranges_seq_show(struct seq_file *m, void *v)
 	rtc_time_to_tm(jrange_entry->last_returned.tv_sec, &last_ret_tm);
 	rtc_time_to_tm(jrange_entry->reserved.tv_sec, &assigned_tm);
 	seq_printf(m, "%u,%u,%u,%u,%u,%u,%s,%llu,%s,%.32s,",
-				jrange_entry->range_idx, 
-				jrange_entry->binje_shift == JRANGE_INVALID_BINJE_SHIFT ? 
+				jrange_entry->range_idx,
+				jrange_entry->binje_shift == JRANGE_INVALID_BINJE_SHIFT ?
 					NVMEIB_EC_INVALID_JOURNAL_BINJE : (1U << jrange_entry->binje_shift),
 				jrange_entry->rng_rlba, jrange_entry->rng_nlba,
 				jrange_entry->rng_rblk, jrange_entry->rng_nblk,
@@ -3385,7 +3385,7 @@ static void calc_io_completion_stats_cb(void *arg, int status, u32 result)
 	size_t comp_lbas = op_rsrc->nvme_req.data_len >> nvmeibs_disk_info_get_block_shift(serjio_pd->di);
 	int comp_iops = 1;
 
-	/* Update your stats here with current_work_type, is_error, is_read, comp_bytes, comp_lbas and comp_iops  
+	/* Update your stats here with current_work_type, is_error, is_read, comp_bytes, comp_lbas and comp_iops
 	 * Make sure to take spinlock as the completions can come on multiple NVME queues */
 
 	nvmeibs_serjio_update_io_stats_on_rsrc_completion(&serjio_pd->stats, current_work_type, comp_bytes, comp_lbas, comp_iops, is_read, is_error, &op_rsrc->op_rsrc_stats);
@@ -3506,7 +3506,7 @@ static int submit_nvme_op_rsrc_to_disk(struct nvme_op_rsrc *op_rsrc, enum nvme_o
 
 		nvmeibs_serjio_work_type_submit_io_success(&serjio_pd->stats, serjio_pd->current_work_type, nvme_op, submitted_bytes, block_size);
 	}
-	
+
 	return rv;
 }
 
@@ -4725,7 +4725,7 @@ static void read_jmdc_entry_cb(void *arg, int status, u32 result)
 		u64 j2d_start = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
 		u64 j2d_end = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
 		int chain_err = NVMEIB_JENTRY_CHAIN_OK;
-		if (jrange_entry->status == JRANGE_FREE || 
+		if (jrange_entry->status == JRANGE_FREE ||
 			jrange_entry->status == JRANGE_QUARANTINED ||
 			jrange_entry->status == JRANGE_DB_ZERO ||
 			(CLEAN_ENTRIES_WITH_INVALID_J2D &&
@@ -5368,8 +5368,8 @@ static void disconnect_all_allocated_clients(struct nvmeibs_serjio_disk_private_
 				jrng->client_id, jrng->range_idx);
 			if ((rv = nvmeibs_remove_cid_clients(jrng->client_id,
 					 NVMEIBS_LOGOUT_REASON_SERJIO_ERROR) < 0)) {
-				_NEs(err_disconnect_all_allocated_clients, serjio_pd, 
-				     "nvmeibs_remove_cid_clients failed (@RV) for client @CID_LLONG\n", 
+				_NEs(err_disconnect_all_allocated_clients, serjio_pd,
+				     "nvmeibs_remove_cid_clients failed (@RV) for client @CID_LLONG\n",
 				     rv, jrng->client_id);
 			}
 		}
@@ -5444,7 +5444,7 @@ static DECLARE_IO_WQ_FN(io_rd_gpt_fn)
 		_NTs(io_rd_gpt_fn_t4, serjio_pd, "SERJIO in invalid state @SERJIO_STATE", init_state);
 		BUG_ON(1);
 	}
-	
+
 	if (nvmeibs_serjio_fail_next_gpt_update && init_state == SERJIO_GPT_UPDATE) {
 		_NTs(io_rd_gpt_fn_t5, serjio_pd, "SERJIO TEST - Failing GPT Update");
 		nvmeibs_serjio_fail_next_gpt_update = false;
@@ -5550,11 +5550,11 @@ static DECLARE_IO_WQ_FN(io_rd_gpt_fn)
 
 	if (init_state == SERJIO_GPT_UPDATE) {
 		if (serjio_pd->gpt_upd_state != SERJIO_GPT_UPDATE_CANCELLED) {
-			SERJIO_BUG_ON(serjio_pd->n_gpt_ents != serjio_pd->n_pend_gpt_ents, 
-				      err_serjio_io_rd_gpt_fn_n_ents_chng, serjio_pd, 
+			SERJIO_BUG_ON(serjio_pd->n_gpt_ents != serjio_pd->n_pend_gpt_ents,
+				      err_serjio_io_rd_gpt_fn_n_ents_chng, serjio_pd,
 					"Num partition entries changed from pending GPT update");
-			SERJIO_BUG_ON(memcmp(serjio_pd->gpt_entry, serjio_pd->pend_gpt_ents, 
-					     serjio_pd->n_gpt_ents * sizeof(struct gpt_entry)) != 0, 
+			SERJIO_BUG_ON(memcmp(serjio_pd->gpt_entry, serjio_pd->pend_gpt_ents,
+					     serjio_pd->n_gpt_ents * sizeof(struct gpt_entry)) != 0,
 						err_serjio_io_rd_gpt_fn_ents_chng, serjio_pd,
 				      "Partition entries changed from pending GPT update");
 		}
@@ -5611,7 +5611,7 @@ static DECLARE_IO_WQ_FN(io_rd_gpt_fn)
 	} else {
 		rv = run_on_io_wq(serjio_pd, io_rd_db_fn, NULL, false, true, NVMEIBS_SERJIO_WORK_TYPE_RD_DB);
 	}
-	
+
 	goto out;
 
 unlock:
@@ -5646,10 +5646,10 @@ static int check_jrnl_rng_blk(struct nvmeibs_serjio_disk_private_data *serjio_pd
 			unsigned exp_n_ents;
 			/* [NVMESH-5279]: There are 2 possibilities for ranges with index < NVMEIB_EC_NUM_RESERVED_JOURNAL_RANGES
 			 * 1: SERJIO DB was init before the fix
-			 *	==> Ranges 0, 1, 2 have status JRANGE_FREE, and are allocated on disk 
+			 *	==> Ranges 0, 1, 2 have status JRANGE_FREE, and are allocated on disk
 			 * 		i.e. rng->rng_rlba and rng->rng_nlba are valid and must be taken into account.
-			 * 2: SERJIO DB was init after the fix 
-			 * 	==> Ranges 0, 1, 2 have status JRANGE_INVALID, but are not allocated on disk 
+			 * 2: SERJIO DB was init after the fix
+			 * 	==> Ranges 0, 1, 2 have status JRANGE_INVALID, but are not allocated on disk
 			 * 		i.e. rng->rng_rlba == NVMEIB_EC_INVALID_JOURNAL_RLBA and rng->rng_rblk == NVMEIB_EC_INVALID_JOURNAL_RBLK
 			 */
 			if (rng->status == JRANGE_DB_ERR || rng->status == JRANGE_DB_ZERO || rng->status == JRANGE_INVALID)
@@ -5676,9 +5676,9 @@ static int check_jrnl_rng_blk(struct nvmeibs_serjio_disk_private_data *serjio_pd
 					goto next_rng;
 				}
 			}
-			if (rng->status > JRANGE_ALLOCATED && 
-				rng->status != JRANGE_RSVD_DB_ERR && 
-				rng->status != JRANGE_QUARANTINED) 
+			if (rng->status > JRANGE_ALLOCATED &&
+				rng->status != JRANGE_RSVD_DB_ERR &&
+				rng->status != JRANGE_QUARANTINED)
 			{
 				_NEs(err_check_jrnl_rng_blk_inv_state, serjio_pd,
 				     "Range @JRNL_RNG_IDX has invalid state @JRANGE_STATUS",
@@ -5796,7 +5796,7 @@ static int set_jrnl_rng_blk(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 	u32 rng_rblk;
 	const int n_rng_sched = 8;
 	uuid_be new_init_db_uuid;
-	
+
 	nvmeibs_serjio_uuid_generate(new_init_db_uuid.b);
 
 	/* All valid ranges are free, update the number of blocks per range */
@@ -5888,7 +5888,7 @@ static int set_jrnl_rng_blk(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 		BUG_ON(rng->status != JRANGE_INVALID);
 		rng->init_db_uuid = new_init_db_uuid;
 		rng->init_db_uuid_done = NULL_UUID_BE;
-		
+
 		/* [NVMESH-5279]: Make ranges 0,1,2 invalid as well as ranges past the end of the partition */
 		if ((invalid_jris_exist_on_disk || i >= NVMEIB_EC_NUM_RESERVED_JOURNAL_RANGES) &&
 			rng_rlba < serjio_pd->disk_ranges.journal.len_nlbas)
@@ -5981,7 +5981,7 @@ static int set_jrnl_rng_blk(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 			_NWs(warn_serjio_set_jrnl_rng_blk_fail_write_db_2, serjio_pd,
 			"Failed (@RV) to write SERJIO DB Entry @JRNL_RNG_IDX", rv, rng->range_idx);
 			/* Write Failed - Put the jrange in the error list */
-			
+
 			/* Lock is needed because the callback from write_jrange_to_serjio_db can also modify this stuff */
 			spin_lock_irqsave(&jranges_alloc_tbl->lock, flags);
 			hlist_del(&rng->link);
@@ -6062,7 +6062,7 @@ static DECLARE_IO_WQ_FN(io_rd_db_fn)
 		SERJIO_BUG_ON(jrng->status == JRANGE_UNKNOWN, bug_serjio_io_rd_db_fn_rng_inv_state, serjio_pd,
 			      "Range @JRNL_RNG_IDX in invalid state @JRANGE_STATUS",
 				jrng->range_idx, jrng->status);
-		
+
 		if (jrng->status > JRANGE_STATUS_DB_MAX) {
 			_NEs(err_serjio_io_rd_db_fn_both_first_and_last_rng_err, serjio_pd,
 			     "SERJIO does not support recovery from DB errors in both first range and last range @JRNL_RNG_IDX (state @JRANGE_STATUS)",
@@ -6215,7 +6215,7 @@ static int rd_jrnl(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 		}
 		if (jrange_entry->status > JRANGE_ALLOCATED && jrange_entry->status != JRANGE_QUARANTINED) {
 			_NTs(trace_serjio_rd_jrnl_skip_range_inv_state, serjio_pd,
-			     "Skipping range @JRNL_RNG_IDX in state @JRANGE_STATUS", 
+			     "Skipping range @JRNL_RNG_IDX in state @JRANGE_STATUS",
 				jrange_entry->range_idx, jrange_entry->status);
 			continue;
 		}
@@ -6281,7 +6281,7 @@ static int free_jrnl_rng(struct jrange_entry *rng, struct completion *comp, atom
 	/* Then clear the range state */
 	spin_lock_irqsave(&rng->lock, flags);
 	if (rng->range_idx < NVMEIB_EC_NUM_RESERVED_JOURNAL_RANGES) {
-		/* [NVMESH-5279]: Invalid JRI was allocated to client and is now free. 
+		/* [NVMESH-5279]: Invalid JRI was allocated to client and is now free.
 		 *	==> Add to invalid list */
 		_NTs(trace_serjio_free_jrnl_rng_fail_inv_jri, serjio_pd,
 		     "Range @JRNL_RNG_IDX is invalid for client "
@@ -6350,7 +6350,7 @@ static int free_jrnl_rng(struct jrange_entry *rng, struct completion *comp, atom
 		/* Write Failed - Put the jrange in the error list */
 		spin_lock_irqsave(&jranges_alloc_tbl->lock, flags);
 		hlist_del(&rng->link);
-		if (rng->range_idx >= NVMEIB_EC_NUM_RESERVED_JOURNAL_RANGES) 
+		if (rng->range_idx >= NVMEIB_EC_NUM_RESERVED_JOURNAL_RANGES)
 			jranges_alloc_tbl->num_free_rngs--;
 		hlist_add_head(&rng->link, &jranges_alloc_tbl->db_err_ranges);
 		jranges_alloc_tbl->num_db_err_rngs++;
@@ -7049,7 +7049,7 @@ static DECLARE_IO_WQ_FN(io_alloc_rng_fn)
 				ret_entry = &jranges_alloc_tbl->ranges[next_free_alloc_quarantined_idx];
 				if (ret_entry->status == JRANGE_QUARANTINED) {
 					_NTs(trace_8_serjio_io_alloc_rng_fn, serjio_pd,
-					     "Allocating quarantined range @JRNL_RNG_IDX to client", 
+					     "Allocating quarantined range @JRNL_RNG_IDX to client",
 						next_free_alloc_quarantined_idx);
 					hlist_del_init(&ret_entry->link);
 					jranges_alloc_tbl->num_quarantined_rngs--;
@@ -7066,7 +7066,7 @@ static DECLARE_IO_WQ_FN(io_alloc_rng_fn)
 					ret_entry = hlist_entry(jranges_alloc_tbl->quarantined_ranges.first,
 							struct jrange_entry, link);
 					_NTs(trace_10_serjio_io_alloc_rng_fn, serjio_pd,
-					     "Allocating quarantined range @JRNL_RNG_IDX to client", 
+					     "Allocating quarantined range @JRNL_RNG_IDX to client",
 					next_free_alloc_quarantined_idx);
 					hlist_del_init(&ret_entry->link);
 					jranges_alloc_tbl->num_quarantined_rngs--;
@@ -7079,7 +7079,7 @@ static DECLARE_IO_WQ_FN(io_alloc_rng_fn)
 					"Cannot allocate quarantined range to client - No quarantined ranges");
 			}
 		}
-		
+
 		if (!jranges_alloc_tbl->num_free_rngs) {
 			_NTs(trace_5_serjio_io_alloc_rng_fn, serjio_pd, "No free journal ranges to allocate to client @CLIENT_UUID (@CLIENT_HOST)",
 				&client_uuid, client_host);
@@ -8269,7 +8269,7 @@ static DECLARE_IO_WQ_FN(io_cln_jrnl_disk_rng_start_fn)
 		if ((rv = nvmeibs_toma_report_event_serjio_disk_range_cleaned(
 			serjio_pd->di, seg_uuid_str)))
 		{
-			_NEs(error_serjio_io_cln_jrnl_disk_rng_start_fn_failed_report, serjio_pd, 
+			_NEs(error_serjio_io_cln_jrnl_disk_rng_start_fn_failed_report, serjio_pd,
 			     "Failed (@INT) to report segment @STR clean to TOMA",
 			     rv, seg_uuid_str);
 		}
@@ -9650,7 +9650,7 @@ static DECLARE_IO_WQ_FN(io_gpt_upd_fn)
 		} else if (is_gpt_ent_jrnl(new_gpt_ent)) {
 			u64 new_slba = le64_to_cpu(new_gpt_ent->starting_lba);
 			u64 new_elba = le64_to_cpu(new_gpt_ent->ending_lba);
-			
+
 			new_disk_ranges.journal.lba = new_slba;
 			new_disk_ranges.journal.len_nlbas = new_elba - new_slba + 1;
 			new_disk_ranges.journal.part_idx = i;
@@ -9703,7 +9703,7 @@ static DECLARE_IO_WQ_FN(io_gpt_upd_fn)
 		}
 		goto free_mem;
 	}
-	
+
 	if (new_disk_ranges.journal.part_idx < 0) {
 		_NEs(error_serjio_io_gpt_upd_fn_jrnl_missing, serjio_pd,
 		     "Journal missing in new GPT");
@@ -9774,13 +9774,13 @@ static DECLARE_IO_WQ_FN(io_gpt_upd_fn)
 		new_disk_ranges.db.len_nlbas != serjio_pd->disk_ranges.db.len_nlbas)
 	{
 		_NEs(error_serjio_io_gpt_upd_fn_serjio_db_moved, serjio_pd,
-			"SERJIO DB in updated GPT unexpectedly moved to [@SLBA_LLONG, @ELBA]", 
+			"SERJIO DB in updated GPT unexpectedly moved to [@SLBA_LLONG, @ELBA]",
 			new_disk_ranges.db.lba, new_disk_ranges.db.lba + new_disk_ranges.db.len_nlbas - 1);
 		rv = -EINVAL;
 		goto free_mem;
 	}
 	if (new_disk_ranges.journal.lba != serjio_pd->disk_ranges.journal.lba ||
-		new_disk_ranges.journal.len_nlbas != serjio_pd->disk_ranges.journal.len_nlbas) 
+		new_disk_ranges.journal.len_nlbas != serjio_pd->disk_ranges.journal.len_nlbas)
 	{
 		_NEs(error_serjio_io_gpt_upd_fn_jrnl_moved, serjio_pd,
 		     "Journal in new updated unexpectedly moved to [@SLBA_LLONG, @ELBA]",
@@ -9956,7 +9956,7 @@ int nvmeibs_serjio_gpt_update_done(struct nvmeibs_disk_info *di, bool primary,
 		rv = 0;
 		goto out;
 	}
-	
+
 	if (status >= 0)
 		rv = run_on_io_wq(serjio_pd, io_gpt_upd_done_fn, &param, true, true, NVMEIBS_SERJIO_WORK_TYPE_GPT_UPD_DONE);
 	else
