@@ -1735,7 +1735,7 @@ static bool handle_nl(struct nvmeibs_um_comm *p, struct netlink_event *e)
 
 	NFIN;
 	msg = e->p;
-	switch (msg->caller_type) {
+	switch ((enum nvmeibs_um_caller_type)msg->caller_type) {
 	case TOMA_CALLER:
 		p->toma_is_up = true;
 		p->next_toma_keep_alive = jiffies + wait_for_toma_dt();
@@ -2719,10 +2719,10 @@ static inline void *dma_alloc_coherent_opt(struct device *dev, size_t size, dma_
 
 	if (dev != NULL)
 		return dma_alloc_coherent(dev, size, dma_handle, flag);
-	
+
 	if ((p = alloc_pages_exact(size, flag)) == NULL)
 		return NULL;
- 
+
 	*dma_handle = (dma_addr_t)virt_to_phys(p);
 	return p;
 }
@@ -3032,7 +3032,7 @@ static int prepare_req(
 		goto error;
 	}
 	for (i = 0; i < n_pages; ++i) {
-		req->pages[i] = alloc_pages_node(dev ? dev->numa_node : NUMA_NO_NODE, GFP_KERNEL, 0); 
+		req->pages[i] = alloc_pages_node(dev ? dev->numa_node : NUMA_NO_NODE, GFP_KERNEL, 0);
 		if (!req->pages[i]) {
 			_NE(error_4_um_comm_prepare_req, "Failed to allocate page @PAGE_NUM for pd @DISK_ID_STR", i, pd->di->disk_id);
 			goto error;
@@ -3234,7 +3234,7 @@ static int perpare_pd(struct per_disk *pd)
 	if (!list_empty(&pd->p->processes) &&
 		send_disk_to_processes(pd->p, pd))
 	{
-		/* [NVMESH-4263] - Dont exit pd thread if send_disk_to_processes fails and 
+		/* [NVMESH-4263] - Dont exit pd thread if send_disk_to_processes fails and
 		 * toma is not up.Solves race where TOMA is connecting just as the drive is added.
 		if (pd->p->toma_is_up)
 			goto error_pd;
@@ -4013,7 +4013,7 @@ invalid_param:
 rep_failed:
 	if (serjio_gpt_update) {
 		/* Tell SERJIO GPT Update Failed */
-		nvmeibs_serjio_gpt_update_done(pd->di, 
+		nvmeibs_serjio_gpt_update_done(pd->di,
 			wmsg->start_sector == 1, wmsg->gpt_update_flags, -EIO);
 	}
 	reply_error_code(pd->p, e, csce_io_failed);

@@ -188,9 +188,7 @@ enum nvmeibs_toma_server_msg_type {
 #define NETLINK_SRV_COMM 31
 #define NETLINK_SRV_COMM_MAX_PAYLOAD 1024
 #define NVMESH_NL_MSG_TYPE (NLMSG_MIN_TYPE + 1)
-#define TOMA_CALLER 'T'
-#define INFRA_CALLER 'I'
-#define LOCAL_CLNT_CALLER 'C'
+enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT_CALLER = 'C' };
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
 struct nvmeib_nl_uk_comm_msg {
@@ -198,7 +196,7 @@ struct nvmeib_nl_uk_comm_msg {
     int len;
     int opcode;
 	/* the name of the caller */
-	char caller_type;
+	char caller_type;				// enum nvmeibs_um_caller_type
     unsigned long id __attribute__((aligned(8)));
     char data[0];
 };
@@ -338,25 +336,17 @@ enum nvmeib_main_gpt_update_flags {
 static inline const char *nvmeib_gpt_update_str(enum nvmeib_main_gpt_update_flags gpt_update, bool is_primary)
 {
 	switch (gpt_update & MAIN_GPT_UPDATE_STAGE_MASK) {
-	case NO_MAIN_GPT_UPDATE:
-		return "No Main GPT Update";
+	case NO_MAIN_GPT_UPDATE:	return "No Main GPT Update";
 	case MAIN_GPT_UPDATE_STAGE_HEADER_PRE_UPDATE:
-		if (is_primary)
-			return "Main Primary GPT Header Pre-Update";
-		else
-			return "Alternate Primary GPT Header Pre-Update";
+		if (is_primary)			return      "Main Primary GPT Header Pre-Update";
+		else					return "Alternate Primary GPT Header Pre-Update";
 	case MAIN_GPT_UPDATE_STAGE_ENTRIES:
-		if (is_primary)
-			return "Main Primary GPT Entries";
-		else
-			return "Alternate Primary GPT Entries";
+		if (is_primary)			return      "Main Primary GPT Entries";
+		else					return "Alternate Primary GPT Entries";
 	case MAIN_GPT_UPDATE_STAGE_HEADER_POST_UPDATE:
-		if (is_primary)
-			return "Main Primary GPT Header Post-Update";
-		else
-			return "Alternate Primary GPT Header Post-Update";
-	default:
-		return "Unknown Main GPT Update";
+		if (is_primary)			return      "Main Primary GPT Header Post-Update";
+		else					return "Alternate Primary GPT Header Post-Update";
+	default:					return "Unknown Main GPT Update";
 	}
 }
 
@@ -558,7 +548,7 @@ struct nvmeib_push_msg_process {
 
 struct nvmeib_nl_toma_msg_hdr {		// Use the same header msg_to_toma and msg_from_toma. No real reason
 	int							opcode;
-	char						caller_type;
+	char						caller_type;	// == TOMA_CALLER
 	pid_t						toma_pid;
 };
 
