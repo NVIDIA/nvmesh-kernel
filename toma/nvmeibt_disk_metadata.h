@@ -3,7 +3,7 @@
 
 #include "nvmeibt_params.h"
 #include "nvmeibt_common.h"
-#include "interfaces/srvr/nvmeibt_km_comm.h"
+#include "interfaces/srvr/nvmeibt_srvr_proc.h"
 
 struct nvmeibt_mbr_partition_record
 {

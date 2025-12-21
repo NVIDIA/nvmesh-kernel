@@ -18,7 +18,7 @@
 #include <sys/ucontext.h>
 #include <sys/un.h>
 #include <pthread.h>
-#include "nvmeibt_km_comm.h"
+#include "nvmeibt_srvr_proc.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_topology.h"

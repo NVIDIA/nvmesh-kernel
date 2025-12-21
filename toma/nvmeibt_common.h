@@ -76,6 +76,7 @@ typedef int (*nvmeibt_status_printf_fn_type)(void *ctx, const char *format, ...)
 #include "common/compat/kr_incs_types.h"
 #include "common/nvmeib_math.h"
 #include "utils/nvmeibt_uuid.h"
+#include "srv/nvmeibs_srv_toma_messages.h"
 
 static inline int nvmeibt_do_ranges_overlap(unsigned long long s0, unsigned long long e0, unsigned long long s1, unsigned long long e1)
 {

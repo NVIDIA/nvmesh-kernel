@@ -88,6 +88,7 @@ void syslog(int priority, const char *fmt, ...) {
 struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "common/nvmeib_shared.h"
+#include "srv/nvmeibs_srv_toma_messages.h"
 ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
 	(void)fd; (void)offset; (void)flags;
