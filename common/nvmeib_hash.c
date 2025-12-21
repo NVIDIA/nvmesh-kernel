@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "compat/kr_incs_time.h"
+
+#if defined IS_HASH_UNITTEST
+#define IS_EXTERNAL_UNITTEST 1
+#else	// #if defined IS_HASH_UNITTEST
 #define IS_HASH_UNITTEST 0
+#define IS_EXTERNAL_UNITTEST 0
+#endif	// #if defined IS_HASH_UNITTEST
 
 /******************************************************************************/
 
@@ -151,7 +157,7 @@ static void nvmeib_hash_resize(struct nvmeib_hash_table *hash_tbl)
 	free(old_arr);
 	getnstimeofday_boot(&end_timespec);
 #if IS_HASH_UNITTEST
-	fprintf(stdout, "nvmeib_hash_resize() took %lldns\n", timespec_diff_ns(end_timespec, start_timespec));
+	fprintf(stdout, "nvmeib_hash_resize() took %ldns\n", timespec_diff_ns(end_timespec, start_timespec));
 #endif	// #if IS_HASH_UNITTEST
 out:;
 }
@@ -183,7 +189,7 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 		if (is_found) {
 			rv_ptr_to_obj = hash_tbl->arr[idx].ptr_to_obj;
 #if IS_HASH_UNITTEST
-			fprintf(stdout, "add found: key=(%llx,%llx)%p hash_tbl->arr[%d].key=(%llx,%llx)%p\n", key->ll[1], key->ll[0], in_ptr_to_obj, idx, hash_tbl->arr[idx].key.ll[1], hash_tbl->arr[idx].key.ll[0], hash_tbl->arr[idx].ptr_to_obj);
+			fprintf(stdout, "add found: key=(%lx,%lx)%p hash_tbl->arr[%d].key=(%lx,%lx)%p\n", key->ll[1], key->ll[0], in_ptr_to_obj, idx, hash_tbl->arr[idx].key.ll[1], hash_tbl->arr[idx].key.ll[0], hash_tbl->arr[idx].ptr_to_obj);
 #else	// #if IS_HASH_UNITTEST
 #endif	// #if IS_HASH_UNITTEST
 			goto out;
@@ -538,7 +544,7 @@ void nvmeib_hash_dump_tbl(struct nvmeib_hash_table *hash_tbl)
 #endif	// #if IS_HASH_UNITTEST
 		} else {
 #if IS_HASH_UNITTEST
-			fprintf(stdout, "		%d: %x  %p  %llx %llx", i, e.scrambled, e.ptr_to_obj, e.key.ll[0], e.key.ll[1]);
+			fprintf(stdout, "		%d: %x  %p  %lx %lx", i, e.scrambled, e.ptr_to_obj, e.key.ll[0], e.key.ll[1]);
 #else	// #if IS_HASH_UNITTEST
 			N_Tf(wmpu6n1, "		@INT: @X  @PTR  @INT64_TX @INT64_TX", i, e.scrambled, e.ptr_to_obj, e.key.ll[0], e.key.ll[1]);
 #endif	// #if IS_HASH_UNITTEST
@@ -560,6 +566,8 @@ void nvmeib_hash_free_all_tables(void)
 out:;
 }
 
+#if IS_EXTERNAL_UNITTEST
+#else	// #if IS_EXTERNAL_UNITTEST
 #if IS_HASH_UNITTEST
 int main() {
 	struct nvmeib_hash_table	*ht1, *ht2, *ht3, *ht4;
@@ -706,4 +714,5 @@ int main() {
 	return 0;
 }
 #endif	// #if IS_HASH_UNITTEST
+#endif	// #if IS_EXTERNAL_UNITTEST
 

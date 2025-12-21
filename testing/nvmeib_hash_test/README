@@ -1,0 +1,78 @@
+NVMEIB Hash Table Test Suite
+============================
+
+This directory contains comprehensive tests for the nvmeib_hash.c hash table implementation.
+
+Building the Tests
+------------------
+To compile the test suite:
+    make
+
+Running the Tests
+-----------------
+To run all tests:
+    make test
+
+Or run directly:
+    ./nvmeib_hash_test
+
+Test Coverage
+-------------
+The test suite covers:
+
+1. Basic Operations
+   - test_uint32_basic: Basic uint32_t add/search/delete operations
+   - test_uint64_basic: Basic uint64_t operations
+   - test_uuid_basic: Basic UUID operations
+   - test_ascii_basic: Basic ASCII string operations
+
+2. Collision Handling
+   - test_collisions: Tests proper handling of hash collisions
+
+3. Dynamic Resizing
+   - test_resize: Tests hash table growth when load factor is exceeded
+   - test_shrink: Tests hash table shrinking after deletions
+
+4. Deletion Logic
+   - test_delete_chain: Tests deletion with chain rearrangement
+   - test_reuse_deleted_slots: Tests that deleted slots are properly reused
+
+5. Edge Cases
+   - test_empty_table: Tests operations on empty hash tables
+   - test_foreach: Tests the NVMEIB_HASH_FOREACH macro
+   - test_ascii_varying_lengths: Tests ASCII strings of varying lengths
+   - test_multiple_tables: Tests multiple concurrent hash tables
+
+6. Stress Testing
+   - test_large_dataset: Tests with 10,000 entries
+   - benchmark_operations: Performance benchmarks for add/search/delete
+
+Test Output
+-----------
+Each test prints its status as it runs. A summary is printed at the end:
+- Number of tests run
+- Number of tests passed
+- Number of tests failed
+
+Exit code is 0 if all tests pass, 1 if any test fails.
+
+Implementation Notes
+--------------------
+The test suite includes:
+- Mock implementations of required functions (murmur3_32, time functions)
+- The actual hash table implementation from nvmeib_hash.c compiled with IS_HASH_UNITTEST=1
+- Comprehensive assertions to verify correct behavior
+- Performance benchmarks
+
+Cleaning Up
+-----------
+To remove compiled binaries:
+    make clean
+
+
+
+
+
+
+
+
