@@ -510,25 +510,7 @@ struct nvmeibs_toma_disk_change_msg {
 	char native_serial_str[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 }__attribute__((packed));
 
-enum nvmeibs_toma_lock_gid_op {
-	NVMEIBS_TOMA_LOCK_GID_OP_GET = 0,
-	NVMEIBS_TOMA_LOCK_GID_OP_PUT = 1,
-};
-struct nvmeibs_toma_disk_segment_lock_gid_req {
-	enum nvmeibs_toma_lock_gid_op op;
-	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
-	int seg_id;
-}__attribute__((packed));
-
 #define MAX_PORTS_FOR_LOCKS_GIDS (8)
-
-struct nvmeibs_toma_disk_segment_lock_gid_rsp {
-	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
-	int seg_id;
-	int num_gids;
-	u8 gids[MAX_PORTS_FOR_LOCKS_GIDS][16];
-}__attribute__((packed));
-
 
 enum nvmeibs_serjio_state {
 	/* Boot states */

@@ -116,8 +116,6 @@ struct nvmeibs_toma_server_proc_buf {
 		struct nvmeibs_toma_subscriber_change_msg subscriber_change_msg;
 		struct nvmeibs_toma_client_disconnect_msg_hdr client_disconnect_msg_hdr;
 		struct nvmeibs_toma_disk_change_msg disk_change_msg;
-		struct nvmeibs_toma_disk_segment_lock_gid_req lock_gid_req;
-		struct nvmeibs_toma_disk_segment_lock_gid_rsp lock_gid_rsp;
 		struct nvmeibs_t2s_msg_client_disconnect_force_cmd client_disconnect_force_cmd;
 		struct nvmeibs_msg_s2t_port_gid_change port_gid_change_msg;
 		struct nvmeibs_msg_s2t_nic_change nic_change_msg;
@@ -136,8 +134,8 @@ struct nvmeibs_toma_server_proc_buf {
 /* Server:Toma msg type */
 enum nvmeibs_toma_server_msg_type {
 	/* Toma requests to Server and corresponding responses */
-	NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_REQ		= 0x00,
-	NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_RSP		= 0x01,
+	// NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_REQ		= 0x00,  Deprecated
+	// NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_RSP		= 0x01,
 
 	/*Toma login*/
 	NVMEIBS_TOMA_LOGIN							= 0x02,

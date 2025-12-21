@@ -963,70 +963,6 @@ send_rsp:
 /*          	     Toma:Server proc-file interface                          */
 /*                                                                            */
 /* -------------------------------------------------------------------------- */
-static int process_disk_segment_lock_gid_get(
-	struct nvmeibs_toma_disk_segment_lock_gid_req *req)
-{
-	int num_gids = MAX_PORTS_FOR_LOCKS_GIDS;
-	union ib_gid gids[num_gids];
-	struct nvmeibs_toma_server_proc_buf proc_buf;
-	struct nvmeibs_toma_disk_segment_lock_gid_rsp *rsp;
-	int rv = -1;
-
-	NFIN;
-
-	memset(gids, 0, sizeof(gids));
-	if ((rv = nvmeibs_disk_locks_get_dev(req->disk_id, gids, &num_gids))) {
-		_NE(error_toma_process_disk_segment_lock_gid_get, "Fail to find lock gid for disk @DISK_ID_STR, seg id @SEG_ID_INT",
-		   req->disk_id, req->seg_id);
-		rv = -ENODEV;
-		goto out;
-	}
-
-	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
-	proc_buf.type = NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_RSP;
-	rsp = (struct nvmeibs_toma_disk_segment_lock_gid_rsp *)&proc_buf.lock_gid_rsp;
-	memcpy(rsp->disk_id, req->disk_id, sizeof(rsp->disk_id));
-	rsp->seg_id = req->seg_id;
-	rsp->num_gids = num_gids;
-	memcpy(rsp->gids, gids, sizeof(rsp->gids));
-
-	if ((rv = nvmeibs_toma_server_proc_send(&proc_buf)) < 0) {
-		_NT(trace_toma_process_disk_segment_lock_gid_get, "Fail to send lock-gid-rsp for disk @DISK_ID_STR, seg id @SEG_ID_INT",
-		   req->disk_id, req->seg_id);
-		goto out;
-	}
-
-	rv = 0;
-out:
-	NFOUT;
-	return rv;
-}
-
-static int process_disk_segment_lock_gid_req(
-	struct nvmeibs_toma_disk_segment_lock_gid_req *req)
-{
-	int rv = -EINVAL;
-	NFIN;
-
-	switch (req->op) {
-	case NVMEIBS_TOMA_LOCK_GID_OP_GET:
-		rv = process_disk_segment_lock_gid_get(req);
-		break;
-
-	case NVMEIBS_TOMA_LOCK_GID_OP_PUT:
-		rv = nvmeibs_disk_locks_put_dev(req->disk_id);
-		break;
-
-	default:
-		_NE(error_toma_process_disk_segment_lock_gid_req, "Unknown lock-gid req op @OP", req->op);
-		break;
-	}
-
-	NFOUT;
-	return rv;
-}
-
 #define CLIENT_DISCONNECT_MSG_VEC_COUNT 2
 static void prepare_client_disconnect_msg(
 	struct nvmeibs_client *cl,
@@ -1429,12 +1365,6 @@ int nvmeibs_toma_server_proc_recv(void *arg, char *buf, size_t len,
 
 	toma_srv_proc_buf = (struct nvmeibs_toma_server_proc_buf *)buf;
 	switch (toma_srv_proc_buf->type) {
-	case NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_REQ:
-		if ((rv = process_disk_segment_lock_gid_req(
-			&toma_srv_proc_buf->lock_gid_req)) < 0)
-			goto out;
-		break;
-
 	case NVMEIBS_TOMA_LOGIN:
 		if ((rv = on_toma_login()) < 0)
 			goto out;
