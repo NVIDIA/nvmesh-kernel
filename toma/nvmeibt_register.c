@@ -17,7 +17,6 @@
 #include "local/ram/nvmeibt_ds_blkset_entries.h"
 
 #define NVMEIB_REG_LOCK_ID_ZONE_BITS        2
-#define NVMEIB_REG_LOCK_ID_ZONE_MASK        (1 << NVMEIB_REG_LOCK_ID_ZONE_BITS - 1)
 
 #define NVMEIB_REG_LOCK_ID_TO_ZONE(lid)     \
 		((lid) >>  (NVMEIB_REG_LOCK_ID_LOCKID_BITS - NVMEIB_REG_LOCK_ID_ZONE_BITS))
@@ -458,8 +457,6 @@ inline static BOOL lock_id_cache_is_lockid_taken(struct nvmeibt_seg_active *seg_
 			(nvmeibt_register_lookup_longing_registrant_by_reg_lock_id(seg_active, rli) != NULL) ||
 			(nvmeibt_register_lookup_stale_registrant_by_reg_lock_id(seg_active, rli)));
 }
-
-#define NVMEIB_REG_LOCK_ID_ZONE_MAX		((1 << NVMEIB_REG_LOCK_ID_ZONE_BITS) - 1)
 
 /*
  * Note: the arg "reg_lock_id" is both input and output argument -
