@@ -1016,7 +1016,7 @@ static struct nvmeibt_raft_member *raft_get_member_by_name(char *name)
 		}
 	}
 	if (!is_found) {
-		N_Tf(vnekf21, "Member not found hame='@STR'", name);
+		N_Tf(vnekf21, "Member='@STR' not found", name);
 	}
 	return (is_found ? member : NULL);
 }
@@ -1029,7 +1029,7 @@ int nvmeibt_raft_ignore_member(char *hostname)
 	if (member && !member->is_ignored) {
 		member->is_ignored = 1;
 		my_raft_global.n_raft_active_members--;
-		N_Tf(vhs7wy3, "member=@STR marked as ignoerd", hostname);
+		N_Tf(vhs7wy3, "member=@STR marked as ignored", hostname);
 		return 0;
 	} else {
 		N_Tf(vhs7wy6, "member=@STR already NOT in the game", hostname);
