@@ -89,6 +89,10 @@ enum sync_op_stage_e {
 	sync_stage_recov_read_cmds_sent,	// Read the data
 	sync_stage_recov_restore_complete,
 
+	/* 4.0 Stages of maintenance sync */
+	sync_stage_recov_mainten_sbs_loop_end,	// If encountered readfail, read slice-by-slice
+	sync_stage_recov_mainten_resolve_binfo,	// All reads complete, resolve unknown parts of binfo from on-disk MD
+
 	/* 4.1. States of recovering stale-special locks and dirtybyte */
 	sync_stage_recov_do_sync_stale,
 	sync_stage_recov_commit_binfo_before_rollback,

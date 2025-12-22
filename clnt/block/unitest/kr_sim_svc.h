@@ -53,7 +53,7 @@ struct cpu_prop {
 #ifdef LOG_IRQ_SAVE_RESTORE
 	struct irq_change_log	irq_mod;	// log irq modifications
 #endif
-#define KERNEL_SIM_CPU_IRQ_SAVE_MAX_RECURSION	32	// when irq are saved (recursively) too many time, warn !!!
+#define KERNEL_SIM_CPU_IRQ_SAVE_MAX_RECURSION	64	// when irq are saved (recursively) too many time, warn !!!
 	struct percpu_prop		per_cpu;			// percpu state on a cpu
 	pthread_mutex_t			cpu_owner;			// a lock that allows a thread to acquire the cpu, hence not allowing any other thread to run on that cpu until the cpu is release. this is simulating the fact that the kthread cannot be preempted (either by kernel or interrupt). its a recursive mutex bcz the same thread can disable irq many times in recursion, as long as each save() has a matching restore()
 };
