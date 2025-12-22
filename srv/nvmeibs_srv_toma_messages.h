@@ -496,14 +496,14 @@ struct nvmeib_register_change_disk {
 	void *remove_ctx;
 };
 
-struct nvmeib_push_msg_process {
+struct nvmeib_push_extended_msg {				// Not used, infrastructure for pushing message from local client to toma like was in elect project
 	struct nvmeib_nl_uk_comm_rep base;
-	char start[0];
+	int n_bytes_len;
+	char content[0];
 };
 
 struct nvmeib_nl_msg_to_toma {
-	union srvr2toma_payload_t {
-		struct nvmeib_nl_uk_comm_rep			nl_uk_comm_rep;
+	union {
 		struct nvmeib_test_zero_reply			test_zero_reply;
 		struct nvmeib_format_disk_reply			format_disk_reply;
 		struct nvmeib_zero_disk_reply			__used_but_not_by_name;
@@ -512,13 +512,9 @@ struct nvmeib_nl_msg_to_toma {
 		struct nvmeib_disk_info_reply			disk_info_reply;
 		struct nvmeib_identify_disk_reply		identify_disk_reply;
 		struct nvmeib_copied_rscs_reply			copied_rscs_reply;
+		struct nvmeib_push_extended_msg			extended_msg;
 	} payload;
 };
-
-static inline int nvmeibs_max_nl_reply(void)
-{
-	return sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union srvr2toma_payload_t);
-}
 
 struct nvmeib_nl_msg_from_toma {
 	union {

@@ -1219,8 +1219,7 @@ static void handle_send_msg_to_process(
 	struct nvmeibs_um_comm *p, struct msg_to_process_event *e)
 {
 	struct nvmeib_nl_uk_comm_msg *omsg;
-	struct nvmeib_push_msg_process *rep;
-	int msg_size;
+	struct nvmeib_push_extended_msg *rep;
 	struct sk_buff *skb;
 	struct nlmsghdr *nlh;
 	struct netlink_event *n;
@@ -1229,12 +1228,13 @@ static void handle_send_msg_to_process(
 	NFIN;
 	list_for_each_entry(n, &p->processes, link) {
 		if (n->pid == e->m.pid) {
-			msg_size = sizeof(*omsg) + sizeof(*rep) + e->m.buf_len;
+			const int msg_size = sizeof(*omsg) + sizeof(*rep) + e->m.buf_len;
 			if ((skb = nlmsg_new(msg_size, GFP_KERNEL))) {
 				nlh = nlmsg_put(skb, n->pid, 0, NLMSG_DONE, msg_size, 0);
 				omsg = nlmsg_data(nlh);
-				rep =(void *)((struct nvmeib_push_msg_process *)omsg->data)->start;
-				memcpy(rep, e->m.buf, e->m.buf_len);
+				rep = &((struct nvmeib_nl_msg_to_toma*)omsg->data)->payload.extended_msg;
+				rep->n_bytes_len = e->m.buf_len;
+				memcpy(rep->content, e->m.buf, e->m.buf_len);
 				_NT(hsmtp_t1, "Send msg to process_id @INT", n->pid);
 				rv = reply_usermode_payload(p, n, 0, skb, omsg, msg_size,
 						prepare_send_to_process, omsg);
@@ -2589,17 +2589,21 @@ static int post_pd_msg(struct per_disk *pd, struct netlink_event *e)
 	return rv;
 }
 
+static inline int nvmeibs_max_nl_reply(void)
+{
+	return sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(struct nvmeib_nl_msg_to_toma);
+}
+
 static void reply_usermode(struct nvmeibs_um_comm *p, struct netlink_event *e,
 	int code, repf f, void *ctx)
 {
 	struct nlmsghdr *nlh;
 	struct sk_buff *skb;
-	int msg_size;
+	const int msg_size = nvmeibs_max_nl_reply();
 	struct nvmeib_nl_uk_comm_msg *omsg;
 
 	NFIN;
 	_ND(trace_um_comm_reply_usermode, "Send reply to usermode request, code=@CODE...", code);
-	msg_size = nvmeibs_max_nl_reply();
 	skb = nlmsg_new(msg_size, GFP_KERNEL);
 	if (skb) {
 		nlh = nlmsg_put(skb, e->pid, 0, NLMSG_DONE, msg_size, 0);

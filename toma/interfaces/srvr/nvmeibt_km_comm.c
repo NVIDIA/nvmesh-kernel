@@ -543,19 +543,6 @@ static void add_disk(
 	NFOUT;
 }
 
-int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(void *msg_fr_local_clnt);
-static void handle_pushed_msg(
-	struct nvmeibt_km_comm *p, struct nvmeib_nl_uk_comm_msg *rcv_msg)
-{
-	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
-	struct nvmeib_push_msg_process *msg = container_of(rep, struct nvmeib_push_msg_process, base);
-	void *data = msg->start;
-	NFIN;
-	N_Tf(wgydyqwdgdugy, "p=@PTR", p);
-	nvmeibt_add_local_clnt_msg_to_toma_nl_queue(data);
-	NFOUT;
-}
-
 static int handle_new_nl(struct nvmeibt_km_comm *p)
 {
 	struct sockaddr_nl src_addr;
@@ -599,7 +586,10 @@ static int handle_new_nl(struct nvmeibt_km_comm *p)
 				add_disk(p, rcv_msg);
 			}
 			else if (rcv_msg->opcode == csc_msg_to_process) {
-				handle_pushed_msg(p, rcv_msg);
+				extern int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extended_msg *);
+				struct nvmeib_nl_msg_to_toma *tm = (void*)rcv_msg->data;
+				N_Tf(wgydyqwdgdugy, "p=@PTR", p);
+				nvmeibt_add_local_clnt_msg_to_toma_nl_queue(&tm->payload.extended_msg);
 			}
 			else {
 				N_Ef(error_1_km_comm_handle_new_nl, "Got a message from kernel that no one was waiting for");

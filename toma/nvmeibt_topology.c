@@ -2064,7 +2064,7 @@ struct netlink_queue_elem_t {
 	enum nvmeibs_serjio_status serjio_status;
 	union {
 		struct nvmeib_disk_info disk_info;
-		struct nvmeib_nl_msg_to_toma	msg_fr_local_clnt;
+		char extended_msg[256];
 	};
 };
 
@@ -2072,7 +2072,7 @@ static XDLIST_DECLARE(, struct netlink_queue_elem_t, link) nl_head = XDLIST_INIT
 static pthread_mutex_t nl_guard_mutex;
 static bool nl_queue_initialized = false;
 
-static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, struct nvmeib_nl_msg_to_toma *msg_fr_local_clnt)
+static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, const struct nvmeib_push_extended_msg *ext)
 {
 	struct netlink_queue_elem_t *elem;
 
@@ -2083,8 +2083,9 @@ static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, e
 
 	elem = (struct netlink_queue_elem_t *) NNVMEIBT_TOMA_CALLOC(trace_netlink_queue_push_2, 1, sizeof(struct netlink_queue_elem_t));
 
-	if (msg_fr_local_clnt) {
-		elem->msg_fr_local_clnt = *msg_fr_local_clnt;
+	if (ext) {
+		NTOMA_ASSERT(tnlqp34, (size_t)ext->n_bytes_len >= sizeof(elem->extended_msg), "Buffer for extended msg is too small, need @SIZEOF", (size_t)ext->n_bytes_len);
+		memcpy(elem->extended_msg, ext->content, ext->n_bytes_len);
 	} else if (disk_info) {
 		elem->disk_info = *disk_info;
 		elem->serjio_status = serjio_status;
@@ -2176,9 +2177,9 @@ static int nvmeibt_remove_disk_event_callback(void *ctx __attribute__((unused)),
 	return netlink_queue_push(&disk_info, 'r', 0, NULL);
 }
 
-int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(void *msg_fr_local_clnt)
+int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extended_msg *ext)
 {
-	return netlink_queue_push(NULL, 'C', 0, (struct nvmeib_nl_msg_to_toma *)msg_fr_local_clnt);
+	return netlink_queue_push(NULL, 'C', 0, ext);
 }
 
 void nvmeibt_topology_register_disk_events(void)
