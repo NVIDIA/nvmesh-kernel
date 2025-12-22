@@ -13,6 +13,7 @@
 #include "block/datapath_ec/nvmeibc_block_dp_ec.h"
 #include "common/nvmeib_str.h"
 #include "nvmeibc_error_tags.h"
+#include "nvmeibc_io_pet.h"
 
 /******************************************************************************/
 uint nvmeibc_jentry_num_blocks = 16;						// Todo, rename internally to binje
@@ -510,24 +511,56 @@ static void __finish_cmds_comp_oper(struct operation *o)
 	}
 }
 
-void nvmeibc_operation_compressed_op_dump_bio(const struct operation *o)
+static void __pet_nvmeibc_operation_compressed_op_dump_bio(const struct operation *o)
 {
-	if (nvmeibc_operation_is_bio(o)) {
-		const struct nvmeibc_block_command *rldr = o->cmds;		// For now print info of first rldr only
-		const u64 start_lba = get_op_start_lba(o), nlbas = get_op_nlbas(o);
-		const u64 topo = (u64)o->topo->debug_unique_index;
-		const u32 vol_id = nvmeibc_volume_short_id(o->nd);
-		// Attention!!! this good path compressed bitfield must stay fast and compact! Never add dynamic sized values, only small known sizes.
-		if (o->op == NVMEIB_BLOCK_IO_OP_READ) {
-				NVMEIB_LOG_GOODPATH("{@O_DBG_ID} @BIODUMP_BINFO_N", _T, goodpath_nvmeibc, op_dump_bio_r,   o->dbg_id, o->op, vol_id, topo, start_lba, nlbas);
-		} else {		// Write/Trim
-			if (o->nd->dp.enable_care_about_txid) {
-				NVMEIB_LOG_GOODPATH("{@O_DBG_ID} @BIODUMP_BINFO_Y", _I, goodpath_nvmeibc, op_dump_bio_wty, o->dbg_id, o->op, vol_id, topo, start_lba, nlbas, rldr->rld.pre.all);
-			} else {
-				NVMEIB_LOG_GOODPATH("{@O_DBG_ID} @BIODUMP_BINFO_N", _I, goodpath_nvmeibc, op_dump_bio_wtn, o->dbg_id, o->op, vol_id, topo, start_lba, nlbas);
-			}
+	const struct nvmeibc_block_command *rldr = o->cmds;		// For now print info of first rldr only
+	const u64 start_lba = get_op_start_lba(o), nlbas = get_op_nlbas(o);
+	const u64 topo = (u64)o->topo->debug_unique_index;
+	const u32 vol_id = nvmeibc_volume_short_id(o->nd);
+
+	if (o->op == NVMEIB_BLOCK_IO_OP_READ) {
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal, 
+								"read operation started; o=%p, dbg_id=%u, short volume id=%u, topology=%llu, vlba=0x%llx, nlbas=%llu, dbg_cntrs=0x%llx", 
+								o, o->dbg_id, vol_id, topo, start_lba, nlbas, o->dbg_cntrs.raw);
+	} else {		// Write/Trim
+		if (o->nd->dp.enable_care_about_txid) {
+			NVMEIBC_IO_PET_MSG_NORM(&o->journal, 
+									"write operation started; o=%p, dbg_id=%u, short volume id=%u, topology=%llu, vlba=0x%llx, nlbas=%llu, binfo=0x%x dbg_cntrs=0x%llx", 
+									o, o->dbg_id, vol_id, topo, start_lba, nlbas, rldr->rld.pre.all, o->dbg_cntrs.raw);
+		} else {
+			NVMEIBC_IO_PET_MSG_NORM(&o->journal, 
+								"trim operation started; o=%p, dbg_id=%u, short volume id=%u, topology=%llu, vlba=0x%llx, nlbas=%llu, dbg_cntrs=0x%llx", 
+									o, o->dbg_id, vol_id, topo, start_lba, nlbas, o->dbg_cntrs.raw);
 		}
 	}
+}
+
+
+static void __goodpath_operation_compressed_op_dump_bio(const struct operation *o)
+{
+	const struct nvmeibc_block_command *rldr = o->cmds;		// For now print info of first rldr only
+	const u64 start_lba = get_op_start_lba(o), nlbas = get_op_nlbas(o);
+	const u64 topo = (u64)o->topo->debug_unique_index;
+	const u32 vol_id = nvmeibc_volume_short_id(o->nd);
+	// Attention!!! this good path compressed bitfield must stay fast and compact! Never add dynamic sized values, only small known sizes.
+	if (o->op == NVMEIB_BLOCK_IO_OP_READ) {
+		NVMEIB_LOG_GOODPATH("{@O_DBG_ID} @BIODUMP_BINFO_N", _T, goodpath_nvmeibc, op_dump_bio_r,   o->dbg_id, o->op, vol_id, topo, start_lba, nlbas);
+	} else {		// Write/Trim
+		if (o->nd->dp.enable_care_about_txid) {
+			NVMEIB_LOG_GOODPATH("{@O_DBG_ID} @BIODUMP_BINFO_Y", _I, goodpath_nvmeibc, op_dump_bio_wty, o->dbg_id, o->op, vol_id, topo, start_lba, nlbas, rldr->rld.pre.all);
+		} else {
+			NVMEIB_LOG_GOODPATH("{@O_DBG_ID} @BIODUMP_BINFO_N", _I, goodpath_nvmeibc, op_dump_bio_wtn, o->dbg_id, o->op, vol_id, topo, start_lba, nlbas);
+		}
+	}
+}
+
+void nvmeibc_operation_compressed_op_dump_bio(const struct operation *o)
+{
+	if (!nvmeibc_operation_is_bio(o)) {
+		return;
+	}
+	__goodpath_operation_compressed_op_dump_bio(o);
+	__pet_nvmeibc_operation_compressed_op_dump_bio(o);
 }
 
 static void __nvmeibc_operation_comp(struct operation *o)

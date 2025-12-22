@@ -12,6 +12,7 @@
 #include "block/datapath_mirror/nvmeibc_block_dp_mirror.h"
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_memmgr_metrics.h"
+#include "nvmeibc_io_pet.h"
 
 // a module parameter to set limit of concurrent sync operations
 uint nvmeibc_sync_max_operations_per_dev = NVMEIBC_MAX_ALLOWED_SYNC_OPS_DEFAULT;
@@ -463,6 +464,9 @@ static void __compressed_sync_op_trace_start(const struct recovery_sync_op *so) 
 			so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
 			tr->ch, tr->r1, so->rlba,
 			so->start_slice, so->n_slices);
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync start: orig_o_dbg_id=%u op=%u vol_id=%u topo=%llu rlba=%llu slices=%u-%u",
+		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, (u32)so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
+		so->rlba, (u16)(so->start_slice), (u16)(so->n_slices));
 }
 
 static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op *so) {
@@ -472,6 +476,7 @@ static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op
 
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync end: RV: @RV", _I, goodpath_nvmeibc_syncs, compressed_sync_op_trace_end, so->o->dbg_id, so->error);
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync end: rv=%d", so->error);
 }
 
 static int __do_on_stage_done(struct recovery_sync_op *so) {
