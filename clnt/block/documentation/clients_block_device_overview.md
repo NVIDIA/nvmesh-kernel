@@ -1902,7 +1902,7 @@ LBA \= Logical block address
 
 # Datapath state machines {#datapath-state-machines}
 
-386. The block layer achieves concurrency via message passing, following a design philosophy similar to SPDK[https://spdk.io/doc/concurrency.html]. Each operation execution is a state machine, which can transition between its states asynchronously via callbacks (callback on lock acquisition, lock release, io command execution etc).
+386. The block layer achieves concurrency via "message passing", following a design philosophy similar to [SPDK concurrency](https://spdk.io/doc/concurrency.html). Each operation execution is a state machine, which can transition between its states asynchronously via callbacks (callback on lock acquisition, lock release, io command execution etc).
 387. A few callbacks may execute in parallel so this state machine has a high degree of concurrency. For example, acquiring a few locks in parallel, sending read cmds to a few disks, etc.
 
 ## High Level flow: Read {#high-level-flow:-read}
