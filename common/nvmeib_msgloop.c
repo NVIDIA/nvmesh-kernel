@@ -31,15 +31,19 @@ static void msgloop_free_msg(struct kref *kref)
        kfree(msg);
 }
 
-void msgloop_get_msg(void *_msg)
+static inline void __msgloop_get_msg(struct msgloop_msg *msg)
 {
-	struct msgloop_msg *msg = _msg;
 	if (msg) {
-	BUG_ON(kref_read(&msg->ref_cnt) < 1);
+		BUG_ON(kref_read(&msg->ref_cnt) < 1);
 		kref_get(&msg->ref_cnt);
 	}
-
 }
+
+void msgloop_get_msg(void* msg)
+{
+	__msgloop_get_msg((struct msgloop_msg *)msg);
+}
+
 
 void msgloop_put_msg(void *_msg)
 {
@@ -291,27 +295,42 @@ static long msgloop_proc_ioctl(struct file *f, unsigned int cmd, unsigned long a
 	};
 #endif
 
-int nvmeib_msgloop_send(struct msgloop_procfs_ent *p, char *data, size_t len)
+static int __verify_can_send_and_update_flushing(struct msgloop_procfs_ent *p, size_t len)
 {
-	struct msgloop_msg *msg;
-	ulong flags;
-
 	if (p->shutdown)
 		return -EPIPE;
 
 	if (len == 0) {
 		return -EINVAL;
 	}
+
 	if ((p->max_msg > 0) && (p->msg_count >= p->max_msg))
 		p->flushing = true;
+
 	if (p->flushing)
 		return -ENOSPC;
+
+	return 0;
+}
+
+int nvmeib_msgloop_send(struct msgloop_procfs_ent *p, char *data, size_t len)
+{
+	struct msgloop_msg *msg;
+	ulong flags;
+	int const rv = __verify_can_send_and_update_flushing(p, len);
+
+	if (rv){
+		return rv;
+	}
+
 	/* allocate msg and data buffer - free it after read() */
 	if ((msg = nvmeib_msgloop_alloc_msg(len + sizeof(*msg))) == NULL)
 		return -ENOMEM;
+
 	msg->len = len;
 	if (data && len)
 		memcpy(msg->data, data, len);
+
 	spin_lock_irqsave(&p->lock, flags);
 	list_add_tail(&msg->link, &p->kernel_to_user);
 	++p->msg_count;
@@ -322,6 +341,28 @@ int nvmeib_msgloop_send(struct msgloop_procfs_ent *p, char *data, size_t len)
 	return 0;
 }
 EXPORT_SYMBOL(nvmeib_msgloop_send);
+
+int nvmeib_msgloop_sendm(struct msgloop_procfs_ent *p, struct msgloop_msg *msg)
+{
+	ulong flags;
+	int const rv = __verify_can_send_and_update_flushing(p, msg->len);
+
+	if (rv){
+		return rv;
+	}
+
+	__msgloop_get_msg(msg);
+
+	spin_lock_irqsave(&p->lock, flags);
+	list_add_tail(&msg->link, &p->kernel_to_user);
+	++p->msg_count;
+	spin_unlock_irqrestore(&p->lock, flags);
+
+	wake_up_interruptible(&p->read_waitq);
+
+	return 0;
+}
+EXPORT_SYMBOL(nvmeib_msgloop_sendm);
 
 int nvmeib_msgloop_sendv(struct msgloop_procfs_ent *p, struct msg_vec *vec, int cnt)
 {

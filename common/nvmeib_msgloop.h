@@ -34,6 +34,9 @@ void nvmeib_msgloop_remove(struct msgloop_procfs_ent *p);
 size_t nvmeib_msgloop_flush(struct msgloop_procfs_ent *p);
 int  nvmeib_msgloop_get_count(const struct msgloop_procfs_ent *p);
 
+__attribute__((nonnull (1,2)))
+int nvmeib_msgloop_sendm(struct msgloop_procfs_ent *p, struct msgloop_msg* msg);
+
 int nvmeib_msgloop_send(struct msgloop_procfs_ent *p, char *data, size_t len);
 int nvmeib_msgloop_sendv(struct msgloop_procfs_ent *p, struct msg_vec *vec, int cnt);
 int nvmeib_msgloop_sendl(struct msgloop_procfs_ent *p, struct list_head *l);
