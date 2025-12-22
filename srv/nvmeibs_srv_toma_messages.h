@@ -522,7 +522,6 @@ struct nvmeib_nl_toma_msg_hdr {		// Use the same header msg_to_toma and msg_from
 };
 
 struct nvmeib_nl_msg_to_toma {
-	struct nvmeib_nl_toma_msg_hdr hdr;
 	union srvr2toma_payload_t {
 		struct nvmeib_nl_uk_comm_rep			nl_uk_comm_rep;
 		struct nvmeib_test_zero_reply			test_zero_reply;
