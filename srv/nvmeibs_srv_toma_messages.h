@@ -206,26 +206,24 @@ struct nvmeib_nl_uk_comm_rep {			// s2t, server reply on toma requests
 
 enum uk_comm_opcode {
 	csc_start = 0,
-	csc_get_disk_names,					// Version 1.3+
-	csc_zero_disk,
-	csc_test_zero_disk,
+	csc_get_disk_names = 1,					// Version 1.3+
+	csc_zero_disk = 2,
+	csc_test_zero_disk = 3,
 
-	csc_register_disk_events,			// Version 2.0+
-	csc_get_disks,
-	csc_remove_disk,
-	csc_format_disk,
-	csc_io_to_disk,
-	csc_keep_alive,
-	csc_identify_disk,
+	csc_register_disk_events = 4,			// Version 2.0+
+	csc_get_disks = 5,
+	csc_remove_disk = 6,
+	csc_format_disk = 7,
+	csc_io_to_disk = 8,
+	csc_keep_alive = 9,
+	csc_identify_disk = 10,					// NVMESH-7336 not used
 
-	csc_local_client,					// Version 2.3+
-	csc_local_clnt_msg_to_toma_unused,
-	csc_toma_msg_to_local_clnt,			// Example: recovery attach
-	csc_msg_to_process,
-
-	/* should be the last just before the end */
+	csc_local_client = 11,					// Version 2.3+
+	csc_local_clnt_msg_to_toma_unused = 12,
+	csc_toma_msg_to_local_clnt = 13,		// Example: recovery attach
+	csc_msg_to_process = 14,				// s2t, generic mechanism to send a message from kernel to user space
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
-	csc_contaminate_disk,
+	csc_contaminate_disk = 15,				// should be the last just before the end
 #endif
 	csc_end
 };
@@ -244,6 +242,7 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_keep_alive: return "csc_keep_alive";
 	case csc_identify_disk: return "csc_identify_disk";
 	case csc_local_client: return "csc_local_client";
+	case csc_toma_msg_to_local_clnt: return "csc_local_clnt_msg";
 	case csc_msg_to_process: return "csc_msg_to_process";
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";
@@ -523,7 +522,7 @@ struct nvmeib_nl_toma_msg_hdr {		// Use the same header msg_to_toma and msg_from
 };
 
 struct nvmeib_nl_msg_to_toma {
-	struct nvmeib_nl_toma_msg_hdr	hdr;
+	struct nvmeib_nl_toma_msg_hdr hdr;
 	union srvr2toma_payload_t {
 		struct nvmeib_nl_uk_comm_rep			nl_uk_comm_rep;
 		struct nvmeib_test_zero_reply			test_zero_reply;
@@ -542,27 +541,14 @@ static inline int nvmeibs_max_nl_reply(void)
 	return sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union srvr2toma_payload_t);
 }
 
-/* message from toma to ... */
 struct nvmeib_nl_msg_from_toma {
 	struct nvmeib_nl_toma_msg_hdr hdr;
 	union {
-		/* message from toma to local client.
-		   if the data is copied, toma will receive a message
-		   at teh end of a successfult copy and error otherwise...
-		*/
-		struct nvmeib_toma_client {
-			enum RECOVERY_ATTACH_CMD		attach_cmd;
-			/* if true the message data in the message must be copied before
-			   calling the client API
-			*/
-			int copy;
-			/* numebr of pages that are needed to be copied */
-			unsigned n_pages;
-			/* the data to be transfered to the client.  in the case where the
-			   message is needed to be copied the message pointer must be
-			   page aligned
-			*/
-			void *data;
+		struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
+			enum RECOVERY_ATTACH_CMD attach_cmd;
+			int copy;						// if true the message data in the message must be copied before calling the client API
+			unsigned n_pages;				// numebr of pages that are needed to be copied
+			void *data;						// the data to be transfered to the client.  If data is coppied pointer must be page aligned
 		} toma_client;
 	} payload;
 };
