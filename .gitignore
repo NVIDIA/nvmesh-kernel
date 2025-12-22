@@ -150,3 +150,7 @@ memmgr_info_run_end.json
 *.so.*
 *.so
 lz4
+test.pet
+io_pet_messages.binlog
+error_tags_run_end.json
+common/pet/build/
