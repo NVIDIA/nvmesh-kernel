@@ -12,6 +12,7 @@
 
 #include "operation/nvmeibc_block_dp_operation_per_cpu.h"
 #include "operation/nvmeibc_block_dp_operation_throttling.h"
+#include "nvmeibc_io_pet.h"
 
 NVMEIBC_MEMMGR_METRIC(dp_io_operation, "component=raid.io.user");
 NVMEIBC_MEMMGR_METRIC(dp_sync_operation, "component=raid.io.sync");
@@ -398,7 +399,7 @@ void nvmeibc_operation_execute_chain(struct operation *o)
 	__execute_chain_noplug(o);
 }
 
-struct operation *nvmeibc_operation_create_with_biopart(u32 op_size)
+struct operation *nvmeibc_operation_create_with_biopart(u32 op_size, struct nvmeib_pet_base_controller* io_pet_controller)
 {
 	const u32 bp_size = sizeof(struct bio_part);
 	void *buf = kmalloc(PAGE_SIZE, GFP_NOFS);
@@ -409,6 +410,7 @@ struct operation *nvmeibc_operation_create_with_biopart(u32 op_size)
 		memset(buf, 0, bp_size + op_size);
 		o->bios[0] = buf;
 		o->flags.is_allocated_with_bio_part = true;
+		o->journal = nvmeib_pet_journal_make(io_pet_controller); 
 		return o;
 	}
 	return NULL;

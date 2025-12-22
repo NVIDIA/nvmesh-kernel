@@ -867,7 +867,8 @@ out:
 }
 
 int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
-	const struct nvmeib_mgmt_to_client_volume_configuration *msg)
+	const struct nvmeib_mgmt_to_client_volume_configuration *msg,
+	struct nvmeib_pet_base_controller* io_pet_controller)
 {
 	struct nvmeibc_volume *volume;
 	const struct nvmeibc_volume_conf *hdr = &msg->volumes[0];
@@ -890,6 +891,7 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 		goto out;
 	}
 	volume->p = p;
+	volume->io_pet_controller = io_pet_controller;
 	nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true);
 
 	spin_lock_init(&volume->spinlock);

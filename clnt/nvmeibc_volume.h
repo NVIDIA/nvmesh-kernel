@@ -3,6 +3,7 @@
 
 #include "nvmeibc_block.h"
 #include "main/cc_api/nvmeibc_main_capi_manipulate_vols.h"  // For nvmeibc_config_volume
+#include "common/pet/nvmeib_pet_specification.h"
 
 /* Realtime state of the volume. Typical flow:
    kmalloc -> NVS_ATTACHING -> NVS_ATTACHED -> NVS_UPDATING ->
@@ -90,14 +91,18 @@ struct nvmeibc_volume {
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 	struct proc_dir_entry *disks_dir;			// The volumes /proc/.../vol_name/disks/ directory, where disk proc folders and files will reside
 #endif
+	struct nvmeib_pet_base_controller* io_pet_controller;
 };
 
 /********************** Generic API of All Volumes ***************************/
 /* Attach a volume, or update an existing volume. Receives MCS message that gave
    this command and for backwards compatibility config-fs entry.
    To be used by main.c, only in main workqueue! */
+
+struct nvmeib_pet_base_controller;
 int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
-	const struct nvmeib_mgmt_to_client_volume_configuration *msg);
+	const struct nvmeib_mgmt_to_client_volume_configuration *msg,
+	struct nvmeib_pet_base_controller* io_pet_controller);
 
 /* Polymorphic for any type of volume, can be called during attach.
    returns 0 - asyncronous detach started (not busy), or negative error code if

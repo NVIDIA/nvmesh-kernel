@@ -86,7 +86,7 @@ int execute_bio(struct bio *bio, unsigned long now)
 			if (bio_part_size_b > max_bytes)
 				bio_part_size_b = max_bytes;
 		}
-		o = nvmeibc_operation_create_with_biopart(nd->dp.sizeof_operation);
+		o = nvmeibc_operation_create_with_biopart(nd->dp.sizeof_operation, nd->io_pet_controller);
 		if (unlikely(!o)) {
 			rv = -ENOMEM;
 			goto _out;

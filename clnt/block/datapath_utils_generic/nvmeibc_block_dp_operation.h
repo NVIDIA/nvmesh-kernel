@@ -16,6 +16,7 @@
 #include "nvmeibc_block_dp_io_generic_cmds.h"
 #include "nvmeibc_block_dp_buffers.h"
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_async_mode.h"
+#include "common/pet/nvmeib_pet_specification.h"
 
 typedef u32 o_dbg_id_t;
 
@@ -91,6 +92,9 @@ struct operation {
 		}  __attribute__((packed));
 		u64 raw;
 	} dbg_cntrs;
+
+	struct nvmeib_pet_journal journal; //mutable
+
 	union {
 		struct {								// Extended rider->carrier bio
 			struct bio_extention *bx;
@@ -219,8 +223,9 @@ void                             nvmeibc_operation_start_bio_part(struct bio_par
 void                             nvmeibc_operation_add_bio_part(  struct bio_part *b);
 
 /* Execute the operation: when all commands finished we have to complete its execution (maybe retry it if needed). Once we decided that operation should be finished (execution cannot start / it succeeded / timed-out / etc) we destroy it and return answer to kernel. If execution was started it must be completed before destroying operation*/
-/* Source of operation: 1. User space, 2. Throttled op pulled by finishing op, 3. resubmitter, 4. mtv-destager, 5. carrier bio, 6. vio */
-struct operation * nvmeibc_operation_create_with_biopart(u32 op_size);
+/* Source of operation: 1. User space, 2. Throttled op pulled by fin`ishing op, 3. resubmitter, 4. mtv-destager, 5. carrier bio, 6. vio */
+struct nvmeib_pet_base_controller;
+struct operation * nvmeibc_operation_create_with_biopart(u32 op_size, struct nvmeib_pet_base_controller* io_pet_controller);
 struct operation * nvmeibc_operation_create_atomic(const struct operation *o);
 void* nvmeibc_operation_alloc_from_sufix(const struct operation *o, u32 alloc_size);
 void nvmeibc_operation_execute(       struct operation *o, bool is_from_user_space);		// is_from_user_space=false if 'o' submitted internally, not from user_space

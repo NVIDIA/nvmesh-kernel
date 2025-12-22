@@ -40,7 +40,7 @@ enum nvmeibc_block_status {					// Status of block device during attach/detach, 
 const char *nvmeibc_block_status_to_string(enum nvmeibc_block_status);
 
 struct nvmeibc_cinst_params_blk;
-
+struct nvmeib_pet_base_controller;
 struct nvmeibc_block_device {   			// TODO: change this to something shorter
 	//struct nvmeibc_bdev_base_class {		// TODO: Base class for many block devices
 		struct list_head list_n;				// Structure allowing to link block devices in linked list (for higher level app having a few volumes, possible using the same physical disks)
@@ -77,6 +77,7 @@ struct nvmeibc_block_device {   			// TODO: change this to something shorter
 	struct nvmeibc_trace_stats_scheduling trace_stats;	// Scheduling state of block stats tracing for block watchdog
 #endif
 	bool ignore_all_recov_toma_speed_req;		// Ignore requests from toma to change recovery speed. Used when manually setting those values
+	struct nvmeib_pet_base_controller* io_pet_controller;
 };
 #define nvmeibc_volume_short_id(nd) ((nd)->dbg_id)
 #define assert_dev_on_mainwq(dev) nvmeibc_assert_on_main_wq(nvmeibc_isnt_params_blk2main(nvmeibc_cinst_get_blok_p(dev)))	// Attach/Detach actions must be done serialized on main-wq
