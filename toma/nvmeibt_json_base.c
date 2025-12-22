@@ -376,6 +376,99 @@ out:
 }
 
 /******************************************************************************/
+// JSON Serialization - Convert JSON tree back to string
+/******************************************************************************/
+
+/**
+ * Serialize JSON element to string (recursive helper with indentation)
+ * Returns 0 on success, -1 on error
+ */
+static int serialize_json_elem_recursive(struct mm_json_elem *elem, struct nvmeibt_Str *output, int indent_level)
+{
+	int i;
+	char indent[256];
+
+	if (!elem) {
+		return -1;
+	}
+
+	// Build indentation string
+	memset(indent, ' ', min(indent_level * 2, (int)sizeof(indent) - 1));
+	indent[min(indent_level * 2, (int)sizeof(indent) - 1)] = '\0';
+
+	switch (elem->type) {
+	case JSON_E_STR:
+		nvmeibt_Str_sprintf(output, "\"%s\"", elem->str);
+		break;
+
+	case JSON_E_NUM:
+		nvmeibt_Str_sprintf(output, "%ld", elem->num);
+		break;
+
+	case JSON_E_NUM_FLOAT:
+		nvmeibt_Str_sprintf(output, "%f", elem->num_float);
+		break;
+
+	case JSON_E_BOOL:
+		nvmeibt_Str_sprintf(output, "%s", elem->num ? "true" : "false");
+		break;
+
+	case JSON_E_NULL:
+		nvmeibt_Str_sprintf(output, "null");
+		break;
+
+	case JSON_E_DICT:
+		nvmeibt_Str_sprintf(output, "{\n");
+		for (i = 0; i < elem->dict.len; i++) {
+			nvmeibt_Str_sprintf(output, "%s  \"%s\": ", indent, elem->dict.elements[i].key);
+			serialize_json_elem_recursive(elem->dict.elements[i].value, output, indent_level + 1);
+			if (i < elem->dict.len - 1) {
+				nvmeibt_Str_sprintf(output, ",\n");
+			} else {
+				nvmeibt_Str_sprintf(output, "\n");
+			}
+		}
+		nvmeibt_Str_sprintf(output, "%s}", indent);
+		break;
+
+	case JSON_E_ARRAY:
+		nvmeibt_Str_sprintf(output, "[\n");
+		for (i = 0; i < elem->array.len; i++) {
+			nvmeibt_Str_sprintf(output, "%s  ", indent);
+			serialize_json_elem_recursive(elem->array.elements[i], output, indent_level + 1);
+			if (i < elem->array.len - 1) {
+				nvmeibt_Str_sprintf(output, ",\n");
+			} else {
+				nvmeibt_Str_sprintf(output, "\n");
+			}
+		}
+		nvmeibt_Str_sprintf(output, "%s]", indent);
+		break;
+
+	default:
+		N_Ef(serialize_unknown_type, "Unknown JSON element type=@INT", elem->type);
+		return -1;
+	}
+
+	return 0;
+}
+
+/**
+ * Serialize JSON tree to string
+ * Converts parsed JSON tree back to JSON string with proper formatting
+ * Output is appended to the provided nvmeibt_Str
+ * Returns 0 on success, -1 on error
+ */
+int serialize_json_tree_to_str(struct mm_json_elem *root, struct nvmeibt_Str *output)
+{
+	if (!root || !output) {
+		return -1;
+	}
+
+	return serialize_json_elem_recursive(root, output, 0);
+}
+
+/******************************************************************************/
 // JSON Query Functions - For querying already-parsed JSON trees
 /******************************************************************************/
 
@@ -422,4 +515,60 @@ int64_t json_get_dict_num(struct mm_json_elem *dict_elem, const char *key, int64
 		return value->num;
 	}
 	return default_val;
+}
+
+/******************************************************************************/
+// JSON Modification Functions - For modifying values in already-parsed trees
+/******************************************************************************/
+
+/**
+ * Set boolean value for a key in dict element
+ * Returns 0 on success, -1 if key not found
+ */
+int json_set_dict_bool(struct mm_json_elem *dict_elem, const char *key, bool value)
+{
+	struct mm_json_elem *elem = json_get_dict_value(dict_elem, key);
+	if (!elem) {
+		return -1;
+	}
+	elem->type = JSON_E_BOOL;
+	elem->num = value ? 1 : 0;
+	return 0;
+}
+
+/**
+ * Set string value for a key in dict element
+ * Returns 0 on success, -1 if key not found
+ * Note: Frees old string and allocates new one
+ */
+int json_set_dict_str(struct mm_json_elem *dict_elem, const char *key, const char *value)
+{
+	struct mm_json_elem *elem = json_get_dict_value(dict_elem, key);
+	if (!elem) {
+		return -1;
+	}
+
+	// Free old string if it was a string type
+	if (elem->type == JSON_E_STR && elem->str) {
+		free(elem->str);
+	}
+
+	elem->type = JSON_E_STR;
+	elem->str = strdup(value);
+	return 0;
+}
+
+/**
+ * Set numeric value for a key in dict element
+ * Returns 0 on success, -1 if key not found
+ */
+int json_set_dict_num(struct mm_json_elem *dict_elem, const char *key, int64_t value)
+{
+	struct mm_json_elem *elem = json_get_dict_value(dict_elem, key);
+	if (!elem) {
+		return -1;
+	}
+	elem->type = JSON_E_NUM;
+	elem->num = value;
+	return 0;
 }
