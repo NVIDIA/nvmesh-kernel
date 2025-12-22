@@ -185,30 +185,25 @@ enum nvmeibs_toma_server_msg_type {
 };
 
 /******************************** New netlink API ****************************/
-#define NETLINK_SRV_COMM 31
-#define NETLINK_SRV_COMM_MAX_PAYLOAD 1024
+#define NETLINK_SRV_COMM 31							// unit in kernel netlink, not sure why 31
 #define NVMESH_NL_MSG_TYPE (NLMSG_MIN_TYPE + 1)
 enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT_CALLER = 'C' };
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
-struct nvmeib_nl_uk_comm_msg {
-	/* header and data */
-    int len;
-    int opcode;
-	/* the name of the caller */
-	char caller_type;				// enum nvmeibs_um_caller_type
-    unsigned long id __attribute__((aligned(8)));
-    char data[0];
+struct nvmeib_nl_uk_comm_msg {			// s2t, header and data
+	int len;
+	int opcode;							// enum uk_comm_opcode
+	char caller_type;					// enum nvmeibs_um_caller_type
+	unsigned long id __attribute__((aligned(8)));
+	char data[0];						// Content of the message
 };
 
-struct nvmeib_nl_uk_comm_rep {
-    int opcode;
-	int error;
-	long long latency_ns;
+struct nvmeib_nl_uk_comm_rep {			// s2t, server reply on toma requests
+	int opcode;							// enum uk_comm_opcode
+	int error;							// enum uk_comm_err_opcode
+	long long latency_ns;				// n[ns] it took the kernel to execute Toma request
 };
 
-typedef void (*on_uk_comm_done_func)(void *ctx, int ok,
-									 struct nvmeib_nl_uk_comm_rep *rep);
 enum uk_comm_opcode {
 	csc_start = 0,
 	csc_get_disk_names,					// Version 1.3+
@@ -225,7 +220,7 @@ enum uk_comm_opcode {
 
 	csc_local_client,					// Version 2.3+
 	csc_local_clnt_msg_to_toma_unused,
-	csc_toma_msg_to_local_clnt,		// Example: recovery attach
+	csc_toma_msg_to_local_clnt,			// Example: recovery attach
 	csc_msg_to_process,
 
 	/* should be the last just before the end */
@@ -241,7 +236,6 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_get_disk_names: return "csc_get_disk_names";
 	case csc_zero_disk: return "csc_zero_disk";
 	case csc_test_zero_disk: return "csc_test_zero_disk";
-
 	case csc_register_disk_events: return "csc_register_disk_events";
 	case csc_get_disks: return "csc_get_disks";
 	case csc_remove_disk: return "csc_remove_disk";
@@ -249,10 +243,8 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_io_to_disk: return "csc_io_to_disk";
 	case csc_keep_alive: return "csc_keep_alive";
 	case csc_identify_disk: return "csc_identify_disk";
-
 	case csc_local_client: return "csc_local_client";
 	case csc_msg_to_process: return "csc_msg_to_process";
-
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";
 #endif
@@ -260,7 +252,7 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	}
 }
 
-enum uk_comm_err_opcode {
+enum uk_comm_err_opcode {				// s2t error codes, for Toma requests
 	csce_ok = 0,
 	csce_failed,
 	csce_bad_zero_params,
@@ -273,12 +265,11 @@ enum uk_comm_err_opcode {
 	csce_identify_thread,
 	csce_disk_stopped,
 	csce_unsupported_opcode,
-	csce_end,
 };
 
 /* Request structures between TOMA and nvmeibs */
 
-struct nvmeib_zero_disk {
+struct nvmeib_zero_disk {				// t2s - Toma request server to zero a disk range
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int vendor_id;
 	unsigned long start_hw_sector;
@@ -307,7 +298,7 @@ union nvme_format_id {
 	};
 };
 
-struct nvmeib_format_disk {
+struct nvmeib_format_disk {				// t2s - Toma request server to format a disk
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int vendor_id;
 	union nvme_format_id format_id;
@@ -350,7 +341,7 @@ static inline const char *nvmeib_gpt_update_str(enum nvmeib_main_gpt_update_flag
 	}
 }
 
-struct nvmeib_io_to_disk {
+struct nvmeib_io_to_disk {				// t2s  - Toma request server to do io to a disk
 	char 			disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int 	vendor_id;
 	int				pid;
@@ -371,27 +362,6 @@ struct nvmeib_io_to_disk {
 		unsigned long v;
 	};
 };
-
-enum nvmeib_io_is_read {
-	NVMEIB_IO_IS_WRITE = 0,
-	NVMEIB_IO_IS_READ,
-};
-
-static inline void nvmeib_init_io_to_disk(struct nvmeib_io_to_disk *io_to_disk,
-								   unsigned long start_sector,
-								   char *data, unsigned int data_len,
-								   char *md, unsigned int md_len,
-								   enum nvmeib_io_is_read is_read, enum nvmeib_main_gpt_update_flags main_gpt_update_flags)
-{
-	io_to_disk->start_sector = start_sector;
-	io_to_disk->data = data;
-	io_to_disk->data_len = data_len;
-	io_to_disk->md = md;
-	io_to_disk->md_len = md_len;
-	io_to_disk->is_read = is_read;
-	io_to_disk->gpt_update_flags = main_gpt_update_flags;
-}
-
 
 struct nvmeib_identify_disk {
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];

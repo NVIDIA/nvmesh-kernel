@@ -262,6 +262,21 @@ void nvmeibt_netlink_io_free(struct netlink_io_context **nl_ctx_p)
 	}
 }
 
+static inline void nvmeib_init_io_to_disk(struct nvmeib_io_to_disk *io_to_disk,
+								   unsigned long start_sector,
+								   char *data, unsigned int data_len,
+								   char *md, unsigned int md_len,
+								   enum nvmeib_io_is_read is_read, enum nvmeib_main_gpt_update_flags main_gpt_update_flags)
+{
+	io_to_disk->start_sector = start_sector;
+	io_to_disk->data = data;
+	io_to_disk->data_len = data_len;
+	io_to_disk->md = md;
+	io_to_disk->md_len = md_len;
+	io_to_disk->is_read = is_read;
+	io_to_disk->gpt_update_flags = main_gpt_update_flags;
+}
+
 int nvmeibt_disk_metadata_do_sync_IO_with_disk_netlink_or_not(struct netlink_io_context *nl_ctx, const int fd,
 										void *buf,
 										const uint64_t pbyte_s,

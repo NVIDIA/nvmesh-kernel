@@ -147,6 +147,8 @@ struct netlink_io_context {
 struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmeibt_local_disk_config *ldc);
 int nvmeibt_netlink_do_io_sync(struct netlink_io_context *nl_ctx);
 void nvmeibt_netlink_io_free(struct netlink_io_context **nl_ctx_p);
+
+enum nvmeib_io_is_read { NVMEIB_IO_IS_WRITE = 0, NVMEIB_IO_IS_READ, };		// Todo: Get rid of this enum, just bool is good enough or use 'r', 'w'
 int nvmeibt_disk_metadata_do_sync_IO_with_disk_netlink_or_not(struct netlink_io_context *nl_ctx, const int fd,
 										void *buf,
 										const uint64_t pbyte_s,

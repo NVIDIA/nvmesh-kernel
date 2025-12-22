@@ -128,6 +128,7 @@ static int start_thread(struct nvmeibt_km_comm *p)
 	return rv;
 }
 
+#define NETLINK_SRV_COMM_MAX_PAYLOAD 1024			//	TODO(NVMESH-7336, "Should actually use sezof largest msg")
 struct nvmeibt_km_comm * nvmeibt_km_comm_create(void)
 {
 	struct nvmeibt_km_comm *p;

@@ -41,7 +41,7 @@ int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const 
 #define PCI_DISK_FILE_UN_BIND TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/unbind" 	// "nvme" / "nvmeibs"
 
 // Other server procs "/proc/nvmeibs"
-// TOMA_STATUS_PROC_PATH - directory for toa output
+// TOMA_STATUS_PROC_PATH - directory for toma output
 
 #endif //NVMEIBT_SRVR_PROC_H
 
