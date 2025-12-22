@@ -31,9 +31,9 @@ static const char local_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_nv
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"
 
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme0n1", SANDBOX_DEV_DIR "nvme0n1", true },
-	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false },
-	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false },
+	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme0n1", SANDBOX_DEV_DIR "nvme0n1", true, 2048 },
+	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 2000 },
+	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 2000 },
 };
 
 #define NVME_DEVICE_COUNT (sizeof(nvme_devices) / sizeof(nvme_devices[0]))

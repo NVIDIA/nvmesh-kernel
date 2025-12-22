@@ -292,10 +292,10 @@ int ioctl(int fd, unsigned long int req, ...) {
 				BUG_ON(cmd->data_len < sizeof(*response));
 				memset(response, 0, cmd->data_len);
 				response->flbas = 5; // Choosing index 5 arbitrarily. Range is 0..15.
-				response->lbaf[5].ds = 12; // LBA data size (logical sector size) as exponent of 2 (2**12 = 4096 bytes).
+				response->lbaf[5].ds = SANDBOX_NVME_BLOCK_SIZE_EXPONENT; // LBA data size (logical sector size) as exponent of 2
 				// Note that LBAF { ms, ds, rp } are defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01
 				// Figure 116: LBA Format Data Structure, NVM Command Set Specific (PDF p. 91).
-				response->nsze = 2000; // Our sandbox drives have 2000 blocks of 4 KiB.
+				response->nsze = nvme_dev->size_in_blocks;
 				N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT reporting ds=4K nsze=@INT64_TD", cmd->nsid, fd, response->nsze);
 			}
 		} else if (cmd->opcode == nvme_admin_get_log_page) {

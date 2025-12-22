@@ -14,8 +14,11 @@ struct sandbox_nvme_device {
 	// The path we actually use for the device, e.g. `_root/dev/nvme0n1`.
 	const char *device_path;
 	bool stock_disk;
+	uint64_t size_in_blocks;
 };
 
 struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path);
+
+#define SANDBOX_NVME_BLOCK_SIZE_EXPONENT 12 // logical sector size as exponent of 2 (2**12 = 4096 bytes).
 
 #endif // TOMA_SANDBOX_NVME_H_INCLUDED
