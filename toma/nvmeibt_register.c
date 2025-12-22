@@ -2000,7 +2000,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 /*
  * Note: we assume that that registrant (client) will not access the local
- * segment anymore. See launch_unregistered_registrant_removal() for details.
+ * segment anymore. See launch_non_ioable_registrant_removal() for details.
  */
 static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_removal(struct nvmeibt_registrant_ctx *active_registrant_entry)
 {
@@ -2116,7 +2116,7 @@ static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmei
  * Now, we start a registrant_disconnect procedure, that includes converting locks &
  * to stale_locks
  * */
-static enum UNREGISTER_RV launch_unregistered_registrant_removal(
+static enum UNREGISTER_RV launch_non_ioable_registrant_removal(
 										struct nvmeibt_registrant_ctx *input_registrant_ctx,
 										int is_removing_longing)
 {
@@ -2512,7 +2512,7 @@ static int handle_unregister_registrant_from_disk_segment(struct nvmeibt_registr
 	NFIN;
 
 	input_registrant_ctx->is_client_waiting_for_ack = 1;
-	if (launch_unregistered_registrant_removal(input_registrant_ctx, 0) == UNREGISTER_RV_FAILED)
+	if (launch_non_ioable_registrant_removal(input_registrant_ctx, 0) == UNREGISTER_RV_FAILED)
 		rv = -1;
 
 	/* notify lock_id: don't wait for (lost registrant's) ack for purges */
@@ -2524,7 +2524,7 @@ static int handle_unregister_registrant_from_disk_segment(struct nvmeibt_registr
 
 enum UNREGISTER_RV nvmeibt_register_launch_unsubscribed_registrant_removal(struct nvmeibt_registrant_ctx *input_registrant_ctx)
 {
-	return launch_unregistered_registrant_removal(input_registrant_ctx, 1);
+	return launch_non_ioable_registrant_removal(input_registrant_ctx, 1);
 }
 
 /******************          Register      ***********************/
