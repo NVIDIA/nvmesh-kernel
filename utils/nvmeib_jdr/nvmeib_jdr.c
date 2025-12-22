@@ -149,14 +149,69 @@ static void __jdr_ptr(struct jdr* self, char const * name, void const * const va
 
 static void __jdr_ascii(struct jdr* self, char const * name, char const * const text)
 {
-	JDR_ASSERT((strstr(text, "\"") == NULL));
-	__jdr_append_name_value(self, "\"%s\"", name, text);
+	if (text){
+		JDR_ASSERT((strstr(text, "\"") == NULL));
+		__jdr_append_name_value(self, "\"%s\"", name, text);
+	} else {
+		__jdr_append_name_value(self, "\"%s\"", name, "");
+	}
+}
+/*
+ * Append a float value to the JSON document.
+ *
+ * @param self The JDR instance.
+ * @param name The name of the value.
+ * @param numerator The numerator of the float value.
+ * @param denominator The denominator of the float value.
+ * @param precision The precision of the float value.
+ *
+ * This routine is largely borrowed from json_data_uval_float(). However, the known
+ * issue is that the conversion from float to string is not lossless. Take
+ * `UINT64_MAX / 10` as an example, the result is `1844674407370955264` when
+ * converted to double and then back to uint64_t, which is not equal to the
+ * uint64_t value of `1844674407370955161`.
+ */
+static void __jdr_ascii_float(struct jdr* self, char const * name, const uint64_t numerator, const uint64_t denominator, const int precision)
+{
+	uint64_t int_part;
+	uint64_t remainder;
+	int i;
+
+	/* start appending a new key/value */
+	__jdr_on_value_append(self);
+	/* append the key and/or a quote */
+	if (name){
+		__jdr_append(self, "%*s\"%s\": ", self->impl.nesting, " ", name);
+	} else {
+		__jdr_append(self, "%*s", self->impl.nesting, " ");
+	}
+
+	/* append the formatted float value */
+	if (denominator == 0) {
+		/* Invalid division - output null as value */
+		__jdr_append(self, "null");
+	} else {
+		int_part = numerator / denominator;
+		remainder = numerator % denominator;
+
+		/* Print the integer part */
+		__jdr_append(self, "%llu", (unsigned long long)int_part);
+
+		if (precision > 0) {
+			__jdr_append(self, ".");
+			for (i = 0; i < precision; i++) {
+				remainder *= 10;
+				__jdr_append(self, "%d", (int)(remainder / denominator));
+				remainder = remainder % denominator;
+			}
+		}
+	}
 }
 
 static void __attribute__((format (printf, 3, 4))) __jdr_ascii_format(struct jdr* self, char const * name, char const * fmt, ...)
 {
 	va_list args;
-	
+
 	/* start appending a new key/value */
 	__jdr_on_value_append(self);
 	/* append the key and/or a quote */
@@ -303,6 +358,7 @@ static struct jdr jdr_get_default(void)
 		.ptr = __jdr_ptr,
 		.ascii = __jdr_ascii,
 		.ascii_format = __jdr_ascii_format,
+		.ascii_float = __jdr_ascii_float,
 		.bitmap = __jdr_bitmap,
 		.uuid_be = __jdr_uuid_be,
 

@@ -1275,7 +1275,8 @@ void drain_workqueue(  struct workqueue_struct *wq);
 void flush_workqueue(struct workqueue_struct *wq);
 bool workqueue_is_empty(struct workqueue_struct *wq);
 void destroy_workqueue(struct workqueue_struct *wq);
-char *workqueue_dump(struct workqueue_struct 	*wq, char	*buf, int max_size, bool add_items);
+struct nvmeib_txt;
+void workqueue_dump(struct workqueue_struct *wq, struct nvmeib_txt* txt, bool add_items);
 void workqueue_dump_works_to_log(struct workqueue_struct *wq, void (*print_fn)(const struct work_struct *));
 /*static*/void __queue_delayed_work(     int cpu, struct workqueue_struct *wq, struct delayed_work *dwork, unsigned long delay);
 static inline bool queue_delayed_work_on(int cpu, struct workqueue_struct *wq, struct delayed_work *dwork, unsigned long delay){ __queue_delayed_work(cpu, wq, dwork, delay); return true; }

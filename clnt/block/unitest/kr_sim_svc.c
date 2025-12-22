@@ -2,6 +2,7 @@
 #include "nvmeibc_trace.h"
 #include "di_tracker.h"
 #include "nvmeibc_block.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
 
 enum kernel_status_t get_kernel_status = KERNEL_STATUS_BOOOTING;
 
@@ -588,21 +589,38 @@ void __bio_track_end(struct bio *b, int rv) {
 }
 
 
+static void __dump_workqueue_emerg(struct workq_struct* wq, struct charvec buffer)
+{
+	struct charvec txt_result = {0};
+	struct nvmeib_txt txt = nvmeib_txt_make(buffer);
+	workqueue_dump(wq, &txt, true);
+	txt_result = nvmeib_txt_finalize(&txt);
+	BUG_ON(txt_result.base == NULL); //it means we don't allocated enough memory
+	pr_emerg("%s\n", buffer.base);
+}
+
 void kernel_sim_dump_state(void) {
 	#define KERN_DUMP_SIZE 	(10*4096)
-	char	*buf;
 	struct workq_struct	*wq;
-	buf = sim_kmalloc(KERN_DUMP_SIZE, 0);
+	char *buf = sim_kmalloc(KERN_DUMP_SIZE, 0);
+	struct charvec txt_buf = {.base=buf, .len=KERN_DUMP_SIZE};
+
 	pr_emerg("------------Kernel Simulator Dump start -------------------\n");
 	ecpu_set_dump_queues(&kernel_sim.ecpu_set, buf, KERN_DUMP_SIZE);
 	pr_emerg("pending eCPU tasks:%s\n", buf);
 	kernel_timers_dump(&kernel_sim.timers, buf, KERN_DUMP_SIZE);
 	pr_emerg("pending timers:\n%s", buf);
-	workqueue_dump(system_wq, buf, KERN_DUMP_SIZE, true);
-	pr_emerg("%s\n", buf);
 
-	wq = kernel_work_queues_get_by_name(&kernel_sim.wqs, "c_main_wq");		if (wq) { workqueue_dump(wq, buf, KERN_DUMP_SIZE, true); pr_emerg("%s\n", buf); }
-	wq = kernel_work_queues_get_by_name(&kernel_sim.wqs, TOMA_THREAD_NAME);	if (wq) { workqueue_dump(wq, buf, KERN_DUMP_SIZE, true); pr_emerg("%s\n", buf); }
+	__dump_workqueue_emerg(system_wq, txt_buf);
+
+	wq = kernel_work_queues_get_by_name(&kernel_sim.wqs, "c_main_wq");
+	if (wq) {
+		__dump_workqueue_emerg(wq, txt_buf);
+	}
+	wq = kernel_work_queues_get_by_name(&kernel_sim.wqs, TOMA_THREAD_NAME);
+	if (wq) {
+		__dump_workqueue_emerg(wq, txt_buf);
+	}
 	pr_emerg("------------Kernel Simulator Dump ends -------------------\n");
 	sim_kfree(buf);
 }

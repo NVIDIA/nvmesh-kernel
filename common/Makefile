@@ -17,7 +17,7 @@ nvmeib_common-y := nvmeib.o nvmeib_utils.o nvmeib_ib_driver.o nvmeib_wd.o \
 	nvmeib_json.o \
 	nvmeib_metrics_jdr.o nvmeib_memmgr_metrics.o nvmeib_error_tags.o \
 	nvmeib_completion_noise.o nvmeib_pcpu_wq.o
-	
+
 ifeq ($(call ofed_ver_check,5,1),no)
   # Ofed below 5.1 - support mlx4 driver
   nvmeib_common-y += mlx/nvmeib_mlx4.o

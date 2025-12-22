@@ -615,7 +615,7 @@ struct nvmeibt_nm_path * nvmeibt_nm_restart_path(struct nvmeibt_nm_path *path)
 		XDLIST_ADD_TAIL(&path->ra->connecting, &path->base);
 		path->cmt.base.guid = ++path->pp->pn->local_node->guid;
 		path->cmt.base.base.type = kt_connect_cm;
-		
+
 		path->payload->sgid = path->pp->gid;
 		pathtoln(path)->hw_func_tbl.set_conneting_path(path);
 		if (path->renew_srm_id) {
@@ -641,7 +641,7 @@ static int handle_path(void *ctx, int is_read, int is_write, int dry_tries)
 	//N_Tf(kckckck, "handle path @NAME - state = @INT", path->name, path->state);
 	if (clear_timer_fd(path->timer_fd, is_read, is_write))
 		goto out;
-	
+
 	if (path->pp->restart_needed) {
 		nvmeibt_nm_restart_port(path->pp);
 		path = NULL;
@@ -1033,7 +1033,7 @@ void nvmeibt_nm_attach_port(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic
 		goto out;
 	}
 	lnic_name = lnic->from_config.device_type;
-	
+
 	if (strncmp(lnic_name, siw_iface_prefix, sizeof(siw_iface_prefix) - 1) == 0)
 		lnic_name += strlen(siw_iface_prefix);
 
@@ -1079,7 +1079,7 @@ void nvmeibt_nm_attach_port(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic
 	ln->hw_func_tbl.create_port(pp);
 	add_port_paths(pp);
 	ln->renew_status = 1;
-	
+
 out:
 	NFOUT;
 }
@@ -1115,15 +1115,15 @@ static void add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nm_a
 		N_Wf(nm_add_remote_w1, "No valid topology contaning my node");
 		goto out;
 	}
-	
+
 	if (!(rn = get_remote_node(ln, e))) {
 		N_ETf(nm_arn_e1, "Failed to get a remote node");
 		goto out;
 	}
-	
+
 	if (e->me)
 			nvmeibt_nm_attach_port(ln, e->nic);
-	ra = find_remote_address(rn, e->remote_nic, &e->nic_id);	
+	ra = find_remote_address(rn, e->remote_nic, &e->nic_id);
 	if (!ra) {
 		add_remote_address(rn, e->nic, &e->nic_id, e->remote_nic,
 			NULL, e->brodcast_id);
@@ -1134,7 +1134,7 @@ static void add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nm_a
 			e->remote_nic, e->remote_node);
 		add_paths(ra);
 	}
-	
+
 
 out:
 	NFOUT;
@@ -1260,7 +1260,7 @@ static void handle_del_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nm_d
 	int i,j;
 
 	NFIN;
-	
+
 	N_Tf(nm_del_remote_nic_t12345, "Trying to del NIC @STR on node @STR(me=@BOOL)",
 			e->remote_nic, e->remote_node, e->me);
 	if (nvmeibt_ib_common_device_uuid_str_to_raw(&gid, e->remote_nic))
@@ -1467,7 +1467,7 @@ void nvmeibt_nm_restart_port(struct nvmeibt_nm_per_port *pp) {
 	nvmeibt_nm_free_port(pp);
 	if (!pp->pn->local_node->hw_func_tbl.create_port(pp))
 		add_port_paths(pp);
-	
+
 	NFOUT;
 }
 
@@ -2401,7 +2401,7 @@ int nvmeibt_nm_add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_n
 	}
 	cur_topo = nvmeibt_global_get_global();
 	me = ARE_UUID_EQ(&(nic->its_node->from_config.id), &(cur_topo->my_node->from_config.id));
-	
+
 	if (ARE_UUID_EQ(&ln->local_node_id, &nvmeib_uuid_null_val))
 		ln->local_node_id = cur_topo->my_node->from_config.id;
 
@@ -2875,7 +2875,7 @@ int nvmeibt_nm_try_connect_path(struct nvmeibt_nm_path *path) {
 	path->payload->sgid = path->pp->gid;
 	format_gid_raw(path->pp->gid.raw, gid_str);
 	path->payload->node_id = path->pp->pn->local_node->local_node_id;
-	
+
 	N_Tf(checker, "Trying to connect to connect gid @STR", gid_str);
 	rv = pathtoln(path)->hw_func_tbl.try_connect_path(path, true);
 	if (rv) {
@@ -2964,7 +2964,7 @@ int nvmeibt_nm_on_connection_request(struct nvmeibt_nm_login_data *login, struct
 	char b[TOMA_SOCKADDR_STRING_LEN];
 	int rv;
 	struct nvmeibt_nm_path *path;
-	
+
 	if (check_version(login->version, s_min_ver) < 0) {
 		N_ETf(nm_hecr_e1001, "Version mismatch: "
 			"peer version is @INT.@INT.@INT, "
@@ -3277,7 +3277,7 @@ void nvmeibt_nm_path_set_last_error(struct nvmeibt_nm_path *path, enum nvmeibt_n
 		return;
 
 	path->last_error = error;
-	
+
 	if (error >= 0 && error < nvmeibt_nm_ple_max) {
 		nvmeibt_nm_path_counter_inc(path, &path->counters.error_counts[error]);
 	} else {
@@ -3297,20 +3297,20 @@ static void print_path_jdr(struct jdr *jdr, struct nvmeibt_nm_path *path, const 
 	if (path->state == nvmeibt_nm_ps_wait_ping_ack) {
 		jdr_write_var(jdr, ping_retries, path->ping_retry_counter);
 	}
-	
+
 	/* Add counters information */
-	{ /* counters scope */ 
+	{ /* counters scope */
 		jdr_object_scope(jdr, "counters");
-		
+
 		/* Path restart counter */
 		jdr_write_var(jdr, path_restarts, path->counters.path_restarts);
 		jdr_write_var(jdr, invalid_ping_response, path->counters.invalid_ping_response);
 		jdr_write_var(jdr, ping_retries, path->counters.ping_retries);
 		{ /* path_restarts_counters scope */
 			int error_type;
-			
+
 			jdr_object_scope(jdr, "path_restarts_counters");
-			
+
 			for (error_type = 0; error_type < nvmeibt_nm_ple_max; error_type++) {
 				const char *error_description = nvmeibt_nm_ple_str(error_type);
 				jdr->ops.u64(jdr, error_description, path->counters.error_counts[error_type]);
@@ -3369,7 +3369,7 @@ cont:
 	json_str = *ln_json_str;
 	buffer.base = json_str;
 	buffer.len = len;
-	
+
 	jdr = jdr_make(buffer);
 
 	{ /* nw_status scope */
@@ -3386,7 +3386,7 @@ cont:
 						jdr_write_var(&jdr, name, (char const *)rn->name);
 						jdr_write_var(&jdr, connected, rn->connected);
 						jdr_write_var(&jdr, is_me, rn->me);
-						
+
 						/* Print event tracker for this remote node */
 						nvmeibt_event_tracker_print_jdr(&rn->event_tracker, &jdr);
 					}
@@ -3448,7 +3448,7 @@ cont:
 	} /* nw_status scope */
 
 	json = jdr_finalize(&jdr);
-	
+
 	/* Check if buffer was too small */
 	if (json.base == NULL && json.len > buffer.len) {
 		/* Buffer was too small, need larger buffer */
@@ -3496,7 +3496,7 @@ void nvmeibt_nm_handle_local_nic_change(struct nvmeibt_nm_local_node *ln, const 
 		goto out;
 	if ((r = get_request_ex(ln, 0, NULL))) {
 		e = &r->local_nic_change_req;
-		
+
 		if (strncmp(dev_name, siw_iface_prefix, sizeof(siw_iface_prefix) - 1) == 0)
 			dev_name += strlen(siw_iface_prefix);
 		e->dev_name = NNVMEIBT_TOMA_STRDUP(nm_nrhncr_t1001, dev_name);
@@ -3597,7 +3597,7 @@ void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln)
 {
 	struct nvmeibt_nm_req *r;
 	pthread_t t;
-	
+
 
 	NFIN;
 	if (!ln)
@@ -3617,7 +3617,7 @@ out:
 
 void nvmeibt_nm_set_path_state(struct nvmeibt_nm_path *path, enum nvmeibt_nm_path_state new_state) {
 	enum nvmeibt_nm_path_state old_state = path->state;
-	
+
 	path->state = new_state;
 	if ((new_state >= nvmeibt_nm_ps_wait_connect && old_state < nvmeibt_nm_ps_connected) || (old_state >= nvmeibt_nm_ps_connected &&
 		 new_state < nvmeibt_nm_ps_connected))

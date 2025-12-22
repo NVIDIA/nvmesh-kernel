@@ -8,7 +8,7 @@
 #include "block/unitest/nvmeibc_simu_disk.h"
 #include <sys/stat.h>
 #include <errno.h>
-#include "common/nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
 #define cli_vol_status_is_detached(s) (!strcmp(s, CLI_DETACHED) || !strcmp(s,CLI_ATTACH_FAILED) || !strcmp(s,CLI_SHUTDOWN) || !strcmp(s,CLI_UPDATE_READY))
 #define cli_vol_status_is_attached(s) (!strcmp(s, CLI_ATTACHED))

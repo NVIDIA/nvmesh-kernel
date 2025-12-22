@@ -13,6 +13,7 @@
 #include "common/compat/kr_incs_compiler_types.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeibs_memmgr_metrics.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
 
 NVMEIBC_MEMMGR_METRIC(client_total_mem, "component=client");
 NVMEIBC_MEMMGR_METRIC(simulator_total_mem, "component=simulator");
@@ -2274,32 +2275,24 @@ void delayed_work_timer_fn(unsigned long __data)
 }
 
 // dump the state of the work-queue
-char *workqueue_dump(struct workqueue_struct *wq, char *buf, int size, bool	add_items) {
+void workqueue_dump(struct workqueue_struct *wq, struct nvmeib_txt* txt, bool	add_items) {
 	struct list_head	*iter;
 	void	*func[1];
 	char	**symbols;
-	char	*p = buf;
-	int 	written;
 	mutex_lock(&wq->add_mutex);
-	written = snprintf(p, size, "wq = {name=%-20s, pending=%d}", wq->name, wq->num_pending_works);
-	p += written;
-	size -= written;
-	BUG_ON(size < 0);
+
+	nvmeib_txt_append(txt, "wq = {name=%-20s, pending=%d}", wq->name, wq->num_pending_works);
 	if (add_items) {
 		list_for_each(iter, &wq->w_list) {
 			struct work_struct	*wi = container_of(iter, struct work_struct, entry);
 			// resolve function address to symbol
 			func[0] = wi->func;
 			symbols = backtrace_symbols(func,1);
-			written = snprintf(p, size, "\n\tfunc=%p (%s)", wi->func, symbols[0]);
+			nvmeib_txt_append(txt, "\n\tfunc=%p (%s)", wi->func, symbols[0]);
 			free(symbols);
-			p += written;
-			size -= written;
-			BUG_ON(size < 0);
 		}
 	}
 	mutex_unlock(&wq->add_mutex);
-	return buf;
 }
 
 void workqueue_dump_works_to_log(struct workqueue_struct *wq, void (*print_fn)(const struct work_struct *)) {

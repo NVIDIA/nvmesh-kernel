@@ -16,7 +16,7 @@ struct nvmeibt_event_tracker {
 	nvmeibt_event_to_str_fn event_to_str;
 };
 
-struct nvmeibt_event_tracker *nvmeibt_event_tracker_init(struct nvmeibt_event_tracker *tracker, 
+struct nvmeibt_event_tracker *nvmeibt_event_tracker_init(struct nvmeibt_event_tracker *tracker,
 	int max_events, nvmeibt_event_to_str_fn event_to_str);
 
 void nvmeibt_event_tracker_free(struct nvmeibt_event_tracker *tracker);

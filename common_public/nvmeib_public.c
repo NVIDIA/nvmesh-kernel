@@ -284,7 +284,7 @@ static int __init nvmeib_public_module_init(void) /* Constructor */
 
 	printk(KERN_INFO "On-Demand-Paging is %s\n",
 		   paging_enabled ? "enabled" : "disabled");
-	
+
 	if (nvmeibp_do_kasan_test) {
 		nvmeib_public_kasan_test();
 	}
@@ -302,7 +302,7 @@ static int __init nvmeib_public_module_init(void) /* Constructor */
 #endif
 
 	nvmeib_public_save_stack_trace_ptr = nvmeib_public_save_stack_trace;
-	
+
 	/* Init interface to nvmeib_keeper module */
 	nvmeib_public_keeper_init();
 
@@ -356,7 +356,7 @@ static void __exit nvmeib_public_module_exit(void) /* Destructor */
 		nvmeib_public_save_stack_trace_ptr = NULL;
 	}
 	free_public_hwdevs();
-	
+
 	/* Finish keeper interface */
 	nvmeib_public_keeper_fini();
 
@@ -398,7 +398,7 @@ int nvmeib_public_call_for_each_disk_part(struct gendisk *disk, int (*f)(struct 
 	struct disk_part_iter piter;
 	struct hd_struct *part;
 	int rv = -ENOENT;
-	
+
 	disk_part_iter_init(&piter, disk, 0);
 	while ((part = disk_part_iter_next(&piter)) &&
 		!(rv = (*f)(part, args)));
@@ -411,7 +411,7 @@ int nvmeib_public_call_for_each_disk_part(struct gendisk *disk, int (*f)(struct 
 	struct block_device *part;
 	unsigned long idx;
 	int rv = -ENOENT;
-	
+
 	rcu_read_lock();
 	xa_for_each_start(&disk->part_tbl, idx, part, 1) {
 		if ((rv = (*f)(part, args)) < 0)
@@ -1031,7 +1031,7 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_ref_release_wait_n);
 
-int nvmeib_public_kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp_ext[]) 
+int nvmeib_public_kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp_ext[])
 {
 	return kobject_uevent_env(kobj, action, envp_ext);
 }
@@ -1076,7 +1076,7 @@ struct task_struct *nvmeib_public_kthread_create_on_cpu(int (*threadfn)(void *da
 					  const char *namefmt)
 {
 	struct task_struct *p;
-	
+
 	p = kthread_create_on_node(threadfn, data, cpu_to_node(cpu), namefmt,
 				   cpu);
 	if (IS_ERR(p))
@@ -1160,14 +1160,14 @@ bool nvmeib_public_cancel_work_sync(struct work_struct *work)
 EXPORT_SYMBOL(nvmeib_public_cancel_work_sync);
 
 /* KASAN
- * 
+ *
  * Enable use of kasan_poison / kasan_unpoison for NVMesh
  * Can be used to find memory corruptions.
- * 
+ *
  * See nvmeib_public_kasan_test() for example usage
  *
  * NOTE: Only x86 and x86_64 is supported.
- * 
+ *
  * NOTE: kasan_multishot=on must be passed on kernel command-line.
  */
 #if defined(CONFIG_KASAN) && defined(CONFIG_X86)
@@ -1211,7 +1211,7 @@ int nvmeib_public_kasan_poison(const void *addr, size_t size, enum nvmeib_public
 
 	if (is_vmalloc_addr(addr)) {
 #ifndef CONFIG_KASAN_VMALLOC
-		_NW_dmesg(warn_public_kasan_poison_vm_not_supp, 
+		_NW_dmesg(warn_public_kasan_poison_vm_not_supp,
 			  "KASAN VMALLOC support is not enabled");
 		rv = -EOPNOTSUPP;
 		goto out;
@@ -1219,14 +1219,14 @@ int nvmeib_public_kasan_poison(const void *addr, size_t size, enum nvmeib_public
 	}
 
 	if (((unsigned long)addr & KASAN_GRANULE_MASK)) {
-		_NW_dmesg(warn_public_kasan_poison_addr_not_aligned, 
+		_NW_dmesg(warn_public_kasan_poison_addr_not_aligned,
 			  "KASAN - Address @ADDR alignment error", (u64)addr);
 		rv = -EFAULT;
 		goto out;
 	}
 
 	if (((unsigned long)size & KASAN_GRANULE_MASK)) {
-		_NW_dmesg(warn_public_kasan_poison_size_not_aligned, 
+		_NW_dmesg(warn_public_kasan_poison_size_not_aligned,
 			  "KASAN - Size @SIZE_T alignment error", size);
 		rv = -EFAULT;
 		goto out;
@@ -1247,7 +1247,7 @@ int nvmeib_public_kasan_unpoison(const void *addr, size_t size)
 
 #ifndef CONFIG_KASAN_VMALLOC
 	if (is_vmalloc_addr(addr)) {
-		_NW_dmesg(warn_public_kasan_unpoison_vm_not_supp, 
+		_NW_dmesg(warn_public_kasan_unpoison_vm_not_supp,
 			  "KASAN VMALLOC support is not enabled");
 		rv = -EOPNOTSUPP;
 		goto out;
@@ -1262,14 +1262,14 @@ int nvmeib_public_kasan_unpoison(const void *addr, size_t size)
 	addr = kasan_reset_tag(addr);
 
 	if (((unsigned long)addr & KASAN_GRANULE_MASK)) {
-		_NW_dmesg(warn_public_kasan_unpoison_addr_not_aligned, 
+		_NW_dmesg(warn_public_kasan_unpoison_addr_not_aligned,
 			  "KASAN - Address @ADDR alignment error", (u64)addr);
 		rv = -EFAULT;
 		goto out;
 	}
 
 	if (((unsigned long)size & KASAN_GRANULE_MASK)) {
-		_NW_dmesg(warn_public_kasan_unpoison_size_not_aligned, 
+		_NW_dmesg(warn_public_kasan_unpoison_size_not_aligned,
 			  "KASAN - Size @SIZE_T alignment error", size);
 		rv = -EFAULT;
 		goto out;

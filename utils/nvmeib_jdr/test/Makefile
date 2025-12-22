@@ -1,5 +1,5 @@
 CC       = gcc
-CFLAGS   = -Wall -Wextra -O2 -I../
+CFLAGS   = -Wall -Wextra -O2 -I../ -ggdb
 BUILD_DIR = ../build
 LIB_STATIC = $(BUILD_DIR)/libnvmeib_jdr.a
 LDFLAGS  = $(LIB_STATIC)

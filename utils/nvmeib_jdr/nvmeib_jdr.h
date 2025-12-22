@@ -63,6 +63,7 @@ struct jdr{
 		void (*sll)(struct jdr* self, char const * name, long long value);
 		void (*ptr)(struct jdr* self, char const * name, void const * value);
 		void (*ascii)(struct jdr* self, char const * name, char const * text);
+		void (*ascii_float)(struct jdr* self, char const * name, const uint64_t numerator, const uint64_t denominator, const int precision);
 		void (*ascii_format)(struct jdr* self, char const* name, char const * fmt, ...);
 		void (*bitmap)(struct jdr* self, char const * name, unsigned long long value);
 		void (*uuid_be)(struct jdr* self, char const * name, uuid_be uuid);
@@ -97,9 +98,9 @@ struct charvec jdr_finalize(struct jdr* jdr);
 
 //a small helpers to avoid calling done manually
 static inline void __jdr_on_object_done(struct jdr** jdr)
-{ 
+{
 	if (*jdr){
-		(*jdr)->ops.object_done(*jdr); 
+		(*jdr)->ops.object_done(*jdr);
 	}
 }
 
@@ -114,9 +115,9 @@ static inline void __jdr_on_object_done(struct jdr** jdr)
 __attribute__((cleanup(__jdr_on_object_done))) struct jdr* UNIQUE_NAME(jdr_object_scope) = (jdr_inst)->ops.object((jdr_inst), (name))
 
 static inline void __jdr_on_array_done(struct jdr** jdr)
-{ 
+{
 	if (*jdr){
-		(*jdr)->ops.array_done(*jdr); 
+		(*jdr)->ops.array_done(*jdr);
 	}
 }
 
