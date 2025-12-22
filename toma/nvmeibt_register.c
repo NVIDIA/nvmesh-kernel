@@ -2178,6 +2178,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int ci
 			}
 		}
 	}
+	nvmeibt_register_remove_longing_registrant_on_invalid_seg(((unsigned long long)cid) << 32, 1);
 out:
 	NFOUT;
 	return rv;
