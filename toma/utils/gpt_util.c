@@ -3056,33 +3056,11 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	}
 
 	// Display detected flags
-	if (mismatch_detected) {
-		fprintf(stdout, "_READONLY_mismatch_detected: true\n");
-	}
-	if (overlaps_detected) {
-		fprintf(stdout, "_READONLY_overlaps_detected: true\n");
-	}
 	if (recalculate_crc) {
 		fprintf(stdout, "_recalculate_crc: true\n");
 	}
 
-	// Safety check: Block if mismatch detected and not resolved
-	if (mismatch_detected) {
-		N_Ef(apply_json_mismatch_block, "JSON has _READONLY_mismatch_detected=true, blocking apply. file=@STR",
-			 config->apply_json_file);
-		rv = -1;
-		goto out;
-	}
-
-	// Safety check: Block if overlaps detected
-	if (overlaps_detected) {
-		N_Ef(apply_json_overlap_block, "JSON has _READONLY_overlaps_detected=true, blocking apply. file=@STR",
-			 config->apply_json_file);
-		rv = -1;
-		goto out;
-	}
-
-	fprintf(stdout, "\n" COL_GREEN "=== Metadata validation: PASSED ===" COL_RESET "\n\n");
+	fprintf(stdout, "\n" COL_GREEN "=== Metadata parsing: OK ===" COL_RESET "\n\n");
 
 	// Step 4: Parse GPT sections and prepare for apply
 	memset(&current_gpt, 0, sizeof(current_gpt));
@@ -3151,19 +3129,69 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	// Recalculate mismatch detection (if both copies present in JSON)
 	if (main_gpt_primary_elem && main_gpt_alternate_elem) {
-		// TODO: Parse both into separate structures and compare
-		// For now, keep JSON flag (will implement when parse logic is complete)
+		struct nvmeibt_disk_gpt		json_gpt_alternate;
+		BOOL						is_header_mismatch;
+		BOOL						is_entries_mismatch;
 		fprintf(stdout, "Both primary and alternate present in JSON\n");
-		fprintf(stdout, "TODO: Recalculate mismatch by comparing parsed GPTs\n");
+		fprintf(stdout, "Parsing alternate copy for comparison...\n");
+
+		// Parse alternate section
+		memset(&json_gpt_alternate, 0, sizeof(json_gpt_alternate));
+		nvmeibt_strlcpy(json_gpt_alternate.main_or_metadata, MAIN_GPT_NAME, sizeof(json_gpt_alternate.main_or_metadata));
+		json_gpt_alternate.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+
+		if (parse_gpt_from_json_section(&json_gpt_alternate, main_gpt_alternate_elem, "main_gpt_alternate") < 0) {
+			N_Ef(apply_json_parse_alt_for_mismatch, "Failed to parse main_gpt_alternate from JSON");
+			goto out;
+		}
+
+		// Compare headers
+		is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(&json_gpt.header, &json_gpt_alternate.header);
+
+		// Compare entries
+		is_entries_mismatch = !nvmeibt_disk_metadata_are_gpt_entries_equal(
+			json_gpt.entries, json_gpt_alternate.entries,
+			json_gpt.header.n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
+
+		mismatch_detected = is_header_mismatch || is_entries_mismatch;
+
+		if (mismatch_detected) {
+			fprintf(stdout, COL_YELLOW "Mismatch detected between primary and alternate in JSON" COL_RESET "\n");
+		} else {
+			fprintf(stdout, COL_GREEN "Primary and alternate are identical in JSON" COL_RESET "\n");
+		}
 	}
 
 	// Recalculate overlap detection from parsed entries
-	// TODO: Check json_gpt.entries[] for overlaps
-	fprintf(stdout, "TODO: Recalculate overlaps from JSON entries\n");
+	overlaps_detected = (detect_overlaps(json_gpt.entries, json_gpt.max_n_entries) > 0);
+	if (overlaps_detected) {
+		fprintf(stdout, COL_YELLOW "Overlaps detected in JSON entries" COL_RESET "\n");
+	}
 
 	fprintf(stdout, "Recalculation: mismatch=%s, overlaps=%s\n",
 			mismatch_detected ? "true" : "false",
 			overlaps_detected ? "true" : "false");
+
+	// Step 6.6: Block if safety issues detected
+	if (mismatch_detected) {
+		N_Ef(apply_json_mismatch_block, "Mismatch detected after recalculation, blocking apply. file=@STR",
+			 config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "\nERROR: JSON contains mismatched primary and alternate copies!" COL_RESET "\n");
+		fprintf(stderr, "  Re-export with --gpt-copy=primary or --gpt-copy=alternate\n");
+		rv = -1;
+		goto out;
+	}
+
+	if (overlaps_detected) {
+		N_Ef(apply_json_overlap_block, "Overlaps detected after recalculation, blocking apply. file=@STR",
+			 config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "\nERROR: JSON contains overlapping partitions!" COL_RESET "\n");
+		fprintf(stderr, "  Fix overlaps in JSON before applying\n");
+		rv = -1;
+		goto out;
+	}
+
+	fprintf(stdout, "\n" COL_GREEN "=== Safety checks: PASSED ===" COL_RESET "\n\n");
 
 	// Step 7: Safety check - GPT size compatibility
 	fprintf(stdout, "\n=== Safety Check: GPT Size Compatibility ===\n");
@@ -3230,13 +3258,40 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	}
 	fprintf(stdout, "\n");
 
-	// Step 9: Write changes if in write mode
+	// Step 9: Apply changes if in write mode
 	if (config->write_mode) {
-		fprintf(stdout, "=== Would apply changes (NOT IMPLEMENTED YET) ===\n");
-		fprintf(stdout, "TODO: Prompt for confirmation\n");
-		fprintf(stdout, "TODO: Copy json_gpt to current_gpt\n");
-		fprintf(stdout, "TODO: Call nvmeibt_disk_metadata_store_gpt()\n");
-		fprintf(stdout, "TODO: Log audit trail with N_IMf (before/after CRCs)\n");
+		uint32_t old_header_crc = current_gpt.header.header_crc32;
+		uint32_t old_entries_crc = current_gpt.header.partition_entry_array_crc32;
+
+		fprintf(stdout, "=== Applying Changes ===\n");
+
+		// Log before state
+		N_IMf(apply_gpt_before, "Applying GPT changes: dev=@STR CRC_before: hdr=@CRC ent=@CRC",
+			  config->device_path, old_header_crc, old_entries_crc);
+
+		// Copy JSON entries to current GPT structure
+		memcpy(current_gpt.entries, json_gpt.entries, sizeof(current_gpt.entries));
+
+		// Copy editable header fields (preserve disk-specific fields)
+		current_gpt.header.disk_obj_uuid = json_gpt.header.disk_obj_uuid;
+		current_gpt.header.n_partition_entries = json_gpt.header.n_partition_entries;
+		current_gpt.header.first_usable_pba = json_gpt.header.first_usable_pba;
+		current_gpt.header.last_usable_pba = json_gpt.header.last_usable_pba;
+
+		// Write to disk (this will recalculate CRCs automatically)
+		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_gpt, false) < 0) {
+			N_Ef(apply_write_failed, "Failed to write GPT dev=@STR", config->device_path);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write changes to disk" COL_RESET "\n");
+			rv = -1;
+			goto out;
+		}
+
+		// Log after state (CRCs were recalculated by store_gpt)
+		N_IMf(apply_gpt_success, "GPT changes applied: dev=@STR CRC_after: hdr=@CRC ent=@CRC",
+			  config->device_path, current_gpt.header.header_crc32, current_gpt.header.partition_entry_array_crc32);
+
+		fprintf(stdout, "\n" COL_GREEN "=== Changes written successfully ===" COL_RESET "\n");
+		fprintf(stdout, "GPT updated on disk: %s\n", config->device_path);
 	} else {
 		fprintf(stdout, COL_GREEN "=== Dry-run complete ===" COL_RESET "\n");
 		fprintf(stdout, "No changes written to disk.\n");
