@@ -137,6 +137,7 @@ SOURCES  = tests_conf.c
 SOURCES += bunitest.c kr_incs.c nvmeibc_simu_disk.c ib_incs.c kr_sim_svc.c nvmeib_common_all.c nvmesh_sim.c di_tracker.c
 SOURCES += memmgr_metrics_tests.c
 SOURCES += error_tags_tests.c
+SOURCES += io_pet_traces_controller.c
 SOURCES += ./clnt/nvmeibc_cli_scripts_simu.c ./clnt/nvmeibc_user_space_simu.c
 SOURCES += ./mgmt/nvmeibm_conf_db.c ./mgmt/nvmeibm_mgmt_simu.c ./mgmt/nvmeibm_mcs_simu.c
 SOURCES += ./toma/nvmeibt_topology_simu.c ./toma/nvmeibt_toma_simu.c ./toma/nvmeibr_disk_metadata_sim.c
@@ -254,7 +255,7 @@ SOURCES += $(SSDA)/toma/utils/nvmeibt_uuid.c
 SOURCES += $(SSDA)/toma/clnt/nvmeibt_client_protocol.c
 SOURCES += $(SDIR)/module/instance/nvmeibc_cinst.c
 
-SOURCES += $(SDIR)/nvmeibc_volume.c $(SDIR)/nvmeibc_main.c $(SDIR)/nvmeibc_common.c $(SDIR)/nvmeibc_cc_api.c $(SDIR)/nvmeibc_targets.c
+SOURCES += $(SDIR)/nvmeibc_volume.c $(SDIR)/nvmeibc_main.c $(SDIR)/nvmeibc_common.c $(SDIR)/nvmeibc_cc_api.c $(SDIR)/nvmeibc_io_pet.c $(SDIR)/nvmeibc_targets.c
 SOURCES += $(SDIR)/nvmeibc_disk_gen_cmds.c
 SOURCES += $(SDIR)/nvmeibc_capabilities.c
 SOURCES += $(SDIR)/management_utils_common/nvmeibc_management_capi_parse_conf.c

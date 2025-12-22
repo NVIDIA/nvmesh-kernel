@@ -143,6 +143,7 @@ ifeq ($(CPP_INLCUDE_CONFIG),1)
 	SOURCES += $(SDIR)/nvmeibc_main.c
 	SOURCES += $(SDIR)/nvmeibc_common.c
 	SOURCES += $(SDIR)/nvmeibc_cc_api.c
+	SOURCES += $(SDIR)/nvmeibc_io_pet.c
 	SOURCES += $(SDIR)/nvmeibc_targets.c
 	SOURCES += $(SDIR)/nvmeibc_block.c
 	SOURCES += $(CBDIR)/nvmeibc_block_api_conf.c

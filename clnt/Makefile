@@ -36,7 +36,7 @@ endif
 
 obj-m += nvmeibc.o
 nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
-	nvmeibc_cc_api.o nvmeibc_nvme.o nvmeibc_targets.o nvmeibc_memmgr_metrics.o \
+	nvmeibc_cc_api.o nvmeibc_nvme.o nvmeibc_targets.o nvmeibc_memmgr_metrics.o nvmeibc_io_pet.o\
 	nvmeibc_channel.o nvmeibc_ib_io_channel.o \
 	nvmeibc_admin_channel.o nvmeibc_ib_admin_channel.o \
 	nvmeibc_ib_net.o nvmeibc_ib_net_admin.o \

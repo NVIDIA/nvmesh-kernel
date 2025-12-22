@@ -12,4 +12,11 @@ SECTIONS {
                 KEEP(*(.nvmeibc_error_tags))
                 __stop_nvmeibc_error_tags = .;
         }
+
+        .nvmeibc_io_pet_msgs : {
+               . = ALIGN(8);
+                __start_nvmeibc_io_pet_msgs = .;
+                KEEP(*(.nvmeibc_io_pet_msgs))
+                __stop_nvmeibc_io_pet_msgs = .;
+        }
 }
