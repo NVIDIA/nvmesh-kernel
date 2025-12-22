@@ -1643,10 +1643,10 @@ static bool handle_toma_client_msg(struct nvmeibs_um_comm *p,
 	struct page **pages;
 	int i, rv = -1;
 	int	n_pages_pinned;
+	const pid_t toma_pid = e->pid;	// Filled in post_msg(), no need for explicit passing of msg->toma_pid
 
 	NFIN;
 	m = &msg->payload.toma_client;
-	// _NI(vahj13u, "msg=@PTR    hdr.opcode=@INT hdr.toma_pid=@UINT hdr.caller_type=@CHAR     attach_cmd=@INT data=@PTR copy=@INT", msg, msg->hdr.opcode, msg->hdr.toma_pid, msg->hdr.caller_type, m->attach_cmd, m->data, m->copy);
 	if (m->copy) {
 		if ((unsigned long)m->data % PAGE_SIZE) {
 			_NE(htcm_1, "copy from user space must be page align m->data=@PTR", m->data);
@@ -1660,7 +1660,7 @@ static bool handle_toma_client_msg(struct nvmeibs_um_comm *p,
 			_NE(htcm_2, "failed to allocated pages array");
 			goto done;
 		}
-		n_pages_pinned = nvmeib_public_user_pages_for_io_pin(msg->hdr.toma_pid, (unsigned long)m->data, m->n_pages, pages, false);
+		n_pages_pinned = nvmeib_public_user_pages_for_io_pin(toma_pid, (unsigned long)m->data, m->n_pages, pages, false);
 		if (n_pages_pinned != m->n_pages) {
 			_NE(htcm_3, "failed to pin user pages n_pages_pinned=@INT", n_pages_pinned);
 			goto free_pages;
@@ -1714,7 +1714,7 @@ done:
 			local_client_up_p->c.toma_request_f(&lc_params);
 		}
 		mutex_unlock(&local_client_up_p_mutex);
-		rv = send_copied_rscs(p, e, msg->hdr.toma_pid, m->data);
+		rv = send_copied_rscs(p, e, toma_pid, m->data);
 	}
 	NFOUT;
 	return rv;

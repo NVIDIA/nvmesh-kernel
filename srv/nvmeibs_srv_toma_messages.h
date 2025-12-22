@@ -220,8 +220,8 @@ enum uk_comm_opcode {
 	csc_identify_disk = 10,					// NVMESH-7336 not used
 
 	csc_local_client = 11,					// Version 2.3+
-	csc_local_clnt_msg_to_toma_unused = 12,
-	csc_toma_msg_to_local_clnt = 13,		// Example: recovery attach
+	opcode_unused_1 = 12,
+	opcode_unused_2 = 13,
 	csc_msg_to_process = 14,				// s2t, generic mechanism to send a message from kernel to user space
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	csc_contaminate_disk = 15,				// should be the last just before the end
@@ -243,7 +243,6 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_keep_alive: return "csc_keep_alive";
 	case csc_identify_disk: return "csc_identify_disk";
 	case csc_local_client: return "csc_local_client";
-	case csc_toma_msg_to_local_clnt: return "csc_local_clnt_msg";
 	case csc_msg_to_process: return "csc_msg_to_process";
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";
@@ -502,12 +501,6 @@ struct nvmeib_push_msg_process {
 	char start[0];
 };
 
-struct nvmeib_nl_toma_msg_hdr {		// Use the same header msg_to_toma and msg_from_toma. No real reason
-	int							opcode;
-	char						caller_type;	// == TOMA_CALLER
-	pid_t						toma_pid;
-};
-
 struct nvmeib_nl_msg_to_toma {
 	union srvr2toma_payload_t {
 		struct nvmeib_nl_uk_comm_rep			nl_uk_comm_rep;
@@ -528,13 +521,11 @@ static inline int nvmeibs_max_nl_reply(void)
 }
 
 struct nvmeib_nl_msg_from_toma {
-	struct nvmeib_nl_toma_msg_hdr hdr;
 	union {
 		struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
-			enum RECOVERY_ATTACH_CMD attach_cmd;
-			int copy;						// if true the message data in the message must be copied before calling the client API
+			int copy;						// Always true, if true the message data in the message must be copied before calling the client API
 			unsigned n_pages;				// numebr of pages that are needed to be copied
-			void *data;						// the data to be transfered to the client.  If data is coppied pointer must be page aligned
+			void *data;						// the data to be transfered to the client, must be page aligned
 		} toma_client;
 	} payload;
 };

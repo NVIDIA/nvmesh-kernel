@@ -307,14 +307,13 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p,
 
 	NFIN;
 	if (msg->msg.len > len) {
-		N_Ef(error_km_comm_send_msg_to_kernel, "message size @LEN exceeds max netlink message @LEN",
-			msg->msg.len, len);
+		N_Ef(tkmcsmtk0, "message size @LEN exceeds max netlink message @LEN", msg->msg.len, len);
 		goto error;
 	}
 	msg->msg.caller_type = TOMA_CALLER;
 	memset(nlh, 0, len);
 	nlh->nlmsg_len = len;
-	nlh->nlmsg_pid = /*pthread_self() << 16 | */getpid();
+	nlh->nlmsg_pid = getpid();
 	nlh->nlmsg_flags = 0;
 	nlh->nlmsg_type = NVMESH_NL_MSG_TYPE;
 	memcpy(NLMSG_DATA(nlh), &msg->msg, msg->msg.len);
@@ -324,8 +323,7 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p,
 	hdr.msg_namelen = sizeof(p->dest_addr);
 	hdr.msg_iov = &iov;
 	hdr.msg_iovlen = 1;
-	N_Tf(trace_km_comm_send_msg_to_kernel, "Sending message @ID to kernel pid=@PID(@GETPID)",
-		msg->msg.id, nlh->nlmsg_pid, getpid());
+	N_Tf(tkmcsmtk1, "Sending message @ID to kernel pid=@PID(@GETPID)", msg->msg.id, nlh->nlmsg_pid, getpid());
 	sendmsg(p->nl_sock_fd, &hdr, 0);
 	if (msg->remember) {
 		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);
