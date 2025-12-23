@@ -486,7 +486,7 @@ struct udev_event_wq_entry {
 	u32									vendor_id;
 };
 
-static struct nvmeib_hash_table		*ldisks_wq_hash_by_ldisk_id_str;
+static struct nvmeib_hash_table		*nvmesh_ldisks_wq_hash_by_ldisk_id_str;
 static struct nvmeib_hash_table		*stock_ldisks_wq_hash_by_ldisk_id_str;
 
 #if defined(COMPILE_DEBUG)
@@ -678,7 +678,7 @@ static void terminate_toma(int rv)
 	// as at this point of shutdown we cannot in any way wait for the threads signaling that they finished their
 	// work (and decreased the used counter of each memtbl), since we are outside the event loop already.
 
-	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, ldisks_wq_hash_by_ldisk_id_str) {
+	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, nvmesh_ldisks_wq_hash_by_ldisk_id_str) {
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
 		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
 		specific_disk_wq_ctx->wq = NULL;
@@ -1312,7 +1312,7 @@ int nvmeibt_toma_stock_local_disk_specific_add_work(const struct nvmeibt_ascii_u
 
 int nvmeibt_toma_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
 {
-	return local_disk_specific_add_work(ldisks_wq_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
+	return local_disk_specific_add_work(nvmesh_ldisks_wq_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
 }
 
 /**
@@ -1331,7 +1331,7 @@ void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
 
 	NFIN;
 
-	specific_disk_wq_ctx = nvmeib_hash_delete_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
+	specific_disk_wq_ctx = nvmeib_hash_delete_ascii_str(nvmesh_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
 	if (specific_disk_wq_ctx) {
 		// drain the wq of this disk, to avoid anything from attempting execution on it.
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
@@ -2695,7 +2695,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	/* create work-queues */
 	// Init disk_wqs hash table.
-	ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
+	nvmesh_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
 	stock_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(ebaimqx, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_ldisks_wq_hash", -1);
 	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
