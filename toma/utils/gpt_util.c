@@ -1,7 +1,7 @@
 /**
- * Utility that prints the GPT table of a given disk at a given offset and
- * prints it to the screen.
+ * gpt_util - NVMesh GPT/MBR Utility
  *
+ * Displays, exports, and applies GPT structures for NVMesh-managed and regular block devices.
  */
 
 #include <ctype.h>
@@ -207,8 +207,48 @@ static int open_target_device(struct gpt_util_config *config)
 	return fd;
 }
 
+// Self-test framework: Test context structure
+struct self_test_ctx {
+	const char	*test_device_path;
+	const char	*wrong_device_path;
+	char		**test_argv;
+	int			*test_argc;
+};
+
+// Self-test framework: Test function signature
+typedef int (*self_test_func_t)(struct self_test_ctx *ctx);
+
+// Self-test framework: Test registration structure
+struct self_test_entry {
+	const char			*name;
+	const char			*command;
+	self_test_func_t	func;
+	BOOL				expect_failure;		// true for negative tests
+};
+
+// X-Macro: Define all tests here (order determines test numbers automatically)
+// Format: X(function_name, "Test Name", "Command Description", expect_failure)
+#define SELF_TEST_LIST \
+	X(test_normal_gpt, "Normal GPT (Primary == Alternate)", "gpt_util -a <path> -c both", false) \
+	X(test_mismatch_gpt, "Mismatched GPT (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
+	X(test_uuid_filtering, "UUID Filtering", "gpt_util -a <path> --filter-uuid <UUID>", false) \
+	X(test_lba_filtering, "LBA Filtering", "gpt_util -a <path> --filter-lba 1000", false) \
+	X(test_overlap_detection, "Overlap Detection (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
+	X(test_gpt_upgrade, "GPT Upgrade (corrupt n_partition_entries to 128, upgrade to 8192)", "Internal API test", false) \
+	X(test_json_export_apply, "JSON Export + Apply (Dry-Run)", "gpt_util -a <path> -J + --apply-from", false) \
+	X(test_zeroing_verify, "Zeroing Verification Commands (-Z)", "gpt_util -a <path> -Z", false) \
+	X(test_diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from", false) \
+	X(test_diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from", false) \
+	X(test_apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B", false) \
+	X(test_crc_flag, "CRC Recalculation Flag", "gpt_util export + modify JSON + apply", false) \
+	X(test_missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
+	X(test_device_path_safety, "Safety - Device Path Mismatch", "gpt_util export + apply to different device (blocked)", true) \
+	X(test_overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
+	X(test_mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)", true)
+
 // Forward declarations
 static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
+static int SELF_TEST_compare_gpt_binary(const char *device_a, const char *device_b, int pblk_size, uint64_t n_blocks);
 static struct mm_json_elem *SELF_TEST_parse_json_file(const char *filepath);
 static int SELF_TEST_validate_json_bool_flag(const char *json_path, const char *flag_name, BOOL expected_value);
 static int SELF_TEST_modify_json_bool_field(const char *json_path, const char *field, BOOL new_value);
@@ -220,20 +260,15 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config);
 
 /**
  * Start a self-test case (SELF-TEST only)
- * Increments test_idx and prints test header
- * Returns the current test number
+ * Prints test header with the given test number
  */
-static int SELF_TEST_start(int *test_idx, const char *description, const char *command)
+static void SELF_TEST_start(int test_num, const char *description, const char *command)
 {
-	int current_test = ++(*test_idx);
-
 	fprintf(stdout, "\n");
 	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
-	fprintf(stdout, COL_WHITE_BOLD "SELF-TEST %d: %s" COL_RESET "\n", current_test, description);
+	fprintf(stdout, COL_WHITE_BOLD "SELF-TEST %d: %s" COL_RESET "\n", test_num, description);
 	fprintf(stdout, "Emulated command: " COL_YELLOW "%s" COL_RESET "\n", command);
 	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
-
-	return current_test;
 }
 
 /**
@@ -258,8 +293,9 @@ static int SELF_TEST_setup_device(int (*setup_func)(const char *), const char *d
  * End a self-test case (SELF-TEST only)
  * Prints PASSED/FAILED based on result
  * expect_failure: if true, non-zero result is success (for negative tests)
+ * Returns: 0 if passed, -1 if failed (for counting)
  */
-static void SELF_TEST_end(int test_num, int result, BOOL expect_failure)
+static int SELF_TEST_end(int test_num, int result, BOOL expect_failure)
 {
 	BOOL test_passed;
 
@@ -276,8 +312,10 @@ static void SELF_TEST_end(int test_num, int result, BOOL expect_failure)
 
 	if (test_passed) {
 		fprintf(stdout, "\n" COL_GREEN ">>> SELF-TEST %d: PASSED <<<" COL_RESET "\n", test_num);
+	return 0;
 	} else {
 		fprintf(stdout, "\n" COL_RED_BOLD ">>> SELF-TEST %d: FAILED <<<" COL_RESET "\n", test_num);
+		return -1;
 	}
 }
 
@@ -870,8 +908,8 @@ out:
 }
 
 /**
- * Generate a mock device with MODIFIED partition layout for diff testing
- * Different from standard mock: partition has different pba_e (1700 vs 1742) and name
+ * Generate a mock device with MODIFIED partition name for diff testing
+ * Different from standard mock: partition has different name only (MODIFIED_metadata vs excelero_metadata)
  * Returns the fd of the created device (caller must close it)
  */
 static int SELF_TEST_generate_mock_device_modified(const char *filepath)
@@ -914,10 +952,10 @@ static int SELF_TEST_generate_mock_device_modified(const char *filepath)
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	// Add EXCELERO_METADATA partition with DIFFERENT end (1700 instead of 1742)
+	// Add EXCELERO_METADATA partition with DIFFERENT name
 	{
 		uint64_t metadata_start = main_gpt.header.first_usable_pba;
-		uint64_t metadata_end = 1700;  // MODIFIED: was last_usable_pba (1742)
+		uint64_t metadata_end = main_gpt.header.last_usable_pba;
 
 		metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
 		metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
@@ -926,7 +964,7 @@ static int SELF_TEST_generate_mock_device_modified(const char *filepath)
 			&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
 			&metadata_partition_uuid,
 			metadata_start, metadata_end,
-			"MODIFIED_metadata",  // MODIFIED: different name
+			"MODIFIED_metadata",  // MODIFIED: different name only
 			strlen("MODIFIED_metadata"));
 
 		if (!metadata_partition) {
@@ -1703,443 +1741,477 @@ static int SELF_TEST_generate_mock_device_with_mismatch(const char *filepath)
 	return fd;
 }
 
-/**
- * Run comprehensive self-test suite
- * Creates mock devices and calls run_gpt_util_op() with simulated parameters
- * This tests the complete production code path end-to-end
- */
-static int run_self_test(void)
-{
-	int			disk_fd = -1;
-	int			test_idx = 0;		// Auto-incrementing test counter
-	const char	*test_device_path;
-	const char	*wrong_device_path;
-	char		*test_argv[10];
-	int			test_argc;
+// Forward declare all test functions (auto-generated from X-Macro)
+#define X(func, name, cmd, expect_fail) static int func(struct self_test_ctx *ctx);
+SELF_TEST_LIST
+#undef X
 
-	mkdir(TOMA_ROOT_DIR "tmp", 0755);
-	test_device_path = TOMA_ROOT_DIR "tmp/gpt_util_self_test";
-	wrong_device_path = TOMA_ROOT_DIR "tmp/gpt_util_wrong_device";
-
-	// Helper to generate test JSON paths (all in tmp directory)
+// Helper macros for test functions
 	#define TEST_JSON_PATH(name) TOMA_ROOT_DIR "tmp/test_" name ".json"
 
-	// Setup device or abort entire test suite on failure (infrastructure error)
-	#define SELF_TEST_SETUP_OR_ABORT(setup_func, path) \
-		if (SELF_TEST_setup_device(setup_func, path) < 0) { \
-			fprintf(stdout, COL_RED_BOLD "\nINFRASTRUCTURE FAILURE - Aborting test suite" COL_RESET "\n"); \
-			goto out; \
-		}
+// Macro: Define test function (searchable marker + function signature)
+// Usage: DEFINE_TEST(normal_gpt) { test body }
+#define DEFINE_TEST(name) \
+	static int test_##name(struct self_test_ctx *ctx)
 
-	// Setup test_argv, test_argc, and optind from variable arguments
-	#define SELF_TEST_ARGV(...) do { \
-		const char *_args[] = {"gpt_util", __VA_ARGS__}; \
-		int _i; \
-		test_argc = sizeof(_args) / sizeof(_args[0]); \
-		for (_i = 0; _i < test_argc; _i++) { \
-			test_argv[_i] = (char *)_args[_i]; \
-		} \
-		optind = 1; \
-	} while(0)
-
-	// ===== TEST 1: Normal GPT =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Normal GPT (Primary == Alternate)",
-										   "gpt_util -a <path> -c both");
-		int rv;
-
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-c", "both");
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		SELF_TEST_end(current_test, rv, false);
+// Setup device or abort entire test suite (global macro for test functions)
+#define SELF_TEST_SETUP_OR_ABORT(setup_func, path) \
+	if (SELF_TEST_setup_device(setup_func, path) < 0) { \
+		fprintf(stdout, COL_RED_BOLD "\nINFRASTRUCTURE FAILURE - Aborting test suite" COL_RESET "\n"); \
+		exit(1); \
 	}
 
-	// ===== TEST 2: Mismatched GPT (Display + Export + Flag Validation) =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Mismatched GPT (Display + Export + Flag Validation)",
-										   "gpt_util -a <path> -c both + export");
-		int rv = 0;
+// Setup test_argv from context (global macro for test functions)
+#define SELF_TEST_ARGV(...) do { \
+	const char *_args[] = {"gpt_util", __VA_ARGS__}; \
+	int _i; \
+	*ctx->test_argc = sizeof(_args) / sizeof(_args[0]); \
+	for (_i = 0; _i < *ctx->test_argc; _i++) { \
+		ctx->test_argv[_i] = (char *)_args[_i]; \
+	} \
+	optind = 1; \
+} while(0)
 
-		// Step 1: Display mismatched GPT
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-c", "both");
-		rv = run_gpt_util_op(test_argc, test_argv);
+DEFINE_TEST(normal_gpt)
+{
+	int rv;
 
-		// Step 2: Export and verify flag
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "-c", "both", "-J", TEST_JSON_PATH("mismatch"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-c", "both");
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 
-		if (rv == 0) {
-			rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("mismatch"), "_READONLY_mismatch_detected", true);
-		}
+	return rv;
+}
 
-		SELF_TEST_end(current_test, rv, false);
+DEFINE_TEST(mismatch_gpt)
+{
+	int rv = 0;
+
+	// Step 1: Display mismatched GPT
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-c", "both");
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	// Step 2: Export and verify flag
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "-c", "both", "-J", TEST_JSON_PATH("mismatch"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
-	// ===== TEST 3: UUID Filtering =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "UUID Filtering",
-										   "gpt_util -a <path> --filter-uuid <UUID>");
-		int rv;
-
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "--filter-uuid", "aabbccdd-1122-3344-5566-778899aabbcc");
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		SELF_TEST_end(current_test, rv, false);
+	if (rv == 0) {
+		rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("mismatch"), "_READONLY_mismatch_detected", true);
 	}
 
-	// ===== TEST 4: LBA Filtering =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "LBA Filtering",
-										   "gpt_util -a <path> --filter-lba 1000");
-		int rv;
+	return rv;
+}
 
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "--filter-lba", "1000");
-		rv = run_gpt_util_op(test_argc, test_argv);
+DEFINE_TEST(uuid_filtering)
+{
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "--filter-uuid", "aabbccdd-1122-3344-5566-778899aabbcc");
+	return run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+}
 
-		SELF_TEST_end(current_test, rv, false);
+DEFINE_TEST(lba_filtering)
+{
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "--filter-lba", "1000");
+	return run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+}
+
+DEFINE_TEST(overlap_detection)
+{
+	int rv = 0;
+
+	// Step 1: Display overlapping GPT
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-c", "both");
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	// Step 2: Export and verify flag
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("overlaps"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
-	// ===== TEST 5: Overlap Detection (Display + Export + Flag Validation) =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Overlap Detection (Display + Export + Flag Validation)",
-										   "gpt_util -a <path> -c both + export");
-		int rv = 0;
-
-		// Step 1: Display overlapping GPT
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-c", "both");
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Export and verify flag
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("overlaps"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		if (rv == 0) {
-			rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("overlaps"), "_READONLY_overlaps_detected", true);
-		}
-
-		SELF_TEST_end(current_test, rv, false);
+	if (rv == 0) {
+		rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("overlaps"), "_READONLY_overlaps_detected", true);
 	}
 
-	// ===== TEST 6: GPT Upgrade (corrupt -> upgrade -> verify) =====
-	if (1) {
+	return rv;
+}
+
+DEFINE_TEST(gpt_upgrade)
+{
 		struct nvmeibt_disk_gpt		main_gpt;
 		struct nvmeibt_disk_gpt		verify_gpt;
 		uint32_t					expected_crc;
 		int							nbytes;
 		int							wrong_n_partition_entries = 128;
-		int							current_test;
-		int							rv = 0;
+	int							rv = 0;
+	int							disk_fd;
 
-		current_test = SELF_TEST_start(&test_idx, "GPT Upgrade (corrupt n_partition_entries to 128, upgrade to 8192)",
-									   "Internal API test (corrupt -> upgrade -> verify)");
-
-		// Create fresh device (keep fd open for corruption operations)
-		disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(test_device_path);
+	disk_fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(ctx->test_device_path);
 		if (disk_fd < 0) {
-			fprintf(stdout, COL_RED_BOLD "SETUP FAILED" COL_RESET "\n");
+		return -1;
+	}
+
+	if (rv == 0) {
+		rv = SELF_TEST_corrupt_gpt_n_partition_entries(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+														1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1,
+														wrong_n_partition_entries);
+	}
+
+	if (rv == 0) {
+		memset(&main_gpt, 0, sizeof(main_gpt));
+		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+		rv = nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+											   &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false);
+	}
+
+	if (rv == 0) {
+		nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * main_gpt.header.size_of_partition_entry;
+		expected_crc = crc32_seedless(main_gpt.entries, nbytes);
+		if (main_gpt.header.n_partition_entries != wrong_n_partition_entries ||
+			main_gpt.header.partition_entry_array_crc32 != expected_crc) {
 			rv = -1;
 		}
+	}
 
-		// Corrupt Main GPT by setting n_partition_entries to 128
-		if (rv == 0) {
-			rv = SELF_TEST_corrupt_gpt_n_partition_entries(disk_fd,
-														   SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-														   1,
-														   SELF_TEST_MOCK_DEVICE_BLOCKS - 1,
-														   wrong_n_partition_entries);
+	if (rv == 0) {
+		rv = upgrade_gpt_if_needed(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, "Main");
+	}
+
+	if (rv == 0) {
+		memset(&verify_gpt, 0, sizeof(verify_gpt));
+		nvmeibt_strlcpy(verify_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(verify_gpt.main_or_metadata));
+		rv = nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+											   &verify_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false);
+	}
+
+	if (rv == 0) {
+		nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * verify_gpt.header.size_of_partition_entry;
+		expected_crc = crc32_seedless(verify_gpt.entries, nbytes);
+		if (verify_gpt.header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES ||
+			verify_gpt.header.partition_entry_array_crc32 != expected_crc) {
+			rv = -1;
 		}
+	}
 
-		// Read the corrupted GPT
-		if (rv == 0) {
-			memset(&main_gpt, 0, sizeof(main_gpt));
-			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-			rv = nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-												   &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false);
+	if (disk_fd >= 0) close(disk_fd);
+	return rv;
+}
+
+DEFINE_TEST(json_export_apply)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("export"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("export"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(zeroing_verify)
+{
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-Z");
+	return run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+}
+
+DEFINE_TEST(diff_no_changes)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("diff_baseline"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("diff_baseline"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(diff_modifications)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("standard"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_modified, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("standard"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(apply_write)
+{
+	int rv = 0;
+	const char *device_a = TOMA_ROOT_DIR "tmp/gpt_device_a";
+	const char *device_b = TOMA_ROOT_DIR "tmp/gpt_device_b";
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_a);
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_modified, device_b);
+
+	// Verify A != B initially
+	if (rv == 0) {
+		if (SELF_TEST_compare_gpt_binary(device_a, device_b, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, SELF_TEST_MOCK_DEVICE_BLOCKS) == 0) {
+			rv = -1;
 		}
+	}
 
-		// Verify corruption
-		if (rv == 0) {
-			nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * main_gpt.header.size_of_partition_entry;
-			expected_crc = crc32_seedless(main_gpt.entries, nbytes);
+	// Export A, modify JSON, apply to B
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_a, "-J", TEST_JSON_PATH("write_test"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+	if (rv == 0) {
+		rv = SELF_TEST_modify_json_str_field(TEST_JSON_PATH("write_test"), "device_path", device_b);
+	}
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("write_test"), "--write");
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
 
-			if (main_gpt.header.n_partition_entries != wrong_n_partition_entries ||
-				main_gpt.header.partition_entry_array_crc32 != expected_crc) {
-				rv = -1;
+	// Verify A == B (complete binary roundtrip fidelity)
+	if (rv == 0) {
+		rv = SELF_TEST_compare_gpt_binary(device_a, device_b, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, SELF_TEST_MOCK_DEVICE_BLOCKS);
+	}
+
+	unlink(device_a);
+	unlink(device_b);
+	return rv;
+}
+
+DEFINE_TEST(crc_flag)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("crc_test"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		rv = SELF_TEST_modify_json_bool_field(TEST_JSON_PATH("crc_test"), "_recalculate_crc", false);
+	}
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("crc_test"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(missing_section)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("missing_gpt"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		rv = SELF_TEST_remove_json_field(TEST_JSON_PATH("missing_gpt"), "main_gpt_primary");
+	}
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("missing_gpt"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(device_path_safety)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("device_check"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->wrong_device_path);
+		SELF_TEST_ARGV("-a", ctx->wrong_device_path, "--apply-from", TEST_JSON_PATH("device_check"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(overlap_blocking)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("overlap_block"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("overlap_block"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+DEFINE_TEST(mismatch_blocking)
+{
+	int rv = 0;
+
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-c", "both", "-J", TEST_JSON_PATH("mismatch_block"));
+	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	if (rv == 0) {
+		rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("mismatch_block"), "_READONLY_mismatch_detected", true);
+	}
+
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("mismatch_block"));
+		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
+/**
+ * Run comprehensive self-test suite
+ * Creates mock devices and calls run_gpt_util_op() with simulated parameters
+ * This tests the complete production code path end-to-end
+ *
+ * @param test_selection: Comma-separated test numbers or ranges (e.g., "1,3-5,10" or NULL for all)
+ */
+static int run_self_test(const char *test_selection)
+{
+	int							disk_fd = -1;
+	int							tests_run = 0;
+	int							tests_passed = 0;
+	int							tests_failed = 0;
+	const char					*test_device_path;
+	const char					*wrong_device_path;
+	char						*test_argv[10];
+	int							test_argc;
+	struct self_test_ctx		ctx;
+	int							i;
+	BOOL						*tests_to_run = NULL;
+	int							num_tests_total = 1;		// Will be updated
+
+	// Test registry - auto-generated from SELF_TEST_LIST X-Macro
+	#define X(func, name, cmd, expect_fail) {name, cmd, func, expect_fail},
+	struct self_test_entry tests[] = { SELF_TEST_LIST };
+	#undef X
+
+	num_tests_total = sizeof(tests) / sizeof(tests[0]);
+
+	mkdir(TOMA_ROOT_DIR "tmp", 0755);
+	test_device_path = TOMA_ROOT_DIR "tmp/gpt_util_self_test";
+	wrong_device_path = TOMA_ROOT_DIR "tmp/gpt_util_wrong_device";
+
+	// Setup context
+	ctx.test_device_path = test_device_path;
+	ctx.wrong_device_path = wrong_device_path;
+	ctx.test_argv = test_argv;
+	ctx.test_argc = &test_argc;
+
+	// Parse test selection (NULL = run all)
+	tests_to_run = calloc(num_tests_total, sizeof(BOOL));
+	if (test_selection == NULL) {
+		// Run all tests
+		for (i = 0; i < num_tests_total; i++) {
+			tests_to_run[i] = true;
+		}
+	} else {
+		// Parse comma-separated list and ranges
+		char *selection_copy = strdup(test_selection);
+		char *token = strtok(selection_copy, ",");
+		while (token != NULL) {
+			char *dash = strchr(token, '-');
+			if (dash) {
+				// Range: "3-5"
+				int start = atoi(token);
+				int end = atoi(dash + 1);
+				int j;
+				for (j = start; j <= end && j <= num_tests_total; j++) {
+					if (j >= 1) tests_to_run[j - 1] = true;
+				}
+			} else {
+				// Single test: "3"
+				int test_num = atoi(token);
+				if (test_num >= 1 && test_num <= num_tests_total) {
+					tests_to_run[test_num - 1] = true;
+				}
+			}
+			token = strtok(NULL, ",");
+		}
+		free(selection_copy);
+	}
+
+	// Run selected tests
+	for (i = 0; i < num_tests_total; i++) {
+		if (tests_to_run[i]) {
+			int test_num = i + 1;		// Actual test number (1-16, from registry position)
+			int rv;
+
+			SELF_TEST_start(test_num, tests[i].name, tests[i].command);
+			rv = tests[i].func(&ctx);
+
+			tests_run++;
+			if (SELF_TEST_end(test_num, rv, tests[i].expect_failure) == 0) {
+				tests_passed++;
+			} else {
+				tests_failed++;
 			}
 		}
-
-		// Perform the upgrade
-		if (rv == 0) {
-			rv = upgrade_gpt_if_needed(disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, "Main");
-		}
-
-		// Re-read and verify
-		if (rv == 0) {
-			memset(&verify_gpt, 0, sizeof(verify_gpt));
-			nvmeibt_strlcpy(verify_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(verify_gpt.main_or_metadata));
-			rv = nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-												   &verify_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false);
-		}
-
-		if (disk_fd >= 0) {
-			close(disk_fd);
-			disk_fd = -1;
-		}
-
-		// Verify upgrade results
-		if (rv == 0) {
-			nbytes = LARGE_GPT_MAX_NUM_GPT_ENTRIES * verify_gpt.header.size_of_partition_entry;
-			expected_crc = crc32_seedless(verify_gpt.entries, nbytes);
-
-			if (verify_gpt.header.n_partition_entries != LARGE_GPT_MAX_NUM_GPT_ENTRIES ||
-				verify_gpt.header.partition_entry_array_crc32 != expected_crc) {
-				rv = -1;
-			}
-		}
-
-		SELF_TEST_end(current_test, rv, false);
 	}
 
-	// ===== TEST 7: JSON Export + Apply (Dry-Run) =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "JSON Export + Apply (Dry-Run)",
-										   "gpt_util -a <path> -J + --apply-from");
-		int rv = 0;
 
-		// Step 1: Export
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("export"));
-		rv = run_gpt_util_op(test_argc, test_argv);
+	// Cleanup
+	free(tests_to_run);
 
-		// Step 2: Apply (dry-run)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("export"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, false);
-	}
-
-	// ===== TEST 8: Zeroing Verification Commands =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Zeroing Verification Commands (-Z)",
-										   "gpt_util -a <path> -Z");
-		int rv;
-
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-Z");
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		SELF_TEST_end(current_test, rv, false);
-	}
-
-	// ===== TEST 9: Diff Comparison - No Changes =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Diff Comparison - No Changes",
-										   "gpt_util -a <path> -J + --apply-from");
-		int rv = 0;
-
-		// Step 1: Export baseline
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("diff_baseline"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Apply same JSON (no changes expected)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("diff_baseline"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, false);
-	}
-
-	// ===== TEST 10: Diff Comparison - Modifications Detected =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Diff Comparison - Modifications Detected",
-										   "gpt_util -a <path> -J + --apply-from");
-		int rv = 0;
-
-		// Step 1: Export from standard device
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("standard"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Apply to modified device (expect MODIFY diff)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_modified, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("standard"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, false);
-	}
-
-	// ===== TEST 11: Apply with --write =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Apply with --write",
-										   "gpt_util export + apply --write");
-		int rv = 0;
-
-		// Step 1: Export from modified device
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_modified, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("write_test"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Apply to standard device with --write
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("write_test"), "--write");
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, false);
-	}
-
-	// ===== TEST 12: CRC Recalculation Flag =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "CRC Recalculation Flag",
-										   "gpt_util export + modify JSON + apply");
-		int rv = 0;
-
-		// Step 1: Export baseline
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("crc_test"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Modify JSON
-		if (rv == 0) {
-			rv = SELF_TEST_modify_json_bool_field(TEST_JSON_PATH("crc_test"), "_recalculate_crc", false);
-		}
-
-		// Step 3: Apply with modified JSON
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("crc_test"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, false);
-	}
-
-	// ===== TEST 13: Safety - Missing GPT Section =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Safety - Missing GPT Section",
-										   "gpt_util export + remove section + apply (blocked)");
-		int rv = 0;
-
-		// Step 1: Export
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("missing_gpt"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Remove main_gpt_primary section
-		if (rv == 0) {
-			rv = SELF_TEST_remove_json_field(TEST_JSON_PATH("missing_gpt"), "main_gpt_primary");
-		}
-
-		// Step 3: Apply (should be blocked)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("missing_gpt"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, true);
-	}
-
-	// ===== TEST 14: Safety - Device Path Mismatch =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Safety - Device Path Mismatch",
-										   "gpt_util export + apply to different device (blocked)");
-		int rv = 0;
-
-		// Step 1: Export
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("device_check"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Apply to different device (should be blocked)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, wrong_device_path);
-			SELF_TEST_ARGV("-a", wrong_device_path, "--apply-from", TEST_JSON_PATH("device_check"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, true);
-	}
-
-	// ===== TEST 15: Safety - Overlap Blocking =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Safety - Overlap Blocking",
-										   "gpt_util export overlaps + apply (blocked)");
-		int rv = 0;
-
-		// Step 1: Export device with overlaps
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-J", TEST_JSON_PATH("overlap_block"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Step 2: Apply (should be blocked)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("overlap_block"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, true);
-	}
-
-	// ===== TEST 16: Safety - Both Copies with Mismatch (blocked) =====
-	if (1) {
-		int current_test = SELF_TEST_start(&test_idx, "Safety - Both Copies with Mismatch (blocked)",
-										   "gpt_util export both + apply (blocked)");
-		int rv = 0;
-
-		// Step 1: Export with both copies
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, test_device_path);
-		SELF_TEST_ARGV("-a", test_device_path, "-c", "both", "-J", TEST_JSON_PATH("mismatch_block"));
-		rv = run_gpt_util_op(test_argc, test_argv);
-
-		// Validate mismatch flag
-		if (rv == 0) {
-			rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("mismatch_block"), "_READONLY_mismatch_detected", true);
-		}
-
-		// Step 2: Apply (should be blocked)
-		if (rv == 0) {
-			SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, test_device_path);
-			SELF_TEST_ARGV("-a", test_device_path, "--apply-from", TEST_JSON_PATH("mismatch_block"));
-			rv = run_gpt_util_op(test_argc, test_argv);
-		}
-
-		SELF_TEST_end(current_test, rv, true);
-	}
-
-	// ===== SUMMARY =====
+	// Summary
 	fprintf(stdout, "\n");
 	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
-	fprintf(stdout, COL_GREEN "ALL SELF-TESTS PASSED (%d/%d)" COL_RESET "\n", test_idx, test_idx);
-	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
-	fprintf(stdout, "\nTest Coverage:\n");
-	fprintf(stdout, "  Tests 1-6:   Core GPT functionality\n");
-	fprintf(stdout, "  Tests 7-8:   JSON export/apply and zeroing verification\n");
-	fprintf(stdout, "  Tests 9-11:  Diff comparison and write operations\n");
-	fprintf(stdout, "  Tests 12-16: Safety checks (CRC flag, missing section, device path, overlaps, mismatch)\n");
 
-out:
+	if (tests_failed == 0) {
+		fprintf(stdout, COL_GREEN "ALL SELF-TESTS PASSED (%d/%d)" COL_RESET "\n", tests_passed, tests_run);
+	} else {
+		fprintf(stdout, COL_RED_BOLD "SOME TESTS FAILED: %d passed, %d failed (%d total)" COL_RESET "\n",
+				tests_passed, tests_failed, tests_run);
+	}
+
+	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
+
+	if (test_selection == NULL) {
+		fprintf(stdout, "\nTest List (%d tests):\n", num_tests_total);
+		for (i = 0; i < num_tests_total; i++) {
+			fprintf(stdout, "  Test %d: %s\n", i + 1, tests[i].name);
+		}
+	}
+
 	// Cleanup
 	if (disk_fd >= 0) {
 		close(disk_fd);
@@ -2827,9 +2899,7 @@ out:
  * Modify JSON string field (SELF-TEST helper)
  * Parses JSON, modifies field using base library, serializes back
  * Returns 0 on success, -1 on error
- * Note: Available for future tests (device_path, serial_id modification)
  */
-static int SELF_TEST_modify_json_str_field(const char *json_path, const char *field, const char *new_value) __attribute__((unused));
 static int SELF_TEST_modify_json_str_field(const char *json_path, const char *field, const char *new_value)
 {
 	struct mm_json_elem		*json_root = NULL;
@@ -2925,7 +2995,7 @@ static int SELF_TEST_remove_json_field(const char *json_path, const char *field)
 			if (*value_end == '}') brace_count--;
 			value_end++;
 		} while (brace_count > 0 && *value_end != '\0');
-	} else {
+			} else {
 		// Simple value - find comma or closing brace
 		value_end = value_start;
 		while (*value_end != ',' && *value_end != '}' && *value_end != '\0') {
@@ -2962,6 +3032,51 @@ out:
 	if (fd >= 0) close(fd);
 	NNVMEIBT_STR_FREE(trace_selftest_remove_cleanup1, file_content);
 	NNVMEIBT_STR_FREE(trace_selftest_remove_cleanup2, new_content);
+	return rv;
+}
+
+/**
+ * Compare GPT binary data between two devices (SELF-TEST helper)
+ * Compares entire device: MBR, Main GPT (primary + backup), Metadata partition (nested GPT + disk_metadata)
+ * Returns 0 if identical, non-zero if different
+ */
+static int SELF_TEST_compare_gpt_binary(const char *device_a, const char *device_b, int pblk_size, uint64_t n_blocks)
+{
+	int			fd_a = -1;
+	int			fd_b = -1;
+	char		*buf_a = NULL;
+	char		*buf_b = NULL;
+	int			rv = -1;
+	uint64_t	region_size;
+	uint64_t	region_offset;
+
+	// Compare entire device (MBR + Main GPT + Metadata partition + Main GPT backup)
+	region_size = n_blocks * pblk_size;	// Entire device
+	region_offset = 0;
+
+	buf_a = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_cmp_a, PAGE_SIZE, region_size);
+	buf_b = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_cmp_b, PAGE_SIZE, region_size);
+
+	fd_a = open(device_a, O_RDONLY);
+	fd_b = open(device_b, O_RDONLY);
+
+	if (fd_a < 0 || fd_b < 0) {
+		goto out;
+	}
+
+	if (pread(fd_a, buf_a, region_size, region_offset) != (ssize_t)region_size ||
+		pread(fd_b, buf_b, region_size, region_offset) != (ssize_t)region_size) {
+		goto out;
+	}
+
+	rv = memcmp(buf_a, buf_b, region_size);
+
+out:
+	if (fd_a >= 0) close(fd_a);
+	if (fd_b >= 0) close(fd_b);
+	NNVMEIBT_BM_FREE(trace_selftest_cmp_a_free, buf_a);
+	NNVMEIBT_BM_FREE(trace_selftest_cmp_b_free, buf_b);
+
 	return rv;
 }
 
@@ -3194,10 +3309,11 @@ static int execute_export_json(int disk_fd, struct gpt_util_config *config)
 }
 
 /**
- * Phase 3: Execute APPLY_JSON action
+ * Execute APPLY_JSON action
  * Parse JSON file, validate safety checks, and apply GPT changes
- * Default: dry-run (show changes without writing)
- * With --write: actually apply changes after confirmation
+ * Default: dry-run (shows diff without writing)
+ * With --write: applies changes to disk
+ * Safety: Recalculates mismatch/overlap flags from actual JSON data (never trusts _READONLY_ flags)
  */
 static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 {
@@ -3288,7 +3404,9 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	JSON_ASSIGN_AND_CALL_VALIDATE(apply_json_meta_validate);
 
 	// Warn if CRC recalculation is disabled
-	if (!recalculate_crc) {
+	if (recalculate_crc) {
+		fprintf(stdout, "_recalculate_crc: true\n");
+	} else {
 		N_Wf(apply_crc_recalc_off, "CRC recalculation disabled in JSON: file=@STR", config->apply_json_file);
 		fprintf(stdout, COL_YELLOW "\nWARNING: _recalculate_crc is false" COL_RESET "\n");
 		fprintf(stdout, "  CRCs from JSON will be used (may cause validation errors if entries were edited)\n");
@@ -3309,11 +3427,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			rv = -1;
 			goto out;
 		}
-	}
-
-	// Display detected flags
-	if (recalculate_crc) {
-		fprintf(stdout, "_recalculate_crc: true\n");
 	}
 
 	fprintf(stdout, "\n" COL_GREEN "=== Metadata parsing: OK ===" COL_RESET "\n\n");
@@ -3528,11 +3641,13 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		// Copy JSON entries to current GPT structure
 		memcpy(current_gpt.entries, json_gpt.entries, sizeof(current_gpt.entries));
 
-		// Copy editable header fields (preserve disk-specific fields)
+		// Copy user-editable header fields from JSON
+		// Note: Location fields (my_pba, alternate_pba, partition_entry_pba) are NOT copied
+		// They must be preserved from current_gpt as they're disk-specific and auto-calculated
 		current_gpt.header.disk_obj_uuid = json_gpt.header.disk_obj_uuid;
-		current_gpt.header.n_partition_entries = json_gpt.header.n_partition_entries;
 		current_gpt.header.first_usable_pba = json_gpt.header.first_usable_pba;
 		current_gpt.header.last_usable_pba = json_gpt.header.last_usable_pba;
+		current_gpt.header.n_partition_entries = json_gpt.header.n_partition_entries;
 
 		// Write to disk (this will recalculate CRCs automatically)
 		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_gpt, false) < 0) {
@@ -3545,6 +3660,66 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		// Log after state (CRCs were recalculated by store_gpt)
 		N_IMf(apply_gpt_success, "GPT changes applied: dev=@STR CRC_after: hdr=@CRC ent=@CRC",
 			  config->device_path, current_gpt.header.header_crc32, current_gpt.header.partition_entry_array_crc32);
+
+		// Step 10: Apply Metadata GPT if present in JSON
+		{
+			struct mm_json_elem *metadata_gpt_primary_elem = NULL;
+			const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+			struct nvmeibt_disk_gpt current_metadata_gpt;
+			struct nvmeibt_disk_gpt json_metadata_gpt;
+			int i;
+
+			// Check if JSON has metadata GPT section
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "metadata_gpt_primary") == 0) {
+					metadata_gpt_primary_elem = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+
+			if (metadata_gpt_primary_elem) {
+				// Get metadata partition from newly written Main GPT
+				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&current_gpt);
+				if (!metadata_partition) {
+					N_Wf(apply_no_metadata_partition, "JSON has metadata_gpt but disk has no metadata partition, skipping");
+				} else {
+					// Read current Metadata GPT from disk
+					memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
+					nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
+
+					if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt,
+														  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+						N_Wf(apply_read_metadata_gpt_failed, "Failed to read current Metadata GPT, skipping");
+					} else {
+						// Parse Metadata GPT from JSON
+						memset(&json_metadata_gpt, 0, sizeof(json_metadata_gpt));
+						nvmeibt_strlcpy(json_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(json_metadata_gpt.main_or_metadata));
+						json_metadata_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
+
+						if (parse_gpt_from_json_section(&json_metadata_gpt, metadata_gpt_primary_elem, "metadata_gpt_primary") < 0) {
+							N_Wf(apply_parse_metadata_gpt_failed, "Failed to parse metadata_gpt_primary from JSON, skipping");
+						} else {
+							// Copy JSON metadata GPT to current structure
+							memcpy(current_metadata_gpt.entries, json_metadata_gpt.entries, sizeof(current_metadata_gpt.entries));
+
+							// Copy user-editable header fields from JSON
+							// Location fields (my_pba, alternate_pba, partition_entry_pba) preserved from current_metadata_gpt
+							current_metadata_gpt.header.disk_obj_uuid = json_metadata_gpt.header.disk_obj_uuid;
+							current_metadata_gpt.header.first_usable_pba = json_metadata_gpt.header.first_usable_pba;
+							current_metadata_gpt.header.last_usable_pba = json_metadata_gpt.header.last_usable_pba;
+							current_metadata_gpt.header.n_partition_entries = json_metadata_gpt.header.n_partition_entries;
+
+							// Write Metadata GPT
+							if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt, false) < 0) {
+								N_Ef(apply_write_metadata_gpt_failed, "Failed to write Metadata GPT dev=@STR", config->device_path);
+							} else {
+								N_IMf(apply_metadata_gpt_success, "Metadata GPT applied: dev=@STR", config->device_path);
+							}
+						}
+					}
+				}
+			}
+		}
 
 		fprintf(stdout, "\n" COL_GREEN "=== Changes written successfully ===" COL_RESET "\n");
 		fprintf(stdout, "GPT updated on disk: %s\n", config->device_path);
@@ -3672,18 +3847,24 @@ out:
 
 /**
  * Main entry point for gpt_util
- * Dispatches to either self-test or normal operation
+ * Dispatches to either self-test (with test selection support) or normal operation
+ * Test selection: -T [tests] where tests can be "1", "1,3,5", "1-5", or empty for all
  */
 int gpt_util_main(int argc, char *argv[])
 {
-	int		rv = 1;
-	long	i;
-	BOOL	is_self_test = false;
+	int			rv = 1;
+	long		i;
+	BOOL		is_self_test = false;
+	const char	*test_selection = NULL;		// NULL = run all tests
 
 	// Quick check for --self-test flag (before full parsing)
 	for (i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "-T") == 0 || strcmp(argv[i], "--self-test") == 0) {
 			is_self_test = true;
+			// Check if next argument is a test selection (number, range, or list)
+			if (i + 1 < argc && argv[i + 1][0] != '-') {
+				test_selection = argv[i + 1];
+			}
 			break;
 		}
 	}
@@ -3707,7 +3888,7 @@ int gpt_util_main(int argc, char *argv[])
 
 	// Dispatch to appropriate mode
 	if (is_self_test) {
-		rv = run_self_test();
+		rv = run_self_test(test_selection);
 	} else {
 		rv = run_gpt_util_op(argc, argv);
 	}
