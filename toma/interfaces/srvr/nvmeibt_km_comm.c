@@ -1,4 +1,4 @@
-#include "nvmeibt_debug.h"
+#include "nvmeibt_srvr_proc.h"
 #include "nvmeibt_common.h"
 #include <sys/socket.h>
 #include <linux/netlink.h>
@@ -18,10 +18,7 @@
 #include <sys/ucontext.h>
 #include <sys/un.h>
 #include <pthread.h>
-#include "nvmeibt_srvr_proc.h"
 #include "nvmeibt_ds.h"
-#include "nvmeibt_toma.h"
-#include "nvmeibt_topology.h"
 
 struct srv_comm_msg {
 	unsigned long time;
@@ -457,6 +454,7 @@ static void remove_disk_from(struct nvmeibt_km_comm *p, struct disk_info *disk)
 	NFOUT;
 }
 
+extern int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char* ldisk_id, u16 vendor_id, char *model_str, enum nvmeibs_serjio_status serjio_status);
 static void handle_serjio_state_changed(
 	struct nvmeibt_km_comm *p, struct nvmeib_disk_info_reply *disk_rep)
 {
