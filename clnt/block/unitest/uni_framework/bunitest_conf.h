@@ -30,6 +30,7 @@ struct ut_conf_base {
 struct ut_conf_bunitest {
 	int 		nRep;										// how many times do we repeat the whole test suit
 	char 		*config_path;
+	char 	    *procfs_dump_path;
 	bool		disableActTests, disableErasureTests, disableNreplicaTests, disableClientRestartTests;
 	bool		disableEC_8plus2_exhastiveTests;
 	bool        disableEC_seg_reloc_test;					// Jam and serjio dont deal well with this

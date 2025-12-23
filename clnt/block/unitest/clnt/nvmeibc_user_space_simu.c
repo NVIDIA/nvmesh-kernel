@@ -6,6 +6,9 @@
 #include "../nvmeibc_block_common.h"
 #include "module/instance/nvmeibc_cinst_params.h"							// To test states of client instance, access lists of volumes, etc
 #include "block/unitest/nvmeibc_simu_disk.h"
+#include <sys/stat.h>
+#include <errno.h>
+#include "common/nvmeib_jdr.h"
 
 #define cli_vol_status_is_detached(s) (!strcmp(s, CLI_DETACHED) || !strcmp(s,CLI_ATTACH_FAILED) || !strcmp(s,CLI_SHUTDOWN) || !strcmp(s,CLI_UPDATE_READY))
 #define cli_vol_status_is_attached(s) (!strcmp(s, CLI_ATTACHED))
@@ -207,6 +210,168 @@ void clientSimulator_print_proc_dir(struct clientSimulator *client, bool verbose
 	p.buf[0] = 0;		// Add null terminator
 	if (verbose)
 		unitest_print("%s", buff);
+}
+
+/******************************************************************************/
+/* Context for dumping proc files to filesystem */
+struct proc_dump_to_fs_ctx {
+	char current_path[PATH_MAX];	// Current accumulated path
+	int depth;						// Current depth in directory tree
+};
+
+/* Helper: Create directory recursively (like mkdir -p) */
+static int __mkdir_recursive(const char *path) {
+	char tmp[PATH_MAX];
+	char *p = NULL;
+	size_t len;
+
+	snprintf(tmp, sizeof(tmp), "%s", path);
+	len = strlen(tmp);
+	if (tmp[len - 1] == '/')
+		tmp[len - 1] = 0;
+
+	for (p = tmp + 1; *p; p++) {
+		if (*p == '/') {
+			*p = 0;
+			if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+				unitest_print("Error: Failed to create directory %s: %s\n", tmp, strerror(errno));
+				return -1;
+			}
+			*p = '/';
+		}
+	}
+	if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+		unitest_print("Error: Failed to create directory %s: %s\n", tmp, strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+/* Helper: Pop N subdirectories from current_path */
+static void __pop_path_components(char *path, int count) {
+	char *p;
+	int i;
+
+	for (i = 0; i < count; i++) {
+		p = strrchr(path, '/');
+		if (p && p != path) {
+			*p = '\0';
+		} else {
+			/* Reached root or invalid state */
+			path[0] = '\0';
+			break;
+		}
+	}
+}
+
+/* Helper: Write proc file content to filesystem */
+static bool __write_proc_file_to_disk(struct proc_dir_entry *e, const char *current_path) {
+	char file_path[PATH_MAX];
+	char buff[4096*64];
+	FILE *fp = NULL;
+	loff_t offset = 0;
+	int bytes_read, written;
+
+	/* Build file path */
+	if ((size_t)scnprintf(file_path, sizeof(file_path), "%s/%s", current_path, e->name) >= sizeof(file_path)) {
+		unitest_print("Error: Path too long, skipping file: %s/%s\n", current_path, e->name);
+		return true; /* Continue with other files */
+	}
+
+	/* Open file for writing */
+	fp = fopen(file_path, "w");
+	if (!fp) {
+		unitest_print("Error: Failed to create file %s: %s\n", file_path, strerror(errno));
+		return true; /* Continue with other files */
+	}
+
+	/* Read proc file content in chunks and write to disk */
+	bytes_read = e->fops->read((void *)e->data, buff, sizeof(buff), &offset);
+	if (bytes_read > 0) {
+		nvmeib_write_file(file_path, buff, bytes_read);
+		written = fwrite(buff, 1, bytes_read, fp);
+		if (written != bytes_read) {
+			unitest_print("Error: Failed to write to %s\n", file_path);
+			fclose(fp);
+			return true; /* Continue with other files */
+		}
+	}
+
+	fclose(fp);
+	unitest_print("Wrote %d bytes to: %s\n", written, file_path);
+	return true; /* Continue traversal */
+}
+
+/* Helper: Handle directory entry - adjust path and create directory */
+static bool __handle_directory_entry(struct proc_dir_entry *e, struct proc_dump_to_fs_ctx *ctx) {
+	size_t path_len, remaining;
+	int n, pop_count;
+
+	/* Adjust path based on depth changes */
+	if (e->depth <= ctx->depth) {
+		/* Same level or going back up - pop directories and append new name */
+		pop_count = ctx->depth - e->depth + 1;
+		__pop_path_components(ctx->current_path, pop_count);
+	}
+
+	/* Append directory name to current path */
+	path_len = strlen(ctx->current_path);
+	remaining = sizeof(ctx->current_path) - path_len;
+	n = scnprintf(ctx->current_path + path_len, remaining, "/%s", e->name);
+
+	if (n <= 0 || (size_t)n >= remaining) {
+		unitest_print("Error: Path too long: %s/%s\n", ctx->current_path, e->name);
+		return false; /* Stop traversal on error */
+	}
+
+	/* Update context depth */
+	ctx->depth = e->depth;
+
+	/* Create directory */
+	if (__mkdir_recursive(ctx->current_path) != 0) {
+		return false; /* Stop traversal on error */
+	}
+
+	unitest_print("Created directory: %s (depth=%d)\n", ctx->current_path, e->depth);
+	return true; /* Enter subdirectories */
+}
+
+/* Callback to dump each proc file to filesystem */
+static int __dump_proc_file_to_fs(struct proc_dir_entry* e, void* _ctx) {
+	struct proc_dump_to_fs_ctx *ctx = _ctx;
+
+	/* Directory: handle path and create it */
+	if (!e->data) {
+		return __handle_directory_entry(e, ctx);
+	}
+
+	/* File: write proc content to filesystem */
+	return __write_proc_file_to_disk(e, ctx->current_path);
+}
+
+void clientSimulator_dump_procfs_to_disk(struct clientSimulator *client, const char *rootPath) {
+	int n;
+	struct proc_dump_to_fs_ctx ctx;
+	if (!rootPath || strlen(rootPath) == 0 || rootPath[0] == '/') {
+		unitest_print("Error: Invalid procfs dump root path %s\n", rootPath);
+		return;
+	}
+	/* Initialize context */
+	n = scnprintf(ctx.current_path, sizeof(ctx.current_path), "%s/%lld", rootPath, (s64)ktime_get());
+	if (n <= 0 || (size_t)n >= sizeof(ctx.current_path)) {
+		unitest_print("Error: Path too long: %s\n", rootPath);
+		return;
+	}
+	ctx.depth = -1;
+
+	/* Create root directory */
+	if (__mkdir_recursive(ctx.current_path) != 0) {
+		unitest_print("Error: Failed to create root directory %s\n", ctx.current_path);
+		return;
+	}
+
+	/* Traverse entire proc tree starting from root and dump all files */
+	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, &ctx, &__dump_proc_file_to_fs);
 }
 
 void clientSimulator_print_proc_files_of_vol(struct clientSimulator *client, bool verbose, int volInd) {

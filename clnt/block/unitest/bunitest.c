@@ -1,5 +1,6 @@
 #include "bunitest.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
+#include "clnt/nvmeibc_user_space_simu.h"
 #include "common/nvmeib_error_report.h"
 #include "compat/kr_incs_percpu.h"
 #include "management_utils_common/nvmeibc_management_capi_parse_conf.h"
@@ -7245,6 +7246,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					rv |= SIMU_RUN_TEST_ID(unitest_GoodPathIO_block_md_illegal_splits, raid_50, buni);
 					rv |= SIMU_RUN_TEST_ID(unitest_io_perm_alert, raid_50, sys);
 					rv |= unitest_raid_ec_transform(sys, "back_to_mirror");
+					clientSimulator_dump_procfs_to_disk(&sys->clients[0], buni->conf->bunitest.procfs_dump_path);
 					rv |= unitest_raid_ec_transform(sys, "to_raid_60");
 					rv |= SIMU_RUN_TEST_ID(unitest_GoodPathIO_raid50_or_60, raid_60, buni);
 					rv |= SIMU_RUN_TEST(unitest_ec_view_lock, buni);

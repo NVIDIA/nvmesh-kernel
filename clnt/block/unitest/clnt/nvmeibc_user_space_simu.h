@@ -51,6 +51,7 @@ void clientSimulator_destroy_instance(struct clientSimulator *client_0, int inst
 void clientSimulator_ismod(			 struct clientSimulator *client);
 void clientSimulator_rmmod(			 struct clientSimulator *client);
 void clientSimulator_print_proc_dir( struct clientSimulator *client, bool verbose); /* cat /proc/nvmesh/. */
+void clientSimulator_dump_procfs_to_disk(struct clientSimulator *client, const char *rootPath); /* Dump entire /proc tree to disk */
 void clientSimulator_print_proc_files_of_vol(struct clientSimulator *client, bool verbose, int volInd); /* cat/proc/nvmeibc/<volume name>/<wildcard> on Linux */
 void clientSimulator_print_proc_file_by_path(struct clientSimulator *client, const char *path); /* cat path on Linux */
 struct proc_dir_entry* clientSimulator_find_proc_file_by_path(struct clientSimulator *client, const char *path);
@@ -76,7 +77,7 @@ clientSimulator_send_to_cli_va(struct clientSimulator* client, const char* cmd, 
 	BUG_ON(rc < 0);
 
 	cli_send_command_to_clnt(&(client)->cli_scripts, buf);
-	clientSimulator_wait_for_mainwq( client); 
+	clientSimulator_wait_for_mainwq( client);
 }
 
 #define clientSimulator_send_to_cli(         client, cmd) ({ cli_send_command_to_clnt(&(client)->cli_scripts, cmd); clientSimulator_wait_for_mainwq( client); })

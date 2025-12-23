@@ -29,6 +29,7 @@
 #define ARG_GF			"-gf"
 #define ARG_UNI_CONF	"-conf"
 #define ARG_DRAIN_WORKQUEUE_IS_INFINITE "-drain_workqueue_is_infinite"
+#define ARG_PROCFS_DUMP_PATH "-procfsDumpPath"
 #define ARG_DEBUG_DUMP_FUNCS "-debug_dump_funcs"
 
 // command arguments to the executable
@@ -106,6 +107,7 @@ void ut_conf__print_help(void){
 				"\t[" ARG_ECPU_COUNT "     set the number of emulated CPU's executing the work]\n"
 			    "\t[" ARG_VALGRIND   "       instructs the test code to adapt to running under valgrind (IO's will probably timeout when running under valgrind without this option)\n"
 				"\t[" ARG_PRINT_PROC "           print content or /proc files when unitest finishes. Default - no print]\n"
+				"\t[" ARG_PROCFS_DUMP_PATH "           dump procfs to filesystem. Default - no dump]\n"
 				"\t[" ARG_DRAIN_WORKQUEUE_IS_INFINITE " wait for kernel workqueue drain will become infinite; by default - false ]\n");
 	unitest_print("\t---------------------------------------------------------------------------------\n"
 				"\t Find memory leaks use:\t\t" CMD_VALGRIND " " ARG_PROG_NAME " " ARG_NREP " 1\n"
@@ -126,6 +128,7 @@ void ut_conf__parse_args(int argc, char* argv[]){
 		else if ( !strcmp( argv[i], ARG_ECPU_COUNT	)){ ++i; ut_conf.kernel_prm.num_ecpu = atoi(argv[i]); }
 		else if ( !strcmp( argv[i], ARG_UNI_CONF     )){ ++i; ut_conf.bunitest.config_path = argv[i];}
 		else if ( !strcmp( argv[i], ARG_NO_ACT		)){ ut_conf.bunitest.disableActTests  = 1; }
+		else if ( !strcmp( argv[i], ARG_PROCFS_DUMP_PATH	)){ ++i; ut_conf.bunitest.procfs_dump_path = argv[i];}
 		else if ( !strcmp( argv[i], ARG_NO_ERASURE	)){ ut_conf.bunitest.disableErasureTests = 1; }
 		else if ( !strcmp( argv[i], ARG_NO_EC_8p2	)){ ut_conf.bunitest.disableEC_8plus2_exhastiveTests = 1; }
 		else if ( !strcmp( argv[i], ARG_NO_EC_SRL	)){ ut_conf.bunitest.disableEC_seg_reloc_test = 1; }
