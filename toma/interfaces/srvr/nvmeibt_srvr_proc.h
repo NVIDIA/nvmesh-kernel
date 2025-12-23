@@ -37,8 +37,8 @@ int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const 
 #define NICS__INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/nics.csv"
 #define LOCKS_INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s"          	// uuid of disk
 
-#define PCI_DISK_FILE_DO_BIND TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/bind"   	// "nvme" / "nvmeibs"
-#define PCI_DISK_FILE_UN_BIND TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/unbind" 	// "nvme" / "nvmeibs"
+int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh);	//   Bind to   nvmesh/nvme driver
+int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh);	// UnBind from nvmesh/nvme driver
 
 // Other server procs "/proc/nvmeibs"
 // TOMA_STATUS_PROC_PATH - directory for toma output

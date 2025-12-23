@@ -139,3 +139,45 @@ int nvmeibt_toma_send_buf_to_client(const char *buf, int buf_len, const char *cl
 	return rv;
 }
 
+/* Original shell code:
+* 		pcidrivers_base_path=/sys/bus/pci/drivers
+* 		pcifd=$pcidrivers_base_path/nvme/$nvmepci
+* 		#check if pci binded to nvme driver
+* 		if [ ! -e "$pcifd" ]; then
+* 			echo "Error locating pcifd for dev=$dev_id"
+* 			exit 0
+* 			fi
+* 		#unbind pci from nvme driver
+* 		echo -n "$nvmepci" > $pcidrivers_base_path/nvme/unbind
+* 		if [ "$?" -eq "0" ] && [ -d "$pcidrivers_base_path/nvmeibs" ]; then
+* 			#bind to nvmeibs
+* 			echo -n "$nvmepci" > $pcidrivers_base_path/nvmeibs/bind
+* 			fi
+*/
+static int __nvmeib_srvr_api_lib_disk_do_bind_unbind(const char *disk_bdf, bool is_nvmesh, bool do_bind)
+{
+	char path[128];	// Build kernel path of bind/unbind
+	int fd;
+	snprintf(path, sizeof(path), TOMA_ROOT_DIR "sys/bus/pci/drivers/%s/%sbind", (is_nvmesh ? "nvmeibs" : "nvme"), (do_bind ? "" : "un"));
+	if (!disk_bdf[0])
+		return -EINVAL;
+	fd = NNVMEIBT_OPEN(salddbu0, path, O_WRONLY);
+	if (fd >= 0) {
+		const int n_written = NNVMEIBT_PWRITE(salddbu1, fd, disk_bdf, strlen(disk_bdf), 0, 0);		// write() // Ronen: I suspect that this takes 1/2 sec for mvmeibs
+		NNVMEIBT_CLOSE(salddbu2, fd);
+		if (n_written > 0)
+			return 0;
+		return -EIO;
+	}
+	return -EACCES;
+}
+
+int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh)
+{
+	return __nvmeib_srvr_api_lib_disk_do_bind_unbind(disk_bdf, is_nvmesh, true);
+}
+
+int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh)
+{
+	return __nvmeib_srvr_api_lib_disk_do_bind_unbind(disk_bdf, is_nvmesh, false);
+}

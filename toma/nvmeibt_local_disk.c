@@ -2002,10 +2002,9 @@ out:
 static void bind_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct local_disk_bind_wq_entry *entry;
-	int n_written;
-	char path[256];
+	int op_rv;
+	char *path;
 	char *bdf_str;
-	int fd = -1;
 	struct nvmeibt_local_disk_controller	*controller;
 	char									*native_serial_str;
 
@@ -2028,61 +2027,38 @@ static void bind_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		entry->rv = 1;
 		goto out;
 	}
-	/*
-	 * Original shell code:
-	 * 		pcidrivers_base_path=/sys/bus/pci/drivers
-	 * 		pcifd=$pcidrivers_base_path/nvme/$nvmepci
-	 * 		#check if pci binded to nvme driver
-	 * 		if [ ! -e "$pcifd" ]; then
-	 * 			echo "Error locating pcifd for dev=$dev_id"
-	 * 			exit 0
-	 * 			fi
-	 * 		#unbind pci from nvme driver
-	 * 		echo -n "$nvmepci" > $pcidrivers_base_path/nvme/unbind
-	 * 		if [ "$?" -eq "0" ] && [ -d "$pcidrivers_base_path/nvmeibs" ]; then
-	 * 			#bind to nvmeibs
-	 * 			echo -n "$nvmepci" > $pcidrivers_base_path/nvmeibs/bind
-	 * 			fi
-	 *
-	 */
 	N_Tf(8sh3bao, "dev_file_name=@STR serial=@STR is_auto_takeover=@BOOL is_stock_to_nvmeibs=@BOOL", entry->dev_file_name, entry->serial, entry->is_auto_takeover, entry->is_stock_to_nvmeibs);
-	snprintf(path, sizeof(path), PCI_DISK_FILE_UN_BIND, entry->is_stock_to_nvmeibs ? "nvme" : "nvmeibs");
-	fd = NNVMEIBT_OPEN(evtsjh8, path, O_WRONLY);
-	if (fd < 0) {
-		N_Ef(usnfsd4, "Cannot open @STR! serial=@STR is_auto_takeover=@BOOL @AUTO_ERRNO", path, entry->serial, entry->is_auto_takeover);
+	path = entry->is_stock_to_nvmeibs ? "nvme" : "nvmeibs";
+	op_rv = nvmeib_srvr_api_lib_disk_unbind(bdf_str, !entry->is_stock_to_nvmeibs);
+	if ((op_rv != 0) && (op_rv != -EIO)) {
+		N_Ef(usnfsd4, "Cannot open path='@STR' serial=@STR is_auto_takeover=@BOOL rv=@RV, @AUTO_ERRNO", path, entry->serial, entry->is_auto_takeover, op_rv);
 		entry->rv = -1;
 		goto out;
-	}
 
-	n_written = NNVMEIBT_PWRITE(ibr4wbc, fd, bdf_str, strlen(bdf_str), 0, 0);	// Ronen: I suspect that this takes 5 seconds for stock driver
-	if (n_written > 0) {
+	} else if (op_rv == 0) {
 		controller->controller_state = (entry->is_stock_to_nvmeibs ? NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_UNBOUND_STOCK_TO_NVMEIBS : NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_UNBOUND_NVMEIBS_TO_STOCK);
-		N_Tf(vhqj3kw, "Unbind write SUCCESS BDF=@STR serial=@STR to path=@STR n_written=@INT @AUTO_ERRNO", bdf_str, entry->serial, path, n_written);
+		N_Tf(vhqj3kw, "Unbind write SUCCESS BDF=@STR serial=@STR to path=@STR @AUTO_ERRNO", bdf_str, entry->serial, path);
 	} else {
 		controller->controller_state = NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_UNDEFINED;
 		if (entry->is_auto_takeover) {
-			N_Tf(vh2j9l2, "Unbind write FAILED BDF=@STR to path=@STR serial=@STR n_written=@INT @AUTO_ERRNO", bdf_str, path, entry->serial, n_written);
+			N_Tf(vh2j9l2, "Unbind write FAILED BDF=@STR to path=@STR serial=@STR @AUTO_ERRNO", bdf_str, path, entry->serial);
 			entry->rv = 1;
 		} else {
-			N_Wf(b5j46ne, "Unbind write FAILED BDF=@STR to path=@STR serial=@STR n_written=@INT @AUTO_ERRNO", bdf_str, path, entry->serial, n_written);
+			N_Wf(b5j46ne, "Unbind write FAILED BDF=@STR to path=@STR serial=@STR @AUTO_ERRNO", bdf_str, path, entry->serial);
 			entry->rv = -1;
 		}
 		goto out;
 	}
-	NNVMEIBT_CLOSE(syaon3b, fd);
-
-	snprintf(path, sizeof(path), PCI_DISK_FILE_DO_BIND, entry->is_stock_to_nvmeibs ? "nvmeibs" : "nvme");
-	fd = NNVMEIBT_OPEN(b389dkw, path, O_WRONLY);
-	if (fd < 0) {
-		N_Ef(7shsdkl, "Cannot open path='@STR' serial=@STR is_auto_takeover=@BOOL @AUTO_ERRNO", path, entry->serial, entry->is_auto_takeover);
+	path = entry->is_stock_to_nvmeibs ? "nvmeibs" : "nvme";
+	op_rv = nvmeib_srvr_api_lib_disk_dobind(bdf_str,  entry->is_stock_to_nvmeibs);
+	if ((op_rv != 0) && (op_rv != -EIO)) {
+		N_Ef(7shsdkl, "Cannot open path='@STR' serial=@STR is_auto_takeover=@BOOL rv=@RV, @AUTO_ERRNO", path, entry->serial, entry->is_auto_takeover, op_rv);
 		entry->rv = -1;
 		goto out;
-	}
-	n_written = NNVMEIBT_PWRITE(kmic1vt, fd, bdf_str, strlen(bdf_str), 0, 0);	// Ronen: I suspect that this takes 1/2 sec for mvmeibs
-	if (n_written > 0) {
+	} else if (op_rv == 0) {
 		controller->controller_state = (entry->is_stock_to_nvmeibs ? NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_NVMEIBS : NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_STOCK);
 		entry->rv = 0;
-		N_Tf(7rghdkw, "Bind write SUCCESS BDF=@STR path=@STR n_written=@INT", bdf_str, path, n_written);
+		N_Tf(7rghdkw, "Bind write SUCCESS BDF=@STR path=@STR", bdf_str, path);
 	} else {
 		if (	(XDLIST_N_ELEMNTS(&(controller->local_disks_list)) > 0 &&	// Already has a "disk", probably my siebling namespace
 				 controller->controller_state == (entry->is_stock_to_nvmeibs ? NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_NVMEIBS : NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_STOCK))) {
@@ -2091,11 +2067,10 @@ static void bind_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		} else {
 			controller->controller_state = NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_UNDEFINED;
 			entry->rv = -1;
-			N_Ef(03mskxg, "Bind Failed BDF=@STR to path=@STR serial=@STR n_written=@INT @AUTO_ERRNO", bdf_str, path, entry->serial, n_written);
+			N_Ef(03mskxg, "Bind Failed BDF=@STR to path=@STR serial=@STR @AUTO_ERRNO", bdf_str, path, entry->serial);
 		}
 	}
 out:
-	NNVMEIBT_CLOSE(0cjquws, fd);
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, (void *) wq_entry);
 	NFOUT;
 }
@@ -2482,20 +2457,11 @@ mark_disk_as_nvmesh_formatted:
 	if (NNVMEIBT_PWRITE(warn_3_local_disk_format_disk_wrapper, entry->fd, dma_buffer, PAGE_SIZE, 0, 0) < 0) {
 		N_Ef(error_5_local_disk_format_disk_wrapper, "Failed to write size @SIZEOF at offset 0x0 fd=@FD buff=@BUFFER (@AUTO_ERRNO)", PAGE_SIZE, entry->fd, (void *) dma_buffer);
 		if (params && params->reset_after_format && bdf[0]) {
-			int fd;
 			N_Tf(trace_format_disk_wrapper_nl_9, "Rebinding disk due to write error");
 			close(entry->fd);
 			entry->fd = -1;
-			fd = open("/sys/bus/pci/drivers/nvmeibs/unbind", O_WRONLY);	// Todo: cahnge to PCI_DISK_FILE_UN_BIND
-			if (fd >= 0) {
-				write(fd, bdf, strlen(bdf));
-				close(fd);
-			}
-			fd = open("/sys/bus/pci/drivers/nvmeibs/bind", O_WRONLY);	// Todo: cahnge to PCI_DISK_FILE_DO_BIND
-			if (fd >= 0) {
-				write(fd, bdf, strlen(bdf));
-				close(fd);
-			}
+			(void)nvmeib_srvr_api_lib_disk_unbind(bdf, true);
+			(void)nvmeib_srvr_api_lib_disk_dobind(bdf, true);
 		}
 	} else {
 		entry->rv = 0;
