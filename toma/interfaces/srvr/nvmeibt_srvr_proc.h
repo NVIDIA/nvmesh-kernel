@@ -13,7 +13,7 @@ int nvmeibt_toma_announce_ready(int is_on);			// Login/Logout into local server
 /***************************** Generic messages *******************************/
 int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg);
 int nvmeibt_toma_get_msg_from_local_server(     struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
-int nvmeibt_toma_send_buf_to_client(      const /* nvmeibt_client_msg */ char *buf, int buf_len, const struct nvmeibt_host_name *dst);
+int nvmeibt_toma_send_buf_to_client(      const /* nvmeibt_client_msg */ char *buf, int buf_len, const char *clnt_host);
 
 /***************************** Netlink: New Toma-API vs kernel server, used for disk related communication */
 struct km_comm_msg_hdr {

@@ -1,6 +1,5 @@
-#include "nvmeibt_topology.h"
 #include "nvmeibt_srvr_proc.h"
-#include "nvmeibt_toma.h"
+#include "nvmeibt_common.h"
 
 /***************************** Generic API Toma->Server ***********************/
 static const char proc_path_toma2srvr[] = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";			// Toma->Srvr
@@ -126,16 +125,14 @@ int nvmeibt_toma_get_msg_from_local_server(struct nvmeibs_toma_server_proc_buf *
 	return rv;
 }
 
-int nvmeibt_toma_send_buf_to_client(const char *buf, int buf_len, const struct nvmeibt_host_name *dst)
+int nvmeibt_toma_send_buf_to_client(const char *buf, int buf_len, const char *clnt_host)
 {
 	int rv = 0;
-	if (NNVMEIBT_PWRITE_ATOMIC(trace_1_toma_nvmeibt_toma_send_msg_to_client, fd_toma2clnt, buf, buf_len, 0, ENXIO, 0) < 0) {
+	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, buf, buf_len, 0, ENXIO, 0) < 0) {
 		if (errno == ENXIO) {
-			N_Tf(trace_2_toma_nvmeibt_toma_send_msg_to_client, "write('@STR', handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected",
-				proc_path_toma2clnt, buf, buf_len, dst->host_name);
+			N_Tf(tsb2cp1, "write('@STR', handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", proc_path_toma2clnt, buf, buf_len, clnt_host);
 		} else {
-			N_Tf(trace_3_toma_nvmeibt_toma_send_msg_to_client, "write('@STR', handle=@PTR, len=@LEN) failed, @AUTO_ERRNO",
-				proc_path_toma2clnt, buf, buf_len);
+			N_Tf(tsb2cp2, "write('@STR', handle=@PTR, len=@LEN) failed, @AUTO_ERRNO",    proc_path_toma2clnt, buf, buf_len);
 			rv = -1;
 		}
 	}

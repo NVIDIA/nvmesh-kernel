@@ -1830,7 +1830,7 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 data,
 							 msg_id
 							);
-	rv = nvmeibt_toma_send_buf_to_client(buf, buf_len, &reg_ctx->client->net);
+	rv = nvmeibt_toma_send_buf_to_client(buf, buf_len, reg_ctx->client->net.host_name);
 	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, buf);
 
 	NFOUT;
