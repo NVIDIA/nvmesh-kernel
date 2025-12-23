@@ -865,12 +865,12 @@ static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
 	return stale_lock;
 }
 
-struct nvmeibt_registrant_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(
-	struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, bool existing_lock_id_bits_is_read)
+struct stale_lock_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(
+	struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, const union nvmeib_lock_id existing_lock_id)
 {
-	struct nvmeibt_registrant_ctx	*reg_ctx_to_restore = NULL;
+	struct stale_lock_ctx			*existing_stale_lock = NULL;
+	struct stale_lock_ctx			*stale_lock_to_restore;
 	struct nvmeibt_seg_active		*seg_active;
-	struct stale_lock_ctx			*stale_lock;
 
 	NFIN;
 	seg_active = reg_ctx->seg_active;
@@ -879,48 +879,47 @@ struct nvmeibt_registrant_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash
 		N_Tf(i9i8ub2, "non journalled praid seg=@UUID_8. Skipping.", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
-	stale_lock = nvmeib_hash_search_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, seg_blkset_no);
-	if (stale_lock) {
-		if (stale_lock->reg_ctx == reg_ctx) {
+	existing_stale_lock = nvmeib_hash_search_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, seg_blkset_no);
+	if (existing_stale_lock) {
+		if (existing_stale_lock->reg_ctx == reg_ctx) {
 			N_Wf(xtvsjw9, "Stale entry already exists " STALE_BLKSET_FMT " client_id=@MY_HOSTNAME",
-				stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
-				nvmeib_lockid_purify(stale_lock->reg_ctx->reg_lock_id),
-				stale_lock->reg_ctx->client->net.host_name);
-			reg_ctx_to_restore = stale_lock->reg_ctx;
+				existing_stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
+				nvmeib_lockid_purify(existing_stale_lock->reg_ctx->reg_lock_id),
+				existing_stale_lock->reg_ctx->client->net.host_name);
 			goto out;
 		} else {
-			if (existing_lock_id_bits_is_read) {
+			if (existing_lock_id.bits.is_read) {
 				N_Tf(x5vcwh3, "Found stale entry " STALE_BLKSET_FMT " in stale_locks_hash. In mem we have an 'is_read (being recovered)' " STALE_BLKSET_FMT " client_id=@MY_HOSTNAME",
-					 stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
-					 nvmeib_lockid_purify(stale_lock->reg_ctx->reg_lock_id),
+					 existing_stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
+					 nvmeib_lockid_purify(existing_stale_lock->reg_ctx->reg_lock_id),
 					 seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
 					 nvmeib_lockid_purify(reg_ctx->reg_lock_id),
-					stale_lock->reg_ctx->client->net.host_name);
+					existing_stale_lock->reg_ctx->client->net.host_name);
 				N_Tf(rctyahe, "The value in the locks table will be restored according to stale_locks_hash. The recoverer died");
-				reg_ctx_to_restore = stale_lock->reg_ctx;
 				goto out;
 			} else {
 				N_Ef(tcvshwu, "Surprise. Found stale entry " STALE_BLKSET_FMT " different from new " STALE_BLKSET_FMT " client_id=@MY_HOSTNAME",
-					 stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
-					 nvmeib_lockid_purify(stale_lock->reg_ctx->reg_lock_id),
+					 existing_stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
+					 nvmeib_lockid_purify(existing_stale_lock->reg_ctx->reg_lock_id),
 					 seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active),
 					 nvmeib_lockid_purify(reg_ctx->reg_lock_id),
-					stale_lock->reg_ctx->client->net.host_name);
+					existing_stale_lock->reg_ctx->client->net.host_name);
 				N_Tf(omjsy37, "Erasing the old entry, and adding the new one. The old one is definitely wrong");
-				remove_stale_lock_from_seg_stale_locks_hash(stale_lock);
+				remove_stale_lock_from_seg_stale_locks_hash(existing_stale_lock);
 			}
 		}
 	}
-	stale_lock = NNVMEIBT_BM_ALLOC(hf7i30w, sizeof(*stale_lock));
-	stale_lock->seg_blkset_no = seg_blkset_no;
-	stale_lock->reg_ctx = reg_ctx;
+	stale_lock_to_restore = NNVMEIBT_BM_ALLOC(hf7i30w, sizeof(*stale_lock_to_restore));
+	stale_lock_to_restore->seg_blkset_no = seg_blkset_no;
+	stale_lock_to_restore->reg_ctx = reg_ctx;
+	stale_lock_to_restore->lockid_that_was_left_behind = existing_lock_id;
 	reg_ctx->n_stale_locks++;
-	nvmeib_hash_add_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, seg_blkset_no, stale_lock);
+	nvmeib_hash_add_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, seg_blkset_no, stale_lock_to_restore);
 	N_Tf(ts6tslh, "Adding " STALE_BLKSET_FMT, seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 out:
 	unlock_stale_locks_hash(seg_active);
 	NFOUT;
-	return reg_ctx_to_restore;
+	return existing_stale_lock;
 }
 
 int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_msg_s2t_blkset_recovered *blkset_recovered_msg)

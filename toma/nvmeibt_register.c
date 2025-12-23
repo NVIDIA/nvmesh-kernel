@@ -1764,7 +1764,7 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 	uint64_t									ii;
 	union nvmeib_lock_id						write_lock_id;
 	union nvmeib_lock_blkset_entry				*mmapped_locks_table;
-	struct nvmeibt_registrant_ctx				*reg_ctx_to_restore;
+	struct stale_lock_ctx						*already_existing_stale_lock;
 	struct nvmeibt_disk_segment					*disk_segment;
 	struct {
 		union nvmeib_lock_id						stale_lock_id;
@@ -1845,13 +1845,13 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 
 			// Since only this registrant_disconnect can update this entry, do it directly
 			//  Do not worry about RDMA read caches. We find it hard to believe that they exist (== disable polling over RDMA)
-			reg_ctx_to_restore = nvmeibt_seg_active_add_blkset_to_stale_locks_hash(released_lock_ids[n].entry->reg_ctx, ii, existing_lock_id.bits.is_read);
-			if (!reg_ctx_to_restore) {
+			already_existing_stale_lock = nvmeibt_seg_active_add_blkset_to_stale_locks_hash(released_lock_ids[n].entry->reg_ctx, ii, existing_lock_id);
+			if (!already_existing_stale_lock) {
 				write_lock_id = released_lock_ids[n].stale_lock_id;
 				// write_lock_id.bits.is_read = existing_lock_id.bits.is_read; // Daniel: Impossible, client will not send blockset recovered on this blckset and Toma Hash will explode
 			} else {
 				// A recoverer locked and unregistered. We need to restore the value that it tried to fix (recoveree clients lock)
-				write_lock_id = reg_ctx_to_restore->reg_lock_id;	// Daniel: Todo: Fix this: Here we loose .is_read bit of original lock id because reg_lock_id is purified.
+				write_lock_id = already_existing_stale_lock->lockid_that_was_left_behind;
 				nvmeib_lock_id_set_is_stale(&write_lock_id);
 				// A client that does the sync (recoverer)
 				// - locks with is_read=1

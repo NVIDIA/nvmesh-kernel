@@ -31,6 +31,7 @@ struct nvmeibt_topology;
 struct stale_lock_ctx {
 	unsigned long long							seg_blkset_no;
 	struct nvmeibt_registrant_ctx				*reg_ctx;
+	union nvmeib_lock_id						lockid_that_was_left_behind;
 	struct xdlist 								seg_active_link;
 };
 
@@ -381,8 +382,8 @@ void nvmeibt_seg_active_remove_registrant_disconnect_record_from_seg(struct nvme
 /* stale locks */
 void nvmeibt_seg_active_delete_all_stale_locks_of_registrant(
 	struct nvmeibt_seg_active *seg_active, struct nvmeibt_registrant_ctx *reg_ctx);
-struct nvmeibt_registrant_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(
-	struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, bool existing_lock_id_bits_is_read);
+struct stale_lock_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(
+	struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, const union nvmeib_lock_id existing_lock_id);
 
 /* recovery/rebuild */
 bool nvmeibt_seg_active_mark_cold_recovery_required_if_needed(struct nvmeibt_seg_active *seg_active);
