@@ -436,7 +436,7 @@ struct oper_param_t {
 		{"attach_timeout_sec",								ATTACH_TIMEOUT_SEC_DEFAULT,
 			&recovery_timeout_wait_client_sec, NULL, NULL},
 		{"max_wait_for_non_registrable_seg_sec",			PRAID_LEADER_MAX_NSEC_WAIT_FOR_NON_REGISTRABLE_SEG_TO_APPLY_DEFAULT,
-				NULL, nvmeibt_binary_tracing_set_tracer_debug_level, nvmeibt_binary_tracing_get_tracer_debug_level},
+			NULL, nvmeibt_raft_set_max_wait_for_non_registrable_seg_sec, nvmeibt_raft_get_max_wait_for_non_registrable_seg_sec},
 		{"freeze_topology",									0,
 				&nvmeibt_topology_freeze_topo, NULL, NULL},
 #ifdef TOMA_IB_ROCE
