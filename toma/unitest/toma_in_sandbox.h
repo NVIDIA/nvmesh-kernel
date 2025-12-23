@@ -115,6 +115,7 @@ typedef struct epoll_data {
 struct epoll_event {
 	epoll_data_t data;
 	uint32_t events;
+	int __fd;		// Private usage of the sandbox
 };
 int epoll_create1(int __flags);
 int epoll_ctl( int efd, enum EPOLL_CTL __op, int __fd, struct epoll_event *ev_ptr);

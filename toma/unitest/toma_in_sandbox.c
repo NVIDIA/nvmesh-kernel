@@ -620,16 +620,23 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 
 /************************************* Epoll ********************************/
 int epoll_create1(int flags) {
+	struct globa_epoll *ep = &sys->TSB_epoll;
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_epoll_fd");
+	memset(ep->evs, 0, sizeof(ep->evs));
+	ep->n_fds = 0;
 	return __connect(socket(0,0,flags), &addr, 0);
 }
 
 int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 	struct globa_epoll *ep = &sys->TSB_epoll;
-	BUG_ON(ep->o.sock->fd != efd); (void)__fd;
+	BUG_ON(ep->o.sock->fd != efd);
 	switch (op) {
-		case EPOLL_CTL_ADD: ep->evs[ep->n_fds] = *ev; ep->n_fds++;  break;
+		case EPOLL_CTL_ADD: {
+			for (int i = 0; i < ep->n_fds; i++)
+				BUG_ON(ep->evs[i].__fd == __fd);	// Double add to epoll
+			ep->evs[ep->n_fds] = *ev;  ep->evs[ep->n_fds].__fd = __fd; ep->n_fds++;  break;
+		}
 		case EPOLL_CTL_DEL: ep->n_fds--; memset(&ep->evs[ep->n_fds], 0, sizeof(ep->evs[0])); break;
 		case EPOLL_CTL_MOD: default : BUG_ON(true); break;
 	}
@@ -1055,7 +1062,7 @@ const char* mgmt_simu_kafka_msg_cache[] = {
 	"{\"messageType\":\"hardwareConfiguration\"   "",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\",\"configurationVersion\":17,\"leaderToken\":1,\"kafkaMessageSequence\""
 		":%d,\"raftTerm\":9,\"stopSendingKeepaliveToken\":false,\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\"},"
 		"\"targets\":["
-			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"n38.mtl.labs.mlnx\",\"uuid\":\"cde269b0-c3c0-11f0-bc49-e391b6ca4c2b\","
+			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"cde269b0-c3c0-11f0-bc49-e391b6ca4c2b\","
 				"\"disks\":["
 					"{\"diskID\":\"D0_n38\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"f39cebd0-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
 					"{\"diskID\":\"D1_n38\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"f39cebd1-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":1,\"isOutOfService\":false}],"
@@ -1088,9 +1095,13 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	m->err = RD_KAFKA_RESP_ERR_NO_ERROR;
 	if (!strncmp(ko->name, "HW", 2)) {
 		static int once_every = 0;
-		if ((once_every++ % 4) == 0) {		// Inject conf msg once every few iterations. Todo, make this actual conf msg
+		if (once_every == 0) {
 			m->payload = malloc(256);
 			m->len = snprintf(m->payload, 256, mgmt_simu_kafka_msg_cache[1], sys->my_hostname);
+			once_every++;
+		} else if (((once_every++ % 4) == 0) && true) {		// Inject conf msg once every few iterations. Todo, make this actual conf msg
+			m->payload = malloc(4096);
+			m->len = snprintf(m->payload, 4096, mgmt_simu_kafka_msg_cache[3], once_every, sys->my_hostname);
 		}
 	} else if (!strncmp(ko->name, "CMD", 3)) {
 		static int cmds_order = 0;
