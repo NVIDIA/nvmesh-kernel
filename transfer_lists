@@ -77,6 +77,7 @@ optional_common_transfer_list="tools/traces_post_processor/cpager \
 # Can include both static and compiled files
 common_scripts_transfer_list="tools/dictionary.json \
 			tools/traces_post_processor/pager.py \
+			tools/traces_post_processor/json-c \
 			scripts/common/nvmesh_set_irq_affinity_common \
 			scripts/common/nvmesh_set_tcp_affinity \
 			scripts/common/nvmesh_set_tcp_affinity_dbg \
