@@ -2948,7 +2948,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	// Read the nics.csv file
 	{
 		struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
-		if (nvmeibt_topology_probe_local_hardware(&cfg_file, 1) < 0)
+		if (nvmeibt_topology_probe_local_hardware(&cfg_file) < 0)
 			nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.
 	}
 	if (!nvmeibt_toma_is_running_as_a_utility()) {

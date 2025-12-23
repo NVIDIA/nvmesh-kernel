@@ -48,7 +48,7 @@ const char *nvmeibt_get_csv_section_header_by_section_type(int section_type);
 const char *nvmeibt_get_csv_header_by_section_type(int section_type);
 struct nvmeibt_disk_segment;
 void nvmeibt_read_config_add_missing_seg_to_praid(struct nvmeibt_praid *praid, struct nvmeibt_disk_segment *seg);
-int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, struct nvmeibt_csv_file_ctx *file_entry);
+int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, const struct nvmeibt_csv_file_ctx *file_entry);
 int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is_updating_leader);
 void nvmeibt_read_config_vol_mark_vol_and_segs_for_removal(struct mm_mgmt_conf *conf, bool is_updating_leader);
 int nvmeibt_read_config_apply_vol_mgmt_conf(struct mm_mgmt_conf *conf, int vol_config_tag, bool is_updating_leader, enum KAFKA_EVENT_TYPE event_type, bool is_topo_config);

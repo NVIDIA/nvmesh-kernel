@@ -112,7 +112,7 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 		return 0;
 	} else if (strcmp("rescan-disks", argv[1])==0) {
 		struct nvmeibt_csv_file_ctx cfg_file = {DISKS_INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_DISKS};
-		nvmeibt_topology_probe_local_hardware(&cfg_file, 1);
+		nvmeibt_topology_probe_local_hardware(&cfg_file);
 		nvmeibt_Str_sprintf(out, "Done scanning for disks.\n");
 		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
 			nvmeibt_Str_sprintf(out, "Available disk: %s\n", nvmeibt_local_disk_display(local_disk));

@@ -138,7 +138,7 @@ bool nvmeibt_read_config_am_i_eligible_to_read_config_directly(void)
 	return (!nvmeibt_raft_is_raft_valid() || nvmeibt_raft_is_leader());
 }
 
-int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, struct nvmeibt_csv_file_ctx *file_entry)
+int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, const struct nvmeibt_csv_file_ctx *file_entry)
 {
 	int			rv = -1;
 	int			fd = -1;

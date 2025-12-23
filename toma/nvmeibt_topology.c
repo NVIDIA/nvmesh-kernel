@@ -810,36 +810,20 @@ out:
 	return rv;
 }
 
-int nvmeibt_topology_probe_local_hardware(struct nvmeibt_csv_file_ctx *config_files_list, unsigned int list_size)
+int nvmeibt_topology_probe_local_hardware(const struct nvmeibt_csv_file_ctx *cfg)
 {
 	struct nvmeibt_Str			*new_config = NULL;
-	unsigned int						i;
 	int									rv = 0;
-
 	NFIN;
 	// Read the csv files
 	new_config = NNVMEIBT_STR_ALLOC(aju6843);
-
-	/*
-	 * During replay: skip probing of local hardware from /proc:
-	 *  - We only need to replay the leader's logic and how it calculates new
-	 *    topologies based on config and follower reports.
-	 *  - Decouple replay from the original execution environment (hardware)
-	 *    where recording took place originally.
-	 */
-	if (!nvmeibt_replay_is_enabled()) {
-		for (i = 0; i < list_size; i++) {
-			if (nvmeibt_read_config_file(new_config, &(config_files_list[i])) < 0) {
-				rv = -1;
-				goto out;
-			}
-		}
+	if (nvmeibt_read_config_file(new_config, cfg) < 0) {
+		rv = -1;
+	} else {
 		N_Tf(fju7865, "Local hardware changed");
+		//	nvmeibt_topology_active_mark_reserialization_required();
+		rv = nvmeibt_parse_csv_buf(new_config, 0, NVMEIBT_CSV_TYPE_LOCAL_DISKS);
 	}
-//	nvmeibt_topology_active_mark_reserialization_required();
-	rv = nvmeibt_parse_csv_buf(new_config, 0, NVMEIBT_CSV_TYPE_LOCAL_DISKS);
-
-out:
 	NNVMEIBT_STR_FREE(ft67ut5, new_config);
 	NFOUT;
 	return rv;
@@ -1896,7 +1880,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 	case NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE: {
 			struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
 			N_IMf(jjuu88w, "EVENT_GID_CHANGE gid=@GID_STR", msg_buf->port_gid_change_msg.gid_str);
-			if (nvmeibt_topology_probe_local_hardware(&cfg_file, 1) < 0) {
+			if (nvmeibt_topology_probe_local_hardware(&cfg_file) < 0) {
 				// Failed reading hardware config.
 				nvmeibt_abort(ES_FATAL);
 			}
@@ -1919,7 +1903,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 			struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
 			N_IMf(dfrt654, "EVENT_NIC_CHANGE nic=@NIC_STR active=@ACTIVE",
 				msg_buf->nic_change_msg.ib_dev, msg_buf->nic_change_msg.add);
-			if (nvmeibt_topology_probe_local_hardware(&cfg_file, 1) < 0) {
+			if (nvmeibt_topology_probe_local_hardware(&cfg_file) < 0) {
 				// Failed reading hardware config.
 				nvmeibt_abort(ES_FATAL);
 			}

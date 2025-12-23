@@ -131,7 +131,7 @@ void nvmeibt_topology_leader_remove_disk_from_its_current_raft_member(struct nvm
 void nvmeibt_topology_remove_disk_from_its_current_node(struct nvmeibt_disk *disk);
 void nvmeibt_topology_print_versions(struct nvmeibt_topology_serialized_topo_header *header_ptr);
 int update_liveliness_of_seg_actives_of_specific_local_disk(struct nvmeibt_local_disk *local_disk);
-int nvmeibt_topology_probe_local_hardware(struct nvmeibt_csv_file_ctx *config_files_list, unsigned int list_size);
+int nvmeibt_topology_probe_local_hardware(const struct nvmeibt_csv_file_ctx *);
 int nvmeibt_topology_relate_hardware_probe_to_config(void);
 int nvmeibt_topology_setup_relationships(void);
 int nvmeibt_topology_parse_committed_topology(void);
