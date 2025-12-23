@@ -1025,10 +1025,10 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 	/* Set error 0 */ BUG_ON(size_of_err < 16); err_str[0] = 0;
 	return RD_KAFKA_CONF_OK;
 }
-
 const char* mgmt_simu_kafka_msg_cache[] = {
 	"{\"messageType\":\"updateLeaderKeepaliveToken\",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":5}}",
 	"{\"messageType\":\"updateTomaKeepaliveToken\""",\"messageTypeVersion\":1,\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":5}}",
+	"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":{\"nodeID\":\"%s\",\"uuid\":\"e8c70c10-db79-11f0-8f35-cb935b7ef6ae\",\"targetsInZone\":0,\"targetUpdatesSequence\":1}}",
 	"{\"messageType\":\"hardwareConfiguration\"   "",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\",\"configurationVersion\":17,\"leaderToken\":1,\"kafkaMessageSequence\""
 		":%d,\"raftTerm\":9,\"stopSendingKeepaliveToken\":false,\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\"},"
 		"\"targets\":["
@@ -1078,6 +1078,14 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 		} else if ((cmds_order++ % 3) == 0) {
 			m->payload = strdup(mgmt_simu_kafka_msg_cache[0]);	// Because it is treated by toma not as const
 			m->len = strlen(m->payload);
+		}
+	} else if (!strstr(ko->name, "incrementalTarget")) {
+		// Not called yet, because in toma nvmeibt_kafka_req_start_consuming_leader_TARGET_msgs() is not called yet. Solve it
+		static int cmds_order = 0;
+		if (cmds_order == 0) {
+			m->payload = malloc(256);	// Insert self machine as 1 machine raft domain. Will auto become leader
+			m->len = snprintf(m->payload, 256, mgmt_simu_kafka_msg_cache[2], sys->my_hostname);
+			cmds_order++;
 		}
 	} else {
 		BUG_ON(true);		// Not supported yet. Insert messages to other kafka queues as well
