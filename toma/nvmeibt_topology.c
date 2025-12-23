@@ -1914,7 +1914,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 		handle_subscriber_event(&(msg_buf->subscriber_change_msg));
 		break;
 	case NVMEIBS_TOMA_REPORT_EVENT_CLIENT_DISCONNECT:
-		handle_client_disconnect_event(nvmeibt_toma_get_local_server_fd_events(), &msg_buf->client_disconnect_msg_hdr);
+		handle_client_disconnect_event(&msg_buf->client_disconnect_msg_hdr);
 		break;
 	case NVMEIBS_TOMA_WRITE_STATUS_REQ:
 		nvmeibt_toma_write_status_srv_req(msg_buf->status_req_msg.type, msg_buf->status_req_msg.fname,

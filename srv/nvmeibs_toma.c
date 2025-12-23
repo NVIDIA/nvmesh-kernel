@@ -94,12 +94,10 @@ struct nvmeibs_toma {
 
 struct nvmeibs_toma *toma = NULL;
 
-/* toma:client buffer format as
-   received/sent in proc file's
-   write/read methods */
+/* toma:client buffer format as received/sent in proc file's write/read methods */
 struct nvmeibs_toma_client_proc_buf {
-	__be64 handle;
-	u8 data[];
+	__be64 handle;					// Unique handle for each client
+	u8 data[];						// struct nvmeibt_client_msg
 }__attribute__((packed));
 
 /* container of proc file's

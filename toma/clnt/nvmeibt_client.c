@@ -261,9 +261,8 @@ out:
 	NFOUT;
 }
 
-void handle_client_disconnect_event(int srv_events_fd, const struct nvmeibs_msg_s2t_client_disconnect *h)
+void handle_client_disconnect_event(const struct nvmeibs_msg_s2t_client_disconnect *h)
 {
-	(void)srv_events_fd;
 	if (h->payload_len) {
 		N_Tf(ur8473w, "client disconnect cid=@CID with payload @X[bytes]", h->cid, h->payload_len);	// Deprecated
 	} else {
