@@ -92,7 +92,7 @@ echo "/opt/nvmesh
 
 %pre
 # an upgrade
-if [ $1 -gt 1 ] || [ "$1" == "upgrade" ]; then
+if [ "$1" = "2" ] || [ "$1" = "upgrade" ]; then
 	MDIR="/opt/nvmesh/target-repo"
 	compressed_kos=`find -L $MDIR -name '*.ko.xz' -type f 2>/dev/null`
 	# if compressed kos found then remove old decompressed kos
