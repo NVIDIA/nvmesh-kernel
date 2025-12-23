@@ -1159,11 +1159,6 @@ static void send_registrable_to_all_longing_registrants(struct nvmeibt_seg_activ
 	NFIN;
 	N_Tf(fjurty3, "seg=@UUID_8 committed_@RES_MOD_VER",
 		 nvmeibt_seg_active_UUID_8(seg_active), seg_active->committed_reservation_mode_version);
-	if (!seg_active) {
-		N_Ef(error_register_send_registrable_to_all_longing_registrants, "surprise seg_active == NULL");
-		TOMA_ABORT_IF_DEBUG(ES_FATAL);
-		goto out;
-	}
 	if (nvmeibt_register_is_seg_active_accepting_registrations(seg_active, NULL)) {
 		struct nvmeibt_registrant_ctx	*reg_ctx;
 		// If clients tried to register and received TOMA_NOT_READY, tell them that they can register now
@@ -1171,7 +1166,6 @@ static void send_registrable_to_all_longing_registrants(struct nvmeibt_seg_activ
 			send_registrable_to_longing_registrant_if_eligable(seg_active, reg_ctx);
 		}
 	}
-out:
 	NFOUT;
 }
 
