@@ -185,7 +185,7 @@ struct nvmeibt_msg_request {
 #include "nvmeibt_ds.h"
 struct nvmeibt_srm { int dummy; };
 struct udp_peer { struct xdlist node_link; };
-union ibv_gid { int dummy; };
+union ibv_gid { uint8_t raw[16]; struct { uint64_t subnet_prefix; uint64_t interface_id;} global; };
 struct nvmeibt_node;
 static inline int is_peer_reachable(const struct udp_peer *p) { (void)p; return 0;}
 int nvmeibt_srm_queue_req(struct nvmeibt_srm *srm, struct nvmeibt_msg_request *req);
