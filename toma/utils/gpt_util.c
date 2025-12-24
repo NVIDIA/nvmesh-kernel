@@ -226,24 +226,34 @@ struct self_test_entry {
 	BOOL				expect_failure;		// true for negative tests
 };
 
-// X-Macro: Define all tests here (order determines test numbers automatically)
+// X-Macro: Declare all tests here (order determines test numbers automatically)
 // Format: X(function_name, "Test Name", "Command Description", expect_failure)
 #define SELF_TEST_LIST \
-	X(test_normal_gpt, "Normal GPT (Primary == Alternate)", "gpt_util -a <path> -c both", false) \
-	X(test_mismatch_gpt, "Mismatched GPT (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
-	X(test_uuid_filtering, "UUID Filtering", "gpt_util -a <path> --filter-uuid <UUID>", false) \
-	X(test_lba_filtering, "LBA Filtering", "gpt_util -a <path> --filter-lba 1000", false) \
-	X(test_overlap_detection, "Overlap Detection (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
-	X(test_gpt_upgrade, "GPT Upgrade (corrupt n_partition_entries to 128, upgrade to 8192)", "Internal API test", false) \
-	X(test_json_export_apply, "JSON Export + Apply (Dry-Run)", "gpt_util -a <path> -J + --apply-from", false) \
-	X(test_zeroing_verify, "Zeroing Verification Commands (-Z)", "gpt_util -a <path> -Z", false) \
-	X(test_diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from", false) \
-	X(test_diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from", false) \
-	X(test_apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B", false) \
-	X(test_missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
-	X(test_device_path_safety, "Safety - Device Path Mismatch", "gpt_util export + apply to different device (blocked)", true) \
-	X(test_overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
-	X(test_mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)", true)
+	X(normal_gpt, "Normal GPT (Primary == Alternate)", "gpt_util -a <path> -c both", false) \
+	X(mismatch_gpt, "Mismatched GPT (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
+	X(uuid_filtering, "UUID Filtering", "gpt_util -a <path> --filter-uuid <UUID>", false) \
+	X(lba_filtering, "LBA Filtering", "gpt_util -a <path> --filter-lba 1000", false) \
+	X(overlap_detection, "Overlap Detection (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
+	X(gpt_upgrade, "GPT Upgrade (corrupt n_partition_entries to 128, upgrade to 8192)", "Internal API test", false) \
+	X(json_export_apply, "JSON Export + Apply (Dry-Run)", "gpt_util -a <path> -J + --apply-from", false) \
+	X(zeroing_verify, "Zeroing Verification Commands (-Z)", "gpt_util -a <path> -Z", false) \
+	X(diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from", false) \
+	X(diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from", false) \
+	X(apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B", false) \
+	X(missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
+	X(device_path_safety, "Safety - Device Path Mismatch", "gpt_util export + apply to different device (blocked)", true) \
+	X(overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
+	X(mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)", true)
+
+// Define test function (searchable marker + function signature)
+// Usage: DEFINE_TEST(normal_gpt) { test body }
+#define DEFINE_TEST(name) \
+	static int test_##name(struct self_test_ctx *ctx)
+
+// Forward declare all test functions (auto-generated from X-Macro)
+#define X(func, name, cmd, expect_fail) static int test_##func(struct self_test_ctx *ctx);
+SELF_TEST_LIST
+#undef X
 
 // Forward declarations
 static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
@@ -1737,18 +1747,8 @@ static int SELF_TEST_generate_mock_device_with_mismatch(const char *filepath)
 	return fd;
 }
 
-// Forward declare all test functions (auto-generated from X-Macro)
-#define X(func, name, cmd, expect_fail) static int func(struct self_test_ctx *ctx);
-SELF_TEST_LIST
-#undef X
-
 // Helper macros for test functions
-	#define TEST_JSON_PATH(name) TOMA_ROOT_DIR "tmp/test_" name ".json"
-
-// Macro: Define test function (searchable marker + function signature)
-// Usage: DEFINE_TEST(normal_gpt) { test body }
-#define DEFINE_TEST(name) \
-	static int test_##name(struct self_test_ctx *ctx)
+#define TEST_JSON_PATH(name) TOMA_ROOT_DIR "tmp/test_" name ".json"
 
 // Setup device or abort entire test suite (global macro for test functions)
 #define SELF_TEST_SETUP_OR_ABORT(setup_func, path) \
@@ -1767,6 +1767,8 @@ SELF_TEST_LIST
 	} \
 	optind = 1; \
 } while(0)
+
+/********************** Self test cases defined here ************************/
 
 DEFINE_TEST(normal_gpt)
 {
@@ -2096,7 +2098,7 @@ static int run_self_test(const char *test_selection)
 	int							num_tests_total = 1;		// Will be updated
 
 	// Test registry - auto-generated from SELF_TEST_LIST X-Macro
-	#define X(func, name, cmd, expect_fail) {name, cmd, func, expect_fail},
+	#define X(func, name, cmd, expect_fail) {name, cmd, test_##func, expect_fail},
 	struct self_test_entry tests[] = { SELF_TEST_LIST };
 	#undef X
 
