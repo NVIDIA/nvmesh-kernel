@@ -53,6 +53,8 @@ void unlink_list_destroy(unlink_list_t *list)
 {
 	unlink_list_clear(list);
 	pthread_mutex_destroy(&list->lock);
+	list->dir = NULL;
+	list->name = NULL;
 }
 
 /**
