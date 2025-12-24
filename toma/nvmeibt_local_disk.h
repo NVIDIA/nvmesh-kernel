@@ -273,7 +273,7 @@ void nvmeibt_local_disk_mark_is_specific_disk_report_req(const char *ldisk_id, u
 void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk);
 int nvmeibt_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
 void nvmeibt_local_disk_stop_wq(struct nvmeibt_local_disk *local_disk);
-int nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
+int nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
 														   bool is_stock_ldisk);
 
 /******************* API Toma-Srvr for zeroing/formating **********************/
