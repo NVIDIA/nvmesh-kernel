@@ -654,8 +654,10 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		evs[i] = ep->evs[i];	// As if each and every fd in which toma is sleeping has an event.
 	}
 	if (loop_idx < 10) {
+		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 		return i;
 	} else {
+		// sys->TSB_sig.sig = 9;	// Daniel: This seems not to work better than epoll failure
 		return -1;				// For now after 10 iterations stop toma. This is ugly! Simulate shutdown instruction via kafka from mgmt
 	}
 }
