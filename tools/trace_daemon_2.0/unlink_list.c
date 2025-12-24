@@ -5,7 +5,9 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <stdio.h> 
+#include <stdio.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #define __MODULE_HDR "%s"
 #define __MODULE_HDR_ARGS "unlink_list"
@@ -218,6 +220,73 @@ int unlink_list_parse_log_filename(const char *fname, const char *tname, int *cp
 			return 0;
 		++idx;
 		return 1;
+	}
+}
+
+/**
+ * Scan directory and populate unlink list with existing log files
+ */
+int unlink_list_populate(unlink_list_t *list, const char *dir, const char *name, int max_cpus)
+{
+	DIR* dp;
+	struct dirent* ep;
+
+	dp = opendir(dir);
+	if(dp != NULL)
+	{
+		while((ep = readdir(dp)) != NULL)
+		{
+			int cpu, idx;
+			if(unlink_list_parse_log_filename(ep->d_name, name, &cpu, &idx, max_cpus))
+			{
+				char path[MAX_FILENAME];
+				time_t ts;
+				struct stat st;
+				snprintf(path, sizeof(path), "%s/%s", dir, ep->d_name);
+
+				if(stat(path, &st))
+					ts = 0;
+				else
+					ts = st.st_mtime;
+
+				unlink_list_add(list, cpu, idx, ts);
+			}
+		}
+		closedir(dp);
+	}
+	else
+	{
+		_error("Listing working dir %s", dir);
+		/* We can continue in this situation, just report error and continue */
+	}
+
+	return 0;
+}
+
+/**
+ * Process unlink list and remove old log files (returns number of files unlinked)
+ */
+int unlink_list_do_unlink(unlink_list_t *list, const char *dir, const char *name, int max_logs)
+{
+	int unlinked_count = 0;
+
+	while(1)
+	{
+		unlink_candidate_t* cand = unlink_list_get_next(list, max_logs);
+
+		if(cand)
+		{ /* We do have a valid candidate - actually unlink now */
+			_info("Do unlink %s cpu=%d id=%d", name, cand->cpu, cand->id);
+			unlink_list_try_remove_log_file(dir, name, cand, "", "");
+			unlink_list_try_remove_log_file(dir, name, cand, "", ".lz4");
+			unlink_list_try_remove_log_file(dir, name, cand, ".cache", "");
+			free(cand);
+			unlinked_count++;
+		}
+		else
+		{
+			return unlinked_count; /*Finished*/
+		}
 	}
 }
 

@@ -127,48 +127,6 @@ void destroy_trace_channel(trace_channel_t* self)
 }
 
 
-/**
- * Scan directory and populate unlink list with existing log files
- */
-static int _scan_directory_for_logs(trace_channel_t* self)
-{
-	DIR* dp;
-	struct dirent* ep;
-
-	dp = opendir(self->meta.dir);
-	if(dp != NULL)
-	{
-		while((ep = readdir(dp)) != NULL)
-		{
-			int cpu, idx;
-			if(unlink_list_parse_log_filename(ep->d_name, self->meta.name, &cpu, &idx, MAX_CPUS))
-			{
-				if(self->priv.per_cpu[cpu])
-				{
-					char path[MAX_FILENAME];
-					time_t ts;
-					struct stat st;
-					snprintf(path, MAX_FILENAME, "%s/%s", self->meta.dir, ep->d_name);
-
-					if(stat(path, &st))
-						ts = 0;
-					else
-						ts = st.st_mtime;
-
-					unlink_list_add(&self->priv.unlink_list, cpu, idx, ts);
-				}
-			}
-		}
-		closedir(dp);
-	}
-	else
-	{
-		_error("Listing working dir");
-		/* We can continue in this situation, just report error and continue */
-	}
-
-	return 0;
-}
 
 /**
  * Iterate unlink list and update workers with existing log IDs
@@ -211,7 +169,7 @@ int start_trace_channel(trace_channel_t* self)
 	}
 
 	/* Find out what files exist on the disk, update workers accordingly */
-	if(_scan_directory_for_logs(self))
+	if(unlink_list_populate(&self->priv.unlink_list, self->meta.dir, self->meta.name, MAX_CPUS))
 	{
 		_error("Scanning previous logs");
 		goto err;
@@ -352,24 +310,7 @@ void add_to_unlink(trace_channel_t* self, int cpu, int id, unsigned long ts)
  */
 void do_unlink(trace_channel_t* self)
 {
-	while(1)
-	{
-		unlink_candidate_t* cand = unlink_list_get_next(&self->priv.unlink_list, 
-			self->meta.max_logs);
-
-		if(cand)
-		{ /* We do have a valid candidate - actually unlink now */
-			_info("Do unlink %s cpu=%d id=%d", self->meta.name, cand->cpu, cand->id);
-			unlink_list_try_remove_log_file(self->meta.dir, self->meta.name, cand, "", "");
-			unlink_list_try_remove_log_file(self->meta.dir, self->meta.name, cand, "", ".lz4");
-			unlink_list_try_remove_log_file(self->meta.dir, self->meta.name, cand, ".cache", "");
-			free(cand);
-		}
-		else
-		{
-			return; /*Finished*/
-		}
-	}
+	unlink_list_do_unlink(&self->priv.unlink_list, self->meta.dir, self->meta.name, self->meta.max_logs);
 }
 
 void increment_open_files(trace_channel_t* self) {
