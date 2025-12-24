@@ -3229,42 +3229,196 @@ static int execute_export_json(int disk_fd, struct gpt_util_config *config)
 }
 
 /**
+ * Validate that device has proper NVMesh structure (Main GPT + Metadata partition)
+ * Returns 0 if valid, -1 if missing required structure
+ */
+static int validate_nvmesh_device_structure(int disk_fd, int pblk_size, uint64_t pba_s, uint64_t pba_hw_e,
+											 struct nvmeibt_disk_gpt *main_gpt,
+											 const struct nvmeibt_disk_gpt_partition_entry **metadata_partition_out)
+{
+	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+
+	memset(main_gpt, 0, sizeof(*main_gpt));
+	nvmeibt_strlcpy(main_gpt->main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt->main_or_metadata));
+
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, pblk_size, main_gpt, pba_s, pba_hw_e, false) < 0) {
+		N_Ef(validate_device_read_gpt_failed, "Failed to read Main GPT from device");
+		return -1;
+	}
+
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(main_gpt);
+	if (!metadata_partition) {
+		N_Ef(validate_device_no_metadata, "Device has no metadata partition (not a valid NVMesh device)");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device must have EXCELERO_METADATA partition" COL_RESET "\n");
+		return -1;
+	}
+
+	*metadata_partition_out = metadata_partition;
+	return 0;
+}
+
+/**
+ * Validate JSON has required sections for NVMesh apply
+ * Returns 0 if valid, -1 if missing required sections
+ */
+static int validate_json_required_sections(struct mm_json_elem *json_root,
+											const char *json_path,
+											struct mm_json_elem **main_gpt_primary_out,
+											struct mm_json_elem **metadata_gpt_primary_out)
+{
+	struct mm_json_elem *main_gpt_primary_elem;
+	struct mm_json_elem *metadata_gpt_primary_elem;
+	struct mm_json_elem *main_gpt_alternate_elem;
+
+	main_gpt_primary_elem = json_get_dict_value(json_root, "main_gpt_primary");
+	if (!main_gpt_primary_elem) {
+		N_Ef(validate_json_no_main_gpt, "JSON missing required 'main_gpt_primary' section file=@STR", json_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain main_gpt_primary section" COL_RESET "\n");
+		return -1;
+	}
+
+	metadata_gpt_primary_elem = json_get_dict_value(json_root, "metadata_gpt_primary");
+	if (!metadata_gpt_primary_elem) {
+		N_Ef(validate_json_no_metadata_gpt, "JSON missing required 'metadata_gpt_primary' section file=@STR", json_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain metadata_gpt_primary section for NVMesh devices" COL_RESET "\n");
+		return -1;
+	}
+
+	/* Reject JSON with both primary and alternate (ambiguous which to use) */
+	main_gpt_alternate_elem = json_get_dict_value(json_root, "main_gpt_alternate");
+	if (main_gpt_alternate_elem) {
+		N_Ef(validate_json_has_alternate, "JSON contains both primary and alternate copies (ambiguous) file=@STR", json_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain only primary copy. Re-export with --gpt-copy=primary" COL_RESET "\n");
+		return -1;
+	}
+
+	*main_gpt_primary_out = main_gpt_primary_elem;
+	*metadata_gpt_primary_out = metadata_gpt_primary_elem;
+	return 0;
+}
+
+/**
+ * Prepare GPT structure from JSON section
+ * Parses JSON, copies to GPT structure, calculates CRCs
+ * Returns 0 on success, -1 on error
+ */
+static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
+								  struct mm_json_elem *json_section,
+								  const char *section_name,
+								  int max_n_entries)
+{
+	memset(gpt, 0, sizeof(*gpt));
+	nvmeibt_strlcpy(gpt->main_or_metadata, section_name, sizeof(gpt->main_or_metadata));
+	gpt->max_n_entries = max_n_entries;
+
+	if (parse_gpt_from_json_section(gpt, json_section, section_name) < 0) {
+		N_Ef(prepare_gpt_parse_failed, "Failed to parse @STR from JSON", section_name);
+		return -1;
+	}
+
+	/*
+	 * Initialize static/constant fields (not in JSON, always the same)
+	 * These are the same values set by nvmeibt_disk_metadata_init_gpt_structure()
+	 */
+	gpt->header.gpt_signature = GPT_SIGNATURE;
+	gpt->header.revision = 0x00010000;			/* GPT revision by UEFI standard */
+	gpt->header.header_size = 92;				/* GPT header size by UEFI standard */
+	gpt->header.size_of_partition_entry = UEFI_MIN_GPT_ENTRY_SIZE;
+
+	/* Calculate CRCs (exactly as store_gpt will do) */
+	gpt->header.partition_entry_array_crc32 = crc32_seedless(gpt->entries,
+															 gpt->header.n_partition_entries * gpt->header.size_of_partition_entry);
+	gpt->header.header_crc32 = 0;
+	gpt->header.header_crc32 = crc32_seedless(&gpt->header, gpt->header.header_size);
+
+	return 0;
+}
+
+/**
+ * Compare GPT structures and display diff
+ * Returns number of changes detected
+ */
+static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
+									  const struct nvmeibt_disk_gpt *json_gpt,
+									  const char *gpt_name)
+{
+	int		i;
+	int		n_additions = 0;
+	int		n_deletions = 0;
+	int		n_modifications = 0;
+	int		n_unchanged = 0;
+
+	fprintf(stdout, "\n=== %s Changes ===\n", gpt_name);
+	fprintf(stdout, "CRC: header 0x%08x->0x%08x, entries 0x%08x->0x%08x\n",
+			disk_gpt->header.header_crc32, json_gpt->header.header_crc32,
+			disk_gpt->header.partition_entry_array_crc32, json_gpt->header.partition_entry_array_crc32);
+
+	for (i = 0; i < json_gpt->max_n_entries; i++) {
+		BOOL disk_in_use = nvmeibt_disk_metadata_is_gpt_entry_in_use(&disk_gpt->entries[i]);
+		BOOL json_in_use = nvmeibt_disk_metadata_is_gpt_entry_in_use(&json_gpt->entries[i]);
+
+		if (!disk_in_use && json_in_use) {
+			show_entry_diff("ADD", i, NULL, &json_gpt->entries[i]);
+			n_additions++;
+		} else if (disk_in_use && !json_in_use) {
+			show_entry_diff("DELETE", i, &disk_gpt->entries[i], NULL);
+			n_deletions++;
+		} else if (disk_in_use && json_in_use) {
+			if (!entries_are_equal(&disk_gpt->entries[i], &json_gpt->entries[i])) {
+				show_entry_diff("MODIFY", i, &disk_gpt->entries[i], &json_gpt->entries[i]);
+				n_modifications++;
+			} else {
+				n_unchanged++;
+			}
+		}
+	}
+
+	fprintf(stdout, "\n" COL_WHITE_BOLD "%s Summary:" COL_RESET "\n", gpt_name);
+	fprintf(stdout, "  Additions:     %d\n", n_additions);
+	fprintf(stdout, "  Deletions:     %d\n", n_deletions);
+	fprintf(stdout, "  Modifications: %d\n", n_modifications);
+	fprintf(stdout, "  Unchanged:     %d\n", n_unchanged);
+
+	if (n_additions + n_deletions + n_modifications == 0) {
+		fprintf(stdout, COL_GREEN "No changes detected" COL_RESET "\n");
+	}
+
+	return (n_additions + n_deletions + n_modifications);
+}
+
+/**
  * Execute APPLY_JSON action
  * Parse JSON file, validate safety checks, and apply GPT changes
  * Default: dry-run (shows diff without writing)
  * With --write: applies changes to disk
- * Safety: Recalculates mismatch/overlap flags from actual JSON data (never trusts _READONLY_ flags)
  */
 static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 {
 	int							rv = -1;
+	int							json_fd = -1;
 	struct nvmeibt_Str			*json_content = NULL;
 	struct mm_json_elem			*json_root = NULL;
-	struct mm_json_kv_pair		*kv = NULL;
-	struct mm_json_dict			*dict = NULL;
-	int							json_fd = -1;
-	BOOL						mismatch_detected = false;
-	BOOL						overlaps_detected = false;
-	const char					*device_path_in_json = NULL;
 	struct mm_json_elem			*main_gpt_primary_elem = NULL;
-	struct mm_json_elem			*main_gpt_alternate_elem = NULL;
-	int							n_gpt_sections_found = 0;
-	struct nvmeibt_disk_gpt		current_gpt;
-	struct nvmeibt_disk_gpt		json_gpt;
-	JSON_ASSIGN_AND_CALL_INIT();		// Declares: JSON_ARR, json_n, is_found, __json_iter, n_json_tokens
-
-	(void)disk_fd;		// Will be used in next step
+	struct mm_json_elem			*metadata_gpt_primary_elem = NULL;
+	const char					*device_path_in_json = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition = NULL;
+	struct nvmeibt_disk_gpt		current_main_gpt;
+	struct nvmeibt_disk_gpt		current_metadata_gpt;
+	struct nvmeibt_disk_gpt		json_main_gpt;
+	struct nvmeibt_disk_gpt		json_metadata_gpt;
+	int							n_main_changes = 0;
+	int							n_metadata_changes = 0;
 
 	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
-
+	fprintf(stdout, "Device: %s\n", config->device_path);
 	if (config->write_mode) {
-		fprintf(stdout, "Mode: WRITE (changes will be applied to disk)\n");
+		fprintf(stdout, "Mode: " COL_YELLOW "WRITE" COL_RESET " (changes will be applied to disk)\n");
 	} else {
-		fprintf(stdout, "Mode: DRY-RUN (showing changes, use --write to apply)\n");
+		fprintf(stdout, "Mode: DRY-RUN (use --write to apply)\n");
 	}
 	fprintf(stdout, "\n");
 
-	// Step 1: Read JSON file
+	/* Step 1: Read and parse JSON file */
 	json_fd = NNVMEIBT_OPEN_READ(trace_apply_json_open, config->apply_json_file, 1);
 	if (json_fd < 0) {
 		N_Ef(apply_json_open_failed, "Failed to open JSON file @STR @AUTO_ERRNO", config->apply_json_file);
@@ -3280,360 +3434,144 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	NNVMEIBT_CLOSE(trace_apply_json_close, json_fd);
 	json_fd = -1;
 
-	fprintf(stdout, "JSON file read successfully (%zu bytes)\n\n", nvmeibt_Str_strlen(json_content));
-
-	// Step 2: Parse JSON into key-value tree
 	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(json_content), nvmeibt_Str_strlen(json_content));
-	if (!json_root) {
+	if (!json_root || json_root->type != JSON_E_DICT) {
 		N_Ef(apply_json_parse_failed, "Failed to parse JSON file @STR", config->apply_json_file);
 		rv = -1;
 		goto out;
 	}
 
-	if (json_root->type != JSON_E_DICT) {
-		N_Ef(apply_json_not_dict, "JSON root is not a dictionary type=@INT", json_root->type);
+	/* Step 2: Validate device has required NVMesh structure */
+	if (validate_nvmesh_device_structure(disk_fd, config->pblk_size, config->pba_s, config->pba_hw_e,
+										  &current_main_gpt, &metadata_partition) < 0) {
 		rv = -1;
 		goto out;
 	}
 
-	fprintf(stdout, "JSON parsed successfully\n\n");
-
-	// Step 3: Extract and validate metadata using JSON macros
-	fprintf(stdout, "=== Validating JSON metadata ===\n");
-
-	dict = &json_root->dict;
-	JSON_LOOP_FOR_DICT(kv, dict) {
-		JSON_LOOP_ITERATION_START(apply_json_meta, kv->key);
-		JSON_ASSIGN_PLAIN(apply_dev_path, "device_path", device_path_in_json, kv->value->str);
-		JSON_ASSIGN_OPTIONAL(apply_mismatch_from_json, "_READONLY_mismatch_detected");
-		JSON_ASSIGN_OPTIONAL(apply_overlaps_from_json, "_READONLY_overlaps_detected");
-		JSON_ASSIGN_OPTIONAL(apply_timestamp, "backup_timestamp");
-		JSON_ASSIGN_PLAIN(apply_main_pri, "main_gpt_primary", main_gpt_primary_elem, kv->value);
-		JSON_ASSIGN_PLAIN(apply_main_alt, "main_gpt_alternate", main_gpt_alternate_elem, kv->value);
-		JSON_ASSIGN_OPTIONAL(apply_pmbr, "pmbr");
-		JSON_ASSIGN_OPTIONAL(apply_metadata, "metadata_gpt_primary");
-		JSON_ASSIGN_OPTIONAL(apply_metadata_alt, "metadata_gpt_alternate");
-		JSON_ASSIGN_OPTIONAL(apply_disk_md, "disk_metadata");
-		JSON_ASSIGN_OPTIONAL(apply_section1, "=== SECTION 1 ===");
-		JSON_ASSIGN_OPTIONAL(apply_section2, "=== SECTION 2 ===");
-		JSON_LOOP_ITERATION_END(apply_json_meta_end, kv->key);
-	}
-	JSON_ASSIGN_AND_CALL_VALIDATE(apply_json_meta_validate);
-
-	// Recalculate readonly flags from actual data (never trust JSON)
-	mismatch_detected = false;
-	overlaps_detected = false;
-
-	// Device path validation
-	if (device_path_in_json) {
-		fprintf(stdout, "Device in JSON: %s\n", device_path_in_json);
-		fprintf(stdout, "Device in config: %s\n", config->device_path);
-		if (strcmp(device_path_in_json, config->device_path) != 0) {
-			N_Ef(apply_json_device_mismatch, "Device path mismatch: JSON=@STR config=@STR",
-				 device_path_in_json, config->device_path);
-			rv = -1;
-			goto out;
-		}
-	}
-
-	fprintf(stdout, "\n" COL_GREEN "=== Metadata parsing: OK ===" COL_RESET "\n\n");
-
-	// Step 4: Parse GPT sections and prepare for apply
-	memset(&current_gpt, 0, sizeof(current_gpt));
-	memset(&json_gpt, 0, sizeof(json_gpt));
-	nvmeibt_strlcpy(current_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(current_gpt.main_or_metadata));
-	nvmeibt_strlcpy(json_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(json_gpt.main_or_metadata));
-	json_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
-
-	fprintf(stdout, "=== Parsing GPT sections ===\n");
-
-	// Determine which GPT section(s) to apply (already extracted in Step 3)
-	if (main_gpt_primary_elem) {
-		n_gpt_sections_found++;
-		fprintf(stdout, "Found: main_gpt_primary\n");
-	}
-	if (main_gpt_alternate_elem) {
-		n_gpt_sections_found++;
-		fprintf(stdout, "Found: main_gpt_alternate\n");
-	}
-
-	if (n_gpt_sections_found == 0) {
-		N_Ef(apply_json_no_gpt_sections, "No GPT sections found in JSON file=@STR", config->apply_json_file);
+	/* Step 3: Validate JSON has required sections (fail fast) */
+	if (validate_json_required_sections(json_root, config->apply_json_file,
+										 &main_gpt_primary_elem, &metadata_gpt_primary_elem) < 0) {
 		rv = -1;
 		goto out;
 	}
 
-	if (n_gpt_sections_found == 2) {
-		// Both primary and alternate present - this shouldn't happen if mismatch check passed
-		N_Wf(apply_json_both_sections, "JSON has both primary and alternate sections (will apply both) file=@STR",
-			 config->apply_json_file);
-	}
-
-	fprintf(stdout, "\n");
-
-	// Step 5: Read current GPT from disk
-	fprintf(stdout, "=== Reading current GPT from disk ===\n");
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_gpt,
-										  config->pba_s, config->pba_hw_e, false) < 0) {
-		N_Ef(apply_json_read_current_failed, "Failed to read current GPT from disk dev=@STR", config->device_path);
-		goto out;
-	}
-	fprintf(stdout, "Current GPT: n_entries=%d, first_usable=%lu, last_usable=%lu\n",
-			current_gpt.header.n_partition_entries,
-			current_gpt.header.first_usable_pba,
-			current_gpt.header.last_usable_pba);
-
-	// Step 6: Parse GPT from JSON
-	fprintf(stdout, "\n=== Parsing GPT from JSON ===\n");
-
-	// Parse the GPT section(s) - entries are already part of struct, no separate allocation needed
-	if (main_gpt_primary_elem) {
-		if (parse_gpt_from_json_section(&json_gpt, main_gpt_primary_elem, "main_gpt_primary") < 0) {
-			N_Ef(apply_json_parse_primary_failed, "Failed to parse main_gpt_primary from JSON");
-			goto out;
-		}
-	} else if (main_gpt_alternate_elem) {
-		if (parse_gpt_from_json_section(&json_gpt, main_gpt_alternate_elem, "main_gpt_alternate") < 0) {
-			N_Ef(apply_json_parse_alternate_failed, "Failed to parse main_gpt_alternate from JSON");
-			goto out;
-		}
-	}
-
-	// Step 6.5: Recalculate READONLY flags from actual JSON data
-	// Never trust readonly flags from JSON - always recalculate for safety
-	fprintf(stdout, "\n=== Recalculating Safety Flags ===\n");
-
-	// Recalculate mismatch detection (if both copies present in JSON)
-	if (main_gpt_primary_elem && main_gpt_alternate_elem) {
-		struct nvmeibt_disk_gpt		json_gpt_alternate;
-		BOOL						is_header_mismatch;
-		BOOL						is_entries_mismatch;
-		fprintf(stdout, "Both primary and alternate present in JSON\n");
-		fprintf(stdout, "Parsing alternate copy for comparison...\n");
-
-		// Parse alternate section
-		memset(&json_gpt_alternate, 0, sizeof(json_gpt_alternate));
-		nvmeibt_strlcpy(json_gpt_alternate.main_or_metadata, MAIN_GPT_NAME, sizeof(json_gpt_alternate.main_or_metadata));
-		json_gpt_alternate.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
-
-		if (parse_gpt_from_json_section(&json_gpt_alternate, main_gpt_alternate_elem, "main_gpt_alternate") < 0) {
-			N_Ef(apply_json_parse_alt_for_mismatch, "Failed to parse main_gpt_alternate from JSON");
-			goto out;
-		}
-
-		// Compare headers
-		is_header_mismatch = !nvmeibt_disk_metadata_are_gpt_headers_equal(&json_gpt.header, &json_gpt_alternate.header);
-
-		// Compare entries
-		is_entries_mismatch = !nvmeibt_disk_metadata_are_gpt_entries_equal(
-			json_gpt.entries, json_gpt_alternate.entries,
-			json_gpt.header.n_partition_entries * sizeof(struct nvmeibt_disk_gpt_partition_entry));
-
-		mismatch_detected = is_header_mismatch || is_entries_mismatch;
-
-		if (mismatch_detected) {
-			fprintf(stdout, COL_YELLOW "Mismatch detected between primary and alternate in JSON" COL_RESET "\n");
-		} else {
-			fprintf(stdout, COL_GREEN "Primary and alternate are identical in JSON" COL_RESET "\n");
-		}
-	}
-
-	// Recalculate overlap detection from parsed entries
-	overlaps_detected = (detect_overlaps(json_gpt.entries, json_gpt.max_n_entries) > 0);
-	if (overlaps_detected) {
-		fprintf(stdout, COL_YELLOW "Overlaps detected in JSON entries" COL_RESET "\n");
-	}
-
-	fprintf(stdout, "Recalculation: mismatch=%s, overlaps=%s\n",
-			mismatch_detected ? "true" : "false",
-			overlaps_detected ? "true" : "false");
-
-	// Step 6.6: Block if safety issues detected
-	if (mismatch_detected) {
-		N_Ef(apply_json_mismatch_block, "Mismatch detected after recalculation, blocking apply. file=@STR",
-			 config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "\nERROR: JSON contains mismatched primary and alternate copies!" COL_RESET "\n");
-		fprintf(stderr, "  Re-export with --gpt-copy=primary or --gpt-copy=alternate\n");
+	/* Step 4: Validate device path matches */
+	device_path_in_json = json_get_dict_str(json_root, "device_path", NULL);
+	if (device_path_in_json && strcmp(device_path_in_json, config->device_path) != 0) {
+		N_Ef(apply_json_device_mismatch, "Device path mismatch: JSON=@STR config=@STR",
+			 device_path_in_json, config->device_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device path in JSON (%s) != device (%s)" COL_RESET "\n",
+				device_path_in_json, config->device_path);
 		rv = -1;
 		goto out;
 	}
 
-	if (overlaps_detected) {
-		N_Ef(apply_json_overlap_block, "Overlaps detected after recalculation, blocking apply. file=@STR",
-			 config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "\nERROR: JSON contains overlapping partitions!" COL_RESET "\n");
-		fprintf(stderr, "  Fix overlaps in JSON before applying\n");
+	/* Step 5: Prepare Main GPT from JSON */
+	if (prepare_gpt_from_json(&json_main_gpt, main_gpt_primary_elem, MAIN_GPT_NAME, LARGE_GPT_MAX_NUM_GPT_ENTRIES) < 0) {
 		rv = -1;
 		goto out;
 	}
 
-	fprintf(stdout, "\n" COL_GREEN "=== Safety checks: PASSED ===" COL_RESET "\n\n");
-
-	// Step 7: Safety check - GPT size compatibility
-	fprintf(stdout, "\n=== Safety Check: GPT Size Compatibility ===\n");
-	fprintf(stdout, "Disk GPT: max_n_entries=%d (n_partition_entries=%d)\n",
-			current_gpt.max_n_entries, current_gpt.header.n_partition_entries);
-	fprintf(stdout, "JSON GPT: max_n_entries=%d (n_partition_entries=%d)\n",
-			json_gpt.max_n_entries, json_gpt.header.n_partition_entries);
-
-	if (current_gpt.max_n_entries != json_gpt.max_n_entries) {
-		N_Ef(apply_gpt_size_mismatch, "GPT size mismatch BLOCKED: JSON=@INT disk=@INT JSON_n_part=@INT disk_n_part=@INT file=@STR dev=@STR",
-			 json_gpt.max_n_entries, current_gpt.max_n_entries,
-			 json_gpt.header.n_partition_entries, current_gpt.header.n_partition_entries,
+	/* Check GPT size compatibility */
+	if (current_main_gpt.max_n_entries != json_main_gpt.max_n_entries) {
+		N_Ef(apply_gpt_size_mismatch, "GPT size mismatch: JSON=@INT disk=@INT file=@STR dev=@STR",
+			 json_main_gpt.max_n_entries, current_main_gpt.max_n_entries,
 			 config->apply_json_file, config->device_path);
-		fprintf(stderr, COL_RED_BOLD "\nERROR: Cannot apply GPT to different size disk! Non-NVMesh disks?" COL_RESET "\n");
-		fprintf(stderr, "  JSON GPT: %d entries\n", json_gpt.max_n_entries);
-		fprintf(stderr, "  Current disk: %d entries\n", current_gpt.max_n_entries);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot apply GPT of different size (JSON=%d, disk=%d)" COL_RESET "\n",
+				json_main_gpt.max_n_entries, current_main_gpt.max_n_entries);
 		rv = -1;
 		goto out;
 	}
-	fprintf(stdout, COL_GREEN "GPT size compatible: %d entries" COL_RESET "\n", current_gpt.max_n_entries);
 
-	// Step 8: Compare and show diff
-	fprintf(stdout, "\n=== Comparing GPT Changes ===\n");
-	{
-		int i;
-		int n_additions = 0;
-		int n_deletions = 0;
-		int n_modifications = 0;
-		int n_unchanged = 0;
-
-		// Compare each entry slot
-		for (i = 0; i < current_gpt.max_n_entries; i++) {
-			BOOL current_in_use = nvmeibt_disk_metadata_is_gpt_entry_in_use(&current_gpt.entries[i]);
-			BOOL json_in_use = nvmeibt_disk_metadata_is_gpt_entry_in_use(&json_gpt.entries[i]);
-
-			if (!current_in_use && json_in_use) {
-				// Addition
-				show_entry_diff("ADD", i, NULL, &json_gpt.entries[i]);
-				n_additions++;
-			} else if (current_in_use && !json_in_use) {
-				// Deletion
-				show_entry_diff("DELETE", i, &current_gpt.entries[i], NULL);
-				n_deletions++;
-			} else if (current_in_use && json_in_use) {
-				// Check if modified
-				if (!entries_are_equal(&current_gpt.entries[i], &json_gpt.entries[i])) {
-					show_entry_diff("MODIFY", i, &current_gpt.entries[i], &json_gpt.entries[i]);
-					n_modifications++;
-				} else {
-					n_unchanged++;
-				}
-			}
-		}
-
-		fprintf(stdout, "\n" COL_WHITE_BOLD "Summary:" COL_RESET "\n");
-		fprintf(stdout, "  Additions:     %d\n", n_additions);
-		fprintf(stdout, "  Deletions:     %d\n", n_deletions);
-		fprintf(stdout, "  Modifications: %d\n", n_modifications);
-		fprintf(stdout, "  Unchanged:     %d\n", n_unchanged);
-
-		if (n_additions + n_deletions + n_modifications == 0) {
-			fprintf(stdout, "\n" COL_GREEN "No changes detected - JSON matches disk" COL_RESET "\n");
-		}
+	/* Check for overlaps in JSON */
+	if (detect_overlaps(json_main_gpt.entries, json_main_gpt.max_n_entries) > 0) {
+		N_Ef(apply_json_overlap_block, "Overlaps detected in JSON, blocking apply. file=@STR", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON contains overlapping partitions!" COL_RESET "\n");
+		rv = -1;
+		goto out;
 	}
+
+	/* Step 6: Prepare Metadata GPT from JSON */
+	memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
+	nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
+
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt,
+										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+		N_Ef(apply_read_metadata_gpt_failed, "Failed to read current Metadata GPT dev=@STR", config->device_path);
+		rv = -1;
+		goto out;
+	}
+
+	if (prepare_gpt_from_json(&json_metadata_gpt, metadata_gpt_primary_elem, METADATA_GPT_NAME, MAX_NUM_GPT_ENTRIES) < 0) {
+		rv = -1;
+		goto out;
+	}
+
+	/* Step 7: Compare and show differences */
+	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
 	fprintf(stdout, "\n");
+	n_metadata_changes = compare_and_show_gpt_diff(&current_metadata_gpt, &json_metadata_gpt, "Metadata GPT");
 
-	// Step 9: Apply changes if in write mode
+	/* Step 8: Write if in write mode */
 	if (config->write_mode) {
-		uint32_t old_header_crc = current_gpt.header.header_crc32;
-		uint32_t old_entries_crc = current_gpt.header.partition_entry_array_crc32;
+		fprintf(stdout, "\n" COL_YELLOW "=== Writing Changes to Disk ===" COL_RESET "\n");
 
-		fprintf(stdout, "=== Applying Changes ===\n");
+		/*
+		 * CRITICAL: Copy JSON data into current_main_gpt (which has correct location fields)
+		 * JSON doesn't have location fields (my_pba, alternate_pba, partition_entry_pba)
+		 * See gpt-util-implementation-notes.md Critical Caveat section
+		 */
+		memcpy(current_main_gpt.entries, json_main_gpt.entries, sizeof(current_main_gpt.entries));
+		current_main_gpt.header.disk_obj_uuid = json_main_gpt.header.disk_obj_uuid;
+		current_main_gpt.header.first_usable_pba = json_main_gpt.header.first_usable_pba;
+		current_main_gpt.header.last_usable_pba = json_main_gpt.header.last_usable_pba;
+		current_main_gpt.header.n_partition_entries = json_main_gpt.header.n_partition_entries;
+		/* Location fields (my_pba, alternate_pba, partition_entry_pba) preserved from current_main_gpt */
 
-		// Log before state
-		N_IMf(apply_gpt_before, "Applying GPT changes: dev=@STR CRC_before: hdr=@CRC ent=@CRC",
-			  config->device_path, old_header_crc, old_entries_crc);
+		/* Write Main GPT - Audit trail log */
+		N_IMf(apply_main_gpt_write, "Applying Main GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
+			  config->device_path, config->apply_json_file, n_main_changes,
+			  json_main_gpt.header.header_crc32, json_main_gpt.header.partition_entry_array_crc32);
 
-		// Copy JSON entries to current GPT structure
-		memcpy(current_gpt.entries, json_gpt.entries, sizeof(current_gpt.entries));
-
-		// Copy user-editable header fields from JSON
-		// Note: Location fields (my_pba, alternate_pba, partition_entry_pba) are NOT copied
-		// They must be preserved from current_gpt as they're disk-specific and auto-calculated
-		current_gpt.header.disk_obj_uuid = json_gpt.header.disk_obj_uuid;
-		current_gpt.header.first_usable_pba = json_gpt.header.first_usable_pba;
-		current_gpt.header.last_usable_pba = json_gpt.header.last_usable_pba;
-		current_gpt.header.n_partition_entries = json_gpt.header.n_partition_entries;
-
-		// Write to disk (this will recalculate CRCs automatically)
-		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_gpt, false) < 0) {
-			N_Ef(apply_write_failed, "Failed to write GPT dev=@STR", config->device_path);
-			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write changes to disk" COL_RESET "\n");
+		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_main_gpt, false) < 0) {
+			N_Ef(apply_write_failed, "Failed to write Main GPT dev=@STR", config->device_path);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write Main GPT to disk" COL_RESET "\n");
 			rv = -1;
 			goto out;
 		}
 
-		// Log after state (CRCs were recalculated by store_gpt)
-		N_IMf(apply_gpt_success, "GPT changes applied: dev=@STR CRC_after: hdr=@CRC ent=@CRC",
-			  config->device_path, current_gpt.header.header_crc32, current_gpt.header.partition_entry_array_crc32);
+		/* Copy JSON data into current_metadata_gpt (same reason as above) */
+		memcpy(current_metadata_gpt.entries, json_metadata_gpt.entries, sizeof(current_metadata_gpt.entries));
+		current_metadata_gpt.header.disk_obj_uuid = json_metadata_gpt.header.disk_obj_uuid;
+		current_metadata_gpt.header.first_usable_pba = json_metadata_gpt.header.first_usable_pba;
+		current_metadata_gpt.header.last_usable_pba = json_metadata_gpt.header.last_usable_pba;
+		current_metadata_gpt.header.n_partition_entries = json_metadata_gpt.header.n_partition_entries;
 
-		// Step 10: Apply Metadata GPT if present in JSON
-		{
-			struct mm_json_elem *metadata_gpt_primary_elem = NULL;
-			const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
-			struct nvmeibt_disk_gpt current_metadata_gpt;
-			struct nvmeibt_disk_gpt json_metadata_gpt;
-			int i;
+		/* Write Metadata GPT - Audit trail log */
+		N_IMf(apply_metadata_gpt_write, "Applying Metadata GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
+			  config->device_path, config->apply_json_file, n_metadata_changes,
+			  json_metadata_gpt.header.header_crc32, json_metadata_gpt.header.partition_entry_array_crc32);
 
-			// Check if JSON has metadata GPT section
-			for (i = 0; i < json_root->dict.len; i++) {
-				if (strcmp(json_root->dict.elements[i].key, "metadata_gpt_primary") == 0) {
-					metadata_gpt_primary_elem = json_root->dict.elements[i].value;
-					break;
-				}
-			}
-
-			if (metadata_gpt_primary_elem) {
-				// Get metadata partition from newly written Main GPT
-				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&current_gpt);
-				if (!metadata_partition) {
-					N_Wf(apply_no_metadata_partition, "JSON has metadata_gpt but disk has no metadata partition, skipping");
-				} else {
-					// Read current Metadata GPT from disk
-					memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
-					nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
-
-					if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt,
-														  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
-						N_Wf(apply_read_metadata_gpt_failed, "Failed to read current Metadata GPT, skipping");
-					} else {
-						// Parse Metadata GPT from JSON
-						memset(&json_metadata_gpt, 0, sizeof(json_metadata_gpt));
-						nvmeibt_strlcpy(json_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(json_metadata_gpt.main_or_metadata));
-						json_metadata_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
-
-						if (parse_gpt_from_json_section(&json_metadata_gpt, metadata_gpt_primary_elem, "metadata_gpt_primary") < 0) {
-							N_Wf(apply_parse_metadata_gpt_failed, "Failed to parse metadata_gpt_primary from JSON, skipping");
-						} else {
-							// Copy JSON metadata GPT to current structure
-							memcpy(current_metadata_gpt.entries, json_metadata_gpt.entries, sizeof(current_metadata_gpt.entries));
-
-							// Copy user-editable header fields from JSON
-							// Location fields (my_pba, alternate_pba, partition_entry_pba) preserved from current_metadata_gpt
-							current_metadata_gpt.header.disk_obj_uuid = json_metadata_gpt.header.disk_obj_uuid;
-							current_metadata_gpt.header.first_usable_pba = json_metadata_gpt.header.first_usable_pba;
-							current_metadata_gpt.header.last_usable_pba = json_metadata_gpt.header.last_usable_pba;
-							current_metadata_gpt.header.n_partition_entries = json_metadata_gpt.header.n_partition_entries;
-
-							// Write Metadata GPT
-							if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt, false) < 0) {
-								N_Ef(apply_write_metadata_gpt_failed, "Failed to write Metadata GPT dev=@STR", config->device_path);
-							} else {
-								N_IMf(apply_metadata_gpt_success, "Metadata GPT applied: dev=@STR", config->device_path);
-							}
-						}
-					}
-				}
-			}
+		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt, false) < 0) {
+			N_Ef(apply_write_metadata_gpt_failed, "Failed to write Metadata GPT dev=@STR", config->device_path);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write Metadata GPT to disk" COL_RESET "\n");
+			rv = -1;
+			goto out;
 		}
 
-		fprintf(stdout, "\n" COL_GREEN "=== Changes written successfully ===" COL_RESET "\n");
-		fprintf(stdout, "GPT updated on disk: %s\n", config->device_path);
+		fprintf(stdout, "\n" COL_GREEN "=== GPT Successfully Updated ===" COL_RESET "\n");
+		fprintf(stdout, "Device: %s\n", config->device_path);
+		fprintf(stdout, "  Main GPT:     %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
+		fprintf(stdout, "  Metadata GPT: %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
 	} else {
-		fprintf(stdout, COL_GREEN "=== Dry-run complete ===" COL_RESET "\n");
-		fprintf(stdout, "No changes written to disk.\n");
-		fprintf(stdout, COL_YELLOW "Use --write flag to actually apply changes." COL_RESET "\n");
+		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
+		if (n_main_changes + n_metadata_changes > 0) {
+			fprintf(stdout, COL_YELLOW "Use --write flag to apply %d change%s to disk." COL_RESET "\n",
+					n_main_changes + n_metadata_changes,
+					(n_main_changes + n_metadata_changes) == 1 ? "" : "s");
+		} else {
+			fprintf(stdout, "No GPT changes detected - JSON matches disk.\n");
+		}
 	}
 
 	rv = 0;
