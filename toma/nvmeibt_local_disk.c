@@ -1757,9 +1757,8 @@ void nvmeibt_local_disk_launch_local_disk_periodic_reread_smart_counters_if_need
 	periodic_reread_smart_counters_task->rv = -1;
 	periodic_reread_smart_counters_task->is_stock_disk = is_stock_disk;
 
-	rv = (is_stock_disk ?
-		  stock_local_disk_specific_add_work_with_sync(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk), &(periodic_reread_smart_counters_task->wq_entry)) :
-		  local_disk_specific_add_work_with_sync(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk), &(periodic_reread_smart_counters_task->wq_entry)));
+	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk),
+																&(periodic_reread_smart_counters_task->wq_entry), is_stock_disk);
 	if (rv != 0) {
 		N_Ef(usnej2n, "Unable to add update log task to WQ @STR disk=@STR", (is_stock_disk ? "stock" : ""), nvmeibt_local_disk_display(local_disk));
 		goto free_resources;
@@ -2963,5 +2962,4 @@ void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk)
 	}
 	NFOUT;
 }
-
 

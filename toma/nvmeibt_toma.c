@@ -1267,7 +1267,8 @@ static void local_disk_wq_entry_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-static int local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_toma_local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id,
+											  const char *ld_display, struct nvmeibt_wq_entry *e)
 {
 	int rv = 0;
 	struct local_disk_wq_hash_ctx *specific_disk_ctx;
@@ -1303,16 +1304,6 @@ static int local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash
 out:
 	NFOUT;
 	return rv;
-}
-
-int nvmeibt_toma_stock_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
-{
-	return local_disk_specific_add_work(stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
-}
-
-int nvmeibt_toma_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
-{
-	return local_disk_specific_add_work(nvmesh_ldisks_wq_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
 }
 
 /**
@@ -1364,32 +1355,30 @@ void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldis
 	NFOUT;
 }
 
-static struct local_disk_wq_entry_wrapper_entry* prepare_synced_entry(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
+static struct local_disk_wq_entry_wrapper_entry* prepare_entry_with_ldisk_last_CHANGE_no(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
-	struct local_disk_wq_entry_wrapper_entry *entry_wrapper = NULL;
+	struct local_disk_wq_entry_wrapper_entry	*entry_wrapper = NULL;
+	uint32_t									local_disk_last_CHANGE_no = local_disk->CHANGE_EVENT_counters.last_CHANGE_no;	// Freeze the value
 
 	if (!e->last_CHANGE_no) {
 		// We need to generate the version with which this execution starts, this is the first (and possibly only) link in a disk
 		// specific WQ execution
-		e->last_CHANGE_no = local_disk->CHANGE_EVENT_counters.last_CHANGE_no;
+		e->last_CHANGE_no = local_disk_last_CHANGE_no;
 		N_Tf(s8l30l5, "Initializing execution of wq for disk=@STR with last_CHANGE_no=@INT",
 			nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no);
 	}
 
 	// We check the version with which the WQ is submitted, if the disk version is different, we can't execute it,
 	// since this means that probably the WQ is a part of a chain that needs to be cut-off.
-	if (e->last_CHANGE_no != local_disk->CHANGE_EVENT_counters.last_CHANGE_no) {
+	if (e->last_CHANGE_no != local_disk_last_CHANGE_no) {
 		N_Wf(bi4n6sg, "Unable to add work for specific disk=@STR because wq_last_CHANGE_no=@INT != last_CHANGE_no=@INT",
-			 nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no, local_disk->CHANGE_EVENT_counters.last_CHANGE_no);
+			 nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no, local_disk_last_CHANGE_no);
 		goto free_resources;
 	}
 
 	N_Tf(d84k50j, "Starting execution of wq for disk=@STR with last_CHANGE_no=@INT", nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no);
 
-	// Create wrapper entry that performs all the synchronization of local_disk object with other WQ's and
-	// if possible executes the original wq_entry
-	entry_wrapper =
-		NNVMEIBT_BM_CALLOC(trace_3_toma_prepare_synced_entry, sizeof(*entry_wrapper));
+	entry_wrapper = NNVMEIBT_BM_CALLOC(tvfhjwe, sizeof(*entry_wrapper));
 	entry_wrapper->wrapped_entry = e;
 	/* The active version is snapshotted - at THIS moment in time, while the current
 	   can change, as a result of DISK_CHANGE events, hence if the current changes,
@@ -1413,56 +1402,31 @@ out:
 	return entry_wrapper;
 }
 
-static void free_synced_entry(struct local_disk_wq_entry_wrapper_entry *entry_wrapper)
+static void free_work_with_ldisk_last_CHANGE_no_entry(struct local_disk_wq_entry_wrapper_entry *entry_wrapper)
 {
-	NNVMEIBT_BM_FREE(t1_free_synced_entry, entry_wrapper);
+	NNVMEIBT_BM_FREE(cvvgs82, entry_wrapper);
 }
 
-int stock_local_disk_specific_add_work_with_sync(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
+														   bool is_stock_ldisk)
 {
 	int rv = 0;
 	struct nvmeibt_local_disk *local_disk = NULL;
 	struct local_disk_wq_entry_wrapper_entry *entry_wrapper = NULL;
 
 	NFIN;
-	N_Tf(udmdhwr, "Adding work for stock_disk=@STR", ld_display);
+	N_Tf(whcia9g, "Adding work for disk=@STR is_stock=@BOOL", ld_display, is_stock_ldisk);
 
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
-	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
-		N_Wf(vgshjk3, "Unable to add work for specific stock_disk=@STR because the disk is not found neither from config nor from stock", ld_display);
-		rv = -1;
-		goto out;
+	if (!is_stock_ldisk) {
+		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
+		if (!local_disk) {
+			N_Tf(d4nk1sp, "couldn't find local_disk=@STR, trying in stock_local_disks", ld_display);
+		}
 	}
-
-	if ((entry_wrapper = prepare_synced_entry(local_disk, e)) == NULL) {
-		rv = -1;
-		goto out;
-	}
-
-	rv = nvmeibt_toma_stock_local_disk_specific_add_work(ldisk_id, ld_display, &entry_wrapper->wq_entry);
-	if (rv < 0)
-		free_synced_entry(entry_wrapper);
-
-out:
-	NFOUT;
-	return rv;
-}
-
-int local_disk_specific_add_work_with_sync(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
-{
-	int rv = 0;
-	struct nvmeibt_local_disk *local_disk = NULL;
-	struct local_disk_wq_entry_wrapper_entry *entry_wrapper = NULL;
-
-	NFIN;
-	N_Tf(whcia9g, "Adding work for disk=@STR", ld_display);
-
-	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (!local_disk) {
-		N_Tf(d4nk1sp, "couldn't find local_disk=@STR, trying in stock_local_disks", ld_display);
 		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
 		if (!local_disk) {
-			N_Wf(vdxgaj2, "Unable to add work for specific disk=@STR because the disk is not found neither from config nor from stock", ld_display);
+			N_Wf(vdxgaj2, "stock disk=@STR not found. Unable to add work.", ld_display);
 			rv = -1;
 			goto out;
 		}
@@ -1472,15 +1436,14 @@ int local_disk_specific_add_work_with_sync(const struct nvmeibt_ascii_uuid *ldis
 		rv = -1;
 		goto out;
 	}
-	if ((entry_wrapper = prepare_synced_entry(local_disk, e)) == NULL) {
+	if ((entry_wrapper = prepare_entry_with_ldisk_last_CHANGE_no(local_disk, e)) == NULL) {
 		rv = -1;
 		goto out;
 	}
-
-	rv = nvmeibt_toma_local_disk_specific_add_work(ldisk_id, ld_display, &entry_wrapper->wq_entry);
+	rv = nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, nvmeibt_local_disk_UUID(local_disk),
+																  nvmeibt_local_disk_display(local_disk), &entry_wrapper->wq_entry);
 	if (rv < 0)
-		free_synced_entry(entry_wrapper);
-
+		free_work_with_ldisk_last_CHANGE_no_entry(entry_wrapper);
 out:
 	NFOUT;
 	return rv;
@@ -1492,7 +1455,7 @@ int nvmeibt_registrant_disconnect_add_work(const struct nvmeibt_ascii_uuid *ldis
 	NFIN;
 
 	/* registrant_disconnect events should not be skipped due to version mismatch */
-	rv = nvmeibt_toma_local_disk_specific_add_work(ldisk_id, ld_display, e);
+	rv = nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
 
 	NFOUT;
 	return rv;
@@ -1504,7 +1467,7 @@ int nvmeibt_seg_metadata_ctrl_save_add_work(const struct nvmeibt_ascii_uuid *ldi
 
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_sync(ldisk_id, ld_display, e);
+	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -1515,7 +1478,7 @@ int nvmeibt_toma_local_disk_zero_iter_add_work(const struct nvmeibt_ascii_uuid *
 	int rv;
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_sync(ldisk_id, ld_display, e);
+	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -1526,7 +1489,7 @@ int nvmeibt_toma_restore_disk_structures_add_work(const struct nvmeibt_ascii_uui
 	int rv;
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_sync(ldisk_id, ld_display, e);
+	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -1537,7 +1500,7 @@ int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk
 	int rv;
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_sync(ldisk_id, ld_display, e);
+	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -2402,7 +2365,9 @@ void nvmeibt_toma_process_waiting_udev_events(void)
 					udev_event_task->udev_event_info = udev_event_info;
 
 					// put this message to a queue for the given disk parameters to be executed when it's time comes. (when there are no actives left.)
-					if (nvmeibt_toma_stock_local_disk_specific_add_work(nvmeibt_local_disk_UUID(stock_local_disk), nvmeibt_local_disk_display(stock_local_disk), &udev_event_task->wq_entry) != 0) {
+					if (nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str,
+																  nvmeibt_local_disk_UUID(stock_local_disk),
+																  nvmeibt_local_disk_display(stock_local_disk), &udev_event_task->wq_entry) != 0) {
 						N_Ef(zvq93kq, "Unable to add stock event for disk=@STR to WQ", nvmeibt_local_disk_display(stock_local_disk));
 						NNVMEIBT_BM_FREE(t_fq_toma, udev_event_task);
 						nvmeibt_abort(ES_FATAL);
