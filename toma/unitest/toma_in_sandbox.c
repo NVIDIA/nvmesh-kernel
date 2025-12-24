@@ -181,7 +181,8 @@ static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags)
 
 static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags) {
 	static int n_rpcs_sent = 0;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
-	static const char* cmds[] = {"simulate dump-clnt-hash 20\n" ,"simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n", "status kafka\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
+	static const char* cmds[] = { "simulate dump_status\n", "simulate reread_conf\n",
+		"simulate dump-clnt-hash 20\n", "simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n", "status\n", "status server_csvs\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
 	const bool only_checking = (flags & MSG_PEEK);
 	(void)fd;
 	(void)offset;
@@ -200,10 +201,10 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags)
 }
 
 static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	const int print_n_bytes = min(n, (size_t)64);
+	const int print_n_bytes = min(n, (size_t)640);
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON((fd < 2) || (n == 0)); (void)flags;
-	SANDBOX_PRINT("RPC reply %u[b]: " COL_PURPL "%.*s\n" COL_RESET, (unsigned)n, print_n_bytes, (const char*)buf);
+	SANDBOX_PRINT("RPC reply %u[b]: " COL_YELLOW "%.*s\n" COL_RESET, (unsigned)n, print_n_bytes, (const char*)buf);
 	return n;
 }
 
@@ -765,11 +766,11 @@ int init_signal_handling(const char *exe_name) {
 	return __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
 }
 
-void handle_sig_fd(int signals_fd, void (*sig_handler)(int32_t n, uint64_t addr)) {
+void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
 	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(signals_fd);
 	struct TSB_signals_queue *tsb_q = container_of(s->other_side, struct TSB_signals_queue, o);
 	if (tsb_q->sig) {
-		sig_handler(tsb_q->sig, 0x12345);
+		fn(tsb_q->sig, 0x12345);
 	}
 }
 
@@ -915,11 +916,22 @@ void rd_kafka_consume_stop(rd_kafka_topic_t *kt, int32_t partition) {
 	kt->is_active = false;
 }
 
+static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
+	BUG_ON(offset <= 0);
+	kt->commited_offset = offset;			// Start from some non zero number
+	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
+}
+
 rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset) {
 	kt->is_active = true;
 	__rd_kafka_topic_verify_valid(kt, partition);
-	if (offset != RD_KAFKA_OFFSET_STORED)
-		BUG_ON(offset != kt->cur_offset);		// User should consume messages from the start
+	if ((offset == RD_KAFKA_OFFSET_STORED) || (offset == RD_KAFKA_OFFSET_BEGINNING)) {
+		// Tome relies on Kafka simulator
+	} else {
+		BUG_ON(offset < kt->cur_offset);		// Toma should consume messages from the start or from its persistency
+		if (offset > kt->cur_offset)
+			__reset_offset(kt, offset);			// Our kafka simulator does not have persistency over destroy and reinit, so just use what toma said
+	}
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -943,8 +955,7 @@ static void __rd_kafka_topic_init(rd_kafka_topic_t *kt, const char* name, rd_kaf
 	BUG_ON((kt->name != NULL) || (kt->is_active));
 	kt->name = strdup(name);
 	kt->conf = conf;
-	kt->commited_offset = 6;			// Start from some non zero number
-	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
+	__reset_offset(kt, 6);
 	kt->partition = 0;
 	kt->is_active = false;
 }
@@ -961,10 +972,10 @@ void                rd_kafka_flush(        rd_kafka_t* me, int x) { (void)me; (v
 rd_kafka_resp_err_t rd_kafka_unsubscribe(  rd_kafka_t* me) { (void)me;return RD_KAFKA_RESP_ERR_NO_ERROR; }
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking) { (void)me; (void)is_blocking; return 0; }
 rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async) {
-	const int last_consumed = (pl->elems[0].offset - 1);
+	const int64_t last_consumed = (pl->elems[0].offset - 1);
 	BUG_ON(me != pl->elems[0].k);
-	BUG_ON((last_consumed < me->topic.commited_offset) || (last_consumed >= me->topic.cur_offset));		// Todo: Maybe off by 1 here
-	me->topic.commited_offset = last_consumed;
+	BUG_ON((last_consumed >= me->topic.cur_offset));		// Todo: Maybe off by 1 here
+	me->topic.commited_offset = max(last_consumed, me->topic.commited_offset);
 	//SANDBOX_PRINT_TMP("%s: Commit %lu\n", me->topic.name, me->topic.commited_offset);
 	(void)is_async;
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -987,7 +998,7 @@ rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags) { (void)rk;
 
 void rd_kafka_destroy(rd_kafka_t* k) {
 	struct kafka_simulator_t *ks = &sys->kafka_simu;
-	int i = ks->n_obj;
+	int i;
 	for (i = 0; i < ks->n_obj; i++) {
 		if (ks->obj[i] == k) {
 			free(k->name);
@@ -995,6 +1006,8 @@ void rd_kafka_destroy(rd_kafka_t* k) {
 			rd_kafka_topic_destroy(&k->topic);
 			free(k);
 			ks->obj[i] = NULL;
+			while ((ks->n_obj > 0) && (ks->obj[ks->n_obj-1] == NULL))		// Shrink the array
+				ks->n_obj--;
 			return;
 		}
 	}
@@ -1007,7 +1020,7 @@ static bool is_kafka_cp_used(const rd_kafka_t* o) {
 
 static rd_kafka_t* kafka_simu_find_next_unused(struct kafka_simulator_t *ks) {
 	rd_kafka_t *k;
-	int i = ks->n_obj;
+	int i;
 	for (i = 0; i < ks->n_obj; i++) {		// Reuse deleted
 		if (ks->obj[i] == NULL)
 			ks->obj[i] = calloc(1, sizeof(*k));
