@@ -48,5 +48,8 @@ void unlink_list_decrement_open_files(unlink_list_t *list);
 int unlink_list_try_remove_log_file(const char *dir, const char *name, 
 	unlink_candidate_t *cand, const char *subdir, const char *ext);
 
+/* Parse log filename to extract CPU and log ID (format: name + cpu + "." + id) */
+int unlink_list_parse_log_filename(const char *fname, const char *tname, int *cpu, int *idx, int max_cpus);
+
 #endif /* UNLINK_LIST_H */
 

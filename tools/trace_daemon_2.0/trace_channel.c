@@ -126,57 +126,11 @@ void destroy_trace_channel(trace_channel_t* self)
 	}
 }
 
-/**
- * Utility function
- * Check whether string @str starts with string @pre
- */
-int _starts_with(const char* pre, const char* str)
-{
-	size_t lenpre = strlen(pre), lenstr = strlen(str);
-	return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
-}
 
 /**
- * Utility function
- * Extract cpu and log id from filename
+ * Scan directory and populate unlink list with existing log files
  */
-int _parse_log_filename(const char* fname, const char* tname, int* cpu, int* idx)
-{
-	if(!_starts_with(tname, fname))
-		return 0;
-	else
-	{
-		size_t lentname = strlen(tname);
-		*cpu = 0;
-		*idx = 0;
-		const char* sub = fname + lentname;
-		while(*sub >= '0' && *sub <= '9')
-		{
-			*cpu = *cpu * 10 + *sub - '0';
-			++sub;
-		}
-		if(*sub == '\0')
-			return 0;
-		if(*cpu >= MAX_CPUS)
-			return 0;
-		++sub;
-		while(*sub >= '0' && *sub <= '9')
-		{
-			*idx = *idx * 10 + *sub - '0';
-			++sub;
-		}
-		if(*sub != '\0')
-			return 0;
-		++idx;
-		return 1;
-	}
-}
-
-/**
- * Find the first log id already existing on disk for each cpu in channel, and update workers
- * accordingly
- */
-int _get_start_log_id(trace_channel_t* self)
+static int _scan_directory_for_logs(trace_channel_t* self)
 {
 	DIR* dp;
 	struct dirent* ep;
@@ -187,7 +141,7 @@ int _get_start_log_id(trace_channel_t* self)
 		while((ep = readdir(dp)) != NULL)
 		{
 			int cpu, idx;
-			if(_parse_log_filename(ep->d_name, self->meta.name, &cpu, &idx))
+			if(unlink_list_parse_log_filename(ep->d_name, self->meta.name, &cpu, &idx, MAX_CPUS))
 			{
 				if(self->priv.per_cpu[cpu])
 				{
@@ -201,7 +155,6 @@ int _get_start_log_id(trace_channel_t* self)
 					else
 						ts = st.st_mtime;
 
-					add_existing_log_id(self->priv.per_cpu[cpu], idx);
 					unlink_list_add(&self->priv.unlink_list, cpu, idx, ts);
 				}
 			}
@@ -213,6 +166,29 @@ int _get_start_log_id(trace_channel_t* self)
 		_error("Listing working dir");
 		/* We can continue in this situation, just report error and continue */
 	}
+
+	return 0;
+}
+
+/**
+ * Iterate unlink list and update workers with existing log IDs
+ */
+static int _update_workers_from_unlink_list(trace_channel_t* self)
+{
+	unlink_candidate_t *cand;
+	pthread_mutex_t *lock = &self->priv.unlink_list.lock;
+
+	pthread_mutex_lock(lock);
+	cand = self->priv.unlink_list.head;
+	while(cand)
+	{
+		if(self->priv.per_cpu[cand->cpu])
+		{
+			add_existing_log_id(self->priv.per_cpu[cand->cpu], cand->id);
+		}
+		cand = cand->next;
+	}
+	pthread_mutex_unlock(lock);
 
 	return 0;
 }
@@ -235,9 +211,14 @@ int start_trace_channel(trace_channel_t* self)
 	}
 
 	/* Find out what files exist on the disk, update workers accordingly */
-	if(_get_start_log_id(self))
+	if(_scan_directory_for_logs(self))
 	{
 		_error("Scanning previous logs");
+		goto err;
+	}
+	if(_update_workers_from_unlink_list(self))
+	{
+		_error("Updating workers from unlink list");
 		goto err;
 	}
 

@@ -177,3 +177,47 @@ int unlink_list_try_remove_log_file(const char *dir, const char *name,
 	return 0;
 }
 
+/**
+ * Check whether string @str starts with string @pre
+ */
+static int _starts_with(const char* pre, const char* str)
+{
+	size_t lenpre = strlen(pre), lenstr = strlen(str);
+	return lenstr < lenpre ? 0 : strncmp(pre, str, lenpre) == 0;
+}
+
+/**
+ * Parse log filename to extract CPU and log ID (format: name + cpu + "." + id)
+ */
+int unlink_list_parse_log_filename(const char *fname, const char *tname, int *cpu, int *idx, int max_cpus)
+{
+	if(!_starts_with(tname, fname))
+		return 0;
+	else
+	{
+		size_t lentname = strlen(tname);
+		*cpu = 0;
+		*idx = 0;
+		const char* sub = fname + lentname;
+		while(*sub >= '0' && *sub <= '9')
+		{
+			*cpu = *cpu * 10 + *sub - '0';
+			++sub;
+		}
+		if(*sub == '\0')
+			return 0;
+		if(*cpu >= max_cpus)
+			return 0;
+		++sub;
+		while(*sub >= '0' && *sub <= '9')
+		{
+			*idx = *idx * 10 + *sub - '0';
+			++sub;
+		}
+		if(*sub != '\0')
+			return 0;
+		++idx;
+		return 1;
+	}
+}
+
