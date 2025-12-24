@@ -432,7 +432,6 @@ static struct nvmeibt_wq *leader_wq;
 static struct nvmeibt_wq *stat_wq;
 static struct nvmeibt_wq *recoveries_progress_wq;
 static struct nvmeibt_wq *read_disk_from_smart_wq;
-static struct nvmeibt_wq *local_disk_format_wq;
 
 static pthread_t toma_main_thread;
 //static char executables_dir[PATH_MAX];
@@ -703,10 +702,6 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_drain(toma_persistency_wq);
 	nvmeibt_wq_destroy(toma_persistency_wq);
 	toma_persistency_wq = NULL;
-
-	nvmeibt_wq_drain(local_disk_format_wq);
-	nvmeibt_wq_destroy(local_disk_format_wq);
-	local_disk_format_wq = NULL;
 
 	nvmeibt_wq_drain(recoveries_progress_wq);
 	nvmeibt_wq_destroy(recoveries_progress_wq);
@@ -1223,21 +1218,6 @@ int nvmeibt_toma_persistency_add_work(struct nvmeibt_wq_entry *e)
 	NFIN;
 	if (toma_persistency_wq) {
 		nvmeibt_wq_addw(toma_persistency_wq, e);
-		rv = 0;
-	}
-	else
-		rv = -1;
-	NFOUT;
-	return rv;
-}
-
-int nvmeibt_local_disk_format_add_work(struct nvmeibt_wq_entry *e)
-{
-	int rv;
-
-	NFIN;
-	if (local_disk_format_wq) {
-		nvmeibt_wq_addw(local_disk_format_wq, e);
 		rv = 0;
 	}
 	else
@@ -2882,11 +2862,6 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	toma_persistency_wq = nvmeibt_wq_create("Toma_Persistency_offload");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");
-		goto out;
-	}
-	local_disk_format_wq = nvmeibt_wq_create("Local_Disk_Format");
-	if (!local_disk_format_wq) {
-		N_Ef(dloi795, "Failed to create wq local_disk_format offload");
 		goto out;
 	}
 	recoveries_progress_wq = nvmeibt_wq_create("Toma_recoveries_offload");

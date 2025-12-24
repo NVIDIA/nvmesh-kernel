@@ -2253,7 +2253,7 @@ void nvmeibt_local_disk_launch_bind_back_to_stock(struct nvmeibt_local_disk *loc
 	bind_wq_entry->udev_event_info = local_disk->its_udev_event_info;
 	bind_wq_entry->controller_for_sanity_checks = controller_get_by_native_serial(bind_wq_entry->serial);
 
-	if (nvmeibt_local_disk_format_add_work(&bind_wq_entry->wq_entry) != 0) {
+	if (nvmeibt_wq_run_once(&bind_wq_entry->wq_entry) == NULL) {
 		N_Ef(vgsh482, "Unable to add disk bind offload task to WQ! disk=@STR", nvmeibt_local_disk_display(local_disk));
 		NNVMEIBT_BM_FREE(t2_local_disk_bind_back_to_stock, bind_wq_entry);
 		goto out;
@@ -2668,13 +2668,11 @@ int nvmeibt_local_disk_launch_disk_format(struct nvmeibt_local_disk *in_local_di
 	nvmeibt_strlcpy(disk_format_wq_entry->format_details.model, local_disk->from_config.smart_info.Model, sizeof(disk_format_wq_entry->format_details.model));
 	nvmeibt_strlcpy(disk_format_wq_entry->ld_display, nvmeibt_local_disk_display(local_disk), sizeof(disk_format_wq_entry->ld_display));
 
-	if (nvmeibt_local_disk_format_add_work(&disk_format_wq_entry->wq_entry) != 0) {
+	if (nvmeibt_wq_run_once(&disk_format_wq_entry->wq_entry) == NULL) {
 		N_Ef(aji98w3, "Unable to add disk format offload task to WQ!");
 		NNVMEIBT_BM_FREE(dkit984, disk_format_wq_entry);
-
 		goto out;
 	}
-
 	// Mark disk as formatting, in case we will send a report target for now.
 	sprintf(local_disk->from_config.status, "Formatting");
 	rv = 0;
