@@ -2204,6 +2204,7 @@ static int read_target_drives_spec_file(target_drives_spec_t *drives_spec_list, 
 	// Empty prev content
 	XDLIST_FOREACH_SAFE(drive_spec_line, drives_spec_list) {
 		XDLIST_DEL(&(drive_spec_line->target_drives_link));
+		NNVMEIBT_TOMA_FREE(bgjrhzx1, drive_spec_line);
 	}
 	//
 	str_end = str + n_bytes_read;
