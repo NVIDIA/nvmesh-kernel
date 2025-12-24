@@ -106,7 +106,7 @@ trace_channel_t* init_trace_channel(
 		.priv.per_cpu = {0},
 		.priv.mmap_mgr = mmap_mgr};
 	assert(self->meta.dir && self->meta.name);
-	unlink_list_init(&self->priv.unlink_list);
+	unlink_list_init(&self->priv.unlink_list, self->meta.dir, self->meta.name);
 
 	return self;
 }
@@ -169,7 +169,7 @@ int start_trace_channel(trace_channel_t* self)
 	}
 
 	/* Find out what files exist on the disk, update workers accordingly */
-	if(unlink_list_populate(&self->priv.unlink_list, self->meta.dir, self->meta.name, MAX_CPUS))
+	if(unlink_list_populate(&self->priv.unlink_list, MAX_CPUS))
 	{
 		_error("Scanning previous logs");
 		goto err;
@@ -304,13 +304,12 @@ void add_to_unlink(trace_channel_t* self, int cpu, int id, unsigned long ts)
 	unlink_list_add(&self->priv.unlink_list, cpu, id, ts);
 }
 
-
 /**
  * Actually unlink next file in the queue
  */
 void do_unlink(trace_channel_t* self)
 {
-	unlink_list_do_unlink(&self->priv.unlink_list, self->meta.dir, self->meta.name, self->meta.max_logs);
+	unlink_list_do_unlink(&self->priv.unlink_list, self->meta.max_logs);
 }
 
 void increment_open_files(trace_channel_t* self) {

@@ -17,13 +17,15 @@
 /**
  * Initialize unlink list
  */
-void unlink_list_init(unlink_list_t *list)
+void unlink_list_init(unlink_list_t *list, const char *dir, const char *name)
 {
 	pthread_mutex_init(&list->lock, NULL);
 	list->len = 0;
 	list->head = NULL;
 	list->tail = NULL;
 	list->open_files = 0;
+	list->dir = dir;
+	list->name = name;
 }
 
 /**
@@ -40,6 +42,7 @@ void unlink_list_clear(unlink_list_t *list)
 	list->tail = NULL;
 	list->len = 0;
 	list->open_files = 0;
+	/* Keep dir and name - they don't need to be cleared */
 	pthread_mutex_unlock(&list->lock);
 }
 
@@ -150,7 +153,7 @@ void unlink_list_decrement_open_files(unlink_list_t *list)
 /**
  * Try to remove log file (returns 0 on success, -1 on error, ignores ENOENT)
  */
-int unlink_list_try_remove_log_file(const char *dir, const char *name, 
+int unlink_list_try_remove_log_file(unlink_list_t *list, 
 	unlink_candidate_t *cand, const char *subdir, const char *ext)
 {
 	char filename[MAX_FILENAME];
@@ -158,10 +161,10 @@ int unlink_list_try_remove_log_file(const char *dir, const char *name,
 
 	if (subdir && subdir[0] != '\0') {
 		snprintf(filename, sizeof(filename), "%s/%s/%s%d.%d%s", 
-			dir, subdir, name, cand->cpu, cand->id, ext ? ext : "");
+			list->dir, subdir, list->name, cand->cpu, cand->id, ext ? ext : "");
 	} else {
 		snprintf(filename, sizeof(filename), "%s/%s%d.%d%s", 
-			dir, name, cand->cpu, cand->id, ext ? ext : "");
+			list->dir, list->name, cand->cpu, cand->id, ext ? ext : "");
 	}
 
 	/* Use syscall_or_nfs_syscall macro with NULL as self (self is not used by the macro) */
@@ -226,23 +229,23 @@ int unlink_list_parse_log_filename(const char *fname, const char *tname, int *cp
 /**
  * Scan directory and populate unlink list with existing log files
  */
-int unlink_list_populate(unlink_list_t *list, const char *dir, const char *name, int max_cpus)
+int unlink_list_populate(unlink_list_t *list, int max_cpus)
 {
 	DIR* dp;
 	struct dirent* ep;
 
-	dp = opendir(dir);
+	dp = opendir(list->dir);
 	if(dp != NULL)
 	{
 		while((ep = readdir(dp)) != NULL)
 		{
 			int cpu, idx;
-			if(unlink_list_parse_log_filename(ep->d_name, name, &cpu, &idx, max_cpus))
+			if(unlink_list_parse_log_filename(ep->d_name, list->name, &cpu, &idx, max_cpus))
 			{
 				char path[MAX_FILENAME];
 				time_t ts;
 				struct stat st;
-				snprintf(path, sizeof(path), "%s/%s", dir, ep->d_name);
+				snprintf(path, sizeof(path), "%s/%s", list->dir, ep->d_name);
 
 				if(stat(path, &st))
 					ts = 0;
@@ -256,7 +259,7 @@ int unlink_list_populate(unlink_list_t *list, const char *dir, const char *name,
 	}
 	else
 	{
-		_error("Listing working dir %s", dir);
+		_error("Listing working dir %s", list->dir);
 		/* We can continue in this situation, just report error and continue */
 	}
 
@@ -266,7 +269,7 @@ int unlink_list_populate(unlink_list_t *list, const char *dir, const char *name,
 /**
  * Process unlink list and remove old log files (returns number of files unlinked)
  */
-int unlink_list_do_unlink(unlink_list_t *list, const char *dir, const char *name, int max_logs)
+int unlink_list_do_unlink(unlink_list_t *list, int max_logs)
 {
 	int unlinked_count = 0;
 
@@ -276,10 +279,10 @@ int unlink_list_do_unlink(unlink_list_t *list, const char *dir, const char *name
 
 		if(cand)
 		{ /* We do have a valid candidate - actually unlink now */
-			_info("Do unlink %s cpu=%d id=%d", name, cand->cpu, cand->id);
-			unlink_list_try_remove_log_file(dir, name, cand, "", "");
-			unlink_list_try_remove_log_file(dir, name, cand, "", ".lz4");
-			unlink_list_try_remove_log_file(dir, name, cand, ".cache", "");
+			_info("Do unlink %s cpu=%d id=%d", list->name, cand->cpu, cand->id);
+			unlink_list_try_remove_log_file(list, cand, "", "");
+			unlink_list_try_remove_log_file(list, cand, "", ".lz4");
+			unlink_list_try_remove_log_file(list, cand, ".cache", "");
 			free(cand);
 			unlinked_count++;
 		}

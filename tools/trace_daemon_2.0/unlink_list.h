@@ -21,10 +21,12 @@ typedef struct unlink_list
 	unlink_candidate_t* head;
 	unlink_candidate_t* tail;
 	int open_files;
+	const char *dir;
+	const char *name;
 } unlink_list_t;
 
 /* Initialize unlink list */
-void unlink_list_init(unlink_list_t *list);
+void unlink_list_init(unlink_list_t *list, const char *dir, const char *name);
 
 /* Clear unlink list (free all entries, keep mutex initialized) */
 void unlink_list_clear(unlink_list_t *list);
@@ -45,17 +47,17 @@ void unlink_list_increment_open_files(unlink_list_t *list);
 void unlink_list_decrement_open_files(unlink_list_t *list);
 
 /* Try to remove log file (returns 0 on success, -1 on error, ignores ENOENT) */
-int unlink_list_try_remove_log_file(const char *dir, const char *name, 
+int unlink_list_try_remove_log_file(unlink_list_t *list, 
 	unlink_candidate_t *cand, const char *subdir, const char *ext);
 
 /* Parse log filename to extract CPU and log ID (format: name + cpu + "." + id) */
 int unlink_list_parse_log_filename(const char *fname, const char *tname, int *cpu, int *idx, int max_cpus);
 
 /* Scan directory and populate unlink list with existing log files */
-int unlink_list_populate(unlink_list_t *list, const char *dir, const char *name, int max_cpus);
+int unlink_list_populate(unlink_list_t *list, int max_cpus);
 
 /* Process unlink list and remove old log files (returns number of files unlinked) */
-int unlink_list_do_unlink(unlink_list_t *list, const char *dir, const char *name, int max_logs);
+int unlink_list_do_unlink(unlink_list_t *list, int max_logs);
 
 #endif /* UNLINK_LIST_H */
 
