@@ -2732,6 +2732,19 @@ bool nvmeibt_topology_is_disk_explicitly_auto_takeover(struct nvmeibt_ascii_uuid
 	return is;
 }
 
+static void __clean_drives_specs(void)
+{
+	struct target_drive	*drive_spec_line;
+	XDLIST_FOREACH_SAFE(drive_spec_line, &(nvmeibt_global_get_global()->excluded_drives_spec)) {
+		XDLIST_DEL(&(drive_spec_line->target_drives_link));
+		NNVMEIBT_TOMA_FREE(bgjrhzx3, drive_spec_line);
+	}
+	XDLIST_FOREACH_SAFE(drive_spec_line, &(nvmeibt_global_get_global()->auto_takeover_drives_spec)) {
+		XDLIST_DEL(&(drive_spec_line->target_drives_link));
+		NNVMEIBT_TOMA_FREE(bgjrhzx4, drive_spec_line);
+	}
+}
+
 void nvmeibt_topology_free_resources(void)
 {
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
@@ -2749,6 +2762,7 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_BM_FREE(kiu12qa, cur_topo->buf_of_follower_wire_topo.data_buf);
 	NNVMEIBT_BM_FREE(etnpa51, raft_long_msg_test_buf.data_buf);
 	HW_conf_free_tree(cur_topo->HW_mgmt_conf);
+	__clean_drives_specs();
 }
 
 void nvmeibt_topology_set_raft_long_msg_test_appendix_len(int appendix_len)
