@@ -52,14 +52,20 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 	if (argc<2) {
 		nvmeibt_Str_sprintf(out, "Specify status type. Available options:\n");
 		for (i=0; i<ARRAY_SIZE(status_types); i++) {
-			nvmeibt_Str_sprintf(out, "    status %s\n", status_types[i].name);
+			nvmeibt_Str_sprintf(out, "\tstatus %s\n", status_types[i].name);
 		}
-		return -1;
+			nvmeibt_Str_sprintf(out, "\tstatus server_csvs\n");
+	return -1;
 	}
 	for (i=0; i<ARRAY_SIZE(status_types); i++) {
 		if (strcmp(argv[1], status_types[i].name)==0) {
 			return  nvmeibt_toma_get_status_str(status_types[i].type, out);
 		}
+	}
+	if (strcmp(argv[1], "server_csvs")==0) {
+		(void)nvmeib_srvr_api_lib_get_csv_disks(out);
+		(void)nvmeib_srvr_api_lib_get_csv_nics(out);
+		return nvmeibt_Str_strlen(out);
 	}
 	nvmeibt_Str_sprintf(out, "Unknown status type '%s'. Use 'status' alone to get a list of available options.\n", argv[1]);
 	return -1;
@@ -73,6 +79,7 @@ static int nvmeibt_rpc_command_trace(int argc, char *argv[], struct nvmeibt_Str 
 	return 0;
 }
 
+extern void toma_sig_handler_fn(int32_t n, uint64_t addr);
 static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_Str *out)
 {
 	struct nvmeibt_topology *cur_topo = nvmeibt_global_get_global();
@@ -81,25 +88,29 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 
 	if (argc<2) {
 		nvmeibt_Str_sprintf(out, "Error injection and simulation. Available sub-commands:\n"
-				"    remove-all-disks\n"
-				"    rescan-disks\n"
-				"    follower-ser pause/resume\n"
-				"    mgmt pause/resume\n"
-				"    md-write pause/resume\n"
-				"    raft pause-in/pause-out/pause-in-out/resume\n"
-				"    topo-discard <num> once/permanent\n"
-				"    rebuild endless/normal\n"
-				"    smart-cnt fail/normal\n"
-				"    zeroing fail/normal\n"
-				"    client-disconnect brute/normal\n"
-				"    stale-rebuild enable/disable\n"
-				"    raft-long-msg <appendix len in Kbytes>\n"
-				"    scrubbing enable/disable\n"
-				"    encrypt-delay before-exec/after-exec/before-detach/before-commit/none\n"
-				"    bm-garbage-collect <Optional: min log size 1..31>\n"
-				"    dump-clnt-hash <max_num>\n"
-				"    resend-praids-report all/<volume_name>\n"
-				"    reelect\n");
+				"\tremove-all-disks\n"
+				"\trescan-disks\n"
+				"\tfollower-ser pause/resume\n"
+				"\tmgmt pause/resume\n"
+				"\tmd-write pause/resume\n"
+				"\traft pause-in/pause-out/pause-in-out/resume\n"
+				"\ttopo-discard <num> once/permanent\n"
+				"\trebuild endless/normal\n"
+				"\tsmart-cnt fail/normal\n"
+				"\tzeroing fail/normal\n"
+				"\tclient-disconnect brute/normal\n"
+				"\tstale-rebuild enable/disable\n"
+				"\traft-long-msg <appendix len in Kbytes>\n"
+				"\tscrubbing enable/disable\n"
+				"\tencrypt-delay before-exec/after-exec/before-detach/before-commit/none\n"
+				"\tbm-garbage-collect <Optional: min log size 1..31>\n"
+				"\tdump-clnt-hash <max_num>\n"
+				"\tdump_status\n"
+				"\treread_conf\n"
+				"\ttoggle_logs\n"
+				"\tkill9\n"
+				"\tresend-praids-report all/<volume_name>\n"
+				"\treelect\n");
 		return -1;
 	}
 
@@ -323,10 +334,18 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 			nvmeibt_Str_sprintf(out, "Rpc rejected. I'm not a leader.\n");
 		}
 		return 0;
-	} else if (strcmp("reelect", argv[1])==0) {
-		nvmeibt_Str_sprintf(out, "Reelection initiated.\n");
-		nvmeibt_raft_timeout_occurred(1, 1);
-		return 0;
+	} else if (strcmp("dump_status", argv[1])==0) {
+		toma_sig_handler_fn(10, 0xface00000010UL);
+		return nvmeibt_Str_sprintf(out, "see toma latest .stat file...\n");
+	} else if (strcmp("toggle_logs", argv[1])==0) {
+		toma_sig_handler_fn(12, 0xface00000012UL);
+		return nvmeibt_Str_sprintf(out, "bin logs toggled\n");
+	} else if (strcmp("reread_conf", argv[1])==0) {
+		toma_sig_handler_fn( 1, 0xface00000001UL);
+		return nvmeibt_Str_sprintf(out, "rereed conf instructed (sighup)\n");
+	} else if (strcmp("kill9", argv[1])==0) {
+		toma_sig_handler_fn( 9, 0xface00000009UL);
+		return nvmeibt_Str_sprintf(out, "remote kill -9 send!\n");
 	}
 #if 0
 	else if (strcmp("mallinfo", argv[1])==0) { // YR: On Ubuntu 22, this is mallinfo2. On RH 8, it is still mallinfo. To avoid wasting time now, disabling. Open it when you want to debug.
