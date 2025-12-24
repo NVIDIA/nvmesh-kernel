@@ -2928,12 +2928,8 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	/* login to server module */
 	(void)nvmeibt_toma_announce_ready(true);
 
-	// Read the nics.csv file
-	{
-		struct nvmeibt_csv_file_ctx cfg_file = {NICS__INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_NICS};
-		if (nvmeibt_topology_probe_local_hardware(&cfg_file) < 0)
-			nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.
-	}
+	if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0)
+		nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.
 	if (!nvmeibt_toma_is_running_as_a_utility()) {
 		if (nvmeibt_raft_read_persistence_and_upd_committed(toma_persistency_file_name, NULL) != 0) {
 			N_Ef(cc77ru5, "Failed raft_read_toma_state_from_persistency()");

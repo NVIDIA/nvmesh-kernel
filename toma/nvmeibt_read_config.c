@@ -27,12 +27,6 @@
 
 #define DISK_ZEROING_UPDATE_THRESHOLD_SEC 			10
 
-struct nvmeibt_section_type_entry {
-	int		section_type;
-	char	const *section_header;
-	char	const *csv_header;
-};
-
 struct nvmeibt_restored_seg_metadata_container {
 	struct nvmeibt_seg_active_metadata_ctrl			*metadata_ctrl;		// Includes the header
 	int												metadata_gpt_entry_idx;
@@ -71,48 +65,26 @@ struct local_disk_zero_iter_wq_entry {
 
 #define MINIMUM_ZERO_THREASHOLD_FOR_INIT 0.01
 
-#define CSV_BUF_SECTION_HEADER "SECTION NAME: "
-static const struct nvmeibt_section_type_entry section_type_table[] = {
-	/*********** Local resources from nvmeibs **************/
-	{NVMEIBT_CSV_TYPE_LOCAL_DISKS,			CSV_BUF_SECTION_HEADER "LOCAL_DISKS", 				NVMEIBS_DISKS_CSV_HEADER},
-	{NVMEIBT_CSV_TYPE_LOCAL_NICS,			CSV_BUF_SECTION_HEADER "LOCAL_NICS", 				NVMEIBS_NICS_CSV_HEADER},
-};
-
-enum NVMEIBT_CSV_TYPE nvmeibt_get_section_type_by_section_header(char *section_header)
+static const char *nvmeibt_get_csv_section_header_by_section_type(enum NVMEIBT_CSV_TYPE section_type)
 {
-	int	i;
-	int	table_size = ARRAY_SIZE(section_type_table);
-	for (i = 0; i < table_size; i++) {
-		if (!strncmp(section_type_table[i].section_header, section_header, 100)) {
-			break;
-		}
-	}
-	return (enum NVMEIBT_CSV_TYPE)(i < table_size ? section_type_table[i].section_type : NVMEIBT_CSV_TYPE_NONE);
+	#define CSV_BUF_SECTION_HEADER "SECTION NAME: "
+	if (     section_type == NVMEIBT_CSV_TYPE_LOCAL_DISKS)	return CSV_BUF_SECTION_HEADER "LOCAL_DISKS";
+	else if (section_type == NVMEIBT_CSV_TYPE_LOCAL_NICS)	return CSV_BUF_SECTION_HEADER "LOCAL_NICS";
+	else													return NULL;
 }
 
-const char *nvmeibt_get_csv_section_header_by_section_type(int section_type)
+const char *nvmeibt_get_csv_header_by_section_type(enum NVMEIBT_CSV_TYPE section_type)
 {
-	int	i;
-	int	table_size = ARRAY_SIZE(section_type_table);
-	for (i = 0; i < table_size; i++) {
-		if (section_type_table[i].section_type == section_type) {
-			break;
-		}
-	}
-	return (i < table_size ? section_type_table[i].section_header : NULL);
+	if (     section_type == NVMEIBT_CSV_TYPE_LOCAL_DISKS)	return NVMEIBS_DISKS_CSV_HEADER;
+	else if (section_type == NVMEIBT_CSV_TYPE_LOCAL_NICS)	return NVMEIBS_NICS_CSV_HEADER;
+	else													return NULL;
 }
 
-const char *nvmeibt_get_csv_header_by_section_type(int section_type)
+enum NVMEIBT_CSV_TYPE nvmeibt_get_section_type_by_section_header(const char *hdr)
 {
-	int	i;
-	int	table_size = ARRAY_SIZE(section_type_table);
-	for (i = 0; i < table_size; i++) {
-		if (section_type_table[i].section_type == section_type) {
-			break;
-		}
-	}
-	NTOMA_ASSERT(hju7e03, i < table_size, "Wrong section_type id, section_type=@SECTION_TYPE", section_type);
-	return (i < table_size ? section_type_table[i].csv_header : NULL);
+	if (!strncmp(nvmeibt_get_csv_section_header_by_section_type(NVMEIBT_CSV_TYPE_LOCAL_DISKS), hdr, 100))	return NVMEIBT_CSV_TYPE_LOCAL_DISKS;
+	if (!strncmp(nvmeibt_get_csv_section_header_by_section_type(NVMEIBT_CSV_TYPE_LOCAL_NICS ), hdr, 100))	return NVMEIBT_CSV_TYPE_LOCAL_NICS;
+	else													return NVMEIBT_CSV_TYPE_NONE;
 }
 
 void print_config_to_log(struct mm_mgmt_conf *conf, bool is_topo_config)
@@ -138,55 +110,31 @@ bool nvmeibt_read_config_am_i_eligible_to_read_config_directly(void)
 	return (!nvmeibt_raft_is_raft_valid() || nvmeibt_raft_is_leader());
 }
 
-int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, const struct nvmeibt_csv_file_ctx *file_entry)
+int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, enum NVMEIBT_CSV_TYPE what)
 {
 	int			rv = -1;
-	int			fd = -1;
-	const char  *csv_header_line_ptr;
-	size_t		csv_header_line_len;
-	const char	*str;
+	const char	*str = nvmeibt_get_csv_section_header_by_section_type(what);
 	size_t		csv_section_header_line_len;
 
-	fd = NNVMEIBT_OPEN_READ(trace_read_config_nvmeibt_read_config_file, file_entry->name, 1);
 	NFIN;
-	if (fd < 0) {
-		N_Tf(fhuy5rt, "OOPS! Error while opening the file @FILE_ENTRY_NAME, @AUTO_ERRNO", file_entry->name);
-		goto out;
-	}
-	N_Tf(cki98r5, "Opened file @FILE_ENTRY_NAME for read.", file_entry->name);
-
-	// Add my Header line to the buffer
-	str = nvmeibt_get_csv_section_header_by_section_type(file_entry->section_type);
-	if (str == NULL) {
-		N_Tf(i889i2, "OOPS"); // I am almost certain this line could be more explicit.
-		goto out;
-	}
+	NTOMA_ASSERT(i889i2, str != NULL, "unknown @SECTION_TYPE", what);	// Add my Header line to the buffer
 	nvmeibt_Str_sprintf(config_struct, "%s\n", str);
 	csv_section_header_line_len = nvmeibt_Str_strlen(config_struct);
-
-	// Read the file - char by char for now.
-	rv = NNVMEIBT_STR_FREAD_ATOMIC(warn_read_config_nvmeibt_read_config_file, config_struct, fd);
+	rv = (what == NVMEIBT_CSV_TYPE_LOCAL_DISKS) ?
+			nvmeib_srvr_api_lib_get_csv_disks(config_struct) :
+			nvmeib_srvr_api_lib_get_csv_nics(config_struct);
 	if (rv < 0) {
-		N_ETf(t_zzz_25, "Error reading the file @FILE_ENTRY_NAME, @AUTO_ERRNO", file_entry->name);
-		goto out;
+		N_ETf(t_zzz_25, "Error reading @SECTION_TYPE, @AUTO_ERRNO", what);
+	} else {
+		const char *csv_header = nvmeibt_get_csv_header_by_section_type(what);
+		const size_t csv_header_line_len = strlen(csv_header);
+		const char  *csv_header_line_ptr = nvmeibt_Str_str(config_struct) + csv_section_header_line_len;
+		rv = 0;
+		if (strncmp(csv_header_line_ptr, csv_header, csv_header_line_len)) {
+			N_Wf(rtyy765, "@SECTION_TYPE header, len=@LEN_SIZET, expected='@STR', got='@STR'", what, csv_header_line_len, csv_header, csv_header_line_ptr);
+			rv = -__LINE__;
+		}
 	}
-
-	str = nvmeibt_get_csv_header_by_section_type(file_entry->section_type);
-	if (str == NULL) {
-		N_Tf(qa00923, "Wrong section_type=@SECTION_TYPE given", file_entry->section_type);
-		goto out;
-	}
-	csv_header_line_len = strlen(str);
-	csv_header_line_ptr = nvmeibt_Str_str(config_struct) + csv_section_header_line_len;
-	if (strncmp(csv_header_line_ptr, str, csv_header_line_len)) {
-		N_Wf(rtyy765, "CSV header, len=@LEN_SIZET, expected='@STR', got='@CSV_HEADER_LINE_PTR'", csv_header_line_len, str, csv_header_line_ptr);
-		goto out;
-	}
-
-	rv = 0;
-out:
-	NNVMEIBT_CLOSE(trace_4_read_config_nvmeibt_read_config_file, fd);
-
 	NFOUT;
 	return rv;
 }
@@ -859,10 +807,10 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 			idx_in_section = -1;
 		}
 		else if (is_expecting_csv_header_line) {
-			char		*ref_header = (char *)nvmeibt_get_csv_header_by_section_type(section_type);
+			const char *ref_header = nvmeibt_get_csv_header_by_section_type(section_type);
 			// verify and skip the header line
 			if (ref_header == NULL) {
-				N_Tf(gu8765e, "Wrong section_type=@SECTION_TYPE given", section_type);
+				N_Tf(gu8765e, "Wrong @SECTION_TYPE given", section_type);
 				goto out;
 			}
 			if (memcmp(line, ref_header, line_len)) {
@@ -884,7 +832,7 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 				add_rv = nvmeibt_local_nic_add(line, nvmeibt_global_get_global()->config_tag);
 				break;
 			default:
-				N_Ef(tu879t3, "Unknown section_type=@SECTION_TYPE", section_type);
+				N_Ef(tu879t3, "Unknown @SECTION_TYPE", section_type);
 				add_rv = NVMEIBT_ADD_FAILED;
 				break;
 			}
@@ -892,7 +840,7 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 				--idx_in_section;
 			}
 			if (add_rv == NVMEIBT_ADD_FAILED || add_rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL) {
-				N_Ef(ttu678w, "Add failed, section_type=@SECTION_TYPE, line='@LINE'", section_type, line);
+				N_Ef(ttu678w, "Add failed, @SECTION_TYPE, line='@LINE'", section_type, line);
 				if (add_rv == NVMEIBT_ADD_FAILED) {
 					N_Ef(fyyy732, "\n@STR", csv_or_wire_buf);
 					nvmeibt_abort(ES_FATAL);

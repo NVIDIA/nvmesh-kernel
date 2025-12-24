@@ -1,5 +1,6 @@
 #include "nvmeibt_srvr_proc.h"
 #include "nvmeibt_common.h"
+#include "utils/nvmeibt_str.h"
 
 /***************************** Generic API Toma->Server ***********************/
 static const char proc_path_toma2srvr[] = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";			// Toma->Srvr
@@ -138,6 +139,25 @@ int nvmeibt_toma_send_buf_to_client(const char *buf, int buf_len, const char *cl
 	}
 	return rv;
 }
+
+static int __get_srvr_csv(struct nvmeibt_Str *str, bool is_disks)
+{
+	const char *path = (is_disks ? TOMA_ROOT_DIR "proc/nvmeibs/disks.csv" : TOMA_ROOT_DIR "proc/nvmeibs/nics.csv");
+	int rv = 0, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
+	if (fd > 0) {
+		const int n_recv_bytes = NNVMEIBT_STR_FREAD_ATOMIC(salgcd2, str, fd);
+		if (n_recv_bytes <= 0) {
+			rv = -__LINE__;
+		}
+	} else {
+		rv = -__LINE__;
+	}
+	NNVMEIBT_CLOSE(salgcd4, fd);
+	return rv;
+}
+
+int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str) { return __get_srvr_csv(str, true); }
+int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str) { return __get_srvr_csv(str, false); }
 
 /* Original shell code:
 * 		pcidrivers_base_path=/sys/bus/pci/drivers

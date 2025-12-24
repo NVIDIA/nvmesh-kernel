@@ -20,7 +20,6 @@
 #include "nvmeibt_uuid.h"
 #include "../nvmeibt_json_base.h"
 #include "../interfaces/log/nvmeibt_binary_tracing.h"
-#include "../interfaces/srvr/nvmeibt_srvr_proc.h"	// DISKS_INFO_FILE
 
 #define GPT_UTIL_VERSION	"2.0.0-dev"
 #define MAX_DEV_NAME		256
@@ -2169,7 +2168,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "Usage: %s [OPTIONS]\n\n", argv[0]);
 
 	fprintf(stdout, "Device Context:\n");
-	fprintf(stdout, "  -d, --device=PATH           NVMesh managed device (reads disks.csv)\n");
+	fprintf(stdout, "  -d, --device=PATH           NVMesh managed device (reads disks csv)\n");
 	fprintf(stdout, "  -a, --any-device=PATH       Any block device or regular file\n");
 	fprintf(stdout, "  -s, --pba-s=NUM             Override start PBA\n");
 	fprintf(stdout, "  -e, --pba-e=NUM             Override end PBA\n");
@@ -2251,8 +2250,6 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 
 	new_config = NNVMEIBT_STR_ALLOC(trace_parse_args_config);
 	while ((op = getopt_long(argc, _argv, short_options, long_options, &long_idx)) != -1) {
-		const char				file_name[] = DISKS_INFO_FILE;
-		int						fd = -1;
 		const char				*csv_str_end;
 		const char				*scan_line_ptr;
 		char					line[NVMEIBT_MAX_CSV_LINE_LENGTH];
@@ -2268,22 +2265,16 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			nvmeibt_strlcpy(config->device_path, optarg, sizeof(config->device_path));
 			config->is_nvmesh_managed = true;
 			fprintf(stdout, "Device: %s (NVMesh managed)\n", config->device_path);
-			// Read disks.csv
-			if ((fd = NNVMEIBT_OPEN_READ(trace_12_main, file_name, 1)) < 0) {
-				N_Ef(parse_args_open_csv_failed, "Failed to open @FILE_ENTRY_NAME @AUTO_ERRNO", file_name);
-				rv = -1;
-				goto out;
-			}
 			// Read disks file data
 			nvmeibt_Str_reuse(new_config);
-			rv = NNVMEIBT_STR_FREAD_ATOMIC(trace_13_main, new_config, fd);
+			rv = nvmeib_srvr_api_lib_get_csv_disks(new_config);
 			if (rv < 0) {
-				N_Ef(t_zzz_26, "Error reading the file @FILE_ENTRY_NAME, @AUTO_ERRNO", file_name);
+				N_Ef(t_zzz_26, "Error getting disks csv, @AUTO_ERRNO");
 				rv = -1;
 				goto out;
 			}
 
-			// Parse disks.csv to find device parameters
+			// Parse disks csv to find device parameters
 			csv_str_end = nvmeibt_Str_str(new_config) + nvmeibt_Str_strlen(new_config);
 			scan_line_ptr = nvmeibt_Str_str(new_config);
 			is_expecting_csv_header_line = 1;
@@ -2307,7 +2298,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 
 				fprintf(stdout,"is_expecting_csv_header_line=%d\n", is_expecting_csv_header_line);
 				if (is_expecting_csv_header_line) {
-					char *ref_header = (char *)nvmeibt_get_csv_header_by_section_type(section_type);
+					const char *ref_header = nvmeibt_get_csv_header_by_section_type(section_type);
 					if (ref_header == NULL) {
 						N_Ef(parse_csv_bad_section_type, "Wrong section_type=@INT", section_type);
 						rv = -1;
@@ -2352,7 +2343,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 						config->pba_e = disk_config.n_pblk - 1;
 						config->pba_hw_e = disk_config.n_hw_pblk - 1;
 						config->pblk_size = disk_config.pblk_size;
-						fprintf(stdout,"Found device=%s in disks.csv, using pba_s=0x%lx, pba_e=0x%lx, block_size=%d\n",
+						fprintf(stdout,"Found device=%s in disks csv, using pba_s=0x%lx, pba_e=0x%lx, block_size=%d\n",
 								config->device_path, config->pba_s, config->pba_e, config->pblk_size);
 						break;
 					} else {
@@ -2360,10 +2351,6 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 								disk_config.dev_file_name, config->device_path);
 					}
 				}
-			}
-
-			if (fd >= 0) {
-				NNVMEIBT_CLOSE(trace_15_main, fd);
 			}
 			break;
 		case 's':

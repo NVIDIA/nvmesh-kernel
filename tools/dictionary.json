@@ -2709,15 +2709,6 @@
             "%s": 18
         }
     },
-    "@CSV_HEADER_LINE_PTR": {
-        "size": "string",
-        "type": "string",
-        "fmt": "%s",
-        "final": true,
-        "__histogram": {
-            "%s": 13
-        }
-    },
     "@CTRL": {
         "size": 32,
         "type": "s32",
@@ -15429,7 +15420,7 @@
     "@SECTION_TYPE": {
         "size": 32,
         "type": "s32",
-        "fmt": "%d",
+        "fmt": "csv_section_type=%d",
         "final": true,
         "__collision": true,
         "__histogram": {

@@ -19,11 +19,6 @@ enum NVMEIBT_CSV_TYPE {
 	NVMEIBT_CSV_TYPE_INCREMENTAL_UPDATE = 0x80,
 };
 
-struct nvmeibt_csv_file_ctx {
-	const char 					*name;
-	enum NVMEIBT_CSV_TYPE 	section_type;
-};
-
 struct nvmeibt_topology;
 struct nvmeibt_local_disk;
 struct nvmeibt_Str;
@@ -43,12 +38,10 @@ struct nvmeibt_raft_member;
 struct mm_mgmt_conf;
 
 bool nvmeibt_read_config_am_i_eligible_to_read_config_directly(void);
-enum NVMEIBT_CSV_TYPE nvmeibt_get_section_type_by_section_header(char *section_header);
-const char *nvmeibt_get_csv_section_header_by_section_type(int section_type);
-const char *nvmeibt_get_csv_header_by_section_type(int section_type);
+const char *nvmeibt_get_csv_header_by_section_type(enum NVMEIBT_CSV_TYPE);
 struct nvmeibt_disk_segment;
 void nvmeibt_read_config_add_missing_seg_to_praid(struct nvmeibt_praid *praid, struct nvmeibt_disk_segment *seg);
-int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, const struct nvmeibt_csv_file_ctx *file_entry);
+int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, enum NVMEIBT_CSV_TYPE);
 int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is_updating_leader);
 void nvmeibt_read_config_vol_mark_vol_and_segs_for_removal(struct mm_mgmt_conf *conf, bool is_updating_leader);
 int nvmeibt_read_config_apply_vol_mgmt_conf(struct mm_mgmt_conf *conf, int vol_config_tag, bool is_updating_leader, enum KAFKA_EVENT_TYPE event_type, bool is_topo_config);

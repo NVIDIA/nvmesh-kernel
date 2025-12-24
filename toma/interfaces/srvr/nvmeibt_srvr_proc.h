@@ -33,8 +33,9 @@ void nvmeibt_km_comm_ack_disk_remove(          struct nvmeibt_km_comm *p, unsign
 int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);
 
 /***************************** Probe Local Hardware *******************************/
-#define DISKS_INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"
-#define NICS__INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/nics.csv"
+struct nvmeibt_Str;
+int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str); // Appends the csv to already allocated (possibly empty) string. Upon error return negative rv, 0 on success
+int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str); // Same as above
 #define LOCKS_INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s"          	// uuid of disk
 
 int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh);	//   Bind to   nvmesh/nvme driver

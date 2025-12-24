@@ -125,7 +125,6 @@
 #include "nvmeibt_read_config.h"
 #include "nvmeibt_persistency_info.h"
 #include "nvmeibt_kafka.h"
-#include "./interfaces/srvr/nvmeibt_srvr_proc.h"	// DISKS_INFO_FILE
 
 #define LOCAL_DISK_SMART_PROBE_UPDATE_THRESHOLD_SEC		300
 
@@ -2497,16 +2496,11 @@ static void format_disk_freer(struct nvmeibt_wq_entry *wq_entry) {
 	entry = container_of(wq_entry, struct local_disk_format_wq_entry, wq_entry);
 	// It is a pitty that the use-case that led to the following (very rare?) use case is not documented
 	if (entry->rescan_after_format) {
-		struct nvmeibt_csv_file_ctx cfg_file = {DISKS_INFO_FILE, NVMEIBT_CSV_TYPE_LOCAL_DISKS};
-		struct nvmeibt_Str			*new_config = NULL;
-		struct nvmeibt_Str			*edited_new_config = NULL;
-
-		new_config = NNVMEIBT_STR_ALLOC(trace_format_disk_freer_2);
-		edited_new_config = NNVMEIBT_STR_ALLOC(trace_format_disk_freer_4);
-		if (nvmeibt_read_config_file(new_config, &cfg_file) < 0) {
-			N_Ef(trace_format_disk_freer_1, "Failed reading disks.csv after format");
-		}
-		else {
+		struct nvmeibt_Str			*new_config = NNVMEIBT_STR_ALLOC(trace_format_disk_freer_2);
+		struct nvmeibt_Str			*edited_new_config = NNVMEIBT_STR_ALLOC(trace_format_disk_freer_4);
+		if (nvmeibt_read_config_file(new_config, NVMEIBT_CSV_TYPE_LOCAL_DISKS) < 0) {
+			N_Ef(trace_format_disk_freer_1, "Failed reading disks csv after format");
+		} else {
 			// read first 2 lines
 			const char *start = nvmeibt_Str_str(new_config);
 			const char *newline = strchr(start, '\n');
@@ -2521,7 +2515,7 @@ static void format_disk_freer(struct nvmeibt_wq_entry *wq_entry) {
 					if (*start && !newline)
 						newline = start+strlen(start)-1;
 					if (strncmp(start, entry->format_details.ldisk_id.str, sizeof(entry->format_details.ldisk_id.str)) == 0) {
-						// If the line from disks.csv matches the formatted disk then generate a config with only this new line for immediate parsing
+						// If the line from disks csv matches the formatted disk then generate a config with only this new line for immediate parsing
 						nvmeibt_Str_strncat(edited_new_config, start, (newline-start)+1);
 					}
 				} while(*start);

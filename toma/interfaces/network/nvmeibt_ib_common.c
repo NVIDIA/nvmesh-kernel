@@ -4,33 +4,36 @@
 #include "nvmeibt_debug.h"
 #include "nvmeibt_ib_common.h"
 #include "../srvr/nvmeibt_srvr_proc.h"
+#include "utils/nvmeibt_str.h"
 
 int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
-{
-	FILE *file;
-	int rv = -1;
-	char *line_ptr = NULL;
-	size_t line_ptr_size = 0;
-	ssize_t line_len;
-	int line = 0;
-	__MEASURE_TOOK_INIT();
-
-	NFIN;
-	if (!(file = fopen(NICS__INFO_FILE, "r"))) {
-		N_Ef(nvmeibt_ib_read_local_nics_e1, "Error (@ERRNO @AUTO_ERRNO) opening local server nics.csv string=@STR", errno, NICS__INFO_FILE);
-		goto out;
+{								// Todo: unify code with nvmeibt_local_nic_add()
+	int rv = -1, line_idx = 0;
+	const char* cur_line, *next_line;
+	struct nvmeibt_Str *cfg = NNVMEIBT_STR_ALLOC(ribcrln0);
+	rv = nvmeib_srvr_api_lib_get_csv_nics(cfg);
+	if (rv < 0) {
+		N_Ef(nvmeibt_ib_read_local_nics_e1, "Error (@ERRNO @AUTO_ERRNO) opening local server nics csv", errno);
+		goto free_mem;
 	}
-	__MEASURE_TOOK(N_IMf(4cfghw8, "fopen() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
 
 	lnd->n_nics = 0;
 	lnd->n_ib_nics = 0;
 
-	while ((line_len = getline(&line_ptr, &line_ptr_size, file)) != -1) {
-		if (line == 0) {
+	for (cur_line = nvmeibt_Str_str(cfg); cur_line != nvmeibt_Str_end(cfg); cur_line = next_line, line_idx++) {
+		char line_ptr[256];		// Non const but for destructive processing of current line
+		int line_len;
+		next_line = (char *)memchr(cur_line, '\n', (nvmeibt_Str_end(cfg) - cur_line));
+		next_line = (next_line ? next_line + 1 : nvmeibt_Str_end(cfg));		// Include \n at the end of csv line and handle missing \n of last line
+		line_len = (next_line-cur_line);
+		NTOMA_ASSERT(ribcrln1, line_len < (int)sizeof(line_ptr), "Corrupted nic config. Line too long =@INT[bytes]", line_len);
+		memcpy(line_ptr, cur_line, line_len);
+		line_ptr[line_len] = '\x0';
+		if (line_idx == 0) {
 			/* Check header line */
 			if (line_len != strlen(NVMEIBS_NICS_CSV_HEADER_EOL) ||
 				strncmp(line_ptr, NVMEIBS_NICS_CSV_HEADER_EOL, sizeof(NVMEIBS_NICS_CSV_HEADER_EOL) - 1) != 0) {
-				N_Ef(nvmeibt_ib_read_local_nics_e2, "Local server nics.csv has invalid header @STR", line_ptr);
+				N_Ef(nvmeibt_ib_read_local_nics_e2, "Local server nics csv has invalid header @STR", line_ptr);
 				break;
 			}
 		}
@@ -76,21 +79,21 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 				case 2: /* Port */
 					port = atoi(field);
 					if (port < 0 || port > 256) {
-						N_Ef(nvmeibt_ib_read_local_nics_e4, "Invalid port @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e4, "Invalid port @STR in nics csv", field);
 						goto free_mem;
 					}
 					break;
 				case 3: /* Pkey */
 					pkey = (int)strtol(field, NULL, 16);
 					if (pkey < 0 || pkey > 0xffff) {
-						N_Ef(nvmeibt_ib_read_local_nics_e5, "Invalid pkey @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e5, "Invalid pkey @STR in nics csv", field);
 						goto free_mem;
 					}
 					break;
 				case 4: /* Link type */
 					transport = nvmeib_transport_cton(field[0]);
 					if (transport == rtr_unknown) {
-						N_Ef(nvmeibt_ib_read_local_nics_e6, "Invalid link type @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e6, "Invalid link type @STR in nics csv", field);
 						goto free_mem;
 					}
 					else if (transport == rtr_ib)
@@ -101,7 +104,7 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 				case 6: /* MTU */
 					mtu = atoi(field);
 					if (mtu != 256 && mtu != 512 && mtu != 1024 && mtu != 2048 && mtu != 4096) {
-						N_Ef(nvmeibt_ib_read_local_nics_e7, "Invalid mtu @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e7, "Invalid mtu @STR in nics csv", field);
 						goto free_mem;
 					}
 					break;
@@ -110,7 +113,7 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 				case 8: /* GID Index */
 					gid_index = atoi(field);
 					if (gid_index < 0 || gid_index > 256) {
-						N_Ef(nvmeibt_ib_read_local_nics_e8, "Invalid gid_index @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e8, "Invalid gid_index @STR in nics csv", field);
 						goto free_mem;
 					}
 					break;
@@ -118,7 +121,7 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 					if (strcmp(field, "true") == 0)
 						roce_v2 = true;
 					else if (strcmp(field, "false") != 0) {
-						N_Ef(nvmeibt_ib_read_local_nics_e9, "Invalid RoCE V2 value @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e9, "Invalid RoCE V2 value @STR in nics csv", field);
 						goto free_mem;
 					}
 					break;
@@ -126,7 +129,7 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 					if (strcmp(field, "true") == 0)
 						roce_ipv6 = true;
 					else if (strcmp(field, "false") != 0) {
-						N_Ef(nvmeibt_ib_read_local_nics_e10, "Invalid RoCE IPv6 value @STR in nics.csv", field);
+						N_Ef(nvmeibt_ib_read_local_nics_e10, "Invalid RoCE IPv6 value @STR in nics csv", field);
 						goto free_mem;
 					}
 					break;
@@ -136,7 +139,7 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 					nvmeibt_strlcpy(ndev_name, field, sizeof(ndev_name));
 					break;
 				default:
-					N_Ef(nvmeibt_ib_read_local_nics_e11, "Invalid number of fields in nics.csv");
+					N_Ef(nvmeibt_ib_read_local_nics_e11, "Invalid number of fields in nics csv");
 					goto free_mem;
 				}
 			}
@@ -170,17 +173,12 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 			if (!found)
 				lnd->n_nics++;
 		}
-		line++;
 	}
 
-	N_Tf(nvmeibt_ib_read_local_nics_t1, "Read @N_NICS local nics from @LINE_INT lines of nics.csv", lnd->n_nics, line);
+	N_Tf(nvmeibt_ib_read_local_nics_t1, "Read @N_NICS local nics from @LINE_INT lines of nics csv", lnd->n_nics, line_idx);
 
 free_mem:
-
-	free(line_ptr);
-	fclose(file);
-out:
-	NFOUT;
+	NNVMEIBT_STR_FREE(ribcrln2, cfg);
 	return rv;
 }
 
