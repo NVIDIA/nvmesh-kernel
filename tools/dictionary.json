@@ -7244,6 +7244,12 @@
         "fmt": "%d",
         "fmt_func": "fmt_serjio_jentry_state"
     },
+    "@JENTRY_STATE_MASK": {
+        "size": 32,
+        "type": "u32",
+        "fmt": "%x",
+        "fmt_func": "fmt_serjio_jentry_state_mask"
+    },
     "@JGC_SEG_ID_STR": {
         "size": "string",
         "type": "string",

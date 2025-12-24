@@ -5,6 +5,8 @@
  */
 
 #include "nvmeibs_serjio.h"
+#include "nvmeib_shared.h"
+#include "nvmeib_trace_warns.h"
 #include "nvmeibs_serjio_deps.h"
 #include "nvmeibs_serjio_gpt.h"
 #include "nvmeibs_nvme.h"
@@ -156,6 +158,10 @@ MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range inde
 
 #define _NEs(name, _pd, fmt, ...) \
 	_NE(name, "SERJIO (@SERJIO_PD): Disk @DISK_ID_STR (@DISK): " fmt, \
+		_pd, nvmeibs_disk_info_get_disk_id(_pd->di), _pd->di, ## __VA_ARGS__)
+	
+#define _NEs_dmesg(name, _pd, fmt, ...) \
+	_NE_dmesg(name, "SERJIO (@SERJIO_PD): Disk @DISK_ID_STR (@DISK): " fmt, \
 		_pd, nvmeibs_disk_info_get_disk_id(_pd->di), _pd->di, ## __VA_ARGS__)
 
 #define _NDs(name, _pd, fmt, ...) \
@@ -895,7 +901,7 @@ static struct jrange_entry* get_jrange_entry_for_uuid(
 
 static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param, struct jrange_entry *jrng,
-				   u8 read_ent_state_mask, unsigned long *read_ent_bmp,
+				   unsigned long read_ent_state_mask, unsigned long *read_ent_bmp,
 				   atomic_t *ctr, struct completion *comp);
 
 static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd);
@@ -6139,7 +6145,7 @@ out:
 
 static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param, struct jrange_entry *jrng,
-				   u8 read_ent_state_mask, unsigned long *read_ent_bmp,
+				   unsigned long read_ent_state_mask, unsigned long *read_ent_bmp,
 				   atomic_t *ctr, struct completion *comp)
 {
 	enum nvmeibs_serjio_jentry_state cur_jentry_state;
@@ -6149,6 +6155,8 @@ static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 	DECLARE_COMPLETION_ONSTACK(int_comp);
 	unsigned long flags;
 	DECLARE_BITMAP(rd_ents_bmp, NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE) = {0};
+	int state;
+	int state_mask_cnt = 0;
 
 	NFIN;
 	if (!comp) {
@@ -6173,9 +6181,33 @@ static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 	spin_lock_irqsave(&jrng->lock, flags);
 	for (entry = 0; entry < jrng->n_ents; entry++) {
 		cur_jentry_state = GET_JENTRY_STATE_FROM_BMP(jrng->jentry_state_bmp, entry);
-		if (((1 << cur_jentry_state) & read_ent_state_mask) &&
+		if ((test_bit(cur_jentry_state, &read_ent_state_mask)) &&
 				(!read_ent_bmp || test_bit(entry, read_ent_bmp)))
 			set_bit(entry, rd_ents_bmp);
+	}
+	/* [NVMESH-7216]: Check for mismatch between rd_ents_bmp and state counters */
+	if (!read_ent_bmp) {
+		for_each_set_bit(state, &read_ent_state_mask, MAX_JENTRY_STATE) {
+			state_mask_cnt += jrng->jentry_state_cnt[state];
+		}
+		if (bitmap_empty(rd_ents_bmp, jrng->n_ents) && state_mask_cnt > 0)
+		{
+			_NEs_dmesg(warn_serjio_rd_jrange_empty_bmp_with_unsynced, serjio_pd,
+				"Range @JRNL_RNG_IDX: Empty rd_ents_bmp when it should not be empty- "
+				"mask=@JENTRY_STATE_MASK entries=@JENTRY_STATE_CNT cnt[UNKNOWN]=@JENTRY_STATE_CNT cnt[SYNCED]=@JENTRY_STATE_CNT "
+				"cnt[FREE]=@JENTRY_STATE_CNT cnt[ABND]=@JENTRY_STATE_CNT cnt[TAKEN]=@JENTRY_STATE_CNT "
+				"cnt[WAIT_RET]=@JENTRY_STATE_CNT cnt[IO_ERR]=@JENTRY_STATE_CNT cnt[INVALID]=@JENTRY_STATE_CNT",
+				jrng->range_idx, (unsigned)read_ent_state_mask, jrng->n_ents,
+				jrng->jentry_state_cnt[JENTRY_UNKNOWN],
+				jrng->jentry_state_cnt[JENTRY_SYNCED],
+				jrng->jentry_state_cnt[JENTRY_FREE],
+				jrng->jentry_state_cnt[JENTRY_ABND],
+				jrng->jentry_state_cnt[JENTRY_TAKEN],
+				jrng->jentry_state_cnt[JENTRY_WAIT_RET],
+				jrng->jentry_state_cnt[JENTRY_IO_ERR],
+				jrng->jentry_state_cnt[JENTRY_INVALID]);
+				BUG_NON_PRODUCTION(7216);
+		}
 	}
 	spin_unlock_irqrestore(&jrng->lock, flags);
 	_NTs(trace_serjio_rd_jrange_ents, serjio_pd,
@@ -6199,7 +6231,7 @@ out:
 static int rd_jrnl(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param,
 				   enum nvmeibs_serjio_state check_state, bool read_free_rng,
-				   u8 read_ent_state_mask)
+				   unsigned long read_ent_state_mask)
 {
 	struct jranges_allocation_table *jranges_alloc_tbl = &serjio_pd->jranges_alloc_tbl;
 	int i, rv = 0;
