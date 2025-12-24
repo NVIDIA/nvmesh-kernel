@@ -548,8 +548,6 @@ struct nvmeibt_nm_local_node * nvmeibt_get_nw_node(void)
 	return nw_node;
 }
 
-static void sig_handler(int32_t n, uint64_t addr);
-
 static void udev_event_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
 	NFIN;
@@ -1857,21 +1855,18 @@ static int read_nvmesh_management_host(void)
 static volatile sig_atomic_t got_sigusr1 = 0;		// Non critical signal
 static volatile sig_atomic_t got_sigusr2 = 0;		// Non critical signal
 static volatile int received_sig_no;				// Critical shutting down signal
-static void sig_handler(int32_t n, uint64_t addr)
+void toma_sig_handler_fn(int32_t n, uint64_t addr)
 {
-	fprintf(stderr, "%s[%d]:%s(): n=%d   addr=0x%lx\n",__FILE__, __LINE__,
-			__FUNCTION__,  n, addr);
-	if (n == SIGCHLD) {
-		/* got_sigchld = 1;*/
-	} else if (n == SIGUSR1) {
+	if (n == SIGCHLD)
+		return; /* do nothing, no logs, got_sigchld = 1;*/
+	N_IMf(ttsgh1, "got signal=@INT addr=@LX", n, addr);
+	if (n == SIGUSR1) {
 		got_sigusr1 = 1; /* SIGUSR1 is used for dumping status */
 	} else if (n == SIGUSR2) {
 		got_sigusr2 = 1; /* SIGUSR2 is used to start/stop logging */
 	} else if (n == SIGHUP) {
 		nvmeibt_global_mark_is_reread_nvmesh_conf_required();
 	} else {
-		N_IMf(trace_toma_sig_handler, "got signal=@SIGNAL", n);
-		fprintf(stderr, "%s[%d]:%s(): signal=%d\n",__FILE__, __LINE__, __FUNCTION__,  n);
 		received_sig_no = n;
 	}
 }
@@ -3111,7 +3106,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		for (i = 0; i < n_fds_returned; i++) {
 			trigger_fd = (struct nvmeibt_toma_fd_in_use *)epoll_events[i].data.ptr;
 			if (trigger_fd->fd == signals_fd)
-				handle_sig_fd(signals_fd, sig_handler);
+				handle_sig_fd(signals_fd, toma_sig_handler_fn);
 		}
 		nvmeibt_nm_rsrm_resend_acks(nw_node);
 		// If the epoll_timeout was too short || (returned due to n_fds_returned after a very short time)
