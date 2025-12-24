@@ -240,7 +240,6 @@ struct self_test_entry {
 	X(test_diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from", false) \
 	X(test_diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from", false) \
 	X(test_apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B", false) \
-	X(test_crc_flag, "CRC Recalculation Flag", "gpt_util export + modify JSON + apply", false) \
 	X(test_missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
 	X(test_device_path_safety, "Safety - Device Path Mismatch", "gpt_util export + apply to different device (blocked)", true) \
 	X(test_overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
@@ -251,7 +250,6 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 static int SELF_TEST_compare_gpt_binary(const char *device_a, const char *device_b, int pblk_size, uint64_t n_blocks);
 static struct mm_json_elem *SELF_TEST_parse_json_file(const char *filepath);
 static int SELF_TEST_validate_json_bool_flag(const char *json_path, const char *flag_name, BOOL expected_value);
-static int SELF_TEST_modify_json_bool_field(const char *json_path, const char *field, BOOL new_value);
 static int SELF_TEST_modify_json_str_field(const char *json_path, const char *field, const char *new_value);
 static int SELF_TEST_remove_json_field(const char *json_path, const char *field);
 static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries, int max_n_entries);
@@ -503,12 +501,10 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "{\n");
 	nvmeibt_Str_sprintf(json_output, "  \"backup_timestamp\": \"%s\",\n", timestamp);
 	nvmeibt_Str_sprintf(json_output, "  \"device_path\": \"%s\",\n", config->device_path);
-	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 1 ===\": \"USER CONTROL FLAG\",\n");
-	nvmeibt_Str_sprintf(json_output, "  \"_recalculate_crc\": true,\n");
-	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 2 ===\": \"AUTO-DETECTED STATUS - DO NOT EDIT\",\n");
+	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 1 ===\": \"AUTO-DETECTED STATUS - DO NOT EDIT\",\n");
 	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_mismatch_detected\": %s,\n", is_mismatch ? "true" : "false");
 	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_overlaps_detected\": %s,\n", has_overlaps ? "true" : "false");
-	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 3 ===\": \"DISK STRUCTURE DATA - EDIT WITH CAUTION\",\n");
+	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 2 ===\": \"DISK STRUCTURE DATA - EDIT WITH CAUTION\",\n");
 
 	memset(&main_gpt_for_metadata, 0, sizeof(main_gpt_for_metadata));
 	nvmeibt_strlcpy(main_gpt_for_metadata.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt_for_metadata.main_or_metadata));
@@ -2001,27 +1997,6 @@ DEFINE_TEST(apply_write)
 	return rv;
 }
 
-DEFINE_TEST(crc_flag)
-{
-	int rv = 0;
-
-	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
-	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("crc_test"));
-	rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-
-	if (rv == 0) {
-		rv = SELF_TEST_modify_json_bool_field(TEST_JSON_PATH("crc_test"), "_recalculate_crc", false);
-	}
-
-	if (rv == 0) {
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
-		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("crc_test"));
-		rv = run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	return rv;
-}
-
 DEFINE_TEST(missing_section)
 {
 	int rv = 0;
@@ -2226,7 +2201,6 @@ static int run_self_test(const char *test_selection)
 	unlink(TEST_JSON_PATH("diff_baseline"));
 	unlink(TEST_JSON_PATH("standard"));
 	unlink(TEST_JSON_PATH("write_test"));
-	unlink(TEST_JSON_PATH("crc_test"));
 	unlink(TEST_JSON_PATH("missing_gpt"));
 	unlink(TEST_JSON_PATH("device_check"));
 	unlink(TEST_JSON_PATH("overlap_block"));
@@ -2842,60 +2816,6 @@ out:
 }
 
 /**
- * Modify JSON file field (SELF-TEST helper)
- * Parses JSON, modifies field using base library, serializes back to file
- * Returns 0 on success, -1 on error
- */
-static int SELF_TEST_modify_json_bool_field(const char *json_path, const char *field, BOOL new_value)
-{
-	struct mm_json_elem		*json_root = NULL;
-	struct nvmeibt_Str		*json_output = NULL;
-	int						fd = -1;
-	int						rv = -1;
-
-	// Parse existing JSON
-	json_root = SELF_TEST_parse_json_file(json_path);
-	if (!json_root || json_root->type != JSON_E_DICT) {
-		goto out;
-	}
-
-	// Modify field using base library function
-	if (json_set_dict_bool(json_root, field, new_value) < 0) {
-		N_Ef(selftest_field_not_found, "Field @STR not found in JSON", field);
-		goto out;
-	}
-
-	// Serialize back to string
-	json_output = NNVMEIBT_STR_ALLOC(trace_selftest_json_serialize);
-	if (serialize_json_tree_to_str(json_root, json_output) < 0) {
-		N_Ef(selftest_serialize_failed, "Failed to serialize JSON tree");
-		goto out;
-	}
-
-	// Write to file
-	fd = open(json_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (fd < 0) {
-		goto out;
-	}
-
-	if (write(fd, nvmeibt_Str_str(json_output), nvmeibt_Str_strlen(json_output)) != (ssize_t)nvmeibt_Str_strlen(json_output)) {
-		goto out;
-	}
-
-	rv = 0;
-
-out:
-	if (fd >= 0) {
-		close(fd);
-	}
-	if (json_root) {
-		nvmeibt_mm_json_free_kv_tree(json_root);
-	}
-	NNVMEIBT_STR_FREE(trace_selftest_json_serialize_cleanup, json_output);
-	return rv;
-}
-
-/**
  * Modify JSON string field (SELF-TEST helper)
  * Parses JSON, modifies field using base library, serializes back
  * Returns 0 on success, -1 on error
@@ -3325,7 +3245,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	int							json_fd = -1;
 	BOOL						mismatch_detected = false;
 	BOOL						overlaps_detected = false;
-	BOOL						recalculate_crc = false;
 	const char					*device_path_in_json = NULL;
 	struct mm_json_elem			*main_gpt_primary_elem = NULL;
 	struct mm_json_elem			*main_gpt_alternate_elem = NULL;
@@ -3388,7 +3307,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		JSON_ASSIGN_PLAIN(apply_dev_path, "device_path", device_path_in_json, kv->value->str);
 		JSON_ASSIGN_OPTIONAL(apply_mismatch_from_json, "_READONLY_mismatch_detected");
 		JSON_ASSIGN_OPTIONAL(apply_overlaps_from_json, "_READONLY_overlaps_detected");
-		JSON_ASSIGN_PLAIN(apply_recalc, "_recalculate_crc", recalculate_crc, (kv->value->num != 0));
 		JSON_ASSIGN_OPTIONAL(apply_timestamp, "backup_timestamp");
 		JSON_ASSIGN_PLAIN(apply_main_pri, "main_gpt_primary", main_gpt_primary_elem, kv->value);
 		JSON_ASSIGN_PLAIN(apply_main_alt, "main_gpt_alternate", main_gpt_alternate_elem, kv->value);
@@ -3398,20 +3316,9 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		JSON_ASSIGN_OPTIONAL(apply_disk_md, "disk_metadata");
 		JSON_ASSIGN_OPTIONAL(apply_section1, "=== SECTION 1 ===");
 		JSON_ASSIGN_OPTIONAL(apply_section2, "=== SECTION 2 ===");
-		JSON_ASSIGN_OPTIONAL(apply_section3, "=== SECTION 3 ===");
 		JSON_LOOP_ITERATION_END(apply_json_meta_end, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(apply_json_meta_validate);
-
-	// Warn if CRC recalculation is disabled
-	if (recalculate_crc) {
-		fprintf(stdout, "_recalculate_crc: true\n");
-	} else {
-		N_Wf(apply_crc_recalc_off, "CRC recalculation disabled in JSON: file=@STR", config->apply_json_file);
-		fprintf(stdout, COL_YELLOW "\nWARNING: _recalculate_crc is false" COL_RESET "\n");
-		fprintf(stdout, "  CRCs from JSON will be used (may cause validation errors if entries were edited)\n");
-		fprintf(stdout, "  To recalculate CRCs, set _recalculate_crc: true and apply again\n\n");
-	}
 
 	// Recalculate readonly flags from actual data (never trust JSON)
 	mismatch_detected = false;
