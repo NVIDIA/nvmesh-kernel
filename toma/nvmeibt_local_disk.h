@@ -271,9 +271,8 @@ int nvmeibt_local_disk_write_PMBR_and_GPTs(struct local_disk_info *ld_info);
 void nvmeibt_local_disk_mark_segs_post_update_actions_required(struct nvmeibt_local_disk *local_disk);
 void nvmeibt_local_disk_mark_is_specific_disk_report_req(const char *ldisk_id, unsigned int reappearing_counter);
 void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk);
-int nvmeibt_toma_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
-void nvmeibt_toma_stop_local_disk_wq(struct nvmeibt_local_disk *local_disk);
-
+int nvmeibt_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
+void nvmeibt_local_disk_stop_wq(struct nvmeibt_local_disk *local_disk);
 
 /******************* API Toma-Srvr for zeroing/formating **********************/
 struct nvmeibt_disk_flow_params_t {

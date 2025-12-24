@@ -528,7 +528,7 @@ static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk
 
 	N_IMf(idwoam4, "Removing local_disk=@STR", nvmeibt_local_disk_display(local_disk));
 
-	nvmeibt_toma_stop_local_disk_wq(local_disk);
+	nvmeibt_local_disk_stop_wq(local_disk);
 
 	// remove the workqueue from the hash, as we are guaranteed that no one will be using it
 
@@ -634,7 +634,7 @@ static void stock_local_disk_terminate(struct nvmeibt_local_disk *stock_local_di
 	if (!(stock_local_disk->is_bind_to_nvmeibs_needed)) {
 		controller_del_local_disk(stock_local_disk->from_config.native_serial.str, stock_local_disk, 0);
 	}
-	nvmeibt_toma_stop_local_disk_wq(stock_local_disk);
+	nvmeibt_local_disk_stop_wq(stock_local_disk);
 	NNVMEIBT_HASH_DEL_OBJ_ASCII_new(vdgh2q7, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str, stock_local_disk, local_disk);
 	NNVMEIBT_CLOSE(t3_stock_local_disk_terminate, stock_local_disk->dev_file_fd);
 	NNVMEIBT_TOMA_FREE(t4_stock_local_disk_terminate, stock_local_disk);
@@ -3031,7 +3031,7 @@ static void local_disk_wq_entry_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-int nvmeibt_toma_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
+int nvmeibt_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
 	return (local_disk ? nvmeibt_wq_addw(local_disk->wq, e) : -1);
 }
@@ -3046,7 +3046,7 @@ int nvmeibt_toma_local_disk_specific_add_work(struct nvmeibt_local_disk *local_d
  * @param vendor_id
  *
  */
-void nvmeibt_toma_stop_local_disk_wq(struct nvmeibt_local_disk *local_disk)
+void nvmeibt_local_disk_stop_wq(struct nvmeibt_local_disk *local_disk)
 {
 	NFIN;
 	if (local_disk) {
@@ -3146,7 +3146,7 @@ int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_
 		rv = -1;
 		goto out;
 	}
-	rv = nvmeibt_toma_local_disk_specific_add_work(local_disk, &entry_wrapper->wq_entry);
+	rv = nvmeibt_local_disk_specific_add_work(local_disk, &entry_wrapper->wq_entry);
 	if (rv < 0)
 		free_work_with_ldisk_last_CHANGE_no_entry(entry_wrapper);
 out:
