@@ -3024,7 +3024,7 @@ ssize_t fill_disks(void *dummy, char *buffer, size_t len)
 	extern char *dummy_id;
 
 	count += scnprintf(buffer + count, len - count,
-			   NVMEIBS_DISKS_CSV_HEADER_EOL);
+			   NVMEIBS_DISKS_CSV_HEADER "\n");
 	down_read(&global_lock);
 	for (d = device_list; d != NULL; d = d->next) {
 		for (drv = d->drives; drv != NULL; drv = drv->next) {

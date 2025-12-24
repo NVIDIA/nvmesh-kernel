@@ -29,8 +29,8 @@ int nvmeibt_ib_common_read_local_nics(struct local_nics_data *lnd)
 		NTOMA_ASSERT(ribcrln1, line_len < (int)sizeof(line_ptr), "Corrupted nic config. Line too long =@INT[bytes]", line_len);
 		memcpy(line_ptr, cur_line, line_len);
 		line_ptr[line_len] = '\x0';
-		if (line_idx == 0) {
-			/* Check header line */
+		if (line_idx == 0) {		/* Check header line */
+			#define NVMEIBS_NICS_CSV_HEADER_EOL NVMEIBS_NICS_CSV_HEADER "\n"
 			if (line_len != strlen(NVMEIBS_NICS_CSV_HEADER_EOL) ||
 				strncmp(line_ptr, NVMEIBS_NICS_CSV_HEADER_EOL, sizeof(NVMEIBS_NICS_CSV_HEADER_EOL) - 1) != 0) {
 				N_Ef(nvmeibt_ib_read_local_nics_e2, "Local server nics csv has invalid header @STR", line_ptr);

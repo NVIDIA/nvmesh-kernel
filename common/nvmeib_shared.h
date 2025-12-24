@@ -1226,10 +1226,8 @@ struct nvmeibs_lost_srv_resource_payload {
 
 #define NVMEIBS_LOST_SRV_RESOURCE_PAYLOAD_SIZE (sizeof(struct nvmeibs_lost_srv_resource_payload))
 
-#define NVMEIBS_NICS_CSV_HEADER "device,hw_gid,port,pkey,transport,state,mtu,max_mtu,gid_index,roce_v2,roce_ipv6,used,ndev_name,sw_gid"
-#define NVMEIBS_NICS_CSV_HEADER_EOL NVMEIBS_NICS_CSV_HEADER "\n"
+#define NVMEIBS_NICS_CSV_HEADER 	"device,hw_gid,port,pkey,transport,state,mtu,max_mtu,gid_index,roce_v2,roce_ipv6,used,ndev_name,sw_gid"
 #define NVMEIBS_DISKS_CSV_HEADER 	"id,blocks,hw_blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor,model,native_serial"
-#define NVMEIBS_DISKS_CSV_HEADER_EOL 	NVMEIBS_DISKS_CSV_HEADER "\n"
 #define NVMEIBS_NICS_CSV_TRANSPORT_INFINIBAND 'I'
 #define NVMEIBS_NICS_CSV_TRANSPORT_ROCE 'R'
 #define NVMEIBS_NICS_CSV_TRANSPORT_TCP 'T'
