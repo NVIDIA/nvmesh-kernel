@@ -1,7 +1,8 @@
+
 #include "capuch_worker.h"
 #include "trace_channel.h"
+#include "unlink_list.h"
 
-#define _GNU_SOURCE
 #include <assert.h>
 #include <fcntl.h>
 #include <pthread.h>

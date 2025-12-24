@@ -1,6 +1,5 @@
 #include "mmap_manager.h"
 
-#define _GNU_SOURCE
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>

@@ -1,0 +1,52 @@
+#ifndef UNLINK_LIST_H
+#define UNLINK_LIST_H
+
+#include <time.h>
+#include <pthread.h>
+
+#define MAX_TS ((unsigned long)-1)
+
+typedef struct unlink_candidate
+{
+	int cpu;
+	int id;
+	time_t ts; /* Timestamp. Only relevant when initializing. */
+	struct unlink_candidate* next;
+} unlink_candidate_t;
+
+typedef struct unlink_list
+{
+	pthread_mutex_t lock;
+	int len;
+	unlink_candidate_t* head;
+	unlink_candidate_t* tail;
+	int open_files;
+} unlink_list_t;
+
+/* Initialize unlink list */
+void unlink_list_init(unlink_list_t *list);
+
+/* Clear unlink list (free all entries, keep mutex initialized) */
+void unlink_list_clear(unlink_list_t *list);
+
+/* Destroy unlink list (clear entries and destroy mutex) */
+void unlink_list_destroy(unlink_list_t *list);
+
+/* Add candidate to unlink list */
+void unlink_list_add(unlink_list_t *list, int cpu, int id, unsigned long ts);
+
+/* Get next candidate to unlink (caller must free the candidate after use) */
+unlink_candidate_t* unlink_list_get_next(unlink_list_t *list, int max_logs);
+
+/* Increment open files counter */
+void unlink_list_increment_open_files(unlink_list_t *list);
+
+/* Decrement open files counter */
+void unlink_list_decrement_open_files(unlink_list_t *list);
+
+/* Try to remove log file (returns 0 on success, -1 on error, ignores ENOENT) */
+int unlink_list_try_remove_log_file(const char *dir, const char *name, 
+	unlink_candidate_t *cand, const char *subdir, const char *ext);
+
+#endif /* UNLINK_LIST_H */
+

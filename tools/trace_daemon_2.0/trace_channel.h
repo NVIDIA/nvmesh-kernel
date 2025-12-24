@@ -3,8 +3,6 @@
 
 #include "mmap_manager.h"
 
-#define MAX_TS ((unsigned long)-1)
-
 typedef struct trace_channel_meta
 {
 	unsigned int chid;

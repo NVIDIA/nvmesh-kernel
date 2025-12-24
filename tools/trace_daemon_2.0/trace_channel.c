@@ -1,7 +1,7 @@
 #include "trace_channel.h"
+#include "unlink_list.h"
 #include "capuch_worker.h"
 
-#define _GNU_SOURCE
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
@@ -21,24 +21,6 @@
 #include "trace_daemon_common.h"
 
 #define MAX_CPUS 1024 /* 1024 should be eough, we will not use all of it anyway */
-
-/**
- * Unlink list - represents the list of data to clean as new data is produced
- */
-typedef struct unlink_candidate
-{
-	int cpu;
-	int id;
-	time_t ts; /* Timestamp. Only relevant when initializing. */
-	struct unlink_candidate* next;
-} unlink_candidate_t;
-typedef struct unlink_list
-{
-	pthread_mutex_t lock;
-	int len;
-	unlink_candidate_t* head;
-	unlink_candidate_t* tail;
-} unlink_list_t;
 
 /**
  * Trace channel object
@@ -62,8 +44,6 @@ struct trace_channel
 		unlink_list_t unlink_list;
 		/** Pointer to an mmap manager */
 		mmap_manager_t* mmap_mgr;
-		/* current open logs */
-		int open_files;
 	} priv;
 };
 
@@ -124,13 +104,9 @@ trace_channel_t* init_trace_channel(
 		.meta.max_logs = get_max_logs(name),
 		.meta.bufs_per_log = get_buf_per_log(name),
 		.priv.per_cpu = {0},
-		.priv.unlink_list.len = 0,
-		.priv.unlink_list.head = NULL,
-		.priv.unlink_list.tail = NULL,
-		.priv.mmap_mgr = mmap_mgr,
-		.priv.open_files = 0};
+		.priv.mmap_mgr = mmap_mgr};
 	assert(self->meta.dir && self->meta.name);
-	pthread_mutex_init(&self->priv.unlink_list.lock, NULL);
+	unlink_list_init(&self->priv.unlink_list);
 
 	return self;
 }
@@ -143,7 +119,7 @@ void destroy_trace_channel(trace_channel_t* self)
 	if(self)
 	{
 		join_trace_channel(self);
-		pthread_mutex_destroy(&self->priv.unlink_list.lock);
+		unlink_list_destroy(&self->priv.unlink_list);
 		free(self->meta.dir);
 		free(self->meta.name);
 		free(self);
@@ -226,7 +202,7 @@ int _get_start_log_id(trace_channel_t* self)
 						ts = st.st_mtime;
 
 					add_existing_log_id(self->priv.per_cpu[cpu], idx);
-					add_to_unlink(self, cpu, idx, ts);
+					unlink_list_add(&self->priv.unlink_list, cpu, idx, ts);
 				}
 			}
 		}
@@ -342,13 +318,7 @@ void join_trace_channel(trace_channel_t* self)
 		destroy_capuch_worker(self->priv.per_cpu[cpu]);
 	}
 	/* Clean unlink list */
-	while(self->priv.unlink_list.head)
-	{
-		unlink_candidate_t* tmp = self->priv.unlink_list.head;
-		self->priv.unlink_list.head = self->priv.unlink_list.head->next;
-		free(tmp);
-	}
-	self->priv.unlink_list.len = 0;
+	unlink_list_clear(&self->priv.unlink_list);
 }
 
 /**
@@ -392,82 +362,9 @@ void reconf_trace_channel(trace_channel_t* self)
 void add_to_unlink(trace_channel_t* self, int cpu, int id, unsigned long ts)
 {
 	_info("Add to unlink cpu=%d file=%d", cpu, id);
-	pthread_mutex_lock(&self->priv.unlink_list.lock); /* Critical section */
-	if(!self->priv.unlink_list.tail)
-	{
-		assert((self->priv.unlink_list.head = self->priv.unlink_list.tail =
-					calloc(1, sizeof(unlink_candidate_t))));
-		self->priv.unlink_list.tail->cpu = cpu;
-		self->priv.unlink_list.tail->id = id;
-		self->priv.unlink_list.tail->ts = ts;
-	}
-	else
-	{
-		unlink_candidate_t* cand;
-		assert(self->priv.unlink_list.head); /* Sanity check */
-		assert((cand = calloc(1, sizeof(unlink_candidate_t))));
-		cand->cpu = cpu;
-		cand->id = id;
-		cand->ts = ts;
-		if(ts == MAX_TS)
-		{ /* If timestamp not specified - just add to tail */
-			self->priv.unlink_list.tail->next = cand;
-			self->priv.unlink_list.tail = cand;
-		}
-		else
-		{ /* Else - lets find where to add it */
-			unlink_candidate_t* pos = self->priv.unlink_list.head;
-			unlink_candidate_t* prev = NULL;
-			while(pos && ts > pos->ts)
-			{
-				prev = pos;
-				pos = pos->next;
-			}
-			if(!pos)
-			{ /* Add to tail */
-				self->priv.unlink_list.tail->next = cand;
-				self->priv.unlink_list.tail = cand;
-			}
-			else
-			{
-				cand->next = pos;
-				if(prev)
-				{
-					prev->next = cand;
-				}
-				else
-				{
-					self->priv.unlink_list.head = cand;
-				}
-			}
-		}
-	}
-	if (!self->priv.unlink_list.head)
-		abort();
-	++self->priv.unlink_list.len;
-	pthread_mutex_unlock(&self->priv.unlink_list.lock); /* Critical section end */
+	unlink_list_add(&self->priv.unlink_list, cpu, id, ts);
 }
 
-static int __try_remove_log_files(trace_channel_t *self, unlink_candidate_t *cand, const char *subdir, const char *ext)
-{
-	trace_channel_meta_t *meta = &self->meta;
-	char filename[MAX_FILENAME];
-	int rv;
-
-	snprintf(filename, sizeof(filename), "%s/%s/%s%d.%d%s", meta->dir, subdir, meta->name, cand->cpu, cand->id, ext);
-	rv = syscall_or_nfs_syscall(self, unlink, filename);
-	if (rv < 0) {
-		if (errno != ENOENT) { // ignore missing files
-			_info("Unlink failed for file %s reason: %s", filename, strerror(errno));
-		 } else {
-			rv = 0;
-		 }
-		return rv;
-	} else {
-		_info("Unlink %s", filename);
-	}
-	return 0;
-}
 
 /**
  * Actually unlink next file in the queue
@@ -476,31 +373,15 @@ void do_unlink(trace_channel_t* self)
 {
 	while(1)
 	{
-		unlink_candidate_t* cand;
-		cand = NULL;
-
-		pthread_mutex_lock(&self->priv.unlink_list.lock); /* Critical section */
-		_info("Do unlink %s (len=%d,max=%d)", self->meta.name, self->priv.unlink_list.len + self->priv.open_files,
-		self->meta.max_logs);
-		if(self->meta.max_logs > 0 && ((self->priv.unlink_list.len + self->priv.open_files) > self->meta.max_logs))
-			cand = self->priv.unlink_list.head;
-		if(cand)
-		{
-			self->priv.unlink_list.head = self->priv.unlink_list.head->next;
-			--self->priv.unlink_list.len;
-			if (!self->priv.unlink_list.len) {
-				_info("Unlinking list is empty - reset tail"); 
-				/* list is empty so reset tail as well */
-				self->priv.unlink_list.tail = self->priv.unlink_list.head;
-			}
-		}
-		pthread_mutex_unlock(&self->priv.unlink_list.lock); /* Critical section end */
+		unlink_candidate_t* cand = unlink_list_get_next(&self->priv.unlink_list, 
+			self->meta.max_logs);
 
 		if(cand)
 		{ /* We do have a valid candidate - actually unlink now */
-			__try_remove_log_files(self, cand, "", "");
-			__try_remove_log_files(self, cand, "", ".lz4");
-			__try_remove_log_files(self, cand, ".cache", "");
+			_info("Do unlink %s cpu=%d id=%d", self->meta.name, cand->cpu, cand->id);
+			unlink_list_try_remove_log_file(self->meta.dir, self->meta.name, cand, "", "");
+			unlink_list_try_remove_log_file(self->meta.dir, self->meta.name, cand, "", ".lz4");
+			unlink_list_try_remove_log_file(self->meta.dir, self->meta.name, cand, ".cache", "");
 			free(cand);
 		}
 		else
@@ -511,15 +392,11 @@ void do_unlink(trace_channel_t* self)
 }
 
 void increment_open_files(trace_channel_t* self) {
-	pthread_mutex_lock(&self->priv.unlink_list.lock);
-	self->priv.open_files++;
-	pthread_mutex_unlock(&self->priv.unlink_list.lock);
+	unlink_list_increment_open_files(&self->priv.unlink_list);
 }
 
 void decrement_open_files(trace_channel_t* self) {
-	pthread_mutex_lock(&self->priv.unlink_list.lock);
-	self->priv.open_files--;
-	pthread_mutex_unlock(&self->priv.unlink_list.lock);
+	unlink_list_decrement_open_files(&self->priv.unlink_list);
 }
 
 
