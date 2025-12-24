@@ -650,7 +650,7 @@ void nvmeibt_toma_cleanup_single_instance(void)
 
 static void terminate_toma(int rv)
 {
-	struct local_disk_wq_hash_ctx	*specific_disk_wq_ctx;
+	struct nvmeibt_wq		*wq;
 
 	NFIN;
 	// Once we get here, there is no way back, and naturally, no work in TOMA's main loop (the events handler)
@@ -663,23 +663,15 @@ static void terminate_toma(int rv)
 	// as at this point of shutdown we cannot in any way wait for the threads signaling that they finished their
 	// work (and decreased the used counter of each memtbl), since we are outside the event loop already.
 
-	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, nvmeibt_global_get_global()->nvmesh_ldisks_wq_hash_by_ldisk_id_str) {
-		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-		specific_disk_wq_ctx->wq = NULL;
-		NNVMEIBT_BM_FREE(terminate_toma_trace, specific_disk_wq_ctx);
+	NVMEIB_HASH_FOREACH(wq, nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str) {
+		nvmeibt_wq_drain(wq);
+		nvmeibt_wq_destroy(wq);
 	}
+	nvmeib_hash_tbl_free(nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str);
 
 	nvmeibt_wq_drain(read_disk_from_smart_wq);
 	nvmeibt_wq_destroy(read_disk_from_smart_wq);
 	read_disk_from_smart_wq = NULL;
-
-	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str) {
-		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-		specific_disk_wq_ctx->wq = NULL;
-		NNVMEIBT_BM_FREE(terminate_toma_trace_1, specific_disk_wq_ctx);
-	}
 
 	nvmeibt_wq_drain(toma_persistency_wq);
 	nvmeibt_wq_destroy(toma_persistency_wq);
@@ -1213,16 +1205,10 @@ int nvmeibt_toma_leader_add_work(struct nvmeibt_wq_entry *e)
 	return rv;
 }
 
-int nvmeibt_registrant_disconnect_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_registrant_disconnect_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
-	int rv;
-	NFIN;
-
 	/* registrant_disconnect events should not be skipped due to version mismatch */
-	rv = nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
-
-	NFOUT;
-	return rv;
+	return nvmeibt_toma_local_disk_specific_add_work(local_disk, e);
 }
 
 int nvmeibt_seg_metadata_ctrl_save_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
@@ -2129,9 +2115,7 @@ void nvmeibt_toma_process_waiting_udev_events(void)
 					udev_event_task->udev_event_info = udev_event_info;
 
 					// put this message to a queue for the given disk parameters to be executed when it's time comes. (when there are no actives left.)
-					if (nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str,
-																  nvmeibt_local_disk_UUID(stock_local_disk),
-																  nvmeibt_local_disk_display(stock_local_disk), &udev_event_task->wq_entry) != 0) {
+					if (nvmeibt_toma_local_disk_specific_add_work(stock_local_disk, &udev_event_task->wq_entry) != 0) {
 						N_Ef(zvq93kq, "Unable to add stock event for disk=@STR to WQ", nvmeibt_local_disk_display(stock_local_disk));
 						NNVMEIBT_BM_FREE(t_fq_toma, udev_event_task);
 						nvmeibt_abort(ES_FATAL);
@@ -2423,9 +2407,8 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		goto out;
 	}
 	/* create work-queues */
-	// Init disk_wqs hash table.
-	nvmeibt_global_get_global()->nvmesh_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
-	nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(ebaimqx, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_ldisks_wq_hash", -1);
+	// Init local_disk wqs hash table.
+	nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
 	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");

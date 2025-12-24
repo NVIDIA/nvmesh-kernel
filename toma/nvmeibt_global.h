@@ -100,8 +100,7 @@ struct nvmeibt_topology {
 	struct nvmeib_hash_table			*chunks_hash_by_uuid;
 	struct nvmeib_hash_table			*local_nics_hash_by_sw_gid_uuid_str;
 	//
-	struct nvmeib_hash_table			*nvmesh_ldisks_wq_hash_by_ldisk_id_str;
-	struct nvmeib_hash_table			*stock_ldisks_wq_hash_by_ldisk_id_str;
+	struct nvmeib_hash_table			*ldisks_wq_hash_by_ldisk_id_str;
 	// We need two following 'highest_seen' params because we can receive a one step backward config
 	// from a new leader. In this case we prevent a wrong trim.
 	int64_t						startup_timestamp_msec;

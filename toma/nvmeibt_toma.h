@@ -67,7 +67,7 @@ int  nvmeibt_toma_trigger_wakeup(           enum NVMEIBT_TOMA_WAKEUP_TYPE type, 
 void nvmeibt_toma_trigger_wakeup_handle_err(struct nvmeibt_wq_entry *wq_entry);
 int nvmeibt_toma_persistency_add_work(struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_leader_add_work(struct nvmeibt_wq_entry *e);
-int nvmeibt_registrant_disconnect_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
+int nvmeibt_registrant_disconnect_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_local_disk_zero_iter_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
 int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,

@@ -528,7 +528,7 @@ static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk
 
 	N_IMf(idwoam4, "Removing local_disk=@STR", nvmeibt_local_disk_display(local_disk));
 
-	nvmeibt_toma_stop_local_disk_wq(nvmeibt_local_disk_UUID(local_disk));
+	nvmeibt_toma_stop_local_disk_wq(local_disk);
 
 	// remove the workqueue from the hash, as we are guaranteed that no one will be using it
 
@@ -634,7 +634,7 @@ static void stock_local_disk_terminate(struct nvmeibt_local_disk *stock_local_di
 	if (!(stock_local_disk->is_bind_to_nvmeibs_needed)) {
 		controller_del_local_disk(stock_local_disk->from_config.native_serial.str, stock_local_disk, 0);
 	}
-	nvmeibt_toma_stop_stock_local_disk_wq(nvmeibt_local_disk_UUID(stock_local_disk));
+	nvmeibt_toma_stop_local_disk_wq(stock_local_disk);
 	NNVMEIBT_HASH_DEL_OBJ_ASCII_new(vdgh2q7, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str, stock_local_disk, local_disk);
 	NNVMEIBT_CLOSE(t3_stock_local_disk_terminate, stock_local_disk->dev_file_fd);
 	NNVMEIBT_TOMA_FREE(t4_stock_local_disk_terminate, stock_local_disk);
@@ -706,6 +706,27 @@ void nvmeibt_local_disk_mark_periodic_reread_smart_counters_just_finished(struct
 	}
 out:
 	return;	// Avoid compilation error
+}
+
+struct nvmeibt_wq *nvmeibt_local_disk_create_wq(const char *ldisk_id_str)
+{
+	struct nvmeibt_wq		*wq;
+
+	NFIN;
+	wq = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str, ldisk_id_str);
+	if (wq) {
+		N_Tf(vgshgwe, "ldisk=@STR wq already exists", ldisk_id_str);
+		goto out;
+	}
+	wq = nvmeibt_wq_create(ldisk_id_str);
+	if (!wq) {
+		N_Ef(sj74lsx, "Failed to create wq for ldisk=@STR", ldisk_id_str);
+		goto out;
+	}
+	nvmeib_hash_add_ascii_str(nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str, nvmeibt_wq_get_name(wq), wq);
+out:
+	NFOUT;
+	return wq;
 }
 
 enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int config_tag)
@@ -894,6 +915,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 		N_Tf(gjity96, "adding disk=@STR, ptr=@PTR will read config from disk", nvmeibt_local_disk_display(local_disk), local_disk);
 		should_reread_disk = true;
 		controller_add_local_disk(local_disk->from_config.native_serial.str, local_disk, NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_NVMEIBS);
+		local_disk->wq = nvmeibt_local_disk_create_wq(nvmeibt_local_disk_UUID_str(local_disk));
 	}
 
 	if (rv == NVMEIBT_ADD_MODIFIED) {
@@ -1233,6 +1255,7 @@ static void fill_disk_from_stock_driver_finalize(struct nvmeibt_wq_entry *wq_ent
 	}
 	if (rv == NVMEIBT_ADD_NEW) {
 		controller_add_local_disk(entry->new_local_disk->from_config.native_serial.str, entry->new_local_disk, NVMEIBT_LOCAL_DISK_CONTROLLER_STATE_STOCK);
+		entry->new_local_disk->wq = nvmeibt_local_disk_create_wq(nvmeibt_local_disk_UUID_str(entry->new_local_disk));
 	}
 	NVMEIBT_GLOBAL_MARK_REPORT_TARGET_HAS_NEW_DATA(4jd8bjp);
 	if (entry->new_local_disk->is_excluded) {
@@ -3008,43 +3031,9 @@ static void local_disk_wq_entry_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-int nvmeibt_toma_local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id,
-											  const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_toma_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
-	int rv = 0;
-	struct local_disk_wq_hash_ctx *specific_disk_ctx;
-	char wq_name[ASCII_UUID_MAX_STR_LEN + 16];
-
-	NFIN;
-
-	// Find the wq for ldisk_id
-	specific_disk_ctx = nvmeib_hash_search_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-	if (specific_disk_ctx) {
-		rv = nvmeibt_wq_addw(specific_disk_ctx->wq, e);
-		goto out;
-	}
-
-	// Allocate the hash member.
-	specific_disk_ctx = NNVMEIBT_BM_CALLOC(trace_toma_local_disk_specific_add_work, sizeof(*specific_disk_ctx));
-
-	// Create a new WQ for this drive/vendor combination.
-	snprintf(wq_name, sizeof(wq_name), "%s", ld_display);
-	specific_disk_ctx->wq = nvmeibt_wq_create(wq_name);
-	if (!specific_disk_ctx->wq) {
-		N_Ef(sj74lsx, "Failed to create wq for stock_disk=@STR", ld_display);
-		NNVMEIBT_BM_FREE(trace_2_toma_local_disk_specific_add_work, specific_disk_ctx);
-		rv = -1;
-		goto out;
-	}
-	specific_disk_ctx->ldisk_id = *ldisk_id;
-
-	// Add the wq wrapper to the hash.
-	nvmeib_hash_add_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str, specific_disk_ctx);
-	nvmeibt_wq_addw(specific_disk_ctx->wq, e);
-
-out:
-	NFOUT;
-	return rv;
+	return (local_disk ? nvmeibt_wq_addw(local_disk->wq, e) : -1);
 }
 
 /**
@@ -3057,42 +3046,16 @@ out:
  * @param vendor_id
  *
  */
-void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
+void nvmeibt_toma_stop_local_disk_wq(struct nvmeibt_local_disk *local_disk)
 {
-	struct local_disk_wq_hash_ctx *specific_disk_wq_ctx;
-
 	NFIN;
-
-	specific_disk_wq_ctx = nvmeib_hash_delete_ascii_str(nvmeibt_global_get_global()->nvmesh_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-	if (specific_disk_wq_ctx) {
+	if (local_disk) {
 		// drain the wq of this disk, to avoid anything from attempting execution on it.
-		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-		specific_disk_wq_ctx->wq = NULL;
-		// remove the local disk_wq from the wq's hash
-		NNVMEIBT_BM_FREE(nvmeibt_toma_stop_local_disk_wq_trace_bm_free, specific_disk_wq_ctx);
+		nvmeibt_wq_drain(local_disk->wq);
+		nvmeibt_wq_destroy(local_disk->wq);
+		local_disk->wq = NULL;
+		nvmeib_hash_delete_ascii_str(nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str, nvmeibt_local_disk_UUID_str(local_disk));
 	}
-	NFOUT;
-}
-
-void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
-{
-	struct local_disk_wq_hash_ctx *specific_disk_wq_ctx;
-
-	NFIN;
-
-	specific_disk_wq_ctx = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-	if (specific_disk_wq_ctx) {
-		// drain the wq of this disk, to avoid anything from attempting execution on it.
-		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-		specific_disk_wq_ctx->wq = NULL;
-
-		// remove the local disk_wq from the wq's hash
-		nvmeib_hash_delete_ascii_str(nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-		NNVMEIBT_BM_FREE(nvmeibt_toma_stop_stock_local_disk_wq_1, specific_disk_wq_ctx);
-	}
-
 	NFOUT;
 }
 
@@ -3183,8 +3146,7 @@ int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_
 		rv = -1;
 		goto out;
 	}
-	rv = nvmeibt_toma_local_disk_specific_add_work((is_stock_ldisk ? nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str : nvmeibt_global_get_global()->nvmesh_ldisks_wq_hash_by_ldisk_id_str),
-									  ldisk_id, ld_display, &entry_wrapper->wq_entry);
+	rv = nvmeibt_toma_local_disk_specific_add_work(local_disk, &entry_wrapper->wq_entry);
 	if (rv < 0)
 		free_work_with_ldisk_last_CHANGE_no_entry(entry_wrapper);
 out:

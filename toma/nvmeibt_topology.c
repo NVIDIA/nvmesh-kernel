@@ -1797,6 +1797,7 @@ static void handle_serjio_state_changed(const char* ldisk_id_str, u16 vendor_id,
 	struct nvmeibs_msg_s2t_disk_change *msg;
 	char	ld_display[100];
 	struct nvmeibt_ascii_uuid		ldisk_id;
+	struct nvmeibt_local_disk		*local_disk;
 
 	event_serjio_state_task = NNVMEIBT_BM_CALLOC(u87hdy6, sizeof(*event_serjio_state_task));
 	N_Tf(hyuytu7, "got DISK_CHANGE_EVENT from SERJIO state=@INT, disk=@STR", serjio_status, ldisk_id_str);
@@ -1815,8 +1816,8 @@ static void handle_serjio_state_changed(const char* ldisk_id_str, u16 vendor_id,
 
 	nvmeibt_strlcpy(ldisk_id.str, ldisk_id_str, sizeof(ldisk_id.str));
 	snprintf(ld_display, sizeof(ld_display), "%.36s(%.24s.%d)", ldisk_id.str, msg->native_serial_str, msg->nsid);
-	if (nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str,
-												  &ldisk_id, ld_display, &event_serjio_state_task->wq_entry) != 0) {
+	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(&ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
+	if (nvmeibt_toma_local_disk_specific_add_work(local_disk, &event_serjio_state_task->wq_entry) != 0) {
 		N_Ef(ytu7687, "Unable to add hardware event for disk=@STR to WQ", ld_display);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -1992,8 +1993,7 @@ static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
 	}
 
 	// put this message to a queue for the given disk parameters to be executed when it's time comes. (when there are no actives left.)
-	if (nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str,
-												  &ldisk_id, ld_display, &event_disk_change_task->wq_entry) != 0) {
+	if (nvmeibt_toma_local_disk_specific_add_work(local_disk, &event_disk_change_task->wq_entry) != 0) {
 		N_Ef(fggtyr0, "Unable to add hardware event for " LOCAL_DISK_LOG_FMT " to WQ",
 			 disk_info->disk_id, disk_info->native_serial_str, disk_info->nsid);
 		nvmeibt_abort(ES_FATAL);

@@ -2152,7 +2152,7 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_removal(struct
 	struct registrant_disconnect_wq_entry *registrant_disconnect_task = NULL;
 	enum REGISTRANT_DISCONNECT_LAUNCH_STATUS rv = REGISTRANT_DISCONNECT_LAUNCH_FAILED;
 	struct nvmeibt_seg_active	*seg_active = active_registrant_entry->seg_active;
-	const struct nvmeibt_local_disk *its_local_disk = nvmeibt_seg_active_get_local_disk(seg_active);
+	struct nvmeibt_local_disk	*its_local_disk = nvmeibt_seg_active_get_local_disk(seg_active);
 
 	NFIN;
 
@@ -2188,7 +2188,7 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_registrant_removal(struct
 	TODO(This code should optimally go away from a WQ thread and run in the TOMA main thread. \
 		 For that we need to refactor the flow so that the send lock requests are all sent and the IB \
 		 callback gathers all responses and continues disconnect flow once this done.)
-	if (nvmeibt_registrant_disconnect_add_work(nvmeibt_local_disk_UUID(its_local_disk), nvmeibt_local_disk_display(its_local_disk), &(registrant_disconnect_task->wq_entry)) != 0) {
+	if (nvmeibt_registrant_disconnect_add_work(its_local_disk, &(registrant_disconnect_task->wq_entry)) != 0) {
 		N_Ef(dki9y76, "Unable to add registrant_disconnect offload task to WQ!");
 		rv = REGISTRANT_DISCONNECT_LAUNCH_FAILED;
 		goto free_resources;
