@@ -278,15 +278,15 @@ int64_t nvmeibt_raft_get_effective_min_election_timeout_factor(void)
 	return raft_min_election_timeout_factor;
 }
 
-void nvmeibt_raft_set_max_wait_for_non_registrable_seg_sec(uint64_t wait_sec)
+void nvmeibt_raft_set_max_wait_for_non_registrable_seg_sec(int64_t wait_sec)
 {
-	max_wait_for_non_registrable_seg_nsec = SEC_TO_NSEC(wait_sec);
+	max_wait_for_non_registrable_seg_nsec = SEC_TO_NSEC((uint64_t)wait_sec);
 	nvmeibt_raft_recalc_timeout_constants();
 }
 
-uint64_t nvmeibt_raft_get_max_wait_for_non_registrable_seg_sec(void)
+int64_t nvmeibt_raft_get_max_wait_for_non_registrable_seg_sec(void)
 {
-	return max_wait_for_non_registrable_seg_nsec / NSEC_IN_1_SEC;
+	return (int64_t)(max_wait_for_non_registrable_seg_nsec / NSEC_IN_1_SEC);
 }
 
 int64_t nvmeibt_raft_get_praid_leader_max_nsec_wait_for_registrable_seg_to_apply(BOOL client_problems)
