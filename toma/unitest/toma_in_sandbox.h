@@ -182,9 +182,8 @@ struct nvmeibt_msg_request {
 };
 
 #define SRM_EMPTY_USER ((void *)(~(0ULL)))
-#include "nvmeibt_ds.h"
 struct nvmeibt_srm { int dummy; };
-struct udp_peer { struct xdlist node_link; };
+struct udp_peer { int dummy; };
 union ibv_gid { uint8_t raw[16]; struct { uint64_t subnet_prefix; uint64_t interface_id;} global; };
 struct nvmeibt_node;
 static inline int is_peer_reachable(const struct udp_peer *p) { (void)p; return 0;}
@@ -193,9 +192,6 @@ struct nvmeibt_srm *udp_peer_srm(struct udp_peer *peer);
 int allocate_udp_server(int ip_protocol, union ibv_gid *gid, struct nvmeibt_node *node);
 int start_udp_server(void);
 int nvmeib_register_udp_peer(struct nvmeibt_node *node, const char *peer_name, const char *peer_guid);
-
-/************************************* srvr ***********************************/
-//#include "interfaces/srvr/nvmeibt_srvr_proc.h"
 
 /************************************* Kafka ************************************/
 // Implemented according to: https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html
