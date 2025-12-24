@@ -1217,7 +1217,7 @@ int nvmeibt_seg_metadata_ctrl_save_add_work(const struct nvmeibt_ascii_uuid *ldi
 
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
+	rv = nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -1228,7 +1228,7 @@ int nvmeibt_toma_local_disk_zero_iter_add_work(const struct nvmeibt_ascii_uuid *
 	int rv;
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
+	rv = nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -1239,7 +1239,7 @@ int nvmeibt_toma_restore_disk_structures_add_work(const struct nvmeibt_ascii_uui
 	int rv;
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
+	rv = nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;
@@ -1250,7 +1250,7 @@ int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk
 	int rv;
 	NFIN;
 
-	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
+	rv = nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
 
 	NFOUT;
 	return rv;

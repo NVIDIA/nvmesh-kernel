@@ -1780,7 +1780,7 @@ void nvmeibt_local_disk_launch_local_disk_periodic_reread_smart_counters_if_need
 	periodic_reread_smart_counters_task->rv = -1;
 	periodic_reread_smart_counters_task->is_stock_disk = is_stock_disk;
 
-	rv = local_disk_specific_add_work_with_ldisk_last_CHANGE_no(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk),
+	rv = nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk),
 																&(periodic_reread_smart_counters_task->wq_entry), is_stock_disk);
 	if (rv != 0) {
 		N_Ef(usnej2n, "Unable to add update log task to WQ @STR disk=@STR", (is_stock_disk ? "stock" : ""), nvmeibt_local_disk_display(local_disk));
@@ -3113,7 +3113,7 @@ static void free_work_with_ldisk_last_CHANGE_no_entry(struct local_disk_wq_entry
 	NNVMEIBT_BM_FREE(cvvgs82, entry_wrapper);
 }
 
-int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
+int nvmeibt_local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
 														   bool is_stock_ldisk)
 {
 	int rv = 0;

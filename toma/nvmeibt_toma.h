@@ -70,8 +70,6 @@ int nvmeibt_toma_leader_add_work(struct nvmeibt_wq_entry *e);
 int nvmeibt_registrant_disconnect_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_local_disk_zero_iter_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
-int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
-														   bool is_stock_ldisk);
 int nvmeibt_toma_restore_disk_structures_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
 int nvmeibt_seg_metadata_ctrl_save_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_read_disk_from_stock_driver_add_work(struct nvmeibt_wq_entry *e);
