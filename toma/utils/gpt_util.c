@@ -2917,7 +2917,7 @@ static int SELF_TEST_remove_json_field(const char *json_path, const char *field)
 			if (*value_end == '}') brace_count--;
 			value_end++;
 		} while (brace_count > 0 && *value_end != '\0');
-			} else {
+	} else {
 		// Simple value - find comma or closing brace
 		value_end = value_start;
 		while (*value_end != ',' && *value_end != '}' && *value_end != '\0') {
@@ -3305,9 +3305,9 @@ static int validate_json_required_sections(struct mm_json_elem *json_root,
  * Returns 0 on success, -1 on error
  */
 static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
-								  struct mm_json_elem *json_section,
-								  const char *section_name,
-								  int max_n_entries)
+								 struct mm_json_elem *json_section,
+								 const char *section_name,
+								 int max_n_entries)
 {
 	memset(gpt, 0, sizeof(*gpt));
 	nvmeibt_strlcpy(gpt->main_or_metadata, section_name, sizeof(gpt->main_or_metadata));
@@ -3341,8 +3341,8 @@ static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
  * Returns number of changes detected
  */
 static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
-									  const struct nvmeibt_disk_gpt *json_gpt,
-									  const char *gpt_name)
+									 const struct nvmeibt_disk_gpt *json_gpt,
+									 const char *gpt_name)
 {
 	int		i;
 	int		n_additions = 0;
