@@ -68,6 +68,12 @@ struct nvmeibt_udev_event_info {
 	BOOL								is_processing;
 };
 
+struct local_disk_wq_hash_ctx {
+//	struct xdlist 				link;	// Hash link
+	struct nvmeibt_wq 			*wq;
+	struct nvmeibt_ascii_uuid	ldisk_id;
+};
+
 struct nvmeibt_local_disk {
 	struct nvmeibt_local_disk_config					from_config;
 	struct nvmeibt_disk									*its_disk;
@@ -264,6 +270,10 @@ int nvmeibt_local_disk_write_PMBR_and_GPTs(struct local_disk_info *ld_info);
 void nvmeibt_local_disk_mark_segs_post_update_actions_required(struct nvmeibt_local_disk *local_disk);
 void nvmeibt_local_disk_mark_is_specific_disk_report_req(const char *ldisk_id, unsigned int reappearing_counter);
 void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk);
+int nvmeibt_toma_local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id,
+											  const char *ld_display, struct nvmeibt_wq_entry *e);
+void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id);
+void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id);
 
 
 /******************* API Toma-Srvr for zeroing/formating **********************/

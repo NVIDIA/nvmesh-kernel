@@ -464,18 +464,6 @@ bool nvmeibt_ib_use_srq = false;
 static struct nvmeibt_nm_local_node *nw_node = NULL;
 char tracing_cgroup[NAME_MAX] = "";
 
-struct local_disk_wq_hash_ctx {
-//	struct xdlist 				link;	// Hash link
-	struct nvmeibt_wq 			*wq;
-	struct nvmeibt_ascii_uuid	ldisk_id;
-};
-
-struct local_disk_wq_entry_wrapper_entry {
-	struct nvmeibt_wq_entry 	wq_entry;
-	struct nvmeibt_wq_entry 	*wrapped_entry;
-	unsigned int 				*last_CHANGE_no;
-};
-
 struct udev_event_wq_entry {
 	struct nvmeibt_wq_entry 			wq_entry;
 	struct nvmeibt_udev_event_info		*udev_event_info;
@@ -485,9 +473,6 @@ struct udev_event_wq_entry {
 	int									nsid;
 	u32									vendor_id;
 };
-
-static struct nvmeib_hash_table		*nvmesh_ldisks_wq_hash_by_ldisk_id_str;
-static struct nvmeib_hash_table		*stock_ldisks_wq_hash_by_ldisk_id_str;
 
 #if defined(COMPILE_DEBUG)
 #	define MOD_STR "debug"
@@ -678,7 +663,7 @@ static void terminate_toma(int rv)
 	// as at this point of shutdown we cannot in any way wait for the threads signaling that they finished their
 	// work (and decreased the used counter of each memtbl), since we are outside the event loop already.
 
-	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, nvmesh_ldisks_wq_hash_by_ldisk_id_str) {
+	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, nvmeibt_global_get_global()->nvmesh_ldisks_wq_hash_by_ldisk_id_str) {
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
 		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
 		specific_disk_wq_ctx->wq = NULL;
@@ -689,7 +674,7 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_destroy(read_disk_from_smart_wq);
 	read_disk_from_smart_wq = NULL;
 
-	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, stock_ldisks_wq_hash_by_ldisk_id_str) {
+	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str) {
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
 		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
 		specific_disk_wq_ctx->wq = NULL;
@@ -1224,227 +1209,6 @@ int nvmeibt_toma_leader_add_work(struct nvmeibt_wq_entry *e)
 	}
 	else
 		rv = -1;
-	NFOUT;
-	return rv;
-}
-
-static void local_disk_wq_entry_wrapper(struct nvmeibt_wq_entry *wq_entry)
-{
-	struct local_disk_wq_entry_wrapper_entry *entry;
-
-	NFIN;
-
-	entry = container_of(wq_entry, struct local_disk_wq_entry_wrapper_entry, wq_entry);
-
-	N_Tf(trace_1_toma_local_disk_wq_entry_wrapper, "last_CHANGE_no=@INT", *entry->last_CHANGE_no);
-
-	// Execute original entry;
-	entry->wrapped_entry->wq = entry->wq_entry.wq;
-	entry->wrapped_entry->execute(entry->wrapped_entry);
-
-	// Modify entry to signal that inner entry "free will run separately - via completion of the original entry"
-	entry->wrapped_entry = NULL;
-	// Signal completion of entry wrapper.
-	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, (void *) wq_entry);
-	NFOUT;
-}
-
-static void local_disk_wq_entry_freer(struct nvmeibt_wq_entry *wq_entry)
-{
-	struct local_disk_wq_entry_wrapper_entry *entry;
-
-	NFIN;
-
-	entry = container_of(wq_entry, struct local_disk_wq_entry_wrapper_entry, wq_entry);
-
-	// Check if inner WQ still exists (in case it did NOT execute), if so free it.
-	if (entry->wrapped_entry) {
-		entry->wrapped_entry->free(entry->wrapped_entry);
-	}
-
-	NNVMEIBT_BM_FREE(trace_toma_local_disk_wq_entry_freer, entry);
-
-	NFOUT;
-}
-
-int nvmeibt_toma_local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id,
-											  const char *ld_display, struct nvmeibt_wq_entry *e)
-{
-	int rv = 0;
-	struct local_disk_wq_hash_ctx *specific_disk_ctx;
-	char wq_name[ASCII_UUID_MAX_STR_LEN + 16];
-
-	NFIN;
-
-	// Find the wq for ldisk_id
-	specific_disk_ctx = nvmeib_hash_search_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-	if (specific_disk_ctx) {
-		rv = nvmeibt_wq_addw(specific_disk_ctx->wq, e);
-		goto out;
-	}
-
-	// Allocate the hash member.
-	specific_disk_ctx = NNVMEIBT_BM_CALLOC(trace_toma_local_disk_specific_add_work, sizeof(*specific_disk_ctx));
-
-	// Create a new WQ for this drive/vendor combination.
-	snprintf(wq_name, sizeof(wq_name), "%s", ld_display);
-	specific_disk_ctx->wq = nvmeibt_wq_create(wq_name);
-	if (!specific_disk_ctx->wq) {
-		N_Ef(sj74lsx, "Failed to create wq for stock_disk=@STR", ld_display);
-		NNVMEIBT_BM_FREE(trace_2_toma_local_disk_specific_add_work, specific_disk_ctx);
-		rv = -1;
-		goto out;
-	}
-	specific_disk_ctx->ldisk_id = *ldisk_id;
-
-	// Add the wq wrapper to the hash.
-	nvmeib_hash_add_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str, specific_disk_ctx);
-	nvmeibt_wq_addw(specific_disk_ctx->wq, e);
-
-out:
-	NFOUT;
-	return rv;
-}
-
-/**
- * Stop & drain the wq for the specific local_disk, if it exists, and returns
- * when the WQ is drained.
- *
- * @author max (11/8/18)
- *
- * @param ldisk_id
- * @param vendor_id
- *
- */
-void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
-{
-	struct local_disk_wq_hash_ctx *specific_disk_wq_ctx;
-
-	NFIN;
-
-	specific_disk_wq_ctx = nvmeib_hash_delete_ascii_str(nvmesh_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-	if (specific_disk_wq_ctx) {
-		// drain the wq of this disk, to avoid anything from attempting execution on it.
-		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-		specific_disk_wq_ctx->wq = NULL;
-		// remove the local disk_wq from the wq's hash
-		NNVMEIBT_BM_FREE(nvmeibt_toma_stop_local_disk_wq_trace_bm_free, specific_disk_wq_ctx);
-	}
-	NFOUT;
-}
-
-void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
-{
-	struct local_disk_wq_hash_ctx *specific_disk_wq_ctx;
-
-	NFIN;
-
-	specific_disk_wq_ctx = nvmeib_hash_search_ascii_str(stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-	if (specific_disk_wq_ctx) {
-		// drain the wq of this disk, to avoid anything from attempting execution on it.
-		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-		specific_disk_wq_ctx->wq = NULL;
-
-		// remove the local disk_wq from the wq's hash
-		nvmeib_hash_delete_ascii_str(stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
-		NNVMEIBT_BM_FREE(nvmeibt_toma_stop_stock_local_disk_wq_1, specific_disk_wq_ctx);
-	}
-
-	NFOUT;
-}
-
-static struct local_disk_wq_entry_wrapper_entry* prepare_entry_with_ldisk_last_CHANGE_no(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
-{
-	struct local_disk_wq_entry_wrapper_entry	*entry_wrapper = NULL;
-	uint32_t									local_disk_last_CHANGE_no = local_disk->CHANGE_EVENT_counters.last_CHANGE_no;	// Freeze the value
-
-	if (!e->last_CHANGE_no) {
-		// We need to generate the version with which this execution starts, this is the first (and possibly only) link in a disk
-		// specific WQ execution
-		e->last_CHANGE_no = local_disk_last_CHANGE_no;
-		N_Tf(s8l30l5, "Initializing execution of wq for disk=@STR with last_CHANGE_no=@INT",
-			nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no);
-	}
-
-	// We check the version with which the WQ is submitted, if the disk version is different, we can't execute it,
-	// since this means that probably the WQ is a part of a chain that needs to be cut-off.
-	if (e->last_CHANGE_no != local_disk_last_CHANGE_no) {
-		N_Wf(bi4n6sg, "Unable to add work for specific disk=@STR because wq_last_CHANGE_no=@INT != last_CHANGE_no=@INT",
-			 nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no, local_disk_last_CHANGE_no);
-		goto free_resources;
-	}
-
-	N_Tf(d84k50j, "Starting execution of wq for disk=@STR with last_CHANGE_no=@INT", nvmeibt_local_disk_display(local_disk), e->last_CHANGE_no);
-
-	entry_wrapper = NNVMEIBT_BM_CALLOC(tvfhjwe, sizeof(*entry_wrapper));
-	entry_wrapper->wrapped_entry = e;
-	/* The active version is snapshotted - at THIS moment in time, while the current
-	   can change, as a result of DISK_CHANGE events, hence if the current changes,
-	   it will cause any entries that are inserted to the queue with the old version
-	   to be drained, regardless if they were inserted before or after the DISK_CHANGE
-	   event, as long as the event was not completed, when the event is completed -
-	   only then new entries will be allowed to execute as again active will match
-	   current, but new entries will be inserted only from the main thread hence
-	   exactly after the DISK_CHANGE event completes.*/
-	entry_wrapper->last_CHANGE_no = &local_disk->CHANGE_EVENT_counters.last_CHANGE_no;
-	entry_wrapper->wq_entry.type = "LOCAL_DISK_WRAPPER";
-	entry_wrapper->wq_entry.execute = local_disk_wq_entry_wrapper;
-	entry_wrapper->wq_entry.free = local_disk_wq_entry_freer;
-
-	goto out;
-
-free_resources:
-	NNVMEIBT_BM_FREE(vbus93o, entry_wrapper);
-
-out:
-	return entry_wrapper;
-}
-
-static void free_work_with_ldisk_last_CHANGE_no_entry(struct local_disk_wq_entry_wrapper_entry *entry_wrapper)
-{
-	NNVMEIBT_BM_FREE(cvvgs82, entry_wrapper);
-}
-
-int local_disk_specific_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
-														   bool is_stock_ldisk)
-{
-	int rv = 0;
-	struct nvmeibt_local_disk *local_disk = NULL;
-	struct local_disk_wq_entry_wrapper_entry *entry_wrapper = NULL;
-
-	NFIN;
-	N_Tf(whcia9g, "Adding work for disk=@STR is_stock=@BOOL", ld_display, is_stock_ldisk);
-
-	if (!is_stock_ldisk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
-		if (!local_disk) {
-			N_Tf(d4nk1sp, "couldn't find local_disk=@STR, trying in stock_local_disks", ld_display);
-		}
-	}
-	if (!local_disk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
-		if (!local_disk) {
-			N_Wf(vdxgaj2, "stock disk=@STR not found. Unable to add work.", ld_display);
-			rv = -1;
-			goto out;
-		}
-	}
-	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
-		N_Tf(4u2m9ak, "disk=@STR is_being_deleted. Skipping", ld_display);
-		rv = -1;
-		goto out;
-	}
-	if ((entry_wrapper = prepare_entry_with_ldisk_last_CHANGE_no(local_disk, e)) == NULL) {
-		rv = -1;
-		goto out;
-	}
-	rv = nvmeibt_toma_local_disk_specific_add_work(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, nvmeibt_local_disk_UUID(local_disk),
-																  nvmeibt_local_disk_display(local_disk), &entry_wrapper->wq_entry);
-	if (rv < 0)
-		free_work_with_ldisk_last_CHANGE_no_entry(entry_wrapper);
-out:
 	NFOUT;
 	return rv;
 }
@@ -2660,8 +2424,8 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	/* create work-queues */
 	// Init disk_wqs hash table.
-	nvmesh_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
-	stock_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(ebaimqx, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_ldisks_wq_hash", -1);
+	nvmeibt_global_get_global()->nvmesh_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
+	nvmeibt_global_get_global()->stock_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(ebaimqx, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_ldisks_wq_hash", -1);
 	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");

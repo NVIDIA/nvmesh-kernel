@@ -76,10 +76,6 @@ int nvmeibt_toma_restore_disk_structures_add_work(const struct nvmeibt_ascii_uui
 int nvmeibt_seg_metadata_ctrl_save_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e);
 int nvmeibt_toma_read_disk_from_stock_driver_add_work(struct nvmeibt_wq_entry *e);
 void nvmeibt_toma_abort_child_processes(void);
-int nvmeibt_toma_local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id,
-											  const char *ld_display, struct nvmeibt_wq_entry *e);
-void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id);
-void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id);
 void nvmeibt_topology_set_mgmt_updates_pause_state(int is_paused);
 
 void nvmeibt_server_lib_create(void);
