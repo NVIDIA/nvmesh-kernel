@@ -2763,6 +2763,10 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_BM_FREE(etnpa51, raft_long_msg_test_buf.data_buf);
 	HW_conf_free_tree(cur_topo->HW_mgmt_conf);
 	__clean_drives_specs();
+	nvmeibt_disk_free_all_at_exit();
+	nvmeibt_nic_free_all_at_exit();
+	nvmeibt_local_nic_free_all_at_exit();
+	nvmeibt_node_free_all_at_exit();
 }
 
 void nvmeibt_topology_set_raft_long_msg_test_appendix_len(int appendix_len)

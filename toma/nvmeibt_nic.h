@@ -35,6 +35,7 @@ enum nvmeibt_add_rv nvmeibt_nic_add(struct mm_nic_conf *conf, struct mm_node_con
 void nvmeibt_nic_detach_from_node(struct nvmeibt_nic *nic);
 void nvmeibt_nic_trim_unused_entries(int n_used);
 bool nvmeibt_nic_is_roce(enum nvmeib_rdma_transport transport);
+void nvmeibt_nic_free_all_at_exit(void);
 
 #endif
 

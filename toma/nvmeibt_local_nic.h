@@ -34,5 +34,6 @@ struct nvmeibt_local_nic {
 enum nvmeibt_add_rv nvmeibt_local_nic_add(char *config_str, int config_tag);
 void nvmeibt_local_nic_trim_unused_entries(int config_tag);
 struct nvmeibt_local_nic * nvmeibt_local_nic_nic_to_local_nic(struct nvmeibt_nic *nic);
+void nvmeibt_local_nic_free_all_at_exit(void);
 #endif // #ifndef NVMEIBT_LOCAL_NIC
 

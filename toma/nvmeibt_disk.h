@@ -57,7 +57,7 @@ char *nvmeibt_disk_get_leader_node_name(struct nvmeibt_disk *disk);
 char *nvmeibt_disk_get_applied_node_name(struct nvmeibt_disk *disk);
 char *nvmeibt_disk_get_node_name(const struct nvmeibt_disk *disk);
 enum nvmeibt_add_rv nvmeibt_disk_add(struct mm_disk_conf *conf, int idx);
-
+void nvmeibt_disk_free_all_at_exit(void);
 bool nvmeibt_disk_is_local_in_config(const struct nvmeibt_disk *disk);
 bool nvmeibt_disk_is_local(const struct nvmeibt_disk *disk);
 

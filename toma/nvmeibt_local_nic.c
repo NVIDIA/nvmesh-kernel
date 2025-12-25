@@ -69,7 +69,11 @@ out:
 	NFOUT;
 	return rv;
 }
-
+static void __local_nic_remove(struct nvmeibt_local_nic *local_nic)
+{
+	NNVMEIBT_HASH_DEL_OBJ(ajji8e3, &nvmeibt_global_get_global()->local_nics_hash, local_nic, local_nic);
+	NNVMEIBT_TOMA_FREE(ddii98w, local_nic);
+}
 void nvmeibt_local_nic_trim_unused_entries(int config_tag)
 {
 	struct nvmeibt_local_nic	*local_nic;
@@ -79,8 +83,7 @@ void nvmeibt_local_nic_trim_unused_entries(int config_tag)
 			N_Tf(inn87x, "Removing local nic: @UUID_LE with config tag @INT<@INT",
 				nvmeibt_local_nic_UUID(local_nic), local_nic->config_tag, config_tag);
 			NVMEIBT_HASH_MARK_OBJ_OUTDATED(fjuu873, local_nic, local_nic);
-			NNVMEIBT_HASH_DEL_OBJ(ajji8e3, &nvmeibt_global_get_global()->local_nics_hash, local_nic, local_nic);
-			NNVMEIBT_TOMA_FREE(ddii98w, local_nic);
+			__local_nic_remove(local_nic);
 		}
 	}
 	NFOUT;
@@ -94,4 +97,12 @@ struct nvmeibt_local_nic * nvmeibt_local_nic_nic_to_local_nic(struct nvmeibt_nic
 		}
 	}
 	return NULL;
+}
+
+void nvmeibt_local_nic_free_all_at_exit(void)
+{
+	struct nvmeibt_local_nic	*local_nic;
+	XHASHTABLE_FOR_EACH_SAFE(local_nic, &nvmeibt_global_get_global()->local_nics_hash) {
+		__local_nic_remove(local_nic);
+	}
 }

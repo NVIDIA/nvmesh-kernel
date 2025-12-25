@@ -264,6 +264,14 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 	NFOUT;
 }
 
+void nvmeibt_node_free_all_at_exit(void)
+{
+	struct nvmeibt_node		*node;
+	XHASHTABLE_FOR_EACH_SAFE(node, &nvmeibt_global_get_global()->nodes_hash) {
+		nvmeibt_node_remove(node);
+	}
+}
+
 void nvmeibt_node_cancel_send(struct nvmeibt_node *node)
 {
 	NFIN;

@@ -82,7 +82,7 @@ struct nvmeibt_node *nvmeibt_node_get_node_by_id(const union nvmeib_uuid *id);
    the return value is 0 is we set a new value or -1 if we failed
 */
 void nvmeibt_node_trim_unused_entries(int n_used);
-
+void nvmeibt_node_free_all_at_exit(void);
 struct nvmeibt_msg_request;
 void nvmeibt_node_cancel_send(struct nvmeibt_node *node);
 int nvmeibt_node_send(struct nvmeibt_node *node, struct nvmeibt_msg_request *req);

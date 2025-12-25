@@ -135,3 +135,10 @@ bool nvmeibt_nic_is_roce(enum nvmeib_rdma_transport transport)
 	return ((transport == rtr_roce) || (transport == rtr_multi));
 }
 
+void nvmeibt_nic_free_all_at_exit(void)
+{
+	struct nvmeibt_nic		*nic;
+	XHASHTABLE_FOR_EACH_SAFE(nic, &nvmeibt_global_get_global()->nics_hash) {
+		nic_remove(nic);
+	}
+}

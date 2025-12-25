@@ -270,6 +270,14 @@ void nvmeibt_disk_trim_unused_entries(int config_tag)
 	NFOUT;
 }
 
+void nvmeibt_disk_free_all_at_exit(void)
+{
+	struct nvmeibt_disk			*disk;
+	XHASHTABLE_FOR_EACH_SAFE(disk, &nvmeibt_global_get_global()->disks_hash) {
+		disk_remove(disk);
+	}
+}
+
 int nvmeibt_disk_print_status_line(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_disk *disk, int n_prefix_tabs)
 {
 	int i;
