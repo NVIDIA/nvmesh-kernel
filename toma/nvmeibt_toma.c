@@ -2235,32 +2235,36 @@ static void print_status_str(enum nvmeibs_toma_status_type status_type, int (*pr
 			MOD_STR, __DATE__, __TIME__, GIT_COMMIT_ID, GIT_BRANCH, TOMA_SW_COMPATIBILITY_VER, NVMEIBT_CLIENT_PROTO_VERSION);
 	}
 
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL) {
-		// static_mem_alloc_print_status(printf_fn, printf_ctx);
-		last_time_print_status(printf_fn, printf_ctx);
+	if (nvmeibt_global_get_global()) {		// Protect against early call too print before topology is initialized
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL) {
+			// static_mem_alloc_print_status(printf_fn, printf_ctx);
+			last_time_print_status(printf_fn, printf_ctx);
+		}
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_RAFT)
+			nvmeibt_raft_print_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_DSEG)
+			nvmeibt_seg_active_print_all_seg_actives_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_BDEV)
+			nvmeibt_block_device_print_blkdevs_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_DISK)
+			nvmeibt_disk_print_disks_status(printf_fn, printf_ctx);
 	}
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_RAFT)
-		nvmeibt_raft_print_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_DSEG)
-		nvmeibt_seg_active_print_all_seg_actives_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_BDEV)
-		nvmeibt_block_device_print_blkdevs_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_DISK)
-		nvmeibt_disk_print_disks_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_IB)
 		nvmeibt_nm_print_status(nw_node, printf_fn, printf_ctx);
 	// if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_RTM)
 	// 	nvmeibt_rtm_print_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_RECOVER)
 		nvmeibt_recovery_print_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_CFG)
-		nvmeibt_read_config_print_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_TOPO)
-		nvmeibt_topology_print_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_LEADER)
-		nvmeibt_leader_print_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_LOCAL_DISKS)
-		nvmeibt_local_disk_print_status(printf_fn, printf_ctx);
+	if (nvmeibt_global_get_global()) {		// Protect against early call too print before topology is initialized
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_CFG)
+			nvmeibt_read_config_print_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_TOPO)
+			nvmeibt_topology_print_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_LEADER)
+			nvmeibt_leader_print_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_LOCAL_DISKS)
+			nvmeibt_local_disk_print_status(printf_fn, printf_ctx);
+	}
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_MEM_ALLOC)
 		nvmeibt_print_alloc_free_summary_table(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ZEROING)
