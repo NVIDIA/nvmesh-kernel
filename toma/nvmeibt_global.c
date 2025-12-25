@@ -13,7 +13,8 @@
 #include "nvmeibt_kafka.h"
 #include "interfaces/log/nvmeibt_binary_tracing.h"
 
-struct nvmeibt_topology global_ctx;
+static struct nvmeibt_topology *_global_ctx_ptr = NULL;
+#define global_ctx (*_global_ctx_ptr)
 int64_t nvmeibt_follower_keep_alive_secs = MGMT_KEEP_ALIVE_SECS_DEFAULT;
 int64_t nvmeibt_leader_keep_alive_secs = MGMT_LEADER_KEEP_ALIVE_SECS_DEFAULT;
 
@@ -29,7 +30,7 @@ struct nvmeibt_global_adaptive_timeouts_ctx		my_nvmeibt_global_adaptive_timeouts
 void nvmeibt_global_init(void)
 {
 	NFIN;
-	memset(&global_ctx, 0, sizeof(global_ctx));
+	_global_ctx_ptr = calloc(1, sizeof(*_global_ctx_ptr));
 	global_ctx.persistent_toma_software_version = TOMA_SW_COMPATIBILITY_VER;
 	global_ctx.mgmt_DB_uuid = nvmeib_uuid_null_val;
 	getnstimeofday(&(global_ctx.startup_timespec));

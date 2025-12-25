@@ -2767,6 +2767,7 @@ void nvmeibt_topology_free_resources(void)
 	nvmeibt_nic_free_all_at_exit();
 	nvmeibt_local_nic_free_all_at_exit();
 	nvmeibt_node_free_all_at_exit();
+	free(cur_topo);
 }
 
 void nvmeibt_topology_set_raft_long_msg_test_appendix_len(int appendix_len)
