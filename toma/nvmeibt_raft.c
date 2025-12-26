@@ -1471,8 +1471,7 @@ static void write_leader_name_to_file(const char *node_name)
 {
 	int 					fd = -1;
 	const char				file_name[] = TOMA_LOG_DIR"/toma_leader_name";
-	char					leader_str[NVMEIBT_MAX_NODE_NAME_LENGTH];
-	int						written;
+	char					leader_str[NVMEIB_HOST_NAME_LEN+4];
 
 	NFIN;
 	if (nvmeibt_toma_is_running_as_a_utility()) {
@@ -1482,13 +1481,13 @@ static void write_leader_name_to_file(const char *node_name)
 	if (fd < 0) {
 		N_ETf(error_raft_write_leader_name_to_file, "Error while opening the file @FILE_NAME for writing @AUTO_ERRNO", file_name);
 		goto out;
+	} else {
+		int written = snprintf(leader_str, NVMEIB_HOST_NAME_LEN, "%s\n", node_name);
+		if (NNVMEIBT_PWRITE(warn_raft_write_leader_name_to_file, fd, leader_str, written, 0, 0) < 0)
+			goto out;
 	}
-	written = snprintf(leader_str, min((int)sizeof(leader_str), NVMEIB_HOST_NAME_LEN), "%s\n", node_name);
-	if (NNVMEIBT_PWRITE(warn_raft_write_leader_name_to_file, fd, leader_str, written, 0, 0) < 0)
-		goto out;
 out:
 	NNVMEIBT_CLOSE(trace_1_raft_write_leader_name_to_file, fd);
-
 	NFOUT;
 }
 
