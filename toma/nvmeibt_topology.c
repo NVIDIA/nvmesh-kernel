@@ -1917,8 +1917,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 		handle_client_disconnect_event(&msg_buf->client_disconnect_msg_hdr);
 		break;
 	case NVMEIBS_TOMA_WRITE_STATUS_REQ:
-		nvmeibt_toma_write_status_srv_req(msg_buf->status_req_msg.type, msg_buf->status_req_msg.fname,
-			msg_buf->status_req_msg.handle, msg_buf->status_req_msg.max_length, msg_buf->status_req_msg.handle_req);
+		nvmeibt_toma_write_status_srv_req(&msg_buf->status_req_msg);
 		break;
 	case NVMEIBS_TOMA_TRIGGER_JGC:
 		nvmeibt_recovery_trigger_local_seg_JGC(msg_buf->trigger_JGC_cmd.disk_segment_urn_uuid_str, msg_buf->trigger_JGC_cmd.disk_id_str);
