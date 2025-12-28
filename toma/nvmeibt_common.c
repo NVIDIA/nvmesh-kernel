@@ -1218,12 +1218,12 @@ static inline void *padded_mmap_aligned_addr(void* addr)
    This interface should seem as if the original mmap was used but with the added protection given by the extra protected pages */
 void *nvmeibt_mmap(size_t length, int fd)
 {
+	const size_t padded_length = padded_mmap_length(length);
 	void *mapped_padded, *mapped;
 
-	mapped_padded = mmap(NULL, padded_mmap_length(length),\
-						 PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	mapped_padded = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (mapped_padded == MAP_FAILED) {
-		N_Ef(error_common_nvmeibt_mmap, "nvmeibt_mmap(length=@LENGTH_SIZET, fd=@FD) failed on mmap().", length, fd);
+		N_Ef(salddbmmf0, "(length=@LENGTH_SIZET, fd=@FD) failed on mmap().", length, fd);
 		mapped = MAP_FAILED;
 		goto out;
 	}
@@ -1235,9 +1235,7 @@ void *nvmeibt_mmap(size_t length, int fd)
 		mapped = MAP_FAILED;
 		goto skip_mapped_mmap;
 	}
-	init_padded_mmap_magic_number_struct(mapped_padded,\
-										 padded_mmap_length(length),\
-										 mapped_padded);
+	init_padded_mmap_magic_number_struct(mapped_padded, padded_length, mapped_padded);
 	if (mprotect(mapped_padded, 1, PROT_NONE) < 0) {
 		mapped = MAP_FAILED;
 		goto skip_mapped_mmap;
@@ -1249,10 +1247,10 @@ skip_mapped_mmap:
 	if (mapped == MAP_FAILED) {
 		int save_errno = errno;
 		int rv;
-		N_Ef(error_1_common_nvmeibt_mmap, "nvmeibt_mmap(length=@LENGTH_SIZET, fd=@FD) failed, unmapping.", length, fd);
+		N_Ef(salddbmmf1, "(length=@LENGTH_SIZET, fd=@FD) failed, unmapping.", length, fd);
 		memset(mapped_padded, 0, sizeof(struct padded_mmap_magic_number));
-		rv = munmap(mapped_padded, padded_mmap_length(length));
-		NTOMA_ASSERT(error_2_common_nvmeibt_mmap, rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
+		rv = munmap(mapped_padded, padded_length);
+		NTOMA_ASSERT(salddbmmf2, rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
 		mapped_padded = NULL;
 		errno = save_errno;
 	}
@@ -1275,7 +1273,7 @@ int nvmeibt_munmap(void *addr, size_t length)
 
 	NFIN;
 	if ((!is_addr_page_aligned(addr)) || (uintptr_t)addr < 2*PAGE_SIZE) {
-		NTOMA_ASSERT(error_common_nvmeibt_munmap, 0, "Invalid addr=@ADDR_PTR, length=@LENGTH_SIZET",\
+		NTOMA_ASSERT(salddbmmf5, 0, "Invalid addr=@ADDR_PTR, length=@LENGTH_SIZET",\
 					   addr, length);
 		rv = -1;
 		errno = EINVAL;
@@ -1289,7 +1287,7 @@ int nvmeibt_munmap(void *addr, size_t length)
 	if (magic_num_struct->addr 		!= mapped_padded ||\
 		magic_num_struct->length 	!= length_padded ||\
 		magic_num_struct->magic_num != PADDED_MMAP_MAGIC_NUM) {
-		NTOMA_ASSERT(error_1_common_nvmeibt_munmap, 0, "Magic number mismatch, expected: mapped_padded=@MAPPED_PADDED, length_padded=@LENGTH_PADDED, magic_num=@MAGIC_NUM, found: mapped_padded=@MAPPED_PADDED, length_padded=@LENGTH_PADDED, magic_num=@MAGIC_NUM",\
+		NTOMA_ASSERT(salddbmmf6, 0, "Magic number mismatch, expected: mapped_padded=@MAPPED_PADDED, length_padded=@LENGTH_PADDED, magic_num=@MAGIC_NUM, found: mapped_padded=@MAPPED_PADDED, length_padded=@LENGTH_PADDED, magic_num=@MAGIC_NUM",\
 					   mapped_padded, length_padded, PADDED_MMAP_MAGIC_NUM,\
 					   magic_num_struct->addr, magic_num_struct->length,\
 					   magic_num_struct->magic_num);
@@ -1301,7 +1299,7 @@ int nvmeibt_munmap(void *addr, size_t length)
 	mprotect(mapped_padded, 1, PROT_WRITE);
 	memset(mapped_padded, 0, sizeof(struct padded_mmap_magic_number));
 	rv = munmap(mapped_padded, length_padded);
-	NTOMA_ASSERT(oo03ww7, rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
+	NTOMA_ASSERT(salddbmmf8, rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
 
 out:
 	NFOUT;
