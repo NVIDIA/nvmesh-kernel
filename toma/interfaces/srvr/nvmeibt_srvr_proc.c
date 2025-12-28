@@ -97,9 +97,90 @@ int nvmeibt_toma_announce_ready(int is_on)
 	return rv;
 }
 
-/***************************** Status proc reply messages *******************************/
+/***************************** mmap shared memory (server /proc files, disk locks file) *******************************/
 #include <sys/mman.h>
+/* mmap wrapper that creates a protected page before and after the allocation. Must be freed using nvmeibt_munmap(),
+	This interface should seem as if the original mmap was used but with the added protection given by the extra protected pages  */
+static inline size_t padded_mmap_length(size_t length) { return length + 2 * PAGE_SIZE; }
 
+#define PADDED_MMAP_MAGIC_NUM 0x726f656568657265LLU		// MAGIC cookie to protect against buffer overrun in the first page
+
+struct padded_mmap_magic_number {
+	long long unsigned int magic_num;
+	void *addr;
+	size_t length;
+} __attribute__ ((packed));
+
+static inline void init_padded_mmap_magic_number_struct(struct padded_mmap_magic_number *me, size_t length)
+{
+	me->addr = (void*)me;
+	me->length = length;
+	me->magic_num = PADDED_MMAP_MAGIC_NUM;
+}
+
+static void *nvmeibt_mmap(size_t length, int fd)
+{
+	const size_t padded_length = padded_mmap_length(length);
+	void *mapped_padded = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);	// Allocating 2 pages more than length requested with no access permissions PROT_NONE
+	void *mapped = MAP_FAILED;
+
+	if (mapped_padded == MAP_FAILED) {
+		N_Ef(salddbmmf0, "(length=@ZX, fd=@FD) failed on mmap().", length, fd);
+		return MAP_FAILED;
+	}
+
+	if (mprotect(mapped_padded, 1, PROT_WRITE) >= 0) {		// mprotect() __len == 1 so we only modify permissions for a single page. In case the struct is bigger than the size of one page we crash immediately after when we try to write to the 2nd page
+		init_padded_mmap_magic_number_struct(mapped_padded, padded_length);			// Writing to the first page details about the allocation and setting it back to no access permissions
+		if (mprotect(mapped_padded, 1, PROT_NONE) >= 0) {
+			const int permission = PROT_READ | PROT_WRITE;
+			const int flags = MAP_FIXED | MAP_SHARED;
+			mapped = mmap(mapped_padded + PAGE_SIZE, length, permission, flags, fd, 0 /*offset*/);	// Override the last mmap (except for the first and last pages)
+		}
+	}
+	if (mapped == MAP_FAILED) {		// Have to unmap the +2 pages larger arre
+		int save_errno = errno;
+		int unmap_rv;
+		N_Ef(salddbmmf1, "(length=@ZX, fd=@FD) failed, unmapping.", length, fd);
+		memset(mapped_padded, 0, sizeof(struct padded_mmap_magic_number));
+		unmap_rv = munmap(mapped_padded, padded_length);
+		NTOMA_ASSERT(salddbmmf2, unmap_rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
+		mapped_padded = NULL;
+		errno = save_errno;
+	}
+	return mapped;
+}
+
+static int nvmeibt_munmap(void *addr, size_t length)
+{
+	int rv = -1;
+	void *mapped_padded = addr - PAGE_SIZE;
+	const size_t length_padded = padded_mmap_length(length);
+	const struct padded_mmap_magic_number *me = mapped_padded;
+
+	NFIN;
+	if ((((uintptr_t)addr % PAGE_SIZE) != 0) || (uintptr_t)addr < 2*PAGE_SIZE) {
+		NTOMA_ASSERT(salddbmmf5, false, "Invalid addr=@PTR, length=@ZX", addr, length);
+		errno = EINVAL;
+		goto out;
+	}
+	mprotect(mapped_padded, 1, PROT_READ);
+	if ((me->addr != (void*)me) || (me->length != length_padded) || (me->magic_num != PADDED_MMAP_MAGIC_NUM)) {
+		NTOMA_ASSERT(salddbmmf6, false, "Magic number mismatch, expected: {@PTR, len=@ZX, magic=@LLX}, found: {@PTR, len=@ZX, magic=@LLX}",
+					   mapped_padded, length_padded, PADDED_MMAP_MAGIC_NUM,
+					   me->addr, me->length, me->magic_num);
+		errno = EINVAL;
+	} else {
+		mprotect(mapped_padded, 1, PROT_WRITE);
+		memset(mapped_padded, 0, sizeof(struct padded_mmap_magic_number));
+		rv = munmap(mapped_padded, length_padded);
+		NTOMA_ASSERT(salddbmmf8, rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
+	}
+out:
+	NFOUT;
+	return rv;
+}
+
+/***************************** Status proc reply messages *******************************/
 struct status_str_ctx {					// Write status to mmap proc file in response to server request
 	char 	*buf;
 	size_t 	max_len;
@@ -279,7 +360,7 @@ struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char *disk_uuid, uint64_
 	int fd = -1;
 	n_bytes = roundup(n_bytes, PAGE_SIZE);		// Align to page size to allow toma padding of pages.
 	snprintf(file_name, sizeof(file_name), TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s", 128, disk_uuid);
-	N_Tf(salddbmm0, "mmap file @FILE_NAME n_bytes=@LENGTH_SIZET at offset=@OFFSET_INT n_blksets=@UINT64_TX", file_name, n_bytes, offset, n_blksets);
+	N_Tf(salddbmm0, "mmap file @FILE_NAME n_bytes=@ZX at offset=@OFFSET_INT n_blksets=@UINT64_TX", file_name, n_bytes, offset, n_blksets);
 	fd = NNVMEIBT_OPEN(salddbmm1, file_name, O_RDWR);
 	if (fd < 0) {
 		N_Wf(salddbmm2, "Failed to open @FILE_NAME (@AUTO_ERRNO). Possibly was removed immediatelly", file_name);

@@ -8057,24 +8057,6 @@
         "type": "long",
         "fmt": "%lu"
     },
-    "@LENGTH_PADDED": {
-        "size": 64,
-        "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__histogram": {
-            "0x%zx": 47
-        }
-    },
-    "@LENGTH_SIZET": {
-        "size": 64,
-        "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__histogram": {
-            "0x%zx": 21
-        }
-    },
     "@LEN_LLONG": {
         "size": 64,
         "type": "s64",
@@ -9033,15 +9015,6 @@
             "%#x": 4
         }
     },
-    "@MAGIC_NUM": {
-        "size": 64,
-        "type": "s64",
-        "fmt": "0x%llx",
-        "final": true,
-        "__histogram": {
-            "0x%llx": 47
-        }
-    },
     "@MAGIC_STR": {
         "size": "string",
         "type": "string",
@@ -9094,15 +9067,6 @@
         "final": true,
         "__histogram": {
             "0x%.16llx": 4
-        }
-    },
-    "@MAPPED_PADDED": {
-        "size": 64,
-        "type": "const void*",
-        "fmt": "%p",
-        "final": true,
-        "__histogram": {
-            "%p": 47
         }
     },
     "@MAP_MR_F": {
@@ -19451,11 +19415,7 @@
     "@ZX": {
         "size": 64,
         "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__histogram": {
-            "0x%zx": 8
-        }
+        "fmt": "0x%zx"
     },
     "@_12": {
         "size": 32,

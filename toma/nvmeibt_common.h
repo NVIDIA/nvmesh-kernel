@@ -794,24 +794,11 @@ char* trim_whitespace(char *str);
 
 #define ZEROINIT(x) do {memset(&x, 0, sizeof(x));} while (0)
 
-/* mmap wrapper that creates a protected page before and after the allocation.
-   Must be freed using nvmeibt_munmap().
-   Always uses the MAP_SHARED flag, offset = 0, permissions = PROT_READ | PROT_WRITE. */
-void *nvmeibt_mmap(size_t length, int fd);
-/* mmap wrapper that unmaps anything mapped using nvmeibt_mmap */
-int nvmeibt_munmap(void *addr, size_t length);
-
-#define ALIGNED_128KB (128ll * 1024)
 #define ALIGNED_1MB (1024ll * 1024)
-
-static inline BOOL is_1MB_aligned(uint64_t pba, int pblk_size)
-{
-        return ((pba * pblk_size) % ALIGNED_1MB) == 0;
-}
 
 static inline BOOL is_128KB_aligned(uint64_t pba, int pblk_size)
 {
-        return ((pba * pblk_size) % ALIGNED_128KB) == 0;
+        return ((pba * pblk_size) % (128ll * 1024)) == 0;
 }
 
 #include "../common/compat/kr_incs_time_rdtsc.h"
