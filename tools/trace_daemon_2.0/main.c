@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include "mmap_manager.h"
 #include "trace_channel.h"
+#include "io_pet_channel.h"
 
 #define __MODULE_HDR "trace_daemon"
 #include "trace_daemon_common.h"
@@ -42,6 +43,9 @@ trace_daemon_cfg_t trace_cfg = INIT_TRACE_CFG;
 /* Global tracer context.
    Must be global as it is sharred between signal and regular context */
 trace_channel_ctx_t ctx[MAX_TRACE_CHANNELS] = {{0}};
+
+/* IO PET channel context (separate from regular trace channels) */
+io_pet_channel_t* io_pet_ch = NULL;
 
 static const char *nvmesh_is_prod_env_var_name = "NVMESH_IS_PRODUCTION";
 
@@ -159,6 +163,8 @@ void reconf(trace_channel_ctx_t ctx[])
 		if(ctx[i].ch)
 			reconf_trace_channel(ctx[i].ch);
 	}
+	if(io_pet_ch)
+		reconf_io_pet_channel(io_pet_ch);
 }
 
 void overide_default_compress_cfg(void)
@@ -274,6 +280,9 @@ int main(int argc, char* argv[])
 			usleep(PING_INTERVAL); /* Wait until control proc is available */
 		while(access(MMAP_PROC, F_OK) == -1)
 			usleep(PING_INTERVAL); /* Wait until control proc is available */
+		while(access(IO_PET_PROC_PATH, F_OK) == -1)
+			usleep(PING_INTERVAL); /* Wait until control proc is available */
+
 		_info("Control proc available");
 		{
 			/* Start with mmap manager */
@@ -302,13 +311,29 @@ int main(int argc, char* argv[])
 				fclose(flist);
 			}
 
+			/* Initialize IO PET channel */
+			_info("Initializing IO PET channel");
+			io_pet_ch = init_io_pet_channel(dir, IO_PET_CHANNEL_NAME);
+			if(!io_pet_ch){
+				_suicide("Failed to init IO PET channel");
+			}
+			if(start_io_pet_channel(io_pet_ch)){
+				_suicide("Failed to start IO PET channel");
+			}
+			
 			_info("Closed control proc, working");
+			//There is a bug here, in some cases, the thread may not start running or trying to read from the proc 
+			//but we will call abort functionality. We need some barrier here
+
 
 			for(i = 0; i < MAX_TRACE_CHANNELS; ++i)
 			{
 				destroy_trace_channel(ctx[i].ch);
 				ctx[i].ch = NULL;
 			}
+			
+			destroy_io_pet_channel(io_pet_ch);
+			io_pet_ch = NULL;
 
 			destroy_mmap_manager(mmap);
 

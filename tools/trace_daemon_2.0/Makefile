@@ -14,7 +14,7 @@ NVMESH_SRC_DIR ?= ../..
 
 EXE := trace_daemon
 TEST_EXE := unlink_list_test
-OBJ := main.o trace_channel.o mmap_manager.o capuch_worker.o unlink_list.o
+OBJ := main.o trace_channel.o mmap_manager.o capuch_worker.o unlink_list.o io_pet_channel.o
 OBJ := $(foreach obj,$(OBJ),$(shell realpath $(obj)))
 TEST_OBJ := unlink_list_test.o unlink_list_test_impl.o
 TOOLS_LIB := -I$(NVMESH_SRC_DIR)/tools
