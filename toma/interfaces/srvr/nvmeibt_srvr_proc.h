@@ -36,7 +36,13 @@ int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const 
 struct nvmeibt_Str;
 int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str); // Appends the csv to already allocated (possibly empty) string. Upon error return negative rv, 0 on success
 int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str); // Same as above
-#define LOCKS_INFO_FILE    TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s"          	// uuid of disk
+
+struct mmap_tbl {
+	void *addr;					// Address of locks table memory map. On alloc error returned NULL
+	size_t length;				// Actual length[bytes] of allocated memory. On error == 0. Might be slightly bigger than requested, due to padding
+};
+struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char* disk_uuid, uint64_t n_blksets, uint64_t offset /* typically = 0 */);
+int             nvmeib_srvr_api_lib_locks_map_put(const char *disk_uuid, struct mmap_tbl memory_returned_by_valid_get);		// Upon error returns negative
 
 int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh);	//   Bind to   nvmesh/nvme driver
 int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh);	// UnBind from nvmesh/nvme driver

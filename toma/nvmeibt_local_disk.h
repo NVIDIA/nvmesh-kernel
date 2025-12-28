@@ -38,11 +38,6 @@ struct nvmeibt_local_disk_config {
 	char										pcie_bdf[NVMEIBS_DISKS_CSV_STATUS_LEN];
 };
 
-struct mmap_tbl {
-	void *addr;
-	size_t length;
-};
-
 struct format_details {
 	struct nvmeibt_ascii_uuid							ldisk_id;
 	struct nvmeibt_ascii_uuid							native_serial;

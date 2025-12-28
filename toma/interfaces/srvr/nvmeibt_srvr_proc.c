@@ -201,3 +201,38 @@ int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh)
 {
 	return __nvmeib_srvr_api_lib_disk_do_bind_unbind(disk_bdf, is_nvmesh, false);
 }
+
+#include <sys/mman.h>
+struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char *disk_uuid, uint64_t n_blksets, uint64_t offset)
+{
+	char file_name[256];
+	struct mmap_tbl rv = { .addr = NULL, .length = 0};
+	size_t n_bytes = n_blksets * NVMEIB_LOCK_BLKSET_ENTRY_SIZE;	// Same calculation as in scan_locks_ec or disk_lock_allocate_(). Each blockset has a ram blockset-entry which we want to access
+	int fd = -1;
+	n_bytes = roundup(n_bytes, PAGE_SIZE);		// Align to page size to allow toma padding of pages.
+	snprintf(file_name, sizeof(file_name), TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s", 128, disk_uuid);
+	N_Tf(salddbmm0, "mmap file @FILE_NAME n_bytes=@LENGTH_SIZET at offset=@OFFSET_INT n_blksets=@UINT64_TX", file_name, n_bytes, offset, n_blksets);
+	fd = NNVMEIBT_OPEN(salddbmm1, file_name, O_RDWR);
+	if (fd < 0) {
+		N_Wf(salddbmm2, "Failed to open @FILE_NAME (@AUTO_ERRNO). Possibly was removed immediatelly", file_name);
+		return rv;
+	}
+	rv.addr = nvmeibt_mmap(n_bytes, fd);
+	if (rv.addr == MAP_FAILED) {
+		N_Wf(salddbmm3, "Failed to mmap locks table of disk=@STR @AUTO_ERRNO. Possibly was removed immediatelly", disk_uuid);
+		rv.addr = NULL;
+	} else {
+		rv.length = n_bytes;
+	}
+	NNVMEIBT_CLOSE(salddbmm6, fd); /* closing file descriptor does not unmap the region */
+	return rv;
+}
+
+int nvmeib_srvr_api_lib_locks_map_put(const char *disk_uuid, struct mmap_tbl m)
+{
+	if (m.addr && (nvmeibt_munmap(m.addr, m.length) < 0)) {
+		N_Wf(vjs9o39, "Failed to munmap disk=@STR locks table @AUTO_ERRNO", disk_uuid);
+		return -1;
+	}
+	return 0;
+}

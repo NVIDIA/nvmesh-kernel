@@ -101,7 +101,6 @@
    */
 
 #include <sys/types.h>
-#include <sys/mman.h>
 #include <linux/types.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -469,63 +468,26 @@ BOOL nvmeibt_local_disk_is_md_supported(const struct nvmeibt_local_disk *local_d
 	return (local_disk && (local_disk->from_config.metadata_n_bytes != 0));
 }
 
-#define DISK_MMAP_PROC_FILE_NAME_MAX_LEN	(128)
-
 static int mmap_locks_table(struct nvmeibt_local_disk *local_disk)
 {
 	const char *disk_name = nvmeibt_local_disk_display(local_disk);
 	const uint64_t n_4k_blocks = DIV_ROUND_UP(local_disk->from_config.n_pblk * local_disk->from_config.pblk_size, 4096);
 	const uint64_t n_blksets = DIV_ROUND_UP(n_4k_blocks, NUM_4KBLKS_IN_BLKSET);
 	off_t offset = 0;				// For simplicity: Toma maps the entire disk locks table, even if it includes jbods segments or unsed areas.
-	size_t length;
-	char file_name[DISK_MMAP_PROC_FILE_NAME_MAX_LEN +1];
-	int fd = -1;
-	void *addr = NULL;
-	int rv = -1;
-
-	NFIN;
-
-	N_Tf(bys85k3, "mmap locks table of disk=@STR", disk_name);
-
 	if (local_disk->mmap_disk_locks_tbl.addr) {
 		N_Tf(sh3ifu6, "disk=@STR locks table is already mmaped", disk_name);
-		rv = 0;
-		goto out;
+		return 0;
+	} else {
+		struct mmap_tbl mtbl;
+		N_Tf(sh3ifu7, "disk=@STR mmap at offset=@OFFSET_INT n_blksets=@UINT64_TX n_4k_blocks=@UINT64_TX", disk_name, offset, n_blksets, n_4k_blocks);
+		mtbl = nvmeib_srvr_api_lib_locks_map_get(nvmeibt_local_disk_UUID_str(local_disk), n_blksets, offset);
+		if (mtbl.addr) {
+			local_disk->mmap_disk_locks_tbl = mtbl;
+			N_Tf(ca8ak20, "mmap locks table of disk=@STR: addr @ADDR_PTR, length @LENGTH_LONG ", disk_name, mtbl.addr, mtbl.length);
+			return 0;
+		} // else, dont touch local_disk->mmap_disk_locks_tbl.
+		return -1;
 	}
-	length = n_blksets * NVMEIB_LOCK_BLKSET_ENTRY_SIZE;	// Same calculation as in scan_locks_ec or disk_lock_allocate_(). Each blockset has a ram blockset-entry which we want to access
-	length = roundup(length, PAGE_SIZE);		// Align to page size to allow toma padding of pages.
-
-	//open the disk's locks proc file
-	snprintf(file_name, sizeof(file_name), LOCKS_INFO_FILE,
-			 (int) sizeof_member(struct nvmeibt_ascii_uuid, str),
-			 nvmeibt_local_disk_UUID_str(local_disk));
-	N_Tf(sh3ifu7, "disk=@STR mmap file @FILE_NAME length=@LENGTH_SIZET at offset=@OFFSET_INT n_blksets=@UINT64_TX n_4k_blocks=@UINT64_TX", disk_name, file_name, length, offset, n_blksets, n_4k_blocks);
-	if ((fd = NNVMEIBT_OPEN(trace_3_local_disk_mmap_locks_table, file_name, O_RDWR)) < 0) {
-		N_Wf(warn_local_disk_mmap_locks_table, "Failed to open @FILE_NAME (@AUTO_ERRNO). Possibly was removed immediatelly", file_name);
-		goto out;
-	}
-
-	//memory map
-	addr = nvmeibt_mmap(length, fd);
-	if (addr == MAP_FAILED) {
-		N_Wf(fhs8i3o, "Failed to mmap locks table of disk=@STR '@AUTO_ERRNO. Possibly was removed immediatelly'",
-			disk_name);
-		goto close_fd;
-	}
-
-	local_disk->mmap_disk_locks_tbl.addr = addr;
-	local_disk->mmap_disk_locks_tbl.length = length;
-
-	N_Tf(ca8ak20, "mmap locks table of disk=@STR: addr @ADDR_PTR, length @LENGTH_LONG ",
-		disk_name, addr, length);
-	rv = 0;
-
-close_fd:
-	NNVMEIBT_CLOSE(trace_5_local_disk_mmap_locks_table, fd); /* closing file descriptor does not unmap the region */
-
-out:
-	NFOUT;
-	return rv;
 }
 
 static int nvmeibt_local_disk_munmap_mem_tbls(struct nvmeibt_local_disk *local_disk)
@@ -547,19 +509,9 @@ static int nvmeibt_local_disk_munmap_mem_tbls(struct nvmeibt_local_disk *local_d
 
 	if (!local_disk->mmap_disk_locks_tbl.addr) {
 		N_Tf(xvq7i29, "disk=@STR locks table is NOT mmaped", nvmeibt_local_disk_display(local_disk));
-		goto out;
+	} else {
+		rv = nvmeib_srvr_api_lib_locks_map_put(nvmeibt_local_disk_UUID_str(local_disk), local_disk->mmap_disk_locks_tbl);
 	}
-
-	// The dirty-bits use the same locks_tbl mmap with a different offset, hence
-	//  no need to unmap them separately
-	if (nvmeibt_munmap(local_disk->mmap_disk_locks_tbl.addr,
-			   local_disk->mmap_disk_locks_tbl.length) == -1) {
-		N_Wf(vjs9o39, "Failed to munmap disk=@STR locks table '@AUTO_ERRNO'", nvmeibt_local_disk_display(local_disk));
-		rv = -1;
-		goto out;
-	}
-
-out:
 	local_disk->mmap_disk_locks_tbl.addr = NULL;
 	local_disk->mmap_disk_locks_tbl.length = -1;
 	NFOUT;
