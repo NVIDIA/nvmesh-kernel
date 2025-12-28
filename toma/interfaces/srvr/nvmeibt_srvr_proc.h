@@ -15,6 +15,9 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 int nvmeibt_toma_get_msg_from_local_server(     struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
 int nvmeibt_toma_send_buf_to_client(      const /* struct nvmeibs_toma_client_proc_buf */ char *buf, int buf_len, const char *clnt_host);
 
+int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req,
+	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx));
+
 /***************************** Netlink: New Toma-API vs kernel server, used for disk related communication */
 struct km_comm_msg_hdr {
 	int len; /* the len of data[0] */

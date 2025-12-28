@@ -1906,9 +1906,11 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 	case NVMEIBS_TOMA_REPORT_EVENT_CLIENT_DISCONNECT:
 		handle_client_disconnect_event(&msg_buf->client_disconnect_msg_hdr);
 		break;
-	case NVMEIBS_TOMA_WRITE_STATUS_REQ:
-		nvmeibt_toma_write_status_srv_req(&msg_buf->status_req_msg);
+	case NVMEIBS_TOMA_WRITE_STATUS_REQ: {
+		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
+		(void)nvmeib_srvr_api_lib_fill_and_send_status_reply(&msg_buf->status_req_msg, print_status_str);
 		break;
+	}
 	case NVMEIBS_TOMA_TRIGGER_JGC:
 		nvmeibt_recovery_trigger_local_seg_JGC(msg_buf->trigger_JGC_cmd.disk_segment_urn_uuid_str, msg_buf->trigger_JGC_cmd.disk_id_str);
 		break;

@@ -54,7 +54,6 @@ unsigned int nvmeibt_toma_get_bin_log_file_size(void);
 void *nvmeibt_toma_extract_user(void *buf);
 void nvmeibt_toma_on_new_disk(void);
 
-int nvmeibt_toma_write_status_srv_req(const struct nvmeibs_msg_s2t_toma_status_req *req);
 bool nvmeibt_toma_is_in_shutdown(void);
 bool is_shutdown_me_only(void);
 
