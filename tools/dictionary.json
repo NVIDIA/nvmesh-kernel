@@ -2793,15 +2793,6 @@
             "%llu": 4
         }
     },
-    "@CUR_LEN": {
-        "size": 64,
-        "type": "long",
-        "fmt": "%zu",
-        "final": true,
-        "__histogram": {
-            "%zu": 56
-        }
-    },
     "@CUR_LLONG": {
         "size": 64,
         "type": "s64",
@@ -8117,15 +8108,6 @@
         },
         "__collision": true
     },
-    "@LEN_NEEDED": {
-        "size": 64,
-        "type": "long",
-        "fmt": "%zu",
-        "final": true,
-        "__histogram": {
-            "%zu": 56
-        }
-    },
     "@LEN_NLBAS": {
         "size": 64,
         "type": "s64",
@@ -9329,15 +9311,6 @@
         "final": true,
         "__histogram": {
             "%d": 6
-        }
-    },
-    "@MAX_LEN": {
-        "size": 64,
-        "type": "long",
-        "fmt": "%zu",
-        "final": true,
-        "__histogram": {
-            "%zu": 56
         }
     },
     "@MAX_MR_SIZE": {

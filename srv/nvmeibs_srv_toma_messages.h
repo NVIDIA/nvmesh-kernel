@@ -25,7 +25,7 @@ enum nvmeibs_toma_status_type {		// Server requests Toma for the current status 
 	NVMEIBS_TOMA_STATUS_ZEROING,
 };
 
-struct nvmeibs_msg_s2t_toma_status_req {	// s2t means Server to Toma, t2s is Toma to Server
+struct nvmeibs_msg_s2t_toma_status_req {	// Prefix: s2t means Server to Toma, t2s is Toma to Server
 	enum nvmeibs_toma_status_type type;
 	int handle;								// Cookie passed from srvr to Toma and returned in the reply
 	size_t max_length;						// Max byte length of the reply inlcuding terminating \0
@@ -33,7 +33,7 @@ struct nvmeibs_msg_s2t_toma_status_req {	// s2t means Server to Toma, t2s is Tom
 	int handle_req; /* Cookie passed from srvr to Toma and returned in the reply. When we have more than one caller, we need to differentiate between them */
 };
 
-struct nvmeibs_msg_t2s_toma_status_resp {
+struct nvmeibs_msg_t2s_toma_status_resp {	// To reply to server to fill toma related proc files. Note: The payload of the message (actual context of the status is not passed here but mmaped to kernel proc file)
 	int handle;								// Copied from the request
 	size_t length;							// Actual byte length of the reply
 	int is_overflow;						// was req->max_length too short for the reply buffer and it was truncated

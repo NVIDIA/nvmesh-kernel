@@ -2337,20 +2337,18 @@ struct status_str_ctx {
 	bool	is_overflow;
 };
 
-static int status_printf(void *context, const char *format, ...)
+static int __status_str_printf(void *context, const char *format, ...)			// vsnprintf wrapper
 {
 	struct status_str_ctx 	*str_ctx = context;
 	va_list					arglist;
 	size_t					len_needed;
-	ssize_t					avail_len;
-
-	avail_len = (ssize_t)str_ctx->max_len - (ssize_t)str_ctx->cur_len;
-	NTOMA_ASSERT(trace_toma_status_printf, avail_len > 0, "cur_len >= max_len when writing to buffer (overflow).");
+	const ssize_t			avail_len = (ssize_t)str_ctx->max_len - (ssize_t)str_ctx->cur_len;
+	NTOMA_ASSERT(ttsrspfs0, avail_len > 0, "cur_len >= max_len when writing to buffer (overflow).");
 	va_start(arglist, format);
 	len_needed = vsnprintf(str_ctx->buf + str_ctx->cur_len, (size_t)avail_len, format, arglist);
 	va_end(arglist);
 	if (len_needed >= (size_t)avail_len) {
-		N_Tf(trace_1_toma_status_printf, "Buffer overflow, max_len=@MAX_LEN cur_len=@CUR_LEN len_needed=@LEN_NEEDED", str_ctx->max_len, str_ctx->cur_len, len_needed);
+		N_Tf(ttsrspfs1, "Buffer overflow, max_len=@SIZE_T cur_len=@SIZE_T len_needed=@SIZE_T", str_ctx->max_len, str_ctx->cur_len, len_needed);
 		str_ctx->is_overflow = 1;
 	}
 	str_ctx->cur_len += min((size_t)avail_len - 1, len_needed);
@@ -2360,57 +2358,42 @@ static int status_printf(void *context, const char *format, ...)
 /* Write status to mmap proc file in response to server request */
 int nvmeibt_toma_write_status_srv_req(const struct nvmeibs_msg_s2t_toma_status_req *req)
 {
-	int rv = 0, mmap_fd = -1;
+	int mmap_fd = -1;
 	char mmap_fname[PATH_MAX];
-	struct status_str_ctx status_str_ctx = {
-		.buf = NULL,
-		.max_len = req->max_length,
-		.cur_len = 0,
-		.is_overflow = 0
-	};
-	struct nvmeibs_toma_server_proc_buf write_resp;
+	struct status_str_ctx status_str_ctx = {.buf = NULL, .max_len = req->max_length, .cur_len = 0, .is_overflow = 0	};
+	struct nvmeibs_toma_server_proc_buf write_resp = {.type = NVMEIBS_TOMA_WRITE_STATUS_RESP};
+	struct nvmeibs_msg_t2s_toma_status_resp *pl = &write_resp.status_resp_msg;
 
-	//open the mmap proc file
+	// Open the mmap proc file
 	#define TOMA_STATUS_PROC_PATH TOMA_ROOT_DIR "proc/nvmeibs/" TOMA_STATUS_PROC_DIR
 	snprintf(mmap_fname, sizeof(mmap_fname), "%s/%s", TOMA_STATUS_PROC_PATH, req->fname);
-	N_Tf(trace_toma_nvmeibt_toma_write_status_srv_req, "mmap file @MMAP_FNAME", mmap_fname);
-	if ((mmap_fd =
-		 NNVMEIBT_OPEN(trace_1_toma_nvmeibt_toma_write_status_srv_req, mmap_fname, O_RDWR)
-		 ) < 0) {
-		N_Wf(trace_2_toma_nvmeibt_toma_write_status_srv_req, "Failed to open mmap file @MMAP_FNAME (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
-		rv = -1;
-		goto out;
+	N_Tf(ttsrspfs4, "mmap file @MMAP_FNAME", mmap_fname);
+	if ((mmap_fd = NNVMEIBT_OPEN(ttsrspfs5, mmap_fname, O_RDWR)) < 0) {
+		N_Wf(ttsrspfs6, "Failed to open mmap file @MMAP_FNAME (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
+		return -1;
 	}
 
-	//memory map the proc file
+	// memory map the proc file
 	status_str_ctx.buf = nvmeibt_mmap(req->max_length, mmap_fd);
 	if (status_str_ctx.buf == MAP_FAILED) {
-		N_Wf(trace_3_toma_nvmeibt_toma_write_status_srv_req, "Failed to mmap file @MMAP_FNAME. (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
-		NNVMEIBT_CLOSE(trace_4_toma_nvmeibt_toma_write_status_srv_req, mmap_fd);
-		rv = -1;
-		goto out;
+		N_Wf(ttsrspfs7, "Failed to mmap file @MMAP_FNAME. (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
+		NNVMEIBT_CLOSE(ttsrspfs8, mmap_fd);
+		return -1;
 	}
 
-	//print the status to the proc file
-	print_status_str(req->type, &status_printf, &status_str_ctx);
-
-	//unmap and close the file
+	print_status_str(req->type, &__status_str_printf, &status_str_ctx);	// print the status to the proc file
 	nvmeibt_munmap(status_str_ctx.buf, req->max_length);
-	NNVMEIBT_CLOSE(trace_5_toma_nvmeibt_toma_write_status_srv_req, mmap_fd);
+	NNVMEIBT_CLOSE(ttsrspfs9, mmap_fd);
 
-	//Signal the server
-	write_resp.type = NVMEIBS_TOMA_WRITE_STATUS_RESP;
-	write_resp.status_resp_msg.handle = req->handle;
-	write_resp.status_resp_msg.length = status_str_ctx.cur_len;
-	write_resp.status_resp_msg.is_overflow = status_str_ctx.is_overflow;
-	write_resp.status_resp_msg.handle_req = req->handle_req;
+	pl->handle = req->handle;
+	pl->length = status_str_ctx.cur_len;
+	pl->is_overflow = status_str_ctx.is_overflow;
+	pl->handle_req = req->handle_req;
 	if (nvmeibt_toma_send_msg_to_local_server(&write_resp) < 0) {
-		N_Wf(trace_6_toma_nvmeibt_toma_write_status_srv_req, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
-		rv = -1;
+		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
+		return -1;
 	}
-
-out:
-	return rv;
+	return 0;
 }
 
 static void at_event_end_activities(void)
