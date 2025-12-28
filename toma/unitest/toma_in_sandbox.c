@@ -89,16 +89,89 @@ struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "common/nvmeib_shared.h"
 #include "srv/nvmeibs_srv_toma_messages.h"
+
+struct TSB_server_toma_status_req_simu {
+	int n_srvr_msg_idx;					// Ever increasing number
+	int n_toma_replies_received;
+	int expecting_reply_cookie;			// If sent a message to toma and expecting a reply, store it
+	int max_reply_length_bytes;
+};
+
+struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void);
+
+void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *me) {
+	me->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
+}
+
+void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *me) {
+	BUG_ON(me->expecting_reply_cookie);				// Did not get a reply from Toma
+	BUG_ON(me->n_toma_replies_received <= 0);		// Coverage tests did not receive any reply from Toma
+}
+
 ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
 	(void)fd; (void)offset; (void)flags;
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON(n <= sizeof(struct nvmeibs_toma_server_proc_buf));
-	msg_buf->type = 0x22;	// Trigger JGC == NVMEIBS_TOMA_TRIGGER_JGC, use NVMEIBS_TOMA_WRITE_STATUS_REQ to inject server msg
+	me->n_srvr_msg_idx++;
+	if (me->n_srvr_msg_idx == 3) {
+		struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
+		msg_buf->type = NVMEIBS_TOMA_TRIGGER_JGC;
+		strcpy(pl->disk_segment_urn_uuid_str, "todo_disk_seg");
+		strcpy(pl->disk_id_str, "todo_disk_id");
+		// Currently not expecting reply.
+	} else if (me->n_srvr_msg_idx == 5) {
+		struct nvmeibs_msg_s2t_toma_status_req *pl = &msg_buf->status_req_msg;
+		BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
+		me->expecting_reply_cookie = 0x1000 + me->n_srvr_msg_idx;
+		msg_buf->type = NVMEIBS_TOMA_WRITE_STATUS_REQ;
+		pl->type = NVMEIBS_TOMA_STATUS_RAFT;
+		pl->handle = 0 - me->expecting_reply_cookie;
+		pl->handle_req = me->expecting_reply_cookie;
+		strcpy(pl->fname, "placeholder.tmp");		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
+		pl->max_length = me->max_reply_length_bytes;
+	}
 	return sizeof(struct nvmeibs_toma_server_proc_buf);
 }
 
+static ssize_t _srvr_simu_from_toma_recv_msg(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	const struct nvmeibs_toma_server_proc_buf *m = buf;
+	BUG_ON((fd < 2) || (n < sizeof(*m)));
+	(void)buf; (void)offset; (void)flags;
+	switch (m->type) {
+		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Got: Toma_Hello %lu[b]\n", n); break;
+		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->Got: TomaByeBye %lu[b]\n", n); break;
+		case NVMEIBS_TOMA_WRITE_STATUS_RESP: {
+			const struct nvmeibs_msg_t2s_toma_status_resp *pl = &m->status_resp_msg;
+			me->n_toma_replies_received++;
+			SANDBOX_PRINT("SRVR_SIMU->Got: TomaStatusRep %lu[b], cnt=%d\n", n, me->n_toma_replies_received);
+			BUG_ON(me->expecting_reply_cookie <= 0);				// Reply comes without server expecting it
+			BUG_ON(pl->handle != 0 - me->expecting_reply_cookie);
+			BUG_ON(pl->handle_req != me->expecting_reply_cookie);
+			BUG_ON(pl->length >= (size_t)me->max_reply_length_bytes);		// Cannot reply more than permitted buf size including '\0'
+			if ((pl->length + 1) == (size_t)me->max_reply_length_bytes)
+				BUG_ON(!pl->is_overflow);							// Toma status reply was truncated. Verify that
+			me->expecting_reply_cookie = false;
+			break;
+		}
+		default: BUG_ON(true);		// Not supported yet
+	}
+	return n;
+}
+
 /************************************* FD/Sockets ********************************/
+static ssize_t _send_illegal_trap(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	BUG_ON(true || (fd < 2) || (n == 0) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
+	return 0;
+}
+
+static ssize_t _recv_illegal_trap(int fd, void *buf, size_t n, off_t offset, int flags) {
+	BUG_ON(true || (fd < 2) || (n == 0) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
+	return 0;
+}
+
 static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags) {
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON((fd < 2) || (n == 0));
@@ -139,19 +212,6 @@ static ssize_t _send_empty(int fd, const void *buf, size_t n, off_t offset, int 
 	(void)buf; (void)offset; (void)flags;
 	return n;
 }
-
-static ssize_t _srvr_simu_from_toma_recv_msg(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	const struct nvmeibs_toma_server_proc_buf *m = buf;
-	BUG_ON((fd < 2) || (n < sizeof(*m)));
-	(void)buf; (void)offset; (void)flags;
-	switch (m->type) {
-		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Toma_Hello %lu[b]\n", n); break;
-		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->TomaByeBye %lu[b]\n", n); break;
-		default: BUG_ON(true);		// Not supported yet
-	}
-	return n;
-}
-
 
 struct TSB_sock_otherside {		// Every implementation must derive from this sub class. Sandbox injects data to Toma via those functions
 	// The send()/recv() operations act as a generic I/O interface that is common to both
@@ -222,6 +282,7 @@ struct t_sandbox_all {
 		int n_obj;
 		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
 	} kafka_simu;
+	struct TSB_server_toma_status_req_simu s_req_simu;
 	char my_hostname[64];
 } *sys;
 
@@ -230,6 +291,17 @@ void t_sandbox_all_init(void) {
 	sys->TS.debug_offset = 10000;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
 	sandbox_nvme_init();
+	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
+}
+
+void t_sandbox_all_destroy(void) {
+	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
+	free(sys);
+	sys = NULL;
+}
+
+struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void) {
+	return &sys->s_req_simu;
 }
 
 /// Look up and return a socket object by fd. Returns null if not found.
@@ -339,6 +411,7 @@ done:
 void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 	if (strstr(s->addr.sun_path, "netlink")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_nlink.o;
+		s->other_side->send = _send_empty;
 	} else if (strstr(s->addr.sun_path, "signal")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_sig.o;
 	} else if (strstr(s->addr.sun_path, "sys_log")) {
@@ -361,13 +434,15 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 	} else if (strstr(s->addr.sun_path, "server_events")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_srvr2toma.o;
 		s->other_side->recv = server_simu_get_next_msg_for_toma;
-		s->other_side->send = _send_empty;
+		s->other_side->send = _send_illegal_trap;				// Via this fd server sends msgs to Tom, Toma never replies back
 	} else if (strstr(s->addr.sun_path, "toma_server")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2srvr.o;
 		s->other_side->send = _srvr_simu_from_toma_recv_msg;
+		s->other_side->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
 	} else if (strstr(s->addr.sun_path, "toma_clients")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
-		s->other_side->send = _send_empty;
+		s->other_side->send = _send_illegal_trap;				// Unsupported yet
+		s->other_side->recv = _recv_illegal_trap;
 	} else {
 		return;
 	}
@@ -665,7 +740,8 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 
 /*********************************************************************/
 static void toma_unitest_env_end(void) {
-	SANDBOX_PRINT(COL_GREEN "unitest done %d" COL_RESET "\n", 0 );
+	SANDBOX_PRINT(COL_GREEN "unitest done sys=%p" COL_RESET "\n", sys);
+	t_sandbox_all_destroy();
 }
 void toma_unitest_env_start(void) {
 	bool is_running_as_a_utility = false;
@@ -673,7 +749,7 @@ void toma_unitest_env_start(void) {
 	SANDBOX_PRINT("init, is_running_as_a_utility=%d dir: %s\n", is_running_as_a_utility, pwd);
 	free(pwd);
 	atexit(toma_unitest_env_end);
-	SANDBOX_PRINT(COL_GREEN "unitest starting %d" COL_RESET "\n", 0 );
+	SANDBOX_PRINT(COL_GREEN "unitest starting sys=%p" COL_RESET "\n", sys);
 	t_sandbox_all_init();
 }
 
