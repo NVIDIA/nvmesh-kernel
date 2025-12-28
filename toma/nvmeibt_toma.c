@@ -2371,6 +2371,7 @@ int nvmeibt_toma_write_status_srv_req(enum nvmeibs_toma_status_type stat_type, c
 	struct nvmeibs_toma_server_proc_buf write_resp;
 
 	//open the mmap proc file
+	#define TOMA_STATUS_PROC_PATH TOMA_ROOT_DIR "proc/nvmeibs/" TOMA_STATUS_PROC_DIR
 	snprintf(mmap_fname, sizeof(mmap_fname), "%s/%s", TOMA_STATUS_PROC_PATH, fname);
 	N_Tf(trace_toma_nvmeibt_toma_write_status_srv_req, "mmap file @MMAP_FNAME", mmap_fname);
 	if ((mmap_fd =

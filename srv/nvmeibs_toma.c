@@ -2014,7 +2014,7 @@ static int create_toma_stat_proc_files(struct proc_dir_entry *dir, struct nvmeib
 								&toma_req_status_mmap_open,
 								&toma_req_status_mmap_release,
 								0644))) {
-			_NE(error_1_toma_create_toma_stat_proc_files, "nvmeib_public_mmap_create failed for @DIR_NAME@FILE_NAME", TOMA_STATUS_PROC_PATH, toma_stat_proc_fname[i]);
+			_NE(error_1_toma_create_toma_stat_proc_files, "nvmeib_public_mmap_create failed for /proc/nvmeibs/@FILE_NAME", toma_stat_proc_fname[i]);
 			atomic_dec(&t->stat_file_count);
 			goto err;
 		}

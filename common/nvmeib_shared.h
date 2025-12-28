@@ -840,7 +840,6 @@ static inline const char * rdma_trasport_to_string(enum nvmeib_rdma_transport t)
 
 #define TOMA_THREAD_NAME                "nvmeibt_toma"
 #define TOMA_STATUS_PROC_DIR 			"toma_status"
-#define TOMA_STATUS_PROC_PATH 			"/proc/nvmeibs/" TOMA_STATUS_PROC_DIR
 
 #define NVMEIBS_CLIENT_NAME_SIZE (NVMEIB_HOST_NAME_LEN + \
 								  NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE + 1 + 7)
