@@ -1510,7 +1510,7 @@ int nvmeibt_topology_leader_new_remote_applied_topology_arrived(const void *remo
 		goto out;
 	}
 
-	rv = nvmeibt_parse_buf(remote_topology_data, remote_topology_data_len, 1, remote_member->last_local_serialization_version, remote_member, NVMEIBT_CSV_TYPE_REMOTE_APPLIED, NULL);
+	rv = nvmeibt_parse_buf(remote_topology_data, remote_topology_data_len, 1, remote_member->last_local_serialization_version, remote_member, NVMEIBT_CSV_TYPE_TOPO, NULL);
 	if (rv == 0)
 		leader_remove_node_disks_whose_segs_are_not_in_remote_applied(remote_member);
 out:

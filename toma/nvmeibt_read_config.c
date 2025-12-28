@@ -727,8 +727,6 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 	 */
 	nvmeibt_global_get_global()->config_tag++;
 
-	// check if the received data is csv or binary
-
 	// The content (config/topo) is detected from the content of the "csv_buf", but explicit behavior is less error prone
 	switch (content_type) {
 	case NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES:
@@ -738,18 +736,12 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 			nvmeibt_global_get_global()->is_valid_topo_config_received = 1;
 		}
 		break;
-	case NVMEIBT_CSV_TYPE_INCREMENTAL_UPDATE:
-		NTOMA_ASSERT(vnbeo6v, is_updating_leader, "NVMEIBT_CSV_TYPE_INCREMENTAL_UPDATE && !is_updating_leader");
-#if (__GNUC__ >= 7)
-		__attribute__ ((fallthrough)); // Otherwise gcc complains about a nasty fallthrough
-#endif
 	case NVMEIBT_CSV_TYPE_FULL_KAFKA_MGMT_CONFIG_VOLUMES:
 		rv = parse_bin_config_buf(csv_or_wire_buf, csv_or_wire_buf_len, &parsed_kafka_offset, 0, JSON_output);
 		if (rv == 0) {
 			SET_RAFT_COMMIT_LIFECYCLE_VAL(hf85kcm, KAFKA_MGMT_CONFIG, follower_applied, parsed_kafka_offset);
 		}
 		break;
-	case NVMEIBT_CSV_TYPE_REMOTE_APPLIED:
 	case NVMEIBT_CSV_TYPE_TOPO:
 		rv = parse_bin_topo_buf(csv_or_wire_buf, csv_or_wire_buf_len, serialization_version, remote_member, JSON_output);
 		break;
@@ -757,8 +749,6 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 	case NVMEIBT_CSV_TYPE_LOCAL_NICS:
 		N_Tf(jfuwek5, "Received a real CSV");
 		break;
-	case NVMEIBT_CSV_TYPE_FULL_HW_CONFIG:
-	case NVMEIBT_CSV_TYPE_NONE:
 	default:
 		N_Ef(rvaireo, "Unexpected content_type=@X", content_type);
 		goto out;
