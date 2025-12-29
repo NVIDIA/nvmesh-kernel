@@ -741,9 +741,7 @@ static void terminate_toma(int rv)
 
 	nvmeibt_topology_free_resources();
 
-	N_Tf(tt67332, "toma_server fd closing...");
-	(void)nvmeibt_toma_announce_ready(false);
-	N_Tf(lo00jn2, "toma_server fd closed");
+	(void)nvmeib_srvr_api_lib_destroy();
 	cleanup_single_instance();
 
 	nvmeibt_wq_drain(stat_wq);
@@ -2393,7 +2391,7 @@ static void update_read_and_exception_select_fds(struct nvmeibt_toma_fds_in_use 
 	fds_in_use->n_fds_in_use = 0;
 	add_fd_to_select_fds(fds_in_use, signals_fd, NVMEIBT_TOMA_FD_TYPE_SYSTEM_EVENTS);
 	add_fd_to_select_fds(fds_in_use, toma_wakeup_pipe[0], NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP);
-	add_fd_to_select_fds(fds_in_use, nvmeib_srvr_api_lib_get_fd_srvr2toma(), NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS);
+	add_fd_to_select_fds(fds_in_use, nvmeib_srvr_api_lib_get_fd_for_epoll(), NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS);
 	add_fd_to_select_fds(fds_in_use, nvmeibt_udev_get_fd(), NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS);
 	add_fd_to_select_fds(fds_in_use, nvmeibt_nm_get_fd(nw_node), NVMEIBT_TOMA_FD_TYPE_IB);
 	if (rsrm_faults_get_fd() != -1) {
@@ -2866,8 +2864,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		N_Ef(tcvsj39, "Failed to read&parse '.nvmesh.conf'");
 		goto out;
 	}
-	if (nvmeibt_open_fd_clnt_and_local_srvr() < 0) {
-		N_Ef(u5577bs, "Failed open_fd_clnt_and_local_srvr()");
+	if (nvmeib_srvr_api_lib_create() < 0) {
 		goto out;
 	}
 	// Start netlink after server is up
@@ -2881,8 +2878,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		nvmeibt_topology_register_disk_events();
 	}
 	read_disks_info_from_stock_driver();
-	/* login to server module */
-	(void)nvmeibt_toma_announce_ready(true);
+	(void)nvmeib_srvr_api_lib_handshake_server(); /* login to server module */
 
 	if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0)
 		nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.

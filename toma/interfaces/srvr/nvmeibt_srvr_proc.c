@@ -3,53 +3,26 @@
 #include "utils/nvmeibt_str.h"
 
 /***************************** Generic API Toma->Server ***********************/
-static const char proc_path_toma2srvr[] = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";			// Toma->Srvr
-static const char proc_path_srvr2toma[] = TOMA_ROOT_DIR "proc/nvmeibs/toma_server_events";	// Srvr->Toma
-static const char proc_path_toma2clnt[] = TOMA_ROOT_DIR "proc/nvmeibs/toma_clients";		// Toma->Clnt
 static int fd_toma2srvr = -1;
 static int fd_srvr2toma = -1;
 static int fd_toma2clnt = -1;
 
-int nvmeib_srvr_api_lib_get_fd_srvr2toma(void) { return fd_srvr2toma; }
+int nvmeib_srvr_api_lib_get_fd_for_epoll(void) { return fd_srvr2toma; }
 
-static int __open_fd_toma2srvr(void)
+int nvmeib_srvr_api_lib_create(void)
 {
-	int rv = 0;
-	fd_toma2srvr = NNVMEIBT_OPEN(trace_toma_open_local_server_fd, proc_path_toma2srvr, O_RDWR);
-	N_Tf(t_07_nvmeibt_open_fd_comm, "open('@STR')=@LOCAL_SERVER_FD, errno=@AUTO_ERRNO", proc_path_toma2srvr, fd_toma2srvr);
-	if (fd_toma2srvr == -1)
-		rv = -1;
-	return rv;
-}
-
-int nvmeibt_open_fd_clnt_and_local_srvr(void)
-{
-	int	rv = 0;
-
-	NFIN;
-	if (fd_srvr2toma == -1) {
-		fd_srvr2toma = NNVMEIBT_OPEN(t_01_nvmeibt_open_fd_comm, proc_path_srvr2toma, O_RDWR);
-		if (fd_srvr2toma == -1) {
-			N_Ef(t_02_nvmeibt_open_fd_comm, "open('@STR') failed, @AUTO_ERRNO, FATAL: Without server toma will not live", proc_path_srvr2toma);
-			exit(-1); //without server toma should not live
-		} else {
-			N_Tf(t_03_nvmeibt_open_fd_comm, "opened('@STR')   fd_srvr2toma=@FD", proc_path_srvr2toma, fd_srvr2toma);
-		}
+	const char *proc_path_toma2srvr = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";		// Toma->Srvr, See server nvmeibs_toma_create()
+	const char *proc_path_srvr2toma = TOMA_ROOT_DIR "proc/nvmeibs/toma_server_events";	// Srvr->Toma
+	const char *proc_path_toma2clnt = TOMA_ROOT_DIR "proc/nvmeibs/toma_clients";		// Toma->Clnt
+	NTOMA_ASSERT(nsalc0, (fd_srvr2toma | fd_toma2clnt | fd_toma2srvr) == -1, "Wrong call, already initialized");
+	fd_srvr2toma = NNVMEIBT_OPEN(nsalc1, proc_path_srvr2toma, O_RDWR);
+	fd_toma2clnt = NNVMEIBT_OPEN(nsalc2, proc_path_toma2clnt, O_RDWR);
+	fd_toma2srvr = NNVMEIBT_OPEN(nsalc3, proc_path_toma2srvr, O_RDWR);
+	if ((fd_srvr2toma < 0) || (fd_toma2clnt < 0) || (fd_toma2srvr < 0)) {
+		N_Ef(nsalc7, "Failed: @STR=@FD, @STR=@FD, @STR=@FD, @AUTO_ERRNO, FATAL: Without server toma will not live", proc_path_srvr2toma, fd_srvr2toma, proc_path_toma2clnt, fd_toma2clnt, proc_path_toma2srvr, fd_toma2srvr);
+		exit(-1);
 	}
-	if (fd_toma2clnt == -1) {
-		fd_toma2clnt = NNVMEIBT_OPEN(t_04_nvmeibt_open_fd_comm, proc_path_toma2clnt, O_RDWR);
-		if (fd_toma2clnt == -1) {
-			N_Ef(t_05_nvmeibt_open_fd_comm, "open('@STR') failed, @AUTO_ERRNO", proc_path_toma2clnt);
-			rv = -1;
-		} else {
-			N_Tf(t_06_nvmeibt_open_fd_comm, "opened('@STR')   fd_toma2clnt=@CLIENTS_FD", proc_path_toma2clnt, fd_toma2clnt);
-		}
-	}
-	if (fd_toma2srvr == -1) {
-		rv = __open_fd_toma2srvr();
-	}
-	NFOUT;
-	return rv;
+	return 0;
 }
 
 static ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, int OK_err_1, int OK_err_2)
@@ -77,47 +50,28 @@ static ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, in
 	__rv__;																									\
 })
 
-static int __login_into_server(int is_login)
+static int nvmeibt_toma_announce_ready(bool is_login)
 {
 	struct nvmeibs_toma_server_proc_buf buf;
-	int rv = 0;
-
-	NFIN;
+	int rv;
+	N_Tf(nsalcq, "is_login=@BOOL_YN", is_login);
 	memset(&buf, 0, sizeof(buf));
-	if (fd_toma2srvr < 0) {
-		goto out;	// Too early for login/logout
-	}
-
 	buf.type = (is_login ? NVMEIBS_TOMA_LOGIN : NVMEIBS_TOMA_LOGOUT);
-	if (NNVMEIBT_PWRITE_ATOMIC(trace_toma_login_into_server, fd_toma2srvr, &buf, sizeof(buf), 0, 0) < 0) {
-		N_Ef(trace_1_toma_login_into_server, "OOPS! Failed pwrite(fd_toma2srvr,...) of size @SIZEOF)", sizeof(buf));
-		if (!is_login) {
-			N_Tf(trace_2_toma_login_into_server, "For now patching using close() and open");
-			NNVMEIBT_CLOSE(trace_3_toma_login_into_server, fd_toma2srvr);
-			if (__open_fd_toma2srvr() == 0) {
-				goto out;
-			}
-		}
-		rv = -1;
-		exit(-1);
+	rv = NNVMEIBT_PWRITE_ATOMIC(nsalca, fd_toma2srvr, &buf, sizeof(buf), 0, 0);
+	if (rv < 0) {
+		N_Ef(nsalcb, "OOPS! Failed, fd=@FD of size @SIZEOF, rv=@RV", fd_toma2srvr, sizeof(buf), rv);
 	}
-out:
-	NFOUT;
-	return rv;
+	if (!is_login && 0) {	// Todo, properly close me
+		NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
+		NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
+		NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
+	}
+	N_Tf(nsalcw, "Done");
+	return 0;
 }
 
-int nvmeibt_toma_announce_ready(int is_on)
-{
-	int rv = 0;
-
-	NFIN;
-	if ((fd_toma2srvr < 0) || __login_into_server(is_on) != 0) {
-		N_Tf(trace_toma_nvmeibt_toma_announce_ready, "Failed: is_on=@RV, proc: @STR", is_on, proc_path_toma2srvr);
-		rv = -1;
-	}
-	NFOUT;
-	return rv;
-}
+int nvmeib_srvr_api_lib_handshake_server(void) { 	return nvmeibt_toma_announce_ready(true); }
+int nvmeib_srvr_api_lib_destroy(void){ 				return nvmeibt_toma_announce_ready(false); }
 
 /***************************** mmap shared memory (server /proc files, disk locks file) *******************************/
 #include <sys/mman.h>
@@ -146,6 +100,7 @@ static void *nvmeibt_mmap(size_t length, int fd, uint64_t offset, bool allow_wri
 	void *mapped_padded = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);	// Allocating 2 pages more than length requested with no read/write access
 	void *mapped = MAP_FAILED;
 
+	N_Tf(salddbmmfr, "length=@ZX, fd=@FD, offset=@ZX, write=@BOOL_YN", length, fd, offset, allow_write);
 	if (mapped_padded == MAP_FAILED) {
 		N_Ef(salddbmmf0, "(length=@ZX, fd=@FD) failed on mmap().", length, fd);
 		return MAP_FAILED;
@@ -272,7 +227,7 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 	int	rv = 0;
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
 		if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0) < 0) {
-			N_Tf(tsmtls1, "pwrite('@STR') failed, @AUTO_ERRNO", proc_path_toma2srvr);
+			N_Tf(tsmtls1, "pwrite(@FD) failed, @AUTO_ERRNO", fd_toma2srvr);
 			rv = -1;
 		}
 	} else {
@@ -285,7 +240,7 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 			N_Tf(tsmtls4, "cleanup request success: @STR", (errno == EALREADY) ? "already active" : "started");
 			rv = EINPROGRESS;
 		} else {
-			N_Ef(tsmtls5, "pwrite('@STR') failed, wr_cnt=@RV @AUTO_ERRNO", proc_path_toma2srvr, rv);
+			N_Ef(tsmtls5, "pwrite(@FD) failed, wr_cnt=@RV @AUTO_ERRNO", fd_toma2srvr, rv);
 			rv = -1;
 		}
 	}
@@ -294,13 +249,12 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 
 int nvmeibt_toma_get_msg_from_local_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
 {
-	int rv = read(fd_srvr2toma, msg, max_len);
+	const int rv = read(fd_srvr2toma, msg, max_len);
 	if (rv < (int)sizeof(msg->handle)) {
-		N_Ef(tsmtls8, "Failed read(fd_srvr2toma) rv=@RV @AUTO_ERRNO", rv);
-		rv = -1;
-	} else {
-		*is_server_event = (msg->zero == 0);			// The first u64 decides between server event or client message to TOMA: For server event, the zero member must be 0, and then the type member indicates the server event type. For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero. (see also common/nvmeib_shared.h)
+		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
+		return -1;
 	}
+	*is_server_event = (msg->zero == 0);			// The first u64 decides between server event or client message to TOMA: For server event, the zero member must be 0, and then the type member indicates the server event type. For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero. (see also common/nvmeib_shared.h)
 	return rv;
 }
 
@@ -309,9 +263,9 @@ int nvmeibt_toma_send_buf_to_client(const char *buf, int buf_len, const char *cl
 	int rv = 0;
 	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, buf, buf_len, ENXIO, 0) < 0) {
 		if (errno == ENXIO) {
-			N_Tf(tsb2cp1, "write('@STR', handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", proc_path_toma2clnt, buf, buf_len, clnt_host);
+			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, buf, buf_len, clnt_host);
 		} else {
-			N_Tf(tsb2cp2, "write('@STR', handle=@PTR, len=@LEN) failed, @AUTO_ERRNO",    proc_path_toma2clnt, buf, buf_len);
+			N_Tf(tsb2cp2, "write(@FD, handle=@PTR, len=@LEN) failed, @AUTO_ERRNO", fd_toma2clnt, buf, buf_len);
 			rv = -1;
 		}
 	}
