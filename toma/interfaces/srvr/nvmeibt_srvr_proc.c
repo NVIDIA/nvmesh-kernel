@@ -249,13 +249,10 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 {
 	const int srv_fd = nvmeibt_toma_get_local_server_fd();
 	int	rv = 0;
-
-	NFIN;
-	if (NNVMEIBT_PWRITE_ATOMIC(trace_toma_nvmeibt_toma_send_msg_to_local_server, srv_fd, msg, sizeof(*msg), 0, 0, 0) < 0) {
-		N_Tf(trace_1_toma_nvmeibt_toma_send_msg_to_local_server, "pwrite('@STR') failed, @AUTO_ERRNO", proc_path_toma2srvr);
+	if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, srv_fd, msg, sizeof(*msg), 0, 0, 0) < 0) {
+		N_Tf(tsmtls1, "pwrite('@STR') failed, @AUTO_ERRNO", proc_path_toma2srvr);
 		rv = -1;
 	}
-	NFOUT;
 	return rv;
 }
 

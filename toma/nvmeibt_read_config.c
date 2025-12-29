@@ -891,10 +891,9 @@ static inline int nvmeibr_proc_notify_journal_info(const char* ldisk_id  /*Name 
 	buf.journal_msg.length = journal_length;
 	buf.journal_msg.serjio_db_lba = serjio_db_pba;
 	buf.journal_msg.serjio_db_length = serjio_db_length;
-	N_Tf(t_01_nvmeibt_notify_jour_info, "disk=@STR journal_pba=@JOURNAL_PBA, length=@ZU, serjio_pba=@SERJIO_PBA, len=@ZU", ldisk_id, journal_pba, journal_length, serjio_db_pba, serjio_db_length);
 	if (nvmeibt_toma_send_msg_to_local_server(&buf) < 0) {
 		N_Ef(t_03_nvmeibt_notify_jour_info, "failed write to local server (@AUTO_ERRNO)");
-		rv = 0;	// DHS: Not sure why ??? seems illegal
+		rv = 0;	// DHS: Not sure why ??? seems illegal, but at least since 2020
 	}
 	NFOUT;
 	return rv;
@@ -905,12 +904,12 @@ int nvmeibt_read_config_notify_server_about_journal_partition(const struct nvmei
 															  const struct nvmeibt_disk_gpt_partition_entry *serjio_db,
 															  const char *ldisk_id, const char *ld_display)
 {
-	int		rv = 0;
+	int rv = 0;
 	if (journal_data && serjio_db) {
 		const uint64_t j_len = (journal_data->pba_e - journal_data->pba_s + 1);
 		const uint64_t s_len = (serjio_db->pba_e - serjio_db->pba_s + 1);
-		N_Tf(op0oer8, "Notifying server about disk=@STR journal_data pba=@PBA length=@LENGTH_LONG blocks serjio_db pba=@PBA length=@LENGTH_LONG blocks",
-			 ld_display, journal_data->pba_s, j_len, serjio_db->pba_s, s_len);
+		N_Tf(op0oer8, "Notifying server about disk=@STR(@STR) journal{pba=@PBA, len=@ZU[blocks]} serjio_db{pba=@PBA, len=@ZU[blocks]}",
+			 ld_display, ldisk_id, journal_data->pba_s, j_len, serjio_db->pba_s, s_len);
 		rv = nvmeibr_proc_notify_journal_info(ldisk_id, journal_data->pba_s, j_len, serjio_db->pba_s, s_len);
 	}
 	return rv;

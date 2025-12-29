@@ -7416,15 +7416,6 @@
             "%p": 13
         }
     },
-    "@JOURNAL_PBA": {
-        "size": 64,
-        "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__histogram": {
-            "0x%zx": 7
-        }
-    },
     "@JOUR_COMMITTED_INT": {
         "size": 32,
         "type": "s32",
@@ -15770,15 +15761,6 @@
         "final": true,
         "__histogram": {
             "%s": 9
-        }
-    },
-    "@SERJIO_PBA": {
-        "size": 64,
-        "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__histogram": {
-            "0x%zx": 7
         }
     },
     "@SERJIO_PD": {
