@@ -56,16 +56,17 @@
  */
 
 struct nvmeibt_Str {
-	size_t						str_len;
-	size_t						allocated_size;
-	char						*text_buf;
-	struct nvmeibt_Str*			__this_addr; // For internal use only (Private)
+	size_t				str_len;
+	size_t				allocated_size;
+	char			   *text_buf;
+	struct nvmeibt_Str *__this_addr;	// For internal use only (Private)
 };
 
 struct nvmeibt_Buf {
-	size_t						buf_len;
-	void						*data_buf;
+	size_t buf_len;
+	void  *data_buf;
 };
+
 #define NVMEIBT_BUF_INIT(t)	({ (t)->data_buf = NULL; (t)->buf_len = 0; })
 #define NNVMEIBT_BUF_FREE(name, t) ({										\
 	if ((t)->data_buf) {													\
@@ -81,44 +82,39 @@ struct nvmeibt_Buf {
 })
 
 struct nvmeibt_KVP {	// Key-Value-Paid. Points into the parsed string
-	char	*key;
-	size_t	key_len;
-	char	*val;
-	size_t	val_len;
+	char  *key;
+	size_t key_len;
+	char  *val;
+	size_t val_len;
 };
 
-int nvmeibt_Str_strncat(struct nvmeibt_Str *this, const char *str, size_t size);
-int nvmeibt_Str_strcat(struct nvmeibt_Str *this, const char *str);
-int nvmeibt_Str_sprintf(struct nvmeibt_Str *this, const char *format, ...);
-int nvmeibt_Str_fwrite(struct nvmeibt_Str *this, FILE *file);
-int nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size);
-int nvmeibt_Str_strcpy(struct nvmeibt_Str *this, const char *str);
+int			nvmeibt_Str_strncat(struct nvmeibt_Str *this, const char *str, size_t size);
+int			nvmeibt_Str_strcat(struct nvmeibt_Str *this, const char *str);
+int			nvmeibt_Str_sprintf(struct nvmeibt_Str *this, const char *format, ...);
+int			nvmeibt_Str_fwrite(struct nvmeibt_Str *this, FILE *file);
+int			nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size);
+int			nvmeibt_Str_strcpy(struct nvmeibt_Str *this, const char *str);
 const char *nvmeibt_Str_str(const struct nvmeibt_Str *this);
-size_t nvmeibt_Str_strlen(const struct nvmeibt_Str *this);
-void nvmeibt_Str_reuse(struct nvmeibt_Str *this);
-int nvmeibt_Str_strcmp(const struct nvmeibt_Str *str_ctx1,
-					   const struct nvmeibt_Str *str_ctx2);
-void nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src);
-void nvmeibt_Str_chop_last_char(struct nvmeibt_Str *this);
+size_t		nvmeibt_Str_strlen(const struct nvmeibt_Str *this);
+void		nvmeibt_Str_reuse(struct nvmeibt_Str *this);
+int			nvmeibt_Str_strcmp(const struct nvmeibt_Str *str_ctx1, const struct nvmeibt_Str *str_ctx2);
+void		nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src);
+void		nvmeibt_Str_chop_last_char(struct nvmeibt_Str *this);
 
 /* Note: Function below is doing a destructive string parsing*/
 int	nvmeibt_tokenize_KVP(char *in_str_null_terminated, size_t in_str_len_incl_null, struct nvmeibt_KVP *output_KVP_arr, int n_entries_output_KVP_arr);
 
 typedef struct nvmeibt_str_with_escape_chars {
-	char	s[8192];
+	char s[8192];
 } nvmeibt_str_with_escape_chars_t;
+
 nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in);
 
-#define N_VERIFY_NVMEIBT_STR_INITIALIZED(name, this) ({						\
-	NTOMA_ASSERT(name, (this) && (this)->__this_addr == (this),			\
-		"Badly initialized nvmeibt_Str, was initialized at ptr=@PPP, now at ptr=@PPP",	\
-		(this)->__this_addr, (this));							\
-})
+#define N_VERIFY_NVMEIBT_STR_INITIALIZED(name, this) ({ NTOMA_ASSERT(name, (this) && (this)->__this_addr == (this), "Badly initialized nvmeibt_Str, was initialized at ptr=@PPP, now at ptr=@PPP", (this)->__this_addr, (this)); })
 
 /* sets the size of the buffer containing the string
    nvmeibt_Str_strlen(this) should be smaller than the new size */
-#define NNVMEIBT_STR_RESIZE_BUF(name, this, required_txt_len)					\
-({																				\
+#define NNVMEIBT_STR_RESIZE_BUF(name, this, required_txt_len) ({				\
 	size_t __required_txt_len = required_txt_len;								\
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(name ## _verify, this);					\
 	if ((this)->str_len > (__required_txt_len)) {								\
@@ -156,7 +152,7 @@ nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in
 })
 
 ssize_t _Str_fread(struct nvmeibt_Str *this, int fd);
-ssize_t nvmeibt_str_read_from_pipe_fd(struct nvmeibt_Str *this, int fd, const char* pipe_name);
+ssize_t nvmeibt_str_read_from_pipe_fd(struct nvmeibt_Str *this, int fd, const char *pipe_name);
 ssize_t _Str_fread_atomic(struct nvmeibt_Str *this, int fd);
 ssize_t _Str_fwrite(struct nvmeibt_Str *this, int fd);
 ssize_t _Buf_fwrite(struct nvmeibt_Buf *this, int fd);
@@ -189,4 +185,3 @@ ssize_t _Buf_fwrite(struct nvmeibt_Buf *this, int fd);
 
 /*************************************************************/
 #endif /* NVMEIBT_STR */
-
