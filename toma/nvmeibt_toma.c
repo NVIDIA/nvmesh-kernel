@@ -2393,7 +2393,7 @@ static void update_read_and_exception_select_fds(struct nvmeibt_toma_fds_in_use 
 	fds_in_use->n_fds_in_use = 0;
 	add_fd_to_select_fds(fds_in_use, signals_fd, NVMEIBT_TOMA_FD_TYPE_SYSTEM_EVENTS);
 	add_fd_to_select_fds(fds_in_use, toma_wakeup_pipe[0], NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP);
-	add_fd_to_select_fds(fds_in_use, nvmeibt_toma_get_local_server_fd_events(), NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS);
+	add_fd_to_select_fds(fds_in_use, nvmeib_srvr_api_lib_get_fd_srvr2toma(), NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS);
 	add_fd_to_select_fds(fds_in_use, nvmeibt_udev_get_fd(), NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS);
 	add_fd_to_select_fds(fds_in_use, nvmeibt_nm_get_fd(nw_node), NVMEIBT_TOMA_FD_TYPE_IB);
 	if (rsrm_faults_get_fd() != -1) {

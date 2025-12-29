@@ -6,8 +6,7 @@
 
 /***************************** Generic API Toma->Server ***********************/
 int nvmeibt_open_fd_clnt_and_local_srvr(void); 		// Toma->Srvr, Srvr->Toma, Toma->Clnt.  No need to close, when Toma dies
-int nvmeibt_toma_get_local_server_fd(void);			// Todo: obscure, Get already opened file descriptor Toma->Srvr,.
-int nvmeibt_toma_get_local_server_fd_events(void);	// Used to epoll on this fd
+int nvmeib_srvr_api_lib_get_fd_srvr2toma(void);		// Used to epoll on this fd
 int nvmeibt_toma_announce_ready(int is_on);			// Login/Logout into local server
 
 /***************************** Generic messages *******************************/

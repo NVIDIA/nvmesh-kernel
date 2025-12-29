@@ -10,8 +10,7 @@ static int fd_toma2srvr = -1;
 static int fd_srvr2toma = -1;
 static int fd_toma2clnt = -1;
 
-int nvmeibt_toma_get_local_server_fd(void) { return fd_toma2srvr;}
-int nvmeibt_toma_get_local_server_fd_events(void) { return fd_srvr2toma; }
+int nvmeib_srvr_api_lib_get_fd_srvr2toma(void) { return fd_srvr2toma; }
 
 static int __open_fd_toma2srvr(void)
 {
