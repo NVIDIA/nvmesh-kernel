@@ -5,7 +5,7 @@
 #include "../toma/clnt/nvmeibt_client_protocol.h"
 
 /******************************** Old proc API ****************************/
-enum nvmeibs_toma_status_type {		// Server requests Toma for the current status specific of s specific component
+enum nvmeibs_toma_status_type {		// Server requests Toma for the current status specific of s specific component. For each component display a proc file with the status
 	NVMEIBS_TOMA_STATUS_ALL = 0,
 	NVMEIBS_TOMA_STATUS_RAFT,
 	NVMEIBS_TOMA_STATUS_DSEG,

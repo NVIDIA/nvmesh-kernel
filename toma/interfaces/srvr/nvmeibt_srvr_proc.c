@@ -209,32 +209,29 @@ static int __status_str_printf(void *context, const char *format, ...)			// vsnp
 int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req,
 	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx))
 {
-	int mmap_fd = -1;
-	char mmap_fname[PATH_MAX];
+	int fd;
+	char fname[256];
 	struct status_str_ctx status_str_ctx = {.buf = NULL, .max_len = req->max_length, .cur_len = 0, .is_overflow = 0	};
 	struct nvmeibs_toma_server_proc_buf write_resp = {.type = NVMEIBS_TOMA_WRITE_STATUS_RESP};
 	struct nvmeibs_msg_t2s_toma_status_resp *pl = &write_resp.status_resp_msg;
 
 	// Open the mmap proc file
-	#define TOMA_STATUS_PROC_PATH TOMA_ROOT_DIR "proc/nvmeibs/" TOMA_STATUS_PROC_DIR
-	snprintf(mmap_fname, sizeof(mmap_fname), "%s/%s", TOMA_STATUS_PROC_PATH, req->fname);
-	N_Tf(ttsrspfs4, "mmap file @MMAP_FNAME", mmap_fname);
-	if ((mmap_fd = NNVMEIBT_OPEN(ttsrspfs5, mmap_fname, O_RDWR)) < 0) {
-		N_Wf(ttsrspfs6, "Failed to open mmap file @MMAP_FNAME (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
-		return -1;
+	snprintf(fname, sizeof(fname), TOMA_ROOT_DIR "proc/nvmeibs/" TOMA_STATUS_PROC_DIR "/%s", req->fname);
+	fd = NNVMEIBT_OPEN(ttsrspfs5, fname, O_RDWR);
+	if (fd < 0) {
+		N_Wf(ttsrspfs6, "Failed to open mmap file @STR (@ERRNO - '@AUTO_ERRNO')", fname, errno);
+		return -__LINE__;
 	}
-
-
-	status_str_ctx.buf = nvmeibt_mmap(req->max_length, mmap_fd, 0, true);		// map writable memory to the start of the proc file
+	status_str_ctx.buf = nvmeibt_mmap(req->max_length, fd, 0, true);		// map writable memory to the start of the proc file
 	if (status_str_ctx.buf == MAP_FAILED) {
-		N_Wf(ttsrspfs7, "Failed to mmap file @MMAP_FNAME. (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
-		NNVMEIBT_CLOSE(ttsrspfs8, mmap_fd);
-		return -1;
+		N_Wf(ttsrspfs7, "Failed to mmap file @STR. (@ERRNO - '@AUTO_ERRNO')", fname, errno);
+		NNVMEIBT_CLOSE(ttsrspfs8, fd);
+		return -__LINE__;
 	}
 
 	your_print_status_fn(req->type, &__status_str_printf, &status_str_ctx);	// Print the status to the proc file
 	nvmeibt_munmap(status_str_ctx.buf, req->max_length);
-	NNVMEIBT_CLOSE(ttsrspfs9, mmap_fd);
+	NNVMEIBT_CLOSE(ttsrspfs9, fd);
 
 	pl->handle = req->handle;
 	pl->length = status_str_ctx.cur_len;
@@ -242,7 +239,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 	pl->handle_req = req->handle_req;
 	if (nvmeibt_toma_send_msg_to_local_server(&write_resp) < 0) {
 		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
-		return -1;
+		return -__LINE__;
 	}
 	return 0;
 }

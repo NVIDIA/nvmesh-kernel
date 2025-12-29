@@ -9854,16 +9854,6 @@
             "%s": 58
         }
     },
-    "@MMAP_FNAME": {
-        "size": "string",
-        "type": "string",
-        "fmt": "%s",
-        "final": true,
-        "__histogram": {
-            "%d": 54,
-            "%s": 4
-        }
-    },
     "@MMIO_PHYS": {
         "size": 64,
         "type": "s64",
