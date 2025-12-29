@@ -25,7 +25,7 @@ static const char stock_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_st
 static const char local_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_nvmesh.img";
 
 #define TARGET_DEVICES_FILE TOMA_ROOT_DIR "var/opt/nvmesh/.target_devices"
-#define DISKS_CSV_FILE TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"
+#define DISKS_CSV_FILE TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"						// Emulates the work of kernel server.
 
 // Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"
