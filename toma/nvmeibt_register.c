@@ -2411,12 +2411,11 @@ out:
 /* cid - identifier of client's connection with server per specific disk, Command server to force disconnect clinet (cid) from disk */
 static inline int nvmeibt_client_disconnect_force_cmd(int cid)
 {
-	const int srv_fd = nvmeibt_toma_get_local_server_fd();
 	struct nvmeibs_toma_server_proc_buf buf;
 	ZEROINIT(buf);
 	buf.type = NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD;
 	buf.client_disconnect_force_cmd.cid = cid;
-	if (NNVMEIBT_PWRITE_ATOMIC(t_31_nvmeibt_disconnect_clnt, srv_fd, &buf, sizeof(buf), 0, 0, 0) < 0) {
+	if (nvmeibt_toma_send_msg_to_local_server(&buf) < 0) {
 		N_Ef(t_32_nvmeibt_disconnect_clnt, "cid=@CID failed write (@AUTO_ERRNO)", cid);
 		return -1;
 	} else {
@@ -2427,10 +2426,9 @@ static inline int nvmeibt_client_disconnect_force_cmd(int cid)
 
 static void brute_force_disconnect_client(struct nvmeibt_registrant_ctx *reg_ctx)
 {
-	int		cid;
+	const int cid = (int)client_messaging_handle_to_cid(reg_ctx->client_messaging_handle);
 
 	NFIN;
-	cid = (int)client_messaging_handle_to_cid(reg_ctx->client_messaging_handle);
 	// Brutally cut the QP for RDMA clients
 	remove_longing_registrant_on_seg_by_ctx(reg_ctx, true);		// Remove clients of all segments on disk as an optional cleanup
 	if (nvmeibt_client_disconnect_force_cmd(cid) < 0) {
