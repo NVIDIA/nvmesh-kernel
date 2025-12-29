@@ -860,30 +860,6 @@ ssize_t __nvmeibt_pread(int fd, void *vptr, size_t size, off_t offset, BOOL is_e
  * To be used e.g. with /proc/... files which assume/require whole action.
  */
 
-ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, off_t offset, int OK_err_1, int OK_err_2)
-{
-	ssize_t rv;
-
-	NTOMA_ASSERT(error_common_nvmeibt_pwrite_atomic, offset >= 0, "invalid offset @OFFSET", (long long) offset);
-
-	rv = pwrite(fd, vptr, size, offset);
-	if (rv < 0) {
-		if (errno == OK_err_1 || errno == OK_err_2) {
-			N_Tf(6sjhk20, "Failed pwrite(fd=@FD vptr=@PTR size=@SIZEOF offset=@OFFSET) (@AUTO_ERRNO))",
-				fd, vptr, size, (long long) offset);
-		} else {
-			N_Wf(35s83jm, "Failed pwrite(fd=@FD vptr=@PTR size=@SIZEOF offset=@OFFSET) (@AUTO_ERRNO))",
-				fd, vptr, size, (long long) offset);
-		}
-	} else if ((size_t) rv != size) {
-		N_Tf(rvsx83j, "Partial pwrite(fd=@FD, size=@SIZEOF, offset=@OFFSET) wrote rv=@RV_SSIZE_T",	// No ERRNO, since not an error
-			fd, size, (long long) offset, rv);
-		errno = 0;
-		rv = -1;
-	}
-	return rv;
-}
-
 ssize_t __nvmeibt_pread_atomic(int fd, void *vptr, size_t size, off_t offset,  BOOL is_exact_size)
 {
 	ssize_t rv;

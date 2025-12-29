@@ -687,17 +687,10 @@ int nvmeibt_asprintf(char **str, const char *fmt, ...);
  *   - write/read @size bytes at @offset (file position not updated)
  *   - return total number of bytes written/read (@size) on success or -1 on error
  *   - partial write/read (bytes written/read < @size) considered error
- *
- * __nvmeibt_pwrite_atomic(fd, buf, size, offset)
- * __nvmeibt_pread_atomic(fd, buf, size, offset)
- *   - write/read @size bytes at @offset (file position not updated) atomically
- *   - return total number of bytes written/read (@size) on success or -1 on error
- *   - for use with nvmesh local server/clients fd's
  */
 
 ssize_t nvmeibt_write(int fd, const void *buf, size_t n);
 ssize_t __nvmeibt_pwrite(int fd, const void *buf, size_t n, off_t offset);
-ssize_t __nvmeibt_pwrite_atomic(int fd, const void *buf, size_t n, off_t offset, int OK_err_1, int OK_err_2);
 
 ssize_t __nvmeibt_pread(int fd, void *vptr, size_t size, off_t offset, BOOL is_exact_size);
 ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL is_exact_size);
@@ -712,14 +705,6 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL 
 	__rv__ = __nvmeibt_pwrite((__fd), (__buf), (__n), (__offset));						\
 	__MEASURE_TOOK(N_IMf(name ## _measure, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));		\
 	__rv__;																				\
-})
-
-#define NNVMEIBT_PWRITE_ATOMIC(name, __fd, __buf, __n, __offset, _OK_err_1, _OK_err_2) ({					\
-	ssize_t		__rv__;																						\
-	__MEASURE_TOOK_INIT();																					\
-	__rv__ = __nvmeibt_pwrite_atomic((__fd), (__buf), (__n), (__offset), (_OK_err_1), (_OK_err_2));			\
-	__MEASURE_TOOK(N_IMf(name, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));	\
-	__rv__;																									\
 })
 
 #define NNVMEIBT_PREAD NNVMEIBT_PREAD_ATOMIC

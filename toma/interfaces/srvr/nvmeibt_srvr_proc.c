@@ -53,24 +53,55 @@ int nvmeibt_open_fd_clnt_and_local_srvr(void)
 	return rv;
 }
 
+ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, off_t offset, int OK_err_1, int OK_err_2)
+{
+	ssize_t rv;
+
+	NTOMA_ASSERT(error_common_nvmeibt_pwrite_atomic, offset >= 0, "invalid offset @OFFSET", (long long) offset);
+
+	rv = pwrite(fd, vptr, size, offset);
+	if (rv < 0) {
+		if (errno == OK_err_1 || errno == OK_err_2) {
+			N_Tf(6sjhk20, "Failed pwrite(fd=@FD vptr=@PTR size=@SIZEOF offset=@OFFSET) (@AUTO_ERRNO))",
+				fd, vptr, size, (long long) offset);
+		} else {
+			N_Wf(35s83jm, "Failed pwrite(fd=@FD vptr=@PTR size=@SIZEOF offset=@OFFSET) (@AUTO_ERRNO))",
+				fd, vptr, size, (long long) offset);
+		}
+	} else if ((size_t) rv != size) {
+		N_Tf(rvsx83j, "Partial pwrite(fd=@FD, size=@SIZEOF, offset=@OFFSET) wrote rv=@RV_SSIZE_T",	// No ERRNO, since not an error
+			fd, size, (long long) offset, rv);
+		errno = 0;
+		rv = -1;
+	}
+	return rv;
+}
+
+#define NNVMEIBT_PWRITE_ATOMIC(name, __fd, __buf, __n, __offset, _OK_err_1, _OK_err_2) ({					\
+	ssize_t		__rv__;																						\
+	__MEASURE_TOOK_INIT();																					\
+	__rv__ = __nvmeibt_pwrite_atomic((__fd), (__buf), (__n), (__offset), (_OK_err_1), (_OK_err_2));			\
+	__MEASURE_TOOK(N_IMf(name, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));	\
+	__rv__;																									\
+})
+
 static int __login_into_server(int is_login)
 {
 	struct nvmeibs_toma_server_proc_buf buf;
-	int srv_fd = nvmeibt_toma_get_local_server_fd();
 	int rv = 0;
 
 	NFIN;
 	memset(&buf, 0, sizeof(buf));
-	if (srv_fd < 0) {
+	if (fd_toma2srvr < 0) {
 		goto out;	// Too early for login/logout
 	}
 
 	buf.type = (is_login ? NVMEIBS_TOMA_LOGIN : NVMEIBS_TOMA_LOGOUT);
-	if (NNVMEIBT_PWRITE_ATOMIC(trace_toma_login_into_server, srv_fd, &buf, sizeof(buf), 0, 0, 0) < 0) {
+	if (NNVMEIBT_PWRITE_ATOMIC(trace_toma_login_into_server, fd_toma2srvr, &buf, sizeof(buf), 0, 0, 0) < 0) {
 		N_Ef(trace_1_toma_login_into_server, "OOPS! Failed pwrite(fd_toma2srvr,...) of size @SIZEOF)", sizeof(buf));
 		if (!is_login) {
 			N_Tf(trace_2_toma_login_into_server, "For now patching using close() and open");
-			NNVMEIBT_CLOSE(trace_3_toma_login_into_server, srv_fd);
+			NNVMEIBT_CLOSE(trace_3_toma_login_into_server, fd_toma2srvr);
 			if (__open_fd_toma2srvr() == 0) {
 				goto out;
 			}
@@ -85,11 +116,10 @@ out:
 
 int nvmeibt_toma_announce_ready(int is_on)
 {
-	const int srv_fd = nvmeibt_toma_get_local_server_fd();
 	int rv = 0;
 
 	NFIN;
-	if ((srv_fd < 0) || __login_into_server(is_on) != 0) {
+	if ((fd_toma2srvr < 0) || __login_into_server(is_on) != 0) {
 		N_Tf(trace_toma_nvmeibt_toma_announce_ready, "Failed: is_on=@RV, proc: @STR", is_on, proc_path_toma2srvr);
 		rv = -1;
 	}
@@ -247,16 +277,15 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 /***************************** Generic messages *******************************/
 int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg)
 {
-	const int srv_fd = nvmeibt_toma_get_local_server_fd();
 	int	rv = 0;
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
-		if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, srv_fd, msg, sizeof(*msg), 0, 0, 0) < 0) {
+		if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0, 0) < 0) {
 			N_Tf(tsmtls1, "pwrite('@STR') failed, @AUTO_ERRNO", proc_path_toma2srvr);
 			rv = -1;
 		}
 	} else {
 		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
-		rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, srv_fd, &msg, sizeof(*msg), 0, EALREADY, EINPROGRESS);
+		rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, &msg, sizeof(*msg), 0, EALREADY, EINPROGRESS);
 		if (rv >= 0) {
 			rv = 0;
 		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
