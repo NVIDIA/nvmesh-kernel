@@ -691,9 +691,7 @@ out:
 static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_active *seg_active, bool seg_deleted);
 static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_active *seg_active, bool seg_deleted)
 {
-	int									srv_fd;
 	struct nvmeibs_toma_server_proc_buf buf;
-	int									wr_cnt;
 	int									rv = -1;
 	const struct nvmeibt_local_disk		*local_disk;
 	struct nvmeibs_msg_t2s_clean_journal_for_range		*msg = &buf.clean_journal_msg;
@@ -713,7 +711,6 @@ static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_activ
 		rv = 0;
 		goto out;
 	}
-	srv_fd = nvmeibt_toma_get_local_server_fd();
 	local_disk = nvmeibt_seg_active_get_local_disk(seg_active);
 	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
 		N_Tf(x5cf48q, "disk=@STR is_being_deleted. Skipping", nvmeibt_local_disk_display(local_disk));
@@ -722,7 +719,7 @@ static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_activ
 	}
 	//build the req
 	ZEROINIT(buf);
-	buf.type = NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE;	//EC-362, unify with the rest of msgs to server
+	buf.type = NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE;
 	nvmeibt_strlcpy(msg->disk_id, nvmeibt_local_disk_UUID_str(local_disk), sizeof(msg->disk_id));
 	msg->vendor_id = nvmeibt_local_disk_vendor_id(local_disk);
 	msg->start_4Klba = nvmeibt_seg_active_get_seg_mgmt(seg_active)->lb_s;
@@ -731,18 +728,10 @@ static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_activ
 	nvmeibt_strlcpy(msg->seg_uuid, nvmeibt_seg_active_id_str(seg_active), sizeof(msg->seg_uuid));
 
 	N_Tf(jru8534, "disk=@STR lb_s=@UINT64_TX lb_e=@UINT64_TX seg=@STR", nvmeibt_local_disk_display(local_disk), msg->start_4Klba, msg->end_4Klba, msg->seg_uuid);
-	//write: our kernel API is weird - write() will return error anyway, where
-	//certain errno values indicate success... sigh.
-	wr_cnt = NNVMEIBT_PWRITE_ATOMIC(warn_seg_active_notify_serjio_clean_range, srv_fd, &buf, sizeof(buf), 0, EALREADY, EINPROGRESS);
-	if (wr_cnt < 0 && (errno == EALREADY || errno == EINPROGRESS)) {
-		// Either a cleanup was already active, or a new "job" started
-		N_Tf(fko09de, "cleanup request success: @STR", errno == EALREADY ? "already active" : "started");
-	} else {
-		N_Ef(vffgg94, "wr_cnt=@WR_CNT @AUTO_ERRNO", wr_cnt);
-		goto out;
-	}
-	seg_active->applied_serjio_clean_range_state = SERJIO_CLEAN_RANGE_STATE_IN_WORK;
-	rv = 0;
+	rv = nvmeibt_toma_send_msg_to_local_server(&buf);
+	if (rv == EINPROGRESS)
+		seg_active->applied_serjio_clean_range_state = SERJIO_CLEAN_RANGE_STATE_IN_WORK;
+	rv = 0;	// Meaningless, no one checks this 'rv'.
 out:
 	NFOUT;
 	return rv;

@@ -249,20 +249,33 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 {
 	const int srv_fd = nvmeibt_toma_get_local_server_fd();
 	int	rv = 0;
-	if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, srv_fd, msg, sizeof(*msg), 0, 0, 0) < 0) {
-		N_Tf(tsmtls1, "pwrite('@STR') failed, @AUTO_ERRNO", proc_path_toma2srvr);
-		rv = -1;
+	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
+		if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, srv_fd, msg, sizeof(*msg), 0, 0, 0) < 0) {
+			N_Tf(tsmtls1, "pwrite('@STR') failed, @AUTO_ERRNO", proc_path_toma2srvr);
+			rv = -1;
+		}
+	} else {
+		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
+		rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, srv_fd, &msg, sizeof(*msg), 0, EALREADY, EINPROGRESS);
+		if (rv >= 0) {
+			rv = 0;
+		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
+			// Either a cleanup was already active, or a new "job" started
+			N_Tf(tsmtls4, "cleanup request success: @STR", (errno == EALREADY) ? "already active" : "started");
+			rv = EINPROGRESS;
+		} else {
+			N_Ef(tsmtls5, "pwrite('@STR') failed, wr_cnt=@RV @AUTO_ERRNO", proc_path_toma2srvr, rv);
+			rv = -1;
+		}
 	}
 	return rv;
 }
 
 int nvmeibt_toma_get_msg_from_local_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
 {
-	int rv = 0;
-
-	rv = read(fd_srvr2toma, msg, max_len);
+	int rv = read(fd_srvr2toma, msg, max_len);
 	if (rv < (int)sizeof(msg->handle)) {
-		N_Ef(error_topology_nvmeibt_topology_handle_local_server_event, "Failed read(fd_srvr2toma) rv=@RV @AUTO_ERRNO", rv);
+		N_Ef(tsmtls8, "Failed read(fd_srvr2toma) rv=@RV @AUTO_ERRNO", rv);
 		rv = -1;
 	} else {
 		*is_server_event = (msg->zero == 0);			// The first u64 decides between server event or client message to TOMA: For server event, the zero member must be 0, and then the type member indicates the server event type. For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero. (see also common/nvmeib_shared.h)
