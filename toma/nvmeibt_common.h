@@ -688,10 +688,6 @@ int nvmeibt_asprintf(char **str, const char *fmt, ...);
  *   - return total number of bytes written/read (@size) on success or -1 on error
  *   - partial write/read (bytes written/read < @size) considered error
  *
- * __nvmeibt_pwrite_noblock(fd, buf, size, offset)
- *   - same as above for __nvmeibt_pwrite/pread_noblock()
- *   - may return bytes written/read < @size for non-blocking fd (partially done)
- *
  * __nvmeibt_pwrite_atomic(fd, buf, size, offset)
  * __nvmeibt_pread_atomic(fd, buf, size, offset)
  *   - write/read @size bytes at @offset (file position not updated) atomically
@@ -701,7 +697,6 @@ int nvmeibt_asprintf(char **str, const char *fmt, ...);
 
 ssize_t nvmeibt_write(int fd, const void *buf, size_t n);
 ssize_t __nvmeibt_pwrite(int fd, const void *buf, size_t n, off_t offset);
-ssize_t __nvmeibt_pwrite_noblock(int fd, const void *buf, size_t n, off_t offset);
 ssize_t __nvmeibt_pwrite_atomic(int fd, const void *buf, size_t n, off_t offset, int OK_err_1, int OK_err_2);
 
 ssize_t __nvmeibt_pread(int fd, void *vptr, size_t size, off_t offset, BOOL is_exact_size);
@@ -715,14 +710,6 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL 
 		nvmeibt_abort(ES_FATAL);																	\
 	}																								\
 	__rv__ = __nvmeibt_pwrite((__fd), (__buf), (__n), (__offset));						\
-	__MEASURE_TOOK(N_IMf(name ## _measure, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));		\
-	__rv__;																				\
-})
-
-#define NNVMEIBT_PWRITE_NOBLOCK(name, __fd, __buf, __n, __offset) ({							\
-	ssize_t		__rv__;																	\
-	__MEASURE_TOOK_INIT();																\
-	__rv__ = __nvmeibt_pwrite_noblock((__fd), (__buf), (__n), (__offset));				\
 	__MEASURE_TOOK(N_IMf(name ## _measure, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));		\
 	__rv__;																				\
 })
@@ -744,13 +731,6 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL 
 	__MEASURE_TOOK(N_IMf(name ## _measure, "pread(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));     \
 	__rv__;                                                                               \
 })
-
-
-/* Used for printing to buffer with offset and maximum length check */
-#define _Bpf(buff, offset, max_len, fmt, ...)\
-	do {\
-		offset += snprintf(buff + offset, max_len - offset, fmt, ## __VA_ARGS__);\
-	} while(0)
 
 int nvmeibt_close_all_nonstd_fds(BOOL is_verbose);
 
@@ -785,8 +765,6 @@ static inline BOOL is_128KB_aligned(uint64_t pba, int pblk_size)
 //#if sizeof(nvmeibt_topology_binary_active_topo_header) != NVMEIBT_TOPOLOGY_BIN_NAME_LEN
 //#	error NVMEIBT_TOPOLOGY_BIN_NAME_LEN mismatch
 //#endif
-
-//#define NVMEIBT_GET_OFFSET(str,field)	(int)(&(((str *)0)->field))
 
 typedef struct {
 	volatile int counter;
