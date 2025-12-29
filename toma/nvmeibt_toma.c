@@ -407,7 +407,6 @@ static bool toma_wakeup_pending_by_type[NVMEIBT_TOMA_WAKEUP_TYPE_LAST];
 
 static int						epoll_fd = -1;
 static struct epoll_event		epoll_events[10000];
-struct nvmeibt_toma_fds_in_use	g_fds_in_use;
 
 enum shutdown_state {
 	ds_none,
@@ -521,6 +520,20 @@ struct stat_wq_entry {
 	struct nvmeibt_Str			*status_str;
 };
 
+enum NVMEIBT_FD_TYPES {
+	NVMEIBT_TOMA_FD_TYPE_IB = 1,
+	NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS = 2,
+	NVMEIBT_TOMA_FD_TYPE_ROCE = 3,
+	NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP = 4,
+	NVMEIBT_TOMA_FD_TYPE_TOMA_SRM_RESEND_TIMER = 7,
+	NVMEIBT_TOMA_FD_TYPE_FIFO_COMM = 8,
+	NVMEIBT_TOMA_FD_TYPE_SYSTEM_EVENTS = 15,
+	NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS = 16,
+	NVMEIBT_TOMA_FD_TYPE_UDP = 17,
+	NVMEIBT_TOMA_FD_TYPE_UDP_TIMER = 18,
+	NVMEIBT_TOMA_FD_TYPE_NETLINK_EVENTS = 19,
+};
+
 static char *fd_type_str(enum NVMEIBT_FD_TYPES t)
 {
 	switch (t) {
@@ -542,6 +555,15 @@ static char *fd_type_str(enum NVMEIBT_FD_TYPES t)
 	}
 	}
 }
+
+static struct nvmeibt_toma_fds_in_use {
+	struct nvmeibt_toma_fd_in_use {
+		int						fd;
+		enum NVMEIBT_FD_TYPES	fd_type;
+	} fds_arr[1024];
+	int								n_fds_in_use;
+	int								max_fd_no;
+} g_fds_in_use;
 
 struct nvmeibt_nm_local_node * nvmeibt_get_nw_node(void)
 {
@@ -3073,7 +3095,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 					nvmeibt_nm_rsrm_faults_handle_fifo_com(nvmeibt_get_nw_node());
 					break;
 				case NVMEIBT_TOMA_FD_TYPE_NETLINK_EVENTS:
-					//handle_netlink_event(nl_sock);
+					//handle_netlink_event(nl_sock);		// Netlink has a different select  in a different thread
 					break;
 				default:
 					N_Ef(trace_17_toma_run, "Unsupported FD type: @FD_TYPE", trigger_fd->fd_type);

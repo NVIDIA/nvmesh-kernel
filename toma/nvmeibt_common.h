@@ -164,31 +164,6 @@ struct nvmeibt_ldisk_id_for_srvr_cmd{	// Unique identifier of disk, for server c
 int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *disk,
 	uint64_t pba_s, uint64_t n_pblk_to_zero, BOOL are_hw_blks);
 
-enum NVMEIBT_FD_TYPES {
-	NVMEIBT_TOMA_FD_TYPE_IB = 1,
-	NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS = 2,
-	NVMEIBT_TOMA_FD_TYPE_ROCE = 3,
-	NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP = 4,
-	NVMEIBT_TOMA_FD_TYPE_TOMA_SRM_RESEND_TIMER = 7,
-	NVMEIBT_TOMA_FD_TYPE_FIFO_COMM = 8,
-	NVMEIBT_TOMA_FD_TYPE_SYSTEM_EVENTS = 15,
-	NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS = 16,
-	NVMEIBT_TOMA_FD_TYPE_UDP = 17,
-	NVMEIBT_TOMA_FD_TYPE_UDP_TIMER = 18,
-	NVMEIBT_TOMA_FD_TYPE_NETLINK_EVENTS = 19,
-};
-
-struct nvmeibt_toma_fd_in_use {
-	int						fd;
-	enum NVMEIBT_FD_TYPES	fd_type;
-};
-
-struct nvmeibt_toma_fds_in_use {
-	struct nvmeibt_toma_fd_in_use	fds_arr[1024];
-	int								n_fds_in_use;
-	int								max_fd_no;
-};
-
 struct nvmeibt_initiator_ctx {
 	uint64_t	session_gid; /* for srm */
 	uint64_t	th_info;
