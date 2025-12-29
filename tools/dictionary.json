@@ -11605,17 +11605,7 @@
     "@OFFSET_INT": {
         "size": 64,
         "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__collision": true,
-        "__histogram": {
-            "%zx": 53,
-            "%x": 3,
-            "%zu": 1,
-            "%d": 3,
-            "%u": 2,
-            "0x%zx": 8
-        }
+        "fmt": "0x%zx"
     },
     "@OFFSET_LONG": {
         "size": 64,

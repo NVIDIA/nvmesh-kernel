@@ -103,13 +103,13 @@ int nvmeibt_toma_announce_ready(int is_on)
 	This interface should seem as if the original mmap was used but with the added protection given by the extra protected pages  */
 static inline size_t padded_mmap_length(size_t length) { return length + 2 * PAGE_SIZE; }
 
-#define PADDED_MMAP_MAGIC_NUM 0x726f656568657265LLU		// MAGIC cookie to protect against buffer overrun in the first page
+#define PADDED_MMAP_MAGIC_NUM 0x726f656568657265LLU		// MAGIC cookie ("roeehere") to protect against buffer overrun in the first page
 
 struct padded_mmap_magic_number {
-	long long unsigned int magic_num;
+	uint64_t magic_num;
 	void *addr;
 	size_t length;
-} __attribute__ ((packed));
+};
 
 static inline void init_padded_mmap_magic_number_struct(struct padded_mmap_magic_number *me, size_t length)
 {
@@ -118,10 +118,10 @@ static inline void init_padded_mmap_magic_number_struct(struct padded_mmap_magic
 	me->magic_num = PADDED_MMAP_MAGIC_NUM;
 }
 
-static void *nvmeibt_mmap(size_t length, int fd)
+static void *nvmeibt_mmap(size_t length, int fd, uint64_t offset, bool allow_write)
 {
 	const size_t padded_length = padded_mmap_length(length);
-	void *mapped_padded = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);	// Allocating 2 pages more than length requested with no access permissions PROT_NONE
+	void *mapped_padded = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);	// Allocating 2 pages more than length requested with no read/write access
 	void *mapped = MAP_FAILED;
 
 	if (mapped_padded == MAP_FAILED) {
@@ -132,9 +132,9 @@ static void *nvmeibt_mmap(size_t length, int fd)
 	if (mprotect(mapped_padded, 1, PROT_WRITE) >= 0) {		// mprotect() __len == 1 so we only modify permissions for a single page. In case the struct is bigger than the size of one page we crash immediately after when we try to write to the 2nd page
 		init_padded_mmap_magic_number_struct(mapped_padded, padded_length);			// Writing to the first page details about the allocation and setting it back to no access permissions
 		if (mprotect(mapped_padded, 1, PROT_NONE) >= 0) {
-			const int permission = PROT_READ | PROT_WRITE;
+			const int permission = PROT_READ | (allow_write ? PROT_WRITE : 0);
 			const int flags = MAP_FIXED | MAP_SHARED;
-			mapped = mmap(mapped_padded + PAGE_SIZE, length, permission, flags, fd, 0 /*offset*/);	// Override the last mmap (except for the first and last pages)
+			mapped = mmap(mapped_padded + PAGE_SIZE, length, permission, flags, fd, offset);	// Override the last mmap (except for the first and last pages)
 		}
 	}
 	if (mapped == MAP_FAILED) {		// Have to unmap the +2 pages larger arre
@@ -165,7 +165,7 @@ static int nvmeibt_munmap(void *addr, size_t length)
 	}
 	mprotect(mapped_padded, 1, PROT_READ);
 	if ((me->addr != (void*)me) || (me->length != length_padded) || (me->magic_num != PADDED_MMAP_MAGIC_NUM)) {
-		NTOMA_ASSERT(salddbmmf6, false, "Magic number mismatch, expected: {@PTR, len=@ZX, magic=@LLX}, found: {@PTR, len=@ZX, magic=@LLX}",
+		NTOMA_ASSERT(salddbmmf6, false, "Magic number mismatch, expected={@PTR, len=@ZX, magic=@LLX}, found={@PTR, len=@ZX, magic=@LLX}",
 					   mapped_padded, length_padded, PADDED_MMAP_MAGIC_NUM,
 					   me->addr, me->length, me->magic_num);
 		errno = EINVAL;
@@ -225,7 +225,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 	}
 
 
-	status_str_ctx.buf = nvmeibt_mmap(req->max_length, mmap_fd);		// memory map the proc file
+	status_str_ctx.buf = nvmeibt_mmap(req->max_length, mmap_fd, 0, true);		// map writable memory to the start of the proc file
 	if (status_str_ctx.buf == MAP_FAILED) {
 		N_Wf(ttsrspfs7, "Failed to mmap file @MMAP_FNAME. (@ERRNO - '@AUTO_ERRNO')", mmap_fname, errno);
 		NNVMEIBT_CLOSE(ttsrspfs8, mmap_fd);
@@ -352,23 +352,23 @@ int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh)
 	return __nvmeib_srvr_api_lib_disk_do_bind_unbind(disk_bdf, is_nvmesh, false);
 }
 
-struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char *disk_uuid, uint64_t n_blksets, uint64_t offset)
+struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char *disk_name, uint64_t n_blksets, uint64_t offset, bool allow_write)
 {
 	char file_name[256];
 	struct mmap_tbl rv = { .addr = NULL, .length = 0};
 	size_t n_bytes = n_blksets * NVMEIB_LOCK_BLKSET_ENTRY_SIZE;	// Same calculation as in scan_locks_ec or disk_lock_allocate_(). Each blockset has a ram blockset-entry which we want to access
 	int fd = -1;
 	n_bytes = roundup(n_bytes, PAGE_SIZE);		// Align to page size to allow toma padding of pages.
-	snprintf(file_name, sizeof(file_name), TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s", 128, disk_uuid);
-	N_Tf(salddbmm0, "mmap file @FILE_NAME n_bytes=@ZX at offset=@OFFSET_INT n_blksets=@UINT64_TX", file_name, n_bytes, offset, n_blksets);
+	snprintf(file_name, sizeof(file_name), TOMA_ROOT_DIR "proc/nvmeibs/locks.%.*s", 128, disk_name);
+	N_Tf(salddbmm0, "mmap file @STR n_bytes=@ZX at offset=@ZX n_blksets=@ZX writable=@BOOL_YN", file_name, n_bytes, offset, n_blksets, allow_write);
 	fd = NNVMEIBT_OPEN(salddbmm1, file_name, O_RDWR);
 	if (fd < 0) {
-		N_Wf(salddbmm2, "Failed to open @FILE_NAME (@AUTO_ERRNO). Possibly was removed immediatelly", file_name);
+		N_Wf(salddbmm2, "Failed to open @STR (@AUTO_ERRNO). Possibly was removed immediatelly", file_name);
 		return rv;
 	}
-	rv.addr = nvmeibt_mmap(n_bytes, fd);
+	rv.addr = nvmeibt_mmap(n_bytes, fd, offset, allow_write);
 	if (rv.addr == MAP_FAILED) {
-		N_Wf(salddbmm3, "Failed to mmap locks table of disk=@STR @AUTO_ERRNO. Possibly was removed immediatelly", disk_uuid);
+		N_Wf(salddbmm3, "Failed to mmap locks table of disk=@STR @AUTO_ERRNO. Possibly was removed immediatelly", disk_name);
 		rv.addr = NULL;
 	} else {
 		rv.length = n_bytes;
@@ -377,10 +377,10 @@ struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char *disk_uuid, uint64_
 	return rv;
 }
 
-int nvmeib_srvr_api_lib_locks_map_put(const char *disk_uuid, struct mmap_tbl m)
+int nvmeib_srvr_api_lib_locks_map_put(const char *disk_name, struct mmap_tbl m)
 {
 	if (m.addr && (nvmeibt_munmap(m.addr, m.length) < 0)) {
-		N_Wf(vjs9o39, "Failed to munmap disk=@STR locks table @AUTO_ERRNO", disk_uuid);
+		N_Wf(vjs9o39, "Failed to munmap disk=@STR locks table @AUTO_ERRNO", disk_name);
 		return -1;
 	}
 	return 0;

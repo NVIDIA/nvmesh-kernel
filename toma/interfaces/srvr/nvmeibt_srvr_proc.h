@@ -44,8 +44,8 @@ struct mmap_tbl {
 	void *addr;					// Address of locks table memory map. On alloc error returned NULL
 	size_t length;				// Actual length[bytes] of allocated memory. On error == 0. Might be slightly bigger than requested, due to padding
 };
-struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char* disk_uuid, uint64_t n_blksets, uint64_t offset /* typically = 0 */);
-int             nvmeib_srvr_api_lib_locks_map_put(const char *disk_uuid, struct mmap_tbl memory_returned_by_valid_get);		// Upon error returns negative
+struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char* disk_name, uint64_t n_blksets, uint64_t offset /*=0*/, bool allow_write /*= true*/);
+int             nvmeib_srvr_api_lib_locks_map_put(const char *disk_name, struct mmap_tbl memory_returned_by_valid_get);		// Upon error returns negative
 
 int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh);	//   Bind to   nvmesh/nvme driver
 int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh);	// UnBind from nvmesh/nvme driver
