@@ -880,9 +880,8 @@ out:
 /* Notify server about the location of partitions a disk's (journal/serjio-db)*/
 static inline int nvmeibr_proc_notify_journal_info(const char* ldisk_id  /*Name of NVMe disk */, uint64_t journal_pba, uint64_t journal_length, uint64_t serjio_db_pba, uint64_t serjio_db_length)
 {
-	const int srv_fd = nvmeibt_toma_get_local_server_fd();
 	struct nvmeibs_toma_server_proc_buf buf;
-	int rv = -1;
+	int rv = 0;
 
 	NFIN;
 	ZEROINIT(buf);
@@ -893,35 +892,26 @@ static inline int nvmeibr_proc_notify_journal_info(const char* ldisk_id  /*Name 
 	buf.journal_msg.serjio_db_lba = serjio_db_pba;
 	buf.journal_msg.serjio_db_length = serjio_db_length;
 	N_Tf(t_01_nvmeibt_notify_jour_info, "disk=@STR journal_pba=@JOURNAL_PBA, length=@ZU, serjio_pba=@SERJIO_PBA, len=@ZU", ldisk_id, journal_pba, journal_length, serjio_db_pba, serjio_db_length);
-	if (NNVMEIBT_PWRITE_ATOMIC(t_02_nvmeibt_notify_jour_info, srv_fd, &buf, sizeof(buf), 0, 0, 0) < 0) {
+	if (nvmeibt_toma_send_msg_to_local_server(&buf) < 0) {
 		N_Ef(t_03_nvmeibt_notify_jour_info, "failed write to local server (@AUTO_ERRNO)");
-		rv = 0;
-		N_Ef(t_04_nvmeibt_notify_jour_info, "************ Remove me once the server stops issueing an error ****************");	// LKJ
-	} else {
-		rv = 0;
+		rv = 0;	// DHS: Not sure why ??? seems illegal
 	}
 	NFOUT;
 	return rv;
 }
 
-/**
- * Notify nvmeibs about the existance of the a journal partition and its start
- * address.
- */
-int nvmeibt_read_config_notify_server_about_journal_partition(const struct nvmeibt_disk_gpt_partition_entry *journal_data_entry,
-															  const struct nvmeibt_disk_gpt_partition_entry *serjio_db_entry,
+/* Notify nvmeibs about the existance of the a journal partition and its start address. */
+int nvmeibt_read_config_notify_server_about_journal_partition(const struct nvmeibt_disk_gpt_partition_entry *journal_data,
+															  const struct nvmeibt_disk_gpt_partition_entry *serjio_db,
 															  const char *ldisk_id, const char *ld_display)
 {
 	int		rv = 0;
-	if (journal_data_entry && serjio_db_entry) {
-		N_Tf(op0oer8, "Notifying server about disk=@STR journal_data pba=@PBA_LONG length=@LENGTH_LONG blocks serjio_db pba=@PBA_LONG length=@LENGTH_LONG blocks",
-			 ld_display, journal_data_entry->pba_s, journal_data_entry->pba_e - journal_data_entry->pba_s + 1,
-			 serjio_db_entry->pba_s, serjio_db_entry->pba_e - serjio_db_entry->pba_s + 1);
-		rv = nvmeibr_proc_notify_journal_info(ldisk_id,
-											  journal_data_entry->pba_s,
-											  journal_data_entry->pba_e - journal_data_entry->pba_s + 1,
-											  serjio_db_entry->pba_s,
-											  serjio_db_entry->pba_e - serjio_db_entry->pba_s + 1);
+	if (journal_data && serjio_db) {
+		const uint64_t j_len = (journal_data->pba_e - journal_data->pba_s + 1);
+		const uint64_t s_len = (serjio_db->pba_e - serjio_db->pba_s + 1);
+		N_Tf(op0oer8, "Notifying server about disk=@STR journal_data pba=@PBA length=@LENGTH_LONG blocks serjio_db pba=@PBA length=@LENGTH_LONG blocks",
+			 ld_display, journal_data->pba_s, j_len, serjio_db->pba_s, s_len);
+		rv = nvmeibr_proc_notify_journal_info(ldisk_id, journal_data->pba_s, j_len, serjio_db->pba_s, s_len);
 	}
 	return rv;
 }

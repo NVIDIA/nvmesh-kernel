@@ -12314,45 +12314,17 @@
     "@PBA": {
         "size": 64,
         "type": "long",
-        "fmt": "%zx",
-        "final": true,
-        "__histogram": {
-            "%zx": 42,
-            "0x%zx": 1
-        },
-        "__collision": true,
-        "__split": true
+        "fmt": "0x%zx"
     },
     "@PBA_E": {
         "size": 64,
         "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__collision": true,
-        "__histogram": {
-            "%zx": 36,
-            "0x%zx": 20
-        }
-    },
-    "@PBA_LONG": {
-        "size": 64,
-        "type": "long",
-        "fmt": "%lx",
-        "final": true,
-        "__histogram": {
-            "%lx": 14
-        }
+        "fmt": "0x%zx"
     },
     "@PBA_S": {
         "size": 64,
         "type": "long",
-        "fmt": "0x%zx",
-        "final": true,
-        "__histogram": {
-            "0x%zx": 31,
-            "%zx": 36
-        },
-        "__collision": true
+        "fmt": "0x%zx"
     },
     "@N_PBLK": {
         "size": 64,
