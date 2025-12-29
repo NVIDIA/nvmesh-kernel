@@ -229,27 +229,27 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 /***************************** Generic messages *******************************/
 int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg)
 {
-	int	rv = 0;
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
-		if (NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0) < 0) {
-			N_Tf(tsmtls1, "pwrite(@FD) failed, @AUTO_ERRNO", fd_toma2srvr);
-			rv = -1;
+		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
+		if (rv < 0) {
+			N_Tf(tsmtls1, "pwrite(@FD) failed rv=@RV, @AUTO_ERRNO", fd_toma2srvr, rv);
+			return -1;
 		}
+		return 0;
 	} else {
 		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
-		rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, &msg, sizeof(*msg), EALREADY, EINPROGRESS);
+		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, &msg, sizeof(*msg), EALREADY, EINPROGRESS);
 		if (rv >= 0) {
-			rv = 0;
+			return 0;
 		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
 			// Either a cleanup was already active, or a new "job" started
 			N_Tf(tsmtls4, "cleanup request success: @STR", (errno == EALREADY) ? "already active" : "started");
-			rv = EINPROGRESS;
+			return EINPROGRESS;
 		} else {
 			N_Ef(tsmtls5, "pwrite(@FD) failed, wr_cnt=@RV @AUTO_ERRNO", fd_toma2srvr, rv);
-			rv = -1;
+			return -1;
 		}
 	}
-	return rv;
 }
 
 int nvmeibt_toma_get_msg_from_local_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
