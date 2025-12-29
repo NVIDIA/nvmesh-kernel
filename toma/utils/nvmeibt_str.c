@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
-#include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
 
 static inline size_t Str_get_allocated_size(const struct nvmeibt_Str *this)
