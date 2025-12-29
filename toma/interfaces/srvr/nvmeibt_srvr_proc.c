@@ -162,6 +162,7 @@ struct status_str_ctx {					// Write status to mmap proc file in response to ser
 	char 	*buf;
 	size_t 	max_len;
 	size_t 	cur_len;
+	size_t 	total_needed_len;
 	bool	is_overflow;
 };
 
@@ -175,10 +176,11 @@ static int __status_str_printf(void *context, const char *format, ...)			// vsnp
 	va_start(arglist, format);
 	len_needed = vsnprintf(str_ctx->buf + str_ctx->cur_len, (size_t)avail_len, format, arglist);
 	va_end(arglist);
-	if (len_needed >= (size_t)avail_len) {
+	if ((len_needed >= (size_t)avail_len) && (!str_ctx->is_overflow)) {	// Print only first time on overflow, not for every function call
 		N_Tf(ttsrspfs1, "Buffer overflow, max_len=@SIZE_T cur_len=@SIZE_T len_needed=@SIZE_T", str_ctx->max_len, str_ctx->cur_len, len_needed);
 		str_ctx->is_overflow = 1;
 	}
+	str_ctx->total_needed_len += len_needed;
 	str_ctx->cur_len += min((size_t)avail_len - 1, len_needed);
 	return 0;
 }
@@ -188,7 +190,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 {
 	int fd;
 	char fname[256];
-	struct status_str_ctx status_str_ctx = {.buf = NULL, .max_len = req->max_length, .cur_len = 0, .is_overflow = 0	};
+	struct status_str_ctx ctx = {.buf = NULL, .max_len = req->max_length, .cur_len = 0, .total_needed_len = 0, .is_overflow = 0	};
 	struct nvmeibs_toma_server_proc_buf write_resp = {.type = NVMEIBS_TOMA_WRITE_STATUS_RESP};
 	struct nvmeibs_msg_t2s_toma_status_resp *pl = &write_resp.status_resp_msg;
 
@@ -199,20 +201,23 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 		N_Wf(ttsrspfs6, "Failed to open mmap file @STR (@ERRNO - '@AUTO_ERRNO')", fname, errno);
 		return -__LINE__;
 	}
-	status_str_ctx.buf = nvmeibt_mmap(req->max_length, fd, 0, true);		// map writable memory to the start of the proc file
-	if (status_str_ctx.buf == MAP_FAILED) {
+	ctx.buf = nvmeibt_mmap(req->max_length, fd, 0, true);		// map writable memory to the start of the proc file
+	if (ctx.buf == MAP_FAILED) {
 		N_Wf(ttsrspfs7, "Failed to mmap file @STR. (@ERRNO - '@AUTO_ERRNO')", fname, errno);
 		NNVMEIBT_CLOSE(ttsrspfs8, fd);
 		return -__LINE__;
 	}
 
-	your_print_status_fn(req->type, &__status_str_printf, &status_str_ctx);	// Print the status to the proc file
-	nvmeibt_munmap(status_str_ctx.buf, req->max_length);
+	your_print_status_fn(req->type, &__status_str_printf, &ctx);	// Print the status to the proc file
+	nvmeibt_munmap(ctx.buf, req->max_length);
 	NNVMEIBT_CLOSE(ttsrspfs9, fd);
 
+	if (ctx.is_overflow)
+		N_Tf(ttsrspfsc, "Output truncated from @SIZE_T to @SIZE_T characters", ctx.total_needed_len, ctx.cur_len);
+
 	pl->handle = req->handle;
-	pl->length = status_str_ctx.cur_len;
-	pl->is_overflow = status_str_ctx.is_overflow;
+	pl->length = ctx.cur_len;
+	pl->is_overflow = ctx.is_overflow;
 	pl->handle_req = req->handle_req;
 	if (nvmeibt_toma_send_msg_to_local_server(&write_resp) < 0) {
 		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
