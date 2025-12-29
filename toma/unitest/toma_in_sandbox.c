@@ -740,7 +740,10 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 
 /*********************************************************************/
 static void toma_unitest_env_end(void) {
-	SANDBOX_PRINT(COL_GREEN "unitest done sys=%p" COL_RESET "\n", sys);
+	#define LOGS_DIR TOMA_ROOT_DIR "var/log/nvmesh/trace_daemon"
+	#define DICT_DIR "99bin/*/obj/"
+	SANDBOX_PRINT(COL_GREEN "unitest done sys=%p" COL_RESET ". \t\tAnalyze bin logs via:\n", sys);
+	SANDBOX_PRINT(LOGS_DIR "/pager " LOGS_DIR " --toma --color --dict_preload " DICT_DIR "dict* --fmtlib_preload " DICT_DIR "/libfmtrs.so > %s\n", "z.txt");
 	t_sandbox_all_destroy();
 }
 void toma_unitest_env_start(void) {
