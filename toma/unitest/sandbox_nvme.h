@@ -19,6 +19,10 @@ struct sandbox_nvme_device {
 
 struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path);
 
+// Get all mock NVMe devices for netlink mock
+int sandbox_nvme_get_device_count(void);
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index);
+
 #define SANDBOX_NVME_BLOCK_SIZE_EXPONENT 12 // logical sector size as exponent of 2 (2**12 = 4096 bytes).
 
 #endif // TOMA_SANDBOX_NVME_H_INCLUDED

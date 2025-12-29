@@ -70,6 +70,28 @@ void sandbox_nvme_init(void)
 	write_file(DISKS_CSV_FILE, "id,blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor\n"
 				   "NVMD_SN_002.1,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122\n"
 				   "NVMD_SN_003.1,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123\n");
+
+	// Create locks files for NVMesh disks (required for mmap during disk add)
+	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+		struct sandbox_nvme_device *d = &nvme_devices[i];
+		if (!d->stock_disk) {
+			char locks_path[256];
+			int fd;
+			// Locks file is named after the disk_id (serial.nsid)
+			snprintf(locks_path, sizeof(locks_path), TOMA_ROOT_DIR "proc/nvmeibs/locks.%s.1", d->serial_number);
+			fd = open(locks_path, O_CREAT | O_RDWR, 0644);
+			if (fd >= 0) {
+				// Extend to one page size for mmap
+				if (ftruncate(fd, 4096) < 0) {
+					N_Ef(sbu3410, "ftruncate failed for locks file @STR: @STR", locks_path, strerror(errno));
+				}
+				close(fd);
+				N_Tf(sbu3403, "created locks file @STR", locks_path);
+			} else {
+				N_Ef(sbu3404, "failed to create locks file @STR: @STR", locks_path, strerror(errno));
+			}
+		}
+	}
 	N_Tf(sbu3402, "done initializing NVMe disks");
 }
 
@@ -114,6 +136,18 @@ struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path)
 
 	N_Tf(uti3345, "no device for path=@STR", path);
 	return NULL;
+}
+
+int sandbox_nvme_get_device_count(void)
+{
+	return (int)NVME_DEVICE_COUNT;
+}
+
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index)
+{
+	if (index < 0 || index >= (int)NVME_DEVICE_COUNT)
+		return NULL;
+	return &nvme_devices[index];
 }
 
 struct udev *udev_new(void)
