@@ -8546,15 +8546,6 @@
             "%p": 9
         }
     },
-    "@LOCAL_SERVER_EVENTS_FD": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 56
-        }
-    },
     "@LOCAL_SERVER_FD": {
         "size": 32,
         "type": "s32",
@@ -16045,14 +16036,7 @@
     "@SIZEOF": {
         "size": 64,
         "type": "long",
-        "fmt": "%zu",
-        "final": true,
-        "__histogram": {
-            "%zu": 46,
-            "%zd": 22
-        },
-        "__split": true,
-        "__collision": true
+        "fmt": "%zu"
     },
     "@SIZEOF_LONG": {
         "size": 64,
@@ -19340,11 +19324,7 @@
     "@ZU": {
         "size": 64,
         "type": "long",
-        "fmt": "%zu",
-        "final": true,
-        "__histogram": {
-            "%zu": 8
-        }
+        "fmt": "%zu"
     },
     "@ZX": {
         "size": 64,
