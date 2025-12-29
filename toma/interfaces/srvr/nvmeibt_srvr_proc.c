@@ -219,7 +219,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 	pl->length = ctx.cur_len;
 	pl->is_overflow = ctx.is_overflow;
 	pl->handle_req = req->handle_req;
-	if (nvmeibt_toma_send_msg_to_local_server(&write_resp) < 0) {
+	if (nvmeib_srvr_api_lib_send_msg_to_server(&write_resp) < 0) {
 		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
 		return -__LINE__;
 	}
@@ -227,7 +227,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 }
 
 /***************************** Generic messages *******************************/
-int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg)
+int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg)
 {
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
 		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
@@ -252,7 +252,7 @@ int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_
 	}
 }
 
-int nvmeibt_toma_get_msg_from_local_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
+int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
 {
 	const int rv = read(fd_srvr2toma, msg, max_len);
 	if (rv < (int)sizeof(msg->handle)) {

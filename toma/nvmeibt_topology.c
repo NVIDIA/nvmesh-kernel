@@ -1926,8 +1926,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 				N_Wf(ju87661, "Got a BLKSET_RECOVERED before mgmt_config. Ignoring.");
 				ack.blkset_recovered_ack_msg.toma_rv = 1;
 			}
-
-			if (nvmeibt_toma_send_msg_to_local_server(&ack) < 0) {
+			if (nvmeib_srvr_api_lib_send_msg_to_server(&ack) < 0) {
 				N_Wf(ww77823, "Failed to send BLKSET_RECOVERED_ACK to server (@ERRNO - '@AUTO_ERRNO')", errno);
 			}
 		}
@@ -1950,7 +1949,7 @@ int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
 
 	NFIN;
 	msg_buf = NNVMEIBT_BM_CALLOC(trace_topology_nvmeibt_topology_handle_local_server_event, max_len);
-	rv = nvmeibt_toma_get_msg_from_local_server(msg_buf, max_len, is_server_event);
+	rv = nvmeib_srvr_api_lib_recv_msg_from_server(msg_buf, max_len, is_server_event);
 	if (rv < 0) {
 		goto out;
 	} else if (*is_server_event) {

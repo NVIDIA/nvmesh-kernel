@@ -9,8 +9,8 @@ int nvmeib_srvr_api_lib_handshake_server(void);	// Login into local server, Todo
 int nvmeib_srvr_api_lib_destroy(void);
 int nvmeib_srvr_api_lib_get_fd_for_epoll(void);
 
-int nvmeibt_toma_send_msg_to_local_server(const struct nvmeibs_toma_server_proc_buf *msg);
-int nvmeibt_toma_get_msg_from_local_server(     struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
+int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg);
+int nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
 int nvmeibt_toma_send_buf_to_client(      const /* struct nvmeibs_toma_client_proc_buf */ char *buf, int buf_len, const char *clnt_host);
 
 // Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory

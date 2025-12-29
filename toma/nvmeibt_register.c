@@ -2415,7 +2415,7 @@ static inline int nvmeibt_client_disconnect_force_cmd(int cid)
 	ZEROINIT(buf);
 	buf.type = NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD;
 	buf.client_disconnect_force_cmd.cid = cid;
-	if (nvmeibt_toma_send_msg_to_local_server(&buf) < 0) {
+	if (nvmeib_srvr_api_lib_send_msg_to_server(&buf) < 0) {
 		N_Ef(t_32_nvmeibt_disconnect_clnt, "cid=@CID failed write (@AUTO_ERRNO)", cid);
 		return -1;
 	} else {
