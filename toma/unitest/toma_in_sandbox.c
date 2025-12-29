@@ -8,6 +8,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/syscall.h>  // For SYS_socketpair to create real socketpairs
+#include <linux/netlink.h>  // For struct nlmsghdr, NLMSG_DATA
+#include <poll.h>  // For poll() in override_select
 
 /************************************* Logging ********************************/
 
@@ -284,6 +287,11 @@ struct t_sandbox_all {
 		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
 	} kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
+	struct TSB_netlink_mock {
+		int toma_end_fd;    // fds[0] - Toma's nl_sock_fd (reads responses here)
+		int mock_end_fd;    // fds[1] - mock server writes responses here
+		bool initialized;
+	} TSB_netlink;
 	char my_hostname[64];
 } *sys;
 
@@ -528,40 +536,171 @@ int __connect(int fd, const struct sockaddr_un * addr, unsigned int len) {
 	return TSB_sock_open(s);
 }
 
-struct sockaddr_nl {
-	unsigned short	nl_family;	/* AF_NETLINK	*/
-	unsigned short	nl_pad;		/* zero		*/
-	u32 nl_pid;		/* port ID	*/
-};
+// struct sockaddr_nl is now provided by <linux/netlink.h>
 
 int __bind(int fd, const void* __addr, unsigned int len) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	struct t_sandbox_sock *s = &TS->socks[fd - TS->debug_offset];
 	const struct sockaddr_nl *addr = __addr;
 	s->addr.sun_family = addr->nl_family;
-	if (addr->nl_family == AF_NETLINK)
+	if (addr->nl_family == AF_NETLINK) {
+		// Create a real Unix datagram socketpair for netlink mock.
+		// Use syscall directly since our socket functions are mocked.
+		int fds[2];
+		if (syscall(SYS_socketpair, AF_UNIX, SOCK_DGRAM, 0, fds) < 0) {
+			N_Ef(bind_nl_err, "Failed to create netlink mock socketpair: @STR", strerror(errno));
+			return -1;
+		}
+		sys->TSB_netlink.toma_end_fd = fds[0];  // Toma reads responses here
+		sys->TSB_netlink.mock_end_fd = fds[1];  // Mock server writes responses here
+		sys->TSB_netlink.initialized = true;
+		s->fd = fds[0];  // Update socket table with the real fd
 		sprintf(s->addr.sun_path, FILE_SANDBOX_PREFIX "bind_netlink_sock");
-	else
+		N_Tf(bind_nl_ok, "Created netlink mock socketpair: toma_fd=@INT mock_fd=@INT",
+		     fds[0], fds[1]);
+		s->len = len;
+		return fds[0];
+	} else {
 		sprintf(s->addr.sun_path, FILE_SANDBOX_PREFIX "bind_toma_rpc_sock");
+	}
 	s->len = len;
 	return TSB_sock_open(s);
 }
 
 int socketpair(int __domain, int __type, int __protocol, int fds[2]) {
-	struct sockaddr_un addr;
-	for (int i = 0; i < 2; i++) {
-		sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "km_comm_pair%d", i);
-		fds[i] = __connect(socket(__domain,__type,__protocol), &addr, 16);
+	// Use a real Unix socketpair so that select() works correctly.
+	// The file-based approach caused select() to always see files as "ready".
+	(void)__domain; (void)__type; (void)__protocol;
+	if (syscall(SYS_socketpair, AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
+		N_Ef(socketpair_err, "Failed to create real socketpair: @STR", strerror(errno));
+		return -1;
 	}
+	N_Tf(socketpair_ok, "Created real socketpair: fds[0]=@INT fds[1]=@INT", fds[0], fds[1]);
 	return 0;
 }
 
-ssize_t sendmsg(int __fd, const struct msghdr *__msg, int __flags) {
-	(void)__fd; (void)__msg; (void)__flags; return 0;
+// Helper to send a disk info response via the netlink mock
+static void TSB_netlink_send_disk_response(struct sandbox_nvme_device *dev)
+{
+	// Buffer for the netlink message: nlmsghdr + nvmeib_nl_uk_comm_msg + nvmeib_disk_info_reply
+	char buf[sizeof(struct nlmsghdr) + sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(struct nvmeib_disk_info_reply)];
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg;
+	struct nvmeib_disk_info_reply *rep;
+	struct iovec iov;
+	struct msghdr hdr;
+	ssize_t sent;
+
+	memset(buf, 0, sizeof(buf));
+	memset(&iov, 0, sizeof(iov));
+	memset(&hdr, 0, sizeof(hdr));
+	iov.iov_base = buf;
+	iov.iov_len = sizeof(buf);
+	hdr.msg_iov = &iov;
+	hdr.msg_iovlen = 1;
+
+	// Fill nlmsghdr
+	nlh->nlmsg_len = sizeof(buf);
+	nlh->nlmsg_type = NLMSG_DONE;
+	nlh->nlmsg_flags = 0;
+	nlh->nlmsg_seq = 0;
+	nlh->nlmsg_pid = getpid();
+
+	// Fill nvmeib_nl_uk_comm_msg
+	msg = NLMSG_DATA(nlh);
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	msg->opcode = csc_get_disks;
+	msg->caller_type = 0;
+	msg->id = 0;
+
+	// Fill nvmeib_disk_info_reply
+	rep = (struct nvmeib_disk_info_reply *)msg->data;
+	rep->base.opcode = csc_get_disks;
+	rep->base.error = csce_ok;
+	rep->base.latency_ns = 0;
+	rep->selector = nvmeib_disk_info_reply_dinfo;
+
+	// Fill disk info from sandbox device
+	rep->dinfo.disk.n_blocks = dev->size_in_blocks;
+	rep->dinfo.disk.n_hw_blocks = dev->size_in_blocks;
+	rep->dinfo.disk.vendor_id = dev->vendor_id;
+	rep->dinfo.disk.block_size = 1 << SANDBOX_NVME_BLOCK_SIZE_EXPONENT;  // 4096
+	rep->dinfo.disk.max_request_size = 32;
+	rep->dinfo.disk.seq = 0;
+	rep->dinfo.disk.nsid = 1;
+	rep->dinfo.disk.metadata = 0;
+	snprintf(rep->dinfo.disk.disk_id, sizeof(rep->dinfo.disk.disk_id), "%s.1", dev->serial_number);
+	snprintf(rep->dinfo.disk.dev_name, sizeof(rep->dinfo.disk.dev_name), "%s", dev->device_path);
+	snprintf(rep->dinfo.disk.model_str, sizeof(rep->dinfo.disk.model_str), "%s", dev->model_number);
+	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
+	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
+	rep->dinfo.serjio_status = 0;  // nvmeibs_serjio_status_ok
+
+	// Send via real sendmsg to mock_end_fd
+	sent = syscall(SYS_sendmsg, sys->TSB_netlink.mock_end_fd, &hdr, 0);
+	N_Tf(nl_send_disk, "Sent disk response for @STR: @INT64_TD bytes", dev->serial_number, (int64_t)sent);
 }
 
-ssize_t recvmsg(int __fd,       struct msghdr *__msg, int __flags) {
-	(void)__fd; (void)__msg; (void)__flags; return 0;
+ssize_t sendmsg(int __fd, const struct msghdr *__msg, int __flags) {
+	struct iovec *iov;
+	struct nlmsghdr *nlh;
+	struct nvmeib_nl_uk_comm_msg *req_msg;
+	int count;
+	int i;
+
+	// Check if this is the netlink socket
+	if (sys->TSB_netlink.initialized && __fd == sys->TSB_netlink.toma_end_fd) {
+		// Cast msg_iov from void* (sandbox's msghdr) to struct iovec*
+		iov = (struct iovec *)__msg->msg_iov;
+
+		// Parse the request from the iovec
+		if (__msg->msg_iovlen < 1 || iov[0].iov_len < sizeof(struct nlmsghdr)) {
+			N_Ef(nl_sendmsg_err, "Invalid netlink message");
+			return -1;
+		}
+
+		nlh = (struct nlmsghdr *)iov[0].iov_base;
+		req_msg = NLMSG_DATA(nlh);
+
+		N_Tf(nl_sendmsg, "Netlink sendmsg: opcode=@INT", req_msg->opcode);
+
+		if (req_msg->opcode == csc_get_disks) {
+			// Send disk info for each mock NVMe device
+			count = sandbox_nvme_get_device_count();
+			for (i = 0; i < count; i++) {
+				struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
+				if (dev && !dev->stock_disk) {  // Only send NVMesh disks, not stock disks
+					TSB_netlink_send_disk_response(dev);
+				}
+			}
+		} else if (req_msg->opcode == csc_keep_alive) {
+			// No response needed for keep_alive
+			N_Tf(nl_keepalive, "Netlink keep_alive received");
+		} else {
+			N_Df(nl_unknown_op, "Netlink opcode @INT not handled", req_msg->opcode);
+		}
+
+		// Return success (pretend message was sent to kernel)
+		return (ssize_t)iov[0].iov_len;
+	}
+
+	// Not netlink socket - original behavior
+	(void)__flags;
+	return 0;
+}
+
+ssize_t recvmsg(int __fd, struct msghdr *__msg, int __flags) {
+	// Check if this is the netlink socket
+	if (sys->TSB_netlink.initialized && __fd == sys->TSB_netlink.toma_end_fd) {
+		// Pass through to real recvmsg - reads responses from the socketpair
+		ssize_t n = syscall(SYS_recvmsg, __fd, __msg, __flags);
+		N_Tf(nl_recvmsg, "Netlink recvmsg: @INT64_TD bytes", (int64_t)n);
+		return n;
+	}
+
+	// Not netlink socket - original behavior
+	(void)__flags;
+	return 0;
 }
 
 ssize_t send(int fd, const void *buf, size_t n , int flags) {
@@ -614,7 +753,7 @@ int override_close(int fd) {
 		if (s) {
 			socket_destroy(s);
 		} else {
-			N_Df(ovc5786, "close on untracked fd=@INT", fd);
+			close(fd);		// Real fd (e.g., from real socketpair)
 		}
 	}
 	return 0;
@@ -622,19 +761,22 @@ int override_close(int fd) {
 
 int override_fcntl(int fd, int cmd, ...) {
 	const int *pipe_fds = sys->TSB_wake_pip.fds;
+	struct t_sandbox_sock *s;
+	int value = 0;
+	va_list ap;
 	BUG_ON(fd < 3);
+	va_start(ap, cmd);
+	value = va_arg(ap, int);
+	va_end(ap);
 	if ((fd == pipe_fds[0]) || (fd == pipe_fds[1])) {					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
-		int value = 0;
-		va_list ap;
-		va_start(ap, cmd);
-		value = va_arg(ap, int);
-		va_end(ap);
 		return fcntl(fd, cmd, value);
-	} else {
-		struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-		(void)s; (void)cmd;
-		return 0;
 	}
+	s = TSB_socket_find_by_fd_opt(fd);
+	if (!s) {
+		return fcntl(fd, cmd, value);		// Real fd (e.g., from real socketpair)
+	}
+	(void)cmd;
+	return 0;
 }
 
 int override_pipe(int fds[2]) {
@@ -657,7 +799,10 @@ ssize_t override_read(int fd, void *buf, size_t nbytes) {
 	if ((fd == pipe_fds[0]) || (fd == pipe_fds[1])) {					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
 		return read(fd, buf, nbytes);		// Backward compatibility for pipe
 	}
-	s = TSB_socket_find_by_fd(fd);
+	s = TSB_socket_find_by_fd_opt(fd);
+	if (!s) {
+		return read(fd, buf, nbytes);		// Real fd (e.g., from real socketpair)
+	}
 	if (s->other_side && s->other_side->recv) {
 		return s->other_side->recv(fd, buf, nbytes, OFFSET_NONE, 0);
 	} else {
@@ -672,7 +817,10 @@ ssize_t override_write( int fd, const void *buf, size_t count) {
 
 ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset) {
 	struct t_sandbox_sock *s;
-	s = TSB_socket_find_by_fd(fd);
+	s = TSB_socket_find_by_fd_opt(fd);
+	if (!s) {
+		return pread(fd, buf, count, offset);	// Real fd (e.g., from real socketpair)
+	}
 	if (s->other_side && s->other_side->recv) {
 		return s->other_side->recv(fd, buf, count, offset, 0);
 	} else {
@@ -682,7 +830,10 @@ ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset) {
 
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 	struct t_sandbox_sock *s;
-	s = TSB_socket_find_by_fd(fd);
+	s = TSB_socket_find_by_fd_opt(fd);
+	if (!s) {
+		return pwrite(fd, buf, count, offset);	// Real fd (e.g., from real socketpair)
+	}
 	if (s->other_side && s->other_side->send) {
 		return s->other_side->send(fd, buf, count, offset, 0);
 	} else {
@@ -691,6 +842,9 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
+	// Now that socketpair() creates real Unix sockets (not files), we can
+	// just pass through to the real select(). The OS handles readiness
+	// correctly for both spair and netlink mock sockets.
 	msleep(100);	// Throttled km_comm select
 	return select(nfds, readfds, writefds, exceptfds, timeout);
 }
@@ -775,9 +929,15 @@ void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
 }
 
 int nvmeibt_nonblock_fd(int fd) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-	(void)s;
-	return 0;
+	const struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
+	int flags;
+	if (s) {
+		return 0;  // Sandbox-tracked fd: pretend we set non-blocking
+	}
+	// Real fd (e.g., from real socketpair): use actual fcntl
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0) return -1;
+	return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 /************************************* nvme ***********************************/
