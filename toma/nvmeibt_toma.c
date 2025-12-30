@@ -1603,18 +1603,6 @@ int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk
 	return rv;
 }
 
-int nvmeibt_record_seg_zeroed_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
-{
-	int rv;
-
-	NFIN;
-
-	rv = local_disk_specific_add_work_with_sync(ldisk_id, ld_display, e);
-
-	NFOUT;
-	return rv;
-}
-
 struct nvmeibt_km_comm * nvmeibt_get_srv_comm(void)
 {
 	return srv_comm;
