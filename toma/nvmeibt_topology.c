@@ -2072,7 +2072,7 @@ static XDLIST_DECLARE(, struct netlink_queue_elem_t, link) nl_head = XDLIST_INIT
 static pthread_mutex_t nl_guard_mutex;
 static bool nl_queue_initialized = false;
 
-static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, const struct nvmeib_push_extended_msg *ext)
+static int netlink_queue_push(const struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, const struct nvmeib_push_extended_msg *ext)
 {
 	struct netlink_queue_elem_t *elem;
 
@@ -2151,7 +2151,7 @@ void nvmeibt_netlink_queue_run(void)
 	NFOUT;
 }
 
-int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 vendor_id, char *model_str, enum nvmeibs_serjio_status serjio_status)
+int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status)
 {
 	struct nvmeib_disk_info disk_info = {.vendor_id = vendor_id};
 	memcpy(disk_info.disk_id, ldisk_id, sizeof(disk_info.disk_id));
@@ -2160,12 +2160,12 @@ int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 ve
 	return netlink_queue_push(&disk_info, 'S', serjio_status, NULL);
 }
 
-static int nvmeibt_add_disk_event_callback(void *ctx __attribute__((unused)), struct nvmeib_disk_info *disk_info)
+static int nvmeibt_add_disk_event_callback(const struct nvmeib_disk_info *disk_info)
 {
 	return netlink_queue_push(disk_info, 'a', 0, NULL);
 }
 
-static int nvmeibt_remove_disk_event_callback(void *ctx __attribute__((unused)), struct nvmeib_remove_disk *disk_remove_msg)
+static int nvmeibt_remove_disk_event_callback(const struct nvmeib_remove_disk *disk_remove_msg)
 {
 	struct nvmeib_disk_info disk_info;
 
@@ -2184,13 +2184,10 @@ int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extende
 
 void nvmeibt_topology_register_disk_events(void)
 {
-	struct nvmeibt_km_comm *p;
 	struct nvmeib_register_change_disk cbs;
-
-	p = nvmeibt_get_srv_comm();
 	cbs.on_add_disk = &nvmeibt_add_disk_event_callback;
 	cbs.on_remove_disk = &nvmeibt_remove_disk_event_callback;
-	nvmeibt_km_comm_register_disk_events(p, &cbs);
+	nvmeibt_km_comm_register_disk_events(nvmeibt_get_srv_comm(), &cbs);
 }
 
 static void store_config_and_topo_and_gpt_on_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)

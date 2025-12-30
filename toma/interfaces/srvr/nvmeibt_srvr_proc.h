@@ -20,7 +20,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 /***************************** Netlink: New Toma-API vs kernel server, used for disk related communication */
 struct km_comm_msg_hdr {
 	int len; /* the len of data[0] */
-	int opcode;
+	int opcode;					// enum uk_comm_opcode
 	void (*on_done)(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep);
 	void *ctx;
 	char  data[0] __attribute((aligned(8)));
@@ -29,10 +29,15 @@ struct km_comm_msg_hdr {
 struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeibt_km_comm_create(void);
 void					nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p);
-int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, struct km_comm_msg_hdr *hdr);
-int	 nvmeibt_km_comm_register_disk_events(     struct nvmeibt_km_comm *p, struct nvmeib_register_change_disk *cbs);
-void nvmeibt_km_comm_ack_disk_remove(          struct nvmeibt_km_comm *p, unsigned long ack_id);
-int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);
+int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr);
+
+struct nvmeib_register_change_disk {							// Toma registers its callbacks to server notifications about disks
+	int (*on_add_disk   )(const struct nvmeib_disk_info *);		// Called when new disk is added
+	int (*on_remove_disk)(const struct nvmeib_remove_disk *);	// Called when existing disk is removed
+};
+
+int	 nvmeibt_km_comm_register_disk_events(     struct nvmeibt_km_comm *p, const struct nvmeib_register_change_disk *cbs);		// Multiple callbacks can be registered. All will fire
+int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
 
 /***************************** Probe Local Hardware *******************************/
 struct nvmeibt_Str;

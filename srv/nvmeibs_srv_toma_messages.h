@@ -489,13 +489,6 @@ struct nvmeib_disk_info_reply {				// s2t
 	};
 };
 
-struct nvmeib_register_change_disk {
-	int (*on_add_disk)(void *ctx, struct nvmeib_disk_info *);
-	void *add_ctx;
-	int (*on_remove_disk)(void *ctx, struct nvmeib_remove_disk *);
-	void *remove_ctx;
-};
-
 struct nvmeib_push_extended_msg {				// Not used, infrastructure for pushing message from local client to toma like was in elect project
 	struct nvmeib_nl_uk_comm_rep base;
 	int n_bytes_len;

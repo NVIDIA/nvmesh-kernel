@@ -5340,15 +5340,6 @@
             "%llx": 4
         }
     },
-    "@GETPID": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 31
-        }
-    },
     "@GET_DBITS": {
         "size": 32,
         "type": "s32",
@@ -10719,15 +10710,6 @@
             "%d": 4
         }
     },
-    "@NNN": {
-        "size": 64,
-        "type": "long",
-        "fmt": "%ld",
-        "final": true,
-        "__histogram": {
-            "%ld": 1
-        }
-    },
     "@NODE": {
         "size": "string",
         "type": "string",
@@ -12601,11 +12583,7 @@
     "@PID": {
         "size": 32,
         "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 73
-        }
+        "fmt": "%d"
     },
     "@PING_ID": {
         "size": 32,
@@ -17435,11 +17413,7 @@
     "@PTHREAD": {
         "size": 64,
         "type": "long",
-        "fmt": "%#lx",
-        "final": true,
-        "__histogram": {
-            "%#lx": 45
-        }
+        "fmt": "%#lx"
     },
     "@TID_INT_NOFMT": {
         "size": 32,
