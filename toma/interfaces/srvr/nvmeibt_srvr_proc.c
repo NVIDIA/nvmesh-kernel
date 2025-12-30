@@ -2,7 +2,7 @@
 #include "nvmeibt_common.h"
 #include "utils/nvmeibt_str.h"
 
-/***************************** Generic API Toma->Server ***********************/
+/***************************** 3 x /proc API Toma<-->Server ***********************/
 static int fd_toma2srvr = -1;
 static int fd_srvr2toma = -1;
 static int fd_toma2clnt = -1;
@@ -73,7 +73,7 @@ static int nvmeibt_toma_announce_ready(bool is_login)
 int nvmeib_srvr_api_lib_handshake_server(void) { 	return nvmeibt_toma_announce_ready(true); }
 int nvmeib_srvr_api_lib_destroy(void){ 				return nvmeibt_toma_announce_ready(false); }
 
-/***************************** mmap shared memory (server /proc files, disk locks file) *******************************/
+/***************************** mmap shared memory (server /proc/.../toma_status/files & IO locks table) *******************************/
 #include <sys/mman.h>
 /* mmap wrapper that creates a protected page before and after the allocation. Must be freed using nvmeibt_munmap(),
 	This interface should seem as if the original mmap was used but with the added protection given by the extra protected pages  */
