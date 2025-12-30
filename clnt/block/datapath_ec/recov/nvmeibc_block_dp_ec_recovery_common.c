@@ -1363,7 +1363,9 @@ static void __prep_write_perm_read_fail(struct recovery_sync_op *so)
 
 	for (i = n_read_cmds(so), src_bit = 1; i < n_total; i++, src_bit <<= 1) {
 		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		if (!cmd->do_not_send && (so->nwhole_exec_plan.invalid_sources & src_bit)) { // Daniel: I added the required optimization from below (we only destroy the invalid sources) the tests pass so it's a win win, but we should test that if a DEAD segment returns we CAN fix the slice
+		if (!(src_bit & (so->nwhole_exec_plan.first_write_bmp | so->nwhole_exec_plan.second_write_bmp)))
+			continue;
+		if (src_bit & so->nwhole_exec_plan.invalid_sources) { // Daniel: I added the required optimization from below (we only destroy the invalid sources) the tests pass so it's a win win, but we should test that if a DEAD segment returns we CAN fix the slice
 			nbdpec_md_mark_data_invalid_for_read(cmd->iocmd->reqs1.md, cmd->is_parity, max_txid_in_slice);
 			dp_dbgdi_do_add_restore_info(cmd, true);	// The failed read blocks are already marked as such since we set poison into the writer magic before submitting, but the degraded (W) ones have not been sent to read and if we destroy them we must invalidate first (when restoring them we do mark it in reed solomon)
 		}
