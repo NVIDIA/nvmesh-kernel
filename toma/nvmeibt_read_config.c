@@ -1580,7 +1580,7 @@ static void local_disk_zero_iter_finalize(struct nvmeibt_wq_entry *wq_entry)
 		local_disk_zero_iter_task->ldisk = entry->ldisk;
 		local_disk_zero_iter_task->format_data = entry->format_data;
 
-		if (nvmeibt_toma_local_disk_zero_iter_add_work(&(ld_info->from_config.ldisk_id), nvmeibt_local_disk_display(local_disk), &(local_disk_zero_iter_task->wq_entry)) != 0) {
+		if (nvmeibt_toma_local_disk_zero_iter_add_work(local_disk, &(local_disk_zero_iter_task->wq_entry)) != 0) {
 			N_Ef(iu97342, "Unable to add local disk zero task to WQ to continue zeroing of disk=@STR!", nvmeibt_local_disk_display(local_disk));
 			NNVMEIBT_BM_FREE(wduty86, local_disk_zero_iter_task);
 			goto err;
@@ -2007,7 +2007,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 		NNVMEIBT_LOCAL_DISK_INC_GPT_CHANGE_NO(6cfgr3m, local_disk);
 		NNVMEIBT_LOCAL_DISK_SET_GPT_SUBMITTED_CHANGE_NO(eitf5ux, local_disk, local_disk->gpt_change_no);
 
-		if (nvmeibt_toma_local_disk_zero_iter_add_work(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk), &(local_disk_zero_iter_task->wq_entry)) != 0) {
+		if (nvmeibt_toma_local_disk_zero_iter_add_work(local_disk, &(local_disk_zero_iter_task->wq_entry)) != 0) {
 			N_Ef(kki221s, "Unable to add local disk init task to WQ, for disk=@STR!", nvmeibt_local_disk_display(local_disk));
 			NNVMEIBT_BM_FREE(dki9r54, local_disk_zero_iter_task);
 			entry->rv = -1;
@@ -2042,7 +2042,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 		local_disk_zero_iter_task->ldisk = nvmeibt_local_disk_config_to_srvr_cmd_disk(&local_disk->from_config);
 //		local_disk_zero_iter_task->seq = entry->from_config.seq;
 
-		if (nvmeibt_toma_local_disk_zero_iter_add_work(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk), & (local_disk_zero_iter_task->wq_entry)) != 0) {
+		if (nvmeibt_toma_local_disk_zero_iter_add_work(local_disk, & (local_disk_zero_iter_task->wq_entry)) != 0) {
 			N_Ef(aki89d3, "Unable to add local disk init task to WQ, for disk=@STR", nvmeibt_local_disk_display(local_disk));
 			NNVMEIBT_BM_FREE(dkuirn2, local_disk_zero_iter_task);
 			entry->rv = -1;
@@ -2107,7 +2107,7 @@ int launch_read_of_local_disk_gpt_and_segs_metadata_and_persist(struct nvmeibt_l
 	restore_disk_structures_task->main_gpt = local_disk->main_gpt;
 	restore_disk_structures_task->metadata_gpt = local_disk->metadata_gpt;
 
-	if (nvmeibt_toma_restore_disk_structures_add_work(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk), &(restore_disk_structures_task->wq_entry)) != 0) {
+	if (nvmeibt_toma_restore_disk_structures_add_work(local_disk, &(restore_disk_structures_task->wq_entry)) != 0) {
 		N_Ef(nf43njs, "Unable to add local disk restore_structures to WQ, for disk=@STR!", nvmeibt_local_disk_display(local_disk));
 		NNVMEIBT_BM_FREE(l098n6l, restore_disk_structures_task);
 		rv = -1;

@@ -1780,8 +1780,7 @@ void nvmeibt_local_disk_launch_local_disk_periodic_reread_smart_counters_if_need
 	periodic_reread_smart_counters_task->rv = -1;
 	periodic_reread_smart_counters_task->is_stock_disk = is_stock_disk;
 
-	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk),
-																&(periodic_reread_smart_counters_task->wq_entry), is_stock_disk);
+	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(local_disk, &(periodic_reread_smart_counters_task->wq_entry));
 	if (rv != 0) {
 		N_Ef(usnej2n, "Unable to add update log task to WQ @STR disk=@STR", (is_stock_disk ? "stock" : ""), nvmeibt_local_disk_display(local_disk));
 		goto free_resources;
@@ -3113,32 +3112,20 @@ static void free_work_with_ldisk_last_CHANGE_no_entry(struct local_disk_wq_entry
 	NNVMEIBT_BM_FREE(cvvgs82, entry_wrapper);
 }
 
-int nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e,
-														   bool is_stock_ldisk)
+int nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
 	int rv = 0;
-	struct nvmeibt_local_disk *local_disk = NULL;
 	struct local_disk_wq_entry_wrapper_entry *entry_wrapper = NULL;
 
 	NFIN;
-	N_Tf(whcia9g, "Adding work for disk=@STR is_stock=@BOOL", ld_display, is_stock_ldisk);
-
-	if (!is_stock_ldisk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
-		if (!local_disk) {
-			N_Tf(d4nk1sp, "couldn't find local_disk=@STR, trying in stock_local_disks", ld_display);
-		}
-	}
 	if (!local_disk) {
-		local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(ldisk_id, nvmeibt_global_get_global()->stock_local_disks_hash_by_ldisk_id_str);
-		if (!local_disk) {
-			N_Wf(vdxgaj2, "stock disk=@STR not found. Unable to add work.", ld_display);
-			rv = -1;
-			goto out;
-		}
+		N_Wf(d4nk1sp, "local_disk=NULL");
+		rv = -1;
+		goto out;
 	}
+	N_Tf(whcia9g, "Adding work for disk=@STR", nvmeibt_local_disk_display(local_disk));
 	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
-		N_Tf(4u2m9ak, "disk=@STR is_being_deleted. Skipping", ld_display);
+		N_Tf(4u2m9ak, "disk=@STR is_being_deleted. Skipping", nvmeibt_local_disk_display(local_disk));
 		rv = -1;
 		goto out;
 	}

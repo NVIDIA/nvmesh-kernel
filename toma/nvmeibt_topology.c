@@ -2553,7 +2553,7 @@ int nvmeibt_register_launch_seg_metadata_ctrl_save(struct nvmeibt_seg_active *se
 	wq_entry->wq_entry.abort = nvmeibt_toma_wakeup_wq_abort_func;
 	wq_entry->wq_entry.free = seg_metadata_ctrl_save_freer;
 
-	if (nvmeibt_seg_metadata_ctrl_save_add_work(nvmeibt_local_disk_UUID(local_disk), nvmeibt_local_disk_display(local_disk), &(wq_entry->wq_entry)) != 0) {
+	if (nvmeibt_seg_metadata_ctrl_save_add_work(local_disk, &(wq_entry->wq_entry)) != 0) {
 		N_Ef(4uhw783, "seg=@UUID_8 Failed nvmeibt_seg_metadata_ctrl_save_add_work", nvmeibt_seg_UUID_8(disk_segment));
 		rv = -1;
 		NVMEIBT_SEG_ACTIVE_SET_SUBMITTED_RESERVATION_MODE_VERSION(brys74h, seg_active, prev_submitted_reservation_mode_version);

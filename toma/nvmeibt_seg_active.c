@@ -2604,7 +2604,7 @@ static void launch_seg_active_zero_task(struct nvmeibt_seg_active *seg_active, u
 	seg_zero_task->pblk_size = nvmeibt_local_disk_pblk_size(its_local_disk);
 	// Copy the node name to the ofloading task, in case for some reason the leader node will be deleted, when we are doing the actual write.
 
-	if (nvmeibt_toma_segment_zeroing_add_work(nvmeibt_local_disk_UUID(its_local_disk), nvmeibt_local_disk_display(its_local_disk), &(seg_zero_task->wq_entry)) != 0) {
+	if (nvmeibt_toma_segment_zeroing_add_work(its_local_disk, &(seg_zero_task->wq_entry)) != 0) {
 		N_Ef(dji85h3, "Unable to add segment zeroing offload task to WQ for seg=@UUID_8!", nvmeibt_seg_active_UUID_8(seg_active));
 		NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(uy788sd, seg_active, "ZEROING", -1);
 		NNVMEIBT_BM_FREE(i9i983d, seg_zero_task);

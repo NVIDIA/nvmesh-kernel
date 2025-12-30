@@ -1211,47 +1211,42 @@ int nvmeibt_registrant_disconnect_add_work(struct nvmeibt_local_disk *local_disk
 	return nvmeibt_local_disk_specific_add_work(local_disk, e);
 }
 
-int nvmeibt_seg_metadata_ctrl_save_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_seg_metadata_ctrl_save_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
 	int rv;
 
 	NFIN;
-
-	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
-
+	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(local_disk, e);
 	NFOUT;
 	return rv;
 }
 
-int nvmeibt_toma_local_disk_zero_iter_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_toma_local_disk_zero_iter_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
 	int rv;
+
 	NFIN;
-
-	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
-
+	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(local_disk, e);
 	NFOUT;
 	return rv;
 }
 
-int nvmeibt_toma_restore_disk_structures_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_toma_restore_disk_structures_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
 	int rv;
+
 	NFIN;
-
-	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
-
+	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(local_disk, e);
 	NFOUT;
 	return rv;
 }
 
-int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+int nvmeibt_toma_segment_zeroing_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
 {
 	int rv;
+
 	NFIN;
-
-	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(ldisk_id, ld_display, e, 0);
-
+	rv = nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(local_disk, e);
 	NFOUT;
 	return rv;
 }
