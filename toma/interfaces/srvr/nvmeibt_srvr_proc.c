@@ -263,14 +263,14 @@ int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibs_toma_server_proc_buf
 	return rv;
 }
 
-int nvmeibt_toma_send_buf_to_client(const char *buf, int buf_len, const char *clnt_host)
+int nvmeibt_toma_send_buf_to_client(const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
 {
 	int rv = 0;
-	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, buf, buf_len, ENXIO, 0) < 0) {
+	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0) < 0) {
 		if (errno == ENXIO) {
-			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, buf, buf_len, clnt_host);
+			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, msg, buf_len, clnt_host);
 		} else {
-			N_Tf(tsb2cp2, "write(@FD, handle=@PTR, len=@LEN) failed, @AUTO_ERRNO", fd_toma2clnt, buf, buf_len);
+			N_Tf(tsb2cp2, "write(@FD, handle=@PTR, len=@LEN) failed, @AUTO_ERRNO", fd_toma2clnt, msg, buf_len);
 			rv = -1;
 		}
 	}

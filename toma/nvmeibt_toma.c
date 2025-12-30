@@ -1808,16 +1808,14 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 									enum NVMEIBT_CLIENT_MSG_TYPES msg_type, enum NVMEIBT_CLIENT_TR_REASON reason, int data_length, void *data, u64 msg_id)
 {
 	int							rv = 0;
-	struct nvmeibt_client_msg	*client_msg;
-	int							buf_len = sizeof(reg_ctx->client_messaging_handle) + sizeof(*client_msg) + data_length;
-	char						*buf;
+	struct nvmeibs_toma_client_proc_buf	*msg;
+	const int					buf_len = sizeof(*msg) + data_length;
 
 	NFIN;
 
-	buf = NNVMEIBT_BM_ALLOC(trace_toma_nvmeibt_toma_send_msg_to_client, buf_len);
-	memcpy(buf, &(reg_ctx->client_messaging_handle), sizeof(reg_ctx->client_messaging_handle));
-	client_msg = (struct nvmeibt_client_msg *)(buf + sizeof(reg_ctx->client_messaging_handle));
-	nvmeibt_client_thick_msg_write(client_msg,
+	msg = NNVMEIBT_BM_ALLOC(trace_toma_nvmeibt_toma_send_msg_to_client, buf_len);
+	msg->handle = reg_ctx->client_messaging_handle;
+	nvmeibt_client_thick_msg_write(&msg->data,
 							 (int)msg_type,
 							 (int)reason,
 							 reg_ctx->client->net.host_name,
@@ -1836,8 +1834,8 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 data,
 							 msg_id
 							);
-	rv = nvmeibt_toma_send_buf_to_client(buf, buf_len, reg_ctx->client->net.host_name);
-	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, buf);
+	rv = nvmeibt_toma_send_buf_to_client(msg, buf_len, reg_ctx->client->net.host_name);
+	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, msg);
 
 	NFOUT;
 	return rv;

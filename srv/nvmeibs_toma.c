@@ -94,12 +94,6 @@ struct nvmeibs_toma {
 
 struct nvmeibs_toma *toma = NULL;
 
-/* toma:client buffer format as received/sent in proc file's write/read methods */
-struct nvmeibs_toma_client_proc_buf {
-	__be64 handle;					// Unique handle for each client
-	u8 data[];						// struct nvmeibt_client_msg
-}__attribute__((packed));
-
 /* container of proc file's
    write methods arguments */
 struct nvmeibs_toma_proc_msg {
@@ -471,15 +465,14 @@ static int send_toma_msg(struct nvmeibs_client *cl,
 	proc_handle = toma_cl_proc_buf->handle;
 	if (!(h = toma_conn_hash_lookup(proc_handle))) {
 		_NT(trace_toma_send_toma_msg, "Fail lookup toma connection by handle @HANDLE; "
-		   "Before adding work cl was @CL",
-		   toma_cl_proc_buf->handle, cl);
+		   "Before adding work cl was @CL", proc_handle, cl);
 		goto out;
 	}
 
 	if (h->cl != cl) {
 		_NT(trace_1_toma_send_toma_msg, "Fail lookup toma connection by handle @HANDLE; "
 		   "Before adding work cl was @CL, now found h->cl @CL",
-		   toma_cl_proc_buf->handle, cl, h->cl);
+		   proc_handle, cl, h->cl);
 		goto out;
 	}
 
@@ -515,7 +508,7 @@ static int send_toma_msg(struct nvmeibs_client *cl,
 
 	dd = 0;
 	wr_len = 0;
-	data = toma_cl_proc_buf->data;
+	data = (char*)&toma_cl_proc_buf->data;
 	data_len = len - offsetof(struct nvmeibs_toma_client_proc_buf, data);
 	_ND(trace_4_toma_send_toma_msg, "Sending toma msg data_len @DATA_LEN", data_len);
 	send_done = kzalloc(sizeof (struct completion), GFP_KERNEL);
@@ -685,7 +678,7 @@ int nvmeibs_toma_client_proc_recv(void *arg, char *buf, size_t len,
 	bool *posted)
 {
 	struct nvmeibs_toma_connection_hash_entry *h;
-	struct nvmeibs_toma_client_proc_buf *toma_cl_proc_buf;
+	u64 proc_handle;
 	unsigned long flags;
 	int rv = -1;
 	u32 cid = 0;
@@ -711,17 +704,15 @@ int nvmeibs_toma_client_proc_recv(void *arg, char *buf, size_t len,
 	}
 
 	/* lookup handle and map to client obj */
-	toma_cl_proc_buf = (struct nvmeibs_toma_client_proc_buf*)buf;
+	proc_handle = ((struct nvmeibs_toma_client_proc_buf*)buf)->handle;
 	spin_lock_irqsave(&toma->spinlock, flags);
-	h = toma_conn_hash_lookup_nolock(toma_cl_proc_buf->handle);
+	h = toma_conn_hash_lookup_nolock(proc_handle);
 	if (h)
 		cid = h_to_cl_cid(h);
 	spin_unlock_irqrestore(&toma->spinlock, flags);
 
 	if (!h) {
-		_NT(trace_toma_nvmeibs_toma_client_proc_recv,
-		    "Fail lookup toma connection by handle @HANDLE",
-		   toma_cl_proc_buf->handle);
+		_NT(stcpr0, "Fail lookup toma connection by handle @HANDLE", proc_handle);
 		rv = -ENXIO;
 		goto out;
 	}

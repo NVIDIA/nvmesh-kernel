@@ -516,7 +516,7 @@ struct nvmeib_nl_msg_to_toma {
 	} payload;
 };
 
-struct nvmeib_nl_msg_from_toma {
+struct nvmeib_nl_msg_from_toma {			// Toma sets msg to local client via netlink. Used for attach, passing praid configuration
 	union {
 		struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
 			int copy;						// Always true, if true the message data in the message must be copied before calling the client API
@@ -525,5 +525,12 @@ struct nvmeib_nl_msg_from_toma {
 		} toma_client;
 	} payload;
 };
+
+
+/* Toma->Any-Client for registering segment and issuing IO. Sent via local server */
+struct nvmeibs_toma_client_proc_buf {		// Toma -> client buffer format as received/sent in proc file's write/read methods
+	__be64 handle;							// Unique handle for each client (stored as big endian!)
+	struct nvmeibt_client_msg data;
+}__attribute__((packed));
 
 #endif // NVMEIBS_SRV_TOMA_MESSAGES_H

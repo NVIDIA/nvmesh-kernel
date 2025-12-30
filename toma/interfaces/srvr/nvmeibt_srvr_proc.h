@@ -11,7 +11,7 @@ int nvmeib_srvr_api_lib_get_fd_for_epoll(void);
 
 int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg);
 int nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
-int nvmeibt_toma_send_buf_to_client(      const /* struct nvmeibs_toma_client_proc_buf */ char *buf, int buf_len, const char *clnt_host);
+int nvmeibt_toma_send_buf_to_client(       const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host);
 
 // Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory
 int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req,
