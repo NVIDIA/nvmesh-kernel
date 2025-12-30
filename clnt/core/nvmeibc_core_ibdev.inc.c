@@ -37,7 +37,7 @@ unsigned sm_th = 32;
 module_param(sm_th, uint, 0644);
 MODULE_PARM_DESC(sm_th, "Maximum concurrent sm-requests per client");
 
-bool nvmeibc_use_pcpu_cq = true; /* Disabled by service script for TCP */
+bool nvmeibc_use_pcpu_cq = false; /* Disabled by service script for TCP */
 module_param_named(use_pcpu_cq, nvmeibc_use_pcpu_cq, bool, 0444);
 MODULE_PARM_DESC(use_pcpu_cq, "Use a per CPU shared completion queue (SCQ) and shared receive queue (SRQ)");
 
