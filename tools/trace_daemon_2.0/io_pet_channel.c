@@ -14,7 +14,7 @@
 #define __MODULE_HDR_ARGS self->meta.name
 #include "trace_daemon_common.h"
 
-#define IO_PET_READ_BUFFER_SIZE (16 * 1024) /* 64KB read buffer */
+#define IO_PET_READ_BUFFER_SIZE (64 * 1024) /* 64KB read buffer */
 #define MAX_FAILURES_BEFORE_SUICIDE 5
 
 /**

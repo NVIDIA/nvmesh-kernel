@@ -64,14 +64,20 @@ void unlink_list_add(unlink_list_t *list, int cpu, int id, unsigned long ts)
 {
 	pthread_mutex_lock(&list->lock); /* Critical section */
 	if (!list->tail) {
-		assert((list->head = list->tail = calloc(1, sizeof(unlink_candidate_t))));
+		list->head = list->tail = calloc(1, sizeof(unlink_candidate_t));
+		if (list->head == NULL){
+			_suicide("failed to allocate memory for unlink_list head/tail");
+		}
 		list->tail->cpu = cpu;
 		list->tail->id = id;
 		list->tail->ts = ts;
 	} else {
 		unlink_candidate_t *cand;
 		assert(list->head); /* Sanity check */
-		assert((cand = calloc(1, sizeof(unlink_candidate_t))));
+		cand = calloc(1, sizeof(unlink_candidate_t));
+		if (cand == NULL){
+			_suicide("failed to allocate memory for unlink_list candidate");
+		}
 		cand->cpu = cpu;
 		cand->id = id;
 		cand->ts = ts;
@@ -223,7 +229,6 @@ int unlink_list_parse_log_filename(const char *fname, const char *tname, int *cp
 		}
 		if(*sub != '\0')
 			return 0;
-		++idx;
 		return 1;
 	}
 }
