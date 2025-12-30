@@ -591,7 +591,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		echo_title "/etc/hosts"; cat /etc/hosts | grep -v -e ^\# -e ^127 -e ^f[fe] -e ^::;
 		echo_title "Net stats"; netstat -r; echo -e "\t\t----- arp"; arp -a;
 		echo_title "Self Testing"; resolvectl status;
-		MTL="mtl.labs.mlnx"; NVC="nvidia.com";
+		MTL="lab.nvidia.com"; NVC="nvidia.com";
 		resolvectl query nvmeserver2.${MTL} www.google.com geovpn.mellanox.com confluence.${NVC} nvme34-ilo.${MTL} nvme34.${MTL} mtv-excelero1.${MTL} gitlab-excelero.mtv.labs.mlnx gitlab-master.${NVC} server2 n34;
 		echo "date; speedtest-cli | grep -e Upload -e Download";
 	}
