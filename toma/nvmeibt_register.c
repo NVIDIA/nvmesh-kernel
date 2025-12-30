@@ -2348,44 +2348,19 @@ out:
 	return rv;
 }
 
-
-/* cid - identifier of client's connection with server per specific disk, Command server to force disconnect clinet (cid) from disk */
-static inline int nvmeibt_client_disconnect_force_cmd(int cid)
-{
+static void brute_force_disconnect_client_request(struct nvmeibt_registrant_ctx *reg_ctx)
+{																								// Brutally cut the QP for RDMA clients
+	const int cid = (int)client_messaging_handle_to_cid(reg_ctx->client_messaging_handle);		// identifier of client's connection with server per specific disk, Command server to force disconnect clinet (cid) from disk
 	struct nvmeibs_toma_server_proc_buf buf;
+
+	N_Tf(do3by0a, "handle=@HANDLE, cid=@CID", reg_ctx->client_messaging_handle, cid);
 	ZEROINIT(buf);
 	buf.type = NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD;
 	buf.client_disconnect_force_cmd.cid = cid;
-	if (nvmeib_srvr_api_lib_send_msg_to_server(&buf) < 0) {
-		N_Ef(t_32_nvmeibt_disconnect_clnt, "cid=@CID failed write (@AUTO_ERRNO)", cid);
-		return -1;
-	} else {
-		N_Df(t_33_nvmeibt_disconnect_clnt, "cid=@CID", cid);
-		return 0;
+	if (nvmeib_srvr_api_lib_send_msg_to_server(&buf) < 0) {		// If client does not exist, server returns 0, see srvr code.
+		N_Ef(do3by0b, "cid=@CID failed req (@AUTO_ERRNO)", cid);
 	}
-}
-
-static void brute_force_disconnect_client(struct nvmeibt_registrant_ctx *reg_ctx)
-{
-	const int cid = (int)client_messaging_handle_to_cid(reg_ctx->client_messaging_handle);
-
-	NFIN;
-	// Brutally cut the QP for RDMA clients
-	if (nvmeibt_client_disconnect_force_cmd(cid) < 0) {
-		if (errno == ENOKEY) {
-			N_Tf(trace_register_brute_force_disconnect_client, "Client already disconnected. @AUTO_ERRNO ");
-			//This may occur if we had already issued the client_disconnect_force cmd
-			//in previous iteration or previous call of this function AND had not got
-			//the client_disconnect event from server.Otherwise, there's some kind of
-			//sync issue (btw Toma and Srv) or a bug, This can be handled by adding
-			//association btw cid and disk in the Toma.
-			//
-			handle_client_remove(cid);  	// Jan 23 - due to bug https://jirasw.nvidia.com/browse/NVMESH-2547
-		}
-	}
-	// Not erasing the registrant. Will unreg when the force succeeds
-
-	NFOUT;
+	N_Tf(do3by0c, "req sent");	// Not erasing the registrant. We only asked now asyncronously, Will unreg when the force succeeds
 }
 
 static void brute_force_disconnect_registrant_client(struct nvmeibt_registrant_ctx *reg_ctx,
@@ -2403,9 +2378,7 @@ static void brute_force_disconnect_registrant_client(struct nvmeibt_registrant_c
 			N_Ef(oqjwm4v, "is_on_timeout && !was_timeout_active");
 			nvmeibt_abort(ES_FATAL);
 		}
-		N_Tf(do3by0a, "handle=@HANDLE", reg_ctx->client_messaging_handle);
-		TODO(try to merge brute_force_disconnect_client() and brute_force_disconnect_registrant_client())
-		brute_force_disconnect_client(reg_ctx);
+		brute_force_disconnect_client_request(reg_ctx);
 	}
 
 	NFOUT;

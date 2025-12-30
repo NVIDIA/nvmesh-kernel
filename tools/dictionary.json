@@ -1886,15 +1886,7 @@
     "@CID": {
         "size": 32,
         "type": "s32",
-        "fmt": "0x%x",
-        "final": true,
-        "__histogram": {
-            "0x%x": 63,
-            "%d": 17,
-            "%u": 1
-        },
-        "__split": true,
-        "__collision": true
+        "fmt": "0x%x"
     },
     "@CID_LLONG": {
         "size": 64,
