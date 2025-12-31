@@ -61,7 +61,7 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 			return  nvmeibt_toma_get_status_str(status_types[i].type, out);
 		}
 	}
-	nvmeibt_Str_sprintf(out, "Unknown status type. Use 'status' alone to get a list of available options.\n");
+	nvmeibt_Str_sprintf(out, "Unknown status type '%s'. Use 'status' alone to get a list of available options.\n", argv[1]);
 	return -1;
 }
 
@@ -348,7 +348,7 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 	}
 #endif
 
-	nvmeibt_Str_sprintf(out, "Unknown sub-command. Use 'simulate' alone to get a list of available options.\n");
+	nvmeibt_Str_sprintf(out, "Unknown sub-command '%s'. Use 'simulate' alone to get a list of available options.\n", argv[1]);
 	return -1;
 }
 
