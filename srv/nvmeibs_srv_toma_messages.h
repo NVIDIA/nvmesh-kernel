@@ -190,7 +190,7 @@ enum nvmeibs_toma_server_msg_type {
 enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT_CALLER = 'C' };
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
-struct nvmeib_nl_uk_comm_msg {			// s2t, header and data
+struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Header and data
 	int len;
 	int opcode;							// enum uk_comm_opcode
 	char caller_type;					// enum nvmeibs_um_caller_type
@@ -198,19 +198,20 @@ struct nvmeib_nl_uk_comm_msg {			// s2t, header and data
 	char data[0];						// Content of the message
 };
 
-struct nvmeib_nl_uk_comm_rep {			// s2t, server reply on toma requests
+struct nvmeib_nl_uk_comm_rep {			// s2t, server base reply on toma requests
 	int opcode;							// enum uk_comm_opcode
 	int error;							// enum uk_comm_err_opcode
 	long long latency_ns;				// n[ns] it took the kernel to execute Toma request
 };
 
 enum uk_comm_opcode {
+	// csc_internal_suicide = -1			// Used internally, never sent to server
 	csc_start = 0,
-	csc_get_disk_names = 1,					// Version 1.3+
+	csc_get_disk_names = 1,
 	csc_zero_disk = 2,
 	csc_test_zero_disk = 3,
 
-	csc_register_disk_events = 4,			// Version 2.0+
+	csc_register_disk_events = 4,			// Never sent to server, internal mechanism of server communication registers callbacks and dispatches them within the caller cantest
 	csc_get_disks = 5,
 	csc_remove_disk = 6,
 	csc_format_disk = 7,
@@ -369,18 +370,6 @@ struct nvmeib_identify_disk {
 	int data_len;
 };
 
-enum NVMEIB_DISK_EVENT {
-	NVMEIB_DISK_EVENT_PLUG			= 0x0,
-	NVMEIB_DISK_EVENT_UNPLUG		= (0x1 << 0)
-};
-
-struct nvmeib_ack_disk_event {
-	struct nvmeib_nl_uk_comm_rep base;
-	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
-	unsigned int vendor_id;
-	enum NVMEIB_DISK_EVENT acked_event;
-};
-
 struct nvmeib_remove_disk {
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	u64 vendor_id;
@@ -388,7 +377,7 @@ struct nvmeib_remove_disk {
 };
 
 /* Response structures*/
-struct nvmeib_zero_disk_reply {
+struct nvmeib_zero_disk_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 };
 
@@ -398,7 +387,7 @@ struct nvmeib_contaminate_disk_reply {
 };
 #endif
 
-struct nvmeib_io_to_disk_reply {
+struct nvmeib_io_to_disk_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 	char 			disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int 	vendor_id;
@@ -406,13 +395,13 @@ struct nvmeib_io_to_disk_reply {
 	unsigned int	n_md_io;
 };
 
-struct nvmeib_identify_disk_reply {
+struct nvmeib_identify_disk_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 	char 			disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int	data_len;
 };
 
-struct nvmeib_copied_rscs_reply {
+struct nvmeib_copied_rscs_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 	void *rsc;
 };
@@ -435,7 +424,7 @@ struct nvmeib_short_disk_info {
 	};
 };
 
-struct nvmeib_get_disk_names_reply {
+struct nvmeib_get_disk_names_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 	int n_disks;
 	char dummy[4];
@@ -448,12 +437,12 @@ struct nvmeib_new_format_info {
 	int	new_seq;
 };
 
-struct nvmeib_format_disk_reply {
+struct nvmeib_format_disk_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 	struct nvmeib_new_format_info info;
 };
 
-struct nvmeib_test_zero_reply {
+struct nvmeib_test_zero_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
 	unsigned long failed_sw_lba;
 };
@@ -476,15 +465,13 @@ struct nvmeib_disk_info {
 	u32 max_n_sw_sectors;
 };
 
-enum nvmeib_disk_info_reply_selector {
-	nvmeib_disk_info_reply_dinfo,
-	nvmeib_disk_info_reply_serjio_state,
-	nvmeib_disk_info_reply_dummy,
-};
-
-struct nvmeib_disk_info_reply {
+struct nvmeib_disk_info_reply {				// s2t
 	struct nvmeib_nl_uk_comm_rep base;
-	enum nvmeib_disk_info_reply_selector selector;
+	enum nvmeib_disk_info_reply_selector {
+		nvmeib_disk_info_reply_dinfo,
+		nvmeib_disk_info_reply_serjio_state,
+		nvmeib_disk_info_reply_dummy,
+	} selector;
 	union {
 		struct {
 			struct nvmeib_disk_info disk;
@@ -494,7 +481,7 @@ struct nvmeib_disk_info_reply {
 			char dummy_name[256];
 			bool remove_disk;
 		};
-		struct {
+		struct nvmeib_disk_info_rep_sej_state_t {
 			char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 			u16 vendor_id;
 			char model_str[NVMEIB_DISK_MAX_MODEL_STR_SIZE];
@@ -525,8 +512,8 @@ struct nvmeib_nl_msg_to_toma {
 	union srvr2toma_payload_t {
 		struct nvmeib_nl_uk_comm_rep			nl_uk_comm_rep;
 		struct nvmeib_test_zero_reply			test_zero_reply;
-		struct nvmeib_ack_disk_event			ack_disk_event;
 		struct nvmeib_format_disk_reply			format_disk_reply;
+		struct nvmeib_zero_disk_reply			__used_but_not_by_name;
 		struct nvmeib_io_to_disk_reply			io_to_disk_reply;
 		struct nvmeib_get_disk_names_reply		get_disk_names_reply;
 		struct nvmeib_disk_info_reply			disk_info_reply;
