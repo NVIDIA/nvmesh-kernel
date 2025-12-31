@@ -8,6 +8,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <pthread.h>
+#include <linux/netlink.h>  // For struct nlmsghdr, NLMSG_DATA
+#include "srv/nvmeibs_srv_toma_messages.h"  // For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
 
 /************************************* Logging ********************************/
 
@@ -208,12 +211,6 @@ static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int 
 	return n;
 }
 
-static ssize_t _send_empty(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	BUG_ON((fd < 2) || (n == 0));
-	(void)buf; (void)offset; (void)flags;
-	return n;
-}
-
 struct TSB_sock_otherside {		// Every implementation must derive from this sub class. Sandbox injects data to Toma via those functions
 	// The send()/recv() operations act as a generic I/O interface that is common to both
 	// seekable like a block device or a local file, and non-seekable resources like a pipe, socket, or FIFO.
@@ -265,7 +262,7 @@ struct t_sandbox_all {
 	} TSB_sig;
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_sock_otherside o;
-	} TSB_nlink, TSB_udev, TSB_rpc, TSB_syslog, TSB_srm_fault, TSB_srm_timer;
+	} TSB_udev, TSB_rpc, TSB_syslog, TSB_srm_fault, TSB_srm_timer;
 	struct TSB_server {
 		struct TSB_sock_otherside o;
 	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
@@ -284,6 +281,21 @@ struct t_sandbox_all {
 		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
 	} kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
+	struct TSB_netlink_mock {
+		struct TSB_sock_otherside o;
+		// Thread-safe message queue for netlink responses
+		pthread_mutex_t mutex;
+		// Simple fixed-size queue of messages
+		#define TSB_NL_QUEUE_SIZE 16
+		#define TSB_NL_MSG_SIZE 512
+		struct {
+			char data[TSB_NL_MSG_SIZE];
+			size_t len;
+		} queue[TSB_NL_QUEUE_SIZE];
+		int queue_head;			// Next position to dequeue from
+		int queue_tail;			// Next position to enqueue to
+		int queue_count;		// Number of messages in queue
+	} TSB_netlink;
 	char my_hostname[64];
 } *sys;
 
@@ -291,12 +303,14 @@ void t_sandbox_all_init(void) {
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
+	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 }
 
 void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
+	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	free(sys);
 	sys = NULL;
 }
@@ -408,11 +422,63 @@ done:
 	return rv;
 }
 
+/********************************* Netlink mock *******************************/
+// Forward declarations for netlink queue helpers
+static bool TSB_netlink_queue_is_empty(void);
+static bool TSB_netlink_queue_enqueue(const void *data, size_t len);
+static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
+static void TSB_netlink_send_disk_response(struct sandbox_nvme_device *dev);
+
+// Netlink send callback: Toma sends a request, we parse it and queue responses
+static ssize_t _netlink_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	const struct nlmsghdr *nlh = (const struct nlmsghdr *)buf;
+	const struct nvmeib_nl_uk_comm_msg *req_msg;
+	int count;
+	int i;
+
+	(void)fd; (void)offset; (void)flags;
+	BUG_ON(n < sizeof(struct nlmsghdr));
+
+	req_msg = NLMSG_DATA(nlh);
+	N_Tf(nl_send, "Netlink send: opcode=@INT (@STR)", req_msg->opcode, uk_comm_opcode_str(req_msg->opcode));
+
+	if (req_msg->opcode == csc_get_disks) {
+		// Queue disk info for each mock NVMe device
+		count = sandbox_nvme_get_device_count();
+		for (i = 0; i < count; i++) {
+			struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
+			if (dev && !dev->stock_disk) {  // Only queue NVMesh disks, not stock disks
+				TSB_netlink_send_disk_response(dev);
+			}
+		}
+	} else if (req_msg->opcode == csc_keep_alive) {
+		N_Tf(nl_keepalive, "Netlink keep_alive received");
+	} else {
+		N_Df(nl_unknown_op, "Netlink opcode @INT not handled", req_msg->opcode);
+	}
+
+	return (ssize_t)n;
+}
+
+// Netlink recv callback: Toma receives a response from the queue
+static ssize_t _netlink_recv(int fd, void *buf, size_t n, off_t offset, int flags) {
+	ssize_t len;
+	(void)fd; (void)offset; (void)flags;
+
+	len = TSB_netlink_queue_dequeue(buf, n);
+	if (len > 0) {
+		N_Tf(nl_recv, "Netlink recv: @INT64_TD bytes", (int64_t)len);
+	}
+	return len;
+}
+
 // Connect the other side which communicates with Toma
 void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 	if (strstr(s->addr.sun_path, "netlink")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_nlink.o;
-		s->other_side->send = _send_empty;
+		BUG_ON(s->other_side); s->other_side = &sys->TSB_netlink.o;
+		s->other_side->send = _netlink_send;
+		s->other_side->recv = _netlink_recv;
+		s->other_side->sock = s;  // Back-pointer for override_select to find the fd
 	} else if (strstr(s->addr.sun_path, "signal")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_sig.o;
 	} else if (strstr(s->addr.sun_path, "sys_log")) {
@@ -528,12 +594,6 @@ int __connect(int fd, const struct sockaddr_un * addr, unsigned int len) {
 	return TSB_sock_open(s);
 }
 
-struct sockaddr_nl {
-	unsigned short	nl_family;	/* AF_NETLINK	*/
-	unsigned short	nl_pad;		/* zero		*/
-	u32 nl_pid;		/* port ID	*/
-};
-
 int __bind(int fd, const void* __addr, unsigned int len) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	struct t_sandbox_sock *s = &TS->socks[fd - TS->debug_offset];
@@ -556,12 +616,127 @@ int socketpair(int __domain, int __type, int __protocol, int fds[2]) {
 	return 0;
 }
 
-ssize_t sendmsg(int __fd, const struct msghdr *__msg, int __flags) {
-	(void)__fd; (void)__msg; (void)__flags; return 0;
+// Netlink mock queue helpers (thread-safe)
+static bool TSB_netlink_queue_is_empty(void) {
+	bool empty;
+	pthread_mutex_lock(&sys->TSB_netlink.mutex);
+	empty = (sys->TSB_netlink.queue_count == 0);
+	pthread_mutex_unlock(&sys->TSB_netlink.mutex);
+	return empty;
 }
 
-ssize_t recvmsg(int __fd,       struct msghdr *__msg, int __flags) {
-	(void)__fd; (void)__msg; (void)__flags; return 0;
+static bool TSB_netlink_queue_enqueue(const void *data, size_t len) {
+	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
+	bool ok = false;
+	pthread_mutex_lock(&nl->mutex);
+	if (nl->queue_count < TSB_NL_QUEUE_SIZE && len <= TSB_NL_MSG_SIZE) {
+		memcpy(nl->queue[nl->queue_tail].data, data, len);
+		nl->queue[nl->queue_tail].len = len;
+		nl->queue_tail = (nl->queue_tail + 1) % TSB_NL_QUEUE_SIZE;
+		nl->queue_count++;
+		ok = true;
+	}
+	pthread_mutex_unlock(&nl->mutex);
+	return ok;
+}
+
+static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
+	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
+	ssize_t len = -1;
+	pthread_mutex_lock(&nl->mutex);
+	if (nl->queue_count > 0) {
+		size_t msg_len = nl->queue[nl->queue_head].len;
+		if (msg_len <= buf_size) {
+			memcpy(buf, nl->queue[nl->queue_head].data, msg_len);
+			len = (ssize_t)msg_len;
+		}
+		nl->queue_head = (nl->queue_head + 1) % TSB_NL_QUEUE_SIZE;
+		nl->queue_count--;
+	}
+	pthread_mutex_unlock(&nl->mutex);
+	return len;
+}
+
+// Queue a netlink disk info response for a given device
+static void TSB_netlink_send_disk_response(struct sandbox_nvme_device *dev) {
+	char buf[TSB_NL_MSG_SIZE];
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg;
+	struct nvmeib_disk_info_reply *rep;
+	size_t total_len;
+
+	memset(buf, 0, sizeof(buf));
+
+	// Fill nlmsghdr
+	total_len = NLMSG_SPACE(sizeof(*msg) + sizeof(*rep));
+	nlh->nlmsg_len = total_len;
+	nlh->nlmsg_type = NLMSG_DONE;
+	nlh->nlmsg_flags = 0;
+	nlh->nlmsg_seq = 0;
+	nlh->nlmsg_pid = getpid();
+
+	// Fill nvmeib_nl_uk_comm_msg
+	msg = NLMSG_DATA(nlh);
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	msg->opcode = csc_get_disks;
+	msg->caller_type = 0;
+	msg->id = 0;
+
+	// Fill nvmeib_disk_info_reply
+	rep = (struct nvmeib_disk_info_reply *)msg->data;
+	rep->base.opcode = csc_get_disks;
+	rep->base.error = csce_ok;
+	rep->base.latency_ns = 0;
+	rep->selector = nvmeib_disk_info_reply_dinfo;
+
+	// Fill disk info from sandbox device
+	rep->dinfo.disk.n_blocks = dev->size_in_blocks;
+	rep->dinfo.disk.n_hw_blocks = dev->size_in_blocks;
+	rep->dinfo.disk.vendor_id = dev->vendor_id;
+	rep->dinfo.disk.block_size = 1 << SANDBOX_NVME_BLOCK_SIZE_EXPONENT;  // 4096
+	rep->dinfo.disk.max_request_size = 32;
+	rep->dinfo.disk.seq = 0;
+	rep->dinfo.disk.nsid = 1;
+	rep->dinfo.disk.metadata = 0;
+	snprintf(rep->dinfo.disk.disk_id, sizeof(rep->dinfo.disk.disk_id), "%s.1", dev->serial_number);
+	snprintf(rep->dinfo.disk.dev_name, sizeof(rep->dinfo.disk.dev_name), "%s", dev->device_path);
+	snprintf(rep->dinfo.disk.model_str, sizeof(rep->dinfo.disk.model_str), "%s", dev->model_number);
+	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
+	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
+	rep->dinfo.serjio_status = 0;  // nvmeibs_serjio_status_ok
+
+	// Queue the response
+	if (TSB_netlink_queue_enqueue(buf, total_len)) {
+		N_Tf(nl_queue_disk, "Queued disk response for @STR (@INT bytes)", dev->serial_number, (int)total_len);
+	} else {
+		N_Ef(nl_queue_full, "Failed to queue disk response for @STR", dev->serial_number);
+	}
+}
+
+ssize_t sendmsg(int __fd, const struct msghdr *__msg, int __flags) {
+	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(__fd);
+	struct iovec *iov = (struct iovec *)__msg->msg_iov;
+
+	// Assert single iovec element (as used by km_comm)
+	BUG_ON(__msg->msg_iovlen != 1);
+
+	if (s->other_side && s->other_side->send) {
+		return s->other_side->send(__fd, iov[0].iov_base, iov[0].iov_len, OFFSET_NONE, __flags);
+	}
+	return 0;
+}
+
+ssize_t recvmsg(int __fd, struct msghdr *__msg, int __flags) {
+	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(__fd);
+	struct iovec *iov = (struct iovec *)__msg->msg_iov;
+
+	// Assert single iovec element (as used by km_comm)
+	BUG_ON(__msg->msg_iovlen != 1);
+
+	if (s->other_side && s->other_side->recv) {
+		return s->other_side->recv(__fd, iov[0].iov_base, iov[0].iov_len, OFFSET_NONE, __flags);
+	}
+	return 0;
 }
 
 ssize_t send(int fd, const void *buf, size_t n , int flags) {
@@ -691,7 +866,26 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
+	struct t_sandbox_sock *nl_sock;
+	int nl_fd;
+
 	msleep(100);	// Throttled km_comm select
+
+	// Check if netlink socket is in the read set and we have queued messages
+	nl_sock = sys->TSB_netlink.o.sock;
+	if (nl_sock && readfds) {
+		nl_fd = nl_sock->fd;
+		if (FD_ISSET(nl_fd, readfds) && !TSB_netlink_queue_is_empty()) {
+			// Return immediately - netlink socket is ready to read
+			FD_ZERO(readfds);
+			FD_SET(nl_fd, readfds);
+			if (writefds) FD_ZERO(writefds);
+			if (exceptfds) FD_ZERO(exceptfds);
+			N_Tf(nl_select_ready, "Netlink fd @INT ready (queued messages)", nl_fd);
+			return 1;
+		}
+	}
+
 	return select(nfds, readfds, writefds, exceptfds, timeout);
 }
 

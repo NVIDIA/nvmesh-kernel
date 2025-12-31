@@ -2,6 +2,7 @@
 #define TOMA_SANDBOX_NVME_H_INCLUDED
 
 #include <stdbool.h>
+#include <stdint.h>
 
 void sandbox_nvme_init(void);
 
@@ -18,8 +19,6 @@ struct sandbox_nvme_device {
 };
 
 struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path);
-
-// Get all mock NVMe devices for netlink mock
 int sandbox_nvme_get_device_count(void);
 struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index);
 
