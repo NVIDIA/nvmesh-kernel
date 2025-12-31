@@ -455,15 +455,13 @@ static int regenerate_topo_for_clients(struct nvmeibt_seg_active *seg_active)
 	int									rv = 0;
 	struct nvmeibt_praid_lot			*praid_lot;
 
-	if (seg_active) {
-		praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
-		if (praid_lot->topo_ctx.is_activated) {
-			rv = nvmeibt_praid_lot_calc_topo_for_clients(praid_lot, &(seg_active->topo_for_clients), praid_lot->my_praid->praid_follower.applied_io_perms.all, true);
-			idx_in_praid = nvmeibt_seg_active_get_applied_seg_lot(seg_active)->from_config.idx_in_praid;
-			seg_active->is_seg_registrable = (seg_active->topo_for_clients.s[idx_in_praid].access_mode != NVMEIBTC_DS_MODE_DEAD);
-		} else {
-			N_Tf(bfyw3j4, "Don't build: seg=@UUID_8 praid is not activated", nvmeibt_seg_active_UUID_8(seg_active));
-		}
+	praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
+	if (praid_lot->topo_ctx.is_activated) {
+		rv = nvmeibt_praid_lot_calc_topo_for_clients(praid_lot, &(seg_active->topo_for_clients), praid_lot->my_praid->praid_follower.applied_io_perms.all, true);
+		idx_in_praid = nvmeibt_seg_active_get_applied_seg_lot(seg_active)->from_config.idx_in_praid;
+		seg_active->is_seg_registrable = (seg_active->topo_for_clients.s[idx_in_praid].access_mode != NVMEIBTC_DS_MODE_DEAD);
+	} else {
+		N_Tf(bfyw3j4, "Don't build: seg=@UUID_8 praid is not activated", nvmeibt_seg_active_UUID_8(seg_active));
 	}
 	return rv;
 }
