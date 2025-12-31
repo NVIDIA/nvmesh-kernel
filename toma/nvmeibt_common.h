@@ -234,9 +234,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 	({																														\
 		if (ppp) {																											\
 			NVMEIBT_TOMA_ALLOC_COMMON('F');																					\
-			if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c") != 0) {													\
-				N_Tf(name, "FREE p=@PPP size=@SIZEOF", ppp, malloc_usable_size(ppp));										\
-			}																												\
+			N_Tf(name, "FREE p=@PPP size=@SIZEOF", ppp, malloc_usable_size(ppp));										\
 			nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_MEM_FREE, nvmeibt_toma_alloc_common_idx, (ppp), 0, 0); 				\
 			ppp = NULL;																										\
 		}																													\
@@ -247,9 +245,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		void	*__p;																											\
 		NVMEIBT_TOMA_ALLOC_COMMON('A');																							\
 		__p = nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_MEM_MALLOC, nvmeibt_toma_alloc_common_idx, NULL, 0, (size));			\
-		if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c")) {																\
-			N_Tf(name, "MALLOC p=@PPP size=@SIZEOF", __p, malloc_usable_size(__p));												\
-		}																														\
+		N_Tf(name, "MALLOC p=@PPP size=@SIZEOF", __p, malloc_usable_size(__p));												\
 		__p;																													\
 	})
 
@@ -258,9 +254,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		void	*__p;																												\
 		NVMEIBT_TOMA_ALLOC_COMMON('C');																								\
 		__p = nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_MEM_CALLOC, nvmeibt_toma_alloc_common_idx, NULL, (nmemb), (size));		\
-		if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c")) {																	\
-			N_Tf(name, "CALLOC p=@PPP size=@SIZEOF", __p, malloc_usable_size(__p));													\
-		}																															\
+		N_Tf(name, "CALLOC p=@PPP size=@SIZEOF", __p, malloc_usable_size(__p));													\
 		__p;																														\
 	})
 
@@ -270,9 +264,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		size_t __prev_size = malloc_usable_size(in_ptr);																				\
 		NVMEIBT_TOMA_ALLOC_COMMON('R');																									\
 		__p = nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_MEM_REALLOC, nvmeibt_toma_alloc_common_idx, (in_ptr), 0, (size));				\
-		if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c")) {																		\
-			N_Tf(name, "REALLOC prev=@PPP p=@PPP prev_size=@SIZEOF size=@SIZEOF", (in_ptr), __p, __prev_size, malloc_usable_size(__p));	\
-		}																																\
+		N_Tf(name, "REALLOC prev=@PPP p=@PPP prev_size=@SIZEOF size=@SIZEOF", (in_ptr), __p, __prev_size, malloc_usable_size(__p));	\
 		__p;																															\
 	})
 
@@ -282,9 +274,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		int toma_posix_memalign_rv; 																								\
 		NVMEIBT_TOMA_ALLOC_COMMON('P');																								\
 		__p = nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_MEM_ALIGN, nvmeibt_toma_alloc_common_idx, (pptr), (alignment), (size)); 	\
-		if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c")) {																	\
-			N_Tf(name, "MEM_ALIGN ptr=@PPP p=@PPP size=@SIZEOF", *((void **)(pptr)), __p, malloc_usable_size(__p));					\
-		}																															\
+		N_Tf(name, "MEM_ALIGN ptr=@PPP p=@PPP size=@SIZEOF", *((void **)(pptr)), __p, malloc_usable_size(__p));					\
 		toma_posix_memalign_rv = (__p != NULL ? 0 : -1);																			\
 		toma_posix_memalign_rv;																										\
 	})
@@ -303,9 +293,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		void *__p; \
 		NVMEIBT_TOMA_ALLOC_COMMON('N'); \
 		__p = nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_REG_RSC, nvmeibt_toma_alloc_common_idx, (ptr), (0), (size)); \
-		if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c")) { \
-			N_Tf(name, "REG_RSC p=@PPP size=@SIZEOF", __p, size); \
-		} \
+		N_Tf(name, "REG_RSC p=@PPP size=@SIZEOF", __p, size); \
 		__p; \
 	 })
 
@@ -313,9 +301,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 	({ \
 		if (ppp) { \
 			NVMEIBT_TOMA_ALLOC_COMMON('N'); \
-			if (strcmp(__FILE__, "interfaces/log/nvmeibt_logger.c")) { \
-				N_Tf(name, "UREG_RSC p=@PPP size=@SIZEOF", ppp, size); \
-			} \
+			N_Tf(name, "UREG_RSC p=@PPP size=@SIZEOF", ppp, size); \
 			nvmeibt_alloc_free_and_account(NVMEIBT_TOMA_UREG_RSC, nvmeibt_toma_alloc_common_idx, (ppp), 0, size); \
 		} \
 	 })
