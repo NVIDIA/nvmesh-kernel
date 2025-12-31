@@ -442,7 +442,6 @@ static void write_one_disk_json(
 
     NFIN;
 
-	TODO(Make sure that the dummy_disk has a valid PMBR and GPTs, and remove the following special condition);
 	if (!nvmeibt_local_disk_is_done_initial_reading_of_local_disk(local_disk)) {
 		N_Tf(fkito09, "disk=@STR path=@PATH is_smart_log_valid=@BOOL is_done_reading_gpt=@BOOL is_mbr_a_valid_pmbr=@BOOL main_gpt.is_valid=@BOOL. skipping this disk in the report for now",
 			nvmeibt_local_disk_display(local_disk), nvmeibt_local_disk_file_name(local_disk),

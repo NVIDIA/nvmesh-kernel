@@ -1319,7 +1319,6 @@ int nvmeibt_topology_parse_a_config(enum NVMEIBT_CSV_TYPE content_type, struct n
 		goto out;
 
 	/* Post config update actions */
-	TODO(Separate vol from target from H/W config);
 	nvmeibt_seg_active_stop_all_recoveries_and_registrations_on_deleted_segs();
 
 	rv = 0;
@@ -2065,7 +2064,6 @@ struct netlink_queue_elem_t {
 	enum nvmeibs_serjio_status serjio_status;
 	union {
 		struct nvmeib_disk_info disk_info;
-		char dummy_name[256];
 		struct nvmeib_nl_msg_to_toma	msg_fr_local_clnt;
 	};
 };
@@ -2074,7 +2072,7 @@ static XDLIST_DECLARE(, struct netlink_queue_elem_t, link) nl_head = XDLIST_INIT
 static pthread_mutex_t nl_guard_mutex;
 static bool nl_queue_initialized = false;
 
-static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, char *dummy_name, enum nvmeibs_serjio_status serjio_status, struct nvmeib_nl_msg_to_toma *msg_fr_local_clnt)
+static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, struct nvmeib_nl_msg_to_toma *msg_fr_local_clnt)
 {
 	struct netlink_queue_elem_t *elem;
 
@@ -2085,9 +2083,7 @@ static int netlink_queue_push(struct nvmeib_disk_info *disk_info, char opcode, c
 
 	elem = (struct netlink_queue_elem_t *) NNVMEIBT_TOMA_CALLOC(trace_netlink_queue_push_2, 1, sizeof(struct netlink_queue_elem_t));
 
-	if (dummy_name)
-		nvmeibt_strlcpy(elem->dummy_name, dummy_name, sizeof(elem->dummy_name));
-	else if (msg_fr_local_clnt) {
+	if (msg_fr_local_clnt) {
 		elem->msg_fr_local_clnt = *msg_fr_local_clnt;
 	} else if (disk_info) {
 		elem->disk_info = *disk_info;
@@ -2160,12 +2156,12 @@ int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 ve
 	memcpy(disk_info.disk_id, ldisk_id, sizeof(disk_info.disk_id));
 	memcpy(disk_info.model_str, model_str, sizeof(disk_info.model_str));
 
-	return netlink_queue_push(&disk_info, 'S', NULL, serjio_status, NULL);
+	return netlink_queue_push(&disk_info, 'S', serjio_status, NULL);
 }
 
 static int nvmeibt_add_disk_event_callback(void *ctx __attribute__((unused)), struct nvmeib_disk_info *disk_info)
 {
-	return netlink_queue_push(disk_info, 'a', NULL, 0, NULL);
+	return netlink_queue_push(disk_info, 'a', 0, NULL);
 }
 
 static int nvmeibt_remove_disk_event_callback(void *ctx __attribute__((unused)), struct nvmeib_remove_disk *disk_remove_msg)
@@ -2177,12 +2173,12 @@ static int nvmeibt_remove_disk_event_callback(void *ctx __attribute__((unused)),
 	nvmeibt_strlcpy(disk_info.disk_id, disk_remove_msg->disk_id, sizeof(disk_info.disk_id));
 	nvmeibt_strlcpy(disk_info.status, "Remove", sizeof(disk_info.status));
 
-	return netlink_queue_push(&disk_info, 'r', NULL, 0, NULL);
+	return netlink_queue_push(&disk_info, 'r', 0, NULL);
 }
 
 int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(void *msg_fr_local_clnt)
 {
-	return netlink_queue_push(NULL, 'C', NULL, 0, (struct nvmeib_nl_msg_to_toma *)msg_fr_local_clnt);
+	return netlink_queue_push(NULL, 'C', 0, (struct nvmeib_nl_msg_to_toma *)msg_fr_local_clnt);
 }
 
 void nvmeibt_topology_register_disk_events(void)

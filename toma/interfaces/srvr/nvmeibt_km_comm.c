@@ -484,7 +484,7 @@ static void add_disk(
 		disk_rep = container_of(rep, struct nvmeib_disk_info_reply, base);
 		switch (disk_rep->selector) {
 		case nvmeib_disk_info_reply_dummy:
-			N_Wf(uy76vd3, "Obsolete dummy disk=@STR added. Ignoring", disk_rep->dinfo.disk.disk_id);
+			// Obsolete. Need to be removed from the ENUM in order to avoid compilation warning
 			break;
 		case nvmeib_disk_info_reply_serjio_state:
 			handle_serjio_state_changed(p, disk_rep);

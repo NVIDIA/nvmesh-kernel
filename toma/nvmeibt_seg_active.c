@@ -71,9 +71,6 @@ out:
 
 /******************************************************************************/
 
-// ORENL TODO
-// - move struct seg_applied_required_recovery_action from .h to .c file
-
 void nvmeibt_seg_active_inc_n_active_registrants_on_applied_praid(struct nvmeibt_seg_active *seg_active)
 {
 	seg_active->n_active_registrants_on_active_praid_version++;
@@ -243,7 +240,6 @@ static int seg_active_scrub_period_sec(const struct nvmeibt_seg_active *seg_acti
 		N_Ef(ybaumxu, "!seg_active");
 		nvmeibt_abort(ES_FATAL); // appease compiler
 	}
-	// TODO: replace with lookup in volume's config
 	return scrub_default_period_sec;
 }
 
@@ -811,7 +807,7 @@ out:
 	NFOUT;
 }
 
-/************************ Stale locks hash map. Todo: Move to dedicated file ********/
+/************************ Stale locks hash map. ********/
 static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *stale_lock)
 {
 	struct nvmeibt_seg_active		*seg_active;
@@ -871,7 +867,7 @@ static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
 	stale_lock = NULL;		// not found
 	if (lockid.all != 0) {	// Client says there is a stale lock here
 		N_Ef(t_11_tstlkrec, "No stale_lock, " STALE_BLKSET_FMT ". Ignoring",
-			 seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), lockid.all);	// Eventually Todo: This should not be a warning
+			 seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), lockid.all);
 	}
 
 out:
@@ -1581,8 +1577,6 @@ static void nvmeibt_seg_active_stale_rebuild(struct nvmeibt_seg_active *seg_acti
 		goto out;
 	}
 
-	TODO(add logic for watermark on the number of free journal chunks, and launch ungently if reached);
-
 	nsec_since_last_registrant_disconnect =
 			timespec_diff_ns(nvmeibt_global_get_cur_event_start_time(), seg_active->last_registrant_disconnect_timespec);
 	if (nsec_since_last_registrant_disconnect < SEC_TO_NSEC(1)) {
@@ -1926,7 +1920,6 @@ static void seg_active_done_dirty_rebuild(
 			seg_active->dirty_rebuild_ctx.praid_version = 0;
 			// If indeed this round succeeded then mark as done
 			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS(3chsir9, seg_active, NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE);
-			TODO(Maybe send appendentries_rep. Be careful, we might be out of leader or whatever);
 		}
 		nvmeibt_seg_active_clear_txid_rebuild_required(seg_active);
 	} else {
@@ -1934,7 +1927,6 @@ static void seg_active_done_dirty_rebuild(
 		seg_active->dirty_rebuild_ctx.praid_version = 0;
 		if (nvmeibt_disk_segment_is_owner_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
 			N_Tf(dkw0gv3, "status=@STATUS but still a recoverer, marking for retry.", recovery_status);
-			TODO(maybe no need to rerun due to certain failures);
 			nvmeibt_seg_active_mark_dirty_rebuild_required(seg_active);
 			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(x93m328, seg_active);
 		}
@@ -1977,7 +1969,6 @@ static void seg_active_done_stale_rebuild(
 	if (recovery_status == NVMEIBT_RECOVERY_STATUS_SUCCESS) {
 		N_Tf(jdiellp, "Stale rebuild succeeded seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 	} else {
-		TODO(maybe no need to rerun due to certain failures);
 		N_Tf(vn5kof4, "Stale rebuild failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->stale_rebuild_ctx.praid_version = 0;
 		nvmeibt_seg_active_mark_stale_rebuild_required(seg_active);
@@ -2030,14 +2021,12 @@ static void seg_active_done_cold_recovery(
 			seg_active->cold_recovery_ctx.praid_version = 0;
 			// If indeed this round succeeded then mark as done
 			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS(bxj830m, seg_active, NVMEIBT_SEG_DIRTY_BITS_STATE_EC_COLD_RECOVERER_DONE);
-			TODO(Maybe send appendentries_rep. Be careful, we might be out of leader or whatever);
 		}
 	} else {
 		N_Tf(jdikr4h, "Cold_recovery failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->cold_recovery_ctx.praid_version = 0;
 		if (nvmeibt_disk_segment_is_ec_cold_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
 			N_Tf(uej6m4k, "status=@STATUS but still an ec_cold_recoverer, marking for retry.", recovery_status);
-			TODO(maybe no need to rerun due to certain failures);
 			nvmeibt_seg_active_mark_cold_recovery_required(seg_active);
 			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(behbs71, seg_active);
 		}
@@ -2399,10 +2388,10 @@ void nvmeibt_seg_active_mark_stale_rebuild_needed_as_needed(struct nvmeibt_seg_a
 
 #define SEG_ZERO_REPORT_TO_MGMT_FREQUENCY_SEC 			10
 
-struct zero_seg_active_wq_entry {	// TODO: Unify with struct local_disk_zero_iter_wq_entry
+struct zero_seg_active_wq_entry {
 	/* Input */
 	struct nvmeibt_wq_entry 				wq_entry;
-	int										fd;				// Todo: Do union between 'fd' of dummy disk and 'disk' for real disk
+	int										fd;
 	struct netlink_io_context				*nl_ctx;
 	struct nvmeibt_ldisk_id_for_srvr_cmd	disk;
 	struct nvmeibt_seg_active				*seg_active;
