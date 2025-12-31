@@ -24,7 +24,6 @@
 #define SCRUB_PRIORITY_SCALE_FACTOR		(1LL << 16)
 
 #define STALE_BLKSET_FMT "(blkset=@LLX, seg=@UUID_8, lockid=@T_LID)"
-#define NTODO_N_REPLICA_SUPPORT(name, fmt, x...) N_Tf(name, "TODO_N_REPLICA - " fmt, x)
 
 static int64_t	recovery_client_batch_n_blksets;	// In the client: max_batch_size
 static bool is_stale_rebuild_enabled = true;
@@ -262,7 +261,6 @@ static inline int64_t calc_tv_sec_of_next_scrub_iteration(struct nvmeibt_seg_act
 	if (seg_active_scrub_secs_since_start(seg_active) > time_by_percentage_scrubbed_sec + SCRUB_RANDOMNESS_SEC + 100) {
 		N_Wf(4bhjasd, "seg=@UUID_8 should have finished scrubbing @ZU>>@ZU", nvmeibt_seg_active_UUID_8(seg_active),
 			 seg_active_scrub_secs_since_start(seg_active), time_by_percentage_scrubbed_sec);
-		// ORENL_FIX_THIS: log a warning? report to mgmt?
 	}
 	tv_sec = seg_active->scrubbing_start_time.tv_sec + time_by_percentage_scrubbed_sec;
 	if (tv_sec < seg_active->last_failed_scrub_iteration_time.tv_sec + 60) {
@@ -379,21 +377,6 @@ void nvmeibt_seg_active_upd_liveliness_according_to_local_disk(struct nvmeibt_se
 		N_Tf(hu87sr4, "seg=@UUID_8 not in config yet, skipping", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;	// The configuration is unknown yet
 	}
-/* No need for specific was_ever_activated logic here
-	if (nvmeibt_praid_lot_is_config_saying_that_was_never_activated(nvmeibt_seg_active_get_applied_praid_lot(seg_active))) {
-		N_Tf(fstvewi, "seg=@UUID_8 was_never_activated, resetting", nvmeibt_seg_active_UUID_8(seg_active));
-	    nvmeibt_disk_segment_reset_topo_ctx(NULL, NULL, seg_active);
-		NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS(va04klw, seg_active, NVMEIBT_SEG_DIRTY_BITS_STATE_ALIVE_UNSTABLE);
-		goto out;
-	}
-*/
-/* Excessive code. No need for special logic
-	// Was activated in the past already, we revive its active state
-	if (!nvmeibt_disk_segment_is_dirty_bits_state_unknown(seg_topo_ctx->dirty_bits_state)) {
-		N_Wf(fjsu5rb, "seg=@UUID_8 dirty_bits_state=@DIRTY_BITS_STATE (expected UNKNOWN)", nvmeibt_seg_active_UUID_8(seg_active), dirty_bits_state_str(seg_topo_ctx->dirty_bits_state));
-		goto out;
-	}
-*/
 	// All should be good.
 	//NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(4bd7ne9, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN);
 	//NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(4bd7nb4, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN);
@@ -1587,10 +1570,6 @@ static void nvmeibt_seg_active_stale_rebuild(struct nvmeibt_seg_active *seg_acti
 		goto out;
 	}
 	// Launch a stale-rebuild
-	NTODO_N_REPLICA_SUPPORT(yrvf8sk,
-		"compute this.Loop on all @N_TOPO_SEGS replicas that "
-		"are needed for recovery, and not just for n=2", nvmeibt_seg_active_get_applied_praid_lot(seg_active)->n_topo_seg_lots);
-
 	NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(pqbx3nf, seg_active, 0);	// Before launching an async rebuild
 	tid = nvmeibt_recovery_start_rebuild(NVMEIBT_RECOVERY_TYPE_STALE_REBUILD, seg_active);
 	if (tid == -1ULL) {
@@ -2413,7 +2392,6 @@ BOOL nvmeibt_seg_active_is_disk_format_zeroing_done_for_me(struct nvmeibt_seg_ac
 	}
 	if (seg_active->persistent_metadata && seg_active->persistent_metadata->active_praid_version_major > PRAID_VERSION_INVALID_VALUE) {
 		// Avoid TOMAerr before parsing the config. active_praid_version_major is a sign that it was already zeroed.
-		TODO(Probably doesnt work for JBOD currently, because not saved);
 		rv = true;
 		goto out;
 	}
@@ -2860,7 +2838,6 @@ void nvmeibt_seg_active_upd_active_topo_from_applied_topo(struct nvmeibt_seg_act
 	if (nvmeibt_disk_segment_is_x(active_topo)) {
 		// If the active is already X_ZERO or X_DONE then do not go backwards due to leader decision.
 		// The issue is that we might read the X from config that the leader didn't yet get
-		TODO(Do not make topo changes, such as switch to X_ZERO based on config. wait for leader decision);
 		if (nvmeibt_disk_segment_is_x_done(applied_topo)) {
 			// In practice if already X, then only accept X_DONE (the mgmt. already received X_DONE from us in the past)
 			mark_seg_active_x_done_if_all_cleaning_works_are_finished(seg_active, 1);
