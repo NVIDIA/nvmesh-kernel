@@ -226,6 +226,30 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 	return 0;
 }
 
+int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const char*model, const char*serial, u16 vendor, const bool is_stock_to_nvmeibs)
+{
+	const char* path = TOMA_ROOT_DIR "proc/nvmeibs/nvmeof_disks";
+	char val[512];
+	int n_bytes, n_bytes_written, fd = NNVMEIBT_OPEN(ttsrspfsh, path, O_WRONLY);
+	if (fd < 0) {
+		N_Ef(ttsrspfsi, "Cannot open @STR @AUTO_ERRNO", path);
+		return -ENOENT;
+	}
+	if (is_stock_to_nvmeibs)
+		n_bytes = snprintf(val, sizeof(val), "%s,%s/%s,%d", dev_file_name, model, serial, vendor);
+	else
+		n_bytes = snprintf(val, sizeof(val), "%s", dev_file_name);
+	n_bytes_written = write(fd, val, n_bytes);
+	NNVMEIBT_CLOSE(ttsrspfsj, fd);
+	if (n_bytes_written < 0) {
+		N_Ef(ttsrspfsk, "Cannot write @STR @AUTO_ERRNO", val);
+		if (errno == EEXIST && is_stock_to_nvmeibs)
+			N_Tf(ttsrspfsl, "Apperantly @STR already belong to nvmeibs(Only Toma closed?)", val);
+	}
+	N_Tf(ttsrspfsm, "Bind @STR len=@INT[b] written=@INT[b]", val, n_bytes, n_bytes_written);
+	return 0;
+}
+
 /***************************** Generic messages *******************************/
 int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg)
 {

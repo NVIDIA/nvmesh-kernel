@@ -1836,43 +1836,13 @@ out:
 
 static void bind_not_nvme_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
-	struct local_disk_bind_wq_entry *entry;
+	struct local_disk_bind_wq_entry *entry = container_of(wq_entry, struct local_disk_bind_wq_entry, wq_entry);
 	int rc;
-	char path[256];
-	int fd;
 
 	NFIN;
-
-	entry = container_of(wq_entry, struct local_disk_bind_wq_entry, wq_entry);
-	fd = open("/proc/nvmeibs/nvmeof_disks", O_WRONLY);
-	if (fd < 0) {
-		N_Ef(trace_bind_sata_disk_wrapper_1, "Cannot open /proc/nvmibs/nvmeof_disks @AUTO_ERRNO");
-		goto out;
-	}
-
-	if (entry->is_stock_to_nvmeibs)
-		rc = snprintf(path, sizeof(path), "%s,%s/%s,%d", entry->dev_file_name, entry->model, entry->serial, entry->vendor);
-	else
-		rc = snprintf(path, sizeof(path), "%s", entry->dev_file_name);
-
-	if (rc <= 0)
-		goto close_fd;
-
-	rc = write(fd, path, strnlen(path, sizeof path));
-	if (rc < 0) {
-		N_Ef(trace_bind_sata_disk_wrapper_4, "Cannot write @STR @AUTO_ERRNO", path);
-		if (errno == EEXIST && entry->is_stock_to_nvmeibs) {
-			N_Tf(trace_bind_sata_disk_wrapper_OK, "Apperantly @STR already belong to nvmeibs(Only Toma closed?)", path);
-		}
-	}
-	N_Tf(trace_bind_sata_disk_wrapper_5, "Bind write @STR len=@SIZE_T rc=@INT", path, strlen(path), rc);
-
-	entry->rv = 0;
-
-
-close_fd:
-	close(fd);
-out:
+	rc = nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(entry->dev_file_name, entry->model, entry->serial, entry->vendor, entry->is_stock_to_nvmeibs);
+	if (rc == 0)
+		entry->rv = 0;
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, (void *)wq_entry);
 	NFOUT;
 }

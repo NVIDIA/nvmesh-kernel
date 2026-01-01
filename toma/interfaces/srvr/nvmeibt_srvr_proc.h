@@ -43,6 +43,7 @@ int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const 
 struct nvmeibt_Str;
 int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str); // Appends the csv to already allocated (possibly empty) string. Upon error return negative rv, 0 on success
 int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str); // Same as above
+int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str);
 
 struct mmap_tbl {
 	void *addr;					// Address of locks table memory map. On alloc error returned NULL
@@ -53,6 +54,7 @@ int             nvmeib_srvr_api_lib_locks_map_put(const char *disk_name, struct 
 
 int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh);	//   Bind to   nvmesh/nvme driver
 int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh);	// UnBind from nvmesh/nvme driver
+int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const char*model, const char*serial, u16 vendor, const bool is_stock_to_nvmeibs);
 
 #endif //NVMEIBT_SRVR_PROC_H
 
