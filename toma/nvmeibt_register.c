@@ -1885,13 +1885,12 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 	n_blksets = num_blksets_in_disk_segment(disk_segment);
 	for (ii = 0; ii < n_blksets; ii++) {
 		const union nvmeib_lock_id existing_lock_id = mmapped_locks_table[ii].lock_id;
-		if (existing_lock_id.all == 0) {	// Free (the dominant case)
+		if ((existing_lock_id.all == 0) || (existing_lock_id.all == nvmeib_stale_special_raid1.lock_id.all)) {// Free (the dominant case) or already stale special (post R1 cold-recovery)
 			continue;
 		}
-#if 0
-		if (!nvmeib_lockid_are_purified_eq(existing_lock_id, nvmeib_stale_special_raid1.lock_id)) {
-			// Found an interesting value
-		}
+#if 0	// Todo Enable, once we are sure that clients behaviour NVMESH-7407 is correct and remove the related Error print below, grep this ticket id
+		if (existing_lock_id.bits.is_stale)
+			continue;							// Toma has nothing to do with this lock. No need to remove .is_read bit
 #endif
 
 		map_lock_id_purified = nvmeib_lockid_purify(existing_lock_id);
@@ -1907,7 +1906,7 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 				write_lock_id = released_lock_ids[n].stale_lock_id;
 				// write_lock_id.bits.is_read = existing_lock_id.bits.is_read; // Daniel: Impossible, client will not send blockset recovered on this blckset and Toma Hash will explode
 			} else {
-				// A recoverer locked and unregistered. We need to restore the value that it tried to fix
+				// A recoverer locked and unregistered. We need to restore the value that it tried to fix (recoveree clients lock)
 				write_lock_id = reg_ctx_to_restore->reg_lock_id;	// Daniel: Todo: Fix this: Here we loose .is_read bit of original lock id because reg_lock_id is purified.
 				nvmeib_lock_id_set_is_stale(&write_lock_id);
 				// A client that does the sync (recoverer)
@@ -1920,6 +1919,11 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 					write_lock_id = released_lock_ids[n].stale_lock_id;	// The better option is not to restore to the value from the hash
 						// Remove it from the hash
 					N_Ef(dki98u7, "Probably missed blockset recovered msg! seg=@UUID_8 blkset=@LLX lockConvert @X-->@X",
+						 nvmeibt_seg_active_UUID_8(seg_active), (unsigned long long)ii, existing_lock_id.all, write_lock_id.all);
+				}
+				if (existing_lock_id.bits.is_stale) {		// This is a data corruption situation. Recoverer unlocked to its stale lock. Should have abandoned or unlock to recoveree lock.
+					write_lock_id = released_lock_ids[n].stale_lock_id;	// The better option is not to restore to the value from the hash
+					N_Ef(dki98u8, "Client bug: NVMESH-7407, unlocked to invalid stale lock, possible DI issue! seg=@UUID_8 blkset=@LLX lockConvert @X-->@X",
 						 nvmeibt_seg_active_UUID_8(seg_active), (unsigned long long)ii, existing_lock_id.all, write_lock_id.all);
 				}
 			}
