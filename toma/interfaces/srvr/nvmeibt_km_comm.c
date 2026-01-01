@@ -159,6 +159,15 @@ static void __remove_disk_and_free(struct nvmeibt_km_comm *p, struct disk_info *
 	NNVMEIBT_TOMA_FREE(tscnlssn, disk);
 }
 
+static void __drain_msg_list(msgs_list_t *l)
+{
+	while (!XDLIST_EMPTY(l)) {
+		struct srv_comm_msg *msg = XDLIST_FIRST(l);
+		XDLIST_DEL(&msg->link);
+		msg_free(msg);
+	}
+}
+
 void nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p)
 {
 	NFIN;
@@ -172,16 +181,9 @@ void nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p)
 		p->comm_thread = 0;
 		N_Tf(tscnlssu, "Main thread down");
 	}
-	while (!XDLIST_EMPTY(p->msgs)) {
-		struct srv_comm_msg *msg = XDLIST_FIRST(p->msgs);
-		XDLIST_DEL(&msg->link);
-		msg_free(msg);
-	}
-	while (!XDLIST_EMPTY(&p->in_progress_msgs)) {
-		struct srv_comm_msg *msg = XDLIST_FIRST(&p->in_progress_msgs);
-		XDLIST_DEL(&msg->link);
-		msg_free(msg);
-	}
+	__drain_msg_list(&p->msgs1);
+	__drain_msg_list(&p->msgs2);		// One of those 2 is p->msgs
+	__drain_msg_list(&p->in_progress_msgs);
 	while (!XDLIST_EMPTY(&p->cbs)) {
 		struct change_disk_cb *cb = XDLIST_FIRST(&p->cbs);
 		XDLIST_DEL(&cb->link);
@@ -432,11 +434,7 @@ static bool __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char 
 			is_alive = false;
 		msg_free(msg);
 	}
-	while (!XDLIST_EMPTY(&p->in_progress_msgs)) {
-		struct srv_comm_msg *msg = XDLIST_FIRST(&p->in_progress_msgs);
-		XDLIST_DEL(&msg->link);
-		msg_free(msg);
-	}
+	__drain_msg_list(&p->in_progress_msgs);
 	nvmeibt_km_comm_unlock(p);
 	if (is_alive) {
 		char c;
