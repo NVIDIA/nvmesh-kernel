@@ -17,13 +17,13 @@ int nvmeibt_toma_send_buf_to_client(       const struct nvmeibs_toma_client_proc
 int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req,
 	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx));
 
-/***************************** Netlink: New Toma-API vs kernel server, used for disk related communication */
-struct km_comm_msg_hdr {
-	int len; /* the len of data[0] */
-	int opcode;					// enum uk_comm_opcode
-	void (*on_done)(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep);
-	void *ctx;
-	char  data[0] __attribute((aligned(8)));
+/***************************** Netlink: New Toma-API vs Server, used for disk related communication */
+struct km_comm_msg_hdr {													// Will be converted internally upon send to struct nvmeib_nl_uk_comm_msg.
+	int len; 																// size of data[0], actually can be calculated from opcode field directly.
+	enum uk_comm_opcode opcode;
+	void (*on_done)(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep);	// Optional callback to execute when reply from server arrives.
+	void *ctx;																// Optional private context for on done
+	char  data[0] __attribute((aligned(8))); // union { struct nvmeib_zero_disk; struct nvmeib_io_to_disk; struct nvmeib_format_disk; struct nvmeib_msg_tom_2_local_clnt; }
 };
 
 struct nvmeibt_km_comm;

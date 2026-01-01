@@ -541,17 +541,16 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 {
 	struct srv_comm_msg *kmsg;
 	const int		msg_size = sizeof(kmsg->msg) + hdr->len;
-	const int 		kmsg_size = sizeof(*kmsg) + msg_size;
 	char c = 1;
 	int rv;
 
 	NFIN;
 	if (hdr->opcode == csc_start || hdr->opcode >= csc_end) {
-		N_Ef(stkmcnl0, "Invalid kernel message opcode @OPCODE", hdr->opcode);
+		N_Ef(stkmcnl0, "Invalid kernel message @INT", hdr->opcode);
 		rv = -1;
 		goto out;
 	}
-	if (!(kmsg = NNVMEIBT_BM_CALLOC(stkmcnl1, kmsg_size))) {
+	if (!(kmsg = NNVMEIBT_BM_CALLOC(stkmcnl1, sizeof(*kmsg) + msg_size))) {
 		N_Ef(stkmcnl2, "Fail to allocate nvmeibt_km_comm msg");
 		rv = -1;
 		goto out;
