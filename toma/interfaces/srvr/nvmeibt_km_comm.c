@@ -51,7 +51,7 @@ struct nvmeibt_km_comm {
 	struct sockaddr_nl dest_addr;	// Netlink address to send msgs to
 	int spair[2];					// Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
 	pthread_t comm_thread;			// main thread which processes messages
-	int valid;
+	int error_occured;				// if != 0: Object is not operational, closing due to error. Stores error code
 	unsigned long unique_id_generator;		// Ever increasing counter for msg id and others
 };
 
@@ -136,7 +136,6 @@ struct nvmeibt_km_comm * nvmeibt_km_comm_create(void)
 	XDLIST_HEAD_INIT(&p->msgs1);
 	XDLIST_HEAD_INIT(&p->msgs2);
 	p->msgs = &p->msgs1;
-	p->valid = 1;
 	if (start_thread(p) < 0) {									rv = -__LINE__; goto free_nl_buffer;}
 	goto out;
 
@@ -277,7 +276,7 @@ static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 			is_alive = false;
 		if (is_alive) {
 			if (msg->msg.opcode == csc_register_disk_events) {
-				if (p->valid)
+				if (!p->error_occured)
 					__on_user_registers_new_callbacks(p, msg);
 				msg_free(msg);
 			} else if (msg->msg.opcode < csc_end) {
@@ -423,7 +422,7 @@ static bool __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char 
 	N_Ef(t2srmqon0, "Error: @STR, @AUTO_ERRNO", reason);
 	nvmeibt_km_comm_lock(p);
 	read_toma_wakeup_event(p);
-	p->valid = false;
+	p->error_occured = -1;				// No need to deferntiate by 'reason', we have it in logs
 	msgs = p->msgs;
 	p->msgs = msgs == &p->msgs1 ? &p->msgs2 : &p->msgs1;
 	while (!XDLIST_EMPTY(msgs)) {
@@ -553,7 +552,7 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 		N_Tf(stkmcnl3, "msg[@INT].id=@ID, hdr=@INT[b] msg=@INT[b]", hdr->opcode, kmsg->msg.id, hdr->len, kmsg->msg.len);
 	}
 	nvmeibt_km_comm_lock(p);
-	if (p->valid) {
+	if (!p->error_occured) {
 		XDLIST_ADD_TAIL(p->msgs, kmsg);
 		rv = write(p->spair[0], &c, 1) == 1 ? 0 : -1;		// Wakeup our main thread to handle the message
 	} else {
