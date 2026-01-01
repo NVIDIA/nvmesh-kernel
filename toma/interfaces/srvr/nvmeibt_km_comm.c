@@ -46,8 +46,9 @@ struct nvmeibt_km_comm {
 	disk_list_t disks;
 	pthread_mutex_t guard;			// Serialize Toma thread access
 	int nl_sock_fd;					// Socket to which send/recv message to/from kernel server
-	int max_msg_size;
-	struct nlmsghdr *nlh;			// Linux netlink msg
+	int max_msg_size;				// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time
+	struct nlmsghdr *nlh;			// 1 preallocated Linux netlink msg, to avoid mallocs during send/recv
+	struct iovec iov;				// 1 preallocated iovec
 	struct sockaddr_nl dest_addr;	// Netlink address to send msgs to
 	int spair[2];					// Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
 	pthread_t comm_thread;			// main thread which processes messages
@@ -116,10 +117,10 @@ static int start_thread(struct nvmeibt_km_comm *p)
 	return 0;
 }
 
-#define NETLINK_SRV_COMM_MAX_PAYLOAD 1024			//	TODO(NVMESH-7336, "Should actually use sezof largest msg")
 struct nvmeibt_km_comm * nvmeibt_km_comm_create(void)
 {
 	struct nvmeibt_km_comm *p = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
+	const int NETLINK_SRV_COMM_MAX_PAYLOAD = max((sizeof(struct nvmeib_nl_msg_to_toma) + 256 /*nvmeib_push_extended_msg payload?*/), (sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union nvmeib_nl_msg_to_srvr_payload)));
 	int rv = 0;
 
 	if (!p) { 													rv = -__LINE__; goto out; }
@@ -130,6 +131,8 @@ struct nvmeibt_km_comm * nvmeibt_km_comm_create(void)
 	p->max_msg_size = NLMSG_SPACE(NETLINK_SRV_COMM_MAX_PAYLOAD);
 	p->nlh = NNVMEIBT_TOMA_MALLOC(tscnlssb, p->max_msg_size);
 	if (!p->nlh) {												rv = -__LINE__; goto free_netlink; }
+	p->iov.iov_base = (void *)p->nlh;
+	p->iov.iov_len = p->max_msg_size;
 	XDLIST_HEAD_INIT(&p->in_progress_msgs);
 	XDLIST_HEAD_INIT(&p->cbs);
 	XDLIST_HEAD_INIT(&p->disks);
@@ -209,32 +212,34 @@ static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
 	NFOUT;
 }
 
+static void __fill_netlink_hdr(struct nvmeibt_km_comm *p, struct msghdr* hdr, struct sockaddr_nl *addr)
+{
+	memset(hdr, 0, sizeof(*hdr));
+	memset(p->nlh, 0, p->max_msg_size);		// Todo: too much mem set, reduce this. Just memset for debug, not really needed
+	hdr->msg_name = (void *)addr;
+	hdr->msg_namelen = sizeof(*addr);
+	hdr->msg_iov = &p->iov;
+	hdr->msg_iovlen = 1;
+}
+
 static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *msg, bool is_toma_explicit_msg)
 {
-	struct iovec iov;
-	struct msghdr hdr = {0};
+	struct msghdr hdr;
 	struct nlmsghdr *nlh = p->nlh;
-	int len = p->max_msg_size;
 
 	NFIN;
-	if (msg->msg.len > len) {
-		N_Ef(tkmcsmtk0, "message size @LEN exceeds max netlink message @LEN", msg->msg.len, len);
+	if (msg->msg.len > p->max_msg_size) {
+		N_Ef(tkmcsmtk0, "msg[@INT].id=@ID size @LEN[b] > max netlink msg @LEN[b]", msg->msg.opcode, msg->msg.id, msg->msg.len, p->max_msg_size);
 		msg_free(msg);
 		goto out;
 	}
 	msg->msg.caller_type = TOMA_CALLER;
-	memset(nlh, 0, len);
-	nlh->nlmsg_len = len;
+	__fill_netlink_hdr(p, &hdr, &p->dest_addr);
+	nlh->nlmsg_len = p->max_msg_size;
 	nlh->nlmsg_pid = getpid();
 	nlh->nlmsg_flags = 0;
 	nlh->nlmsg_type = NVMESH_NL_MSG_TYPE;
 	memcpy(NLMSG_DATA(nlh), &msg->msg, msg->msg.len);
-	iov.iov_base = (void *)nlh;
-	iov.iov_len = nlh->nlmsg_len;
-	hdr.msg_name = (void *)&p->dest_addr;
-	hdr.msg_namelen = sizeof(p->dest_addr);
-	hdr.msg_iov = &iov;
-	hdr.msg_iovlen = 1;
 	N_Tf(tkmcsmtk1, "msg[@INT].id=@ID to kernel pid=@PID(@PID)", msg->msg.opcode, msg->msg.id, nlh->nlmsg_pid, getpid());
 	if (msg->on_done)
 		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);		// Important: Insert before calling send, as reply can come fast and not find the in progress message
@@ -372,26 +377,18 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 {
 	struct sockaddr_nl src_addr;
-	struct iovec iov[1];
-	struct msghdr hdr = {0};
-	struct nlmsghdr *nlh = p->nlh;
+	struct msghdr hdr;
 	ssize_t n;
 	bool is_alive = true;
 
 	NFIN;
-	memset(nlh, 0, p->max_msg_size);
-	iov[0].iov_base = (void *)nlh;
-	iov[0].iov_len = p->max_msg_size;
-	hdr.msg_name = (void *)&src_addr;
-	hdr.msg_namelen = sizeof(src_addr);
-	hdr.msg_iov = iov;
-	hdr.msg_iovlen = 1;
+	__fill_netlink_hdr(p, &hdr, &src_addr);
 	n = recvmsg(p->nl_sock_fd, &hdr, 0);
 	if (n == -1) {
 		N_Ef(t2shnnm0, "Failed to recieve message from kernel");
 		is_alive = false;
 	} else {
-		struct nvmeib_nl_uk_comm_msg *rcv_msg = NLMSG_DATA(nlh);
+		struct nvmeib_nl_uk_comm_msg *rcv_msg = NLMSG_DATA(p->nlh);
 		struct srv_comm_msg *msg = find_in_progress_msg_waiting_for_reply(p, rcv_msg->id);
 		N_Tf(t2shnnm1, "rcv_msg[@INT].id=@ID, @LEN[b], was_blocking=@BOOL_YN, n=@ZU[b]", rcv_msg->opcode, rcv_msg->id, rcv_msg->len, !!msg, n);
 		if (msg) {

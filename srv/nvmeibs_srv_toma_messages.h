@@ -190,14 +190,6 @@ enum nvmeibs_toma_server_msg_type {
 enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT_CALLER = 'C' };
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
-struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Base Header which exists in all messages
-	int len;
-	int opcode;							// enum uk_comm_opcode
-	char caller_type;					// enum nvmeibs_um_caller_type
-	unsigned long id __attribute__((aligned(8)));
-	char data[0];						// Content of the message
-};
-
 struct nvmeib_nl_uk_comm_rep {			// s2t, server base reply on toma requests
 	int opcode;							// enum uk_comm_opcode
 	int error;							// enum uk_comm_err_opcode
@@ -513,6 +505,22 @@ struct nvmeib_msg_tom_2_local_clnt {	// Toma sets msg to local client via netlin
 		unsigned n_pages;				// numebr of pages that are needed to be copied
 		void *data;						// the data to be transfered to the client, must be page aligned
 	} toma_client;
+};
+
+struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Base Header which exists in all messages
+	int len;
+	int opcode;							// enum uk_comm_opcode
+	char caller_type;					// enum nvmeibs_um_caller_type
+	unsigned long id __attribute__((aligned(8)));
+	char data[0];						// Content of the message
+};
+union nvmeib_nl_msg_to_srvr_payload {			// t2s: All possible payloads, user space (toma/others) send to server.
+	struct nvmeib_zero_disk zero_disk;
+	struct nvmeib_io_to_disk  io2disk;
+	struct nvmeib_format_disk fmt_disk;
+	struct nvmeib_msg_tom_2_local_clnt msg2clnt;
+	struct nvmeib_remove_disk rmv_disk_ack;
+	struct nvmeib_identify_disk identify_disk;
 };
 
 /* Toma->Any-Client for registering segment and issuing IO. Sent via local server */

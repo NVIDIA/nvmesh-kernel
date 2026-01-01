@@ -23,7 +23,7 @@ struct km_comm_msg_hdr {													// Will be converted internally upon send t
 	enum uk_comm_opcode opcode;
 	void (*on_done)(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep);	// Optional callback to execute when reply from server arrives.
 	void *ctx;																// Optional private context for on done
-	char  data[0] __attribute((aligned(8))); // union { struct nvmeib_zero_disk; struct nvmeib_io_to_disk; struct nvmeib_format_disk; struct nvmeib_msg_tom_2_local_clnt; }
+	char  data[0] __attribute((aligned(8))); // union nvmeib_nl_msg_to_srvr_payload;
 };
 
 struct nvmeibt_km_comm;
