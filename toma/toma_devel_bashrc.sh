@@ -314,7 +314,7 @@ else	###########################################              my-laptop) code   
 	alias add_deep_sleep='sudo grubby --update-kernel=ALL --args="mem_sleep_default=deep"'
 	alias grep_alloc_free="grep -rEn '\<kfree\>|\<vfree\>|\<kalloc\>|\<kzalloc\>|\<kcalloc\>|\<krealloc\>|\<vzalloc\>|\<vmalloc\>|\<calloc\>|\<kmem_alloc\>|\<malloc\>' clnt"
 	alias ping_nvme1006_IPMI='ping nvme1006.ilo'	# nvme1006-ilo/ ADMIN ADMIN	# Enter remote control iKVM/HTML5
-	alias resolveall='resolvectl query www.google.com geovpn.mellanox.com confluence.nvidia.com nvme1014.mtl.labs.mlnx nvme1014';
+	alias resolveall='resolvectl query www.google.com geovpn.mellanox.com confluence.nvidia.com nvme1014.lab.nvidia.com nvme1014';
 	#LOGS & stat
 	alias my_compile_simulator="
 		#rsync --ignore-errors --delete --delete-before --delete-excluded --exclude-from=~/projects/ssda/excludes -rlpgoDv ~/projects/ssda/ ~/projects/ssda_tmp;
@@ -627,12 +627,12 @@ else	###########################################              my-laptop) code   
 		fi
 		resolv_links=`resolvectl domain | tail -n +2 | cut -d" " -f2`;
 		for i in ${resolv_links}; do sudo resolvectl domain ${i} search mtl.labs.mlnx; done;
-		resolvectl query www.google.com geovpn.mellanox.com confluence.nvidia.com nvme1014.mtl.labs.mlnx nvme1014;
+		resolvectl query www.google.com geovpn.mellanox.com confluence.nvidia.com nvme1014.lab.nvidia.com nvme1014;
 	'
 	alias generate_hosts_file='
 		(
 			for i in mtv-excelero1 nvmeserver2 gitlab-mirror-mtl.nvidia.com gitlab-master.nvidia.com confluence.nvidia.com; do n=${i}; resolvectl query "${n}" | grep ${n}: | awk '"'"'{print $2 "	" $1}'"'"' | sed "s/://" ; done
-			for i in {0..2000}; do n=nvme${i}; resolvectl query "${n}" | grep ${n}: | awk '"'"'{print $2 "	" $1 "  	" $1".mtl.labs.mlnx"}'"'"' | sed "s/://g" ; done
+			for i in {0..2000}; do n=nvme${i}; resolvectl query "${n}" | grep ${n}: | awk '"'"'{print $2 "	" $1 "  	" $1".lab.nvidia.com"}'"'"' | sed "s/://g" ; done
 		) > ~/.ssh/auto_generated_hosts_file
 	'
 	alias kernel_vmcore_debugging_rocky='
