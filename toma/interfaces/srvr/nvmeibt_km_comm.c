@@ -9,7 +9,6 @@ struct srv_comm_msg {
 	void (*on_done)(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *msg);
 	void *ctx;								// ctx for on_done()
 	struct xdlist link;						// Link to reside in msg lists or in progress list
-	bool remember;
 	struct nvmeib_nl_uk_comm_msg msg;
 };
 
@@ -42,7 +41,7 @@ typedef XDLIST_DECLARE(disk_list, struct disk_info,      link) disk_list_t;
 struct nvmeibt_km_comm {
 	msgs_list_t msgs1, msgs2;		// Double buffering, 1 list is draining, other getting new requests
 	msgs_list_t *msgs;				// Points to current list of added entries (1 of the 2 above) ????
-	msgs_list_t in_progress_msgs;	// Send msgs to kernel, awaiting reply
+	msgs_list_t in_progress_msgs;	// In air messages, sent to server and awaiting reply, accessed only from main thread, or when it is dead, so no need for locks
 	cb_list_t cbs;					// List of user callbacks to execute on disk add/remove events
 	disk_list_t disks;
 	pthread_mutex_t guard;			// Serialize Toma thread access
@@ -209,7 +208,7 @@ static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
 	NFOUT;
 }
 
-static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *msg)
+static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *msg, bool is_toma_explicit_msg)
 {
 	struct iovec iov;
 	struct msghdr hdr = {0};
@@ -236,9 +235,11 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *m
 	hdr.msg_iov = &iov;
 	hdr.msg_iovlen = 1;
 	N_Tf(tkmcsmtk1, "msg[@INT].id=@ID to kernel pid=@PID(@PID)", msg->msg.opcode, msg->msg.id, nlh->nlmsg_pid, getpid());
-	if (msg->remember)
-		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);				// Important: Insert before calling send, as reply can come fast and not find the in progress message
-	sendmsg(p->nl_sock_fd, &hdr, 0);
+	if (msg->on_done)
+		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);		// Important: Insert before calling send, as reply can come fast and not find the in progress message
+	sendmsg(p->nl_sock_fd, &hdr, 0);					// Todo: Check for error
+	if (!msg->on_done && is_toma_explicit_msg)			// Internally generated messages are always on stack and dont have on_done() (for simplicity of code)
+		msg_free(msg);
 out:
 	NFOUT;
 }
@@ -280,7 +281,7 @@ static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 					__on_user_registers_new_callbacks(p, msg);
 				msg_free(msg);
 			} else if (msg->msg.opcode < csc_end) {
-				send_msg_to_kernel(p, msg);				// Dont free msg, it is added to a different queue or freed inside
+				send_msg_to_kernel(p, msg, true);		// Dont free msg, it is added to a different queue or freed inside
 			}
 		} else {										// Autofail msg
 			msg_free(msg);
@@ -303,7 +304,7 @@ static struct srv_comm_msg *find_in_progress_msg_waiting_for_reply(struct nvmeib
 }
 
 extern int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
-static void remove_disk_ack(struct nvmeibt_km_comm *p, struct nvmeib_remove_disk *disk);
+static void remove_disk_ack(struct nvmeibt_km_comm *p, const struct nvmeib_disk_info *di);
 static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_comm_msg *rcv_msg)
 {
 	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
@@ -339,7 +340,6 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 					N_Ef(t2cnlpd3, "Failed to allocate memory for disk=@STR", di->disk_id);
 				}
 			} else {
-				struct nvmeib_remove_disk rd;
 				bool found_disk = false;
 				XDLIST_FOREACH(disk, &p->disks) {
 					if (disk_info_is_equal(disk, di->disk_id)) {
@@ -356,11 +356,8 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 						break;
 					}
 				}
-
 				// Ack the remove. When the WQ is finalized we will unmap the lock table, releasing the disk.
-				memset(&rd, 0, sizeof(rd));
-				memcpy(rd.disk_id, disk_rep->dinfo.disk.disk_id, sizeof(disk_rep->dinfo.disk.disk_id));
-				remove_disk_ack(p, &rd);
+				remove_disk_ack(p, &disk_rep->dinfo.disk);
 				if (found_disk) {
 					__remove_disk_and_free(p, disk);
 				}
@@ -371,7 +368,7 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 	NFOUT;
 }
 
-static bool handle_new_nl(struct nvmeibt_km_comm *p)
+static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 {
 	struct sockaddr_nl src_addr;
 	struct iovec iov[1];
@@ -453,43 +450,34 @@ static bool __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char 
 	return false;	// should stop due to error
 }
 
-static void remove_disk_ack(struct nvmeibt_km_comm *p, struct nvmeib_remove_disk *disk)
+static void remove_disk_ack(struct nvmeibt_km_comm *p, const struct nvmeib_disk_info *di)
 {
-	char buf[sizeof(struct srv_comm_msg) + sizeof(struct nvmeib_remove_disk)] = {0};
+	char buf[sizeof(struct srv_comm_msg) + sizeof(struct nvmeib_remove_disk)];
 	struct srv_comm_msg *kmsg = (void *)buf;
 	struct nvmeib_remove_disk *rd = (void *)kmsg->msg.data;
-
-	NFIN;
 	memset(buf, 0, sizeof(buf));
 	kmsg->msg.opcode = csc_remove_disk_ack;
 	kmsg->msg.len = sizeof(kmsg->msg) + sizeof(struct nvmeib_remove_disk);
-	*rd = *disk;
-	send_msg_to_kernel(p, kmsg);
-	NFOUT;
+	memcpy(rd->disk_id, di->disk_id, sizeof(di->disk_id));
+	send_msg_to_kernel(p, kmsg, false);
 }
 
 static void get_disks(struct nvmeibt_km_comm *p)
 {
 	struct srv_comm_msg kmsg;
-
-	NFIN;
 	memset(&kmsg, 0, sizeof(kmsg));
 	kmsg.msg.opcode = csc_get_disks;
 	kmsg.msg.len = sizeof(kmsg.msg);
-	send_msg_to_kernel(p, &kmsg);
-	NFOUT;
+	send_msg_to_kernel(p, &kmsg, false);
 }
 
 static void _send_keep_alive_to_server(struct nvmeibt_km_comm *p)
 {
 	struct srv_comm_msg kmsg;
-
-	NFIN;
 	memset(&kmsg, 0, sizeof(kmsg));
 	kmsg.msg.opcode = csc_keep_alive;
 	kmsg.msg.len = sizeof(kmsg.msg);
-	send_msg_to_kernel(p, &kmsg);
-	NFOUT;
+	send_msg_to_kernel(p, &kmsg, false);
 }
 
 static void * run(void *v)
@@ -515,7 +503,7 @@ static void * run(void *v)
 				read_toma_wakeup_event(p);
 				is_alive = __handle_incomming_msg_from_toma(p);
 			} else if (FD_ISSET(p->nl_sock_fd, &read_fds)) {
-				is_alive = handle_new_nl(p);
+				is_alive = __handle_new_srvr_msg(p);
 			} else if (FD_ISSET(p->spair[1], &except_fds)) {
 				is_alive = __release_msg_queues_on_error(p, "toma sock");
 			} else if (FD_ISSET(p->nl_sock_fd, &except_fds)) {
@@ -557,7 +545,6 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 	}
 	kmsg->msg.opcode = hdr->opcode;
 	if (hdr->opcode > csc_start) {
-		kmsg->remember = true;
 		kmsg->on_done = hdr->on_done;
 		kmsg->ctx =  hdr->ctx;
 		kmsg->msg.len = msg_size;
