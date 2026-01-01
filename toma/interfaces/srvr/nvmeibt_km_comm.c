@@ -236,9 +236,9 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *m
 	hdr.msg_iov = &iov;
 	hdr.msg_iovlen = 1;
 	N_Tf(tkmcsmtk1, "msg[@INT].id=@ID to kernel pid=@PID(@PID)", msg->msg.opcode, msg->msg.id, nlh->nlmsg_pid, getpid());
-	sendmsg(p->nl_sock_fd, &hdr, 0);
 	if (msg->remember)
-		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);
+		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);				// Important: Insert before calling send, as reply can come fast and not find the in progress message
+	sendmsg(p->nl_sock_fd, &hdr, 0);
 out:
 	NFOUT;
 }
