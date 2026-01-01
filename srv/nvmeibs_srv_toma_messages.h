@@ -190,7 +190,7 @@ enum nvmeibs_toma_server_msg_type {
 enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT_CALLER = 'C' };
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
-struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Header and data
+struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Base Header which exists in all messages
 	int len;
 	int opcode;							// enum uk_comm_opcode
 	char caller_type;					// enum nvmeibs_um_caller_type
@@ -205,28 +205,26 @@ struct nvmeib_nl_uk_comm_rep {			// s2t, server base reply on toma requests
 };
 
 enum uk_comm_opcode {
-	// csc_internal_suicide = -1			// Used internally, never sent to server
-	csc_start = 0,
-	csc_get_disk_names = 1,
-	csc_zero_disk = 2,
-	csc_test_zero_disk = 3,
+	csc_internal_suicide = -1,				// Toma: Used internally, never sent to server, no payload
+	csc_start = 0,							// Not an actual message, never sent
+	csc_get_disk_names = 1,					// Deprecated. t2s no payload. s2t reply: struct nvmeib_get_disk_names_reply
+	csc_zero_disk = 2,						// t2s, zero disk segment after volume deletion. payload: struct nvmeib_zero_disk. s2t, reply: struct nvmeib_zero_disk_reply
+	csc_test_zero_disk = 3,					// Deprecated testing code. t2s: struct nvmeib_zero_disk, reply s2t struct nvmeib_test_zero_reply
 
-	csc_register_disk_events = 4,			// Never sent to server, internal mechanism of server communication registers callbacks and dispatches them within the caller cantest
-	csc_get_disks = 5,
-	csc_remove_disk = 6,
-	csc_format_disk = 7,
-	csc_io_to_disk = 8,
-	csc_keep_alive = 9,
-	csc_identify_disk = 10,					// NVMESH-7336 not used
+	csc_register_disk_events = 4,			// Toma: Used internally, Never sent to server, registers callback functions for handling new disks, in message below
+	csc_get_disks = 5,						// t2s, no paylod. s2t, replay: payload struct nvmeib_disk_info_reply
+	csc_remove_disk_ack = 6,				// t2s, Ack on server disk-removal notification via msg above. payload: struct nvmeib_remove_disk
+	csc_format_disk = 7,					// t2s, request to format the entire drive before volume allocations. payload: struct nvmeib_format_disk, s2t reply: struct nvmeib_format_disk_reply
+	csc_io_to_disk = 8,						// t2s, request to do io (like read/write gpt). payload: struct nvmeib_io_to_disk. s2t reply: struct nvmeib_io_to_disk_reply
+	csc_keep_alive = 9,						// t2s,  no paylod, no reply from server.
+	csc_identify_disk = 10,					// deprecated: t2s: payload struct nvmeib_identify_disk,  s2t reply: struct nvmeib_identify_disk_reply
 
-	csc_local_client = 11,					// Version 2.3+
-	opcode_unused_1 = 12,
-	opcode_unused_2 = 13,
-	csc_msg_to_process = 14,				// s2t, generic mechanism to send a message from kernel to user space
+	csc_local_client = 11,					// t2s: instruction to local client, like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
+	csc_msg_to_process = 14,				// s2t, generic mechanism to send a message from kernel to user space, payload: struct nvmeib_push_extended_msg
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	csc_contaminate_disk = 15,				// should be the last just before the end
 #endif
-	csc_end
+	csc_end									// Never sent
 };
 
 static inline const char * uk_comm_opcode_str(int opcode)
@@ -237,7 +235,7 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_test_zero_disk: return "csc_test_zero_disk";
 	case csc_register_disk_events: return "csc_register_disk_events";
 	case csc_get_disks: return "csc_get_disks";
-	case csc_remove_disk: return "csc_remove_disk";
+	case csc_remove_disk_ack: return "csc_remove_disk_ack";
 	case csc_format_disk: return "csc_format_disk";
 	case csc_io_to_disk: return "csc_io_to_disk";
 	case csc_keep_alive: return "csc_keep_alive";
@@ -362,14 +360,14 @@ struct nvmeib_io_to_disk {				// t2s  - Toma request server to do io to a disk
 	};
 };
 
-struct nvmeib_identify_disk {
+struct nvmeib_identify_disk {				// t2s, deprecated
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	int pid;
 	void *data;
 	int data_len;
 };
 
-struct nvmeib_remove_disk {
+struct nvmeib_remove_disk {					// t2s
 	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	u64 vendor_id;
 	unsigned long ack_id;
@@ -394,7 +392,7 @@ struct nvmeib_io_to_disk_reply {				// s2t
 	unsigned int	n_md_io;
 };
 
-struct nvmeib_identify_disk_reply {				// s2t
+struct nvmeib_identify_disk_reply {				// s2t, deprecated
 	struct nvmeib_nl_uk_comm_rep base;
 	char 			disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int	data_len;
@@ -441,7 +439,7 @@ struct nvmeib_format_disk_reply {				// s2t
 	struct nvmeib_new_format_info info;
 };
 
-struct nvmeib_test_zero_reply {				// s2t
+struct nvmeib_test_zero_reply {					// s2t, Deprecated
 	struct nvmeib_nl_uk_comm_rep base;
 	unsigned long failed_sw_lba;
 };
@@ -495,9 +493,9 @@ struct nvmeib_push_extended_msg {				// Not used, infrastructure for pushing mes
 	char content[0];
 };
 
-struct nvmeib_nl_msg_to_toma {
+struct nvmeib_nl_msg_to_toma {					// s2t: All possible payloads
 	union {
-		struct nvmeib_test_zero_reply			test_zero_reply;
+		struct nvmeib_test_zero_reply			test_zero_reply;		// Deprecated
 		struct nvmeib_format_disk_reply			format_disk_reply;
 		struct nvmeib_zero_disk_reply			__used_but_not_by_name;
 		struct nvmeib_io_to_disk_reply			io_to_disk_reply;
@@ -509,16 +507,13 @@ struct nvmeib_nl_msg_to_toma {
 	} payload;
 };
 
-struct nvmeib_nl_msg_from_toma {			// Toma sets msg to local client via netlink. Used for attach, passing praid configuration
-	union {
-		struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
-			int copy;						// Always true, if true the message data in the message must be copied before calling the client API
-			unsigned n_pages;				// numebr of pages that are needed to be copied
-			void *data;						// the data to be transfered to the client, must be page aligned
-		} toma_client;
-	} payload;
+struct nvmeib_msg_tom_2_local_clnt {	// Toma sets msg to local client via netlink. Used for attach, passing praid configuration
+	struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
+		int copy;						// Always true, if true the message data in the message must be copied before calling the client API
+		unsigned n_pages;				// numebr of pages that are needed to be copied
+		void *data;						// the data to be transfered to the client, must be page aligned
+	} toma_client;
 };
-
 
 /* Toma->Any-Client for registering segment and issuing IO. Sent via local server */
 struct nvmeibs_toma_client_proc_buf {		// Toma -> client buffer format as received/sent in proc file's write/read methods

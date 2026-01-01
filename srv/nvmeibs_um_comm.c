@@ -1634,7 +1634,7 @@ out:
 }
 
 static bool handle_toma_client_msg(struct nvmeibs_um_comm *p,
-	struct netlink_event *e, struct nvmeib_nl_msg_from_toma *msg)
+	struct netlink_event *e, struct nvmeib_msg_tom_2_local_clnt *msg)
 {
 	struct nvmeib_toma_client *m;
 	struct nvmeib_local_client_params lc_params = {};
@@ -1646,7 +1646,7 @@ static bool handle_toma_client_msg(struct nvmeibs_um_comm *p,
 	const pid_t toma_pid = e->pid;	// Filled in post_msg(), no need for explicit passing of msg->toma_pid
 
 	NFIN;
-	m = &msg->payload.toma_client;
+	m = &msg->toma_client;
 	if (m->copy) {
 		if ((unsigned long)m->data % PAGE_SIZE) {
 			_NE(htcm_1, "copy from user space must be page align m->data=@PTR", m->data);
@@ -1802,7 +1802,7 @@ static bool handle_nl(struct nvmeibs_um_comm *p, struct netlink_event *e)
 		need_reply = false;
 		delete_msg = false;
 		goto out;
-	case csc_remove_disk:
+	case csc_remove_disk_ack:
 		finish_remove_disk(p, e);
 		need_reply = false;
 		delete_msg = true;
@@ -1818,7 +1818,7 @@ static bool handle_nl(struct nvmeibs_um_comm *p, struct netlink_event *e)
 			goto error;
 		}
 		if ((failed = handle_toma_client_msg(p, e,
-			(struct nvmeib_nl_msg_from_toma *)msg->data))) {
+			(struct nvmeib_msg_tom_2_local_clnt *)msg->data))) {
 			need_reply = true;
 		}
 		else {
@@ -2632,12 +2632,8 @@ static struct nvmeib_nl_uk_comm_rep * get_rep(
 	case csc_test_zero_disk:
 		rep = &((struct nvmeib_test_zero_reply *)msg->data)->base;
 		break;
-	case csc_register_disk_events:
-		break;
 	case csc_get_disks:
 		rep = &((struct nvmeib_disk_info_reply *)msg->data)->base;
-		break;
-	case csc_remove_disk:
 		break;
 	case csc_format_disk:
 		rep = &((struct nvmeib_format_disk_reply *)msg->data)->base;
@@ -2651,13 +2647,12 @@ static struct nvmeib_nl_uk_comm_rep * get_rep(
 	case csc_local_client:
 		rep = &((struct nvmeib_copied_rscs_reply *)msg->data)->base;
 		break;
-
 #if TEST_CODE
 	case csc_contaminate_disk:
 		rep = &((struct nvmeib_contaminate_disk_reply *)msg->data)->base;
 		break;
 #endif
-	default:
+	case csc_register_disk_events: case csc_remove_disk_ack: default:	// All those codes do not require response from the server
 		break;
 	};
 	NFOUT;

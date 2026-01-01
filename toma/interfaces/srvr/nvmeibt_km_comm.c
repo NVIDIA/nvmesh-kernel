@@ -461,7 +461,7 @@ static void remove_disk_ack(struct nvmeibt_km_comm *p, struct nvmeib_remove_disk
 
 	NFIN;
 	memset(buf, 0, sizeof(buf));
-	kmsg->msg.opcode = csc_remove_disk;
+	kmsg->msg.opcode = csc_remove_disk_ack;
 	kmsg->msg.len = sizeof(kmsg->msg) + sizeof(struct nvmeib_remove_disk);
 	*rd = *disk;
 	send_msg_to_kernel(p, kmsg);

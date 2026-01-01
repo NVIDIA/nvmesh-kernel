@@ -884,7 +884,7 @@ void nvmeibt_recovery_buf_to_local_clnt_was_copied_and_can_be_freed(void *ctx, i
 static int nvmeibt_toma_send_recovery_attach_msg_to_local_clnt(struct attach_detach_wq_entry *attach_detach_task)
 {
 	struct km_comm_msg_hdr			*nl_msg;
-	struct nvmeib_nl_msg_from_toma	*toma_msg;
+	struct nvmeib_msg_tom_2_local_clnt	*toma_msg;
 	int								rv = 0;
 
 	NFIN;
@@ -895,11 +895,11 @@ static int nvmeibt_toma_send_recovery_attach_msg_to_local_clnt(struct attach_det
 	nl_msg->on_done = nvmeibt_recovery_buf_to_local_clnt_was_copied_and_can_be_freed;
 	toma_msg = (typeof(toma_msg))nl_msg->data;
 	//
-	toma_msg->payload.toma_client.data = attach_detach_task->serialized_blkdev_for_clnt_4k_aligned;
-	toma_msg->payload.toma_client.n_pages = (unsigned)divroundup(attach_detach_task->serialized_blkdev_for_clnt_len, PAGE_SIZE);
-	toma_msg->payload.toma_client.copy = 1;
-	N_Tf(56wjhgqkgyed, "opcode=@INT nl_msg->len=@INT n_pages=@UINT data=@PTR pid=@LLU",
-		 nl_msg->opcode, nl_msg->len, toma_msg->payload.toma_client.n_pages, toma_msg->payload.toma_client.data, getpid());
+	toma_msg->toma_client.data = attach_detach_task->serialized_blkdev_for_clnt_4k_aligned;
+	toma_msg->toma_client.n_pages = (unsigned)divroundup(attach_detach_task->serialized_blkdev_for_clnt_len, PAGE_SIZE);
+	toma_msg->toma_client.copy = 1;
+	N_Tf(56wjhgqkgyed, "opcode=@INT nl_msg->len=@INT n_pages=@UINT data=@PTR pid=@PID",
+		 nl_msg->opcode, nl_msg->len, toma_msg->toma_client.n_pages, toma_msg->toma_client.data, getpid());
 	if (nvmeibt_send_msg_to_srv(nl_msg) != 0) {
 		N_Ef(03ndjzb, "Unable to send attach msg to local_clnt using netlink vol=@STR", attach_detach_task->vol->from_config.client_blkdev_name);
 		rv = -1;
