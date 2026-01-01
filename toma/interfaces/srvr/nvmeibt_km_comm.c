@@ -531,16 +531,13 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 	char c = 1;
 	int rv;
 
-	NFIN;
 	if (hdr->opcode == csc_start || hdr->opcode >= csc_end) {
 		N_Ef(stkmcnl0, "Invalid kernel message @INT", hdr->opcode);
-		rv = -1;
-		goto out;
+		return -EINVAL;
 	}
 	if (!(kmsg = NNVMEIBT_BM_CALLOC(stkmcnl1, sizeof(*kmsg) + msg_size))) {
 		N_Ef(stkmcnl2, "Fail to allocate nvmeibt_km_comm msg");
-		rv = -1;
-		goto out;
+		return -EINVAL;
 	}
 	kmsg->msg.opcode = hdr->opcode;
 	if (hdr->opcode > csc_start) {
@@ -549,19 +546,20 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 		kmsg->msg.len = msg_size;
 		kmsg->msg.id = get_guid(p);
 		memcpy(kmsg->msg.data, hdr->data, hdr->len);
-		N_Tf(stkmcnl3, "msg[@INT].id=@ID, hdr=@INT[b] msg=@INT[b]", hdr->opcode, kmsg->msg.id, hdr->len, kmsg->msg.len);
 	}
+	N_Tf(stkmcnl3, "msg[@INT].id=@ID, hdr=@INT[b] msg=@INT[b]", hdr->opcode, kmsg->msg.id, hdr->len, kmsg->msg.len);
+	rv = -EPERM;
 	nvmeibt_km_comm_lock(p);
-	if (!p->error_occured) {
+	if (!p->error_occured) {									// Reading is syncronize with setting it from main thread via lock
 		XDLIST_ADD_TAIL(p->msgs, kmsg);
-		rv = write(p->spair[0], &c, 1) == 1 ? 0 : -1;		// Wakeup our main thread to handle the message
-	} else {
-		rv = -1;
+		rv = (write(p->spair[0], &c, 1) == 1) ? 0 : -EIO;		// Wakeup our main thread to handle the message
 	}
 	nvmeibt_km_comm_unlock(p);
-	goto out;
-
-out:
+	if (rv == -EPERM) {
+		N_Tf(stkmcnl4, "msg cannot be sent");
+		kmsg->on_done = NULL; 									// Agreement in case of syncronous send error, callback will not be given
+		msg_free(kmsg);
+	}
 	NFOUT;
 	return rv;
 }
