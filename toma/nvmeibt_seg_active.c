@@ -23,7 +23,7 @@
 #define SCRUB_RANDOMNESS_SEC			(SCRUBBING_DEFAULT_PERIOD_DAYS_DEFAULT * SCRUB_SECS_IN_DAY / 1024)
 #define SCRUB_PRIORITY_SCALE_FACTOR		(1LL << 16)
 
-#define STALE_BLKSET_FMT "(blkset=@LLX, seg=@UUID_8, lockid=@T_LID)"
+#define STALE_BLKSET_FMT "(blkset=@LLX seg=@UUID_8 lockid=@T_LID)"
 
 static int64_t	recovery_client_batch_n_blksets;	// In the client: max_batch_size
 static bool is_stale_rebuild_enabled = true;
