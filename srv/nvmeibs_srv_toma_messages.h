@@ -190,12 +190,6 @@ enum nvmeibs_toma_server_msg_type {
 enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT_CALLER = 'C' };
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
-struct nvmeib_nl_uk_comm_rep {			// s2t, server base reply on toma requests
-	int opcode;							// enum uk_comm_opcode
-	int error;							// enum uk_comm_err_opcode
-	long long latency_ns;				// n[ns] it took the kernel to execute Toma request
-};
-
 enum uk_comm_opcode {
 	csc_internal_suicide = -1,				// Toma: Used internally, never sent to server, no payload
 	csc_start = 0,							// Not an actual message, never sent
@@ -254,6 +248,12 @@ enum uk_comm_err_opcode {				// s2t error codes, for Toma requests
 	csce_identify_thread,
 	csce_disk_stopped,
 	csce_unsupported_opcode,
+};
+
+struct nvmeib_nl_uk_comm_rep {			// s2t, server base reply on toma requests
+	union { enum uk_comm_opcode opcode;       int __just_align4bytes1; };
+	union { enum uk_comm_err_opcode error;    int __just_align4bytes2; };
+	long long latency_ns;				// n[ns] it took the kernel to execute Toma request
 };
 
 /* Request structures between TOMA and nvmeibs */
@@ -509,7 +509,7 @@ struct nvmeib_msg_tom_2_local_clnt {	// Toma sets msg to local client via netlin
 
 struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Base Header which exists in all messages
 	int len;
-	int opcode;							// enum uk_comm_opcode
+	union { enum uk_comm_opcode opcode; int __just_align4bytes; };
 	char caller_type;					// enum nvmeibs_um_caller_type
 	unsigned long id __attribute__((aligned(8)));
 	char data[0];						// Content of the message
