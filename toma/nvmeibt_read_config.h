@@ -59,28 +59,6 @@ int nvmeibt_read_config_notify_server_about_journal_partition(const struct nvmei
 int nvmeibt_read_excluded_target_drives(void);
 int nvmeibt_read_auto_takeover_target_drives(void);
 
-#define NNVMEIBT_HASH_GET_OBJ_BY_UUID(name, __hash, __uuid, __obj_name)			\
-({																				\
-	XHASHTABLE_TYPE(__hash)		_iter_;											\
-	XHASHTABLE_TYPE(__hash)		_obj1_ = NULL;									\
-	unsigned long				_key_ = UUID_TO_64_HASH_KEY(__uuid);			\
-																				\
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(_iter_, __hash, _key_) {					\
-		if (ARE_UUID_EQ(nvmeibt_##__obj_name##_UUID(_iter_), __uuid)) {			\
-			_obj1_ = _iter_;													\
-			break;																\
-		}																		\
-	}																			\
-	N_Df(name, "hash: @STR found " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE",	\
-		 (_obj1_ ? "" : "Not "), __uuid);										\
-	_obj1_;																		\
-})
-
-static inline void _hash_copy(void* dst, void* src, int size) {
-	if (dst != NULL)
-		memcpy(dst, src, size);
-}
-
 #define CONFIG_TAG_OUTDATED -1
 
 /* Inserts __newobj to hash table or if exists overrrides its from_config
@@ -88,62 +66,6 @@ static inline void _hash_copy(void* dst, void* src, int size) {
 	1. _rv_ - action the hash table performed
     2. get_hash_obj_ptr_addr - if not NULL, returns address of object in hash
     3. get_prev_config_buf - if not NULL, copies prev config value to it */
-#define NNVMEIBT_HASH_ADD_OBJ(name, __hash, __newobj, __tag, MAX_N,						\
-				get_hash_obj_ptr_addr, __obj_name)										\
-({																						\
-	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
-	const int _config_size = sizeof((__newobj)->from_config);							\
-	const union nvmeib_uuid			*_uuid_ = nvmeibt_##__obj_name##_UUID(__newobj);	\
-	XHASHTABLE_TYPE(__hash)			_obj2_;												\
-																						\
-	_obj2_ = NNVMEIBT_HASH_GET_OBJ_BY_UUID(name ## _hash, __hash, _uuid_, __obj_name);	\
-	if (_obj2_) {																		\
-		if (memcmp(&(__newobj)->from_config, &_obj2_->from_config, _config_size) == 0) {\
-			N_Tf(name ## _1, "hash: object already exists " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE",		\
-								_uuid_);												\
-			_rv_ = NVMEIBT_ADD_ALREADY_UP_TO_DATE;										\
-		} else if (_obj2_->config_tag == (__tag)) {										\
-			N_Ef(name ## _error_1, "hash: Same ID diff objects " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE",	\
-									_uuid_);											\
-			_rv_ = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;								\
-		} else {																		\
-			_obj2_->from_config = (__newobj)->from_config;								\
-			N_Tf(name ## _2, "hash: object modified " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);	\
-			_rv_ = NVMEIBT_ADD_MODIFIED;												\
-		}																				\
-	} else {																			\
-		if (XHASHTABLE_N_ELEMENTS(__hash) > MAX_N) {									\
-			N_Wf(name ## _4, "hash: too many entires " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);	\
-		}																				\
-		_obj2_ = (__newobj);															\
-		N_Tf(name ## _3, "hash: add " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);					\
-		NTOMA_ASSERT(name ## _assert, XDLIST_NULL(&_obj2_->topo_link),					\
-					"object already linked " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);				\
-		XHASHTABLE_ADD(__hash, _obj2_, UUID_TO_64_HASH_KEY(_uuid_));					\
-		_rv_ = NVMEIBT_ADD_NEW;															\
-	}																					\
-	if (_obj2_ != NULL && !NVMEIBT_OBJ_IS_MARKED_OUTDATED(_obj2_)) {					\
-		_obj2_->config_tag = (__tag);													\
-	}																					\
-	get_hash_obj_ptr_addr = _obj2_;		(void)get_hash_obj_ptr_addr;					\
-	_rv_;																				\
-})
-
-#define NNVMEIBT_HASH_DEL_OBJ(name, __hash, __oldobj, __obj_name)						\
-do {																					\
-	const union nvmeib_uuid			*_uuid_ = nvmeibt_##__obj_name##_UUID(__oldobj);	\
-	XHASHTABLE_TYPE(__hash)			_obj2_ = NULL;										\
-																						\
-	_obj2_ = NNVMEIBT_HASH_GET_OBJ_BY_UUID(name ## _hash_get, __hash, _uuid_, __obj_name);					\
-	if (_obj2_ == NULL) {																\
-		N_Ef(name ## _error, "hash: unknown entry" MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);		\
-	} else {																			\
-		N_Tf(name, "hash: del " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);		\
-		XHASHTABLE_DEL(__hash, &_obj2_->topo_link);										\
-		_obj2_->config_tag = CONFIG_TAG_OUTDATED;										\
-	}																					\
-} while (0)
-
 #define NNVMEIBT_HASH_ADD_OBJ_new(name, __hash, __newobj, __tag, MAX_N,					\
 				get_hash_obj_ptr_addr, __obj_name) ({									\
 	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
