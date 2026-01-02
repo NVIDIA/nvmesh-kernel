@@ -1180,6 +1180,466 @@ DEFINE_TEST(mismatch_blocking)
 	return rv;
 }
 
+DEFINE_TEST(delete_main_entry)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_delete_test";
+	struct nvmeibt_disk_gpt		gpt_before;
+	struct nvmeibt_disk_gpt		gpt_after;
+	int							fd = -1;
+
+	/* Create device with standard structure */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Verify device has entry 0 before deletion */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&gpt_before, 0, sizeof(gpt_before));
+		nvmeibt_strlcpy(gpt_before.main_or_metadata, MAIN_GPT_NAME, sizeof(gpt_before.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &gpt_before,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(&gpt_before.entries[0])) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Entry 0 should exist before deletion" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Export to JSON */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("delete_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Set _delete flag to true for main_gpt_primary entry 0 */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("delete_test"));
+		struct mm_json_elem *main_gpt = NULL;
+		struct mm_json_elem *entries = NULL;
+		int i;
+
+		if (json_root) {
+			/* Navigate: root -> main_gpt_primary -> entries -> [0] -> _delete */
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "main_gpt_primary") == 0) {
+					main_gpt = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (main_gpt) {
+				for (i = 0; i < main_gpt->dict.len; i++) {
+					if (strcmp(main_gpt->dict.elements[i].key, "entries") == 0) {
+						entries = main_gpt->dict.elements[i].value;
+						break;
+					}
+				}
+			}
+			if (entries && entries->array.len > 0) {
+				json_set_dict_bool(entries->array.elements[0], "_delete", true);
+				fprintf(stdout, "Set main_gpt_primary entries[0]._delete = true\n");
+			}
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("delete_test"));
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Apply with --write */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("delete_test"), "--write");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify entry 0 is deleted */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&gpt_after, 0, sizeof(gpt_after));
+		nvmeibt_strlcpy(gpt_after.main_or_metadata, MAIN_GPT_NAME, sizeof(gpt_after.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &gpt_after,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&gpt_after.entries[0])) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Entry 0 should be deleted after apply" COL_RESET "\n");
+			rv = -1;
+		} else {
+			fprintf(stdout, COL_GREEN "Verified: Entry 0 successfully deleted" COL_RESET "\n");
+		}
+	}
+
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(delete_metadata_entry)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_delete_metadata_test";
+	struct nvmeibt_disk_gpt		main_gpt;
+	struct nvmeibt_disk_gpt		metadata_gpt_before;
+	struct nvmeibt_disk_gpt		metadata_gpt_after;
+	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition = NULL;
+	int							fd = -1;
+
+	/* Create device with standard structure */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Read Main GPT to get metadata partition location */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&main_gpt, 0, sizeof(main_gpt));
+		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+		if (!metadata_partition) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No metadata partition found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Verify metadata GPT has entry 0 before deletion */
+	if (rv == 0) {
+		memset(&metadata_gpt_before, 0, sizeof(metadata_gpt_before));
+		nvmeibt_strlcpy(metadata_gpt_before.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt_before.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt_before,
+											  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt_before.entries[0])) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Metadata entry 0 should exist before deletion" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Export to JSON */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("delete_metadata_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Set _delete flag to true for metadata_gpt_primary entry 0 */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("delete_metadata_test"));
+		struct mm_json_elem *metadata_gpt = NULL;
+		struct mm_json_elem *entries = NULL;
+		int i;
+
+		if (json_root) {
+			/* Navigate: root -> metadata_gpt_primary -> entries -> [0] -> _delete */
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "metadata_gpt_primary") == 0) {
+					metadata_gpt = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (metadata_gpt) {
+				for (i = 0; i < metadata_gpt->dict.len; i++) {
+					if (strcmp(metadata_gpt->dict.elements[i].key, "entries") == 0) {
+						entries = metadata_gpt->dict.elements[i].value;
+						break;
+					}
+				}
+			}
+			if (entries && entries->array.len > 0) {
+				json_set_dict_bool(entries->array.elements[0], "_delete", true);
+				fprintf(stdout, "Set metadata_gpt_primary entries[0]._delete = true\n");
+			}
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("delete_metadata_test"));
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Apply with --write */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("delete_metadata_test"), "--write");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify metadata entry 0 is deleted */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&main_gpt, 0, sizeof(main_gpt));
+		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+		if (!metadata_partition) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Metadata partition should still exist" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&metadata_gpt_after, 0, sizeof(metadata_gpt_after));
+		nvmeibt_strlcpy(metadata_gpt_after.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt_after.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt_after,
+											  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt_after.entries[0])) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Metadata entry 0 should be deleted after apply" COL_RESET "\n");
+			rv = -1;
+		} else {
+			fprintf(stdout, COL_GREEN "Verified: Metadata GPT entry 0 successfully deleted" COL_RESET "\n");
+		}
+	}
+
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(readonly_fields_ignored)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_readonly_test";
+	struct nvmeibt_disk_gpt		gpt_before;
+	struct nvmeibt_disk_gpt		gpt_after;
+	int		 					correct_header_crc;
+	int							bogus_crc;
+	int							fd = -1;
+
+	correct_header_crc = 0;
+	bogus_crc = (int)0xDEADBEEF;
+
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Read original CRC */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&gpt_before, 0, sizeof(gpt_before));
+		nvmeibt_strlcpy(gpt_before.main_or_metadata, MAIN_GPT_NAME, sizeof(gpt_before.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &gpt_before,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		correct_header_crc = gpt_before.header.header_crc32;
+		fprintf(stdout, "Original header CRC: 0x%08x\n", correct_header_crc);
+	}
+
+	/* Export to JSON */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("readonly_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Modify _READONLY_header_crc32 to bogus value (CRCs exported as hex strings) */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("readonly_test"));
+		struct mm_json_elem *main_gpt = NULL;
+		int i;
+
+		if (json_root) {
+			/* Navigate to main_gpt_primary section */
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "main_gpt_primary") == 0) {
+					main_gpt = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (main_gpt && json_set_dict_str(main_gpt, "_READONLY_header_crc32", "0xdeadbeef") == 0) {
+				fprintf(stdout, "Modified main_gpt_primary._READONLY_header_crc32 = 0xdeadbeef\n");
+				rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("readonly_test"));
+			} else {
+				rv = -1;
+			}
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Apply with --write */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("readonly_test"), "--write");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify CRC on disk is correct (not the bogus value) */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&gpt_after, 0, sizeof(gpt_after));
+		nvmeibt_strlcpy(gpt_after.main_or_metadata, MAIN_GPT_NAME, sizeof(gpt_after.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &gpt_after,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		if (gpt_after.header.header_crc32 == bogus_crc) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: CRC on disk is bogus value 0x%08x (should have been recalculated)" COL_RESET "\n", bogus_crc);
+			rv = -1;
+		} else if (gpt_after.header.header_crc32 == correct_header_crc) {
+			fprintf(stdout, COL_GREEN "Verified: CRC recalculated correctly (0x%08x, not bogus 0x%08x)" COL_RESET "\n",
+					gpt_after.header.header_crc32, bogus_crc);
+		} else {
+			fprintf(stdout, COL_YELLOW "Note: CRC changed (old=0x%08x, new=0x%08x, bogus=0x%08x)" COL_RESET "\n",
+					correct_header_crc, gpt_after.header.header_crc32, bogus_crc);
+			fprintf(stdout, COL_GREEN "Verified: Bogus CRC was ignored (CRC != 0x%08x)" COL_RESET "\n", bogus_crc);
+		}
+	}
+
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(static_fields_validated)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_static_test";
+	struct nvmeibt_disk_gpt		gpt_after;
+	int							fd = -1;
+
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Export to JSON */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("static_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Modify _STATIC_gpt_signature to bogus value */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("static_test"));
+		struct mm_json_elem *main_gpt = NULL;
+		int i;
+
+		if (json_root) {
+			/* Navigate to main_gpt_primary section */
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "main_gpt_primary") == 0) {
+					main_gpt = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (main_gpt && json_set_dict_str(main_gpt, "_STATIC_gpt_signature", "0xdeadbeefdeadbeef") == 0) {
+				fprintf(stdout, "Modified main_gpt_primary._STATIC_gpt_signature = 0xdeadbeefdeadbeef\n");
+				rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("static_test"));
+			} else {
+				rv = -1;
+			}
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Apply with --write (should succeed - static fields ignored) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("static_test"), "--write");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify GPT signature on disk is correct (not the bogus value) */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd < 0) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		memset(&gpt_after, 0, sizeof(gpt_after));
+		nvmeibt_strlcpy(gpt_after.main_or_metadata, MAIN_GPT_NAME, sizeof(gpt_after.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &gpt_after,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			rv = -1;
+		}
+		close(fd);
+		fd = -1;
+	}
+
+	if (rv == 0) {
+		if (gpt_after.header.gpt_signature != GPT_SIGNATURE) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: GPT signature on disk is wrong (0x%lx, expected 0x%lx)" COL_RESET "\n",
+					gpt_after.header.gpt_signature, (uint64_t)GPT_SIGNATURE);
+			rv = -1;
+		} else {
+			fprintf(stdout, COL_GREEN "Verified: GPT signature correct (0x%lx), bogus value ignored" COL_RESET "\n",
+					gpt_after.header.gpt_signature);
+		}
+	}
+
+	unlink(device_path);
+	return rv;
+}
+
 /**
  * Run comprehensive self-test suite
  */
@@ -1307,6 +1767,10 @@ int run_self_test(const char *test_selection)
 	unlink(TEST_JSON_PATH("device_check"));
 	unlink(TEST_JSON_PATH("overlap_block"));
 	unlink(TEST_JSON_PATH("mismatch_block"));
+	unlink(TEST_JSON_PATH("delete_test"));
+	unlink(TEST_JSON_PATH("readonly_test"));
+	unlink(TEST_JSON_PATH("delete_metadata_test"));
+	unlink(TEST_JSON_PATH("static_test"));
 
 	return 0;
 }
