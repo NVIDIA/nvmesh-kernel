@@ -105,7 +105,10 @@ void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu
 
 void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *me) {
 	BUG_ON(me->expecting_reply_cookie);				// Did not get a reply from Toma
-	BUG_ON(me->n_toma_replies_received <= 0);		// Coverage tests did not receive any reply from Toma
+	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
+	if (me->n_srvr_msg_idx > 0) {
+		BUG_ON(me->n_toma_replies_received <= 0);	// Coverage tests did not receive any reply from Toma
+	}
 }
 
 ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
