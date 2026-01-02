@@ -152,12 +152,6 @@ int SELF_TEST_corrupt_gpt_n_partition_entries(int fd, int pblk_size, uint64_t pb
 											   int wrong_n_partition_entries);
 
 /**
- * Modify JSON string field (SELF-TEST helper)
- * Returns 0 on success, -1 on error
- */
-int SELF_TEST_modify_json_str_field(const char *json_path, const char *field, const char *new_value);
-
-/**
  * Remove field from JSON file (SELF-TEST helper)
  * Returns 0 on success, -1 on error
  */
@@ -174,6 +168,13 @@ int SELF_TEST_compare_gpt_binary(const char *device_a, const char *device_b, int
  * Returns the parsed tree (caller must free with nvmeibt_mm_json_free_kv_tree)
  */
 struct mm_json_elem *SELF_TEST_parse_json_file(const char *filepath);
+
+/**
+ * Write JSON tree to file and free it (serializes, writes, frees)
+ * Simplifies cleanup in tests - tree is always freed after write
+ * Returns 0 on success, -1 on error
+ */
+int SELF_TEST_write_json_file_and_free_kv_tree(struct mm_json_elem *json_root, const char *filepath);
 
 /**
  * Validate boolean flag in exported JSON (SELF-TEST helper)

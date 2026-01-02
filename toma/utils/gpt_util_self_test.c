@@ -616,51 +616,6 @@ out:
 }
 
 /**
- * Modify JSON string field (SELF-TEST helper)
- */
-int SELF_TEST_modify_json_str_field(const char *json_path, const char *field, const char *new_value)
-{
-	struct mm_json_elem		*json_root = NULL;
-	struct nvmeibt_Str		*json_output = NULL;
-	int						fd = -1;
-	int						rv = -1;
-
-	json_root = SELF_TEST_parse_json_file(json_path);
-	if (!json_root || json_root->type != JSON_E_DICT) {
-		goto out;
-	}
-
-	// Modify using base library function
-	if (json_set_dict_str(json_root, field, new_value) < 0) {
-		N_Ef(selftest_str_field_not_found, "String field @STR not found", field);
-		goto out;
-	}
-
-	// Serialize and write
-	json_output = NNVMEIBT_STR_ALLOC(trace_selftest_json_mod_str);
-	if (serialize_json_tree_to_str(json_root, json_output) < 0) {
-		goto out;
-	}
-
-	fd = open(json_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (fd < 0) {
-		goto out;
-	}
-
-	if (write(fd, nvmeibt_Str_str(json_output), nvmeibt_Str_strlen(json_output)) != (ssize_t)nvmeibt_Str_strlen(json_output)) {
-		goto out;
-	}
-
-	rv = 0;
-
-out:
-	if (fd >= 0) close(fd);
-	if (json_root) nvmeibt_mm_json_free_kv_tree(json_root);
-	NNVMEIBT_STR_FREE(trace_selftest_json_mod_str_cleanup, json_output);
-	return rv;
-}
-
-/**
  * Remove field from JSON file (SELF-TEST helper)
  */
 int SELF_TEST_remove_json_field(const char *json_path, const char *field)
@@ -819,6 +774,44 @@ out:
 	NNVMEIBT_STR_FREE(trace_selftest_json_cleanup, json_content);
 
 	return json_root;
+}
+
+/**
+ * Write JSON tree to file and free it (serializes, writes, frees)
+ * Simplifies cleanup in tests - tree is always freed after write
+ * Returns 0 on success, -1 on error
+ */
+int SELF_TEST_write_json_file_and_free_kv_tree(struct mm_json_elem *json_root, const char *filepath)
+{
+	struct nvmeibt_Str		*json_output = NULL;
+	int						fd = -1;
+	int						rv = -1;
+
+	if (!json_root) {
+		return -1;
+	}
+
+	json_output = NNVMEIBT_STR_ALLOC(trace_selftest_json_write);
+	if (serialize_json_tree_to_str(json_root, json_output) < 0) {
+		goto out;
+	}
+
+	fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0) {
+		goto out;
+	}
+
+	if (write(fd, nvmeibt_Str_str(json_output), nvmeibt_Str_strlen(json_output)) != (ssize_t)nvmeibt_Str_strlen(json_output)) {
+		goto out;
+	}
+
+	rv = 0;
+
+out:
+	if (fd >= 0) close(fd);
+	NNVMEIBT_STR_FREE(trace_selftest_json_write_cleanup, json_output);
+	nvmeibt_mm_json_free_kv_tree(json_root);		/* Always free the tree */
+	return rv;
 }
 
 /**
@@ -1084,13 +1077,17 @@ DEFINE_TEST(apply_write)
 		}
 	}
 
-	// Export A, modify JSON, apply to B
+	// Export A, modify JSON device_path, apply to B
 	if (rv == 0) {
 		SELF_TEST_ARGV("-a", device_a, "-J", TEST_JSON_PATH("write_test"));
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 	if (rv == 0) {
-		rv = SELF_TEST_modify_json_str_field(TEST_JSON_PATH("write_test"), "device_path", device_b);
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("write_test"));
+		if (!json_root || json_set_dict_str(json_root, "device_path", device_b) < 0 ||
+			SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("write_test")) < 0) {
+			rv = -1;
+		}
 	}
 	if (rv == 0) {
 		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("write_test"), "--write");
