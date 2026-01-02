@@ -135,6 +135,7 @@ $(TDIR)/clnt/nvmeibt_client_protocol.c \
 $(TDIR)/clnt/nvmeibt_client.c \
 $(TDIR)/local/ram/nvmeibt_ds_blkset_entries.c \
 $(TDIR)/utils/gpt_util.c \
+$(TDIR)/utils/gpt_util_self_test.c \
 
 SOURCES += \
 $(TDIR)/interfaces/log/nvmeibt_binary_tracing.c \
