@@ -301,6 +301,15 @@ static void show_entry_diff(const char *change_type,
 		fprintf(stdout, "    Name: %s\n", old_name);
 		fprintf(stdout, "    Type: %s\n", type_uuid.str);
 		fprintf(stdout, "    Range: %lu-%lu\n", old_entry->pba_s, old_entry->pba_e);
+
+		// Warn if this is a critical partition
+		if (ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
+			ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
+			N_Wf(delete_critical_partition, "Deleting critical partition: name=@STR type=@UUID_LE",
+				 old_name, &old_entry->partition_type_guid);
+			fprintf(stdout, "    " COL_RED_BOLD "WARNING: This is a critical NVMesh partition!" COL_RESET "\n");
+			fprintf(stdout, "    " COL_YELLOW "Deletion will make device unusable by NVMesh." COL_RESET "\n");
+		}
 	}
 }
 
@@ -714,7 +723,8 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 			nvmeibt_Str_sprintf(json_output, "        \"pba_s\": %lu,\n", entry->pba_s);
 			nvmeibt_Str_sprintf(json_output, "        \"pba_e\": %lu,\n", entry->pba_e);
 			nvmeibt_Str_sprintf(json_output, "        \"attributes\": %lu,\n", entry->attributes);
-			nvmeibt_Str_sprintf(json_output, "        \"name\": \"%s\"\n", partition_name_str);
+			nvmeibt_Str_sprintf(json_output, "        \"name\": \"%s\",\n", partition_name_str);
+			nvmeibt_Str_sprintf(json_output, "        \"_delete\": false\n");
 			nvmeibt_Str_sprintf(json_output, "      }");
 			entry_count++;
 		}
@@ -1675,7 +1685,7 @@ out:
 /**
  * Parse one GPT entry from JSON dict element
  * Fills in the provided entry structure
- * Returns 0 on success, -1 on error
+ * Returns: 0 = normal entry, 1 = entry marked for deletion (_delete: true), -1 = error
  */
 static int parse_gpt_entry_from_json(struct nvmeibt_disk_gpt_partition_entry *entry,
 									  struct mm_json_elem *entry_elem)
@@ -1686,6 +1696,7 @@ static int parse_gpt_entry_from_json(struct nvmeibt_disk_gpt_partition_entry *en
 	char						*type_guid_str = NULL;
 	char						*partition_guid_str = NULL;
 	char						*name_str = NULL;
+	BOOL						is_delete_requested = false;
 	JSON_ASSIGN_AND_CALL_INIT();
 
 	if (!entry_elem || entry_elem->type != JSON_E_DICT) {
@@ -1705,9 +1716,18 @@ static int parse_gpt_entry_from_json(struct nvmeibt_disk_gpt_partition_entry *en
 		JSON_ASSIGN_PLAIN(parse_attr, "attributes", entry->attributes, (uint64_t)kv->value->num);
 		JSON_ASSIGN_PLAIN(parse_name, "name", name_str, kv->value->str);
 		JSON_ASSIGN_OPTIONAL(parse_index, "index");		// Optional, just for display
+		JSON_ASSIGN_OPTIONAL(parse_delete, "_delete");	// Optional, marks entry for deletion
+		if (strcmp(kv->key, "_delete") == 0 && kv->value->type == JSON_E_BOOL && kv->value->num != 0) {
+			is_delete_requested = true;
+		}
 		JSON_LOOP_ITERATION_END(parse_entry_end, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(parse_entry_validate);
+
+	// If deletion requested, return special status (entry content doesn't matter)
+	if (is_delete_requested) {
+		return 1;		// Deletion requested
+	}
 
 	// Convert UUIDs from strings
 	if (type_guid_str) {
@@ -1809,13 +1829,18 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 			continue;
 		}
 
-		// Parse the entry
-		if (parse_gpt_entry_from_json(&temp_entry, entry_elem) < 0) {
+		// Parse the entry (returns: 0=normal, 1=delete, -1=error)
+		rv = parse_gpt_entry_from_json(&temp_entry, entry_elem);
+		if (rv < 0) {
 			N_Wf(parse_entry_failed, "Failed to parse entry @INT, skipping", j);
+			continue;
+		} else if (rv == 1) {
+			// Entry marked for deletion - leave gpt->entries[entry_index] as zero (unused)
+			N_Tf(parse_entry_delete, "Entry @INT marked for deletion (will be removed)", entry_index);
 			continue;
 		}
 
-		// Copy to correct position in entries array
+		// Copy normal entry to correct position in entries array
 		memcpy(&gpt->entries[entry_index], &temp_entry, sizeof(temp_entry));
 	}
 
