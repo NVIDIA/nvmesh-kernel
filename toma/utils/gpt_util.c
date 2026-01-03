@@ -1173,7 +1173,6 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		case 'd':
 			nvmeibt_strlcpy(config->device_path, optarg, sizeof(config->device_path));
 			config->is_nvmesh_managed = true;
-			fprintf(stdout, "Device: %s (NVMesh managed)\n", config->device_path);
 			// Read disks file data
 			nvmeibt_Str_reuse(new_config);
 			rv = nvmeib_srvr_api_lib_get_csv_disks(new_config);
@@ -1207,20 +1206,23 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 					continue;
 				}
 
-				fprintf(stdout,"is_expecting_csv_header_line=%d\n", is_expecting_csv_header_line);
 				if (is_expecting_csv_header_line) {
 					const char *ref_header = nvmeibt_get_csv_header_by_section_type(section_type);
+					int ref_header_len;
+
 					if (ref_header == NULL) {
 						N_Ef(parse_csv_bad_section_type, "Wrong section_type=@INT", section_type);
 						rv = -1;
 						goto out;
 					}
-					if (memcmp(line, ref_header, line_len) != 0) {
-						N_Ef(parse_csv_header_mismatch, "Expecting csv header '@STR'. Got '@STR'", ref_header, line);
+
+					ref_header_len = strlen(ref_header);
+					if (line_len != ref_header_len || memcmp(line, ref_header, line_len) != 0) {
+						N_Ef(parse_csv_header_mismatch, "CSV header mismatch: expected '@STR' (@INT bytes), got '@STR' (@INT bytes)",
+							 ref_header, ref_header_len, line, line_len);
 						rv = -1;
 						goto out;
 					}
-					fprintf(stdout,"The header csv header line:%s\n", ref_header);
 					is_expecting_csv_header_line = 0;
 				} else {
 					int r;
@@ -1254,12 +1256,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 						config->pba_e = disk_config.n_pblk - 1;
 						config->pba_hw_e = disk_config.n_hw_pblk - 1;
 						config->pblk_size = disk_config.pblk_size;
-						fprintf(stdout,"Found device=%s in disks csv, using pba_s=0x%lx, pba_e=0x%lx, block_size=%d\n",
-								config->device_path, config->pba_s, config->pba_e, config->pblk_size);
 						break;
-					} else {
-						fprintf(stdout, "Device=%s is different from requested=%s skipping\n",
-								disk_config.dev_file_name, config->device_path);
 					}
 				}
 			}
@@ -2059,7 +2056,9 @@ static int compare_and_show_disk_metadata_diff(const struct nvmeibt_disk_metadat
 
 	/* Check all editable fields */
 	if (memcmp(&current->mgmt_db_uuid, &json_data->mgmt_db_uuid, sizeof(current->mgmt_db_uuid)) != 0) {
-		fprintf(stdout, "  mgmt_db_uuid: modified\n");
+		struct nvmeibt_urn_uuid current_uuid = nvmeibt_union_uuid_to_urn_uuid(&current->mgmt_db_uuid);
+		struct nvmeibt_urn_uuid json_uuid = nvmeibt_union_uuid_to_urn_uuid(&json_data->mgmt_db_uuid);
+		fprintf(stdout, "  mgmt_db_uuid: %s -> %s\n", current_uuid.str, json_uuid.str);
 		n_changes++;
 	}
 	if (strcmp(current->ldisk_id_str, json_data->ldisk_id_str) != 0) {
