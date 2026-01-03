@@ -2038,8 +2038,10 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct mm_json_elem			*json_root = NULL;
 	struct mm_json_elem			*main_gpt_primary_elem = NULL;
 	struct mm_json_elem			*metadata_gpt_primary_elem = NULL;
-	const char					*device_path_in_json = NULL;
+	struct mm_json_elem			*disk_metadata_elem = NULL;
+	const char					*json_serial_id = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition = NULL;
 	struct nvmeibt_disk_gpt		current_main_gpt;
 	struct nvmeibt_disk_gpt		current_metadata_gpt;
 	struct nvmeibt_disk_gpt		json_main_gpt;
@@ -2094,18 +2096,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	/* Step 4: Validate device path matches */
-	device_path_in_json = json_get_dict_str(json_root, "device_path", NULL);
-	if (device_path_in_json && strcmp(device_path_in_json, config->device_path) != 0) {
-		N_Ef(apply_json_device_mismatch, "Device path mismatch: JSON=@STR config=@STR",
-			 device_path_in_json, config->device_path);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Device path in JSON (%s) != device (%s)" COL_RESET "\n",
-				device_path_in_json, config->device_path);
-		rv = -1;
-		goto out;
-	}
-
-	/* Step 5: Prepare Main GPT from JSON */
+	/* Step 4: Prepare Main GPT from JSON */
 	if (prepare_gpt_from_json(&json_main_gpt, main_gpt_primary_elem, MAIN_GPT_NAME, LARGE_GPT_MAX_NUM_GPT_ENTRIES) < 0) {
 		rv = -1;
 		goto out;
@@ -2130,7 +2121,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	/* Step 6: Prepare Metadata GPT from JSON */
+	/* Step 5: Prepare Metadata GPT from JSON */
 	memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
 	nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
 
@@ -2144,6 +2135,32 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	if (prepare_gpt_from_json(&json_metadata_gpt, metadata_gpt_primary_elem, METADATA_GPT_NAME, MAX_NUM_GPT_ENTRIES) < 0) {
 		rv = -1;
 		goto out;
+	}
+
+	/* Step 6: Validate serial ID matches (critical safety - more reliable than device path) */
+	disk_metadata_elem = get_json_section(json_root, "disk_metadata");
+	json_serial_id = json_get_dict_str(disk_metadata_elem, "native_serial_str", NULL);
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
+	if (json_serial_id && strlen(json_serial_id) > 0 && disk_md_partition) {
+		uint64_t pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+		struct nvmeibt_disk_metadata *disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_serial_check, PAGE_SIZE, sizeof(*disk_md));
+		if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
+													 pbyte_s, disk_md) == 0) {
+			/* Compare serial IDs */
+			if (strcmp(json_serial_id, disk_md->native_serial_str) != 0) {
+				N_Ef(apply_serial_mismatch, "Serial ID mismatch: JSON=@STR disk=@STR",
+						json_serial_id, disk_md->native_serial_str);
+				fprintf(stderr, COL_RED_BOLD "ERROR: Serial ID mismatch!" COL_RESET "\n");
+				fprintf(stderr, "  JSON serial:   %s\n", json_serial_id);
+				fprintf(stderr, "  Device serial: %s\n", disk_md->native_serial_str);
+				fprintf(stderr, "  This JSON is from a different device!\n");
+				NNVMEIBT_BM_FREE(trace_apply_serial_free, disk_md);
+				rv = -1;
+				goto out;
+			}
+			N_Tf(apply_serial_match, "Serial ID validation passed: serial=@STR", json_serial_id);
+		}
+		NNVMEIBT_BM_FREE(trace_apply_serial_free2, disk_md);
 	}
 
 	/* Step 7: Compare and show differences */

@@ -240,6 +240,93 @@ out:
 }
 
 /**
+ * Generate a mock NVMesh disk with custom serial ID for testing
+ * Returns the fd of the created device (caller must close it)
+ */
+int SELF_TEST_generate_mock_device_with_serial(const char *filepath, const char *serial_id)
+{
+	int		fd;
+
+	/* Generate standard device first */
+	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(filepath);
+	if (fd < 0) {
+		return -1;
+	}
+
+	/* Now overwrite the disk_metadata with custom serial ID */
+	{
+		struct nvmeibt_disk_gpt					main_gpt;
+		struct nvmeibt_disk_gpt					metadata_gpt;
+		const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+		const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+		struct nvmeibt_disk_metadata			disk_metadata;
+		char									*dma_buffer = NULL;
+		int										n_bytes_write;
+		uint64_t								pbyte_s;
+
+		/* Read Main GPT to find metadata partition */
+		memset(&main_gpt, 0, sizeof(main_gpt));
+		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+			close(fd);
+			return -1;
+		}
+
+		metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+		if (!metadata_partition) {
+			close(fd);
+			return -1;
+		}
+
+		/* Read Metadata GPT to find disk_metadata partition */
+		memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+		nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+											  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+			close(fd);
+			return -1;
+		}
+
+		disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+		if (!disk_md_partition) {
+			close(fd);
+			return -1;
+		}
+
+		/* Read existing disk_metadata */
+		pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+		if (pread(fd, &disk_metadata, sizeof(disk_metadata), pbyte_s) != sizeof(disk_metadata)) {
+			close(fd);
+			return -1;
+		}
+
+		/* Modify serial ID */
+		nvmeibt_strlcpy(disk_metadata.native_serial_str, serial_id, sizeof(disk_metadata.native_serial_str));
+
+		/* Recalculate CRC */
+		disk_metadata.crc32 = 0;
+		disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
+
+		/* Write back */
+		n_bytes_write = roundup(sizeof(disk_metadata), SELF_TEST_MOCK_DEVICE_BLOCK_SIZE);
+		dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_serial_disk_md, PAGE_SIZE, n_bytes_write);
+		memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
+
+		if (pwrite(fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
+			NNVMEIBT_BM_FREE(trace_selftest_serial_disk_md_free, dma_buffer);
+			close(fd);
+			return -1;
+		}
+
+		NNVMEIBT_BM_FREE(trace_selftest_serial_disk_md_free2, dma_buffer);
+		fsync(fd);
+	}
+
+	return fd;
+}
+
+/**
  * Generate a mock device with MODIFIED partition name for diff testing
  * Returns the fd of the created device (caller must close it)
  */
@@ -1131,23 +1218,6 @@ DEFINE_TEST(missing_section)
 	return rv;
 }
 
-DEFINE_TEST(device_path_safety)
-{
-	int rv = 0;
-
-	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
-	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("device_check"));
-	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-
-	if (rv == 0) {
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->wrong_device_path);
-		SELF_TEST_ARGV("-a", ctx->wrong_device_path, "--apply-from", TEST_JSON_PATH("device_check"));
-		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	return rv;
-}
-
 DEFINE_TEST(overlap_blocking)
 {
 	int rv = 0;
@@ -1646,6 +1716,58 @@ DEFINE_TEST(static_fields_validated)
 	return rv;
 }
 
+DEFINE_TEST(serial_id_mismatch)
+{
+	int			rv = 0;
+	const char	*device_a = TOMA_ROOT_DIR "tmp/gpt_serial_device_a";
+	const char	*device_b = TOMA_ROOT_DIR "tmp/gpt_serial_device_b";
+	int			fd;
+
+	/* Create device A with serial "MOCK-SERIAL-AAAA" */
+	fd = SELF_TEST_generate_mock_device_with_serial(device_a, "MOCK-SERIAL-AAAA");
+	if (fd < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device A" COL_RESET "\n");
+		return -1;
+	}
+	close(fd);
+
+	/* Create device B with serial "MOCK-SERIAL-BBBB" */
+	fd = SELF_TEST_generate_mock_device_with_serial(device_b, "MOCK-SERIAL-BBBB");
+	if (fd < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device B" COL_RESET "\n");
+		unlink(device_a);
+		return -1;
+	}
+	close(fd);
+
+	/* Export JSON from device A */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_a, "-J", TEST_JSON_PATH("serial_check"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Try to apply JSON from A to device B (should be BLOCKED) */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("serial_check"));
+		if (json_root && json_set_dict_str(json_root, "device_path", device_b) == 0 &&
+			SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("serial_check")) == 0) {
+			fprintf(stdout, "Modified JSON device_path to point to device B\n");
+		} else {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("serial_check"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure (serial mismatch), so rv != 0 is success for this test */
+	}
+
+	unlink(device_a);
+	unlink(device_b);
+	return rv;
+}
+
 /**
  * Run comprehensive self-test suite
  */
@@ -1720,7 +1842,7 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 	// Run selected tests
 	for (i = 0; i < num_tests_total; i++) {
 		if (tests_to_run[i]) {
-			int test_num = i + 1;		// Actual test number (1-16, from registry position)
+			int test_num = i + 1;		// Actual test number (from registry position)
 			int rv;
 
 			SELF_TEST_start(test_num, tests[i].name, tests[i].command, quiet_mode);
@@ -1788,13 +1910,13 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 	unlink(TEST_JSON_PATH("standard"));
 	unlink(TEST_JSON_PATH("write_test"));
 	unlink(TEST_JSON_PATH("missing_gpt"));
-	unlink(TEST_JSON_PATH("device_check"));
 	unlink(TEST_JSON_PATH("overlap_block"));
 	unlink(TEST_JSON_PATH("mismatch_block"));
 	unlink(TEST_JSON_PATH("delete_test"));
 	unlink(TEST_JSON_PATH("readonly_test"));
 	unlink(TEST_JSON_PATH("delete_metadata_test"));
 	unlink(TEST_JSON_PATH("static_test"));
+	unlink(TEST_JSON_PATH("serial_check"));
 
 	return 0;
 }

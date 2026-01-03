@@ -54,13 +54,13 @@ struct self_test_entry {
 	X(diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from", false) \
 	X(apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B", false) \
 	X(missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
-	X(device_path_safety, "Safety - Device Path Mismatch", "gpt_util export + apply to different device (blocked)", true) \
 	X(overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
 	X(mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)", true) \
 	X(delete_main_entry, "Delete Main GPT Entry (_delete flag)", "gpt_util export + add _delete + apply --write", false) \
 	X(delete_metadata_entry, "Delete Metadata GPT Entry (_delete in nested GPT)", "gpt_util export + delete metadata entry + apply --write", false) \
 	X(readonly_fields_ignored, "Validation - _READONLY_ Fields Ignored", "gpt_util export + edit CRC + apply (CRC recalculated)", false) \
-	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)", false)
+	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)", false) \
+	X(serial_id_mismatch, "Safety - Serial ID Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true)
 
 // Define test function (searchable marker + function signature)
 // Usage: DEFINE_TEST(normal_gpt) { test body }
@@ -123,6 +123,12 @@ int SELF_TEST_end(int test_num, int result, BOOL expect_failure);
  * Returns the fd of the created device (caller must close it)
  */
 int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath);
+
+/**
+ * Generate a mock NVMesh disk with custom serial ID for testing
+ * Returns the fd of the created device (caller must close it)
+ */
+int SELF_TEST_generate_mock_device_with_serial(const char *filepath, const char *serial_id);
 
 /**
  * Generate a mock device with MODIFIED partition name for diff testing
