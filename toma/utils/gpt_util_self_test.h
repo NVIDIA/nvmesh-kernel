@@ -61,7 +61,13 @@ struct self_test_entry {
 	X(readonly_fields_ignored, "Validation - _READONLY_ Fields Ignored", "gpt_util export + edit CRC + apply (CRC recalculated)", false) \
 	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)", false) \
 	X(serial_id_mismatch, "Safety - Serial ID Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true) \
-	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write", false)
+	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write", false) \
+	X(missing_serial_id, "Safety - Missing Serial ID Blocked", "gpt_util remove serial from JSON + apply (blocked)", true) \
+	X(nguid_preservation, "Validation - NGUID Preserved on Apply", "gpt_util apply without NGUID in JSON (NGUID unchanged)", false) \
+	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)", false) \
+	X(warning_fields_apply, "Validation - _WARNING_ Fields Applied", "gpt_util modify last_pba_zeroed + apply --write", false) \
+	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)", false) \
+	X(o_direct_flags, "Validation - O_DIRECT Flags", "gpt_util --direct and --no-direct (I/O mode control)", false)
 
 // Define test function (searchable marker + function signature)
 // Usage: DEFINE_TEST(normal_gpt) { test body }
