@@ -17,6 +17,10 @@
 #include "../nvmeibt_local_disk.h"
 #include "gpt_util_self_test.h"
 
+#define PASS		"."
+#define FAIL		"F"
+#define SKIP		"s"
+
 /**
  * Start a self-test case (SELF-TEST only)
  * Prints test header with the given test number
@@ -1656,6 +1660,7 @@ int run_self_test(const char *test_selection)
 	struct self_test_ctx		ctx;
 	int							i;
 	BOOL						*tests_to_run = NULL;
+	int							*test_results = NULL;
 	int							num_tests_total = 1;		// Will be updated
 
 	// Test registry - auto-generated from SELF_TEST_LIST X-Macro
@@ -1675,8 +1680,10 @@ int run_self_test(const char *test_selection)
 	ctx.test_argv = test_argv;
 	ctx.test_argc = &test_argc;
 
-	// Parse test selection (NULL = run all)
+	// Allocate tracking arrays
 	tests_to_run = calloc(num_tests_total, sizeof(BOOL));
+	test_results = calloc(num_tests_total, sizeof(int));		/* 0=not run, 1=passed, -1=failed */
+
 	if (test_selection == NULL) {
 		// Run all tests
 		for (i = 0; i < num_tests_total; i++) {
@@ -1720,14 +1727,13 @@ int run_self_test(const char *test_selection)
 			tests_run++;
 			if (SELF_TEST_end(test_num, rv, tests[i].expect_failure) == 0) {
 				tests_passed++;
+				test_results[i] = 1;		/* Passed */
 			} else {
 				tests_failed++;
+				test_results[i] = -1;		/* Failed */
 			}
 		}
 	}
-
-	// Cleanup
-	free(tests_to_run);
 
 	// Summary
 	fprintf(stdout, "\n");
@@ -1742,14 +1748,30 @@ int run_self_test(const char *test_selection)
 
 	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
 
-	if (test_selection == NULL) {
-		fprintf(stdout, "\nTest List (%d tests):\n", num_tests_total);
-		for (i = 0; i < num_tests_total; i++) {
-			fprintf(stdout, "  Test %d: %s\n", i + 1, tests[i].name);
+	/* Always show test list with pass/fail status */
+	fprintf(stdout, "\nTest Results (%d tests):\n", num_tests_total);
+	for (i = 0; i < num_tests_total; i++) {
+		const char *status;
+		const char *color;
+
+		if (test_results[i] == 1) {
+			status = PASS;
+			color = COL_GREEN;
+		} else if (test_results[i] == -1) {
+			status = FAIL;
+			color = COL_RED_BOLD;
+		} else {
+			status = SKIP;
+			color = COL_YELLOW;
 		}
+
+		fprintf(stdout, "  %s%s Test %2d:%s %s\n",
+				color, status, i + 1, COL_RESET, tests[i].name);
 	}
 
 	// Cleanup
+	free(tests_to_run);
+	free(test_results);
 	if (disk_fd >= 0) {
 		close(disk_fd);
 	}
