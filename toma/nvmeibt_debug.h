@@ -125,6 +125,13 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 #define CLIP_MAX_TIME_BETWEEN_SYSLOG_NS (OK_AVG_TIME_BETWEEN_SYSLOG_NS * 5)
 #define THROTTLE_IIR_SIZE 10
 #include "../common/nvmeib_iir.h"
+
+#ifdef TOMA_SIMULATOR_SANDBOX
+// Sandbox: Disable throttling for clean test output
+#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...) \
+	syslog(SYSLOG_LOG_LVL, __FMT, ## __VA_ARGS__)
+#else // TOMA_SIMULATOR_SANDBOX
+// Production: Enable throttling to prevent syslog flooding
 #define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...)	({														\
 	static struct nvmeib_iir	avg_ns_between_writes_IIR;															\
 	static int64_t				prev_write_time_ns;																	\
@@ -157,6 +164,7 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 		_n_throttled++;																								\
 	}												        														\
 })
+#endif // #ifdef TOMA_SIMULATOR_SANDBOX
 
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
 int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_fmt, const char *filename, int line, const char *func_name);
