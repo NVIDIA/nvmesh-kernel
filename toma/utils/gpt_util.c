@@ -918,27 +918,29 @@ static int export_gpt_to_json(int disk_fd,
 
 			nvmeibt_Str_sprintf(json_output, "  \"disk_metadata\": {\n");
 
-			// Static field (do not edit)
+			/* Static fields (constants - do not edit) */
 			nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%lx\",\n", disk_md->signature);
+			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
+			nvmeibt_Str_sprintf(json_output, "    \"_STATIC_native_nguid\": \"%s\",\n", nguid_urn.str);
 
-			// Editable fields
-			nvmeibt_Str_sprintf(json_output, "    \"last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
+			/* Readonly fields (from hardware - do not edit) */
+			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
+			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_nsid\": %d,\n", disk_md->nsid);
+			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_crc32\": \"0x%08x\",\n", disk_md->crc32);
 
+			/* Editable fields (safe configuration) */
 			mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
 			nvmeibt_Str_sprintf(json_output, "    \"mgmt_db_uuid\": \"%s\",\n", mgmt_uuid_urn.str);
 			nvmeibt_Str_sprintf(json_output, "    \"disk_metadata_version\": %u,\n", disk_md->disk_metadata_version);
 			nvmeibt_Str_sprintf(json_output, "    \"format_pblk_size\": %u,\n", disk_md->format_pblk_size);
 			nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
-			nvmeibt_Str_sprintf(json_output, "    \"format_request_counter\": %u,\n", disk_md->format_request_counter);
+			nvmeibt_Str_sprintf(json_output, "    \"is_md_supported\": %s,\n", disk_md->is_md_supported ? "true" : "false");
 			nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
-			nvmeibt_Str_sprintf(json_output, "    \"nsid\": %d,\n", disk_md->nsid);
-			nvmeibt_Str_sprintf(json_output, "    \"native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
 
-			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
-			nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
+			/* Editable with WARNING (system state - dangerous!) */
+			nvmeibt_Str_sprintf(json_output, "    \"_WARNING_last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
+			nvmeibt_Str_sprintf(json_output, "    \"_WARNING_format_request_counter\": %u\n", disk_md->format_request_counter);
 
-			// Read-only field (recalculated on write)
-			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_crc32\": \"0x%08x\"\n", disk_md->crc32);
 			nvmeibt_Str_sprintf(json_output, "  }");
 		}
 
@@ -1973,6 +1975,110 @@ static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
 }
 
 /**
+ * Prepare disk_metadata from JSON section
+ * Parses JSON, preserves readonly fields from current, returns prepared structure
+ * Returns 0 on success, -1 on error
+ */
+static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepared_dm,
+											const struct nvmeibt_disk_metadata *current_dm,
+											struct mm_json_elem *disk_metadata_elem)
+{
+	const char *mgmt_uuid_str;
+	const char *ldisk_id;
+
+	memset(prepared_dm, 0, sizeof(*prepared_dm));
+
+	/* Initialize static fields */
+	prepared_dm->signature = DISK_METADATA_SIGNATURE;
+	prepared_dm->native_nguid_unused = nvmeib_uuid_null_val;
+
+	/* Parse editable fields from JSON */
+	mgmt_uuid_str = json_get_dict_str(disk_metadata_elem, "mgmt_db_uuid", NULL);
+	if (mgmt_uuid_str) {
+		nvmeibt_urn_uuid_str_to_union_uuid(&prepared_dm->mgmt_db_uuid, mgmt_uuid_str);
+	}
+	prepared_dm->disk_metadata_version = (unsigned int)json_get_dict_num(disk_metadata_elem, "disk_metadata_version", current_dm->disk_metadata_version);
+	prepared_dm->format_pblk_size = (unsigned int)json_get_dict_num(disk_metadata_elem, "format_pblk_size", current_dm->format_pblk_size);
+	prepared_dm->format_metadata_size = (unsigned int)json_get_dict_num(disk_metadata_elem, "format_metadata_size", current_dm->format_metadata_size);
+	prepared_dm->is_md_supported = json_get_dict_bool(disk_metadata_elem, "is_md_supported", current_dm->is_md_supported);
+
+	ldisk_id = json_get_dict_str(disk_metadata_elem, "ldisk_id_str", NULL);
+	if (ldisk_id) {
+		nvmeibt_strlcpy(prepared_dm->ldisk_id_str, ldisk_id, sizeof(prepared_dm->ldisk_id_str));
+	} else {
+		nvmeibt_strlcpy(prepared_dm->ldisk_id_str, current_dm->ldisk_id_str, sizeof(prepared_dm->ldisk_id_str));
+	}
+
+	/* Parse WARNING fields */
+	prepared_dm->last_pba_zeroed = (uint64_t)json_get_dict_num(disk_metadata_elem, "_WARNING_last_pba_zeroed", current_dm->last_pba_zeroed);
+	prepared_dm->format_request_counter = (unsigned int)json_get_dict_num(disk_metadata_elem, "_WARNING_format_request_counter", current_dm->format_request_counter);
+
+	/* Preserve readonly fields from current disk */
+	nvmeibt_strlcpy(prepared_dm->native_serial_str, current_dm->native_serial_str, sizeof(prepared_dm->native_serial_str));
+	prepared_dm->nsid = current_dm->nsid;
+
+	/* Calculate CRC */
+	prepared_dm->crc32 = 0;
+	prepared_dm->crc32 = crc32_seedless(prepared_dm, sizeof(*prepared_dm));
+
+	return 0;
+}
+
+/**
+ * Compare disk_metadata structures and display diff
+ * Returns number of changes detected (or 0 if no changes)
+ */
+static int compare_and_show_disk_metadata_diff(const struct nvmeibt_disk_metadata *current,
+												const struct nvmeibt_disk_metadata *json_data)
+{
+	int n_changes = 0;
+
+	fprintf(stdout, "\n=== disk_metadata Changes ===\n");
+
+	/* Check all editable fields */
+	if (memcmp(&current->mgmt_db_uuid, &json_data->mgmt_db_uuid, sizeof(current->mgmt_db_uuid)) != 0) {
+		fprintf(stdout, "  mgmt_db_uuid: modified\n");
+		n_changes++;
+	}
+	if (strcmp(current->ldisk_id_str, json_data->ldisk_id_str) != 0) {
+		fprintf(stdout, "  ldisk_id_str: %s -> %s\n", current->ldisk_id_str, json_data->ldisk_id_str);
+		n_changes++;
+	}
+	if (current->disk_metadata_version != json_data->disk_metadata_version) {
+		fprintf(stdout, "  disk_metadata_version: %u -> %u\n", current->disk_metadata_version, json_data->disk_metadata_version);
+		n_changes++;
+	}
+	if (current->format_pblk_size != json_data->format_pblk_size) {
+		fprintf(stdout, "  format_pblk_size: %u -> %u\n", current->format_pblk_size, json_data->format_pblk_size);
+		n_changes++;
+	}
+	if (current->format_metadata_size != json_data->format_metadata_size) {
+		fprintf(stdout, "  format_metadata_size: %u -> %u\n", current->format_metadata_size, json_data->format_metadata_size);
+		n_changes++;
+	}
+	if (current->is_md_supported != json_data->is_md_supported) {
+		fprintf(stdout, "  is_md_supported: %s -> %s\n", current->is_md_supported ? "true" : "false", json_data->is_md_supported ? "true" : "false");
+		n_changes++;
+	}
+
+	/* Check WARNING fields */
+	if (current->last_pba_zeroed != json_data->last_pba_zeroed) {
+		fprintf(stdout, COL_YELLOW "  WARNING: last_pba_zeroed: %lu -> %lu" COL_RESET "\n", current->last_pba_zeroed, json_data->last_pba_zeroed);
+		n_changes++;
+	}
+	if (current->format_request_counter != json_data->format_request_counter) {
+		fprintf(stdout, COL_YELLOW "  WARNING: format_request_counter: %u -> %u" COL_RESET "\n", current->format_request_counter, json_data->format_request_counter);
+		n_changes++;
+	}
+
+	if (n_changes == 0) {
+		fprintf(stdout, COL_GREEN "  No changes" COL_RESET "\n");
+	}
+
+	return n_changes;
+}
+
+/**
  * Compare GPT structures and display diff
  * Returns number of changes detected
  */
@@ -2046,8 +2152,11 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct nvmeibt_disk_gpt		current_metadata_gpt;
 	struct nvmeibt_disk_gpt		json_main_gpt;
 	struct nvmeibt_disk_gpt		json_metadata_gpt;
+	struct nvmeibt_disk_metadata current_disk_md;
+	struct nvmeibt_disk_metadata prepared_disk_md;
 	int							n_main_changes = 0;
 	int							n_metadata_changes = 0;
+	int							n_disk_metadata_changes = 0;
 
 	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
@@ -2139,7 +2248,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	/* Step 6: Validate serial ID matches (critical safety - more reliable than device path) */
 	disk_metadata_elem = get_json_section(json_root, "disk_metadata");
-	json_serial_id = json_get_dict_str(disk_metadata_elem, "native_serial_str", NULL);
+	json_serial_id = json_get_dict_str(disk_metadata_elem, "_READONLY_native_serial_str", NULL);
 	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
 	if (json_serial_id && strlen(json_serial_id) > 0 && disk_md_partition) {
 		uint64_t pbyte_s = disk_md_partition->pba_s * config->pblk_size;
@@ -2167,6 +2276,19 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
 	fprintf(stdout, "\n");
 	n_metadata_changes = compare_and_show_gpt_diff(&current_metadata_gpt, &json_metadata_gpt, "Metadata GPT");
+
+	/* Prepare and compare disk_metadata (if present in JSON) */
+	if (disk_metadata_elem && disk_md_partition) {
+		uint64_t pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+
+		memset(&current_disk_md, 0, sizeof(current_disk_md));
+		memset(&prepared_disk_md, 0, sizeof(prepared_disk_md));
+
+		if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) == 0 &&
+			prepare_disk_metadata_from_json(&prepared_disk_md, &current_disk_md, disk_metadata_elem) == 0) {
+			n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
+		}
+	}
 
 	/* Step 8: Write if in write mode */
 	if (config->write_mode) {
@@ -2215,18 +2337,44 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			goto out;
 		}
 
-		fprintf(stdout, "\n" COL_GREEN "=== GPT Successfully Updated ===" COL_RESET "\n");
+		/* Write disk_metadata if there are changes (already prepared in Step 7.5) */
+		if (n_disk_metadata_changes > 0) {
+			uint64_t	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+			char		*dma_buffer = NULL;
+			int			n_bytes_write;
+
+			/* Write disk_metadata - Audit trail log */
+			N_IMf(apply_disk_md_write, "Applying disk_metadata from JSON: dev=@STR json=@STR changes=@INT CRC_new=@CRC",
+				  config->device_path, config->apply_json_file, n_disk_metadata_changes, prepared_disk_md.crc32);
+
+			n_bytes_write = roundup(sizeof(prepared_disk_md), config->pblk_size);
+			dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_disk_md, PAGE_SIZE, n_bytes_write);
+			memcpy(dma_buffer, &prepared_disk_md, sizeof(prepared_disk_md));
+
+			if (pwrite(disk_fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
+				N_Ef(apply_disk_md_write_failed, "Failed to write disk_metadata dev=@STR @AUTO_ERRNO", config->device_path);
+				fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write disk_metadata to disk" COL_RESET "\n");
+				NNVMEIBT_BM_FREE(trace_apply_disk_md_free, dma_buffer);
+				rv = -1;
+				goto out;
+			}
+
+			NNVMEIBT_BM_FREE(trace_apply_disk_md_free2, dma_buffer);
+		}
+
+		fprintf(stdout, "\n" COL_GREEN "=== Changes Successfully Applied ===" COL_RESET "\n");
 		fprintf(stdout, "Device: %s\n", config->device_path);
-		fprintf(stdout, "  Main GPT:     %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
-		fprintf(stdout, "  Metadata GPT: %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
+		fprintf(stdout, "  Main GPT:      %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
+		fprintf(stdout, "  Metadata GPT:  %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
+		fprintf(stdout, "  disk_metadata: %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
 	} else {
 		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
-		if (n_main_changes + n_metadata_changes > 0) {
+		if (n_main_changes + n_metadata_changes + n_disk_metadata_changes > 0) {
 			fprintf(stdout, COL_YELLOW "Use --write flag to apply %d change%s to disk." COL_RESET "\n",
-					n_main_changes + n_metadata_changes,
-					(n_main_changes + n_metadata_changes) == 1 ? "" : "s");
+					n_main_changes + n_metadata_changes + n_disk_metadata_changes,
+					(n_main_changes + n_metadata_changes + n_disk_metadata_changes) == 1 ? "" : "s");
 		} else {
-			fprintf(stdout, "No GPT changes detected - JSON matches disk.\n");
+			fprintf(stdout, "No changes detected - JSON matches disk.\n");
 		}
 	}
 

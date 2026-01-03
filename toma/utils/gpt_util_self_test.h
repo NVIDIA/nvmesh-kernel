@@ -60,7 +60,8 @@ struct self_test_entry {
 	X(delete_metadata_entry, "Delete Metadata GPT Entry (_delete in nested GPT)", "gpt_util export + delete metadata entry + apply --write", false) \
 	X(readonly_fields_ignored, "Validation - _READONLY_ Fields Ignored", "gpt_util export + edit CRC + apply (CRC recalculated)", false) \
 	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)", false) \
-	X(serial_id_mismatch, "Safety - Serial ID Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true)
+	X(serial_id_mismatch, "Safety - Serial ID Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true) \
+	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write", false)
 
 // Define test function (searchable marker + function signature)
 // Usage: DEFINE_TEST(normal_gpt) { test body }
