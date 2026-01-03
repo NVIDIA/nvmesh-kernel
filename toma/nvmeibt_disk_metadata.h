@@ -5,6 +5,9 @@
 #include "nvmeibt_common.h"
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
 
+#define UEFI_GPT_REVISION		0x00010000		/* GPT revision 1.0 by UEFI standard */
+#define UEFI_GPT_HEADER_SIZE	92				/* GPT header size by UEFI standard */
+
 struct nvmeibt_mbr_partition_record
 {
 	char									boot_indicator;							// Set to 0x00

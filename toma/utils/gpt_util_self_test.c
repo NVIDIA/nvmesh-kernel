@@ -25,13 +25,15 @@
  * Start a self-test case (SELF-TEST only)
  * Prints test header with the given test number
  */
-void SELF_TEST_start(int test_num, const char *description, const char *command)
+void SELF_TEST_start(int test_num, const char *description, const char *command, BOOL quiet_mode)
 {
-	fprintf(stdout, "\n");
-	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
-	fprintf(stdout, COL_WHITE_BOLD "SELF-TEST %d: %s" COL_RESET "\n", test_num, description);
-	fprintf(stdout, "Emulated command: " COL_YELLOW "%s" COL_RESET "\n", command);
-	fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
+	if (!quiet_mode) {
+		fprintf(stdout, "\n");
+		fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
+		fprintf(stdout, COL_WHITE_BOLD "SELF-TEST %d: %s" COL_RESET "\n", test_num, description);
+		fprintf(stdout, "Emulated command: " COL_YELLOW "%s" COL_RESET "\n", command);
+		fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
+	}
 }
 
 /**
@@ -1647,7 +1649,7 @@ DEFINE_TEST(static_fields_validated)
 /**
  * Run comprehensive self-test suite
  */
-int run_self_test(const char *test_selection)
+int run_self_test(const char *test_selection, BOOL quiet_mode)
 {
 	int							disk_fd = -1;
 	int							tests_run = 0;
@@ -1721,7 +1723,7 @@ int run_self_test(const char *test_selection)
 			int test_num = i + 1;		// Actual test number (1-16, from registry position)
 			int rv;
 
-			SELF_TEST_start(test_num, tests[i].name, tests[i].command);
+			SELF_TEST_start(test_num, tests[i].name, tests[i].command, quiet_mode);
 			rv = tests[i].func(&ctx);
 
 			tests_run++;

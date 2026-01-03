@@ -25,7 +25,6 @@
 #define GPT_UTIL_VERSION	"2.0.0-dev"
 #define MAX_DEV_NAME		256
 
-
 // Actions (mutually exclusive operations)
 enum GPT_UTIL_ACTION {
 	ACTION_DISPLAY_GPT = 0,		// Default: display GPT structure
@@ -1110,6 +1109,7 @@ static void print_usage(char *argv[])
 
 	fprintf(stdout, "Testing:\n");
 	fprintf(stdout, "  -T, --self-test             Run comprehensive self-test suite\n");
+	fprintf(stdout, "  -q, --quiet                 Quiet mode (suppress decorative banners in tests)\n");
 }
 
 
@@ -1959,8 +1959,8 @@ static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
 	 * These are the same values set by nvmeibt_disk_metadata_init_gpt_structure()
 	 */
 	gpt->header.gpt_signature = GPT_SIGNATURE;
-	gpt->header.revision = 0x00010000;			/* GPT revision by UEFI standard */
-	gpt->header.header_size = 92;				/* GPT header size by UEFI standard */
+	gpt->header.revision = UEFI_GPT_REVISION;
+	gpt->header.header_size = UEFI_GPT_HEADER_SIZE;
 	gpt->header.size_of_partition_entry = UEFI_MIN_GPT_ENTRY_SIZE;
 
 	/* Calculate CRCs (exactly as store_gpt will do) */
@@ -2053,6 +2053,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		fprintf(stdout, "Mode: " COL_YELLOW "WRITE" COL_RESET " (changes will be applied to disk)\n");
 	} else {
 		fprintf(stdout, "Mode: DRY-RUN (use --write to apply)\n");
+		N_Tf(apply_dry_run, "Dry-run apply: dev=@STR json=@STR", config->device_path, config->apply_json_file);
 	}
 	fprintf(stdout, "\n");
 
@@ -2356,9 +2357,10 @@ int gpt_util_main(int argc, char *argv[])
 	int			rv = 1;
 	long		i;
 	BOOL		is_self_test = false;
+	BOOL		quiet_mode = false;
 	const char	*test_selection = NULL;		// NULL = run all tests
 
-	// Quick check for --self-test flag (before full parsing)
+	// Quick check for --self-test and --quiet flags (before full parsing)
 	for (i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "-T") == 0 || strcmp(argv[i], "--self-test") == 0) {
 			is_self_test = true;
@@ -2366,7 +2368,8 @@ int gpt_util_main(int argc, char *argv[])
 			if (i + 1 < argc && argv[i + 1][0] != '-') {
 				test_selection = argv[i + 1];
 			}
-			break;
+		} else if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
+			quiet_mode = true;
 		}
 	}
 
@@ -2384,7 +2387,7 @@ int gpt_util_main(int argc, char *argv[])
 
 	// Dispatch to appropriate mode
 	if (is_self_test) {
-		rv = run_self_test(test_selection);
+		rv = run_self_test(test_selection, quiet_mode);
 	} else {
 		rv = run_gpt_util_op(argc, argv);
 	}

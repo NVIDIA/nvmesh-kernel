@@ -1096,8 +1096,8 @@ void nvmeibt_disk_metadata_init_gpt_structure(uint64_t pba_s,
 	memset(&gpt->header, 0, sizeof(struct nvmeibt_disk_gpt_header));
 	// Init the GPT header
 	gpt->header.gpt_signature = GPT_SIGNATURE;
-	gpt->header.revision = 0x00010000; /* GPT revision by UEFI standard*/
-	gpt->header.header_size = 92; /*GPT header size by UEFI standard*/
+	gpt->header.revision = UEFI_GPT_REVISION; /* GPT revision by UEFI standard*/
+	gpt->header.header_size = UEFI_GPT_HEADER_SIZE; /*GPT header size by UEFI standard*/
 	gpt->header.reserved = 0;
 	gpt->header.my_pba = pba_s;
 	gpt->header.alternate_pba = pba_e;

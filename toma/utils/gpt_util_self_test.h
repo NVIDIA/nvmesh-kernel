@@ -91,15 +91,17 @@ struct self_test_entry {
 /**
  * Run comprehensive self-test suite
  * @param test_selection: Comma-separated test numbers or ranges (e.g., "1,3-5,10" or NULL for all)
+ * @param quiet_mode: If true, suppress decorative banners (only show results)
  * @return 0 on success
  */
-int run_self_test(const char *test_selection);
+int run_self_test(const char *test_selection, BOOL quiet_mode);
 
 /**
  * Start a self-test case (SELF-TEST only)
  * Prints test header with the given test number
+ * @param quiet_mode: If true, suppress decorative banners
  */
-void SELF_TEST_start(int test_num, const char *description, const char *command);
+void SELF_TEST_start(int test_num, const char *description, const char *command, BOOL quiet_mode);
 
 /**
  * Setup device for self-test (SELF-TEST only)
