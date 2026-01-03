@@ -685,7 +685,6 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 	// Editable fields
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&header->disk_obj_uuid);
 	nvmeibt_Str_sprintf(json_output, "    \"disk_uuid\": \"%s\",\n", urn_uuid.str);
-	nvmeibt_Str_sprintf(json_output, "    \"n_partition_entries\": %d,\n", header->n_partition_entries);
 	nvmeibt_Str_sprintf(json_output, "    \"first_usable_pba\": %lu,\n", header->first_usable_pba);
 	nvmeibt_Str_sprintf(json_output, "    \"last_usable_pba\": %lu,\n", header->last_usable_pba);
 
@@ -695,7 +694,8 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_header_size\": %d,\n", header->header_size);
 	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_size_of_partition_entry\": %d,\n", header->size_of_partition_entry);
 
-	// Computed fields (recalculated on write - do not edit)
+	// Readonly fields (recalculated on write - do not edit)
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_n_partition_entries\": %d,\n", header->n_partition_entries);
 	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_header_crc32\": \"0x%08x\",\n", header->header_crc32);
 	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_partition_entry_array_crc32\": \"0x%08x\",\n", header->partition_entry_array_crc32);
 
@@ -920,8 +920,6 @@ static int export_gpt_to_json(int disk_fd,
 
 			/* Static fields (constants - do not edit) */
 			nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%lx\",\n", disk_md->signature);
-			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
-			nvmeibt_Str_sprintf(json_output, "    \"_STATIC_native_nguid\": \"%s\",\n", nguid_urn.str);
 
 			/* Readonly fields (from hardware - do not edit) */
 			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
@@ -936,6 +934,8 @@ static int export_gpt_to_json(int disk_fd,
 			nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
 			nvmeibt_Str_sprintf(json_output, "    \"is_md_supported\": %s,\n", disk_md->is_md_supported ? "true" : "false");
 			nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
+			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
+			nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
 
 			/* Editable with WARNING (system state - dangerous!) */
 			nvmeibt_Str_sprintf(json_output, "    \"_WARNING_last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
@@ -1191,16 +1191,18 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			while (scan_line_ptr < csv_str_end - 1) {
 				const char *scan_line_end = (char *)memchr(scan_line_ptr, '\n', csv_str_end - scan_line_ptr);
 				if (!scan_line_end) {
-					fprintf(stdout,"Missing \\n at the end of csv line '%s'\n", scan_line_ptr);
 					scan_line_end = csv_str_end;
 				}
 				line_len = strnlen(scan_line_ptr, scan_line_end - scan_line_ptr);
-				if (line_len >= (int)sizeof(line))
+				/* Advance pointer even if line is too long (prevents infinite loop) */
+				if (line_len >= (int)sizeof(line)) {
+					N_Wf(parse_csv_line_too_long, "CSV line too long (@INT bytes), skipping", line_len);
+					scan_line_ptr = scan_line_end + 1;
 					continue;
+				}
 				memcpy(line, scan_line_ptr, line_len);
 				scan_line_ptr = scan_line_ptr + line_len + 1;
 				line[line_len] = '\0';
-				fprintf(stdout,"read line of len=%d, '%s'\n", line_len, line);
 				if (line_len < 1) {
 					continue;
 				}
@@ -1776,7 +1778,6 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 	JSON_LOOP_FOR_DICT(kv, dict) {
 		JSON_LOOP_ITERATION_START(parse_gpt_sec, kv->key);
 		JSON_ASSIGN_PLAIN(parse_disk_uuid, "disk_uuid", disk_uuid_str, kv->value->str);
-		JSON_ASSIGN_PLAIN(parse_n_part, "n_partition_entries", gpt->header.n_partition_entries, (uint32_t)kv->value->num);
 		JSON_ASSIGN_PLAIN(parse_first_pba, "first_usable_pba", gpt->header.first_usable_pba, (uint64_t)kv->value->num);
 		JSON_ASSIGN_PLAIN(parse_last_pba, "last_usable_pba", gpt->header.last_usable_pba, (uint64_t)kv->value->num);
 		JSON_ASSIGN_PLAIN(parse_entries_arr, "entries", entries_array, kv->value);
@@ -1784,6 +1785,7 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 		JSON_ASSIGN_OPTIONAL(parse_static_rev, "_STATIC_revision");
 		JSON_ASSIGN_OPTIONAL(parse_static_hdr_sz, "_STATIC_header_size");
 		JSON_ASSIGN_OPTIONAL(parse_static_ent_sz, "_STATIC_size_of_partition_entry");
+		JSON_ASSIGN_OPTIONAL(parse_ro_n_part, "_READONLY_n_partition_entries");
 		JSON_ASSIGN_OPTIONAL(parse_ro_hdr_crc, "_READONLY_header_crc32");
 		JSON_ASSIGN_OPTIONAL(parse_ro_ent_crc, "_READONLY_partition_entry_array_crc32");
 		JSON_LOOP_ITERATION_END(parse_gpt_sec_end, kv->key);
@@ -1909,6 +1911,7 @@ static int validate_json_required_sections(struct mm_json_elem *json_root,
 	struct mm_json_elem *main_gpt_primary_elem;
 	struct mm_json_elem *metadata_gpt_primary_elem;
 	struct mm_json_elem *main_gpt_alternate_elem;
+	struct mm_json_elem *metadata_gpt_alternate_elem;
 
 	main_gpt_primary_elem = json_get_dict_value(json_root, "main_gpt_primary");
 	if (!main_gpt_primary_elem) {
@@ -1927,7 +1930,15 @@ static int validate_json_required_sections(struct mm_json_elem *json_root,
 	/* Reject JSON with both primary and alternate (ambiguous which to use) */
 	main_gpt_alternate_elem = json_get_dict_value(json_root, "main_gpt_alternate");
 	if (main_gpt_alternate_elem) {
-		N_Ef(validate_json_has_alternate, "JSON contains both primary and alternate copies (ambiguous) file=@STR", json_path);
+		N_Ef(validate_json_has_main_alternate, "JSON contains main_gpt_alternate (ambiguous) file=@STR", json_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain only primary copy. Re-export with --gpt-copy=primary" COL_RESET "\n");
+		return -1;
+	}
+
+	/* Reject metadata_gpt_alternate */
+	metadata_gpt_alternate_elem = json_get_dict_value(json_root, "metadata_gpt_alternate");
+	if (metadata_gpt_alternate_elem) {
+		N_Ef(validate_json_has_metadata_alternate, "JSON contains metadata_gpt_alternate (ambiguous) file=@STR", json_path);
 		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain only primary copy. Re-export with --gpt-copy=primary" COL_RESET "\n");
 		return -1;
 	}
@@ -1964,6 +1975,7 @@ static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
 	gpt->header.revision = UEFI_GPT_REVISION;
 	gpt->header.header_size = UEFI_GPT_HEADER_SIZE;
 	gpt->header.size_of_partition_entry = UEFI_MIN_GPT_ENTRY_SIZE;
+	gpt->header.n_partition_entries = GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES;		// Open BUG NVMESH-7436 - incorrect value (not the actual number of entries), which causes standard GPT tools to think CRC is corrupted.
 
 	/* Calculate CRCs (exactly as store_gpt will do) */
 	gpt->header.partition_entry_array_crc32 = crc32_seedless(gpt->entries,
@@ -1985,18 +1997,28 @@ static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepare
 {
 	const char *mgmt_uuid_str;
 	const char *ldisk_id;
+	const char *nguid_str;
 
 	memset(prepared_dm, 0, sizeof(*prepared_dm));
 
 	/* Initialize static fields */
 	prepared_dm->signature = DISK_METADATA_SIGNATURE;
-	prepared_dm->native_nguid_unused = nvmeib_uuid_null_val;
 
-	/* Parse editable fields from JSON */
+	/* Parse editable fields from JSON (default to current if missing) */
 	mgmt_uuid_str = json_get_dict_str(disk_metadata_elem, "mgmt_db_uuid", NULL);
 	if (mgmt_uuid_str) {
 		nvmeibt_urn_uuid_str_to_union_uuid(&prepared_dm->mgmt_db_uuid, mgmt_uuid_str);
+	} else {
+		prepared_dm->mgmt_db_uuid = current_dm->mgmt_db_uuid;		/* Preserve if missing */
 	}
+
+	nguid_str = json_get_dict_str(disk_metadata_elem, "native_nguid", NULL);
+	if (nguid_str) {
+		nvmeibt_urn_uuid_str_to_union_uuid(&prepared_dm->native_nguid_unused, nguid_str);
+	} else {
+		prepared_dm->native_nguid_unused = current_dm->native_nguid_unused;		/* Preserve if missing */
+	}
+
 	prepared_dm->disk_metadata_version = (unsigned int)json_get_dict_num(disk_metadata_elem, "disk_metadata_version", current_dm->disk_metadata_version);
 	prepared_dm->format_pblk_size = (unsigned int)json_get_dict_num(disk_metadata_elem, "format_pblk_size", current_dm->format_pblk_size);
 	prepared_dm->format_metadata_size = (unsigned int)json_get_dict_num(disk_metadata_elem, "format_metadata_size", current_dm->format_metadata_size);
@@ -2009,11 +2031,11 @@ static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepare
 		nvmeibt_strlcpy(prepared_dm->ldisk_id_str, current_dm->ldisk_id_str, sizeof(prepared_dm->ldisk_id_str));
 	}
 
-	/* Parse WARNING fields */
+	/* Parse WARNING fields (default to current if missing) */
 	prepared_dm->last_pba_zeroed = (uint64_t)json_get_dict_num(disk_metadata_elem, "_WARNING_last_pba_zeroed", current_dm->last_pba_zeroed);
 	prepared_dm->format_request_counter = (unsigned int)json_get_dict_num(disk_metadata_elem, "_WARNING_format_request_counter", current_dm->format_request_counter);
 
-	/* Preserve readonly fields from current disk */
+	/* Preserve readonly fields from current disk (hardware-derived) */
 	nvmeibt_strlcpy(prepared_dm->native_serial_str, current_dm->native_serial_str, sizeof(prepared_dm->native_serial_str));
 	prepared_dm->nsid = current_dm->nsid;
 
@@ -2154,9 +2176,11 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct nvmeibt_disk_gpt		json_metadata_gpt;
 	struct nvmeibt_disk_metadata current_disk_md;
 	struct nvmeibt_disk_metadata prepared_disk_md;
+	struct nvmeibt_disk_metadata *disk_md = NULL;
 	int							n_main_changes = 0;
 	int							n_metadata_changes = 0;
 	int							n_disk_metadata_changes = 0;
+	uint64_t					pbyte_s = 0;
 
 	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
@@ -2246,31 +2270,65 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	/* Step 6: Validate serial ID matches (critical safety - more reliable than device path) */
-	disk_metadata_elem = get_json_section(json_root, "disk_metadata");
-	json_serial_id = json_get_dict_str(disk_metadata_elem, "_READONLY_native_serial_str", NULL);
-	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
-	if (json_serial_id && strlen(json_serial_id) > 0 && disk_md_partition) {
-		uint64_t pbyte_s = disk_md_partition->pba_s * config->pblk_size;
-		struct nvmeibt_disk_metadata *disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_serial_check, PAGE_SIZE, sizeof(*disk_md));
-		if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
-													 pbyte_s, disk_md) == 0) {
-			/* Compare serial IDs */
-			if (strcmp(json_serial_id, disk_md->native_serial_str) != 0) {
-				N_Ef(apply_serial_mismatch, "Serial ID mismatch: JSON=@STR disk=@STR",
-						json_serial_id, disk_md->native_serial_str);
-				fprintf(stderr, COL_RED_BOLD "ERROR: Serial ID mismatch!" COL_RESET "\n");
-				fprintf(stderr, "  JSON serial:   %s\n", json_serial_id);
-				fprintf(stderr, "  Device serial: %s\n", disk_md->native_serial_str);
-				fprintf(stderr, "  This JSON is from a different device!\n");
-				NNVMEIBT_BM_FREE(trace_apply_serial_free, disk_md);
-				rv = -1;
-				goto out;
-			}
-			N_Tf(apply_serial_match, "Serial ID validation passed: serial=@STR", json_serial_id);
-		}
-		NNVMEIBT_BM_FREE(trace_apply_serial_free2, disk_md);
+	/* Step 6: Validate serial ID (REQUIRED - fail-closed for safety) */
+	disk_metadata_elem = json_get_dict_value(json_root, "disk_metadata");
+	if (!disk_metadata_elem) {
+		N_Ef(apply_no_disk_metadata, "JSON missing disk_metadata section (cannot validate device) file=@STR", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain disk_metadata section with _READONLY_native_serial_str" COL_RESET "\n");
+		rv = -1;
+		goto out;
 	}
+
+	json_serial_id = json_get_dict_str(disk_metadata_elem, "_READONLY_native_serial_str", NULL);
+	if (!json_serial_id || strlen(json_serial_id) == 0) {
+		N_Ef(apply_no_serial, "JSON disk_metadata missing _READONLY_native_serial_str (cannot validate device) file=@STR", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain _READONLY_native_serial_str for device validation" COL_RESET "\n");
+		fprintf(stderr, "  This safety check prevents applying JSON to wrong device.\n");
+		rv = -1;
+		goto out;
+	}
+
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
+	if (!disk_md_partition) {
+		N_Ef(apply_no_disk_md_partition, "Device missing disk_metadata partition (cannot validate serial) dev=@STR", config->device_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device has no disk_metadata partition" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+	disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_serial_check, PAGE_SIZE, sizeof(*disk_md));
+
+	if (!disk_md) {
+		N_Ef(apply_serial_alloc_failed, "Failed to allocate buffer for serial check");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Memory allocation failed" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, disk_md) < 0) {
+		N_Ef(apply_serial_read_failed, "Failed to read disk_metadata for serial validation dev=@STR", config->device_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial ID - blocking apply for safety" COL_RESET "\n");
+		NNVMEIBT_BM_FREE(trace_apply_serial_free, disk_md);
+		rv = -1;
+		goto out;
+	}
+
+	/* Compare serial IDs */
+	if (strcmp(json_serial_id, disk_md->native_serial_str) != 0) {
+		N_Ef(apply_serial_mismatch, "Serial ID mismatch: JSON=@STR disk=@STR",
+				json_serial_id, disk_md->native_serial_str);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Serial ID mismatch!" COL_RESET "\n");
+		fprintf(stderr, "  JSON serial:   %s\n", json_serial_id);
+		fprintf(stderr, "  Device serial: %s\n", disk_md->native_serial_str);
+		fprintf(stderr, "  This JSON is from a different device!\n");
+		NNVMEIBT_BM_FREE(trace_apply_serial_free2, disk_md);
+		rv = -1;
+		goto out;
+	}
+
+	N_Tf(apply_serial_match, "Serial ID validation passed: serial=@STR", json_serial_id);
+	NNVMEIBT_BM_FREE(trace_apply_serial_free3, disk_md);
 
 	/* Step 7: Compare and show differences */
 	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
@@ -2279,7 +2337,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	/* Prepare and compare disk_metadata (if present in JSON) */
 	if (disk_metadata_elem && disk_md_partition) {
-		uint64_t pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+		pbyte_s = disk_md_partition->pba_s * config->pblk_size;
 
 		memset(&current_disk_md, 0, sizeof(current_disk_md));
 		memset(&prepared_disk_md, 0, sizeof(prepared_disk_md));
@@ -2294,55 +2352,61 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	if (config->write_mode) {
 		fprintf(stdout, "\n" COL_YELLOW "=== Writing Changes to Disk ===" COL_RESET "\n");
 
-		/*
-		 * CRITICAL: Copy JSON data into current_main_gpt (which has correct location fields)
-		 * JSON doesn't have location fields (my_pba, alternate_pba, partition_entry_pba)
-		 * See gpt-util-implementation-notes.md Critical Caveat section
-		 */
-		memcpy(current_main_gpt.entries, json_main_gpt.entries, sizeof(current_main_gpt.entries));
-		current_main_gpt.header.disk_obj_uuid = json_main_gpt.header.disk_obj_uuid;
-		current_main_gpt.header.first_usable_pba = json_main_gpt.header.first_usable_pba;
-		current_main_gpt.header.last_usable_pba = json_main_gpt.header.last_usable_pba;
-		current_main_gpt.header.n_partition_entries = json_main_gpt.header.n_partition_entries;
-		/* Location fields (my_pba, alternate_pba, partition_entry_pba) preserved from current_main_gpt */
+		/* Write Main GPT only if there are changes */
+		if (n_main_changes > 0) {
+			/*
+			 * CRITICAL: Copy JSON data into current_main_gpt (which has correct location fields)
+			 * JSON doesn't have location fields (my_pba, alternate_pba, partition_entry_pba)
+			 * See gpt-util-implementation-notes.md Critical Caveat section
+			 */
+			memcpy(current_main_gpt.entries, json_main_gpt.entries, sizeof(current_main_gpt.entries));
+			current_main_gpt.header.disk_obj_uuid = json_main_gpt.header.disk_obj_uuid;
+			current_main_gpt.header.first_usable_pba = json_main_gpt.header.first_usable_pba;
+			current_main_gpt.header.last_usable_pba = json_main_gpt.header.last_usable_pba;
+			current_main_gpt.header.n_partition_entries = json_main_gpt.header.n_partition_entries;
+			/* Location fields (my_pba, alternate_pba, partition_entry_pba) preserved from current_main_gpt */
 
-		/* Write Main GPT - Audit trail log */
-		N_IMf(apply_main_gpt_write, "Applying Main GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
-			  config->device_path, config->apply_json_file, n_main_changes,
-			  json_main_gpt.header.header_crc32, json_main_gpt.header.partition_entry_array_crc32);
+			/* Write Main GPT - Audit trail log */
+			N_IMf(apply_main_gpt_write, "Applying Main GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
+				  config->device_path, config->apply_json_file, n_main_changes,
+				  json_main_gpt.header.header_crc32, json_main_gpt.header.partition_entry_array_crc32);
 
-		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_main_gpt, false) < 0) {
-			N_Ef(apply_write_failed, "Failed to write Main GPT dev=@STR", config->device_path);
-			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write Main GPT to disk" COL_RESET "\n");
-			rv = -1;
-			goto out;
+			if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_main_gpt, false) < 0) {
+				N_Ef(apply_write_failed, "Failed to write Main GPT dev=@STR", config->device_path);
+				fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write Main GPT to disk" COL_RESET "\n");
+				rv = -1;
+				goto out;
+			}
 		}
 
-		/* Copy JSON data into current_metadata_gpt (same reason as above) */
-		memcpy(current_metadata_gpt.entries, json_metadata_gpt.entries, sizeof(current_metadata_gpt.entries));
-		current_metadata_gpt.header.disk_obj_uuid = json_metadata_gpt.header.disk_obj_uuid;
-		current_metadata_gpt.header.first_usable_pba = json_metadata_gpt.header.first_usable_pba;
-		current_metadata_gpt.header.last_usable_pba = json_metadata_gpt.header.last_usable_pba;
-		current_metadata_gpt.header.n_partition_entries = json_metadata_gpt.header.n_partition_entries;
+		/* Write Metadata GPT only if there are changes */
+		if (n_metadata_changes > 0) {
+			/* Copy JSON data into current_metadata_gpt (same reason as above) */
+			memcpy(current_metadata_gpt.entries, json_metadata_gpt.entries, sizeof(current_metadata_gpt.entries));
+			current_metadata_gpt.header.disk_obj_uuid = json_metadata_gpt.header.disk_obj_uuid;
+			current_metadata_gpt.header.first_usable_pba = json_metadata_gpt.header.first_usable_pba;
+			current_metadata_gpt.header.last_usable_pba = json_metadata_gpt.header.last_usable_pba;
+			current_metadata_gpt.header.n_partition_entries = json_metadata_gpt.header.n_partition_entries;
 
-		/* Write Metadata GPT - Audit trail log */
-		N_IMf(apply_metadata_gpt_write, "Applying Metadata GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
-			  config->device_path, config->apply_json_file, n_metadata_changes,
-			  json_metadata_gpt.header.header_crc32, json_metadata_gpt.header.partition_entry_array_crc32);
+			/* Write Metadata GPT - Audit trail log */
+			N_IMf(apply_metadata_gpt_write, "Applying Metadata GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
+				  config->device_path, config->apply_json_file, n_metadata_changes,
+				  json_metadata_gpt.header.header_crc32, json_metadata_gpt.header.partition_entry_array_crc32);
 
-		if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt, false) < 0) {
-			N_Ef(apply_write_metadata_gpt_failed, "Failed to write Metadata GPT dev=@STR", config->device_path);
-			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write Metadata GPT to disk" COL_RESET "\n");
-			rv = -1;
-			goto out;
+			if (nvmeibt_disk_metadata_store_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt, false) < 0) {
+				N_Ef(apply_write_metadata_gpt_failed, "Failed to write Metadata GPT dev=@STR", config->device_path);
+				fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write Metadata GPT to disk" COL_RESET "\n");
+				rv = -1;
+				goto out;
+			}
 		}
 
 		/* Write disk_metadata if there are changes (already prepared in Step 7.5) */
 		if (n_disk_metadata_changes > 0) {
-			uint64_t	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
 			char		*dma_buffer = NULL;
 			int			n_bytes_write;
 
+			pbyte_s = disk_md_partition->pba_s * config->pblk_size;
 			/* Write disk_metadata - Audit trail log */
 			N_IMf(apply_disk_md_write, "Applying disk_metadata from JSON: dev=@STR json=@STR changes=@INT CRC_new=@CRC",
 				  config->device_path, config->apply_json_file, n_disk_metadata_changes, prepared_disk_md.crc32);
