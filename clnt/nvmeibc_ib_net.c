@@ -2177,7 +2177,9 @@ static inline void poll_cq_and_process_work(struct workqe_struct *work)
 	rv = poll_cq_and_process(net, &resched);
 	busy_ns = nvmeib_public_local_clock() - start_ns;
 
-	resched = rv > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, rv, busy_ns);
+	if (!resched) {
+		resched = rv > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, rv, busy_ns);
+	}
 
 	/* before we may rearm interrupts we must change state such that
 	   interrupt-handler will be able to add another defer-recv work.
