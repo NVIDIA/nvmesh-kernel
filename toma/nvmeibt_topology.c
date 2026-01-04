@@ -963,10 +963,8 @@ int nvmeibt_topology_setup_relationships(void)
 		goto skip;
 	if (trim_stale_gpt_entries_from_local_disks_gpt() < 0)
 		goto skip;
-#if 1
 	if (add_segments_to_local_disks_gpt() < 0)
 		goto skip;
-#endif
 
 	rv = 0;
 skip:
