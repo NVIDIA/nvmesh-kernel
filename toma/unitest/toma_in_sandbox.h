@@ -78,6 +78,28 @@ int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restric
 #define select  override_select
 #endif // TOMA_SANDBOX_BYPASS_REDIRECTS
 
+/************************************* Emulation of netlink mechanism *************************************/
+#define __LINUX_NETLINK_H	// #include <linux/netlink.h>
+struct sockaddr_nl {
+	unsigned short	nl_family;	/* AF_NETLINK	*/
+	unsigned short	nl_pad;		/* zero		*/
+	u32		nl_pid;				/* port ID	*/
+	u32		nl_groups;			/* multicast groups mask */
+};
+struct nlmsghdr {				// 16[bytes] Copied netlink header from linux include
+	u32		nlmsg_len;
+	u16		nlmsg_type;
+	u16		nlmsg_flags;
+	u32		nlmsg_seq;			// Unused
+	u32		nlmsg_pid;
+};
+#define NLMSG_LENGTH(len) ((len) + sizeof(struct nlmsghdr))
+#define NLMSG_ALIGN(len)  (len)
+#define NLMSG_SPACE(len) NLMSG_ALIGN(NLMSG_LENGTH(len))
+#define NLMSG_DATA(nlh)  ((void *)(((char *)nlh) + sizeof(struct nlmsghdr)))
+#define NLMSG_DONE 0x3
+#define NLMSG_MIN_TYPE		0x10
+
 /************************************* syslog *************************************/
 #define _SYS_SYSLOG_H 1
 #include <syslog.h>
