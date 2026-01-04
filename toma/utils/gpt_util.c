@@ -34,7 +34,8 @@ enum GPT_UTIL_ACTION {
 	ACTION_CHECK_EXCELERO,		// -i: check if EXCELERO_METADATA exists
 	ACTION_EXPORT_JSON,			// --output-json: export GPT to JSON
 	ACTION_APPLY_JSON,			// --apply-from: apply GPT from JSON (dry-run by default)
-	ACTION_UPGRADE_GPT			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
+	ACTION_UPGRADE_GPT,			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
+	ACTION_RESTORE_BINARY		// --restore-binary: restore from binary backup
 };
 
 // GPT level (Main or Metadata)
@@ -116,12 +117,385 @@ struct gpt_util_config {
 	char					apply_json_file[256];	// Input JSON filename to apply
 	BOOL					write_mode;				// true = write changes, false = dry-run (default)
 
+	// Binary restore options (for ACTION_RESTORE_BINARY)
+	char					restore_binary_file[256];	// Binary backup file to restore
+
 	// Confirmation options
 	BOOL					skip_confirmation;		// Skip interactive confirmation (--yes flag)
 
 	// I/O options
 	enum O_DIRECT_MODE		o_direct_mode;			// O_DIRECT behavior
 };
+
+/**
+ * Create private backup directory with restrictive permissions
+ * Returns 0 on success, -1 on error
+ */
+static int create_backup_directory(const char *backup_dir)
+{
+	struct stat	st;
+
+	/* Check if directory already exists */
+	if (stat(backup_dir, &st) == 0) {
+		/* Directory exists - verify it's a directory and has correct permissions */
+		if (!S_ISDIR(st.st_mode)) {
+			N_Ef(backup_dir_not_dir, "Backup path exists but is not a directory: @STR", backup_dir);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Backup path exists but is not a directory: %s" COL_RESET "\n", backup_dir);
+			return -1;
+		}
+		/* Directory exists and is valid */
+		return 0;
+	}
+
+	/* Create directory with restrictive permissions (0700 - owner only) */
+	if (mkdir(backup_dir, 0700) < 0) {
+		N_Ef(backup_dir_create_failed, "Failed to create backup directory @STR @AUTO_ERRNO", backup_dir);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to create backup directory: %s" COL_RESET "\n", backup_dir);
+		return -1;
+	}
+
+	N_Tf(backup_dir_created, "Created backup directory: @STR", backup_dir);
+	return 0;
+}
+
+/**
+ * Helper: Backup a single structure to hidden file
+ * Returns 0 on success, -1 on error
+ */
+static int backup_structure(int disk_fd, const char *filepath, uint64_t pba_start, uint64_t n_blocks, int pblk_size)
+{
+	int			rv = -1;
+	int			backup_fd = -1;
+	char		*backup_buffer = NULL;
+	uint64_t	backup_size_bytes;
+	uint64_t	pbyte_start;
+
+	backup_size_bytes = n_blocks * pblk_size;
+	pbyte_start = pba_start * pblk_size;
+
+	backup_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_backup_struct_buf, PAGE_SIZE, backup_size_bytes);
+	if (!backup_buffer) {
+		N_Ef(backup_struct_alloc_failed, "Failed to allocate backup buffer size=@SIZE_T", backup_size_bytes);
+		goto out;
+	}
+
+	/* Use TOMA I/O helper for robust reading (handles EINTR, partial I/O) */
+	if (NNVMEIBT_PREAD_ATOMIC(trace_backup_struct_pread, disk_fd, backup_buffer, backup_size_bytes, pbyte_start, 1) != (ssize_t)backup_size_bytes) {
+		N_Ef(backup_struct_read_failed, "Failed to read structure pba=@ZX", pba_start);
+		goto out;
+	}
+
+	/* Open with O_EXCL | O_NOFOLLOW to prevent symlink attacks */
+	backup_fd = open(filepath, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+	if (backup_fd < 0) {
+		N_Ef(backup_struct_open_failed, "Failed to create @STR @AUTO_ERRNO", filepath);
+		goto out;
+	}
+
+	if (write(backup_fd, backup_buffer, backup_size_bytes) != (ssize_t)backup_size_bytes) {
+		N_Ef(backup_struct_write_failed, "Failed to write @STR @AUTO_ERRNO", filepath);
+		goto out;
+	}
+
+	/* fsync ensures backup is durable before returning success */
+	if (fsync(backup_fd) < 0) {
+		N_Ef(backup_struct_fsync_failed, "Failed to sync @STR @AUTO_ERRNO", filepath);
+		goto out;
+	}
+
+	rv = 0;
+
+out:
+	if (backup_fd >= 0) {
+		close(backup_fd);
+	}
+	NNVMEIBT_BM_FREE(trace_backup_struct_buf_free, backup_buffer);
+	return rv;
+}
+
+/**
+ * Helper: Backup structure and append to manifest JSON
+ * Returns 0 on success, -1 on error
+ */
+static int backup_structure_and_append_manifest(int disk_fd,
+												const char *structure_name,
+												const char *backup_dir,
+												uint64_t pba_start,
+												uint64_t n_blocks,
+												int pblk_size,
+												struct nvmeibt_Str *manifest_json,
+												uint64_t *total_backup_bytes,
+												BOOL is_first)
+{
+	char	structure_file[512];
+	int		rv;
+
+	/* Build structure file path within private backup directory */
+	snprintf(structure_file, sizeof(structure_file), "%s/%s.bin",
+			 backup_dir, structure_name);
+
+	/* Backup the structure */
+	rv = backup_structure(disk_fd, structure_file, pba_start, n_blocks, pblk_size);
+	if (rv < 0) {
+		return rv;
+	}
+
+	/* Update total bytes */
+	*total_backup_bytes += n_blocks * pblk_size;
+
+	/* Append to manifest JSON */
+	if (!is_first) {
+		nvmeibt_Str_sprintf(manifest_json, ",\n");
+	}
+	nvmeibt_Str_sprintf(manifest_json, "    {\n");
+	nvmeibt_Str_sprintf(manifest_json, "      \"name\": \"%s\",\n", structure_name);
+	nvmeibt_Str_sprintf(manifest_json, "      \"file\": \"%s\",\n", structure_file);
+	nvmeibt_Str_sprintf(manifest_json, "      \"pba_start\": %lu,\n", pba_start);
+	nvmeibt_Str_sprintf(manifest_json, "      \"n_blocks\": %lu\n", n_blocks);
+	nvmeibt_Str_sprintf(manifest_json, "    }");
+
+	return 0;
+}
+
+/**
+ * Create modular binary backup of critical disk structures before write
+ * Creates private directory with manifest + structure files
+ * Returns 0 on success, -1 on error
+ * Backup format:
+ *   - directory: /tmp/backup_<device>_<timestamp>/ (0700 permissions)
+ *   - manifest: <directory>/manifest.json (0600 permissions)
+ *   - structure files: <directory>/<structure>.bin (0600 permissions, 10 files total)
+ * NVMesh-only: REQUIRES Main GPT + Metadata GPT + disk_metadata readable
+ */
+static int create_binary_backup(int disk_fd, struct gpt_util_config *config, char *backup_prefix, size_t backup_prefix_size)
+{
+	time_t										now;
+	struct tm									*tm_info;
+	char										timestamp[64];
+	char										device_basename[64];
+	char										*last_slash;
+	char										backup_dir[512];
+	char										manifest_file[600];
+	int											manifest_fd = -1;
+	struct nvmeibt_Str							*manifest_json = NULL;
+	struct nvmeibt_disk_gpt						*main_gpt = NULL;
+	struct nvmeibt_disk_gpt						*metadata_gpt = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
+	struct nvmeibt_disk_metadata				disk_md;
+	int											rv = -1;
+	int											n_entries_blocks;
+	uint64_t									total_backup_bytes = 0;
+	uint64_t									pbyte_s;
+
+	/* Generate backup prefix: /tmp/backup_<device>_<timestamp> */
+	time(&now);
+	tm_info = gmtime(&now);
+	strftime(timestamp, sizeof(timestamp), "%m%d%Y_UTC%H%M%S", tm_info);
+
+	/* Extract device name from path */
+	last_slash = strrchr(config->device_path, '/');
+	if (last_slash) {
+		nvmeibt_strlcpy(device_basename, last_slash + 1, sizeof(device_basename));
+	} else {
+		nvmeibt_strlcpy(device_basename, config->device_path, sizeof(device_basename));
+	}
+
+	/* Create private backup directory: /tmp/backup_<device>_<timestamp>/ */
+	snprintf(backup_dir, sizeof(backup_dir), "/tmp/backup_%s_%s", device_basename, timestamp);
+	snprintf(backup_prefix, backup_prefix_size, "%s", backup_dir);
+	snprintf(manifest_file, sizeof(manifest_file), "%s/manifest.json", backup_dir);
+
+	N_IMf(backup_create_start, "Creating modular binary backup: dev=@STR dir=@STR",
+		  config->device_path, backup_dir);
+
+	/* Create backup directory with restrictive permissions (0700 - owner only) */
+	if (create_backup_directory(backup_dir) < 0) {
+		goto out;
+	}
+
+	/* Allocate GPT structures on heap (too large for stack) */
+	main_gpt = NNVMEIBT_BM_CALLOC(trace_backup_main_gpt, sizeof(*main_gpt));
+	if (!main_gpt) {
+		N_Ef(backup_alloc_main_gpt_failed, "Failed to allocate main_gpt");
+		goto out;
+	}
+
+	metadata_gpt = NNVMEIBT_BM_CALLOC(trace_backup_metadata_gpt, sizeof(*metadata_gpt));
+	if (!metadata_gpt) {
+		N_Ef(backup_alloc_metadata_gpt_failed, "Failed to allocate metadata_gpt");
+		goto out;
+	}
+
+	manifest_json = NNVMEIBT_STR_ALLOC(trace_backup_manifest);
+
+	/* Start JSON manifest */
+	nvmeibt_Str_sprintf(manifest_json, "{\n");
+	nvmeibt_Str_sprintf(manifest_json, "  \"backup_timestamp\": \"%s\",\n", timestamp);
+	nvmeibt_Str_sprintf(manifest_json, "  \"device_path\": \"%s\",\n", config->device_path);
+	nvmeibt_Str_sprintf(manifest_json, "  \"block_size\": %d,\n", config->pblk_size);
+
+	/* Read Main GPT to get structure locations */
+	memset(main_gpt, 0, sizeof(*main_gpt));
+	nvmeibt_strlcpy(main_gpt->main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt->main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, main_gpt,
+										  config->pba_s, config->pba_hw_e, false) < 0) {
+		N_Ef(backup_read_main_gpt_failed, "Failed to read Main GPT for backup");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read Main GPT - device not NVMesh formatted" COL_RESET "\n");
+		goto out;
+	}
+
+	/* Validate device has Metadata GPT (required for all NVMesh devices) */
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(main_gpt);
+	if (!metadata_partition) {
+		N_Ef(backup_no_metadata_partition, "Device has no EXCELERO_METADATA partition");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no metadata partition)" COL_RESET "\n");
+		goto out;
+	}
+
+	memset(metadata_gpt, 0, sizeof(*metadata_gpt));
+	nvmeibt_strlcpy(metadata_gpt->main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt->main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, metadata_gpt,
+										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+		N_Ef(backup_read_metadata_gpt_failed, "Failed to read Metadata GPT");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read Metadata GPT - device corrupted or not NVMesh formatted" COL_RESET "\n");
+		goto out;
+	}
+
+	/* Require disk_metadata partition with serial ID for restore validation */
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(metadata_gpt);
+	if (!disk_md_partition) {
+		N_Ef(backup_no_disk_md_partition, "Device has no disk_metadata partition");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no disk_metadata partition)" COL_RESET "\n");
+		goto out;
+	}
+
+	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+	memset(&disk_md, 0, sizeof(disk_md));
+	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &disk_md) < 0) {
+		N_Ef(backup_read_disk_md_failed, "Failed to read disk_metadata");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read disk_metadata - device corrupted" COL_RESET "\n");
+		goto out;
+	}
+
+	/* Store serial ID in manifest for restore validation */
+	nvmeibt_Str_sprintf(manifest_json, "  \"disk_metadata_serial\": \"%s\",\n", disk_md.native_serial_str);
+	nvmeibt_Str_sprintf(manifest_json, "  \"structures\": [\n");
+
+	/* 1. Backup MBR (block 0) */
+	if (backup_structure_and_append_manifest(disk_fd, "mbr", backup_dir,
+											  0, 1, config->pblk_size, manifest_json,
+											  &total_backup_bytes, true) < 0) {
+		goto out;
+	}
+
+	/* Calculate Main GPT entry blocks */
+	n_entries_blocks = divroundup(main_gpt->header.n_partition_entries * main_gpt->header.size_of_partition_entry, config->pblk_size);
+
+	/* 2. Backup Main GPT Primary Header */
+	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_primary_hdr", backup_dir,
+											  main_gpt->header.my_pba, 1, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 3. Backup Main GPT Primary Entries */
+	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_primary_ent", backup_dir,
+											  main_gpt->header.partition_entry_pba, n_entries_blocks, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 4. Backup Main GPT Alternate Entries (before alternate header) */
+	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_alternate_ent", backup_dir,
+											  main_gpt->header.alternate_pba - n_entries_blocks, n_entries_blocks, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 5. Backup Main GPT Alternate Header */
+	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_alternate_hdr", backup_dir,
+											  main_gpt->header.alternate_pba, 1, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* Backup Metadata GPT structures (REQUIRED for NVMesh - already validated above) */
+	/* Calculate Metadata GPT entry blocks */
+	n_entries_blocks = divroundup(metadata_gpt->header.n_partition_entries * metadata_gpt->header.size_of_partition_entry, config->pblk_size);
+
+	/* 6. Backup Metadata GPT Primary Header */
+	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_primary_hdr", backup_dir,
+											  metadata_gpt->header.my_pba, 1, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 7. Backup Metadata GPT Primary Entries */
+	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_primary_ent", backup_dir,
+											  metadata_gpt->header.partition_entry_pba, n_entries_blocks, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 8. Backup Metadata GPT Alternate Entries */
+	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_alternate_ent", backup_dir,
+											  metadata_gpt->header.alternate_pba - n_entries_blocks, n_entries_blocks, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 9. Backup Metadata GPT Alternate Header */
+	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_alternate_hdr", backup_dir,
+											  metadata_gpt->header.alternate_pba, 1, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* 10. Backup disk_metadata structure (REQUIRED - already validated above) */
+	if (backup_structure_and_append_manifest(disk_fd, "disk_metadata", backup_dir,
+											  disk_md_partition->pba_s, 1, config->pblk_size,
+											  manifest_json, &total_backup_bytes, false) < 0) {
+		goto out;
+	}
+
+	/* Close JSON manifest */
+	nvmeibt_Str_sprintf(manifest_json, "\n  ]\n");
+	nvmeibt_Str_sprintf(manifest_json, "}\n");
+
+	/* Write manifest file */
+	/* O_EXCL | O_NOFOLLOW | 0600: Security hardening (prevent symlink attacks, owner-only access) */
+	manifest_fd = open(manifest_file, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+	if (manifest_fd < 0) {
+		N_Ef(backup_manifest_open_failed, "Failed to create manifest @STR @AUTO_ERRNO", manifest_file);
+		goto out;
+	}
+
+	if (write(manifest_fd, nvmeibt_Str_str(manifest_json), nvmeibt_Str_strlen(manifest_json)) != (ssize_t)nvmeibt_Str_strlen(manifest_json)) {
+		N_Ef(backup_manifest_write_failed, "Failed to write manifest @STR @AUTO_ERRNO", manifest_file);
+		goto out;
+	}
+
+	/* fsync ensures manifest durability before returning success */
+	if (fsync(manifest_fd) < 0) {
+		N_Ef(backup_manifest_fsync_failed, "Failed to sync manifest @STR @AUTO_ERRNO", manifest_file);
+		goto out;
+	}
+
+	N_IMf(backup_create_success, "Modular backup created: dir=@STR total_bytes=@SIZE_T", backup_dir, total_backup_bytes);
+	fprintf(stdout, COL_GREEN "Modular backup created: %s (%lu bytes total)" COL_RESET "\n", backup_dir, total_backup_bytes);
+
+	rv = 0;
+
+out:
+	if (manifest_fd >= 0) {
+		close(manifest_fd);
+	}
+	NNVMEIBT_STR_FREE(trace_backup_manifest_free, manifest_json);
+	NNVMEIBT_BM_FREE(trace_backup_main_gpt_free, main_gpt);
+	NNVMEIBT_BM_FREE(trace_backup_metadata_gpt_free, metadata_gpt);
+	return rv;
+}
 
 /**
  * Prompt user for confirmation before write operations
@@ -169,6 +543,7 @@ static BOOL is_action_read_only(struct gpt_util_config *config)
 	case ACTION_FIX_GPT:
 	case ACTION_FIX_MBR:
 	case ACTION_UPGRADE_GPT:
+	case ACTION_RESTORE_BINARY:
 		return false;
 	default:
 		return false;
@@ -795,12 +1170,15 @@ static int export_gpt_to_json(int disk_fd,
 	struct nvmeibt_Str						*json_output = NULL;
 	struct nvmeibt_disk_gpt					temp_gpt;
 	struct nvmeibt_disk_gpt					main_gpt_for_metadata;
+	struct nvmeibt_disk_gpt					metadata_temp_gpt;
 	struct nvmeibt_disk_mbr					mbr;
 	struct gpt_buffers						bufs;
 	struct gpt_buffers						metadata_bufs;
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_metadata_partition = NULL;
 	struct nvmeibt_disk_metadata			*disk_md = NULL;
+	struct nvmeibt_urn_uuid					mgmt_uuid_urn;
+	struct nvmeibt_urn_uuid					nguid_urn;
 	enum GPT_VALIDITY						primary_header_validity;
 	enum GPT_VALIDITY						alternate_header_validity;
 	enum GPT_VALIDITY						primary_entries_validity;
@@ -812,10 +1190,9 @@ static int export_gpt_to_json(int disk_fd,
 	time_t									now;
 	char									timestamp[64];
 	int										output_fd = -1;
+	uint64_t								pbyte_s;
 	BOOL									is_mismatch = false;
 	BOOL									has_overlaps = false;
-	BOOL									has_metadata_gpt = false;
-	BOOL									has_disk_metadata = false;
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
@@ -874,11 +1251,20 @@ static int export_gpt_to_json(int disk_fd,
 	memset(&main_gpt_for_metadata, 0, sizeof(main_gpt_for_metadata));
 	nvmeibt_strlcpy(main_gpt_for_metadata.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt_for_metadata.main_or_metadata));
 
-	// Check if metadata GPT exists first (determines is_last_section for later exports)
+	// NVMesh-only: REQUIRE metadata GPT exists and is readable
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &main_gpt_for_metadata,
-										  config->pba_s, config->pba_hw_e, false) == 0) {
-		metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt_for_metadata);
-		has_metadata_gpt = (metadata_partition != NULL);
+										  config->pba_s, config->pba_hw_e, false) < 0) {
+		N_Ef(export_read_main_gpt_failed, "Failed to read Main GPT for export");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read Main GPT - device not NVMesh formatted" COL_RESET "\n");
+		goto out;
+	}
+
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt_for_metadata);
+	if (!metadata_partition) {
+		N_Ef(export_no_metadata_partition, "Device has no EXCELERO_METADATA partition");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no metadata partition)" COL_RESET "\n");
+		fprintf(stderr, "  gpt_util only supports NVMesh devices.\n");
+		goto out;
 	}
 
 	// Export pMBR
@@ -892,110 +1278,105 @@ static int export_gpt_to_json(int disk_fd,
 	// Export Main GPT based on --gpt-copy option
 	nvmeibt_Str_sprintf(json_output, ",\n");
 	if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
-		BOOL is_last = !(config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) && !has_metadata_gpt;
+		/* Metadata GPT always exists (NVMesh-only), so never last */
 		export_gpt_copy_entries_to_json(GPT_LEVEL_MAIN, GPT_COPY_PRIMARY,
 										bufs.primary_header, bufs.primary_entries,
-										temp_gpt.max_n_entries, json_output, is_last);
+										temp_gpt.max_n_entries, json_output, false);
 	}
 	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
-		BOOL is_last = !has_metadata_gpt;
+		/* Metadata GPT always exists (NVMesh-only), so never last */
 		export_gpt_copy_entries_to_json(GPT_LEVEL_MAIN, GPT_COPY_ALTERNATE,
 										bufs.alternate_header, bufs.alternate_entries,
-										temp_gpt.max_n_entries, json_output, is_last);
+										temp_gpt.max_n_entries, json_output, false);
 	}
 
-	// Export Metadata GPT (if exists)
-	if (has_metadata_gpt) {
-		struct nvmeibt_disk_gpt	metadata_temp_gpt;
+	// Export Metadata GPT (always exists for NVMesh devices)
+	alloc_gpt_buffers(&metadata_bufs, config->pblk_size, MAX_NUM_GPT_ENTRIES);
+	memset(&metadata_temp_gpt, 0, sizeof(metadata_temp_gpt));
+	metadata_temp_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
+	nvmeibt_strlcpy(metadata_temp_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_temp_gpt.main_or_metadata));
 
-		alloc_gpt_buffers(&metadata_bufs, config->pblk_size, MAX_NUM_GPT_ENTRIES);
-		memset(&metadata_temp_gpt, 0, sizeof(metadata_temp_gpt));
-		metadata_temp_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
-		nvmeibt_strlcpy(metadata_temp_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_temp_gpt.main_or_metadata));
+	// Read all 4 Metadata GPT structures to metadata_bufs
+	nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
+		NULL, disk_fd, config->pblk_size, &metadata_temp_gpt,
+		metadata_partition->pba_s, metadata_partition->pba_e,
+		&meta_primary_header_validity, &meta_alternate_header_validity,
+		&meta_primary_entries_validity, &meta_alternate_entries_validity,
+		metadata_bufs.primary_header, metadata_bufs.alternate_header,
+		metadata_bufs.primary_entries, metadata_bufs.alternate_entries);
 
-		// Read all 4 Metadata GPT structures to metadata_bufs
-		nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
-			NULL, disk_fd, config->pblk_size, &metadata_temp_gpt,
-			metadata_partition->pba_s, metadata_partition->pba_e,
-			&meta_primary_header_validity, &meta_alternate_header_validity,
-			&meta_primary_entries_validity, &meta_alternate_entries_validity,
-			metadata_bufs.primary_header, metadata_bufs.alternate_header,
-			metadata_bufs.primary_entries, metadata_bufs.alternate_entries);
-
-		// Try to locate EXCELERO_DISK_METADATA partition in the primary entries
-		// buffer, and read serial ID/NGUID into disk_md
-		for (int k = 0; k < metadata_temp_gpt.max_n_entries; k++) {
-			if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_bufs.primary_entries[k])) {
-				if (ARE_UUID_EQ(&metadata_bufs.primary_entries[k].partition_type_guid,
-								&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
-					disk_metadata_partition = &metadata_bufs.primary_entries[k];
-					break;
-				}
+	// NVMesh-only: REQUIRE EXCELERO_DISK_METADATA partition
+	for (int k = 0; k < metadata_temp_gpt.max_n_entries; k++) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_bufs.primary_entries[k])) {
+			if (ARE_UUID_EQ(&metadata_bufs.primary_entries[k].partition_type_guid,
+							&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
+				disk_metadata_partition = &metadata_bufs.primary_entries[k];
+				break;
 			}
 		}
-		if (disk_metadata_partition) {
-			uint64_t pbyte_s = disk_metadata_partition->pba_s * config->pblk_size;
-			disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_export_disk_md, PAGE_SIZE, sizeof(*disk_md));
-			if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
-														 pbyte_s, disk_md) == 0) {
-				has_disk_metadata = true;
-			}
-		}
-
-		// Export Metadata GPT
-		if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
-			BOOL is_last = !(config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) && !has_disk_metadata;
-			export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_PRIMARY,
-											metadata_bufs.primary_header,
-											metadata_bufs.primary_entries,
-											metadata_temp_gpt.max_n_entries, json_output, is_last);
-		}
-		if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
-			BOOL is_last = !has_disk_metadata;
-			export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_ALTERNATE,
-											metadata_bufs.alternate_header,
-											metadata_bufs.alternate_entries,
-											metadata_temp_gpt.max_n_entries, json_output, is_last);
-		}
-
-		// Export disk_metadata (if available) - modifiable on apply
-		if (has_disk_metadata) {
-			struct nvmeibt_urn_uuid mgmt_uuid_urn;
-			struct nvmeibt_urn_uuid nguid_urn;
-
-			N_Tf(gpt_export_disk_md, "Exporting disk_metadata structure");
-
-			nvmeibt_Str_sprintf(json_output, "  \"disk_metadata\": {\n");
-
-			/* Static fields (constants - do not edit) */
-			nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%lx\",\n", disk_md->signature);
-
-			/* Readonly fields (from hardware - do not edit) */
-			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
-			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_nsid\": %d,\n", disk_md->nsid);
-			nvmeibt_Str_sprintf(json_output, "    \"_READONLY_crc32\": \"0x%08x\",\n", disk_md->crc32);
-
-			/* Editable fields (safe configuration) */
-			mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
-			nvmeibt_Str_sprintf(json_output, "    \"mgmt_db_uuid\": \"%s\",\n", mgmt_uuid_urn.str);
-			nvmeibt_Str_sprintf(json_output, "    \"disk_metadata_version\": %u,\n", disk_md->disk_metadata_version);
-			nvmeibt_Str_sprintf(json_output, "    \"format_pblk_size\": %u,\n", disk_md->format_pblk_size);
-			nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
-			nvmeibt_Str_sprintf(json_output, "    \"is_md_supported\": %s,\n", disk_md->is_md_supported ? "true" : "false");
-			nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
-			nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
-			nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
-
-			/* Editable with WARNING (system state - dangerous!) */
-			nvmeibt_Str_sprintf(json_output, "    \"_WARNING_last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
-			nvmeibt_Str_sprintf(json_output, "    \"_WARNING_format_request_counter\": %u\n", disk_md->format_request_counter);
-
-			nvmeibt_Str_sprintf(json_output, "  }");
-		}
-
-		free_gpt_buffers(&metadata_bufs);
-		NNVMEIBT_BM_FREE(trace_gpt_export_disk_md_free, disk_md);
 	}
+
+	if (!disk_metadata_partition) {
+		N_Ef(export_no_disk_md_partition, "Device has no disk_metadata partition");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no disk_metadata partition)" COL_RESET "\n");
+		goto out;
+	}
+
+	pbyte_s = disk_metadata_partition->pba_s * config->pblk_size;
+	disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_export_disk_md, PAGE_SIZE, sizeof(*disk_md));
+	if (!disk_md || nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size,
+												 pbyte_s, disk_md) < 0) {
+		N_Ef(export_read_disk_md_failed, "Failed to read disk_metadata");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read disk_metadata - device corrupted" COL_RESET "\n");
+		goto out;
+	}
+
+	// Export Metadata GPT (disk_metadata always last)
+	if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
+		export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_PRIMARY,
+										metadata_bufs.primary_header,
+										metadata_bufs.primary_entries,
+										metadata_temp_gpt.max_n_entries, json_output, false);
+	}
+	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
+		export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_ALTERNATE,
+										metadata_bufs.alternate_header,
+										metadata_bufs.alternate_entries,
+										metadata_temp_gpt.max_n_entries, json_output, false);
+	}
+
+	// Export disk_metadata (always last section)
+	N_Tf(gpt_export_disk_md, "Exporting disk_metadata structure");
+
+	nvmeibt_Str_sprintf(json_output, "  \"disk_metadata\": {\n");
+
+	/* Static fields (constants - do not edit) */
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%lx\",\n", disk_md->signature);
+
+	/* Readonly fields (from hardware - do not edit) */
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_nsid\": %d,\n", disk_md->nsid);
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_crc32\": \"0x%08x\",\n", disk_md->crc32);
+
+	/* Editable fields (safe configuration) */
+	mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
+	nvmeibt_Str_sprintf(json_output, "    \"mgmt_db_uuid\": \"%s\",\n", mgmt_uuid_urn.str);
+	nvmeibt_Str_sprintf(json_output, "    \"disk_metadata_version\": %u,\n", disk_md->disk_metadata_version);
+	nvmeibt_Str_sprintf(json_output, "    \"format_pblk_size\": %u,\n", disk_md->format_pblk_size);
+	nvmeibt_Str_sprintf(json_output, "    \"format_metadata_size\": %u,\n", disk_md->format_metadata_size);
+	nvmeibt_Str_sprintf(json_output, "    \"is_md_supported\": %s,\n", disk_md->is_md_supported ? "true" : "false");
+	nvmeibt_Str_sprintf(json_output, "    \"ldisk_id_str\": \"%s\",\n", disk_md->ldisk_id_str);
+	nguid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->native_nguid_unused);
+	nvmeibt_Str_sprintf(json_output, "    \"native_nguid\": \"%s\",\n", nguid_urn.str);
+
+	/* Editable with WARNING (system state - dangerous!) */
+	nvmeibt_Str_sprintf(json_output, "    \"_WARNING_last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
+	nvmeibt_Str_sprintf(json_output, "    \"_WARNING_format_request_counter\": %u\n", disk_md->format_request_counter);
+
+	nvmeibt_Str_sprintf(json_output, "  }");
+
+	free_gpt_buffers(&metadata_bufs);
+	NNVMEIBT_BM_FREE(trace_gpt_export_disk_md_free, disk_md);
 
 	nvmeibt_Str_sprintf(json_output, "\n}\n");
 
@@ -1011,19 +1392,12 @@ static int export_gpt_to_json(int disk_fd,
 		goto out;
 	}
 
-	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR has_metadata_gpt=@INT has_disk_md=@INT",
-		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option), has_metadata_gpt, has_disk_metadata);
+	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR",
+		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option));
 	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
 
-	// Build status message
-	fprintf(stdout, "  - Exported: pMBR, Main GPT");
-	if (has_metadata_gpt) {
-		fprintf(stdout, ", Metadata GPT");
-		if (has_disk_metadata) {
-			fprintf(stdout, ", disk_metadata");
-		}
-	}
-	fprintf(stdout, "\n");
+	// NVMesh devices always have: pMBR, Main GPT, Metadata GPT, disk_metadata
+	fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, disk_metadata\n");
 
 	// Warn if mismatch or overlaps detected
 	if (is_mismatch) {
@@ -1139,6 +1513,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
 	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON file\n");
 	fprintf(stdout, "  --apply-from=FILE           Apply GPT from JSON file (dry-run by default)\n");
+	fprintf(stdout, "  --restore-binary=FILE       Restore device from binary backup\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
 
 	fprintf(stdout, "Display Options:\n");
@@ -1191,6 +1566,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"print-zero-verify",		no_argument,		0,	'Z'},
 		{"output-json",				required_argument,	0,	'J'},
 		{"apply-from",				required_argument,	0,	'A'},
+		{"restore-binary",			required_argument,	0,	'R'},
 		{"write",					no_argument,		0,	'W'},
 		{"yes",						no_argument,		0,	'Y'},
 		{"direct",					no_argument,		0,	'D'},
@@ -1198,7 +1574,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:ZimfFUWDNY";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:R:ZimfFUWDNY";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1415,6 +1791,16 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			nvmeibt_strlcpy(config->apply_json_file, optarg, sizeof(config->apply_json_file));
 			fprintf(stdout, "Action: Apply GPT from JSON file: %s (dry-run by default)\n", config->apply_json_file);
 			break;
+		case 'R':
+			if (config->action != ACTION_DISPLAY_GPT) {
+				N_Ef(parse_multiple_actions_restore, "Multiple actions specified (only one allowed)");
+				rv = -1;
+				goto out;
+			}
+			config->action = ACTION_RESTORE_BINARY;
+			nvmeibt_strlcpy(config->restore_binary_file, optarg, sizeof(config->restore_binary_file));
+			fprintf(stdout, "Action: Restore from binary backup: %s\n", config->restore_binary_file);
+			break;
 		case 'W':
 			config->write_mode = true;
 			fprintf(stdout, "Write mode: ENABLED (changes will be written to disk)\n");
@@ -1556,6 +1942,8 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 
 	// Check if fix needed
 	if (mbr.signature != (short)MBR_SIGNATURE) {
+		char backup_path[512];
+
 		fprintf(stdout, "MBR signature invalid, attempting fix...\n");
 		if (config->pba_e == 0) {
 			N_Ef(fix_mbr_no_size, "Disk size not detected, please specify with -e");
@@ -1566,6 +1954,11 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 		if (!confirm_write_operation(config, "Fix MBR")) {
 			fprintf(stdout, "MBR fix cancelled.\n");
 			goto out;
+		}
+
+		/* Create binary backup before modifying */
+		if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
+			fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
 		}
 
 		N_IMf(fix_mbr_before, "Fixing MBR on dev=@STR old_signature=@X new_signature=@X pba_e=@ZX",
@@ -1595,11 +1988,17 @@ out:
 static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 {
 	int		rv;
+	char	backup_path[512];
 
 	/* Confirm before fix */
 	if (!confirm_write_operation(config, "Fix GPT from alternate copy")) {
 		fprintf(stdout, "GPT fix cancelled.\n");
 		return -1;
+	}
+
+	/* Create binary backup */
+	if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
+		fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
 	}
 
 	N_IMf(fix_gpt_start, "Fixing GPT from another copy: dev=@STR pba_s=@ZX pba_hw_e=@ZX",
@@ -1688,6 +2087,7 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 	int										rv = -1;
 	struct nvmeibt_disk_gpt					main_gpt;
 	struct nvmeibt_disk_gpt					metadata_gpt;
+	char									backup_path[512];
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_entry;
 
 	memset(&main_gpt, 0, sizeof(main_gpt));
@@ -1701,6 +2101,11 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 	if (!confirm_write_operation(config, "Upgrade GPT (fix n_partition_entries to 8192)")) {
 		fprintf(stdout, "GPT upgrade cancelled.\n");
 		goto out;
+	}
+
+	/* Create binary backup */
+	if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
+		fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
 	}
 
 	// Step 1: Read Main GPT (with backward compatibility validation)
@@ -2427,12 +2832,19 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		} else {
 			/* Confirm before writing */
 			char operation_desc[256];
+			char backup_path[512];
 			snprintf(operation_desc, sizeof(operation_desc), "Apply %d change%s from JSON",
 					 total_changes, total_changes == 1 ? "" : "s");
 			if (!confirm_write_operation(config, operation_desc)) {
 				rv = 0;		/* User cancelled - not an error */
 				goto out;
 			}
+
+			/* Create binary backup before modifying */
+			if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
+				fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
+			}
+
 			fprintf(stdout, "\n" COL_GREEN "=== Writing Changes to Disk ===" COL_RESET "\n");
 		}
 
@@ -2542,6 +2954,434 @@ out:
 }
 
 /**
+ * Helper: Restore a single structure from file to device
+ * Returns 0 on success, -1 on error
+ */
+static int restore_structure(int disk_fd, const char *filepath, uint64_t pba_start, uint64_t n_blocks, int pblk_size)
+{
+	int			rv = -1;
+	int			backup_fd = -1;
+	char		*restore_buffer = NULL;
+	uint64_t	restore_size_bytes;
+	uint64_t	pbyte_start;
+	struct stat	st;
+
+	/* Verify file exists and get size */
+	if (stat(filepath, &st) < 0) {
+		N_Ef(restore_struct_stat_failed, "Cannot stat @STR @AUTO_ERRNO", filepath);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Structure file not found: %s" COL_RESET "\n", filepath);
+		goto out;
+	}
+
+	restore_size_bytes = n_blocks * pblk_size;
+	pbyte_start = pba_start * pblk_size;
+
+	/* Validate file size */
+	if ((uint64_t)st.st_size != restore_size_bytes) {
+		N_Ef(restore_struct_size_mismatch, "File size mismatch: @STR expected=@SIZE_T actual=@SIZE_T",
+			 filepath, restore_size_bytes, (uint64_t)st.st_size);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Structure file size mismatch: %s" COL_RESET "\n", filepath);
+		goto out;
+	}
+
+	restore_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_restore_struct_buf, PAGE_SIZE, restore_size_bytes);
+	if (!restore_buffer) {
+		N_Ef(restore_struct_alloc_failed, "Failed to allocate restore buffer size=@SIZE_T", restore_size_bytes);
+		goto out;
+	}
+
+	backup_fd = NNVMEIBT_OPEN_READ(trace_restore_struct_open, filepath, 1);
+	if (backup_fd < 0) {
+		N_Ef(restore_struct_open_failed, "Cannot open @STR", filepath);
+		goto out;
+	}
+
+	/* Use TOMA I/O helper for robust reading (handles EINTR, partial I/O) */
+	if (NNVMEIBT_PREAD_ATOMIC(trace_restore_struct_read, backup_fd, restore_buffer, restore_size_bytes, 0, 1) != (ssize_t)restore_size_bytes) {
+		N_Ef(restore_struct_read_failed, "Cannot read @STR", filepath);
+		goto out;
+	}
+
+	/* Use TOMA I/O helper for robust writing (min_offset=0 allows MBR writes) */
+	if (NNVMEIBT_PWRITE(trace_restore_struct_write, disk_fd, restore_buffer, restore_size_bytes, pbyte_start, 0) != (ssize_t)restore_size_bytes) {
+		N_Ef(restore_struct_write_failed, "Cannot write structure to device pba=@ZX", pba_start);
+		goto out;
+	}
+
+	rv = 0;
+
+out:
+	if (backup_fd >= 0) {
+		close(backup_fd);
+	}
+	NNVMEIBT_BM_FREE(trace_restore_struct_buf_free, restore_buffer);
+	return rv;
+}
+
+/**
+ * Execute RESTORE_BINARY action
+ * Restores device from modular binary backup (manifest + hidden files)
+ * Manifest file format: JSON with list of structures and their file paths
+ */
+static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
+{
+	int											rv = -1;
+	int											manifest_fd = -1;
+	struct nvmeibt_Str							*manifest_content = NULL;
+	struct mm_json_elem							*json_root = NULL;
+	struct mm_json_elem							*structures_array = NULL;
+	const char									*device_path_in_manifest = NULL;
+	const char									*manifest_serial = NULL;
+	int											block_size_in_manifest = 0;
+	int											i;
+	int											n_structures_restored = 0;
+	uint64_t									total_bytes_restored = 0;
+	struct nvmeibt_disk_gpt						current_main_gpt;
+	struct nvmeibt_disk_gpt						current_metadata_gpt;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
+	struct nvmeibt_disk_metadata				current_disk_md;
+	uint64_t									pbyte_s;
+
+	fprintf(stdout, "\n=== Restoring from Modular Binary Backup ===\n");
+	fprintf(stdout, "Manifest file: %s\n", config->restore_binary_file);
+	fprintf(stdout, "Device: %s\n", config->device_path);
+
+	/* Read and parse manifest file */
+	manifest_fd = NNVMEIBT_OPEN_READ(trace_restore_manifest_open, config->restore_binary_file, 1);
+	if (manifest_fd < 0) {
+		N_Ef(restore_manifest_open_failed, "Cannot open manifest @STR @AUTO_ERRNO", config->restore_binary_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest file not found" COL_RESET "\n");
+		goto out;
+	}
+
+	manifest_content = NNVMEIBT_STR_ALLOC(trace_restore_manifest_read);
+	if (NNVMEIBT_STR_FREAD_ATOMIC(trace_restore_manifest_fread, manifest_content, manifest_fd) < 0) {
+		N_Ef(restore_manifest_read_failed, "Cannot read manifest @STR @AUTO_ERRNO", config->restore_binary_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read manifest file" COL_RESET "\n");
+		goto out;
+	}
+	NNVMEIBT_CLOSE(trace_restore_manifest_close, manifest_fd);
+	manifest_fd = -1;
+
+	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(manifest_content), nvmeibt_Str_strlen(manifest_content));
+	if (!json_root || json_root->type != JSON_E_DICT) {
+		N_Ef(restore_manifest_parse_failed, "Failed to parse manifest JSON @STR", config->restore_binary_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Invalid manifest file format" COL_RESET "\n");
+		goto out;
+	}
+
+	/* Extract metadata from manifest */
+	device_path_in_manifest = json_get_dict_str(json_root, "device_path", NULL);
+	block_size_in_manifest = (int)json_get_dict_num(json_root, "block_size", 0);
+	structures_array = json_get_dict_value(json_root, "structures");
+
+	if (!device_path_in_manifest || block_size_in_manifest == 0 || !structures_array) {
+		N_Ef(restore_manifest_missing_fields, "Manifest missing required fields @STR", config->restore_binary_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Invalid manifest - missing required fields" COL_RESET "\n");
+		goto out;
+	}
+
+	if (structures_array->type != JSON_E_ARRAY) {
+		N_Ef(restore_manifest_bad_structures, "Manifest structures is not an array @STR", config->restore_binary_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Invalid manifest - structures must be array" COL_RESET "\n");
+		goto out;
+	}
+
+	/* Validate block size matches */
+	if (block_size_in_manifest != config->pblk_size) {
+		N_Ef(restore_block_size_mismatch, "Block size mismatch: manifest=@INT device=@INT",
+			 block_size_in_manifest, config->pblk_size);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Block size mismatch (manifest=%d, device=%d)" COL_RESET "\n",
+				block_size_in_manifest, config->pblk_size);
+		goto out;
+	}
+
+	fprintf(stdout, "\nManifest Info:\n");
+	fprintf(stdout, "  Original device: %s\n", device_path_in_manifest);
+	fprintf(stdout, "  Block size: %d\n", block_size_in_manifest);
+	fprintf(stdout, "  Structures: %d\n", structures_array->array.len);
+
+	/* NVMesh devices always have exactly 10 structures - validate upfront */
+	if (structures_array->array.len != 10) {
+		N_Ef(restore_wrong_structure_count, "Invalid structure count: expected=10 actual=@INT", structures_array->array.len);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest has wrong number of structures!" COL_RESET "\n");
+		fprintf(stderr, "  Expected: 10 (1 MBR + 4 Main GPT + 4 Metadata GPT + 1 disk_metadata)\n");
+		fprintf(stderr, "  Actual: %d\n", structures_array->array.len);
+		fprintf(stderr, "  This backup is incomplete or corrupt.\n");
+		rv = -1;
+		goto out;
+	}
+
+	/* Validation 1: Verify all structure files exist and have correct sizes */
+	fprintf(stdout, "\nValidating backup files...\n");
+	for (i = 0; i < structures_array->array.len; i++) {
+		struct mm_json_elem		*structure_elem = structures_array->array.elements[i];
+		const char				*name;
+		const char				*file;
+		uint64_t				n_blocks;
+		uint64_t				expected_size;
+		struct stat				st;
+
+		if (structure_elem->type != JSON_E_DICT) {
+			continue;
+		}
+
+		name = json_get_dict_str(structure_elem, "name", NULL);
+		file = json_get_dict_str(structure_elem, "file", NULL);
+		n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
+
+		if (!name || !file || n_blocks == 0) {
+			continue;
+		}
+
+		/* Guard against integer overflow in size calculation */
+		if (n_blocks > UINT64_MAX / config->pblk_size) {
+			N_Ef(restore_size_overflow, "Size calculation overflow: n_blocks=@ZX pblk_size=@INT", n_blocks, config->pblk_size);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Structure size overflow in manifest!" COL_RESET "\n");
+			fprintf(stderr, "  Structure: %s\n", name);
+			rv = -1;
+			goto out;
+		}
+
+		expected_size = n_blocks * config->pblk_size;
+
+		/* Check file exists */
+		if (stat(file, &st) < 0) {
+			N_Ef(restore_file_missing, "Structure file missing: @STR", file);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Backup file missing: %s" COL_RESET "\n", file);
+			fprintf(stderr, "  Structure: %s\n", name);
+			rv = -1;
+			goto out;
+		}
+
+		/* Validate file size */
+		if ((uint64_t)st.st_size != expected_size) {
+			N_Ef(restore_file_size_wrong, "Structure file size mismatch: @STR expected=@SIZE_T actual=@SIZE_T",
+				 file, expected_size, (uint64_t)st.st_size);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Backup file size mismatch: %s" COL_RESET "\n", file);
+			fprintf(stderr, "  Expected: %lu bytes\n", expected_size);
+			fprintf(stderr, "  Actual: %lu bytes\n", (uint64_t)st.st_size);
+			rv = -1;
+			goto out;
+		}
+
+		fprintf(stdout, "  ✓ %s (%lu bytes)\n", name, (uint64_t)st.st_size);
+	}
+
+	/* Validation 2: Verify serial ID matches device (fail-closed) */
+	fprintf(stdout, "\nValidating device serial ID...\n");
+
+	/* Read current device serial ID */
+	memset(&current_main_gpt, 0, sizeof(current_main_gpt));
+	nvmeibt_strlcpy(current_main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(current_main_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_main_gpt,
+										  config->pba_s, config->pba_hw_e, false) < 0) {
+		N_Ef(restore_read_device_gpt_failed, "Cannot read device Main GPT for validation");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device GPT (device may not be NVMesh formatted)" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&current_main_gpt);
+	if (!metadata_partition) {
+		N_Ef(restore_device_no_metadata, "Device has no metadata partition");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device has no metadata partition (not a valid NVMesh device)" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
+	nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt,
+										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+		N_Ef(restore_read_metadata_gpt_failed, "Cannot read device Metadata GPT for validation");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read Metadata GPT" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
+	if (!disk_md_partition) {
+		N_Ef(restore_no_disk_md_partition, "Device has no disk_metadata partition");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device has no disk_metadata partition" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+	memset(&current_disk_md, 0, sizeof(current_disk_md));
+	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) < 0) {
+		N_Ef(restore_read_disk_md_failed, "Cannot read device disk_metadata for validation");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial ID - blocking restore for safety" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	/* Serial ID is mandatory for all NVMesh backups (fail-closed, no fallback) */
+	manifest_serial = json_get_dict_str(json_root, "disk_metadata_serial", NULL);
+	if (!manifest_serial || strlen(manifest_serial) == 0) {
+		N_Ef(restore_manifest_no_serial, "Manifest missing disk_metadata_serial field");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest missing serial ID for validation" COL_RESET "\n");
+		fprintf(stderr, "  This backup is corrupt or from a non-NVMesh device.\n");
+		fprintf(stderr, "  Restore blocked for safety.\n");
+		rv = -1;
+		goto out;
+	}
+
+	/* Compare serial IDs (fail-closed) */
+	if (strcmp(manifest_serial, current_disk_md.native_serial_str) != 0) {
+		N_Ef(restore_serial_mismatch, "Serial ID mismatch: manifest=@STR device=@STR",
+			 manifest_serial, current_disk_md.native_serial_str);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Serial ID mismatch!" COL_RESET "\n");
+		fprintf(stderr, "  Manifest serial: %s\n", manifest_serial);
+		fprintf(stderr, "  Device serial:   %s\n", current_disk_md.native_serial_str);
+		fprintf(stderr, "  This backup is from a different device!\n");
+		rv = -1;
+		goto out;
+	}
+
+	fprintf(stdout, "  ✓ Serial ID matches: %s\n", current_disk_md.native_serial_str);
+
+	/* Validation 3: Verify PBA boundaries don't exceed device size */
+	fprintf(stdout, "\nValidating PBA boundaries...\n");
+	for (i = 0; i < structures_array->array.len; i++) {
+		struct mm_json_elem		*structure_elem;
+		const char				*name;
+		uint64_t				pba_start;
+		uint64_t				n_blocks;
+		uint64_t				pba_end;
+
+		structure_elem = structures_array->array.elements[i];
+
+		if (structure_elem->type != JSON_E_DICT) {
+			continue;
+		}
+
+		name = json_get_dict_str(structure_elem, "name", NULL);
+		pba_start = (uint64_t)json_get_dict_num(structure_elem, "pba_start", -1);
+		n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
+
+		if (!name || n_blocks == 0) {
+			continue;
+		}
+
+		/* Guard against integer overflow in PBA calculation */
+		if (pba_start > UINT64_MAX - n_blocks) {
+			N_Ef(restore_pba_overflow_calc, "PBA calculation overflow: pba_start=@ZX n_blocks=@ZX", pba_start, n_blocks);
+			fprintf(stderr, COL_RED_BOLD "ERROR: PBA range overflow in manifest!" COL_RESET "\n");
+			fprintf(stderr, "  Structure: %s\n", name);
+			rv = -1;
+			goto out;
+		}
+
+		pba_end = pba_start + n_blocks - 1;
+
+		/* Check against device boundaries */
+		if (pba_end > config->pba_e) {
+			N_Ef(restore_pba_out_of_bounds, "Structure @STR exceeds device: pba_end=@ZX device_pba_e=@ZX",
+				 name, pba_end, config->pba_e);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Structure would overwrite beyond device end!" COL_RESET "\n");
+			fprintf(stderr, "  Structure: %s\n", name);
+			fprintf(stderr, "  PBA range: %lu-%lu\n", pba_start, pba_end);
+			fprintf(stderr, "  Device end: %lu\n", config->pba_e);
+			fprintf(stderr, "  This backup is from a larger device!\n");
+			rv = -1;
+			goto out;
+		}
+	}
+	fprintf(stdout, "  ✓ All structures within device boundaries (device PBA end: %lu)\n", config->pba_e);
+
+	/* Confirm before restore */
+	if (!confirm_write_operation(config, "Restore from modular backup")) {
+		fprintf(stdout, "Restore cancelled.\n");
+		rv = 0;		/* User cancelled - not an error */
+		goto out;
+	}
+
+	fprintf(stdout, "\nRestoring structures...\n");
+
+	/* Restore each structure */
+	for (i = 0; i < structures_array->array.len; i++) {
+		struct mm_json_elem		*structure_elem = structures_array->array.elements[i];
+		const char				*name;
+		const char				*file;
+		uint64_t				pba_start;
+		uint64_t				n_blocks;
+
+		if (structure_elem->type != JSON_E_DICT) {
+			N_Wf(restore_skip_bad_structure, "Skipping non-dict structure at index @INT", i);
+			continue;
+		}
+
+		name = json_get_dict_str(structure_elem, "name", NULL);
+		file = json_get_dict_str(structure_elem, "file", NULL);
+		pba_start = (uint64_t)json_get_dict_num(structure_elem, "pba_start", -1);
+		n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
+
+		if (!name || !file || n_blocks == 0) {
+			N_Wf(restore_skip_incomplete_structure, "Skipping structure @INT with missing fields", i);
+			continue;
+		}
+
+		fprintf(stdout, "  [%d/%d] %s (PBA %lu, %lu blocks)...\n",
+				i + 1, structures_array->array.len, name, pba_start, n_blocks);
+
+		if (restore_structure(disk_fd, file, pba_start, n_blocks, config->pblk_size) < 0) {
+			N_Ef(restore_structure_failed, "Failed to restore structure @STR from @STR", name, file);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to restore %s" COL_RESET "\n", name);
+			/* Warn about partial restore (restore is NOT atomic) */
+			fprintf(stderr, "  Structures restored before failure: %d/10\n", n_structures_restored);
+			fprintf(stderr, COL_YELLOW "  WARNING: Device is in INCONSISTENT state!" COL_RESET "\n");
+			fprintf(stderr, "  Some structures from backup, some original.\n");
+			goto out;
+		}
+
+		n_structures_restored++;
+		total_bytes_restored += n_blocks * config->pblk_size;
+	}
+
+	/* NVMesh devices must have all 10 structures restored successfully */
+	if (n_structures_restored != 10) {
+		N_Ef(restore_incomplete, "Incomplete restore: expected=10 actual=@INT", n_structures_restored);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Only %d/10 structures were restored!" COL_RESET "\n", n_structures_restored);
+		fprintf(stderr, "  Device is in INCONSISTENT state!\n");
+		fprintf(stderr, "  Some structures from backup, some original.\n");
+		rv = -1;
+		goto out;
+	}
+
+	/* Check fsync return value to ensure changes are durable */
+	if (fsync(disk_fd) < 0) {
+		N_Ef(restore_fsync_failed, "Failed to sync device @AUTO_ERRNO");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to sync changes to device" COL_RESET "\n");
+		fprintf(stderr, "  Restore may not be durable!\n");
+		rv = -1;
+		goto out;
+	}
+
+	N_IMf(restore_success, "Device restored from modular backup: dev=@STR manifest=@STR structures=@INT bytes=@SIZE_T",
+		  config->device_path, config->restore_binary_file, n_structures_restored, total_bytes_restored);
+
+	fprintf(stdout, "\n" COL_GREEN "=== Device Restored Successfully ===" COL_RESET "\n");
+	fprintf(stdout, "Device: %s\n", config->device_path);
+	fprintf(stdout, "Structures restored: %d/10\n", n_structures_restored);
+	fprintf(stdout, "Total bytes: %lu\n", total_bytes_restored);
+
+	rv = 0;
+
+out:
+	if (manifest_fd >= 0) {
+		NNVMEIBT_CLOSE(trace_restore_manifest_cleanup, manifest_fd);
+	}
+	if (json_root) {
+		nvmeibt_mm_json_free_kv_tree(json_root);
+	}
+	NNVMEIBT_STR_FREE(trace_restore_manifest_cleanup_str, manifest_content);
+	return rv;
+}
+
+/**
  * Phase 3: Execute DISPLAY_GPT action
  */
 static int execute_display_gpt(int disk_fd, struct gpt_util_config *config)
@@ -2627,6 +3467,10 @@ static int run_gpt_util_op(int argc, char *argv[])
 
 	case ACTION_APPLY_JSON:
 		rv = execute_apply_json(disk_fd, &config);
+		break;
+
+	case ACTION_RESTORE_BINARY:
+		rv = execute_restore_binary(disk_fd, &config);
 		break;
 
 	default:

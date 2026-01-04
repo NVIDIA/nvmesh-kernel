@@ -72,6 +72,17 @@ struct self_test_entry {
 	/* Advanced Features */ \
 	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write", false) \
 	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)", false) \
+	/* Binary Backup & Restore */ \
+	X(binary_backup_restore, "Binary Backup & Restore", "gpt_util apply creates backup + restore works", false) \
+	X(backup_restore_serial_mismatch, "Backup Safety - Serial ID Mismatch Blocked", "gpt_util restore to wrong device (serial mismatch)", true) \
+	X(backup_restore_missing_file, "Backup Safety - Missing Structure File Blocked", "gpt_util restore with missing file", true) \
+	X(backup_restore_corrupted_file, "Backup Safety - Corrupted File Blocked", "gpt_util restore with wrong file size", true) \
+	X(backup_restore_incomplete_manifest, "Backup Safety - Incomplete Manifest Blocked", "gpt_util restore with missing manifest fields", true) \
+	X(backup_restore_pba_overflow, "Backup Safety - PBA Overflow Blocked", "gpt_util restore from larger device to smaller", true) \
+	X(backup_restore_block_size_mismatch, "Backup Safety - Block Size Mismatch Blocked", "gpt_util restore with wrong block size", true) \
+	X(backup_restore_empty_structures, "Backup Safety - Empty Structures Array Blocked", "gpt_util restore with structures: []", true) \
+	X(backup_creation_non_nvmesh_device, "Backup Failure - Non-NVMesh Device Blocked", "gpt_util backup device without metadata GPT", true) \
+	X(restore_mid_failure_file_deleted, "Restore Mid-Failure - File Deleted During Restore", "gpt_util restore with file deleted mid-process", true) \
 	/* Edge Cases */ \
 	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)", false) \
 	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)", true)*/ \

@@ -7,6 +7,7 @@
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dirent.h>		// opendir()
 
 #include "../nvmeibt_debug.h"
 #include "../nvmeibt_disk_metadata.h"
@@ -475,95 +476,60 @@ out:
 }
 
 /**
- * Generate a mock device with intentionally overlapping partitions
+ * Generate a mock device with intentionally overlapping partitions in Main GPT
  * Returns the fd of the created device (caller must close it)
  */
 int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 {
-	int									rv = -1;
-	int									fd = -1;
-	struct nvmeibt_disk_mbr				mbr;
+	int									fd;
 	struct nvmeibt_disk_gpt				main_gpt;
-	union nvmeib_uuid					disk_uuid;
-	union nvmeib_uuid					partition1_uuid;
-	union nvmeib_uuid					partition2_uuid;
-	uint64_t							n_disk_blocks = SELF_TEST_MOCK_DEVICE_BLOCKS;
-	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+	union nvmeib_uuid					overlap_partition_uuid;
 	uint64_t							overlap_start;
 	uint64_t							overlap_end;
 
-	memset(&main_gpt, 0, sizeof(main_gpt));
-	nvmeibt_strlcpy(main_gpt.main_or_metadata, "Main", sizeof(main_gpt.main_or_metadata));
-
-	fd = open(filepath, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	/* Start with standard NVMesh device */
+	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(filepath);
 	if (fd < 0) {
-		N_Ef(selftest_overlap_create_failed, "Failed to create overlap test device @STR @AUTO_ERRNO", filepath);
 		return -1;
 	}
 
-	// Initialize protective MBR
-	nvmeibt_disk_metadata_init_pmbr(&mbr, n_disk_blocks, pblk_size);
-	if (nvmeibt_disk_metadata_write_mbr(NULL, fd, pblk_size, &mbr) < 0) {
-		N_Ef(selftest_overlap_write_mbr_failed, "Failed to write MBR to overlap test device");
-		goto out;
+	/* Read the Main GPT */
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+										  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+		close(fd);
+		return -1;
 	}
 
-	// Initialize Main GPT
-	disk_uuid.ll[0] = 0x1122334455667788ULL;
-	disk_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
+	/* Add overlapping partition to Main GPT (overlaps with existing EXCELERO_METADATA at entry 0) */
+	overlap_partition_uuid.ll[0] = 0x1122334455667788ULL;
+	overlap_partition_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
 
-	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
-											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
-
-	// Add first partition (LBA 258-1500)
-	partition1_uuid.ll[0] = 0xAABBCCDD11223344ULL;
-	partition1_uuid.ll[1] = 0x5566778899AABBCCULL;
-
-	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
-												 &EXCELERO_METADATA_PARTITION_TYPE_GUID,
-												 &partition1_uuid,
-												 main_gpt.header.first_usable_pba,
-												 main_gpt.header.first_usable_pba + 1242,  // 1500 - 258
-												 "partition_1",
-												 strlen("partition_1"))) {
-		N_Ef(selftest_add_part1_failed, "Failed to add partition 1 to overlap test device");
-		goto out;
-	}
-
-	// Add second partition (LBA 1400-1742) - OVERLAPS with first!
-	partition2_uuid.ll[0] = 0x1122334455667788ULL;
-	partition2_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
-
-	overlap_start = main_gpt.header.first_usable_pba + 1142;  // 1400
-	overlap_end = main_gpt.header.last_usable_pba;
+	/* Existing partition 0: pba_s=258, pba_e=1742 (EXCELERO_METADATA) */
+	/* New partition 1: pba_s=1400, pba_e=1742 - OVERLAPS! */
+	overlap_start = main_gpt.entries[0].pba_s + 1142;  // 1400
+	overlap_end = main_gpt.entries[0].pba_e;  // 1742
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
 												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
-												 &partition2_uuid,
+												 &overlap_partition_uuid,
 												 overlap_start,
 												 overlap_end,
-												 "partition_2_OVERLAP",
-												 strlen("partition_2_OVERLAP"))) {
-		N_Ef(selftest_add_part2_failed, "Failed to add partition 2 (overlap) to test device");
-		goto out;
+												 "partition_OVERLAP",
+												 strlen("partition_OVERLAP"))) {
+		close(fd);
+		return -1;
 	}
 
-	// Write Main GPT
-	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &main_gpt, false) < 0) {
-		N_Ef(selftest_store_overlap_gpt_failed, "Failed to store Main GPT with overlaps");
-		goto out;
+	/* Write updated Main GPT with overlap */
+	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, false) < 0) {
+		close(fd);
+		return -1;
 	}
 
 	fsync(fd);
-
-	rv = fd;
-	fd = -1;
-
-out:
-	if (fd >= 0) {
-		close(fd);
-	}
-	return rv;
+	return fd;
 }
 
 /**
@@ -957,6 +923,180 @@ static int SELF_TEST_generate_mock_device_with_mismatch(const char *filepath)
 	return fd;
 }
 
+/**
+ * Helper: Export JSON, modify disk_metadata, apply with --write to trigger backup
+ * Returns 0 on success, -1 on error
+ */
+static int SELF_TEST_trigger_backup_for_device(struct self_test_ctx *ctx,
+												const char *device_path,
+												const char *json_path)
+{
+	int						rv = 0;
+	struct mm_json_elem		*json_root;
+	struct mm_json_elem		*disk_md = NULL;
+	int						i;
+
+	/* Export to JSON */
+	SELF_TEST_ARGV("-a", device_path, "-J", json_path);
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	if (rv != 0) {
+		return rv;
+	}
+
+	/* Modify disk_metadata to trigger a change */
+	json_root = SELF_TEST_parse_json_file(json_path);
+	if (!json_root) {
+		return -1;
+	}
+
+	for (i = 0; i < json_root->dict.len; i++) {
+		if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
+			disk_md = json_root->dict.elements[i].value;
+			break;
+		}
+	}
+
+	if (!disk_md) {
+		nvmeibt_mm_json_free_kv_tree(json_root);
+		return -1;
+	}
+
+	json_set_dict_str(disk_md, "ldisk_id_str", "TRIGGER_BACKUP");
+	rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, json_path);
+	if (rv != 0) {
+		return rv;
+	}
+
+	/* Apply with --write --yes (creates backup) */
+	SELF_TEST_ARGV("-a", device_path, "--apply-from", json_path, "--write", "--yes");
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	return rv;
+}
+
+/**
+ * Find newest backup directory for a device
+ * Returns 0 if found, -1 if not found
+ * Looks for /tmp/backup_<device_basename>_<timestamp>/ directories
+ */
+static int find_newest_backup_directory(const char *device_path, char *manifest_file, size_t manifest_file_size)
+{
+	DIR					*dir;
+	struct dirent		*entry;
+	char				device_basename[64];
+	const char			*last_slash;
+	char				pattern[80];
+	char				backup_dir[512] = {0};
+	time_t				newest_time = 0;
+
+	/* Extract device basename */
+	last_slash = strrchr(device_path, '/');
+	if (last_slash) {
+		nvmeibt_strlcpy(device_basename, last_slash + 1, sizeof(device_basename));
+	} else {
+		nvmeibt_strlcpy(device_basename, device_path, sizeof(device_basename));
+	}
+
+	/* Build search pattern */
+	snprintf(pattern, sizeof(pattern), "backup_%s_", device_basename);
+
+	/* Scan /tmp for backup directories */
+	dir = opendir("/tmp");
+	if (!dir) {
+		return -1;
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strncmp(entry->d_name, pattern, strlen(pattern)) == 0 && entry->d_type == DT_DIR) {
+			char full_path[512];
+			struct stat st;
+			snprintf(full_path, sizeof(full_path), "/tmp/%s", entry->d_name);
+			if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_mtime > newest_time) {
+				newest_time = st.st_mtime;
+				nvmeibt_strlcpy(backup_dir, full_path, sizeof(backup_dir));
+			}
+		}
+	}
+
+	closedir(dir);
+
+	if (backup_dir[0] == '\0') {
+		return -1;
+	}
+
+	/* Build manifest path */
+	snprintf(manifest_file, manifest_file_size, "%s/manifest.json", backup_dir);
+	return 0;
+}
+
+/**
+ * Remove directory recursively
+ */
+static void remove_directory_recursive(const char *dir_path)
+{
+	DIR				*dir;
+	struct dirent	*entry;
+	char			full_path[512];
+
+	dir = opendir(dir_path);
+	if (!dir) {
+		return;
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+			continue;
+		}
+
+		snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+		unlink(full_path);		/* Remove files (directories would fail, which is fine) */
+	}
+
+	closedir(dir);
+	rmdir(dir_path);		/* Remove the directory itself */
+}
+
+/**
+ * Cleanup all backup directories for a device
+ * Removes all /tmp/backup_<device_basename>_<timestamp> directories
+ */
+static void cleanup_backup_files_for_device(const char *device_path)
+{
+	DIR					*dir;
+	struct dirent		*entry;
+	char				device_basename[64];
+	const char			*last_slash;
+	char				pattern[80];
+	char				full_path[512];
+
+	/* Extract device basename */
+	last_slash = strrchr(device_path, '/');
+	if (last_slash) {
+		nvmeibt_strlcpy(device_basename, last_slash + 1, sizeof(device_basename));
+	} else {
+		nvmeibt_strlcpy(device_basename, device_path, sizeof(device_basename));
+	}
+
+	/* Build search pattern */
+	snprintf(pattern, sizeof(pattern), "backup_%s_", device_basename);
+
+	/* Scan /tmp for backup directories */
+	dir = opendir("/tmp");
+	if (!dir) {
+		return;
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		/* Match backup directories: backup_<device>_<timestamp> */
+		if (strncmp(entry->d_name, pattern, strlen(pattern)) == 0 && entry->d_type == DT_DIR) {
+			snprintf(full_path, sizeof(full_path), "/tmp/%s", entry->d_name);
+			remove_directory_recursive(full_path);
+		}
+	}
+
+	closedir(dir);
+}
+
 /********************** Self test cases defined here ************************/
 
 DEFINE_TEST(normal_gpt)
@@ -990,6 +1130,8 @@ DEFINE_TEST(mismatch_gpt)
 		rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("mismatch"), "_READONLY_mismatch_detected", true);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("mismatch"));
 	return rv;
 }
 
@@ -1027,6 +1169,8 @@ DEFINE_TEST(overlap_detection)
 		rv = SELF_TEST_validate_json_bool_flag(TEST_JSON_PATH("overlaps"), "_READONLY_overlaps_detected", true);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("overlaps"));
 	return rv;
 }
 
@@ -1110,6 +1254,8 @@ DEFINE_TEST(json_export_apply)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("export"));
 	return rv;
 }
 
@@ -1134,6 +1280,8 @@ DEFINE_TEST(diff_no_changes)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("diff_baseline"));
 	return rv;
 }
 
@@ -1151,6 +1299,8 @@ DEFINE_TEST(diff_modifications)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("standard"));
 	return rv;
 }
 
@@ -1192,6 +1342,9 @@ DEFINE_TEST(apply_write)
 		rv = SELF_TEST_compare_gpt_binary(device_a, device_b, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, SELF_TEST_MOCK_DEVICE_BLOCKS);
 	}
 
+	unlink(TEST_JSON_PATH("write_test"));
+	cleanup_backup_files_for_device(device_a);
+	cleanup_backup_files_for_device(device_b);
 	unlink(device_a);
 	unlink(device_b);
 	return rv;
@@ -1215,6 +1368,8 @@ DEFINE_TEST(missing_section)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("missing_gpt"));
 	return rv;
 }
 
@@ -1232,6 +1387,8 @@ DEFINE_TEST(overlap_blocking)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("overlap_block"));
 	return rv;
 }
 
@@ -1253,6 +1410,8 @@ DEFINE_TEST(mismatch_blocking)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("mismatch_block"));
 	return rv;
 }
 
@@ -1303,6 +1462,9 @@ DEFINE_TEST(serial_id_mismatch)
 		/* Expecting failure (serial mismatch), so rv != 0 is success for this test */
 	}
 
+	unlink(TEST_JSON_PATH("serial_check"));
+	cleanup_backup_files_for_device(device_a);
+	cleanup_backup_files_for_device(device_b);
 	unlink(device_a);
 	unlink(device_b);
 	return rv;
@@ -1329,6 +1491,8 @@ DEFINE_TEST(missing_serial_id)
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("missing_serial"));
 	return rv;
 }
 
@@ -1442,6 +1606,9 @@ DEFINE_TEST(delete_main_entry)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("delete_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -1593,6 +1760,9 @@ DEFINE_TEST(delete_metadata_entry)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("delete_metadata_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -1707,6 +1877,9 @@ DEFINE_TEST(readonly_fields_ignored)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("readonly_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -1788,6 +1961,9 @@ DEFINE_TEST(static_fields_validated)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("static_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -1905,6 +2081,9 @@ DEFINE_TEST(nguid_preservation)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("nguid_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -1998,6 +2177,9 @@ DEFINE_TEST(warning_fields_apply)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("warning_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -2124,6 +2306,9 @@ DEFINE_TEST(disk_metadata_apply)
 		}
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("disk_md_test"));
+	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
 }
@@ -2149,6 +2334,654 @@ DEFINE_TEST(zero_change_write_skip)
 		fprintf(stdout, COL_GREEN "Verified: Apply with 0 changes completed successfully" COL_RESET "\n");
 	}
 
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("zero_change"));
+	return rv;
+}
+
+DEFINE_TEST(binary_backup_restore)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_binary_test";
+	char						manifest_file[600] = {0};
+	struct mm_json_elem			*manifest_json = NULL;
+	struct mm_json_elem			*structures_array = NULL;
+	int							i;
+
+	/* Step 1: Create original device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Step 2: Export and modify */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("binary_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Modify disk_metadata to trigger write */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("binary_test"));
+		struct mm_json_elem *disk_md = NULL;
+
+		if (json_root) {
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
+					disk_md = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (disk_md) {
+				json_set_dict_str(disk_md, "ldisk_id_str", "MODIFIED_FOR_BACKUP_TEST");
+				rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("binary_test"));
+			} else {
+				rv = -1;
+			}
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Step 3: Apply with --write --yes (creates modular backup automatically) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("binary_test"), "--write", "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		fprintf(stdout, "Modular backup should have been created in /tmp/\n");
+	}
+
+	/* Step 4: Find the backup directory (newest backup_* directory in /tmp) */
+	if (rv == 0) {
+		DIR *dir = opendir("/tmp");
+		struct dirent *entry;
+		time_t newest_time = 0;
+		char backup_dir[512] = {0};
+
+		if (dir) {
+			while ((entry = readdir(dir)) != NULL) {
+				if (strncmp(entry->d_name, "backup_", 7) == 0 && entry->d_type == DT_DIR) {
+					char full_path[512];
+					struct stat st;
+					snprintf(full_path, sizeof(full_path), "/tmp/%s", entry->d_name);
+					if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_mtime > newest_time) {
+						newest_time = st.st_mtime;
+						nvmeibt_strlcpy(backup_dir, full_path, sizeof(backup_dir));
+					}
+				}
+			}
+			closedir(dir);
+		}
+
+		if (backup_dir[0] == '\0') {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		} else {
+			snprintf(manifest_file, sizeof(manifest_file), "%s/manifest.json", backup_dir);
+			fprintf(stdout, "Found backup directory: %s\n", backup_dir);
+			fprintf(stdout, "Manifest: %s\n", manifest_file);
+		}
+	}
+
+	/* Step 4.5: Verify manifest structure and hidden files exist */
+	if (rv == 0) {
+		manifest_json = SELF_TEST_parse_json_file(manifest_file);
+		if (!manifest_json) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Cannot parse manifest" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		structures_array = json_get_dict_value(manifest_json, "structures");
+		if (!structures_array || structures_array->type != JSON_E_ARRAY) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Manifest missing structures array" COL_RESET "\n");
+			rv = -1;
+		} else {
+			fprintf(stdout, "Manifest contains %d structures\n", structures_array->array.len);
+
+			/* Verify all structure files exist */
+			for (i = 0; i < structures_array->array.len; i++) {
+				struct mm_json_elem *structure_elem = structures_array->array.elements[i];
+				const char *file = json_get_dict_str(structure_elem, "file", NULL);
+				const char *name = json_get_dict_str(structure_elem, "name", NULL);
+				struct stat st;
+
+				if (file && stat(file, &st) == 0) {
+					fprintf(stdout, "  ✓ %s (%lu bytes)\n", name ? name : "unknown", (uint64_t)st.st_size);
+				} else {
+					fprintf(stdout, COL_RED_BOLD "  ✗ Missing: %s" COL_RESET "\n", file ? file : "null");
+					rv = -1;
+				}
+			}
+		}
+	}
+
+	/* Step 5: Restore from modular backup */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Step 6: Verify device matches original (check disk_metadata) */
+	if (rv == 0) {
+		struct nvmeibt_disk_gpt					main_gpt;
+		struct nvmeibt_disk_gpt					metadata_gpt;
+		struct nvmeibt_disk_metadata			disk_md;
+		const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+		const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+		int fd = open(device_path, O_RDONLY);
+
+		if (fd >= 0) {
+			memset(&main_gpt, 0, sizeof(main_gpt));
+			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
+				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+				if (metadata_partition) {
+					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
+						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+						if (disk_md_partition) {
+							uint64_t pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+							memset(&disk_md, 0, sizeof(disk_md));
+							if (nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md) == 0) {
+								/* Original mock has empty ldisk_id_str, check it's back to empty (not MODIFIED_FOR_BACKUP_TEST) */
+								if (disk_md.ldisk_id_str[0] != '\0') {
+									fprintf(stdout, COL_RED_BOLD "FAIL: Device not restored (ldisk_id=%s)" COL_RESET "\n", disk_md.ldisk_id_str);
+									rv = -1;
+								} else {
+									fprintf(stdout, COL_GREEN "Verified: Device restored to original state (modular backup)" COL_RESET "\n");
+								}
+							}
+						}
+					}
+				}
+			}
+			close(fd);
+		}
+	}
+
+	/* Cleanup */
+	if (manifest_json) {
+		nvmeibt_mm_json_free_kv_tree(manifest_json);
+	}
+	unlink(TEST_JSON_PATH("binary_test"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_serial_mismatch)
+{
+	int							rv = 0;
+	const char					*device_a = TOMA_ROOT_DIR "tmp/gpt_backup_serial_a";
+	const char					*device_b = TOMA_ROOT_DIR "tmp/gpt_backup_serial_b";
+	char						manifest_file[600] = {0};
+	int							fd_a;
+	int							fd_b;
+
+	/* Create device A with serial "BACKUP-SERIAL-AAA" */
+	fd_a = SELF_TEST_generate_mock_device_with_serial(device_a, "BACKUP-SERIAL-AAA");
+	if (fd_a < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device A" COL_RESET "\n");
+		return -1;
+	}
+	close(fd_a);
+
+	/* Create device B with different serial "BACKUP-SERIAL-BBB" */
+	fd_b = SELF_TEST_generate_mock_device_with_serial(device_b, "BACKUP-SERIAL-BBB");
+	if (fd_b < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device B" COL_RESET "\n");
+		unlink(device_a);
+		return -1;
+	}
+	close(fd_b);
+
+	/* Export from device A and trigger backup */
+	if (rv == 0) {
+		rv = SELF_TEST_trigger_backup_for_device(ctx, device_a, TEST_JSON_PATH("backup_serial"));
+	}
+
+	/* Find the manifest */
+	if (rv == 0) {
+		if (find_newest_backup_directory(device_a, manifest_file, sizeof(manifest_file)) < 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Try to restore to device B (should be BLOCKED by serial mismatch) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_b, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to serial mismatch */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("backup_serial"));
+	cleanup_backup_files_for_device(device_a);
+	cleanup_backup_files_for_device(device_b);
+	unlink(device_a);
+	unlink(device_b);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_missing_file)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_missing";
+	char						manifest_file[600] = {0};
+	struct mm_json_elem			*manifest_json = NULL;
+	struct mm_json_elem			*structures_array = NULL;
+	const char					*first_structure_file = NULL;
+
+	/* Create device and trigger backup */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	if (rv == 0) {
+		rv = SELF_TEST_trigger_backup_for_device(ctx, device_path, TEST_JSON_PATH("backup_missing"));
+	}
+
+	/* Find manifest */
+	if (rv == 0) {
+		if (find_newest_backup_directory(device_path, manifest_file, sizeof(manifest_file)) < 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Parse manifest and delete first structure file */
+	if (rv == 0) {
+		manifest_json = SELF_TEST_parse_json_file(manifest_file);
+		if (manifest_json) {
+			structures_array = json_get_dict_value(manifest_json, "structures");
+			if (structures_array && structures_array->type == JSON_E_ARRAY && structures_array->array.len > 0) {
+				first_structure_file = json_get_dict_str(structures_array->array.elements[0], "file", NULL);
+				if (first_structure_file) {
+					fprintf(stdout, "Deleting structure file: %s\n", first_structure_file);
+					unlink(first_structure_file);
+				}
+			}
+		}
+	}
+
+	/* Try to restore (should be BLOCKED by missing file) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to missing file */
+	}
+
+	/* Cleanup */
+	if (manifest_json) {
+		nvmeibt_mm_json_free_kv_tree(manifest_json);
+	}
+	unlink(TEST_JSON_PATH("backup_missing"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_corrupted_file)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_corrupt";
+	char						manifest_file[600] = {0};
+	struct mm_json_elem			*manifest_json = NULL;
+	struct mm_json_elem			*structures_array = NULL;
+	const char					*first_structure_file = NULL;
+
+	/* Create device and trigger backup */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	if (rv == 0) {
+		rv = SELF_TEST_trigger_backup_for_device(ctx, device_path, TEST_JSON_PATH("backup_corrupt"));
+	}
+
+	/* Find manifest */
+	if (rv == 0) {
+		if (find_newest_backup_directory(device_path, manifest_file, sizeof(manifest_file)) < 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Parse manifest and corrupt first structure file (truncate it) */
+	if (rv == 0) {
+		manifest_json = SELF_TEST_parse_json_file(manifest_file);
+		if (manifest_json) {
+			structures_array = json_get_dict_value(manifest_json, "structures");
+			if (structures_array && structures_array->type == JSON_E_ARRAY && structures_array->array.len > 0) {
+				first_structure_file = json_get_dict_str(structures_array->array.elements[0], "file", NULL);
+				if (first_structure_file) {
+					int fd = open(first_structure_file, O_WRONLY | O_TRUNC);
+					if (fd >= 0) {
+						fprintf(stdout, "Corrupting structure file (truncating): %s\n", first_structure_file);
+						write(fd, "BAD", 3);		/* Write wrong size */
+						close(fd);
+					}
+				}
+			}
+		}
+	}
+
+	/* Try to restore (should be BLOCKED by wrong file size) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to corrupted file */
+	}
+
+	/* Cleanup */
+	if (manifest_json) {
+		nvmeibt_mm_json_free_kv_tree(manifest_json);
+	}
+	unlink(TEST_JSON_PATH("backup_corrupt"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_incomplete_manifest)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_incomplete";
+	int							fd;
+
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Create incomplete manifest manually (missing "structures" field) */
+	fd = open(TEST_JSON_PATH("incomplete_manifest"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd >= 0) {
+		const char *json_content =
+			"{\n"
+			"  \"backup_timestamp\": \"test\",\n"
+			"  \"device_path\": \"" TOMA_ROOT_DIR "tmp/gpt_backup_incomplete\",\n"
+			"  \"block_size\": 4096\n"
+			"}\n";
+		write(fd, json_content, strlen(json_content));
+		close(fd);
+		fprintf(stdout, "Created incomplete manifest (missing 'structures' field)\n");
+	} else {
+		rv = -1;
+	}
+
+	/* Try to restore (should be BLOCKED by missing structures field) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("incomplete_manifest"), "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to missing structures field */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("incomplete_manifest"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_pba_overflow)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_overflow";
+	char						manifest_file[600] = {0};
+	struct mm_json_elem			*manifest_json = NULL;
+	struct mm_json_elem			*structures_array = NULL;
+
+	/* Create device and trigger backup */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	if (rv == 0) {
+		rv = SELF_TEST_trigger_backup_for_device(ctx, device_path, TEST_JSON_PATH("backup_overflow"));
+	}
+
+	/* Find manifest */
+	if (rv == 0) {
+		if (find_newest_backup_directory(device_path, manifest_file, sizeof(manifest_file)) < 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Modify manifest to set a structure's pba_start beyond device end */
+	if (rv == 0) {
+		manifest_json = SELF_TEST_parse_json_file(manifest_file);
+		if (manifest_json) {
+			structures_array = json_get_dict_value(manifest_json, "structures");
+			if (structures_array && structures_array->type == JSON_E_ARRAY && structures_array->array.len > 0) {
+				/* Set last structure's pba_start to 999999 (way beyond device end) */
+				int last_idx = structures_array->array.len - 1;
+				json_set_dict_num(structures_array->array.elements[last_idx], "pba_start", 999999);
+				fprintf(stdout, "Modified manifest: set last structure pba_start=999999\n");
+				rv = SELF_TEST_write_json_file_and_free_kv_tree(manifest_json, manifest_file);
+				manifest_json = NULL;		/* Already freed by helper */
+			} else {
+				rv = -1;
+			}
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Try to restore (should be BLOCKED by PBA overflow) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to PBA out of bounds */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("backup_overflow"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_block_size_mismatch)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_blocksize";
+	char						manifest_file[600] = {0};
+	struct mm_json_elem			*manifest_json = NULL;
+
+	/* Create device and trigger backup */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	if (rv == 0) {
+		rv = SELF_TEST_trigger_backup_for_device(ctx, device_path, TEST_JSON_PATH("backup_blocksize"));
+	}
+
+	/* Find manifest */
+	if (rv == 0) {
+		if (find_newest_backup_directory(device_path, manifest_file, sizeof(manifest_file)) < 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Modify manifest to set wrong block_size */
+	if (rv == 0) {
+		manifest_json = SELF_TEST_parse_json_file(manifest_file);
+		if (manifest_json) {
+			json_set_dict_num(manifest_json, "block_size", 512);		/* Wrong! Should be 4096 */
+			fprintf(stdout, "Modified manifest: set block_size=512 (should be 4096)\n");
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(manifest_json, manifest_file);
+			manifest_json = NULL;		/* Already freed by helper */
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Try to restore (should be BLOCKED by block size mismatch) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to block size mismatch */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("backup_blocksize"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_restore_empty_structures)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_empty";
+	int							fd;
+
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Create manifest with empty structures array */
+	fd = open(TEST_JSON_PATH("empty_structures"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd >= 0) {
+		const char *json_content =
+			"{\n"
+			"  \"backup_timestamp\": \"test\",\n"
+			"  \"device_path\": \"" TOMA_ROOT_DIR "tmp/gpt_backup_empty\",\n"
+			"  \"block_size\": 4096,\n"
+			"  \"disk_metadata_serial\": \"MOCK-SERIAL-12345678\",\n"
+			"  \"structures\": []\n"
+			"}\n";
+		write(fd, json_content, strlen(json_content));
+		close(fd);
+		fprintf(stdout, "Created manifest with empty structures array (structures: [])\n");
+	} else {
+		rv = -1;
+	}
+
+	/* Try to restore (should be BLOCKED by structure count = 0, expected 10) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("empty_structures"), "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure due to structures.len != 10 */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("empty_structures"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(backup_creation_non_nvmesh_device)
+{
+	int									rv = 0;
+	const char							*device_path = TOMA_ROOT_DIR "tmp/gpt_non_nvmesh";
+	int									fd = -1;
+	struct nvmeibt_disk_mbr				mbr;
+	struct nvmeibt_disk_gpt				main_gpt;
+	union nvmeib_uuid					disk_uuid;
+	uint64_t							n_disk_blocks = SELF_TEST_MOCK_DEVICE_BLOCKS;
+	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+
+	/* Create device with Main GPT ONLY (no EXCELERO_METADATA partition) */
+	fd = open(device_path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device" COL_RESET "\n");
+		return -1;
+	}
+
+	/* Initialize MBR */
+	memset(&mbr, 0, sizeof(mbr));
+	nvmeibt_disk_metadata_init_pmbr(&mbr, n_disk_blocks, pblk_size);
+	if (nvmeibt_disk_metadata_write_mbr(NULL, fd, pblk_size, &mbr) < 0) {
+		close(fd);
+		unlink(device_path);
+		return -1;
+	}
+
+	/* Initialize Main GPT with NO partitions (regular GPT disk, not NVMesh) */
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, "Main", sizeof(main_gpt.main_or_metadata));
+	disk_uuid.ll[0] = 0x1122334455667788ULL;
+	disk_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
+
+	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
+											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
+
+	/* Write Main GPT (NO EXCELERO_METADATA partition added) */
+	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &main_gpt, false) < 0) {
+		close(fd);
+		unlink(device_path);
+		return -1;
+	}
+
+	fsync(fd);
+	close(fd);
+
+	/* Try to export (should be BLOCKED - device not NVMesh formatted) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("non_nvmesh"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure - no metadata partition */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("non_nvmesh"));
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(restore_mid_failure_file_deleted)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_restore_mid_fail";
+	char						manifest_file[600] = {0};
+	struct mm_json_elem			*manifest_json = NULL;
+	struct mm_json_elem			*structures_array = NULL;
+	const char					*last_file = NULL;
+
+	/* Create device and trigger backup */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	if (rv == 0) {
+		rv = SELF_TEST_trigger_backup_for_device(ctx, device_path, TEST_JSON_PATH("restore_mid_fail"));
+	}
+
+	/* Find manifest */
+	if (rv == 0) {
+		if (find_newest_backup_directory(device_path, manifest_file, sizeof(manifest_file)) < 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: No backup directory found" COL_RESET "\n");
+			rv = -1;
+		}
+	}
+
+	/* Make LAST structure file unreadable to simulate mid-restore I/O failure */
+	/* This tests partial restore scenario: structures 1-9 restore, structure 10 fails */
+	/* NOTE: True I/O failures (disk full, write errors) are hard to simulate without mocking */
+	if (rv == 0) {
+		manifest_json = SELF_TEST_parse_json_file(manifest_file);
+		if (manifest_json) {
+			structures_array = json_get_dict_value(manifest_json, "structures");
+			if (structures_array && structures_array->type == JSON_E_ARRAY && structures_array->array.len == 10) {
+				/* Get last structure (disk_metadata - index 9) */
+				last_file = json_get_dict_str(structures_array->array.elements[9], "file", NULL);
+				if (last_file) {
+					fprintf(stdout, "Making last structure unreadable: %s\n", last_file);
+					fprintf(stdout, "Restore should process 9/10 before failing\n");
+					chmod(last_file, 0000);		/* Remove all permissions - open() will fail */
+				}
+			}
+		}
+	}
+
+	/* Try to restore - file exists (passes validation) but open() fails during restore */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure during restore with partial restore warning */
+	}
+
+	/* Cleanup */
+	if (manifest_json) {
+		nvmeibt_mm_json_free_kv_tree(manifest_json);
+	}
+	unlink(TEST_JSON_PATH("restore_mid_fail"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
 	return rv;
 }
 
@@ -2216,6 +3049,9 @@ DEFINE_TEST(csv_parsing_path)
 // 		/* Expect failure, but graceful (no crash) */
 // 	}
 
+// 	/* Cleanup */
+// 	unlink(TEST_JSON_PATH("malformed"));
+// 	cleanup_backup_files_for_device(ctx->test_device_path);
 // 	return rv;
 // }
 
@@ -2380,29 +3216,11 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 		close(disk_fd);
 	}
 
-	// Always clean up test files
+	/* Safety net cleanup: Remove common test resources if tests crashed/aborted */
+	/* Each test cleans up its own files - this is just for abnormal termination */
 	unlink(test_device_path);
 	unlink(wrong_device_path);
-	unlink(TEST_JSON_PATH("export"));
-	unlink(TEST_JSON_PATH("mismatch"));
-	unlink(TEST_JSON_PATH("overlaps"));
-	unlink(TEST_JSON_PATH("diff_baseline"));
-	unlink(TEST_JSON_PATH("standard"));
-	unlink(TEST_JSON_PATH("write_test"));
-	unlink(TEST_JSON_PATH("missing_gpt"));
-	unlink(TEST_JSON_PATH("overlap_block"));
-	unlink(TEST_JSON_PATH("mismatch_block"));
-	unlink(TEST_JSON_PATH("serial_check"));
-	unlink(TEST_JSON_PATH("missing_serial"));
-	unlink(TEST_JSON_PATH("delete_test"));
-	unlink(TEST_JSON_PATH("delete_metadata_test"));
-	unlink(TEST_JSON_PATH("readonly_test"));
-	unlink(TEST_JSON_PATH("static_test"));
-	unlink(TEST_JSON_PATH("nguid_test"));
-	unlink(TEST_JSON_PATH("warning_test"));
-	unlink(TEST_JSON_PATH("disk_md_test"));
-	unlink(TEST_JSON_PATH("zero_change"));
-	unlink(TEST_JSON_PATH("malformed"));
+	cleanup_backup_files_for_device(test_device_path);
 
 	return 0;
 }
