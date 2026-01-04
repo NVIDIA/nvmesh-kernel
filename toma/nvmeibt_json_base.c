@@ -15,6 +15,7 @@
 #include <memory.h>
 
 #include "nvmeibt_json_base.h"
+#include "nvmeibt_common.h"
 
 // Memory management macros for JSON parsing (uses standard malloc/free)
 #define JSON_PARSING_ALLOC(name, size) 			malloc(size)
@@ -550,11 +551,11 @@ int json_set_dict_str(struct mm_json_elem *dict_elem, const char *key, const cha
 
 	// Free old string if it was a string type
 	if (elem->type == JSON_E_STR && elem->str) {
-		free(elem->str);
+		NNVMEIBT_TOMA_FREE(json_set_dict_str_free_string, elem->str);
 	}
 
 	elem->type = JSON_E_STR;
-	elem->str = strdup(value);
+	elem->str = NNVMEIBT_TOMA_STRDUP(json_set_dict_str_dup_string, value);
 	return 0;
 }
 
