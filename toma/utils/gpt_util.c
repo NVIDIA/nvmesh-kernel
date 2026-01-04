@@ -264,6 +264,8 @@ static void show_entry_diff(const char *change_type,
 	char old_name[GPT_MAX_PARTITION_NAME_LENGTH + 1] = {0};
 	char new_name[GPT_MAX_PARTITION_NAME_LENGTH + 1] = {0};
 	struct nvmeibt_urn_uuid type_uuid;
+	const char *action_color;
+	const char *action_prefix;
 
 	if (old_entry) {
 		char16_str_to_str(old_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, old_name);
@@ -272,42 +274,55 @@ static void show_entry_diff(const char *change_type,
 		char16_str_to_str(new_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, new_name);
 	}
 
-	fprintf(stdout, "\n  " COL_YELLOW "%s Entry %d:" COL_RESET "\n", change_type, index);
+
+	/* Git-like colors: green for ADD, red for DELETE, yellow for MODIFY */
+	if (old_entry && new_entry) {
+		action_color = COL_YELLOW;
+		action_prefix = "~";
+	} else if (new_entry) {
+		action_color = COL_GREEN;
+		action_prefix = "+";
+	} else {
+		action_color = COL_RED;
+		action_prefix = "-";
+	}
+
+	fprintf(stdout, "\n  %s%s %s Entry %d:" COL_RESET "\n", action_color, action_prefix, change_type, index);
 
 	if (old_entry && new_entry) {
 		// Modified
 		if (strcmp(old_name, new_name) != 0) {
-			fprintf(stdout, "    Name: %s -> %s\n", old_name, new_name);
+			fprintf(stdout, "    • Name: %s -> %s\n", old_name, new_name);
 		}
 		if (old_entry->pba_s != new_entry->pba_s || old_entry->pba_e != new_entry->pba_e) {
-			fprintf(stdout, "    Range: %lu-%lu -> %lu-%lu\n",
+			fprintf(stdout, "    • Range: %lu-%lu -> %lu-%lu\n",
 					old_entry->pba_s, old_entry->pba_e,
 					new_entry->pba_s, new_entry->pba_e);
 		}
 		if (old_entry->attributes != new_entry->attributes) {
-			fprintf(stdout, "    Attributes: 0x%lx -> 0x%lx\n",
+			fprintf(stdout, "    • Attributes: 0x%lx -> 0x%lx\n",
 					old_entry->attributes, new_entry->attributes);
 		}
 	} else if (new_entry) {
 		// Added
 		type_uuid = nvmeibt_union_uuid_to_urn_uuid(&new_entry->partition_type_guid);
-		fprintf(stdout, "    Name: %s\n", new_name);
-		fprintf(stdout, "    Type: %s\n", type_uuid.str);
-		fprintf(stdout, "    Range: %lu-%lu\n", new_entry->pba_s, new_entry->pba_e);
+		fprintf(stdout, "    • Name: %s\n", new_name);
+		fprintf(stdout, "    • Type: %s\n", type_uuid.str);
+		fprintf(stdout, "    • Range: %lu-%lu\n", new_entry->pba_s, new_entry->pba_e);
 	} else {
 		// Deleted
 		type_uuid = nvmeibt_union_uuid_to_urn_uuid(&old_entry->partition_type_guid);
-		fprintf(stdout, "    Name: %s\n", old_name);
-		fprintf(stdout, "    Type: %s\n", type_uuid.str);
-		fprintf(stdout, "    Range: %lu-%lu\n", old_entry->pba_s, old_entry->pba_e);
+		fprintf(stdout, "    • Name: %s\n", old_name);
+		fprintf(stdout, "    • Type: %s\n", type_uuid.str);
+		fprintf(stdout, "    • Range: %lu-%lu\n", old_entry->pba_s, old_entry->pba_e);
 
 		// Warn if this is a critical partition
 		if (ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
 			ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
 			N_Wf(delete_critical_partition, "Deleting critical partition: name=@STR type=@UUID_LE",
 				 old_name, &old_entry->partition_type_guid);
-			fprintf(stdout, "    " COL_RED_BOLD "WARNING: This is a critical NVMesh partition!" COL_RESET "\n");
-			fprintf(stdout, "    " COL_YELLOW "Deletion will make device unusable by NVMesh." COL_RESET "\n");
+			fprintf(stdout, "    " COL_RED_BOLD "⚠  WARNING: This is a critical NVMesh partition!" COL_RESET "\n");
+			fprintf(stdout, "    " COL_YELLOW "   Deletion will make device unusable by NVMesh." COL_RESET "\n");
 		}
 	}
 }
@@ -1097,9 +1112,6 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  --filter-uuid=UUID          Show only entries matching UUID\n");
 	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n");
 	fprintf(stdout, "  -Z, --print-zero-verify     Print commands that verify zeroed ranges\n\n");
-
-	fprintf(stdout, "JSON Export Options:\n");
-	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON\n\n");
 
 	fprintf(stdout, "Apply Options:\n");
 	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n\n");
@@ -2058,42 +2070,42 @@ static int compare_and_show_disk_metadata_diff(const struct nvmeibt_disk_metadat
 	if (memcmp(&current->mgmt_db_uuid, &json_data->mgmt_db_uuid, sizeof(current->mgmt_db_uuid)) != 0) {
 		struct nvmeibt_urn_uuid current_uuid = nvmeibt_union_uuid_to_urn_uuid(&current->mgmt_db_uuid);
 		struct nvmeibt_urn_uuid json_uuid = nvmeibt_union_uuid_to_urn_uuid(&json_data->mgmt_db_uuid);
-		fprintf(stdout, "  mgmt_db_uuid: %s -> %s\n", current_uuid.str, json_uuid.str);
+		fprintf(stdout, "  • mgmt_db_uuid: %s -> %s\n", current_uuid.str, json_uuid.str);
 		n_changes++;
 	}
 	if (strcmp(current->ldisk_id_str, json_data->ldisk_id_str) != 0) {
-		fprintf(stdout, "  ldisk_id_str: %s -> %s\n", current->ldisk_id_str, json_data->ldisk_id_str);
+		fprintf(stdout, "  • ldisk_id_str: %s -> %s\n", current->ldisk_id_str, json_data->ldisk_id_str);
 		n_changes++;
 	}
 	if (current->disk_metadata_version != json_data->disk_metadata_version) {
-		fprintf(stdout, "  disk_metadata_version: %u -> %u\n", current->disk_metadata_version, json_data->disk_metadata_version);
+		fprintf(stdout, "  • disk_metadata_version: %u -> %u\n", current->disk_metadata_version, json_data->disk_metadata_version);
 		n_changes++;
 	}
 	if (current->format_pblk_size != json_data->format_pblk_size) {
-		fprintf(stdout, "  format_pblk_size: %u -> %u\n", current->format_pblk_size, json_data->format_pblk_size);
+		fprintf(stdout, "  • format_pblk_size: %u -> %u\n", current->format_pblk_size, json_data->format_pblk_size);
 		n_changes++;
 	}
 	if (current->format_metadata_size != json_data->format_metadata_size) {
-		fprintf(stdout, "  format_metadata_size: %u -> %u\n", current->format_metadata_size, json_data->format_metadata_size);
+		fprintf(stdout, "  • format_metadata_size: %u -> %u\n", current->format_metadata_size, json_data->format_metadata_size);
 		n_changes++;
 	}
 	if (current->is_md_supported != json_data->is_md_supported) {
-		fprintf(stdout, "  is_md_supported: %s -> %s\n", current->is_md_supported ? "true" : "false", json_data->is_md_supported ? "true" : "false");
+		fprintf(stdout, "  • is_md_supported: %s -> %s\n", current->is_md_supported ? "true" : "false", json_data->is_md_supported ? "true" : "false");
 		n_changes++;
 	}
 
 	/* Check WARNING fields */
 	if (current->last_pba_zeroed != json_data->last_pba_zeroed) {
-		fprintf(stdout, COL_YELLOW "  WARNING: last_pba_zeroed: %lu -> %lu" COL_RESET "\n", current->last_pba_zeroed, json_data->last_pba_zeroed);
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: last_pba_zeroed: %lu -> %lu" COL_RESET "\n", current->last_pba_zeroed, json_data->last_pba_zeroed);
 		n_changes++;
 	}
 	if (current->format_request_counter != json_data->format_request_counter) {
-		fprintf(stdout, COL_YELLOW "  WARNING: format_request_counter: %u -> %u" COL_RESET "\n", current->format_request_counter, json_data->format_request_counter);
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: format_request_counter: %u -> %u" COL_RESET "\n", current->format_request_counter, json_data->format_request_counter);
 		n_changes++;
 	}
 
 	if (n_changes == 0) {
-		fprintf(stdout, COL_GREEN "  No changes" COL_RESET "\n");
+		fprintf(stdout, COL_GREEN "  No changes detected" COL_RESET "\n");
 	}
 
 	return n_changes;
@@ -2139,10 +2151,10 @@ static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
 	}
 
 	fprintf(stdout, "\n" COL_WHITE_BOLD "%s Summary:" COL_RESET "\n", gpt_name);
-	fprintf(stdout, "  Additions:     %d\n", n_additions);
-	fprintf(stdout, "  Deletions:     %d\n", n_deletions);
-	fprintf(stdout, "  Modifications: %d\n", n_modifications);
-	fprintf(stdout, "  Unchanged:     %d\n", n_unchanged);
+	fprintf(stdout, "  • Additions:     %d\n", n_additions);
+	fprintf(stdout, "  • Deletions:     %d\n", n_deletions);
+	fprintf(stdout, "  • Modifications: %d\n", n_modifications);
+	fprintf(stdout, "  • Unchanged:     %d\n", n_unchanged);
 
 	if (n_additions + n_deletions + n_modifications == 0) {
 		fprintf(stdout, COL_GREEN "No changes detected" COL_RESET "\n");
@@ -2179,6 +2191,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	int							n_main_changes = 0;
 	int							n_metadata_changes = 0;
 	int							n_disk_metadata_changes = 0;
+	int							total_changes = 0;
 	uint64_t					pbyte_s = 0;
 
 	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
@@ -2346,9 +2359,8 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	}
 
 	/* Step 8: Write if in write mode */
+	total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes;
 	if (config->write_mode) {
-		fprintf(stdout, "\n" COL_YELLOW "=== Writing Changes to Disk ===" COL_RESET "\n");
-
 		/* Write Main GPT only if there are changes */
 		if (n_main_changes > 0) {
 			/*
@@ -2423,19 +2435,22 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			NNVMEIBT_BM_FREE(trace_apply_disk_md_free2, dma_buffer);
 		}
 
-		fprintf(stdout, "\n" COL_GREEN "=== Changes Successfully Applied ===" COL_RESET "\n");
-		fprintf(stdout, "Device: %s\n", config->device_path);
-		fprintf(stdout, "  Main GPT:      %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
-		fprintf(stdout, "  Metadata GPT:  %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
-		fprintf(stdout, "  disk_metadata: %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
+		if (total_changes > 0) {
+			fprintf(stdout, "\n" COL_GREEN "=== Changes Successfully Applied ===" COL_RESET "\n");
+			fprintf(stdout, "Device: %s\n", config->device_path);
+			fprintf(stdout, "  Main GPT:      %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
+			fprintf(stdout, "  Metadata GPT:  %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
+			fprintf(stdout, "  disk_metadata: %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
+		} else {
+			fprintf(stdout, "No changes detected.\n");
+		}
 	} else {
-		int total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes;
 		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
 		if (total_changes > 0) {
 			fprintf(stdout, COL_YELLOW "Use --write flag to apply %d change%s to disk." COL_RESET "\n",
 					total_changes, total_changes == 1 ? "" : "s");
 		} else {
-			fprintf(stdout, "No changes detected - JSON matches disk.\n");
+			fprintf(stdout, "No changes detected.\n");
 		}
 	}
 
