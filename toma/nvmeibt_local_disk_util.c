@@ -337,44 +337,29 @@ const char *nvmeibt_local_disk_util_nvme_status_to_string(__u32 status)
 
 int nvmeibt_local_disk_util_read_smart_info(int seq, struct nvmeibt_local_disk_util_smart_info *smart_info, int disk_fd)
 {
-	int					smart_fd = -1;
 	int					rv = 0;
-	char 				file_name[100];
-	char				file_data[2048];
 	char 				*tok = NULL;
 	char 				*delim = "\n";
 	char 				*saveptr;
 	int 				i, capab_idx = 0;
 	struct nvme_id_ns 	ns;
 	const struct nvmeibt_disk_flow_params_t *params = NULL;
+	struct nvmeibt_Str	*smart_str = NULL;
 
 	NFIN;
 	if (seq < 0) {
 		// Dummy, already initialized its smart on local_disk_add
 		goto out;
 	}
-
-	N_Tf(trace_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "Filling smart info from /proc/nvmeibs/smart@SEQ", seq);
-
-	memset(file_data, 0, sizeof(file_data));
-	sprintf(file_name, "%s%d", "/proc/nvmeibs/smart", seq);
-
-	smart_fd = NNVMEIBT_OPEN_READ(vgs72k0, file_name, 1);
-
-	if (smart_fd < 0) {
-		N_Wf(warn_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "OOPS! Error while opening the file @FILE_NAME, @AUTO_ERRNO", file_name);
-		rv = -1;
-		goto out;
-	}
-	N_Tf(trace_2_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "Opened file @FILE_NAME for read.", file_name);
-
-	if (read(smart_fd, file_data, sizeof(file_data) - 1) < 0) {
-		N_Wf(warn_1_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "OOPS! Error while reading the file @FILE_NAME, @AUTO_ERRNO", file_name);
+	smart_str = NNVMEIBT_STR_ALLOC(7643hsd);
+	rv = nvmeib_srvr_api_lib_get_disk_smart_info(seq, smart_str);	// The '2' in /dev/nvme1002n1
+	if (rv < 0) {
+		N_Wf(tldursi0, "OOPS! Error while reading smart idx=@INT, rv=@RV, @AUTO_ERRNO", seq, rv);
 		rv = -1;
 		goto out;
 	}
 
-	tok = strtok_r(file_data, delim, &saveptr);
+	tok = strtok_r(smart_str->text_buf, delim, &saveptr);
 
 	while (tok != NULL) {
 		if (strstr(tok, "Pci Address=") != NULL) {
@@ -461,7 +446,7 @@ int nvmeibt_local_disk_util_read_smart_info(int seq, struct nvmeibt_local_disk_u
 			char *val = strstr(tok, "=");
 			nvmeibt_strlcpy(smart_info->time, val + 1, sizeof(smart_info->time));
 		} else {
-			N_Ef(error_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "Unexpected token: \"@TOK\"",  tok);
+			N_Ef(tldursi1, "Unexpected token: \"@TOK\"",  tok);
 			break;
 		}
 
@@ -470,7 +455,7 @@ int nvmeibt_local_disk_util_read_smart_info(int seq, struct nvmeibt_local_disk_u
 
 	// fill metadata_capabilities
 	if (nvmeibt_local_disk_util_nvme_identify_ns(disk_fd, smart_info->Namespace_Id, 0, &ns) != 0) {
-		N_Ef(error_local_disk_util_nvmeibt_local_disk_util_read_smart_info_2, "could not identify namespace for nsid=@NSID on disk id=@SERIAL_NUMBER", smart_info->Namespace_Id, smart_info->Serial_Number);
+		N_Ef(tldursi2, "could not identify namespace for nsid=@NSID on disk id=@SERIAL_NUMBER", smart_info->Namespace_Id, smart_info->Serial_Number);
 		rv = -1;
 		goto out;
 	}
@@ -484,14 +469,14 @@ int nvmeibt_local_disk_util_read_smart_info(int seq, struct nvmeibt_local_disk_u
 		int n_written = 0;
 
 		if (params && params->ignore_metadata && cur_format.ms > 0) {
-			N_Tf(trace_5_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "disk=@STR ignoring LBAF @INT+@INT due to ignore_metadata flow parameter",
+			N_Tf(tldursi3, "disk=@STR ignoring LBAF @INT+@INT due to ignore_metadata flow parameter",
 					smart_info->Serial_Number,
 					1<<cur_format.ds, cur_format.ms);
 			continue;
 		}
 
 		if (params && params->force_512b && cur_format.ds > 9) {
-			N_Tf(trace_5_1_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "disk=@STR ignoring LBAF @INT+@INT due to force_512b flow parameter",
+			N_Tf(tldursi4, "disk=@STR ignoring LBAF @INT+@INT due to force_512b flow parameter",
 					smart_info->Serial_Number,
 					1<<cur_format.ds, cur_format.ms);
 			continue;
@@ -502,20 +487,19 @@ int nvmeibt_local_disk_util_read_smart_info(int seq, struct nvmeibt_local_disk_u
 					  "{\"dataBS\": %d, \"metaBS\": %d},", 1 << cur_format.ds, cur_format.ms);
 
 		if (n_written < 0) {
-			N_Ef(error_1_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "Unable to write format option bs=@DS ms=@MS", 1 << cur_format.ds, cur_format.ms);
+			N_Ef(tldursi5, "Unable to write format option bs=@DS ms=@MS", 1 << cur_format.ds, cur_format.ms);
 			rv = -1;
 			goto out;
 		}
 		capab_idx += n_written;
 	}
-	N_Tf(trace_3_local_disk_util_nvmeibt_local_disk_util_read_smart_info, "disk=@STR wrote format options", smart_info->Serial_Number);
+	N_Tf(tldursi6, "disk=@STR wrote format options", smart_info->Serial_Number);
 
 	/* Replace trailing comma with closing bracket of array */
 	smart_info->format_options[max(capab_idx - 1, 1)] = ']';
 
 out:
-	NNVMEIBT_CLOSE(trace_4_local_disk_util_nvmeibt_local_disk_util_read_smart_info, smart_fd);
-
+	NNVMEIBT_STR_FREE(tldursi7, smart_str);
 	NFOUT;
 	rv = 0;
 	return rv;
@@ -695,25 +679,13 @@ out:
 
 static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct nvmeibt_ascii_uuid *native_serial, char *pcie_slot, char *pcie_bdf)
 {
-	DIR *dir = NULL;
 	char block_path[256];
 	char link_path[256]="";
-	int rc;
-	int fd = 0;
-
 	char					line[256];
 	__kernel_size_t			line_len;
 	bool					is_nvmesh_device;
 	int						chardev_file_idx;
-	char					nvmesh_device_no;
-	const char				nvmesh_smart_prefix[] = "/proc/nvmeibs/smart";
-	struct nvmeibt_Str		*file_content_str = NULL;
-	const char				PCI_line_key[] = "Pci Address=";
-	char					*scan_line_ptr;
-	char					*scan_line_end;
-	char					*content_end;
 	char					bdf_for_slot_file[BDF_MAX_LEN + 1];
-	int						PCI_line_key_len = strlen(PCI_line_key);
 	int						bdf_len;
 
 	pcie_slot[0] = '\0';
@@ -723,24 +695,24 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 	is_nvmesh_device = nvmeibt_local_disk_is_nvmesh_dev_name(dev_file_name, &chardev_file_idx);
 	if (chardev_file_idx < 0) {
 		N_Ef(2bxus0w, "Bad dev_file_name='@STR'", dev_file_name);
-		goto out;
+		return;
 	}
 	//
 	N_Tf(4ysiwmc, "@STR is_nvmesh_device=@INT", dev_file_name, is_nvmesh_device);
 	if (is_nvmesh_device) {
-		// Read from our own, non_standard, smart_file /proc/nvmeibs/smart<i>
-		nvmesh_device_no = chardev_file_idx - 1000;		// The '2' in /dev/nvme1002n1
-		snprintf(link_path, sizeof(link_path), "%s%d", nvmesh_smart_prefix, nvmesh_device_no);		// /proc/nvmeibs/smart2
-		fd = NNVMEIBT_OPEN_READ(tvcjhs3, link_path, 1);
-		if (fd < 0) {
-			N_ETf(6cvsk40, "Error while opening the file=@STR @AUTO_ERRNO", link_path);
-			goto out;
+		const char				PCI_line_key[] = "Pci Address=";
+		int						PCI_line_key_len = strlen(PCI_line_key);
+		struct nvmeibt_Str *smart_str = NNVMEIBT_STR_ALLOC(7643hsd1);
+		char *scan_line_ptr, *scan_line_end, *content_end;
+		int rc = nvmeib_srvr_api_lib_get_disk_smart_info(chardev_file_idx, smart_str);	// The '1002' in /dev/nvme1002n1
+		if (rc < 0) {
+			N_ETf(6cvsk40, "Error while getting smart info idx=@INT, rv=@RV, @AUTO_ERRNO", rc, chardev_file_idx);
+			NNVMEIBT_STR_FREE(0amnfue, smart_str);
+			return;
 		}
-		file_content_str = NNVMEIBT_STR_ALLOC(7643hsd);
-		NNVMEIBT_STR_FREAD(ycbsm4j, file_content_str, fd);
 
-		content_end = (char *)(nvmeibt_Str_str(file_content_str) + nvmeibt_Str_strlen(file_content_str));
-		scan_line_ptr = (char *)nvmeibt_Str_str(file_content_str);
+		content_end = (char *)(nvmeibt_Str_str(smart_str) + nvmeibt_Str_strlen(smart_str));
+		scan_line_ptr = (char *)nvmeibt_Str_str(smart_str);
 		while (scan_line_ptr < content_end) {
 			// Get a nice, null_terminated line
 			scan_line_end = (char *)memchr(scan_line_ptr, '\n', content_end - scan_line_ptr);
@@ -761,8 +733,7 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 				bdf_len = strlen(line + PCI_line_key_len);
 				if (bdf_len > BDF_MAX_LEN) {
 					N_Wf(xxyy716, "BDF len>@INT, ignoring", BDF_MAX_LEN);
-				}
-				else {
+				} else {
 					nvmeibt_strlcpy(pcie_bdf, line + PCI_line_key_len, bdf_len + 1);	// 0000:87:00.0
 					nvmeibt_strlcpy(bdf_for_slot_file, line + PCI_line_key_len, bdf_len + (1 - BDF_FOR_SLOT_FILE_LEN_DIFF));	// 0000:87:00
 					N_Tf(vbnjhsd, "@STR BDF=@STR BDF_for_slot_file=@STR", dev_file_name, pcie_bdf, bdf_for_slot_file);
@@ -771,7 +742,9 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 			}
 		}
 		block_path[0] = '\0';	// Irelevant for nvmesh devices
+		NNVMEIBT_STR_FREE(0amnfue1, smart_str);
 	} else {	// A stock driver device such as /dev/nvme2n1
+		int rc;
 		/*
 		 * Seems like the most standard technique is
 		 * # ls -l  /sys/class/nvme/nvme2
@@ -822,15 +795,15 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 			extract_BDF_out_of_file_name(link_path, pcie_bdf, bdf_for_slot_file);
 		}
 	}
-	N_Tf(bhsa84k, "block_path=@STR link_path=@STR fd=@INT BDF=@STR BDF_for_slot_file=@STR", block_path, link_path, fd, pcie_bdf, bdf_for_slot_file);
+	N_Tf(bhsa84k, "block_path=@STR link_path=@STR BDF=@STR BDF_for_slot_file=@STR", block_path, link_path, pcie_bdf, bdf_for_slot_file);
 
 	if (pcie_bdf[0] == '\0') {
 		N_Wf(icns47m, "Failed to find bdf for dev_file_name=@STR", dev_file_name);
 		goto out;
 	}
 
-	// Look in sysfs for the slot whose address file contains our BDF. Each slot is represented by a directory.
-	dir = opendir("/sys/bus/pci/slots");
+	{ // Look in sysfs for the slot whose address file contains our BDF. Each slot is represented by a directory.
+	DIR *dir = opendir("/sys/bus/pci/slots");
 	if (!dir)
 		goto out;
 	while(1) {
@@ -841,21 +814,20 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 		if (result->d_type == DT_DIR && result->d_name[0] != '.') {
 			char path[512];
 			char addr[32]="";
-			rc = -1;
-
+			int rc = -1, fd;
 			snprintf(path, sizeof(path), "/sys/bus/pci/slots/%s/address", result->d_name);
 			fd = open(path, O_RDONLY);
 			if (fd < 0) {
 				N_Ef(5dimslp, "Failed to open file=@STR @AUTO_ERRNO", path);
-				goto out;
+				closedir(dir);
+				return;;
 			}
 			rc = read(fd, addr, sizeof(addr));
+			close(fd);
 			if (rc < 1) {
 				N_Tf(czjq83j, "Failed read(@STR) rc=@INT @AUTO_ERRNO", path, rc);
-				close(fd);
 				continue;
 			}
-			close(fd);
 			addr[rc-1] = 0;		// chop the newline
 			if (strcmp(bdf_for_slot_file, addr)==0) {
 				nvmeibt_strlcpy(pcie_slot, result->d_name, NVMEIBS_DISKS_CSV_STATUS_LEN);
@@ -864,11 +836,9 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 		}
 	}
 	N_Tf(d629dj4, "dev=@STR pcie_slot=@STR", dev_file_name, pcie_slot);
-
-out:
-	NNVMEIBT_STR_FREE(0amnfue, file_content_str);
-	if (dir)
-		closedir(dir);
+	closedir(dir);
+	}
+out:;
 }
 
 void nvmeibt_local_disk_util_set_attention_LED(const char *pcie_slot, int value)

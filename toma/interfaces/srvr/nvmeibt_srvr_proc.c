@@ -301,9 +301,8 @@ int nvmeibt_toma_send_buf_to_client(const struct nvmeibs_toma_client_proc_buf *m
 	return rv;
 }
 
-static int __get_srvr_csv(struct nvmeibt_Str *str, bool is_disks)
+static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
 {
-	const char *path = (is_disks ? TOMA_ROOT_DIR "proc/nvmeibs/disks.csv" : TOMA_ROOT_DIR "proc/nvmeibs/nics.csv");
 	int rv = 0, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
 	if (fd > 0) {
 		const int n_recv_bytes = NNVMEIBT_STR_FREAD_ATOMIC(salgcd2, str, fd);
@@ -317,8 +316,17 @@ static int __get_srvr_csv(struct nvmeibt_Str *str, bool is_disks)
 	return rv;
 }
 
-int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str) { return __get_srvr_csv(str, true); }
-int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str) { return __get_srvr_csv(str, false); }
+int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str) { return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"); }
+int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str) { return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/nics.csv"); }
+int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
+{
+	char path[256];
+	if (seq > 1000)
+		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
+	snprintf(path, sizeof(path), TOMA_ROOT_DIR "proc/nvmeibs/smart%d", seq);
+	return __get_srvr_buf_info(str, path);
+}
+
 
 /* Original shell code:
 * 		pcidrivers_base_path=/sys/bus/pci/drivers
