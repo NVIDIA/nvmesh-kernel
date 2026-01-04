@@ -1183,7 +1183,7 @@ DEFINE_TEST(apply_write)
 		}
 	}
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("write_test"), "--write");
+		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("write_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -1410,7 +1410,7 @@ DEFINE_TEST(delete_main_entry)
 
 	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("delete_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("delete_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -1544,7 +1544,7 @@ DEFINE_TEST(delete_metadata_entry)
 
 	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("delete_metadata_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("delete_metadata_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -1670,7 +1670,7 @@ DEFINE_TEST(readonly_fields_ignored)
 
 	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("readonly_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("readonly_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -1754,7 +1754,7 @@ DEFINE_TEST(static_fields_validated)
 
 	/* Apply with --write (should succeed - static fields ignored) */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("static_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("static_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -1866,7 +1866,7 @@ DEFINE_TEST(nguid_preservation)
 
 	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("nguid_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("nguid_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -1958,7 +1958,7 @@ DEFINE_TEST(warning_fields_apply)
 
 	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("warning_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("warning_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -2053,7 +2053,7 @@ DEFINE_TEST(disk_metadata_apply)
 
 	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("disk_md_test"), "--write");
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("disk_md_test"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
@@ -2140,7 +2140,7 @@ DEFINE_TEST(zero_change_write_skip)
 	/* Apply same JSON back with --write (0 changes) */
 	if (rv == 0) {
 		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
-		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("zero_change"), "--write");
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("zero_change"), "--write", "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 

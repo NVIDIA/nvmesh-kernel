@@ -116,9 +116,43 @@ struct gpt_util_config {
 	char					apply_json_file[256];	// Input JSON filename to apply
 	BOOL					write_mode;				// true = write changes, false = dry-run (default)
 
+	// Confirmation options
+	BOOL					skip_confirmation;		// Skip interactive confirmation (--yes flag)
+
 	// I/O options
 	enum O_DIRECT_MODE		o_direct_mode;			// O_DIRECT behavior
 };
+
+/**
+ * Prompt user for confirmation before write operations
+ * Returns true if user confirms, false if user cancels
+ * Always returns true if skip_confirmation is set
+ */
+static BOOL confirm_write_operation(struct gpt_util_config *config, const char *operation_description)
+{
+	char response[10];
+
+	if (config->skip_confirmation) {
+		return true;		// --yes flag: auto-confirm
+	}
+
+	fprintf(stdout, "\n" COL_YELLOW "WARNING: This operation will modify the disk!" COL_RESET "\n");
+	fprintf(stdout, "Operation: %s\n", operation_description);
+	fprintf(stdout, "Device: %s\n", config->device_path);
+	fprintf(stdout, "\nProceed? [y/N]: ");
+	fflush(stdout);
+
+	if (fgets(response, sizeof(response), stdin) == NULL) {
+		return false;		// EOF or error
+	}
+
+	if (response[0] == 'y' || response[0] == 'Y') {
+		return true;
+	}
+
+	fprintf(stdout, "Operation cancelled by user.\n");
+	return false;
+}
 
 // Check if operation is read-only (no disk modifications)
 // Considers both action type and mode (e.g., dry-run vs write)
@@ -1114,7 +1148,8 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -Z, --print-zero-verify     Print commands that verify zeroed ranges\n\n");
 
 	fprintf(stdout, "Apply Options:\n");
-	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n\n");
+	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n");
+	fprintf(stdout, "  --yes, -Y                   Skip confirmation prompt (auto-confirm writes)\n\n");
 
 	fprintf(stdout, "I/O Options:\n");
 	fprintf(stdout, "  --direct                    Force O_DIRECT even for regular files (may fail)\n");
@@ -1157,12 +1192,13 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"output-json",				required_argument,	0,	'J'},
 		{"apply-from",				required_argument,	0,	'A'},
 		{"write",					no_argument,		0,	'W'},
+		{"yes",						no_argument,		0,	'Y'},
 		{"direct",					no_argument,		0,	'D'},
 		{"no-direct",				no_argument,		0,	'N'},
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:ZimfFUWDN";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:ZimfFUWDNY";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1383,6 +1419,10 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			config->write_mode = true;
 			fprintf(stdout, "Write mode: ENABLED (changes will be written to disk)\n");
 			break;
+		case 'Y':
+			config->skip_confirmation = true;
+			fprintf(stdout, "Confirmation: SKIPPED (--yes flag)\n");
+			break;
 		case 'D':
 			config->o_direct_mode = O_DIRECT_FORCE_ON;
 			fprintf(stdout, "I/O mode: Force O_DIRECT (may fail for regular files)\n");
@@ -1522,6 +1562,12 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 			goto out;
 		}
 
+		/* Confirm before write */
+		if (!confirm_write_operation(config, "Fix MBR")) {
+			fprintf(stdout, "MBR fix cancelled.\n");
+			goto out;
+		}
+
 		N_IMf(fix_mbr_before, "Fixing MBR on dev=@STR old_signature=@X new_signature=@X pba_e=@ZX",
 			  config->device_path, mbr.signature, (short)MBR_SIGNATURE, config->pba_e);
 
@@ -1549,6 +1595,12 @@ out:
 static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 {
 	int		rv;
+
+	/* Confirm before fix */
+	if (!confirm_write_operation(config, "Fix GPT from alternate copy")) {
+		fprintf(stdout, "GPT fix cancelled.\n");
+		return -1;
+	}
 
 	N_IMf(fix_gpt_start, "Fixing GPT from another copy: dev=@STR pba_s=@ZX pba_hw_e=@ZX",
 		  config->device_path, config->pba_s, config->pba_hw_e);
@@ -1644,6 +1696,12 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
 
 	fprintf(stdout, "\n=== GPT Upgrade Check (n_partition_entries -> %d) ===\n\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
+
+	/* Confirm before upgrade */
+	if (!confirm_write_operation(config, "Upgrade GPT (fix n_partition_entries to 8192)")) {
+		fprintf(stdout, "GPT upgrade cancelled.\n");
+		goto out;
+	}
 
 	// Step 1: Read Main GPT (with backward compatibility validation)
 	fprintf(stdout, "Reading Main GPT...\n");
@@ -2361,6 +2419,23 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	/* Step 8: Write if in write mode */
 	total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes;
 	if (config->write_mode) {
+		if (total_changes == 0) {
+			fprintf(stdout, "\n" COL_GREEN "=== No Changes Detected - Skipping Write ===" COL_RESET "\n");
+			fprintf(stdout, "JSON matches current disk state.\n");
+			rv = 0;
+			goto out;
+		} else {
+			/* Confirm before writing */
+			char operation_desc[256];
+			snprintf(operation_desc, sizeof(operation_desc), "Apply %d change%s from JSON",
+					 total_changes, total_changes == 1 ? "" : "s");
+			if (!confirm_write_operation(config, operation_desc)) {
+				rv = 0;		/* User cancelled - not an error */
+				goto out;
+			}
+			fprintf(stdout, "\n" COL_GREEN "=== Writing Changes to Disk ===" COL_RESET "\n");
+		}
+
 		/* Write Main GPT only if there are changes */
 		if (n_main_changes > 0) {
 			/*
@@ -2441,8 +2516,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			fprintf(stdout, "  Main GPT:      %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
 			fprintf(stdout, "  Metadata GPT:  %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
 			fprintf(stdout, "  disk_metadata: %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
-		} else {
-			fprintf(stdout, "No changes detected.\n");
 		}
 	} else {
 		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
