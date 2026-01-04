@@ -96,7 +96,7 @@ limitations under the License.
    - `got EVENT_DISK_CHANGE disk=S3HCNX0K700658.1 op=a` - netlink
    - process_waiting_udev_events
 26. Disk report `write_one_disk_json`
-27. Smart info  `/proc/nvmeibs/smartX`
+27. Smart info / disks csv
 28. Store processes  `n_stores_in_progress`
 29. Disks
 ```
@@ -255,7 +255,7 @@ end
 #### Get TOMA status
 - To generate status file: `pkill -10 nvmeibt_toma`
 	- Default path of stat is `/var/log/nvmesh/toma_*.stat`
-- To live monitor status: `/proc/nvmeibs/toma_status/all`
+- To live monitor status of: `/opt/nvmesh/common-repo/tools/toma_rpc status all`
 
 ****
 #### Execution types
