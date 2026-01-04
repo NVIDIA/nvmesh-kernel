@@ -356,7 +356,7 @@ int ioctl(int fd, unsigned long int req, ...) {
 
 	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
-		struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
+		const struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
 		struct nvme_admin_cmd *cmd =  va_arg(ap, struct nvme_admin_cmd*);
 		BUG_ON(!nvme_dev);
 		N_Df(sbioctnv, "ioctl:nvme:admin opcode=@INT", cmd->opcode);

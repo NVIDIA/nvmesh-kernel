@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include "common/nvmeib_shared.h"
 
 // Forward declarations
 
@@ -27,16 +28,15 @@ static const char local_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_nv
 #define TARGET_DEVICES_FILE TOMA_ROOT_DIR "var/opt/nvmesh/.target_devices"
 #define DISKS_CSV_FILE TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"						// Emulates the work of kernel server.
 
-// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
-#define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"
+#define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 
-static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme0n1", SANDBOX_DEV_DIR "nvme0n1", true, 2048 },
+static const struct sandbox_nvme_device nvme_devices[] = {
+	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  2048 },
 	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 2000 },
 	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 2000 },
 };
 
-#define NVME_DEVICE_COUNT (sizeof(nvme_devices) / sizeof(nvme_devices[0]))
+#define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
 
 static void mkdir_if_not_exists(const char *path);
 static void write_file(const char *path, const char *content);
@@ -50,7 +50,7 @@ void sandbox_nvme_init(void)
 
 	// Create mock NVMe block device files.
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		struct sandbox_nvme_device *d = &nvme_devices[i];
+		const struct sandbox_nvme_device *d = &nvme_devices[i];
 		const char *template_src = d->stock_disk ? stock_disk_template_file_path :
 							   local_disk_template_file_path;
 		if (disk_init(d->device_path, template_src) != 0) {
@@ -67,13 +67,14 @@ void sandbox_nvme_init(void)
 
 	// Generate the disk data files.
 	write_file(TARGET_DEVICES_FILE, "nvme,STKD_SN_001,5121,STKD_MN_001,1\n");
-	write_file(DISKS_CSV_FILE, "id,blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor\n"
-				   "NVMD_SN_002.1,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122\n"
-				   "NVMD_SN_003.1,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123\n");
+
+	write_file(DISKS_CSV_FILE, NVMEIBS_DISKS_CSV_HEADER "\n"
+		"NVMD_SN_002.1,2000,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122,SAMSUNG MZWLL800HEHP-00003\n"
+		"NVMD_SN_003.1,2000,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123,KIOXIA KXK600-02\n");
 
 	// Create locks files for NVMesh disks (required for mmap during disk add)
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		struct sandbox_nvme_device *d = &nvme_devices[i];
+		const struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (!d->stock_disk) {
 			char locks_path[256];
 			int fd;
@@ -122,12 +123,11 @@ static void write_file(const char *path, const char *content)
 	}
 }
 
-/// Given the device node path (e.g. `_root/dev/nvme0n1`), get the sandbox device definition struct, or NULL if none.
-struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path)
+const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path)
 {
 	int i;
 	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		struct sandbox_nvme_device *d = &nvme_devices[i];
+		const struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (!strcmp(d->device_path, path)) {
 			N_Tf(kdj3946, "found device for path=@STR", path);
 			return d;
@@ -143,7 +143,7 @@ int sandbox_nvme_get_device_count(void)
 	return (int)NVME_DEVICE_COUNT;
 }
 
-struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index)
+const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index)
 {
 	if (index < 0 || index >= (int)NVME_DEVICE_COUNT)
 		return NULL;
