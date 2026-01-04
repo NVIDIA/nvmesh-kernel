@@ -280,15 +280,14 @@ struct t_sandbox_all {
 	struct TSB_server_toma_status_req_simu s_req_simu;
 	struct TSB_netlink_mock {
 		struct TSB_sock_otherside o;
-		// Thread-safe message queue for netlink responses
-		pthread_mutex_t mutex;
-		// Simple fixed-size queue of messages
-		#define TSB_NL_QUEUE_SIZE 16
+		unsigned n_recv_msgs;
+		pthread_mutex_t mutex;			// Thread-safe message queue for netlink responses
+		#define TSB_NL_QUEUE_SIZE 8		// Simple fixed-size queue of messages
 		#define TSB_NL_MSG_SIZE 512
 		struct {
 			char data[TSB_NL_MSG_SIZE];
 			size_t len;
-		} queue[TSB_NL_QUEUE_SIZE];
+		} queue[TSB_NL_QUEUE_SIZE];	// Outgoing messages to Toma
 		int queue_head;			// Next position to dequeue from
 		int queue_tail;			// Next position to enqueue to
 		int queue_count;		// Number of messages in queue
@@ -308,6 +307,7 @@ void t_sandbox_all_init(void) {
 void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
+	BUG_ON(sys->TSB_netlink.n_recv_msgs <= 0);
 	free(sys);
 	sys = NULL;
 }
@@ -427,17 +427,18 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
 	const struct nlmsghdr *nlh = (const struct nlmsghdr *)buf;
 	const struct nvmeib_nl_uk_comm_msg *req_msg = NLMSG_DATA(nlh);
 
 	(void)fd; (void)offset; (void)flags;
 	BUG_ON(n < sizeof(struct nlmsghdr));
-
-	N_Tf(nl_send, "Netlink send: opcode=@INT (@STR)", req_msg->opcode, uk_comm_opcode_str(req_msg->opcode));
+	nl->n_recv_msgs++;
+	N_Tf(nl_send, "opcode=@INT, total_n_msgs=@INT", req_msg->opcode, nl->n_recv_msgs);
 	if (req_msg->opcode == csc_get_disks) {
 		int i, count = sandbox_nvme_get_device_count();	// Queue disk info for each mock NVMe device
 		for (i = 0; i < count; i++) {
-			struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
+			const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
 			if (dev && !dev->stock_disk) {  // Only queue NVMesh disks, not stock disks
 				TSB_netlink_send_disk_response(dev);
 			}
@@ -833,13 +834,20 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	const int nl_fd = nl_sock->fd;
 	BUG_ON(!nl_sock || !readfds);
 
-	if (FD_ISSET(nl_fd, readfds) && !TSB_netlink_queue_is_empty()) {	// Check if netlink socket is in the read set and we have queued messages
-		FD_ZERO(readfds);												// Return immediately - netlink socket is ready to read
-		FD_SET(nl_fd, readfds);
-		FD_ZERO(writefds);
-		FD_ZERO(exceptfds);
-		N_Tf(nl_select_ready, "Netlink fd @INT ready (queued messages)", nl_fd);
-		return 1;
+	if (FD_ISSET(nl_fd, readfds)) {	// Check if netlink socket is in the read set and we have queued messages
+		const bool has_msg_for_toma = !TSB_netlink_queue_is_empty();
+		const bool emulate_timeout = (sys->TSB_netlink.n_recv_msgs == 1);
+		if (has_msg_for_toma || emulate_timeout) {				// Return immediately - netlink socket is ready to read
+			FD_ZERO(readfds); FD_ZERO(writefds); FD_ZERO(exceptfds);
+			FD_SET(nl_fd, readfds);
+			if (has_msg_for_toma) {
+				N_Tf(nl_select_ready0, "Netlink fd @INT ready (queued messages)", nl_fd);
+				return 1;
+			} else {
+				N_Tf(nl_select_ready1, "Netlink emulate timeout");
+				return 0; // Timeout;
+			}
+		}
 	}
 	msleep(100);	// Throttled km_comm select
 	return select(nfds, readfds, writefds, exceptfds, timeout);
