@@ -2058,9 +2058,10 @@ static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
  	return 0;
 }
 
+/*****************************************************************************/
 struct netlink_queue_elem_t {
 	struct xdlist link;
-	char opcode;
+	char opcode;					// Resolves which union is used below
 	enum nvmeibs_serjio_status serjio_status;
 	union {
 		struct nvmeib_disk_info disk_info;
@@ -2068,21 +2069,16 @@ struct netlink_queue_elem_t {
 	};
 };
 
-static XDLIST_DECLARE(, struct netlink_queue_elem_t, link) nl_head = XDLIST_INIT(nl_head);
-static pthread_mutex_t nl_guard_mutex;
-static bool nl_queue_initialized = false;
+static struct t_incomming_srvr_msg {
+	struct nvmeibt_km_comm *km_comm;
+	XDLIST_DECLARE(, struct netlink_queue_elem_t, link) head;
+	pthread_mutex_t guard;
+} srvr_msg_queue = {NULL};
 
-static int netlink_queue_push(const struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, const struct nvmeib_push_extended_msg *ext)
+// Called from server comm context. Add to list and allow toma main thread to fetch the message
+static int srvr_msg_queue_add(const struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, const struct nvmeib_push_extended_msg *ext)
 {
-	struct netlink_queue_elem_t *elem;
-
-	if (!nl_queue_initialized) {
-		N_Ef(gtt6555, "Netlink queue not initialized!");
-		return -1;
-	}
-
-	elem = (struct netlink_queue_elem_t *) NNVMEIBT_TOMA_CALLOC(trace_netlink_queue_push_2, 1, sizeof(struct netlink_queue_elem_t));
-
+	struct netlink_queue_elem_t *elem = (struct netlink_queue_elem_t *)NNVMEIBT_TOMA_CALLOC(ttsimn0, 1, sizeof(*elem));
 	if (ext) {
 		NTOMA_ASSERT(tnlqp34, (size_t)ext->n_bytes_len >= sizeof(elem->extended_msg), "Buffer for extended msg is too small, need @SIZEOF", (size_t)ext->n_bytes_len);
 		memcpy(elem->extended_msg, ext->content, ext->n_bytes_len);
@@ -2093,18 +2089,16 @@ static int netlink_queue_push(const struct nvmeib_disk_info *disk_info, char opc
 		N_Ef(2nsjss8, "No valid arg opcode=@CHAR disk_info=@PTR serjio_status=@INT", opcode, disk_info, serjio_status);
 	}
 	elem->opcode = opcode;
-
-	pthread_mutex_lock(&nl_guard_mutex);
-	XDLIST_ADD_TAIL(&nl_head, elem);
-	pthread_mutex_unlock(&nl_guard_mutex);
+	pthread_mutex_lock(&srvr_msg_queue.guard);
+	XDLIST_ADD_TAIL(&srvr_msg_queue.head, elem);
+	pthread_mutex_unlock(&srvr_msg_queue.guard);
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_NETLINK, NULL);
-
 	return 0;
 }
 
 static void handle_nvmeibs_nl_msg(struct netlink_queue_elem_t *elem)
 {
-	unsigned char	opcode = (elem->opcode & 0x7f);
+	const unsigned char opcode = (elem->opcode & 0x7f);
 	NFIN;
 	switch (opcode) {
 	case 'S':
@@ -2122,24 +2116,18 @@ static void handle_nvmeibs_nl_msg(struct netlink_queue_elem_t *elem)
 
 void nvmeibt_netlink_queue_run(void)
 {
-	struct netlink_queue_elem_t *elem;
+	pthread_mutex_t *lock = &srvr_msg_queue.guard;
 	NFIN;
-
-	if (!nl_queue_initialized) {
-		pthread_mutex_init(&nl_guard_mutex, NULL);
-		XDLIST_HEAD_INIT(&nl_head);
-		nl_queue_initialized = true;
-	}
-
-	while (!XDLIST_EMPTY(&nl_head)) {
-		pthread_mutex_lock(&nl_guard_mutex);
-		elem = XDLIST_FIRST(&nl_head);
+	while (!XDLIST_EMPTY(&srvr_msg_queue.head)) {
+		struct netlink_queue_elem_t *elem;
+		pthread_mutex_lock(lock);
+		elem = XDLIST_FIRST(&srvr_msg_queue.head);
 		if (!elem) {
-			pthread_mutex_unlock(&nl_guard_mutex);
+			pthread_mutex_unlock(lock);
 			break;
 		}
 		XDLIST_DEL(&elem->link);
-		pthread_mutex_unlock(&nl_guard_mutex);
+		pthread_mutex_unlock(lock);
 
 		if (elem->opcode == 'C') {	// a msg from nvmeibc (client)
 			// handle_nvmeibc_nl_msg(elem);
@@ -2156,39 +2144,47 @@ int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 ve
 	struct nvmeib_disk_info disk_info = {.vendor_id = vendor_id};
 	memcpy(disk_info.disk_id, ldisk_id, sizeof(disk_info.disk_id));
 	memcpy(disk_info.model_str, model_str, sizeof(disk_info.model_str));
-
-	return netlink_queue_push(&disk_info, 'S', serjio_status, NULL);
+	return srvr_msg_queue_add(&disk_info, 'S', serjio_status, NULL);
 }
 
 static int nvmeibt_add_disk_event_callback(const struct nvmeib_disk_info *disk_info)
 {
-	return netlink_queue_push(disk_info, 'a', 0, NULL);
+	return srvr_msg_queue_add(disk_info, 'a', 0, NULL);
 }
 
-static int nvmeibt_remove_disk_event_callback(const struct nvmeib_remove_disk *disk_remove_msg)
+static int nvmeibt_remove_disk_event_callback(const struct nvmeib_remove_disk *msg)
 {
 	struct nvmeib_disk_info disk_info;
-
 	memset(&disk_info, 0, sizeof(disk_info));	// Avoid strcpy() in change_disk_event() below
-	disk_info.vendor_id = disk_remove_msg->vendor_id;
-	nvmeibt_strlcpy(disk_info.disk_id, disk_remove_msg->disk_id, sizeof(disk_info.disk_id));
+	disk_info.vendor_id = msg->vendor_id;
+	nvmeibt_strlcpy(disk_info.disk_id, msg->disk_id, sizeof(disk_info.disk_id));
 	nvmeibt_strlcpy(disk_info.status, "Remove", sizeof(disk_info.status));
 
-	return netlink_queue_push(&disk_info, 'r', 0, NULL);
+	return srvr_msg_queue_add(&disk_info, 'r', 0, NULL);
 }
 
 int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extended_msg *ext)
 {
-	return netlink_queue_push(NULL, 'C', 0, ext);
+	return srvr_msg_queue_add(NULL, 'C', 0, ext);
 }
 
-void nvmeibt_topology_register_disk_events(void)
+struct nvmeibt_km_comm *nvmeibt_netlink_queue_init(void)
 {
-	struct nvmeib_register_change_disk cbs;
-	cbs.on_add_disk = &nvmeibt_add_disk_event_callback;
-	cbs.on_remove_disk = &nvmeibt_remove_disk_event_callback;
-	nvmeibt_km_comm_register_disk_events(nvmeibt_get_srv_comm(), &cbs);
+	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
+	if (!smq->km_comm) {
+		pthread_mutex_init(&smq->guard, NULL);
+		XDLIST_HEAD_INIT(&smq->head);
+		smq->km_comm = nvmeibt_km_comm_create();
+		if (smq->km_comm) {
+			struct nvmeib_register_change_disk cbs;
+			cbs.on_add_disk = &nvmeibt_add_disk_event_callback;
+			cbs.on_remove_disk = &nvmeibt_remove_disk_event_callback;
+			nvmeibt_km_comm_register_disk_events(smq->km_comm, &cbs);
+		}
+	}
+	return smq->km_comm;
 }
+/*****************************************************************************/
 
 static void store_config_and_topo_and_gpt_on_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {

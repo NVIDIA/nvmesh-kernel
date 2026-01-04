@@ -2853,15 +2853,10 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	if (nvmeib_srvr_api_lib_create() < 0) {
 		goto out;
 	}
-	// Start netlink after server is up
-	nvmeibt_netlink_queue_run();	// needed to create the mutex and queue
-	srv_comm = nvmeibt_km_comm_create();
+	srv_comm = nvmeibt_netlink_queue_init();
 	if (!srv_comm) {
 		N_Ef(djut866, "Failed to init srv_comm");
 		nvmeibt_abort(ES_FATAL);
-	}
-	else {
-		nvmeibt_topology_register_disk_events();
 	}
 	read_disks_info_from_stock_driver();
 	(void)nvmeib_srvr_api_lib_handshake_server(); /* login to server module */
