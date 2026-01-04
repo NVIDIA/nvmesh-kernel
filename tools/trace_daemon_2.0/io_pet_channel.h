@@ -3,7 +3,7 @@
 
 #include "unlink_list.h"
 
-#define IO_PET_PROC_PATH "/proc/nvmeibc/io.pet/io.pet"
+#define IO_PET_PROC_PATH "/proc/nvmeib/io.pet/io.pet"
 #define IO_PET_CHANNEL_NAME "nvmeibc_io_pet"
 #define IO_PET_CPU_ID 0
 //IO_PET_CPU_ID was introduced to reuse unlink_list.h functionality for io.pet channel

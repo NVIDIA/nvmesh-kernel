@@ -146,10 +146,6 @@ int nvmeibc_cc_api_create(struct nvmeibc_control_api *capi, struct proc_dir_entr
 	if (!(capi->cli.dir = proc_mkdir(capi->cli.name, root_proc_dir)))
 		goto _out;
 
-	capi->io_pet_out.name = "io.pet";
-	if (!(capi->io_pet_out.dir = proc_mkdir(capi->io_pet_out.name, root_proc_dir)))
-		goto _out;
-
 	// Initialize /proc mechanisms: mcs + cli
 	capi->clnt_2_mgmt_report_id = DEFAULT_UPSTREAM_VALUE;
 	capi->clnt_2_mgmt_fullconf_token = DEFAULT_UPSTREAM_VALUE;
@@ -158,7 +154,6 @@ int nvmeibc_cc_api_create(struct nvmeibc_control_api *capi, struct proc_dir_entr
 	capi->latest_attachment_version = DEFAULT_ATTACHMENT_VERSION;
 	capi->mcs.handle = NVMEIB_MCS_INIT;
 	capi->cli.handle = nvmeib_cli_init();
-	capi->io_pet_out.handle = NULL;
 
 	if ((!capi->mcs.handle)||(!capi->cli.handle))
 		goto _out;
@@ -171,20 +166,13 @@ int nvmeibc_cc_api_create(struct nvmeibc_control_api *capi, struct proc_dir_entr
 				      &schedule_handle_cli_msg, &__cli_on_open,
 				      &__cli_on_close, &capi->cli.handle);
 
-	capi->io_pet_out.msg_loop =
-	nvmeib_msgloop_create(capi->io_pet_out.name, 
-						  capi->io_pet_out.dir,
-				          NULL, NULL, NULL, //no read, on init/close callbacks 
-						  &capi->io_pet_out);
+	capi->io_pet_controller = nvmeibc_io_pet_controller_create(); 
 
-	capi->io_pet_controller = nvmeibc_io_pet_controller_create(capi->io_pet_out.msg_loop); 
-
-	if ((!capi->mcs.msg_loop)||(!capi->cli.msg_loop)||(!capi->io_pet_out.msg_loop)||(!capi->io_pet_controller))
+	if ((!capi->mcs.msg_loop)||(!capi->cli.msg_loop)||(!capi->io_pet_controller))
 		goto _out;
 	nvmeib_msgloop_set_ready_cb(capi->mcs.msg_loop, &nvmeib_mcs_init_protocol);
 	nvmeib_msgloop_set_max(capi->cli.msg_loop, NVMEIBC_CLI_MAX_MSG);
 	nvmeib_msgloop_set_max(capi->mcs.msg_loop, NVMEIBC_CLI_MAX_MSG * 10);
-	nvmeib_msgloop_set_max(capi->io_pet_out.msg_loop, 256); //TODO: probably need module param for this
 
 	__heartbeat_create(&capi->heartbeat);
 	__full_conf_create(&capi->full_conf);
@@ -206,12 +194,6 @@ void nvmeibc_cc_api_destroy(struct nvmeibc_control_api *capi)
 	nvmeibc_io_pet_controller_free(capi->io_pet_controller);
 	capi->io_pet_controller = NULL;
 
-	capi->io_pet_out.handle = NULL;
-	if (capi->io_pet_out.msg_loop) {
-		nvmeib_msgloop_remove(capi->io_pet_out.msg_loop);
-		capi->io_pet_out.msg_loop = NULL;
-	}
-
 	if (capi->cli.handle) {
 		nvmeib_cli_remove(capi->cli.handle);
 		capi->cli.handle = NULL;
@@ -230,7 +212,6 @@ void nvmeibc_cc_api_destroy(struct nvmeibc_control_api *capi)
 	}
 
 	// Remove /proc directories
-	c_api_proc_remove(&capi->io_pet_out, capi->proc_dir);
 	c_api_proc_remove(&capi->cli, capi->proc_dir);
 	c_api_proc_remove(&capi->mcs, capi->proc_dir);
 }

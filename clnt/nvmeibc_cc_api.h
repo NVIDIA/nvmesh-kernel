@@ -73,7 +73,6 @@ struct nvmeibc_control_api {
 	struct c_api_perrep full_conf;		// Full conf delayed workqueue
 	struct c_api_proc mcs;				// Communication with management
 	struct c_api_proc cli;				// Command line interface
-	struct c_api_proc io_pet_out;		// Output of IO pet traces 
 	struct nvmeib_pet_base_controller* io_pet_controller;
 	struct proc_dir_entry *proc_dir;	// Location where ccapi proc files/msg loops reside (typically /proc/nvmeibc/)
 	struct c_api_bdev_ioctls ioctls;	// Excelero specific ioctls

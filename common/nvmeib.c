@@ -17,6 +17,7 @@
 #include "nvmeib_public.h"
 #include "nvmeib_numa.h"
 #include "common/proc_epilog.h"
+#include "nvmeib_msgloop.h"
 #include "nvmeib_memmgr_metrics.h"
 #include "nvmeib_pcpu_wq.h"
 #include "nvmeib_completion_noise.h"
@@ -44,6 +45,9 @@ static DEFINE_MUTEX(cb_lock);
 
 #define PROCFS_COMMON_STR "nvmeib"
 static struct proc_dir_entry *proc_dir = NULL;
+
+struct proc_dir_entry *io_pet_dir = NULL;
+struct msgloop_procfs_ent *io_pet_writer = NULL;
 
 int nvmeib_cmn_debug_level = DEBUG_LEVEL;
 module_param_named(debug_level, nvmeib_cmn_debug_level, int, 0644);
@@ -2380,6 +2384,15 @@ bool nvmeib_dev_use_keeper(struct nvmeib_dev *dev) {
 	return dev->dev_type != DT_siw;
 }
 EXPORT_SYMBOL(nvmeib_dev_use_keeper);
+
+
+struct msgloop_procfs_ent *nvmeib_trace_get_io_pet_msgloop(void);
+struct msgloop_procfs_ent *nvmeib_trace_get_io_pet_msgloop(void)
+{
+	return io_pet_writer;
+}
+EXPORT_SYMBOL(nvmeib_trace_get_io_pet_msgloop);
+
 
 struct nvmeib_dev *nvmeib_init(struct ib_device *device,
 			       const char *inst_name,
@@ -4799,6 +4812,16 @@ static void procs_remove(void)
 			nvmeib_public_proc_remove(nvmeib_intr_shaper_procfs_ent);
 			nvmeib_intr_shaper_procfs_ent = NULL;
 		}
+
+		if (io_pet_writer != NULL) {
+			nvmeib_msgloop_remove(io_pet_writer);
+			io_pet_writer = NULL;
+		}
+		if (io_pet_dir != NULL) {
+			remove_proc_entry("io.pet", proc_dir);
+			io_pet_dir = NULL;
+		}
+
 #ifdef NVMEIB_COUNT_MEM_USAGE
 		nvmeib_mem_usage_proc_remove(proc_dir);
 #endif
@@ -4857,6 +4880,19 @@ static int procs_create(void)
 	   _NE_dmesg(error_nvmeib_module_init_intr_shaper_proc, "Failed to create intr-shaper proc file");
 	   goto err;
    }
+
+   	/* Prepare io.pet msgloop */
+	io_pet_dir = proc_mkdir("io.pet", proc_dir);
+	if (io_pet_dir == NULL) {
+		_NE_dmesg(error_nvmeib_module_init_io_pet_dir, "Failed to create io.pet proc directory.");
+		goto err;
+	}
+
+	io_pet_writer = nvmeib_msgloop_create("io.pet",io_pet_dir,NULL, NULL, NULL, NULL);
+	if (io_pet_writer == NULL) {
+		_NE_dmesg(error_nvmeib_module_init_io_pet_writer, "Failed to create io.pet msgloop instance.");
+		goto err;
+	}
 
 #ifdef NVMEIB_COUNT_MEM_USAGE
 	if ((rv = nvmeib_mem_usage_proc_create(proc_dir) < 0)) {

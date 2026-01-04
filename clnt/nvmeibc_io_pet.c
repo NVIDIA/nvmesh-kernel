@@ -7,10 +7,9 @@
 
 #if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR 
 
-	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(struct msgloop_procfs_ent* msgloop)
+	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create()
 	{
 		extern struct nvmeib_pet_base_controller* sim_get_io_pet_controller(void);
-		(void)msgloop;
 		return sim_get_io_pet_controller();
 	}
 
@@ -39,7 +38,7 @@
 		__auto_type self = (struct io_pet_controller*)(base);
 		BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
 
-		if (self->cfg.pet_buffer_size){
+		if (self->cfg.pet_buffer_size && self->writer){
 			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg(self->cfg.msg_allocation_size, GFP_NOFS);
 			nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, self->cfg.msg_allocation_size, msg);
 			if (msg) {
@@ -98,12 +97,13 @@
 	module_param(nvmeibc_io_pet_buffer_size, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_buffer_size, "IO PET buffer size;");
 
-	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(struct msgloop_procfs_ent* writer)
+	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create()
 	{
 		unsigned const min_buffer_size = 256;
 		unsigned const msg_allocation_size = nvmeibc_io_pet_buffer_size;
 		bool const is_valid_cfg = min_buffer_size <= msg_allocation_size;
 		struct io_pet_controller* self = kzalloc(sizeof(struct io_pet_controller), GFP_KERNEL);
+		extern struct msgloop_procfs_ent* nvmeib_trace_get_io_pet_msgloop(void);
 
 		if (!self){
 			return NULL;
@@ -117,15 +117,18 @@
 				.get_buffer = __io_pet_controller_get_buffer,
 				.put_buffer = __io_pet_controller_put_buffer
 			},
-			.writer = writer,
+			.writer = nvmeib_trace_get_io_pet_msgloop(),
 			.cfg = {
 				.pet_buffer_size = is_valid_cfg ? msg_allocation_size - sizeof(struct msgloop_msg) : 0,
 				.msg_allocation_size = msg_allocation_size
 			}
 		};
-		
-		_NI(nvmeibc_io_pet_controller_create, "severity{min=@INT}, size={msg=@SIZE, pet=@SIZE}",
-			nvmeibc_io_pet_minimal_severity, self->cfg.msg_allocation_size, self->cfg.pet_buffer_size);
+		if (self->writer){
+			nvmeib_msgloop_set_max(self->writer, 256); //TODO: probably need module param for this
+		}
+
+		_NI(nvmeibc_io_pet_controller_create, "writer=@PTR severity{min=@INT}, size={msg=@SIZE, pet=@SIZE}",
+			self->writer, nvmeibc_io_pet_minimal_severity, self->cfg.msg_allocation_size, self->cfg.pet_buffer_size);
 
 		return &(self->base);
 	}
@@ -161,7 +164,7 @@
 		(void)data;
 	}
 
-	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(struct msgloop_procfs_ent* writer)
+	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create()
 	{
 		static struct io_pet_controller dummy = {
 			.base = {

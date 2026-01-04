@@ -34,8 +34,7 @@ extern const char __stop_nvmeibc_io_pet_msgs[];
 
 struct msgloop_procfs_ent;
 
-__attribute__((nonnull (1)))
-struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(struct msgloop_procfs_ent* msgloop);
+struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(void);
 
 __attribute__((nonnull (1)))
 void nvmeibc_io_pet_controller_free(struct nvmeib_pet_base_controller* self);

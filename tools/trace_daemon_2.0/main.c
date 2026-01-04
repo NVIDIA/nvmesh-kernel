@@ -282,6 +282,8 @@ int main(int argc, char* argv[])
 			usleep(PING_INTERVAL); /* Wait until control proc is available */
 		while(access(IO_PET_PROC_PATH, F_OK) == -1)
 			usleep(PING_INTERVAL); /* Wait until control proc is available */
+		while(access(IO_PET_PROC_PATH, F_OK) == -1)
+			usleep(PING_INTERVAL); /* Wait until control proc is available */
 
 		_info("Control proc available");
 		{
