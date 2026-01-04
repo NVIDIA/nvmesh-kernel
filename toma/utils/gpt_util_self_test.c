@@ -17,7 +17,7 @@
 #include "../nvmeibt_local_disk.h"
 #include "gpt_util_self_test.h"
 
-#define PASS		"."
+#define PASS		"P"
 #define FAIL		"F"
 #define SKIP		"s"
 
@@ -1256,6 +1256,82 @@ DEFINE_TEST(mismatch_blocking)
 	return rv;
 }
 
+DEFINE_TEST(serial_id_mismatch)
+{
+	int			rv = 0;
+	const char	*device_a = TOMA_ROOT_DIR "tmp/gpt_serial_device_a";
+	const char	*device_b = TOMA_ROOT_DIR "tmp/gpt_serial_device_b";
+	int			fd;
+
+	/* Create device A with serial "MOCK-SERIAL-AAAA" */
+	fd = SELF_TEST_generate_mock_device_with_serial(device_a, "MOCK-SERIAL-AAAA");
+	if (fd < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device A" COL_RESET "\n");
+		return -1;
+	}
+	close(fd);
+
+	/* Create device B with serial "MOCK-SERIAL-BBBB" */
+	fd = SELF_TEST_generate_mock_device_with_serial(device_b, "MOCK-SERIAL-BBBB");
+	if (fd < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device B" COL_RESET "\n");
+		unlink(device_a);
+		return -1;
+	}
+	close(fd);
+
+	/* Export JSON from device A */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_a, "-J", TEST_JSON_PATH("serial_check"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Try to apply JSON from A to device B (should be BLOCKED) */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("serial_check"));
+		if (json_root && json_set_dict_str(json_root, "device_path", device_b) == 0 &&
+			SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("serial_check")) == 0) {
+			fprintf(stdout, "Modified JSON device_path to point to device B\n");
+		} else {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("serial_check"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expecting failure (serial mismatch), so rv != 0 is success for this test */
+	}
+
+	unlink(device_a);
+	unlink(device_b);
+	return rv;
+}
+
+DEFINE_TEST(missing_serial_id)
+{
+	int rv = 0;
+
+	/* Create device and export */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("missing_serial"));
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	/* Remove disk_metadata section from JSON */
+	if (rv == 0) {
+		rv = SELF_TEST_remove_json_field(TEST_JSON_PATH("missing_serial"), "disk_metadata");
+	}
+
+	/* Try to apply - should be BLOCKED */
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("missing_serial"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	return rv;
+}
+
 DEFINE_TEST(delete_main_entry)
 {
 	int							rv = 0;
@@ -1716,55 +1792,213 @@ DEFINE_TEST(static_fields_validated)
 	return rv;
 }
 
-DEFINE_TEST(serial_id_mismatch)
+DEFINE_TEST(nguid_preservation)
 {
-	int			rv = 0;
-	const char	*device_a = TOMA_ROOT_DIR "tmp/gpt_serial_device_a";
-	const char	*device_b = TOMA_ROOT_DIR "tmp/gpt_serial_device_b";
-	int			fd;
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_nguid_test";
+	struct nvmeibt_disk_gpt		main_gpt;
+	struct nvmeibt_disk_gpt		metadata_gpt;
+	struct nvmeibt_disk_metadata disk_md_before;
+	struct nvmeibt_disk_metadata disk_md_after;
+	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+	uint64_t					pbyte_s;
+	int							fd = -1;
 
-	/* Create device A with serial "MOCK-SERIAL-AAAA" */
-	fd = SELF_TEST_generate_mock_device_with_serial(device_a, "MOCK-SERIAL-AAAA");
-	if (fd < 0) {
-		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device A" COL_RESET "\n");
-		return -1;
-	}
-	close(fd);
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
 
-	/* Create device B with serial "MOCK-SERIAL-BBBB" */
-	fd = SELF_TEST_generate_mock_device_with_serial(device_b, "MOCK-SERIAL-BBBB");
-	if (fd < 0) {
-		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device B" COL_RESET "\n");
-		unlink(device_a);
-		return -1;
-	}
-	close(fd);
-
-	/* Export JSON from device A */
+	/* Read original NGUID */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_a, "-J", TEST_JSON_PATH("serial_check"));
+		fd = open(device_path, O_RDONLY);
+		if (fd >= 0) {
+			memset(&main_gpt, 0, sizeof(main_gpt));
+			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
+				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+				if (metadata_partition) {
+					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
+						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+						if (disk_md_partition) {
+							pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+							nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md_before);
+						}
+					}
+				}
+			}
+			close(fd);
+			fd = -1;
+		}
+	}
+
+	/* Export (NGUID will be in JSON) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("nguid_test"));
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 
-	/* Try to apply JSON from A to device B (should be BLOCKED) */
+	/* Remove native_nguid from JSON */
 	if (rv == 0) {
-		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("serial_check"));
-		if (json_root && json_set_dict_str(json_root, "device_path", device_b) == 0 &&
-			SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("serial_check")) == 0) {
-			fprintf(stdout, "Modified JSON device_path to point to device B\n");
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("nguid_test"));
+		struct mm_json_elem *disk_md = NULL;
+		int i;
+
+		if (json_root) {
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
+					disk_md = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			/* Remove native_nguid field using JSON API - this tests the "missing field" path */
+			if (disk_md) {
+				/* We can't easily remove a field with current API, so just set it to null UUID */
+				json_set_dict_str(disk_md, "native_nguid", "00000000-0000-0000-0000-000000000000");
+			}
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("nguid_test"));
 		} else {
 			rv = -1;
 		}
 	}
 
+	/* Apply with --write */
 	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_b, "--apply-from", TEST_JSON_PATH("serial_check"));
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("nguid_test"), "--write");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-		/* Expecting failure (serial mismatch), so rv != 0 is success for this test */
 	}
 
-	unlink(device_a);
-	unlink(device_b);
+	/* Verify NGUID preserved (not zeroed or changed) */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd >= 0) {
+			memset(&main_gpt, 0, sizeof(main_gpt));
+			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
+				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+				if (metadata_partition) {
+					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
+						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+						if (disk_md_partition) {
+							pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+							memset(&disk_md_after, 0, sizeof(disk_md_after));
+							nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md_after);
+						}
+					}
+				}
+			}
+			close(fd);
+		}
+	}
+
+	if (rv == 0) {
+		if (memcmp(&disk_md_before.native_nguid_unused, &disk_md_after.native_nguid_unused, sizeof(disk_md_before.native_nguid_unused)) != 0) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: NGUID changed after apply" COL_RESET "\n");
+			rv = -1;
+		} else {
+			fprintf(stdout, COL_GREEN "Verified: NGUID preserved (unchanged despite missing from JSON)" COL_RESET "\n");
+		}
+	}
+
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(warning_fields_apply)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_warning_test";
+	struct nvmeibt_disk_gpt		main_gpt;
+	struct nvmeibt_disk_gpt		metadata_gpt;
+	struct nvmeibt_disk_metadata disk_md_after;
+	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+	uint64_t					pbyte_s;
+	int							fd = -1;
+
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Export */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("warning_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Modify _WARNING_ fields */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("warning_test"));
+		struct mm_json_elem *disk_md = NULL;
+		int i;
+
+		if (json_root) {
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
+					disk_md = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (disk_md) {
+				json_set_dict_num(disk_md, "_WARNING_last_pba_zeroed", 12345);
+				json_set_dict_num(disk_md, "_WARNING_format_request_counter", 99);
+				fprintf(stdout, "Modified _WARNING_ fields (last_pba_zeroed=12345, format_request_counter=99)\n");
+				rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("warning_test"));
+			} else {
+				rv = -1;
+			}
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Apply with --write */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("warning_test"), "--write");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify WARNING fields applied */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd >= 0) {
+			memset(&main_gpt, 0, sizeof(main_gpt));
+			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
+				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+				if (metadata_partition) {
+					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
+						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+						if (disk_md_partition) {
+							pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+							memset(&disk_md_after, 0, sizeof(disk_md_after));
+							nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md_after);
+						}
+					}
+				}
+			}
+			close(fd);
+		}
+	}
+
+	if (rv == 0) {
+		if (disk_md_after.last_pba_zeroed != 12345 || disk_md_after.format_request_counter != 99) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: WARNING fields not applied (last_pba=%lu, counter=%u)" COL_RESET "\n",
+					disk_md_after.last_pba_zeroed, disk_md_after.format_request_counter);
+			rv = -1;
+		} else {
+			fprintf(stdout, COL_GREEN "Verified: _WARNING_ fields successfully applied" COL_RESET "\n");
+		}
+	}
+
+	unlink(device_path);
 	return rv;
 }
 
@@ -1894,147 +2128,6 @@ DEFINE_TEST(disk_metadata_apply)
 	return rv;
 }
 
-DEFINE_TEST(missing_serial_id)
-{
-	int rv = 0;
-
-	/* Create device and export */
-	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
-	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("missing_serial"));
-	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-
-	/* Remove disk_metadata section from JSON */
-	if (rv == 0) {
-		rv = SELF_TEST_remove_json_field(TEST_JSON_PATH("missing_serial"), "disk_metadata");
-	}
-
-	/* Try to apply - should be BLOCKED */
-	if (rv == 0) {
-		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
-		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("missing_serial"));
-		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	return rv;
-}
-
-DEFINE_TEST(nguid_preservation)
-{
-	int							rv = 0;
-	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_nguid_test";
-	struct nvmeibt_disk_gpt		main_gpt;
-	struct nvmeibt_disk_gpt		metadata_gpt;
-	struct nvmeibt_disk_metadata disk_md_before;
-	struct nvmeibt_disk_metadata disk_md_after;
-	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
-	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
-	uint64_t					pbyte_s;
-	int							fd = -1;
-
-	/* Create device */
-	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
-
-	/* Read original NGUID */
-	if (rv == 0) {
-		fd = open(device_path, O_RDONLY);
-		if (fd >= 0) {
-			memset(&main_gpt, 0, sizeof(main_gpt));
-			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
-				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-				if (metadata_partition) {
-					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
-					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
-					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
-														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
-						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-						if (disk_md_partition) {
-							pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-							nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md_before);
-						}
-					}
-				}
-			}
-			close(fd);
-			fd = -1;
-		}
-	}
-
-	/* Export (NGUID will be in JSON) */
-	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("nguid_test"));
-		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	/* Remove native_nguid from JSON */
-	if (rv == 0) {
-		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("nguid_test"));
-		struct mm_json_elem *disk_md = NULL;
-		int i;
-
-		if (json_root) {
-			for (i = 0; i < json_root->dict.len; i++) {
-				if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
-					disk_md = json_root->dict.elements[i].value;
-					break;
-				}
-			}
-			/* Remove native_nguid field using JSON API - this tests the "missing field" path */
-			if (disk_md) {
-				/* We can't easily remove a field with current API, so just set it to null UUID */
-				json_set_dict_str(disk_md, "native_nguid", "00000000-0000-0000-0000-000000000000");
-			}
-			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("nguid_test"));
-		} else {
-			rv = -1;
-		}
-	}
-
-	/* Apply with --write */
-	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("nguid_test"), "--write");
-		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	/* Verify NGUID preserved (not zeroed or changed) */
-	if (rv == 0) {
-		fd = open(device_path, O_RDONLY);
-		if (fd >= 0) {
-			memset(&main_gpt, 0, sizeof(main_gpt));
-			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
-				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-				if (metadata_partition) {
-					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
-					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
-					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
-														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
-						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-						if (disk_md_partition) {
-							pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-							memset(&disk_md_after, 0, sizeof(disk_md_after));
-							nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md_after);
-						}
-					}
-				}
-			}
-			close(fd);
-		}
-	}
-
-	if (rv == 0) {
-		if (memcmp(&disk_md_before.native_nguid_unused, &disk_md_after.native_nguid_unused, sizeof(disk_md_before.native_nguid_unused)) != 0) {
-			fprintf(stdout, COL_RED_BOLD "FAIL: NGUID changed after apply" COL_RESET "\n");
-			rv = -1;
-		} else {
-			fprintf(stdout, COL_GREEN "Verified: NGUID preserved (unchanged despite missing from JSON)" COL_RESET "\n");
-		}
-	}
-
-	unlink(device_path);
-	return rv;
-}
-
 DEFINE_TEST(zero_change_write_skip)
 {
 	int rv = 0;
@@ -2056,99 +2149,6 @@ DEFINE_TEST(zero_change_write_skip)
 		fprintf(stdout, COL_GREEN "Verified: Apply with 0 changes completed successfully" COL_RESET "\n");
 	}
 
-	return rv;
-}
-
-DEFINE_TEST(warning_fields_apply)
-{
-	int							rv = 0;
-	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_warning_test";
-	struct nvmeibt_disk_gpt		main_gpt;
-	struct nvmeibt_disk_gpt		metadata_gpt;
-	struct nvmeibt_disk_metadata disk_md_after;
-	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
-	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
-	uint64_t					pbyte_s;
-	int							fd = -1;
-
-	/* Create device */
-	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
-
-	/* Export */
-	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("warning_test"));
-		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	/* Modify _WARNING_ fields */
-	if (rv == 0) {
-		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("warning_test"));
-		struct mm_json_elem *disk_md = NULL;
-		int i;
-
-		if (json_root) {
-			for (i = 0; i < json_root->dict.len; i++) {
-				if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
-					disk_md = json_root->dict.elements[i].value;
-					break;
-				}
-			}
-			if (disk_md) {
-				json_set_dict_num(disk_md, "_WARNING_last_pba_zeroed", 12345);
-				json_set_dict_num(disk_md, "_WARNING_format_request_counter", 99);
-				fprintf(stdout, "Modified _WARNING_ fields (last_pba_zeroed=12345, format_request_counter=99)\n");
-				rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("warning_test"));
-			} else {
-				rv = -1;
-			}
-		} else {
-			rv = -1;
-		}
-	}
-
-	/* Apply with --write */
-	if (rv == 0) {
-		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("warning_test"), "--write");
-		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
-	}
-
-	/* Verify WARNING fields applied */
-	if (rv == 0) {
-		fd = open(device_path, O_RDONLY);
-		if (fd >= 0) {
-			memset(&main_gpt, 0, sizeof(main_gpt));
-			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
-				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-				if (metadata_partition) {
-					memset(&metadata_gpt, 0, sizeof(metadata_gpt));
-					nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
-					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
-														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
-						disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-						if (disk_md_partition) {
-							pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-							memset(&disk_md_after, 0, sizeof(disk_md_after));
-							nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md_after);
-						}
-					}
-				}
-			}
-			close(fd);
-		}
-	}
-
-	if (rv == 0) {
-		if (disk_md_after.last_pba_zeroed != 12345 || disk_md_after.format_request_counter != 99) {
-			fprintf(stdout, COL_RED_BOLD "FAIL: WARNING fields not applied (last_pba=%lu, counter=%u)" COL_RESET "\n",
-					disk_md_after.last_pba_zeroed, disk_md_after.format_request_counter);
-			rv = -1;
-		} else {
-			fprintf(stdout, COL_GREEN "Verified: _WARNING_ fields successfully applied" COL_RESET "\n");
-		}
-	}
-
-	unlink(device_path);
 	return rv;
 }
 
@@ -2369,7 +2369,7 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 			color = COL_YELLOW;
 		}
 
-		fprintf(stdout, "  %s%s Test %2d:%s %s\n",
+		fprintf(stdout, "  %s[%s] Test %2d:%s %s\n",
 				color, status, i + 1, COL_RESET, tests[i].name);
 	}
 
@@ -2392,16 +2392,16 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 	unlink(TEST_JSON_PATH("missing_gpt"));
 	unlink(TEST_JSON_PATH("overlap_block"));
 	unlink(TEST_JSON_PATH("mismatch_block"));
-	unlink(TEST_JSON_PATH("delete_test"));
-	unlink(TEST_JSON_PATH("readonly_test"));
-	unlink(TEST_JSON_PATH("delete_metadata_test"));
-	unlink(TEST_JSON_PATH("static_test"));
 	unlink(TEST_JSON_PATH("serial_check"));
-	unlink(TEST_JSON_PATH("disk_md_test"));
 	unlink(TEST_JSON_PATH("missing_serial"));
+	unlink(TEST_JSON_PATH("delete_test"));
+	unlink(TEST_JSON_PATH("delete_metadata_test"));
+	unlink(TEST_JSON_PATH("readonly_test"));
+	unlink(TEST_JSON_PATH("static_test"));
 	unlink(TEST_JSON_PATH("nguid_test"));
-	unlink(TEST_JSON_PATH("zero_change"));
 	unlink(TEST_JSON_PATH("warning_test"));
+	unlink(TEST_JSON_PATH("disk_md_test"));
+	unlink(TEST_JSON_PATH("zero_change"));
 	unlink(TEST_JSON_PATH("malformed"));
 
 	return 0;
