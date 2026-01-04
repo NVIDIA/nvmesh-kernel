@@ -26,7 +26,6 @@ struct km_comm_msg_hdr {													// Will be converted internally upon send t
 	char  data[0] __attribute((aligned(8))); // union nvmeib_nl_msg_to_srvr_payload;
 };
 
-
 struct nvmeibt_km_comm_params {									// Must fill all callbacks
 	int (*on_add_disk   )(const struct nvmeib_disk_info *);		// Called when new disk is added, Toma registers its callbacks to server notifications about disks
 	int (*on_remove_disk)(const struct nvmeib_remove_disk *);	// Called when existing disk is removed

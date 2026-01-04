@@ -577,7 +577,7 @@ void nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p)
 {
 	NFIN;
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
-		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = (int)csc_start - 1, .on_done = NULL };	// csc_internal_suicide
+		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_suicide, .on_done = NULL };
 		N_Tf(tscnlsst, "Send internal suicide message, to main thread");
 		nvmeibt_km_comm_send(p, &msg);
 		if (pthread_join(p->comm_thread, NULL)) {
@@ -661,12 +661,10 @@ static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 		struct srv_comm_msg *msg = XDLIST_FIRST(msgs);
 		XDLIST_DEL(&msg->link);
 		N_Tf(tkmcsmtk2, "msg[@INT].id=@ID", msg->msg.opcode, msg->msg.id);
-		if (msg->msg.opcode <= csc_start) 				// Suicide message arrived
+		if (msg->msg.opcode <= csc_internal_suicide)
 			is_alive = false;
 		if (is_alive) {
-			if (msg->msg.opcode < csc_end) {
-				send_msg_to_kernel(p, msg, true);		// Dont free msg, it is added to a different queue or freed inside
-			}
+			send_msg_to_kernel(p, msg, true);		// Dont free msg, it is added to a different queue or freed inside
 		} else {										// Autofail msg
 			msg_free(msg);
 		}
@@ -799,7 +797,7 @@ static bool __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char 
 	while (!XDLIST_EMPTY(msgs)) {
 		struct srv_comm_msg *msg = XDLIST_FIRST(msgs);
 		XDLIST_DEL(&msg->link);
- 		if (msg->msg.opcode < csc_start)
+ 		if (msg->msg.opcode <= csc_internal_suicide)
 			is_alive = false;
 		msg_free(msg);
 	}
@@ -907,7 +905,7 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 		return -EINVAL;
 	}
 	kmsg->msg.opcode = hdr->opcode;
-	if (hdr->opcode > csc_start) {
+	if (hdr->opcode > csc_start) {	// !csc_internal_suicide
 		kmsg->on_done = hdr->on_done;
 		kmsg->ctx =  hdr->ctx;
 		kmsg->msg.len = msg_size;
