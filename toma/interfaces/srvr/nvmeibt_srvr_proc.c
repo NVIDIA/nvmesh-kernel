@@ -802,7 +802,7 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 		if (msg) {
 			if (msg->on_done) {
 				struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
-				N_Tf(t2shnnm3, "Calling callback for msg @ID rp_rv=@RV", msg->msg.id, rep->error);
+				N_Tf(t2shnnm3, "Calling callback on rep_msg[@INT].id=@ID rp_rv=@RV", rep->opcode, msg->msg.id, rep->error);
 				msg->on_done(msg->ctx, (rep->error == csce_ok), rep);
 				msg->on_done = NULL;
 			}
