@@ -359,11 +359,11 @@ struct msgloop_procfs_ent *nvmeib_msgloop_create(char *name,
 	return p;
 }
 
-struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size)
+struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
 {
 	struct msgloop_msg *msg;
 
-	msg = kzalloc(sizeof(*msg) + data_size, GFP_KERNEL);
+	msg = kzalloc(sizeof(*msg) + data_size, flags);
 	if (msg) {
 		kref_init(&msg->ref_cnt);
 	}

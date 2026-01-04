@@ -53,11 +53,11 @@ void msgloop_put_msg(void *_msg)
 }
 EXPORT_SYMBOL(msgloop_put_msg);
 
-struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size)
+struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
 {
 	struct msgloop_msg *msg;
 
-	msg = kzalloc(sizeof(*msg) + data_size, GFP_KERNEL);
+	msg = kzalloc(sizeof(*msg) + data_size, flags);
 	if (msg) {
 		kref_init(&msg->ref_cnt);
 	}
@@ -324,7 +324,7 @@ int nvmeib_msgloop_send(struct msgloop_procfs_ent *p, char *data, size_t len)
 	}
 
 	/* allocate msg and data buffer - free it after read() */
-	if ((msg = nvmeib_msgloop_alloc_msg(len + sizeof(*msg))) == NULL)
+	if ((msg = nvmeib_msgloop_alloc_msg(len + sizeof(*msg), GFP_KERNEL)) == NULL)
 		return -ENOMEM;
 
 	msg->len = len;
@@ -384,7 +384,7 @@ int nvmeib_msgloop_sendv(struct msgloop_procfs_ent *p, struct msg_vec *vec, int 
 		return -ENOSPC;
 
 	for (ii = 0; ii < cnt; ii++) {
-		msg = nvmeib_msgloop_alloc_msg(vec[ii].len + sizeof(*msg));
+		msg = nvmeib_msgloop_alloc_msg(vec[ii].len + sizeof(*msg), GFP_KERNEL);
 		if (msg == NULL) {
 			rv = -ENOMEM;
 			goto free_msgs;

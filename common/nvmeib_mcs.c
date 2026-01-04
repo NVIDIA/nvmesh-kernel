@@ -709,7 +709,7 @@ static int mcs_alloc(struct mcs_build_info *info)
 	struct msgloop_msg *msg;
 	int rv;
 
-	msg = nvmeib_msgloop_alloc_msg(info->total_len);
+	msg = nvmeib_msgloop_alloc_msg(info->total_len, GFP_KERNEL);
 	if (msg) {
 		list_add_tail(&msg->link, &info->msg_list);
 		rv = 0;
