@@ -836,8 +836,8 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "  \"pmbr\": {\n");
 	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%04x\",\n", mbr.signature);
 	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_os_type\": \"0x%02x\",\n", mbr.partitions[0].os_type);
-	nvmeibt_Str_sprintf(json_output, "    \"pba_s\": %d,\n", mbr.partitions[0].pba_s);
-	nvmeibt_Str_sprintf(json_output, "    \"n_pblk\": %d\n", mbr.partitions[0].n_pblk);
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_pba_s\": %d,\n", mbr.partitions[0].pba_s);
+	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_n_pblk\": %d\n", mbr.partitions[0].n_pblk);
 	nvmeibt_Str_sprintf(json_output, "  }");
 
 	// Export Main GPT based on --gpt-copy option
@@ -2333,8 +2333,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
 	fprintf(stdout, "\n");
 	n_metadata_changes = compare_and_show_gpt_diff(&current_metadata_gpt, &json_metadata_gpt, "Metadata GPT");
-
-	/* Prepare and compare disk_metadata (if present in JSON) */
 	if (disk_metadata_elem && disk_md_partition) {
 		pbyte_s = disk_md_partition->pba_s * config->pblk_size;
 
@@ -2431,11 +2429,11 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		fprintf(stdout, "  Metadata GPT:  %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
 		fprintf(stdout, "  disk_metadata: %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
 	} else {
+		int total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes;
 		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
-		if (n_main_changes + n_metadata_changes + n_disk_metadata_changes > 0) {
+		if (total_changes > 0) {
 			fprintf(stdout, COL_YELLOW "Use --write flag to apply %d change%s to disk." COL_RESET "\n",
-					n_main_changes + n_metadata_changes + n_disk_metadata_changes,
-					(n_main_changes + n_metadata_changes + n_disk_metadata_changes) == 1 ? "" : "s");
+					total_changes, total_changes == 1 ? "" : "s");
 		} else {
 			fprintf(stdout, "No changes detected - JSON matches disk.\n");
 		}
