@@ -67,6 +67,7 @@ struct self_test_entry {
 	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)", false) \
 	X(warning_fields_apply, "Validation - _WARNING_ Fields Applied", "gpt_util modify last_pba_zeroed + apply --write", false) \
 	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)", false) \
+	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)", true)*/ \
 	X(o_direct_flags, "Validation - O_DIRECT Flags", "gpt_util --direct and --no-direct (I/O mode control)", false)
 
 // Define test function (searchable marker + function signature)

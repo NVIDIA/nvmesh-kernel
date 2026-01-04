@@ -2172,6 +2172,53 @@ DEFINE_TEST(csv_parsing_path)
 	return rv;
 }
 
+/* This test will seg fault as we don't have json type enforcement */
+// DEFINE_TEST(malformed_json_type)
+// {
+// 	int rv = 0;
+
+// 	/* Create device and export */
+// 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+// 	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("malformed"));
+// 	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+// 	/* Corrupt JSON: change string field to number */
+// 	if (rv == 0) {
+// 		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("malformed"));
+// 		struct mm_json_elem *main_gpt = NULL;
+// 		int i;
+
+// 		if (json_root) {
+// 			for (i = 0; i < json_root->dict.len; i++) {
+// 				if (strcmp(json_root->dict.elements[i].key, "main_gpt_primary") == 0) {
+// 					main_gpt = json_root->dict.elements[i].value;
+// 					break;
+// 				}
+// 			}
+// 			/* Set disk_uuid (string) to a number - will cause type mismatch */
+// 			if (main_gpt) {
+// 				json_set_dict_num(main_gpt, "disk_uuid", 12345);
+// 				fprintf(stdout, "Corrupted JSON: set disk_uuid (string) to number\n");
+// 				rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("malformed"));
+// 			} else {
+// 				rv = -1;
+// 			}
+// 		} else {
+// 			rv = -1;
+// 		}
+// 	}
+
+// 	/* Try to apply - should fail gracefully (not crash) */
+// 	if (rv == 0) {
+// 		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+// 		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("malformed"));
+// 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+// 		/* Expect failure, but graceful (no crash) */
+// 	}
+
+// 	return rv;
+// }
+
 DEFINE_TEST(o_direct_flags)
 {
 	int rv = 0;
