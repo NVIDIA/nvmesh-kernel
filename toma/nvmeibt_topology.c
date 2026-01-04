@@ -375,8 +375,6 @@ int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *
 
 	NFIN;
 
-	TODO(Go over all the validations. Duplicated in various layers. Here only seg_level, not GPT/disk level. Maybe first validate both GPTs);
-
 	seg_metadata_gpt_entry = nvmeibt_seg_active_get_metadata_gpt_entry(seg_active);
 	if (seg_metadata_gpt_entry) {	// This is the common case. Quick check and we are done
 		N_Tf(bskijw2, "seg=@UUID_8 Found existing entry. No harm", SEG_UUID_8);
