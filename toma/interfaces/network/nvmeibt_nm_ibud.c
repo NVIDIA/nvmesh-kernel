@@ -1001,7 +1001,7 @@ static int poll_cq(struct ibud_per_nic *pn, int *dry_tries)
 	while ((n = ibv_poll_cq(pn->cq, min(ARRAY_SIZE(wc), *dry_tries), wc)) > 0) {
 		org_dry_tries = *dry_tries;
 		N_Df(nm_poll_cq_d1000, "n @INT", n);
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		for (i = 0; i < n; ++i) {
 			*dry_tries = *dry_tries - 1;
 			if (wc[i].opcode == IBV_WC_RECV) {
@@ -2149,7 +2149,7 @@ static int timed_wait(pthread_cond_t *cond, pthread_mutex_t *m, int sec)
 	int rv;
 
 	if (sec) {
-		getnstimeofday(&ts);
+		getnstimeofday_real(&ts);
 		ts.tv_sec += sec;
 		if ((rv = pthread_cond_timedwait(cond, m, &ts)) != 0 &&
 			rv != ETIMEDOUT) {
@@ -2597,7 +2597,7 @@ int nvmeibt_nm_hw_send_ping(struct nvmeibt_nm_path *path, int is_response, uint8
 		ibud_port->qp->qp_num, ibud_path->remote_qp_num, wr.wr.ud.remote_qkey);
 	}
 
-	getnstimeofday(&(path->ping_send_timespec));
+	getnstimeofday_boot(&(path->ping_send_timespec));
 	wrid->type = IBT_WR_SEND_PING;
 	wrid->sender_index = 0;
 	wrid->response = is_response;

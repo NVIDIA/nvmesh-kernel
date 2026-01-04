@@ -30,14 +30,21 @@
 				ret.tv_nsec = ts64.tv_nsec;
 				return ret;
 		}
+	#endif
 
-		static inline void getnstimeofday(struct timespec *ts)
+		static inline void getnstimeofday_real(struct timespec *ts)
 		{
 				struct timespec64 ts64;
 				ktime_get_real_ts64(&ts64);
 				*ts = timespec64_to_timespec(ts64);
 		}
-	#endif
+
+		static inline void getnstimeofday_boot(struct timespec *ts)
+		{
+				struct timespec64 ts64;
+				ktime_get_boottime_ts64(&ts64);
+				*ts = timespec64_to_timespec(ts64);
+		}
 
 	#if !KS_HAS_RTC_TM_TO_TIME		/* Removed in newer kernels, reimplement */
 		static inline void rtc_time_to_tm(unsigned long time, struct rtc_time *tm) {
@@ -140,7 +147,8 @@
 
 	extern struct timezone sys_tz;			// Daniel set it to represent Israel.
 	static inline void do_gettimeofday(struct timeval *tv)	{ gettimeofday(tv, &sys_tz); }
-	static inline int getnstimeofday(struct timespec *ts)	{ return clock_gettime(CLOCK_REALTIME, ts); }
+	static inline int getnstimeofday_real(struct timespec *ts)	{ return clock_gettime(CLOCK_REALTIME, ts); }
+	static inline int getnstimeofday_boot(struct timespec *ts)	{ return clock_gettime(CLOCK_BOOTTIME, ts); }
 
 /***********************         TIMESPEC         *****************************/
 
@@ -255,6 +263,17 @@ static inline int64_t timespec_to_nsec(const struct timespec ts)
 static inline int64_t timespec_to_msec(const struct timespec ts)
 {
 	return (SEC_TO_MSEC(ts.tv_sec) + NSEC_TO_MSEC(ts.tv_nsec));
+}
+
+static inline void getnstimeofday_convert_boot_to_real(const struct timespec *ts_boot, struct timespec *ts_real)
+{
+	struct timespec					ts_boot_now;
+	struct timespec					ts_real_now;
+
+	getnstimeofday_boot(&ts_boot_now);
+	getnstimeofday_real(&ts_real_now);
+	*ts_real = timespec_add(ts_real_now, ts_boot_now);
+	*ts_real = timespec_sub(*ts_real, *ts_boot);
 }
 
 /******************************************************************************/

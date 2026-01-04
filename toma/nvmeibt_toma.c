@@ -831,7 +831,7 @@ int nvmeibt_toma_on_shutdown_me_only(__attribute__((__unused__)) void *args, boo
 	shutdown_from_management += !!from_mgmt;
 	N_Tf(trace_toma_on_shutdown_me_only, "shutdown_from_management=@SHUTDOWN_FROM_MANAGEMENT", shutdown_from_management);
 	if (shutdown_status == ds_none) {
-		getnstimeofday(&nvmeibt_global_get_global()->shutdown_start_time);
+		getnstimeofday_boot(&nvmeibt_global_get_global()->shutdown_start_time);
 		shutdown_status = ds_me;
 		nvmeibt_kafka_shutdown();
 		nvmeibt_toma_print_status();
@@ -847,7 +847,7 @@ int nvmeibt_toma_on_shutdown_all(__attribute__((__unused__)) void *args, bool fr
 	shutdown_from_management += !!from_mgmt;
 	N_Tf(trace_toma_on_shutdown_all, "shutdown_from_management=@SHUTDOWN_FROM_MANAGEMENT", shutdown_from_management);
 	if (shutdown_status == ds_none) {
-		getnstimeofday(&nvmeibt_global_get_global()->shutdown_start_time);
+		getnstimeofday_boot(&nvmeibt_global_get_global()->shutdown_start_time);
 		shutdown_status = ds_all;
 		nvmeibt_kafka_shutdown();
 		nvmeibt_toma_print_status();
@@ -1126,7 +1126,7 @@ static int toma_wakeup_event(void)
 	const bool is_shuttind_down = (shutdown_status != ds_none);
 	NFIN;
 
-	getnstimeofday(&start_timespec);
+	getnstimeofday_boot(&start_timespec);
 	do {
 		TODO(This is an interim solution. Need to put everything in one WQ item);
 		if (iteration_no) {
@@ -1184,7 +1184,7 @@ static int toma_wakeup_event(void)
 		} else {
 			N_Wf(slso3lp, "Partial read n=@RV_SSIZE_T", read_size_rv);
 		}
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		if ((++iteration_no > 100) || (timespec_diff_ns(now, start_timespec) > MSEC_TO_NSEC(50))) {
 			N_Tf(a2jn4la, "Spent too much time here. Quitting");
 			ret = 1;
@@ -2071,14 +2071,17 @@ int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *p
 	char time_str[32];
 	size_t strf_len;
 	struct tm	tmp_tm;
+	struct timespec ts_real;
 
 	if (timespec_eq(ts, TIMESPEC_ZERO)) {
-		localtime_r(&ts.tv_sec, &tmp_tm);
-		strf_len = strftime(time_str, sizeof(time_str), "%H:%M:%S", &tmp_tm);
-		sprintf(time_str + strf_len, ".%03lld", NSEC_TO_MSEC(ts.tv_nsec));
-		(*printf_fn)(printf_ctx, "%s", time_str);
-	} else
 		(*printf_fn)(printf_ctx, "Not Set      ");
+	} else {
+		getnstimeofday_convert_boot_to_real(&ts, &ts_real);
+		localtime_r(&ts_real.tv_sec, &tmp_tm);
+		strf_len = strftime(time_str, sizeof(time_str), "%H:%M:%S", &tmp_tm);
+		sprintf(time_str + strf_len, ".%03lld", NSEC_TO_MSEC(ts_real.tv_nsec));
+		(*printf_fn)(printf_ctx, "%s", time_str);
+	}
 	return 0;
 }
 
@@ -2197,7 +2200,7 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 
 	NFIN;
 	/* Make a nicer time string for inside the file */
-	getnstimeofday(&now);
+	getnstimeofday_real(&now);
 	localtime_r(&now.tv_sec, &timeinfo);
 	strftime(time_str, sizeof(time_str), "%b %d %X ", &timeinfo);
 
@@ -2288,7 +2291,7 @@ static void nvmeibt_toma_print_status(void)
 	status_filename = stat_offload_task->status_filename;
 
 	dirname = nvmeibt_toma_get_log_dir_name();
-	getnstimeofday(&now);
+	getnstimeofday_real(&now);
 	localtime_r(&now.tv_sec, &timeinfo);
 	strftime(short_time_str, sizeof(short_time_str), "%Y_%m_%d_%H_%M_%S", &timeinfo);
 	rv = snprintf(status_filename, PATH_MAX, "%s/toma_%s.stat", dirname, short_time_str);
@@ -2323,7 +2326,7 @@ static void at_event_end_activities(void)
 //	NFIN;
 	// nvmeibr_rtm_state_machine();
 	if (nvmeibt_toma_is_in_shutdown()) {
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		if (!is_shutdown_me_only() ||
 			timespec_diff_ns(now, nvmeibt_global_get_global()->shutdown_start_time) > (nvmeibt_raft_get_effective_heartbeat_timeout_ns() * 15)) {
 			nvmeibt_global_get_global()->is_in_shutdown_active_phase = 1;
@@ -2943,7 +2946,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 			is_need_to_update_the_main_select_fds = false;
 		}
 		// Calculate the epoll_timeout
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		now_millisec = timespec_to_msec(now);
 		epoll_timeout_ms = 1000;	// Start from max of 1 sec. Probably the other timeouts will pull it down
 
@@ -2961,7 +2964,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		n_fds_returned = epoll_wait(epoll_fd, epoll_events, g_fds_in_use.max_fd_no + 1, epoll_timeout_ms);
 		select_errno = errno;
 
-		getnstimeofday(&(nvmeibt_global_get_global()->cur_event_start_time));
+		getnstimeofday_boot(&(nvmeibt_global_get_global()->cur_event_start_time));
 		pselect_time_ms = timespec_to_msec(nvmeibt_global_get_cur_event_start_time());
 		pselect_time_ms -= now_millisec;
 		did_pselect_allow_time_to_receive_append_entries = (pselect_time_ms > 1);
@@ -3051,7 +3054,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		}
 
 		// Handle the expired timeouts
-		getnstimeofday(&now);	// Do not re-sample "now". as we do not handle incoming messages
+		getnstimeofday_boot(&now);	// Do not re-sample "now". as we do not handle incoming messages
 		now_millisec = timespec_to_msec(now);
 		//_Tf("Select timeout\n");
 		if (timespec_ge(now, nvmeibt_raft_get_next_timeout_timespec())) {

@@ -319,7 +319,7 @@ int nvmeibt_ds_metadata_ctrl_blk_write(struct seg_persistency_write_params *writ
 		nvmeibt_abort(ES_FATAL);
 	}
 
-	getnstimeofday(&now);
+	getnstimeofday_real(&now);
 	md_ctrl->save_timespec_tv_sec = now.tv_sec;
 
 	md_ctrl->locks_table_pbyte_s = seg_metadata_pbyte_s + LOCKS_TABLE_RELATIVE_OFFSET_BYTES;
@@ -646,7 +646,7 @@ void nvmeibt_ds_metadata_store_on_shutdown(struct nvmeibt_seg_active *seg_active
 	live_seg_persistent_metadata->is_current_shutdown_clean = !locks_table_store_status;
 	live_seg_persistent_metadata->active_praid_version_major = praid_topo_ctx->praid_version_major;
 	live_seg_persistent_metadata->active_praid_version_minor = praid_topo_ctx->praid_version_minor;
-	getnstimeofday(&now);
+	getnstimeofday_real(&now);
 	live_seg_persistent_metadata->save_timespec_tv_sec = now.tv_sec;
 
 	write_params.fd = fd;

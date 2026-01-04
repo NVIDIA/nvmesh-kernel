@@ -1640,14 +1640,14 @@ void nvmeibt_topology_calc_topology(void)
 	}
 
 	N_Tf(ufy123c, "Recalc topology");
-	getnstimeofday(&start_timespec);
+	getnstimeofday_boot(&start_timespec);
 	ZEROINIT(nvmeibt_global_adaptive_timeouts()->n_praids);
 	nvmeibt_topology_leader_clear_recalc_required();
 	for (int i = XDLIST_N_ELEMNTS(&cur_topo->praid_topo_recalc_list); i > 0; i--) {
 		praid = XDLIST_FIRST(&cur_topo->praid_topo_recalc_list);
 		if (praid == NULL)
 			break;
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		time_diff_nsec = timespec_diff_ns(now, nvmeibt_global_get_cur_event_start_time());
 		N_Tf(xnnkw33, "time from event start=@INT64 nsec", time_diff_nsec);
 		if (time_diff_nsec * 2 > nvmeibt_raft_get_effective_heartbeat_timeout_ns()) {
@@ -1689,7 +1689,7 @@ void nvmeibt_topology_calc_topology(void)
 
 	/* dumper: log this new global topology */
 	nvmeibt_dumper_event_global_topo();
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	time_diff_nsec = timespec_diff_ns(now, start_timespec);
 	nvmeib_iir_add_sample(&(nvmeibt_global_adaptive_timeouts()->leader_calculated_topo_calc_time_ns_IIR), time_diff_nsec);
 	// NVMEIB_IIR_DUMP(usnfzi4, nvmeibt_global_adaptive_timeouts()->leader_calculated_topo_calc_time_ns_IIR, time_diff_nsec);

@@ -107,7 +107,7 @@ static void send_registrable_to_all_longing_registrants(struct nvmeibt_seg_activ
 #define NDUMP_REG_CTX(name, _Tf_OR_If, reg_ctx) do {																\
 		struct timespec		__now, time_left;																		\
 		if (!reg_ctx) {N ## _Tf_OR_If(name ## _1, "reg_ctx=NULL"); break;}											\
-		getnstimeofday(&__now);																		\
+		getnstimeofday_boot(&__now);																		\
 		time_left = timespec_sub((reg_ctx)->timeout_time, __now);													\
 		N ## _Tf_OR_If(name ## _2, "seg=@UUID_8 lock_id=@T_LID handle=@HANDLE "										\
 			"time_left=@LLD.@TIMESPEC_NS is_force_cmd_called=@BOOL disconnect_time=@LLD",							\
@@ -177,7 +177,7 @@ static void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_act
 	struct timespec					now;
 	NFIN;
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	XHASHTABLE_FOR_EACH_SAFE(active_registrant, &seg_active->active_registrants) {
 		if (is_err && !(active_registrant->is_force_cmd_called) && timespec_lt(active_registrant->timeout_time, now)) {
 			NDUMP_REG_CTX(dhy7462, _Ef, active_registrant);
@@ -1258,7 +1258,7 @@ static BOOL upd_registrant_sync_timeout(struct nvmeibt_registrant_ctx *reg_ctx,
 		reg_ctx->timeout_time = TIMESPEC_MAX_C99;
 		goto out_changed;
 	}
-	getnstimeofday(&(reg_ctx->timeout_time));
+	getnstimeofday_boot(&(reg_ctx->timeout_time));
 	timespec_update_by_a_few_nsec(&(reg_ctx->timeout_time), MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_NSEC);
 	// Always add it last, assuming that it is added at time now+MAX_WAIT_FOR_REGISTRANT_TIMEOUT_NSEC
 	N_Tf(ski9ry3, "Adding last");
@@ -2240,7 +2240,7 @@ static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmei
 		rv = UNREGISTER_RV_OK;
 	}
 	if (rv == UNREGISTER_RV_IN_WORK) {
-		getnstimeofday(&(reg_ctx->reg_disconnect_time));
+		getnstimeofday_boot(&(reg_ctx->reg_disconnect_time));
 	}
 	NFOUT;
 	return rv;
@@ -2912,7 +2912,7 @@ int nvmeibt_register_timeout_occurred(void)
 	struct timespec				now;
 
 	NFIN;
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	// Go over the local disk_segments, and locate the expired registrants' timeout
 	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
 		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {

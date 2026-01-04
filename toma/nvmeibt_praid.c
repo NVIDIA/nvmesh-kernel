@@ -952,7 +952,7 @@ void nvmeibt_praid_reset_due_to_convert_to_leader(struct nvmeibt_praid *praid)
 	praid_leader->previous_topo_for_clients.header.n_segments = -1;
 	praid_leader->did_any_client_report_about_problems = 0;
 	praid_leader->praid_wire_topo.segs_num = LE_SWAP8(ILLEGAL_SEGS_NUM); // Mark a never serialized topo
-	getnstimeofday(&(praid_leader->last_serialization_timestamp));	// Wait for non-responsive segs as if we serialized now
+	getnstimeofday_boot(&(praid_leader->last_serialization_timestamp));	// Wait for non-responsive segs as if we serialized now
 
 	//nvmeibt_praid_lot_duplicate_content(&praid_leader->baseline_praid_lot, &praid->praid_follower.committed_praid_lot);
 	nvmeibt_praid_leader_we_have_a_new_baseline(praid, &praid->praid_follower.committed_praid_lot);
@@ -1781,7 +1781,7 @@ static bool leader_is_waiting_for_any_remote_seg_to_apply_topo(struct nvmeibt_pr
 		}
 	}
 	//
-	getnstimeofday(&now);;
+	getnstimeofday_boot(&now);
 	wait_time_nsec = timespec_diff_ns(now, praid_leader->last_serialization_timestamp);
 	max_nsec_wait_for_registrable_seg = nvmeibt_raft_get_praid_leader_max_nsec_wait_for_registrable_seg_to_apply(praid_leader->did_any_client_report_about_problems);
 	max_nsec_wait_for_non_registrable_seg = nvmeibt_raft_get_praid_leader_max_nsec_wait_for_non_registrable_seg_to_apply(praid_leader->did_any_client_report_about_problems);
@@ -2566,7 +2566,7 @@ void nvmeibt_praid_leader_we_have_a_new_baseline(struct nvmeibt_praid *praid, st
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(sxro0n5, TOPO_CONFIG, leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit) + 1);
 	}
 	praid_leader_serialize_topo(praid);
-	getnstimeofday(&(praid_leader->last_serialization_timestamp));
+	getnstimeofday_boot(&(praid_leader->last_serialization_timestamp));
 	NFOUT;
 }
 

@@ -227,7 +227,7 @@ static int64_t seg_active_scrub_secs_since_start(const struct nvmeibt_seg_active
 {
 	struct timespec		now;
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	if (now.tv_sec > seg_active->scrubbing_start_time.tv_sec)
 		return (now.tv_sec - seg_active->scrubbing_start_time.tv_sec);
 	else
@@ -296,7 +296,7 @@ void nvmeibt_seg_active_scrub_upd_failure_status(struct nvmeibt_seg_active *seg_
 	if (is_OK) {
 		seg_active->last_failed_scrub_iteration_time = TIMESPEC_ZERO;
 	} else {
-		getnstimeofday(&(seg_active->last_failed_scrub_iteration_time));    // In case of failure, do not retry for a while
+		getnstimeofday_boot(&(seg_active->last_failed_scrub_iteration_time));    // In case of failure, do not retry for a while
 	}
 	upd_scrub_timeout_heap_following_a_change(seg_active);
 }
@@ -320,7 +320,7 @@ static void seg_active_scrub_reset(struct nvmeibt_seg_active *seg_active, bool i
 	if (is_starting_new_period)
 		seg_active->scrubbing_start_time.tv_sec += (int64_t)seg_active_scrub_period_sec(seg_active);
 	else
-		getnstimeofday(&(seg_active->scrubbing_start_time));
+		getnstimeofday_boot(&(seg_active->scrubbing_start_time));
 	seg_active->scrubbing_start_time.tv_sec -= time_by_percentage_scrubbed_sec;
 	nvmeibt_seg_active_scrub_upd_failure_status(seg_active, 1);
 }
@@ -494,7 +494,7 @@ static void nvmeibt_seg_active_topo_reset(struct nvmeibt_seg_active *seg_active)
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE( djuy723, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
 	NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(       dki98se, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
 	NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(alo9rt4, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
-	getnstimeofday(&ts);
+	getnstimeofday_real(&ts);
 	seg_active->active_seg_topo.active_seg_ser_ver = ((uint64_t)ts.tv_sec << 32) + ts.tv_nsec;	// Hopefully works with disk hot-plug/unplug
 }
 
@@ -1830,7 +1830,7 @@ void nvmeibt_recovery_execute_scrubbing_as_needed(void)
 		goto out;
 	}
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	// Instead of using a timeout mechanism, we use the idle_time_activities, and avoid frequent scans
 	if (now.tv_sec - prev_call_timespec.tv_sec < SCRUB_PERIODIC_TIMEOUT_SEC) {
 		N_Tf(msjf43h, "Too soon after prev call");
@@ -2675,7 +2675,7 @@ static void seg_active_zeroing_finalize(struct nvmeibt_wq_entry *wq_entry)
 	}
 	seg_active->n_4Kblk_zeroed = n_4Kblk_zeroed; // for status reports only
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	diff_timeout = timespec_sub(now, seg_active->last_zeroing_progress_report_time);
 
 	if (is_done_zeroing || (diff_timeout.tv_sec > SEG_ZERO_REPORT_TO_MGMT_FREQUENCY_SEC)) {

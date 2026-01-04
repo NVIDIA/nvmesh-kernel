@@ -1271,7 +1271,7 @@ static enum nvmeibt_add_rv raft_apply_raft_protocol_params_that_were_read_from_p
 	my_raft_global.current_term = persistent_current_term;
 	nvmeibt_kafka_new_kafka_mgmt_zone_number_received(persistent_kafka_mgmt_zone_number);
 	my_raft_global.last_rx_append_entries_term = persistent_last_rx_append_entries_term;
-	getnstimeofday(&ts);
+	getnstimeofday_real(&ts);
 	cur_topo->running_local_serialization_version = ((unsigned long long)ts.tv_sec << 32) + ts.tv_nsec;
 	cur_topo->known_to_leader_local_serialization_version = NVMEIBT_NOT_INITIALIZED_SER_VER;
 	nvmeibt_raft_set_voted_for_uuid(&persistent_voted_for_raft_member_uuid);
@@ -1708,7 +1708,7 @@ static void raft_send_topo_cb(__attribute__((__unused__)) void *arg, int status)
 	(void)__sync_add_and_fetch(&(cur_topo->in_transmission_cnt), -1); // atomic dec
     N_Tf(t_bb_1, "End of topo tx status=@INT, tx_remained=@INT", status, cur_topo->in_transmission_cnt);
 	if (cur_topo->in_transmission_cnt == 0) {
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		diff_timeout_nsec = timespec_diff_ns(now, cur_topo->last_raft_distribution_timestamp);
 		if (diff_timeout_nsec < raft_leader_heartbeat_timeout_nsec)
 			N_Tf(dii022z,"Raft distribution time=@INT64 nsec", diff_timeout_nsec);
@@ -2068,7 +2068,7 @@ int nvmeibt_raft_get_avg_leader_lifespan_sec(void)
 	int					oldest_entry_idx = n_changes_in_leader_history_array % ARRAY_SIZE(leader_history_array);
 	struct timespec		now;
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	return (n_changes_in_leader_history_array >= ARRAY_SIZE(leader_history_array) ?
 			(now.tv_sec - leader_history_array[oldest_entry_idx].timestamp_sec) / ARRAY_SIZE(leader_history_array) :
 			INT_MAX);
@@ -2129,7 +2129,7 @@ static inline void add_noise_to_srand48(void)
 	struct timespec ts;
 
 	// sys_getrandom(&randseed, sizeof randseed, 0);
-	getnstimeofday(&ts);
+	getnstimeofday_boot(&ts);
 	randseed = ts.tv_nsec;
 	srand48(lrand48() ^ randseed);	// Even the slightest change makes a total difference
 }
@@ -2139,7 +2139,7 @@ static void raft_reset_election_timeout(BOOL is_just_allowing_busy_main_loop_tim
 	struct timespec		now_plus_little;
 
 	NFIN;
-	getnstimeofday(&now_plus_little);
+	getnstimeofday_boot(&now_plus_little);
 	if (!is_just_allowing_busy_main_loop_time_to_receive_leader_heartbeat) {
 		add_noise_to_srand48();   // Otherwise raft on different nodes use the same seed and are synchronized
 		my_raft_global.next_election_time = now_plus_little;
@@ -2396,7 +2396,7 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 		break;
 	}
 	node = nvmeibt_raft_member_get_node(dst_member);	// Might fail
-	getnstimeofday(&(cur_topo->last_send_appendentries_timestamp));
+	getnstimeofday_boot(&(cur_topo->last_send_appendentries_timestamp));
 	raft_send_msg_to_peer(RAFT_MSG_APPEND_ENTRIES, node, 0, is_with_raft_log, send_persist_and_wire_buf, 0, data_len);
 out:
 	NFOUT;
@@ -2446,7 +2446,7 @@ static bool is_srm_ready_to_accept_the_new_msgs(bool is_with_raft_log)
 		rv = 1;
 		goto out;
 	}
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	diff_timeout_nsec = timespec_diff_ns(now, cur_topo->last_send_appendentries_timestamp);
 	if (diff_timeout_nsec < (raft_leader_heartbeat_timeout_nsec * RAFT_TX_WAIT_FACTOR)) {
 		N_Tf(c63b3ks, "Skipping. Awaiting previous transmission to finished, tx_remained=@INT, timeout=@INT64 ms", cur_topo->in_transmission_cnt, NSEC_TO_MSEC(diff_timeout_nsec));
@@ -2509,7 +2509,7 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 	}
 	my_raft_global.last_tx_append_entries_msg_num++;
 	if (is_srm_ready_to_accept_the_new_msgs(is_with_raft_log)) {
-		getnstimeofday(&(nvmeibt_global_get_global()->last_raft_distribution_timestamp));
+		getnstimeofday_boot(&(nvmeibt_global_get_global()->last_raft_distribution_timestamp));
 		is_new_committed_or_applied = (prev_topo_to_commit != RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit) ||
 									   prev_topo_to_apply != RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_committed_by_majority));
 		if (is_new_committed_or_applied) {
@@ -3108,7 +3108,7 @@ static void raft_upd_append_entries_rep_IIRs(const struct raft_msg *msg, struct 
 	// N_Tf(ghvfsgvuyr, "persist_and_wire_buf=@INT64_TD leader_to_commit=@INT64_TD msg->applied_TOPO_idx=@INT64_TD leader_committed_by_majority=@INT64_TD",
 	//	 nvmeibt_tlv_get_idx(&(msg->persist_and_wire_buf.topo_ctx)), RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit),
 	//	 msg->applied_TOPO_idx, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_committed_by_majority));
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	ns_since_append_entries = timespec_diff_ns(now, nvmeibt_global_get_global()->last_raft_distribution_timestamp);
 	// N_Tf(4vgs9l2, "ns_since_append_entries=@INT64_TD", ns_since_append_entries);
 	if (ns_since_append_entries > CLIP_ROOF_IMAGINARY_REFERENCE_HEARTBEAT_TIMEOUT_NS) {
@@ -3416,7 +3416,7 @@ int nvmeibt_raft_one_time_init(void)
 	XHASHTABLE_INIT(&(my_raft_global.raft_members_hash));
 	my_raft_global.n_raft_members = 0;
 	nvmeibt_raft_recalc_timeout_constants();
-	getnstimeofday(&(my_raft_global.next_election_time));
+	getnstimeofday_boot(&(my_raft_global.next_election_time));
 	my_raft_global.last_recieved_append_entries_timestamp_sec = my_raft_global.next_election_time.tv_sec;	// init with "now"
 	init_lifecycle_ctx(&(my_raft_global.TOPO_commit_lifecycle));
 	init_lifecycle_ctx(&(my_raft_global.TOPO_CONFIG_commit_lifecycle));

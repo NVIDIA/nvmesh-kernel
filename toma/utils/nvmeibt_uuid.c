@@ -124,7 +124,7 @@ void generate_random_uuid(union nvmeib_uuid *uuid) {
 	if (rv) {
 		// N_Tf(9sjcb4t, "getrandom() returned @AUTO_ERRNO. Using a less 'random' method");
 		// Add noise to random
-		getnstimeofday(&ts);
+		getnstimeofday_real(&ts);
 		if (!noisy_tv_nsec) {
 			noisy_tv_nsec = (unsigned int)((unsigned long long)&generate_random_uuid) ^ getpid();
 		}

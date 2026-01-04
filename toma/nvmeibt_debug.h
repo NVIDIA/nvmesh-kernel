@@ -74,7 +74,7 @@
 #include <syslog.h>
 #include "interfaces/log/log_incs.h"
 #include "../common/nvmeib_macro_utils.h"
-#include "../common/compat/kr_incs_time.h"  // getnstimeofday, MSEC_TO_NSEC, timespec_diff_ns, etc.
+#include "../common/compat/kr_incs_time.h"  // getnstimeofday_boot, MSEC_TO_NSEC, timespec_diff_ns, etc.
 
 	// config params defaults
 #define RAFT_LEADER_HEARTBEAT_TIMEOUT_NSEC_DEFAULT				MSEC_TO_NSEC(200)
@@ -104,13 +104,13 @@
 
 #define __MEASURE_TOOK_INIT()									\
 	struct timespec	__measure_took_t1, __measure_took_t2;		\
-	getnstimeofday(&__measure_took_t1);
+	getnstimeofday_boot(&__measure_took_t1);
 
 int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 
 #define __MEASURE_TOOK(__measure_took_prt_cmd) do {													\
 		int64_t __measure_took_time_took_nsec;														\
-		getnstimeofday(&__measure_took_t2);															\
+		getnstimeofday_boot(&__measure_took_t2);															\
 		__measure_took_time_took_nsec = timespec_diff_ns(__measure_took_t2, __measure_took_t1);		\
 		if (__measure_took_time_took_nsec  * 2 > nvmeibt_raft_get_effective_heartbeat_timeout_ns()) {	\
 			__measure_took_prt_cmd;																	\
@@ -134,7 +134,7 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 	int64_t						time_since_prev_ns;																	\
 	struct timespec				_now_;																				\
 	int64_t						now_ns;																				\
-	getnstimeofday(&_now_);																							\
+	getnstimeofday_boot(&_now_);																							\
 	now_ns = timespec_to_nsec(_now_);								        									  	\
 	time_since_prev_ns = now_ns - prev_write_time_ns;						       									\
 	if (time_since_prev_ns > VERY_MIN_TIME_BETWEEN_SYSLOG_NS) {														\
@@ -204,7 +204,7 @@ int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_
 #define _DILUTED_CMD(_msec, _diluted_cmd_...) ({				\
 	struct timespec				now;							\
 	static struct timespec		prev;							\
-	getnstimeofday(&now);										\
+	getnstimeofday_boot(&now);										\
 	if (timespec_diff_ns(now, prev) >= MSEC_TO_NSEC(_msec)) {	\
 		_diluted_cmd_;											\
 		prev = now;												\

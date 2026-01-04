@@ -666,7 +666,7 @@ static int handle_path(void *ctx, int is_read, int is_write, int dry_tries)
 				nvmeibt_nm_restart_path(path);
 			}
 			else {
-				getnstimeofday(&(path->ping_send_timespec));
+				getnstimeofday_boot(&(path->ping_send_timespec));
 				nvmeibt_nm_set_path_state(path, nvmeibt_nm_ps_wait_ping_ack);
 				++path->ping_retry_counter;
 			}
@@ -2659,7 +2659,7 @@ void nvmeibt_nm_on_recv_ping(struct nvmeibt_nm_path *path, union nvmeibt_nm_ping
 		if (	(path->state == nvmeibt_nm_ps_wait_ping_ack &&
 				 v->fields.srm_id_lsb == (uint16_t)path->srm_id &&
 				 v->fields.ping_id == path->ping_id)) {
-			getnstimeofday(&(path->ra->rn->node->peer_statistics.last_ping_response_timespec));
+			getnstimeofday_boot(&(path->ra->rn->node->peer_statistics.last_ping_response_timespec));
 			path->ping_retry_counter = 0;
 			++path->ping_id;
 			//path->pp->pn->ln->renew_status = 1;
@@ -2713,7 +2713,7 @@ void nvmeibt_nm_on_recv_ping(struct nvmeibt_nm_path *path, union nvmeibt_nm_ping
 					path->name,
 					(unsigned)v->fields.ping_id,
 					(unsigned)v->fields.retry_count);
-			getnstimeofday(&(path->ping_send_timespec));
+			getnstimeofday_boot(&(path->ping_send_timespec));
 		}
 	}
 	//PFOUT_;
@@ -3085,7 +3085,7 @@ static void trace_time(char *buf, int buf_size)
     time_t nowtime;
     struct tm nowtm;
     char tmbuf[64];
-    getnstimeofday(&ts);
+    getnstimeofday_real(&ts);
     nowtime = ts.tv_sec;
 	localtime_r(&nowtime, &nowtm);
     strftime(tmbuf, sizeof(tmbuf), "%Y.%m.%d-%H:%M:%S", &nowtm);

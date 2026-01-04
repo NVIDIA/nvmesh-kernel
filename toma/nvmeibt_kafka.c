@@ -393,7 +393,7 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 		// return;	Should we ignore errors that do not look like security related
 		break;
 	}
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	if (timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) {
 		N_IMf(hu8a475, "Marking kafka soft init required");
 		kafka_requested_init_preserve_state_vars_counter++;
@@ -935,7 +935,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 			goto out;
 		}
 		rv = extract_messageType_params_from_json_first_level(*out_json_tree_root, out_msg);
-		getnstimeofday(&kafka_last_consume_timespec);
+		getnstimeofday_boot(&kafka_last_consume_timespec);
 		rv = 0;
 		k->consumer_offset = new_offset;	// Decision: Update offset only if message is well formatetd. Can change it. Decided by Ronen: Change-Id: I37dad733615fdacd58d144245d306f78d2133eb7
 		break;
@@ -1756,7 +1756,7 @@ void send_keepalive_msgs_as_needed(void)
 	if (!json_payload) {
 		json_payload = NNVMEIBT_STR_ALLOC(4vc7usk);
 	}
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	// Follower (node) keepalive
 	if (now.tv_sec - last_follower_keepalive_ts.tv_sec > nvmeibt_follower_keep_alive_secs) {
 		nvmeibt_strlcpy(unique_key, "keep_alive_follower-", sizeof(unique_key));
@@ -2099,7 +2099,7 @@ static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__))) {
 				nanosleep(&(struct timespec){5, 0}, NULL); // 5 sec
 				continue;
 			}
-			getnstimeofday(&kafka_last_restart_timestamp);
+			getnstimeofday_boot(&kafka_last_restart_timestamp);
 		}
 		send_keepalive_msgs_as_needed();
 		// Here, everything must be properly initialized and stable (no free() etc)

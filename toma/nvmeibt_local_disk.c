@@ -698,7 +698,7 @@ void nvmeibt_local_disk_mark_periodic_reread_smart_counters_just_finished(struct
 	if (is_successful) {
 		local_disk->is_smart_log_valid = 1;
 		if (is_periodic_reread_needed && is_periodic_smart_polling_enabled) {
-			getnstimeofday(&(local_disk->last_periodic_reread_smart_counters_time));
+			getnstimeofday_boot(&(local_disk->last_periodic_reread_smart_counters_time));
 		} else {
 			local_disk->last_periodic_reread_smart_counters_time = TIMESPEC_MAX_C99;	// Never reread
 		}
@@ -1478,7 +1478,7 @@ static BOOL nvmeibt_local_disk_is_periodic_reread_smart_counters_needed(const st
 						is_periodic_smart_polling_enabled &&
 						!nvmeibt_local_disk_is_being_deleted(local_disk));
 	if (is_update_needed) {
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		diff_timeout = timespec_sub(now, local_disk->last_periodic_reread_smart_counters_time);
 
 		is_update_needed = (diff_timeout.tv_sec > LOCAL_DISK_SMART_PROBE_UPDATE_THRESHOLD_SEC);

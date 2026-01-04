@@ -1,4 +1,5 @@
 #include "kr_incs.h"
+#include "../common/compat/kr_incs_time.h"
 #include "nvmeib_public_mmap.h"
 #include "nvmeib_public_procfs.h"
 #include "nvmeib_rsc_pool.h"
@@ -1390,7 +1391,7 @@ __init_tracer_md_header(struct nvmeib_trace_system *trace_system) {
 
 	trace_system->md.tsc_khz = nvmeib_public_tsc_khz();
 
-	getnstimeofday(&ts);
+	getnstimeofday_real(&ts);
 	cyc = nvmeib_public_rdtsc();
 	trace_system->md.tsc_offset =
 	    mul_x_div_y(1000000000L * ts.tv_sec + ts.tv_nsec,

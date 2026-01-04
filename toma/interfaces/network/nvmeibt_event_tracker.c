@@ -69,7 +69,7 @@ void nvmeibt_event_tracker_add(struct nvmeibt_event_tracker *tracker, int event)
 	index = tracker->head;
 	entry = &tracker->events[index];
 
-	getnstimeofday(&entry->timestamp);
+	getnstimeofday_real(&entry->timestamp);
 	entry->event = event;
 
 	tracker->head = (tracker->head + 1) % tracker->max_events;

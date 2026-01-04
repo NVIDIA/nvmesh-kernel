@@ -32,7 +32,7 @@ char *get_8_plus_3_char_str_of_now(void)
 	struct timespec		now;
 	struct tm			*_tm, tmp_tm;
 
-	getnstimeofday(&now);
+	getnstimeofday_real(&now);
 	if (now.tv_sec != prev_sec) {
 		prev_sec = now.tv_sec;
 		_tm = localtime_r(&(now.tv_sec), &tmp_tm);
@@ -643,7 +643,7 @@ void nvmeibt_get_current_date_n_time(struct date_time *dt)
 	struct tm tm;
 	int64_t timep;
 
-	if (getnstimeofday(&now) < 0) {
+	if (getnstimeofday_real(&now) < 0) {
 		return;
 	}
 	timep = (time_t)now.tv_sec;

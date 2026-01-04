@@ -6730,8 +6730,8 @@ static void alloc_rng_to_client(struct nvmeibs_serjio_disk_private_data *serjio_
 	jrange->client_id = client_id;
 	strlcpy(jrange->client_host, client_host, sizeof(jrange->client_host));
 	jrange->client_uuid = client_uuid;
-	getnstimeofday(&jrange->reserved);
-	getnstimeofday(&jrange->last_allocated);
+	getnstimeofday_real(&jrange->reserved);
+	getnstimeofday_real(&jrange->last_allocated);
 	jrange->gen_id++;
 	jrange->ent_gen_id_wrapped = false;
 
@@ -6891,7 +6891,7 @@ unlock_and_read:
 	jrange->client_id = client_id;
 	jrange->gen_id++;
 	jrange->ent_gen_id_wrapped = false;
-	getnstimeofday(&jrange->last_allocated);
+	getnstimeofday_real(&jrange->last_allocated);
 	rv = 0;
 
 unlock_and_out:
@@ -7439,7 +7439,7 @@ static DECLARE_IO_WQ_FN(io_ret_rng_fn)
 	nvmeib_ref_release_wait(&jrange->alloc_ref);
 
 	/* Scan JMDC to see which entries are abandoned */
-	getnstimeofday(&jrange->last_returned);
+	getnstimeofday_real(&jrange->last_returned);
 	scan_ret_rng(jrange);
 
 	if (srj_state == SERJIO_CLN_JRNL) {
@@ -7456,7 +7456,7 @@ static DECLARE_IO_WQ_FN(io_ret_rng_fn)
 		jrange->jentry_state_cnt[JENTRY_UNKNOWN]);
 
 	spin_lock_irqsave(&jrange->lock, flags);
-	getnstimeofday(&jrange->last_returned);
+	getnstimeofday_real(&jrange->last_returned);
 	jrange->status = JRANGE_RESERVED;
 	jrange->returned_jif = jiffies;
 

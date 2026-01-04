@@ -29,12 +29,15 @@ struct nvmeibt_global_adaptive_timeouts_ctx		my_nvmeibt_global_adaptive_timeouts
 
 void nvmeibt_global_init(void)
 {
+	struct timespec						tmp_timespec;
+
 	NFIN;
 	_global_ctx_ptr = calloc(1, sizeof(*_global_ctx_ptr));
 	global_ctx.persistent_toma_software_version = TOMA_SW_COMPATIBILITY_VER;
 	global_ctx.mgmt_DB_uuid = nvmeib_uuid_null_val;
-	getnstimeofday(&(global_ctx.startup_timespec));
-	global_ctx.startup_timestamp_msec = timespec_to_msec(global_ctx.startup_timespec);		// Don't use timespec_to_nsec() as MGMT will round the LSBs
+	getnstimeofday_boot(&(global_ctx.startup_timespec));
+	getnstimeofday_convert_boot_to_real(&global_ctx.startup_timespec, &tmp_timespec);
+	global_ctx.startup_timestamp_msec = timespec_to_msec(tmp_timespec);		// Don't use timespec_to_nsec() as MGMT will round the LSBs
 	XHASHTABLE_INIT(&(global_ctx.block_devices_hash));
 	XHASHTABLE_INIT(&(global_ctx.nics_hash));
 	XHASHTABLE_INIT(&(global_ctx.disks_hash));
@@ -169,7 +172,7 @@ void nvmeibt_global_issue_leader_report_praids_status_to_mgmt(void)
 	if (report_time_diff < MAX_TIME_BETWEEN_CHANGED_SEGMENT_REPORTS_NSECS) {
 		goto skip_report_to_mgmt;
 	}
-	getnstimeofday(&start_timespec);
+	getnstimeofday_boot(&start_timespec);
 	/*
 	 * During replay: skip reporting of any status to management:
 	 *  - We only need to replay the leader's logic and how it calculates new
@@ -194,7 +197,7 @@ void nvmeibt_global_issue_leader_report_praids_status_to_mgmt(void)
 						KAFKA_PRODUCER_MSG_HEADER_VAR_L("updatePRaidReport", 1));
 	// Immediate reports
 	XDLIST_FOREACH_SAFE(praid, &(global_ctx.immediate_report_to_mgmt_praid_list)) {
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		ns_since_start = timespec_diff_ns(now, start_timespec);
 		if (	((n_praids_written_total >= nvmeibt_topology_max_praids_in_a_report) ||
 				 (ns_since_start > MSEC_TO_NSEC(10) && n_praids_written_total))) {
@@ -274,7 +277,7 @@ void nvmeibt_global_call_all_seg_active_post_update_actions(void)
 	/* Don't use "XDLIST_FOREACH_SAFE" because after nvmeibt_seg_active_handle_post_update_actions call
 	   the seg_active_post_update_action_list can be completely changed */
 	for (int i = XDLIST_N_ELEMNTS(&(global_ctx.seg_active_post_update_action_list)); i > 0; i--) {
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		time_diff_nsec = timespec_diff_ns(now, nvmeibt_global_get_cur_event_start_time());
 		N_Tf(xnnkw55, "time from event start=@INT64 nsec", time_diff_nsec);
 		if (time_diff_nsec * 5 > nvmeibt_raft_get_effective_heartbeat_timeout_ns() * 4) {
@@ -652,7 +655,7 @@ static void send_report_target_if_needed(void)
 		json_payload = NNVMEIBT_STR_ALLOC(5jnsd9k);
 	}
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	diff_timeout = timespec_sub(now, global_ctx.last_local_report_target_to_mgmt_time);
 	if (diff_timeout.tv_sec <= 1) {
 		N_Tf(ianey6d, "Skipping. Waiting 1 sec after prev send");
@@ -982,7 +985,7 @@ void nvmeibt_global_set_log_snapshotting_mode(int64_t is_log_snapshotting_mode)
 		N_IMf(bshukw9, "Disabling log_snappshoting_mode");
 		nvmeibt_log_snapshotting_mode_start_timestamp_sec = -1ULL;
 	} else if (is_log_snapshotting_mode) {     // 1(==now) or time-stamp
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		if (nvmeibt_log_snapshotting_mode_start_timestamp_sec > 0) {
 			N_Tf(bfh39sl, "Skipping. log_snappshoting_mode is already active for @LLD secs.", now.tv_sec - nvmeibt_log_snapshotting_mode_start_timestamp_sec);
 		} else {

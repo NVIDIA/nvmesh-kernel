@@ -308,7 +308,7 @@ static void calc_next_wait_for_recovery_timeout(void)
 
 	NFIN;
 	next_wait_for_recovery_timeout = TIMESPEC_MAX_C99;
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	XDLIST_FOREACH_SAFE(task, &recovery_task_list) {
 		next_wait_for_recovery_timeout = timespec_min(next_wait_for_recovery_timeout, task->timeout_time);
 		ts_diff = timespec_sub(task->timeout_time, now);
@@ -325,7 +325,7 @@ static void recovery_task_upd_timeout_time(struct recovery_task *task)
 
 	NFIN;
 
-	getnstimeofday(&(task->timeout_time));
+	getnstimeofday_boot(&(task->timeout_time));
 
 	switch (task->state) {
 	case RECOVERY_STATE_INIT:
@@ -370,7 +370,7 @@ static BOOL recovery_task_is_timeout_expired(struct recovery_task *task)
 {
 	struct timespec now;
 
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	return timespec_ge(now, task->timeout_time);
 }
 
@@ -1304,7 +1304,7 @@ static int waitpid_with_timeout(pid_t pid, int timeout_ms, char *exec_str)
 		goto out;
 	}
 
-	getnstimeofday(&end_timespec);
+	getnstimeofday_boot(&end_timespec);
 	timespec_update_by_a_few_nsec(&end_timespec, MSEC_TO_NSEC(timeout_ms));
 	while (1) {
 		returned_pid = waitpid(pid, &waitpid_status, WNOHANG);
@@ -1312,7 +1312,7 @@ static int waitpid_with_timeout(pid_t pid, int timeout_ms, char *exec_str)
 			break;
 
 		if (returned_pid == 0) {
-			getnstimeofday(&now);
+			getnstimeofday_boot(&now);
 			if (timespec_lt(now, end_timespec)) {
 				N_Tf(vauk39s, "0=waitpid(), Retrying");
 				nanosleep(&(struct timespec){0, MSEC_TO_NSEC(100)}, NULL); // 100ms
@@ -1442,7 +1442,7 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 	encrypt_params = blkdev->encrypt_params;
 	// Wait for the blkdev to show up
 	snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh/%s", nvmeibt_blkdev_name(blkdev));
-	getnstimeofday(&start_timestamp);
+	getnstimeofday_boot(&start_timestamp);
     do {
 		if (stat(blkdev_path, &blkdev_stat) == 0) {
 			if (!is_block_device_stat(blkdev_stat)) {
@@ -1455,7 +1455,7 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 			}
 		}
 		N_Tf(idhswkr, "Awaiting @STR to attach", blkdev_path);
-		getnstimeofday(&now);
+		getnstimeofday_boot(&now);
 		if (timespec_diff_ns(now, start_timestamp) > MSEC_TO_NSEC(entry->run_exec_on_blkdev_ctx->timeout_ms)) {
 			N_Ef(0ajdowb, "Timeout awaiting attach of @STR", nvmeibt_blkdev_name(blkdev));
 			goto out;

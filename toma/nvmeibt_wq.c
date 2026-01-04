@@ -67,7 +67,7 @@ static int timed_wait(struct nvmeibt_wq *wq, int ms) {
 	struct timespec ts;
 	int rv;
 	if (ms) {
-		getnstimeofday(&ts);
+		getnstimeofday_real(&ts);
 		timespec_update_by_a_few_nsec(&ts, (long)MSEC_TO_NSEC(ms));
 		if ((rv = pthread_cond_timedwait(cond, m, &ts)) != 0 &&
 			rv != ETIMEDOUT) {

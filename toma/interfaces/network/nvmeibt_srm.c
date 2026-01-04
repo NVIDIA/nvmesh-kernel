@@ -1294,7 +1294,7 @@ static int rsrm_resend_window(struct connection_work *work)
 			signal_send_cmpl = should_send_signal(srm);
 			msg->send_cnt++;
 			fr_info->send_count++;
-			getnstimeofday(&work->window_time);
+			getnstimeofday_boot(&work->window_time);
 		} else {
 			work->error = true;
 			terminate_expired_work(srm, work, 1);
@@ -1358,7 +1358,7 @@ rsrm_queue_req(struct nvmeibt_srm *srm, struct nvmeibt_msg_request *req)
 		return_req_to_pool_(srm, work->req);
 		finish_work_(srm, work);
 	} else {
-		getnstimeofday(&work->window_time);
+		getnstimeofday_boot(&work->window_time);
 		work->work_time = work->window_time;
 	}
 
@@ -1437,7 +1437,7 @@ static int init_recv_context(struct nvmeibt_srm *srm,
 	}
 	recv_ctx->rcv_buffer = srm->rcv_buffer;
 	recv_ctx->rcv_buffer_len = srm->rcv_buffer_len - sizeof(*bmsg);
-	getnstimeofday(&recv_ctx->start_time);
+	getnstimeofday_boot(&recv_ctx->start_time);
 
 	bmsg = recv_ctx->rcv_buffer;
 	bmsg->big_msg_id = msg_id;
@@ -1477,7 +1477,7 @@ fetch_recv_context(struct nvmeibt_srm *srm, uint16_t msg_id,
 			int rv;
 			long diff_ns;
 			struct timespec now;
-			getnstimeofday(&now);
+			getnstimeofday_boot(&now);
 			diff_ns = timespec_diff_ns(now, recv_ctx->start_time);
 			if (false) {
 				 N__D(trace_1_srm_fetch_recv_context, "incoming msg_id=@MSG_ID_INT claims recv_ctx after @DIFF nsec existing msg_id=@MSG_ID_INT dispatched=@DISPATCHED",
@@ -1539,7 +1539,7 @@ void srm_post_send_cmpl(struct nvmeibt_srm *srm)
 				finish_work_(srm, work);
 			}
 		}
-		getnstimeofday(&work->window_time);
+		getnstimeofday_boot(&work->window_time);
 	}
 
 	unlock(srm);
@@ -2234,7 +2234,7 @@ int rsrm_resend_timer(void)
 
 	NFIN;
 	rv = read(srm_resend_fd, &rsrm_tm_buffer, sizeof(rsrm_tm_buffer));	// Dummy read
-	getnstimeofday(&now);
+	getnstimeofday_boot(&now);
 	XDLIST_FOREACH_SAFE(srm, &rsrm_resend_q) {
 		lock(srm);
 		XDLIST_FOREACH_SAFE(work, &srm->work_q) {
