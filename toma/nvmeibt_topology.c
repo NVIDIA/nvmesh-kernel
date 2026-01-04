@@ -2139,7 +2139,7 @@ void nvmeibt_netlink_queue_run(void)
 	NFOUT;
 }
 
-int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status)
+static int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char *ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status)
 {
 	struct nvmeib_disk_info disk_info = {.vendor_id = vendor_id};
 	memcpy(disk_info.disk_id, ldisk_id, sizeof(disk_info.disk_id));
@@ -2163,7 +2163,7 @@ static int nvmeibt_remove_disk_event_callback(const struct nvmeib_remove_disk *m
 	return srvr_msg_queue_add(&disk_info, 'r', 0, NULL);
 }
 
-int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extended_msg *ext)
+static int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extended_msg *ext)
 {
 	return srvr_msg_queue_add(NULL, 'C', 0, ext);
 }
@@ -2172,15 +2172,14 @@ struct nvmeibt_km_comm *nvmeibt_netlink_queue_init(void)
 {
 	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
 	if (!smq->km_comm) {
+		struct nvmeibt_km_comm_params par;
+		par.on_add_disk = &nvmeibt_add_disk_event_callback;
+		par.on_remove_disk = &nvmeibt_remove_disk_event_callback;
+		par.process_disk_info = &nvmeibt_handle_serjio_state_changed_from_nl_ctx;
+		par.process_extend_msg = &nvmeibt_add_local_clnt_msg_to_toma_nl_queue;
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);
-		smq->km_comm = nvmeibt_km_comm_create();
-		if (smq->km_comm) {
-			struct nvmeib_register_change_disk cbs;
-			cbs.on_add_disk = &nvmeibt_add_disk_event_callback;
-			cbs.on_remove_disk = &nvmeibt_remove_disk_event_callback;
-			nvmeibt_km_comm_register_disk_events(smq->km_comm, &cbs);
-		}
+		smq->km_comm = nvmeibt_km_comm_create(&par);
 	}
 	return smq->km_comm;
 }

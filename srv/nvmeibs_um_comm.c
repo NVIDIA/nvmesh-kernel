@@ -2652,7 +2652,7 @@ static struct nvmeib_nl_uk_comm_rep * get_rep(
 		rep = &((struct nvmeib_contaminate_disk_reply *)msg->data)->base;
 		break;
 #endif
-	case csc_register_disk_events: case csc_remove_disk_ack: default:	// All those codes do not require response from the server
+	case csc_remove_disk_ack: default:	// All those codes do not require response from the server
 		break;
 	};
 	NFOUT;

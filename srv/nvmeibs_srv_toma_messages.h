@@ -197,7 +197,6 @@ enum uk_comm_opcode {
 	csc_zero_disk = 2,						// t2s, zero disk segment after volume deletion. payload: struct nvmeib_zero_disk. s2t, reply: struct nvmeib_zero_disk_reply
 	csc_test_zero_disk = 3,					// Deprecated testing code. t2s: struct nvmeib_zero_disk, reply s2t struct nvmeib_test_zero_reply
 
-	csc_register_disk_events = 4,			// Toma: Used internally, Never sent to server, registers callback functions for handling new disks, in message below
 	csc_get_disks = 5,						// t2s, no paylod. s2t, replay: payload struct nvmeib_disk_info_reply
 	csc_remove_disk_ack = 6,				// t2s, Ack on server disk-removal notification via msg above. payload: struct nvmeib_remove_disk
 	csc_format_disk = 7,					// t2s, request to format the entire drive before volume allocations. payload: struct nvmeib_format_disk, s2t reply: struct nvmeib_format_disk_reply
@@ -219,7 +218,6 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_get_disk_names: return "csc_get_disk_names";
 	case csc_zero_disk: return "csc_zero_disk";
 	case csc_test_zero_disk: return "csc_test_zero_disk";
-	case csc_register_disk_events: return "csc_register_disk_events";
 	case csc_get_disks: return "csc_get_disks";
 	case csc_remove_disk_ack: return "csc_remove_disk_ack";
 	case csc_format_disk: return "csc_format_disk";

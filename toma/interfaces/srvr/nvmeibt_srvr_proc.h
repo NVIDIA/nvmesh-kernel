@@ -26,17 +26,17 @@ struct km_comm_msg_hdr {													// Will be converted internally upon send t
 	char  data[0] __attribute((aligned(8))); // union nvmeib_nl_msg_to_srvr_payload;
 };
 
+
+struct nvmeibt_km_comm_params {									// Must fill all callbacks
+	int (*on_add_disk   )(const struct nvmeib_disk_info *);		// Called when new disk is added, Toma registers its callbacks to server notifications about disks
+	int (*on_remove_disk)(const struct nvmeib_remove_disk *);	// Called when existing disk is removed
+	int (*process_extend_msg)(const struct nvmeib_push_extended_msg *);
+	int (*process_disk_info)(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
+};
 struct nvmeibt_km_comm;
-struct nvmeibt_km_comm *nvmeibt_km_comm_create(void);
+struct nvmeibt_km_comm *nvmeibt_km_comm_create(const struct nvmeibt_km_comm_params *);
 void					nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p);
 int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr);
-
-struct nvmeib_register_change_disk {							// Toma registers its callbacks to server notifications about disks
-	int (*on_add_disk   )(const struct nvmeib_disk_info *);		// Called when new disk is added
-	int (*on_remove_disk)(const struct nvmeib_remove_disk *);	// Called when existing disk is removed
-};
-
-int	 nvmeibt_km_comm_register_disk_events(     struct nvmeibt_km_comm *p, const struct nvmeib_register_change_disk *cbs);		// Multiple callbacks can be registered. All will fire
 int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
 
 /***************************** Probe Local Hardware *******************************/

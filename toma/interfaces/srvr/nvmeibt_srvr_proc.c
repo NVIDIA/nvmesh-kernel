@@ -426,11 +426,6 @@ static void msg_free(struct srv_comm_msg *msg) {
 	NNVMEIBT_BM_FREE(ttkmcmf0, msg);		// Did not get any reply
 }
 
-struct change_disk_cb {
-	struct nvmeib_register_change_disk cb;
-	struct xdlist link;
-};
-
 struct disk_info {
 	struct nvmeib_disk_info disk;
 	struct nvmeib_remove_disk rm_disk;
@@ -444,13 +439,12 @@ bool disk_info_is_equal(const struct disk_info *di, const char* disk_name) {
 }
 
 typedef XDLIST_DECLARE(msgs_list, struct srv_comm_msg,   link) msgs_list_t;
-typedef XDLIST_DECLARE(cb_list,   struct change_disk_cb, link) cb_list_t;
 typedef XDLIST_DECLARE(disk_list, struct disk_info,      link) disk_list_t;
 struct nvmeibt_km_comm {
+	struct nvmeibt_km_comm_params params;
 	msgs_list_t msgs1, msgs2;		// Double buffering, 1 list is draining, other getting new requests
 	msgs_list_t *msgs;				// Points to current list of added entries (1 of the 2 above) ????
 	msgs_list_t in_progress_msgs;	// In air messages, sent to server and awaiting reply, accessed only from main thread, or when it is dead, so no need for locks
-	cb_list_t cbs;					// List of user callbacks to execute on disk add/remove events
 	disk_list_t disks;
 	pthread_mutex_t guard;			// Serialize Toma thread access
 	int nl_sock_fd;					// Socket to which send/recv message to/from kernel server
@@ -525,13 +519,14 @@ static int start_thread(struct nvmeibt_km_comm *p)
 	return 0;
 }
 
-struct nvmeibt_km_comm * nvmeibt_km_comm_create(void)
+struct nvmeibt_km_comm * nvmeibt_km_comm_create(const struct nvmeibt_km_comm_params* params)
 {
 	struct nvmeibt_km_comm *p = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
 	const int NETLINK_SRV_COMM_MAX_PAYLOAD = max((sizeof(struct nvmeib_nl_msg_to_toma) + 256 /*nvmeib_push_extended_msg payload?*/), (sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union nvmeib_nl_msg_to_srvr_payload)));
 	int rv = 0;
 
 	if (!p) { 													rv = -__LINE__; goto out; }
+	p->params = *params;
 	if (pthread_mutex_init(&p->guard, NULL) < 0) { 				rv = -__LINE__; goto free_p; }
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
 	if (start_netlink_socket(p))  { 							rv = -__LINE__; goto free_spair; }
@@ -542,7 +537,6 @@ struct nvmeibt_km_comm * nvmeibt_km_comm_create(void)
 	p->iov.iov_base = (void *)p->nlh;
 	p->iov.iov_len = p->max_msg_size;
 	XDLIST_HEAD_INIT(&p->in_progress_msgs);
-	XDLIST_HEAD_INIT(&p->cbs);
 	XDLIST_HEAD_INIT(&p->disks);
 	XDLIST_HEAD_INIT(&p->msgs1);
 	XDLIST_HEAD_INIT(&p->msgs2);
@@ -595,11 +589,6 @@ void nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p)
 	__drain_msg_list(&p->msgs1);
 	__drain_msg_list(&p->msgs2);		// One of those 2 is p->msgs
 	__drain_msg_list(&p->in_progress_msgs);
-	while (!XDLIST_EMPTY(&p->cbs)) {
-		struct change_disk_cb *cb = XDLIST_FIRST(&p->cbs);
-		XDLIST_DEL(&cb->link);
-		NNVMEIBT_TOMA_FREE(tscnlssm, cb);
-	}
 	while (!XDLIST_EMPTY(&p->disks)) {
 		__remove_disk_and_free(p, XDLIST_FIRST(&p->disks));
 	}
@@ -658,21 +647,6 @@ out:
 	NFOUT;
 }
 
-static void __on_user_registers_new_callbacks(struct nvmeibt_km_comm *p, const struct srv_comm_msg *msg)
-{
-	struct change_disk_cb *cb = NNVMEIBT_TOMA_CALLOC(tscnuc0, 1, sizeof(*cb));
-	struct disk_info *disk;
-
-	NFIN;
-	if (cb) {
-		cb->cb = *(struct nvmeib_register_change_disk *)msg->msg.data;
-		XDLIST_ADD_TAIL(&p->cbs, cb);
-		XDLIST_FOREACH_SAFE(disk, &p->disks)
-			cb->cb.on_add_disk(&disk->disk);
-	}
-	NFOUT;
-}
-
 static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 {
 	msgs_list_t *msgs;
@@ -690,11 +664,7 @@ static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 		if (msg->msg.opcode <= csc_start) 				// Suicide message arrived
 			is_alive = false;
 		if (is_alive) {
-			if (msg->msg.opcode == csc_register_disk_events) {
-				if (!p->error_occured)
-					__on_user_registers_new_callbacks(p, msg);
-				msg_free(msg);
-			} else if (msg->msg.opcode < csc_end) {
+			if (msg->msg.opcode < csc_end) {
 				send_msg_to_kernel(p, msg, true);		// Dont free msg, it is added to a different queue or freed inside
 			}
 		} else {										// Autofail msg
@@ -717,13 +687,11 @@ static struct srv_comm_msg *find_in_progress_msg_waiting_for_reply(struct nvmeib
 	return NULL;
 }
 
-extern int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
 static void remove_disk_ack(struct nvmeibt_km_comm *p, const struct nvmeib_disk_info *di);
 static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_comm_msg *rcv_msg)
 {
 	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
 	struct disk_info *disk;
-	struct change_disk_cb *cb;
 
 	NFIN;
 	if (rep->error == csce_ok) {
@@ -735,7 +703,7 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 			break;
 		case nvmeib_disk_info_reply_serjio_state: {
 			const struct nvmeib_disk_info_rep_sej_state_t *ssc = &disk_rep->serjio_state_change;
-			nvmeibt_handle_serjio_state_changed_from_nl_ctx(ssc->disk_id, ssc->vendor_id, ssc->model_str, ssc->serjio_status);
+			p->params.process_disk_info(ssc->disk_id, ssc->vendor_id, ssc->model_str, ssc->serjio_status);
 			break;
 		}
 		case nvmeib_disk_info_reply_dinfo:
@@ -747,9 +715,8 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 					nvmeibt_km_comm_lock(p);
 					XDLIST_ADD_TAIL(&p->disks, disk);
 					nvmeibt_km_comm_unlock(p);
-					XDLIST_FOREACH(cb, &p->cbs)
-						cb->cb.on_add_disk(&disk->disk);
-					nvmeibt_handle_serjio_state_changed_from_nl_ctx(di->disk_id, di->vendor_id, di->model_str, disk_rep->dinfo.serjio_status);
+					p->params.on_add_disk(&disk->disk);
+					p->params.process_disk_info(di->disk_id, di->vendor_id, di->model_str, disk_rep->dinfo.serjio_status);
 				} else {
 					N_Ef(t2cnlpd3, "Failed to allocate memory for disk=@STR", di->disk_id);
 				}
@@ -764,9 +731,7 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 						disk->rm_disk.vendor_id = disk->disk.vendor_id;
 						disk->rm_disk.ack_id = disk->ack_id;
 						N_Tf(t2cnlpd4, "Removing disk=@STR", di->disk_id);
-						XDLIST_FOREACH(cb, &p->cbs) {
-							cb->cb.on_remove_disk(&disk->rm_disk);
-						}
+						p->params.on_remove_disk(&disk->rm_disk);
 						break;
 					}
 				}
@@ -810,9 +775,8 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 		} else if (rcv_msg->opcode == csc_get_disks) {			// Reply to internal periodic get disks message
 			__process_disk(p, rcv_msg);
 		} else if (rcv_msg->opcode == csc_msg_to_process) {		// Server initiated extended msg
-			extern int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_extended_msg *);
-			struct nvmeib_nl_msg_to_toma *tm = (void*)rcv_msg->data;
-			nvmeibt_add_local_clnt_msg_to_toma_nl_queue(&tm->payload.extended_msg);
+			const struct nvmeib_nl_msg_to_toma *tm = (void*)rcv_msg->data;
+			p->params.process_extend_msg(&tm->payload.extended_msg);
 		} else {
 			N_Ef(t2shnnm5, "Got a message from kernel that no one was waiting for");
 		}
@@ -963,21 +927,6 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 		kmsg->on_done = NULL; 									// Agreement in case of syncronous send error, callback will not be given
 		msg_free(kmsg);
 	}
-	NFOUT;
-	return rv;
-}
-
-int nvmeibt_km_comm_register_disk_events(struct nvmeibt_km_comm *p, const struct nvmeib_register_change_disk *cbs)
-{
-	char buf[sizeof(struct km_comm_msg_hdr) + sizeof(struct nvmeib_register_change_disk)] = {0};
-	struct km_comm_msg_hdr *msg = (void *)buf;
-	int rv;
-
-	NFIN;
-	msg->len = sizeof(struct nvmeib_register_change_disk);
-	msg->opcode = csc_register_disk_events;
-	*((struct nvmeib_register_change_disk *)msg->data) = *cbs;
-	rv = nvmeibt_km_comm_send(p, msg);			// Wakeup our main thread to process the message, never reaches the server
 	NFOUT;
 	return rv;
 }

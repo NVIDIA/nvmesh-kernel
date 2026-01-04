@@ -160,7 +160,6 @@ void nvmeibt_netlink_queue_run(void);
 void nvmeibt_topology_convert_serialized_topo_buf_to_wire(struct nvmeibt_Buf *wire, struct nvmeibt_Buf *serialized);
 void nvmeibt_topology_convert_wire_topo_buf_to_serialized(struct nvmeibt_Buf *serialized, const struct nvmeibt_Buf *wire, struct nvmeibt_Str *JSON_output);
 void nvmeibt_topology_build_second_global_topo_buf(BOOL is_convert_to_wire);
-int nvmeibt_handle_serjio_state_changed_from_nl_ctx(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
 void nvmeibt_topology_init_raft_long_msg_test_buf(void);
 void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void);
 unsigned long long nvmeibt_topology_leader_get_next_config_version(void);
