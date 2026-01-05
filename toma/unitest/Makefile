@@ -311,7 +311,8 @@ define clean_prev_run
 	rm -f ./_root/var/log/nvmesh/toma_2*;
 	rm -f ./_root/var/log/nvmesh/tracelist.txt;
 	rm -f ./_root/var/run/nvmesh/sandbox_*;
-	rm -f ./_root/etc/nvmesh/tls/*.[ct][rx]_
+	rm -f ./_root/etc/nvmesh/tls/*.[ct][rx]_;
+	rm -rf ./_root/dev/nvme*;
 endef
 clean:
 	@printf "+-->Cleaning |\e[1;45mall\e[0;0m|\n"
