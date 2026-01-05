@@ -1,3 +1,8 @@
+/*
+ * TRACER section collects trace metadata (__tracer input sections).
+ * Placed after .rodata to ensure it lands in a non-executable segment,
+ * avoiding the "LOAD segment with RWX permissions" linker warning.
+ */
 SECTIONS {
   TRACER : {
     __tracer_start = .;
@@ -6,4 +11,4 @@ SECTIONS {
   }
 }
 
-INSERT AFTER .text;
+INSERT AFTER .rodata;
