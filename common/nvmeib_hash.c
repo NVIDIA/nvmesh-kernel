@@ -563,7 +563,7 @@ out:;
 #if IS_HASH_UNITTEST
 int main() {
 	struct nvmeib_hash_table	*ht1, *ht2, *ht3, *ht4;
-	void						*ptr_to_obj = (void *)0xdeadbeef;
+	void						*ptr_to_obj;
 	void						*v;
 
 
@@ -571,12 +571,16 @@ int main() {
 	ht1 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_uint32", 4);
 
 	fprintf(stdout, "\n\n523 entries - u32 - (add) Test collisions and scale\n");
-	for (int i = 0; i < 523; i++)
+	for (int i = 0; i < 523; i++) {
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uint32_t(ht1, i, ptr_to_obj);
+	}
 
 	fprintf(stdout, "\n\nALREADY existing - u32- (add)\n");
-	for (int i = 10; i < 20; i++)
+	for (int i = 10; i < 20; i++) {
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uint32_t(ht1, i, ptr_to_obj);
+	}
 
 	fprintf(stdout, "\n\n523 entries - u32- (search) Test collisions and scale\n");
 	for (int i = 0; i < 523; i++) {
@@ -593,8 +597,17 @@ int main() {
 		nvmeib_hash_delete_uint32_t(ht1, i);
 
 	fprintf(stdout, "\n\n523 entries - u32 - (add) Test collisions and scale\n");
-	for (int i = 0; i < 523; i++)
+	for (int i = 0; i < 523; i++) {
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uint32_t(ht1, i, ptr_to_obj);
+	}
+
+	fprintf(stdout, "\n\n523 entries - u32- (search) Test NVMEIB_HASH_FOREACH deletions\n");
+	NVMEIB_HASH_FOREACH (v, ht1) {
+		void	*deleted_v;
+		deleted_v = nvmeib_hash_delete_uint32_t(ht1, (uint32_t)((uint64_t)v >> 32));
+		fprintf(stdout, "v=%llx deleted_v=%p\n", v, deleted_v);
+	}
 
 	fprintf(stdout, "\n520 entries - uuid - Test collisions and reuse of deleted\n");
 	ht2 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_uuid", 16);
@@ -602,12 +615,14 @@ int main() {
 	fprintf(stdout, "\n\n523 entries - uuid - (add) Test collisions and scale\n");
 	for (int i = 0; i < 523; i++) {
 		union nvmeib_uuid	key = {.ints = {i, i, i, i}};
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uuid(ht2, &key, ptr_to_obj);
 	}
 
 	fprintf(stdout, "\n\nALREADY existing - uuid- (add)\n");
 	for (int i = 40; i < 50; i++) {
 		union nvmeib_uuid	key = {.ints = {i, i, i, i}};
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uuid(ht2, &key, ptr_to_obj);
 	}
 
@@ -620,6 +635,7 @@ int main() {
 	fprintf(stdout, "\n\n20 entries - uuid - (add)\n");
 	for (int i = 10; i < 20; i++) {
 		union nvmeib_uuid	key = {.ints = {i, i, i, i}};
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uuid(ht2, &key, ptr_to_obj);
 	}
 
@@ -634,10 +650,12 @@ int main() {
 	fprintf(stdout, "\n\n520 entries - u64 - Test collisions\n");
 	ht3 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_int64", 8);
 	for (int64_t i = 0; i < 523; i++) {
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uint64_t(ht3, i, ptr_to_obj);
 	}
 
 	for (int64_t i = 70; i < 80; i++) {
+		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uint64_t(ht3, i, ptr_to_obj);
 	}
 
