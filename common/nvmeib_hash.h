@@ -45,10 +45,15 @@ struct nvmeib_hash_table {		// Note that during resize, we keep the object, and 
 })
 #endif	// #if IS_HASH_UNITTEST
 
-#define NVMEIB_HASH_FOREACH(__x__, __hash_tbl) 																														\
-	if ((__hash_tbl) && (__hash_tbl)->n_occupied)																													\
-		for (struct nvmeib_hash_entry *__e ## __x__ = &((__hash_tbl)->arr[0]); __e ## __x__ < ((__hash_tbl)->arr + (__hash_tbl)->n_arr_entries); __e ## __x__++)	\
-			if (hash_is_entry_OCCUPIED(__e ## __x__) && (__x__ = __e ## __x__->ptr_to_obj))
+// NVMEIB_HASH_FOREACH is delicate since entries might be deleted, and this moves entries backwards.
+//  It might be that a new entry moved into the deleted "idx", so we progress to the next only if either empty of same ptr_to_obj as before
+//  Unfortunately, the for loop does not allow two different types in the first clause
+#define NVMEIB_HASH_FOREACH(__x__, __hash_tbl) 																																		\
+	if ((__hash_tbl) && (__hash_tbl)->n_occupied)																																	\
+		for (	struct nvmeib_hash_entry *__e ## __x__ = &((__hash_tbl)->arr[0]), __OLD_ ## __x__ = *(__e ## __x__);																\
+				(__e ## __x__) < ((__hash_tbl)->arr + (__hash_tbl)->n_arr_entries);																									\
+				(__e ## __x__) = (!hash_is_entry_OCCUPIED(__e ## __x__) || (__e ## __x__)->ptr_to_obj == (__OLD_ ## __x__).ptr_to_obj ? (__e ## __x__) + 1 : (__e ## __x__)), (__OLD_ ## __x__) = *(__e ## __x__))		\
+			if (hash_is_entry_OCCUPIED(__e ## __x__) && (__x__ = (__e ## __x__)->ptr_to_obj))
 
 static inline bool hash_is_entry_OCCUPIED(const struct nvmeib_hash_entry *entry)
 {
