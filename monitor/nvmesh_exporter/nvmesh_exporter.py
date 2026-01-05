@@ -921,7 +921,7 @@ def _check_and_reload_certificates():
                 logger.warning("Management certificates changed - exiting process")
                 sys.exit(0)
             logger.info("Auto-reload: Management certificates changed - clearing connection cache")
-            if reload_management_certificates():
+            if not reload_management_certificates():
                 logger.error("Failed to reload management certificates")
     except Exception as e:
         logger.error(f"Error checking certificates: {e}")
