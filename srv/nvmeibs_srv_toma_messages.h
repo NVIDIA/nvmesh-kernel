@@ -236,7 +236,7 @@ static inline const char * uk_comm_opcode_str(int opcode)
 }
 
 enum uk_comm_err_opcode {				// s2t error codes, for Toma requests
-	csce_ok = 0,
+	csce_ok = 0,						// By design equals 0
 	csce_failed,
 	csce_bad_zero_params,
 	csce_format_in_progress,

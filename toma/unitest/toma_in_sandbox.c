@@ -423,7 +423,7 @@ done:
 // Forward declarations for netlink queue helpers
 static bool TSB_netlink_queue_is_empty(void);
 static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
-static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev);
+static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -440,7 +440,7 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		for (i = 0; i < count; i++) {
 			const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
 			if (dev && !dev->stock_disk) {  // Only queue NVMesh disks, not stock disks
-				TSB_netlink_send_disk_response(dev);
+				TSB_netlink_send_disk_response(dev, req_msg);
 			}
 		}
 	} else if (req_msg->opcode == csc_keep_alive) {
@@ -636,38 +636,26 @@ static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
 		nl->queue_count--;
 	}
 	pthread_mutex_unlock(&nl->mutex);
-	N_Tf(nl_recv, "@INT64_TD[bytes]", (int64_t)len);
+	N_Tf(nl_recv, "n_msgs_in_q=@INT, cur_msg=@INT[b]", nl->queue_count, (int)len);
 	return len;
 }
 
 #include "srv/nvmeibs_srv_toma_messages.h"  // For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
 // Queue a netlink disk info response for a given device
-static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev) {
-	char buf[TSB_NL_MSG_SIZE];
+static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
 	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
-	const size_t total_len = NLMSG_SPACE(sizeof(*msg) + sizeof(*rep));
 
-	memset(buf, 0, sizeof(buf));
-
-	// Fill nlmsghdr
-	nlh->nlmsg_len = total_len;
-	nlh->nlmsg_type = NLMSG_DONE;
-	nlh->nlmsg_flags = 0;
-	nlh->nlmsg_seq = 0;
-	nlh->nlmsg_pid = getpid();
-
-	// Fill nvmeib_nl_uk_comm_msg
 	msg->len = sizeof(*msg) + sizeof(*rep);
-	msg->opcode = csc_get_disks;
-	msg->caller_type = 0;
-	msg->id = 0;
+	rep->base.opcode = msg->opcode = req_msg->opcode;
+	msg->id = req_msg->id;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 
 	// Fill nvmeib_disk_info_reply
-	rep->base.opcode = csc_get_disks;
 	rep->base.error = csce_ok;
-	rep->base.latency_ns = 0;
+	rep->base.latency_ns = 555;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
 
 	// Fill disk info from sandbox device
@@ -685,8 +673,19 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
 	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
 	rep->dinfo.serjio_status = 0;  // nvmeibs_serjio_status_ok
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
 
-	TSB_netlink_queue_enqueue(buf, total_len);
+static void TSB_netlink_send_extended_msg(void) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_push_extended_msg *rep = (struct nvmeib_push_extended_msg *)msg->data;
+	msg->opcode = rep->base.opcode = csc_msg_to_process;
+	rep->n_bytes_len = sprintf(&rep->content[0], "%s", "HelloFromClnt");
+	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
 ssize_t sendmsg(int __fd, const struct msghdr *__msg, int __flags) {
@@ -835,18 +834,25 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	BUG_ON(!nl_sock || !readfds);
 
 	if (FD_ISSET(nl_fd, readfds)) {	// Check if netlink socket is in the read set and we have queued messages
+		static int n_extended_msgs_to_emulate = 1;
 		const bool has_msg_for_toma = !TSB_netlink_queue_is_empty();
 		const bool emulate_timeout = (sys->TSB_netlink.n_recv_msgs == 1);
-		if (has_msg_for_toma || emulate_timeout) {				// Return immediately - netlink socket is ready to read
+		const bool emulate_extended_msg = (n_extended_msgs_to_emulate > 0) && !has_msg_for_toma && !emulate_timeout;
+		if (has_msg_for_toma || emulate_timeout || emulate_extended_msg) {				// Return immediately - netlink socket is ready to read
 			FD_ZERO(readfds); FD_ZERO(writefds); FD_ZERO(exceptfds);
 			FD_SET(nl_fd, readfds);
 			if (has_msg_for_toma) {
 				N_Tf(nl_select_ready0, "Netlink fd @INT ready (queued messages)", nl_fd);
 				return 1;
-			} else {
+			} else if (emulate_timeout) {
 				N_Tf(nl_select_ready1, "Netlink emulate timeout");
 				return 0; // Timeout;
+			} else if (emulate_extended_msg) {
+				TSB_netlink_send_extended_msg();
+				n_extended_msgs_to_emulate--;
+				return 1;
 			}
+			BUG_ON(true);				// Wrong implementation
 		}
 	}
 	msleep(100);	// Throttled km_comm select
