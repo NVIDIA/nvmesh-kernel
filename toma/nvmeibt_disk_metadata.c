@@ -1081,7 +1081,7 @@ void nvmeibt_disk_metadata_init_gpt_structure(uint64_t pba_s,
 	gpt->header.alternate_pba = pba_e;
 	gpt->header.disk_obj_uuid = *disk_obj_uuid;
 	gpt->header.partition_entry_pba = pba_s + gpt_header_n_pblk;
-	gpt->header.n_partition_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+	gpt->header.n_partition_entries = GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES;		// fixed, never used
 	gpt->header.size_of_partition_entry = UEFI_MIN_GPT_ENTRY_SIZE; /* Minimum partition entry size by UEFI standard*/
 	/* This affects gpt->header.first_usable_pba and last_usable_pba and leaves enough room for a larger actual
 	   GPT size, I.e., not according to gpt->header.n_partition_entries*/
