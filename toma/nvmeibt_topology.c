@@ -2080,7 +2080,7 @@ static int srvr_msg_queue_add(const struct nvmeib_disk_info *disk_info, char opc
 {
 	struct netlink_queue_elem_t *elem = (struct netlink_queue_elem_t *)NNVMEIBT_TOMA_CALLOC(ttsimn0, 1, sizeof(*elem));
 	if (ext) {
-		NTOMA_ASSERT(tnlqp34, (size_t)ext->n_bytes_len >= sizeof(elem->extended_msg), "Buffer for extended msg is too small, need @SIZEOF", (size_t)ext->n_bytes_len);
+		NTOMA_ASSERT(tnlqp34, (size_t)ext->n_bytes_len <= sizeof(elem->extended_msg), "Extended msg too big for queue buffer: n_bytes_len=@SIZEOF > buf_size=@SIZEOF", (size_t)ext->n_bytes_len, sizeof(elem->extended_msg));
 		memcpy(elem->extended_msg, ext->content, ext->n_bytes_len);
 	} else if (disk_info) {
 		elem->disk_info = *disk_info;
