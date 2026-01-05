@@ -310,7 +310,10 @@ void t_sandbox_all_init(void) {
 void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
-	BUG_ON(sys->TSB_netlink.n_recv_msgs <= 0);
+	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
+	if (sys->s_req_simu.n_srvr_msg_idx > 0) {
+		BUG_ON(sys->TSB_netlink.n_recv_msgs <= 0);
+	}
 	free(sys);
 	sys = NULL;
 }
