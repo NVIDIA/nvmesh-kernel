@@ -730,9 +730,9 @@ static void terminate_toma(int rv)
 
 	nvmeibt_dumper_exit();
 	nvmeibt_rpc_terminate();
-	nvmeibt_km_comm_delete(srv_comm);
+	nvmeib_srvr_api_lib_server__detach(srv_comm);	// Stop receiving msgs from server
 
-	if (nvmeibt_global_get_global()) {
+	if (nvmeibt_global_get_global()) {				// Close other resources, like lock maps
 		nvmeibt_local_disk_free_all_resources();
 		nvmeibt_local_disk_free_stock_fds();
 	}
@@ -741,7 +741,7 @@ static void terminate_toma(int rv)
 
 	nvmeibt_topology_free_resources();
 
-	(void)nvmeib_srvr_api_lib_destroy();
+	nvmeib_srvr_api_lib_destroy(srv_comm);
 	cleanup_single_instance();
 
 	nvmeibt_wq_drain(stat_wq);
@@ -2850,16 +2850,13 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		N_Ef(tcvsj39, "Failed to read&parse '.nvmesh.conf'");
 		goto out;
 	}
-	if (nvmeib_srvr_api_lib_create() < 0) {
-		goto out;
-	}
 	srv_comm = nvmeibt_netlink_queue_init();
 	if (!srv_comm) {
 		N_Ef(djut866, "Failed to init srv_comm");
 		nvmeibt_abort(ES_FATAL);
 	}
 	read_disks_info_from_stock_driver();
-	(void)nvmeib_srvr_api_lib_handshake_server(); /* login to server module */
+	(void)nvmeib_srvr_api_lib_server_connect(srv_comm);
 
 	if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0)
 		nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.

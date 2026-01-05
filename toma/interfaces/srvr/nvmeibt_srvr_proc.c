@@ -9,7 +9,7 @@ static int fd_toma2clnt = -1;
 
 int nvmeib_srvr_api_lib_get_fd_for_epoll(void) { return fd_srvr2toma; }
 
-int nvmeib_srvr_api_lib_create(void)
+static int __blocking_msg_api_create(void)
 {
 	const char *proc_path_toma2srvr = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";		// Toma->Srvr, See server nvmeibs_toma_create()
 	const char *proc_path_srvr2toma = TOMA_ROOT_DIR "proc/nvmeibs/toma_server_events";	// Srvr->Toma
@@ -70,8 +70,8 @@ static int nvmeibt_toma_announce_ready(bool is_login)
 	return 0;
 }
 
-int nvmeib_srvr_api_lib_handshake_server(void) { 	return nvmeibt_toma_announce_ready(true); }
-int nvmeib_srvr_api_lib_destroy(void){ 				return nvmeibt_toma_announce_ready(false); }
+int nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p) { (void)p;	return nvmeibt_toma_announce_ready(true); }
+static int __blocking_msg_api_destroy(void){ 		return nvmeibt_toma_announce_ready(false); }
 
 /***************************** mmap shared memory (server /proc/.../toma_status/files & IO locks table) *******************************/
 #include <sys/mman.h>
@@ -519,13 +519,14 @@ static int start_thread(struct nvmeibt_km_comm *p)
 	return 0;
 }
 
-struct nvmeibt_km_comm * nvmeibt_km_comm_create(const struct nvmeibt_km_comm_params* params)
+struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 {
 	struct nvmeibt_km_comm *p = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
 	const int NETLINK_SRV_COMM_MAX_PAYLOAD = max((sizeof(struct nvmeib_nl_msg_to_toma) + 256 /*nvmeib_push_extended_msg payload?*/), (sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union nvmeib_nl_msg_to_srvr_payload)));
 	int rv = 0;
 
 	if (!p) { 													rv = -__LINE__; goto out; }
+	__blocking_msg_api_create();
 	p->params = *params;
 	if (pthread_mutex_init(&p->guard, NULL) < 0) { 				rv = -__LINE__; goto free_p; }
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
@@ -573,7 +574,7 @@ static void __drain_msg_list(msgs_list_t *l)
 	}
 }
 
-void nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p)
+void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 {
 	NFIN;
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
@@ -597,8 +598,13 @@ void nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p)
 	NNVMEIBT_CLOSE(tscnlssp, p->spair[0]);
 	NNVMEIBT_CLOSE(tscnlssq, p->spair[1]);
 	NNVMEIBT_CLOSE(tscnlssr, p->nl_sock_fd);
-	NNVMEIBT_TOMA_FREE(tscnlsss, p);
 	NFOUT;
+}
+
+void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)
+{
+	__blocking_msg_api_destroy();
+	NNVMEIBT_TOMA_FREE(tscnlsss, p);
 }
 
 static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)

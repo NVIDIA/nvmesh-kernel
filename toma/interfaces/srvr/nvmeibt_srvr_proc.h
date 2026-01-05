@@ -4,9 +4,6 @@
 /* This file encapsulates communication channel Toma<-->LocalServer */
 #include "srv/nvmeibs_srv_toma_messages.h"		// Global nvmesh dir: ../../../
 
-int nvmeib_srvr_api_lib_create(void);
-int nvmeib_srvr_api_lib_handshake_server(void);	// Login into local server, Todo: Unify with create
-int nvmeib_srvr_api_lib_destroy(void);
 int nvmeib_srvr_api_lib_get_fd_for_epoll(void);
 
 int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg);
@@ -33,8 +30,10 @@ struct nvmeibt_km_comm_params {									// Must fill all callbacks
 	int (*process_disk_info)(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
 };
 struct nvmeibt_km_comm;
-struct nvmeibt_km_comm *nvmeibt_km_comm_create(const struct nvmeibt_km_comm_params *);
-void					nvmeibt_km_comm_delete(struct nvmeibt_km_comm *p);
+struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params *);
+int						nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p);	// Login into local server, Now can receive messages from server. Initialize your queues/mutexes/etc before calling this function
+void					nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p);	// Stop send/recv msgs to server. Can still use the library calls unrelated to server messaging, like unmapping locks
+void					nvmeib_srvr_api_lib_destroy(       struct nvmeibt_km_comm *p);	// Do not use 'p' after calling this function. It is freed
 int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr);
 int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
 

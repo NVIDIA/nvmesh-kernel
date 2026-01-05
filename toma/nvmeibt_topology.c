@@ -2179,7 +2179,7 @@ struct nvmeibt_km_comm *nvmeibt_netlink_queue_init(void)
 		par.process_extend_msg = &nvmeibt_add_local_clnt_msg_to_toma_nl_queue;
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);
-		smq->km_comm = nvmeibt_km_comm_create(&par);
+		smq->km_comm = nvmeib_srvr_api_lib_create(&par);
 	}
 	return smq->km_comm;
 }
