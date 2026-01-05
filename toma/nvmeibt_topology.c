@@ -1907,14 +1907,13 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 		break;
 	case NVMEIBS_TOMA_WRITE_STATUS_REQ: {
 		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
-		(void)nvmeib_srvr_api_lib_fill_and_send_status_reply(&msg_buf->status_req_msg, print_status_str);
+		(void)nvmeib_srvr_api_lib_fill_and_send_status_reply(nvmeibt_get_srv_comm(), &msg_buf->status_req_msg, print_status_str);
 		break;
 	}
 	case NVMEIBS_TOMA_TRIGGER_JGC:
 		nvmeibt_recovery_trigger_local_seg_JGC(msg_buf->trigger_JGC_cmd.disk_segment_urn_uuid_str, msg_buf->trigger_JGC_cmd.disk_id_str);
 		break;
-	case NVMEIBS_TOMA_REPORT_EVENT_BLKSET_RECOVERED:
-		{
+	case NVMEIBS_TOMA_REPORT_EVENT_BLKSET_RECOVERED: {
 			struct nvmeibs_toma_server_proc_buf ack;
 			ack.type = NVMEIBS_TOMA_REPORT_EVENT_BLKSET_RECOVERED_ACK;
 			ack.blkset_recovered_ack_msg.cookie = msg_buf->blkset_recovered_msg.cookie;
@@ -1925,7 +1924,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 				N_Wf(ju87661, "Got a BLKSET_RECOVERED before mgmt_config. Ignoring.");
 				ack.blkset_recovered_ack_msg.toma_rv = 1;
 			}
-			if (nvmeib_srvr_api_lib_send_msg_to_server(&ack) < 0) {
+			if (nvmeib_srvr_api_lib_send_block_msg_to_server(nvmeibt_get_srv_comm(), &ack) < 0) {
 				N_Wf(ww77823, "Failed to send BLKSET_RECOVERED_ACK to server (@ERRNO - '@AUTO_ERRNO')", errno);
 			}
 		}
@@ -1948,7 +1947,7 @@ int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
 
 	NFIN;
 	msg_buf = NNVMEIBT_BM_CALLOC(trace_topology_nvmeibt_topology_handle_local_server_event, max_len);
-	rv = nvmeib_srvr_api_lib_recv_msg_from_server(msg_buf, max_len, is_server_event);
+	rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len, is_server_event);
 	if (rv < 0) {
 		goto out;
 	} else if (*is_server_event) {

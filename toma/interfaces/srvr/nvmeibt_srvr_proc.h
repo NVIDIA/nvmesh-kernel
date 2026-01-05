@@ -4,15 +4,7 @@
 /* This file encapsulates communication channel Toma<-->LocalServer */
 #include "srv/nvmeibs_srv_toma_messages.h"		// Global nvmesh dir: ../../../
 
-int nvmeib_srvr_api_lib_get_fd_for_epoll(void);
-
-int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg);
-int nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event);
-int nvmeibt_toma_send_buf_to_client(       const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host);
-
-// Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory
-int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req,
-	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx));
+int nvmeib_srvr_api_lib_get_fd_for_epoll(void);		// Todo: Remove me
 
 /***************************** Netlink: New Toma-API vs Server, used for disk related communication */
 struct km_comm_msg_hdr {													// Will be converted internally upon send to struct nvmeib_nl_uk_comm_msg.
@@ -31,11 +23,17 @@ struct nvmeibt_km_comm_params {									// Must fill all callbacks
 };
 struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params *);
-int						nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p);	// Login into local server, Now can receive messages from server. Initialize your queues/mutexes/etc before calling this function
-void					nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p);	// Stop send/recv msgs to server. Can still use the library calls unrelated to server messaging, like unmapping locks
-void					nvmeib_srvr_api_lib_destroy(       struct nvmeibt_km_comm *p);	// Do not use 'p' after calling this function. It is freed
-int						nvmeibt_km_comm_send(  struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr);
-int  nvmeibt_km_comm_get_disk_info(            struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
+int	 nvmeib_srvr_api_lib_server_connect(          struct nvmeibt_km_comm *);	// Login into local server, Now can receive messages from server. Initialize your queues/mutexes/etc before calling this function
+void nvmeib_srvr_api_lib_server__detach(          struct nvmeibt_km_comm *);	// Stop send/recv msgs to server. Can still use the library calls unrelated to server messaging, like unmapping locks
+void nvmeib_srvr_api_lib_destroy(                 struct nvmeibt_km_comm *);	// Do not use 'p' after calling this function. It is freed
+int	 nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *, const struct km_comm_msg_hdr *);	// Send message with callback (async api)
+int	 nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *, const struct nvmeibs_toma_server_proc_buf *);	// Blocking: server reply returned directly
+int	 nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibt_km_comm *,       struct nvmeibs_toma_server_proc_buf *, int max_len, bool *is_server_event);	// Should be replaced by callback
+int  nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *, const struct nvmeibs_toma_client_proc_buf *, int buf_len, const char *clnt_host);	// Blocking: ask server to forward msg to a client. Server send rv returned directly
+int  nvmeibt_km_comm_get_disk_info(               struct nvmeibt_km_comm *, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
+// Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory
+int nvmeib_srvr_api_lib_fill_and_send_status_reply(struct nvmeibt_km_comm *, const struct nvmeibs_msg_s2t_toma_status_req *req,
+	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx));
 
 /***************************** Probe Local Hardware *******************************/
 struct nvmeibt_Str;

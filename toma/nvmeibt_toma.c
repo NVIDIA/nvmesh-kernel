@@ -649,7 +649,7 @@ bool nvmeibt_toma_is_in_shutdown(void)
 
 int nvmeibt_send_msg_to_srv(struct km_comm_msg_hdr *msg)
 {
-	return nvmeibt_km_comm_send(srv_comm, msg);
+	return nvmeib_srvr_api_lib_send_async_msg_to_server(srv_comm, msg);
 }
 
 static const char single_instance_file[] = TOMA_DIR_RUN_NVMESH "/toma.lock";
@@ -1814,7 +1814,7 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 data,
 							 msg_id
 							);
-	rv = nvmeibt_toma_send_buf_to_client(msg, buf_len, reg_ctx->client->net.host_name);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_client( srv_comm, msg, buf_len, reg_ctx->client->net.host_name);
 	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, msg);
 
 	NFOUT;

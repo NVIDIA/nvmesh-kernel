@@ -185,7 +185,7 @@ static int __status_str_printf(void *context, const char *format, ...)			// vsnp
 	return 0;
 }
 
-int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req,
+int nvmeib_srvr_api_lib_fill_and_send_status_reply(struct nvmeibt_km_comm *p, const struct nvmeibs_msg_s2t_toma_status_req *req,
 	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx))
 {
 	int fd;
@@ -219,7 +219,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(const struct nvmeibs_msg_s2t_
 	pl->length = ctx.cur_len;
 	pl->is_overflow = ctx.is_overflow;
 	pl->handle_req = req->handle_req;
-	if (nvmeib_srvr_api_lib_send_msg_to_server(&write_resp) < 0) {
+	if (nvmeib_srvr_api_lib_send_block_msg_to_server(p , &write_resp) < 0) {
 		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
 		return -__LINE__;
 	}
@@ -251,8 +251,9 @@ int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const c
 }
 
 /***************************** Generic messages *******************************/
-int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg)
+int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
 {
+	(void)p;
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
 		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
 		if (rv < 0) {
@@ -276,9 +277,10 @@ int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc
 	}
 }
 
-int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
+int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
 {
 	const int rv = read(fd_srvr2toma, msg, max_len);
+	(void)p;
 	if (rv < (int)sizeof(msg->handle)) {
 		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
 		return -1;
@@ -287,9 +289,10 @@ int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibs_toma_server_proc_buf
 	return rv;
 }
 
-int nvmeibt_toma_send_buf_to_client(const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
+int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
 {
 	int rv = 0;
+	(void)p;
 	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0) < 0) {
 		if (errno == ENXIO) {
 			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, msg, buf_len, clnt_host);
@@ -580,7 +583,7 @@ void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
 		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_suicide, .on_done = NULL };
 		N_Tf(tscnlsst, "Send internal suicide message, to main thread");
-		nvmeibt_km_comm_send(p, &msg);
+		nvmeib_srvr_api_lib_send_async_msg_to_server(p, &msg);	// Issue suicide request to be handled in main thread context
 		if (pthread_join(p->comm_thread, NULL)) {
 			N_Ef(tscnlssk, "join failed @PTHREAD, @AUTO_ERRNO", p->comm_thread);
 		}
@@ -895,7 +898,7 @@ static void * run(void *v)
 	return NULL;
 }
 
-int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr)
+int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr)
 {
 	struct srv_comm_msg *kmsg;
 	const int		msg_size = sizeof(kmsg->msg) + hdr->len;

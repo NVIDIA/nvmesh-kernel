@@ -2357,7 +2357,7 @@ static void brute_force_disconnect_client_request(struct nvmeibt_registrant_ctx 
 	ZEROINIT(buf);
 	buf.type = NVMEIBS_TOMA_CLIENT_DISCONNECT_FORCE_CMD;
 	buf.client_disconnect_force_cmd.cid = cid;
-	if (nvmeib_srvr_api_lib_send_msg_to_server(&buf) < 0) {		// If client does not exist, server returns 0, see srvr code.
+	if (nvmeib_srvr_api_lib_send_block_msg_to_server(nvmeibt_get_srv_comm(), &buf) < 0) {		// If client does not exist, server returns 0, see srvr code.
 		N_Ef(do3by0b, "cid=@CID failed req (@AUTO_ERRNO)", cid);
 	}
 	N_Tf(do3by0c, "req sent");	// Not erasing the registrant. We only asked now asyncronously, Will unreg when the force succeeds

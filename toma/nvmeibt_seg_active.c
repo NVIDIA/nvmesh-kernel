@@ -725,7 +725,7 @@ static int nvmeibt_seg_active_notify_serjio_clean_range(struct nvmeibt_seg_activ
 	nvmeibt_strlcpy(msg->seg_uuid, nvmeibt_seg_active_id_str(seg_active), sizeof(msg->seg_uuid));
 
 	N_Tf(jru8534, "disk=@STR lb_s=@UINT64_TX lb_e=@UINT64_TX seg=@STR", nvmeibt_local_disk_display(local_disk), msg->start_4Klba, msg->end_4Klba, msg->seg_uuid);
-	rv = nvmeib_srvr_api_lib_send_msg_to_server(&buf);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_server(nvmeibt_get_srv_comm(), &buf);
 	if (rv == EINPROGRESS)
 		seg_active->applied_serjio_clean_range_state = SERJIO_CLEAN_RANGE_STATE_IN_WORK;
 	rv = 0;	// Meaningless, no one checks this 'rv'.
