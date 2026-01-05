@@ -93,7 +93,7 @@
 
 	//TODO: in simulator we should understand for a single pass max consumed bytes (bad and good flow)
 	//single pass: [start, complete] or [start, resubmit]
-	unsigned nvmeibc_io_pet_buffer_size = 1024;
+	unsigned nvmeibc_io_pet_buffer_size = 0; //1024;
 	module_param(nvmeibc_io_pet_buffer_size, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_buffer_size, "IO PET buffer size;");
 
