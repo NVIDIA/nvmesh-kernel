@@ -242,7 +242,7 @@ int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const c
 	n_bytes_written = write(fd, val, n_bytes);
 	NNVMEIBT_CLOSE(ttsrspfsj, fd);
 	if (n_bytes_written < 0) {
-		N_Ef(ttsrspfsk, "Cannot write @STR @AUTO_ERRNO", val);
+		N_Ef(ttsrspfsk, "Cannot write @STR to path @STR @AUTO_ERRNO", val, path);
 		if (errno == EEXIST && is_stock_to_nvmeibs)
 			N_Tf(ttsrspfsl, "Apperantly @STR already belong to nvmeibs(Only Toma closed?)", val);
 	}
@@ -633,11 +633,11 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *m
 	msg->msg.caller_type = TOMA_CALLER;
 	__fill_netlink_hdr(p, &hdr, &p->dest_addr);
 	nlh->nlmsg_len = p->max_msg_size;
-	nlh->nlmsg_pid = getpid();
+	nlh->nlmsg_pid = getpid();							// Important, server uses this pid to pin pages in memory
 	nlh->nlmsg_flags = 0;
 	nlh->nlmsg_type = NVMESH_NL_MSG_TYPE;
 	memcpy(NLMSG_DATA(nlh), &msg->msg, msg->msg.len);
-	N_Tf(tkmcsmtk1, "msg[@INT].id=@ID to kernel pid=@PID(@PID)", msg->msg.opcode, msg->msg.id, nlh->nlmsg_pid, getpid());
+	N_Tf(tkmcsmtk1, "msg[@INT].id=@ID to kernel pid=@PID", msg->msg.opcode, msg->msg.id, nlh->nlmsg_pid);
 	if (msg->on_done)
 		XDLIST_ADD_TAIL(&p->in_progress_msgs, msg);		// Important: Insert before calling send, as reply can come fast and not find the in progress message
 	sendmsg(p->nl_sock_fd, &hdr, 0);					// Todo: Check for error
@@ -918,7 +918,7 @@ int nvmeibt_km_comm_send(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr
 	if (!p->error_occured) {									// Reading is syncronize with setting it from main thread via lock
 		XDLIST_ADD_TAIL(p->msgs, kmsg);
 		rv = (write(p->spair[0], &c, 1) == 1) ? 0 : -EIO;		// Wakeup our main thread to handle the message
-	}
+	}															// Else msg lists already drained, dont add anything to it
 	nvmeibt_km_comm_unlock(p);
 	if (rv == -EPERM) {
 		N_Tf(stkmcnl4, "msg cannot be sent");
