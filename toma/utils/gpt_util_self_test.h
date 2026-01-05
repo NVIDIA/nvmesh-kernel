@@ -83,6 +83,10 @@ struct self_test_entry {
 	X(backup_restore_empty_structures, "Backup Safety - Empty Structures Array Blocked", "gpt_util restore with structures: []", true) \
 	X(backup_creation_non_nvmesh_device, "Backup Failure - Non-NVMesh Device Blocked", "gpt_util backup device without metadata GPT", true) \
 	X(restore_mid_failure_file_deleted, "Restore Mid-Failure - File Deleted During Restore", "gpt_util restore with file deleted mid-process", true) \
+	/* Advanced JSON Modifications */ \
+	X(json_add_partition_entry, "JSON Modification - Add Partition Entry", "gpt_util add new partition via JSON", false) \
+	X(json_modify_metadata_gpt, "JSON Modification - Metadata GPT Changes", "gpt_util modify metadata partition name/range", false) \
+	X(json_boundary_max_partitions, "Boundary Test - Max Partitions", "gpt_util handle max 8192 partitions", false) \
 	/* Edge Cases */ \
 	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)", false) \
 	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)", true)*/ \

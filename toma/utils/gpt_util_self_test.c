@@ -2500,9 +2500,7 @@ DEFINE_TEST(binary_backup_restore)
 	}
 
 	/* Cleanup */
-	if (manifest_json) {
-		nvmeibt_mm_json_free_kv_tree(manifest_json);
-	}
+	nvmeibt_mm_json_free_kv_tree(manifest_json);
 	unlink(TEST_JSON_PATH("binary_test"));
 	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
@@ -2611,9 +2609,7 @@ DEFINE_TEST(backup_restore_missing_file)
 	}
 
 	/* Cleanup */
-	if (manifest_json) {
-		nvmeibt_mm_json_free_kv_tree(manifest_json);
-	}
+	nvmeibt_mm_json_free_kv_tree(manifest_json);
 	unlink(TEST_JSON_PATH("backup_missing"));
 	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
@@ -2671,9 +2667,7 @@ DEFINE_TEST(backup_restore_corrupted_file)
 	}
 
 	/* Cleanup */
-	if (manifest_json) {
-		nvmeibt_mm_json_free_kv_tree(manifest_json);
-	}
+	nvmeibt_mm_json_free_kv_tree(manifest_json);
 	unlink(TEST_JSON_PATH("backup_corrupt"));
 	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
@@ -2976,9 +2970,7 @@ DEFINE_TEST(restore_mid_failure_file_deleted)
 	}
 
 	/* Cleanup */
-	if (manifest_json) {
-		nvmeibt_mm_json_free_kv_tree(manifest_json);
-	}
+	nvmeibt_mm_json_free_kv_tree(manifest_json);
 	unlink(TEST_JSON_PATH("restore_mid_fail"));
 	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
@@ -3054,6 +3046,381 @@ DEFINE_TEST(csv_parsing_path)
 // 	cleanup_backup_files_for_device(ctx->test_device_path);
 // 	return rv;
 // }
+
+DEFINE_TEST(json_add_partition_entry)
+{
+	int									rv = 0;
+	const char							*device_path = TOMA_ROOT_DIR "tmp/gpt_add_partition";
+	struct mm_json_elem					*json_root = NULL;
+	struct mm_json_elem					*entries = NULL;
+	struct nvmeibt_disk_gpt				main_gpt_after;
+	struct nvmeibt_disk_mbr				mbr;
+	struct nvmeibt_disk_gpt				main_gpt;
+	struct nvmeibt_disk_gpt				metadata_gpt;
+	int									fd_large = -1;
+	union nvmeib_uuid					disk_uuid;
+	union nvmeib_uuid					metadata_disk_uuid;
+	union nvmeib_uuid					metadata_partition_uuid;
+	union nvmeib_uuid					disk_metadata_partition_uuid;
+	uint64_t							n_disk_blocks = 4000;		/* Larger device */
+	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+	struct nvmeibt_disk_metadata		disk_metadata;
+	char								*dma_buffer = NULL;
+	int									n_bytes_write;
+	uint64_t							pbyte_s;
+	struct nvmeibt_disk_gpt_partition_entry			*metadata_partition = NULL;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
+
+	/* Create LARGER device (4000 blocks) to have room for multiple partitions */
+	/* Standard 2000 blocks has EXCELERO_METADATA taking 258-1742, leaving no room */
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, "Main", sizeof(main_gpt.main_or_metadata));
+	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, "Metadata", sizeof(metadata_gpt.main_or_metadata));
+
+	fd_large = open(device_path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	if (fd_large < 0) {
+		fprintf(stdout, COL_RED_BOLD "SETUP FAILED" COL_RESET "\n");
+		return -1;
+	}
+
+	/* Initialize MBR */
+	nvmeibt_disk_metadata_init_pmbr(&mbr, n_disk_blocks, pblk_size);
+	nvmeibt_disk_metadata_write_mbr(NULL, fd_large, pblk_size, &mbr);
+
+	/* Initialize Main GPT */
+	disk_uuid.ll[0] = 0x1122334455667788ULL;
+	disk_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
+	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
+												LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
+
+	/* Add EXCELERO_METADATA partition (smaller to leave room for new partition) */
+	/* Use PBA 258-1500 (instead of full usable range 258-3742) */
+	metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
+	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
+
+	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
+		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&metadata_partition_uuid,
+		main_gpt.header.first_usable_pba,
+		main_gpt.header.first_usable_pba + 1242,		/* PBA 258-1500 */
+		EXCELERO_METADATA_PARTITION_NAME,
+		strlen(EXCELERO_METADATA_PARTITION_NAME));
+
+	if (!metadata_partition) {
+		close(fd_large);
+		return -1;
+	}
+
+	nvmeibt_disk_metadata_store_gpt(NULL, fd_large, pblk_size, &main_gpt, false);
+
+	/* Initialize nested Metadata GPT */
+	metadata_disk_uuid.ll[0] = 0x2233445566778899ULL;
+	metadata_disk_uuid.ll[1] = 0xAABBCCDDEEFF0011ULL;
+
+	nvmeibt_disk_metadata_init_gpt_structure(metadata_partition->pba_s,
+												metadata_partition->pba_e,
+												&metadata_gpt, pblk_size,
+												MAX_NUM_GPT_ENTRIES, &metadata_disk_uuid);
+
+	/* Add disk_metadata partition */
+	disk_metadata_partition_uuid.ll[0] = 0xDD11223344556677ULL;
+	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
+
+	nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
+											&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+											&disk_metadata_partition_uuid,
+											metadata_gpt.header.first_usable_pba,
+											metadata_gpt.header.last_usable_pba,
+											DISK_METADATA_PARTITION_NAME,
+											strlen(DISK_METADATA_PARTITION_NAME));
+
+	nvmeibt_disk_metadata_store_gpt(NULL, fd_large, pblk_size, &metadata_gpt, false);
+
+	/* Write disk_metadata structure */
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+	if (disk_md_partition) {
+		memset(&disk_metadata, 0, sizeof(disk_metadata));
+		disk_metadata.signature = DISK_METADATA_SIGNATURE;
+		disk_metadata.format_pblk_size = pblk_size;
+		disk_metadata.format_request_counter = 1;
+		nvmeibt_strlcpy(disk_metadata.native_serial_str, "MOCK-SERIAL-12345678", sizeof(disk_metadata.native_serial_str));
+		disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
+		disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
+		disk_metadata.crc32 = 0;
+		disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
+
+		pbyte_s = disk_md_partition->pba_s * pblk_size;
+		n_bytes_write = roundup(sizeof(disk_metadata), pblk_size);
+		dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_large_disk_md, PAGE_SIZE, n_bytes_write);
+		memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
+		pwrite(fd_large, dma_buffer, n_bytes_write, pbyte_s);
+		NNVMEIBT_BM_FREE(trace_selftest_large_disk_md_free, dma_buffer);
+	}
+
+	fsync(fd_large);
+	close(fd_large);
+	fprintf(stdout, "Created larger device (4000 blocks) with partition PBA 258-1500\n");
+
+	/* Export to JSON */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("add_partition"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Add a new partition entry by duplicating existing entry and modifying it */
+	if (rv == 0) {
+		json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("add_partition"));
+		if (!json_root) {
+			rv = -1;
+		}
+	}
+
+	if (rv == 0) {
+		struct mm_json_elem *main_gpt_ptr = NULL;
+		/* Navigate to main_gpt_primary -> entries */
+		for (int i = 0; i < json_root->dict.len; i++) {
+			if (strcmp(json_root->dict.elements[i].key, "main_gpt_primary") == 0) {
+				main_gpt_ptr = json_root->dict.elements[i].value;
+				break;
+			}
+		}
+		if (main_gpt_ptr) {
+			for (int i = 0; i < main_gpt_ptr->dict.len; i++) {
+				if (strcmp(main_gpt_ptr->dict.elements[i].key, "entries") == 0) {
+					entries = main_gpt_ptr->dict.elements[i].value;
+					break;
+				}
+			}
+		}
+
+		if (!entries || entries->type != JSON_E_ARRAY || entries->array.len == 0) {
+			rv = -1;
+			goto cleanup;		/* Free json_root before returning */
+		}
+	}
+
+	/* Manually add a new entry by expanding the array */
+	if (rv == 0) {
+		struct mm_json_elem *existing_entry = entries->array.elements[0];
+		struct mm_json_elem *new_entry = calloc(1, sizeof(*new_entry));
+
+		/* Create new entry (copy of existing, will modify fields) */
+		if (!new_entry) {
+			rv = -1;
+			goto cleanup;		/* Free json_root before returning */
+		} else {
+			new_entry->type = JSON_E_DICT;
+			new_entry->dict.len = existing_entry->dict.len;
+			new_entry->dict.elements = calloc(existing_entry->dict.len, sizeof(struct mm_json_kv_pair));
+			new_entry->parent = entries;
+
+			/* Deep copy all fields from existing entry */
+			for (int i = 0; i < existing_entry->dict.len; i++) {
+				new_entry->dict.elements[i].key = strdup(existing_entry->dict.elements[i].key);
+				new_entry->dict.elements[i].value = calloc(1, sizeof(struct mm_json_elem));
+				new_entry->dict.elements[i].value->type = existing_entry->dict.elements[i].value->type;
+				new_entry->dict.elements[i].value->parent = new_entry;
+				if (existing_entry->dict.elements[i].value->type == JSON_E_STR) {
+					new_entry->dict.elements[i].value->str = strdup(existing_entry->dict.elements[i].value->str);
+				} else {
+					new_entry->dict.elements[i].value->num = existing_entry->dict.elements[i].value->num;
+				}
+			}
+
+			/* Add new partition in free space after existing (1501-1700) */
+			/* Existing is at 258-1500, device ends at ~3742, so plenty of room */
+			json_set_dict_num(new_entry, "index", 1);
+			json_set_dict_str(new_entry, "name", "new_partition");
+			json_set_dict_str(new_entry, "partition_guid", "11223344-5566-7788-99aa-bbccddeeff00");
+			json_set_dict_str(new_entry, "type_guid", "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7");  /* Linux filesystem */
+			json_set_dict_num(new_entry, "pba_s", 1501);
+			json_set_dict_num(new_entry, "pba_e", 1700);
+			json_set_dict_num(new_entry, "attributes", 0);
+			json_set_dict_bool(new_entry, "_delete", false);
+
+			/* Expand entries array */
+			entries->array.elements = realloc(entries->array.elements,
+											   (entries->array.len + 1) * sizeof(struct mm_json_elem *));
+			entries->array.elements[entries->array.len] = new_entry;
+			entries->array.len++;
+
+			fprintf(stdout, "Added new partition entry (index 1, PBA 600-800)\n");
+		}
+	}
+
+	/* Write modified JSON */
+	if (rv == 0) {
+		rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("add_partition"));
+		json_root = NULL;		/* Already freed by helper */
+	}
+
+	/* Apply with --write */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("add_partition"), "--write", "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify new partition was added */
+	if (rv == 0) {
+		int fd = open(device_path, O_RDONLY);
+		if (fd >= 0) {
+			int n_entries_after = 0;
+			memset(&main_gpt_after, 0, sizeof(main_gpt_after));
+			nvmeibt_strlcpy(main_gpt_after.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt_after.main_or_metadata));
+			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt_after,
+												  1, 4000 - 1, false) == 0) {		/* Match larger device size */
+				for (int i = 0; i < main_gpt_after.max_n_entries; i++) {
+					if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&main_gpt_after.entries[i])) {
+						n_entries_after++;
+					}
+				}
+
+				if (n_entries_after == 2) {
+					fprintf(stdout, COL_GREEN "Verified: New partition added successfully (1 -> 2 entries)" COL_RESET "\n");
+				} else {
+					fprintf(stdout, COL_RED_BOLD "FAIL: Expected 2 entries, got %d" COL_RESET "\n", n_entries_after);
+					rv = -1;
+				}
+			}
+			close(fd);
+		}
+	}
+
+cleanup:
+	/* Cleanup */
+	nvmeibt_mm_json_free_kv_tree(json_root);
+	unlink(TEST_JSON_PATH("add_partition"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(json_modify_metadata_gpt)
+{
+	int							rv = 0;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_modify_metadata";
+	struct nvmeibt_disk_gpt		main_gpt;
+	struct nvmeibt_disk_gpt		metadata_gpt_after;
+	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
+	char						partition_name_after[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+	int							fd = -1;
+
+	/* Create device */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+
+	/* Export to JSON */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("modify_metadata"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Modify metadata GPT partition name */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("modify_metadata"));
+		struct mm_json_elem *metadata_gpt_elem = NULL;
+		struct mm_json_elem *entries = NULL;
+		int i;
+
+		if (json_root) {
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "metadata_gpt_primary") == 0) {
+					metadata_gpt_elem = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (metadata_gpt_elem) {
+				for (i = 0; i < metadata_gpt_elem->dict.len; i++) {
+					if (strcmp(metadata_gpt_elem->dict.elements[i].key, "entries") == 0) {
+						entries = metadata_gpt_elem->dict.elements[i].value;
+						break;
+					}
+				}
+			}
+
+			/* Modify first entry's name */
+			if (entries && entries->type == JSON_E_ARRAY && entries->array.len > 0) {
+				json_set_dict_str(entries->array.elements[0], "name", "Modified_Disk_Metadata");
+				fprintf(stdout, "Modified metadata partition name to: Modified_Disk_Metadata\n");
+			}
+
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("modify_metadata"));
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Apply with --write */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("modify_metadata"), "--write", "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Verify name was changed */
+	if (rv == 0) {
+		fd = open(device_path, O_RDONLY);
+		if (fd >= 0) {
+			memset(&main_gpt, 0, sizeof(main_gpt));
+			nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+			if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+												  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) == 0) {
+				metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+				if (metadata_partition) {
+					memset(&metadata_gpt_after, 0, sizeof(metadata_gpt_after));
+					nvmeibt_strlcpy(metadata_gpt_after.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt_after.main_or_metadata));
+					if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt_after,
+														  metadata_partition->pba_s, metadata_partition->pba_e, false) == 0) {
+						char16_str_to_str(metadata_gpt_after.entries[0].partition_name,
+										  GPT_MAX_PARTITION_NAME_LENGTH + 1, partition_name_after);
+						if (strcmp(partition_name_after, "Modified_Disk_Metadata") == 0) {
+							fprintf(stdout, COL_GREEN "Verified: Metadata partition name changed successfully" COL_RESET "\n");
+						} else {
+							fprintf(stdout, COL_RED_BOLD "FAIL: Name not changed (got: %s)" COL_RESET "\n", partition_name_after);
+							rv = -1;
+						}
+					}
+				}
+			}
+			close(fd);
+		}
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("modify_metadata"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
+DEFINE_TEST(json_boundary_max_partitions)
+{
+	int rv = 0;
+
+	/* Verify system handles LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192) correctly */
+	/* Standard device uses 8192-entry GPTs for both Main and Metadata */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+
+	/* Export to JSON (exercises 8192-entry GPT export) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("boundary_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Apply back (exercises 8192-entry GPT apply) */
+	if (rv == 0) {
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("boundary_test"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	}
+
+	/* Validates: n_partition_entries=8192 handled correctly in export/apply */
+	if (rv == 0) {
+		fprintf(stdout, COL_GREEN "Verified: 8192-entry GPT handled correctly" COL_RESET "\n");
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("boundary_test"));
+	return rv;
+}
 
 DEFINE_TEST(o_direct_flags)
 {
