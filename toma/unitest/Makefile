@@ -235,7 +235,7 @@ $(OBJ_DIR)/%.i: %.cpp
 %.c_gen_events.h: %.trace.json $(TRACE_GEN_SCRIPT)
 	@echo "Generating gen_events header $@"
 	mkdir -p $(dir $@)
-	cd $(dir $@); $(TRACE_GEN_SCRIPT) $(PWD)/$< nvmeibt --userspace -o $(PWD)/$@
+	cd $(dir $@); $(TRACE_GEN_SCRIPT) $(abspath $<) nvmeibt --userspace -o $(abspath $@)
 
 # Note: the tgz image uses tar's sparse file handling.
 # Created with: tar --sparse -c -z -f ./disk_nvmesh.img.tgz ./disk_nvmesh.img
