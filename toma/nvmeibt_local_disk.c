@@ -1116,11 +1116,11 @@ static void fill_disk_from_stock_driver_wrapper(struct nvmeibt_wq_entry *wq_entr
 	/*We automatically bind all disks that are formatted with MD to nvmesh, as previous stock drivers have
 	  bugs when reading from such disks and cause system crashes upon read. We must therefore move these disks  															 .
 	  to our driver prior to trying to read from them (even the main_GPT).
-																																											 .
 	  This isn't such a bad choice since someone who uses the stock driver cannot use these disks anyway															 .
 	  once they are formatted with MD   																																	 .
-																																											 .
 	  For disks that are not formatted with MD we check if they are ours or not.*/
+	/* DHSH: Related to BUG NVMESH-7436 The above remark is shit! During boot nvmesh does not exist and stock driver will read the MBR and GPT and get crash.
+	   So if there is a problem - Solving it here is meaningless! The current solution we have is that GPT crc is corrupted */
 	if (is_formatted_with_md) {
 		nvmeibt_local_disk_mark_is_bind_to_nvmeibs_needed(new_local_disk);
 		N_Tf(trace_2_local_disk_fill_disk_from_stock_driver_wrapper, "disk=@STR is formatted with metadata, will be moved to nvmesh driver.", nvmeibt_local_disk_display(new_local_disk));

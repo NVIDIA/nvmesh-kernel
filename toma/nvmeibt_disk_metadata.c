@@ -1094,7 +1094,7 @@ void nvmeibt_disk_metadata_init_gpt_structure(uint64_t pba_s,
 	gpt->header.alternate_pba = pba_e;
 	gpt->header.disk_obj_uuid = *disk_obj_uuid;
 	gpt->header.partition_entry_pba = pba_s + gpt_header_n_pblk;
-	gpt->header.n_partition_entries = GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES;		// fixed, never used
+	gpt->header.n_partition_entries = GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES;		// Open BUG NVMESH-7436 - incorrect value (not the actual number of entries), which causes standard GPT tools to think CRC is corrupted.
 	gpt->header.size_of_partition_entry = UEFI_MIN_GPT_ENTRY_SIZE; /* Minimum partition entry size by UEFI standard*/
 	/* This affects gpt->header.first_usable_pba and last_usable_pba and leaves enough room for a larger actual
 	   GPT size, I.e., not according to gpt->header.n_partition_entries*/
@@ -1488,7 +1488,7 @@ int nvmeibt_disk_metadata_read_disk_metadata(struct netlink_io_context *nl_ctx, 
 		N_Ef(bd8954u, "disk_metadata signature mismatch. Expected=@GPT_SIGNATURE got=@GPT_SIGNATURE pbyte_s=@POS", DISK_METADATA_SIGNATURE, disk_metadata->signature, pbyte_s);
 		goto out;
 	}
-	disk_metadata->crc32 = read_crc32;		// Restore crc32 to original value after validation passed
+	disk_metadata->crc32 = read_crc32;		// Restore crc32 to original value after validation passed, Open BUG NVMESH-7436
 	rv = 0;
 	N_Tf(vbyhduy, "Restored disk_metadata fd=@FD", fd);
 out:
