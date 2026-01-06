@@ -262,7 +262,7 @@ int nvmeib_srvr_api_lib_send_msg_to_server(const struct nvmeibs_toma_server_proc
 		return 0;
 	} else {
 		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
-		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, &msg, sizeof(*msg), EALREADY, EINPROGRESS);
+		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
 		if (rv >= 0) {
 			return 0;
 		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
