@@ -1533,7 +1533,43 @@ static void print_usage(char *argv[])
 
 	fprintf(stdout, "Testing:\n");
 	fprintf(stdout, "  -T, --self-test             Run comprehensive self-test suite\n");
-	fprintf(stdout, "  -q, --quiet                 Quiet mode (suppress decorative banners in tests)\n");
+	fprintf(stdout, "  -q, --quiet                 Quiet mode (suppress decorative banners in tests)\n\n");
+
+	fprintf(stdout, "Help:\n");
+	fprintf(stdout, "  -h, --help                  Display this help message\n\n");
+
+	fprintf(stdout, COL_BLUE "Examples:" COL_RESET "\n\n");
+
+	fprintf(stdout, "Display GPT:\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1                      # Display primary copy\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 -c both              # Display both primary and alternate\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --filter-lba=1000    # Filter by LBA address\n\n");
+
+	fprintf(stdout, "Fix corrupted GPT:\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --fix-gpt            # Fix from alternate copy\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --fix-mbr            # Fix MBR\n\n");
+
+	fprintf(stdout, "Export/Apply Workflow (Edit GPT via JSON):\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --output-json=backup.json       # Export to JSON\n");
+	fprintf(stdout, "  vim backup.json                                          # Edit (delete partition, etc)\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --apply-from=backup.json        # Preview (dry-run)\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --apply-from=backup.json --write  # Apply changes\n\n");
+
+	fprintf(stdout, "Binary Backup/Restore:\n");
+	fprintf(stdout, "  # Automatic backup before writes:\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --apply-from=changes.json --write\n");
+	fprintf(stdout, "  # Creates: /tmp/backup_nvme0n1_<timestamp>/\n");
+	fprintf(stdout, "  \n");
+	fprintf(stdout, "  # Manual restore:\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --restore-binary=/tmp/backup_nvme0n1_<timestamp>/manifest.json\n\n");
+
+	fprintf(stdout, "Advanced:\n");
+	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 -Z                   # Print zeroing verification commands\n");
+	fprintf(stdout, "  gpt_util -T                                   # Run all self-tests\n");
+	fprintf(stdout, "  gpt_util -T 1,5,10-15                         # Run specific tests\n\n");
+
+	fprintf(stdout, COL_YELLOW "Note: gpt_util requires properly formatted NVMesh devices\n");
+	fprintf(stdout, "      (Main GPT + Metadata GPT + disk_metadata must be readable)\n" COL_RESET);
 }
 
 
@@ -1571,10 +1607,11 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"yes",						no_argument,		0,	'Y'},
 		{"direct",					no_argument,		0,	'D'},
 		{"no-direct",				no_argument,		0,	'N'},
+		{"help",					no_argument,		0,	'h'},
 
 		{0, 0, 0, 0}
 	};
-	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:R:ZimfFUWDNY";
+	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:R:ZimfFUWDNYh";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1816,6 +1853,10 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		case 'N':
 			config->o_direct_mode = O_DIRECT_FORCE_OFF;
 			fprintf(stdout, "I/O mode: Disable O_DIRECT\n");
+			break;
+		case 'h':
+			print_usage(argv);
+			exit(0);
 			break;
 		case 'a':
 			nvmeibt_strlcpy(config->device_path, optarg, sizeof(config->device_path));
