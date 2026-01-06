@@ -4,7 +4,7 @@
 
 #if !defined(BLKDEV_SIMULATOR)
 /* Strictly non simulator includes */
-#include "nvmeibs_nordda.h"
+#include "nvmeibs_nordda.h"	
 #include "nvmeibs_toma.h"
 #include "nvmeib.h"
 #include "nvmeibs_defs.h"
@@ -2916,9 +2916,9 @@ static void attempt_handle_pending_recv(struct nvmeibs_nr_channel *nrch)
 	__NFOUT;
 }
 
-static void io_cmd_process_work(struct workqe_struct *work)
+/* Common handler for deferred IO command processing */
+static void io_cmd_deferred_process(struct nvmeib_iu *recv_ioctx)
 {
-	struct nvmeib_iu *recv_ioctx = container_of(work, struct nvmeib_iu, work);
 	struct nvmeibs_net *net = recv_ioctx->owner_ptr;
 	struct nvmeibs_nr_channel *nrch = net->params.nrch;
 	struct volume_client_req *req = recv_ioctx->buf;
@@ -2927,7 +2927,7 @@ static void io_cmd_process_work(struct workqe_struct *work)
 	if (nvmeibs_net_get_qp_state(nrch->net) == QP_LIVE) {
 		io_cmd_process(nrch, recv_ioctx);
 	} else {
-		_NT(trace_nordda_io_cmd_process_work, "nrch @NRCH_NAME, not processing deferred cmd, net not LIVE", nrch->name);
+		_NT(trace_nordda_io_cmd_deferred_process, "nrch @NRCH_NAME, not processing deferred cmd, net not LIVE", nrch->name);
 		cmd_ended(nrch, req->hdr.tag);
 		post_recv_iu(nrch, recv_ioctx);
 	}
@@ -2935,15 +2935,39 @@ static void io_cmd_process_work(struct workqe_struct *work)
 	NFOUT;
 }
 
+/* Custom nvmeib_q callback wrapper */
+static void io_cmd_process_work(struct workqe_struct *work)
+{
+	struct nvmeib_iu *recv_ioctx = container_of(work, struct nvmeib_iu, work);
+	io_cmd_deferred_process(recv_ioctx);
+}
+
+/* Kernel workqueue callback wrapper */
+static void io_cmd_defer_kwork(struct work_struct *kwork)
+{
+	struct nvmeib_iu *recv_ioctx = container_of(kwork, struct nvmeib_iu, kwork);
+	io_cmd_deferred_process(recv_ioctx);
+}
+
 static inline void io_cmd_defer(struct nvmeibs_nr_channel *nrch,
 	struct nvmeib_iu *recv_ioctx)
 {
 	NFIN;
 
-	WQ_INIT_WORK(&recv_ioctx->work, io_cmd_process_work);
-	if (nvmeibs_nordda_add_work(nrch, &recv_ioctx->work) < 0) {
-		_NE(error_1_nordda_io_cmd_defer, "Fail to add work");
-		goto err;
+	if (nvmeibs_nordda_kwq) {
+		/* Use global kernel workqueue for lower IRQ latency */
+		INIT_WORK(&recv_ioctx->kwork, io_cmd_defer_kwork);
+		if (!queue_work(nvmeibs_nordda_kwq, &recv_ioctx->kwork)) {
+			_NE(error_nordda_io_cmd_defer_kwork, "Fail to queue kwork");
+			goto err;
+		}
+	} else {
+		/* Fall back to custom nvmeib_q workqueue */
+		WQ_INIT_WORK(&recv_ioctx->work, io_cmd_process_work);
+		if (nvmeibs_nordda_add_work(nrch, &recv_ioctx->work) < 0) {
+			_NE(error_1_nordda_io_cmd_defer, "Fail to add work");
+			goto err;
+		}
 	}
 	goto out;
 
@@ -3445,6 +3469,7 @@ static int nrch_rscs_alloc(struct nvmeibs_nr_channel *nrch, struct nvmeib_dev *d
 		_NE(error_nordda_nrch_rscs_alloc, "invalid nrch @NRCH", nrch);
 		goto out;
 	}
+	/* Always create custom nvmeib_q workqueue (used by other flows and as fallback) */
 	srv_proc_name_format(pname, 'S', "WQ", "nr", qp_num);
 	nrch->wq = nvmeibs_nr_wq_set_cpu_affinity ? wq_create_on(pname, qp_num) : wq_create(pname);
 	if (!nrch->wq) {
@@ -3471,6 +3496,11 @@ static void nrch_rscs_free(struct nvmeibs_nr_channel *nrch)
 	NFIN;
 
 	if (nrch) {
+		/* Flush global kernel workqueue to ensure all pending work for this channel completes */
+		if (nvmeibs_nordda_kwq) {
+			//nvmeibs_nordda_kwq_flush();
+			/* should we really wait here? maybe we can only wait for all recv-iu to be processed? */
+		}
 		if (nrch->wq) {
 			wq_drain(nrch->wq);
 			wq_destroy(nrch->wq);
@@ -4697,3 +4727,64 @@ out:
 	return rv;
 }
 
+/* Global kernel workqueue for nordda deferred IO commands */
+bool nvmeibs_nordda_use_kernel_wq = true;
+module_param_named(nordda_use_kernel_wq, nvmeibs_nordda_use_kernel_wq, bool, 0444);
+MODULE_PARM_DESC(nordda_use_kernel_wq, "Use kernel workqueue for nordda deferred IO commands (reduces IRQ latency)");
+
+bool nvmeibs_nordda_kernel_wq_unbound = false;
+module_param_named(nordda_kernel_wq_unbound, nvmeibs_nordda_kernel_wq_unbound, bool, 0444);
+MODULE_PARM_DESC(nordda_kernel_wq_unbound, "Use unbound kernel workqueue (true) or bound (false, default)");
+
+struct workqueue_struct *nvmeibs_nordda_kwq;
+
+void nvmeibs_nordda_kwq_flush(void)
+{
+	if (nvmeibs_nordda_kwq)
+		nvmeib_public_flush_workqueue(nvmeibs_nordda_kwq);
+}
+EXPORT_SYMBOL(nvmeibs_nordda_kwq_flush);
+
+int nvmeibs_nordda_kwq_init(void)
+{
+	int rv;
+
+	if (!nvmeibs_nordda_use_kernel_wq) {
+		nvmeibs_nordda_kwq = NULL;
+		rv = 0;
+		goto out;
+	}
+
+	if (nvmeibs_nordda_kernel_wq_unbound) {
+		nvmeibs_nordda_kwq = nvmeib_public_alloc_workqueue("nvmeibs_nordda",
+			WQ_UNBOUND | WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS,
+			WQ_UNBOUND_MAX_ACTIVE);
+	} else {
+		nvmeibs_nordda_kwq = nvmeib_public_alloc_workqueue("nvmeibs_nordda",
+			WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+	}
+
+	if (!nvmeibs_nordda_kwq) {
+		_NE(error_main_nordda_kwq_init, "Failed to allocate nordda kernel workqueue");
+		rv = -ENOMEM;
+		goto out;
+	}
+
+	rv = 0;
+	_NT(trace_main_nordda_kwq_init, "Created nordda kernel workqueue (unbound=@BOOL)", nvmeibs_nordda_kernel_wq_unbound);
+
+out:
+	return rv;
+}
+EXPORT_SYMBOL(nvmeibs_nordda_kwq_init);
+
+void nvmeibs_nordda_kwq_exit(void)
+{
+	if (nvmeibs_nordda_kwq) {
+		nvmeib_public_flush_workqueue(nvmeibs_nordda_kwq);
+		nvmeib_public_destroy_workqueue(nvmeibs_nordda_kwq);
+		nvmeibs_nordda_kwq = NULL;
+		_NT(trace_main_nordda_kwq_exit, "Destroyed nordda kernel workqueue");
+	}
+}
+EXPORT_SYMBOL(nvmeibs_nordda_kwq_exit);

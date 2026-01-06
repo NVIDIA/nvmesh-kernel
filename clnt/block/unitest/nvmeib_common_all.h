@@ -57,5 +57,7 @@ void nvmeib_public_init(void);
 void nvmeib_public_module_exit(void);
 void *nvmeib_public_vzalloc(unsigned long size);
 #include "nvmeib_public_keeper.h"
-
+struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *fmt, unsigned int flags, int max_active);
+void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq);
+void nvmeib_public_flush_workqueue(struct workqueue_struct *wq);
 #endif  // H beginning

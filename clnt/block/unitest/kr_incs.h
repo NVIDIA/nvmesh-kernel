@@ -2022,6 +2022,12 @@ typedef unsigned long long time64_t;
 struct hrtimer {};
 enum hrtimer_mode {NOT_AN_EMPTY_ENUM = 0};
 
+#define WQ_UNBOUND 0
+#define WQ_HIGHPRI 0
+#define WQ_MEM_RECLAIM 0
+#define WQ_SYSFS 0
+#define WQ_UNBOUND_MAX_ACTIVE 0
+
 //#define NVME_IOCTL_ID			(0x4e40)
 #endif // #ifndef KR_INCS_H
 /*****************************************************************************/

@@ -567,5 +567,23 @@ out:
 	return rv;
 }
 
+struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *name, unsigned int flags, int max_active)
+{
+	(void)name;
+	(void)flags;
+	(void)max_active;
+	return NULL;
+}
+
+void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq)
+{
+	(void)wq;
+}
+
+void nvmeib_public_flush_workqueue(struct workqueue_struct *wq)
+{
+	(void)wq;
+}
+
 /*****************************************************************************/
 // EOF.

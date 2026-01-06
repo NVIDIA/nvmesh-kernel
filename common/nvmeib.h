@@ -504,7 +504,10 @@ struct nvmeib_iu {
 	void (*work_handler)(struct nvmeib_iu *ioctx);
 	void *work_payload;
 	struct completion *io_done;
-	struct workqe_struct work;
+	union {
+		struct workqe_struct work;   /* custom nvmeib_q work item */
+		struct work_struct kwork;    /* kernel workqueue work item */
+	};
 	u64 dma;
 	void *buf;
 	size_t size; /* NVMEIBS_MAX_ADMIN_MSG_SIZE or NVMEIBC_DEFAULT_CLIENT_MSG_SIZE */

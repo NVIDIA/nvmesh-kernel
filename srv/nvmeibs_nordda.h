@@ -160,7 +160,7 @@ struct nvmeibs_nr_channel {
 	struct ib_wc *scq_wcs;
 	struct ib_wc *rcq_wcs;
 
-	/* deferred io cmds wq */
+	/* deferred io cmds wq (custom nvmeib_q, used when kernel wq is disabled) */
 	struct workq_struct *wq;
 	/* io cmds */
 	int io_cmd_n_pages;
@@ -211,5 +211,14 @@ int nvmeibs_nordda_add_work(struct nvmeibs_nr_channel *nrch,
 int nvmeibs_nordda_io_cmds_alloc(struct nvmeibs_nr_channel *nrch);
 int nvmeibs_nordda_fill_config_alloc_nr_net_rsp(struct nvmeibs_nr_channel *nrch,
 	struct volume_server_config_alloc_nr_net_rsp *rsp);
+
+extern bool nvmeibs_nordda_use_kernel_wq;
+extern bool nvmeibs_nordda_kernel_wq_unbound;
+extern struct workqueue_struct *nvmeibs_nordda_kwq;
+
+int nvmeibs_nordda_kwq_init(void);
+void nvmeibs_nordda_kwq_exit(void);
+void nvmeibs_nordda_kwq_flush(void);
+
 #endif
 

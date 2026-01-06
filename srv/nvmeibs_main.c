@@ -25,6 +25,7 @@
 #include "nvmeib_io_stats.h"
 #include "common/proc_epilog.h"
 #include "nvmeibs_memmgr_metrics.h"
+#include "nvmeibs_nordda.h"
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMe storage device over Infiniband");
 
@@ -4147,6 +4148,11 @@ int nvmeibs_init(void) /* Constructor */
 	}
 	main_wq_pid = wq_pid(main_wq);
 
+	if ((rv = nvmeibs_nordda_kwq_init()) != 0) {
+		_NE(error_3_main_nvmeibs_init, "Failed to initialize nordda kernel workqueue");
+		goto unlock;
+	}
+
 	nvmeibs_serial_console_flag = nvmeib_public_serial_console();
 	if (nvmeibs_serial_console_flag)
 		_NI(trace_1_main_nvmeibs_init, "Kernel has a serial console, reducing output");
@@ -4322,8 +4328,11 @@ void nvmeibs_exit(void) /* Destructor */
 
 	nvmeibs_disk_all_free_lock_resources();
 
+	/* stop nordda kernel workqueue */
+	_NT(trace_12_main_nvmeibs_exit, "Stop nordda kernel wq...");
+	nvmeibs_nordda_kwq_exit();
 	/* wait for main-q works e.g. proc-locks remove */
-	_NT(trace_12_main_nvmeibs_exit, "Stop main wq...");
+	_NT(trace_13_main_nvmeibs_exit, "Stop main wq...");
 	if (main_wq) {
 		wq_drain(main_wq);
 		wq_destroy(main_wq);
