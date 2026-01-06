@@ -590,10 +590,17 @@ MAKE_OPTS=$(arr_entries_leave_unique "${MAKE_OPTS}")
 MAKE_OPTS=$(arr_entries_sort_for_make "${MAKE_OPTS}")
 
 # check used tools options support
-SED_UNBUF="sed --unbuffered"
-`echo | ${SED_UNBUF} 's/$//' 2> /dev/null` || SED_UNBUF="sed"
-GREP_UNBUF="grep --line-buffered"
-`echo | ${GREP_UNBUF} '$' 2> /dev/null` || GREP_UNBUF="grep"
+# On macOS, disable filtering to avoid buffering issues
+if [ `uname -s` = "Darwin" ]; then
+	FILTER_OUT=false
+	SED_UNBUF="sed"
+	GREP_UNBUF="grep"
+else
+	SED_UNBUF="sed --unbuffered"
+	`echo | ${SED_UNBUF} 's/$//' 2> /dev/null` || SED_UNBUF="sed"
+	GREP_UNBUF="grep --line-buffered"
+	`echo | ${GREP_UNBUF} '$' 2> /dev/null` || GREP_UNBUF="grep"
+fi
 
 # print build opts final values
 echo "Build start: `date '+%a %d-%b-%y %H.%M.%S'`"
