@@ -100,6 +100,7 @@ MODULE_PARM_DESC(recovery_debug_level, "Recovery tracing debug level");
 
 module_param_named(iommu_enabled, nvmeibc_iommu_enabled, bool, 0444);
 MODULE_PARM_DESC(iommu_enabled, "Used to tell client that IOMMU is enabled");
+EXPORT_SYMBOL(nvmeibc_iommu_enabled);
 
 NVMEIB_DECLARE_KERNEL_WARNINGS_TRAP;
 

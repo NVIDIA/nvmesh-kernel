@@ -39,6 +39,10 @@ static unsigned int nvmeibc_nr_max_channels_per_path = 4;
 module_param_named(nr_max_channels_per_path, nvmeibc_nr_max_channels_per_path, uint, 0644);
 MODULE_PARM_DESC(nr_max_channels_per_path, "max nordda channels per path (for RDMA), 0 will set NUM_OF_POSSIBLE_CPUS + 4 channels");
 
+static unsigned int nvmeibc_nr_max_channels_per_path_iommu = 4;
+module_param_named(nr_max_channels_per_path_iommu, nvmeibc_nr_max_channels_per_path_iommu, uint, 0644);
+MODULE_PARM_DESC(nr_max_channels_per_path_iommu, "max nordda channels per path (for IOMMU)");
+
 static unsigned int nvmeibc_nr_max_channels_per_path_tcp = NVMEIB_MAX_NR_TCP_CHANNELS_PER_PATH;
 module_param_named(nr_max_channels_per_path_tcp, nvmeibc_nr_max_channels_per_path_tcp, uint, 0644);
 MODULE_PARM_DESC(nr_max_channels_per_path_tcp, "max nordda channels per path (for TCP)");
@@ -4259,7 +4263,7 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 	struct nvmeibc_io_rnic *rionic;
 	struct list_head *lionics;
 	struct nvmeibc_io_lnic *lionic = NULL;
-	int clnt_max_nrchs_per_path_rdma = NVMEIB_NR_GET_MAX_CHANNELS_PER_PATH(nvmeibc_nr_max_channels_per_path);
+	int clnt_max_nrchs_per_path_rdma = NVMEIB_NR_GET_MAX_CHANNELS_PER_PATH(nvmeibc_iommu_enabled ? nvmeibc_nr_max_channels_per_path_iommu : nvmeibc_nr_max_channels_per_path);
 	int clnt_max_nrchs_per_path_tcp = nvmeibc_nr_max_channels_per_path_tcp;
 	int p = 0, np = 0;
 	int rv = -1;
