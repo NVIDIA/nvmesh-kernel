@@ -3030,9 +3030,9 @@ static void local_disk_wq_entry_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-int nvmeibt_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e)
+int nvmeibt_local_disk_specific_add_work(struct nvmeibt_wq *local_disk_wq, struct nvmeibt_wq_entry *e)
 {
-	return (local_disk ? nvmeibt_wq_addw(local_disk->wq, e) : -1);
+	return (local_disk_wq ? nvmeibt_wq_addw(local_disk_wq , e) : -1);
 }
 
 /**
@@ -3133,7 +3133,7 @@ int nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(struct nvmeibt_local_d
 		rv = -1;
 		goto out;
 	}
-	rv = nvmeibt_local_disk_specific_add_work(local_disk, &entry_wrapper->wq_entry);
+	rv = nvmeibt_local_disk_specific_add_work(local_disk->wq, &entry_wrapper->wq_entry);
 	if (rv < 0)
 		free_work_with_ldisk_last_CHANGE_no_entry(entry_wrapper);
 out:

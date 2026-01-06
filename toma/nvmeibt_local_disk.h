@@ -227,6 +227,7 @@ static inline bool nvmeibt_local_disk_is_connected_to_disk(const struct nvmeibt_
 }
 BOOL nvmeibt_local_disk_is_done_initial_reading_of_local_disk(const struct nvmeibt_local_disk *local_disk);
 void nvmeibt_local_disk_mark_periodic_reread_smart_counters_just_finished(struct nvmeibt_local_disk *local_disk, BOOL is_successful, BOOL is_periodic_reread_needed);
+struct nvmeibt_wq *nvmeibt_local_disk_create_wq(const char *ldisk_id_str);
 int nvmeibt_local_disk_recover_missing_ldisk_id_in_upgraded_disk_metadata(struct nvmeibt_local_disk_config *f);
 enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int config_tag);
 int nvmeibt_local_disk_add_from_stock_driver(struct nvmeibt_udev_event_info *udev_event_info);
@@ -271,7 +272,7 @@ int nvmeibt_local_disk_write_PMBR_and_GPTs(struct local_disk_info *ld_info);
 void nvmeibt_local_disk_mark_segs_post_update_actions_required(struct nvmeibt_local_disk *local_disk);
 void nvmeibt_local_disk_mark_is_specific_disk_report_req(const char *ldisk_id, unsigned int reappearing_counter);
 void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk);
-int nvmeibt_local_disk_specific_add_work(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
+int nvmeibt_local_disk_specific_add_work(struct nvmeibt_wq *local_disk_wq, struct nvmeibt_wq_entry *e);
 void nvmeibt_local_disk_stop_wq(struct nvmeibt_local_disk *local_disk);
 int nvmeibt_local_disk_add_work_with_ldisk_last_CHANGE_no(struct nvmeibt_local_disk *local_disk, struct nvmeibt_wq_entry *e);
 
