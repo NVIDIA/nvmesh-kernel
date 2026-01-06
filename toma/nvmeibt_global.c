@@ -1298,6 +1298,7 @@ void nvmeibt_log_snapshotting_shutdown(void)
 {
 	while (is_logs_snapshotting_slowpath_wq_in_the_air) {
 		N_Tf(rftsikl, "Awaiting for the running task to end");
+		break;	// Do not delay the shutdown process
 		nanosleep(&(struct timespec){0, MSEC_TO_NSEC(100)}, NULL); // 100ms
 	}
 }
