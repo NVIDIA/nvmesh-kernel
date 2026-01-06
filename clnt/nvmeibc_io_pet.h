@@ -32,8 +32,6 @@ extern const char __stop_nvmeibc_io_pet_msgs[];
 #define NVMEIBC_IO_PET_MSG_CRIT(pet_journal, msg, ...) NVMEIBC_IO_PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_CRITICAL, __VA_ARGS__)
 
 
-struct msgloop_procfs_ent;
-
 struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(void);
 
 __attribute__((nonnull (1)))

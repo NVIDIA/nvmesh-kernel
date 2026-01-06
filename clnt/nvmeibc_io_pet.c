@@ -73,13 +73,13 @@
 		return nvmeib_pet_severity_is_same_or_worse(nvmeibc_io_pet_minimal_severity, severity);
 	}
 
+	NVMEIBC_ERROR_TAG(io_pet_send_failures);
 	static void __io_pet_controller_flush(struct nvmeib_pet_base_controller const* base, enum nvmeib_pet_severity severity, struct iovec data)
 	{
 		int sendm_rv = -EINPROGRESS;
 		bool const should_send = __io_pet_controller_should_send(severity, data); 
+		__auto_type self = (struct io_pet_controller*)(base);
 		if (should_send) {
-			NVMEIBC_ERROR_TAG(io_pet_send_failures);
-			__auto_type self = (struct io_pet_controller*)(base);
 			struct msgloop_msg *msg = container_of(data.iov_base, struct msgloop_msg, data);
 			BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
 
