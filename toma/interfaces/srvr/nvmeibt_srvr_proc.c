@@ -321,7 +321,7 @@ int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str) { return __get_sr
 int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
 {
 	char path[256];
-	if (seq > 1000)
+	if (seq >= 1000)
 		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
 	snprintf(path, sizeof(path), TOMA_ROOT_DIR "proc/nvmeibs/smart%d", seq);
 	return __get_srvr_buf_info(str, path);
