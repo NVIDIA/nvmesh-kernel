@@ -76,9 +76,14 @@ int nvmeibt_toma_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *l
 void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id);
 void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id);
 void nvmeibt_topology_set_mgmt_updates_pause_state(int is_paused);
+
+void nvmeibt_server_lib_create(void);
+void nvmeibt_server_lib_consume_incomming_srvr_msgs(void);
 int nvmeibt_send_msg_to_srv(struct km_comm_msg_hdr *msg);
 struct nvmeibt_km_comm;
-struct nvmeibt_km_comm * nvmeibt_get_srv_comm(void);
+struct nvmeibt_km_comm * nvmeibt_get_srv_comm(void);	// Used to call server lib functions directly after init
+void nvmeibt_server_lib_destroy(void);
+
 struct format_details;
 int nvmeibt_toma_get_status_str(enum nvmeibs_toma_status_type status_type, struct nvmeibt_Str *out);
 void nvmeibt_toma_udev_event_processing_end(struct nvmeibt_udev_event_info *udev_event_info);

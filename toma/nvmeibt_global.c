@@ -936,7 +936,7 @@ void nvmeibt_global_idle_time_activities(void)
 	nvmeibt_recovery_execute_scrubbing_as_needed();
 	nvmeibt_validate_alloc_free_summary_table();
 	nvmeibt_register_validate_n_active_vs_n_applied();
-	nvmeibt_netlink_queue_run();
+	nvmeibt_server_lib_consume_incomming_srvr_msgs();
 	nvmeibt_rpc_run();
 	nvmeibt_wq_stuck_pthread_check();
 	nvmeibt_global_call_all_seg_active_post_update_actions();

@@ -394,7 +394,6 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 
-static struct nvmeibt_km_comm	*srv_comm = NULL;
 static bool						toma_is_running_as_a_utility = 0;
 
 /* used to wakeup TOMA from timeout in select() */
@@ -649,7 +648,7 @@ bool nvmeibt_toma_is_in_shutdown(void)
 
 int nvmeibt_send_msg_to_srv(struct km_comm_msg_hdr *msg)
 {
-	return nvmeib_srvr_api_lib_send_async_msg_to_server(srv_comm, msg);
+	return nvmeib_srvr_api_lib_send_async_msg_to_server(nvmeibt_get_srv_comm(), msg);
 }
 
 static const char single_instance_file[] = TOMA_DIR_RUN_NVMESH "/toma.lock";
@@ -725,7 +724,7 @@ static void terminate_toma(int rv)
 
 	nvmeibt_dumper_exit();
 	nvmeibt_rpc_terminate();
-	nvmeib_srvr_api_lib_server__detach(srv_comm);	// Stop receiving msgs from server
+	nvmeib_srvr_api_lib_server__detach(nvmeibt_get_srv_comm());	// Stop receiving msgs from server
 
 	if (nvmeibt_global_get_global()) {				// Close other resources, like lock maps
 		nvmeibt_local_disk_free_all_resources();
@@ -733,10 +732,8 @@ static void terminate_toma(int rv)
 	}
 
 	free_toma_wakeup();
-
 	nvmeibt_topology_free_resources();
-
-	nvmeib_srvr_api_lib_destroy(srv_comm);
+	nvmeibt_server_lib_destroy();
 	cleanup_single_instance();
 
 	nvmeibt_wq_drain(stat_wq);
@@ -1171,7 +1168,7 @@ static int toma_wakeup_event(void)
 				toma_wakeup_wq(buf.ptr);
 				break;
 			case NVMEIBT_TOMA_WAKEUP_TYPE_NETLINK:
-				if (!is_shuttind_down) nvmeibt_netlink_queue_run();						// Dont care during shutdown
+				if (!is_shuttind_down) nvmeibt_server_lib_consume_incomming_srvr_msgs();	// Dont care during shutdown
 				break;
 			case NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA:
 				nvmeibt_kafka_toma_wakeup_dispatcher(buf.ptr);
@@ -1583,11 +1580,6 @@ int nvmeibt_toma_segment_zeroing_add_work(const struct nvmeibt_ascii_uuid *ldisk
 	return rv;
 }
 
-struct nvmeibt_km_comm * nvmeibt_get_srv_comm(void)
-{
-	return srv_comm;
-}
-
 void wakeup_format_event(const struct nvmeibt_ascii_uuid *ldisk_id,
 						 unsigned int vendor_id,
 						 const char *format_req_disk_obj_uuid_str,
@@ -1814,7 +1806,7 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 data,
 							 msg_id
 							);
-	rv = nvmeib_srvr_api_lib_send_block_msg_to_client( srv_comm, msg, buf_len, reg_ctx->client->net.host_name);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_client(nvmeibt_get_srv_comm(), msg, buf_len, reg_ctx->client->net.host_name);
 	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, msg);
 
 	NFOUT;
@@ -2828,13 +2820,9 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		N_Ef(tcvsj39, "Failed to read&parse '.nvmesh.conf'");
 		goto out;
 	}
-	srv_comm = nvmeibt_netlink_queue_init();
-	if (!srv_comm) {
-		N_Ef(djut866, "Failed to init srv_comm");
-		nvmeibt_abort(ES_FATAL);
-	}
+	nvmeibt_server_lib_create();
 	read_disks_info_from_stock_driver();
-	(void)nvmeib_srvr_api_lib_server_connect(srv_comm);
+	(void)nvmeib_srvr_api_lib_server_connect(nvmeibt_get_srv_comm());
 
 	if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0)
 		nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.

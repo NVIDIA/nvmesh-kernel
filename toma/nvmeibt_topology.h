@@ -155,8 +155,6 @@ bool nvmeibt_topology_is_disk_explicitly_excluded(struct nvmeibt_ascii_uuid *nat
 bool nvmeibt_topology_is_disk_explicitly_auto_takeover(struct nvmeibt_ascii_uuid *native_serial, unsigned int vendor_id, char *model_str, int nsid);
 void nvmeibt_topology_free_resources(void);
 void nvmeibt_topology_set_raft_long_msg_test_appendix_len(int appendix_len);
-struct nvmeibt_km_comm	*nvmeibt_netlink_queue_init(void);
-void nvmeibt_netlink_queue_run(void);
 void nvmeibt_topology_convert_serialized_topo_buf_to_wire(struct nvmeibt_Buf *wire, struct nvmeibt_Buf *serialized);
 void nvmeibt_topology_convert_wire_topo_buf_to_serialized(struct nvmeibt_Buf *serialized, const struct nvmeibt_Buf *wire, struct nvmeibt_Str *JSON_output);
 void nvmeibt_topology_build_second_global_topo_buf(BOOL is_convert_to_wire);

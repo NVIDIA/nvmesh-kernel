@@ -2113,7 +2113,7 @@ static void handle_nvmeibs_nl_msg(struct netlink_queue_elem_t *elem)
 	NFOUT;
 }
 
-void nvmeibt_netlink_queue_run(void)
+void nvmeibt_server_lib_consume_incomming_srvr_msgs(void)
 {
 	pthread_mutex_t *lock = &srvr_msg_queue.guard;
 	NFIN;
@@ -2167,10 +2167,10 @@ static int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_
 	return srvr_msg_queue_add(NULL, 'C', 0, ext);
 }
 
-struct nvmeibt_km_comm *nvmeibt_netlink_queue_init(void)
+void nvmeibt_server_lib_create(void)
 {
 	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
-	if (!smq->km_comm) {
+	if (!smq->km_comm) {	// Just protect agains double mistaken call
 		struct nvmeibt_km_comm_params par;
 		par.on_add_disk = &nvmeibt_add_disk_event_callback;
 		par.on_remove_disk = &nvmeibt_remove_disk_event_callback;
@@ -2179,9 +2179,24 @@ struct nvmeibt_km_comm *nvmeibt_netlink_queue_init(void)
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);
 		smq->km_comm = nvmeib_srvr_api_lib_create(&par);
+		if (!smq->km_comm) {
+			N_Ef(djut866, "Failed to init srv library, cannot continue");
+			nvmeibt_abort(ES_FATAL);
+		}
 	}
-	return smq->km_comm;
 }
+
+struct nvmeibt_km_comm *nvmeibt_get_srv_comm(void) { return srvr_msg_queue.km_comm; }
+
+void nvmeibt_server_lib_destroy(void) {
+	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
+	// Todo: drain list here!!!!
+	if (smq->km_comm) {
+		nvmeib_srvr_api_lib_destroy(smq->km_comm);
+		smq->km_comm = NULL;
+	}
+}
+
 /*****************************************************************************/
 
 static void store_config_and_topo_and_gpt_on_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
