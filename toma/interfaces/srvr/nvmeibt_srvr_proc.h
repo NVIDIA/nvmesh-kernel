@@ -4,7 +4,7 @@
 /* This file encapsulates communication channel Toma<-->LocalServer */
 #include "srv/nvmeibs_srv_toma_messages.h"		// Global nvmesh dir: ../../../
 
-int nvmeib_srvr_api_lib_get_fd_for_epoll(void);		// Todo: Remove me
+int nvmeib_srvr_api_lib_get_fd_for_epoll(void);		// Todo: Remove me, FD to wakeup on incomming server message
 
 /***************************** Netlink: New Toma-API vs Server, used for disk related communication */
 struct km_comm_msg_hdr {													// Will be converted internally upon send to struct nvmeib_nl_uk_comm_msg.

@@ -579,7 +579,6 @@ static void __drain_msg_list(msgs_list_t *l)
 
 void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 {
-	NFIN;
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
 		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_suicide, .on_done = NULL };
 		N_Tf(tscnlsst, "Send internal suicide message, to main thread");
@@ -588,8 +587,8 @@ void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 			N_Ef(tscnlssk, "join failed @PTHREAD, @AUTO_ERRNO", p->comm_thread);
 		}
 		p->comm_thread = 0;
-		N_Tf(tscnlssu, "Main thread down");
 	}
+	N_Tf(tscnlssu, "Main thread down");
 	__drain_msg_list(&p->msgs1);
 	__drain_msg_list(&p->msgs2);		// One of those 2 is p->msgs
 	__drain_msg_list(&p->in_progress_msgs);
@@ -601,7 +600,6 @@ void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 	NNVMEIBT_CLOSE(tscnlssp, p->spair[0]);
 	NNVMEIBT_CLOSE(tscnlssq, p->spair[1]);
 	NNVMEIBT_CLOSE(tscnlssr, p->nl_sock_fd);
-	NFOUT;
 }
 
 void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)

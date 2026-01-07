@@ -1863,12 +1863,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 			if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0) {
 				nvmeibt_abort(ES_FATAL);
 			}
-			/*
-			nvmeibt_nm_handle_local_port_gid_change(nvmeibt_get_nw_node(),
-				msg_buf->port_gid_change_msg.ib_dev,
-				msg_buf->port_gid_change_msg.port,
-				msg_buf->port_gid_change_msg.gid_str);
-			*/
+			/* nvmeibt_nm_handle_local_port_gid_change(nvmeibt_get_nw_node(), msg_buf->port_gid_change_msg.ib_dev, msg_buf->port_gid_change_msg.port, msg_buf->port_gid_change_msg.gid_str); */
 			if (1) {
 				// Reregsiter Peer NICs because of new listener
 				reregister_peer_nics();
@@ -1941,28 +1936,21 @@ out:
 
 int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
 {
-	struct nvmeibs_toma_server_proc_buf *msg_buf;
-	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int) sizeof(*msg_buf));
-	int rv = 0;
-
-	NFIN;
-	msg_buf = NNVMEIBT_BM_CALLOC(trace_topology_nvmeibt_topology_handle_local_server_event, max_len);
-	rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len, is_server_event);
+	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
+	struct nvmeibs_toma_server_proc_buf *msg_buf = NNVMEIBT_BM_CALLOC(tthlse0, max_len);
+	int rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len, is_server_event);
 	if (rv < 0) {
-		goto out;
+		N_Ef(tthlse1, "Error reading handling local server event rv=@RV!", rv);
 	} else if (*is_server_event) {
 		rv = server_handle_local_event(msg_buf, rv);
 		if (rv < 0)
-			N_Ef(hhu7876, "Error reading handling local server event rv=@RV!", rv);
+			N_Ef(tthlse2, "Error reading handling local server event rv=@RV!", rv);
 	} else {
 		rv = nvmeibt_client_handle_incoming_message(msg_buf, rv);
 		if (rv < 0)
-			N_Ef(aaski98, "Error reading client incoming message rv=@RV!", rv);
+			N_Ef(tthlse3, "Error reading client incoming message rv=@RV!", rv);
 	}
-out:
-	NNVMEIBT_BM_FREE(trace_1_topology_nvmeibt_topology_handle_local_server_event, msg_buf);
-
-	NFOUT;
+	NNVMEIBT_BM_FREE(tthlse4, msg_buf);
 	return rv;
 }
 

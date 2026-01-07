@@ -3007,7 +3007,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 					break;
 				case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS:
 					if (nvmeibt_topology_handle_local_server_event(&is_server_event) < 0) {
-						N_Ef(error_toma_run, "Error reading handling local server event!");
 						rv = -1;
 						goto out;
 					}
