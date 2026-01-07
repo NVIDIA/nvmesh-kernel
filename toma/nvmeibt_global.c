@@ -1011,11 +1011,11 @@ static bool is_core_file_new(void)
 	struct dirent		*entry;
 	char				core_full_path[256];
 	uint32_t			newest_core_timestamp_sec = 0;
-	const char			systemd_coredump_dir[] = "/var/lib/systemd/coredump/";
-	const char			ubuntu_coredump_dir[] = "/var/lib/apport/coredump/";
+	const char			systemd_coredump_dir[] = TOMA_ROOT_DIR "/var/lib/systemd/coredump/";
+	const char			ubuntu_coredump_dir[] =  TOMA_ROOT_DIR "/var/lib/apport/coredump/";
 	size_t				dir_name_len;
 	struct stat			st;
-	const char			leader_file_name[] = TOMA_LOG_DIR"/toma_leader_name";
+	const char			leader_file_name[] = TOMA_LOG_DIR "/toma_leader_name";
 	time_t				leader_file_timestamp_sec = 0;
 	bool				is_new = 0;
 	int					rc;
