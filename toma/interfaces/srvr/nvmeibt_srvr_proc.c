@@ -61,7 +61,7 @@ static int nvmeibt_toma_announce_ready(bool is_login)
 	if (rv < 0) {
 		N_Ef(nsalcb, "OOPS! Failed, fd=@FD of size @SIZEOF, rv=@RV", fd_toma2srvr, sizeof(buf), rv);
 	}
-	if (!is_login && 0) {	// Todo, properly close me
+	if (!is_login) {
 		NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
 		NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
 		NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
