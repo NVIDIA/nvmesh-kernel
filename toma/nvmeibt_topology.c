@@ -1901,8 +1901,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 		handle_client_disconnect_event(&msg_buf->client_disconnect_msg_hdr);
 		break;
 	case NVMEIBS_TOMA_WRITE_STATUS_REQ: {
-		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
-		(void)nvmeib_srvr_api_lib_fill_and_send_status_reply(nvmeibt_get_srv_comm(), &msg_buf->status_req_msg, print_status_str);
+		(void)nvmeib_srvr_api_lib_send_block_status_reply(nvmeibt_get_srv_comm(), &msg_buf->status_req_msg);
 		break;
 	}
 	case NVMEIBS_TOMA_TRIGGER_JGC:
@@ -2159,11 +2158,13 @@ void nvmeibt_server_lib_create(void)
 {
 	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
 	if (!smq->km_comm) {	// Just protect agains double mistaken call
+		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 		struct nvmeibt_km_comm_params par;
 		par.on_add_disk = &nvmeibt_add_disk_event_callback;
 		par.on_remove_disk = &nvmeibt_remove_disk_event_callback;
 		par.process_disk_info = &nvmeibt_handle_serjio_state_changed_from_nl_ctx;
 		par.process_extend_msg = &nvmeibt_add_local_clnt_msg_to_toma_nl_queue;
+		par.print_status_fn = &print_status_str;
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);
 		smq->km_comm = nvmeib_srvr_api_lib_create(&par);

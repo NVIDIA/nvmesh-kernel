@@ -20,6 +20,7 @@ struct nvmeibt_km_comm_params {									// Must fill all callbacks
 	int (*on_remove_disk)(const struct nvmeib_remove_disk *);	// Called when existing disk is removed
 	int (*process_extend_msg)(const struct nvmeib_push_extended_msg *);
 	int (*process_disk_info)(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
+	void (*print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx);
 };
 struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params *);
@@ -31,9 +32,7 @@ int	 nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *, cons
 int	 nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibt_km_comm *,       struct nvmeibs_toma_server_proc_buf *, int max_len, bool *is_server_event);	// Should be replaced by callback
 int  nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *, const struct nvmeibs_toma_client_proc_buf *, int buf_len, const char *clnt_host);	// Blocking: ask server to forward msg to a client. Server send rv returned directly
 int  nvmeibt_km_comm_get_disk_info(               struct nvmeibt_km_comm *, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
-// Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory
-int nvmeib_srvr_api_lib_fill_and_send_status_reply(struct nvmeibt_km_comm *, const struct nvmeibs_msg_s2t_toma_status_req *req,
-	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx));
+int  nvmeib_srvr_api_lib_send_block_status_reply( struct nvmeibt_km_comm *, const struct nvmeibs_msg_s2t_toma_status_req *req);	// Todo: Remove. Library should auto call this. Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory
 
 /***************************** Probe Local Hardware *******************************/
 struct nvmeibt_Str;

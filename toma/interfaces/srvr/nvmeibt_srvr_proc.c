@@ -185,8 +185,8 @@ static int __status_str_printf(void *context, const char *format, ...)			// vsnp
 	return 0;
 }
 
-int nvmeib_srvr_api_lib_fill_and_send_status_reply(struct nvmeibt_km_comm *p, const struct nvmeibs_msg_s2t_toma_status_req *req,
-	void (*your_print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx))
+static void __just_a_hack_reorder_funcions(struct nvmeibt_km_comm *p, enum nvmeibs_toma_status_type type, struct status_str_ctx* ctx);
+int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const struct nvmeibs_msg_s2t_toma_status_req *req)
 {
 	int fd;
 	char fname[256];
@@ -208,7 +208,7 @@ int nvmeib_srvr_api_lib_fill_and_send_status_reply(struct nvmeibt_km_comm *p, co
 		return -__LINE__;
 	}
 
-	your_print_status_fn(req->type, &__status_str_printf, &ctx);	// Print the status to the proc file
+	__just_a_hack_reorder_funcions(p, req->type, &ctx);
 	nvmeibt_munmap(ctx.buf, req->max_length);
 	NNVMEIBT_CLOSE(ttsrspfs9, fd);
 
@@ -478,6 +478,10 @@ static int nvmeibt_km_comm_unlock(struct nvmeibt_km_comm *p)
 	int rv = pthread_mutex_unlock(&p->guard);
 	if (rv != 0) N_Ef(kmtscl1, "Failed to unlock srv comm guard rv=@RV @AUTO_ERRNO", rv);
 	return rv;
+}
+
+static void __just_a_hack_reorder_funcions(struct nvmeibt_km_comm *p, enum nvmeibs_toma_status_type type, struct status_str_ctx* ctx) {
+	p->params.print_status_fn(type, &__status_str_printf, ctx); 	// Print the status to the proc file
 }
 
 static int start_netlink_socket(struct nvmeibt_km_comm *p)
