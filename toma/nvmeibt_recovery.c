@@ -715,7 +715,7 @@ size_t nvmeibt_recovery_serialize_nvmeibc_attach_config(struct attach_detach_wq_
 		disks_size += (node->n_disks_config * sizeof(struct nvmeibc_disk_conf));
 	}
 	size = toma_to_local_client_msg_size + hdr_size + vol_size + chunks_size + praids_size + segs_size + targets_size + nics_size + disks_size;
-	*serialized_buf_4k_aligned = NNVMEIBT_BM_ALIGNED_ALLOC(inwnk2l, PAGE_SIZE, size);
+	*serialized_buf_4k_aligned = NNVMEIBT_BM_ALIGNED_CALLOC(inwnk2l, PAGE_SIZE, size);	// Must be calloc as we dont trust the code below to fill optional fields with correct values
 	//
 	offset_of_hdr = 0;
 	offset_of_vol = offset_of_hdr + hdr_size;
@@ -801,7 +801,7 @@ size_t nvmeibt_recovery_serialize_detach_msg(struct attach_detach_wq_entry *atta
 	size_t						size;
 
 	size = sizeof(*msg) + sizeof(*config_s) + sizeof(config_s->volumes[0]);
-	*serialized_buf_4k_aligned = NNVMEIBT_BM_ALIGNED_ALLOC(txbwu4h, PAGE_SIZE, size);
+	*serialized_buf_4k_aligned = NNVMEIBT_BM_ALIGNED_CALLOC(txbwu4h, PAGE_SIZE, size);	// Must be calloc as we dont trust the code below to fill optional fields with correct values
 	msg = (struct nvmeibt_toma_to_local_client_msg *)(*serialized_buf_4k_aligned);
 	attach_params = &(msg->payload.attach_params);
 	nvmeibt_strlcpy(attach_params->vol_name, vol->from_config.client_blkdev_name, sizeof(attach_params->vol_name));
