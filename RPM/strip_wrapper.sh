@@ -5,7 +5,7 @@
 file="${@: -1}"
 ORIG_STRIP=$(rpm --eval %__strip)
 case $file in
-  *.ko|*infra_shared.so)
+  *.ko|*infra_shared.so|*nvmeibt_toma)
     _STRIP=/usr/bin/true
     ;;
   *)
