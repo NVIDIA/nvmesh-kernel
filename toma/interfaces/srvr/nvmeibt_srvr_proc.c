@@ -447,6 +447,7 @@ struct nvmeibt_km_comm {
 	msgs_list_t in_progress_msgs;	// In air messages, sent to server and awaiting reply, accessed only from main thread, or when it is dead, so no need for locks
 	disk_list_t disks;
 	pthread_mutex_t guard;			// Serialize Toma thread access
+	unsigned long unique_id_generator __attribute__((aligned(sizeof(long))));		// Ever increasing counter for msg id and others
 	int nl_sock_fd;					// Socket to which send/recv message to/from kernel server
 	int max_msg_size;				// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time
 	struct nlmsghdr *nlh;			// 1 preallocated Linux netlink msg, to avoid mallocs during send/recv
@@ -455,7 +456,6 @@ struct nvmeibt_km_comm {
 	int spair[2];					// Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
 	pthread_t comm_thread;			// main thread which processes messages
 	int error_occured;				// if != 0: Object is not operational, closing due to error. Stores error code
-	unsigned long unique_id_generator;		// Ever increasing counter for msg id and others
 };
 
 static unsigned long get_guid(struct nvmeibt_km_comm *p)
