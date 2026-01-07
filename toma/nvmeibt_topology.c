@@ -2190,10 +2190,16 @@ struct nvmeibt_km_comm *nvmeibt_get_srv_comm(void) { return srvr_msg_queue.km_co
 
 void nvmeibt_server_lib_destroy(void) {
 	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
-	// Todo: drain list here!!!!
 	if (smq->km_comm) {
+		N_Tf(djut867, "");
 		nvmeib_srvr_api_lib_destroy(smq->km_comm);
-		smq->km_comm = NULL;
+		pthread_mutex_destroy(&smq->guard);
+		while (!XDLIST_EMPTY(&smq->head)) {
+			struct netlink_queue_elem_t *elem = XDLIST_FIRST(&smq->head);
+			XDLIST_DEL(&elem->link);
+			NNVMEIBT_TOMA_FREE(djut868, elem);
+		}
+		memset(smq, 0, sizeof(*smq));
 	}
 }
 
