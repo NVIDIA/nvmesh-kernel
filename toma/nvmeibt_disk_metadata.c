@@ -528,7 +528,11 @@ void nvmeibt_disk_metadata_print_all_gpt_entries(const struct nvmeibt_disk_gpt_p
 static void update_gpt_crcs(struct nvmeibt_disk_gpt *gpt)
 {
 	// First calculate the partition entries CRC.
-	// TODO: CRC should be calculated on n_partition_entries, not max_n_entries. However, old code incorrectly set n_partition_entries to 128 instead of the correct LARGE_GPT_MAX_NUM_GPT_ENTRIES, so we keep using max_n_entries for now. Once all nodes and disks are upgraded, we can fix this.
+	/*
+	 * TODO(NVMESH-7436): CRC should be calculated on n_partition_entries, not max_n_entries.
+	 * However, code incorrectly sets n_partition_entries to 128 instead of LARGE_GPT_MAX_NUM_GPT_ENTRIES,
+	 * so we keep using max_n_entries for now.
+	 */
 	gpt->header.partition_entry_array_crc32 = crc32_seedless(gpt->entries, gpt->max_n_entries * gpt->header.size_of_partition_entry);
 	// Now set the header crc to be 0.
 	gpt->header.header_crc32 = 0;
@@ -572,7 +576,11 @@ static BOOL is_gpt_entries_crc_OK(const struct nvmeibt_disk_gpt_partition_entry 
 	int			nbytes;
 	uint32_t	upgrade_calculated_crc;
 
-	// TODO: CRC should be calculated on n_partition_entries, not max_n_entries. However, old code incorrectly set n_partition_entries to 128 instead of the correct LARGE_GPT_MAX_NUM_GPT_ENTRIES, so we keep using max_n_entries for now. Once all nodes and disks are upgraded, we can fix this.
+	/*
+	 * TODO(NVMESH-7436): CRC should be calculated on n_partition_entries, not max_n_entries.
+	 * However, code incorrectly sets n_partition_entries to 128 instead of LARGE_GPT_MAX_NUM_GPT_ENTRIES,
+	 * so we keep using max_n_entries for now.
+	 */
 	nbytes = (gpt->max_n_entries * gpt_header->size_of_partition_entry);
 	NTOMA_ASSERT(85hs7h4, nbytes <= (int)allocated_n_bytes_entries, "CRC is calculated on @INT > @SIZE_T bytes. More than allocated", nbytes, allocated_n_bytes_entries);
 
@@ -1488,7 +1496,7 @@ int nvmeibt_disk_metadata_read_disk_metadata(struct netlink_io_context *nl_ctx, 
 		N_Ef(bd8954u, "disk_metadata signature mismatch. Expected=@GPT_SIGNATURE got=@GPT_SIGNATURE pbyte_s=@POS", DISK_METADATA_SIGNATURE, disk_metadata->signature, pbyte_s);
 		goto out;
 	}
-	disk_metadata->crc32 = read_crc32;		// Restore crc32 to original value after validation passed, Open BUG NVMESH-7436
+	disk_metadata->crc32 = read_crc32;		// Restore crc32 to original value after validation passed
 	rv = 0;
 	N_Tf(vbyhduy, "Restored disk_metadata fd=@FD", fd);
 out:

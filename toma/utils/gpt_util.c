@@ -2679,6 +2679,13 @@ static int upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk
 		return 0;
 	}
 
+	// TODO(NVMESH-7436): Remove this block once ticket is fixed.
+	if (1) {
+		fprintf(stdout, COL_YELLOW "%s GPT: Blocking gpt upgrade (n_partition_entries remains %d), as it may prevent some machines from booting." COL_RESET "\n",
+			gpt_name, gpt->header.n_partition_entries);
+		return 0;
+	}
+
 	// Perform upgrade
 	old_n_partition_entries = gpt->header.n_partition_entries;
 	gpt->header.n_partition_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
