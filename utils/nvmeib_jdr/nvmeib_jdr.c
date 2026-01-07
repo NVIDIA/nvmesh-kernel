@@ -132,6 +132,11 @@ static void __jdr_s64(struct jdr* self, char const * name, int64_t value)
 #endif
 }
 
+static void __jdr_ul(struct jdr* self, char const * name, unsigned long value)
+{
+	__jdr_append_name_value(self, "%lu", name, value);
+}
+
 static void __jdr_ull(struct jdr* self, char const * name, unsigned long long value)
 {
 	__jdr_append_name_value(self, "%llu", name, value);
@@ -338,37 +343,38 @@ static struct charvec __jdr_finalize_seq(struct jdr* self)
 
 static struct jdr jdr_get_default(void)
 {
-	return (struct jdr){ .impl = {
-		.nesting = 0,
-		.is_first_value = true,
-	},
-	.ops = {
-		.null = __jdr_null,
-		.boolean = __jdr_boolean,
-		.u8 = __jdr_u8,
-		.s8 = __jdr_s8,
-		.u16 = __jdr_u16,
-		.s16 = __jdr_s16,
-		.u32 = __jdr_u32,
-		.s32 = __jdr_s32,
-		.u64 = __jdr_u64,
-		.s64 = __jdr_s64,
-		.ull = __jdr_ull,
-		.sll = __jdr_sll,
-		.ptr = __jdr_ptr,
-		.ascii = __jdr_ascii,
-		.ascii_format = __jdr_ascii_format,
-		.ascii_float = __jdr_ascii_float,
-		.bitmap = __jdr_bitmap,
-		.uuid_be = __jdr_uuid_be,
+	return (struct jdr){ 
+		.impl = {
+			.nesting = 0,
+			.is_first_value = true,
+		},
+		.ops = {
+			.null = __jdr_null,
+			.boolean = __jdr_boolean,
+			.u8 = __jdr_u8,
+			.s8 = __jdr_s8,
+			.u16 = __jdr_u16,
+			.s16 = __jdr_s16,
+			.u32 = __jdr_u32,
+			.s32 = __jdr_s32,
+			.u64 = __jdr_u64,
+			.s64 = __jdr_s64,
+			.ul  = __jdr_ul,
+			.ull = __jdr_ull,
+			.sll = __jdr_sll,
+			.ptr = __jdr_ptr,
+			.ascii = __jdr_ascii,
+			.ascii_float = __jdr_ascii_float,
+			.ascii_format = __jdr_ascii_format,
+			.bitmap = __jdr_bitmap,
+			.uuid_be = __jdr_uuid_be,
 
-		.object = __jdr_object,
-		.object_done = __jdr_object_done,
+			.object = __jdr_object,
+			.object_done = __jdr_object_done,
 
-		.array = __jdr_array,
-		.array_done = __jdr_array_done
-	}
-
+			.array = __jdr_array,
+			.array_done = __jdr_array_done
+		}
 	};
 }
 
