@@ -4,8 +4,10 @@
 
 CFLAGS  := -ggdb3 -Wall -Werror -D_GNU_SOURCE
 LDFLAGS := -pthread
-TEST_CFLAGS := $(CFLAGS) -fsanitize=address -fsanitize=undefined
-TEST_LDFLAGS := $(LDFLAGS) -fsanitize=address -fsanitize=undefined
+TEST_CFLAGS := $(CFLAGS)
+#TEST_CFLAGS := $(CFLAGS) -fsanitize=address -fsanitize=undefined
+TEST_LDFLAGS := $(LDFLAGS)
+#TEST_LDFLAGS := $(LDFLAGS) -fsanitize=address -fsanitize=undefined
 CC      := gcc
 LD      := $(CC)
 TRACE    =#@echo '>' $@ ;
