@@ -364,7 +364,11 @@ int ioctl(int fd, unsigned long int req, ...) {
 	if (req == NVME_IOCTL_ADMIN_CMD) {
 		const struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
 		struct nvme_admin_cmd *cmd =  va_arg(ap, struct nvme_admin_cmd*);
-		BUG_ON(!nvme_dev);
+		if (!nvme_dev) {
+			errno = ENOTTY;		// We presume the failure is because the device is not NVMe.
+			N_Wf(sbioctnv1, "ioctl:nvme:admin: no device found for path=@STR", path);
+			return -1;
+		}
 		N_Df(sbioctnv, "ioctl:nvme:admin opcode=@INT", cmd->opcode);
 		if (cmd->opcode == nvme_admin_identify) {
 			if (cmd->nsid == 0) {
