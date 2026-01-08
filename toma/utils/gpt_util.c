@@ -21,6 +21,7 @@
 #include "nvmeibt_uuid.h"
 #include "../nvmeibt_json_base.h"
 #include "../interfaces/log/nvmeibt_binary_tracing.h"
+#include "../interfaces/nvme/nvmeibt_nvme_defines.h"
 
 #define GPT_UTIL_VERSION	"2.0.0-dev"
 #define MAX_DEV_NAME		256
@@ -125,6 +126,9 @@ struct gpt_util_config {
 
 	// I/O options
 	enum O_DIRECT_MODE		o_direct_mode;			// O_DIRECT behavior
+
+	// Self-test mode
+	BOOL					is_self_test;			// true if running in self-test mode
 };
 
 /**
@@ -258,6 +262,94 @@ static int backup_structure_and_append_manifest(int disk_fd,
 }
 
 /**
+ * Get device serial number for validation
+ * Strategy:
+ *   1. Try NVMe controller ioctl (works for real NVMe devices and registered sandbox devices)
+ *   2. If that fails AND is_self_test mode, generate stable mock serial from path
+ * Returns 0 on success, -1 on error
+ */
+static int get_device_serial_num(int fd, struct gpt_util_config *config, char *serial_out, size_t size)
+{
+	struct nvme_id_ctrl		*id_ctrl = NULL;
+	struct nvme_admin_cmd	cmd;
+	int						rv = -1;
+	int						i;
+	int						len;
+	struct stat				st;
+
+	/* Try NVMe controller identify ioctl first */
+	id_ctrl = NNVMEIBT_BM_ALIGNED_CALLOC(trace_nvme_get_serial, PAGE_SIZE, sizeof(*id_ctrl));
+	if (!id_ctrl) {
+		N_Ef(nvme_serial_alloc_failed, "Failed to allocate buffer for NVMe identify");
+		goto fallback_to_mock;
+	}
+
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.opcode = nvme_admin_identify;
+	cmd.nsid = 0;		/* 0 = controller identify */
+	cmd.addr = (__u64)(uintptr_t)id_ctrl;
+	cmd.data_len = sizeof(*id_ctrl);
+	cmd.cdw10 = 1;		/* CNS=1 for controller identify */
+
+	rv = ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+	if (rv == 0) {
+		/* NVMe ioctl succeeded - trim whitespace from serial */
+		len = strnlen(id_ctrl->sn, sizeof(id_ctrl->sn));
+		for (i = len - 1; i >= 0; i--) {
+			if (id_ctrl->sn[i] > ' ') {
+				break;
+			}
+		}
+		len = i + 1;
+
+		if (len == 0) {
+			N_Wf(nvme_serial_empty, "NVMe controller serial is empty");
+			goto fallback_to_mock;
+		}
+
+		if ((size_t)len >= size) {
+			N_Ef(nvme_serial_too_long, "Serial number too long: @INT bytes (max @SIZE_T)", len, size - 1);
+			goto fallback_to_mock;
+		}
+
+		memcpy(serial_out, id_ctrl->sn, len);
+		serial_out[len] = '\0';
+
+		N_Tf(nvme_serial_retrieved, "NVMe controller serial: @STR (len=@INT)", serial_out, len);
+		rv = 0;
+		goto out;
+	}
+
+fallback_to_mock:
+	/* NVMe ioctl failed - only allow mock serial in self-test mode */
+	if (!config->is_self_test) {
+		N_Ef(serial_not_nvme_device, "Device is not NVMe or ioctl failed: @STR", config->device_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read NVMe controller serial number" COL_RESET "\n");
+		fprintf(stderr, "  Device: %s\n", config->device_path);
+		fprintf(stderr, "  This device may not be a valid NVMe device.\n");
+		rv = -1;
+		goto out;
+	}
+
+	/* Self-test mode - check if this is a regular file (test device) */
+	if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
+		/* Regular file (sandbox test device or test file) - generate stable mock serial */
+		SELF_TEST_generate_mock_serial_number_from_path(config->device_path, serial_out, size);
+		N_Tf(mock_serial_generated, "Generated mock serial for test file: path=@STR serial=@STR", config->device_path, serial_out);
+		rv = 0;
+		goto out;
+	}
+
+	/* Neither NVMe device nor regular file - fail */
+	N_Ef(serial_unsupported_device, "Cannot get serial for device: @STR", config->device_path);
+	rv = -1;
+
+out:
+	NNVMEIBT_BM_FREE(trace_nvme_get_serial_free, id_ctrl);
+	return rv;
+}
+
+/**
  * Create modular binary backup of critical disk structures before write
  * Creates private directory with manifest + structure files
  * Returns 0 on success, -1 on error
@@ -282,11 +374,10 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	struct nvmeibt_disk_gpt						*metadata_gpt = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
-	struct nvmeibt_disk_metadata				disk_md;
 	int											rv = -1;
 	int											n_entries_blocks;
 	uint64_t									total_backup_bytes = 0;
-	uint64_t									pbyte_s;
+	char										controller_serial_num[64] = {0};
 
 	/* Generate backup prefix: /tmp/backup_<device>_<timestamp> */
 	time(&now);
@@ -362,7 +453,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 		goto out;
 	}
 
-	/* Require disk_metadata partition with serial ID for restore validation */
+	/* Require disk_metadata partition (validates device is NVMesh formatted) */
 	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(metadata_gpt);
 	if (!disk_md_partition) {
 		N_Ef(backup_no_disk_md_partition, "Device has no disk_metadata partition");
@@ -370,16 +461,15 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 		goto out;
 	}
 
-	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
-	memset(&disk_md, 0, sizeof(disk_md));
-	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &disk_md) < 0) {
-		N_Ef(backup_read_disk_md_failed, "Failed to read disk_metadata");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read disk_metadata - device corrupted" COL_RESET "\n");
+	/* Get device serial number for restore validation */
+	if (get_device_serial_num(disk_fd, config, controller_serial_num, sizeof(controller_serial_num)) < 0) {
+		N_Ef(backup_get_serial_failed, "Failed to get device serial number");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial number - blocking backup for safety" COL_RESET "\n");
 		goto out;
 	}
 
-	/* Store serial ID in manifest for restore validation */
-	nvmeibt_Str_sprintf(manifest_json, "  \"disk_metadata_serial\": \"%s\",\n", disk_md.native_serial_str);
+	/* Store controller serial number in manifest for restore validation */
+	nvmeibt_Str_sprintf(manifest_json, "  \"controller_serial_num\": \"%s\",\n", controller_serial_num);
 	nvmeibt_Str_sprintf(manifest_json, "  \"structures\": [\n");
 
 	/* 1. Backup MBR (block 0) */
@@ -1193,6 +1283,7 @@ static int export_gpt_to_json(int disk_fd,
 	uint64_t								pbyte_s;
 	BOOL									is_mismatch = false;
 	BOOL									has_overlaps = false;
+	char									controller_serial_num[64] = {0};
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
@@ -1239,11 +1330,19 @@ static int export_gpt_to_json(int disk_fd,
 	memset(&mbr, 0, sizeof(mbr));
 	nvmeibt_disk_metadata_read_mbr_blk(NULL, disk_fd, config->pblk_size, &mbr, config->device_path, NULL);
 
+	// Get device serial number for validation
+	if (get_device_serial_num(disk_fd, config, controller_serial_num, sizeof(controller_serial_num)) < 0) {
+		N_Ef(export_get_serial_failed, "Failed to get device serial number");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial number - export blocked" COL_RESET "\n");
+		goto out;
+	}
+
 	// Start JSON with metadata
 	nvmeibt_Str_sprintf(json_output, "{\n");
 	nvmeibt_Str_sprintf(json_output, "  \"backup_timestamp\": \"%s\",\n", timestamp);
 	nvmeibt_Str_sprintf(json_output, "  \"device_path\": \"%s\",\n", config->device_path);
 	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 1 ===\": \"AUTO-DETECTED STATUS - DO NOT EDIT\",\n");
+	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_controller_serial_num\": \"%s\",\n", controller_serial_num);
 	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_mismatch_detected\": %s,\n", is_mismatch ? "true" : "false");
 	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_overlaps_detected\": %s,\n", has_overlaps ? "true" : "false");
 	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 2 ===\": \"DISK STRUCTURE DATA - EDIT WITH CAUTION\",\n");
@@ -1354,9 +1453,11 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%lx\",\n", disk_md->signature);
 
 	/* Readonly fields (from hardware - do not edit) */
-	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
 	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_nsid\": %d,\n", disk_md->nsid);
 	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_crc32\": \"0x%08x\",\n", disk_md->crc32);
+
+	/* Editable fields (safe configuration) */
+	nvmeibt_Str_sprintf(json_output, "    \"native_serial_str\": \"%s\",\n", disk_md->native_serial_str);
 
 	/* Editable fields (safe configuration) */
 	mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&disk_md->mgmt_db_uuid);
@@ -2511,6 +2612,7 @@ static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepare
 	const char *mgmt_uuid_str;
 	const char *ldisk_id;
 	const char *nguid_str;
+	const char *serial_str;
 
 	memset(prepared_dm, 0, sizeof(*prepared_dm));
 
@@ -2544,12 +2646,19 @@ static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepare
 		nvmeibt_strlcpy(prepared_dm->ldisk_id_str, current_dm->ldisk_id_str, sizeof(prepared_dm->ldisk_id_str));
 	}
 
+	/* Parse native_serial_str (now editable, not used for validation) */
+	serial_str = json_get_dict_str(disk_metadata_elem, "native_serial_str", NULL);
+	if (serial_str) {
+		nvmeibt_strlcpy(prepared_dm->native_serial_str, serial_str, sizeof(prepared_dm->native_serial_str));
+	} else {
+		nvmeibt_strlcpy(prepared_dm->native_serial_str, current_dm->native_serial_str, sizeof(prepared_dm->native_serial_str));
+	}
+
 	/* Parse WARNING fields (default to current if missing) */
 	prepared_dm->last_pba_zeroed = (uint64_t)json_get_dict_num(disk_metadata_elem, "_WARNING_last_pba_zeroed", current_dm->last_pba_zeroed);
 	prepared_dm->format_request_counter = (unsigned int)json_get_dict_num(disk_metadata_elem, "_WARNING_format_request_counter", current_dm->format_request_counter);
 
 	/* Preserve readonly fields from current disk (hardware-derived) */
-	nvmeibt_strlcpy(prepared_dm->native_serial_str, current_dm->native_serial_str, sizeof(prepared_dm->native_serial_str));
 	prepared_dm->nsid = current_dm->nsid;
 
 	/* Calculate CRC */
@@ -2579,6 +2688,10 @@ static int compare_and_show_disk_metadata_diff(const struct nvmeibt_disk_metadat
 	}
 	if (strcmp(current->ldisk_id_str, json_data->ldisk_id_str) != 0) {
 		fprintf(stdout, "  • ldisk_id_str: %s -> %s\n", current->ldisk_id_str, json_data->ldisk_id_str);
+		n_changes++;
+	}
+	if (strcmp(current->native_serial_str, json_data->native_serial_str) != 0) {
+		fprintf(stdout, "  • native_serial_str: %s -> %s\n", current->native_serial_str, json_data->native_serial_str);
 		n_changes++;
 	}
 	if (current->disk_metadata_version != json_data->disk_metadata_version) {
@@ -2682,7 +2795,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct mm_json_elem			*main_gpt_primary_elem = NULL;
 	struct mm_json_elem			*metadata_gpt_primary_elem = NULL;
 	struct mm_json_elem			*disk_metadata_elem = NULL;
-	const char					*json_serial_id = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition = NULL;
 	struct nvmeibt_disk_gpt		current_main_gpt;
@@ -2691,12 +2803,13 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct nvmeibt_disk_gpt		json_metadata_gpt;
 	struct nvmeibt_disk_metadata current_disk_md;
 	struct nvmeibt_disk_metadata prepared_disk_md;
-	struct nvmeibt_disk_metadata *disk_md = NULL;
 	int							n_main_changes = 0;
 	int							n_metadata_changes = 0;
 	int							n_disk_metadata_changes = 0;
 	int							total_changes = 0;
 	uint64_t					pbyte_s = 0;
+	char						current_serial_num[64] = {0};
+	const char					*json_serial_num = NULL;
 
 	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
@@ -2786,7 +2899,41 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	/* Step 6: Validate serial ID (REQUIRED - fail-closed for safety) */
+	/* Step 6: Validate serial number (REQUIRED - fail-closed for safety) */
+	json_serial_num = json_get_dict_str(json_root, "_READONLY_controller_serial_num", NULL);
+	if (!json_serial_num || strlen(json_serial_num) == 0) {
+		N_Ef(apply_no_serial, "JSON missing _READONLY_controller_serial_num (cannot validate device) file=@STR", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain _READONLY_controller_serial_num for device validation" COL_RESET "\n");
+		fprintf(stderr, "  This safety check prevents applying JSON to wrong device.\n");
+		rv = -1;
+		goto out;
+	}
+
+	if (get_device_serial_num(disk_fd, config, current_serial_num, sizeof(current_serial_num)) < 0) {
+		N_Ef(apply_get_serial_failed, "Failed to get device serial number");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial number - blocking apply for safety" COL_RESET "\n");
+		rv = -1;
+		goto out;
+	}
+
+	/* Compare serial numbers */
+	if (strcmp(json_serial_num, current_serial_num) != 0) {
+		N_Ef(apply_serial_mismatch, "Serial number mismatch: JSON=@STR device=@STR",
+				json_serial_num, current_serial_num);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Serial number mismatch!" COL_RESET "\n");
+		fprintf(stderr, "  JSON serial:   %s\n", json_serial_num);
+		fprintf(stderr, "  Device serial: %s\n", current_serial_num);
+		fprintf(stderr, "  This JSON is from a different device!\n");
+		rv = -1;
+		goto out;
+	}
+
+	N_Tf(apply_serial_match, "Serial number validation passed: serial=@STR", json_serial_num);
+
+	/* Step 7: Compare and show differences */
+	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
+	fprintf(stdout, "\n");
+	n_metadata_changes = compare_and_show_gpt_diff(&current_metadata_gpt, &json_metadata_gpt, "Metadata GPT");
 	disk_metadata_elem = json_get_dict_value(json_root, "disk_metadata");
 	if (!disk_metadata_elem) {
 		N_Ef(apply_no_disk_metadata, "JSON missing disk_metadata section (cannot validate device) file=@STR", config->apply_json_file);
@@ -2794,16 +2941,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		rv = -1;
 		goto out;
 	}
-
-	json_serial_id = json_get_dict_str(disk_metadata_elem, "_READONLY_native_serial_str", NULL);
-	if (!json_serial_id || strlen(json_serial_id) == 0) {
-		N_Ef(apply_no_serial, "JSON disk_metadata missing _READONLY_native_serial_str (cannot validate device) file=@STR", config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain _READONLY_native_serial_str for device validation" COL_RESET "\n");
-		fprintf(stderr, "  This safety check prevents applying JSON to wrong device.\n");
-		rv = -1;
-		goto out;
-	}
-
 	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
 	if (!disk_md_partition) {
 		N_Ef(apply_no_disk_md_partition, "Device missing disk_metadata partition (cannot validate serial) dev=@STR", config->device_path);
@@ -2811,55 +2948,14 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		rv = -1;
 		goto out;
 	}
-
 	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
-	disk_md = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_serial_check, PAGE_SIZE, sizeof(*disk_md));
 
-	if (!disk_md) {
-		N_Ef(apply_serial_alloc_failed, "Failed to allocate buffer for serial check");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Memory allocation failed" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
+	memset(&current_disk_md, 0, sizeof(current_disk_md));
+	memset(&prepared_disk_md, 0, sizeof(prepared_disk_md));
 
-	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, disk_md) < 0) {
-		N_Ef(apply_serial_read_failed, "Failed to read disk_metadata for serial validation dev=@STR", config->device_path);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial ID - blocking apply for safety" COL_RESET "\n");
-		NNVMEIBT_BM_FREE(trace_apply_serial_free, disk_md);
-		rv = -1;
-		goto out;
-	}
-
-	/* Compare serial IDs */
-	if (strcmp(json_serial_id, disk_md->native_serial_str) != 0) {
-		N_Ef(apply_serial_mismatch, "Serial ID mismatch: JSON=@STR disk=@STR",
-				json_serial_id, disk_md->native_serial_str);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Serial ID mismatch!" COL_RESET "\n");
-		fprintf(stderr, "  JSON serial:   %s\n", json_serial_id);
-		fprintf(stderr, "  Device serial: %s\n", disk_md->native_serial_str);
-		fprintf(stderr, "  This JSON is from a different device!\n");
-		NNVMEIBT_BM_FREE(trace_apply_serial_free2, disk_md);
-		rv = -1;
-		goto out;
-	}
-
-	N_Tf(apply_serial_match, "Serial ID validation passed: serial=@STR", json_serial_id);
-	NNVMEIBT_BM_FREE(trace_apply_serial_free3, disk_md);
-
-	/* Step 7: Compare and show differences */
-	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
-	fprintf(stdout, "\n");
-	n_metadata_changes = compare_and_show_gpt_diff(&current_metadata_gpt, &json_metadata_gpt, "Metadata GPT");
-	if (disk_metadata_elem && disk_md_partition) {
-		pbyte_s = disk_md_partition->pba_s * config->pblk_size;
-
-		memset(&current_disk_md, 0, sizeof(current_disk_md));
-		memset(&prepared_disk_md, 0, sizeof(prepared_disk_md));
-
-		if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) == 0 &&
-			prepare_disk_metadata_from_json(&prepared_disk_md, &current_disk_md, disk_metadata_elem) == 0) {
-			n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
-		}
+	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) == 0 &&
+		prepare_disk_metadata_from_json(&prepared_disk_md, &current_disk_md, disk_metadata_elem) == 0) {
+		n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
 	}
 
 	/* Step 8: Write if in write mode */
@@ -3077,12 +3173,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	int											i;
 	int											n_structures_restored = 0;
 	uint64_t									total_bytes_restored = 0;
-	struct nvmeibt_disk_gpt						current_main_gpt;
-	struct nvmeibt_disk_gpt						current_metadata_gpt;
-	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
-	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
-	struct nvmeibt_disk_metadata				current_disk_md;
-	uint64_t									pbyte_s;
+	char										current_serial_num[64] = {0};
 
 	fprintf(stdout, "\n=== Restoring from Modular Binary Backup ===\n");
 	fprintf(stdout, "Manifest file: %s\n", config->restore_binary_file);
@@ -3213,82 +3304,44 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 			goto out;
 		}
 
-		fprintf(stdout, "  ✓ %s (%lu bytes)\n", name, (uint64_t)st.st_size);
+		N_Tf(restore_file_size_match, "File size match: @STR size=@SIZE_T", name, (uint64_t)st.st_size);
 	}
 
-	/* Validation 2: Verify serial ID matches device (fail-closed) */
-	fprintf(stdout, "\nValidating device serial ID...\n");
+	/* Validation 2: Verify serial number matches device (fail-closed) */
+	fprintf(stdout, "\nValidating device serial number...\n");
 
-	/* Read current device serial ID */
-	memset(&current_main_gpt, 0, sizeof(current_main_gpt));
-	nvmeibt_strlcpy(current_main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(current_main_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_main_gpt,
-										  config->pba_s, config->pba_hw_e, false) < 0) {
-		N_Ef(restore_read_device_gpt_failed, "Cannot read device Main GPT for validation");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device GPT (device may not be NVMesh formatted)" COL_RESET "\n");
+	/* Get current device serial number */
+	if (get_device_serial_num(disk_fd, config, current_serial_num, sizeof(current_serial_num)) < 0) {
+		N_Ef(restore_get_serial_failed, "Failed to get device serial number");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial number - blocking restore for safety" COL_RESET "\n");
 		rv = -1;
 		goto out;
 	}
 
-	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&current_main_gpt);
-	if (!metadata_partition) {
-		N_Ef(restore_device_no_metadata, "Device has no metadata partition");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Device has no metadata partition (not a valid NVMesh device)" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
-	nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt,
-										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
-		N_Ef(restore_read_metadata_gpt_failed, "Cannot read device Metadata GPT for validation");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read Metadata GPT" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&current_metadata_gpt);
-	if (!disk_md_partition) {
-		N_Ef(restore_no_disk_md_partition, "Device has no disk_metadata partition");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Device has no disk_metadata partition" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
-	memset(&current_disk_md, 0, sizeof(current_disk_md));
-	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) < 0) {
-		N_Ef(restore_read_disk_md_failed, "Cannot read device disk_metadata for validation");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial ID - blocking restore for safety" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	/* Serial ID is mandatory for all NVMesh backups (fail-closed, no fallback) */
-	manifest_serial = json_get_dict_str(json_root, "disk_metadata_serial", NULL);
+	/* Controller serial number is mandatory for all NVMesh backups (fail-closed, no fallback) */
+	manifest_serial = json_get_dict_str(json_root, "controller_serial_num", NULL);
 	if (!manifest_serial || strlen(manifest_serial) == 0) {
-		N_Ef(restore_manifest_no_serial, "Manifest missing disk_metadata_serial field");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest missing serial ID for validation" COL_RESET "\n");
-		fprintf(stderr, "  This backup is corrupt or from a non-NVMesh device.\n");
+		N_Ef(restore_manifest_no_serial, "Manifest missing controller_serial_num field");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest missing serial number for validation" COL_RESET "\n");
+		fprintf(stderr, "  This backup is corrupt or from an old version.\n");
 		fprintf(stderr, "  Restore blocked for safety.\n");
 		rv = -1;
 		goto out;
 	}
 
-	/* Compare serial IDs (fail-closed) */
-	if (strcmp(manifest_serial, current_disk_md.native_serial_str) != 0) {
-		N_Ef(restore_serial_mismatch, "Serial ID mismatch: manifest=@STR device=@STR",
-			 manifest_serial, current_disk_md.native_serial_str);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Serial ID mismatch!" COL_RESET "\n");
+	/* Compare serial numbers (fail-closed) */
+	if (strcmp(manifest_serial, current_serial_num) != 0) {
+		N_Ef(restore_serial_mismatch, "Serial number mismatch: manifest=@STR device=@STR",
+				manifest_serial, current_serial_num);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Serial number mismatch!" COL_RESET "\n");
 		fprintf(stderr, "  Manifest serial: %s\n", manifest_serial);
-		fprintf(stderr, "  Device serial:   %s\n", current_disk_md.native_serial_str);
+		fprintf(stderr, "  Device serial:   %s\n", current_serial_num);
 		fprintf(stderr, "  This backup is from a different device!\n");
 		rv = -1;
 		goto out;
 	}
 
-	fprintf(stdout, "  ✓ Serial ID matches: %s\n", current_disk_md.native_serial_str);
+	N_Tf(restore_serial_match, "Serial number validation passed: serial=@STR", current_serial_num);
 
 	/* Validation 3: Verify PBA boundaries don't exceed device size */
 	fprintf(stdout, "\nValidating PBA boundaries...\n");
@@ -3343,7 +3396,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 			goto out;
 		}
 	}
-	fprintf(stdout, "  ✓ All structures within device boundaries (device PBA end: %lu)\n", config->pba_e);
+	N_Tf(restore_pba_boundaries_match, "All structures within device boundaries (device PBA end: @PBA_E)", config->pba_e);
 
 	/* Confirm before restore */
 	if (!confirm_write_operation(config, "Restore from modular backup")) {
@@ -3351,8 +3404,6 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		rv = 0;		/* User cancelled - not an error */
 		goto out;
 	}
-
-	fprintf(stdout, "\nRestoring structures...\n");
 
 	/* Restore each structure */
 	for (i = 0; i < structures_array->array.len; i++) {
@@ -3453,10 +3504,11 @@ static int execute_display_gpt(int disk_fd, struct gpt_util_config *config)
 }
 
 /**
- * Run GPT utility operation (normal mode - not self-test)
+ * Run GPT utility operation
  * Uses 4-phase architecture: parse, validate, setup, execute
+ * @param is_self_test: true if running in self-test mode
  */
-static int run_gpt_util_op(int argc, char *argv[])
+static int run_gpt_util_op(int argc, char *argv[], BOOL is_self_test)
 {
 	int							rv = 1;
 	int							disk_fd = -1;
@@ -3467,6 +3519,7 @@ static int run_gpt_util_op(int argc, char *argv[])
 	config.action = ACTION_DISPLAY_GPT;		// Default action
 	config.gpt_copy_option = GPT_COPY_OPTION_PRIMARY;
 	config.o_direct_mode = O_DIRECT_AUTO;	// Auto-detect O_DIRECT based on file type
+	config.is_self_test = is_self_test;		// Allow mock serials in self-test mode
 
 	if (argc < 2) {
 		print_usage(argv);
@@ -3550,7 +3603,7 @@ out:
  */
 int SELF_TEST_run_gpt_util_op(int argc, char *argv[])
 {
-	return run_gpt_util_op(argc, argv);
+	return run_gpt_util_op(argc, argv, true);		// Self-test mode
 }
 
 /**
@@ -3604,7 +3657,7 @@ int gpt_util_main(int argc, char *argv[])
 	if (is_self_test) {
 		rv = run_self_test(test_selection, quiet_mode);
 	} else {
-		rv = run_gpt_util_op(argc, argv);
+		rv = run_gpt_util_op(argc, argv, false);
 	}
 
 	nvmeibt_bm_destroy();

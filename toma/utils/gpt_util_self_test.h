@@ -16,6 +16,9 @@
 int SELF_TEST_run_gpt_util_op(int argc, char *argv[]);
 int SELF_TEST_upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_disk_gpt *gpt, const char *gpt_name);
 
+// Helper function for generating consistent mock serials in tests
+void SELF_TEST_generate_mock_serial_number_from_path(const char *device_path, char *serial_out, size_t size);
+
 // Self-test mock device constants
 #define SELF_TEST_MOCK_DEVICE_BLOCKS		2000		// 8MB at 4KB blocks (enough for nested GPT)
 #define SELF_TEST_MOCK_DEVICE_BLOCK_SIZE	4096
@@ -59,8 +62,8 @@ struct self_test_entry {
 	X(missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
 	X(overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
 	X(mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)", true) \
-	X(serial_id_mismatch, "Safety - Serial ID Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true) \
-	X(missing_serial_id, "Safety - Missing Serial ID Blocked", "gpt_util remove serial from JSON + apply (blocked)", true) \
+	X(serial_number_mismatch, "Safety - Serial Number Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true) \
+	X(missing_serial_number, "Safety - Missing Serial Number Blocked", "gpt_util remove serial from JSON + apply (blocked)", true) \
 	/* Delete Features */ \
 	X(delete_main_entry, "Delete Main GPT Entry (_delete flag)", "gpt_util export + add _delete + apply --write", false) \
 	X(delete_metadata_entry, "Delete Metadata GPT Entry (_delete in nested GPT)", "gpt_util export + delete metadata entry + apply --write", false) \
@@ -74,7 +77,7 @@ struct self_test_entry {
 	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)", false) \
 	/* Binary Backup & Restore */ \
 	X(binary_backup_restore, "Binary Backup & Restore", "gpt_util apply creates backup + restore works", false) \
-	X(backup_restore_serial_mismatch, "Backup Safety - Serial ID Mismatch Blocked", "gpt_util restore to wrong device (serial mismatch)", true) \
+	X(backup_restore_serial_mismatch, "Backup Safety - Serial Number Mismatch Blocked", "gpt_util restore to wrong device (serial mismatch)", true) \
 	X(backup_restore_missing_file, "Backup Safety - Missing Structure File Blocked", "gpt_util restore with missing file", true) \
 	X(backup_restore_corrupted_file, "Backup Safety - Corrupted File Blocked", "gpt_util restore with wrong file size", true) \
 	X(backup_restore_incomplete_manifest, "Backup Safety - Incomplete Manifest Blocked", "gpt_util restore with missing manifest fields", true) \
@@ -150,15 +153,10 @@ int SELF_TEST_end(int test_num, int result, BOOL expect_failure);
 
 /**
  * Generate a mock NVMesh disk with valid MBR and GPT structure for self-test
+ * Serial number auto-generated from filepath (e.g., "MOCK-gpt_util_self_test")
  * Returns the fd of the created device (caller must close it)
  */
 int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath);
-
-/**
- * Generate a mock NVMesh disk with custom serial ID for testing
- * Returns the fd of the created device (caller must close it)
- */
-int SELF_TEST_generate_mock_device_with_serial(const char *filepath, const char *serial_id);
 
 /**
  * Generate a mock device with MODIFIED partition name for diff testing

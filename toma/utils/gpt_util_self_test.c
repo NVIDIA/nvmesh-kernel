@@ -86,6 +86,21 @@ int SELF_TEST_end(int test_num, int result, BOOL expect_failure)
 }
 
 /**
+ * Generate mock serial number from device path (for test files only)
+ * Format: "MOCK-<8-hex-crc32>" (13 chars total, fits in 20-char NVMe serial field)
+ */
+void SELF_TEST_generate_mock_serial_number_from_path(const char *device_path, char *serial_out, size_t size)
+{
+	uint32_t hash;
+
+	/* Hash the full path to ensure uniqueness (handles long paths, similar prefixes) */
+	hash = crc32_seedless((const void *)device_path, strlen(device_path));
+
+	/* Generate stable mock serial: "MOCK-<8-char-hex>" (13 chars total, fits in 20) */
+	snprintf(serial_out, size, "MOCK-%08x", hash);
+}
+
+/**
  * Generate a mock NVMesh disk with valid MBR and GPT structure for self-test
  * Returns the fd of the created device (caller must close it)
  */
@@ -202,8 +217,8 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 			disk_metadata.format_pblk_size = pblk_size;
 			disk_metadata.format_request_counter = 1;
 
-			// Test serial ID and NGUID
-			nvmeibt_strlcpy(disk_metadata.native_serial_str, "MOCK-SERIAL-12345678", sizeof(disk_metadata.native_serial_str));
+			// Test serial ID (stored in disk_metadata - NOT used for validation)
+			nvmeibt_strlcpy(disk_metadata.native_serial_str, "TEST-SERIAL-001", sizeof(disk_metadata.native_serial_str));
 			disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
 			disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
 
@@ -238,93 +253,6 @@ out:
 		close(fd);
 	}
 	return rv;
-}
-
-/**
- * Generate a mock NVMesh disk with custom serial ID for testing
- * Returns the fd of the created device (caller must close it)
- */
-int SELF_TEST_generate_mock_device_with_serial(const char *filepath, const char *serial_id)
-{
-	int		fd;
-
-	/* Generate standard device first */
-	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(filepath);
-	if (fd < 0) {
-		return -1;
-	}
-
-	/* Now overwrite the disk_metadata with custom serial ID */
-	{
-		struct nvmeibt_disk_gpt					main_gpt;
-		struct nvmeibt_disk_gpt					metadata_gpt;
-		const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
-		const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
-		struct nvmeibt_disk_metadata			disk_metadata;
-		char									*dma_buffer = NULL;
-		int										n_bytes_write;
-		uint64_t								pbyte_s;
-
-		/* Read Main GPT to find metadata partition */
-		memset(&main_gpt, 0, sizeof(main_gpt));
-		nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
-											  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-			close(fd);
-			return -1;
-		}
-
-		metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-		if (!metadata_partition) {
-			close(fd);
-			return -1;
-		}
-
-		/* Read Metadata GPT to find disk_metadata partition */
-		memset(&metadata_gpt, 0, sizeof(metadata_gpt));
-		nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
-		if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
-											  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
-			close(fd);
-			return -1;
-		}
-
-		disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-		if (!disk_md_partition) {
-			close(fd);
-			return -1;
-		}
-
-		/* Read existing disk_metadata */
-		pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-		if (pread(fd, &disk_metadata, sizeof(disk_metadata), pbyte_s) != sizeof(disk_metadata)) {
-			close(fd);
-			return -1;
-		}
-
-		/* Modify serial ID */
-		nvmeibt_strlcpy(disk_metadata.native_serial_str, serial_id, sizeof(disk_metadata.native_serial_str));
-
-		/* Recalculate CRC */
-		disk_metadata.crc32 = 0;
-		disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
-
-		/* Write back */
-		n_bytes_write = roundup(sizeof(disk_metadata), SELF_TEST_MOCK_DEVICE_BLOCK_SIZE);
-		dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_serial_disk_md, PAGE_SIZE, n_bytes_write);
-		memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
-
-		if (pwrite(fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
-			NNVMEIBT_BM_FREE(trace_selftest_serial_disk_md_free, dma_buffer);
-			close(fd);
-			return -1;
-		}
-
-		NNVMEIBT_BM_FREE(trace_selftest_serial_disk_md_free2, dma_buffer);
-		fsync(fd);
-	}
-
-	return fd;
 }
 
 /**
@@ -441,7 +369,8 @@ int SELF_TEST_generate_mock_device_modified(const char *filepath)
 			disk_metadata.format_pblk_size = pblk_size;
 			disk_metadata.format_request_counter = 1;
 
-			nvmeibt_strlcpy(disk_metadata.native_serial_str, "MOCK-SERIAL-12345678", sizeof(disk_metadata.native_serial_str));
+			// Test serial ID (stored in disk_metadata - NOT used for validation)
+			nvmeibt_strlcpy(disk_metadata.native_serial_str, "TEST-SERIAL-001", sizeof(disk_metadata.native_serial_str));
 			disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
 			disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
 
@@ -1320,14 +1249,19 @@ DEFINE_TEST(apply_write)
 		}
 	}
 
-	// Export A, modify JSON device_path, apply to B
+	// Export A, modify JSON to point to B, apply to B
 	if (rv == 0) {
 		SELF_TEST_ARGV("-a", device_a, "-J", TEST_JSON_PATH("write_test"));
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 	}
 	if (rv == 0) {
 		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("write_test"));
-		if (!json_root || json_set_dict_str(json_root, "device_path", device_b) < 0 ||
+		char mock_serial_b[64];
+
+		SELF_TEST_generate_mock_serial_number_from_path(device_b, mock_serial_b, sizeof(mock_serial_b));
+		if (!json_root ||
+			json_set_dict_str(json_root, "device_path", device_b) < 0 ||
+			json_set_dict_str(json_root, "_READONLY_controller_serial_num", mock_serial_b) < 0 ||
 			SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("write_test")) < 0) {
 			rv = -1;
 		}
@@ -1415,23 +1349,23 @@ DEFINE_TEST(mismatch_blocking)
 	return rv;
 }
 
-DEFINE_TEST(serial_id_mismatch)
+DEFINE_TEST(serial_number_mismatch)
 {
 	int			rv = 0;
 	const char	*device_a = TOMA_ROOT_DIR "tmp/gpt_serial_device_a";
 	const char	*device_b = TOMA_ROOT_DIR "tmp/gpt_serial_device_b";
 	int			fd;
 
-	/* Create device A with serial "MOCK-SERIAL-AAAA" */
-	fd = SELF_TEST_generate_mock_device_with_serial(device_a, "MOCK-SERIAL-AAAA");
+	/* Create device A */
+	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(device_a);
 	if (fd < 0) {
 		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device A" COL_RESET "\n");
 		return -1;
 	}
 	close(fd);
 
-	/* Create device B with serial "MOCK-SERIAL-BBBB" */
-	fd = SELF_TEST_generate_mock_device_with_serial(device_b, "MOCK-SERIAL-BBBB");
+	/* Create device B */
+	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(device_b);
 	if (fd < 0) {
 		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device B" COL_RESET "\n");
 		unlink(device_a);
@@ -1470,7 +1404,7 @@ DEFINE_TEST(serial_id_mismatch)
 	return rv;
 }
 
-DEFINE_TEST(missing_serial_id)
+DEFINE_TEST(missing_serial_number)
 {
 	int rv = 0;
 
@@ -1479,9 +1413,9 @@ DEFINE_TEST(missing_serial_id)
 	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("missing_serial"));
 	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
 
-	/* Remove disk_metadata section from JSON */
+	/* Remove controller_serial_num from JSON (now at root level) */
 	if (rv == 0) {
-		rv = SELF_TEST_remove_json_field(TEST_JSON_PATH("missing_serial"), "disk_metadata");
+		rv = SELF_TEST_remove_json_field(TEST_JSON_PATH("missing_serial"), "_READONLY_controller_serial_num");
 	}
 
 	/* Try to apply - should be BLOCKED */
@@ -2516,16 +2450,16 @@ DEFINE_TEST(backup_restore_serial_mismatch)
 	int							fd_a;
 	int							fd_b;
 
-	/* Create device A with serial "BACKUP-SERIAL-AAA" */
-	fd_a = SELF_TEST_generate_mock_device_with_serial(device_a, "BACKUP-SERIAL-AAA");
+	/* Create device A */
+	fd_a = SELF_TEST_generate_and_open_mock_nvmesh_disk(device_a);
 	if (fd_a < 0) {
 		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device A" COL_RESET "\n");
 		return -1;
 	}
 	close(fd_a);
 
-	/* Create device B with different serial "BACKUP-SERIAL-BBB" */
-	fd_b = SELF_TEST_generate_mock_device_with_serial(device_b, "BACKUP-SERIAL-BBB");
+	/* Create device B */
+	fd_b = SELF_TEST_generate_and_open_mock_nvmesh_disk(device_b);
 	if (fd_b < 0) {
 		fprintf(stdout, COL_RED_BOLD "SETUP FAILED: Could not create device B" COL_RESET "\n");
 		unlink(device_a);
@@ -2686,12 +2620,18 @@ DEFINE_TEST(backup_restore_incomplete_manifest)
 	/* Create incomplete manifest manually (missing "structures" field) */
 	fd = open(TEST_JSON_PATH("incomplete_manifest"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd >= 0) {
-		const char *json_content =
+		char mock_serial[64];
+		char json_content[512];
+
+		SELF_TEST_generate_mock_serial_number_from_path(device_path, mock_serial, sizeof(mock_serial));
+		snprintf(json_content, sizeof(json_content),
 			"{\n"
 			"  \"backup_timestamp\": \"test\",\n"
-			"  \"device_path\": \"" TOMA_ROOT_DIR "tmp/gpt_backup_incomplete\",\n"
-			"  \"block_size\": 4096\n"
-			"}\n";
+			"  \"device_path\": \"%s\",\n"
+			"  \"block_size\": 4096,\n"
+			"  \"controller_serial_num\": \"%s\"\n"
+			"}\n",
+			device_path, mock_serial);
 		write(fd, json_content, strlen(json_content));
 		close(fd);
 		fprintf(stdout, "Created incomplete manifest (missing 'structures' field)\n");
@@ -2831,14 +2771,19 @@ DEFINE_TEST(backup_restore_empty_structures)
 	/* Create manifest with empty structures array */
 	fd = open(TEST_JSON_PATH("empty_structures"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd >= 0) {
-		const char *json_content =
+		char mock_serial[64];
+		char json_content[512];
+
+		SELF_TEST_generate_mock_serial_number_from_path(device_path, mock_serial, sizeof(mock_serial));
+		snprintf(json_content, sizeof(json_content),
 			"{\n"
 			"  \"backup_timestamp\": \"test\",\n"
-			"  \"device_path\": \"" TOMA_ROOT_DIR "tmp/gpt_backup_empty\",\n"
+			"  \"device_path\": \"%s\",\n"
 			"  \"block_size\": 4096,\n"
-			"  \"disk_metadata_serial\": \"MOCK-SERIAL-12345678\",\n"
+			"  \"controller_serial_num\": \"%s\",\n"
 			"  \"structures\": []\n"
-			"}\n";
+			"}\n",
+			device_path, mock_serial);
 		write(fd, json_content, strlen(json_content));
 		close(fd);
 		fprintf(stdout, "Created manifest with empty structures array (structures: [])\n");
@@ -3144,7 +3089,9 @@ DEFINE_TEST(json_add_partition_entry)
 		disk_metadata.signature = DISK_METADATA_SIGNATURE;
 		disk_metadata.format_pblk_size = pblk_size;
 		disk_metadata.format_request_counter = 1;
-		nvmeibt_strlcpy(disk_metadata.native_serial_str, "MOCK-SERIAL-12345678", sizeof(disk_metadata.native_serial_str));
+
+		// Test serial ID
+		nvmeibt_strlcpy(disk_metadata.native_serial_str, "TEST-SERIAL-001", sizeof(disk_metadata.native_serial_str));
 		disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
 		disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
 		disk_metadata.crc32 = 0;
