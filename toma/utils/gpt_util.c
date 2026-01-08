@@ -2285,8 +2285,8 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 		struct nvmeibt_disk_gpt_partition_entry	temp_entry;
 
 		if (entry_elem->type != JSON_E_DICT) {
-			N_Wf(parse_entry_skip_not_dict, "Skipping entry @INT (not a dict)", j);
-			continue;
+			N_Ef(parse_gpt_entry_not_dict, "Entry @INT in @STR is not a dict", j, section_name);
+			return -1;
 		}
 
 		// Get the index field to know where to place this entry
@@ -2300,16 +2300,16 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 		}
 
 		if (entry_index < 0 || entry_index >= gpt->max_n_entries) {
-			N_Wf(parse_entry_bad_index, "Entry @INT has invalid index=@INT (max=@INT), skipping",
-				 j, entry_index, gpt->max_n_entries);
-			continue;
+			N_Ef(parse_entry_bad_index, "Entry @INT in @STR has invalid index=@INT (max=@INT)",
+				 j, section_name, entry_index, gpt->max_n_entries);
+			return -1;
 		}
 
 		// Parse the entry (returns: 0=normal, 1=delete, -1=error)
 		rv = parse_gpt_entry_from_json(&temp_entry, entry_elem);
 		if (rv < 0) {
-			N_Wf(parse_entry_failed, "Failed to parse entry @INT, skipping", j);
-			continue;
+			N_Ef(parse_entry_failed, "Failed to parse entry @INT in @STR", j, section_name);
+			return -1;
 		} else if (rv == 1) {
 			// Entry marked for deletion - leave gpt->entries[entry_index] as zero (unused)
 			N_Tf(parse_entry_delete, "Entry @INT marked for deletion (will be removed)", entry_index);
@@ -3124,7 +3124,10 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		struct stat				st;
 
 		if (structure_elem->type != JSON_E_DICT) {
-			continue;
+			N_Ef(restore_validate1_not_dict, "Structure @INT is not a dict", i);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Corrupt manifest - structure %d is not a dict" COL_RESET "\n", i);
+			rv = -1;
+			goto out;
 		}
 
 		name = json_get_dict_str(structure_elem, "name", NULL);
@@ -3132,7 +3135,10 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
 
 		if (!name || !file || n_blocks == 0) {
-			continue;
+			N_Ef(restore_validate1_missing_field, "Structure @INT missing required field (name/file/n_blocks)", i);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Corrupt manifest - structure %d has missing fields" COL_RESET "\n", i);
+			rv = -1;
+			goto out;
 		}
 
 		/* Guard against integer overflow in size calculation */
@@ -3255,15 +3261,21 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		structure_elem = structures_array->array.elements[i];
 
 		if (structure_elem->type != JSON_E_DICT) {
-			continue;
+			N_Ef(restore_validate3_not_dict, "Structure @INT is not a dict", i);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Corrupt manifest - structure %d is not a dict" COL_RESET "\n", i);
+			rv = -1;
+			goto out;
 		}
 
 		name = json_get_dict_str(structure_elem, "name", NULL);
 		pba_start = (uint64_t)json_get_dict_num(structure_elem, "pba_start", -1);
 		n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
 
-		if (!name || n_blocks == 0) {
-			continue;
+		if (!name || pba_start == (uint64_t)-1 || n_blocks == 0) {
+			N_Ef(restore_validate3_missing_field, "Structure @INT missing required field (name/pba_start/n_blocks)", i);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Corrupt manifest - structure %d has missing fields" COL_RESET "\n", i);
+			rv = -1;
+			goto out;
 		}
 
 		/* Guard against integer overflow in PBA calculation */
@@ -3310,8 +3322,10 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		uint64_t				n_blocks;
 
 		if (structure_elem->type != JSON_E_DICT) {
-			N_Wf(restore_skip_bad_structure, "Skipping non-dict structure at index @INT", i);
-			continue;
+			N_Ef(restore_loop_not_dict, "Structure @INT is not a dict (validation should have caught this)", i);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Internal error - structure %d is not a dict" COL_RESET "\n", i);
+			rv = -1;
+			goto out;
 		}
 
 		name = json_get_dict_str(structure_elem, "name", NULL);
@@ -3319,9 +3333,11 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		pba_start = (uint64_t)json_get_dict_num(structure_elem, "pba_start", -1);
 		n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
 
-		if (!name || !file || n_blocks == 0) {
-			N_Wf(restore_skip_incomplete_structure, "Skipping structure @INT with missing fields", i);
-			continue;
+		if (!name || !file || pba_start == (uint64_t)-1 || n_blocks == 0) {
+			N_Ef(restore_loop_missing_field, "Structure @INT missing required field (validation should have caught this)", i);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Internal error - structure %d has missing fields" COL_RESET "\n", i);
+			rv = -1;
+			goto out;
 		}
 
 		fprintf(stdout, "  [%d/%d] %s (PBA %lu, %lu blocks)...\n",
