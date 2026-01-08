@@ -3049,11 +3049,18 @@ void nvmeibt_local_disk_stop_wq(struct nvmeibt_local_disk *local_disk)
 {
 	NFIN;
 	if (local_disk) {
-		// drain the wq of this disk, to avoid anything from attempting execution on it.
-		nvmeibt_wq_drain(local_disk->wq);
-		nvmeibt_wq_destroy(local_disk->wq);
-		local_disk->wq = NULL;
-		nvmeib_hash_delete_ascii_str(nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str, nvmeibt_local_disk_UUID_str(local_disk));
+		if (local_disk->wq) {
+			N_Tf(4cf8sk2, "ldisk=@STR wq=@PTR", nvmeibt_local_disk_UUID_str(local_disk), local_disk->wq);
+#if 0	// Do not delete ldisk_wq. It is used by stock and non-stock
+			// drain the wq of this disk, to avoid anything from attempting execution on it.
+			nvmeibt_wq_drain(local_disk->wq);
+			nvmeibt_wq_destroy(local_disk->wq);
+			local_disk->wq = NULL;
+			nvmeib_hash_delete_ascii_str(nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str, nvmeibt_local_disk_UUID_str(local_disk));
+#endif	// #if 0	// Do not delete ldisk_wq. It is used by stock and non-stock
+		} else {
+			N_Wf(82njkaow, "ldisk=@STR wq=NULL", nvmeibt_local_disk_UUID_str(local_disk));
+		}
 	}
 	NFOUT;
 }
