@@ -604,7 +604,8 @@ static BOOL is_gpt_entries_crc_OK(const struct nvmeibt_disk_gpt_partition_entry 
 	}
 
 	// Backward compatibility check 2: buggy n_partition_entries in gpt header; should be max_n_entries
-	if (gpt->max_n_entries == LARGE_GPT_MAX_NUM_GPT_ENTRIES && gpt_header->n_partition_entries != gpt->max_n_entries) {
+	// TODO(NVMESH-7436): Add back this warning once ticket is fixed.
+	if (0 && gpt->max_n_entries == LARGE_GPT_MAX_NUM_GPT_ENTRIES && gpt_header->n_partition_entries != gpt->max_n_entries) {
 		N_Wf(trace_disk_metadata_buggy_n_partition_entries_detected,
 				"@STR-@STR-GPT on @STR has n_partition_entries=@INT instead of max_n_entries=@INT. This may fail external tools. Consider updating n_partition_entries via `nvmeibt_toma gpt_util --upgrade-gpt`.",
 				gpt->main_or_metadata, gpt_primary_or_alternate_or_mem_str,
