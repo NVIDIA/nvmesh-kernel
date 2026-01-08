@@ -2600,6 +2600,37 @@ static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
 	return 0;
 }
 
+// Helper: Parse UUID from JSON or preserve current value
+static void json_parse_uuid_or_preserve(union nvmeib_uuid *dst,
+										struct mm_json_elem *json_elem,
+										const char *key,
+										const union nvmeib_uuid *current_val)
+{
+	const char *uuid_str = json_get_dict_str(json_elem, key, NULL);
+
+	if (uuid_str) {
+		nvmeibt_urn_uuid_str_to_union_uuid(dst, uuid_str);
+	} else {
+		*dst = *current_val;		// Preserve if missing
+	}
+}
+
+// Helper: Parse string from JSON or preserve current value
+static void json_parse_str_or_preserve(char *dst,
+									   size_t dst_size,
+									   struct mm_json_elem *json_elem,
+									   const char *key,
+									   const char *current_val)
+{
+	const char *str = json_get_dict_str(json_elem, key, NULL);
+
+	if (str) {
+		nvmeibt_strlcpy(dst, str, dst_size);
+	} else {
+		nvmeibt_strlcpy(dst, current_val, dst_size);		// Preserve if missing
+	}
+}
+
 /**
  * Prepare disk_metadata from JSON section
  * Parses JSON, preserves readonly fields from current, returns prepared structure
@@ -2609,50 +2640,21 @@ static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepare
 											const struct nvmeibt_disk_metadata *current_dm,
 											struct mm_json_elem *disk_metadata_elem)
 {
-	const char *mgmt_uuid_str;
-	const char *ldisk_id;
-	const char *nguid_str;
-	const char *serial_str;
-
 	memset(prepared_dm, 0, sizeof(*prepared_dm));
 
 	/* Initialize static fields */
 	prepared_dm->signature = DISK_METADATA_SIGNATURE;
 
 	/* Parse editable fields from JSON (default to current if missing) */
-	mgmt_uuid_str = json_get_dict_str(disk_metadata_elem, "mgmt_db_uuid", NULL);
-	if (mgmt_uuid_str) {
-		nvmeibt_urn_uuid_str_to_union_uuid(&prepared_dm->mgmt_db_uuid, mgmt_uuid_str);
-	} else {
-		prepared_dm->mgmt_db_uuid = current_dm->mgmt_db_uuid;		/* Preserve if missing */
-	}
-
-	nguid_str = json_get_dict_str(disk_metadata_elem, "native_nguid", NULL);
-	if (nguid_str) {
-		nvmeibt_urn_uuid_str_to_union_uuid(&prepared_dm->native_nguid_unused, nguid_str);
-	} else {
-		prepared_dm->native_nguid_unused = current_dm->native_nguid_unused;		/* Preserve if missing */
-	}
+	json_parse_uuid_or_preserve(&prepared_dm->mgmt_db_uuid, disk_metadata_elem, "mgmt_db_uuid", &current_dm->mgmt_db_uuid);
+	json_parse_uuid_or_preserve(&prepared_dm->native_nguid_unused, disk_metadata_elem, "native_nguid", &current_dm->native_nguid_unused);
+	json_parse_str_or_preserve(prepared_dm->ldisk_id_str, sizeof(prepared_dm->ldisk_id_str), disk_metadata_elem, "ldisk_id_str", current_dm->ldisk_id_str);
+	json_parse_str_or_preserve(prepared_dm->native_serial_str, sizeof(prepared_dm->native_serial_str), disk_metadata_elem, "native_serial_str", current_dm->native_serial_str);
 
 	prepared_dm->disk_metadata_version = (unsigned int)json_get_dict_num(disk_metadata_elem, "disk_metadata_version", current_dm->disk_metadata_version);
 	prepared_dm->format_pblk_size = (unsigned int)json_get_dict_num(disk_metadata_elem, "format_pblk_size", current_dm->format_pblk_size);
 	prepared_dm->format_metadata_size = (unsigned int)json_get_dict_num(disk_metadata_elem, "format_metadata_size", current_dm->format_metadata_size);
 	prepared_dm->is_md_supported = json_get_dict_bool(disk_metadata_elem, "is_md_supported", current_dm->is_md_supported);
-
-	ldisk_id = json_get_dict_str(disk_metadata_elem, "ldisk_id_str", NULL);
-	if (ldisk_id) {
-		nvmeibt_strlcpy(prepared_dm->ldisk_id_str, ldisk_id, sizeof(prepared_dm->ldisk_id_str));
-	} else {
-		nvmeibt_strlcpy(prepared_dm->ldisk_id_str, current_dm->ldisk_id_str, sizeof(prepared_dm->ldisk_id_str));
-	}
-
-	/* Parse native_serial_str (now editable, not used for validation) */
-	serial_str = json_get_dict_str(disk_metadata_elem, "native_serial_str", NULL);
-	if (serial_str) {
-		nvmeibt_strlcpy(prepared_dm->native_serial_str, serial_str, sizeof(prepared_dm->native_serial_str));
-	} else {
-		nvmeibt_strlcpy(prepared_dm->native_serial_str, current_dm->native_serial_str, sizeof(prepared_dm->native_serial_str));
-	}
 
 	/* Parse WARNING fields (default to current if missing) */
 	prepared_dm->last_pba_zeroed = (uint64_t)json_get_dict_num(disk_metadata_elem, "_WARNING_last_pba_zeroed", current_dm->last_pba_zeroed);
