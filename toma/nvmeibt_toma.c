@@ -2763,7 +2763,9 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 
 	/* any attempts to use _T before this point will not output anything. */
 	prepare_all_traces();
-	read_rpc_config_from_persist(true);
+	nvmeibt_global_init();
+	nvmeibt_common_init();
+	read_rpc_config_from_persist(true);				// Durinng parameters settings checks global topology, so it must be initialized
 	log_snapshotting_set_active_log_levels("High");	// Only after reading the RPC config, since we overide the persist
 	/* set main thread id */
 	nvmeibt_toma_set_main_thread();
@@ -2772,8 +2774,6 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		N_Ef(fjju887, "Failed to setup internal toma wakeup");
 		goto out;
 	}
-	nvmeibt_global_init();
-	nvmeibt_common_init();
 	// initialize raft
 	if (nvmeibt_raft_one_time_init() != 0) {
 		N_Ef(qqwo009, "Failed to do raft one time init");
