@@ -2258,51 +2258,35 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 	NFOUT;
 }
 
-static void nvmeibt_toma_print_status(void)
+static void nvmeibt_toma_print_status(void)		/* Used for printing status - We create a seperate file for this */
 {
-	/* Used for printing status - We create a seperate file for this */
 	int							rv;
 	struct timespec				now;
 	struct tm					timeinfo;
 	char						short_time_str[32];
-	char						*status_filename = NULL;
-	struct nvmeibt_Str			*status_str_ctx = NULL;
-	const char					*dirname;
-	struct stat_wq_entry		*stat_offload_task;
+	struct stat_wq_entry		*task = NNVMEIBT_BM_CALLOC(ttps01, sizeof(*task));
+	char						*status_filename = task->status_filename;
 
-	NFIN;
+	task->status_str = NNVMEIBT_STR_ALLOC(ttps02);
+	task->wq_entry.type = "SAVE_STAT";
+	task->wq_entry.execute = write_stat_wrapper;
+	task->wq_entry.free = write_stat_freer;
 
-	stat_offload_task = NNVMEIBT_BM_CALLOC(trace_toma_nvmeibt_toma_print_status, sizeof(*stat_offload_task));
-	stat_offload_task->status_str = NNVMEIBT_STR_ALLOC(trace_1_toma_nvmeibt_toma_print_status);
-
-	stat_offload_task->wq_entry.type = "SAVE_STAT";
-	stat_offload_task->wq_entry.execute = write_stat_wrapper;
-	stat_offload_task->wq_entry.free = write_stat_freer;
-
-	status_str_ctx = stat_offload_task->status_str;
-	status_filename = stat_offload_task->status_filename;
-
-	dirname = nvmeibt_toma_get_log_dir_name();
 	getnstimeofday_real(&now);
 	localtime_r(&now.tv_sec, &timeinfo);
 	strftime(short_time_str, sizeof(short_time_str), "%Y_%m_%d_%H_%M_%S", &timeinfo);
-	rv = snprintf(status_filename, PATH_MAX, "%s/toma_%s.stat", dirname, short_time_str);
-	if (rv >= PATH_MAX) {
+	rv = snprintf(status_filename, PATH_MAX, "%s/toma_%s.stat", nvmeibt_toma_get_log_dir_name(), short_time_str);
+	if (rv >= (int)sizeof(task->status_filename)) {
 		N_Wf(t_11_tomatoma, "status filename was truncated because too long"); // failed to compile filename string
-		write_stat_freer(&stat_offload_task->wq_entry);
-		goto out;
+		write_stat_freer(&task->wq_entry);
+		return;
 	}
 
-	print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, status_str_ctx);
-
-	if (stat_add_work(&(stat_offload_task->wq_entry)) != 0) {
+	print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, task->status_str);
+	if (stat_add_work(&task->wq_entry) != 0) {
 		N_Ef(error_2_toma_nvmeibt_toma_print_status, "Unable to add stat offload task to WQ!");
-		write_stat_freer(&stat_offload_task->wq_entry);
-		goto out;
+		write_stat_freer(&task->wq_entry);
 	}
-
-out:
-	NFOUT;
 }
 
 int nvmeibt_toma_get_status_str(enum nvmeibs_toma_status_type status_type, struct nvmeibt_Str *out)
