@@ -1241,21 +1241,6 @@ int nvmeibt_toma_leader_add_work(struct nvmeibt_wq_entry *e)
 	return rv;
 }
 
-static int stat_add_work(struct nvmeibt_wq_entry *e)
-{
-	int rv;
-
-	NFIN;
-	if (stat_wq) {
-		nvmeibt_wq_addw(stat_wq, e);
-		rv = 0;
-	}
-	else
-		rv = -1;
-	NFOUT;
-	return rv;
-}
-
 static void local_disk_wq_entry_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct local_disk_wq_entry_wrapper_entry *entry;
@@ -2268,6 +2253,7 @@ static void nvmeibt_toma_print_status(void)		/* Used for printing status - We cr
 	char						*status_filename = task->status_filename;
 
 	task->status_str = NNVMEIBT_STR_ALLOC(ttps02);
+	NNVMEIBT_STR_RESIZE_BUF(ttps03, task->status_str, 1 << 25); // 32[mb]. Maybe consider calculating the needed size.
 	task->wq_entry.type = "SAVE_STAT";
 	task->wq_entry.execute = write_stat_wrapper;
 	task->wq_entry.free = write_stat_freer;
@@ -2277,14 +2263,17 @@ static void nvmeibt_toma_print_status(void)		/* Used for printing status - We cr
 	strftime(short_time_str, sizeof(short_time_str), "%Y_%m_%d_%H_%M_%S", &timeinfo);
 	rv = snprintf(status_filename, PATH_MAX, "%s/toma_%s.stat", nvmeibt_toma_get_log_dir_name(), short_time_str);
 	if (rv >= (int)sizeof(task->status_filename)) {
-		N_Wf(t_11_tomatoma, "status filename was truncated because too long"); // failed to compile filename string
+		N_Wf(ttps04, "status filename was truncated because too long"); // failed to compile filename string
 		write_stat_freer(&task->wq_entry);
 		return;
 	}
 
 	print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, task->status_str);
-	if (stat_add_work(&task->wq_entry) != 0) {
-		N_Ef(error_2_toma_nvmeibt_toma_print_status, "Unable to add stat offload task to WQ!");
+	N_Tf(ttps05, "Status generated @ZU[kb]", (task->status_str->str_len >> 10));
+	if (stat_wq) {
+		nvmeibt_wq_addw(stat_wq, &task->wq_entry);
+	} else {
+		N_Ef(ttps06, "Unable to add stat offload task to WQ!");
 		write_stat_freer(&task->wq_entry);
 	}
 }

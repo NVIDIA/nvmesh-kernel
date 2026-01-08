@@ -8,7 +8,7 @@ static inline size_t Str_get_allocated_size(const struct nvmeibt_Str *this)
 	return this->allocated_size;
 }
 
-#define N_VERIFY_SIZE(name, this) NTOMA_ASSERT(name, Str_get_allocated_size(this) < (100 << 20), "nvmeibt_str->allocated_size=@SIZEOF", Str_get_allocated_size(this));
+#define N_VERIFY_SIZE(name, this) NTOMA_ASSERT(name, Str_get_allocated_size(this) < (128 << 20), "nvmeibt_str->allocated_size=@SIZEOF", Str_get_allocated_size(this));
 
 void nvmeibt_Str_clone(struct nvmeibt_Str *dst, const struct nvmeibt_Str *src)
 {
