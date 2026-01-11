@@ -516,7 +516,7 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 	}
 	*cfg = NULL;	// Configuration object is now owned, and freed, by the 'rv' instance.
 	// rd_kafka_conf_set_log_cb(rv, logger);
-	rd_kafka_set_log_level(rv, LOG_DEBUG);
+	rd_kafka_set_log_level(rv, LOG_NOTICE);
 	N_Tf(tkckno1, "@STR[@STR]=@PTR, topic=@STR", (is_producer ? "prod" : "cons"), rd_kafka_name(rv), rv, topic_name);
 
 	if (!is_producer) {	// For consumers, attach polling method (high-level consumer API)
