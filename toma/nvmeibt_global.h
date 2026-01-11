@@ -17,8 +17,6 @@
 #include "nvmeibt_node.h"
 #include "nvmeibt_topology.h"
 
-#define TOMA_SW_VER_STRING				"SW_VER"
-
 #define NVMEIBT_PERSISTENCY_CACHE_DIR TOMA_DIR_OPT_NVMESH "/toma/"
 extern const char	toma_persistency_file_name[];
 

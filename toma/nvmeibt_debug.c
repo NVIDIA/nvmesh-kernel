@@ -32,25 +32,27 @@ static int num_tracer_sections = 0;
 		for ((t) = tracer_sections[__section_idx].start; \
 			 (t) < tracer_sections[__section_idx].end; ++(t))
 
-#define TRACE_LIST_FILENAME				"/tracelist.txt"
-#define TRACE_CONFIG_FILENAME			"/toma_trace.config"
+#define TRACE_LIST_FILENAME				"/tracelist.txt"			// Toma outputs all its traces so developer knows which traces he can turn on/off
+#define TRACE_CONFIG_FILENAME			"toma_trace.config"
 #define	TOMA_CONFIG_PARAMS_FULL_PATH	TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config"
-#define STACK_SIZE 100
+#define TOMA_SW_VER_STRING				"SW_VER"
 
 bool trace_config_updated_by_toma = false;
 char *config_params_full_path = TOMA_CONFIG_PARAMS_FULL_PATH;
 int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n_matches);		// Load parameters from config line
 int nvmeibt_debug_config_params_parse(char *line, int *n_matches);
 
-#define SANITIZE_STR_END(str, len) \
-		len = strlen(str); \
-		while (((str[len - 1] == '\n') || (str[len - 1] == '\r')) && (len > 0)) \
-			str[--len] = '\0'
+static inline size_t SANITIZE_STR_END(char *str)
+{
+	size_t len = strlen(str);
+	while ((len > 0) && (str[len - 1] <= ' '))		// Remove all trailing invisible characters.
+		str[--len] = '\0';
+	return len;
+}
 
 static void try_to_read_sw_ver(char *str, uint32_t *sw_ver) {
-	size_t	line_len;
 	if (!strncmp(str, TOMA_SW_VER_STRING, sizeof(TOMA_SW_VER_STRING) - 1)) {
-		SANITIZE_STR_END(str, line_len);
+		const size_t line_len = SANITIZE_STR_END(str);
 		if (line_len > (strlen(TOMA_SW_VER_STRING) + 3))
 			sscanf(str + strlen(TOMA_SW_VER_STRING) + 1, "%x", sw_ver);
 	}
@@ -133,7 +135,7 @@ void read_rpc_config_from_persist(bool is_initial_read)
 		goto continue_reading;
 #endif
 	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-		N_WTf(hj3a05n, "SW_VER mismatch");
+		N_WTf(hj3a05n, "SW_VER mismatch @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 		if (is_initial_read)
 			nvmeibt_abort(ES_FATAL);
 		else
@@ -146,8 +148,7 @@ void read_rpc_config_from_persist(bool is_initial_read)
 		size_t	line_len;
 
 continue_reading:
-		SANITIZE_STR_END(config, line_len);
-		line_len = strlen(config);
+		line_len = SANITIZE_STR_END(config);
 		if (!line_len)
 			continue;
 		N_Tf(hsuk35n, "@STR", config);
@@ -163,7 +164,7 @@ continue_reading:
 			// line consumed
 		}
 		if (!n_matches) {
-			N_WTf(ploi98c, "No config param matches '@BUFFER_DUMP'", config + 2);
+			N_WTf(ploi98c, "No config param matches '@STR'", config + 2);
 		}
 	}
 	config_stat_last = config_stat;
@@ -271,7 +272,7 @@ void update_traces(void) {
 		size_t				line_len;
 
 continue_reading:
-		SANITIZE_STR_END(config, line_len);
+		line_len = SANITIZE_STR_END(config);
 		if (!line_len)
 			continue;
 		fprintf(stderr, "%s\n", config);
@@ -559,6 +560,7 @@ void prepare_all_traces(void)
 }
 
 void print_stack(void) {
+	#define STACK_SIZE 100
 	int j, nptrs;
 	void *buffer[STACK_SIZE];
 	char **strings;
