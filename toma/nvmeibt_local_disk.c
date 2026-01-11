@@ -838,7 +838,9 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 		N_Tf(dgy777w, "disk=@STR finished formatting", nvmeibt_local_disk_display(new_local_disk));
 		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(aki9e84, cur_topo->formatting_local_disks_hash_by_ldisk_id_str, local_disk_tmp, local_disk);
 		new_local_disk->reappearing_counter = local_disk_tmp->reappearing_counter;	// Got it from MGMT, and we need it in the next reportTarget
+#if 0	// The local_disk object should move as-is from formatting_hash to local_disks_hash
 		NNVMEIBT_TOMA_FREE(dko089e, local_disk_tmp);
+#endif	// #if 0	// The local_disk object should move as-is from formatting_hash to local_disks_hash
 	}
 
 	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
