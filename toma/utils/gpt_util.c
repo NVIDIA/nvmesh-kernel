@@ -1642,32 +1642,32 @@ static void print_usage(char *argv[])
 	fprintf(stdout, COL_BLUE "Examples:" COL_RESET "\n\n");
 
 	fprintf(stdout, "Display GPT:\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1                      # Display primary copy\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 -c both              # Display both primary and alternate\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --filter-lba=1000    # Filter by LBA address\n\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1\t\t\t\t# Display primary copy\n", argv[0]);
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 -c both\t\t\t# Display both primary and alternate\n", argv[0]);
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --filter-lba=1000\t\t# Filter by LBA address\n\n", argv[0]);
 
 	fprintf(stdout, "Fix corrupted GPT:\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --fix-gpt            # Fix from alternate copy\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --fix-mbr            # Fix MBR\n\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --fix-gpt\t\t\t# Fix from alternate copy\n", argv[0]);
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --fix-mbr\t\t\t# Fix MBR\n\n", argv[0]);
 
 	fprintf(stdout, "Export/Apply Workflow (Edit GPT via JSON):\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --output-json=backup.json       # Export to JSON\n");
-	fprintf(stdout, "  vim backup.json                                          # Edit (delete partition, etc)\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --apply-from=backup.json        # Preview (dry-run)\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --apply-from=backup.json --write  # Apply changes\n\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --output-json=backup.json\t# Export to JSON\n", argv[0]);
+	fprintf(stdout, "  vim backup.json\t\t\t\t\t\t# Edit (delete partition, etc)\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --apply-from=backup.json\t# Preview (dry-run)\n", argv[0]);
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --apply-from=backup.json --write\t# Apply changes\n\n", argv[0]);
 
 	fprintf(stdout, "Binary Backup/Restore:\n");
 	fprintf(stdout, "  # Automatic backup before writes:\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --apply-from=changes.json --write\n");
-	fprintf(stdout, "  # Creates: /tmp/backup_nvme0n1_<timestamp>/\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --apply-from=changes.json --write\n", argv[0]);
+	fprintf(stdout, "  # Creates: " TOMA_ROOT_DIR "tmp/backup_nvme0n1_<timestamp>/\n");
 	fprintf(stdout, "  \n");
 	fprintf(stdout, "  # Manual restore:\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 --restore-binary=/tmp/backup_nvme0n1_<timestamp>/manifest.json\n\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --restore-binary=" TOMA_ROOT_DIR "tmp/backup_nvme0n1_<timestamp>/manifest.json\n\n", argv[0]);
 
 	fprintf(stdout, "Advanced:\n");
-	fprintf(stdout, "  gpt_util -a /dev/nvme0n1 -Z                   # Print zeroing verification commands\n");
-	fprintf(stdout, "  gpt_util -T                                   # Run all self-tests\n");
-	fprintf(stdout, "  gpt_util -T 1,5,10-15                         # Run specific tests\n\n");
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 -Z\t\t\t\t# Print zeroing verification commands\n", argv[0]);
+	fprintf(stdout, "  %s -T\t\t\t\t\t\t\t# Run all self-tests\n", argv[0]);
+	fprintf(stdout, "  %s -T 1,5,10-15\t\t\t\t\t# Run specific tests\n\n", argv[0]);
 
 	fprintf(stdout, COL_YELLOW "Note: gpt_util requires properly formatted NVMesh devices\n");
 	fprintf(stdout, "      (Main GPT + Metadata GPT + disk_metadata must be readable)\n" COL_RESET);
