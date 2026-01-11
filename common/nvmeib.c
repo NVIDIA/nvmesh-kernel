@@ -5872,25 +5872,30 @@ void nvmeib_cnt_free(enum nvmeib_free_type free_type, const void *ptr,
 
 	switch(free_type) {
 	case NVMEIB_FREE_KFREE:
-		kfree(alloc_data->ptr);
+		if (alloc_data)
+			kfree(alloc_data->ptr);
 		break;
 	case NVMEIB_FREE_DMA_FREE:
-		if ((size_t)p2 != alloc_data->size) {
-			_NE(nvmeib_cnt_free_e3, "Size mismatch @@BUFF_SIZE != @@BUFF_SIZE",
-				(size_t)p2, alloc_data->size);
-			WARN_ON(1);
+		if (alloc_data) {
+			if ((size_t)p2 != alloc_data->size) {
+				_NE(nvmeib_cnt_free_e3, "Size mismatch @@BUFF_SIZE != @@BUFF_SIZE",
+					(size_t)p2, alloc_data->size);
+				WARN_ON(1);
+			}
+			dma_free_coherent((struct device *)p1, p2,
+								alloc_data->ptr, p3);
 		}
-		dma_free_coherent((struct device *)p1, p2,
-						  alloc_data->ptr, p3);
 		break;
 	case NVMEIB_FREE_IB_DMA_FREE:
-		if ((size_t)p2 != alloc_data->size) {
-			_NE(nvmeib_cnt_free_e4, "Size mismatch @BUFF_SIZE != @BUFF_SIZE",
-				(size_t)p2, alloc_data->size);
-			WARN_ON(1);
+		if (alloc_data) {
+			if ((size_t)p2 != alloc_data->size) {
+				_NE(nvmeib_cnt_free_e4, "Size mismatch @BUFF_SIZE != @BUFF_SIZE",
+					(size_t)p2, alloc_data->size);
+				WARN_ON(1);
+			}
+			nvmeib_public_ib_dma_free_coherent(((struct ib_device *)p1), p2,
+								alloc_data->ptr, p3);
 		}
-		nvmeib_public_ib_dma_free_coherent(((struct ib_device *)p1), p2,
-						  alloc_data->ptr, p3);
 		break;
 	case NVMEIB_FREE_PAGES:
 		_ND(trace_nvmeib_cnt_free_pages, "free_pages ptr @PTR order @COUNT",
