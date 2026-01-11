@@ -905,6 +905,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		return i;
 	} else {
 		// sys->TSB_sig.sig = 9;	// Daniel: This seems not to work better than epoll failure
+		errno = ENOMEM;
 		return -1;				// For now after 10 iterations stop toma. This is ugly! Simulate shutdown instruction via kafka from mgmt
 	}
 }
