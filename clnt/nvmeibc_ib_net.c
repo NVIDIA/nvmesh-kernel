@@ -1049,6 +1049,7 @@ static int scq_kthread_func(void *arg)
 		goto out;
 	}
 	while (!kthread_should_stop()) {
+		continue_polling = false;
 		nvmeib_qp_stats_on_offth_iter(net->qp_stats);
 		if (READ_ONCE(net->scq_poll_mode) == NVMEIBC_IB_CQ_INTR) {
 			_NEn(error_ib_net_scq_kthread_func, net, "Oops, intr-polling off");
@@ -1108,8 +1109,11 @@ static int scq_kthread_func(void *arg)
 		/* Step 3: Write Barrier */
 		smp_mb();
 
-		/* Step 4: Enable interrupts using ib_req_notify_cq */
-		n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
+		/* This step is only needed if the previous poll was successful */
+		if (n >= 0) {
+			/* Step 4: Enable interrupts using ib_req_notify_cq */
+			n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
+		}
 	
 		if (n >= 0) {
 			tot += n;
@@ -1771,6 +1775,7 @@ static int rcq_kthread_func(void *arg)
 		goto out;
 	}
 	while (!kthread_should_stop()) {
+		continue_polling = false;
 		nvmeib_qp_stats_on_offth_iter(net->qp_stats);
 		if (net->rcq_poll_mode == NVMEIBC_IB_CQ_INTR) {
 			_NEn(error_ib_net_rcq_kthread_func, net, "Oops, intr-polling off");
@@ -1826,8 +1831,12 @@ static int rcq_kthread_func(void *arg)
 		/* Step 3: Write Barrier */
 		smp_mb();
 
-		/* Step 4: Enable interrupts using ib_req_notify_cq */
-		n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
+		/* This step is only needed if the previous poll was successful */
+		if (n >= 0) {
+			/* Step 4: Enable interrupts using ib_req_notify_cq */
+			n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
+		}
+		
 		if (n >= 0) {
 			tot += n;
 			if (continue_polling) {
