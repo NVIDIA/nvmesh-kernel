@@ -23,8 +23,6 @@
 #define __NFIN	NFINS(cl ? cl->name : "???")
 #define __NFOUT	NFOUTS(cl ? cl->name : "???")
 
-#define NVMEIBS_TOMA_DEBUG	0
-
 //fires when server waits for toma to be killed
 static DECLARE_COMPLETION(toma_killed_comp);
 
@@ -685,11 +683,6 @@ int nvmeibs_toma_client_proc_recv(void *arg, char *buf, size_t len,
 
 	NFIN;
 
-#if NVMEIBS_TOMA_DEBUG
-	_NI(nvmeibs_toma_client_proc_recv_i1, "Dump toma message of length @SZ bytes:", len);
-	_Dbuf(buf, len);
-#endif
-
 	/* checks */
 	if (len < offsetof(struct nvmeibs_toma_client_proc_buf, data)) {
 		_NE(error_toma_nvmeibs_toma_client_proc_recv, "Invalid data length (@LEN_LONG), 'handle' bytes must be included", len);
@@ -1339,11 +1332,6 @@ int nvmeibs_toma_server_proc_recv(void *arg, char *buf, size_t len,
 	int rv = -1;
 
 	NFIN;
-
-#if NVMEIBS_TOMA_DEBUG
-	_NI(nvmeibs_toma_server_proc_recv_i1, "Dump toma message of length @SZ bytes:", len);
-	_Dbuf(buf, len);
-#endif
 
 	/* checks */
 	if (len != sizeof(struct nvmeibs_toma_server_proc_buf)) {

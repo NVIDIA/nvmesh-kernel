@@ -416,7 +416,7 @@ int nvmeib_srvr_api_lib_locks_map_put(const char *disk_name, struct mmap_tbl m)
 #include <sys/select.h>
 #include "nvmeibt_ds.h"
 
-struct srv_comm_msg {
+struct srv_comm_msg {						// In air message awaiting for server reply
 	void (*on_done)(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *msg);
 	void *ctx;								// ctx for on_done()
 	struct xdlist link;						// Link to reside in msg lists or in progress list
@@ -908,7 +908,7 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, cons
 	int rv;
 
 	if (hdr->opcode == csc_start || hdr->opcode >= csc_end) {
-		N_Ef(stkmcnl0, "Invalid kernel message @INT", hdr->opcode);
+		N_Ef(stkmcnl0, "msg[@INT] Invalid type", hdr->opcode);
 		return -EINVAL;
 	}
 	if (!(kmsg = NNVMEIBT_BM_CALLOC(stkmcnl1, sizeof(*kmsg) + msg_size))) {
@@ -916,13 +916,11 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, cons
 		return -EINVAL;
 	}
 	kmsg->msg.opcode = hdr->opcode;
-	if (hdr->opcode > csc_start) {	// !csc_internal_suicide
-		kmsg->on_done = hdr->on_done;
-		kmsg->ctx =  hdr->ctx;
-		kmsg->msg.len = msg_size;
-		kmsg->msg.id = get_guid(p);
-		memcpy(kmsg->msg.data, hdr->data, hdr->len);
-	}
+	kmsg->on_done = hdr->on_done;
+	kmsg->ctx =  hdr->ctx;
+	kmsg->msg.len = msg_size;
+	kmsg->msg.id = get_guid(p);
+	if (hdr->len) memcpy(kmsg->msg.data, hdr->data, hdr->len);
 	N_Tf(stkmcnl3, "msg[@INT].id=@ID, hdr=@INT[b] msg=@INT[b]", hdr->opcode, kmsg->msg.id, hdr->len, kmsg->msg.len);
 	rv = -EPERM;
 	nvmeibt_km_comm_lock(p);
