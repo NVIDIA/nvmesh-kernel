@@ -683,9 +683,9 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL 
 
 #define NNVMEIBT_PWRITE(name, __fd, __buf, __n, __offset, __min_offset) ({				\
 	ssize_t		__rv__;																	\
-	const uint64_t	__min_off_val__ = (uint64_t)(__min_offset);								\
+	const uint64_t	__min_off_val__ = (uint64_t)(__min_offset);							\
 	__MEASURE_TOOK_INIT();																\
-	if (__min_off_val__ > 0 && (uint64_t)(__offset) < __min_off_val__) {				\
+	if ((uint64_t)(__offset) < __min_off_val__) {										\
 		N_Ef(name ## _err, "offset=@OFFSET_INT min_offset=@OFFSET_INT", __offset, __min_offset);	\
 		nvmeibt_abort(ES_FATAL);																	\
 	}																								\
