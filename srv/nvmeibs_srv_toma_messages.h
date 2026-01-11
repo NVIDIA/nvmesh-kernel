@@ -201,10 +201,13 @@ enum uk_comm_opcode {
 	csc_keep_alive = 9,						// t2s,  no paylod, no reply from server.
 	csc_identify_disk = 10,					// deprecated: t2s: payload struct nvmeib_identify_disk,  s2t reply: struct nvmeib_identify_disk_reply
 
-	csc_t2s_local_client = 11,				// t2s: instruction to local client, like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
-	csc_msg_to_process = 14,				// s2t, generic mechanism to send a message from kernel to user space, payload: struct nvmeib_push_extended_msg
+	csc_t2s_local_client = 11,				// t2s: instruction to local client (control path), like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
+	csc_t2s_blocking_msg_other = 12,		// t2s: blocking message to server any of 'enum nvmeibs_toma_server_msg_type'
+	csc_t2s_blocking_msg_to_io_clients = 13,// t2s: blocking message to pass to registrant client (client which wants to do io to disk segment)
+	csc_s2t_blocking_msg_ack = 14,			// s2t: ack for the 2 above message type, send by server, unblocking Toma thread
+	csc_msg_to_process = 15,				// s2t, generic mechanism to send a message from kernel to user space, payload: struct nvmeib_push_extended_msg
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
-	csc_contaminate_disk = 15,				// should be the last just before the end
+	csc_contaminate_disk = 16,				// should be the last just before the end
 #endif
 	csc_end									// Never sent
 };
@@ -222,6 +225,9 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_keep_alive: return "csc_keep_alive";
 	case csc_identify_disk: return "csc_identify_disk";
 	case csc_t2s_local_client: return "csc_t2s_local_client";
+	case csc_t2s_blocking_msg_other: return "csc_t2s_blocking_msg_other";
+	case csc_t2s_blocking_msg_to_io_clients: return "csc_t2s_blocking_msg_to_io_clients";
+	case csc_s2t_blocking_msg_ack: return "csc_s2t_blocking_msg_ack";
 	case csc_msg_to_process: return "csc_msg_to_process";
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";
@@ -232,6 +238,8 @@ static inline const char * uk_comm_opcode_str(int opcode)
 
 enum uk_comm_err_opcode {				// s2t error codes, for Toma requests
 	csce_ok = 0,						// By design equals 0
+	csce_dst_not_exist,					// May be success depending on message type
+	csce_already_running,				// May be success depending on message type
 	csce_failed,
 	csce_bad_zero_params,
 	csce_in_progress,					// May be success depending on message type (if success is launch of task and not completion)
@@ -491,6 +499,7 @@ struct nvmeib_nl_msg_to_toma {					// s2t: All possible payloads
 		struct nvmeib_identify_disk_reply		identify_disk_reply;
 		struct nvmeib_copied_rscs_reply			copied_rscs_reply;
 		struct nvmeib_push_extended_msg			extended_msg;
+		struct nvmeib_nl_uk_comm_rep 			unblock_ack;
 	} payload;
 };
 

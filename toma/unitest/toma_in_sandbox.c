@@ -164,10 +164,9 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 	const struct nvmeibs_toma_server_proc_buf *m = buf;
 	const enum nvmeibs_toma_server_msg_type type = m->type;
 	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
-	(void)flags;
 	switch (type) {
-		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Got: Toma_Hello %lu[b]\n", n); break;
-		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->Got: TomaByeBye %lu[b]\n", n); break;
+		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Got: Toma_Hello %lu[b] via_netlink=%d\n", n, !!flags); break;
+		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->Got: TomaByeBye %lu[b] via_netlink=%d\n", n, !!flags); break;
 		case NVMEIBS_TOMA_WRITE_STATUS_RESP: {
 			const struct nvmeibs_msg_t2s_toma_status_resp *pl = &m->status_resp_msg;
 			me->n_toma_replies_received++;
@@ -183,6 +182,20 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 		}
 		default: BUG_ON(true);		// Not supported yet
 	}
+	errno = 0;						// Failure not supported yet
+	return n;
+}
+
+static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	const struct nvmeibs_toma_client_proc_buf *m = buf;
+	const u32 cid = (m->handle >> 32);		// Todo: Find client in hash
+	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
+	SANDBOX_PRINT("SRVR_SIMU->Got: 2_reg_clnt %lu[b] via_netlink=%d\n", n, flags);
+	me->n_msgs_to_registrants++;
+	if (!m->handle) { errno = ENXIO;	return -1; }
+	if (!cid)		{ errno = EINVAL;	return -1; }
+	if (0)			{ errno = ENXIO;	return -1; }	// Send fail to client
 	return n;
 }
 
@@ -564,6 +577,7 @@ static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
+static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -589,6 +603,16 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		TSB_netlink_handle_io_to_disk(req_msg);
 	} else if (req_msg->opcode == csc_zero_disk) {
 		TSB_netlink_handle_zero_disk(req_msg);
+	} else if (req_msg->opcode == csc_t2s_blocking_msg_other) {
+		struct TSB_server *s = &sys->TSB_toma2srvr;
+		const struct nvmeibs_toma_server_proc_buf *m = (typeof(m))req_msg->data;
+		const ssize_t exec_rv = s->o.send(s->o.sock->fd, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
+		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
+	} else if (req_msg->opcode == csc_t2s_blocking_msg_to_io_clients) {
+		struct TSB_server *s = &sys->TSB_toma2clnt;
+		const struct nvmeibs_toma_client_proc_buf *m = (typeof(m))req_msg->data;
+		const ssize_t exec_rv = s->o.send(s->o.sock->fd, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
+		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
@@ -650,7 +674,7 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		s->other_side->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
 	} else if (strstr(s->addr.sun_path, "toma_clients")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
-		s->other_side->send = _send_illegal_trap;				// Unsupported yet
+		s->other_side->send = _srvr_simu_nvmeibs_toma_client_proc_recv;
 		s->other_side->recv = _recv_illegal_trap;
 	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[0];
@@ -978,6 +1002,29 @@ static void TSB_netlink_send_extended_msg(void) {
 	msg->opcode = rep->base.opcode = csc_msg_to_process;
 	rep->n_bytes_len = sprintf(&rep->content[0], "%s", "HelloFromClnt");
 	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+static inline enum uk_comm_err_opcode uk_comm_err_from_errno(ssize_t rv) {
+	if (rv >= 0) return csce_ok;		// Proc api returns negative value on failure and type of failure in errno
+	rv = errno; errno = 0;				// Convert to msg api which does not use errno and works in userspace as well
+	if (rv == ENXIO) return csce_dst_not_exist;
+	if (rv == EINPROGRESS) return csce_in_progress;
+	if (rv == EALREADY) return csce_already_running;
+	return csce_failed;
+}
+
+static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)msg->data;
+	BUG_ON((req_msg->opcode != csc_t2s_blocking_msg_other) && (req_msg->opcode != csc_t2s_blocking_msg_to_io_clients));
+	msg->opcode = rep->opcode = csc_s2t_blocking_msg_ack;
+	rep->error = uk_comm_err_from_errno(rv);
+	msg->id = req_msg->id;
+	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }

@@ -101,6 +101,8 @@ struct nlmsghdr {				// 16[bytes] Copied netlink header from linux include
 #define NLMSG_DONE 0x3
 #define NLMSG_MIN_TYPE		0x10
 
+#define TOMA_USE_USER_SPACE_SERVER_API (1)
+
 /************************************* syslog *************************************/
 #define _SYS_SYSLOG_H 1
 #include <syslog.h>

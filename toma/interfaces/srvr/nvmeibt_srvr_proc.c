@@ -280,6 +280,7 @@ struct nvmeibt_km_comm {
 	pthread_t comm_thread;			// main thread which processes messages
 	struct {
 		int error_occured;			// if != 0: Object is not operational, closing due to error. Stores error code
+		bool use_async_api_and_sema_for_blocking_msgs;
 	} state_flags;
 	struct resource_usage_counters_t {
 		int n_lock_maps;
@@ -354,9 +355,17 @@ void __calc_max_msg_size(struct nvmeibt_km_comm *p) {
 	const size_t server_nlink = sizeof(struct nvmeib_nl_uk_comm_msg) + max((sizeof(struct nvmeib_nl_msg_to_toma) + 256 /*nvmeib_push_extended_msg payload?*/), sizeof(union nvmeib_nl_msg_to_srvr_payload));
 	const size_t lserver_proc = sizeof(struct nvmeibs_toma_server_proc_buf);
 	const size_t clients_topo = NVMEIB_TOMA_REQ_MAX_LEN + (sizeof(struct nvmeibs_toma_client_proc_buf) - sizeof(struct nvmeibt_client_msg));
+	const size_t srvr_max = max(server_nlink, lserver_proc);
+	const size_t total_max = max(srvr_max, clients_topo);
 	p->max_msg_size.proc_recv = max(lserver_proc, clients_topo);
 	p->max_msg_size.proc_send = clients_topo;
+	#ifdef TOMA_USE_USER_SPACE_SERVER_API
+		p->state_flags.use_async_api_and_sema_for_blocking_msgs = true;									// Kernel has blocking /proc. User space does not have them. Toma Simulator supports both
+		p->max_msg_size.nlink = NLMSG_SPACE(total_max);			// All messages via async api
+	#else
+		(void)total_max;
 		p->max_msg_size.nlink = NLMSG_SPACE(server_nlink);		// Large messages use /proc sync api
+	#endif
 }
 
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
@@ -800,15 +809,69 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, cons
 	return rv;
 }
 
-int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
-{
-	(void)p;
-	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
-		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
-		return (rv < 0) ? -1 : 0;
+#include <semaphore.h>
+struct completion {
+	sem_t s;	// reset(){=0}, done(){change 0->1}, wait(){block until == 1, then reset()}
+};
+static inline void init_completion(    struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_init(&x->s, 0, 0) == 0, "AAA"); }
+static inline void reinit_completion(  struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_init(&x->s, 0, 0) == 0, "AAA"); }
+static inline void wait_for_completion(struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_wait(&x->s) == 0, "AAA"); }
+static inline void complete(           struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_post(&x->s) == 0, "AAA"); }
+static inline void destroy_completion( struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_destroy(&x->s) == 0, "AAA"); }
+static inline bool completion_is_done( struct completion *x){ return sem_trywait(&x->s); }
+
+struct blocking_wait_context {
+	struct completion comp;				// For blocking implementation
+	int rv;
+};
+
+static void __on_done_wakeup_sender(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep) {
+	struct blocking_wait_context *b = ctx;
+	(void)ok;
+	if (rep) {
+		if (     rep->error == csce_ok)				 b->rv = 0;	// Inverse of uk_comm_err_from_errno
+		else if (rep->error == csce_dst_not_exist)	 b->rv = -ENXIO;
+		else if (rep->error == csce_in_progress)	 b->rv = -EINPROGRESS;
+		else if (rep->error == csce_already_running) b->rv = -EALREADY;
+		else 							 			 b->rv = -EIO;
 	} else {
-		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
-		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
+		b->rv = -ENOEXEC;				// Sent to server, but did not get a reply
+	}
+	complete(&b->comp);
+}
+
+static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len)
+{
+	struct blocking_wait_context b;
+	struct srv_comm_msg *m = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*m) + sizeof(m->msg) + buf_len);
+	if (!m) {
+		N_Ef(__AUTOID__, "Fail to allocate nvmeibt_km_comm msg");
+		return -ENOMEM;
+	}
+	m->msg.opcode = op;
+	m->on_done = &__on_done_wakeup_sender;
+	m->ctx = (void*)&b;
+	init_completion(&b.comp);
+	b.rv = -EPERM;							// Not sent to server
+	if (__submit_toma_msg(p, m, buf, buf_len)) {
+		wait_for_completion(&b.comp);	// Server reply will autofill b.rv
+		N_Tf(__AUTOID__, "msg[@INT].id=@ID, (done), rv=@RV", m->msg.opcode, m->msg.id, b.rv);
+	}	// else, beware: 'm' already freed
+	return b.rv;
+
+}
+int	nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
+{
+	int rv = 0;
+	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)
+		rv = _submit_msg_and_wait_for_ack(p, csc_t2s_blocking_msg_other, msg, sizeof(*msg));
+	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
+		if (!p->state_flags.use_async_api_and_sema_for_blocking_msgs)
+			rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
+		return (rv < 0) ? -1 : 0;
+	} else { // RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
+		if (!p->state_flags.use_async_api_and_sema_for_blocking_msgs)
+			rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
 		if (rv >= 0) {
 			return 0;
 		} else if (rv == -EALREADY || rv == -EINPROGRESS) {	// Either a cleanup was already active, or a new "job" started
@@ -824,7 +887,11 @@ int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, cons
 {
 	int rv; (void)clnt_host;
 	NTOMA_ASSERT(__AUTOID__, buf_len <= p->max_msg_size.proc_send, "Msg too large @INT[b]", buf_len);
-	rv = NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0);
+	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)	{
+		rv = _submit_msg_and_wait_for_ack(p, csc_t2s_blocking_msg_to_io_clients, msg, buf_len);
+	} else {
+		rv = NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0);
+	}
 	return ((rv == 0) || (rv == -ENXIO)) ? 0 : -1;	// Disconenct OK, or client already disconnected
 }
 
