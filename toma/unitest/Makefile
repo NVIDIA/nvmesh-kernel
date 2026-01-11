@@ -56,8 +56,7 @@ CFLAGS += -DTOMA_SIMULATOR_SANDBOX -DUSER_SPACE
 CFLAGS += -D__USE_GNU -D_GNU_SOURCE
 CFLAGS += -DNVMEIBC_SECTOR_SHIFT=12
 CFLAGS += -DGIT_COMMIT_ID=\"0x$(COMMIT_ID)\" -DVER_TAGID=$(VER_TAGID) -DGIT_BRANCH=\"$(BRANCH_NAME)\"
-CFLAGS += -DTOMA -DNVMESH_VERSION=$(VER_TAGID) -DNVMESH_RELEASE=2.0.0-1982 -DBUILD_VERSION_FOR_MGMT=\"mmmmmmm1\" -DBUILD_NUMBER_FOR_MGMT=\"mmmmmmm2\"
-# When git commit changes, invalidate pch
+CFLAGS += -DTOMA -DNVMESH_VERSION=$(VER_TAGID) -DNVMESH_RELEASE=2.0.0-1982 -DBUILD_VERSION_FOR_MGMT=\"$(VER_TAGID)\" -DBUILD_NUMBER_FOR_MGMT=\"$(COMMIT_ID)\"
 CFLAGS += -I$(SSDA)/tools/
 
 # ********** Included directories of H files *********
@@ -74,7 +73,7 @@ else
 endif
 LIBS  = -lpthread -lm -ldl
 
-USE_SANITIZERS?=1
+USE_SANITIZERS?=1		# Note: makes executable much larger, affects profiling
 ifeq ($(USE_SANITIZERS),1)
 	CFLAGS += -fsanitize=leak -fsanitize=address -fsanitize=undefined
 	LDFLAGS += -fsanitize=leak -fsanitize=address -fsanitize=undefined
