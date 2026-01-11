@@ -170,6 +170,9 @@ void nvmeibt_join_all_trace_pollers(void) {
 void nvmeibt_start_all_trace_pollers(bool is_running_as_a_utility) {
 	tracer_nvmeibt_debug_level = (int)tracer_nvmeibt_requested_debug_level;
 	__start_trace_pollers(&long_poller, &eph_poller, &eter_poller, is_running_as_a_utility);
+	#ifdef TOMA_SIMULATOR_SANDBOX
+		{ extern void toma_unitest_env_start(void); toma_unitest_env_start(); }
+	#endif
 }
 
 unsigned long long nvmeibt_get_total_bytes(void) {

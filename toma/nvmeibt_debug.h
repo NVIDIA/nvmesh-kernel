@@ -126,12 +126,6 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 #define THROTTLE_IIR_SIZE 10
 #include "../common/nvmeib_iir.h"
 
-#ifdef TOMA_SIMULATOR_SANDBOX
-// Sandbox: Disable throttling for clean test output
-#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...) \
-	syslog(SYSLOG_LOG_LVL, __FMT, ## __VA_ARGS__)
-#else // TOMA_SIMULATOR_SANDBOX
-// Production: Enable throttling to prevent syslog flooding
 #define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...)	({														\
 	static struct nvmeib_iir	avg_ns_between_writes_IIR;															\
 	static int64_t				prev_write_time_ns;																	\
@@ -164,7 +158,10 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 		_n_throttled++;																								\
 	}												        														\
 })
-#endif // #ifdef TOMA_SIMULATOR_SANDBOX
+#ifdef TOMA_SIMULATOR_SANDBOX
+	#undef NVMEIBT_THROTTLED_SYSLOG 				// Sandbox: throttling for clean test output
+	#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...) syslog(SYSLOG_LOG_LVL, __FMT, ## __VA_ARGS__)
+#endif
 
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
 int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_fmt, const char *filename, int line, const char *func_name);
@@ -281,11 +278,9 @@ struct _tracer {
 			__memorized_syslog_end_char = *end_of_syslog;											\
 			*end_of_syslog = '\0';																	\
 			SEND_TO_SYSLOG(LOG_NOTICE, "%s ", __p);													\
-			/* NVMEIBT_THROTTLED_SYSLOG(LOG_NOTICE, "(%lu) " __str_in__, get_my_tid());	*/							\
 			*end_of_syslog = __memorized_syslog_end_char;                                           \
 		} else {																					\
 			_NLOGLEVEL_NO_PREFIX(Tf, __name__ ## _2, "@STR", __p);									\
-			/*NVMEIBT_THROTTLED_SYSLOG(LOG_INFO, "%s\n", __p);*/									\
 		}																							\
 		*__cur_end = __memorized_end_char;															\
 		__p = __cur_end + (*__cur_end == '\n' || *__cur_end == '\0' ? 1 : 0);						\

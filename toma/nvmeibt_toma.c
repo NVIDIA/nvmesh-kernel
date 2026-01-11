@@ -2899,9 +2899,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	read_cmdl_rv = read_cmdl(argc, argv, 0);
 	toma_is_running_as_a_utility = (nvmeibt_is_converting_json_to_persistence || nvmeibt_is_converting_persistence_to_json);
 	nvmeibt_start_all_trace_pollers(nvmeibt_toma_is_running_as_a_utility());
-	#ifdef TOMA_SIMULATOR_SANDBOX
-		{ extern void toma_unitest_env_start(void); toma_unitest_env_start(); }
-	#endif
 	if (read_cmdl_rv < 0) {
 		read_cmdl(argc, argv, 1);
 	}

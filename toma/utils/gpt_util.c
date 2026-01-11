@@ -2373,11 +2373,6 @@ int gpt_util_main(int argc, char *argv[])
 	// Start trace pollers (gpt_util is a utility, routes traces properly)
 	nvmeibt_start_all_trace_pollers(true);
 
-#ifdef TOMA_SIMULATOR_SANDBOX
-	// Initialize sandbox environment for subprogram execution
-	{ extern void toma_unitest_env_start(void); toma_unitest_env_start(); }
-#endif // #ifdef TOMA_SIMULATOR_SANDBOX
-
 	// Buffer Manager
 	if (nvmeibt_bm_create()) {
 		N_Ef(gpt_util_bm_create_failed, "Failed to create buffer manager");
