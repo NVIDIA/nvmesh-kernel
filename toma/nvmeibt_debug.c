@@ -105,9 +105,9 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	__MEASURE_TOOK_INIT();
 
 	if (stat(config_params_full_path, &config_stat))
-		goto out;
+		return;	// File does not exist
 	if (config_stat.st_mtime == config_stat_last.st_mtime)
-		goto out;
+		return;	// Already read this file
 
 	if (trace_config_updated_by_toma) {
 		trace_config_updated_by_toma = false;
@@ -148,27 +148,23 @@ void read_rpc_config_from_persist(bool is_initial_read)
 		size_t	line_len;
 
 continue_reading:
+		if (config[0] == '#')
+			continue; /* Ignore comments */
 		line_len = SANITIZE_STR_END(config);
 		if (!line_len)
 			continue;
 		N_Tf(hsuk35n, "@STR", config);
-		fprintf(stderr, "%s\n", config);
-
-		if (config[0] == '#')
-    		continue; /* Ignore comments */
 
 		if (nvmeibt_disk_flow_params_try_read_from_config_line(config + 2, &n_matches)) {
 			/* Nothing to do, line was consumed*/
-		}
-		else if (nvmeibt_debug_config_params_parse(config + 2, &n_matches)) {
+		} else if (nvmeibt_debug_config_params_parse(config + 2, &n_matches)) {
 			// line consumed
 		}
 		if (!n_matches) {
 			N_WTf(ploi98c, "No config param matches '@STR'", config + 2);
 		}
 	}
-	config_stat_last = config_stat;
-
+	config_stat_last = config_stat;		// Mark that we read this file
 out:
 	if (f)
 		fclose(f);
@@ -272,6 +268,8 @@ void update_traces(void) {
 		size_t				line_len;
 
 continue_reading:
+		if (config[0] == '#')
+			continue; /* Ignore comments */
 		line_len = SANITIZE_STR_END(config);
 		if (!line_len)
 			continue;
@@ -282,45 +280,35 @@ continue_reading:
 		else if (config[0] == '+') {
 			explicit_change = explicit_plus;
 		} else {
-			if (config[0] != '#') {
-				N_WTf(ayirmop, "Cannot parse the argument '@CONFIG_STR'", config);
-			} else { /* Ignore comments */}
+			N_WTf(ayirmop, "Cannot parse the argument '@CONFIG_STR'", config);
 			continue;
 		}
-
-		// fprintf(stderr, "value_or=%d value_and=%d\n", value_or, value_and);
 
 		if (!strncmp(config + 2, "filename ", 9)) {
 			const char *filename = config + 11;
 			FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
-				// fprintf(stderr, "%d cmp '%s' '%s'\n", __LINE__, t->filename, filename);
 				if (!strcmp(kbasename(t->filename), filename)) {
 					t->plus_minus_flag = explicit_change;
 					n_matches++;
 				}
 			}
-		}
-		else if (!strncmp(config + 2, "function ", 9)) {
+		} else if (!strncmp(config + 2, "function ", 9)) {
 			const char *function = config + 11;
 			FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
-				// fprintf(stderr, "%d cmp '%s' '%s'\n", __LINE__, t->function, function);
 				if (!strcmp(t->function, function)) {
 					t->plus_minus_flag = explicit_change;
 					n_matches++;
 				}
 			}
-		}
-		else if (!strncmp(config + 2, "LVL ", sizeof("LVL ") - 1)) {
+		} else if (!strncmp(config + 2, "LVL ", sizeof("LVL ") - 1)) {
 			const char *lvl = config + 2 + strlen("LVL ");
 			FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
-				// fprintf(stderr, "%d cmp '%s' '%s'\n", __LINE__, t->function, function);
 				if (!strcmp(t->lvl, lvl)) {
 					t->plus_minus_flag = explicit_change;
 					n_matches++;
 				}
 			}
-		}
-		else if (!strncmp(config + 2, "line ", 5)) {
+		} else if (!strncmp(config + 2, "line ", 5)) {
 			char filename[line_len];
 			int lineno;
 
@@ -331,8 +319,7 @@ continue_reading:
 					n_matches++;
 				}
 			}
-		}
-		else if (!strcmp(config + 2, "all")) {
+		} else if (!strcmp(config + 2, "all")) {
 			n_matches = update_traces_turn_all_on_or_off(config[0], 0);
 		}
 
@@ -344,7 +331,6 @@ continue_reading:
 	}
 
 	FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
-		// fprintf(stderr, "%d t->plus_minus_flag=%d\n", __LINE__, t->plus_minus_flag);
 		if (t->plus_minus_flag == explicit_plus) {
 			t->is_on = 1;
 		} else if (t->plus_minus_flag == explicit_minus) {
@@ -353,10 +339,6 @@ continue_reading:
 			t->is_on = TRACE_METADATA_is_on_DEFAULT;
 		}
 		t->plus_minus_flag = 0;
-		/* fprintf(stderr, "%d: %s, %s, %d, %s%s",
-			t->is_on,
-			t->filename, t->function, t->lineno, t->format,
-			t->format[strlen(t->format) - 1] == '\n' ? "" : "\n"); */
 	}
 out:
 	is_initial_read = 0;
@@ -365,7 +347,6 @@ out:
 		fclose(f);
 		__MEASURE_TOOK(N_IMf(zbmeofh, "fclose() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
 	}
-	//NNVMEIBT_TOMA_FREE(v5t9sl3, traceconfig);
 	NFOUT;
 }
 
