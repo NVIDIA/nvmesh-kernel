@@ -82,10 +82,10 @@ if [[ "`hostname`" =~ nvme.* ]]; then
 			while true; do
 				x=$(($x+1));
 				if ((${x}%10==0)); then
-					~/nvmesh client detach --force --id `hostname` --volume R1
-					~/nvmesh client detach --force --id `hostname` --volume J1
-					~/nvmesh client attach --force --id `hostname` --volume R1
-					~/nvmesh client attach --force --id `hostname` --volume J1
+					/usr/bin/nvmesh client detach --id `hostname` --volume R1
+					/usr/bin/nvmesh client detach --id `hostname` --volume J1
+					/usr/bin/nvmesh client attach --id `hostname` --volume R1
+					/usr/bin/nvmesh client attach --id `hostname` --volume J1
 				fi;
 				echo "`date +%H:%M:%S` $x ${tabs:0:$(($x%7+1))}*****";
 				if ([ ! -b $J1 ] || [ ! -b $R1 ]); then
