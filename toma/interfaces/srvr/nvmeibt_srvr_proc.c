@@ -61,17 +61,11 @@ static int nvmeibt_toma_announce_ready(bool is_login)
 	if (rv < 0) {
 		N_Ef(nsalcb, "OOPS! Failed, fd=@FD of size @SIZEOF, rv=@RV", fd_toma2srvr, sizeof(buf), rv);
 	}
-	if (!is_login) {
-		NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
-		NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
-		NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
-	}
 	N_Tf(nsalcw, "Done");
 	return 0;
 }
 
 int nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p) { (void)p;	return nvmeibt_toma_announce_ready(true); }
-static int __blocking_msg_api_destroy(void){ 		return nvmeibt_toma_announce_ready(false); }
 
 /***************************** mmap shared memory (server /proc/.../toma_status/files & IO locks table) *******************************/
 #include <sys/mman.h>
@@ -577,7 +571,10 @@ void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 
 void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)
 {
-	__blocking_msg_api_destroy();
+	nvmeibt_toma_announce_ready(false);		// Close blocking msg API
+	NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
+	NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
+	NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
 	if (p->resource.n_lock_maps != 0)
 		N_Ef(tscnlssv, "Leaking resources: lock_maps=@INT", p->resource.n_lock_maps);
 	NNVMEIBT_TOMA_FREE(tscnlsss, p);
