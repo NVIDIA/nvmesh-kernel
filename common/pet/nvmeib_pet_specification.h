@@ -19,7 +19,7 @@ static inline u64 nvmeib_pet_get_trace_time_ns(void)
 	#ifdef __KERNEL__
 		extern unsigned long nvmeib_trace_tsc_to_ns(unsigned long timestamp);
 		return nvmeib_trace_tsc_to_ns(nvmeib_public_rdtsc());
-	#else 
+	#else
 		return nvmeib_public_rdtsc() + tsc_offset;
 	#endif
 }
@@ -196,9 +196,13 @@ struct nvmeib_pet_variant{
 		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
 	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), typeof((void*)0)),			\
 		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
-	NVMEIB_PET_STORE_TYPE_U_LONG_INT ))))))))))))))))))))))));										\
-	BUILD_BUG_ON(sizeof(void*) != 8);																\
-	__store_type;																					\
+	NVMEIB_PET_STORE_TYPE_U_LONG_INT ))))))))))))))))))))))));															\
+	BUILD_BUG_ON_MSG(sizeof(void*) != 8, "only 64bit platforms are supported"); 										\
+	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), float), "float type is not supported");				\
+	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), double), "double type is not supported"); 				\
+	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), char*), "char* type is not supported");				\
+	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), char const*), "char const* type is not supported");	\
+	__store_type;																										\
 })
 
 
@@ -211,7 +215,7 @@ struct nvmeib_pet_variant{
 })
 
 
-//offset == message id; 
+//offset == message id;
 //	the message should be stored as clear text in some compiler & linker generated section
 //	at runtime it is possible to calculate the message offset from the begining of the section;
 //	that offset will be used as the message id
@@ -220,14 +224,14 @@ struct nvmeib_pet_variant{
 
 //for performance reasons I use struct of arrays instead of arrays of structs
 //the delta is almost x2 both in memory usage (Linux stack frame is limited) and performance
-//last note: the underlying enum type is int, but this is too much for pet store type 
+//last note: the underlying enum type is int, but this is too much for pet store type
 #define __NVMEIB_PET_MESSAGE_FIELDS(n_args) 			\
 	u16 offset; 										\
 	u8 /*enum nvmeib_pet_store_type*/ type[1 + n_args];	\
 	u64 value[1 + n_args];								\
 
 //obviously I can create a single macro, which generates the needed struct.
-//obvioulsy  can use macro to implement the function, 
+//obvioulsy  can use macro to implement the function,
 //BUT using the macros all the way done make it very difficult to troublshoot the compiler error.
 
 struct nvmeib_pet_message_1{
@@ -262,6 +266,9 @@ struct nvmeib_pet_message_8{
 	__NVMEIB_PET_MESSAGE_FIELDS(8);
 };
 
+struct nvmeib_pet_message_9{
+	__NVMEIB_PET_MESSAGE_FIELDS(9);
+};
 
 //this is the interface to create message from any supported types
 #define NVMEIB_PET_MSG_1(offset_arg, arg1) 											\
@@ -336,9 +343,18 @@ struct nvmeib_pet_message_8{
 	};																				\
 })
 
+#define NVMEIB_PET_MSG_9(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) \
+({																					\
+	(struct nvmeib_pet_message_9){													\
+		.offset = offset_arg + 1,														\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7), nvmeib_pet_get_store_type(arg8), nvmeib_pet_get_store_type(arg9)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7), (u64)(arg8), (u64)(arg9)}							\
+	};																				\
+})
+
 //counts the number of elements in __VA_ARGS__
-#define NVMEIB_PET_VA_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,N,...) N
-#define NVMEIB_PET_VA_NARGS(...) NVMEIB_PET_VA_NARGS_IMPL(__VA_ARGS__,8,7,6,5,4,3,2,1)
+#define NVMEIB_PET_VA_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,_9,N,...) N
+#define NVMEIB_PET_VA_NARGS(...) NVMEIB_PET_VA_NARGS_IMPL(__VA_ARGS__,9,8,7,6,5,4,3,2,1)
 
 //if we know the number of arguments we can decide ourself what macro should be used
 //there is a need for double indirecion in order to convert number of arguments to actual number
@@ -365,7 +381,7 @@ static inline u16 nvmeib_pet_message_2_get_size(struct nvmeib_pet_message_2 cons
 {return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }
 
 static inline u16 nvmeib_pet_message_3_get_size(struct nvmeib_pet_message_3 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }	
+{return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }
 
 static inline u16 nvmeib_pet_message_4_get_size(struct nvmeib_pet_message_4 const* self)
 {return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }
@@ -380,6 +396,9 @@ static inline u16 nvmeib_pet_message_7_get_size(struct nvmeib_pet_message_7 cons
 {return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }
 
 static inline u16 nvmeib_pet_message_8_get_size(struct nvmeib_pet_message_8 const* self)
+{return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }
+
+static inline u16 nvmeib_pet_message_9_get_size(struct nvmeib_pet_message_9 const* self)
 {return __NVMEIB_PET_MESSAGE_GET_SIZE(self); }
 
 #define nvmeib_pet_message_get_size(self)																	\
@@ -400,7 +419,9 @@ static inline u16 nvmeib_pet_message_8_get_size(struct nvmeib_pet_message_8 cons
 	nvmeib_pet_message_7_get_size,																			\
 	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_8 const*),	\
 	nvmeib_pet_message_8_get_size,																			\
-	0))))))))(self);																						\
+	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_9 const*),	\
+	nvmeib_pet_message_9_get_size,																			\
+	0)))))))))(self);																						\
 })
 
 /*
@@ -410,7 +431,7 @@ message format(implemented):
 kaitai supports other format:
     offset, number of arguments, [type]+, [value]+
 
-the second format probably has better performance - we are capable to write the whole struct in a single memcpy 
+the second format probably has better performance - we are capable to write the whole struct in a single memcpy
 nvmeib_pet_message struct would change to:
 {
 	u16 offset;
@@ -473,6 +494,10 @@ __attribute__((nonnull (1)))
 static inline u16 nvmeib_pet_message_8_write(struct nvmeib_pet_message_8 const* self, struct nvmeib_pet_stream* out)
 { return __NVMEIB_PET_MESSAGE_WRITE(self, out); }
 
+__attribute__((nonnull (1)))
+static inline u16 nvmeib_pet_message_9_write(struct nvmeib_pet_message_9 const* self, struct nvmeib_pet_stream* out)
+{ return __NVMEIB_PET_MESSAGE_WRITE(self, out); }
+
 #define nvmeib_pet_message_write(self, out)																	\
 ({																											\
 	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_1 const),	\
@@ -491,7 +516,9 @@ static inline u16 nvmeib_pet_message_8_write(struct nvmeib_pet_message_8 const* 
 		nvmeib_pet_message_7_write,																			\
 	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_8 const),	\
 		nvmeib_pet_message_8_write,																			\
-	0))))))))(self, out);																					\
+	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_9 const),	\
+		nvmeib_pet_message_9_write,																			\
+	0)))))))))(self, out);																					\
 })
 
 struct nvmeib_pet_journal{
@@ -501,10 +528,9 @@ struct nvmeib_pet_journal{
 	u64 prev_timestamp_ns; //with high probability the next message may store delta between times, thus saving space
 };
 
-__attribute__((nonnull (1)))
 static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pet_base_controller const* controller)
 {
-	struct iovec const buffer = controller->get_buffer(controller);
+	struct iovec const buffer = controller ? controller->get_buffer(controller) : (struct iovec){0};
 	return (struct nvmeib_pet_journal){
 	    .controller = controller,
 	    .stream = nvmeib_pet_stream_make(buffer),
@@ -580,6 +606,9 @@ __attribute__((nonnull (1)))
 static inline u16 nvmeib_pet_journal_add_msg_8(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_8 msg)
 { return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
 
+__attribute__((nonnull (1)))
+static inline u16 nvmeib_pet_journal_add_msg_9(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_9 msg)
+{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
 
 __attribute__((nonnull (1)))
 __attribute__((format (printf,1,2)))
@@ -605,7 +634,9 @@ static inline void nvmeib_pet_journal_add_msg_verify_format(char const * const f
 		nvmeib_pet_journal_add_msg_7,																\
 	__builtin_choose_expr(__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_8),	\
 		nvmeib_pet_journal_add_msg_8,																\
-	0))))))))(self, severity, msg);																	\
+	__builtin_choose_expr(__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_9),	\
+		nvmeib_pet_journal_add_msg_9,																\
+	0)))))))))(self, severity, msg);																	\
 })
 
 
