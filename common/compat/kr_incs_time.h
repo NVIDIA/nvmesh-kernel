@@ -31,7 +31,7 @@
 				return ret;
 		}
 	#endif
-
+		// Deliberately dont use kernel getnstimeofday(struct timespec*) as it is confusing, and implicit. Use one of below
 		static inline void getnstimeofday_real(struct timespec *ts)
 		{
 				struct timespec64 ts64;
