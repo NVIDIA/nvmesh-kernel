@@ -65,4 +65,10 @@
 #define NVMESH_SECTION(name)  __attribute__((__section__(name)))
 #define NVMESH_ALIGNED(x)     __attribute__((__aligned__(x)))
 
+
+#define const_cast_ptr(type, ptr) 																								\
+({																																\
+	BUILD_BUG_ON_MSG(!__same_type(const type, typeof(ptr)), "the const_cast_pre should be use on the same unqualified type");	\
+	(type)(ptr);																												\
+})
 #endif
