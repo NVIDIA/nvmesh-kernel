@@ -4979,7 +4979,7 @@ static int kthread_process_drive_cq(void *arg)
 				enb_irq = (q->state == LOCAL_Q_ON ||
 						   q->state == LOCAL_Q_STOP_NEW_IO);
 				spin_unlock_irqrestore(&q->q_lock, flags);
-				cont = i > 0 && nvmeib_intr_shaper_should_continue_polling(s_intr_shaper, i, busy_ns);
+				cont = i > 0;
 				total += i;
 			} while (cont && time_before(jiffies, max_time));
 
