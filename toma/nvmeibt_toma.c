@@ -2797,7 +2797,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	/* start our logger */
 	time(&cur_time_t);
 	nvmeibt_strlcpy(cur_time_t_str_no_newline, ctime(&cur_time_t), 25);
-	N_IMf(trace_toma_nvmeibt_toma_init,
+	N_IMf(trace_toma_nvmeibt_toma_init, // Do not change this trace id!!! it is used when filtering toma restarts, change will require to filter by both old and new id
 		  "now='@STR' Starting TOMA (@STR), compiled @STR, @STR",
 		  cur_time_t_str_no_newline, MOD_STR, __DATE__, __TIME__);
 	N_IMf(trace_1_toma_nvmeibt_toma_init,
