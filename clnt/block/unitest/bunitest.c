@@ -4427,7 +4427,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 	rcvr_args.ext_args.lock_range.count = 2 + 0 * sraid.cpr->length/LOCKSET_SLICES;
 	NVMeshSystem_volume_memset(sys, 0, 0);
 	BUG_ON(!env.dev->dp.enable_edic_check);		// If metadata is not enabled then this test is meaningless
-	nvmeibc_warn_on_edic_werification_failure = false;							// Unitest cases edic failure
+	nvmeibc_warn_on_edic_verification_failure = false;							// Unitest cases edic failure
 	for (rep = 0; rep < 50; rep++) {
 		const u32 n_blksets_in_praid = rcvr_args.ext_args.lock_range.count;
 		const u32 blockset = (rand()%n_blksets_in_praid);
@@ -4638,7 +4638,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 	}
 
 	clientSimulator_wait_for_all_sync_ops(env.client);
-	nvmeibc_warn_on_edic_werification_failure = true;
+	nvmeibc_warn_on_edic_verification_failure = true;
 	NVMeshSystem_serialize(sys);
 	nvmeibc_nowhole_stats_reset();
 	__dd_clean_dlba_pointers(env);				// Clean bad sectors

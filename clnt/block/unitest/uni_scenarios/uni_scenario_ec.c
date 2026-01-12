@@ -3095,7 +3095,7 @@ int unitest_scrubRecovery_ec(bunitest_s* B) {
 	NVMeshSystem_all_clients_dbg_di(sys, true);
 	st.restored.block = sim_kzalloc(NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 	nvmeibc_nowhole_stats_reset();
-	nvmeibc_warn_on_edic_werification_failure = false;							// Unitest cases edic failure
+	nvmeibc_warn_on_edic_verification_failure = false;							// Unitest cases edic failure
 	nvmeibc_warn_on_parities_sync_missmatch = false;							// Unitest can inject 1 parity as written, the other as not written
 	for (rep = 0; rep < 75; rep++) {
 		const u64 n_blksets_in_praid = sraid.cpr->length/LOCKSET_SLICES;
@@ -3265,7 +3265,7 @@ int unitest_scrubRecovery_ec(bunitest_s* B) {
 	sim_kfree(st.inj.blocks[0][0]);
 	sim_kfree(st.restored.block);
 	clientSimulator_wait_for_all_sync_ops(env.client);
-	nvmeibc_warn_on_edic_werification_failure = true;							// Unitest cases edic failure
+	nvmeibc_warn_on_edic_verification_failure = true;							// Unitest cases edic failure
 	nvmeibc_warn_on_parities_sync_missmatch = true;
 	NVMeshSystem_all_clients_dbg_di(sys, false);
 	NVMeshSystem_serialize(sys);
