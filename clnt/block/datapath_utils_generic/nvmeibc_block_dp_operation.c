@@ -69,7 +69,7 @@ static void __compressed_op_trace_end(const struct operation *o, int rv) {
 		} else {
 			NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Operation end: RV: @RV", _I, goodpath_nvmeibc, compressed_op_trace_end_bio_wt, o->dbg_id, rv);
 		}
-		NVMEIBC_IO_PET_MSG_NORM(&o->journal, "end: rv=%d", rv);
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal, "op_end(dbg_id=%u) = %d", o->dbg_id, rv);
 	}
 }
 
