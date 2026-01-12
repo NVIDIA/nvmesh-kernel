@@ -1048,9 +1048,9 @@ static void nvmeibc_profile_event_register(void)
 {
 	int rv;
 #if KS_HAS_PROFILE_EVENT_REGISTER
-	rv = nvmeib_public_profile_event_register(PROFILE_TASK_EXIT, &task_exit_nb);
+	rv = profile_event_register(PROFILE_TASK_EXIT, &task_exit_nb);
 #else
-	rv = nvmeib_public_register_kprobe(&kp_on_do_exit);
+	rv = register_kprobe(&kp_on_do_exit);
 #endif
 	if (rv) {
 		_NI(t_00_cper, DMESG_MOD_PREFIX ": Failed to register to profile-events, mini-elevator will not be usable (rv=@INT)", rv);
@@ -1063,9 +1063,9 @@ static void nvmeibc_profile_event_unregister(void)
 {
 	if (nvmeibc_prof_evt_registered) {
 #if KS_HAS_PROFILE_EVENT_REGISTER
-		nvmeib_public_profile_event_unregister(PROFILE_TASK_EXIT, &task_exit_nb);
+		profile_event_unregister(PROFILE_TASK_EXIT, &task_exit_nb);
 #else
-		nvmeib_public_unregister_kprobe(&kp_on_do_exit);
+		unregister_kprobe(&kp_on_do_exit);
 #endif
 		nvmeibc_prof_evt_registered = false;
 	}

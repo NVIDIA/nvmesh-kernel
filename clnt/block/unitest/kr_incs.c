@@ -400,6 +400,11 @@ out:
 	return ptr;
 }
 
+void __percpu *__alloc_percpu_gfp(size_t size, size_t align, gfp_t gfp) {
+	(void)gfp;
+	return __alloc_percpu(size, align);
+}
+
 void free_percpu(void __percpu *ptr) {
 	void *real_ptr;
 	if (ptr) {
@@ -3247,8 +3252,6 @@ struct blk_plug_cb *blk_check_plugged(blk_plug_cb_fn unplug, void *data, int siz
 	return cb;
 }
 #define __nouse__ __attribute__((__unused__))
-int nvmeib_public_profile_event_register(  __nouse__ enum profile_type type, __nouse__ struct notifier_block *n){return 0;}
-int nvmeib_public_profile_event_unregister(__nouse__ enum profile_type type, __nouse__ struct notifier_block *n){return 0;}
 int local_nic_prio_cmp_fn(__nouse__ void *priv, __nouse__ struct list_head *a, __nouse__ struct list_head *b) { return 0;}
 int nvmeibc_disk_prefix_priority_masks_validate_module_params(void) { return 0; }
 
@@ -3266,6 +3269,17 @@ void nvmeibc_nordda_channel_wq_destroy(void) { }
 
 int nvmeibc_locks_channel_wq_init(void) { return 0; }
 void nvmeibc_locks_channel_wq_destroy(void) { }
+
+//struct workqueue_struct *
+struct workqueue_struct *alloc_workqueue(const char *name, unsigned int flags, int max_active) {
+	(void)name;
+	(void)flags;
+	(void)max_active;
+	return NULL;
+}
+
+int profile_event_register(enum profile_type type, struct notifier_block *n){(void)type; (void)n; return 0;}
+int profile_event_unregister(enum profile_type type, struct notifier_block *n){(void)type; (void)n; return 0;}
 
 /*****************************************************************************/
 // EOF.

@@ -163,7 +163,7 @@ static int vdisk_disabled_work(void *param) {
 	struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)param;
 	char *uevents[] = {VDISK_UEVENT_IO_DISABLE, NULL};
 	_NT(trace_vdisk_disabled_work, "Sending uevent for io disable for @DEV_NAME", dev->name);
-	return nvmeib_public_kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
+	return kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
 									KOBJ_CHANGE, uevents);
 }
 
@@ -171,7 +171,7 @@ static int vdisk_enabled_work(void *param) {
 	struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)param;
 	char *uevents[] = {VDISK_UEVENT_IO_ENABLE, NULL};
 	_NT(trace_vdisk_enabled_work, "Sending uevent for io enable for @DEV_NAME", dev->name);
-	return nvmeib_public_kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
+	return kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
 									KOBJ_CHANGE, uevents);
 }
 

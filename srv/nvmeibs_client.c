@@ -666,7 +666,7 @@ int nvmeibs_client_send_msg(struct nvmeibs_client *cl, struct nvmeibs_net *net,
 	}
 
 	iu->send_size += len;
-	iu->send_time = nvmeib_public_ktime_get();
+	iu->send_time = ktime_get();
 	rv = nvmeibs_ib_post_send(net, &wr, &bad_wr);
 
 out:

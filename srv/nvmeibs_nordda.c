@@ -92,7 +92,7 @@ do {	\
 static void nvmeibs_nr_lat_meas_record_io_cmd_cb(struct nvmeibs_nr_channel *nrch, struct nvmeibs_nr_cmd *cmd) {
 	u64 lat_us;
 	/* Update stats */
-	cmd->lat_meas.comp_time = nvmeib_public_ktime_get();
+	cmd->lat_meas.comp_time = ktime_get();
 	lat_us = ktime_to_us(ktime_sub(cmd->lat_meas.comp_time, cmd->lat_meas.submit_time));
 	NRCH_PCPU_STAT_INC(nrch, n_iops_comp);
 	NRCH_PCPU_STAT_ADD(nrch, tot_lat_us, lat_us);
@@ -103,20 +103,20 @@ static void nvmeibs_nr_lat_meas_record_io_cmd_cb(struct nvmeibs_nr_channel *nrch
 static void nvmeibs_nr_lat_meas_record_io_submit(struct nvmeibs_nr_channel *nrch, struct nvmeibs_nr_cmd *cmd)
 {
 	NRCH_PCPU_STAT_INC(nrch, n_iops_submit);
-	cmd->lat_meas.submit_time = nvmeib_public_ktime_get();
+	cmd->lat_meas.submit_time = ktime_get();
 }
 
 static void nvmeibs_nr_lat_meas_record_send_rsp(struct nvmeibs_nr_channel *nrch, struct nvmeibs_nr_cmd *cmd)
 {
 	(void)nrch;
-	cmd->lat_meas.post_send_time = nvmeib_public_ktime_get();
+	cmd->lat_meas.post_send_time = ktime_get();
 }
 
 static void nvmeibs_nr_lat_meas_record_rx_md(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioctx)
 {
 	if (recv_ioctx->rx_md.valid) {
 		u64 recv_poll_lat_us = ktime_to_us(ktime_sub(recv_ioctx->rx_md.poll_time, recv_ioctx->rx_md.recv_time));
-		u64 recv_submit_lat_us = ktime_to_us(ktime_sub(nvmeib_public_ktime_get(), recv_ioctx->rx_md.recv_time));
+		u64 recv_submit_lat_us = ktime_to_us(ktime_sub(ktime_get(), recv_ioctx->rx_md.recv_time));
 		NRCH_PCPU_STAT_ADD(nrch, tot_recv_poll_lat_us, recv_poll_lat_us);
 		NRCH_PCPU_STAT_MIN_UPDATE(nrch, min_recv_poll_lat_us, recv_poll_lat_us);
 		NRCH_PCPU_STAT_MAX_UPDATE(nrch, max_recv_poll_lat_us, recv_poll_lat_us);
@@ -140,8 +140,8 @@ static void nvmeibs_nr_lat_meas_fill_rx_md(const struct ib_wc *recv_wc, struct n
 		&recv_ioctx->rx_md.queue,
 		&recv_ioctx->rx_md.skb_hash))) {
 		/* Did not get MD from SIW MD, fill it as best we can */
-		recv_ioctx->rx_md.recv_time = nvmeib_public_ktime_get();
-		recv_ioctx->rx_md.poll_time = nvmeib_public_ktime_get();
+		recv_ioctx->rx_md.recv_time = ktime_get();
+		recv_ioctx->rx_md.poll_time = ktime_get();
 		recv_ioctx->rx_md.cpu = smp_processor_id();
 		recv_ioctx->rx_md.valid = true;
 	}
@@ -158,7 +158,7 @@ static void nvmeibs_nr_lat_meas_record_send_comp(const struct ib_wc *wc_send, st
 	ktime_t post_send_time;
 	ktime_t sent_time;
 	ktime_t ack_time;
-	ktime_t send_comp_time = nvmeib_public_ktime_get();
+	ktime_t send_comp_time = ktime_get();
 	u64 send2comp_us;
 	u16 tx_cpu;
 
@@ -1338,7 +1338,7 @@ static inline void cmd_stats_md_on_send_rsp(struct nvmeibs_nr_cmd *cmd)
 	struct nvmeibs_nr_cmd_stats_md *stats_md_head = &CMD_STATS_MD_HEAD(cmd);
 
 	__NFIN;
-	stats_md_head->send_rsp_time = nvmeib_public_ktime_get();
+	stats_md_head->send_rsp_time = ktime_get();
 	
 	/* Set to valid and increment the producer */
 	stats_md_head->valid = true;
@@ -3347,7 +3347,7 @@ static void nordda_record_io_stats(struct nvmeibs_nr_cmd *cmd, u16 version)
 			/* Found it */
 			if (stats_md->stat_verb < N_IO_STAT_VERBS) {
 				ktime_t start_time = stats_md->send_rsp_time;
-				ktime_t end_time = nvmeib_public_ktime_get();
+				ktime_t end_time = ktime_get();
 				u64 lat = ktime_after(end_time, start_time) ? ktime_to_ns(ktime_sub(end_time, start_time)) : 0;
 				u64 size = stats_md->stat_verb == IO_STAT_VERB_GEN_TX ? stats_md->send_rsp_len : stats_md->io_xfer_size;
 
@@ -3365,7 +3365,7 @@ static void nordda_record_gen_no_rdma_stats(struct nvmeibs_nr_channel *nrch, str
 {
 	struct nvmeib_io_stats *stats = nrch->rionic->lionic->port->nis_dev->stats;
 	ktime_t start_time = send_ioctx->send_time;
-	ktime_t end_time = nvmeib_public_ktime_get();
+	ktime_t end_time = ktime_get();
 	u64 lat = ktime_after(end_time, start_time) ? ktime_to_ns(ktime_sub(end_time, start_time)) : 0;
 
 	nvmeib_io_stats_adjust_and_update(stats, NULL, IO_STAT_VERB_GEN_TX, send_ioctx->send_size, lat, false);
@@ -4894,7 +4894,7 @@ struct workqueue_struct *nvmeibs_nordda_kwq;
 void nvmeibs_nordda_kwq_flush(void)
 {
 	if (nvmeibs_nordda_kwq)
-		nvmeib_public_flush_workqueue(nvmeibs_nordda_kwq);
+		flush_workqueue(nvmeibs_nordda_kwq);
 }
 EXPORT_SYMBOL(nvmeibs_nordda_kwq_flush);
 
@@ -4909,7 +4909,7 @@ int nvmeibs_nordda_kwq_init(void)
 	}
 
 	if (nvmeibs_nordda_kernel_wq_unbound) {
-		nvmeibs_nordda_kwq = nvmeib_public_alloc_workqueue("nvmeibs_nordda",
+		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda",
 			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS,
 			WQ_UNBOUND_MAX_ACTIVE);
 	} else {
@@ -4933,8 +4933,8 @@ EXPORT_SYMBOL(nvmeibs_nordda_kwq_init);
 void nvmeibs_nordda_kwq_exit(void)
 {
 	if (nvmeibs_nordda_kwq) {
-		nvmeib_public_flush_workqueue(nvmeibs_nordda_kwq);
-		nvmeib_public_destroy_workqueue(nvmeibs_nordda_kwq);
+		flush_workqueue(nvmeibs_nordda_kwq);
+		destroy_workqueue(nvmeibs_nordda_kwq);
 		nvmeibs_nordda_kwq = NULL;
 		_NT(trace_main_nordda_kwq_exit, "Destroyed nordda kernel workqueue");
 	}

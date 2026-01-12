@@ -45,7 +45,7 @@ static void update_work_type_stats_exec_start(struct nvmeibs_serjio_stats *stats
     unsigned long flags = 0;
     spin_lock_irqsave(&stats->lock, flags);
     stats->io_stats[work_type].current_work_stats = (struct nvmeibs_serjio_work_type_io_stats){0};
-    stats->io_stats[work_type].current_work_stats.t_start = nvmeib_public_ktime_get();
+    stats->io_stats[work_type].current_work_stats.t_start = ktime_get();
 
     increase_work_count(&stats->work_stats_by_type[work_type].works_exec_time);
     spin_unlock_irqrestore(&stats->lock, flags);
@@ -142,7 +142,7 @@ void nvmeibs_serjio_update_work_stats_completed(struct nvmeibs_serjio_work_stats
     u64 time_queued = 0;
     u64 io_duration = 0;
 
-    work_stats->t_exec_end = nvmeib_public_ktime_get();
+    work_stats->t_exec_end = ktime_get();
     work_stats->success = (rv == 0);
 
     BUG_ON(work_stats->t_queued == 0);
@@ -158,13 +158,13 @@ void nvmeibs_serjio_update_work_stats_completed(struct nvmeibs_serjio_work_stats
 
 void nvmeibs_serjio_update_work_stats_queued(struct nvmeibs_serjio_work_stats *work_stats, struct nvmeibs_serjio_stats *serjio_stats)
 {
-    work_stats->t_queued = nvmeib_public_ktime_get();
+    work_stats->t_queued = ktime_get();
     update_work_type_stats_queued_start(serjio_stats, work_stats->work_type);
 }
 
 void nvmeibs_serjio_update_work_stats_exec(struct nvmeibs_serjio_work_stats *work_stats, struct nvmeibs_serjio_stats *serjio_stats)
 {
-    work_stats->t_exec_start = nvmeib_public_ktime_get();
+    work_stats->t_exec_start = ktime_get();
     update_work_type_stats_exec_start(serjio_stats, work_stats->work_type);
 }
 
@@ -176,7 +176,7 @@ void nvmeibs_serjio_update_work_stats_resched(struct nvmeibs_serjio_work_stats *
 
 void nvmeibs_serjio_state_init(struct nvmeibs_serjio_stats *serjio_stats, enum nvmeibs_serjio_state state)
 {
-    serjio_stats->states_stats[state].t_start = nvmeib_public_ktime_get();
+    serjio_stats->states_stats[state].t_start = ktime_get();
     increase_work_count(&serjio_stats->states_stats[state].state_stats);
 }
 
@@ -224,8 +224,8 @@ void nvmeibs_serjio_on_state_change(struct nvmeibs_serjio_stats *serjio_stats, e
     unsigned long flags = 0;
     u64 duration;
     spin_lock_irqsave(&serjio_stats->lock, flags);
-    serjio_stats->states_stats[new_state].t_start = nvmeib_public_ktime_get();
-    duration = ktime_sub(nvmeib_public_ktime_get(), serjio_stats->states_stats[old_state].t_start);
+    serjio_stats->states_stats[new_state].t_start = ktime_get();
+    duration = ktime_sub(ktime_get(), serjio_stats->states_stats[old_state].t_start);
     increase_work_count(&serjio_stats->states_stats[new_state].state_stats);
     update_new_value(&serjio_stats->states_stats[old_state].state_stats, duration);
     spin_unlock_irqrestore(&serjio_stats->lock, flags);
@@ -249,7 +249,7 @@ void nvmeibs_serjio_work_type_submit_io_success(struct nvmeibs_serjio_stats *ser
         BUG_ON(1);
     }
     if (serjio_stats->io_stats[work_type].current_work_stats.t_start == 0) {
-        serjio_stats->io_stats[work_type].current_work_stats.t_start = nvmeib_public_ktime_get();
+        serjio_stats->io_stats[work_type].current_work_stats.t_start = ktime_get();
     }
     spin_unlock_irqrestore(&serjio_stats->lock, flags);
 }
@@ -604,7 +604,7 @@ void nvmeibs_serjio_update_io_stats_on_rsrc_completion(struct nvmeibs_serjio_sta
                                             struct nvmeibs_serjio_op_rsrc_stats *op_rsrc_stats)
 {
     unsigned long flags = 0;
-    ktime_t t_completion = nvmeib_public_ktime_get();
+    ktime_t t_completion = ktime_get();
     ktime_t duration = 0;
     spin_lock_irqsave(&serjio_stats->lock, flags);
     duration = ktime_sub(t_completion, op_rsrc_stats->t_start);

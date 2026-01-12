@@ -1788,7 +1788,7 @@ static int iwarp_find_path_sock_send_resp(struct find_path_sock_cep *cep)
 			iw_dev->name);
 	} else {
 		memcpy(resp.netdev_name, iw_ndev->name, IFNAMSIZ);
-		nvmeib_public_dev_put(iw_ndev);
+		dev_put(iw_ndev);
 	}
 
 	memcpy(resp.key, find_path_prot_key, sizeof(resp.key));
@@ -2466,7 +2466,7 @@ dec_ref:
 
 out:
 	if (iw_ndev)
-		nvmeib_public_dev_put(iw_ndev);
+		dev_put(iw_ndev);
 	NFOUT;
 	return rv;
 }
@@ -3344,7 +3344,7 @@ bool nvmeib_rdma_try_inv_cm(struct nvmeib_rdma_cm *cm)
 				spin_unlock_irqrestore(&roce_conn->conn.lock, flags);
 				/* Move the QP to error state to cancel the in-progress CM operation */
 				ib_set_qp_err(roce_conn->conn.qp);
-				roce_conn->iw_cm_inv_stats.start_wait = nvmeib_public_ktime_get();
+				roce_conn->iw_cm_inv_stats.start_wait = ktime_get();
 				/* Wait for event */
 				if ((rv_w = wait_for_completion_interruptible_timeout(&done, wait_cm_inv_timeout)) <= 0) {
 					spin_lock_irqsave(&roce_conn->conn.lock, flags);
@@ -3356,7 +3356,7 @@ bool nvmeib_rdma_try_inv_cm(struct nvmeib_rdma_cm *cm)
 					BUG_ON(1);
 					goto out;
 				}
-				roce_conn->iw_cm_inv_stats.end_wait = nvmeib_public_ktime_get();
+				roce_conn->iw_cm_inv_stats.end_wait = ktime_get();
 				if (roce_conn->conn.dev->iw_cm_id_inv_stats_priv) {
 					/* Update stats for iw_cm invalidate */
 					struct iw_cm_inv_stats *stats = roce_conn->conn.dev->iw_cm_id_inv_stats_priv;
@@ -7167,7 +7167,7 @@ static int fill_rdma_port_gid(struct ib_device *ib_device, u8 port,
 		else
 			port_gid->vlan_id = 0;
 		if (do_ndev_put) /* ndev is from get_netdev -> put */
-			nvmeib_public_dev_put(ndev);
+			dev_put(ndev);
 	}
 	else {
 		port_gid->ndev_name[0] = 0;
@@ -7651,7 +7651,7 @@ next_gid:
 			rdma_put_gid_attr((const struct ib_gid_attr *)gid_attr_ptr);
 #elif IB_QUERY_ROCE_GID_DOES_DEV_HOLD
 		if (gid_attr_ptr && gid_attr.ndev)
-			nvmeib_public_dev_put(gid_attr.ndev);
+			dev_put(gid_attr.ndev);
 #endif
 		if (rdma_port_gid->valid)
 			break;
@@ -7878,7 +7878,7 @@ static int internal_netdev_event(struct notifier_block *nb, unsigned long event,
 			port = i;
 			if (event == NETDEV_UNREGISTER) {
 #if IB_QUERY_ROCE_GID_DOES_DEV_HOLD
-				nvmeib_public_dev_put(port_data[port].ndev);
+				dev_put(port_data[port].ndev);
 #endif
 				port_data[port].ndev = NULL;
 				handler_private->n_ndev_ports--;
@@ -8113,7 +8113,7 @@ int nvmeib_rdma_unregister_event_handler(struct nvmeib_rdma_event_handler *handl
 		for (i = 1; i <= ib_dev->phys_port_cnt; i++, port_data++) {
 			if (port_data->ndev) {
 #if IB_QUERY_ROCE_GID_DOES_DEV_HOLD
-				nvmeib_public_dev_put(port_data->ndev);
+				dev_put(port_data->ndev);
 #endif
 				port_data->ndev = NULL;
 			}

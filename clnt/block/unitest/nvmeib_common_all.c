@@ -161,7 +161,6 @@ void nvmeibc_ib_net_intr_shaper_destroy(void){
 
 /********************* common_public/nvmeib_public.h **************************/
 // Implementation of #include "nvmeib_public.h"
-int nvmeib_public_cache_line_size(void) { return sizeof(unsigned long); }
 
 int nvmeib_public_debug_level(void) {
 	return nvmeib_debug_level(); // Daniel: use the same param of nvmeibc for nvmeib
@@ -190,9 +189,6 @@ void nvmeib_public_user_pages_for_io_unpin(int n_pages, struct page **pages, int
 		put_page(pages[i]);
 }
 
-void __percpu *__nvmeib_public_alloc_percpu(size_t size, size_t align){ return __alloc_percpu(size, align); }
-void __percpu *__nvmeib_public_alloc_percpu_zeroed(size_t size, size_t align) { return __alloc_percpu(size, align); }
-void nvmeib_public_free_percpu(void __percpu *ptr) { return free_percpu(ptr); }
 bool nvmeib_public_serial_console(void){ return false; }
 
 /* Common EC functions to client and server filled as function pointer*/
@@ -539,13 +535,6 @@ unsigned int nvmeib_get_tcp_base_port_id(void) {
 	return NVMEIB_EXCELERO_IWARP_PORT_ID;
 }
 
-int nvmeib_public_kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp_ext[])
-{
-	(void) kobj;
-	(void) action;
-	(void) envp_ext;
-	return 0;
-}
 
 int nvmeib_buffer_alloc_sgl_from_pages(struct nvmeib_buffer *buf, struct page **pages,
 				       unsigned int n_pages, unsigned int size, unsigned int offset, gfp_t gfp_mask)
@@ -567,22 +556,12 @@ out:
 	return rv;
 }
 
-struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *name, unsigned int flags, int max_active)
+int kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp[])
 {
-	(void)name;
-	(void)flags;
-	(void)max_active;
-	return NULL;
-}
-
-void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq)
-{
-	(void)wq;
-}
-
-void nvmeib_public_flush_workqueue(struct workqueue_struct *wq)
-{
-	(void)wq;
+	(void)kobj;
+	(void)action;
+	(void)envp;
+	return 0;
 }
 
 /*****************************************************************************/

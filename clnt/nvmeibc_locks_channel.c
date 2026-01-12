@@ -462,7 +462,7 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 	if (ch) {
 		if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-			nvmeib_public_destroy_workqueue(ch->callback_wq);
+			destroy_workqueue(ch->callback_wq);
 #else
 			wq_destroy(ch->callback_wq);
 #endif
@@ -470,14 +470,14 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 		}
 
 		if (ch->_2nd_ch_pcpu_wq) {
-			nvmeib_public_destroy_workqueue(ch->_2nd_ch_pcpu_wq);
+			destroy_workqueue(ch->_2nd_ch_pcpu_wq);
 			ch->_2nd_ch_pcpu_wq = NULL;
 		}
 		for (i = 0; i < NVMEIB_N_2ND_LOCK_CHS; i++) {
 			if (ch->_2nd_ch[i]) {
 				if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-					nvmeib_public_destroy_workqueue(ch->callback_wq);
+					destroy_workqueue(ch->callback_wq);
 #else
 					wq_destroy(ch->callback_wq);
 #endif
@@ -564,7 +564,7 @@ static struct nvmeibc_locks_channel *alloc(
 	}
 
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-	if (!(ch->callback_wq = nvmeib_public_alloc_workqueue("lock_cb_wq", WQ_UNBOUND, 0)))
+	if (!(ch->callback_wq = alloc_workqueue("lock_cb_wq", WQ_UNBOUND, 0)))
 #else
 	if (!(ch->callback_wq = wq_create(proc_name_format("C", "WQ", "lock_cb"))))
 #endif
@@ -600,7 +600,7 @@ static struct nvmeibc_locks_channel *alloc(
 			goto out_err;
 		}
 		if (ch->_2nd_ch_pcpu_lockless && 
-			!(ch->_2nd_ch_pcpu_wq = nvmeib_public_alloc_workqueue("lock_pcpu_wq", 0, 0))) 
+			!(ch->_2nd_ch_pcpu_wq = alloc_workqueue("lock_pcpu_wq", 0, 0))) 
 		{
 			_NE(error_3_locks_channel_alloc, "cannot allocate pcpu wq");
 			goto out_err;
@@ -621,11 +621,11 @@ out_err:
 		free_cpumask_var(ch->_2nd_ch_pcpu_mask);
 
 		if (ch->_2nd_ch_pcpu_wq)
-			nvmeib_public_destroy_workqueue(ch->_2nd_ch_pcpu_wq);
+			destroy_workqueue(ch->_2nd_ch_pcpu_wq);
 
 		if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-			nvmeib_public_destroy_workqueue(ch->callback_wq);
+			destroy_workqueue(ch->callback_wq);
 #else
 			wq_destroy(ch->callback_wq);
 #endif
@@ -1682,7 +1682,7 @@ static void free_2nd_ch(struct nvmeibc_locks_channel *ch)
 {
 	if (ch->callback_wq) {
 		#if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-		nvmeib_public_destroy_workqueue(ch->callback_wq);
+		destroy_workqueue(ch->callback_wq);
 		#else
 		wq_destroy(ch->callback_wq);
 		#endif

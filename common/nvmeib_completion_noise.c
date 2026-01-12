@@ -153,7 +153,7 @@ static enum hrtimer_restart percpu_noise_measurement_hrtimer_callback(struct hrt
 
 	local_irq_save(flags);
 
-	current_cycles = nvmeib_public_get_cycles();
+	current_cycles = get_cycles();
 	cycles_per_interval = current_cycles - stats->cycles_start_interval;
 	       
 	process_threshold_levels(stats->accumulated_noisy_cycles, cycles_per_interval, current_cycles, stats->threshold_levels);
@@ -162,13 +162,13 @@ static enum hrtimer_restart percpu_noise_measurement_hrtimer_callback(struct hrt
 	/* Reset accumulated cycles for next interval */
 	stats->accumulated_noisy_cycles = 0;
 	stats->accumulated_local_noisy_cycles = 0;
-	stats->cycles_start_interval = nvmeib_public_get_cycles();
+	stats->cycles_start_interval = get_cycles();
 
 	local_irq_restore(flags);
 
 	/* Reschedule this CPU's hrtimer */
 	interval = ms_to_ktime(nvmeib_completion_noise_measurement_interval_ms);
-	nvmeib_public_hrtimer_forward(timer, hrtimer_cb_get_time(timer), interval);
+	hrtimer_forward(timer, hrtimer_cb_get_time(timer), interval);
 	return HRTIMER_RESTART;
 }
 
@@ -176,7 +176,7 @@ static void nvmeib_completion_noise_reset_cpu_stats(struct nvmeib_completion_noi
 {
 	int i;
 	struct nvmeib_completion_noise_stats *stats = &noise->stats;
-	u64 current_cycles = nvmeib_public_get_cycles();
+	u64 current_cycles = get_cycles();
 	
 	/* Reset stats without touching the timer - just memset the stats struct */
 	memset(stats, 0, sizeof(*stats));
@@ -197,7 +197,7 @@ static void nvmeib_completion_noise_reset_cpu_stats(struct nvmeib_completion_noi
 static void nvmeib_completion_noise_init_cpu_timer(struct nvmeib_completion_noise_pcpu *noise)
 {
 	/* Initialize per-CPU high-resolution timer pinned to this CPU */
-	nvmeib_public_hrtimer_init(&noise->measurement_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	hrtimer_init(&noise->measurement_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
 	noise->measurement_hrtimer.function = percpu_noise_measurement_hrtimer_callback;
 }
 
@@ -209,7 +209,7 @@ static void nvmeib_completion_noise_init_cpu(struct nvmeib_completion_noise_pcpu
 
 static void __start_timer(struct nvmeib_completion_noise_pcpu *noise)
 {
-	nvmeib_public_hrtimer_start(&noise->measurement_hrtimer, 
+	hrtimer_start(&noise->measurement_hrtimer, 
 		      ms_to_ktime(nvmeib_completion_noise_measurement_interval_ms), 
 		      HRTIMER_MODE_REL_PINNED);
 }
@@ -237,7 +237,7 @@ static void stop_cpu_timer(void *unused)
 
 	BUG_ON(!completion_noise_stats);
 	noise = this_cpu_ptr(completion_noise_stats);
-	nvmeib_public_hrtimer_cancel(&noise->measurement_hrtimer);
+	hrtimer_cancel(&noise->measurement_hrtimer);
 }
 
 int nvmeib_completion_noise_init(void)
@@ -315,7 +315,7 @@ void nvmeib_completion_noise_start(enum nvmeib_noise_type type)
 	local_irq_save(flags);
 	noise = this_cpu_ptr(completion_noise_stats);
 	stats = &noise->stats;
-	current_cycles = nvmeib_public_get_cycles();
+	current_cycles = get_cycles();
 
 	switch (type) {
 	case NVMEIB_NOISE_COMPLETION:
@@ -364,7 +364,7 @@ void nvmeib_completion_noise_end(enum nvmeib_noise_type type, const unsigned lon
 
 	noise = this_cpu_ptr(completion_noise_stats);
 	stats = &noise->stats;
-	end_cycles = nvmeib_public_get_cycles();
+	end_cycles = get_cycles();
 
 	switch (type) {
 	case NVMEIB_NOISE_COMPLETION:
@@ -591,7 +591,7 @@ static void reset_cpu_noise_data(void *unused)
 	
 	local_irq_disable();
 	noise = this_cpu_ptr(completion_noise_stats);
-	nvmeib_public_hrtimer_cancel(&noise->measurement_hrtimer);
+	hrtimer_cancel(&noise->measurement_hrtimer);
 	nvmeib_completion_noise_reset_cpu_stats(noise);
 	__start_timer(noise);
 	local_irq_enable();

@@ -3501,7 +3501,7 @@ static int submit_nvme_op_rsrc_to_disk(struct nvme_op_rsrc *op_rsrc, enum nvme_o
 	BUG_ON(op_rsrc->nvme_req.data_len > (unsigned)(op_rsrc->n_data_pgs << PAGE_SHIFT));
 
 	nvme_op_rsrc_chng_state(op_rsrc, exp_op_state, NVME_OP_POSTED);
-	op_rsrc->op_rsrc_stats.t_start = nvmeib_public_ktime_get();
+	op_rsrc->op_rsrc_stats.t_start = ktime_get();
 	if ((rv = nvmeibs_serjio_update_disk(serjio_pd->di, &op_rsrc->nvme_req)) < 0) {
 		nvme_op_rsrc_chng_state(op_rsrc, NVME_OP_POSTED, NVME_OP_ERROR);
 		nvmeibs_serjio_work_type_submit_io_fail(&serjio_pd->stats, serjio_pd->current_work_type, nvme_op);

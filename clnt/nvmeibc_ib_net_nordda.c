@@ -1042,7 +1042,7 @@ static int execute_gen_send_request_signaled(struct nvmeibc_ib_net_nordda *net,
 	nvmeibc_ib_nordda_channel_req_start_wd(info);
 	if (!net->base.dev_cq)
 		nvmeibc_ib_net_req_notify_send_cq(&net->base);
-	gen_cmd->send_time = nvmeib_public_ktime_get();
+	gen_cmd->send_time = ktime_get();
 	if ((rv = nvmeibc_ib_post_send(&net->base,
 			nvmeib_send_wr_to_ib_ptr(*first_wr), &bad_wr)) < 0) {
 		_NE(error_3_ib_net_nordda_execute_gen_send_request_signaled, "Fail to send gen command on nordda channel @RV", rv);

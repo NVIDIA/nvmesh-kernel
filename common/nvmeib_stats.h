@@ -24,13 +24,13 @@ static inline void nvmeib_stats_init(struct nvmeib_stats *st) {
 }
 
 static inline void nvmeib_stats_set_start(struct nvmeib_stats *st) {
-	st->start_t = nvmeib_public_ktime_get();
+	st->start_t = ktime_get();
 }
 static inline bool nvmeib_stats_is_start(struct nvmeib_stats *st) {
 	return (ktime_to_ns(st->start_t) != 0);
 }
 static inline void nvmeib_stats_set_end(struct nvmeib_stats *st) {
-	st->end_t = nvmeib_public_ktime_get();
+	st->end_t = ktime_get();
 }
 
 static inline s64 nvmeib_stats_sum_dt_ns(struct nvmeib_stats *st) {
@@ -47,14 +47,14 @@ static inline void nvmeib_stats_measure(struct nvmeib_stats *st) {
 #endif
 
 static inline void nvmeib_stats_measureq(struct nvmeib_stats *st) {
-	st->last_dt = ktime_sub(nvmeib_public_ktime_get(), st->start_t);
+	st->last_dt = ktime_sub(ktime_get(), st->start_t);
 	st->sum_dt = ktime_add(st->sum_dt, st->last_dt);
 	++st->counts;
 }
 
 #ifdef NVMEIB_STATUS_USE_EXTENDED
 static inline void nvmeib_stats_measureq_ext(struct nvmeib_stats *st) {
-	st->sum_dt_ext = ktime_add(st->sum_dt_ext, ktime_sub(nvmeib_public_ktime_get(), st->start_t));
+	st->sum_dt_ext = ktime_add(st->sum_dt_ext, ktime_sub(ktime_get(), st->start_t));
 	++st->counts_ext;
 }
 
@@ -76,7 +76,7 @@ static inline void nvmeib_stop_watch_init(struct nvmeib_stop_watch *st) {
 }
 
 static inline void nvmeib_stop_watch_start(struct nvmeib_stop_watch *st) {
-	st->start_t = nvmeib_public_ktime_get();
+	st->start_t = ktime_get();
 }
 
 static inline bool nvmeib_stop_watch_is_start(struct nvmeib_stop_watch *st) {
@@ -84,7 +84,7 @@ static inline bool nvmeib_stop_watch_is_start(struct nvmeib_stop_watch *st) {
 }
 
 static inline void nvmeib_stop_watch_stop(struct nvmeib_stop_watch *st) {
-	ktime_t end_t = nvmeib_public_ktime_get();
+	ktime_t end_t = ktime_get();
 
 	#if defined(DBLKDEV_SIMULATOR) && DBLKDEV_SIMULATOR==1
 		BUG_ON(nvmeib_stop_watch_is_start(st) == false);

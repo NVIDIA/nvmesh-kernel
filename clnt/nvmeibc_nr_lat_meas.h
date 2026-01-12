@@ -118,7 +118,7 @@ static inline void nvmeibc_nr_lat_meas_init_req(struct nvmeibc_nr_lat_meas_nrch_
 
 static inline void nvmeibc_nr_lat_meas_sq_post(struct nvmeibc_nr_lat_meas_nrch_req_meas *lat_meas)
 {
-	lat_meas->sq_post_time = nvmeib_public_ktime_get();
+	lat_meas->sq_post_time = ktime_get();
 }
 
 static inline void nvmeibc_nr_lat_meas_send_comp(struct nvmeibc_nr_lat_meas_nrch_req_meas *lat_meas,
@@ -147,15 +147,15 @@ static inline void nvmeibc_nr_lat_meas_recv_comp(struct nvmeibc_nr_lat_meas_nrch
 		&lat_meas->rx_queue,
 		&lat_meas->rx_skb_hash)) {
 
-		lat_meas->recv_time = nvmeib_public_ktime_get();
-		lat_meas->rcq_poll_time = nvmeib_public_ktime_get();
+		lat_meas->recv_time = ktime_get();
+		lat_meas->rcq_poll_time = ktime_get();
 		lat_meas->rx_cpu = smp_processor_id();
 	}
 }
 
 static inline void nvmeibc_nr_lat_meas_recv_comp_process(struct nvmeibc_nr_lat_meas_nrch_req_meas *lat_meas)
 {
-	lat_meas->recv_comp_time = nvmeib_public_ktime_get();
+	lat_meas->recv_comp_time = ktime_get();
 }
 
 static inline void nvmeibc_nr_lat_meas_update_nrch_pcpu_data(

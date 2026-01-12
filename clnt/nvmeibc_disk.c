@@ -2212,7 +2212,7 @@ static void free_dirty_bits_mem(struct nvmeibc_disk *disk)
 	unmap_disk_ec_dirty_bits(disk);
 
 	if (disk->db.virt) {
-		nvmeib_public_vunmap(disk->db.virt);
+		vunmap(disk->db.virt);
 		disk->db.virt = NULL;
 	}
 	sg_free_table(&disk->db.dirty_bits_mem.sgt);
@@ -2390,7 +2390,7 @@ int nvmeibc_disk_create_remote(struct nvmeibc_ib_admin_channel *ach,
 		info = kzalloc(sizeof(*info), GFP_KERNEL);
 		hcaa = kzalloc(sizeof(*hcaa) * p, GFP_KERNEL);
 		rscs = n ? kzalloc(sizeof(*rscs) * n, GFP_KERNEL) : NULL;
-		pcpu_wq = disk->pcpu_nrchs_ll ? nvmeib_public_alloc_workqueue("pcpu_wq", 0, 0) : NULL;
+		pcpu_wq = disk->pcpu_nrchs_ll ? alloc_workqueue("pcpu_wq", 0, 0) : NULL;
 		cinfo = disk->coremask_support ? alloc_coremask_info(disk) : NULL;
 		if (!(info && hcaa && (!n || rscs) && (!disk->pcpu_nrchs_ll || pcpu_wq) && (!disk->coremask_support || cinfo))) {
 			_NE(error_disk_nvmeibc_disk_create_remote, "Failed to allocate disk info");
@@ -2458,7 +2458,7 @@ int nvmeibc_disk_create_remote(struct nvmeibc_ib_admin_channel *ach,
 no_mem:
 	kfree(cinfo);
 	if (pcpu_wq)
-		nvmeib_public_destroy_workqueue(pcpu_wq);
+		destroy_workqueue(pcpu_wq);
 	if (rscs)
 		kfree(rscs);
 	if (hcaa) {
@@ -5918,7 +5918,7 @@ static void execute_io_local_cb(void *arg, int status, u32 result)
 	bool in_interrupt = in_interrupt();
 	const struct nvmeib_cpu_mask cpus = block_cmd->reqs[0].cpu_mask_info->mask;
 	int comp_code;
-	ktime_t end_ts = nvmeib_public_ktime_get();
+	ktime_t end_ts = ktime_get();
 #if defined(TAKE_STATS)
 	unsigned long flags;
 #endif
@@ -7282,7 +7282,7 @@ static inline int execute_io(struct nvmeibc_disk *disk,
 		}
 	}
 
-	block_cmd->disk_cmd.start_ts = nvmeib_public_ktime_get();
+	block_cmd->disk_cmd.start_ts = ktime_get();
 	block_cmd->disk = disk;					// Todo, functions which accept 'cmd' dont need 'disk' param
 
 	disk_cmd_link_init(&block_cmd->disk_cmd);
@@ -10250,7 +10250,7 @@ static void free_disk_rsc(struct nvmeibc_disk *disk)
 		}
 		up_write(&info->ch->segments_locks_remote.guard);
 		if (info->pcpu_wq)
-			nvmeib_public_destroy_workqueue(info->pcpu_wq);
+			destroy_workqueue(info->pcpu_wq);
 		free_coremask_info(info->coremask_info);
 		kfree(info);
 	}

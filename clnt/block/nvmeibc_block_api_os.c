@@ -367,7 +367,7 @@ static int __ioctl_by_bdev(struct block_device *bdev, unsigned cmd, unsigned lon
 	res = blkdev_ioctl(bdev, 0, cmd, arg);
 	set_fs(old_fs);
 #else
-	res = nvmeib_blkdev_ioctl(bdev, 0, cmd, arg);
+	res = blkdev_ioctl(bdev, 0, cmd, arg);
 #endif
 	return res;
 }
@@ -737,7 +737,7 @@ static void start_stats(struct bio *bio)
 
 	if (blk_queue_io_stat(disk->queue)) {
 		#if KS_HAS_BIO_START_IO_ACCT
-			nvmeib_public_bio_start_io_acct(bio);
+			bio_start_io_acct(bio);
 		#elif KS_GENERIC_IO_ACCT
 			#if KS_GENERIC_IO_ACCT_REQ_Q
 				generic_start_io_acct(disk->queue, bio_data_dir(bio), bio_sectors(bio), &disk->part0);
@@ -781,7 +781,7 @@ static void end_stats(struct bio *bio, struct gendisk *disk, unsigned long start
 {
 	if (blk_queue_io_stat(disk->queue)) {
 		#if KS_HAS_BIO_START_IO_ACCT
-			nvmeib_public_bio_end_io_acct(bio, start_time);
+			bio_end_io_acct(bio, start_time);
 		#else
 			#if KS_GENERIC_IO_ACCT
 				#if KS_GENERIC_IO_ACCT_REQ_Q

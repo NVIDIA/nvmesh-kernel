@@ -227,16 +227,6 @@ bool nvmeib_mlx_on_demand_paging(void) {
 }
 EXPORT_SYMBOL(nvmeib_mlx_on_demand_paging);
 
-void nvmeib_public_vunmap(void *vaddr) {
-	if (vaddr) vunmap(vaddr);
-}
-EXPORT_SYMBOL(nvmeib_public_vunmap);
-
-void* nvmeib_public_vzalloc(unsigned long size) {
-	return vzalloc(size);
-}
-EXPORT_SYMBOL(nvmeib_public_vzalloc);
-
 static void __print_hooray(bool is_start, const char* mod_name)
 {	/* Hooray */
 	const char *ur = ((is_start) ? "registered" : "unregistered");		// Consider up/down
@@ -369,20 +359,7 @@ static void __exit nvmeib_public_module_exit(void) /* Destructor */
 	__print_hooray(false, "nvmeib_common_public");
 }
 
-void __percpu* __nvmeib_public_alloc_percpu(size_t size, size_t align) {
-	return __alloc_percpu(size, align);
-}
-EXPORT_SYMBOL(__nvmeib_public_alloc_percpu);
-
-void nvmeib_public_free_percpu(void __percpu *ptr) {
-	return free_percpu(ptr);
-}
-EXPORT_SYMBOL(nvmeib_public_free_percpu);
-
-void __percpu* __nvmeib_public_alloc_percpu_zeroed(size_t size, size_t align) {
-	return __alloc_percpu_gfp(size, align, GFP_KERNEL | __GFP_ZERO);
-}
-EXPORT_SYMBOL(__nvmeib_public_alloc_percpu_zeroed);
+/* percpu convenience wrappers remain for type casting */
 
 void nvmeib_public_uuid_gen(uuid_be *bu) {
 #if KS_HAS_UUID_BE_GEN
@@ -438,12 +415,6 @@ bool nvmeib_public_serial_console(void) {
 }
 EXPORT_SYMBOL(nvmeib_public_serial_console);
 
-int nvmeib_get_user_pages_fast(unsigned long start, int nr_pages, int write,
-							   struct page **pages) {
-	return get_user_pages_fast(start, nr_pages, write, pages);
-}
-EXPORT_SYMBOL(nvmeib_get_user_pages_fast);
-
 int nvmeib_public_generic_post_send_atomic(struct ib_qp *ibqp,
 										   struct nvmeib_send_wr *wr,
 										   struct nvmeib_send_wr **bad_wr)
@@ -460,15 +431,6 @@ int nvmeib_public_generic_post_send_atomic(struct ib_qp *ibqp,
 }
 EXPORT_SYMBOL(nvmeib_public_generic_post_send_atomic);
 
-ktime_t nvmeib_public_ktime_get(void) {
-	return ktime_get();
-}
-EXPORT_SYMBOL(nvmeib_public_ktime_get);
-
-ktime_t nvmeib_public_ktime_get_raw(void) {
-	return ktime_get_raw();
-}
-EXPORT_SYMBOL(nvmeib_public_ktime_get_raw);
 
 /*
  * Must be called under rcu_read_lock().
@@ -717,67 +679,6 @@ extern struct workqueue_struct *system_wq __read_mostly;
 extern struct workqueue_struct *system_unbound_wq __read_mostly;
 #endif
 
-int nvmeib_schedule_delayed_work(struct delayed_work *dwork,
-								 unsigned long delay) {
-	return queue_delayed_work(system_wq, dwork, delay);
-}
-EXPORT_SYMBOL(nvmeib_schedule_delayed_work);
-
-bool nvmeib_public_mod_delayed_work(struct workqueue_struct *wq,
-				     struct delayed_work *dwork, unsigned long delay) {
-	return mod_delayed_work(wq, dwork, delay);
-}
-EXPORT_SYMBOL(nvmeib_public_mod_delayed_work);
-
-struct workqueue_struct *nvmeib_public_get_system_unbound_wq(void)
-{
-	return system_unbound_wq;
-}
-EXPORT_SYMBOL(nvmeib_public_get_system_unbound_wq);
-
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wformat-security"
-#endif
-struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *fmt, unsigned int flags, int max_active)
-{
-	return alloc_workqueue(fmt, flags, max_active);
-}
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-EXPORT_SYMBOL(nvmeib_public_alloc_workqueue);
-
-void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq)
-{
-	destroy_workqueue(wq);
-}
-EXPORT_SYMBOL(nvmeib_public_destroy_workqueue);
-
-void nvmeib_public_flush_workqueue(struct workqueue_struct *wq)
-{
-	flush_workqueue(wq);
-}
-EXPORT_SYMBOL(nvmeib_public_flush_workqueue);
-
-bool nvmeib_public_workqueue_congested(int cpu, struct workqueue_struct *wq)
-{
-	return workqueue_congested(cpu, wq);
-}
-EXPORT_SYMBOL(nvmeib_public_workqueue_congested);
-
-#if KS_BIO_BI_STATUS
-blk_status_t nvmeib_errno_to_blk_status(int errno) {
-	return errno_to_blk_status(errno);
-}
-EXPORT_SYMBOL(nvmeib_errno_to_blk_status);
-
-int nvmeib_blk_status_to_errno(blk_status_t status) {
-	return blk_status_to_errno(status);
-}
-EXPORT_SYMBOL(nvmeib_blk_status_to_errno);
-#endif
-
 struct ring_buffer_event;
 struct ring_buffer;
 struct ftrace_event_call;
@@ -840,47 +741,6 @@ EXPORT_SYMBOL(nvmeib_trace_event_raw_init);
 #ifndef __kprobes
 	#define __kprobes
 #endif
-
-/*
- * starting from linux-5.2.4 bio_set_dev() calls GPL_ONLY bio_associate_blkg
- * RH-8 make use of that API.
- */
-void nvmeib_bio_set_dev(struct bio *bio, struct block_device *block_dev)
-{
-	bio_set_dev(bio, block_dev);
-}
-EXPORT_SYMBOL(nvmeib_bio_set_dev);
-
-int nvmeib_public_dma_set_coherent_mask(struct device *dev, u64 mask) {
-	return dma_set_coherent_mask(dev, mask);
-}
-EXPORT_SYMBOL(nvmeib_public_dma_set_coherent_mask);
-
-#if KS_HAS_PROFILE_EVENT_REGISTER
-int nvmeib_public_profile_event_register(enum profile_type type, struct notifier_block *n)
-{
-	return profile_event_register(type, n);
-}
-EXPORT_SYMBOL(nvmeib_public_profile_event_register);
-
-int nvmeib_public_profile_event_unregister(enum profile_type type, struct notifier_block *n)
-{
-	return profile_event_unregister(type, n);
-}
-EXPORT_SYMBOL(nvmeib_public_profile_event_unregister);
-#endif
-
-int nvmeib_public_register_kprobe(struct kprobe *p)
-{
-	return register_kprobe(p);
-}
-EXPORT_SYMBOL(nvmeib_public_register_kprobe);
-
-void nvmeib_public_unregister_kprobe(struct kprobe *p)
-{
-	unregister_kprobe(p);
-}
-EXPORT_SYMBOL(nvmeib_public_unregister_kprobe);
 
 void nvmeib_public_save_stack_trace(struct nvmeib_stack_trace *trace)
 {
@@ -951,13 +811,6 @@ bool nvmeib_sym_resolve_kernel_bug_can_happen(void* addr)
 #endif
 }
 EXPORT_SYMBOL(nvmeib_sym_resolve_kernel_bug_can_happen);
-
-#if KS_HAS_BLKDEV_IOCTL
-int nvmeib_blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg) {
-	return blkdev_ioctl(bdev, 0, cmd, arg);
-}
-EXPORT_SYMBOL(nvmeib_blkdev_ioctl);
-#endif
 
 void nvmeib_ref_init(struct nvmeib_ref *r)
 {
@@ -1057,46 +910,6 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_ref_release_wait_n);
 
-int nvmeib_public_kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp_ext[])
-{
-	return kobject_uevent_env(kobj, action, envp_ext);
-}
-EXPORT_SYMBOL(nvmeib_public_kobject_uevent_env);
-
-int nvmeib_public_cache_line_size(void)
-{
-	return cache_line_size();
-}
-EXPORT_SYMBOL(nvmeib_public_cache_line_size);
-
-int nvmeib_public_cpu_to_sock(int cpu)
-{
-	return topology_physical_package_id(cpu);
-}
-EXPORT_SYMBOL(nvmeib_public_cpu_to_sock);
-
-void nvmeib_public_dev_put(struct net_device *net_device)
-{
-	dev_put(net_device);
-}
-EXPORT_SYMBOL(nvmeib_public_dev_put);
-
-#if KS_HAS_BIO_START_IO_ACCT
-unsigned long nvmeib_public_bio_start_io_acct(struct bio *bio)
-{
-	return bio_start_io_acct(bio);
-}
-EXPORT_SYMBOL(nvmeib_public_bio_start_io_acct);
-#endif
-
-#if KS_HAS_BIO_START_IO_ACCT
-void nvmeib_public_bio_end_io_acct(struct bio *bio, unsigned long start_time)
-{
-	bio_end_io_acct(bio, start_time);
-}
-EXPORT_SYMBOL(nvmeib_public_bio_end_io_acct);
-#endif
-
 struct task_struct *nvmeib_public_kthread_create_on_cpu(int (*threadfn)(void *data),
 					  void *data, unsigned int cpu,
 					  const char *namefmt)
@@ -1111,79 +924,6 @@ struct task_struct *nvmeib_public_kthread_create_on_cpu(int (*threadfn)(void *da
 	return p;
 }
 EXPORT_SYMBOL(nvmeib_public_kthread_create_on_cpu);
-
-void nvmeib_public_mutex_lock_nested(struct mutex *lock, unsigned int subclass)
-{
-	mutex_lock_nested(lock, subclass);
-}
-EXPORT_SYMBOL(nvmeib_public_mutex_lock_nested);
-
-int nvmeib_public_smp_call_function_single_async(int cpu, call_single_data_t *csd)
-{
-	return smp_call_function_single_async(cpu, csd);
-}
-EXPORT_SYMBOL(nvmeib_public_smp_call_function_single_async);
-
-void nvmeib_public_add_timer_on(struct timer_list *timer, int cpu)
-{
-	add_timer_on(timer, cpu);
-}
-EXPORT_SYMBOL(nvmeib_public_add_timer_on);
-
-cycles_t nvmeib_public_get_cycles(void) {
-	return get_cycles();
-}
-EXPORT_SYMBOL(nvmeib_public_get_cycles);
-
-time64_t nvmeib_public_ktime_get_real_seconds(void)
-{
-	return ktime_get_real_seconds();
-}
-EXPORT_SYMBOL(nvmeib_public_ktime_get_real_seconds);
-
-u64 nvmeib_public_hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval)
-{
-	return hrtimer_forward(timer, now, interval);
-}
-EXPORT_SYMBOL(nvmeib_public_hrtimer_forward);
-
-void nvmeib_public_hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
-	enum hrtimer_mode mode)
-{
-	hrtimer_init(timer, clock_id, mode);
-}
-EXPORT_SYMBOL(nvmeib_public_hrtimer_init);
-
-void nvmeib_public_hrtimer_cancel(struct hrtimer *timer)
-{
-	hrtimer_cancel(timer);
-}
-EXPORT_SYMBOL(nvmeib_public_hrtimer_cancel);
-
-void nvmeib_public_hrtimer_start(struct hrtimer *timer, ktime_t interval,
-	enum hrtimer_mode mode)
-{
-	hrtimer_start(timer, interval, mode);
-}
-EXPORT_SYMBOL(nvmeib_public_hrtimer_start);
-
-bool nvmeib_public_llist_add(struct llist_node *new, struct llist_head *head)
-{
-	return llist_add(new, head);
-}
-EXPORT_SYMBOL(nvmeib_public_llist_add);
-
-bool nvmeib_public_llist_add_batch(struct llist_node *new_first, struct llist_node *new_last, struct llist_head *head)
-{
-	return llist_add_batch(new_first, new_last, head);
-}
-EXPORT_SYMBOL(nvmeib_public_llist_add_batch);
-
-bool nvmeib_public_cancel_work_sync(struct work_struct *work)
-{
-	return cancel_work_sync(work);
-}
-EXPORT_SYMBOL(nvmeib_public_cancel_work_sync);
 
 /* KASAN
  *
@@ -1448,22 +1188,18 @@ EXPORT_SYMBOL(nvmeib_public_kasan_test);
 
 #endif /* defined(CONFIG_KASAN) && defined(CONFIG_X86) */
 
-void *__nvmeib_public_symbol_get(const char *symbol_name)
+struct task_struct *nvmeib_kthread_create_on_cpu(
+	int (*threadfn)(void *data), void *data, unsigned int cpu, const char *namefmt)
 {
-	return __symbol_get(symbol_name);
+	struct task_struct *p;
+	p = kthread_create_on_node(threadfn, data, cpu_to_node(cpu), namefmt, cpu);
+	if (!IS_ERR(p))
+		kthread_bind(p, cpu);
+	return p;
 }
-EXPORT_SYMBOL(__nvmeib_public_symbol_get);
+EXPORT_SYMBOL(nvmeib_kthread_create_on_cpu);
 
-void __nvmeib_public_symbol_put(const char *symbol_name)
-{
-	__symbol_put(symbol_name);
-}
-EXPORT_SYMBOL(__nvmeib_public_symbol_put);
-
-u64 nvmeib_public_local_clock(void) {
-	return local_clock();
-}
-EXPORT_SYMBOL(nvmeib_public_local_clock);
+/* symbol_get/put convenience wrappers remain for type casting */
 
 module_init(nvmeib_public_module_init);
 module_exit(nvmeib_public_module_exit);

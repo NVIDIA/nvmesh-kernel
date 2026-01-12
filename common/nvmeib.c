@@ -1394,9 +1394,9 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 		iop->weight = weight; //SCQ-TODO: move this to nvmeib_public_intr_poll_modify
 		budget = iop->weight; //update before using so it is in sync with caller's complementary cond
 	}
-	start_ns = nvmeib_public_local_clock();
+	start_ns = local_clock();
 	completed = process_cq(cq, budget);
-	busy_ns = nvmeib_public_local_clock() - start_ns;
+	busy_ns = local_clock() - start_ns;
 	if (completed)
 		nviop->last_nonempty_comp_jif = jiffies;
 	cq->n_comps_poll += completed;
@@ -1548,7 +1548,7 @@ static int user_poll_handler_intr(struct nvmeib_dev_cq *cq, int budget)
 		cq->user_poll.poll_wd_timer.expires = jiffies + msecs_to_jiffies(USER_POLL_TIMEOUT_GRANULARITY_MSECS);
 
 		BUG_ON(!nvmeib_pcpu_cq_all_cpus);
-		nvmeib_public_add_timer_on(&cq->user_poll.poll_wd_timer, cq->cpu_id_sched);
+		add_timer_on(&cq->user_poll.poll_wd_timer, cq->cpu_id_sched);
 	}
 
 	completed = process_cq(cq, budget);
@@ -2092,7 +2092,7 @@ TIMER_CALLBACK(user_poll_wd_fn, struct nvmeib_dev_cq, user_poll.poll_wd_timer, s
 
 	BUG_ON(!nvmeib_pcpu_cq_all_cpus);
 
-	nvmeib_public_add_timer_on(&cq->user_poll.poll_wd_timer, cq->cpu_id_sched);
+	add_timer_on(&cq->user_poll.poll_wd_timer, cq->cpu_id_sched);
 	NFOUT;
 }
 
@@ -4050,7 +4050,7 @@ struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs)
 		goto out;
 	}
 
-	shaper->percpu_size = round_up(sizeof(*pcpu), nvmeib_public_cache_line_size());
+	shaper->percpu_size = round_up(sizeof(*pcpu), cache_line_size());
 	if (!(shaper->percpu =
 		  kzalloc(nr_cpu_ids * shaper->percpu_size, GFP_KERNEL))) {		// Todo: Use MAX_NUM_ACTIVE_CPUS
 		_NT(trace_1_nvmeib_nvmeib_intr_shaper_create, "Fail to allocate memory for intr-shaper percpu");
@@ -4098,7 +4098,7 @@ static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
 {
 	struct intr_shaper_percpu *pcpu = (struct intr_shaper_percpu *)
 	(shaper->percpu + get_cpu()*shaper->percpu_size);
-	u64 now = nvmeib_public_local_clock(); /* TSC in units of ns */
+	u64 now = local_clock(); /* TSC in units of ns */
 	u64 dt, busy;
 	u32 inst_load_pct_x1000, ewma, pct;
 	s32 diff;
@@ -4191,14 +4191,14 @@ void nvmeib_intr_shaper_intr_enter(struct nvmeib_intr_shaper *shaper, enum intr_
 		BUG_ON(pcpu->hw_intr_start_ns);
 		BUG_ON(pcpu->hw_intr_n_polled);
 		pcpu->hw_intr_type = intr_type;
-		pcpu->hw_intr_start_ns = nvmeib_public_local_clock();
+		pcpu->hw_intr_start_ns = local_clock();
 	}
 	else if (in_softirq()) {
 		BUG_ON(pcpu->sw_intr_type != INTR_SHAPER_INTR_TYPE_NONE);
 		BUG_ON(pcpu->sw_intr_start_ns);
 		BUG_ON(pcpu->sw_intr_n_polled);
 		pcpu->sw_intr_type = intr_type;
-		pcpu->sw_intr_start_ns = nvmeib_public_local_clock();
+		pcpu->sw_intr_start_ns = local_clock();
 	} else {
 		/* This can happen for SIW when flushing the queue */
 	}
@@ -4218,14 +4218,14 @@ void nvmeib_intr_shaper_intr_exit(struct nvmeib_intr_shaper *shaper)
 		BUG_ON(!pcpu->hw_intr_start_ns);
 		BUG_ON(pcpu->hw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
 		BUG_ON(pcpu->hw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
-		busy_ns = nvmeib_public_local_clock() - pcpu->hw_intr_start_ns;
+		busy_ns = local_clock() - pcpu->hw_intr_start_ns;
 		n_polled = pcpu->hw_intr_n_polled;
 		pcpu_stats = &pcpu->stats_per_intr_type[pcpu->hw_intr_type];
 	} else if (in_softirq()) {
 		BUG_ON(!pcpu->sw_intr_start_ns);
 		BUG_ON(pcpu->sw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
 		BUG_ON(pcpu->sw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
-		busy_ns = nvmeib_public_local_clock() - pcpu->sw_intr_start_ns;
+		busy_ns = local_clock() - pcpu->sw_intr_start_ns;
 		n_polled = pcpu->sw_intr_n_polled;
 		pcpu_stats = &pcpu->stats_per_intr_type[pcpu->sw_intr_type];
 	} else {
@@ -4297,12 +4297,12 @@ bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *sh
 		BUG_ON(pcpu->hw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
 		BUG_ON(pcpu->hw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
 		n_polled = pcpu->hw_intr_n_polled;
-		dt = nvmeib_public_local_clock() - pcpu->hw_intr_start_ns;
+		dt = local_clock() - pcpu->hw_intr_start_ns;
 	} else if (in_softirq()) {
 		BUG_ON(pcpu->sw_intr_type == INTR_SHAPER_INTR_TYPE_NONE);
 		BUG_ON(pcpu->sw_intr_type >= MAX_INTR_SHAPER_INTR_TYPE);
 		n_polled = pcpu->sw_intr_n_polled;
-		dt = nvmeib_public_local_clock() - pcpu->sw_intr_start_ns;
+		dt = local_clock() - pcpu->sw_intr_start_ns;
 	} else {
 		/* This can happen for SIW when flushing the queue */
 		return false;

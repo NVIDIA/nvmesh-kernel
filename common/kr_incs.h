@@ -180,7 +180,7 @@ enum {
 #endif
 
 #if KS_BIO_BI_STATUS
-#	define bio_error(bio) nvmeib_blk_status_to_errno(bio->bi_status)
+#	define bio_error(bio) blk_status_to_errno(bio->bi_status)
 #else
 #	define bio_error(bio) (bio->bi_error)
 #endif
@@ -253,7 +253,7 @@ static inline void nvmeib_bio_copy_data_with_offsets(struct bio *dst, unsigned d
 #if KS_BIO_BI_STATUS
 	#define bio_endio(bio, errno) 			\
 	do {					\
-		bio->bi_status = nvmeib_errno_to_blk_status(errno);	\
+		bio->bi_status = errno_to_blk_status(errno);	\
 		bio_endio(bio);			\
 	} while (0)
 #else

@@ -45,18 +45,17 @@ void nvmeib_mem_vunmap_n_free(struct nvmeib_alloc_n_map *mem,
 	void *vaddr);
 
 void * nvmeib_vmap(void **virts, int n);
-void nvmeib_public_vunmap(void *vaddr);
 
-void __percpu *__nvmeib_public_alloc_percpu(size_t size, size_t align);
+#define __nvmeib_public_alloc_percpu(size, align) __alloc_percpu(size, align)
 #define nvmeib_public_alloc_percpu(type)                                \
-		(typeof(type) __percpu *)__nvmeib_public_alloc_percpu(          \
+		(typeof(type) __percpu *)__alloc_percpu(                        \
 											sizeof(type),               \
 											__alignof__(type))
 #define nvmeib_public_alloc_percpu_cacheline(type)                      \
-		(typeof(type) __percpu *)__nvmeib_public_alloc_percpu(          \
+		(typeof(type) __percpu *)__alloc_percpu(                        \
 											sizeof(type),               \
-											nvmeib_public_cache_line_size())
-void nvmeib_public_free_percpu(void __percpu *ptr);
+											cache_line_size())
+#define nvmeib_public_free_percpu(ptr) free_percpu(ptr)
 #define nvmeib_public_zero_percpu(_obj) \
         do { \
             int cpu; \
@@ -65,16 +64,18 @@ void nvmeib_public_free_percpu(void __percpu *ptr);
             } \
         } while(0); \
 
-void __percpu* __nvmeib_public_alloc_percpu_zeroed(size_t size, size_t align);
+#define __nvmeib_public_alloc_percpu_zeroed(size, align) __alloc_percpu_gfp(size, align, GFP_KERNEL | __GFP_ZERO)
 #define nvmeib_public_alloc_percpu_zeroed(type)                        \
-		(typeof(type) __percpu *)__nvmeib_public_alloc_percpu_zeroed(    \
+		(typeof(type) __percpu *)__alloc_percpu_gfp(                    \
 											sizeof(type),               \
-											__alignof__(type))
+											__alignof__(type),          \
+											GFP_KERNEL | __GFP_ZERO)
 
 #define nvmeib_public_alloc_percpu_zeroed_cacheline(type)                      \
-		(typeof(type) __percpu *)__nvmeib_public_alloc_percpu_zeroed(          \
+		(typeof(type) __percpu *)__alloc_percpu_gfp(                          \
 											sizeof(type),               \
-											nvmeib_public_cache_line_size())
+											cache_line_size(),          \
+											GFP_KERNEL | __GFP_ZERO)
             
 void nvmeib_public_uuid_gen(uuid_be *bu);
 
@@ -82,9 +83,6 @@ void nvmeib_public_uuid_gen(uuid_be *bu);
  * @brief Determines if kernel has a serial console enabled
  */
 bool nvmeib_public_serial_console(void);
-
-int nvmeib_get_user_pages_fast(unsigned long start, int nr_pages, int write,
-	struct page **pages);
 
 struct ib_device;
 struct ib_device_attr;
@@ -139,37 +137,12 @@ int nvmeib_public_generic_post_send_atomic(struct ib_qp *ibqp,
 
 bool nvmeib_mlx_on_demand_paging(void);
 
-int nvmeib_schedule_delayed_work(struct delayed_work *dwork, unsigned long delay);
-bool nvmeib_public_mod_delayed_work(struct workqueue_struct *wq,
-				    struct delayed_work *dwork, unsigned long delay);
-struct workqueue_struct *nvmeib_public_get_system_unbound_wq(void);
-
 #if KS_HAS_DISK_PART_ITER
 int nvmeib_public_call_for_each_disk_part(struct gendisk *disk, int (*f)(struct hd_struct *, void *), void *args);
 #else
 int nvmeib_public_call_for_each_disk_part(struct gendisk *disk, int (*f)(struct block_device *, void *), void *args);
 #endif
 
-void *nvmeib_public_vzalloc(unsigned long size);
-
-#if KS_BIO_BI_STATUS
-blk_status_t nvmeib_errno_to_blk_status(int errno);
-int nvmeib_blk_status_to_errno(blk_status_t status);
-#endif
-
-#if defined(KS_GPL_SCHEDULE_DELAYED_WORK) && KS_GPL_SCHEDULE_DELAYED_WORK
-#define SCHEDULE_DELAYED_WORK nvmeib_schedule_delayed_work
-#else
-#define SCHEDULE_DELAYED_WORK schedule_delayed_work
-#endif
-
-
-int nvmeib_public_dma_set_coherent_mask(struct device *dev, u64 mask);
-
-#if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR==0)
-ktime_t nvmeib_public_ktime_get(void);
-ktime_t nvmeib_public_ktime_get_raw(void);
-#endif
 
 struct mm_struct * nvmeib_public_get_process_mm(int pid);
 void nvmeib_public_put_process_mm(struct mm_struct *mm);
@@ -179,33 +152,13 @@ int nvmeib_public_copy_user_pages(
 int  nvmeib_public_user_pages_for_io_pin(pid_t pid, ulong userspace_vaddr,			  int n_pages, struct page **pages, int is_write);
 void nvmeib_public_user_pages_for_io_unpin(                                           int n_pages, struct page **pages, int copy_to);
 
-void nvmeib_bio_set_dev(struct bio *bio, struct block_device *block_dev);
-
 void nvmeib_public_save_stack_trace(struct nvmeib_stack_trace *trace);
 
 void nvmeib_public_kgdb_breakpoint(void);
 
-#if KS_HAS_PROFILE_EVENT_REGISTER
-int nvmeib_public_profile_event_register(enum profile_type type, struct notifier_block *n);
-int nvmeib_public_profile_event_unregister(enum profile_type type, struct notifier_block *n);
-#endif
-
-struct kprobe;
-int nvmeib_public_register_kprobe(struct kprobe *p);
-void nvmeib_public_unregister_kprobe(struct kprobe *p);
-
 unsigned long nvmeib_kallsyms_lookup_name(const char *name);
 
 bool nvmeib_sym_resolve_kernel_bug_can_happen(void *addr);
-
-struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *fmt, unsigned int flags, int max_active);
-void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq);
-void nvmeib_public_flush_workqueue(struct workqueue_struct *wq);
-bool nvmeib_public_workqueue_congested(int cpu, struct workqueue_struct *wq);
-
-#if KS_HAS_BLKDEV_IOCTL
-int nvmeib_blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg);
-#endif
 
 /**
  * nvmeib reference counted objects
@@ -308,8 +261,6 @@ static inline void nvmeib_ref_release_wait_if_first(struct nvmeib_ref *r)
 
 void nvmeib_public_kth_fill_ft(struct nvmeib_public_kth_ft *ft);
 void nvmeib_public_intr_poller_fill_ft(struct nvmeib_intr_pollers_ft *ift);
-
-int nvmeib_public_kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp_ext[]);
 
 static inline bool is_siw_ib_dev(struct ib_device *ib_dev)
 {
@@ -518,44 +469,8 @@ void nvmeib_public_save_stack_trace(struct nvmeib_stack_trace *trace);
 
 #include "../common/compat/kr_incs_time_rdtsc.h"
 
-
-int nvmeib_public_cache_line_size(void);
-int nvmeib_public_cpu_to_sock(int cpu);
-void nvmeib_public_dev_put(struct net_device *net_device);
-
-#if KS_HAS_BIO_START_IO_ACCT
-unsigned long nvmeib_public_bio_start_io_acct(struct bio *bio);
-#endif
-
-#if KS_HAS_BIO_START_IO_ACCT
-void nvmeib_public_bio_end_io_acct(struct bio *bio, unsigned long start_time);
-#endif
-
-struct task_struct *nvmeib_public_kthread_create_on_cpu(int (*threadfn)(void *data),
-					  void *data, unsigned int cpu,
-					  const char *namefmt);
-
-void nvmeib_public_mutex_lock_nested(struct mutex *lock, unsigned int subclass);
-
-int nvmeib_public_smp_call_function_single_async(int cpu, call_single_data_t *csd);
-
-void nvmeib_public_add_timer_on(struct timer_list *timer, int cpu);
-
-cycles_t nvmeib_public_get_cycles(void);
-
-time64_t nvmeib_public_ktime_get_real_seconds(void);
-
-
-bool nvmeib_public_llist_add(struct llist_node *new, struct llist_head *head);
-bool nvmeib_public_llist_add_batch(struct llist_node *new_first, struct llist_node *new_last, struct llist_head *head);
-bool nvmeib_public_cancel_work_sync(struct work_struct *work);
-
-u64 nvmeib_public_hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval);
-void nvmeib_public_hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
-	enum hrtimer_mode mode);
-void nvmeib_public_hrtimer_cancel(struct hrtimer *timer);
-void nvmeib_public_hrtimer_start(struct hrtimer *timer, ktime_t interval,
-	enum hrtimer_mode mode);
+struct task_struct *nvmeib_kthread_create_on_cpu(
+	int (*threadfn)(void *data), void *data, unsigned int cpu, const char *namefmt);
 
 /* Used for finding memory corruption with KASAN */
 enum nvmeib_public_kasan_poison_type {
@@ -572,12 +487,8 @@ int nvmeib_public_kasan_test(void);
 #define __NVMEIB_PUBLIC_SYMBOL_STR(x) #x
 #define NVMEIB_PUBLIC_SYMBOL_STR(x) __NVMEIB_PUBLIC_SYMBOL_STR(x)
 
-void *__nvmeib_public_symbol_get(const char *symbol_name);
-#define nvmeib_public_symbol_get(x) ((typeof(&x))(__nvmeib_public_symbol_get(NVMEIB_PUBLIC_SYMBOL_STR(x))))
-
-void __nvmeib_public_symbol_put(const char *symbol_name);
-#define nvmeib_public_symbol_put(x) __nvmeib_public_symbol_put(NVMEIB_PUBLIC_SYMBOL_STR(x))
-
-u64 nvmeib_public_local_clock(void);
+/* Convenience macros for symbol_get/put with type casting */
+#define nvmeib_public_symbol_get(x) ((typeof(&x))(__symbol_get(NVMEIB_PUBLIC_SYMBOL_STR(x))))
+#define nvmeib_public_symbol_put(x) __symbol_put(NVMEIB_PUBLIC_SYMBOL_STR(x))
 
 #endif

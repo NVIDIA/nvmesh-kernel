@@ -2000,6 +2000,9 @@ enum hrtimer_mode {NOT_AN_EMPTY_ENUM = 0};
 #define WQ_SYSFS 0
 #define WQ_UNBOUND_MAX_ACTIVE 0
 
+int profile_event_register(enum profile_type type, struct notifier_block *n);
+int profile_event_unregister(enum profile_type type, struct notifier_block *n);
+
 //#define NVME_IOCTL_ID			(0x4e40)
 #endif // #ifndef KR_INCS_H
 /*****************************************************************************/

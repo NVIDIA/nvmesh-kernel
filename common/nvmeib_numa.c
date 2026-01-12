@@ -135,7 +135,7 @@ int nvmeib_socket_from_numa(int dev_node) {
 	int cpu;
 	for_each_online_cpu(cpu) {
 		const int cpu_node = cpu_to_node(cpu);
-		const int cpu_sock = nvmeib_public_cpu_to_sock(cpu);
+		const int cpu_sock = topology_physical_package_id(cpu);
 		if (cpu_node == dev_node) {
 			dev_sock = cpu_sock;
 			break;
@@ -160,7 +160,7 @@ static void nvmeib_numa_iter_init_device_socket(struct nvmeib_numa_iter *iter,
 
 	for_each_online_cpu(cpu) {
 		const int cpu_node = cpu_to_node(cpu);
-		const int cpu_sock = nvmeib_public_cpu_to_sock(cpu);
+		const int cpu_sock = topology_physical_package_id(cpu);
 		if (dev_sock == cpu_sock) {
 			node_set(cpu_node, iter->data.nodemask);
 		}

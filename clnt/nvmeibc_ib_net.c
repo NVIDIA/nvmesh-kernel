@@ -1022,9 +1022,9 @@ static int polling_process_send_cq_(struct nvmeibc_ib_net *net, bool req_notify,
        __NFIN;
 
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-		start_ns = nvmeib_public_local_clock();
+		start_ns = local_clock();
 		rv = process_send_cq_offload_enb_(net, net->n_wc_s, req_notify, false, &req_notify_state);
-		busy_ns = nvmeib_public_local_clock() - start_ns;
+		busy_ns = local_clock() - start_ns;
 		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 
 		if (continue_polling) {
@@ -1242,7 +1242,7 @@ static inline int scq_kthread_create_(struct nvmeibc_ib_net *net, int comp_cpu)
 			clnt_proc_name_format_extd(pname, 'C', "PL", "ScqP",
 						   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&net->admin_ch->base)),
 						   comp_cpu);
-			if (!IS_ERR(t = nvmeib_public_kthread_create_on_cpu(scq_kthread_func, net, comp_cpu, pname))) {
+			if (!IS_ERR(t = nvmeib_kthread_create_on_cpu(scq_kthread_func, net, comp_cpu, pname))) {
 				_NDn(trace_1_ib_net_scq_kthread_create, net, "scq thread created on cpu @INT", comp_cpu);
 				wake_up_process(t);
 				wait_for_completion(&net->scq_kth_ready);
@@ -1566,7 +1566,7 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 		} else if (smp_processor_id() != nvmeibc_channel_pcpu_ch_get_cpu(net->ioch)) {
 			/* Interrupt came in on different CPU. Use IPI to switch to correct CPU (if not already pending) */
 			if (atomic_cmpxchg(&net->pcpu_send_comp_smp_call.call_pending, 0, 1) == 0) {
-				if (nvmeib_public_smp_call_function_single_async(
+				if (smp_call_function_single_async(
 						nvmeibc_channel_pcpu_ch_get_cpu(net->ioch),
 						&net->pcpu_send_comp_smp_call.call_data) < 0) {
 					_NEn(send_completion_intr_t2, net, "smp_call_function_single_async failed");
@@ -1811,9 +1811,9 @@ static int polling_process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify,
 	__NFIN;
 
 	nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-	start_ns = nvmeib_public_local_clock();
+	start_ns = local_clock();
 	rv = process_recv_cq_(net, req_notify, &req_notify_state);
-	busy_ns = nvmeib_public_local_clock() - start_ns;
+	busy_ns = local_clock() - start_ns;
 	nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 
 	if (continue_polling) {
@@ -1973,7 +1973,7 @@ static inline int rcq_kthread_create_(struct nvmeibc_ib_net *net, int comp_cpu)
 			clnt_proc_name_format_extd(pname, 'C', "PL", "RcqP",
 						   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&net->admin_ch->base)),
 						comp_cpu);
-			if (!IS_ERR(t = nvmeib_public_kthread_create_on_cpu(rcq_kthread_func, net, comp_cpu, pname))) {
+			if (!IS_ERR(t = nvmeib_kthread_create_on_cpu(rcq_kthread_func, net, comp_cpu, pname))) {
 				_NDn(trace_1_ib_net_rcq_kthread_create, net, "rcq thread created on cpu @INT", comp_cpu);
 				wake_up_process(t);
 				wait_for_completion(&net->rcq_kth_ready);
@@ -2257,9 +2257,9 @@ static inline void poll_cq_and_process_common(struct nvmeibc_ib_net *net)
 	nvmeib_qp_stats_on_offth_iter(net->qp_stats);
 
 	/* poll upto net->n_wc_mixed CQEs into net->wc_mixed */
-	start_ns = nvmeib_public_local_clock();
+	start_ns = local_clock();
 	rv = poll_cq_and_process(net, &resched);
-	busy_ns = nvmeib_public_local_clock() - start_ns;
+	busy_ns = local_clock() - start_ns;
 
 	if (!resched) {
 		resched = rv > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, rv, busy_ns);
@@ -2499,7 +2499,7 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 			if ((rv = defer_recv_interrupts_(net)) < 0 && rv != -EALREADY) {
 				/* Deferring recv interrupts failed or not enabled. Use IPI to switch to correct CPU  (if not already pending) */
 				if (atomic_cmpxchg(&net->pcpu_recv_comp_smp_call.call_pending, 0, 1) == 0) {
-					if (nvmeib_public_smp_call_function_single_async(
+					if (smp_call_function_single_async(
 							nvmeibc_channel_pcpu_ch_get_cpu(net->ioch),
 							&net->pcpu_recv_comp_smp_call.call_data) < 0) {
 						_NEn(recv_completion_intr_t2, net, "smp_call_function_single_async failed");
@@ -5143,7 +5143,7 @@ void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, enum stats_
 	struct nvmeibc_disk_io_command *bcmd = disk_to_block(dcmd);
 	//logic we've skipped @ nvmeibc_ib_net_complete_iocmd
 	if (bcmd->comp.comp_code == 0) {
-		ktime_t end_ts = nvmeib_public_ktime_get();
+		ktime_t end_ts = ktime_get();
 		if (ktime_after(end_ts, bcmd->disk_cmd.start_ts)) {
 			u64 latency = ktime_to_ns(ktime_sub(end_ts, bcmd->disk_cmd.start_ts));
 		

@@ -1346,7 +1346,7 @@ static int nordda_pending_io(struct nvmeibc_disk *disk,
 		    "wrong CPU (not @INT) for pcpu nrch (@PTR) @BASE_NAME. Scheduling on correct CPU",
 		    pcpu_nrch_cpu_get(nrch), nrch, nrch->base.name);
 		/* Safe because the request has not yet been returned to the pool by put_req_info */
-		if (nvmeib_public_smp_call_function_single_async(
+		if (smp_call_function_single_async(
 			pcpu_nrch_cpu_get(nrch), &info->pcpu_pending_io_smp_call.call_data) < 0) {
 			_NE(err_ib_nordda_channel_nordda_pending_io_pcpu_cpu,
 			    "Failed to reschedule req (@REQ) for pcpu nrch (@PTR) @BASE_NAME on cpu @CPU",
@@ -1896,7 +1896,7 @@ static int process_gen_rsp(struct nvmeibc_ib_nordda_channel *ch,
 	struct nvmeibc_disk_gen_cmd *g = disk_to_gen(req->req.dcmd);
 	NFIN;
 
-	g->recv_comp_time = nvmeib_public_ktime_get();
+	g->recv_comp_time = ktime_get();
 	g->recv_sz = wc->byte_len;
 	if (rsp->opcode != NVMEIBS_RSP_GEN_OPCODE_OK)
 		_NT(error_ib_nordda_channel_process_gen_rsp, "ch @BASE_NAME: GEN request returned error: request @TAG code=@CODE, OPCODE=@OPCODE",

@@ -1028,21 +1028,7 @@ else
 endif
 
 ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
-    ifeq ($(shell grep -w schedule_delayed_work $(OFA_KERNEL)/include/linux/compat-2.6.h 2> /dev/null),)
-        cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=1
-    else
-        cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=0
-    endif
     INCLUDES = -include linux/compat-2.6.h
-endif
-
-ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
-        ifeq ($(shell grep -w schedule_delayed_work $(OFA_KERNEL)/include/linux/compat-2.6.h 2> /dev/null),)
-                cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=1
-        else
-                cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=0
-        endif
-	INCLUDES = -include linux/compat-2.6.h
 endif
 
 ifneq ($(shell grep -w __tcp_send_ack $(KSRC1)/include/net/tcp.h 2> /dev/null),)

@@ -4107,7 +4107,7 @@ static void submit_external_iop(struct work_struct *work)
 #endif
 		if (bio == NULL)
 			goto err;
-		nvmeib_bio_set_dev(bio, ed2bd(d));
+		bio_set_dev(bio, ed2bd(d));
 		if (req->use_sg) {
 			struct scatterlist *s;
 			int n = 0;
@@ -4182,7 +4182,7 @@ int submit_local_cmd(struct nvmeibs_disk_info *d_info,
 	bool op_uses_md = req->nvme_op == nvme_cmd_read ||
 		req->nvme_op == nvme_cmd_write || req->nvme_op == nvme_cmd_compare;
 
-	req->stats.start_time = nvmeib_public_ktime_get();
+	req->stats.start_time = ktime_get();
 
 	NFIN;
 	_ND(trace_nvme_submit_local_cmd, "submit_local_cmd d=@DEVICE_PTR req=@REQ", d, req);
@@ -5115,9 +5115,9 @@ static int kthread_process_drive_cq(void *arg)
 					break;
 				q_lock_irqsave(q, flags);
 				nvmeib_qp_stats_on_offth_iter(q->qp_stats);
-				start_ns = nvmeib_public_local_clock();
+				start_ns = local_clock();
 				i = nvmeibs_process_cq(q);
-				busy_ns = nvmeib_public_local_clock() - start_ns;
+				busy_ns = local_clock() - start_ns;
 				enb_irq = can_enable_irq(q);
 				q_unlock_irqrestore(q, flags);
 				cont = i > 0;
@@ -5553,7 +5553,7 @@ static struct nvme_iod *nvmeibs_map_user_pages(struct device_data *dev, int writ
 	if (!pages)
 		return ERR_PTR(-ENOMEM);
 
-	err = nvmeib_get_user_pages_fast(addr, count, 1, pages);
+	err = get_user_pages_fast(addr, count, 1, pages);
 	if (err < count) {
 		count = err;
 		err = -EFAULT;
@@ -5851,7 +5851,7 @@ static int submit_user_cmd_io(struct device_data *d, struct nvme_qp *q,
 			rv = -EINVAL;
 			goto out;
 		}
-		rv = nvmeib_get_user_pages_fast(acmd.metadata, 1, 1, &md_pg);
+		rv = get_user_pages_fast(acmd.metadata, 1, 1, &md_pg);
 		if (rv != 1) {
 			if (rv >= 0)
 				rv = -EFAULT;
@@ -5953,7 +5953,7 @@ static int submit_user_io(struct drive_params *drv, struct nvme_user_io __user *
 			_NT(trace_nvme_submit_user_io, "io.metadata=@METADATA_LLONG meta_len=@META_LEN", io.metadata, meta_len);
 			return -EINVAL; /* Only support 1 page of metadata */
 		}
-		rv = nvmeib_get_user_pages_fast(io.metadata, 1, 1, &page);
+		rv = get_user_pages_fast(io.metadata, 1, 1, &page);
 		if (rv < 0)
 			return rv;
 		else if (rv != 1)
@@ -6390,7 +6390,7 @@ static void remove_all_devices(void)
 	/* [NVMESH-4373]: Use private work-queue for remove-work
 	 * so we don't get complaints about hogging the system-wq
 	 */
-	if (!(rm_wq = nvmeib_public_alloc_workqueue("nvmeibs_nvme_rm_wq",
+	if (!(rm_wq = alloc_workqueue("nvmeibs_nvme_rm_wq",
 		WQ_UNBOUND, WQ_UNBOUND_MAX_ACTIVE)))
 	{
 		_NW_dmesg(warn_remove_all_devices_rm_wq_fail,
@@ -6426,8 +6426,8 @@ static void remove_all_devices(void)
 	complete_all(&rm_all_comp);
 
 	if (rm_wq != system_wq) {
-		nvmeib_public_flush_workqueue(rm_wq);
-		nvmeib_public_destroy_workqueue(rm_wq);
+		flush_workqueue(rm_wq);
+		destroy_workqueue(rm_wq);
 	}
 }
 
@@ -6623,7 +6623,7 @@ static void test_sector_done(void *arg, int status, u32 result)
 			if (status == 0) {
 				d->read_test_done = false;
 				INIT_DELAYED_WORK(&d->dwork, test_done_work);
-				SCHEDULE_DELAYED_WORK(&d->dwork, 0);
+				schedule_delayed_work(&d->dwork, 0);
 			}
 			else {
 				if (d->read_test_done)
@@ -6785,7 +6785,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(64));
 	if (!err) {
 #	if KS_HAS_GPL_SME_ACTIVE
-		err = nvmeib_public_dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
+		err = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
 #	else
 		err = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
 #	endif
@@ -6849,7 +6849,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	d->wait_until = d->wait_started + NVMEIB_CAP_TIMEOUT(d->cap)*HZ/2;
 
 	atomic_inc(&total_pending);
-	SCHEDULE_DELAYED_WORK(&d->dwork, HZ / 10); /* nvmeibs_probe1 */
+	schedule_delayed_work(&d->dwork, HZ / 10); /* nvmeibs_probe1 */
 
 	_NT(trace_8_nvme_nvmeibs_probe, "<-- nvmeibspci_driver probe: pci_dev=@PCI_DEV", pdev);
 	return 0;
@@ -6895,7 +6895,7 @@ static void nvmeibs_probe1(struct work_struct *arg)
 			err = -ENXIO;
 			goto errout;
 		}
-		SCHEDULE_DELAYED_WORK(&d->dwork, 1+HZ/10);
+		schedule_delayed_work(&d->dwork, 1+HZ/10);
 		goto immediateout;
 	}
 	_NT(trace_nvme_nvmeibs_probe1, "Device ready after @WAIT_TIME msec pci_dev=@PCI_DEV", 1000*(jiffies - d->wait_started)/HZ, pci_dev);

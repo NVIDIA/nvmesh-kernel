@@ -104,7 +104,7 @@
 		return ktime_set(tv.tv_sec, tv.tv_usec * 1000);
 	}
 
-	#define nvmeib_public_ktime_get() ktime_get()
+	/* nvmeib_public_ktime_get was removed - use ktime_get() directly */
 
 	static inline int ktime_compare(const ktime_t cmp1, const ktime_t cmp2)
 	{

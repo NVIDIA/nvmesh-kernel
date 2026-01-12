@@ -21,6 +21,10 @@ int nvmeib_public_debug_level(void);
 
 #define _Emerg(fmt, ...) pr_emerg("(%d)%s[%s](%d): " fmt, current->pid, FILENAME, __FUNCTION__, __LINE__, ## __VA_ARGS__)
 #include "nvmeibs_types.h"
+
+//#define GFP_KERNEL 0
+//#define __GFP_ZERO 0
+
 #include "nvmeib_public.h"
 #include "nvmeibc_types.h"
 #include "nvmeib_wd.h"
@@ -55,9 +59,10 @@ u64 nvmeib_get_guid(void);
 #include "kth/nvmeib_public_kth.h"
 void nvmeib_public_init(void);
 void nvmeib_public_module_exit(void);
-void *nvmeib_public_vzalloc(unsigned long size);
+
+struct workqueue_struct *alloc_workqueue(const char *name, unsigned int flags, int max_active);
+void destroy_workqueue(struct workqueue_struct *wq);
+void flush_workqueue(struct workqueue_struct *wq);
+int kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp[]);
 #include "nvmeib_public_keeper.h"
-struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *fmt, unsigned int flags, int max_active);
-void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq);
-void nvmeib_public_flush_workqueue(struct workqueue_struct *wq);
 #endif  // H beginning

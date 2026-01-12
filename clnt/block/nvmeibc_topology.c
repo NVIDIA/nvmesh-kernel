@@ -838,7 +838,7 @@ static int deep_copy_topo_chunk(struct nvmeibc_topology *new_t, const struct nvm
 static inline struct nvmeibc_topo_percpu* nvmeibc_topo_percpu_create(void)
 {
 	struct nvmeibc_topo_percpu *tpcpu;
-	tpcpu = topo_kzalloc(round_up(sizeof(*tpcpu), nvmeib_public_cache_line_size()) * MAX_NUM_ACTIVE_CPUS, GFP_ATOMIC);	// Todo, use a better way to allocate percpu instead of paddinf
+	tpcpu = topo_kzalloc(round_up(sizeof(*tpcpu), cache_line_size()) * MAX_NUM_ACTIVE_CPUS, GFP_ATOMIC);	// Todo, use a better way to allocate percpu instead of paddinf
 	if (tpcpu) {
 		int n;
 		for_each_allocated_cpu(n) {

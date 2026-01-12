@@ -311,7 +311,7 @@ struct wd_obj* nvmeib_wd_create_on_cpu(unsigned int timeout_sec,
 	min_n_buckets = (wd->timeout_hz * 11 / 10) / wd->hz_per_bucket + 2;
 	if (n_buckets < min_n_buckets)
 		n_buckets = min_n_buckets;
-	n_buckets = round_up(n_buckets, nvmeib_public_cache_line_size()/sizeof(int));
+	n_buckets = round_up(n_buckets, cache_line_size()/sizeof(int));
 	wd->n_buckets = (n_buckets == 0 ? min_n_buckets : n_buckets);
 	// alloc_percpu_buckets(wd, n_buckets);
 	wd->percpu_buckets = kzalloc(
@@ -332,7 +332,7 @@ struct wd_obj* nvmeib_wd_create_on_cpu(unsigned int timeout_sec,
 	} else {
 		proc_name_t pname;
 		proc_name_format_extd(pname, 'M', "WD", "nvmeibWD", cpu);
-		if (!IS_ERR(wd->thread = nvmeib_public_kthread_create_on_cpu(watchdog_loop_thread_function, wd, cpu, pname))) {
+		if (!IS_ERR(wd->thread = nvmeib_kthread_create_on_cpu(watchdog_loop_thread_function, wd, cpu, pname))) {
 			wake_up_process(wd->thread);
 		}
 	}
