@@ -241,6 +241,11 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 	rldr->use_io_apend_stages = true;
 }
 
+raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds)
+{
+	const struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(ds);
+	return ds - raid->segments;
+}
 int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 {
 	struct nvmeibc_block_command   *bcmd = &cmds[cmd_idx];
@@ -1086,8 +1091,8 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 
 static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
-	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = get_locks_arr_of(l);
-	const int lsi = l->lock_i;
+	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
+	const int lsi = l->lockset_idx;
 	int rv = 0;
 
 	(void)tag;
@@ -1178,7 +1183,7 @@ static void __send_or_check_pigbck_view_of_ow_lock(struct nvmeibc_block_command 
 		struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
 		dp_locks_view_lock_sm(dc, nvmeibc_d_rdma_comp_tag_make());  // == dc->callback(dc);
 	} else {				// Read command failed, skip viewing lock
-		dp_locks_read_complete(get_locks_arr_of(l), l->lock_i, NCL_STATUS_DONE);
+		dp_locks_read_complete(dp_locks_get_locks_header(l), l->lockset_idx, NCL_STATUS_DONE);
 		dp_cmds_complete_cmd(cmds, li, NULL);
 	}
 }

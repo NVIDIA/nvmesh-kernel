@@ -151,7 +151,7 @@ void __dump_operation_unsafe(const struct operation *o, const struct nvmeibc_blo
 	for (i = 0; i < nlocks; i++) {
 		const struct nvmeibc_cmd_lock *l = locksets + i;
 		_N_dmesg(trace_level, t_0c_dp_dbg_tools, "lck[@LSI|ow=@LSI]) type=@LOCK_TYPE status=@LOCK_STATUS n_pending=@N_PENDING n_cmds=@NCMDS secondary=@LSI, disk=@DISK_NAME:@DLBA",
-			i, l->owner_id, nvmeibc_rdma_intent_to_string(l->type),ncl_status_str(l->status),
+			i, l->owner_idx, nvmeibc_rdma_intent_to_string(l->type),ncl_status_str(l->status),
 			nvmeibc_atomic_read(&l->pending),nvmeibc_atomic_read(&l->ncmds), l->secondary_id,
 			l->ds->disk->name, l->address);
 	}

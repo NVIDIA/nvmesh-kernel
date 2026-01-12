@@ -83,9 +83,9 @@ struct nvmeibc_cmd_lock {
 	#ifdef DEBUG_LOCKS_CORRUPTION
 		nvmeibc_atomic_t n_callbs;                      // Amount of callbacks the lock received. Should become 1. 0 - Lock was not processed yet. IO is stuck. 2+ means vicious corruption
 	#endif
-	int owner_id;                               // In protection raid we lock only on 1 owner (to avoid deadlocks). Index of the owner (index in the array of locks). Owner and the rest of its mirrored locks are called siblings
+	int owner_idx;                               // In protection raid we lock only on 1 owner (to avoid deadlocks). Index of the owner (index in the array of locks). Owner and the rest of its mirrored locks are called siblings
 	int n_siblings;                             // Todo: Move to be field of only primary owner lock.
-	int lock_i;
+	int lockset_idx;                           //Index of this "lock command" within the lockset array - needed to refer to the header;
 	u32 mem_allocated_size;                    // set for the first lock when operation and locks don't share memory, used by memmgr metrics on-free accounting
 
 #ifdef DEBUG_CONTENDED_LOCKS
@@ -129,7 +129,8 @@ struct t_abandon {				// Assist struct for calculations whether blockset locks s
 	u8 unused;
 };
 
-raid_sgmnt_t get_si_of_lock(const struct nvmeibc_cmd_lock *lo, const struct nvmeibc_raid1 *r1);
+__attribute__((nonnull (1)))
+raid_sgmnt_t dp_locks_get_sgmnt_idx_of_lock(const struct nvmeibc_cmd_lock *self);
 
 /* Given an empty array of locks, append the locks which
    protect range [start_lba,start_lba+nlbas). Returns the amount of locks. The
@@ -196,10 +197,33 @@ void dp_locks_read_complete(struct nvmeibc_cmd_lock *locksets, int lsi, enum nvm
 // Todo: move this to .c file
 #define __change_lock_status_to(l, s) ({ (l)->comp.lock_status = (l)->status = (s); })
 
-#define dp_locks_get_ow_of(l) (&((l)[-((l)->lock_i - (l)->owner_id)]))
-#define get_locks_arr_of(  l) (&((l)[-(l)->lock_i]))
+__attribute__((nonnull(1)))
+static inline struct nvmeibc_cmd_lock const* __dp_locks_get_blockset_owner_lock_impl(struct nvmeibc_cmd_lock const* self)
+{
+	size_t const distance = self->lockset_idx - self->owner_idx;
+	return self - distance;
+}
 
-#define nvmeibc_b_rdma_comp_init(comp, lsi, locksarr) ({ locksarr[lsi].lock_i = lsi; })
+//working correctly with constness
+#define dp_locks_get_blockset_owner_lock(self) \
+	__builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_cmd_lock*),	\
+		__dp_locks_get_blockset_owner_lock_impl(self),														\
+		(struct nvmeibc_cmd_lock*)__dp_locks_get_blockset_owner_lock_impl(self)) 							\
+
+__attribute__((nonnull(1)))
+static inline struct nvmeibc_cmd_lock const* __dp_locks_get_locks_header_impl(struct nvmeibc_cmd_lock const* self)
+{
+	return self - self->lockset_idx;
+}
+
+//working correctly with constness
+#define dp_locks_get_locks_header(self) \
+	__builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_cmd_lock*),	\
+		__dp_locks_get_locks_header_impl(self),																\
+		(struct nvmeibc_cmd_lock*)__dp_locks_get_locks_header_impl(self)) 									\
+
+
+#define nvmeibc_b_rdma_comp_init(comp, lsi, locksarr) ({ locksarr[lsi].lockset_idx = lsi; })
 
 #define                                    lock_of_bcomp(                              dc)  container_of(dc, struct nvmeibc_cmd_lock, comp)
 static inline struct nvmeibc_d_iocmd_comp *get_d_comp_of_pg(struct nvmeibc_d_rdma_comp *d) { return container_of(d, struct nvmeibc_d_iocmd_comp, pigbck_comp);}

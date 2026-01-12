@@ -506,7 +506,7 @@ static void __sync_dp_locks_release_cb(struct nvmeibc_cmd_lock *l, struct nvmeib
 		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
 	l->status = NCL_STATUS_DONE;
 	__invoke_crash_on_lock_corruption(l, 0, "free", 0);
-	nvmeibc_atomic_dec(&get_locks_arr_of(l)->n_uncompleted_locks);
+	nvmeibc_atomic_dec(&dp_locks_get_locks_header(l)->n_uncompleted_locks);
 }
 
 /* Return 0 if callback will arrive, otherwise error code without callback */
@@ -544,7 +544,7 @@ static inline void __retry_aquire_lock(struct nvmeibc_d_rdma_comp *lock_comp, st
 			/* Owner is 0. If we hold at least 1 lock than should proceed
 			   (secondary is zero), otherwise abort sync operation, probably other
 			   client already synced */
-			if ((l->lock_i > 0) && NCL_do_i_have_lock(l[-1].status))
+			if ((l->lockset_idx > 0) && NCL_do_i_have_lock(l[-1].status))
 				goto _retry;	// Try unlocked
 			else {
 				// IMPORTANT: Other client did the sync but this might not be good enough for me. The direction of the sync is crucial for some callers (roll-fwd/foll-backwards).
@@ -741,7 +741,7 @@ static int __complete_bs_info_write(struct nvmeibc_d_rdma_comp *dc, struct nvmei
 		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
 	if (!NCL_do_i_have_lock(dc->lock_status)) { // Handle errors
 		so->error = -10026;						// Todo: Race condition here (3 locks attempt to update same integer), first wait for all locks to return, then test their result and set so->error
-		_NTSO(t_00_binfo_write, "Failed: seg=@SEG_DBG_UUID lock=@LSI, err=@ERR, status=@STATUS", l->ds->dbg_uuid, l->lock_i, so->error, dc->lock_status);
+		_NTSO(t_00_binfo_write, "Failed: seg=@SEG_DBG_UUID lock=@LSI, err=@ERR, status=@STATUS", l->ds->dbg_uuid, l->lockset_idx, so->error, dc->lock_status);
 	}
 	rv = nvmeibc_atomic_dec_return(&so->cmds->n_uncompleted_cmds);
 	if (rv > 0)
@@ -912,7 +912,7 @@ _func_start:
 
 	case sync_stage_recov_lo_next:{
 		/* This lock is taken, check if any others are needed to be taken:*/
-		const int next_lsi = l->lock_i+1;
+		const int next_lsi = l->lockset_idx+1;
 		if (so->locks->n_siblings == next_lsi) { // I was the last lock
 			so->stage = sync_stage_recov_lo_all_taken;
 		} else {
@@ -1012,8 +1012,8 @@ _func_start:
 	}
 
 	case sync_stage_recov_un_lock_next_lock: {
-		const int prev_lsi = l->lock_i-1;
-		if (l->lock_i == 0) { 	// All locks handled, last to first
+		const int prev_lsi = l->lockset_idx-1;
+		if (l->lockset_idx == 0) { 	// All locks handled, last to first
 			so->stage = sync_stage_done;  /* All locks release or broken*/
 			goto _func_start;
 		}
@@ -1023,7 +1023,7 @@ _func_start:
 	}
 
 	case sync_stage_recov_rereg_on_error: {
-		nvmeibc_topologies_rereg_seg(so->locks[l->owner_id].ds);
+		nvmeibc_topologies_rereg_seg(so->locks[l->owner_idx].ds);
 		BUG_ON(so->error == 0);			// Why then are we doing rereg?
 		so->stage = sync_stage_done;
 		goto _func_start;
@@ -1046,7 +1046,7 @@ static void __copy_only_owner_lock(struct nvmeibc_cmd_lock *l,
 						const struct nvmeibc_cmd_lock *lock)
 {
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
-	BUG_ON(dp_locks_get_ow_of(lock) != lock);	// Sanity: Verify we are copying owner lock
+	BUG_ON(dp_locks_get_blockset_owner_lock(lock) != lock);	// Sanity: Verify we are copying owner lock
 	l->address = lock->address;
 	l->ds =      lock->ds;
 	nvmeibc_b_rdma_comp_init(&l->comp, 0, l);	// Lockset of 1 lock: owner_id = comp->lock_i = 0
@@ -1063,7 +1063,7 @@ static void __copy_only_owner_lock(struct nvmeibc_cmd_lock *l,
    as IO's dp_fill_locks_for_raid() + dp_locks_send_all() */
 static void __copy_all_locks(struct recovery_sync_op *so, const struct nvmeibc_cmd_lock *lock)
 {
-	const struct nvmeibc_cmd_lock *ow = dp_locks_get_ow_of(lock);			// In rare case lock might be the dual owner.
+	const struct nvmeibc_cmd_lock *ow = dp_locks_get_blockset_owner_lock(lock);			// In rare case lock might be the dual owner.
 	const u64 holder= get_contending_id(&lock->comp);	// Stale lock we are trying to solve
 	struct nvmeibc_cmd_lock *l = so->locks;
 	int i, n_missing_olocks = 0;
@@ -1117,7 +1117,7 @@ static int __init_so(enum nvmeib_block_io_op op, struct recovery_sync_op *so,
 					  u16 start_block, u16 n_slices,
    struct nvmeibc_cmd_lock *lock, nvmeibc_sync_cb_t done_cb, void* context)
 {
-	struct nvmeibc_cmd_lock *locksets = get_locks_arr_of(lock);
+	struct nvmeibc_cmd_lock *locksets = dp_locks_get_locks_header(lock);
 	const struct nvmeibc_block_command *cmds = locksets->cmds;
 	const struct operation *orig_o = cmds->o;
 	int rv = 0;
@@ -1141,7 +1141,7 @@ static int __init_so(enum nvmeib_block_io_op op, struct recovery_sync_op *so,
 	so->start_slice = start_block;
 	so->r1 = nvmeibc_disk_segment_get_praid(lock->ds);
 	so->n_slices = n_slices;
-	so->orig_rldr = nvmeibc_cllink_find_cmd_by_lock(locksets, lock->lock_i);
+	so->orig_rldr = nvmeibc_cllink_find_cmd_by_lock(locksets, lock->lockset_idx);
 	BUG_ON(!so->orig_rldr);	// Sanity. Caller (IO / Recovery / DpLib) Must have at least 1 disk command
 	BUG_ON((start_block + n_slices) > LOCKSET_SLICES);		// Sanity, invalid blocksets request
 	so->stage = sync_stage_start;
@@ -1160,7 +1160,7 @@ _out:
 	return rv;
 }
 
-#define should_abort_sync_on_detach(l) nvmeibc_block_status_is_detaching(get_locks_arr_of(l)->cmds->o->nd->status) // can also use: nvmeibc_disk_seg_to_bdev(l->ds)
+#define should_abort_sync_on_detach(l) nvmeibc_block_status_is_detaching(dp_locks_get_locks_header(l)->cmds->o->nd->status) // can also use: nvmeibc_disk_seg_to_bdev(l->ds)
 static int __trigger_sync(struct nvmeibc_cmd_lock *lock, u16 start_block, u16 n_slices,
 	enum nvmeib_block_io_op op, nvmeibc_sync_cb_t when_done_cb, void* context)
 {
@@ -1213,7 +1213,7 @@ static int __trigger_sync(struct nvmeibc_cmd_lock *lock, u16 start_block, u16 n_
 	}
 	if (rv == 0) { /* Analize Correct locks of caller */
 		if (lock->ds->toma_acm != NVMEIBTC_DS_MODE_RW) {	// Primary owner lock is taken, secondary/copy lock is contended
-			struct nvmeibc_cmd_lock *ow = dp_locks_get_ow_of(lock);
+			struct nvmeibc_cmd_lock *ow = dp_locks_get_blockset_owner_lock(lock);
 			if (!NCL_do_i_have_lock(ow->status)) {
 				WARN(true, DMESG_PREFIX("%s: ") "nvmeibc bug. No reason for sync, op=%u\n", so->o->nd->name, op);
 				rv = -10005;

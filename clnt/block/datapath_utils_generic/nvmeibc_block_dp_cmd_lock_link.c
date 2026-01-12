@@ -134,7 +134,7 @@ struct nvmeibc_block_command *nvmeibc_cllink_find_cmd_by_lock(
 {
 	struct nvmeibc_block_command *cmds_arr = locksets->cmds;
 	int c;
-	lsi = locksets[lsi].owner_id;	// Search by owner
+	lsi = locksets[lsi].owner_idx;	// Search by owner
 	for (c = 0; c < cmds_arr->ncmds; c+=dp_cmds_get_next_raid_leader(cmds_arr+c)) {
 		if (nvmeibc_clmat_is_linked(cmds_arr->o->CLmat, c, lsi, locksets))
 			return &cmds_arr[c];

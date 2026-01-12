@@ -172,8 +172,8 @@ static inline void DEBUG_LOCKS_CONTENTION(__attribute__((__unused__)) struct nvm
 
 int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
-	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = get_locks_arr_of(l);
-	const int lock_i = l->lock_i, ow_id = l->owner_id;			// Just for short writing
+	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
+	const int lock_i = l->lockset_idx, ow_id = l->owner_idx;			// Just for short writing
 	// Warning: operation/cmds might already be free() dont access them!!!
 	(void)tag;
 	__invoke_crash_on_lock_corruption(locksets, lock_i, "release", 1);
@@ -271,11 +271,11 @@ static void __set_cmpxchg_for_release(struct nvmeibc_cmd_lock*l, struct nvmeibc_
 	dc->compare = holder.all;
 }
 
-#define __print_release_lock_status(trace_name, msg, l) _ND(trace_name, "@STR: locksets=@LOCKSETS[@LSI] @DLBA disk=@DISK_NAME", msg, get_locks_arr_of(l), l->lock_i, l->address, l->ds->disk->name);
+#define __print_release_lock_status(trace_name, msg, l) _ND(trace_name, "@STR: locksets=@LOCKSETS[@LSI] @DLBA disk=@DISK_NAME", msg, dp_locks_get_locks_header(l), l->lockset_idx, l->address, l->ds->disk->name);
 
 static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 {
-	struct nvmeibc_cmd_lock *l = &locksets[lsi], *lo = &locksets[l->owner_id];
+	struct nvmeibc_cmd_lock *l = &locksets[lsi], *lo = &locksets[l->owner_idx];
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	struct nvmeibc_disk_segment *seg = l->ds;
 	struct nvmeibc_disk *disk = seg->disk;
@@ -336,7 +336,7 @@ void dp_locks_release_locks_sibs(struct nvmeibc_cmd_lock *locksets, int owner_i)
 #endif
 
 static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
-	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = get_locks_arr_of(l);
+	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
 	ulong times[3] = {jiffies, 0, 0}, duration;
@@ -349,21 +349,21 @@ static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 	times[1] = jiffies;
 	if (rv) {
 		const struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(cmp);
-		_ND(t_1srl, "locksets=@LOCKSETS[@LSI] rv=@RV o=@OPERATION c=@CMD_PTR", locksets, l->lock_i, rv, cmd->o, cmd);
+		_ND(t_1srl, "locksets=@LOCKSETS[@LSI] rv=@RV o=@OPERATION c=@CMD_PTR", locksets, l->lockset_idx, rv, cmd->o, cmd);
 		__give_failed_lock_cb(dc);
 	}
 	times[2] = jiffies;
 	duration = jiffies_to_msecs(times[2] - times[0]);
 	if (__SUSPICIOUS_LOCK_REQ_TIME < duration) {
-		_NT(t_2srl, "Retry, locksets=@LOCKSETS[@LSI] read=@MILISECONDS cb=@MILISECONDS total=@MILISECONDS", locksets, l->lock_i, jiffies_to_msecs(times[1] - times[0]), jiffies_to_msecs(times[2] - times[1]), (u32)duration);
+		_NT(t_2srl, "Retry, locksets=@LOCKSETS[@LSI] read=@MILISECONDS cb=@MILISECONDS total=@MILISECONDS", locksets, l->lockset_idx, jiffies_to_msecs(times[1] - times[0]), jiffies_to_msecs(times[2] - times[1]), (u32)duration);
 	}
 }
 
 static void __retry_read_lock(struct nvmeibc_d_iocmd_comp *cmp)
 {
-	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = get_locks_arr_of(l);
+	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
-	_ND(trace_1_retry_rdlock, "Retry cmp=@CMP_PTR, locksets=@LOCKSETS[@LSI]", cmp, locksets, l->lock_i);
+	_ND(trace_1_retry_rdlock, "Retry cmp=@CMP_PTR, locksets=@LOCKSETS[@LSI]", cmp, locksets, l->lockset_idx);
 	l->retries++;
 	slow_io_stats_t_log_over_retry(&locksets->cmds->o->nd->dp.io_slow, l, get_contending_id(dp_cmds_get_pigbck_comp_dc(iocmd)));
 	dp_locks_send_read_lock(cmp);
@@ -391,8 +391,8 @@ static void __read_lock_and_cmd_complete(struct nvmeibc_d_iocmd_comp *cmp,
 static void __fail_cmds_of_broken_read_lock(enum nvmeibc_block_lock_status l_status,
 			struct nvmeibc_d_iocmd_comp *cmp, int cmd_err)
 {
-	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = get_locks_arr_of(l);
-	const int lsi = l->lock_i;
+	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
+	const int lsi = l->lockset_idx;
 	const u64 holder = get_contending_id(&cmp->pigbck_comp);
 	_NT(t_1fblr, "locksets=@LOCKSETS[@LSI].status=@STATUS_STR-->@STATUS_STR seg=@SEG, @DLBA, lock=@LOCK_ENT_U64, retries=@RETRIES, comp=@COMP, err=@ERR", locksets, lsi, ncl_status_str(l->status), ncl_status_str(l_status), l->ds->uuid, l->address, holder, l->retries, cmp, cmd_err);
 	cmp->comp_code = cmd_err;
@@ -437,8 +437,8 @@ static void __schedule_retry_read_lock(struct nvmeibc_cmd_lock *l, struct nvmeib
 static int __retry_read_lock_cb_sync_done(void* context, int err)
 {
 	struct nvmeibc_d_iocmd_comp *cmp = context;
-	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = get_locks_arr_of(l);
-	const int lsi = l->lock_i;
+	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
+	const int lsi = l->lockset_idx;
 	switch (err) {
 		case EPERM_READ_FAIL_NO_RETRY: {/* sync failed in double read error. */
 			cmp->comp_code = err;
@@ -521,12 +521,12 @@ static void __squash_transport_lock_status(struct nvmeibc_cmd_lock *l, enum nvme
 int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_d_iocmd_comp *cmp = get_d_comp_of_pg(read_comp);
-	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = get_locks_arr_of(l);
+	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	unsigned long retry_time;
 	struct operation *o = locksets->cmds->o;
 	const u64 holder = get_contending_id(read_comp);
-	const int lsi = l->lock_i;
+	const int lsi = l->lockset_idx;
 
 	(void)tag;
 	l->status = read_comp->lock_status;
@@ -609,7 +609,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 static void __print_lock_to_log(struct nvmeibc_cmd_lock* locksets, int lsi)
 {	// Daniel: Todo, unite with code of __dump_operation_unsafe()
 	const struct nvmeibc_cmd_lock* l = &locksets[lsi]; (void)l;
-	_ND(trace_lock_to_log, "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] type=@TYPE @DISK_NAME:@DLBA, n_sibs=@N_SIBS", locksets, lsi, l->owner_id,
+	_ND(trace_lock_to_log, "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] type=@TYPE @DISK_NAME:@DLBA, n_sibs=@N_SIBS", locksets, lsi, l->owner_idx,
 	   l->type, l->ds->disk->name, l->address, l->n_siblings);
 }
 
@@ -625,7 +625,7 @@ static int __add_locks_for_raid(const struct nvmeibc_raid1 *r1, const enum nvmei
 		const u64 dlba = dp_io_topo_iterator_conv_rlba_to_phys_lock_addr(r1, si, rlba);
 		struct nvmeibc_cmd_lock *l = &locksets[my_ind];
 
-		l->owner_id = owner_i;		/* Init generic lock header */
+		l->owner_idx = owner_i;		/* Init generic lock header */
 		l->n_siblings = rlmap.n_locks;
 		l->ds = &r1->segments[si];
 		l->address = __to4K(dlba);
@@ -684,8 +684,10 @@ int dp_fill_locks_for_io(enum nvmeib_block_io_op op, u64 nlbas, u64 vlba, int c_
 	return lock_i;
 }
 
-raid_sgmnt_t get_si_of_lock(const struct nvmeibc_cmd_lock *lo, const struct nvmeibc_raid1 *r1) {
-	return lo->ds - r1->segments;
+raid_sgmnt_t dp_locks_get_sgmnt_idx_of_lock(const struct nvmeibc_cmd_lock *self) 
+{
+	struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(self->ds);
+	return self->ds - raid->segments;
 }
 
 int dp_fill_locks_for_raid(const struct nvmeibc_raid1 *r1, enum nvmeib_block_io_op op, u64 rlba, struct nvmeibc_cmd_lock *locksets)
@@ -713,8 +715,8 @@ void dp_block_translation_unit_calc_locks(struct dp_block_translation_unit *tu, 
 static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi);
 static void __retry_owner_lock(struct nvmeibc_cmd_lock *l, bool autofail)
 {
-	const int lsi = l->lock_i;
-	struct nvmeibc_cmd_lock *locksets = get_locks_arr_of(l);
+	const int lsi = l->lockset_idx;
+	struct nvmeibc_cmd_lock *locksets = dp_locks_get_locks_header(l);
 	struct nvmeibc_d_rdma_comp* dc = &l->comp;
 	const struct operation *o = locksets->cmds->o;
 	ulong start = jiffies, diff;
@@ -788,9 +790,9 @@ static void __fix_release_val_after_full_sync(struct nvmeibc_cmd_lock *l)
 	on it). Sync took only secondary owner (coz owner is taken by IO).
 	Solution: if sync succeeded, original IO has to mark its owner to be
 	released as 0, not stale special */
-	struct nvmeibc_cmd_lock *lo = dp_locks_get_ow_of(l);
+	struct nvmeibc_cmd_lock *lo = dp_locks_get_blockset_owner_lock(l);
 	if (unlikely(lo->secondary_id > 0)) {
-		if ((lo->secondary_id == (l->lock_i + 1)) &&
+		if ((lo->secondary_id == (l->lockset_idx + 1)) &&
 		    (lo->unlock_val   == RELEASE_LOCK__STALE_SPECIAL)) {
 			NVMEIBC_LOCK_SET_UNLOCK(lo, RELEASE_LOCK__UNLOCKED, RELEASE_LOCK_REASON__NONE);
 		}
@@ -920,7 +922,7 @@ static int __on_stale_resolved_val(struct nvmeibc_cmd_lock *locksets, int lock_i
 static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 {
 	struct nvmeibc_cmd_lock *l = &locksets[lock_i];
-	const int owner_id = l->owner_id;
+	const int owner_id = l->owner_idx;
 	const u32 msecs = jiffies_to_msecs(jiffies - l->first_try_time);
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	struct nvmeibc_cmd_lock *owner_lock = &locksets[owner_id];
@@ -1062,7 +1064,7 @@ static void prediscard_proc(struct nvmeibc_cmd_lock *ls, int lsi)
 	relink_trim_split_cmds(ls, rv);
 
 	/* Simulate callbacks on all the prediscard locks (with old/new cmds). */
-	last_prediscard = ls[ls->nlocks-1].owner_id;	// Once last ow gets cb(), kfree() occurs, so cache it on stack
+	last_prediscard = ls[ls->nlocks-1].owner_idx;	// Once last ow gets cb(), kfree() occurs, so cache it on stack
 	for (i = 0; i <= last_prediscard; i+= left) {	// Traverse all owners
 		struct nvmeibc_cmd_lock *lo = &ls[i];
 		left = lo->n_siblings;
@@ -1074,8 +1076,8 @@ static void prediscard_proc(struct nvmeibc_cmd_lock *ls, int lsi)
 
 static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
-	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = get_locks_arr_of(l);
-	const int lsi = l->lock_i;
+	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
+	const int lsi = l->lockset_idx;
 	const bool rv1 = NCL_is_failed_to_acquire(dc->lock_status) || (dc->lock_status == NCL_STATUS_CONTENDED);
 
 	(void)tag;

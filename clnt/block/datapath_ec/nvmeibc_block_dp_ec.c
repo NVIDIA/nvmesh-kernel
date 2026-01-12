@@ -2056,7 +2056,7 @@ void dp_ec_block_completion(struct nvmeibc_d_iocmd_comp *comp)
 void dp_ec_calc_should_abandon(struct nvmeibc_block_command *cmds, int lsi)
 {
 	struct nvmeibc_cmd_lock *locksets = cmds->locksets;
-	struct nvmeibc_cmd_lock *lo = locksets + locksets[lsi].owner_id;
+	struct nvmeibc_cmd_lock *lo = locksets + locksets[lsi].owner_idx;
 	int ci;
 
 	if (unlikely(cmds->o->op == NVMEIB_BLOCK_IO_OP_READ)) // Just a hack!

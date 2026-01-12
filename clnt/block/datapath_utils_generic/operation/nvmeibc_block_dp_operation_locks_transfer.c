@@ -15,7 +15,7 @@
 #define __IO_LT_still_unhandled(ptr) (((u64)(ptr)&(0x3)) == 0)
 
 #define get_first_owner_lock_of(ls) ((ls)                                )
-#define get_last_owner_lock_of( ls) ((ls) + (ls)[(ls)->nlocks-1].owner_id)
+#define get_last_owner_lock_of( ls) ((ls) + (ls)[(ls)->nlocks-1].owner_idx)
 
 static uint per_cpu_lock_transfer_num = NVMEIBC_NUM_PREV_OWNERS;
 module_param(per_cpu_lock_transfer_num, uint, 0444);
@@ -74,17 +74,17 @@ int __IO_LT_try_request_transfer(struct nvmeibc_cmd_lock *locksets)
 		if (!cand) {
 			best = e;					// No candidate, may use this slot
 		} else if (do_ow_locks_match(cand, first_owner)) {
-			if (get_locks_arr_of(cand)->asker != IO_LT_TRANSFERRED && (++e->counter & 0xff)) {
+			if (dp_locks_get_locks_header(cand)->asker != IO_LT_TRANSFERRED && (++e->counter & 0xff)) {
 				//BUG_ON((get_locks_arr_of(cand)->asker == IO_LT_DONE));
-				BUG_ON((get_locks_arr_of(cand)->asker != NULL));
-				_ND(trace_1_IO_LT, "locksets=@LOCKSETS requests transfer from locksets=@LOCKSETS", locksets, get_locks_arr_of(cand));
+				BUG_ON((dp_locks_get_locks_header(cand)->asker != NULL));
+				_ND(trace_1_IO_LT, "locksets=@LOCKSETS requests transfer from locksets=@LOCKSETS", locksets, dp_locks_get_locks_header(cand));
 				lsi_start = first_owner->n_siblings;/* Skip the first owner lock+siblings*/
 				cand->asker = locksets;
 				locksets->giver = cand;
 				__IO_LT_start_take_stats(locksets);
 			} else {
 				e->counter = 0;
-				__IO_LT_refuse_transfer(get_locks_arr_of(cand));
+				__IO_LT_refuse_transfer(dp_locks_get_locks_header(cand));
 			}
 			best = e;					// Definitely use this slot, regardless if transferred or did not
 			break;
@@ -98,7 +98,7 @@ int __IO_LT_try_request_transfer(struct nvmeibc_cmd_lock *locksets)
 		best->counter = 0;
 		cand = best->prev_owner;
 		if (cand) { /* Last lockset (IO) has no asker, It will never get one because I (locksets) am becoming the last lockset now. */
-			__IO_LT_refuse_transfer(get_locks_arr_of(cand));
+			__IO_LT_refuse_transfer(dp_locks_get_locks_header(cand));
 		}
 	}
 
@@ -232,7 +232,7 @@ _out:
 
 void __IO_LT_try_transfer_give(struct nvmeibc_cmd_lock *locksets, int lsi)
 {
-	struct nvmeibc_cmd_lock *l = locksets + lsi, *lo = locksets + l->owner_id;
+	struct nvmeibc_cmd_lock *l = locksets + lsi, *lo = locksets + l->owner_idx;
 	if (lo != get_last_owner_lock_of(locksets))
 		goto _out;									// Only transfer of last owner with siblings is supported
 
@@ -259,7 +259,7 @@ void __IO_LT_try_transfer_give(struct nvmeibc_cmd_lock *locksets, int lsi)
 			goto _out;
 		}
 		rcv_ow = lo->asker;	/* Going to try to tansfer my locks */
-		transferred = (__IO_LT_transfer_locks_of_raid(locksets, l->owner_id, rcv_ow) > 0);
+		transferred = (__IO_LT_transfer_locks_of_raid(locksets, l->owner_idx, rcv_ow) > 0);
 		spin_unlock_irqrestore(&locksets->last_ls->lock, flags);
 		if (transferred)
 			__IO_LT_schedule_transfer(rcv_ow);
