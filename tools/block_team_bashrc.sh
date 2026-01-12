@@ -500,7 +500,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			echo_green "---------------------- Toma SIMULATOR EXAMPLES --------------------";
 			echo "cd ${MY_PROJECTS_DIR}/nvmesh/toma/unitest/";
 			echo "make clean;    make all -j 10;   ./nvmeibt_toma";
-			echo -e "\t./_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color --dict_preload 99bin/*/obj/dict* --fmtlib_preload 99bin/*/obj/libfmtrs.so"
+			echo -e "\t./_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color"
 			echo_green "---------------------- Utils examples --------------------"
 			echo -e "\tcd ${MY_PROJECTS_DIR}/perfTest/io_stress/cmp_blocks; examples/run_test.sh;"
 		fi
