@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from threading import Lock, RLock
-from prometheus_client import start_http_server, Gauge
+from prometheus_client import Gauge, MetricsHandler
 from prometheus_client.metrics import MetricWrapperBase
 from prometheus_client.registry import REGISTRY
 
@@ -22,7 +22,7 @@ from xlro.core import infra_conf
 from xlro.core.entities import Manager, Host
 from xlro.core.sdk.ConnectionManager import ConnectionManager, ConnectionManagerError
 from xlro.core.util.general_utils import host_name, wait_for_it
-from xlro.core.util.ssh import Connection
+from xlro.core.util.ssh import Connection, local_execute
 from xlro.core.util.dict_util import merge_dicts, del_path
 import tracemalloc, psutil
 
@@ -30,7 +30,7 @@ import tracemalloc, psutil
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 GIT_SPEC = {}
-EXPORTER_VERSION = 'v2.3.1'  # support labels list
+EXPORTER_VERSION = 'v2.4.0'  # support readyness and liveness
 Connection.LOCALHOST_CHECK = True
 
 # TODO: move to some utils lib once it's completely in nvmesh repo
@@ -68,8 +68,13 @@ EXIT_ON_CERT_CHANGE = False
 MEMORY_PROFILING = False
 MEMORY_REPORT_INTERVAL = 60
 MEMORY_TRACEMALLOC_LIMIT = 10
+LIVENESS_THRESHOLD_LOOPS = 5  # Number of missed loops before liveness probe fails
 # source (i.e. /proc/nvmeibc/volumes/*/iostats.json) -> MetricParser object
 SOURCE_CONF = {}
+
+_last_successful_loop: float = 0.0
+_exporter_ready: bool = False
+_management_connected: bool = False
 host = Host.instance(name=socket.gethostname())
 cycle_count = 0
 cache_size_metric : Optional[MetricWrapperBase] = None
@@ -147,6 +152,7 @@ parser.add_argument("--logfile", help='Log file', default=get_default('LOGGING_F
 parser.add_argument('--memory-profiling', type=bool_check, default=get_default('MEMORY_PROFILING'), help='Enable memory profiling and periodic reporting')
 parser.add_argument('--memory-report-interval', type=int, default=get_default('MEMORY_REPORT_INTERVAL'), help='Memory report interval in seconds (default: 60)')
 parser.add_argument('--memory-tracemalloc-limit', type=int, default=get_default('MEMORY_TRACEMALLOC_LIMIT'), help='Number of top memory allocations to report (default: 10)')
+parser.add_argument('--liveness-threshold-loops', type=int, default=get_default('LIVENESS_THRESHOLD_LOOPS'), help='Number of missed loops before liveness probe fails (default: 5)')
 parsed_args = parser.parse_args()
 
 # Set runtime certificate directories based on parsed argument
@@ -413,7 +419,7 @@ class MetricParser(object):
 class CmdParser(MetricParser):
     @classmethod
     def run_cmd(cls, cmd: str) -> str:
-        stdout, stderr, code = Connection.local_execute(cmd)
+        stdout, stderr, code = local_execute(cmd)
         if code != 0:
             raise subprocess.CalledProcessError(code, cmd, stdout, stderr)
         return stdout
@@ -502,8 +508,10 @@ class RestParser(MetricParser):
                         self._connection_cache[endpoint_key] = connection
                         #JJW: Does global API version make sense with multiple endpoints?
                         self._api_version = conn_mgmt.api_version
+                        set_management_connected(True)
                         logger.info(f'Connection acquired successfully for endpoint key: {endpoint_key}! API Version: {self._api_version}')
                     except Exception as e:
+                        set_management_connected(False)
                         next_retry = time.time() + parsed_args.mgmt_retry_login
                         self._connection_cache[endpoint_key] = next_retry
                         raise ConnectionError(f'Unable to acquire connection for endpoint key: {endpoint_key} - {repr(e)}. Retry login after {time.ctime(next_retry)}')
@@ -1137,25 +1145,121 @@ def initialize_certificates():
     if has_mgmt_certs and not update_certificates('management'):
         raise Exception("Failed to copy management certificates to runtime directory")
 
+
+class HealthMetricsHandler(MetricsHandler):
+    """Custom HTTP handler that adds health check endpoints for prometheus probes.
+    
+    Endpoints:
+        /healthz, /health - Liveness probe: checks if metrics loop is running
+        /readyz, /ready  - Readiness probe: checks if exporter is initialized
+        /metrics         - Standard Prometheus metrics (inherited)
+    """
+    
+    def do_GET(self):
+        if self.path == '/healthz' or self.path == '/health':
+            self._handle_liveness()
+        elif self.path == '/readyz' or self.path == '/ready':
+            self._handle_readiness()
+        else:
+            # Default prometheus metrics handling
+            super().do_GET()
+    
+    def _handle_liveness(self):
+        """Liveness probe - check if the process is alive and not deadlocked.
+        
+        Returns 200 if the metrics loop has run within the expected interval.
+        Considers unhealthy if no successful loop in last N intervals (configurable).
+        """
+        global _last_successful_loop
+        
+        max_stale_time = parsed_args.interval * parsed_args.liveness_threshold_loops
+        time_since_last_loop = time.time() - _last_successful_loop
+        
+        # Allow startup grace period (first loop hasn't run yet)
+        if _last_successful_loop == 0:
+            self._send_response(200, "OK (starting up)")
+        elif time_since_last_loop < max_stale_time:
+            self._send_response(200, "OK")
+        else:
+            self._send_response(503, f"Stale: last loop {time_since_last_loop:.1f}s ago (threshold: {max_stale_time}s)")
+    
+    def _handle_readiness(self):
+        """Readiness probe - check if the exporter is ready to serve traffic.
+        
+        Returns 200 if exporter is initialized, with status indicating management connection.
+        """
+        global _exporter_ready, _management_connected
+        
+        if _exporter_ready:
+            if _management_connected:
+                self._send_response(200, "Ready, management connected")
+            else:
+                self._send_response(200, "Ready, management disconnected")
+        else:
+            self._send_response(503, "Not ready")
+    
+    def _send_response(self, status_code: int, message: str):
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(message.encode('utf-8'))
+
+
+def set_last_successful_loop():
+    """Called at the end of each successful metrics collection loop."""
+    global _last_successful_loop
+    _last_successful_loop = time.time()
+
+
+def set_exporter_ready(ready: bool = True):
+    """Called when the exporter is ready/not-ready to serve traffic."""
+    global _exporter_ready
+    _exporter_ready = ready
+    logger.info(f"Exporter readiness set to: {ready}")
+
+
+def set_management_connected(connected: bool = True):
+    """Called when management connection status changes."""
+    global _management_connected
+    if _management_connected != connected:
+        _management_connected = connected
+        logger.info(f"Management connection status: {'connected' if connected else 'disconnected'}")
+
+
 def start_prometheus_server():
-    """Start prometheus HTTP server using prometheus_client built-in TLS support.
+    """Start prometheus HTTP server with health check endpoints.
 
     Certificate rotation can be triggered via:
     - SIGHUP signal for manual reload
     - Auto-reload when file changes are detected (if enabled via SIGUSR2)
     """
     global prometheus_server, prometheus_thread
+    from http.server import ThreadingHTTPServer
+    import ssl
+
     port = int(parsed_args.port)
     is_https = loaded_exporter_cert and loaded_exporter_key
-    https_kwargs = {
-        'certfile': loaded_exporter_cert,
-        'keyfile': loaded_exporter_key,
-        'client_cafile': loaded_exporter_ca if loaded_exporter_ca else None,
-        'client_auth_required': parsed_args.exporter_client_auth_required
-    } if is_https else {}
 
     logger.info(f"Starting prometheus server on port {port}. IS_HTTPS: {is_https}")
-    prometheus_server, prometheus_thread = start_http_server(port, **https_kwargs)
+
+    # Create server with custom handler that includes health endpoints
+    prometheus_server = ThreadingHTTPServer(('', port), HealthMetricsHandler)
+
+    # Configure TLS if certificates are provided
+    if is_https:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=loaded_exporter_cert, keyfile=loaded_exporter_key)
+        if loaded_exporter_ca:
+            context.load_verify_locations(cafile=loaded_exporter_ca)
+        if parsed_args.exporter_client_auth_required:
+            context.verify_mode = ssl.CERT_REQUIRED
+        prometheus_server.socket = context.wrap_socket(prometheus_server.socket, server_side=True)
+
+    # Start server in background thread
+    prometheus_thread = threading.Thread(target=prometheus_server.serve_forever)
+    prometheus_thread.daemon = True
+    prometheus_thread.start()
+
     _setup_signal_handlers()
     logger.info(f"Server started successfully")
 
@@ -1163,6 +1267,8 @@ def start_prometheus_server():
     certs_list = (exporter_certs if has_exporter_certs else []) + (mgmt_certs if has_mgmt_certs else [])
     if certs_list:
         check_certificate_changes(certs_list)
+
+    set_exporter_ready(True)
 
 def reload_management_certificates() -> bool:
     """Reload management certificates by copying to runtime dir and clearing connection cache."""
@@ -1591,7 +1697,7 @@ def metrics_collection_loop(sources: Dict[str, list]):
     MetricParser.decrease_metric_threshold()
     populate_metrics(sources)
     MetricParser.remove_inactive_metrics()
-
+    set_last_successful_loop()  
 
 def main():
     logger.info(f'Starting NVMesh prometheus metrics exporter {EXPORTER_VERSION} on {host.name}: {parsed_args}')
