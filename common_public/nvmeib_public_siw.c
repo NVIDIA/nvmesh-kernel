@@ -7,7 +7,7 @@
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMeIB Public siw");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 #define DEBUG_LEVEL (int)0
 static int (*debug_level_f)(void);

@@ -75,8 +75,7 @@ EXPORT_SYMBOL(nvmeib_txt_make_seq);
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMeIB Public");
-MODULE_LICENSE("Dual BSD/GPL");
-//MODULE_LICENSE("Proprietary");
+MODULE_LICENSE("GPL and additional rights");
 
 /* In case kallsyms is not available, this parameter allows the Infiniband On-Demand-Paging state to be provided on module load */
 enum {

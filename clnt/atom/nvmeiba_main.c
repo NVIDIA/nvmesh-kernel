@@ -4,7 +4,7 @@
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("nvmesh client hot upgrade core");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 #define NVMEIBA_2_C_PROTO_VERSION_CURRENT NVMEIBA_2_C_PROTO_VERSION_V_2_1
 

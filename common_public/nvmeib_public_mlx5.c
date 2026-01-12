@@ -8,7 +8,7 @@
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMeIB Public mlx5");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 #if !KS_HAS_MMIOWB
 #define mmiowb() barrier()

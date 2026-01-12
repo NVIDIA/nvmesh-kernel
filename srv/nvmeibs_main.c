@@ -28,12 +28,7 @@
 #include "nvmeibs_nordda.h"
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMe storage device over Infiniband");
-
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-MODULE_LICENSE("Dual BSD/GPL");
-#else
-MODULE_LICENSE("Proprietary");
-#endif
+MODULE_LICENSE("GPL and additional rights");
 
 #define DRV_VERSION "0.0.1"
 const char nvmeibs_driver_version[] = DRV_VERSION;

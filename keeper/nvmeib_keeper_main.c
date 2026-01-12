@@ -119,7 +119,7 @@ static inline const char *basename(const char *path)
 
 MODULE_AUTHOR("NVIDIA");
 MODULE_DESCRIPTION("Keeps NVMesh resources during upgrade");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 /* Keeper Ops Functions Signatures */
 static DEFINE_KEEPER_PUSH_FRS_FN(push_frs_op_fn);

@@ -34,12 +34,7 @@
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMe block device over Infiniband");
-
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-MODULE_LICENSE("Dual BSD/GPL");
-#else
-MODULE_LICENSE("Proprietary");
-#endif
+MODULE_LICENSE("GPL and additional rights");
 
 #define PROCFS_VOLUMES_STR "volumes"
 #define PROCFS_DISKS_STR "disks"

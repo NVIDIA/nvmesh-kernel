@@ -30,13 +30,7 @@
 
 MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMeIB Common");
-//MODULE_LICENSE("Dual BSD/GPL");
-
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-MODULE_LICENSE("Dual BSD/GPL");
-#else
-MODULE_LICENSE("Proprietary");
-#endif
+MODULE_LICENSE("GPL and additional rights");
 
 #define DEBUG_LEVEL (int)1
 static int (*debug_level_f)(void);
