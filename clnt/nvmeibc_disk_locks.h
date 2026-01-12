@@ -51,6 +51,15 @@ static inline bool NCL_is_failed_to_release(enum nvmeibc_block_lock_status s){
 			(s == NCL_STATUS_ABANDONED)); /* Forbidden to release */
 }
 
+static inline bool NCL_is_request_failed(enum nvmeibc_block_lock_status s){
+	return (NCL_STATUS_FAIL_NO_COMP == s) 
+	       || (NCL_STATUS_FAIL_COMP == s) 
+		   || (NCL_STATUS_DISKDEAD == s) 
+		   || (NCL_STATUS_DISKDEAD_NO_RETRY == s)
+		   || (NCL_STATUS_ABANDONED == s)
+		   || (NCL_STATUS_TAKEN_DISKDEAD == s);
+}
+
 /* Check if we did our best to acquire a lock but failed (IO also failed) */
 static inline bool NCL_is_failed_to_acquire(enum nvmeibc_block_lock_status s){
 	return (s == NCL_STATUS_DISKDEAD) || (s == NCL_STATUS_DISKDEAD_NO_RETRY);
