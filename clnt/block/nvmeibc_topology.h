@@ -234,7 +234,11 @@ struct nvmeibc_raid1 const* __nvmeibc_disk_segment_get_praid_impl(struct nvmeibc
 #define nvmeibc_disk_segment_get_praid(self) 																	\
 	__builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_disk_segment*),	\
 		__nvmeibc_disk_segment_get_praid_impl(self),															\
-		(struct nvmeibc_raid1*)__nvmeibc_disk_segment_get_praid_impl(self))
+		(struct nvmeibc_raid1*)__nvmeibc_disk_segment_get_praid_impl(self)) 								\
+
+struct nvmeib_pet_journal;
+__attribute__((nonnull(1,2)))
+void nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid, struct nvmeib_pet_journal* journal);
 
 #define raid1_for_each_seg(r1, seg, si) \
 	for (si = 0, seg = r1 ? (r1)->segments : 0; \
