@@ -106,25 +106,28 @@ const char *nvmeib_status_str(enum ib_wc_status *status)
 }
 EXPORT_SYMBOL(nvmeib_status_str);
 
+#define PORT_ID_MAX_STR_LENGTH 255
+#define PORT_ID_MAX_INT 254
+
 static void parse_port_id(const char *param, struct nvmeib_used_dev_ports *udp, const char *start_token, int i)
 {
 	int num_of_chars;
 	long port;
-	char tmp[255];
+	char tmp[PORT_ID_MAX_STR_LENGTH];
 
 	NFIN;
 	BUG_ON(!udp);
 	num_of_chars = &param[i] - start_token;
-	if (num_of_chars >= 255) {
+	if (num_of_chars >= PORT_ID_MAX_STR_LENGTH -1) {
 		_NE(error_nvmeib_utils_parse_port_id, "port number of chars is very long: @NUM_OF_CHARS",
 			num_of_chars);
-		num_of_chars = 255;
+		num_of_chars = PORT_ID_MAX_STR_LENGTH - 1;
 	}
 	memcpy(tmp, start_token, num_of_chars);
 	tmp[num_of_chars] = '\0';
 	if (kstrtol(tmp, 0, &port))
 		_NE(error_1_nvmeib_utils_parse_port_id, "Unable to parse port id @TMP", tmp);
-	else if (port > 0 && port < 255) {
+	else if (port > 0 && port <= PORT_ID_MAX_INT) {
 		--port; /*assuming port is 1 based*/
 		udp->dev_ports.used_ports_mask[port >> 3] |= (1 << (port & 0x7));
 	} else
