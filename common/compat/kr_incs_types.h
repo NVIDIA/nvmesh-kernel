@@ -104,4 +104,15 @@
 	#define __bitwise
 #endif
 
+
+/***************************** Debugging & Utils*******************************/
+#define numeric_downcast(type, value) \
+({	\
+    __auto_type __numeric_cast_value = (value); \
+    type __numeric_cast_narror_type_same_value = (type)__numeric_cast_value;	\
+    BUG_ON(__numeric_cast_narror_type_same_value != __numeric_cast_value);	\
+    __numeric_cast_narror_type_same_value;	\
+})
+
+
 #endif // KERNEL_BASE_TYPES_H
