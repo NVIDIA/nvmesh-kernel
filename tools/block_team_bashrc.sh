@@ -853,6 +853,9 @@ else
 				NVMESH_service toma up;
 			elif [ "$2" == "find" ]; then
 				find ${NVMESH_DIR_SRC}/ -name nvmeibt_toma;
+			elif [ "$2" == "rpc" ]; then
+				cmd="sudo ${NVMESH_DIR_SRC}/common-repo/tools/toma_rpc ${@:3}";
+				echo $cmd; eval $cmd;
 			elif [ "$2" == "dump" ]; then
 				local toma_dir="./z_last_toma_$(date +%Y_%m_%d_%H_%M_%S)";
 				local toma_cfg_file="/${NVMESH_DIR_LOG}/toma_trace.config";
@@ -895,7 +898,7 @@ else
 				echo "cd toma;";
 				echo "make clean; rm ${tfile}; rm -rf obj/*; make -j 10 --debug=verbose all MOD=release make AUTOGEN_DIR='../autogen' AUTOGEN_SUBDIRS_TOMA='common toma' NVMEIBC_SECTOR_SHIFT=12 GIT_COMMIT_ID=0xdddaaa55;  [ -f ${tfile} ] && echo_green "OK" || echo_red "Fail";";
 				echo "sudo mv ${toma_exe} ${toma_exe}.back";
-				echo "sudo sudo cp ./trace/nvmeibt_toma/release/dict.*.json /var/log/nvmesh/trace_daemon/";
+				echo "sudo cp ./trace/nvmeibt_toma/release/dict.*.json /var/log/nvmesh/trace_daemon/";
 				echo "NVMESH_service toma stop; sudo cp bin/release/nvmeibt_toma ${toma_exe}; NVMESH_service toma restart; sleep 1s; cat /proc/nvmeibs/toma_status/raft | grep commit;";
 			else
 				echo "params: up / start / restart / dump / stop / del_csv / find / recoveries / compile"
