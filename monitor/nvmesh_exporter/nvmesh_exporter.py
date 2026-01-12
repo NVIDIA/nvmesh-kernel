@@ -411,14 +411,22 @@ class MetricParser(object):
 
 
 class CmdParser(MetricParser):
-    sp_run_kwargs = {'shell': True, 'check': True, 'capture_output': True, 'text': True}
-
     @classmethod
     def run_cmd(cls, cmd: str) -> str:
-        return subprocess.run(cmd, **cls.sp_run_kwargs).stdout
+        stdout, stderr, code = Connection.local_execute(cmd)
+        if code != 0:
+            raise subprocess.CalledProcessError(code, cmd, stdout, stderr)
+        return stdout
 
     def fetch_metrics_dict(self, path: str) -> Dict[str, Any]:
-        return json.loads(self.run_cmd(path))
+        try:
+            return json.loads(self.run_cmd(path))
+        except FileNotFoundError as e:
+            logger.warning(f"Command not available (distroless container?): {path} - {e}")
+            raise
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Command failed: {path} - exit code {e.returncode}")
+            raise
 
 
 class UmRpcParser(CmdParser):
@@ -1540,6 +1548,8 @@ def populate_metrics(sources: Dict[str, list]):
                 path2source += [(um_rpc_parser_class.build_rpc_cmd(source, elem), source) for elem in um_rpc_parser_class.get_iterables(source)]
             else:
                 path2source += [(source, source)]
+
+    path2source += [(source, source) for source in sources['cmd']]
 
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_FOPEN) as executor:
         executor.map(lambda source_args: _populate_metrics(*source_args), path2source)
