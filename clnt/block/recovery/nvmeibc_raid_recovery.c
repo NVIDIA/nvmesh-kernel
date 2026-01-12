@@ -176,7 +176,7 @@ static __attribute__((unused)) bool __uncommited_binfo_detect_case_1(struct nvme
 #define n_bits_blkset_stale_s (sizeof(union nvmeib_blkset_sparse_report )*8)
 #define nvmeibc_is_request_sparse(el_size) ((el_size) == n_bits_blkset_stale_s)
 
-static int __blocksets_problems_read_cb(struct nvmeibc_d_rdma_comp *dc)
+static int __blocksets_problems_read_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	int rv = 0;
 	struct nvmeibc_cmd_lock *db_req = lock_of_bcomp(dc);
@@ -189,6 +189,7 @@ static int __blocksets_problems_read_cb(struct nvmeibc_d_rdma_comp *dc)
 	u64 b_length;								// Exact lenght of the batch (in units of blocksets)
 
 	u8 *arr = dc->dbits_arr.arr;
+	(void)tag;
 	__sync_worker_clean_topo(__sync_worker_of_o(o));			// Disconnect topology from worker to be able to free it even if worker finishes
 	if (NCL_had_acquire_callback(dc->lock_status))
 		nvmeibc_pd_cb_called_comp(seg->disk, dc);
@@ -244,7 +245,7 @@ static int __simulate_get_problems_array_from_server(struct nvmeibc_d_rdma_comp 
 	dc->dbits_arr.arr = (void*)&_arr[0];
 	dc->dbits_arr.size = min(dlba_length, (u64)ARRAY_SIZE(_arr));
 	dc->lock_status = NCL_STATUS_TRANSFERRED; 		// Transfer from stack to callback
-	dc->callback(dc);
+	dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
 	return 0;		// Always succeeds
 }
 
@@ -306,7 +307,7 @@ __treat_error_via_cb:
 	if (rv) {
 		_NTRR(tr_2_get_next_batch, "autofail rv=@RV", rv);
 		dc->lock_status = NCL_STATUS_DISKDEAD;
-		dc->callback(dc);	// Every error is handled via call to callback
+		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());	// Every error is handled via call to callback
 	}
 }
 

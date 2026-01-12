@@ -163,7 +163,7 @@ void dp_locks_put_TxID_dbits(struct nvmeibc_cmd_lock *locksets, int owner_i,
 bool __attribute__((warn_unused_result)) verify_binfo_is_legal(struct nvmeibc_disk_segment *ds, const union nvmeib_blkset_info binfo, const u64 blockset_dlba, const char action);
 
 /* For EC / QLC recoveries and IO stages we update all lock binfos with a new value */
-void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const union nvmeib_blkset_info *binfo, int (*callback)(struct nvmeibc_d_rdma_comp*), int prev_rv);
+void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const union nvmeib_blkset_info *binfo, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag), int prev_rv);
 
 /********************* Stale Locks During lock acquisition ********************/
 sgmnts_bmp_t dp_locks_stale_get_locks_bitmap_in_blockset(struct nvmeibc_cmd_lock *owl);
@@ -175,7 +175,7 @@ void dp_locks_stale_after_sync_retry_acquire(struct nvmeibc_cmd_lock *owl, int s
 void dp_locks_release_locks_sibs(struct nvmeibc_cmd_lock *locksets, int owner_i);
 
 /* Callback of the above function (allways called, on each of the siblings). */
-int  dp_locks_release_cb(   struct nvmeibc_d_rdma_comp *dc);	// Callback for e
+int  dp_locks_release_cb(   struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag);	// Callback for e
 void dp_locks_complete_lock(struct nvmeibc_cmd_lock *locks, int nrefs, int lsi, const bool release);	// Complete state machine for this lock. No more work has to be done
 void dp_locks_free_all(     struct nvmeibc_cmd_lock *locks);	// Actually kfree the locks array (all owner locks with their siblings)
 
@@ -188,7 +188,7 @@ void dp_locks_free_all(     struct nvmeibc_cmd_lock *locks);	// Actually kfree t
 		4. Piggyback/ Explicit-view-lock failed, need to retry it.
    After read command completed, read piggibacked lock value or rdma read the
    owner lock value (do not compare exchange it) */
-int  dp_locks_view_lock_sm(       struct nvmeibc_d_rdma_comp *read_comp);	// State machine for blockset (access of 1 owner lock) and also a callback
+int  dp_locks_view_lock_sm(       struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_d_rdma_comp_tag tag);	// State machine for blockset (access of 1 owner lock) and also a callback
 //void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp);		// No declaration as it is internally called
 void dp_locks_read_complete(struct nvmeibc_cmd_lock *locksets, int lsi, enum nvmeibc_block_lock_status status);	// Termination of owner lock view state machine
 

@@ -65,8 +65,8 @@ _out:;
 }
 
 /************** Sync rescheduling on resubmitter thread ***********************/
-static int __handle_locks_o(      struct nvmeibc_d_rdma_comp *dc);	// take release locks state machine
-static int __jour_garbg_collect_o(struct nvmeibc_d_rdma_comp *dc);
+static int __handle_locks_o(      struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag);	// take release locks state machine
+static int __jour_garbg_collect_o(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag);
 
 #ifndef DP_LIB
 void nvmeibc_mark_sync_wants_to_inject_caller_sgl(const struct nvmeibc_block_command *cmd)
@@ -75,7 +75,7 @@ void nvmeibc_mark_sync_wants_to_inject_caller_sgl(const struct nvmeibc_block_com
 }
 #endif
 #ifndef BLKCMP_SO_COMPLETION_PRESERVE_STACK
-static void set_callback_as_locks_state_machine(struct nvmeibc_d_rdma_comp *dc, int (*callback)(struct nvmeibc_d_rdma_comp*))
+static void set_callback_as_locks_state_machine(struct nvmeibc_d_rdma_comp *dc, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag))
 {
 	dc->callback = callback;	// Continue state machine from lock callback context
 }
@@ -91,7 +91,7 @@ static void __resume_sync_operation_work(struct workqe_struct *work)
 	struct recovery_sync_op *so = o->rso;
 	struct nvmeibc_d_rdma_comp* dc = &so->locks[0].comp;
 
-	__handle_locks_o(dc);	// == dc->callback(dc), Only locks SM rescheduling is supported for now. TODO: Support other sync SMs, including nested.
+	__handle_locks_o(dc, nvmeibc_d_rdma_comp_tag_make());	// == dc->callback(dc), Only locks SM rescheduling is supported for now. TODO: Support other sync SMs, including nested.
 }
 
 void nvmeibcbdp_sync_reschedule(struct recovery_sync_op *so)
@@ -169,7 +169,7 @@ static void __return_to_locks_unlock_sm(struct recovery_sync_op *so)
 		so->stage = sync_stage_recov_owner_ulock_sm;
 	}
 	__verify_unlock_callback_is_correct(dc);
-	BLKCMP_SO_ASYNC_RESUME_CAL(dc->callback(dc));		// Transition back to locks state machine
+	BLKCMP_SO_ASYNC_RESUME_CAL(dc->callback(dc, nvmeibc_d_rdma_comp_tag_make()));		// Transition back to locks state machine
 }
 
 void nvmeibcbdpec_return_to_caller_sm(struct recovery_sync_op *so)
@@ -730,11 +730,13 @@ static void debug_transfer_transport_so(__attribute__ ((unused)) const struct re
 }
 
 // Used to mark all blkset info writes. Much like __send_blkset_info_to_data_lock_cb()
-static int __complete_bs_info_write(struct nvmeibc_d_rdma_comp *dc)
+static int __complete_bs_info_write(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(dc);
 	struct recovery_sync_op *so = l->cmds->o->rso;
 	int rv = 0;
+
+	(void)tag;
 	if (NCL_had_acquire_callback(dc->lock_status))
 		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
 	if (!NCL_do_i_have_lock(dc->lock_status)) { // Handle errors
@@ -847,13 +849,14 @@ void* nvmeibcbdpec_sync_get_fn_by_rtype(enum NVMEIBT_RECOVERY_TYPE rtype)
 }
 
 /***************** State machine which Takes/Releases all locks ***************/
-static int __handle_locks_o(struct nvmeibc_d_rdma_comp *lock_comp)
+static int __handle_locks_o(struct nvmeibc_d_rdma_comp *lock_comp, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(lock_comp);		// Any lock from all siblings
 	struct recovery_sync_op *so = l->cmds->o->rso;
 	int err = 0;
 _func_start:
 
+	(void)tag;
 	__ndump_operation(handle_locks, &so->o);
 	if (so->error != 0) {
 		if (so->should_abandon_on_error && (so->stage < sync_stage_done)) {
@@ -1002,7 +1005,7 @@ _func_start:
 	case sync_stage_recov_un_lock_release_cb: {
 		l->status = lock_comp->lock_status;
 		if (!did_caller_of_so_took_this_lock(l)) { /* Owner/Dual/Copy-Ow handled by sync, released or broken */
-			dp_locks_release_cb(lock_comp);
+			dp_locks_release_cb(lock_comp, nvmeibc_d_rdma_comp_tag_make());
 		}
 		so->stage = sync_stage_recov_un_lock_next_lock;
 		goto _func_start;
@@ -1242,11 +1245,13 @@ error:
 }
 
 // EC-1477: Hide this entire state machine in _mirror_ files. It should not be in common!
-static int __convert_stale_special_2_dirty_o(struct nvmeibc_d_rdma_comp *lock_comp)
+static int __convert_stale_special_2_dirty_o(struct nvmeibc_d_rdma_comp *lock_comp, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(lock_comp); // Always first lock
 	struct recovery_sync_op *so = (void*)l->cmds;
 	int err = 0;
+
+	(void)tag;
 	__ndump_operation(t_00_ss2dbit, &so->o);
 
 _func_start:
@@ -1303,7 +1308,7 @@ _func_start:
 		case sync_stage_st_to_db_stale_released:{
 			if (NCL_had_release_callback(lock_comp->lock_status))   // Do this only if actuall callback returned, or else changing to TAKEN implies a callback and we would corrupt the count of in_transfers io requests
 				lock_comp->lock_status = NCL_STATUS_TAKEN;			// Daniel: Even if stale-special release failed, sync operation is a success, coz dirty bit was written (no data corruption). dp_locks_release_cb() - does reregisters failed release. We don't want this!
-			dp_locks_release_cb(lock_comp);
+			dp_locks_release_cb(lock_comp, nvmeibc_d_rdma_comp_tag_make());
 			so->stage = sync_stage_done;
 			goto _func_start;
 		}
@@ -1349,7 +1354,7 @@ static int __convert_stale_special_2_dirty_bit(struct nvmeibc_cmd_lock *lock, nv
 			struct nvmeibc_d_rdma_comp *dc = &so->locks[0].comp;
 			dc->lock.id = lock->comp.lock.id;	// Propegate the original holder lock id for handling later
 			set_callback_as_locks_state_machine(dc ,&__convert_stale_special_2_dirty_o);
-			__convert_stale_special_2_dirty_o(dc);
+			__convert_stale_special_2_dirty_o(dc, nvmeibc_d_rdma_comp_tag_make());
 			return 0;
 		} else
 			return -ENOMEM;
@@ -1534,12 +1539,13 @@ int nvmeibc_sync_generic_by_op(struct nvmeibc_cmd_lock *lock, u16 start_block, u
 }
 
 // EC-1477: Hide this entire state machine in _ec_ files. It should not be in common!
-static int __jour_garbg_collect_o(struct nvmeibc_d_rdma_comp *lock_comp)
+static int __jour_garbg_collect_o(struct nvmeibc_d_rdma_comp *lock_comp, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(lock_comp); // Always first lock
 	struct recovery_sync_op *so = (void*)l->cmds;
 	int err = 0;
 
+	(void)tag;
 	__ndump_operation(jour_garbg_collect, &so->o);
 
 _func_start:
@@ -1607,7 +1613,7 @@ int nvmeibc_sync_gc_unlocked_lock(struct nvmeibc_cmd_lock *l, nvmeibc_sync_cb_t 
 			struct nvmeibc_d_rdma_comp *dc = &so->locks[0].comp;
 			so->o->user_data = l->user_data;
 			set_callback_as_locks_state_machine(dc, __jour_garbg_collect_o);
-			__jour_garbg_collect_o(dc);
+			__jour_garbg_collect_o(dc, nvmeibc_d_rdma_comp_tag_make());
 			return 0;
 		} else
 			return -ENOMEM;
@@ -1632,7 +1638,7 @@ static void __execute_sync_operation(struct recovery_sync_op *so)
 		o->cmds = so->cmds;				// Copy fields into 'o' for debug/prints
 		o->locks= so->locks;
 		__compressed_sync_op_trace_start(so);
-		__handle_locks_o(&l->comp);	// Start on owner
+		__handle_locks_o(&l->comp, nvmeibc_d_rdma_comp_tag_make());	// Start on owner
 	}
 };
 

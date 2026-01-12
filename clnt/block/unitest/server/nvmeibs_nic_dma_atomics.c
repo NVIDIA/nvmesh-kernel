@@ -24,7 +24,7 @@ static eCPU_cb_ret_type __async_op_cb(eCPU_cb_param_list) {
 	eCPU_thread_start_execution(p);
 	switch (p->which) {
 		case 'g': nvmeibc_disk_gen_cmd_completion(p->gen_cmd, p->gen_cmd->comp_code); break;	// Admin channel gen_cmds
-		case 'l': p->lock_comp->callback(p->lock_comp); break;				// Lock channel RDMA
+		case 'l': p->lock_comp->callback(p->lock_comp, nvmeibc_d_rdma_comp_tag_make()); break;				// Lock channel RDMA
 		default: BUG();
 	}
 	eCPU_thread_end_execution(p);

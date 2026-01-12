@@ -288,7 +288,7 @@ void __IO_LT_complete_transfer_transaction(struct nvmeibc_cmd_lock *lo)
 		struct nvmeibc_d_rdma_comp* cmp = &lo[lsi].comp;
 		__invoke_crash_on_lock_corruption(lo, lsi, "mendtransfer", 0);
 		_ND(trace_10_IO_LT, "TRANSFER locksets=@LOCKSETS callback cmp=@CMP_PTR", &lo[lsi], cmp);
-		cmp->callback(cmp); /* Simulate success callback */
+		cmp->callback(cmp, nvmeibc_d_rdma_comp_tag_make()); /* Simulate success callback */
 	}
 }
 

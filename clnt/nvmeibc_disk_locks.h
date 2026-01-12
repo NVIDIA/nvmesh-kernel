@@ -149,6 +149,10 @@ static inline struct nvmeibc_disk_command_probes_try_data *nvmeibc_disk_command_
 }
 #endif /* NVMEIBC_DISK_CMDS_STATS_PROBES */
 
+struct nvmeibc_d_rdma_comp_tag{}; //helps to discover all callbacks
+static inline struct nvmeibc_d_rdma_comp_tag nvmeibc_d_rdma_comp_tag_make(void)
+{ return (struct nvmeibc_d_rdma_comp_tag){}; }
+
 struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 	u64 lockset_id;				/* Ownerlock blockset to refer to*/
 	union {
@@ -183,7 +187,7 @@ struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 	/*keep a pointer to lock channel when the comp is in process*/
 	struct nvmeibc_disk_seg_locks_mem_info *mem_info;
 	/*callback to be used after operation*/
-	int (*callback)(struct nvmeibc_d_rdma_comp*);
+	int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag tag);
 
 	enum nvmeibc_disk_locks_opr opr;		/*keep operation, todo: unite with field below and block layer lock->type. 3 fields that mean the same thing */
 	volatile enum nvmeibc_rdma_intent code;     // Intention, Same as lock->type but changes to unlock upon release. For piggybacked dirtybits this field is a must coz we dont have lock

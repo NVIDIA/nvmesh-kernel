@@ -170,12 +170,12 @@ static inline void DEBUG_LOCKS_CONTENTION(__attribute__((__unused__)) struct nvm
 #endif
 }
 
-int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc)
+int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = get_locks_arr_of(l);
 	const int lock_i = l->lock_i, ow_id = l->owner_id;			// Just for short writing
 	// Warning: operation/cmds might already be free() dont access them!!!
-
+	(void)tag;
 	__invoke_crash_on_lock_corruption(locksets, lock_i, "release", 1);
 	WARN_ON(NCL_is_failed_to_acquire(dc->lock_status));			// Cant release if we havent acquired lock
 	if (NCL_had_release_callback(dc->lock_status)) {
@@ -304,10 +304,10 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 		rv = nvmeibc_pd_cmpxchg(disk, handle_of(seg), l->address, dc);
 		if (rv < 0) { // Simulate failed release completion
 			dc->lock_status = NCL_STATUS_FAIL_NO_COMP;
-			dc->callback(dc);
+			dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
 		}
 	} else {
-		dc->callback(dc);		// Callback on successful transfer
+		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());		// Callback on successful transfer
 	}
 }
 
@@ -324,7 +324,7 @@ void dp_locks_release_locks_sibs(struct nvmeibc_cmd_lock *locksets, int owner_i)
 	}
 }
 
-#define __give_failed_lock_cb(dc) ({ (dc)->lock_status = NCL_STATUS_DISKDEAD; (dc)->callback(dc); })
+#define __give_failed_lock_cb(dc) ({ (dc)->lock_status = NCL_STATUS_DISKDEAD; (dc)->callback(dc, nvmeibc_d_rdma_comp_tag_make()); })
 #ifdef BLKCMP_IO_COMPLETION_PRESERVE_STACK
 	static int __um_completion_unblock_waiting_stack(struct nvmeibc_d_rdma_comp *read_comp)
 	{
@@ -518,7 +518,7 @@ static void __squash_transport_lock_status(struct nvmeibc_cmd_lock *l, enum nvme
 	}
 }
 
-int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp)
+int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_d_iocmd_comp *cmp = get_d_comp_of_pg(read_comp);
 	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = get_locks_arr_of(l);
@@ -528,6 +528,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp)
 	const u64 holder = get_contending_id(read_comp);
 	const int lsi = l->lock_i;
 
+	(void)tag;
 	l->status = read_comp->lock_status;
 	_ND(t_rlsm0, "locksets=@LOCKSETS[@LSI] cmp=@PTR, val=@LOCK_ENT_U64, lock_status=@STATUS_STR" , locksets, lsi, cmp, holder, ncl_status_str(l->status));
 	dp_locks_trace_lock_comp(o, l, read_comp);
@@ -730,7 +731,7 @@ static void __retry_owner_lock(struct nvmeibc_cmd_lock *l, bool autofail)
 	} else {
 		_NT(t2_rol, "locksets=@LOCKSETS[@LSI] Error with lock for @DLBA disk=@DISK_NAME", locksets, lsi, l->address, l->ds->disk->name);
 		dc->lock_status = NCL_STATUS_DISKDEAD_NO_RETRY;
-		dc->callback(dc); /* Simulate failure callback */
+		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make()); /* Simulate failure callback */
 		diff = (jiffies - start);
 		if (__SUSPICIOUS_LOCK_REQ_TIME < jiffies_to_msecs(diff)) {
 			_NT(t3_rol, "Retry locksets=@LOCKSETS[@LSI] callback=@MILISECONDS", locksets, lsi, jiffies_to_msecs(diff));
@@ -1071,11 +1072,13 @@ static void prediscard_proc(struct nvmeibc_cmd_lock *ls, int lsi)
 	}
 }
 
-static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc)
+static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = get_locks_arr_of(l);
 	const int lsi = l->lock_i;
 	const bool rv1 = NCL_is_failed_to_acquire(dc->lock_status) || (dc->lock_status == NCL_STATUS_CONTENDED);
+
+	(void)tag;
 	_ND(trace_1_lock_cb, "locksets=@LOCKSETS[@LSI] @DLBA", locksets, lsi, l->address);
 	dp_locks_trace_lock_comp(locksets->cmds->o, l, dc);
 	nvmeibc_profiling_end_take_cmd_stats_for_op(__raid_gp_profile_for_rwt_op_locks(l, locksets), l->ds->lock_operation_profiler, locksets->cmds->o, l->type, l, rv1);
@@ -1244,7 +1247,7 @@ void dp_locks_put_TxID_dbits(struct nvmeibc_cmd_lock *locksets, int owner_i, uni
 }
 
 /* Prepare & execute sub state machine which writes all blockset infos */
-void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const union nvmeib_blkset_info *binfo, int (*callback)(struct nvmeibc_d_rdma_comp*), int prev_rv)
+void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const union nvmeib_blkset_info *binfo, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag), int prev_rv)
 {
 	int i, err, nlocks = ow_l->n_siblings;
 	for (i = 0; i < nlocks; i++) { // Daniel: Note, we traverse all locks, so we do commit binfo to W- segment. This is not mandatory when turning dbits on, but mandatory when turning off. We refrain from optimizations and always commit to W-

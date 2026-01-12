@@ -156,8 +156,9 @@ static inline u64 __cmd_to_piggyback_addr(struct nvmeibc_block_command *c)
    failure. So we don't call the full completion of command callback:
    dev->dp.cmd_comp_cb(), but give a second, simpler completion on the cmd that
    casued by dirty bit turn-off */
-static int __post_cmd_dirtybit_turnoff_cb(struct nvmeibc_d_rdma_comp *dc) {
+static int __post_cmd_dirtybit_turnoff_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag) {
 	struct nvmeibc_block_command *c = dp_cmds_get_cmd_from_comp(get_d_comp_of_pg(dc));
+	(void)tag;
 	nvmeibc_pd_cb_called_comp(c->ds->disk, dc);
 	dp_cmds_complete_cmd(c->cmdarr, c->my_leader, c);
 	return 0;
@@ -1083,11 +1084,13 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 	}
 }
 
-static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc)
+static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = get_locks_arr_of(l);
 	const int lsi = l->lock_i;
 	int rv = 0;
+
+	(void)tag;
 	if (NCL_had_acquire_callback(dc->lock_status)) {
 		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
 	}
@@ -1135,7 +1138,7 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 	if (unlikely(rv)) {
 		_ND(t_00_binfo_datalock, "Failed binfo-write data_lock=@DATA_LOCK inline cb(), rv=@RV, prev_rv=@RV", dl, rv, prev_rv);
 		dc->lock_status = NCL_STATUS_DISKDEAD;
-		dc->callback(dc);
+		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
 	}
 }
 
@@ -1173,7 +1176,7 @@ static void __send_or_check_pigbck_view_of_ow_lock(struct nvmeibc_block_command 
 	WARN(!dp_cmd_is_raid_leader(&cmds[last_cmd]), "nvmeibc bug ci=%d\n", last_cmd);
 	if (!prev_rv) {
 		struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
-		dp_locks_view_lock_sm(dc);  // == dc->callback(dc);
+		dp_locks_view_lock_sm(dc, nvmeibc_d_rdma_comp_tag_make());  // == dc->callback(dc);
 	} else {				// Read command failed, skip viewing lock
 		dp_locks_read_complete(get_locks_arr_of(l), l->lock_i, NCL_STATUS_DONE);
 		dp_cmds_complete_cmd(cmds, li, NULL);

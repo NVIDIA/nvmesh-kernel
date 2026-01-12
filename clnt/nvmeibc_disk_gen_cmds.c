@@ -203,7 +203,7 @@ static void get_db_process_cb(struct get_dirty_bits_ec_info *info, int comp_code
 			info->comp->dbits_arr.size = size;
 		}
 		nvmeibc_disk_cmd_status_debug(&gen_cmd->disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
-		info->comp->callback(info->comp);
+		info->comp->callback(info->comp, nvmeibc_d_rdma_comp_tag_make());
 		_NT(get_db_process_cb_t4,
 			"done with dirty bits callback  info @PTR   comp @PTR   "
 			"comp_code @INT", info, info->comp, comp_code);
