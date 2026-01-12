@@ -58,8 +58,6 @@ enum NVMEIBT_ZEROING_STATE {
 #define ILLEGAL_CONFIG_VER			-1
 #define DUMMY_OWNER					((int8_t)0xFF)
 
-#define STARTING_TOMA_TOKEN "Starting TOMA"
-
 struct nvmeibt_big_msg {
 	int		msg_type;
 	int		big_msg_id;
