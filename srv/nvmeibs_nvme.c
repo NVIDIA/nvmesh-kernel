@@ -1099,9 +1099,9 @@ static inline void local_q_modify_irq(struct nvme_qp *q,
 		goto out;
 	}
 	if (new_state != q->irq_state) {
-		_ND(trace_1_nvme_local_q_modify_irq, "@OP_STR IRQ: Disk @SERIAL qid=@QID irq=@IRQ",
-			new_state == LOCAL_Q_IRQ_ENABLE ? "Enable" : "Disable",
-			d->serial, q->id, d->msix_entries[q->id].vector);
+		//_NT(trace_1_nvme_local_q_modify_irq, "@OP_STR IRQ: Disk @SERIAL qid=@QID irq=@IRQ",
+		//	new_state == LOCAL_Q_IRQ_ENABLE ? "Enable" : "Disable",
+		//	d->serial, q->id, d->msix_entries[q->id].vector);
 		if (new_state == LOCAL_Q_IRQ_ENABLE)
 			enable_irq(d->msix_entries[q->id].vector);
 		else if (new_state == LOCAL_Q_IRQ_DISABLE_NOSYNC)
@@ -1539,6 +1539,12 @@ static inline void nvme_remove_disk(struct drive_params *drv)
 	NFOUT;
 }
 
+static inline bool is_cq_empty(struct nvme_qp *q)
+{
+	struct nvme_completion *cqp = &q->cq[q->cq_head];
+
+	return (le16_to_cpu(cqp->status) & 1) == q->cq_phase;
+}
 
 static int nvmeibs_process_cq(struct nvme_qp *q)
 {
@@ -1569,7 +1575,7 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 			nvmeib_completion_noise_start(NVMEIB_NOISE_COMPLETION);
 		}
 		cqp = &q->cq[q->cq_head];
-		if ((le16_to_cpu(cqp->status) & 1) == q->cq_phase) {
+		if (is_cq_empty(q)) {
 			nvmeib_qp_stats_on_poll_cq_empty(q->qp_stats);
 			break;
 		}
@@ -1659,6 +1665,7 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	if (d_use_intr_shaper && d->adminq != q) {
 		d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 	}
+
 	if (q->irq_debug == 2) {
 		q->irq_debug = 0;
 		_ND(trace_nvme_nvmeibs_intr, "Got local IRQ again");
@@ -1672,7 +1679,9 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 			d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 		}
 	}
+
 	if (((num_handled == d_max_completions && d_max_completions) || d_defer_process_io_cq) && q->thread) {
+		//_ND(trace_nvme_nvmeibs_intr_offload_sched, "Offload sched serial=@SERIAL qid=@QID is_admin=@BOOL", d->serial, q->id, d->adminq == q);
 		nvmeib_qp_stats_on_offload_sched(q->qp_stats);
 		local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
 		/* Set polling=true before wake_up_process to ensure the woken thread sees it.
@@ -4943,6 +4952,7 @@ static int kthread_process_drive_cq(void *arg)
 	unsigned long max_time;
 	bool enb_irq = false;
 	u64 start_ns, busy_ns;
+	unsigned long flags;
 
 	set_current_state(TASK_INTERRUPTIBLE);
 	complete(&q->th_ready);
@@ -4954,7 +4964,6 @@ static int kthread_process_drive_cq(void *arg)
 			max_time = jiffies + HZ;
 
 			do {
-				unsigned long flags;
 
 				cont = false;
 				enb_irq = false;
@@ -4996,13 +5005,32 @@ static int kthread_process_drive_cq(void *arg)
 				
 				/* Step 4: enable interrupts */
 				if (enb_irq) {
+					spin_lock_irqsave(&q->q_lock, flags);
 					local_q_modify_irq(q, LOCAL_Q_IRQ_ENABLE);
+					spin_unlock_irqrestore(&q->q_lock, flags);
 					_ND(trace_1_nvme_kthread_process_drive_cq, "Switch local IRQ back after @TOTAL completions", total);
 					q->irq_debug = 2;
 					total = 0;
 				}
 
 				/* Step 5: read barrier */
+				smp_mb();
+
+				/* we may miss an interrupt in the time until we rearm the interrupts, so we need to check if the CQ is not empty */
+				if (!is_cq_empty(q)) {
+					//_ND(cq_not_empty_nvme_kthread_process_drive_cq, "CQ is not empty, disable interrupts and mark as polling again serial=@SERIAL qid=@QID", d->serial, qid);
+					set_current_state(TASK_RUNNING);
+					/* disable interrupts */
+					spin_lock_irqsave(&q->q_lock, flags);
+					local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
+					spin_unlock_irqrestore(&q->q_lock, flags);
+					/* mark as polling again */
+					WRITE_ONCE(q->polling, true);
+					smp_mb();
+					/* sleep if needed */
+					cond_resched();
+					continue;
+				}
 				smp_mb();
 
 				/* Step 6: Check polling again in case interrupt set it to true. This is not a must as
@@ -5020,7 +5048,7 @@ static int kthread_process_drive_cq(void *arg)
 		}
 		cond_resched();
 	}
-	_NT(trace_2_nvme_kthread_process_drive_cq, "Thread stopped for drive @SERIAL", d->serial);
+	_NT(trace_2_nvme_kthread_process_drive_cq, "Thread stopped for drive @SERIAL qid=@QID", d->serial, qid);
 	return 0;
 }
 
