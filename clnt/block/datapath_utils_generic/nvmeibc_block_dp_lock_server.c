@@ -193,14 +193,14 @@ void lock_ownership_update_raid_map(const struct nvmeibc_raid1 *r1, int si,
 #include "block/datapath_ec/nvmeibc_block_dp_ec.h"
 
 sgmnts_bmp_t nvmeibc_calc_db_on_parities_segs(const struct nvmeibc_block_command *rldr) {
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(rldr->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(rldr->ds);
 	const int slice_start = rldr->o->mssa->owner_seg;
 	/* Parities are rotated based on slice. Dead stay dead. Think about it... */
 	return nvmeibc_raid1_get_roles_bmp(pr, slice_start, pari_sgmnts) & nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_on_mask);
 }
 
 roles_bmp_t nvmeibc_calc_db_on_parities_roles(const struct nvmeibc_block_command *rldr) {
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(rldr->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(rldr->ds);
 	const int slice_start = rldr->o->mssa->owner_seg;
 	/* Parities are rotated based on slice. Dead stay dead. Think about it... */
 	return nvmeibc_raid1_get_roles_bmp(pr, slice_start, raid.pari) & nvmeibc_raid1_get_roles_bmp(pr, slice_start, dbits_on_mask);
@@ -209,7 +209,7 @@ roles_bmp_t nvmeibc_calc_db_on_parities_roles(const struct nvmeibc_block_command
 bool dp_ec_can_fix_dbits(struct nvmeibc_block_command *rldr)
 {
 	union nvmeibc_dbits_entry dbits_pre = {.all_bits = rldr->rld.pre.bits.dirty};
-	struct nvmeibc_raid1* pr = nvmeibc_get_raid1_of_seg(rldr->ds);
+	struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(rldr->ds);
 	const sgmnts_bmp_t db_turn_off = nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_off_mask);
 	int ind[2], i;
 	nvmeibc_dbits_entry_get_ind(&dbits_pre, &ind[0], &ind[1]);

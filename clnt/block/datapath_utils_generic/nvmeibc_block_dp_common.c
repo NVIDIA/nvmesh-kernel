@@ -90,7 +90,7 @@ void dp_io_topo_iterator_conv_phys_lock_addr_to_raid_ofst(struct dp_io_topo_iter
 
 void dp_io_topo_iterator_conv_seg_lock_addr_to_raid_ofst(struct dp_io_topo_iterator_res *res, const struct nvmeibc_disk_segment *ds, const u64 phys_offset_in_seg)
 {
-	res->r =    nvmeibc_get_raid1_of_seg(ds);
+	res->r =    nvmeibc_disk_segment_get_praid(ds);
 	res->rlba = phys_offset_in_seg * res->r->slice_size;
 	res->nlbas = LOCKSET_SLICES     * res->r->slice_size;
 }

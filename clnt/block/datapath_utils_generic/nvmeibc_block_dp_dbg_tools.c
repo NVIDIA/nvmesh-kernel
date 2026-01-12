@@ -117,7 +117,7 @@ void __dump_operation_unsafe(const struct operation *o, const struct nvmeibc_blo
 
 	__dump_operation_cfg(o, trace_level);
 	if (o->mssa && o->cmds)
-		nvmeibc_dump_mssa(o->mssa, o->op, nvmeibc_get_raid1_of_seg(o->cmds->ds), trace_level);
+		nvmeibc_dump_mssa(o->mssa, o->op, nvmeibc_disk_segment_get_praid(o->cmds->ds), trace_level);
 
 	_N_dmesg(trace_level, t_09_dp_dbg_tools,
 		 "o=@OPERATION n_commands=@NCMDS locks=@LOCKSETS n_locks=@N_LOCKS, nuncomp=@NUNCOMP", o, cmds ? cmds->ncmds : 0,

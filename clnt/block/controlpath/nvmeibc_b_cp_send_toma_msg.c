@@ -52,7 +52,7 @@ static int __send_combined_msg(struct nvmeibc_disk_segment *seg,
 		goto out;
 	}
 	memset(env.buf, 0, env.len_srvr);	// Memset only the needed size
-	r1 = nvmeibc_get_raid1_of_seg(seg);
+	r1 = nvmeibc_disk_segment_get_praid(seg);
 	nt = tr->nt;						// Also can take nvmeibc_disk_seg_to_bdev(seg)->nt which is the same
 	{
 		__prepare_toma_thick_msg(seg, r1, msg, mtype, reason, never_reged_on_seg, tpl);

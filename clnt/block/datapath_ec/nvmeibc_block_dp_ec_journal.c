@@ -124,7 +124,7 @@ void nvmeibc_block_dp_ec_journal_alloc_cb(int status, u64 *res_jlbas, void *ctx)
 static void __calc_is_roll_fwd_guaranteed(struct nvmeibc_block_command *rldr, u16 wr_succeeded, bool did_data_cmd_failed)
 {
 	const struct multi_snake_slice_analyzer *mssa = rldr->o->mssa;
-	const struct nvmeibc_raid1* pr = nvmeibc_get_raid1_of_seg(rldr->ds);
+	const struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(rldr->ds);
 	const struct nvmeibc_roles_bmps *bmp = &pr->calculated_data.roles_bmps[mssa->owner_seg];
 	const bool can_recoverer_skip_rollfwd = __is_bmp_included_in(bmp->raid.data, bmp->readable);	// If All datas OK -> can loose all parities -> no rollfwds are performed
 	const bool has_journal = (!mssa->no_jour);

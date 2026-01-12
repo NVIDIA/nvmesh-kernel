@@ -139,7 +139,7 @@ static void t_db_who_cmd_fill(struct t_db_who_cmd *s,
 }
 
 static void t_db_who_cmd_core_cell(struct t_core_dbgdi *s, const struct nvmeibc_block_command *c) {
-	const struct nvmeibc_raid1 *r1 = nvmeibc_get_raid1_of_seg(c->ds);
+	const struct nvmeibc_raid1 *r1 = nvmeibc_disk_segment_get_praid(c->ds);
 	const bool is_mirrored = !nvmeibc_raid_is_ec(r1) && !nvmeibc_raid_is_jbod(r1);
 	const int cell = is_mirrored ? c->ds->toma_reg->seg % 2 : 0;
 	strncpy(s->wr[cell].disk_name, c->ds->disk->name, sizeof(s->wr[cell].disk_name));
@@ -272,7 +272,7 @@ static void t_db_who_reader_fill(data_blk *d, const void *md,
 	const struct nvmeibc_block_command *cmd, int sgi, int j_in_sgi, int cum_len)
 {
 	struct t_db_who_reader s; // All fields are set no need for init
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(cmd->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(cmd->ds);
 	s.magic = DBG_DI_MAGIC_RD;
 	t_db_who_clnt_fill(&s.clnt);
 	t_db_who_cmd_fill(  &s.cmd	   , cmd);
@@ -401,7 +401,7 @@ static void __clear_restored_block_history(void *_d, bool is_destroyed_blk) {
 static void data_blk_fill_for_sync(data_blk *d, const void *md,
 	const struct nvmeibc_block_command *cmd)
 {
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(cmd->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(cmd->ds);
 	const struct operation *o = cmd->o;
 	const enum nvmeib_block_io_op op = o->op;
 	struct t_db_who_recovery r = {.magic = 0}; // Init required even if all fields are filled - TODO determine why fails on unitest_ECDbitsOnDisk
@@ -478,7 +478,7 @@ static void data_blk_fill_for_sync(data_blk *d, const void *md,
 static void __data_blk_fill_for_write(data_blk *d, const void *md,
 	const struct nvmeibc_block_command *cmd, int sgi, int j_in_sgi, int cum_len)
 {
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(cmd->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(cmd->ds);
 	struct nvmeibc_block_command *rldr = dp_cmd_get_raid_leader((void *)cmd);
 	const struct operation *o = cmd->o;
 	struct t_db_who_writer s = {.dbg_di_magic = 0};	// Non-journal EC write doesn't set data_md so init is required - TODO fix, jrnl might not be full set
@@ -724,7 +724,7 @@ static void __dp_dbgdi_do_rdr_info_of_read_op(struct nvmeibc_block_command *cmd)
 
 static void __dp_dbgdi_do_rdr_info_for_sync(struct nvmeibc_block_command *cmd)
 {
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(cmd->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(cmd->ds);
 	struct sg_table *sgtbl = &__get_tbl(cmd);
 	struct scatterlist *curSG = NULL;
 	data_blk* dblk;

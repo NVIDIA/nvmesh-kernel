@@ -229,7 +229,12 @@ static inline u64  nvmeibc_raid_get_slba_len(const struct nvmeibc_raid1 *pr) {re
 /* Convert bmp: relative to slice start to rel-to-seg0 + insert parities */
 sgmnts_bmp_t nvmeibcbdpec_bmp_ss2fs_with_pari(struct nvmeibc_raid1 *r1, u64 slba, roles_bmp_t tx_bmp);
 
-struct nvmeibc_raid1* nvmeibc_get_raid1_of_seg(const struct nvmeibc_disk_segment *seg);
+struct nvmeibc_raid1 const* __nvmeibc_disk_segment_get_praid_impl(struct nvmeibc_disk_segment const* seg);
+
+#define nvmeibc_disk_segment_get_praid(self) 																	\
+	__builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_disk_segment*),	\
+		__nvmeibc_disk_segment_get_praid_impl(self),															\
+		(struct nvmeibc_raid1*)__nvmeibc_disk_segment_get_praid_impl(self))
 
 #define raid1_for_each_seg(r1, seg, si) \
 	for (si = 0, seg = r1 ? (r1)->segments : 0; \

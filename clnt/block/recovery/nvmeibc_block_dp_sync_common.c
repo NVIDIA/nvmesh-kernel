@@ -1139,7 +1139,7 @@ static int __init_so(enum nvmeib_block_io_op op, struct recovery_sync_op *so,
 	DEBUG_TOPO_CNTRS_add_elem_to_topo(o, o->topo);
 	so->o->op = op;
 	so->start_slice = start_block;
-	so->r1 = nvmeibc_get_raid1_of_seg(lock->ds);
+	so->r1 = nvmeibc_disk_segment_get_praid(lock->ds);
 	so->n_slices = n_slices;
 	so->orig_rldr = nvmeibc_cllink_find_cmd_by_lock(locksets, lock->lock_i);
 	BUG_ON(!so->orig_rldr);	// Sanity. Caller (IO / Recovery / DpLib) Must have at least 1 disk command
@@ -1365,14 +1365,14 @@ static int __convert_stale_special_2_dirty_bit(struct nvmeibc_cmd_lock *lock, nv
 
 static inline bool __can_r1_convert_stale_lock_2_diry_bit(const struct nvmeibc_cmd_lock *l)
 {
-	const struct nvmeibc_raid1* pr = nvmeibc_get_raid1_of_seg(l->ds);
+	const struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(l->ds);
 	return (!nvmeibc_raid_is_ec(pr) && (nvmeibc_raid1_get_num_dead_seg(pr) > 0));		// This is legal only for 2-mirror. Todo: EC-5969. Can run this sync only if n_dead = n_parities!!! 3-mirror issue
 }
 
 bool nvmeibc_sync_is_io_implicit_sync(const struct nvmeibc_cmd_lock *l,
 									 const struct nvmeibc_block_command *c)
 {
-	const struct nvmeibc_raid1* pr = nvmeibc_get_raid1_of_seg(l->ds);
+	const struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(l->ds);
 	if (!nvmeibc_raid_is_ec(pr)) {
 		if (unlikely(__can_r1_convert_stale_lock_2_diry_bit(l)))
 			return true;	/* In degraded mode of raid-1, 2 mirror, sync stale-to-dirty is legal */

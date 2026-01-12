@@ -171,7 +171,7 @@ void dp_cmds_piggyback_dbR1_on_write(struct nvmeibc_block_command *_cmd, const s
 	u64 *payload = &dp_cmds_get_piggyback_val(_cmd);
 	cmd->lpb.handle = handle_of(_cmd->ds);
 	cmd->lpb.addr = __data_cmd_to_piggyback_addr(cmd); // Never pigbacked on journal cmds
-	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(nvmeibc_get_raid1_of_seg(_cmd->ds));
+	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(nvmeibc_disk_segment_get_praid(_cmd->ds));
 	((union nvmeib_blkset_info*)payload)->bits.dirty = dbmap->post.all_bits;
 	((union nvmeib_blkset_info*)payload)->bits.txid  = reserved; 		// Daniel: Tmp debug code (coz those bits are not used)
 	dc->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
@@ -196,7 +196,7 @@ void dp_cmds_piggyback_info_on_write(struct nvmeibc_block_command *_cmd, union n
 	u64 *payload = &dp_cmds_get_piggyback_val(_cmd);
 	cmd->lpb.handle = handle_of(_cmd->ds);
 	cmd->lpb.addr =  __cmd_to_piggyback_addr(_cmd); // May be piggbacked on journal
-	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(nvmeibc_get_raid1_of_seg(_cmd->ds));
+	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(nvmeibc_disk_segment_get_praid(_cmd->ds));
 	*((union nvmeib_blkset_info*)payload) = v;
 	dc->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
 	dp_cmds_add_generic_piggyback(cmd);
@@ -212,7 +212,7 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 	const int lsi = nvmeibc_cllink_find_lock_by_cmd(rldr);	// Owner lock
 	struct nvmeibc_cmd_lock *l = &rldr->cmdarr->locksets[lsi];
 	const struct nvmeibc_disk_segment *seg_l = l->ds;
-	const struct nvmeibc_raid1* r1 = nvmeibc_get_raid1_of_seg(seg_l);
+	const struct nvmeibc_raid1* r1 = nvmeibc_disk_segment_get_praid(seg_l);
 
 	WARN(!dp_cmd_is_raid_leader(rldr), "nvmeibc bug ci=%d\n", (int)(rldr-rldr->cmdarr));
 	cmd->lpb.handle = handle_of(seg_l);
@@ -1203,11 +1203,11 @@ static void __exec_stage(struct nvmeibc_block_command *cmds, int li, int prev_rv
 		extern void restore_degraded_data_for_read(const struct operation *o, u32 dgrd_segment_bmp, int prev_rv, const bool is_crc_required);
 		struct operation *o = cmds[li].o;
 		/* We have all required blocks, calc data and complete commands */
-		restore_degraded_data_for_read(o, nvmeibc_raid1_get_inverse_roles_bmp(nvmeibc_get_raid1_of_seg(o->cmds->ds), o->mssa->owner_seg, readable), prev_rv, false);
+		restore_degraded_data_for_read(o, nvmeibc_raid1_get_inverse_roles_bmp(nvmeibc_disk_segment_get_praid(o->cmds->ds), o->mssa->owner_seg, readable), prev_rv, false);
 	} else if (unlikely(cur_stage == E_CMDS_STAGE_CALC_PARITIES)) {  /* Parity calculation */
 		extern u32 apply_gf_calculation_for_operation(const struct operation *o, u32 dgrd_sgmnts_bmp, int prev_rv);
 		struct operation *o = cmds[li].o;
-		apply_gf_calculation_for_operation(o, nvmeibc_raid1_get_inverse_roles_bmp(nvmeibc_get_raid1_of_seg(o->cmds->ds), o->mssa->owner_seg, readable), prev_rv);
+		apply_gf_calculation_for_operation(o, nvmeibc_raid1_get_inverse_roles_bmp(nvmeibc_disk_segment_get_praid(o->cmds->ds), o->mssa->owner_seg, readable), prev_rv);
 	} else {
 		const bool is_disk_op = ((cur_stage == E_CMDS_STAGE_READ_PRE_DATA)||(cur_stage == E_CMDS_STAGE_WRITE_JOURNAL)||(cur_stage == E_CMDS_STAGE_DO_IO_AND_PAR)); // LKJ, todo, remove in product, just for debug
 		WARN((!is_disk_op), "nvmeibc bug: cant exec stage=%d rv=%d\n", cur_stage, prev_rv);	// Unknown stage or should have skipped it
@@ -1350,7 +1350,7 @@ struct nvmeibc_cmd_lock *__get_lock_by_seg(const struct nvmeibc_disk_segment *se
 struct nvmeibc_cmd_lock * __get_data_lock(struct nvmeibc_block_command *rldr)
 {
 	const int ssi = rldr->o->mssa->owner_seg;
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(rldr->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(rldr->ds);
 	const struct nvmeibc_disk_segment *ssds = &pr->segments[ssi];
 	const int o_lsi = nvmeibc_cllink_find_lock_by_cmd(rldr);
 	struct nvmeibc_cmd_lock *o_lock = &rldr->cmdarr->locksets[o_lsi];

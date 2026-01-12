@@ -688,7 +688,7 @@ int ramDisk_execute_io(struct ramDiskSimulator* ram, struct nvmeibc_disk_io_comm
 	const enum nvmeib_block_io_op op 	= curReq->op;			// Type of IO operation != bcmd->o->op
 	int i;
 	struct scatterlist *curSG			= NULL;
-	const struct nvmeibc_raid1* r1 = nvmeibc_get_raid1_of_seg(bcmd->ds);
+	const struct nvmeibc_raid1* r1 = nvmeibc_disk_segment_get_praid(bcmd->ds);
 	const u64 max_disk_alloc_address = ram->committed_addr_end.byte;
 	//cmd->reqs->req.nvme_op = (enum e_NVMEIB_CMD)io_mode;
 

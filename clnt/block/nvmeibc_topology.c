@@ -3798,7 +3798,7 @@ static int __segment_register(struct nvmeibc_disk_segment *seg)
 	nvmeibc_segment_clear_b4_reg(seg, NULL);
 	_NT_TOPO(trace_topology_segment_register, seg->chunk->topology, "toma_register: disk=@DISK,@DISK_NAME seg=@SEG " SEGMENT_FMT " c_lid=@C_LID",
 	   seg->disk, seg->disk->full_name, seg->uuid,
-	   tr->ch, tr->r1, tr->seg, nvmeibc_get_raid1_of_seg(seg)->lid.all);
+	   tr->ch, tr->r1, tr->seg, nvmeibc_disk_segment_get_praid(seg)->lid.all);
 	rv = nvmeibc_toma_send_direct_msg(seg,
 						NVMEIBT_CLIENT_MSG_RT_REGISTER_DISK_SEGMENT, NULL);
 _out:

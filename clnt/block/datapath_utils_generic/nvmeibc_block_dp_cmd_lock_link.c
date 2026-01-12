@@ -162,7 +162,7 @@ static inline bool __ranges_intersect(u64 cs, u64 ce, u64 ls, u64 le)
 }
 
 #define are_different_raids(ds1, ds2) \
-	(nvmeibc_get_raid1_of_seg(ds1) != nvmeibc_get_raid1_of_seg(ds2))
+	(nvmeibc_disk_segment_get_praid(ds1) != nvmeibc_disk_segment_get_praid(ds2))
 
 static int __link_next_locks_raid_to_cmd(struct nvmeibc_cmd_lock *locksets, int own_i,
 		u64 cmd_start, u64 cmd_end, struct nvmeibc_block_command *cmds, int ci)

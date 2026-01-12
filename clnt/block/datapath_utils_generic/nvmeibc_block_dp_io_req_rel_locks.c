@@ -258,7 +258,7 @@ static void __set_cmpxchg_for_release(struct nvmeibc_cmd_lock*l, struct nvmeibc_
 {
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	const union nvmeib_lock_id holder = { .all = dc->exchange };
-	const union nvmeib_lock_id toma_id = nvmeibc_get_raid1_of_seg(seg)->lid;
+	const union nvmeib_lock_id toma_id = nvmeibc_disk_segment_get_praid(seg)->lid;
 	dc->code = NVMEIBC_CMD_LOCK_UNLOCK;
 	WARN(!nvmeib_lockid_are_purified_eq(holder, toma_id), "nvmeibc bug: 0x%x != 0x%x", holder.all, toma_id.all);
 	if (unlikely(l->unlock_val)) {
@@ -463,7 +463,7 @@ static int __retry_read_lock_cb_sync_done(void* context, int err)
 }
 
 static bool must_do_full_blkset_sync(const struct nvmeibc_block_command *c) {
-	return (nvmeibc_raid_is_ec(nvmeibc_get_raid1_of_seg(c->ds))||
+	return (nvmeibc_raid_is_ec(nvmeibc_disk_segment_get_praid(c->ds))||
 		nvmeibc_sync_is_trigger_full_blkset_sync(c->nlbas));
 }
 
@@ -475,7 +475,7 @@ bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_
 {
 	if (nvmeibc_debug_ram_binfo) {
 		if (unlikely(binfo.bits.dirty != 0)) {		// Todo: Extend this test, currently detects wrong dbits
-			struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(seg);
+			struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(seg);
 			sgmnts_bmp_t clean_bm = nvmeibc_raid1_get_sgmnts_bmp(pr, readable);
 			const union nvmeibc_dbits_entry dbits_ent = { .all_bits = binfo.bits.dirty };
 			const sgmnts_bmp_t dbits_bm = nvmeibc_dbits_get_bm(&dbits_ent, nvmeibc_raid1_get_protect_lvl(pr));
@@ -1163,7 +1163,7 @@ void dp_locks_send_all(struct nvmeibc_cmd_lock *locksets)
 		case NVMEIBC_CMD_PREDISCARD:
 		case NVMEIBC_CMD_LOCK_OWNER:
 		case NVMEIBC_CMD_LOCK_COPY_OWNER:{
-			struct nvmeibc_raid1* r1 = nvmeibc_get_raid1_of_seg(l->ds);
+			struct nvmeibc_raid1* r1 = nvmeibc_disk_segment_get_praid(l->ds);
 			dc->code = NVMEIBC_CMD_LOCK_OWNER;		// Daniel: always do cmpxchg (even for copy owners). For debug!
 			dc->callback = &__lock_response_cb;
 			dc->compare = nvmeibc_raid1_get_lock_consts(r1)->unlocked_val;
@@ -1210,7 +1210,7 @@ union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *
 	   it might be the sole owner in next topology and have higher TxID */
 	const struct nvmeibc_cmd_lock *lo = &locksets[owner_i];
 	union nvmeib_blkset_info ow_rv, so_rv;
-	struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(lo->ds);
+	struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(lo->ds);
 	ow_rv.all = nvmeibc_get_binfo_of_lock(lo);
 	if (lo->secondary_id && (!only_owner)) {
 		union nvmeibc_dbits_entry ow_dbits, so_dbits;

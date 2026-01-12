@@ -168,7 +168,7 @@ struct nvmeibc_raid_topo_persistent {
 static inline struct nvmeibc_profiler *nvmeibc_get_raid_good_path_profile_for_rwt_op(struct nvmeibc_disk_segment *ds, enum nvmeib_block_io_op op)
 {
 	const unsigned verb = good_path_profiler_io_op_to_rwt_verb(op);
-	return nvmeibc_get_raid1_of_seg(ds)->hdr->good_path_profile[verb];
+	return nvmeibc_disk_segment_get_praid(ds)->hdr->good_path_profile[verb];
 }
 
 struct nvmeibc_raid_topo_persistent* nvmeibc_raid_topo_persistent_create(void);

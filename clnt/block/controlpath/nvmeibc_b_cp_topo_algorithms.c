@@ -2,6 +2,7 @@
 #include "block/nvmeibc_topology.h"
 #include "block/controlpath/nvmeibc_b_cp_topo_common.h"
 #include "block/nvmeibc_block_common.h"
+#include "nvmeibc_io_pet.h"
 /* This c file implements algorithmic components of topology
 	Started separating the specific implementation logic of topologies transition
 	(atomic counters, list, locks) from the algorithmic functions which are
@@ -17,7 +18,7 @@ bool nvmeibc_should_use_view_lock(const enum nvmeib_block_io_op op, const struct
 	return ((op == NVMEIB_BLOCK_IO_OP_READ)&&(seg->is_safe_for_view_lock));
 }
 
-struct nvmeibc_raid1 *nvmeibc_get_raid1_of_seg(const struct nvmeibc_disk_segment *seg)
+struct nvmeibc_raid1 const* __nvmeibc_disk_segment_get_praid_impl(struct nvmeibc_disk_segment const *seg)
 {
 	const struct nvmeibc_subscription_ctx *tr;
 	if (seg) {

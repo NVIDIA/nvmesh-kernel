@@ -289,7 +289,7 @@ static void __calc_and_apply_io_dbits_action(struct nvmeibc_block_command *rldr)
 	struct nvmeibc_dbits_tx dbmap;
 	const union nvmeibc_dbits_entry pre = { .all_bits = rldr->rld.pre.bits.dirty };
 
-	const struct nvmeibc_raid1 *pr = nvmeibc_get_raid1_of_seg(rldr->ds);
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(rldr->ds);
 	sgmnts_bmp_t turn_on_dbit_bmp, turn_off_dbit_bmp;
 	turn_on_dbit_bmp = (nvmeibc_mssa_calc_write_bmp(rldr->o->mssa) & nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_on_mask));
 	turn_off_dbit_bmp = (nvmeibc_mssa_calc_full_blockset_write_bmp(rldr->o->mssa) & nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_off_mask));
@@ -521,7 +521,7 @@ BLKCMP_IO_ONLY_IF_PRESERVE_STACK(_func_start:)
 	}
 
 	if (unlikely(dp_ec_mainten_has_txid_unreslvd(rldr) ||
-		         dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(nvmeibc_get_raid1_of_seg(rldr->ds))))) {
+		         dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(nvmeibc_disk_segment_get_praid(rldr->ds))))) {
 		__call_assist_sync(rldr, __analyze_binfo_sm_cb_b4j, NVMEIB_BLOCK_IO_OP_MAINTAIN_RESOLVE_ALL_BINFO);
 	}
 

@@ -328,7 +328,7 @@ void stale_lock_resolver_to_log(const struct stale_lock_resolver_t *slr)
 enum stale_lock_resolve_status stale_lock_resolver_get_status(struct stale_lock_resolver_t *slr, u32 lock_id, const struct nvmeibc_cmd_lock *l)
 {
 	enum stale_lock_resolve_status rv;
-	const struct nvmeibc_raid1* r = nvmeibc_get_raid1_of_seg(l->ds);
+	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(l->ds);
 	const int n_toma_bitmap = nvmeibc_raid1_get_inverse_sgmnts_bmp(r, dead);
 
 	if (!nvmeibc_raid_is_ec(r) && (lock_id == R1_STALE_SPECIAL_LOCK_VAL)) {
