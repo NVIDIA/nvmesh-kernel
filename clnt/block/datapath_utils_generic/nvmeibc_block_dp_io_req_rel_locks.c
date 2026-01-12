@@ -7,6 +7,7 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_lock_stages.h"
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_locks_transfer.h"
+#include "nvmeibc_io_pet.h"
 
 #define __SUSPICIOUS_LOCK_REQ_TIME 500 /* 0.5[sec], If lock request takes more time, print that to log */
 #define __SUSPICIONS_LOCK_TIME   20000 /*  20[sec]  , If lock finally acquired but it took a lot of time, print that to log */
@@ -300,7 +301,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	if (l->status != NCL_STATUS_TRANSFERRED) {	// OWNER || PREDISCARD || COPY_OWNER
 		int rv = 0;
 		__set_cmpxchg_for_release(l, seg);
-		dp_locks_trace_lock_release(locksets->cmds ? locksets->cmds->o : NULL, l, dc);
+		dp_locks_trace_lock_release(locksets->cmds ? locksets->cmds->o : NULL, l);
 		rv = nvmeibc_pd_cmpxchg(disk, handle_of(seg), l->address, dc);
 		if (rv < 0) { // Simulate failed release completion
 			dc->lock_status = NCL_STATUS_FAIL_NO_COMP;
@@ -1277,7 +1278,8 @@ void dp_locks_trace_lock_comp(const struct operation *o, const struct nvmeibc_cm
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: @LOCK_COMPLETION_DUMP", _T, goodpath_nvmeibc_locks, lock_comp,        o->dbg_id    , l->ds->dbg_uuid, __lock_blockset(*l), l->type, dc->lock_status, dc->compare, dc->exchange, get_contending_id(dc), l->retries, (jiffies - l->first_try_time));
 }
 
-void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc_cmd_lock *l, const struct nvmeibc_d_rdma_comp *dc)
+void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc_cmd_lock *l)
 {
+	struct nvmeibc_d_rdma_comp const* dc = &l->comp;
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: @LOCK_RELEASE_DUMP",    _T, goodpath_nvmeibc_locks, lock_release, o ? o->dbg_id : 0, l->ds->dbg_uuid, __lock_blockset(*l),                                        dc->exchange);
 }

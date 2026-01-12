@@ -254,7 +254,7 @@ ulong dp_locks_get_retry_time(struct nvmeibc_cmd_lock *l);
 /***************************** Locks Tracing **********************************/
 struct operation;
 void dp_locks_trace_lock_comp(   const struct operation *o, const struct nvmeibc_cmd_lock *l, const struct nvmeibc_d_rdma_comp *lock_comp);
-void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc_cmd_lock *l, const struct nvmeibc_d_rdma_comp *lock_comp);
+void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc_cmd_lock *l);
 
 #endif  // H beginning
 

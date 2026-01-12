@@ -514,7 +514,7 @@ static int __release_lock_of_sync(struct nvmeibc_cmd_lock *l, struct recovery_sy
 {
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	int rv;
-	dp_locks_trace_lock_release(so->o, l, dc);
+	dp_locks_trace_lock_release(so->o, l);
 	rv = nvmeibc_pd_cmpxchg(l->ds->disk, handle_of(l->ds), l->address, dc);
 	if (rv) {
 		__change_lock_status_to(l, NCL_STATUS_FAIL_NO_COMP);
@@ -1296,7 +1296,7 @@ _func_start:
 				goto _func_start;
 			}
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
-			dp_locks_trace_lock_release(so->o, l, lock_comp);
+			dp_locks_trace_lock_release(so->o, l);
 			err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_cmpxchg(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			if (!err)
 				BLKCMP_SO_ASYNC_RESUME_CUR(0);
