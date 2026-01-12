@@ -1086,42 +1086,18 @@ out:
 	return is_new;
 }
 
-static inline int gen_pager_search_string(char *dst, char *src)
-{
-	int		d = 0, s = 0;
-
-	dst[d++] = '*';
-	while (src[s]) {
-		if (src[s] == ' ') {
-			dst[d] = '*';
-		} else {
-			dst[d] = src[s];
-		}
-		d++;
-		s++;
-	}
-	dst[d++] = '*';
-	dst[d++] = '\0';
-	return 0;
-}
-
 static int n_toma_restarts_in_the_last_5_days(void)
 {
 	char		cmd[256];
 	char		n_restarts_file_name[64];
-	char		n_as_str[10];
+	char		n_as_str[10] = {0};
 	int			fd = 0;
 	int			rv = 0;
 	int			n_bytes_read;
 	int			system_status;
-	char		starting_toma_search_str[sizeof(STARTING_TOMA_TOKEN) + 10];
-
-	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), "/tmp/jctl_%d", getpid());
-//	snprintf(cmd, sizeof(cmd), "journalctl -u nvmeshtoma --since='-5days' --grep='Starting NVMesh Toma' | grep nvmeshtarget | wc -l > %s", n_restarts_file_name);
-//	snprintf(cmd, sizeof(cmd), "find /var/log/nvmesh/trace_daemon/ -name toma.binlog_marker* -mmin -7200 | wc -l > %s", n_restarts_file_name);
-	gen_pager_search_string(starting_toma_search_str, STARTING_TOMA_TOKEN);
-	snprintf(cmd, sizeof(cmd), "cd /var/log/nvmesh/trace_daemon/; ./pager.py -l toma.eter.binlog -t now-120h -f fmt like '%s' | wc -l > %s",
-			 starting_toma_search_str, n_restarts_file_name);
+	#define LOGS_DIR TOMA_ROOT_DIR "var/log/nvmesh/trace_daemon"
+	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), TOMA_ROOT_DIR "tmp/jctl_%d", getpid());
+	snprintf(cmd, sizeof(cmd), LOGS_DIR "/pager " LOGS_DIR " -l toma.eter.binlog -t now-120h --nogreet -f 'trace=trace_toma_nvmeibt_toma_init' | wc -l > %s", n_restarts_file_name);
 	N_Tf(0kkdoks, "@STR", cmd);
 	system_status = system(cmd);
 	if (!WIFEXITED(system_status) || WEXITSTATUS(system_status)) {
