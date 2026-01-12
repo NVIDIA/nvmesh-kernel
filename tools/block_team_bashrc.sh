@@ -1772,7 +1772,7 @@ else
 		PARAM=/sys/module/nvmeibc/parameters/max_ios_per_cpu; sudo bash -c "echo 1 > ${PARAM}"; cat $PARAM;
 		PARAM=/sys/module/nvmeibc/parameters/bio_noexec;      sudo bash -c "echo Y > ${PARAM}"; cat $PARAM;
 		PARAM=/sys/module/nvmeibc/parameters/max_ios_per_cpu; sudo bash -c "echo 100000000 > ${PARAM}"; cat $PARAM;
-		PARAM=/sys/module/nvmeibc/parameters/use_block_extrenal_major; cat $PARAM;
+		PARAM=/sys/module/nvmeibc/parameters/use_block_external_major; cat $PARAM;
 		#strace -tt -o ~/z_fio.txt
 		time fio --direct=1 --numjobs=8 --iodepth=256 --bs 4k --filename=/dev/nvmesh/J1 --name=test --rw=randrw --ioengine=libaio --rwmixwrite 100 --group_reporting --time_based --runtime 10 --refill_buffers
 		#time fio --direct=0 --bs 4k --filename /dev/nvmesh/J1 --name test --rw randrw --numjobs=8 --iodepth 1 --ioengine psync --rwmixwrite 99 --group_reporting --time_based --runtime 20 --refill_buffers

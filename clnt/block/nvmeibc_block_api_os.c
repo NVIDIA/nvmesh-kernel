@@ -28,9 +28,9 @@ module_param(max_trim_size_non_mirrored, uint, 0644);
 MODULE_PARM_DESC(max_trim_size_non_mirrored, "Max longest supported trim on unprotected volumes. units of 128KB");
 
 /************************ Minor ID allocator for volume ***********************/
-bool nvmeibc_use_block_extrenal_major = false;	// Use internal allocator of minors instead of kernel built in
-module_param_named(use_block_extrenal_major, nvmeibc_use_block_extrenal_major, bool, 0444);	// Can be set only when module is going up
-MODULE_PARM_DESC(use_block_extrenal_major, "Use a dedicated block external major");
+bool nvmeibc_use_block_external_major = false;	// Use internal allocator of minors instead of kernel built in
+module_param_named(use_block_external_major, nvmeibc_use_block_external_major, bool, 0444);	// Can be set only when module is going up
+MODULE_PARM_DESC(use_block_external_major, "Use a dedicated block external major");
 
 uint nvmeibc_max_num_partitions_on_vol = DISK_MAX_PARTS;	// Used in internal allocator of minors
 module_param_named(max_num_partitions_on_vol, nvmeibc_max_num_partitions_on_vol, uint, 0444);	// Can be set only when module is going up
@@ -47,7 +47,7 @@ void disk_id_allocator_init(struct disk_id_allocator_t* al)
 
 void disk_id_allocator_alloc(struct disk_id_allocator_t* al, struct gendisk *disk, const char* vol_name)
 {
-	if (nvmeibc_use_block_extrenal_major) {
+	if (nvmeibc_use_block_external_major) {
 		disk->minors = disk->first_minor = 0;
 		if (disk->minors == 0)// This will cause the gendisk to be minor of  'cat /proc/devices | grep blkext' driver
 			disk->flags	|= GENHD_FL_EXT_DEVT;	// minors == 0 indicates to use ext devt from part0
@@ -66,7 +66,7 @@ void disk_id_allocator_alloc(struct disk_id_allocator_t* al, struct gendisk *dis
 
 void disk_id_allocator_free(struct disk_id_allocator_t* al, struct gendisk *disk)
 {
-	if (!nvmeibc_use_block_extrenal_major) {
+	if (!nvmeibc_use_block_external_major) {
 		const int new_minor = disk->first_minor / nvmeibc_max_num_partitions_on_vol;
 		_NT(t_dia1, "DIA: -@INT, bmp=@LX, vol=@DEV_NAME", new_minor, al->bmp[0], disk->disk_name);		// pr_emerg("DIA: - %u, 0x%lx disk=%p, vol=%s\n", new_minor, al->bmp[0], disk, disk->disk_name);
 		WARN(!test_bit(new_minor, al->bmp), "nvmeibc: Unexpected Internal error during detach, %d minor of disk %s not registered for removal!\n", new_minor, disk->disk_name);
@@ -76,7 +76,7 @@ void disk_id_allocator_free(struct disk_id_allocator_t* al, struct gendisk *disk
 
 void disk_id_allocator_mark(struct disk_id_allocator_t* al, struct gendisk *disk)
 {
-	if (!nvmeibc_use_block_extrenal_major) {
+	if (!nvmeibc_use_block_external_major) {
 		const int new_minor = disk->first_minor / nvmeibc_max_num_partitions_on_vol;
 		const int is_already_allocated = test_bit(new_minor, al->bmp);
 		_NT(t_dia2, "DIA: u@INT, bmp=@LX, vol=@DEV_NAME, is_a=@BOOL_YN", new_minor, al->bmp[0], disk->disk_name, is_already_allocated);		// pr_emerg("DIA: u %u, 0x%lx disk=%p, vol=%s\n", new_minor, al->bmp[0], disk, disk->disk_name);
@@ -1429,7 +1429,7 @@ int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 	__request_queue_set_default_params(q, atom->dev_name, __init_request_queue_params(os));
 	atom->conf.enforce_readonly = true;		// Default is true
 	disk = atom->disk;			/* Just for short writing */
-	disk->major = nvmeibc_use_block_extrenal_major ? 0 : c->drv_ver.nvmeibc_major;	// In kernel 5.15+ setting major without minors is illegal: https://elixir.bootlin.com/linux/v5.15.165/source/block/genhd.c#L416
+	disk->major = nvmeibc_use_block_external_major ? 0 : c->drv_ver.nvmeibc_major;	// In kernel 5.15+ setting major without minors is illegal: https://elixir.bootlin.com/linux/v5.15.165/source/block/genhd.c#L416
 	disk_id_allocator_alloc(get_dia(atom), atom->disk, atom->dev_name);
 	if (no_part_scan || IS_PATH_VDISK(atom->dev_name)) {
 		/* Avoid udevd reading our volumes as it not handle io disable well and may stuck */
@@ -2097,7 +2097,7 @@ void block_api_os_change_size(struct nvmeibc_block_device *dev, bool force_reval
 
 static void __copy_gendisk(struct gendisk *dst, const struct gendisk *src)
 {
-	dst->major = nvmeibc_use_block_extrenal_major ? 0 : src->major;
+	dst->major = nvmeibc_use_block_external_major ? 0 : src->major;
 	dst->flags = src->flags;
 	dst->fops =  src->fops;
 	dst->queue = src->queue;
