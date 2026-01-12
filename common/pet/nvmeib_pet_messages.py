@@ -8,7 +8,7 @@ import pathlib
 import argparse
 import datetime
 from elftools.elf.elffile import ELFFile
-from nvmeib_pet_archive import NvmeibPetArchive
+from nvmeib_pet_archive import NvmeibPetArchive, KaitaiStream
 
 
 libc = ctypes.cdll.LoadLibrary("libc.so.6")
@@ -17,6 +17,7 @@ sprintf_buffer = ctypes.create_string_buffer(8192)
 
 
 class Message(typing.NamedTuple):
+    fname: str
     entity: int
     ns_stamp: int
     dt_stamp: datetime.datetime
@@ -63,7 +64,7 @@ class Template:
     def as_line(self):
         return f"{self.offset:#0{4}x} {self.spec}"
 
-    def instantiate(self, msg:NvmeibPetArchive.Message, entity:int, prev_ns_stemp: int) -> Message:
+    def instantiate(self, msg:NvmeibPetArchive.Message, fname: str, entity:int, prev_ns_stemp: int) -> Message:
         args: list[int] = []
         for arg in msg.args: # type: ignore
             args.append(arg.pet_value) # type: ignore
@@ -77,8 +78,7 @@ class Template:
             timestamp += prev_ns_stemp # type: ignore
 
         dt_stamp = datetime.datetime.fromtimestamp(timestamp/(10**9)) # type: ignore
-        return Message(entity=entity, ns_stamp=timestamp, dt_stamp=dt_stamp, text=text)
-
+        return Message(fname=fname, entity=entity, ns_stamp=timestamp, dt_stamp=dt_stamp, text=text)
 
 class TemplatesLoader:
     def __init__(self, module: pathlib.Path, section_name: str):
@@ -224,9 +224,22 @@ class ViewMessages(Command):
     @typing.no_type_check
     def __iter_entities(self) -> typing.Generator[NvmeibPetArchive.Entity, None, None]:
         for fpath in self.traces:
-            archive: NvmeibPetArchive = NvmeibPetArchive.from_file(fpath)
-            for entity in archive.entities:
-                yield entity
+            with open(fpath, 'rb') as fobj:
+                idx = 0
+                kstream = KaitaiStream(fobj)
+                while not kstream.is_eof():
+                    entity_start_position = kstream.pos()
+                    entity = NvmeibPetArchive.Entity(kstream)
+                    entity.fname = fpath.name
+                    entity.idx = idx 
+                    entity.size = kstream.pos() - entity_start_position
+                    idx += 1
+                    yield entity
+
+            #The code below loads the whole file into memory - waste of resources 
+            #archive: NvmeibPetArchive = NvmeibPetArchive.from_file(fpath)
+            #for entity in archive.entities:
+                #yield entity
 
     @typing.no_type_check
     def __iter_entity_messages(self, entity: NvmeibPetArchive.Entity) -> typing.Generator[NvmeibPetArchive.Message, None, None]:
@@ -239,17 +252,21 @@ class ViewMessages(Command):
     @typing.no_type_check
     def __iter_human_messages(self) -> typing.Generator[Message, None, None]:
         templates:dict[int,Template] = self.__load_templates()
-        for idx, entity in enumerate(self.__iter_entities()):
+        for entity in self.__iter_entities():
             prev_ns_stamp = 0
+            last_human_msg = None
             for msg in self.__iter_entity_messages(entity):
                 try:
                     tmpl = templates[msg.offset - 1]
                 except KeyError:
                     raise RuntimeError(f"Unknown PET template offset {msg.offset:#06x} for entity {idx}")
                 tmpl = templates[msg.offset-1]
-                human_msg = tmpl.instantiate(msg, idx, prev_ns_stamp)
+                human_msg = tmpl.instantiate(msg, entity.fname, entity.idx, prev_ns_stamp)
                 prev_ns_stamp = human_msg.ns_stamp
                 yield human_msg
+                last_human_msg = human_msg
+            yield human_msg._replace(text=f"entity size={entity.size} bytes")
+
 
     def __call__(self):
         human_msgs:typing.Generator[Message, None, None] = self.__iter_human_messages()
@@ -257,7 +274,7 @@ class ViewMessages(Command):
             human_msgs = sorted(human_msgs, key=lambda hm: hm.ns_stamp) # type: ignore
 
         for human_msg in human_msgs:
-            print(f"{human_msg.dt_stamp} entity={human_msg.entity} {human_msg.text}")
+            print(f"{human_msg.dt_stamp} entity={human_msg.fname}[{human_msg.entity}] {human_msg.text}")
         
 
 if __name__ == '__main__':
