@@ -480,7 +480,7 @@ static int mmap_locks_table(struct nvmeibt_local_disk *local_disk)
 	} else {
 		struct mmap_tbl mtbl;
 		N_Tf(sh3ifu7, "disk=@STR mmap at offset=@OFFSET_INT n_blksets=@UINT64_TX n_4k_blocks=@UINT64_TX", disk_name, offset, n_blksets, n_4k_blocks);
-		mtbl = nvmeib_srvr_api_lib_locks_map_get(nvmeibt_local_disk_UUID_str(local_disk), n_blksets, offset, true);
+		mtbl = nvmeib_srvr_api_lib_locks_map_get(nvmeibt_get_srv_comm(), nvmeibt_local_disk_UUID_str(local_disk), n_blksets, offset, true);
 		if (mtbl.addr) {
 			local_disk->mmap_disk_locks_tbl = mtbl;
 			N_Tf(ca8ak20, "mmap locks table of disk=@STR: addr @ADDR_PTR, length @LENGTH_LONG ", disk_name, mtbl.addr, mtbl.length);
@@ -506,11 +506,10 @@ static int nvmeibt_local_disk_munmap_mem_tbls(struct nvmeibt_local_disk *local_d
 	}
 
 	N_Tf(cg672k9, "munmap locks table of disk=@STR", nvmeibt_local_disk_display(local_disk));
-
 	if (!local_disk->mmap_disk_locks_tbl.addr) {
 		N_Tf(xvq7i29, "disk=@STR locks table is NOT mmaped", nvmeibt_local_disk_display(local_disk));
 	} else {
-		rv = nvmeib_srvr_api_lib_locks_map_put(nvmeibt_local_disk_UUID_str(local_disk), local_disk->mmap_disk_locks_tbl);
+		rv = nvmeib_srvr_api_lib_locks_map_put(nvmeibt_get_srv_comm(), nvmeibt_local_disk_UUID_str(local_disk), local_disk->mmap_disk_locks_tbl);
 	}
 	local_disk->mmap_disk_locks_tbl.addr = NULL;
 	local_disk->mmap_disk_locks_tbl.length = -1;

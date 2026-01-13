@@ -25,7 +25,7 @@ struct nvmeibt_km_comm_params {									// Must fill all callbacks
 struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params *);
 int	 nvmeib_srvr_api_lib_server_connect(          struct nvmeibt_km_comm *);	// Login into local server, Now can receive messages from server. Initialize your queues/mutexes/etc before calling this function
-void nvmeib_srvr_api_lib_server__detach(          struct nvmeibt_km_comm *);	// Stop send/recv msgs to server. Can still use the library calls unrelated to server messaging, like unmapping locks
+void nvmeib_srvr_api_lib_server__detach(          struct nvmeibt_km_comm *);	// Stop send/recv msgs to server and receive callbacks. Can still use the library calls unrelated to server messaging, like unmapping locks
 void nvmeib_srvr_api_lib_destroy(                 struct nvmeibt_km_comm *);	// Do not use 'p' after calling this function. It is freed
 int	 nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *, const struct km_comm_msg_hdr *);	// Send message with callback (async api)
 int	 nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *, const struct nvmeibs_toma_server_proc_buf *);	// Blocking: server reply returned directly
@@ -44,8 +44,8 @@ struct mmap_tbl {
 	void *addr;					// Address of locks table memory map. On alloc error returned NULL
 	size_t length;				// Actual length[bytes] of allocated memory. On error == 0. Might be slightly bigger than requested, due to padding
 };
-struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char* disk_name, uint64_t n_blksets, uint64_t offset /*=0*/, bool allow_write /*= true*/);
-int             nvmeib_srvr_api_lib_locks_map_put(const char *disk_name, struct mmap_tbl memory_returned_by_valid_get);		// Upon error returns negative
+struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(struct nvmeibt_km_comm *, const char* disk_name, uint64_t n_blksets, uint64_t offset /*=0*/, bool allow_write /*= true*/);
+int             nvmeib_srvr_api_lib_locks_map_put(struct nvmeibt_km_comm *, const char *disk_name, struct mmap_tbl memory_returned_by_valid_get);		// Upon error returns negative
 
 int nvmeib_srvr_api_lib_disk_dobind(const char *disk_bdf, bool is_nvmesh);	//   Bind to   nvmesh/nvme driver
 int nvmeib_srvr_api_lib_disk_unbind(const char *disk_bdf, bool is_nvmesh);	// UnBind from nvmesh/nvme driver
