@@ -2157,15 +2157,9 @@ out:
 
 static void write_stat_freer(struct nvmeibt_wq_entry *wq_entry)
 {
-	struct stat_wq_entry *entry;
-
-	NFIN;
-
-	entry = container_of(wq_entry, struct stat_wq_entry, wq_entry);
+	struct stat_wq_entry *entry = container_of(wq_entry, struct stat_wq_entry, wq_entry);
 	NNVMEIBT_STR_FREE(trace_toma_write_stat_freer, entry->status_str);
 	NNVMEIBT_BM_FREE(trace_1_toma_write_stat_freer, entry);
-
-	NFOUT;
 }
 
 void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
@@ -2253,7 +2247,7 @@ static void nvmeibt_toma_print_status(void)		/* Used for printing status - We cr
 	char						*status_filename = task->status_filename;
 
 	task->status_str = NNVMEIBT_STR_ALLOC(ttps02);
-	NNVMEIBT_STR_RESIZE_BUF(ttps03, task->status_str, 1 << 25); // 32[mb]. Maybe consider calculating the needed size.
+	NNVMEIBT_STR_RESIZE_BUF(ttps03, task->status_str, (1 << 25)-128); // ~32[mb]. Maybe consider calculating the needed size.
 	task->wq_entry.type = "SAVE_STAT";
 	task->wq_entry.execute = write_stat_wrapper;
 	task->wq_entry.free = write_stat_freer;
@@ -2265,12 +2259,9 @@ static void nvmeibt_toma_print_status(void)		/* Used for printing status - We cr
 	if (rv >= (int)sizeof(task->status_filename)) {
 		N_Wf(ttps04, "status filename was truncated because too long"); // failed to compile filename string
 		write_stat_freer(&task->wq_entry);
-		return;
-	}
-
-	print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, task->status_str);
-	N_Tf(ttps05, "Status generated @ZU[kb]", (task->status_str->str_len >> 10));
-	if (stat_wq) {
+	} else if (stat_wq) {
+		print_status_str(NVMEIBS_TOMA_STATUS_ALL, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, task->status_str);
+		N_Tf(ttps05, "Status generated @ZU[kb]", (task->status_str->str_len >> 10));
 		nvmeibt_wq_addw(stat_wq, &task->wq_entry);
 	} else {
 		N_Ef(ttps06, "Unable to add stat offload task to WQ!");
