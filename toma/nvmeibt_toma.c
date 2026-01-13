@@ -445,9 +445,6 @@ bool		nvmeibt_is_converting_json_to_persistence = 0;
 bool		nvmeibt_is_converting_persistence_to_json = 0;
 
 static int signals_fd = -1;
-#define PARENT_SOCKET 0
-#define CHILD_SOCKET 1
-int toma_sm_key = 0;
 bool toma_abort_nf = false;
 static bool is_need_to_update_the_main_select_fds = true;
 int64_t nvmeibt_toma_is_not_reporting_data_segs_gpt_entries = TOMA_DO_NOT_REPORT_DISK_SEGMENT_GPTS_DEFAULT;
@@ -1930,11 +1927,10 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 			toma_bin_log_file_size_mega = (unsigned)atoi(optarg);
 			if (toma_bin_log_file_size_mega > TOMA_BIN_LOG_MAX_SIZE) {
 				toma_bin_log_file_size_mega = TOMA_BIN_LOG_MAX_SIZE;
-			}
-			else if (toma_bin_log_file_size_mega < TOMA_BIN_LOG_MIN_SIZE) {
+			} else if (toma_bin_log_file_size_mega < TOMA_BIN_LOG_MIN_SIZE) {
 				toma_bin_log_file_size_mega = TOMA_BIN_LOG_MIN_SIZE;
 			}
-			fprintf(stdout, "TOMA bin log size is %d Mega\n", toma_bin_log_file_size_mega);
+			fprintf(stdout, "TOMA bin log size is %d[mb]\n", toma_bin_log_file_size_mega);
 			break;
 		case 'n':
 			toma_log_file_n = (unsigned)atoi(optarg);
@@ -1975,16 +1971,13 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 			fprintf(stdout, "TOMA cloud-mode is %s\n", optarg);
 			N_Tf(467sagnstdout, "TOMA cloud-mode is @STR", optarg);
 			break;
+		case '4':
 		case 'k':
-			toma_sm_key = (unsigned)atoi(optarg);
-			fprintf(stdout, "TOMA sm_key is %d\n", toma_sm_key);
+			fprintf(stdout, "Deprecated: Param %c val=%s\n", op, optarg);
 			break;
 		case 'a':
 			toma_abort_nf = true;
 			fprintf(stdout, "TOMA will abort on non-fatal error detection\n");
-			break;
-		case '4':
-			N_Tf(ecfayj1, "OLD unused option '@STR'. left here since used by CI", optarg);
 			break;
 		case 'u':
 			fprintf(stdout, "TOMA will start UDP server for RAFT\n");
@@ -2021,7 +2014,6 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 				fprintf(stdout, "\t[-s log file size in K or M or G]\n");
 				fprintf(stdout, "\t[-c cloud-mode <Yes/No>]\n");
 				fprintf(stdout, "\t[-m max sm query rate (per second)\n");
-				fprintf(stdout, "\t[-k sm_key]\n");
 				fprintf(stdout, "\t[-S use_srq]\n");
 				fprintf(stdout, "\t[-u|--udp start RAFT UDP]\n");
 				fprintf(stdout, "\t[-i|--use-libibcm - Force use of libibcm]\n");
@@ -3065,28 +3057,33 @@ exit:
 
 extern int gpt_util_main(int argc, char *argv[]);
 
+static int run_dummy_empty(int argc, char *argv[])
+{
+	(void) argc; (void)argv;
+	fprintf(stderr, "Running dummy util: n_args=%d, exe=%s\n", argc, argv[0]);
+	return 0;
+}
+
 struct {
 	char *name;
 	int (*func)(int argc, char **argv);
 } toma_subprogs[] = {
 		{ TOMA_THREAD_NAME, run },
 		{ "gpt_util", gpt_util_main },
+		{ "dummy", run_dummy_empty },
 };
 
 int main(int argc, char *argv[]) {
-	char *base;
+	const char *base = strrchr(argv[0], '/') + 1;		// not using basename() since it may alter the argument
 	int i, arg_shift = 0, subprog = 0;
-
-	base = strrchr(argv[0], '/') + 1;		// not using basename() since it may alter the argument
-
-	for (i=0; i<ARRAY_SIZE(toma_subprogs); i++) {
+	for (i=0; i<ARRAY_SIZE(toma_subprogs); i++) {		// Select sub program by exe name
 		if (strcmp(base, toma_subprogs[i].name)==0) {
 			subprog = i;
 			break;
 		}
 	}
-	if (subprog == 0 && argc>1) {
-		for (i=0; i<ARRAY_SIZE(toma_subprogs); i++) {
+	if ((subprog == 0) && (argc > 1)) {
+		for (i=0; i<ARRAY_SIZE(toma_subprogs); i++) {	// Select sub program by first argument
 			if (strcmp(argv[1], toma_subprogs[i].name)==0) {
 				subprog = i;
 				arg_shift = 1;
@@ -3094,8 +3091,6 @@ int main(int argc, char *argv[]) {
 			}
 		}
 	}
-
-	// will call "run()" for main toma
 	return toma_subprogs[subprog].func(argc-arg_shift, argv+arg_shift);
 }
 
