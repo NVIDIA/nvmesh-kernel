@@ -365,11 +365,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 8
+            "%pf": 8
         },
         "__split": true
     },
@@ -377,11 +377,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 8
+            "%pf": 8
         },
         "__split": true
     },
@@ -389,11 +389,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 8
+            "%pf": 8
         },
         "__split": true
     },
@@ -1654,11 +1654,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 57
+            "%pf": 57
         },
         "__split": true
     },
@@ -4390,10 +4390,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "__histogram": {
-            "%pS": 2
+            "%pF": 2
         }
     },
     "@ENTRY_INT": {
@@ -5055,11 +5055,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "__split": true,
         "__histogram": {
-            "%pS": 4
+            "%pF": 4
         }
     },
     "@FNAME": {
@@ -5077,11 +5077,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 4
+            "%pf": 4
         }
     },
     "@FORCE": {
@@ -5297,11 +5297,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 61
+            "%pf": 61
         }
     },
     "@FUNCTION": {
@@ -5318,10 +5318,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "__histogram": {
-            "%pS": 3
+            "%pF": 3
         }
     },
     "@F_RV": {
@@ -9151,10 +9151,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "__histogram": {
-            "%pS": 3
+            "%pF": 3
         }
     },
     "@MASKED_ATOMIC_CAP": {
@@ -12949,32 +12949,32 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 58
+            "%pf": 58
         }
     },
     "@POST_SEND_ATOMIC": {
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "__histogram": {
-            "%pS": 3
+            "%pF": 3
         }
     },
     "@POST_SEND_ATOMIC_FN": {
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 8
+            "%pf": 8
         },
         "__split": true
     },
@@ -13177,11 +13177,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 59
+            "%pf": 59
         }
     },
     "@PRIORITY": {
@@ -19312,10 +19312,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "__histogram": {
-            "%pS": 9
+            "%pF": 9
         }
     },
     "@WRITE_IN_PROGRESS": {
@@ -19585,11 +19585,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%ps",
+        "dmesg_fmt": "%pf",
         "final": true,
         "func": true,
         "__histogram": {
-            "%ps": 20
+            "%pf": 20
         }
     },
     "@BUF_LEN": {

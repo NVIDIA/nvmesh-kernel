@@ -253,7 +253,7 @@ static void listen_stop(void)
 	   by unregistering listener sk's callbacks */
 	sk = listen_sock->sk;
 	write_lock_bh(&sk->sk_callback_lock);
-	_I("Unregister data-ready: '%ps'(%p) to '%ps'(%p)\n",
+	_I("Unregister data-ready: '%pf'(%p) to '%pf'(%p)\n",
 		sk->sk_data_ready, sk->sk_data_ready,
 		sk->sk_user_data, sk->sk_user_data);
 	sk->sk_data_ready = sk->sk_user_data;
@@ -306,7 +306,7 @@ static int listen_sock_open(__be32 addr, __be16 port)
 	sock->sk->sk_allocation = GFP_ATOMIC;
 	/* register (hijack) sk's callbacks */
 	write_lock_bh(&sock->sk->sk_callback_lock);
-	_I("Register data-ready: '%ps'(%p) to '%ps'(%p)\n",
+	_I("Register data-ready: '%pf'(%p) to '%pf'(%p)\n",
 		sock->sk->sk_data_ready, sock->sk->sk_data_ready,
 		listen_data_ready, listen_data_ready);
 	sock->sk->sk_user_data = sock->sk->sk_data_ready;

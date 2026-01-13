@@ -79,13 +79,13 @@ int siw_set_dprint_fn(t_siw_dprint_fn dprint_fn)
 	if (dprint_fn) {
 		for_each_possible_cpu(cpu) {
 			if (siw_dprint_fn[cpu]) {
-				pr_warn("SIW: dprint fn for CPU %d already set to %pS\n", 
+				pr_warn("SIW: dprint fn for CPU %d already set to %pF\n", 
 					cpu, siw_dprint_fn[cpu]);
 				return -EALREADY;
 			}
 		}
 		on_each_cpu(set_cpu_dprint_fn, dprint_fn, 1);
-		dprint(DBG_KEYP, "SIW: debug print function set to %pS\n",
+		dprint(DBG_KEYP, "SIW: debug print function set to %pF\n",
 		       dprint_fn);
 	} else {
 		dprint(DBG_KEYP, "SIW: debug print function reset\n");

@@ -61,7 +61,7 @@ C_DMESG_TYPE_FORMATS = {
     'uuid_le': r'.*\%pU(?:L|l).*',
     'bitmap': r'.*\%[0-9]*pbl.*',
     'hex': r'.*\%[0-9]*ph.*',
-    'symbol': r'.*\%(?:pf|pF|ps|pS).*',
+    'symbol': r'.*\%(?:pf|pF).*',
     'stack_trace': r'.*\%(?:p).*',
 }
 

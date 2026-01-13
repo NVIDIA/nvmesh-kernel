@@ -464,16 +464,16 @@ void print_sk_callbacks(struct sock *sk)
 	//check they are as expected: 'accepted socket' vs. not
 	if (sk) {
 		if (sk->sk_data_ready)
-			_I("sk_data_ready='%ps'(%p)\n",
+			_I("sk_data_ready='%pf'(%p)\n",
 				sk->sk_data_ready, sk->sk_data_ready);
 		if (sk->sk_state_change)
-			_I("sk_state_change='%ps'(%p)\n",
+			_I("sk_state_change='%pf'(%p)\n",
 				sk->sk_state_change, sk->sk_state_change);
 		if (sk->sk_write_space)
-			_I("sk_write_space='%ps'(%p)\n",
+			_I("sk_write_space='%pf'(%p)\n",
 				sk->sk_write_space, sk->sk_write_space);
 		if (sk->sk_error_report)
-			_I("sk_error_report='%ps'(%p)\n",
+			_I("sk_error_report='%pf'(%p)\n",
 				sk->sk_error_report, sk->sk_error_report);
 	}
 }

@@ -1634,9 +1634,9 @@ static void write_status_buf(struct write_status_buf_data *data)
 		BUF_ADD("\t - None\n");
 	BUF_ADD("LOCAL SERVER (%px)\n", disk->local_server);
 	if (disk->local_server) {
-		BUF_ADD("\t- is_local: %pS, cl-reg: %pS, cl-unreg: %pS, "
-				"cl-alloc-locks: %pS, cl-alloc-jrnl-rng: %pS,  "
-				"local-cmd: %pS, dma-device: %pS, gen-cmd: %pS\n",
+		BUF_ADD("\t- is_local: %pF, cl-reg: %pF, cl-unreg: %pF, "
+				"cl-alloc-locks: %pF, cl-alloc-jrnl-rng: %pF,  "
+				"local-cmd: %pF, dma-device: %pF, gen-cmd: %pF\n",
 			disk->local_server->is_local_disk,
 			disk->local_server->cl_register,
 			disk->local_server->cl_unregister,

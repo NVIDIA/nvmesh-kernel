@@ -1841,7 +1841,7 @@ static inline bool __sym_resolve_kernel_bug_can_happen(void *addr)
  */
 int nvmeib_symbol_length(void *addr) {
 	return __sym_resolve_kernel_bug_can_happen(addr) ?
-		strlen("<kallsyms-bug>") : snprintf(NULL, 0, "%ps", addr);
+		strlen("<kallsyms-bug>") : snprintf(NULL, 0, "%pf", addr);
 }
 EXPORT_SYMBOL(nvmeib_symbol_length);
 /**
@@ -1849,7 +1849,7 @@ EXPORT_SYMBOL(nvmeib_symbol_length);
  */
 int nvmeib_symbol_strcpy(char *dest, void *addr, int len) {
 	return __sym_resolve_kernel_bug_can_happen(addr) ?
-		scnprintf(dest, len, "%s", "<kallsyms-bug>") : scnprintf(dest, len, "%ps", addr);
+		scnprintf(dest, len, "%s", "<kallsyms-bug>") : scnprintf(dest, len, "%pf", addr);
 }
 EXPORT_SYMBOL(nvmeib_symbol_strcpy);
 
@@ -1860,7 +1860,7 @@ int nvmeib_stack_trace_length(void *addr) {
 	BUG_ON(!addr); /* Case is handled by code generator */
 	for (i = 0; i < st->nr_entries; ++i)
 		if (st->entries[i])
-			sum += snprintf(NULL, 0, "[%016lx] %pS", st->entries[i], (void*)st->entries[i]) + 2;
+			sum += snprintf(NULL, 0, "[%016lx] %pF", st->entries[i], (void*)st->entries[i]) + 2;
 
 	return sum + 1;
 }
@@ -1875,7 +1875,7 @@ int nvmeib_stack_trace_strcpy(char *dest, void *addr, int len) {
 	for (i = 0; i < st->nr_entries; ++i) {
 		if (st->entries[i]) {
 			dest[sum++] = '>';
-			sum += scnprintf(dest + sum, len - sum, "[%016lx] %pS", st->entries[i], (void*)st->entries[i]);
+			sum += scnprintf(dest + sum, len - sum, "[%016lx] %pF", st->entries[i], (void*)st->entries[i]);
 			dest[sum++] = '\n';
 		}
 	}

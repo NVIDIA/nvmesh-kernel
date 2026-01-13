@@ -3609,14 +3609,14 @@ int siw_post_srq_recv(struct ib_srq *ofa_srq, struct ib_recv_wr *wr,
 			for (i = 0; i < srq->num_rqe; i++) {
 				struct siw_rqe *chk_rqe = &srq->recvq[i % srq->num_rqe];
 				if (chk_rqe->id == wr->wr_id && _load_shared(chk_rqe->flags)) {
-					pr_err("SIW: SRQ " dprint_ptr_str() " double-post of id 0x%llx in wr " dprint_ptr_str() ". Previous post in idx %u - Post call-stack %pS <- %pS <- %pS <- %pS <- %pS\n",
+					pr_err("SIW: SRQ " dprint_ptr_str() " double-post of id 0x%llx in wr " dprint_ptr_str() ". Previous post in idx %u - Post call-stack %pF <- %pF <- %pF <- %pF <- %pF\n",
 					       srq, wr->wr_id, wr, i, (void *)srqe_md->post_bt[0], (void *)srqe_md->post_bt[1], (void *)srqe_md->post_bt[2], (void *)srqe_md->post_bt[3], (void *)srqe_md->post_bt[4]);
 					BUG_ON(1);
 				}
 			}
 			save_stack_trace(&st);
 			srqe_md->post_pid = current->pid;
-			trace_printk("SRQ " dprint_ptr_str() " posting wr_id %llx - Post call-stack %pS <- %pS <- %pS <- %pS <- %pS\n", 
+			trace_printk("SRQ " dprint_ptr_str() " posting wr_id %llx - Post call-stack %pF <- %pF <- %pF <- %pF <- %pF\n", 
 				     srq, wr->wr_id, (void *)srqe_md->post_bt[0], (void *)srqe_md->post_bt[1], (void *)srqe_md->post_bt[2], (void *)srqe_md->post_bt[3], (void *)srqe_md->post_bt[4]);
 			for (i = 0; i < wr->num_sge; i++) {
 				struct siw_mem *mem = siw_mem_id2obj(srq->pd->hdr.sdev, wr->sg_list[i].lkey >> 8);

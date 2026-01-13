@@ -5369,7 +5369,7 @@ static const void *nvmeib_alloc_add_str(const void *ptr, gfp_t gfp, bool is_bt)
 			goto out;
 		}
 		/* Decode ptr to function-location */
-		scnprintf(alloc_str->str, 128, "%pS", ptr);
+		scnprintf(alloc_str->str, 128, "%pF", ptr);
 	}
 	/* String duplicated - Add to hash table (check to make sure it hasn't been added between the last check) */
 	spin_lock_hash_bkt(ptr_hash_bkt, flags);

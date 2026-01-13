@@ -1412,7 +1412,7 @@ void siw_cq_notify(struct siw_cq *cq, u32 flags, bool force)
 		(*cq->ofa_cq.comp_handler)(&cq->ofa_cq, cq->ofa_cq.cq_context);
 		handler_jif = jiffies - handler_start_jif;
 		if (handler_jif > SIW_CQ_HANDLER_TIMEOUT_LOG) {
-			dprint(DBG_ON, "(CQ%d): handler %pS (context " dprint_ptr_str() ") took %u ms\n", OBJ_ID(cq), cq->ofa_cq.comp_handler, cq->ofa_cq.cq_context, jiffies_to_msecs(handler_jif));
+			dprint(DBG_ON, "(CQ%d): handler %pF (context " dprint_ptr_str() ") took %u ms\n", OBJ_ID(cq), cq->ofa_cq.comp_handler, cq->ofa_cq.cq_context, jiffies_to_msecs(handler_jif));
 			WARN_ON_ONCE(SIW_CQ_HANDLER_TIMEOUT_WARN && handler_jif > SIW_CQ_HANDLER_TIMEOUT_WARN);
 		}
 	}

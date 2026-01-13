@@ -160,7 +160,7 @@ int siw_reap_cqe(struct siw_cq *cq, struct ib_wc *ofa_wc)
 	struct siw_srq *recv_srq = NULL;
 #endif
 
-	dprint(DBG_WR|DBG_OL, " called from '%ps'\n",
+	dprint(DBG_WR|DBG_OL, " called from '%pf'\n",
 		__builtin_return_address(0));
 
 	lock_cq_rxsave(cq, flags);

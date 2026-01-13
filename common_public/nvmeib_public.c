@@ -832,7 +832,7 @@ EXPORT_SYMBOL(nvmeib_kallsyms_lookup_name);
  * the race condition can happen, and false otherwise.
  *
  * It shall be used before any symbol resolve call, i.e. call to kallsyms,
- * sprintf or printk via %ps or %pS format etc.
+ * sprintf or printk via %pf or %pF format etc.
  */
 bool nvmeib_sym_resolve_kernel_bug_can_happen(void* addr)
 {
