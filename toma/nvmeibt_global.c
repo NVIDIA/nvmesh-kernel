@@ -1101,6 +1101,7 @@ static int n_toma_restarts_in_the_last_5_days(void)
 	#define LOGS_DIR TOMA_ROOT_DIR "var/log/nvmesh/trace_daemon"
 	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), TOMA_ROOT_DIR "tmp/jctl_%d", getpid());
 	snprintf(cmd, sizeof(cmd), LOGS_DIR "/pager " LOGS_DIR " -l toma.eter.binlog -t now-120h --nogreet -f 'trace=trace_toma_nvmeibt_toma_init' | wc -l > %s", n_restarts_file_name);
+	// Todo: Consider using faster code instead: snprintf(cmd, sizeof(cmd), "find " TOMA_ROOT_DIR " -name toma.binlog_marker* -mmin -7200 | wc -l > %s", n_restarts_file_name);
 	N_Tf(0kkdoks, "@STR", cmd);
 	system_status = system(cmd);
 	if (!WIFEXITED(system_status) || WEXITSTATUS(system_status)) {
@@ -1126,7 +1127,7 @@ out:
 
 /************************  logs_snapshotting_WQ  ******************************/
 
-static bool is_logs_snapshotting_slowpath_wq_in_the_air = 0;
+static bool is_logs_snapshotting_slowpath_wq_in_the_air = 0;	// Not atomic becuases accesses only from Toma main thread
 struct logs_snapshotting_slowpath_wq_entry {
 	struct nvmeibt_wq_entry 		wq_entry;
 	bool							is_first_run_after_boot;
@@ -1250,45 +1251,41 @@ static void logs_snapshotting_slowpath_finalize(struct nvmeibt_wq_entry *wq_entr
 
 static void logs_snapshotting_slowpath_freer(struct nvmeibt_wq_entry *wq_entry)
 {
-	struct logs_snapshotting_slowpath_wq_entry		*entry;
-
-	NFIN;
-	entry = container_of(wq_entry, struct logs_snapshotting_slowpath_wq_entry, wq_entry);
+	struct logs_snapshotting_slowpath_wq_entry *entry = container_of(wq_entry, struct logs_snapshotting_slowpath_wq_entry, wq_entry);
 	NNVMEIBT_STR_FREE(598dnjw, entry->reason_for_snapshot);
 	NNVMEIBT_BM_FREE(cbyshwj, entry);
 	is_logs_snapshotting_slowpath_wq_in_the_air = 0;
-	NFOUT;
 }
 
 static void nvmeibt_logs_snapshotting_slowpath_WQ_launch(bool is_calling_snapshot, bool is_starting_snapshotting, bool is_stopping_snapshotting, bool is_first_run_after_boot, struct nvmeibt_Str *reason_for_snapshot)
 {
-	struct logs_snapshotting_slowpath_wq_entry 	*snapshotting_wq_entry;
+	struct logs_snapshotting_slowpath_wq_entry 	*work;
 
 	NFIN;
 	if (is_logs_snapshotting_slowpath_wq_in_the_air) {
 		N_Tf(7lrtbyz, "Skipping. is_logs_snapshotting_slowpath_wq_in_the_air=1");
 		goto out;
 	}
-	snapshotting_wq_entry = NNVMEIBT_BM_CALLOC(yshw93k, sizeof(*snapshotting_wq_entry));
-	snapshotting_wq_entry->reason_for_snapshot = NNVMEIBT_STR_ALLOC(iajdrc6);
-	nvmeibt_Str_clone(snapshotting_wq_entry->reason_for_snapshot, reason_for_snapshot);
-	snapshotting_wq_entry->wq_entry.execute = logs_snapshotting_slowpath_wrapper;
-	snapshotting_wq_entry->wq_entry.finalize = logs_snapshotting_slowpath_finalize;
+	work = NNVMEIBT_BM_CALLOC(yshw93k, sizeof(*work));
+	work->reason_for_snapshot = NNVMEIBT_STR_ALLOC(iajdrc6);
+	nvmeibt_Str_clone(work->reason_for_snapshot, reason_for_snapshot);
+	work->wq_entry.execute = logs_snapshotting_slowpath_wrapper;
+	work->wq_entry.finalize = logs_snapshotting_slowpath_finalize;
 	//
-	snapshotting_wq_entry->wq_entry.type = "LOGS_SNAPSHOTTING_SLOWPATH";
-	snapshotting_wq_entry->wq_entry.free = logs_snapshotting_slowpath_freer;
+	work->wq_entry.type = "LOGS_SNAPSHOTTING_SLOWPATH";
+	work->wq_entry.free = logs_snapshotting_slowpath_freer;
 	//
-	snapshotting_wq_entry->is_calling_snapshot = is_calling_snapshot;
-	snapshotting_wq_entry->is_starting_snapshotting = is_starting_snapshotting;
-	snapshotting_wq_entry->is_stopping_snapshotting = is_stopping_snapshotting;
-	snapshotting_wq_entry->is_first_run_after_boot = is_first_run_after_boot;
+	work->is_calling_snapshot = is_calling_snapshot;
+	work->is_starting_snapshotting = is_starting_snapshotting;
+	work->is_stopping_snapshotting = is_stopping_snapshotting;
+	work->is_first_run_after_boot = is_first_run_after_boot;
 	//
 	is_logs_snapshotting_slowpath_wq_in_the_air = 1;
-	if (nvmeibt_wq_run_once(&snapshotting_wq_entry->wq_entry) == NULL) {
+	if (nvmeibt_wq_run_once(&work->wq_entry) == NULL) {
 		N_Ef(8xkwlpx, "Unable to add logs_snapshotting_slowpath task to WQ!");
-		logs_snapshotting_slowpath_finalize(&(snapshotting_wq_entry->wq_entry));
-		logs_snapshotting_slowpath_freer(&(snapshotting_wq_entry->wq_entry));
-		goto out;
+		is_logs_snapshotting_slowpath_wq_in_the_air = 0;
+		logs_snapshotting_slowpath_finalize(&(work->wq_entry));
+		logs_snapshotting_slowpath_freer(&(work->wq_entry));
 	}
 out:
 	NFOUT;
@@ -1296,10 +1293,13 @@ out:
 
 void nvmeibt_log_snapshotting_shutdown(void)
 {
-	while (is_logs_snapshotting_slowpath_wq_in_the_air) {
+	int i;
+	for (i = 0; (i < 20) && is_logs_snapshotting_slowpath_wq_in_the_air; i++) {
 		N_Tf(rftsikl, "Awaiting for the running task to end");
-		break;	// Do not delay the shutdown process
 		nanosleep(&(struct timespec){0, MSEC_TO_NSEC(100)}, NULL); // 100ms
+	}
+	if (is_logs_snapshotting_slowpath_wq_in_the_air) {
+		N_Ef(rftsikk, "Work still running, not waiting anymore, application may crash...");
 	}
 }
 
