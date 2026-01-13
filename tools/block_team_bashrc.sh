@@ -84,7 +84,7 @@ function NVMESH_perf() {
 	#sudo perf top
 }
 
-BASHRC_VER='1.21';
+BASHRC_VER='1.22';
 [ -f /usr/bin/git ] && GIT_USER=`git config --get user.name` || GIT_USER="???";
 if [[ -f /usr/lib64/openmpi/bin/orted ]]; then
 	module purge; module load mpi/openmpi-x86_64;
@@ -483,26 +483,26 @@ if [[ $IS_LOCAL == "Y" ]]; then
 	}
 
 	function NVMESH_simu() {
+			local TOMA_UNITEST="${MY_PROJECTS_DIR}/nvmesh/toma/unitest/";
 		if [[ $1 == clnt* ]]; then
 			cd ${MY_PROJECTS_DIR}/$cur_branch/clnt/block/unitest/
 			cmd='make clean_prev_run; ./build_block_testing.sh build; ./run_block_unitest.sh -n -d 0 -nRep 2 -hsync'
 			echo $cmd; eval $cmd;
 		elif [[ $1 == toma* ]]; then
-			cd ${MY_PROJECTS_DIR}/nvmesh; make all -j 10 -C toma/unitest; ./nvmeibt_toma
+			cd ${TOMA_UNITEST}; make all -j; ./nvmeibt_toma
 		else
-			echo_green "params to run: clnt/ toma"
-			echo "---------------------- BLOCK SIMULATOR EXAMPLES --------------------";
-			echo "make clean_prev_run; make all -j 10 --output-sync=recurse USE_RELEASE=0 USE_SANITIZERS=1; ./blk_unitest -tracedbg 4 -nRep 1 -hsync -ECAllPerm >longdmesg.txt 2>&1";
+			echo "params to run: clnt / toma"
+			echo_green "---------------------- BLOCK SIMULATOR EXAMPLES --------------------";
+			echo "make clean_prev_run; make all -j --output-sync=recurse USE_RELEASE=0 USE_SANITIZERS=1; ./blk_unitest -tracedbg 4 -nRep 1 -hsync -ECAllPerm >longdmesg.txt 2>&1";
 			echo -e "\t Can use: 2>&1 | tee longdmesg.txt";
 			echo -e "view binary traces:\t ./pager --color --dict_preload 99bin/*/dict.5.json --fmtlib_preload 99bin/*/libfmtrs.so > longterm.txt; less -R longterm.txt";
 			echo -e "build in release  :\t ./build_block_testing.sh rebuild USE_RELEASE=1";
 			echo -e "Help / valgrind   :\t ./blk_unitest --help";
 			echo_green "---------------------- Toma SIMULATOR EXAMPLES --------------------";
-			echo "cd ${MY_PROJECTS_DIR}/nvmesh/toma/unitest/";
-			echo "make clean;    make all -j 10;   ./nvmeibt_toma";
-			echo -e "\t./_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color"
+			echo "cd ${TOMA_UNITEST};     make clean;    make all -j;   ./nvmeibt_toma";
+			echo -e "\t./_root/${NVMESH_DIR_LOG}/trace_daemon/pager _root/${NVMESH_DIR_LOG}/trace_daemon --toma --color"
 			echo_green "---------------------- Utils examples --------------------"
-			echo -e "\tcd ${MY_PROJECTS_DIR}/perfTest/io_stress/cmp_blocks; examples/run_test.sh;"
+			echo -e "cd ${MY_PROJECTS_DIR}/perfTest/io_stress/cmp_blocks; examples/run_test.sh;"
 		fi
 	}
 
@@ -896,9 +896,9 @@ else
 				local toma_exe=`NVMESH_service toma find`;
 				echo_green "Compile toma:";
 				echo "cd toma;";
-				echo "make clean; rm ${tfile}; rm -rf obj/*; make -j 10 --debug=verbose all MOD=release make AUTOGEN_DIR='../autogen' AUTOGEN_SUBDIRS_TOMA='common toma' NVMEIBC_SECTOR_SHIFT=12 GIT_COMMIT_ID=0xdddaaa55;  [ -f ${tfile} ] && echo_green "OK" || echo_red "Fail";";
-				echo "sudo mv ${toma_exe} ${toma_exe}.back";
-				echo "sudo cp ./trace/nvmeibt_toma/release/dict.*.json /var/log/nvmesh/trace_daemon/";
+				echo "make clean; rm ${tfile}; rm -rf obj/*; make -j -debug=verbose all MOD=release make AUTOGEN_DIR='../autogen' AUTOGEN_SUBDIRS_TOMA='common toma' NVMEIBC_SECTOR_SHIFT=12 GIT_COMMIT_ID=0xdddaaa55;  [ -f ${tfile} ] && echo_green "OK" || echo_red "Fail";";
+				echo -e "\nsudo mv ${toma_exe} ${toma_exe}.back";
+				echo "sudo cp ./trace/nvmeibt_toma/release/dict.*.json /${NVMESH_DIR_LOG}/trace_daemon/";
 				echo "NVMESH_service toma stop; sudo cp bin/release/nvmeibt_toma ${toma_exe}; NVMESH_service toma restart; sleep 1s; cat /proc/nvmeibs/toma_status/raft | grep commit;";
 			else
 				echo "params: up / start / restart / dump / stop / del_csv / find / recoveries / compile"
