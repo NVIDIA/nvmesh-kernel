@@ -13161,7 +13161,7 @@ static void cancel_queued_get_ec_db_reqs(struct nvmeibc_disk *disk)
 	while ((info = list_first_entry_or_null(&disk->db.dirty_bits_pending_reqs, struct get_dirty_bits_ec_info, link))) {
 		if (info->comp) {
 			info->comp->lock_status = NCL_STATUS_FAIL_COMP;
-			info->comp->callback(info->comp);
+			info->comp->callback(info->comp, nvmeibc_d_rdma_comp_tag_make());
 		}
 		list_del(&info->link);
 		kfree(info);

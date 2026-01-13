@@ -241,11 +241,13 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 	rldr->use_io_apend_stages = true;
 }
 
-raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds)
+static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds) __attribute__((unused));
+static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds)
 {
 	const struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(ds);
 	return ds - raid->segments;
 }
+
 int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 {
 	struct nvmeibc_block_command   *bcmd = &cmds[cmd_idx];

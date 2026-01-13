@@ -1544,7 +1544,7 @@ static inline void run_lock_comp_cb(struct nvmeibc_d_rdma_comp *comp, bool noisy
 	struct nvmeib_cpu_mask cpu_mask;
 
 	cpu_mask = comp->cpu_mask_info.mask;
-	comp->callback(comp);
+	comp->callback(comp, nvmeibc_d_rdma_comp_tag_make());
 	if (noisy)
 		nvmeib_completion_noise_end(NVMEIB_NOISE_COMPLETION, cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS,
 			NVMEIB_NOISE_CTRS_LOCK_CB);
