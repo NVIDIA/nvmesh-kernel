@@ -538,14 +538,14 @@ u32 dp_sync_gen_read_fail_bit_mask(struct recovery_sync_op *so)
 	//TODO(EC-2518): the function name is misleading; I propose to split it to two with and without side effect , Daniel: Or unite it with function below to form executino plan
 	//               also it looks like this function should be virtual
 	struct nvmeibc_block_command *cmds = so->cmds;
-	int c, n_reads = n_read_cmds(so);
-	u32 bit_mask = 0;
+	int c;
+	u32 bit_mask = 0, bit;
 	if (__is_raid1_mirror(so)) { //TODO Follow integration in EC-2518
 		__find_valid_source_for_r1(so);
 	}
-	for (c = 0; c < n_reads; c++) { // Search for read fail seg
+	for (c = so->last_cmd + 1 - so->n_cmds, bit = 1; c <= so->last_cmd; c++, bit <<= 1) { // Search for read fail seg
 		if (!is_transient_disk_error(cmds[c].o_rv)) { // Found one bad sector
-			bit_mask |= (1 << c);
+			bit_mask |= bit;
 		} else if (unlikely(cmds[c].o_rv == -ENXIO) && cmds[c].do_not_send) { // Do Not Send
 			continue;
 		} else if (unlikely(cmds[c].o_rv)) { // Some other error
