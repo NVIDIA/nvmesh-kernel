@@ -23,7 +23,10 @@ int main(int argc, char *argv[])
 {
 	struct sockaddr_un sun;
 	int fd;
-	int i, len, rc, arg;
+	int i, len, rc;
+#ifdef TOMA_RPC_POLLING
+	int arg;
+#endif
 	char inbuf[MSG_SIZE+1];
 
 	if (getuid()) {
@@ -73,8 +76,11 @@ int main(int argc, char *argv[])
 	}
 
 	send(fd, inbuf, strlen(inbuf), 0);
+
+#ifdef TOMA_RPC_POLLING
 	arg=1;
 	ioctl(fd, FIONBIO, &arg);
+#endif
 
 	while (1) {
 		rc = recv(fd, inbuf, sizeof(inbuf)-1, 0);
