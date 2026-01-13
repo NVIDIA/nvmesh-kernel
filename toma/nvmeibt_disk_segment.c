@@ -477,7 +477,7 @@ enum nvmeibt_add_rv nvmeibt_disk_segment_leader_upd_from_peer_applied(struct nvm
 	N_Tf(p09oki8, "Received: seg=@UUID_8 peer_applied_dirty_bits_state=@DIRTY_BITS_STATE(old=@DIRTY_BITS_STATE) peer_applied_praid_version=@PRAID_VERSION:@PRAID_VERSION node_uuid=@UUID_LE flg=@X",
 		SEG_UUID_8,
 		dirty_bits_state_str(seg_active_topo->dirty_bits_state), dirty_bits_state_str(peer_topo->dirty_bits_state),
-		seg_active_topo->active_praid_version_major, seg_active_topo->active_praid_version_minor, nvmeibt_raft_member_id(remote_member), *(int *)&(seg_active_topo->active_seg_flags));
+		seg_active_topo->active_praid_version_major, seg_active_topo->active_praid_version_minor, nvmeibt_raft_member_id(remote_member), seg_active_topo->active_seg_flags_int);
 	if (!praid) {
 		N_Tf(hy65472, "No PRAID");
 		goto out;

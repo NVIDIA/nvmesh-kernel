@@ -36,7 +36,7 @@ void nvmeibt_seg_serialized_active_topo(int (*printf_fn)(void *ctx, const char *
 		         seg_uuid.str, serialized_seg_topo_ptr->active_praid_version_major, serialized_seg_topo_ptr->active_praid_version_minor,
 		         serialized_seg_topo_ptr->active_seg_ser_ver, dirty_bits_state_str(serialized_seg_topo_ptr->dirty_bits_state),
 		         mem_tbl_init_mode_str(serialized_seg_topo_ptr->dirty_bits_init_mode), mem_tbl_init_mode_str(serialized_seg_topo_ptr->stale_locks_init_mode),
-				 *(int *)&(serialized_seg_topo_ptr->active_seg_flags));
+				 serialized_seg_topo_ptr->active_seg_flags_int);
 }
 
 void nvmeibt_disk_segment_convert_topo_le_be(struct nvmeibt_serialized_seg_leader_topo *src_ptr, struct nvmeibt_serialized_seg_leader_topo *dst_ptr)
