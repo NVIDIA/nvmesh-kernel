@@ -18,7 +18,7 @@ int main(int argc, char *argv[])
 {
 	struct sockaddr_un sun;
 	int fd;
-	int i, len, rc, arg;
+	int i, len, rc;
 	char inbuf[MSG_SIZE+1];
 
 	if (getuid()) {
@@ -68,9 +68,6 @@ int main(int argc, char *argv[])
 	}
 
 	send(fd, inbuf, strlen(inbuf), 0);
-	arg=1;
-	ioctl(fd, FIONBIO, &arg);
-
 	while (1) {
 		rc = recv(fd, inbuf, sizeof(inbuf)-1, 0);
 		if (rc == 0) {
