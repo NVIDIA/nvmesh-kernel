@@ -118,7 +118,7 @@ struct nvmeibt_topology {
 	struct nvmeib_hash_table	*stock_local_disks_hash_by_ldisk_id_str;
 	struct nvmeib_hash_table	*formatting_local_disks_hash_by_ldisk_id_str;
 	struct nvmeibt_mm					*mm;
-	XDLIST_DECLARE(, struct nvmeibt_registrant_ctx, longing_link) registrants_on_invalid_seg;		// When client receives configuration before Toma and wants to register on unknown disk segment
+	XDLIST_DECLARE(, struct nvmeibt_registrant_ctx, longing_link) longing_on_invalid_seg_list_by_handle;		// When client receives configuration before Toma and wants to register on unknown disk segment
 	target_drives_spec_t excluded_drives_spec;
 	target_drives_spec_t auto_takeover_drives_spec;
 	XDLIST_DECLARE(, struct nvmeibt_udev_event_info, udev_event_info_link) udev_events_info;

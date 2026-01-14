@@ -125,7 +125,7 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->longing_registrants_by_cid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants) {
+	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_lockid) {
 		free_reg_ctx(reg_ctx);
 	}
 	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_cid) {
@@ -490,7 +490,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->uuid = *uuid;
 	NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(v20sslk, seg_active, "LOCAL_DISK", 1);
 	XHASHTABLE_INIT(&seg_active->longing_registrants_by_cid);
-	XHASHTABLE_INIT(&seg_active->active_registrants);
+	XHASHTABLE_INIT(&seg_active->active_registrants_by_lockid);
 	XHASHTABLE_INIT(&seg_active->active_registrants_by_cid);
 	XHASHTABLE_INIT(&seg_active->stale_registrants);
 	XHASHTABLE_INIT(&seg_active->stale_locks_hash);

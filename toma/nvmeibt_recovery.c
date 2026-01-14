@@ -1844,7 +1844,7 @@ static int recovery_task_look_for_local_active_registrant(struct recovery_task *
 		reg_ctx = new_local_reg_ctx;
 		goto found_local_clnt;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &task->seg_active->active_registrants) {
+	NVMEIB_HASH_FOREACH(reg_ctx, task->seg_active->active_registrants_by_lockid) {
 		reg_ctx_hostname = __recovery_get_host_name(reg_ctx->client->net);
 		// N_Tf(y776zs, "consider registrant=@HOSTNAME reg_lock_id=@C_LID seg=@UUID_8", reg_ctx_hostname, reg_ctx->reg_lock_id.all, nvmeibt_seg_active_UUID_8(task->seg_active));
 		if (reg_ctx->is_recoverer && (strncmp(nvmeibt_get_my_hostname(), reg_ctx_hostname, NVMEIB_HOST_NAME_LEN) == 0)) {

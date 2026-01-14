@@ -52,7 +52,7 @@ void nvmeibt_global_init(void)
 	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1);
 	global_ctx.local_nics_hash_by_sw_gid_str = NVMEIB_HASH_CREATE(vhghnwd, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_nics_hash", -1);
 
-	XDLIST_HEAD_INIT(&(global_ctx.registrants_on_invalid_seg));
+	XDLIST_HEAD_INIT(&(global_ctx.longing_on_invalid_seg_list_by_handle));
 	XDLIST_HEAD_INIT(&(global_ctx.excluded_drives_spec));
 	XDLIST_HEAD_INIT(&(global_ctx.auto_takeover_drives_spec));
 	XDLIST_HEAD_INIT(&(global_ctx.udev_events_info));

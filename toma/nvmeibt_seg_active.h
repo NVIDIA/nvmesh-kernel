@@ -89,7 +89,7 @@ struct nvmeibt_seg_active {
 	struct nvmeibt_disk_segment					*disk_segment;
 	//
 	XHASHTABLE_DECLARE(longing_registrants_by_cid, struct nvmeibt_registrant_ctx,            longing_link,         NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
-	XHASHTABLE_DECLARE(active_registrants,         struct nvmeibt_registrant_ctx,            active_link,          NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
+	XHASHTABLE_DECLARE(active_registrants_by_lockid, struct nvmeibt_registrant_ctx,            active_link,          NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
 	XHASHTABLE_DECLARE(active_registrants_by_cid,  struct nvmeibt_registrant_ctx,            active_link_by_cid,   NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
 	XHASHTABLE_DECLARE(stale_registrants,          struct nvmeibt_registrant_ctx,            stale_link,           NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
 	XHASHTABLE_DECLARE(stale_locks_hash,           struct stale_lock_ctx,                    seg_active_link,      NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE) + 1);	// EC after unreg, record all registrants' stale-locks
@@ -329,7 +329,7 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 
 #define NVMEIBT_SEG_ACTIVE_REMOVE_ACTIVE_REGISTRANT_FROM_HASHES(__seg_active__, __reg_ctx__)	do {		\
 	if ((__seg_active__) && (__reg_ctx__)) {																\
-		XHASHTABLE_DEL(&(__seg_active__)->active_registrants, &(__reg_ctx__)->active_link);					\
+		XHASHTABLE_DEL(&(__seg_active__)->active_registrants_by_lockid, &(__reg_ctx__)->active_link);					\
 		XHASHTABLE_DEL(&(__seg_active__)->active_registrants_by_cid, &(__reg_ctx__)->active_link_by_cid);	\
 	}																										\
 } while (0)
@@ -337,7 +337,7 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 #define NVMEIBT_SEG_ACTIVE_ADD_ACTIVE_REGISTRANT_TO_HASHES(__seg_active__, __reg_ctx__)	do {																	\
 	if ((__seg_active__) && (__reg_ctx__)) {																													\
 		__seg_active__->active_reservation_mode_version = __seg_active__->committed_reservation_mode_version;													\
-		XHASHTABLE_ADD(&(__seg_active__)->active_registrants, (__reg_ctx__), nvmeib_lockid_purify((__reg_ctx__)->reg_lock_id));									\
+		XHASHTABLE_ADD(&(__seg_active__)->active_registrants_by_lockid, (__reg_ctx__), nvmeib_lockid_purify((__reg_ctx__)->reg_lock_id));									\
 		XHASHTABLE_ADD(&(__seg_active__)->active_registrants_by_cid, (__reg_ctx__), client_messaging_handle_to_cid((__reg_ctx__)->client_messaging_handle));	\
 	}																																							\
 } while (0)
@@ -550,7 +550,7 @@ static inline bool nvmeibt_seg_active_is_zeroing_state_skipable(const struct nvm
 
 /* registrants */
 static inline int nvmeibt_seg_active_n_active_registrants(const struct nvmeibt_seg_active *seg_active)
-	{ return (seg_active ? XHASHTABLE_N_ELEMENTS(&seg_active->active_registrants) : 0); }
+	{ return (seg_active ? XHASHTABLE_N_ELEMENTS(&seg_active->active_registrants_by_lockid) : 0); }
 
 static inline int nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(const struct nvmeibt_seg_active *seg_active)
 	{ return (seg_active ? seg_active->n_active_registrants_on_active_praid_version : 0); }

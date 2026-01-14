@@ -286,14 +286,14 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 				// directly to that segment. For now, we're doing a simple search on all segments.
 				tmp_reg_ctx.seg_active = seg_active;
 				// implicitly unregister the registrant and remove it from longing registrants list
-				nvmeibt_register_totally_remove_registrant(&tmp_reg_ctx);
+				nvmeibt_register_remove_unsubscribed_registrant(&tmp_reg_ctx);
 				if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
 					N_Tf(fst6645, "Local disk removed");
 					break;
 				}
 			}
 		}
-		nvmeibt_remove_longing_registrant_on_invalid_seg(msg->toma_conn_proc_handle);
+		nvmeibt_register_remove_longing_registrant_on_invalid_seg(msg->toma_conn_proc_handle, 0);	// A subscribe is on a specific seg
 	}
 	NFOUT;
 }
