@@ -93,7 +93,12 @@ struct self_test_entry {
 	/* Edge Cases */ \
 	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)", false) \
 	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)", true)*/ \
-	X(o_direct_flags, "Validation - O_DIRECT Flags", "gpt_util --direct and --no-direct (I/O mode control)", false)
+	X(o_direct_flags, "Validation - O_DIRECT Flags", "gpt_util --direct and --no-direct (I/O mode control)", false) \
+	/* In-Memory GPT & TOMA Blocking */ \
+	X(export_without_toma, "In-Memory GPT - Export Without TOMA", "gpt_util export when TOMA not running", false) \
+	X(write_blocked_toma_running, "TOMA Safety - Write Blocked When TOMA Running", "gpt_util blocks writes if TOMA detected", true) \
+	X(memory_sections_ignored, "In-Memory GPT - Memory Sections Ignored in Apply", "gpt_util apply ignores memory_* sections", false) \
+	X(export_memory_gpt, "Export In-Memory GPT", "gpt_util export with mock memory GPT returning JSON", false)
 
 // Define test function (searchable marker + function signature)
 // Usage: DEFINE_TEST(normal_gpt) { test body }

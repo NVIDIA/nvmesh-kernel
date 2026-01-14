@@ -11,6 +11,7 @@
 #include <dirent.h>		// opendir()
 
 #include "../nvmeibt_disk_metadata.h"
+#include "../nvmeibt_rpc.h"
 #include "nvmeibt_bm.h"
 #include "nvmeibt_str.h"
 #include "nvmeibt_uuid.h"
@@ -27,6 +28,7 @@ BOOL SELF_TEST_acquire_toma_lock(void);
 void SELF_TEST_release_toma_lock(void);
 void SELF_TEST_mock_toma_running(void);
 void SELF_TEST_undo_mock_toma_running(void);
+void SELF_TEST_set_mock_local_disk(const struct nvmeibt_local_disk *local_disk);
 
 /**
  * Start a self-test case (SELF-TEST only)
@@ -3400,6 +3402,270 @@ DEFINE_TEST(o_direct_flags)
 		fprintf(stdout, COL_GREEN "Verified: O_DIRECT flags handled correctly" COL_RESET "\n");
 	}
 
+	return rv;
+}
+
+DEFINE_TEST(export_without_toma)
+{
+	int rv = 0;
+
+	/* Create device and export (TOMA not running - guaranteed by run_self_test check) */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("no_toma"));
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	/* Verify JSON has TOMA status but no memory sections */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("no_toma"));
+		BOOL toma_running;
+
+		if (!json_root) {
+			rv = -1;
+		} else {
+			toma_running = json_get_dict_bool(json_root, "_toma_running", true);		/* Default true to catch errors */
+			if (toma_running) {
+				fprintf(stdout, COL_RED_BOLD "FAIL: JSON says TOMA running (expected false)" COL_RESET "\n");
+				rv = -1;
+			} else if (json_get_dict_value(json_root, "memory_main_gpt") || json_get_dict_value(json_root, "memory_metadata_gpt")) {
+				fprintf(stdout, COL_RED_BOLD "FAIL: JSON contains memory sections (should not)" COL_RESET "\n");
+				rv = -1;
+			} else {
+				fprintf(stdout, COL_GREEN "Verified: TOMA not running, no memory sections in JSON" COL_RESET "\n");
+			}
+			nvmeibt_mm_json_free_kv_tree(json_root);
+		}
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("no_toma"));
+	return rv;
+}
+
+DEFINE_TEST(write_blocked_toma_running)
+{
+	int rv = 0;
+
+	/* Create device and export */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("write_block"));
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	/* Modify JSON to create changes (so confirmation is triggered) */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("write_block"));
+		struct mm_json_elem *disk_md = NULL;
+		int i;
+
+		if (json_root) {
+			/* Find disk_metadata and modify it to trigger a change */
+			for (i = 0; i < json_root->dict.len; i++) {
+				if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
+					disk_md = json_root->dict.elements[i].value;
+					break;
+				}
+			}
+			if (disk_md) {
+				json_set_dict_str(disk_md, "ldisk_id_str", "MODIFIED_TO_TRIGGER_CHANGE");
+				fprintf(stdout, "Modified JSON to trigger a change\n");
+			}
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("write_block"));
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Try to apply with --write (should be BLOCKED by TOMA check at confirmation) */
+	if (rv == 0) {
+		SELF_TEST_mock_toma_running();
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("write_block"), "--write", "--yes");
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		SELF_TEST_undo_mock_toma_running();
+		/* Expecting failure (write blocked before confirmation) */
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("write_block"));
+	return rv;
+}
+
+DEFINE_TEST(memory_sections_ignored)
+{
+	int rv = 0;
+
+	/* Create device and export */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("mem_sections"));
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+
+	/* Manually add fake memory_main_gpt section to JSON */
+	if (rv == 0) {
+		struct mm_json_elem *json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("mem_sections"));
+
+		if (json_root) {
+			/* Add minimal memory_main_gpt section */
+			json_set_dict_str(json_root, "memory_main_gpt", "fake_data");
+			fprintf(stdout, "Added fake memory_main_gpt section to JSON\n");
+			rv = SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("mem_sections"));
+		} else {
+			rv = -1;
+		}
+	}
+
+	/* Try to apply (should succeed, ignoring memory sections) */
+	if (rv == 0) {
+		SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+		SELF_TEST_ARGV("-a", ctx->test_device_path, "--apply-from", TEST_JSON_PATH("mem_sections"));
+		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+		/* Expect success (memory sections ignored) */
+	}
+
+	if (rv == 0) {
+		fprintf(stdout, COL_GREEN "Verified: Memory sections ignored gracefully during apply" COL_RESET "\n");
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("mem_sections"));
+	return rv;
+}
+
+/**
+ * Test get_memory_gpt_via_rpc() using mock GPT structures
+ * This test verifies the JSON export
+ */
+DEFINE_TEST(export_memory_gpt)
+{
+	int								rv = 0;
+	struct nvmeibt_local_disk		mock_local_disk;
+	union nvmeib_uuid				test_uuid;
+
+	/* Step 1: Create mock local_disk structure */
+	memset(&mock_local_disk, 0, sizeof(mock_local_disk));
+
+	/* Setup mock Main GPT */
+	nvmeibt_strlcpy(mock_local_disk.main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(mock_local_disk.main_gpt.main_or_metadata));
+	mock_local_disk.main_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+	nvmeibt_urn_uuid_str_to_union_uuid(&mock_local_disk.main_gpt.header.disk_obj_uuid, "12345678-1234-1234-1234-123456789abc");
+	mock_local_disk.main_gpt.header.first_usable_pba = 34;
+	mock_local_disk.main_gpt.header.last_usable_pba = 1999;
+	mock_local_disk.main_gpt.header.n_partition_entries = 128;
+	mock_local_disk.main_gpt.header.header_crc32 = 0x12345678;
+	mock_local_disk.main_gpt.header.partition_entry_array_crc32 = 0xabcdef00;
+
+	/* Add mock entry to Main GPT */
+	nvmeibt_urn_uuid_str_to_union_uuid(&test_uuid, "c12a7328-f81f-11d2-ba4b-00a0c93ec93b");
+	mock_local_disk.main_gpt.entries[0].partition_type_guid = test_uuid;
+	nvmeibt_urn_uuid_str_to_union_uuid(&test_uuid, "11111111-2222-3333-4444-555555555555");
+	mock_local_disk.main_gpt.entries[0].partition_guid = test_uuid;
+	mock_local_disk.main_gpt.entries[0].pba_s = 100;
+	mock_local_disk.main_gpt.entries[0].pba_e = 200;
+	mock_local_disk.main_gpt.entries[0].attributes = 0;
+	str_to_char16_str("MOCK_MAIN_ENTRY", 15, mock_local_disk.main_gpt.entries[0].partition_name);
+
+	/* Setup mock Metadata GPT */
+	nvmeibt_strlcpy(mock_local_disk.metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(mock_local_disk.metadata_gpt.main_or_metadata));
+	mock_local_disk.metadata_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
+	nvmeibt_urn_uuid_str_to_union_uuid(&mock_local_disk.metadata_gpt.header.disk_obj_uuid, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+	mock_local_disk.metadata_gpt.header.first_usable_pba = 2;
+	mock_local_disk.metadata_gpt.header.last_usable_pba = 99;
+	mock_local_disk.metadata_gpt.header.n_partition_entries = 128;
+	mock_local_disk.metadata_gpt.header.header_crc32 = 0xdeadbeef;
+	mock_local_disk.metadata_gpt.header.partition_entry_array_crc32 = 0xcafebabe;
+
+	/* Add mock entry to Metadata GPT */
+	nvmeibt_urn_uuid_str_to_union_uuid(&test_uuid, "c12a7328-f81f-11d2-ba4b-00a0c93ec93b");
+	mock_local_disk.metadata_gpt.entries[0].partition_type_guid = test_uuid;
+	nvmeibt_urn_uuid_str_to_union_uuid(&test_uuid, "66666666-7777-8888-9999-aaaaaaaaaaaa");
+	mock_local_disk.metadata_gpt.entries[0].partition_guid = test_uuid;
+	mock_local_disk.metadata_gpt.entries[0].pba_s = 10;
+	mock_local_disk.metadata_gpt.entries[0].pba_e = 50;
+	mock_local_disk.metadata_gpt.entries[0].attributes = 0;
+	str_to_char16_str("MOCK_META_ENTRY", 15, mock_local_disk.metadata_gpt.entries[0].partition_name);
+
+	/* Setup mock MBR */
+	mock_local_disk.mbr.signature = MBR_SIGNATURE;
+	mock_local_disk.mbr.partitions[0].os_type = 0xEE;
+	mock_local_disk.mbr.partitions[0].pba_s = 1;
+	mock_local_disk.mbr.partitions[0].n_pblk = 2000;
+
+	/* Setup change tracking */
+	mock_local_disk.gpt_change_no = 5;
+	mock_local_disk.gpt_submitted_change_no = 3;
+
+	fprintf(stdout, "Created mock local_disk with GPT structures\n");
+
+	/* Step 2: Set mock local_disk and mock TOMA as running */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
+	SELF_TEST_set_mock_local_disk(&mock_local_disk);
+	SELF_TEST_mock_toma_running();
+
+	/* Step 3: Run export - should use mock structures */
+	SELF_TEST_ARGV("-a", ctx->test_device_path, "-J", TEST_JSON_PATH("mem_rpc"));
+	rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
+	SELF_TEST_undo_mock_toma_running();
+	SELF_TEST_set_mock_local_disk(NULL);	// Clear mock
+
+	/* Step 4: Verify the exported JSON contains memory sections from mock */
+	if (rv == 0) {
+		struct mm_json_elem		*json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("mem_rpc"));
+		struct mm_json_elem		*mem_main_gpt;
+		struct mm_json_elem		*mem_meta_gpt;
+		struct mm_json_elem		*entries;
+		BOOL					toma_running;
+
+		if (!json_root) {
+			fprintf(stdout, COL_RED_BOLD "FAIL: Cannot parse exported JSON" COL_RESET "\n");
+			rv = -1;
+		} else {
+			/* Verify _toma_running is true */
+			toma_running = json_get_dict_bool(json_root, "_toma_running", false);
+			if (!toma_running) {
+				fprintf(stdout, COL_RED_BOLD "FAIL: JSON says TOMA not running (expected true)" COL_RESET "\n");
+				rv = -1;
+			}
+
+			/* Verify memory_main_gpt section exists with our mock data */
+			mem_main_gpt = json_get_dict_value(json_root, "memory_main_gpt");
+			if (!mem_main_gpt || mem_main_gpt->type != JSON_E_DICT) {
+				fprintf(stdout, COL_RED_BOLD "FAIL: memory_main_gpt section missing or invalid" COL_RESET "\n");
+				rv = -1;
+			} else {
+				entries = json_get_dict_value(mem_main_gpt, "entries");
+				if (!entries || entries->type != JSON_E_ARRAY || entries->array.len == 0) {
+					fprintf(stdout, COL_RED_BOLD "FAIL: memory_main_gpt has no entries" COL_RESET "\n");
+					rv = -1;
+				} else {
+					fprintf(stdout, COL_GREEN "Verified: memory_main_gpt from mock structures (%d entries)" COL_RESET "\n",
+							entries->array.len);
+				}
+			}
+
+			/* Verify memory_metadata_gpt section exists */
+			mem_meta_gpt = json_get_dict_value(json_root, "memory_metadata_gpt");
+			if (!mem_meta_gpt || mem_meta_gpt->type != JSON_E_DICT) {
+				fprintf(stdout, COL_RED_BOLD "FAIL: memory_metadata_gpt section missing or invalid" COL_RESET "\n");
+				rv = -1;
+			} else {
+				entries = json_get_dict_value(mem_meta_gpt, "entries");
+				if (!entries || entries->type != JSON_E_ARRAY || entries->array.len == 0) {
+					fprintf(stdout, COL_RED_BOLD "FAIL: memory_metadata_gpt has no entries" COL_RESET "\n");
+					rv = -1;
+				} else {
+					fprintf(stdout, COL_GREEN "Verified: memory_metadata_gpt from mock structures (%d entries)" COL_RESET "\n",
+							entries->array.len);
+				}
+			}
+
+			nvmeibt_mm_json_free_kv_tree(json_root);
+		}
+	}
+
+	if (rv == 0) {
+		fprintf(stdout, COL_GREEN "Verified: get_memory_gpt_via_rpc() uses mock structures correctly" COL_RESET "\n");
+	}
+
+	/* Cleanup */
+	unlink(TEST_JSON_PATH("mem_rpc"));
 	return rv;
 }
 
