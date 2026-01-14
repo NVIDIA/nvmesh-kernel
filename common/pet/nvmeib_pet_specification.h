@@ -7,7 +7,6 @@
 	#include <string.h>
 	#include <sys/uio.h>
 #endif
-#include <stdarg.h>
 #include "compat/kr_incs_types.h"
 #include "compat/kr_incs_asserts.h"
 #include "compat/kr_incs_time_rdtsc.h"
