@@ -24,9 +24,14 @@
 #include "../nvmeibt_json_base.h"
 #include "../interfaces/log/nvmeibt_binary_tracing.h"
 #include "../interfaces/nvme/nvmeibt_nvme_defines.h"
+#include "../nvmeibt_rpc.h"
+
 
 #define GPT_UTIL_VERSION	"2.0.0-dev"
 #define MAX_DEV_NAME		256
+
+// Forward declarations
+static int parse_gpt_entry_from_json(struct nvmeibt_disk_gpt_partition_entry *entry, struct mm_json_elem *entry_elem);
 
 // Actions (mutually exclusive operations)
 enum GPT_UTIL_ACTION {
@@ -336,6 +341,194 @@ static int backup_structure_and_append_manifest(int disk_fd,
 	nvmeibt_Str_sprintf(manifest_json, "    }");
 
 	return 0;
+}
+
+/**
+ * Self-test mock for memory GPT - when set, get_memory_gpt_via_rpc() returns this instead of calling RPC
+ */
+static const struct nvmeibt_local_disk		*s_mock_local_disk = NULL;
+
+/**
+ * Format in-memory GPT structures as JSON fields (merge-ready).
+ * Outputs just the memory_* fields that can be directly inserted into a larger JSON object.
+ * Does NOT include outer braces - caller must handle JSON object boundaries.
+ *
+ * @param out         Output string buffer
+ * @param local_disk  Local disk structure containing GPT, MBR, and change tracking
+ */
+void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out,
+									 const struct nvmeibt_local_disk *local_disk)
+{
+	struct nvmeibt_urn_uuid					urn_uuid;
+	int										i;
+	int										entry_count;
+	const struct nvmeibt_disk_gpt			*main_gpt = &local_disk->main_gpt;
+	const struct nvmeibt_disk_gpt			*metadata_gpt = &local_disk->metadata_gpt;
+	const struct nvmeibt_disk_mbr			*mbr = &local_disk->mbr;
+
+	/* Export change tracking info */
+	nvmeibt_Str_sprintf(out, "  \"gpt_change_no\": %d,\n", local_disk->gpt_change_no);
+	nvmeibt_Str_sprintf(out, "  \"gpt_submitted_change_no\": %d,\n", local_disk->gpt_submitted_change_no);
+	nvmeibt_Str_sprintf(out, "  \"has_pending_writes\": %s,\n",
+						(local_disk->gpt_change_no > local_disk->gpt_submitted_change_no) ? "true" : "false");
+
+	/* Export MBR */
+	nvmeibt_Str_sprintf(out, "  \"memory_mbr\": {\n");
+	nvmeibt_Str_sprintf(out, "    \"signature\": \"0x%04x\",\n", mbr->signature);
+	nvmeibt_Str_sprintf(out, "    \"os_type\": \"0x%02x\",\n", mbr->partitions[0].os_type);
+	nvmeibt_Str_sprintf(out, "    \"pba_s\": %d,\n", mbr->partitions[0].pba_s);
+	nvmeibt_Str_sprintf(out, "    \"n_pblk\": %d\n", mbr->partitions[0].n_pblk);
+	nvmeibt_Str_sprintf(out, "  },\n");
+
+	/* Export Main GPT */
+	nvmeibt_Str_sprintf(out, "  \"memory_main_gpt\": {\n");
+	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&main_gpt->header.disk_obj_uuid);
+	nvmeibt_Str_sprintf(out, "    \"disk_uuid\": \"%s\",\n", urn_uuid.str);
+	nvmeibt_Str_sprintf(out, "    \"first_usable_pba\": %lu,\n", main_gpt->header.first_usable_pba);
+	nvmeibt_Str_sprintf(out, "    \"last_usable_pba\": %lu,\n", main_gpt->header.last_usable_pba);
+	nvmeibt_Str_sprintf(out, "    \"n_partition_entries\": %d,\n", main_gpt->header.n_partition_entries);
+	nvmeibt_Str_sprintf(out, "    \"header_crc32\": \"0x%08x\",\n", main_gpt->header.header_crc32);
+	nvmeibt_Str_sprintf(out, "    \"partition_entry_array_crc32\": \"0x%08x\",\n", main_gpt->header.partition_entry_array_crc32);
+	nvmeibt_Str_sprintf(out, "    \"entries\": [\n");
+
+	entry_count = 0;
+	for (i = 0; i < main_gpt->max_n_entries; i++) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&main_gpt->entries[i])) {
+			const struct nvmeibt_disk_gpt_partition_entry *entry = &main_gpt->entries[i];
+			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
+			struct nvmeibt_urn_uuid part_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_guid);
+			char partition_name[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+
+			char16_str_to_str(entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, partition_name);
+
+			if (entry_count > 0) {
+				nvmeibt_Str_sprintf(out, ",\n");
+			}
+			nvmeibt_Str_sprintf(out, "      {\"index\":%d,\"type_guid\":\"%s\",\"partition_guid\":\"%s\",\"pba_s\":%lu,\"pba_e\":%lu,\"attributes\":%lu,\"name\":\"%s\"}",
+								i, type_urn.str, part_urn.str, entry->pba_s, entry->pba_e, entry->attributes, partition_name);
+			entry_count++;
+		}
+	}
+	nvmeibt_Str_sprintf(out, "\n    ]\n");
+	nvmeibt_Str_sprintf(out, "  },\n");
+
+	/* Export Metadata GPT */
+	nvmeibt_Str_sprintf(out, "  \"memory_metadata_gpt\": {\n");
+	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&metadata_gpt->header.disk_obj_uuid);
+	nvmeibt_Str_sprintf(out, "    \"disk_uuid\": \"%s\",\n", urn_uuid.str);
+	nvmeibt_Str_sprintf(out, "    \"first_usable_pba\": %lu,\n", metadata_gpt->header.first_usable_pba);
+	nvmeibt_Str_sprintf(out, "    \"last_usable_pba\": %lu,\n", metadata_gpt->header.last_usable_pba);
+	nvmeibt_Str_sprintf(out, "    \"n_partition_entries\": %d,\n", metadata_gpt->header.n_partition_entries);
+	nvmeibt_Str_sprintf(out, "    \"header_crc32\": \"0x%08x\",\n", metadata_gpt->header.header_crc32);
+	nvmeibt_Str_sprintf(out, "    \"partition_entry_array_crc32\": \"0x%08x\",\n", metadata_gpt->header.partition_entry_array_crc32);
+	nvmeibt_Str_sprintf(out, "    \"entries\": [\n");
+
+	entry_count = 0;
+	for (i = 0; i < metadata_gpt->max_n_entries; i++) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt->entries[i])) {
+			const struct nvmeibt_disk_gpt_partition_entry *entry = &metadata_gpt->entries[i];
+			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
+			struct nvmeibt_urn_uuid part_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_guid);
+			char partition_name[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+
+			char16_str_to_str(entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, partition_name);
+
+			if (entry_count > 0) {
+				nvmeibt_Str_sprintf(out, ",\n");
+			}
+			nvmeibt_Str_sprintf(out, "      {\"index\":%d,\"type_guid\":\"%s\",\"partition_guid\":\"%s\",\"pba_s\":%lu,\"pba_e\":%lu,\"attributes\":%lu,\"name\":\"%s\"}",
+								i, type_urn.str, part_urn.str, entry->pba_s, entry->pba_e, entry->attributes, partition_name);
+			entry_count++;
+		}
+	}
+	nvmeibt_Str_sprintf(out, "\n    ]\n");
+	nvmeibt_Str_sprintf(out, "  }\n");
+}
+
+/**
+ * Self-test: Set mock local_disk for testing without real TOMA RPC.
+ */
+void SELF_TEST_set_mock_local_disk(const struct nvmeibt_local_disk *local_disk)
+{
+	s_mock_local_disk = local_disk;
+}
+
+/**
+ * Get memory GPT from TOMA via RPC and return as JSON string (merge-ready).
+ * Uses toma_rpc CLI tool via popen() to avoid code duplication.
+ * In self-test mode with mock local_disk, generates JSON from mock local disk.
+ *
+ * @param device_path     Device path to query
+ * @param out             Output buffer for JSON fields (caller-provided)
+ * @param is_self_test    true if in self-test mode (use mock)
+ * @return 0 on success, -1 on error
+ */
+static int get_memory_gpt_via_rpc(const char *device_path,
+								   struct nvmeibt_Str *out,
+								   BOOL is_self_test)
+{
+	char					command[512];
+	char					response[65536];		// Large enough for GPT JSON
+	int						n_read = 0;
+	int						rv = -1;
+	FILE					*pipe_fp = NULL;
+	int						pclose_status;
+	char					*trailer;
+
+	/* Check for mock data (self-test mode) */
+	if (is_self_test && s_mock_local_disk) {
+		N_Tf(rpc_using_mock, "Using mock local_disk for testing");
+		gpt_util_format_memory_gpt_json(out, s_mock_local_disk);	// Generates json string of memory GPT data from mock local_disk. This is the function used by TOMA RPC handler as well.
+		return 0;
+	}
+
+	/* Build command: toma_rpc export-memory-gpt <device> */
+	snprintf(command, sizeof(command), "%s export-memory-gpt %s 2>/dev/null",
+			 TOMA_RPC_TOOL_PATH, device_path);
+
+	pipe_fp = popen(command, "r");
+	if (!pipe_fp) {
+		N_Ef(rpc_popen_failed, "Failed to popen toma_rpc: @AUTO_ERRNO");
+		goto out;
+	}
+
+	/* Read entire response into buffer */
+	n_read = fread(response, 1, sizeof(response) - 1, pipe_fp);
+	response[n_read] = '\0';
+
+	pclose_status = pclose(pipe_fp);
+	pipe_fp = NULL;
+
+	if (pclose_status != 0 || n_read <= 0) {
+		N_Ef(rpc_send_failed, "toma_rpc failed: status=@INT n_read=@INT", pclose_status, n_read);
+		goto out;
+	}
+
+	/* Strip toma_rpc trailer: "[end Nb]" or "[error %m]" at end of output */
+	trailer = strstr(response, "\n[end ");
+	if (trailer) {
+		*trailer = '\0';
+		n_read = trailer - response;
+	}
+
+	/* Check for error responses */
+	if (strncmp(response, "ERROR:", 6) == 0) {
+		N_Tf(rpc_error_response, "TOMA RPC returned error: @STR", response);
+		goto out;
+	}
+
+	N_Tf(rpc_response_received, "RPC response: @INT bytes", n_read);
+
+	/*
+	 * TOMA RPC response contains memory GPT fields (merge-ready format).
+	 * No outer braces - just the fields that can be directly inserted into our JSON.
+	 * Simply copy the response to output.
+	 */
+	nvmeibt_Str_sprintf(out, "%s", response);
+	rv = 0;
+
+out:
+	return rv;
 }
 
 /**
@@ -1355,9 +1548,8 @@ static int export_gpt_to_json(int disk_fd,
 {
 	int										rv = -1;
 	struct nvmeibt_Str						*json_output = NULL;
-	struct nvmeibt_disk_gpt					temp_gpt;
-	struct nvmeibt_disk_gpt					main_gpt_for_metadata;
-	struct nvmeibt_disk_gpt					metadata_temp_gpt;
+	struct nvmeibt_disk_gpt					main_gpt;
+	struct nvmeibt_disk_gpt					metadata_gpt;
 	struct nvmeibt_disk_mbr					mbr;
 	struct gpt_buffers						bufs;
 	struct gpt_buffers						metadata_bufs;
@@ -1387,13 +1579,13 @@ static int export_gpt_to_json(int disk_fd,
 	// Allocate buffers
 	alloc_gpt_buffers(&bufs, config->pblk_size, LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 
-	memset(&temp_gpt, 0, sizeof(temp_gpt));
-	temp_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
-	nvmeibt_strlcpy(temp_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(temp_gpt.main_or_metadata));
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	main_gpt.max_n_entries = LARGE_GPT_MAX_NUM_GPT_ENTRIES;
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
 
-	// Read all 4 structures
+	// Read all 4 Main GPT structures
 	nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
-		NULL, disk_fd, config->pblk_size, &temp_gpt,
+		NULL, disk_fd, config->pblk_size, &main_gpt,
 		config->pba_s, config->pba_hw_e,
 		&primary_header_validity, &alternate_header_validity,
 		&primary_entries_validity, &alternate_entries_validity,
@@ -1413,10 +1605,10 @@ static int export_gpt_to_json(int disk_fd,
 
 	// Detect overlaps in exported entries (check each bit)
 	if (config->gpt_copy_option & GPT_COPY_OPTION_PRIMARY) {
-		has_overlaps = (detect_overlaps(bufs.primary_entries, temp_gpt.max_n_entries) > 0);
+		has_overlaps = (detect_overlaps(bufs.primary_entries, main_gpt.max_n_entries) > 0);
 	}
 	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
-		has_overlaps = has_overlaps || (detect_overlaps(bufs.alternate_entries, temp_gpt.max_n_entries) > 0);
+		has_overlaps = has_overlaps || (detect_overlaps(bufs.alternate_entries, main_gpt.max_n_entries) > 0);
 	}
 
 	// Get timestamp
@@ -1444,18 +1636,17 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "  \"_READONLY_overlaps_detected\": %s,\n", has_overlaps ? "true" : "false");
 	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 2 ===\": \"DISK STRUCTURE DATA - EDIT WITH CAUTION\",\n");
 
-	memset(&main_gpt_for_metadata, 0, sizeof(main_gpt_for_metadata));
-	nvmeibt_strlcpy(main_gpt_for_metadata.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt_for_metadata.main_or_metadata));
-
 	// NVMesh-only: REQUIRE metadata GPT exists and is readable
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &main_gpt_for_metadata,
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &main_gpt,
 										  config->pba_s, config->pba_hw_e, false) < 0) {
 		N_Ef(export_read_main_gpt_failed, "Failed to read Main GPT for export");
 		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read Main GPT - device not NVMesh formatted" COL_RESET "\n");
 		goto out;
 	}
 
-	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt_for_metadata);
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
 	if (!metadata_partition) {
 		N_Ef(export_no_metadata_partition, "Device has no EXCELERO_METADATA partition");
 		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no metadata partition)" COL_RESET "\n");
@@ -1477,24 +1668,24 @@ static int export_gpt_to_json(int disk_fd,
 		/* Metadata GPT always exists (NVMesh-only), so never last */
 		export_gpt_copy_entries_to_json(GPT_LEVEL_MAIN, GPT_COPY_PRIMARY,
 										bufs.primary_header, bufs.primary_entries,
-										temp_gpt.max_n_entries, json_output, false);
+										main_gpt.max_n_entries, json_output, false);
 	}
 	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
 		/* Metadata GPT always exists (NVMesh-only), so never last */
 		export_gpt_copy_entries_to_json(GPT_LEVEL_MAIN, GPT_COPY_ALTERNATE,
 										bufs.alternate_header, bufs.alternate_entries,
-										temp_gpt.max_n_entries, json_output, false);
+										main_gpt.max_n_entries, json_output, false);
 	}
 
 	// Export Metadata GPT (always exists for NVMesh devices)
 	alloc_gpt_buffers(&metadata_bufs, config->pblk_size, MAX_NUM_GPT_ENTRIES);
-	memset(&metadata_temp_gpt, 0, sizeof(metadata_temp_gpt));
-	metadata_temp_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
-	nvmeibt_strlcpy(metadata_temp_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_temp_gpt.main_or_metadata));
+	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+	metadata_gpt.max_n_entries = MAX_NUM_GPT_ENTRIES;
+	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
 
 	// Read all 4 Metadata GPT structures to metadata_bufs
 	nvmeibt_disk_metadata_read_all_4_gpt_structs_into_buffers(
-		NULL, disk_fd, config->pblk_size, &metadata_temp_gpt,
+		NULL, disk_fd, config->pblk_size, &metadata_gpt,
 		metadata_partition->pba_s, metadata_partition->pba_e,
 		&meta_primary_header_validity, &meta_alternate_header_validity,
 		&meta_primary_entries_validity, &meta_alternate_entries_validity,
@@ -1502,7 +1693,7 @@ static int export_gpt_to_json(int disk_fd,
 		metadata_bufs.primary_entries, metadata_bufs.alternate_entries);
 
 	// NVMesh-only: REQUIRE EXCELERO_DISK_METADATA partition
-	for (int k = 0; k < metadata_temp_gpt.max_n_entries; k++) {
+	for (int k = 0; k < metadata_gpt.max_n_entries; k++) {
 		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_bufs.primary_entries[k])) {
 			if (ARE_UUID_EQ(&metadata_bufs.primary_entries[k].partition_type_guid,
 							&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
@@ -1532,13 +1723,13 @@ static int export_gpt_to_json(int disk_fd,
 		export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_PRIMARY,
 										metadata_bufs.primary_header,
 										metadata_bufs.primary_entries,
-										metadata_temp_gpt.max_n_entries, json_output, false);
+										metadata_gpt.max_n_entries, json_output, false);
 	}
 	if (config->gpt_copy_option & GPT_COPY_OPTION_ALTERNATE) {
 		export_gpt_copy_entries_to_json(GPT_LEVEL_METADATA, GPT_COPY_ALTERNATE,
 										metadata_bufs.alternate_header,
 										metadata_bufs.alternate_entries,
-										metadata_temp_gpt.max_n_entries, json_output, false);
+										metadata_gpt.max_n_entries, json_output, false);
 	}
 
 	// Export disk_metadata (always last section)
@@ -1571,12 +1762,39 @@ static int export_gpt_to_json(int disk_fd,
 	nvmeibt_Str_sprintf(json_output, "    \"_WARNING_last_pba_zeroed\": %lu,\n", disk_md->last_pba_zeroed);
 	nvmeibt_Str_sprintf(json_output, "    \"_WARNING_format_request_counter\": %u\n", disk_md->format_request_counter);
 
-	nvmeibt_Str_sprintf(json_output, "  }");
+	nvmeibt_Str_sprintf(json_output, "  },\n");
 
 	free_gpt_buffers(&metadata_bufs);
 	NNVMEIBT_BM_FREE(trace_gpt_export_disk_md_free, disk_md);
 
-	nvmeibt_Str_sprintf(json_output, "\n}\n");
+	/* Export in-memory GPT from TOMA if running */
+	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 3 ===\": \"TOMA IN-MEMORY GPT - READ-ONLY\",\n");
+	if (is_toma_running_and_acquire_lock()) { // TOMA is running
+		struct nvmeibt_Str *memory_gpt_json = NNVMEIBT_STR_ALLOC(trace_gpt_export_memory_gpt);
+
+		nvmeibt_Str_sprintf(json_output, "  \"_toma_running\": true");
+
+		if (get_memory_gpt_via_rpc(config->device_path, memory_gpt_json, config->is_self_test) == 0) {
+			N_Tf(export_got_memory_gpt, "Retrieved in-memory GPT from TOMA for dev=@STR", config->device_path);
+			nvmeibt_Str_sprintf(json_output, ",\n");
+			nvmeibt_Str_sprintf(json_output, "  \"_memory_gpt_available\": true,\n");
+
+			/* Merge memory GPT JSON fields directly */
+			nvmeibt_Str_sprintf(json_output, "%s\n", nvmeibt_Str_str(memory_gpt_json));
+		} else {
+			N_Tf(export_memory_gpt_unavailable, "Could not retrieve in-memory GPT from TOMA dev=@STR", config->device_path);
+			nvmeibt_Str_sprintf(json_output, ",\n");
+			nvmeibt_Str_sprintf(json_output, "  \"_memory_gpt_available\": false\n");
+		}
+
+		NNVMEIBT_STR_FREE(trace_gpt_export_memory_gpt_free, memory_gpt_json);
+	} else {
+		// Lock remains held - will be released at end of gpt_util operation
+		N_Tf(export_toma_not_running, "TOMA not running");
+		nvmeibt_Str_sprintf(json_output, "  \"_toma_running\": false\n");
+	}
+
+	nvmeibt_Str_sprintf(json_output, "}\n");
 
 	// Write JSON to file
 	output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -3041,14 +3259,14 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		rv = -1;
 		goto out;
 	}
-	pbyte_s = disk_md_partition->pba_s * config->pblk_size;
+		pbyte_s = disk_md_partition->pba_s * config->pblk_size;
 
-	memset(&current_disk_md, 0, sizeof(current_disk_md));
-	memset(&prepared_disk_md, 0, sizeof(prepared_disk_md));
+		memset(&current_disk_md, 0, sizeof(current_disk_md));
+		memset(&prepared_disk_md, 0, sizeof(prepared_disk_md));
 
-	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) == 0 &&
-		prepare_disk_metadata_from_json(&prepared_disk_md, &current_disk_md, disk_metadata_elem) == 0) {
-		n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
+		if (nvmeibt_disk_metadata_read_disk_metadata(NULL, disk_fd, config->pblk_size, pbyte_s, &current_disk_md) == 0 &&
+			prepare_disk_metadata_from_json(&prepared_disk_md, &current_disk_md, disk_metadata_elem) == 0) {
+			n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
 	}
 
 	/* Step 8: Write if in write mode */

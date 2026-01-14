@@ -15,6 +15,7 @@
 #include "nvmeibt_global.h"
 #include "nvmeibt_raft.h"
 #include "nvmeibt_seg_active.h"
+#include "nvmeibt_local_disk.h"
 #include <time.h>
 #include "toma/interfaces/log/nvmeibt_binary_tracing.h"
 #include "./interfaces/srvr/nvmeibt_srvr_proc.h"
@@ -23,6 +24,9 @@
 static int rpc_listener_fd = -1;
 static int rpc_child_fd = -1;
 static struct nvmeibt_Str *rpc_out_str = NULL;
+
+// Forward declarations
+void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out, const struct nvmeibt_local_disk *local_disk); // Defined in gpt_util.c
 
 static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str *out)
 {
@@ -681,6 +685,51 @@ static int nvmeibt_rpc_command_shadow_attach(int argc, char *argv[], struct nvme
 	return 0;
 }
 
+static int nvmeibt_rpc_command_export_memory_gpt(int argc, char *argv[], struct nvmeibt_Str *out)
+{
+	struct nvmeibt_topology		*cur_topo;
+	struct nvmeibt_local_disk	*local_disk;
+	const char					*device_path;
+	BOOL						found = false;
+
+	if (argc < 2) {
+		nvmeibt_Str_sprintf(out, "ERROR: Missing device path argument\n");
+		nvmeibt_Str_sprintf(out, "Usage: export-memory-gpt <device_path>\n");
+		return -1;
+	}
+
+	device_path = argv[1];
+	cur_topo = nvmeibt_global_get_global();
+
+	/* Search for local_disk by device_path */
+	XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->local_disks_hash) {
+		if (strcmp(local_disk->from_config.dev_file_name, device_path) == 0) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		/* Try stock_local_disks_hash */
+		XHASHTABLE_FOR_EACH_SAFE(local_disk, &cur_topo->stock_local_disks_hash) {
+			if (strcmp(local_disk->from_config.dev_file_name, device_path) == 0) {
+				found = true;
+				break;
+			}
+		}
+	}
+
+	if (!found) {
+		nvmeibt_Str_sprintf(out, "ERROR: Device not found: %s\n", device_path);
+		return -1;
+	}
+
+	/* Use shared function defined in gpt_util.c for JSON generation */
+	gpt_util_format_memory_gpt_json(out, local_disk);
+
+	return 0;
+}
+
 typedef int (*rpc_command_handler_fn)(int, char **, struct nvmeibt_Str *);
 static struct rpc_handler_t {
 	char *command;
@@ -694,6 +743,7 @@ static struct rpc_handler_t {
 		{ "config",             nvmeibt_rpc_command_config },
 		{ "ignore-raft_member", nvmeibt_rpc_command_ignore_raft_member },
 		{ "shadow-volume",      nvmeibt_rpc_command_shadow_attach },
+		{ "export-memory-gpt",  nvmeibt_rpc_command_export_memory_gpt },
 };
 
 static int nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
@@ -903,4 +953,3 @@ void nvmeibt_rpc_terminate(void)
 	}
 	NFOUT;
 }
-
