@@ -2,10 +2,8 @@
 #define __NVMEIB_PET_SPECIFICATION_H__
 
 #if defined(__KERNEL__)
-	#include <linux/stdarg.h>
 	#include <linux/string.h>
 #else
-	#include <stdarg.h>
 	#include <string.h>
 	#include <sys/uio.h>
 #endif
