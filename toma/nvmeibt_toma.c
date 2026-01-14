@@ -650,7 +650,7 @@ int nvmeibt_send_msg_to_srv(struct km_comm_msg_hdr *msg)
 
 static const char single_instance_file[] = TOMA_DIR_RUN_NVMESH "/toma.lock";
 static int single_instance_fd;
-static int single_instance(void)
+int nvmeibt_toma_is_single_instance(void)
 {
 	if (nvmeibt_recursive_mkdir_for_path(single_instance_file, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH)) {
 		return -1;
@@ -662,7 +662,7 @@ static int single_instance(void)
 	}
 	return flock(single_instance_fd, LOCK_EX | LOCK_NB) < 0 ? -1 : 0;
 }
-static void cleanup_single_instance(void)
+void nvmeibt_toma_cleanup_single_instance(void)
 {
 	/* Unlock and remove single-instance lock file */
 	flock(single_instance_fd, LOCK_UN);
@@ -731,7 +731,7 @@ static void terminate_toma(int rv)
 	free_toma_wakeup();
 	nvmeibt_topology_free_resources();
 	nvmeibt_server_lib_destroy();
-	cleanup_single_instance();
+	nvmeibt_toma_cleanup_single_instance();
 
 	nvmeibt_wq_drain(stat_wq);
 	nvmeibt_wq_destroy(stat_wq);
@@ -2828,7 +2828,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	/* first thing register at_exit */
 	atexit(nvmeibt_toma_abort_child_processes);
 	/* only one TOMA instance alllowed */
-	if (!nvmeibt_toma_is_running_as_a_utility() && single_instance() < 0) {
+	if (!nvmeibt_toma_is_running_as_a_utility() && nvmeibt_toma_is_single_instance() < 0) {
 		N_ETf(trace_toma_run, "TOMA instance is already running...");
 		goto exit;
 	}

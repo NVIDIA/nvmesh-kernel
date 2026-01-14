@@ -57,6 +57,9 @@ void nvmeibt_toma_on_new_disk(void);
 bool nvmeibt_toma_is_in_shutdown(void);
 bool is_shutdown_me_only(void);
 
+int nvmeibt_toma_is_single_instance(void);
+void nvmeibt_toma_cleanup_single_instance(void);
+
 struct nvmeibt_wq_entry;
 void nvmeibt_toma_wakeup_wq_abort_func(struct nvmeibt_wq_entry *wq_entry);
 int  nvmeibt_toma_trigger_wakeup(           enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr);		// Todo: Remove this eventually
