@@ -257,7 +257,7 @@ int nvmeibt_seg_active_fill_metadata_ctrl_header(struct nvmeibt_seg_active_metad
 	struct nvmeibt_disk_segment_metadata_hdr	*header;
 
 	if (!metadata_ctrl) {
-		N_Ef(bs8923l, "seg=@UUID_LE metadata_ctrl=NULL", &(metadata_ctrl->disk_segment_uuid));
+		N_Ef(bs8923l, "metadata_ctrl=NULL");
 		goto out;
 	}
 	header = &(metadata_ctrl->header);
