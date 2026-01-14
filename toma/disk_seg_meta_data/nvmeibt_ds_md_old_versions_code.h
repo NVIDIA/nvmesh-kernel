@@ -12,6 +12,7 @@ static int __verify_persistent_md_unused_buf(const struct nvmeibt_seg_active_met
 {
 	const struct nvmeibt_disk_segment_metadata_hdr *header = &(ctrl->header);
 	int i, rv = 0;
+	const char *filler_ptr;
 	ssize_t			filler_size;
 
 	filler_size = sizeof(header->__unused);
@@ -23,9 +24,10 @@ static int __verify_persistent_md_unused_buf(const struct nvmeibt_seg_active_met
 		}
 	}
 	filler_size = sizeof(*ctrl) - offsetof(typeof(*ctrl), __zeroed_filler_till_4K__);
+	filler_ptr = ctrl->__zeroed_filler_till_4K__;
 	for (i = 0; i < filler_size; i++) {
-		if (ctrl->__zeroed_filler_till_4K__[i] != 0) {
-			N_Ef(t_11_upgrade_persistent_md, "metadata->__zeroed_filler_till_4K__[@IND]=@RV != 0", i, ctrl->__zeroed_filler_till_4K__[i]);
+		if (filler_ptr[i] != 0) {
+			N_Ef(t_11_upgrade_persistent_md, "metadata->__zeroed_filler_till_4K__[@IND]=@RV != 0", i, filler_ptr[i]);
 			rv = -1;
 			goto out;
 		}
