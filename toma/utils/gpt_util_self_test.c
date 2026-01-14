@@ -2894,9 +2894,8 @@ DEFINE_TEST(restore_mid_failure_file_deleted)
 		}
 	}
 
-	/* Make LAST structure file unreadable to simulate mid-restore I/O failure */
-	/* This tests partial restore scenario: structures 1-9 restore, structure 10 fails */
-	/* NOTE: True I/O failures (disk full, write errors) are hard to simulate without mocking */
+	/* Delete LAST structure file to simulate mid-restore I/O failure */
+	/* This tests that restore properly handles a missing/deleted backup file */
 	if (rv == 0) {
 		manifest_json = SELF_TEST_parse_json_file(manifest_file);
 		if (manifest_json) {
@@ -2905,15 +2904,15 @@ DEFINE_TEST(restore_mid_failure_file_deleted)
 				/* Get last structure (disk_metadata - index 9) */
 				last_file = json_get_dict_str(structures_array->array.elements[9], "file", NULL);
 				if (last_file) {
-					fprintf(stdout, "Making last structure unreadable: %s\n", last_file);
-					fprintf(stdout, "Restore should process 9/10 before failing\n");
-					chmod(last_file, 0000);		/* Remove all permissions - open() will fail */
+					fprintf(stdout, "Deleting last structure file: %s\n", last_file);
+					fprintf(stdout, "Restore should fail when file is missing\n");
+					unlink(last_file);		/* Delete file - restore will fail */
 				}
 			}
 		}
 	}
 
-	/* Try to restore - file exists (passes validation) but open() fails during restore */
+	/* Try to restore - file is deleted, restore should fail */
 	if (rv == 0) {
 		SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
 		rv = SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
