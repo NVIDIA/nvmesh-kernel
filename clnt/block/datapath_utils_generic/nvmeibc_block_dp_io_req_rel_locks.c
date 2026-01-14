@@ -327,9 +327,11 @@ void dp_locks_release_locks_sibs(struct nvmeibc_cmd_lock *locksets, int owner_i)
 
 #define __give_failed_lock_cb(dc) ({ (dc)->lock_status = NCL_STATUS_DISKDEAD; (dc)->callback(dc, nvmeibc_d_rdma_comp_tag_make()); })
 #ifdef BLKCMP_IO_COMPLETION_PRESERVE_STACK
-	static int __um_completion_unblock_waiting_stack(struct nvmeibc_d_rdma_comp *read_comp)
+	static int __um_completion_unblock_waiting_stack(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_d_rdma_comp_tag tag)
 	{
 		struct operation *o = get_d_comp_of_pg(read_comp)->cmd->o;
+
+		(void)tag;
 		read_comp->callback = &dp_locks_view_lock_sm;
 		BLKCMP_IO_ASYNC_RESUME_CMP(dp_locks_view_lock_sm(read_comp));
 		return 0;
@@ -884,7 +886,7 @@ static int __retry_owner_lock_cb_sync_done(void* context, int err)
 	static int __call_assist_sync(struct nvmeibc_cmd_lock *l)
 	{
 		struct operation *o = l->cmds->o;
-		struct nvmeibc_cmd_lock *owner_lock = dp_locks_get_ow_of(l);
+		struct nvmeibc_cmd_lock *owner_lock = dp_locks_get_blockset_owner_lock(l);
 		l->need_stale_sync = true;
 		if (owner_lock == l) {
 			BLKCMP_IO_ASYNC_RESUME_CMP();	// Waiting only for owner, wakeup fiber now

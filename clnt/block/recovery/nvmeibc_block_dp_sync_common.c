@@ -101,15 +101,16 @@ void nvmeibcbdp_sync_reschedule(struct recovery_sync_op *so)
 }
 
 #else
-static int __um_completion_unblock_waiting_stack(struct nvmeibc_d_rdma_comp *dc)
+static int __um_completion_unblock_waiting_stack(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(dc);		// Any lock from all siblings
 	//struct recovery_sync_op *so = l->cmds->o->rso;
+	(void)tag;
 	SO_CMP_COMP(l->cmds->o);
 	return 0;
 }
 
-static void set_callback_as_locks_state_machine(struct nvmeibc_d_rdma_comp *dc, int (*callback)(struct nvmeibc_d_rdma_comp*))
+static void set_callback_as_locks_state_machine(struct nvmeibc_d_rdma_comp *dc, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag))
 {
 	dc->callback = __um_completion_unblock_waiting_stack; // Callback to unblock (wakeup caller). Dont continue state machine in completion context
 	(void)callback;

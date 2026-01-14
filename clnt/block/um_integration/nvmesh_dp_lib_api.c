@@ -210,7 +210,7 @@ int  __IO_LT_try_request_transfer(struct nvmeibc_cmd_lock *locks) {	// Caller gi
 		}
 		for (i = 0; i < n_locks; i++) {
 			struct nvmeibc_d_rdma_comp *dc = &locks[i].comp;
-			dc->callback(dc); /* Simulate success callback */
+			dc->callback(dc, nvmeibc_d_rdma_comp_tag_make()); /* Simulate success callback */
 		}
 		return n_locks;
 	}

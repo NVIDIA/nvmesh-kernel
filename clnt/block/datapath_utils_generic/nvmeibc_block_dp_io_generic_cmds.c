@@ -1284,7 +1284,7 @@ void dp_cmds_fiber_execute_1_blockset_state_machine(struct operation *o, const b
 		dp_cmds_next_stage_execute(cmds, 0);
 		while (cmds->should_check_view_lock) {	// May need to retry it due to lock taken / sync-stale / etc ...
 			cmds->should_check_view_lock = 0;
-			BLKCMP_IO_ASYNC_AWAIT(dp_locks_view_lock_sm(dp_cmds_get_pigbck_comp_dc(cmds->iocmd)));
+			BLKCMP_IO_ASYNC_AWAIT(dp_locks_view_lock_sm(dp_cmds_get_pigbck_comp_dc(cmds->iocmd), nvmeibc_d_rdma_comp_tag_make()));
 		}
 	};
 	if (acquired_locks) {
