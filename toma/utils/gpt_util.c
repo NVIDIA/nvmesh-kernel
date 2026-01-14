@@ -4,6 +4,7 @@
  * Displays, exports, and applies GPT structures for NVMesh-managed and regular block devices.
  */
 
+#include "../nvmeibt_debug.h"
 #include <ctype.h>
 #include <getopt.h>
 #include <linux/fs.h>
@@ -12,7 +13,8 @@
 #include <sys/types.h>
 #include "gpt_util_self_test.h"
 
-#include "../nvmeibt_debug.h"
+#include "nvmeibt_utils.h"
+#include "../nvmeibt_toma.h"
 #include "../nvmeibt_disk_metadata.h"
 #include "nvmeibt_bm.h"
 #include "../nvmeibt_read_config.h"
@@ -130,6 +132,81 @@ struct gpt_util_config {
 	// Self-test mode
 	BOOL					is_self_test;			// true if running in self-test mode
 };
+
+// TOMA single-instance lock state for gpt_util.
+typedef enum {
+	TOMA_LOCK_NOT_HELD,			// No lock held by gpt_util or its self-test framework
+	TOMA_LOCK_GPT_UTIL,			// Lock held by normal gpt_util operation (release at end)
+	TOMA_LOCK_GPT_SELF_TEST,	// Lock held by gpt_util self-test framework (don't release during ops)
+	TOMA_LOCK_MOCK_RUNNING,		// Self-test: pretend TOMA is running
+} toma_lock_state_gpt_t;
+
+static toma_lock_state_gpt_t s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD;
+
+/**
+ * Checks if TOMA is running. If not, acquires the single instance lock.
+ * Returns true if TOMA is running or mocked, false if not running.
+ */
+int is_toma_running_and_acquire_lock(void)
+{
+	if (s_toma_lock_state_gpt == TOMA_LOCK_MOCK_RUNNING) {
+		return true;	// Mocked TOMA running always overrides the lock check
+	}
+	if (s_toma_lock_state_gpt != TOMA_LOCK_NOT_HELD) {
+		return false;	// Already holding lock by gpt_util or its self-test framework, so TOMA is definitely not running
+	}
+	if (nvmeibt_toma_is_single_instance() < 0) {
+		return true;	// Real TOMA is running
+	}
+	s_toma_lock_state_gpt = TOMA_LOCK_GPT_UTIL;
+	return false;
+}
+
+/**
+ * Releases lock if acquired by normal operation (not if self-test owns it).
+ */
+void release_toma_lock_if_acquired(void)
+{
+	if (s_toma_lock_state_gpt == TOMA_LOCK_GPT_UTIL) {
+		nvmeibt_toma_cleanup_single_instance();
+		s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD;
+	}
+}
+
+/**
+ * Below are toma lock functions only used by self-test framework.
+ * Do NOT call them in places other than self-test framework.
+ */
+// Acquire lock for test framework, to prevent self-test from interfering with real TOMA. Returns true if real TOMA is running.
+BOOL SELF_TEST_acquire_toma_lock(void)
+{
+	if (nvmeibt_toma_is_single_instance() < 0) {
+		return true;
+	}
+	s_toma_lock_state_gpt = TOMA_LOCK_GPT_SELF_TEST;
+	return false;
+}
+// Release lock held by self-test and reset state.
+void SELF_TEST_release_toma_lock(void)
+{
+	NTOMA_ASSERT(error_self_test_release_toma_lock, s_toma_lock_state_gpt != TOMA_LOCK_GPT_UTIL, "Self test cannot release lock really held by gpt_util");
+	if (s_toma_lock_state_gpt != TOMA_LOCK_NOT_HELD) {
+		nvmeibt_toma_cleanup_single_instance();
+		s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD;
+	}
+}
+
+// Mock TOMA as running.
+void SELF_TEST_mock_toma_running(void)
+{
+	s_toma_lock_state_gpt = TOMA_LOCK_MOCK_RUNNING;
+}
+
+// Undo mock, back to lock held by self-test framework.
+void SELF_TEST_undo_mock_toma_running(void)
+{
+	s_toma_lock_state_gpt = TOMA_LOCK_GPT_SELF_TEST;
+}
 
 /**
  * Create private backup directory with restrictive permissions
@@ -588,13 +665,33 @@ out:
 }
 
 /**
- * Prompt user for confirmation before write operations
- * Returns true if user confirms, false if user cancels
- * Always returns true if skip_confirmation is set
+ * Validates safety conditions (TOMA running) and prompts user for confirmation before write operations
+ * Returns true if safe to write, and user confirms or skip_confirmation is set, false otherwise
+ * BLOCKS if TOMA is running (safety check)
  */
-static BOOL confirm_write_operation(struct gpt_util_config *config, const char *operation_description)
+static BOOL validate_and_confirm_write(struct gpt_util_config *config, const char *operation_description)
 {
 	char response[10];
+
+	/* Safety check: Block writes if TOMA is running and managing device */
+	if (is_toma_running_and_acquire_lock()) {
+		N_Ef(confirm_toma_running, "TOMA is running - cannot write to device dev=@STR", config->device_path);
+		fprintf(stderr, COL_RED_BOLD "\nERROR: TOMA is currently running!" COL_RESET "\n");
+		fprintf(stderr, "Cannot modify GPT while TOMA is managing devices.\n");
+		fprintf(stderr, "\n");
+		fprintf(stderr, COL_YELLOW "To fix GPT, follow this procedure:" COL_RESET "\n");
+		fprintf(stderr, "  1. Exclude device: Add to /var/opt/nvmesh/.target_devices\n");
+		fprintf(stderr, "  2. Signal TOMA: pkill -1 nvmeibt_toma\n");
+		fprintf(stderr, "  3. Find PCI address of this device (nvme10xxn1): ls /sys/bus/pci/drivers/nvmeibs/0000:*/misc; PCI_ADDR=\"0000:44:00.0\"\n");
+		fprintf(stderr, "  4. Unbind from nvmeibs: echo <PCI_ADDR> > /sys/bus/pci/drivers/nvmeibs/unbind\n");
+		fprintf(stderr, "  5. Run gpt_util to fix GPT\n");
+		fprintf(stderr, "  6. Remove exclusion and signal TOMA again (undo step 1 and redo step 2)\n");
+		fprintf(stderr, "  7. Rebind to nvmeibs: echo <PCI_ADDR> > /sys/bus/pci/drivers/nvme/bind\n");
+		fprintf(stderr, "  8. Wait for rebuild to finish\n");
+		fprintf(stderr, "\n");
+		fprintf(stderr, "Operation blocked for safety.\n");
+		return false;
+	}
 
 	if (config->skip_confirmation) {
 		return true;		// --yes flag: auto-confirm
@@ -2093,7 +2190,7 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 		}
 
 		/* Confirm before write */
-		if (!confirm_write_operation(config, "Fix MBR")) {
+		if (!validate_and_confirm_write(config, "Fix MBR")) {
 			fprintf(stdout, "MBR fix cancelled.\n");
 			goto out;
 		}
@@ -2133,7 +2230,7 @@ static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 	char	backup_path[512];
 
 	/* Confirm before fix */
-	if (!confirm_write_operation(config, "Fix GPT from alternate copy")) {
+	if (!validate_and_confirm_write(config, "Fix GPT from alternate copy")) {
 		fprintf(stdout, "GPT fix cancelled.\n");
 		return -1;
 	}
@@ -2240,7 +2337,7 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "\n=== GPT Upgrade Check (n_partition_entries -> %d) ===\n\n", LARGE_GPT_MAX_NUM_GPT_ENTRIES);
 
 	/* Confirm before upgrade */
-	if (!confirm_write_operation(config, "Upgrade GPT (fix n_partition_entries to 8192)")) {
+	if (!validate_and_confirm_write(config, "Upgrade GPT (fix n_partition_entries to 8192)")) {
 		fprintf(stdout, "GPT upgrade cancelled.\n");
 		goto out;
 	}
@@ -2293,12 +2390,6 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 out:
 	return rv;
 }
-
-/**
- * Modify JSON string field (SELF-TEST helper)
- * Parses JSON, modifies field using base library, serializes back
- * Returns 0 on success, -1 on error
- */
 
 /**
  * Parse one GPT entry from JSON dict element
@@ -2974,8 +3065,8 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			char backup_path[512];
 			snprintf(operation_desc, sizeof(operation_desc), "Apply %d change%s from JSON",
 					 total_changes, total_changes == 1 ? "" : "s");
-			if (!confirm_write_operation(config, operation_desc)) {
-				rv = 0;		/* User cancelled - not an error */
+			if (!validate_and_confirm_write(config, operation_desc)) {
+				rv = -1;
 				goto out;
 			}
 
@@ -3401,7 +3492,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	N_Tf(restore_pba_boundaries_match, "All structures within device boundaries (device PBA end: @PBA_E)", config->pba_e);
 
 	/* Confirm before restore */
-	if (!confirm_write_operation(config, "Restore from modular backup")) {
+	if (!validate_and_confirm_write(config, "Restore from modular backup")) {
 		fprintf(stdout, "Restore cancelled.\n");
 		rv = 0;		/* User cancelled - not an error */
 		goto out;
@@ -3595,6 +3686,8 @@ out:
 	if (disk_fd >= 0) {
 		close(disk_fd);
 	}
+
+	release_toma_lock_if_acquired();
 
 	return rv;
 }

@@ -4,12 +4,12 @@
  * Comprehensive test suite for GPT utility operations
  */
 
+#include "../nvmeibt_debug.h"
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>		// opendir()
 
-#include "../nvmeibt_debug.h"
 #include "../nvmeibt_disk_metadata.h"
 #include "nvmeibt_bm.h"
 #include "nvmeibt_str.h"
@@ -21,6 +21,12 @@
 #define PASS		"P"
 #define FAIL		"F"
 #define SKIP		"s"
+
+// External, defined in gpt_util.c
+BOOL SELF_TEST_acquire_toma_lock(void);
+void SELF_TEST_release_toma_lock(void);
+void SELF_TEST_mock_toma_running(void);
+void SELF_TEST_undo_mock_toma_running(void);
 
 /**
  * Start a self-test case (SELF-TEST only)
@@ -3422,6 +3428,18 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 	struct self_test_entry tests[] = { SELF_TEST_LIST };
 	#undef X
 
+	/* Safety check: Block self-tests if TOMA is running */
+	if (SELF_TEST_acquire_toma_lock()) {
+		fprintf(stderr, COL_RED_BOLD "\nERROR: Cannot run self-tests while TOMA is running!" COL_RESET "\n");
+		fprintf(stderr, "Self-tests may spawn fake TOMA process and create conflicts.\n");
+		fprintf(stderr, "Please stop TOMA before running tests.\n");
+		fprintf(stderr, "\n");
+		fprintf(stderr, "To stop TOMA: sudo systemctl stop nvmesh-toma\n");
+		fprintf(stderr, "Or: sudo pkill nvmeibt_toma\n");
+		fprintf(stderr, "\n");
+		return 1;
+	}
+
 	num_tests_total = sizeof(tests) / sizeof(tests[0]);
 
 	mkdir(TOMA_ROOT_DIR "tmp", 0755);
@@ -3535,7 +3553,7 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 	unlink(test_device_path);
 	unlink(wrong_device_path);
 	cleanup_backup_files_for_device(test_device_path);
-
+	SELF_TEST_release_toma_lock();
 	return 0;
 }
 
