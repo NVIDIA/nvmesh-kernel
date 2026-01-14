@@ -146,10 +146,6 @@ int epoll_wait(int efd,                                struct epoll_event *ev_ar
 /************************************* network ********************************/
 #define NVMEIBT_NETWORK_INCS_H			//#include "interfaces/network/network_incs.h"
 
-// API SRVR<-->Toma Netlink
-int scan_server_netdev(void);			// Get file descriptor on which to select
-int handle_netlink_event(int sock);		// Callback upon event
-
 // API SRM<-->Toma
 int  rsrm_init_work_tmq(void);			// Create SRM
 void rsrm_resend_acks(void);			// Periodic high priority job: Send acks for received packets
@@ -160,12 +156,6 @@ int  rsrm_resend_timer(void);			// Callback for timer
 int  rsrm_faults_init_fifo_comm(void);	// Create Fifo queue (cli file)
 int  rsrm_faults_get_fd(void);			// Get descriptor of fifo to select
 void rsrm_faults_handle_fifo_comm(void);// Handle fault after wakeup from select
-
-// Todo: Remove. Encapsulate into unified layer with SRM
-int  udp_server_sock(void);				// Get socket descriptor on which to select
-void nvmeibt_udp_read_event(int fd);	// Callback upon event
-int  udp_server_timer(void);			// Get timer descriptor on which to select
-void nvmeibt_udp_timer_event(int fd);	// Callback upon event
 
 // nm
 struct nvmeibt_nm_local_node { int dummy; };

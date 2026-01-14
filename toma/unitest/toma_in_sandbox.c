@@ -1035,36 +1035,6 @@ void nvmeibt_udev_put_event(struct nvmeibt_udev_event *rv) { memset(rv, 0, sizeo
 /************************************* network ********************************/
 int64_t ibud_enable_periodic_traces = 0;
 int64_t udp_max_header_length = 128;
-static int udp_sock_fd, udp_timer_fd;
-int udp_server_sock(void) { return udp_sock_fd; }
-int udp_server_timer(void){ return udp_timer_fd; }
-
-void nvmeibt_udp_read_event(int fd) {
-	(void)fd;
-}
-
-void nvmeibt_udp_timer_event(int fd) {
-	(void)fd;
-}
-
-int scan_server_netdev(void) {
-	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
-	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_net_dev");
-	return __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
-}
-int handle_netlink_event(int sock) { (void)sock; return 0; }
-int nvmeibt_srm_queue_req(struct nvmeibt_srm *srm, struct nvmeibt_msg_request *req) { (void)srm; (void)req; return 0;}
-struct nvmeibt_srm *udp_peer_srm(struct udp_peer *peer) {(void)peer; return NULL;}
-int nvmeib_register_udp_peer(struct nvmeibt_node *n, const char *pn, const char *pg){ (void)n; (void)pn; (void)pg; return 0; }
-int allocate_udp_server(int p, union ibv_gid *g, struct nvmeibt_node *node) { (void)p; (void)g; (void)node; return 0; }
-int start_udp_server(void) {
-	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
-	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_udp_srvr");
-	udp_sock_fd = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
-	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_udp_timer");
-	udp_timer_fd = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
-	return 0;
-}
 
 int rsrm_init_work_tmq(void) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};

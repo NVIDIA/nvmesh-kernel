@@ -526,7 +526,6 @@ enum NVMEIBT_FD_TYPES {
 	NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS = 16,
 	NVMEIBT_TOMA_FD_TYPE_UDP = 17,
 	NVMEIBT_TOMA_FD_TYPE_UDP_TIMER = 18,
-	NVMEIBT_TOMA_FD_TYPE_NETLINK_EVENTS = 19,
 };
 
 static char *fd_type_str(enum NVMEIBT_FD_TYPES t)
@@ -542,7 +541,6 @@ static char *fd_type_str(enum NVMEIBT_FD_TYPES t)
 	case NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS: return "UDEV";
 	case NVMEIBT_TOMA_FD_TYPE_UDP: return "UDP";
 	case NVMEIBT_TOMA_FD_TYPE_UDP_TIMER: return "UDP_TIMER";
-	case NVMEIBT_TOMA_FD_TYPE_NETLINK_EVENTS: return "NETLINK";
 	default : {
 		static char	unexpected_val_str[] = "unknown               ";
 		sprintf(unexpected_val_str, "unknown(%x)", t);
@@ -2987,9 +2985,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 					break;
 				case NVMEIBT_TOMA_FD_TYPE_FIFO_COMM:
 					nvmeibt_nm_rsrm_faults_handle_fifo_com(nvmeibt_get_nw_node());
-					break;
-				case NVMEIBT_TOMA_FD_TYPE_NETLINK_EVENTS:
-					//handle_netlink_event(nl_sock);		// Netlink has a different select  in a different thread
 					break;
 				default:
 					N_Ef(trace_17_toma_run, "Unsupported FD type: @FD_TYPE", trigger_fd->fd_type);
