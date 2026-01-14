@@ -2637,6 +2637,10 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		goto toma_not_ready;
 	}
 
+	if (existing_reg_ctx && existing_reg_ctx->is_processing_registrant_removal) {
+		refusal_reason = NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS;
+		goto toma_not_ready;
+	}
 	if (!existing_reg_ctx && lock_id_cache_is_lockid_taken(seg_active, incoming_reg_ctx->reg_lock_id)) {
 		// No active registrant, but its journal entries were not fully cleaned yet
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_LOCKID_ALREADY_TAKEN;
