@@ -1102,26 +1102,6 @@ uint64_t nvmeibt_host_writes_int128_to_uint64(unsigned char *data)
 	return *(uint64_t *)(data);
 }
 
-void uuid_mgmt_format_to_urn_str(const char uuid[16], char *out)
-{
-	int i;
-	char *itr;
-
-	itr = out;
-	for (i = 0; i < 4; ++i) {
-		itr += sprintf(itr, "%02x", uuid[i] & 0xff);
-	}
-
-	*itr++ = '-';
-	for (i = 4; i < 10; ++i) {
-		itr += sprintf(itr, "%02x", uuid[i] & 0xff);
-		if (i & 0x1)
-			*itr++ = '-';
-	}
-	for (i = 10; i < 16; ++i)
-		itr += sprintf(itr, "%02x", uuid[i] & 0xff);
-}
-
 /*
 	Trim the whitespaces from the beginning and the end of the string.
     Input: A proper null-terminated string, in accessible memory. No validation

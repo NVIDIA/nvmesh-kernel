@@ -107,7 +107,6 @@ struct nvmeibt_urn_uuid {
 };
 
 void generate_random_uuid(union nvmeib_uuid *urn_uuid);
-void uuid_mgmt_format_to_urn_str(const char uuid[16], char *out);
 
 int nvmeibt_urn_uuid_str_to_union_uuid(union nvmeib_uuid *uuid, const char *urn_uuid_str);
 int nvmeibt_urn_uuid_to_union_uuid(union nvmeib_uuid *uuid, const struct nvmeibt_urn_uuid *id);
