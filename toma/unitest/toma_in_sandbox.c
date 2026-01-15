@@ -486,7 +486,7 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 	} else if (strstr(s->addr.sun_path, "udev_monitor")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_udev.o;
 		sys->TSB_udev.o.recv = _recv_empty;
-	} else if (strstr(s->addr.sun_path, "toma_rpc_sock")) {
+	} else if (strstr(s->addr.sun_path, "nvmesh/toma_rpc")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_rpc.o;
 		sys->TSB_rpc.o.recv = _rpc_inject;
 		sys->TSB_rpc.o.send = _rpc_accept;
@@ -595,10 +595,14 @@ int __bind(int fd, const void* __addr, unsigned int len) {
 	struct t_sandbox_sock *s = &TS->socks[fd - TS->debug_offset];
 	const struct sockaddr_nl *addr = __addr;
 	s->addr.sun_family = addr->nl_family;
-	if (addr->nl_family == AF_NETLINK)
+	if (addr->nl_family == AF_NETLINK) {
 		sprintf(s->addr.sun_path, FILE_SANDBOX_PREFIX "bind_netlink_sock");
-	else
-		sprintf(s->addr.sun_path, FILE_SANDBOX_PREFIX "bind_toma_rpc_sock");
+	} else {
+		const struct sockaddr_un *sun = __addr;
+		BUG_ON(sun->sun_family != PF_UNIX);
+		//sprintf(s->addr.sun_path, FILE_SANDBOX_PREFIX "bind_toma_rpc_sock");
+		sprintf(s->addr.sun_path, "%s", &sun->sun_path[0]);
+	}
 	s->len = len;
 	return TSB_sock_open(s);
 }
