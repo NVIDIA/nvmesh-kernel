@@ -692,6 +692,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 
 	/* Start JSON manifest */
 	nvmeibt_Str_sprintf(manifest_json, "{\n");
+	nvmeibt_Str_sprintf(manifest_json, "  \"gpt_util_version\": \"%s\",\n", GPT_UTIL_VERSION);
 	nvmeibt_Str_sprintf(manifest_json, "  \"backup_timestamp\": \"%s\",\n", timestamp);
 	nvmeibt_Str_sprintf(manifest_json, "  \"device_path\": \"%s\",\n", config->device_path);
 	nvmeibt_Str_sprintf(manifest_json, "  \"block_size\": %d,\n", config->pblk_size);
@@ -1628,6 +1629,7 @@ static int export_gpt_to_json(int disk_fd,
 
 	// Start JSON with metadata
 	nvmeibt_Str_sprintf(json_output, "{\n");
+	nvmeibt_Str_sprintf(json_output, "  \"gpt_util_version\": \"%s\",\n", GPT_UTIL_VERSION);
 	nvmeibt_Str_sprintf(json_output, "  \"backup_timestamp\": \"%s\",\n", timestamp);
 	nvmeibt_Str_sprintf(json_output, "  \"device_path\": \"%s\",\n", config->device_path);
 	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 1 ===\": \"AUTO-DETECTED STATUS - DO NOT EDIT\",\n");
@@ -2886,7 +2888,8 @@ static int prepare_gpt_from_json(struct nvmeibt_disk_gpt *gpt,
 	gpt->max_n_entries = max_n_entries;
 
 	if (parse_gpt_from_json_section(gpt, json_section, section_name) < 0) {
-		N_Ef(prepare_gpt_parse_failed, "Failed to parse @STR from JSON", section_name);
+		N_Ef(prepare_gpt_parse_failed, "Failed to parse @STR from JSON.", section_name);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to parse %s from JSON. Exiting." COL_RESET "\n", section_name);
 		return -1;
 	}
 
@@ -3121,6 +3124,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	uint64_t					pbyte_s = 0;
 	char						current_serial_num[64] = {0};
 	const char					*json_serial_num = NULL;
+	const char					*json_version = NULL;
 
 	fprintf(stdout, "\n=== Applying GPT from JSON: %s ===\n", config->apply_json_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
@@ -3136,6 +3140,8 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	json_fd = NNVMEIBT_OPEN_READ(trace_apply_json_open, config->apply_json_file, 1);
 	if (json_fd < 0) {
 		N_Ef(apply_json_open_failed, "Failed to open JSON file @STR @AUTO_ERRNO", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to open JSON file. Exiting." COL_RESET "\n");
+		rv = -1;
 		goto out;
 	}
 
@@ -3143,6 +3149,8 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	rv = NNVMEIBT_STR_FREAD_ATOMIC(trace_apply_json_fread, json_content, json_fd);
 	if (rv < 0) {
 		N_Ef(apply_json_read_failed, "Failed to read JSON file @STR @AUTO_ERRNO", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to read JSON file. Exiting." COL_RESET "\n");
+		rv = -1;
 		goto out;
 	}
 	NNVMEIBT_CLOSE(trace_apply_json_close, json_fd);
@@ -3151,25 +3159,44 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(json_content), nvmeibt_Str_strlen(json_content));
 	if (!json_root || json_root->type != JSON_E_DICT) {
 		N_Ef(apply_json_parse_failed, "Failed to parse JSON file @STR", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to parse JSON file. Exiting." COL_RESET "\n");
 		rv = -1;
 		goto out;
 	}
 
-	/* Step 2: Validate device has required NVMesh structure */
+	/* Step 2: Validate gpt_util version compatibility */
+	json_version = json_get_dict_str(json_root, "gpt_util_version", NULL);
+	if (!json_version) {
+		N_Ef(apply_json_no_version, "JSON missing gpt_util_version field file=@STR", config->apply_json_file);
+		fprintf(stderr, COL_RED_BOLD "ERROR: JSON missing gpt_util_version field. Exiting." COL_RESET "\n");
+		rv = -1;
+		goto out;
+	} else {
+		fprintf(stdout, "JSON version: %s (current: %s)\n", json_version, GPT_UTIL_VERSION);
+		if (strcmp(json_version, GPT_UTIL_VERSION) != 0) {
+			N_Ef(apply_json_version_mismatch, "Version mismatch: json=@STR current=@STR file=@STR",
+					json_version, GPT_UTIL_VERSION, config->apply_json_file);
+			fprintf(stderr, COL_RED_BOLD "ERROR: JSON was created by different gpt_util version. Exiting." COL_RESET "\n");
+			rv = -1;
+			goto out;
+		}
+	}
+
+	/* Step 3: Validate device has required NVMesh structure */
 	if (validate_nvmesh_device_structure(disk_fd, config->pblk_size, config->pba_s, config->pba_hw_e,
 										  &current_main_gpt, &metadata_partition) < 0) {
 		rv = -1;
 		goto out;
 	}
 
-	/* Step 3: Validate JSON has required sections (fail fast) */
+	/* Step 4: Validate JSON has required sections (fail fast) */
 	if (validate_json_required_sections(json_root, config->apply_json_file,
 										 &main_gpt_primary_elem, &metadata_gpt_primary_elem) < 0) {
 		rv = -1;
 		goto out;
 	}
 
-	/* Step 4: Prepare Main GPT from JSON */
+	/* Step 5: Prepare Main GPT from JSON */
 	if (prepare_gpt_from_json(&json_main_gpt, main_gpt_primary_elem, MAIN_GPT_NAME, LARGE_GPT_MAX_NUM_GPT_ENTRIES) < 0) {
 		rv = -1;
 		goto out;
@@ -3194,13 +3221,14 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	/* Step 5: Prepare Metadata GPT from JSON */
+	/* Step 6: Prepare Metadata GPT from JSON */
 	memset(&current_metadata_gpt, 0, sizeof(current_metadata_gpt));
 	nvmeibt_strlcpy(current_metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(current_metadata_gpt.main_or_metadata));
 
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &current_metadata_gpt,
 										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
 		N_Ef(apply_read_metadata_gpt_failed, "Failed to read current Metadata GPT dev=@STR", config->device_path);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to read current Metadata GPT. Exiting." COL_RESET "\n");
 		rv = -1;
 		goto out;
 	}
@@ -3210,12 +3238,11 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	/* Step 6: Validate serial number (REQUIRED - fail-closed for safety) */
+	/* Step 7: Validate serial number (REQUIRED - fail-closed for safety) */
 	json_serial_num = json_get_dict_str(json_root, "_READONLY_controller_serial_num", NULL);
 	if (!json_serial_num || strlen(json_serial_num) == 0) {
 		N_Ef(apply_no_serial, "JSON missing _READONLY_controller_serial_num (cannot validate device) file=@STR", config->apply_json_file);
 		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain _READONLY_controller_serial_num for device validation" COL_RESET "\n");
-		fprintf(stderr, "  This safety check prevents applying JSON to wrong device.\n");
 		rv = -1;
 		goto out;
 	}
@@ -3231,17 +3258,14 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	if (strcmp(json_serial_num, current_serial_num) != 0) {
 		N_Ef(apply_serial_mismatch, "Serial number mismatch: JSON=@STR device=@STR",
 				json_serial_num, current_serial_num);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Serial number mismatch!" COL_RESET "\n");
-		fprintf(stderr, "  JSON serial:   %s\n", json_serial_num);
-		fprintf(stderr, "  Device serial: %s\n", current_serial_num);
-		fprintf(stderr, "  This JSON is from a different device!\n");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Serial number mismatch! src=%s dst=%s", json_serial_num, current_serial_num);
 		rv = -1;
 		goto out;
 	}
 
 	N_Tf(apply_serial_match, "Serial number validation passed: serial=@STR", json_serial_num);
 
-	/* Step 7: Compare and show differences */
+	/* Step 8: Compare and show differences */
 	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
 	fprintf(stdout, "\n");
 	n_metadata_changes = compare_and_show_gpt_diff(&current_metadata_gpt, &json_metadata_gpt, "Metadata GPT");
@@ -3269,7 +3293,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
 	}
 
-	/* Step 8: Write if in write mode */
+	/* Step 9: Write if in write mode */
 	total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes;
 	if (config->write_mode) {
 		if (total_changes == 0) {
@@ -3345,7 +3369,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			}
 		}
 
-		/* Write disk_metadata if there are changes (already prepared in Step 7.5) */
+		/* Write disk_metadata if there are changes */
 		if (n_disk_metadata_changes > 0) {
 			char		*dma_buffer = NULL;
 			int			n_bytes_write;
@@ -3480,6 +3504,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	struct mm_json_elem							*structures_array = NULL;
 	const char									*device_path_in_manifest = NULL;
 	const char									*manifest_serial = NULL;
+	const char									*manifest_version = NULL;
 	int											block_size_in_manifest = 0;
 	int											i;
 	int											n_structures_restored = 0;
@@ -3523,6 +3548,23 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		N_Ef(restore_manifest_missing_fields, "Manifest missing required fields @STR", config->restore_binary_file);
 		fprintf(stderr, COL_RED_BOLD "ERROR: Invalid manifest - missing required fields" COL_RESET "\n");
 		goto out;
+	}
+
+	/* Validate gpt_util version compatibility */
+	manifest_version = json_get_dict_str(json_root, "gpt_util_version", NULL);
+	if (!manifest_version) {
+		N_Ef(restore_manifest_no_version, "Manifest missing gpt_util_version field @STR", config->restore_binary_file);
+		rv = -1;
+		goto out;
+	} else {
+		fprintf(stdout, "Backup version: %s (current: %s)\n", manifest_version, GPT_UTIL_VERSION);
+		if (strcmp(manifest_version, GPT_UTIL_VERSION) != 0) {
+			N_Ef(restore_manifest_version_mismatch, "Version mismatch: manifest=@STR current=@STR file=@STR",
+					manifest_version, GPT_UTIL_VERSION, config->restore_binary_file);
+			fprintf(stderr, COL_RED_BOLD "ERROR: Backup was created by different gpt_util version. Exiting." COL_RESET "\n");
+			rv = -1;
+			goto out;
+		}
 	}
 
 	if (structures_array->type != JSON_E_ARRAY) {
@@ -3634,7 +3676,6 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	if (!manifest_serial || strlen(manifest_serial) == 0) {
 		N_Ef(restore_manifest_no_serial, "Manifest missing controller_serial_num field");
 		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest missing serial number for validation" COL_RESET "\n");
-		fprintf(stderr, "  This backup is corrupt or from an old version.\n");
 		fprintf(stderr, "  Restore blocked for safety.\n");
 		rv = -1;
 		goto out;
