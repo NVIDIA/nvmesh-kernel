@@ -155,6 +155,12 @@ class Component(object):
 	def doBeforeExit(self):
 		pass
 
+	def getManagementTopicName(self):
+		return 'default.management.priority.1.0.0'
+
+	def getManagementKeepAliveTopicName(self):
+		return 'default.management.keepalive.1.0.0'
+
 	def initKafka(self):
 		self.initConsumer()
 		self.initProducer()
@@ -220,9 +226,12 @@ class Component(object):
 			self.consumer.close()
 			self.exitGracefully()
 
-	def produceMessageToTopic(self, message, topic):
+	def produceMessageToTopic(self, message, topic, key=None):
 		try:
-			self.producer.produce(topic, value=json.dumps(message))
+			if topic == self.getManagementKeepAliveTopicName() and not key:
+				key = f"{self.hostname}.{self.getType()}.{message.get('messageType')}"
+
+			self.producer.produce(topic, key=key, value=json.dumps(message))
 			self.producer.flush()  # flush is not raising an exception if the topic does not exist
 
 		except Exception as e:

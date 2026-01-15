@@ -86,8 +86,8 @@ class TOMA(Component):
 	def afterKafkaInitiated(self):
 		self.sendKeepaliveMessage()
 
-	def produceMessageToTopic(self, message, topic):
-		Component.produceMessageToTopic(self, message, topic)
+	def produceMessageToTopic(self, message, topic, key=None):
+		Component.produceMessageToTopic(self, message, topic, key)
 		self.messageSequence += 1
 
 	def getMessageSequence(self):
@@ -227,7 +227,7 @@ class TOMA(Component):
 		message = self.buildGenericMessage(messageType=MessageTypes.TOMA_KEEPALIVE, payload=payload)
 
 		self.logger.debug('Going to send keepalive message with tomaToken {} zone {}'.format(message['tomaToken'], payload['zone']))
-		self.produceMessageToTopic(message, self.getManagementTopicName())
+		self.produceMessageToTopic(message, self.getManagementKeepAliveTopicName())
 
 		self.lastKeepAliveTime = datetime.datetime.now()
 
@@ -242,7 +242,7 @@ class TOMA(Component):
 
 			self.logger.debug('Going to send leader keepalive message with leaderToken {} zone {} raftTerm {}'.format(message['leaderToken'], payload['zone'],
 																													  payload['raftTerm']))
-			self.produceMessageToTopic(message, self.getManagementTopicName())
+			self.produceMessageToTopic(message, self.getManagementKeepAliveTopicName())
 
 	def sendDriveZeroingProgressMessage(self, disk, formatDetails):
 		zeroPortionSize = disk['blocks'] / self.driveZeroBlocksDivider
