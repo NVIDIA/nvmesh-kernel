@@ -2327,7 +2327,7 @@ static void raft_leader_check_validity_of_all_peers(void)
 static void set_guaranteed_sw_ver(void)
 {
 	struct nvmeibt_raft_member	*peer_member;
-	uint32_t					new_guaranteed_sw_ver;
+	uint32_t					new_guaranteed_sw_ver = 0;
 	int							n_members = my_raft_global.n_raft_members;
 	int							n_new_ver = 0;
 
