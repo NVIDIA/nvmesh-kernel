@@ -253,10 +253,12 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 
 #define NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(name, __seg_active__, __new_value__)	do {	\
 	if (__seg_active__) {																						\
-		N_Tf(name, "SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS seg=@UUID_8 (@FLAGS_INT-->@FLAGS_INT)",					\
-			nvmeibt_seg_active_UUID_8((__seg_active__)),														\
-			(__seg_active__)->is_expected_to_have_stale_locks, (__new_value__));								\
-		(__seg_active__)->is_expected_to_have_stale_locks = (__new_value__);									\
+		if ((__seg_active__)->is_expected_to_have_stale_locks != (__new_value__)) {								\
+			N_Tf(name, "SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS seg=@UUID_8 (@FLAGS_INT-->@FLAGS_INT)",				\
+				nvmeibt_seg_active_UUID_8((__seg_active__)),													\
+				(__seg_active__)->is_expected_to_have_stale_locks, (__new_value__));							\
+			(__seg_active__)->is_expected_to_have_stale_locks = (__new_value__);								\
+		}																										\
 	} else {																									\
 		N_Ef(name ## _error, "SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS seg_active=NULL)");							\
 	}																											\
