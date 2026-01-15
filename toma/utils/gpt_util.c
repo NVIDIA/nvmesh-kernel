@@ -707,6 +707,60 @@ static int validate_serial_number_match(int disk_fd, struct gpt_util_config *con
 }
 
 /**
+ * Backup structure descriptor for table-driven backup
+ */
+struct backup_structure_desc {
+	const char		*name;
+	uint64_t		pba_start;
+	uint64_t		n_blocks;
+	BOOL			is_first;		// true for first entry (no leading comma in JSON)
+};
+
+/**
+ * Backup all 10 NVMesh structures using table-driven approach.
+ * Returns 0 on success, -1 on error.
+ */
+static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_size,
+								 struct nvmeibt_disk_gpt *main_gpt,
+								 struct nvmeibt_disk_gpt *metadata_gpt,
+								 const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition,
+								 struct nvmeibt_Str *manifest_json,
+								 uint64_t *total_backup_bytes)
+{
+	int										i;
+	uint64_t								n_entries_blocks_main;
+	uint64_t								n_entries_blocks_metadata;
+	struct backup_structure_desc			structures[10];
+
+	// Calculate entry block counts
+	n_entries_blocks_main = divroundup(main_gpt->header.n_partition_entries * main_gpt->header.size_of_partition_entry, pblk_size);
+	n_entries_blocks_metadata = divroundup(metadata_gpt->header.n_partition_entries * metadata_gpt->header.size_of_partition_entry, pblk_size);
+
+	// Define all 10 structures to backup (order matches restore expectations)
+	structures[0] = (struct backup_structure_desc){"mbr",                        0,                                                      1,                          true};
+	structures[1] = (struct backup_structure_desc){"main_gpt_primary_hdr",       main_gpt->header.my_pba,                                1,                          false};
+	structures[2] = (struct backup_structure_desc){"main_gpt_primary_ent",       main_gpt->header.partition_entry_pba,                   n_entries_blocks_main,      false};
+	structures[3] = (struct backup_structure_desc){"main_gpt_alternate_ent",     main_gpt->header.alternate_pba - n_entries_blocks_main, n_entries_blocks_main,      false};
+	structures[4] = (struct backup_structure_desc){"main_gpt_alternate_hdr",     main_gpt->header.alternate_pba,                         1,                          false};
+	structures[5] = (struct backup_structure_desc){"metadata_gpt_primary_hdr",   metadata_gpt->header.my_pba,                            1,                          false};
+	structures[6] = (struct backup_structure_desc){"metadata_gpt_primary_ent",   metadata_gpt->header.partition_entry_pba,               n_entries_blocks_metadata,  false};
+	structures[7] = (struct backup_structure_desc){"metadata_gpt_alternate_ent", metadata_gpt->header.alternate_pba - n_entries_blocks_metadata, n_entries_blocks_metadata, false};
+	structures[8] = (struct backup_structure_desc){"metadata_gpt_alternate_hdr", metadata_gpt->header.alternate_pba,                     1,                          false};
+	structures[9] = (struct backup_structure_desc){"disk_metadata",              disk_md_partition->pba_s,                               1,                          false};
+
+	// Execute backups in loop
+	for (i = 0; i < 10; i++) {
+		if (backup_structure_and_append_manifest(disk_fd, structures[i].name, backup_dir,
+												 structures[i].pba_start, structures[i].n_blocks, pblk_size,
+												 manifest_json, total_backup_bytes, structures[i].is_first) < 0) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+/**
  * Create modular binary backup of critical disk structures before write
  * Creates private directory with manifest + structure files
  * Returns 0 on success, -1 on error
@@ -732,7 +786,6 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
 	int											rv = -1;
-	int											n_entries_blocks;
 	uint64_t									total_backup_bytes = 0;
 	char										controller_serial_num[64] = {0};
 
@@ -830,80 +883,10 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	nvmeibt_Str_sprintf(manifest_json, "  \"controller_serial_num\": \"%s\",\n", controller_serial_num);
 	nvmeibt_Str_sprintf(manifest_json, "  \"structures\": [\n");
 
-	/* 1. Backup MBR (block 0) */
-	if (backup_structure_and_append_manifest(disk_fd, "mbr", backup_dir,
-											  0, 1, config->pblk_size, manifest_json,
-											  &total_backup_bytes, true) < 0) {
-		goto out;
-	}
-
-	/* Calculate Main GPT entry blocks */
-	n_entries_blocks = divroundup(main_gpt->header.n_partition_entries * main_gpt->header.size_of_partition_entry, config->pblk_size);
-
-	/* 2. Backup Main GPT Primary Header */
-	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_primary_hdr", backup_dir,
-											  main_gpt->header.my_pba, 1, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 3. Backup Main GPT Primary Entries */
-	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_primary_ent", backup_dir,
-											  main_gpt->header.partition_entry_pba, n_entries_blocks, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 4. Backup Main GPT Alternate Entries (before alternate header) */
-	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_alternate_ent", backup_dir,
-											  main_gpt->header.alternate_pba - n_entries_blocks, n_entries_blocks, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 5. Backup Main GPT Alternate Header */
-	if (backup_structure_and_append_manifest(disk_fd, "main_gpt_alternate_hdr", backup_dir,
-											  main_gpt->header.alternate_pba, 1, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* Backup Metadata GPT structures (REQUIRED for NVMesh - already validated above) */
-	/* Calculate Metadata GPT entry blocks */
-	n_entries_blocks = divroundup(metadata_gpt->header.n_partition_entries * metadata_gpt->header.size_of_partition_entry, config->pblk_size);
-
-	/* 6. Backup Metadata GPT Primary Header */
-	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_primary_hdr", backup_dir,
-											  metadata_gpt->header.my_pba, 1, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 7. Backup Metadata GPT Primary Entries */
-	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_primary_ent", backup_dir,
-											  metadata_gpt->header.partition_entry_pba, n_entries_blocks, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 8. Backup Metadata GPT Alternate Entries */
-	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_alternate_ent", backup_dir,
-											  metadata_gpt->header.alternate_pba - n_entries_blocks, n_entries_blocks, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 9. Backup Metadata GPT Alternate Header */
-	if (backup_structure_and_append_manifest(disk_fd, "metadata_gpt_alternate_hdr", backup_dir,
-											  metadata_gpt->header.alternate_pba, 1, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
-		goto out;
-	}
-
-	/* 10. Backup disk_metadata structure (REQUIRED - already validated above) */
-	if (backup_structure_and_append_manifest(disk_fd, "disk_metadata", backup_dir,
-											  disk_md_partition->pba_s, 1, config->pblk_size,
-											  manifest_json, &total_backup_bytes, false) < 0) {
+	/* Backup all 10 NVMesh structures */
+	if (backup_all_structures(disk_fd, backup_dir, config->pblk_size,
+							  main_gpt, metadata_gpt, disk_md_partition,
+							  manifest_json, &total_backup_bytes) < 0) {
 		goto out;
 	}
 
