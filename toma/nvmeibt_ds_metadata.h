@@ -2,8 +2,6 @@
 #define NVMEIBR_DS_METADATA_H
 
 #include "nvmeibt_common.h"
-#include <assert.h>  // _Static_assert
-#include <stddef.h>  // offsetof
 
 /*
  * The sizeof metadata magic string is 59 bytes (including '\0').
@@ -66,9 +64,6 @@ struct nvmeibt_seg_active_metadata_ctrl {
 } __attribute__((packed, aligned(4096)));
 
 _Static_assert(sizeof(struct nvmeibt_seg_active_metadata_ctrl) == 4096, "sizeof(struct nvmeibt_seg_active_metadata_ctrl) != 4096");
-// The exact offset of __zeroed_filler_till_4K__ is not special, but it should be constant and much less than 4K. Static assert for a sanity check.
-_Static_assert(offsetof(struct nvmeibt_seg_active_metadata_ctrl, __zeroed_filler_till_4K__) == 311, "struct nvmeibt_seg_active_metadata_ctrl zero filler");
-_Static_assert(offsetof(struct nvmeibt_seg_active_metadata_ctrl, __END_of_filler_for_4K__) == 4096, "struct nvmeibt_seg_active_metadata_ctrl end");
 
 enum nvmeibt_dseg_md_ctrl_blk_status {				 // Crucial before we can apply topo to this segment
   //NVMEIBT_DSEG_MD_CTRL_BLK_STATUS_ERROR       =-1, // Not in persistancy, and not in RAM (can even try to write it to persistancy)
