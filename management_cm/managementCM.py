@@ -44,10 +44,10 @@ TLS_CERTS_CA_FILEPATH = os.path.join(TLS_CERTS_DIR, 'ca.crt')
 
 schemePath = '/opt/nvmesh/client-repo/management_cm/clnt/'
 
-
 POLL_PERIOD_BEFORE_FIRST_CONNECTION_SEC = 0.01
 SELECT_TIMEOUT_SEC = 2.0
 WAIT_FOR_MCS_PROC_TIMEOUT_SECS = 10
+
 
 class ManagementCM(Daemon):
 	def __init__(self, pidfile, lockfile, logger):
@@ -65,9 +65,11 @@ class ManagementCM(Daemon):
 		self.shouldClose = False
 		self.concurrentConnections = {}
 		self.managementTopic = 'default.management.priority.1.0.0'
+		self.managementKeepaliveTopic = 'default.management.keepalive.1.0.0'
 		self.hostname = socket.gethostname()
 		self.clientTopic = 'client.main'
-		self.topicsToSubscribeOn = { '{0}.managementAgent.main.1.0.0'.format(self.hostname): False, '{0}.{1}.1.0.0'.format(self.hostname, self.clientTopic) : False }
+		self.topicsToSubscribeOn = {'{0}.managementAgent.main.1.0.0'.format(self.hostname): False,
+									'{0}.{1}.1.0.0'.format(self.hostname, self.clientTopic): False}
 		self.consumableTopicsInitiated = False
 		self.cacheFolder = '/var/opt/nvmesh/mcs/'
 		self.kafkaAdminClient = None
@@ -83,10 +85,13 @@ class ManagementCM(Daemon):
 			print(("Unknown exception at Deamon init Exception:{0}".format(e)))
 			raise
 
+	def isKeepaliveMessage(self, message):
+		return message.get('messageType') in ['keepalive', 'leaderKeepalive']
+
 	def stopSignalHandler(self, signum, frame):
 		self.logger.debug("Received close signal, exiting. PID {}".format(os.getpid()))
 		self.closing = True
-		os.close(self.select_wakeup_p_write) # wakeup select
+		os.close(self.select_wakeup_p_write)  # wakeup select
 
 	def handleSIGHUP(self, signum, frame):
 		self.logger.debug(f'Received SIGHUP signal - reloading certificates and Kafka connections')
@@ -390,8 +395,17 @@ class ManagementCM(Daemon):
 
 			while self.kafkaOutbox.qsize() > 0:
 				messageToSend = self.kafkaOutbox.get()
-				self.logger.debug('Sending the following message to Kafka: {}'.format(messageToSend.payload))
-				self.producer.produce(self.managementTopic, value=messageToSend.payload.decode('utf-8'), on_delivery=deliveryDone)
+				messagePayload = json.loads(messageToSend.payload.decode('utf-8'))
+				self.logger.debug('Sending the following message to Kafka: {}'.format(messagePayload))
+
+				topic = self.managementTopic
+				key = None
+
+				if self.isKeepaliveMessage(messagePayload):
+					topic = self.managementKeepaliveTopic
+					key = f"{self.hostname}.{messagePayload.get('originType')}.{messagePayload.get('messageType')}"
+
+				self.producer.produce(topic, key=key, value=json.dumps(messagePayload), on_delivery=deliveryDone)
 
 			self.logger.debug('There are {} messages in producer, waiting to be send - Flushing the producer'.format(len(self.producer)))
 			self.producer.flush(5)
@@ -450,10 +464,10 @@ class ManagementCM(Daemon):
 		if not offsetToCommit:
 			return self.logger.debug('I\'ve being called to commit offsets to topic:partition {}:{} but nothing could be committed'.format(topic, partition))
 
-		topicPartition = TopicPartition(topic, partition, offsetToCommit+1)
+		topicPartition = TopicPartition(topic, partition, offsetToCommit + 1)
 
 		try:
-			self.logger.debug('Committing offsets to topic:partition {}:{} with offset: {}'.format(topic, partition, offsetToCommit+1))
+			self.logger.debug('Committing offsets to topic:partition {}:{} with offset: {}'.format(topic, partition, offsetToCommit + 1))
 			self.consumer.commit(offsets=[topicPartition], asynchronous=False)
 		except Exception as e:
 			self.logger.error('Failed to commit offsets for topic:partition {}:{} with offset: {}. {}'.format(topic, partition, offsetToCommit, e))
@@ -723,7 +737,7 @@ class ManagementCM(Daemon):
 
 	def getSchemeVersion(self) -> str:
 		packer = process_scheme.Packer(os.path.join(schemePath, "clnt_scheme.json"), logger=None)
-		print (hex(packer.scheme_version))
+		print(hex(packer.scheme_version))
 
 
 class OurHandler(logging.handlers.SysLogHandler):
@@ -732,7 +746,6 @@ class OurHandler(logging.handlers.SysLogHandler):
 		logging.handlers.SysLogHandler.__init__(self, address=address)
 		self.CONTINUATION_STR = "..."
 		self.MAX_MSG = 4096 - len(self.CONTINUATION_STR)
-
 
 	def emit(self, record):
 		"""
@@ -748,7 +761,7 @@ class OurHandler(logging.handlers.SysLogHandler):
 		prio = '<%d>' % self.encodePriority(self.facility,
 											self.mapPriority(record.levelname))
 		# Message is a string. Convert to bytes as required by RFC 5424
-		#if type(msg) is str:
+		# if type(msg) is str:
 		#	msg = msg.encode('utf-8')
 
 		msg_ = msg
@@ -790,12 +803,12 @@ def addLoggingLevelVerbose():
 			return
 
 		isMessage = False
-		#sequences = None
+		# sequences = None
 		verboseType = kws.pop('verboseType', '')
 		typeWithOpcode = None
 
 		if verboseType == 'message':
-			#sequences = (kws.pop('sequences'))
+			# sequences = (kws.pop('sequences'))
 			isMessage = True
 			verboseType = kws.pop('fromTo', None)
 			opcode = kws.pop('opcode', '-')
@@ -814,8 +827,8 @@ def addLoggingLevelVerbose():
 					pass
 
 				verbose_message = 'msg: %s: %s.' % (typeWithOpcode, json_body or message)
-				#if sequences:
-					#verbose_message += ' connectionSequence: {}, messageSequence: {}'.format(sequences[0], sequences[1])
+			# if sequences:
+			# verbose_message += ' connectionSequence: {}, messageSequence: {}'.format(sequences[0], sequences[1])
 			else:
 				verbose_message = '%s: %s.' % (verboseType, message)
 
@@ -850,6 +863,7 @@ def readBashFile(filename):
 
 	return l
 
+
 def is_service_enabled(service_name):
 	logger = logging.getLogger('managementCM')
 	try:
@@ -865,6 +879,7 @@ def is_service_enabled(service_name):
 	except Exception as e:
 		logger.debug("Unexpected error: {}".format(str(e)))
 		return False
+
 
 def readConfigFile():
 	subprocess.call('/opt/nvmesh/bin/process_config_files')
@@ -916,6 +931,7 @@ def readConfigFile():
 
 	if is_service_enabled('nvmeshum.service'):
 		CMConfig.nvmeshUMClient = True
+
 
 # CMConfig.MULTI_INSTANCE_ENABLED = 'MULTI_INSTANCE_ENABLED' in configFile and configFile['MULTI_INSTANCE_ENABLED'] == 'Yes'
 
@@ -976,12 +992,13 @@ class CMConfig(object):
 	MULTI_INSTANCE_ENABLED = False
 	remoteDebug = False
 
- 	# TLS configs for Kafka
+	# TLS configs for Kafka
 	TLSEnabled = False
 	CA = None
 	cert = None
 	key = None
 	keyPass = None
+
 
 if __name__ == "__main__":
 	SYSLOG_PATH = '/dev/log'
@@ -993,7 +1010,7 @@ if __name__ == "__main__":
 	procPathServer = '/proc/nvmeibs/mcs'
 	# procPathMC = '/proc/{clientInstName}/mcs/mcs'
 
-	if not (len(sys.argv) == 2 and sys.argv[1] in ['--version', '-v']): #readConfigFile not needed in this case, we only want print the version
+	if not (len(sys.argv) == 2 and sys.argv[1] in ['--version', '-v']):  # readConfigFile not needed in this case, we only want print the version
 		readConfigFile()
 
 	logger = getLogger()
@@ -1011,7 +1028,6 @@ if __name__ == "__main__":
 		schemePath = '/opt/nvmesh/client-repo/management_cm/clnt/'
 
 	managementCM = ManagementCM(PID_FILE, LOCK_FILE, logger)
-
 
 	if len(sys.argv) >= 2:
 		pid = 1
