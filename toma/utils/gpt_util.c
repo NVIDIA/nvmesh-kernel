@@ -620,6 +620,47 @@ out:
 }
 
 /**
+ * Validate that source serial number matches current device serial number.
+ * Returns 0 if match, -1 if mismatch or error (with detailed logging).
+ *
+ * @param disk_fd         Device file descriptor
+ * @param config          Config for reading serial
+ * @param source_serial   Expected serial number (from JSON/manifest)
+ * @param source_name     Name of source for error messages (e.g., "JSON", "manifest")
+ */
+static int validate_serial_number_match(int disk_fd, struct gpt_util_config *config,
+										const char *source_serial, const char *source_name)
+{
+	char	current_serial[64] = {0};
+
+	/* Validate source serial is present */
+	if (!source_serial || strlen(source_serial) == 0) {
+		N_Ef(validate_serial_missing, "@STR missing serial number", source_name);
+		fprintf(stderr, COL_RED_BOLD "ERROR: %s missing serial - validation blocked" COL_RESET "\n", source_name);
+		return -1;
+	}
+
+	/* Get current device serial */
+	if (get_device_serial_num(disk_fd, config, current_serial, sizeof(current_serial)) < 0) {
+		N_Ef(validate_serial_read_failed, "Cannot read device serial");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial - validation blocked" COL_RESET "\n");
+		return -1;
+	}
+
+	/* Compare serials */
+	if (strcmp(source_serial, current_serial) != 0) {
+		N_Ef(validate_serial_mismatch, "Serial mismatch: @STR=@STR device=@STR",
+				source_name, source_serial, current_serial);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Serial mismatch! %s=%s device=%s" COL_RESET "\n",
+				source_name, source_serial, current_serial);
+		return -1;
+	}
+
+	N_Tf(validate_serial_match, "Serial validation passed: @STR", source_serial);
+	return 0;
+}
+
+/**
  * Create modular binary backup of critical disk structures before write
  * Creates private directory with manifest + structure files
  * Returns 0 on success, -1 on error
@@ -3122,7 +3163,6 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	int							n_disk_metadata_changes = 0;
 	int							total_changes = 0;
 	uint64_t					pbyte_s = 0;
-	char						current_serial_num[64] = {0};
 	const char					*json_serial_num = NULL;
 	const char					*json_version = NULL;
 
@@ -3240,30 +3280,10 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 	/* Step 7: Validate serial number (REQUIRED - fail-closed for safety) */
 	json_serial_num = json_get_dict_str(json_root, "_READONLY_controller_serial_num", NULL);
-	if (!json_serial_num || strlen(json_serial_num) == 0) {
-		N_Ef(apply_no_serial, "JSON missing _READONLY_controller_serial_num (cannot validate device) file=@STR", config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: JSON must contain _READONLY_controller_serial_num for device validation" COL_RESET "\n");
+	if (validate_serial_number_match(disk_fd, config, json_serial_num, "JSON") < 0) {
 		rv = -1;
 		goto out;
 	}
-
-	if (get_device_serial_num(disk_fd, config, current_serial_num, sizeof(current_serial_num)) < 0) {
-		N_Ef(apply_get_serial_failed, "Failed to get device serial number");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial number - blocking apply for safety" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	/* Compare serial numbers */
-	if (strcmp(json_serial_num, current_serial_num) != 0) {
-		N_Ef(apply_serial_mismatch, "Serial number mismatch: JSON=@STR device=@STR",
-				json_serial_num, current_serial_num);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Serial number mismatch! src=%s dst=%s", json_serial_num, current_serial_num);
-		rv = -1;
-		goto out;
-	}
-
-	N_Tf(apply_serial_match, "Serial number validation passed: serial=@STR", json_serial_num);
 
 	/* Step 8: Compare and show differences */
 	n_main_changes = compare_and_show_gpt_diff(&current_main_gpt, &json_main_gpt, "Main GPT");
@@ -3509,7 +3529,6 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	int											i;
 	int											n_structures_restored = 0;
 	uint64_t									total_bytes_restored = 0;
-	char										current_serial_num[64] = {0};
 
 	fprintf(stdout, "\n=== Restoring from Modular Binary Backup ===\n");
 	fprintf(stdout, "Manifest file: %s\n", config->restore_binary_file);
@@ -3664,36 +3683,12 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "\nValidating device serial number...\n");
 
 	/* Get current device serial number */
-	if (get_device_serial_num(disk_fd, config, current_serial_num, sizeof(current_serial_num)) < 0) {
-		N_Ef(restore_get_serial_failed, "Failed to get device serial number");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read device serial number - blocking restore for safety" COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	/* Controller serial number is mandatory for all NVMesh backups (fail-closed, no fallback) */
+	/* Validate serial number (REQUIRED - fail-closed for safety) */
 	manifest_serial = json_get_dict_str(json_root, "controller_serial_num", NULL);
-	if (!manifest_serial || strlen(manifest_serial) == 0) {
-		N_Ef(restore_manifest_no_serial, "Manifest missing controller_serial_num field");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest missing serial number for validation" COL_RESET "\n");
-		fprintf(stderr, "  Restore blocked for safety.\n");
+	if (validate_serial_number_match(disk_fd, config, manifest_serial, "manifest") < 0) {
 		rv = -1;
 		goto out;
 	}
-
-	/* Compare serial numbers (fail-closed) */
-	if (strcmp(manifest_serial, current_serial_num) != 0) {
-		N_Ef(restore_serial_mismatch, "Serial number mismatch: manifest=@STR device=@STR",
-				manifest_serial, current_serial_num);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Serial number mismatch!" COL_RESET "\n");
-		fprintf(stderr, "  Manifest serial: %s\n", manifest_serial);
-		fprintf(stderr, "  Device serial:   %s\n", current_serial_num);
-		fprintf(stderr, "  This backup is from a different device!\n");
-		rv = -1;
-		goto out;
-	}
-
-	N_Tf(restore_serial_match, "Serial number validation passed: serial=@STR", current_serial_num);
 
 	/* Validation 3: Verify PBA boundaries don't exceed device size */
 	fprintf(stdout, "\nValidating PBA boundaries...\n");
