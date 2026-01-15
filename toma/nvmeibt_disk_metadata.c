@@ -71,7 +71,10 @@ void hexdump(void *bufi, int len, char *str)
 			j += sprintf(out_txt + j, "\n%08x:", i);	// Start writing the new line
 		}
 		sum_line += ((buf[i] & 0xff) != 0);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-overflow"
 		j += sprintf(out_txt + j, "%02x", (buf[i] & 0xff));
+#pragma GCC diagnostic pop
 		i++;
 	}
 }
