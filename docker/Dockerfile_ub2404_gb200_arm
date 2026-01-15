@@ -1,0 +1,48 @@
+# Use Ubuntu 24.04 (Noble Numbat) as the base image
+FROM ubuntu:24.04
+
+ENV DIRPATH /excelero
+WORKDIR $DIRPATH
+
+# Avoid prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Fix segfault on libc-bin
+RUN rm /var/lib/dpkg/info/libc-bin.*
+RUN apt-get clean
+RUN apt-get update
+RUN apt-get install libc-bin
+
+# Update apt package list and install build essentials and other useful tools
+RUN apt update && apt install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    vim \
+    rsync
+
+RUN apt install -y \
+    rdma-core \
+    librdmacm1 \
+    librdmacm-dev \
+    rdmacm-utils
+
+RUN apt install -y \
+     libelf1 \
+     elfutils \
+     libudev1 \
+     libudev-dev \
+     alien
+
+RUN apt install -y \
+	linux-image-unsigned-6.11.0-1016-nvidia-64k \
+	linux-headers-6.11.0-1016-nvidia-64k
+
+RUN apt install -y \
+    librdkafka1 \
+    librdkafka-dev
+
+# Set the default command for the container
+#CMD ["/bin/bash"]
+
