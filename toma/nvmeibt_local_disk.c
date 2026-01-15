@@ -920,7 +920,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 			// either unuseable due to a hardware problem or might already have users' data on it.
 			char header[MGMT_LOG_MSG_HEADER_LEN];
 			char msg[MGMT_LOG_MSG_MSG_LEN];
-			snprintf(header, sizeof(header), "disk %s is unusable", nvmeibt_local_disk_display(local_disk));
+			snprintf(header, sizeof(header), "disk %.77s is unusable", nvmeibt_local_disk_display(local_disk));
 			snprintf(msg, sizeof(msg), "Unable to read persistency from new disk, dev=%.32s on node=%.32s",
 				 nvmeibt_local_disk_file_name(local_disk), nvmeibt_node_name(cur_topo->my_node));
 			nvmeibt_kafka_generic_log_msg_to_mgmt_send(NULL, header, msg, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
