@@ -1474,7 +1474,7 @@ static int HW_full_config_consume(void) {
 /******************************************************************************/
 static int incremental_VOL_updates_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".leader.incrementalUpdates.1.0.0";
-	char group_id_str[24];	// All leaders commit/store/consume using the same group_id
+	char group_id_str[32];	// All leaders commit/store/consume using the same group_id
 	const struct key_val_strs k_conf_kv[] = {
 		K_DEFAULT_CONSUMER_CONFIG, {"client.id", "" /* Overriden with machine name */ }
 	};
@@ -1639,7 +1639,7 @@ out:
 /******************************************************************************/
 static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".leader.incrementalTargetUpdates.1.0.0";
-	char group_id_str[24];	// All leaders commit/store/consume using the same group_id
+	char group_id_str[32];	// All leaders commit/store/consume using the same group_id
 	const struct key_val_strs k_conf_kv[] = {
 		K_DEFAULT_CONSUMER_CONFIG, {"client.id", "" /* Overriden with machine name */ }
 	};
