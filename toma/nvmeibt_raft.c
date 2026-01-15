@@ -2027,7 +2027,7 @@ static void raft_write_leader_name(char *leader_name)
 
 	NFIN;
 
-	strncpy(my_raft_global.leader_node_name, leader_name, sizeof(my_raft_global.leader_node_name));
+	nvmeibt_strlcpy(my_raft_global.leader_node_name, leader_name, sizeof(my_raft_global.leader_node_name));
 	// Allocate task to offload writing leader_name to a thread.
 	write_leader_name_task = NNVMEIBT_BM_CALLOC(trace_raft_raft_write_leader_name, sizeof(*write_leader_name_task));
 	write_leader_name_task->wq_entry.type = "SAVE_LEADER_NAME";
