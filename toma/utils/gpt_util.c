@@ -620,6 +620,52 @@ out:
 }
 
 /**
+ * Load and parse JSON file into tree.
+ * Returns json_root on success, NULL on failure (logs errors internally).
+ *
+ * @param filepath   Path to JSON file
+ * @return JSON root element (dict), or NULL if failed
+ */
+static struct mm_json_elem *load_json_file_or_fail(const char *filepath)
+{
+	int						json_fd = -1;
+	struct nvmeibt_Str		*json_content = NULL;
+	struct mm_json_elem		*json_root = NULL;
+
+	json_fd = NNVMEIBT_OPEN_READ(trace_load_json, filepath, 1);
+	if (json_fd < 0) {
+		N_Ef(load_json_open_failed, "Cannot open JSON file @STR @AUTO_ERRNO", filepath);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot open JSON file: %s" COL_RESET "\n", filepath);
+		goto out;
+	}
+
+	json_content = NNVMEIBT_STR_ALLOC(trace_load_json_content);
+	if (NNVMEIBT_STR_FREAD_ATOMIC(trace_load_json_read, json_content, json_fd) < 0) {
+		N_Ef(load_json_read_failed, "Cannot read JSON file @STR @AUTO_ERRNO", filepath);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read JSON file: %s" COL_RESET "\n", filepath);
+		goto out;
+	}
+
+	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(json_content), nvmeibt_Str_strlen(json_content));
+	if (!json_root || json_root->type != JSON_E_DICT) {
+		N_Ef(load_json_parse_failed, "Invalid JSON format @STR", filepath);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Invalid JSON format: %s" COL_RESET "\n", filepath);
+		if (json_root) {
+			nvmeibt_mm_json_free_kv_tree(json_root);
+			json_root = NULL;
+		}
+		goto out;
+	}
+
+out:
+	if (json_fd >= 0) {
+		NNVMEIBT_CLOSE(trace_load_json_close, json_fd);
+	}
+	NNVMEIBT_STR_FREE(trace_load_json_free, json_content);
+	return json_root;
+}
+
+/**
  * Validate that source serial number matches current device serial number.
  * Returns 0 if match, -1 if mismatch or error (with detailed logging).
  *
@@ -3144,8 +3190,6 @@ static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
 static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 {
 	int							rv = -1;
-	int							json_fd = -1;
-	struct nvmeibt_Str			*json_content = NULL;
 	struct mm_json_elem			*json_root = NULL;
 	struct mm_json_elem			*main_gpt_primary_elem = NULL;
 	struct mm_json_elem			*metadata_gpt_primary_elem = NULL;
@@ -3176,30 +3220,9 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	}
 	fprintf(stdout, "\n");
 
-	/* Step 1: Read and parse JSON file */
-	json_fd = NNVMEIBT_OPEN_READ(trace_apply_json_open, config->apply_json_file, 1);
-	if (json_fd < 0) {
-		N_Ef(apply_json_open_failed, "Failed to open JSON file @STR @AUTO_ERRNO", config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to open JSON file. Exiting." COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-
-	json_content = NNVMEIBT_STR_ALLOC(trace_apply_json_read);
-	rv = NNVMEIBT_STR_FREAD_ATOMIC(trace_apply_json_fread, json_content, json_fd);
-	if (rv < 0) {
-		N_Ef(apply_json_read_failed, "Failed to read JSON file @STR @AUTO_ERRNO", config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to read JSON file. Exiting." COL_RESET "\n");
-		rv = -1;
-		goto out;
-	}
-	NNVMEIBT_CLOSE(trace_apply_json_close, json_fd);
-	json_fd = -1;
-
-	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(json_content), nvmeibt_Str_strlen(json_content));
-	if (!json_root || json_root->type != JSON_E_DICT) {
-		N_Ef(apply_json_parse_failed, "Failed to parse JSON file @STR", config->apply_json_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to parse JSON file. Exiting." COL_RESET "\n");
+	/* Step 1: Load and parse JSON file */
+	json_root = load_json_file_or_fail(config->apply_json_file);
+	if (!json_root) {
 		rv = -1;
 		goto out;
 	}
@@ -3434,14 +3457,9 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	rv = 0;
 
 out:
-	if (json_fd >= 0) {
-		NNVMEIBT_CLOSE(trace_apply_json_cleanup_fd, json_fd);
-	}
-	// json_gpt.entries is a fixed array in the struct, not dynamically allocated
 	if (json_root) {
 		nvmeibt_mm_json_free_kv_tree(json_root);
 	}
-	NNVMEIBT_STR_FREE(trace_apply_json_cleanup_str, json_content);
 	return rv;
 }
 
@@ -3518,8 +3536,6 @@ out:
 static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 {
 	int											rv = -1;
-	int											manifest_fd = -1;
-	struct nvmeibt_Str							*manifest_content = NULL;
 	struct mm_json_elem							*json_root = NULL;
 	struct mm_json_elem							*structures_array = NULL;
 	const char									*device_path_in_manifest = NULL;
@@ -3534,27 +3550,10 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "Manifest file: %s\n", config->restore_binary_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
 
-	/* Read and parse manifest file */
-	manifest_fd = NNVMEIBT_OPEN_READ(trace_restore_manifest_open, config->restore_binary_file, 1);
-	if (manifest_fd < 0) {
-		N_Ef(restore_manifest_open_failed, "Cannot open manifest @STR @AUTO_ERRNO", config->restore_binary_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest file not found" COL_RESET "\n");
-		goto out;
-	}
-
-	manifest_content = NNVMEIBT_STR_ALLOC(trace_restore_manifest_read);
-	if (NNVMEIBT_STR_FREAD_ATOMIC(trace_restore_manifest_fread, manifest_content, manifest_fd) < 0) {
-		N_Ef(restore_manifest_read_failed, "Cannot read manifest @STR @AUTO_ERRNO", config->restore_binary_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read manifest file" COL_RESET "\n");
-		goto out;
-	}
-	NNVMEIBT_CLOSE(trace_restore_manifest_close, manifest_fd);
-	manifest_fd = -1;
-
-	json_root = parse_json_txt_into_kv_tree(nvmeibt_Str_str(manifest_content), nvmeibt_Str_strlen(manifest_content));
-	if (!json_root || json_root->type != JSON_E_DICT) {
-		N_Ef(restore_manifest_parse_failed, "Failed to parse manifest JSON @STR", config->restore_binary_file);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Invalid manifest file format" COL_RESET "\n");
+	/* Load and parse manifest file */
+	json_root = load_json_file_or_fail(config->restore_binary_file);
+	if (!json_root) {
+		rv = -1;
 		goto out;
 	}
 
@@ -3826,13 +3825,9 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	rv = 0;
 
 out:
-	if (manifest_fd >= 0) {
-		NNVMEIBT_CLOSE(trace_restore_manifest_cleanup, manifest_fd);
-	}
 	if (json_root) {
 		nvmeibt_mm_json_free_kv_tree(json_root);
 	}
-	NNVMEIBT_STR_FREE(trace_restore_manifest_cleanup_str, manifest_content);
 	return rv;
 }
 
