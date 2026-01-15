@@ -204,7 +204,7 @@ enum uk_comm_opcode {
 	csc_keep_alive = 9,						// t2s,  no paylod, no reply from server.
 	csc_identify_disk = 10,					// deprecated: t2s: payload struct nvmeib_identify_disk,  s2t reply: struct nvmeib_identify_disk_reply
 
-	csc_local_client = 11,					// t2s: instruction to local client, like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
+	csc_t2s_local_client = 11,				// t2s: instruction to local client, like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
 	csc_msg_to_process = 14,				// s2t, generic mechanism to send a message from kernel to user space, payload: struct nvmeib_push_extended_msg
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	csc_contaminate_disk = 15,				// should be the last just before the end
@@ -224,7 +224,7 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_io_to_disk: return "csc_io_to_disk";
 	case csc_keep_alive: return "csc_keep_alive";
 	case csc_identify_disk: return "csc_identify_disk";
-	case csc_local_client: return "csc_local_client";
+	case csc_t2s_local_client: return "csc_t2s_local_client";
 	case csc_msg_to_process: return "csc_msg_to_process";
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";

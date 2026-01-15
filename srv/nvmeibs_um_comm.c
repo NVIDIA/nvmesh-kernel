@@ -1812,7 +1812,7 @@ static bool handle_nl(struct nvmeibs_um_comm *p, struct netlink_event *e)
 		need_reply = false;
 		delete_msg = true;
 		goto out;
-	case csc_local_client:
+	case csc_t2s_local_client:
 		if (!local_client_up_p) {
 			_NE(handle_nl_e1001, "No local client");
 			goto error;
@@ -2643,7 +2643,7 @@ static struct nvmeib_nl_uk_comm_rep * get_rep(struct nvmeib_nl_uk_comm_msg *msg)
 	case csc_identify_disk:
 		rep = &((struct nvmeib_identify_disk_reply *)msg->data)->base;
 		break;
-	case csc_local_client:
+	case csc_t2s_local_client:
 		rep = &((struct nvmeib_copied_rscs_reply *)msg->data)->base;
 		break;
 #if TEST_CODE

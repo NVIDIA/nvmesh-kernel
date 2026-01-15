@@ -889,7 +889,7 @@ static int nvmeibt_toma_send_recovery_attach_msg_to_local_clnt(struct attach_det
 
 	NFIN;
 	nl_msg = NNVMEIBT_BM_CALLOC(84j2kua, sizeof(*nl_msg) + sizeof(*toma_msg));	// Copy into it
-	nl_msg->opcode = csc_local_client;
+	nl_msg->opcode = csc_t2s_local_client;
 	nl_msg->ctx = attach_detach_task->serialized_blkdev_for_clnt_4k_aligned;
 	nl_msg->len = sizeof(*toma_msg);
 	nl_msg->on_done = nvmeibt_recovery_buf_to_local_clnt_was_copied_and_can_be_freed;
