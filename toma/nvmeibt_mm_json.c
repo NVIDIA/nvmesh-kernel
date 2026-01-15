@@ -1541,7 +1541,7 @@ int apply_json_topo_hdr(struct mm_json_dict *dict)
 {
 	struct mm_json_kv_pair							*kv;
 	int												rv = 0;
-	struct nvmeibt_topology_serialized_topo_header	header;
+	struct nvmeibt_topology_serialized_topo_header	header = {0};
 	JSON_ASSIGN_AND_CALL_INIT();
 
 	NFIN;
