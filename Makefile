@@ -1,4 +1,10 @@
 # Parent Makefile
+#
+MAKE_PID := $(shell echo $$PPID)
+JOBS := $(shell ps T | sed -n 's@.*$(MAKE_PID).*$(MAKE).* \(-j\|--jobs=\) *\([0-9]*[0-9]*\).*@\1\2@p')
+ifeq ($(JOBS),)
+    JOBS = -j1
+endif
 
 ifneq ($(LLVM),)
     export CC=clang
@@ -202,8 +208,8 @@ ifndef TCM
 endif
 
 GEN_USED_SYMVERS = ./bin/nvmesh_gen_symvers
-COMPILE_UTILS = cd perfTest/io_stress/di_parser; make CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../scan_locks; make SSDA=$(NVMESH_SRC_DIR); cd ../change_bio_in_air; make all; cd ../cmp_blocks;  make CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../gen_md;  make CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../../..
-CLEAN_UTILS =   cd perfTest/io_stress/di_parser; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../scan_locks; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../change_bio_in_air; make clean; cd ../cmp_blocks; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../gen_md; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../../..
+COMPILE_UTILS = cd perfTest/io_stress/di_parser; $(MAKE) CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../scan_locks; $(MAKE) SSDA=$(NVMESH_SRC_DIR); cd ../change_bio_in_air; $(MAKE) all; cd ../cmp_blocks;  $(MAKE) CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../gen_md;  $(MAKE) CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../../..
+CLEAN_UTILS =   cd perfTest/io_stress/di_parser; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../scan_locks; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../change_bio_in_air; $(MAKE) clean; cd ../cmp_blocks; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../gen_md; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../../..
 COMPRESS_KERNEL_MODULES =
 
 ifeq ($(COMPRESS_KO),yes)
@@ -218,29 +224,27 @@ endif
 
 ifneq ($(COMPILE_SERVER),)
     obj-m += srv/
-    COMPILE_TOOLS= cd utils && make all
-    CLEAN_TOOLS= cd utils && make clean
+    COMPILE_TOOLS= cd utils && $(MAKE) $(JOBS) all
+    CLEAN_TOOLS= cd utils && $(MAKE) clean
 
     ifeq ($(TCM), TCMD)
         INFO_TOMA = Building TOMA in DEBUG mode
-        COMPILE_TOMA = cd toma && make all $(SECTOR_SHIFT_FLAG)
-        CLEAN_TOMA = cd toma; make clean
+        COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all $(SECTOR_SHIFT_FLAG)
+        CLEAN_TOMA = cd toma; $(MAKE) clean
     else
         ifeq ($(TCM), TCMR)
             INFO_TOMA = Building TOMA in RELEASE mode
-            COMPILE_TOMA = cd toma && make all MOD=release $(SECTOR_SHIFT_FLAG)
-            CLEAN_TOMA = cd toma; make clean MOD=release
+            COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
+            CLEAN_TOMA = cd toma; $(MAKE) clean MOD=release
         else
             ifeq ($(TCM), TCMDR)
                 INFO_TOMA = Building TOMA in DEBUG RELEASE mode
-                COMPILE_TOMA = cd toma && make all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
-                CLEAN_TOMA = cd toma; make clean MOD=release DEBUG=yes
+                COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
+                CLEAN_TOMA = cd toma; $(MAKE) clean MOD=release DEBUG=yes
             else
                 INFO_TOMA = Building TOMA in IB and UDP-only (release) modes
-                COMPILE_TOMA = cd toma && make all MOD=release $(SECTOR_SHIFT_FLAG)
-                    COMPILE_TOMA = cd toma && make all $(SECTOR_SHIFT_FLAG) && make all MOD=release $(SECTOR_SHIFT_FLAG) && make $(JOBS) all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
-                CLEAN_TOMA = cd toma; make clean; make clean MOD=release; make clean MOD=release DEBUG=yes
-                    COMPILE_TOMA = cd toma && make all $(SECTOR_SHIFT_FLAG) && make all MOD=release $(SECTOR_SHIFT_FLAG)
+                COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
+                CLEAN_TOMA = cd toma; $(MAKE) clean; $(MAKE) clean MOD=release; $(MAKE) clean MOD=release DEBUG=yes
             endif
         endif
     endif
@@ -1417,7 +1421,7 @@ ifeq ($(IS_TOMA_FIRST),true)
 endif
 endif
 	+$(VV)$(COMPILE_UTILS)
-	make -C $(TOOLS_DIR)/toma_rpc
+	$(MAKE) -C $(TOOLS_DIR)/toma_rpc
 	$(VV)$(COLLECT_DICTIONARIES)
 	$(VV)$(COMPRESS_KERNEL_MODULES)
 	$(info $(PY_TO_EXEC_INFO))
