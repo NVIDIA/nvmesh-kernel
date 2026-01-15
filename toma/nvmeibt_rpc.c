@@ -25,9 +25,6 @@ static int rpc_listener_fd = -1;
 static int rpc_child_fd = -1;
 static struct nvmeibt_Str *rpc_out_str = NULL;
 
-// Forward declarations
-void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out, const struct nvmeibt_local_disk *local_disk); // Defined in gpt_util.c
-
 static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str *out)
 {
 	int i;
@@ -723,10 +720,10 @@ static int nvmeibt_rpc_command_export_memory_gpt(int argc, char *argv[], struct 
 		nvmeibt_Str_sprintf(out, "ERROR: Device not found: %s\n", device_path);
 		return -1;
 	}
-
-	/* Use shared function defined in gpt_util.c for JSON generation */
-	gpt_util_format_memory_gpt_json(out, local_disk);
-
+	{
+		void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out, const struct nvmeibt_local_disk *local_disk); /* Use shared function defined in gpt_util.c for JSON generation */
+		gpt_util_format_memory_gpt_json(out, local_disk);
+	}
 	return 0;
 }
 
