@@ -710,6 +710,7 @@ static struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and
 		// A pretty common case. Only the topo details changed, so we can store the incoming topo over the same memory
 		dst = old;
 		dst_data_ptr = (char *)dst + sizeof(*dst);
+		old_data_ptr = (char *)old + sizeof(*old);
 		persist_and_wire_buf_copy_data_to_section(&(dst->topo_ctx), &(old->topo_ctx), &(upd->topo_ctx), &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
 		goto out;
 	}
