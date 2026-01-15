@@ -629,11 +629,13 @@ int SELF_TEST_remove_json_field(const char *json_path, const char *field)
 	// Read file
 	fd = NNVMEIBT_OPEN_READ(trace_selftest_remove_open, json_path, 1);
 	if (fd < 0) {
+		N_Ef(selftest_remove_open_failed, "Failed to open JSON @STR for field removal", json_path);
 		goto out;
 	}
 
 	file_content = NNVMEIBT_STR_ALLOC(trace_selftest_remove_read);
 	if (NNVMEIBT_STR_FREAD_ATOMIC(trace_selftest_remove_fread, file_content, fd) < 0) {
+		N_Ef(selftest_remove_read_failed, "Failed to read JSON @STR", json_path);
 		goto out;
 	}
 	NNVMEIBT_CLOSE(trace_selftest_remove_close1, fd);
@@ -686,10 +688,12 @@ int SELF_TEST_remove_json_field(const char *json_path, const char *field)
 	// Write back
 	fd = open(json_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
+		N_Ef(selftest_remove_open_write_failed, "Failed to open JSON @STR for field removal", json_path);
 		goto out;
 	}
 
 	if (write(fd, nvmeibt_Str_str(new_content), nvmeibt_Str_strlen(new_content)) != (ssize_t)nvmeibt_Str_strlen(new_content)) {
+		N_Ef(selftest_remove_write_failed, "Failed to write JSON @STR", json_path);
 		goto out;
 	}
 
