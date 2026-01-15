@@ -2615,8 +2615,7 @@ static void reply_usermode(struct nvmeibs_um_comm *p, struct netlink_event *e,
 	NFOUT;
 }
 
-static struct nvmeib_nl_uk_comm_rep * get_rep(
-	struct nvmeib_nl_uk_comm_msg *msg)
+static struct nvmeib_nl_uk_comm_rep * get_rep(struct nvmeib_nl_uk_comm_msg *msg)
 {
 	struct nvmeib_nl_uk_comm_rep *rep = NULL;
 
@@ -2653,6 +2652,8 @@ static struct nvmeib_nl_uk_comm_rep * get_rep(
 		break;
 #endif
 	case csc_remove_disk_ack: default:	// All those codes do not require response from the server
+		WARN(true, "Going to crash: wrong msg->opcode=%d", msg->opcode);
+		BUG();
 		break;
 	};
 	NFOUT;
@@ -2676,22 +2677,11 @@ static int reply_usermode_payload(struct nvmeibs_um_comm *p,
 	imsg = e->p;
 	_ND(trace_1_um_comm_reply_usermode_payload, "omsg=@OMSG, imsg=@IMSG, imsg_opcode=@IMSG_OPCODE, msg_size=@MSG_SIZE",
 		omsg, imsg, uk_comm_opcode_str(imsg->opcode), msg_size);
-	omsg->opcode = imsg->opcode;
+	omsg->opcode = imsg->opcode;		// omsg->opcode is wrong. When we push message to process, it is taken from the message that registered the toma process. The reply in the following line is taken by the opcode and we need the reply type of the send_msg_to_process.
 	omsg->id = imsg->id;
 	omsg->caller_type = imsg->caller_type;
 	omsg->len = msg_size;
-	/*
-	 * When we push message to process the initial opcode omsg is wrong as it
-	 * is taken from the message that registered the toma process.
-	 * The reply in the following line is taken by the opcode and we need the
-	 * reply type of the send_msg_to_process.  This works because
-	 * all replies starts with the the same base type namely:
-	 * `struct nvmeib_nl_uk_comm_rep`
-	 */
 	rep = get_rep(omsg);
-	if (!rep) {
-		BUG();
-	}
 	rep->opcode = omsg->opcode;
 	rep->error = code == 0 ? csce_ok :
 			(code == -1 ? -((int)csce_failed) : -((int)code));
