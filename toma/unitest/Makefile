@@ -73,7 +73,8 @@ else
 endif
 LIBS  = -lpthread -lm -ldl
 
-USE_SANITIZERS?=1		# Note: makes executable much larger, affects profiling
+# Note: USE_SANITIZERS makes executable much larger, affects profiling
+USE_SANITIZERS ?= 1
 ifeq ($(USE_SANITIZERS),1)
 	CFLAGS += -fsanitize=leak -fsanitize=address -fsanitize=undefined
 	LDFLAGS += -fsanitize=leak -fsanitize=address -fsanitize=undefined
