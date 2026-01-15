@@ -773,7 +773,11 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 			scan_line_end = csv_str_end;
 		}
 		line_len = strnlen(scan_line_ptr, scan_line_end - scan_line_ptr);	// Look for '\0' before the '\n'
-		NTOMA_ASSERT(nvmeibt_parse_buf_assert, line_len < (int)sizeof(line), "incorrect usage of csv, long lines? line_len=@INT > @SIZEOF", line_len, sizeof(line));
+		if (line_len >= (int)sizeof(line)) {
+			NTOMA_ASSERT(nvmeibt_parse_buf_assert, 0, "incorrect usage of csv, long lines? line_len=@INT >= @SIZEOF", line_len, sizeof(line));
+			scan_line_ptr = scan_line_end + 1;
+			continue;
+		}
 		memcpy(line, scan_line_ptr, line_len);
 		scan_line_ptr = scan_line_ptr + line_len + 1;	// For next line
 		line[line_len] = '\0';
