@@ -2211,7 +2211,7 @@ int nvmeibt_read_excluded_target_drives(void)
 {
 	int		rv;
 	NFIN;
-	rv = read_target_drives_spec_file(&(nvmeibt_global_get_global()->excluded_drives_spec), EXCLUDED_DRIVES_SPEC_FILE_PATH, 0);
+	rv = read_target_drives_spec_file(&(nvmeibt_global_get_global()->excluded_drives_spec), EXCLUDED_DRIVES_SPEC_FILE_PATH, 1);
 	NFOUT;
 	return rv;
 }
@@ -2222,7 +2222,7 @@ int nvmeibt_read_auto_takeover_target_drives(void)
 	struct nvmeibt_local_disk	*stock_local_disk;
 
 	NFIN;
-	rv = read_target_drives_spec_file(&(nvmeibt_global_get_global()->auto_takeover_drives_spec), AUTO_TAKEOVER_DRIVES_SPEC_FILE_PATH, 1);
+	rv = read_target_drives_spec_file(&(nvmeibt_global_get_global()->auto_takeover_drives_spec), AUTO_TAKEOVER_DRIVES_SPEC_FILE_PATH, 0);
 	XHASHTABLE_FOR_EACH_SAFE(stock_local_disk, &(nvmeibt_global_get_global()->stock_local_disks_hash)) {
 		if (nvmeibt_topology_is_disk_explicitly_auto_takeover(&stock_local_disk->from_config.native_serial, stock_local_disk->from_config.vendor, stock_local_disk->from_config.smart_info.Model, stock_local_disk->from_config.nsid)) {
 			stock_local_disk->is_auto_takeover = 1;
