@@ -1012,11 +1012,13 @@ BOOL nvmeibt_seg_active_is_cold_recovery_required(struct nvmeibt_seg_active *seg
 void nvmeibt_seg_active_mark_stale_rebuild_required(struct nvmeibt_seg_active *seg_active)
 {
 	if (seg_active) {
-		if (!nvmeibt_seg_active_is_stale_rebuild_required(seg_active)) { NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(a54l0jo, n_pending_stale_rebuild); }
-		N_Tf(sdf23q9, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
-		seg_active->required_recovery_action.stale_rebuild = 1;
-		NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(2vvv2y4, seg_active);
-		NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(tv393c8, seg_active, 1);
+		if (!(seg_active->required_recovery_action.stale_rebuild)) {
+			NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(a54l0jo, n_pending_stale_rebuild);
+			N_Tf(sdf23q9, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
+			seg_active->required_recovery_action.stale_rebuild = 1;
+			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(2vvv2y4, seg_active);
+			NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(tv393c8, seg_active, 1);
+		}
 	}
 }
 
@@ -1024,10 +1026,10 @@ void nvmeibt_seg_active_clear_stale_rebuild_required(struct nvmeibt_seg_active *
 {
 	if (seg_active) {
 		N_Tf(lolo0f5, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
-		if (nvmeibt_seg_active_is_stale_rebuild_required(seg_active)) {
+		if (seg_active->required_recovery_action.stale_rebuild) {
 			NVMEIBT_GLOBAL_DEC_N_TASKS_COUNTER(kslq1i2, n_pending_stale_rebuild);
+			seg_active->required_recovery_action.stale_rebuild = 0;
 		}
-		seg_active->required_recovery_action.stale_rebuild = 0;
 	}
 }
 
