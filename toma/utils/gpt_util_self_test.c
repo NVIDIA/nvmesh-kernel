@@ -989,11 +989,17 @@ static void remove_directory_recursive(const char *dir_path)
 	}
 
 	while ((entry = readdir(dir)) != NULL) {
+		int ret;
+
 		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
 			continue;
 		}
 
-		snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+		ret = snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+		if (ret < 0 || (size_t)ret >= sizeof(full_path)) {
+			fprintf(stderr, "Error: path truncated for %s/%s\n", dir_path, entry->d_name);
+			continue;
+		}
 		unlink(full_path);		/* Remove files (directories would fail, which is fine) */
 	}
 
