@@ -465,8 +465,7 @@ static struct nvmeibt_nm_local_node *nw_node = NULL;
 char tracing_cgroup[NAME_MAX] = "";
 
 struct local_disk_wq_hash_ctx {
-	// Hash link
-	struct xdlist 				link;
+//	struct xdlist 				link;	// Hash link
 	struct nvmeibt_wq 			*wq;
 	struct nvmeibt_ascii_uuid	ldisk_id;
 };
@@ -487,9 +486,8 @@ struct udev_event_wq_entry {
 	u32									vendor_id;
 };
 
-typedef XHASHTABLE_DECLARE(ldisks_wq_hash_t, struct local_disk_wq_hash_ctx, link, 8);
-static ldisks_wq_hash_t local_ldisks_wq_hash;
-static ldisks_wq_hash_t stock_ldisks_wq_hash;
+static struct nvmeib_hash_table		*ldisks_wq_hash_by_ldisk_id_str;
+static struct nvmeib_hash_table		*stock_ldisks_wq_hash_by_ldisk_id_str;
 
 #if defined(COMPILE_DEBUG)
 #	define MOD_STR "debug"
@@ -680,11 +678,10 @@ static void terminate_toma(int rv)
 	// as at this point of shutdown we cannot in any way wait for the threads signaling that they finished their
 	// work (and decreased the used counter of each memtbl), since we are outside the event loop already.
 
-	XHASHTABLE_FOR_EACH_SAFE(specific_disk_wq_ctx, &(local_ldisks_wq_hash)) {
+	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, ldisks_wq_hash_by_ldisk_id_str) {
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
 		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
 		specific_disk_wq_ctx->wq = NULL;
-		XHASHTABLE_DEL(&(local_ldisks_wq_hash), &(specific_disk_wq_ctx->link));
 		NNVMEIBT_BM_FREE(terminate_toma_trace, specific_disk_wq_ctx);
 	}
 
@@ -692,11 +689,10 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_destroy(read_disk_from_smart_wq);
 	read_disk_from_smart_wq = NULL;
 
-	XHASHTABLE_FOR_EACH_SAFE(specific_disk_wq_ctx, &(stock_ldisks_wq_hash)) {
+	NVMEIB_HASH_FOREACH(specific_disk_wq_ctx, stock_ldisks_wq_hash_by_ldisk_id_str) {
 		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
 		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
 		specific_disk_wq_ctx->wq = NULL;
-		XHASHTABLE_DEL(&(stock_ldisks_wq_hash), &(specific_disk_wq_ctx->link));
 		NNVMEIBT_BM_FREE(terminate_toma_trace_1, specific_disk_wq_ctx);
 	}
 
@@ -1271,21 +1267,19 @@ static void local_disk_wq_entry_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-static int local_disk_specific_add_work(ldisks_wq_hash_t *ldisks_wq_hash, const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
+static int local_disk_specific_add_work(struct nvmeib_hash_table *ldisks_wq_hash_by_ldisk_id_str, const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
 {
 	int rv = 0;
 	struct local_disk_wq_hash_ctx *specific_disk_ctx;
-	uint64_t disk_hash_val = xhash_str_to_32_bits(ldisk_id->str);
 	char wq_name[ASCII_UUID_MAX_STR_LEN + 16];
 
 	NFIN;
 
 	// Find the wq for ldisk_id
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(specific_disk_ctx, ldisks_wq_hash, disk_hash_val) {
-		if (is_ascii_uuid_eq(&(specific_disk_ctx->ldisk_id), ldisk_id)) {
-			rv = nvmeibt_wq_addw(specific_disk_ctx->wq, e);
-			goto out;
-		}
+	specific_disk_ctx = nvmeib_hash_search_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
+	if (specific_disk_ctx) {
+		rv = nvmeibt_wq_addw(specific_disk_ctx->wq, e);
+		goto out;
 	}
 
 	// Allocate the hash member.
@@ -1303,7 +1297,7 @@ static int local_disk_specific_add_work(ldisks_wq_hash_t *ldisks_wq_hash, const 
 	specific_disk_ctx->ldisk_id = *ldisk_id;
 
 	// Add the wq wrapper to the hash.
-	XHASHTABLE_ADD(ldisks_wq_hash, specific_disk_ctx, disk_hash_val);
+	nvmeib_hash_add_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str, specific_disk_ctx);
 	nvmeibt_wq_addw(specific_disk_ctx->wq, e);
 
 out:
@@ -1313,12 +1307,12 @@ out:
 
 int nvmeibt_toma_stock_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
 {
-	return local_disk_specific_add_work(&stock_ldisks_wq_hash, ldisk_id, ld_display, e);
+	return local_disk_specific_add_work(stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
 }
 
 int nvmeibt_toma_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *ldisk_id, const char *ld_display, struct nvmeibt_wq_entry *e)
 {
-	return local_disk_specific_add_work(&local_ldisks_wq_hash, ldisk_id, ld_display, e);
+	return local_disk_specific_add_work(ldisks_wq_hash_by_ldisk_id_str, ldisk_id, ld_display, e);
 }
 
 /**
@@ -1334,44 +1328,37 @@ int nvmeibt_toma_local_disk_specific_add_work(const struct nvmeibt_ascii_uuid *l
 void nvmeibt_toma_stop_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
 {
 	struct local_disk_wq_hash_ctx *specific_disk_wq_ctx;
-	uint64_t calculated_hash_val = xhash_str_to_32_bits(ldisk_id->str);
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(specific_disk_wq_ctx, &(local_ldisks_wq_hash), calculated_hash_val) {
-		if (is_ascii_uuid_eq(&(specific_disk_wq_ctx->ldisk_id), ldisk_id)) {
-			// drain the wq of this disk, to avoid anything from attempting execution on it.
-			nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-			nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-			specific_disk_wq_ctx->wq = NULL;
-
-			// remove the local disk_wq from the wq's hash
-			XHASHTABLE_DEL(&(local_ldisks_wq_hash), &(specific_disk_wq_ctx->link));
-			NNVMEIBT_BM_FREE(nvmeibt_toma_stop_local_disk_wq_trace_bm_free, specific_disk_wq_ctx);
-		}
+	specific_disk_wq_ctx = nvmeib_hash_delete_ascii_str(ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
+	if (specific_disk_wq_ctx) {
+		// drain the wq of this disk, to avoid anything from attempting execution on it.
+		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
+		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
+		specific_disk_wq_ctx->wq = NULL;
+		// remove the local disk_wq from the wq's hash
+		NNVMEIBT_BM_FREE(nvmeibt_toma_stop_local_disk_wq_trace_bm_free, specific_disk_wq_ctx);
 	}
-
 	NFOUT;
 }
 
 void nvmeibt_toma_stop_stock_local_disk_wq(const struct nvmeibt_ascii_uuid *ldisk_id)
 {
 	struct local_disk_wq_hash_ctx *specific_disk_wq_ctx;
-	uint64_t calculated_hash_val = xhash_str_to_32_bits(ldisk_id->str);
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(specific_disk_wq_ctx, &(stock_ldisks_wq_hash), calculated_hash_val) {
-		if (is_ascii_uuid_eq(&(specific_disk_wq_ctx->ldisk_id), ldisk_id)) {
-			// drain the wq of this disk, to avoid anything from attempting execution on it.
-			nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
-			nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
-			specific_disk_wq_ctx->wq = NULL;
+	specific_disk_wq_ctx = nvmeib_hash_search_ascii_str(stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
+	if (specific_disk_wq_ctx) {
+		// drain the wq of this disk, to avoid anything from attempting execution on it.
+		nvmeibt_wq_drain(specific_disk_wq_ctx->wq);
+		nvmeibt_wq_destroy(specific_disk_wq_ctx->wq);
+		specific_disk_wq_ctx->wq = NULL;
 
-			// remove the local disk_wq from the wq's hash
-			XHASHTABLE_DEL(&(stock_ldisks_wq_hash), &(specific_disk_wq_ctx->link));
-			NNVMEIBT_BM_FREE(nvmeibt_toma_stop_stock_local_disk_wq_1, specific_disk_wq_ctx);
-		}
+		// remove the local disk_wq from the wq's hash
+		nvmeib_hash_delete_ascii_str(stock_ldisks_wq_hash_by_ldisk_id_str, ldisk_id->str);
+		NNVMEIBT_BM_FREE(nvmeibt_toma_stop_stock_local_disk_wq_1, specific_disk_wq_ctx);
 	}
 
 	NFOUT;
@@ -2708,8 +2695,8 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	/* create work-queues */
 	// Init disk_wqs hash table.
-	XHASHTABLE_INIT(&local_ldisks_wq_hash);
-	XHASHTABLE_INIT(&stock_ldisks_wq_hash);
+	ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
+	stock_ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(ebaimqx, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_ldisks_wq_hash", -1);
 	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");
