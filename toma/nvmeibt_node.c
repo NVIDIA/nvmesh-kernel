@@ -62,8 +62,7 @@ enum nvmeibt_add_rv nvmeibt_node_add(struct mm_node_conf *conf, int config_tag)
 
 	f->id = conf->uuid;
 	f->version = conf->version;
-	strncpy(f->name, conf->node_id, sizeof(f->name));
-	f->name[sizeof(f->name)-1] = 0;
+	strlcpy(f->name, conf->node_id, sizeof(f->name));
 
 	if (pthread_mutex_init(&new_node->guard, NULL) < 0) {
 		N_Ef(error_node_nvmeibt_node_add, "Failed to create node @NODE_NAME guard @AUTO_ERRNO",
