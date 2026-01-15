@@ -169,6 +169,7 @@ class ManagementCM(Daemon):
 		producer_conf = conf.copy()
 		producer_conf['error_cb'] = lambda err: self.onProducerError(err, producerId)
 		producer_conf['retries'] = 5
+		producer_conf['message.timeout.ms'] = 60000
 		self.producer = Producer(producer_conf)
 
 	def isSSLRelatedError(self, err):
