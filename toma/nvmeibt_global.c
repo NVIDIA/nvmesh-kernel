@@ -1098,9 +1098,8 @@ static int n_toma_restarts_in_the_last_5_days(void)
 	int			rv = 0;
 	int			n_bytes_read;
 	int			system_status;
-	#define LOGS_DIR TOMA_ROOT_DIR "var/log/nvmesh/trace_daemon"
 	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), TOMA_ROOT_DIR "tmp/jctl_%d", getpid());
-	snprintf(cmd, sizeof(cmd), LOGS_DIR "/pager " LOGS_DIR " -l toma.eter.binlog -t now-120h --nogreet -f 'trace=trace_toma_nvmeibt_toma_init' | wc -l > %s", n_restarts_file_name);
+	snprintf(cmd, sizeof(cmd), TOMA_BINLOG_DIR "/pager " TOMA_BINLOG_DIR " -l toma.eter.binlog -t now-120h --nogreet -f 'trace=trace_toma_nvmeibt_toma_init' | wc -l > %s", n_restarts_file_name);
 	// Todo: Consider using faster code instead: snprintf(cmd, sizeof(cmd), "find " TOMA_ROOT_DIR " -name toma.binlog_marker* -mmin -7200 | wc -l > %s", n_restarts_file_name);
 	N_Tf(0kkdoks, "@STR", cmd);
 	system_status = system(cmd);
