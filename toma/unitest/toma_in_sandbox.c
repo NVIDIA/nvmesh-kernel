@@ -681,6 +681,7 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	rep->dinfo.disk.vendor_id = dev->vendor_id;
 	rep->dinfo.disk.block_size = 1 << SANDBOX_NVME_BLOCK_SIZE_EXPONENT;  // 4096
 	rep->dinfo.disk.max_request_size = 32;
+	rep->dinfo.disk.max_n_hw_sectors = 32;
 	rep->dinfo.disk.seq = 0;
 	rep->dinfo.disk.nsid = 1;
 	rep->dinfo.disk.metadata = 0;
