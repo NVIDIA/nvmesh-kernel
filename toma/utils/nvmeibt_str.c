@@ -63,6 +63,10 @@ int nvmeibt_Str_sprintf(struct nvmeibt_Str *this, const char *format, ...)
 	size_t	size_needed;
 	bool	is_enough_allocated;
 	N_VERIFY_NVMEIBT_STR_INITIALIZED(error_str_nvmeibt_Str_sprintf, this);
+	if (!format) {
+		NTOMA_ASSERT(Str_sprintf_fmt_null, 0, "null format string");
+		return -1;
+	}
 	do {
 		const size_t allocated_size = Str_get_allocated_size(this);
 		const size_t len = nvmeibt_Str_strlen(this);
