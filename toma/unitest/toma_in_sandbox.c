@@ -1,4 +1,4 @@
-#define TOMA_SANDBOX_BYPASS_REDIRECTS  // allow calling real OS I/O functions from this module
+#define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module - must be defined before any other includes
 
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
