@@ -29,6 +29,7 @@ struct self_test_ctx {
 	const char	*wrong_device_path;
 	char		**test_argv;
 	int			*test_argc;
+	BOOL		quiet_mode;
 };
 
 // Self-test framework: Test function signature
@@ -39,66 +40,66 @@ struct self_test_entry {
 	const char			*name;
 	const char			*command;
 	self_test_func_t	func;
-	BOOL				expect_failure;		// true for negative tests
 };
 
 // X-Macro: Declare all tests here (order determines test numbers automatically)
-// Format: X(function_name, "Test Name", "Command Description", expect_failure)
+// Format: X(function_name, "Test Name", "Command Description")
+// Note: Negative tests (expect blocking) handle result inversion internally
 #define SELF_TEST_LIST \
-	/* Display & Filterin */ \
-	X(normal_gpt, "Normal GPT (Primary == Alternate)", "gpt_util -a <path> -c both", false) \
-	X(mismatch_gpt, "Mismatched GPT (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
-	X(uuid_filtering, "UUID Filtering", "gpt_util -a <path> --filter-uuid <UUID>", false) \
-	X(lba_filtering, "LBA Filtering", "gpt_util -a <path> --filter-lba 1000", false) \
-	X(overlap_detection, "Overlap Detection (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export", false) \
+	/* Display & Filtering */ \
+	X(normal_gpt, "Normal GPT (Primary == Alternate)", "gpt_util -a <path> -c both") \
+	X(mismatch_gpt, "Mismatched GPT (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export") \
+	X(uuid_filtering, "UUID Filtering", "gpt_util -a <path> --filter-uuid <UUID>") \
+	X(lba_filtering, "LBA Filtering", "gpt_util -a <path> --filter-lba 1000") \
+	X(overlap_detection, "Overlap Detection (Display + Export + Flag Validation)", "gpt_util -a <path> -c both + export") \
 	/* Core Operations */ \
-	X(gpt_upgrade, "GPT Upgrade (corrupt n_partition_entries to 128, upgrade to 8192)", "Internal API test", false) \
-	X(json_export_apply, "JSON Export + Apply (Dry-Run)", "gpt_util -a <path> -J + --apply-from", false) \
-	X(zeroing_verify, "Zeroing Verification Commands (-Z)", "gpt_util -a <path> -Z", false) \
-	X(diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from", false) \
-	X(diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from", false) \
-	X(apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B", false) \
-	/* Safety & Blocking */ \
-	X(missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)", true) \
-	X(overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)", true) \
-	X(mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)", true) \
-	X(serial_number_mismatch, "Safety - Serial Number Mismatch Protection", "gpt_util export from A + apply to B (blocked)", true) \
-	X(missing_serial_number, "Safety - Missing Serial Number Blocked", "gpt_util remove serial from JSON + apply (blocked)", true) \
+	X(gpt_upgrade, "GPT Upgrade (corrupt n_partition_entries to 128, upgrade to 8192)", "Internal API test") \
+	X(json_export_apply, "JSON Export + Apply (Dry-Run)", "gpt_util -a <path> -J + --apply-from") \
+	X(zeroing_verify, "Zeroing Verification Commands (-Z)", "gpt_util -a <path> -Z") \
+	X(diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from") \
+	X(diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from") \
+	X(apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B") \
+	/* Safety & Blocking (negative tests - expect operation to be blocked) */ \
+	X(missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)") \
+	X(overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)") \
+	X(mismatch_blocking, "Safety - Both Copies with Mismatch (blocked)", "gpt_util export both + apply (blocked)") \
+	X(serial_number_mismatch, "Safety - Serial Number Mismatch Protection", "gpt_util export from A + apply to B (blocked)") \
+	X(missing_serial_number, "Safety - Missing Serial Number Blocked", "gpt_util remove serial from JSON + apply (blocked)") \
 	/* Delete Features */ \
-	X(delete_main_entry, "Delete Main GPT Entry (_delete flag)", "gpt_util export + add _delete + apply --write", false) \
-	X(delete_metadata_entry, "Delete Metadata GPT Entry (_delete in nested GPT)", "gpt_util export + delete metadata entry + apply --write", false) \
+	X(delete_main_entry, "Delete Main GPT Entry (_delete flag)", "gpt_util export + add _delete + apply --write") \
+	X(delete_metadata_entry, "Delete Metadata GPT Entry (_delete in nested GPT)", "gpt_util export + delete metadata entry + apply --write") \
 	/* Field Validation */ \
-	X(readonly_fields_ignored, "Validation - _READONLY_ Fields Ignored", "gpt_util export + edit CRC + apply (CRC recalculated)", false) \
-	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)", false) \
-	X(nguid_preservation, "Validation - NGUID Preserved on Apply", "gpt_util apply without NGUID in JSON (NGUID unchanged)", false) \
-	X(warning_fields_apply, "Validation - _WARNING_ Fields Applied", "gpt_util modify last_pba_zeroed + apply --write", false) \
+	X(readonly_fields_ignored, "Validation - _READONLY_ Fields Ignored", "gpt_util export + edit CRC + apply (CRC recalculated)") \
+	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)") \
+	X(nguid_preservation, "Validation - NGUID Preserved on Apply", "gpt_util apply without NGUID in JSON (NGUID unchanged)") \
+	X(warning_fields_apply, "Validation - _WARNING_ Fields Applied", "gpt_util modify last_pba_zeroed + apply --write") \
 	/* Advanced Features */ \
-	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write", false) \
-	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)", false) \
+	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write") \
+	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)") \
 	/* Binary Backup & Restore */ \
-	X(binary_backup_restore, "Binary Backup & Restore", "gpt_util apply creates backup + restore works", false) \
-	X(backup_restore_serial_mismatch, "Backup Safety - Serial Number Mismatch Blocked", "gpt_util restore to wrong device (serial mismatch)", true) \
-	X(backup_restore_missing_file, "Backup Safety - Missing Structure File Blocked", "gpt_util restore with missing file", true) \
-	X(backup_restore_corrupted_file, "Backup Safety - Corrupted File Blocked", "gpt_util restore with wrong file size", true) \
-	X(backup_restore_incomplete_manifest, "Backup Safety - Incomplete Manifest Blocked", "gpt_util restore with missing manifest fields", true) \
-	X(backup_restore_pba_overflow, "Backup Safety - PBA Overflow Blocked", "gpt_util restore from larger device to smaller", true) \
-	X(backup_restore_block_size_mismatch, "Backup Safety - Block Size Mismatch Blocked", "gpt_util restore with wrong block size", true) \
-	X(backup_restore_empty_structures, "Backup Safety - Empty Structures Array Blocked", "gpt_util restore with structures: []", true) \
-	X(backup_creation_non_nvmesh_device, "Backup Failure - Non-NVMesh Device Blocked", "gpt_util backup device without metadata GPT", true) \
-	X(restore_mid_failure_file_deleted, "Restore Mid-Failure - File Deleted During Restore", "gpt_util restore with file deleted mid-process", true) \
+	X(binary_backup_restore, "Binary Backup & Restore", "gpt_util apply creates backup + restore works") \
+	X(backup_restore_serial_mismatch, "Backup Safety - Serial Number Mismatch Blocked", "gpt_util restore to wrong device (serial mismatch)") \
+	X(backup_restore_missing_file, "Backup Safety - Missing Structure File Blocked", "gpt_util restore with missing file") \
+	X(backup_restore_corrupted_file, "Backup Safety - Corrupted File Blocked", "gpt_util restore with wrong file size") \
+	X(backup_restore_incomplete_manifest, "Backup Safety - Incomplete Manifest Blocked", "gpt_util restore with missing manifest fields") \
+	X(backup_restore_pba_overflow, "Backup Safety - PBA Overflow Blocked", "gpt_util restore from larger device to smaller") \
+	X(backup_restore_block_size_mismatch, "Backup Safety - Block Size Mismatch Blocked", "gpt_util restore with wrong block size") \
+	X(backup_restore_empty_structures, "Backup Safety - Empty Structures Array Blocked", "gpt_util restore with structures: []") \
+	X(backup_creation_non_nvmesh_device, "Backup Failure - Non-NVMesh Device Blocked", "gpt_util backup device without metadata GPT") \
+	X(restore_mid_failure_file_deleted, "Restore Mid-Failure - File Deleted During Restore", "gpt_util restore with file deleted mid-process") \
 	/* Advanced JSON Modifications */ \
-	X(json_add_partition_entry, "JSON Modification - Add Partition Entry", "gpt_util add new partition via JSON", false) \
-	X(json_modify_metadata_gpt, "JSON Modification - Metadata GPT Changes", "gpt_util modify metadata partition name/range", false) \
-	X(json_boundary_max_partitions, "Boundary Test - Max Partitions", "gpt_util handle max 8192 partitions", false) \
+	X(json_add_partition_entry, "JSON Modification - Add Partition Entry", "gpt_util add new partition via JSON") \
+	X(json_modify_metadata_gpt, "JSON Modification - Metadata GPT Changes", "gpt_util modify metadata partition name/range") \
+	X(json_boundary_max_partitions, "Boundary Test - Max Partitions", "gpt_util handle max 8192 partitions") \
 	/* Edge Cases */ \
-	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)", false) \
-	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)", true)*/ \
-	X(o_direct_flags, "Validation - O_DIRECT Flags", "gpt_util --direct and --no-direct (I/O mode control)", false) \
+	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)") \
+	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)")*/ \
+	X(o_direct_flags, "Validation - O_DIRECT Flags", "gpt_util --direct and --no-direct (I/O mode control)") \
 	/* In-Memory GPT & TOMA Blocking */ \
-	X(export_without_toma, "In-Memory GPT - Export Without TOMA", "gpt_util export when TOMA not running", false) \
-	X(write_blocked_toma_running, "TOMA Safety - Write Blocked When TOMA Running", "gpt_util blocks writes if TOMA detected", true) \
-	X(memory_sections_ignored, "In-Memory GPT - Memory Sections Ignored in Apply", "gpt_util apply ignores memory_* sections", false) \
-	X(export_memory_gpt, "Export In-Memory GPT", "gpt_util export with mock memory GPT returning JSON", false)
+	X(export_without_toma, "In-Memory GPT - Export Without TOMA", "gpt_util export when TOMA not running") \
+	X(write_blocked_toma_running, "TOMA Safety - Write Blocked When TOMA Running", "gpt_util blocks writes if TOMA detected") \
+	X(memory_sections_ignored, "In-Memory GPT - Memory Sections Ignored in Apply", "gpt_util apply ignores memory_* sections") \
+	X(export_memory_gpt, "Export In-Memory GPT", "gpt_util export with mock memory GPT returning JSON")
 
 // Define test function (searchable marker + function signature)
 // Usage: DEFINE_TEST(normal_gpt) { test body }
@@ -151,10 +152,9 @@ int SELF_TEST_setup_device(int (*setup_func)(const char *), const char *device_p
 /**
  * End a self-test case (SELF-TEST only)
  * Prints PASSED/FAILED based on result
- * expect_failure: if true, non-zero result is success (for negative tests)
  * Returns: 0 if passed, -1 if failed (for counting)
  */
-int SELF_TEST_end(int test_num, int result, BOOL expect_failure);
+int SELF_TEST_end(int test_num, int result);
 
 /**
  * Generate a mock NVMesh disk with valid MBR and GPT structure for self-test
