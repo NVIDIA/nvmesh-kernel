@@ -434,6 +434,7 @@ done:
 static bool TSB_netlink_queue_is_empty(void);
 static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
+static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -455,6 +456,8 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		}
 	} else if (req_msg->opcode == csc_keep_alive) {
 		N_Tf(nl_keepalive, "Netlink keep_alive received");
+	} else if (req_msg->opcode == csc_io_to_disk) {
+		TSB_netlink_handle_io_to_disk(req_msg);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
@@ -687,6 +690,53 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
 	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
 	rep->dinfo.serjio_status = 0;  // nvmeibs_serjio_status_ok
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+// Handle csc_io_to_disk requests - perform disk I/O and queue response
+static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_io_to_disk_reply *rep = (struct nvmeib_io_to_disk_reply *)msg->data;
+	const struct nvmeib_io_to_disk *io_req = (const struct nvmeib_io_to_disk *)req_msg->data;
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(io_req->disk_id);
+
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	rep->base.opcode = msg->opcode = req_msg->opcode;
+	msg->id = req_msg->id;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+
+	if (!dev) {
+		rep->base.error = 1;  // Device not found
+		N_Wf(nl_io_err, "IO to unknown disk disk_id=@STR", io_req->disk_id);
+	} else {
+		// Perform the actual I/O on the sandbox disk file
+		int fd = sandbox_nvme_get_fd(dev);
+		off_t offset = (off_t)io_req->start_sector * (1 << SANDBOX_NVME_BLOCK_SIZE_EXPONENT);
+		ssize_t result;
+
+		if (io_req->is_read) {
+			result = pread(fd, io_req->data, io_req->data_len, offset);
+		} else {
+			result = pwrite(fd, io_req->data, io_req->data_len, offset);
+		}
+		close(fd);
+
+		if (result < 0) {
+			rep->base.error = 1;
+			N_Wf(nl_io_fail, "IO failed disk=@STR is_read=@INT offset=@ZX len=@INT err=@AUTO_ERRNO",
+				io_req->disk_id, io_req->is_read, offset, io_req->data_len);
+		} else {
+			rep->base.error = 0;  // csce_ok
+			rep->n_data_io = io_req->data_len;
+			rep->n_md_io = 0;
+		}
+		nvmeib_strlcpy(rep->disk_id, io_req->disk_id, sizeof(rep->disk_id));
+		rep->vendor_id = io_req->vendor_id;
+	}
+
+	rep->base.latency_ns = 100;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 

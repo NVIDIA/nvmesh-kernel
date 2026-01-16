@@ -211,6 +211,48 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index)
 	return &nvme_devices[index];
 }
 
+const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id)
+{
+	// disk_id format is "SERIAL.NSID" e.g. "NVMD_SN_002.1"
+	// We need to match the serial number portion
+	char serial[64];
+	const char *dot = strchr(disk_id, '.');
+	size_t serial_len;
+	int i;
+
+	if (!disk_id)
+		return NULL;
+
+	if (dot) {
+		serial_len = (size_t)(dot - disk_id);
+		if (serial_len >= sizeof(serial))
+			serial_len = sizeof(serial) - 1;
+		memcpy(serial, disk_id, serial_len);
+		serial[serial_len] = '\0';
+	} else {
+		nvmeibt_strlcpy(serial, disk_id, sizeof(serial));
+	}
+
+	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+		const struct sandbox_nvme_device *d = &nvme_devices[i];
+		if (!strcmp(d->serial_number, serial)) {
+			N_Tf(kdj3947, "found device for disk_id=@STR serial=@STR", disk_id, serial);
+			return d;
+		}
+	}
+
+	N_Tf(uti3346, "no device for disk_id=@STR serial=@STR", disk_id, serial);
+	return NULL;
+}
+
+int sandbox_nvme_get_fd(const struct sandbox_nvme_device *dev)
+{
+	// Open the device file for reading/writing
+	if (!dev)
+		return -1;
+	return open(dev->device_path, O_RDWR);
+}
+
 struct udev *udev_new(void)
 {
 	int i;
