@@ -2615,7 +2615,7 @@ void nvmeibt_abort(enum nvmeibt_error_severity es)
 
 static int nvmeibt_toma_init(int argc, char *argv[])
 {
-	char *last_slash_in_mypath, *cmdline;
+	char *last_slash_in_mypath;
 	int rv;
 	BOOL success = 0;
 	time_t		cur_time_t;
@@ -2661,14 +2661,14 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		  "client_proto_version=@X dictionary_checksum=@X",
 		  GIT_COMMIT_ID, GIT_BRANCH, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT, TOMA_SW_COMPATIBILITY_VER,
 		  NVMEIBT_CLIENT_PROTO_VERSION, (unsigned int)NVMEIB_DICTIONARY_CKSUM);
-	cmdline = malloc(1024);
-	if (cmdline) {
-		int i, offset = 0;
+	{
+		int i;
+		struct nvmeibt_Str *cmdline_str = NNVMEIBT_STR_ALLOC(trace_2_toma_nvmeibt_toma_init);
 		for (i = 0; i < argc; i++) {
-			offset += sprintf(cmdline + offset, " %s", argv[i]);
+			nvmeibt_Str_sprintf(cmdline_str, " %s", argv[i]);
 		}
-		N_IMf(trace_3_toma_nvmeibt_toma_init, "@STR", cmdline);
-		free(cmdline);
+		N_IMf(trace_3_toma_nvmeibt_toma_init, "@STR", nvmeibt_Str_str(cmdline_str));
+		NNVMEIBT_STR_FREE(trace_4_toma_nvmeibt_toma_init, cmdline_str);
 	}
 	if (!nvmeibt_toma_is_running_as_a_utility()) {
 		if ((rv = nvmeibt_udev_create()) < 0) {
