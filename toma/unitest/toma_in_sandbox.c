@@ -326,7 +326,7 @@ struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void
 static struct t_sandbox_sock * TSB_socket_find_by_fd_opt(int fd) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	int i;
-	if (fd > sys->TS.debug_offset)
+	if (fd >= sys->TS.debug_offset)
 		return &TS->socks[fd - TS->debug_offset];
 	for (i = 0; i < TS->n_socks; i++) {
 		if (TS->socks[i].fd == fd)
