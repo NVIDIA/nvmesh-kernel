@@ -1058,6 +1058,10 @@ class NvmeshUMSocket(ClientSocket):
 
 		self.kafkaOutbox.put(message)
 
+	def replayCacheUponReceivingUpdateToken(self, writeList):
+		self.logger.debug('This is the first updateToken, replaying messages from cache')
+		self.resendMessagesFromCache(writeList)
+
 	@staticmethod
 	def filterResponseForRequestedVolumes(response, requestedVolumes):
 		requestedVolumesNames = [vol["name"] for vol in requestedVolumes]
