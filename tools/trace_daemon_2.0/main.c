@@ -327,17 +327,19 @@ int main(int argc, char* argv[])
 			//There is a bug here, in some cases, the thread may not start running or trying to read from the proc 
 			//but we will call abort functionality. We need some barrier here
 
-
+			//closing the channels and destroying the mmap manager is an "atomic" operation
+			//it should not be splitted
 			for(i = 0; i < MAX_TRACE_CHANNELS; ++i)
 			{
 				destroy_trace_channel(ctx[i].ch);
 				ctx[i].ch = NULL;
 			}
 			
+			destroy_mmap_manager(mmap);
+
 			destroy_io_pet_channel(io_pet_ch);
 			io_pet_ch = NULL;
 
-			destroy_mmap_manager(mmap);
 
 			_info("Cycle terminated");
 		}
