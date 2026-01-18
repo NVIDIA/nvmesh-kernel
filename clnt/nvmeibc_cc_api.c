@@ -1212,6 +1212,23 @@ _out:
 	return rv;
 }
 
+__attribute__((nonnull (1,2)))
+static void __nvmeibc_cc_api_notify_vol_io_changed(struct nvmeibc_volume *volume,
+						   const struct nvmeibc_cinst_params_main *p)
+{
+	enum_io_perm io_perm;
+	bool send_to_mcs = true; // Update mgmt
+	bool send_to_cli = !volume->hdr.first_io_enabled_was_sent_to_cli && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr); // Send only on first time and not hidden
+
+	io_perm = nvmeibc_get_io_perm_for_reporting(volume->block_dev);
+	if (volume->hdr.last_sent_io_perm == io_perm) { // We are sending the exact same IO permission from WD context, probably a race
+		_ND(nvmeibc_cc_api_notify_io_changed, "@DEV_NAME_FULL: Volume @HDR_UUID sending the previously sent IO Perm @IO_PERM to mgmt", volume->full_name, volume->hdr.uuid, io_perm);
+	}
+	nvmeibc_cc_api_reply_vol_cmd_status(p, &volume->hdr, NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED, io_perm, send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
+	// Only upon first IO enabled send to CLI - if hidden attached and changing to fully attached will update cli only once (mgmt still gets every update)
+	volume->hdr.first_io_enabled_was_sent_to_cli = volume->hdr.first_io_enabled_was_sent_to_cli || (!io_perm_is_blocked_no_io(io_perm) && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr));
+}
+
 
 void nvmeibc_cc_api_notify_io_changed(void *_volume_uuid, const struct nvmeibc_cinst_params_main *p)
 {
@@ -1220,15 +1237,7 @@ void nvmeibc_cc_api_notify_io_changed(void *_volume_uuid, const struct nvmeibc_c
 															UNKNOWN_ILLEGAL);
 	nvmeibc_assert_on_main_wq(p);
 	if (volume){
-		const enum_io_perm io_perm = nvmeibc_get_io_perm_for_reporting(volume->block_dev);
-		bool send_to_cli = !volume->hdr.first_io_enabled_was_sent_to_cli && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr); // Send only on first time and not hidden
-		bool send_to_mcs = true; // Update mgmt
-		if (volume->hdr.last_sent_io_perm == io_perm) { // We are sending the exact same IO permission from WD context, probably a race
-			_ND(nvmeibc_cc_api_notify_io_changed, "@DEV_NAME_FULL: Volume @HDR_UUID sending the previously sent IO Perm @IO_PERM to mgmt", volume->full_name, volume->hdr.uuid, io_perm);
-		}
-		nvmeibc_cc_api_reply_vol_cmd_status(p, &volume->hdr, NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED, io_perm, send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
-		// Only upon first IO enabled send to CLI - if hidden attached and changing to fully attached will update cli only once (mgmt still gets every update)
-		volume->hdr.first_io_enabled_was_sent_to_cli = volume->hdr.first_io_enabled_was_sent_to_cli || (!io_perm_is_blocked_no_io(io_perm) && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr));
+		__nvmeibc_cc_api_notify_vol_io_changed(volume, p);
 	} else {
 		//actually this should never happen - work queue will ensure this
 	}
@@ -2187,11 +2196,28 @@ static inline void __set_keepalive_interval(struct nvmeibc_control_api* cc_api, 
 	cc_api->heartbeat.delay_jiffies = 1;
 }
 
+static void __send_all_volumes_status_upstream(struct nvmeibc_control_api *cc_api)
+{
+	const struct nvmeibc_cinst_params_main *cinst = __get_cinst_params_from_cc_api(cc_api);
+	struct nvmeibc_volume *volume = NULL;
+	int n_vols = 0;
+	NFIN;
+
+	list_for_each_entry(volume, nvmeibc_get_volumes(cinst), link) {
+		__nvmeibc_cc_api_notify_vol_io_changed(volume, cinst);
+		++n_vols;
+	}
+	_NT(t_1__send_volume_status_upstream, "Sent status of @INT volumes upstream after setting client token", n_vols);
+
+	NFOUT;
+}
+
 static int __client_update_upstream_params(void *_p) {
 	struct mcs_handler_param *p = (struct mcs_handler_param*)_p;
 	struct nvmeibc_control_api* cc_api = p->cc_api;
 	int rv = 0;
 	bool was_client_token_updated;
+	const long long last_token_val = cc_api->clnt_2_mgmt_fullconf_token;
 
 	__verify_on_main_wq_ccapi(cc_api);
 
@@ -2214,9 +2240,12 @@ static int __client_update_upstream_params(void *_p) {
 	//report id
 	__update_clnt_report_id_from_mgmt(cc_api, p->report_id_to_set);
 
-	_NT(t_2_client_update_upstream_params_cc_api, "Client updated upstream params: clientToken=@COUNTS, reportID=@COUNTS, messageSequence=@COUNTS, attachmentsVersion=@INT", cc_api->clnt_2_mgmt_fullconf_token, cc_api->clnt_2_mgmt_report_id, cc_api->clnt_2_mgmt_sequence_id, cc_api->latest_attachment_version);
 	__set_keepalive_interval(cc_api, p->keepaliveInterval);
 
+	_NT(t_2_client_update_upstream_params_cc_api, "Client updated upstream params: clientToken=@COUNTS, reportID=@COUNTS, messageSequence=@COUNTS, attachmentsVersion=@INT", cc_api->clnt_2_mgmt_fullconf_token, cc_api->clnt_2_mgmt_report_id, cc_api->clnt_2_mgmt_sequence_id, cc_api->latest_attachment_version);
+	if (was_client_token_updated && last_token_val == DEFAULT_UPSTREAM_VALUE) { //resend all volume status if after setting token.
+		__send_all_volumes_status_upstream(cc_api);
+	}
 	kfree(p);
 	return rv;
 }
