@@ -258,6 +258,9 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 				nvmeibt_seg_active_UUID_8((__seg_active__)),													\
 				(__seg_active__)->is_expected_to_have_stale_locks, (__new_value__));							\
 			(__seg_active__)->is_expected_to_have_stale_locks = (__new_value__);								\
+			if (!(__seg_active__)->is_expected_to_have_stale_locks) {											\
+				nvmeibt_seg_active_clear_stale_rebuild_required(__seg_active__);								\
+			}																									\
 		}																										\
 	} else {																									\
 		N_Ef(name ## _error, "SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS seg_active=NULL)");							\
