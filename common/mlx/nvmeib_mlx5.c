@@ -54,48 +54,7 @@ MODULE_PARM_DESC(mlx5_rdda_blacklist, "Mellanox 5 Firmware Blacklist for RDDA");
  *
  */
 
-static int nvmeib_mlx5_get_qp_sqr(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-	struct nvmeib_sq_rsc *sqr)
-{
-	return _nvmeib_mlx5_get_qp_sqr(ib_dev, ib_qp, sqr);
-}
-
-static int nvmeib_mlx5_get_qp_cqr(struct ib_device *ib_dev, struct ib_cq *ib_cq,
-	struct nvmeib_cq_rsc *cqr)
-{
-	return _nvmeib_mlx5_get_qp_cqr(ib_dev, ib_cq, cqr);
-}
-
-static int nvmeib_mlx5_init_qp(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-	u64 wr_id, u32 *opcode, struct nvmeib_sq_rsc *sqr)
-{
-	return _nvmeib_mlx5_init_qp(ib_dev, ib_qp, wr_id, opcode, sqr);
-}
-
 /* client side */
-static int nvmeib_mlx5_init_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
-	void **priv)
-{
-	return _nvmeib_mlx5_init_remote_qp_shadow(rnet, priv);
-}
-
-static int nvmeib_mlx5_clear_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
-	void *priv)
-{
-	return 0;
-}
-
-static int nvmeib_mlx5_send_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
-	void *priv, struct nvmeib_send_wr *wr)
-{
-	return _nvmeib_mlx5_send_remote_qp_shadow(rnet, priv, wr);
-}
-
-static int nvmeib_mlx5_free_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
-	void *priv)
-{
-	return _nvmeib_mlx5_free_remote_qp_shadow(rnet, priv);
-}
 
 static ssize_t nvmeib_mlx5_get_qp_usage(struct ib_device *ib_dev, struct ib_qp *ib_qp,
 	enum nvmeib_cnt_mem_type mem_type)
@@ -175,13 +134,6 @@ EXPORT_SYMBOL(nvmeib_mlx5_check_rdda_fw);
 
 static struct nvmeib_device_ops mlx5 = {
 	.module = THIS_MODULE,
-	.get_qp_sqr = nvmeib_mlx5_get_qp_sqr,
-	.get_qp_cqr = nvmeib_mlx5_get_qp_cqr,
-	.init_qp = nvmeib_mlx5_init_qp,
-	.init_remote_qp_shadow = nvmeib_mlx5_init_remote_qp_shadow,
-	.clear_remote_qp_shadow = nvmeib_mlx5_clear_remote_qp_shadow,
-	.send_remote_qp_shadow = nvmeib_mlx5_send_remote_qp_shadow,
-	.free_remote_qp_shadow = nvmeib_mlx5_free_remote_qp_shadow,
 	.get_qp_usage = nvmeib_mlx5_get_qp_usage,
 	.get_srq_usage = nvmeib_mlx5_get_srq_usage,
 	.get_cq_usage = nvmeib_mlx5_get_cq_usage,

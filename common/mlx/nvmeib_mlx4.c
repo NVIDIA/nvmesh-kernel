@@ -600,13 +600,6 @@ static int nvmeib_mlx4_check_rdda_fw(struct ib_device *ib_dev)
 
 static struct nvmeib_device_ops mlx4 = {
 	.module = THIS_MODULE,
-	.get_qp_sqr = nvmeib_mlx4_get_qp_sqr,
-	.get_qp_cqr = nvmeib_mlx4_get_qp_cqr,
-	.init_qp = nvmeib_mlx4_init_qp,
-	.init_remote_qp_shadow = nvmeib_mlx4_init_remote_qp_shadow,
-	.clear_remote_qp_shadow = nvmeib_mlx4_clear_remote_qp_shadow,
-	.send_remote_qp_shadow = nvmeib_mlx4_send_remote_qp_shadow,
-	.free_remote_qp_shadow = nvmeib_mlx4_free_remote_qp_shadow,
 	.check_rdda_fw = nvmeib_mlx4_check_rdda_fw,
 };
 

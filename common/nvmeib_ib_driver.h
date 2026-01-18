@@ -12,19 +12,6 @@ struct ib_srq;
 
 struct nvmeib_device_ops {
 	struct module *module;
-	int (*get_qp_sqr)(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-			  struct nvmeib_sq_rsc *sqr);
-	int (*get_qp_cqr)(struct ib_device *ib_dev, struct ib_cq *ib_cq,
-			  struct nvmeib_cq_rsc *cqr);
-	int (*init_qp)(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-		       u64 wr_id, u32 *opcode, struct nvmeib_sq_rsc *sqr);
-	int (*dump_sq)(struct ib_device *ib_dev, struct ib_qp *ib_qp);
-	int (*init_remote_qp_shadow)(struct nvmeibc_remote_net *rnet, void **priv);
-	int (*clear_remote_qp_shadow)(struct nvmeibc_remote_net *rnet, void *priv);
-	int (*send_remote_qp_shadow)(struct nvmeibc_remote_net *rnet,
-				     void *priv, struct nvmeib_send_wr *wr);
-	int (*free_remote_qp_shadow)(struct nvmeibc_remote_net *rnet, void *priv);
-	int (*dump_remote_sq_shadow)(struct nvmeibc_remote_net *rnet, void *priv);
 	ssize_t (*get_qp_usage)(struct ib_device *ib_dev, struct ib_qp *ib_qp, enum nvmeib_cnt_mem_type mem_type);
 	ssize_t (*get_srq_usage)(struct ib_device *ib_dev, struct ib_srq *ib_srq, enum nvmeib_cnt_mem_type mem_type);
 	ssize_t (*get_cq_usage)(struct ib_device *ib_dev, struct ib_cq *ib_cq, enum nvmeib_cnt_mem_type mem_type);
@@ -234,35 +221,8 @@ enum nvmeib_dev_type nvmeib_get_device_type(struct ib_device *ib_dev);
 /* check if device type support rdda connection */
 bool nvmeib_device_sup_cap(enum nvmeib_dev_type t, enum nvmeib_dev_cap cap);
 int nvmeib_device_get_max_rd_atom_on_wire(enum nvmeib_dev_type t);
-/* server side */
-/* utility functions */
-/* get qp resources */
-int nvmeib_ibdr_get_qp_sqr(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-	struct nvmeib_sq_rsc *sqr);
-int nvmeib_ibdr_get_qp_cqr(struct ib_device *ib_dev, struct ib_cq *ib_cq,
-	struct nvmeib_cq_rsc *cqr);
-/* init send_queue for remote access */
-int nvmeib_ibdr_init_qp(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-	u64 wr_id, u32 *opcode, struct nvmeib_sq_rsc *sqr);
-/* dump sq for debugging */
-int nvmeib_ibdr_dump_sq(struct ib_device *ib_dev, struct ib_qp *ib_qp);
-/* max sq size for remote access */
-int nvmeib_ibdr_max_sq_sz(struct ib_device *ib_dev);
 /* firmware supports RDDA */
 int nvmeib_ibdr_check_rdda_fw(struct ib_device *ib_dev);
-
-/* client side */
-int nvmeib_ibdr_init_remote_qp_shadow(enum nvmeib_dev_type type,
-	struct nvmeibc_remote_net *rnet);
-int nvmeib_ibdr_free_remote_qp_shadow(struct nvmeibc_remote_net *rnet);
-int nvmeib_ibdr_clear_remote_qp_shadow(struct nvmeibc_remote_net *rnet);
-int nvmeib_ibdr_read_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
-	struct nvmeib_rdma_iu *ariu, struct nvmeib_iu *iu,
-	struct nvmeib_rdma_iu *pbiu, u32 immediate);
-int nvmeib_ibdr_write_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
-	struct nvmeib_rdma_iu *ariu, u32 immediate);
-/* dump shadow sq for debugging */
-int nvmeib_ibdr_dump_remote_sq_shadow(struct nvmeibc_remote_net *rnet);
 
 /* Used for memory usage calculation */
 ssize_t nvmeib_ibdr_get_qp_usage(struct ib_device *ib_dev, struct ib_qp *ib_qp,
