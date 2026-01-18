@@ -170,9 +170,9 @@ struct nvmeibc_disk_channel_rsc {
 	/* the current entry from the list */
 	struct lock_seg_info *cur_lsi;
 
-	/* the io channel */
+	/* the io channel - removed */
 	union {
-		struct nvmeibc_ib_io_channel *ch;
+		void *ch;
 	};
 
 	/* admin stuff */
@@ -944,9 +944,6 @@ void nvmeibc_disk_reused_bb_release(struct nvmeibc_disk *disk,
 struct nvmeibc_disk_gen_cmd;
 int nvmeibc_disk_execute_gen(struct nvmeibc_disk *disk,
 	struct nvmeibc_disk_gen_cmd *gen_cmd);
-struct nvmeibc_ib_io_channel;
-int nvmeibc_disk_kill_channel(struct nvmeibc_disk *disk,
-	struct nvmeibc_ib_io_channel *ch, struct list_head *bailed_cmds);
 struct nvmeibc_disk_io_command * nvmeibc_disk_get_block_cmd_rdda(
 	struct nvmeibc_disk *disk, struct nvmeibc_channel *ch, u32 version);
 struct nvmeibc_volume_req_info;

@@ -1,7 +1,6 @@
 #define C_IB_ADMIN_CHANNEL_C
 
 #include "nvmeibc_ib_admin_channel.h"
-#include "nvmeibc_ib_io_channel.h"
 #include "nvmeibc_ib_nordda_channel.h"
 #include "nvmeibc_main.h"
 #include "nvmeibc_volume.h"
@@ -180,7 +179,6 @@ static void wait_io_channels(struct nvmeibc_ib_admin_channel *ch)
 	struct nvmeibc_io_rnic *rionic;
 	struct list_head *lionics;
 	struct nvmeibc_io_lnic *lionic;
-	struct nvmeibc_ib_io_channel *ioch;
 	struct nvmeibc_ib_nordda_channel *nrch;
 	int i;
 
@@ -189,18 +187,6 @@ static void wait_io_channels(struct nvmeibc_ib_admin_channel *ch)
 	list_for_each_entry(rionic, rionics, admin_link) {
 		lionics = &rionic->lionics;
 		list_for_each_entry(lionic, lionics, rionic_link) {
-			/*
-			 * Wait release-wq RDDA channels
-			 */
-			for (i = 0; i < lionic->n_qps; ++i) {
-				ioch = lionic->io_channels + i;
-				_NT(trace_ib_admin_channel_wait_io_channels,
-					"Waiting for IO ch=@IOCH (net=@NET) to stop",
-					ioch, &ioch->net);
-				nvmeibc_ib_io_channel_clear_rq(ioch, true);
-				BUG_ON(!nvmeibc_disk_ioch_drained_is_empty(&ioch->base));
-			}
-
 			/*
 			 * Wait release-wq No-RDDA channels
 			 */
@@ -3262,19 +3248,7 @@ static int load_disk_nics(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 			n_qps = be32_to_cpu(triplet->n_qps);
 			if (n_qps == 0)
 				n_trip_0_qs++;
-			/* allocate the local nic io_channels */
-			if (n_qps && !(lionic->io_channels = kzalloc(
-				sizeof(*lionic->io_channels) * n_qps, GFP_KERNEL))) {
-				format_gid_raw(triplet->lnic, rgid_buf);
-				format_gid_raw(triplet->rnic, lgid_buf);
-				_NE(error_ib_admin_channel_load_disk_nics, "OOM: fail to allocate io_cannels for disk @DISK_NAME "
-					"rgid=@RGID, lgid=@LGID n_qps=@N_QPS", disk->name, rgid_buf,
-					lgid_buf, n_qps);
-				rv = -1;
-				cont = false;
-				break;
-			}
-			lionic->n_qps = n_qps;
+		/* RDDA io_channels removed */
 			//lionic->disk = disk;
 		}
 		nvmeibc_ib_admin_channel_put_rx_iu(ch, recv_ioctx);
@@ -4426,8 +4400,8 @@ static void print_controller_info(struct nvmeibc_ib_admin_channel *ch)
 			lionics = &rionic->lionics;
 			list_for_each_entry(lionic, lionics, rionic_link) {
 				format_gid_raw(lionic->path.sgid.raw, lgid_buf);
-				_ND(trace_3_ib_admin_channel_print_controller_info, "IO pair (l=@LGID_BUF, r=@RGID_BUF), n_rscs=@N_RSCS", lgid_buf, rgid_buf,
-					lionic->n_qps);
+		_ND(trace_3_ib_admin_channel_print_controller_info, "IO pair (l=@LGID_BUF, r=@RGID_BUF), n_rscs=@N_RSCS", lgid_buf, rgid_buf,
+		   0); /* RDDA removed */
 			}
 		}
 	}
@@ -4493,109 +4467,20 @@ out:
 }
 
 /* prepare alloc_net message */
-static ssize_t prp_alloc_net(void *p, void *buf, const void *buf_end)
+static ssize_t __attribute__((unused)) prp_alloc_net(void *p, void *buf, const void *buf_end)
 {
-	struct nvmeibc_ib_io_channel *ioch = p;
-	struct nvmeibc_io_lnic *lionic = ioch->lionic;
-	struct nvmeibc_ib_admin_channel *ch = ac_to_iac(lionic->rionic->ch);
-	struct volume_client_req *req;
-	struct volume_client_config_alloc_net_req *a_net_req;
-
-	__NFIN;
-	/* init the command */
-	BUG_ON(buf + NVMEIBC_VOLUME_CLIENT_13_CONFIG_REQ_SIZE(a_net_req) > buf_end);
-	req = buf;
-	memset(req, 0, sizeof(*req));
-	req->hdr.opcode = NVMEIB_CONFIG;
-	req->hdr.tag = atomic_inc_return(&ch->base.base.tag);
-	req->version_tag = cpu_to_be16(vex_base);
-	_ND(trace_ib_admin_channel_prp_alloc_net, "req tag @TAG", req->hdr.tag);
-	req->config_req.opcode = NVMEIBC_MA_ALLOC_IO_NET;
-	a_net_req = &req->config_req.a_net_req;
-	memcpy(a_net_req->def.disk_name, lionic->disk->name,
-		sizeof(a_net_req->def.disk_name));
-	if (!NVMEIB_UPDATE_NW_PATHS) {
-		memcpy(a_net_req->def.sgid, lionic->path.sgid.raw, 16);
-		memcpy(a_net_req->def.dgid, lionic->path.dgid.raw, 16);
-	}
-	else {
-		memcpy(a_net_req->def.sgid, &lionic->port->gid.hw_gid, 16);
-		memcpy(a_net_req->def.dgid, &lionic->rionic->hw_gid, 16);
-	}
-	a_net_req->def.qp_num = cpu_to_be16((u16)ioch->base.index);
-
-	if (nvmeib_version_protocol_lt(&ch->base.base.disk->last_tgt_ver,
-								   &nvmeib_2p1_version)) {
-		_NT(trace_0_ib_admin_channel_prp_alloc_net,
-			"omit cs-gid for older server");
-	}
-	else {
-		a_net_req->cs_gid = cpu_to_be64(ioch->base.bailed_cmds.cs_gid);
-	}
-
-	__NFOUT;
-	return NVMEIBC_VOLUME_CLIENT_13_CONFIG_REQ_SIZE(a_net_req);
+	/* RDDA removed - stubbed */
+	return -ENOTSUPP;
 }
 
-static int io_connect(struct nvmeibc_ib_admin_channel *ch,
-	struct nvmeibc_ib_io_channel *ioch)
+
+static int __attribute__((unused)) io_connect(struct nvmeibc_ib_admin_channel *ch,
+	void *ioch)
 {
-	struct volume_client_req *req;
-	struct volume_server_rsp *rsp;
-	struct nvmeib_iu *recv_ioctx = NULL;
-	int erv, rv = -ENOENT;
+	int rv = -ENOENT;
 
 	__NFIN;
-	_NT(trace_ib_admin_channel_io_connect, "--- Sending NVMEIBC_MA_ALLOC_IO_NET message to qp @INDEX @ host @BASE_NAME",
-		ioch->base.index, ch->base.base.name);
-	if (!(ch->send_ioctx = nvmeibc_ib_admin_channel_get_tx_iu(ch))) {
-		_NE(error_ib_admin_channel_io_connect, "No free messages for administrator to use");
-		goto out;
-	}
-	/* set the iu type */
-	/* set the request */
-	req = ch->send_ioctx->buf;
-	/* send and wait for send completion */
-	if ((rv = nvmeibc_ib_admin_channel_prepare_n_send_msg(ch, prp_alloc_net,
-		ioch, NVMEIB_SEND_CFG, ch->send_ioctx)) < 0)
-		goto free_iu;
-	/* wait for the reply */
-	if ((recv_ioctx = nvmeibc_ib_admin_channel_pending_iu(ch, req->hdr.tag))) {
-		rsp = recv_ioctx->buf;
-		if (rsp->hdr.tag == req->hdr.tag &&
-			rsp->version_tag == req->version_tag &&
-			rsp->opcode == NVMEIBS_RSP_MGMT_OPCODE_OK) {
-			if ((rv = nvmeibc_ib_io_channel_init_rnet(ioch, &rsp->a_net_rsp))) {
-				_NT(trace_1_ib_admin_channel_io_connect, "nvmeibc_ib_io_channel_init_rnet failed (@RV)", rv);
-				goto post_recv;
-			}
-		} else {
-			_NT(error_1_ib_admin_channel_io_connect, "response error, tag rsp @TAG vs. req @TAG, rsp->opcode = "
-			   "@OPCODE", rsp->hdr.tag, req->hdr.tag, rsp->opcode);
-			rv = -EINVAL;
-			goto post_recv;
-		}
-	}
-	else {
-		_NT(trace_2_ib_admin_channel_io_connect, "Failed to wait for new receivee messages");
-		rv = -1;
-		goto free_iu;
-	}
-	_NT(trace_3_ib_admin_channel_io_connect, "--- Received NVMEIBC_MA_ALLOC_IO_NET message reply from "
-		"qp @INDEX @ host @BASE_NAME was: @OPT_NOT ok",
-		ioch->base.index, ch->base.base.name, rv ? "not " : "");
-
-post_recv:
-	erv = nvmeibc_ib_admin_channel_put_rx_iu(ch, recv_ioctx);
-	if (!rv && erv)
-		rv = erv;
-
-free_iu:
-	nvmeibc_ib_admin_channel_put_tx_iu(ch, ch->send_ioctx);
-
-out:
-	ch->send_ioctx = NULL;
-
+	/* RDDA removed - stubbed */
 	__NFOUT;
 	return rv;
 }
@@ -4740,21 +4625,6 @@ static int connect_lionics(struct nvmeibc_ib_admin_channel *ch,
 	list_for_each_entry(lionic, lionics, rionic_link) {
 		format_gid_raw(lionic->path.sgid.raw, gid_buf);
 		/*
-		 * Create RDDA channels
-		 */
-		_ND(trace_ib_admin_channel_connect_lionics, "Creating @N_QPS qps for local ionic @GID_BUF", lionic->n_qps, gid_buf);
-		for (i = 0; i < lionic->n_qps; ++i) {
-			if (!nvmeibc_ib_io_channel_create(nvmeibc_cinst_get_core_p(&ch->base.base),
-				lionic, i, lionic_index, rionic_index)) {
-				ARNIC_DISCOVER_STATUS(arnic, NVMEIBC_ARNIC_DISCOVER_IB_IO_CHANNEL_CREATE_FAILED);
-				DISK_DISCOVER_STATUS(disk, NVMEIBC_DISK_DISCOVER_IOCH_CREATE_FAILED);
-				_NT(trace_1_ib_admin_channel_connect_lionics, "Fail to create IB IO channel");
-				rv = -ENOMEM;
-				goto out;
-			}
-		}
-
-		/*
 		 * Create No-RDDA channels
 		 */
 		for (i = 0; i < lionic->n_nr_qps; ++i) {
@@ -4834,12 +4704,6 @@ static void disconnect_lionic(struct nvmeibc_ib_admin_channel *ch,
 
 	__NFIN;
 	if ((dying = atomic_inc_return(&lionic->dying)) == 1) {
-		/*
-		 * Disconnect RDDA channels
-		 */
-		for (i = 0; i < lionic->n_qps; ++i)
-			nvmeibc_ib_io_channel_try_disconnect(lionic->io_channels + i);
-
 		/*
 		 * Disconnect No-RDDA channels
 		 */
@@ -5438,17 +5302,13 @@ int nvmeibc_ib_admin_channel_request_disks_resources(
 }
 
 int nvmeibc_ib_admin_channel_connect_io_channel(
-	struct nvmeibc_ib_admin_channel *ch, struct nvmeibc_ib_io_channel *ioch)
+	struct nvmeibc_ib_admin_channel *ch, void *ioch)
 {
 	int rv;
 
 	__NFIN;
-	if ((rv = nvmeibc_ib_io_channel_connect(ioch)) < 0) {
-		_NT(trace_ib_admin_channel_nvmeibc_ib_admin_channel_connect_io_channel, "Fail to start connection of IB IO channel");
-	}
-	else if ((rv = io_connect(ch, ioch)) < 0) {
-		_NT(trace_1_ib_admin_channel_nvmeibc_ib_admin_channel_connect_io_channel, "Fail to finish connection of IB IO channel");
-	}
+	/* RDDA removed - stubbed */
+	rv = -ENOTSUPP;
 	__NFOUT;
 	return rv;
 }
@@ -5472,7 +5332,7 @@ int nvmeibc_ib_admin_channel_connect_nordda_channel(
 
 
 struct prp_ma_reset_info {
-	struct nvmeibc_ib_io_channel *ioch;
+	void *ioch;
 	u64 disk_rsc_id;
 	u64 msix_table_addr;
 	u64 msix_raddr;
@@ -5480,49 +5340,17 @@ struct prp_ma_reset_info {
 };
 
 /* prepare disk io reset message */
-static ssize_t prp_reset_io(void *p, void *buf, const void *buf_end)
+static ssize_t __attribute__((unused)) prp_reset_io(void *p, void *buf, const void *buf_end)
 {
-	struct prp_ma_reset_info *info = p;
-	struct nvmeibc_ib_io_channel *ioch = info->ioch;
-	struct nvmeibc_io_lnic *lionic = ioch->lionic;
-	struct nvmeibc_ib_admin_channel *ch = ac_to_iac(lionic->rionic->ch);
-	struct volume_client_req *req;
-	struct volume_client_config_ma_reset_io *reset_io_req;
-
-	__NFIN;
-	/* init the command */
-	BUG_ON(buf + NVMEIBC_VOLUME_CLIENT_13_CONFIG_REQ_SIZE(reset_io_req) > buf_end);
-	req = buf;
-	memset(req, 0, sizeof(*req));
-	req->hdr.opcode = NVMEIB_CONFIG;
-	req->hdr.tag = atomic_inc_return(&ch->base.base.tag);
-	req->version_tag = cpu_to_be16(vex_base);
-	_ND(trace_ib_admin_channel_prp_reset_io, "req tag @TAG", req->hdr.tag);
-	req->config_req.opcode = NVMEIBC_MA_RESET_RSC;
-	reset_io_req = &req->config_req.reset_io_req;
-	memcpy(reset_io_req->def.disk_name, lionic->disk->name,
-		sizeof(reset_io_req->def.disk_name));
-	if (!NVMEIB_UPDATE_NW_PATHS) {
-		memcpy(reset_io_req->def.sgid, lionic->path.sgid.raw, 16);
-		memcpy(reset_io_req->def.dgid, lionic->path.dgid.raw, 16);
-	}
-	else {
-		memcpy(reset_io_req->def.sgid, &lionic->port->gid.hw_gid, 16);
-		memcpy(reset_io_req->def.dgid, &lionic->rionic->hw_gid, 16);
-	}
-	reset_io_req->def.qp_num = cpu_to_be16((u16)ioch->base.index);
-
-	reset_io_req->rsc_id = cpu_to_be64(info->disk_rsc_id);
-    reset_io_req->msix_table_addr =
-        cpu_to_be64(info->msix_table_addr);
-	reset_io_req->msix_raddr = cpu_to_be64(info->msix_raddr);
-	reset_io_req->msix_payload = cpu_to_be32(info->msix_payload);
-	__NFOUT;
-	return NVMEIBC_VOLUME_CLIENT_13_CONFIG_REQ_SIZE(reset_io_req);
+	/* RDDA removed - stubbed */
+	NFIN;
+	NFOUT;
+	return -ENOTSUPP;
 }
 
+
 static int io_init(struct nvmeibc_ib_admin_channel *ch,
-	struct nvmeibc_ib_io_channel *ioch, u64 disk_rsc_id,
+	void *ioch, u64 disk_rsc_id,
 	u64 msix_table_addr, u64 msix_raddr, u32 msix_payload)
 {
 	struct volume_client_req *req;
@@ -5534,9 +5362,9 @@ static int io_init(struct nvmeibc_ib_admin_channel *ch,
 
 	__NFIN;
 	_NT(trace_ib_admin_channel_io_init, "--- Sending NVMEIBC_MA_RESET_RSC message to qp @INDEX @ host @BASE_NAME",
-		ioch->base.index, ch->base.base.name);
+		0, ch->base.base.name);
 	_NT(trace_1_ib_admin_channel_io_init, "disk_rsc_id=@DISK_RSC_ID, qp_num=@QP_NUM, msix_table_addr=@MSIX_TABLE_ADDR, msix_raddr=@MSIX_RADDR, "
-	   "msix_payload=@MSIX_PAYLOAD", disk_rsc_id, ioch->base.index,
+	   "msix_payload=@MSIX_PAYLOAD", disk_rsc_id, 0,
 		msix_table_addr, msix_raddr, msix_payload);
 	if (!(ch->send_ioctx = nvmeibc_ib_admin_channel_get_tx_iu(ch))) {
 		_NE(error_ib_admin_channel_io_init, "No free messages for administrator to use");
@@ -5555,8 +5383,8 @@ static int io_init(struct nvmeibc_ib_admin_channel *ch,
 		if (rsp->hdr.tag == req->hdr.tag &&
 			rsp->version_tag == req->version_tag &&
 			rsp->opcode == NVMEIBS_RSP_MGMT_OPCODE_OK) {
-			_ND(trace_2_ib_admin_channel_io_init, "Managed to reset disk @DISK_NAME resource @DISK_RSC_ID",
-				ioch->lionic->disk->name, disk_rsc_id);
+			_ND(trace_2_ib_admin_channel_io_init, "Managed to reset disk resource @DISK_RSC_ID",
+				disk_rsc_id);
 			rv = 0;
 		}
 		else {
@@ -5573,7 +5401,7 @@ static int io_init(struct nvmeibc_ib_admin_channel *ch,
 	}
 	_NT(trace_4_ib_admin_channel_io_init, "--- Received NVMEIBC_MA_RESET_RSC message reply from "
 		"qp @INDEX @ host @BASE_NAME was: @OPT_NOT ok",
-		ioch->base.index, ch->base.base.name, rv ? "not " : "");
+		0, ch->base.base.name, rv ? "not " : "");
 
 post_recv:
 	erv = nvmeibc_ib_admin_channel_put_rx_iu(ch, recv_ioctx);
@@ -5591,13 +5419,15 @@ out:
 }
 
 int nvmeibc_ib_admin_channel_init_io_channel(
-	struct nvmeibc_ib_admin_channel *ch, struct nvmeibc_ib_io_channel *ioch,
+	struct nvmeibc_ib_admin_channel *ch, void *ioch,
 	u64 disk_rsc_id, u64 msix_table_addr, u64 msix_address, u32 msix_payload)
 {
 	int rv;
 
 	__NFIN;
-	if ((rv = io_init(ch, ioch, disk_rsc_id,
+	/* RDDA removed - stubbed */
+	rv = -ENOTSUPP;
+	if (0 && (rv = io_init(ch, ioch, disk_rsc_id,
 		msix_table_addr, msix_address, msix_payload)) < 0) {
 		_NT(trace_ib_admin_channel_nvmeibc_ib_admin_channel_init_io_channel, "Fail to init disk IO resource");
 	}

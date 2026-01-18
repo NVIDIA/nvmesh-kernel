@@ -46,12 +46,10 @@ nvmeibc-y := \
 	nvmeibc_wq_metrics.o \
 	nvmeibc_io_pet.o \
 	nvmeibc_channel.o \
-	nvmeibc_ib_io_channel.o \
 	nvmeibc_admin_channel.o \
 	nvmeibc_ib_admin_channel.o \
 	nvmeibc_ib_net.o \
 	nvmeibc_ib_net_admin.o \
-	nvmeibc_ib_net_io.o \
 	nvmeibc_disk.o \
 	nvmeibc_disk_locks.o \
 	nvmeibc_disk_local_dma_pools.o \

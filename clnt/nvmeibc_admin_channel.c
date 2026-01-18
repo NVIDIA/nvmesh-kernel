@@ -1,5 +1,4 @@
 #include "nvmeibc_admin_channel.h"
-#include "nvmeibc_ib_io_channel.h"
 #include "nvmeibc_ib_nordda_channel.h"
 #include "nvmeibc_disk.h"
 #include "nvmeibc_defs.h"
@@ -53,7 +52,6 @@ static void free_iornic(struct nvmeibc_io_rnic *rionic)
 {
 	struct list_head *lionics = &rionic->lionics;
 	struct nvmeibc_io_lnic *lionic, *tmp_lionic;
-	struct nvmeibc_ib_io_channel *ch;
 	int i;
 	unsigned long flags;
 
@@ -70,15 +68,6 @@ static void free_iornic(struct nvmeibc_io_rnic *rionic)
 
 	list_for_each_entry_safe(lionic, tmp_lionic, lionics, rionic_link) {
 		list_del(&lionic->rionic_link);
-		/*
-		 * Free RDDA channels
-		 */
-		for (i = 0; i < lionic->n_qps; ++i) {
-			ch = lionic->io_channels + i;
-			nvmeibc_ib_io_channel_free(ch);
-		}
-		kfree(lionic->io_channels);
-
 		/*
 		 * Free No-RDDA channels
 		 */

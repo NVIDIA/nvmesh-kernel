@@ -4991,8 +4991,12 @@ void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
 	__NFOUT;
 }
 
-int nvmeibc_ib_io_channel_get_rsc_id_from_opaque_pointer(
-    struct nvmeibc_channel *ch);
+static int nvmeibc_ib_io_channel_get_rsc_id_from_opaque_pointer(
+    struct nvmeibc_channel *ch)
+{
+	/* RDDA removed - stubbed */
+	return -1;
+}
 
 #ifdef DBGDI_REMOVED_IN_PRODUCTION
 	#define dp_dbgdi_add_info_core_post_with_magic(...)

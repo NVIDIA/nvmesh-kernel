@@ -257,9 +257,9 @@ int nvmeibc_ib_admin_channel_get_journal_range(
 int nvmeibc_ib_admin_channel_request_disks_resources(
 	struct nvmeibc_ib_admin_channel *ch);
 int nvmeibc_ib_admin_channel_connect_io_channel(
-	struct nvmeibc_ib_admin_channel *ch, struct nvmeibc_ib_io_channel *ioch);
+	struct nvmeibc_ib_admin_channel *ch, void *ioch);
 int nvmeibc_ib_admin_channel_init_io_channel(
-	struct nvmeibc_ib_admin_channel *ch, struct nvmeibc_ib_io_channel *ioch,
+	struct nvmeibc_ib_admin_channel *ch, void *ioch,
 	u64 disk_rsc_id, u64 msix_table_addr, u64 msix_address, u32 msix_payload);
 int nvmeibc_ib_admin_channel_connect_nordda_channel(
 	struct nvmeibc_ib_admin_channel *ch,

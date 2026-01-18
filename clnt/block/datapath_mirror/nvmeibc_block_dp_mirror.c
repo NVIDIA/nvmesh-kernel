@@ -130,7 +130,9 @@ void dp_mirror_calc_should_abandon(struct nvmeibc_block_command *cmds, int olsi)
 	__calc_should_abandon_set_unlock_value(lo, &aban);
 }
 
-#include "nvmeibc_ib_net_io.h"
+/* RDDA transport error codes - kept for compatibility */
+#define NVMEIBC_IB_OVEREAGER 0xdeaddead
+#define NVMEIBC_IB_OVEREAGER_MAX_REACHED (NVMEIBC_IB_OVEREAGER + 1)
 #define dp_cmds_rv_failed_transport(rv) \
 	(((rv)==NVMEIBC_IB_OVEREAGER)||((rv)==NVMEIBC_IB_OVEREAGER_MAX_REACHED))
 
