@@ -819,9 +819,11 @@ class ClientSocket(SocketToManagement):
 				self.sendToClient(payload, writeList, sendNextMessage)
 
 			if not self.isUpdateTokenReceived and msg['opcode'] == MessageTypes.UPDATE_CLIENT_KEEPALIVE_TOKEN:
-				self.logger.debug('This is the first updateToken, replaying messages from cache')
 				self.isUpdateTokenReceived = True
-				self.resendMessagesFromCache(writeList)
+				self.replayCacheUponReceivingUpdateToken(writeList)
+
+	def replayCacheUponReceivingUpdateToken(self, writeList):
+		pass
 
 	def prepareMessage(self, opcode, messageTypeVersion, payload):
 		ret: List[BinaryMessage] = []
@@ -944,6 +946,8 @@ class FileSocket(ClientSocket):
 			except Exception as e:
 				self.logger.error('Failed to check if {} exists, ex: {}'.format(FileSocket.CLIENT_VERSION_FILE, e))
 
+		self.resendMessagesFromCache(writeList)
+
 	def setClientModuleVersion(self):
 		success, out = runCommand(command=['cat', FileSocket.CLIENT_VERSION_FILE], logger=self.logger)
 		if success:
@@ -1056,6 +1060,10 @@ class NvmeshUMSocket(ClientSocket):
 		self.logMessage(self.originType, 'MGMT', res)
 
 		self.kafkaOutbox.put(message)
+
+	def replayCacheUponReceivingUpdateToken(self, writeList):
+		self.logger.debug('This is the first updateToken, replaying messages from cache')
+		self.resendMessagesFromCache(writeList)
 
 	@staticmethod
 	def filterResponseForRequestedVolumes(response, requestedVolumes):
