@@ -802,8 +802,7 @@ static int validate_login_request(struct nvmeibs_ib_port *ib_port,
 	}
 
 	if (NVMEIB_UPDATE_NW_PATHS &&
-		opcode != NVMEIBC_NORDDA_CHANNEL &&
-		opcode != NVMEIBC_IO_CHANNEL) {
+		opcode != NVMEIBC_NORDDA_CHANNEL) {
 		sgid.global.subnet_prefix = ib_port->gid.gid.global.subnet_prefix;
 		sgid.global.interface_id = ib_port->gid.gid.global.interface_id;
 	}
@@ -832,12 +831,7 @@ static int validate_login_request(struct nvmeibs_ib_port *ib_port,
 			_NT(trace_5_ib_port_validate_login_request, "Rejected NVMEIBS_LOGIN_REJ_LOCK_2ND_INVALID_GID because "
 				"GID is invalid: req @DGID vs. mine @SGID", dgid, &sgid);
 		}
-		else if (opcode == NVMEIBC_IO_CHANNEL) {
-			rej->reason = __constant_cpu_to_be32(
-				NVMEIBS_LOGIN_REJ_RDDA_INVALID_GID);
-			_NT(trace_6_ib_port_validate_login_request, "Rejected NVMEIBS_LOGIN_REJ_RDDA_INVALID_GID because "
-				"GID is invalid: req @DGID vs. mine @SGID", dgid, &sgid);
-		}
+		/* NVMEIBC_IO_CHANNEL removed */
 		else {
 			rej->reason = __constant_cpu_to_be32(
 				NVMEIBS_LOGIN_REJ_NRDDA_INVALID_GID);
@@ -888,9 +882,7 @@ static int validate_login_request(struct nvmeibs_ib_port *ib_port,
 				return -EXDEV;
 			}
 		}
-		else if (opcode == NVMEIBC_IO_CHANNEL) {
-			/* no specific checks */
-		}
+		/* NVMEIBC_IO_CHANNEL removed */
 		else if (opcode == NVMEIBC_NORDDA_CHANNEL) {
 			/* no specific checks */
 		}
@@ -1253,8 +1245,7 @@ static void new_connection_work(struct workqe_struct *work)
 		_NT(trace_2_ib_port_new_connection_work, "Received LOCK-CH login from client to port @PORT on gid @GID_IPV6 (@DGID)",
 			ib_port->port, &ib_port->gid.gid, &dgid);
 	}
-	else if (opcode == NVMEIBC_IO_CHANNEL ||
-			 opcode == NVMEIBC_NORDDA_CHANNEL) {
+	else if (opcode == NVMEIBC_NORDDA_CHANNEL) {
 		u16 qp_num;
 		nvmeibc_login_req_get_ioch(req,
 					&sgid.global.subnet_prefix, &sgid.global.interface_id,
@@ -1262,7 +1253,7 @@ static void new_connection_work(struct workqe_struct *work)
 					&qp_num, NULL);
 		_NT(trace_3_ib_port_new_connection_work, "Received @TYPE_STR-CH login from client path: @SGID->@DGID, "
 		   "cid @CID_LLONG, on port @PORT (@GID_IPV6) and qpn @QPN",
-			(opcode == NVMEIBC_IO_CHANNEL) ? "IO" : "NORDDA",
+			"NORDDA",
 			&sgid, &dgid, cid, ib_port->port, &ib_port->gid.gid,
 			(int)qp_num);
 	}
@@ -1319,7 +1310,7 @@ static void new_connection_work(struct workqe_struct *work)
 			if (opcode == NVMEIBC_LOCK_CHANNEL)
 				rv = nvmeibs_client_connect_lock_channel(
 					ib_port, cm_id, cl, req, rej);
-			else if (opcode == NVMEIBC_IO_CHANNEL)
+			else if (0) /* NVMEIBC_IO_CHANNEL removed */
 				rv = nvmeibs_client_connect_io_channel(
 					ib_port, cm_id, cl, req, rej);
 			else if (opcode == NVMEIBC_NORDDA_CHANNEL)

@@ -58,8 +58,6 @@ static void l_send_comp_h(void *ctx, struct ib_wc *wcs);
 static void l_recv_comp_h(void *ctx, struct ib_wc *wcs);
 static void l_2nd_send_comp_h(void *ctx, struct ib_wc *wcs);
 static void l_2nd_recv_comp_h(void *ctx, struct ib_wc *wcs);
-static void io_send_comp_h(void *ctx, struct ib_wc *wcs);
-static void io_recv_comp_h(void *ctx, struct ib_wc *wcs);
 
 static void send_resource(struct nvmeibs_client *cl,
 						  struct nvmeibs_cmd_info *info,
@@ -766,12 +764,7 @@ struct nvmeibs_rionic *nvmeibs_client_get_rionic(struct nvmeibs_client *cl,
 						if (!memcmp(cdisk->lionics[i].rionics[j].gid.raw,
 							def->sgid, 16)) {
 							if (ioch_type == NVMEIBS_IOCH_RDDA) {
-								if (qp < cdisk->lionics[i].rionics[j].\
-									n_io_channels) {
-									_ND(nvmeibs_client_get_rionic_d1, "Found requested rdda ioch triplet");
-									rionic = &cdisk->lionics[i].rionics[j];
-									goto out;
-								}
+								/* RDDA removed */
 							}
 							else if (ioch_type == NVMEIBS_IOCH_NORDDA) {
 								if (qp < cdisk->lionics[i].rionics[j].\
@@ -1742,9 +1735,7 @@ static void free_lnics(struct nvmeibs_client_disk *cdisk)
 			/*
 			 * RDDA
 			 */
-			for (k = 0; k < cdisk->lionics[i].rionics[j].n_io_channels; ++k)
-				kfree(cdisk->lionics[i].rionics[j].io_channels[k].net);
-			kfree(cdisk->lionics[i].rionics[j].io_channels);
+			/* RDDA io_channels removed */
 			/*
 			 * No-RDDA
 			 */
@@ -1950,78 +1941,6 @@ static int build_disks_list(struct nvmeibs_client *cl)
 	return rv;
 }
 
-static int map_ib_sq_db(struct nvmeibs_io_channel *ioch)
-{
-	struct nvmeibs_disk_info *di = ioch->rionic->lionic->disk->di;
-	struct device *nvme_dev = get_nvme_dma_device(di->dev);
-	dma_addr_t dma;
-	phys_addr_t phys = ioch->qp_rsc.sq.doorbell_address;
-
-	/* JH IOMMU: DMA_FROM_DEVICE is correct. SQ doorbell is sink for Remote RDMA Write */
-	dma = dma_map_page(nvme_dev,
-			   pfn_to_page(PHYS_PFN(phys)),
-			   phys & ~PAGE_MASK,
-			   sizeof(u64),
-			   DMA_FROM_DEVICE);
-
-	if (dma_mapping_error(nvme_dev, dma))
-	       return -EIO;
-
-	ioch->ib_sq_db_dma = dma;
-
-	return 0;
-}
-
-static void unmap_ib_sq_db(struct nvmeibs_io_channel *ioch)
-{
-	struct nvmeibs_disk_info *di = ioch->rionic->lionic->disk->di;
-	struct device *nvme_dev = get_nvme_dma_device(di->dev);
-
-	/* JH IOMMU: DMA_FROM_DEVICE is correct. SQ doorbell is sink for Remote RDMA Write */
-	dma_unmap_page(nvme_dev, ioch->ib_sq_db_dma, sizeof(u64), DMA_FROM_DEVICE);
-}
-
-static int map_rdma_area(struct nvmeibs_io_channel *ioch)
-{
-	struct nvmeib_dev *nvdev;
-	int rv;
-
-	NFIN;
-	nvdev = P2NV(ioch->net->params.port);
-	ioch->bb_map.pd = nvdev->pd;
-	ioch->bb_map.dma_pages = ioch->pli.dma_pages;
-	ioch->bb_map.use_dma_pages = true;
-	ioch->bb_map.n_pages = ioch->pli.n_pages;
-	ioch->bb_map.access_flags =
-		IB_ACCESS_LOCAL_WRITE |
-		IB_ACCESS_REMOTE_WRITE;
-	ioch->bb_map.ioaddr = 0;
-	if ((rv = nvmeib_mem_alloc_n_map(&ioch->bb_map)) < 0) {
-		_NE(error_client_map_rdma_area, "Fail to map bounce buffer memory @RV", rv);
-		rv = -1;
-	}
-	else {
-		ioch->pli.io_addr = ioch->bb_map.ioaddr;
-		ioch->pli.lkey = ioch->bb_map.lkey;
-		ioch->pli.rkey = ioch->bb_map.rkey;
-		ioch->pli.use_fmr = true;
-		ioch->pli.fmr = NULL;
-		rv = 0;
-	}
-
-	NFOUT;
-	return rv;
-}
-
-static void unmap_rdma_mr(struct nvmeibs_io_channel *ioch)
-{
-	NFIN;
-	if (ioch->pli.use_fmr) {
-		nvmeib_mem_unmapn_n_free(&ioch->bb_map);
-		ioch->pli.use_fmr = false;
-	}
-	NFOUT;
-}
 
 static int send_n_wait(struct nvmeibs_client *cl, u64 tag, __be16 version_tag, struct nvmeib_iu *iu,
 	void *payload, int payload_len)
@@ -2128,34 +2047,7 @@ static int distribute_lionic_resources(struct nvmeibs_client *cl, struct nvmeibs
 					&cdisk->lionics[i].rionics[j].gid);
 				continue;
 			}
-			cdisk->lionics[i].rionics[j].n_io_channels = per_rionic;
-			if (unlikely(first))
-					cdisk->lionics[i].rionics[j].n_io_channels -= extra;
-			_ND(distribute_lionic_resources_d1, "disk @STR: lionic=@INT, rionic=@INT, n_qps=@INT",
-				cdisk->di->disk_id, i,j, per_rionic);
-			if (cdisk->lionics[i].rionics[j].n_io_channels &&
-				!(cdisk->lionics[i].rionics[j].io_channels =
-				  kzalloc(sizeof(*cdisk->lionics[i].rionics[j].io_channels) *
-					  cdisk->lionics[i].rionics[j].n_io_channels, GFP_KERNEL))) {
-				_NE(distribute_lionic_resources_e1, "OOM: cannot allocate io channels for "
-					"disk @STR (l=@INT, r=@INT, n=@INT)", cdisk->di->disk_id, i, j,
-					cdisk->lionics[i].rionics[j].n_io_channels);
-				cdisk->lionics[i].rionics[j].n_io_channels = 0;
-				n_rionics = -1;
-				goto out;
-			}
-			else {
-				/* init the io_channels */
-				for (k = 0;
-					  k < cdisk->lionics[i].rionics[j].n_io_channels;
-					  ++k) {
-					cdisk->lionics[i].rionics[j].io_channels[k].id = -1;
-					cdisk->lionics[i].rionics[j].io_channels[k].disk_rsc_id = -1;
-					cdisk->lionics[i].rionics[j].io_channels[k].rionic =
-						&cdisk->lionics[i].rionics[j];
-				}
-				n += cdisk->lionics[i].rionics[j].n_io_channels;
-			}
+			/* RDDA io_channels allocation removed */
 			first = false;
 		}
 	}
@@ -2425,7 +2317,7 @@ static int send_triplets(struct nvmeibs_client *cl, struct nvmeibs_client_disk *
 			format_gid_raw(per_disk_n_rsp->a[k].lnic, lgid_buf);
 			format_gid_raw(per_disk_n_rsp->a[k].rnic, rgid_buf);
 			_ND(send_triplets_d1, "Triplet: s=@STR, d=@STR", lgid_buf, rgid_buf);
-			per_disk_n_rsp->a[k].n_qps = cpu_to_be32(rionic->n_io_channels);
+			per_disk_n_rsp->a[k].n_qps = cpu_to_be32(0); /* RDDA removed */
 			if (++k == VOLUME_SERVER_MAX_ARRAY_SIZE) {
 				/* message buffer is full so send it */
 				_ND(send_triplets_d2, "Disk @STR: mid - lionic=@INT, rionic=@INT, k=@INT",
@@ -3315,16 +3207,6 @@ static void get_access_info(struct nvmeibs_client *cl,
 }
 
 //test if io channel is alive
-static bool io_channel_alive(struct nvmeibs_io_channel *ioch)
-{
-	bool rv;
-
-	NFIN;
-	rv =  ioch && ioch->net && ioch->net->qp && ioch->id >= 0;
-
-	NFOUT;
-	return rv;
-}
 
 static void get_lock_gids(struct nvmeibs_client *cl,
 	struct nvmeib_iu *recv_ioctx, struct nvmeib_iu *send_ioctx)
@@ -4453,178 +4335,11 @@ out:
 	return is_done;
 }
 
-static int prepare_io_channel(struct nvmeibs_io_channel *ioch)
-{
-	struct nvmeib_dev *nvdev;
-	struct ib_device *ib;
-	int rv = 0;
 
-	NFIN;
-	/* get the qp resources for remote shadowing */
-
-	nvdev = P2NV(ioch->net->params.port);
-	ib = nvdev->ib_dev;
-	ioch->qp_rsc.sq.pages = 0;
-	if ((rv = nvmeib_ibdr_get_qp_sqr(ib, ioch->net->qp, &ioch->qp_rsc.sq))) {
-		_NE(error_client_prepare_io_channel, "Fail to get I/O qp resources");
-		rv = -1;
-		goto out;
-	}
-
-	rv = map_ib_sq_db(ioch);
-	if (rv) {
-		_NE(error_1_client_prepare_io_channel, "Fail to DMA map NIC SQ doorbell");
-		goto out;
-	}
-
-	/* switch ownership on pages to io_channel */
-	ioch->pli.dma_pages = ioch->qp_rsc.sq.pages;
-	ioch->pli.n_pages = ioch->qp_rsc.sq.n_pages;
-	ioch->qp_rsc.sq.pages = NULL;
-	if (ioch->qp_rsc.sq.n_bufs == 1) { /* direct buffer */
-		ioch->pli.io_addr = ioch->pli.dma_pages[0];
-		ioch->pli.lkey = nvmeib_get_lkey(nvdev);
-		ioch->pli.rkey = nvmeib_get_rkey(nvdev);
-		ioch->pli.use_fmr = false;
-		ioch->pli.fmr = NULL;
-	}
-	else { /* page list */
-		if (ioch->qp_rsc.sq.n_pages > nvdev->max_pages_per_mr) {
-			_NE(error_2_client_prepare_io_channel, "SendQ size @N_PAGES of I/O QP is too big to map into "
-				"a single MR (@MAX_PAGES_PER_MR)",
-				ioch->qp_rsc.sq.n_pages, nvdev->max_pages_per_mr);
-			rv = -1;
-			goto unmap_ib_sq_db;
-		}
-		else {
-			if (map_rdma_area(ioch) < 0) {
-				_NT(trace_1_client_prepare_io_channel, "Out with NULL NIC Map");
-				rv = -1;
-				goto unmap_ib_sq_db;
-			}
-		}
-	}
-
-	/* Init QP for RDDA */
-	nvmeib_ibdr_init_qp(ib, ioch->net->qp, 0, NULL, &ioch->qp_rsc.sq);
-
-	/* set the send q remote info */
-	ioch->qp_rsc.sq.sq_address =
-		ioch->pli.io_addr + ioch->qp_rsc.sq.offset;
-	ioch->qp_rsc.sq.sq_rkey = ioch->pli.rkey;
-
-	_NT(trace_2_client_prepare_io_channel, "sq rkey: @SQ_RKEY raddr: @SQ_ADDRESS", ioch->qp_rsc.sq.sq_rkey, ioch->qp_rsc.sq.sq_address);
-	/* get the cq resources for remote shadowing */
-	if ((rv = nvmeib_ibdr_get_qp_cqr(ib, ioch->net->scq,
-				&ioch->qp_rsc.cq))) {
-		_NT(trace_3_client_prepare_io_channel, "nvmeib_ibdr_get_qp_cqr(): failed");
-		goto free_mr;
-	}
-	else {
-		ioch->qp_rsc.cq.entries = ioch->net->scq->cqe;
-		ioch->qp_rsc.cq.cq_rkey = nvmeib_get_rkey(nvdev);
-	}
-	/* fill the rkey for remote send_q doorbell */
-	ioch->qp_rsc.sq.doorbell_rkey = nvmeib_get_rkey(nvdev);
-	ioch->qp_rsc.sq.doorbell_descr_rkey = nvmeib_get_rkey(nvdev);
-
-	goto out;
-
-free_mr:
-	unmap_rdma_mr(ioch);
-unmap_ib_sq_db:
-	unmap_ib_sq_db(ioch);
-out:
-	NFOUT;
-	return rv;
-}
-
-static void fill_config_alloc_net_req(struct nvmeibs_io_channel *ioch,
-	struct volume_server_config_alloc_net_rsp *rsp)
-{
-	NFIN;
-	rsp->sendq_buffer_raddr = cpu_to_be64(ioch->qp_rsc.sq.sq_address);
-	rsp->sendq_buffer_size = cpu_to_be32(ioch->qp_rsc.sq.size);
-	rsp->sendq_buffer_rkey = cpu_to_be32(ioch->qp_rsc.sq.sq_rkey);
-	_ND(trace_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): addr=@ADDR, length=@LENGTH_INT, rkey=@RKEY",
-		ioch->id,
-		ioch->qp_rsc.sq.sq_address,
-		ioch->qp_rsc.sq.size,
-		ioch->qp_rsc.sq.sq_rkey);
-	_ND(trace_1_client_fill_config_alloc_net_req, "ib_sq_db(@ID_INT): addr=@ADDR, payload=@PAYLOAD",
-		ioch->id,
-		ioch->qp_rsc.sq.doorbell_address,
-		ioch->qp_rsc.sq.doorbell_payload);
-	rsp->sq_wqe_shift = cpu_to_be32(ioch->qp_rsc.sq.sq_wqe_shift);
-	_ND(trace_2_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_wqe_shift=@SQ_WQE_SHIFT",
-		ioch->id, ioch->qp_rsc.sq.sq_wqe_shift);
-	rsp->sq_wqe_cnt = cpu_to_be32(ioch->qp_rsc.sq.sq_wqe_cnt);
-	_ND(trace_3_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_wqe_cnt=@SQ_WQE_CNT",
-		ioch->id, ioch->qp_rsc.sq.sq_wqe_cnt);
-	rsp->sq_spare_wqes = cpu_to_be32(ioch->qp_rsc.sq.sq_spare_wqes);
-	_ND(trace_4_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_spare_wqes=@SQ_SPARE_WQES",
-		ioch->id, ioch->qp_rsc.sq.sq_spare_wqes);
-	rsp->sq_max_wqes_per_wr = cpu_to_be32(ioch->qp_rsc.sq.sq_max_wqes_per_wr);
-	_ND(trace_5_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_max_wqes_per_wr=@SQ_MAX_WQES_PER_WR",
-		ioch->id, ioch->qp_rsc.sq.sq_max_wqes_per_wr);
-	rsp->sq_last_pos = cpu_to_be16(ioch->qp_rsc.sq.last_pos);
-	_ND(trace_6_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_last_pos=@SQ_LAST_POS",
-		ioch->id, ioch->qp_rsc.sq.last_pos);
-	rsp->sq_full_delta = cpu_to_be16(ioch->qp_rsc.sq.q_full_delta);
-	_ND(trace_7_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_full_delta=@SQ_FULL_DELTA",
-		ioch->id, ioch->qp_rsc.sq.q_full_delta);
-	rsp->sq_max_sge = cpu_to_be16(ioch->qp_rsc.sq.max_sge);
-	_ND(trace_8_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_max_sge=@SQ_MAX_SGE",
-		ioch->id, ioch->qp_rsc.sq.max_sge);
-	rsp->qp_mtu = cpu_to_be16(ioch->qp_rsc.sq.mtu);
-	_ND(trace_9_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): qp_mtu=@QP_MTU",
-		ioch->id, ioch->qp_rsc.sq.mtu);
-	rsp->sq_psn = cpu_to_be32(ioch->qp_rsc.sq.psn);
-	_ND(trace_10_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_psn=@SQ_PSN",
-		ioch->id, ioch->qp_rsc.sq.psn);
-	rsp->qp_id = cpu_to_be32(ioch->qp_rsc.sq.qp_id);
-	_ND(trace_11_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): qp_id=@QP_ID",
-		ioch->id, ioch->qp_rsc.sq.qp_id);
-	rsp->sq_head = cpu_to_be32(ioch->qp_rsc.sq.head);
-	_ND(trace_12_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): sq_head=@SQ_HEAD",
-		ioch->id, ioch->qp_rsc.sq.head);
-	rsp->db_size_in_db = cpu_to_be32(ioch->qp_rsc.sq.db_size_in_db);
-	_ND(trace_13_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): db_size_in_db=@DB_SIZE_IN_DB",
-		ioch->id, ioch->qp_rsc.sq.db_size_in_db);
-	rsp->cq_ci_db_raddr = cpu_to_be64(ioch->qp_rsc.cq.ci_db_addr);
-	rsp->cq_rkey = cpu_to_be32(ioch->qp_rsc.cq.cq_rkey);
-	rsp->cq_cons_index = cpu_to_be32(ioch->qp_rsc.cq.cons_index);
-	rsp->cq_entries = cpu_to_be32(ioch->qp_rsc.cq.entries);
-	_ND(trace_14_client_fill_config_alloc_net_req, "ib_sq(@ID_INT): cq_ci_db_raddr=@CQ_CI_DB_RADDR, rkey=@RKEY, index=@INDEX, cqe=@CQE",
-		ioch->id,
-		ioch->qp_rsc.cq.ci_db_addr,
-		ioch->qp_rsc.cq.cq_rkey,
-		ioch->qp_rsc.cq.cons_index,
-		ioch->qp_rsc.cq.entries);
-	rsp->sqdb_raddr = cpu_to_be64(ioch->ib_sq_db_dma);
-	rsp->sqdb_size = cpu_to_be32(4);
-	rsp->sqdb_rkey = cpu_to_be32(ioch->qp_rsc.sq.doorbell_rkey);
-	rsp->sqdb_payload = cpu_to_be32(ioch->qp_rsc.sq.doorbell_payload);
-	_ND(trace_15_client_fill_config_alloc_net_req, "sq_db(@ID_INT): raddr=@RADDR, size=@SIZE, rkey=@RKEY, payload=@PAYLOAD",
-		ioch->id,
-		ioch->qp_rsc.sq.doorbell_address,
-		4,
-		ioch->qp_rsc.sq.doorbell_rkey,
-		ioch->qp_rsc.sq.doorbell_payload);
-	rsp->sqdb_descr_raddr = cpu_to_be64(ioch->qp_rsc.sq.doorbell_descr_address);
-	rsp->sqdb_descr_size = cpu_to_be32(4);
-	rsp->sqdb_descr_rkey = cpu_to_be32(ioch->qp_rsc.sq.doorbell_descr_rkey);
-	_ND(trace_16_client_fill_config_alloc_net_req, "sq_db_descr(@ID_INT): raddr=@RADDR, size=@SIZE, rkey=@RKEY",
-		ioch->id,
-		ioch->qp_rsc.sq.doorbell_descr_address,
-		4,
-		ioch->qp_rsc.sq.doorbell_descr_rkey);
-	NFOUT;
-}
 #if 0 /* DEBUG ONLY */
 static void dump_send_buffer(struct nvmeibs_client *cl)
 {
-	struct nvmeibs_io_channel *ioch = cl->_ioch_;
+	void *ioch = cl->_ioch_;
 
 	__NFIN;
 	if (false && ioch) {
@@ -4636,87 +4351,6 @@ static void dump_send_buffer(struct nvmeibs_client *cl)
 	__NFOUT;
 }
 #endif
-static void alloc_io_nets(struct nvmeibs_client *cl,
-	struct nvmeib_iu *recv_ioctx, struct nvmeib_iu *send_ioctx)
-{
-	struct volume_client_req *req;
-	struct volume_client_config_alloc_net_req *creq;
-	struct volume_server_config_alloc_net_rsp reply;
-	struct nvmeibs_rionic *rionic;
-	struct nvmeibs_io_channel *ioch;
-	void *payload = NULL;
-	u16 channel_id;
-	int payload_len = 0;
-	int rv;
-
-	__NFIN;
-	req = recv_ioctx->buf;
-
-	if (be16_to_cpu(req->version_tag) != vex_base) {
-		_NT(__AUTOID__, "Invalid version tag @VERSION in NVMEIBC_MA_ALLOC_IO_NET", be16_to_cpu(req->version_tag));
-		rv = -EPROTO;
-		goto send_rsp;
-	}
-
-	creq = &req->config_req.a_net_req;
-	channel_id = be16_to_cpu(creq->def.qp_num);
-	_NT(trace_client_alloc_io_nets, "--- Start handling NVMEIBC_MA_ALLOC_IO_NET message from host @CL_NAME "
-	   "qpn=@QPN", cl->name,  be16_to_cpu(creq->def.qp_num));
-	if (!(rionic = nvmeibs_client_get_rionic(cl, &creq->def,
-		NVMEIBS_IOCH_RDDA))) {
-		_NE(error_client_alloc_io_nets, "Invalid client parameters: src nic=@NIC_STR, dst nic=@NIC_STR, channel=@CHANNEL",
-			creq->def.sgid, creq->def.dgid, channel_id);
-		rv = -EINVAL;
-		goto send_rsp;
-	}
-
-	ioch = &rionic->io_channels[channel_id];
-	if (!io_channel_alive(ioch)) {
-		_NT(trace_0_client_alloc_io_nets, "I/O channel is dead");
-		rv = -ENOTCONN;
-		goto send_rsp;
-	}
-
-	if (nvmeib_version_protocol_lt(&cl->link_version, &nvmeib_2p1_version)) {
-		_NT(trace_2_client_alloc_io_nets, "omit check cs-gid for older client");
-	}
-	else {
-		struct nvmeibs_net *net = ioch->net;
-		u64 cs_gid = be64_to_cpu(creq->cs_gid);
-		if (cs_gid <= ioch->cs_gid) {
-			_NW(trace_3_client_alloc_io_nets,
-				"@CL_NAME.@PARAMS_NAME, recv cs-gid @LLU exp. > @LLU",
-				net->params.cl->name, net->params.name, cs_gid, ioch->cs_gid);
-			rv = -EINVAL;
-			goto send_rsp;
-		}
-		_NT(trace_4_client_alloc_io_nets,
-			"@CL_NAME.@PARAMS_NAME, cs-gid: @LLU --> @LLU",
-			net->params.cl->name, net->params.name, ioch->cs_gid, cs_gid);
-		ioch->cs_gid = cs_gid;
-	}
-
-	if (!(rv = prepare_io_channel(ioch))) {
-		fill_config_alloc_net_req(ioch, &reply);
-		payload = &reply;
-		payload_len = sizeof(reply);
-
-#if 0 /* DEBUG ONLY */
-		if (!cl->_ioch_) {
-			cl->_ioch_ = ioch;
-			dump_send_buffer(cl);
-		}
-#endif
-	}
-
-send_rsp:
-	nvmeibs_client_send_rsp(cl, cl->net,
-		rv == 0 ? NVMEIBS_RSP_MGMT_OPCODE_OK : NVMEIBS_RSP_MGMT_OPCODE_ERR,
-		req->hdr.tag, req->version_tag, send_ioctx, payload, payload_len, NVMEIB_SEND_CFG, NON_NR_VERSION);
-	_NT(trace_1_client_alloc_io_nets, "--- Finish handling NVMEIBC_MA_ALLOC_IO_NET message from host @CL_NAME (rv @RV)",
-		cl->name, rv);
-	__NFOUT;
-}
 
 static void alloc_nr_nets(struct nvmeibs_client *cl,
 	struct nvmeib_iu *recv_ioctx, struct nvmeib_iu *send_ioctx)
@@ -4815,189 +4449,6 @@ send_rsp:
 	__NFOUT;
 }
 
-static void locate_io_channels(struct nvmeibs_client *cl,
-	struct nvmeib_iu *recv_ioctx, struct nvmeib_iu *send_ioctx)
-{
-	struct volume_client_req *req;
-	struct volume_client_config_ma_locate *creq;
-	struct volume_server_rsp *rsp = &cl->rsp;
-	struct volume_server_config_locate_rsp *lrsp = &rsp->locate_rsp;
-	void *p = cl->out_msg_area;
-	void *e = p + (NVMEIBS_CONFIG_MSG_RDMA_PAGES << PAGE_SHIFT);
-	struct completion *alloc_done = NULL;
-	int rv;
-	unsigned long start;
-	size_t rdma_len = sizeof(__be64);
-	DECLARE_COMPLETION_ONSTACK(send_done);
-
-	__NFIN;
-	*(u64*)p = -1; // poison
-	memset(lrsp, 0, sizeof(*lrsp));
-	req = recv_ioctx->buf;
-
-	if (be16_to_cpu(req->version_tag) != vex_base) {
-		_NT(locate_io_channels_t1, "Invalid version tag @UINT in NVMEIBC_MA_LOCATE_RSC", be16_to_cpu(req->version_tag));
-		rv = -EPROTO;
-		goto out;
-	}
-
-	creq = &req->config_req.loc_req;
-	_NT(trace_client_locate_io_channels, "--- Start handling NVMEIBC_MA_LOCATE_RSC message from host @CL_NAME",
-		cl->name);
-	WARN_ON(cl->is_local); //we don't give resources to local clients
-	WARN_ON(cl->release_done);
-	alloc_done = kzalloc(sizeof(struct completion), GFP_KERNEL);
-	if (!alloc_done) {
-		_NE(error_client_locate_io_channels, "failed to allocate memory for completion");
-		rv = -ENOMEM;
-		goto out;
-	}
-	init_completion(alloc_done);
-	cl->release_done = alloc_done;
-	nvmeib_ref_init(&cl->msg_area_refcount);
-
-	_NT(trace_1_client_locate_io_channels, "LOCATE_ANA nvmeibs_disk_client_locate");
-
-	rv = nvmeibs_disk_client_locate(cl, creq->disk_name, creq->ofed_ver, creq->kern_ver, lrsp, p, e);
-	if (rv) {
-		start = jiffies;
-		rv = wait_for_completion_interruptible_timeout(alloc_done, NVMEIB_WAIT_FOR_RESOURCES_S);
-		if (rv > 0 && corecomm_inj_var(NULL, int, corecomm_inj_locate_rsc_timeout, 0)) {
-			usleep_range(NVMEIB_WAIT_FOR_RESOURCES_S * 1000, NVMEIB_WAIT_FOR_RESOURCES_S * 1000 + 1);
-			rv = 0;
-		}
-		_NT(trace_4_client_locate_io_channels, "wait completed with @RV timeout @DIFF_JIFFIES", rv, jiffies - start);
-		nvmeib_ref_release_start(&cl->msg_area_refcount);
-		nvmeib_ref_release_wait(&cl->msg_area_refcount);
-		cl->release_done = NULL;
-
-		if (rv <= 0) {
-			_NE(error_1_client_locate_io_channels, "Fail to wait on resource allocation");
-			nvmeibs_disk_remove_client(cl, creq->disk_name);
-			rv = 0;
-		} else {
-			if (*(u64*)p == -1) {
-				// client was terminated before reply or timeout
-				// expect the client to go down
-				BUG_ON(!atomic_read(&cl->dying));
-				rv = 0;
-			}
-		}
-	} else {
-		nvmeib_ref_release_start(&cl->msg_area_refcount);
-		nvmeib_ref_release_wait(&cl->msg_area_refcount);
-	}
-
-	if (rv) {
-		BUG_ON(*(u64*)p == -1);
-		rdma_len += be64_to_cpu(*(__be64*)p) * sizeof(__be64);
-	} else {
-		*(u64*)p = 0;
-	}
-
-	_NT(trace_6_client_locate_io_channels, "rdma_len=@SIZE_LONG", rdma_len);
-
-	rv = send_rdma_msg(cl, &creq->rdma, rdma_len);
-	if (!rv)
-		send_ioctx->io_done = &send_done;
-	kfree(alloc_done);
-	cl->release_done = NULL;
-
-out:
-	start = jiffies;
-	nvmeibs_client_send_rsp(cl, cl->net,
-		rv == 0 ? NVMEIBS_RSP_MGMT_OPCODE_OK : NVMEIBS_RSP_MGMT_OPCODE_ERR,
-		req->hdr.tag, req->version_tag, send_ioctx, lrsp, sizeof(*lrsp), NVMEIB_SEND_CFG, NON_NR_VERSION);
-	if (send_ioctx->io_done && (rv = wait_for_completion_timeout(&send_done, NVMEIB_WAIT_FOR_ADMIN_SEND_COMP)) <= 0) {
-		_NT(trace_client_locate_io_channels_time_out, "Timed out (@RV) waiting for send comp from host @CL_NAME",
-			rv, cl->name);
-		rv = -ETIMEDOUT;
-	}
-	send_ioctx->io_done = NULL;
-	_NT(trace_10_client_locate_io_channels, "--- Finish handling NVMEIBC_MA_LOCATE_RSC message from host @CL_NAME (rv @RV)",
-		cl->name, rv);
-	__NFOUT;
-}
-
-static void reset_io_channels(struct nvmeibs_client *cl,
-	struct nvmeib_iu *recv_ioctx, struct nvmeib_iu *send_ioctx)
-{
-	struct volume_client_req *req;
-	struct volume_client_config_ma_reset_io *creq;
-	u64 disk_rsc_id;
-	u64 msix_table_addr;
-	u64 msix_raddr;
-	u32 msix_payload;
-	u16 channel_id;
-	struct nvmeibs_rionic *rionic;
-	struct nvmeibs_io_channel *ioch;
-	void *payload = NULL;
-	int payload_len = 0;
-	int rv;
-
-	__NFIN;
-	req = recv_ioctx->buf;
-
-	if (be16_to_cpu(req->version_tag) != vex_base) {
-		_NT(reset_io_channels_t1, "Invalid version tag @UINT in NVMEIBC_MA_RESET_RSC", be16_to_cpu(req->version_tag));
-		rv = -EPROTO;
-		goto send_rsp;
-	}
-
-	creq = &req->config_req.reset_io_req;
-	disk_rsc_id = be64_to_cpu(creq->rsc_id);
-	msix_table_addr = be64_to_cpu(creq->msix_table_addr);
-	msix_raddr = be64_to_cpu(creq->msix_raddr);
-	msix_payload = be32_to_cpu(creq->msix_payload);
-	channel_id = be16_to_cpu(creq->def.qp_num);
-	_NT(trace_client_reset_io_channels, "--- Start handling NVMEIBC_MA_RESET_RSC message from host @CL_NAME "
-	   "cl->disk=@DISK_STR, qp_num=@QP_NUM disk_resource_id=@DISK_RESOURCE_ID, "
-	   "msix_taddr=@MSIX_TADDR, msix_raddr=@MSIX_RADDR, payload=@PAYLOAD",
-	   cl->name, cl->disk_name, channel_id, disk_rsc_id,
-	   msix_table_addr, msix_raddr, msix_payload);
-
-	/* bind ioch to disk_rsc_id so that when ioch goes down we'll
-	   reset the disk's msix entry before freeing net/qp resources,
-	   to avoid ringing the qp doorbell while/after its down */
-	if (!(rionic = nvmeibs_client_get_rionic(cl, &creq->def,
-		NVMEIBS_IOCH_RDDA))) {
-		_NE(error_client_reset_io_channels, "Invalid client parameters: src nic=@NIC_STR, dst nic=@NIC_STR, channel=@CHANNEL",
-			creq->def.sgid, creq->def.dgid, channel_id);
-		rv = -EINVAL;
-		goto send_rsp;
-	}
-	ioch = &rionic->io_channels[channel_id];
-	if (ioch->id == -1) {
-		_NI(trace_1_client_reset_io_channels, "IO-channel is not connected");
-		rv = -ENOTCONN;
-		goto send_rsp;
-	}
-	if (ioch->disk_rsc_id != -1) {
-		_NI(trace_2_client_reset_io_channels, "IO-channel already binded to disk_rsc_id=@DISK_RSC_ID_INT", ioch->disk_rsc_id);
-		rv = -EALREADY;
-		goto send_rsp;
-	}
-
-	/* program disk_rsc_id's msix-entry with client's values */
-	if ((rv = nvmeibs_disk_client_reset_io(cl, cl->disk_name, disk_rsc_id,
-		msix_table_addr, msix_raddr, msix_payload)) < 0) {
-		_NE(error_1_client_reset_io_channels, "Fail to reset-io (undind and send rsp)");
-		rv = -EIO;
-		goto send_rsp;
-	}
-
-	/* actual bind */
-	ioch->disk_rsc_id = disk_rsc_id;
-
-send_rsp:
-	nvmeibs_client_send_rsp(cl, cl->net,
-		rv == 0 ? NVMEIBS_RSP_MGMT_OPCODE_OK : NVMEIBS_RSP_MGMT_OPCODE_ERR,
-		req->hdr.tag, req->version_tag, send_ioctx, payload, payload_len, NVMEIB_SEND_CFG, NON_NR_VERSION);
-	_NT(trace_3_client_reset_io_channels, "--- Finish handling NVMEIBC_MA_RESET_RSC message from host @CL_NAME (rv @RV)",
-		cl->name, rv);
-	__NFOUT;
-}
-
 /**
  * nvmeibs_handle_fmr_reg(): The FMR registration return from
  * the send_q. Once we manage to register the send_q buffer for
@@ -5039,15 +4490,6 @@ static void handle_fmr_inv(struct nvmeib_iu *send_ioctx)
 	NFOUT;
 }
 
-static void locate_rsc(struct nvmeibs_client *cl,
-	struct nvmeib_iu *recv_ioctx, struct nvmeib_iu *send_ioctx)
-{
-	__NFIN;
-
-	locate_io_channels(cl, recv_ioctx, send_ioctx);
-
-	__NFOUT;
-}
 
 /**
  * nvmeibs_handle_client_config_req() - Client configuration
@@ -5075,13 +4517,10 @@ static void handle_config_req(struct nvmeibs_client *cl,
 		get_access_info(cl, recv_ioctx, send_ioctx);
 		break;
 	case NVMEIBC_MA_ALLOC_IO_NET:
-		alloc_io_nets(cl, recv_ioctx, send_ioctx);
-		break;
-	case NVMEIBC_MA_LOCATE_RSC:
-		locate_rsc(cl, recv_ioctx, send_ioctx);
+		BUG();
 		break;
 	case NVMEIBC_MA_RESET_RSC:
-		reset_io_channels(cl, recv_ioctx, send_ioctx);
+		BUG();
 		break;
 	case NVMEIBC_MA_GET_DISK_MEMS:
 		send_disk_lock_mems(cl,recv_ioctx,send_ioctx);
@@ -5949,74 +5388,6 @@ static void process_rcq_completion(struct ib_cq *cq, void *ctx)
 	NFOUT;
 }
 
-/**
- * nvmeibs_disk_qp_send_completion() - When we init an IO qp we
- * send a noop and we need to wait till it completes and thus we
- * need to register a completion procedure to all IO qps.
- *
- */
-static void io_channel_send_completion(struct ib_cq *cq, void *ctx)
-{
-	struct nvmeibs_io_channel *ioch = ctx;
-	DECLARE_IB_WC_ONSTACK(wc);
-
-	NFIN;
-
-	BUG_ON(nvmeibs_use_pcpu_cq);
-
-	ib_req_notify_cq(cq, IB_CQ_NEXT_COMP);
-	while (ib_poll_cq(cq, 1, &wc) > 0) {
-#if 0 /* currently drain-sq is not done for ioch */
-		if (unlikely(nvmeib_opcode_from_wc(&wc) == NVMEIB_DRAIN_QUEUE)) {
-			nvmeibs_net_on_drain_sq(ioch->net);
-			continue; //catch send after drain-sq
-		}
-#endif
-
-		if (likely(wc.status == IB_WC_SUCCESS)) {
-#ifdef SIM_NO_MSI
-			if (wc.wr_id != SIM_NO_MSI_WR_ID)
-#endif
-				_NT(trace_client_io_channel_send_completion, "RDDA channel got successful send completion on WQE @WR_ID_LLONG", wc.wr_id);
-		} else {
-#ifdef SIM_NO_MSI
-			if (wc.wr_id == SIM_NO_MSI_WR_ID)
-				_NT(io_channel_send_completion_t1, "RDDA channel failed on No MSI Send");
-			else
-#endif
-			{
-				_NT(trace_1_client_io_channel_send_completion, "RDDA channel remote send failed on WQE @WR_ID_LLONG with opcode @OPCODE status @STATUS",
-				   wc.wr_id, wc.opcode, wc.status);
-				/* TBD: Add function for printing WQE per device type to nvmeib_ibdr */
-			}
-			nvmeibs_net_release(ioch->net, NVMEIBS_LOGOUT_REASON_IO_CH_SND_COMPLETION_FAILED);
-		}
-	}
-
-/* Jared: Previous code */
-#if 0
-		/* check if someone waits for the send completion */
-#ifdef SIM_NO_MSI
-		if (wc.wr_id != SIM_NO_MSI_WR_ID) {
-#endif
-		u32 index = nvmeib_idx_from_wc(&wc);
-		if ((int)index != -1) {
-			struct nvmeib_iu *send_ioctx; = ioch->net->ioctx_ring[index];
-			if (send_ioctx->io_done) {
-				send_ioctx->io_status = wc.status;
-				complete(send_ioctx->io_done);
-			}
-			else
-				nvmeibs_net_put_ioctx(ioch->net, send_ioctx);
-		}
-#ifdef SIM_NO_MSI
-		}
-#endif
-	}
-#endif
-	NFOUT;
-}
-
 static void lock_channel_send_completion(struct ib_cq *cq, void *vcl)
 {
 	struct nvmeibs_client *cl = vcl;
@@ -6040,42 +5411,6 @@ static void lock_channel_send_completion(struct ib_cq *cq, void *vcl)
 	NFOUT;
 }
 
-#ifdef SIM_NO_MSI
-static void io_channel_recv_completion(struct ib_cq *cq, void *ctx)
-{
-	struct nvmeibs_io_channel *ioch = ctx;
-	struct ib_wc wc;
-	struct ib_send_wr wr;
-	struct ib_send_wr *bad_wr;
-
-	struct nvmeibs_dev *nis_dev = P2NV(ioch->net->port);
-	struct nvmeib_iu *recv_ioctx;
-	unsigned index;
-
-	__NFIN;
-	bad_wr = &wr;
-	ib_req_notify_cq(cq, IB_CQ_NEXT_COMP);
-	while (ib_poll_cq(cq, 1, &wc) > 0)
-		if (likely(wc.status == IB_WC_SUCCESS)) {
-			_ND(io_channel_recv_completion_d1, "sending reply");
-			memset(&wr, 0, sizeof(wr));
-			wr.opcode = IB_WR_SEND;
-			wr.wr_id = SIM_NO_MSI_WR_ID;
-			wr.send_flags = IB_SEND_SIGNALED;
-			if (nvmeibs_ib_post_send(ioch->net, &wr, &bad_wr)) {
-				_ND(io_channel_recv_completion_d2, "Fail to send");
-			}
-			index = nvmeib_idx_from_wc(&wc);
-			recv_ioctx = nis_dev->ioctx_ring[index];
-			nvmeibs_post_recv(nis_dev, recv_ioctx);
-		}
-		else {
-			BUG_ON(true);
-			break;
-		}
-	__NFOUT;
-}
-#endif
 
 static void ka_disable(void *context)
 {
@@ -6316,7 +5651,7 @@ out:
 #if 0 /* DEBUG ONLY */
 void nvmeibs_client_check_trigger(struct nvmeibs_client *cl)
 {
-	struct nvmeibs_io_channel *ioch = cl->_ioch_;
+	void *ioch = cl->_ioch_;
 #if 0
 	struct nvmeib_dbg_mlx mm = {0};
 	struct ib_send_wr wr[2] = {{0}};
@@ -7272,328 +6607,6 @@ int nvmeibs_client_connect_2nd_lock_ch(struct nvmeibs_ib_port *ib_port,
 }
 
 /* stop ib-post-send triggered by disk completion */
-static void ioch_stop_iosq(struct nvmeibs_io_channel *ioch)
-{
-	struct nvmeibs_disk_info *di;
-	int i;
-	NFIN;
-
-	if (ioch->disk_rsc_id == -1) {
-		_NT(trace_client_ioch_stop_iosq, "ioch not bound to disk-rsc");
-		goto out;
-	}
-	if (!ioch->rionic ||
-		!ioch->rionic->lionic ||
-		!ioch->rionic->lionic->disk ||
-		!ioch->rionic->lionic->disk->di) {
-		_NE(error_client_ioch_stop_iosq, "OOPS, cant extract di");
-		goto out;
-	}
-
-	di = ioch->rionic->lionic->disk->di;
-	for (i = 0; i < di->n_qs; ++i) {
-		if (di->qs[i].qid == ioch->disk_rsc_id) {
-			_NT(trace_1_client_ioch_stop_iosq, "mask msix-entry of ioch's disk-rsc=@RSC", ioch->disk_rsc_id);
-			mask_msix_vector(&di->qs[i]);
-			/* Terminate outstanding nvme-cmd as part of cl-release to prevent
-			   these very unlikely scenarios where this nvme-cmd execute after:
-			   (1) recovery's read or (2) nvmeibs_serjio_return_journal_range()
-			   which is the (1st) barrier for reusing the JRI (by same/other
-			   client) and triggering JGC which may erase JLBAs */
-			//nvmeibs_nvme_client_q_destroy(&di->qs[i]);
-			ioch->disk_rsc_id = -1;
-			break;
-		}
-	}
-
-out:
-	NFOUT;
-}
-
-static void free_io_channel_net(void *context)
-{
-	struct nvmeibs_io_channel *ioch = context;
-
-	NFIN;
-
-	nvmeibs_client_rionic_disconnect_ioch(ioch->rionic, ioch->io_ka_enabled);
-	ioch->io_ka_enabled = false;
-
-	_NT(trace_0_client_free_io_channel_net,
-		"Putting Disk @DISK_NAME jrange handle @JRANGE_HANDLE jmdc_map_handle @HANDLE_PTR",
-		ioch->rionic->lionic->disk->di->disk_id, ioch->jrange_handle, ioch->jmdc_map_handle);
-	nvmeibs_serjio_put_jrange_handle(ioch->jrange_handle, ioch->jmdc_map_handle);
-	ioch->jrange_handle = NULL;
-	ioch->jmdc_map_handle = NULL;
-
-	/* this is ugly, dma_pages is allocated from within
-	 * nvmeib_ibdr_get_qp_sqr() and stored in ioch->qp_rsc.sq.pages which
-	 * is assigned into dma_pages before being nullified
-	 * So need to kfree() from here...
-	 */
-	kfree(ioch->pli.dma_pages);
-
-	ioch_stop_iosq(ioch);
-	unmap_rdma_mr(ioch);
-	unmap_ib_sq_db(ioch);
-
-	/* send ioch-drained */
-	_NT(trace_1_client_free_io_channel_net, "cs-gid: sent=@LLU, curr=@LLU",
-		ioch->cs_gid_last_sent, ioch->cs_gid);
-	if (ioch->id != -1 && ioch->cs_gid_last_sent != ioch->cs_gid) {
-		nvmeibs_client_send_ioch_drained(ioch->net->params.cl, true,
-										 ioch->rionic, ioch->id, ioch->cs_gid);
-		ioch->cs_gid_last_sent = ioch->cs_gid;
-	}
-
-	/* make channel reuseable */
-	ioch->id = -1;
-
-#ifdef CONFIG_NVMEIB_DEBUG
-	nvmeib_ibdr_dump_sq(P2IB(ioch->net->params.port), ioch->net->qp);
-
-	if (ioch->rionic->lionic->disk) {
-		nvmeibs_nvme_dump_msix_table(ioch->rionic->lionic->disk->di);
-	}
-#endif
-
-	NFOUT;
-}
-
-void nvmeibs_client_prp_io_channel_def(struct nvmeibs_client *cl,
-	struct nvmeibc_login_request *req, struct nvmeibs_ib_port *ib_port,
-	struct nvmeibc_io_channel_def *def)
-{
-	union ib_gid sgid, dgid;
-	u16 qp_num;
-	const int d_name_size = min(sizeof(cl->disk_name), sizeof(def->disk_name));
-
-	NFIN;
-	memset(def->disk_name, 0, sizeof(def->disk_name));
-	memcpy(def->disk_name, cl->disk_name, d_name_size);
-	nvmeibc_login_req_get_ioch(req,
-				&sgid.global.subnet_prefix, &sgid.global.interface_id,
-				&dgid.global.subnet_prefix, &dgid.global.interface_id,
-				&qp_num, NULL);
-	memcpy(def->sgid, sgid.raw, sizeof(def->sgid));
-	memcpy(def->dgid, dgid.raw, sizeof(def->dgid));
-	def->qp_num = cpu_to_be16(qp_num);
-	_ND(trace_client_nvmeibs_client_prp_io_channel_def, "s=@SGID --> d=@DGID", def->sgid, def->dgid);
-
-	NFOUT;
-}
-
-static void connect_io_channel_work(struct workqe_struct *work)
-{
-	struct alloc_work *w = container_of(work, struct alloc_work, work);
-	struct nvmeibs_ib_port *ib_port = w->port;
-	struct nvmeib_rdma_cm *cm_id = w->cm_id;
-	struct nvmeibs_client *cl = w->cl;
-	struct nvmeibc_login_request *req = &w->req;
-	struct nvmeibs_login_reject lrej = {{0}};
-	struct nvmeibs_login_reject *rej = &lrej;
-	struct nvmeibs_login_response *rsp = NULL;
-	struct nvmeibs_net_init *params = NULL;
-	struct nvmeibs_net_init_target target;
-	struct nvmeibs_rionic *rionic;
-	struct nvmeibs_client_disk *cdisk;
-	struct nvmeibs_lionic *lionic;
-	struct nvmeibs_io_channel *io_channel;
-	struct nvmeibc_io_channel_def def;
-	int qp_num, i, j;
-	u8 ioch_flags;
-	struct nvmeib_remote_access_info jmdc_rai = {0};
-
-	__NFIN;
-	nvmeibs_client_prp_io_channel_def(cl, req, ib_port, &def);
-	if (!(rionic = nvmeibs_client_get_rionic(cl, &def, NVMEIBS_IOCH_RDDA))) {
-		_NE(error_client_connect_io_channel_work, "rejected NVMEIB_IO_LOGIN_REQ because no match for src/dst nic.");
-		rej->reason = __constant_cpu_to_be32(
-			NVMEIBS_LOGIN_REJ_IO_CHANNEL_SRC_DST_MATCH);
-		goto reject;
-	}
-	qp_num = be16_to_cpu(def.qp_num);
-	io_channel = &rionic->io_channels[qp_num];
-	if (io_channel->id != -1) {
-		_NE(error_1_client_connect_io_channel_work, "IO channel (@QP_NUM-@ID_INT) is still connected - rejecting new connection",
-			qp_num, io_channel->id);
-		rej->reason = __constant_cpu_to_be32(
-			NVMEIBS_LOGIN_REJ_IO_CHANNEL_ALREADY_CONNECTED);
-		/* start net release if it is not already in progress */
-		nvmeibs_net_release(io_channel->net, NVMEIBS_LOGOUT_REASON_IO_CH_SND_COMPLETION_FAILED);
-		goto reject;
-	}
-
-	/* in the case we reuse the channel */
-	if (io_channel->net) {
-		kfree(io_channel->net);
-		io_channel->net = NULL;
-		memset(&io_channel->qp_rsc, 0, sizeof(io_channel->qp_rsc));
-		memset(&io_channel->pli, 0, sizeof(io_channel->pli));
-		BUG_ON(io_channel->io_ka_enabled);
-	}
-
-	rsp = kzalloc(sizeof(*rsp), GFP_KERNEL);
-	params = kzalloc(sizeof(*params), GFP_KERNEL);
-	if (!(rsp && params)) {
-		rej->reason = __constant_cpu_to_be32(NVMEIBS_LOGIN_REJ_INSUFFICIENT_RESOURCES);
-		_NE(error_2_client_connect_io_channel_work, "rejected NVMEIB_IO_LOGIN_REQ because no memory.");
-		goto reject;
-	}
-	lionic = rionic->lionic;
-	cdisk = lionic->disk;
-	i = ((void *)lionic - (void *)cdisk->lionics) / sizeof(*lionic);
-	j = ((void *)rionic - (void *)lionic->rionics) / sizeof(*rionic);
-
-	/* init connection params */
-	snprintf(params->name, sizeof(params->name), "R.%d:%d:%03d",
-		i, j, qp_num);
-	params->net_type = S_NET_IO;
-	params->cl = cl;
-	WARN_ON(ib_port == NULL);
-	params->port = ib_port;
-	params->cm_id = cm_id;
-	params->s_msg_size = NVMEIBS_DEFAULT_IO_MSG_SIZE;
-	params->max_send_sge = 1;
-	params->r_msg_size = NVMEIBS_DEFAULT_IO_MSG_SIZE;
-	params->sendq_size = min(nvmeib_ibdr_max_sq_sz(P2IB(ib_port)), cl->n_msgs);
-	params->scq_size = params->sendq_size;
-#ifdef SIM_NO_MSI
-	params->rcq_size = params->sendq_size;
-#else
-	params->rcq_size = 0;
-#endif
-
-	params->rdda_qp = true;
-
-#ifdef SIM_NO_MSI
-	params->use_srq = true;
-	params->srq_priv = NULL;
-	params->srq_type = NVMEIB_SRQ_TYPE_PRIMARY;
-#else
-	params->use_srq = false;
-#endif
-	params->cm_handler = NULL;
-	params->scq_handler = io_channel_send_completion;
-	params->scq_context = &rionic->io_channels[qp_num];
-#ifdef SIM_NO_MSI
-	params->rcq_handler = nvmeibs_disk_qp_recv_completion;
-	params->rcq_context = &rionic->io_channels[qp_num];
-#else
-	params->rcq_handler = NULL;
-	params->rcq_context = NULL;
-#endif
-	params->bn_handler = free_io_channel_net;
-	params->bn_context = &rionic->io_channels[qp_num];
-	params->ch_index = qp_num;
-
-	//TODO: cleanup the SIM_NO_MSI mess
-	if (nvmeibs_use_pcpu_cq) {
-#ifdef SIM_NO_MSI
-		BUG();
-#else
-		params->scq_handler = NULL;
-		params->rcq_handler = NULL;
-		params->use_srq = nvmeibs_support_srq(P2NV(ib_port));
-		params->send_comp_h = io_send_comp_h;
-		params->recv_comp_h = io_recv_comp_h;
-		params->scq_context = &rionic->io_channels[qp_num];
-		params->rcq_context = &rionic->io_channels[qp_num];
-		params->after_qp_error = nvmeibs_net_trigger_qp_last_wqe_reached; //TODO: Remove this
-#endif
-	}
-
-	/* create nvmeib_login_response */
-	nvmeib_wire_op_cid_set_rsp(&rsp->base.op_cid, NVMEIB_LOGIN_RSP, 0);
-	rsp->base.opcode = NVMEIBS_IO_CHANNEL;
-
-	if (cl->di->metadata) {
-		if (!IS_ERR(io_channel->jrange_handle = nvmeibs_serjio_get_jrange_handle(
-				cl->di, cl->cid, cl->jrnl_rng, ib_port->nis_dev, &io_channel->jmdc_map_handle)))
-		{
-			int rv;
-			if ((rv = nvmeibs_serjio_get_jrange_jmdc_rai(
-				io_channel->jrange_handle, io_channel->jmdc_map_handle, &jmdc_rai)) < 0)
-			{
-				_NT(trace_connect_io_channel_work_jmdc_rai_fail,
-				    "Failed (@RV) getting handle for jrange @JRNL_RNG_IDX", rv, cl->jrnl_rng);
-				nvmeibs_serjio_put_jrange_handle(io_channel->jrange_handle, io_channel->jmdc_map_handle);
-				goto reject;
-			}
-			rsp->base.io_rsp.jmdc_raddr = cpu_to_be64(jmdc_rai.raddr);
-			rsp->base.io_rsp.jmdc_rkey = cpu_to_be32(jmdc_rai.rkey);
-			rsp->base.io_rsp.jmdc_len = cpu_to_be32(jmdc_rai.len);
-			_NT(trace_connect_io_channel_work, "jrange @JRNL_RNG_IDX handle @JRANGE_HANDLE jmdc_map_handle @HANDLE_PTR jmdc-rai={raddr=@RADDR, rkey=@RKEY}",
-			    cl->jrnl_rng, io_channel->jrange_handle, io_channel->jmdc_map_handle, jmdc_rai.raddr, jmdc_rai.rkey);
-		}
-		else {
-			_NT(trace_1_connect_io_channel_work, "Failed (@RV) getting handle for jrange @JRNL_RNG_IDX", PTR_ERR(io_channel->jrange_handle), cl->jrnl_rng);
-			goto reject;
-		}
-	}
-
-	nvmeibc_login_req_get_ioch(req, NULL, NULL, NULL, NULL, NULL, &ioch_flags);
-	if (ioch_flags & NVMEIBC_LOGIN_IOCH_USE_IO_KA) {
-		if (nvmeibs_client_rionic_fill_rsp_io_ka(rionic, ib_port, rsp)) {
-			_NE(error_3_client_connect_io_channel_work,
-				"Failed io-ka init");
-			goto err_jrng;
-		}
-		io_channel->io_ka_enabled = true;
-	}
-
-	/* set target */
-	target.common = params;
-	target.req = req;
-	target.rsp = rsp;
-
-	rej->reason = 0;
-	if (!nvmeibs_net_allocate_target(&io_channel->net, &target, rej)) {
-		_NT(trace_client_connect_io_channel_work, "Failed to create target I/O QP");
-		goto err_io_ka;
-	}
-	else {
-		io_channel->net->priv = (void *)(u64)qp_num;
-		io_channel->id = qp_num;
-	}
-	goto out;
-
-err_io_ka:
-	if (io_channel->io_ka_enabled) {
-		nvmeibs_client_rionic_disconnect_ioch(rionic, true);
-		io_channel->io_ka_enabled = false;
-	}
-
-err_jrng:
-	if (io_channel->jrange_handle) {
-		nvmeibs_serjio_put_jrange_handle(io_channel->jrange_handle, io_channel->jmdc_map_handle);
-		io_channel->jrange_handle = NULL;
-		io_channel->jmdc_map_handle = NULL;
-	}
-
-reject:
-	if (rej->reason) {
-		_NT(trace_1_client_connect_io_channel_work, "Reject new connection");
-		nvmeibs_send_login_reject(cm_id, rej, req);
-	}
-	/* we must remember to close the cm_id */
-	nvmeib_rdma_destroy_cm(cm_id);
-
-	nvmeib_ref_put(&ib_port->n_port_conns);
-	goto out;
-
-out:
-	if (params) {
-		kfree(params);
-		params = NULL;
-	}
-	if (rsp) {
-		kfree(rsp);
-		rsp = NULL;
-	}
-	kfree(w);
-	__NFOUT;
-}
 
 int nvmeibs_client_connect_io_channel(struct nvmeibs_ib_port *ib_port,
 	struct nvmeib_rdma_cm *cm_id, struct nvmeibs_client *cl,
@@ -7601,12 +6614,13 @@ int nvmeibs_client_connect_io_channel(struct nvmeibs_ib_port *ib_port,
 {
 	int rv;
 	__NFIN;
-
-	rv = nvmeibs_client_connect_channel(
-		ib_port, cm_id, cl, req, rej, connect_io_channel_work);
-	_NT(trace_client_nvmeibs_client_connect_io_channel, "cl @CL_NAME: @STATUS_STR connect-io-channel work to cl-wq",
-		cl->name, !rv ? "Added" : "Failed to add");
-
+	/* RDDA removed - stubbed */
+	rv = -ENOTSUPP;
+	(void)ib_port;
+	(void)cm_id;
+	(void)cl;
+	(void)req;
+	(void)rej;
 	__NFOUT;
 	return rv;
 }
@@ -7636,6 +6650,28 @@ static void free_cmds(struct list_head *l)
 	NFOUT;
 }
 
+void nvmeibs_client_prp_io_channel_def(struct nvmeibs_client *cl,
+	struct nvmeibc_login_request *req, struct nvmeibs_ib_port *ib_port,
+	struct nvmeibc_io_channel_def *def)
+{
+	union ib_gid sgid, dgid;
+	u16 qp_num;
+	const int d_name_size = min(sizeof(cl->disk_name), sizeof(def->disk_name));
+
+	NFIN;
+	memset(def->disk_name, 0, sizeof(def->disk_name));
+	memcpy(def->disk_name, cl->disk_name, d_name_size);
+	nvmeibc_login_req_get_ioch(req,
+				&sgid.global.subnet_prefix, &sgid.global.interface_id,
+				&dgid.global.subnet_prefix, &dgid.global.interface_id,
+				&qp_num, NULL);
+	memcpy(def->sgid, sgid.raw, sizeof(def->sgid));
+	memcpy(def->dgid, dgid.raw, sizeof(def->dgid));
+	def->qp_num = cpu_to_be16(qp_num);
+	_ND(trace_client_nvmeibs_client_prp_io_channel_def, "s=@SGID --> d=@DGID", def->sgid, def->dgid);
+
+	NFOUT;
+}
 
 static void free_client_cmds(struct nvmeibs_client *cl)
 {
@@ -8018,7 +7054,7 @@ static ssize_t print_cl_rionic_info(char *buffer, int len,
 		"\"n_io_channels\":%d,\n"
 		"\"n_nr_channels\":%d"
 		"}\n",
-		gid, rionic->n_io_channels, rionic->n_nr_channels);
+		gid, 0 /* RDDA removed */, rionic->n_nr_channels);
 
 	NFOUT;
 	return count;
@@ -8504,7 +7540,6 @@ out:
 static int disconnect_rionic_iochs(struct nvmeibs_rionic *rionic)
 {
 	struct nvmeibs_nr_channel *nrch;
-	struct nvmeibs_io_channel *ioch;
 	struct nvmeibs_lionic *lionic = rionic->lionic;
 	int i, rv = 0;
 
@@ -8517,16 +7552,6 @@ static int disconnect_rionic_iochs(struct nvmeibs_rionic *rionic)
 			nrch = &rionic->nr_channels[i];
 			if (nrch && nrch->id != -1) {
 				nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_IO_CH_DISCONNECTION);
-				rv++;
-			}
-		}
-	}
-	/* RDDA */
-	if (rionic->io_channels) {
-		for (i = 0; i < rionic->n_io_channels; i++) {
-			ioch = &rionic->io_channels[i];
-			if (ioch && ioch->id != -1) {
-				nvmeibs_net_release(ioch->net, NVMEIBS_LOGOUT_REASON_NR_CH_DISCONNECTION);
 				rv++;
 			}
 		}
@@ -8973,41 +7998,6 @@ static void l_2nd_send_comp_h(void *ctx, struct ib_wc *wcs)
 }
 
 static void l_2nd_recv_comp_h(void *ctx, struct ib_wc *wcs)
-{
-	NFIN;
-	WARN_ON(true);
-	NFOUT;
-}
-
-static void io_send_comp_h(void *ctx, struct ib_wc *wcs)
-{
-	struct nvmeibs_io_channel *ioch = ctx;
-
-	NFIN;
-
-	if (likely(wcs->status == IB_WC_SUCCESS)) {
-#ifdef SIM_NO_MSI
-			if (wcs->wr_id != SIM_NO_MSI_WR_ID)
-#endif
-				_NT(io_send_comp_h_t1, "RDDA channel got successful send completion on WQE @_X",
-					wcs->wr_id);
-		} else {
-#ifdef SIM_NO_MSI
-			if (wcs->wr_id == SIM_NO_MSI_WR_ID)
-				_NT(io_send_comp_h_t2, "RDDA channel failed on No MSI Send");
-			else
-#endif
-			{
-				_NT(io_send_comp_h_t3, "RDDA channel remote send failed on WQE @_X with opcode @INT status @INT",
-				   wcs->wr_id, wcs->opcode, wcs->status);
-				/* TBD: Add function for printing WQE per device type to nvmeib_ibdr */
-			}
-			nvmeibs_net_release(ioch->net, NVMEIBS_LOGOUT_REASON_IO_CH_SND_COMPLETION_FAILED);
-		}
-	NFOUT;
-}
-
-static void io_recv_comp_h(void *ctx, struct ib_wc *wcs)
 {
 	NFIN;
 	WARN_ON(true);
