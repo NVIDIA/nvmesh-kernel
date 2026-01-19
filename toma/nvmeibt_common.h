@@ -435,13 +435,17 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 	__fd__;																			\
 })
 
-#define NNVMEIBT_OPEN_READ_EXCL(name, __path) ({ 									\
+#define NNVMEIBT_OPEN_READ_EXCL(name, __path, __is_mandatory) ({ 					\
 	int		__fd__;																	\
 	__MEASURE_TOOK_INIT();															\
 	errno = 0;																		\
 	__fd__ = open((__path), O_RDONLY | O_CLOEXEC | O_EXCL);							\
 	if (__fd__ < 0) {																\
-		N_Wf(name ## 2, "OPEN_READ_EXCL path=@PATH file_type='@STR' @AUTO_ERRNO", (__path), get_file_type_str(__path));		\
+		if (__is_mandatory) {														\
+			N_Wf(name ## 2, "OPEN_READ_EXCL path=@PATH file_type='@STR' @AUTO_ERRNO", (__path), get_file_type_str(__path));		\
+		} else {																	\
+			N_Tf(name ## 3, "OPEN_READ_EXCL path=@PATH file_type='@STR' @AUTO_ERRNO", (__path), get_file_type_str(__path));		\
+		}																			\
 	} else {																		\
 		N_Tf(name, "open path=@PATH fd=@FD", (__path), __fd__);						\
 	}																				\

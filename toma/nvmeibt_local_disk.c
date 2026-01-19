@@ -1316,7 +1316,7 @@ int nvmeibt_local_disk_add_from_stock_driver(struct nvmeibt_udev_event_info *ude
 	XHASHTABLE_INIT(&wqe->new_local_disk->seg_active_hash);
 
 	wqe->new_local_disk->are_partitions_setup_in_mem = false;
-	if ((wqe->new_local_disk->dev_file_fd = NNVMEIBT_OPEN_READ_EXCL(t_h3_tomaldisk, dev_file_name)) < 0) {
+	if ((wqe->new_local_disk->dev_file_fd = NNVMEIBT_OPEN_READ_EXCL(rcgdh2k, dev_file_name, 0)) < 0) {
 		N_Tf(tvcsghe, "open(@OPEN, O_EXCL) failed. err='@AUTO_ERRNO'. marking is_excluded and retrying non-O_EXCL", dev_file_name);
 		wqe->new_local_disk->is_excluded = true;
 		if ((wqe->new_local_disk->dev_file_fd = NNVMEIBT_OPEN_READ(t_h5_tomaldisk, dev_file_name, 1)) < 0) {
