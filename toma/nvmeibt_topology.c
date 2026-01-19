@@ -1933,7 +1933,8 @@ int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
 {
 	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
 	struct nvmeibs_toma_server_proc_buf *msg_buf = NNVMEIBT_BM_CALLOC(tthlse0, max_len);
-	int rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len, is_server_event);
+	int rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len);
+	*is_server_event = (msg_buf->is_clnt == 0);
 	if (rv < 0) {
 		N_Ef(tthlse1, "Error reading handling local server event rv=@RV!", rv);
 	} else if (*is_server_event) {

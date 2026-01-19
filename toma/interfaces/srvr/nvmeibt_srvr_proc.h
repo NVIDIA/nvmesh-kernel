@@ -29,7 +29,7 @@ void nvmeib_srvr_api_lib_server__detach(          struct nvmeibt_km_comm *);	// 
 void nvmeib_srvr_api_lib_destroy(                 struct nvmeibt_km_comm *);	// Do not use 'p' after calling this function. It is freed
 int	 nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *, const struct km_comm_msg_hdr *);	// Send message with callback (async api)
 int	 nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *, const struct nvmeibs_toma_server_proc_buf *);	// Blocking: server reply returned directly
-int	 nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibt_km_comm *,       struct nvmeibs_toma_server_proc_buf *, int max_len, bool *is_server_event);	// Should be replaced by callback
+int	 nvmeib_srvr_api_lib_recv_msg_from_server(    struct nvmeibt_km_comm *,       struct nvmeibs_toma_server_proc_buf *, int max_len);	// Should be replaced by callback
 int  nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *, const struct nvmeibs_toma_client_proc_buf *, int buf_len, const char *clnt_host);	// Blocking: ask server to forward msg to a client. Server send rv returned directly
 int  nvmeibt_km_comm_get_disk_info(               struct nvmeibt_km_comm *, const char *disk_name, struct nvmeib_disk_info *di);	// On success returns 0, negative on error
 int  nvmeib_srvr_api_lib_send_block_status_reply( struct nvmeibt_km_comm *, const struct nvmeibs_msg_s2t_toma_status_req *req);	// Todo: Remove. Library should auto call this. Function below is used to fill kernel server proc files under TOMA_STATUS_PROC_DIR directory

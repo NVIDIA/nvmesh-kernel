@@ -271,7 +271,7 @@ int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, cons
 	}
 }
 
-int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len, bool *is_server_event)
+int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len)
 {
 	const int rv = read(fd_srvr2toma, msg, max_len);
 	(void)p;
@@ -279,7 +279,6 @@ int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct n
 		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
 		return -1;
 	}
-	*is_server_event = (msg->is_clnt == 0);
 	return rv;
 }
 
