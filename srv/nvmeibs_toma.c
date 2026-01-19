@@ -739,7 +739,7 @@ static void prepare_subscriber_evt_msg(struct nvmeibs_client *cl,
 	NFIN;
 
 	memset(proc_buf, 0, sizeof(*proc_buf));
-	proc_buf->zero = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
+	proc_buf->is_clnt = 0; /* server event */
 	proc_buf->type = NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE;
 	msg = &(proc_buf->subscriber_change_msg);
 	memset(msg, 0, sizeof(*msg));
@@ -954,7 +954,7 @@ static void prepare_client_disconnect_msg(
 {
 	NFIN;
 
-	proc_buf->zero = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
+	proc_buf->is_clnt = 0; /* server event */
 	proc_buf->type = NVMEIBS_TOMA_REPORT_EVENT_CLIENT_DISCONNECT;
 	proc_buf->client_disconnect_msg_hdr.cid = cl->cid;
 
@@ -1457,7 +1457,7 @@ int nvmeibs_toma_report_event_disk_change(char *disk_id, unsigned long long n_bl
 		goto out;
 
 	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
+	proc_buf.is_clnt = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
 	proc_buf.type = NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE;
 	memcpy(proc_buf.disk_change_msg.disk_id, disk_id,
 		   sizeof(proc_buf.disk_change_msg.disk_id));
@@ -1497,7 +1497,7 @@ int nvmeibs_toma_report_event_serjio_disk_range_cleaned(void *arg, const char *s
 		goto out;
 
 	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
+	proc_buf.is_clnt = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
 	proc_buf.type = NVMEIBS_TOMA_REPORT_EVENT_SERJIO_RANGE_CLEANED;
 	memcpy(proc_buf.serjio_range_cleaned_msg.seg_id, seg_id,
 		   sizeof(proc_buf.serjio_range_cleaned_msg.seg_id));
@@ -1529,7 +1529,7 @@ int nvmeibs_toma_report_event_serjio_request_jgc(const char *seg_id, char *disk_
 	}
 
 	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
+	proc_buf.is_clnt = 0; /* server event must use 0 (see common/nvmeib_shared.h) */
 	proc_buf.type = NVMEIBS_TOMA_TRIGGER_JGC;
 	memcpy(proc_buf.trigger_JGC_cmd.disk_segment_urn_uuid_str, seg_id, NVMEIB_GID_STR_MAX);
 	memcpy(proc_buf.trigger_JGC_cmd.disk_id_str, disk_id_str, NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE);
@@ -1561,7 +1561,7 @@ int nvmeibs_toma_report_event_port_gid_change(struct nvmeibs_ib_port *ib_port)
 		goto out;
 
 	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
+	proc_buf.is_clnt = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
 	proc_buf.type = NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE;
 	strncpy(proc_buf.port_gid_change_msg.ib_dev, P2IB(ib_port)->name, NVMEIB_IB_DEVICE_NAME_MAX);
 	proc_buf.port_gid_change_msg.port = ib_port->port;
@@ -1591,7 +1591,7 @@ int nvmeibs_toma_report_event_nic_change(struct nvmeibs_dev *nis_dev, bool add)
 		goto out;
 
 	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
+	proc_buf.is_clnt = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
 	proc_buf.type = NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE;
 	strncpy(proc_buf.nic_change_msg.ib_dev, N2IB(nis_dev)->name, NVMEIB_IB_DEVICE_NAME_MAX);
 	proc_buf.nic_change_msg.add = add;
@@ -1629,7 +1629,7 @@ int nvmeibs_toma_report_event_blkset_recovered(struct nvmeibs_disk_info *di, con
 		goto out;
 
 	memset(&proc_buf, 0, sizeof(proc_buf));
-	proc_buf.zero = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
+	proc_buf.is_clnt = 0; /* server event must set 0 (see common/nvmeib_shared.h) */
 	proc_buf.type = NVMEIBS_TOMA_REPORT_EVENT_BLKSET_RECOVERED;
 	memcpy(proc_buf.blkset_recovered_msg.disk_segment_urn_uuid_str, ds_uuid,
 		   sizeof(proc_buf.blkset_recovered_msg.disk_segment_urn_uuid_str));
@@ -1905,7 +1905,7 @@ static void destroy_toma_stat_proc_files(struct nvmeibs_toma *t)
 static int toma_req_status_mmap_show(struct seq_file *m, void *v)
 {
 	struct toma_status_req_data *req_data = (struct toma_status_req_data *)m->private;
-	struct nvmeibs_toma_server_proc_buf proc_buf = { { .zero = 0, .type = NVMEIBS_TOMA_WRITE_STATUS_REQ } };
+	struct nvmeibs_toma_server_proc_buf proc_buf = { { .is_clnt = 0, .type = NVMEIBS_TOMA_WRITE_STATUS_REQ } };
 	int i;
 	bool unlock_mutex = false;
 	ssize_t rv = 0;

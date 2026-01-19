@@ -130,8 +130,8 @@ struct nvmeibs_msg_s2t_client_disconnect {	// Server notifies toma that client h
 struct nvmeibs_toma_server_proc_buf {
 	union {
 		struct {		// The first u64 decides between server event or client message to TOMA
-			u32 type;	// For server event, the zero member must be 0, and then the type member indicates the server event type.
-			u32 zero;	// For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero.
+			u32 type;	// For server event, the is_clnt member must be 0, and then the type member indicates the server event type.
+			u32 is_clnt;// For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero. (see also common/nvmeib_shared.h)
 		};
 		u64 handle;
 	};

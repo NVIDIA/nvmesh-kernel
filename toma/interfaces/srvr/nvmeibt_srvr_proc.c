@@ -279,7 +279,7 @@ int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct n
 		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
 		return -1;
 	}
-	*is_server_event = (msg->zero == 0);			// The first u64 decides between server event or client message to TOMA: For server event, the zero member must be 0, and then the type member indicates the server event type. For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero. (see also common/nvmeib_shared.h)
+	*is_server_event = (msg->is_clnt == 0);
 	return rv;
 }
 
