@@ -142,7 +142,6 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void);
 void nvmeibt_topology_serialize_conf_and_topo_if_needed(void);
 void nvmeibt_topology_calc_topology(void);
 int nvmeibt_topology_serialize_active_topology(void);
-int nvmeibt_topology_handle_local_server_event(bool *is_server_event);
 void nvmeibt_topology_leader_connect_disk_with_raft_member(struct nvmeibt_disk *disk, struct nvmeibt_raft_member *member);
 void nvmeibt_topology_leader_detach_all_disks_from_raft_member(struct nvmeibt_raft_member *member);
 void nvmeibt_topology_detach_all_disks_from_node(struct nvmeibt_node *node);

@@ -2026,9 +2026,13 @@ struct netlink_queue_elem_t {
 	struct xdlist link;
 	char opcode;					// Resolves which union is used below
 	enum nvmeibs_serjio_status serjio_status;
-	union {
+	union {										// Notifications arrived from server on serverlib context, reschedule them to Toma main thread context
 		struct nvmeib_disk_info disk_info;
 		char extended_msg[256];
+		struct {								// Old proc API for relatively large messages <=4[KB]
+			struct nvmeibs_toma_server_proc_buf *msg;
+			int msg_size_bytes;
+		} old;
 	};
 };
 
@@ -2059,6 +2063,19 @@ static int srvr_msg_queue_add(const struct nvmeib_disk_info *disk_info, char opc
 	return 0;
 }
 
+// Called from server comm context. Add to list and allow toma main thread to fetch the message
+static void __local_server_msg_queue_add(struct nvmeibs_toma_server_proc_buf *m, int n_bytes)
+{
+	struct netlink_queue_elem_t *elem = (struct netlink_queue_elem_t *)NNVMEIBT_TOMA_CALLOC(ttsimn4, 1, sizeof(*elem));
+	elem->opcode = 'L';
+	elem->old.msg = m;
+	elem->old.msg_size_bytes = n_bytes;
+	pthread_mutex_lock(&srvr_msg_queue.guard);
+	XDLIST_ADD_TAIL(&srvr_msg_queue.head, elem);
+	pthread_mutex_unlock(&srvr_msg_queue.guard);
+	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS, NULL);
+}
+
 static void handle_nvmeibs_nl_msg(struct netlink_queue_elem_t *elem)
 {
 	const unsigned char opcode = (elem->opcode & 0x7f);
@@ -2077,25 +2094,23 @@ static void handle_nvmeibs_nl_msg(struct netlink_queue_elem_t *elem)
 	NFOUT;
 }
 
-int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
+static int nvmeibt_topology_handle_local_server_event(struct netlink_queue_elem_t *elem)
 {
-	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
-	struct nvmeibs_toma_server_proc_buf *msg_buf = NNVMEIBT_BM_CALLOC(tthlse0, max_len);
-	int rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len);
-	*is_server_event = (msg_buf->is_clnt == 0);
-	if (rv < 0) {
-		N_Ef(tthlse1, "Error reading handling local server event rv=@RV!", rv);
-	} else if (*is_server_event) {
-		rv = server_handle_local_event(msg_buf, rv);
+	extern struct timespec last_client_event_timespec, last_local_srv_event_timespec;
+	const bool is_server_event = (elem->old.msg->is_clnt == 0);
+	if (is_server_event) {
+		const int rv = server_handle_local_event(elem->old.msg, elem->old.msg_size_bytes);
 		if (rv < 0)
 			N_Ef(tthlse2, "Error reading handling local server event rv=@RV!", rv);
+		last_local_srv_event_timespec = nvmeibt_global_get_cur_event_start_time();
 	} else {
-		rv = nvmeibt_client_handle_incoming_message(msg_buf, rv);
+		const int rv = nvmeibt_client_handle_incoming_message(elem->old.msg, elem->old.msg_size_bytes);
 		if (rv < 0)
 			N_Ef(tthlse3, "Error reading client incoming message rv=@RV!", rv);
+		last_client_event_timespec = nvmeibt_global_get_cur_event_start_time();
 	}
-	NNVMEIBT_BM_FREE(tthlse4, msg_buf);
-	return rv;
+	NNVMEIBT_BM_FREE(tthlse4, elem->old.msg);
+	return 0;
 }
 
 void nvmeibt_server_lib_consume_incomming_srvr_msgs(void)
@@ -2115,6 +2130,8 @@ void nvmeibt_server_lib_consume_incomming_srvr_msgs(void)
 
 		if (elem->opcode == 'C') {	// a msg from nvmeibc (client)
 			// handle_nvmeibc_nl_msg(elem);
+		} else if (elem->opcode == 'L') {
+			nvmeibt_topology_handle_local_server_event(elem);
 		} else {	// A msg from nvmeibs (server)
 			handle_nvmeibs_nl_msg(elem);
 		}
@@ -2162,6 +2179,7 @@ void nvmeibt_server_lib_create(void)
 		par.on_remove_disk = &nvmeibt_remove_disk_event_callback;
 		par.process_disk_info = &nvmeibt_handle_serjio_state_changed_from_nl_ctx;
 		par.process_extend_msg = &nvmeibt_add_local_clnt_msg_to_toma_nl_queue;
+		par.process_local_srvr_msg = &__local_server_msg_queue_add;
 		par.print_status_fn = &print_status_str;
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);

@@ -7,8 +7,6 @@ static int fd_toma2srvr = -1;
 static int fd_srvr2toma = -1;
 static int fd_toma2clnt = -1;
 
-int nvmeib_srvr_api_lib_get_fd_for_epoll(void) { return fd_srvr2toma; }
-
 static int __blocking_msg_api_create(void)
 {
 	const char *proc_path_toma2srvr = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";		// Toma->Srvr, See server nvmeibs_toma_create()
@@ -767,22 +765,26 @@ static void _send_keep_alive_to_server(struct nvmeibt_km_comm *p)
 	send_msg_to_kernel(p, &kmsg, false);
 }
 
-int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len)
+static bool _recv_msg_from_local_server(struct nvmeibt_km_comm *p)
 {
+	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
+	struct nvmeibs_toma_server_proc_buf *msg = NNVMEIBT_BM_CALLOC(tthlsd0, max_len);
 	const int rv = read(fd_srvr2toma, msg, max_len);
-	(void)p;
 	if (rv < (int)sizeof(msg->handle)) {
-		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
-		return -1;
+		N_Ef(tthlsd1, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
+		NNVMEIBT_BM_FREE(tthlsd2, msg);
+	} else {
+		p->params.process_local_srvr_msg(msg, rv);	// Callback will free the message
 	}
-	return rv;
+	return true;
 }
 
 static void * run(void *v)
 {
 	struct nvmeibt_km_comm *p = v;
 	fd_set read_fds, except_fds;
-	const int n_fds = max(p->spair[1], p->nl_sock_fd) + 1;
+	const int _max_fd0 = max(p->spair[1], p->nl_sock_fd);
+	const int n_fds = max(_max_fd0, fd_srvr2toma) + 1;
 	int n;
 
 	NFIN;
@@ -792,12 +794,14 @@ static void * run(void *v)
 		FD_ZERO(&read_fds);
 		FD_SET(p->spair[1],   &read_fds);
 		FD_SET(p->nl_sock_fd, &read_fds);
+		FD_SET(fd_srvr2toma,  &read_fds);
 		except_fds = read_fds;
 		n = select(n_fds, &read_fds, NULL /*No writes*/, &except_fds, &tv);	// Wakeup on incomming msg from server or from toma
 		if (n > 0) {
 			if (FD_ISSET(p->spair[1], &read_fds)) {
 				read_toma_wakeup_event(p);				if (!__handle_incomming_msg_from_toma(p)) 	   break; }
 			if (FD_ISSET(p->nl_sock_fd, &read_fds)) {	if (!__handle_new_srvr_msg(p)) 				   break; }
+			if (FD_ISSET(fd_srvr2toma,  &read_fds)) {	if (!_recv_msg_from_local_server(p)) 		   break; }
 			if (FD_ISSET(p->spair[1],   &except_fds)) { __release_msg_queues_on_error(p, "toma sock"); break; }
 			if (FD_ISSET(p->nl_sock_fd, &except_fds)) { __release_msg_queues_on_error(p, "srvr sock"); break; }
 			if (FD_ISSET(fd_srvr2toma,  &except_fds)) { __release_msg_queues_on_error(p, "fd_s2toma"); break; }

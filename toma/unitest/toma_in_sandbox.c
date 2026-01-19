@@ -1087,11 +1087,12 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
 	struct t_sandbox_sock *nl_sock = sys->TSB_netlink.o.sock;
+	struct t_sandbox_sock *ls_sock = sys->TSB_srvr2toma.o.sock;
 	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
-	const int nl_fd = nl_sock->fd;
-	const bool monitor_nl = FD_ISSET(nl_fd, readfds), monitor_wakup = FD_ISSET(w->o[1].sock->fd, readfds);
+	const int nl_fd = nl_sock->fd, ls_fd = ls_sock->fd;
+	const bool monitor_nl = FD_ISSET(nl_fd, readfds), monitor_wakup = FD_ISSET(w->o[1].sock->fd, readfds), monitor_ls = FD_ISSET(ls_fd, readfds);
 	int n_events, n_iterations;
-	BUG_ON(!nl_sock || !readfds || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd));	// Wrong select from Toma production code
+	BUG_ON(!nl_sock || !readfds || !ls_sock || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd) || (nfds <= ls_fd));	// Wrong select from Toma production code
 	FD_ZERO(readfds); if (writefds) FD_ZERO(writefds); FD_ZERO(exceptfds);
 	for (n_events = 0, n_iterations = 0; (n_events == 0); n_iterations++) { // Throttled km_comm select, todo, use timeout
 		if (monitor_nl && sys->TSB_netlink.o.has_data()) {	// Check if netlink socket is in the read set and we have queued messages, prepared by server_simu_get_next_msg_for_toma
@@ -1102,13 +1103,17 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 			FD_SET(w->o[1].sock->fd, readfds);				// Toma sends message via netlink
 			n_events++;
 		}
+		if (monitor_ls && sys->TSB_srvr2toma.o.has_data()) { // Check if local servers message arrived
+			FD_SET(ls_fd, readfds);
+			n_events++;
+		}
 		if (n_events == 0) {
 			msleep(100); (void)timeout;						// Todo: use a real timeout
 			if (n_iterations > 3)
 				break; 										// Emulate timeout
 		}
 	}
-	N_Tf(nl_select_ready0, "n_events=@INT nl=@BOOL_YN, wu=@BOOL_YN", n_events, FD_ISSET(nl_fd, readfds), FD_ISSET(w->o[1].sock->fd, readfds));
+	N_Tf(nl_select_ready0, "n_events=@INT nl=@BOOL_YN, wu=@BOOL_YN, ls=@BOOL_YN", n_events, FD_ISSET(nl_fd, readfds), FD_ISSET(w->o[1].sock->fd, readfds), FD_ISSET(ls_fd, readfds));
 	return n_events;
 }
 

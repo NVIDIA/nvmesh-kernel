@@ -451,8 +451,7 @@ int64_t nvmeibt_toma_is_not_reporting_data_segs_gpt_entries = TOMA_DO_NOT_REPORT
 
 /* Times for Status */
 static struct timespec last_ib_event_timespec;
-static struct timespec last_client_event_timespec;
-static struct timespec last_local_srv_event_timespec;
+struct timespec last_client_event_timespec, last_local_srv_event_timespec;
 static struct timespec last_toma_wakeup_event_timespec;
 static struct timespec last_wq_event_timespec;
 //
@@ -517,7 +516,6 @@ struct stat_wq_entry {
 
 enum NVMEIBT_FD_TYPES {
 	NVMEIBT_TOMA_FD_TYPE_IB = 1,
-	NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS = 2,
 	NVMEIBT_TOMA_FD_TYPE_ROCE = 3,
 	NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP = 4,
 	NVMEIBT_TOMA_FD_TYPE_TOMA_SRM_RESEND_TIMER = 7,
@@ -532,7 +530,6 @@ static char *fd_type_str(enum NVMEIBT_FD_TYPES t)
 {
 	switch (t) {
 	case NVMEIBT_TOMA_FD_TYPE_IB: return "IB";
-	case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS: return "SERVER";
 	case NVMEIBT_TOMA_FD_TYPE_ROCE: return "ROCE";
 	case NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP: return "WAKEUP";
 	case NVMEIBT_TOMA_FD_TYPE_TOMA_SRM_RESEND_TIMER: return "SRM";
@@ -1013,6 +1010,7 @@ static const char *toma_wakeup_type_to_str(enum NVMEIBT_TOMA_WAKEUP_TYPE type)
 	case NVMEIBT_TOMA_WAKEUP_TYPE_IB_SA:		return "WAKEUP_TYPE_IB_SA";
 	case NVMEIBT_TOMA_WAKEUP_TYPE_WQ:			return "WAKEUP_TYPE_WQ";
 	case NVMEIBT_TOMA_WAKEUP_TYPE_NETLINK:		return "WAKEUP_TYPE_NETLINK";
+	case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS: return "WAKEUP_TYPE_LOCAL_SERVER";
 	case NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA:		return "WAKEUP_TYPE_KAFKA";
 	default:
 		N_Ef(5vwh3js, "Unknown type=@INT", type);
@@ -1159,6 +1157,7 @@ static int toma_wakeup_event(void)
 			case NVMEIBT_TOMA_WAKEUP_TYPE_WQ:
 				toma_wakeup_wq(buf.ptr);
 				break;
+			case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS:
 			case NVMEIBT_TOMA_WAKEUP_TYPE_NETLINK:
 				if (!is_shuttind_down) nvmeibt_server_lib_consume_incomming_srvr_msgs();	// Dont care during shutdown
 				break;
@@ -2303,7 +2302,6 @@ static void update_read_and_exception_select_fds(struct nvmeibt_toma_fds_in_use 
 	fds_in_use->n_fds_in_use = 0;
 	add_fd_to_select_fds(fds_in_use, signals_fd, NVMEIBT_TOMA_FD_TYPE_SYSTEM_EVENTS);
 	add_fd_to_select_fds(fds_in_use, toma_wakeup_pipe[0], NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP);
-	add_fd_to_select_fds(fds_in_use, nvmeib_srvr_api_lib_get_fd_for_epoll(), NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS);
 	add_fd_to_select_fds(fds_in_use, nvmeibt_udev_get_fd(), NVMEIBT_TOMA_FD_TYPE_UDEV_EVENTS);
 	add_fd_to_select_fds(fds_in_use, nvmeibt_nm_get_fd(nw_node), NVMEIBT_TOMA_FD_TYPE_IB);
 	if (rsrm_faults_get_fd() != -1) {
@@ -2803,7 +2801,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	int 							i, fd;
 	int								rv = -1;
 	BOOL							did_pselect_allow_time_to_receive_append_entries = false;
-	bool 							is_server_event;
 	int 							raft_timeout_skip_ctr = 0;
 	int 							read_cmdl_rv;
 	struct nvmeibt_toma_fd_in_use	*trigger_fd;
@@ -2955,16 +2952,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 						last_ib_event_timespec = nvmeibt_global_get_cur_event_start_time();
 						nvmeibt_nm_process_toma_requests(nw_node);
 					}
-					break;
-				case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS:
-					if (nvmeibt_topology_handle_local_server_event(&is_server_event) < 0) {
-						rv = -1;
-						goto out;
-					}
-					if (is_server_event)
-						last_local_srv_event_timespec = nvmeibt_global_get_cur_event_start_time();
-					else
-						last_client_event_timespec = nvmeibt_global_get_cur_event_start_time();
 					break;
 				case NVMEIBT_TOMA_FD_TYPE_TOMA_WAKEUP:
 					last_toma_wakeup_event_timespec = nvmeibt_global_get_cur_event_start_time();
