@@ -977,13 +977,16 @@ static void toma_unitest_env_end(void) {
 		"\t\t * If pager is not properly built, run once: ./build-verify.sh\n", sys);
 	t_sandbox_all_destroy();
 }
-void toma_unitest_env_start(void) {
-	bool is_running_as_a_utility = false;
+void toma_unitest_env_start(bool is_running_as_a_utility, int trace_debug_level) {
+	#ifdef NDEBUG
+		const char *opt = "RELEASE";
+	#else
+		const char *opt = "DEBUG";
+	#endif
 	char *pwd = getcwd(NULL, 0);
-	SANDBOX_PRINT("init, is_running_as_a_utility=%d dir: %s\n", is_running_as_a_utility, pwd);
+	SANDBOX_PRINT(COL_GREEN "unitest(%s) starting sys=%p" COL_RESET " is_util=%d trace=%d, dir=%s\n", opt, sys, is_running_as_a_utility, trace_debug_level, pwd);
 	free(pwd);
 	atexit(toma_unitest_env_end);
-	SANDBOX_PRINT(COL_GREEN "unitest starting sys=%p" COL_RESET "\n", sys);
 	t_sandbox_all_init();
 }
 
