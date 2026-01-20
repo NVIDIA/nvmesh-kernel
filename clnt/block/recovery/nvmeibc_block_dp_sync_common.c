@@ -465,7 +465,7 @@ static void __compressed_sync_op_trace_start(const struct recovery_sync_op *so) 
 			so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
 			tr->ch, tr->r1, so->rlba,
 			so->start_slice, so->n_slices);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync start: orig_o_dbg_id=%u op=%u vol_id=%u topo=%llu rlba=%llu slices=%u-%u",
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_start(orig_o_dbg_id=%u op=%u vol_id=%u topo=%llu rlba=%llu slices=%u-%u)",
 		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, (u32)so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
 		so->rlba, (u16)(so->start_slice), (u16)(so->n_slices));
 }
@@ -477,7 +477,7 @@ static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op
 
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync end: RV: @RV", _I, goodpath_nvmeibc_syncs, compressed_sync_op_trace_end, so->o->dbg_id, so->error);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync end: rv=%d", so->error);
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_end(orig_o_dbg_id=%u) = %d", so->o->dbg_id, so->error);
 }
 
 static int __do_on_stage_done(struct recovery_sync_op *so) {
@@ -1275,6 +1275,7 @@ _func_start:
 				rld.pre.all = lock_comp->lock.bi;						// Check binfo for unknown
 				__mirror_sync_calc_post_binfo(so, &rld, true);			// Here we will commit binfo much like should_blockset_info_commit() but with state machine to only primary owner lock
 				lock_comp->lock.bi  = (u32)rld.post.all;
+				nvmeibc_blkset_info_write_pet_describe(l->cmds, l->address, lock_comp);
 				// Multiple writes of dirty bits to bi are fine, unlocking will still only be done once
 				err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_write_blkset_info(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			}
