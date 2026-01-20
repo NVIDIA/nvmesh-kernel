@@ -9,28 +9,24 @@ core_file=`ls -t core core.[0-9]* | head -1`
 trace_daemon_dir='/var/log/nvmesh/trace_daemon/'
 
 if [ "_${core_file}" == "_" ]; then
-	echo Assuming that running on a desktop and got the files using copyCI or copybug
+	echo Assuming that running on a desktop right after copyCI or copybug
 	read -p "hostname? " host_name_to_debug
-	nvmesh_dir="${host_name_to_debug}_nvmesh_logs_*"
+	toma_dir="${host_name_to_debug}_toma_src_dir/toma"
+	nvmesh_dir="../../${host_name_to_debug}_nvmesh_logs_*"
 	#
-	gpg -d -z6 --batch --passphrase AlexanderRonen ${nvmesh_dir}/opt/nvmesh/target-repo/target_*/toma/bin/release/nvmeibt_toma_src_tar.pgp | tar -xvpf -
-	toma_dir=toma
 	cd ${toma_dir}
-	core_file_origin=`ls -t ../${nvmesh_dir}/var/lib/systemd/coredump/core.nvmeibt_toma.* | head -1`
+	core_file_origin=`ls -t ${nvmesh_dir}/var/lib/systemd/coredump/core.nvmeibt_toma.* | head -1`
+	core_file="../core"
 	if [ "_${core_file_origin}" != "_" ]; then
-		sudo lz4 -d -f ${core_file_origin} core
+		sudo lz4 -d -f ${core_file_origin} ${core_file}
 	else
-		core_file=`ls -t ../${nvmesh_dir}/var/opt/nvmesh/core* ../${nvmesh_dir}/var/log/nvmesh/trace_daemon_snapshot__*/core* | head -1`
+		core_file=`ls -t ${nvmesh_dir}/var/opt/nvmesh/core* ${nvmesh_dir}/var/log/nvmesh/trace_daemon_snapshot__*/core* | head -1`
 		if [ "_${core_file}" == "_" ]; then
 			echo "Couldn't find a core file"
 			exit 1
 		fi
-		cp ${core_file} core
 	fi
-	core_file="core"
-	trace_daemon_dir="../${nvmesh_dir}/var/log/nvmesh/trace_daemon/"
-	tar -xvpf ../${nvmesh_dir}/target_*.tar
-	tar -xvpf ../${nvmesh_dir}/toma_libs_*.tar
+	trace_daemon_dir="${nvmesh_dir}/var/log/nvmesh/trace_daemon/"
 fi
 
 default_executable='./bin/release/nvmeibt_toma'
@@ -50,8 +46,8 @@ sudo touch ${tmp_trace_daemon_dir}/toma.eph.binlog_marker.0;
 # (cd /var/log/nvmesh/trace_daemon; sudo rm toma.binlog* toma.eph.binlog*; sudo touch toma.binlog_marker.0; sudo touch toma.eph.binlog_marker.0)
 
 sudo gdb ${executable_file} ${core_file} << 'END'
-	set solib-search-path ./lib64
-	set solib-absolute-prefix ./lib64
+	set solib-search-path ../lib64:../lib
+	set solib-absolute-prefix ../lib64:../lib
 
 	set $end_at_buf=(nvmeibt_trace_long->active_buf + 1) % nvmeibt_trace_long->bufs_per_channel
 	set $i=0
