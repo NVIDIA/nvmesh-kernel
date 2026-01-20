@@ -46,6 +46,12 @@ fi
 systemctl daemon-reload > /dev/null 2>&1
 [ "$rpm_kind" == "client" ] && systemctl enable nvmeshclient > /dev/null 2>&1
 
+# Check if RPM contains updated IB Core modules and print a NOTE if it does
+if [ "$rpm_kind" == "client" ] && [ -n "$(find /opt/nvmesh/common-repo/ -name 'ib_core_modules.tar.gz')" ]; then
+    echo -e "\033[1m\e[33mNOTE: RPM contains updated IB Core modules. To install them, run: \e[37m/opt/nvmesh/common-repo/scripts/nvmesh_install_ib_core_mod.sh\e[0m"
+    touch /var/opt/nvmesh/.ib_core_mod
+fi
+
 /sbin/depmod -a
 
 exit 0

@@ -63,7 +63,7 @@ common_transfer_list="common_public/*.ko* \
 			tools/trace_daemon_2.0/run_trace_daemon.sh \
 			tools/pipe_tracer/build/bin/nvmeib_pipe_tracer \
 			dictionaries.tar.gz \
-			perfTest/io_stress/scan_locks/scan_locks_ec"
+			perfTest/io_stress/scan_locks/scan_locks_ec "
 
 optional_common_transfer_list="tools/traces_post_processor/cpager \
 			tools/nvmesh_netlink.py \
@@ -85,6 +85,7 @@ common_scripts_transfer_list="tools/dictionary.json \
 			scripts/common/nvmesh_ib* \
 			scripts/common/export_vdisk.sh \
 			scripts/common/nvmesh_snapshot_logs.sh \
+			scripts/common/nvmesh_install_ib_core_mod.sh \
 			tools/traces_post_processor/pager-profiler.py \
 			tools/traces_post_processor/formatters/formatters.py"
 
@@ -93,6 +94,10 @@ if [ -n "$NCONFIG_BNXT" ]; then
 	common_transfer_list+=" \
 		common_public/bnxt/*.ko* \
 		common_public/bnxt/*.h"
+fi
+
+if [ -n "$NCONFIG_IB_CORE_MOD_DIR" ]; then
+	common_transfer_list+="ib_core_modules.tar.gz "
 fi
 
 # Only include static files here (not compiled ones).
