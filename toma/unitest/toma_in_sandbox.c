@@ -468,6 +468,7 @@ static bool TSB_netlink_queue_is_empty(void);
 static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
+static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -491,6 +492,8 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		N_Tf(nl_keepalive, "Netlink keep_alive received");
 	} else if (req_msg->opcode == csc_io_to_disk) {
 		TSB_netlink_handle_io_to_disk(req_msg);
+	} else if (req_msg->opcode == csc_zero_disk) {
+		TSB_netlink_handle_zero_disk(req_msg);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
@@ -806,6 +809,71 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 		rep->vendor_id = io_req->vendor_id;
 	}
 
+	rep->base.latency_ns = 100;
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+// Handle csc_zero_disk requests - perform zeroing and queue response
+static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg)
+{
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_zero_disk_reply *rep = (struct nvmeib_zero_disk_reply *)msg->data;
+	const struct nvmeib_zero_disk *zreq = (const struct nvmeib_zero_disk *)req_msg->data;
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(zreq->disk_id);
+	const size_t block_size = (size_t)1U << SANDBOX_NVME_BLOCK_SIZE_EXPONENT; // 4096
+	uint64_t total_bytes = (uint64_t)zreq->n_hw_sectors * (uint64_t)block_size;
+	uint64_t offset = (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
+	int rv = 0;
+
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	rep->base.opcode = msg->opcode = req_msg->opcode;
+	msg->id = req_msg->id;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+
+	if (!dev) {
+		rep->base.error = csce_failed;
+		goto out;
+	}
+
+	{
+		int fd = sandbox_nvme_get_fd(dev);
+		size_t chunk_bytes = 1024 * 1024;
+		void *zero_buf = NULL;
+		if (fd < 0) {
+			rep->base.error = csce_failed;
+			goto out;
+		}
+
+		if (chunk_bytes % block_size != 0) {
+			chunk_bytes = ((chunk_bytes + block_size - 1) / block_size) * block_size;
+		}
+		zero_buf = calloc(1, chunk_bytes);
+		if (!zero_buf) {
+			rep->base.error = csce_failed;
+			close(fd);
+			goto out;
+		}
+
+		while (total_bytes > 0) {
+			size_t write_bytes = (total_bytes > chunk_bytes) ? chunk_bytes : (size_t)total_bytes;
+			ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
+			if (w < 0 || (size_t)w != write_bytes) {
+				rep->base.error = csce_failed;
+				rv = -1;
+				break;
+			}
+			offset += (uint64_t)write_bytes;
+			total_bytes -= (uint64_t)write_bytes;
+		}
+
+		free(zero_buf);
+		close(fd);
+		rep->base.error = (rv == 0) ? csce_ok : csce_failed;
+	}
+
+out:
 	rep->base.latency_ns = 100;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
