@@ -10,7 +10,7 @@
 	// /linux/scatterlist.h, /linux/asm-generic/scatterlist.h, Scatter-gather list implementation without virtual pages. API described at https://lwn.net/Articles/256368/
 	struct scatterlist {
 		unsigned long	page_link;
-		unsigned int	offset, length;
+		unsigned int	offset, length;	 // For reads or writes, `length` is the total bytes in SG list. For TRIM, it's the total bytes of the NVMe DSM command size.
 		#if defined(BLKDEV_SIMULATOR)
 			dma_addr_t		dma_address;		// Needed only for emulation of kernel to kernel drives
 		#endif

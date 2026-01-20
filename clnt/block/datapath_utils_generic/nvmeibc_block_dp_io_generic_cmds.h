@@ -124,6 +124,14 @@ struct nvmeibc_block_command {					// IO Command to disk to R/W/T data or metada
 /* Allocates and returns a buffer typically used for an SGL  */
 struct nvmeib_data_buffer *nvmeib_get_ndb(struct nvmeibc_block_command *cmd, int nentries, gfp_t gfp);
 void                     __nvmeib_put_ndb(struct nvmeib_data_buffer *ndb);	// EXC-3361 should be static and used via __nvmeibc_disk_io_command_free(). Hack of HTR
+int nvmeib_make_discard_ndb(struct nvmeibc_block_command *cmd);
+
+enum nvmeib_dsm_range_encoding {
+	NVMEIB_DSM_RANGE_ENCODING_NATIVE,
+	NVMEIB_DSM_RANGE_ENCODING_LITTLE_ENDIAN,
+};
+
+struct nvmeib_dsm_range nvmeib_get_ndb_discard_range(struct nvmeibc_block_command *cmd, enum nvmeib_dsm_range_encoding encoding);
 
 /* Does this command require journal manager actions */
 bool dp_cmds_does_require_jam(const struct nvmeibc_block_command *cmd);

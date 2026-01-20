@@ -4,8 +4,11 @@
 #include "../nvmeibc_block_common.h"
 #include "../datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 
-/* In TRIM, don't care about the data blocks dont traverse the bio contents. */
-static int __make_discard_ndb(struct nvmeibc_block_command *cmd)
+/**
+ * For TRIM, we don't traverse the bio contents. The sg buffer and length
+ * represent the NVMe DSM command address and bytes, respectively.
+ */
+int nvmeib_make_discard_ndb(struct nvmeibc_block_command *cmd)
 {
 	const struct nvmeibc_disk   *d =  cmd->ds->disk;
 	struct nvmeibc_block_io_req *ir = &cmd->iocmd->reqs1;
@@ -25,6 +28,20 @@ static int __make_discard_ndb(struct nvmeibc_block_command *cmd)
 	ir->ndb->table.nents = 1;
 out:
 	return rv;
+}
+
+__attribute__((nonnull(1)))
+struct nvmeib_dsm_range nvmeib_get_ndb_discard_range(struct nvmeibc_block_command *cmd, enum nvmeib_dsm_range_encoding encoding)
+{
+	struct nvmeibc_block_io_req *ir = &cmd->iocmd->reqs1;
+	if (encoding == NVMEIB_DSM_RANGE_ENCODING_LITTLE_ENDIAN) {
+		return *ir->trim;
+	}
+	return (struct nvmeib_dsm_range) {
+		.cattr = le32_to_cpu(ir->trim->cattr),
+		.nlb = le32_to_cpu(ir->trim->nlb),
+		.slba = le64_to_cpu(ir->trim->slba),
+	};
 }
 
 #define _NDtbuf(name, buf, format, ...) _ND(name, "buffer=(@BUF_CATTR @BUF_SLBA @BUF_NLB), " format, le32_to_cpu((buf)->cattr), le32_to_cpu((buf)->nlb), le64_to_cpu((buf)->slba), ##__VA_ARGS__)
@@ -56,7 +73,7 @@ int __concat_discard_op(struct nvmeibc_block_command cmds[], int *pncmds, int nl
 		}
 	}
 
-	if ((rv = __make_discard_ndb(cur_c)) < 0)
+	if ((rv = nvmeib_make_discard_ndb(cur_c)) < 0)
 		goto _out;
 	_ND(t_03_r1trim, "(@DISK_NAME) shift=@SHIFT len=@NLBA", disk_um->name, disk_um->sector_shift, io_req->ndb->length);
 	_NDtbuf(t_04_r1trim, io_req->trim, "");
@@ -97,7 +114,7 @@ static int __copy_blk_cmd(struct nvmeibc_block_command *cmds, int ci,
 	dst_req->nlbas = cmd_e - cmd_s;
 #endif
 	dst->nlbas = cmd_e - cmd_s;
-	if ((rv = __make_discard_ndb(&new_cmds[nci])) < 0)
+	if ((rv = nvmeib_make_discard_ndb(&new_cmds[nci])) < 0)
 		goto out;
 	_ND(t_05_r1trim, "new_cmds=@NEW_CMDS[@NCI] req_id=@REQ_ID_LLONG", new_cmds, nci, dst->iocmd->req_id);
 	_ND(t_06_r1trim, "cmds[@CI]=[@DISK_ADDRESS-@NLBAS) new_cmds[@NCI]=[@DISK_ADDRESS-@NLBAS)",

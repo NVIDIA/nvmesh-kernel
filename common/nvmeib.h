@@ -456,7 +456,7 @@ struct nvmeib_data_buffer {			// IO is transmitted clnt->srvr by this
 	struct sg_table table;			// SG list and number of entries
 	struct scatterlist sg_single;		// Optimisation for when SG only has one entry
 	struct nvmeib_data_reuse_buf_params rcookie;
-	u32 length;						// total bytes in SG list
+	u32 length;						// For reads or writes, it's the total bytes in SG list. For TRIM, it's the total bytes of the NVMe DSM command size.
 	union {
 		struct {
 			/* Control Flags */
