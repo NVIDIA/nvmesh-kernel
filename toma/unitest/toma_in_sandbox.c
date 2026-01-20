@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <ctype.h>
 
 /************************************* Logging ********************************/
 
@@ -698,6 +699,34 @@ static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
 }
 
 #include "srv/nvmeibs_srv_toma_messages.h"  // For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
+
+// Extract the seq (smart file index) from device name.
+// For NVMesh devices like "nvme1001n1", seq = 1001 - 1000 = 1.
+// For stock devices like "nvme0n1", returns -1 (no smart file).
+static int TSB_get_seq_from_nvmesh_device_name(const char *device_name) {
+	const char *p;
+	int nvme_num;
+
+	if (!device_name || strncmp(device_name, "nvme", 4) != 0)
+		return -1;
+
+	p = device_name + 4;
+	if (!isdigit((unsigned char)*p))
+		return -1;
+
+	nvme_num = 0;
+	while (isdigit((unsigned char)*p)) {
+		nvme_num = nvme_num * 10 + (*p - '0');
+		p++;
+	}
+
+	// NVMesh devices have numbers >= 1000
+	if (nvme_num < 1000)
+		return -1;
+
+	return nvme_num - 1000;
+}
+
 // Queue a netlink disk info response for a given device
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
@@ -722,7 +751,7 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	rep->dinfo.disk.block_size = 1 << SANDBOX_NVME_BLOCK_SIZE_EXPONENT;  // 4096
 	rep->dinfo.disk.max_request_size = 32;
 	rep->dinfo.disk.max_n_hw_sectors = 32;
-	rep->dinfo.disk.seq = 0;
+	rep->dinfo.disk.seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
 	rep->dinfo.disk.nsid = 1;
 	rep->dinfo.disk.metadata = 0;
 	snprintf(rep->dinfo.disk.disk_id, sizeof(rep->dinfo.disk.disk_id), "%s.1", dev->serial_number);
