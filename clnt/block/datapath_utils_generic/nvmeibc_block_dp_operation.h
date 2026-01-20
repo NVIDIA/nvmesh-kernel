@@ -26,6 +26,18 @@ typedef u32 o_dbg_id_t;
 	#define MAX_BIOS_PER_OP 1					/* No bio merge to operation / no elevator */
 #endif
 
+union operation_dbg_cntrs{
+	struct {
+		u32 n_resubmissions:		8;	// How many times operation was resubmitted
+		u32 n_jam_alloc_failed:		4;	// How many times a JAM alloc failed (non-DEADLK failure) at least once?
+		u32 n_dcmd_failed:			4;	// How many times a disk command failed (non-DNR (transient) failure) at least once?
+		u32 n_lcmd_failed:			4;	// How many times a lock acquire command failed (disk/transport failure) at least once?
+		u32 n_write_binfo_failed:	4;	// How many times a write binfo command failed at least once?
+		u32 n_topo_phased_out:		4;	// How many times encountered a topology phased out between stages?
+	}  __attribute__((packed));
+	u64 raw;
+};
+
 struct operation {
 	enum nvmeib_block_io_op op;					// Operation type.
 	o_dbg_id_t dbg_id;							// Operation's debug identifier, used in tracing.
@@ -81,17 +93,8 @@ struct operation {
 		u32 was_bio_part_split         : 1;		// Was bio split to a few operations?
 		u32 need_to_copy_bio           : 1;		// If bio changes during read/write operation then we have to copy it for edic/parity calculations to be stable
 	} flags;
-	union {
-		struct {
-			u32 n_resubmissions:		8;	// How many times operation was resubmitted
-			u32 n_jam_alloc_failed:		4;	// How many times a JAM alloc failed (non-DEADLK failure) at least once?
-			u32 n_dcmd_failed:			4;	// How many times a disk command failed (non-DNR (transient) failure) at least once?
-			u32 n_lcmd_failed:			4;	// How many times a lock acquire command failed (disk/transport failure) at least once?
-			u32 n_write_binfo_failed:	4;	// How many times a write binfo command failed at least once?
-			u32 n_topo_phased_out:		4;	// How many times encountered a topology phased out between stages?
-		}  __attribute__((packed));
-		u64 raw;
-	} dbg_cntrs;
+	
+	union operation_dbg_cntrs dbg_cntrs;
 
 	struct nvmeib_pet_journal journal; //mutable
 
