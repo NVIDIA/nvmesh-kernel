@@ -215,6 +215,9 @@ enum nvmeib_io_type_permission nvmeibc_raid1_get_io_perm(const struct nvmeibc_to
 #define                        nvmeibc_raid1_get_io_perm_2(r1) ((r1)->calculated_data.final_io_perm)
 
 static inline bool nvmeibc_raid_is_ec(const struct nvmeibc_raid1 *r){ return r->slice_size > 1;}
+static inline bool nvmeibc_raid_is_mirror(const struct nvmeibc_raid1 *r){ return (r->slice_size == 1) && (r->replicas > 1);}
+
+
 #define nvmeibc_raid_is_enable_partial_slice_write(pr) nvmeibc_raid_is_ec(pr)				// protection raid capability
 static inline int  nvmeibc_raid1_get_protect_lvl(const struct nvmeibc_raid1 *pr){return pr->replicas - pr->slice_size; }
 static inline bool nvmeibc_raid_is_jbod(     const struct nvmeibc_raid1 *pr) {return pr->replicas == 1;}

@@ -1,5 +1,7 @@
 #include "nvmeibc_block_dp_io_generic_cmds.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
+#include "nvmeib_types.h"
+#include "nvmeibc_block.h"
 #include "nvmeibc_block_dp_io_req_rel_locks.h"
 #include "nvmeibc_pausable.h"
 #include "nvmeibc_block_dp_dbg_tools.h"
@@ -14,6 +16,7 @@
 #include "common/nvmeib_str.h"
 #include "nvmeibc_error_tags.h"
 #include "nvmeibc_io_pet.h"
+#include "compat/kr_incs_sgl.h"
 
 /******************************************************************************/
 uint nvmeibc_jentry_num_blocks = 16;						// Todo, rename internally to binje
@@ -244,15 +247,117 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds) __attribute__((unused));
 static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds)
 {
-	const struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(ds);
-	return ds - raid->segments;
+	return ds->toma_reg->seg;
+}
+
+static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_block_command *bcmd, bool is_completion)
+{
+	struct nvmeibc_disk_io_command const* disk_io_cmd =  bcmd->iocmd;
+	if (nvmeib_pet_journal_is_verbose(&bcmd->o->journal) == false){
+		return false;
+	}
+	if (disk_io_cmd->reqs1.op != NVMEIB_BLOCK_IO_OP_READ && disk_io_cmd->reqs1.op != NVMEIB_BLOCK_IO_OP_WRITE){
+		return false;
+	}
+	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_READ && is_completion == false){ //sending read request
+		return false;
+	}
+	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_WRITE && is_completion == true){ //receiving write response
+		return false;
+	}
+	return true;
+}
+
+static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_command *bcmd, bool is_completion)
+{
+	struct nvmeibc_disk_io_command *disk_io_cmd =  bcmd->iocmd;
+	struct nvmeib_data_buffer *ndb = disk_io_cmd->reqs1.ndb;
+	struct nvmeib_pet_journal* journal = &bcmd->o->journal;
+	
+	struct scatterlist *sg;
+	u32 i;
+	u64 *data_first_content;
+	union nvmeibc_block_dp_ec_data_block_md *md;
+	const u32 md_size = nvmeibc_sgmnt_sw_md_size(bcmd->ds);
+	const u32 nlbas = NVMEIBC_BYTE2SECTOR(ndb->length);
+	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(bcmd->ds);
+
+	bool const should_trace = __nvmeibc_cmd_data_and_metadata_pet_should_describe(bcmd, is_completion);
+	if(should_trace == false){
+		return;
+	}
+
+	if (nlbas != ndb->table.nents) {
+		NVMEIBC_IO_PET_MSG_ERROR(journal, "nlbas != cmd->reqs1.ndb->table.nents: %u, %u", nlbas, ndb->table.nents);
+		return;
+	}
+
+	md = (union nvmeibc_block_dp_ec_data_block_md *)disk_io_cmd->reqs1.md;
+	for_each_sg(ndb->table.sgl, sg, ndb->table.nents, i) {
+		data_first_content = sg ? (u64 *)sg_virt(sg) : NULL;
+		if (data_first_content != NULL && md != NULL) {
+			/**
+			* JBOD does not use metadata. Mirroring only cares about EDIC, as
+			* it may be transaction id (used to mark what type of client wrote the
+			* data). EC cares about everything.
+			*/
+			if (nvmeibc_raid_is_ec(r)) {
+				NVMEIBC_IO_PET_MSG_NORM(journal,
+							"    content(idx=%hhu, first_8b = 0x%llx, md = 0x%llx<union nvmeibc_block_dp_ec_data_block_md>)", 
+							numeric_downcast(u8, i), *data_first_content, md->raw);
+			} else if (nvmeibc_raid_is_mirror(r)) {
+				//mirror datapath is configurable and may use or not use edic, but since we are playing with the backdoor, it is better to print it anyway
+				NVMEIBC_IO_PET_MSG_NORM(journal,
+							"    content(idx=%hhu, first_8b = 0x%llx, edic = 0x%x)",
+							numeric_downcast(u8, i), *data_first_content, nvmeibc_block_dp_ec_md_get_edic(md, true));
+			}
+			md = (union nvmeibc_block_dp_ec_data_block_md *)((u8*)md + md_size);
+		} else if (data_first_content != NULL) {
+			NVMEIBC_IO_PET_MSG_NORM(journal, "    content(idx=%hhu, first_8b = 0x%llx)", numeric_downcast(u8, i), *data_first_content);
+		}
+	}
+}
+
+static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command *cmds, int cmd_idx)
+{
+	struct nvmeibc_block_command   *bcmd = &cmds[cmd_idx];
+	struct nvmeibc_disk_io_command *cmd =  bcmd->iocmd;
+	u8 const sgmnt_idx = numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(bcmd->ds));
+	struct nvmeib_data_buffer *ndb = cmd->reqs1.ndb;
+	enum nvmeib_block_io_op op = cmds->o->op;
+	u32 nlbas;
+	struct nvmeibc_d_rdma_comp* dc;
+	// For TRIM, use bcmd->nlbas directly; for R/W, calculate from buffer length.
+	if (op == NVMEIB_BLOCK_IO_OP_DISCARD) {
+		nlbas = nvmeib_get_ndb_discard_range(bcmd, NVMEIB_DSM_RANGE_ENCODING_NATIVE).nlb;    // get_dsm.
+	} else {
+		nlbas = NVMEIBC_BYTE2SECTOR(ndb->length);
+	}
+
+	NVMEIBC_IO_PET_MSG_NORM(
+		&cmds->o->journal,
+		"dp_cmds_execute_cmd(sgmnt=%hhu, dlba=0x%llx, nlbas=%u, raid_cur_stage=%hhu<enum e_cmds_stage>)",
+		sgmnt_idx, __cmd_start(*bcmd), nlbas, (u8)cmds->raid_cur_stage);
+	
+	__nvmeibc_cmd_data_and_metadata_pet_describe(bcmd, false/*is_completion*/);
+
+	if (dp_cmds_pigbck_has_any(cmd)) {
+		dc = dp_cmds_get_pigbck_comp_dc(cmd);
+		if (dc->code == NVMEIBC_CMD_BLKSET_INFO_WR_PB) { // write piggyback
+			NVMEIBC_IO_PET_MSG_NORM(
+				&cmds->o->journal,
+				"    write_pb(binfo=%u<union nvmeib_blkset_info>, addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>)",
+				(u32)dc->lock.bi, cmd->lpb.addr, dc->opr, dc->code);
+		}
+	}
 }
 
 int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 {
 	struct nvmeibc_block_command   *bcmd = &cmds[cmd_idx];
 	struct nvmeibc_disk_io_command *cmd =  bcmd->iocmd;
-	int op = cmds->o->op, rv = -EDOM;
+	enum nvmeib_block_io_op op = cmds->o->op;
+	int rv = -EDOM;
 	struct nvmeibc_profiler *profile = NULL;
 	bool can_do_profiling = cmd->reqs1.op <= NVMEIB_BLOCK_IO_OP_DISCARD && io_op_is_rwt(op);
 	dp_dbgdi_do_add_info(&cmds[cmd_idx], true);
@@ -265,6 +370,7 @@ int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 		nvmeibc_profiling_start_take_cmd_stats_for_op(nvmeibc_get_raid_good_path_profile_for_rwt_op(bcmd->ds, op), bcmd->ds->disk_operation_profiler, cmds->o, nvmeibc_profiling_get_cmd_stage(cmd), bcmd);
 	}
 	_ND(trace_dp_io_generic_cmds_dp_cmds_execute_cmd, "Going to execute: operation_code=@BLOCK_IO_OP cmds[@COMMAND_IDX].nlbas=@NLBAS", op, cmd_idx, bcmd->nlbas);
+	__nvmeibc_cmd_execute_pet_describe(cmds, cmd_idx);
 	if (unlikely(dp_cmds_does_require_jam(bcmd)))
 		rv = nvmeibc_pd_execute_io_jour_blocks(bcmd->ds->disk, cmd);
 	else
@@ -519,7 +625,7 @@ static void __finish_cmds_comp_oper(struct operation *o)
 	}
 }
 
-static void __pet_nvmeibc_operation_compressed_op_dump_bio(const struct operation *o)
+void nvmeibc_operation_compressed_op_pet_dump_bio(const struct operation *o)
 {
 	const struct nvmeibc_block_command *rldr = o->cmds;		// For now print info of first rldr only
 	const u64 topo = (u64)o->topo->debug_unique_index;
@@ -564,7 +670,6 @@ void nvmeibc_operation_compressed_op_dump_bio(const struct operation *o)
 		return;
 	}
 	__goodpath_operation_compressed_op_dump_bio(o);
-	__pet_nvmeibc_operation_compressed_op_dump_bio(o);
 }
 
 static void __nvmeibc_operation_comp(struct operation *o)
@@ -644,17 +749,44 @@ void dp_cmds_free_split(struct nvmeibc_block_command *cmds)
 	__free_detached_cmds_from_op(cmds);
 }
 
+
+static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, struct nvmeibc_block_command *cmds, int li)
+{
+	struct nvmeibc_block_command *rldr = &cmds[li];
+	struct nvmeibc_d_rdma_comp* dc;
+
+	for (int i = li; i < li + cmds[li].nraid_siblings; ++i) {
+		struct nvmeibc_block_command *cmd = &cmds[i];
+		if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
+			continue;
+		NVMEIBC_IO_PET_MSG(&o->journal, 
+						   "dp_cmds_complete_cmd(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
+						   cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,  
+						   numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
+		
+		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, true/*is_completion*/);
+
+		if (dp_cmds_pigbck_has_any(rldr->iocmd)) {
+			dc = dp_cmds_get_pigbck_comp_dc(rldr->iocmd);
+			if (dc->code == NVMEIBC_CMD_LOCK_READ_PB) { // read piggyback
+				NVMEIBC_IO_PET_MSG_NORM(&o->journal, "    read_pb(compare=0x%llx<union nvmeib_lock_id>, exchange=0x%llx<union nvmeib_lock_id>)", dc->compare, dc->exchange);
+			}
+		}
+
+	}
+}
+
 void dp_cmds_complete_cmd(struct nvmeibc_block_command *cmds, int ci, struct nvmeibc_block_command *this_cmd /* DEBUG_TRANSFERS */)
 {
 	struct operation *o = cmds->o;
-	int value;
+	int n_uncompleted_cmds;
 	DEBUG_TRANSFERS_verify_core_stuff(this_cmd, ci);
-	value = nvmeibc_atomic_dec_return(&cmds[ci].n_uncompleted_cmds);
-	__uncompleted_cmds_list_comp(&cmds->iocmd, value);
-	if (value > 0)
+	n_uncompleted_cmds = nvmeibc_atomic_dec_return(&cmds[ci].n_uncompleted_cmds);
+	__uncompleted_cmds_list_comp(&cmds->iocmd, n_uncompleted_cmds);
+	if (n_uncompleted_cmds > 0)
 		return;					// Waiting for other commands
-	if (unlikely(value < 0)) {
-		WARN(true, "nvmeibc bug! cmds=%p cmds->req_id=0x%llx value=%d, op=%d\n", cmds, cmds->iocmd->req_id, value, o->op);
+	if (unlikely(n_uncompleted_cmds < 0)) {
+		WARN(true, "nvmeibc bug! cmds=%p cmds->req_id=0x%llx n_uncompleted_cmds=%d, op=%d\n", cmds, cmds->iocmd->req_id, n_uncompleted_cmds, o->op);
 	}
 	#ifdef DEBUG_TRANSFERS
 		{	int i;
@@ -663,6 +795,7 @@ void dp_cmds_complete_cmd(struct nvmeibc_block_command *cmds, int ci, struct nvm
 			}
 		}
 	#endif
+	__nvmeibc_cmd_completion_pet_describe(o, cmds, ci);
 	BLKCMP_IO_ASYNC_RESUME_CMP(dp_cmds_done_stage_overcome_failure(cmds, ci));
 }
 
@@ -1081,6 +1214,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 			BUG();
 		}
 		if (prev_rv == 0) {
+			nvmeibc_blkset_info_write_pet_describe(cmds, iocmd->lpb.addr, dc);
 			err = nvmeibc_pd_write_blkset_info(c->ds->disk, iocmd->lpb.handle, iocmd->lpb.addr, dc);
 			if (err) {
 				OPERATION_DBG_CNTR_INC(cmds->o, n_write_binfo_failed);
@@ -1144,6 +1278,7 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 	if (prev_rv == 0) {
 		/* Send the lock info */
 		dc->lock.bi = nvmeibc_rldr_get_post_stage_rdma_piggyback(&rldr->rld, rldr->raid_cur_stage).all;
+		nvmeibc_blkset_info_write_pet_describe(rldr, dl->address, dc);
 		rv = nvmeibc_pd_write_blkset_info(dl->ds->disk, handle_of(dl->ds), dl->address, dc);
 	} else {
 		rv = prev_rv;

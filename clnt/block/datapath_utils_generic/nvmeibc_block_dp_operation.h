@@ -133,6 +133,7 @@ struct operation {
 
 #define _NTO(n, o, format, ...) _NT(n, "{@O_DBG_ID}(@BLOCK_IO_OP,@VOL_ID:@TOPO_DBG_ID,@VLBA[@NLBAS]): " format, o->dbg_id, o->op, nvmeibc_volume_short_id(o->nd), o->topo->debug_unique_index, get_op_start_lba(o), (u64)o->io_stat_length, ##__VA_ARGS__)
 void nvmeibc_operation_compressed_op_dump_bio(const struct operation *o);
+void nvmeibc_operation_compressed_op_pet_dump_bio(const struct operation *o);
 
 /* Get/Put reference count on operation to prevent it from being free */
 void nvmeibc_operation_get(struct operation *o, int n_refs);

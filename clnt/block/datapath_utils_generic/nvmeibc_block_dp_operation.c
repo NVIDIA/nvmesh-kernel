@@ -381,6 +381,7 @@ static void __operation_execute_no_cache(struct operation *o, int rv)
 		DEBUG_TRANSFERS_init_cb_counters(cmds->ncmds, cmds);
 		__uncompleted_cmds_list_add(&cmds->iocmd);
 		BLKCMP_IO_ONLY_IF_PRESERVE_STACK(BUG_ON(o->locks && (o->locks->n_siblings != o->locks->nlocks)));	// Trap, IO with multiple state machines (more than 1 blockset length)
+		nvmeibc_operation_compressed_op_pet_dump_bio(o);
 		dp->execute_op(o);
 	}
 }
