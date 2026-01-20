@@ -1054,6 +1054,16 @@ _out:
 	*ncmds= n_cmds_in_cur_stage + n_non_exec_cmds;
 }
 
+void nvmeibc_blkset_info_write_pet_describe(struct nvmeibc_block_command *cmds,
+	u64 addr, struct nvmeibc_d_rdma_comp *dc)
+{
+	u32 binfo = dc->lock.bi;
+
+	NVMEIBC_IO_PET_MSG_NORM(&cmds->o->journal, 
+			                "nvmeibc_pd_write_blkset_info(addr=0x%llx binfo=0x%x<union nvmeib_blkset_info>)", 
+							addr, binfo);
+}
+
 static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 							int n_cmds, int last_cmd, int prev_rv)
 {

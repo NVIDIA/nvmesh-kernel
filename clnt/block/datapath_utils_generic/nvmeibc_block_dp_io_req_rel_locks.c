@@ -7,6 +7,7 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_lock_stages.h"
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_locks_transfer.h"
+#include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 #include "nvmeibc_io_pet.h"
 
 #define __SUSPICIOUS_LOCK_REQ_TIME 500 /* 0.5[sec], If lock request takes more time, print that to log */
@@ -106,6 +107,54 @@ static inline struct nvmeibc_profiler *__raid_gp_profile_for_rwt_op_locks(const 
 	return nvmeibc_get_raid_good_path_profile_for_rwt_op(l->ds, locks->cmds->o->op);
 }
 
+//The real reasons to receive the reference to operation instance are:
+//1. the operation reference is initialized only on the first lock within the lockset array;
+//   but this can be solved, since nvmeibc_cmd_lock has lockset_idx
+//2. the sync operations do some ugly tricks, by replacing the lock commands pointer with something else;
+//   thus getting the operation via replaced commands will not gave us the desired result.
+
+__attribute__((nonnull(2)))
+static void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
+{
+	struct nvmeibc_d_rdma_comp const *rdma_comp = &lock->comp;
+	if (!o){
+		return;
+	}
+
+	NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+							"lock.request(sgmnt=%hhu, address=0x%llx, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>))",
+							numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+							lock->address,
+							numeric_downcast(u8, lock->type),
+							numeric_downcast(u32, rdma_comp->compare),
+							numeric_downcast(u32, rdma_comp->exchange));
+}
+
+__attribute__((nonnull(2)))
+static void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
+{
+	struct nvmeibc_d_rdma_comp const *rdma_comp = &lock->comp;
+	enum nvmeib_pet_severity const severity = NCL_is_request_failed(rdma_comp->lock_status)
+									   	      ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL;
+	if (!o){
+		return;
+	}
+
+	//I decided to dump sgmnt, address, type rdma_comp(compare, exchange) - mainly because these data was in used by another layer
+	//repeating the data will not hurt;
+	//if needed, we may just print the lock index or (segment + address)
+	NVMEIBC_IO_PET_MSG(&o->journal,
+					   "lock.response(sgmnt=%hhu, address=0x%llx, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>, status=%hhu<enum nvmeibc_block_lock_status>, contending=0x%llx<union nvmeib_lock_id>))",
+						severity,
+						numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+						lock->address,
+						numeric_downcast(u8, lock->type),
+						numeric_downcast(u32, rdma_comp->compare),
+						numeric_downcast(u32, rdma_comp->exchange),
+						numeric_downcast(u8, rdma_comp->lock_status),
+						get_contending_id(rdma_comp));
+}
+
 void dp_locks_free_all(struct nvmeibc_cmd_lock *locks)
 {
 	struct nvmeibc_topology *t = locks->topo;
@@ -171,6 +220,17 @@ static inline void DEBUG_LOCKS_CONTENTION(__attribute__((__unused__)) struct nvm
 #endif
 }
 
+/*
+ * dp_locks_release_cb - Callback invoked when a lock release operation completes
+ *
+ * IMPORTANT: The operation (nvmeibc_operation) and associated command structures
+ * may already be dead and deleted by the time this lock release callback is invoked.
+ * Lock release happens asynchronously via RDMA, and the operation completion may
+ * trigger operation cleanup/destruction before the RDMA lock release completes.
+ * Therefore, DO NOT access operation or cmd structures within this callback.
+ * Only access the lock structures themselves, which are kept alive until the
+ * release completes.
+ */
 int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag)
 {
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
@@ -301,6 +361,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	if (l->status != NCL_STATUS_TRANSFERRED) {	// OWNER || PREDISCARD || COPY_OWNER
 		int rv = 0;
 		__set_cmpxchg_for_release(l, seg);
+		nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds ? locksets->cmds->o : NULL, l);
 		dp_locks_trace_lock_release(locksets->cmds ? locksets->cmds->o : NULL, l);
 		rv = nvmeibc_pd_cmpxchg(disk, handle_of(seg), l->address, dc);
 		if (rv < 0) { // Simulate failed release completion
@@ -338,20 +399,27 @@ void dp_locks_release_locks_sibs(struct nvmeibc_cmd_lock *locksets, int owner_i)
 	}
 #endif
 
+
+__attribute__((nonnull(1)))
 static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
 	ulong times[3] = {jiffies, 0, 0}, duration;
+
+	struct nvmeibc_block_command const *cmd = dp_cmds_get_cmd_from_comp(cmp);
+	u64 const lock_addr = iocmd->lpb.addr;
 	int rv;
+
 	#ifdef BLKCMP_IO_COMPLETION_PRESERVE_STACK
 		locksets->cmds->should_check_view_lock = 1;	// == cmp->cmd, relevant for fiber mode only
 		cmp->pigbck_comp.callback = &__um_completion_unblock_waiting_stack;
 	#endif
-	rv = nvmeibc_pd_read_lock(l->ds->disk, iocmd->lpb.handle, iocmd->lpb.addr, dc);
+
+	nvmeibc_cmd_lock_request_io_pet_describe(cmd->o, l);
+	rv = nvmeibc_pd_read_lock(l->ds->disk, iocmd->lpb.handle, lock_addr, dc);
 	times[1] = jiffies;
 	if (rv) {
-		const struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(cmp);
 		_ND(t_1srl, "locksets=@LOCKSETS[@LSI] rv=@RV o=@OPERATION c=@CMD_PTR", locksets, l->lockset_idx, rv, cmd->o, cmd);
 		__give_failed_lock_cb(dc);
 	}
@@ -532,6 +600,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	const int lsi = l->lockset_idx;
 
 	(void)tag;
+	nvmeibc_cmd_lock_response_io_pet_describe(o, l);
 	l->status = read_comp->lock_status;
 	_ND(t_rlsm0, "locksets=@LOCKSETS[@LSI] cmp=@PTR, val=@LOCK_ENT_U64, lock_status=@STATUS_STR" , locksets, lsi, cmp, holder, ncl_status_str(l->status));
 	dp_locks_trace_lock_comp(o, l, read_comp);
@@ -931,6 +1000,9 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	struct nvmeibc_cmd_lock *owner_lock = &locksets[owner_id];
 	struct operation *o = locksets->cmds->o;
 
+	if (l == owner_lock){
+		nvmeibc_cmd_lock_response_io_pet_describe(o,l);
+	}
 	__squash_transport_lock_status(l, dc->lock_status);
 	BUG_ON((l->status != dc->lock_status) || (l->type == NVMEIBC_CMD_PREDISCARD));		// Just sanity
 	WARN(!(NCL_is_failed_to_acquire(l->status) || (l->status == NCL_STATUS_CONTENDED) || (l->status == NCL_STATUS_TAKEN)), "nvmeibc bug: locks=%p[%d].status=%d", locksets, lock_i, l->status);
@@ -1035,6 +1107,11 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 		_ND(tr_6_check_lock_actions, "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] pending=@PENDING_INT", locksets, lock_i, owner_id, pending);
 		WARN(pending < 0, "nvmeibc bug: locks=%p[%d|ow=%d], pend=%d", locksets, lock_i, owner_id, pending);
 		if (pending == 0) {
+			int sibling_idx = 0;
+			for (sibling_idx = 1; sibling_idx < owner_lock->n_siblings; ++sibling_idx) {
+				nvmeibc_cmd_lock_response_io_pet_describe(o, &locksets[owner_id + sibling_idx]);
+			}
+
 			BLKCMP_IO_ASYNC_RESUME_CMP(dp_transition_to_locked_cmds_sm(locksets, owner_id));
 		}
 	}
@@ -1118,6 +1195,7 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 		l->last_retry_report_time = l->first_try_time = jiffies;
 	}
 	l->status = NCL_STATUS_ISSUED;						// Issue owner request
+	nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
 	rv = nvmeibc_pd_cmpxchg(seg->disk, handle_of(seg), l->address, dc);
 	lock_rqsted = jiffies;
 	if (unlikely(rv)) { // handle pausable/transport layer immediate errors
@@ -1262,6 +1340,7 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 		dc->callback = callback;
 		if (likely(prev_rv == 0)) {	/* Send the lock info */
 			dc->lock_status = NCL_STATUS_NOTISSUED;	// Lock is taken but we use its comp for binfo
+			nvmeibc_blkset_info_write_pet_describe(ow_l->cmds, l->address, dc);
 			err = nvmeibc_pd_write_blkset_info(l->ds->disk, handle_of(l->ds), l->address, dc);
 		} else {
 			err = prev_rv;
@@ -1278,10 +1357,12 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 void dp_locks_trace_lock_comp(const struct operation *o, const struct nvmeibc_cmd_lock *l, const struct nvmeibc_d_rdma_comp *dc)
 {
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: @LOCK_COMPLETION_DUMP", _T, goodpath_nvmeibc_locks, lock_comp,        o->dbg_id    , l->ds->dbg_uuid, __lock_blockset(*l), l->type, dc->lock_status, dc->compare, dc->exchange, get_contending_id(dc), l->retries, (jiffies - l->first_try_time));
+	//do not call PET here - this function is called from multiple contexts
 }
 
 void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc_cmd_lock *l)
 {
 	struct nvmeibc_d_rdma_comp const* dc = &l->comp;
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: @LOCK_RELEASE_DUMP",    _T, goodpath_nvmeibc_locks, lock_release, o ? o->dbg_id : 0, l->ds->dbg_uuid, __lock_blockset(*l),                                        dc->exchange);
+	//do not call PET here - this function is called from multiple contexts
 }

@@ -178,7 +178,8 @@ struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 		} dbits_arr;
 		struct {				// Lock value + embdedded metadata (OWNER LOCK request/release/view, write embedded metadata DIRTY BIT / TxID write)
 			u64 id;				// The value that is written in remote server lock (lowest 32 bits are used = result of cmpxchng). NVMEIBC_LOCK_CMP_AND_SWAP, NVMEIBC_LOCK_READ, NVMEIBC_LOCK_FORCE_WRITE
-			u64 bi;				// The value that is written in remote server blockset info (lowest 32 bits are used)
+			u64 bi;				// The value that is written in remote server blockset info (lowest 32 bits are used). It'
+								// is interpreted as union `nvmeib_blkset_info` type.
 			// NVMEIBC_LOCK_BLKSET_INFO_WRITE As piggyback: bi=initialized, id=0
 			// NVMEIBC_LOCK_BLKSET_INFO_WRITE As RDMA op  : bi=initialized, id=current held lock id
 			// NVMEIBC_LOCK_BLKSET_INFO_READ  Currently unused becuase BINFO is auto-read on each access to locks

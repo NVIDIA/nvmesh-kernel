@@ -262,5 +262,8 @@ struct nvmeibc_cmd_lock * __get_data_lock(struct nvmeibc_block_command *rldr);
 int  dp_cmds_gencmd_add(struct nvmeibc_block_command *cmd);
 void dp_cmds_gencmd_del(struct nvmeibc_block_command *cmd);
 
+/**************************** PET APIs  *****************************/
+void nvmeibc_blkset_info_write_pet_describe(struct nvmeibc_block_command *cmds, u64 addr, struct nvmeibc_d_rdma_comp *dc);
+
 #endif  // H beginning
 
