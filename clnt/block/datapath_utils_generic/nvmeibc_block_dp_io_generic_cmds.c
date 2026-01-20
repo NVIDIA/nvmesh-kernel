@@ -754,8 +754,9 @@ static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, st
 {
 	struct nvmeibc_block_command *rldr = &cmds[li];
 	struct nvmeibc_d_rdma_comp* dc;
+	int i = 0;
 
-	for (int i = li; i < li + cmds[li].nraid_siblings; ++i) {
+	for (i = li; i < li + cmds[li].nraid_siblings; ++i) {
 		struct nvmeibc_block_command *cmd = &cmds[i];
 		if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
 			continue;
