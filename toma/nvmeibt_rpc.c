@@ -343,7 +343,7 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 		return nvmeibt_Str_sprintf(out, "bin logs toggled\n");
 	} else if (strcmp("reread_conf", argv[1])==0) {
 		toma_sig_handler_fn( 1, 0xface00000001UL);
-		return nvmeibt_Str_sprintf(out, "rereed conf instructed (sighup)\n");
+		return nvmeibt_Str_sprintf(out, "reread conf instructed (sighup)\n");
 	} else if (strcmp("kill9", argv[1])==0) {
 		toma_sig_handler_fn( 9, 0xface00000009UL);
 		return nvmeibt_Str_sprintf(out, "remote kill -9 send!\n");
