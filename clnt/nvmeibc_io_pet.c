@@ -16,12 +16,21 @@
     void nvmeibc_io_pet_controller_free(struct nvmeib_pet_base_controller* self)
 	{(void)self;}
 
+	struct nvmeib_pet_journal nvmeibc_io_pet_journal_make(struct nvmeib_pet_base_controller* controller){
+		bool const verbose = true;
+		return nvmeib_pet_journal_make(controller, verbose);
+	}
+
 #elif defined(__KERNEL__)
 
 	unsigned nvmeibc_io_pet_minimal_severity = NVMEIB_PET_SEVERITY_WARNING;
 	module_param(nvmeibc_io_pet_minimal_severity, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_minimal_severity, "IO PET buffers with severity less then minimal will not be written;");
 	
+	unsigned nvmeibc_io_pet_verbose = 0;
+	module_param(nvmeibc_io_pet_verbose, uint, 0644);
+	MODULE_PARM_DESC(nvmeibc_io_pet_verbose, "Non zero value will allow IO PET buffers to provide even more information (like first 8 bytes & metadata for every block); But of course it may hurt performance and the buffer size should be taken into account");
+
 	NVMEIBC_MEMMGR_METRIC(io_pet_buffers, "component=raid.io.pet.buffers");
 
 	struct io_pet_controller{
@@ -140,6 +149,12 @@
 		kfree(self);
 	}
 
+	struct nvmeib_pet_journal nvmeibc_io_pet_journal_make(struct nvmeib_pet_base_controller* controller){
+		bool const verbose = nvmeibc_io_pet_verbose;
+		return nvmeib_pet_journal_make(controller, verbose);
+	}
+
+
 #else //probably UM
 	struct io_pet_controller{
 		struct nvmeib_pet_base_controller base;
@@ -179,6 +194,11 @@
 	void nvmeibc_io_pet_controller_free(struct nvmeib_pet_base_controller* self)
 	{
 		(void)self;
+	}
+
+	struct nvmeib_pet_journal nvmeibc_io_pet_journal_make(struct nvmeib_pet_base_controller* controller){
+		bool const verbose = false;
+		return nvmeib_pet_journal_make(controller, verbose);
 	}
 
 #endif

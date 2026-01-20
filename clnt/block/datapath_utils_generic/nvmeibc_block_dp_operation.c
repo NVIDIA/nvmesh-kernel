@@ -411,7 +411,7 @@ struct operation *nvmeibc_operation_create_with_biopart(u32 op_size, struct nvme
 		memset(buf, 0, bp_size + op_size);
 		o->bios[0] = buf;
 		o->flags.is_allocated_with_bio_part = true;
-		o->journal = nvmeib_pet_journal_make(io_pet_controller); 
+		o->journal = nvmeibc_io_pet_journal_make(io_pet_controller);
 		return o;
 	}
 	return NULL;

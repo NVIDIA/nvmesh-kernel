@@ -688,7 +688,7 @@ void test_journal_timestamp(void)
 	};	
 	//not optimal, but better then nothing - I don't want to develop reader in C
 	//if you want to be sure that offsets are correct, run pe_messages.py script and see the result 
-	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base);
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 	__auto_type const msg1 = NVMEIB_PET_MSG(0x10, (u8)0x11);
 	__auto_type const msg2 = NVMEIB_PET_MSG(0x20, (u8)0x22); 
 
@@ -717,7 +717,7 @@ void test_journal_timestamp(void)
 
 void test_multiple_messages(void)
 {
-	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base);
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base, true);
 	PET_MSG_NORM(&journal, "operation created; o=%p offset=0x%llx size=%u", &journal, (unsigned long long)(4096*4096), 8192);
 	PET_MSG_NORM(&journal, "operation completed; raid uuid=%x", 0xb1c69d3e);
 	PET_MSG_NORM(&journal, "operation completed; rv=%d", -1);
@@ -915,7 +915,7 @@ void test_performance(void)
 	struct perf_test_stats stats = {0};
 	
 	for (int run = 0; run < num_runs; run++) {
-		struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base);
+		struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 		struct perf_test_stats run_stats = __test_performance_journal(&journal);
 		merge_stats(&stats, run_stats);
 		nvmeib_pet_journal_commit(&journal);

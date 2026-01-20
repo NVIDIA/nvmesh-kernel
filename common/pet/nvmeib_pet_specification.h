@@ -595,10 +595,18 @@ static inline u16 nvmeib_pet_message_12_write(struct nvmeib_pet_message_12 const
 	0))))))))))))(self, out);																				\
 })
 
+//severity & verbosity
+//the main difference between traditional logging systems and PET is the following: 
+//* PET must accumulate the whole history and the history will be stored only in case it saw some "problematic" record.
+//  The problematic record is identified by the severity. The severity of the all records is the worst one.
+//Now, "verbose", on the other side defines how much information we collect through the process. 
+//For example, we may decide to print first 8 bytes and edic for every read/write block. Obviously will hurt the performance.
+
 struct nvmeib_pet_journal{
 	struct nvmeib_pet_base_controller const* controller;
 	struct nvmeib_pet_stream stream;
 	enum nvmeib_pet_severity worst_severity;
+	bool verbose; 
 	u64 prev_timestamp_ns; //with high probability the next message may store delta between times, thus saving space
 };
 
@@ -609,6 +617,7 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 	    .controller = controller,
 	    .stream = nvmeib_pet_stream_make(buffer),
 	    .worst_severity = NVMEIB_PET_SEVERITY_NORMAL,
+		.verbose = verbose,
 	    .prev_timestamp_ns = 0
 	};
 }
@@ -618,6 +627,13 @@ static inline bool nvmeib_pet_journal_is_activated(struct nvmeib_pet_journal con
 {
 	return self->stream.data.iov_base;
 }
+
+__attribute__((nonnull (1)))
+static inline bool nvmeib_pet_journal_is_verbose(struct nvmeib_pet_journal const* self)
+{
+	return self->verbose;
+}
+
 
 static inline struct nvmeib_pet_variant __nvmeib_pet_journal_get_curr_message_timestamp(u64 prev_timestamp, u64 curr_timestamp)
 {

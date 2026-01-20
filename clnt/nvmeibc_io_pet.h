@@ -37,4 +37,6 @@ struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(void);
 __attribute__((nonnull (1)))
 void nvmeibc_io_pet_controller_free(struct nvmeib_pet_base_controller* self);
 
+struct nvmeib_pet_journal nvmeibc_io_pet_journal_make(struct nvmeib_pet_base_controller*);
+
 #endif //NVMEIBC_IO_PET_H_INCLUDED
