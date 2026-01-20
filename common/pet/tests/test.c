@@ -715,17 +715,6 @@ void test_journal_timestamp(void)
 	free(perf_controller.memcpy_buffer.iov_base);
 }
 
-void test_multiple_messages(void)
-{
-	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base, true);
-	PET_MSG_NORM(&journal, "operation created; o=%p offset=0x%llx size=%u", &journal, (unsigned long long)(4096*4096), 8192);
-	PET_MSG_NORM(&journal, "operation completed; raid uuid=%x", 0xb1c69d3e);
-	PET_MSG_NORM(&journal, "operation completed; rv=%d", -1);
-
-	nvmeib_pet_journal_commit(&journal);
-}
-
-
 struct perf_test_stats {
 	u32 total_messages;
 	u32 total_bytes;
@@ -935,6 +924,124 @@ void test_performance(void)
 	free(perf_controller.msgs_buffer.iov_base);
 }
 
+enum colors{green=1, blue=2, red=3};
+
+void test_multiple_messages(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base, true);
+	
+	PET_MSG_NORM(&journal, "operation created; o=%p offset=0x%llx size=%u", &journal, (unsigned long long)(4096*4096), 8192);
+	PET_MSG_NORM(&journal, "operation completed; raid uuid=%x", 0xb1c69d3e);
+	PET_MSG_NORM(&journal, "operation completed; rv=%d", -1);
+				 
+	nvmeib_pet_journal_commit(&journal);
+}
+
+void test_enums(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base, true);
+
+	PET_MSG_NORM(&journal, "I know to print enums; green=%d<enum colors> blue=%d<enum colors> red=%d<coooooolors>", green, blue, red);
+	
+	nvmeib_pet_journal_commit(&journal);
+}
+
+
+union pet_test_blkset_info {
+	struct {
+		uint32_t txid : 20;
+		uint32_t dirty : 12;
+	} bits;
+	uint32_t all;
+};
+
+union pet_test_lock_id {
+	struct {
+		uint32_t idx_in_praid : 4;
+		uint32_t lock_id : 24;
+		uint32_t is_stale : 1;
+		uint32_t is_read : 1;
+		uint32_t reserved : 2;
+	} bits;
+	struct {
+		uint32_t lock_id_bits : 28;
+		uint32_t __remainder : 4;
+	};
+	uint32_t all;
+};
+
+union pet_test_lock_blkset_entry {
+	struct {
+		union pet_test_lock_id lock_id;
+		union pet_test_blkset_info blkset_info;
+	};
+	uint64_t all;
+};
+
+union pet_test_block_dp_ec_data_block_md {
+	struct {
+		union {
+			struct {
+				uint32_t version : 2;
+				uint32_t d2j_rng : 9;
+				uint32_t edic : 21;
+			} D;
+			struct {
+				uint32_t version : 2;
+				uint32_t d2j_rng : 9;
+				uint32_t edic : 13;
+				uint32_t dbits_0 : 4;
+				uint32_t dbits_1 : 4;
+			} P;
+		};
+		uint32_t tx_id : 20;
+		uint32_t jri : 10;
+		uint32_t reserved : 2;
+	};
+	uint64_t raw;
+};
+
+void test_structs_and_unions(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base, true);
+
+	union pet_test_blkset_info const blkset_info = {.bits = {.txid = 1977, .dirty = 6}};
+	PET_MSG_NORM(&journal, 
+		"pet_test_blkset_info txid=%u(1977) dirty=%u(6) all=%u all=%u<union pet_test_blkset_info>", 
+		(uint32_t)blkset_info.bits.txid, (uint32_t)blkset_info.bits.dirty, blkset_info.all, blkset_info.all);
+	
+	union pet_test_lock_id const lock_id = {.bits = {.idx_in_praid=7, .lock_id=8, .is_stale=0, .is_read=1, .reserved=2}};
+	PET_MSG_NORM(&journal, 
+		"pet_test_lock_id idx_in_praid=%u(7) lock_id=%u(8) is_stale=%u(0) is_read=%u(1) reserved=%u(2) lock_id_bits=%u remainder=%u all=%u all=%u<union pet_test_lock_id>", 
+		(uint32_t)lock_id.bits.idx_in_praid, (uint32_t)lock_id.bits.lock_id, (uint32_t)lock_id.bits.is_stale, (uint32_t)lock_id.bits.is_read, (uint32_t)lock_id.bits.reserved, (uint32_t)lock_id.lock_id_bits, (uint32_t)lock_id.__remainder, lock_id.all, lock_id.all);
+
+	union pet_test_lock_blkset_entry const lock_blkset_entry = {.lock_id = lock_id, .blkset_info = blkset_info};
+	PET_MSG_NORM(&journal, 
+		"pet_test_lock_blkset_entry lock_id=%u<union pet_test_lock_id> blkset_info=%u<union pet_test_blkset_info> all=%llu all=%llu<union pet_test_lock_blkset_entry>", 
+		lock_blkset_entry.lock_id.all, lock_blkset_entry.blkset_info.all, (unsigned long long)lock_blkset_entry.all, (unsigned long long)lock_blkset_entry.all);
+
+	union pet_test_block_dp_ec_data_block_md const block_md_d = {
+		.D = {.version = 1u, .d2j_rng = 2u, .edic = 3u},
+		.tx_id = 9u,
+		.jri = 10u,
+		.reserved = 2u,	
+	};
+	PET_MSG_NORM(&journal, 
+		"pet_test_block_dp_ec_data_block_md version=%u(1) d2j_rng=%u(2) edic=%u(3) tx_id=%u(9) jri=%u(10) reserved=%u(2) raw=%llu all=%llu<union pet_test_block_dp_ec_data_block_md>", 
+		(uint32_t)block_md_d.D.version, (uint32_t)block_md_d.D.d2j_rng, (uint32_t)block_md_d.D.edic, (uint32_t)block_md_d.tx_id, (uint32_t)block_md_d.jri, (uint32_t)block_md_d.reserved, (unsigned long long)block_md_d.raw, (unsigned long long)block_md_d.raw);
+	
+	union pet_test_block_dp_ec_data_block_md const block_md_p = {
+		.P = {.version = 1u, .d2j_rng = 5u, .edic = 6u, .dbits_0 = 7u, .dbits_1 = 8u},
+		.tx_id = 9u,
+		.jri = 10u,
+		.reserved = 2u,	
+	};
+	PET_MSG_NORM(&journal, 
+		"pet_test_block_dp_ec_data_block_md version=%u(4) d2j_rng=%u(5) edic=%u(6) dbits_0=%u(7) dbits_1=%u(8) tx_id=%u(9) jri=%u(10) reserved=%u(2) raw=%llu all=%llu<union pet_test_block_dp_ec_data_block_md>", 
+		(uint32_t)block_md_p.P.version, (uint32_t)block_md_p.P.d2j_rng, (uint32_t)block_md_p.P.edic, (uint32_t)block_md_p.P.dbits_0, (uint32_t)block_md_p.P.dbits_1, (uint32_t)block_md_p.tx_id, (uint32_t)block_md_p.jri, (uint32_t)block_md_p.reserved, (unsigned long long)block_md_p.raw, (unsigned long long)block_md_p.raw);
+	
+	nvmeib_pet_journal_commit(&journal);
+}
 
 int main(int argc, char* argv[]){
 	char const* fname = argc > 1 ? argv[1] : "test.pet";
@@ -961,8 +1068,10 @@ int main(int argc, char* argv[]){
 		test_message_11();
 		test_message_12();
 		test_journal_timestamp();
-		test_multiple_messages();
 		test_performance();
+		test_multiple_messages();
+		test_enums();
+		test_structs_and_unions();
 	}
 
 	close(file_pet_controller.fd_output);
