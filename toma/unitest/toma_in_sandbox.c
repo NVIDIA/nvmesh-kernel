@@ -1034,17 +1034,20 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
 	struct globa_epoll *ep = &sys->TSB_epoll;
 	static uint64_t loop_idx = 0;
+	static bool is_shutting_down = false;
 	int i;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
 	nanosleep(&(struct timespec){0, 100*1000*1000}, NULL); // 100ms
-	SANDBOX_PRINT("Toma Sandbox epoll loop %lu\n", loop_idx); loop_idx++;
+	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s\n", loop_idx, is_shutting_down ? " (shutting down)" : ""); loop_idx++;
 	for (i = 0; i < ep->n_fds; i++) {
 		evs[i] = ep->evs[i];	// As if each and every fd in which toma is sleeping has an event.
 	}
-	if (loop_idx < 10) {
+	if (is_shutting_down || loop_idx < 10) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 		return i;
 	} else {
+		N_IMf(sbexit001, "sandbox shutting down Toma app");
+		is_shutting_down = true;
 		// sys->TSB_sig.sig = 9;	// Daniel: This seems not to work better than epoll failure
 		errno = ENOMEM;
 		return -1;				// For now after 10 iterations stop toma. This is ugly! Simulate shutdown instruction via kafka from mgmt
