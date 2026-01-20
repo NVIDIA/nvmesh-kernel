@@ -295,8 +295,40 @@ struct t_sandbox_all {
 		int queue_tail;			// Next position to enqueue to
 		int queue_count;		// Number of messages in queue
 	} TSB_netlink;
+	struct TSB_server_comm_wakeup_mock {
+		struct TSB_sock_otherside o[2];
+		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
+	} TSB_km_sock_pair;
 	char my_hostname[64];
 } *sys;
+
+static ssize_t _socket_pair_wakeup_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	long n_wups;
+	BUG_ON((w->o[0].sock->fd != fd) || (n != 1) || (buf == NULL) || (offset != 0) || (flags != 0));
+	n_wups = __atomic_add_fetch(&w->n_wakeup_msgs, 1, __ATOMIC_SEQ_CST);
+	N_Tf(__AUTOID__, "n_wakups_in_queue=@INT", (int)n_wups);
+	return n;
+}
+
+static ssize_t _socket_pair_wakeup_recv(int fd, void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	const long n_wups = __atomic_load_n(&w->n_wakeup_msgs, __ATOMIC_SEQ_CST);
+	BUG_ON((w->o[1].sock->fd != fd) || (n != 1) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
+	BUG_ON(n_wups < 0);
+	if (n_wups > 0) {
+		__atomic_sub_fetch(&w->n_wakeup_msgs, 1, __ATOMIC_SEQ_CST);
+		*(char*)buf = 'w';		// Just for debug, so toma reads initialized character
+		return 1;
+	}
+	return 0;
+}
+
+static bool _socket_pair_should_wakeup(void) {
+	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	const long n = __atomic_load_n(&w->n_wakeup_msgs, __ATOMIC_SEQ_CST);
+	return n > 0;
+}
 
 void t_sandbox_all_init(void) {
 	sys = calloc(1, sizeof(*sys));
@@ -445,7 +477,7 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	(void)fd; (void)offset; (void)flags;
 	BUG_ON(n < sizeof(struct nlmsghdr));
 	nl->n_recv_msgs++;
-	N_Tf(nl_send, "opcode=@INT, total_n_msgs=@INT", req_msg->opcode, nl->n_recv_msgs);
+	N_Tf(nl_send, "opcode=@INT (@STR), total_n_msgs=@INT", req_msg->opcode, uk_comm_opcode_str(req_msg->opcode), nl->n_recv_msgs);
 	if (req_msg->opcode == csc_get_disks) {
 		int i, count = sandbox_nvme_get_device_count();	// Queue disk info for each mock NVMe device
 		for (i = 0; i < count; i++) {
@@ -509,6 +541,14 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
 		s->other_side->send = _send_illegal_trap;				// Unsupported yet
 		s->other_side->recv = _recv_illegal_trap;
+	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {
+		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[0];
+		s->other_side->send = _socket_pair_wakeup_send;			// o[0] Toma writes to it to wakeup server lib main thread. Never reads
+		s->other_side->recv = _recv_illegal_trap;
+	} else if (strstr(s->addr.sun_path, "km_comm_pair1")) {
+		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[1];
+		s->other_side->send = _send_illegal_trap;				// o[1] ServerLib reads from it to wakeup. Never writes
+		s->other_side->recv = _socket_pair_wakeup_recv;
 	} else {
 		return;
 	}
@@ -869,6 +909,9 @@ ssize_t override_read(int fd, void *buf, size_t nbytes) {
 }
 
 ssize_t override_write( int fd, const void *buf, size_t count) {
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
+	if (s && s->other_side && s->other_side->recv)
+		return s->other_side->send(fd, buf, count, 0, 0);
 	// Pass through to real file.
 	return write(fd, buf, count);
 }
@@ -895,9 +938,11 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
 	struct t_sandbox_sock *nl_sock = sys->TSB_netlink.o.sock;
+	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
 	const int nl_fd = nl_sock->fd;
-	BUG_ON(!nl_sock || !readfds);
+	BUG_ON(!nl_sock || !readfds || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd));	// Wrong select from Toma production code
 
+	for ((void)timeout; true; msleep(100)) { // Throttled km_comm select, todo, use timeout
 	if (FD_ISSET(nl_fd, readfds)) {	// Check if netlink socket is in the read set and we have queued messages
 		static int n_extended_msgs_to_emulate = 1;
 		const bool has_msg_for_toma = !TSB_netlink_queue_is_empty();
@@ -920,8 +965,16 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 			BUG_ON(true);				// Wrong implementation
 		}
 	}
-	msleep(100);	// Throttled km_comm select
-	return select(nfds, readfds, writefds, exceptfds, timeout);
+		if (FD_ISSET(w->o[1].sock->fd, readfds)) { 	// Check if wakeup due to toma sending message
+			if (_socket_pair_should_wakeup()) {		// Toma sends message via netlink, wakeup the server communication thread
+				FD_ZERO(readfds); FD_ZERO(writefds); FD_ZERO(exceptfds);
+				FD_SET(w->o[1].sock->fd, readfds);
+				return 1;
+			}
+		}
+	}
+	BUG_ON(true);				// Wrong implementation
+	return -1;
 }
 
 /************************************* Epoll ********************************/
