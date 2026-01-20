@@ -28,35 +28,31 @@ struct nvmeibc_raid1 const* __nvmeibc_disk_segment_get_praid_impl(struct nvmeibc
 	return NULL;
 }
 
-void nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid, struct nvmeib_pet_journal* journal)
+union nvmeibc_raid1_io_pet_status
+nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid)
 {
 	u8 idx = 0;
-	u8 acms[2] = {0};
-	u8 sgmnts[2] = {0};
+	enum NVMEIBTC_DS_MODE acms[2] = {NVMEIBTC_DS_MODE_RW, NVMEIBTC_DS_MODE_RW};
+	u8 sgmnts[2] = {0, 0};
 	int info_idx = -1;
 	u8 const n_segments = numeric_downcast(u8, raid->replicas);
 	for (idx = 0; idx < n_segments; ++idx){
 		enum NVMEIBTC_DS_MODE acm = raid->segments[idx].toma_acm;
 		if (unlikely( acm != NVMEIBTC_DS_MODE_RW)){
 			info_idx += 1;
-			acms[info_idx] = numeric_downcast(u8, acm);
+			acms[info_idx] = acm;
 			sgmnts[info_idx] = idx;
 			if (info_idx == 1){
 				break;
 			}
 		}
 	}
-	if (info_idx == -1){
-		NVMEIBC_IO_PET_MSG_NORM(journal, "raid topology(n_segments=%hhu, all good)", n_segments);
-	} else if (info_idx == 0){
-		NVMEIBC_IO_PET_MSG_NORM(journal, 
-								"raid topology(n_segments=%hhu, degraded1=(segment=%hhu, acm=%hhu))",
-								n_segments, sgmnts[0],acms[0]);
-	} else {
-		NVMEIBC_IO_PET_MSG_NORM(journal, 
-								"raid topology(n_segments=%hhu, degraded1=(segment=%hhu, acm=%hhu), degraded2=(segment=%hhu, acm=%hhu))",
-								n_segments, sgmnts[0], acms[0], sgmnts[1], acms[1]);
-	}
+	return (union nvmeibc_raid1_io_pet_status){
+		.info = {
+			.n_sgmnts = n_segments,
+			.dgrd_sgmnts = {{sgmnts[0], acms[0]}, {sgmnts[1], acms[1]}}
+		}
+	};
 }
 
 struct nvmeib_lock_entry_constants _default_lock_consts;		// Constants for lock (mask, stale_bit_mask, tx_id shift/mask, dirty-bits shift/mask)
