@@ -6,6 +6,7 @@
 
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmeibc_block.h"
+#include "nvmeibc_io_pet.h"
 
 #ifndef __KERNEL__
 	#include "nvmeib_math.h"	/* For round_up/round_down in user-space */
@@ -99,6 +100,16 @@ static inline bool __is_multiple_blocksets(ulong lba_bio_start_s, long size, u32
 	return (align_up_end - align_down_start) > blockset_size_b;
 }
 
+__attribute__((nonnull(1)))
+static inline void __pet_nvmeibc_log_operation_create(struct operation *o, u32 short_volume_id)
+{
+	u32 bio_part_ofst_s = o->bios[0]->bio_offst;
+
+	NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+		"operation.create(short_volume_id=%d, o=%p, type=%d<enum nvmeib_block_io_op>, vlba_start_s=0x%llx, nlbas=%llu, bio_part_ofst_s=0x%x)",
+		short_volume_id, o, o->op, get_op_start_lba(o), get_op_nlbas(o), bio_part_ofst_s);
+}
+
 #define BIO_LEADER_REF  0x40000000
 int execute_bio(struct bio *bio, unsigned long now)
 {
@@ -171,6 +182,8 @@ int execute_bio(struct bio *bio, unsigned long now)
 			const u64 nlbas = get_op_nlbas(o);
 			nvmeib_io_stats_operation_start(o->nd->os->stats, io_op_to_verb(o->op, false), nlbas << NVMEIBC_SECTOR_SHIFT);
 		}
+
+		__pet_nvmeibc_log_operation_create(o, nvmeibc_volume_short_id(nd));
 
 		if (!chain_head) /* Starting new chain */
 			chain_head = o;

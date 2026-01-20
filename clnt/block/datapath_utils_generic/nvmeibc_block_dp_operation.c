@@ -69,7 +69,7 @@ static void __compressed_op_trace_end(const struct operation *o, int rv) {
 		} else {
 			NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Operation end: RV: @RV", _I, goodpath_nvmeibc, compressed_op_trace_end_bio_wt, o->dbg_id, rv);
 		}
-		NVMEIBC_IO_PET_MSG_NORM(&o->journal, "op_end(dbg_id=%u) = %d", o->dbg_id, rv);
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal, "operation.end(rv=%d<errno>)", rv);
 	}
 }
 
@@ -476,6 +476,7 @@ void nvmeibc_operation_execute(struct operation *o, bool is_from_user_space)
 	DEBUG_TOPO_CNTRS_add_elem_to_topo(o, t);
 	rv = dp->should_ignore_op(o);
 	if (unlikely(rv)) { // operation failes/succeeds syncronously
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal, "operation.should_ignore_op(rv=%d<errno>)", rv);
 		if (rv > 0)
 			nvmeibc_operation_destroy(o, 0);
 		else
@@ -515,6 +516,7 @@ void nvmeibc_operation_destroy(struct operation *o, int rv)
 	DEBUG_TOPO_CNTRS_del_elem_from_topo(o);
 	nvmeibc_operation_throttling_pull_next(o->nd, o->cpu_id, (o->chained_op != NULL));
 	nvmeibc_topology_put(o->topo);
+	NVMEIBC_IO_PET_MSG_WARN(&o->journal, "operation.destroy(rv=%d<errno>)", rv);
 	nvmeib_pet_journal_commit(&o->journal);
 	__operation_free(o);
 }

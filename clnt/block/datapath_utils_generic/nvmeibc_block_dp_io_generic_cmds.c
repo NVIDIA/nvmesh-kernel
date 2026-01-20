@@ -522,24 +522,20 @@ static void __finish_cmds_comp_oper(struct operation *o)
 static void __pet_nvmeibc_operation_compressed_op_dump_bio(const struct operation *o)
 {
 	const struct nvmeibc_block_command *rldr = o->cmds;		// For now print info of first rldr only
-	const u64 start_lba = get_op_start_lba(o), nlbas = get_op_nlbas(o);
 	const u64 topo = (u64)o->topo->debug_unique_index;
-	const u32 vol_id = nvmeibc_volume_short_id(o->nd);
+	const struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(rldr->ds);
+	const union nvmeibc_raid1_io_pet_status topo_status = nvmeibc_raid1_io_pet_describe_state(raid);
 
-	if (o->op == NVMEIB_BLOCK_IO_OP_READ) {
-		NVMEIBC_IO_PET_MSG_NORM(&o->journal, 
-								"read operation started; o=%p, dbg_id=%u, short volume id=%u, topology=%llu, vlba=0x%llx, nlbas=%llu, dbg_cntrs=0x%llx", 
-								o, o->dbg_id, vol_id, topo, start_lba, nlbas, o->dbg_cntrs.raw);
-	} else {		// Write/Trim
-		if (o->nd->dp.enable_care_about_txid) {
-			NVMEIBC_IO_PET_MSG_NORM(&o->journal, 
-									"write operation started; o=%p, dbg_id=%u, short volume id=%u, topology=%llu, vlba=0x%llx, nlbas=%llu, binfo=0x%x dbg_cntrs=0x%llx", 
-									o, o->dbg_id, vol_id, topo, start_lba, nlbas, rldr->rld.pre.all, o->dbg_cntrs.raw);
-		} else {
-			NVMEIBC_IO_PET_MSG_NORM(&o->journal, 
-								"trim operation started; o=%p, dbg_id=%u, short volume id=%u, topology=%llu, vlba=0x%llx, nlbas=%llu, dbg_cntrs=0x%llx", 
-									o, o->dbg_id, vol_id, topo, start_lba, nlbas, o->dbg_cntrs.raw);
-		}
+	if (o->nd->dp.enable_care_about_txid && o->op == NVMEIB_BLOCK_IO_OP_WRITE) {
+		//TODO PET: assign dbg_id when operation is created;
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+									"operation.execute(dbg_id=%u, topology=(index=%llu, status=%llu<union nvmeibc_raid1_io_pet_status>) binfo=0x%x<union nvmeib_blkset_info> dbg_cntrs=0x%llx<union operation_dbg_cntrs>)",
+									o->dbg_id, topo, topo_status.all, rldr->rld.pre.all, o->dbg_cntrs.raw);
+
+	} else {
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+									"operation.execute(dbg_id=%u, topology=(index=%llu, status=%llu<union nvmeibc_raid1_io_pet_status>) dbg_cntrs=0x%llx<union operation_dbg_cntrs>)",
+									o->dbg_id, topo, topo_status.all, o->dbg_cntrs.raw);
 	}
 }
 
