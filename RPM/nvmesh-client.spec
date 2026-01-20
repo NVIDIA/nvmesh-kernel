@@ -124,7 +124,6 @@ fi
 # this should either move to the infra post install phase or the rpm creation phase (since we now work with xz.bcp which is not recognized by modinfo)
 # modinfo $(find -L /opt/nvmesh/client-repo/ -name 'nvmeibc.ko' -o -name 'nvmeibc.ko.xz' -type f) -F nvmeibc_capabilities > /opt/nvmesh/client-repo/.capabilities
 
-
 %preun
 /opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}/uninstall-client $1
 

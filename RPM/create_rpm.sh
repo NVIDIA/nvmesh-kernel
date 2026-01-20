@@ -291,6 +291,7 @@ for rpm_kind in $rpms_to_build; do
 	if [ "$rpm_kind" == "client" ] || [ "$rpm_kind" == "target" ]; then
 		echo Copying post-install and uninstall scripts.
 		cp $installers_dir/post_install $rpm_source_path
+		cp $installers_dir/post_install_ib_core_mod $rpm_source_path
 		cp $installers_dir/install.py $rpm_source_path
 		cp $installers_dir/uninstall-$rpm_kind $rpm_source_path
 
