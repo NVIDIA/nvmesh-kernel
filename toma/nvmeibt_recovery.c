@@ -1350,10 +1350,11 @@ out:
 static void cleanup_passphrase_dir_leftover_files(void)
 {
 	if (strlen(PASSPHRASE_DIR_NAME) > 10 && strstr(PASSPHRASE_DIR_NAME, "toma")) {		// Avoid accidents
-		system("rm -rf " PASSPHRASE_DIR_NAME);
-	} else {
-		N_Ef(92n4jwi, "PASSPHRASE_DIR_NAME=@STR", PASSPHRASE_DIR_NAME);
+		const int rv = system("rm -rf " PASSPHRASE_DIR_NAME);
+		if (rv == 0)
+			return;
 	}
+	N_Ef(92n4jwi, "Leaking PASSPHRASE_DIR_NAME=@STR", PASSPHRASE_DIR_NAME);
 }
 
 static int write_passphrase_to_file(char *passphrase, char *file_name)

@@ -744,7 +744,9 @@ static void terminate_toma(int rv)
 
 	if (shutdown_from_management || nvmeibt_raft_is_shutdown_triggered()) {
 		// YR: move from execlp to a system and background process and regular exit due to systemd tracking forks
-		system("service nvmeshtarget stop &"); // Nothing to do with the return value
+		const int srvr_rv = system("service nvmeshtarget stop &"); // Try to take server down as well.
+		if (srvr_rv)
+			syslog(LOG_INFO, "TOMA attempt to stop nvmesh target failed, rv=%d\n", rv);
 	}
 
 	syslog(LOG_INFO, "TOMA Exit\n");
