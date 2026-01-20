@@ -415,6 +415,224 @@ void test_message_8(void)
 	__bug_on_written_message_content_not_equal(memory_expected, expected_size);
 }
 
+void test_message_9(void)
+{
+	__auto_type const msg = NVMEIB_PET_MSG(0x04db,
+				 (int8_t)               0x11, 
+				 (uint8_t)              0x12,
+				 (int16_t)            0x2222, 
+				 (uint16_t)           0x2223,
+				 (int32_t)        0x44444444, 
+				 (uint32_t)       0x44444445,
+				 (int64_t) 0x8888888888888888, 
+				 (uint64_t)0x8888888888888889,
+				 (void*)           (void*)0xaaaaaaaaaaaaaaaa);
+	size_t const expected_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value)
+	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+
+	u8 const memory_expected[128] = { 
+		0x01, 0x00, //number of messages
+		0xdc, 0x04, //offset
+		0x09, //n_args   
+		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
+		0x00, 0x11,    //arg1: S_BYTE
+		0x01, 0x12,    //arg2: U_BYTE
+		0x02, 0x22, 0x22,    //arg3: S_SHORT
+		0x03, 0x23, 0x22,    //arg4: U_SHORT
+		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
+		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
+		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
+		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
+		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa     //arg9: U_LONG_INT (pointer)
+	};
+
+	BUG_ON(msg.offset != 0x04db+1);
+	BUG_ON(msg.value[0] == 0);
+	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
+	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[1] != 0x11);
+	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[2] != 0x12);
+	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[3] != 0x2222);
+	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[4] != 0x2223);
+	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[5] != 0x44444444);
+	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[6] != 0x44444445);
+	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[7] != 0x8888888888888888);
+	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != 0x8888888888888889);
+	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[9] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
+
+	BUG_ON(nvmeib_pet_message_get_size(&msg) != expected_size);
+	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
+	BUG_ON(nvmeib_pet_message_write(&msg, &stream) != expected_size);
+	__bug_on_written_message_content_not_equal(memory_expected, expected_size);
+}
+
+void test_message_10(void)
+{
+	__auto_type const msg = NVMEIB_PET_MSG(0x04dc,
+				 (int8_t)               0x11, 
+				 (uint8_t)              0x12,
+				 (int16_t)            0x2222, 
+				 (uint16_t)           0x2223,
+				 (int32_t)        0x44444444, 
+				 (uint32_t)       0x44444445,
+				 (int64_t) 0x8888888888888888, 
+				 (uint64_t)0x8888888888888889,
+				 (void*)           (void*)0xaaaaaaaaaaaaaaaa,
+				 (int8_t)               0x13);
+	size_t const expected_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 1; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value) + arg10(1 type + 1 value)
+	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+
+	u8 const memory_expected[128] = { 
+		0x01, 0x00, //number of messages
+		0xdd, 0x04, //offset
+		0x0a, //n_args   
+		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
+		0x00, 0x11,    //arg1: S_BYTE
+		0x01, 0x12,    //arg2: U_BYTE
+		0x02, 0x22, 0x22,    //arg3: S_SHORT
+		0x03, 0x23, 0x22,    //arg4: U_SHORT
+		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
+		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
+		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
+		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
+		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,    //arg9: U_LONG_INT (pointer)
+		0x00, 0x13     //arg10: S_BYTE
+	};
+
+	BUG_ON(msg.offset != 0x04dc+1);
+	BUG_ON(msg.value[0] == 0);
+	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
+	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[1] != 0x11);
+	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[2] != 0x12);
+	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[3] != 0x2222);
+	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[4] != 0x2223);
+	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[5] != 0x44444444);
+	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[6] != 0x44444445);
+	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[7] != 0x8888888888888888);
+	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != 0x8888888888888889);
+	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[9] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
+	BUG_ON(msg.type[10] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[10] != 0x13);
+
+	BUG_ON(nvmeib_pet_message_get_size(&msg) != expected_size);
+	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
+	BUG_ON(nvmeib_pet_message_write(&msg, &stream) != expected_size);
+	__bug_on_written_message_content_not_equal(memory_expected, expected_size);
+}
+
+void test_message_11(void)
+{
+	__auto_type const msg = NVMEIB_PET_MSG(0x04dd,
+				 (int8_t)               0x11, 
+				 (uint8_t)              0x12,
+				 (int16_t)            0x2222, 
+				 (uint16_t)           0x2223,
+				 (int32_t)        0x44444444, 
+				 (uint32_t)       0x44444445,
+				 (int64_t) 0x8888888888888888, 
+				 (uint64_t)0x8888888888888889,
+				 (void*)           (void*)0xaaaaaaaaaaaaaaaa,
+				 (int8_t)               0x13,
+				 (uint8_t)              0x14);
+	size_t const expected_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 1 + 1 + 1; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value) + arg10(1 type + 1 value) + arg11(1 type + 1 value)
+	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+
+	u8 const memory_expected[128] = { 
+		0x01, 0x00, //number of messages
+		0xde, 0x04, //offset
+		0x0b, //n_args   
+		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
+		0x00, 0x11,    //arg1: S_BYTE
+		0x01, 0x12,    //arg2: U_BYTE
+		0x02, 0x22, 0x22,    //arg3: S_SHORT
+		0x03, 0x23, 0x22,    //arg4: U_SHORT
+		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
+		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
+		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
+		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
+		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,    //arg9: U_LONG_INT (pointer)
+		0x00, 0x13,    //arg10: S_BYTE
+		0x01, 0x14     //arg11: U_BYTE
+	};
+
+	BUG_ON(msg.offset != 0x04dd+1);
+	BUG_ON(msg.value[0] == 0);
+	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
+	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[1] != 0x11);
+	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[2] != 0x12);
+	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[3] != 0x2222);
+	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[4] != 0x2223);
+	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[5] != 0x44444444);
+	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[6] != 0x44444445);
+	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[7] != 0x8888888888888888);
+	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != 0x8888888888888889);
+	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[9] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
+	BUG_ON(msg.type[10] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[10] != 0x13);
+	BUG_ON(msg.type[11] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[11] != 0x14);
+
+	BUG_ON(nvmeib_pet_message_get_size(&msg) != expected_size);
+	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
+	BUG_ON(nvmeib_pet_message_write(&msg, &stream) != expected_size);
+	__bug_on_written_message_content_not_equal(memory_expected, expected_size);
+}
+
+void test_message_12(void)
+{
+	__auto_type const msg = NVMEIB_PET_MSG(0x04de,
+				 (int8_t)               0x11, 
+				 (uint8_t)              0x12,
+				 (int16_t)            0x2222, 
+				 (uint16_t)           0x2223,
+				 (int32_t)        0x44444444, 
+				 (uint32_t)       0x44444445,
+				 (int64_t) 0x8888888888888888, 
+				 (uint64_t)0x8888888888888889,
+				 (void*)           (void*)0xaaaaaaaaaaaaaaaa,
+				 (int8_t)               0x13,
+				 (uint8_t)              0x14,
+				 (int16_t)            0x3333);
+	size_t const expected_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 2; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value) + arg10(1 type + 1 value) + arg11(1 type + 1 value) + arg12(1 type + 2 value)
+	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+
+	u8 const memory_expected[128] = { 
+		0x01, 0x00, //number of messages
+		0xdf, 0x04, //offset
+		0x0c, //n_args   
+		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
+		0x00, 0x11,    //arg1: S_BYTE
+		0x01, 0x12,    //arg2: U_BYTE
+		0x02, 0x22, 0x22,    //arg3: S_SHORT
+		0x03, 0x23, 0x22,    //arg4: U_SHORT
+		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
+		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
+		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
+		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
+		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,    //arg9: U_LONG_INT (pointer)
+		0x00, 0x13,    //arg10: S_BYTE
+		0x01, 0x14,    //arg11: U_BYTE
+		0x02, 0x33, 0x33     //arg12: S_SHORT
+	};
+
+	BUG_ON(msg.offset != (0x04de + 1));
+	BUG_ON(msg.value[0] == 0);
+	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
+	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[1] != 0x11);
+	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[2] != 0x12);
+	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[3] != 0x2222);
+	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[4] != 0x2223);
+	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[5] != 0x44444444);
+	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[6] != 0x44444445);
+	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[7] != 0x8888888888888888);
+	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != 0x8888888888888889);
+	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[9] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
+	BUG_ON(msg.type[10] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[10] != 0x13);
+	BUG_ON(msg.type[11] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[11] != 0x14);
+	BUG_ON(msg.type[12] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[12] != 0x3333);
+
+	BUG_ON(nvmeib_pet_message_get_size(&msg) != expected_size);
+	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
+	BUG_ON(nvmeib_pet_message_write(&msg, &stream) != expected_size);
+	__bug_on_written_message_content_not_equal(memory_expected, expected_size);
+}
+
 void test_get_store_type(void)
 {
 	// Test various types to ensure nvmeib_pet_get_store_type returns correct enum values
@@ -596,7 +814,7 @@ static struct perf_test_stats __test_performance_journal(struct nvmeib_pet_journ
 	
 	while (written) {
 		arg_counter += 1;
-		arg_counter %= 9;
+		arg_counter %= 13;
 		written = PET_MSG_NORM(journal, "msg_1arg; val=%d", (int)arg_counter);
 		update_stats_on_msg_written(&stats, written);
 	
@@ -637,6 +855,38 @@ static struct perf_test_stats __test_performance_journal(struct nvmeib_pet_journ
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
 			(signed char)arg_counter + 6, &stats);
+		update_stats_on_msg_written(&stats, written);
+
+		written = PET_MSG_NORM(journal, "msg_9arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p", 
+			(int)arg_counter, (unsigned)arg_counter + 1, 
+			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
+			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
+			(signed char)arg_counter + 6, &stats, journal);
+		update_stats_on_msg_written(&stats, written);
+
+		written = PET_MSG_NORM(journal, "msg_10arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd", 
+			(int)arg_counter, (unsigned)arg_counter + 1, 
+			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
+			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
+			(signed char)arg_counter + 6, &stats, journal,
+			(signed char)arg_counter + 7);
+		update_stats_on_msg_written(&stats, written);
+
+		written = PET_MSG_NORM(journal, "msg_11arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd v11=%hhu", 
+			(int)arg_counter, (unsigned)arg_counter + 1, 
+			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
+			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
+			(signed char)arg_counter + 6, &stats, journal,
+			(signed char)arg_counter + 7, (unsigned char)arg_counter + 8);
+		update_stats_on_msg_written(&stats, written);
+
+		written = PET_MSG_NORM(journal, "msg_12arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd v11=%hhu v12=%hd", 
+			(int)arg_counter, (unsigned)arg_counter + 1, 
+			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
+			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
+			(signed char)arg_counter + 6, &stats, journal,
+			(signed char)arg_counter + 7, (unsigned char)arg_counter + 8,
+			(short)arg_counter + 9);
 		update_stats_on_msg_written(&stats, written);
 	}
 	
@@ -706,6 +956,10 @@ int main(int argc, char* argv[]){
 		test_message_6();
 		test_message_7();
 		test_message_8();
+		test_message_9();
+		test_message_10();
+		test_message_11();
+		test_message_12();
 		test_journal_timestamp();
 		test_multiple_messages();
 		test_performance();
