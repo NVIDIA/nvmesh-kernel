@@ -137,7 +137,11 @@ void nvmeibt_node_locate_my_node(void)
 	}
 	nvmeibt_global_set_my_node(my_node);	// Also assigns node->is_my_node as needed
 	if (!nvmeibt_global_get_my_node()) {
-		N_Wf(warn_node_nvmeibt_node_locate_my_node, "The nodes list doesn't include me '@MY_HOSTNAME'!", nvmeibt_get_my_hostname());
+		if (timespec_diff_ns(nvmeibt_global_get_cur_event_start_time(), nvmeibt_global_get_startup_timespec()) > SEC_TO_NSEC(30)) {
+			N_Wf(a7b3lmh, "The nodes list doesn't include me '@STR'!", nvmeibt_get_my_hostname());
+		} else {
+			N_Tf(1vys9k2, "The nodes list doesn't include me '@STR'!", nvmeibt_get_my_hostname());
+		}
 	} else {
 		// Send a report target, as the initialization of my_node triggers possibility to
 		// updating mgmt_db_uuid  for some local disks, and hence reporting them to the MGMT,
