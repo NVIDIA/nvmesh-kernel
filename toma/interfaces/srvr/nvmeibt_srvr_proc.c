@@ -428,20 +428,16 @@ static unsigned long get_guid(struct nvmeibt_km_comm *p)
 	return __sync_add_and_fetch(&p->unique_id_generator, 1);
 }
 
-static int nvmeibt_km_comm_lock(struct nvmeibt_km_comm *p)
+static void nvmeibt_km_comm_lock(struct nvmeibt_km_comm *p)
 {
 	const int rv = pthread_mutex_lock(&p->guard);
-	errno = rv; // pthread_mutex_lock() does not set errno
-	if (rv != 0) N_Ef(kmtscl0, "Failed to lock srv comm guard rv=@RV @AUTO_ERRNO", rv);
-	return rv;
+	if (rv != 0) N_Ef(kmtscl0, "Failed to lock srv comm guard rv=@RV", rv);
 }
 
-static int nvmeibt_km_comm_unlock(struct nvmeibt_km_comm *p)
+static void nvmeibt_km_comm_unlock(struct nvmeibt_km_comm *p)
 {
-	int rv = pthread_mutex_unlock(&p->guard);
-	errno = rv; // pthread_mutex_unlock() does not set errno
-	if (rv != 0) N_Ef(kmtscl1, "Failed to unlock srv comm guard rv=@RV @AUTO_ERRNO", rv);
-	return rv;
+	const int rv = pthread_mutex_unlock(&p->guard);
+	if (rv != 0) N_Ef(kmtscl1, "Failed to unlock srv comm guard rv=@RV", rv);
 }
 
 static void __just_a_hack_reorder_funcions(struct nvmeibt_km_comm *p, enum nvmeibs_toma_status_type type, struct status_str_ctx* ctx) {

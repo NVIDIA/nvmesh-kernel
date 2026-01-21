@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <ctype.h>
 
 /************************************* Logging ********************************/
 
@@ -707,27 +706,11 @@ static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
 // For NVMesh devices like "nvme1001n1", seq = 1001 - 1000 = 1.
 // For stock devices like "nvme0n1", returns -1 (no smart file).
 static int TSB_get_seq_from_nvmesh_device_name(const char *device_name) {
-	const char *p;
 	int nvme_num;
-
-	if (!device_name || strncmp(device_name, "nvme", 4) != 0)
+	if (!device_name || (strncmp(device_name, "nvme", 4) != 0) || !isdigit(device_name[4]))
 		return -1;
-
-	p = device_name + 4;
-	if (!isdigit((unsigned char)*p))
-		return -1;
-
-	nvme_num = 0;
-	while (isdigit((unsigned char)*p)) {
-		nvme_num = nvme_num * 10 + (*p - '0');
-		p++;
-	}
-
-	// NVMesh devices have numbers >= 1000
-	if (nvme_num < 1000)
-		return -1;
-
-	return nvme_num - 1000;
+	nvme_num = atoi(&device_name[4]);
+	return (nvme_num < 1000) ? -1 : (nvme_num - 1000);		// NVMesh devices have numbers >= 1000
 }
 
 // Queue a netlink disk info response for a given device
@@ -1110,7 +1093,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	for (i = 0; i < ep->n_fds; i++) {
 		evs[i] = ep->evs[i];	// As if each and every fd in which toma is sleeping has an event.
 	}
-	if (is_shutting_down || loop_idx < 10) {
+	if (loop_idx != 10) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 		return i;
 	} else {
