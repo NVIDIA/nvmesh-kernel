@@ -91,6 +91,7 @@ struct self_test_entry {
 	X(json_add_partition_entry, "JSON Modification - Add Partition Entry", "gpt_util add new partition via JSON") \
 	X(json_modify_metadata_gpt, "JSON Modification - Metadata GPT Changes", "gpt_util modify metadata partition name/range") \
 	X(json_boundary_max_partitions, "Boundary Test - Max Partitions", "gpt_util handle max 8192 partitions") \
+	X(stress_large_gpt_single_modification, "Stress Test - Single Entry Modification in Large GPT", "gpt_util modify 1 entry among 100+ partitions") \
 	/* Edge Cases */ \
 	X(csv_parsing_path, "Validation - CSV Parsing Path (-d)", "gpt_util -d with mock CSV (device discovery)") \
 	/*X(malformed_json_type, "Safety - Malformed JSON Type Handling", "gpt_util apply with wrong JSON types (graceful failure)")*/ \

@@ -3481,6 +3481,295 @@ out:
 	return rv;
 }
 
+/**
+ * Create device with many partitions for stress testing
+ * Returns fd on success, -1 on error
+ */
+static int create_device_with_many_partitions(const char *filepath, int n_partitions)
+{
+	int									rv = -1;
+	int									fd = -1;
+	struct nvmeibt_disk_mbr				mbr;
+	struct nvmeibt_disk_gpt				main_gpt;
+	struct nvmeibt_disk_gpt				metadata_gpt;
+	union nvmeib_uuid					disk_uuid;
+	union nvmeib_uuid					metadata_disk_uuid;
+	union nvmeib_uuid					disk_metadata_partition_uuid;
+	uint64_t							n_disk_blocks = 500000;		/* ~2GB device (sparse - minimal disk usage) */
+	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+	uint64_t							data_partition_size = 50;		/* Each DATA partition is 50 blocks */
+	uint64_t							metadata_partition_size = 1500;	/* EXCELERO_METADATA needs ~1500 blocks for nested GPT */
+	uint64_t							current_pba;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition;
+	struct nvmeibt_disk_gpt_partition_entry			*metadata_partition;
+
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, "Main", sizeof(main_gpt.main_or_metadata));
+	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, "Metadata", sizeof(metadata_gpt.main_or_metadata));
+
+	fd = open(filepath, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0) {
+		return -1;
+	}
+
+	/* Initialize protective MBR */
+	nvmeibt_disk_metadata_init_pmbr(&mbr, n_disk_blocks, pblk_size);
+	if (nvmeibt_disk_metadata_write_mbr(NULL, fd, pblk_size, &mbr) < 0) {
+		goto out;
+	}
+
+	/* Initialize Main GPT */
+	disk_uuid.ll[0] = 0x1122334455667788ULL;
+	disk_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
+	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
+											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
+
+	/* Add n_partitions non-overlapping partitions */
+	/* First partition: EXCELERO_METADATA */
+	/* Remaining partitions: DATA segments */
+	current_pba = main_gpt.header.first_usable_pba;
+	for (int i = 0; i < n_partitions; i++) {
+		char partition_name[64];
+		union nvmeib_uuid part_uuid;
+		const union nvmeib_uuid *type_guid;
+		uint64_t part_size;
+
+		/* First partition needs to be much larger (contains nested Metadata GPT) */
+		part_size = (i == 0) ? metadata_partition_size : data_partition_size;
+
+		if (current_pba + part_size >= main_gpt.header.last_usable_pba) {
+			break;  /* Out of space */
+		}
+
+		snprintf(partition_name, sizeof(partition_name), "partition_%d", i);
+		part_uuid.ll[0] = 0xAABBCCDD00000000ULL | i;
+		part_uuid.ll[1] = 0x5566778899AABBCCULL;
+
+		/* First partition is EXCELERO_METADATA (contains nested GPT) */
+		/* Rest are DATA partitions (normal NVMesh segments) */
+		type_guid = (i == 0) ? &EXCELERO_METADATA_PARTITION_TYPE_GUID
+							 : &EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL;
+
+		if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
+													 type_guid,
+													 &part_uuid,
+													 current_pba,
+													 current_pba + part_size - 1,
+													 partition_name,
+													 strlen(partition_name))) {
+			goto out;
+		}
+
+		current_pba += part_size;
+	}
+
+	/* Write Main GPT */
+	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &main_gpt, false) < 0) {
+		goto out;
+	}
+
+	/* Initialize nested Metadata GPT */
+	metadata_disk_uuid.ll[0] = 0x2233445566778899ULL;
+	metadata_disk_uuid.ll[1] = 0xAABBCCDDEEFF0011ULL;
+
+	metadata_partition = &main_gpt.entries[0];		/* First partition for metadata */
+	nvmeibt_disk_metadata_init_gpt_structure(metadata_partition->pba_s,
+											 metadata_partition->pba_e,
+											 &metadata_gpt, pblk_size,
+											 MAX_NUM_GPT_ENTRIES, &metadata_disk_uuid);
+
+	/* Add disk_metadata partition */
+	disk_metadata_partition_uuid.ll[0] = 0xDD11223344556677ULL;
+	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
+
+	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
+												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &disk_metadata_partition_uuid,
+												 metadata_gpt.header.first_usable_pba,
+												 metadata_gpt.header.last_usable_pba,
+												 DISK_METADATA_PARTITION_NAME,
+												 strlen(DISK_METADATA_PARTITION_NAME))) {
+		goto out;
+	}
+
+	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &metadata_gpt, false) < 0) {
+		goto out;
+	}
+
+	/* Write disk_metadata structure */
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+	if (disk_md_partition) {
+		struct nvmeibt_disk_metadata disk_metadata;
+		char *dma_buffer = NULL;
+		int n_bytes_write;
+		uint64_t pbyte_s;
+
+		memset(&disk_metadata, 0, sizeof(disk_metadata));
+		disk_metadata.signature = DISK_METADATA_SIGNATURE;
+		disk_metadata.format_pblk_size = pblk_size;
+		disk_metadata.format_request_counter = 1;
+
+		/* Test serial ID */
+		nvmeibt_strlcpy(disk_metadata.native_serial_str, "TEST-SERIAL-STRESS", sizeof(disk_metadata.native_serial_str));
+		disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
+		disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
+
+		disk_metadata.crc32 = 0;
+		disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
+
+		pbyte_s = disk_md_partition->pba_s * pblk_size;
+		n_bytes_write = roundup(sizeof(disk_metadata), pblk_size);
+		dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_stress_disk_md, PAGE_SIZE, n_bytes_write);
+		memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
+
+		if (pwrite(fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
+			N_Ef(selftest_write_stress_disk_md_failed, "Failed to write disk_metadata to stress test device");
+			NNVMEIBT_BM_FREE(trace_selftest_stress_disk_md_free, dma_buffer);
+			goto out;
+		}
+
+		NNVMEIBT_BM_FREE(trace_selftest_stress_disk_md_free2, dma_buffer);
+	}
+
+	fsync(fd);
+	rv = fd;
+	fd = -1;
+
+out:
+	if (fd >= 0) {
+		close(fd);
+	}
+	return rv;
+}
+
+DEFINE_TEST(stress_large_gpt_single_modification)
+{
+	int							rv = -1;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_stress_large";
+	struct nvmeibt_disk_gpt		main_gpt;
+	int							fd = -1;
+	struct mm_json_elem			*json_root = NULL;
+	struct mm_json_elem			*main_gpt_json = NULL;
+	struct mm_json_elem			*entries = NULL;
+	char						partition_name_after[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+	int							n_partitions = 8000;	/* Stress test with near-maximum partitions */
+	int							target_partition = 4000;	/* Modify middle partition */
+
+	/* Step 1: Create device with many partitions */
+	fd = create_device_with_many_partitions(device_path, n_partitions);
+	if (fd < 0) {
+		TEST_FAIL("SETUP FAILED: Could not create device with %d partitions", n_partitions);
+		goto out;
+	}
+	close(fd);
+	fd = -1;
+
+	TEST_INFO("Created device with %d partitions", n_partitions);
+
+	/* Step 2: Export to JSON */
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("stress_large"));
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		goto out;
+	}
+
+	/* Step 3: Modify ONLY partition 50's name */
+	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("stress_large"));
+	if (!json_root) {
+		goto out;
+	}
+
+	/* Navigate to main_gpt_primary -> entries */
+	for (int i = 0; i < json_root->dict.len; i++) {
+		if (strcmp(json_root->dict.elements[i].key, "main_gpt_primary") == 0) {
+			main_gpt_json = json_root->dict.elements[i].value;
+			break;
+		}
+	}
+	if (!main_gpt_json) {
+		goto out;
+	}
+
+	for (int i = 0; i < main_gpt_json->dict.len; i++) {
+		if (strcmp(main_gpt_json->dict.elements[i].key, "entries") == 0) {
+			entries = main_gpt_json->dict.elements[i].value;
+			break;
+		}
+	}
+	if (!entries || entries->type != JSON_E_ARRAY || entries->array.len < target_partition) {
+		goto out;
+	}
+
+	/* Find and modify partition 50 */
+	for (int i = 0; i < entries->array.len; i++) {
+		struct mm_json_elem *entry = entries->array.elements[i];
+		int index = (int)json_get_dict_num(entry, "index", -1);
+
+		if (index == target_partition) {
+			json_set_dict_str(entry, "name", "partition_4000_MODIFIED");
+			TEST_INFO("Modified partition %d name to: partition_4000_MODIFIED", target_partition);
+			break;
+		}
+	}
+
+	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("stress_large")) < 0) {
+		goto out;
+	}
+	json_root = NULL;
+
+	/* Step 4: Apply with --write (triggers full entries array rewrite) */
+	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("stress_large"),
+				   "--write", "--yes");
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		goto out;
+	}
+
+	/* Step 5: Verify the change was applied */
+	fd = open(device_path, O_RDONLY);
+	if (fd < 0) {
+		goto out;
+	}
+
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+										  1, 500000 - 1, false) < 0) {
+		goto out;
+	}
+	close(fd);
+	fd = -1;
+
+	/* Verify target partition was modified */
+	if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(&main_gpt.entries[target_partition])) {
+		TEST_FAIL("Partition %d not in use", target_partition);
+		goto out;
+	}
+
+	char16_str_to_str(main_gpt.entries[target_partition].partition_name,
+					  GPT_MAX_PARTITION_NAME_LENGTH + 1, partition_name_after);
+	if (strcmp(partition_name_after, "partition_4000_MODIFIED") != 0) {
+		TEST_FAIL("Partition %d name not modified (got: %s)", target_partition, partition_name_after);
+		goto out;
+	}
+
+	TEST_SUCCEED("Verified: Single modification in large GPT (%d partitions) handled correctly", n_partitions);
+	TEST_INFO("Note: GPT spec requires rewriting entire entries array (~1MB for 8192 entries)");
+	TEST_INFO("Performance: Modifying 1 entry triggers 2MB write (primary + alternate)");
+	TEST_INFO("Device file is sparse - actual disk usage is minimal despite 2GB size");
+	rv = 0;
+
+out:
+	/* Cleanup */
+	if (fd >= 0) {
+		close(fd);
+	}
+	nvmeibt_mm_json_free_kv_tree(json_root);
+	unlink(TEST_JSON_PATH("stress_large"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
+	return rv;
+}
+
 DEFINE_TEST(o_direct_flags)
 {
 	int rv = -1;
