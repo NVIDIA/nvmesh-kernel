@@ -144,6 +144,16 @@ struct nvmeib_pet_variant{
 	uint64_t value;
 };
 
+static inline enum nvmeib_pet_store_type 
+__nvmeib_pet_optimize_store_type_if_zero(enum nvmeib_pet_store_type store_type, uint64_t value)
+{
+	if (value){
+		return store_type;
+	} 
+	return NVMEIB_PET_STORE_TYPE_U_BYTE; 
+	//probably we can optimize even futher, by adding special type, but this is too much work 
+}
+
 //64bit platform support only
 #define nvmeib_pet_get_store_type(value)															\
 ({																									\
@@ -202,9 +212,8 @@ struct nvmeib_pet_variant{
 	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), double), "double type is not supported"); 				\
 	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), char*), "char* type is not supported");				\
 	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), char const*), "char const* type is not supported");	\
-	__store_type;																										\
+	__nvmeib_pet_optimize_store_type_if_zero(__store_type, (uint64_t)value); 											\
 })
-
 
 #define nvmeib_pet_variant_make(arg)			\
 ({												\
