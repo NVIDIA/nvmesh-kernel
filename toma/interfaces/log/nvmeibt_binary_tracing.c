@@ -147,6 +147,9 @@ void nvmeibt_toggle_logging(void) {
 }
 
 void nvmeibt_join_all_trace_pollers(void) {
+	#ifdef TOMA_SIMULATOR_SANDBOX
+		{ extern void toma_unitest_notify_stop_traces(void); toma_unitest_notify_stop_traces(); }
+	#endif
 	if (long_poller == 0) {
 		fprintf(stderr, "long_poller=0, (previously closed?)\n");
 		return;

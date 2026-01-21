@@ -84,6 +84,7 @@ void syslog(int priority, const char *fmt, ...) {
 // rather than a random access operation like pread()/pwrite().
 #define OFFSET_NONE ((off_t) -1)
 
+static bool nvmeibt_toma_is_running_as_a_utility(void);
 /************************************* srvr ***********************************/
 struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
@@ -118,7 +119,7 @@ bool server_simu_has_next_msg_for_toma(void) {
 void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *me) {
 	BUG_ON(me->expecting_reply_cookie);				// Did not get a reply from Toma
 	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	if (me->n_srvr_msg_idx > 0) {
+	if (!nvmeibt_toma_is_running_as_a_utility()) {
 		BUG_ON(me->n_toma_replies_received <= 0);	// Coverage tests did not receive any reply from Toma
 	}
 }
@@ -325,6 +326,8 @@ struct t_sandbox_all {
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
 	} TSB_km_sock_pair;
 	char my_hostname[64];
+	bool is_running_as_a_utility;
+	bool can_use_bin_traces;
 } *sys;
 
 static ssize_t _socket_pair_wakeup_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -395,15 +398,17 @@ static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 	return n;
 }
 
-void t_sandbox_all_init(void) {
+void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
+	sys->is_running_as_a_utility = is_running_as_a_utility;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
 	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 }
+static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
 
 void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
@@ -689,7 +694,8 @@ static void socket_destroy(struct t_sandbox_sock *s) {
 	if (s->ref_cnt > 0)
 		return;
 	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
-	N_Df(sbd8465, "sandbox file: close path=@STR fd=@INT mode=@STR delete=@BOOL", s->addr.sun_path, s->fd, sbfd_get_open_mode(s), should_del);
+	if (sys->can_use_bin_traces)		// Some fd's are closed after binary traces were shut down
+		N_Df(sbd8465, "sandbox file: close path=@STR fd=@INT mode=@STR delete=@BOOL", s->addr.sun_path, s->fd, sbfd_get_open_mode(s), should_del);
 	if (s->f != NULL) {
 		fclose(s->f);
 	}
@@ -1191,9 +1197,12 @@ void toma_unitest_env_start(bool is_running_as_a_utility, int trace_debug_level)
 	free(pwd);
 	__verify_correct_dir();
 	atexit(toma_unitest_env_end);
-	t_sandbox_all_init();
+	t_sandbox_all_init(is_running_as_a_utility);
 }
 
+void toma_unitest_notify_stop_traces(void) {
+	sys->can_use_bin_traces = false;
+}
 /************************************* logging ********************************/
 int init_signal_handling(const char *exe_name) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
