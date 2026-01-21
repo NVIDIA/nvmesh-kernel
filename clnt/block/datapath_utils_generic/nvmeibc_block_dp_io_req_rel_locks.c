@@ -121,13 +121,25 @@ static void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, 
 		return;
 	}
 
-	NVMEIBC_IO_PET_MSG_NORM(&o->journal,
-							"lock.request(sgmnt=%hhu, address=0x%llx, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>))",
-							numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
-							lock->address,
-							numeric_downcast(u8, lock->type),
-							numeric_downcast(u32, rdma_comp->compare),
-							numeric_downcast(u32, rdma_comp->exchange));
+	if (rdma_comp->opr == NVMEIBC_LOCK_READ){
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+								"lock.request(sgmnt=%hhu, address=0x%llx, opr=READ, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>)",
+								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+								lock->address,
+								numeric_downcast(u8, lock->type),
+								numeric_downcast(u8, rdma_comp->code));
+
+	} else {
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+								"lock.request(sgmnt=%hhu, address=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>))",
+								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+								lock->address,
+								numeric_downcast(u8, rdma_comp->opr),
+								numeric_downcast(u8, lock->type),
+								numeric_downcast(u8, rdma_comp->code),
+								numeric_downcast(u32, rdma_comp->compare),
+								numeric_downcast(u32, rdma_comp->exchange));
+	}
 }
 
 __attribute__((nonnull(2)))
@@ -140,19 +152,15 @@ static void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o,
 		return;
 	}
 
-	//I decided to dump sgmnt, address, type rdma_comp(compare, exchange) - mainly because these data was in used by another layer
-	//repeating the data will not hurt;
-	//if needed, we may just print the lock index or (segment + address)
+	//we don't call this function on lock release - mainly because the operation already does not exist
+	//so, rdma_comp->lock.bi should contain a legal value
 	NVMEIBC_IO_PET_MSG(&o->journal,
-					   "lock.response(sgmnt=%hhu, address=0x%llx, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>, status=%hhu<enum nvmeibc_block_lock_status>, contending=0x%llx<union nvmeib_lock_id>))",
+						"lock.response(sgmnt=%hhu, rdma_comp(lock_status=%hhu<enum nvmeibc_block_lock_status>, blkset_info=0x%x<union nvmeib_blkset_info>, contending=0x%x<union nvmeib_lock_id>))",
 						severity,
 						numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
-						lock->address,
-						numeric_downcast(u8, lock->type),
-						numeric_downcast(u32, rdma_comp->compare),
-						numeric_downcast(u32, rdma_comp->exchange),
 						numeric_downcast(u8, rdma_comp->lock_status),
-						get_contending_id(rdma_comp));
+						numeric_downcast(u32, rdma_comp->lock.bi),
+						numeric_downcast(u32, get_contending_id(rdma_comp)));
 }
 
 void dp_locks_free_all(struct nvmeibc_cmd_lock *locks)
