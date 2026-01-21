@@ -250,7 +250,7 @@ struct t_sandbox_sock_tbl {
 		int type;
 		int proto;
 		u32 len;
-		int ref_cnt;								// Same fd' is sometimes use multiple times by the simulator. accept() / pipe(). Todo, clean this
+		int ref_cnt;								// Same fd' is sometimes use multiple times by the simulator. accept(). Todo, clean this
 		struct sockaddr_un addr;
 		struct TSB_sock_otherside *other_side;		// Here sandbox connects to socket from the other side
 	} socks[32];			// Max amount of sockets used by toma
@@ -286,8 +286,14 @@ struct t_sandbox_all {
 		struct TSB_sock_otherside o;
 	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
 	struct TSB_wakeup_pipe {
-		struct TSB_sock_otherside o;
-		int fds[2];
+		struct TSB_sock_otherside o[2];				// 1 read, 1 write file descriptor
+		pthread_mutex_t mutex;
+		#define TSB_WU_PIPE_QUEUE_SIZE 32			// Simple fixed-size circular buffer queue of wakeup messages
+		#define TSB_WU_PIPE_MSG_SIZE 16				// Toma write wakeup messages of exactly 16[b]
+		struct {
+			char data[TSB_WU_PIPE_MSG_SIZE];
+		} queue[TSB_WU_PIPE_QUEUE_SIZE];			// Wakeup message from toma other threads to toma main thread
+		int queue_head, queue_tail, queue_count;	// Next position to dequeue from, Next position to enqueue to, Number of messages in queue
 	} TSB_wake_pip;
 	struct globa_epoll {
 		struct TSB_sock_otherside o;
@@ -349,11 +355,52 @@ static bool _socket_pair_should_wakeup(void) {
 	return n > 0;
 }
 
+static bool _wakeup_pipe_should_wakeup(void) {
+	struct TSB_wakeup_pipe *w = &sys->TSB_wake_pip;
+	bool rv;
+	pthread_mutex_lock(&w->mutex);
+	rv = (w->queue_count != 0);
+	pthread_mutex_unlock(&w->mutex);
+	return rv;
+}
+
+static ssize_t _wakeup_pipe_wakeup_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_wakeup_pipe *w = &sys->TSB_wake_pip;
+	int n_wake_ups;
+	pthread_mutex_lock(&w->mutex);
+	BUG_ON((w->o[1].sock->fd != fd) || (offset != 0) || (flags != 0) || (w->queue_count >= TSB_WU_PIPE_QUEUE_SIZE) || (n != TSB_WU_PIPE_MSG_SIZE));
+	memcpy(w->queue[w->queue_tail].data, buf, n);
+	w->queue_tail = (w->queue_tail + 1) % TSB_WU_PIPE_QUEUE_SIZE;
+	n_wake_ups = ++w->queue_count;
+	pthread_mutex_unlock(&w->mutex);
+	N_Tf(__AUTOID__, "n_wake_ups=@INT", n_wake_ups);
+	return n;
+}
+
+static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offset, int flags) {
+	struct TSB_wakeup_pipe *w = &sys->TSB_wake_pip;
+	int n_wake_ups = 0;
+	pthread_mutex_lock(&w->mutex);
+	BUG_ON((w->o[0].sock->fd != fd) || (offset != OFFSET_NONE) || (flags != 0) || (w->queue_count < 0) || (n != TSB_WU_PIPE_MSG_SIZE));
+	if (w->queue_count > 0) {
+		memcpy(buf, w->queue[w->queue_head].data, n);
+		w->queue_head = (w->queue_head + 1) % TSB_WU_PIPE_QUEUE_SIZE;
+		n_wake_ups = --w->queue_count;
+	} else {
+		n = -1;			// No data
+		errno = EAGAIN;
+	}
+	pthread_mutex_unlock(&w->mutex);
+	N_Tf(__AUTOID__, "n_wake_ups=@INT", n_wake_ups);
+	return n;
+}
+
 void t_sandbox_all_init(void) {
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
 	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
+	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 }
@@ -361,6 +408,7 @@ void t_sandbox_all_init(void) {
 void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
+	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
 	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	if (sys->s_req_simu.n_srvr_msg_idx > 0) {
 		BUG_ON(sys->TSB_netlink.n_recv_msgs <= 0);
@@ -399,9 +447,6 @@ static struct TSB_sock_otherside* TSB_socket_find_other_side_by_fd(int fd) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
 	if (s)
 		return s->other_side;
-	if (sys->TSB_wake_pip.fds[0] == fd) {
-		return &sys->TSB_wake_pip.o;
-	}
 	fprintf(stderr, "sandbox: no such fd %d\n", fd); BUG_ON(true);
 	return NULL; // not reached
 }
@@ -564,9 +609,15 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		sys->TSB_rpc.o.send = _rpc_accept;
 	} else if (strstr(s->addr.sun_path, "epoll")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_epoll.o;
-	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o;
-		s->other_side->has_data = _recv_always_has_data;			// Todo: properly implement pipe, without using a real pipe!
+	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {
+		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o[0];
+		s->other_side->recv = _wakeup_pipe_wakeup_recv;
+		s->other_side->send = _send_illegal_trap;
+		s->other_side->has_data = _wakeup_pipe_should_wakeup;	// o[0] Toma main thread read wakeups messages from other threads. Never writes
+	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair1")) {
+		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o[1];
+		s->other_side->send = _wakeup_pipe_wakeup_send;			// o[1] Toma aux thread write to wakeup toma main thread. Never reads
+		s->other_side->recv = _recv_illegal_trap;
 	} else if (strstr(s->addr.sun_path, "server_events")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_srvr2toma.o;
 		s->other_side->recv = server_simu_get_next_msg_for_toma;
@@ -959,82 +1010,43 @@ int override_open(const char *path, int flags, ... /*int mode*/) {
 }
 
 int override_close(int fd) {
-	int *pipe_fds = sys->TSB_wake_pip.fds;
-	if (pipe_fds[0] == fd) {					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
-		close(fd);
-		pipe_fds[0] = -1;
-		socket_destroy(sys->TSB_wake_pip.o.sock);
-	} else if (pipe_fds[1] == fd) {
-		close(fd);
-		pipe_fds[1] = -1;
-		socket_destroy(sys->TSB_wake_pip.o.sock);
-	} else {
-		struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
-		if (s) {
-			socket_destroy(s);
-		} else {
-			N_Df(ovc5786, "close on untracked fd=@INT", fd);
-		}
-	}
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	socket_destroy(s);
 	return 0;
 }
 
 int override_fcntl(int fd, int cmd, ...) {
-	const int *pipe_fds = sys->TSB_wake_pip.fds;
-	BUG_ON(fd < 3);
-	if ((fd == pipe_fds[0]) || (fd == pipe_fds[1])) {					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
-		int value = 0;
-		va_list ap;
-		va_start(ap, cmd);
-		value = va_arg(ap, int);
-		va_end(ap);
-		return fcntl(fd, cmd, value);
-	} else {
-		struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-		(void)s; (void)cmd;
-		return 0;
-	}
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	/*int value = 0;
+	va_list ap;
+	va_start(ap, cmd);
+	value = va_arg(ap, int);
+	va_end(ap);*/
+	(void)s; (void)cmd;
+	return 0;
 }
 
 int override_pipe(int fds[2]) {
 	struct sockaddr_un addr;
-	const int pipe_rv = pipe(fds);
-	int fd;
-	BUG_ON(pipe_rv != 0);
-	sys->TSB_wake_pip.fds[0] = fds[0];
-	sys->TSB_wake_pip.fds[1] = fds[1];
-	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "wakeup_pipe_pair{%d,%d}", fds[0], fds[1]);
-	fd = __connect(socket(0,0,0), &addr, 16);
-	accept(fd, NULL, NULL);	// Increase refcount because this fd represents pair of fds
+	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "wakeup_pipe_pair0");
+	fds[0] = __connect(socket(0,0,0), &addr, 16);
+	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "wakeup_pipe_pair1");
+	fds[1] = __connect(socket(0,0,0), &addr, 16);
 	return 0;
 }
 
-static bool __is_pipe(int fd) {
-	const int *pipe_fds = sys->TSB_wake_pip.fds;
-	return ((fd == pipe_fds[0]) || (fd == pipe_fds[1]));					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
-}
-
 ssize_t override_read(int fd, void *buf, size_t nbytes) {
-	BUG_ON(fd < 3);
-	if (__is_pipe(fd))					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
-		return read(fd, buf, nbytes);		// Backward compatibility for pipe
-	{
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->recv(fd, buf, nbytes, OFFSET_NONE, 0);
 	return read(fd, buf, nbytes);		// Backward compatibility for fd's without backend simulator
-	}
 }
 
 ssize_t override_write(int fd, const void *buf, size_t count) {
-	if (__is_pipe(fd))
-		return write(fd, buf, count);
-	{
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
-	if (s->other_side)	// Fix me, missing pipe simulator
+	if (s->other_side)
 		return s->other_side->send(fd, buf, count, 0, 0);
 	return write(fd, buf, count);	// Pass through to real file.
-	}
 }
 
 ssize_t override_pread(int fd,       void *buf, size_t count, off_t offset) {
