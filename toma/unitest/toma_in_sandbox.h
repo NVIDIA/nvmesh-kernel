@@ -168,7 +168,7 @@ static inline int nvmeibt_nm_del_remote_nic(struct nvmeibt_nm_local_node *ln, st
 #define nvmeibt_nm_cancel_req_node(...)
 static inline int  nvmeibt_nm_queue_srm_req(           struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *remote_node, struct nvmeibt_msg_request *req) { (void)ln; (void)remote_node; (void)req; return 0; }
 static inline bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *remote_node) { (void)ln; (void)remote_node; return true; }
-#define nvmeibt_nm_get_fd(...) (-1)
+#define nvmeibt_nm_get_fd(...) (-555)
 #define nvmeibt_nm_rsrm_resend_acks(...)
 #define nvmeibt_nm_rsrm_faults_handle_fifo_com(...)
 #define nvmeibt_nm_rsrm_send_timer(...) (0)

@@ -95,12 +95,24 @@ struct TSB_server_toma_status_req_simu {
 	int n_toma_replies_received;
 	int expecting_reply_cookie;			// If sent a message to toma and expecting a reply, store it
 	int max_reply_length_bytes;
+	int n_msgs_to_registrants;
+	enum nvmeibs_toma_server_msg_type msg_q[16];
 };
 
 struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void);
 
 void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *me) {
 	me->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
+	memset(me->msg_q, 0, sizeof(me->msg_q));
+	me->msg_q[3] = NVMEIBS_TOMA_TRIGGER_JGC;		// Todo: Unitest environment should instruct this simulator to send specific messages
+	me->msg_q[5] = NVMEIBS_TOMA_WRITE_STATUS_REQ;
+	me->msg_q[7] = NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE;
+}
+
+bool server_simu_has_next_msg_for_toma(void) {
+	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	me->n_srvr_msg_idx++;
+	return (me->n_srvr_msg_idx < 16) && (me->msg_q[me->n_srvr_msg_idx] != 0);
 }
 
 void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *me) {
@@ -114,17 +126,19 @@ void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_s
 ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
-	(void)fd; (void)offset; (void)flags;
+	enum nvmeibs_toma_server_msg_type msg_type;
+	(void)fd; (void)flags;
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON(n <= sizeof(struct nvmeibs_toma_server_proc_buf));
-	me->n_srvr_msg_idx++;
-	if (me->n_srvr_msg_idx == 3) {
+	msg_type = me->msg_q[me->n_srvr_msg_idx];
+	BUG_ON(msg_type == 0);			// Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
+	if (msg_type == NVMEIBS_TOMA_TRIGGER_JGC) {
 		struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
 		msg_buf->type = NVMEIBS_TOMA_TRIGGER_JGC;
 		strcpy(pl->disk_segment_urn_uuid_str, "todo_disk_seg");
 		strcpy(pl->disk_id_str, "todo_disk_id");
 		// Currently not expecting reply.
-	} else if (me->n_srvr_msg_idx == 5) {
+	} else if (msg_type == NVMEIBS_TOMA_WRITE_STATUS_REQ) {
 		struct nvmeibs_msg_s2t_toma_status_req *pl = &msg_buf->status_req_msg;
 		BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
 		me->expecting_reply_cookie = 0x1000 + me->n_srvr_msg_idx;
@@ -134,11 +148,15 @@ ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t off
 		pl->handle_req = me->expecting_reply_cookie;
 		strcpy(pl->fname, "placeholder.tmp");		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
 		pl->max_length = me->max_reply_length_bytes;
+	} else if (msg_type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {
+		msg_buf->type = NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE; 		// Just meaningless message
+	} else {
+		BUG_ON(true); // BUG epoll simulator wrongly told toma that there is a msg from server but there isn't
 	}
 	return sizeof(struct nvmeibs_toma_server_proc_buf);
 }
 
-static ssize_t _srvr_simu_from_toma_recv_msg(int fd, const void *buf, size_t n, off_t offset, int flags) {
+static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
 	const struct nvmeibs_toma_server_proc_buf *m = buf;
 	BUG_ON((fd < 2) || (n < sizeof(*m)));
@@ -181,6 +199,7 @@ static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags)
 	(void)buf; (void)n; (void)offset; (void)flags;
 	return 0;
 }
+static bool _recv_always_has_data(void) { return true; }
 
 static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags) {
 	static int n_rpcs_sent = 0;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
@@ -188,7 +207,6 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags)
 		"simulate dump-clnt-hash 20\n", "simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n", "status\n", "status server_csvs\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
 	const bool only_checking = (flags & MSG_PEEK);
 	(void)fd;
-	(void)offset;
 	BUG_ON(offset != OFFSET_NONE);
 	if (n_rpcs_sent < (int)ARRAY_SIZE(cmds)) {
 		const char* cmd = cmds[n_rpcs_sent];
@@ -218,6 +236,7 @@ struct TSB_sock_otherside {		// Every implementation must derive from this sub c
 	// When offset != OFFSET_NONE (i.e. > 0) this indicates a pread()/pwrite() operation.
 	ssize_t (*send)(int fd, const void *buf, size_t n, off_t offset, int flags);	// Toma sends data to simulator
 	ssize_t (*recv)(int fd,       void *buf, size_t n, off_t offset, int flags);	// Toma receives data from simulator
+	bool    (*has_data)(void);									// epoll()/select() on this socket/file-descriptor
 	struct t_sandbox_sock *sock;								// Pointer to the socket structure which uses me
 };
 
@@ -372,10 +391,21 @@ static struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
 	if (s)
 		return s;
-	fprintf(stderr, "sandbox: no such fd %d\n", fd);
-	abort();
+	fprintf(stderr, "sandbox: no such fd %d\n", fd); BUG_ON(true);
 	return NULL; // not reached
 }
+
+static struct TSB_sock_otherside* TSB_socket_find_other_side_by_fd(int fd) {
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
+	if (s)
+		return s->other_side;
+	if (sys->TSB_wake_pip.fds[0] == fd) {
+		return &sys->TSB_wake_pip.o;
+	}
+	fprintf(stderr, "sandbox: no such fd %d\n", fd); BUG_ON(true);
+	return NULL; // not reached
+}
+
 
 int ioctl(int fd, unsigned long int req, ...) {
 	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd_opt(fd);
@@ -515,15 +545,18 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		s->other_side->recv = _netlink_reply_to_toma;
 	} else if (strstr(s->addr.sun_path, "signal")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_sig.o;
+		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
 	} else if (strstr(s->addr.sun_path, "sys_log")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_syslog.o;
 	} else if (strstr(s->addr.sun_path, "srm_fault")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_fault.o;
+		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
 	} else if (strstr(s->addr.sun_path, "srm_timer")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_timer.o;
 	} else if (strstr(s->addr.sun_path, "udev_monitor")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_udev.o;
 		sys->TSB_udev.o.recv = _recv_empty;
+		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
 	} else if (strstr(s->addr.sun_path, "nvmesh/toma_rpc")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_rpc.o;
 		sys->TSB_rpc.o.recv = _rpc_inject;
@@ -532,13 +565,15 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_epoll.o;
 	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o;
+		s->other_side->has_data = _recv_always_has_data;			// Todo: properly implement pipe, without using a real pipe!
 	} else if (strstr(s->addr.sun_path, "server_events")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_srvr2toma.o;
 		s->other_side->recv = server_simu_get_next_msg_for_toma;
 		s->other_side->send = _send_illegal_trap;				// Via this fd server sends msgs to Tom, Toma never replies back
+		s->other_side->has_data = server_simu_has_next_msg_for_toma;
 	} else if (strstr(s->addr.sun_path, "toma_server")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2srvr.o;
-		s->other_side->send = _srvr_simu_from_toma_recv_msg;
+		s->other_side->send = _srvr_simu_nvmeibs_toma_server_proc_recv;
 		s->other_side->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
 	} else if (strstr(s->addr.sun_path, "toma_clients")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
@@ -973,47 +1008,46 @@ int override_pipe(int fds[2]) {
 	return 0;
 }
 
-ssize_t override_read(int fd, void *buf, size_t nbytes) {
-	struct t_sandbox_sock *s;
+static bool __is_pipe(int fd) {
 	const int *pipe_fds = sys->TSB_wake_pip.fds;
+	return ((fd == pipe_fds[0]) || (fd == pipe_fds[1]));					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
+}
+
+ssize_t override_read(int fd, void *buf, size_t nbytes) {
 	BUG_ON(fd < 3);
-	if ((fd == pipe_fds[0]) || (fd == pipe_fds[1])) {					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
+	if (__is_pipe(fd))					// Daniel, Todo, encapsulate pipe() same as others, so no special if, for this case
 		return read(fd, buf, nbytes);		// Backward compatibility for pipe
-	}
-	s = TSB_socket_find_by_fd(fd);
-	if (s->other_side && s->other_side->recv) {
+	{
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	if (s->other_side)
 		return s->other_side->recv(fd, buf, nbytes, OFFSET_NONE, 0);
-	} else {
-		return read(fd, buf, nbytes);		// Backward compatibility for fd's without backend simulator
+	return read(fd, buf, nbytes);		// Backward compatibility for fd's without backend simulator
 	}
 }
 
-ssize_t override_write( int fd, const void *buf, size_t count) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
-	if (s && s->other_side && s->other_side->recv)
+ssize_t override_write(int fd, const void *buf, size_t count) {
+	if (__is_pipe(fd))
+		return write(fd, buf, count);
+	{
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	if (s->other_side)	// Fix me, missing pipe simulator
 		return s->other_side->send(fd, buf, count, 0, 0);
-	// Pass through to real file.
-	return write(fd, buf, count);
+	return write(fd, buf, count);	// Pass through to real file.
+	}
 }
 
-ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset) {
-	struct t_sandbox_sock *s;
-	s = TSB_socket_find_by_fd(fd);
-	if (s->other_side && s->other_side->recv) {
+ssize_t override_pread(int fd,       void *buf, size_t count, off_t offset) {
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	if (s->other_side)
 		return s->other_side->recv(fd, buf, count, offset, 0);
-	} else {
-		return pread(fd, buf, count, offset);
-	}
+	return pread(fd, buf, count, offset);	// Pass through to real file.
 }
 
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
-	struct t_sandbox_sock *s;
-	s = TSB_socket_find_by_fd(fd);
-	if (s->other_side && s->other_side->send) {
+	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	if (s->other_side)
 		return s->other_side->send(fd, buf, count, offset, 0);
-	} else {
-		return pwrite(fd, buf, count, offset);
-	}
+	return pwrite(fd, buf, count, offset);	// Pass through to real file.
 }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
@@ -1086,16 +1120,23 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	struct globa_epoll *ep = &sys->TSB_epoll;
 	static uint64_t loop_idx = 0;
 	static bool is_shutting_down = false;
-	int i;
+	int i, n_events;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
 	nanosleep(&(struct timespec){0, 100*1000*1000}, NULL); // 100ms
-	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s\n", loop_idx, is_shutting_down ? " (shutting down)" : ""); loop_idx++;
-	for (i = 0; i < ep->n_fds; i++) {
-		evs[i] = ep->evs[i];	// As if each and every fd in which toma is sleeping has an event.
+	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
+		const int fd = ep->evs[i].__fd;
+		if (fd != nvmeibt_nm_get_fd()) {	// Todo: Solve this hack!
+			const struct TSB_sock_otherside *o = TSB_socket_find_other_side_by_fd(fd);
+			if (o->has_data())
+				evs[n_events++] = ep->evs[i];
+		} else {
+			evs[n_events++] = ep->evs[i];
+		}
 	}
+	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s, n_events=%d\n", loop_idx, is_shutting_down ? " (dying)" : "", n_events); loop_idx++;
 	if (loop_idx != 10) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
-		return i;
+		return n_events;
 	} else {
 		N_IMf(sbexit001, "sandbox shutting down Toma app");
 		is_shutting_down = true;
