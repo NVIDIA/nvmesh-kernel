@@ -63,9 +63,9 @@ struct timespec {
 	long tv_nsec;
 };
 
-static inline int getnstimeofday(struct timespec *ts) {
+static inline int getnstimeofday_boot(struct timespec *ts) {
 	struct timespec tmp;
-	clock_gettime(CLOCK_REALTIME, &tmp);
+	clock_gettime(CLOCK_BOOTTIME, &tmp);
 	ts->tv_sec = tmp.tv_sec;
 	ts->tv_nsec = tmp.tv_nsec;
 	return 0;
@@ -635,31 +635,31 @@ static int benchmark_operations(void) {
 	const int N = 100000;
 	
 	/* Benchmark adds */
-	getnstimeofday(&start);
+	getnstimeofday_boot(&start);
 	for (int i = 0; i < N; i++) {
 		nvmeib_hash_add_uint32_t(ht, i, (void *)(long)i);
 	}
-	getnstimeofday(&end);
+	getnstimeofday_boot(&end);
 	long long add_time = timespec_diff_ns(end, start);
 	fprintf(stdout, "Add %d entries: %lld ns (%.2f ns/op)\n", 
 		N, add_time, (double)add_time / N);
 	
 	/* Benchmark searches */
-	getnstimeofday(&start);
+	getnstimeofday_boot(&start);
 	for (int i = 0; i < N; i++) {
 		nvmeib_hash_search_uint32_t(ht, i);
 	}
-	getnstimeofday(&end);
+	getnstimeofday_boot(&end);
 	long long search_time = timespec_diff_ns(end, start);
 	fprintf(stdout, "Search %d entries: %lld ns (%.2f ns/op)\n", 
 		N, search_time, (double)search_time / N);
 	
 	/* Benchmark deletes */
-	getnstimeofday(&start);
+	getnstimeofday_boot(&start);
 	for (int i = 0; i < N; i++) {
 		nvmeib_hash_delete_uint32_t(ht, i);
 	}
-	getnstimeofday(&end);
+	getnstimeofday_boot(&end);
 	long long delete_time = timespec_diff_ns(end, start);
 	fprintf(stdout, "Delete %d entries: %lld ns (%.2f ns/op)\n", 
 		N, delete_time, (double)delete_time / N);
