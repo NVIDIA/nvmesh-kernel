@@ -15,6 +15,8 @@
 #define SANDBOX_PRINT_TMP(fmt, ...)  fprintf(stderr, "SANDBOX: " COL_PURPL fmt COL_RESET, __VA_ARGS__)
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
+#include <pthread.h>
+
 #include <stdarg.h>				// va_list
 void syslog(int priority, const char *fmt, ...) {
 	va_list ap;
@@ -245,6 +247,7 @@ struct TSB_sock_otherside {		// Every implementation must derive from this sub c
 struct t_sandbox_sock_tbl {
 	int n_socks;
 	int debug_offset;		// Prevent confusion between real descriptors and emulated
+	pthread_mutex_t mutex;
 	struct t_sandbox_sock {
 		FILE *f;
 		int fd;				// File descriptor associated with the socket
@@ -404,6 +407,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
+	pthread_mutex_init(&sys->TS.mutex, NULL);
 	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
@@ -413,6 +417,7 @@ static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_
 
 void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
+	pthread_mutex_destroy(&sys->TS.mutex);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
 	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
@@ -1004,21 +1009,31 @@ int listen(int fd, int n) {
 }
 
 int accept(int fd, struct sockaddr* addr, unsigned int *addr_len) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct t_sandbox_sock *s;
+	pthread_mutex_lock(&sys->TS.mutex);
+	s = TSB_socket_find_by_fd(fd);
 	s->ref_cnt++;
+	pthread_mutex_unlock(&sys->TS.mutex);
 	(void)addr;  (void)addr_len;
 	return fd;
 }
 
 int override_open(const char *path, int flags, ... /*int mode*/) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
+	int ret;
 	sprintf(addr.sun_path, "%s", path);
-	return __connect(socket(0, 'f', flags), &addr, 0);
+	pthread_mutex_lock(&sys->TS.mutex);
+	ret = __connect(socket(0, 'f', flags), &addr, 0);
+	pthread_mutex_unlock(&sys->TS.mutex);
+	return ret;
 }
 
 int override_close(int fd) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct t_sandbox_sock *s;
+	pthread_mutex_lock(&sys->TS.mutex);
+	s = TSB_socket_find_by_fd(fd);
 	socket_destroy(s);
+	pthread_mutex_unlock(&sys->TS.mutex);
 	return 0;
 }
 
