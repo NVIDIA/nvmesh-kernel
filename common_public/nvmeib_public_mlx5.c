@@ -51,24 +51,6 @@ enum {
 	MLX5_OPCODE_EXT_ATOMICS_64BIT = 0x09,
 };
 
-static int
-nvmeib_public_mlx5_alloc_n_map(struct nvmeib_alloc_n_map *mem)
-{
-	return mlx5_alloc_n_map(mem);
-}
-
-static int
-nvmeib_public_mlx5_unmapn_n_free(struct nvmeib_alloc_n_map *mem)
-{
-	return mlx5_unmapn_n_free(mem);
-}
-
-static int
-nvmeib_public_mlx5_map_mr(struct ib_device *ibdev, struct ib_mr *mr,
-	phys_addr_t *pages, int n_pages)
-{
-	return mlx5_map_mr(ibdev, mr, pages, n_pages);
-}
 
 static int
 nvmeib_public_mlx5_query_device(struct ib_device *ibdev,
@@ -545,30 +527,26 @@ static int nvmeib_public_mlx5_post_send_atomic(struct ib_qp *ibqp,
 	return rv;
 }
 
-static int nvmeib_public_mlx5_peek_cq(struct ib_cq *ibcq, int max)
-{
-	return mlx5_peek_cq(ibcq, max);
-}
 
 #else
 # warning MLX5 Driver not supported by this OFED/Kernel version
 
 static int
-nvmeib_public_mlx5_alloc_n_map(struct nvmeib_alloc_n_map *mem, struct pages **pages, unsigned int n_pages)
+mlx5_alloc_n_map(struct nvmeib_alloc_n_map *mem)
 {
 	printk(KERN_ERR "mlx5 devices not supported by this kernel");
 	return -ENOSYS;
 }
 
 static int
-nvmeib_public_mlx5_unmapn_n_free(struct nvmeib_alloc_n_map *mem)
+mlx5_unmapn_n_free(struct nvmeib_alloc_n_map *mem)
 {
 	printk(KERN_ERR "mlx5 devices not supported by this kernel");
 	return -ENOSYS;
 }
 
 static int
-nvmeib_public_mlx5_map_mr(struct ib_device *ibdev, struct ib_mr *mr,
+mlx5_map_mr(struct ib_device *ibdev, struct ib_mr *mr,
 	phys_addr_t *pages, int n_pages)
 {
 	printk(KERN_ERR "mlx5 devices not supported by this kernel");
@@ -590,7 +568,7 @@ static int nvmeib_public_mlx5_post_send_atomic(struct ib_qp *ibqp,
 	return -ENOSYS;
 }
 
-static int nvmeib_public_mlx5_peek_cq(struct ib_cq *ibcq, int max)
+static int mlx5_peek_cq(struct ib_cq *ibcq, int max)
 {
 	printk(KERN_ERR "mlx5 devices not supported by this kernel");
 	return -ENOSYS;
@@ -600,28 +578,28 @@ static int nvmeib_public_mlx5_peek_cq(struct ib_cq *ibcq, int max)
 
 static struct nvmeib_device_public_ops mlx5 = {
 	.module = THIS_MODULE,
-	.alloc_n_map = nvmeib_public_mlx5_alloc_n_map,
-	.unmapn_n_free = nvmeib_public_mlx5_unmapn_n_free,
-	.map_mr = nvmeib_public_mlx5_map_mr,
+	.alloc_n_map = mlx5_alloc_n_map,
+	.unmapn_n_free = mlx5_unmapn_n_free,
+	.map_mr = mlx5_map_mr,
 
 	.query_device = nvmeib_public_mlx5_query_device,
 	.post_send_atomic = nvmeib_public_mlx5_post_send_atomic,
 	.set_debug_level = nvmeib_public_mlx5_set_debug_level,
-	.peek_cq = nvmeib_public_mlx5_peek_cq,
+	.peek_cq = mlx5_peek_cq,
 	.create_rdda_qp = ib_create_qp,
 	.destroy_rdda_qp = ib_destroy_qp,
 };
 
 static struct nvmeib_device_public_ops mlx5_odp = {
 	.module = THIS_MODULE,
-	.alloc_n_map = nvmeib_public_mlx5p_alloc_n_map,
-	.unmapn_n_free = nvmeib_public_mlx5p_unmapn_n_free,
-	.map_mr = nvmeib_public_mlx5p_map_mr,
+	.alloc_n_map = mlx5_alloc_n_map,
+	.unmapn_n_free = mlx5_unmapn_n_free,
+	.map_mr = mlx5_map_mr,
 
 	.query_device = nvmeib_public_mlx5_query_device,
 	.post_send_atomic = nvmeib_public_mlx5_post_send_atomic,
 	.set_debug_level = nvmeib_public_mlx5_set_debug_level,
-	.peek_cq = nvmeib_public_mlx5_peek_cq,
+	.peek_cq = mlx5_peek_cq,
 	.create_rdda_qp = ib_create_qp,
 	.destroy_rdda_qp = ib_destroy_qp,
 };
