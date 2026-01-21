@@ -493,7 +493,7 @@ done:
 
 /********************************* Netlink mock *******************************/
 // Forward declarations for netlink queue helpers
-static bool TSB_netlink_queue_is_empty(void);
+static bool TSB_netlink_queue_has_something(void);
 static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
@@ -543,6 +543,7 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_netlink.o;
 		s->other_side->send = _netlink_recv_msg_from_toma;
 		s->other_side->recv = _netlink_reply_to_toma;
+		s->other_side->has_data = TSB_netlink_queue_has_something;
 	} else if (strstr(s->addr.sun_path, "signal")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_sig.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
@@ -587,6 +588,7 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[1];
 		s->other_side->send = _send_illegal_trap;				// o[1] ServerLib reads from it to wakeup. Never writes
 		s->other_side->recv = _socket_pair_wakeup_recv;
+		s->other_side->has_data = _socket_pair_should_wakeup;
 	} else {
 		return;
 	}
@@ -697,13 +699,12 @@ int socketpair(int __domain, int __type, int __protocol, int fds[2]) {
 	return 0;
 }
 
-// Netlink mock queue helpers (thread-safe)
-static bool TSB_netlink_queue_is_empty(void) {
-	bool empty;
+static bool TSB_netlink_queue_has_something(void) {		// Netlink mock queue helpers (thread-safe)
+	bool rv;
 	pthread_mutex_lock(&sys->TSB_netlink.mutex);
-	empty = (sys->TSB_netlink.queue_count == 0);
+	rv = (sys->TSB_netlink.queue_count != 0);
 	pthread_mutex_unlock(&sys->TSB_netlink.mutex);
-	return empty;
+	return rv;
 }
 
 static void TSB_netlink_queue_enqueue(const void *data, size_t len) {
@@ -1059,7 +1060,7 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	for ((void)timeout; true; msleep(100)) { // Throttled km_comm select, todo, use timeout
 	if (FD_ISSET(nl_fd, readfds)) {	// Check if netlink socket is in the read set and we have queued messages
 		static int n_extended_msgs_to_emulate = 1;
-		const bool has_msg_for_toma = !TSB_netlink_queue_is_empty();
+		const bool has_msg_for_toma = sys->TSB_netlink.o.has_data();
 		const bool emulate_timeout = (sys->TSB_netlink.n_recv_msgs == 1);
 		const bool emulate_extended_msg = (n_extended_msgs_to_emulate > 0) && !has_msg_for_toma && !emulate_timeout;
 		if (has_msg_for_toma || emulate_timeout || emulate_extended_msg) {				// Return immediately - netlink socket is ready to read
@@ -1080,7 +1081,7 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 		}
 	}
 		if (FD_ISSET(w->o[1].sock->fd, readfds)) { 	// Check if wakeup due to toma sending message
-			if (_socket_pair_should_wakeup()) {		// Toma sends message via netlink, wakeup the server communication thread
+			if (w->o[1].has_data()) {		// Toma sends message via netlink, wakeup the server communication thread
 				FD_ZERO(readfds); FD_ZERO(writefds); FD_ZERO(exceptfds);
 				FD_SET(w->o[1].sock->fd, readfds);
 				return 1;
