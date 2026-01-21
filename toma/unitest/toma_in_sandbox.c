@@ -1106,6 +1106,19 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 }
 
 /*********************************************************************/
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+static void __verify_correct_dir(void) {
+	DIR *root_dir_exists = opendir(TOMA_ROOT_DIR);
+	if (!root_dir_exists) {
+		SANDBOX_PRINT(COL_RED "Running toma from wrong directory, root sandbox(%s) is not accessible. aborting!" COL_RESET "\n", TOMA_ROOT_DIR);
+		BUG_ON(!root_dir_exists);
+	} else {
+		closedir(root_dir_exists);
+	}
+}
+
 static void toma_unitest_env_end(void) {
 	#define DICT_DIR "99bin/*/obj/"
 	SANDBOX_PRINT(COL_GREEN "unitest done sys=%p" COL_RESET ". \t\tAnalyze bin logs via:\n"
@@ -1122,6 +1135,7 @@ void toma_unitest_env_start(bool is_running_as_a_utility, int trace_debug_level)
 	char *pwd = getcwd(NULL, 0);
 	SANDBOX_PRINT(COL_GREEN "unitest(%s) starting sys=%p" COL_RESET " is_util=%d trace=%d, dir=%s\n", opt, sys, is_running_as_a_utility, trace_debug_level, pwd);
 	free(pwd);
+	__verify_correct_dir();
 	atexit(toma_unitest_env_end);
 	t_sandbox_all_init();
 }
