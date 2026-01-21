@@ -1292,6 +1292,35 @@ void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset)
 	mark_CMD_k_msg_for_kafka_commit(kafka_offset, 1);
 }
 
+static void __wakeup_toma_params_free(struct kafka_wakeup_params *wap) {
+	switch (wap->event_type) {
+	case KAFKA_EVENT_TYPE_HW_FULL_CONFIG:
+		HW_conf_free_tree((struct HW_mgmt_conf*)wap->event_data);
+		break;
+	case KAFKA_EVENT_TYPE_VOL_ADD:
+	case KAFKA_EVENT_TYPE_VOL_DEL:
+	case KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED:
+	case KAFKA_EVENT_TYPE_VOL_UPD:
+		mm_conf_free_tree((struct mm_mgmt_conf *)wap->event_data);
+		break;
+	case KAFKA_EVENT_TYPE_TARGET_ADD:
+	case KAFKA_EVENT_TYPE_TARGET_DEL:
+	case KAFKA_EVENT_TYPE_CMD:
+		NNVMEIBT_BM_FREE(tbsi84l, wap->event_data);
+		break;
+	default:
+		N_Ef(vsh398a, "*******************************   FIX ME   ****************************** conf=@PTR event_type=@INT", wap, wap->event_type);
+		break;
+	}
+	NNVMEIBT_BM_FREE(2kzx0oe, wap);
+}
+
+static void __wakeup_toma_main_tread(struct kafka_wakeup_params *wap) {
+	const int wakeup_rv = nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wap);
+	if (wakeup_rv < 0)
+		__wakeup_toma_params_free(wap);	// Just free the memory, toma main thread cannot wakeup
+}
+
 static int CMD_consume(void) {
 	struct messageType_params_ctx		messageType_params;
 	struct mm_json_elem 				*json_tree_root = NULL;
@@ -1343,7 +1372,7 @@ static int CMD_consume(void) {
 		wap->event_data = CMD_params;
 		wap->kafka_offset = k_CMD.consumer_offset;
 		atomic_add(1, &CMD_consumer_n_msgs_awaiting_toma_processing);
-		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wap);
+		__wakeup_toma_main_tread(wap);
 	}
 out:
 	if (commit_it_now)
@@ -1463,7 +1492,7 @@ static int HW_full_config_consume(void) {
 		wakeup_params->event_data = highest_HW_mgmt_conf;
 		wakeup_params->kafka_offset = HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date;
 		HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date;
-		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
+		__wakeup_toma_main_tread(wakeup_params);
 	}
 	nvmeibt_mm_json_free_kv_tree(json_tree_root);
 	return rv;
@@ -1540,7 +1569,7 @@ static int incremental_VOL_updates_consume(void) {
 		wakeup_params->event_data = (void *)mgmt_conf;
 		wakeup_params->kafka_offset = k_incremental_VOL_updates.consumer_offset;
 		wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs = kafka_applied_consuming_leader_VOL_msgs_raft_term;
-		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
+		__wakeup_toma_main_tread(wakeup_params);
 	} else {
 		N_Ef(ajk348z, "Unexpected messageType=@STR", msg_param.messageType);
 		rv = -1;
@@ -1590,7 +1619,7 @@ static void kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma(voi
 		// Accept it
 		XDLIST_DEL(&(wakeup_params->kafka_raft_members_sorted_msgs_queue_link));
 		nvmeibt_kafka_set_last_sent_to_toma_targets_updates_seq_no(wakeup_params->seq_no);
-		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
+		__wakeup_toma_main_tread(wakeup_params);
 	}
 	if (!XDLIST_EMPTY(&kafka_raft_members_sorted_msgs_queue)) {
 		N_Wf(rcaj1kn, "Queue not empty after processing");
@@ -2608,30 +2637,7 @@ void nvmeibt_kafka_toma_wakeup_dispatcher(struct kafka_wakeup_params *wakeup_par
 		break;
 	}
 out:
-	// Free it. Used or not
-	switch (wakeup_params->event_type) {
-	case KAFKA_EVENT_TYPE_UNKNOWN:
-		N_Ef(ycvbd92, "KAFKA_EVENT_TYPE_UNKNOWN");
-		break;
-	case KAFKA_EVENT_TYPE_HW_FULL_CONFIG:
-		HW_conf_free_tree((struct HW_mgmt_conf*)wakeup_params->event_data);
-		break;
-	case KAFKA_EVENT_TYPE_VOL_ADD:
-	case KAFKA_EVENT_TYPE_VOL_DEL:
-	case KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED:
-	case KAFKA_EVENT_TYPE_VOL_UPD:
-		mm_conf_free_tree((struct mm_mgmt_conf *)wakeup_params->event_data);
-		break;
-	case KAFKA_EVENT_TYPE_TARGET_ADD:
-	case KAFKA_EVENT_TYPE_TARGET_DEL:
-	case KAFKA_EVENT_TYPE_CMD:
-		NNVMEIBT_BM_FREE(tbsi84l, wakeup_params->event_data);
-		break;
-	default:
-		N_Ef(vsh398a, "*******************************   FIX ME   ****************************** conf=@PTR", wakeup_params);
-		break;
-	}
-	NNVMEIBT_BM_FREE(2kzx0oe, wakeup_params);
+	__wakeup_toma_params_free(wakeup_params); // Free it. Used or not
 	NFOUT;
 }
 
