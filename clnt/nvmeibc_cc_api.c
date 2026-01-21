@@ -2194,14 +2194,19 @@ static void __send_all_volumes_status_upstream(struct nvmeibc_control_api *cc_ap
 {
 	const struct nvmeibc_cinst_params_main *cinst = __get_cinst_params_from_cc_api(cc_api);
 	struct nvmeibc_volume *volume = NULL;
-	int n_vols = 0;
+	int n_vols_total = 0, n_vols_skipped = 0;
 	NFIN;
 
 	list_for_each_entry(volume, nvmeibc_get_volumes(cinst), link) {
-		__nvmeibc_cc_api_notify_vol_io_changed(volume, cinst);
-		++n_vols;
+		++n_vols_total;
+		if (false == nvmeibc_block_is_during_attach_stabilization_period(volume->block_dev)){
+			__nvmeibc_cc_api_notify_vol_io_changed(volume, cinst);
+		} else {
+			++n_vols_skipped;
+		}
+
 	}
-	_NT(t_1__send_volume_status_upstream, "Sent status of @INT volumes upstream after setting client token", n_vols);
+	_NT(t_1__send_volume_status_upstream, "Sent status of @INT volumes upstream after setting client token; @INT volumes were skipped", n_vols_total, n_vols_skipped);
 
 	NFOUT;
 }

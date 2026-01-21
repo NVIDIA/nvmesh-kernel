@@ -1389,6 +1389,19 @@ enum_io_perm nvmeibc_get_io_perm_for_reporting(struct nvmeibc_block_device *dev)
 	return __to_mcs_io_perm_enum(rv);
 }
 
+bool nvmeibc_block_is_during_attach_stabilization_period(struct nvmeibc_block_device *dev)
+{
+	bool result = false;
+	if (dev){
+		ulong flags;
+		spin_lock_irqsave(&dev->dp.resub.lock, flags);
+	
+		result = nvmeibc_io_perm_alert_is_during_attach_stabilization_period(&dev->dp.io_perm_alert);
+		spin_unlock_irqrestore(&dev->dp.resub.lock, flags);
+	}
+	return result;
+}
+
 void nvmeibc_del_blkdev(struct nvmeibc_block_device	*dev)
 {
 	assert_dev_on_mainwq(dev);
