@@ -1044,20 +1044,17 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 	return ret;
 }
 
-struct toma_wakeup_args {
+struct __attribute__((aligned(16))) toma_wakeup_args {
 	void	*ptr;
 	int		type;
-	int32_t	filler_to_16_bytes_align;
 };
+_Static_assert(sizeof(struct toma_wakeup_args) == 16, "sizeof(struct toma_wakeup_args) != 16, Not sure this is mandatory");
 
 /* request wakeup of TOMA main thread */
 int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
 {
+	const struct toma_wakeup_args buf = { .ptr = ptr, .type = type};
 	int ret = -1;
-	struct toma_wakeup_args		buf;
-
-	NFIN;
-
 	N_Tf(trace_toma_nvmeibt_toma_wakeup, "wakeup request type @TOMA_WAKEUP_TYPE_TO_STR ptr @PTR", toma_wakeup_type_to_str(type), ptr);
 
 	if (pthread_mutex_lock(&toma_wakeup_mutex) != 0) {
@@ -1076,8 +1073,6 @@ int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
 		N_Tf(trace_2_toma_nvmeibt_toma_wakeup, "wakeup request skipped due to already pending");
 		goto skip;
 	}
-	buf.type = type;
-	buf.ptr = ptr;
 	if (nvmeibt_write(toma_wakeup_pipe[1], &buf, sizeof(buf)) < 0) {
 		N_Ef(tvsjkwi, "Fail to write type @STR to toma wakeup (@AUTO_ERRNO)", toma_wakeup_type_to_str(type));
 		goto out;
@@ -1095,7 +1090,7 @@ out_unlocked:
 			self_inflicted_death_on_error();
 		else { /* Finalize of wq entry will not be called*/}
 	}
-	NFOUT;
+	N_Tf(__AUTOID__, "Done");
 	return ret;
 }
 
