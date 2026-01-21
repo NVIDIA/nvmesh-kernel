@@ -431,6 +431,7 @@ static unsigned long get_guid(struct nvmeibt_km_comm *p)
 static int nvmeibt_km_comm_lock(struct nvmeibt_km_comm *p)
 {
 	const int rv = pthread_mutex_lock(&p->guard);
+	errno = rv; // pthread_mutex_lock() does not set errno
 	if (rv != 0) N_Ef(kmtscl0, "Failed to lock srv comm guard rv=@RV @AUTO_ERRNO", rv);
 	return rv;
 }
@@ -438,6 +439,7 @@ static int nvmeibt_km_comm_lock(struct nvmeibt_km_comm *p)
 static int nvmeibt_km_comm_unlock(struct nvmeibt_km_comm *p)
 {
 	int rv = pthread_mutex_unlock(&p->guard);
+	errno = rv; // pthread_mutex_unlock() does not set errno
 	if (rv != 0) N_Ef(kmtscl1, "Failed to unlock srv comm guard rv=@RV @AUTO_ERRNO", rv);
 	return rv;
 }
