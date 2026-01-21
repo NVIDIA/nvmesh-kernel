@@ -61,10 +61,15 @@ void nvmeibc_io_perm_alert_periodic_wakeup(struct nvmeibc_block_device *dev, nvm
 {
 	struct nvmeibc_io_perm_alert *iod = &dev->dp.io_perm_alert;
 
-	if ((iod->arm_stable != iod->arm) && ((iod->last_armed_at + iod->config.stabilization_period) < now)) {
-		iod->arm_stable = iod->arm;
-		if (iod->config.notify_io_changed)
-			iod->config.notify_io_changed(dev, iod->arm_stable);
+	if ((iod->arm_stable != iod->arm)) {
+		bool const is_stabilization_period_end = (iod->last_armed_at + iod->config.stabilization_period) < now;
+		bool const is_first_ok = (iod->arm_stable == NVMEIBC_IO_PERM_ARM_DEV_INIT) && ((iod->arm & NVMEIBC_IO_PERM_ARM_BIO_OK) == NVMEIBC_IO_PERM_ARM_BIO_OK);
+ 		if (is_stabilization_period_end || is_first_ok){
+			iod->arm_stable = iod->arm;
+			if (iod->config.notify_io_changed) {
+				iod->config.notify_io_changed(dev, iod->arm_stable);
+			}
+		}
 	}
 
 	if (__should_send_detaching_alert(iod, now)){

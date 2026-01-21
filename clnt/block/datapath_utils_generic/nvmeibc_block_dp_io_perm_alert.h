@@ -95,5 +95,12 @@ static inline bool nvmeibc_io_perm_alert_is_no_bio_for_long_time(const struct nv
 //* on transition from I/O enabled, but without protection after unprotected_write_period ended
 bool nvmeibc_io_perm_alert_should_create_readonly_topo(const struct nvmeibc_io_perm_alert *iod, nvmeibc_jiffies_t now);
 
+__attribute__((nonnull(1)))
+static inline bool nvmeibc_io_perm_alert_is_during_attach_stabilization_period(const struct nvmeibc_io_perm_alert *iod)
+{
+	return iod->arm_stable == NVMEIBC_IO_PERM_ARM_DEV_INIT;
+}
+
+
 #endif  // H beginning
 

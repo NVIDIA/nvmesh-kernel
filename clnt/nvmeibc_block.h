@@ -148,6 +148,8 @@ int nvmeibc_block_try_detach(struct nvmeibc_block_device *dev,
  */
 enum_io_perm nvmeibc_get_io_perm_for_reporting(struct nvmeibc_block_device *dev);
 
+bool nvmeibc_block_is_during_attach_stabilization_period(struct nvmeibc_block_device *dev);
+
 /**
  * @brief Get block device reservation information
  * @author doronl (3/5/2020)
