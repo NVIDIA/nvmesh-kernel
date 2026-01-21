@@ -131,7 +131,7 @@ enum nvmeib_dsm_range_encoding {
 	NVMEIB_DSM_RANGE_ENCODING_LITTLE_ENDIAN,
 };
 
-struct nvmeib_dsm_range nvmeib_get_ndb_discard_range(struct nvmeibc_block_command *cmd, enum nvmeib_dsm_range_encoding encoding);
+struct nvmeib_dsm_range nvmeib_get_ndb_discard_range(struct nvmeibc_block_command const* cmd, enum nvmeib_dsm_range_encoding encoding);
 
 /* Does this command require journal manager actions */
 bool dp_cmds_does_require_jam(const struct nvmeibc_block_command *cmd);

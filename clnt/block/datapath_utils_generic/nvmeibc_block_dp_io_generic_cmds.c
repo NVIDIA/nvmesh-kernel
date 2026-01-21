@@ -250,7 +250,7 @@ static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment
 	return ds->toma_reg->seg;
 }
 
-static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_block_command *bcmd, bool is_completion)
+static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_block_command const *bcmd, bool is_completion)
 {
 	struct nvmeibc_disk_io_command const* disk_io_cmd =  bcmd->iocmd;
 	if (nvmeib_pet_journal_is_verbose(&bcmd->o->journal) == false){
@@ -268,12 +268,13 @@ static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_b
 	return true;
 }
 
-static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_command *bcmd, bool is_completion)
+static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_command const *bcmd, bool is_completion)
 {
 	struct nvmeibc_disk_io_command *disk_io_cmd =  bcmd->iocmd;
 	struct nvmeib_data_buffer *ndb = disk_io_cmd->reqs1.ndb;
 	struct nvmeib_pet_journal* journal = &bcmd->o->journal;
-	
+	bool const enable_edic_check = bcmd->o->nd->dp.enable_edic_check;
+
 	struct scatterlist *sg;
 	u32 i;
 	u64 *data_first_content;
@@ -295,38 +296,48 @@ static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_co
 	md = (union nvmeibc_block_dp_ec_data_block_md *)disk_io_cmd->reqs1.md;
 	for_each_sg(ndb->table.sgl, sg, ndb->table.nents, i) {
 		data_first_content = sg ? (u64 *)sg_virt(sg) : NULL;
-		if (data_first_content != NULL && md != NULL) {
+		if (data_first_content != NULL) {
 			/**
 			* JBOD does not use metadata. Mirroring only cares about EDIC, as
 			* it may be transaction id (used to mark what type of client wrote the
 			* data). EC cares about everything.
 			*/
 			if (nvmeibc_raid_is_ec(r)) {
+				BUG_ON(md == NULL); //we print on write.request & read.response, so md should be allocated
 				NVMEIBC_IO_PET_MSG_NORM(journal,
 							"    content(idx=%hhu, first_8b = 0x%llx, is_parity = %hhu, md = 0x%llx<union nvmeibc_block_dp_ec_data_block_md>)", 
 							numeric_downcast(u8, i), *data_first_content, (u8)bcmd->is_parity, md->raw);
 			} else if (nvmeibc_raid_is_mirror(r)) {
 				//mirror datapath is configurable and may use or not use edic, but since we are playing with the backdoor, it is better to print it anyway
-				NVMEIBC_IO_PET_MSG_NORM(journal,
-							"    content(idx=%hhu, first_8b = 0x%llx, edic = 0x%x)",
-							numeric_downcast(u8, i), *data_first_content, nvmeibc_block_dp_ec_md_get_edic(md, bcmd->is_parity));
+				if (enable_edic_check){
+					BUG_ON(md == NULL); //we print on write.request & read.response, so md should be allocated
+					NVMEIBC_IO_PET_MSG_NORM(journal,
+								"    content(idx=%hhu, first_8b = 0x%llx, edic = 0x%x)",
+								numeric_downcast(u8, i), *data_first_content, nvmeibc_block_dp_ec_md_get_edic(md, bcmd->is_parity));
+				} else {
+					NVMEIBC_IO_PET_MSG_NORM(journal,
+								"    content(idx=%hhu, first_8b = 0x%llx)",
+								numeric_downcast(u8, i), *data_first_content);
+				}
 			}
-			md = (union nvmeibc_block_dp_ec_data_block_md *)((u8*)md + md_size);
+			if (md){
+				md = (union nvmeibc_block_dp_ec_data_block_md *)((u8*)md + md_size);
+			}
 		} else if (data_first_content != NULL) {
 			NVMEIBC_IO_PET_MSG_NORM(journal, "    content(idx=%hhu, first_8b = 0x%llx)", numeric_downcast(u8, i), *data_first_content);
 		}
 	}
 }
 
-static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command *cmds, int cmd_idx)
+static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command const *cmds, int cmd_idx)
 {
-	struct nvmeibc_block_command   *bcmd = &cmds[cmd_idx];
-	struct nvmeibc_disk_io_command *cmd =  bcmd->iocmd;
+	struct nvmeibc_block_command const* bcmd = &cmds[cmd_idx];
+	struct nvmeibc_disk_io_command const* cmd =  bcmd->iocmd;
 	u8 const sgmnt_idx = numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(bcmd->ds));
-	struct nvmeib_data_buffer *ndb = cmd->reqs1.ndb;
+	struct nvmeib_data_buffer const* ndb = cmd->reqs1.ndb;
 	enum nvmeib_block_io_op op = cmds->o->op;
 	u32 nlbas;
-	struct nvmeibc_d_rdma_comp* dc;
+	struct nvmeibc_d_rdma_comp const* dc;
 	
 	if (op == NVMEIB_BLOCK_IO_OP_DISCARD) {
 		nlbas = nvmeib_get_ndb_discard_range(bcmd, NVMEIB_DSM_RANGE_ENCODING_NATIVE).nlb;    // get_dsm.
@@ -339,7 +350,7 @@ static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command *cmd
 		"dp_cmds_execute_cmd(sgmnt=%hhu, dlba=0x%llx, nlbas=%u, raid_cur_stage=%hhu<enum e_cmds_stage>)",
 		sgmnt_idx, __cmd_start(*bcmd), nlbas, (u8)cmds->raid_cur_stage);
 	
-	__nvmeibc_cmd_data_and_metadata_pet_describe(bcmd, /*is_completion*/false);
+	__nvmeibc_cmd_data_and_metadata_pet_describe(bcmd, false/*is_completion*/);
 
 	if (dp_cmds_pigbck_has_any(cmd)) {
 		dc = dp_cmds_get_pigbck_comp_dc(cmd);
@@ -765,7 +776,7 @@ static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, st
 						   cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,  
 						   numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
 		
-		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, /*is_completion*/true);
+		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, true/*is_completion*/);
 
 		if (dp_cmds_pigbck_has_any(rldr->iocmd)) {
 			dc = dp_cmds_get_pigbck_comp_dc(rldr->iocmd);

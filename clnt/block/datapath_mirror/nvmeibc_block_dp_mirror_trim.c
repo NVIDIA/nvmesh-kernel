@@ -31,7 +31,7 @@ out:
 }
 
 __attribute__((nonnull(1)))
-struct nvmeib_dsm_range nvmeib_get_ndb_discard_range(struct nvmeibc_block_command *cmd, enum nvmeib_dsm_range_encoding encoding)
+struct nvmeib_dsm_range nvmeib_get_ndb_discard_range(struct nvmeibc_block_command const* cmd, enum nvmeib_dsm_range_encoding encoding)
 {
 	struct nvmeibc_block_io_req *ir = &cmd->iocmd->reqs1;
 	if (encoding == NVMEIB_DSM_RANGE_ENCODING_LITTLE_ENDIAN) {
