@@ -137,7 +137,14 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 	union nvmeib_uuid					disk_metadata_partition_uuid;
 	uint64_t							n_disk_blocks = SELF_TEST_MOCK_DEVICE_BLOCKS;
 	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-	struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
+	struct nvmeibt_disk_gpt_partition_entry			*metadata_partition;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
+	uint64_t							metadata_start;
+	uint64_t							metadata_end;
+	uint64_t							pbyte_s;
+	struct nvmeibt_disk_metadata		disk_metadata;
+	char								*dma_buffer = NULL;
+	int									n_bytes_write;
 
 	memset(&main_gpt, 0, sizeof(main_gpt));
 	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
@@ -165,24 +172,22 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
 	// 3. Add EXCELERO_METADATA partition using all available space (test device)
-	{
-		uint64_t metadata_start = main_gpt.header.first_usable_pba;
-		uint64_t metadata_end = main_gpt.header.last_usable_pba;
+	metadata_start = main_gpt.header.first_usable_pba;
+	metadata_end = main_gpt.header.last_usable_pba;
 
-		metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
-		metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
+	metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
+	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
-		metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-			&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
-			&metadata_partition_uuid,
-			metadata_start, metadata_end,
-			EXCELERO_METADATA_PARTITION_NAME,
-			strlen(EXCELERO_METADATA_PARTITION_NAME));
+	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
+		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&metadata_partition_uuid,
+		metadata_start, metadata_end,
+		EXCELERO_METADATA_PARTITION_NAME,
+		strlen(EXCELERO_METADATA_PARTITION_NAME));
 
-		if (!metadata_partition) {
-			N_Ef(selftest_add_metadata_failed, "Failed to add metadata partition to mock device");
-			goto out;
-		}
+	if (!metadata_partition) {
+		N_Ef(selftest_add_metadata_failed, "Failed to add metadata partition to mock device");
+		goto out;
 	}
 
 	// 4. Write Main GPT to disk using existing TOMA function
@@ -222,44 +227,36 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 	}
 
 	// 7. Write disk metadata structure (for serial ID/NGUID testing)
-	{
-		const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
-		struct nvmeibt_disk_metadata	disk_metadata;
-		char							*dma_buffer = NULL;
-		int								n_bytes_write;
-		uint64_t						pbyte_s;
+	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+	if (disk_md_partition) {
+		// Initialize disk metadata with test values
+		memset(&disk_metadata, 0, sizeof(disk_metadata));
+		disk_metadata.signature = DISK_METADATA_SIGNATURE;
+		disk_metadata.format_pblk_size = pblk_size;
+		disk_metadata.format_request_counter = 1;
 
-		disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-		if (disk_md_partition) {
-			// Initialize disk metadata with test values
-			memset(&disk_metadata, 0, sizeof(disk_metadata));
-			disk_metadata.signature = DISK_METADATA_SIGNATURE;
-			disk_metadata.format_pblk_size = pblk_size;
-			disk_metadata.format_request_counter = 1;
+		// Test serial ID (stored in disk_metadata - NOT used for validation)
+		nvmeibt_strlcpy(disk_metadata.native_serial_str, "TEST-SERIAL-001", sizeof(disk_metadata.native_serial_str));
+		disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
+		disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
 
-			// Test serial ID (stored in disk_metadata - NOT used for validation)
-			nvmeibt_strlcpy(disk_metadata.native_serial_str, "TEST-SERIAL-001", sizeof(disk_metadata.native_serial_str));
-			disk_metadata.native_nguid_unused.ll[0] = 0xAABBCCDD11223344ULL;
-			disk_metadata.native_nguid_unused.ll[1] = 0x5566778899AABBCCULL;
+		// Calculate CRC
+		disk_metadata.crc32 = 0;
+		disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
 
-			// Calculate CRC
-			disk_metadata.crc32 = 0;
-			disk_metadata.crc32 = crc32_seedless(&disk_metadata, sizeof(disk_metadata));
+		// Write to disk
+		pbyte_s = disk_md_partition->pba_s * pblk_size;
+		n_bytes_write = roundup(sizeof(disk_metadata), pblk_size);
+		dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_disk_md, PAGE_SIZE, n_bytes_write);
+		memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
 
-			// Write to disk
-			pbyte_s = disk_md_partition->pba_s * pblk_size;
-			n_bytes_write = roundup(sizeof(disk_metadata), pblk_size);
-			dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_selftest_disk_md, PAGE_SIZE, n_bytes_write);
-			memcpy(dma_buffer, &disk_metadata, sizeof(disk_metadata));
-
-			if (pwrite(fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
-				N_Ef(selftest_write_disk_md_failed, "Failed to write disk metadata to mock device @AUTO_ERRNO");
-				NNVMEIBT_BM_FREE(trace_selftest_disk_md_free, dma_buffer);
-				goto out;
-			}
-
-			NNVMEIBT_BM_FREE(trace_selftest_disk_md_free2, dma_buffer);
+		if (pwrite(fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
+			N_Ef(selftest_write_disk_md_failed, "Failed to write disk metadata to mock device @AUTO_ERRNO");
+			NNVMEIBT_BM_FREE(trace_selftest_disk_md_free, dma_buffer);
+			goto out;
 		}
+
+		NNVMEIBT_BM_FREE(trace_selftest_disk_md_free2, dma_buffer);
 	}
 
 	fsync(fd);
@@ -290,12 +287,14 @@ int SELF_TEST_generate_mock_device_modified(const char *filepath)
 	union nvmeib_uuid					disk_metadata_partition_uuid;
 	uint64_t							n_disk_blocks = SELF_TEST_MOCK_DEVICE_BLOCKS;
 	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-	struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
-	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+	struct nvmeibt_disk_gpt_partition_entry			*metadata_partition;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition;
 	struct nvmeibt_disk_metadata		disk_metadata;
 	char								*dma_buffer = NULL;
 	int									n_bytes_write;
 	uint64_t							pbyte_s;
+	uint64_t							metadata_start;
+	uint64_t							metadata_end;
 
 	memset(&main_gpt, 0, sizeof(main_gpt));
 	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
@@ -323,24 +322,22 @@ int SELF_TEST_generate_mock_device_modified(const char *filepath)
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
 	// Add EXCELERO_METADATA partition with DIFFERENT name
-	{
-		uint64_t metadata_start = main_gpt.header.first_usable_pba;
-		uint64_t metadata_end = main_gpt.header.last_usable_pba;
+	metadata_start = main_gpt.header.first_usable_pba;
+	metadata_end = main_gpt.header.last_usable_pba;
 
-		metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
-		metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
+	metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
+	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
-		metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-			&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
-			&metadata_partition_uuid,
-			metadata_start, metadata_end,
-			"MODIFIED_metadata",  // MODIFIED: different name only
-			strlen("MODIFIED_metadata"));
+	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
+		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&metadata_partition_uuid,
+		metadata_start, metadata_end,
+		"MODIFIED_metadata",  // MODIFIED: different name only
+		strlen("MODIFIED_metadata"));
 
-		if (!metadata_partition) {
-			N_Ef(selftest_add_modified_metadata_failed, "Failed to add modified metadata partition");
-			goto out;
-		}
+	if (!metadata_partition) {
+		N_Ef(selftest_add_modified_metadata_failed, "Failed to add modified metadata partition");
+		goto out;
 	}
 
 	// Write Main GPT
@@ -557,6 +554,7 @@ int SELF_TEST_corrupt_gpt_n_partition_entries(int fd, int pblk_size, uint64_t pb
 	struct nvmeibt_disk_gpt_header	primary_header;
 	struct nvmeibt_disk_gpt_header	alternate_header;
 	uint32_t					crc_with_max_entries;
+	int64_t						primary_entries_offset;
 	int							nbytes;
 
 	memset(&gpt, 0, sizeof(gpt));
@@ -586,13 +584,11 @@ int SELF_TEST_corrupt_gpt_n_partition_entries(int fd, int pblk_size, uint64_t pb
 	alternate_header.partition_entry_array_crc32 = crc_with_max_entries;
 	alternate_header.my_pba = gpt.header.alternate_pba;
 	alternate_header.alternate_pba = gpt.header.my_pba;
-	{
-		int64_t	primary_entries_offset = (int64_t)gpt.header.partition_entry_pba - (int64_t)gpt.header.my_pba;
-		alternate_header.partition_entry_pba = gpt.header.alternate_pba + primary_entries_offset;
-		if (alternate_header.partition_entry_pba >= alternate_header.my_pba) {
-			int entries_n_pblks = divroundup(nbytes, pblk_size);
-			alternate_header.partition_entry_pba = alternate_header.my_pba - entries_n_pblks;
-		}
+	primary_entries_offset = (int64_t)gpt.header.partition_entry_pba - (int64_t)gpt.header.my_pba;
+	alternate_header.partition_entry_pba = gpt.header.alternate_pba + primary_entries_offset;
+	if (alternate_header.partition_entry_pba >= alternate_header.my_pba) {
+		int entries_n_pblks = divroundup(nbytes, pblk_size);
+		alternate_header.partition_entry_pba = alternate_header.my_pba - entries_n_pblks;
 	}
 	alternate_header.header_crc32 = 0;
 	alternate_header.header_crc32 = crc32_seedless(&alternate_header, sizeof(alternate_header));
