@@ -1379,12 +1379,12 @@ static int resolve_ch_atomic_caps_and_endianness(struct nvmeibc_locks_channel *c
 		ch->base.disk->rpc_locks = true;
 
 		if (ch->base.disk->access_local)
-			bitmap_fill(ch->local_bypass_bmp, NUM_NVMEIBC_LOCK_OPR);
+			bitmap_fill(ch->local_bypass_bmp, NVMEIBC_LOCK_NUM_OPR);
 
 		rv = 0;
 	}
 
-	BUILD_BUG_ON(NUM_NVMEIBC_LOCK_OPR > 32);
+	BUILD_BUG_ON(NVMEIBC_LOCK_NUM_OPR > 32);
 	_NT(trace_locks_channel_resolve_ch_atomic_caps_and_endianness,
 		"atomic_cap: l={@INT, @INT}, r={@INT, @INT} -> {@INT, @INT},"
 		"use-rpc-locks=@BOOL, acc-loc=@BOOL, local_bypass_bmp=@BITMAP32",
@@ -1807,7 +1807,7 @@ static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch) {
 	ch->masked_atomic_req_endian_swap = primary_ch->masked_atomic_req_endian_swap;
 	ch->masked_atomic_reply_endian_swap = primary_ch->masked_atomic_reply_endian_swap;
 	ch->net.post_send_atomic_fn = primary_ch->net.post_send_atomic_fn;
-	bitmap_copy(ch->local_bypass_bmp, primary_ch->local_bypass_bmp, NUM_NVMEIBC_LOCK_OPR);
+	bitmap_copy(ch->local_bypass_bmp, primary_ch->local_bypass_bmp, NVMEIBC_LOCK_NUM_OPR);
 #endif
 
 	/* Allocate opr_ip entries */

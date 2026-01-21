@@ -230,7 +230,7 @@ enum nvmeibc_disk_locks_opr {
 	/* Write Transaction ID + dbits of erasure coding on command */
 	NVMEIBC_LOCK_BLKSET_INFO_WRITE = 10,
 	NVMEIBC_LOCK_BLKSET_INFO_READ = 12,
-	NUM_NVMEIBC_LOCK_OPR,
+	NVMEIBC_LOCK_NUM_OPR,
 	NVMEIBC_LOCK_LAST_OPR	= 0xff // keep this entry the LAST onet
 } __attribute__ ((packed));
 

@@ -231,7 +231,7 @@ struct nvmeibc_locks_channel {
 	struct workq_struct *callback_wq;
 #endif
 	/* Local-bypass bitmap */
-	DECLARE_BITMAP(local_bypass_bmp, NUM_NVMEIBC_LOCK_OPR);
+	DECLARE_BITMAP(local_bypass_bmp, NVMEIBC_LOCK_NUM_OPR);
 
 	enum nvmeibc_disk_release_reason release_reason;
 
