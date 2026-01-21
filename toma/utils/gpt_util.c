@@ -2,6 +2,10 @@
  * gpt_util - NVMesh GPT/MBR Utility
  *
  * Displays, exports, and applies GPT structures for NVMesh-managed and regular block devices.
+ *
+ * This tool may run when TOMA is up, but only in read-only mode and when the target device is unbound from nvmeibs.
+ *
+ * For write mode or self-test mode, TOMA has to be stopped.
  */
 
 #include "../nvmeibt_debug.h"
@@ -29,9 +33,6 @@
 
 #define GPT_UTIL_VERSION	"2.0.0-dev"
 #define MAX_DEV_NAME		256
-
-// Forward declarations
-static int parse_gpt_entry_from_json(struct nvmeibt_disk_gpt_partition_entry *entry, struct mm_json_elem *entry_elem);
 
 // Actions (mutually exclusive operations)
 enum GPT_UTIL_ACTION {
@@ -1999,24 +2000,24 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -f, --fix-gpt               Fix GPT from alternate copy (and display)\n");
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
-	fprintf(stdout, "  --output-json=FILE          Export GPT to JSON file\n");
-	fprintf(stdout, "  --apply-from=FILE           Apply GPT from JSON file (dry-run by default)\n");
-	fprintf(stdout, "  --restore-binary=FILE       Restore device from binary backup\n");
+	fprintf(stdout, "  -J, --output-json=FILE      Export GPT to JSON file\n");
+	fprintf(stdout, "  -A, --apply-from=FILE       Apply GPT from JSON file (dry-run by default)\n");
+	fprintf(stdout, "  -R, --restore-binary=FILE   Restore device from binary backup\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
 
 	fprintf(stdout, "Display Options:\n");
 	fprintf(stdout, "  -c, --gpt-copy=WHICH        Which copy: primary|alternate|both (default: primary)\n");
-	fprintf(stdout, "  --filter-uuid=UUID          Show only entries matching UUID\n");
-	fprintf(stdout, "  --filter-lba=ADDR           Show only entries containing LBA address\n");
+	fprintf(stdout, "  -u, --filter-uuid=UUID      Show only entries matching UUID\n");
+	fprintf(stdout, "  -l, --filter-lba=ADDR       Show only entries containing LBA address\n");
 	fprintf(stdout, "  -Z, --print-zero-verify     Print commands that verify zeroed ranges\n\n");
 
 	fprintf(stdout, "Apply Options:\n");
-	fprintf(stdout, "  --write                     Actually write changes (default: dry-run)\n");
-	fprintf(stdout, "  --yes, -Y                   Skip confirmation prompt (auto-confirm writes)\n\n");
+	fprintf(stdout, "  -W, --write                 Actually write changes (default: dry-run)\n");
+	fprintf(stdout, "  -Y, --yes                   Skip confirmation prompt (auto-confirm writes)\n\n");
 
 	fprintf(stdout, "I/O Options:\n");
-	fprintf(stdout, "  --direct                    Force O_DIRECT even for regular files (may fail)\n");
-	fprintf(stdout, "  --no-direct                 Disable O_DIRECT even for block devices\n");
+	fprintf(stdout, "  -D, --direct                Force O_DIRECT even for regular files (may fail)\n");
+	fprintf(stdout, "  -N, --no-direct             Disable O_DIRECT even for block devices\n");
 	fprintf(stdout, "  (default: auto)             Block devices use O_DIRECT, files don't\n\n");
 
 	fprintf(stdout, "Testing:\n");
@@ -2056,8 +2057,10 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  %s -T\t\t\t\t\t\t\t# Run all self-tests\n", argv[0]);
 	fprintf(stdout, "  %s -T 1,5,10-15\t\t\t\t\t# Run specific tests\n\n", argv[0]);
 
-	fprintf(stdout, COL_YELLOW "Note: gpt_util requires properly formatted NVMesh devices\n");
-	fprintf(stdout, "      (Main GPT + Metadata GPT + disk_metadata must be readable)\n" COL_RESET);
+	fprintf(stdout, COL_YELLOW "Note:\n");
+	fprintf(stdout, "      1. gpt_util requires properly formatted NVMesh devices (Main GPT + Metadata GPT + disk_metadata must be readable)\n");
+	fprintf(stdout, "      2. For read-only mode, it works when TOMA is up, but target device has to be unbound from nvmeibs.\n");
+	fprintf(stdout, "      3. For write mode or self-test mode, TOMA has to be stopped.\n" COL_RESET);
 }
 
 
