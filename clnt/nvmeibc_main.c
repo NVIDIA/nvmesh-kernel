@@ -32,7 +32,7 @@
 #include "common/proc_epilog.h"
 #include "nvmeibc_memmgr_metrics.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMe block device over Infiniband");
 MODULE_LICENSE("GPL and additional rights");
 

@@ -5,7 +5,7 @@
 #include "nvmeib_public_mlx4_imp.c"
 #include "nvmeib_public_mlx4p.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMeIB Public mlx4");
 MODULE_LICENSE("GPL and additional rights");
 

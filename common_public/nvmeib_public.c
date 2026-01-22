@@ -73,7 +73,7 @@ EXPORT_SYMBOL(nvmeib_txt_make_seq);
 	#include <asm/simd.h>
 #endif
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMeIB Public");
 MODULE_LICENSE("GPL and additional rights");
 

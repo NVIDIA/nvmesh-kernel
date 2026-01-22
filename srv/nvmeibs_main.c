@@ -26,7 +26,7 @@
 #include "common/proc_epilog.h"
 #include "nvmeibs_memmgr_metrics.h"
 #include "nvmeibs_nordda.h"
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMe storage device over Infiniband");
 MODULE_LICENSE("GPL and additional rights");
 

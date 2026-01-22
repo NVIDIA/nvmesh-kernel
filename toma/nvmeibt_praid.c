@@ -1923,7 +1923,7 @@ static void leader_calc_all_segs_init_modes(struct nvmeibt_praid *praid, struct 
 	}
 	// The following was commented out. Added by Ronen to avoid heart-attacks
 	// commit 155361efbdfa0b68786b0cc93544afecf89658a8
-	// Author: DanielHsH <Daniel@excelero.com>
+	// Author: DanielHsH <Daniel@ecelro.com>
 	//	Toma: Disable dconvict turn on for R1. Client does that
     // Change-Id: I7353a60ca0138fe3346502362249cfe7718e1a5f
 	//	if (n->new_under_recov_IR && nvmeibt_disk_segment_is_de_facto_owner(seg_leader_topo)) { // The owner was alive and kicking, but we have new segments, and need to turn d-convict on th>

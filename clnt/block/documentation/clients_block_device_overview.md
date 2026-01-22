@@ -578,7 +578,7 @@ The nvmeiba code could be found under `/[project root]/clnt/atom` directory.
 ### SCSI ioctls {#scsi-ioctls}
 
 19. SCSI ioctls are used by several file systems and applications to discover and manage storage. NVMesh volumes provide a minimal SCSI interface to make them usable by these storage entities.  
-20. Todo: Extend this section. [Doron Levi](mailto:doron.levi@excelero.com)Please do so
+20. Todo: Extend this section. [Doron Levi](mailto:doron.levi@ecelro.com)Please do so
 
 ### Os\_api of volume {#os_api-of-volume}
 
@@ -876,7 +876,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
      5. Periodic status reports to management  
 116. Parsing CLI ioctls and cmds  
      1. String commands to clients which control block device behaviour  
-117. Todo: Describes in more details [Doron Levi](mailto:doron.levi@excelero.com). Feel free to do so in your spare time
+117. Todo: Describes in more details [Doron Levi](mailto:doron.levi@ecelro.com). Feel free to do so in your spare time
 
 ### Multi-completion concept {#multi-completion-concept}
 
@@ -1567,7 +1567,7 @@ LBA \= Logical block address
         4. Send blockset recovered \- Recoverer client notifies server that blockset was fixed and related journals / stale locks are clean. Server dispatches this message to Toma that handles stale locks and Serjio which handles journals  
         5. Free journal entries \- used in cold recovery and journal garbage collection recovery. An instruction to the server to free all journal entries which point to a specific disk segment in a volume. All of the entries were cleaned and none is needed for the future.  
         6. Erase a specific journal entry \- request from client to server to erase a specific journal entry. Used to enforce that no 2 different entries in the same range point to a specific blockset. This is needed just because the back pointer from data to journal (d2j) is short of bits so it cannot point exactly to a specific journal block.  
-        7. Gen-lock. Acquire/release lock via local bypass. [omri.levi@excelero.com](mailto:omri.levi@excelero.com) please add info here  
+        7. Gen-lock. Acquire/release lock via local bypass. [omri.levi@ecelro.com](mailto:omri.levi@ecelro.com) please add info here  
 296. In the operation prepare stage, commands are allocated in an array and are sorted by stages  
 297. Commands can share various sub structures  
      1. For example: Journal write cmds and data area write cmds can share their buffers of 4 KB blocks, but not the metadata buffers.  
@@ -1610,7 +1610,7 @@ LBA \= Logical block address
      3. Before writing data to a disk (in degraded mode), turn on a dirty-marker  
      4. Before writing data to a disk, increase its txid by one  
 306. Transport-layer piggyback (added by JAM):  
-     1. Todo: This mechanism is entirely in the transport layer. [Omri Levi](mailto:omri.levi@excelero.com) please add link to spec  
+     1. Todo: This mechanism is entirely in the transport layer. [Omri Levi](mailto:omri.levi@ecelro.com) please add link to spec  
      2. It is designed to keep JMDC correct during a good path. Block layer adds metadata for journal blocks wich is written to disk (JMDD). JAM adds a piggyback to update JMDC as well.
      3. This is a special piggyback, as its size is not constant. With binje \= 8 disk journal-write command can cover 1-8 blocks so it might update 1-8 consecutive u64 in jmdc.  
      4. This piggyback is not used in Raid-1 and not used for disk commands which write data and partities. Only for journal writes.  
@@ -1690,7 +1690,7 @@ LBA \= Logical block address
      2. In the simulator: Via breakpoints  
 329. Todo: Move documentation from within the code to this file  
 330. MSSA algorithm  
-     1. Fill me. [Doron Levi](mailto:doron.levi@excelero.com)Feel free to fill out this section on the MSSA. I will concentrate on other stuff  
+     1. Fill me. [Doron Levi](mailto:doron.levi@ecelro.com)Feel free to fill out this section on the MSSA. I will concentrate on other stuff  
 331. MSSA iterators  
      1. Fill me  
 332. struct destage\_bmp\_summary  
@@ -1715,7 +1715,7 @@ LBA \= Logical block address
 
 340. Link to spec ([here](https://docs.google.com/document/d/1mB45IQVr4iZqQX4zq7F-l20mX0xYs36AUyucdpRuriU/edit) and [here](https://docs.google.com/document/d/1glsHaEIh_AHcUdni0qq71XzwE01snpfSCzJRCZB17ho/edit))  
      1. Jam (Journal Allocation Manager) is a transport layer mechanism which manages per disk resources of a journal and distributes them for block devices upon request. Each EC write operation needs 1 journal block for every written (data or parity) block.  
-341. Jam \- explain. Todo [Omri Levi](mailto:omri.levi@excelero.com).
+341. Jam \- explain. Todo [Omri Levi](mailto:omri.levi@ecelro.com).
 
 ### Scratch buffers manager {#scratch-buffers-manager}
 
@@ -1813,7 +1813,7 @@ LBA \= Logical block address
      1. Internal Throttling, a per-cpu mechanism of the block layer. No more than X ios per cpu inflight for a block device.  
      2. 2 Write Operations to the same blockset will serialize regardless of whether they represent 2 user space IOs or a single IO that was split.  
      3. Reed-solomon calculations serialize all IOs on a specific core as there is a single set of AVX registers for each core. This serialization is within a few microseconds and does not affect performance too much.
-        1. Serialization is performed via functions nvmeib\_fpu\_begin() nvmeib\_fpu\_end() [Omri Mann](mailto:omri@excelero.com)Anything special to add to here?  
+        1. Serialization is performed via functions nvmeib\_fpu\_begin() nvmeib\_fpu\_end() [Omri Mann](mailto:omri@ecelro.com)Anything special to add to here?  
      4. On some kernels, memory allocations are extremely slow and datapath does allocations for each IO.  
         1. We found some types of memory allocations to be very slow mainly on Ubuntu 4.15 kernels, especially when compared to RH 7.x OS with the 3.10.XXX kernels. It is unclear whether this was an Ubuntu vs RH or newer vs. older kernel thing.  
      5. In the execution stage of disk commands, all commands run in parallel so performance will be determined by the slowest disk. For example, writing EC, writing 3 journal blocks {D1,P,Q} will wait for 3 completions before moving to the next stage of writing 3 data blocks.  
@@ -1830,7 +1830,7 @@ LBA \= Logical block address
      6. Wrong interrupt spread. Some CPUs are 100% busy, others are idle.  
      7. If a client has a weak CPU then during heavy IO pressure, all CPUs can reach 100% utilization. No more IO/s for this client, though the cluster can handle additional IOs from other clients.  
      8. Wrong server/client queues number. Controlled via module param  
-     9. Infinite timeout on IO command to local disk. In some cases may cause IO latency to be in seconds, not minor seconds. [Omri Levi](mailto:omri.levi@excelero.com), please elaborate. Timeout of 15 sec \* 2, but never seen, maybe with malfunctioning disks
+     9. Infinite timeout on IO command to local disk. In some cases may cause IO latency to be in seconds, not minor seconds. [Omri Levi](mailto:omri.levi@ecelro.com), please elaborate. Timeout of 15 sec \* 2, but never seen, maybe with malfunctioning disks
 371. **Disaster contention**:  
      1. After cold recovery, RAM is lost and reconstructed as unknown. Both in Raid-1 / EC, the first IO to each blockset will be very slow. In EC 8+2, a write of 1\[block\] might need to actually read 320 \= 32\*(8+2) blocks to resolve an unknown TxID. Factor of \~ x100.  
         1. This problem can be alleviated by running recovery to clean all blockset problems (and verify via scan\_locks that problems were cleaned). Only then, start io performance tests  
@@ -2260,7 +2260,7 @@ LBA \= Logical block address
      1. Assembly code \+ c code implementing the nvmeibc\_block\_dp\_ec\_gf.h api of 3 mathematical gf functions  
      2. Nvmeibc\_block\_dp\_ec\_gf\_praid.h wraps the above layer to make it a single slice API  
      3. Nvmeibc\_block\_dp\_ec\_reed\_solomon.h API gets operation/raid-leader-cmd and acts upon it on the entire length of all commands, according to topology  
-527. Explain about slice iteration mechanism using mssa. [Doron Levi](mailto:doron.levi@excelero.com)Todo
+527. Explain about slice iteration mechanism using mssa. [Doron Levi](mailto:doron.levi@ecelro.com)Todo
 
 ### CRC calculations {#crc-calculations}
 
@@ -2492,7 +2492,7 @@ LBA \= Logical block address
         3. Datapath syncs use this framework  
      8. **Elect Chores/wires**:
         1. Hybrid method of callback+Dispatcher+switch case combined with preserving the call stack  
-        2. Todo: [Daniel Gan-Levi](mailto:daniel.g@excelero.com) add More info here.
+        2. Todo: [Daniel Gan-Levi](mailto:daniel.g@ecelro.com) add More info here.
 
 # Datapath error handling and monitoring {#datapath-error-handling-and-monitoring}
 
@@ -2666,7 +2666,7 @@ Some thoughts & observations:
 
 ### Profiling {#profiling}
 
-613. Todo, [Doron Levi](mailto:doron.levi@excelero.com)please expand this section
+613. Todo, [Doron Levi](mailto:doron.levi@ecelro.com)please expand this section
 
 ### Datapath simulation {#datapath-simulation}
 
@@ -2703,7 +2703,7 @@ Some thoughts & observations:
 626. please see example videos of DI analysis which show how the injected debug di blocks look.  
 627. Moreover, you can easily do that via the simulator on your own laptop. Enable debug di, generate injected blocks and analyze them  
 628. Core debug di  
-     1. [Omri Levi](mailto:omri.levi@excelero.com)Fill here.
+     1. [Omri Levi](mailto:omri.levi@ecelro.com)Fill here.
 
 ### DI analysis
 
@@ -3156,7 +3156,7 @@ Some thoughts & observations:
 724. **Virtual no-writehole sync functions**:  
      1. Calculating missing blocks \- restore\_function(), get\_restore\_rv(). In Raid1 this is easy, just copy from any valid source. For EC it is much difficult because various reed solomon calculations are used. In Raid1 restore function cannot fail (as it is just setting pointer to buffer). so rv is irrelevant. In EC this can fail and be asynchronous with hardware offloading.  
      2. destroy\_function() \- If more than P blocks are ruined in a slice we might need to destroy the entire slice, injecting all blocks in the slice with bad sectors. The representation of bad sector depends if we have metadata or not \- and slightly varies for EC and Raid1. In raid1 we inject a bad sector while in EC we mark in metadata that this is a bad sector for read purposes and zero block for parity calculation purposes.  
-     3. sbs\_cleanup() \- Special cleanup function when processing the blockset in slice by slice mode. Exists only in raid1. [Doron Levi](mailto:doron.levi@excelero.com)Why is this still a virtual function and not unified? Why do we treat ndbs in different way in Raid1 and EC. Document this?
+     3. sbs\_cleanup() \- Special cleanup function when processing the blockset in slice by slice mode. Exists only in raid1. [Doron Levi](mailto:doron.levi@ecelro.com)Why is this still a virtual function and not unified? Why do we treat ndbs in different way in Raid1 and EC. Document this?
 
 ### Sync Types and mutation  {#sync-types-and-mutation}
 
@@ -3299,7 +3299,7 @@ Some thoughts & observations:
 748. No write hole  
      1. Design spec ([here](https://docs.google.com/document/d/1v1uk-8fW8y8aEqZXmOrTj1cKvfYwAp_8NtwCe25RI8w/edit))  
      2. Wath the video describing no write hole sync  
-749. [Doron Levi](mailto:doron.levi@excelero.com) Please extend the sections below, marked with bold  
+749. [Doron Levi](mailto:doron.levi@ecelro.com) Please extend the sections below, marked with bold  
 750. **Execution plan**:  
      1. Explain  
 751. **Generic State-machine**:  

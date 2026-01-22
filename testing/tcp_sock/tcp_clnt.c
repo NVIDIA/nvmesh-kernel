@@ -7,9 +7,9 @@
 #include "common.h"
 #include "common.c"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("TCP Client Test");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 static struct workqueue_struct *cwq;
 

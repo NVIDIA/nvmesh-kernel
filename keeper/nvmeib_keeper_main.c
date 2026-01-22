@@ -117,7 +117,7 @@ static inline const char *basename(const char *path)
 
 #include "nvmeib_keeper_iface.h"
 
-MODULE_AUTHOR("NVIDIA");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("Keeps NVMesh resources during upgrade");
 MODULE_LICENSE("GPL and additional rights");
 

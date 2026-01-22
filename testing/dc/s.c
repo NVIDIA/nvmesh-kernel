@@ -1,9 +1,9 @@
 #include "u.h"
 #include "s_dc.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMesh DC test driver - server");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 static int __init _in_(void) /* Constructor */
 {

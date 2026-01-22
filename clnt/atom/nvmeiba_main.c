@@ -2,7 +2,7 @@
 #include "nvmeiba_nvmesh_api.h"
 #include "common/compat/kr_incs_time.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("nvmesh client hot upgrade core");
 MODULE_LICENSE("GPL and additional rights");
 

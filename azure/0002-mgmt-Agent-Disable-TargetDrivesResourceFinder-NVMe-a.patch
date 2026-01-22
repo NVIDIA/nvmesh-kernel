@@ -1,11 +1,11 @@
 From 10c82ee110541622fb9a7c634b2b86b1260e141e Mon Sep 17 00:00:00 2001
-From: Omri Levi <omri.levi@excelero.com>
+From: Omri Levi <omri.levi@ecelero.com>
 Date: Sun, 17 Jan 2021 17:20:34 +0200
 Subject: [PATCH] mgmt Agent: Disable TargetDrivesResourceFinder - NVMe admin
  cmds slow doen azure disks
 
 Change-Id: Ia562e4a47c9860833bb0e4f3e7dff793f3f878ae
-Signed-off-by: Omri <omri.levi@excelero.com>
+Signed-off-by: Omri <omri.levi@ecelero.com>
 ---
  management_cm/managementAgent.py | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

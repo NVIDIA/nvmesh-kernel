@@ -7801,7 +7801,7 @@ static void __exit nvmeibspci_exit(void)
 	_NT(trace_5_nvme_nvmeibspci_exit, "nvmeibspci_exit(): done");
 }
 
-MODULE_AUTHOR("Excelero Storage Ltd.");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_LICENSE("GPL and additional rights");
 MODULE_VERSION("0.1");
 module_init(nvmeibspci_init);

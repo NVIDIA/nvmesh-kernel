@@ -28,7 +28,7 @@
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMeIB Common");
 MODULE_LICENSE("GPL and additional rights");
 

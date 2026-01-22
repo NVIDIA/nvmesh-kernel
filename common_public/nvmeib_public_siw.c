@@ -5,7 +5,7 @@
 #include "nvmeib_public_siw_imp.c"
 #include "nvmeib_public_siwp.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMeIB Public siw");
 MODULE_LICENSE("GPL and additional rights");
 

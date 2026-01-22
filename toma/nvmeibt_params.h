@@ -1,6 +1,6 @@
 /**
  * @file   nvmeibt_params.h
- * @Author Oren (orenl@excelero.com)
+ * @Author Oren (orenl@ecelro.com)
  * @date   Mar, 2017
  * @brief  Misc compile-time parameters
  */

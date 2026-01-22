@@ -1,10 +1,10 @@
 From bae0c468cd309555744f291465cceb46047bd437 Mon Sep 17 00:00:00 2001
-From: Yair Elharrar <yair@excelero.com>
+From: Yair Elharrar <yair@ecelero.com>
 Date: Sun, 17 Jan 2021 12:38:57 +0200
 Subject: [PATCH] Disable periodic smart read
 
 Change-Id: Ib0baccd09150d7757544a2c4e4e6489340a3a883
-Signed-off-by: Yair Elharrar <yair@excelero.com>
+Signed-off-by: Yair Elharrar <yair@ecelero.com>
 ---
  toma/nvmeibt_local_disk.c | 5 +++++
  1 file changed, 5 insertions(+)

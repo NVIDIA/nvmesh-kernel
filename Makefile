@@ -430,7 +430,7 @@ else
         # four argument hash_for_each_possible
         cflags += -DKS_HASHTABLE=1
     else
-        # five argument hash_for_each_possible - use Excelero implementation
+        # five argument hash_for_each_possible - use NVIDIA implementation
         cflags += -DKS_HASHTABLE=0
     endif
 endif

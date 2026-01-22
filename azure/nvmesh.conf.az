@@ -1,5 +1,5 @@
 # NVMesh configuration file
-# This configuration file is utilized by Excelero NVMesh(r) applications for various options.
+# This configuration file is utilized by NVMesh(r) applications for various options.
 
 # Define the management protocol
 # MANAGEMENT_PROTOCOL="<https/http>"

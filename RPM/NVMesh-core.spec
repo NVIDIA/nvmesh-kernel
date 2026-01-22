@@ -2,10 +2,10 @@ Name:               nvmesh-core
 Version:            %{version}
 Release:            %{release}
 Group:              System Environment/Kernel
-Summary:            "nvmesh-core" by Nvidia
+Summary:            "nvmesh-core" by NVIDIA
 
-License:            Commercial Non OSI
-URL:                http://www.excelero.com
+License:            GPL-2.0-only OR Apache-2.0 at your choice
+URL:                http://www.nvidia.com
 Source0:            %{name}
 
 Requires(post):           %{requires_pkgs}
@@ -13,7 +13,7 @@ Autoreq:                        0
 
 %description
 
-© Copyright 2024 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.  This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
 transitional package from nvmesh-core to nvmesh-base, nvmesh-client and nvmesh-target.
 This is a transitional package of NVMesh-core. It can safely be removed.

@@ -57,9 +57,9 @@
 #define IFIN _I("-->\n")
 #define IFOUT _I("<--\n")
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("Tests if RDMA Atomic operations use PCIE Atomics");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 #define NUM_OPS 16
 

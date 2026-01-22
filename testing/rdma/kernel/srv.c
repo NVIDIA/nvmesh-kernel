@@ -20,9 +20,9 @@
 #include "u.h"
 #include "u.c"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("IB Server Test Driver");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 static LIST_HEAD(dev_list);
 

@@ -1,12 +1,9 @@
 #!/bin/bash
 
 ##############################################################################
-#  Copyright (C) 2015-2018 Excelero, Inc. All Rights Reserved.               #
+#  Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.  #
 #                                                                            #
-#  This file is part of Excelero NVMesh software.                            #
-#                                                                            #
-#  Unauthorized copying of this file, via any medium is strictly prohibited  #
-#  Proprietary and confidential                                              #
+#  This file is part of NVMesh software.                                     #
 ##############################################################################
 
 

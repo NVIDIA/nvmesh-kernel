@@ -7,9 +7,9 @@
 #include "manager.h"
 #include "utils.h"
 
-MODULE_AUTHOR("Excelero");
+MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("rpcrdma_backend");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL and additional rights");
 
 
 static struct manager *obj;

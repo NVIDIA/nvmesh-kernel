@@ -7,9 +7,9 @@ Name:				nvmesh-base
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment
-Summary:			"nvmesh-base" by Nvidia
+Summary:			"nvmesh-base" by NVIDIA
 
-License:			Commercial Non OSI
+License:			GPL-2.0-only OR Apache-2.0 at your choice
 URL:				http://www.nvidia.com
 Source0:			%{name}
 
@@ -18,7 +18,7 @@ Autoreq:                        0
 
 %description
 
-© Copyright 2025 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
 "Nvidia nvmesh-base" includes NVMesh base communication and environment tools.
 	Branch: %{branch}

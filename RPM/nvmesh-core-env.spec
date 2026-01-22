@@ -2,9 +2,9 @@ Name:				nvmesh-core
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment
-Summary:			"nvmesh-core" by Excelero
+Summary:			"nvmesh-core" by NVIDIA
 
-License:			Commercial Non OSI
+License:			GPL-2.0-only OR Apache-2.0 at your choice
 URL:				http://www.excelero.com
 Source0:			%{name}
 
@@ -13,7 +13,7 @@ Autoreq:                        0
 
 %description
 
-© Copyright 2015-2020 Excelero, Inc. All rights reserved. This document contains the confidential and proprietary information of Excelero, Inc. Do not reproduce or distribute without the prior written consent of Excelero.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. This document contains the confidential and proprietary information of Excelero, Inc. Do not reproduce or distribute without the prior written consent of Excelero.
 
 "Excelero nvmesh-core" includes NVMesh client and target services and components for a kmod-nvmesh-core environment.
 	Branch: %{branch}
