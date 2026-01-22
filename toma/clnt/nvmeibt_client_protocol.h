@@ -365,23 +365,21 @@ struct nvmeibt_client_msg {
 		u64		cookie;												// Cookie is used as unique identifier for each msg for debug purpose
 		char	reserved_hdr[8];
 	} __attribute__ ((packed)) hdr;
-	union {
-		struct nvmeibt_client_thick_volume {
-			u64		topology_version __attribute__ ((packed));		// Client does not use this field
-			s32		praid_version __attribute__ ((packed));			// Defined by Toma, monotonically increasing generation of protection raid version
-			char	disk_segment_uuid[NVMEIB_GID_STR_MAX];			// For historical reasons, client uses this field to verify the communication channel is not corrupted
-			u32		reserved;										// In V 1.3.0 and before locks were 64bits
-			u32		lock_id __attribute__ ((packed));				// Lock with which client is registered vs toma: union nvmeib_lock_id
-			u64		reservation_mode_version __attribute__ ((packed));	// Client<-->Toma: Both supply the max reservation version, client preempts IO if TOMA > Client
-			u64		conversation_ind;								// Monotonically increased number by client. Toma replies with the number that client sent it.
-			u8		rt_never_reged_on_seg;							// Client->Toma Boolean (on UREG message): If true, client guarantees it never registered/issued IO with this lockid on this seg
-			u8		is_REGISTER_for_recovery;						//
-			char	reserved_thick[14];
-			// Payload: Toma To client: Topology of varying length. Client to Toma: useses the struct below of clients payload
-			u32		data_length __attribute__ ((packed));
-			char	data[0];
-		} __attribute__ ((packed)) thick;
-	};
+	struct nvmeibt_client_thick_volume {
+		u64		topology_version __attribute__ ((packed));		// Client does not use this field
+		s32		praid_version __attribute__ ((packed));			// Defined by Toma, monotonically increasing generation of protection raid version
+		char	disk_segment_uuid[NVMEIB_GID_STR_MAX];			// For historical reasons, client uses this field to verify the communication channel is not corrupted
+		u32		reserved;										// In V 1.3.0 and before locks were 64bits
+		u32		lock_id __attribute__ ((packed));				// Lock with which client is registered vs toma: union nvmeib_lock_id
+		u64		reservation_mode_version __attribute__ ((packed));	// Client<-->Toma: Both supply the max reservation version, client preempts IO if TOMA > Client
+		u64		conversation_ind;								// Monotonically increased number by client. Toma replies with the number that client sent it.
+		u8		rt_never_reged_on_seg;							// Client->Toma Boolean (on UREG message): If true, client guarantees it never registered/issued IO with this lockid on this seg
+		u8		is_REGISTER_for_recovery;						//
+		char	reserved_thick[14];
+		// Payload: Toma To client: Topology of varying length. Client to Toma: useses the struct below of clients payload
+		u32		data_length __attribute__ ((packed));
+		char	data[0];
+	} __attribute__ ((packed)) thick;
 	// data example, for CT_STALE_LOCK, stale_lock_id
 } __attribute__ ((packed));
 
