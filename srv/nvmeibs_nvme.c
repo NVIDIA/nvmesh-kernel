@@ -123,6 +123,10 @@ static bool nvmeibs_use_intr_shaper = true;
 module_param_named(use_intr_shaper, nvmeibs_use_intr_shaper, bool, 0644);
 MODULE_PARM_DESC(use_intr_shaper, "Use interrupt shaper for NVMe completions");
 
+static bool nvmeibs_nvme_doorbell_batch = true;
+module_param_named(nvme_doorbell_batch, nvmeibs_nvme_doorbell_batch, bool, 0644);
+MODULE_PARM_DESC(nvme_doorbell_batch, "Batch NVMe doorbell requests");
+
 static void nvmeibs_free_drives(struct kref *kref);
 
 //OM: increase value as we may be submitting many reset drivven cmds in parallel
@@ -311,6 +315,7 @@ struct nvme_qp {
 	dma_addr_t cq_phys;
 	int cq_len;
 	int cq_head;
+	int old_cq_head;
 	int cq_phase;
 	u32 __iomem *cq_doorbell;
 	struct nvme_command *sq;
@@ -1569,8 +1574,7 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 	nvmeib_qp_stats_on_poll_cq(q->qp_stats, 0, recv);
 
 	q->locking_cpu = smp_processor_id();
-	for (num_handled = 0; num_handled < d_max_completions || d_max_completions == 0;
-			num_handled++) {
+	for (num_handled = 0; num_handled < d_max_completions || d_max_completions == 0; num_handled++) {
 		if (!in_interrupt) {
 			nvmeib_completion_noise_start(NVMEIB_NOISE_COMPLETION);
 		}
@@ -1623,7 +1627,9 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 			q->cq_head = 0;
 			q->cq_phase ^= 1;
 		}
-		writel(q->cq_head, q->cq_doorbell);
+		if (!nvmeibs_nvme_doorbell_batch) {
+			writel(q->cq_head, q->cq_doorbell);
+		}
 		if (callback) {
 			q->locking_cpu = -1;
 			spin_unlock(&q->q_lock); /* irqs stay disabled */
@@ -1636,6 +1642,11 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 
 	if (num_handled != 0) {
 		wake_up(&q->waiting);
+		if (nvmeibs_nvme_doorbell_batch && q->old_cq_head != q->cq_head) {
+			/* as we unlock the q_lock when running the callback other thread/intterupts can update the cq_head before us */
+			writel(q->cq_head, q->cq_doorbell);
+			q->old_cq_head = q->cq_head;
+		}
 		if (q->complete_fn != NULL)
 			(*q->complete_fn)(q);
 	}
