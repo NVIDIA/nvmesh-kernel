@@ -462,5 +462,9 @@ struct nvmeibc_channel *nvmeibc_locks_channel_get_coremash_ch_for_cpu(struct nvm
 								      void *coremask_cookie, int cpu,
 								      struct nvmeib_cpu_mask *ch_cpumask);
 
+int nvmeibc_locks_channel_wq_init(void);
+void nvmeibc_locks_channel_wq_destroy(void);
+struct workqueue_struct *nvmeibc_locks_channel_get_wq(void);
+
 #endif //NVMEIBC_LOCKS_CHANNEL_H
 

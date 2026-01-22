@@ -57,6 +57,46 @@ static bool nvmeibc_lock_ch_scq_offload_thread_tcp = true;
 module_param_named(lock_ch_scq_offload_thread_tcp, nvmeibc_lock_ch_scq_offload_thread_tcp, bool, 0644);
 MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for SCQ offload processing (TCP)");
 
+bool nvmeibc_lock_ch_scq_use_kwq = true;
+module_param_named(lock_ch_scq_use_kwq, nvmeibc_lock_ch_scq_use_kwq, bool, 0644);
+MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Use kernel workqueue instead of kthread for SCQ offload processing (default: false)");
+
+/* Kernel workqueue for locks channel SCQ operations */
+static struct workqueue_struct *nvmeibc_locks_channel_wq;
+
+int nvmeibc_locks_channel_wq_init(void)
+{
+	NFIN;
+	if (nvmeibc_lock_ch_scq_use_kwq) {
+		nvmeibc_locks_channel_wq = nvmeib_public_alloc_workqueue("nvmeibc_locks_scq", WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+		if (!nvmeibc_locks_channel_wq) {
+			_NE(error_nvmeibc_locks_channel_wq_init, "Failed to allocate locks channel SCQ workqueue");
+			NFOUT;
+			return -ENOMEM;
+		}
+		_NT(trace_nvmeibc_locks_channel_wq_init, "Created locks channel SCQ workqueue");
+	}
+	NFOUT;
+	return 0;
+}
+
+void nvmeibc_locks_channel_wq_destroy(void)
+{
+	NFIN;
+	if (nvmeibc_locks_channel_wq) {
+		_ND(trace_nvmeibc_locks_channel_wq_destroy, "Destroying locks channel SCQ workqueue");
+		nvmeib_public_destroy_workqueue(nvmeibc_locks_channel_wq);
+		nvmeibc_locks_channel_wq = NULL;
+	}
+	NFOUT;
+}
+
+struct workqueue_struct *nvmeibc_locks_channel_get_wq(void)
+{
+	return nvmeibc_locks_channel_wq;
+}
+EXPORT_SYMBOL(nvmeibc_locks_channel_get_wq);
+
 static unsigned int nvmeibc_lock_ch_2nd_ch_pcpu = 0;
 module_param_named(lock_ch_2nd_ch_pcpu, nvmeibc_lock_ch_2nd_ch_pcpu, uint, 0644);
 MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu,
@@ -1529,10 +1569,23 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	INIT_LIST_HEAD(&ch->in_progress);
 	ch->net.cm_id = NULL;
 	ch->send_enumerator = 0;
-	params->scq_offload_enb =
-		P2NV(lport)->dev_type == DT_siw ?
-			nvmeibc_lock_ch_scq_offload_thread_tcp :
-			nvmeibc_lock_ch_scq_offload_thread;
+	if (nvmeibc_lock_ch_scq_use_kwq) {
+		/* Use kernel workqueue */
+		params->scq_kwq = nvmeibc_locks_channel_get_wq();
+		params->scq_offload_enb = false;
+		if (!params->scq_kwq) {
+			_NE(error_locks_channel_scq_kwq, "Kernel workqueue not available for SCQ");
+			rv = -ENOMEM;
+			goto out_err;
+		}
+	} else {
+		/* Use kthread */
+		params->scq_kwq = NULL;
+		params->scq_offload_enb =
+			P2NV(lport)->dev_type == DT_siw ?
+				nvmeibc_lock_ch_scq_offload_thread_tcp :
+				nvmeibc_lock_ch_scq_offload_thread;
+	}
 	params->ch_index = 0;
 	params->comp_cpu = NVMEIB_CPU_INVALID;
 
