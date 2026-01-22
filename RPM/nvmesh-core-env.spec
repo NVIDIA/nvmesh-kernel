@@ -34,7 +34,6 @@ mkdir -pv %{buildroot}/opt/NVMesh/target-repo/installation-scripts-%{version}-%{
 mkdir -pv %{buildroot}/opt/NVMesh/client-repo/services
 mkdir -pv %{buildroot}/opt/NVMesh/target-repo/services
 mkdir -pv %{buildroot}/opt/NVMesh/common-repo
-mkdir -pv %{buildroot}/opt/NVMesh/public
 mkdir -pv %{buildroot}/lib/systemd/system
 mkdir -pv %{buildroot}/usr/bin
 mkdir -pv %{buildroot}/etc/modprobe.d
@@ -52,7 +51,6 @@ mkdir -pv %{buildroot}/var/opt/NVMesh/mcs/TOMA
 mkdir -pv %{buildroot}/var/log/NVMesh/trace_daemon
 mkdir -pv %{buildroot}/var/log/NVMesh
 
-cp -rf %{_builddir}/%{name}/public/ %{buildroot}/opt/NVMesh
 cp -rf %{_builddir}/%{name}/toma %{buildroot}/opt/NVMesh/target-repo
 cp -rf %{_builddir}/%{name}/uninstall-target %{buildroot}/opt/NVMesh/target-repo/installation-scripts-%{version}-%{release}
 cp -rf %{_builddir}/%{name}/install.py %{buildroot}/opt/NVMesh/target-repo/installation-scripts-%{version}-%{release}

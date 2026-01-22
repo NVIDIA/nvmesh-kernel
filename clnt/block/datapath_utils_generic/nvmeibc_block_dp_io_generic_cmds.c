@@ -1259,7 +1259,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 		if (!need_turn_off_db(dc))
 			continue;
 		if (dp_cmds_pigbck_has_any(iocmd)) { /* This dirty-bit action was piggibacked */
-			_NE_to_user(t_01_sadbto, DMESG_PREFIX("@DEV_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption, contact Excelero support. Error code: 1020.", cmds->o->nd->name);
+			_NE_to_user(t_01_sadbto, DMESG_PREFIX("@DEV_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1020.", cmds->o->nd->name);
 			BUG();
 		}
 		if (prev_rv == 0) {

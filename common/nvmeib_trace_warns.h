@@ -50,7 +50,7 @@ bool __nvmeib_trace_kernel_warning(const char* file, int line, const char* fmt, 
 		if (st)                                                                                  \
 			nvmeib_public_save_stack_trace_ptr(st);                                              \
 		if (nvmeib_get_hide_warnings_stack()) { \
-			pr_err("Error in critical resource, contact Excelero support. Error code: 1052, uuid=%llu, Additional info in nvmesh log\n", __cookie); \
+			pr_err("Error in critical resource. Error code: 1052, uuid=%llu, Additional info in nvmesh log\n", __cookie); \
 		} else {	\
 			pr_err(___trace_fmt_kernel_warning ". Error code: 1053\n", file, line, __cookie, __strbuf);            \
 		} \

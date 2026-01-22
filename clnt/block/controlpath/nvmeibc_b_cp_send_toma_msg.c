@@ -123,7 +123,7 @@ static inline enum NVMEIBT_CLIENT_LOCK_OP __lock_op_translate_to_toma(enum nvmei
 	case NVMEIBC_LOCK_BLKSET_INFO_READ:  rv = NVMEIBT_CLIENT_BIF_R;	    break;
 	case NVMEIBC_LOCK_BLKSET_INFO_WRITE: rv = NVMEIBT_CLIENT_BIF_W;	    break;
 	default:
-		_NE_to_user(t_00_lottt, DMESG_PREFIX(), "Internal error in communication with the TOMA that is not expected to happen, contact Excelero support. Error code: 1001. Lock operation: @COMP_OPR.", comp_opr); break;
+		_NE_to_user(t_00_lottt, DMESG_PREFIX(), "Internal error in communication with the TOMA that is not expected to happen. Error code: 1001. Lock operation: @COMP_OPR.", comp_opr); break;
 	}
 	return rv;
 }

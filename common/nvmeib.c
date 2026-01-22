@@ -3445,7 +3445,7 @@ out:
 	NFOUT;
 	return fmr;
 #else
-	_NE_dmesg(fmr_usupported_by_kernel, "Unexpected internal error, crashing the operating system to prevent data corruption, contact Excelero support. Error code: 1055.");
+	_NE_dmesg(fmr_usupported_by_kernel, "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1055.");
 	BUG();
 	return NULL;
 #endif

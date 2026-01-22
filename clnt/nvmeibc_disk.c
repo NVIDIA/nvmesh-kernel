@@ -5911,7 +5911,7 @@ void nvmeibc_disk_cmd_piggyback_lock_read_poison_verify(
 		if (nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[0]) ||
 			(c->lock_cnsts->w_blkset_info &&
 			 nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[1]))) {
-			_NE_to_user(t_00_iicgdcc, DMESG_PD_PREFIX("@DISK_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption, contact Excelero support. Error code: 1017. Internal info {@LLX, @LLX}.",
+			_NE_to_user(t_00_iicgdcc, DMESG_PD_PREFIX("@DISK_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1017. Internal info {@LLX, @LLX}.",
 				bcmd->disk->name, c->val[0], c->val[1]);
 			BUG();
 		}

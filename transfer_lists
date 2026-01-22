@@ -18,8 +18,7 @@ base_transfer_list="system.d/nvmeshagent.service \
         config/nvmesh.conf.d/00-readme.conf \
         management_cm \
 		bin/nvmesh_configure_management_server \
-		bin/nvmesh_configure_nics \
-        public"
+		bin/nvmesh_configure_nics"
 
 # Can include both static and compiled files
 base_tools_transfer_list="dist/pytools \
@@ -152,7 +151,6 @@ client_scripts_transfer_list="init.d/nvmeshclient \
 				management_cm \
 				upgrade_scripts/nvmesh-client \
 				rules.d/60-nvmesh.rules \
-				public \
 				clnt/block/datapath_utils_generic/profiling/nvmesh_profiling.py"
 
 toma_symbols="toma/bin/*/nvmeibt_toma.with_symbols"

@@ -31,7 +31,6 @@ cp -rf %{_sourcedir}/%{name} %{_builddir}/
 
 %install
 mkdir -pv %{buildroot}/opt/nvmesh/client-repo
-mkdir -pv %{buildroot}/opt/nvmesh/public
 mkdir -pv %{buildroot}/usr/bin
 mkdir -pv %{buildroot}/lib/systemd/system
 mkdir -pv %{buildroot}/var/run/nvmesh
@@ -42,7 +41,6 @@ mkdir -pv %{buildroot}/var/opt/nvmesh
 mkdir -pv %{buildroot}/opt/nvmesh/bin
 mkdir -pv %{buildroot}/opt/nvmesh/common-repo/tools
 
-cp -rf %{_builddir}/%{name}/public/ %{buildroot}/opt/nvmesh
 cp -rf %{_builddir}/%{name}/system.d/nvmeshagent.service %{buildroot}/lib/systemd/system/
 cp -rf %{_builddir}/%{name}/system.d/nvmeshcm.service %{buildroot}/lib/systemd/system/
 cp -rf %{_builddir}/%{name}/bin/* %{buildroot}/usr/bin/

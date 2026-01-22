@@ -134,14 +134,14 @@ static void __exit nvmeiba_all_os_apis_exit(void) /* Destructor */
 	if ((n_lives != 0)||(n_nvmeibc != 0)) {
 		const int buf_size = 4*PAGE_SIZE;
 		char *printbuf = kzalloc(buf_size, GFP_KERNEL);	// Take one page
-		WARN(true, A_DMESG_PREFIX "Unexpected internal error, operating system may become unstable. Contact Excelero support. Error code: 1007. Internal info (%d, %d)", n_lives, n_nvmeibc);
+		WARN(true, A_DMESG_PREFIX "Unexpected internal error, operating system may become unstable.  Error code: 1007. Internal info (%d, %d)", n_lives, n_nvmeibc);
 		/* Daniel, kernel should prevent service stop/ yum remove, etc so it is
 		   impossible fo this if to occur. If it occurs on older kernels
 		   disable os_api volume f_ops callbacks, coz nvmeiba code will unload
 		   shortely */
 		if (printbuf) {
 			fill_status_h(A, printbuf, buf_size);
-			_NE_to_user(t_02_atom, "Unexpected internal error, Contact Excelero support. Error code: 1008. Internal info %s.\n", printbuf);
+			_NE_to_user(t_02_atom, "Unexpected internal error,  Error code: 1008. Internal info %s.\n", printbuf);
 			kfree(printbuf);
 		}
 	}
@@ -237,7 +237,7 @@ static int nvmeiba_os_apis_tostring(struct nvmeiba_all_os_apis* A, char *buf, in
 		pos -= 2;					// Remove prev ",\n"
 		BUF_ADD("\n}\n");    	  	// Add atoms file epilog
 	}
-	WARN((pos >= buf_len), A_DMESG_PREFIX "Unexpected internal error, buffer too short. Some volumes may not report attachment correctly. Contact Excelero support. Error code: 1003.");  // Acts as _NE_to_user()
+	WARN((pos >= buf_len), A_DMESG_PREFIX "Unexpected internal error, buffer too short. Some volumes may not report attachment correctly.  Error code: 1003.");  // Acts as _NE_to_user()
 	#undef BUF_ADD
 	return pos;
 }

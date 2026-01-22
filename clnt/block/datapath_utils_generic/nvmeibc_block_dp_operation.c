@@ -347,7 +347,7 @@ static void operation_abort_on_error_b4_execution_started(struct operation *o, i
 // Function below, somewhat equivalent to nvmeibc_operation_put() at the end of IO execution
 static void nvmeibc_operation_put_upon_prepare_op_failure(struct operation *o, const int rv)
 {
-	_NW_to_user(t_02_oppof, DMESG_PREFIX("@DEV_NAME"), "Internal error in IO execution that is not expected to happen, contact Excelero support. Error code: 1006. Return code: @RV. Volume Type: @HDR_TYPE. Operation: @OP", o->nd->name, rv, o->nd->type, o->op);
+	_NW_to_user(t_02_oppof, DMESG_PREFIX("@DEV_NAME"), "Internal error in IO execution that is not expected to happen. Error code: 1006. Return code: @RV. Volume Type: @HDR_TYPE. Operation: @OP", o->nd->name, rv, o->nd->type, o->op);
 	dp_cmds_free_all(o->cmds);
 	if (o->locks) {
 		dp_cmds_free_all(o->locks->new_cmds);
