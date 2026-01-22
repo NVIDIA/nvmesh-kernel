@@ -1930,27 +1930,6 @@ out:
 	return rv;
 }
 
-int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
-{
-	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
-	struct nvmeibs_toma_server_proc_buf *msg_buf = NNVMEIBT_BM_CALLOC(tthlse0, max_len);
-	int rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len);
-	*is_server_event = (msg_buf->is_clnt == 0);
-	if (rv < 0) {
-		N_Ef(tthlse1, "Error reading handling local server event rv=@RV!", rv);
-	} else if (*is_server_event) {
-		rv = server_handle_local_event(msg_buf, rv);
-		if (rv < 0)
-			N_Ef(tthlse2, "Error reading handling local server event rv=@RV!", rv);
-	} else {
-		rv = nvmeibt_client_handle_incoming_message(msg_buf, rv);
-		if (rv < 0)
-			N_Ef(tthlse3, "Error reading client incoming message rv=@RV!", rv);
-	}
-	NNVMEIBT_BM_FREE(tthlse4, msg_buf);
-	return rv;
-}
-
 static int change_disk_event(struct nvmeib_disk_info *disk_info, char op)
 {
     struct nvmeibt_local_disk *local_disk;
@@ -2096,6 +2075,27 @@ static void handle_nvmeibs_nl_msg(struct netlink_queue_elem_t *elem)
 		N_Ef(fvwgz83, "Unknown op=@CHAR", opcode);
 	}
 	NFOUT;
+}
+
+int nvmeibt_topology_handle_local_server_event(bool *is_server_event)
+{
+	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
+	struct nvmeibs_toma_server_proc_buf *msg_buf = NNVMEIBT_BM_CALLOC(tthlse0, max_len);
+	int rv = nvmeib_srvr_api_lib_recv_msg_from_server(NULL, msg_buf, max_len);
+	*is_server_event = (msg_buf->is_clnt == 0);
+	if (rv < 0) {
+		N_Ef(tthlse1, "Error reading handling local server event rv=@RV!", rv);
+	} else if (*is_server_event) {
+		rv = server_handle_local_event(msg_buf, rv);
+		if (rv < 0)
+			N_Ef(tthlse2, "Error reading handling local server event rv=@RV!", rv);
+	} else {
+		rv = nvmeibt_client_handle_incoming_message(msg_buf, rv);
+		if (rv < 0)
+			N_Ef(tthlse3, "Error reading client incoming message rv=@RV!", rv);
+	}
+	NNVMEIBT_BM_FREE(tthlse4, msg_buf);
+	return rv;
 }
 
 void nvmeibt_server_lib_consume_incomming_srvr_msgs(void)

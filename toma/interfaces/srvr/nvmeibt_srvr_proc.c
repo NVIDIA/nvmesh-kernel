@@ -245,17 +245,6 @@ int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const c
 }
 
 /***************************** Generic messages *******************************/
-int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len)
-{
-	const int rv = read(fd_srvr2toma, msg, max_len);
-	(void)p;
-	if (rv < (int)sizeof(msg->handle)) {
-		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
-		return -1;
-	}
-	return rv;
-}
-
 static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
 {
 	int rv = 0, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
@@ -540,7 +529,7 @@ static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
 {
 	char c;
 	NFIN;
-	while (read(p->spair[1], &c, 1) == 1);
+	while (read(p->spair[1], &c, 1) == 1);		// If toma send a few messages, drain all wakeups
 	NFOUT;
 }
 
@@ -776,6 +765,17 @@ static void _send_keep_alive_to_server(struct nvmeibt_km_comm *p)
 	kmsg.msg.opcode = csc_keep_alive;
 	kmsg.msg.len = sizeof(kmsg.msg);
 	send_msg_to_kernel(p, &kmsg, false);
+}
+
+int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len)
+{
+	const int rv = read(fd_srvr2toma, msg, max_len);
+	(void)p;
+	if (rv < (int)sizeof(msg->handle)) {
+		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
+		return -1;
+	}
+	return rv;
 }
 
 static void * run(void *v)
