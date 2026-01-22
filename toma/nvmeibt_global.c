@@ -223,11 +223,11 @@ void nvmeibt_global_issue_leader_report_praids_status_to_mgmt(void)
 
 send_json_payload:
 	{
-		char 									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
+		//char 									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
 
-		nvmeibt_strlcpy(unique_key, "praid_status", sizeof(unique_key) - strlen(unique_key));	TODO(Beware, if the report is partial it might delete older reports);
+		//nvmeibt_strlcpy(unique_key, "praid_status", sizeof(unique_key) - strlen(unique_key));	TODO(Beware, if the report is partial it might delete older reports);
 		// nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_praid_id_str(praid), sizeof(unique_key) - strlen(unique_key));
-		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+		nvmeibt_kafka_outgoing_msgs_queue_add(NULL, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 		n_segs_in_report_to_mgmt_total = 0;	// Signify that no need to resend it
 		nvmeibt_global_set_last_global_report_to_mgmt_timespec(nvmeibt_global_get_cur_event_start_time());
 	}
@@ -641,7 +641,7 @@ static void send_report_target_if_needed(void)
 	struct timespec				diff_timeout;
 	struct nvmeibt_local_disk	*local_disk;
 	static struct nvmeibt_Str	*json_payload = NULL;
-	char 						unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
+	//char 						unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
 
 	NFIN;
 	if (!nvmeibt_kafka_is_mgmt_zone_specified()) {
@@ -695,9 +695,9 @@ static void send_report_target_if_needed(void)
 	max_report_target_len = max(max_report_target_len, nvmeibt_Str_strlen(report_target) + 10);
 	nvmeibt_Str_sprintf(report_target, "}}}");
 
-	nvmeibt_strlcpy(unique_key, "report_target", sizeof(unique_key));
-	nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_get_my_hostname(), sizeof(unique_key) - strlen(unique_key));
-	nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(report_target), nvmeibt_Str_strlen(report_target) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+	//nvmeibt_strlcpy(unique_key, "report_target", sizeof(unique_key));
+	//nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_get_my_hostname(), sizeof(unique_key) - strlen(unique_key));
+	nvmeibt_kafka_outgoing_msgs_queue_add(NULL, nvmeibt_Str_str(report_target), nvmeibt_Str_strlen(report_target) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 	global_ctx.last_local_report_target_to_mgmt_time = now;
 	NVMEIBT_GLOBAL_CLEAR_REPORT_TARGET_HAS_NEW_DATA(iwkmzb2);
 out:

@@ -1597,7 +1597,7 @@ static void local_disk_zero_iter_finalize(struct nvmeibt_wq_entry *wq_entry)
 				entry->zero_write_counter, last_pba_zeroed + 1, disk_obj_urn_uuid.str,
 				nvmeibt_get_my_hostname());
 		N_Tf(5bsd3uf, "@STR", nvmeibt_Str_str(json_payload));
-		nvmeibt_kafka_outgoing_msgs_queue_add(disk_obj_urn_uuid.str, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
+		nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*disk_obj_urn_uuid.str*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
 		local_disk->last_zeroing_update_time = nvmeibt_global_get_cur_event_start_time();
 	}
 
