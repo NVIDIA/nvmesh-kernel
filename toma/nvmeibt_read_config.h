@@ -145,8 +145,7 @@ do {																					\
 } while (0)
 
 #define NNVMEIBT_HASH_ADD_OBJ_new(name, __hash, __newobj, __tag, MAX_N,					\
-				get_hash_obj_ptr_addr, __obj_name)										\
-({																						\
+				get_hash_obj_ptr_addr, __obj_name) ({									\
 	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
 	const int						 _config_size = sizeof((__newobj)->from_config);	\
 	const union nvmeib_uuid			*_uuid_ = nvmeibt_##__obj_name##_UUID(__newobj);	\
@@ -184,8 +183,7 @@ do {																					\
 	_rv_;																				\
 })
 
-#define NNVMEIBT_HASH_DEL_OBJ_new(name, __hash, __oldobj, __obj_name)						\
-do {																					\
+#define NNVMEIBT_HASH_DEL_OBJ_new(name, __hash, __oldobj, __obj_name) ({				\
 	const union nvmeib_uuid			*_uuid_ = nvmeibt_##__obj_name##_UUID(__oldobj);	\
 	typeof(__oldobj)				_obj2_ = NULL;										\
 																						\
@@ -196,7 +194,8 @@ do {																					\
 		N_Tf(name, "hash: del " MACRO_DEF_TO_STR(__obj_name) "=@UUID_LE", _uuid_);		\
 		_obj2_->config_tag = CONFIG_TAG_OUTDATED;										\
 	}																					\
-} while (0)
+	_obj2_;																				\
+})
 
 #define NVMEIBT_HASH_N_OBJS(__hash)                                                        \
 	XHASHTABLE_N_ELEMENTS(__hash)
@@ -216,6 +215,12 @@ do {																					\
 	((__oldobj)->config_tag == CONFIG_TAG_OUTDATED)
 
 	// HASH functions for ascii_uuid
+
+
+
+
+
+
 
 #define NNVMEIBT_HASH_GET_OBJ_BY_UUID_ASCII(name, __hash, __uuid_str, __obj_name)		\
 ({																				\
@@ -289,6 +294,65 @@ do {																					\
 		_obj2_->config_tag = CONFIG_TAG_OUTDATED;										\
 	}																					\
 } while (0)
+
+
+
+
+
+
+
+#define NNVMEIBT_HASH_ADD_OBJ_ASCII_new(name, __hash, __newobj, __tag, MAX_N,			\
+				get_hash_obj_ptr_addr, __obj_name) ({									\
+	enum nvmeibt_add_rv				_rv_ = NVMEIBT_ADD_UNINITIALIZED;					\
+	const int _config_size = sizeof((__newobj)->from_config);							\
+	const struct nvmeibt_ascii_uuid	*_uuid_ = nvmeibt_##__obj_name##_UUID(__newobj);	\
+	const char						*_uuid_str = _uuid_->str;							\
+	typeof(__newobj)				_obj2_;												\
+																						\
+	_obj2_ = nvmeib_hash_search_ascii_str(__hash, _uuid_str);							\
+	if (_obj2_) {																		\
+		if (memcmp(&(__newobj)->from_config, &_obj2_->from_config, _config_size) == 0) {\
+			N_Tf(name ## _1, "hash: object already exists " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);		\
+			_rv_ = NVMEIBT_ADD_ALREADY_UP_TO_DATE;										\
+		} else if (_obj2_->config_tag == (__tag)) {										\
+			N_Ef(name ## _error_1, "hash: Same ID diff objects " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);	\
+			_rv_ = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;								\
+		} else {																		\
+			_obj2_->from_config = (__newobj)->from_config;								\
+			N_Tf(name ## _2, "hash: object modified " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);			\
+			_rv_ = NVMEIBT_ADD_MODIFIED;												\
+		}																				\
+	} else {																			\
+		if (nvmeib_hash_get_n_elements(__hash) > MAX_N) {									\
+			N_Wf(name ## _4, "hash: too many entires " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);			\
+		}																				\
+		_obj2_ = (__newobj);															\
+		_uuid_str = nvmeibt_##__obj_name##_UUID(_obj2_)->str;							\
+		N_Tf(name ## _3, "hash: add " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);\
+		nvmeib_hash_add_ascii_str(__hash, _uuid_str, _obj2_);							\
+		_rv_ = NVMEIBT_ADD_NEW;															\
+	}																					\
+	if (_obj2_ != NULL) {																\
+		_obj2_->config_tag = (__tag);													\
+	}																					\
+	get_hash_obj_ptr_addr = _obj2_;		(void)get_hash_obj_ptr_addr;					\
+	_rv_;																				\
+})
+
+#define NNVMEIBT_HASH_DEL_OBJ_ASCII_new(name, __hash, __oldobj, __obj_name) ({			\
+	const struct nvmeibt_ascii_uuid	*_uuid_ = nvmeibt_##__obj_name##_UUID(__oldobj);	\
+	const char						*_uuid_str = _uuid_->str;							\
+	typeof(__oldobj)				_obj2_ = NULL;										\
+																						\
+	_obj2_ = nvmeib_hash_delete_ascii_str(__hash, _uuid_str);							\
+	if (_obj2_ == NULL) {																\
+		N_Ef(name ## _error, "hash: unknown entry " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);	\
+	} else {																			\
+		N_Tf(name, "hash: del " MACRO_DEF_TO_STR(__obj_name) "=@UUID", _uuid_str);		\
+		_obj2_->config_tag = CONFIG_TAG_OUTDATED;										\
+	}																					\
+	_obj2_;																				\
+})
 
 #endif	// #ifndef NVMEIBT_CONFIG_READ_FILE
 
