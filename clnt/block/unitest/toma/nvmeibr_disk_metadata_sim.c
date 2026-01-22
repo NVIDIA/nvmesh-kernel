@@ -72,12 +72,12 @@ static void  __gpt_entry_encode(struct gpt_entry *g) {
 #define SERJIO_DB_PARTITION_GUID "30909090-0000-0000-0000-000000000000"
 void nvmeibr_disk_metadata_store_entries(struct serverSimulator *srv, struct gpt_entry *ent, unsigned max_ent, u32 *ent_crc) {
 	struct ramDiskSimulator * D = &srv->ramDisk;
-	const union nvmeib_uuid toma_md_uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_CONST;
-	const union nvmeib_uuid journal_uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
-	const union nvmeib_uuid serj_db_uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
-	const union nvmeib_uuid seg_ec__uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
+	const union nvmeib_uuid toma_md_uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid journal_uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid serj_db_uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid seg_ec__uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
 	u64 serjio_jour_start = ~0, serjio_jour_length = ~0, serjio_db_start = ~0, serjio_db_length = ~0;
-	//const union nvmeib_uuid seg_noj_uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
+	//const union nvmeib_uuid seg_noj_uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
 	struct gpt_entry tmp;
 	struct gpt_entry *cur = ent ? ent : &tmp;								// Entries iterator
 	struct disk_sgmnts disk_sgmnts = tTopoOfNVMesh_list_disk_sgmnts(srv->simToma.globalTopo, srv->ramDisk.uniqueID, true);

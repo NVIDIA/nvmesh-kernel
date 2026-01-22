@@ -23,7 +23,7 @@ if [ "$1" = "0" -o "$1" = "remove" ]; then
 fi
 
 if ! $isUpgrade; then
-	echo "Uninstalling Excelero NVMesh(r) client"
+	echo "Uninstalling NVMesh(r) client"
 	isSysD=false
 
 	if ! pidof systemd > /dev/null 2>&1; then

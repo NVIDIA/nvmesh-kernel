@@ -9,10 +9,10 @@ toma_udp="${6:-UNSET}" # if target rpm
 rpm_build_type="$RPM_BUILD_TYPE" #exported: kmod/kmod_only/regular (default)
 is_development="$IS_DEVELOPMENT" #exported via build.sh using build_sh_conf: IS_DEVELOPMENT=yes (default=no)
 rpm_build_dir=`readlink -f ~/rpmbuild`
-OLD_EXCELERO_PREFIX="NVMesh-"
-EXCELERO_PREFIX="nvmesh-"
-rpm_name=${EXCELERO_PREFIX}${kind}
-old_rpm_name=${OLD_EXCELERO_PREFIX}${kind}
+OLD_NVMESH_PREFIX="NVMesh-"
+NVMESH_PREFIX="nvmesh-"
+rpm_name=${NVMESH_PREFIX}${kind}
+old_rpm_name=${OLD_NVMESH_PREFIX}${kind}
 rpm_source_path="$rpm_build_dir/SOURCES/$rpm_name"
 ARCH=`uname -m`
 TOOLS_DIR=`realpath "./\`dirname "${BASH_SOURCE[0]}"\`/../tools/"`
@@ -210,8 +210,8 @@ fi
 
 for rpm_kind in $rpms_to_build; do
 	if $create_kmod && [ "$rpm_kind" == "kmod-core" ]; then
-		rpm_name="kmod-${EXCELERO_PREFIX}core-${KERN_VER_NO_ARCH}"
-		old_rpm_name="kmod-${OLD_EXCELERO_PREFIX}core-${KERN_VER_NO_ARCH}"
+		rpm_name="kmod-${NVMESH_PREFIX}core-${KERN_VER_NO_ARCH}"
+		old_rpm_name="kmod-${OLD_NVMESH_PREFIX}core-${KERN_VER_NO_ARCH}"
 		rpm_source_path="$rpm_build_dir/SOURCES/$rpm_name"
 	fi
 

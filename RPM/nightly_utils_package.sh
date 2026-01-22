@@ -2,7 +2,7 @@
 
 USAGE_MSG="Usage: nightly_utils_package.sh -b <branch_name>"
 REPO_MACHINE='10.0.1.198'
-TMP_PATH='/home/excelero/temp_nvmesh_utils'
+TMP_PATH='/home/nvmesh/temp_nvmesh_utils'
 EXECUTABLES_MACHINE='c6.4m-o4.2-1.0.0.0-k2.6.32-696.6.3.el6_base_for_pyinstaller_executables'
 
 got_branch=0
@@ -71,9 +71,9 @@ if [ $pkg_count -ne 2 ]; then
 fi
 
 log info "copying the packages to the repo machine: $REPO_MACHINE"
-scp -r $output_dir/* excelero@$REPO_MACHINE:$TMP_PATH
+scp -r $output_dir/* nvmesh@$REPO_MACHINE:$TMP_PATH
 
 [[ $? -eq 0 ]] || log_and_exit "failed to copy packages to: $REPO_MACHINE:$TMP_PATH, exiting"
 
 log info "Triggering update repo script on: $REPO_MACHINE"
-ssh excelero@${REPO_MACHINE} "sudo /usr/local/bin/update_nvmesh_utils_repo.sh"
+ssh nvmesh@${REPO_MACHINE} "sudo /usr/local/bin/update_nvmesh_utils_repo.sh"

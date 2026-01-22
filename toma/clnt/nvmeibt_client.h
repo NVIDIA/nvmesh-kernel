@@ -10,7 +10,7 @@ struct nvmeibt_local_disk;
 struct nvmeibt_client {												// Describes connection of client to local disk
 	union nvmeib_uuid					client_provided_uuid;		// UUID binary, like: 0x124a1d9f09d21c25eb816ae030a1f98e
 	struct nvmeibt_urn_uuid				client_provided_urn_uuid;	// UUID text formatted, like: 251cd209-9f1d-4a12-8ef9-a130e06a81eb
-	struct nvmeibt_host_name			net;						// Like: nvme112.excelero.com
+	struct nvmeibt_host_name			net;						// Like: nvme112.acme.com
 	struct nvmeibt_ascii_uuid			ldisk_id;					// Like: S3HCNX0JC01988.1
 	struct nvmeibt_local_disk			*local_disk;
 	u32									cid;						// Small number [0..4K]

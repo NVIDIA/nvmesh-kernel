@@ -822,7 +822,7 @@ static void end_stats(struct bio *bio, struct gendisk *disk, unsigned long start
 #include "../../common/nvmeib_scalabale_refcount.h"
 struct reqq_data {								// Saved in kernel's "struct request_queue"->queuedata
 	struct scalabale_refcount	io_refcount;	// Counter of IO's currently active on the volume. also indicates the need to fail requests when it refuses the provide a reference.
-	/*Daniel: Todo, here put Excelero elevator*/
+	/*Daniel: Todo, here put NVMesh's elevator*/
 	bio_exec_fn *bio_executor;
 	u16 vol_refcount;							// Debug only field. How many vols use this ref count
 };

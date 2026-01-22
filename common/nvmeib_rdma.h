@@ -62,7 +62,7 @@ struct nvmeib_rdma_listen_ib_params {
 
 /* roce specific parameters */
 struct nvmeib_rdma_listen_roce_params {
-	int port;	/* port -> in Excelero case the tcp port */
+	int port;	/* port -> in NVMesh case the tcp port */
 	bool ipv4_only;
 	bool iw_primary;		/* For iWARP, is this the primary listener */
 	int iw_2nd_base_port;		/* Base port for iWARP secondary listeners */

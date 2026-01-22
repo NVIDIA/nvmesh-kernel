@@ -402,9 +402,9 @@ static ssize_t server_store_ib_address(
 		goto out;
 	}
 	q->sib_family = AF_IB;
-	q->sib_sid = cpu_to_be64(EXCELERO_SERVICE_ID);
-	q->sib_sid_mask = cpu_to_be64(EXCELERO_SERVICE_ID_MASK);
-	q->sib_pkey = cpu_to_be16(EXCELERO_PKEY);
+	q->sib_sid = cpu_to_be64(NVMESH_SERVICE_ID);
+	q->sib_sid_mask = cpu_to_be64(NVMESH_SERVICE_ID_MASK);
+	q->sib_pkey = cpu_to_be16(NVMESH_PKEY);
 	xetrace("server GID is %pI6\n",
 		((struct sockaddr_ib *)&o->s_sin)->sib_addr.sib_raw);
 
@@ -560,9 +560,9 @@ static ssize_t client_store_ib_address(
 	q->sib_family = AF_IB;
 	/* any port for the client bind address */
 	q->sib_sid = cpu_to_be64(
-		((0 & EXCELERO_SERVICE_ID_MASK) | RDMA_IB_IP_PS_IB));
-	q->sib_sid_mask = cpu_to_be64(EXCELERO_SERVICE_ID_MASK);
-	q->sib_pkey = cpu_to_be16(EXCELERO_PKEY);
+		((0 & NVMESH_SERVICE_ID_MASK) | RDMA_IB_IP_PS_IB));
+	q->sib_sid_mask = cpu_to_be64(NVMESH_SERVICE_ID_MASK);
+	q->sib_pkey = cpu_to_be16(NVMESH_PKEY);
 	xetrace("server input gid %s\n", srv);
 	q = (struct sockaddr_ib *)&o->s_sin;
 	if (in6_pton(srv, -1, q->sib_addr.sib_raw, -1, NULL))
@@ -573,10 +573,10 @@ static ssize_t client_store_ib_address(
 	}
 	q->sib_family = AF_IB;
 	q->sib_sid = cpu_to_be64(
-		((EXCELERO_SERVICE_ID & EXCELERO_SERVICE_ID_MASK) |
+		((NVMESH_SERVICE_ID & NVMESH_SERVICE_ID_MASK) |
 		 RDMA_IB_IP_PS_IB));
-	q->sib_sid_mask = cpu_to_be64(EXCELERO_SERVICE_ID_MASK);
-	q->sib_pkey = cpu_to_be16(EXCELERO_PKEY);
+	q->sib_sid_mask = cpu_to_be64(NVMESH_SERVICE_ID_MASK);
+	q->sib_pkey = cpu_to_be16(NVMESH_PKEY);
 
 	xttrace("client GID %pI6 server GID is %pI6\n",
 		((struct sockaddr_ib *)&o->c_sin)->sib_addr.sib_raw,

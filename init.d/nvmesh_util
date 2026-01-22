@@ -20,7 +20,7 @@ TRACE_DAEMON_LOCKFILE_DIR=/var/run/nvmesh
 TRACE_DAEMON_DIR=$LOG_DIR/trace_daemon
 TRACE_MAX_BUFF_PER_LOG=25000
 TRACE_MAX_LOGS=4
-DEFAULT_TCP_BASE_PORT_ID=7915	# Corresponds to NVMEIB_EXCELERO_IWARP_PORT_ID of
+DEFAULT_TCP_BASE_PORT_ID=7915	# Corresponds to NVMEIB_IWARP_PORT_ID of
 				# common/nvmeib.h and nvmesh_set_tcp_affinity
 
 DEBUG="Debug"

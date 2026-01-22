@@ -139,7 +139,7 @@ measure_performance() {
     echo "Unmounting and deleting $MOUNT_DIR"
     umount $MOUNT_DIR
     rm -rf $MOUNT_DIR
-    chown daniel:excelero pt_*.*
+    chown daniel: pt_*.*
 }
 
 measure_performance_multi_slice_ec() {

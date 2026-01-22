@@ -434,7 +434,7 @@ if $COMPILE_NVMFT; then
 	if ! $IS_COMPILATOR; then
 		SPDK_BRANCH_NAME="master"
 		echo "Cloning NVMfT/spdk repo branch $SPDK_BRANCH_NAME"
-		git clone -b "$SPDK_BRANCH_NAME" git@gitlab.excelero.com:excelero/spdk.git
+		git clone -b "$SPDK_BRANCH_NAME" git@gitlab.acme.com:acme/spdk.git
 		cd spdk
 	fi
 

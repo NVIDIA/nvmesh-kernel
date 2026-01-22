@@ -74,7 +74,7 @@ module_param_named(tracer_debug_level, tracer_nvmeibm_debug_level, int, 0644);
 MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 EXPORT_SYMBOL(tracer_nvmeibm_debug_level);
 
-unsigned int nvmeib_tcp_base_port_id = NVMEIB_EXCELERO_IWARP_PORT_ID;
+unsigned int nvmeib_tcp_base_port_id = NVMEIB_IWARP_PORT_ID;
 module_param_named(tcp_base_port_id, nvmeib_tcp_base_port_id, uint, 0444);
 MODULE_PARM_DESC(tcp_base_port_id, "The first (base) port ID for secondary SIW (iWARP) listeners.");
 
@@ -163,11 +163,11 @@ EXPORT_SYMBOL(nvmeib_is_dev_in_blacklist);
 
 static void nvmeib_set_tcp_base_port_id(void)
 {
-	if (nvmeib_tcp_base_port_id < NVMEIB_EXCELERO_IWARP_PORT_ID) {
+	if (nvmeib_tcp_base_port_id < NVMEIB_IWARP_PORT_ID) {
 		_NE_dmesg(err_nvmeib_set_tcp_base_port_id,
 				  "override nvmeib_tcp_base_port_id=@UINT with default @UINT",
-				  nvmeib_tcp_base_port_id, NVMEIB_EXCELERO_IWARP_PORT_ID);
-		nvmeib_tcp_base_port_id = NVMEIB_EXCELERO_IWARP_PORT_ID;
+				  nvmeib_tcp_base_port_id, NVMEIB_IWARP_PORT_ID);
+		nvmeib_tcp_base_port_id = NVMEIB_IWARP_PORT_ID;
 	}
 }
 

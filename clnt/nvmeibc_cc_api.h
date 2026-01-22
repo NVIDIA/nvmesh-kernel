@@ -75,7 +75,7 @@ struct nvmeibc_control_api {
 	struct c_api_proc cli;				// Command line interface
 	struct nvmeib_pet_base_controller* io_pet_controller;
 	struct proc_dir_entry *proc_dir;	// Location where ccapi proc files/msg loops reside (typically /proc/nvmeibc/)
-	struct c_api_bdev_ioctls ioctls;	// Excelero specific ioctls
+	struct c_api_bdev_ioctls ioctls;	// NVMesh specific ioctls
 
 	long long clnt_2_mgmt_report_id;		// Initialized to DEFAULT_UPSTREAM_VALUE (-1). Set by mgmt with MCS_UPDATE_CLIENT_TOKEN_MSG. Increments whenever volume: is attached/detached/IO enabled for the first time
 	long long clnt_2_mgmt_fullconf_token;	// Initialized to DEFAULT_UPSTREAM_VALUE (-1). Set by mgmt with MCS_UPDATE_CLIENT_TOKEN_MSG. Token with which mgmt requests client to report its full configuration

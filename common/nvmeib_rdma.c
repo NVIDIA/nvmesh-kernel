@@ -5743,7 +5743,7 @@ int nvmeib_rdma_find_path(struct nvmeib_rdma_path_info *info)
 	}
 
 	link_layer = rdma_port_get_link_layer(info->dev->ib_dev, info->src_port);
-	is_roce = info->service_port == NVMEIB_EXCELERO_PORT_ID;
+	is_roce = info->service_port == NVMEIB_PORT_ID;
 	if ((is_roce && link_layer != IB_LINK_LAYER_ETHERNET) ||
 		(!is_roce && link_layer != IB_LINK_LAYER_INFINIBAND)) {
 		_NT(trace_2_nvmeib_rdma_nvmeib_rdma_find_path, "No match between link layer (@LINK_LAYER) and destination address (@IS_ROCE) "

@@ -311,7 +311,7 @@ static void write_gpt_entries_json(struct nvmeibt_local_disk *cur_local_disk, st
 	struct nvmeibt_disk_gpt_partition_entry			*cur_gpt_entry;
 	union nvmeib_uuid								mgmt_db_uuid;
 	BOOL											is_seg_found;
-	BOOL											is_excelero_data_partition;
+	BOOL											is_nvmesh_data_partition;
 	struct nvmeibt_seg_active						*seg_active;
 
 	NFIN;
@@ -321,7 +321,7 @@ static void write_gpt_entries_json(struct nvmeibt_local_disk *cur_local_disk, st
 		cur_gpt_entry = &cur_local_disk->main_gpt.entries[part_idx];
 		mgmt_db_uuid = nvmeib_uuid_null_val;
 		is_seg_found = false;
-		is_excelero_data_partition = false;
+		is_nvmesh_data_partition = false;
 
 		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(cur_gpt_entry)) {
 			continue;
@@ -344,31 +344,31 @@ static void write_gpt_entries_json(struct nvmeibt_local_disk *cur_local_disk, st
 		} else {
 			mgmt_db_uuid = nvmeib_uuid_null_val;
 		}
-		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_DATA_PARTITION_TYPE_GUID_DATA_OLD) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID)) {
+		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID_OLD) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_DATA_PARTITION_TYPE_GUID_DATA_OLD) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID)) {
 			sprintf(owner, "nvmesh");
-			is_excelero_data_partition = true;
+			is_nvmesh_data_partition = true;
 		} else {
 			sprintf(owner, "system");
 		}
 #if NO_USE_FOR_THIS_INFO
-		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID)) {
-			is_excelero_md_partition = true;
+		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID_OLD) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID)) {
+			is_nvmesh_md_partition = true;
 		}
 #endif	// #if NO_USE_FOR_THIS_INFO
 		char16_str_to_str(cur_gpt_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, part_name);
 		mgmt_db_uuid_to_report = nvmeibt_union_uuid_to_urn_uuid(&mgmt_db_uuid);
 		partition_uuid = nvmeibt_union_uuid_to_urn_uuid(&cur_gpt_entry->partition_guid);
 		// If there is no segment but there is a gpt entry, we mark it as zeroed, this shouldn't happen generally so we issue an error but try to survive.
-		if (!is_seg_found && !is_excelero_data_partition) {
+		if (!is_seg_found && !is_nvmesh_data_partition) {
 			N_Wf(vxime6a, "gpt entry=@ENTRY_STR no seg found, assuming finished zeroing but not yet deleted..", partition_uuid.str);
 		}
 		nvmeibt_Str_sprintf(report_target,

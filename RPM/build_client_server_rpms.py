@@ -2,7 +2,7 @@
 
 import sys, subprocess, getopt, json, os.path, os, fcntl, time
 
-EXCELERO_PREFIX = 'NVMesh-'
+NVMESH_PREFIX = 'NVMesh-'
 SERVER_DIR_NAME = 'NVMesh-target'
 CLIENT_DIR_NAME = 'NVMesh-client'
 
@@ -61,7 +61,7 @@ def copy_git_repo():
 
 	print 'Cloning git repo...'
 
-	clone_cmd = 'cd /tmp; git clone -b "{}" git@gitlab.excelero.com:{}/nvmesh.git; cd nvmesh'.format(
+	clone_cmd = 'cd /tmp; git clone -b "{}" git@gitlab.nvidia.com:{}/nvmesh.git; cd nvmesh'.format(
 			BRANCH, PRIVATE_REPOSITORY)
 	gitclone_proc = subprocess.Popen(clone_cmd, shell=True)
 	proc_res = gitclone_proc.wait()
@@ -364,7 +364,7 @@ def main(argv):
 	global FORCE
 	FORCE = False
 	global PRIVATE_REPOSITORY
-	PRIVATE_REPOSITORY = 'excelero'
+	PRIVATE_REPOSITORY = 'nvidia'
 	global SECTOR_SHIFT
 	SECTOR_SHIFT = False
         global SIGN_RPM

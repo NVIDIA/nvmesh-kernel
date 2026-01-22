@@ -470,9 +470,9 @@ struct nvmeibc_disk {
 	char name[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];				// like: S3HCNX0K501681.1
 	char full_name[NVMEIB_HOST_NAME_LEN +
 		NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE + 2];				// Exactly: disk_host-disk_name+
-	char disk_host[NVMEIB_HOST_NAME_LEN];				// like: n111.excelero.com,
+	char disk_host[NVMEIB_HOST_NAME_LEN];				// like: n111.acme.com,
 	/*node that holds the disk*/
-	char config_node_id[NVMEIB_HOST_NAME_LEN];			// like: n111.excelero.com,
+	char config_node_id[NVMEIB_HOST_NAME_LEN];			// like: n111.acme.com,
 	/* The disk's admin nics - remote and local.
 	   dup of all nics from configuration (see arnic-dup) */
 	struct list_head arnics;

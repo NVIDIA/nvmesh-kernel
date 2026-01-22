@@ -106,7 +106,7 @@ static int nvmeibc_block_trans_standard_inq_page(const struct nvmeibc_os_api *os
 	inq_response[4] = ADDITIONAL_STD_INQ_LENGTH;
 	inq_response[5] = 0; // protect;      /* sccs=0 | acc=0 | tpgs=0 | pc3=0 */
 	inq_response[7] = (0x01 << 1);       /* wbus16=0 | sync=0 | vs=0 */
-	memcpy( (char*)&inq_response[8], "Excelero", 8);
+	memcpy( (char*)&inq_response[8], "NVMesh  ", 8);
 	memcpy( (char*)&inq_response[16], "NVMesh          " , 16);
 	strlcpy((char*)&inq_response[23], __stringify(NVMESH_RELEASE) ,9);
 	memcpy( (char*)&inq_response[32], "    ", 4);

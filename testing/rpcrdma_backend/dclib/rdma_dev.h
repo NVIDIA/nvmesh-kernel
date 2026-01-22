@@ -5,9 +5,9 @@
 #include "xib_incs.h"
 #include "utils.h"
 
-#define EXCELERO_SERVICE_ID 6988676976697999ULL
-#define EXCELERO_SERVICE_ID_MASK (~RDMA_IB_IP_PS_MASK)
-#define EXCELERO_PKEY 0xffff
+#define NVMESH_SERVICE_ID 6988676976697999ULL
+#define NVMESH_SERVICE_ID_MASK (~RDMA_IB_IP_PS_MASK)
+#define NVMESH_PKEY 0xffff
 
 struct manager;
 struct ib_device;

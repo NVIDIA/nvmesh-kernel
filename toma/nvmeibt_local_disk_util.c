@@ -757,7 +757,7 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 		 *
 		 * BUT !!!!
 		 * [root@nvme31 13:04:16 ~]$ uname -a
-		 * Linux nvme31.excelero.com 4.15.0-141-generic #145-Ubuntu SMP Wed Mar 24 18:08:07 UTC 2021 x86_64 x86_64 x86_64 GNU/Linux
+		 * Linux nvme31.acme.com 4.15.0-141-generic #145-Ubuntu SMP Wed Mar 24 18:08:07 UTC 2021 x86_64 x86_64 x86_64 GNU/Linux
 		 *
 		 * We noticed a bug in the stock NVME driver where the chardev of say nvme0, actually controls the blkdev of nvme1(nvme1n1),
 		 *  so an unbind and bind affects unexpected block devices.

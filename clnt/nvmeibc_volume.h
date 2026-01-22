@@ -63,7 +63,7 @@ struct nvmeibc_volume {
 	struct nvmeibc_volume_header hdr; /* Configuration header */
 
 	/*name of the client concatenated with the name of the device*/
-	char full_name[NVMEIB_HOST_NAME_LEN + NVMEIBC_BD_NAME_LEN + 2];		// Example: "n118.excelero.com_mc0003-vol_ec"  +2 for ('-','\0'). Dont confuse with hdr.dev_name
+	char full_name[NVMEIB_HOST_NAME_LEN + NVMEIBC_BD_NAME_LEN + 2];		// Example: "n118.acme.com_mc0003-vol_ec"  +2 for ('-','\0'). Dont confuse with hdr.dev_name
 	const struct nvmeibc_cinst_params_main *p;						// To whihc client instance this volume belongs
 
 	/* volume guard and status to handle properly volume creation and offline

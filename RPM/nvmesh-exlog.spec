@@ -12,9 +12,9 @@ Requires:			%{requires_pkgs}
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-"Excelero nvmesh-exlog" component.
+"Nvidia nvmesh-exlog" component.
 	Branch: %{branch}
 	Commit: %{commit_id}
 	Kernel: %{kern_ver}

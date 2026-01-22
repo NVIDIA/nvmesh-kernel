@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # nvmeshclient	This shell script takes care of starting and stopping
-#		the Excelero NVMesh(r) client
+#		the NVMesh(r) client
 #
 # chkconfig: 345 20 80
 # description: NVMesh client

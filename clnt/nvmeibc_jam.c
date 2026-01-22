@@ -39,7 +39,7 @@
  *    triggering this op.
  */
 
-//https://excelero.atlassian.net/browse/EC-2945 - same @tokens for JRI & JRE
+// EC-2945 - same @tokens for JRI & JRE
 
 #define NJAM_FMT(_disk_, fmt, ...) \
 		"JAM @FUNCTION; Disk @DISK_ID_STR (@JAM_DISK); Range @JRNL_RNG_IDX; GenID @JRNL_RNG_GEN_ID: " fmt, \

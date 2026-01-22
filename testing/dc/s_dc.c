@@ -265,9 +265,9 @@ static ssize_t store_ib_address(struct dc_info *info, char *page, size_t count)
 		goto out;
 	}
 	q->sib_family = AF_IB;
-	q->sib_sid = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
-	q->sib_sid_mask = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID_MASK);
-	q->sib_pkey = cpu_to_be16(NVMEIB_EXCELERO_PKEY);
+	q->sib_sid = cpu_to_be64(NVMEIB_SERVICE_ID);
+	q->sib_sid_mask = cpu_to_be64(NVMEIB_SERVICE_ID_MASK);
+	q->sib_pkey = cpu_to_be16(NVMEIB_PKEY);
 	trace("server GID is %pI6\n",
 		((struct sockaddr_ib *)&info->s_sin)->sib_addr.sib_raw);
 	info->last_error = 0;

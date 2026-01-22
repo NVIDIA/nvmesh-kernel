@@ -11411,7 +11411,7 @@
             "%d": 8
         }
     },
-    "@NVMEIB_EXCELERO_PORT_ID": {
+    "@NVMEIB_PORT_ID": {
         "size": 32,
         "type": "s32",
         "fmt": "%d",

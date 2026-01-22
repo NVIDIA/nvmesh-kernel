@@ -221,7 +221,7 @@ create_nvmesh_repo() {
 
 	echo "[NVMesh]
 name=NVMesh repository
-baseurl=https://$user:$password@repo.excelero.com/nvmesh/1.3/$os/$os_ver/x86_64
+baseurl=https://$user:$password@repo.acme.com/nvmesh/1.3/$os/$os_ver/x86_64
 gpgcheck=0
 enabled=1" > $nvmesh_repo_file
 

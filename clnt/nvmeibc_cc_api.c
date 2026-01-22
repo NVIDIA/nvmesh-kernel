@@ -1436,7 +1436,7 @@ _send_to_cli:
 	rv = nvmeibc_send_to_cli(cc_api, cli_reply);
 	_NT(error_1_cc_api_send_cli_error_reply, DMESG_PREFIX("CLI Error: ") "replying with @CLI_REPLY, send_rv=@RV", cli_reply, rv);
 }
-// block device excelero proprietry ioctl
+// block device nvmesh proprietry ioctl
 #define __cli_msg_is_ioctl(buf) ((buf)[0] == '#' || \
 								 (buf)[0] == '@' || \
 								 (buf)[0] == MAIN_IOCTL_MARKER)

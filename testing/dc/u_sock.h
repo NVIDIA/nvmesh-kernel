@@ -10,8 +10,8 @@
 	struct sock *)0)->sk_data_ready, void (*)(struct sock *, int)) ? \
 	(void *)a : (void *)b)
 
-#define EXCELERO_KEEPALIVE_DELAY_MS_DEFAULT 2000
-#define EXCELERO_IDLE_TIMEOUT_MS_DEFAULT 30000
+#define NVMESH_KEEPALIVE_DELAY_MS_DEFAULT 2000
+#define NVMESH_IDLE_TIMEOUT_MS_DEFAULT 30000
 
 /*
 	TCP_NODELAY
@@ -24,7 +24,7 @@
               TCP_CORK; however, setting this option forces an explicit
               flush of pending output, even if TCP_CORK is currently set.
 */
-#define EXCELERO_TCP_NODELAY 1
+#define NVMESH_TCP_NODELAY 1
 
 /*
 	TCP_USER_TIMEOUT (since Linux 2.6.37)
@@ -59,9 +59,9 @@
               Further details on the user timeout feature can be found in
               RFC 793 and RFC 5482 ("TCP User Timeout Option").
 */
-#define EXCELERO_TCP_USER_TIMEOUT 0x7fffffff
+#define NVMESH_TCP_USER_TIMEOUT 0x7fffffff
 
-#define EXCELERO_MAX_PAYLOAD_BYTES (4096 - sizeof(struct test_msg))
+#define NVMESH_MAX_PAYLOAD_BYTES (4096 - sizeof(struct test_msg))
 
 struct test_msg {
 	__be16 magic;

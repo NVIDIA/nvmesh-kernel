@@ -32,7 +32,7 @@
 #include "nvmeibc_nr_lat_meas.h"
 #include "nvmeibc_disk_local_dma_pools.h"
 
-// https://excelero.atlassian.net/browse/EC-2944 - this file should NOT include and parse disk io cmd to get to block command
+// EC-2944 - this file should NOT include and parse disk io cmd to get to block command
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_stages.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 
@@ -12888,7 +12888,7 @@ int nvmeibc_disk_lionic_rionic_find_path(struct nvmeibc_io_lnic *lionic)
 	path->sgid = lionic->ib_gid;
 	path->dgid = rionic->ib_gid;
 	path->service_id = (layer == IB_LINK_LAYER_INFINIBAND) ?
-		cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID) : 0;
+		cpu_to_be64(NVMEIB_SERVICE_ID) : 0;
 	/* use stuff from port we assume never changes */
 	path->pkey = cpu_to_be16(port->pkey);
 	info.dev = P2NV(port);
@@ -12896,14 +12896,14 @@ int nvmeibc_disk_lionic_rionic_find_path(struct nvmeibc_io_lnic *lionic)
 	info.path = path;
 	info.src_port = port->port;
 	if (layer == IB_LINK_LAYER_INFINIBAND) {
-		info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		info.service_id = NVMEIB_SERVICE_ID;
 		info.pkey = port->pkey;
 		info.service_port = 0;
 	}
 	else {
 		info.service_id = 0;
 		info.pkey = 0;
-		info.service_port = transport_type == RDMA_TRANSPORT_IWARP ? nvmeib_get_tcp_base_port_id() : NVMEIB_EXCELERO_PORT_ID;
+		info.service_port = transport_type == RDMA_TRANSPORT_IWARP ? nvmeib_get_tcp_base_port_id() : NVMEIB_PORT_ID;
 	}
 	rv = nvmeibc_disk_find_path(rionic->disk, &info);
 	_NT(trace_3_disk_nvmeibc_disk_lionic_rionic_find_path, "@TRUE_FALSE_STR path @SGID->@DGID",

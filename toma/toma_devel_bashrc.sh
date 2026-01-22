@@ -1,4 +1,3 @@
-# .bashrc
 # Source global definitions
 shopt -s expand_aliases
 shopt -s extglob
@@ -129,11 +128,11 @@ if [[ "`hostname`" =~ nvme.* ]]; then
 	'
 	alias bt_test='
 		host_idx=-1;
-		if [ "`hostname`" == "nvme42.excelero.com" ] || [ "`hostname`" == "nvme114.excelero.com" ]; then
+		if [ "`hostname`" == "nvme42.acme.com" ] || [ "`hostname`" == "nvme114.acme.com" ]; then
 			host_idx=0;
-		elif [ "`hostname`" == "nvme43.excelero.com" ] || [ "`hostname`" == "nvme116.excelero.com" ]; then
+		elif [ "`hostname`" == "nvme43.acme.com" ] || [ "`hostname`" == "nvme116.acme.com" ]; then
 			host_idx=1;
-		elif [ "`hostname`" == "nvme44.excelero.com" ] || [ "`hostname`" == "nvme122.excelero.com" ]; then
+		elif [ "`hostname`" == "nvme44.acme.com" ] || [ "`hostname`" == "nvme122.acme.com" ]; then
 			host_idx=2;
 		fi;
 		if ( ! `lsmod | cut -d" " -f1 | grep -q nvmeibc` ) ; then
@@ -171,7 +170,7 @@ if [[ "`hostname`" =~ nvme.* ]]; then
 		(cd /var/log/nvmesh/trace_daemon/; sudo rm dict\.[0-9]*\.json; tar --no-same-owner -xvpSf ~/projects/ssda/dictionaries.tar.gz); sleep 2;
 		sudo ./bin/udp/nvmeibt_toma -s 4G --nm-transport ./bin/udp/nw_ibud.so;
 	'
-	tirtur_params='-rt 100 -dt 5'; if [ "$HOSTNAME" == "nvme1006.excelero.com" ]; then tirtur_params='-rt 1000 -dt 3'; elif [ "$HOSTNAME" == "nvme1015.excelero.com" ]; then tirtur_params='-rt 50 -dt 4'; fi
+	tirtur_params='-rt 100 -dt 5'; if [ "$HOSTNAME" == "nvme1006.acme.com" ]; then tirtur_params='-rt 1000 -dt 3'; elif [ "$HOSTNAME" == "nvme1015.acme.com" ]; then tirtur_params='-rt 50 -dt 4'; fi
 	alias run_tirtur='
 		cd ~/projects/ssda/toma;
 		pushd /var/log/nvmesh/trace_daemon/; rm -f core core\.[0-9]*; sudo rm dict\.[0-9]+\.json; tar --no-same-owner -xvpSf ~/projects/ssda/dictionaries.tar.gz; popd
@@ -259,7 +258,7 @@ if [[ "`hostname`" =~ nvme.* ]]; then
 
 	# Setup machines
 	alias open_firewall_other='sudo iptables -I INPUT 1 -i -p tcp --dport 4000 -j ACCEPT; sudo iptables -I INPUT 1 -i -p tcp --dport 4001 -j ACCEPT'
-	alias setup_excelero_node='sudo bash -c '"'"'echo MANAGEMENT_SERVER="http://10.0.1.42:4000" > /etc/nvmesh/nvmesh.conf'"'"'; sudo mkdir /var/opt/nvmesh/toma; sudo mkdir /var/opt/nvmesh/bin; sudo mkdir /var/opt/nvmesh/toma/; sudo bash -c '"'"'echo "+ all" > /var/log/nvmesh/trace.config'"'"
+	alias setup_nvmesh_node='sudo bash -c '"'"'echo MANAGEMENT_SERVER="http://10.0.1.42:4000" > /etc/nvmesh/nvmesh.conf'"'"'; sudo mkdir /var/opt/nvmesh/toma; sudo mkdir /var/opt/nvmesh/bin; sudo mkdir /var/opt/nvmesh/toma/; sudo bash -c '"'"'echo "+ all" > /var/log/nvmesh/trace.config'"'"
 	alias stop_nvmesh_services='sudo /sbin/chkconfig nvmeshtarget1 off; sudo service nvmeshtarget stop; sudo /sbin/chkconfig nvmeshclient off; sudo service nvmeshclient stop'
 	alias client_debug='sudo bash -c "echo 2 > /sys/module/nvmeibc/parameters/debug_level"'
 
@@ -508,7 +507,7 @@ else	###########################################              my-laptop) code   
 			) &
                 done
 	'
-	alias diff_persist_files="for i in {0..8}; do let j=(\$i+1); echo \$i \$j; diff -s -q /var/opt/excelero/toma/toma_persistency.csv_bufs.[\$i,\$j]; done"
+	alias diff_persist_files="for i in {0..8}; do let j=(\$i+1); echo \$i \$j; diff -s -q /var/opt/nvmesh/toma/toma_persistency.csv_bufs.[\$i,\$j]; done"
 
 	# git
 	alias gitConfigEdit="git config --global --edit"
@@ -608,14 +607,14 @@ else	###########################################              my-laptop) code   
 	cp /tmp/resolv.conf_HOME_BEFORE_RUNNING_PULSECURE /tmp/resolv.conf_OFFICE
 
 	cat << "	END" > /tmp/resolv.conf_HOME_EDITED_BY_PULSE_before_Aug24_2023
-	search mellanox.com nvidia.com mtl.com labs.mlnx mtl.labs.mlnx mth.labs.mlnx mtr.labs.mlnx mtl.labs.mlnx lab.mtl.com mts.labs.mlnx wap.labs.mlnx swx.labs.mlnx yok.mtl.com excelero.com
+	search mellanox.com nvidia.com mtl.com labs.mlnx mtl.labs.mlnx mth.labs.mlnx mtr.labs.mlnx mtl.labs.mlnx lab.mtl.com mts.labs.mlnx wap.labs.mlnx swx.labs.mlnx yok.mtl.com nvmesh.com
 	nameserver 10.0.16.151
 	nameserver 10.0.16.152
 	nameserver 192.168.0.1
 	END
 
 	cat << "	END" > /tmp/resolv.conf_HOME_BY_PULSE_Aug24_2023_Working
-	search excelero.com nvidia.com labs.mlnx mtl.labs.mlnx mth.labs.mlnx mtr.labs.mlnx mtl.labs.mlnx mts.labs.mlnx wap.labs.mlnx swx.labs.mlnx yok.mtl.com mtl.com lab.mtl.com mellanox.com
+	search nvmesh.com nvidia.com labs.mlnx mtl.labs.mlnx mth.labs.mlnx mtr.labs.mlnx mtl.labs.mlnx mts.labs.mlnx wap.labs.mlnx swx.labs.mlnx yok.mtl.com mtl.com lab.mtl.com mellanox.com
 	nameserver 192.168.0.1
 	nameserver 10.0.15.56
 	nameserver 10.0.8.3

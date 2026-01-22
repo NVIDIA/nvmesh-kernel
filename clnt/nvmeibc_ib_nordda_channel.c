@@ -1014,13 +1014,13 @@ int nvmeibc_ib_nordda_channel_connect(struct nvmeibc_ib_nordda_channel *ch)
 	_ND(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_connect, "Use (lionic=@LIONIC) path @DGID->@LIONIC_IPV6",
 	   &ch->lionic->path.sgid, &ch->lionic->path.dgid, ch->lionic);
 
-		ch->net.base.service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		ch->net.base.service_id = NVMEIB_SERVICE_ID;
 		ch->net.base.service_port = 0;
 		ch->net.base.cm_rdma_type = _rdma_ib;
 	}
 	else if (ch->lionic->rdma_type == _rdma_roce) {
 		ch->net.base.service_id = 0;
-		ch->net.base.service_port = NVMEIB_EXCELERO_PORT_ID;
+		ch->net.base.service_port = NVMEIB_PORT_ID;
 		ch->net.base.cm_rdma_type = _rdma_roce;
 	}
 	else if (ch->lionic->rdma_type == _rdma_iwarp) {

@@ -74,13 +74,13 @@ usage(){
 checkssh(){
 	echo waiting for sshd service...
 	sleep 2
-	ssh excelero@$cloneIP exit;
+	ssh nvmesh@$cloneIP exit;
 	sshTest=$?;
 	echo sshTest: $sshTest;
 	if [[ $sshTest != 0 ]]; then
 		until [[ $sshTest == 0 ]]; do
 			sleep 1;
-			ssh -t excelero@$cloneIP exit;
+			ssh -t nvmesh@$cloneIP exit;
 			sshTest=$?;
 			echo sshTest: $sshTest;
 		done
@@ -96,7 +96,7 @@ check_if_inbox_driver_dependencies_installed(){
 	elif [ ${distro} -eq 2 ]; then
 		cmd="rpm -qa | grep -E 'libibmad-devel|opensm-devel|ibutils-devel|infiniband-diags|librdmacm-utils|libibverbs-utils|libibumad' | wc -l | grep 9"
 	fi
-	ssh -t excelero@$cloneIP $cmd 
+	ssh -t nvmesh@$cloneIP $cmd 
 	return $?
 }
 
@@ -108,7 +108,7 @@ check_if_package_installed(){
 	elif [ ${distro} -eq 2 ]; then
 		cmd="rpm -qa | grep ${pkg}"
 	fi
-	ssh -t excelero@$cloneIP $cmd
+	ssh -t nvmesh@$cloneIP $cmd
 	ret=$?
 
 	if [ "$ret" != "0" ] && [ "$2" == "exit" ]; then
@@ -131,7 +131,7 @@ shutdown_clone() {
 
 install_new_packages_and_exit() {
 	 echo "Installing this packages: ${pkgs_to_add}"
-         ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} -y ${pkgs_to_add}"
+         ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} -y ${pkgs_to_add}"
          checkLastCommand "Unable to install ${pkgs_to_add}, exiting" 1
          shutdown_clone $clone_domain
 	 exit 0
@@ -200,7 +200,7 @@ shift $((OPTIND -1))
 		#Check distibution type (currently ub/el supported) and store it in $distro
 		# Ubuntu 	 ->	$distro = 1 
 		# CentOS/Red Hat -> 	$distro = 2
-		distVersion=`ssh -t excelero@${cloneIP} "cat /proc/version"`
+		distVersion=`ssh -t nvmesh@${cloneIP} "cat /proc/version"`
 		echo ${distVersion} | grep "ubuntu" -i
 		if [ $? -eq 0 ]; then distro=1; fi
 		echo ${distVersion} | grep "red hat" -i
@@ -214,7 +214,7 @@ shift $((OPTIND -1))
 			inbox_driver_pkgs=${UB_INBOX_DEPENDENCIES}
 			extra_pkgs=${UB_DEPENDENCIES}
 			if [ "$pkgs_to_add" != "none" ]; then install_new_packages_and_exit ;fi
-			ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} -y ${kernel_pkg}${kernel} ${kernel_dev_pkg}${kernel}"
+			ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} -y ${kernel_pkg}${kernel} ${kernel_dev_pkg}${kernel}"
                         checkLastCommand "Unable to install ${kernel_pkg}${kernel} and/or ${kernel_dev_pkg}${kernel} , exiting" 0
 		elif [ ${distro} -eq 2 ]; then 
 			pkg_install_cmd="yum install"; 
@@ -224,22 +224,22 @@ shift $((OPTIND -1))
                         extra_pkgs=${EL_DEPENDENCIES}
 			if [ "$pkgs_to_add" != "none" ]; then install_new_packages_and_exit ;fi
 			
-			current_kernel=`ssh -t excelero@${cloneIP} 'uname -r'`
+			current_kernel=`ssh -t nvmesh@${cloneIP} 'uname -r'`
 			
 			if [ $kernel != $current_kernel ]; then
-				ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} wget -y"
+				ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} wget -y"
 				checkLastCommand "Unable to install wget, exiting" 0
 	
-				ssh -t excelero@${cloneIP} "sudo wget http://ftp.riken.jp/Linux/cern/centos/7/updates/x86_64/Packages/${kernel_pkg}${kernel}.rpm"
+				ssh -t nvmesh@${cloneIP} "sudo wget http://ftp.riken.jp/Linux/cern/centos/7/updates/x86_64/Packages/${kernel_pkg}${kernel}.rpm"
 				checkLastCommand "Unable to download kernel ${kernel}, exiting" 0
 	
-				ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} ${kernel_pkg}${kernel}.rpm -y"
+				ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} ${kernel_pkg}${kernel}.rpm -y"
 				checkLastCommand "Unable to install ${kernel_pkg}${kernel}.rpm, exiting" 0
 	
-				ssh -t excelero@${cloneIP} "sudo wget http://ftp.riken.jp/Linux/cern/centos/7/updates/x86_64/Packages/${kernel_dev_pkg}${kernel}.rpm"
+				ssh -t nvmesh@${cloneIP} "sudo wget http://ftp.riken.jp/Linux/cern/centos/7/updates/x86_64/Packages/${kernel_dev_pkg}${kernel}.rpm"
 				checkLastCommand "Unable to download ${kernel_dev_pkg}${kernel}, exiting" 0
 	
-				ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} ${kernel_dev_pkg}${kernel}.rpm -y"
+				ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} ${kernel_dev_pkg}${kernel}.rpm -y"
 				checkLastCommand "Unable to install ${kernel_dev_pkg}${kernel}.rpm, exiting" 0
 			else
 				echo "This kernel: $kernel is already installed!"
@@ -267,7 +267,7 @@ shift $((OPTIND -1))
 			sudo ./ofed_install.sh -t ${cloneIP} -p ${ofed_path}
 			stty $tty_backup
 		else
-			ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} -y ${inbox_driver_pkgs}"
+			ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} -y ${inbox_driver_pkgs}"
 		    	check_if_inbox_driver_dependencies_installed $distro
 		    	pkgs_installed=$?
 
@@ -276,7 +276,7 @@ shift $((OPTIND -1))
 		    	fi
 		fi
 		stty $tty_backup
-	        ssh -t excelero@${cloneIP} "sudo ${pkg_install_cmd} -y ${extra_pkgs}"
+	        ssh -t nvmesh@${cloneIP} "sudo ${pkg_install_cmd} -y ${extra_pkgs}"
 		shutdown_clone $clone_domain
 	else
 		echo "VM Didn't Start";

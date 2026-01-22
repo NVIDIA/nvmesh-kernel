@@ -532,7 +532,7 @@ out:
 }
 
 unsigned int nvmeib_get_tcp_base_port_id(void) {
-	return NVMEIB_EXCELERO_IWARP_PORT_ID;
+	return NVMEIB_IWARP_PORT_ID;
 }
 
 

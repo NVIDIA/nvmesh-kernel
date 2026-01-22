@@ -5,7 +5,7 @@ Group:				System Environment
 Summary:			"nvmesh-core" by NVIDIA
 
 License:			GPL-2.0-only OR Apache-2.0 at your choice
-URL:				http://www.excelero.com
+URL:				http://www.nvidia.com
 Source0:			%{name}
 
 Requires:			%{requires_pkgs}
@@ -13,9 +13,9 @@ Autoreq:                        0
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. This document contains the confidential and proprietary information of Excelero, Inc. Do not reproduce or distribute without the prior written consent of Excelero.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-"Excelero nvmesh-core" includes NVMesh client and target services and components for a kmod-nvmesh-core environment.
+"Nvidia nvmesh-core" includes NVMesh client and target services and components for a kmod-nvmesh-core environment.
 	Branch: %{branch}
 	Block Size: %{block_size}
 	Commit: %{commit_id}
@@ -172,5 +172,5 @@ fi
 %config(noreplace) /etc/opt/NVMesh/target_devices.conf
 
 %changelog
-* Wed Oct 7 2015 Excelero
-- Installing Excelero nvmesh-core for a kmod-nvmesh-core environment
+* Wed Oct 7 2015 nvmesh
+- Installing NVIDIA nvmesh-core for a kmod-nvmesh-core environment

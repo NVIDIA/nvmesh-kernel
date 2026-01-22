@@ -23,10 +23,10 @@ int main(void) {
 
 	// clang-format off
 	// Stripe Replica Status   Disk NVMe ID      0xLBA Start  0xLBA End    Last Known Target     Debug-info
-	// 0      0       Online   S3P8NY0J700237.1  8f180        38a5d7f      nvme109.excelero.com  [a=1 p=0 acm=RW  sy=1 lm(O0) r1v=0x100 lid=0x70|a uid=a67280d1
+	// 0      0       Online   S3P8NY0J700237.1  8f180        38a5d7f      nvme109.acme.com  [a=1 p=0 acm=RW  sy=1 lm(O0) r1v=0x100 lid=0x70|a uid=a67280d1
 	// clang-format on
 
-	if ((rv = corecomm_register_arnic(corecomm, "nvme109.excelero.com",
+	if ((rv = corecomm_register_arnic(corecomm, "nvme109.acme.com",
 	                                  "0x00000000000000000000ffff0a0a6d02", 1,
 	                                  CORECOMM_RDMA_ROCE)) < 0) {
 		fprintf(stderr, "corecomm_register_arnic %d %m\n", errno);
@@ -34,7 +34,7 @@ int main(void) {
 	} else
 		printf("corecomm_register_arnic: %ld\n", rv);
 
-	if ((rv = corecomm_register_arnic(corecomm, "nvme109.excelero.com",
+	if ((rv = corecomm_register_arnic(corecomm, "nvme109.acme.com",
 	                                  "0x00000000000000000000ffff0a0b6d02", 1,
 	                                  CORECOMM_RDMA_ROCE)) < 0) {
 		fprintf(stderr, "corecomm_register_arnic %d %m\n", errno);
@@ -43,7 +43,7 @@ int main(void) {
 		printf("corecomm_register_arnic: %ld\n", rv);
 
 	if ((disk = corecomm_discover(corecomm, "S3P8NY0J700237.1",
-	                              "nvme109.excelero.com")) < 0) {
+	                              "nvme109.acme.com")) < 0) {
 		fprintf(stderr, "corecomm_discover %d %m\n", errno);
 		return 1;
 	} else

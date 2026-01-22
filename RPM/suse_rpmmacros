@@ -1,4 +1,4 @@
-%_gpg_name Excelero, Inc
+%_gpg_name NVIDIA, Inc
 
 %_topdir %(echo $HOME)/rpmbuild
 

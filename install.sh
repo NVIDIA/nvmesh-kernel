@@ -16,7 +16,7 @@
 #   example: SSH_INVOKE="sshpass -p Pa$$w0rd ssh -l root"
 #            the same as above but with the password supplied in cmd line
 # INSTALL_REMOTE_DIR=<remote-install-dir-name>
-#   example: INSTALL_REMOTE_DIR=excelero
+#   example: INSTALL_REMOTE_DIR=nvmesh
 # REPO_DIR=<local-repo-dir-name>
 #   example: REPO_DIR="~/build_repo"
 # RSYNC_OPTS=<list_of_rsync_args>, to be added to default ones
@@ -127,7 +127,7 @@ source ${CONFIG_FILE}
 
 # set default opts; conf file overrides most of them
 SSH_INVOKE=${SSH_INVOKE:-ssh}
-INSTALL_REMOTE_DIR=${INSTALL_REMOTE_DIR:-"excelero"}
+INSTALL_REMOTE_DIR=${INSTALL_REMOTE_DIR:-"nvmesh"}
 REPO_DIR=${REPO_DIR:-${HOME}/build_repo}
 PARALLEL=${PARALLEL:-false}
 DRY_RUN=${DRY_RUN:-false}

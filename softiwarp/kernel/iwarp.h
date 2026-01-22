@@ -70,7 +70,7 @@ enum {
 	MPA_RR_FLAG_REJECT		= __cpu_to_be16(0x2000),
 	MPA_RR_FLAG_ENHANCED_RSVD 	= __cpu_to_be16(0x1000), /* Used in upstream SIW */
 	MPA_RR_FLAG_GSO_EXP_RSVD 	= __cpu_to_be16(0x0800),  /* Used in upstream SIW */
-	MPA_RR_FLAG_WR_ACK		= __cpu_to_be16(0x0400),  /* Acknowledge Writes with RDMAP_RDMA_READ_RESP (Excelero) */
+	MPA_RR_FLAG_WR_ACK		= __cpu_to_be16(0x0400),  /* Acknowledge Writes with RDMAP_RDMA_READ_RESP (NVMesh) */
 	MPA_RR_RESERVED			= __cpu_to_be16(0x0300),
 	MPA_RR_MASK_REVISION		= __cpu_to_be16(0x00ff)
 };

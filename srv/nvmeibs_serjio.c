@@ -1126,28 +1126,28 @@ static inline unsigned get_jentry_in_mask_cnt(struct jrange_entry *rng, unsigned
 /* Compare GPT Entry partition_type_guid with NVMesh GUIDs in nvmeib_shared.h */
 static bool is_gpt_ent_toma_md(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid nvmeib_uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
 static bool is_gpt_ent_jrnl(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid nvmeib_uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
 static bool is_gpt_ent_serjio_db(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid nvmeib_uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
 static bool is_gpt_ent_seg_jrnl(const struct gpt_entry *gpt_entry, bool *deprecated)
 {
-	const union nvmeib_uuid nvmeib_uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
+	const union nvmeib_uuid nvmeib_uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
 	if (memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0) {
 		if (deprecated)
-			*deprecated = (gpt_entry->attributes & EXCELERO_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK);
+			*deprecated = (gpt_entry->attributes & NVMESH_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK);
 		return true;
 	}
 	return false;
@@ -1155,7 +1155,7 @@ static bool is_gpt_ent_seg_jrnl(const struct gpt_entry *gpt_entry, bool *depreca
 
 static bool is_gpt_ent_seg_no_jrnl(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
+	const union nvmeib_uuid nvmeib_uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 

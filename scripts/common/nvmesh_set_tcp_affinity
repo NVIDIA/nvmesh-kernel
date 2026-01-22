@@ -299,7 +299,7 @@ function is_integer() {
 # Increase number of Rx/Combined Queues/Channels via ethtool -L option
 # ------------------------------------------------------------------------------
 # Example:
-# root@nvsmesh1:/home/excelero# ethtool -l $BASE_DEVICE
+# root@nvmesh1:/root# ethtool -l $BASE_DEVICE
 # Channel parameters for enP40275s1:
 # Pre-set maximums:
 # RX:             48
@@ -312,7 +312,7 @@ function is_integer() {
 # Other:          0
 # Combined:       0
 #
-# root@nvmesh1:/home/excelero# ethtool -l eth0
+# root@nvmesh1:/root# ethtool -l eth0
 # Channel parameters for eth0:
 # Pre-set maximums:
 # RX:             0

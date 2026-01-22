@@ -146,11 +146,11 @@ static int __corecomm_add_target_arnic(const char *node_id, const char *gid,
 
 	/* Other values */
 	if (type == CORECOMM_RDMA_IB) {
-		arnic->service_id   = NVMEIB_EXCELERO_SERVICE_ID;
+		arnic->service_id   = NVMEIB_SERVICE_ID;
 		arnic->service_port = 0;
 	} else if (type == CORECOMM_RDMA_ROCE) {
 		arnic->service_id   = 0;
-		arnic->service_port = NVMEIB_EXCELERO_PORT_ID;
+		arnic->service_port = NVMEIB_PORT_ID;
 	} else if (type == CORECOMM_RDMA_IWARP) {
 		arnic->service_id   = 0;
 		arnic->service_port = nvmeib_get_tcp_base_port_id();

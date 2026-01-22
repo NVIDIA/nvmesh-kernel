@@ -1,6 +1,6 @@
 /**
  * @file   nvmeibt_params.h
- * @Author Oren (orenl@ecelro.com)
+ * @Author Oren
  * @date   Mar, 2017
  * @brief  Misc compile-time parameters
  */
@@ -42,9 +42,9 @@
 #define GPT_SIGNATURE 								(uint64_t)0x5452415020494645        /*"EFI PART"*/
 #define DISK_METADATA_SIGNATURE 					(uint64_t)0x1234567898765432
 #define DISK_METADATA_PARTITION_NAME 				"Disk_Metadata"
-#define EXCELERO_JOURNAL_PARTITION_NAME				"excelero_journal_data"
-#define EXCELERO_SERJIO_DB_PARTITION_NAME			"excelero_serjio_db"
-#define EXCELERO_METADATA_PARTITION_NAME			"excelero_metadata"
+#define NVMESH_JOURNAL_PARTITION_NAME				"excelero_journal_data"
+#define NVMESH_SERJIO_DB_PARTITION_NAME			"excelero_serjio_db"
+#define NVMESH_METADATA_PARTITION_NAME			"excelero_metadata"
 
 #define GPT_MAX_PARTITION_NAME_LENGTH 			36
 #define MAX_NUM_GPT_ENTRIES						8192

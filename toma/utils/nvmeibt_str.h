@@ -1,6 +1,6 @@
 /**
  * @file   nvmeibt_str.h
- * @Author Oren (orenl@ecelro.com)
+ * @Author Oren
  * @date   Mar, 2017
  * @brief  The nvmeibt_str buffer helpers
  */

@@ -409,7 +409,7 @@ int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *
 	seg_metadata_gpt_entry = nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&local_disk->metadata_gpt,
 																seg_active_metadata_size,
 																local_disk->from_config.pblk_size,
-																&EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID,
+																&NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID,
 																nvmeibt_seg_active_UUID(seg_active),
 																nvmeibt_seg_active_id_str(seg_active),
 																URN_UUID_STR_LENGTH,
@@ -434,7 +434,7 @@ int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *
 	// Add seg to MAIN GPT
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&local_disk->main_gpt,
 											(nvmeibt_seg_active_is_config_EC(seg_active) ?
-											 &EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED : &EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL),
+											 &NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED : &NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL),
 											nvmeibt_seg_UUID(disk_segment),
 											disk_segment->seg_mgmt.pba_s,
 											disk_segment->seg_mgmt.pba_e,

@@ -18,7 +18,7 @@ Autoreq:                        0
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 "Nvidia nvmesh-base" includes NVMesh base communication and environment tools.
 	Branch: %{branch}

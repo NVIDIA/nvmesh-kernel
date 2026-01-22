@@ -630,7 +630,7 @@ int nvmeibt_disk_metadata_deprecate_entry_in_mem_gpt(struct nvmeibt_disk_gpt *gp
 		struct nvmeibt_disk_gpt_partition_entry *curr_gpt_entry = &(gpt->entries[entry_idx]);
 		// Check the partition uuid matches the disk segment uuid, and that the partition entry is not marked as unused.
 		if (nvmeibt_disk_metadata_is_gpt_entry_active_and_matching_uuid(uuid, curr_gpt_entry)) {
-			curr_gpt_entry->attributes |= EXCELERO_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK;
+			curr_gpt_entry->attributes |= NVMESH_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK;
 			N_Tf(vdge73h, "Deprecated entry=@ENTRY_INT partition name=@NAME from @STR n_active_partitions=@N_ACTIVE_PARTITIONS", entry_idx, part_name, gpt->main_or_metadata, gpt->n_entries_in_use);
 			rv = 0;	// Modified the GPT - need to save
 			goto out;
@@ -1830,8 +1830,8 @@ static const struct nvmeibt_disk_gpt_partition_entry* get_gpt_entry_by_type_uuid
 	for (i = 0; i < gpt->max_n_entries; ++i) {
 		const struct nvmeibt_disk_gpt_partition_entry *curr_metadata_gpt_entry = &(gpt->entries[i]);
 		if (	ARE_UUID_EQ(type_uuid, &curr_metadata_gpt_entry->partition_type_guid) ||
-				(ARE_UUID_EQ(type_uuid, &EXCELERO_METADATA_PARTITION_TYPE_GUID) &&	// Support of old GUID read
-				 ARE_UUID_EQ(&EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD, &curr_metadata_gpt_entry->partition_type_guid))) {
+				(ARE_UUID_EQ(type_uuid, &NVMESH_METADATA_PARTITION_TYPE_GUID) &&	// Support of old GUID read
+				 ARE_UUID_EQ(&NVMESH_METADATA_PARTITION_TYPE_GUID_OLD, &curr_metadata_gpt_entry->partition_type_guid))) {
 			result = curr_metadata_gpt_entry;
 			goto out;
 		}
@@ -1854,7 +1854,7 @@ out:
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(const struct nvmeibt_disk_gpt *gpt)
 {
-	return get_gpt_entry_by_type_uuid(gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID);
+	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID);
 }
 
 /**
@@ -1869,7 +1869,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_gpt_ent
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_journal_data_entry(const struct nvmeibt_disk_gpt *gpt)
 {
-	return get_gpt_entry_by_type_uuid(gpt, &EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID);
+	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID);
 }
 
 
@@ -1885,7 +1885,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_journal
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_serjio_db_entry(const struct nvmeibt_disk_gpt *gpt)
 {
-	return get_gpt_entry_by_type_uuid(gpt, &EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID);}
+	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID);}
 
 /**
  * Locates the Excelero disk_metadata partition in the metadata GPT, return NULL
@@ -1899,7 +1899,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_serjio_
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_disk_metadata_entry(const struct nvmeibt_disk_gpt *metadata_gpt)
 {
-	return get_gpt_entry_by_type_uuid(metadata_gpt, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID);}
+	return get_gpt_entry_by_type_uuid(metadata_gpt, &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID);}
 
 /**
  * Initializes an mbr structure of type gpt protective.
@@ -2168,16 +2168,16 @@ struct partition_guid_name {
 static struct partition_guid_name partition_mapping[] = {
 	{ .uuid = {.ll = {0x0000000000000000, 0x0000000000000000}}, .partition_type_name = "Unused entry" },
 	//
-	{ .uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero metadata
-	{ .uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero Serjio
-	{ .uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST,		.partition_type_name = "excelero_metadata" },	// Excelero Journal
-	{ .uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
-	{ .uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_OLD_CONST,	.partition_type_name = "excelero_metadata" },	// OLD
-	{ .uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
+	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero metadata
+	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero Serjio
+	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST,		.partition_type_name = "excelero_metadata" },	// Excelero Journal
+	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
+	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_OLD_CONST,	.partition_type_name = "excelero_metadata" },	// OLD
+	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
 	//
-	{ .uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST,	.partition_type_name = "data" },				// Excelero Segment Journaled
-	{ .uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST,	.partition_type_name = "data" },				// Excelero Segment non-Journaled
-	{ .uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_DATA_OLD_CONST,		.partition_type_name = "data" },				// OLD
+	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST,	.partition_type_name = "data" },				// Excelero Segment Journaled
+	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST,	.partition_type_name = "data" },				// Excelero Segment non-Journaled
+	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_DATA_OLD_CONST,		.partition_type_name = "data" },				// OLD
 	//
 	{ .uuid = {.ll = {0x024DEE4133E711D3, 0x9D690008C781F39F}}, .partition_type_name = "MBR partition scheme" },
 	{ .uuid = {.ll = {0xC12A7328F81F11D2, 0xBA4B00A0C93EC93B}}, .partition_type_name = "EFI System partition" },

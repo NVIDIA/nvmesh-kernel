@@ -15,7 +15,7 @@ def main():
 	   u'payload': {u'health': u'healthy', u'volumeID':\
 	   u'test', u'uuid': u'6f268b30-4ac1-11e7-8048-fdc188e0701c'}}, u'opcode': 27,\
 	   u'messageID': u'c624dda6-4ac1-11e7-8e58-305a3a540737',\
-	   u'registrant': {u'type': u'CLIENT', u'id': u'nvme52.excelero.com'},\
+	   u'registrant': {u'type': u'CLIENT', u'id': u'nvme52.acme.com'},\
 	    u'requestMD5': u'135585e322ae12cf876c291b985a8053'}
 	mypacker.pack("volume_deletion_message", True, msg["payload"])
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # nvmeshtarget	This shell script takes care of starting and stopping
-#		the Excelero NVMesh(r) target / controller
+#		the NVMesh(r) target / controller
 #
 # chkconfig: 345 19 81
 # description: NVMesh target / controller
@@ -164,7 +164,7 @@ find_devname_by_serial() {
                 exit 1
         elif [ "${#matched_devices[@]}" -ne 1 ]; then
 		if ! $gptUtilPath -a $main_devname -i 2> /dev/null | grep 'EXCELERO_METADATA_FOUND' > /dev/null 2>&1; then
-	                echo "The current serial resolves to multiple devicenames, probably partitions not used by excelero, to avoid data loss we won't use it."
+	                echo "The current serial resolves to multiple devicenames, probably partitions not used by nvmesh, to avoid data loss we won't use it."
         	        exit 1
 		fi
         fi

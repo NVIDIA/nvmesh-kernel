@@ -392,7 +392,7 @@ ifeq ($(MOD),$(RELEASE_STR))
 	## One solution is to create a symbols_only file
 	#	objcopy --only-keep-debug $$@ $$@.symbols_only
 	#	objcopy --add-gnu-debuglink=$$@.symbols_only $$@	# Add a debug link to allow GDB to find the file with the debugging symbols.
-	#	gpg -c -z6 --batch --pinentry-mode default --passphrase excelero1111 < $$@.symbols_only > $$@.symbols_only.gpg
+	#	gpg -c -z6 --batch --pinentry-mode default --passphrase nvmesh1111 < $$@.symbols_only > $$@.symbols_only.gpg
 	## A second solution is not to strip since it is an internal (NVIDIA) distribution
 	#	strip $$@
 	(cd ..; tar -cf - `find ./toma ./common -name \*.[ch]` toma/bin/release/nvmeibt_toma | gpg -c -z6 --batch --pinentry-mode default --passphrase AlexanderRonen) > $$@_src_tar.pgp

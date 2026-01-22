@@ -41,7 +41,7 @@ enum GPT_UTIL_ACTION {
 	ACTION_DISPLAY_MBR,			// -m: display MBR only
 	ACTION_FIX_GPT,				// -f: fix GPT from alternate copy
 	ACTION_FIX_MBR,				// -F: fix MBR
-	ACTION_CHECK_EXCELERO,		// -i: check if EXCELERO_METADATA exists
+	ACTION_CHECK_NVMESH		// -i: check if NVMESH_METADATA exists
 	ACTION_EXPORT_JSON,			// --output-json: export GPT to JSON
 	ACTION_APPLY_JSON,			// --apply-from: apply GPT from JSON (dry-run by default)
 	ACTION_UPGRADE_GPT,			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
@@ -2083,8 +2083,8 @@ static void print_usage(char *argv[])
 
 	fprintf(stdout, "Actions (choose one, default is display GPT):\n");
 	fprintf(stdout, "  -m, --print-mbr             Display MBR only\n");
-	fprintf(stdout, "  -i, --check-excelero        Check if EXCELERO_METADATA partition exists\n");
-	fprintf(stdout, "  -f, --fix-gpt               Fix Main GPT from alternate copy (and display)\n");
+	fprintf(stdout, "  -i, --check-nvmesh          Check if NVMESH_METADATA partition exists\n");
+	fprintf(stdout, "  -f, --fix-gpt               Fix GPT from alternate copy (and display)\n");
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
 	fprintf(stdout, "  -J, --output-json=FILE      Export GPT to JSON file\n");
@@ -2180,7 +2180,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"pba-s",					required_argument,	0,	's'},
 		{"pba-e",					required_argument,	0,	'e'},
 		{"block-size",				required_argument,	0,	'b'},
-		{"check-excelero",			no_argument,		0,	'i'},
+		{"check-nvmesh",			no_argument,		0,	'i'},
 		{"print-mbr",				no_argument,		0,	'm'},
 		{"fix-gpt",					no_argument,		0,	'f'},
 		{"fix-mbr",					no_argument,		0,	'F'},
@@ -2346,8 +2346,8 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			break;
 		case 'i':
 			CHECK_SINGLE_ACTION(config, parse_multiple_actions_check);
-			config->action = ACTION_CHECK_EXCELERO;
-			fprintf(stdout, "Action: Check for EXCELERO_METADATA partition\n");
+			config->action = ACTION_CHECK_NVMESH;
+			fprintf(stdout, "Action: Check for NVMESH_METADATA partition\n");
 			break;
 		case 'U':
 			CHECK_SINGLE_ACTION(config, parse_multiple_actions_upgrade);
@@ -2465,9 +2465,9 @@ static int validate_config(struct gpt_util_config *config)
 }
 
 /**
- * Phase 3: Execute CHECK_EXCELERO action
+ * Phase 3: Execute CHECK_NVMESH action
  */
-static int execute_check_excelero(int disk_fd, struct gpt_util_config *config)
+static int execute_check_nvmesh(int disk_fd, struct gpt_util_config *config)
 {
 	int						rv = -1;
 	struct nvmeibt_disk_gpt	temp_gpt;
@@ -2476,10 +2476,10 @@ static int execute_check_excelero(int disk_fd, struct gpt_util_config *config)
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &temp_gpt,
 										  config->pba_s, config->pba_hw_e, false) == 0) {
 		if (nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&temp_gpt)) {
-			fprintf(stdout, "%s EXCELERO_METADATA_FOUND\n", config->device_path);
+			fprintf(stdout, "%s NVMESH_METADATA_FOUND\n", config->device_path);
 			rv = 0;
 		} else {
-			fprintf(stdout, "%s EXCELERO_METADATA_NOT_FOUND\n", config->device_path);
+			fprintf(stdout, "%s NVMESH_METADATA_NOT_FOUND\n", config->device_path);
 			rv = 0;
 		}
 	} else {
@@ -4348,8 +4348,8 @@ static int run_gpt_util_op(int argc, char *argv[], BOOL is_self_test)
 		rv = execute_fix_mbr(disk_fd, &config);
 		break;
 
-	case ACTION_CHECK_EXCELERO:
-		rv = execute_check_excelero(disk_fd, &config);
+	case ACTION_CHECK_NVMESH:
+		rv = execute_check_nvmesh(disk_fd, &config);
 		break;
 
 	case ACTION_UPGRADE_GPT:

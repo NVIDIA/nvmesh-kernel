@@ -13,7 +13,7 @@
    (Example: bad sector in Raid-0). However, most of user space apps dont handle
    well IO erros (not every fread()/fwrite() is tested for failure in the code).
    In particulary file systems. So returning IO error might be disastrous
-   (corrupting entire file system) even though this is not always Excelero fault.
+   (corrupting entire file system) even though this is not always NVMesh's fault.
    As a precausion upon returning maximum of N errors, block device will suspend
    itself and not return errors enymore. IO's will stuck blocking the userspace
    app but at least preserving the existing data and preventing further

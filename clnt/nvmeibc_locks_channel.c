@@ -1476,7 +1476,7 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	/* first get the local guid */
 	memcpy(&ch->net.path.sgid.raw, &lport->gid.gid, 16);
 	memcpy(&ch->net.path.dgid.raw, dgid, 16);
-	ch->net.path.service_id = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
+	ch->net.path.service_id = cpu_to_be64(NVMEIB_SERVICE_ID);
 	ch->net.path.pkey = cpu_to_be16(lport->pkey);
 	ch->net.ioch = &ch->base;
 	ch->net.admin_ch = admin_ch;
@@ -1492,17 +1492,17 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	info.src_port = lport->port;
 	if (lport->layer == IB_LINK_LAYER_INFINIBAND) {
 		_ND(trace_2_locks_channel_try_connect, "LOCKS: locks channel is trying to connect via infiniband");
-		info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
-		ch->net.service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		info.service_id = NVMEIB_SERVICE_ID;
+		ch->net.service_id = NVMEIB_SERVICE_ID;
 		info.pkey = lport->pkey;
 		info.service_port = 0;
 		ch->net.service_port = 0;
 	}
 	else {
 		bool is_tcp = lport->transport_type == RDMA_TRANSPORT_IWARP;
-		u16 service_port = (is_tcp ? tcp_base_port : NVMEIB_EXCELERO_PORT_ID);
+		u16 service_port = (is_tcp ? tcp_base_port : NVMEIB_PORT_ID);
 		_ND(trace_3_locks_channel_try_connect,
-			"LOCKS locks channel is trying to connect via @STRING_LITERAL port @NVMEIB_EXCELERO_PORT_ID",
+			"LOCKS locks channel is trying to connect via @STRING_LITERAL port @NVMEIB_PORT_ID",
 			is_tcp ? "TCP" : "RoCE", service_port);
 		info.service_id = 0;
 		info.pkey = 0;
@@ -1761,7 +1761,7 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	/* first get the local guid */
 	net->path.sgid = lport->gid.gid;
 	net->path.dgid = *dgid;
-	net->path.service_id = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
+	net->path.service_id = cpu_to_be64(NVMEIB_SERVICE_ID);
 	net->path.pkey = cpu_to_be16(lport->pkey);
 	net->ioch = &ch->base;
 	net->admin_ch = primary_ch->net.admin_ch;
@@ -1776,8 +1776,8 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	info.path = &net->path;
 	info.src_port = lport->port;
 	if (lport->layer == IB_LINK_LAYER_INFINIBAND) {
-		info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
-		net->service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		info.service_id = NVMEIB_SERVICE_ID;
+		net->service_id = NVMEIB_SERVICE_ID;
 		info.pkey = lport->pkey;
 		info.service_port = 0;
 		net->service_port = 0;
@@ -1785,7 +1785,7 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	else {
 		info.service_id = 0;
 		info.pkey = 0;
-		info.service_port = lport->transport_type == RDMA_TRANSPORT_IWARP ? tcp_base_port + (ch->base.index % tcp_num_ports) : NVMEIB_EXCELERO_PORT_ID;
+		info.service_port = lport->transport_type == RDMA_TRANSPORT_IWARP ? tcp_base_port + (ch->base.index % tcp_num_ports) : NVMEIB_PORT_ID;
 		net->service_id = 0;
 		net->service_port = info.service_port;
 	}

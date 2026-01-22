@@ -1,6 +1,6 @@
 /**
  * @file   nvmeibt_topology.h
- * @Author Ronen (ronen@ecelro.com)
+ * @Author Ronen
  * @date   Mar, 2015
  * @brief  The topology data glue
  *

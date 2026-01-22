@@ -2,7 +2,7 @@
 #define KR_INCS_H
 /*
  * Simulation of linux kernel API by user space library.
- * Intention: Debug Excelero linux kernel driver externally (possibly on different OS)
+ * Intention: Debug NVMesh's linux kernel driver externally (possibly on different OS)
  */
 
 // User space includes

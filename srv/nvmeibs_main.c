@@ -1748,7 +1748,7 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 	}
 
 	if (!nvmeibs_service_guid)
-		nvmeibs_service_guid = NVMEIB_EXCELERO_SERVICE_ID;
+		nvmeibs_service_guid = NVMEIB_SERVICE_ID;
 
 	/* print out target login information */
 	_ND(trace_2_main_do_add_one, "Host info: guid=@GUID_LLONG", nvmeibs_service_guid);
@@ -1813,7 +1813,7 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 		params.on_peer_event = client_cm_event;
 		params.context = nis_dev;
 
-		/* Primary listener on NVMEIB_EXCELERO_IWARP_PORT_ID */
+		/* Primary listener on NVMEIB_IWARP_PORT_ID */
 		if (!(nis_dev->iw_prim_l_cm_id = nvmeib_rdma_listen(&params))) {
 			_NE(error_main_do_add_one_prim_l_fail, "@DEVICE_NAME iw_cm_listen() failed.", device->name);
 			rv = -EIO;
@@ -3347,7 +3347,7 @@ int nvmeibs_start_roce(void)
 	_ND(trace_main_nvmeibs_start_roce, "initializing roce!!!!");
 	/*initialize roce listener*/
 	params.type = _rdma_roce;
-	params.roce.port = NVMEIB_EXCELERO_PORT_ID;
+	params.roce.port = NVMEIB_PORT_ID;
 	params.roce.ipv4_only = roce_ipv4_only;
 	params.new_connection = cm_req_recv;
 	params.on_peer_event = client_cm_event;

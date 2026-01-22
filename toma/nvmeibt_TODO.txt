@@ -85,7 +85,7 @@ TOMA
 - use nvmeivt_read_config_line() in raft read persistency
 
 - There are permissions issues
-  - /etc/cache/excelero
+  - /etc/cache/nvmesh
   - /etc/udev/rules.d/90-ib.rules
 
 - Clean shutdown:

@@ -241,7 +241,7 @@ static void __format_target_nic(struct targets_global *t,
 	switch (src_nic->protocol) {
 	case PROTOCOL_INFINIBAND:
 		current_host->pkey = src_nic->pkey;
-		current_host->service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		current_host->service_id = NVMEIB_SERVICE_ID;
 		current_host->service_port = 0;
 		current_host->link_layer = IB_LINK_LAYER_INFINIBAND;
 		current_host->transport_type = RDMA_TRANSPORT_IB;
@@ -253,7 +253,7 @@ static void __format_target_nic(struct targets_global *t,
 	case PROTOCOL_ROCE:
 		current_host->pkey = 0;
 		current_host->service_id = 0;
-		current_host->service_port = NVMEIB_EXCELERO_PORT_ID;
+		current_host->service_port = NVMEIB_PORT_ID;
 		current_host->link_layer = IB_LINK_LAYER_ETHERNET;
 		current_host->transport_type = RDMA_TRANSPORT_IB;
 		current_host->priority.transport = NVMEIB_ROCE_PORT_PRIORITY;

@@ -2518,14 +2518,14 @@ int nvmeibc_ib_admin_channel_access_iornics(struct nvmeibc_ib_admin_channel *ch,
 			&path.sgid, port->layer, &path.dgid, rionic->layer);
 
 		/* do not copy from admin channel since the admin can be RoCE */
-		path.service_id = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
+		path.service_id = cpu_to_be64(NVMEIB_SERVICE_ID);
 		path.pkey = cpu_to_be16(port->pkey);
 		info.dev = P2NV(port);
 		info.sa = nvmeibc_sa_client(nvmeibc_cinst_get_core_p(&ch->base.base));
 		info.path = &path;
 		info.src_port = port->port;
 		if (port->layer == IB_LINK_LAYER_INFINIBAND) {
-			info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
+			info.service_id = NVMEIB_SERVICE_ID;
 			info.pkey = port->pkey;
 			info.service_port = 0;
 			info.rdma_type = _rdma_ib;
@@ -2537,7 +2537,7 @@ int nvmeibc_ib_admin_channel_access_iornics(struct nvmeibc_ib_admin_channel *ch,
 				info.service_port = nvmeib_get_tcp_base_port_id();
 				info.rdma_type = _rdma_iwarp;
 			} else {
-				info.service_port = NVMEIB_EXCELERO_PORT_ID;
+				info.service_port = NVMEIB_PORT_ID;
 				info.rdma_type = _rdma_roce;
 			}
 		}
