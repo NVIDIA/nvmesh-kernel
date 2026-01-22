@@ -102,8 +102,8 @@ enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config
 	f->stripe_size = vol->stripeSize;
 	f->stripe_width = vol->stripeWidth;
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(ti98dju,
-							   &nvmeibt_global_get_global()->block_devices_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(ti98dju,
+							   nvmeibt_global_get_global()->block_devices_hash_by_uuid,
 							   new_block_device,
 							   config_tag,
 							   NVMEIBT_MAX_N_BLOCK_DEVICES,

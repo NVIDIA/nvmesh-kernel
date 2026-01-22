@@ -759,7 +759,6 @@ static void attempt_stable_local_shutdown(void)
 	static BOOL	is_store_segments_metadata_on_shutdown_launched = 0;
 	static BOOL	is_close_all_seg_actives_for_registration_launched = 0;
 	struct nvmeibt_node * node;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 	NFIN;
 
 	if (!start_time_sec) {
@@ -791,7 +790,7 @@ static void attempt_stable_local_shutdown(void)
 	/* If we are coming from a graceful shutdown, we can be more patient about waiting for recoveries to finish */
 	if (	!are_disks_detached &&
 			(nvmeibt_global_get_cur_event_start_time().tv_sec - start_time_sec > MAX_WAIT_RECOVERY_SEC)) {
-		XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
+		NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 			nvmeibt_topology_detach_all_disks_from_node(node);	TODO(Needed?);
 		}
 		are_disks_detached = 1;
@@ -1739,10 +1738,9 @@ void nvmeibt_topology_set_mgmt_updates_pause_state(int is_paused)
 void nvmeibt_toma_init_mesh(void)
 {
 	struct nvmeibt_nic		*nic;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(nic, &cur_topo->nics_hash) {
+	NVMEIB_HASH_FOREACH(nic, nvmeibt_global_get_global()->nics_hash_by_uuid) {
 		// IB & RoCE: we connect also to loopback for locking
 		TODO(locks code is obsolete);
 		TODO(Remove stale nics);

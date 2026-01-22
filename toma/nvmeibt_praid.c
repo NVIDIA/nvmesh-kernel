@@ -155,7 +155,7 @@ struct nvmeibt_praid *nvmeibt_praid_get_praid_by_id(const union nvmeib_uuid *id)
 {
 	struct nvmeibt_praid 	*praid;
 
-	praid = NNVMEIBT_HASH_GET_OBJ_BY_UUID(evimxo4, &nvmeibt_global_get_global()->praids_hash, id, praid);
+	praid = nvmeib_hash_search_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, id);
 
 	if (praid == NULL) {
 		N_Tf(gty765r, "praid not found id=@UUID_LE", id);
@@ -297,7 +297,7 @@ int nvmeibt_praid_validate_praids_config(void)
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, cur_topo->praids_hash_by_uuid) {
 		if (nvmeibt_praid_is_conf_corrupted(praid)) {
 			N_Tf(ru87tu5, "Skipping praid=@UUID_LE conf_corrupted", nvmeibt_praid_UUID(praid));
 			continue;
@@ -2339,7 +2339,7 @@ int nvmeibt_praid_remove(struct nvmeibt_praid *praid) {
 		N_Tf(jiu87yt, "Removing praid=@UUID_LE", nvmeibt_praid_UUID(praid));
 		nvmeibt_topology_leader_mark_recalc_required();
 		SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cybajh2);
-		NNVMEIBT_HASH_DEL_OBJ(bhuy763, &cur_topo->praids_hash, praid, praid);
+		NNVMEIBT_HASH_DEL_OBJ_new(bhuy763, cur_topo->praids_hash_by_uuid, praid, praid);
 		// The assumption is that the surrounding objects (disk_segment & chunk) are also removed
 		NFREE_PRAID(sdr43e9, praid);
 		rv = 0;
@@ -2353,7 +2353,6 @@ int nvmeibt_praid_remove(struct nvmeibt_praid *praid) {
 ({																							\
 	struct nvmeibt_praid *__praid;															\
 	__praid = NNVMEIBT_TOMA_CALLOC(name ## _calloc, 1, sizeof *__praid);					\
-	XDLIST_INIT_LINK(&__praid->topo_link, NULL);											\
 	XDLIST_INIT_LINK(&__praid->global_report_to_mgmt_praid_link, NULL);						\
 	XDLIST_INIT_LINK(&__praid->praid_topo_recalc_link, NULL);								\
 	XDLIST_HEAD_INIT(&__praid->praid_mgmt.all_segs_list);									\
@@ -2407,8 +2406,8 @@ enum nvmeibt_add_rv nvmeibt_praid_add(struct mm_praid_conf *conf,
 	build_praid_from_config(&new_praid->from_config, conf, vol);
 	new_praid->from_config.version = vol->version; //MGMT doesn't send us a vol version per praid
 
-	rv = NNVMEIBT_HASH_ADD_OBJ(u87uy75,
-							   &nvmeibt_global_get_global()->praids_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_new(u87uy75,
+							   nvmeibt_global_get_global()->praids_hash_by_uuid,
 							   new_praid,
 							   config_tag,
 							   NVMEIBT_MAX_N_PRAIDS,
@@ -2542,7 +2541,7 @@ void nvmeibt_praid_trim_unused_entries(int config_tag, uint8_t trim_flag)
 	struct nvmeibt_praid	*praid;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(praid, &nvmeibt_global_get_global()->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(praid, config_tag)) {
 			nvmeibt_praid_trim_specific_praid(praid, trim_flag);
 		}

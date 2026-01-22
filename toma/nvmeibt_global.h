@@ -91,13 +91,13 @@ struct nvmeibt_topology {
 	int									n_pending_scrubbing; // Total scrubbing tasks in the heap, equal to next_scrub_timeout_heap.n_elements
 
 	XHASHTABLE_DECLARE(, struct nvmeibt_client, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_CLIENTS_PER_NODE))		clients_hash;
-	XHASHTABLE_DECLARE(, struct nvmeibt_block_device, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_BLOCK_DEVICES))	block_devices_hash;
-	XHASHTABLE_DECLARE(, struct nvmeibt_nic, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_NICS))			nics_hash;
-	XHASHTABLE_DECLARE(, struct nvmeibt_disk, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_DISKS))			disks_hash;
+	struct nvmeib_hash_table			*block_devices_hash_by_uuid;
+	struct nvmeib_hash_table			*nics_hash_by_uuid;
+	struct nvmeib_hash_table			*disks_hash_by_uuid;
 	struct nvmeib_hash_table			*disk_segments_hash_by_uuid;
-	XHASHTABLE_DECLARE(, struct nvmeibt_praid, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_PRAIDS))		praids_hash;
-	XHASHTABLE_DECLARE(, struct nvmeibt_node, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_NODES))			nodes_hash;
-	XHASHTABLE_DECLARE(, struct nvmeibt_chunk, topo_link, NVMEIB_XHASHTABLE_N_BITS(NVMEIBT_MAX_N_CHUNKS))		chunks_hash;
+	struct nvmeib_hash_table			*praids_hash_by_uuid;
+	struct nvmeib_hash_table			*nodes_hash_by_uuid;
+	struct nvmeib_hash_table			*chunks_hash_by_uuid;
 	// We need two following 'highest_seen' params because we can receive a one step backward config
 	// from a new leader. In this case we prevent a wrong trim.
 	int64_t						startup_timestamp_msec;

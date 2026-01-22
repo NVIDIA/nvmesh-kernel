@@ -183,7 +183,7 @@ void nvmeibt_disk_leader_detach_all_disks_from_raft_members(void)
 		for (int i = 0; i < disk->n_segments; i++)
 			nvmeibt_seg_remote_reset(&(disk->disk_segments[i]->seg_leader.remote_seg_topo), disk->disk_segments[i]);
 	}
-	NVMEIB_HASH_FOREACH(member, nvmeibt_raft_get_my_raft()->raft_members_hash_by_uuid) {
+	XHASHTABLE_FOR_EACH_SAFE(member, &(my_raft_global.raft_members_hash)) {
 		member->n_disks_leader = 0;
 	}
 	NFOUT;

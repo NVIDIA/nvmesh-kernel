@@ -708,9 +708,9 @@ size_t nvmeibt_recovery_serialize_nvmeibc_attach_config(struct attach_detach_wq_
 		}
 	}
 	// Targets, disks and NICS, we send all
-	n_targets = NVMEIBT_HASH_N_OBJS(&(nvmeibt_global_get_global()->nodes_hash));
+	n_targets = nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nodes_hash_by_uuid);
 	targets_size = n_targets * sizeof(struct nvmeibc_target_conf);
-	XHASHTABLE_FOR_EACH_SAFE(node, &(nvmeibt_global_get_global()->nodes_hash)) {
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		nics_size += (node->n_nics * sizeof(struct nvmeibc_nic_conf));
 		disks_size += (node->n_disks_config * sizeof(struct nvmeibc_disk_conf));
 	}
@@ -767,7 +767,7 @@ size_t nvmeibt_recovery_serialize_nvmeibc_attach_config(struct attach_detach_wq_
 	}
 
 	// Serialize the HW
-	XHASHTABLE_FOR_EACH_SAFE(node, &(nvmeibt_global_get_global()->nodes_hash)) {
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		serialize_target_to_nvmeibc(config_s + offset_of_this_target, node, offset_of_this_nic, offset_of_this_disk, node->n_disks_needed_for_vol);
 		offset_of_this_target += sizeof(struct nvmeibc_target_conf);
 		for (i = 0; i < node->n_nics; i++) {
@@ -1257,7 +1257,7 @@ void nvmeibt_attach_detach_shadow_vol(char *origin_vol_name, bool is_attach, str
 	enum RECOVERY_ATTACH_CMD							attach_cmd;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(vol, &nvmeibt_global_get_global()->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(vol, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		if(!strcmp(vol->from_config.client_blkdev_name, origin_vol_name)) {
 			origin_vol = vol;
 			break;

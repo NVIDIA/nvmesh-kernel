@@ -227,25 +227,6 @@ static void add_seg_lot_to_praid_lot(struct nvmeibt_seg_lot *seg_lot)
         } \
 	}
 
-#define UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG(_name, _conf, _config_tag, _obj_hash, _rv, _obj_name)        \
-({																						\
-	XHASHTABLE_TYPE(_obj_hash)					_obj;									\
-																						\
-	_obj = NNVMEIBT_HASH_GET_OBJ_BY_UUID(_name, _obj_hash, &_conf->uuid, _obj_name);	\
-	if (_obj) {																			\
-		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(_obj)) {								\
-			_obj->config_tag = _config_tag;												\
-			_obj->trim_flags &= ~CONFIG_TRIM_TOPO;										\
-			_rv = NVMEIBT_ADD_MODIFIED;													\
-		} else {																		\
-			_rv = NVMEIBT_ADD_SKIPPED;													\
-		}																				\
-	}																					\
-	else {																				\
-		_rv = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;										\
-	}																					\
-})
-
 #define UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG_new(_name, _conf, _config_tag, _obj_hash, _rv, _obj_to_upd_type)        \
 ({																						\
 	_obj_to_upd_type					*_obj;											\
@@ -464,12 +445,12 @@ int nvmeibt_read_config_apply_vol_committed_topo_conf(struct mm_mgmt_conf *conf,
 	for (i=0; i<conf->num_vols; i++) {
 		struct mm_vol_conf *vol = &conf->volumes[i];
 
-		UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG(hyr7513, vol, vol_config_tag, &cur_topo->block_devices_hash, add_rv, block_device);
+		UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG_new(hyr7513, vol, vol_config_tag, cur_topo->block_devices_hash_by_uuid, add_rv, struct nvmeibt_block_device);
 		VALIDATE_ADD_RV(8jsknhm, add_rv, volume);
 		for (j=0; j<vol->num_chunks; j++) {
 			struct mm_chunk_conf *chunk = &vol->chunks[j];
 
-			UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG(hyr7514, chunk, vol_config_tag, &cur_topo->chunks_hash, add_rv, chunk);
+			UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG_new(hyr7514, chunk, vol_config_tag, cur_topo->chunks_hash_by_uuid, add_rv, struct nvmeibt_chunk);
 			VALIDATE_ADD_RV(d4dimd0, add_rv, chunk);
 			for (k=0; k<chunk->num_praids; k++) {
 				struct mm_praid_conf *praid = &chunk->praids[k];
@@ -482,7 +463,7 @@ int nvmeibt_read_config_apply_vol_committed_topo_conf(struct mm_mgmt_conf *conf,
 				nvmeibt_praid_update_committed_lot_config(praid, vol, &praid_out);
 				if (!praid_out)
 					continue;
-				UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG(hyr7515, praid, vol_config_tag, &cur_topo->praids_hash, add_rv, praid);
+				UPDATE_CONFIG_TAG_ACCORDING_TO_TOPO_CONFIG_new(hyr7515, praid, vol_config_tag, cur_topo->praids_hash_by_uuid, add_rv, struct nvmeibt_praid);
 				VALIDATE_ADD_RV(4b232kw, add_rv, praid);
 
 				for (l=0; l<praid->num_segments; l++) {

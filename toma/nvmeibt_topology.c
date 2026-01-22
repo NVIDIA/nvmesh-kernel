@@ -334,16 +334,14 @@ static int connect_nics_with_nodes(void)
 	struct nvmeibt_node		*node;
 	struct nvmeibt_nic		*nic;
 	int		rv = 0;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-
-	XHASHTABLE_FOR_EACH_SAFE(nic, &cur_topo->nics_hash) {
+	NVMEIB_HASH_FOREACH(nic, nvmeibt_global_get_global()->nics_hash_by_uuid) {
 		if (nic->its_node && ARE_UUID_EQ(nvmeibt_node_UUID(nic->its_node), &(nic->from_config.its_node_id))) {
 			continue;
 		}
 		nvmeibt_nic_detach_from_node(nic);
-		XHASHTABLE_FOR_EACH_SAFE(node, &cur_topo->nodes_hash) {
+		NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 			if (ARE_UUID_EQ(nvmeibt_node_UUID(node), &(nic->from_config.its_node_id))) {
 				nic->its_node = node;
 				if (node->n_nics >= NVMEIBT_MAX_N_NICS_PER_NODE) {
@@ -488,7 +486,7 @@ static int add_segments_to_local_disks_gpt(void)
 			N_Tf(kiuht76, "Skipping local_disk=@STR. is_being_deleted", nvmeibt_local_disk_display(local_disk));
 			continue;
 		}
-		XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+		XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
 			if (nvmeibt_seg_active_get_metadata_gpt_entry(seg_active)) {
 				continue;	// Already in, at least in the memory copy, on its way to the disk
 			}
@@ -573,17 +571,17 @@ static int connect_disks_with_disk_segments(void)
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-	if (XHASHTABLE_N_ELEMENTS(&cur_topo->disks_hash) == 0) {
+	if (nvmeib_hash_get_n_elements(cur_topo->disks_hash_by_uuid) == 0) {
 		N_Tf(bctavjw, "Too early. No disks (from HW_config) yet");
 		goto out;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(disk, &cur_topo->disks_hash) {
+	NVMEIB_HASH_FOREACH(disk, cur_topo->disks_hash_by_uuid) {
 		disk->n_segments = 0;	// Reinitialize
 	}
 	NVMEIB_HASH_FOREACH(disk_segment, cur_topo->disk_segments_hash_by_uuid) {
 		struct nvmeibt_disk			*prev_disk = disk_segment->seg_mgmt.its_disk;
 
-		disk = NNVMEIBT_HASH_GET_OBJ_BY_UUID(dr56gr7, &cur_topo->disks_hash, &disk_segment->seg_mgmt.disk_id, disk);
+		disk =  nvmeib_hash_search_uuid(cur_topo->disks_hash_by_uuid, &disk_segment->seg_mgmt.disk_id);
 		disk_segment->seg_mgmt.its_disk = disk;
 		if (disk != NULL) {
 			if (disk->n_segments >= disk->n_allocated_segments) { /* YR: should never be > */
@@ -671,7 +669,7 @@ static int connect_local_disks_with_disks(void)
 	NFIN;
 	remove_ptr_from_disk_to_local_disks_that_are_missing();
 	N_Tf(asr5t46, "n_disks=@N_DISKS n_local_disks=@N_LOCAL_DISKS",
-		NVMEIBT_HASH_N_OBJS(&cur_topo->disks_hash),
+		nvmeib_hash_get_n_elements(cur_topo->disks_hash_by_uuid),
 		NVMEIBT_HASH_N_OBJS(&cur_topo->local_disks_hash));
 
 	// Connect all the local_disks to disks.
@@ -751,15 +749,14 @@ static int connect_disk_with_node_by_config(void)
 	int							rv = 0;
 	struct nvmeibt_disk			*disk;
 	struct nvmeibt_node			*node;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
 
 	// Redo from scratch
-	XHASHTABLE_FOR_EACH_SAFE(node, &(cur_topo->nodes_hash)) {
+	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		node->n_disks_config = 0;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(disk, &(cur_topo->disks_hash)) {
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
 		node = nvmeibt_node_get_node_by_id(&(disk->from_config.its_original_node_id));
 		disk->its_node_config = node;
 		if (!disk->its_node_config) {
@@ -797,7 +794,7 @@ int update_liveliness_of_seg_actives_of_specific_local_disk(struct nvmeibt_local
 	}
 	N_Tf(cbdhyw0, "updating local_disk=@STR disk=@UUID_LE n_segs=@N_SEGS", nvmeibt_local_disk_display(local_disk), nvmeibt_disk_UUID(disk), disk->n_segments);
 	local_disk->prev_is_ready_for_segments = new_is_ready_for_segments;
-	XHASHTABLE_FOR_EACH_SAFE(seg_active, &(local_disk->seg_active_hash)) {
+	XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
 		nvmeibt_seg_active_upd_liveliness_according_to_local_disk(seg_active);
 	}
 
@@ -939,7 +936,7 @@ void reset_all_conf_corrupted_flags(void) {
 	NVMEIB_HASH_FOREACH(disk_segment, cur_topo->disk_segments_hash_by_uuid) {
 		disk_segment->is_conf_corrupted = 0;
 	}
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, cur_topo->praids_hash_by_uuid) {
 		praid->praid_mgmt.is_conf_corrupted = 0;
 	}
 	NFOUT;
@@ -981,12 +978,10 @@ skip:
 void nvmeibt_topology_leader_mark_all_modified_praids_report_to_mgmt_due_to_committed_by_majority(void)
 {
 	struct nvmeibt_praid			*praid;
-	struct nvmeibt_topology			*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-
 	TODO(Consider avoiding full report to MGMT upon new leader);
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 			N_Tf(u876nss, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 		}
@@ -1008,7 +1003,7 @@ void nvmeibt_topology_leader_resend_all_praids_report_to_mgmt(void)
 	struct nvmeibt_topology			*cur_topo = nvmeibt_global_get_global();
 
 	N_Tf(y77uq21,"Resend all praids report");
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, cur_topo->praids_hash_by_uuid) {
 		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid))
 			nvmeibt_praid_mark_immediate_report_to_mgmt_required(praid);
 	}
@@ -1019,7 +1014,7 @@ int nvmeibt_topology_leader_resend_specific_vol_praids_report_to_mgmt(char *vol_
 	struct nvmeibt_block_device					*vol;
 	int											i, j;
 
-	XHASHTABLE_FOR_EACH_SAFE(vol, &nvmeibt_global_get_global()->block_devices_hash) {
+	NVMEIB_HASH_FOREACH(vol, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
 		if (strcmp(vol->from_config.client_blkdev_name, vol_name) == 0) {
 			N_Tf(y77ubu1,"Resend vol=@STR praids report", vol_name);
 			for (i = 0; i < vol->n_chunks; i++) {
@@ -1061,7 +1056,6 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	struct nvmeibt_praid							*praid;
 	int												praids_num = 0, segs_num = 0;
 	unsigned int									topo_len;
-	struct nvmeibt_topology							*cur_topo = nvmeibt_global_get_global();
 	struct nvmeibt_Buf								*dst_wire_topo_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo);
 	struct nvmeibt_topology_serialized_topo_header	serialized_header = {0};
 	struct nvmeibt_topology_serialized_topo_header	*dst_wire_header_ptr;
@@ -1072,7 +1066,7 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 
 	NFIN;
 	// Count how many praids and segments we have in order to allocate a buffer
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (omit_praid_in_serialized_topo(praid))
 			continue;
 		praids_num++;
@@ -1096,7 +1090,7 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	dst_wire_header_ptr = (struct nvmeibt_topology_serialized_topo_header *)(dst_wire_topo_buf->data_buf);
 	nvmeibt_topology_convert_header_le_be(&serialized_header, dst_wire_header_ptr);
 	dst_praid_wire_topo_ptr = (struct nvmeibt_praid_serialized_topo *)(dst_wire_header_ptr + 1);
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (omit_praid_in_serialized_topo(praid))
 			continue;
 		*dst_praid_wire_topo_ptr = praid->praid_leader.praid_wire_topo;
@@ -1339,7 +1333,7 @@ static void update_applied_topology(void)
 
 	NFIN;
 	nvmeibt_global_get_global()->last_apply_time = nvmeibt_global_get_cur_event_start_time();
-	XHASHTABLE_FOR_EACH_SAFE(praid, &nvmeibt_global_get_global()->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid)) {
 			N_Tf(gegey33, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 			continue;
@@ -1517,7 +1511,6 @@ out:
 void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 {
 	struct nvmeibt_praid		*praid;
-	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
 #if  0 // always take from the baseline, no need to reset. maybe take committed to baseline here (if not done by the prev func
@@ -1563,7 +1556,7 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(vbnxau7, RAFT_MEMBERS_SEQ_NO, leader_calculated, nvmeibt_offset_and_idx_uninitialized);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(vbnxmr5, RAFT_MEMBERS_SEQ_NO, leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed));
 	//
-	XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid))
 			N_Tf(imfjj2, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 		else
@@ -1603,10 +1596,9 @@ void nvmeibt_topology_serialize_conf_and_topo_if_needed(void)
 static void mark_recalc_required_for_all_praids_if_config_became_not_corrupted(void)
 {
 	struct nvmeibt_praid			*praid;
-	struct nvmeibt_topology			*cur_topo = nvmeibt_global_get_global();
 
 	if (nvmeibt_conf_became_not_corrupted()) {
-		XHASHTABLE_FOR_EACH_SAFE(praid, &cur_topo->praids_hash) {
+		NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 			NVMEIBT_PRAID_MARK_TOPO_RECALC_REQUIRED(dyye226, praid);
 		}
 	}
@@ -1702,7 +1694,7 @@ static void reregister_peer_nics(void)
 
 	NFIN;
 
-	XHASHTABLE_FOR_EACH_SAFE(nic, &nvmeibt_global_get_global()->nics_hash) {
+	NVMEIB_HASH_FOREACH(nic, nvmeibt_global_get_global()->nics_hash_by_uuid) {
 		if (nic->transport != rtr_unknown) {
 			nvmeibt_nm_add_remote_nic(nvmeibt_get_nw_node() ,nic);
 		}

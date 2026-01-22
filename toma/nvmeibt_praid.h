@@ -69,7 +69,6 @@ struct nvmeibt_praid {
 	struct nvmeibt_praid_mgmt					praid_mgmt;
 	struct nvmeibt_praid_leader					praid_leader;
 	struct nvmeibt_praid_follower				praid_follower;
-	struct xdlist								topo_link;
 	struct xdlist								global_report_to_mgmt_praid_link;
 	struct xdlist								praid_topo_recalc_link;
 	char										vol_name_for_recovery[32];
