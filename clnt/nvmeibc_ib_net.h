@@ -251,6 +251,9 @@ struct nvmeibc_ib_net_params {
 	
 	int rcq_offload_cpu;
 	int scq_offload_cpu;
+	
+	/* kernel workqueue for SCQ - mutually exclusive with scq_offload_enb kthread */
+	struct workqueue_struct *scq_kwq;
 
 	/*will loop for all interrupts*/
 	bool poll_interrupts;
@@ -440,6 +443,8 @@ struct nvmeibc_ib_net {
 	struct task_struct *scq_kthread;
 	enum cq_poll_mode scq_poll_mode;
 	struct completion scq_kth_ready;
+	struct workqueue_struct *scq_kwq;  /* Kernel workqueue for SCQ - mutually exclusive with scq_kthread */
+	struct work_struct scq_kwork;  /* Kernel workqueue work for SCQ */
 #if SCQ_OFFLOAD_TRACE
 	struct {
 		int cnt;

@@ -21,6 +21,7 @@
 #include "nvmeib_ib_driver.h"
 #include "management_utils_common/nvmeibc_management_capi_parse_conf.h"
 #include "nvmeibc_ib_nordda_channel.h"
+#include "nvmeibc_locks_channel.h"
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
 #include "nvmeib_public.h"
@@ -1070,6 +1071,7 @@ static void __nvmeibc_exit(void)
 	nvmeibc_instance_do_blocking(NULL, mw_inst_del_all_blocking, false);
 	nvmeib_public_set_debug_level(NULL);
 	nvmeibc_nordda_channel_wq_destroy();
+	nvmeibc_locks_channel_wq_destroy();
 	main_module_single_instance_globals_destroy();
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
@@ -1103,6 +1105,11 @@ static int __init nvmeibc_init(void) /* Constructor */
 
 	if (nvmeibc_nordda_channel_wq_init() < 0) {
 		_NE(nvmeibc_init_nordda_wq, "Failed to initialize nordda channel workqueue");
+		goto out;
+	}
+
+	if (nvmeibc_locks_channel_wq_init() < 0) {
+		_NE(nvmeibc_init_locks_wq, "Failed to initialize locks channel SCQ workqueue");
 		goto out;
 	}
 

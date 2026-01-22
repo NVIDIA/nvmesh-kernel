@@ -918,7 +918,7 @@ static int process_send_cq(struct nvmeibc_ib_net *net, int n)
 	if (unlikely(n > net->n_wc_s))
 		_NW(warn_ib_net_nvmeibc_ib_net_process_send_cq, "@COUNT exceeds q-size (@N_WC_S)", n, net->n_wc_s);
 	else {
-		if (!net->scq_kthread || net->drain_sq_done) {
+		if (!(net->scq_kthread && net->scq_kwq) || net->drain_sq_done) {
 			rv = process_send_cq_(net, n);
 			net->scq_stats.n_external += (rv > 0) ? rv : 0;
 		}
@@ -1041,6 +1041,55 @@ static int polling_process_send_cq_(struct nvmeibc_ib_net *net, bool req_notify,
 
 	   __NFOUT;
 	   return rv;
+}
+
+static void scq_kwork_func(struct work_struct *work)
+{
+	struct nvmeibc_ib_net *net = container_of(work, struct nvmeibc_ib_net, scq_kwork);
+	unsigned long flags;
+	bool continue_polling = false;
+	u64 busy_ns;
+	int n;
+
+	__NFIN;
+
+	if (!nvmeib_ref_get(&net->ib_rsrc_ref)) {
+		_NTn(scq_kwork_func_t1, net, "failed to get ib_rsrc");
+		goto out;
+	}
+
+	nvmeib_qp_stats_on_offth_iter(net->qp_stats);
+	if (READ_ONCE(net->scq_poll_mode) == NVMEIBC_IB_CQ_INTR) {
+		_NEn(error_ib_net_scq_kwork_func, net, "Oops, intr-polling off");
+		BUG();
+	}
+
+	n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, &busy_ns);
+	continue_polling = continue_polling && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, n, busy_ns);
+
+	if (!continue_polling) {
+		_NDn(trace_2_ib_net_scq_kwork_func, net, "transition back to IRQ");
+
+		/* Step 1: update poll-mode */
+		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
+		if (net->scq_poll_mode == NVMEIBC_IB_CQ_POLLING) {
+			scq_offload_trace(net, __LINE__);
+			net->scq_poll_mode = NVMEIBC_IB_CQ_INTR;
+		} else if (net->scq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
+			scq_offload_trace(net, __LINE__);
+			net->scq_poll_mode = NVMEIBC_IB_CQ_POLLING;
+			continue_polling = true;
+		} else BUG();
+		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
+	}
+
+	if (continue_polling && !atomic_read(&net->dying)) {
+		queue_work(net->scq_kwq, &net->scq_kwork);
+	}
+
+	nvmeib_ref_put(&net->ib_rsrc_ref);
+out:
+	__NFOUT;
 }
 
 static int scq_kthread_func(void *arg)
@@ -1218,14 +1267,19 @@ void scq_kthread_stop(struct nvmeibc_ib_net *net)
 
 	__NFIN;
 
-	if (net->scq_kthread) {
+	if (net->scq_kwq) {
+		/* Cancel kernel workqueue work */
+		_NTn(trace_ib_net_scq_kthread_stop, net, "canceling scq_kwq work");
+		nvmeib_public_cancel_work_sync(&net->scq_kwork);
+		net->scq_kwq = NULL;
+	} else if (net->scq_kthread) {
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
 		t = net->scq_kthread;
 		net->scq_kthread = NULL;
 		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 
 		if (t) {
-			_NTn(trace_ib_net_scq_kthread_stop, net, "stopping kthread");
+			_NTn(trace_ib_net_scq_kthread_stopx, net, "stopping kthread");
 			rv = kthread_stop(t);
 			_NTn(trace_1_ib_net_scq_kthread_stop, net, "scq kthread_stop (rv @RV)", rv);
 		}
@@ -1310,7 +1364,6 @@ static inline void intr_process_send_cq_offload_enb_(struct nvmeibc_ib_net *net)
 
 	__NFIN;
 
-	BUG_ON(!net->scq_kthread);
 	if (poll_mode == NVMEIBC_IB_CQ_INTR) {
 
 		/* if this is the first intr after polling period and
@@ -1322,7 +1375,12 @@ sw2polling:
 			nvmeib_qp_stats_on_offload_sched(net->qp_stats);
 			WRITE_ONCE(net->scq_poll_mode, NVMEIBC_IB_CQ_POLLING);
 			smp_mb();
-			wake_up_process(net->scq_kthread);
+			if (net->scq_kwq) {
+				queue_work(net->scq_kwq, &net->scq_kwork);
+			} else {
+				BUG_ON(!net->scq_kthread);
+				wake_up_process(net->scq_kthread);
+			}
 			if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
 				net->scq_stats.n_wakeups_cycles++;
 			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
@@ -1520,7 +1578,7 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 
 	start = jiffies;
 	nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-	if (net->scq_kthread)
+	if (net->scq_kthread || net->scq_kwq)
 		intr_process_send_cq_offload_enb_(net); /* currently only lock-ch */
 	else
 		intr_process_send_cq_(net);
@@ -3654,6 +3712,7 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 		//memset(&net->rcq_stats, 0, sizeof(net->rcq_stats));
 
 		net->scq_kthread = NULL;
+		net->scq_kwq = NULL;
 		net->scq_poll_mode = NVMEIBC_IB_CQ_INTR;
 		//memset(&net->scq_stats, 0, sizeof(net->scq_stats));
 
@@ -3716,7 +3775,12 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 			}
 		}
 
-		if (params->scq_offload_enb) {
+		if (params->scq_kwq) {
+			/* Use kernel workqueue */
+			net->scq_kwq = params->scq_kwq;
+			net->scq_kthread = NULL;
+		} else if (params->scq_offload_enb) {
+			/* Use kthread */
 			if ((rv = scq_kthread_create_(net, params->comp_cpu)) < 0) {
 				_NE(error_1_ib_net_nvmeibc_ib_net_alloc, "Fail to create scq thread");
 				goto err_free_ib;
@@ -3764,6 +3828,7 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 
 	WQ_INIT_WORK(&net->defer_recv_work, poll_cq_and_process_work);
 	INIT_WORK(&net->defer_recv_kwork, poll_cq_and_process_kwork);
+	INIT_WORK(&net->scq_kwork, scq_kwork_func);
 
 	_NTn(trace_9_ib_net_nvmeibc_ib_net_alloc, net, "allocate - done");
 	goto out;
