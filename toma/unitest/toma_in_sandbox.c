@@ -37,7 +37,7 @@ void syslog(int priority, const char *fmt, ...) {
 #include <sys/un.h>
 #include <errno.h>
 
-#define BUG_ON(condition)	do { const int hit__ = !!(condition); if (hit__) {fprintf(stderr, "************************** BUG!!!! at %s, %s() line %d, val=%d, condition=%s\n", __FILE__, __FUNCTION__, __LINE__, hit__, #condition); raise(SIGABRT);} } while(0)
+#define BUG_ON(condition)	do { const int hit__ = !!(condition); if (hit__) {fprintf(stderr, "************************** BUG!!!! at %s:%d - %s(), val=%d, condition=%s\n", __FILE__, __LINE__, __FUNCTION__, hit__, #condition); raise(SIGABRT);} } while(0)
 //#define WARN(condition, fmt, ...) 	do { const int hit = !!(condition); if (hit) {/*dump_stack(); */SANDBOX_PRINT("************************** BUG!!!! at %s() line %d, val=%d, condition=%s\n", __FUNCTION__, __LINE__, hit, #condition); raise(SIGABRT);} } while(0)
 
 #include "interfaces/nvme/nvmeibt_nvme_defines.h"
