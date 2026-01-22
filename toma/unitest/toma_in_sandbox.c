@@ -160,9 +160,10 @@ ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t off
 static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
 	const struct nvmeibs_toma_server_proc_buf *m = buf;
-	BUG_ON((fd < 2) || (n < sizeof(*m)));
-	(void)buf; (void)offset; (void)flags;
-	switch (m->type) {
+	const enum nvmeibs_toma_server_msg_type type = m->type;
+	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
+	(void)flags;
+	switch (type) {
 		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Got: Toma_Hello %lu[b]\n", n); break;
 		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->Got: TomaByeBye %lu[b]\n", n); break;
 		case NVMEIBS_TOMA_WRITE_STATUS_RESP: {
@@ -1073,41 +1074,27 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	struct t_sandbox_sock *nl_sock = sys->TSB_netlink.o.sock;
 	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
 	const int nl_fd = nl_sock->fd;
+	const bool monitor_nl = FD_ISSET(nl_fd, readfds), monitor_wakup = FD_ISSET(w->o[1].sock->fd, readfds);
+	int n_events, n_iterations;
 	BUG_ON(!nl_sock || !readfds || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd));	// Wrong select from Toma production code
-
-	for ((void)timeout; true; msleep(100)) { // Throttled km_comm select, todo, use timeout
-	if (FD_ISSET(nl_fd, readfds)) {	// Check if netlink socket is in the read set and we have queued messages
-		static int n_extended_msgs_to_emulate = 1;
-		const bool has_msg_for_toma = sys->TSB_netlink.o.has_data();
-		const bool emulate_timeout = (sys->TSB_netlink.n_recv_msgs == 1);
-		const bool emulate_extended_msg = (n_extended_msgs_to_emulate > 0) && !has_msg_for_toma && !emulate_timeout;
-		if (has_msg_for_toma || emulate_timeout || emulate_extended_msg) {				// Return immediately - netlink socket is ready to read
-			FD_ZERO(readfds); FD_ZERO(writefds); FD_ZERO(exceptfds);
+	FD_ZERO(readfds); if (writefds) FD_ZERO(writefds); FD_ZERO(exceptfds);
+	for (n_events = 0, n_iterations = 0; (n_events == 0); n_iterations++) { // Throttled km_comm select, todo, use timeout
+		if (monitor_nl && sys->TSB_netlink.o.has_data()) {	// Check if netlink socket is in the read set and we have queued messages, prepared by server_simu_get_next_msg_for_toma
 			FD_SET(nl_fd, readfds);
-			if (has_msg_for_toma) {
-				N_Tf(nl_select_ready0, "Netlink fd @INT ready (queued messages)", nl_fd);
-				return 1;
-			} else if (emulate_timeout) {
-				N_Tf(nl_select_ready1, "Netlink emulate timeout");
-				return 0; // Timeout;
-			} else if (emulate_extended_msg) {
-				TSB_netlink_send_extended_msg();
-				n_extended_msgs_to_emulate--;
-				return 1;
-			}
-			BUG_ON(true);				// Wrong implementation
+			n_events++;
+		}
+		if (monitor_wakup && w->o[1].has_data()) { 			// Check if wakeup due to toma sending message
+			FD_SET(w->o[1].sock->fd, readfds);				// Toma sends message via netlink
+			n_events++;
+		}
+		if (n_events == 0) {
+			msleep(100); (void)timeout;						// Todo: use a real timeout
+			if (n_iterations > 3)
+				break; 										// Emulate timeout
 		}
 	}
-		if (FD_ISSET(w->o[1].sock->fd, readfds)) { 	// Check if wakeup due to toma sending message
-			if (w->o[1].has_data()) {		// Toma sends message via netlink, wakeup the server communication thread
-				FD_ZERO(readfds); FD_ZERO(writefds); FD_ZERO(exceptfds);
-				FD_SET(w->o[1].sock->fd, readfds);
-				return 1;
-			}
-		}
-	}
-	BUG_ON(true);				// Wrong implementation
-	return -1;
+	N_Tf(nl_select_ready0, "n_events=@INT nl=@BOOL_YN, wu=@BOOL_YN", n_events, FD_ISSET(nl_fd, readfds), FD_ISSET(w->o[1].sock->fd, readfds));
+	return n_events;
 }
 
 /************************************* Epoll ********************************/
@@ -1155,6 +1142,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s, n_events=%d\n", loop_idx, is_shutting_down ? " (dying)" : "", n_events); loop_idx++;
 	if (loop_idx != 10) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
+		if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
 		return n_events;
 	} else {
 		N_IMf(sbexit001, "sandbox shutting down Toma app");
