@@ -15,6 +15,7 @@
 #include "core/nvmeibc_core_common.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeib_completion_noise.h"
+#include "nvmeib_public.h"
 /* All the code in this file does not compile in simulator,
    except some explicitly marked chunks that are shared. */
 
@@ -30,7 +31,45 @@ extern bool nr_shared_cq_tcp;
 extern bool nr_use_srq;
 extern bool nr_use_srq_tcp;
 
+bool nr_defer_recv_comps_use_kwq = true;
+module_param(nr_defer_recv_comps_use_kwq, bool, 0644);
+MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Use kernel workqueue for deferred receive completions on nordda channels (default: true)");
+
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
+
+/* Kernel workqueue for nordda channel operations */
+static struct workqueue_struct *nvmeibc_nordda_wq;
+
+int nvmeibc_nordda_channel_wq_init(void)
+{
+	NFIN;
+	nvmeibc_nordda_wq = nvmeib_public_alloc_workqueue("nvmeibc_nordda", WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+	if (!nvmeibc_nordda_wq) {
+		_NE(error_nvmeibc_nordda_channel_wq_init, "Failed to allocate nordda channel workqueue");
+		NFOUT;
+		return -ENOMEM;
+	}
+	_NT(trace_nvmeibc_nordda_channel_wq_init, "Created nordda channel workqueue @PTR", nvmeibc_nordda_wq);
+	NFOUT;
+	return 0;
+}
+
+void nvmeibc_nordda_channel_wq_destroy(void)
+{
+	NFIN;
+	if (nvmeibc_nordda_wq) {
+		_ND(trace_nvmeibc_nordda_channel_wq_destroy, "Destroying nordda channel workqueue @PTR", nvmeibc_nordda_wq);
+		nvmeib_public_destroy_workqueue(nvmeibc_nordda_wq);
+		nvmeibc_nordda_wq = NULL;
+	}
+	NFOUT;
+}
+
+struct workqueue_struct *nvmeibc_nordda_channel_get_wq(void)
+{
+	return nvmeibc_nordda_wq;
+}
+EXPORT_SYMBOL(nvmeibc_nordda_channel_get_wq);
 
 static int nordda_pending_io(struct nvmeibc_disk *disk,
 	struct nvmeibc_channel *ch, void *context, bool sp_locked, u64 version);
@@ -1026,30 +1065,44 @@ int nvmeibc_ib_nordda_channel_connect(struct nvmeibc_ib_nordda_channel *ch)
 	if (!nvmeibc_use_pcpu_cq) {
 		params->nr_defer_recv_comps = P2NV(ch->lionic->port)->dev_type == DT_siw ? nr_defer_recv_comps_tcp : nr_defer_recv_comps; //get this from c-disk ?!
 		if (params->nr_defer_recv_comps) {
-			proc_name_t pname;
 			params->rcq_offload_enb = false;
-			/* create recv completion handler WQ */
-			if (params->comp_cpu >= 0)
-				clnt_proc_name_format_extd(pname, 'C', "WQ", "NRpc",
-							   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)),
-							   params->comp_cpu);
-			else
-				clnt_proc_name_format(pname, 'C', "WQ", "nr_rc", nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)));
-			ch->rc_wq = params->comp_cpu >= 0 ? wq_create_on(pname, params->comp_cpu) : wq_create(pname);
-			if (!ch->rc_wq) {
-				_NE(nvmeibc_ib_nordda_channel_connect_e100,
-					"Failed to create recv comps WQ");
-				rv = -ENOMEM;
-				goto out;
+			if (nr_defer_recv_comps_use_kwq) {
+				/* Use kernel workqueue */
+				params->defer_recv_intr_kwq = nvmeibc_nordda_channel_get_wq();
+				params->defer_recv_intr_wq = NULL;
+				if (!params->defer_recv_intr_kwq) {
+					_NE(nvmeibc_ib_nordda_channel_connect_e101,
+						"Kernel workqueue not available for nordda channel");
+					rv = -ENOMEM;
+					goto out;
+				}
+			} else {
+				/* Use custom workqueue */
+				proc_name_t pname;
+				if (params->comp_cpu >= 0)
+					clnt_proc_name_format_extd(pname, 'C', "WQ", "NRpc",
+								   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)),
+								   params->comp_cpu);
+				else
+					clnt_proc_name_format(pname, 'C', "WQ", "nr_rc", nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)));
+				ch->rc_wq = params->comp_cpu >= 0 ? wq_create_on(pname, params->comp_cpu) : wq_create(pname);
+				if (!ch->rc_wq) {
+					_NE(nvmeibc_ib_nordda_channel_connect_e100,
+						"Failed to create recv comps WQ");
+					rv = -ENOMEM;
+					goto out;
+				}
+				_NT(nvmeibc_ib_nordda_channel_connect_rc_wq_pid,
+					"NRCH @IOCH_NAME (@CH_PTR) - created c_nr_rc_wq with pid @K_PID",
+					ch->base.name, ch, wq_pid(ch->rc_wq));
+				params->defer_recv_intr_wq = ch->rc_wq;
+				params->defer_recv_intr_kwq = NULL;
 			}
-			_NT(nvmeibc_ib_nordda_channel_connect_rc_wq_pid,
-				"NRCH @IOCH_NAME (@CH_PTR) - created c_nr_rc_wq with pid @K_PID",
-				ch->base.name, ch, wq_pid(ch->rc_wq));
-			params->defer_recv_intr_wq = ch->rc_wq;
 		} else {
 			params->rcq_offload_enb = true;
 			params->rcq_offload_cpu = is_pcpu_nrch(ch) ? pcpu_nrch_cpu_get(ch) : WORK_CPU_UNBOUND;
 			params->defer_recv_intr_wq = NULL;
+			params->defer_recv_intr_kwq = NULL;
 		}
 		params->scq_offload_enb = false;
 		params->shared_cq = P2NV(ch->lionic->port)->dev_type == DT_siw ? nr_shared_cq_tcp : nr_shared_cq;

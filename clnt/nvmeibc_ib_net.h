@@ -266,8 +266,9 @@ struct nvmeibc_ib_net_params {
 	/* send and recv shared CQ */
 	bool shared_cq;
 
-	/* defer receive interrupt handling */
+	/* defer receive interrupt handling - either custom wq or kernel wq, not both */
 	struct workq_struct *defer_recv_intr_wq;
+	struct workqueue_struct *defer_recv_intr_kwq;
 	
 	/* allocate metadata for SIW WCs */
 	bool alloc_siw_wc_md;
@@ -466,7 +467,8 @@ struct nvmeibc_ib_net {
 				// net object is reused
 
 	bool shared_cq;
-	struct workq_struct *defer_recv_intr_wq;
+	struct workq_struct *defer_recv_intr_wq;  /* Custom workqueue for defer recv */
+	struct workqueue_struct *defer_recv_intr_kwq;  /* Kernel workqueue for defer recv - mutually exclusive with defer_recv_intr_wq */
 	struct nvmeib_state_guard defer_recv_state;
 
 	struct {
@@ -482,6 +484,7 @@ struct nvmeibc_ib_net {
 	struct list_head qp_action_list;
 
 	struct workqe_struct defer_recv_work;
+	struct work_struct defer_recv_kwork;  /* Kernel workqueue work for nordda channels */
 
 	struct nvmeib_ref ib_rsrc_ref;
 

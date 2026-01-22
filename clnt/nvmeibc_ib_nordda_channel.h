@@ -366,4 +366,9 @@ bool nvmeibc_ib_nordda_channel_alive(struct nvmeibc_ib_nordda_channel *ch);
 
 int nvmeibc_ib_nordda_channel_poll_cqs(struct nvmeibc_ib_nordda_channel *ch, bool notify);
 
+/* Workqueue management */
+int nvmeibc_nordda_channel_wq_init(void);
+void nvmeibc_nordda_channel_wq_destroy(void);
+struct workqueue_struct *nvmeibc_nordda_channel_get_wq(void);
+
 #endif
