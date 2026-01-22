@@ -6,6 +6,9 @@
 #
 # Make files tutorial: http://www.cs.swarthmore.edu/~newhall/unixhelp/howto_makefiles.html
 
+# Default target when running plain `make`.
+.DEFAULT_GOAL := all
+
 # ********** Define compiler and compilation flags *********
 ARCH := $(shell uname -m)
 BUILD_RELEASE?=0
