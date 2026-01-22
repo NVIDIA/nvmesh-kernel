@@ -245,32 +245,6 @@ int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const c
 }
 
 /***************************** Generic messages *******************************/
-int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
-{
-	(void)p;
-	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
-		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
-		if (rv < 0) {
-			N_Tf(tsmtls1, "pwrite(@FD) failed rv=@RV, @AUTO_ERRNO", fd_toma2srvr, rv);
-			return -1;
-		}
-		return 0;
-	} else {
-		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
-		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
-		if (rv >= 0) {
-			return 0;
-		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
-			// Either a cleanup was already active, or a new "job" started
-			N_Tf(tsmtls4, "cleanup request success: @STR", (errno == EALREADY) ? "already active" : "started");
-			return EINPROGRESS;
-		} else {
-			N_Ef(tsmtls5, "pwrite(@FD) failed, wr_cnt=@RV @AUTO_ERRNO", fd_toma2srvr, rv);
-			return -1;
-		}
-	}
-}
-
 int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct nvmeibs_toma_server_proc_buf *msg, int max_len)
 {
 	const int rv = read(fd_srvr2toma, msg, max_len);
@@ -278,21 +252,6 @@ int nvmeib_srvr_api_lib_recv_msg_from_server(struct nvmeibt_km_comm *p, struct n
 	if (rv < (int)sizeof(msg->handle)) {
 		N_Ef(tsmtls8, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
 		return -1;
-	}
-	return rv;
-}
-
-int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
-{
-	int rv = 0;
-	(void)p;
-	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0) < 0) {
-		if (errno == ENXIO) {
-			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, msg, buf_len, clnt_host);
-		} else {
-			N_Tf(tsb2cp2, "write(@FD, handle=@PTR, len=@LEN) failed, @AUTO_ERRNO", fd_toma2clnt, msg, buf_len);
-			rv = -1;
-		}
 	}
 	return rv;
 }
@@ -886,6 +845,47 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, cons
 		msg_free(kmsg);
 	}
 	NFOUT;
+	return rv;
+}
+
+int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
+{
+	(void)p;
+	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
+		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
+		if (rv < 0) {
+			N_Tf(tsmtls1, "pwrite(@FD) failed rv=@RV, @AUTO_ERRNO", fd_toma2srvr, rv);
+			return -1;
+		}
+		return 0;
+	} else {
+		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
+		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
+		if (rv >= 0) {
+			return 0;
+		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
+			// Either a cleanup was already active, or a new "job" started
+			N_Tf(tsmtls4, "cleanup request success: @STR", (errno == EALREADY) ? "already active" : "started");
+			return EINPROGRESS;
+		} else {
+			N_Ef(tsmtls5, "pwrite(@FD) failed, wr_cnt=@RV @AUTO_ERRNO", fd_toma2srvr, rv);
+			return -1;
+		}
+	}
+}
+
+int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
+{
+	int rv = 0;
+	(void)p;
+	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0) < 0) {
+		if (errno == ENXIO) {
+			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, msg, buf_len, clnt_host);
+		} else {
+			N_Tf(tsb2cp2, "write(@FD, handle=@PTR, len=@LEN) failed, @AUTO_ERRNO", fd_toma2clnt, msg, buf_len);
+			rv = -1;
+		}
+	}
 	return rv;
 }
 
