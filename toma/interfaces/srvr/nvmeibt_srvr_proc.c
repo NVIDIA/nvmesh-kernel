@@ -759,7 +759,7 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 	return is_alive;
 }
 
-static bool __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char *reason)
+static void __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char *reason)
 {
 	msgs_list_t *msgs;
 	bool is_alive = true;
@@ -787,7 +787,6 @@ static bool __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char 
 		N_Tf(t2scqrl2, "Wakeup arrived");
 	}
 	NFOUT;
-	return false;	// should stop due to error
 }
 
 static void remove_disk_ack(struct nvmeibt_km_comm *p, const struct nvmeib_disk_info *di)
@@ -823,43 +822,30 @@ static void _send_keep_alive_to_server(struct nvmeibt_km_comm *p)
 static void * run(void *v)
 {
 	struct nvmeibt_km_comm *p = v;
-	fd_set read_fds, write_fds, except_fds;			// For select
-	const int max_fd = max(p->spair[1], p->nl_sock_fd);
-	bool is_alive = true;
+	fd_set read_fds, except_fds;
+	const int n_fds = max(p->spair[1], p->nl_sock_fd) + 1;
 	int n;
 
 	NFIN;
 	get_disks(p);
-	while (is_alive) {
+	while (true) {
 		struct timeval tv = {.tv_sec = TOMA_SILENCE_MAX_PERIOD_SECS, .tv_usec = 0};
 		FD_ZERO(&read_fds);
-		FD_SET(p->spair[1], &read_fds);
+		FD_SET(p->spair[1],   &read_fds);
 		FD_SET(p->nl_sock_fd, &read_fds);
-		FD_ZERO(&write_fds);					// We dont write anything, just wakeup on incomming msg from server or from toma
 		except_fds = read_fds;
-		n = select(max_fd + 1, &read_fds, &write_fds, &except_fds, &tv);
+		n = select(n_fds, &read_fds, NULL /*No writes*/, &except_fds, &tv);	// Wakeup on incomming msg from server or from toma
 		if (n > 0) {
 			if (FD_ISSET(p->spair[1], &read_fds)) {
-				read_toma_wakeup_event(p);
-				is_alive = __handle_incomming_msg_from_toma(p);
-			} else if (FD_ISSET(p->nl_sock_fd, &read_fds)) {
-				is_alive = __handle_new_srvr_msg(p);
-			} else if (FD_ISSET(p->spair[1], &except_fds)) {
-				is_alive = __release_msg_queues_on_error(p, "toma sock");
-			} else if (FD_ISSET(p->nl_sock_fd, &except_fds)) {
-				is_alive = __release_msg_queues_on_error(p, "server sock");
-			} else {
-				N_Wf(warn_km_comm_run, " select triggered none of our fd");
-			}
+				read_toma_wakeup_event(p);				if (!__handle_incomming_msg_from_toma(p)) 	   break; }
+			if (FD_ISSET(p->nl_sock_fd, &read_fds)) {	if (!__handle_new_srvr_msg(p)) 				   break; }
+			if (FD_ISSET(p->spair[1],   &except_fds)) { __release_msg_queues_on_error(p, "toma sock"); break; }
+			if (FD_ISSET(p->nl_sock_fd, &except_fds)) { __release_msg_queues_on_error(p, "srvr sock"); break; }
+			if (FD_ISSET(fd_srvr2toma,  &except_fds)) { __release_msg_queues_on_error(p, "fd_s2toma"); break; }
 		} else if (n == 0) {	// timeout
-			N_Df(trace_km_comm_run, "Timeout");
-			is_alive = __handle_incomming_msg_from_toma(p);		// Try for the chance we missed an event
-			if (is_alive) {
-				XDLIST_EMPTY(&p->disks) ? get_disks(p) : _send_keep_alive_to_server(p);
-			}
-		} else {
-			is_alive = __release_msg_queues_on_error(p, "select");
-		}
+			N_Df(trace_km_comm_run, "Timeout");		  { if (!__handle_incomming_msg_from_toma(p)) 	   break; }	// Try for the chance we missed an event
+			XDLIST_EMPTY(&p->disks) ? get_disks(p) : _send_keep_alive_to_server(p);
+		} else {										__release_msg_queues_on_error(p, "select_-1"); break; }
 	}
 	NFOUT;
 	return NULL;
