@@ -30,6 +30,9 @@
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
 
+struct workqueue_struct *nvmeibs_nvme_wq = NULL;
+EXPORT_SYMBOL(nvmeibs_nvme_wq);
+
 #ifndef PCI_MSIX_ENTRY_CTRL_MASKBIT
 #define   PCI_MSIX_ENTRY_CTRL_MASKBIT 1
 #endif
@@ -53,6 +56,10 @@ MODULE_PARM_DESC(max_completions, "Maximum nvme completions to poll and process 
 static bool nvmeibs_defer_process_io_cq = false;
 module_param_named(defer_process_io_cq, nvmeibs_defer_process_io_cq, bool, 0644);
 MODULE_PARM_DESC(defer_process_io_cq, "Defer all io complentions to offload-thread per cq");
+
+static bool use_nvme_kwq = true;
+module_param_named(use_nvme_kwq, use_nvme_kwq, bool, 0444);
+MODULE_PARM_DESC(use_nvme_kwq, "Use kernel workqueue instead of wakeup thread for processing completion queues");
 
 /* we dont really need to expose this param as we dont fail anything if we alloc less qs.
    it is just used as an initial/default value for when drive has not too many (< 30) qs */
@@ -350,6 +357,7 @@ struct nvme_qp {
 	bool dying;
 	struct nvmeib_qp_stats_pcpu __percpu * qp_stats;
 	struct nvme_qp_cmds_stats nvme_qp_stats;
+	struct work_struct process_cq_work;
 };
 
 /* -------------------------------------------------------------------------- *
@@ -1150,8 +1158,12 @@ static inline int end_use_local_q(struct nvme_qp *q, bool shutdown)
 	}
 	spin_unlock_irqrestore(&q->q_lock, flags);
 
-	/* first stop polling kthread then free-irq */
-	local_q_kthread_stop(q);
+	if (use_nvme_kwq) {
+		nvmeib_public_cancel_work_sync(&q->process_cq_work);
+	} else {
+		local_q_kthread_stop(q);
+	}
+
 	local_q_free_irq(q);
 
 	/* destroy sq and cq */
@@ -1677,6 +1689,7 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	int d_defer_process_io_cq = d->adminq != q ? (d->defer_process_io_cq) : 0;
 	int num_handled = 0;
 	static long last_time = 0;
+	bool _use_nvme_kwq = d->adminq != q ? use_nvme_kwq : false;
 
 	nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_NVME);
 	nvmeib_completion_noise_start(NVMEIB_NOISE_INTERRUPT);
@@ -1690,24 +1703,28 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	}
 	spin_lock(&q->q_lock);
 	nvmeib_qp_stats_on_interrupt(q->qp_stats);
-	if (!d_defer_process_io_cq || !q->thread) {
+	if (!d_defer_process_io_cq || !q->thread || _use_nvme_kwq) {
 		num_handled = nvmeibs_process_cq(q);
-		if (d_use_intr_shaper && d->adminq != q) {
+		if (d_use_intr_shaper && d->adminq != q && !is_cq_empty(q)) {
 			nvmeib_intr_shaper_intr_polled(s_intr_shaper, num_handled);
 			d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 		}
 	}
 
-	if (((num_handled == d_max_completions && d_max_completions) || d_defer_process_io_cq) && q->thread) {
+	if (((num_handled == d_max_completions && d_max_completions) || d_defer_process_io_cq) && (_use_nvme_kwq || q->thread)) {
 		//_ND(trace_nvme_nvmeibs_intr_offload_sched, "Offload sched serial=@SERIAL qid=@QID is_admin=@BOOL", d->serial, q->id, d->adminq == q);
 		nvmeib_qp_stats_on_offload_sched(q->qp_stats);
-		local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
-		/* Set polling=true before wake_up_process to ensure the woken thread sees it.
-		 * The smp_mb__before_atomic in wake_up_process provides the necessary barrier. */
-		WRITE_ONCE(q->polling, true);
-		/* Ensure the polling mode is visible before waking up the thread */
-		smp_mb();
-		wake_up_process(q->thread);
+		if (use_nvme_kwq) {
+			queue_work(nvmeibs_nvme_wq, &q->process_cq_work);
+		} else {
+			local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
+			/* Set polling=true before wake_up_process to ensure the woken thread sees it.
+			 * The smp_mb__before_atomic in wake_up_process provides the necessary barrier. */
+			WRITE_ONCE(q->polling, true);
+			/* Ensure the polling mode is visible before waking up the thread */
+			smp_mb();
+			wake_up_process(q->thread);
+		}
 		if (q->irq_debug < 1 || jiffies > last_time + 5 * HZ) {
 			last_time = jiffies;
 			q->irq_debug = 1;
@@ -4708,6 +4725,23 @@ static void nvmeibs_shutdown(struct pci_dev *pdev)
 	mutex_unlock(&d->dev_lock);
 }
 
+static void kthread_process_drive_cq_work_func(struct work_struct *work)
+{
+	struct nvme_qp *q = container_of(work, struct nvme_qp, process_cq_work);
+	unsigned long flags;
+	int i = 0;
+
+	spin_lock_irqsave(&q->q_lock, flags);
+	if (q->state == LOCAL_Q_ON || q->state == LOCAL_Q_STOP_NEW_IO) {
+		i = nvmeibs_process_cq(q);
+		_NT(trace_nvme_kthread_process_drive_cq_work_func_processed, "Work function processed @INT completions for drive @SERIAL qid=@QID", i, q->dev->serial, q->id);
+		if (!is_cq_empty(q)) {
+			/* resched itself */
+			queue_work(nvmeibs_nvme_wq, &q->process_cq_work);
+		}
+	}
+	spin_unlock_irqrestore(&q->q_lock, flags);
+}
 
 /*
  * This function can be called either
@@ -4740,9 +4774,11 @@ static inline int reuse_local_q_(struct nvme_qp *q)
 	WARN_ON_ONCE(q->irq_state != LOCAL_Q_IRQ_ENABLE);
 
 	/* start polling kthread */
-	WRITE_ONCE(q->polling, false);
-	if (local_q_kthread_start_(q) < 0)
-		goto free_irq;
+	if (!use_nvme_kwq) {
+		WRITE_ONCE(q->polling, false);
+		if (local_q_kthread_start_(q) < 0)
+			goto free_irq;
+	}
 
 	q->state = LOCAL_Q_ON;
 	rv = 0;
@@ -4990,7 +5026,9 @@ static void abandon_outstanding(struct device_data *d)
 
 		if ((q = d->local_ioq[qid])) {
 			spin_unlock_irqrestore(&q->q_lock, flags);
-			local_q_kthread_stop(q);
+			if (!use_nvme_kwq) {
+				local_q_kthread_stop(q);
+			}
 		}
 	}
 	if (d->adminq)
@@ -5144,7 +5182,6 @@ static int kthread_process_drive_cq(void *arg)
 	int qid = q->id - 1;
 	bool cont = false;
 	int total = 0, i;
-	unsigned long max_time;
 	bool enb_irq = false;
 	u64 start_ns, busy_ns __attribute__((unused));
 	unsigned long flags;
@@ -5156,10 +5193,8 @@ static int kthread_process_drive_cq(void *arg)
 	while (!kthread_should_stop()) {
 		q = d->local_ioq[qid];
 		if (q && READ_ONCE(q->polling)) {
-			max_time = jiffies + HZ;
 
 			do {
-
 				cont = false;
 				enb_irq = false;
 				q = d->local_ioq[qid];
@@ -5176,7 +5211,8 @@ static int kthread_process_drive_cq(void *arg)
 				spin_unlock_irqrestore(&q->q_lock, flags);
 				cont = i > 0;
 				total += i;
-			} while (cont && time_before(jiffies, max_time));
+				cond_resched(); /* let other threads run */
+			} while (cont);
 
 			if (!cont && !d->removed && READ_ONCE(q->polling)) {
 				/* The correct sequence to prevent lost-wakeups is: 
@@ -5338,8 +5374,11 @@ static int setup_ioqs(struct device_data *d)
 				goto out;
 			if ((err = create_sq(d, qid, q->sq_phys, q->sq_len, qid)) < 0)
 				goto out;
-			if ((err = local_q_kthread_start_(q)) < 0)
-				goto out;
+			if (!use_nvme_kwq) {
+				if ((err = local_q_kthread_start_(q)) < 0)
+					goto out;
+			}
+			INIT_WORK(&q->process_cq_work, kthread_process_drive_cq_work_func);
 			q->state = LOCAL_Q_ON;
 		}
 		d->local_ioq[qid - 1] = q;
@@ -5349,13 +5388,17 @@ static int setup_ioqs(struct device_data *d)
 out:
 	_NW(warn_nvme_setup_ioqs, "setup_ioqs failed err=@ERR", err);
 	if (q != NULL) {
-		local_q_kthread_stop(q);
+		if (!use_nvme_kwq) {
+			local_q_kthread_stop(q);
+		}
 		local_q_free_irq(q);
 		free_qp(q);
 	}
 	while (--ii >= 0) {
 		if ((q = d->local_ioq[ii])) {
-			local_q_kthread_stop(q);
+			if (!use_nvme_kwq) {
+				local_q_kthread_stop(q);
+			}
 			local_q_free_irq(q);
 			free_qp(q);
 		}
@@ -6247,7 +6290,9 @@ static bool nvmeibs_remove1(struct pci_dev *pdev, bool do_shutdown)
 
 	for (qid = 0; qid < d->max_ioqs; ++qid) {
 		if ((q = d->local_ioq[qid])) {
-			local_q_kthread_stop(q);
+			if (!use_nvme_kwq) {
+				local_q_kthread_stop(q);
+			}
 
 			if (!d->need_reset && !d->removed) {
 				destroy_sq(d, q->id);
@@ -7664,6 +7709,16 @@ static int __init nvmeibspci_init(void)
 		goto err;
 	}
 
+	if (use_nvme_kwq) {
+		nvmeibs_nvme_wq = nvmeib_public_alloc_workqueue("nvmeibs_nvme", WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+		if (!nvmeibs_nvme_wq) {
+			_NE(error_2_nvme_nvmeibspci_init_d, "Failed to allocate nvmeibs_nvme work queue");
+			err = -ENOMEM;
+			goto err;
+		}
+		_NT(trace_nvme_nvmeibspci_init_d, "Created nvmeibs_nvme work queue");
+	}
+
 	nvmeibs_kthread = kthread_run(nvmeibs_nvme_thread_func, NULL, "nvmeibs");
 	if (IS_ERR(nvmeibs_kthread)) {
 		_NE(error_2_nvme_nvmeibspci_init, "Failed to create nvmeibs thread @PTR_ERR", PTR_ERR(nvmeibs_kthread));
@@ -7708,6 +7763,8 @@ err:
 		remove_proc_entry("disks", nvmeibs_proc_dir);
 	if (nvmeibs_proc_dir)
 		remove_proc_entry("nvmeibs", NULL);
+	if (use_nvme_kwq && nvmeibs_nvme_wq)
+		nvmeib_public_destroy_workqueue(nvmeibs_nvme_wq);
 
 	_NE(error_3_nvme_nvmeibspci_init, "nvmeibspci_init(): err=@INT", err);
 	return err;
@@ -7748,6 +7805,8 @@ static void __exit nvmeibspci_exit(void)
 	   even after removing devices */
 	wq_drain(ioqm_wq);
 	wq_destroy(ioqm_wq);
+	if (use_nvme_kwq && nvmeibs_nvme_wq)
+		nvmeib_public_destroy_workqueue(nvmeibs_nvme_wq);
 
 	nvmeib_public_proc_remove(nvmeof_proc);
 	remove_proc_entry("disks", nvmeibs_proc_dir);
