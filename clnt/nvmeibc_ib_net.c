@@ -35,6 +35,7 @@ bool nr_defer_recv_comps_tcp = false;
 module_param(nr_defer_recv_comps_tcp, bool, 0644);
 MODULE_PARM_DESC(nr_defer_recv_comps_tcp, "Defer processing of nrch recv completions (for TCP)");
 
+
 bool nr_shared_cq = true;
 module_param(nr_shared_cq, bool, 0644);
 MODULE_PARM_DESC(nr_shared_cq, "nrch uses shared cq (for RDMA)");
@@ -513,9 +514,14 @@ static void defer_recv_intr_wq_drain(struct nvmeibc_ib_net *net)
 			break;
 		case NVMEIBC_IB_NET_DEFER_RECV_SCHEDULED:
 			if (!(n & 0x1FFFF)) { /* consider udelay -> print every ~1sec */
-				_NTn(trace_defer_recv_intr_wq_drain_0, net,
-					 "wait for SCHED->RUN before drain (pid=@K_PID, n=@INT)",
-					 wq_pid(net->defer_recv_intr_wq), n);
+				if (net->defer_recv_intr_wq) {
+					_NTn(trace_defer_recv_intr_wq_drain_0, net,
+						 "wait for SCHED->RUN before drain (pid=@K_PID, n=@INT)",
+						 wq_pid(net->defer_recv_intr_wq), n);
+				} else {
+					_NTn(trace_defer_recv_intr_wq_drain_0x, net,
+						 "wait for SCHED->RUN before drain (kwq, n=@INT)", n);
+				}
 				/* otherwise we may wq-drain before intr-ctx adds the work */
 			}
 			udelay((1 << 3));
@@ -524,9 +530,16 @@ static void defer_recv_intr_wq_drain(struct nvmeibc_ib_net *net)
 		case NVMEIBC_IB_NET_DEFER_RECV_RUNNING:
 			if (nvmeib_switch_state_guard(&net->defer_recv_state,
 				NVMEIBC_IB_NET_DEFER_RECV_RUNNING, NVMEIBC_IB_NET_DEFER_RECV_TERMINATING)) {
-				_NTn(trace_defer_recv_intr_wq_drain_1, net,
-					 "draining defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
-				wq_drain(net->defer_recv_intr_wq);
+				if (net->defer_recv_intr_kwq) {
+					/* Cancel kernel workqueue work */
+					_NTn(trace_defer_recv_intr_wq_drain_1, net,
+						 "canceling defer_recv_intr_kwq work");
+					nvmeib_public_cancel_work_sync(&net->defer_recv_kwork);
+				} else if (net->defer_recv_intr_wq) {
+					_NTn(trace_defer_recv_intr_wq_drain_1x, net,
+						 "draining defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
+					wq_drain(net->defer_recv_intr_wq);
+				}
 				stopped_defer = true;
 			}
 			break;
@@ -2166,10 +2179,9 @@ out:
 
 static int defer_recv_interrupts_(struct nvmeibc_ib_net *net);
 
-static inline void poll_cq_and_process_work(struct workqe_struct *work)
+/* Common processing function for both custom and kernel workqueues */
+static inline void poll_cq_and_process_common(struct nvmeibc_ib_net *net)
 {
-	struct nvmeibc_ib_net *net = container_of(
-		work, struct nvmeibc_ib_net, defer_recv_work);
 	bool resched = false;
 	u64 start_ns, busy_ns;
 	int rv;
@@ -2242,6 +2254,21 @@ out:
 	__NFOUT;
 }
 
+/* Kernel workqueue wrapper for poll_cq_and_process_work */
+static inline void poll_cq_and_process_kwork(struct work_struct *kwork)
+{
+	struct nvmeibc_ib_net *net = container_of(
+		kwork, struct nvmeibc_ib_net, defer_recv_kwork);
+	poll_cq_and_process_common(net);
+}
+
+static inline void poll_cq_and_process_work(struct workqe_struct *work)
+{
+	struct nvmeibc_ib_net *net = container_of(
+		work, struct nvmeibc_ib_net, defer_recv_work);
+	poll_cq_and_process_common(net);
+}
+
 static int defer_recv_interrupts_(struct nvmeibc_ib_net *net)
 {
 	int rv;
@@ -2265,13 +2292,19 @@ static int defer_recv_interrupts_(struct nvmeibc_ib_net *net)
 		goto out;
 	}
 
-	/* poll_cq_and_process_work */
-	if (!wq_add_work(net->defer_recv_intr_wq, &net->defer_recv_work)) {
+	/* Use kernel workqueue if set, otherwise use custom workqueue */
+	if (net->defer_recv_intr_kwq) {
+		if (!queue_work(net->defer_recv_intr_kwq, &net->defer_recv_kwork)) {
+			rv = -EALREADY;
+			goto out;
+		}
+	} else if (!wq_add_work(net->defer_recv_intr_wq, &net->defer_recv_work)) {
 		/* State check should prevent this from happening */
 		BUG_ON(1);
 		rv = -EALREADY;
 		goto out;
 	}
+
 	nvmeib_qp_stats_on_offload_sched(net->qp_stats);
 	net->rcq_stats.n_defer_poll++;
 	rv = 0;
@@ -2631,11 +2664,14 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 	net->recv_cq = recv_cq;
 	net->send_cq = send_cq;
 	net->defer_recv_intr_wq = params->defer_recv_intr_wq;
+	net->defer_recv_intr_kwq = params->defer_recv_intr_kwq;
 	net->recv_intr_vec = recv_intr;
 	net->send_intr_vec = send_intr;
 	nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 	if (net->defer_recv_intr_wq)
 		_NTn(trace_ib_net_create_qp_defer_wq, net, "Using defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
+	else if (net->defer_recv_intr_kwq)
+		_NTn(trace_ib_net_create_qp_defer_wqx, net, "Using defer_recv_intr_kwq");
 
 	rv = 0;
 	goto out;
@@ -3508,8 +3544,13 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 #endif
 
 	if (!nvmeibc_use_pcpu_cq) {
-		if (params->rcq_offload_enb && params->defer_recv_intr_wq) {
-			_NT(trace_1_ib_net_nvmeibc_ib_net_alloc, "Invalid params: mutual exclusive features");
+		if (params->rcq_offload_enb && (params->defer_recv_intr_wq || params->defer_recv_intr_kwq)) {
+			_NT(trace_defer_recv_intr_wq_invalid_params, "Invalid params: mutual exclusive features");
+			rv = -1;
+			goto out;
+		}
+		if (params->defer_recv_intr_wq && params->defer_recv_intr_kwq) {
+			_NT(trace_1_ib_net_nvmeibc_ib_net_alloc, "Invalid params: both defer_recv_intr_wq and defer_recv_intr_kwq set");
 			rv = -1;
 			goto out;
 		}
@@ -3618,8 +3659,9 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 
 		net->shared_cq = params->shared_cq;
 		net->defer_recv_intr_wq = params->defer_recv_intr_wq;
+		net->defer_recv_intr_kwq = params->defer_recv_intr_kwq;
 		nvmeib_init_state_guard(&net->defer_recv_state,
-							   (params->defer_recv_intr_wq ? NVMEIBC_IB_NET_DEFER_RECV_IDLE : NVMEIBC_IB_NET_DEFER_RECV_DISABLED));
+							   ((params->defer_recv_intr_wq || params->defer_recv_intr_kwq) ? NVMEIBC_IB_NET_DEFER_RECV_IDLE : NVMEIBC_IB_NET_DEFER_RECV_DISABLED));
 	}
 	//TODO: do we use this stats in pcpu-cq mode?
 	memset(&net->rcq_stats, 0, sizeof(net->rcq_stats));
@@ -3721,6 +3763,7 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 	}
 
 	WQ_INIT_WORK(&net->defer_recv_work, poll_cq_and_process_work);
+	INIT_WORK(&net->defer_recv_kwork, poll_cq_and_process_kwork);
 
 	_NTn(trace_9_ib_net_nvmeibc_ib_net_alloc, net, "allocate - done");
 	goto out;

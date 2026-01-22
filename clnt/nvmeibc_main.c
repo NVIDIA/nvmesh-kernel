@@ -20,6 +20,7 @@
 #include "core/nvmeibc_core_common.h"
 #include "nvmeib_ib_driver.h"
 #include "management_utils_common/nvmeibc_management_capi_parse_conf.h"
+#include "nvmeibc_ib_nordda_channel.h"
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
 #include "nvmeib_public.h"
@@ -1068,6 +1069,7 @@ static void __nvmeibc_exit(void)
 	nvmeibc_profile_event_unregister();
 	nvmeibc_instance_do_blocking(NULL, mw_inst_del_all_blocking, false);
 	nvmeib_public_set_debug_level(NULL);
+	nvmeibc_nordda_channel_wq_destroy();
 	main_module_single_instance_globals_destroy();
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
@@ -1098,6 +1100,11 @@ static int __init nvmeibc_init(void) /* Constructor */
 	main_module_single_instance_globals_init();
 	nvmeib_set_debug_level(nvmeib_debug_level);
 	nvmeib_public_set_debug_level(nvmeib_debug_level);
+
+	if (nvmeibc_nordda_channel_wq_init() < 0) {
+		_NE(nvmeibc_init_nordda_wq, "Failed to initialize nordda channel workqueue");
+		goto out;
+	}
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
 	rv = nvmesh_memmgr_metrics_alloc_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
