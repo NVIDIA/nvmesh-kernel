@@ -139,27 +139,27 @@ struct gpt_util_config {
 	BOOL					is_self_test;			// true if running in self-test mode
 };
 
-// TOMA single-instance lock state for gpt_util.
+// TOMA single-instance lock state for gpt_util. This enum does not capture the state when TOMA is running.
 typedef enum {
-	TOMA_LOCK_NOT_HELD,			// No lock held by gpt_util or its self-test framework
-	TOMA_LOCK_GPT_UTIL,			// Lock held by normal gpt_util operation (release at end)
-	TOMA_LOCK_GPT_SELF_TEST,	// Lock held by gpt_util self-test framework (don't release during ops)
-	TOMA_LOCK_MOCK_RUNNING,		// Self-test: pretend TOMA is running
+	TOMA_LOCK_NOT_HELD_BY_GPT,		// No lock held by gpt_util or its self-test framework
+	TOMA_LOCK_GPT_UTIL,				// Lock held by normal gpt_util operation (release at end)
+	TOMA_LOCK_GPT_SELF_TEST,		// Lock held by gpt_util self-test framework (don't release during ops)
+	TOMA_LOCK_MOCK_RUNNING,			// Self-test: pretend TOMA is running
 } toma_lock_state_gpt_t;
 
-static toma_lock_state_gpt_t s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD;
+static toma_lock_state_gpt_t s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD_BY_GPT;
 
 /**
  * Checks if TOMA is running. If not, acquires the single instance lock.
  * Returns true if TOMA is running or mocked, false if not running.
  */
-int is_toma_running_and_acquire_lock(void)
+static BOOL is_toma_running_and_acquire_lock(void)
 {
 	if (s_toma_lock_state_gpt == TOMA_LOCK_MOCK_RUNNING) {
 		return true;	// Mocked TOMA running always overrides the lock check
 	}
-	if (s_toma_lock_state_gpt != TOMA_LOCK_NOT_HELD) {
-		return false;	// Already holding lock by gpt_util or its self-test framework, so TOMA is definitely not running
+	if (s_toma_lock_state_gpt == TOMA_LOCK_GPT_UTIL || s_toma_lock_state_gpt == TOMA_LOCK_GPT_SELF_TEST) {
+		return false;	// Already holding lock by gpt_util or its self-test framework, so TOMA is not running
 	}
 	if (nvmeibt_toma_is_single_instance() < 0) {
 		return true;	// Real TOMA is running
@@ -168,14 +168,12 @@ int is_toma_running_and_acquire_lock(void)
 	return false;
 }
 
-/**
- * Releases lock if acquired by normal operation (not if self-test owns it).
- */
-void release_toma_lock_if_acquired(void)
+// Releases lock if acquired by normal operation (not if self-test owns it).
+static void release_toma_lock_if_acquired(void)
 {
 	if (s_toma_lock_state_gpt == TOMA_LOCK_GPT_UTIL) {
 		nvmeibt_toma_cleanup_single_instance();
-		s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD;
+		s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD_BY_GPT;
 	}
 }
 
@@ -183,7 +181,7 @@ void release_toma_lock_if_acquired(void)
  * Below are toma lock functions only used by self-test framework.
  * Do NOT call them in places other than self-test framework.
  */
-// Acquire lock for test framework, to prevent self-test from interfering with real TOMA. Returns true if real TOMA is running.
+// Acquires lock for test framework, to prevent self-test from interfering with real TOMA. Returns true if real TOMA is running.
 BOOL SELF_TEST_acquire_toma_lock(void)
 {
 	if (nvmeibt_toma_is_single_instance() < 0) {
@@ -192,23 +190,21 @@ BOOL SELF_TEST_acquire_toma_lock(void)
 	s_toma_lock_state_gpt = TOMA_LOCK_GPT_SELF_TEST;
 	return false;
 }
-// Release lock held by self-test and reset state.
+// Releases lock held by self-test and reset state.
 void SELF_TEST_release_toma_lock(void)
 {
 	NTOMA_ASSERT(error_self_test_release_toma_lock, s_toma_lock_state_gpt != TOMA_LOCK_GPT_UTIL, "Self test cannot release lock really held by gpt_util");
-	if (s_toma_lock_state_gpt != TOMA_LOCK_NOT_HELD) {
+	if (s_toma_lock_state_gpt != TOMA_LOCK_NOT_HELD_BY_GPT) {
 		nvmeibt_toma_cleanup_single_instance();
-		s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD;
+		s_toma_lock_state_gpt = TOMA_LOCK_NOT_HELD_BY_GPT;
 	}
 }
-
-// Mock TOMA as running.
+// Mocks TOMA as running.
 void SELF_TEST_mock_toma_running(void)
 {
 	s_toma_lock_state_gpt = TOMA_LOCK_MOCK_RUNNING;
 }
-
-// Undo mock, back to lock held by self-test framework.
+// Undoes mock, back to lock held by self-test framework.
 void SELF_TEST_undo_mock_toma_running(void)
 {
 	s_toma_lock_state_gpt = TOMA_LOCK_GPT_SELF_TEST;
@@ -345,11 +341,6 @@ static int backup_structure_and_append_manifest(int disk_fd,
 }
 
 /**
- * Self-test mock for memory GPT - when set, get_memory_gpt_via_rpc() returns this instead of calling RPC
- */
-static const struct nvmeibt_local_disk		*s_mock_local_disk = NULL;
-
-/**
  * Format in-memory GPT structures as JSON fields (merge-ready).
  * Outputs just the memory_* fields that can be directly inserted into a larger JSON object.
  * Does NOT include outer braces - caller must handle JSON object boundaries.
@@ -447,8 +438,10 @@ void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out,
 }
 
 /**
- * Self-test: Set mock local_disk for testing without real TOMA RPC.
+ * Self-test mock for memory GPT without real TOMA RPC.
+ * Once set, get_memory_gpt_via_rpc() returns this instead of calling RPC
  */
+static const struct nvmeibt_local_disk		*s_mock_local_disk = NULL;
 void SELF_TEST_set_mock_local_disk(const struct nvmeibt_local_disk *local_disk)
 {
 	s_mock_local_disk = local_disk;
@@ -597,7 +590,6 @@ fallback_to_mock:
 		N_Ef(serial_not_nvme_device, "Device is not NVMe or ioctl failed: @STR", config->device_path);
 		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot read NVMe controller serial number" COL_RESET "\n");
 		fprintf(stderr, "  Device: %s\n", config->device_path);
-		fprintf(stderr, "  This device may not be a valid NVMe device.\n");
 		rv = -1;
 		goto out;
 	}
@@ -816,7 +808,6 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 		goto out;
 	}
 
-	/* Allocate GPT structures on heap (too large for stack) */
 	main_gpt = NNVMEIBT_BM_CALLOC(trace_backup_main_gpt, sizeof(*main_gpt));
 	if (!main_gpt) {
 		N_Ef(backup_alloc_main_gpt_failed, "Failed to allocate main_gpt");
@@ -1212,16 +1203,14 @@ static BOOL entries_overlap(const struct nvmeibt_disk_gpt_partition_entry *e1,
 static int detect_overlaps(const struct nvmeibt_disk_gpt_partition_entry *entries,
 						   int max_n_entries)
 {
-	int		i;
-	int		j;
 	int		n_overlaps = 0;
 
-	for (i = 0; i < max_n_entries; i++) {
+	for (int i = 0; i < max_n_entries; i++) {
 		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[i])) {
 			continue;
 		}
 
-		for (j = i + 1; j < max_n_entries; j++) {
+		for (int j = i + 1; j < max_n_entries; j++) {
 			if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[j])) {
 				continue;
 			}
@@ -1501,7 +1490,7 @@ static int display_all_gpts(int disk_fd,
 		goto out;
 	}
 
-	// Try to fix the metadata GPT as well
+	// Find metadata partition for nested GPT display
 	metadata_entry = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
 	if (!metadata_entry) {
 		fprintf(stdout, "No metadata entry found in main GPT (non-NVMesh disk)\n");
@@ -1976,13 +1965,6 @@ out:
 	return rv;
 }
 
-/**
- * Generate a mock NVMesh disk with valid MBR and GPT structure for self-test
- * Returns the fd of the created device (caller must close it)
- * In sandbox: file auto-deleted when fd closed (O_CREAT tracked)
- * In production: caller should unlink file when done
- */
-
 static void print_usage(char *argv[])
 {
 	fprintf(stdout, "Usage: %s [OPTIONS]\n\n", argv[0]);
@@ -1997,7 +1979,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "Actions (choose one, default is display GPT):\n");
 	fprintf(stdout, "  -m, --print-mbr             Display MBR only\n");
 	fprintf(stdout, "  -i, --check-excelero        Check if EXCELERO_METADATA partition exists\n");
-	fprintf(stdout, "  -f, --fix-gpt               Fix GPT from alternate copy (and display)\n");
+	fprintf(stdout, "  -f, --fix-gpt               Fix Main GPT from alternate copy (and display)\n");
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
 	fprintf(stdout, "  -J, --output-json=FILE      Export GPT to JSON file\n");
@@ -2063,6 +2045,18 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "      3. For write mode or self-test mode, TOMA has to be stopped.\n" COL_RESET);
 }
 
+
+/**
+ * Helper macro: Check if action already set (only one action allowed)
+ */
+#define CHECK_SINGLE_ACTION(config, error_name) \
+	do { \
+		if ((config)->action != ACTION_DISPLAY_GPT) { \
+			N_Ef(error_name, "Multiple actions specified (only one allowed)"); \
+			rv = -1; \
+			goto out; \
+		} \
+	} while(0)
 
 /**
  * Phase 1: Parse command-line arguments into config structure
@@ -2226,47 +2220,27 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			fprintf(stdout, "Override block_size=%d\n", config->pblk_size);
 			break;
 		case 'm':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions);
 			config->action = ACTION_DISPLAY_MBR;
 			fprintf(stdout, "Action: Display MBR\n");
 			break;
 		case 'f':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_fix_gpt, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_fix_gpt);
 			config->action = ACTION_FIX_GPT;
 			fprintf(stdout, "Action: Fix GPT from alternate copy\n");
 			break;
 		case 'F':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_fix_mbr, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_fix_mbr);
 			config->action = ACTION_FIX_MBR;
 			fprintf(stdout, "Action: Fix MBR\n");
 			break;
 		case 'i':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_check, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_check);
 			config->action = ACTION_CHECK_EXCELERO;
 			fprintf(stdout, "Action: Check for EXCELERO_METADATA partition\n");
 			break;
 		case 'U':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_upgrade, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_upgrade);
 			config->action = ACTION_UPGRADE_GPT;
 			fprintf(stdout, "Action: Fix n_partition_entries to %d and recalculate CRC\n",
 					LARGE_GPT_MAX_NUM_GPT_ENTRIES);
@@ -2300,31 +2274,19 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 			fprintf(stdout, "Print zeroing verification commands: ENABLED\n");
 			break;
 		case 'J':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_export, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_export);
 			config->action = ACTION_EXPORT_JSON;
 			nvmeibt_strlcpy(config->output_json_file, optarg, sizeof(config->output_json_file));
 			fprintf(stdout, "Action: Export GPT to JSON file: %s\n", config->output_json_file);
 			break;
 		case 'A':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_apply, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_apply);
 			config->action = ACTION_APPLY_JSON;
 			nvmeibt_strlcpy(config->apply_json_file, optarg, sizeof(config->apply_json_file));
 			fprintf(stdout, "Action: Apply GPT from JSON file: %s (dry-run by default)\n", config->apply_json_file);
 			break;
 		case 'R':
-			if (config->action != ACTION_DISPLAY_GPT) {
-				N_Ef(parse_multiple_actions_restore, "Multiple actions specified (only one allowed)");
-				rv = -1;
-				goto out;
-			}
+			CHECK_SINGLE_ACTION(config, parse_multiple_actions_restore);
 			config->action = ACTION_RESTORE_BINARY;
 			nvmeibt_strlcpy(config->restore_binary_file, optarg, sizeof(config->restore_binary_file));
 			fprintf(stdout, "Action: Restore from binary backup: %s\n", config->restore_binary_file);
@@ -3331,11 +3293,11 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			rv = 0;
 			goto out;
 		} else {
-			/* Confirm before writing */
 			char operation_desc[256];
 			char backup_path[512];
 			snprintf(operation_desc, sizeof(operation_desc), "Apply %d change%s from JSON",
 					 total_changes, total_changes == 1 ? "" : "s");
+			/* Confirm before writing */
 			if (!validate_and_confirm_write(config, operation_desc)) {
 				rv = -1;
 				goto out;
@@ -3351,11 +3313,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 		/* Write Main GPT only if there are changes */
 		if (n_main_changes > 0) {
-			/*
-			 * CRITICAL: Copy JSON data into current_main_gpt (which has correct location fields)
-			 * JSON doesn't have location fields (my_pba, alternate_pba, partition_entry_pba)
-			 * See gpt-util-implementation-notes.md Critical Caveat section
-			 */
+			/* Copy JSON data into current_main_gpt (which has correct location fields) */
 			memcpy(current_main_gpt.entries, json_main_gpt.entries, sizeof(current_main_gpt.entries));
 			current_main_gpt.header.disk_obj_uuid = json_main_gpt.header.disk_obj_uuid;
 			current_main_gpt.header.first_usable_pba = json_main_gpt.header.first_usable_pba;
@@ -3378,7 +3336,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 		/* Write Metadata GPT only if there are changes */
 		if (n_metadata_changes > 0) {
-			/* Copy JSON data into current_metadata_gpt (same reason as above) */
+			/* Copy JSON data into current_metadata_gpt (which has correct location fields) */
 			memcpy(current_metadata_gpt.entries, json_metadata_gpt.entries, sizeof(current_metadata_gpt.entries));
 			current_metadata_gpt.header.disk_obj_uuid = json_metadata_gpt.header.disk_obj_uuid;
 			current_metadata_gpt.header.first_usable_pba = json_metadata_gpt.header.first_usable_pba;
@@ -3412,8 +3370,8 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_disk_md, PAGE_SIZE, n_bytes_write);
 			memcpy(dma_buffer, &prepared_disk_md, sizeof(prepared_disk_md));
 
-			if (pwrite(disk_fd, dma_buffer, n_bytes_write, pbyte_s) != n_bytes_write) {
-				N_Ef(apply_disk_md_write_failed, "Failed to write disk_metadata dev=@STR @AUTO_ERRNO", config->device_path);
+			if (NNVMEIBT_PWRITE(trace_apply_disk_md_write, disk_fd, dma_buffer, n_bytes_write, pbyte_s, 0) != (ssize_t)n_bytes_write) {
+				N_Ef(apply_disk_md_write_failed, "Failed to write disk_metadata dev=@STR", config->device_path);
 				fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write disk_metadata to disk" COL_RESET "\n");
 				NNVMEIBT_BM_FREE(trace_apply_disk_md_free, dma_buffer);
 				rv = -1;
@@ -3498,7 +3456,6 @@ static int restore_structure(int disk_fd, const char *filepath, uint64_t pba_sta
 		goto out;
 	}
 
-	/* Use TOMA I/O helper for robust writing (min_offset=0 allows MBR writes) */
 	if (NNVMEIBT_PWRITE(trace_restore_struct_write, disk_fd, restore_buffer, restore_size_bytes, pbyte_start, 0) != (ssize_t)restore_size_bytes) {
 		N_Ef(restore_struct_write_failed, "Cannot write structure to device pba=@ZX", pba_start);
 		goto out;
@@ -3666,9 +3623,6 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 
 	/* Validation 2: Verify serial number matches device (fail-closed) */
 	fprintf(stdout, "\nValidating device serial number...\n");
-
-	/* Get current device serial number */
-	/* Validate serial number (REQUIRED - fail-closed for safety) */
 	manifest_serial = json_get_dict_str(json_root, "controller_serial_num", NULL);
 	if (validate_serial_number_match(disk_fd, config, manifest_serial, "manifest") < 0) {
 		rv = -1;
