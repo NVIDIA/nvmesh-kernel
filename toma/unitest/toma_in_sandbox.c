@@ -1094,7 +1094,7 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	int n_events, n_iterations;
 	BUG_ON(!nl_sock || !readfds || !ls_sock || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd) || (nfds <= ls_fd));	// Wrong select from Toma production code
 	FD_ZERO(readfds); if (writefds) FD_ZERO(writefds); FD_ZERO(exceptfds);
-	for (n_events = 0, n_iterations = 0; (n_events == 0); n_iterations++) { // Throttled km_comm select, todo, use timeout
+	for (n_events = 0, n_iterations = 0; n_events == 0; n_iterations++) { // Throttled km_comm select, todo, use timeout
 		if (monitor_nl && sys->TSB_netlink.o.has_data()) {	// Check if netlink socket is in the read set and we have queued messages, prepared by server_simu_get_next_msg_for_toma
 			FD_SET(nl_fd, readfds);
 			n_events++;
