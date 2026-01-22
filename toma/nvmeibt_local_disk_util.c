@@ -81,7 +81,7 @@ int nvmeibt_local_disk_util_nvme_get_nsid(int fd)
 	int rv = 0;
 
 	if (fstat(fd, &nvme_stat) < 0) {
-		N_Wf(warn_local_disk_util_nvmeibt_local_disk_util_nvme_get_nsid, "fstat error for fd=@FD", fd);
+		N_Wf(warn_local_disk_util_nvmeibt_local_disk_util_nvme_get_nsid, "fstat error for fd=@FD @AUTO_ERRNO", fd);
 		rv = -1;
 		goto out;
 	}
