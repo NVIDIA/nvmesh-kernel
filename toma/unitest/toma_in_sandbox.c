@@ -87,6 +87,7 @@ void syslog(int priority, const char *fmt, ...) {
 #define OFFSET_NONE ((off_t) -1)
 
 static bool nvmeibt_toma_is_running_as_a_utility(void);
+
 /************************************* srvr ***********************************/
 struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
@@ -309,6 +310,8 @@ struct t_sandbox_all {
 		rd_kafka_t *obj[10];
 		int n_obj;
 		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
+		// Outgoing mgmt producer message inspection (unit test assertions)
+		char *last_report_target_json;		// owned, NUL-terminated; NULL if not received
 	} kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
 	struct TSB_netlink_mock {
@@ -413,6 +416,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 }
+
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
 
 void t_sandbox_all_destroy(void) {
@@ -420,6 +424,8 @@ void t_sandbox_all_destroy(void) {
 	pthread_mutex_destroy(&sys->TS.mutex);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
+	free(sys->kafka_simu.last_report_target_json);
+	sys->kafka_simu.last_report_target_json = NULL;
 	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	if (sys->s_req_simu.n_srvr_msg_idx > 0) {
 		BUG_ON(sys->TSB_netlink.n_recv_msgs <= 0);
@@ -1031,10 +1037,22 @@ int override_open(const char *path, int flags, ... /*int mode*/) {
 int override_close(int fd) {
 	struct t_sandbox_sock *s;
 	pthread_mutex_lock(&sys->TS.mutex);
-	s = TSB_socket_find_by_fd(fd);
-	socket_destroy(s);
+	s = TSB_socket_find_by_fd_opt(fd);
+	if (s)
+		socket_destroy(s);
 	pthread_mutex_unlock(&sys->TS.mutex);
-	return 0;
+
+	if (!s) {
+		// This happens during shutdown currently, as Toma closes all fd's before exiting.
+		// To get a clean unit test run, we need to handle this gracefully.
+		// Also, we can't use the binary trace mechanism here during shutdown, as it gets destroyed first.
+		SANDBOX_PRINT("close attempted for invalid fd=%d\n", fd);
+		errno = EBADF;
+		return -1;
+	} else {
+		errno = 0;
+		return 0;
+	}
 }
 
 int override_fcntl(int fd, int cmd, ...) {
@@ -1142,6 +1160,28 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 	return 1;
 }
 
+static void sandbox_kafka_validate_report_target(void) {
+	const bool ok = sys && sys->kafka_simu.last_report_target_json &&
+			strstr(sys->kafka_simu.last_report_target_json, "NVMD_SN_002.1") &&
+			strstr(sys->kafka_simu.last_report_target_json, "NVMD_SN_003.1");
+
+	if (ok) {
+		SANDBOX_PRINT("%s", COL_GREEN "ok - Toma should send reportTarget" COL_RESET "\n");
+		return;
+	}
+
+	{
+		const char *last = (sys && sys->kafka_simu.last_report_target_json) ?
+					   sys->kafka_simu.last_report_target_json :
+					   "<none>";
+		SANDBOX_PRINT("%s", COL_RED "fail - Toma should send reportTarget" COL_RESET "\n");
+		SANDBOX_PRINT("  - last_report_target:\n%s\n", last);
+		fflush(stderr);
+	}
+}
+
+#define SANDBOX_TERMINATE_AFTER_N_LOOPS 50
+
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
 	struct globa_epoll *ep = &sys->TSB_epoll;
 	static uint64_t loop_idx = 0;
@@ -1160,7 +1200,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		}
 	}
 	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s, n_events=%d\n", loop_idx, is_shutting_down ? " (dying)" : "", n_events); loop_idx++;
-	if (loop_idx != 10) {
+	if (loop_idx != SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 		if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
 		return n_events;
@@ -1169,7 +1209,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		is_shutting_down = true;
 		// sys->TSB_sig.sig = 9;	// Daniel: This seems not to work better than epoll failure
 		errno = ENOMEM;
-		return -1;				// For now after 10 iterations stop toma. This is ugly! Simulate shutdown instruction via kafka from mgmt
+		return -1;				// Simulate shutdown instruction via kafka from mgmt
 	}
 }
 
@@ -1188,10 +1228,15 @@ static void __verify_correct_dir(void) {
 }
 
 static void toma_unitest_env_end(void) {
-	#define DICT_DIR "99bin/*/obj/"
+	// #define DICT_DIR "99bin/*/obj/"
 	SANDBOX_PRINT(COL_GREEN "unitest done sys=%p" COL_RESET ". \t\tAnalyze bin logs via:\n"
 		"\t" TOMA_BINLOG_DIR "/pager " TOMA_BINLOG_DIR " --toma --color " /* "--dict_preload " DICT_DIR "dict* --fmtlib_preload " DICT_DIR "libfmtrs.so" */ " > z.txt\n"
 		"\t\t * If pager is not properly built, run once: ./build-verify.sh\n", sys);
+
+	SANDBOX_PRINT("%s", COL_WHITE_BOLD "verification:" COL_RESET "\n");
+	sandbox_kafka_validate_report_target();
+	SANDBOX_PRINT("%s", COL_WHITE_BOLD "verification done" COL_RESET "\n");
+
 	t_sandbox_all_destroy();
 }
 void toma_unitest_env_start(bool is_running_as_a_utility, int trace_debug_level) {
@@ -1550,11 +1595,28 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	static int fail_once_every = 0;
 	rd_kafka_t *ko = kafka_simu_find_by_topic(kt);
 	rd_kafka_message_t km;
+	char *payload_copy = NULL;
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (key == NULL) || (len == 0) || (keylen == 0));
 	(void)msgflags;
 	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (char*)key, (char*)payload);
+
+	// Capture outgoing mgmt messages. The buffer is NOT guaranteed to be NUL-terminated.
+	payload_copy = malloc(len + 1);
+	BUG_ON(!payload_copy);
+	memcpy(payload_copy, payload, len);
+	payload_copy[len] = '\0';
+	{
+		static const char *k_report_target_marker = "\"messageType\": \"reportTarget\"";
+		if (strstr(payload_copy, k_report_target_marker) != NULL) {
+			free(sys->kafka_simu.last_report_target_json);
+			sys->kafka_simu.last_report_target_json = payload_copy;
+			payload_copy = NULL; // ownership moved
+		}
+	}
+	free(payload_copy);
+
 	// No, put this on to kt, in a list and then poll_cb will return the callbacks
 	sys->kafka_simu.notify_producer_msg_accepted(ko, &km, NULL);
 	// Todo: Here, submit msg to management simulator
