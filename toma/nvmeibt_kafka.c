@@ -600,7 +600,7 @@ static void all_producers_msg_to_mgmt_delivery_cb(rd_kafka_t *k, const rd_kafka_
 static struct t_producer_impl {
 	rd_kafka_t       *msg_to_mgmt_producer;
 	rd_kafka_topic_t *msg_to_mgmt_producer_topic;
-} k_high_priority, k_low_priority;
+} k_high_priority, k_low_priority, k_keepalive;
 
 static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_msg *msg) {
 	rd_kafka_topic_t *k_topic = k->msg_to_mgmt_producer_topic;
@@ -665,6 +665,11 @@ static int low_priority_msg_to_mgmt_producer_init(void) {
 	}
 	generate_topic_name_using_zone(str, sizeof(str), ".management.low.1.0.0", 1);
 	return producer_init(&k_low_priority, str, kv, ARRAY_SIZE(kv));
+}
+
+static int keepalive_msg_to_mgmt_producer_init(void) {
+	const struct key_val_strs kv[] = { K_DEFAULT_PRODUCER_CONFIG };
+	return producer_init(&k_keepalive, "default.management.keepalive.1.0.0", kv, ARRAY_SIZE(kv));
 }
 
 /******************************************************************************/
@@ -780,8 +785,11 @@ static void kafka_outgoing_msgs_queue_send_pending_msgs_to_kafka_producer(void) 
 		const enum KAFKA_OUTGOING_MSG_STATE m_state = msg->kafka_outgoing_msg_state;
 		if ((m_state == KAFKA_OUTGOING_MSG_STATE_NOT_SENT) || (m_state == KAFKA_OUTGOING_MSG_STATE_REJECTED_BY_KAFKA)) {
 			msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA;
-			if (    msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH) {
+			if (msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH) {
 				if (producer_send_msg(&k_high_priority, msg) != 0)
+					break;
+			} else if (msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE) {
+				if (producer_send_msg(&k_keepalive, msg) != 0)
 					break;
 			} else {
 				if (msg->out_priority != NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW)
@@ -1811,7 +1819,7 @@ void send_keepalive_msgs_as_needed(void)
 		rebuild_stats_to_json(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "}}");
 		N_Tf(jsghw7b, "Sending follower keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
-		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
 		last_follower_keepalive_ts = now;
 	}
 	// Leader keepalive
@@ -1825,7 +1833,7 @@ void send_keepalive_msgs_as_needed(void)
 							nvmeibt_leader_keep_alive_secs, nvmeibt_raft_get_current_term(),
 							kafka_mgmt_zone_number, nvmeibt_raft_get_guaranteed_sw_ver() >> 16, nvmeibt_raft_get_guaranteed_sw_ver() & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
 		N_Tf(fbdsiuh, "Sending leader keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
-		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
 		last_leader_keepalive_ts = now;
 	}
 }
@@ -2000,6 +2008,11 @@ static void kafka_poll_all_producers_in_order_to_get_their_cb(int timeout_ms) {
 				N_Tf(uxjdn3k, "Poll k_low_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
 		}
 	}
+	if (k_keepalive.msg_to_mgmt_producer) {
+		const int n_events_served = rd_kafka_poll(k_keepalive.msg_to_mgmt_producer, timeout_ms);
+		if (n_events_served > 0)													// Otherwise clutters the log
+			N_Tf(bse3k8a, "Poll k_keepalive.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
+	}
 }
 
 static void kafka_commit_done_offsets_of_all_consumer_queues(void);
@@ -2015,6 +2028,7 @@ static void kafka_close_all_blocking(void) {
 	N_Tf(5nduq93, "n_sends_in_the_air=0. Closing.");
 	producer_close(&k_high_priority);
 	producer_close(&k_low_priority);
+	producer_close(&k_keepalive);
 	consumer_close(&k_incremental_VOL_updates);
 	consumer_close(&k_incremental_TARGET_updates);
 	consumer_close(&k_HW_full_config);
@@ -2035,7 +2049,8 @@ static int kafka_init(bool is_full_init) {
 		 (HW_full_config_consumer_init(is_full_init) < 0) ||
 		 (CMD_consumer_init(is_full_init) < 0) ||
 		 (high_priority_msg_to_mgmt_producer_init() < 0) ||
-		 (low_priority_msg_to_mgmt_producer_init() < 0)) {
+		 (low_priority_msg_to_mgmt_producer_init() < 0) ||
+		 (keepalive_msg_to_mgmt_producer_init() < 0)) {
 		rv = -1;
 	}
 	N_IMf(kamweuj, "k_heartbeat_interval_ms=@INT, k_client_id=@STR", k_heartbeat_interval_ms, nvmeibt_get_my_hostname());
