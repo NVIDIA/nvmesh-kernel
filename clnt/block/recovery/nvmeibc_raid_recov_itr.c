@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeibc_raid_recov_itr.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_req_rel_locks.h"	// Stale special value
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"			// vfree()

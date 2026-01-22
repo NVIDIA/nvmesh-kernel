@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 # ********** Define compiler and compilation flags *********
 BUILD_RELEASE?=1
 UNAME := $(shell uname)# Which operating system we use?

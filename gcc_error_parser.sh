@@ -1,5 +1,8 @@
 #/usr/local/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 TOMA_DIR="toma"
 HOME_PATH="\/Users\/${USER}\/projects"
 HOME_DIR="nvmeib.drs"

@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #ifndef __nvmesh_avx_runner___h
 #define __nvmesh_avx_runner___h
 

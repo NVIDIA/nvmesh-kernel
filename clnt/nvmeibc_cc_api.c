@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 /*********************** Client - Control API *********************************
  API between this struct and nvmeibc_main.c()
  This module will handle all MCS and CLI requests

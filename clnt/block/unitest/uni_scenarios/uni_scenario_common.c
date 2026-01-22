@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "uni_scenario_common.h"
 #include "uni_framework/cond_wait_algorithms.h"
 #include "uni_framework/range_algorithms.h"

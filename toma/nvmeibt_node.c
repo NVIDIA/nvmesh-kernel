@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #include "nvmeibt_node.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_topology.h"

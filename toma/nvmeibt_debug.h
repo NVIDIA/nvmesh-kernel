@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #ifndef NVMEIBT_DEBUG_H
 #define NVMEIBT_DEBUG_H
 /* Note: This is the most basic and first include in all Toma files, It may

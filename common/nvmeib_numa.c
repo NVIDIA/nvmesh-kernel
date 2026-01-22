@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeibm_trace.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_utils_bin_traces.h"

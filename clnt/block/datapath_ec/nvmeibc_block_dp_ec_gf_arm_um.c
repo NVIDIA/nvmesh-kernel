@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeibc_block_dp_ec_gf_arm_defs.h"
 #ifdef NVMEIBC_GF_ARM_USER_SPACE_IMPLEMENTATION
 #ifdef __KERNEL__

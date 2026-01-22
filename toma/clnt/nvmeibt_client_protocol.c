@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #include "common/kr_incs.h"
 #include "common/compat/kr_incs_crc32.h"		/*crc32() */
 #include "common/compat/kr_incs_compiler_types.h"

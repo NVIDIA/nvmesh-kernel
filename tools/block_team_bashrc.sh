@@ -1,4 +1,8 @@
 # .bashrc
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 [ "`hostname`" == "danielhsh-laptop" ] && IS_LOCAL="Y" || IS_LOCAL="N";
 if [ -f /etc/bashrc ]; then
 	. /etc/bashrc

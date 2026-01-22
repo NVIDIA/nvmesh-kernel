@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 /*This header was generated automaticaly from scheme, do change it*/
 
 #ifndef NVMEIBC_MCS_STUB

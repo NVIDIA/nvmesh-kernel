@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 set -x
 oldest_GLIBC_domain_for_pyinstaller='c6.4m-o4.2-1.0.0.0-k2.6.32-696.6.3.el6_base_for_pyinstaller_executables'
 

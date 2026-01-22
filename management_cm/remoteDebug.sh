@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 USAGE_MSG="Usage: ./remoteDebug.sh -s <remote server hostname or IP> -c<component to debug> [-h] \n
 Usage example: ./remoteDebug.sh -s nvme1111 -c mcs \n\n
 -h\t    help\n

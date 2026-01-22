@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #ifndef NVMEIBR_DISK_METADATA_H
 #define NVMEIBR_DISK_METADATA_H
 

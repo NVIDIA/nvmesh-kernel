@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef IB_INCS_H
 #define IB_INCS_H
 /*Simulation of Infiniband connection. Complementary file to linux kernel simulator for programs using IB or RDMA verbs */

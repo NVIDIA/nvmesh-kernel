@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 # ********** Extract git information *********
 ifeq ($(COMPILATION_DATE),)
 	COMPILATION_DATE := NVMEIB_DATE\($(shell date +%-d,%-m,%Y)\)

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 USAGE_MSG="Usage: nightly_utils_package.sh -b <branch_name>"
 REPO_MACHINE='10.0.1.198'
 TMP_PATH='/home/nvmesh/temp_nvmesh_utils'

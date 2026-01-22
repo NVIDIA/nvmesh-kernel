@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeibm_conf_db.h"
 #include "./toma/nvmeibt_topology_simu.h"
 #include "../uni_framework/unitest_defs.h"

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 TODO:
 # sock_create vs. sock_create_krenel, what to use? looks lie ocfs2/tcp.hincludes are made for userspace too
 # Use __sk_user_data() //rcu ...

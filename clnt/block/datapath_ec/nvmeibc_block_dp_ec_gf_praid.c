@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "kr_incs.h"
 #include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
 #include "nvmeib_shared.h"	// Just for N_MAX_RAID_SLICE_LEN

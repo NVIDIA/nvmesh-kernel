@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeib_types.h"
 #include "nvmeibc_block_dp_common.h"
 #include "nvmeibc_icore_ops.h"

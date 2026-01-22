@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmesh_dp_lib_api.h"
 #include "nvmeibc_disk_locks.h"
 /************************ Transport layer dependency **********************************/

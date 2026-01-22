@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef SERJIO_SIM_ACCESS_H
 #define SERJIO_SIM_ACCESS_H
 /* Additional API for serjio to allow simulators tot est it. */

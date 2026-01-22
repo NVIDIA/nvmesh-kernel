@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Trace Daemon Protocol
 
 Trace daemon runs a "capuch" thread for each channel and core, which spends most of its time in a blocking read call on a kernel-exposed traces control file.

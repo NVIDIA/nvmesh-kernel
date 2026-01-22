@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 while (( 1 )); do
 	JSON_file_name=`ls -t *.JSON | head -1`
 	read -p "JSON file (default=${JSON_file_name})? " in_file_name

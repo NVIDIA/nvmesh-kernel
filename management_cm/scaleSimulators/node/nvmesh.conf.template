@@ -1,3 +1,7 @@
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 MANAGEMENT_PROTOCOL="https"
 MCS_LOGGING_LEVEL="DEBUG"
 #MCS_LOGGING_VERBOSE_TYPES="CLIENT>MGMT"

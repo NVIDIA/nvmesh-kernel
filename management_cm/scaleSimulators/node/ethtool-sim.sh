@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+
+
 if [ "$1" == "-S" ]; then
   cat /tmp/statistics/node/nics/$2/data_for_ethtool_sim
 elif [ "$1" == "-p" ]; then

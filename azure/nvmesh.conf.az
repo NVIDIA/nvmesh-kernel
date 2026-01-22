@@ -1,5 +1,7 @@
 # NVMesh configuration file
-# This configuration file is utilized by NVMesh(r) applications for various options.
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 # Define the management protocol
 # MANAGEMENT_PROTOCOL="<https/http>"

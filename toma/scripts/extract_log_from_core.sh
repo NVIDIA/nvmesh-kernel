@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Local on the server (on nvme1018 and alike)
 core_file_origin=`ls -t /var/lib/systemd/coredump/core.nvmeibt_toma.* | head -1`
 if [ "_${core_file_origin}" != "_" ]; then

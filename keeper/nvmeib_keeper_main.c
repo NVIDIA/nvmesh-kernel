@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 /* The keeper module is used to hold resources for the client/target during restart,
  * speeding up the restart and reducing the time that IO is paused (hiatus time).
  * 

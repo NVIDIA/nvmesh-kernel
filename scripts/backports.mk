@@ -1,4 +1,8 @@
 # Set the SHELL variable to bash (fix ubuntu issues)
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 SHELL:=/bin/bash
 
 # Uncomment the lines below to debug the grep utility functions below

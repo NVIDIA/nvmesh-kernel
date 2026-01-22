@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 /******************************* Upgrade code *********************************/
 enum nvmeit_seg_md_version {
 	TOMA_METADATA_VERSION_v3_0_0 = 0x00030001U,

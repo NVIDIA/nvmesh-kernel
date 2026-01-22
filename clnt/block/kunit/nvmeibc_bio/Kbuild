@@ -1,2 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 obj-m := nvmeibc_bio.o
 nvmeibc_bio-y := nvmeibc_bio_main.o nvmeibc_bio_test.o

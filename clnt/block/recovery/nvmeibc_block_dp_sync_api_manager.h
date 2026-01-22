@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBC_SYNC_MANAGER_EXTERNAL_API_H
 #define NVMEIBC_SYNC_MANAGER_EXTERNAL_API_H
 /* Blockdevice/datapath should must implement this api to be able to use syncs */

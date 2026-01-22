@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 ifeq ($(NON_PROD),1)
 	INFRA_SO_PATH=../infra_shared/infra_shared.so
 else

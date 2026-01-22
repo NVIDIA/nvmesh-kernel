@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #ifndef NVMEIBT_NM_HW_IFACE_H
 #define NVMEIBT_NM_HW_IFACE_H
 #include "nvmeibt_nm.h"

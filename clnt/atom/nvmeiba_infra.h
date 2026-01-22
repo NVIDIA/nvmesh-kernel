@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBA_INFRA_H
 #define NVMEIBA_INFRA_H
 /* Must not include anything from the rest of NVMesh codebase! */

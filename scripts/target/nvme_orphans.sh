@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # The script will resassign orphans nvme drives back to inbox nvme driver.
 # Orphans may be happen if toma calls unbind and exit/crash before calling bind again.
 devices_path=/sys/bus/pci/devices

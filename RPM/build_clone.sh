@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 USAGE_STR="USAGE: ./build_clone.sh -c <clone_name> -i <base image name> -k <kernel> -o <ofed path>"
 UB_INBOX_DEPENDENCIES="libibverbs1 librdmacm1 libibcm1 libibmad5 libibumad3 libmlx4-1 libmlx5-1 opensm ibutils infiniband-diags perftest mstflint rdmacm-utils ibverbs-utils gcc rsync"
 EL_INBOX_DEPENDENCIES="libibverbs-devel libibmad-devel libibcm-devel opensm-devel librdmacm-devel ibutils-devel libmlx5 libmlx4 infiniband-diags perftest librdmacm-utils libibverbs-utils libibumad gcc rsync libudev-devel"

@@ -1,4 +1,9 @@
 /*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+/*
     Watchdog
     Use case:
     1. Non responsive hardware (a command that doesn't return)

@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 devices_path=/sys/bus/pci/devices
 # First we bind all orphans to nvme
 for pci in $(lspci -Dd ::0108 | cut -f1 -d ' ')

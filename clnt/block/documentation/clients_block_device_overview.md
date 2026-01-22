@@ -1,3 +1,7 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+-->
 
 | Symbology:   Normal text, Important, to be defined issue, ~~inferior alternative,~~ future version,  |
 | :---- |

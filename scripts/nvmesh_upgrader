@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 MGMT_MDIR=/opt/NVMesh/management
 MGMT_PID_FILE=/var/run/NVMesh/nvmeshmgr/management.pid
 TOMA_PID_FILE=/var/run/NVMesh/nvmeshtarget/toma.pid

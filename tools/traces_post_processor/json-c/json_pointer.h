@@ -1,4 +1,9 @@
 /*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
+/*
  * Copyright (c) 2016 Alexadru Ardelean.
  *
  * This is free software; you can redistribute it and/or modify

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 1. Test:
 	*. compile: gcc -march=armv8-a+simd+crc -O -o test test.c neon4.c arm_um_ec.c recov_neon.c
 	*. run ./test for a test

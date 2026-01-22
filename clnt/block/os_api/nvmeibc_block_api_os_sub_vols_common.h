@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBC_BLOCK_API_OS_SUB_VOLS_H
 #define NVMEIBC_BLOCK_API_OS_SUB_VOLS_H
 /* Internal API on top of regular os_apis, which implements a sub volume functionality.

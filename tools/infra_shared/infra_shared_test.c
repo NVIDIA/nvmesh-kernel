@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #include "common/kr_incs.h" /*Must be first*/
 #include "nvmeib_shared.h"
 #include "nvmeib_types.h"

@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIB_COMMON_ALL_H
 #define NVMEIB_COMMON_ALL_H
 /* First injection point which should be included by all simulators. Replaces

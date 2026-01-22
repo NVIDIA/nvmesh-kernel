@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 Avx_runner was designed to detect NVMesh kernel module AVX registers corruption.
 The test loads AVX2 / AVX512 registers with non zero random values
 and verifies that values in these registers did not change over time

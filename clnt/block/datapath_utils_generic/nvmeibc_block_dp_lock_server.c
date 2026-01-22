@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeibc_block_dp_lock_server.h"
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_block_dp_locks_scheme.h"

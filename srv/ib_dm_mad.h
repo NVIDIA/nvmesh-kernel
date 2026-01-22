@@ -1,4 +1,9 @@
 /*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+/*
  * Copyright (c) 2006 - 2009 Mellanox Technology Inc.  All rights reserved.
  *
  * This software is available to you under a choice of one of two

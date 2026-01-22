@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #ifndef CLI_SRV_TEST_COMMON_H_INCLUDED
 #define CLI_SRV_TEST_COMMON_H_INCLUDED
 

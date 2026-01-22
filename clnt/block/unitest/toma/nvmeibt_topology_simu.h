@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBT_TOPOLOGY_H
 #define NVMEIBT_TOPOLOGY_H
 /* Simulator of the appropriate toma file which stores the configuration and

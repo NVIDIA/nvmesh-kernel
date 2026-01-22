@@ -1,10 +1,7 @@
 #!/bin/bash
 
-##############################################################################
-#  Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.  #
-#                                                                            #
-#  This file is part of NVMesh software.                                     #
-##############################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 cd /sys/class/infiniband
 mlx_devices=`ls`

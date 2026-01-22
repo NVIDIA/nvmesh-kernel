@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBC_DP_SUBMIT_BIO_FUNC_H
 #define NVMEIBC_DP_SUBMIT_BIO_FUNC_H
 /* Datapath Utils function for BIO execution. Used for submitting BIO into krnel request

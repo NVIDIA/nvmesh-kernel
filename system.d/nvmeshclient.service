@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 [Unit]
 Description=NVMesh(r) Client
 Wants=nvmeshagent.service nvmeshtrace@trace_daemon.service nvmeshtrace@siw_tracer.service nvmeshcm.service

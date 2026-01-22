@@ -1,4 +1,9 @@
 /*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
+/*
  * A concensus algorithm (Raft) is needed in order to take consistent
  *  decisions. We need it
  *   - mostly in order to decide upon and synchronize the state of a RAID that

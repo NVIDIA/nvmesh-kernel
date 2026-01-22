@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 To run it manually:
 1) compile nvmesh using build.sh with IM_TEST=yes to compile this test, no must for IM_CLIENT/TARGET/BOTH.
 2) sudo insmod ./common_public/nvmeib_common_public.ko.xz  ib_odp_info=`grep -c ib_umem_odp_get /proc/kallsyms 2> /dev/null`

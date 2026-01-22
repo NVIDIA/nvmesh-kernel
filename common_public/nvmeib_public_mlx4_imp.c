@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include <linux/netdevice.h>
 #include <linux/scatterlist.h>
 #include <infiniband/hw/mlx4/mlx4_ib.h>

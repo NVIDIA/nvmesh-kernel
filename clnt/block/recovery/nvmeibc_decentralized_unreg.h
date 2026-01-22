@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBC_DECENTRALIZED_UNREG_H
 #define NVMEIBC_DECENTRALIZED_UNREG_H
 /* Implementation of cache for stale locks of other clients. When my IO

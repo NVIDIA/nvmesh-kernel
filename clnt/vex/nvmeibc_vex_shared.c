@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "nvmeibc_vex_shared.h"
 
 const struct vex_ops *const vex_ach_clnt_ops_collection[vex_ach_ops_num] = {

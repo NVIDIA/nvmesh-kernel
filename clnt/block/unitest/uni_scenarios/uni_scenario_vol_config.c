@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "uni_scenario_vol_config.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmesh_sim.h"

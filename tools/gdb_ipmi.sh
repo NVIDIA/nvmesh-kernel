@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 if [ $# -lt 2 ] || [ $# -gt 4 ]; then
 	echo "$0 <nvme_num> <symbols: tgt/clnt,none> <nvmesh_build_dir> <kver>"
 	exit -1

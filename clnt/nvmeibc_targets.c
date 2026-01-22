@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 /* This module is used to hold all of the client's required information
    regarding targets. Namely hold all of the formatted nics of the server
    as a linked list of arnics. Moreover we will hold for each target the

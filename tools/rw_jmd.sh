@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Writes to Journal MD
 # Usage:
 # rw_jmd.sh <disk_id> <journal_range> <range_entry> [<j2d> <tx_id> <tx_bmp> <ver>]

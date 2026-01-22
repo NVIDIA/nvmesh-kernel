@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 stty -g > /tmp/.currentTtySettings.$$
 tty_backup=$(</tmp/.currentTtySettings.$$)
 

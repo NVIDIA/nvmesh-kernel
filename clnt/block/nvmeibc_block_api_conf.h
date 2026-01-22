@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBC_BLOCK_API_CONF_H
 #define NVMEIBC_BLOCK_API_CONF_H
 /* Component used for changing configurations of block device after it is

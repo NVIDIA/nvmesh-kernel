@@ -1,4 +1,10 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #pragma once
+
 /* First injection point which should be included by all Toma simulators
    This file replaces Toma's interfaces with other components, allowing it to
    run in a sandbox. Used for unitesting */

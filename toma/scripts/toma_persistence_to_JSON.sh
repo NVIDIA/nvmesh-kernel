@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 while (( 1 )); do
 	# compgen -G returns nothing when no files match (no need for nullglob)
 	persist_and_wire_file_name=( $(compgen -G './toma_persistence_*_raft_and_topo.0*persistence') )

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 #####################################  Compile plugin into corosync library to be an arbiter.
 # Run executable on each node of the cluster, or insert the code into Toma so toma is the executable!
 

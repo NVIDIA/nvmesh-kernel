@@ -7,12 +7,13 @@ Version:             %{version}
 Release:             %{release}
 Summary:             "nvmesh-monitor" by NVIDIA
 
-License:             Commercial Non OSI
+License:             Apache-2.0
 URL:                 http://www.nvidia.com
 Source0:             %{name}
 
 %description
-© Copyright NVIDIA, Inc. All rights reserved. This document contains the confidential and proprietary information of NVIDIA, Inc. Do not reproduce or distribute without the prior written consent of NVIDIA.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 "NVIDIA nvmesh-monitor" includes NVMesh monitor set of tools.
     Branch: %{branch}

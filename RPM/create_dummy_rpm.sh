@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
 	echo "USAGE:"
 	echo "./create_dummy_rpm <version> <release>        (if not passed the version and release will be taken from 'git-describe')"

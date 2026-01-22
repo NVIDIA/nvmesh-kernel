@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIB__ENUM_FACTORY_H
 #define NVMEIB__ENUM_FACTORY_H
 /*  This file implements a technique for making enum and a list of string with

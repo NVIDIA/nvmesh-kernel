@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBC_DP_RESUBMITTER_H
 #define NVMEIBC_DP_RESUBMITTER_H
 /* Class which resubmits and retries IO tasks, when they cannot be executed now

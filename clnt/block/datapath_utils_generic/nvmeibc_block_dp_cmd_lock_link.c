@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 // For documentation, see Header in H file
 /*****************************************************************************/
 #include "nvmeibc_block_dp_cmd_lock_link.h"

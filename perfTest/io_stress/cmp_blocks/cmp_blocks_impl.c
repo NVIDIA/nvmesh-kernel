@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #include "./cmp_blocks_impl.h"
 #include "block/datapath_ec/nvmeibc_block_dp_ec_gf_praid.h"
 #include <stdarg.h>

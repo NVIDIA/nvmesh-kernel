@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Main makefile for core layer test suite kernel communication layer
 # build target is library corecomm (aka libcorecomm.so.0.1)
 

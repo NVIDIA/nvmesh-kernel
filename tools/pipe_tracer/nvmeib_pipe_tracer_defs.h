@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
 #ifndef NVMEIB_PIPE_TRACER_DEFS_H
 #define NVMEIB_PIPE_TRACER_DEFS_H
 

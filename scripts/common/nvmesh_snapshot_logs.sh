@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 usage_str="Usage: $0 [--toma] [--clnt] [--srv] [--reason <one_word>]"
 # Parse the arguments
 declare i is_toma=0

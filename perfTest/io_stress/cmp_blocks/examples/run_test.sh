@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 PROJ="../../..";
 function __run_cmd() {	cmd=("$@"); echo -e "\e[1;33m************************ ${cmd}\e[0;39m"; eval ${cmd}; }
 function echo_error { echo -e "\e[0;31m$*\e[0m"; }
