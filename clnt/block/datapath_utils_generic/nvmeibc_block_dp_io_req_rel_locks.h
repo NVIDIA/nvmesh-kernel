@@ -256,5 +256,9 @@ struct operation;
 void dp_locks_trace_lock_comp(   const struct operation *o, const struct nvmeibc_cmd_lock *l, const struct nvmeibc_d_rdma_comp *lock_comp);
 void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc_cmd_lock *l);
 
+/***************************** PET APIs **********************************/
+void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock);
+void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock);
+
 #endif  // H beginning
 

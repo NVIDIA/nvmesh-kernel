@@ -1242,6 +1242,11 @@ void nvmeibc_blkset_info_write_pet_describe(struct nvmeibc_block_command *cmds,
 							addr, binfo);
 }
 
+static void __nvmeibc_blkset_info_write_failed_to_send_pet_describe(struct operation* o, int prev_rv)
+{
+	NVMEIBC_IO_PET_MSG_NORM(&o->journal, "rdma.failed_to_send(prev_rv=%d)", prev_rv);
+}
+
 static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 							int n_cmds, int last_cmd, int prev_rv)
 {
@@ -1267,6 +1272,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 
 			}
 		} else {
+			__nvmeibc_blkset_info_write_failed_to_send_pet_describe(cmds->o, prev_rv);
 			err = prev_rv;
 		}
 		if (err != 0) { // Implicit call to __post_cmd_dirtybit_turnoff_cb()

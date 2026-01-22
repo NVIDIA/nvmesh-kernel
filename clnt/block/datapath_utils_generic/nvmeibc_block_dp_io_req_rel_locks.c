@@ -114,7 +114,7 @@ static inline struct nvmeibc_profiler *__raid_gp_profile_for_rwt_op_locks(const 
 //   thus getting the operation via replaced commands will not gave us the desired result.
 
 __attribute__((nonnull(2)))
-static void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
+void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
 {
 	struct nvmeibc_d_rdma_comp const *rdma_comp = &lock->comp;
 	if (!o){
@@ -144,7 +144,7 @@ static void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, 
 }
 
 __attribute__((nonnull(2)))
-static void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
+void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
 {
 	struct nvmeibc_d_rdma_comp const *rdma_comp = &lock->comp;
 	enum nvmeib_pet_severity const severity = NCL_is_request_failed(rdma_comp->lock_status)

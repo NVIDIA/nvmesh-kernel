@@ -428,6 +428,7 @@ static void __free_sync_op(struct recovery_sync_op *so, bool release_slot)
 		my_kfree(o->mssa->gf_blocks.prd);
 		my_kfree(o->mssa->blocks_md);
 	}
+	nvmeib_pet_journal_commit(&o->journal);
 	nvmeibc_operation_free(o);
 }
 
@@ -465,19 +466,20 @@ static void __compressed_sync_op_trace_start(const struct recovery_sync_op *so) 
 			so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
 			tr->ch, tr->r1, so->rlba,
 			so->start_slice, so->n_slices);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_start(orig_o_dbg_id=%u op=%u vol_id=%u topo=%llu rlba=%llu slices=%u-%u)",
-		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, (u32)so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
-		so->rlba, (u16)(so->start_slice), (u16)(so->n_slices));
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_start(origr_o_dbg_id=%u op=%hhu<enum nvmeib_block_io_op> vol_id=%u topo=%llu rlba=%llu slices=%hhu-%hhu)",
+		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, (u8)so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
+		so->rlba, (u8)(so->start_slice), (u8)(so->n_slices));
 }
 
 static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op *so) {
 	const u32 bi_post = so->cmds->rld.post.all, bi_pre = so->cmds->rld.pre.all;
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync write binfo: PRE: @BINFO POST: @BINFO", _T, goodpath_nvmeibc_syncs, compressed_sync_op_write_binfo, so->o->dbg_id, bi_pre, bi_post);
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_write_binfo(origr_o_dbg_id=%u pre=0x%x<union nvmeib_blkset_info> post=0x%x<union nvmeib_blkset_info>)", so->o->dbg_id, bi_pre, bi_post);
 }
 
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync end: RV: @RV", _I, goodpath_nvmeibc_syncs, compressed_sync_op_trace_end, so->o->dbg_id, so->error);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_end(orig_o_dbg_id=%u) = %d", so->o->dbg_id, so->error);
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_end(origr_o_dbg_id=%u) = %d", so->o->dbg_id, so->error);
 }
 
 static int __do_on_stage_done(struct recovery_sync_op *so) {
@@ -518,6 +520,7 @@ static int __release_lock_of_sync(struct nvmeibc_cmd_lock *l, struct recovery_sy
 	int rv;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	dp_locks_trace_lock_release(so->o, l);
+	nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 	rv = icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
 	if (rv) {
 		__change_lock_status_to(l, NCL_STATUS_FAIL_NO_COMP);
@@ -737,7 +740,7 @@ static int __complete_bs_info_write(struct nvmeibc_d_rdma_comp *dc, struct nvmei
 {
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(dc);
 	struct recovery_sync_op *so = l->cmds->o->rso;
-	int rv = 0;
+	int i, rv = 0;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
@@ -751,6 +754,10 @@ static int __complete_bs_info_write(struct nvmeibc_d_rdma_comp *dc, struct nvmei
 	if (rv > 0)
 		return 0;
 	WARN(rv < 0, "nvmeibc bug rv=%d\n", rv);
+	for (i = 0; i < so->locks->n_siblings; ++i) {
+		nvmeibc_cmd_lock_response_io_pet_describe(so->o, &so->locks[i]);
+	}
+
 	debug_transfer_transport_so(so);
 
 	//atomic_inc(&get_so_fctr(so)->main.n_commit_binfo); // Todo: Daniel: do really add the counter here?
@@ -893,6 +900,7 @@ _func_start:
 			goto _func_start;
 		}
 		so->stage = sync_stage_recov_lo_try_lock_cb;
+		nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 		err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 		if (!err)
 			BLKCMP_SO_ASYNC_RESUME_CUR(0);
@@ -903,6 +911,7 @@ _func_start:
 	case sync_stage_recov_lo_try_lock_cb:{
 		l->status = lock_comp->lock_status;
 		icore_ops->cb_called_comp(icore_ops, l->ds->disk, lock_comp);
+		nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 		dp_locks_trace_lock_comp(so->o, l, lock_comp);
 		__invoke_crash_on_lock_corruption(l, 0, "take", 1);
 		if (NCL_do_i_have_lock(lock_comp->lock_status)) {
@@ -1010,6 +1019,7 @@ _func_start:
 	case sync_stage_recov_un_lock_release_cb: {
 		l->status = lock_comp->lock_status;
 		if (!did_caller_of_so_took_this_lock(l)) { /* Owner/Dual/Copy-Ow handled by sync, released or broken */
+			nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 			dp_locks_release_cb(lock_comp, nvmeibc_d_rdma_comp_tag_make());
 		}
 		so->stage = sync_stage_recov_un_lock_next_lock;
@@ -1134,6 +1144,7 @@ static int __init_so(enum nvmeib_block_io_op op, struct recovery_sync_op *so,
 	}
 	o = so->o;
 	o->rso = so;
+	o->journal = nvmeibc_io_pet_journal_make(orig_o->nd->io_pet_controller);
 	o->jiffies1 = jiffies; // Just for debug
 	BLKCMP_SO_BLOCKING_CONTEXT_ALLOC(o);
 	o->nd = orig_o->nd; // Just for debug
@@ -1294,6 +1305,7 @@ _func_start:
 
 		case sync_stage_st_to_db_written_db:{
 			icore_ops->cb_called_comp(icore_ops, l->ds->disk, lock_comp);
+			nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 			__invoke_crash_on_lock_corruption(l, 0, "take", 1);
 			so->stage = sync_stage_st_to_db_stale_released;
 			if (!NCL_do_i_have_lock(lock_comp->lock_status)) {
@@ -1304,6 +1316,7 @@ _func_start:
 			}
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
 			dp_locks_trace_lock_release(so->o, l);
+			nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			if (!err)
 				BLKCMP_SO_ASYNC_RESUME_CUR(0);
@@ -1313,6 +1326,7 @@ _func_start:
 		}
 
 		case sync_stage_st_to_db_stale_released:{
+			nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 			if (NCL_had_release_callback(lock_comp->lock_status))   // Do this only if actuall callback returned, or else changing to TAKEN implies a callback and we would corrupt the count of in_transfers io requests
 				lock_comp->lock_status = NCL_STATUS_TAKEN;			// Daniel: Even if stale-special release failed, sync operation is a success, coz dirty bit was written (no data corruption). dp_locks_release_cb() - does reregisters failed release. We don't want this!
 			dp_locks_release_cb(lock_comp, nvmeibc_d_rdma_comp_tag_make());
@@ -1570,6 +1584,7 @@ _func_start:
 			lock_comp->compare  = lock_comp->exchange = 0ULL;
 			l->comp.code = NVMEIBC_CMD_LOCK_UNLOCK;	// Compare exchange to zero
 			__invoke_crash_on_lock_corruption(l, 0, "take", 1);	// As if was taken before release
+			nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			#else
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
@@ -1585,6 +1600,7 @@ _func_start:
 		case sync_stage_recov_read_cmds_sent:{
 			const bool is_lock_zero = NCL_do_i_have_lock(lock_comp->lock_status);
 			const u64 holder = get_contending_id(lock_comp);
+			nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 			dp_locks_trace_lock_comp(so->o, l, lock_comp);
 			__sync_dp_locks_release_cb(l, lock_comp);
 
