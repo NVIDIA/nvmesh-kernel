@@ -1279,15 +1279,15 @@ int rsrm_faults_get_fd(void) {
 void rsrm_faults_handle_fifo_comm(void) {}
 
 /************************************* Kafka ********************************/
-typedef struct rd_kafka_topic_conf_s {
+struct rd_kafka_topic_conf_s {
 	int dummy;
-} rd_kafka_topic_conf_t;
+};
 rd_kafka_topic_conf_t* rd_kafka_topic_conf_new(void) {
 	return calloc(1, sizeof(rd_kafka_topic_conf_t));
-};
+}
 void rd_kafka_topic_conf_destroy(rd_kafka_topic_conf_t *conf) { free(conf); }
 
-typedef struct rd_kafka_topic_s {
+struct rd_kafka_topic_s {
 	char *name;
 	rd_kafka_topic_conf_t* conf;
 	int64_t commited_offset, cur_offset, last_offset;
@@ -1295,20 +1295,20 @@ typedef struct rd_kafka_topic_s {
 	int32_t partition;		// Support only 1 partition for now. Store its index
 	bool is_active;
 	int temp_store_offset;	// Daniel, not sure is needed - just for two stage store and commit.
-} rd_kafka_topic_t;
+};
 
-typedef struct rd_kafka_conf_s {
+struct rd_kafka_conf_s {
 	char *group_id;
 	bool enable_ssl;
-} rd_kafka_conf_t;
+};
 
-typedef struct rd_kafka_s {
+struct rd_kafka_s {
 	char* name;
 	int log_lvl;
 	enum rd_kafka_type_t who;
 	rd_kafka_conf_t* conf;
 	rd_kafka_topic_t topic;
-} rd_kafka_t;
+};
 
 static inline void __rd_kafka_topic_verify_valid(rd_kafka_topic_t *kt, int32_t partition) {
 	BUG_ON((partition != kt->partition) || (!kt->is_active));
