@@ -211,6 +211,13 @@ do {																					\
 	(__oldobj)->config_tag = CONFIG_TAG_OUTDATED;										\
 } while (0)
 
+#define NVMEIBT_OBJ_MARK_OUTDATED_ASCII(__name__, __oldobj, __obj_name)						\
+do {																						\
+	const struct nvmeibt_ascii_uuid		*_uuid_ = nvmeibt_##__obj_name##_UUID(__oldobj);	\
+	N_Tf(__name__, "hash: mark old " MACRO_DEF_TO_STR(__obj_name) "=@STR", _uuid_->str);	\
+	(__oldobj)->config_tag = CONFIG_TAG_OUTDATED;											\
+} while (0)
+
 #define NVMEIBT_OBJ_IS_MARKED_OUTDATED(__oldobj)										\
 	((__oldobj)->config_tag == CONFIG_TAG_OUTDATED)
 

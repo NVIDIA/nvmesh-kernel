@@ -10,8 +10,8 @@ struct nvmeibt_nic_config {
 	union nvmeib_uuid		id;
 	int						version;
 	union nvmeib_uuid		its_node_id;
-	char					nicID[35];
-	char					guid_str[35];
+	char					hw_gid_str[35];
+	char					sw_gid_str[35];
 	int						partition_key;
 	char					protocol[20];
 };

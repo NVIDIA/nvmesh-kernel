@@ -19,8 +19,8 @@ void nvmeibt_nic_dump(struct nvmeibt_nic *nic)
 {
 	struct nvmeibt_nic_config *f = &nic->from_config;
 
-	N_Tf(trace_nic_nvmeibt_nic_dump, "Config data: uuid=@UUID_LE version=@VERSION its_node_uuid=@UUID_LE nicID=@STR guid=@STR partition_key=@INT protocol=@STR",
-		nvmeibt_nic_UUID(nic), f->version, &(f->its_node_id), f->nicID, f->guid_str, f->partition_key, f->protocol);
+	N_Tf(trace_nic_nvmeibt_nic_dump, "Config data: uuid=@UUID_LE version=@VERSION its_node_uuid=@UUID_LE hw_gid_str=@STR sw_gid_str=@STR partition_key=@INT protocol=@STR",
+		nvmeibt_nic_UUID(nic), f->version, &(f->its_node_id), f->hw_gid_str, f->sw_gid_str, f->partition_key, f->protocol);
 }
 #else	// #ifdef TOMA_DEBUG
 void nvmeibt_nic_dump(__attribute__((__unused__)) struct nvmeibt_nic *nic) {}
@@ -62,8 +62,8 @@ enum nvmeibt_add_rv nvmeibt_nic_add(struct mm_nic_conf *conf, struct mm_node_con
 	f = &(new_nic->from_config);
 	f->id = conf->uuid;
 	f->version = conf->version;
-	nvmeibt_strlcpy(f->guid_str, conf->guid+2, sizeof(f->guid_str)-1);
-	nvmeibt_strlcpy(f->nicID, conf->nicID, sizeof(f->nicID));
+	nvmeibt_strlcpy(f->sw_gid_str, conf->sw_gid_str+2, sizeof(f->sw_gid_str)-1);
+	nvmeibt_strlcpy(f->hw_gid_str, conf->hw_gid_str, sizeof(f->hw_gid_str));
 	f->its_node_id = node->uuid;
 	f->partition_key = conf->pkey;
 	switch(conf->protocol) {

@@ -1027,7 +1027,7 @@ void nvmeibt_nm_attach_port(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic
 	union ibv_gid conf_gid;
 
 	NFIN;
-	lnic = nvmeibt_local_nic_nic_to_local_nic(nic);
+	lnic = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->local_nics_hash_by_sw_gid_str, nic->from_config.sw_gid_str);
 	if (!lnic) {
 		N_Ef(attach_port_lnic_not_found, "Couldn't find lnic");
 		goto out;
@@ -1058,7 +1058,7 @@ void nvmeibt_nm_attach_port(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic
 	}
 	/* Now attach the port */
 	pp = ln->nics[nic_idx]->ports[lnic->from_config.port -1];
-	nvmeibt_ib_common_device_uuid_str_to_raw(&conf_gid, nic->from_config.guid_str);
+	nvmeibt_ib_common_device_uuid_str_to_raw(&conf_gid, nic->from_config.sw_gid_str);
 	if (pp->is_valid) {
 		/* port is already attached, check if config was changed as toma may call us even if not */
 		if (pp->mtu != lnic->from_config.mtu || memcmp(&pp->conf_gid, &conf_gid, sizeof(union ibv_gid)) ||
@@ -2415,7 +2415,7 @@ int nvmeibt_nm_add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_n
 		e->nic = nic;
 		e->nic_id = nic->from_config.id;
 		snprintf(e->remote_nic, sizeof(e->remote_nic), "%s",
-			nic->from_config.guid_str);
+			nic->from_config.sw_gid_str);
 		if (!me)
 			e->me_id = cur_topo->my_node->from_config.id;
 		e->transport = nic->transport;
@@ -3035,7 +3035,7 @@ int nvmeibt_nm_del_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_n
 			nic->its_node ? nic->its_node->from_config.name : "???");
 		e->nic_id = nic->from_config.id;
 		snprintf(e->remote_nic, sizeof(e->remote_nic), "%s",
-			nic->from_config.guid_str);
+			nic->from_config.sw_gid_str);
 		e->transport = nic->transport;
 		e->broadcast_id = nic->from_config.partition_key;
 		r->base.type = nvmeibt_nm_request_del_nic;

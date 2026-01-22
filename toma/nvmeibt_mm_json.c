@@ -251,8 +251,8 @@ static void _HW_nic_from_json(struct mm_nic_conf *nic, struct mm_json_elem *elem
 		s = kv->value->str;
 		JSON_ASSIGN_PLAIN(thsuik3, "pkey", nic->pkey, kv->value->num);
 		JSON_ASSIGN_PLAIN(1dmopyl, "version", nic->version, kv->value->num);
-		JSON_ASSIGN_STR(bhsikws, "guid", nic->guid, s);
-		JSON_ASSIGN_STR(8nklspw, "nicID", nic->nicID, s);
+		JSON_ASSIGN_STR(bhsikws, "guid", nic->sw_gid_str, s);
+		JSON_ASSIGN_STR(8nklspw, "nicID", nic->hw_gid_str, s);
 		JSON_ASSIGN_PLAIN(b6euhrq, "uuid", nic->uuid, *GET_UNION_UUID_OF_URN_UUID_STR(s));
 		JSON_ASSIGN_PLAIN(7xbjwl2, "protocol", nic->protocol, (!strcmp(s, "RoCE") ? 1 :
 															   !strcmp(s, "Infiniband") ? 2 :
@@ -678,7 +678,7 @@ void HW_print_conf(struct HW_mgmt_conf *conf, int (*printf_fn)(void *ctx, const 
 			struct mm_nic_conf *nic = &node->nics[j];
 			_mm_uuid_binary_to_str(&nic->uuid, uuid);
 			(*printf_fn)(s, "      NIC:  uuid=%s (%s)\n", uuid, nic->eyecatcher);
-			(*printf_fn)(s, "            pkey=%u, protocol=%u, GUID=%s\n", nic->pkey, nic->protocol, nic->guid);
+			(*printf_fn)(s, "            pkey=%u, protocol=%u, hw_gid_str=%s, sw_gid_str=%s\n", nic->pkey, nic->protocol, nic->hw_gid_str, nic->sw_gid_str);
 		}
 	}
 	NFOUT;

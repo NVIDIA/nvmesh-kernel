@@ -643,8 +643,8 @@ void *serialize_nic_to_nvmeibc(struct nvmeibc_nic_conf *out_p, struct nvmeibt_ni
 {
 	size_t		sz = sizeof(nic->from_config.protocol);
 
-	nvmeibt_strlcpy(out_p->nicID, nic->from_config.nicID, sizeof(out_p->nicID));
-	snprintf(out_p->guid, sizeof(out_p->guid), "0x%s", nic->from_config.guid_str);
+	nvmeibt_strlcpy(out_p->nicID, nic->from_config.hw_gid_str, sizeof(out_p->nicID));
+	snprintf(out_p->guid, sizeof(out_p->guid), "0x%s", nic->from_config.sw_gid_str);
 	out_p->pkey = (unsigned short)(nic->from_config.partition_key);
 	out_p->protocol = (!strncmp(nic->from_config.protocol, "ROCE", sz)		?	PROTOCOL_ROCE :
 					   !strncmp(nic->from_config.protocol, "IB", sz)		?	PROTOCOL_INFINIBAND :

@@ -3,6 +3,9 @@
 #include "nvmeibt_read_config.h"
 #include "nvmeibt_local_nic.h"
 
+int nvmeibt_ib_common_device_uuid_str_to_raw(
+	union ibv_gid *ibv_gid, const char *device_uuid_str);
+
 void nvmeibt_local_nic_dump(struct nvmeibt_local_nic *local_nic)
 {
 	const struct nvmeibt_local_nic_config *f = &local_nic->from_config;
@@ -10,9 +13,9 @@ void nvmeibt_local_nic_dump(struct nvmeibt_local_nic *local_nic)
 		f->device_type, f->hw_gid_uuid.str, f->port, f->pkey, f->link, f->state, f->mtu, f->max_mtu, f->sw_gid_uuid.str);
 }
 
-const union nvmeib_uuid *nvmeibt_local_nic_UUID(const struct nvmeibt_local_nic *local_nic)
+const struct nvmeibt_ascii_uuid *nvmeibt_local_nic_UUID(const struct nvmeibt_local_nic *local_nic)
 {
-	return &local_nic->from_config.id;
+	return &local_nic->from_config.sw_gid_uuid;
 }
 
 enum nvmeibt_add_rv nvmeibt_local_nic_add(char *config_str, int config_tag)
@@ -21,10 +24,10 @@ enum nvmeibt_add_rv nvmeibt_local_nic_add(char *config_str, int config_tag)
 	struct nvmeibt_local_nic			*new_local_nic = NULL, *local_nic = NULL;
 	struct nvmeibt_local_nic_config		*f = NULL;
 	int									r;
+	union ibv_gid						uuid_just_for_validation;
 
 	NFIN;
 	new_local_nic = NNVMEIBT_TOMA_CALLOC(trace_local_nic_nvmeibt_local_nic_add, 1, sizeof(*new_local_nic));
-	XDLIST_INIT_LINK(&new_local_nic->topo_link, NULL);
 
 	// device,hw_gid,port,pkey,transport,state,mtu,max_mtu,gid_index,roce_v2,roce_ipv6,used,ndev_name,sw_gid
 	// mlx4_0,0xfe80000000000000f4521403007984e1,1,0xffff,I,ACTIVE,4096,4096,0xfe80000000000000f4521403007984e1
@@ -50,20 +53,20 @@ enum nvmeibt_add_rv nvmeibt_local_nic_add(char *config_str, int config_tag)
 		goto out;
 	}
 
-	if (nvmeibt_urn_uuid_to_union_uuid(&f->id, &f->hw_gid_uuid)) {
+	if (nvmeibt_ib_common_device_uuid_str_to_raw(&uuid_just_for_validation, f->hw_gid_uuid.str)) {
 		N_Ef(hru8720, "Illegal nic uuid=@STR, ignoring", f->hw_gid_uuid.str);
 		rv = NVMEIBT_ADD_FAILED;
 		goto out;
 	}
-	rv = NNVMEIBT_HASH_ADD_OBJ(ji987ys,
-					&nvmeibt_global_get_global()->local_nics_hash,
+	rv = NNVMEIBT_HASH_ADD_OBJ_ASCII_new(ji987ys,
+					nvmeibt_global_get_global()->local_nics_hash_by_sw_gid_str,
 					new_local_nic,
 					config_tag,
 					NVMEIBT_MAX_N_NICS_PER_NODE, local_nic, local_nic);
 
 out:
 	if (rv != NVMEIBT_ADD_NEW) {
-		N_Tf(njko098, "free unused new local nic: @UUID_LE", nvmeibt_local_nic_UUID(new_local_nic));
+		N_Tf(njko098, "free unused new local nic: @STR", nvmeibt_local_nic_UUID(new_local_nic)->str);
 		NNVMEIBT_TOMA_FREE(ddt654w, new_local_nic);
 	}
 	NFOUT;
@@ -71,38 +74,31 @@ out:
 }
 static void __local_nic_remove(struct nvmeibt_local_nic *local_nic)
 {
-	NNVMEIBT_HASH_DEL_OBJ(ajji8e3, &nvmeibt_global_get_global()->local_nics_hash, local_nic, local_nic);
+	NNVMEIBT_HASH_DEL_OBJ_ASCII_new(ajji8e3, nvmeibt_global_get_global()->local_nics_hash_by_sw_gid_str, local_nic, local_nic);
 	NNVMEIBT_TOMA_FREE(ddii98w, local_nic);
 }
+
+TODO(local_nic does not have a add/remove event like local_disk, hence we have a trim and NVMEIBT_OBJ_MARK_OUTDATED_ASCII());
+
 void nvmeibt_local_nic_trim_unused_entries(int config_tag)
 {
 	struct nvmeibt_local_nic	*local_nic;
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(local_nic, &nvmeibt_global_get_global()->local_nics_hash) {
+	NVMEIB_HASH_FOREACH(local_nic, nvmeibt_global_get_global()->local_nics_hash_by_sw_gid_str) {
 		if (NVMEIBT_OBJ_IS_OLDER(local_nic, config_tag)) {
-			N_Tf(inn87x, "Removing local nic: @UUID_LE with config tag @INT<@INT",
-				nvmeibt_local_nic_UUID(local_nic), local_nic->config_tag, config_tag);
-			NVMEIBT_OBJ_MARK_OUTDATED(fjuu873, local_nic, local_nic);
+			N_Tf(inn87x, "Removing local nic: @STR with config tag @INT<@INT",
+				 nvmeibt_local_nic_UUID(local_nic)->str, local_nic->config_tag, config_tag);
+			NVMEIBT_OBJ_MARK_OUTDATED_ASCII(fjuu873, local_nic, local_nic);
 			__local_nic_remove(local_nic);
 		}
 	}
 	NFOUT;
 }
 
-struct nvmeibt_local_nic * nvmeibt_local_nic_nic_to_local_nic(struct nvmeibt_nic *nic) {
-	struct nvmeibt_local_nic *check;
-	XHASHTABLE_FOR_EACH_SAFE(check, &nvmeibt_global_get_global()->local_nics_hash) {
-		if (!strncmp(nic->from_config.guid_str, check->from_config.sw_gid_uuid.str, URN_UUID_STR_LENGTH)) {
-			return check;
-		}
-	}
-	return NULL;
-}
-
 void nvmeibt_local_nic_free_all_at_exit(void)
 {
 	struct nvmeibt_local_nic	*local_nic;
-	XHASHTABLE_FOR_EACH_SAFE(local_nic, &nvmeibt_global_get_global()->local_nics_hash) {
-		__local_nic_remove(local_nic);
+	NVMEIB_HASH_FOREACH(local_nic, nvmeibt_global_get_global()->local_nics_hash_by_sw_gid_str) {
+		NNVMEIBT_TOMA_FREE(vgs8k30, local_nic);
 	}
 }

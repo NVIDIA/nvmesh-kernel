@@ -87,8 +87,8 @@ struct mm_nic_conf {	// Never serialized to wire format. No need to validate its
 	uint32_t pkey;						// 8
 	uint16_t version;					// 10
 	uint8_t protocol;					// 11
-	char guid[36];						// 47
-	char nicID[36];   					// 83
+	char sw_gid_str[36];				// 47
+	char hw_gid_str[36];  				// 83
 	char filler[13];					// 96
 	union nvmeib_uuid uuid;				// 112
 	char	align[0] __attribute__((aligned(16)));

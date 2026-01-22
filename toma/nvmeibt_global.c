@@ -50,7 +50,7 @@ void nvmeibt_global_init(void)
 	global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnw9, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_disks_hash", -1);
 	global_ctx.stock_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnwa, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_local_disks_hash", -1);
 	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1);
-	XHASHTABLE_INIT(&(global_ctx.local_nics_hash));
+	global_ctx.local_nics_hash_by_sw_gid_str = NVMEIB_HASH_CREATE(vhghnwd, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_nics_hash", -1);
 
 	XDLIST_HEAD_INIT(&(global_ctx.registrants_on_invalid_seg));
 	XDLIST_HEAD_INIT(&(global_ctx.excluded_drives_spec));
@@ -414,7 +414,7 @@ static void write_nics_json(struct nvmeibt_Str *report_target)
 	nvmeibt_Str_sprintf(report_target, "%s", "\"nics\": [");
 
 	pre_array_fill_len = nvmeibt_Str_strlen(report_target);
-	XHASHTABLE_FOR_EACH_SAFE(local_nic, &global_ctx.local_nics_hash) {
+	NVMEIB_HASH_FOREACH(local_nic, global_ctx.local_nics_hash_by_sw_gid_str) {
 		nvmeibt_Str_sprintf(report_target,
 							"{\"nicID\" : \"0x%s\", \"protocol\" : %d, \"status\" : %d, \"guid\" : \"0x%s\", \"pkey\" : \"%s\", \"pci_root\" : 0, \"mtu\" : %d, \"deviceType\" : \"%s\" },",
 							local_nic->from_config.hw_gid_uuid.str,
