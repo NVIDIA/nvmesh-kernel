@@ -1712,3 +1712,42 @@ rd_kafka_message_t* rd_kafka_consume(rd_kafka_topic_t* kt, int32_t partition, in
 	BUG_ON(0 != partition);
 	return rd_kafka_consumer_poll(kafka_simu_find_by_topic(kt), timeout_ms);
 }
+
+int nvmeibt_ib_common_device_uuid_str_to_raw(
+	union ibv_gid *ibv_gid, const char *device_uuid_str)
+{
+	int i, rv;
+	char gid[3];
+
+#if 0
+	if (strstr(device_uuid_str, ":") != NULL) {
+		/* String is formatted, we can use IPv6 routines to decode it */
+		if (inet_pton(AF_INET6, device_uuid_str,
+			(struct in6_addr *)ibv_gid) <= 0) {
+			N_Tf(tibc_dustr_t1,
+				"Bad device_uuid_str '@DEVICE_UUID_STR'", device_uuid_str);
+			rv = -1;
+        }
+		else
+			rv = 0;
+
+		goto out;
+	}
+#endif
+	if (strlen(device_uuid_str) != 32) {
+		N_Tf(tibc_dustr_t2,
+			"Bad device_uuid_str '@DEVICE_UUID_STR'", device_uuid_str);
+		rv = -1;
+		goto out;
+	}
+	gid[2] = '\0';
+	for (i = 0; i < 16; ++i) {
+		memcpy(gid, device_uuid_str + i * 2, 2);
+		ibv_gid->raw[i] = strtoul(gid, NULL, 16);
+	}
+	rv = 0;
+
+out:
+	return rv;
+}
+
