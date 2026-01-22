@@ -321,11 +321,6 @@ start() {
 
 	check_nics_validity
 
-	# must come after check_nics_validity
-	if [ "$MLX5_RDDA_ENABLED" == "Yes" ] || [ "$MLX5_RDDA_ENABLED" == "True" ]; then
-		check_cx5_64b_doorbell_fix
-	fi
-
 	if [ "$conflinklayer" == "Ethernet" ]; then
 		set_roce_version_in_config
 	fi
@@ -478,10 +473,6 @@ status() {
 	else
 		echo $"Toma process not running"
 		success=1
-	fi
-
-	if [ "$MLX5_RDDA_ENABLED" == "Yes" ] || [ "$MLX5_RDDA_ENABLED" == "True" ]; then
-		check_cx5_64b_doorbell_fix
 	fi
 
 	check_roce_multipath_config

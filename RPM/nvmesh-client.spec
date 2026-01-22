@@ -58,8 +58,6 @@ cp -rf %{_builddir}/%{name}/sysctl %{buildroot}/opt/nvmesh/
 cp -rf %{_builddir}/%{name}/scripts/client %{buildroot}/opt/nvmesh/client-repo/scripts
 cp     %{_builddir}/%{name}/clnt/block/datapath_utils_generic/profiling/nvmesh_profiling.py %{buildroot}/opt/nvmesh/client-repo/scripts/
 cp -rf %{_builddir}/%{name}/scripts/common %{buildroot}/opt/nvmesh/common-repo/scripts
-cp -rf %{_builddir}/%{name}/mlnx_fw/Excelero_mlxconfig.db %{buildroot}/etc/nvmesh
-cp -rf %{_builddir}/%{name}/mlnx_fw/patch_mlxconfig.db.sql %{buildroot}/etc/nvmesh
 cp -rf %{_builddir}/%{name}/client_* %{buildroot}/opt/nvmesh/client-repo
 cp -rf %{_builddir}/%{name}/uninstall-client %{buildroot}/opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}
 cp -rf %{_builddir}/%{name}/install.py %{buildroot}/opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}
@@ -111,8 +109,6 @@ echo "/opt/nvmesh
 /lib/systemd/system/nvmeshtrace@.service
 /etc/modprobe.d/nvmesh.conf
 /etc/depmod.d/zz02-nvmesh.conf
-/etc/nvmesh/Excelero_mlxconfig.db
-/etc/nvmesh/patch_mlxconfig.db.sql
 /etc/udev/rules.d/60-nvmesh.rules
 %ghost /var/opt/nvmesh/client_upgrade_version" > files.lst
 

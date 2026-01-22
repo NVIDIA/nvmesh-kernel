@@ -151,8 +151,6 @@ client_scripts_transfer_list="init.d/nvmeshclient \
 				config/nvmesh.conf.d/00-readme.conf \
 				management_cm \
 				upgrade_scripts/nvmesh-client \
-				mlnx_fw/Excelero_mlxconfig.db \
-				mlnx_fw/patch_mlxconfig.db.sql \
 				rules.d/60-nvmesh.rules \
 				public \
 				clnt/block/datapath_utils_generic/profiling/nvmesh_profiling.py"

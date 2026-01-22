@@ -69,8 +69,6 @@ cp -rf %{_builddir}/%{name}/scripts/target %{buildroot}/opt/NVMesh/target-repo/s
 cp -rf %{_builddir}/%{name}/scripts/client %{buildroot}/opt/NVMesh/client-repo/scripts
 cp -rf %{_builddir}/%{name}/scripts/common %{buildroot}/opt/NVMesh/common-repo/scripts
 cp -rf %{_builddir}/%{name}/upgrade_scripts/NVMesh-target %{buildroot}/opt/NVMesh/target-repo
-cp -rf %{_builddir}/%{name}/mlnx_fw/Excelero_mlxconfig.db %{buildroot}/etc/opt/NVMesh
-cp -rf %{_builddir}/%{name}/mlnx_fw/patch_mlxconfig.db.sql %{buildroot}/etc/opt/NVMesh
 mv %{buildroot}/opt/NVMesh/target-repo/NVMesh-target %{buildroot}/opt/NVMesh/target-repo/upgrade_scripts
 cp -rf %{_builddir}/%{name}/uninstall-client %{buildroot}/opt/NVMesh/client-repo/installation-scripts-%{version}-%{release}
 cp -rf %{_builddir}/%{name}/install.py %{buildroot}/opt/NVMesh/client-repo/installation-scripts-%{version}-%{release}
@@ -133,8 +131,6 @@ echo "/opt/NVMesh
 /etc/depmod.d/zz02-nvmesh.conf
 /etc/opt/NVMesh/nvmesh.conf
 /etc/opt/NVMesh/target_devices.conf
-/etc/opt/NVMesh/Excelero_mlxconfig.db
-/etc/opt/NVMesh/patch_mlxconfig.db.sql
 /etc/udev/rules.d/60-nvmesh.rules
 %ghost /var/opt/NVMesh/.target_devices
 %ghost /var/opt/NVMesh/client_upgrade_version
