@@ -50,7 +50,10 @@ testing/test_mcs/tags
 testing/test_mcs/*.msg
 .next/
 .idea/
-cmake-build-debug/
+/dist/
+/build/
+/build-*/
+cmake-build-*/
 tags
 autogen/clnt/
 autogen/common/
