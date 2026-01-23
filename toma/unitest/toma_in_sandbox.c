@@ -873,7 +873,7 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 		N_Wf(nl_io_err, "IO to unknown disk disk_id=@STR", io_req->disk_id);
 	} else {
 		// Perform the actual I/O on the sandbox disk file
-		int fd = sandbox_nvme_get_fd(dev);
+		int fd = sandbox_nvme_open(dev);
 		off_t offset = (off_t)io_req->start_sector * (1 << SANDBOX_NVME_BLOCK_SIZE_EXPONENT);
 		ssize_t result;
 
@@ -926,7 +926,7 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 	}
 
 	{
-		int fd = sandbox_nvme_get_fd(dev);
+		int fd = sandbox_nvme_open(dev);
 		size_t chunk_bytes = 1024 * 1024;
 		void *zero_buf = NULL;
 		if (fd < 0) {

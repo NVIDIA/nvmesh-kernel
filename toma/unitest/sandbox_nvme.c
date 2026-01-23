@@ -245,9 +245,8 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 	return NULL;
 }
 
-int sandbox_nvme_get_fd(const struct sandbox_nvme_device *dev)
+int sandbox_nvme_open(const struct sandbox_nvme_device *dev)
 {
-	// Open the device file for reading/writing
 	if (!dev)
 		return -1;
 	return open(dev->device_path, O_RDWR);
