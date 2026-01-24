@@ -18,6 +18,7 @@
 #include "nvmeib_macro_utils.h"
 #include "nvmeibc_msgs_shared.h"
 #include "nvmeibc_memmgr_metrics.h"
+#include "nvmeibc_io_pet.h"
 
 NVMEIBC_MEMMGR_METRIC(dp_recovery_hot, "component=raid.io.sync.stale_lock");
 
@@ -1052,6 +1053,60 @@ static int read_jblk_comp (struct htr_ctx *h, int si)
 	return rv;
 }
 
+static void __nvmeibc_read_jmdc_request_pet_describe(struct htr_ctx *h, int si, uuid_be *client_uuid)
+{
+	struct nvmeibc_block_command *cmd = &h->seg_info[si].cmd;
+	struct nvmeibc_disk_gen_cmd *gen_cmd = cmd->gen_cmd;
+
+	NVMEIBC_IO_PET_MSG_NORM(&h->so->o->journal,
+		"read_jmdc.request(sgmnt=%hhu, opcode=%hhu<enum nvmeib_gen_cmd_op>, client_uuid_first_8b=0x%llx)",
+		numeric_downcast(u8, si), numeric_downcast(u8, gen_cmd->opcode), ((union nvmeib_uuid*)client_uuid)->ll[0]);
+}
+
+static void __nvmeibc_read_jmdc_response_pet_describe(struct htr_ctx *h, int si, int rv, struct cl_jour *clj, u32 binje)
+{
+	unsigned i;
+
+	if (rv == 0) {
+		NVMEIBC_IO_PET_MSG_NORM(&h->so->o->journal, "read_jmdc.response(si=%hhu) = %d", numeric_downcast(u8, si), rv);
+		if (nvmeib_pet_journal_is_verbose(&h->so->o->journal)) {
+			for (i = 0; i < clj->desc.n_ents; i++) {
+				NVMEIBC_IO_PET_MSG_NORM(&h->so->o->journal,
+					"client_jnl(idx=%hhu ent_gen_id=%hhu jmdc=0x%llx<union jblock_md>)",
+					numeric_downcast(u8, i), clj->ent_md[i].ent_gen_id, clj->jmdc[i * binje].raw);
+			}
+		}
+	} else {
+		NVMEIBC_IO_PET_MSG_WARN(&h->so->o->journal, "read_jmdc.response(si=%hhu) = %d", numeric_downcast(u8, si), rv);
+	}
+}
+
+static void __nvmeibc_free_jrnl_ents_request_pet_describe(struct htr_ctx *h, int si, struct nvmeibc_disk_free_jrnl_ents_comp *free_ents_comp)
+{
+	NVMEIBC_IO_PET_MSG_NORM(
+		&h->so->o->journal,
+		"free_jrnl_ents.request(sgmnt_idx=%hhu, blkset_slba=%llu, blkset_num=%llu, pass2toma=%hhu, lock_id=0x%llx<union nvmeib_lock_id>)",
+		numeric_downcast(u8, si), free_ents_comp->blkset_slba, free_ents_comp->blkset_num,
+		free_ents_comp->pass2toma, free_ents_comp->lock_ent);
+}
+
+static void __nvmeibc_send_recovered_response_pet_describe(struct htr_ctx *h, int si, int rv)
+{
+	struct nvmeibc_disk_gen_cmd *gen_cmd = h->seg_info[si].cmd.gen_cmd;
+
+	if (h->tx_jentries[si].is_valid) {
+		NVMEIBC_IO_PET_MSG_NORM(
+			&h->so->o->journal,
+			"free_jrnl_ents.response(sgmnt_idx=%hhu, status=%hhu) = %d",
+			numeric_downcast(u8, si), gen_cmd->rsp.br.status, rv);
+	} else {
+		NVMEIBC_IO_PET_MSG_NORM(
+			&h->so->o->journal,
+			"send_recovered_blkset.response(sgmnt_idx=%hhu, status=%hhu) = %d",
+			numeric_downcast(u8, si), gen_cmd->rsp.br.status, rv);
+	}
+}
+
 static int read_jmdc(struct htr_ctx *h, int si)
 {
 	struct nvmeibc_block_command *cmd = &h->seg_info[si].cmd;
@@ -1084,6 +1139,7 @@ static int read_jmdc(struct htr_ctx *h, int si)
 	gen_cmd->data_sink[0] = &gen_cmd->param.uj.jmdc_dest;
 	gen_cmd->data_sink[1] = &gen_cmd->param.uj.ent_md_dest;
 
+	__nvmeibc_read_jmdc_request_pet_describe(h, si, &gen_cmd->param.uj.client_uuid);
 	rv = (icore_ops->execute_gen(icore_ops, cmd->ds->disk, gen_cmd) == 0) ? -EINPROGRESS : -1;
 
 out:
@@ -1156,6 +1212,7 @@ static int read_jmdc_comp(struct htr_ctx *h, int si)
 
 
 out:
+	__nvmeibc_read_jmdc_response_pet_describe(h, si, rv, clj, binje);
 	NFOUT;
 	return rv;
 }
@@ -1368,7 +1425,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 		_NTh(trace_dp_ec_recov_hot_send_recovered_entries, h,
 			"Send free-ents, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
 			ds->disk->name, h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, pass2toma, lock_entry.all);
-
+		__nvmeibc_free_jrnl_ents_request_pet_describe(h, si, free_ents_comp);
 		rv = icore_ops->free_jrnl_ents(icore_ops, ds->disk, free_ents_comp);
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_entries_failed, h,
@@ -1394,8 +1451,8 @@ static int send_recovered(struct htr_ctx *h, int si)
 
 		_NTh(trace_dp_ec_recov_hot_send_recovered, h, "Send blkset-recovered, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
 		   ds->disk->name, range_id, entry_id, pass2toma, lock_entry.all);
+		nvmeibc_send_recovered_blkset_request_pet_describe(h->so, cmd, lock_entry.all, si);
 		rv = icore_ops->execute_gen(icore_ops, ds->disk, cmd->gen_cmd);
-
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_failed, h, "Send blkset-recovered failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX rv=@RV",
 			   ds->disk->name, range_id, entry_id, rv);
@@ -1428,6 +1485,7 @@ static int send_recovered_comp(struct htr_ctx *h, int si)
 	}
 
 out:
+	__nvmeibc_send_recovered_response_pet_describe(h, si, rv);
 	return rv;
 }
 

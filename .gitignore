@@ -84,7 +84,9 @@ tools/tracer_pp
 tools/**/*.tab.*
 tools/**/*.yy.*
 *.binlog*.*
+*.txtlog*.*
 *binlog
+*txtlog
 *.h.gch
 compilation_cmd.txt
 *.md5
@@ -155,5 +157,6 @@ memmgr_info_run_end.json
 lz4
 test.pet
 io_pet_messages.binlog
+io_pet_messages.txtlog
 error_tags_run_end.json
 common/pet/build/

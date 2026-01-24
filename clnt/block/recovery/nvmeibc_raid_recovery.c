@@ -6,6 +6,7 @@
 #include "common/compat/kr_incs_compiler_types.h"
 #include "nvmeib_event.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "nvmeibc_io_pet.h"
 
 struct __fake_recovery{ struct{ u64 task_id; const struct nvmeibc_subscription_ctx *tr; } args; enum NVMEIBT_RECOVERY_TYPE type; };
 #define DECL_FAKE_RECOVERY(id, type, tr) struct __fake_recovery __fake_rcvr = {{(id), (tr)}, (type)}, *recov = &__fake_rcvr;	// For prints/traces, when recovery context does not exist

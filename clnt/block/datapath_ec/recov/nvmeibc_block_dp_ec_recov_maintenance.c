@@ -6,6 +6,7 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_block_dp_ec_sync_txid_wraparound.h"
 #include "nvmeibc_block_dp_ec_recov_stats.h"
+#include "nvmeibc_io_pet.h"
 
 bool dp_ec_mainten_has_txid_unreslvd(const struct nvmeibc_block_command *rldr)
 {
@@ -412,6 +413,10 @@ static void __all_blockset_recovered_completed_analyze_rv(struct recovery_sync_o
 		} else if (gen_cmd->rsp.br.status != 0) {		// Serjio reported failure, but we dont care? Is this correct?
 			_NTSO(tr_3_blkset_rec_cb, "Ignorring Serjio @SI, srj_err=@ERROR, so_err=@SO_ERR", si, gen_cmd->rsp.br.status, so->error);
 		}
+		NVMEIBC_IO_PET_MSG(&so->o->journal,
+					"send_recovered_blkset.response(sgmnt_idx=%hhu, status=%d, so_err=%d) = %d",
+					cmd_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,
+					numeric_downcast(u8, si), gen_cmd->rsp.br.status, so->error, cmd_rv);
 		dp_cmds_gencmd_del(cmd);
 	}
 	so->should_send_msg_blckst_recovrd = false;
@@ -434,6 +439,7 @@ static void __send_all_blockset_recovered(struct recovery_sync_op *so)
 		if (!err) {
 			nvmeibcbdpec_fill_blockset_recovered_info(cmd, HZ, so, holder, so,
 				NVMEIB_EC_INVALID_JOURNAL_RANGE, NVMEIB_EC_INVALID_JOURNAL_ENTRY, true);
+			nvmeibc_send_recovered_blkset_request_pet_describe(so, cmd, holder, si);
 			err = icore_ops->execute_gen(icore_ops, cmd->ds->disk, cmd->gen_cmd);
 		}
 		if (err) {

@@ -67,6 +67,9 @@ enum cand_type {
 void nvmeibc_sync_send_cur_stage_cmds(  struct recovery_sync_op *so);
 /* Get rv of current stage of sync */
 int  nvmeibcbdpec_get_rv_cur_stage_cmds(struct recovery_sync_op *so);
+/* PET describe for send_recovered_blkset request */
+void nvmeibc_send_recovered_blkset_request_pet_describe(struct recovery_sync_op *so,
+	struct nvmeibc_block_command *cmd, const u64 holder, const int si);
 
 /********************* General Cold/Hot Common functions *******************/
 u32 nvmeibcbdpec_calc_max_txid_in_data_md(const struct recovery_sync_op *so);

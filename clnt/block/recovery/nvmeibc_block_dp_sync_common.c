@@ -466,20 +466,23 @@ static void __compressed_sync_op_trace_start(const struct recovery_sync_op *so) 
 			so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
 			tr->ch, tr->r1, so->rlba,
 			so->start_slice, so->n_slices);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_start(origr_o_dbg_id=%u op=%hhu<enum nvmeib_block_io_op> vol_id=%u topo=%llu rlba=%llu slices=%hhu-%hhu)",
-		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, (u8)so->o->op, vol_id, (u64)so->o->topo->debug_unique_index,
-		so->rlba, (u8)(so->start_slice), (u8)(so->n_slices));
+	NVMEIBC_IO_PET_MSG_NORM(
+		&so->o->journal,
+		"sync_start(origr_o_dbg_id=%u op=%hhu<enum nvmeib_block_io_op> vol_id=%u topo=%llu rlba=%llu slices=%hhu-%hhu)",
+		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, numeric_downcast(u8, so->o->op), vol_id,
+		(u64)so->o->topo->debug_unique_index, so->rlba, numeric_downcast(u8, so->start_slice), numeric_downcast(u8, so->n_slices));
 }
 
 static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op *so) {
 	const u32 bi_post = so->cmds->rld.post.all, bi_pre = so->cmds->rld.pre.all;
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync write binfo: PRE: @BINFO POST: @BINFO", _T, goodpath_nvmeibc_syncs, compressed_sync_op_write_binfo, so->o->dbg_id, bi_pre, bi_post);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_write_binfo(origr_o_dbg_id=%u pre=0x%x<union nvmeib_blkset_info> post=0x%x<union nvmeib_blkset_info>)", so->o->dbg_id, bi_pre, bi_post);
 }
 
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync end: RV: @RV", _I, goodpath_nvmeibc_syncs, compressed_sync_op_trace_end, so->o->dbg_id, so->error);
-	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal, "sync_end(origr_o_dbg_id=%u) = %d", so->o->dbg_id, so->error);
+	NVMEIBC_IO_PET_MSG(&so->o->journal, "sync_end(orig_o_dbg_id=%u) = %d",
+			   so->error ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL, so->o->dbg_id,
+			   so->error);
 }
 
 static int __do_on_stage_done(struct recovery_sync_op *so) {

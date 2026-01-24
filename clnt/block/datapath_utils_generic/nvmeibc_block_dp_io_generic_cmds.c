@@ -247,12 +247,6 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 	rldr->use_io_apend_stages = true;
 }
 
-static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds) __attribute__((unused));
-static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds)
-{
-	return ds->toma_reg->seg;
-}
-
 static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_block_command const *bcmd, bool is_completion)
 {
 	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(bcmd->ds);
@@ -352,7 +346,7 @@ static void __nvmeibc_cmd_execute_disk_io_request_pet_describe(struct nvmeibc_bl
 	struct nvmeibc_block_command const *bcmd = &cmds[cmd_idx];
 	struct nvmeibc_disk_io_command const *cmd = bcmd->iocmd;
 	struct nvmeib_data_buffer const *ndb = cmd->reqs1.ndb;
-	u8 const sgmnt_idx = numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(bcmd->ds));
+	u8 const sgmnt_idx = numeric_downcast(u8, nvmeibc_dp_get_sgmnt_idx_from_ds(bcmd->ds));
 	enum nvmeib_block_io_op op = cmds->o->op;
 	u32 nlbas;
 
@@ -803,7 +797,7 @@ static void __nvmeibc_cmd_disk_io_complete_response_pet_describe(struct operatio
 	NVMEIBC_IO_PET_MSG(&o->journal,
 		"disk_io.response(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
 		cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,
-		numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
+		numeric_downcast(u8, nvmeibc_dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
 }
 
 static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, struct nvmeibc_block_command *cmds, int li)

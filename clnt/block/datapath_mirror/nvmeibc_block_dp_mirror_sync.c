@@ -6,6 +6,7 @@
 #include "../datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
+#include "nvmeibc_io_pet.h"
 
 static void __inject_debug_di_with_sync_info(struct recovery_sync_op *so, int n_cmds_to_do)
 {

@@ -439,3 +439,8 @@ void nvmeibc_datapath_destroy(struct nvmeibc_datapath *dp)
 {
 	nvmeibc_datapath_syncs_resources_destroy(&dp->sync_rsrcs);
 }
+
+raid_sgmnt_t nvmeibc_dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds)
+{
+	return ds->toma_reg->seg;
+}

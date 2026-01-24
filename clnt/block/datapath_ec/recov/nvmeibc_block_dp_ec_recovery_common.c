@@ -7,6 +7,7 @@
 #include "block/recovery/nvmeibc_block_dp_sync_no_write_hole.h"
 #include "nvmeibc_block_dp_ec_sync_txid_wraparound.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
+#include "nvmeibc_io_pet.h"
 
 static int dp_ec_sync_read_write_prepare_op(struct recovery_sync_op *so);
 static int dp_ec_sync_md_read_prepare_op(   struct recovery_sync_op *so); // Called from thread context
@@ -696,7 +697,7 @@ static bool nvmeibc_tx_does_seg_d2j_match(const struct recovery_sync_op *so, int
 		const u32 d2j_rng = dmd->D.d2j_rng; //(cmd->is_parity) ? dmd->P.d2j_rng : dmd->D.d2j_rng;
 		/* d2j_rng should either be the rblk of the journal entry (pre 2.7) or the jentry (2.7+) */
 		WARN(d2j_rng != cand->locations[si].jentry &&
-			d2j_rng != cand->locations[si].jentry*cand->locations[si].rng_binje + i - cand->locations[si].binje_offset, 
+			d2j_rng != cand->locations[si].jentry*cand->locations[si].rng_binje + i - cand->locations[si].binje_offset,
 			"Candidate for seg %d jentry is not the same as the used one (cand=%d, md=%d)\n",si, cand->locations[si].jentry, d2j_rng);
 	}
 	#endif
@@ -1531,4 +1532,19 @@ void dp_ec_sync_no_write_hole_execute_op(struct recovery_sync_op *so)
 		so->stage = sync_stage_recov_lo_all_taken;		// Daniel: This is redundant, should already be set.
 		return dp_sync_no_write_hole_cb_stg_end(so);
 	}
+}
+
+void nvmeibc_send_recovered_blkset_request_pet_describe(struct recovery_sync_op *so,
+	struct nvmeibc_block_command *cmd, const u64 holder, const int si)
+{
+	NVMEIBC_IO_PET_MSG_NORM(&so->o->journal,
+		"send_recovered_blkset.request(sgmnt_idx=%hhu, opcode=%hhu<enum nvmeib_gen_cmd_op>, holder=0x%llx<union nvmeib_lock_id>, blkset_num=%llu, blkset_slba=0x%llx, rng_id=%u, ent_id=%u, pass2toma=%hhu)",
+		numeric_downcast(u8, si),
+		numeric_downcast(u8, cmd->gen_cmd->opcode),
+		holder,
+		cmd->gen_cmd->param.br.blkset_num,
+		cmd->gen_cmd->param.br.blkset_slba,
+		cmd->gen_cmd->param.br.rng_id,
+		cmd->gen_cmd->param.br.ent_id,
+		cmd->gen_cmd->param.br.pass2toma);
 }

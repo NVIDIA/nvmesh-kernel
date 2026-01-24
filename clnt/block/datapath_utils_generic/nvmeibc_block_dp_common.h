@@ -132,6 +132,8 @@ void dp_io_topo_iterator_conv_seg_lock_addr_to_raid_ofst(
 struct nvmeibc_datapath;
 u64 nvmeibc_datapath_dlba_to_vlba(const struct nvmeibc_datapath *dp, const struct nvmeibc_raid1* r1, const int si, const u64 dlba);
 u64 nvmeibc_datapath_dlba_to_rlba(const struct nvmeibc_datapath *dp, const struct nvmeibc_raid1* r1, const int si, const u64 dlba);
+/* Get segment index from disk segment */
+raid_sgmnt_t nvmeibc_dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment *ds);
 /****************************** Mallocs **************************************/
 static inline void* my_kmalloc(size_t size, gfp_t flags){
     void *k = kmalloc(size, flags);
