@@ -33,11 +33,6 @@ nvmeib.vpj
 nvmeibt_toma
 excludes
 build_remote.sh
-.gitignore.swp
-toma/unitest/_root/sys_log
-toma/unitest/_root/var/run/nvmesh/tls/
-toma/unitest/_root/var/run/nvmesh/toma.lock
-toma/unitest/_root/var/log/nvmesh/toma_rpc
 clnt/block/unitest/blk_unitest
 clnt/block/unitest/out.txt
 clnt/block/unitest/nvmeibc.trace.json.cksum

@@ -506,7 +506,7 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 	struct timespec					now;
 	static struct timespec			last_invocation;
 
-NFIN;
+	NFIN;
 	if (!all_active_hashs) {
 		goto out;
 	}
@@ -523,7 +523,7 @@ NFIN;
 		}
 	}
 out:;
-NFOUT;
+	NFOUT;
 }
 
 void nvmeib_hash_dump_tbl(struct nvmeib_hash_table *hash_tbl)

@@ -65,7 +65,7 @@ struct nvmeibt_wq_entry {
 	unsigned int			last_CHANGE_no; /* Needed for WQ's that chain as a result other WQ's to continue their logical execution*/
 };
 
-char* nvmeibt_wq_get_name(struct nvmeibt_wq *wq);
+const char* nvmeibt_wq_get_name(const struct nvmeibt_wq *wq);
 
 /* create a new workqueue */
 struct nvmeibt_wq *nvmeibt_wq_create(const char *name);

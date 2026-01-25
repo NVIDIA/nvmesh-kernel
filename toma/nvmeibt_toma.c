@@ -716,7 +716,6 @@ static void terminate_toma(int rv)
 		if (srvr_rv)
 			syslog(LOG_INFO, "TOMA attempt to stop nvmesh target failed, rv=%d\n", rv);
 	}
-	nvmeib_hash_free_all_tables();
 
 	syslog(LOG_INFO, "TOMA Exit\n");
 	fprintf(stderr, "TOMA Exit\n");
@@ -1973,6 +1972,7 @@ static void nvmeibt_toma_abort_child_threads_and_mem(bool do_destroy_mem_alloc) 
 	nvmeibt_kafka_shutdown();
 	nvmeibt_log_snapshotting_shutdown();
 	if (do_destroy_mem_alloc) {
+		nvmeib_hash_free_all_tables();
 		nvmeibt_bm_destroy();
 	}
 	nvmeibt_join_all_trace_pollers();	// Beyond this point, no more traces
