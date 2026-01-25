@@ -2743,7 +2743,7 @@ void nvmeibt_topology_free_resources(void)
 	struct nvmeibt_raft_ctx		*my_raft = nvmeibt_raft_get_my_raft();
 
 	NNVMEIBT_TOMA_FREE(8dj3kss, my_raft->follower_to_commit_persist_and_wire_buf_full);
-	// NNVMEIBT_TOMA_FREE(vbs8sl3, my_raft->follower_to_submit_persist_and_wire_buf_full);
+	NNVMEIBT_TOMA_FREE(vbs8sl3, my_raft->follower_to_leader_wire_buf);
 	// NNVMEIBT_TOMA_FREE(0vdnzlw, my_raft->follower_submitted_persist_and_wire_buf_full);
 	NNVMEIBT_TOMA_FREE(c5c84k4, my_raft->leader_to_commit_persist_and_wire_buf_full);
 	NNVMEIBT_TOMA_FREE(c7colp2, my_raft->leader_to_commit_persist_and_wire_buf_topo_only);

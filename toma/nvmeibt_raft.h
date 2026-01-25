@@ -126,10 +126,6 @@ struct nvmeibt_raft_ctx {
 	// We have 4 sections in the persist_and_wire_buf:
 	// - TOPO, TOPO_CONFIG, KAFKA_MGMT_CONFIG, RAFT_MEMBERS
 	// The leader serializes a buffer per section on every we_have_a_new_baseline
-	// - leader_to_commit_wire_topo
-	// - leader_to_commit_wire_topo_config
-	// - leader_to_commit_wire_kafka_mgmt_config
-	// - leader_to_commit_wire_raft_members
 	struct nvmeibt_Buf			leader_to_commit_wire_topo;
 	struct nvmeibt_Buf			leader_to_commit_wire_topo_config;
 	struct nvmeibt_Buf			leader_to_commit_wire_kafka_mgmt_config;
