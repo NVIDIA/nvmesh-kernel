@@ -22,6 +22,7 @@ from nvmeib_pet_archive import NvmeibPetArchive, KaitaiStream
 #gGaAeEfF - are used to print floating-point numbers - kernel & pet don't have them
 #s is for string - PET will not have them too; the budget is really thin
 PRINTF_SPEC_RE = printf_enum_re = re.compile(r"""
+	(?P<spec_prefix>0x?)?
 	%(?P<pos>\d+\$)?
 	(?P<flags>[-+ #0]*)
 	(?P<width>\*|\d+)?
@@ -30,15 +31,6 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(r"""
 	(?P<spec>[diuoxXcp%])
 	(?:<(?P<tag>enum|union|struct)\s(?P<type_name>[A-Za-z_][A-Za-z0-9_]*)>)?
 """, re.VERBOSE)
-
-@dataclasses.dataclass(frozen=True)
-class PrintfSpec:
-	spec: str
-	tag: str 
-	type_name: str
-	@staticmethod
-	def from_re_match(m: re.Match[str]) -> 'PrintfSpec':
-		return PrintfSpec(m.group('spec'), m.group('tag'), m.group('type_name'))
 
 # ---------------------------------------------------------------------------
 # Reconstructed message
@@ -50,7 +42,6 @@ class Message(typing.NamedTuple):
 	ns_stamp: int
 	dt_stamp: datetime.datetime
 	text: str
-
 
 # ---------------------------------------------------------------------------
 # Kaitai helpers
@@ -82,6 +73,7 @@ NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value
 
 
 TypeInfo = typing.Union["BaseType", "EnumType", "StructType", "UnionType", "ArrayType"]
+
 
 @dataclasses.dataclass(frozen=True)
 class BaseType: # actually fundamental type, but DWARF uses "base" as terminology
@@ -378,7 +370,7 @@ class DwarfRuntime:
 		for child in die.iter_children():
 			if child.tag != 'DW_TAG_member':
 				continue
-			mv_name = self.__get_die_name(child) or f'member_{len(members)}'
+			mv_name = self.__get_die_name(child) or f'_unnamed{len(members)}'
 			mv_type = self.__build_any_type(self.__resolve_die_type(child))
 			offset = child.attributes.get('DW_AT_data_member_location')
 			byte_offset_val = offset.value if offset else 0
@@ -397,17 +389,66 @@ class MessageSpec:
 	spec: str
 
 
-class ArgDecoder:
-	def __init__(self, user_defined_type:TypeInfo):
-		self.__user_defined_type: TypeInfo = user_defined_type
+@dataclasses.dataclass
+class ArgPrintfSpec:
+	spec: str
+	tag: str 
+	type_name: str
+	_hex: bool = dataclasses.field(init=False,repr=False)
 
-	def __call__(self, value: int) -> typing.Any:
-		if value or isinstance(self.__user_defined_type, EnumType):
+	@staticmethod
+	def from_re_match(m: re.Match[str]) -> 'ArgPrintfSpec':
+		return ArgPrintfSpec(m.group('spec'), m.group('tag'), m.group('type_name'))
+
+	def __post_init__(self):
+		self._hex = bool(set('xXpP') & set(self.spec))
+
+	@property
+	def hex(self) -> bool:
+		return self._hex
+
+
+class ArgDecoder:
+	def __init__(self, user_defined_type:TypeInfo, printf_spec: ArgPrintfSpec):	
+		self.__user_defined_type: TypeInfo = user_defined_type
+		self.__printf_spec = printf_spec
+	
+	def __format(self, value: typing.Union[dict,list,tuple,str,int]) -> str:
+		if isinstance(value, int):
+			if self.__printf_spec.hex and value:
+				return '0x{:x}'.format(value)
+			else:
+				return str(value)
+		elif isinstance(value, str):
+			return value
+		elif isinstance(value, (list, tuple)):
+			inner_values: list[str] = []
+			for inner_value in value:
+				inner_values.append(self.__format(inner_value))
+			return '[' + ', '.join(inner_values) + ']'
+		else:
+			inner_items: list[str] = []
+			for inner_key, inner_value in value.items():
+				inner_items.append(self.__format(inner_key) + ': ' + self.__format(inner_value))
+			return '{' + ', '.join(inner_items) + '}'
+
+	def decode(self, value: int) -> typing.Any:
+		try:
 			memview = memoryview(value.to_bytes(8, byteorder='little', signed=False)) 
 			return self.__user_defined_type.decode(memview)
-		else:
-			return value
+		except Exception as error:
+			return str(error)
 
+	def __call__(self, value: int) -> str:
+		if value or isinstance(self.__user_defined_type, EnumType):
+			decoded = self.decode(value)
+			formatted = self.__format(decoded)
+			if self.__printf_spec.hex:
+				return '0x{:x}<{}>'.format(value, formatted)
+			else:
+				return '{}<{}>'.format(value, formatted)
+		else:
+			return '0'
 
 class Template:
 	def __init__(self, msg_spec:MessageSpec, user_defined_types: dict[str, TypeInfo]):
@@ -415,29 +456,30 @@ class Template:
 		self.__c_spec = msg_spec
 		self.__py_spec: str = ""
 		self.__py_decoders:dict[int,typing.Callable[[int], typing.Any]] = {} 
-		
 		self.__process_c_spec() # updates __py_spec and __py_args
+
+	def __escape_msg_part(self, part: str ) -> str:
+		return part.replace('{', '{{').replace('}', '}}')
 
 	def __process_c_spec(self) -> None:
 		last = 0
 		parts: list[str] = []
 		spec = self.__c_spec.spec
 		for idx, m in enumerate(PRINTF_SPEC_RE.finditer(spec)):
-			parts.append(spec[last:m.start()])	# field before separator
+			parts.append(self.__escape_msg_part(spec[last:m.start()]))	# field before separator
+			arg_printf_spec:ArgPrintfSpec = ArgPrintfSpec.from_re_match(m)
 			if m.group('type_name'):
 				udt_found:typing.Optional[TypeInfo] = self.__user_defined_types.get(m.group('type_name'), None)
 				if udt_found:
-					self.__py_decoders[idx] = ArgDecoder(udt_found)
+					self.__py_decoders[idx] = ArgDecoder(udt_found, arg_printf_spec)
 				parts.append('{}')
 			else:
-				if m.group('spec') in 'p':
+				if arg_printf_spec.hex:
 					parts.append('0x{:x}')
-				elif m.group('spec') in 'xX':
-					parts.append('{:%s}' % m.group('spec'))
 				else:
 					parts.append('{}')
 			last = m.end()
-		parts.append(spec[last:])				# trailing field
+		parts.append(self.__escape_msg_part(spec[last:]))				# trailing field
 		self.__py_spec = ''.join(parts)
 
 	def __bool__(self):
@@ -451,10 +493,10 @@ class Template:
 	def __load_args(self, msg:NvmeibPetArchive.Message) -> list[typing.Any]:
 		args: list[int] = []
 		for idx, arg in enumerate(msg.args): # type: ignore
-			decoder = self.__py_decoders.get(idx, lambda x: x)
-			try:
+			decoder = self.__py_decoders.get(idx, None)
+			if decoder:
 				args.append(decoder(arg.pet_value))
-			except Exception as error:
+			else:
 				args.append(arg.pet_value)
 		return args
 
@@ -587,7 +629,8 @@ class EvaluateInt(Command):
 		if udt is None:
 			print(f"Failed to find {self.udt_name}.")
 			return 
-		decoder = ArgDecoder(udt)
+		decoder = ArgDecoder(udt, ArgPrintfSpec('u', '', self.udt_name))
+		import pudb; pudb.set_trace()
 		print(decoder(self.value))
 
 class SaveDictionary(Command):
