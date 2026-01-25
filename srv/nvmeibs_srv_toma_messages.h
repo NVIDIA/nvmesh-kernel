@@ -130,7 +130,7 @@ struct nvmeibs_msg_s2t_client_disconnect {	// Server notifies toma that client h
 struct nvmeibs_toma_server_proc_buf {
 	union {
 		struct {		// The first u64 decides between server event or client message to TOMA
-			u32 type;	// For server event, the is_clnt member must be 0, and then the type member indicates the server event type.
+			u32 type;	// For server event, the is_clnt member must be 0, and then the type member indicates the server event type: enum nvmeibs_toma_server_msg_type.
 			u32 is_clnt;// For client messages, the client-uid (cid) - which occupies the higher half of the handle- may not be zero. (see also common/nvmeib_shared.h)
 		};
 		u64 handle;
@@ -157,10 +157,6 @@ struct nvmeibs_toma_server_proc_buf {
 
 /* Server:Toma msg type For the above payloads */
 enum nvmeibs_toma_server_msg_type {
-	/* Toma requests to Server and corresponding responses */
-	// NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_REQ		= 0x00,  Deprecated
-	// NVMEIBS_TOMA_DISK_SEGMENT_LOCK_GID_RSP		= 0x01,
-
 	/*Toma login*/
 	NVMEIBS_TOMA_LOGIN							= 0x02,
 	NVMEIBS_TOMA_LOGOUT							= 0x03,

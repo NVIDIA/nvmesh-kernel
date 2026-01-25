@@ -206,15 +206,14 @@ int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
 * 		pcifd=$pcidrivers_base_path/nvme/$nvmepci
 * 		#check if pci binded to nvme driver
 * 		if [ ! -e "$pcifd" ]; then
-* 			echo "Error locating pcifd for dev=$dev_id"
-* 			exit 0
-* 			fi
+* 			echo "Error locating pcifd for dev=$dev_id"; exit 0;
+* 		fi
 * 		#unbind pci from nvme driver
 * 		echo -n "$nvmepci" > $pcidrivers_base_path/nvme/unbind
 * 		if [ "$?" -eq "0" ] && [ -d "$pcidrivers_base_path/nvmeibs" ]; then
 * 			#bind to nvmeibs
 * 			echo -n "$nvmepci" > $pcidrivers_base_path/nvmeibs/bind
-* 			fi
+* 		fi
 */
 static int __nvmeib_srvr_api_lib_disk_do_bind_unbind(const char *disk_bdf, bool is_nvmesh, bool do_bind)
 {
@@ -368,6 +367,7 @@ struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_
 	if (!p) { 													rv = -__LINE__; goto out; }
 	__blocking_msg_api_create();
 	p->params = *params;
+	if (!params->print_status_fn) { 							rv = -__LINE__; goto free_p; }			// The only one which is mandatory
 	if (pthread_mutex_init(&p->guard, NULL) < 0) { 				rv = -__LINE__; goto free_p; }
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
 	if (start_netlink_socket(p))  { 							rv = -__LINE__; goto free_spair; }
@@ -481,7 +481,7 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *m
 	}
 	msg->msg.caller_type = TOMA_CALLER;
 	__fill_netlink_hdr(p, &hdr, &p->dest_addr);
-	nlh->nlmsg_len = p->max_msg_size;
+	nlh->nlmsg_len = NLMSG_HDRLEN + msg->msg.len;
 	nlh->nlmsg_pid = getpid();							// Important, server uses this pid to pin pages in memory
 	nlh->nlmsg_flags = 0;
 	nlh->nlmsg_type = NVMESH_NL_MSG_TYPE;
@@ -604,8 +604,8 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 	NFIN;
 	__fill_netlink_hdr(p, &hdr, &src_addr);
 	n = recvmsg(p->nl_sock_fd, &hdr, 0);
-	if (n == -1) {
-		N_Ef(t2shnnm0, "Failed to recieve message from kernel");
+	if (n < (ssize_t)(NLMSG_HDRLEN + sizeof(struct nvmeib_nl_uk_comm_msg))) {
+		N_Ef(t2shnnm0, "Failed to recieve message from kernel, bytes=@INT", (int)n);
 		is_alive = false;
 	} else {
 		struct nvmeib_nl_uk_comm_msg *rcv_msg = NLMSG_DATA(p->nlh);
@@ -614,7 +614,7 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 		if (msg) {
 			if (msg->on_done) {
 				struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)rcv_msg->data;
-				N_Tf(t2shnnm3, "Calling callback on rep_msg[@INT].id=@ID rp_rv=@RV", rep->opcode, msg->msg.id, rep->error);
+				N_Tf(t2shnnm3, "Calling callback on rep_msg[@INT].id=@ID rp_rv=@RV, waiting_msg[@INT]", rep->opcode, msg->msg.id, rep->error, msg->msg.opcode);
 				msg->on_done(msg->ctx, (rep->error == csce_ok), rep);
 				msg->on_done = NULL;
 			}
