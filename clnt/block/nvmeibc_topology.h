@@ -246,7 +246,7 @@ union nvmeibc_raid1_io_pet_status{
 		struct {
 			u8 sgmnt;
 			enum NVMEIBTC_DS_MODE mode : 8;
-		} dgrd_sgmnts[2];
+		} __attribute__((packed)) dgrd_sgmnts[2];
 	} info;
 	u64 all;
 }; 
