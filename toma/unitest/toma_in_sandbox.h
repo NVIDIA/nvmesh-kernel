@@ -95,6 +95,7 @@ struct nlmsghdr {				// 16[bytes] Copied netlink header from linux include
 };
 #define NLMSG_LENGTH(len) ((len) + sizeof(struct nlmsghdr))
 #define NLMSG_ALIGN(len)  (len)
+#define NLMSG_HDRLEN	 ((int) NLMSG_ALIGN(sizeof(struct nlmsghdr)))
 #define NLMSG_SPACE(len) NLMSG_ALIGN(NLMSG_LENGTH(len))
 #define NLMSG_DATA(nlh)  ((void *)(((char *)nlh) + sizeof(struct nlmsghdr)))
 #define NLMSG_DONE 0x3

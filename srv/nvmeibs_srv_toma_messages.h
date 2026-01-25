@@ -150,6 +150,7 @@ struct nvmeibs_toma_server_proc_buf {
 		struct nvmeibs_msg_t2s_blkset_recovered_ack blkset_recovered_ack_msg;
 		struct nvmeibs_msg_s2t_launch_JGC trigger_JGC_cmd;
 		struct nvmeibs_msg_s2t_serjio_range_cleaned serjio_range_cleaned_msg;
+		// struct nvmeibt_client_msg + topology of praid, as sent by client via local server to toma
 		u8 buf[0];
 	};
 }__attribute__((packed));
