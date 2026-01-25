@@ -61,6 +61,10 @@ bool nvmeibc_lock_ch_scq_use_kwq = true;
 module_param_named(lock_ch_scq_use_kwq, nvmeibc_lock_ch_scq_use_kwq, bool, 0644);
 MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Use kernel workqueue instead of kthread for SCQ offload processing (default: false)");
 
+bool nvmeibc_locks_scq_wq_unbound = false;
+module_param_named(locks_scq_wq_unbound, nvmeibc_locks_scq_wq_unbound, bool, 0444);
+MODULE_PARM_DESC(locks_scq_wq_unbound, "Use unbound kernel workqueue for nvmeibc_locks_scq (true) or bound (false, default)");
+
 /* Kernel workqueue for locks channel SCQ operations */
 static struct workqueue_struct *nvmeibc_locks_channel_wq;
 
@@ -68,7 +72,10 @@ int nvmeibc_locks_channel_wq_init(void)
 {
 	NFIN;
 	if (nvmeibc_lock_ch_scq_use_kwq) {
-		nvmeibc_locks_channel_wq = nvmeib_public_alloc_workqueue("nvmeibc_locks_scq", WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+		unsigned int flags = WQ_SYSFS;
+		if (nvmeibc_locks_scq_wq_unbound)
+			flags |= WQ_UNBOUND;
+		nvmeibc_locks_channel_wq = nvmeib_public_alloc_workqueue("nvmeibc_locks_scq", flags, 0);
 		if (!nvmeibc_locks_channel_wq) {
 			_NE(error_nvmeibc_locks_channel_wq_init, "Failed to allocate locks channel SCQ workqueue");
 			NFOUT;

@@ -3349,6 +3349,12 @@ struct workqueue_struct *alloc_workqueue(const char *name, unsigned int flags, i
 int profile_event_register(enum profile_type type, struct notifier_block *n){(void)type; (void)n; return 0;}
 int profile_event_unregister(enum profile_type type, struct notifier_block *n){(void)type; (void)n; return 0;}
 
+int nvmeibc_nordda_channel_wq_init(void) { return 0; }
+void nvmeibc_nordda_channel_wq_destroy(void) { }
+
+int nvmeibc_locks_channel_wq_init(void) { return 0; }
+void nvmeibc_locks_channel_wq_destroy(void) { }
+
 /*****************************************************************************/
 // EOF.
 

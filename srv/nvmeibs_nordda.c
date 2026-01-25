@@ -4762,11 +4762,10 @@ int nvmeibs_nordda_kwq_init(void)
 
 	if (nvmeibs_nordda_kernel_wq_unbound) {
 		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda",
-			WQ_UNBOUND | WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS,
+			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS,
 			WQ_UNBOUND_MAX_ACTIVE);
 	} else {
-		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda",
-			WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda", WQ_MEM_RECLAIM | WQ_SYSFS, 0);
 	}
 
 	if (!nvmeibs_nordda_kwq) {
