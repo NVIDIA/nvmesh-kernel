@@ -149,75 +149,6 @@ out:
 	return rv;
 }
 
-/***************************** Status proc reply messages *******************************/
-struct status_str_ctx {					// Write status to mmap proc file in response to server request
-	char 	*buf;
-	size_t 	max_len;
-	size_t 	cur_len;
-	size_t 	total_needed_len;
-	bool	is_overflow;
-};
-
-static int __status_str_printf(void *context, const char *format, ...)			// vsnprintf wrapper
-{
-	struct status_str_ctx 	*str_ctx = context;
-	va_list					arglist;
-	size_t					len_needed;
-	const ssize_t			avail_len = (ssize_t)str_ctx->max_len - (ssize_t)str_ctx->cur_len;
-	NTOMA_ASSERT(ttsrspfs0, avail_len > 0, "cur_len >= max_len when writing to buffer (overflow).");
-	va_start(arglist, format);
-	len_needed = vsnprintf(str_ctx->buf + str_ctx->cur_len, (size_t)avail_len, format, arglist);
-	va_end(arglist);
-	if ((len_needed >= (size_t)avail_len) && (!str_ctx->is_overflow)) {	// Print only first time on overflow, not for every function call
-		N_Tf(ttsrspfs1, "Buffer overflow, max_len=@SIZE_T cur_len=@SIZE_T len_needed=@SIZE_T", str_ctx->max_len, str_ctx->cur_len, len_needed);
-		str_ctx->is_overflow = 1;
-	}
-	str_ctx->total_needed_len += len_needed;
-	str_ctx->cur_len += min((size_t)avail_len - 1, len_needed);
-	return 0;
-}
-
-static void __just_a_hack_reorder_funcions(struct nvmeibt_km_comm *p, enum nvmeibs_toma_status_type type, struct status_str_ctx* ctx);
-int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const struct nvmeibs_msg_s2t_toma_status_req *req)
-{
-	int fd;
-	char fname[256];
-	struct status_str_ctx ctx = {.buf = NULL, .max_len = req->max_length, .cur_len = 0, .total_needed_len = 0, .is_overflow = 0	};
-	struct nvmeibs_toma_server_proc_buf write_resp = {.type = NVMEIBS_TOMA_WRITE_STATUS_RESP};
-	struct nvmeibs_msg_t2s_toma_status_resp *pl = &write_resp.status_resp_msg;
-
-	// Open the mmap proc file
-	snprintf(fname, sizeof(fname), TOMA_ROOT_DIR "proc/nvmeibs/" TOMA_STATUS_PROC_DIR "/%s", req->fname);
-	fd = NNVMEIBT_OPEN(ttsrspfs5, fname, O_RDWR);
-	if (fd < 0) {
-		N_Wf(ttsrspfs6, "Failed to open mmap file @STR (@ERRNO - '@AUTO_ERRNO')", fname, errno);
-		return -__LINE__;
-	}
-	ctx.buf = nvmeibt_mmap(req->max_length, fd, 0, true);		// map writable memory to the start of the proc file
-	if (ctx.buf == MAP_FAILED) {
-		N_Wf(ttsrspfs7, "Failed to mmap file @STR. (@ERRNO - '@AUTO_ERRNO')", fname, errno);
-		NNVMEIBT_CLOSE(ttsrspfs8, fd);
-		return -__LINE__;
-	}
-
-	__just_a_hack_reorder_funcions(p, req->type, &ctx);
-	nvmeibt_munmap(ctx.buf, req->max_length);
-	NNVMEIBT_CLOSE(ttsrspfs9, fd);
-
-	if (ctx.is_overflow)
-		N_Tf(ttsrspfsc, "Output truncated from @SIZE_T to @SIZE_T characters", ctx.total_needed_len, ctx.cur_len);
-
-	pl->handle = req->handle;
-	pl->length = ctx.cur_len;
-	pl->is_overflow = ctx.is_overflow;
-	pl->handle_req = req->handle_req;
-	if (nvmeib_srvr_api_lib_send_block_msg_to_server(p , &write_resp) < 0) {
-		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
-		return -__LINE__;
-	}
-	return 0;
-}
-
 int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const char*model, const char*serial, u16 vendor, const bool is_stock_to_nvmeibs)
 {
 	const char* path = TOMA_ROOT_DIR "proc/nvmeibs/nvmeof_disks";
@@ -384,10 +315,6 @@ static void nvmeibt_km_comm_unlock(struct nvmeibt_km_comm *p)
 {
 	const int rv = pthread_mutex_unlock(&p->guard);
 	if (rv != 0) N_Ef(kmtscl1, "Failed to unlock srv comm guard rv=@RV", rv);
-}
-
-static void __just_a_hack_reorder_funcions(struct nvmeibt_km_comm *p, enum nvmeibs_toma_status_type type, struct status_str_ctx* ctx) {
-	p->params.print_status_fn(type, &__status_str_printf, ctx); 	// Print the status to the proc file
 }
 
 static int start_netlink_socket(struct nvmeibt_km_comm *p)
@@ -911,6 +838,74 @@ int nvmeibt_km_comm_get_disk_info(struct nvmeibt_km_comm *p, const char *disk_na
 	nvmeibt_km_comm_unlock(p);
 	NFOUT;
 	return rv;
+}
+
+/***************************** Status proc reply messages *******************************/
+struct status_str_ctx {					// Write status to mmap proc file in response to server request
+	char 	*buf;
+	size_t 	max_len;
+	size_t 	cur_len;
+	size_t 	total_needed_len;
+	bool	is_overflow;
+};
+
+static int __status_str_printf(void *context, const char *format, ...)			// vsnprintf wrapper
+{
+	struct status_str_ctx 	*str_ctx = context;
+	va_list					arglist;
+	size_t					len_needed;
+	const ssize_t			avail_len = (ssize_t)str_ctx->max_len - (ssize_t)str_ctx->cur_len;
+	NTOMA_ASSERT(ttsrspfs0, avail_len > 0, "cur_len >= max_len when writing to buffer (overflow).");
+	va_start(arglist, format);
+	len_needed = vsnprintf(str_ctx->buf + str_ctx->cur_len, (size_t)avail_len, format, arglist);
+	va_end(arglist);
+	if ((len_needed >= (size_t)avail_len) && (!str_ctx->is_overflow)) {	// Print only first time on overflow, not for every function call
+		N_Tf(ttsrspfs1, "Buffer overflow, max_len=@SIZE_T cur_len=@SIZE_T len_needed=@SIZE_T", str_ctx->max_len, str_ctx->cur_len, len_needed);
+		str_ctx->is_overflow = 1;
+	}
+	str_ctx->total_needed_len += len_needed;
+	str_ctx->cur_len += min((size_t)avail_len - 1, len_needed);
+	return 0;
+}
+
+int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const struct nvmeibs_msg_s2t_toma_status_req *req)
+{
+	int fd;
+	char fname[256];
+	struct status_str_ctx ctx = {.buf = NULL, .max_len = req->max_length, .cur_len = 0, .total_needed_len = 0, .is_overflow = 0	};
+	struct nvmeibs_toma_server_proc_buf write_resp = {.type = NVMEIBS_TOMA_WRITE_STATUS_RESP};
+	struct nvmeibs_msg_t2s_toma_status_resp *pl = &write_resp.status_resp_msg;
+
+	// Open the mmap proc file
+	snprintf(fname, sizeof(fname), TOMA_ROOT_DIR "proc/nvmeibs/" TOMA_STATUS_PROC_DIR "/%s", req->fname);
+	fd = NNVMEIBT_OPEN(ttsrspfs5, fname, O_RDWR);
+	if (fd < 0) {
+		N_Wf(ttsrspfs6, "Failed to open mmap file @STR (@ERRNO - '@AUTO_ERRNO')", fname, errno);
+		return -__LINE__;
+	}
+	ctx.buf = nvmeibt_mmap(req->max_length, fd, 0, true);		// map writable memory to the start of the proc file
+	if (ctx.buf == MAP_FAILED) {
+		N_Wf(ttsrspfs7, "Failed to mmap file @STR. (@ERRNO - '@AUTO_ERRNO')", fname, errno);
+		NNVMEIBT_CLOSE(ttsrspfs8, fd);
+		return -__LINE__;
+	}
+
+	p->params.print_status_fn(req->type, &__status_str_printf, &ctx); 	// Print the status to the proc file
+	nvmeibt_munmap(ctx.buf, req->max_length);
+	NNVMEIBT_CLOSE(ttsrspfs9, fd);
+
+	if (ctx.is_overflow)
+		N_Tf(ttsrspfsc, "Output truncated from @SIZE_T to @SIZE_T characters", ctx.total_needed_len, ctx.cur_len);
+
+	pl->handle = req->handle;
+	pl->length = ctx.cur_len;
+	pl->is_overflow = ctx.is_overflow;
+	pl->handle_req = req->handle_req;
+	if (nvmeib_srvr_api_lib_send_block_msg_to_server(p , &write_resp) < 0) {
+		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
+		return -__LINE__;
+	}
+	return 0;
 }
 
 /***************************** Lock maps API ***********************/
