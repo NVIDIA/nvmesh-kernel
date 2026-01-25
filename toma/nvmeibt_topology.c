@@ -2177,6 +2177,7 @@ void nvmeibt_server_lib_create(void)
 			N_Ef(djut866, "Failed to init srv library, cannot continue");
 			nvmeibt_abort(ES_FATAL);
 		}
+		(void)nvmeib_srvr_api_lib_server_connect(smq->km_comm);
 	}
 }
 

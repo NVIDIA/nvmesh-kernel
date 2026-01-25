@@ -2084,16 +2084,7 @@ void nvmeibt_toma_process_waiting_udev_events(void)
 	}
 }
 
-/**
- * Reads the disks info from the stock driver directly:
- * * Disk characteristics
- * * Format characteristics for each disks
- *
- * @author max (2/19/18)
- *
- * @return int
- */
-static void __attribute__((used)) read_disks_info_from_stock_driver(void)
+static void read_disks_info_from_stock_driver(void)
 {
 	struct udev							*udev = NULL;
 	struct udev_enumerate				*enumerate = NULL;
@@ -2424,7 +2415,6 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	nvmeibt_server_lib_create();
 	read_disks_info_from_stock_driver();
-	(void)nvmeib_srvr_api_lib_server_connect(nvmeibt_get_srv_comm());
 
 	if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0)
 		nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.
