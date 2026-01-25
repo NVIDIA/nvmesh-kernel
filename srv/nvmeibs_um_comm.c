@@ -1578,7 +1578,7 @@ static int handle_format(struct nvmeibs_um_comm *p, struct netlink_event *e)
 		}
 	if (found) {
 		_NE(error_um_comm_handle_format, "Format for disk @DISK_ID_STR is already in progress", fe->disk_id);
-		rv = csce_format_in_progress;
+		rv = csce_in_progress;
 	}
 	else
 		rv = launch_format(p, e);

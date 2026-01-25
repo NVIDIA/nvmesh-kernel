@@ -238,7 +238,7 @@ enum uk_comm_err_opcode {				// s2t error codes, for Toma requests
 	csce_ok = 0,						// By design equals 0
 	csce_failed,
 	csce_bad_zero_params,
-	csce_format_in_progress,
+	csce_in_progress,					// May be success depending on message type (if success is launch of task and not completion)
 	csce_format_oom,
 	csce_format_thread,
 	csce_format_failed,
