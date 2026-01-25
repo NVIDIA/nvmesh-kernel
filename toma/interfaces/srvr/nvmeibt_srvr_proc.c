@@ -51,23 +51,6 @@ static ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, in
 	__rv__;																									\
 })
 
-static int nvmeibt_toma_announce_ready(bool is_login)
-{
-	struct nvmeibs_toma_server_proc_buf buf;
-	int rv;
-	N_Tf(nsalcq, "is_login=@BOOL_YN", is_login);
-	memset(&buf, 0, sizeof(buf));
-	buf.type = (is_login ? NVMEIBS_TOMA_LOGIN : NVMEIBS_TOMA_LOGOUT);
-	rv = NNVMEIBT_PWRITE_ATOMIC(nsalca, fd_toma2srvr, &buf, sizeof(buf), 0, 0);
-	if (rv < 0) {
-		N_Ef(nsalcb, "OOPS! Failed, fd=@FD of size @SIZEOF, rv=@RV", fd_toma2srvr, sizeof(buf), rv);
-	}
-	N_Tf(nsalcw, "Done");
-	return 0;
-}
-
-int nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p) { (void)p;	return nvmeibt_toma_announce_ready(true); }
-
 /***************************** mmap shared memory (server /proc/.../toma_status/files & IO locks table) *******************************/
 #include <sys/mman.h>
 /* mmap wrapper that creates a protected page before and after the allocation. Must be freed using nvmeibt_munmap(),
@@ -415,6 +398,16 @@ out:
 	return p;
 }
 
+int nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p) {
+	struct nvmeibs_toma_server_proc_buf buf;
+	NFIN;
+	memset(&buf, 0, sizeof(buf));
+	buf.type = NVMEIBS_TOMA_LOGIN;
+	(void)nvmeib_srvr_api_lib_send_block_msg_to_server(p, &buf);
+	NFOUT;
+	return 0;
+}
+
 static void __remove_disk_and_free(struct nvmeibt_km_comm *p, struct disk_info *disk)
 {
 	nvmeibt_km_comm_lock(p);
@@ -457,9 +450,15 @@ void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
 	NNVMEIBT_CLOSE(tscnlssr, p->nl_sock_fd);
 }
 
-void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)
+void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)		// Close blocking msg API
 {
-	nvmeibt_toma_announce_ready(false);		// Close blocking msg API
+	struct nvmeibs_toma_server_proc_buf buf;
+	int rv;
+	N_Tf(__AUTOID__, "");
+	memset(&buf, 0, sizeof(buf));
+	buf.type = NVMEIBS_TOMA_LOGOUT;
+	rv = NNVMEIBT_PWRITE_ATOMIC(nsalca, fd_toma2srvr, &buf, sizeof(buf), 0, 0);
+	(void)rv; // Nothing to do with this
 	NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
 	NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
 	NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
