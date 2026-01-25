@@ -121,8 +121,7 @@ bool server_simu_has_next_msg_for_toma(void) {
 
 void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *me) {
 	BUG_ON(me->expecting_reply_cookie);				// Did not get a reply from Toma
-	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	if (!nvmeibt_toma_is_running_as_a_utility()) {
+	if (!nvmeibt_toma_is_running_as_a_utility()) {	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 		BUG_ON(me->n_toma_replies_received <= 0);	// Coverage tests did not receive any reply from Toma
 	}
 }
@@ -419,17 +418,22 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
 
+static void sandbox_kafka_validate_report_target(void) {
+	const char *str = sys->kafka_simu.last_report_target_json;
+	const bool ok = str && strstr(str, "NVMD_SN_002.1") && strstr(str, "NVMD_SN_003.1");
+	BUG_ON(!ok);
+}
+
 void t_sandbox_all_destroy(void) {
+	if (!nvmeibt_toma_is_running_as_a_utility())
+		sandbox_kafka_validate_report_target();
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	pthread_mutex_destroy(&sys->TS.mutex);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
 	free(sys->kafka_simu.last_report_target_json);
 	sys->kafka_simu.last_report_target_json = NULL;
-	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	if (sys->s_req_simu.n_srvr_msg_idx > 0) {
-		BUG_ON(sys->TSB_netlink.n_recv_msgs <= 0);
-	}
+	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	free(sys);
 	sys = NULL;
 }
@@ -1160,29 +1164,8 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 	return 1;
 }
 
-static void sandbox_kafka_validate_report_target(void) {
-	const bool ok = sys && sys->kafka_simu.last_report_target_json &&
-			strstr(sys->kafka_simu.last_report_target_json, "NVMD_SN_002.1") &&
-			strstr(sys->kafka_simu.last_report_target_json, "NVMD_SN_003.1");
-
-	if (ok) {
-		SANDBOX_PRINT("%s", COL_GREEN "ok - Toma should send reportTarget" COL_RESET "\n");
-		return;
-	}
-
-	{
-		const char *last = (sys && sys->kafka_simu.last_report_target_json) ?
-					   sys->kafka_simu.last_report_target_json :
-					   "<none>";
-		SANDBOX_PRINT("%s", COL_RED "fail - Toma should send reportTarget" COL_RESET "\n");
-		SANDBOX_PRINT("  - last_report_target:\n%s\n", last);
-		fflush(stderr);
-	}
-}
-
-#define SANDBOX_TERMINATE_AFTER_N_LOOPS 50
-
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
+	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 50
 	struct globa_epoll *ep = &sys->TSB_epoll;
 	static uint64_t loop_idx = 0;
 	static bool is_shutting_down = false;
@@ -1232,11 +1215,6 @@ static void toma_unitest_env_end(void) {
 	SANDBOX_PRINT(COL_GREEN "unitest done sys=%p" COL_RESET ". \t\tAnalyze bin logs via:\n"
 		"\t" TOMA_BINLOG_DIR "/pager " TOMA_BINLOG_DIR " --toma --color " /* "--dict_preload " DICT_DIR "dict* --fmtlib_preload " DICT_DIR "libfmtrs.so" */ " > z.txt\n"
 		"\t\t * If pager is not properly built, run once: ./build-verify.sh\n", sys);
-
-	SANDBOX_PRINT("%s", COL_WHITE_BOLD "verification:" COL_RESET "\n");
-	sandbox_kafka_validate_report_target();
-	SANDBOX_PRINT("%s", COL_WHITE_BOLD "verification done" COL_RESET "\n");
-
 	t_sandbox_all_destroy();
 }
 void toma_unitest_env_start(bool is_running_as_a_utility, int trace_debug_level) {
