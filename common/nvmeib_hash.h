@@ -98,7 +98,7 @@ void *nvmeib_hash_add_uuid(struct nvmeib_hash_table *hash_tbl, const union nvmei
 
 void *nvmeib_hash_add_uint32_t(struct nvmeib_hash_table *hash_tbl, const uint32_t uint32_t_key, void *ptr_to_obj);
 void *nvmeib_hash_add_uint64_t(struct nvmeib_hash_table *hash_tbl, const uint64_t uint64_t_key, void *ptr_to_obj);
-void *nvmeib_hash_add_ascii_str(struct nvmeib_hash_table *hash_tbl, const char *ascii_str_key, void *ptr_to_obj);
+void *nvmeib_hash_add_ascii_str(struct nvmeib_hash_table *hash_tbl, const char *ascii_str_key, void *ptr_to_obj);	// Note that ascii_str_key should point to a string inside ptr_to_obj!
 void *nvmeib_hash_search_uuid(struct nvmeib_hash_table *hash_tbl, const union nvmeib_uuid *uuid_key);
 void *nvmeib_hash_search_uint32_t(struct nvmeib_hash_table *hash_tbl, const uint32_t uint32_t_key);
 void *nvmeib_hash_search_uint64_t(struct nvmeib_hash_table *hash_tbl, const uint64_t uint64_t_key);
