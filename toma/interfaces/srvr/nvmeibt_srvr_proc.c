@@ -287,16 +287,22 @@ struct nvmeibt_km_comm {
 	pthread_mutex_t guard;			// Serialize Toma thread access
 	unsigned long unique_id_generator __attribute__((aligned(sizeof(long))));		// Ever increasing counter for msg id and others
 	int nl_sock_fd;					// Socket to which send/recv message to/from kernel server
-	int max_msg_size;				// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time
 	struct nlmsghdr *nlh;			// 1 preallocated Linux netlink msg, to avoid mallocs during send/recv
 	struct iovec iov;				// 1 preallocated iovec
 	struct sockaddr_nl dest_addr;	// Netlink address to send msgs to
 	int spair[2];					// Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
 	pthread_t comm_thread;			// main thread which processes messages
-	int error_occured;				// if != 0: Object is not operational, closing due to error. Stores error code
+	struct {
+		int error_occured;			// if != 0: Object is not operational, closing due to error. Stores error code
+	} state_flags;
 	struct resource_usage_counters_t {
 		int n_lock_maps;
 	} resource;
+	struct {						// For debug, maximal message sizes. Defined at compile time
+		int proc_recv;
+		int proc_send;
+		int nlink;					// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time	} max_msg_size;
+	} max_msg_size;
 };
 
 static unsigned long get_guid(struct nvmeibt_km_comm *p)
@@ -358,10 +364,18 @@ static int start_thread(struct nvmeibt_km_comm *p)
 	return 0;
 }
 
+void __calc_max_msg_size(struct nvmeibt_km_comm *p) {
+	const size_t server_nlink = sizeof(struct nvmeib_nl_uk_comm_msg) + max((sizeof(struct nvmeib_nl_msg_to_toma) + 256 /*nvmeib_push_extended_msg payload?*/), sizeof(union nvmeib_nl_msg_to_srvr_payload));
+	const size_t lserver_proc = sizeof(struct nvmeibs_toma_server_proc_buf);
+	const size_t clients_topo = NVMEIB_TOMA_REQ_MAX_LEN + (sizeof(struct nvmeibs_toma_client_proc_buf) - sizeof(struct nvmeibt_client_msg));
+	p->max_msg_size.proc_recv = max(lserver_proc, clients_topo);
+	p->max_msg_size.proc_send = clients_topo;
+		p->max_msg_size.nlink = NLMSG_SPACE(server_nlink);		// Large messages use /proc sync api
+}
+
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 {
 	struct nvmeibt_km_comm *p = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
-	const int NETLINK_SRV_COMM_MAX_PAYLOAD = max((sizeof(struct nvmeib_nl_msg_to_toma) + 256 /*nvmeib_push_extended_msg payload?*/), (sizeof(struct nvmeib_nl_uk_comm_msg) + sizeof(union nvmeib_nl_msg_to_srvr_payload)));
 	int rv = 0;
 
 	if (!p) { 													rv = -__LINE__; goto out; }
@@ -372,11 +386,11 @@ struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
 	if (start_netlink_socket(p))  { 							rv = -__LINE__; goto free_spair; }
 	if (nvmeibt_nonblock_fd(p->spair[1]) < 0) {					rv = -__LINE__; goto free_netlink; }
-	p->max_msg_size = NLMSG_SPACE(NETLINK_SRV_COMM_MAX_PAYLOAD);
-	p->nlh = NNVMEIBT_TOMA_MALLOC(tscnlssb, p->max_msg_size);
+	__calc_max_msg_size(p);
+	p->nlh = NNVMEIBT_TOMA_MALLOC(tscnlssb, p->max_msg_size.nlink);
 	if (!p->nlh) {												rv = -__LINE__; goto free_netlink; }
 	p->iov.iov_base = (void *)p->nlh;
-	p->iov.iov_len = p->max_msg_size;
+	p->iov.iov_len = p->max_msg_size.nlink;
 	XDLIST_HEAD_INIT(&p->in_progress_msgs);
 	XDLIST_HEAD_INIT(&p->disks);
 	XDLIST_HEAD_INIT(&p->msgs1);
@@ -461,7 +475,7 @@ static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
 static void __fill_netlink_hdr(struct nvmeibt_km_comm *p, struct msghdr* hdr, struct sockaddr_nl *addr)
 {
 	memset(hdr, 0, sizeof(*hdr));
-	memset(p->nlh, 0, p->max_msg_size);		// Todo: too much mem set, reduce this. Just memset for debug, not really needed
+	memset(p->nlh, 0, p->max_msg_size.nlink);		// Todo: too much mem set, reduce this. Just memset for debug, not really needed
 	hdr->msg_name = (void *)addr;
 	hdr->msg_namelen = sizeof(*addr);
 	hdr->msg_iov = &p->iov;
@@ -474,8 +488,8 @@ static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *m
 	struct nlmsghdr *nlh = p->nlh;
 
 	NFIN;
-	if (msg->msg.len > p->max_msg_size) {
-		N_Ef(tkmcsmtk0, "msg[@INT].id=@ID size @LEN[b] > max netlink msg @LEN[b]", msg->msg.opcode, msg->msg.id, msg->msg.len, p->max_msg_size);
+	if (msg->msg.len > p->max_msg_size.nlink) {
+		N_Ef(tkmcsmtk0, "msg[@INT].id=@ID size @LEN[b] > max netlink msg @LEN[b]", msg->msg.opcode, msg->msg.id, msg->msg.len, p->max_msg_size.nlink);
 		msg_free(msg);
 		goto out;
 	}
@@ -640,7 +654,7 @@ static void __release_msg_queues_on_error(struct nvmeibt_km_comm *p, const char 
 	N_Ef(t2srmqon0, "Error: @STR, @AUTO_ERRNO", reason);
 	nvmeibt_km_comm_lock(p);
 	read_toma_wakeup_event(p);
-	p->error_occured = -1;				// No need to deferntiate by 'reason', we have it in logs
+	p->state_flags.error_occured = -1;				// No need to deferntiate by 'reason', we have it in logs
 	msgs = p->msgs;
 	p->msgs = msgs == &p->msgs1 ? &p->msgs2 : &p->msgs1;
 	while (!XDLIST_EMPTY(msgs)) {
@@ -694,7 +708,7 @@ static void _send_keep_alive_to_server(struct nvmeibt_km_comm *p)
 
 static bool _recv_msg_from_local_server(struct nvmeibt_km_comm *p)
 {
-	const int max_len = max(NVMEIB_TOMA_REQ_MAX_LEN, (int)sizeof(struct nvmeibs_toma_server_proc_buf));
+	const int max_len = p->max_msg_size.proc_recv;
 	struct nvmeibs_toma_server_proc_buf *msg = NNVMEIBT_BM_CALLOC(tthlsd0, max_len);
 	const int rv = read(fd_srvr2toma, msg, max_len);
 	if (rv < (int)sizeof(msg->handle)) {
@@ -765,7 +779,7 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, cons
 	N_Tf(stkmcnl3, "msg[@INT].id=@ID, hdr=@INT[b] msg=@INT[b]", hdr->opcode, kmsg->msg.id, hdr->len, kmsg->msg.len);
 	rv = -EPERM;
 	nvmeibt_km_comm_lock(p);
-	if (!p->error_occured) {									// Reading is syncronize with setting it from main thread via lock
+	if (!p->state_flags.error_occured) {						// Reading is syncronize with setting it from main thread via lock
 		XDLIST_ADD_TAIL(p->msgs, kmsg);
 		rv = (write(p->spair[0], &c, 1) == 1) ? 0 : -EIO;		// Wakeup our main thread to handle the message
 	}															// Else msg lists already drained, dont add anything to it
@@ -808,7 +822,7 @@ int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, cons
 int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
 {
 	int rv = 0;
-	(void)p;
+	NTOMA_ASSERT(__AUTOID__, buf_len <= p->max_msg_size.proc_send, "Msg too large @INT[b]", buf_len);
 	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0) < 0) {
 		if (errno == ENXIO) {
 			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, msg, buf_len, clnt_host);
