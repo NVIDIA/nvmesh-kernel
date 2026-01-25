@@ -758,40 +758,44 @@ static void * run(void *v)
 	return NULL;
 }
 
-int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr)
+static bool __submit_toma_msg(struct nvmeibt_km_comm *p, struct srv_comm_msg *m, const void* buf, size_t buf_len)
 {
-	struct srv_comm_msg *kmsg;
-	const int		msg_size = sizeof(kmsg->msg) + hdr->len;
-	char c = 1;
-	int rv;
-
-	if (hdr->opcode == csc_start || hdr->opcode >= csc_end) {
-		N_Ef(stkmcnl0, "msg[@INT] Invalid type", hdr->opcode);
-		return -EINVAL;
-	}
-	if (!(kmsg = NNVMEIBT_BM_CALLOC(stkmcnl1, sizeof(*kmsg) + msg_size))) {
-		N_Ef(stkmcnl2, "Fail to allocate nvmeibt_km_comm msg");
-		return -EINVAL;
-	}
-	kmsg->msg.opcode = hdr->opcode;
-	kmsg->on_done = hdr->on_done;
-	kmsg->ctx =  hdr->ctx;
-	kmsg->msg.len = msg_size;
-	kmsg->msg.id = get_guid(p);
-	if (hdr->len) memcpy(kmsg->msg.data, hdr->data, hdr->len);
-	N_Tf(stkmcnl3, "msg[@INT].id=@ID, hdr=@INT[b] msg=@INT[b]", hdr->opcode, kmsg->msg.id, hdr->len, kmsg->msg.len);
-	rv = -EPERM;
+	bool was_sent;
+	m->msg.len = sizeof(m->msg) + buf_len;
+	if (buf_len) memcpy(m->msg.data, buf, buf_len);
+	m->msg.id = get_guid(p);
+	N_Tf(__AUTOID__, "msg[@INT].id=@ID, base=@INT[b]", m->msg.opcode, m->msg.id, m->msg.len-(int)sizeof(struct nvmeib_nl_uk_comm_msg));
 	nvmeibt_km_comm_lock(p);
-	if (!p->state_flags.error_occured) {						// Reading is syncronize with setting it from main thread via lock
-		XDLIST_ADD_TAIL(p->msgs, kmsg);
-		rv = (write(p->spair[0], &c, 1) == 1) ? 0 : -EIO;		// Wakeup our main thread to handle the message
+	was_sent = !p->state_flags.error_occured;					// Reading is syncronize with setting it from main thread via lock
+	if (was_sent) {
+		int wakeup_rv;
+		char c = 1;
+		XDLIST_ADD_TAIL(p->msgs, m);
+		wakeup_rv = write(p->spair[0], &c, 1);					// Wakeup our main thread to handle the message, dont care if wakeup fails
+		if (wakeup_rv != 1) N_Ef(__AUTOID__, "Unable wakeup msg2srv submit thread");
 	}															// Else msg lists already drained, dont add anything to it
 	nvmeibt_km_comm_unlock(p);
-	if (rv == -EPERM) {
-		N_Tf(stkmcnl4, "msg cannot be sent");
-		kmsg->on_done = NULL; 									// Agreement in case of syncronous send error, callback will not be given
-		msg_free(kmsg);
+	if (unlikely(!was_sent)) {
+		N_Tf(__AUTOID__, "msg[@INT].id=@ID cannot be sent", m->msg.opcode, m->msg.id);
+		m->on_done = NULL; 										// Agreement in case of syncronous send error, callback will not be given
+		msg_free(m);
 	}
+	return was_sent;
+}
+
+int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr)
+{
+	struct srv_comm_msg *m = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*m) + sizeof(m->msg) + hdr->len);
+	int rv;
+	NTOMA_ASSERT(__AUTOID__, (hdr->opcode != csc_start || hdr->opcode < csc_end), "msg[@INT] Invalid type", hdr->opcode);
+	if (!m) {
+		N_Ef(stkmcnl2, "Fail to allocate nvmeibt_km_comm msg");
+		return -ENOMEM;
+	}
+	m->msg.opcode = hdr->opcode;
+	m->on_done = hdr->on_done;
+	m->ctx =  hdr->ctx;
+	rv = __submit_toma_msg(p, m, hdr->data, hdr->len) ? 0 : -EPERM;
 	NFOUT;
 	return rv;
 }
