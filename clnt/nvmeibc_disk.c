@@ -7339,7 +7339,7 @@ static void ch_reused_bb_release_smp_fn(void *arg)
 	struct nvmeibc_channel *ch = params->ch;
 	struct nvmeib_data_reuse_buf_params *r = params->r;
 	void *context;
-	bool do_pending;
+	bool do_pending = false;
 
 	if (nvmeibc_channel_try_use_req_info(ch)) {
 		if (ch->ct == ct_rdda) {
