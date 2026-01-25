@@ -316,7 +316,13 @@ else	###########################################              my-laptop) code   
 	alias ping_nvme1006_IPMI='ping nvme1006.ilo'	# nvme1006-ilo/ ADMIN ADMIN	# Enter remote control iKVM/HTML5
 	alias resolveall='resolvectl query www.google.com geovpn.mellanox.com confluence.nvidia.com nvme1014.lab.nvidia.com nvme1014';
 	#LOGS & stat
-	alias my_compile_simulator="
+	alias print_toma_simulator_cmds='
+		cd toma/unitest/;
+		echo "make clean;    make all -j;   rm _root/var/log/nvmesh/trace_daemon/*binlog*;	./nvmeibt_toma";
+		echo "./_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color";
+		echo "If you dont have pager on your laptop run\n	./build-verify.sh";
+	'
+	alias my_compile_block_simulator="
 		#rsync --ignore-errors --delete --delete-before --delete-excluded --exclude-from=~/projects/ssda/excludes -rlpgoDv ~/projects/ssda/ ~/projects/ssda_tmp;
 		rsync --ignore-errors --delete --delete-before --exclude-from=/home/alexander/projects/ssda/excludes -rlpgoDv --sparse ~/projects/ssda/ ~/projects/ssda_tmp;
 		cd ~/projects/ssda_tmp/clnt/block/unitest;
@@ -324,7 +330,7 @@ else	###########################################              my-laptop) code   
 		./build_block_testing.sh build;
 	"
 #	alias my_run_simulator='sudo rm /var/lib/systemd/coredump/core* ./core; ./run_block_unitest.sh -n -d f -nRep 2 -hsync; sudo unzstd -o ./core /var/lib/systemd/coredump/core*zst; echo "Running pager"; ./pager -t now-80s > log.txt'
-	function my_run_simulator {
+	function my_run_block_simulator {
 		sudo rm -f /var/lib/systemd/coredump/core* ./core;
 		if [ "_$1" == "_" ] ; then
 			n=1;
