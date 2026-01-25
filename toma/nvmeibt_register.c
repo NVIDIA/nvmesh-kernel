@@ -1754,8 +1754,8 @@ void nvmeibt_register_move_all_longing_registrants_no_seg_to_seg(struct nvmeibt_
 			XDLIST_DEL(&(longing_registrant->longing_link));
 			// Add registrant as longing on current segment.
 			add_longing_registrant_on_seg(longing_registrant);
-			// Free memory (when adding registrant as longing to segment new memory is allocated.
-			NNVMEIBT_TOMA_FREE(trace_register_nvmeibt_register_move_all_logging_registrants_no_seg_to_seg, longing_registrant);
+			// Free the reg_ctx (when adding registrant as longing to segment new reg_ctx is allocated.
+			free_reg_ctx(longing_registrant);
 		}
 	}
 	NFOUT;
