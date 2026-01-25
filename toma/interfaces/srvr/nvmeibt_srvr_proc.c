@@ -387,7 +387,8 @@ struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_
 	if (start_netlink_socket(p))  { 							rv = -__LINE__; goto free_spair; }
 	if (nvmeibt_nonblock_fd(p->spair[1]) < 0) {					rv = -__LINE__; goto free_netlink; }
 	__calc_max_msg_size(p);
-	p->nlh = NNVMEIBT_TOMA_MALLOC(tscnlssb, p->max_msg_size.nlink);
+	if (p->max_msg_size.nlink > 4096) {							rv = -__LINE__; goto free_netlink; }	// Allocate 1 aligned page for faster access
+	NNVMEIBT_TOMA_POSIX_MEMALIGN(tscnlssb, &p->nlh, 4096, 4096);
 	if (!p->nlh) {												rv = -__LINE__; goto free_netlink; }
 	p->iov.iov_base = (void *)p->nlh;
 	p->iov.iov_len = p->max_msg_size.nlink;
@@ -475,7 +476,7 @@ static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
 static void __fill_netlink_hdr(struct nvmeibt_km_comm *p, struct msghdr* hdr, struct sockaddr_nl *addr)
 {
 	memset(hdr, 0, sizeof(*hdr));
-	memset(p->nlh, 0, p->max_msg_size.nlink);		// Todo: too much mem set, reduce this. Just memset for debug, not really needed
+	//memset(p->nlh, 0, p->max_msg_size.nlink);		// Todo: too much mem set, reduce this. Just memset for debug, not really needed
 	hdr->msg_name = (void *)addr;
 	hdr->msg_namelen = sizeof(*addr);
 	hdr->msg_iov = &p->iov;
