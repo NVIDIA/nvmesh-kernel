@@ -25,19 +25,22 @@ static int __blocking_msg_api_create(void)
 
 static ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, int OK_err_1, int OK_err_2)
 {
-	ssize_t rv = pwrite(fd, vptr, size, 0 /*offset*/);
-	if (rv < 0) {
+	const ssize_t n_bytes_written = pwrite(fd, vptr, size, 0 /*offset*/);
+	if (n_bytes_written < 0) {
+		const ssize_t rv = -errno;
 		if (errno == OK_err_1 || errno == OK_err_2) {
 			N_Tf(6sjhk20, "Failed pwrite(fd=@FD vptr=@PTR size=@SIZEOF) (@AUTO_ERRNO))", fd, vptr, size);
 		} else {
 			N_Wf(35s83jm, "Failed pwrite(fd=@FD vptr=@PTR size=@SIZEOF) (@AUTO_ERRNO))", fd, vptr, size);
 		}
-	} else if ((size_t) rv != size) {
-		N_Tf(rvsx83j, "Partial pwrite(fd=@FD, size=@SIZEOF) wrote rv=@ZX",	fd, size, rv);
-		errno = 0;	// No ERRNO, since not an error
+		errno = 0;
+		return rv;
+	} else if ((size_t) n_bytes_written != size) {
+		N_Tf(rvsx83j, "Partial pwrite(fd=@FD vptr=@PTR size=@SIZEOF) (@AUTO_ERRNO) wrote rv=@ZX", fd, vptr, size, n_bytes_written);
+		errno = 0;
 		return -1;
 	}
-	return rv;
+	return 0;		// Success
 }
 
 #define NNVMEIBT_PWRITE_ATOMIC(name, __fd, __buf, __n, _OK_err_1, _OK_err_2) ({					\
@@ -799,22 +802,16 @@ int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, cons
 	(void)p;
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
 		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
-		if (rv < 0) {
-			N_Tf(tsmtls1, "pwrite(@FD) failed rv=@RV, @AUTO_ERRNO", fd_toma2srvr, rv);
-			return -1;
-		}
-		return 0;
+		return (rv < 0) ? -1 : 0;
 	} else {
 		// RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
 		const int rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
 		if (rv >= 0) {
 			return 0;
-		} else if ((rv < 0) && (errno == EALREADY || errno == EINPROGRESS)) {
-			// Either a cleanup was already active, or a new "job" started
-			N_Tf(tsmtls4, "cleanup request success: @STR", (errno == EALREADY) ? "already active" : "started");
-			return EINPROGRESS;
+		} else if (rv == -EALREADY || rv == -EINPROGRESS) {	// Either a cleanup was already active, or a new "job" started
+			N_Tf(tsmtls4, "cleanup request success: @STR", (rv == -EALREADY) ? "already active" : "started");
+			return EINPROGRESS;	// Success
 		} else {
-			N_Ef(tsmtls5, "pwrite(@FD) failed, wr_cnt=@RV @AUTO_ERRNO", fd_toma2srvr, rv);
 			return -1;
 		}
 	}
@@ -822,17 +819,10 @@ int nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, cons
 
 int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
 {
-	int rv = 0;
+	int rv; (void)clnt_host;
 	NTOMA_ASSERT(__AUTOID__, buf_len <= p->max_msg_size.proc_send, "Msg too large @INT[b]", buf_len);
-	if (NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0) < 0) {
-		if (errno == ENXIO) {
-			N_Tf(tsb2cp1, "write(@FD, handle=@PTR, len=@LEN) failed because the client=@MY_HOSTNAME already disconnected", fd_toma2clnt, msg, buf_len, clnt_host);
-		} else {
-			N_Tf(tsb2cp2, "write(@FD, handle=@PTR, len=@LEN) failed, @AUTO_ERRNO", fd_toma2clnt, msg, buf_len);
-			rv = -1;
-		}
-	}
-	return rv;
+	rv = NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0);
+	return ((rv == 0) || (rv == -ENXIO)) ? 0 : -1;	// Disconenct OK, or client already disconnected
 }
 
 int nvmeibt_km_comm_get_disk_info(struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di)
