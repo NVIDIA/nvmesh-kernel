@@ -206,7 +206,7 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 	hash_tbl->arr[idx].scrambled = scrambled;
 	rv_ptr_to_obj = NULL;
 out:
-	NVMEIB_HASH_DUMP_STATISTICS(4cghs89, hash_tbl);									\
+	NVMEIB_HASH_DUMP_STATISTICS(4cghs89, hash_tbl);
 	return rv_ptr_to_obj;
 }
 
@@ -506,6 +506,7 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 	struct timespec					now;
 	static struct timespec			last_invocation;
 
+NFIN;
 	if (!all_active_hashs) {
 		goto out;
 	}
@@ -522,6 +523,7 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 		}
 	}
 out:;
+NFOUT;
 }
 
 void nvmeib_hash_dump_tbl(struct nvmeib_hash_table *hash_tbl)
