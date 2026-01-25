@@ -25,6 +25,11 @@ struct nvmeibt_wq {
 	bool	is_one_time;				// Adhoc work queue with only 1 work entry
 };
 
+char* nvmeibt_wq_get_name(struct nvmeibt_wq *wq)
+{
+	return wq->name;
+}
+
 static int lock(struct nvmeibt_wq *wq) {
 	const int rv = pthread_mutex_lock(&wq->guard);
 	if (rv != 0) {
