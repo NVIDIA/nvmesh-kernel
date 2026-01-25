@@ -188,7 +188,8 @@ enum nvmeibs_um_caller_type { TOMA_CALLER = 'T', INFRA_CALLER = 'I',  LOCAL_CLNT
 #define TOMA_SILENCE_MAX_PERIOD_SECS (3600)
 
 enum uk_comm_opcode {
-	csc_internal_suicide = -1,				// Toma: Used internally, never sent to server, no payload
+	csc_internal_suicide = -2,				// Toma: Used internally, never sent to server, stop all io to/from server,
+	csc_internal_stop_callbacks = -1,		// Toma: Used internally, never sent to server, no payload, stop server notifications
 	csc_start = 0,							// Not an actual message, never sent
 	csc_get_disk_names = 1,					// Deprecated. t2s no payload. s2t reply: struct nvmeib_get_disk_names_reply
 	csc_zero_disk = 2,						// t2s, zero disk segment after volume deletion. payload: struct nvmeib_zero_disk. s2t, reply: struct nvmeib_zero_disk_reply

@@ -280,6 +280,7 @@ struct nvmeibt_km_comm {
 	pthread_t comm_thread;			// main thread which processes messages
 	struct {
 		int error_occured;			// if != 0: Object is not operational, closing due to error. Stores error code
+		bool stop_uplink;			// Prevent Toma messages from being sent to
 		bool use_async_api_and_sema_for_blocking_msgs;
 	} state_flags;
 	struct resource_usage_counters_t {
@@ -434,7 +435,18 @@ static void __drain_msg_list(msgs_list_t *l)
 	}
 }
 
+static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len);
+
 void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
+{
+	if (p->comm_thread) {
+		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_stop_callbacks, .on_done = NULL };
+		N_Tf(tscnlvs0, "Send internal stop callbacks, to main thread");
+		(void)_submit_msg_and_wait_for_ack(p, msg.opcode, &msg, sizeof(msg));
+	}
+}
+
+static void __stop_main_thread(struct nvmeibt_km_comm *p)
 {
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
 		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_suicide, .on_done = NULL };
@@ -463,11 +475,11 @@ void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)		// Close blocking m
 {
 	struct nvmeibs_toma_server_proc_buf buf;
 	int rv;
-	N_Tf(__AUTOID__, "");
 	memset(&buf, 0, sizeof(buf));
 	buf.type = NVMEIBS_TOMA_LOGOUT;
-	rv = NNVMEIBT_PWRITE_ATOMIC(nsalca, fd_toma2srvr, &buf, sizeof(buf), 0, 0);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_server(p, &buf);
 	(void)rv; // Nothing to do with this
+	__stop_main_thread(p);
 	NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
 	NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
 	NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
@@ -536,13 +548,31 @@ static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 		struct srv_comm_msg *msg = XDLIST_FIRST(msgs);
 		XDLIST_DEL(&msg->link);
 		N_Tf(tkmcsmtk2, "msg[@INT].id=@ID", msg->msg.opcode, msg->msg.id);
-		if (msg->msg.opcode <= csc_internal_suicide)
-			is_alive = false;
-		if (is_alive) {
-			send_msg_to_kernel(p, msg, true);		// Dont free msg, it is added to a different queue or freed inside
-		} else {										// Autofail msg
-			msg_free(msg);
+		if (unlikely(msg->msg.opcode < csc_start)) {
+			p->state_flags.stop_uplink = true;
+			if (msg->msg.opcode == csc_internal_stop_callbacks) {
+				p->params.on_add_disk = NULL;
+				p->params.on_remove_disk = NULL;
+				p->params.process_extend_msg = NULL;
+				// p->params.process_local_srvr_msg = NULL;			// Daniel: I am not sure about this: Pass legacy proc api to Toma for cleaner clients disconnect
+				p->params.process_disk_info = NULL;
+			} else if (msg->msg.opcode <= csc_internal_suicide) {
+				is_alive = false;									// Stop the main thread
+			}
 		}
+		if (!p->state_flags.stop_uplink) {
+			send_msg_to_kernel(p, msg, true);						// Dont free msg, it is added to a different queue or freed inside
+			continue;
+		}
+		if (msg->msg.opcode == csc_t2s_blocking_msg_other) {		// Proc messages, autofail all except logout msg
+			const struct nvmeibs_toma_server_proc_buf *pb = (struct nvmeibs_toma_server_proc_buf *)&msg->msg.data[0];
+			if (pb->type == NVMEIBS_TOMA_LOGOUT) {
+				send_msg_to_kernel(p, msg, true);
+				continue;
+			}
+		}
+		N_Tf(tkmcsmtk3, "msg[@INT].id=@ID, not sent to server", msg->msg.opcode, msg->msg.id);
+		msg_free(msg);											// Autofail msg
 	}
 	NFOUT;
 	return is_alive;
@@ -576,20 +606,23 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 			break;
 		case nvmeib_disk_info_reply_serjio_state: {
 			const struct nvmeib_disk_info_rep_sej_state_t *ssc = &disk_rep->serjio_state_change;
-			p->params.process_disk_info(ssc->disk_id, ssc->vendor_id, ssc->model_str, ssc->serjio_status);
+			if (p->params.process_disk_info)
+				p->params.process_disk_info(ssc->disk_id, ssc->vendor_id, ssc->model_str, ssc->serjio_status);
 			break;
 		}
 		case nvmeib_disk_info_reply_dinfo:
 			if (di->n_blocks > 0) {
 				disk = NNVMEIBT_TOMA_CALLOC(t2cnlpd1, 1, sizeof(*disk));
 				if (disk) {
-					N_Tf(t2cnlpd2, "Adding disk=@STR", di->disk_id);
+					N_Tf(t2cnlpd2, "Adding disk=@STR, has_cb=@BOOL_YN", di->disk_id, !!p->params.on_add_disk);
 					disk->disk = *di;
 					nvmeibt_km_comm_lock(p);
 					XDLIST_ADD_TAIL(&p->disks, disk);
 					nvmeibt_km_comm_unlock(p);
-					p->params.on_add_disk(&disk->disk);
-					p->params.process_disk_info(di->disk_id, di->vendor_id, di->model_str, disk_rep->dinfo.serjio_status);
+					if (p->params.on_add_disk)
+						p->params.on_add_disk(&disk->disk);
+					if (p->params.process_disk_info)
+						p->params.process_disk_info(di->disk_id, di->vendor_id, di->model_str, disk_rep->dinfo.serjio_status);
 				} else {
 					N_Ef(t2cnlpd3, "Failed to allocate memory for disk=@STR", di->disk_id);
 				}
@@ -603,8 +636,9 @@ static void __process_disk(struct nvmeibt_km_comm *p, const struct nvmeib_nl_uk_
 						memcpy(disk->rm_disk.disk_id, disk->disk.disk_id, sizeof(disk->rm_disk.disk_id));
 						disk->rm_disk.vendor_id = disk->disk.vendor_id;
 						disk->rm_disk.ack_id = disk->ack_id;
-						N_Tf(t2cnlpd4, "Removing disk=@STR", di->disk_id);
-						p->params.on_remove_disk(&disk->rm_disk);
+						N_Tf(t2cnlpd4, "Removing disk=@STR, has_cb=@BOOL_YN", di->disk_id, !!p->params.on_remove_disk);
+						if (p->params.on_remove_disk)
+							p->params.on_remove_disk(&disk->rm_disk);
 						break;
 					}
 				}
@@ -649,7 +683,8 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 			__process_disk(p, rcv_msg);
 		} else if (rcv_msg->opcode == csc_msg_to_process) {		// Server initiated extended msg
 			const struct nvmeib_nl_msg_to_toma *tm = (void*)rcv_msg->data;
-			p->params.process_extend_msg(&tm->payload.extended_msg);
+			if (p->params.process_extend_msg)
+				p->params.process_extend_msg(&tm->payload.extended_msg);
 		} else {
 			N_Ef(t2shnnm5, "Got a message from kernel that no one was waiting for");
 		}
@@ -726,8 +761,11 @@ static bool _recv_msg_from_local_server(struct nvmeibt_km_comm *p)
 	if (rv < (int)sizeof(msg->handle)) {
 		N_Ef(tthlsd1, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
 		NNVMEIBT_BM_FREE(tthlsd2, msg);
-	} else {
+	} else if (p->params.process_local_srvr_msg) {
 		p->params.process_local_srvr_msg(msg, rv);	// Callback will free the message
+	} else {
+		N_Tf(tthlsd4, "Dropping msg.type=@INT, @INT[bytes], no callback", msg->type, rv);
+		NNVMEIBT_BM_FREE(tthlsd3, msg);
 	}
 	return true;
 }
