@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import re
+import os
 import abc
 import enum
+import errno
 import pprint
 import typing
 import pathlib
@@ -29,7 +31,7 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(r"""
 	(?P<precision>\.(?:\*|\d+))?
 	(?P<length>hh|h|ll|l|j|z|t|L)?
 	(?P<spec>[diuoxXcp%])
-	(?:<(?P<tag>enum|union|struct)\s(?P<type_name>[A-Za-z_][A-Za-z0-9_]*)>)?
+	(?:<(?P<tag>enum|union|struct|const)\s(?P<type_name>[A-Za-z_][A-Za-z0-9_]*)>)?
 """, re.VERBOSE)
 
 # ---------------------------------------------------------------------------
@@ -73,6 +75,16 @@ NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value
 
 
 TypeInfo = typing.Union["BaseType", "EnumType", "StructType", "UnionType", "ArrayType"]
+
+@dataclasses.dataclass(frozen=True)
+class ErrnoType:
+	name: str
+
+	def decode(self, view: memoryview) -> str:
+		value = int.from_bytes(view.tobytes(), 'little', signed=True)
+		if value in errno.errorcode:
+			return os.strerror(abs(value)).lower()
+		raise RuntimeError('unknown errno')
 
 
 @dataclasses.dataclass(frozen=True)
@@ -215,7 +227,8 @@ class DwarfRuntime:
 		
 	@typing.no_type_check
 	def load_types(self, type_names: set[str]) -> dict[str, TypeInfo]:
-		name_cache: dict[str, TypeInfo] = {}
+		name_cache: dict[str, TypeInfo] = {'errno' : ErrnoType('errno')}
+		type_names.discard('errno')
 		if self._dwarf:
 			for type_name in type_names:
 				die = self.__find_type_die(type_name)

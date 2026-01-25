@@ -990,6 +990,17 @@ void test_structs_and_unions(void)
 	nvmeib_pet_journal_commit(&journal);
 }
 
+
+void test_errno(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&file_pet_controller.base, true);
+	
+	PET_MSG_NORM(&journal, "errno rv=%d<const errno> rv2=%x<const errno>", EIO, 0xDEADBEAF); 
+		
+	nvmeib_pet_journal_commit(&journal);
+}
+
+
 int main(int argc, char* argv[]){
 	char const* fname = argc > 1 ? argv[1] : "test.pet";
 	int const fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -1019,6 +1030,7 @@ int main(int argc, char* argv[]){
 		test_multiple_messages();
 		test_enums();
 		test_structs_and_unions();
+		test_errno();
 	}
 
 	close(file_pet_controller.fd_output);
