@@ -52,7 +52,9 @@ struct nvmeib_hash_table {		// Note that during resize, we keep the object, and 
 	if ((__hash_tbl) && (__hash_tbl)->n_occupied)																																	\
 		for (	struct nvmeib_hash_entry *__e ## __x__ = &((__hash_tbl)->arr[0]), __OLD_ ## __x__ = *(__e ## __x__);																\
 				(__e ## __x__) < ((__hash_tbl)->arr + (__hash_tbl)->n_arr_entries);																									\
-				(__e ## __x__) = (!hash_is_entry_OCCUPIED(__e ## __x__) || (__e ## __x__)->ptr_to_obj == (__OLD_ ## __x__).ptr_to_obj ? (__e ## __x__) + 1 : (__e ## __x__)), (__OLD_ ## __x__) = *(__e ## __x__))		\
+				(__e ## __x__) = (!hash_is_entry_OCCUPIED(__e ## __x__) || (__e ## __x__)->ptr_to_obj == (__OLD_ ## __x__).ptr_to_obj ?												\
+								  (__e ## __x__) + 1 : (__e ## __x__)),																												\
+								  (__OLD_ ## __x__) = ((__e ## __x__) < ((__hash_tbl)->arr + (__hash_tbl)->n_arr_entries) ? (*(__e ## __x__)) : (__OLD_ ## __x__)))					\
 			if (hash_is_entry_OCCUPIED(__e ## __x__) && (__x__ = (__e ## __x__)->ptr_to_obj))
 
 static inline bool hash_is_entry_OCCUPIED(const struct nvmeib_hash_entry *entry)
