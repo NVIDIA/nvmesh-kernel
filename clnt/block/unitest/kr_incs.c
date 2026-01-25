@@ -3323,6 +3323,12 @@ void nvmeib_completion_noise_end(enum nvmeib_noise_type type, const unsigned lon
 	(void)type; (void)cpu_mask_bitmap; (void)bitmap_size; (void)ctr;
 }
 
+int nvmeibc_nordda_channel_wq_init(void) { return 0; }
+void nvmeibc_nordda_channel_wq_destroy(void) { }
+
+int nvmeibc_locks_channel_wq_init(void) { return 0; }
+void nvmeibc_locks_channel_wq_destroy(void) { }
+
 /*****************************************************************************/
 // EOF.
 

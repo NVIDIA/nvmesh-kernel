@@ -26,9 +26,13 @@ extern bool nr_shared_cq_tcp;
 extern bool nr_use_srq;
 extern bool nr_use_srq_tcp;
 
-bool nr_defer_recv_comps_use_kwq = true;
+bool nr_defer_recv_comps_use_kwq = false;
 module_param(nr_defer_recv_comps_use_kwq, bool, 0644);
 MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Use kernel workqueue for deferred receive completions on nordda channels (default: true)");
+
+bool nvmeibc_nordda_wq_unbound = false;
+module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
+MODULE_PARM_DESC(nordda_wq_unbound, "Use unbound kernel workqueue for nvmeibc_nordda (true) or bound (false, default)");
 
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
 
@@ -37,8 +41,11 @@ static struct workqueue_struct *nvmeibc_nordda_wq;
 
 int nvmeibc_nordda_channel_wq_init(void)
 {
+	unsigned int flags = WQ_MEM_RECLAIM | WQ_SYSFS;
 	NFIN;
-	nvmeibc_nordda_wq = nvmeib_public_alloc_workqueue("nvmeibc_nordda", WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+	if (nvmeibc_nordda_wq_unbound)
+		flags |= WQ_UNBOUND;
+	nvmeibc_nordda_wq = nvmeib_public_alloc_workqueue("nvmeibc_nordda", flags, 0);
 	if (!nvmeibc_nordda_wq) {
 		_NE(error_nvmeibc_nordda_channel_wq_init, "Failed to allocate nordda channel workqueue");
 		NFOUT;

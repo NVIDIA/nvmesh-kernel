@@ -747,6 +747,12 @@ void nvmeib_public_flush_workqueue(struct workqueue_struct *wq)
 }
 EXPORT_SYMBOL(nvmeib_public_flush_workqueue);
 
+bool nvmeib_public_workqueue_congested(int cpu, struct workqueue_struct *wq)
+{
+	return workqueue_congested(cpu, wq);
+}
+EXPORT_SYMBOL(nvmeib_public_workqueue_congested);
+
 #if KS_BIO_BI_STATUS
 blk_status_t nvmeib_errno_to_blk_status(int errno) {
 	return errno_to_blk_status(errno);

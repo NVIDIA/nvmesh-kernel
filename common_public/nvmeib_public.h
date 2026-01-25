@@ -198,6 +198,7 @@ bool nvmeib_sym_resolve_kernel_bug_can_happen(void *addr);
 struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *fmt, unsigned int flags, int max_active);
 void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq);
 void nvmeib_public_flush_workqueue(struct workqueue_struct *wq);
+bool nvmeib_public_workqueue_congested(int cpu, struct workqueue_struct *wq);
 
 #if KS_HAS_BLKDEV_IOCTL
 int nvmeib_blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg);

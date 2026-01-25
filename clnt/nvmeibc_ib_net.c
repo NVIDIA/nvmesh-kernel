@@ -1043,6 +1043,12 @@ static int polling_process_send_cq_(struct nvmeibc_ib_net *net, bool req_notify,
 	   return rv;
 }
 
+/* Wrapper for queue_work that checks congestion and uses random CPU if congested */
+static inline void scq_queue_work(struct nvmeibc_ib_net *net)
+{
+	queue_work(net->scq_kwq, &net->scq_kwork);
+}
+
 static void scq_kwork_func(struct work_struct *work)
 {
 	struct nvmeibc_ib_net *net = container_of(work, struct nvmeibc_ib_net, scq_kwork);
@@ -1084,7 +1090,7 @@ static void scq_kwork_func(struct work_struct *work)
 	}
 
 	if (continue_polling && !atomic_read(&net->dying)) {
-		queue_work(net->scq_kwq, &net->scq_kwork);
+		scq_queue_work(net);
 	}
 
 	nvmeib_ref_put(&net->ib_rsrc_ref);
@@ -1376,7 +1382,7 @@ sw2polling:
 			WRITE_ONCE(net->scq_poll_mode, NVMEIBC_IB_CQ_POLLING);
 			smp_mb();
 			if (net->scq_kwq) {
-				queue_work(net->scq_kwq, &net->scq_kwork);
+				scq_queue_work(net);
 			} else {
 				BUG_ON(!net->scq_kthread);
 				wake_up_process(net->scq_kthread);
