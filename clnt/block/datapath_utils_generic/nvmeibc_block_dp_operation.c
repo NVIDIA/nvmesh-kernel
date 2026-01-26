@@ -501,7 +501,8 @@ _out:;
 void nvmeibc_operation_destroy(struct operation *o, int rv)
 {
 	const ulong now_jiffies = jiffies;
-        struct nvmeibc_block_device *nd = o->nd;
+    struct nvmeibc_block_device *nd = o->nd;
+	enum nvmeib_pet_severity const severity = rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL;
 	if (o->op < NVMEIB_BLOCK_IO_OP_DISCARD) {
 		const u64 nlbas = get_op_nlbas(o);
 		nvmeib_io_stats_operation_end(o->nd->os->stats, io_op_to_verb(o->op, false),
@@ -517,7 +518,7 @@ void nvmeibc_operation_destroy(struct operation *o, int rv)
 	DEBUG_TOPO_CNTRS_del_elem_from_topo(o);
 	nvmeibc_operation_throttling_pull_next(o->nd, o->cpu_id, (o->chained_op != NULL));
 	nvmeibc_topology_put(o->topo);
-	NVMEIBC_IO_PET_MSG_WARN(&o->journal, "operation.destroy(rv=%d<errno>)", rv);
+	NVMEIBC_IO_PET_MSG(&o->journal, "operation.destroy(rv=%d<errno>)", severity, rv);
 	nvmeib_pet_journal_commit(&o->journal);
 	__operation_free(o);
 }
