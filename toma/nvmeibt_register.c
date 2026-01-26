@@ -591,10 +591,8 @@ static void alloc_reg_ctx(struct nvmeibt_registrant_ctx **reg_ctx, struct nvmeib
 
 void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx)
 {
-	struct nvmeibt_seg_active	*seg_active;
-
 	if (reg_ctx) {
-		seg_active = reg_ctx->seg_active;
+		struct nvmeibt_seg_active *seg_active = reg_ctx->seg_active;
 		XDLIST_DEL(&(reg_ctx->registrant_on_timeout_link));
 		if (seg_active) {
 			XHASHTABLE_DEL(&(seg_active->longing_registrants_by_cid), &(reg_ctx->longing_link));
