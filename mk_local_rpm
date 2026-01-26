@@ -109,6 +109,6 @@ for kind in $kind_list; do
 
 	echo Making RPM $kind
 
-	RPM/create_rpm.sh $kind $sources_path $spec_path $installers_dir $target_dir
+	RPM/create_rpm.sh $kind $sources_path $spec_path $installers_dir $target_dir || exit 1
 	rm -rf $sources_path > /dev/null 2>&1
 done
