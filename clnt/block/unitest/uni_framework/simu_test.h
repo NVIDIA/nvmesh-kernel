@@ -8,6 +8,7 @@
 #include "nvmeib_macro_utils.h"
 #include "nvmesh_sim.h"
 #include "tests_conf.h"
+#include "io_pet_traces_controller.h"
 
 /**
  * Unitest traces. Used to replace unitest prints with binary tracer backend
@@ -35,6 +36,7 @@
 		if (__num_rep != 0 ) {                                                                                          \
 			while(__num_rep--) {                                                                                        \
 				unitest_trace_checkpoint(test_id, start, "");                                                           \
+				sim_io_pet_controller_rotate(NVMEIB_STRINGIFY1(test_id));                                               \
 				__rv_simu_run |= test((_sys), ##__VA_ARGS__);                                                           \
 				if (__builtin_types_compatible_p(typeof(*(_sys)), struct NVMeshSystem))                                 \
 					BUG_ON(!NVMeshSystem_is_stable((struct NVMeshSystem *)(_sys)));                                     \

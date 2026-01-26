@@ -84,6 +84,7 @@ tools/tracer_pp
 tools/**/*.tab.*
 tools/**/*.yy.*
 *.binlog*.*
+*binlog
 *.h.gch
 compilation_cmd.txt
 *.md5
