@@ -1364,6 +1364,7 @@ struct rd_kafka_topic_s {
 	// Todo: Linked list of messages for offsets above cur,cur+1,....last_offset
 	int32_t partition;		// Support only 1 partition for now. Store its index
 	bool is_active;
+	char type;				// For fast comparison, maybe use enum?
 	int temp_store_offset;	// Daniel, not sure is needed - just for two stage store and commit.
 };
 
@@ -1553,7 +1554,6 @@ rd_kafka_t* rd_kafka_new(enum rd_kafka_type_t who, rd_kafka_conf_t *cfg, char*er
 	rd_kafka_t *k = kafka_simu_find_next_unused(ks);
 	if (who == RD_KAFKA_CONSUMER) {
 	} else {	// RD_KAFKA_PRODUCER
-
 	}
 	k->conf = cfg;
 	k->name = cfg->group_id;
@@ -1566,6 +1566,16 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char* name, rd_kafka_t
 	BUG_ON(!is_kafka_cp_used(k));
 	__rd_kafka_topic_init(&k->topic, name, conf);
 	k->topic.is_active = true;
+	k->topic.type = '?';
+	if (k->who == RD_KAFKA_PRODUCER) {
+		if (strstr(name, "management.priority."))
+			k->topic.type = 'P';
+		else if (strstr(name, "management.keepalive."))
+			k->topic.type = 'K';
+		else if (strstr(name, "management.low."))
+			k->topic.type = 'L';
+		else BUG_ON(true);				// unknown topic which management simulator will not listen too
+	}
 	return &k->topic;
 }
 
@@ -1620,27 +1630,24 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	static int fail_once_every = 0;
 	rd_kafka_t *ko = kafka_simu_find_by_topic(kt);
 	rd_kafka_message_t km;
-	char *payload_copy = NULL;
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (key == NULL) || (len == 0) || (keylen == 0));
 	(void)msgflags;
 	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (char*)key, (char*)payload);
 
-	// Capture outgoing mgmt messages. The buffer is NOT guaranteed to be NUL-terminated.
-	payload_copy = malloc(len + 1);
-	BUG_ON(!payload_copy);
-	memcpy(payload_copy, payload, len);
-	payload_copy[len] = '\0';
-	{
-		static const char *k_report_target_marker = "\"messageType\": \"reportTarget\"";
-		if (strstr(payload_copy, k_report_target_marker) != NULL) {
+	if (kt->type == 'P') {
+		const char *m_type = strstr(payload, "\"messageType\":");
+		const bool is_report_target = !strncmp(m_type, "\"messageType\": \"reportTarget\"", 28);
+		if (is_report_target) {
 			free(sys->kafka_simu.last_report_target_json);
-			sys->kafka_simu.last_report_target_json = payload_copy;
-			payload_copy = NULL; // ownership moved
+			sys->kafka_simu.last_report_target_json = strndup(payload, len);		// Capture outgoing mgmt messages. The buffer is NOT guaranteed to be NUL-terminated.
 		}
-	}
-	free(payload_copy);
+	} else if (kt->type == 'K') {
+		// Todo: handle keepalives
+	} else if (kt->type == 'L') {
+		// Todo: handle drive zeroing reports here
+	} else { BUG_ON(true);	}
 
 	// No, put this on to kt, in a list and then poll_cb will return the callbacks
 	sys->kafka_simu.notify_producer_msg_accepted(ko, &km, NULL);
