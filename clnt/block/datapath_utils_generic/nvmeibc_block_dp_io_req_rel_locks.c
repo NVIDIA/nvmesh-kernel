@@ -137,8 +137,9 @@ static void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, 
 								numeric_downcast(u8, rdma_comp->opr),
 								numeric_downcast(u8, lock->type),
 								numeric_downcast(u8, rdma_comp->code),
-								numeric_downcast(u32, rdma_comp->compare),
-								numeric_downcast(u32, rdma_comp->exchange));
+								//casting, since there is no promises about the upper bits content
+								(u32)(rdma_comp->compare),
+								(u32)(rdma_comp->exchange));
 	}
 }
 
@@ -159,8 +160,9 @@ static void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o,
 						severity,
 						numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
 						numeric_downcast(u8, rdma_comp->lock_status),
-						numeric_downcast(u32, rdma_comp->lock.bi),
-						numeric_downcast(u32, get_contending_id(rdma_comp)));
+						//casting, since there is no promises about the upper bits content
+						(u32)(rdma_comp->lock.bi),
+						(u32)(get_contending_id(rdma_comp)));
 }
 
 void dp_locks_free_all(struct nvmeibc_cmd_lock *locks)
