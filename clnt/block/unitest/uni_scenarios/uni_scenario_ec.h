@@ -41,6 +41,7 @@ TEST_FUNC int unitest_ECDbitsOnDisk(bunitest_s* B);
 
 // Referenced in MTV/QLC tests as well
 int unitest_PermanentReadError_EC_IO(const struct test_context env, const int degraded_seg_index, u8 *mem, const int is_dead);
+void unitest_PermanentReadError_EC_Maintenance(const struct test_context env, const int degraded_seg_index, u8 *mem, const int is_dead);
 void __degrade_segment(struct clientSimulator *client, struct tTopoOfPraid* r1, struct disk_range *praid, int ind_dead_seg);
 void __restore_seg_to_write(struct NVMeshSystem *sys, struct clientSimulator *client, struct tTopoOfPraid* r1, struct disk_range *praid, int ind_dead_seg, bool clear_ram);
 void __restore_seg_to_read_write(struct NVMeshSystem *sys, struct tTopoOfPraid* r1, int ind_dead_seg);
