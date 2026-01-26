@@ -616,6 +616,7 @@ struct nvmeib_pet_journal{
 	struct nvmeib_pet_stream stream;
 	enum nvmeib_pet_severity worst_severity;
 	bool verbose; 
+	u8 concurrent_access_detector; //don't bother to remove it in the production build - we have padding here;
 	u64 prev_timestamp_ns; //with high probability the next message may store delta between times, thus saving space
 };
 
@@ -627,6 +628,7 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 	    .stream = nvmeib_pet_stream_make(buffer),
 	    .worst_severity = NVMEIB_PET_SEVERITY_NORMAL,
 		.verbose = verbose,
+		.concurrent_access_detector = 0,
 	    .prev_timestamp_ns = 0
 	};
 }
@@ -643,6 +645,21 @@ static inline bool nvmeib_pet_journal_is_verbose(struct nvmeib_pet_journal const
 	return self->verbose;
 }
 
+static inline bool __nvmeib_pet_journal_test_and_set_in_use(struct nvmeib_pet_journal* self)
+{
+	#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR==1
+		return __atomic_test_and_set(&(self->concurrent_access_detector), __ATOMIC_ACQUIRE);
+	#else
+		return false;
+	#endif
+}
+
+static inline void __nvmeib_pet_journal_clear_in_use(struct nvmeib_pet_journal* self)
+{
+	#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR==1
+		__atomic_clear(&(self->concurrent_access_detector), __ATOMIC_RELEASE);
+	#endif
+}
 
 static inline struct nvmeib_pet_variant __nvmeib_pet_journal_get_curr_message_timestamp(u64 prev_timestamp, u64 curr_timestamp)
 {
@@ -658,7 +675,7 @@ static inline struct nvmeib_pet_variant __nvmeib_pet_journal_get_curr_message_ti
 }
 
 //don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated
-#define __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg)																						\
+#define __NVMEIB_PET_JOURNAL_ADD_MSG_LOGIC_IMPL(self, severity, msg)																			\
 ({																																				\
 	u16 written = 0;																															\
 	u64 const curr_timestamp = msg.value[0];																									\
@@ -671,6 +688,16 @@ static inline struct nvmeib_pet_variant __nvmeib_pet_journal_get_curr_message_ti
 		self->prev_timestamp_ns = curr_timestamp;																								\
 	}																																			\
 	written;																																	\
+})
+
+#define __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg)							\
+({																					\
+	u16 written_bytes = 0;															\
+	bool const is_in_use = __nvmeib_pet_journal_test_and_set_in_use(self);			\
+	BUG_ON(is_in_use);																\
+	written_bytes = __NVMEIB_PET_JOURNAL_ADD_MSG_LOGIC_IMPL(self, severity, msg);	\
+	__nvmeib_pet_journal_clear_in_use(self);										\
+	written_bytes;																	\
 })
 
 __attribute__((nonnull (1)))
