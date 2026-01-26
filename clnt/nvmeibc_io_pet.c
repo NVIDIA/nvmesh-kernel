@@ -7,7 +7,7 @@
 
 #if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR 
 
-	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create()
+	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(void)
 	{
 		extern struct nvmeib_pet_base_controller* sim_get_io_pet_controller(void);
 		return sim_get_io_pet_controller();
@@ -179,7 +179,7 @@
 		(void)data;
 	}
 
-	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create()
+	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(void)
 	{
 		static struct io_pet_controller dummy = {
 			.base = {
