@@ -754,15 +754,17 @@ int ramDisk_execute_io(struct ramDiskSimulator* ram, struct nvmeibc_disk_io_comm
 		BUG_ON((dlba_bytes_rel + sg_nlba_bytes) > max_disk_alloc_address); // IO outside of last segment allocated on the disk
 		atomic_inc(&ram->io_cnt);
 		//spin_lock(&ram->mem_lock); - Uncomment to emulate 1 queue. Comment to emulate infinite queues
+		if (op == NVMEIB_BLOCK_IO_OP_READ || op >= NVMEIB_BLOCK_IO_OP_MD_READ) {        // Any read, check bad sector injection
+			if ((code = ramDiskSimulator_is_bad_byte_addr(ram, dlba_bytes_abs, sg_nlba_bytes))) {
+				_ND(error_ssd_disk_sim_ramDisk_execute_io, "Injecting @INJECTED_CODE error on sector @DLBA", code, dlba_abs);
+				comp->comp_code = code;
+				goto _mem_done;
+			}
+		}
 		if (unlikely(op >= NVMEIB_BLOCK_IO_OP_MD_READ))					// Metadata only command
 			goto _do_metadata;
 		switch (op) {
-			case NVMEIB_BLOCK_IO_OP_READ:	if ((code = ramDiskSimulator_is_bad_byte_addr(ram, dlba_bytes_abs, sg_nlba_bytes))) {
-												_ND(error_ssd_disk_sim_ramDisk_execute_io, "Injecting @INJECTED_CODE error on sector @DLBA", code, dlba_abs);
-												comp->comp_code = code;
-												goto _mem_done;
-											}
-											memcpy(src, &ram->mem[dlba_bytes_rel],      sg_nlba_bytes); break;
+			case NVMEIB_BLOCK_IO_OP_READ:   memcpy(src, &ram->mem[dlba_bytes_rel],      sg_nlba_bytes); break;
 			case NVMEIB_BLOCK_IO_OP_WRITE:	memcpy(     &ram->mem[dlba_bytes_rel], src, sg_nlba_bytes); break;
 			case NVMEIB_BLOCK_IO_OP_DISCARD:memset(     &ram->mem[dlba_bytes_rel], ramDiskSimulator_TRIMVAL,sg_nlba_bytes); break; // Flash disk writes ones
 			case NVMEIB_BLOCK_IO_OP_WRITE_UNCOR: ramDiskSimulator_do_bad_sector(ram, dlba_abs, EPERM_READ_FAIL_NO_RETRY); break;
