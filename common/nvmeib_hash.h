@@ -28,6 +28,7 @@ struct nvmeib_hash_table {		// Note that during resize, we keep the object, and 
 	uint64_t						scrambled_to_idx_mask;
 	struct nvmeib_hash_entry		*arr;
 	int								log2_of_n_arr_entries;
+	int								initial_log2_of_n_arr_entries;
 	int 							n_arr_entries;
 	int								n_occupied;
 	int8_t							key_len;

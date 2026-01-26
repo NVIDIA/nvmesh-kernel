@@ -112,7 +112,8 @@ static void nvmeib_hash_resize(struct nvmeib_hash_table *hash_tbl)
 		// Note we also get here in case of EMERGENCY (on-add)
 		hash_tbl->log2_of_n_arr_entries = hash_tbl->log2_of_n_arr_entries + 1;
 	} else if (hash_tbl->n_occupied * HASH_SHRINK_FACTOR_THRESHOLD < hash_tbl->n_arr_entries) {
-		if (hash_tbl->n_arr_entries < HASH_MIN_N_ARR_ENTRIES * 2) {
+		if (	(hash_tbl->n_arr_entries < HASH_MIN_N_ARR_ENTRIES * 2 ||
+				 hash_tbl->log2_of_n_arr_entries <= hash_tbl->initial_log2_of_n_arr_entries)) {	// Say was CREATEd with a large table, and just starting to add. Do not shrink below the initial size
 			goto out;	// Avoid shrinking too much
 		}
 		hash_tbl->log2_of_n_arr_entries = hash_tbl->log2_of_n_arr_entries - 1;
@@ -456,6 +457,7 @@ static inline struct nvmeib_hash_table *__nvmeib_hash_create(int log2_of_n_arr_e
 #endif	// #if IS_HASH_UNITTEST
 		log2_of_n_arr_entries = 16;
 	}
+	hash_tbl->initial_log2_of_n_arr_entries = log2_of_n_arr_entries;
 	hash_init_arr(hash_tbl, log2_of_n_arr_entries);
 #if 0	// Not needed since the ht->arr[i].ptr_to_obj is already 0==HASH_ENTRY_EMPTY
 	for(int i = 0; i < n_arr_entries; i++)
