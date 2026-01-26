@@ -686,6 +686,7 @@ class ViewMessages(Command):
 
 	@typing.no_type_check
 	def __iter_entities(self) -> typing.Generator[NvmeibPetArchive.Entity, None, None]:
+		n_files = len(self.traces)
 		for fpath in self.traces:
 			with open(fpath, 'rb') as fobj:
 				idx = 0
@@ -693,7 +694,7 @@ class ViewMessages(Command):
 				while not kstream.is_eof():
 					entity_start_position = kstream.pos()
 					entity = NvmeibPetArchive.Entity(kstream)
-					entity.fname = fpath.name
+					entity.fname = fpath.name if n_files > 1 else ''
 					entity.idx = idx 
 					entity.size = kstream.pos() - entity_start_position
 					idx += 1
