@@ -110,7 +110,7 @@ static void __return_execution_to_cmd_stages(struct nvmeibc_block_command *cmd, 
 {
 	cmd->iocmd->comp.comp_code = rv;
 	dp_dbgdi_do_add_restore_info(cmd, false);
-	dp_ec_block_completion(&cmd->iocmd->comp);
+	dp_ec_block_completion(&cmd->iocmd->comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 static void set_final_edic_value_from_crc_res(void *_md, const u32 crc, const bool is_parity)
@@ -135,7 +135,7 @@ static void __mark_edic_only_complete(struct nvmeibc_block_command *rldr, int rv
 	__set_reed_solo_rv_on_cmds(rldr, rv);
 	// Expected single completion when double degraded parities
 	BUG_ON(nvmeibc_atomic_read(&rldr->n_uncompleted_cmds) != 1);
-	dp_ec_block_completion(&rldr->iocmd->comp);
+	dp_ec_block_completion(&rldr->iocmd->comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 // Write first command is always to the first snake

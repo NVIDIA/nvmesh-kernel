@@ -953,10 +953,13 @@ int dp_mirror_exec_func_on_locks_tkn(struct nvmeibc_block_command *rldr, int err
 }
 
 /******************************************************************************/
-void dp_mirror_block_completion(struct nvmeibc_d_iocmd_comp *comp)
+void dp_mirror_block_completion(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag)
 {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp);
 	struct operation *o = cmd->o;
+	
+	(void)tag;
+
 	if (nvmeibc_is_mirror_md_enabled(cmd))
 		nvmeibc_check_metadata_actions(comp);	// If metadata is supported - check it
 	if (cmd->iocmd->reqs1.op <= NVMEIB_BLOCK_IO_OP_DISCARD && io_op_is_rwt(o->op)) {

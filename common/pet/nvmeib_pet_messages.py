@@ -643,7 +643,6 @@ class EvaluateInt(Command):
 			print(f"Failed to find {self.udt_name}.")
 			return 
 		decoder = ArgDecoder(udt, ArgPrintfSpec('u', '', self.udt_name))
-		import pudb; pudb.set_trace()
 		print(decoder(self.value))
 
 class SaveDictionary(Command):

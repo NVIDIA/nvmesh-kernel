@@ -313,12 +313,12 @@ void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp) {	// Remove fro
 			comp->comp_code = nvmeib_error_code_refine(comp->comp_code);
 		}
 	}
-	cmd->o->nd->dp.cmd_comp_cb(comp);
+	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 void nvmeibc_block_comp_gencmd(struct nvmeibc_d_iocmd_comp *comp) {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp);
-	cmd->o->nd->dp.cmd_comp_cb(comp);
+	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 /***************************** Intercept: OS API **************************/

@@ -70,6 +70,10 @@ static inline const char *nvmeibc_block_cmd_status_to_str(
 
 /**************************** Disk IO Command *********************************/
 /* completion for a command submitted to a disk inside a controller host. */
+struct nvmeibc_d_iocmd_comp_tag{}; //helps to discover all callbacks
+static inline struct nvmeibc_d_iocmd_comp_tag nvmeibc_d_iocmd_comp_tag_make(void)
+{ return (struct nvmeibc_d_iocmd_comp_tag){}; }
+
 struct nvmeibc_d_iocmd_comp {				    // Transport layer completion of command
 	struct nvmeibc_block_command *cmd;          // Original command, Todo: Remove, use iocmd->disk_cmd->owner
 	struct nvmeibc_cmd_lock *pigbck_lock;       // Reference to locks, which is viewed as piggyblack

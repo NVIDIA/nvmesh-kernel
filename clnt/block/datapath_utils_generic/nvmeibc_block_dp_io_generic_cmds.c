@@ -560,7 +560,7 @@ static void __wq_autofail_lkd_bio_cmd(struct work_struct *w)
 			nvmeibc_pd_reused_bb_release(cmd->ds->disk, rcookie);
 		nvmeib_data_reuse_buf_zero(rcookie);	// Save failed, dont ask anything
 	}
-	cmd->o->nd->dp.cmd_comp_cb(&io_cmd->comp);
+	cmd->o->nd->dp.cmd_comp_cb(&io_cmd->comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 static void __return_completion_on_unset_cmds(const struct operation *o, struct nvmeibc_block_command *c)
@@ -571,7 +571,7 @@ static void __return_completion_on_unset_cmds(const struct operation *o, struct 
 		INIT_WORK(&iocmd->disk_cmd.auto_fail_work, __wq_autofail_lkd_bio_cmd);	// Asyncrously autofail locked command
 		BLKCMP_ANY_schedule_work(&iocmd->disk_cmd.auto_fail_work);
 	} else {												// Sync operation: give direct callback
-		o->nd->dp.cmd_comp_cb(&iocmd->comp); 				// Same as calling __wq_autofail_lkd_bio_cmd(&iocmd->disk_cmd.auto_fail_work); directly
+		o->nd->dp.cmd_comp_cb(&iocmd->comp, nvmeibc_d_iocmd_comp_tag_make()); 				// Same as calling __wq_autofail_lkd_bio_cmd(&iocmd->disk_cmd.auto_fail_work); directly
 	}
 }
 

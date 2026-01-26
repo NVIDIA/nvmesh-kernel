@@ -1489,7 +1489,7 @@ struct corecomm_io_ctx {
 /** @note: Can only fail if ENOMEM */
 static struct corecomm_io_ctx *
 __init_corecomm_io_ctx(gfp_t gfp, struct nvmeibc_disk *disk,
-                       void (*cb)(struct nvmeibc_d_iocmd_comp *),
+                       void (*cb)(struct nvmeibc_d_iocmd_comp *, struct nvmeibc_d_iocmd_comp_tag),
                        struct corecomm_connection_ctx *conn_ctx) {
 	struct corecomm_io_ctx *ctx = kzalloc(sizeof(*ctx), gfp);
 	if (ctx) {
@@ -1515,10 +1515,11 @@ __init_corecomm_io_ctx(gfp_t gfp, struct nvmeibc_disk *disk,
 	return ctx;
 }
 
-static void corecomm_nvmeibc_pd_io_cb_(struct nvmeibc_d_iocmd_comp *comp) {
+static void corecomm_nvmeibc_pd_io_cb_(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag) {
 	struct corecomm_io_ctx *io_ctx =
 	    (void *)comp->cmd->o->nd->dp.sync_execute_op;
 	struct lock_data rsp;
+	(void)tag;
 	printk(KERN_INFO "IO completion: %d\n", comp->comp_code);
 	if (io_ctx->ninfo) {
 		const unsigned int sw_md = DISK_SW_MD_SIZE(io_ctx->ds.disk);
@@ -1652,7 +1653,7 @@ void __free_corecomm_gen_ctx(struct corecomm_gen_ctx *ctx) {
  */
 static struct corecomm_gen_ctx *
 __init_corecomm_gen_ctx(gfp_t gfp, struct nvmeibc_disk *disk,
-                        void (*cb)(struct nvmeibc_d_iocmd_comp *),
+                        void (*cb)(struct nvmeibc_d_iocmd_comp *, struct nvmeibc_d_iocmd_comp_tag),
                         struct corecomm_connection_ctx *conn_ctx) {
 	struct corecomm_gen_ctx *ctx = kzalloc(sizeof(*ctx), gfp);
 	if (!ctx) goto err;

@@ -2038,10 +2038,13 @@ void dp_ec_calc_comp_state(const struct nvmeibc_block_command *cmds, int *rv, bo
 	}
 }
 
-void dp_ec_block_completion(struct nvmeibc_d_iocmd_comp *comp)
+void dp_ec_block_completion(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag)
 {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp);
 	struct operation *o = cmd->o;
+
+	(void)tag;
+
 	nvmeibc_check_metadata_actions(comp);
 	if (cmd->iocmd->reqs1.op <= NVMEIB_BLOCK_IO_OP_DISCARD && io_op_is_rwt(o->op)) {
 		nvmeibc_profiling_end_take_cmd_stats_for_op(nvmeibc_get_raid_good_path_profile_for_rwt_op(cmd->ds, o->op), cmd->ds->disk_operation_profiler, o, nvmeibc_profiling_get_cmd_stage(cmd->iocmd), cmd, comp->comp_code);

@@ -20,7 +20,7 @@ int dp_ec_cmds_add_for_raid(struct operation *o,
 int  dp_ec_should_ignore_op(const struct operation *o); /* Ignore trim ops */
 int  dp_ec_prepare_op(            struct operation *o);
 int  dp_ec_execute_op(            struct operation *o);
-void dp_ec_block_completion(struct nvmeibc_d_iocmd_comp *comp);
+void dp_ec_block_completion(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag);
 int  dp_ec_exec_func_on_locks_tkn(struct nvmeibc_block_command *rldr, int rv);
 void dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv);
 void dp_ec_calc_should_abandon(struct nvmeibc_block_command *cmds, int lsi);

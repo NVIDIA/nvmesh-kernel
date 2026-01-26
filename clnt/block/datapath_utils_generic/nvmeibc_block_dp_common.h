@@ -289,7 +289,7 @@ struct nvmeibc_datapath {
 	int (*should_ignore_op)(const struct operation *o);	// >0: Yes with success, <0: Yes with failure, 0: No, just execute it
 	int  (*prepare_op)( struct operation *o);// Allocate/Prepare locks, commands, etc
 	int  (*execute_op)( struct operation *o);
-	void (*cmd_comp_cb)(struct nvmeibc_d_iocmd_comp *comp);	// Callback for completion of specific command
+	void (*cmd_comp_cb)(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag);	// Callback for completion of specific command
 	int  (*exec_func_on_locks_tkn)(struct nvmeibc_block_command *rldr, int rv);			// This function is called after locks are taken/broken and before first stage is launched (transition of locks state machine to cmd leader state machine). Returns Error code <0, or positive code, if execution should be aborted and callback will return
 	void (*exec_func_on_stage_end)(struct nvmeibc_block_command *rldr, int *rv);	// This function is called for each stage the raid leader finishes
 	void (*calc_should_abandon)(struct nvmeibc_block_command *cmds, int li);							// After all commands that need lock 'li' calculate if should abandon this lock or not

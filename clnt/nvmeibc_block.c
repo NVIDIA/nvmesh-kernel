@@ -102,7 +102,7 @@ void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp)
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
 	nvmeibc_pd_cb_called_cmd(disk, disk_cmd);
 
-	o->nd->dp.cmd_comp_cb(comp);
+	o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 void nvmeibc_block_comp_gencmd(struct nvmeibc_d_iocmd_comp *comp)
@@ -113,7 +113,7 @@ void nvmeibc_block_comp_gencmd(struct nvmeibc_d_iocmd_comp *comp)
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
 	nvmeibc_pd_cb_called_cmd(cmd->ds->disk, disk_cmd);
 	on_disk_hook(nvmeibc_block_comp_gencmd, cmd->ds->disk, before_gen_cmd_comp_cb, comp->cmd->gen_cmd);
-	cmd->o->nd->dp.cmd_comp_cb(comp);
+	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_sub_block_utils.h"
