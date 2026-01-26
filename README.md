@@ -22,7 +22,7 @@ The management server is used for providing storage definitions and monitoring t
 The storage client software implements block device functionality for storage consumers.
 
 ### Storage Target
-The storage target software identifies storage hardware and sets up RDDA and non-RDDA pathways to the storage elements on behalf of the storage clients.
+The storage target software identifies storage hardware and sets up network pathways to the storage elements on behalf of the storage clients.
 TOMA is part of the storage target
 
 ## Building
