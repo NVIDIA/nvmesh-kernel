@@ -590,8 +590,8 @@ static struct t_producer_impl {
 
 static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_msg *msg) {
 	rd_kafka_topic_t *k_topic = k->msg_to_mgmt_producer_topic;
-	char 				*key = (void*)msg->unique_key;
-	size_t				key_len;
+	const char 			*key = (msg->unique_key[0] == '\0') ? NULL : (char*)msg->unique_key;
+	const size_t		key_len = key ? (strlen(key) + 1) : 0;
 	char 				*val = msg->val;
 	size_t				val_len = msg->val_len;
 	int	n_in_air, err;
@@ -602,12 +602,6 @@ static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_ms
 
 	if (val[val_len - 1] == '\0')
 		val_len -= 1;	// Seems as if the string terminating \0 is driving MGMT JSON parser crazy
-	if (*key == '\0') {
-		key = NULL;
-		key_len = 0;
-	} else {
-		key_len = strlen(key) + 1;
-	}
 	n_in_air = atomic_add(1, &kafka_n_sends_in_the_air);       // If a msg is about to be sent, we know the n_sends_in_the_air was already increased
 	err = rd_kafka_produce(k_topic, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY, (void*)val, val_len, key, key_len, (void*)msg);
 	if (err == 0) {
@@ -802,10 +796,10 @@ int nvmeibt_kafka_generic_log_msg_to_mgmt_send(const char *unique_key, char *hea
 	if (unique_key) {
 		nvmeibt_strlcpy(key, unique_key, sizeof(key));
 	} else {
-		key = NULL;
+		sprintf(key, "unique_key:%x", ++unique_key_counter);
 	}
 	nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT "\"header\": \"%s\", \"errText\": \"%s\"}", KAFKA_PRODUCER_MSG_HEADER_VAR("genericLogMsg", 1), header, str);
-	nvmeibt_kafka_outgoing_msgs_queue_add(key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, priority);
+	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, priority);
 	NFOUT;
 #else	// #if 0	// If we decide to send a genericLogMsg to MGMT
 	(void)unique_key; (void)priority;
@@ -1789,17 +1783,15 @@ void send_keepalive_msgs_as_needed(void)
 	static struct timespec		last_leader_keepalive_ts = TIMESPEC_ZERO;
 	static struct timespec		now;
 	static struct nvmeibt_Str	*json_payload = NULL;
-	char 						unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
 
 	if (!json_payload) {
 		json_payload = NNVMEIBT_STR_ALLOC(4vc7usk);
 	}
 	getnstimeofday_boot(&now);
-	nvmeibt_strlcpy(unique_key, nvmeibt_get_my_hostname(), sizeof(unique_key));
-	nvmeibt_strlcpy(unique_key + strlen(unique_key), ".TOMA", sizeof(unique_key) - strlen(unique_key));
 	// Follower (node) keepalive
 	if (now.tv_sec - last_follower_keepalive_ts.tv_sec > nvmeibt_follower_keep_alive_secs) {
-		nvmeibt_strlcpy(unique_key + strlen(unique_key), ".keepalive", sizeof(unique_key) - strlen(unique_key));
+		char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
+		snprintf(unique_key, sizeof(unique_key), "%s.TOMA.keepalive", nvmeibt_get_my_hostname());		// Exact key format agreed with Mgmt-Team. Dont touch!
 		nvmeibt_Str_reuse(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT
 							"\"keepaliveInterval\": %lld, "
@@ -1817,7 +1809,8 @@ void send_keepalive_msgs_as_needed(void)
 	}
 	// Leader keepalive
 	if (nvmeibt_raft_is_leader_ever_committed_by_majority() && ((now.tv_sec - last_leader_keepalive_ts.tv_sec) > (long)nvmeibt_leader_keep_alive_secs) && nvmeibt_raft_is_leader()) {
-		nvmeibt_strlcpy(unique_key + strlen(unique_key), ".leaderKeepalive", sizeof(unique_key) - strlen(unique_key));
+		char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
+		snprintf(unique_key, sizeof(unique_key), "%s.TOMA.leaderKeepalive", nvmeibt_get_my_hostname());		// Exact key format agreed with Mgmt-Team. Dont touch!
 		nvmeibt_Str_reuse(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT_L
 							"\"keepaliveInterval\": %lld, \"payload\": {\"raftTerm\": %lld, \"zone\": \"%ld\", \"featureCompatibilityVersion\": \"%ld\", \"tomaSoftwareVersion\": \"%ld\", \"version\": \"%s\", \"buildNumber\": \"%s\"}}",
@@ -2426,8 +2419,6 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct 
 											 int encrypt_idx, enum ENCRYPT_CMD_RESPONSE error_code,
 											 bool is_retryable, const char *error_str) {
 	static struct nvmeibt_Str				*json_payload = NULL;
-	//char                                    unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Encript_res_";
-
 	if (!json_payload)
 		json_payload = NNVMEIBT_STR_ALLOC(i877ud3);
 	nvmeibt_Str_reuse(json_payload);
@@ -2436,8 +2427,9 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct 
 			KAFKA_PRODUCER_MSG_HEADER_VAR("encryptionCommandResponse", 1),
 			vol_name, vol_uuid->str,
 			encrypt_idx, error_code, is_retryable ? "true" : "false", error_str);
+	//char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Encript_res_";
 	//nvmeibt_strlcpy(unique_key + strlen(unique_key), vol_uuid->str, sizeof(unique_key) - strlen(unique_key));
-	nvmeibt_kafka_outgoing_msgs_queue_add(NULL, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*unique_key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 }
 
 static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,

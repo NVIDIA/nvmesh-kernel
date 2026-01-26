@@ -1632,9 +1632,9 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	rd_kafka_message_t km;
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
-	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (key == NULL) || (len == 0) || (keylen == 0));
+	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (len == 0) || ((key == NULL) != (keylen == 0)));
 	(void)msgflags;
-	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (char*)key, (char*)payload);
+	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (const char*)key, (const char*)payload);
 
 	if (kt->type == 'P') {
 		const char *m_type = strstr(payload, "\"messageType\":");
