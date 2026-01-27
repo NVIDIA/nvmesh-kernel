@@ -683,7 +683,7 @@ static int nvmeibt_rpc_command_shadow_attach(int argc, char *argv[], struct nvme
 static int nvmeibt_rpc_command_export_memory_gpt(int argc, char *argv[], struct nvmeibt_Str *out)
 {
 	struct nvmeibt_topology		*cur_topo;
-	struct nvmeibt_local_disk	*local_disk;
+	struct nvmeibt_local_disk	*local_disk = NULL;
 	const char					*device_path;
 	BOOL						found = false;
 
