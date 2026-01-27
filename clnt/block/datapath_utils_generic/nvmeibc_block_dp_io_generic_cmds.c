@@ -1,5 +1,6 @@
 #include "nvmeibc_block_dp_io_generic_cmds.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
+#include "nvmeib.h"
 #include "nvmeib_types.h"
 #include "nvmeibc_block.h"
 #include "nvmeibc_block_dp_io_req_rel_locks.h"
@@ -330,6 +331,25 @@ static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_co
 	}
 }
 
+static void __nvmeibc_cmd_piggyback_request_pet_describe(struct operation *o, struct nvmeibc_disk_io_command const *cmd)
+{
+	struct nvmeibc_d_rdma_comp const *rdma_comp;
+
+	if (!dp_cmds_pigbck_has_any(cmd))
+		return;
+
+	rdma_comp = dp_cmds_get_pigbck_comp_dc(cmd);
+	if (rdma_comp->code == NVMEIBC_CMD_LOCK_READ_PB) { // read piggyback
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+			"    read_pb.request(addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>)",
+			cmd->lpb.addr, numeric_downcast(u8, rdma_comp->opr), numeric_downcast(u8, rdma_comp->code));
+	} else if (rdma_comp->code == NVMEIBC_CMD_BLKSET_INFO_WR_PB) { // write piggyback
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+			"    write_pb.request(addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>, binfo=%u<union nvmeib_blkset_info>)",
+			cmd->lpb.addr, numeric_downcast(u8, rdma_comp->opr), numeric_downcast(u8, rdma_comp->code), (u32)rdma_comp->lock.bi);
+	}
+}
+
 static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command const *cmds, int cmd_idx)
 {
 	struct nvmeibc_block_command const* bcmd = &cmds[cmd_idx];
@@ -338,8 +358,6 @@ static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command cons
 	struct nvmeib_data_buffer const* ndb = cmd->reqs1.ndb;
 	enum nvmeib_block_io_op op = cmds->o->op;
 	u32 nlbas;
-	struct nvmeibc_d_rdma_comp const* dc;
-	
 	if (op == NVMEIB_BLOCK_IO_OP_DISCARD) {
 		nlbas = nvmeib_get_ndb_discard_range(bcmd, NVMEIB_DSM_RANGE_ENCODING_NATIVE).nlb;    // get_dsm.
 	} else {
@@ -350,18 +368,9 @@ static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command cons
 		&cmds->o->journal,
 		"dp_cmds_execute_cmd(sgmnt=%hhu, dlba=0x%llx, nlbas=%u, raid_cur_stage=%hhu<enum e_cmds_stage>)",
 		sgmnt_idx, __cmd_start(*bcmd), nlbas, (u8)cmds->raid_cur_stage);
-	
-	__nvmeibc_cmd_data_and_metadata_pet_describe(bcmd, false/*is_completion*/);
 
-	if (dp_cmds_pigbck_has_any(cmd)) {
-		dc = dp_cmds_get_pigbck_comp_dc(cmd);
-		if (dc->code == NVMEIBC_CMD_BLKSET_INFO_WR_PB) { // write piggyback
-			NVMEIBC_IO_PET_MSG_NORM(
-				&cmds->o->journal,
-				"    write_pb(binfo=%u<union nvmeib_blkset_info>, addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>)",
-				(u32)dc->lock.bi, cmd->lpb.addr, dc->opr, dc->code);
-		}
-	}
+	__nvmeibc_cmd_piggyback_request_pet_describe(cmds->o, cmd);
+	__nvmeibc_cmd_data_and_metadata_pet_describe(bcmd, /*is_completion=*/false);
 }
 
 int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
@@ -764,10 +773,29 @@ void dp_cmds_free_split(struct nvmeibc_block_command *cmds)
 }
 
 
+static void __nvmeibc_cmd_piggyback_response_pet_describe(struct operation *o, struct nvmeibc_block_command *rldr, struct nvmeibc_block_command *cmd)
+{
+	struct nvmeibc_d_rdma_comp *dc;
+
+	if (!dp_cmds_pigbck_has_any(rldr->iocmd))
+		return;
+
+	dc = dp_cmds_get_pigbck_comp_dc(rldr->iocmd);
+	// For both, return value is logged as part of __nvmeibc_cmd_data_and_metadata_pet_describe().
+	if (dc->code == NVMEIBC_CMD_LOCK_READ_PB) { // read piggyback
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+			"    read_pb.response(contending=0x%x<union nvmeib_lock_id>, lock_bi=0x%x<union nvmeib_blkset_info>)",
+			(u32)dc->lock.id, (u32)dc->lock.bi);
+	} else if (dc->code == NVMEIBC_CMD_BLKSET_INFO_WR_PB) { // write piggyback
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+			"    write_pb.response(addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>)",
+			cmd->iocmd->lpb.addr, numeric_downcast(u8, dc->opr), numeric_downcast(u8, dc->code));
+	}
+}
+
 static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, struct nvmeibc_block_command *cmds, int li)
 {
 	struct nvmeibc_block_command *rldr = &cmds[li];
-	struct nvmeibc_d_rdma_comp* dc;
 	int i = 0;
 
 	for (i = li; i < li + cmds[li].nraid_siblings; ++i) {
@@ -778,16 +806,9 @@ static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, st
 						   "dp_cmds_complete_cmd(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
 						   cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,  
 						   numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
-		
-		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, true/*is_completion*/);
 
-		if (dp_cmds_pigbck_has_any(rldr->iocmd)) {
-			dc = dp_cmds_get_pigbck_comp_dc(rldr->iocmd);
-			if (dc->code == NVMEIBC_CMD_LOCK_READ_PB) { // read piggyback
-				NVMEIBC_IO_PET_MSG_NORM(&o->journal, "    read_pb(compare=0x%llx<union nvmeib_lock_id>, exchange=0x%llx<union nvmeib_lock_id>)", dc->compare, dc->exchange);
-			}
-		}
-
+		__nvmeibc_cmd_piggyback_response_pet_describe(o, rldr, cmd);
+		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, /*is_completion=*/true);
 	}
 }
 
