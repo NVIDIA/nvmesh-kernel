@@ -25,6 +25,9 @@ alias vault_login_ngc="export VAULT_NAMESPACE=ngc; vault login -method=oidc -pat
 
 ############################### From https://confluence.nvidia.com/display/NSVSREC/NVInit+For+Accessing+SwiftStack+Systems #################################
 
+MTV_EXCELERO1='mtv-excelero1'
+MTV_EXCELERO1='mtv-excelero1.mec01.nbulabs.nvidia.com'
+
 # In your ~/.bashrc or equiv
 NVIDIA_USERNAME=`whoami`
 alias nvssh='nvinit ssh -user $NVIDIA_USERNAME -vault-role sshca-usercert/issue/ss-legacy -principals "${NVIDIA_USERNAME},bouncer";
@@ -187,7 +190,7 @@ if [[ "`hostname`" =~ nvme.* ]]; then
 	'
 	alias run_full_init='function __run_full_init() {
 		mkdir /tmp/backup; cp -p /var/opt/nvmesh/toma/toma_persistence_*_raft_and_topo.0 /tmp/backup/
-		scp mtv-excelero1:/usr/local/lib/infra/infra-bin/nvmesh ~/	# Used for attach/detach
+		scp ${MTV_EXCELERO1}:/usr/local/lib/infra/infra-bin/nvmesh ~/	# Used for attach/detach
 		removed_dict_files=`ls -t ~/projects/ssda/toma/trace/nvmeibt_toma/debug/dict\.[0-9]*\.json | tail -n +2`
 		removed_dict_files_2=`ls ~/projects/ssda/toma/trace/nvmeibt_toma_replay/debug/dict\.[0-9]*\.json`;
 		if [ "_${removed_dict_files}" != "_" ]; then
@@ -637,7 +640,7 @@ else	###########################################              my-laptop) code   
 	'
 	alias generate_hosts_file='
 		(
-			for i in mtv-excelero1 nvmeserver2 gitlab-mirror-mtl.nvidia.com gitlab-master.nvidia.com confluence.nvidia.com; do n=${i}; resolvectl query "${n}" | grep ${n}: | awk '"'"'{print $2 "	" $1}'"'"' | sed "s/://" ; done
+			for i in ${MTV_EXCELERO1} nvmeserver2 gitlab-mirror-mtl.nvidia.com gitlab-master.nvidia.com confluence.nvidia.com; do n=${i}; resolvectl query "${n}" | grep ${n}: | awk '"'"'{print $2 "	" $1}'"'"' | sed "s/://" ; done
 			for i in {0..2000}; do n=nvme${i}; resolvectl query "${n}" | grep ${n}: | awk '"'"'{print $2 "	" $1 "  	" $1".lab.nvidia.com"}'"'"' | sed "s/://g" ; done
 		) > ~/.ssh/auto_generated_hosts_file
 	'
@@ -686,7 +689,7 @@ alias copybug='function __copybug() {
 }; __copybug $@'
 
 alias copyCI='function __copyCI() {
-	bugs_host="mtv-excelero1"
+	bugs_host="${MTV_EXCELERO1}"
 	jenkins_log_dir="/logs/jenkins"
 	shopt -s nullglob;
 	dir_search_name=${1};
