@@ -1753,6 +1753,7 @@ void nvmeibt_register_move_all_longing_registrants_no_seg_to_seg(struct nvmeibt_
 			// Add registrant as longing on current segment.
 			add_longing_registrant_on_seg(longing_registrant);
 			// Free the reg_ctx (when adding registrant as longing to segment new reg_ctx is allocated.
+			longing_registrant->seg_active = NULL;
 			free_reg_ctx(longing_registrant);
 		}
 	}
