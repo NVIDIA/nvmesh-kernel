@@ -614,7 +614,6 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
-	nvmeibc_cmd_lock_response_io_pet_describe(o, l);
 	l->status = read_comp->lock_status;
 	_ND(t_rlsm0, "locksets=@LOCKSETS[@LSI] cmp=@PTR, val=@LOCK_ENT_U64, lock_status=@STATUS_STR" , locksets, lsi, cmp, holder, ncl_status_str(l->status));
 	dp_locks_trace_lock_comp(o, l, read_comp);
@@ -629,6 +628,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 		const enum nvmeibc_block_lock_status new_status = ((holder == read_comp->lock_cnsts->unlocked_val) ? NCL_STATUS_TAKEN : NCL_STATUS_CONTENDED);
 		__change_lock_status_to(l, new_status);					// Simulate as happens in transport layer via explicit view lock
 	} else {													// Explicit Read-lock view operation via pausable layer
+		nvmeibc_cmd_lock_response_io_pet_describe(o, l);
 		if (NCL_had_acquire_callback(l->status))
 			icore_ops->cb_called_comp(icore_ops, l->ds->disk, read_comp);
 		__squash_transport_lock_status(l, l->status);
