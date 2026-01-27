@@ -898,6 +898,8 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 {
 	struct blocking_wait_context b;
 	struct srv_comm_msg *m = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*m) + sizeof(m->msg) + buf_len);
+	struct timespec	t1, t2;
+	getnstimeofday_boot(&t1);
 	if (!m) {
 		N_Ef(__AUTOID__, "Fail to allocate nvmeibt_km_comm msg");
 		return -ENOMEM;
@@ -911,9 +913,14 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 		wait_for_completion(&b.comp);	// Server reply will autofill b.rv
 		N_Tf(__AUTOID__, "msg[@INT].id=@ID, (done), rv=@RV", m->msg.opcode, m->msg.id, b.rv);
 	}	// else, beware: 'm' already freed
+	getnstimeofday_boot(&t2);
+	{
+		const int64_t m_sec = NSEC_TO_MSEC(timespec_diff_ns(t2, t1));
+		if (m_sec > 20) N_IMf(__AUTOID__, "msg[@INT] Took @LLD[ms]", op, m_sec);
+	}
 	return b.rv;
-
 }
+
 int	nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
 {
 	int rv = 0, fd = p->kernel.fd_toma2srvr;
