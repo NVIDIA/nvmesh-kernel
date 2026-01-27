@@ -2,27 +2,6 @@
 #include "nvmeibt_common.h"
 #include "utils/nvmeibt_str.h"
 
-/***************************** 3 x /proc API Toma<-->Server ***********************/
-static int fd_toma2srvr = -1;
-static int fd_srvr2toma = -1;
-static int fd_toma2clnt = -1;
-
-static int __blocking_msg_api_create(void)
-{
-	const char *proc_path_toma2srvr = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";		// Toma->Srvr, See server nvmeibs_toma_create()
-	const char *proc_path_srvr2toma = TOMA_ROOT_DIR "proc/nvmeibs/toma_server_events";	// Srvr->Toma
-	const char *proc_path_toma2clnt = TOMA_ROOT_DIR "proc/nvmeibs/toma_clients";		// Toma->Clnt
-	NTOMA_ASSERT(nsalc0, (fd_srvr2toma | fd_toma2clnt | fd_toma2srvr) == -1, "Wrong call, already initialized");
-	fd_srvr2toma = NNVMEIBT_OPEN(nsalc1, proc_path_srvr2toma, O_RDWR);
-	fd_toma2clnt = NNVMEIBT_OPEN(nsalc2, proc_path_toma2clnt, O_RDWR);
-	fd_toma2srvr = NNVMEIBT_OPEN(nsalc3, proc_path_toma2srvr, O_RDWR);
-	if ((fd_srvr2toma < 0) || (fd_toma2clnt < 0) || (fd_toma2srvr < 0)) {
-		N_Ef(nsalc7, "Failed: @STR=@FD, @STR=@FD, @STR=@FD, @AUTO_ERRNO, FATAL: Without server toma will not live", proc_path_srvr2toma, fd_srvr2toma, proc_path_toma2clnt, fd_toma2clnt, proc_path_toma2srvr, fd_toma2srvr);
-		exit(-1);
-	}
-	return 0;
-}
-
 static ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, int OK_err_1, int OK_err_2)
 {
 	const ssize_t n_bytes_written = pwrite(fd, vptr, size, 0 /*offset*/);
@@ -272,12 +251,18 @@ struct nvmeibt_km_comm {
 	disk_list_t disks;
 	pthread_mutex_t guard;			// Serialize Toma thread access
 	unsigned long unique_id_generator __attribute__((aligned(sizeof(long))));		// Ever increasing counter for msg id and others
-	int nl_sock_fd;					// Socket to which send/recv message to/from kernel server
-	struct nlmsghdr *nlh;			// 1 preallocated Linux netlink msg, to avoid mallocs during send/recv
-	struct iovec iov;				// 1 preallocated iovec
-	struct sockaddr_nl dest_addr;	// Netlink address to send msgs to
-	int spair[2];					// Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
+	int spair[2];					// Wakeup socket-pair: Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
 	pthread_t comm_thread;			// main thread which processes messages
+	//struct async_server_msg_api {
+		struct nlmsghdr *nlh;			// 1 preallocated Linux netlink msg, to avoid mallocs during send/recv
+		struct iovec iov;				// 1 preallocated iovec
+		struct sockaddr_nl dest_addr;	// Netlink address to send msgs to
+		int nl_sock_fd;					// Socket to which send/recv message to/from server (kernel netlink, UDS in user-space)
+		int fd_srvr2toma;				// fd' for toma receive large messages from server (registrant clients topology).
+	//} async;
+	struct blocking_server_api {	// Blocking messaging API (large messages) - implemented towards kernel server, 2 fd's proc files
+		int fd_toma2srvr, fd_toma2clnt;	// 2 fd's for toma send
+	} kernel;						// In user space API those 2 fd's are redirected to 'nl_sock_fd'
 	struct {
 		int error_occured;			// if != 0: Object is not operational, closing due to error. Stores error code
 		bool stop_uplink;			// Prevent Toma messages from being sent to
@@ -360,13 +345,46 @@ void __calc_max_msg_size(struct nvmeibt_km_comm *p) {
 	const size_t total_max = max(srvr_max, clients_topo);
 	p->max_msg_size.proc_recv = max(lserver_proc, clients_topo);
 	p->max_msg_size.proc_send = clients_topo;
-	#ifdef TOMA_USE_USER_SPACE_SERVER_API
+	if (p->params.use_user_space_api) {
 		p->state_flags.use_async_api_and_sema_for_blocking_msgs = true;									// Kernel has blocking /proc. User space does not have them. Toma Simulator supports both
 		p->max_msg_size.nlink = NLMSG_SPACE(total_max);			// All messages via async api
-	#else
-		(void)total_max;
+	} else {
 		p->max_msg_size.nlink = NLMSG_SPACE(server_nlink);		// Large messages use /proc sync api
-	#endif
+	}
+}
+
+static int __blocking_msg_api_create(struct nvmeibt_km_comm *p)
+{
+	const char *path_toma2srvr = TOMA_ROOT_DIR "proc/nvmeibs/toma_server";			// Toma->Srvr, See server nvmeibs_toma_create()
+	const char *path_srvr2toma = TOMA_ROOT_DIR "proc/nvmeibs/toma_server_events";	// Srvr->Toma
+	const char *path_toma2clnt = TOMA_ROOT_DIR "proc/nvmeibs/toma_clients";			// Toma->Clnt
+	int rv = 0;
+
+	p->fd_srvr2toma = p->kernel.fd_toma2clnt = p->kernel.fd_toma2srvr = -1;
+	if (true) {		// We separate it from async API for QOS reason: faster response time
+		p->fd_srvr2toma = NNVMEIBT_OPEN(nsalc1, path_srvr2toma, O_RDWR);
+		if (p->fd_srvr2toma < 0)
+			rv = -1;
+	}
+	if (!p->params.use_user_space_api) {
+		p->kernel.fd_toma2clnt = NNVMEIBT_OPEN(nsalc2, path_toma2clnt, O_RDWR);
+		p->kernel.fd_toma2srvr = NNVMEIBT_OPEN(nsalc3, path_toma2srvr, O_RDWR);
+		if ((p->kernel.fd_toma2clnt < 0) || (p->kernel.fd_toma2srvr < 0))
+			rv = -1;
+	}
+	if (rv < 0)
+		N_Ef(nsalc7, "Failed: @STR=@FD, @STR=@FD, @STR=@FD, @AUTO_ERRNO, FATAL: Without server toma will not live", path_srvr2toma, p->fd_srvr2toma, path_toma2clnt, p->kernel.fd_toma2clnt, path_toma2srvr, p->kernel.fd_toma2srvr);
+	return rv;
+}
+
+static void __blocking_msg_api_destroy(struct nvmeibt_km_comm *p)
+{
+	if (true)
+		NNVMEIBT_CLOSE(nsalcc, p->fd_srvr2toma);
+	if (!p->params.use_user_space_api) {
+		NNVMEIBT_CLOSE(nsalcd, p->kernel.fd_toma2clnt);
+		NNVMEIBT_CLOSE(nsalce, p->kernel.fd_toma2srvr);
+	}
 }
 
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
@@ -375,8 +393,8 @@ struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_
 	int rv = 0;
 
 	if (!p) { 													rv = -__LINE__; goto out; }
-	__blocking_msg_api_create();
 	p->params = *params;
+	if (__blocking_msg_api_create(p) < 0) {						rv = -__LINE__; goto free_p; }
 	if (!params->print_status_fn) { 							rv = -__LINE__; goto free_p; }			// The only one which is mandatory
 	if (pthread_mutex_init(&p->guard, NULL) < 0) { 				rv = -__LINE__; goto free_p; }
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
@@ -480,9 +498,7 @@ void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)		// Close blocking m
 	rv = nvmeib_srvr_api_lib_send_block_msg_to_server(p, &buf);
 	(void)rv; // Nothing to do with this
 	__stop_main_thread(p);
-	NNVMEIBT_CLOSE(nsalcc, fd_srvr2toma);
-	NNVMEIBT_CLOSE(nsalcd, fd_toma2clnt);
-	NNVMEIBT_CLOSE(nsalce, fd_toma2srvr);
+	__blocking_msg_api_destroy(p);
 	if (p->resource.n_lock_maps != 0)
 		N_Ef(tscnlssv, "Leaking resources: lock_maps=@INT", p->resource.n_lock_maps);
 	NNVMEIBT_TOMA_FREE(tscnlsss, p);
@@ -757,9 +773,9 @@ static bool _recv_msg_from_local_server(struct nvmeibt_km_comm *p)
 {
 	const int max_len = p->max_msg_size.proc_recv;
 	struct nvmeibs_toma_server_proc_buf *msg = NNVMEIBT_BM_CALLOC(tthlsd0, max_len);
-	const int rv = read(fd_srvr2toma, msg, max_len);
+	const int rv = read(p->fd_srvr2toma, msg, max_len);
 	if (rv < (int)sizeof(msg->handle)) {
-		N_Ef(tthlsd1, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", fd_srvr2toma, rv);
+		N_Ef(tthlsd1, "Failed read fd=@FD rv=@RV @AUTO_ERRNO", p->fd_srvr2toma, rv);
 		NNVMEIBT_BM_FREE(tthlsd2, msg);
 	} else if (p->params.process_local_srvr_msg) {
 		p->params.process_local_srvr_msg(msg, rv);	// Callback will free the message
@@ -775,7 +791,7 @@ static void * run(void *v)
 	struct nvmeibt_km_comm *p = v;
 	fd_set read_fds, except_fds;
 	const int _max_fd0 = max(p->spair[1], p->nl_sock_fd);
-	const int n_fds = max(_max_fd0, fd_srvr2toma) + 1;
+	const int n_fds = max(_max_fd0, p->fd_srvr2toma) + 1;
 	int n;
 
 	NFIN;
@@ -783,19 +799,19 @@ static void * run(void *v)
 	while (true) {
 		struct timeval tv = {.tv_sec = TOMA_SILENCE_MAX_PERIOD_SECS, .tv_usec = 0};
 		FD_ZERO(&read_fds);
-		FD_SET(p->spair[1],   &read_fds);
-		FD_SET(p->nl_sock_fd, &read_fds);
-		FD_SET(fd_srvr2toma,  &read_fds);
+		FD_SET(p->spair[1],     &read_fds);
+		FD_SET(p->nl_sock_fd,   &read_fds);
+		FD_SET(p->fd_srvr2toma, &read_fds);
 		except_fds = read_fds;
 		n = select(n_fds, &read_fds, NULL /*No writes*/, &except_fds, &tv);	// Wakeup on incomming msg from server or from toma
 		if (n > 0) {
 			if (FD_ISSET(p->spair[1], &read_fds)) {
 				read_toma_wakeup_event(p);				if (!__handle_incomming_msg_from_toma(p)) 	   break; }
-			if (FD_ISSET(p->nl_sock_fd, &read_fds)) {	if (!__handle_new_srvr_msg(p)) 				   break; }
-			if (FD_ISSET(fd_srvr2toma,  &read_fds)) {	if (!_recv_msg_from_local_server(p)) 		   break; }
-			if (FD_ISSET(p->spair[1],   &except_fds)) { __release_msg_queues_on_error(p, "toma sock"); break; }
-			if (FD_ISSET(p->nl_sock_fd, &except_fds)) { __release_msg_queues_on_error(p, "srvr sock"); break; }
-			if (FD_ISSET(fd_srvr2toma,  &except_fds)) { __release_msg_queues_on_error(p, "fd_s2toma"); break; }
+			if (FD_ISSET(p->nl_sock_fd,   &read_fds)) {	if (!__handle_new_srvr_msg(p)) 				   break; }
+			if (FD_ISSET(p->fd_srvr2toma, &read_fds)) {	if (!_recv_msg_from_local_server(p)) 		   break; }
+			if (FD_ISSET(p->spair[1],     &except_fds)) { __release_msg_queues_on_error(p, "toma sock"); break; }
+			if (FD_ISSET(p->nl_sock_fd,   &except_fds)) { __release_msg_queues_on_error(p, "srvr sock"); break; }
+			if (FD_ISSET(p->fd_srvr2toma, &except_fds)) { __release_msg_queues_on_error(p, "fd_s2toma"); break; }
 		} else if (n == 0) {	// timeout
 			N_Df(trace_km_comm_run, "Timeout");		  { if (!__handle_incomming_msg_from_toma(p)) 	   break; }	// Try for the chance we missed an event
 			XDLIST_EMPTY(&p->disks) ? get_disks(p) : _send_keep_alive_to_server(p);
@@ -900,16 +916,16 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 }
 int	nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
 {
-	int rv = 0;
+	int rv = 0, fd = p->kernel.fd_toma2srvr;
 	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)
 		rv = _submit_msg_and_wait_for_ack(p, csc_t2s_blocking_msg_other, msg, sizeof(*msg));
 	if (msg->type != NVMEIBS_TOMA_CLEAN_JOURNAL_FOR_DISK_RANGE) {
 		if (!p->state_flags.use_async_api_and_sema_for_blocking_msgs)
-			rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd_toma2srvr, msg, sizeof(*msg), 0, 0);
+			rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls0, fd, msg, sizeof(*msg), 0, 0);
 		return (rv < 0) ? -1 : 0;
 	} else { // RonenHod: Write: our kernel API is weird - write() will return error anyway, where certain errno values indicate success... sigh.
 		if (!p->state_flags.use_async_api_and_sema_for_blocking_msgs)
-			rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd_toma2srvr, msg, sizeof(*msg), EALREADY, EINPROGRESS);
+			rv = NNVMEIBT_PWRITE_ATOMIC(tsmtls3, fd, msg, sizeof(*msg), EALREADY, EINPROGRESS);
 		if (rv >= 0) {
 			return 0;
 		} else if (rv == -EALREADY || rv == -EINPROGRESS) {	// Either a cleanup was already active, or a new "job" started
@@ -928,7 +944,7 @@ int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, cons
 	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)	{
 		rv = _submit_msg_and_wait_for_ack(p, csc_t2s_blocking_msg_to_io_clients, msg, buf_len);
 	} else {
-		rv = NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, fd_toma2clnt, msg, buf_len, ENXIO, 0);
+		rv = NNVMEIBT_PWRITE_ATOMIC(tsb2cp0, p->kernel.fd_toma2clnt, msg, buf_len, ENXIO, 0);
 	}
 	return ((rv == 0) || (rv == -ENXIO)) ? 0 : -1;	// Disconenct OK, or client already disconnected
 }

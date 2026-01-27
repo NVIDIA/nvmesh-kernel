@@ -20,6 +20,7 @@ struct nvmeibt_km_comm_params {									// Must fill all callbacks
 	void (*process_local_srvr_msg)(struct nvmeibs_toma_server_proc_buf *m, int n_bytes);	// Callback to handle local server message and free it
 	int (*process_disk_info)(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
 	void (*print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx);
+	bool use_user_space_api;									// ServerLib will connect to Kernel/User-Space nvmeib server.
 };
 struct nvmeibt_km_comm;
 struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params *);

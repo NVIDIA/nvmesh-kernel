@@ -2170,6 +2170,10 @@ void nvmeibt_server_lib_create(void)
 		par.process_extend_msg = &nvmeibt_add_local_clnt_msg_to_toma_nl_queue;
 		par.process_local_srvr_msg = &__local_server_msg_queue_add;
 		par.print_status_fn = &print_status_str;
+		par.use_user_space_api = false;
+		#ifdef TOMA_USE_USER_SPACE_SERVER_API
+			par.use_user_space_api = true;
+		#endif
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);
 		smq->km_comm = nvmeib_srvr_api_lib_create(&par);
