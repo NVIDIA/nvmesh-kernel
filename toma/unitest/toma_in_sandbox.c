@@ -417,13 +417,14 @@ static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 	return n;
 }
 
+void sandbox_server_init(void);
 void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
 	pthread_mutex_init(&sys->TS.mutex, NULL);
-	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
+	sandbox_server_init();
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
@@ -606,12 +607,12 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_other) {
 		struct TSB_server *s = &sys->TSB_toma2srvr;
 		const struct nvmeibs_toma_server_proc_buf *m = (typeof(m))req_msg->data;
-		const ssize_t exec_rv = s->o.send(s->o.sock->fd, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
+		const ssize_t exec_rv = s->o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_to_io_clients) {
 		struct TSB_server *s = &sys->TSB_toma2clnt;
 		const struct nvmeibs_toma_client_proc_buf *m = (typeof(m))req_msg->data;
-		const ssize_t exec_rv = s->o.send(s->o.sock->fd, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
+		const ssize_t exec_rv = s->o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
@@ -629,18 +630,12 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 
 // Connect the other side which communicates with Toma
 void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
-	if (strstr(s->addr.sun_path, "netlink")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_netlink.o;
-		s->other_side->send = _netlink_recv_msg_from_toma;
-		s->other_side->recv = _netlink_reply_to_toma;
-		s->other_side->has_data = TSB_netlink_queue_has_something;
+	if (strstr(s->addr.sun_path, "netlink")) {				BUG_ON(s->other_side); s->other_side = &sys->TSB_netlink.o;
 	} else if (strstr(s->addr.sun_path, "signal")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_sig.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
-	} else if (strstr(s->addr.sun_path, "sys_log")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_syslog.o;
-	} else if (strstr(s->addr.sun_path, "srm_fault")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_fault.o;
+	} else if (strstr(s->addr.sun_path, "sys_log")) {		BUG_ON(s->other_side); s->other_side = &sys->TSB_syslog.o;
+	} else if (strstr(s->addr.sun_path, "srm_fault")) {		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_fault.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
 	} else if (strstr(s->addr.sun_path, "srm_timer")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_timer.o;
@@ -652,8 +647,7 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_rpc.o;
 		sys->TSB_rpc.o.recv = _rpc_inject;
 		sys->TSB_rpc.o.send = _rpc_accept;
-	} else if (strstr(s->addr.sun_path, "epoll")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_epoll.o;
+	} else if (strstr(s->addr.sun_path, "epoll")) {			BUG_ON(s->other_side); s->other_side = &sys->TSB_epoll.o;
 	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o[0];
 		s->other_side->recv = _wakeup_pipe_wakeup_recv;
@@ -663,19 +657,9 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o[1];
 		s->other_side->send = _wakeup_pipe_wakeup_send;			// o[1] Toma aux thread write to wakeup toma main thread. Never reads
 		s->other_side->recv = _recv_illegal_trap;
-	} else if (strstr(s->addr.sun_path, "server_events")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_srvr2toma.o;
-		s->other_side->recv = server_simu_get_next_msg_for_toma;
-		s->other_side->send = _send_illegal_trap;				// Via this fd server sends msgs to Tom, Toma never replies back
-		s->other_side->has_data = server_simu_has_next_msg_for_toma;
-	} else if (strstr(s->addr.sun_path, "toma_server")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2srvr.o;
-		s->other_side->send = _srvr_simu_nvmeibs_toma_server_proc_recv;
-		s->other_side->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
-	} else if (strstr(s->addr.sun_path, "toma_clients")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
-		s->other_side->send = _srvr_simu_nvmeibs_toma_client_proc_recv;
-		s->other_side->recv = _recv_illegal_trap;
+	} else if (strstr(s->addr.sun_path, "server_events")) { BUG_ON(s->other_side); s->other_side = &sys->TSB_srvr2toma.o;
+	} else if (strstr(s->addr.sun_path, "toma_server")) {   BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2srvr.o;
+	} else if (strstr(s->addr.sun_path, "toma_clients")) {  BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
 	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {
 		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[0];
 		s->other_side->send = _socket_pair_wakeup_send;			// o[0] Toma writes to it to wakeup server lib main thread. Never reads
@@ -689,6 +673,24 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 		return;
 	}
 	s->other_side->sock = s;
+}
+
+void sandbox_server_init(void) {
+	struct TSB_sock_otherside *o = &sys->TSB_toma2srvr.o;
+	o->send = _srvr_simu_nvmeibs_toma_server_proc_recv;
+	o->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
+	o = &sys->TSB_srvr2toma.o;
+	o->recv = server_simu_get_next_msg_for_toma;
+	o->send = _send_illegal_trap;				// Via this fd server sends msgs to Tom, Toma never replies back
+	o->has_data = server_simu_has_next_msg_for_toma;
+	o = &sys->TSB_toma2clnt.o;
+	o->send = _srvr_simu_nvmeibs_toma_client_proc_recv;
+	o->recv = _recv_illegal_trap;
+	o = &sys->TSB_netlink.o;
+	o->send = _netlink_recv_msg_from_toma;
+	o->recv = _netlink_reply_to_toma;
+	o->has_data = TSB_netlink_queue_has_something;
+	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
 }
 
 static bool sbfd_is_a_file(     const struct t_sandbox_sock* s) {
