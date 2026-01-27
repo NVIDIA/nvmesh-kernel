@@ -504,9 +504,9 @@ out:;
 
 void nvmeib_hash_resize_all_tables_as_needed(void)
 {
-	struct nvmeib_hash_table		*hash_tbl = NULL;
 	struct timespec					now;
 	static struct timespec			last_invocation;
+	static int						last_scanned_idx = 0;
 
 	NFIN;
 	if (!all_active_hashs) {
@@ -517,8 +517,11 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 		goto out;
 	}
 	last_invocation = now;
-	NVMEIB_HASH_FOREACH(hash_tbl, all_active_hashs) {
-		nvmeib_hash_resize(hash_tbl);
+	for (int i = 0; i < all_active_hashs->n_arr_entries; i++) {
+		last_scanned_idx = hash_next_idx_on_collision(last_scanned_idx, all_active_hashs->scrambled_to_idx_mask);	// In range, also if size changed
+		if (hash_is_entry_OCCUPIED(&(all_active_hashs->arr[last_scanned_idx]))) {
+			nvmeib_hash_resize((struct nvmeib_hash_table *)(all_active_hashs->arr[last_scanned_idx].ptr_to_obj));
+		}
 		getnstimeofday_boot(&now);
 		if (timespec_diff_ns(now, last_invocation) > MSEC_TO_NSEC(10)) {
 			goto out;
