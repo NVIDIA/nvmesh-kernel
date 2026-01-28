@@ -392,6 +392,7 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 		return;
 	N_Wf(j911i0a, "kafka err='@STR'", rd_kafka_err2str(err));
 	switch (err) {
+	case RD_KAFKA_RESP_ERR__FATAL:
 	case RD_KAFKA_RESP_ERR__SSL:
 	case RD_KAFKA_RESP_ERR__AUTHENTICATION:
 	case RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED:
@@ -402,7 +403,12 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	case RD_KAFKA_RESP_ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED:
 	case RD_KAFKA_RESP_ERR_SASL_AUTHENTICATION_FAILED:
 	case RD_KAFKA_RESP_ERR_DELEGATION_TOKEN_AUTHORIZATION_FAILED:
-		break;
+		break;			// Fatal or security error. Restart kafka.
+	case RD_KAFKA_RESP_ERR__TRANSPORT:
+	case RD_KAFKA_RESP_ERR_BROKER_NOT_AVAILABLE:
+	case RD_KAFKA_RESP_ERR_NOT_COORDINATOR:
+	case RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE:
+		return;		// Definitely ignore transient network errors.
 	default:
 		// return;	Should we ignore errors that do not look like security related
 		break;
