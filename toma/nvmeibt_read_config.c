@@ -2017,6 +2017,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 		N_Tf(cki7mbt, "Added disk_zero_iter work for disk=@STR", nvmeibt_local_disk_config_display(&(entry->from_config)));
 		goto out;
 	} else {
+		local_disk->mbr = entry->mbr;
 		local_disk->main_gpt = entry->main_gpt;
 		local_disk->metadata_gpt = entry->metadata_gpt;
 	}
