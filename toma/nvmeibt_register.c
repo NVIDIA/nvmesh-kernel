@@ -894,42 +894,15 @@ out:
 	return rv;
 }
 
-static struct nvmeibt_registrant_ctx *get_active_registrant_by_msg_src_and_lockid(
+static struct nvmeibt_registrant_ctx *get_active_registrant_by_client_messaging_handle(
 	struct nvmeibt_seg_active		*seg_active,
 	struct nvmeibt_registrant_ctx	*input_reg_ctx)
 {
 	struct nvmeibt_registrant_ctx 	*reg_ctx;
 	struct nvmeibt_registrant_ctx	*reg_ctx_rv = NULL;
 	int								is_found = 0;
+
 	NFIN;
-
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(reg_ctx, &seg_active->active_registrants, nvmeib_lockid_purify(input_reg_ctx->reg_lock_id)) {
-		if (nvmeibt_register_is_same_registrant(reg_ctx, input_reg_ctx)) {
-			N_Tf(t_f0_tomareg, "Found active registrant reg_@LOCKID messaging_handle=@HANDLE node=@NODE registrant_disconnect_time=@ZU",
-					nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx->client_messaging_handle,
-					nvmeibt_client_get_hostname(reg_ctx->client), reg_ctx->reg_disconnect_time.tv_sec);
-			if (is_found) {
-				N_Ef(t_f1_tomareg, "Search for @NODE,@HANDLE,reg_@LOCKID",
-						input_reg_ctx->registrant_node_id.str, input_reg_ctx->client_messaging_handle,
-						nvmeib_lockid_purify(input_reg_ctx->reg_lock_id));
-				N_Ef(t_f2_tomareg, "Found twice @NODE,@HANDLE,reg_@LOCKID  &  @NODE,@HANDLE,reg_@LOCKID",
-						reg_ctx_rv->registrant_node_id.str, reg_ctx_rv->client_messaging_handle,
-						nvmeib_lockid_purify(reg_ctx_rv->reg_lock_id),
-						reg_ctx->registrant_node_id.str, reg_ctx->client_messaging_handle,
-						nvmeib_lockid_purify(reg_ctx->reg_lock_id));
-				// dump_seg_active_registrants(seg_active, 1);
-			}
-			if (nvmeibt_register_is_processing_registrant_removal(reg_ctx)) {
-				N_Tf(t_f3_tomareg, "Already is_processing_registrant_removal");
-			}
-			if (is_registrant_on_timeout(reg_ctx)) {
-				N_Tf(t_f4_tomareg, "Already is_registrant_on_timeout");
-			}
-			is_found = 1;
-			reg_ctx_rv = reg_ctx;
-		}
-	}
-
 	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(reg_ctx, &seg_active->active_registrants_by_cid, client_messaging_handle_to_cid(input_reg_ctx->client_messaging_handle)) {
 		if (nvmeibt_register_is_same_registrant(reg_ctx, input_reg_ctx)) {
 			N_Tf(t_f7_tomareg, "Found active registrant reg_@LOCKID messaging_handle=@HANDLE node=@NODE registrant_disconnect_time=@ZU",
@@ -961,7 +934,7 @@ static struct nvmeibt_registrant_ctx *get_active_registrant_by_msg_src_and_locki
 	}
 
 	NFOUT;
-	return reg_ctx_rv;
+	return reg_ctx;
 }
 
 static bool is_seg_active_reservation_mode_version_registrable(struct nvmeibt_seg_active *seg_active)
@@ -1103,7 +1076,7 @@ static void send_registrable_to_longing_registrant_if_eligable(
 	struct nvmeibt_registrant_ctx	*active_reg_ctx;
 
 	NFIN;
-	active_reg_ctx = get_active_registrant_by_msg_src_and_lockid(seg_active, longing_registrant);
+	active_reg_ctx = get_active_registrant_by_client_messaging_handle(seg_active, longing_registrant);
 	if (active_reg_ctx) {
 		goto out;	// Avoid sending registrable if TOMA_NOT_READY for this client
 	}
@@ -2605,7 +2578,7 @@ static int handle_register_registrant_on_disk_segment(struct nvmeibt_registrant_
 	struct nvmeibt_seg_active           *seg_active = incoming_reg_ctx->seg_active;
 
 	NFIN;
-	existing_reg_ctx = get_active_registrant_by_msg_src_and_lockid(seg_active, incoming_reg_ctx);
+	existing_reg_ctx = get_active_registrant_by_client_messaging_handle(seg_active, incoming_reg_ctx);
 	// Longing is for clients that hold their registration attempt. Remove it, and possibly add again during processing
 	remove_longing_registrant_on_seg_by_ctx(incoming_reg_ctx, false /* Specific seg, not all segs on disk*/);
 
@@ -2857,7 +2830,7 @@ static int registrant_sw_topo_ack_received(struct nvmeibt_registrant_ctx *input_
 		N_Ef(yuii984, "No seg=@UUID_8", nvmeib_uuid_first_4_bytes(&input_reg_ctx->seg_uuid));
 		goto out;
 	}
-	reg_ctx = get_active_registrant_by_msg_src_and_lockid(seg_active, input_reg_ctx);
+	reg_ctx = get_active_registrant_by_client_messaging_handle(seg_active, input_reg_ctx);
 	if (reg_ctx) {
 		upd_seg_and_registrant_on_reregister_or_sw_topo_ack(reg_ctx, input_reg_ctx);
 	}
@@ -2877,7 +2850,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_get_out_reg_ctx_by_in_msg(struct
 	struct nvmeibt_registrant_ctx			*input_reg_ctx;
 
 	input_reg_ctx = &msg->registrant_ctx;
-	return get_active_registrant_by_msg_src_and_lockid(input_reg_ctx->seg_active, input_reg_ctx);
+	return get_active_registrant_by_client_messaging_handle(input_reg_ctx->seg_active, input_reg_ctx);
 }
 
 int nvmeibt_register_timeout_occurred(void)
