@@ -287,12 +287,12 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 	{"socket.timeout.ms",			"600"},				\
 	{"enable.auto.commit",			"false"},			/* enable.auto.commit (default true), Kafka commits consumer's offset in the background. We disable it and use explicit commit when we done asyncronously processing the message*/ \
 	{"auto.offset.reset",			"earliest"},		/* Start on the msg following the last committed one. Can use "latest".  none: throw exception to the consumer if no previous offset is found for the consumer's group*/ \
-	{"bootstrap.servers",			""},				/* Overidden by the value of KAFKA_SERVERS from nvmesh.conf*/ \
+	{"bootstrap.servers",			""},				/* Overridden by the value of KAFKA_SERVERS from nvmesh.conf*/ \
 	{"group.id",					""},				/* Overriden with machine name. We need that to track offset separately for each Toma/group*/ \
 	{"security.protocol",			"ssl"}, 			\
 	{"enable.ssl.certificate.verification", "true"}, 	\
-	{"ssl.ca.location",				""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
-	{"ssl.certificate.location",	""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
+	{"ssl.ca.location",				""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
+	{"ssl.certificate.location",	""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
 	{"ssl.key.location", 			""},				/* Client's key */\
 	{"ssl.key.password",			""},				/* Key password, if any. */\
 	{"ssl.endpoint.identification.algorithm", "none"}
@@ -300,12 +300,12 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 
 #define K_DEFAULT_PRODUCER_CONFIG \
 	{"socket.timeout.ms",			"600"},				\
-	{"bootstrap.servers",			""},				/* Overidden by the value of KAFKA_SERVERS from nvmesh.conf*/\
+	{"bootstrap.servers",			""},				/* Overridden by the value of KAFKA_SERVERS from nvmesh.conf*/\
 	{"client.id",					"report_to_mgmt_producer"}, \
 	{"security.protocol",			"ssl"},				\
 	{"enable.ssl.certificate.verification", "true"},	\
-	{"ssl.ca.location",				""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
-	{"ssl.certificate.location",	""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
+	{"ssl.ca.location",				""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
+	{"ssl.certificate.location",	""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
 	{"ssl.key.location", 			""},				/* Client's key */\
 	{"ssl.key.password",			""},				/* Key password, if any. */\
 	{"ssl.endpoint.identification.algorithm", "none"}
@@ -878,7 +878,7 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 		if ((k_err == RD_KAFKA_RESP_ERR_NO_ERROR) && (pl->elems[0].offset >= 0L)) {	// May return RD_KAFKA_OFFSET_INVALID if queue just created and was never read from
 			calc_offset = pl->elems[0].offset;
 			if ((k_err_watermark == RD_KAFKA_RESP_ERR_NO_ERROR) && ((calc_offset < low_wm) || (calc_offset > high_wm)))
-				N_Wf(minwusk, "@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);
+				N_Wf(minwusk, "@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and "auto.offset.reset" will take the earliest message
 		} else {
 			calc_offset = RD_KAFKA_OFFSET_BEGINNING;	// Now default is use beginning as fallback
 			k_err = __consumer_assign_partition_and_offset(k, calc_offset);
@@ -1272,7 +1272,7 @@ static int CMD_consumer_init(bool is_full_init) {
 		k->offset_committed = k->consumer_offset = RD_KAFKA_OFFSET_INVALID;
 		atomic_set(&CMD_consumer_n_msgs_awaiting_toma_processing, 0);
 	}
-	snprintf(group_id_str,  sizeof(group_id_str),  "CMD_%s", nvmeibt_get_my_hostname());
+	snprintf(group_id_str,  sizeof(group_id_str),  "CMD_%s", nvmeibt_get_my_hostname());			// Dont change it! Mgmt relies on it to remove old produced messages
 	snprintf(k->topic_name, sizeof(k->topic_name), "%s.TOMA.commands.1.0.0", nvmeibt_get_my_hostname());
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1415,7 +1415,7 @@ static int HW_full_config_consumer_init(bool is_full_init) {
 		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "HW_%s", nvmeibt_get_my_hostname());		// 1 queue for all Toma's but each machine in its own group_id. From each group.id only 1 consumer can read.
+	snprintf(group_id_str, sizeof(group_id_str), "HW_%s", nvmeibt_get_my_hostname());		// 1 queue for all Toma's but each machine in its own group_id. From each group.id only 1 consumer can read. Dont change it! Mgmt relies on it to remove old produced messages!
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1525,7 +1525,7 @@ static int incremental_VOL_updates_consumer_init(bool is_full_init) {
 		// If we didn't even start, use the initial value
 		requested_incremental_VOL_updates_consumer_offset = k->consumer_offset + 1;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);
+	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);		// Dont change it! Mgmt relies on it to remove old produced messages
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1694,7 +1694,7 @@ static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 		}
 		requested_incremental_TARGET_updates_consumer_seq_no = last_sent_to_toma_targets_updates_seq_no;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);
+	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);			// Dont change it! Mgmt relies on it to remove old produced messages
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
