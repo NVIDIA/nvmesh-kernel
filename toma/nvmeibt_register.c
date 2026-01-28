@@ -1662,6 +1662,10 @@ static void add_longing_registrant_on_seg(struct nvmeibt_registrant_ctx *input_r
 	struct nvmeibt_registrant_ctx	*longing_registrant;
 
 	NFIN;
+	if (nvmeibt_toma_is_in_shutdown()) {
+		N_Tf(t98ksoc, "Skipping. toma_is_in_shutdown");
+		goto out;
+	}
 	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(longing_registrant, &seg_active->longing_registrants_by_cid, (unsigned long long)input_reg_ctx->client->cid) {
 		if (nvmeibt_register_is_same_registrant(longing_registrant, input_reg_ctx)) {
 			N_Tf(dkiru43, "Already exists");
