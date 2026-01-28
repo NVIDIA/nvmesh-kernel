@@ -1159,7 +1159,7 @@ static int toma_wakeup_event(void)
 				break;
 			case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS:
 			case NVMEIBT_TOMA_WAKEUP_TYPE_NETLINK:
-				if (!is_shuttind_down) nvmeibt_server_lib_consume_incomming_srvr_msgs();	// Dont care during shutdown
+				nvmeibt_server_lib_consume_incomming_srvr_msgs();	// Must take care of clients brute force disconnect during shutdown
 				break;
 			case NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA:
 				nvmeibt_kafka_toma_wakeup_dispatcher(buf.ptr);
