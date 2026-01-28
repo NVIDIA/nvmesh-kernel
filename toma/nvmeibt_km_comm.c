@@ -64,6 +64,7 @@ struct nvmeibt_km_comm {
 	cb_list_t cbs;
 	disk_list_t disks;
 	pthread_mutex_t guard;
+	unsigned long guid __attribute__((aligned(sizeof(long))));		// Ever increasing counter for msg id and others
 	int nl_sock_fd;
 	struct nlmsghdr *nlh;
 	int nlh_len;
@@ -72,7 +73,6 @@ struct nvmeibt_km_comm {
 	pthread_t comm_thread;
 	int valid;
 	int thread_started;
-	unsigned long guid;
 };
 
 static unsigned long get_guid(struct nvmeibt_km_comm *p)
