@@ -366,8 +366,8 @@ void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out,
 
 	/* Export MBR */
 	nvmeibt_Str_sprintf(out, "  \"memory_mbr\": {\n");
-	nvmeibt_Str_sprintf(out, "    \"signature\": \"0x%04x\",\n", mbr->signature);
-	nvmeibt_Str_sprintf(out, "    \"os_type\": \"0x%02x\",\n", mbr->partitions[0].os_type);
+	nvmeibt_Str_sprintf(out, "    \"signature\": \"0x%04x\",\n", (unsigned short)mbr->signature);
+	nvmeibt_Str_sprintf(out, "    \"os_type\": \"0x%02x\",\n", (unsigned char)mbr->partitions[0].os_type);
 	nvmeibt_Str_sprintf(out, "    \"pba_s\": %d,\n", mbr->partitions[0].pba_s);
 	nvmeibt_Str_sprintf(out, "    \"n_pblk\": %d\n", mbr->partitions[0].n_pblk);
 	nvmeibt_Str_sprintf(out, "  },\n");
@@ -1718,8 +1718,8 @@ static int export_gpt_to_json(int disk_fd,
 
 	// Export pMBR
 	nvmeibt_Str_sprintf(json_output, "  \"pmbr\": {\n");
-	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%04x\",\n", mbr.signature);
-	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_os_type\": \"0x%02x\",\n", mbr.partitions[0].os_type);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_signature\": \"0x%04x\",\n", (unsigned short)mbr.signature);
+	nvmeibt_Str_sprintf(json_output, "    \"_STATIC_os_type\": \"0x%02x\",\n", (unsigned char)mbr.partitions[0].os_type);
 	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_pba_s\": %d,\n", mbr.partitions[0].pba_s);
 	nvmeibt_Str_sprintf(json_output, "    \"_READONLY_n_pblk\": %d\n", mbr.partitions[0].n_pblk);
 	nvmeibt_Str_sprintf(json_output, "  }");
