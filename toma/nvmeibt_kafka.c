@@ -288,7 +288,7 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 	{"enable.auto.commit",			"false"},			/* enable.auto.commit (default true), Kafka commits consumer's offset in the background. We disable it and use explicit commit when we done asyncronously processing the message*/ \
 	{"auto.offset.reset",			"earliest"},		/* Start on the msg following the last committed one. Can use "latest".  none: throw exception to the consumer if no previous offset is found for the consumer's group*/ \
 	{"bootstrap.servers",			""},				/* Overidden by the value of KAFKA_SERVERS from nvmesh.conf*/ \
-	{"group.id",					""},				/* Overriden with machine name*/ \
+	{"group.id",					""},				/* Overriden with machine name. We need that to track offset separately for each Toma/group*/ \
 	{"security.protocol",			"ssl"}, 			\
 	{"enable.ssl.certificate.verification", "true"}, 	\
 	{"ssl.ca.location",				""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
@@ -1415,7 +1415,7 @@ static int HW_full_config_consumer_init(bool is_full_init) {
 		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "HW_%s", nvmeibt_get_my_hostname());
+	snprintf(group_id_str, sizeof(group_id_str), "HW_%s", nvmeibt_get_my_hostname());		// 1 queue for all Toma's but each machine in its own group_id. From each group.id only 1 consumer can read.
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
