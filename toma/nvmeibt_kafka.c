@@ -432,6 +432,21 @@ static void error_event_cb(rd_kafka_t *rk, int err, const char *reason, __attrib
 	check_if_kafka_init_preserve_state_vars_required(err);
 }
 
+// Rebalancing callback is not needed according to current design as in consumer topic has 1 partition only, and consumer group there contains only 1 Toma
+static void rebalance_consumer_cb(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, __attribute__((__unused__)) void *opaque) {
+	N_Tf(u8u8nh6, "@STR: code[@INT]=@STR n_part=@INT", rd_kafka_name(rk), (int)err, rd_kafka_err2str(err), (pl ? pl->cnt : 0));
+	switch (err) {
+	case RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS:
+		// rd_kafka_assign(rk, pl); // We use manual assignment so no need to do that. The callback just notifies us that a rebalance occurred
+		break;
+	case RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS:
+		if (0) check_if_kafka_init_preserve_state_vars_required(err);	// Our partitions were revoked (due to rebalance, timeout, etc). Since we use manual assignment, we need to trigger reinit to properly re-assign
+		break;
+	default:
+		break;
+	}
+}
+
 static rd_kafka_conf_t *alloc_and_init_kafka_conf(const struct key_val_strs *kv_array, size_t n_kv, const char *group_id_str,
 												  void (*dr_msg_cb)(rd_kafka_t *,const rd_kafka_message_t *, void *opaque))
 {
@@ -498,6 +513,8 @@ static rd_kafka_conf_t *alloc_and_init_kafka_conf(const struct key_val_strs *kv_
 	if (dr_msg_cb) {	// Install a delivery-error callback for producers only.
 		rd_kafka_conf_set_dr_msg_cb(conf, dr_msg_cb);
 		N_Tf(vfhjiek, "CB=@PTR", dr_msg_cb);
+	} else {			// For consumers, install rebalance callback
+		rd_kafka_conf_set_rebalance_cb(conf, rebalance_consumer_cb);
 	}
 	rd_kafka_conf_set(conf, "debug", "security,broker,protocol", errstr, sizeof(errstr));	// Write to stderr (or stdout). Anyway, it is lost.
 	rd_kafka_conf_set_error_cb(conf, error_event_cb);
@@ -839,11 +856,12 @@ int nvmeibt_kafka_generic_log_msg_to_mgmt_send(const char *unique_key, char *hea
 /******************************************************************************/
 /************                   CONSUMERS                       ***************/
 /******************************************************************************/
-#define CONSUMER_DEFAULT_INIT {{0}, NULL, 0, RD_KAFKA_OFFSET_INVALID, RD_KAFKA_OFFSET_INVALID}
+#define CONSUMER_DEFAULT_INIT {{0}, NULL, 0 /*zero partition*/, 0, RD_KAFKA_OFFSET_INVALID, RD_KAFKA_OFFSET_INVALID}
 static struct t_consumer_impl {
 	char topic_name[128];					// Topic name for high-level consumer API
 	rd_kafka_t *consumer;
 	int32_t consumer_partition;
+	int32_t	cnt_zero_consecutive_consumes;
 	int64_t consumer_offset;				// Latest received message
 	int64_t	offset_committed;				// ACK'ed to kafka
 } k_CMD = CONSUMER_DEFAULT_INIT, k_HW_full_config = CONSUMER_DEFAULT_INIT,		// Each Toma consumes such queue
@@ -945,8 +963,22 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 	k_msg = rd_kafka_consumer_poll(k->consumer, 0 /* non-blocking*/);
 	if (!k_msg) {
 		N_Df(cvbz84k, "(@STR) returned NULL", rd_kafka_name(k->consumer));
+		if ((++k->cnt_zero_consecutive_consumes % 1024) == 0) {		// Periodically check if we still have partition assignment
+			rd_kafka_topic_partition_list_t *pl = NULL;
+			const rd_kafka_resp_err_t err = rd_kafka_assignment(k->consumer, &pl);
+			int i, n_part = (pl ? pl->cnt : 0);
+			if ((err == RD_KAFKA_RESP_ERR_NO_ERROR) && (n_part != 1)) {
+				N_Wf(cvbz84k2, "(@STR) unexpected num partitions=@INT will reinit", rd_kafka_name(k->consumer), n_part);
+				for (i = 0; i < n_part; ++i) {
+					N_Wf(cvbz84k21, "@INT) topic=@STR part[@INT].offset=@LD", i, pl->elems[i].topic, pl->elems[i].partition, pl->elems[i].offset);
+				}
+				check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__FATAL);
+			}
+			if (pl) rd_kafka_topic_partition_list_destroy(pl);
+		}
 		return 1;
 	}
+	k->cnt_zero_consecutive_consumes = 0;
 	N_Tf(fhs8lad, "(@STR) returned k_msg(err=@STR, k_offset=@LD)", rd_kafka_name(k->consumer), rd_kafka_err2str(k_msg->err), k_msg->offset);
 	switch (k_msg->err) {
 	case RD_KAFKA_RESP_ERR_NO_ERROR: {
