@@ -1380,7 +1380,7 @@ struct rd_kafka_s {
 	int log_lvl;
 	enum rd_kafka_type_t who;
 	rd_kafka_conf_t* conf;
-	rd_kafka_topic_t topic;
+	struct rd_kafka_topic_s topic;
 };
 
 static inline void __rd_kafka_topic_verify_valid(rd_kafka_topic_t *kt, int32_t partition) {
@@ -1446,6 +1446,13 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 		BUG_ON(ko != pl->elems[0].k);
 		return rd_kafka_consume_start(&ko->topic, ko->topic.partition, pl->elems[0].offset);
 	}
+}
+
+rd_kafka_resp_err_t rd_kafka_assignment (rd_kafka_t *ko, rd_kafka_topic_partition_list_t **pl) {
+	*pl = NULL;
+	if (!ko->topic.is_active)
+		return RD_KAFKA_RESP_ERR_NO_ERROR;
+	return RD_KAFKA_RESP_ERR__RETRY;		// Not implemented yet
 }
 
 static void __rd_kafka_topic_init(rd_kafka_topic_t *kt, const char* name, rd_kafka_topic_conf_t* conf) {
@@ -1597,7 +1604,7 @@ rd_kafka_topic_partition_t *rd_kafka_topic_partition_list_add(rd_kafka_topic_par
 		BUG_ON(!k || p->k);		// Must add valid pointer and only 1
 		p->k = k;
 	}
-	p->parition = partition;
+	p->partition = partition;
 	p->offset = RD_KAFKA_OFFSET_INVALID;
 	p->topic = name;
 	return p;
@@ -1628,6 +1635,10 @@ void rd_kafka_conf_set_dr_msg_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk,c
 	(void)kc;
 }
 
+void rd_kafka_conf_set_rebalance_cb(rd_kafka_conf_t* kc, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque)) {
+	(void)kc; (void)fn;
+}
+
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque) {
 	static int fail_once_every = 0;
 	rd_kafka_t *ko = kafka_simu_find_by_topic(kt);
@@ -1656,6 +1667,12 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	// Todo: Here, submit msg to management simulator
 	errno = 0;
 	return 0;
+}
+
+rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *k, char *errstr, size_t errstr_size) {
+	(void)k; (void)errstr_size;
+	errstr[0] = 0;
+	return RD_KAFKA_RESP_ERR_NO_ERROR;	// Or RD_KAFKA_RESP_ERR__FATAL???
 }
 
 rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, const char *val, char* err_str, size_t size_of_err) {
