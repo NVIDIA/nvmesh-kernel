@@ -936,7 +936,7 @@ static BOOL validate_and_confirm_write(struct gpt_util_config *config, const cha
 		fprintf(stderr, "Cannot modify GPT while TOMA is managing devices.\n");
 		fprintf(stderr, "\n");
 		fprintf(stderr, COL_YELLOW "To fix GPT, follow this procedure:" COL_RESET "\n");
-		fprintf(stderr, "  1. Exclude device: Add to /var/opt/nvmesh/.target_devices\n");
+		fprintf(stderr, "  1. Exclude device: Add to /etc/nvmesh/target_devices.conf\n");
 		fprintf(stderr, "  2. Signal TOMA: pkill -1 nvmeibt_toma\n");
 		fprintf(stderr, "  3. Find PCI address of this device (nvme10xxn1): ls /sys/bus/pci/drivers/nvmeibs/0000:*/misc; PCI_ADDR=\"0000:44:00.0\"\n");
 		fprintf(stderr, "  4. Unbind from nvmeibs: echo <PCI_ADDR> > /sys/bus/pci/drivers/nvmeibs/unbind\n");
