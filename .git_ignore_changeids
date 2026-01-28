@@ -1,0 +1,3 @@
+#This file contains change ids that should not be taken to future releases
+I60ab8fd6e50470d41b2caa0e942cd4cb0377b647 # ea200507fb Or Gerlitz 2025-10-20 [NVMESH-6854] common/io_stats: use the right
+Iee8eaf7ae238b4963f235c7f6e8484afce8cb11f # [NVMESH-7288] Revert: send messages from cache
