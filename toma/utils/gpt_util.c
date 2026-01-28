@@ -758,7 +758,7 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
  * Creates private directory with manifest + structure files
  * Returns 0 on success, -1 on error
  * Backup format:
- *   - directory: /var/opt/nvmesh/toma/backup_<device>_<timestamp>/ (0700 permissions)
+ *   - directory: GPT_UTIL_BACKUP_DIR/backup_<device>_<timestamp>/ (0700 permissions)
  *   - manifest: <directory>/manifest.json (0600 permissions)
  *   - structure files: <directory>/<structure>.bin (0600 permissions, 10 files total)
  * NVMesh-only: REQUIRES Main GPT + Metadata GPT + disk_metadata readable
@@ -782,7 +782,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	uint64_t									total_backup_bytes = 0;
 	char										controller_serial_num[64] = {0};
 
-	/* Generate backup prefix: /var/opt/nvmesh/toma/backup_<device>_<timestamp> */
+	/* Generate backup prefix: GPT_UTIL_BACKUP_DIR/backup_<device>_<timestamp> */
 	time(&now);
 	tm_info = gmtime(&now);
 	strftime(timestamp, sizeof(timestamp), "%m%d%Y_UTC%H%M%S", tm_info);
@@ -795,8 +795,8 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 		nvmeibt_strlcpy(device_basename, config->device_path, sizeof(device_basename));
 	}
 
-	/* Create private backup directory: /var/opt/nvmesh/toma/backup_<device>_<timestamp>/ */
-	snprintf(backup_dir, sizeof(backup_dir), "/var/opt/nvmesh/toma/backup_%s_%s", device_basename, timestamp);
+	/* Create private backup directory: GPT_UTIL_BACKUP_DIR/backup_<device>_<timestamp>/ */
+	snprintf(backup_dir, sizeof(backup_dir), GPT_UTIL_BACKUP_DIR "/backup_%s_%s", device_basename, timestamp);
 	snprintf(backup_prefix, backup_prefix_size, "%s", backup_dir);
 	snprintf(manifest_file, sizeof(manifest_file), "%s/manifest.json", backup_dir);
 
@@ -2029,10 +2029,10 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "Binary Backup/Restore:\n");
 	fprintf(stdout, "  # Automatic backup before writes:\n");
 	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --apply-from=changes.json --write\n", argv[0]);
-	fprintf(stdout, "  # Creates: " TOMA_ROOT_DIR "var/opt/nvmesh/toma/backup_nvme0n1_<timestamp>/\n");
+	fprintf(stdout, "  # Creates: " GPT_UTIL_BACKUP_DIR "/backup_nvme0n1_<timestamp>/\n");
 	fprintf(stdout, "  \n");
 	fprintf(stdout, "  # Manual restore:\n");
-	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --restore-binary=" TOMA_ROOT_DIR "var/opt/nvmesh/toma/backup_nvme0n1_<timestamp>/manifest.json\n\n", argv[0]);
+	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 --restore-binary=" GPT_UTIL_BACKUP_DIR "/backup_nvme0n1_<timestamp>/manifest.json\n\n", argv[0]);
 
 	fprintf(stdout, "Advanced:\n");
 	fprintf(stdout, "  %s -a " TOMA_ROOT_DIR "dev/nvme0n1 -Z\t\t\t\t# Print zeroing verification commands\n", argv[0]);

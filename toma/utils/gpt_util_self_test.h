@@ -22,6 +22,7 @@ void SELF_TEST_generate_mock_serial_number_from_path(const char *device_path, ch
 // Self-test mock device constants
 #define SELF_TEST_MOCK_DEVICE_BLOCKS		2000		// 8MB at 4KB blocks (enough for nested GPT)
 #define SELF_TEST_MOCK_DEVICE_BLOCK_SIZE	4096
+#define GPT_UTIL_BACKUP_DIR TOMA_ROOT_DIR "var/opt/nvmesh/toma"
 
 // Self-test framework: Test context structure
 struct self_test_ctx {
