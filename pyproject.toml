@@ -6,13 +6,14 @@ authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.11"
+python = ">=3.9,<3.11"
 confluent-kafka = "2.1.1"
 ipython = "7.34.0"
 pyyaml = "^6.0.2"
 paramiko = "^3.5.0"
 requests = "^2.32.3"
 traitlets = "^5.14.3"
+urllib3 = ">=2.6.3,<3"
 
 [tool.poetry.group.compile]
 optional = true
