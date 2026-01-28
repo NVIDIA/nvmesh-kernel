@@ -498,8 +498,8 @@ static ssize_t nvmeib_completion_noise_fill_stats_impl(void *priv, char *buf, si
 	struct jdr jdr_inst = jdr_make((struct charvec){.base = buf, .len = len});
 	int cpu;
 	struct cpu_noise_data noise_data;
-	int online_cpu_count = 0;
-	int current_cpu_index = 0;
+	int online_cpu_count __attribute__((unused)) = 0;
+	int current_cpu_index __attribute__((unused)) = 0;
 	int max_thresh_idx = min(nvmeib_completion_noise_threshold_percentages_size, MAX_NOISE_THRESHOLD_LEVELS);
 	int max_ctr_idx = use_local ? NVMEIBS_NOISE_CTRS_LOCAL_ONLY_MAX : NVMEIBS_NOISE_CTRS_LOCAL_ONLY_START;
 
@@ -618,4 +618,4 @@ ssize_t nvmeib_completion_noise_reset_stats(void *priv, char *buf, size_t len)
 	
 	return len;
 }
-EXPORT_SYMBOL(nvmeib_completion_noise_reset_stats); 
+EXPORT_SYMBOL(nvmeib_completion_noise_reset_stats);

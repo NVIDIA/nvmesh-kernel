@@ -8,10 +8,17 @@
 #ifdef __KERNEL__
 #include "arm_neon.h"
 
+#ifndef __clang__
 #define __crc32cd(a,b) __builtin_aarch64_crc32cx(a,b)
 #define __crc32cb(a,b) __builtin_aarch64_crc32cb(a,b)
 #define __crc32ch(a,b) __builtin_aarch64_crc32ch(a,b)
 #define __crc32cw(a,b) __builtin_aarch64_crc32cw(a,b)
+#else
+#define __crc32cd(a,b) __builtin_arm_crc32cd(a,b)
+#define __crc32cb(a,b) __builtin_arm_crc32cb(a,b)
+#define __crc32ch(a,b) __builtin_arm_crc32ch(a,b)
+#define __crc32cw(a,b) __builtin_arm_crc32cw(a,b)
+#endif
 
 #define alloca(len) __builtin_alloca(len)
 #else
@@ -126,10 +133,17 @@ static void xor_blocks_into(unsigned int count, unsigned int len, void *dest, vo
 		}
 
 		/* store */
+#ifndef __clang__
 		vst1q_u64(((uint64_t *)(dest+offset))+0, v0);
 		vst1q_u64(((uint64_t *)(dest+offset))+2, v1);
 		vst1q_u64(((uint64_t *)(dest+offset))+4, v2);
 		vst1q_u64(((uint64_t *)(dest+offset))+6, v3);
+#else
+		vst1q_u64(((unsigned long *)(dest+offset))+0, v0);
+		vst1q_u64(((unsigned long *)(dest+offset))+2, v1);
+		vst1q_u64(((unsigned long *)(dest+offset))+4, v2);
+		vst1q_u64(((unsigned long *)(dest+offset))+6, v3);
+#endif
 	}
 }
 
@@ -153,10 +167,17 @@ __attribute__((unused)) static void xor_blocks(unsigned int count, unsigned int 
 		}
 
 		/* store */
+#ifndef __clang__
 		vst1q_u64(((uint64_t *)(dest+offset))+0, v0);
 		vst1q_u64(((uint64_t *)(dest+offset))+2, v1);
 		vst1q_u64(((uint64_t *)(dest+offset))+4, v2);
 		vst1q_u64(((uint64_t *)(dest+offset))+6, v3);
+#else
+		vst1q_u64(((unsigned long *)(dest+offset))+0, v0);
+		vst1q_u64(((unsigned long *)(dest+offset))+2, v1);
+		vst1q_u64(((unsigned long *)(dest+offset))+4, v2);
+		vst1q_u64(((unsigned long *)(dest+offset))+6, v3);
+#endif
 	}
 }
 

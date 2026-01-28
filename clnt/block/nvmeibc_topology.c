@@ -3164,12 +3164,16 @@ static int __raid1_try_to_apply_RUD(struct nvmeibc_subscription_ctx *tr, struct 
 	r1 = __get_r1_by_tr(t, tr);
 	if (tomas_replicas < r1->replicas) { /* raid1->seg downgrade */
 		raid1_for_each_seg(r1, seg, si){
+#ifndef __clang__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpragmas"
 #pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
 			if (!strncmp(seg->uuid, seg_infos[0].uuid, UUID_LEN))
 				continue;
+#ifndef __clang__
 #pragma GCC diagnostic pop
+#endif
 
 			_NI_TOPO(trace_topology_raid1_try_to_apply_RUD, t, "downgrade request:(@N_SEGMENTS->@N_SEGMENTS) @SEGMENT_UUID->NULL",
 			   r1->replicas, tomas_replicas, seg->uuid);

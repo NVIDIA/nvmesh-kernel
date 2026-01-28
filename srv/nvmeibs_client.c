@@ -2006,9 +2006,9 @@ static int client_disk_resource_sets_count(struct nvmeibs_client_disk *cdisk,
 static int distribute_lionic_resources(struct nvmeibs_client *cl, struct nvmeibs_client_disk *cdisk, unsigned req_nrch_per_path)
 {
 	int total_rionics = 0, n_rionics = 0;
-	int per_client, per_rionic = 0, extra;
+	int per_client, per_rionic = 0, extra __attribute__((unused));
 	int i, j, k, n __attribute__((unused));
-	bool first = true;
+	bool first __attribute__((unused)) = true;
 	char guid[GUID_SIZE];
 
 	NFIN;

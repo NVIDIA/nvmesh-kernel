@@ -111,6 +111,7 @@ static inline void __jdr_on_object_done(struct jdr** jdr)
 }
 
 #ifndef CONCATENATE
+#define REMOVE_CONCATENATE_DEF
 #define CONCATENATE_DETAIL(x, y) x##y
 #define CONCATENATE(x, y) CONCATENATE_DETAIL(x, y)
 #endif
@@ -244,4 +245,9 @@ __attribute__((cleanup(__jdr_on_array_done))) struct jdr* UNIQUE_NAME(jdr_array_
 #ifndef __KERNEL__
 int nvmeib_write_file(const char *filename, const char *buf, size_t len);
 #endif
+
+#ifdef REMOVE_CONCATENATE_DEF
+#	undef CONCATENATE
+#endif
+
 #endif//NVMEIB_JDR_H_INCLUDE

@@ -4356,6 +4356,7 @@ static void wait_pd_events(struct per_disk *pd)
 				break;
 			case umc_identify_end:
 				handle_identify_end(pd);
+				FALLTHRU;
 			default:
 				break;
 			}

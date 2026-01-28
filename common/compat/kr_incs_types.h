@@ -94,6 +94,7 @@
 	static inline bool  IS_ERR_OR_NULL(const void *ptr) { return !ptr || IS_ERR(ptr); }
 #endif // __KERNEL__
 
+#ifndef __clang__
 #ifndef FALLTHRU
 	#if (__GNUC__ >= 7)
 		#if __has_attribute(__fallthrough__)
@@ -104,6 +105,9 @@
 	#else
 		#define FALLTHRU
 	#endif
+#endif
+#else
+	#define FALLTHRU __attribute__ ((__fallthrough__))
 #endif
 #ifndef __bitwise
 	#define __bitwise

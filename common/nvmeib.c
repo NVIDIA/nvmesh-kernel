@@ -3693,7 +3693,7 @@ EXPORT_SYMBOL(nvmeib_alloc);
 void nvmeib_release(struct nvmeib_alloc_info *ai,
 	void *vaddr, struct nvmesh_memmgr_metrics *mem_audit)
 {
-	int i, freed_pages = 0;
+	int i, freed_pages __attribute__((unused)) = 0;
 
 	NFIN;
 	if (vaddr)

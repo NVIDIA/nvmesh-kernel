@@ -5100,7 +5100,7 @@ static int kthread_process_drive_cq(void *arg)
 	bool cont = false;
 	int total = 0, i;
 	bool enb_irq = false;
-	u64 start_ns, busy_ns;
+	u64 start_ns, busy_ns __attribute__((unused));
 	unsigned long flags;
 
 	set_current_state(TASK_INTERRUPTIBLE);

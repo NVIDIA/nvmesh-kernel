@@ -1095,6 +1095,7 @@ endif
 cflags += -Wall -Wstrict-prototypes
 cflags += -Werror -Wno-error=unused-function -Wno-vla
 
+ifeq ($(LLVM),)
 GCC_VERCODE=$(shell gcc -dumpfullversion -dumpversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/')
 GCC800_VERCODE=80000
 ifeq ($(shell test $(GCC_VERCODE) -gt $(GCC800_VERCODE); echo $$?),0)
@@ -1106,6 +1107,7 @@ GCC1300_VERCODE=130000
 ifeq ($(shell test $(GCC_VERCODE) -gt $(GCC1300_VERCODE); echo $$?),0)
 	# Disable some GCC 13 and above warnings that cause issues
 	cflags += -Wno-attribute-warning
+endif
 endif
 
 # for KASAN

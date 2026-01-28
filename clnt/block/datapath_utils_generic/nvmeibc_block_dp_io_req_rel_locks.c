@@ -641,6 +641,7 @@ static void __squash_transport_lock_status(struct nvmeibc_cmd_lock *l, enum nvme
 	case NCL_STATUS_FAIL_NO_COMP:
 	case NCL_STATUS_FAIL_COMP:
 		__change_lock_status_to(l, NCL_STATUS_DISKDEAD);
+		FALLTHRU;
 	default:
 		break;
 	}
@@ -943,6 +944,7 @@ static int __retry_owner_lock_cb_sync_done(void* context, int err)
 	case 0:
 		__fix_release_val_after_full_sync(l);
 
+		FALLTHRU;
 	default:
 		break;  /* Daniel: Todo, analyze read failure error more precisely, TODO(EC-2584) */
 	}
