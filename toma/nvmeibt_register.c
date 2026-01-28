@@ -26,7 +26,6 @@
 		((1) << (NVMEIB_REG_LOCK_ID_LOCKID_BITS - NVMEIB_REG_LOCK_ID_ZONE_BITS))
 
 // This file contains the code for registrant disk_segment registration related functionality
-#define MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_NSEC  MSEC_TO_NSEC(6000LL)
 // #define REGISTRANT_DISCONNECT_QUEUE_DEPTH (512)
 
 static struct timespec next_wait_for_registrant_timeout = TIMESPEC_MAX_C99;

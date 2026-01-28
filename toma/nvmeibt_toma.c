@@ -724,14 +724,16 @@ static void terminate_toma(int rv)
 
 #define MAX_WAIT_RECOVERY_SEC		5
 #define MAX_WAIT_KAFKA_SEC			30
-#define MAX_WAIT_UNREGISTER_SEC		6
+#define MAX_WAIT_UNREGISTER_SEC		(MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_SEC + 2)
 static void attempt_stable_local_shutdown(void)
 {
-	static int	start_time_sec = 0;
-	static BOOL	are_disks_detached = 0;
-	static BOOL	is_store_segments_metadata_on_shutdown_launched = 0;
-	static BOOL	is_close_all_seg_actives_for_registration_launched = 0;
-	struct nvmeibt_node * node;
+	static int						start_time_sec = 0;
+	static BOOL						are_disks_detached = 0;
+	static BOOL						is_store_segments_metadata_on_shutdown_launched = 0;
+	static BOOL						is_close_all_seg_actives_for_registration_launched = 0;
+	       BOOL						is_any_registred;
+	struct nvmeibt_node				*node;
+
 	NFIN;
 
 	if (!start_time_sec) {
@@ -751,7 +753,9 @@ static void attempt_stable_local_shutdown(void)
 		nvmeibt_register_close_all_seg_actives_for_registration();
 		is_close_all_seg_actives_for_registration_launched = 1;
 	}
-	if (nvmeibt_register_is_any_registered()) {
+
+	is_any_registred = nvmeibt_register_is_any_registered();
+	if (is_any_registred) {
 		if (nvmeibt_global_get_cur_event_start_time().tv_sec - start_time_sec > MAX_WAIT_UNREGISTER_SEC) {
 			N_Wf(gy7n812, "Clients unregister failed");
 		} else {
@@ -769,9 +773,8 @@ static void attempt_stable_local_shutdown(void)
 		are_disks_detached = 1;
 	}
 
-	if (	((shutdown_status != ds_all || nvmeibt_raft_is_raft_shutdownable_now()) &&
-			 !nvmeibt_register_is_any_registered())) {
-		if (!is_store_segments_metadata_on_shutdown_launched) {
+	if (shutdown_status != ds_all || nvmeibt_raft_is_raft_shutdownable_now()) {
+		if (!is_store_segments_metadata_on_shutdown_launched && !is_any_registred) {		// At least 1 client attached. Cannot save (dbits/stale-locks) as they might be changed.
 			nvmeibt_seg_active_launch_store_of_all_seg_actives_metadata();
 			is_store_segments_metadata_on_shutdown_launched = 1;
 		}
