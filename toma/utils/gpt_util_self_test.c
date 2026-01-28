@@ -918,7 +918,7 @@ static int SELF_TEST_trigger_backup_for_device(struct self_test_ctx *ctx,
 /**
  * Find newest backup directory for a device
  * Returns 0 if found, -1 if not found
- * Looks for /tmp/backup_<device_basename>_<timestamp>/ directories
+ * Looks for /var/opt/nvmesh/toma/backup_<device_basename>_<timestamp>/ directories
  */
 static int find_newest_backup_directory(const char *device_path, char *manifest_file, size_t manifest_file_size)
 {
@@ -941,8 +941,8 @@ static int find_newest_backup_directory(const char *device_path, char *manifest_
 	/* Build search pattern */
 	snprintf(pattern, sizeof(pattern), "backup_%s_", device_basename);
 
-	/* Scan /tmp for backup directories */
-	dir = opendir("/tmp");
+	/* Scan /var/opt/nvmesh/toma for backup directories */
+	dir = opendir("/var/opt/nvmesh/toma");
 	if (!dir) {
 		return -1;
 	}
@@ -951,7 +951,7 @@ static int find_newest_backup_directory(const char *device_path, char *manifest_
 		if (strncmp(entry->d_name, pattern, strlen(pattern)) == 0 && entry->d_type == DT_DIR) {
 			char full_path[512];
 			struct stat st;
-			snprintf(full_path, sizeof(full_path), "/tmp/%s", entry->d_name);
+			snprintf(full_path, sizeof(full_path), "/var/opt/nvmesh/toma/%s", entry->d_name);
 			if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_mtime > newest_time) {
 				newest_time = st.st_mtime;
 				nvmeibt_strlcpy(backup_dir, full_path, sizeof(backup_dir));
@@ -1005,7 +1005,7 @@ static void remove_directory_recursive(const char *dir_path)
 
 /**
  * Cleanup all backup directories for a device
- * Removes all /tmp/backup_<device_basename>_<timestamp> directories
+ * Removes all /var/opt/nvmesh/toma/backup_<device_basename>_<timestamp> directories
  */
 static void cleanup_backup_files_for_device(const char *device_path)
 {
@@ -1027,8 +1027,8 @@ static void cleanup_backup_files_for_device(const char *device_path)
 	/* Build search pattern */
 	snprintf(pattern, sizeof(pattern), "backup_%s_", device_basename);
 
-	/* Scan /tmp for backup directories */
-	dir = opendir("/tmp");
+	/* Scan /var/opt/nvmesh/toma for backup directories */
+	dir = opendir("/var/opt/nvmesh/toma");
 	if (!dir) {
 		return;
 	}
@@ -1036,7 +1036,7 @@ static void cleanup_backup_files_for_device(const char *device_path)
 	while ((entry = readdir(dir)) != NULL) {
 		/* Match backup directories: backup_<device>_<timestamp> */
 		if (strncmp(entry->d_name, pattern, strlen(pattern)) == 0 && entry->d_type == DT_DIR) {
-			snprintf(full_path, sizeof(full_path), "/tmp/%s", entry->d_name);
+			snprintf(full_path, sizeof(full_path), "/var/opt/nvmesh/toma/%s", entry->d_name);
 			remove_directory_recursive(full_path);
 		}
 	}
@@ -2415,17 +2415,17 @@ DEFINE_TEST(binary_backup_restore)
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
-	TEST_INFO("Modular backup should have been created in /tmp/");
+	TEST_INFO("Modular backup should have been created in /var/opt/nvmesh/toma/");
 
-	/* Step 4: Find the backup directory (newest backup_* directory in /tmp) */
-	dir = opendir("/tmp");
+	/* Step 4: Find the backup directory (newest backup_* directory in /var/opt/nvmesh/toma) */
+	dir = opendir("/var/opt/nvmesh/toma");
 
 	if (dir) {
 		while ((entry = readdir(dir)) != NULL) {
 			if (strncmp(entry->d_name, "backup_", 7) == 0 && entry->d_type == DT_DIR) {
 				char full_path[512];
 				struct stat st;
-				snprintf(full_path, sizeof(full_path), "/tmp/%s", entry->d_name);
+				snprintf(full_path, sizeof(full_path), "/var/opt/nvmesh/toma/%s", entry->d_name);
 				if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_mtime > newest_time) {
 					newest_time = st.st_mtime;
 					nvmeibt_strlcpy(backup_dir, full_path, sizeof(backup_dir));
