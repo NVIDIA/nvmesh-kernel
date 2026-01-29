@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+
+import argparse
+import json
+import subprocess
+import os
+import yaml
+from threading import Thread
+import sys
+import pprint
+
+from scale_sim_controller import ScaleSimControllerParser, ClientController, TargetController, NodeController, UpgradeAgentController, CONFIG_DIR
+
+from os.path import expanduser
+USER_HOME_DIR = expanduser("~")
+
+
+def log(msg, end='\n', flush=False):
+	sys.stdout.write(msg + end)
+	if flush:
+		sys.stdout.flush()
+
+
+def buildParser():
+	parser = argparse.ArgumentParser(description='NVMesh Scale Simulator Manager')
+	subparsers = parser.add_subparsers(dest="command")
+	addRunParser(subparsers)
+	addStopParser(subparsers)
+	addDeployParser(subparsers)
+	addInstallParser(subparsers)
+	addLogsParser(subparsers)
+	addClearCacheParser(subparsers)
+	return parser, subparsers
+
+
+def addRunParser(subparsers):
+	subParser = subparsers.add_parser('run', help='Run The Simulator')
+	subParser.add_argument('-i', '--image', type=str, default='excelero/scale-sim', help='The Docker image ID to spawn the containers from')
+	subParser.add_argument('-n', type=int, help='Number of simulated machines')
+	subParser.add_argument('-s','--hosts', type=str, nargs='+', default=['localhost'], help='A list of actual servers of which to spawn the Docker containers')
+	subParser.add_argument('-c','--config', type=str, default=USER_HOME_DIR + '/.scale-sim/config.yaml', help='The path to the config file')
+	subParser.add_argument('--cluster-deployment-config', type=str, help='The path to the cluster-deployment-config.json file')
+	subParser.add_argument('--debug', action='store_true', default=False)
+	subParser.add_argument('--logs', action='store_true', default=False)
+	subParser.add_argument('--mongo-uri', type=str, help='The mongoDB URI to load the nodes configuration from')
+	subParser.add_argument('--port', action='append', type=str, help='port mapping in the format "5678:5678"')
+
+
+def addStopParser(subparsers):
+	subParser = subparsers.add_parser('stop', help='Stop The Simulator')
+	subParser.add_argument('-s','--hosts', type=str, nargs='+', default=['localhost'], help='A list of host servers on which to stop the containers')
+	subParser.add_argument('-c','--containers', type=str, nargs='+', default=["all"],
+						help='A list of containers to stop, "all" will stop all containers on the host. either index or full container hostname are accepted')
+
+
+def addDeployParser(subparsers):
+	subParser = subparsers.add_parser('deploy', help='Deploy the Simulator on hosts')
+	subParser.add_argument('-i', '--image', type=str, default='excelero/scale-sim', help='The Docker image to copy')
+	subParser.add_argument('-s','--hosts', type=str, nargs='+', default=['localhost'], help='A list of Actual servers to which to copy the image')
+
+
+def addInstallParser(subparsers):
+	subParser = subparsers.add_parser('install', help='Install the Simulator on hosts')
+	subParser.add_argument('-s','--hosts', type=str, nargs='+', default=['localhost'], help='A list of Actual servers on which to install the Simulator')
+	subParser.add_argument('--build', action='store_true', default=False)
+	subParser.add_argument('--deploy', action='store_true', default=False)
+	subParser.add_argument('-i', '--image', type=str, default='excelero/scale-sim', help='The Docker image to copy')
+
+
+def addLogsParser(subparsers):
+	subParser = subparsers.add_parser('logs', help='Show logs')
+	subParser.add_argument('-s','--host', type=str, default=['localhost'], help='The host name on which the container is running')
+	subParser.add_argument('-c','--container', type=str, required=True, help='The name of the container to see logs from')
+	subParser.add_argument('-f','--follow', action='store_true', default=False, help='follow logs')
+
+
+def addClearCacheParser(subparsers):
+	subParser = subparsers.add_parser('clear', help='clear / or delete elements')
+	clearParsers = subParser.add_subparsers(dest="clearWhat")
+	clearCacheParser = clearParsers.add_parser('cache', help='clear cache')
+	clearCacheParser.add_argument('-s','--hosts', type=str, nargs='+', default=['localhost'], help='The host name on which the container is running')
+
+
+def doParallel(iterable, func, *args):
+	threads = []
+
+	for item in iterable:
+		argsWithItem = (item,) + args
+		t = Thread(target=func, args=argsWithItem)
+		t.start()
+		threads.append(t)
+
+	for t in threads:
+		t.join()
+
+
+def checkConfigFileIsValid(configFilepath):
+	isFileExists(configFilepath)
+	config = readConfigFromFile(configFilepath)
+
+	if 'managementServers' not in config['baseConfig']:
+		log("WARNING: 'managementServers' not found in config, containers will use management address 'localhost:4001'")
+
+
+def isFileExists(filepath):
+	if not os.path.isfile(filepath):
+		log("Error: Config file not found {}".format(filepath))
+		exit(2)
+
+
+def readConfigFromFile(filepath):
+	with open(filepath) as f:
+		try:
+			if filepath.endswith('.yaml'):
+				config = yaml.safe_load(f)
+			else:
+				config = json.load(f)
+			return config
+		except Exception as ex:
+			log("Error: could not parse JSON from Config file at: {0}, exception: {1}".format(filepath, ex))
+			exit(2)
+
+
+def run(args):
+	hostsParams = None
+	containersNumber = None
+	hostsNumber= None
+
+	checkConfigFileIsValid(args.config)
+	if args.n:
+		hostsParams = getListOfHostParameters(args)
+		containersNumber = args.n
+		hostsNumber = len(args.hosts)
+	elif args.cluster_deployment_config:
+		hostsParams = getListOfHostParametersFromClusterDeploymentConfigFile(args)
+		containersNumber = reduce(lambda acc, hostParams: acc + hostParams[2] - hostParams[1] + 1, hostsParams, 0)
+		hostsNumber = len(hostsParams)
+	else:
+		log("You have to specify a number of simulated machines with -n, or a cluster deployment config file with --cluster-deployment-config")
+		exit(2)
+
+	showDebug = args.debug
+	quiet = '--debug' if showDebug else ''
+	ports = ''
+	if args.port:
+		for p in args.port:
+			ports += ' --port ' + p + ' '
+
+	def runOnSingleHost(argsTuple):
+		host, start, end, image, config = argsTuple
+
+		# create the node-config file on the local machine
+		NODE_CONFIG_DIR = expanduser('~/.scale-sim/')
+		NODE_CONFIG_FILE_NAME = '.node-config.json'
+		NODE_CONFIG_FILE_PATH = NODE_CONFIG_DIR + NODE_CONFIG_FILE_NAME
+
+		config = readConfigFromFile(args.config)
+		runCommand('mkdir -p %s' % NODE_CONFIG_DIR, debug=True)
+
+		with open(NODE_CONFIG_FILE_PATH, 'w') as fp:
+			json.dump(config, fp)
+
+		# copy config to machine
+		if host != 'localhost':
+			destHost = "{}:".format(host)
+			mkdirOnRemote = "ssh {} mkdir -p .scale-sim".format(host)
+			runCommand(mkdirOnRemote, debug=True)
+			rsyncCmd = "rsync {config_file} --rsync-path=\"mkdir -p .scale-sim && rsync\" {destHost}.scale-sim/.node-config.json".format(config_file=NODE_CONFIG_FILE_PATH, destHost=destHost)
+			runCommand(rsyncCmd, debug=True)
+
+		mongoURIFlag = '--mongo-uri {}'.format(args.mongo_uri) if args.mongo_uri else ''
+		logs_flag = '--logs' if args.logs else ''
+		cmd = "/opt/scaleSim/scale-sim-runner.py --image {image} --n_start {startInx} --n_end {endIdx} {quiet} {logs} {mongo} {ports}".format(
+			image=image, startInx=start, endIdx=end, quiet=quiet, logs=logs_flag, mongo=mongoURIFlag, ports=ports)
+
+		runCommandOnHost(cmd, host, showDebug)
+
+	doParallel(hostsParams, runOnSingleHost)
+	log("finished spawning {} containers on {} hosts".format(containersNumber, hostsNumber))
+
+
+def getListOfHostParameters(args):
+	numOfContainers = args.n
+	numOfHosts = len(args.hosts)
+	containersPerHost = round(numOfContainers / numOfHosts)
+	hostsParams = []
+
+	# calculate start and end for each host
+	containersSpawned = 0
+	for index, host in enumerate(args.hosts):
+		start = containersSpawned + 1
+		end = int(containersSpawned + containersPerHost)
+		if index + 1 <= numOfContainers % numOfHosts:
+			end += 1
+
+		end = min(end, numOfContainers)
+		containersSpawned = end
+		argsTuple = (host, start, end, args.image, args.config)
+		hostsParams.append(argsTuple)
+		if end >= numOfContainers:
+			break
+
+	return hostsParams
+
+
+def getListOfHostParametersFromClusterDeploymentConfigFile(args):
+	isFileExists(args.cluster_deployment_config)
+	config = readConfigFromFile(args.cluster_deployment_config)
+	hostsParams = []
+
+	for hostInfo in config:
+		host = hostInfo['host']
+
+		if isinstance(hostInfo['containers'], list):
+			if len(hostInfo['containers']) != 2:
+				log("The 'containers' range for host: {} is wrong, range for host containers should be a 2 items list: [start, end]".format(host))
+				exit(2)
+
+			start, end = hostInfo['containers']
+		elif isinstance(hostInfo['containers'], int):
+			if len(hostsParams) == 0:
+				start, end = 1, hostInfo['containers']
+			else:
+				start = lastIndex + 1
+				end = lastIndex + hostInfo['containers']
+		else:
+			log("The 'containers' for host: {} is wrong, it should be a range list: [start, end], or an int amount".format(host))
+			exit(2)
+
+		lastIndex = end
+
+		argsTuple = (host, start, end, args.image, args.config)
+		hostsParams.append(argsTuple)
+
+	print('CLUSTER')
+	pprint.pprint(hostsParams)
+	return hostsParams
+
+
+def stop(args):
+	def stopAllContainersOnHost(host):
+		cmd = "sudo /opt/scaleSim/docker_stop.sh {}".format(' '.join(args.containers))
+		log("Stopping all instances on {}".format(host))
+		runCommandOnHost(cmd, host)
+
+	doParallel(args.hosts, stopAllContainersOnHost)
+	log("All instances Stopped on {}".format(args.hosts))
+
+
+def getLatestImage():
+	cmd = "docker image ls --format \"{{.ID}}\" | head -1"
+	p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	out, err = p.communicate()
+	imageID = out.split('\n')[0]
+
+	print("using latest image with id {}".format(imageID))
+	return imageID
+
+
+def deploy(args):
+
+	# create tar from docker image
+	log("packing docker image {} into a .tar archive".format(args.image))
+
+	tarFileName = 'docker-image-{}.tar'.format(args.image.replace('/','_').replace(':', '_'))
+	cmd = "rm -f /tmp/{}; docker save -o /tmp/{} {}".format(tarFileName, tarFileName, args.image)
+	runCommand(cmd)
+
+	def deployToOneHost(host, image, tarFileName):
+		log("{}: deploying image {}".format(host, image))
+
+		log("copying image")
+		cmd = "rsync --progress /tmp/{file} {host}:~/{file}".format(file=tarFileName, host=host)
+		runCommand(cmd)
+
+		log("{}: moving files and loading image into docker".format(host))
+		cmd = "sudo mv ~/{tarFileName} /opt/scaleSim/{tarFileName} ; "
+		cmd += "sudo docker load -i /opt/scaleSim/{tarFileName} ; "
+		#cmd += "echo {image} | sudo tee /opt/scaleSim/latest-image"
+		cmd = cmd.format(tarFileName=tarFileName, image=image)
+		runCommandOnHost(cmd, host)
+		log("{}: ScaleSim deployed to {}".format(host, image))
+
+	doParallel(args.hosts, deployToOneHost, args.image, tarFileName)
+
+
+def install(args):
+	if args.build:
+		runCommand('/opt/scaleSim/docker_build.sh')
+
+	if args.deploy:
+		deploy(args)
+
+	def installOnHost(host):
+		log("{}: installing ScaleSim".format(host))
+
+		if host != 'localhost':
+			log("{}: copying scaleSim files".format(host))
+			cmd = "rsync ~/projects/nvmesh/management_cm/scaleSimulators/orch_manager/* {host}:~/scaleSim/".format(host=host)
+			runCommand(cmd)
+
+			log("{}: moving files to /opt/scaleSim/".format(host))
+			cmd = "sudo mkdir -p /opt/scaleSim/ ; sudo mv ~/scaleSim/* /opt/scaleSim/"
+			runCommandOnHost(cmd, host)
+		else:
+			cmd = "sudo mkdir -p /opt/scaleSim/ ; sudo cp ~/projects/nvmesh/management_cm/scaleSimulators/orch_manager/* /opt/scaleSim/"
+			runCommand(cmd)
+
+		# install dependencies only on remote hosts
+		if host != 'localhost':
+			log("{}: installing docker".format(host))
+			cmd = "sudo /opt/scaleSim/docker_install.sh"
+			runCommandOnHost(cmd, host)
+
+			log('{}: install pymongo'.format(host))
+			cmd = 'sudo pip install pymongo'
+			runCommandOnHost(cmd, host)
+
+		log("{}: creating scale-sim command in /usr/local/bin/scale-sim".format(host))
+		cmd = "sudo ln -sf /opt/scaleSim/scale-sim-cli /usr/local/bin/scale-sim"
+		runCommandOnHost(cmd, host)
+
+		log("{}: scale-sim installed ".format(host))
+
+	doParallel(args.hosts, installOnHost)
+
+
+def clearSimulatorCache(args):
+	cmd = 'sudo rm -rf {config_dir}/*'.format(config_dir=CONFIG_DIR)
+
+	for host in args.hosts:
+		runCommandOnHost(cmd, host)
+
+
+def show_logs(args):
+	follow_flag = '-f' if args.follow else ''
+	cmd = 'docker logs {follow} {container_name}'.format(follow=follow_flag, container_name=args.container)
+	res = runCommandOnHost(cmd, args.host)
+
+
+def runCommand(cmd, debug=False):
+	if debug:
+		print(cmd)
+	exitCode = subprocess.call(cmd, shell=True)
+	return exitCode == 0
+
+
+def runSshCommand(cmd, host, debug=False):
+	sshCmd = "ssh {host} \"{cmd}\"".format(host=host, cmd=cmd)
+	return runCommand(sshCmd, debug)
+
+
+def runCommandOnHost(cmd, host, debug=False):
+	if host == 'localhost':
+		return runCommand(cmd, debug)
+	else:
+		return runSshCommand(cmd, host, debug)
+
+
+if __name__ == "__main__":
+	parser, subparsers = buildParser()
+	ScaleSimControllerParser.addSubParsers(subparsers)
+	args = parser.parse_args()
+
+	if args.command == "run":
+		run(args)
+	elif args.command == "stop":
+		stop(args)
+	elif args.command == "deploy":
+		deploy(args)
+	elif args.command == "install":
+		install(args)
+	elif args.command == "logs":
+		show_logs(args)
+	elif args.command == "client":
+		ClientController.handleCliCommand(args)
+	elif args.command == "target":
+		TargetController.handleCliCommand(args)
+	elif args.command == "upgradeAgent":
+		UpgradeAgentController.handleCliCommand(args)
+	elif args.command == "component":
+		NodeController.handleCliCommand(args)
+	elif args.command == "clear" and args.clearWhat == "cache":
+		clearSimulatorCache(args)
+	else:
+		log("command {} is not implemented".format(args.command))

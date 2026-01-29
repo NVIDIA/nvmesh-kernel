@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
+mount -t proc none /proc
+mount -t sysfs none /sys
+
+echo "NVMESH.KUNIT.BEGIN"
+#running our tests
+insmod /opt/nvmesh/nvmeibc_bio.ko
+
+echo "NVMESH.KUNIT.END"
+poweroff -nf # n - do not sync; f - force (don't go through init)

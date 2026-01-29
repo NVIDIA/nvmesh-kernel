@@ -1,0 +1,156 @@
+#!/usr/bin/env bpftrace
+
+/*
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+#include <linux/fs.h>
+
+BEGIN
+{
+	@writeback_reason[0] = "background";
+	@writeback_reason[1] = "vmscan";
+	@writeback_reason[2] = "sync";
+	@writeback_reason[3] = "periodic";
+	@writeback_reason[4] = "laptop_timer";
+	@writeback_reason[5] = "free_more_memory";
+	@writeback_reason[6] = "fs_free_space";
+	@writeback_reason[7] = "forker_thread";
+}
+
+END
+{
+	clear(@writeback_reason);
+}
+
+/*
+tracepoint:syscalls:sys_enter_open, tracepoint:syscalls:sys_enter_openat
+{
+	@open_filename[tid] = args.filename;
+	@open_start[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_open,tracepoint:syscalls:sys_exit_openat /@open_filename[tid]/
+{
+	$ret = args.ret;
+	$fd = $ret >= 0 ? $ret : -1;
+	$errno = $ret >= 0 ? 0 : - $ret;
+    $lat = (nsecs - @open_start[tid]) / 1000;
+
+	printf("%s sys_exit_open pid=%d command=%s fd=%d errno=%d path=%s latency=%d.%03d(ms)\n", strftime("%H:%M:%S:%f", nsecs), pid, comm, $fd, $errno, str(@open_filename[tid]),$lat / 1000, $lat % 1000);
+
+	@open_fd_filename[tid,$fd] = @open_filename[tid];
+
+	delete(@open_filename[tid]);
+	delete(@open_start[tid]);
+}
+
+tracepoint:syscalls:sys_enter_close / @open_fd_filename[tid,args->fd] /
+{
+    printf("%s sys_enter_close command=%s pid=%d tid=%d fd=%ld path=%s\n", strftime("%H:%M:%S:%f", nsecs), comm, pid, tid, args->fd, str(@open_fd_filename[tid,args->fd]));
+    @close_fd[tid] = args->fd;
+    @close_start[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_close / @open_fd_filename[tid, @close_fd[tid]] /
+{
+    $lat = (nsecs - @close_start[tid]) / 1000;
+
+    printf("%s sys_exit_close command=%s pid=%d tid=%d path=%s latency=%d.%03d(ms)\n", strftime("%H:%M:%S:%f", nsecs), comm, pid, tid, str(@open_fd_filename[tid,@close_fd[tid]]),$lat / 1000, $lat % 1000);
+
+    delete(@close_fd[tid]);
+    delete(@close_start[tid]);
+    delete(@open_fd_filename[tid,@close_fd[tid]]);
+}
+*/
+
+kprobe:nvmeiba_bdev_open
+{
+	@nvmeiba_bdev_open_start[tid] = nsecs;
+	@nvmeiba_bdev_open_gendisk[tid] = arg0;
+	@nvmeiba_bdev_open_mode[tid] = arg1;
+	@nvmeiba_bdev_open_pgid[tid] = arg2;
+}
+
+kretprobe:nvmeiba_bdev_open /@nvmeiba_bdev_open_start[tid]/
+{
+	$gendisk = (struct gendisk*)@nvmeiba_bdev_open_gendisk[tid];
+    $lat = (nsecs - @nvmeiba_bdev_open_start[tid]) / 1000;
+
+    printf("%s nvmeiba_bdev_open command=%s pid=%d tid=%d gendisk=%p (major=%d,minor=%d) mode=0x%llx pgid=0x%lx name=%s latency=%d.%03d(ms)\n",
+        strftime("%H:%M:%S:%f", nsecs),
+        comm,
+        pid,
+        tid,
+		$gendisk,
+		$gendisk->major,
+		$gendisk->minors,
+		@nvmeiba_bdev_open_mode[tid],
+		@nvmeiba_bdev_open_pgid[tid],
+        $gendisk->disk_name,
+		$lat / 1000,
+		$lat % 1000
+	);
+
+    delete(@nvmeiba_bdev_open_start[tid]);
+    delete(@nvmeiba_bdev_open_gendisk[tid]);
+    delete(@nvmeiba_bdev_open_mode[tid]);
+    delete(@nvmeiba_bdev_open_pgid[tid]);
+}
+
+kprobe:nvmeiba_bdev_close
+{
+	@nvmeiba_bdev_close_start[tid] = nsecs;
+	@nvmeiba_bdev_close_gendisk[tid] = arg0;
+	@nvmeiba_bdev_close_mode[tid] = arg1;
+	@nvmeiba_bdev_close_pgid[tid] = arg2;
+}
+
+kretprobe:nvmeiba_bdev_close /@nvmeiba_bdev_close_start[tid]/
+{
+    $lat = (nsecs - @nvmeiba_bdev_close_start[tid]) / 1000;
+	$gendisk = (struct gendisk*)@nvmeiba_bdev_open_gendisk[tid];
+
+    printf("%s nvmeiba_bdev_close command=%s pid=%d tid=%d gendisk=%p (major=%d,minor=%d) mode=0x%llx pgid=0x%lx name=%s latency=%d.%03d(ms)\n",
+        strftime("%H:%M:%S:%f", nsecs),
+        comm,
+        pid,
+        tid,
+		$gendisk, 
+		$gendisk->major,
+		$gendisk->minors,
+		@nvmeiba_bdev_close_mode[tid],
+		@nvmeiba_bdev_close_pgid[tid],
+		$gendisk->disk_name,
+		$lat / 1000,
+		$lat % 1000
+	);
+
+    delete(@nvmeiba_bdev_close_start[tid]);
+    delete(@nvmeiba_bdev_close_gendisk[tid]);
+    delete(@nvmeiba_bdev_close_mode[tid]);
+    delete(@nvmeiba_bdev_close_pgid[tid]);
+}
+
+/*
+tracepoint:writeback:writeback_start
+{
+	@writeback_start[args.sb_dev] = nsecs;
+}
+
+tracepoint:writeback:writeback_written
+{
+	$sb_dev = args.sb_dev;
+	$s = @writeback_start[$sb_dev];
+	$lat = $s ? (nsecs - $s) / 1000 : 0;
+
+	printf("%s writeback_written device=%s pages=%d reason=%s latency=%d.%03d(ms)\n", strftime("%H:%M:%S:%f", nsecs), args.name,
+		args.nr_pages & 0xffff,
+		@writeback_reason[args.reason & 0xffffffff],
+		$lat / 1000, $lat % 1000);
+
+	delete(@writeback_start[$sb_dev]);
+}
+*/
+

@@ -1,0 +1,216 @@
+#!/bin/bash
+
+##############################################################################
+#  Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.  #
+#                                                                            #
+#  This file is part of NVMesh software.                                     #
+##############################################################################
+
+# Description:
+# Spread NVMe disks IRQs accross CPUs within $NVME_IRQ_AFFINITY_DOMAIN doamin,
+# which can be either: NUMA-Node, Socket or Host (i.e all CPUS). For-each disk,
+# if $NVME_IRQ_AFFINITY_RR_RESET is on start with the first CPU in domain, otherwise
+# continue from if the least-used CPU.
+#
+# Notes:
+# 1. NVMesh NVMe driver has N nvme-queues (see [min/max]_local_nvmeqs module
+#    params) which are used by Local and No-RDDA channels. When an IO request
+#    arrives on cpu C it will be submitted to nvmeq Q, where Q = 'C % N'.
+#    In an optimal scenario where N=#CPUs, we would prefer to assign IRQ of
+#    queue x to CPU x so for locallity.
+#
+# 2. There are setups with many noma nodes with few CPUs on each numa.
+#    In such setups, mainly if many disks reside on the same numa or if disk
+#    have many queues (and thus many IRQs), we would prefer to spread IRQs
+#    accross socket (e.g. AMD where NPS>1 (Numa Per Socket) or per host (e.g.
+#    Intel x86)
+#
+# TBD:
+# * Extend $NVME_IRQ_AFFINITY_RR_RESET selector to support mode where for disks
+#   with N == 'Num of cores within $NVME_IRQ_AFFINITY_DOMAIN' start from first
+#   core in group. For other copu continue from cpus_group_curr_idx[i]
+# * See 'TBD' in code.
+
+# Take NVME_IRQ_AFFINITY_* env-vars from...
+. /etc/nvmesh/nvmesh.conf
+
+if [ "$NVME_IRQ_AFFINITY_DOMAIN" == "none" ]; then
+    echo "Skip running nvmesh_set_irq_affinity - let things be done by irqbalancer"
+    exit
+fi
+
+if [ -z "$NVME_IRQ_AFFINITY_DOMAIN" ]; then
+    echo "Default to pernuma"
+    NVME_IRQ_AFFINITY_DOMAIN="pernuma"
+fi
+
+if  [[ "$NVME_IRQ_AFFINITY_DOMAIN" != "pernuma" &&
+       "$NVME_IRQ_AFFINITY_DOMAIN" != "persocket" &&
+       "$NVME_IRQ_AFFINITY_DOMAIN" != "fullspread" ]]; then
+    echo "nvmesh_set_irq_affinity: Unsupported mode '$NVME_IRQ_AFFINITY_DOMAIN'"
+    echo "nvmesh_set_irq_affinity: Unsupported mode '$NVME_IRQ_AFFINITY_DOMAIN'" > /dev/kmsg
+    exit
+fi
+
+if [ "$NVME_IRQ_AFFINITY_RR_RESET" == "Yes" ] || [ "$NVME_IRQ_AFFINITY_RR_RESET" == "True" ]; then
+    NVME_IRQ_AFFINITY_RR_RESET=true
+else
+    NVME_IRQ_AFFINITY_RR_RESET=false
+fi
+
+echo "nvmesh_set_irq_affinity: domain='$NVME_IRQ_AFFINITY_DOMAIN', rrr=$NVME_IRQ_AFFINITY_RR_RESET"
+echo "nvmesh_set_irq_affinity: domain='$NVME_IRQ_AFFINITY_DOMAIN', rrr=$NVME_IRQ_AFFINITY_RR_RESET" > /dev/kmsg
+
+# Common Code with nvmesh_set_tcp_affinity has been moved to nvmesh_set_irq_affinity_common
+source nvmesh_set_irq_affinity_common
+if [ $? != 0 ]; then
+	echo "$0: ERROR - nvmesh_set_irq_affinity_common not found!" | tee /dev/kmsg
+	exit 1
+fi
+
+print_table "TBL_CPUS_PER_NUMA" $N_NUMAS NUM_CPUS_PER_NUMA[@] 
+print_table "TBL_CPUS_PER_SOCK" $N_SOCKS NUM_CPUS_PER_SOCK[@] 
+print_table "TBL_CPUS_PER_HOST" $N_HOSTS NUM_CPUS_PER_HOST[@] 
+
+# ---------------------------------------------------------------------------- #
+# cpus-group DB: groups of cpus on the same numa/socket/host
+# ---------------------------------------------------------------------------- #
+n_cpus_groups=0			# num rows in cpus_group_table
+declare -A cpus_group_table	# cpus_group_table[i][j] = j-th cpu-idx in group i
+				# i in {0..(n_cpus_groups-1)}
+				# j in {0..(cpus_group_size[i]-1)}
+declare -a cpus_group_size	# cpus_group_size[i]     = num cpus in group 'i'
+declare -a cpus_group_curr_idx	# cpus_group_curr_idx[i] = next cpu to use from group 'i'
+
+# ---------------------------------------------------------------------------- #
+# Populate cpus-group DB according to NVME_IRQ_AFFINITY_DOMAIN
+# ---------------------------------------------------------------------------- #
+if [ "$NVME_IRQ_AFFINITY_DOMAIN" == "pernuma" ]; then
+    n_cpus_groups=$N_NUMAS
+    for ((i=0;i<n_cpus_groups;i++)) do
+	cpus_group_size[$i]=${NUM_CPUS_PER_NUMA[$i]}
+	for ((j=0; j<cpus_group_size[$i]; j++)) do
+	    cpus_group_table[$i,$j]=${TBL_CPUS_PER_NUMA[$i,$j]}
+	done
+    done
+elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket" ]; then
+    n_cpus_groups=$N_SOCKS
+    for ((i=0;i<n_cpus_groups;i++)) do
+	cpus_group_size[$i]=${NUM_CPUS_PER_SOCK[$i]}
+	for ((j=0; j<cpus_group_size[$i]; j++)) do
+	    cpus_group_table[$i,$j]=${TBL_CPUS_PER_SOCK[$i,$j]}
+	done
+    done
+elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "fullspread" ]; then
+    n_cpus_groups=$N_HOSTS
+    for ((i=0;i<n_cpus_groups;i++)) do
+	cpus_group_size[$i]=${NUM_CPUS_PER_HOST[$i]}
+	for ((j=0; j<cpus_group_size[$i]; j++)) do
+	    cpus_group_table[$i,$j]=${TBL_CPUS_PER_HOST[$i,$j]}
+	done
+    done
+else
+    echo "Unsupported mode $NVME_IRQ_AFFINITY_DOMAIN"
+    exit
+fi
+
+print_table "cpus_group_table" $n_cpus_groups cpus_group_size[@] 
+
+# ---------------------------------------------------------------------------- #
+# Associate disk to cpus group according to NVME_IRQ_AFFINITY_DOMAIN
+# ---------------------------------------------------------------------------- #
+echo "---"
+n_disks=0
+declare -a disk_to_group
+
+for x in `ls /proc/nvmeibs/smart* | cut -c 20- | sort -g`; do
+    numa=`grep Numa /proc/nvmeibs/smart$x | cut -d= -f2`
+    if [ $numa -eq -1 ]; then
+	numa=0
+    fi
+    sock=${NUMA_2_SOCK[$numa]}
+    if [ "$NVME_IRQ_AFFINITY_DOMAIN" == "pernuma" ]; then
+	disk_to_group[$x]=$numa
+    elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket" ]; then
+	disk_to_group[$x]=$sock
+    elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "fullspread" ]; then
+	disk_to_group[$x]=0
+    else
+	echo "Unsupported mode $NVME_IRQ_AFFINITY_DOMAIN"
+	exit
+    fi
+    printf "%2d. disk %2d (numa=%2d, sock=%2d) -> cpus-group=%2d\n"\
+    $n_disks $x $numa $sock ${disk_to_group[$x]}
+    n_disks=$(($n_disks+1))
+done
+
+# ---------------------------------------------------------------------------- #
+# Assign cpus to NVMe IRQs
+# ---------------------------------------------------------------------------- #
+echo "---"
+for ((i=0;i<n_cpus_groups;i++)) do
+    cpus_group_curr_idx[$i]=0
+done
+
+declare -a n_irqs_per_cpu
+for ((i=0;i<N_CPUS;i++)) do
+    n_irqs_per_cpu[$i]=0
+done
+
+# alternative to looping disk by disk is a loop such that iter i handles all
+# i-th IRQ line of all disks i.e.
+# for x in `seq 0 $((MAX_NVME_INTERRUPTS_COUNT - 1))`; do
+
+
+for disk in `ls /proc/nvmeibs/smart* | cut -c 20-`; do
+    grp=${disk_to_group[$disk]}
+    if $NVME_IRQ_AFFINITY_RR_RESET ; then
+	cpus_group_curr_idx[$grp]=0
+    fi
+    for irq in `grep "nvme $disk io" /proc/interrupts | cut -d: -f1` ; do
+	grp_curr_idx=${cpus_group_curr_idx[$grp]}
+	cpu=${cpus_group_table[$grp,$grp_curr_idx]}
+	printf "disk %2d, cpus_group_table[%2d][%2d] -> \
+	cpu=%2d (/proc/irq/%04d/smp_affinity_list='%s')\n"\
+	$disk $grp $grp_curr_idx $cpu $irq `cat /proc/irq/$irq/smp_affinity`
+
+	# Assign cpu to irq
+	echo $cpu > /proc/irq/$irq/smp_affinity_list
+
+	n_irqs_per_cpu[$cpu]=$((${n_irqs_per_cpu[$cpu]}+1))
+
+	cpus_group_curr_idx[$grp]=$((grp_curr_idx+1))
+	if [[ ${cpus_group_curr_idx[$grp]} == ${cpus_group_size[$grp]} ]]; then
+	    cpus_group_curr_idx[$grp]=0
+	fi
+    done
+done
+
+# ---------------------------------------------------------------------------- #
+# Result
+# ---------------------------------------------------------------------------- #
+echo "---"
+printf "%-20s:" "CPU"
+for ((i=0;i<N_CPUS;i++)) do
+    printf "%2d, " ${CPUS[$i]}
+done
+printf "\n%-20s:" "NUMA"
+for ((i=0;i<N_CPUS;i++)) do
+    printf "%2d, " ${CPU2NUMA[$i]}
+done
+printf "\n%-20s:" "SOCKET"
+for ((i=0;i<N_CPUS;i++)) do
+    printf "%2d, " ${CPU2SOCK[$i]}
+done
+printf "\n%-20s:" "Num IRQs per CPU"
+for ((i=0;i<N_CPUS;i++)) do
+    printf "%2d, " ${n_irqs_per_cpu[$i]}
+done
+
+echo -e "\n---"
+echo "nvmesh_set_irq_affinity: Done"
+echo "nvmesh_set_irq_affinity: Done" > /dev/kmsg
+exit
+
+# run this to see how NVMe disks' IRQs are spreaded:
+# 'echo "Num-IRQs, CPU-index" ; for x in `grep nvme /proc/interrupts | grep io | cut -d: -f1` ; do sudo cat /proc/irq/$x/smp_affinity_list ; done | sort | uniq -c'

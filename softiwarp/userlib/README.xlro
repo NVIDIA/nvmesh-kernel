@@ -1,0 +1,32 @@
+********************************************************************
+* Prerequisites for building SIW userlib
+********************************************************************
+1) GCC version 7 or later
+2) libsysfs devel package
+3) cmake
+4) libnl3 devel package
+5) rdma-core build folder
+
+********************************************************************
+* rdma-core build folder
+********************************************************************
+> git clone https://github.com/linux-rdma/rdma-core
+> cd rdma-core
+> git checkout <rdma_core_ver e.g. v22.4>
+> ./build.sh
+
+********************************************************************
+* Instructions for building SIW userlib
+********************************************************************
+> ./autogen.sh
+> ./configure --with-rdma-core=<rdma_core_dir> --sysconfdir=/etc --libdir=/usr/lib64/libibverbs
+> make
+> sudo make install
+
+********************************************************************
+* Notes
+********************************************************************
+- librdmacm must be used for bringing up connection (ie ib_send_bw needs -R param)
+- Same iface cannot also have RoCE support or the rdmacm will use RoCE instead 
+	(rmmod mlx5_ib to use mlx5 ifaces for SIW)
+

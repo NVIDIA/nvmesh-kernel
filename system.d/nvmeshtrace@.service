@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=NVMesh(r) Trace Deamon
+PartOf=nvmeshclient.service
+
+[Service]
+ExecStart=/opt/nvmesh/client-repo/services/nvmeshclient start-trace --systemd %i
+ExecStop=/opt/nvmesh/client-repo/services/nvmeshclient stop-trace --systemd %i
+ExecStartPre=/opt/nvmesh/client-repo/services/nvmeshclient should-start-trace --systemd %i
+ExecCondition=/opt/nvmesh/client-repo/services/nvmeshclient should-start-trace --systemd %i
+PIDFile=/var/run/nvmesh/%i.pid
+Type=forking
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=50
+StartLimitBurst=5

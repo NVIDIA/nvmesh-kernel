@@ -1,0 +1,108 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+if [ `id -un` != "root" ] ; then
+        echo "This script needs to run as root."
+        exit 1
+fi
+
+prog=nvmeshtarget
+tomaService=nvmeshtoma
+logDir=/var/log/nvmesh
+BASEVARDIR=/var/opt/nvmesh
+CONFDIR=/etc/nvmesh
+BASEPIDDIR=/var/run/nvmesh
+SERVICEDIR=/opt/nvmesh/target-repo/services
+tomaCacheDir=$BASEVARDIR/toma
+METADATADIR=$BASEVARDIR/metadata_disk_image
+PIDDIR=$BASEPIDDIR/$prog
+UPGRADEERRORFILE=/var/opt/nvmesh/target-upgrade.err
+UPGRADEVERSIONFILE=/var/opt/nvmesh/target_upgrade_version
+isUpgrade=true
+
+if [ "$1" = "0" -o "$1" = "remove" ]; then
+        isUpgrade=false
+fi
+
+if ! $isUpgrade; then
+	echo "Uninstalling NVMesh(r) Server"
+	isSysD=false
+
+	if ! pidof systemd > /dev/null 2>&1; then
+		echo "Updating chkconfig"
+		if grep -i Ubuntu /etc/*release > /dev/null 2>&1; then
+			update-rc.d -f $prog remove
+		else
+			chkconfig --del $prog
+		fi
+	else
+		isSysD=true
+		echo "Disabling service"
+		systemctl disable nvmeshtarget > /dev/null 2>&1
+	fi
+
+	if [ -d "/sys/module/nvmeibs" ] ; then
+		echo "Stopping any previous version of NVMesh Server"
+		service $prog stop
+		RETVAL=$?
+
+		if $isSysD && systemctl is-failed $prog > /dev/null 2>&1; then
+			echo "Trying to stop NVMesh Server directly"
+			$SERVICEDIR/$prog stop
+			RETVAL=$?
+		fi
+
+		if [ "$RETVAL" -ne 0 ] || [ -d "/sys/module/nvmeibs" ] ; then
+			echo "Couldn't stop the "$prog" service, please reboot"
+		fi
+	fi
+
+	if $isSysD; then
+		if systemctl is-failed $prog > /dev/null 2>&1; then
+			systemctl reset-failed $prog
+		fi
+
+		echo "Stopping Toma"
+		service $tomaService stop
+		RETVAL=$?
+
+		if [ "$RETVAL" -ne 0 ] ; then
+			echo "Couldn't stop $tomaService service, please reboot"
+		fi
+
+		if systemctl is-failed $tomaService > /dev/null 2>&1; then
+                        systemctl reset-failed $tomaService
+		fi
+	fi
+
+	echo "Removing block file"
+	/bin/rm -f $METADATADIR > /dev/null 2>&1
+
+	echo "Removing drive configuration files"
+	/bin/rm -f $CONFDIR/target_devices.old $BASEVARDIR/.target_devices
+
+	echo "Removing logs"
+	/bin/rm -f "$logDir/toma.log" "$logDir/report_target.log" $UPGRADEERRORFILE $UPGRADEVERSIONFILE
+
+	echo "Removing Toma cache and config"
+	/bin/rm -rf $tomaCacheDir/*
+
+	echo "Removing PID dir files"
+	/bin/rm -rf $PIDDIR/* $BASEPIDDIR/toma.lock > /dev/null 2>&1
+
+	# can safely remove all kernels directories since it will be created
+	# once the module be started
+	first_ko_dir=`ls -d1 /lib/modules/*/extra/nvmesh/target 2>/dev/null | head -1`
+
+	if [ ! -z "$first_ko_dir" ] && [ -L "$first_ko_dir" ]; then
+		# this is not a kmod installed machine, nvmesh target ko dirs should be removed
+		echo "Removing modules dir"
+		/bin/rm -f /lib/modules/*/extra/nvmesh/target
+
+		/sbin/depmod -a
+	fi
+fi
+
+exit 0

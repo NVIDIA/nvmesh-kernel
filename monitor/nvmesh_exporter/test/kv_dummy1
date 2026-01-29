@@ -1,0 +1,16 @@
+n_warn_locate_zero_rscs                 : 0
+n_warn_locate_timeout                   : 0
+n_warn_locate_timeout_nzero_rscs        : 0
+n_warn_slow_first_io_ch                 : 0
+n_err_rdda_read_poison                  : 0
+n_err_rdda_oe_max                       : 0
+n_err_nrch_wd_rescue                    : 0
+n_err_nrch_wd_rescue_comp               : 0
+n_err_ulp_reuse_req_timeout             : 0
+n_err_core_dbgdi_detection              : 0
+n_err_jam_non_free_entry_timeout        : 0
+n_err_rtrn_rcook_uncomp_sends_exceeded  : 0
+n_err_comp_rcook_uncomp_sends_exceeded  : 0
+n_err_send_comp_tag_vs_wc               : 0
+n_err_nrch_pcpu_lookup_failed           : 0
+HOSTNAME: 'nvme26.mtv.labs.mlnx', PROC: 'disk_counters', TAKEN_ON: '23/01/2023 11:36:39(UTC)'

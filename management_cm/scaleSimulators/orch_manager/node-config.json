@@ -1,0 +1,49 @@
+{
+	"baseConfig": {
+		"kafkaServers": "localhost:9092",
+		"managementServers": "localhost:4001",
+		"numOfDisks": 2,
+		"numOfNics": 2,
+		"TARGET": {
+			"enabled": false
+		},
+		"CLIENT": {
+			"enabled": true,
+			"isUmClient": true,
+			"ioEnabledDelayMS": 0
+		},
+		"TOMA": {
+			"enabled": true,
+			"reportTargetInterval": 60,
+			"fullFormat": false,
+			"driveZeroingInterval": 1,
+			"autoLeaderElection": true
+		},
+		"AGENT": {
+			"nvmeshUMStatus": "up"
+		},
+		"UPGRADE_AGENT": {
+			"version": "3.1.0-1726-SIM",
+			"librdkafkaVersion": "2.6.0",
+			"featureCompatibilityVersion": "1",
+			"operatingSystem": {
+				"name": "Rocky Linux 8.10 (Green Obsidian)",
+				"id": "rocky",
+				"versionID": "8.10"
+			},
+			"archType": "x86_64",
+			"kernel": "4.18.0-553.el8_10.x86_64",
+			"ofed": "24.10-1.1.4.0",
+			"nvmeshVersions": {
+				"nvmesh-target": "3.3.2-1357.el8_6.x86_64",
+				"nvmesh-base": "3.1.0-1357.el8_6.x86_64",
+				"nvmesh-client": "3.3.2-1357.el8_6.x86_64",
+				"nvmesh-utils": "3.0.0-706.el8_6.x86_64",
+				"nvmesh-management": "3.3.2-706.el8_6.x86_64"
+			}
+		}
+	},
+	"nodesConfig": [{
+		"numOfDisks": 3
+	}]
+}

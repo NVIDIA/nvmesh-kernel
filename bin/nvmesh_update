@@ -1,0 +1,230 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+MDIR=/opt/nvmesh
+
+make_link() {
+    dst=$1
+    kver=$2
+    ver=$3
+
+    src=$(ls -d $MDIR/$dst-repo/$dst"_"$ver 2> /dev/null) || return 0
+
+    base=/lib/modules/$kver/extra/nvmesh
+    install -d "$base"
+    rm -f "$base/$dst"
+
+    $VERBOSE && verbose="-v"
+    ln -s $verbose "$src" "$base/$dst" || return 0
+
+    return 1  # success (inverted logic)
+}
+
+symvers_search() {
+  for m in /opt/nvmesh/client-repo/client_*/symvers/symvers.ko; do
+      insmod $m >& /dev/null
+      if [ $? == 0 ]; then
+          rmmod symvers
+          ver=`echo $m | sed "s|/opt/nvmesh/client-repo/client_\(.*\)/symvers/symvers.ko|\1|"`
+          return
+      fi
+  done
+  ver=""
+}
+
+# For development mode over NVP kernel deployments which rapidly changes,
+# allow installing from repo that does not exact match the running KERNEL
+# and OFED. Kernel shall match the vanilla version and OFED shall match
+# the major and minor version
+#
+# For example:
+#
+# On these KERNEL:
+# 	[root@nvp-evt2 t]# uname -r
+# 	4.18.0-553.22.1.el8.1744060952.e3162a7798.x86_64
+# 	[root@nvp-evt2 t]# ofed_info -s
+# 	OFED-internal-23.10-4.0.9:
+#
+# Allow installing from:
+# 	/opt/nvmesh/client-repo/client_MLNX_OFED_LINUX-23.10-3.2.2_4.18.0-553.22.1.el8.1728954272.8c343a4f15.x86_64/
+#
+relaxed_search() {
+    local repo=$MDIR
+    local modl=$1   # client, target or common
+    local ofed=$2   # MLNX_OFED_LINUX-*  or  OFED-internal-*
+    local dist=$3   # el8
+    local arch=$4   # x86_64
+
+    echo "repo=$repo, modl=$modl, ofed=$ofed, dist=$dist, arch=$arch"
+
+    # check NVP kerenl
+    if [[ ! -f /etc/nvp-release ]]; then
+        echo "DEBUG: /etc/nvp-release not found."
+        return
+    fi
+
+    # check running kernel is <vanilla-kernel-version>.el8.<10-hex>.<10-hex>.x86_64
+    # e.g. 4.18.0-553.22.1.el8.1744060952.e3162a7798.x86_64
+    local kver=$(uname -r)
+    local kver_pattern="^.*\\.${dist}\\.[0-9a-f]{10}\\.[0-9a-f]{10}\\.${arch}\$"
+    if [[ ! $kver =~ $kver_pattern ]]; then
+        echo "DEBUG: '$kver' does not match pattern '$kver_pattern'"
+        return
+    fi
+
+    # prep acceptable repo pattern according to running kernel
+    local kver_prefix="${kver%%.${dist}.*}.${dist}"
+    local repo_kver_pattern="^${kver_prefix}\\.[0-9a-f]{10}\\.[0-9a-f]{10}\\.${arch}\$"
+
+    # extract OFED major.minor
+    local mm
+    if   [[ $ofed == OFED-internal-* ]];   then
+        mm=${ofed#OFED-internal-}
+        ofed_type="OFED-internal"
+    elif [[ $ofed == MLNX_OFED_LINUX-* ]]; then
+        mm=${ofed#MLNX_OFED_LINUX-}
+        ofed_type="MLNX_OFED_LINUX"
+    else
+        echo "DEBUG: unsupported OFED '$ofed', expect MLNX_OFED_LINUX-* or OFED-internal-*"
+        return
+    fi
+    mm=${mm%%-*}
+
+    # scan the repo directories e.g. a match for client module is...
+    # /opt/nvmesh/client-repo/client_MLNX_OFED_LINUX-23.10-3.2.2_4.18.0-553.22.1.el8.1728954272.8c343a4f15.x86_64/
+    local repo_dirs="$repo/${modl}-repo/${modl}_${ofed_type}-${mm}-*_*"
+    echo "DEBUG: scan dirs matching repo_dirs=$repo_dirs"
+    local n=0
+    for d in $repo_dirs; do
+        [[ -d $d ]] || continue
+
+	local ofed_kver=${d##*/${modl}_}			# MLNX_OFED_LINUX-23.10-3.2.2_4.18.0-553.22.1.el8.1728954272.8c343a4f15.x86_64
+	local repo_ofed=${ofed_kver%%_"${kver_prefix}"*}   	# MLNX_OFED_LINUX-23.10-3.2.2                                               
+	local repo_kver=${ofed_kver#${repo_ofed}_}         	# 4.18.0-553.22.1.el8.1728954272.8c343a4f15.x86_64
+	echo -e "-\ndir=$d \nofed_kver=$ofed_kver \nrepo_ofed=$repo_ofed \nrepo_kver=$repo_kver"
+
+        if [[ $repo_kver =~ $repo_kver_pattern ]]; then
+            ((n++))
+            ver="${repo_ofed}_${repo_kver}"
+        fi
+    done
+
+    # result 
+    case $n in
+    1)  echo "DEBUG: Found matching dir $ver" ;;
+    *)  echo "DEBUG: Found $n matching directories (expected 1)" ; ver="" ;;
+    esac
+}
+
+make_link_all() {
+    make_link "client" "$kernel" "$ver"; client=$?
+    make_link "target" "$kernel" "$ver"; target=$?
+    make_link "common" "$kernel" "$ver"; common=$?
+
+    #problematic function implementation - in order to track the errors correctly, 
+    #we should know the exact mode (client-only or converged)
+    if [ $common -eq 0 -o \( $client -eq 0 -a $target -eq 0 \) ]; then
+        $VERBOSE && echo "Kernel: Failed creating links"
+        rm -f /lib/modules/$kernel/extra/nvmesh/{common,target,client}
+        return 1
+    fi
+
+    return 0
+}
+
+# use up to 3 segments of the ofed release part
+extract_ofed_version() {
+    # Split at the first dash
+    raw_ofed_version=$1
+    prefix="${raw_ofed_version%%-*}"
+    rest="${raw_ofed_version#*-}"
+
+    # Count segments in 'rest' by splitting on '.'
+    IFS='.' read -ra segments <<< "$rest"
+
+    if (( ${#segments[@]} > 3 )); then
+        # Join only first 3 segments with dots
+        truncated="${segments[0]}.${segments[1]}.${segments[2]}"
+        # Rebuild the version string
+        output="${prefix}-${truncated}"
+    else
+        # No change needed
+        output="$raw_ofed_version"
+    fi
+    echo "$output"
+}
+
+# ------------------------------------------------------------------------------
+ofed_version=$(ofed_info -n 2> /dev/null);
+if [ "x$ofed_version" == "x" ]; then
+    # OFED not installed
+    ofed_version="none"
+else
+    ofed_version=$(extract_ofed_version $ofed_version)
+fi
+
+if [ "$1" == "-q" ]; then
+    VERBOSE=false
+else
+    VERBOSE=true
+fi
+
+kernel=`uname -r`
+
+$VERBOSE && echo "Installed Ofed: "$ofed_version
+$VERBOSE && echo "Kernel: "$kernel
+$VERBOSE && echo
+
+ver=*"$ofed_version"*_"$kernel"
+
+
+match_exact() {
+    if make_link_all; then
+	$VERBOSE && echo "Kernel: $kernel EXACT OK"
+	return 0
+    else
+	$VERBOSE && echo "Kernel: $kernel - EXACT FAILED"
+    fi
+    return 1
+}
+
+match_symvers() {
+    ver=""
+    symvers_search
+    if [ -z "$ver" ]; then
+	$VERBOSE && echo "Kernel: $kernel - SYMVERS FAILED"
+	return 1
+    fi
+
+    if ! make_link_all; then
+	return 1
+    fi
+
+    $VERBOSE && echo "Kernel: $kernel - SYMVERS OK - $ver"
+    return 0
+}
+
+match_relaxed() {
+    ver=""
+    local ofed_ver=$(ofed_info -s); ofed_ver=${ofed_ver%:}
+    relaxed_search  "client" "$ofed_ver" "el8" "x86_64"
+    if [ -z "$ver" ]; then
+	$VERBOSE && echo "Kernel: $kernel - RELAXED FAILED"
+    fi
+
+    if ! make_link_all; then
+	return 1
+    fi
+
+    $VERBOSE && echo "Kernel: $kernel - RELAXED OK - $ver"
+    return 0
+}
+
+rv=1
+if match_exact || match_symvers || { false && match_relaxed; }; then
+    depmod $kernel || echo "ERROR: depmod failed for kernel $kernel"
+    rv=0
+fi
+exit $rv

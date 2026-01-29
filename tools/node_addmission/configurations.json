@@ -1,0 +1,115 @@
+{
+  "LAB":{
+
+    "parameters":{
+      "nvmeibc":{
+
+      },
+      "nvmeibs":{
+
+      },
+      "nvmeiba":{
+
+      },
+      "nvmeib_common":{
+
+      },
+      "siw":{
+
+      }
+    },
+
+    "grub":[],
+    
+    "iommu":false
+  },
+
+
+
+
+  "DPU":{
+
+    "parameters":{
+      "nvmeibc":{
+
+      },
+      "nvmeibs":{
+
+      },
+      "nvmeiba":{
+
+      },
+      "nvmeib_common":{
+
+      },
+      "siw":{
+
+      }
+    },
+
+    "grub":[],
+    
+    "iommu":false
+  },
+
+
+
+  
+  "OCI":{
+
+      "parameters":{
+        "nvmeibc":{
+          "nvmeibc_jentry_num_blocks":16,
+          "nr_max_used_reqs_per_channel":8,
+          "nr_max_channels_per_path_tcp":3,
+          "tracer_debug_level":4,
+          "max_nic_srqs":32,
+          "no_part_scan":"Y"
+        },
+        "nvmeibs":{
+          "tracer_debug_level":4,
+          "max_nic_srqs":32
+        },
+        "nvmeiba":{
+          "verbose_debug":"n"
+        },
+        "nvmeib_common":{
+          "tracer_debug_level":4,
+          "cq_vec_flags_tcp":0
+        },
+        "siw":{
+          "mpa_crc_required":0,
+          "zcopy_tx":"Y",
+          "low_delay_tx":"N"
+        },
+        "ksocklnd":{
+          "nscheds":10,
+          "sock_timeout":100,
+          "credits":2560,
+          "peer_credits":63,
+          "enable_irq_affinity":0
+        }
+      },
+
+      "grub":["crashkernel=1G-8G:256M,8G-:768M",
+            "amd_iommu=off",
+            "console=ttyS0,115200"
+          ],
+    
+      "iommu":false,
+
+      "kdump":{
+          "sysconfig-kdump":[
+            "nr_cpus=4",
+            "rd.driver.blacklist=nvme"
+          ],
+          "crash-from-console":[
+            "kernel.sysrq=1"
+          ]
+      }
+    }
+  
+  }
+
+
+    

@@ -1,0 +1,145 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+#ifndef NVMEIBC_BLOCK_API_D_CARRIER_H
+#define NVMEIBC_BLOCK_API_D_CARRIER_H
+#include "nvmeibc_block.h"		/* external API of the block */
+/* Interface of CARRIER_D_VOLUME and CARRIER_MD_VOLUMEs  */
+
+/************************ CARRIER_D Control API *******************************/
+/* Generic callback function that rider gives to carrier to gain execution context upon completion */
+typedef void (*rider_d_fn)(struct nvmeibc_block_device *rider, void *context, int rv);
+
+struct nvmeibc_radier_cb { 		// Info which represent async callback to rider
+	rider_d_fn fn; 	// Callback to notify upon completion
+	struct nvmeibc_block_device *rider; // Rider device. Maybe can be included in context itself, added here for debug
+	void* ctx;				// Opaque context param to callback
+};
+#define nvmeibc_radier_cb_init(c) ({ (c)->fn=0; (c)->rider=NULL; (c)->context=NULL; })
+#define nvmeibc_radier_cb_exists(c) ((c)&&((c)->func))
+#define nvmeibc_radier_cb_exec(c, rv) ({ (c)->fn((c)->rider, (c)->ctx, rv); (c) = NULL; })
+
+union nvmeibc_reconf_msg_car2rider {				// u32 bit field for backward compatibility
+	struct {
+		u32 n_segs : 4;								// Support Jbod->mirror. If not zero, notifies to which amount of segment this changed
+		u32 was_size_changed : 1;					// Boolean, did size of volume changed
+		u32 reserved : 3;
+		u8  reserved2[3];
+	};
+	u32 all_bits;
+};
+
+/* Callbacks initiated by carrier to riders (instead of interrupts). Much like c_disk sends pause/cont to block device.
+   Implementation of each callback is up to rider. If multiple riders use a single carrier then callback should traverse all relevant riders */
+struct nvmeibc_api_of_d_carrier;
+typedef void (t_carrier_interrupt_io_perm)(struct nvmeibc_api_of_d_carrier *me);
+typedef void (t_carrier_interrupt_reconf)( struct nvmeibc_api_of_d_carrier *me);
+struct nvmeibc_api_of_d_carrier {
+	t_carrier_interrupt_io_perm *on_io_perm_change_cb;				// Carrier informs rider upon io permission change, preemption, etc
+	t_carrier_interrupt_reconf  *on_reconf_cb;						// Carrier informs rider upon reconfiguration (like sizze change)
+	//void (*watch_dog_cb)(void* wd_params);						// Carrier can call watchdog function of rider each time its watchdog fires. Daniel: Unsued because riders will get their own watchdog event
+	//void  *wd_params;
+
+	spinlock_t lock; 	                                        	// For exclusive access of resources
+	union nvmeibc_reconf_msg_car2rider reconf_msg;       			// Inform rider about carriers reconfiguration (size, etc)
+	struct nvmeibc_block_device **riders;							// Array of pointers, O(n) search for rider. Todo: Change to better data structure
+	uint max_riders;
+	uint n_riders;
+};
+
+int nvmeibc_api_of_d_carrier_init(struct nvmeibc_block_device *dev);
+void nvmeibc_api_of_d_carrier_destroy(struct nvmeibc_block_device *dev);
+
+/* Connect/Disconnect rider to carrier, returns negative number upon error or amount of riders upon success */
+int nvmeibc_api_of_d_carrier_mount(struct nvmeibc_block_device *carrier, struct nvmeibc_block_device *rider,
+		t_carrier_interrupt_io_perm*, t_carrier_interrupt_reconf*);
+int nvmeibc_api_of_d_carrier_umount(struct nvmeibc_block_device *carrier, struct nvmeibc_block_device *rider);
+void nvmeibc_api_of_d_carrier_do_for_rider(struct nvmeibc_block_device *car, void (*do_fn)(struct nvmeibc_block_device *r, void *ctx), void *ctx);
+void nvmeibc_api_of_d_carrier_cond_do_for_rider(struct nvmeibc_block_device *car, bool (*pred_fn)(struct nvmeibc_block_device *car, void *ctx), void (*do_fn)(struct nvmeibc_block_device *r, void *ctx), void *ctx);
+ssize_t nvmeibc_api_of_d_carrier_to_string(struct nvmeibc_block_device *dev, char *buf, size_t len, char fmt);
+
+/**************************** CARRIER BIO IO API ********************************/
+// Base class for alternative for bio.
+enum CAR_BX_CB_REASON {								// For debug only, reason for callback
+	CAR_BX_CB_REASON_ILLEAGL = 0,
+	CAR_BX_CB_REASON_ON_LOCKS_TAKEN_CB     = 1,
+	CAR_BX_CB_REASON_ON_MD_READ_CB         = 2,
+	CAR_BX_CB_REASON_AFTER_READ_CB         = 3,
+	CAR_BX_CB_REASON_BEFORE_WRITE_CB       = 4,
+	CAR_BX_CB_REASON_B4_LAST_MD_WRITE      = 5,
+	CAR_BX_CB_REASON_MD_ENDIO              = 6,
+	CAR_BX_CB_REASON_IO_DONE               = 7,
+	CAR_BX_CB_REASON_INVALID_ADDITIONAL_CB = 8,
+};
+
+typedef void (*rider_bio_cb_t)(void *rider_ctx, int rv, enum CAR_BX_CB_REASON debug_reason);
+
+#ifdef DBGDI_REMOVED_IN_PRODUCTION
+	struct operation;
+	struct bio_ext_dbg_di_rider_info {};	// Empty struct
+#else
+	struct bio_ext_dbg_di_rider_info {		// Information for debug di
+		const struct operation *o;			// Generic operation of rider
+		void (*inject_dbg_di)(void *riders_ctx, void /*struct t_db_who_mtv*/ *mtv_part);		// Generic API to inject riders debug di
+	};
+#endif
+
+struct bio_extention {					// BIO generated by rider to. 'bio->bi_private' will point to it. Known to both carrier and rider
+	struct {							// Controls execution flow of bio
+		ulong *execute_bitmap;			// Even though BIO includes a large vlba range of blocks, carrier can hint an optimization that only subset of the blocks really must be commited. Bitmap of at most N_MAX_QLC_EC_DATA_SLICE_LEN*LOCKSET_SLICES bits
+		int rider_rv_on_callback;		// When carrier gives callback to rider, rider can abort execution by injecting 'rv'. Example: cmpxchng failed
+		bool force_read_b4_write;		// Used to implement cmp-xchng-write. Do read -> give callback to rider -> calc edic -> do write
+		bool give_1st_md_blk_on_endio;	// When carrier completes read-io with succeess it will store the metadata of first block for examination by rider
+		u8   do_512b_sub_block_x;		// Optane2 optimization: When carrier does write/read of 4K, rider can request to write only 512[b] of 4K. Values 0 - irrelevant 0x10+i for writing 512[b] sub block i, i=[0..7]
+	} exec;
+	struct {							// Checkpoints at which carrier should stop and notify rider before proceeding with IO, more than one checkpoint can exist
+		rider_bio_cb_t fn;
+		void *riders_ctx;				// Todo: is needed? Can be just the wrapper of the struct
+		struct {						// Conditions when to carrier gives callback to rider, in addition to the end of io callback
+			bool after_locks_taken;		// Give callback when locks are taken and pause execution, rider resumes execution
+			bool after_md_read_stage;	// After carrier read metadata, give callback immediately. Note: the same metadata can be extracted at the end of the io
+			bool before_first_write_cmd;// Todo: Remove, For debug only (verify edic before it is written)
+			bool before_md_last_write;	// Used for sharing MD block between riders. MTV instructs QLC that when QLC writes MD block, MTV wants to piggiback his stuff
+		} give;
+		struct {						// Carrier gave callback to rider and waits for async callback from rider to resume execution
+			void (*fn)(void *carrier_ctx /*, rv*/);		// 'rv' not needed. Use 'rider_rv_on_callback' field
+			void *carrier_ctx;
+		} get;
+		union {							// Payload to 'give'. Carrier gave callback to rider and puts here additional payload
+			void *md_ptr;				// Virtual-Pointer to first md-block;
+			u64  wcv2mdv_ptr;			// WCV->MDV pointer, which resides in binfo of WCV and acts as J2D for faster cold recovery
+		} payload;
+	} cb;
+	struct bio_ext_dbg_di_rider_info rider;	// Information for debug di
+};
+#define bx_carrier_give_cb_to_rider(bx, ...)  (bx)->cb.fn((bx)->cb.riders_ctx, ## __VA_ARGS__)
+
+void rider_bio_init(struct bio *b, struct bio_vec *table, unsigned short max_vecs, sector_t bi_sector, unsigned rw);
+void rider_bio_send_to_carrier(struct bio *b, struct bio_extention *bx, struct nvmeibc_block_device *carrier);	// Rider calls this function
+#define rider_bio_get_bio_extention_from(bio) ((bio)->bi_private)
+void rider_bio_endio(struct bio *bio, int rv);				// Carrier responds with this function
+
+u64 nvmeibc_convert_vlba_blkset_to_mdv_vlba(vlba_blkset_t vlba_blkset, struct nvmeibc_topology *qlc_topo, bool is_mtv);
+
+/**************************** CARRIER_D IO API ********************************/
+struct d_carrier_base_block_io {
+	struct bio bio;					// Read/Write Data blocks
+	struct bio_extention bext;
+	struct bio_vec *table;			// Only Table is allocated
+} __attribute__((__aligned__(8)));
+
+// Existing bio[skip_blks..skip_blks+n_blks) is converted to carrier io
+struct bio_part;
+struct nvmeibc_pages;
+int  d_carrier_base_block_io_create_from_bio(  struct d_carrier_base_block_io *d, struct bio_part *input_bio , u64 vlba, u32 skip_blks, int n_blks, int rw);
+int  d_carrier_base_block_io_create_from_pages(struct d_carrier_base_block_io *d, struct nvmeibc_pages *pages, u64 vlba, u32 skip_blks, int n_blks, int rw);
+int  d_carrier_base_block_io_create_from_vpges(struct d_carrier_base_block_io *d, struct page **pages        , u64 vlba, u32 skip_blks, int n_blks, int rw);
+void d_carrier_base_block_io_reinit(		   struct d_carrier_base_block_io *d,                              u64 vlba,                            int rw); // Used to alter read/write. Usefull for reading md, changing and writing back
+void d_carrier_base_block_io_set_cb(           struct d_carrier_base_block_io *d, rider_bio_cb_t fn, void *ctx);
+void d_carrier_base_block_io_destroy(          struct d_carrier_base_block_io *d);
+void d_carrier_base_block_io_execute(          struct d_carrier_base_block_io *d, struct nvmeibc_block_device *dev, struct operation *rider_o_for_debug_di);
+u64  d_carrier_base_block_get_vlba(      const struct d_carrier_base_block_io *d);										// Getter function
+
+#endif  // H beginning

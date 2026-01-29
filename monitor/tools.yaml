@@ -1,0 +1,8 @@
+tools:
+  nvmesh_exporter:
+    source: monitor/nvmesh_exporter/nvmesh_exporter.py
+    analysis:
+      datas:
+        - [./monitor/git_spec.info, .]
+        - [./monitor/nvmesh_exporter/nvmesh_exporter_conf.yaml, .]
+        - [../infrastructure/xlro/core/config/infra_config.yaml, xlro/core/config]

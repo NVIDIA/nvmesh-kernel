@@ -1,0 +1,2 @@
+/* argument type to find_symbol() */
+#undef CRCTYPE

@@ -1,0 +1,9 @@
+# [submodule "mgmt"]
+# 	path = management
+# 	url = git@bitbucket.org:yaniv_romem/management.git
+[submodule "tools/crash-cacheutils"]
+	path = tools/crash-cacheutils
+	url = https://github.com/k-hagio/crash-cacheutils.git
+[submodule "lz4"]
+	path = lz4
+	url = https://github.com/lz4/lz4.git

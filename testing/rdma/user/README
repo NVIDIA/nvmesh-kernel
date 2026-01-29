@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+To run rdma app:
+server side run rdma
+client side run rdma <server_name>
+all params are currently hard coded in the app.
+it is easy to extend i all directions
+

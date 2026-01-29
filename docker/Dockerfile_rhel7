@@ -1,0 +1,17 @@
+FROM centos:7
+
+ENV DIRPATH /excelero
+WORKDIR $DIRPATH
+
+RUN yum groupinstall -y "Development Tools"
+RUN yum install -y rsync rdma-core rdma-core-devel kernel kernel-devel kernel-headers
+RUN yum install -y which elfutils-libelf-devel
+RUN yum install -y systemd-devel
+RUN yum install -y rpmdevtools
+
+ADD confluent7.repo /etc/yum.repos.d
+
+RUN yum install -y librdkafka1-2.1.1 librdkafka-devel-2.1.1
+
+
+

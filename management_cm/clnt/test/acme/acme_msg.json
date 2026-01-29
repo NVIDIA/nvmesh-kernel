@@ -1,0 +1,9 @@
+{
+	"opcode" : 1,
+	"workers" : [{
+		"first_name" : "speedy",
+		"last_name" : "gonzales",
+		"id" : 2277960,
+		"salary" : 9999
+		}]
+}

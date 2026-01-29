@@ -1,0 +1,668 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+#
+# nvmeshtarget	This shell script takes care of starting and stopping
+#		the NVMesh(r) target / controller
+#
+# chkconfig: 345 19 81
+# description: NVMesh target / controller
+### BEGIN INIT INFO
+# Provides: nvmeshtarget
+# Required-Start: openibd
+# Required-Stop: openibd
+# Default-Start:  3 4 5
+# Default-Stop: 0 1 2 6
+# Short-Description: start and stop nvmeshtarget
+# Description: nvmeshtarget is the server or controller side of NVMesh(r)
+### END INIT INFO
+
+# Mimic source function library, as this is not always available
+
+MDIR=/opt/nvmesh
+TARGET_REPO_DIR=$MDIR/target-repo
+COMMON_REPO_DIR=$MDIR/common-repo
+CLIENT_REPO_DIR=$MDIR/client-repo
+TARGET_RUN_DIR=""
+
+upgradeerrorpath=/var/opt/nvmesh/target-upgrade.err
+upgrade_version_file=/var/opt/nvmesh/target_upgrade_version
+scriptsdirectory=$TARGET_REPO_DIR/upgrade_scripts
+
+. /opt/nvmesh/client-repo/services/nvmesh_util
+
+SERIAL_REGEX='[[:space:]]+[^#][^[:space:]]*'
+DEVNAME_REGEX='^[[:space:]]*/dev/[^#][^[:space:]]*'
+DEVNAME_SERIAL_REGEX=''
+PROC_FILE=/proc/nvmeibs/nvmeof_disks
+
+ofed_version=""
+
+TARGET_PACKAGE_RPM_DEPENDENCIES="libibverbs librdmacm infiniband-diags"
+TARGET_PACKAGE_DEB_DEPENDENCIES="libibverbs1 librdmacm1|librdmacm1t64 infiniband-diags"
+
+#check specific kernel and ofed support and set main dir
+dirTreeLockFile=/var/run/nvmesh/dirtree.lock
+check_modules common target
+TARGET_RUN_DIR=/lib/modules/$kernel/extra/nvmesh/target
+
+if [ ! -d $TARGET_RUN_DIR/toma ]; then
+	# in case it is a kmod installation
+	TARGET_RUN_DIR=$TARGET_REPO_DIR
+fi
+
+component=target
+prog=nvmeshtarget
+productname=NVMesh-target
+procdir=/proc/nvmeibs
+proc_version_file=$procdir/version
+version_file=/opt/nvmesh/target-repo/version
+pidPath="/var/run/nvmesh/$prog"
+servicesLockFile=/var/run/nvmesh/services.lock
+managementCMPID="/var/run/nvmesh/managementCM.pid"
+managementAgentPID="/var/run/nvmesh/managementAgent.pid"
+monitorPID="$pidPath/monitor.pid"
+tomaPID="$pidPath/toma.pid"
+tomaCorePath="/var/opt/nvmesh"
+toma=nvmeibt_toma
+tomaReleasePath="$TARGET_RUN_DIR/toma/bin/release"
+tomaDeleasePath="$TARGET_RUN_DIR/toma/bin/delease"
+tomaDebugPath="$TARGET_RUN_DIR/toma/bin/debug"
+gptUtilPath="$TARGET_RUN_DIR/toma/bin/release/gpt_util"
+filtered_nvme_pcis=""
+nics_guids=""
+parsed_nic_guid=""
+nics_guids_flag=""
+toma_log_size_flag=""
+toma_cloud_mode_flag=""
+max_client_rsrc=""
+infiniband_base=/sys/class/infiniband
+kernel_rdma_cm=/sys/kernel/config/rdma_cm
+roce_mode=/sys/module/mlx4_core/parameters/roce_mode
+tcp_indicator_module_param_path=/sys/module/nvmeibs/parameters/tcp_mode
+roce_configured_mode=""
+mlx_configured_nics=""
+conflinklayer=""
+module_params=""
+siw_params="loopback_enabled=1"
+
+read_version_info_file
+
+load_relevant_network_modules() {
+	load_roce_or_infiniband_modules
+
+	if which ibstatus > /dev/null 2>&1; then
+		# if toma can start, no need to check for modules
+		if ensure_toma_can_start false; then
+			return
+		fi
+
+		roce_available=`ibstatus | grep Ethernet`
+		infiniband_available=`ibstatus | grep InfiniBand`
+
+		if [ ! -z "$roce_available" ] && ! module_up rdma_ucm; then
+			modprobe rdma_ucm > /dev/null 2>&1
+			if [ ! "$?" -eq 0 ]; then
+				echo "WARNING: could not load module: rdma_ucm"
+			fi
+		fi
+
+		if [ ! -z "$infiniband_available" ]; then
+			if ! module_up ib_ucm; then
+				modprobe ib_ucm > /dev/null 2>&1
+				if [ ! "$?" -eq 0 ]; then
+					echo "WARNING: could not load module: ib_ucm"
+				fi
+			fi
+
+			if ! module_up ib_umad; then
+				modprobe ib_umad > /dev/null 2>&1
+				if [ ! "$?" -eq 0 ]; then
+					echo "WARNING: could not load module: ib_umad"
+				fi
+			fi
+		fi
+	fi
+}
+
+find_serial_by_devname() {
+        file=$1
+
+	if [[ "$file" =~ "/dev/nvme" ]]; then
+		devuname=$(basename "$file")
+		uuidfile="/sys/block/$devuname/subsystem/$devuname/uuid"
+		if [ -e "$uuidfile" ]; then
+			serial=$(cat $uuidfile)
+		fi
+	else
+		serial=`smartctl -i $file | sed -e '/Serial/! d' -e "s/.* //"`
+	fi
+
+        echo $serial
+}
+
+find_devname_by_serial() {
+        #Get all matched devnames
+        matched_devices=()
+	main_devname_regex='^.*[0-9]+$'
+
+        for dev in $(find /dev/ -type b) ; do
+                serial=$(find_serial_by_devname $dev)
+
+                if [ ! -z "$serial" ] ; then
+                        if [ "$serial" == "$1" ] ; then
+                                matched_devices+=($dev)
+
+				if [[ ! $dev =~ $main_devname_regex ]]; then
+					main_devname=$dev
+				fi
+                        fi
+                fi
+        done
+
+        #Sort the array if found more than one
+        if [ "${#matched_devices[@]}" -eq 0 ]; then
+                echo "Couldn't find device with this serial!"
+                exit 1
+        elif [ "${#matched_devices[@]}" -ne 1 ]; then
+		if ! $gptUtilPath -a $main_devname -i 2> /dev/null | grep 'EXCELERO_METADATA_FOUND' > /dev/null 2>&1; then
+	                echo "The current serial resolves to multiple devicenames, probably partitions not used by nvmesh, to avoid data loss we won't use it."
+        	        exit 1
+		fi
+        fi
+
+        echo $main_devname
+        exit 0
+}
+
+process_nvme_drive_limitations() {
+	nvme_prefix=`echo $1 | awk -F, '{print $1}'`
+	nvme_serial=`echo $1 | awk -F, '{print $2}'`
+	nvme_vendor=`echo $1 | awk -F, '{print $3}'`
+	nvme_model=`echo $1 | awk -F, '{print $4}'`
+	nvme_namespace=`echo $1 | awk -F, '{print $5}'`
+
+	if [ -z "$nvme_serial" ]; then
+		echo "WARNING: missing serial number for nvme under $DRIVES_FILE, ignoring"
+		return 2
+	fi
+
+	if [ -z "$nvme_vendor" ] || [ -z "$nvme_model" ] || [ -z "$nvme_namespace" ]; then
+		echo "ERROR: can't exclude nvme drive - some details are missing for drive $nvme_serial under: $DRIVES_FILE (please run 'sudo nvmesh_target exclude nvme <serial>' for each nvme drive you want to exclude"
+		return 1
+	fi
+
+	nvme_record="$nvme_prefix,$nvme_serial,$nvme_vendor,$nvme_model,$nvme_namespace"
+	echo $nvme_record
+	return 0
+}
+
+handle_drive_limitations() {
+	drive_limitations_content=''
+
+        while IFS='' read -r line || [[ -n "$line" ]]; do
+		#Check if the line contains nvme serial
+		if echo "$line" | grep -q -e "^[[:space:]]*nvme[[:space:]]*," ; then
+			nvme_processed_record=$(process_nvme_drive_limitations "$line")
+			retval=$?
+
+			if [ $retval -ne 0 ]; then
+				echo $nvme_processed_record
+				#in case the error is fatal - exit and abort the startup
+				[ $retval -ne 2 ] && exit 1 || continue
+			fi
+			drive_limitations_content="${drive_limitations_content}${nvme_processed_record}\n"
+
+		#Check if the line contains dev AND serial (will use the serial)
+                elif echo "$line" | grep -q -e "^[[:space:]]*/dev/[^#]*[[:space:]]\{1,\}[^#]\{1,\}" ; then
+                        #take only the serial
+                        if [[ "$line" =~ $SERIAL_REGEX ]] ; then
+                                match=$(echo ${BASH_REMATCH} | sed -e "s/[[:space:]]\+//g")
+                                retval=$(find_devname_by_serial $match)
+                                if [ $? -eq 0 ] ; then
+                                        sata_processed_record="$retval $match 0 $INCLUDE_DRIVE"
+					drive_limitations_content="${drive_limitations_content}${sata_processed_record}\n"
+                                else
+                                        echo "Can't use the device with the following serial: '$match', $retval"
+                                fi
+                        fi
+
+		#Check if devname presented alone.
+		elif echo "$line" | grep -q -e "^[[:space:]]*/dev/[^#][^[:space:]]*" ; then
+                        #take only the devname
+                        if [[ "$line" =~ $DEVNAME_REGEX ]] ; then
+                                match=$(echo ${BASH_REMATCH} | sed -e "s/[[:space:]]\+//g")
+                                serial=$(find_serial_by_devname $match)
+
+				if [ ! -z "$serial" ] ; then
+					sata_processed_record="$match $serial"
+
+					#Check if this devname was resolved already
+					if grep -q -e "^$match[[:space:]]\{1,\}$serial" $DRIVES_RESOLVE_FILE ; then
+						echo "Drive already resolved and looks good"
+
+					elif grep -q -e "^$match[[:space:]]\{1,\}" $DRIVES_RESOLVE_FILE ; then
+						echo "The device: $match has been changed! not using it."
+						sata_processed_record="$match $serial $SKIP_DRIVE"
+					fi
+
+					drive_limitations_content="${drive_limitations_content}${sata_processed_record}\n"
+				else
+					echo "Error: Can't find serial to device: $match not using it"
+				fi
+                        fi
+                fi
+
+        done < "$DRIVES_FILE"
+
+	echo -e $drive_limitations_content > $DRIVES_RESOLVE_FILE
+}
+
+set_variables_values_per_OS() {
+	if [ ! "$TOMA_UDP" ] ; then
+		if is_ubuntu_os; then
+			TARGET_PACKAGE_DEPENDENCIES=$TARGET_PACKAGE_DEB_DEPENDENCIES
+		else
+			TARGET_PACKAGE_DEPENDENCIES=$TARGET_PACKAGE_RPM_DEPENDENCIES
+		fi
+		should_check_kos=true
+	fi
+}
+
+
+start() {
+	echo "Starting NVMesh Target: "
+	check_root
+
+	read_process_conf_file
+
+	set_variables_values_per_OS
+
+	# verify package dependencies
+	verify_package_dependencies $TARGET_PACKAGE_DEPENDENCIES
+
+	should_check_kos=true
+	if module_up nvmeibs; then
+		verify_loaded_kernel_modules_version
+
+		echo "$prog service is already up"
+		if ! $sysv_triggered && ! is_k8s_operator; then
+			fork_and_monitor_module nvmeibs
+		fi
+		return 0
+	fi
+
+	[ -d $TARGET_RUN_DIR ] || is_k8s_operator || exit 5
+
+	if [ ! -d $pidPath ]; then
+		mkdir -p $pidPath
+	fi
+
+	check_lsof_procdirs $prog $procdir
+
+	run_upgrade_scripts_if_needed $TARGET_REPO_DIR
+	RETVAL=$?
+
+	if [ "$RETVAL" -eq 1 ] ; then
+		return 1
+	fi
+
+	# loading any missing modules for roce or infiniband (must come before processing the conf file)
+	load_relevant_network_modules
+
+	if $sysv_triggered; then
+		ensure_toma_can_start true
+	fi
+
+	# Start services.
+	modprobe configfs > /dev/null 2>&1
+	mount -t configfs none /sys/kernel/config > /dev/null 2>&1
+
+	# loading siw if needed (must come after processing the conf file)
+	load_siw_tcp_module_if_needed
+
+	check_nics_validity
+
+	if [ "$conflinklayer" == "Ethernet" ]; then
+		set_roce_version_in_config
+	fi
+
+	# Process target_devices.conf and .target_devices files
+	handle_drive_limitations
+
+	ftrace_init
+
+	should_load_mlx mlx4 && load_module nvmeib_common_mlx4_public
+	should_load_mlx mlx5 && load_module nvmeib_common_mlx5_public
+	if module_up bnxt_re; then
+		#load nvmeib_common_bnxt_re_public only if complied and exists in RPM
+		if modinfo nvmeib_common_bnxt_re_public > /dev/null 2>&1; then
+			load_module nvmeib_common_bnxt_re_public
+		fi
+	fi
+
+	if is_tcp_enabled; then
+		if is_tcp_only; then
+			module_params="${module_params} tcp_mode=1"
+		else
+			module_params="${module_params} tcp_mode=2"
+		fi
+		module_up siw && load_module nvmeib_common_siw_public
+	fi
+	google_uuids=$(/opt/nvmesh/target-repo/scripts/google_uuids.sh)
+	module_params="${module_params} gcp_drives_to_uuid_list=${google_uuids}"
+
+	if is_iommu_enabled; then
+		module_params="${module_params} iommu_enabled=Y"
+	fi
+
+	load_module nvmeibs $module_params
+	RETVAL=$?
+
+	if [ "$RETVAL" -ne 0 ]; then
+		echo "Failed to load nvmeibs, exiting.."
+		exit 1
+	fi
+
+	record_current_module_params on_startup_module_params.target
+
+	if $sysv_triggered; then
+		start_trace_daemon
+        start_management_CM_and_Agent $prog
+		start_toma
+	elif ! is_k8s_operator; then
+		fork_and_monitor_module nvmeibs
+	fi
+
+	return $RETVAL
+}
+
+stop() {
+	echo -n $"Stopping NVMesh Target: "
+	check_root
+
+	if $sysv_triggered; then
+		stop_toma
+	fi
+
+	is_down=false
+	retries=3
+	retry_num=0
+	if ! $sysv_triggered; then
+		signal_monitor_process SIGUSR1 #suppress monitor failure
+	fi
+
+	while ! $is_down && [ "$retries" -gt "$retry_num" ]; do
+		retry_num=$((retry_num + 1))
+
+		RETVAL=0
+		if module_up nvmeibs; then
+			unload_module nvmeibs
+			RETVAL=$?
+		fi
+
+		if [ $RETVAL -eq 0 ]; then
+			is_down=true
+
+			if ! module_up nvmeibc; then
+				unload_module nvmeib_common_bnxt_re_public
+				unload_module nvmeib_common_mlx5_public
+				unload_module nvmeib_common_mlx4_public
+				unload_module nvmeib_common_siw_public
+				unload_module siw
+
+				if $sysv_triggered; then
+					stop_trace_daemon
+					stop_management_CM_and_Agent
+				fi
+			fi
+		else
+			echo "Trying to unload nvmeibs module..."
+			sleep 1
+		fi
+	done
+
+	if ! $is_down; then
+		echo "ERROR: failed to unload nvmeibs, the module is probably in use"
+		# Print nvmeibs proc files still open
+		lsof | grep /proc/nvmeibs | sed -e 's/^/LSOF_NVMEIBS_PROC> /;'
+		if ! $sysv_triggered; then
+			signal_monitor_process SIGUSR1 #reactivate monitoring
+		fi
+	fi
+
+	return $RETVAL
+}
+
+status() {
+	success=1
+	should_check_kos=true
+
+	if all_modules_up nvmeibs; then
+		echo " All modules up"
+		success=0
+	fi
+	echo
+
+	if module_up nvmeibs; then
+		echo $"Managed NVMe Drives by Serial Number: "
+		grep -sh 'Serial Number' /proc/nvmeibs/smart* | cut -d= -f2 | paste -sd "," - | sed 's/,/, /g'
+	fi
+
+	if process_up_slow managementCM ; then
+		echo $"ManagementCM process running"
+	else
+		echo $"ManagementCM process not running"
+		success=1
+	fi
+
+	if process_up_slow managementAgent ; then
+		echo $"Management Agent process running"
+	else
+		echo $"Management Agent process not running"
+		success=1
+	fi
+
+	if [ -r "$tomaPID" ]; then
+		PID=`cat $tomaPID`
+
+		if process_up $PID toma; then
+			echo $"Toma process running"
+		else
+			echo $"Toma process not running"
+			success=1
+		fi
+	else
+		echo $"Toma process not running"
+		success=1
+	fi
+
+	check_roce_multipath_config
+
+	return $success
+}
+
+ensure_toma_can_start() {
+	return 0
+}
+
+set_toma_conf() {
+	TOMA_RPC=/opt/nvmesh/common-repo/tools/toma_rpc
+	try=0
+	maxtries=25
+
+	while [ $try -lt $maxtries ]
+	do
+		sleep 1
+		$TOMA_RPC help &>/dev/null && break
+		let try+=1
+	done
+
+	_NVMESH_MODE="${NVMESH_MODE:-nvmesh}"
+	TOMA_DEFAULT_CONF=/opt/nvmesh/common-repo/toma.d/default.rpc
+	TOMA_CONF=/opt/nvmesh/common-repo/toma.d/${_NVMESH_MODE}.rpc
+	if [ $try -lt $maxtries ]; then
+		# Skip blank lines or comments.  Note - ignore errors because bbbb
+		sed -e 's/^ *//;s/#.*//;/^$/d;' $TOMA_DEFAULT_CONF $TOMA_CONF 2>/dev/null | while read cmd
+		do
+			# remove leading white-space
+			cmd=${cmd##*( )}
+
+			# check the first-word of cmd
+			case ${cmd%% *} in
+			config|disk-models)
+				echo "$TOMA_RPC $cmd"
+				$TOMA_RPC $cmd
+				;;
+			*)
+				# backwards-compatibility - assume is a config command
+				echo "$TOMA_RPC config $cmd"
+				$TOMA_RPC config $cmd
+				;;
+			esac
+		done
+	else
+		echo "Could not connect to TOMA-RPC after $try tries."
+		exit 1
+	fi
+}
+
+start_toma() {
+	echo "Starting NVMesh Toma: "
+	check_root
+
+	if [ ! -d $pidPath ]; then
+		mkdir -p $pidPath
+	fi
+
+	read_process_conf_file
+	should_check_kos=true
+
+	if ! $sysv_triggered; then
+		ensure_toma_can_start true
+	fi
+
+	if [ ! -f "$tomaPath" ]; then
+		echo "ERROR: Can't find $tomaPath"
+		exit 1
+	fi
+
+	export KAFKA_SERVERS
+	export KAFKA_TLS_ENABLED
+	export KAFKA_CA
+	export KAFKA_TOMA_CERTIFICATE
+	export KAFKA_TOMA_KEY
+	export KAFKA_TOMA_DISABLE_HOSTNAME_VERIFICATION
+
+	toma_args=($toma_log_size_flag $toma_cloud_mode_flag $toma_sm_query_burst_flag $toma_roce_ipv4_flag $toma_raft_udp $toma_libcm_flag $toma_nm_lib_path $toma_cgroup "${toma_cfg_flags[@]}")
+	toma_cmd="nice -n -10 nohup $tomaPath"
+
+	if [ ! -d /sys/module/ib_uverbs ]; then
+		modprobe ib_uverbs
+	fi
+
+	ulimit -c unlimited
+	cd $tomaCorePath
+
+	/opt/nvmesh/target-repo/scripts/nvme_orphans.sh
+
+	if [ "$TOMA_REDIRECT_OUTPUT_TO_FILE" == "Yes" ]
+	then
+		$toma_cmd "${toma_args[@]}" 2> "$LOG_DIR/toma.$$.err" > "$LOG_DIR/toma.$$.log" &
+	else
+		$toma_cmd "${toma_args[@]}" &> /dev/null &
+	fi
+	echo "$!" > "$tomaPID"
+
+	cd - > /dev/null
+
+	set_toma_conf
+}
+
+stop_toma() {
+	echo "Stopping NVMesh Toma: "
+	check_root
+
+	if [ -r "$tomaPID" ] ; then
+		echo "Signaling SIGTERM to TOMA"
+		PID=`cat $tomaPID`
+		if [ "$PID" -gt 0 ]; then
+			kill -s SIGTERM $PID
+			# waiting for Toma to be killed
+			while process_up $PID toma 2>/dev/null; do
+				sleep 1
+				echo "Waiting for Toma to stop, PID: $PID ..."
+			done
+		fi
+		rm $tomaPID
+	fi
+}
+
+restart_toma() {
+	# stop toma
+	check_root
+        [ -d $TARGET_RUN_DIR ] || exit 5
+
+	echo -n $"Restarting TOMA: "
+
+	read_process_conf_file
+
+	if [ ! -d $pidPath ]; then
+		mkdir -p $pidPath
+	fi
+
+	stop_toma
+	sleep 3
+	start_toma
+	RETVAL=$?
+
+	return $RETVAL
+}
+
+# See if triggered from SystemD or SysV
+if [ ! -z "$2" ] && [ "$2" == "--systemd" ]; then
+	sysv_triggered=false
+else
+	sysv_triggered=true
+fi
+
+# See how we were called.
+case "$1" in
+  start)
+	start
+	;;
+  stop)
+	stop
+	;;
+  status)
+	status
+	;;
+  restart|force-reload)
+	stop
+	start
+	;;
+  restart-toma)
+	restart_toma
+	;;
+  start-toma)
+	start_toma
+	;;
+  stop-toma)
+	stop_toma
+	;;
+  start-trace)
+	start_trace_daemon
+	;;
+  stop-trace)
+	stop_trace_daemon
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|restart|force-reload|status}"
+	exit 2
+esac
+RETVAL=$?
+[ "$RETVAL" -eq 0 ] && success $"$prog $1 " || failure $"$prog $1 "
+echo
+exit $RETVAL

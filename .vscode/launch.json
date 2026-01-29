@@ -1,0 +1,139 @@
+{
+	"version": "0.2.0",
+	"inputs": [
+		{
+			"id": "dbglvl",
+			"type": "pickString",
+			"options": ["0", "1", "2", "3", "4", "5", "6"],
+			"default": "0",
+			"description": "Debug Level"
+		},
+		{
+			"id": "nRep",
+			"type": "promptString",
+			"default": "1",
+			"description": "nRep"
+		}
+	],
+	"configurations": [
+		{
+			"name": "Debug Bunitest",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/clnt/block/unitest/blk_unitest",
+			"args": ["-nRep", "1", "-hsync", "-ECAllPerm"],
+			//"args": ["-async", "-conf", "./ci.cfg" ,"-nRep", "2"],
+			//"args": ["-tracedbg", "4", "-nRep", "1", "-hsync", "-ECAllPerm"],
+			//"args": ["-tracedbg", "${input:dbglvl}", "-good-path-dbg", "${input:dbglvl}", "-nRep", "${input:nRep}" ],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}/clnt/block/unitest", // "${fileDirname}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [
+				{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},
+				//{"description": "favouIntel", "text": "-gdb-set disassembly-flavor intel","ignoreFailures": true}
+			],
+			"preLaunchTask": "BuildBlockSimulatorDanielHsH",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"presentation": { "hidden": false, "group": "simulator", "order": 1 }
+		},
+		{
+			"name": "Debug CmpBlocks",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/perfTest/io_stress/cmp_blocks/cmp_blocks",
+			//"args": ["--verbose", "true", "--dbg_di", "false", "-d", "3", "-p", "2", "--rlba", "0", "--d_path", "examples/EC_3_2/d_%d", "--md_path", "examples/EC_3_2/md_%d", "--reconst_bmp", "0x7", "--dry_run", "true"],
+			"args": ["--verbose", "true", "--dbg_di", "false", "-d", "3", "-p", "2", "--rlba", "227", "--role", "P", "--d_path", "examples/0_GEN_MD/d_%d", "--md_path", "examples/0_GEN_MD/md_%d"],
+			//"args": ["--verbose", "true", "--dbg_di", "false", "-d", "3", "-p", "2", "--rlba", "213", "--d_path", "examples/EC_3_2/d_%d"],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}/perfTest/io_stress/cmp_blocks",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},	],
+			"preLaunchTask": "CmpBlocksBuild",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"presentation": { "hidden": false, "group": "simulator", "order": 1 }
+		},
+		{
+			"name": "Debug GenMd",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/perfTest/io_stress/gen_md/gen_md",
+			"args": ["--verbose", "true", "--dbg_di", "false", "--rlba", "227", "--d_path", "examples/data4k", "--md_path", "examples/md_valid", "--dbits", "{1/3}", "--role", "P", "--dry_run", "true"],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}/perfTest/io_stress/gen_md",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},	],
+			"preLaunchTask": "GenMdBuild",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"presentation": { "hidden": false, "group": "simulator", "order": 1 }
+		},
+		{
+			"name": "Debug Infra.so",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/tools/infra_shared/infra_shared_test",
+			"args": ["--verbose"],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}/tools/infra_shared",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},	],
+			"preLaunchTask": "InfraSharedBuild",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"presentation": { "hidden": false, "group": "simulator", "order": 1 }
+		},
+		{
+			"name": "DpLib",
+			"type": "cppdbg",
+			"request": "launch",
+			"cwd": "${workspaceFolder}/clnt/block/um_integration",
+			"program": "${workspaceFolder}/clnt/block/um_integration/nvmesh_dp_lib",
+			"args": [""],
+			"stopAtEntry": false,
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},	],
+			"preLaunchTask": "BuildDpLibMakeFile",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"presentation": { "hidden": false, "group": "simulator", "order": 1 }
+		},
+		{
+			"name": "Debug Toma",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/toma/unitest/nvmeibt_toma",
+			"args": [],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}/toma/unitest",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"setupCommands": [{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},	],
+			"preLaunchTask": "BuildTomaSimulator",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"presentation": { "hidden": false, "group": "simulator", "order": 1 }
+		},
+		{
+			"name": "Python: Attach",
+			"type": "python",
+			"request": "attach",
+			"connect": {
+				"host": "0.0.0.0",
+				"port": 5678,
+			},
+			"pathMappings": [
+			  {
+				"localRoot": "${workspaceFolder}",
+				"remoteRoot": "/opt/nvmesh/client-repo"
+			  }
+			]
+		}
+	]
+}

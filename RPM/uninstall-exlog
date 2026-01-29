@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# currently, doing nothing. When having a wrapper service script will cleanup
+# after it.
+
+exit 0

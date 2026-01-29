@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import sys
+import os
+import fnmatch
+import tempfile
+import subprocess
+
+def read_symvers(filenames, path = None):
+    symbols = {}
+
+    for filename in filenames:
+        with open(filename) as f:
+            for l in f:
+                if path and not path in l:
+                    continue
+
+                ver, sym = l.split()[:2]
+                symbols[sym] = int(ver, 16)
+
+    return symbols
+
+pwd=sys.argv[1]
+
+all_symbols = {}
+
+modprobe = 'undefined'
+for f in [ '/usr/sbin/modprobe', '/sbin/modprobe']:
+    if os.path.isfile(f):
+        modprobe=f
+
+for root, dirnames, filenames in os.walk(pwd):
+    for filename in fnmatch.filter(filenames, '*.ko'):
+        fname = os.path.join(root, filename)
+        cmd = [modprobe, '--dump-modversions', fname]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        proc.wait()
+        res = proc.stdout.read()
+        # Decode binary output to string
+        res = res.decode('utf-8')
+        for line in res.splitlines():
+            ver, sym = line.split()[:2]
+            all_symbols[sym] = int(ver, 16)
+
+nvmesh_symbols = read_symvers(["%s/Module.symvers" % pwd], pwd)
+
+with open("%s/symvers/symbols.c" % pwd, "w") as f:
+    for sym, ver in all_symbols.items():
+        if sym in nvmesh_symbols:
+            continue
+
+        f.write("SYMVER(\"%s\", %#x),\n" % (sym, ver))

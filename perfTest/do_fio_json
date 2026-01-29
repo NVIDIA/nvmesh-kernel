@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+fio=fio
+
+if [ -e /usr/local/bin/fio ] ; then
+	fio=/usr/local/bin/fio
+fi
+
+declare -a filenames
+for x in $1; do
+	filenames[${#filenames[@]}]="--filename=/dev/nvmesh/$x"
+done
+
+iodepth=$2
+numjobs=$3
+rw=$4
+blocksize=$5
+runtime=$6
+#echo fio iodepth=$iodepth numjobs=$numjobs rw=$rw bs=$blocksize runtime=$runtime    ##Canceled to keep json format
+sudo $fio ${filenames[@]} --direct=1 --rw=randrw --norandommap --randrepeat=0 --ioengine=libaio --rwmixread=$rw --group_reporting --name=4ktestread --time_based --verify=0 --iodepth=$iodepth --numjobs=$numjobs --bs=$blocksize --runtime=$runtime --random_generator=tausworthe64 --output-format=json

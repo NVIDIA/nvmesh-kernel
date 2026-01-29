@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+dev_id=$1
+
+. /opt/nvmesh/client-repo/services/nvmesh_util
+
+unbind_drive_from_nvme_bind_to_nvmeibs() {
+	nvmepci=$(get_nvme_pci_by_devname $dev_id)
+
+	if [ "$?" -eq "0" ] && [ ! -z "$nvmepci" ]; then
+		pcidrivers_base_path=/sys/bus/pci/drivers
+		pcifd=$pcidrivers_base_path/nvme/$nvmepci
+
+		#check if pci binded to nvme driver
+		if [ ! -e "$pcifd" ]; then
+			echo "Error locating pcifd for dev=$dev_id"
+			exit 0
+		fi
+
+		#unbind pci from nvme driver
+		echo -n "$nvmepci" > $pcidrivers_base_path/nvme/unbind
+
+		if [ "$?" -eq "0" ] && [ -d "$pcidrivers_base_path/nvmeibs" ]; then
+			#bind to nvmeibs
+			echo -n "$nvmepci" > $pcidrivers_base_path/nvmeibs/bind
+		fi
+	fi
+}
+
+if module_up nvmeibs && module_up nvme; then
+	unbind_drive_from_nvme_bind_to_nvmeibs
+fi
+
+exit 0

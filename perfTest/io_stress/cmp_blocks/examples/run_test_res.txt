@@ -1,0 +1,1594 @@
+[1;32m******************************* ./cmp_blocks *******************************[0;39m
+Building on Linux/x86_64
+-->Cleaning... |./cmp_blocks_cmp_blocks.o ./kr_incs_cmp_blocks.o ./cmp_blocks_impl_cmp_blocks.o ../../../clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_cmp_blocks.o ../../../clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_praid_cmp_blocks.o ../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables_cmp_blocks.o ../../../clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log_cmp_blocks.o|
+[1;33m************************ ./cmp_blocks --help[0;39m
+Version: 1.9
+USAGE: ./cmp_blocks --verbose <true/false> --dbg_di <true/false> -d <number> -p <number> --d_path <data_prefix>_%d --md_path <md_prefix>_%d [-s <snake size>  Default 1] [--rlba <rlba number of the owner block of first slice or of the slice in slice_index>] (OPTIONAL if omitted no crc will be checked) [--slice_ind <slice index> slice index from start of blockset, exist iff QLC, by default 0 ] [--reconst_bmp bitmap in hex representation string of the valid datas which to restore from - optional if not present then a restoration will not be performed]
+The file names starting from 0.
+Example: ./cmp_blocks --verbose true --dbg_di true -d 8 -p 2 --d_path data_%d --md_path metadata_%d
+Bash cmd to manually analyze: for i in {0..9}; do ./parse_block data_${i} data_${i}.txt; done; cat data_*.txt > all.txt;
+For QLC there should be only one md file with <md_prefix>_0, and --slice_ind must be given
+[32m---------------------- R1 ----------------------
+[0;0m* Example: ./cmp_blocks examples/R1_no_md/data_0 examples/R1_no_md/data_1
+     * Backward Compatible with Old V1.2.1 api of cmp_blocks.c usage for R1: ./cmp_blocks <binary_block_file1> <binary_block_file2>
+* ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_no_md/data_%d --md_path NULL
+* ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_no_md/corrupt_%d
+[1;33m************************ ./cmp_blocks examples/R1_no_md/data_0 examples/R1_no_md/data_1[0;39m
+Version: 1.9
+File examples/R1_no_md/data_0 size: 4096[bytes]=1[blks]
+File examples/R1_no_md/data_1 size: 4096[bytes]=1[blks]
+[32mAll 1 blocks are identical[0;0m
+[1;33m************************ ./cmp_blocks examples/R1_no_md/corrupt_0 examples/R1_no_md/corrupt_1[0;39m
+Version: 1.9
+File examples/R1_no_md/corrupt_0 size: 4096[bytes]=1[blks]
+File examples/R1_no_md/corrupt_1 size: 4096[bytes]=1[blks]
+[1;31mSummary: Not Identical! First non identical block is 0![0;0m
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_no_md/data_%d[0;39m
+Version: 1.9
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_no_md/corrupt_%d[0;39m
+Version: 1.9
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":213,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":1}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/d_%d --md_path examples/R1_with_md/md_%d[0;39m
+Version: 1.9
+***** d0, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x451, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600228801
+***** d1, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x451, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100228801
+*****      \-> wrong txid/jri, was metadata written externally?
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/corrupt_%d --md_path examples/R1_with_md/md_%d[0;39m
+Version: 1.9
+***** d0, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x451, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600228801
+***** d1, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x451, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100228801
+*****      \-> wrong txid/jri, was metadata written externally?
+Summary: parity does not match, crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_AND_PARITY_MISMATCH,
+"slices":[
+{
+	"rlba":213,"enum":CB_CRC_AND_PARITY_MISMATCH,
+	"edic_mismatch":[{"role":1,"original_edic":0x00000451,"calced_edic":0x00000a74}],
+	"parity_mismatch":[{"role":1}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/d_%d --md_path examples/R1_with_md/md_wrong_edic_%d[0;39m
+Version: 1.9
+***** d0, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600a3c801
+***** d1, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+*****      \-> wrong txid/jri, was metadata written externally?
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":213,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001479,"calced_edic":0x00000451}],
+	"edic_mismatch":[{"role":1,"original_edic":0x00001479,"calced_edic":0x00000451}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/corrupt_%d --md_path examples/R1_with_md/md_never_written_%d[0;39m
+Version: 1.9
+***** skip never written slice
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/d_%d --md_path examples/R1_with_md/md_bad_sector_%d[0;39m
+Version: 1.9
+***** bad sectors in entire slice. Data is lost
+Summary: data loss!!!, 
+***summary***
+{
+"total_enum":CB_DATA_LOSS,              
+"slices":[
+{
+	"rlba":213,"enum":CB_DATA_LOSS,              
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/d_%d --md_path examples/R1_with_md/md_bad_and_good_%d[0;39m
+Version: 1.9
+***** d0, md: BAD!-{ver=1, d2j_rng=0x0 edic=0x651, db={0,0}, txid=0x6, jri=1, rsv=0x0}, 0x0010000600328801
+***** d1, md: _OK_-{ver=1, d2j_rng=0x0 edic=0x451, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600228801
+Summary: parity does not match, crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_AND_PARITY_MISMATCH,
+"slices":[
+{
+	"rlba":213,"enum":CB_CRC_AND_PARITY_MISMATCH,
+	"edic_mismatch":[{"role":0,"original_edic":0x00000651,"calced_edic":0x00000451}],
+	"bad_sector":[{"role":0}],
+	"parity_mismatch":[{"role":1}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_with_md/d_%d --md_path examples/R1_with_md/md_%d --reconst_bmp 1[0;39m
+Version: 1.9
+Line=133: Reconstruction is not supported for Raid-1, just copy one leg to another. Missing edic should be regened with 1 column mode!
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 2 --rlba 213 --d_path examples/EC_3_2/d_%d --md_path examples/xx_%d[0;39m
+Version: 1.9
+Line=161: Unable to open file: examples/xx_0, Errno: No such file or directory
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path X --md_path X --reconst_bmp 0x2[0;39m
+Version: 1.9
+Line=129: Wrong reconst_bmp=0x2, not enough valid sources 1 < 3!
+[1;33m************************ ./cmp_blocks -d 3 -p 2 --rlba 0 --d_path X --md_path X --reconst_bmp 0x29[0;39m
+Version: 1.9
+Line=131: Wrong reconst_bmp=0x29, Must be < 0x1f!
+[1;33m************************ ./cmp_blocks -d 13 -p 20 --rlba 0 --d_path X --md_path X --reconst_bmp 0x29[0;39m
+Version: 1.9
+Line=115: Slice size too big 13+20 > 12
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 2 --rlba 213 --d_path examples/EC_3_2/d_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=213, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=1, max_txid=0x0
+***** D[0], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** D[1], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** D[2], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** P[3], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** P[4], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+	"is_slice_neverwritten": 1,
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose false --dbg_di false -d 3 -p 1 --rlba 0 --d_path examples/EC_3_2/d_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+1}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 1 --rlba 555 --d_path examples/EC_3_2/d_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+1}, check_crc=1, dbg_di=0, snake=1, rlba=555, reconstruct_bmp=0x0
+***** Bmps: in=0xf, out=0x8, crc=0xf, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+crc of seg[0] wrong!
+	Original crc is: 0x000cc72e (00000000000011001100011100101110b)   (first bits might be omitted)
+	Correct  crc is: 0x000e87fe (00000000000011101000011111111110b)
+The original   seg[0]: {0x3736353433323139}
+
+crc of seg[1] wrong!
+	Original crc is: 0x0015c3cd (00000000000101011100001111001101b)   (first bits might be omitted)
+	Correct  crc is: 0x0011a9aa (00000000000100011010100110101010b)
+The original   seg[1]: {0x3736353433323131}
+
+crc of seg[2] wrong!
+	Original crc is: 0x000241fd (00000000000000100100000111111101b)   (first bits might be omitted)
+	Correct  crc is: 0x001bcdf7 (00000000000110111100110111110111b)
+The original   seg[2]: {0x3736353433323132}
+
+crc of seg[3] wrong!
+	Original crc is: 0x00000b3d (00000000000000000000101100111101b)   (first bits might be omitted)
+	Correct  crc is: 0x00000bed (00000000000000000000101111101101b)
+The original   seg[3]: {0x373635343332313a}
+
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":555,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x000cc72e,"calced_edic":0x000e87fe}],
+	"edic_mismatch":[{"role":1,"original_edic":0x0015c3cd,"calced_edic":0x0011a9aa}],
+	"edic_mismatch":[{"role":2,"original_edic":0x000241fd,"calced_edic":0x001bcdf7}],
+	"edic_mismatch":[{"role":3,"original_edic":0x00000b3d,"calced_edic":0x00000bed}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_%d --md_path examples/EC_3_2/md_%d --reconst_bmp 7 --dry_run true[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x7
+***** Bmps: in=0x7, out=0x18, crc=0x18, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+	"reconstruct_bmp":"0x18",
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_worng_d1_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+crc of seg[1] wrong!
+	Original crc is: 0x0015c3cd (00000000000101011100001111001101b)   (first bits might be omitted)
+	Correct  crc is: 0x0017b879 (00000000000101111011100001111001b)
+The original   seg[1]: {0x0000000000000000}
+
+parity 3 is not matching
+The original   seg[3]: {0x373635343332313a}
+The calculated seg[3]: {0x000000000000000b}
+crc of seg[3] wrong!
+	Original crc is: 0x00000b3d (00000000000000000000101100111101b)   (first bits might be omitted)
+	Correct  crc is: 0x00001089 (00000000000000000001000010001001b)
+	Note: Original (metadata) edic did match the original data, but does not match reconstructed data
+
+parity 4 is not matching
+The original   seg[4]: {0x85828b8c999e9793}
+The calculated seg[4]: {0xebeee1e4fffaf5f1}
+crc of seg[4] wrong!
+	Original crc is: 0x0000111d (00000000000000000001000100011101b)   (first bits might be omitted)
+	Correct  crc is: 0x00001192 (00000000000000000001000110010010b)
+	Note: Original (metadata) edic did match the original data, but does not match reconstructed data
+
+skip:1, cand=0, wrong_val:0x0, fixed_val:0x3736353433323131, cand_val:0x3736353433323139
+skip:1, cand=2, wrong_val:0x0, fixed_val:0x3736353433323131, cand_val:0x3736353433323132
+skip:1, cand=3, wrong_val:0x0, fixed_val:0x3736353433323131, cand_val:0x373635343332313a
+skip:1, cand=4, wrong_val:0x0, fixed_val:0x3736353433323131, cand_val:0x85828b8c999e9793
+Summary: parity does not match, crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_AND_PARITY_MISMATCH,
+"slices":[
+{
+	"rlba":0,"enum":CB_CRC_AND_PARITY_MISMATCH,
+	"edic_mismatch":[{"role":1,"original_edic":0x0015c3cd,"calced_edic":0x0017b879}],
+	"parity_mismatch":[{"role":3}],
+	"edic_mismatch":[{"role":3,"original_edic":0x00000b3d,"calced_edic":0x00001089}],
+	"parity_mismatch":[{"role":4}],
+	"edic_mismatch":[{"role":4,"original_edic":0x0000111d,"calced_edic":0x00001192}],
+	"partial_slice_match":[{"role":0,"skipped_role":1}],
+	"partial_slice_match":[{"role":2,"skipped_role":1}],
+	"partial_slice_match":[{"role":3,"skipped_role":1}],
+	"partial_slice_match":[{"role":4,"skipped_role":1}],
+	"reconstruction":[{"role":1,"wrong_val":"0x0","fixed_val":"0x3736353433323131"}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_worng_d1_%d --md_path examples/EC_3_2/md_%d --reconst_bmp 0x1d --dry_run true[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x1d
+***** Bmps: in=0x1d, out=0x2, crc=0x2, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+block 1 is not matching
+The original   seg[1]: {0x0000000000000000}
+The calculated seg[1]: {0x3736353433323131}
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":0,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":1}],
+	"reconstruct_bmp":"0x2",
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_wrong_p_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+parity 3 is not matching
+The original   seg[3]: {0x0000000000000000}
+The calculated seg[3]: {0x373635343332313a}
+skip:3, cand=0, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x3736353433323139
+skip:3, cand=1, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x3736353433323131
+skip:3, cand=2, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x3736353433323132
+skip:3, cand=4, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x85828b8c999e9793
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":0,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":3}],
+	"partial_slice_match":[{"role":0,"skipped_role":3}],
+	"partial_slice_match":[{"role":1,"skipped_role":3}],
+	"partial_slice_match":[{"role":2,"skipped_role":3}],
+	"partial_slice_match":[{"role":4,"skipped_role":3}],
+	"reconstruction":[{"role":3,"wrong_val":"0x0","fixed_val":"0x373635343332313a"}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_wrong_p_%d --md_path examples/EC_3_2/md_%d --reconst_bmp 0x17 --dry_run true[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x17
+***** Bmps: in=0x17, out=0x8, crc=0x8, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+parity 3 is not matching
+The original   seg[3]: {0x0000000000000000}
+The calculated seg[3]: {0x373635343332313a}
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":0,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":3}],
+	"reconstruct_bmp":"0x8",
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_wrong_p_%d --md_path examples/EC_3_2/md_never_written_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=0, max_txid=0xfffff
+***** D[0], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** D[1], md: BAD!-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** D[2], md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fffff, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** P[3], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** P[4], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+parity 3 is not matching
+The original   seg[3]: {0x0000000000000000}
+The calculated seg[3]: {0x373635343332313a}
+skip:3, cand=0, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x3736353433323139
+skip:3, cand=1, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x3736353433323131
+skip:3, cand=2, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x3736353433323132
+skip:3, cand=4, wrong_val:0x0, fixed_val:0x373635343332313a, cand_val:0x85828b8c999e9793
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":0,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":3}],
+	"partial_slice_match":[{"role":0,"skipped_role":3}],
+	"partial_slice_match":[{"role":1,"skipped_role":3}],
+	"partial_slice_match":[{"role":2,"skipped_role":3}],
+	"partial_slice_match":[{"role":4,"skipped_role":3}],
+	"reconstruction":[{"role":3,"wrong_val":"0x0","fixed_val":"0x373635343332313a"}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_wrong_p_%d --md_path examples/EC_3_2/md_never_written_%d --reconst_bmp 0x1d --dry_run true[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x1d
+***** Bmps: in=0x1d, out=0x2, crc=0x2, snw=1, max_txid=0xfffff
+***** D[0], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** D[1], md: BAD!-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** D[2], md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fffff, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** P[3], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** P[4], md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+block 1 is not matching
+The original   seg[1]: {0x3736353433323131}
+The calculated seg[1]: {0x000000000000000b}
+crc of seg[1] wrong!
+	Original crc is: 0x0015c3cd (00000000000101011100001111001101b)   (first bits might be omitted)
+	Correct  crc is: 0x001190bc (00000000000100011001000010111100b)
+	Note: Original (metadata) edic did match the original data, but does not match reconstructed data
+
+Summary: parity does not match, crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_AND_PARITY_MISMATCH,
+"slices":[
+{
+	"rlba":0,"enum":CB_CRC_AND_PARITY_MISMATCH,
+	"parity_mismatch":[{"role":1}],
+	"edic_mismatch":[{"role":1,"original_edic":0x0015c3cd,"calced_edic":0x001190bc}],
+	"reconstruct_bmp":"0x2",
+	"is_slice_neverwritten": 1,
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_worng_d1_%d --md_path examples/EC_3_2/md_%d --reconst_bmp 0x1d --dry_run false[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x1d
+***** Bmps: in=0x1d, out=0x2, crc=0x2, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+block 1 is not matching
+The original   seg[1]: {0x0000000000000000}
+The calculated seg[1]: {0x3736353433323131}
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":0,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":1}],
+	"reconstruct_bmp":"0x2",
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_worng_d1_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x4, jri=0, rsv=0x0}, 0x00000004ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ git checkout -q examples/EC_3_2/d_worng_d1_1 examples/EC_3_2/md_1[0;39m
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_wrong_p_%d --md_path examples/EC_3_2/md_%d --reconst_bmp 0x17 --dry_run false[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x17
+***** Bmps: in=0x17, out=0x8, crc=0x8, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x20 edic=0xb3d, db={0,0}, txid=0x4, jri=3fe, rsv=0x0}, 0x3fe000040059e881
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+parity 3 is not matching
+The original   seg[3]: {0x0000000000000000}
+The calculated seg[3]: {0x373635343332313a}
+Summary: parity does not match, 
+***summary***
+{
+"total_enum":CB_PARITY_MISMATCH,        
+"slices":[
+{
+	"rlba":0,"enum":CB_PARITY_MISMATCH,        
+	"parity_mismatch":[{"role":3}],
+	"reconstruct_bmp":"0x8",
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true  --dbg_di false -d 3 -p 2 --rlba 0 --d_path examples/EC_3_2/d_wrong_p_%d --md_path examples/EC_3_2/md_%d[0;39m
+Version: 1.9
+Params: EC {3+2}, check_crc=1, dbg_di=0, snake=1, rlba=0, reconstruct_bmp=0x0
+***** Bmps: in=0x1f, out=0x18, crc=0x1f, snw=0, max_txid=0x4
+***** D[0], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xcc72e, txid=0x2, jri=2a9, rsv=0x0}, 0x2a90000266397001
+***** D[1], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=3fe, rsv=0x0}, 0x3fe00003ae1e6801
+***** D[2], md: _OK_-{ver=1, d2j_rng=0x0 edic=0x241fd, txid=0x4, jri=3ff, rsv=0x0}, 0x3ff00004120fe801
+***** P[3], md: _OK_-{ver=1, d2j_rng=0x0 edic=0xb3d, db={0,0}, txid=0x4, jri=0, rsv=0x0}, 0x000000040059e801
+***** P[4], md: _OK_-{ver=1, d2j_rng=0x20 edic=0x111d, db={0,0}, txid=0x4, jri=286, rsv=0x0}, 0x286000040088e881
+Summary: slice is valid
+***summary***
+{
+"total_enum":CB_OK,                     
+"slices":[
+]
+}
+***summary - end***
+
+[1;33m************************ git checkout -q examples/EC_3_2/d_wrong_p_3 examples/EC_3_2/md_3[0;39m
+[1;32m******************************* ./cmp_blocks *******************************[0;39m
+[1;33m************************ ./cmp_blocks --help[0;39m
+Version: 1.9
+USAGE: ./cmp_blocks --verbose <true/false> --dbg_di <true/false> -d <number> -p <number> --d_path <data_prefix>_%d --md_path <md_prefix>_%d [-s <snake size>  Default 1] [--rlba <rlba number of the owner block of first slice or of the slice in slice_index>] (OPTIONAL if omitted no crc will be checked) [--slice_ind <slice index> slice index from start of blockset, exist iff QLC, by default 0 ] [--reconst_bmp bitmap in hex representation string of the valid datas which to restore from - optional if not present then a restoration will not be performed]
+The file names starting from 0.
+Example: ./cmp_blocks --verbose true --dbg_di true -d 8 -p 2 --d_path data_%d --md_path metadata_%d
+Bash cmd to manually analyze: for i in {0..9}; do ./parse_block data_${i} data_${i}.txt; done; cat data_*.txt > all.txt;
+For QLC there should be only one md file with <md_prefix>_0, and --slice_ind must be given
+[32m---------------------- R1 ----------------------
+[0;0m* Example: ./cmp_blocks examples/R1_no_md/data_0 examples/R1_no_md/data_1
+     * Backward Compatible with Old V1.2.1 api of cmp_blocks.c usage for R1: ./cmp_blocks <binary_block_file1> <binary_block_file2>
+* ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_no_md/data_%d --md_path NULL
+* ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 213 --d_path examples/R1_no_md/corrupt_%d
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 2 --rlba 227 --role P --d_path examples/0_GEN_MD/d_0 --md_path examples/0_GEN_MD/md_0 --dry_run true[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100a3c801
+Summary: slice is valid
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0xfba7013!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1013, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100809801
+Summary: crc is invalid, 
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+Summary: slice is valid
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fff, db={15,15}, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fff, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100fff801
+Summary: slice is valid
+***** Reading md: BAD!-{ver=1, d2j_rng=0x0 edic=0x3cd, db={14,10}, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** Wrong edic, should be=0xa597f9fe!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x19fe, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100cff001
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x00001013}],
+},
+{
+	"rlba":239,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x000003cd,"calced_edic":0x000019fe}],
+	"bad_sector":[{"role":0}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose fals --dbg_di false -d 3 -p 2 --rlba 227 --role P --d_path examples/0_GEN_MD/d_0 --md_path examples/0_GEN_MD/md_0 --dry_run true[0;39m
+Version: 1.9
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x00001013}],
+},
+{
+	"rlba":239,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x000003cd,"calced_edic":0x000019fe}],
+	"bad_sector":[{"role":0}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 2 --rlba 227 --role P --d_path examples/0_GEN_MD/d_0 --md_path examples/0_GEN_MD/md_0 --dry_run true --dbits {1/3}[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={4,2}, txid=0x1, jri=0, rsv=0x0}, 0x0000000124a3c801
+Summary: slice is valid
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0xfba7013!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1013, db={4,2}, txid=0x1, jri=0, rsv=0x0}, 0x0000000124809801
+Summary: crc is invalid, 
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+Summary: slice is valid
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fff, db={15,15}, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fff, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100fff801
+Summary: slice is valid
+***** Reading md: BAD!-{ver=1, d2j_rng=0x0 edic=0x3cd, db={14,10}, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** Wrong edic, should be=0xa597f9fe!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x19fe, db={4,2}, txid=0x1, jri=0, rsv=0x0}, 0x0000000124cff001
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x00001013}],
+},
+{
+	"rlba":239,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x000003cd,"calced_edic":0x000019fe}],
+	"bad_sector":[{"role":0}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 0 --rlba 227 --role P --d_path examples/0_GEN_MD/d8k --md_path examples/0_GEN_MD/md8k --dry_run true --dbits {11/5}[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={12,6}, txid=0x1, jri=0, rsv=0x0}, 0x000000016ca3c801
+Summary: slice is valid
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0xfba7013!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1013, db={12,6}, txid=0x1, jri=0, rsv=0x0}, 0x000000016c809801
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x00001013}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 0 --rlba 227 --role P --d_path examples/0_GEN_MD/d8k --md_path examples/0_GEN_MD/md8k --dry_run true --dbits {-1/-1}[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100a3c801
+Summary: slice is valid
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0xfba7013!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1013, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100809801
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x00001013}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 2 --rlba 227 --role P --d_path examples/0_GEN_MD/d8k --md_path examples/0_GEN_MD/md8k --dry_run true --dbits {-1/0}[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={1,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000101a3c801
+Summary: slice is valid
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0xfba7013!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1013, db={1,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000101809801
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x00001013}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 3 -p 2 --rlba 227 --role D --d_path examples/0_GEN_MD/d_0 --md_path examples/0_GEN_MD/md_0 --dry_run true --dbits {1/3}[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x18d479, txid=0x1, jri=0, rsv=0x0}, 0x00000001c6a3c801
+Summary: crc is invalid, 
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0xfba7013!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1a7013, txid=0x1, jri=0, rsv=0x0}, 0x00000001d3809801
+Summary: crc is invalid, 
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+Summary: slice is valid
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fffff, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fffff, txid=0x1, jri=2, rsv=0x0}, 0x00200001fffff801
+Summary: slice is valid
+***** Reading md: BAD!-{ver=1, d2j_rng=0x0 edic=0x15c3cd, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** Wrong edic, should be=0xa597f9fe!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x17f9fe, txid=0x1, jri=0, rsv=0x0}, 0x00000001bfcff001
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":227,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001479,"calced_edic":0x0018d479}],
+},
+{
+	"rlba":230,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x001a7013}],
+},
+{
+	"rlba":239,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x0015c3cd,"calced_edic":0x0017f9fe}],
+	"bad_sector":[{"role":0}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1 --rlba 227 --role R1 --d_path examples/0_GEN_MD/d_0 --md_path examples/0_GEN_MD/md_0              --dry_run true --dbits {1/3}[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600a3c801
+Summary: slice is valid
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0x4cc7967e!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x167e, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600b3f001
+Summary: crc is invalid, 
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+Summary: slice is valid
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fff, db={15,15}, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fff, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100fff801
+Summary: slice is valid
+***** Reading md: BAD!-{ver=1, d2j_rng=0x0 edic=0x3cd, db={14,10}, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** Wrong edic, should be=0xad8c16bb!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x16bb, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600b5d801
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":228,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x0000167e}],
+},
+{
+	"rlba":231,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x000003cd,"calced_edic":0x000016bb}],
+	"bad_sector":[{"role":0}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --verbose true --dbg_di false -d 1 -p 1            --role R1 --d_path examples/0_GEN_MD/d_0 --md_path examples/0_GEN_MD/md_0              --dry_run true[0;39m
+Version: 1.9
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801
+***** Wrong edic, should be=0x63a33169!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1169, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x00600006008b4801
+Summary: crc is invalid, 
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801
+***** Wrong edic, should be=0x2b3269c8!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x9c8, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x00600006004e4001
+Summary: crc is invalid, 
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+Summary: slice is valid
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fff, db={15,15}, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fff, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100fff801
+Summary: slice is valid
+***** Reading md: BAD!-{ver=1, d2j_rng=0x0 edic=0x3cd, db={14,10}, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801
+***** Wrong edic, should be=0xca79e90d!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x90d, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600486801
+Summary: crc is invalid, 
+***summary***
+{
+"total_enum":CB_CRC_MISMATCH,           
+"slices":[
+{
+	"rlba":4294967295,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001479,"calced_edic":0x00001169}],
+},
+{
+	"rlba":0,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x00001189,"calced_edic":0x000009c8}],
+},
+{
+	"rlba":3,"enum":CB_CRC_MISMATCH,           
+	"edic_mismatch":[{"role":0,"original_edic":0x000003cd,"calced_edic":0x0000090d}],
+	"bad_sector":[{"role":0}],
+},
+]
+}
+***summary - end***
+
+[1;33m************************ ./cmp_blocks --dbits {wrong_format11/-1} 1 2 3 4 5 6 7 8 9 0 a b c d[0;39m
+Version: 1.9
+Line=107: dbits value must have format {%u/%u}, (-1 for none, x for seg x), not {wrong_format11/-1}
+[1;33m************************ ./cmp_blocks --verbose nonbool           1 2 3 4 5 6 7 8 9 0 a b c d[0;39m
+Version: 1.9
+Line=68: 2th argument is neither true/false, nonbool
+[1;33m************************ ./cmp_blocks --role Q                    1 2 3 4 5 6 7 8 9 0 a b c d[0;39m
+Version: 1.9
+Line=99: 2th argument is neither D/P/R1, Q
+[1;32m******************************* ./infra_shared_test *******************************[0;39m
+> clean
+mkdir -p ../../build/tools/infra_shared/
+gcc -ggdb3 -Wall -Werror -fPIC -DNVMEIBC_SECTOR_SHIFT=12 -Wno-address-of-packed-member -O3 -DUSER_SPACE -I../../ -I../../common/ -MT ../../build/tools/infra_shared/infra_shared.o -MMD -MP -MF ../../build/tools/infra_shared/infra_shared.d -c ../../tools/infra_shared/infra_shared.c -o ../../build/tools/infra_shared/infra_shared.o
+mkdir -p ../../build/clnt/block/datapath_utils_debug_di/
+gcc -ggdb3 -Wall -Werror -fPIC -DNVMEIBC_SECTOR_SHIFT=12 -Wno-address-of-packed-member -O3 -DUSER_SPACE -I../../ -I../../common/ -MT ../../build/clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log.o -MMD -MP -MF ../../build/clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log.d -c ../../clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log.c -o ../../build/clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log.o
+> infra_shared.so
+gcc -ggdb3 -Wall -Werror -fPIC -DNVMEIBC_SECTOR_SHIFT=12 -Wno-address-of-packed-member -O3 -DUSER_SPACE -I../../ -I../../common/ -MT ../../build/.o -MMD -MP -MF ../../build/.d -c infra_shared_test.c -o ../../build/tools/infra_shared/infra_shared_test.o
+gcc -ggdb3 -Wall -Werror -fPIC -DNVMEIBC_SECTOR_SHIFT=12 -Wno-address-of-packed-member -O3 -DUSER_SPACE infra_shared.so  ../../build/tools/infra_shared/infra_shared_test.o -o infra_shared_test -L. -ldl ./infra_shared.so
+[1;33m************************ ./infra_shared_test[0;39m
+Starting ./infra_shared_test.so tests
+Starting ./infra_shared_test.so tests done
+[1;32m******************************* ./miniscrub_test *******************************[0;39m
+Makefile:8: Objects = -DCOMPILE_FOR_TEST -g -ggdb , "dfsdfs ", ./infra_shared.so
+/bin/rm -f miniscrub_test miniscrub.o
+Makefile:8: Objects = -DCOMPILE_FOR_TEST -g -ggdb , "dfsdfs ", ../infra_shared/infra_shared.so
+cc -c -O -o miniscrub.o miniscrub.c
+cc -DCOMPILE_FOR_TEST -g -ggdb  -o miniscrub_test miniscrub.c ../infra_shared/infra_shared.so
+Version: 1.0, args:
+	 1=dlba_start,  2=dlba_end
+	 3=volume_name, 4=drive_name
+	 5,6 is D+P of praid
+	 7, is segment index in praid [0..D+P-1]
+	 8, do output to file (boolean), default=0
+	 9, exit on first problem (boolean), default=1
+[1;32m******************************* ./gen_md *******************************[0;39m
+Building on Linux/x86_64
+-->Cleaning... |./gen_md_gen_md.o ../../../perfTest/io_stress/cmp_blocks/kr_incs_gen_md.o ../../../scripts/target/nvme-cli/json_gen_md.o ../../../clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_gen_md.o ../../../clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_praid_gen_md.o ../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables_gen_md.o|
+[1;33m************************ ./gen_md --help[0;39m
+Version: 1.9
+Line=52: Error: Wrong amount of arguments: 2
+Version: 1.9 --- Deprecated, use cmp_blocks instead!
+Used to generate edic and metadata for 4KB blocks.
+USAGE: ./gen_md --dbg_di <true/false> --d_path <data_path> --md_path <md_path> --rlba <rlba of block>
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_wrong_edic
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_never_written
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_valid[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=0, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801 n_read=1
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_wrong_edic[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=0, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801 n_read=1
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_never_written[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=0, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000 n_read=1
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_never_written2[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=0, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fff, db={15,15}, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff n_read=1
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fff, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100fff801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 113 --role P --d_path examples/data4k --md_path ./examples/md_bad_sector[0;39m
+Version: 1.9
+***** Params: rlba=0x71=113, dbg_di=0, is_parity=1, is_r1=0, dry_run=0, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: BAD!-{ver=1, d2j_rng=0x0 edic=0x3cd, db={14,10}, txid=0x3, jri=1, rsv=0x0}, 0x00100003ae1e6801 n_read=1
+***** Wrong edic, should be=0x6c6c18ce!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x18ce, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100c67001
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_valid         --dry_run true --dbits {1/3}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=1, dbits=(3 ,1 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801 n_read=1
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={4,2}, txid=0x1, jri=0, rsv=0x0}, 0x0000000124a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_valid         --dry_run true --dbits {11/5}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=1, dbits=(11 ,5 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801 n_read=1
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={12,6}, txid=0x1, jri=0, rsv=0x0}, 0x000000016ca3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_wrong_edic    --dry_run true --dbits {-1/-1}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=1, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801 n_read=1
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000100a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_wrong_edic    --dry_run true --dbits {-1/0}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=1, dbits=(0 ,N )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801 n_read=1
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={1,0}, txid=0x1, jri=0, rsv=0x0}, 0x0000000101a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role P --d_path examples/data4k --md_path ./examples/md_never_written --dry_run true --dbits {-1/0}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=0, dry_run=1, dbits=(0 ,N )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000 n_read=1
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role D --d_path examples/data4k --md_path ./examples/md_valid         --dry_run true --dbits {1/3}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=0, is_r1=0, dry_run=1, dbits=(3 ,1 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801 n_read=1
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x18d479, txid=0x1, jri=0, rsv=0x0}, 0x00000001c6a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role D --d_path examples/data4k --md_path ./examples/md_wrong_edic    --dry_run true --dbits {4/2}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=0, is_r1=0, dry_run=1, dbits=(4 ,2 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801 n_read=1
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x18d479, txid=0x1, jri=0, rsv=0x0}, 0x00000001c6a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role D --d_path examples/data4k --md_path ./examples/md_never_written --dry_run true --dbits {4/2}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=0, is_r1=0, dry_run=1, dbits=(4 ,2 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000 n_read=1
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+[1;33m************************ ./gen_md --verbose false --dbg_di true --rlba 111 --role D --d_path examples/data4k --md_path ./examples/md_wrong_edic    --dry_run true --dbits {11/-1}[0;39m
+Version: 1.9
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role R1 --d_path examples/data4k --md_path ./examples/md_valid         --dry_run true --dbits {1/3}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=1, dry_run=1, dbits=(3 ,1 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x4000000100a3c801 n_read=1
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false --rlba 227 --role R1 --d_path examples/data4k --md_path ./examples/md_wrong_edic    --dry_run true --dbits {4/2}[0;39m
+Version: 1.9
+***** Params: rlba=0xe3=227, dbg_di=0, is_parity=1, is_r1=1, dry_run=1, dbits=(4 ,2 )
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1189, db={0,0}, txid=0x1, jri=0, rsv=0x1}, 0x40000001008c4801 n_read=1
+***** Wrong edic, should be=0xbe98d479!
+***** Writing md: _OK_-{ver=1, d2j_rng=0x0 edic=0x1479, db={0,0}, txid=0x6, jri=6, rsv=0x0}, 0x0060000600a3c801
+[1;33m************************ ./gen_md --verbose true --dbg_di false            --role R1 --d_path examples/data4k --md_path ./examples/md_never_written --dry_run true[0;39m
+Version: 1.9
+***** Params: rlba=0xffffffffffffffff=-1, dbg_di=0, is_parity=1, is_r1=1, dry_run=1, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: Virg-{ver=0, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x0, jri=0, rsv=0x0}, 0x0000000000000000 n_read=1
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x0, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100000001
+[1;33m************************ ./gen_md --verbose true --dbg_di false            --role R1 --d_path examples/data4k --md_path ./examples/md_never_written2 --dry_run true[0;39m
+Version: 1.9
+***** Params: rlba=0xffffffffffffffff=-1, dbg_di=0, is_parity=1, is_r1=1, dry_run=1, dbits=(None)
+Read 1 block from examples/data4k: 4096[b], from 2[blocks]
+***** Reading md: Virg-{ver=3, d2j_rng=0x1ff edic=0x1fff, db={15,15}, txid=0xfffff, jri=3ff, rsv=0x3}, 0xffffffffffffffff n_read=1
+***** Writing md: ZERO-{ver=1, d2j_rng=0x0 edic=0x1fff, db={0,0}, txid=0x1, jri=2, rsv=0x0}, 0x0020000100fff801
+[1;33m************************ ./gen_md --dbits {wrong_format11/-1} 1 2 3 4 5 6 7 8 9 0 a b c d[0;39m
+Version: 1.9
+Line=85: dbits value must have format {%u/%u}, (-1 for none, x for seg x), not {wrong_format11/-1}
+Version: 1.9 --- Deprecated, use cmp_blocks instead!
+Used to generate edic and metadata for 4KB blocks.
+USAGE: ./gen_md --dbg_di <true/false> --d_path <data_path> --md_path <md_path> --rlba <rlba of block>
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_wrong_edic
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_never_written
+[1;33m************************ ./gen_md --verbose nonbool           1 2 3 4 5 6 7 8 9 0 a b c d[0;39m
+Version: 1.9
+Line=62: 2th argument is neither true/false, nonbool
+Version: 1.9 --- Deprecated, use cmp_blocks instead!
+Used to generate edic and metadata for 4KB blocks.
+USAGE: ./gen_md --dbg_di <true/false> --d_path <data_path> --md_path <md_path> --rlba <rlba of block>
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_wrong_edic
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_never_written
+[1;33m************************ ./gen_md --role Q                    1 2 3 4 5 6 7 8 9 0 a b c d[0;39m
+Version: 1.9
+Line=67: 2th argument is neither D/P/R1, Q
+Version: 1.9 --- Deprecated, use cmp_blocks instead!
+Used to generate edic and metadata for 4KB blocks.
+USAGE: ./gen_md --dbg_di <true/false> --d_path <data_path> --md_path <md_path> --rlba <rlba of block>
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_wrong_edic
+* Example: ./gen_md --verbose true --dbg_di false --rlba 227 --d_path ./examples/data4k --md_path ./examples/md_never_written
+[1;32m******************************* ./scan_locks_ec *******************************[0;39m
+> clean
+> scan_locks_ec.o
+> scan_locks_ec
+[1;31mError: [0;0mVersion: 1.82
+args:	-json -silent -reset -verbose -help
+	Filter example:	-filter=2{S3HCNX0JC01929.1=2:1-3/0x1208b-0x120af}{disk2=3:7-9/10-11/30-31}*   #{<disk_name>=<num_ranges>:<start_range1[lock]>-<(start+len)_range1[lock]>/<start_range2[lock]>-<(start+len)_range2[lock]>/....}
+	Filter values are typically taken from configuration of volume segment lba divided by 32
+	Config example:	-conf_d 8 -conf_p 2 -conf_role 3     -conf_ignore_unused
+	Reset example:	-reset -set_txid 0x17 -set_lock 0x11 -set_dbits 0x1
+	Partial reset:	-reset=D -set_dbits 0x0,      -reset=L -set_lock 0x100f321f
+		'L' = reset only the lock. Binfo untouched, 'D' = reset only the dbits. TxID/Lock untouched. 'A' = all u64 bits are reset, '-' = Dry run
+
+
+To only print unique stale locks per disk:
+	scan_locks_ec -verbose | grep -e "### Disk" -e "lock-id" | awk '{ if ($2 =="Disk") { diskName = $3; print $0;} else { if (!seen[diskName"-"$4]++){print substr($4, 1, length($4)-1)}}}'
+[1;32m******************************* ./parse_block *******************************[0;39m
+rm -f parse_block parse_block.o nvmeibc_block_dp_block_md_tables.o dbgdi_log_test dbgdi_log_test.o nvmeibc_block_dp_dbgdi_log.o
+gcc -Wall -g -Werror -Wshadow -Wno-address-of-packed-member -DNVMEIBC_SECTOR_SHIFT=12 -DUSER_SPACE -DNO_OFED=1 -std=gnu99 -Wno-address-of-packed-member -Wall -Werror -Werror=comment -std=gnu99 -Wno-deprecated -Wdeclaration-after-statement -Wextra -Wshadow -Werror=strict-aliasing   -I./ -I../../../common/ -I../../../clnt/block/datapath_utils_generic/ -I../../.. -c ../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.c
+gcc -Wall -g -Werror -Wshadow -Wno-address-of-packed-member -DNVMEIBC_SECTOR_SHIFT=12 -DUSER_SPACE -DNO_OFED=1 -std=gnu99 -Wno-address-of-packed-member -Wall -Werror -Werror=comment -std=gnu99 -Wno-deprecated -Wdeclaration-after-statement -Wextra -Wshadow -Werror=strict-aliasing   -I./ -I../../../common/ -I../../../clnt/block/datapath_utils_generic/ -I../../.. -c parse_block.c 
+gcc -Wall -g -Werror -Wshadow -Wno-address-of-packed-member -DNVMEIBC_SECTOR_SHIFT=12 -DUSER_SPACE -DNO_OFED=1 -std=gnu99 -Wno-address-of-packed-member -Wall -Werror -Werror=comment -std=gnu99 -Wno-deprecated -Wdeclaration-after-statement -Wextra -Wshadow -Werror=strict-aliasing   -I./ -I../../../common/ -I../../../clnt/block/datapath_utils_generic/ -I../../.. -c ../../../clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log.c
+gcc -Wall -g -Werror -Wshadow -Wno-address-of-packed-member -DNVMEIBC_SECTOR_SHIFT=12 -DUSER_SPACE -DNO_OFED=1 -std=gnu99 -Wno-address-of-packed-member -Wall -Werror -Werror=comment -std=gnu99 -Wno-deprecated -Wdeclaration-after-statement -Wextra -Wshadow -Werror=strict-aliasing   nvmeibc_block_dp_block_md_tables.o nvmeibc_block_dp_dbgdi_log.o parse_block.o -o parse_block 
+gcc -Wall -g -Werror -Wshadow -Wno-address-of-packed-member -DNVMEIBC_SECTOR_SHIFT=12 -DUSER_SPACE -DNO_OFED=1 -std=gnu99 -Wno-address-of-packed-member -Wall -Werror -Werror=comment -std=gnu99 -Wno-deprecated -Wdeclaration-after-statement -Wextra -Wshadow -Werror=strict-aliasing   -I./ -I../../../common/ -I../../../clnt/block/datapath_utils_generic/ -I../../.. -c dbgdi_log_test.c
+gcc -Wall -g -Werror -Wshadow -Wno-address-of-packed-member -DNVMEIBC_SECTOR_SHIFT=12 -DUSER_SPACE -DNO_OFED=1 -std=gnu99 -Wno-address-of-packed-member -Wall -Werror -Werror=comment -std=gnu99 -Wno-deprecated -Wdeclaration-after-statement -Wextra -Wshadow -Werror=strict-aliasing   dbgdi_log_test.o nvmeibc_block_dp_dbgdi_log.o -o dbgdi_log_test 
+Version: 1.4
+commit 0xdeadbeef. Args <binary_block_file> <output_txt_file>
+[1;32m******************************* ./dbgdi_log_test *******************************[0;39m
+
+
+*** dbgdi_log basic uni-test, log buf size 512 max record size 512
+dbgdi_log_iter_init E log is not initialized - can't iterate
+dbgdi_log_print_records - can't init log iterator
+dbgdi_log_iter_init E log is empty - can't iterate
+dbgdi_log_print_records - can't init log iterator
+dbgdi_log_add_rec D   type 1 size 510 added at loc 0
+dbgdi_log_add_rec D   type 2 size 12 added at loc 510
+dbgdi_log_add_rec D   type 3 size 4 added at loc 10
+dbgdi_log_add_rec D   type 4 size 5 added at loc 14
+dbgdi_log_add_rec D   type 5 size 64 added at loc 19
+dbgdi_log_add_rec D   type 6 size 128 added at loc 83
+dbgdi_log_print_records size 512 occupancy 213 free space 299
+offset 0510 type 2 size 12
+offset 0010 type 3 size 4
+offset 0014 type 4 size 5
+offset 0019 type 5 size 64
+offset 0083 type 6 size 128
+dbgdi_log_get_record_by_type D rec type 1 was not found
+can't get record
+dbgdi_log_get_record_by_type D   rec type 5 size 64 found at loc 19
+dbgdi_log_get_record_by_type D   rec type 5 size 64 found at loc 19
+record content doesn't matches the expected 5555555500400005 4444444400400005
+dbgdi_log_get_record_by_type E rec type 6 size 128 bigger than the provided size 124
+can't get record
+dbgdi_log_get_record_by_type D rec type 7 was not found
+can't get record
+dbgdi_log_add_rec D   type 1 size 256 added at loc 0
+dbgdi_log_add_rec D   type 2 size 127 added at loc 256
+dbgdi_log_add_rec D   type 3 size 255 added at loc 383
+dbgdi_log_add_rec D   type 4 size 63 added at loc 126
+dbgdi_log_add_rec D   type 5 size 120 added at loc 189
+dbgdi_log_add_rec D   type 6 size 11 added at loc 309
+dbgdi_log_add_rec D   type 7 size 22 added at loc 320
+dbgdi_log_add_rec D   type 8 size 33 added at loc 342
+dbgdi_log_add_rec D   type 9 size 44 added at loc 375
+dbgdi_log_add_rec D   type 10 size 101 added at loc 419
+dbgdi_log_add_rec D   type 11 size 202 added at loc 8
+dbgdi_log_add_rec D   type 12 size 4 added at loc 210
+dbgdi_log_add_rec E can't add record smaller than the log entry size (4), ignoring
+dbgdi_log_add_rec E can't add record larger than the log buffer size (512), ignoring
+dbgdi_log_print_records size 512 occupancy 417 free space 95
+offset 0309 type 6 size 11
+offset 0320 type 7 size 22
+offset 0342 type 8 size 33
+offset 0375 type 9 size 44
+offset 0419 type 10 size 101
+offset 0008 type 11 size 202
+offset 0210 type 12 size 4
+dbgdi_log_add_rec D   type 13 size 512 added at loc 214
+dbgdi_log_print_records size 512 occupancy 512 free space 0
+offset 0214 type 13 size 512
+
+
+*** dbgdi_log block uni-test, block size 4096 log buf size 4076 max record size 4096
+dbgdi_log_add_rec D   type 1 size 256 added at loc 0
+dbgdi_log_add_rec D   type 2 size 1277 added at loc 256
+dbgdi_log_add_rec D   type 3 size 2550 added at loc 1533
+dbgdi_log_add_rec D   type 4 size 63 added at loc 7
+dbgdi_log_add_rec D   type 5 size 1200 added at loc 70
+log written to block
+dbgdi_log_print_records size 4076 occupancy 3813 free space 263
+offset 1533 type 3 size 2550
+offset 0007 type 4 size 63
+offset 0070 type 5 size 1200
+log read (e.g from file)
+dbgdi_log_print_records size 4076 occupancy 3813 free space 263
+offset 1533 type 3 size 2550
+offset 0007 type 4 size 63
+offset 0070 type 5 size 1200
+[1;32m******************************* ./linear_di_test *******************************[0;39m
+rm -f linear_di_test linear_di_test.o
+gcc -Wall -g -c linear_di_test.c
+gcc -Wall -g linear_di_test.o -o linear_di_test 
+Generate unique 128[mb] file: w <file_name> n
+Test that file was written  : r <file_name>
+[1;32m******************************* ./aio_in_air *******************************[0;39m
+rm -f aio_in_air aio_in_air.o
+gcc -lrt -Wall -g -o aio_in_air aio_in_air.c
+open failed: No such file or directory
+Version: 0.2, Params: /path/to/bdev <read/write/help>.  Running with: [32mpath=/dev/nvmesh/ec, n_iters=1000 io=w
+[0;0m		Reproduces Jira: EC8005-SyncHasNothingToDo, EC7676-Edic error. NVMESH5544-Changes r/w io in air buffers
+[32m	Step 1: Attach volume (example 'ec'), Run ioctls on it:
+[0;0m		sudo bash -c 'echo -n "#ec|max_retry_secs=1" > /proc/nvmeibc/cli/cli';
+		sudo bash -c 'echo -n "#ec|di_debug_mode=0" > /proc/nvmeibc/cli/cli';
+		sudo bash -c 'echo -n "#ec|set_read_edic=1" > /proc/nvmeibc/cli/cli';
+		sudo bash -c 'echo 1 > /sys/module/nvmeibc/parameters/nvmeibc_copy_bio_buffers';
+[32m	Step2.1 Remove buffer copy to force in-flight changing write to trigger edic corruption:
+[0;0m		sudo bash -c 'echo 0 > /sys/module/nvmeibc/parameters/nvmeibc_copy_bio_buffers';
+		sudo ./aio_in_air /dev/nvmesh/ec write; sudo rm ./b.txt; sudo dd if=/dev/nvmesh/ec of=./b.txt bs=4k skip=0 count=4 iflag=direct oflag=direct; xxd ./b.txt | grep '[0-3]00:';
+[32m	Step2.2: Cleanup-After-Edic-Failure:
+[0;0m		sudo bash -c 'echo -n "#ec|volume_suspend=0" > /proc/nvmeibc/cli/cli';
+		sudo dd of=/dev/nvmesh/ec if=/dev/zero bs=16k skip=0 count=1000 oflag=direct;
+		sudo bash -c 'echo 0 > /sys/module/nvmeibc/parameters/num_warnings';
+[32m	Step3.1 Test concurent reads to different vlba but same destination buffer
+[0;0m		sudo dd of=/dev/nvmesh/ec if=./aio_in_air bs=16k skip=0 count=16 oflag=direct;
+		sudo ./aio_in_air /dev/nvmesh/ec read;
+[32m	Step3.2: Cleanup-After-Edic-Failure:
+[0;0m		nothing to do: sync should fix the failed read. Volume is io enabled
+[1;32m******************************* ./cpager *******************************[0;39m
+rm -rf test libfmtrs.so ./build/formatter_functions.o ./build/../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.o  ./build/formatter_functions.d ./build/../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.d
+mkdir -p build
+gcc -DFORMATTERS_APP -ggdb3 -Wall -Werror -fPIC -DNVMEIBC_SECTOR_SHIFT=12 -Wno-address-of-packed-member -DUSER_SPACE -DPAGER_FORMATTER_FUNCTIONS=1 -I../../../ -I../../../clnt/ -I../../../srv/ -I../../../common/ -I../../../common_public/ -I../../../toma/ -I../../../autogen/common/ -I../../../autogen/clnt/  -MT formatter_functions.o -MMD -MP -MF formatter_functions.d -o build/formatter_functions.o -c formatter_functions.c
+mkdir -p build/../../../clnt/block/datapath_utils_generic
+gcc -DFORMATTERS_APP -ggdb3 -Wall -Werror -fPIC -DNVMEIBC_SECTOR_SHIFT=12 -Wno-address-of-packed-member -DUSER_SPACE -DPAGER_FORMATTER_FUNCTIONS=1 -I../../../ -I../../../clnt/ -I../../../srv/ -I../../../common/ -I../../../common_public/ -I../../../toma/ -I../../../autogen/common/ -I../../../autogen/clnt/  -MT ../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.o -MMD -MP -MF ../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.d -o build/../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.o -c ../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.c
+gcc -shared ./build/formatter_functions.o ./build/../../../clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.o  -o libfmtrs.so
+libfmtrs.so
+>o>o> pager.o
+>o>o> pager_infra.o
+>o>o> pager_buf_stream.o
+>o>o> pager_msg_stream.o
+>o>o> binary_heap.o
+>o>o> formatter.o
+>o>o> pager_filter.o
+>o>o> pager_serialized_msg_stream.o
+>o>o> pager_filter.bison.o
+>o>o> pager_filter.flex.o
+>o>o> cpager
+Usage: ./cpager COMMAND [--dbg level] [arguments]
+
+  Commands:
+
+    [help]: 
+        Show help message and exit.
+
+    [deserialize-msg-stream]: work-dir [input-streams]
+        Deserialize binary message stream from stdin into text.
+
+    [msg-stream-bin]: dict-list log-channels-list time-frame [-f filter]
+        Dump all messages from all CPUs from given timeframe to stdout in binary format.
+        [-f] Either filter expression or '-' (to read filters from stdin).
+             If not specified - no filters are applied.
+
+    [msg-stream-txt]: dict-list log-channels-list time-frame [-f filter] [--color] [--print-date] [--fmtlib] [--statistics] [--reliable] [--nogreet]
+        Dump all messages from all CPUs from given timeframe to stdout in text format.
+        [-f] Either filter expression or '-' (to read filters from stdin).
+             If not specified - no filters are applied.
+        [--color] Colorize the output.
+        [--print-date] Print date (by default prints only time).
+        [--fmtlib] Custom formatters so to preload. Default = NULL.
+
+        [--statistics] Statistics collection mode.
+
+
+    [msg-stream-json]: dict-list log-channels-list time-frame [-f filter] [--fmtlib]
+        Dump all messages from all CPUs from given timeframe to stdout in json format.
+        [-f] Either filter expression or '-' (to read filters from stdin).
+             If not specified - no filters are applied.
+        [--fmtlib] Custom formatters so to preload. Default = NULL.
+
+[1;32m******************************* ./trace_daemon *******************************[0;39m
+rm -rf trace_daemon /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.d /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.d /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.d /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.d
+gcc -ggdb3 -Wall -Werror -MT /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.o -MMD -MP -MF /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.d -o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.o -c /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.c
+gcc -ggdb3 -Wall -Werror -MT /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.o -MMD -MP -MF /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.d -o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.o -c /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.c
+gcc -ggdb3 -Wall -Werror -MT /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.o -MMD -MP -MF /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.d -o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.o -c /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.c
+gcc -ggdb3 -Wall -Werror -MT /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.o -MMD -MP -MF /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.d -o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.o -c /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.c
+gcc -pthread /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/main.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/trace_channel.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/mmap_manager.o /home/danielhe/projects/nvmesh/tools/trace_daemon_2.0/capuch_worker.o -o trace_daemon
+[1;32m******************************* ./build/bin/nvmeib_pipe_tracer *******************************[0;39m
+>>> clean
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/i/nvmeib_pipe_tracer.i
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/i//home/danielhe/projects/nvmesh/tools/nvmeib_trace_userspace.i
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/i//home/danielhe/projects/nvmesh/tools/nvmeib_trace_userspace_poller.i
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/nvmeib_pipe.trace.json
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/autogen//includes/gen_events.h
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/obj/nvmeib_pipe_tracer.o
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/obj//home/danielhe/projects/nvmesh/tools/nvmeib_trace_userspace.o
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/obj//home/danielhe/projects/nvmesh/tools/nvmeib_trace_userspace_poller.o
+gcc -I/home/danielhe/projects/nvmesh/tools -I/home/danielhe/projects/nvmesh/tools/pipe_tracer/build/autogen//includes -I/home/danielhe/projects/nvmesh -ggdb3 -Wall -Werror -std=gnu89 -DUSER_SPACE_TRACING=1 -DUSE_EXTERN_TIMESTAMP=1  -DPIPE_TRACER_DEBUG=1 -c -o /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/autogen//includes/traces_ids.o /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/autogen//includes/traces_ids.c
+>>> /home/danielhe/projects/nvmesh/tools/pipe_tracer/build/bin/nvmeib_pipe_tracer
+[1;32m******************************* toma_rpc/link/read_conf *******************************[0;39m
+>>>>> toma_rpc.o
+>>>>> toma_rpc
+gcc -Wall -ggdb -O3 -Wno-strict-aliasing -no-pie toma_rpc.o -no-pie -o toma_rpc -ldl
+>>>>> compiling:  toma_link.o
+>>>>> toma_link
+gcc -Wall -ggdb -O3 -Wno-strict-aliasing -no-pie toma_link.o -no-pie -o toma_link -ldl
+./toma_rpc
+Permission denied
+./toma_link was built successfully
+[1;32m******************************* crash_analyzer.so *******************************[0;39m
+make: *** No rule to make target '/usr/include/crash/defs.h', needed by 'crash_analyzer.so'.  Stop.
+[1;32m******************************* ./nvme *******************************[0;39m
+NVME_VERSION = 1.5
+rm -f nvme *.o *~ a.out NVME-VERSION-FILE *.tar* nvme.spec version control nvme-*.deb
+make -C Documentation clean
+make[1]: Entering directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+rm -f *.xml *.xml+ *.html+
+rm -f *.texi *.texi+ *.texi++ nvme.info nvmeman.info
+rm -f *.pdf
+rm -f howto-index.txt howto/*.html doc.dep
+rm -f technical/*.html technical/api-index.txt
+rm -f cmds-ancillaryinterrogators.txt cmds-ancillarymanipulators.txt cmds-mainporcelain.txt cmds-plumbinginterrogators.txt cmds-plumbingmanipulators.txt cmds-synchingrepositories.txt cmds-synchelpers.txt cmds-purehelpers.txt cmds-foreignscminterface.txt *.made
+rm -f manpage-base-url.xsl
+rm -f *~
+make[1]: Leaving directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+rm -f tests/*.pyc
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c argconfig.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c suffix.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c parser.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-print.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-ioctl.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-lightnvm.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c fabrics.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c json.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c plugin.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c intel-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c lnvm-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c memblaze-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c wdc-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c wdc-utils.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-models.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c huawei-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c netapp-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c toshiba-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' nvme.c -o nvme argconfig.o suffix.o parser.o nvme-print.o nvme-ioctl.o nvme-lightnvm.o fabrics.o json.o plugin.o intel-nvme.o lnvm-nvme.o memblaze-nvme.o wdc-nvme.o wdc-utils.o nvme-models.o huawei-nvme.o netapp-nvme.o  toshiba-nvme.o -luuid
+make -C Documentation
+make[1]: Entering directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+rm -f nvme-admin-passthru.xml+ nvme-admin-passthru.xml && \
+asciidoc  -f asciidoc.conf -b docbook -d manpage -o nvme-admin-passthru.xml+ nvme-admin-passthru.txt && \
+mv nvme-admin-passthru.xml+ nvme-admin-passthru.xml
+/bin/sh: 2: asciidoc: not found
+make[1]: *** [Makefile:158: nvme-admin-passthru.xml] Error 127
+make[1]: Leaving directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+make: *** [Makefile:50: doc] Error 2
+The '<device>' may be either an NVMe character device (ex: /dev/nvme0) or an
+nvme block device (ex: /dev/nvme0n1).nvme-1.5
+usage: nvme <command> [<device>] [<args>]
+
+
+
+The following are all implemented sub-commands:
+  list              List all NVMe devices and namespaces on machine
+  list-subsys       List nvme subsystems
+  id-ctrl           Send NVMe Identify Controller
+  id-ns             Send NVMe Identify Namespace, display structure
+  list-ns           Send NVMe Identify List, display structure
+  ns-descs          Send NVMe Namespace Descriptor List, display structure
+  create-ns         Creates a namespace with the provided parameters
+  delete-ns         Deletes a namespace from the controller
+  attach-ns         Attaches a namespace to requested controller(s)
+  detach-ns         Detaches a namespace from requested controller(s)
+  list-ctrl         Send NVMe Identify Controller List, display structure
+  get-ns-id         Retrieve the namespace ID of opened block device
+  get-log           Generic NVMe get log, returns log in raw format
+  telemetry-log     Retrieve FW Telemetry log write to file
+  fw-log            Retrieve FW Log, show it
+  smart-log         Retrieve SMART Log, show it
+  error-log         Retrieve Error Log, show it
+  effects-log       Retrieve Command Effects Log, show it
+  endurance-log     Retrieve Endurance Group Log, show it
+  get-feature       Get feature and show the resulting value
+  set-feature       Set a feature and show the resulting value
+  set-property      Set a property and show the resulting value
+  format            Format namespace with new block format
+  fw-commit         Verify and commit firmware to a specific slot (fw-activate in old version < 1.2)
+  fw-download       Download new firmware
+  admin-passthru    Submit an arbitrary admin command, return results
+  io-passthru       Submit an arbitrary IO command, return results
+  security-send     Submit a Security Send command, return results
+  security-recv     Submit a Security Receive command, return results
+  resv-acquire      Submit a Reservation Acquire, return results
+  resv-register     Submit a Reservation Register, return results
+  resv-release      Submit a Reservation Release, return results
+  resv-report       Submit a Reservation Report, return results
+  dsm               Submit a Data Set Management command, return results
+  flush             Submit a Flush command, return results
+  compare           Submit a Compare command, return results
+  read              Submit a read command, return results
+  write             Submit a write command, return results
+  write-zeroes      Submit a write zeroes command, return results
+  write-uncor       Submit a write uncorrectable command, return results
+  sanitize          Submit a sanitize command
+  sanitize-log      Retrive sanitize log, show it
+  reset             Resets the controller
+  subsystem-reset   Resets the controller
+  ns-rescan         Rescans the NVME namespaces
+  show-regs         Shows the controller registers or properties. Requires character device
+  discover          Discover NVMeoF subsystems
+  connect-all       Discover and Connect to NVMeoF subsystems
+  connect           Connect to NVMeoF subsystem
+  disconnect        Disconnect from NVMeoF subsystem
+  gen-hostnqn       Generate NVMeoF host NQN
+  dir-receive       Submit a Directive Receive command, return results
+  dir-send          Submit a Directive Send command, return results
+  version           Shows the program version
+  help              Display this help
+
+See 'nvme help <command>' for more information on a specific command
+
+The following are all installed plugin extensions:
+  intel           Intel vendor specific extensions
+  lnvm            LightNVM specific extensions
+  memblaze        Memblaze vendor specific extensions
+  wdc             Western Digital vendor specific extensions
+  huawei          Huawei vendor specific extensions
+  netapp          NetApp vendor specific extensions
+  toshiba         Toshiba NVME plugin
+
+See 'nvme <plugin> help' for more information on a plugin
+error: pathspec './nvme' did not match any file(s) known to git
+[1;32m******************************* test_pack_attach.py *******************************[0;39m
+./examples/run_test.sh: line 248: ./management_cm/clnt/test/attach/test_pack_attach.py.py: No such file or directory
+[1;32m******************************* ./nvme *******************************[0;39m
+NVME_VERSION = 1.5
+rm -f nvme *.o *~ a.out NVME-VERSION-FILE *.tar* nvme.spec version control nvme-*.deb
+make -C Documentation clean
+make[1]: Entering directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+rm -f *.xml *.xml+ *.html+
+rm -f *.texi *.texi+ *.texi++ nvme.info nvmeman.info
+rm -f *.pdf
+rm -f howto-index.txt howto/*.html doc.dep
+rm -f technical/*.html technical/api-index.txt
+rm -f cmds-ancillaryinterrogators.txt cmds-ancillarymanipulators.txt cmds-mainporcelain.txt cmds-plumbinginterrogators.txt cmds-plumbingmanipulators.txt cmds-synchingrepositories.txt cmds-synchelpers.txt cmds-purehelpers.txt cmds-foreignscminterface.txt *.made
+rm -f manpage-base-url.xsl
+rm -f *~
+make[1]: Leaving directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+rm -f tests/*.pyc
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c argconfig.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c suffix.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c parser.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-print.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-ioctl.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-lightnvm.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c fabrics.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c json.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c plugin.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c intel-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c lnvm-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c memblaze-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c wdc-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c wdc-utils.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c nvme-models.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c huawei-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c netapp-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' -c toshiba-nvme.c
+cc -D_GNU_SOURCE -D__CHECK_ENDIAN__ -O2 -g -Wall -Werror -Wno-array-bounds -Wno-stringop-truncation -Wno-format-truncation -std=gnu99 -DLIBUUID -DNVME_VERSION='"1.5"' nvme.c -o nvme argconfig.o suffix.o parser.o nvme-print.o nvme-ioctl.o nvme-lightnvm.o fabrics.o json.o plugin.o intel-nvme.o lnvm-nvme.o memblaze-nvme.o wdc-nvme.o wdc-utils.o nvme-models.o huawei-nvme.o netapp-nvme.o  toshiba-nvme.o -luuid
+make -C Documentation
+make[1]: Entering directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+rm -f nvme-admin-passthru.xml+ nvme-admin-passthru.xml && \
+asciidoc  -f asciidoc.conf -b docbook -d manpage -o nvme-admin-passthru.xml+ nvme-admin-passthru.txt && \
+mv nvme-admin-passthru.xml+ nvme-admin-passthru.xml
+/bin/sh: 2: asciidoc: not found
+make[1]: *** [Makefile:158: nvme-admin-passthru.xml] Error 127
+make[1]: Leaving directory '/home/danielhe/projects/nvmesh/scripts/target/nvme-cli/Documentation'
+make: *** [Makefile:50: doc] Error 2
+The '<device>' may be either an NVMe character device (ex: /dev/nvme0) or an
+nvme block device (ex: /dev/nvme0n1).nvme-1.5
+usage: nvme <command> [<device>] [<args>]
+
+
+
+The following are all implemented sub-commands:
+  list              List all NVMe devices and namespaces on machine
+  list-subsys       List nvme subsystems
+  id-ctrl           Send NVMe Identify Controller
+  id-ns             Send NVMe Identify Namespace, display structure
+  list-ns           Send NVMe Identify List, display structure
+  ns-descs          Send NVMe Namespace Descriptor List, display structure
+  create-ns         Creates a namespace with the provided parameters
+  delete-ns         Deletes a namespace from the controller
+  attach-ns         Attaches a namespace to requested controller(s)
+  detach-ns         Detaches a namespace from requested controller(s)
+  list-ctrl         Send NVMe Identify Controller List, display structure
+  get-ns-id         Retrieve the namespace ID of opened block device
+  get-log           Generic NVMe get log, returns log in raw format
+  telemetry-log     Retrieve FW Telemetry log write to file
+  fw-log            Retrieve FW Log, show it
+  smart-log         Retrieve SMART Log, show it
+  error-log         Retrieve Error Log, show it
+  effects-log       Retrieve Command Effects Log, show it
+  endurance-log     Retrieve Endurance Group Log, show it
+  get-feature       Get feature and show the resulting value
+  set-feature       Set a feature and show the resulting value
+  set-property      Set a property and show the resulting value
+  format            Format namespace with new block format
+  fw-commit         Verify and commit firmware to a specific slot (fw-activate in old version < 1.2)
+  fw-download       Download new firmware
+  admin-passthru    Submit an arbitrary admin command, return results
+  io-passthru       Submit an arbitrary IO command, return results
+  security-send     Submit a Security Send command, return results
+  security-recv     Submit a Security Receive command, return results
+  resv-acquire      Submit a Reservation Acquire, return results
+  resv-register     Submit a Reservation Register, return results
+  resv-release      Submit a Reservation Release, return results
+  resv-report       Submit a Reservation Report, return results
+  dsm               Submit a Data Set Management command, return results
+  flush             Submit a Flush command, return results
+  compare           Submit a Compare command, return results
+  read              Submit a read command, return results
+  write             Submit a write command, return results
+  write-zeroes      Submit a write zeroes command, return results
+  write-uncor       Submit a write uncorrectable command, return results
+  sanitize          Submit a sanitize command
+  sanitize-log      Retrive sanitize log, show it
+  reset             Resets the controller
+  subsystem-reset   Resets the controller
+  ns-rescan         Rescans the NVME namespaces
+  show-regs         Shows the controller registers or properties. Requires character device
+  discover          Discover NVMeoF subsystems
+  connect-all       Discover and Connect to NVMeoF subsystems
+  connect           Connect to NVMeoF subsystem
+  disconnect        Disconnect from NVMeoF subsystem
+  gen-hostnqn       Generate NVMeoF host NQN
+  dir-receive       Submit a Directive Receive command, return results
+  dir-send          Submit a Directive Send command, return results
+  version           Shows the program version
+  help              Display this help
+
+See 'nvme help <command>' for more information on a specific command
+
+The following are all installed plugin extensions:
+  intel           Intel vendor specific extensions
+  lnvm            LightNVM specific extensions
+  memblaze        Memblaze vendor specific extensions
+  wdc             Western Digital vendor specific extensions
+  huawei          Huawei vendor specific extensions
+  netapp          NetApp vendor specific extensions
+  toshiba         Toshiba NVME plugin
+
+See 'nvme <plugin> help' for more information on a plugin
+error: pathspec './nvme' did not match any file(s) known to git
+[1;32m******************************* ./manual_fops *******************************[0;39m
+rm -f manual_fops manual_fops.o
+gcc -std=gnu99 -Wall -g -lpthread -c manual_fops.c
+gcc -std=gnu99 -Wall -g -lpthread manual_fops.o -o manual_fops -pthread
+Version: 1.3
+This app must be run as sudo
+manual_fops:  <options>
+	[-f <file_name>] or [-b <block device>]
+	[-t <number of threads, def=1>]
+	[-d <delay in msec, def=>100]
+	[-s <iovector element size (Bytes), def=4096]
+	[-e <iovector element count, def=1]
+Examples:
+		-b /dev/nvmesh/sm1 -t 5                          : 5 threads, IO's go to block device 'sm1'
+		-f /mnt/a.txt -d 10 -t 16                        : 16 threads, 10 msec between IO's, IO's go to a file
+		-d 1 -t 33 -e 11 -b /dev/nvmesh/r2               : 33 threads, 1 msec between IO's, 11 elements in IOV, IO's go to block device 'r2'
+		-d 10 -t 33 -e 16 -s 4096 -b /dev/nvmesh/r2      : 33 threads, 10 msec between IO's, 16 elements in IOV, 4096B per IOV element, IO's go to block device 'r2'
+Use the following cmds:
+sudo kill -10 0			- open  the file
+sudo kill -12 0			- start IO to file
+sudo kill -12 0			- stop  IO to file
+sudo kill -10 0			- close the file
+sudo kill -15 0			- kill me
+[1;32m******************************* gf_asm.o *******************************[0;39m
+-->ec
+Makefile:70: Objects = ./nvmeibc_block_dp_ec_gf_asm.o
+Makefile:71: SOURCES = ./nvmeibc_block_dp_ec_gf_asm.S_shipped
+rm -f ./nvmeibc_block_dp_ec_gf_asm.o
+gcc -x assembler-with-cpp -c nvmeibc_block_dp_ec_gf_asm.S_shipped -o nvmeibc_block_dp_ec_gf_asm.o
+[1;32m******************************* ./nvmesh_dp_lib *******************************[0;39m
++-->Cleaning |[1;45mnvmesh_dp_lib[0;0m|
++-->Cleaning recursive dir |[1;45m99bin/*/.[od][0;0m|
++-->Cleaning |[1;45mLib / CrashDumps[0;0m|
+clear;
+[H[2J[3JBuilding |[0;32mnvmesh_dp_lib[0;0m| for NVMesh-UM integration
+	* Compilation info, Release=1, COMMIT_ID=010101010, gcc=11.4.0, ARM=0 HT=x86_64|
+
+	* CFLAGS  |  -m64 -Wall -Werror -std=gnu99 -Wdeclaration-after-statement -Wstrict-prototypes -Wextra -Wshadow -Werror=strict-aliasing -Wno-type-limits -falign-functions=8 -fvisibility=hidden -Wno-unused-variable -Wno-unused-parameter -DNVMESH_IS_PRODUCTION_COMPILATION=1 -DUSER_SPACE -DDP_LIB=1 -DDBGDI_REMOVED_IN_PRODUCTION -DAUTONOMOUS_SYNCS_STATS -DCOMMIT_ID=0x010101010ULL -DVER_TAGID=v3.1.0 -DBRANCH_NAME=Unknown -DNVMESH_VERSION=v3.1.0 -DNVMESH_RELEASE=3.1.0-774 -DNVMEIB_COMPILATION_DATE=dummy_build -DNVMEIBC_SECTOR_SHIFT=12 -DDISABLE_ALL_TRACING -Wno-address-of-packed-member -O3 -g -DNDEBUG
+	* INCLUDS | -I/home/danielhe/projects/nvmesh/clnt/block/um_integration/ -I/home/danielhe/projects/nvmesh/clnt/ -I/home/danielhe/projects/nvmesh/srv/ -I/home/danielhe/projects/nvmesh/common/ -I/home/danielhe/projects/nvmesh/common_public/ -I/home/danielhe/projects/nvmesh/toma/ -I/home/danielhe/projects/nvmesh/autogen/common/ -I/home/danielhe/projects/nvmesh/autogen/clnt/ -I/home/danielhe/projects/nvmesh -I/usr/include
+	* DFLAGS  | -MP -MMD
+	* LDLAGS  | -rdynamic -no-pie -ldl -lpthread -luuid
+===========================================
+	* Objects | 	./99bin/release//home/danielhe/projects/nvmesh/clnt/block/um_integration/nvmesh_dp_lib_api.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_sync_txid_wraparound.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_mirror/nvmeibc_block_dp_mirror_sync.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_block_dp_sync_common.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_block_dp_sync_api_manager_flow_cntrs.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_block_dp_sync_no_write_hole.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_journal.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_reed_solomon.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_praid.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_cold_sync.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_hot.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_maintenance.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recovery_common.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_mirror/nvmeibc_block_dp_mirror.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_mirror/nvmeibc_block_dp_mirror_trim.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/io_problems/nvmeibc_b_dp_ioprob_failed.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_buffers.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_cmd_lock_link.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_io_req_rel_locks.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_common.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_lock_server.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_dbits.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_locks_scheme.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/profiling/nvmeibc_block_dp_profiling_generic.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/controlpath/nvmeibc_b_cp_topo_algorithms.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_operation.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_raid_recovery.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_raid_recov_itr.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_cold.o		./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
+	* Unitest | ./99bin/release//home/danielhe/projects/nvmesh/clnt/block/um_integration/test.o 
+===========================================
+	* ASM_src | /home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.S_shipped
+	* ASM_obj |  ./99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
+===========================================
+Usage |[0;32mmake all[0;0m| for building a lib + executable test
+
+
+
+
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/um_integration/nvmesh_dp_lib_api.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_sync_txid_wraparound.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_mirror/nvmeibc_block_dp_mirror_sync.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_block_dp_sync_common.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_block_dp_sync_api_manager_flow_cntrs.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_block_dp_sync_no_write_hole.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_journal.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_reed_solomon.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_praid.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_cold_sync.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_hot.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_maintenance.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recovery_common.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_mirror/nvmeibc_block_dp_mirror.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_mirror/nvmeibc_block_dp_mirror_trim.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/io_problems/nvmeibc_b_dp_ioprob_failed.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_buffers.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_cmd_lock_link.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_io_req_rel_locks.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_common.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_lock_server.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_dbits.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_locks_scheme.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/profiling/nvmeibc_block_dp_profiling_generic.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/controlpath/nvmeibc_b_cp_topo_algorithms.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_utils_generic/nvmeibc_block_dp_operation.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_raid_recovery.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/recovery/nvmeibc_raid_recov_itr.o[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_cold.o[0;0m|
++--->Building |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o[0;0m|
++--->Building |[0;32mnvmesh_dp_lib.a[0;0m|
+   +--->: |[0;32m99bin/release//home/danielhe/projects/nvmesh/clnt/block/um_integration/test.o[0;0m|
++--->Building |[0;32mnvmesh_dp_lib[0;0m|
+gcc -o nvmesh_dp_lib nvmesh_dp_lib.a 99bin/release//home/danielhe/projects/nvmesh/clnt/block/um_integration/test.o     -rdynamic -no-pie -ldl -lpthread -luuid;
+   +--->: |[0;32mnvmesh_dp_lib[0;0m|=Executable
+
++--->Done!
+[1;31munitest of nvmesh_dp_lib: dummy_build, git=v3.1.0(Unknown:0x10101010), Version=3.1.0-774, Optimization:Release
+[0;0m[1;33mSyncs test started
+[0;0m[1;33mSyncs test end
+[0;0m[1;33mIO test started
+[0;0m[1;33mIO test end
+[0;0m[1;33mRecov test started
+[0;0m[1;33mRecov test end
+[0;0m[1;31munitests done!
+[0;0m[1;32m******************************* Done *******************************[0;39m

@@ -1,0 +1,652 @@
+======= <Clean all logs> =======
+
+>>> rm -rf _host1 _host2 nvmeibc.trace.json dict.*.json *.binlog*.* libfmtrs.so
+
+======= <Compile> =======
+
+>>> ./build_block_testing.sh build > /dev/null
+
+======= <Run unitest> =======
+
+>>> ./blk_unitest -tracedbg 6 -tracertest >/dev/null 2>&1
+
+======= <Shuffle binlog> =======
+
+======= <Damage binlog> =======
+
+======= <Create duplicate buffer> =======
+
+======= <Simple> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Hello	World!
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I am 29 years old and look, btw here is an errno: Resource temporarily unavailable
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Samantha and I am using ipv6 [::]
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is R2-O2 and my uuid is [12345678-1234-5678-1234-567812345678]
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is R2-O2 and my uuid is [78563412-3412-7856-1234-567812345678]
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Check out my bmp: < 1-3,33-35 >
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Check out my hex: < ff 00 00 00 >
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Custom formatters DBITS < (5c,3c) > LOCKID < (all=0xa0000083,idx=3,lock_id=0x8,read) >
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : These are the first 10 characters of this string: 'These are '
+[00]PAGER MSG: Application tried to write too long buffer, that was discarded
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] 2bits: 0x0, 11bits: 0x678, 24bits: 0x345678
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] 2bits: 0x1, long int: 0x87654321, 24bits: 0x654321
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] This messages goes to a different channel, but still shall be visible
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] This is eternal channel
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] This will be visible in the ephemeral channel
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] This will be visible in the ephemeral channel, the last ephemeral message
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xa
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x16
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x17
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x18
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x19
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x20
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x21
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x22
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x23
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x24
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x25
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x26
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x27
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x28
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x29
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x2f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x30
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x31
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x32
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x33
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x34
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x35
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x36
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x37
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x38
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x39
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x3f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x40
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x41
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x42
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x3000`: Duplicate buffer detected
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x43
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x44
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x45
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x46
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x47
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x48
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x49
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x4f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x50
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x51
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x52
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x53
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x54
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x55
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x56
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x57
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x58
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x59
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x5f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x60
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x61
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x62
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x63
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x64
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x65
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x66
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x67
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x68
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x69
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x6f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x70
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x71
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x72
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x73
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x74
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x75
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x76
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x77
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x78
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x79
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x7f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x80
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x81
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x82
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x83
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x84
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x85
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x86
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x87
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x88
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x89
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x8a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x8b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x8c
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x5000`: No dictionary found for buffer checksum: 0x6d6f6f62
+[00]PAGER MSG: More system messages are hidden
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xd7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xd8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xd9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xda
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xdb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xdc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xdd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xde
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xdf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xe9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xea
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xeb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xec
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xed
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xee
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xef
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xf9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xfa
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xfb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xfc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xfd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xfe
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0xff
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x100
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x101
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x102
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x103
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x104
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x105
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x106
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x107
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x108
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x109
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x10f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x110
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x111
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x112
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x113
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x114
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x115
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x116
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x117
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x118
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x119
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x11f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x120
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x121
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x122
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x123
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x124
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x125
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x126
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x127
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x128
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x129
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x12f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x130
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x131
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x132
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x133
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x134
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x135
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x136
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x137
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x138
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x139
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x13f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x140
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x141
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x142
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x143
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x144
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x145
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x146
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x147
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x148
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x149
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x14f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x150
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x151
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x152
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x153
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x154
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x155
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x156
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x157
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x158
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x159
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15a
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15b
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15c
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15d
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15e
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x15f
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x160
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x161
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x162
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x163
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x164
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x165
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x166
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x167
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x168
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x169
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x16a
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x6000`: Buffer serial jumped, an indication of traces loss: expected 6, got 7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1b5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1b6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1b7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1b8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1b9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ba
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1bb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1bc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1bd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1be
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1bf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1c9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ca
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1cb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1cc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1cd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ce
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1cf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1d9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1da
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1db
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1dc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1dd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1de
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1df
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1e9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ea
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1eb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ec
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ed
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ee
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ef
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f0
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f4
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f5
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f6
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f7
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f8
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1f9
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1fa
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1fb
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1fc
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1fd
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1fe
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ff
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I choose sticky code tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Brian and I choose sticky code wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Sticky breaker tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message is after the sticky breaker tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Composite test composite(10, ten)
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Alibaba, and behold this: composite(10, ten)
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message has an auto ID
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message contains an \"Escape sequence\"
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Here is function format test: 'some_func', should be equal to 'some_func'
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Testing @ symbol escaping: IAMTAG@IAMNOTATAG
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I have no name (null), I have not function (null), I have no UUID 00000000-0000-0000-0000-000000000000
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print uuid4b_be=12345678 uuid4b_le=78563412
+I have no prefix
+
+[00]nvmeibc_tracer_unitest.c[some_func] : I was called from a function named some_func
+[00]nvmeibc_tracer_unitest.c[some_func] : Here is a stack trace 
+>some_func
+
+>nvmeibc_run_tracer_unitest
+
+>main
+
+>__libc_start_main
+
+>_start
+
+
+
+======= <Filter simple> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Hello	World!
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I am 29 years old and look, btw here is an errno: Resource temporarily unavailable
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] 2bits: 0x1, long int: 0x87654321, 24bits: 0x654321
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I choose sticky code tiger
+======= <Filter advanced> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG: Application tried to write too long buffer, that was discarded
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x3000`: Duplicate buffer detected
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x5000`: No dictionary found for buffer checksum: 0x6d6f6f62
+[00]PAGER MSG: More system messages are hidden
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x6000`: Buffer serial jumped, an indication of traces loss: expected 6, got 7
+[00]nvmeibc_tracer_unitest.c[some_func] : I was called from a function named some_func
+[00]nvmeibc_tracer_unitest.c[some_func] : Here is a stack trace 
+>some_func
+
+>nvmeibc_run_tracer_unitest
+
+>main
+
+>__libc_start_main
+
+>_start
+
+
+
+======= <Filter very advanced> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Hello	World!
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Samantha and I am using ipv6 [::]
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x123
+======= <Filter composite> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Composite test composite(10, ten)
+======= <Filter less> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=2
+======= <Filter greater> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I am 29 years old and look, btw here is an errno: Resource temporarily unavailable
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=3
+======= <Filter in> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=2
+======= <Filter sticky> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Brian and I choose sticky code wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message wolf
+======= <Filter sticky2> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I am 29 years old and look, btw here is an errno: Resource temporarily unavailable
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I choose sticky code tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Sticky breaker tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message is after the sticky breaker tiger
+======= <Filter sticky until> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I am 29 years old and look, btw here is an errno: Resource temporarily unavailable
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I choose sticky code tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Sticky breaker tiger
+======= <Tail> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Message: 'Just filling some buffers', Number: 0x1ff
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I choose sticky code tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Brian and I choose sticky code wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am a sticky message wolf
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Sticky breaker tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message is after the sticky breaker tiger
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Composite test composite(10, ten)
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Alibaba, and behold this: composite(10, ten)
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message has an auto ID
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : This message contains an \"Escape sequence\"
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Here is function format test: 'some_func', should be equal to 'some_func'
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Testing @ symbol escaping: IAMTAG@IAMNOTATAG
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I have no name (null), I have not function (null), I have no UUID 00000000-0000-0000-0000-000000000000
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=1
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=2
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print val=3
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Print uuid4b_be=12345678 uuid4b_le=78563412
+I have no prefix
+
+[00]nvmeibc_tracer_unitest.c[some_func] : I was called from a function named some_func
+[00]nvmeibc_tracer_unitest.c[some_func] : Here is a stack trace 
+>some_func
+
+>nvmeibc_run_tracer_unitest
+
+>main
+
+>__libc_start_main
+
+>_start
+
+
+
+======= <Compile different dictionary> =======
+
+>>> ./build_block_testing.sh build EXTRA_CFLAGS=-DNVMEIBC_TRACER_UNITEST_ALTERNATIVE_COMPILATION SIM_DICT_CKSUM=123 >/dev/null
+
+======= <Run unitest> =======
+
+>>> ./run_block_unitest.sh -tracedbg 6 -tracertest >/dev/null 2>&1
+
+======= <Filter on multiple dictionaries> =======
+
+[00]PAGER MSG At clnt/block/unitest/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Hello	World!
+[00]PAGER MSG At clnt/block/unitest/goodpath.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/eternal.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: Data for CPU 0 start here
+[00]PAGER MSG At clnt/block/unitest/ephemeral.binlog0.0+0x0`: From this point, all data on all CPUs exist
+[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am Iruy, this is a message from the parrallel universe.
+======= <Prepare multihost test> =======
+
+>>> 
+
+    mkdir _host1
+
+    mkdir _host2
+
+    cp longterm.binlog0.0 _host1
+
+    cp longterm.binlog0.1 _host2
+
+    cp dict.* _host1
+
+    cp dict.* _host2
+
+    echo watermelon > _host2/hostname
+
+======= <Multihost test> =======
+
+banana:[00]PAGER MSG At clnt/block/unitest/_host1/longterm.binlog0.0+0x0`: Data for CPU 0 start here
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I am 29 years old and look, btw here is an errno: 11
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Samantha and I am using ipv6 [::]
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is R2-O2 and my uuid is [12345678-1234-5678-1234-567812345678]
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is R2-O2 and my uuid is [78563412-3412-7856-1234-567812345678]
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is John and I choose sticky code tiger
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Brian and I choose sticky code wolf
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : My name is Alibaba, and behold this: composite(10, ten)
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : Testing @ symbol escaping: IAMTAG@IAMNOTATAG
+banana:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I have no name (null), I have not function (null), I have no UUID 00000000-0000-0000-0000-000000000000
+watermelon:[00]PAGER MSG At clnt/block/unitest/_host2/longterm.binlog0.1+0x0`: Data for CPU 0 start here
+watermelon:[00]PAGER MSG At clnt/block/unitest/_host2/longterm.binlog0.1+0x0`: From this point, all data on all CPUs exist
+watermelon:[00]nvmeibc_tracer_unitest.c[nvmeibc_run_tracer_unitest] : I am Iruy, this is a message from the parrallel universe.

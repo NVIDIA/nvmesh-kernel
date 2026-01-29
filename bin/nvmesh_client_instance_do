@@ -1,0 +1,456 @@
+#!/usr/bin/python3
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import errno
+import os
+import sys
+import string
+import argparse
+import logging
+import logging.handlers
+import traceback
+import atexit
+import imp
+import contextlib
+import subprocess
+import re
+
+dir_path = os.path.dirname(os.path.realpath(__file__))
+from management_cm import nvmesh_script_utils
+DEFAULT_MODULE_NAME = nvmesh_script_utils.DEFAULT_MODULE_NAME
+
+NICS_GUIDS_CMD = 'source /opt/nvmesh/client-repo/services/nvmesh_util; export CONFIGURED_NICS="{0}"; >&2 get_nics_guids; echo $nics_guids'
+PERSISTENCY_CINST_PATH = "/var/opt/nvmesh/clnt_instance_configuration"
+
+
+def create_instance_conf(args, instance_name):
+    instance_conf = nvmesh_script_utils.InstanceConfiguration(
+        name=instance_name,
+        configured_nics=args.configured_nics,
+        enable_rdda=args.rdda,
+        disable_rdda=args.rdda,
+        tcp_enabled=args.tcp_enabled,
+        tcp_only=args.tcp_only
+    )
+
+    config_path = '/etc/nvmesh/configs/{}'.format(instance_name)
+    config = instance_conf.get_conf_file_content()
+
+    if not os.path.exists(config_path):
+        os.makedirs(config_path, mode=0755)
+
+    config_path = os.path.join(config_path, 'nvmesh.instance.conf')
+
+    with open(config_path, 'w') as f:
+        f.write(config)
+
+
+def process_config_files(instance_name):
+    subprocess.call(['/opt/nvmesh/client-repo/management_cm/process_config_files.py', instance_name])
+
+
+def run_bash_string(bashCommand):
+    os.system(bashCommand)
+
+
+def run_bash_cmd(command):
+    p = subprocess.Popen(['bash'], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    output, error = p.communicate(command)
+    return output, error, p.returncode
+
+
+def readBashFile(filename):
+    g = {}
+    l = {}
+
+    if os.path.exists(filename):
+       execfile(filename, g, l)
+
+    return l
+
+
+def set_args_from_instance_conf(instance_conf, args):
+    conf_key_to_arg = {
+        'CONFIGURED_NICS': 'configured_nics',
+        'MLX5_RDDA_ENABLED': 'rdda',
+        'TCP_ONLY': 'tcp_only',
+        'TCP_ENABLED': 'tcp_enabled'
+    }
+
+    for conf_key, arg in conf_key_to_arg.items():
+        if conf_key in instance_conf:
+            setattr(args, arg, instance_conf[conf_key])
+
+    if args.rdda and args.rdda.lower() in ['no', 'false']:
+        args.rdda = False
+
+    if args.tcp_only:
+        args.tcp_only = args.tcp_only.lower() == 'yes'
+    if args.tcp_enabled:
+        args.tcp_enabled = args.tcp_enabled.lower() == 'yes'
+
+    cfg_profile_keys = ['CONFIG_PROFILE_NAME', 'CONFIG_PROFILE_ID', 'CONFIG_PROFILE_VERSION']
+    if all(map(lambda key: key in instance_conf, cfg_profile_keys)):
+        args.configuration_profile = ','.join(map(lambda key: instance_conf[key], cfg_profile_keys))
+
+    return args
+
+
+def restore_ioctl_from_conf(prev_ioctl, instance_name, args):
+    conf_path = '/etc/nvmesh/configs/{instance_name}/.nvmesh.instance.conf'.format(instance_name=instance_name)
+    instance_conf = readBashFile(conf_path)
+    args = set_args_from_instance_conf(instance_conf, args)
+    ioctl_params = prepare_ioctl_add_params(args, extra_args=None)
+
+    match = re.match(r'(%clnt\+\+{.*,.*})(.*)', prev_ioctl)
+    ioctl_header = match.group(1)
+    prev_ioctl_params = match.group(2)
+
+    prev_ioctl_params = '|'.join(filter(lambda param: param.split('=')[0] not in ioctl_params, prev_ioctl_params.split('|')))
+    ioctl_params += '|{}'.format(prev_ioctl_params) if prev_ioctl_params else ''
+
+    ioctl = ioctl_header + ioctl_params
+    print "restored ioctl generated: {0}".format(ioctl)
+    return ioctl
+
+# If ever versioning in persistency will be required just add a version field to the ioctl, and if it doesn't exist it's version 0
+# implement translation from version 0->1 or any future versions of persistency that are required
+def restore_all_client_instances(logger, args):
+    multi_client_utils = nvmesh_script_utils.MultiClientUtils(logger)
+    with multi_client_utils.open_lock_file(instance_lock_file=True):
+        with multi_client_utils.open_lock_file():
+            with multi_client_utils.open_instance_ctrl_file() as command_file:   # ensure no concurrent attach running
+                client_instances = multi_client_utils.get_all_client_instances()
+                for instance in client_instances:
+                    if multi_client_utils.is_instance_active(instance):
+                        logger.info("Instance {0} is already active, skipping.".format(instance))
+                        continue
+                    try:
+                        use_module_conf_dir = get_use_module_conf_dir(multi_client_utils=multi_client_utils, instance_name=instance)
+                        conf_files_dir = DEFAULT_MODULE_NAME if use_module_conf_dir else instance
+                        logger.debug('Processing config files for {}'.format(conf_files_dir))
+                        process_config_files(conf_files_dir)
+                        prev_ioctl = multi_client_utils.read_ioctl_for_instance(instance)
+                        if prev_ioctl:
+                            ioctl = restore_ioctl_from_conf(prev_ioctl, conf_files_dir, args)
+                            logger.debug("Restoring instance {0} with ioctl {1}.".format(instance, ioctl))
+                            os.write(command_file, ioctl)
+                            if not multi_client_utils.is_instance_active(instance):
+                                logger.error("Instance {0} reactivation failed.".format(instance))
+                        else:
+                            logger.debug("Instance {0} has no ioctl to restore with.".format(instance))
+                            # We can create it from scratch here?
+                    except Exception as e:
+                        logger.error('Failed to restore ioctl from config file for instance {0}. Ex: {1}'.format(instance, e))
+                        raise e
+
+
+def get_nics_guids(nics):
+    guids, error, code = run_bash_cmd(NICS_GUIDS_CMD.format(nics))
+    if code != 0 or 'Warning' in error or 'ERROR' in error:
+        raise Exception('Failed to find nics guids for {0}, code={1}, error={2}'.format(nics, code, error))
+    return guids.strip()
+
+
+def prepare_ioctl_add_params(args, extra_args):
+    params = []
+    if args.configured_nics:
+        params.append("paramc:ports={0}".format(args.configured_nics))
+        guids = get_nics_guids(args.configured_nics)
+        params.append("paramc:guids={0}".format(guids))
+    if args.rdda is not None:
+        params.append("paramc:use_rdda={0}".format("y" if args.rdda else "n"))
+    if args.multi_slice_n:
+        params.append("paramb:jstride={0}".format(args.multi_slice_n))
+    if args.management_cluster:
+        args.management_cluster = ','.join(args.management_cluster) if isinstance(args.management_cluster, list) else args.management_cluster
+        params.append("paramm:cluster={0}".format(args.management_cluster))
+    if args.management_protocol:
+        params.append("paramm:protocol={0}".format(args.management_protocol))
+    if args.management_autogen:
+        params.append("paramm:auto_gen={0}".format(args.management_autogen))
+    if args.management_dbuuid:
+        params.append("paramm:db_uuid={0}".format(args.management_dbuuid))
+    if nvmesh_script_utils.InstanceConfiguration.is_true_param(args.tcp_enabled) or nvmesh_script_utils.InstanceConfiguration.is_true_param(args.tcp_only):
+        params.append("paramc:tcp_mode={0}".format(1 if nvmesh_script_utils.InstanceConfiguration.is_true_param(args.tcp_only) else 2))
+    else:
+        params.append("paramc:tcp_mode=0")
+    try:
+        cfg_name, cfg_id, cfg_version = args.configuration_profile.split(',')
+    except ValueError:
+        print "Invalid parameters were given to configuration_profile. Expected \"<name>,<id>,<version>\""
+        sys.exit(1)
+    params.append("paramm:cfg_name={0}".format(cfg_name))
+    params.append("paramm:cfg_id={0}".format(cfg_id))
+    params.append("paramm:cfg_version={0}".format(cfg_version))
+    if extra_args is not None:
+        for key, values in extra_args.iteritems():
+            params.append("paramu:{0}={1}".format(key,','.join(values)))
+    return '|'.join(params)
+
+
+def prepare_ioctl_request(add, dev_name, dir_lsblk, args, extra_args):
+    action = "++" if add else "--"
+    res = "%clnt" + action + "{" + dev_name + "," + dir_lsblk + "}"
+    if add:
+        res += prepare_ioctl_add_params(args, extra_args)
+    print "ioctl generated: {0}".format(res)
+    return res
+
+def print_instances_status(logger):
+    run_bash_string("cat /proc/nvmeiba/status | grep -o -G '{}=[0-9]*'".format(DEFAULT_MODULE_NAME));
+    run_bash_string("echo ---------------------- /proc/devices ----------------------");
+    run_bash_string("cat /proc/devices | grep -e mc -e nvmeib");
+    run_bash_string("echo ---------------------- instances params ----------------------");
+    run_bash_string("cat /proc/{}/inst_list.json".format(DEFAULT_MODULE_NAME));
+
+def manipulate_instances(multi_client_utils, logger, add, dev_name, dir_lsblk, args, extra_args):
+    with multi_client_utils.open_instance_ctrl_file() as command_file:   # ensure no concurrent attach running
+        try:
+            ioctl = prepare_ioctl_request(add, dev_name, dir_lsblk, args, extra_args)
+            use_module_conf_dir = get_use_module_conf_dir(multi_client_utils=multi_client_utils, instance_name=dev_name, args=args, is_restore=not add)
+        except Exception as error:
+            logger.error(error.message)
+            sys.exit(1)
+        if not add:
+            if not multi_client_utils.is_instance_active(dev_name):
+                logger.error("Instance {} does not exist, cannot remove it.".format(dev_name))
+                sys.exit(1)
+            prev_ioctl = multi_client_utils.read_previous_ioctl()
+            logger.debug("Removing instance {0}, which was created with ioctl {1}.".format(dev_name, prev_ioctl))
+            os.write(command_file, ioctl)
+            if multi_client_utils.is_instance_active(dev_name):
+                logger.error("Removing instance {0} failed.".format(dev_name))
+                sys.exit(1)
+            else:
+                multi_client_utils.remove_persistency()
+                multi_client_utils.mark_mcs_cache_to_be_removed(dev_name)
+                multi_client_utils.remove_configs(is_module_conf=use_module_conf_dir)
+        else:
+            if multi_client_utils.is_instance_active(dev_name):
+                logger.error("Instance {} already exists.".format(dev_name))
+                sys.exit(1)
+
+            try:
+                create_instance_conf(args, DEFAULT_MODULE_NAME if use_module_conf_dir else dev_name)
+                process_config_files(DEFAULT_MODULE_NAME if use_module_conf_dir else dev_name)
+            except Exception as e:
+                logger.error('Failed to handle default config files for instance {0}, ex: {1}'.format(dev_name, e))
+                sys.exit(1)
+
+            logger.info("ioctl:" + ioctl)
+            os.write(command_file, ioctl)
+
+            if multi_client_utils.is_instance_active(dev_name):
+                multi_client_utils.create_persistency(ioctl)
+            else:
+                logger.error("Instance {0} creation failed.".format(dev_name))
+                sys.exit(1)
+
+
+def get_use_module_conf_dir(multi_client_utils, instance_name, args=None, is_restore=True):
+    use_module_conf_dir = False
+    is_auto_gen = multi_client_utils.is_auto_generated(instance_name=instance_name) if is_restore else args.management_autogen == '1'
+    db_uuid = multi_client_utils.get_management_db_uuid_from_ioctl(instance_name=instance_name) if is_restore else args.management_dbuuid
+
+    if is_auto_gen:
+        nvmesh_conf = readBashFile('/etc/nvmesh/nvmesh.conf')
+        if all(map(lambda param: param in nvmesh_conf, ['MANAGEMENT_SERVERS', 'MANAGEMENT_PROTOCOL'])):
+            conf_db_uuid = multi_client_utils.get_management_db_uuid(
+                management_cluster=nvmesh_conf['MANAGEMENT_SERVERS'],
+                management_protocol=nvmesh_conf['MANAGEMENT_PROTOCOL'],
+                management_http_port='4000'
+            )
+            use_module_conf_dir = db_uuid == conf_db_uuid
+
+    return use_module_conf_dir
+
+class maxLevelFilter(logging.Filter):
+    def filter(self, rec):
+        return rec.levelno < logging.WARNING
+
+def init_logger():
+    SYSLOG_PATH = '/dev/log'
+    CLNT_DEBUG_LEVEL_FILE = "/sys/module/{}/parameters/debug_level".format(DEFAULT_MODULE_NAME)
+    # TODO: multi_client_instance logger
+    mc_logger = logging.getLogger('nvmesh_client_instance')
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(logging.Formatter('%(message)s'))
+    stderr_handler.setLevel(logging.WARNING)
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(logging.Formatter('%(message)s'))
+    stdout_handler.addFilter(maxLevelFilter())
+
+    handler = logging.handlers.SysLogHandler(address=SYSLOG_PATH)
+    handler.setFormatter(logging.Formatter('%(name)s: %(levelname)s: %(message)s'))
+
+    try:
+        with open(CLNT_DEBUG_LEVEL_FILE) as f:
+            debug_level = f.readline()
+            if '2' in debug_level:
+                mc_logger.setLevel(logging.DEBUG)
+            elif '1' in debug_level:
+                mc_logger.setLevel(logging.INFO)
+            else:
+                mc_logger.setLevel(logging.WARNING)
+        mc_logger.addHandler(handler)
+        mc_logger.addHandler(stdout_handler)
+        mc_logger.addHandler(stderr_handler)
+    except Exception:
+        mc_logger.setLevel(logging.ERROR)
+        mc_logger.addHandler(handler)
+        mc_logger.addHandler(stdout_handler)
+        mc_logger.addHandler(stderr_handler)
+        mc_logger.error("Client module is down, ignoring request.")
+    return mc_logger
+
+
+if __name__ == "__main__":
+    arg_parser = argparse.ArgumentParser("nvmesh_client_instance")
+    arg_parser.add_argument('cli_string', type=str, default=None, nargs='*', help=argparse.SUPPRESS)
+    arg_parser.add_argument("--debug", action='store_true', help="print attach debug information")
+    arg_parser.add_argument('-u', '--dump'  , action='store_true', help='dump status of client instances')
+    arg_parser.add_argument('-a', '--add'   , action='store_true', help='add instance')
+    arg_parser.add_argument('-d', '--rmv'   , action='store_true', help='del instance') #Todo: Make exclusive
+    arg_parser.add_argument('-m', '--mc'    , type=int)             # Todo: Here parse more parameters
+    arg_parser.add_argument('-n', '--name'  , help='optional: add or remove by names')
+    arg_parser.add_argument('-b', '--blkdir', help='optional: define block directory name')
+    arg_parser.add_argument('-mg', '--management-cluster', help='optional: which management cluster will be used by this instance.')
+    arg_parser.add_argument('-mp', '--management-protocol', help='optional: which management protocol will be used for the given cluster.')
+    arg_parser.add_argument('-ma', '--management-autogen', default=0,  help='optional: Is instance autogenerated to support connection to multiple mgmts.')
+    arg_parser.add_argument('-md', '--management-dbuuid', help='optional: Mongo DB uuid, empty for default of instance 0.')
+    arg_parser.add_argument('--already-locked', action='store_true')
+    arg_parser.add_argument('-cn', '--configured-nics', help='optional: provide configured_nics for the created instance')
+    arg_parser.add_argument('-cp', '--configuration-profile', default='Cluster Default,cluster_default,1', help='optional: provide configuration profile, should be given as "<name>,<id>,<version>"')
+    arg_parser.add_argument('-jstride', '--multi-slice-n', type=int, help='optional: set EC multi slice N for instance')
+    arg_parser.add_argument('--restore-from-persistency', action='store_true', help=argparse.SUPPRESS)
+    # This should match nvmeibc_tcp_mode module param
+    arg_parser.add_argument('--tcp_enabled', default=False, action='store_true', help='Enable TCP')
+    arg_parser.add_argument('--tcp_only', default=False, action='store_true', help='Enable TCP Only')
+    group = arg_parser.add_mutually_exclusive_group()
+    group.add_argument('--rdda', dest='rdda', action='store_true', default=None, help='optional: enable RDDA for instance')
+    group.add_argument('--no-rdda', dest='rdda', action='store_false', default=None, help='optional: disable RDDA for instance')
+
+    extra_args = None
+    dev_name = None
+    args = arg_parser.parse_args(sys.argv[1:])
+    if sys.argv[1:] == []:
+        arg_parser.print_help()
+        sys.exit(0)
+    mc_logger = init_logger()
+    if args.cli_string:
+        generic_error_string = "{0} passed both in cli string {0}={1} and as a separate parameter {2}. Using {1}."
+        # create namespace and add params from single string, exit if more than 1 string is passed
+        if len(args.cli_string) > 1:
+            mc_logger.error("Unknown arguments passed - {0}".format(args.cli_string[1:]))
+            sys.exit(1)
+        simple_params = args.cli_string[0].split('|')
+        for param in simple_params:
+            multiple_values = param.split(',')
+            if len(multiple_values) == 1:
+                multiple_values = param.split(';')
+            param_name = multiple_values[0].split('=')[0]
+            param_value = multiple_values[0].split('=')[1:]
+            if param_name == 'CONFIGURED_NICS':
+                if len(multiple_values) > 1:
+                    param_value.extend(multiple_values[1:])
+                if args.configured_nics is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value, args.configured_nics))
+                args.configured_nics = ';'.join(param_value)
+            elif param_name == 'MANAGEMENT_SERVERS':
+                if len(multiple_values) > 1:
+                    param_value.extend(multiple_values[1:])
+                if args.management_cluster is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value, args.management_cluster))
+                args.management_cluster = param_value
+            elif param_name == 'MANAGEMENT_PROTOCOL':
+                if args.management_protocol is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value[0], args.management_protocol))
+                args.management_protocol = param_value[0]
+            elif param_name == 'MANAGEMENT_DB_UUID':
+                args.management_dbuuid = param_value[0]
+            elif param_name == 'AUTO_GENERATED':
+                args.management_autogen = param_value[0]
+            elif param_name == 'ADD':
+                if args.add is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value[0], str(True)))
+                args.add = True
+            elif param_name == 'REMOVE':
+                if args.rmv is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value[0], str(True)))
+                args.rmv = True
+            elif param_name == 'INSTANCE_NAME':
+                if args.name is not None or args.mc is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value[0], args.name or "mc{0:04d}".format(int(args.mc))))
+                args.name = param_value[0]
+            elif param_name == 'BLOCK_DIR':
+                if args.blkdir is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value[0], args.blkdir))
+                args.blkdir = param_value[0]
+            elif param_name == 'RDDA':
+                if args.rdda is not None:
+                    mc_logger.error("{0} passed both in cli string {0}={1} and as a separate parameter {2}. Using RDDA=True.".format(param_name, param_value[0], str(args.rdda)))
+                args.rdda = True
+            elif param_name == 'NO_RDDA':
+                if args.rdda is not None:
+                    mc_logger.error("{0} passed both in cli string {0}={1} and as a separate parameter {2}. Using RDDA=False.".format(param_name, param_value[0], str(args.rdda)))
+                args.rdda = False
+            elif param_name == 'CONFIGURATION_PROFILE':
+                if args.configuration_profile is not None:
+                    mc_logger.error(generic_error_string.format(param_name, param_value[0], args.configuration_profile))
+                args.configuration_profile = param_value[0]
+            #TODO this is just not makes sense to do it for any param, add pyparse action for this params
+            elif param_name == 'TCP_ENABLED':
+                args.tcp_enabled = param_value[0]
+            elif param_name == 'TCP_ONLY':
+                args.tcp_only = param_value[0]
+            else:
+                if extra_args is None:
+                    extra_args = {}
+                if len(multiple_values) > 1:
+                    extra_args[param_name] = param_value
+                    extra_args[param_name].extend(multiple_values[1:])
+                else:
+                    extra_args[param_name] = param_value[0]
+
+    # Check root user
+    if os.geteuid() != 0: # Non root user
+        mc_logger.error("Running attach and detach commands should be done as root user.")
+        sys.exit(1)
+
+    if args.restore_from_persistency:
+        restore_all_client_instances(mc_logger, args)
+
+    if args.add and args.rmv:
+        mc_logger.error("Please use only --add or --rmv.")
+        sys.exit(1)
+
+    if args.name:
+        dev_name = args.name
+        # important: do not consider None and "" as the same
+        dir_lsblk = args.name if args.blkdir is None else args.blkdir
+
+    if args.add or args.rmv:
+        #parse params of instance and set default values
+        if dev_name is None:
+            dev_name = "mc{0:04d}".format(int(args.mc))
+            dir_lsblk = dev_name
+        if args.rmv:
+            dir_lsblk = ''  # irelevant for rmv, but also should not be None
+        multi_client_utils = nvmesh_script_utils.MultiClientUtils(mc_logger, dev_name, dir_lsblk)
+        if args.already_locked:
+            with multi_client_utils.open_lock_file(instance_lock_file=True):
+                manipulate_instances(multi_client_utils, mc_logger, args.add, dev_name, dir_lsblk, args, extra_args)
+        else:
+            with multi_client_utils.open_lock_file(instance_lock_file=True):
+                with multi_client_utils.open_lock_file():
+                    manipulate_instances(multi_client_utils, mc_logger, args.add, dev_name, dir_lsblk, args, extra_args)
+
+
+
+    if args.dump:
+        print_instances_status(mc_logger)
+    sys.exit(0)
+

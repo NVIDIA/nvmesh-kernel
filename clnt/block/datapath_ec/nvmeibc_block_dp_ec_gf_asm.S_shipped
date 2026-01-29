@@ -1,0 +1,1246 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+# NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
+#
+# Increment gf_asm_count every time you modify this file!
+#
+# NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
+
+.global gf_asm_count
+gf_asm_count:
+.int 7
+
+#ifndef __x86_64__
+#error Code for X86_64 only
+#endif
+
+/*
+    x86-64 ABI
+    Args: rdi, rsi, rdx, rcx, r8, r9, xmm0 -> xmm7
+    callee save: rbx, rbp, r12 -> r15
+    return: rax or rax,rdx
+*/
+
+// TODO: James
+// Align code loops.
+
+.arch .avx2
+
+.set AVX2_SIZE, 32
+.set AVX2_ITER_SIZE, 4*AVX2_SIZE
+
+
+# Macro to calculate CRC32 on 32 bytes in one row of data. Four r64.
+.macro _crc32_32 yreg:req, xreg:req, dest:req
+    vmovq       \xreg, crctmp          # Get u64[0]
+    crc32q      crctmp, \dest
+    vextracti128 $1, \yreg, t1L         # u128[1]
+    vpextrq      $1, \xreg, crctmp     # u64[1]
+    crc32q      crctmp, \dest
+    vmovq       t1L, crctmp            # u64[2]
+    crc32q      crctmp, \dest
+    vpextrq     $1, t1L, crctmp        # u64[3]
+    crc32q      crctmp, \dest
+.endm
+
+.macro _prologue
+    push        %rbp
+    mov         %rsp, %rbp
+
+    push        %rbx                    # callee save
+    push        %r12
+    push        %r13
+    push        %r14
+    push        %r15
+
+    push        %rdi                    # Save args before call
+    push        %rsi
+    push        %rdx
+    push        %rcx
+    push        %r8
+    push        %r9
+    call        nvmeib_fpu_begin        # Deconflict vector registers in kernel
+    pop         %r9
+    pop         %r8
+    pop         %rcx                    # Restore args
+    pop         %rdx
+    pop         %rsi
+    pop         %rdi
+.endm
+
+.macro _epilogue
+    pop         %r15
+    pop         %r14
+    pop         %r13
+    pop         %r12
+    pop         %rbx                    # callee save
+    leaveq
+
+    jmp         nvmeib_fpu_end
+.endm
+
+/*
+void ec_encode_data_p_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc)
+    Encode 'rows' blocks into parity (P), using AVX2 instructions.
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+*/
+
+# Everybody here will use the same register allocation.
+.set j,     %rax
+.set base,  %rbx
+.set coding, %rcx
+.set data,  %rdx
+.set len,   %rdi
+.set rows,  %rsi
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r8
+.set data_copy, %r9
+.set crctmp,%r10
+
+.set P0,    %ymm0
+.set P0L,   %xmm0
+.set P1,    %ymm1
+.set P1L,   %xmm1
+.set P2,    %ymm2
+.set P2L,   %xmm2
+.set P3,    %ymm3
+.set P3L,   %xmm3
+.set D0,    %ymm4
+.set D0L,   %xmm4   # XMM, lower half
+.set D1,    %ymm5
+.set D1L,   %xmm5   # XMM
+.set D2,    %ymm6
+.set D2L,   %xmm6   # XMM
+.set D3,    %ymm7
+.set D3L,   %xmm7   # XMM
+
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+
+
+
+
+.text
+.globl  ec_encode_data_p_avx2
+.func   ec_encode_data_p_avx2
+
+ec_encode_data_p_avx2:
+    _prologue
+
+    xor         j, j                    # for j = 0
+
+1:  # Loop on j (buffer offset)
+    lea         -1(rows), i
+
+    vpxor       P0, P0, P0	        # For each row, start with zero Parity
+    vpxor       P1, P1, P1
+    vpxor       P2, P2, P2
+    vpxor       P3, P3, P3
+
+2:  # Loop on i (drive number)
+    movq        (data, i, 8), base      # Walking backwards through the rows of data.
+
+    prefetchnta 128(base, j)               # Prefetch D, no cache
+    prefetchnta 196(base, j)
+
+    vmovntdqa   (base, j), D0           # Load D, no cache
+    vmovntdqa   32(base, j), D1
+    vmovntdqa   64(base, j), D2
+    vmovntdqa   96(base, j), D3
+    vpxor       D0, P0, P0              # Xor data into parity registers
+    vpxor       D1, P1, P1
+    vpxor       D2, P2, P2
+    vpxor       D3, P3, P3
+
+    test	data_copy, data_copy
+    jz		5f
+    movq	(data_copy, i, 8), base
+    test	base, base
+    jz		5f
+    vmovntdq	D0, (base, j)
+    vmovntdq	D1, 32(base, j)
+    vmovntdq	D2, 64(base, j)
+    vmovntdq	D3, 96(base, j)
+5:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, i, 4), crcdL
+    _crc32_32   D0, D0L, crcd
+    _crc32_32   D1, D1L, crcd
+    _crc32_32   D2, D2L, crcd
+    _crc32_32   D3, D3L, crcd
+    mov		crcdL,(crcp, i, 4)
+5:
+
+    decq        i
+    jns         2b
+
+3:  # Ready to save a row of 4 YMM registers.
+    movq        (coding), base
+    vmovntdq    P0, (base, j)           # Store parity
+    vmovntdq    P1, 32(base, j)
+    vmovntdq    P2, 64(base, j)
+    vmovntdq    P3, 96(base, j)
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, rows, 4), crcdL
+    _crc32_32   P0, P0L, crcd
+    _crc32_32   P1, P1L, crcd
+    _crc32_32   P2, P2L, crcd
+    _crc32_32   P3, P3L, crcd
+    mov		crcdL, (crcp, rows, 4)
+5:
+
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    _epilogue
+
+.endfunc
+
+
+/*
+void ec_encode_data_q_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc)
+
+    Encode 'rows' blocks into Q parity (Q), using AVX2 instructions.
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+*/
+
+.set j,     %rax
+.set base,  %rbx
+.set coding, %rcx
+.set data,  %rdx
+.set len,   %rdi
+.set rows,  %rsi
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r8
+.set data_copy, %r9
+.set crctmp,%r10
+
+.set Q0,    %ymm4
+.set Q0L,   %xmm4   # XMM, lower half
+.set Q1,    %ymm5
+.set Q1L,   %xmm5   # XMM
+.set Q2,    %ymm6
+.set Q2L,   %xmm6   # XMM
+.set Q3,    %ymm7
+.set Q3L,   %xmm7   # XMM
+.set Poly,  %ymm8
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+.set D0,    %ymm11
+.set D0L,   %xmm11  # XMM
+.set D1,    %ymm12
+.set D1L,   %xmm12  # XMM
+.set D2,    %ymm13
+.set D2L,   %xmm13  # XMM
+.set D3,    %ymm14
+.set D3L,   %xmm14  # XMM
+
+# Macro to calculate incremental P and Q on 32 bytes (sizeof ymm) in one row of data.
+.macro _one_Q dat:req, index:req, disp:req, Q:req, LD:req
+    vmovntdqa   \disp(\dat, \index), \LD # Load D
+    vpcmpgtb    \Q, temp, t1            # Q calculation: Mask of high bits of Q
+    vpaddb      \Q, \Q, \Q              # Q << 1
+    vpand       Poly, t1, t1            # Mask the polynomial, zero if high bit of Q byte not set
+    vpxor       t1, \Q, t1              # Xor polynomial into Q0 if high bit of Q0 was set
+    vpxor       \LD, t1, \Q             # Xor data into Q, finishes gf(8) multiply by 2
+.endm
+
+.text
+.globl  ec_encode_data_q_avx2
+.func   ec_encode_data_q_avx2
+ec_encode_data_q_avx2:
+    _prologue
+
+/* Only minor magic here. Q is calculated by gfmul{2}: D0*g**0 + D1*g**1, etc.
+  So instead we calculated it ((((Dn-1*g) + (Dn-2))*g + Dn-3)*g ...) + D0
+  This means we calculate the buffers in reverse order to get cheap multiplies.
+*/
+    vmovntdqa   (poly_constants), Poly
+    xor         j, j                    # for j = 0
+
+1:  # Loop on j (buffer offset)
+    lea         -1(rows), i
+    movq        (data, i, 8), base      # Walking backwards through the rows of data.
+    prefetchnta 128(base, j)               # Prefetch D, no cache
+    prefetchnta 192(base, j)
+
+    vmovntdqa   (base, j), Q0           # Q initialized to last row so we get cheap mult
+    vmovntdqa   32(base, j), Q1
+    vmovntdqa   64(base, j), Q2
+    vmovntdqa   96(base, j), Q3
+    vpxor       temp, temp, temp
+
+    test	data_copy, data_copy
+    jz		5f
+    movq	(data_copy, i, 8), base
+    test	base, base
+    jz		5f
+    vmovntdq	Q0, (base, j)
+    vmovntdq	Q1, 32(base, j)
+    vmovntdq	Q2, 64(base, j)
+    vmovntdq	Q3, 96(base, j)
+5:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, i, 4), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, (crcp, i, 4)
+5:
+
+2:  # Loop on i (disk member)
+    dec         i                       # for i = rows-2
+    js          3f                      # rows < 2.  What a concept.
+
+    movq        (data, i, 8), base      # Walking backwards through the rows of data.
+    prefetchnta 128(base, j)               # Prefetch D, no cache
+    prefetchnta 192(base, j)
+
+    _one_Q      base, j, 0, Q0, D0
+    _one_Q      base, j, 32, Q1, D1
+    _one_Q      base, j, 64, Q2, D2
+    _one_Q      base, j, 96, Q3, D3
+
+    test	data_copy, data_copy
+    jz		5f
+    movq	(data_copy, i, 8), base
+    test	base, base
+    jz		5f
+    vmovntdq	D0, (base, j)
+    vmovntdq	D1, 32(base, j)
+    vmovntdq	D2, 64(base, j)
+    vmovntdq	D3, 96(base, j)
+5:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, i, 4), crcdL
+    _crc32_32   D0, D0L, crcd
+    _crc32_32   D1, D1L, crcd
+    _crc32_32   D2, D2L, crcd
+    _crc32_32   D3, D3L, crcd
+    mov		crcdL, (crcp, i, 4)
+5:
+    jmp         2b
+
+# 'i' is now available until we jump and start going sideways again.
+3:  # Ready to save a row of 4 YMM registers.
+    movq        8(coding), base
+    vmovntdq    Q0, (base, j)           # Store Q
+    vmovntdq    Q1, 32(base, j)
+    vmovntdq    Q2, 64(base, j)
+    vmovntdq    Q3, 96(base, j)
+
+    test	crcp, crcp
+    jz		5f
+    mov		4(crcp, rows, 4), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, 4(crcp, rows, 4)
+5:
+
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    _epilogue
+
+.endfunc
+
+
+/*
+void ec_encode_data_pq_avx2(int len, int rows, unsigned char **data, unsigned char **coding, u32 *crc, unsigned char **data_copy)
+
+    Encode 'rows' blocks into double parity (PQ), using AVX2 instructions.
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+*/
+
+.set j,     %rax
+.set base,  %rbx
+.set coding, %rcx
+.set data,  %rdx
+.set len,   %rdi
+.set rows,  %rsi
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r8
+.set data_copy, %r9
+.set crctmp,%r10
+
+.set P0,    %ymm0
+.set P1,    %ymm1
+.set P2,    %ymm2
+.set P3,    %ymm3
+.set Q0,    %ymm4
+.set Q0L,   %xmm4   # XMM, lower half
+.set Q1,    %ymm5
+.set Q1L,   %xmm5   # XMM
+.set Q2,    %ymm6
+.set Q2L,   %xmm6   # XMM
+.set Q3,    %ymm7
+.set Q3L,   %xmm7   # XMM
+.set Poly,  %ymm8
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+.set D0,    %ymm11
+.set D0L,   %xmm11  # XMM
+.set D1,    %ymm12
+.set D1L,   %xmm12  # XMM
+.set D2,    %ymm13
+.set D2L,   %xmm13  # XMM
+.set D3,    %ymm14
+.set D3L,   %xmm14  # XMM
+
+# Macro to calculate incremental P and Q on 32 bytes (sizeof ymm) in one row of data.
+.macro _one_vec dat:req, index:req, disp:req, P:req, Q:req, LD:req
+    vmovntdqa   \disp(\dat, \index), \LD  # Load D
+    vpcmpgtb    \Q, temp, t1            # Q calculation: Mask of high bits of Q
+    vpxor       \LD, \P, \P             # Parity calculation: XOR
+    vpaddb      \Q, \Q, \Q              # Q << 1
+    vpand       Poly, t1, t1            # Mask the polynomial, zero if high bit of Q byte not set
+    vpxor       t1, \Q, t1              # Xor polynomial into Q0 if high bit of Q0 was set
+    vpxor       \LD, t1, \Q             # Xor data into Q, finishes gf(8) multiply by 2
+.endm
+
+.text
+.globl  ec_encode_data_pq_avx2
+.func   ec_encode_data_pq_avx2
+ec_encode_data_pq_avx2:
+    _prologue
+
+/* Only minor magic here. Q is calculated by gfmul{2}: D0*g**0 + D1*g**1, etc.
+  So instead we calculated it ((((Dn-1*g) + (Dn-2))*g + Dn-3)*g ...) + D0
+  This means we calculate the buffers in reverse order to get cheap multiplies.
+  P doesn't care about the order, so it goes along for the ride.
+*/
+    vmovntdqa   (poly_constants), Poly
+    xor         j, j                    # for j = 0
+
+1:  # Loop on j (buffer offset)
+    lea         -1(rows), i
+    movq        (data, i, 8), base      # Walking backwards through the rows of data.
+    prefetchnta 128(base, j)               # Prefetch D, no cache
+    prefetchnta 192(base, j)
+
+    vmovntdqa   (base, j), Q0           # Q initialized to last row so we get cheap mult
+    vmovntdqa   32(base, j), Q1
+    vmovntdqa   64(base, j), Q2
+    vmovntdqa   96(base, j), Q3
+    vpxor       temp, temp, temp
+    vmovdqa     Q0, P0                  # Order of P doesn't matter, so load with last row
+    vmovdqa     Q1, P1
+    vmovdqa     Q2, P2
+    vmovdqa     Q3, P3
+
+    test	data_copy, data_copy
+    jz		5f
+    movq	(data_copy, i, 8), base
+    test	base, base
+    jz		5f
+    vmovntdq	Q0, (base, j)
+    vmovntdq	Q1, 32(base, j)
+    vmovntdq	Q2, 64(base, j)
+    vmovntdq	Q3, 96(base, j)
+5:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, i, 4), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, (crcp, i, 4)
+5:
+
+2:  # Loop on i (disk member)
+    decq        i                       # for i = rows-2
+    js          3f                      # rows < 2.  What a concept.
+
+    movq        (data, i, 8), base      # Walking backwards through the rows of data.
+    prefetchnta 128(base, j)               # Prefetch D, no cache
+    prefetchnta 192(base, j)
+
+    _one_vec    base, j, 0, P0, Q0, D0
+    _one_vec    base, j, 32, P1, Q1, D1
+    _one_vec    base, j, 64, P2, Q2, D2
+    _one_vec    base, j, 96, P3, Q3, D3
+
+    test	data_copy, data_copy
+    jz		5f
+    movq	(data_copy, i, 8), base
+    test	base, base
+    jz		5f
+    vmovntdq	D0, (base, j)
+    vmovntdq	D1, 32(base, j)
+    vmovntdq	D2, 64(base, j)
+    vmovntdq	D3, 96(base, j)
+5:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, i, 4), crcdL
+    _crc32_32   D0, D0L, crcd
+    _crc32_32   D1, D1L, crcd
+    _crc32_32   D2, D2L, crcd
+    _crc32_32   D3, D3L, crcd
+    mov		crcdL, (crcp, i, 4)
+5:
+    jmp         2b
+
+# 'i' is now available until we jump and start going sideways again.
+3:  # Ready to save a row of 4 YMM registers.
+    movq        (coding), base
+    vmovntdq    P0, (base, j)           # Store parity
+    vmovntdq    P1, 32(base, j)
+    vmovntdq    P2, 64(base, j)
+    vmovntdq    P3, 96(base, j)
+
+    movq        8(coding), base
+    vmovntdq    Q0, (base, j)           # Store Q
+    vmovntdq    Q1, 32(base, j)
+    vmovntdq    Q2, 64(base, j)
+    vmovntdq    Q3, 96(base, j)
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp, rows, 4), crcdL
+    _crc32_32   P0, P0L, crcd
+    _crc32_32   P1, P1L, crcd
+    _crc32_32   P2, P2L, crcd
+    _crc32_32   P3, P3L, crcd
+    mov		crcdL, (crcp, rows, 4)
+    mov		4(crcp, rows, 4), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, 4(crcp, rows, 4)
+5:
+
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    _epilogue
+
+.endfunc
+
+/*
+int ec_encode_data_update_avx2(int len, int k, int vec_i, unsigned char **data, unsigned char **coding, u32 *crc, unsigned char *data_copy)
+
+   Update the Ps for new data (RMW).
+   len: buffer length in bytes
+   k: number of P (1 = RAID5, 2=RAID6, etc.)
+   vec_i: index of D to update
+   data: K+2 buffer pointers (Old D, New D, Old Ps)
+   coding: (New Ps)
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+function parameters: RDI, RSI, RDX, RCX, R8
+*/
+
+
+.set j,     %rax
+.set base,  %rbx
+.set coding,%r8
+.set data,  %rcx
+.set len,   %rdi
+.set k,     %esi
+.set vec_i, %rdx
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r9
+.set crctmp,%r10
+.set data_copy, %r11
+
+.set P0,    %ymm0
+.set P1,    %ymm1
+.set P2,    %ymm2
+.set P3,    %ymm3
+.set Q0,    %ymm4
+.set Q0L,   %xmm4   # XMM, lower half
+.set Q1,    %ymm5
+.set Q1L,   %xmm5   # XMM
+.set Q2,    %ymm6
+.set Q2L,   %xmm6   # XMM
+.set Q3,    %ymm7
+.set Q3L,   %xmm7   # XMM
+.set Poly,  %ymm8
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+.set LD,    %ymm11
+.set LDL,   %xmm11  # XMM
+
+# Macro to calculate incremental P and Q on 32 bytes (sizeof ymm) in one row of data.
+.macro _one_upd Q:req
+    vpxor	t1, t1, t1
+    vpcmpgtb    \Q, t1, t1              # Q calculation: Mask of high bits of Q
+    vpaddb      \Q, \Q, \Q              # Q << 1
+    vpand       Poly, t1, temp          # Mask the polynomial, zero if high bit of Q byte not set
+    vpxor       temp, \Q, \Q            # Xor polynomial into Q0 if high bit of Q0 was set
+.endm
+
+.text
+.globl  ec_encode_data_update_avx2
+.func   ec_encode_data_update_avx2
+ec_encode_data_update_avx2:
+    _prologue
+
+    movq	56(%rsp),data_copy
+/* Only minor magic here. Q is calculated by gfmul{2}: D0*g**0 + D1*g**1, etc.
+  So instead we calculated it ((((Dn-1*g) + (Dn-2))*g + Dn-3)*g ...) + D0
+  This means we calculate the buffers in reverse order to get cheap multiplies.
+  P doesn't care about the order, so it goes along for the ride.
+*/
+    vmovntdqa   (poly_constants), Poly
+    xor         j, j                    # for j = 0
+
+1:  # Loop on j (buffer offset)
+    lea         -1(rows), i
+
+    movq        8(data), base	# New data ptr
+    vmovntdqa   (base, j), P0
+    vmovntdqa   32(base, j), P1
+    vmovntdqa   64(base, j), P2
+    vmovntdqa   96(base, j), P3
+
+    test	data_copy, data_copy
+    jz		5f
+    vmovntdq	P0, (data_copy, j)
+    vmovntdq	P1, 32(data_copy, j)
+    vmovntdq	P2, 64(data_copy, j)
+    vmovntdq	P3, 96(data_copy, j)
+5:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp), crcdL
+    _crc32_32   P0, P0L, crcd
+    _crc32_32   P1, P1L, crcd
+    _crc32_32   P2, P2L, crcd
+    _crc32_32   P3, P3L, crcd
+    mov		crcdL, (crcp)
+5:
+
+    movq        (data), base	# Old data ptr
+    vmovntdqa   (base, j), temp
+    vpxor       temp, P0, P0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, P1, P1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, P2, P2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, P3, P3
+
+    cmpl        $1, k
+    jle         4f        # only compute Q if k > 1
+
+    vmovdqa     P0, Q0
+    vmovdqa     P1, Q1
+    vmovdqa     P2, Q2
+    vmovdqa     P3, Q3
+
+    mov		vec_i, i
+2:  # Loop on i (vec_i)
+    dec		i
+    js		3f
+    _one_upd	Q0
+    _one_upd	Q1
+    _one_upd	Q2
+    _one_upd	Q3
+
+    jmp		2b
+3:
+
+
+    movq        24(data), base	        # Old Q
+    vmovntdqa   (base, j), temp
+    vpxor       temp, Q0, Q0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, Q1, Q1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, Q2, Q2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, Q3, Q3
+
+    movq        8(coding), base
+    vmovntdq    Q0, (base, j)           # Store Q
+    vmovntdq    Q1, 32(base, j)
+    vmovntdq    Q2, 64(base, j)
+    vmovntdq    Q3, 96(base, j)
+
+    test	crcp, crcp
+    jz		4f
+    mov		8(crcp), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, 8(crcp)
+
+4:
+    movq        16(data), base	        # Old P
+    vmovntdqa   (base, j), temp
+    vpxor       temp, P0, P0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, P1, P1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, P2, P2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, P3, P3
+
+    movq        (coding), base
+    vmovntdq    P0, (base, j)           # Store P
+    vmovntdq    P1, 32(base, j)
+    vmovntdq    P2, 64(base, j)
+    vmovntdq    P3, 96(base, j)
+
+    test	crcp, crcp
+    jz		5f
+    mov		4(crcp), crcdL
+    _crc32_32   P0, P0L, crcd
+    _crc32_32   P1, P1L, crcd
+    _crc32_32   P2, P2L, crcd
+    _crc32_32   P3, P3L, crcd
+    mov		crcdL, 4(crcp)
+5:
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    _epilogue
+
+.endfunc
+
+
+/*
+int ec_decode_data_p_avx2(int len, int rows, int d0, unsigned char **data, unsigned char **new_data, u32 *crc)
+
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+function parameters: RDI, RSI, RDX, RCX, R8, R9
+*/
+
+
+.set j,     %rax
+.set base,  %rbx
+.set len,   %rdi
+.set rows,  %rsi
+.set d0,    %rdx
+.set data,  %rcx
+.set new_data, %r8
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r9
+.set crctmp,%r10
+
+.set P0,    %ymm0
+.set P1,    %ymm1
+.set P2,    %ymm2
+.set P3,    %ymm3
+.set Q0,    %ymm4
+.set Q0L,   %xmm4   # XMM, lower half
+.set Q1,    %ymm5
+.set Q1L,   %xmm5   # XMM
+.set Q2,    %ymm6
+.set Q2L,   %xmm6   # XMM
+.set Q3,    %ymm7
+.set Q3L,   %xmm7   # XMM
+.set Poly,  %ymm8
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+.set LD,    %ymm11
+.set LDL,   %xmm11  # XMM
+
+.text
+.globl  ec_decode_data_p_avx2
+.func   ec_decode_data_p_avx2
+ec_decode_data_p_avx2:
+    _prologue
+
+/* Only minor magic here. Q is calculated by gfmul{2}: D0*g**0 + D1*g**1, etc.
+  So instead we calculated it ((((Dn-1*g) + (Dn-2))*g + Dn-3)*g ...) + D0
+  This means we calculate the buffers in reverse order to get cheap multiplies.
+  P doesn't care about the order, so it goes along for the ride.
+*/
+    vmovntdqa   (poly_constants), Poly
+
+    xor         j, j                    # for j = 0
+1:  # Loop on j (buffer offset)
+    movq        (data,rows,8), base
+    vmovntdqa   (base, j), P0
+    vmovntdqa   32(base, j), P1
+    vmovntdqa   64(base, j), P2
+    vmovntdqa   96(base, j), P3
+
+    lea		-1(rows), i
+2:  # Loop on i (rows)
+    cmpq        i, d0
+    jz          4f        # skip recovered index
+    movq        (data,i,8), base
+    vmovntdqa   (base, j), temp
+    vpxor       temp, P0, P0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, P1, P1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, P2, P2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, P3, P3
+4:
+    dec		i
+    jns		2b
+
+    movq        (new_data), base
+    vmovntdq    P0, (base, j)           # Store new data
+    vmovntdq    P1, 32(base, j)
+    vmovntdq    P2, 64(base, j)
+    vmovntdq    P3, 96(base, j)
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp), crcdL
+    _crc32_32   P0, P0L, crcd
+    _crc32_32   P1, P1L, crcd
+    _crc32_32   P2, P2L, crcd
+    _crc32_32   P3, P3L, crcd
+    mov		crcdL, (crcp)
+5:
+
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    _epilogue
+
+.endfunc
+
+
+/*
+int ec_decode_data_q_avx2(int len, int rows, int d0, unsigned char **data, unsigned char **new_data, u32 *crc)
+
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+function parameters: RDI, RSI, RDX, RCX, R8
+*/
+
+
+.set j,     %rax
+.set base,  %rbx
+.set len,   %rdi
+.set rows,  %rsi
+.set d0,    %rdx
+.set data,  %rcx
+.set new_data, %r8
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r9
+.set crctmp,%r10
+
+.set P0,    %ymm0
+.set P1,    %ymm1
+.set P2,    %ymm2
+.set P3,    %ymm3
+.set Q0,    %ymm4
+.set Q0L,   %xmm4   # XMM, lower half
+.set Q1,    %ymm5
+.set Q1L,   %xmm5   # XMM
+.set Q2,    %ymm6
+.set Q2L,   %xmm6   # XMM
+.set Q3,    %ymm7
+.set Q3L,   %xmm7   # XMM
+.set Poly,  %ymm8
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+.set LD,    %ymm11
+.set LDL,   %xmm11  # XMM
+.set PolyRot,%ymm15
+
+.macro _one_div Q:req
+    vpand	t1, \Q, temp		# extract low bit
+    vpcmpeqb	t1, temp, temp
+    vpand	PolyRot, temp, temp	# mask of where low bit was 1
+    vpandn	\Q, t1, \Q		# mask off low bit
+    vpsrlw	$1, \Q, \Q		# shift right
+    vpxor       temp, \Q, \Q            # Xor polynomial into Q0 if low bit of Q0 was set
+.endm
+
+.data
+byte_one:	.byte 1
+byte_polyRot:	.byte 0x8E
+
+.text
+.globl  ec_decode_data_q_avx2
+.func   ec_decode_data_q_avx2
+ec_decode_data_q_avx2:
+    _prologue
+
+/* Only minor magic here. Q is calculated by gfmul{2}: D0*g**0 + D1*g**1, etc.
+  So instead we calculated it ((((Dn-1*g) + (Dn-2))*g + Dn-3)*g ...) + D0
+  This means we calculate the buffers in reverse order to get cheap multiplies.
+  P doesn't care about the order, so it goes along for the ride.
+*/
+    vmovntdqa   (poly_constants), Poly
+
+    xor         j, j                    # for j = 0
+1:  # Loop on j (buffer offset)
+    vpxor       Q0, Q0, Q0
+    vpxor       Q1, Q1, Q1
+    vpxor       Q2, Q2, Q2
+    vpxor       Q3, Q3, Q3
+
+    leaq	-1(rows), i
+2:  # Loop on i (rows)
+    cmpq        i, d0
+    jz          4f        # skip recovered index
+    movq        (data,i,8), base
+    vmovntdqa   (base, j), temp
+    vpxor       temp, Q0, Q0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, Q1, Q1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, Q2, Q2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, Q3, Q3
+
+4:
+    dec		i
+    js		5f
+    _one_upd	Q0
+    _one_upd	Q1
+    _one_upd	Q2
+    _one_upd	Q3
+    jmp		2b
+5:
+
+    movq        8(data,rows,8), base	# Q
+    vmovntdqa   (base, j), temp
+    vpxor       temp, Q0, Q0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, Q1, Q1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, Q2, Q2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, Q3, Q3
+
+    movq	d0, i
+    vpbroadcastb byte_one, t1
+    vpbroadcastb byte_polyRot, PolyRot
+6:  # Loop on i (d0)
+    dec		i
+    js		7f
+    _one_div	Q0
+    _one_div	Q1
+    _one_div	Q2
+    _one_div	Q3
+    jmp		6b
+7:
+
+    movq        (new_data), base
+    vmovntdq    Q0, (base, j)           # Store new data
+    vmovntdq    Q1, 32(base, j)
+    vmovntdq    Q2, 64(base, j)
+    vmovntdq    Q3, 96(base, j)
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, (crcp)
+5:
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    _epilogue
+
+.endfunc
+
+
+/*
+int ec_decode_data_pq_avx2_asm(int len, int rows, int d0, int d1, unsigned char **data, unsigned char **new_data, u32 *crc, u8 factor)
+
+
+    Register order: rax, rbx, rcx(3), rdx(2), rdi(0), rsi(1), [rbp], [rsp], r8-r15
+
+    CRC32C polynomial:0x1EDC6F41(BE)/0x82F63B78(LE)
+    CRC32C Initial Value:0xFFFFFFFF. Complement at end.
+function parameters: RDI, RSI, RDX, RCX, R8, R9
+*/
+
+
+.set j,     %rax
+.set base,  %rbx
+.set len,   %rdi
+.set rows,  %rsi
+.set d0,    %rdx
+.set d1,    %rcx
+.set data,  %r8
+.set new_data, %r9
+.set i,     %r15
+.set crcd,  %r13
+.set crcdL, %r13d
+.set crcp,  %r12
+.set crctmp,%r11
+.set factor,%r10
+
+.set P0,    %ymm0
+.set P1,    %ymm1
+.set P2,    %ymm2
+.set P3,    %ymm3
+.set Q0,    %ymm4
+.set Q0L,   %xmm4   # XMM, lower half
+.set Q1,    %ymm5
+.set Q1L,   %xmm5   # XMM
+.set Q2,    %ymm6
+.set Q2L,   %xmm6   # XMM
+.set Q3,    %ymm7
+.set Q3L,   %xmm7   # XMM
+.set Poly,  %ymm8
+.set temp,  %ymm9
+.set t1,    %ymm10
+.set t1L,   %xmm10  # XMM
+.set LD,    %ymm11
+.set LDL,   %xmm11  # XMM
+.set R0,    %ymm12
+.set R1,    %ymm13
+.set R2,    %ymm14
+.set R3,    %ymm15
+
+.text
+.globl  ec_decode_data_pq_avx2_asm
+.func   ec_decode_data_pq_avx2_asm
+ec_decode_data_pq_avx2_asm:
+    _prologue
+
+    movq	56(%rsp),crcp
+    movq	64(%rsp),factor
+
+/* Only minor magic here. Q is calculated by gfmul{2}: D0*g**0 + D1*g**1, etc.
+  So instead we calculated it ((((Dn-1*g) + (Dn-2))*g + Dn-3)*g ...) + D0
+  This means we calculate the buffers in reverse order to get cheap multiplies.
+  P doesn't care about the order, so it goes along for the ride.
+*/
+    vmovntdqa   (poly_constants), Poly
+
+    xor         j, j                    # for j = 0
+1:  # Loop on j (buffer offset)
+    movq        (data,rows,8), base
+    vmovntdqa   (base, j), P0
+    vmovntdqa   32(base, j), P1
+    vmovntdqa   64(base, j), P2
+    vmovntdqa   96(base, j), P3
+    vpxor       Q0, Q0, Q0
+    vpxor       Q1, Q1, Q1
+    vpxor       Q2, Q2, Q2
+    vpxor       Q3, Q3, Q3
+
+    leaq	-1(rows), i
+2:  # Loop on i (rows)
+    cmpq        i, d0
+    jz          4f        # skip recovered index
+    cmpq        i, d1
+    jz          4f        # skip recovered index
+    movq        (data,i,8), base
+    vmovntdqa   (base, j), temp
+    vpxor       temp, Q0, Q0
+    vpxor       temp, P0, P0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, Q1, Q1
+    vpxor       temp, P1, P1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, Q2, Q2
+    vpxor       temp, P2, P2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, Q3, Q3
+    vpxor       temp, P3, P3
+4:
+    dec		i
+    js		5f
+    _one_upd	Q0
+    _one_upd	Q1
+    _one_upd	Q2
+    _one_upd	Q3
+    jmp		2b
+5:
+
+    movq        8(data,rows,8), base	# Q
+    vmovntdqa   (base, j), temp
+    vpxor       temp, Q0, Q0
+    vmovntdqa   32(base, j), temp
+    vpxor       temp, Q1, Q1
+    vmovntdqa   64(base, j), temp
+    vpxor       temp, Q2, Q2
+    vmovntdqa   96(base, j), temp
+    vpxor       temp, Q3, Q3
+
+    vmovdqa     P0, R0
+    vmovdqa	P1, R1
+    vmovdqa	P2, R2
+    vmovdqa	P3, R3
+
+    movq	d1, i
+6:  # Loop on i (d1)
+    dec		i
+    js		7f
+    _one_upd	R0
+    _one_upd	R1
+    _one_upd	R2
+    _one_upd	R3
+    jmp		6b
+7:
+
+    vpxor	R0, Q0, R0	# R = Q ^ R
+    vpxor	R1, Q1, R1
+    vpxor	R2, Q2, R2
+    vpxor	R3, Q3, R3
+
+    vpxor	Q0, Q0, Q0	# Q = 0
+    vpxor	Q1, Q1, Q1
+    vpxor	Q2, Q2, Q2
+    vpxor	Q3, Q3, Q3
+
+    movq	64(%rsp),factor
+    movq	$8, i		# Q = factor * R into d0
+8:
+    shr		factor
+    jnc		9f
+    vpxor	R0, Q0, Q0
+    vpxor	R1, Q1, Q1
+    vpxor	R2, Q2, Q2
+    vpxor	R3, Q3, Q3
+9:
+    _one_upd	R0
+    _one_upd	R1
+    _one_upd	R2
+    _one_upd	R3
+    dec		i
+    jns		8b
+
+    movq        (new_data), base
+    vmovntdq    Q0, (base, j)           # Store new data0
+    vmovntdq    Q1, 32(base, j)
+    vmovntdq    Q2, 64(base, j)
+    vmovntdq    Q3, 96(base, j)
+
+    movq        8(new_data), base
+    test	base, base
+    jz		9f
+    vpxor	Q0, P0, P0	# P = P ^ Q into d1
+    vpxor	Q1, P1, P1
+    vpxor	Q2, P2, P2
+    vpxor	Q3, P3, P3
+
+    vmovntdq    P0, (base, j)           # Store new data1
+    vmovntdq    P1, 32(base, j)
+    vmovntdq    P2, 64(base, j)
+    vmovntdq    P3, 96(base, j)
+9:
+
+    test	crcp, crcp
+    jz		5f
+    mov		(crcp), crcdL
+    _crc32_32   Q0, Q0L, crcd
+    _crc32_32   Q1, Q1L, crcd
+    _crc32_32   Q2, Q2L, crcd
+    _crc32_32   Q3, Q3L, crcd
+    mov		crcdL, (crcp)
+    mov		4(crcp), crcdL
+    _crc32_32   P0, P0L, crcd
+    _crc32_32   P1, P1L, crcd
+    _crc32_32   P2, P2L, crcd
+    _crc32_32   P3, P3L, crcd
+    mov		crcdL, 4(crcp)
+5:
+    addq        $AVX2_ITER_SIZE, j
+    cmpq        j, len
+    ja          1b
+
+    movq	64(%rsp),%rax
+    _epilogue
+
+.endfunc
+
+/*
+ * void nvmeib_save_avx256(uchar512 *area);
+ */
+.text
+    .globl	nvmeib_save_avx256
+    .func	nvmeib_save_avx256
+nvmeib_save_avx256:
+    push        %rbp
+	mov         %rsp, %rbp
+	mov     	$0xFFFFFFFFFFFFFFFF, %rdx
+	mov     	$0xFFFFFFFFFFFFFFFF, %rax
+	xsave		(%rdi)
+    pop			%rbp
+	ret
+.endfunc
+
+/*
+ * void nvmeib_restore_avx256(uchar512 *area);
+ */
+.text
+    .globl	nvmeib_restore_avx256
+    .func	nvmeib_restore_avx256
+nvmeib_restore_avx256:
+    push        %rbp
+	mov         %rsp, %rbp
+	mov     	$0xFFFFFFFFFFFFFFFF, %rdx
+	mov     	$0xFFFFFFFFFFFFFFFF, %rax
+	xrstor		(%rdi)
+    pop			%rbp
+	ret
+.endfunc
+
+.end

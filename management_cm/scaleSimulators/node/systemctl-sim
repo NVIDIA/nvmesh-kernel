@@ -1,0 +1,40 @@
+#!/bin/bash
+
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+
+
+prog_name="systemctl-sim"
+action="$1"
+service_name="$2"
+
+exit_error() {
+    exit_code=$1
+    msg=$2
+    echo "$prog_name: $msg"
+    exit $exit_code
+}
+
+isUmClient() {
+    if [ $(echo "$NODE_CONFIG" | jq '.CLIENT.isUmClient') == "true" ]; then
+            return 0
+    else
+            return 1
+    fi
+}
+
+if [ "$action" == "is-enabled" ]; then
+    if [ "$service_name" == "nvmeshum.service" ]; then
+            if isUmClient; then
+                echo "enabled"
+            else
+                exit_error 1 "service $service_name disabled"
+            fi
+    else
+        exit_error 120 "unknown service name $service_name"
+    fi
+else
+    exit_error 110 "unrecognized command $action"
+fi

@@ -1,0 +1,26 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+#ifndef NVMEIB_LINUX_CODE_VERSION_H
+#define NVMEIB_LINUX_CODE_VERSION_H
+
+#if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)
+#define LINUX_VERSION_CODE 0x40A0D
+#define LINUX_VERSION_MAJOR 0x4
+#define LINUX_VERSION_PATCHLEVEL 0xA 
+#define LINUX_VERSION_SUBLEVEL 0xD
+#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
+#else 
+#include <linux/version.h>
+#endif
+
+#define K_CHECK_VER(a, b, c) (LINUX_VERSION_CODE >= KERNEL_VERSION(a, b, c))
+#define KERNEL_VERSION_LT(a,b,c) (LINUX_VERSION_CODE < KERNEL_VERSION(a,b,c))
+#define KERNEL_VERSION_LE(a,b,c) (LINUX_VERSION_CODE <= KERNEL_VERSION(a,b,c))
+#define KERNEL_VERSION_GT(a,b,c) (LINUX_VERSION_CODE > KERNEL_VERSION(a,b,c))
+#define KERNEL_VERSION_GE(a,b,c) (LINUX_VERSION_CODE >= KERNEL_VERSION(a,b,c))
+#define KERNEL_VERSION_EQ(a,b,c) (LINUX_VERSION_CODE == KERNEL_VERSION(a,b,c))
+
+#endif//NVMEIB_LINUX_CODE_VERSION_H

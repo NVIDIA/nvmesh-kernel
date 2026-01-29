@@ -1,0 +1,37 @@
+From bae0c468cd309555744f291465cceb46047bd437 Mon Sep 17 00:00:00 2001
+From: Yair Elharrar
+Date: Sun, 17 Jan 2021 12:38:57 +0200
+Subject: [PATCH] Disable periodic smart read
+
+Change-Id: Ib0baccd09150d7757544a2c4e4e6489340a3a883
+Signed-off-by: Yair Elharrar
+---
+ toma/nvmeibt_local_disk.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/toma/nvmeibt_local_disk.c b/toma/nvmeibt_local_disk.c
+index 045c01475e..198ea8121e 100644
+--- a/toma/nvmeibt_local_disk.c
++++ b/toma/nvmeibt_local_disk.c
+@@ -1235,6 +1235,7 @@ void nvmeibt_local_disk_clear_is_binding_back_to_stock(struct nvmeibt_local_disk
+ 
+ static BOOL nvmeibt_local_disk_is_periodic_reread_smart_counters_needed(const struct nvmeibt_local_disk *local_disk)
+ {
++#ifdef TOMA_SMART_READ
+ 	struct timeval	now;
+ 	struct timeval	diff_timeout;
+ 	BOOL			is_update_needed;
+@@ -1248,6 +1249,10 @@ static BOOL nvmeibt_local_disk_is_periodic_reread_smart_counters_needed(const st
+ 
+ 		is_update_needed = (diff_timeout.tv_sec > LOCAL_DISK_SMART_PROBE_UPDATE_THRESHOLD_SEC);
+ 	}
++#else
++	BOOL			is_update_needed = false;
++	(void)local_disk;
++#endif
+ 	return is_update_needed;
+ }
+ 
+-- 
+2.26.2
+

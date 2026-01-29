@@ -1,0 +1,33 @@
+# Use Ubuntu 22.04 (Jammy Jellyfish) as the base image with Azure Kernel 5.15.0-1052
+FROM ubuntu:22.04
+
+ENV DIRPATH /excelero
+WORKDIR $DIRPATH
+
+# Avoid prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update apt package list and install build essentials and other useful tools
+RUN apt update && apt install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    vim \
+    rsync \
+    rdma-core \
+    librdmacm1 \
+    librdmacm-dev \
+    rdmacm-utils \
+    libelf1 \
+    elfutils \
+    libudev1 \
+    libudev-dev \
+    alien \
+    linux-image-5.15.0-1052-azure \
+    linux-modules-5.15.0-1052-azure \
+    linux-headers-5.15.0-1052-azure \
+    librdkafka1 \
+    librdkafka-dev \
+    python2
+

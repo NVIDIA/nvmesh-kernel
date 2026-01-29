@@ -1,0 +1,633 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+#
+# nvmeshclient	This shell script takes care of starting and stopping
+#		the NVMesh(r) client
+#
+# chkconfig: 345 20 80
+# description: NVMesh client
+### BEGIN INIT INFO
+# Provides: nvmeshclient
+# Required-Start: openibd
+# Required-Stop: openibd
+# Default-Start:  3 4 5
+# Default-Stop: 0 1 2 6
+# Short-Description: start and stop nvmeshclient
+# Description: nvmeshclient is the client of NVMesh(r)
+### END INIT INFO
+
+
+# Mimic source function library, as this is not always available
+
+MDIR=/opt/nvmesh
+CLIENT_REPO_DIR=$MDIR/client-repo
+COMMON_REPO_DIR=$MDIR/common-repo
+
+upgradeerrorpath=/var/opt/nvmesh/client-upgrade.err
+upgrade_version_file=/var/opt/nvmesh/client_upgrade_version
+scriptsdirectory=$CLIENT_REPO_DIR/upgrade_scripts
+
+. /opt/nvmesh/client-repo/services/nvmesh_util
+
+nvmeibastatus=/proc/nvmeiba/status
+ofed_version=""
+
+CLIENT_PACKAGE_RPM_DEPENDENCIES=""
+CLIENT_PACKAGE_DEB_DEPENDENCIES=""
+
+#set variables values by OS
+if is_ubuntu_os; then
+	CLIENT_PACKAGE_DEPENDENCIES=$CLIENT_PACKAGE_DEB_DEPENDENCIES
+else
+	CLIENT_PACKAGE_DEPENDENCIES=$CLIENT_PACKAGE_RPM_DEPENDENCIES
+fi
+
+should_check_kos=false
+if [ "$1" != "stop-trace" ]; then
+        should_check_kos=true
+fi
+
+#check specific kernel and ofed support and set main dir
+dirTreeLockFile=/var/run/nvmesh/dirtree.lock
+check_modules common client
+
+component=client
+prog=nvmeshclient
+productname=NVMesh-client
+procdir=/proc/nvmeibc
+proc_version_file=$procdir/version
+servicesLockFile=/var/run/nvmesh/services.lock
+configdir=/sys/kernel/config/nvmeibc
+version_file=/opt/nvmesh/client-repo/version
+runDir=/var/run/nvmesh
+runLinkDir=/var/run/nvmesh
+pidPath=$runDir/$prog
+managementCMPID=/var/run/nvmesh/managementCM.pid
+managementAgentPID=/var/run/nvmesh/managementAgent.pid
+monitorPID=$pidPath/monitor.pid
+nics_guids=""
+parsed_nic_guid=""
+tcp_indicator_module_param_path=/sys/module/nvmeibc/parameters/tcp_mode
+infiniband_base=/sys/class/infiniband
+kernel_rdma_cm=/sys/kernel/config/rdma_cm
+roce_mode=/sys/module/mlx4_core/parameters/roce_mode
+roce_configured_mode=""
+mlx_configured_nics=""
+conflinklayer=""
+module_params=""
+NUM_OPENS=""
+MY_RUNLEVEL=""
+siw_params="loopback_enabled=1"
+CONFIG_PROFILE_PATH="/etc/nvmesh/configs/nvmeibc/.mgmt.nvmesh.conf"
+TIMEOUT_WAITING_FOR_PROFILE="60s"
+MCS_SCRIPT_PATH="$MDIR/bin/managementCM"
+
+read_version_info_file
+
+# global variable to track upgrade state, default to false, set just below
+# the marker file is created by interopDB directive to the upgrade-agent or by user
+UPGRADE_FILE_MARKER="$runDir/$prog/upgrade"
+RESTART_FOR_UPGRADE=false
+
+create_upgrade_marker() {
+    # ensure the parent directory exists (safeguard)
+    local dir_path
+    dir_path=$(dirname "$UPGRADE_FILE_MARKER")
+
+    if [ ! -d "$dir_path" ]; then
+        mkdir -p "$dir_path"
+    fi
+
+    # create the file using touch
+    if touch "$UPGRADE_FILE_MARKER"; then
+        echo "Upgrade marker created successfully"
+        return 0
+    else
+        echo "Error: Failed to create upgrade marker at $UPGRADE_FILE_MARKER"
+        return 1
+    fi
+}
+
+read_upgrade_marker() {
+    if [ -f "$UPGRADE_FILE_MARKER" ]; then
+        echo "upgrade marker file found"
+        RESTART_FOR_UPGRADE=true
+    else
+        RESTART_FOR_UPGRADE=false
+    fi
+}
+
+cleanup_upgrade_marker() {
+    if [ "$RESTART_FOR_UPGRADE" = true ]; then
+        echo "upgrade start successful, removing upgrade marker"
+        rm -f "$UPGRADE_FILE_MARKER"
+    fi
+}
+
+# echo a message ONLY if an upgrade is in progress
+echo_if_upgrade() {
+    if [ "$RESTART_FOR_UPGRADE" = true ]; then
+        # The "$@" preserves all arguments passed to the function
+        echo "NDU: $@"
+    fi
+}
+
+find_and_alert_on_stuck_detaching() {
+	n_stuck=`cat /proc/nvmeiba/status.json | grep gendisk | grep \"null\" |wc -l`;
+	[ ! "$n_stuck" -eq 0 ] && echo "${n_stuck} Nvmesh volumes cannot detach (still used).";
+	return $n_stuck
+}
+
+check_if_nvmibc_can_abandon_nvmeiba() {
+	#echo "DEBUG: testing volumes"
+	vols_counters=$(cat /proc/nvmeiba/status.json | grep counter);
+	n_atoms=`echo $vols_counters | grep -oE '\"atoms\": [0-9]*' | cut -d ':' -f 2 | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//'`
+	n_orphn=`echo $vols_counters | grep -oE '\"orphans\": [0-9]*' | cut -d ':' -f 2 | sed 's/^[[:blank:]]*//;s/[[:blank:]]*$//'`
+	#echo "DEBUG: n_vols:|"${n_atoms}"|, n_orphans:|"${n_orphn}"|";
+	if [ "$n_atoms" == "$n_orphn" ]; then
+		ret=0
+	else
+		ret=1
+	fi
+	#  Why did we compare atoms to orphans? nvmeibc can go done regardless of this comparison. module nvmeiba will take care of the stuck detaching and upgrading volumes. However when client service is stopped, some udev rules play with block devices and then userspace close on blockdevice of stuck detaching volume will crash the kernel
+	return $ret
+}
+
+detach_volumes() {
+	ret=0
+	# Step 1: Find out if we are force detaching or doing hot upgrade.
+	# set shut_down_args
+	if [ "$RESTART_FOR_UPGRADE" = true ]; then
+		echo "Initiating client hot upgrade procedure";
+		shut_down_args="--upgrade";
+	else
+		# echo "DEBUG: Not a hot upgrade."
+		shut_down_args=""; # can use --json
+	fi
+
+	# Step2: Call external python shutdown script
+	module_state=$(head /proc/nvmeibc/status -n 1 | cut -d = -f 2)
+	if [ "$module_state" != "3 Zombie, ready to removal" ]; then
+		#echo "DEBUG: calling|${shut_down_args}|"
+		echo_if_upgrade "client shutdown script invoked"
+		/opt/nvmesh/bin/nvmesh_clnt_shutdown ${shut_down_args};
+		RETVAL=$?
+		if [ ! "$RETVAL" -eq 0 ] ; then
+			ret=1
+		fi
+		echo_if_upgrade "client shutdown script done"
+		echo "Detached all volumes"
+	else
+		echo "Skipping volumes detach, module is ready for removal"
+		ret=0
+	fi
+	if [ "$ret" -eq 0 ]; then
+		# Let Udev daemon finish it's tasks on volumes which exported as disks
+		n=0
+		until [ "$n" -ge 10 ]
+		do
+			check_if_nvmibc_can_abandon_nvmeiba
+			ret=$?
+			[ "$ret" -eq 0 ] && break
+			n=$((n+1))
+			sleep 1
+		done
+		if (( ret != 0 )); then
+			echo "Could not detach (code $ret), some volumes are still in use:"
+			cat /proc/nvmeiba/status
+		fi
+		#echo "DEBUG: ret|"$ret"|"
+		#find_and_alert_on_stuck_detaching; ret=$?; #echo "DEBUG: ret|"$ret"|";
+	fi
+	return $ret
+}
+
+load_relevant_network_modules() {
+	if ! is_tcp_only; then
+		load_roce_or_infiniband_modules
+	fi
+}
+
+wait_for_config_profile() {
+	# make sure we have a configuration profile - on first client start this will wait for the agent
+	if [ ! -f "$CONFIG_PROFILE_PATH" ]; then
+		echo  "Waiting for nvmesh agent to get a Configuration Profile from the nvmesh management server"
+		timeout "$TIMEOUT_WAITING_FOR_PROFILE" bash <<EOT
+		while [ ! -f "$CONFIG_PROFILE_PATH" ]; do
+			echo "Waiting for config profile.."
+			sleep 3
+		done
+EOT
+
+		if [ $? -ne 0 ]; then
+			echo "Timeout waiting for agent to fetch config profile from the management server"
+			exit 3
+		fi
+	fi
+}
+
+verify_mcs_scheme_version() {
+	base_mcs_scheme_version=$($MCS_SCRIPT_PATH --version)
+	kc_mcs_scheme_version=$(modinfo nvmeibc | grep mcs_scheme_version | cut -d ':' -f2 | xargs)
+
+	if [ "$base_mcs_scheme_version" != "$kc_mcs_scheme_version" ]; then
+		echo "MCS SCHEME VERSION mismatch! exiting. $base_mcs_scheme_version vs $kc_mcs_scheme_version"
+		exit 1
+	else
+		echo "MCS SCHEME VERSION match!"
+	fi
+}
+
+start() {
+	wait_for_config_profile
+
+	# check for upgrade marker and potentially set a global variable
+	read_upgrade_marker
+
+	# too expensive (~130ms) - avoid it
+	# verify_mcs_scheme_version
+
+	echo "Starting NVMesh Client: "
+	check_root
+	# verify package dependencies - doesn't make sense to do this here, should be on install
+	# verify_package_dependencies $CLIENT_PACKAGE_DEPENDENCIES
+
+	if module_up nvmeibc; then
+		verify_loaded_kernel_modules_version
+
+		echo "$prog service is already up"
+		if ! $sysv_triggered; then
+			fork_and_monitor_module nvmeibc
+		fi
+		exit 0
+	fi
+
+	if [ ! -d $pidPath ]; then
+			mkdir -p $pidPath
+	fi
+
+	if [ ! -d $runLinkDir ] && [ ! -L $runLinkDir ]; then
+		ln -s $runDir $runLinkDir
+	fi
+
+	check_lsof_procdirs $prog $procdir
+
+	# expensive if done during NDU - but can't be just removed
+	run_upgrade_scripts_if_needed $CLIENT_REPO_DIR
+	RETVAL=$?
+
+	if [ "$RETVAL" -eq 1 ] ; then
+		return 1
+	fi
+
+	check_roce_multipath_config
+	# loading any missing modules for roce or infiniband (must come before processing the conf file)
+	load_relevant_network_modules
+
+	read_process_conf_file
+
+	_NVMESH_MODE="${NVMESH_MODE:-nvmesh}"
+	echo "Using ${_NVMESH_MODE} as nvmesh modprobe config"
+	cp -f /opt/nvmesh/common-repo/modprobe.d/${_NVMESH_MODE}.conf /etc/modprobe.d/nvmesh.conf
+	chmod 444 /etc/modprobe.d/nvmesh.conf
+
+	# loading siw if needed (must come after processing the conf file)
+	load_siw_tcp_module_if_needed
+
+	# Allow ib+tcp on client so we comment the next line
+	#check_nics_validity
+
+	if [ "$conflinklayer" == "Ethernet" ]; then
+		set_roce_version_in_config
+	fi
+
+	ftrace_init
+
+	echo_if_upgrade "Starting to load modules"
+	load_module nvmeib_common_public
+	should_load_mlx mlx4 && load_module nvmeib_common_mlx4_public
+	should_load_mlx mlx5 && load_module nvmeib_common_mlx5_public
+	if module_up bnxt_re; then
+		#load nvmeib_common_bnxt_re_public only if complied and exists in RPM
+		if modinfo nvmeib_common_bnxt_re_public > /dev/null 2>&1; then
+			load_module nvmeib_common_bnxt_re_public
+		fi
+	fi
+
+	if is_tcp_enabled || [ -n "$SIW_IFACES" ]; then
+		if is_tcp_only; then
+			module_params="${module_params} tcp_mode=1 use_pcpu_cq=N"
+		else
+			module_params="${module_params} tcp_mode=2 use_pcpu_cq=N"
+		fi
+		module_up siw && load_module nvmeib_common_siw_public
+	fi
+	if [ "$IPV4_ONLY" == "Yes" ] || [ "$IPV4_ONLY" == "True" ]; then
+		echo "IPv4 Only"
+		if [ "$IPV6_ONLY" == "Yes" ] || [ "$IPV6_ONLY" == "True" ]; then
+			echo "Invalid combination of IPV4_ONLY and IPV6_ONLY"
+			exit 1
+		fi
+		common_module_params="$common_module_params ipv6_mode=0"
+	elif [ "$IPV6_ONLY" == "Yes" ] || [ "$IPV6_ONLY" == "True" ]; then
+		echo "IPv6 Only"
+		if [ "$IPV4_ONLY" == "Yes" ] || [ "$IPV4_ONLY" == "True" ]; then
+			echo "Invalid combination of IPV4_ONLY and IPV6_ONLY"
+			exit 1
+		fi
+		common_module_params="$common_module_params ipv6_mode=3"
+	elif [ "$PREFER_IP_VER" == "4" ]; then
+		common_module_params="$common_module_params ipv6_mode=1"
+	elif [ "$PREFER_IP_VER" == "6" ]; then
+		common_module_params="$common_module_params ipv6_mode=2"
+	fi
+	if [ -n "$BLACKLIST_NICS" ]; then
+		IFS=';' read -r -a BL_NICS_ARR <<< "$BLACKLIST_NICS"
+		for nic in "${BL_NICS_ARR[@]}"; do
+			if ! [ -d "/sys/class/infiniband/$nic" ]; then
+				echo "Blacklist NIC $nic is not a valid RDMA Device"
+				exit 1
+			fi
+		done
+		common_module_params="$common_module_params nic_blacklist=$(echo $BLACKLIST_NICS | tr ';' ',')"
+	fi
+
+	if is_tcp_enabled; then
+	    get_tcp_base_port_id
+	    if [ ! -z "$tcp_base_port_modparam" ]; then
+		    echo "Setting $tcp_base_port_modparam"
+		    common_module_params="$common_module_params $tcp_base_port_modparam"
+	    fi
+	    if [ !  -z "$tcp_find_path_sock_modparam" ]; then
+		    echo "Setting $tcp_find_path_sock_modparam"
+		    common_module_params="$common_module_params $tcp_find_path_sock_modparam"
+	    fi
+	fi
+
+	if is_iommu_enabled; then
+		module_params="$module_params iommu_enabled=Y"
+	fi
+
+	load_module nvmeib_common $common_module_params
+	RETVAL=$?
+	if [ "$RETVAL" -ne 0 ]; then
+		echo "Failed to load common (nvmeib_common) module, exiting.."
+		exit 1
+	fi
+
+	load_module nvmeiba
+	RETVAL=$?
+	if [ "$RETVAL" -ne 0 ]; then
+		echo "Failed to load atom (nvmeiba) module, exiting.."
+		exit 1
+	fi
+
+	load_module nvmeibc $module_params ${client_cfg_flags[@]}
+	RETVAL=$?
+	if [ "$RETVAL" -ne 0 ]; then
+		echo "Failed to load client (nvmeibc) module, exiting.."
+		exit 1
+	fi
+
+	echo_if_upgrade "Done loading modules"
+
+	if [ "$RETVAL" -eq 0 ]; then
+		# cleanup upgrade marker if exists
+		cleanup_upgrade_marker
+	fi
+
+	record_current_module_params on_startup_module_params.client
+
+	if is_k8s_operator; then
+		# Skip trace_daemon, Agent and MCS in K8s, they run in a different container
+		echo "Client loaded"
+		return 0
+	fi
+
+	RETVAL=$?
+
+	if [ "$RETVAL" -ne 0 ]; then
+		echo "Failed to create sync file, exiting.."
+		exit 1
+	fi
+
+	if $sysv_triggered; then
+		start_trace_daemon
+		start_management_CM_and_Agent $prog
+	else
+		fork_and_monitor_module nvmeibc
+	fi
+
+	return $RETVAL
+}
+
+
+check_busy() {
+	echo "Checking if NVMesh Client is busy: "
+	check_root
+	if [ -e $nvmeibastatus ]; then
+		if [ ! -e $proc_version_file ]; then
+			echo "NVMesh Client is down and during hot upgrade"
+			NUM_OPENS=-1
+			return 0
+		fi
+		NUM_OPENS=$(cat $nvmeibastatus | grep -Eo 'num\s*:\s*\{[^\}]*\}' | cut -d ':' -f2 | tr -d '{}'| tr ',' '\n' | grep 'opens' | cut -d '=' -f2)
+	else
+		echo "NVMesh Client is not up"
+		NUM_OPENS=-1
+		return 0
+	fi
+
+	if [ ! "$NUM_OPENS" -eq 0 ] ; then
+		echo "NVMesh Client is busy, please run 'cat $nvmeibastatus' for more details"
+		return 1
+	fi
+
+	echo "NVMesh Client is not busy "
+	return 0
+}
+
+force_stop() {
+	echo "Stopping NVMesh Client: "
+	check_root
+
+	# check for upgrade marker and potentially set a global variable
+	read_upgrade_marker
+
+	if detach_volumes; then
+		rmdir /sys/kernel/config/nvmeibc/*/* > /dev/null 2>&1
+		if ! $sysv_triggered; then
+			signal_monitor_process SIGUSR1 #suppress monitor failure
+		fi
+		echo_if_upgrade "Starting to unload modules"
+		unload_module nvmeibc
+		RETVAL=$?
+		if [ "$RETVAL" -eq 0 ]; then
+			if ! module_up nvmeibs; then
+				unload_module nvmeib_common
+				# we only rmmod for nvmeib_common_xxx_public as using modprobe -r here will also rmmod the network modules(such as mlx5)
+				rmmod_module nvmeib_common_bnxt_re_public
+				rmmod_module nvmeib_common_mlx5_public
+				rmmod_module nvmeib_common_mlx4_public
+				rmmod_module nvmeib_common_siw_public
+				unload_module siw
+				# pay only once the toll for raid6, xor and crc32 calibration by using rmmod and not modprobe -r
+				rmmod_module nvmeib_common_public
+
+				if $sysv_triggered; then
+					stop_trace_daemon
+					stop_management_CM_and_Agent
+				fi
+			fi
+			if [ "$RESTART_FOR_UPGRADE" = true ]; then
+				echo "nvmeiba remained for upgrade of nvmeibc"
+			else
+				unload_module nvmeiba
+			fi
+			echo_if_upgrade "Done unloading modules"
+		else
+			echo "Failed to unload client (nvmeibc) module"
+			echo "See journalctl -u nvmeshclient for the error"
+			if ! $sysv_triggered; then
+				signal_monitor_process SIGUSR1 #reactivate monitoring
+			fi
+		fi
+	else
+		echo "Failed to detach volumes, some volumes are still in use"
+		echo "Please run 'cat /proc/nvmeiba/status' for more details"
+		RETVAL=1
+	fi
+
+	return $RETVAL
+}
+
+stop() {
+	echo "Checking if NVMesh Client can be shutdown: "
+	check_root
+
+	get_run_level
+	if [ $MY_RUNLEVEL -eq 0 ] || [ $MY_RUNLEVEL -eq 6 ] ; then
+		echo "Runlevel is $MY_RUNLEVEL: NVMesh Client is shutting down forcefully"
+		force_stop
+		return $?
+	fi
+
+	if check_busy; then
+		if [ $NUM_OPENS -eq -1 ] ; then
+			return 0
+		fi
+		force_stop
+		return $?
+	fi
+
+	echo "NVMesh Client shutdown aborted "
+	return 1
+}
+
+status() {
+	success=1
+
+	check_arp_configuration
+
+	if all_modules_up nvmeibc; then
+		echo " All modules up"
+		success=0
+	fi
+	echo
+
+	if module_up nvmeibc; then
+		echo $"Attached Volumes: "
+		ls -1 /proc/nvmeibc/volumes | paste -sd "," - | sed 's/,/, /g'
+	fi
+
+	if process_up_slow managementAgent ; then
+		echo $"Management Agent process running"
+	else
+		echo $"Management Agent process not running"
+		success=1
+	fi
+
+	if process_up_slow managementCM ; then
+		echo $"ManagementCM process running"
+	else
+		echo $"ManagementCM process not running"
+		success=1
+	fi
+
+	check_roce_multipath_config
+	check_busy
+	return $success
+}
+
+# See if triggered from SystemD or SysV
+if [ ! -z "$2" ] && [ "$2" == "--systemd" ]; then
+	set -- "${@:1:1}" "${@:3}" # Remove it from arguments
+	sysv_triggered=false
+else
+	sysv_triggered=true
+fi
+
+# See how we were called.
+case "$1" in
+  start)
+	start
+	RETVAL=$?
+	;;
+  stop)
+	force_stop
+	RETVAL=$?
+	;;
+  stop-keep-agent)
+	stop "--keep-agent"
+	RETVAL=$?
+	;;
+  status)
+	status
+	RETVAL=$?
+	;;
+  restart|force_restart|force_reload)
+	force_stop
+	RETVAL=$?
+	if [ $RETVAL -eq 0 ]; then
+		start
+		RETVAL=$?
+	fi
+	;;
+  force_stop)
+	force_stop
+	RETVAL=$?
+	;;
+  create_upgrade_marker)
+	create_upgrade_marker
+	RETVAL=$?
+	;;
+  check_modules)
+	check_modules common client
+	RETVAL=$?
+	;;
+  check_if_busy)
+	check_busy
+	RETVAL=$?
+	;;
+  should-start-trace)
+	should_start_trace_daemon "${@:2}"
+	RETVAL=$?
+	;;
+  start-trace)
+	start_trace_daemon "${@:2}"
+	RETVAL=$?
+	;;
+  stop-trace)
+	stop_trace_daemon "${@:2}"
+	RETVAL=$?
+	;;
+  *)
+	echo $"Usage: $0 {start|stop|force_stop|restart|force_restart|force_reload|check_if_busy|status}"
+	exit 2
+esac
+[ "$RETVAL" -eq 0 ] && success $"$prog $1 " || failure $"$prog $1 "
+echo
+exit $RETVAL

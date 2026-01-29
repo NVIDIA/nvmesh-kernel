@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+
+oldPath=/var/run/NVMesh/nvmeshclient/managementAgent.pid
+newPath=/var/run/NVMesh/managementAgent.pid
+
+if [ -f $oldPath ] ; then
+	cp $oldPath $newPath
+fi
+
+
+set_default_config_profile() {
+    config_path=/etc/opt/NVMesh/configs/nvmeibc/
+	[ -d ${config_path} ] || mkdir -p ${config_path}
+
+	profile_nvmesh_conf=${config_path}.mgmt.nvmesh.conf
+
+	cat > $profile_nvmesh_conf <<- EOM
+		CONFIG_PROFILE_NAME="Cluster Default"
+		CONFIG_PROFILE_VERSION="1"
+		AUTO_ATTACH_VOLUMES="True"
+		DUMP_FTRACE_ON_OOPS="False"
+		MANAGEMENT_PROTOCOL="https"
+		AGENT_LOGGING_LEVEL="INFO"
+		IPV4_ONLY="True"
+		MCS_LOGGING_LEVEL="INFO"
+		CONFIG_PROFILE_ID="cluster_default"
+		MLX5_RDDA_ENABLED="Yes"
+	EOM
+}
+
+set_default_config_profile

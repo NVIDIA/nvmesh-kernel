@@ -1,0 +1,5 @@
+# Block simulator private gitignre
+_host1
+_host2
+run_tracer_unitest.run_results
+libfmtrs.so

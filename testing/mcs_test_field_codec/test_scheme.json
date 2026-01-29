@@ -1,0 +1,364 @@
+{
+	"__globals" : {
+		"__version" : 100,
+		"__origin_type" : "CLIENT",
+		"__scheme_name" : "NVMEIBC_MCS_CLIENT_SCHEME"
+	},
+	"enum_vol_status": {
+		"//": "referenced by vol_status field",
+		"__type": "enum",
+		"__def": {
+			"//": "status for volume command",
+			"NVMEIB_C_TO_M_VOLUME_ACK_IRRELEVANT"    : 0,
+			"NVMEIB_C_TO_M_VOLUME_ACK_BUSY"          : 1,
+			"NVMEIB_C_TO_M_VOLUME_ACK_DETACHED"      : 2,
+			"NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED" : 3,
+			"NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED"      : 4,
+			"NVMEIB_C_TO_M_VOLUME_ACK_ATTACH_FAILED" : 5,
+			"NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED" : 6,
+			"NVMEIB_C_TO_M_VOLUME_ACK_UNKNOWN"       : 7,
+			"NVMEIB_C_TO_M_VOLUME_IO_STATUS_ONLINE"  : 11,
+			"NVMEIB_C_TO_M_VOLUME_IO_STATUS_OFFLINE" : 12
+		}
+	},
+	"enum_vol_action" : {
+		"//" : "action for volume in vol_action field",
+		"__type" : "enum",
+		"__def" : {
+			"NVMEIB_C_TO_M_VOLUME_ACTION_IRRELEVANT" : 0,
+			"NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_CONFIG" : 1
+		}
+	},
+	"nvmeibc_segment_conf" : {
+		"//" : "segment configuration",
+		"__type" : "used",
+		"mds" : "Q",
+		"mde" : "Q",
+		"lbs" : "Q",
+		"lbe" : "Q",
+		"_id" : "40s",
+		"diskID" : "32s",
+		"node_id" : "32s",
+		"allocationIndex" : "__codec WithDefaultCodec(PodCodec('I'), 0)"
+	},
+	"nvmeibc_chunk_conf" : {
+		"//" : "chunk configuration",
+		"__type" : "used",
+		"_id" : "__codec UuidCodec()",
+		"vlbs" : "Q",
+		"vlbe" : "Q",
+		"numberOfMirrors" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
+		"stripeSize" : "__codec WithDefaultCodec(PodCodec('i'), -1)",
+		"stripeWidth" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
+		"diskSegments" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_segment_conf",
+			"__counter" : "n_segments",
+			"__offset" : "segments"
+		}
+	},
+	"nvmeibc_volume_conf" : {
+		"//" : "volume configuration",
+		"__type" : "used",
+		"RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Striped & Mirrored RAID-10' : 2, 'Concatenated' : 3})",
+		"numberOfMirrors" : "__codec IncrementCodec(1, 'H')",
+		"stripeSize" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+		"stripeWidth" : "__codec WithDefaultCodec(PodCodec('H'), 1)",
+		"type" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+		"name" : "32s",
+		"version" : "I",
+		"uuid" : "64s",
+		"chunks" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_chunk_conf",
+			"__counter" : "n_chunks",
+			"__offset" : "chunks"
+		}
+	},
+	"nic_guid" : {
+		"//" : "guid of a nic",
+		"__type" : "used",
+		"nicID" : "__codec GuidCodec()"
+	},
+	"nvmeibc_nic_conf" : {
+		"//" : "nic configuration",
+		"__type" : "used",
+		"pkey" : "H",
+		"nicID" : "40s",
+		"pci_root" : "H",
+		"protocol" : "__codec WithDefaultCodec(MultiValCodec({'Unknown':-1,'Infiniband':0,'RoCE':1,'TCP':2,'__DEFAULT':-1}), 'Unknown')"
+	},
+	"nvmeibc_disk_conf" : {
+		"//" : "disk configuration",
+		"__type" : "used",
+		"block_size" : "H",
+		"max_dma_blocks" : "I",
+		"diskID" : "32s",
+		"blocks" : "__codec WithDefaultCodec(PodCodec('Q'), 1)"
+	},
+	"nvmeibc_target_conf" : {
+		"//" : "client target description",
+		"__type" : "used",
+		"node_id" : "128s",
+		"nics" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_nic_conf",
+			"__counter" : "n_nics",
+			"__offset" : "nics"
+		},
+		"disks" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_disk_conf",
+			"__counter" : "n_disks",
+			"__offset" : "disks"
+		}
+	},
+	"new_nic_message" : {
+		"//" : "Message with a list of new nics per target",
+		"__type" : "msg",
+		"__opcode" : 22,
+		"__upstream" : false,
+		"__downstream" : true,
+		"targets" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_target_conf",
+			"__counter" : "n_targets",
+			"__offset" : "targets"
+		}
+	},
+	"reappear_nic_message" : {
+		"//" : "Message with a list of reappearing nics on the new target",
+		"__type" : "msg",
+		"__opcode" : 23,
+		"__upstream" : false,
+		"__downstream" : true,
+		"targets" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_target_conf",
+			"__counter" : "n_targets",
+			"__offset" : "targets"
+		}
+	},
+	"delete_nic_message" : {
+		"//" : "Message with a list of nics to delete by guid",
+		"__type" : "msg",
+		"__opcode" : 24,
+		"__upstream" : false,
+		"__downstream" : true,
+		"nics" : {
+			"__type" : "array",
+			"__typename" : "nic_guid",
+			"__counter" : "n_nics",
+			"__offset" : "nics"
+		}
+	},
+	"attach_volumes_message" : {
+		"//" : "Message with a list of volumes to attach with complete configuration for each",
+		"__type" : "msg",
+		"__opcode" : 17,
+		"__upstream" : false,
+		"__downstream" : true,
+		"__typename" : "nvmeib_mgmt_to_client_attach_volumes",
+		"__data" : "nvmeib_mgmt_to_client_volume_configuration"
+	},
+	"nvmeib_mgmt_to_client_volume_configuration" : {
+		"__type" : "used",
+		"configurationVersion" : "i",
+		"volumes" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_volume_conf",
+			"__counter" : "n_volumes",
+			"__offset" : "volumes"
+		},
+		"targets": {
+			"__type" : "array",
+			"__typename" : "nvmeibc_target_conf",
+			"__counter" : "n_targets",
+			"__offset" : "targets"
+		}
+	},
+	"update_volumes_message" : {
+		"//" : "Message with a list of volumes to update with complete configuration for each",
+		"__type" : "msg",
+		"__opcode" : 19,
+		"__upstream" : false,
+		"__downstream" : true,
+		"__typename" : "nvmeib_mgmt_to_client_update_volumes",
+		"__data" : "nvmeib_mgmt_to_client_volume_configuration"
+	},
+	"get_client_configuration_msg" : {
+		"//" : "Request for full client configuration",
+		"__type" : "msg",
+		"__opcode" : 21,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"configurationVersion" : "i",
+		"__upstream" : true,
+		"__downstream" : false,
+		"__route" : "/getClientConfiguration"
+	},
+	"client_configuration_msg" : {
+		"//" : "Full client configuration",
+		"__type" : "msg",
+		"__opcode" : 21,
+		"__upstream" : false,
+		"__downstream" : true,
+		"__typename" : "nvmeib_mgmt_to_client_volumes_configuration",
+		"__data" : "nvmeib_mgmt_to_client_volume_configuration"
+	},
+	"nvmeibc_volume_status_payload" : {
+		"//" : "volume status description with possible action",
+		"__type" : "used",
+		"vol_status": "I",
+		"volume_version" : "I",
+		"is_blocked_no_io" : "I",
+		"uuid" : "64s",
+		"vol_action" : "i",
+		"name" : "32s"
+	},
+	"get_volume_configuration_message": {
+		"//": "Message with volume action information",
+		"__type" : "msg",
+		"__opcode" : 20,
+		"__typename" : "nvmeib_client_to_mgmt_get_vol_info",
+		"__route" : "/getVolumeConfiguration",
+		"__upstream" : true,
+		"__downstream" : false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"volumes" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_volume_status_payload",
+			"__counter" : "n_volumes",
+			"__offset" : "volumes"
+		}
+	},
+	"volume_status_message": {
+		"//": "Message with volume status information",
+		"__type" : "msg",
+		"__opcode" : 2,
+		"__typename" : "nvmeib_client_to_mgmt_vol_info",
+		"__route" : "/updateAttachmentStatus",
+		"__upstream" : true,
+		"__downstream" : false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"volumes" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_volume_status_payload",
+			"__counter" : "n_volumes",
+			"__offset" : "volumes"
+		}
+	},
+	"client_registration_message" : {
+		"//": "Initial message with all attached volumes",
+		"__type" : "msg",
+		"__opcode" : 17,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename" : "nvmeib_client_to_mgmt_init",
+		"__route" : "/registerToEvents",
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"attachedVolumes" : {
+			"__type" : "array",
+			"__typename" : "nvmeibc_volume_status_payload",
+			"__counter" : "n_volumes",
+			"__offset" : "volumes"
+		}
+	},
+	"volume_event_payload" : {
+		"__type" : "used",
+		"health" : "32s",
+		"volumeID" : "32s",
+		"uuid" : "64s"
+	},
+	"volume_deletion_message" : {
+		"//" : "Message to ensure we detach a deleted volume",
+		"__type" : "msg",
+		"__opcode" : 27,
+		"__upstream" : false,
+		"__downstream" : true,
+		"__typename" : "event_message",
+		"eventName": "128s",
+		"payload" : "volume_event_payload"
+	},
+	"report_client" : {
+		"//" : "sent by the client to report its status",
+		"__type" : "msg",
+		"__opcode" : 3,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename" : "nvmeibc_report_client_message",
+		"__route" : "/clients/report",
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"client" : {
+			"configuration_version" : "i",
+			"version" : "__codec VersionCodec()",
+			"branch" : "__codec BranchCodec()",
+			"commit" : "__codec CommitCodec()",
+			"client_id": "__codec HostNameCodec()",
+			"client_status" : "__codec ConstCodec(1)",
+			"block_devices" : {
+				"__type" : "array",
+				"__typename" : "nvmeibc_block_info",
+				"__counter" : "n_blocks",
+				"__offset" : "blocks"
+			}
+		}
+	},
+	"report_client_response" : {
+		"__type" : "msg",
+		"__opcode" : 3,
+		"__upstream" : false,
+		"__downstream" : true,
+		"__filter" : true,
+		"__typename" : "nvmeib_report_client_message_resp"
+	},
+	"nvmeibc_block_info" : {
+		"__type" : "used",
+		"name" : "32s",
+		"uuid" : "64s",
+		"time" : "Q",
+		"read_ops" : "Q",
+		"read_size" : "Q",
+		"read_latency" : "Q",
+		"write_ops" : "Q",
+		"write_size" : "Q",
+		"write_latency" : "Q",
+		"trim_ops" : "Q",
+		"trim_size" : "Q",
+		"trim_latency" : "Q"
+	},
+	"management_log_message": {
+		"__type": "msg",
+		"__route" : "/log",
+		"__opcode": 28,
+		"__upstream": true,
+		"__downstream": false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"__typename": "nvmeib_mcs_log",
+		"level": "8s",
+		"header": "96s",
+		"message": "128s"
+	},
+	"error_response": {
+		"__type": "msg",
+		"__opcode": 25,
+		"__upstream": false,
+		"__downstream": true,
+		"__typename": "nvmeib_mcs_error",
+		"entityName": "32s",
+		"entityUUID": "40s",
+		"requestOpcode": "i",
+		"err": "64s"
+	}
+}

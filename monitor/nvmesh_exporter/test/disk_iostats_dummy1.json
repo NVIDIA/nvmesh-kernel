@@ -1,0 +1,143 @@
+{
+	"uuid" : "S3HCNX0K800868.1",
+	"uptime" : "6417.670",
+	"stats" : {
+		"512B" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		"4K" : {
+			"ops" : {
+				"read" : 2,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 8192,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 1418.2,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		"8K" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		"16K" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		"32K" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		"64K" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		"128K" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		},
+		">128K" : {
+			"ops" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"size" : {
+				"read" : 0,
+				"write" : 0,
+				"trim" : 0
+			},
+			"latency" : {
+				"read" : 0.0,
+				"write" : 0.0,
+				"trim" : 0.0
+			}
+		}
+	},
+	"overeager" : 0
+}

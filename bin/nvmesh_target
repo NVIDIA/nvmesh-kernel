@@ -1,0 +1,331 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+. /opt/nvmesh/client-repo/services/nvmesh_util
+
+displayHelp() {
+	echo
+	echo "usage: ${0} [-h] <add|remove|exclude|include> <block|nvme> <device>"
+	echo
+	echo "positional arguments:"
+	echo "device the full NVMe/SAS/SATA device path or device serial number (see examples)"
+	echo
+	echo "optional arguments:"
+	echo "-h, --help show this help message and exit"
+	echo "add <device> add a generic (SAS/SATA/NVMf) block device to the configuration"
+	echo "remove <device> remove a generic (SAS/SATA/NVMf) block device from the configuration"
+	echo "include nvme <sn> Include a previously excluded NVMe device"
+	echo "exclude nvme <sn>"
+	echo
+	echo "examples:"
+	echo
+	echo "To exclude NVMe serial number S3HCNX0JC02078 from NVMesh use:"
+	echo
+	echo "${0} exclude nvme S3HCNX0JC02078"
+	echo
+	echo "To add /dev/sdb to NVMesh configuration:"
+	echo
+	echo "${0} add block /dev/sdb"
+	echo
+}
+
+getDriveSerialByFullPath() {
+	file=$1
+	if [ ! -b $file ] ; then
+		echo "$file is not a block device"
+		exit 1
+	fi
+
+	if [[ "$file" =~ "/dev/nvme" ]]; then
+		devname=$(basename "$file")
+		uuidfile="/sys/block/$devname/subsystem/$devname/uuid"
+		if [ -e "$uuidfile" ]; then
+			serial=$(cat $uuidfile)
+		else
+			echo "Can't detect uuid for: $file"
+			exit 1
+		fi
+	else
+		serial=`smartctl -i $file | sed -e '/Serial/! d' -e "s/.* //"`
+	fi
+
+	if [ -z "$serial" ] ; then
+		echo "Can't detect serial for: $file"
+		exit 1
+	fi
+
+	echo $serial
+}
+
+addBlock() {
+	serial=$(getDriveSerialByFullPath $1)
+
+	if [ $? == 1 ] ; then
+		echo $serial
+		exit 1
+	fi
+
+	if grep -q -e "^[[:space:]]*$1" $DRIVES_FILE ; then
+		echo "Device $1 already exists!"
+		exit 1
+	fi
+
+	if grep -q -e "^[^#]*$serial" $DRIVES_FILE ; then
+		echo "The serial $1 already exists with a different device path!"
+		exit 1
+	fi
+
+	pathAndSerial=$1' '$serial
+	echo $pathAndSerial >> $DRIVES_FILE
+
+	if [ $? == 0 ] ; then
+		echo "Added the block $1 with the serial: $serial"
+
+		#Update resolve file, it doesn't matter if the serial is already exists.
+		sed -i "/$serial/d" $DRIVES_RESOLVE_FILE
+		echo $pathAndSerial >> $DRIVES_RESOLVE_FILE
+	else
+		echo "Failed to add block $1"
+		exit 1
+	fi
+}
+
+removeBlock() {
+	serial=$(getDriveSerialByFullPath $1)
+
+	#Validate that this is a real device.
+	if [ $? == 1 ] ; then
+		echo $serial
+		exit 1
+	fi
+
+	pathAndSerial=$1' '$serial
+
+	if ! grep -q -e "$pathAndSerial" $DRIVES_FILE ; then
+		echo "Couldn't find the device ($pathAndSerial). Attention! the device's full path might has been chagned."
+		exit 1
+	fi
+
+	sed -i "\|$pathAndSerial|d" $DRIVES_FILE
+	sed -i "\|$pathAndSerial|d" $DRIVES_RESOLVE_FILE
+
+	if [ $? == 0 ] ; then
+		echo "Block has been removed"
+	else
+		echo "Failed to remove block"
+	fi
+}
+
+includeBlock() {
+	serial=$(getDriveSerialByFullPath $1)
+
+        #Validate that this is a real device.
+        if [ $? == 1 ] ; then
+                echo $serial
+                exit 1
+        fi
+
+	pathAndSerial=$1' '$serial
+
+	if ! grep -q -e "^[[:space:]]*#[[:space:]]*$pathAndSerial" $DRIVES_FILE ; then
+                echo "Couldn't find an excluded device ($pathAndSerial). Attention! the device's full path might have changed."
+                exit 1
+        fi
+
+	sed -i "\|^[[:space:]]*#[[:space:]]*$pathAndSerial|s|[[:space:]]*#[[:space:]]*||g" $DRIVES_FILE
+
+	if [ $? == 0 ] ; then
+		echo "Block has been included"
+	else
+		echo "Failed to include block"
+	fi
+}
+
+excludeBlock() {
+        serial=$(getDriveSerialByFullPath $1)
+
+        #Validate that this is a real device.
+        if [ $? == 1 ] ; then
+                echo $serial
+                exit 1
+        fi
+
+	pathAndSerial=$1' '$serial
+
+	if ! grep -q -e "^[[:space:]]*$pathAndSerial" $DRIVES_FILE ; then
+                echo "Coudn't find an included device ($pathAndSerial). Attention! the device's full path might has been changed."
+                exit 1
+        fi
+
+	sed -i "s|^[[:space:]]*$pathAndSerial|#$pathAndSerial|" $DRIVES_FILE
+
+	if [ $? == 0 ] ; then
+		echo "Block as been excluded"
+	else
+		echo "Failed to exclude block"
+	fi
+}
+
+excludeNvmeDrive() {
+        nvme_serial=$1
+
+	nvme_line=`grep -e "[[:space:]]*nvme[[:space:]]*,[[:space:]]*$nvme_serial[[:space:]]*" $DRIVES_FILE`
+	drive_found=$?
+
+	should_update=false
+	if [ $drive_found -eq 0 ] && [ ! -z "$nvme_line" ]; then
+		nvme_vendor=`echo $nvme_line | awk -F, '{print $3}'`
+		if [ $? -eq 0 ] && [ ! -z "$nvme_vendor" ]; then
+			echo "Device already excluded!"
+			exit 1
+		fi
+
+		should_update=true
+        fi
+
+        #validate serial and get devname
+        nvme_devname=$(get_nvme_devname_by_serial $nvme_serial)
+        if [ $? -ne 0 ]; then
+                echo $nvme_devname
+                return 1
+        fi
+
+	#get vendor id and model number
+	nvme_vendor_model=$(get_nvme_vendor_and_model_by_serial $nvme_serial $nvme_devname)
+	if [ $? -ne 0 ]; then
+		echo $nvme_vendor_model
+		exit 1
+	fi
+
+	#get namespace id
+        nvme_nsid=$(get_nvme_nsid_by_devname $nvme_devname)
+        if [ $? -ne 0 ]; then
+                echo $nvme_nsid
+                return 1
+        fi
+
+        nvme_new_line="nvme,$nvme_serial,$nvme_vendor_model,$nvme_nsid"
+
+	#adding the new drive config
+	if $should_update; then
+                #updating the drive to include all the needed info
+		sed -i "s|^[[:space:]]*$nvme_line|$nvme_new_line|" $DRIVES_FILE
+	else
+		#adding the new drive config
+       		echo $nvme_new_line >> $DRIVES_FILE
+	fi
+
+        if [ $? -eq 0 ] ; then
+                echo "nvme serial: $nvme_serial was added to excluded list"
+        else
+                echo "ERROR: Failed to add nvme serial: $nvme_serial to excluded list"
+                exit 1
+        fi
+}
+
+includeNvmeDrive() {
+	nvme_serial=$1
+
+	nvme_line=`grep -e "^[[:space:]]*nvme[[:space:]]*,[[:space:]]*$nvme_serial[[:space:]]*" $DRIVES_FILE`
+
+        if [ $? -eq 0 ] && [ ! -z "$nvme_line" ]; then
+                sed -i "\|^$nvme_line|d" $DRIVES_FILE
+
+                if [ $? -eq 0 ] ; then
+                        echo "Serial has been removed from excluded list"
+                else
+                        echo "ERROR: Failed to remove serial $nvme_serial from excluded list"
+                fi
+        else
+                echo "ERROR: Device $nvme_serial was not found on excluded list"
+        fi
+}
+
+
+notSupported() {
+        echo "Operation not supported"
+}
+
+unknownOption() {
+	echo "Unknown option: $1"
+}
+
+if [ `id -un` != "root" ] ; then
+        echo "This script needs to run as root."
+        exit 1
+fi
+
+action=$1
+entity=$2
+entityID=$3
+
+case $action in
+	--help | -h)
+		displayHelp
+		exit 0
+	;;
+	add)
+		case $entity in
+			block)
+				#notSupported
+				#exit 1
+				addBlock $entityID
+			;;
+			*)
+				unknownOption $entity
+			;;
+		esac
+	;;
+	remove)
+		case $entity in
+			block)
+				#notSupported
+				#exit 1
+				removeBlock $entityID
+			;;
+			*)
+				unknownOption $entity
+			;;
+		esac
+	;;
+	include)
+                case $entity in
+                        block)
+				notSupported
+				exit 1
+                                #includeBlock $entityID
+                        ;;
+                        nvme)
+                                includeNvmeDrive $entityID
+                        ;;
+                        *)
+                                unknownOption $entity
+                        ;;
+                esac
+        ;;
+        exclude)
+                case $entity in
+                        block)
+				notSupported
+				exit 1
+                                #excludeBlock $entityID
+                        ;;
+                        nvme)
+                                excludeNvmeDrive $entityID
+                        ;;
+                        *)
+                                unknownOption $entity
+                        ;;
+                esac
+        ;;
+	*)
+		if [ -z "$action" ] ; then
+			displayHelp
+		else
+			unknownOption $action
+		fi
+	;;
+esac
+

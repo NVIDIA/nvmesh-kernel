@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# mk_local_rpm
+# $0 = mk_client_rpm / mk_target_rpm / mk_local_rpm
+# $1 = Kernel Version
+# $2 = OFED Version
+
+script_path=`readlink -f $0`
+script_dir=`dirname $script_path`
+
+kernel=$1
+if [ "x$kernel" == "x" ]; then
+	kernel=$(uname -r)
+fi
+
+ofed_version=$2
+if [ "x$ofed_version" == "x" ]; then
+	ofed_version=$(ofed_info -s 2> /dev/null);
+	if [ "x$ofed_version" == "x" ]; then
+		# Compiled without OFED
+		ofed_version="none"
+	fi
+fi
+ofed_version=${ofed_version//:};
+
+version_output="$ofed_version"_"$kernel"
+installers_dir=$script_dir/RPM/
+target_dir=$script_dir
+
+#if [[ "$1" == "--debug" ]]; then
+#	echo "debug"
+#	toma_mode="debug"
+#	spec_suffix="-debug"
+#else
+#	echo "release"
+#	toma_mode="release"
+#	spec_suffix=""
+#fi
+
+source ./transfer_lists
+
+name=`basename $0`
+SPEC_PREFIX="nvmesh"
+SPEC_DIR="$script_dir/RPM"
+
+if [ "$name" == "mk_exlog_rpm" ]; then
+	kind_list="exlog"
+elif [ "$name" == "mk_client_rpm" ]; then
+	kind_list="base client"
+elif [ "$name" == "mk_target_rpm" ]; then
+	kind_list="target"
+elif [ "$name" == "mk_base_rpm" ]; then
+	kind_list="base"
+else #mk_local_rpm
+	kind_list="base client target"
+fi
+
+for kind in $kind_list; do
+	spec_path="$SPEC_DIR/$SPEC_PREFIX-$kind.spec"
+	sources_path=/tmp/nvmesh-"$kind"/
+
+	if [ -d $sources_path ]; then
+		rm -rf $sources_path/*
+	else
+		mkdir -p $sources_path
+	fi
+
+	if [ "$kind" == "exlog" ]; then
+		inner_sources_path=$sources_path/"$kind"_"$version_output"
+		mkdir -p $inner_sources_path
+		cp -r --parents $exlog_transfer_list $sources_path
+		mv $sources_path/exlog/user $sources_path/bin_exlog
+
+	elif [ "$kind" == "cli" ]; then
+		echo "";
+
+	elif [ "$kind" == "base" ]; then
+		cp -r --parents $base_transfer_list $base_tools_transfer_list $sources_path
+
+	elif [ "$kind" == "client" ]; then
+		client_inner_sources_path=$sources_path/client_"$version_output"
+		mkdir -p $client_inner_sources_path
+
+		common_path=$sources_path/common_"$version_output"
+		mkdir -p $common_path
+		cp -r --parents $common_scripts_transfer_list $sources_path
+		cp -r --parents $common_transfer_list $optional_common_transfer_list $common_path
+		mv $sources_path/bin $sources_path/bin_common
+
+		cp -r --parents $client_scripts_transfer_list $sources_path
+		cp -r --parents $client_transfer_list $client_inner_sources_path
+		mv $client_inner_sources_path/clnt $client_inner_sources_path/client
+		mv $sources_path/bin $sources_path/bin_client
+
+	elif [ "$kind" == "target" ]; then
+		target_inner_sources_path=$sources_path/target_"$version_output"
+		mkdir -p $target_inner_sources_path
+
+		echo "Running tree for $sources_path - Before copying"
+		tree $sources_path
+		cp -r --parents $target_scripts_transfer_list $sources_path
+		cp -r --parents $target_transfer_list $optional_target_transfer_list $target_inner_sources_path
+		echo "Running tree for $sources_path - After copying and Before moving"
+		tree $sources_path
+		mv $target_inner_sources_path/srv $target_inner_sources_path/target
+		mv $sources_path/bin $sources_path/bin_target
+		echo "Running tree for $sources_path - After moving"
+		tree $sources_path
+	fi
+
+	echo Making RPM $kind
+
+	RPM/create_rpm.sh $kind $sources_path $spec_path $installers_dir $target_dir
+	rm -rf $sources_path > /dev/null 2>&1
+done

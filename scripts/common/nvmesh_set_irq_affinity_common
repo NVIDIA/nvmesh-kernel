@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Description:
+# Sets up tables to be used by nvmesh_set_irq_* scripts.
+# Used to spread IRQs across CPUs within a domain,
+# which can be either: NUMA-Node, Socket or Host (i.e all CPUS). 
+#
+
+# ---------------------------------------------------------------------------- #
+# Utils
+# ---------------------------------------------------------------------------- #
+function print_table()
+{
+    local table_name=$1
+    echo -e "---\n$table_name"
+
+    var=$(declare -p "$1")
+    eval "declare -A table="${var#*=}
+
+#    eval "declare -A _arr="${var#*=}
+#    for k in "${!_arr[@]}"; do
+#        echo "$k: ${_arr[$k]}"
+#    done
+
+    local n_rows=$2
+#    echo "n_rows=$n_rows"
+
+    declare -a row_sizes=("${!3}")
+#    echo "row_sizes: ${row_sizes[@]}"
+
+    for ((i=0;i<n_rows;i++)) do
+	#printf "%-15s [%2d]: " $table_name $i
+	printf "[%2d]: " $i
+	for ((j=0; j<row_sizes[$i]; j++)) do
+	    printf "%2s, " ${table[$i,$j]}
+	done
+	printf "(size:%2d)\n" ${row_sizes[$i]}
+    done
+}
+
+# ---------------------------------------------------------------------------- #
+# Helpers
+# ---------------------------------------------------------------------------- #
+
+# TBD: use lscpu for this:
+# Socket(s):             1
+# NUMA node(s):          8
+
+N_CPUS=0
+declare -a CPUS
+declare -a CPU2SOCK
+declare -a CPU2NUMA
+for x in `lscpu -p=cpu,socket,node | grep -v ^#`; do
+    C=`echo $x | cut -d, -f1`
+    S=`echo $x | cut -d, -f2`
+    N=`echo $x | cut -d, -f3`
+    CPUS[$N_CPUS]=$C
+    CPU2SOCK[$N_CPUS]=$S
+    CPU2NUMA[$N_CPUS]=$N
+    N_CPUS=$(($N_CPUS+1))
+done
+
+N_NUMAS=0
+declare -a NUM_CPUS_PER_NUMA
+declare -A TBL_CPUS_PER_NUMA
+for x in `lscpu -p=node | grep -v ^#  | sort | uniq`; do
+    NUM_CPUS_PER_NUMA[$N_NUMAS]=0
+    N_NUMAS=$(($N_NUMAS+1))
+done
+
+N_SOCKS=0
+declare -a NUM_CPUS_PER_SOCK
+declare -A TBL_CPUS_PER_SOCK
+for x in `lscpu -p=socket | grep -v ^#  | sort | uniq`; do
+    NUM_CPUS_PER_SOCK[$N_SOCKS]=0
+    N_SOCKS=$(($N_SOCKS+1))
+done
+
+N_HOSTS=0
+declare -a NUM_CPUS_PER_HOST
+declare -A TBL_CPUS_PER_HOST
+for x in 1; do
+    NUM_CPUS_PER_HOST[$N_HOSTS]=0
+    N_HOSTS=1
+done
+
+for x in `lscpu -p=socket,node | grep -v ^#`; do
+    SOCK=`echo $x | cut -d, -f1`
+    NUMA=`echo $x | cut -d, -f2`
+    NUMA_2_SOCK[$NUMA]=$SOCK
+done
+
+# NPS - number of Numas Per Socket
+for ((i=0;i<N_SOCKS;i++)) do
+    NPS[$i]=0
+done
+for ((i=0;i<N_NUMAS;i++)) do
+    NPS[${NUMA_2_SOCK[$i]}]=$((${NPS[${NUMA_2_SOCK[$i]}]}+1))
+done
+
+echo "---"
+echo "N_SOCKS=$N_SOCKS, N_NUMAS=$N_NUMAS, N_CPUS=$N_CPUS"
+#echo "NUM_CPUS_PER_SOCK={${NUM_CPUS_PER_SOCK[@]}}"
+#echo "NUM_CPUS_PER_NUMA={${NUM_CPUS_PER_NUMA[@]}}"
+echo "NUMA_2_SOCK={${NUMA_2_SOCK[@]}}"
+echo "NPS={${NPS[@]}}"
+echo "---"
+
+# ---------------------------------------------------------------------------- #
+# Build every possible cpu-group i.e. per numa/socket/host (for debug too)
+# TBL_CPUS_PER_X[i][j] where j of row i is within {0..NUM_CPUS_PER_X[i]-1}
+# ---------------------------------------------------------------------------- #
+for x in `lscpu -p=cpu,socket,node | grep -v ^#`; do
+	CORE=`echo $x | cut -d, -f1`
+	SOCK=`echo $x | cut -d, -f2`
+	NUMA=`echo $x | cut -d, -f3`
+	HOST=0
+	# pernuma
+	TBL_CPUS_PER_NUMA[$NUMA,${NUM_CPUS_PER_NUMA[$NUMA]}]=$CORE
+	NUM_CPUS_PER_NUMA[$NUMA]=$((${NUM_CPUS_PER_NUMA[$NUMA]}+1))
+	# persocket
+	TBL_CPUS_PER_SOCK[$SOCK,${NUM_CPUS_PER_SOCK[$SOCK]}]=$CORE
+	NUM_CPUS_PER_SOCK[$SOCK]=$((${NUM_CPUS_PER_SOCK[$SOCK]}+1))
+	# fullspread
+	TBL_CPUS_PER_HOST[$HOST,${NUM_CPUS_PER_HOST[$HOST]}]=$CORE
+	NUM_CPUS_PER_HOST[$HOST]=$((${NUM_CPUS_PER_HOST[$HOST]}+1))
+done
+
+#print_table "TBL_CPUS_PER_NUMA" $N_NUMAS NUM_CPUS_PER_NUMA[@]
+#print_table "TBL_CPUS_PER_SOCK" $N_SOCKS NUM_CPUS_PER_SOCK[@] 
+#print_table "TBL_CPUS_PER_HOST" $N_HOSTS NUM_CPUS_PER_HOST[@] 

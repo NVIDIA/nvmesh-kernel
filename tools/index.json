@@ -1,0 +1,7 @@
+{
+    "dictionary": "tools/dictionary.json",
+    "domains": {
+        "nvmeibc": "clnt/nvmeibc.trace.json",
+        "nvmeibs": "srv/nvmeibs.trace.json"
+    }
+}

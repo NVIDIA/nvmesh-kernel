@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "nvmesh"
+version = "3.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.11"
+confluent-kafka = "2.1.1"
+ipython = "7.34.0"
+pyyaml = "^6.0.2"
+paramiko = "^3.5.0"
+requests = "^2.32.3"
+traitlets = "^5.14.3"
+
+[tool.poetry.group.compile]
+optional = true
+
+[tool.poetry.group.compile.dependencies]
+pyinstaller = "^6.11.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

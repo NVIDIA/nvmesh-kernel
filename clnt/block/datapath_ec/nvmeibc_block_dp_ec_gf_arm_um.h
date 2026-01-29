@@ -1,0 +1,21 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+#pragma once
+
+#include "nvmeibc_block_dp_ec_gf_defs.h"
+
+#ifdef NVMEIBC_GF_ARM_USER_SPACE_IMPLEMENTATION
+enum gf_return_val ec_encode_data_arm_optimized(int len, int k, int rows, unsigned char ** data, unsigned char ** coding, unsigned int *crc, unsigned char **data_copy);
+enum gf_return_val ec_encode_data_update_arm_optimized(int len, int k, int vec_i, unsigned char **data, unsigned char **coding, unsigned int *crc, unsigned char *data_copy);
+enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsigned char ** data,  unsigned char ** new_data, unsigned int *crc);
+
+#ifdef __KERNEL__
+u32 		ec_crc_arm_optimized(u32 init_crc, const void *buf, unsigned int len);
+#else
+unsigned int 	ec_crc_arm_optimized(unsigned int init_crc, const u8 *buf, unsigned int len);
+#endif
+
+#endif

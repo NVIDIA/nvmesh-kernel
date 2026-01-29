@@ -1,0 +1,3 @@
+#!/bin/bash
+#sudo mlnx_affinity start
+sudo tuned-adm profile latency-performance

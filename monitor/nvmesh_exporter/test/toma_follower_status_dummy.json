@@ -1,0 +1,7 @@
+{
+  "RAFT": {
+    "leader_name": "nvme28.mtl.labs.mlnx",
+    "n_peers_voted_for_me": 0,
+    "Role": "follower"
+  }
+}

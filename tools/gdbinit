@@ -1,0 +1,251 @@
+set disassembly-flavor intel
+
+#arg0 - val to hash
+#arg1 - number of bits
+define hash64
+	set $hash = $arg0
+	set $n = $hash
+	set $n = $n << 18
+	set $hash = $hash - $n
+	set $n = $n << 33
+	set $hash = $hash - $n
+	set $n = $n << 3
+	set $hash = $hash + $n
+	set $n = $n << 3
+	set $hash = $hash - $n
+	set $n = $n << 4
+	set $hash = $hash + $n
+	set $n = $n << 2
+	set $hash = $hash + $n
+	set $hash = $hash >> (64 - $arg1)
+	p/x $hash
+end
+
+#arg0 - number of bits
+#arg1 - input
+define bswap
+        set $out = 0
+        set $i = 0
+        while $i < $arg0
+                set $out = ((unsigned long long)$out | ((($arg1 >> $i) & 0xff) << (($arg0 - 8) - $i)))
+                set $i = $i + 8
+        end
+        p/x $out
+end
+
+define be64_to_cpu
+	bswap 64 $arg0
+end
+
+define be32_to_cpu
+	bswap 32 $arg0
+end
+	
+define be16_to_cpu
+	bswap 16 $arg0
+end
+
+# arg0 ptr
+# arg1 len
+# arg2 zba
+# arg3 ncols
+define hexdump
+	set $ptr = $arg0
+	set $end_ptr = $ptr + $arg1
+	set $zba = $arg2
+	set $ncols = $arg3
+	while $ptr < $end_ptr
+		set $data = *(u8 *)($ptr)
+		printf "0x%016lx: %02x ", $zba, $data
+		set $i = 1
+		set $ptr = $ptr + 1
+		while $i < $ncols && $ptr < $end_ptr
+			set $data = *(u8 *)($ptr)
+			printf "%02x ", $data
+			set $ptr = $ptr + 1
+			set $i = $i + 1
+		end
+		printf "\n"
+		set $zba = $zba + $ncols
+	end
+end
+
+# arg0 skb
+# arg1 offset
+# arg2 len
+define skb_dump
+	set $PAGE_SHIFT = 12
+	set $PAGE_SIZE = (1 << 12)
+	set $skb = ((struct sk_buff*)$arg0)
+	set $offset = $arg1
+	set $len = $arg2
+	set $start = ((struct sk_buff *)$arg0)->len - ((struct sk_buff *)$arg0)->data_len
+	set $skb_shinfo = ((struct skb_shared_info *)($skb->head + $skb->end))
+	if $offset > ($skb->len - $len)
+		echo Invalid offset $offset
+		return -1
+	end
+	set $copy = $start - $offset
+	if $copy > 0
+		if $copy > $len
+			set $copy = $len
+		end
+		set $ptr = $skb->data + $offset
+		printf "0x%08lx - linear: %d bytes [0x%08lx - 0x%08lx]\n", $offset, $copy, $ptr, $ptr + $copy
+		set $len = $len - $copy
+		if $len == 0
+			return 0
+		end
+		set $offset = $offset + $copy
+	end
+	set $nr_frags = $skb_shinfo->nr_frags
+	set $i = 0
+	while $i < $nr_frags
+		set $frag = &($skb_shinfo->frags[$i])
+		set $end = $start + $frag->size
+		set $copy = $end - $offset
+		if $copy > 0
+			if $copy > $len
+				set $copy = $len
+			end
+			set $f_off = $frag->page_offset + $offset - $start
+			set $f_len = $copy
+			set $p = $frag->page.p
+			set $p = $p + ($f_off >> $PAGE_SHIFT)
+			set $p_off = $f_off & ($PAGE_SIZE - 1)
+			set $p_len = $f_len
+			if 0
+				if $p_len > $PAGE_SIZE
+					set $p_len = $PAGE_SIZE
+				end
+			end
+			set $copied = 0
+			while $copied < $f_len
+				printf "0x%08lx - frag: %d page: 0x%lx bytes: %d [0x%04lx - 0x%04lx]\n", $offset, $i, $p, $p_len, $p_off, $p_off + $p_len
+				set $copied = $copied + $p_len
+				set $p = $p + 1
+				set $p_off = 0
+				set $p_len = $f_len - $copied
+				if $p_len > $PAGE_SIZE
+					set $p_len = $PAGE_SIZE
+				end
+			end
+			set $len = $len - $copy
+			if $len == 0
+				return 0
+			end
+			set $offset = $offset + $copy
+		end
+		set $start = $end
+		set $i = $i + 1
+	end
+	set $iter = $skb_shinfo->frag_list
+	while $iter != 0
+		set $end = $start + $iter->len
+		set $copy = $end - $offset
+		if $copy > 0
+			if $copy > $len
+				set $copy = $len
+			end
+			printf "0x%08lx - skb: 0x%lx offset: 0x%08lx copy: %d\n", $offset, $iter, $offset - $start, $copy
+			set $len = $len - $copy
+			if $len == 0
+				return 0
+			end
+			set $offset = $offset + $copy
+		end
+		set $start = $end
+		set $iter = $iter->next
+	end
+end
+
+# arg0 skb
+# arg1 offset
+# arg2 len
+define skb_dump5
+	set $PAGE_SHIFT = 12
+	set $PAGE_SIZE = (1 << 12)
+	set $skb = ((struct sk_buff*)$arg0)
+	set $offset = $arg1
+	set $len = $arg2
+	set $start = ((struct sk_buff *)$arg0)->len - ((struct sk_buff *)$arg0)->data_len
+	set $skb_shinfo = ((struct skb_shared_info *)($skb->head + $skb->end))
+	if $offset > ($skb->len - $len)
+		echo Invalid offset $offset
+		return -1
+	end
+	set $copy = $start - $offset
+	if $copy > 0
+		if $copy > $len
+			set $copy = $len
+		end
+		set $ptr = $skb->data + $offset
+		printf "0x%08lx - linear: %d bytes [0x%08lx - 0x%08lx]\n", $offset, $copy, $ptr, $ptr + $copy
+		set $len = $len - $copy
+		if $len == 0
+			return 0
+		end
+		set $offset = $offset + $copy
+	end
+	set $nr_frags = $skb_shinfo->nr_frags
+	set $i = 0
+	while $i < $nr_frags
+		set $frag = &($skb_shinfo->frags[$i])
+		set $end = $start + $frag->bv_len
+		set $copy = $end - $offset
+		if $copy > 0
+			if $copy > $len
+				set $copy = $len
+			end
+			set $f_off = $frag->bv_offset + $offset - $start
+			set $f_len = $copy
+			set $p = $frag->bv_page
+			set $p = $p + ($f_off >> $PAGE_SHIFT)
+			set $p_off = $f_off & ($PAGE_SIZE - 1)
+			set $p_len = $f_len
+			if 0
+				if $p_len > $PAGE_SIZE
+					set $p_len = $PAGE_SIZE
+				end
+			end
+			set $copied = 0
+			while $copied < $f_len
+				printf "0x%08lx - frag: %d page: 0x%lx bytes: %d [0x%04lx - 0x%04lx]\n", $offset, $i, $p, $p_len, $p_off, $p_off + $p_len
+				set $copied = $copied + $p_len
+				set $p = $p + 1
+				set $p_off = 0
+				set $p_len = $f_len - $copied
+				if $p_len > $PAGE_SIZE
+					set $p_len = $PAGE_SIZE
+				end
+			end
+			set $len = $len - $copy
+			if $len == 0
+				return 0
+			end
+			set $offset = $offset + $copy
+		end
+		set $start = $end
+		set $i = $i + 1
+	end
+	set $iter = $skb_shinfo->frag_list
+	while $iter != 0
+		set $end = $start + $iter->len
+		set $copy = $end - $offset
+		if $copy > 0
+			if $copy > $len
+				set $copy = $len
+			end
+			printf "0x%08lx - skb: 0x%lx offset: 0x%08lx copy: %d\n", $offset, $iter, $offset - $start, $copy
+			set $len = $len - $copy
+			if $len == 0
+				return 0
+			end
+			set $offset = $offset + $copy
+		end
+		set $start = $end
+		set $iter = $iter->next
+	end
+end
+
+set history save on 

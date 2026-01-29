@@ -1,0 +1,115 @@
+dnl Process this file with autoconf to produce a configure script.
+
+AC_PREREQ(2.57)
+AC_INIT(libsiw, 0.9, bmt@zurich.ibm.com)
+AC_CONFIG_SRCDIR([src/siw.h])
+AC_CONFIG_AUX_DIR(config)
+AM_CONFIG_HEADER(siw_config.h)
+AM_INIT_AUTOMAKE(libsiw, 0.9)
+AM_PROG_LIBTOOL
+
+AC_ARG_ENABLE(libcheck, [  --disable-libcheck      do not test for presence of ib libraries],
+	[       if test x$enableval = xno ; then
+			disable_libcheck=yes
+		fi
+	])
+
+AC_ARG_WITH([rdma-core],
+    [AS_HELP_STRING([--with-rdma-core=<path>],
+        [The top-level directory where rdma-core was built.])],
+    [AS_IF([test -f "$with_rdma_core/build/include/infiniband/driver.h"],
+        [
+		AC_MSG_NOTICE([Using rdma-core from "$with_rdma_core"])
+		RDMA_CORE_DIR="$with_rdma_core"
+		CPPFLAGS="$CPPFLAGS -I $with_rdma_core/build/include"
+	],
+        [AC_MSG_ERROR([<include/infiniband/driver.h> not found in $with_rdma_core/build])])],
+    [AC_MSG_ERROR([Use --with-rdma-core=<path> to specify the path to rdma-core])])
+AC_SUBST(RDMA_CORE_DIR)
+
+dnl Checks for programs
+AC_PROG_CC
+AC_CHECK_SIZEOF(long)
+
+dnl Checks for libraries
+if test "$disable_libcheck" != "yes"
+then
+AC_CHECK_LIB(ibverbs, ibv_get_device_list, [],
+    AC_MSG_ERROR([ibv_get_device_list() not found.  libsiw requires libibverbs.]))
+fi
+
+dnl Checks for header files.
+AC_CHECK_HEADERS(sysfs/libsysfs.h)
+
+dnl Check for stdatomic.h
+AC_CHECK_HEADER(stdatomic.h, [], 
+    AC_MSG_ERROR([stdatomic.h not found. Use a newer version of GCC])
+)
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+
+dnl Checks for library functions
+AC_CHECK_FUNCS(ibv_read_sysfs_file)
+
+dnl Check for rdma-core ABI version
+dummy=if$$
+cat <<IBV_ABI_VERSION > $dummy.c
+#include <config.h>
+IBVERBS_PABI_VERSION
+IBV_ABI_VERSION
+IBVERBS_PABI_VERSION=`$CC -I $RDMA_CORE_DIR/build/include -E $dummy.c 2> /dev/null | tail -1`
+if test $IBVERBS_PABI_VERSION = IBVERBS_PABI_VERSION; then
+    AC_MSG_ERROR([IBVERBS_PABI_VERSION not defined.  Is rdma-core valid?])
+else
+    AC_MSG_RESULT(rdma-core ABI version $IBVERBS_PABI_VERSION)
+fi
+AC_SUBST(IBVERBS_PABI_VERSION)
+
+dnl Check for rdma-core Provider Suffix
+dummy=if$$
+cat <<IBV_SUFFIX > $dummy.c
+#include <config.h>
+#include <infiniband/driver.h>
+VERBS_PROVIDER_SUFFIX
+IBV_SUFFIX
+VERBS_PROVIDER_SUFFIX=`$CC -I $RDMA_CORE_DIR/build/include -E $dummy.c 2> /dev/null | tail -1 | xargs`
+if test $VERBS_PROVIDER_SUFFIX = "-rdmav${IBVERBS_PABI_VERSION}.so"; then
+    LIBSIW_RELEASE="rdmav${IBVERBS_PABI_VERSION}"
+    AC_MSG_RESULT(rdma-core provider_suffix=$VERBS_PROVIDER_SUFFIX)
+    AC_SUBST(LIBSIW_RELEASE)
+else
+    AC_MSG_ERROR([mismatch between rdma-core ABI version $IBVERBS_PABI_VERSION and VERBS_PROVIDER_SUFFIX $VERBS_PROVIDER_SUFFIX (expected "-rdmav${IBVERBS_PABI_VERSION}.so")])
+fi
+
+dnl Check if verbs_context_ops has free_context member
+AC_CHECK_MEMBER(struct verbs_context_ops.free_context,
+	[
+		AC_SUBST(FREE_CONTEXT_IN_CTX_OPS, 1)
+	],
+	[
+		AC_SUBST(FREE_CONTEXT_IN_CTX_OPS, 0)
+	],
+	[[#include <infiniband/driver.h>]])
+
+dnl Check if verbs_context_ops has query_device_ex
+AC_CHECK_MEMBER(struct verbs_context_ops.query_device,
+	[
+		AC_SUBST(QUERY_DEVICE_IN_CTX_OPS, 1)
+	],
+	[
+		AC_SUBST(QUERY_DEVICE_IN_CTX_OPS, 0)
+	],
+	[[#include <infiniband/driver.h>]])
+
+AC_CACHE_CHECK(whether ld accepts --version-script, ac_cv_version_script,
+    if test -n "`$LD --help < /dev/null 2>/dev/null | grep version-script`"; then
+        ac_cv_version_script=yes
+    else
+        ac_cv_version_script=no
+    fi)
+
+AM_CONDITIONAL(HAVE_LD_VERSION_SCRIPT, test "$ac_cv_version_script" = "yes")
+
+AC_CONFIG_FILES([Makefile libsiw.spec])
+AC_OUTPUT

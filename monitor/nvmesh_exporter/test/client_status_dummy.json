@@ -1,0 +1,9 @@
+{"module": {"state":1, "state_str":"Ready",
+"blk_size_bytes":4096,
+"n_cpus":32}
+,"main": {"uuid":"DCAD35FE-1D91-45CC-A562-4120367D88D8", "state":1,
+"MCS" : {"shceme_version": 1925726605, "report_id": 11},
+"cluster": {"config_ver":1, "proto_ver":1, "mongodb_uuid":"FD803830-F696-11EE-AB80-5D25C8B9623A"}
+,"n_messages": {"mcs":0, "cli":2, "wq":1}
+}
+}

@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+A test application for user mode RDMA connection management.
+The current code can only be used with IP addresses set to the RDMA NICS.
+To run the code please follow the current steps:
+1.  check that ib_ipoib module is installed:
+	1.1 lsmod | grep ib
+		and check if ib_ipoib is listed.  if not:
+		1.1.1 modprobe ib_ipoib
+			  and check that the module is listed
+2. check that the NIC is shown
+	2.1 ifconfig
+		2.1.1 if the NIC is not shown call ibstat and check which port is ACTIVE
+		2.1.2 port 1 is mapped to ib0 and port 2 is mapped to ib1
+		2.1.2 ifconfig ib[0,1]
+		2.1.2 ifconfig
+			  and check that you can see the ib? in the list.  if there is no
+			  address decide which address and call
+			  example: ifconfig ib0 10.0.0.50/24
+	2.2 call route and see that there is routing going through the RDMA NIC
+	2.3 ping to the RDMA NIC address
+3. on server side compile and run the app as follows:
+	./cs
+4. on client side compile and run the app as follows:
+	./cs -s <server RDMA NIC IP>
+5. see that the test completed

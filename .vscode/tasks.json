@@ -1,0 +1,90 @@
+{
+	"version": "2.0.0",
+	"inputs": [
+		{ "id": "build_cmd", "type": "pickString", "description": "Build cmd", "default": "build", "options": ["build", "rebuild", "clean"]},
+		{ "id": "build_srvrs", "type": "promptString", "description": "Servers", "default": "n60 n61"},
+		{ "id": "make_target", "type": "promptString", "description": "Makefile target", "default": "all"}
+	],
+	"tasks": [
+        {
+            "label": "BuildBlockSimulator",
+            "type": "shell",
+            "command": "./build_block_testing.sh",
+            "args": ["${input:build_cmd}", "USE_ABSPATH=on"],
+            "options": {"cwd": "${workspaceFolder}/clnt/block/unitest"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        },
+        {
+            "label": "BuildBlockSimulatorDanielHsH",
+            "type": "shell",
+            "command": "make",
+            "args": ["all", "-j", "10", "--output-sync=recurse", "USE_RELEASE=0", "USE_SANITIZERS=1"],
+            "options": {"cwd": "${workspaceFolder}/clnt/block/unitest"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        },
+        {
+            "type": "shell",
+            "label": "Build NVMesh",
+            "command": "./build.sh",
+            "args": ["-S", "${input:build_srvrs}" ],
+            "options": {"cwd": "${workspaceFolder}"},
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Makefile",
+            "type": "shell",
+            "command": "make",
+            "args": ["${input:make_target}"],
+            "options": {"cwd": "${fileDirname}"},
+            "problemMatcher": ["$gcc"],
+            "group": "build"
+        },
+        {
+            "label": "CmpBlocksBuild",
+            "type": "shell",
+            "command": "make",
+            "args": ["all"],
+            "options": {"cwd": "${workspaceFolder}/perfTest/io_stress/cmp_blocks"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        },
+        {
+            "label": "BuildDpLibMakeFile",
+            "type": "shell",
+            "command": "make",
+            "args": ["all", "BUILD_RELEASE=0"],
+            "options": {"cwd": "${workspaceFolder}/clnt/block/um_integration"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        },
+        {
+            "label": "GenMdBuild",
+            "type": "shell",
+            "command": "make",
+            "args": ["clean", "all"],
+            "options": {"cwd": "${workspaceFolder}/perfTest/io_stress/gen_md"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        },
+        {
+            "label": "InfraSharedBuild",
+            "type": "shell",
+            "command": "make",
+            "args": ["clean", "all"],
+            "options": {"cwd": "${workspaceFolder}/tools/infra_shared"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        },
+        {
+            "label": "BuildTomaSimulator",
+            "type": "shell",
+            "command": "make",
+            "args": ["all", "-j", "10", "-C", "toma/unitest"],
+            "options": {"cwd": "${workspaceFolder}"},
+            "problemMatcher": ["$gcc"],
+            "group": {"kind": "build", "isDefault": true }
+        }
+    ]
+}

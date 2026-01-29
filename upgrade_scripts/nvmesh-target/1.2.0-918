@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+topo_file='/var/opt/NVMesh/toma/toma_persistency.csv_bufs.0'
+topo_file_tmp=${topo_file}_tmp
+if ([ -e $topo_file ]); then
+	cp -p $topo_file $topo_file_tmp || exit 	# preserve the original permissions
+	sed -e 's/Raid1_version_m/Praid_version_m/g' -e 's/TOPOLOGY_RAID1S/TOPOLOGY_PRAIDS/g' < ${topo_file} > $topo_file_tmp || exit
+	mv $topo_file_tmp $topo_file || exit
+fi

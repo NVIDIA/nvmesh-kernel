@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+To run it manually:
+1) compile nvmesh using build.sh with IM_TEST=yes to compile this test, no must for IM_CLIENT/TARGET/BOTH.
+2) sudo insmod ./common_public/nvmeib_common_public.ko.xz  ib_odp_info=`grep -c ib_umem_odp_get /proc/kallsyms 2> /dev/null`
+3) sudo insmod ./common_public/nvmeib_common_mlx5_public.ko.xz
+4) sudo insmod ./common/nvmeib_common.ko.xz
+5) sudo insmod ./testing/pcie_atomic/pcie_atom_test.ko.xz
+6) sudo ./testing/pcie_atomic/run.sh mlx5_0:1 mlx5_1:1 5 (or your choosen ports/nics)
+7) search for the result line in dmesg
+pass example:
+[Tue Oct  5 07:54:30 2021] (241715/30)atom_test.c[end_thread_fn](647): Test finished - Runtime: 5 secs Count 1: 6135280 Count 2: 6140704 Total Count: 12275984 Atomic Failure: FALSE
+failed example:
+[Mon Oct  4 16:42:16 2021] (9675/24)atom_test.c[end_thread_fn](642): Test finished - Runtime: 4 secs Count 1: 16 Count 2: 16 Total Count: 0 Atomic Failure: TRUE

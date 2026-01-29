@@ -1,0 +1,46 @@
+[
+	{
+		"host": "10.0.1.47",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.48",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.65",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.67",
+		"containers": 5
+	},
+	{
+		"host": "10.0.1.51",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.53",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.57",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.58",
+		"containers": 300
+	},
+	{
+		"host": "10.0.1.106",
+		"containers": 1000
+	},
+	{
+		"host": "10.0.1.221",
+		"containers": 1000
+	},
+	{
+		"host": "10.0.11.41",
+		"containers": 1000
+	}
+]

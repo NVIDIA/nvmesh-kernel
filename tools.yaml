@@ -1,0 +1,64 @@
+tools:
+  managementCM:
+    source: management_cm/managementCM.py
+    linkdir: /opt/nvmesh/client-repo
+    # path: /opt/nvmesh/bin/managementCM # Default for .../xyz.py is /opt/nvmesh/bin/xyz
+    analysis:
+      hiddenimports: ['clnt.client_messages']
+  managementAgent:
+    source: management_cm/managementAgent.py
+    linkdir: /opt/nvmesh/client-repo
+  nvmesh_profiling:
+    linkpath: /opt/nvmesh/client-repo/scripts/nvmesh_profiling.py
+    source: clnt/block/datapath_utils_generic/profiling/nvmesh_profiling.py
+  nvmesh_udev_utils:
+    source: scripts/client/nvmesh_udev_utils.py
+    linkpath: /opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py
+    analysis:
+      pathex: ['.']
+  nvmesh_client_upgrade:
+    source: scripts/client/nvmesh_client_upgrade.py
+    linkpath: /opt/nvmesh/client-repo/scripts/nvmesh_client_upgrade.py
+  the-calculator:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/the-calculator.py
+  pager-profiler:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/traces_post_processor/pager-profiler.py
+  nvmesh_netlink:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/nvmesh_netlink.py
+  read_dwarf:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/read_dwarf.py
+  memmgr_monitor:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/nvmesh_memmgr_monitor.py
+  formatters:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/traces_post_processor/formatters/formatters.py
+    analysis:
+      binaries:
+        - [./tools/traces_post_processor/formatters/libfmtrs.so, .]
+  pager:
+    linkdir: /opt/nvmesh/common-repo
+    source: tools/traces_post_processor/pager.py
+    analysis:
+      binaries:
+        - [./tools/traces_post_processor/cpager, .]
+  process_config_files:
+    source: management_cm/process_config_files.py
+    linkdir: /opt/nvmesh/client-repo
+  nvmesh_clnt_shutdown:
+    source: bin/nvmesh_clnt_shutdown.py
+    linkpath: /usr/bin/nvmesh_clnt_shutdown
+    analysis:
+        pathex: ['.', './bin']
+  humanize_json:
+    source: tools/humanize_json.py
+    linkdir: /opt/nvmesh/common-repo
+
+
+analysis:
+  pathex: # For Analysis(pathex=)
+    - management_cm

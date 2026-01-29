@@ -1,0 +1,43 @@
+{
+"name": "1",
+"uuid": "2bcb9610-94d9-11ed-ba69-815d3cf552e1",
+"type": "visible", "type_num": "0x0",
+"size[blks]": 4882688,
+"block[b]": 4096,"short_id": 0,
+"ptr": "ffff8ada1000c000",
+"Reports status" : {"fioe_cli": 0, "last_mgmt_io_perm": 0},
+"dp_flags" : {"edic": 0, "local_read": 0, "alw": 4096, "alr": 0, "elev": 32, "snake": 1, "jent": 16},
+"flags": {"ign_toma_msg":0, "ign_toma_recov":0, "ign_toma_rec_speed":0},
+"RVMS":"2", "attach_status":"Attaching","raid_type":"RAID-1",
+"reservation":"SHARED_READ_WRITE",
+"reservation_version":"2",
+"preempt":"No",
+"status":"Live, With IO",
+"dbg":"0x192",
+"io-toggles":"0","io_enabled":"1",
+"topo":{
+	"cur": 11029, "freed": 11028, "conf_ver": 1,"io_perm": -2, "nr": 0,"ns": 0, "can_view_lock": 0,
+	"verbose_status": "Wrong topology prevents IO",
+	"chunks":[
+		{ "ci": 0, "vlba_start": 0, "vlba_end": 4882687,
+			"prs":[
+				{"ri": 0, "version": 0, "lock":"0x0",
+					"dbits_off_mask": 0, "dbits_on_mask": 0,
+					"segs":[
+						{"si": 0,"dlba_start": 11275008, "dlba_end": 16157695,"uuid":"2bce2e20", "act": 0,"acm":"???", "locks_on_read":"0","lmap":"?","reconf":"a",
+								"disk":{"name":"S3HCNX0K800838.1", "host": "Unknown", "paused": 3}
+						},
+						{"si": 1,"dlba_start": 11275008, "dlba_end": 16157695,"uuid":"2bcea350", "act": 0,"acm":"???", "locks_on_read":"0","lmap":"?","reconf":"a",
+								"disk":{"name":"S3HCNX0K800868.1", "host": "Unknown", "paused": 3}
+						}					]
+				}			]
+		}	]
+}
+,
+"enforce_read_only": 1, "retry_timeout_sec": 30, "allow_extern_carrier_io": 0,
+"sync_stas": {"n_running":0, "n_pending":0, "finished_ok": {"full_blkst":0, "partial_blkst":0}, "finished": {"n_all":0, "n_maintanance":0, "n_db_suspect":0}, "longest_sec":0},
+"topo_stats": {"n_multi_degraded":0, "n_single_degraded":0},
+"mini_elevator": "unsupported yet",
+"failed_io": {"critical":0, "detach":0, "ignore":0, "rider_cancel":0, "illegal_trims":0, "other": 0},"resubmittion": {"in":15, "out":0, "timed_out":15},"internal_err":{"sus_thresh":7, "n_binfo_err":0, "n_htr_null_uuids":0, "n_EC4571":0},
+"mgmt_alerts": {"armed": {"current":"io-disabled", "stable":"io-disabled"},"last_armed_sec": {"at":8532164, "unpw2ro":0},"stats": {"n_sent":0, "longest_sec":0},"conf_sec": {"stab":5, "unpW":18446744073709551, "det_stuck":10}},
+"slow_locks": {"t_msec": 2000, "num_locks": 0, "last":{"lock_id": "0x0", "n_tries": 0, "n_msec": 0, "op": "U-Ow", "dlba_blksts": "0x0", "seg":{"ci": 0, "ri": 0, "si": 0}}}}

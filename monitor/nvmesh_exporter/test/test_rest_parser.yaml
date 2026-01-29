@@ -1,0 +1,55 @@
+---
+/getClusterStatus:
+  metric_prefix: 'nvmesh_management_cluster'
+  type: RestParser
+  per_node: true
+  metrics:
+    totalspace:
+      help: 'cluster total space'
+      type: 'gauge'
+    allocatedspace:
+      help: 'cluster allocated space'
+      type: 'gauge'
+    freespace:
+      help: 'cluster free space'
+      type: 'gauge'
+    client_counters:
+      help: 'cluster client counters'
+      type: 'gauge'
+      pattern_labels_re: 'clients_(?P<client_counter>\w+)'
+    server_counters:
+      help: 'cluster server counters'
+      type: 'gauge'
+      pattern_labels_re: 'servers_(?P<server_counter>\w+)'
+    drive_counters:
+      help: 'cluster drive counters'
+      type: 'gauge'
+      pattern_labels_re: 'drives_(?P<drive_counter>\w+)'
+    volume_counters:
+      help: 'cluster volume counters'
+      type: 'gauge'
+      pattern_labels_re: 'volumes_(?P<volume_counter>\w+)'
+
+/volumes/all/0/0?projection={"chunks":1}:
+  metric_prefix: 'nvmesh_management_volume'
+  type: RestParser
+  query_labels:
+    volume_name: '_id'
+  collections:
+    chunks:
+      query_labels:
+        chunk_uuid: uuid
+      collections:
+        pRaids:
+          query_labels:
+            praid_uuid: uuid
+          collections:
+            diskSegments:
+              query_labels:
+                segment_uuid: uuid
+              aggregates:
+                segments_by_status:
+                  help: 'segments by status'
+                  aggregate_by:
+                    segment_status:
+                      query: 'status'

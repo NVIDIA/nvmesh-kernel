@@ -1,0 +1,299 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
+#ifndef XKR_VERSION_H
+#define XKR_VERSION_H
+
+#include <linux/version.h>
+
+#define K_CHECK_VER(a, b, c) (LINUX_VERSION_CODE >= KERNEL_VERSION(a, b, c))
+
+#ifndef KS_THIS_CPU_PTR
+#	define KS_THIS_CPU_PTR					K_CHECK_VER(2,6,33)
+#endif
+#ifndef KS_KBASENAME
+#	define KS_KBASENAME						K_CHECK_VER(3,8,0)
+#endif
+#ifndef KS_DMA_DIRECTION
+#	define KS_DMA_DIRECTION					K_CHECK_VER(3,1,0)
+#endif
+#ifndef KS_REINIT_COMPLETION
+#	define KS_REINIT_COMPLETION				K_CHECK_VER(3,12,39)
+#endif
+#ifndef KS_LIST_LAST_ENTRY
+#	define KS_LIST_LAST_ENTRY				K_CHECK_VER(3,13,0)
+#endif
+#ifndef KS_LIST_FIRST_ENTRY_OR_NULL
+#	define KS_LIST_FIRST_ENTRY_OR_NULL		K_CHECK_VER(3,10,0)
+#endif
+#ifndef KS_HASHTABLE
+#	define KS_HASHTABLE 					K_CHECK_VER(3,7,0)
+#endif
+#ifndef KS_RBTREE
+#	define KS_RBTREE 						1
+#endif
+#ifndef KS_PCI_MSIX_VEC_COUNT
+#	define KS_PCI_MSIX_VEC_COUNT 			K_CHECK_VER(3,14,0)
+#endif
+#ifndef KS_DEV_MSIX_CAP
+#	define KS_DEV_MSIX_CAP					K_CHECK_VER(3,14,0)
+#endif
+#ifndef KS_BIO_VEC_RET_STRUCT
+#	define KS_BIO_VEC_RET_STRUCT			K_CHECK_VER(3,14,0)
+#endif
+#ifndef KS_BI_REMAINING
+#	define KS_BI_REMAINING					K_CHECK_VER(3,14,0)
+#endif
+#ifndef KS_BI_REMAINING_UNDERSCORE
+#	define KS_BI_REMAINING_UNDERSCORE			K_CHECK_VER(4,2,0)
+#endif
+#ifndef KS_BI_INC_REMAINING
+#	define KS_BI_INC_REMAINING				K_CHECK_VER(4,7,0)
+#endif
+#ifndef KS_BLOCK_DEV_MAKE_REQUEST_VOID
+#	define KS_BLOCK_DEV_MAKE_REQUEST_VOID	K_CHECK_VER(3,2,0)
+#endif
+#ifndef KS_BLOCK_DEV_DEVICE_CLOSE_VOID
+#	define KS_BLOCK_DEV_DEVICE_CLOSE_VOID	K_CHECK_VER(3,10,0)
+#endif
+#ifndef KS_BLOCK_DEV_DEVICE_TRIM_LIMIT
+#	define KS_BLOCK_DEV_DEVICE_TRIM_LIMIT	K_CHECK_VER(3,10,0)
+#endif
+#ifndef KS_DMA_SET_MASK_AND_COHERENT
+#	define KS_DMA_SET_MASK_AND_COHERENT		K_CHECK_VER(3,13,0)
+#endif
+#ifndef KS_NVME_SC_CMD_SEQ_ERROR
+#	define KS_NVME_SC_CMD_SEQ_ERROR			K_CHECK_VER(3,10,0)
+#endif
+#ifndef KS_BVEC_ITER
+#	define KS_BVEC_ITER						K_CHECK_VER(3,14,0)
+#endif
+#ifndef KS_IB_SRQ_TYPE
+#	define KS_IB_SRQ_TYPE					K_CHECK_VER(3,2,0)
+#endif
+#ifndef KS_WAIT_EVENT_LOCK
+#	define KS_WAIT_EVENT_LOCK				K_CHECK_VER(3,8,0)
+#endif
+#ifndef KS_PDE_DATA
+#	define KS_PDE_DATA						K_CHECK_VER(3,10,0)
+#endif
+#ifndef KS_LIST_PREV_NEXT
+#	define KS_LIST_PREV_NEXT				K_CHECK_VER(3,13,0)
+#endif
+#ifndef KS_HASHTABLE
+#	define KS_HASHTABLE						K_CHECK_VER(2,6,33)
+#endif
+#ifndef KS_GET_BDEV_BY_PATH_EXISTS
+#	define KS_GET_BDEV_BY_PATH_EXISTS		K_CHECK_VER(2,6,38)
+#endif
+#ifndef KS_VM_FLAGS_T
+#	if K_CHECK_VER(2,6,33)
+#		define KS_VM_FLAGS_T	vm_flags_t
+#	else
+#		define KS_VM_FLAGS_T	unsigned long
+#	endif
+#endif
+#ifndef KS_MODULE_PARAM_CB
+#	define KS_MODULE_PARAM_CB			K_CHECK_VER(2,6,39)
+#endif
+#ifndef KS_KALLSYMS_LOOKUP
+#	define KS_KALLSYMS_LOOKUP 	K_CHECK_VER(2,6,33)
+#endif
+#ifndef KS_PR_DEBUG_NONGPL
+#	define KS_PR_DEBUG_NONGPL	K_CHECK_VER(2,6,33)
+#endif
+#ifndef KS_ENDIO_1ARG
+#	define KS_ENDIO_1ARG					K_CHECK_VER(4,3,0)
+#endif
+#ifndef KS_RDMA_WR
+#	define KS_RDMA_WR						(K_CHECK_VER(4,4,0) || K_CHECK_VER(3,10,0))
+#endif
+#ifndef KS_RDMA_CREATE_ID_HAS_NET
+#	define KS_RDMA_CREATE_ID_HAS_NET				(K_CHECK_VER(4,4,0) || K_CHECK_VER(3,10,0))
+#endif
+#ifndef KS_IB_CM_LISTEN_HAS_COMPARE_DATA
+#		define KS_IB_CM_LISTEN_HAS_COMPARE_DATA (!(K_CHECK_VER(4,3,0) || (K_CHECK_VER(3,10,0))))
+#endif
+#ifndef KS_USE_RDTSC
+#	define KS_USE_RDTSC						K_CHECK_VER(4,0,0)
+#endif
+#ifndef KS_REMOVE_EXTRA_ARG
+#	define KS_REMOVE_EXTRA_ARG				(K_CHECK_VER(4,3,0) || K_CHECK_VER(3,10,0))
+#endif
+#ifndef KS_CONFIGFS_ATTRIBUTE_HAS_SHOW_AND_STORE
+#	define KS_CONFIGFS_ATTRIBUTE_HAS_SHOW_AND_STORE		K_CHECK_VER(4,4,0)
+#endif
+#ifndef KS_CONFIG_GROUPS_DEFAULT_GROUPS_IS_LIST
+#	define KS_CONFIG_GROUPS_DEFAULT_GROUPS_IS_LIST		K_CHECK_VER(4,6,0)
+#endif
+#ifndef KS_NVME_DPTR
+#	define KS_NVME_DPTR						NVME_DISC_SUBSYS_NAME
+#endif
+#ifndef KS_CQ_INIT_ATTRS
+#	define KS_CQ_INIT_ATTRS					(K_CHECK_VER(4,2,0) || K_CHECK_VER(3,10,0))
+#endif
+#ifndef KS_BLK_QC_T
+#	define KS_BLK_QC_T						K_CHECK_VER(4,4,0)
+#endif
+#ifndef KS_NEW_FR
+#	define KS_NEW_FR						(K_CHECK_VER(4,3,0) || K_CHECK_VER(3,10,0))
+#	define KS_IB_MAP_MR_SG_OFFSET			K_CHECK_VER(4,7,0)
+#endif
+#ifndef KS_SET_CPI_RESP_TIME
+#	define KS_SET_CPI_RESP_TIME				(K_CHECK_VER(4,7,0) || K_CHECK_VER(3,10,0))
+#endif
+#ifndef KS_MLX_FENCE_VLAN
+#	define KS_MLX_FENCE_VLAN				K_CHECK_VER(4,8,0)
+#endif
+#ifndef KS_DRIVERFS_DEV
+#	define KS_DRIVERFS_DEV					!K_CHECK_VER(4,8,0)
+#endif
+#ifndef KS_MLX5_BUF_PAGE_LIST
+#     define KS_MLX5_BUF_PAGE_LIST                    (!K_CHECK_VER(3,10,0) && !K_CHECK_VER(4,2,0))
+#endif
+#ifndef KS_CREATE_SEND_MAD_BASE_VERSION
+#	define KS_CREATE_SEND_MAD_BASE_VERSION		K_CHECK_VER(4,2,0)
+#endif
+#ifndef KS_CONFIGFS_DEFAULT_GROUPS_LIST
+#	define KS_CONFIGFS_DEFAULT_GROUPS_LIST		K_CHECK_VER(4,6,0)
+#endif
+#ifndef KS_TRACE_PUTS
+#	define KS_TRACE_PUTS						K_CHECK_VER(3,10,0)
+#endif
+#ifndef KS_NEW_NVME_RESULT_NAME
+#	define KS_NEW_NVME_RESULT_NAME		K_CHECK_VER(4,10,0)
+#endif
+#ifndef KS_NO_BIO_IS_RW
+#	define KS_NO_BIO_IS_RW		K_CHECK_VER(4,10,0)
+#endif
+#ifndef KS_IB_DEVICE_HAS_GET_NETDEV
+#	define KS_IB_DEVICE_HAS_GET_NETDEV 		K_CHECK_VER(4,3,0)
+#endif
+#ifndef KS_MLX5_IFC
+#	define KS_MLX5_IFC						K_CHECK_VER(4,9,0)
+#endif
+#ifndef U64_MAX
+	#define U64_MAX   ((u64)~0ULL)
+#endif
+#ifndef KS_USES_NETDEV_HAS_UPPER_DEV_ALL_RCU
+#	define KS_USES_NETDEV_HAS_UPPER_DEV_ALL_RCU 0
+#endif
+#ifndef KS_MMAP_FAULT_HAS_VMA
+#	define KS_MMAP_FAULT_HAS_VMA			!K_CHECK_VER(4,11,0)
+#endif
+#ifndef KS_GENERIC_IO_ACCT
+#	define KS_GENERIC_IO_ACCT				K_CHECK_VER(3,19,0)
+#	define KS_GENERIC_IO_ACCT_REQ_Q				K_CHECK_VER(4,12,14)
+#endif
+#ifndef KS_BIO_HAS_BI_DISK_PTR
+#	define	KS_BIO_HAS_BI_DISK_PTR			K_CHECK_VER(4,12,14)
+#endif
+#ifndef KS_BIO_BI_STATUS
+#	define KS_BIO_BI_STATUS			K_CHECK_VER(4,12,14)
+#endif
+#ifndef KS_Q_LIMITS_HAS_DISCARD_ZEROS
+#	define KS_Q_LIMITS_HAS_DISCARD_ZEROS		!K_CHECK_VER(4,12,0)
+#endif
+#ifndef KS_PART_INC_IN_FLIGHT_USES_Q
+#	define KS_PART_INC_IN_FLIGHT_USES_Q			K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_PART_DEC_IN_FLIGHT_USES_Q
+#	define KS_PART_DEC_IN_FLIGHT_USES_Q			K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_BIO_SET_DEV
+#	define KS_BIO_SET_DEV K_CHECK_VER(4,12,14)
+#endif
+#ifndef KS_PCI_ENABLE_MSIX_DEPRECATED
+#	define KS_PCI_ENABLE_MSIX_DEPRECATED K_CHECK_VER(4,12,0)
+#endif
+#ifndef KS_ZEROOUT_DISCARD
+#	define KS_ZEROOUT_DISCARD			K_CHECK_VER(4,0,0)
+#endif
+#ifndef KS_GPT_SUPPORT
+#	define KS_GPT_SUPPORT K_CHECK_VER(2,6,37)
+#endif
+#ifndef KS_HAS_KREF_READ
+#define KS_HAS_KREF_READ		K_CHECK_VER(4,12,0)
+#endif
+#ifndef KS_KREF_USES_REFCOUNT
+#define KS_KREF_USES_REFCOUNT 	K_CHECK_VER(4,11,0)
+#endif
+#ifndef KS_IB_HAS_RDMA_AH_ATTR_TYPE
+#define KS_IB_HAS_RDMA_AH_ATTR_TYPE K_CHECK_VER(4,12,0)
+#endif
+#ifndef KS_HAS_KREF_READ
+#define KS_HAS_KREF_READ		K_CHECK_VER(4,12,0)
+#endif
+#ifndef KS_KREF_USES_REFCOUNT
+#define KS_KREF_USES_REFCOUNT 	K_CHECK_VER(4,11,0)
+#endif
+#ifndef KS_HAS_GPL_SME_ACTIVE
+#define KS_HAS_GPL_SME_ACTIVE K_CHECK_VER(4,15,0)
+#endif
+#ifndef KS_NETLINK_EXTRA_ARG
+#define KS_NETLINK_EXTRA_ARG 	K_CHECK_VER(4,12,0)
+#endif
+#ifndef KS_INIT_TIMER_KEY_HAS_FLAGS
+#define KS_INIT_TIMER_KEY_HAS_FLAGS K_CHECK_VER(3,7,0)
+#endif
+#ifndef KS_NETLINK_KERNEL_CREATE_CFG_PARAM
+#define KS_NETLINK_KERNEL_CREATE_CFG_PARAM	K_CHECK_VER(3,6,0)
+#endif
+#ifndef KS_HAS_ATOMIC_DEC_IF_POSITIVE
+#define KS_HAS_ATOMIC_DEC_IF_POSITIVE K_CHECK_VER(3,0,0)
+#endif
+#ifndef KS_HAS_CRC32C
+#define KS_HAS_CRC32C K_CHECK_VER(3,0,0)
+#endif
+#ifndef KS_RB_ROOT_CACHED
+#define KS_RB_ROOT_CACHED K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_PERF_TRACE_BUF_PREPARE_SPLIT
+#define KS_PERF_TRACE_BUF_PREPARE_SPLIT K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_TRACE_SEQ_VPRINTF_RETURN_VOID
+#define KS_TRACE_SEQ_VPRINTF_RETURN_VOID K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_HAS_TRACE_BUFFER_UNLOCK_COMMIT
+#define KS_HAS_TRACE_BUFFER_UNLOCK_COMMIT !K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_TRACE_EVENTS
+#define KS_TRACE_EVENTS K_CHECK_VER(4,2,0)
+#endif
+#ifndef KS_DUMMY_TRACE_REG
+#define KS_DUMMY_TRACE_REG !K_CHECK_VER(2,6,35)
+#endif
+#ifndef KS_IB_SA_PATH_REC_GET_HAS_RETRIES
+#define KS_IB_SA_PATH_REC_GET_HAS_RETRIES 0
+#endif
+#ifndef KS_IB_HAS_RDMA_GET_GID_ATTR
+#define KS_IB_HAS_RDMA_GET_GID_ATTR 0
+#endif
+#ifndef KS_LEGACY_API_blk_queue_flag
+#define KS_LEGACY_API_blk_queue_flag !K_CHECK_VER(4,18,0)
+#endif
+#ifndef KS_MLX5_IB_QP_FRAG_BUF
+#define KS_MLX5_IB_QP_FRAG_BUF K_CHECK_VER(4,18,0)
+#endif
+#ifndef KS_MLX5_IB_FBC_HAS_FRAG_BUF
+#ifdef NO_OFED
+#define KS_MLX5_IB_FBC_HAS_FRAG_BUF 0
+#else
+#define KS_MLX5_IB_FBC_HAS_FRAG_BUF K_CHECK_VER(4,18,0)
+#endif
+#endif
+#ifndef KS_MLX5_IB_CQ_FRAG_BUF_CTRL
+#define KS_MLX5_IB_CQ_FRAG_BUF_CTRL K_CHECK_VER(4,18,0)
+#endif
+#ifndef KS_MLX5_IB_SRQ_FRAG_BUF_CTRL
+#define KS_MLX5_IB_SRQ_FRAG_BUF_CTRL K_CHECK_VER(4,18,0)
+#endif
+#ifndef KS_HAS_CALL_USER_HEADER
+#define KS_HAS_CALL_USER_HEADER 	K_CHECK_VER(4,14,0)
+#endif
+#ifndef KS_MAX_DISCARD_SECTORS_IS_ENFORCED
+#define KS_MAX_DISCARD_SECTORS_IS_ENFORCED (!(K_CHECK_VER(4,3,0) && !K_CHECK_VER(4,18,0)))
+#endif
+#endif /* KR_VERSION_H */

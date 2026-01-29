@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=NVMesh(r) Toma
+Wants=nvmeshcm.service
+Requires=nvmeshtarget.service
+After=network.target openibd.service nvmeshtarget.service
+
+[Service]
+ExecStart=/opt/nvmesh/target-repo/services/nvmeshtarget start-toma --systemd
+PIDFile=/var/run/nvmesh/nvmeshtarget/toma.pid
+Type=forking
+
+[Install]
+WantedBy=multi-user.target

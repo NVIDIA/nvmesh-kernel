@@ -1,0 +1,149 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+if [ `id -un` != "root" ] ; then
+        echo "This script needs to run as root."
+        exit 1
+fi
+
+prog=nvmeshclient
+managementCMService=nvmeshcm
+managementAgentService=nvmeshagent
+traceService=( nvmeshtrace@trace_daemon.service nvmeshtrace@siw_tracer.service )
+logDir=/var/log/nvmesh
+BASEPIDDIR=/var/run/nvmesh
+MDIR=/opt/nvmesh
+SERVICEDIR=$MDIR/client-repo/services
+PIDDIR=$BASEPIDDIR/$prog
+UPGRADEERRORFILE=/var/opt/nvmesh/client-upgrade.err
+UPGRADEVERSIONFILE=/var/opt/nvmesh/client_upgrade_version
+isUpgrade=true
+
+if [ "$1" = "0" -o "$1" = "remove" ]; then
+	isUpgrade=false
+fi
+
+if ! $isUpgrade; then
+	echo "Uninstalling NVMesh(r) client"
+	isSysD=false
+
+	if ! pidof systemd > /dev/null 2>&1; then
+		echo "Updating chkconfig"
+		if grep -i Ubuntu /etc/*release > /dev/null 2>&1; then
+			update-rc.d -f $prog remove
+		else
+			chkconfig --del $prog
+		fi
+	else
+		isSysD=true
+		echo "Disabling service"
+		systemctl disable nvmeshclient > /dev/null 2>&1
+	fi
+
+	if [ -d "/sys/module/nvmeibc" ] ; then
+	        echo "Stopping any previous version of NVMesh Client"
+		service $prog stop
+		RETVAL=$?
+
+		if $isSysD && systemctl is-failed $prog > /dev/null 2>&1; then
+			echo "Trying to stop NVMesh Client directly"
+			$SERVICEDIR/$prog stop
+			RETVAL=$?
+		fi
+
+		if [ "$RETVAL" -ne 0 ] || [ -d "/sys/module/nvmeibc" ] ; then
+			echo "Couldn't stop the "$prog" service, please reboot"
+		fi
+	fi
+
+	if [ -d "/sys/module/nvmeiba" ] ; then
+		rmmod nvmeiba > /dev/null 2>&1;
+		if [ "$?" -ne 0 ]; then
+			echo "Couldn't remove nvmeiba module, the module is in use, please reboot"
+		fi
+	fi
+
+	if $isSysD; then
+		if systemctl is-failed $prog > /dev/null 2>&1; then
+			systemctl reset-failed $prog
+		fi
+
+		echo "Stopping managementAgent"
+		service $managementAgentService stop
+		RETVAL=$?
+
+		if [ "$RETVAL" -ne 0 ] ; then
+			echo "Couldn't stop $managementAgentService service, please reboot"
+		fi
+
+		if systemctl is-failed $managementAgentService > /dev/null 2>&1; then
+			systemctl reset-failed $managementAgentService
+		fi
+
+		echo "Stopping managementCM"
+		service $managementCMService stop
+		RETVAL=$?
+
+		if [ "$RETVAL" -ne 0 ] ; then
+			echo "Couldn't stop $managementCMService service, please reboot"
+		fi
+
+		if systemctl is-failed $managementCMService > /dev/null 2>&1; then
+			systemctl reset-failed $managementCMService
+		fi
+
+		echo "Stopping nvmeshtrace daemon"
+		for svc in "${traceService[@]}"; do
+			service $svc stop
+			RETVAL=$?
+
+			if [ "$RETVAL" -ne 0 ] ; then
+				echo "Couldn't stop $svc service, please reboot"
+				break
+			fi
+
+			if systemctl is-failed $svc > /dev/null 2>&1; then
+				systemctl reset-failed $svc
+			fi
+		done
+	fi
+
+	echo "Removing configuration"
+	/bin/rm -rf /sys/kernel/config/nvmeibc
+
+	echo "Removing logs"
+	find $logDir/ ! -name '*management*' -type f -exec rm -f {} +
+	/bin/rm -f $UPGRADEERRORFILE $UPGRADEVERSIONFILE
+	find $logDir/trace_daemon/ ! -name 'pager*' -type f -exec rm -f {} +
+
+	echo "Removing persistent volumes"
+	/bin/rm -rf /var/opt/nvmesh/block_devices_configuration/*
+	/bin/rm -rf /var/opt/nvmesh/block_devices_sub_vols/*
+	/bin/rm -rf /var/opt/nvmesh/clnt_instance_configuration/*
+
+	echo "Removing mcs cache"
+	/bin/rm -rf /var/opt/nvmesh/mcs/*
+
+	echo "Removing PID dir files"
+	/bin/rm -rf $PIDDIR/*
+
+	# can safely remove all kernels directories since it will be created
+	# once the module be started
+	first_ko_dir=`ls -d1 /lib/modules/*/extra/nvmesh/client 2>/dev/null | head -1`
+
+	if [ ! -z "$first_ko_dir" ] && [ -L "$first_ko_dir" ]; then
+		# this is not a kmod installed machine, all nvmesh ko dirs should be removed
+		echo "Removing modules dir"
+		/bin/rm -fr /lib/modules/*/extra/nvmesh
+	fi
+
+	compressed_kos=`find -L $MDIR -name '*.ko.xz' -type f`
+	# if compressed kos found then remove old decompressed kos
+	if [ ! -z "$compressed_kos" ]; then
+		find -L $MDIR -name '*.ko' -type f -exec rm -f {} +
+	fi
+fi
+
+exit 0

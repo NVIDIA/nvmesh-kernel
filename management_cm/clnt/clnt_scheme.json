@@ -1,0 +1,674 @@
+{
+        "__globals" : {
+                "__version" : 100,
+                "__origin_type" : "CLIENT",
+                "__scheme_name" : "NVMEIBC_MCS_CLIENT_SCHEME"
+        },
+        "enum_client_api_version": {
+                "__type": "enum",
+                "__def": {
+                        "//": "client to management feature compatibility version; the version must be incremented every time, the client functionality is changed",
+                        "NVMEIB_C_TO_M_FEATURE_COMPATIBILITY_VERSION" : 1
+                }
+        },
+        "enum_vol_status": {
+                "//": "referenced by vol_status field",
+                "__type": "enum",
+                "__def": {
+                        "//": "status for volume command",
+                        "NVMEIB_C_TO_M_VOLUME_ACK_IRRELEVANT"          :  0,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_BUSY"                :  1,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_DETACHED"            :  2,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED"       :  3,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED"            :  4,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_ATTACH_FAILED"       :  5,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED"       :  6,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_UNKNOWN"             :  7,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_READY"        :  8,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_SHUTDOWN"            :  9,
+                        "NVMEIB_C_TO_M_VOLUME_IO_STATUS_ONLINE"        : 11,
+                        "NVMEIB_C_TO_M_VOLUME_IO_STATUS_OFFLINE"       : 12,
+                        "NVMEIB_C_TO_M_VOLUME_ALIAS_CREATED"           : 13,
+                        "NVMEIB_C_TO_M_VOLUME_ALIAS_CREATE_FAILED"     : 14,
+                        "NVMEIB_C_TO_M_VOLUME_ALIAS_DELETED"           : 15,
+                        "NVMEIB_C_TO_M_VOLUME_ALIAS_DELETE_FAILED"     : 16,
+                        "NVMEIB_C_TO_M_VOLUME_RESERVATION_DENIED"      : 17,
+                        "NVMEIB_C_TO_M_VOLUME_RESERVATION_MODE_DENIED" : 18,
+                        "NVMEIB_C_TO_M_VOLUME_MT_AUTHORIZATION_DENIED" : 19,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED_NOTHING_TO_UPDATE" : 20,
+                        "NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED_UNKNOWN_VOLUME" : 94,
+						"//": "94, in the new protocol all new messages starts with 90"
+                }
+        },
+        "enum_preempt_status": {
+                "//": "do we know if preempt was used",
+                "__type": "enum",
+                "__def": {
+                        "//": "preempt status",
+                        "NVMEIB_C_TO_M_VOLUME_NO_PREEMPT"      : 0,
+                        "NVMEIB_C_TO_M_VOLUME_WEAK_PREEMPT"    : 1,
+                        "NVMEIB_C_TO_M_VOLUME_PREEMPT"         : 2,
+                        "NVMEIB_C_TO_M_VOLUME_PREEMPT_UNKNOWN" : 3
+                }
+        },
+        "enum_io_perm": {
+                "//": "io status of block device sends to mgmt",
+                "__type": "enum",
+                "__def": {
+                        "//": "status io permission",
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_NEVER"             :  0,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_NONE_SUS"          :  3,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_NONE_ERR"          :  9,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_NO_IO"             : 11,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_IO_PREEMPT"        : 12,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_RDONLY"            : 13,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL_NO_PROTECTION" : 14,
+                        "NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL"               : 15
+                }
+        },
+        "enum_reservation_mode" : {
+                "//" : "reservation mode request to management",
+                "__type" : "enum",
+                "__def" : {
+                        "NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_RC" : 0,
+                        "NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_RO" : 1,
+                        "NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_RW" : 2,
+                        "NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_EX" : 3
+                }
+        },
+        "enum_emulation_mode" : {
+                "//" : "volume emulation mode from management",
+                "__type" : "enum",
+                "__def" : {
+                        "NVMEIB_M_TO_C_EMULATION_MODE_NONE" : 0,
+                        "NVMEIB_M_TO_C_EMULATION_MODE_STATIC" : 1,
+                        "NVMEIB_M_TO_C_EMULATION_MODE_HOTPLUG" : 2
+                }
+        },
+        "enum_stack_status_flag" : {
+                "//" : "stack status flags to management",
+                "__type" : "enum",
+                "__def" : {
+                        "NVMEIB_C_TO_M_STACK_STATUS_FLAG_LVOL_READY" : 0,
+                        "NVMEIB_C_TO_M_STACK_STATUS_FLAG_CRYPTO_READY" : 1,
+                        "NVMEIB_C_TO_M_STACK_STATUS_FLAG_CRYPTO_KEY_SET" : 2
+                }
+        },
+        "clnt_toma_common_scheme.json" : "include",
+        "nvmeibc_segment_conf" : {
+                "//" : "segment configuration",
+                "__type" : "used",
+                "lbs" : "Q",
+                "lbe" : "Q",
+                "uuid" : "64s",
+                "diskUUID" : "64s",
+                "diskID" : "64s",
+                "nodeUUID" : "64s",
+                "node_id": "128s",
+                "type" : "__codec MultiValCodec({'data' : 0, 'raftonly' : 1, 'parity' : 2, 'both' : 3})",
+                "pRaidIndex" : "I",
+                "pRaidTypeIndex" : "I",
+                "allocationIndex" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "status" : "__codec WithDefaultCodec(PodCodec('16s'), 'normal')"
+        },
+        "nvmeibc_praid_conf" : {
+                "//" : "protection raid configuration",
+                "__type" : "used",
+                "uuid" : "64s",
+                "activated" : "H",
+                "numberOfMirrors" : "__codec ParentMessage(Member(WithDefaultCodec(PodCodec('H'), 0), 'numberOfMirrors'), 2)",
+                "stripeIndex" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "dataBlocks" : "__codec ParentMessage(Member(WithDefaultCodec(PodCodec('i'), 1), 'dataBlocks'), 2)",
+                "parityBlocks" : "__codec ParentMessage(Member(WithDefaultCodec(PodCodec('i'), 0), 'parityBlocks'), 2)",
+                "n_both_DP_segs" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "lockServer" : "__codec ParentMessage(Member(StructEncoder('nvmeibc_locks_scheme_conf'), 'lockServer'), 2)",
+                "diskSegments" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_segment_conf",
+                        "__counter" : "n_segments",
+                        "__offset" : "segments"
+                }
+        },
+        "nvmeibc_chunk_conf" : {
+                "//" : "chunk configuration",
+                "__type" : "used",
+                "uuid" : "64s",
+                "vlbs" : "Q",
+                "vlbe" : "Q",
+                "stripeSize" : "__codec WithDefaultCodec(PodCodec('i'), -1)",
+                "stripeWidth" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
+                "pRaids" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_praid_conf",
+                        "__counter" : "n_praids",
+                        "__offset" : "praids"
+                }
+        },
+        "nvmeibc_reservation" : {
+                "//" : "Reservation information, reserveBy Should be [128], once client starts using it",
+                "__type" : "used",
+                "version" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "mode" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "preempt" : "__codec WithDefaultCodec(PodCodec('I'), 3)",
+                "is_512B_IO_allowed": "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "reservedBy" : "__codec WithDefaultCodec(PodCodec('32s'), '???')"
+        },
+        "nvmeibc_emulation" : {
+                "//" : "Emulation information",
+                "__type" : "used",
+                "mode" : "__codec WithDefaultCodec(PodCodec('I'), 0)"
+        },
+        "nvmeibc_attachment" : {
+                "//" : "Attachment information",
+                "__type" : "used",
+                "emulation" : "nvmeibc_emulation",
+                "version" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "referenceIDs" : {
+					"__type" : "array",
+					"__typename" : "nvmeibc_reference_id",
+					"__counter" : "n_ref_ids",
+					"__offset" : "referenceIDs"
+			}
+        },
+        "nvmeibc_encryption" : {
+                "//" : "Encryption information",
+                "__type" : "used",
+                "headerSize" : "H",
+                "headerSizeBlocks" : "Q"
+        },
+        "nvmeibc_reference_id" : {
+                "//" : "Holds kubernetes namespace ref id",
+                "__type" : "used",
+                "val" : "__codec WithDefaultCodec(PodCodec('64s'), '')"
+        },
+        "nvmeibc_volume_conf" : {
+                "//" : "volume configuration",
+                "__type" : "used",
+                "RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Concatenated' : 2, 'RAID-5': 5, 'RAID-6' : 6, 'Striped & Mirrored RAID-10' : 10, 'Striped & RAID-5' : 50, 'Striped & RAID-6' : 60, 'Erasure Coding' : 60, 'ELECT' : 80})",
+                "numberOfMirrors" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
+                "stripeSize" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "stripeWidth" : "__codec WithDefaultCodec(PodCodec('H'), 1)",
+                "type" : "__codec WithDefaultCodec(MultiValCodec({'normal':0,'recoverer':1,'WCV':40,'QLC':4384,'MDV':72,'MTV':8960,'carrier':16,'thin':4,'__DEFAULT':0}), 'normal')",
+                "wcvName" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "wcvUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "mdvName" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "mdvUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "qlcName" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "qlcUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "mtvName" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "mtvUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "name" : "32s",
+                "version" : "I",
+                "reservation" : "nvmeibc_reservation",
+                "uuid" : "64s",
+                "blocks" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "blockSize" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
+                "lockServer" : "nvmeibc_locks_scheme_conf",
+                "dataBlocks" : "__codec WithDefaultCodec(PodCodec('i'), 1)",
+                "parityBlocks" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "sliceWidth" : "__codec WithDefaultCodec(PodCodec('i'), 1)",
+                "enableCrcCheck" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "use_debug_di" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "isEncrypted" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "encryption" : "nvmeibc_encryption",
+                "metadataVolumeID" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "metadataVolumeUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "snapshotVolumeID" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "snapshotVolumeUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "sourceID" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "sourceUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "enableLocalReadOptimization" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "chunks" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_chunk_conf",
+                        "__counter" : "n_chunks",
+                        "__offset" : "chunks"
+                },
+                "attachment" : "nvmeibc_attachment"
+        },
+        "nvmeibc_nic_conf" : {
+                "//" : "nic configuration",
+                "__type" : "used",
+                "pkey" : "H",
+                "uuid" : "__codec UuidCodec()",
+                "nicID" : "40s",
+                "guid" : "__codec WithDefaultCodec(PodCodec('40s'), '')",
+                "protocol" : "__codec WithDefaultCodec(MultiValCodec({'Unknown':-1,'Infiniband':0,'RoCE':1,'TCP':2,'MULTI':3,'__DEFAULT':-1}), 'Unknown')",
+                "nodeID" : "128s"
+        },
+        "nvmeibc_disk_conf" : {
+                "//" : "disk configuration",
+                "__type" : "used",
+                "diskID" : "64s",
+                "uuid" : "64s",
+                "blocks" : "__codec WithDefaultCodec(PodCodec('Q'), 1)"
+        },
+        "nvmeibc_target_conf" : {
+                "//" : "client target description",
+                "__type" : "used",
+                "uuid" : "64s",
+                "node_id" : "128s",
+                "nicsVersion" : "i",
+                "targetUpdatesSequence" : "__codec WithDefaultCodec(PodCodec('i'), -1)",
+                "nics" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_nic_conf",
+                        "__counter" : "n_nics",
+                        "__offset" : "nics"
+                },
+                "disks" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_disk_conf",
+                        "__counter" : "n_disks",
+                        "__offset" : "disks"
+                }
+        },
+        "attach_volumes_message" : {
+                "//" : "Message with a list of volumes to attach with complete configuration for each (downstream)",
+                "__type" : "msg",
+                "__opcode" : 90,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__priority" : 1,
+                "__typename" : "nvmeib_mgmt_to_client_attach_volumes",
+                "__enableCache" : true,
+                "__prepack": "fix_and_split_vol_conf",
+                "__data" : "nvmeib_mgmt_to_client_volume_configuration"
+        },
+        "update_volumes_message" : {
+                "//" : "Message with a list of volumes to attach with complete configuration for each (downstream)",
+                "__type" : "msg",
+                "__opcode" : 91,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__priority" : 1,
+                "__typename" : "nvmeib_mgmt_to_client_update_volumes",
+                "__enableCache" : true,
+                "__prepack": "fix_and_split_vol_conf",
+                "__data" : "nvmeib_mgmt_to_client_volume_configuration"
+        },
+        "nvmeib_mgmt_to_client_volume_configuration" : {
+                "__type" : "used",
+                "messageTypeVersion": "I",
+                "cli_unique_id" : "16s",
+                "attachmentsVersion" : "i",
+                "updateType" : "__codec WithDefaultCodec(MultiValCodec({'full' : 0, 'incremental' : 1, 'TOMA_VOL_CONFIG_TO_LOCAL_CLNT' : 2}), 'full')",
+                "expect_more_cmd_with_identical_av" : "I",
+                "volumes" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_volume_conf",
+                        "__counter" : "n_volumes",
+                        "__offset" : "volumes"
+                },
+                "targets": {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_target_conf",
+                        "__counter" : "n_targets",
+                        "__offset" : "targets"
+                }
+        },
+        "update_targets_nics" : {
+                "//" : "Message from the management to update initial target information",
+                "__type" : "msg",
+                "__opcode" : 93,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__priority" : 1,
+                "__typename" : "nvmeib_mgmt_to_client_update_targets_nics",
+                "__enableCache" : true,
+                "__prepack": "split_update_tgt_nics",
+                "refcount": "__codec WithDefaultCodec(PodCodec('I'), 1)",
+                "targets": {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_target_conf",
+                        "__counter" : "n_targets",
+                        "__offset" : "targets"
+                }
+        },
+        "nvmeibc_target_nics_query" : {
+                "//" : "an entry used to query for a target information at management",
+                "__type" : "used",
+                "nodeUUID" : "64s",
+                "node_id" : "128s",
+                "nicsVersion" : "i"
+        },
+        "get_targets_nics" : {
+                "//" : "A request to get nics information of a target",
+                "__type" : "msg",
+                "__opcode" : 94,
+                "__upstream" : true,
+                "__downstream" : false,
+                "__priority" : 1,
+                "__typename" : "nvmeib_client_to_mgmt_get_target_nics",
+                "__messageType": "getTargetNICs",
+                "__route": "/clients/getTargetNICs",
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 2,
+                "__enableCache" : true,
+                "upstream_header": "kafka_header_s",
+                "version" : "48s",
+                "branch" : "__codec BranchCodec()",
+                "commit" : "__codec CommitCodec()",
+                "client_status" : "i",
+                "targets" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_target_nics_query",
+                        "__counter" : "n_targets",
+                        "__offset" : "targets"
+                }
+        },
+        "get_client_configuration_msg" : {
+                "//" : "Request for full client configuration (upstream)",
+                "__type" : "msg",
+                "__opcode" : 21,
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 2,
+                "__upstream" : true,
+                "__downstream" : false,
+                "__enableCache" : true,
+                "__route" : "/clients/getConfiguration",
+                "__messageType": "getConfiguration",
+                "upstream_header": "kafka_header_s",
+                "cli_unique_id" : "16s",
+                "configurationVersion" : "i",
+                "volumes" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_volume_status_payload",
+                        "__counter" : "n_volumes",
+                        "__offset" : "volumes"
+                }
+        },
+        "nvmeibc_volume_status_payload" : {
+                "//" : "volume status description",
+                "__type" : "used",
+                "vol_status": "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "version" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "io_perm" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "ioEnabled" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "is_hidden": "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "uuid" : "64s",
+				"attachment_version_per_volume" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "reservation" : "nvmeibc_reservation",
+                "emulation" : "nvmeibc_emulation",
+                "stackStatus" : "__codec MultiFlagCodec({'lvolStackReady' : 0, 'cryptoStackReady' : 1, 'cryptoKeySet' : 2})",
+                "name" : "32s",
+                "referenceIDs" : {
+					"__type" : "array",
+					"__typename" : "nvmeibc_reference_id",
+					"__counter" : "n_ref_ids",
+					"__offset" : "referenceIDs"
+				}
+        },
+        "nvmeibc_config_profile" : {
+                "//" : "configuration profile sent to management",
+                "__type" : "used",
+                "id" : "64s",
+                "name" : "64s",
+                "version" : "i"
+        },
+        "volume_status_message": {
+                "//": "Message with volume status information (upstream)",
+                "__type" : "msg",
+                "__postunpack" : "fix_vol_stat_msg",
+                "__opcode" : 2,
+                "__typename" : "nvmeib_client_to_mgmt_vol_info",
+                "__route" : "/clients/updateAttachmentStatus",
+                "__upstream" : true,
+                "__downstream" : false,
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 2,
+                "__messageType": "updateAttachmentStatus",
+                "upstream_header": "kafka_header_s",
+                "reportID" : "q",
+                "client_status" : "i",
+                "attachments" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_volume_status_payload",
+                        "__counter" : "n_volumes",
+                        "__offset" : "attachments"
+                }
+        },
+        "client_registration_message" : {
+                "//": "Initial message with all attached volumes. Note - should only be used to send to cli",
+                "__type" : "msg",
+                "__opcode" : 17,
+                "__upstream" : true,
+                "__downstream" : false,
+                "__typename" : "nvmeib_client_to_mgmt_init",
+                "__route" : "/registerToEvents",
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 1,
+                "__enableCache" : false,
+                "cli_unique_id" : "16s",
+                "clientToken" : "Q",
+                "attachedVolumes" : {
+                        "__type" : "array",
+                        "__typename" : "nvmeibc_volume_status_payload",
+                        "__counter" : "n_volumes",
+                        "__offset" : "volumes"
+                }
+        },
+        "volume_deletion_payload" : {
+                "__type" : "used",
+                "//" : "TODO - remove if unused",
+                "health" : "32s",
+                "volumeID" : "32s",
+                "uuid" : "64s"
+        },
+        "volume_deletion_message" : {
+                "//" : "Message to ensure we detach a deleted volume (downstream)",
+                "__type" : "msg",
+                "__opcode" : 27,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__typename" : "delete_message",
+                "messageTypeVersion": "I",
+                "health" : "32s",
+                "volumeID" : "32s",
+                "uuid" : "64s"
+        },
+        "volume_detach_payload" : {
+                "__type" : "used",
+                "force" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "upgrade" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+				"attachment_version_per_volume" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "name" : "32s",
+                "uuid" : "64s"
+        },
+        "volume_detach_message" : {
+                "//" : "Message to request we detach a volume (downstream)",
+                "__type" : "msg",
+                "__opcode" : 92,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__typename" : "detach_message",
+                "messageTypeVersion": "I",
+                "attachmentsVersion" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "volumes" : {
+                        "__type" : "array",
+                        "__typename" : "volume_detach_payload",
+                        "__counter" : "n_volumes",
+                        "__offset" : "volumes"
+                }
+        },
+        "volume_version_info" : {
+                "//" : "holds information about single volume version",
+                "__type" : "used",
+                "ID" : "64s",
+                "version" : "i"
+        },
+        "volume_version_id" : {
+                "//" : "holds single volume uuid",
+                "__type" : "used",
+                "val" : "64s"
+        },
+        "attachment_version_info" : {
+                "//" : "holds information about single attachment version",
+                "__type" : "used",
+                "ID" : "64s",
+                "version" : "i"
+        },
+        "client_keep_alive" : {
+                "//" : "sent by the client periodically to report its status (upstream)",
+                "__type" : "msg",
+                "__opcode" : 50,
+                "__upstream" : true,
+                "__downstream" : false,
+                "__typename" : "nvmeibc_client_keep_alive_message",
+                "__route" : "/clients/keepAlive",
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 1,
+                "__messageType": "keepalive",
+                "upstream_header": "kafka_header_s",
+                "configProfile" : "nvmeibc_config_profile",
+                "version" : "48s",
+                "featureCompatibilityVersion" : "__codec ClientAPIVersionCodec()",
+                "branch" : "__codec BranchCodec()",
+                "commit" : "__codec CommitCodec()",
+                "client_status" : "i",
+                "attachmentsUUIDHash" :  {
+                        "__type": "array",
+                        "__codec" : "SimpleStringArrayToHash",
+                        "__typename" : "volume_version_id",
+                        "__counter" : "n_vols_id",
+                        "__offset" : "attachmentsUUIDHash"
+                },
+                "hasWIPOperations" : "i",
+                "attachmentsVersion" : "i",
+                "volumeVersionsSum" : "I",
+                "timestamp" : "__codec SecsSinceEpoch()",
+                "nHiddenVolumes " : "I"
+        },
+        "kafka_header_s": {
+                "__type" : "used",
+                "messageTypeVersion": "__codec WithDefaultCodec(PodCodec('I'), 1)",
+                "clientID" : "__codec HostNameCodec()",
+                "messageSequence" : "q",
+                "clientToken" : "q",
+                "keepaliveInterval" : "I",
+                "isUmClient" : "__codec BoolToIntCodec(PodCodec('H'))"
+        },
+        "nvmeibc_log_info": {
+                "//": "The container of the log info",
+                "__type": "used",
+                "level": "8s",
+                "header": "96s",
+                "message": "128s",
+                "id": "Q"
+        },
+        "management_log_message": {
+                "//" : "Log to mgmt (upstream)",
+                "__type": "msg",
+                "__route" : "/log",
+                "__opcode": 28,
+                "__upstream": true,
+                "__downstream": false,
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 1,
+                "__typename": "nvmeib_mcs_log",
+                "__messageType": "log",
+                "upstream_header": "kafka_header_s",
+                "__data": "nvmeibc_log_info"
+        },
+        "update_management_log_message": {
+                "//" : "Update log in mgmt (upstream)",
+                "__type": "msg",
+                "__route" : "/updateLog",
+                "__opcode": 32,
+                "__upstream": true,
+                "__downstream": false,
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 1,
+                "__typename": "nvmeib_mcs_update_log",
+                "__messageType": "updateLog",
+                "upstream_header": "kafka_header_s",
+                "__data": "nvmeibc_log_info"
+        },
+        "ack_management_log_message": {
+                "//" : "Ack log in mgmt (upstream)",
+                "__type": "msg",
+                "__route" : "/ackLog",
+                "__opcode": 33,
+                "__upstream": true,
+                "__downstream": false,
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 1,
+                "__typename": "nvmeib_mcs_ack_log",
+                "__messageType": "ackLog",
+                "upstream_header": "kafka_header_s",
+                "header": "96s",
+                "id": "Q"
+        },
+        "vol_config_error" : {
+                "__type" : "used",
+                "entityName": "__codec WithDefaultCodec(PodCodec('32s'), '')",
+                "entityUUID": "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "err": "__codec WithDefaultCodec(PodCodec('255s'), 'None')",
+                "cli_unique_id" : "16s"
+        },
+        "error_response": {
+                "//" : "Error message from management to client in case of unknown / reservation issue with volume attach request for (downstream)",
+                "__type": "msg",
+                "__opcode": 25,
+                "__upstream": false,
+                "__downstream": true,
+                "__typename": "nvmeib_mcs_error",
+                "messageTypeVersion": "I",
+                "payload" : {
+                        "__type" : "array",
+                        "__typename" : "vol_config_error",
+                        "__counter" : "n_errors",
+                        "__offset" : "errors"
+                }
+        },
+        "update_client_token" : {
+                "//" : "Message from management to client for updating the token, message sequence and reportID (downstream)",
+                "__type" : "msg",
+                "__opcode" : 69,
+                "__typename" : "update_client_token_message",
+                "__upstream" : false,
+                "__downstream" : true,
+                "messageTypeVersion": "I",
+                "messageSequence" : "q",
+                "clientToken" : "q",
+                "reportID" : "q",
+                "keepaliveInterval" : "__codec WithDefaultCodec(PodCodec('I'), 5)",
+                "attachmentsVersion" : "i"
+        },
+        "cache_replay_end" : {
+                "//": "message sent after the replay of the mcs cache",
+                "__type" : "msg",
+                "__opcode" : 55,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__typename" : "nvmeib_message_cache_replay_end",
+                "messageTypeVersion": "I"
+        },
+        "Confirmed_delivery" : {
+                "//" : "Downstream message, sent by the MCS to allow a reliable connection between the MCS and the Client",
+                "__type" : "msg",
+                "__opcode" : 59,
+                "__upstream" : false,
+                "__downstream" : true,
+                "__typename" : "nvmeibc_mcs_downstream_ack",
+                "messageTypeVersion": "I",
+                "messageToken" : "__codec UuidCodec()"
+        },
+        "invalid_mcs_opcode" : {
+                "//" : "An mcs message from management to client designed to trigger the invalid opcode path in the client (downstream)",
+                "__type" : "msg",
+                "__opcode" : 1,
+                "__upstream" : false,
+                "__downstream" : true,
+                "messageTypeVersion": "I",
+                "__typename" : "invalid_mcs_opcode_message"
+        }
+}

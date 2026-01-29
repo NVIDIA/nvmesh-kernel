@@ -1,0 +1,347 @@
+---
+bdev_lvol_get_lvstores:
+  type: UmRpcParser
+  metric_prefix: 'nvmesh_lvol_store'
+  metrics:
+    free_clusters:
+      help: 'number of free clusters'
+
+bdev_get_iostat:
+  type: UmRpcLvolParser
+  metric_prefix: 'nvmesh_lvol_io'
+  transform: '{tick_rate: tick_rate, bdev: bdevs[0]}'
+  glob_labels_re: '-b (?P<volume_name>\S+)'
+  metrics:
+    tick_rate:
+      help: 'tick rate for rpc'
+    latency:
+      pattern_labels_re: 'bdev_(?P<op>\w+)_latency_ticks'
+      help: 'lvol io stat latency'
+
+nvmesh_rpc_operation@volume@VOLUME_IO_STATS_SIZE:
+  type: UmRpcOperationParser
+  metric_prefix: 'nvmesh_client_volume_io'
+  glob_labels_re: '--name (?P<volume_name>\S+) '
+  metrics:
+    size:
+      pattern_labels_re: 'summary_chosen_cores_(?P<op>\w+)_bytes_(?P<io_size>\w+)_sum'
+      help: 'IO stat for volume'
+      type: 'counter'
+    latency:
+      pattern_labels_re: 'summary_chosen_cores_(?P<op>\w+)_latency_(?P<io_size>\w+)_sum'
+      help: 'IO stat for volume'
+      type: 'counter'
+    ops:
+      pattern_labels_re: 'summary_chosen_cores_(?P<op>\w+)_ops_(?P<io_size>\w+)_sum'
+      help: 'IO stat for volume'
+      type: 'counter'
+
+nvmesh_rpc_operation@disk@DISK_IO_STATS_SIZE:
+  type: UmRpcOperationParser
+  metric_prefix: 'nvmesh_client_disks_io'
+  glob_labels_re: '--name (?P<disk_sn>\S+) '
+  metrics:
+    size:
+      pattern_labels_re: 'summary_chosen_cores_(?P<op>\w+)_bytes_(?P<io_size>\w+)_sum'
+      help: 'IO size for disk by operation'
+      type: 'counter'
+    latency:
+      pattern_labels_re: 'summary_chosen_cores_(?P<op>\w+)_latency_(?P<io_size>\w+)_sum'
+      help: 'IO latency for disk by operation'
+      type: 'counter'
+    ops:
+      pattern_labels_re: 'summary_chosen_cores_(?P<op>\w+)_ops_(?P<io_size>\w+)_sum'
+      help: 'IO ops for disk by operation'
+      type: 'counter'
+
+
+nvmesh_rpc_operation@volume@VOLUME_DP_STATS:
+  type: UmRpcOperationParser
+  metric_prefix: 'nvmesh_client_volume_dp_stats'
+  glob_labels_re: '--name (?P<volume_name>\S+) '
+  metrics:
+    err_bad_read_metadata_sum:
+      pattern_labels_re: "summary_chosen_cores_err_bad_read_metadata_sum"
+      help: "meta-data validation failed on read"
+    err_bad_read_sectors_sum:
+      pattern_labels_re: "summary_chosen_cores_err_bad_read_sectors_sum"
+      help: "read failed"
+    err_io_aborts_sum:
+      pattern_labels_re: "summary_chosen_cores_err_io_aborts_sum"
+      help: "IOs that were aborted (timeout)"
+    err_io_failures_sum:
+      pattern_labels_re: "summary_chosen_cores_err_io_failures_sum"
+      help: "IOs that failed"
+    err_stale_locks_sum:
+      pattern_labels_re: "summary_chosen_cores_err_stale_locks_sum"
+      help: "stale locks seen"
+    err_sync_failures_sum:
+      pattern_labels_re: "summary_chosen_cores_err_sync_failures_sum"
+      help: "syncs that failed"
+    io_inflight_sum:
+      pattern_labels_re: "summary_chosen_cores_io_inflight_sum"
+      help: "IOs inflight "
+    io_pending_sum:
+      pattern_labels_re: "summary_chosen_cores_io_pending_sum"
+      help: "IOs pending (queued)"
+    io_retries_sum:
+      pattern_labels_re: "summary_chosen_cores_io_retries_sum"
+      help: "IOs that were retried internally"
+    sync_successes_sum:
+      pattern_labels_re: "summary_chosen_cores_sync_successes_sum"
+      help: "syncs that succeeded "
+    syncs_active_sum:
+      pattern_labels_re: "summary_chosen_cores_syncs_active_sum"
+      help: "currently running syncs"
+
+nvmesh_rpc_operation@volume@VOLUME_STATUS:
+  type: UmRpcOperationParser
+  metric_prefix: 'nvmesh_client_volume'
+  query_labels:
+    volume_uuid: 'uuid'
+  glob_labels_re: '--name (?P<volume_name>\S+) '
+  metrics:
+    io_enabled:
+      help: "is IO enabled"
+    md_enabled:
+      help: "is MD enabled"
+  aggregates:
+    segment_statuses:
+      help: 'statuses of segments'
+      aggregate_by:
+        act:
+          query: 'chunks[].praids[].topologies.active.segments[]."segment registered"'
+        paused:
+          query: 'chunks[].praids[].topologies.active.segments[].paused'
+
+./test/iostats_dummy*.json:
+  metric_prefix: 'nvmesh_client_volume_io'
+  glob_labels_re: './test/iostats_dummy(?P<volume_name>[_\-+=\w]+).json'
+  metrics:
+    size:
+      pattern_labels_re: 'stats_(?P<io_size>\w+)_size_(?P<op>\w+)'
+      help: 'IO stat for volume'
+      type: 'counter'
+    latency:
+      pattern_labels_re: 'stats_(?P<io_size>\w+)_latency_(?P<op>\w+)'
+      help: 'IO stat for volume'
+      type: 'counter'
+    ops:
+      pattern_labels_re: 'stats_(?P<io_size>\w+)_ops_(?P<op>\w+)'
+      help: 'IO stat for volume'
+      type: 'counter'
+
+./test/disk_iostats_dummy*.json:
+  metric_prefix: 'nvmesh_client_disks_io'
+  glob_labels_re: './test/disk_iostats_dummy(?P<disk_sn>\w+(\.\d+)?).json'
+  metrics:
+    size:
+      pattern_labels_re: 'stats_(?P<io_size>\w+)_size_(?P<op>\w+)'
+      help: 'IO size for disk by operation'
+      type: 'counter'
+    latency:
+      pattern_labels_re: 'stats_(?P<io_size>\w+)_latency_(?P<op>\w+)'
+      help: 'IO latency for disk by operation'
+      type: 'counter'
+    ops:
+      pattern_labels_re: 'stats_(?P<io_size>\w+)_ops_(?P<op>\w+)'
+      help: 'IO ops for disk by operation'
+      type: 'counter'
+
+./test/kv_dummy*:
+  type: KeyValueProcParser
+  metric_prefix: 'nvmesh_client_disks_counter'
+  glob_labels_re: './test/kv_dummy(?P<disk_sn>\w+(\.\d+)?)'
+  metrics:
+    n:
+      pattern_labels_re: 'n_(?P<ctr_lvl>\w+?)_(?P<ctr_name>\w+)'
+      help: 'number of disks counter occurrences'
+      type: 'counter'
+
+./test*/status_dummy*:
+  metric_prefix: 'nvmesh_client_volume'
+  glob_labels_re: './test/status_dummy(?P<volume_name>[_\-+=\w]+).json'
+  query_labels:
+    volume_uuid: 'uuid'
+  metrics:
+    io_enabled:
+      help: "is IO enabled"
+
+./test/status_dummy*.json:
+  metric_prefix: 'nvmesh_client_volume'
+  glob_labels_re: './test/status_dummy(?P<volume_name>[_\-+=\w]+).json'
+  query_labels:
+    volume_uuid: 'uuid'
+    edic: 'dp_flags.edic'
+    local_read: 'dp_flags.local_read'
+    elev: 'dp_flags.elev'
+    snake: 'dp_flags.snake'
+    jent: 'dp_flags.jent'
+    io_perm: 'topo.io_perm'
+    can_view_lock: 'topo.can_view_lock'
+  metrics:
+    reservation_version:
+      help: 'attachment reservation_version'
+      type: 'counter'
+    rvms:
+      help: 'attachment RVMS'
+      type: 'counter'
+    dp_flags_alw:
+      help: 'data path number of alignment sector write'
+      type: 'counter'
+    dp_flags_alr:
+      help: 'data path number of alignment sector read'
+      type: 'counter'
+    topo_cur:
+      help: 'current topology index'
+      type: 'gauge'
+    topo_freed:
+      help: 'last freed topology index'
+      type: 'gauge'
+    topo_conf_ver:
+      help: 'configuration version of current topology'
+      type: 'counter'
+    topo_nr:
+      help: 'current topology number of reconfiguring segments'
+      type: 'gauge'
+    topo_ns:
+      help: 'current topology volume size after reconfiguring'
+      type: 'gauge'
+    sync_stats:
+      pattern_labels_re: 'sync_stas_(?P<sync_stat>\w+)'
+      help: 'syncs statstics'
+      type: 'gauge'
+    failed_io:
+      pattern_labels_re: 'failed_io_(?P<fail_type>\w+)'
+      help: 'number of failed io by failure type'
+      type: 'counter'
+    resubmission:
+      pattern_labels_re: 'resubmittion_(?P<resub_cntr>\w+)'
+      help: 'number of resubmissions by type'
+      type: 'counter'
+    internal_err:
+      pattern_labels_re: 'internal_err_(?P<internal_err_cntr>\w+)'
+      help: 'number of internal errors by type'
+      type: 'counter'
+    mgmt_alert_last_armed_sec:
+      pattern_labels_re: 'mgmt_alerts_last_armed_sec_(?P<armed_type>\w+)'
+      help: 'number of internal errors by type'
+      type: 'gauge'
+    mgmt_alert_stats:
+      pattern_labels_re: 'mgmt_alerts_stats_(?P<alert_stat>\w+)'
+      help: 'management alert stats'
+      type: 'gauge'
+    num_slow_locks:
+      pattern_labels_re: 'slow_locks_num_locks'
+      help: 'num of slow locks'
+      type: 'gauge'
+  aggregates:
+    attached_total: &att_stat
+      help: 'number of attached volume'
+      aggregate_by:
+        io_state:
+          query: 'status'
+        visibility:
+          query: 'type'
+      ignore:
+        - 'volume_name'
+        - 'volume_uuid'
+        - 'edic'
+        - 'local_read'
+        - 'elev'
+        - 'snake'
+        - 'jent'
+        - 'io_perm'
+        - 'can_view_lock'
+    attach_status_per_volume:
+      <<: *att_stat
+      help: 'Attachment status per volume'
+      ignore:
+        - 'edic'
+        - 'local_read'
+        - 'elev'
+        - 'snake'
+        - 'jent'
+        - 'io_perm'
+        - 'can_view_lock'
+    segment_statuses:
+      help: 'statuses of segments'
+      aggregate_by:
+        act:
+          query: 'topo.chunks[].prs[].segs[].act'
+        paused:
+          query: 'topo.chunks[].prs[].segs[].disk.paused'
+      ignore:
+        - 'edic'
+        - 'local_read'
+        - 'elev'
+        - 'snake'
+        - 'jent'
+        - 'io_perm'
+        - 'can_view_lock'
+
+./test/client_status_dummy.json:
+  metric_prefix: 'nvmesh_client'
+  metrics:
+    main_mcs_report_id:
+      help: 'MCS report id'
+      type: 'counter'
+    main_cluster_config_ver:
+      help: 'cluster config version'
+      type: 'gauge'
+    main_cluster_proto_ver:
+      help: 'cluster protocol version'
+      type: 'gauge'
+    main_n_messages_mcs:
+      help: 'number of mcs messages'
+      type: 'counter'
+    main_n_messages_cli:
+      help: 'number of cli messages'
+      type: 'counter'
+    main_n_messages_wq:
+      help: 'number of wq messages'
+      type: 'counter'
+
+./test/toma_leader_status_dummy.json:
+  metric_prefix: nvmesh_toma
+  metrics:
+    raft_time_since_converted_to_leader:
+      help: 'bla'
+      type: 'counter'
+
+./test/toma_leader_status_dummy.json|1:
+  extends: "0"
+  drops:
+    - metrics.raft_time_since_converted_to_leader
+  metric_prefix: nvmesh_toma_raft
+  transform: 'RAFT.peer_members'
+  query_labels:
+    peer_member: 'member'
+  metrics:
+    time_since_voted_for_me_on_cur_term:
+      help: 'bla1'
+      type: 'counter'
+
+./test//toma_leader_status_dummy.json:
+  metric_prefix: nvmesh_toma_raft
+  transform: 'RAFT.peer_members'
+  query_labels:
+    peer_member: 'member'
+  metrics:
+    time_since_voted_for_me_on_cur_term:
+      help: 'bla1'
+      type: 'counter'
+
+./test/memmgr_info_dummy.json:
+  metric_prefix: 'nvmesh_client_memmgr_info'
+  transform: >-
+    {version: version, metrics: ["metrics.all_cpus"][] | [?name=='memory.allocated'] }
+  collections:
+    metrics:
+      query_labels_list:
+        names: [ 'name', 'module', 'component' ]
+        path: 'labels'
+      metrics:
+        value:
+          help: "bla"
+          type: "counter"

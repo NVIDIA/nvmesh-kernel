@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+source ./transfer_lists
+
+#if [ -d management ] ; then
+#	if [ -x install-management ] ; then
+#		tar czf management.tgz management
+#		cat install-management management.tgz > install-management.ses.sh
+#		chmod +x install-management.ses.sh
+#	else
+#		echo "install-management script not found, or not executable. Skipping generation of management installation"
+#	fi
+#else
+#	echo "No management directory found. Skipping generation of management installation"
+#fi
+
+
+tar czf base.tgz $base_tools_transfer_list
+
+target_opt=""
+for x in $optional_target_transfer_list; do
+	if [[ -e $x ]]; then
+		target_opt="$target_opt $x"
+	fi
+done
+
+tar czf target.tgz $target_transfer_list $toma_symbols $target_opt
+#	cat install-node node.tgz > install-node.ses.sh
+#	chmod +x install-node.ses.sh
+
+common_opt=""
+for x in $optional_common_transfer_list; do
+	if [[ -e $x ]]; then
+		common_opt="$common_opt $x"
+	fi
+done
+
+
+tar czf common.tgz $common_transfer_list $common_opt
+
+tar czf client.tgz $client_transfer_list
+#	cat install-client client.tgz > install-client.ses.sh
+#	chmod +x install-client.ses.sh

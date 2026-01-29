@@ -1,0 +1,32 @@
+{
+  "RAFT": {
+    "leader_name": "nvme28.mtl.labs.mlnx",
+    "n_peers_voted_for_me": 3,
+    "Role": "leader",
+    "mature": "Yes",
+    "time_since_converted_to_leader": 695957.807544,
+    "peer_members": [
+      {
+        "member": "nvme26.mtl.labs.mlnx",
+        "time_since_voted_for_me_on_cur_term": 0.73989,
+        "is_alive_for_topo": 1,
+        "topo_version": 12884901891,
+        "kafka_offset": 1
+      },
+      {
+        "member": "nvme28.mtl.labs.mlnx",
+        "time_since_voted_for_me_on_cur_term": 0.74430,
+        "is_alive_for_topo": 1,
+        "topo_version": 12884901891,
+        "kafka_offset": 1
+      },
+      {
+        "member": "nvme27.mtl.labs.mlnx",
+        "time_since_voted_for_me_on_cur_term": 0.74026,
+        "is_alive_for_topo": 1,
+        "topo_version": 12884901891,
+        "kafka_offset": 1
+      }
+    ]
+  }
+}

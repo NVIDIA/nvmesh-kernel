@@ -1,0 +1,103 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+config_file=/etc/nvmesh/nvmesh.conf
+
+if [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
+    echo "Usage: $(basename "$0") [--addresses <nvme42:4001,nvme43:4001> --protocol <https/http> --kafka_servers <nvme1070:9092>]"
+        exit 0
+fi
+
+isValidIport () {
+	if [[ ! $1 =~ ^(http|https):\/\/.+:[0-9]{1,5}$ ]]; then	
+		return 1
+	fi
+
+	iportArray=(${1//:/ })
+	port=${iportArray[2]}
+
+	if [[ "$port" -gt 65535 ]] ; then
+		echo "Port number not in range! please choose valid port number (0-65535)"
+		return 1
+	fi
+}
+
+if [ `id -un` != "root" ] ; then
+        echo "This script needs to run as root."
+        exit 1
+fi
+
+if [[ $1 == "--addresses" ]]; then
+	originalAddresses=$2
+	addressesArray=(${originalAddresses//,/ })
+	for address in ${addressesArray[@]} ;
+	do
+		! isValidIport http://$address && echo "Invalid ip/hostname" && exit 1
+	done
+
+	addresses=$addressesArray
+	shift
+	shift
+fi
+
+if [[ $1 == "--protocol" ]]; then
+	! isValidIport $2://something:123 && echo "Invalid protocol" && exit 1
+	protocol=$2
+	shift
+	shift
+fi
+
+if [[ $1 == "--kafka_servers" ]]; then
+	originalKafkaServers=$2
+	addressesArray=(${originalKafkaServers//,/ })
+	for address in ${addressesArray[@]} ;
+	do
+		! isValidIport http://$address && echo "Invalid ip/hostname" && exit 1
+	done
+
+	kafka_servers=$addressesArray
+	shift
+	shift
+fi
+
+if [ -z "$protocol" ]; then
+	echo "Please insert the protocol you want to use: (http or https)"
+	read protocol
+	! isValidIport $protocol://something:123 && echo "Invalid protocol" && exit 1
+fi
+
+if [ -z "$addresses" ]; then
+	echo "Please insert the ip address/hostname and port of the management, in case the're more than one, please separate by comma (ex: 10.0.1.47:4001,10.0.1.52:4001)"
+	read originalAddresses
+	addressesArray=(${originalAddresses//,/ })
+	for address in ${addressesArray[@]} ;
+	do
+		! isValidIport http://$address && echo "Invalid ip/hostname" && exit 1
+	done
+
+	addresses=$addressesArray
+fi
+
+if [ -z "$kafka_servers" ]; then
+	echo "Please insert the ip address/hostname and port of the kafka servers, in case the're more than one, please separate by comma (ex: nvme1070:9092,nvme1072:9092)"
+	read originalKafkaServers
+	addressesArray=(${originalKafkaServers//,/ })
+	for address in ${addressesArray[@]} ;
+	do
+		! isValidIport http://$address && echo "Invalid ip/hostname for kafka server" && exit 1
+	done
+
+	kafka_servers=$addressesArray
+fi
+
+if [ -e "$config_file" ] ; then
+	sed -i 's/^[ ]*MANAGEMENT_PROTOCOL="[^"]*"/MANAGEMENT_PROTOCOL="'$protocol'"/g' $config_file
+	sed -i 's/^[ ]*MANAGEMENT_SERVERS="[^"]*"/MANAGEMENT_SERVERS="'$originalAddresses'"/g' $config_file
+	sed -i 's/^[ ]*KAFKA_SERVERS="[^"]*"/KAFKA_SERVERS="'$originalKafkaServers'"/g' $config_file
+else
+        echo 'MANAGEMENT_PROTOCOL="'$protocol'"' >> $config_file
+        echo 'MANAGEMENT_SERVERS="'$originalAddresses'"' >> $config_file
+        echo 'KAFKA_SERVERS="'$originalKafkaServers'"' >> $config_file
+fi

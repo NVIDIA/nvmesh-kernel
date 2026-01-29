@@ -1,0 +1,230 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+/* kth library events */
+KTH_EVENT(nke_start)
+KTH_EVENT(nke_stop)
+KTH_EVENT(nke_timeout)
+KTH_EVENT(nke_resume)
+KTH_EVENT(nke_private)
+KTH_EVENT(nke_kth_done)
+KTH_EVENT(nke_async_fin)
+KTH_EVENT(nke_kth_last)
+
+KTH_EVENT_SEP_S(nke_kth_common_events, nke_kth_last + 1)
+
+/* rdma events */
+KTH_EVENT(ri_rdma_cm)
+KTH_EVENT(ri_ib_cm)
+KTH_EVENT(ri_ib_path)
+
+KTH_EVENT_SEP_E(nke_kth_common_events_last)
+
+KTH_EVENT_SEP_S(nke_kth_client_events, nke_kth_common_events_last + 1)
+
+/* c_main events */
+KTH_EVENT(me_nic_add)
+KTH_EVENT(me_nic_remove)
+KTH_EVENT(me_nic_removed)
+KTH_EVENT(me_disk_remove)
+KTH_EVENT(me_msgloop)
+KTH_EVENT(me_setup_volume)
+KTH_EVENT(me_remove_volume)
+KTH_EVENT(me_remove_volume_from_disk)
+KTH_EVENT(me_local_server_add)
+KTH_EVENT(me_local_server_remove)
+KTH_EVENT(me_local_server_removed)
+KTH_EVENT(me_detach_all)
+KTH_EVENT(me_run_on_main)
+
+KTH_EVENT(ne_nic_disk_add)
+KTH_EVENT(ne_nic_disk_remove)
+KTH_EVENT(ne_disk_update_done)
+KTH_EVENT(ne_ib_event)
+
+/* c_volume events */
+KTH_EVENT(ve_update)
+KTH_EVENT(ve_disk_ack)
+KTH_EVENT(ve_generic_work)
+KTH_EVENT(ve_detach)
+KTH_EVENT(ve_start)
+KTH_EVENT(ve_htr_start)
+KTH_EVENT(ve_htr_done)
+
+/* disk events */
+KTH_EVENT(de_nic_add)
+KTH_EVENT(de_nic_remove)
+KTH_EVENT(de_nic_update)
+KTH_EVENT(de_volume_add)
+KTH_EVENT(de_volume_remove)
+KTH_EVENT(de_local_server_add)
+KTH_EVENT(de_local_server_remove)
+KTH_EVENT(de_update_write_status)
+KTH_EVENT(de_channel_fill)
+KTH_EVENT(de_release)
+KTH_EVENT(de_release_done)
+KTH_EVENT(de_connect_done)
+KTH_EVENT(de_new_configuration)
+KTH_EVENT(de_toma_send_finished)
+KTH_EVENT(de_ask_resource)
+KTH_EVENT(de_return_resource)
+KTH_EVENT(de_wakeup_connect)
+KTH_EVENT(de_toma_op)
+KTH_EVENT(de_start)
+
+/* disk discover events */
+KTH_EVENT(dde_find_path_finished)
+KTH_EVENT(dde_connect_finished)
+KTH_EVENT(dde_read_io_finished)
+KTH_EVENT(dde_access_map_finished)
+KTH_EVENT(dde_request_resources_finished)
+KTH_EVENT(dde_connect_local_server_lock_channel_finished)
+
+/* disk release events */
+KTH_EVENT(dre_arnic_finished)
+
+/* admin channel */
+KTH_EVENT(ach_find_path)
+KTH_EVENT(ach_connect)
+KTH_EVENT(ach_read_io)
+KTH_EVENT(ach_access_map)
+KTH_EVENT(ach_request_resources)
+KTH_EVENT(ach_rsc_get_done)
+KTH_EVENT(ach_start_io_channels)
+KTH_EVENT(ach_rdda_channel_done)
+KTH_EVENT(ach_nrdda_channel_done)
+KTH_EVENT(ach_discovered)
+KTH_EVENT(ach_toma_send)
+KTH_EVENT(ach_lock_ch_connected)
+KTH_EVENT(ach_lock_ch_done)
+KTH_EVENT(ach_allocate_ioch)
+KTH_EVENT(ach_init_ioch)
+KTH_EVENT(ach_allocate_nrddach)
+KTH_EVENT(ach_local_server_login_done)
+KTH_EVENT(ach_connect_local_lock_channel)
+KTH_EVENT(ach_send_comp)
+KTH_EVENT(ach_recv_comp_rep)
+KTH_EVENT(ach_recv_comp_req)
+
+/* lock channel */
+KTH_EVENT(lock_wd)
+KTH_EVENT(lock_disconnect)
+KTH_EVENT(lock_2nd_announce)
+KTH_EVENT(lock_2nd_done)
+
+/* rdda io channel */
+KTH_EVENT(rdda_put_resource)
+KTH_EVENT(rdda_error)
+KTH_EVENT(rdda_done_alloc)
+KTH_EVENT(rdda_done_init_io)
+KTH_EVENT(rdda_done_exec)
+KTH_EVENT(rdda_wd)
+
+/* nrdda io channel */
+KTH_EVENT(nrdda_error)
+KTH_EVENT(nrdda_done_alloc)
+KTH_EVENT(nrdda_done_exec)
+KTH_EVENT(nrdda_wd)
+
+/* ib_net */
+KTH_EVENT(ibn_cq_event)
+KTH_EVENT(ibn_qp_event)
+KTH_EVENT(ibn_sc_event)
+KTH_EVENT(ibn_rc_event)
+KTH_EVENT(ibn_force_disconnect)
+KTH_EVENT(ibn_cq_thread_ready)
+
+/* hot recovery */
+KTH_EVENT(htr_op_comp_event)
+
+/* target */
+KTH_EVENT(tgt_disk_add)
+KTH_EVENT(tgt_release_disk_clients)
+KTH_EVENT(tgt_remove_uuid_client)
+KTH_EVENT(tgt_activate_device)
+KTH_EVENT(tgt_ib_add_one)
+KTH_EVENT(tgt_ib_remove_one)
+KTH_EVENT(tgt_remove_ib_port)
+KTH_EVENT(tgt_refresh_port)
+KTH_EVENT(tgt_port_cleared)
+KTH_EVENT(tgt_disk_free)
+KTH_EVENT(tgt_disk_remove)
+KTH_EVENT(tgt_disk_remove_client)
+KTH_EVENT(tgt_disk_locks_proc_remove)
+KTH_EVENT(tgt_disk_print_clients)
+KTH_EVENT(tgt_release_disks_client)
+KTH_EVENT(tgt_disk_client_locate)
+KTH_EVENT(tgt_disk_is_prefered_port)
+KTH_EVENT(tgt_disk_get)
+KTH_EVENT(tgt_disks_fill)
+KTH_EVENT(tgt_serjios_fill)
+KTH_EVENT(tgt_disks_fill_info)
+KTH_EVENT(tgt_disks_toma_proc_close)
+KTH_EVENT(tgt_disks_free_lock_resources)
+KTH_EVENT(tgt_disk_client_reset_io)
+KTH_EVENT(tgt_disk_put_ref)
+KTH_EVENT(tgt_disk_for_each_lock_mem)
+KTH_EVENT(tgt_disk_put_resource)
+KTH_EVENT(tgt_disk_set_deferred_info)
+KTH_EVENT(tgt_is_local_disk)
+KTH_EVENT(tgt_proc_file)
+KTH_EVENT(tgt_process_journal_info)
+KTH_EVENT(tgt_fill_nics)
+KTH_EVENT(tgt_find_ib_port)
+KTH_EVENT(tgt_client_add_nics_info)
+KTH_EVENT(tgt_client_parse_maps)
+KTH_EVENT(tgt_cm_req_recv)
+KTH_EVENT(tgt_net_event)
+KTH_EVENT(tgt_get_io_info)
+KTH_EVENT(tgt_get_access_info)
+KTH_EVENT(tgt_disk_clear_rm_info)
+
+/* ib_port */
+KTH_EVENT(pe_work_item)
+KTH_EVENT(pe_client_exited)
+KTH_EVENT(pe_local_server_login_request)
+KTH_EVENT(tgt_port_free_client)
+KTH_EVENT(tgt_port_toma_client_dis_req)
+
+/* server's net obj */
+KTH_EVENT(tgt_net_init)
+KTH_EVENT(tgt_net_release)
+KTH_EVENT(tgt_net_release_done)
+KTH_EVENT(tgt_net_drep_comp)
+KTH_EVENT(tgt_net_use_done)
+KTH_EVENT(tgt_net_drain_sq_done)
+
+/* server's client obj */
+KTH_EVENT(tgt_cl_init)
+KTH_EVENT(tgt_cl_rsc_available)
+KTH_EVENT(ce_work_item)
+
+/* netlink event */
+KTH_EVENT(umc_nl)
+KTH_EVENT(umc_disk_add)
+KTH_EVENT(umc_disk_remove)
+KTH_EVENT(umc_dummy_disk_add)
+KTH_EVENT(umc_dummy_disk_remove)
+KTH_EVENT(umc_pd_start)
+KTH_EVENT(umc_pd_stop)
+KTH_EVENT(umc_pd_io)
+KTH_EVENT(umc_pd_trim)
+KTH_EVENT(umc_zero_read)
+KTH_EVENT(umc_zero_write)
+KTH_EVENT(umc_zero_check_write)
+KTH_EVENT(umc_format_start)
+KTH_EVENT(umc_format_end)
+KTH_EVENT(umc_identify_end)
+KTH_EVENT(umc_toma_state)
+KTH_EVENT(umc_serjio_state)
+KTH_EVENT(umc_local_client_down)
+KTH_EVENT(umc_send_msg_process)
+
+KTH_EVENT_SEP_E(nke_kth_client_events_last)
+
+KTH_EVENT_SEP_S(nke_kth_server_events, nke_kth_client_events_last + 1)
+
+KTH_EVENT_SEP_E(nke_kth_server_events_last)
+

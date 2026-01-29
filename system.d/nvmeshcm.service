@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=NVMesh(r) CM
+After=network.target openibd.service
+PartOf=nvmeshclient.service nvmeshum.service
+
+[Service]
+ExecStart=/opt/nvmesh/bin/managementCM start
+PIDFile=/var/run/nvmesh/managementCM.pid
+Type=forking
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=50
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

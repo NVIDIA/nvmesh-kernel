@@ -1,0 +1,149 @@
+{
+        "uptime" : "432546.836",
+        "stats" : {
+                "512B" : {
+                        "ops" : {
+                                "read" : 0,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 0,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 0.0,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                "4K" : {
+                        "ops" : {
+                                "read" : 36,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 147456,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 658.3,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                "8K" : {
+                        "ops" : {
+                                "read" : 2,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 16384,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 37.3,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                "16K" : {
+                        "ops" : {
+                                "read" : 2,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 32768,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 55.5,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                "32K" : {
+                        "ops" : {
+                                "read" : 4,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 98304,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 272.9,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                "64K" : {
+                        "ops" : {
+                                "read" : 6,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 323584,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 425.8,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                "128K" : {
+                        "ops" : {
+                                "read" : 3,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 344064,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 335.8,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                },
+                ">128K" : {
+                        "ops" : {
+                                "read" : 1,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "size" : {
+                                "read" : 258048,
+                                "write" : 0,
+                                "trim" : 0
+                        },
+                        "latency" : {
+                                "read" : 213.0,
+                                "write" : 0.0,
+                                "trim" : 0.0
+                        }
+                }
+        },
+        "type" : 0,
+        "uuid" : "7fdd2c10-90cd-11ed-9c79-45f625fbb4d4",
+	"first": {
+		"second": {
+			"third": "depth_label"
+		}
+	}
+}
+

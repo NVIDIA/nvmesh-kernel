@@ -1,0 +1,555 @@
+ {
+    "version": 1,
+    "metrics.all_cpus": [
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=io_ctrl_topologies;component=raid.io_ctrl.topologies",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=io_ctrl_topologies;component=raid.io_ctrl.topologies",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=io_ctrl_topologies;component=raid.io_ctrl.topologies",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=io_ctrl_topologies;component=raid.io_ctrl.topologies",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=io_ctrl_topologies;component=raid.io_ctrl.topologies",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_recovery_cold;component=raid.io_ctrl.cold",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_recovery_cold;component=raid.io_ctrl.cold",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_recovery_cold;component=raid.io_ctrl.cold",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_recovery_cold;component=raid.io_ctrl.cold",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_recovery_cold;component=raid.io_ctrl.cold",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_recovery_hot;component=raid.io.sync.stale_lock",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_recovery_hot;component=raid.io.sync.stale_lock",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_recovery_hot;component=raid.io.sync.stale_lock",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_recovery_hot;component=raid.io.sync.stale_lock",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_recovery_hot;component=raid.io.sync.stale_lock",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_data_page_buffers;component=raid.io.data",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_data_page_buffers;component=raid.io.data",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_data_page_buffers;component=raid.io.data",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_data_page_buffers;component=raid.io.data",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_data_page_buffers;component=raid.io.data",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_commands_locks_matrix;component=raid.io.locking",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_commands_locks_matrix;component=raid.io.locking",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_commands_locks_matrix;component=raid.io.locking",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_commands_locks_matrix;component=raid.io.locking",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_commands_locks_matrix;component=raid.io.locking",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_commands;component=raid.io.commands",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_commands;component=raid.io.commands",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_commands;component=raid.io.commands",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_commands;component=raid.io.commands",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_commands;component=raid.io.commands",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_sync_operation;component=raid.io.sync",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_sync_operation;component=raid.io.sync",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_sync_operation;component=raid.io.sync",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_sync_operation;component=raid.io.sync",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_sync_operation;component=raid.io.sync",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_io_operation;component=raid.io.user",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_io_operation;component=raid.io.user",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_io_operation;component=raid.io.user",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_io_operation;component=raid.io.user",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_io_operation;component=raid.io.user",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_data_metadata;component=raid.io.data_metadata",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_data_metadata;component=raid.io.data_metadata",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_data_metadata;component=raid.io.data_metadata",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_data_metadata;component=raid.io.data_metadata",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_data_metadata;component=raid.io.data_metadata",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_recovery_problems_report;component=raid.io_ctrl.recovery.problems",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_recovery_problems_report;component=raid.io_ctrl.recovery.problems",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_recovery_problems_report;component=raid.io_ctrl.recovery.problems",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_recovery_problems_report;component=raid.io_ctrl.recovery.problems",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_recovery_problems_report;component=raid.io_ctrl.recovery.problems",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        {
+            "type": "gauge",
+            "name": "memory.allocated",
+            "labels": "module=nvmeibc;name=dp_recov_operation;component=raid.io_ctrl.recovery",
+            "value": 0
+        },
+        {
+            "type": "gauge",
+            "name": "memory.active_allocations",
+            "labels": "module=nvmeibc;name=dp_recov_operation;component=raid.io_ctrl.recovery",
+            "value": 0
+        },
+        {
+            "type": "max_val",
+            "name": "memory.max_allocated",
+            "labels": "module=nvmeibc;name=dp_recov_operation;component=raid.io_ctrl.recovery",
+            "value": 0
+        },
+        {
+            "type": "monotonic_counter",
+            "name": "memory.allocation_failures",
+            "labels": "module=nvmeibc;name=dp_recov_operation;component=raid.io_ctrl.recovery",
+            "value": 0
+        },
+        {
+            "type": "bytes_histogram",
+            "name": "memory.allocation_distribution",
+            "labels": "module=nvmeibc;name=dp_recov_operation;component=raid.io_ctrl.recovery",
+            "meta": "metrics.meta.bytes",
+            "values": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        }
+    ]
+ }

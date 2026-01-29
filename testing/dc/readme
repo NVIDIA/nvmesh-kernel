@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+NVMesh make file will make the test prgram if the 
+build_sh_conf
+include somethings as follows:
+REMOTE_SERVERS+="n174:IM_TEST_DC=yes:MK_RPM=no "
+REMOTE_SERVERS+="n224:IM_TEST_DC=yes:MK_RPM=no "
+
+After the build there will be two modules:
+1. dcc.ko - which is the client side module
+2. dcs.ko - which is the server side module
+
+There will /proc entries on both client and server
+1. /proc/dc_test/dc_test_c - client
+2. /proc/dc_test/dc_test_s - server
+
+To test the modules start with the server by echoing the following:
+
+From the server module directory:
+cd ~/projects/dc_testing/testing/dc; sudo insmod dcs.ko; sudo bash -c 'echo 10.1.2.174:4321 > /proc/dc_test/dc_test_s'
+The IP is the NIC we wish to use use and the port is not necessary but can be kept
+
+From the server module directory:
+cd ~/projects/dc_testing/testing/dc/; sudo insmod dcc.ko; sudo bash -c 'echo 10.1.2.224,10.1.2.174:4321 > /proc/dc_test/dc_test_c'
+The first IP is the local IP we wish to bind and the second IP:PORT is the server side
+  
+The server can run using unmodified OFED code
+The client MUST use a modified OFED - the one on n224  
+
+

@@ -1,0 +1,436 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+MDIR=/opt/nvmesh
+script_path=`readlink -f $0`
+script_dir=`dirname $script_path`
+target_dir=$MDIR/target-repo
+client_dir=$MDIR/client-repo
+config_file=/etc/nvmesh/nvmesh.conf
+infiniband_base=/sys/class/infiniband
+nics_str=''
+need_to_read_entered_nics=false
+
+if [ `id -un` != "root" ] ; then
+        echo "This script needs to run as root."
+        exit 1
+fi
+
+if [ -e $config_file ]; then
+	source $config_file
+else
+	echo "ERROR: $config_file is missing"
+	exit 1
+fi
+
+display_interfaces() {
+	echo "Choose from the following NIC names:"
+
+	echo -en "\e[32m"
+	ls /sys/class/net/
+	echo -en "\e[39m"
+
+	if [ -d "$infiniband_base" ]; then
+		cd $infiniband_base
+		echo "Or choose from the following infiniband NIC names:"
+		infi_nic_list=""
+		infiniband_nic_names=(*)
+		for dir in "${infiniband_nic_names[@]}"; do
+			if [ -d $dir/ports ]; then
+				cd $dir/ports
+				port_numbers=(*)
+				for port in "${port_numbers[@]}"; do
+					link_layer=`cat $port/link_layer`
+					if ! $tcp_enabled || echo "$link_layer" | grep -i "Ethernet" > /dev/null 2>&1; then
+						infi_nic_list="$infi_nic_list$dir:$port  "
+					fi
+				done
+				cd - > /dev/null 2>&1
+			fi
+		done
+
+		if [ -z "$infi_nic_list" ]; then
+			if [ $tcp_enabled ]; then
+				echo "-- No relevant infiniband TCP supporting NICs found --"
+			else
+				echo "-- Infiniband NICs not found --"
+			fi
+		fi
+		echo -e "\e[32m$infi_nic_list\e[39m"
+	fi
+}
+
+display_current_filtered_nics() {
+	if [ ! -z "$CONFIGURED_NICS" ]; then
+		echo "Current configured NIC names:"
+	        echo -en "\e[32m"
+		echo "$CONFIGURED_NICS" | sed -r 's/[;]+/ /g; s/[\/TCP]+/ /g; s/[\/RDMA]+/ /g'
+        	echo -en "\e[39m"
+	else
+		echo "There are no configured NICs."
+	fi
+}
+
+read_entered_nic_names() {
+	if [[ ${IS_INTERACTIVE} -eq 1 ]]; then
+		echo "Please enter NIC names (example: 'ib0') or infiniband device with port (example: 'mlx4_0:1') in the following format: <ib0;mlx4_0:1;eth0>"
+		IFS=';' read -r -a nics_array
+	else
+		IFS=';' read -r -a nics_array <<< "$NICS"
+	fi
+
+	if [ "${#nics_array[@]}" -eq "1" ]; then
+		if echo $nics_array | grep -q "[[:space:]]" > /dev/null 2>&1 || echo $nics_array | grep -q "," > /dev/null 2>&1; then
+			echo "ERROR: NICs should be separeted with ';', space or ',' is an invalid divider."
+			[[ ${IS_INTERACTIVE} -eq 1 ]] && read_entered_nic_names
+			return
+		else
+			NICS_VALID=1
+		fi
+	else
+		NICS_VALID=1
+	fi
+
+	nic_details=''
+	for element in "${nics_array[@]}"
+	do
+		#removing leading and trailing spaces
+		element="$(echo -e "${element}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+		nic_found=false
+		echo "$element - Looking for NIC using ethtool..."
+		nic_details=$(ethtool -P $element 2>/dev/null)
+
+		if [ "$?" -ne 0 ]
+		then
+			echo "$element - Looking for NIC using infiniband..."
+			IFS=':' read -r -a mlx_arr <<< "$element"
+
+			if [ ${#mlx_arr[@]} -eq 2 ]
+			then
+				port_dir="$infiniband_base/${mlx_arr[0]}/ports/${mlx_arr[1]}"
+				[ -r "$port_dir/gids/0" ] && nic_guid=`cat $port_dir/gids/0`
+
+				[ -n "$nic_guid" ] && nic_found=true
+			fi
+
+			if $nic_found && $tcp_enabled; then
+				link_layer=`cat $infiniband_base/${mlx_arr[0]}/ports/${mlx_arr[1]}/link_layer`
+				if echo "$link_layer" | grep -i "InfiniBand" > /dev/null 2>&1; then
+					echo "ERROR: can't use infiniband NIC name with TCP transport type"
+					exit 1
+				fi
+			fi
+		else
+			if $tcp_enabled && [[ "$element" == "ib"* ]]; then
+				echo "ERROR: can't use infiniband NIC name with TCP transport type"
+				exit 1
+			fi
+			nic_found=true
+		fi
+
+		if ! $nic_found
+		then
+			echo "$element - NIC name doesn't exist"
+			echo "== Failed =="
+			exit 1;
+		fi
+
+		if [[ ! $nics_str == *$element* ]]; then
+			nics_str="$nics_str;$element"
+		else
+			echo "NIC duplication found - ignoring"
+		fi
+	done
+}
+
+BOLD=$(tput bold)
+NORMAL=$(tput sgr0)
+
+USAGE_MSG="${BOLD}
+Configure NVMesh NICs.\n
+The script will be run interactively if called without arguments or only with the verbose flag.\n
+Interactive Usage: nvmesh_configure_nics [-v] \n\n
+Non-interactive Usage: nvmesh_configure_nics [-n \"<NICs>\"|-t <yes/no>|-p <yes/no>|-h|-v|-c|-i|-r] \n
+Non-interactive Usage Example: \n Use verbose, enable TCP, configure the following NICs for NVMesh: ib0, mlx4_0:1, eth0, and restart NVMesh services.\n
+nvmesh_configure_nics -v -t yes -n \"ib0;mlx4_0:1;eth0\" -r\n\n
+-h\t    Help\n
+-n\t    NICs that will be configured for NVMesh in the following format: \"<ib0;mlx4_0:1;eth0>\" \n
+-t\t    Enable TCP for NVMesh <yes/no> \n
+-p\t 	Enable IPV4 only for NVMesh <yes/no> \n
+-v\t    Verbose\n
+-c\t    Display currently configured NVMesh NICs\n
+-i\t    Display available interfaces\n
+-r\t    Restart NVMesh services ${NORMAL}"
+
+if [[ -z $1 ]] || [[ "-v" == $1 ]] && [[ -z $2 ]]; then
+	IS_INTERACTIVE=1
+	[[ "-v" == $1 ]] && VERBOSE=1
+else
+	while getopts "n:t:p:hvcir" opt; do
+	case ${opt} in
+		h )
+				echo -e ${USAGE_MSG}
+				exit 0
+		;;
+		n )
+				NICS=$OPTARG
+				need_to_read_entered_nics=true
+		;;
+		t )
+				ENABLE_TCP=$OPTARG
+				ENABLE_TCP="${ENABLE_TCP,,}"
+				if [[ "${ENABLE_TCP}" != "yes" ]] && [[ "${ENABLE_TCP}" != "no" ]]; then
+					echo '-t argument can only accpet a yes/no value.'
+					exit 1
+				fi
+		;;
+		p )
+				ENABLE_IPV4=$OPTARG
+				ENABLE_IPV4="${ENABLE_IPV4,,}"
+				if [[ "${ENABLE_IPV4}" != "yes" ]] && [[ "${ENABLE_IPV4}" != "no" ]]; then
+					echo '-t argument can only accpet a yes/no value.'
+					exit 1
+				fi
+		;;
+		v )
+				VERBOSE=1
+		;;
+		c )
+				DISPLAY_CURRENT_FILTERED_NICS=1
+				display_current_filtered_nics
+		;;
+		i )
+				DISPLAY_INTERFACES=1
+				display_interfaces
+		;;
+		r )
+				RESTART_SERVICES=1
+		;;
+		\? )
+		echo "Invalid option: $OPTARG" 1>&2
+		;;
+		: )
+		echo "Invalid option: $OPTARG requires an argument" 1>&2
+		;;
+	esac
+	done
+	shift $((OPTIND -1))
+fi
+
+module_up() {
+	if [ -d /sys/module/$1 ]; then
+		true
+	else
+		false
+	fi
+}
+
+read_enable_tcp() {
+	if [[ ${IS_INTERACTIVE} -eq 1 ]]; then
+		echo "Should TCP be enabled? [Yes/No]:"
+		read tcp_enabled
+	else
+		tcp_enabled="${ENABLE_TCP}"
+	fi
+
+	if [ "$tcp_enabled" == "Yes" ] || [ "$tcp_enabled" == "yes" ]; then
+		tcp_enabled=true
+		tcp_flag_text="Yes"
+	elif [ "$tcp_enabled" == "No" ] || [ "$tcp_enabled" == "no" ]; then
+		tcp_enabled=false
+		tcp_flag_text="No"
+	else
+		echo "ERROR: please enter 'Yes' or 'No'"
+		read_enable_tcp
+	fi
+}
+
+read_enable_ipv4() {
+	if [[ ${IS_INTERACTIVE} -eq 1 ]]; then
+		echo "Should IPV4_ONLY be enabled? [Yes/No]:"
+		read ipv4_enabled
+	else
+		ipv4_enabled="${ENABLE_IPV4}"
+	fi
+
+	if [ "$ipv4_enabled" == "Yes" ] || [ "$ipv4_enabled" == "yes" ]; then
+		ipv4_enabled=true
+		ipv4_flag_text="Yes"
+	elif [ "$ipv4_enabled" == "No" ] || [ "$ipv4_enabled" == "no" ]; then
+		ipv4_enabled=false
+		ipv4_flag_text="No"
+	else
+		echo "ERROR: please enter 'Yes' or 'No'"
+		read_enable_ipv4
+	fi
+}
+
+save_nics_to_config_file() {
+	nics_str=$(echo $nics_str | cut -c 2-)
+	cd $script_dir
+
+	echo "Saving configured NICs to config file..."
+
+	# edit in-place CONFIGURED_NICS
+	sed -i -E 's/^[ ]*CONFIGURED_NICS="[^"]*"/CONFIGURED_NICS="'$nics_str'"/w changelog.txt' $config_file
+
+	# edit in-place #CONFIGURED_NICS in case the line is commented
+	sed -i -E 's/^[ ]*#CONFIGURED_NICS="[^"]*"/CONFIGURED_NICS="'$nics_str'"/w changelog.txt' $config_file
+
+	if [ -s changelog.txt ]; then
+		echo "== Success =="
+	else
+		echo "Something went wrong... Probably missing CONFIGURED_NICS tag under $config_file";
+		echo "== Failed =="
+		exit 1
+	fi
+	rm -f changelog.txt
+
+	if [[ ${VERBOSE} -eq 1 ]]; then
+		echo "Configured NICs: $nics_str"
+	fi
+}
+
+save_tcp_enabled_flag_to_config_file() {
+	echo "Saving tcp enabled value to config file..."
+
+        sed -i -E 's/^[ ]*TCP_ENABLED="[^"]*"/TCP_ENABLED="'$tcp_flag_text'"/w changelog.txt' $config_file
+
+        if [ ! -s changelog.txt ]; then
+		if [ $tcp_flag_text == "Yes" ]; then
+			echo 'TCP_ENABLED="Yes"' >> $config_file
+
+			retval=$?
+			if [ retval ]; then
+				echo "== Success =="
+			else
+				echo "Something went wrong";
+				echo "== Failed =="
+				exit 1
+			fi
+		else
+			echo "== Success =="
+		fi
+	fi
+
+        rm -f changelog.txt
+
+        if [[ ${VERBOSE} -eq 1 ]]; then
+			echo "TCP Enabled: $tcp_flag_text"
+        fi
+}
+
+save_ipv4_enabled_flag_to_config_file() {
+	echo "Saving ipv4 enabled value to config file..."
+
+        sed -i -E 's/^[ ]*IPV4_ONLY="[^"]*"/IPV4_ONLY="'$ipv4_flag_text'"/w changelog.txt' $config_file
+
+        if [ ! -s changelog.txt ]; then
+		if [ $ipv4_flag_text == "Yes" ]; then
+			echo 'IPV4_ONLY="Yes"' >> $config_file
+
+			retval=$?
+			if [ retval ]; then
+				echo "== Success =="
+			else
+				echo "Something went wrong";
+				echo "== Failed =="
+				exit 1
+			fi
+		else
+			echo "== Success =="
+		fi
+	fi
+
+        rm -f changelog.txt
+
+        if [[ ${VERBOSE} -eq 1 ]]; then
+			echo "IPV4_ONLY Enabled: $tcp_flag_text"
+        fi
+}
+
+restart_nvmesh_services() {
+	if [[ ${IS_INTERACTIVE} -eq 1 ]]; then
+		echo "Do you want to restart NVMesh services? [Yes/No]:"
+		read restart_services
+	else
+		restart_services="Yes"
+	fi
+
+	if [ "$restart_services" == "Yes" ] || [ "$restart_services" == "yes" ]; then
+		restart_services=1
+	elif [ "$restart_services" == "No" ] || [ "$restart_services" == "no" ]; then
+		restart_services=0
+	else
+		echo "ERROR: please enter 'Yes' or 'No'"
+		restart_nvmesh_services
+		return
+	fi
+
+	[[ ${restart_services} -eq 0 ]] && return
+
+	echo "Restarting services if needed..."
+	client_was_up=false
+	target_was_up=false
+
+	if module_up nvmeibs; then
+		target_was_up=true
+	fi
+
+	if module_up nvmeibc; then
+		client_was_up=true
+		systemctl stop nvmeshclient
+	fi
+
+	if ! pidof systemd > /dev/null 2>&1; then
+		if $target_was_up; then
+			systemctl stop nvmeshtarget
+			systemctl start nvmeshtarget
+		fi
+
+		if $client_was_up; then
+			systemctl start nvmeshclient
+		fi
+	else
+		if $target_was_up; then
+			systemctl start nvmeshtarget
+		elif $client_was_up; then
+			systemctl start nvmeshclient
+		fi
+	fi
+}
+
+if $need_to_read_entered_nics ; then
+	[[ ! -z ${ENABLE_TCP} ]] && read_enable_tcp
+	[[ ! -z ${ENABLE_IPV4} ]] && read_enable_ipv4
+	read_entered_nic_names
+fi
+
+
+if [[ ${IS_INTERACTIVE} -eq 1 ]] || [[ ! -z ${ENABLE_TCP} ]]; then
+	[[ ${IS_INTERACTIVE} -eq 1 ]] && read_enable_tcp
+	save_tcp_enabled_flag_to_config_file
+fi
+
+if [[ ${IS_INTERACTIVE} -eq 1 ]] || [[ ! -z ${ENABLE_IPV4} ]]; then
+	[[ ${IS_INTERACTIVE} -eq 1 ]] && read_enable_ipv4
+	save_ipv4_enabled_flag_to_config_file
+fi
+
+if [[ ${IS_INTERACTIVE} -eq 1 ]]; then
+	display_current_filtered_nics
+	display_interfaces
+	read_entered_nic_names
+fi
+
+if [[ ${NICS_VALID} -eq 1 ]]; then
+	save_nics_to_config_file
+fi
+
+if [[ ${IS_INTERACTIVE} -eq 1 ]] || [[ ${RESTART_SERVICES} -eq 1 ]]; then
+	restart_nvmesh_services
+fi
+exit 0

@@ -1,0 +1,39 @@
+# NVMesh configuration file
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Define the management protocol
+# MANAGEMENT_PROTOCOL="<https/http>"
+# Example
+# MANAGEMENT_PROTOCOL="https"
+
+MANAGEMENT_PROTOCOL="https"
+
+# Define the location of the NVMesh Management Websocket servers
+# MANAGEMENT_SERVERS="<server name or IP>:<port>,<server name or IP>:<port>,..."
+# Example:
+# MANAGEMENT_SERVERS="nvmesh-management1:4001,nvmesh-management2:4001"
+
+MANAGEMENT_SERVERS="nvmesh-management:4001"
+
+# Define the nics that will be available for NVMesh Client/Target to work with
+# CONFIGURED_NICS="<interface name;interface name;...>"
+# To allow all nics to be available leave empty. Example: CONFIGURED_NICS=""
+# Examples:
+# CONFIGURED_NICS="ib0;eno1;eth0"
+# CONFIGURED_NICS="eno1;eth0"
+
+CONFIGURED_NICS=""
+
+# Define the IP of the nic to use for NVMf target
+# NVMF_IP="<nic IP>"
+# Must not be empty in case of using NVMf target
+# Examples:
+# NVMF_IP="12.12.12.48;12.12.12.56"
+# NVMF_IP="12.12.12.51"
+
+NVMF_IP=""
+
+# Azure
+ASSIGN_NVME_IRQS="persocket"

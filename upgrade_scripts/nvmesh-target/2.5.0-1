@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+
+trace_config_file="/var/log/NVMesh/trace.config"
+new_rpc_config_file="/opt/NVMesh/common-repo/tools/toma_rpc.config"
+
+if [ ! -f $trace_config_file ]; then
+	exit 0
+fi
+
+comment_rgx='^[[:space:]]*#'
+trace_configs_rgx='^[[:space:]]*(-|\+)[[:space:]](filename[[:space:]]|function[[:space:]]|line[[:space:]]|all|record)'
+
+new_trace_config_content=''
+new_rpc_config_content=''
+
+while IFS= read -r line; do
+	if [ "$line" == "" ] || [[ "$line" =~ $comment_rgx ]] || [[ "$line" =~ $trace_configs_rgx ]]; then
+		#trace configs
+		new_trace_config_content=${new_trace_config_content}${line}$'\n'
+	else
+		#rpc configs
+		new_rpc_config_content=${new_rpc_config_content}${line}$'\n'
+	fi
+done < "$trace_config_file"
+
+echo "$new_trace_config_content" > $trace_config_file
+echo "$new_rpc_config_content" > $new_rpc_config_file

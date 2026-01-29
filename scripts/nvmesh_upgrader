@@ -1,0 +1,492 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+MGMT_MDIR=/opt/NVMesh/management
+MGMT_PID_FILE=/var/run/NVMesh/nvmeshmgr/management.pid
+TOMA_PID_FILE=/var/run/NVMesh/nvmeshtarget/toma.pid
+CM_PID_FILE=/var/run/NVMesh/managementCM.pid
+AGENT_PID_FILE=/var/run/NVMesh/nvmeshclient/managementAgent.pid
+
+MONGO_UPGRADE_UTILS_PATH=/opt/NVMesh/management/upgradeScripts/utils/upgradeUtils.sh
+BACKUP_DIR=/tmp/nvmesh_upgrade_backup
+TOMA_PERSISTENCY_DIR=/var/opt/NVMesh/toma
+
+DB_NAME="management"
+
+UPGRADE_TYPE_BOTH="both"
+UPGRADE_TYPE_MGMT="management"
+UPGRADE_TYPE_CORE="core"
+
+REQUIRED_MONGO_VERSION="v3.6"
+
+NVMESH_TRANS_CLIENT_RPM="NVMesh-client"
+NVMESH_TRANS_TARGET_RPM="NVMesh-target"
+NVMESH_TRANS_CLIENT_DEB="nvmesh-client"
+NVMESH_TRANS_TARGET_DEB="nvmesh-target"
+
+NVMESH_CORE_RPM_DEB="nvmesh-core"
+NVMESH_MGMT_RPM_DEB="nvmesh-management"
+NVMESH_TRANS_MGMT_RPM="NVMesh-management"
+
+check_root() {
+	if [ "$EUID" != "0" ]; then
+		echo $"Must be run as root "
+		exit 4
+	fi
+}
+
+module_up() {
+	if [ -d /sys/module/$1 ]; then
+		true
+	else
+		false
+	fi
+}
+
+process_up() {
+	ps -ef | grep -v grep | grep "$1".*"$2" > /dev/null 2>&1
+	return $?
+}
+
+get_component_pid() {
+	pid_file=$1
+	if [ -r "$pid_file" ] ; then
+		raw_pid=`cat $pid_file`
+		if [ "$raw_pid" -gt 0 ]; then
+			echo $raw_pid
+			return 0
+		fi
+	fi
+	return 1
+}
+
+backup_mgmt_db() {
+	echo "Backuping Management DB..."
+	if ! which mongodump > /dev/null 2>&1; then
+		echo "ERROR: can't back Management DB, 'mongodump' is missing"
+		exit 1
+	fi
+
+	mongodump --db $DB_NAME --out=$BACKUP_DIR --excludeCollection diskDailyStats --excludeCollection diskStatistics --excludeCollection volumeDailyStats --excludeCollection volumeStatistics
+	if [ $? -ne 0 ]; then
+		echo "ERROR: management DB backup failed"
+		exit 1
+	fi
+}
+
+backup_toma_persistency() {
+	if [ -d "$TOMA_PERSISTENCY_DIR" ]; then
+		echo "Backuping Toma persistency..."
+		cp -r $TOMA_PERSISTENCY_DIR $BACKUP_DIR
+	fi
+}
+
+verify_mongo_up() {
+	if ! process_up mongod; then
+                echo "ERROR: Mongo is down, it must be up before starting the upgrade process, please run 'sudo service mongod start'"
+                exit 1
+        fi
+}
+
+verify_mongo_version() {
+	echo "Verifying Mongo Server version..."
+	if ! which mongod > /dev/null 2>&1; then
+		echo "ERROR: can't verify mongo version (mongod command probably not in PATH)"
+		exit 1
+	fi
+
+	if mongod --version | grep $REQUIRED_MONGO_VERSION > /dev/null 2>&1; then
+		echo "Mongo Server Version: 3.6 - Verified"
+	else
+		echo "ERROR: mongo server version doesn't appear to be $REQUIRED_MONGO_VERSION, exiting..."
+		exit 1
+	fi
+}
+
+set_mongo_compatibility_version() {
+	echo "Setting mongo compatibility version to 3.6..."
+
+	err_msg="ERROR: could not set mongo compatibilibty version"
+	if [ ! -e "$MONGO_UPGRADE_UTILS_PATH" ]; then
+		echo "$err_msg, cannot find $MONGO_UPGRADE_UTILS_PATH"
+		exit 1
+	fi
+
+	source $MONGO_UPGRADE_UTILS_PATH
+
+	fetch_management_cluster_from_config
+	if [ $? -ne 0 ] || [ -z "$mongoconnectionstring" ]; then
+		echo "$err_msg, cannot fetch mongo connection string"
+		exit 1
+	fi
+
+	mongo $mongoconnectionstring --eval "db.adminCommand({ setFeatureCompatibilityVersion: '3.6' });"
+	if [ $? -ne 0 ]; then
+		echo "$err_msg"
+		exit 1
+	fi
+}
+
+check_package_installed_with_correct_version() {
+	if [ "$os" == "ubuntu" ]; then
+		if ! dpkg -s $1 | grep -i 'Version: 1\.2\.' > /dev/null 2>&1; then
+			echo "ERROR: '$1' DEB package not installed or its version differs from 1.2, upgrade only available from version 1.2..."
+			exit 1
+		fi
+	elif ! rpm -q --queryformat '%{version}-%{release}' $1 | grep -P '^1.2.' > /dev/null 2>&1; then
+		echo "ERROR: '$1' RPM package not installed or its version differs from 1.2, upgrade only available from version 1.2..."
+		exit 1
+	fi
+}
+
+is_package_installed() {
+	if [ "$os" == "ubuntu" ]; then
+		if dpkg -s $1 > /dev/null 2>&1; then
+			return 0
+		fi
+	elif rpm -q $1 > /dev/null 2>&1; then
+		return 0
+	fi
+
+	return 1
+}
+
+pre_upgrade_validations() {
+	#check if modules or processes are up before starting the upgrade process
+	if module_up nvmeibc; then
+		echo "ERROR: nvmeshclient service (nvmeibc module) is up, please run 'sudo service nvmeshclient stop'"
+		exit 1
+	fi
+
+	if module_up nvmeibs; then
+		echo "ERROR: nvmeshtarget service (nvmeibs module) is up, please use the 'Shutdown All' option in the management GUI to stop all Targets (Sidebar gear icon -> Cluster Control -> Target nodes -> Shutdown icon)"
+		exit 1
+	fi
+
+	toma_pid=$(get_component_pid $TOMA_PID_FILE)
+        [ $? -ne 0 ] && toma_pid=""
+        if process_up $toma_pid nvmeibt_toma; then
+                echo "ERROR: Toma (toma process) which belongs to NVMesh-target RPM is up, please run 'sudo service nvmeshtarget stop'"
+		exit 1
+        fi
+
+	cm_pid=$(get_component_pid $CM_PID_FILE)
+	[ $? -ne 0 ] && cm_pid=""
+	if process_up $cm_pid managementCM; then
+		echo "ERROR: Management CM (managementCM process) is up, please make sure to stop both nvmeshclient & nvmeshtarget"
+		exit 1
+	fi
+
+	agent_pid=$(get_component_pid $AGENT_PID_FILE)
+	[ $? -ne 0 ] && agent_pid=""
+	if process_up $agent_pid managementAgent; then
+		echo "ERROR: Management Agent (managementAgent process) is up, please make sure to stop both nvmeshclient & nvmeshtarget"
+		exit 1
+	fi
+
+	mgmt_pid=$(get_component_pid $MGMT_PID_FILE)
+	[ $? -ne 0 ] &&	mgmt_pid=""
+	if process_up $mgmt_pid $MGMT_MDIR/app.js; then
+		echo "ERROR: nvmeshmgr service (node process) which belongs to NVMesh-management RPM is up, please run 'sudo service nvmeshmgr stop'"
+		exit 1
+	fi
+}
+
+create_mongo_repo() {
+	echo "Deploying new Mongo Repo file..."
+
+	if [ "$os" == "ubuntu" ]; then
+		sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 2930ADAE8CAF5059EE73BB4B58712A2291FA4AD5
+		echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.6 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.6.list
+		sudo apt-get update
+	else
+		echo "[mongodb-org-3.6]
+name=MongoDB Repository
+baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/3.6/x86_64/
+gpgcheck=1
+enabled=1
+gpgkey=https://www.mongodb.org/static/pgp/server-3.6.asc" > /etc/yum.repos.d/mongodb-org-3.6.repo
+	fi
+}
+
+create_nvmesh_repo() {
+	echo "Deploying new NVMesh Repo file..."
+	update_apt_repo=false
+
+	if [ "$os" == "ubuntu" ]; then
+		nvmesh_repo_file=/etc/apt/sources.list.d/NVMesh.repo
+		update_apt_repo=true
+	else
+		nvmesh_repo_file=/etc/yum.repos.d/NVMesh.repo
+	fi
+
+	echo "[NVMesh]
+name=NVMesh repository
+baseurl=https://$user:$password@repo.acme.com/nvmesh/1.3/$os/$os_ver/x86_64
+gpgcheck=0
+enabled=1" > $nvmesh_repo_file
+
+	if $update_apt_repo; then
+		sudo apt-get update
+	fi
+}
+
+get_os_info() {
+	source /etc/os-release > /dev/null 2>&1
+	if [ -e /etc/redhat-release ]; then
+		os="redhat"
+		pkg_install_cmd="yum install"
+		pkg_remove_cmd="yum remove"
+	elif echo $ID | grep -i ubuntu; then
+		os="ubuntu"
+		pkg_install_cmd="apt install"
+		pkg_remove_cmd="apt remove --purge"
+
+		echo "ERROR: $os not supported..."
+		exit 3
+	else
+		echo "ERROR: os name: $ID is not supported in NVMesh repo file"
+		exit 1
+	fi
+
+	echo "OS: $os"
+
+	if [ "$os" == "ubuntu" ]; then
+		os_ver=`echo $VERSION_ID | grep -v \"`
+	else #redhat or centos
+		os_ver=`cat /etc/redhat-release | grep -oP '[0-9]+\.[0-9]+'`
+	fi
+
+	if [ -z "$os_ver" ]; then
+		echo "ERROR: can't find os version"
+		exit 1
+	fi
+
+	echo "OS VERSION: $os_ver"
+}
+
+upgrade_mgmt() {
+	echo "Updating NVMesh Management..."
+	create_mongo_repo
+	install_from_repo=false
+
+	if ([ -z "$mgmt_trans_pkg" ] && [ "$os" != "ubuntu" ]) || [ -z "$mgmt_new_pkg" ]; then
+		echo "Updating from NVMesh Repository..."
+		validate_repo_arguments
+		create_nvmesh_repo
+		install_from_repo=true
+	else
+		echo "Updating from given packages..."
+	fi
+
+	mgmt_new_pkg_install=$NVMESH_MGMT_RPM_DEB
+	mgmt_trans_pkg_install=$NVMESH_TRANS_MGMT_RPM
+
+	if [ "$os" == "ubuntu" ]; then
+		should_remove_trans_pkg=false
+
+		if ! $install_from_repo; then
+			pkg_install_cmd="dpkg -i"
+			pkg_remove_cmd="dpkg -P"
+			mgmt_new_pkg_install="$mgmt_new_pkg"
+		fi
+
+		sudo $pkg_install_cmd $mgmt_new_pkg_install $auto_approve
+	else
+		should_remove_trans_pkg=true
+
+                if ! $install_from_repo; then
+			mgmt_new_pkg_install="$mgmt_new_pkg"
+                        mgmt_trans_pkg_install="$mgmt_trans_pkg"
+                fi
+
+		sudo $pkg_install_cmd $mgmt_trans_pkg_install $mgmt_new_pkg_install $auto_approve
+	fi
+
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Failed to update NVMesh management"
+		exit 1
+	fi
+
+	verify_mongo_version
+	set_mongo_compatibility_version
+
+	# remove transitional mgmt package if needed
+	if $should_remove_trans_pkg; then
+		sudo $pkg_remove_cmd $NVMESH_TRANS_MGMT_RPM $auto_approve
+		if [ $? -ne 0 ]; then
+			echo "WARNING: Could not remove transitional package $mgmt_trans_pkg_install"
+		fi
+	fi
+
+	echo "Make sure to check if there is a new config file located under /etc/opt/NVMesh/management.js.conf.rpmnew and adjust the old one as needed"
+	echo "--- Upgrade Completed Successfully ---"
+}
+
+upgrade_core() {
+	echo "Updating NVMesh Core..."
+	install_from_repo=false
+
+	if [ -z "$client_trans_pkg" ] || [ -z "$target_trans_pkg" ] || [ -z "$core_new_pkg" ]; then
+		echo "Updating from Repository..."
+		validate_repo_arguments
+		create_nvmesh_repo
+		install_from_repo=true
+		core_new_pkg_install=$NVMESH_CORE_RPM_DEB
+
+		if [ "$os" == "ubuntu" ]; then
+			client_trans_pkg_install=$NVMESH_TRANS_CLIENT_DEB
+			target_trans_pkg_install=$NVMESH_TRANS_TARGET_DEB
+		else
+			client_trans_pkg_install=$NVMESH_TRANS_CLIENT_RPM
+			target_trans_pkg_install=$NVMESH_TRANS_TARGET_RPM
+		fi
+
+		client_trans_pkg_remove=$client_trans_pkg_install
+		target_trans_pkg_remove=$target_trans_pkg_install
+	else
+		echo "Updating from given packages..."
+		core_new_pkg_install=$core_new_pkg
+		client_trans_pkg_install=$client_trans_pkg
+		target_trans_pkg_install=$target_trans_pkg
+		client_trans_pkg_remove=$NVMESH_TRANS_CLIENT_RPM
+		target_trans_pkg_remove=$NVMESH_TRANS_TARGET_RPM
+
+		if [ "$os" == "ubuntu" ]; then
+			pkg_install_cmd="dpkg -i"
+			pkg_remove_cmd="dpkg -P"
+			client_trans_pkg_remove=$NVMESH_TRANS_CLIENT_DEB
+			target_trans_pkg_remove=$NVMESH_TRANS_TARGET_DEB
+		fi
+	fi
+
+	sudo $pkg_install_cmd $client_trans_pkg_install $target_trans_pkg_install $core_new_pkg_install $auto_approve
+        if [ $? -ne 0 ]; then
+                echo "ERROR: Failed to update NVMesh Core"
+                exit 1
+        fi
+
+	sudo $pkg_remove_cmd $client_trans_pkg_remove $target_trans_pkg_remove $auto_approve
+	if [ $? -ne 0 ]; then
+		echo "WARNING: Could not remove transitional package $client_trans_pkg_remove or $target_trans_pkg_remove"
+	fi
+
+	echo "Make sure to check if there is a new config file located under /etc/opt/NVMesh/nvmesh.conf.rpmnew and adjust the old one as needed"
+	echo "--- Upgrade Completed Successfully ---"
+}
+
+start_upgrade() {
+	pre_upgrade_validations
+	get_os_info
+
+	if [ ! -d $BACKUP_DIR ]; then
+		mkdir $BACKUP_DIR
+	fi
+
+	if [ "$os" == "ubuntu" ]; then
+		current_installed_mgmt_pkg=$NVMESH_MGMT_RPM_DEB
+		current_installed_client_pkg=$NVMESH_TRANS_CLIENT_DEB
+		current_installed_target_pkg=$NVMESH_TRANS_TARGET_DEB
+	else
+		current_installed_mgmt_pkg=$NVMESH_TRANS_MGMT_RPM
+		current_installed_client_pkg=$NVMESH_TRANS_CLIENT_RPM
+		current_installed_target_pkg=$NVMESH_TRANS_TARGET_RPM
+	fi
+
+	if [ "$upgrade_type" == "$UPGRADE_TYPE_MGMT" ] || [ "$upgrade_type" == "$UPGRADE_TYPE_BOTH" ]; then
+		#check that the current installed version is 1.2
+		check_package_installed_with_correct_version $current_installed_mgmt_pkg
+		verify_mongo_up
+		backup_mgmt_db
+		upgrade_mgmt
+	fi
+
+	if [ "$upgrade_type" == "$UPGRADE_TYPE_CORE" ] || [ "$upgrade_type" == "$UPGRADE_TYPE_BOTH" ]; then
+		#check that the current installed version is 1.2
+		check_package_installed_with_correct_version $current_installed_client_pkg
+		check_package_installed_with_correct_version $current_installed_target_pkg
+		backup_toma_persistency
+		upgrade_core
+	fi
+}
+
+validate_repo_arguments() {
+	if [ -z "$user" ]; then
+		echo "ERROR: missing --repo-user argument"
+		exit 1
+	fi
+
+	if [ -z "$password" ]; then
+		echo "ERROR: missing --repo-password argument"
+		exit 1
+	fi
+}
+
+validate_arguments() {
+	if [ -z "$upgrade_type" ] || ([ "$upgrade_type" != "$UPGRADE_TYPE_MGMT" ] && [ "$upgrade_type" != "$UPGRADE_TYPE_CORE" ] && [ "$upgrade_type" != "$UPGRADE_TYPE_BOTH" ]); then
+		echo "ERROR: missing or wrong --upgrade-type argument (should be one of the following: $UPGRADE_TYPE_MGMT/$UPGRADE_TYPE_CORE/$UPGRADE_TYPE_BOTH)"
+		exit 1
+        fi
+}
+
+auto_approve=""
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--mgmt-trans-pkg)
+			mgmt_trans_pkg=$2
+			shift
+		;;
+		--mgmt-new-pkg)
+			mgmt_new_pkg=$2
+			shift
+		;;
+		--client-trans-pkg)
+			client_trans_pkg=$2
+			shift
+		;;
+		--target-trans-pkg)
+			target_trans_pkg=$2
+			shift
+		;;
+		--core-new-pkg)
+			core_new_pkg=$2
+			shift
+		;;
+		--upgrade-type)
+			upgrade_type=$2
+			shift
+		;;
+		--repo-user)
+			user=$2
+			shift
+		;;
+		--repo-password)
+			password=$2
+			shift
+		;;
+		--auto-approve)
+			auto_approve="-y"
+		;;
+		*)
+			echo "Unknown argument: $1"
+			echo $"Usage: sudo $0 --repo-user <user> --repo-password <password> --upgrade-type <$UPGRADE_TYPE_MGMT/$UPGRADE_TYPE_CORE/$UPGRADE_TYPE_BOTH> --auto-approve
+				[OPTIONAL]:
+				--mgmt-trans-pkg <mgmt-transitional-package.rpm> --mgmt-new-pkg <mgmt-new-package.rpm/deb> --client-trans-pkg <client-transitional-package.rpm/deb>
+				--target-trans-pkg <target-transitional-package.rpm/deb> --core-new-pkg <core-new-package.rpm/deb>"
+			echo
+			echo $"Example 1: (Upgrading only NVMesh Management from the Repository)"
+			echo $"  sudo $0 --repo-user testuser --repo-password 1234 --upgrade-type management"
+			echo
+			echo $"Example 2: (Upgrading both NVMesh Core & Management from a given packages)"
+			echo $"  sudo $0 --repo-user testuser --repo-password 1234 --upgrade-type both --mgmt-trans-pkg NVMesh-management-1.3.0-217.x86_64.rpm --mgmt-new-pkg nvmesh-management-2.0.0-217.x86_64.rpm 				--client-trans-pkg NVMesh-client-1.3.0-346.x86_64.rpm --target-trans-pkg NVMesh-target-1.3.0-346.x86_64.rpm --core-new-pkg NVMesh-core-1.3.0-346.x86_64.rpm"
+			exit 2
+	esac
+	shift
+done
+
+check_root
+validate_arguments
+start_upgrade

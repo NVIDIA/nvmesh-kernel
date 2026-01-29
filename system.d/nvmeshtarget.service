@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=NVMesh(r) Target
+Requires=nvmeshclient.service
+Wants=nvmeshcm.service nvmeshagent.service nvmeshtoma.service nvmeshtrace@trace_daemon.service nvmeshtrace@siw_tracer.service
+After=network.target openibd.service nvmeshclient.service nvmeshtrace@trace_daemon.service nvmeshtrace@siw_tracer.service
+
+[Service]
+ExecStart=/opt/nvmesh/target-repo/services/nvmeshtarget start --systemd
+ExecStop=/opt/nvmesh/target-repo/services/nvmeshtarget stop --systemd
+PIDFile=/var/run/nvmesh/nvmeshtarget/monitor.pid
+Type=forking
+TimeoutSec=300
+
+[Install]
+WantedBy=multi-user.target

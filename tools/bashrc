@@ -1,0 +1,616 @@
+# .bashrc
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+# Uncomment the following line if you don't like systemctl's auto-paging feature:
+# export SYSTEMD_PAGER=
+
+# User specific aliases and functions
+
+export LAST_CRASH_FOLDER=`ls -d /var/crash/*/ 2> /dev/null | tail -1`
+echo "gdb set disassembly-flavor intel" > /tmp/crashinit
+echo "mod -s nvmeibc /home/jared/src/ssda/clnt/nvmeibc.ko" >> /tmp/crashinit
+echo "mod -s nvmeibs /home/jared/src/ssda/srv/nvmeibs.ko" >> /tmp/crashinit
+echo "mod -s nvmeib_common /home/jared/src/ssda/common/nvmeib_common.ko" >> /tmp/crashinit
+alias vimcore="vim $LAST_CRASH_FOLDER/vmcore-dmesg.txt"
+alias vmcrash="sudo crash $LAST_CRASH_FOLDER/vmcore /usr/lib/debug/lib/modules/`uname -r`/vmlinux -i /tmp/crashinit"
+
+function nvcrash()
+{
+    local core="$1"
+    local core_dir=`dirname $1`
+    local src_dir="$2"
+    local kver=`uname -r`
+    local vmdbg="/usr/lib/debug/lib/modules/$kver/vmlinux"
+    if [ -z "$src_dir" ]; then
+        local src_dir=/home/jared/src/ssda
+    fi
+    local crashinit=`mktemp`
+    local gdbinit=`mktemp`
+    echo "gdb set disassembly-flavor intel" > $crashinit
+
+# Load NVMesh Modules
+    echo "mod -s nvmeibc ${src_dir}/clnt/nvmeibc.ko" >> $crashinit
+    echo "mod -s nvmeibs ${src_dir}/srv/nvmeibs.ko" >> $crashinit
+    echo "mod -s nvmeib_common ${src_dir}/common/nvmeib_common.ko" >> $crashinit
+    echo "mod -s nvmeib_common_public ${src_dir}/common_public/nvmeib_common_public.ko" >> $crashinit
+    echo "mod -s siw ${src_dir}/softiwarp/kernel/siw.ko" >> $crashinit
+
+# Aliases
+	echo "alias c_disk struct nvmeibc_disk" >> $crashinit
+	echo "alias nrch struct nvmeibc_ib_nordda_channel" >> $crashinit
+	echo "alias s_nrch struct nvmeibs_nr_channel" >> $crashinit
+	echo "alias s_nrch_net struct nvmeibs_nr_channel.net" >> $crashinit
+	echo "alias ri struct nvmeibc_volume_req_info" >> $crashinit
+	echo "alias iu struct nvmeib_iu" >> $crashinit
+	echo "alias clreq struct volume_client_req" >> $crashinit
+	echo "alias c_net struct nvmeibc_ib_net" >> $crashinit
+	echo "alias s_net struct nvmeibs_net" >> $crashinit
+	echo "alias bcmd struct nvmeibc_disk_io_command" >> $crashinit
+	echo "alias dcmd struct nvmeibc_disk_command" >> $crashinit
+	echo "alias nr_wr_id p (union nordda_wr_id)(u64)" >> @crashinit
+	echo "alias s_nr_cmd struct nvmeibs_nr_cmd" >> $crashinit
+	echo "alias s_net_qp struct nvmeibs_net.qp" >> $crashinit
+
+# Load Trace Extension
+    if [[ -f /usr/lib64/crash/extensions/trace.so ]]; then
+		echo "extend /usr/lib64/crash/extensions/trace.so" >> $crashinit
+	fi
+
+# Dump Trace Logs
+	pushd $core_dir
+	if [[ -f /usr/lib64/crash/extensions/crash_analyzer.so ]]; then
+		sudo tar zxvf ${src_dir}/dictionaries.tar.gz
+		sudo cp ${src_dir}/tools/traces_post_processor/pager.py .
+		sudo cp ${src_dir}/tools/traces_post_processor/pager .
+		echo "extend /usr/lib64/crash/extensions/crash_analyzer.so" >> $crashinit
+		echo "tracedump all" >> $crashinit
+	fi
+
+# Source GDB init (be fns)
+	echo "source ${src_dir}/tools/gdbinit" >> $crashinit
+
+# Run Crash
+    sudo crash $vmdbg $1 -i $crashinit
+
+# Restore DIR
+    popd
+}
+
+function crlast()
+{
+    local last_crash_folder=`ls -d /var/crash/*/ 2> /dev/null | tail -1`
+    nvcrash $last_crash_folder/vmcore $1
+}
+
+function crlastd()
+{
+	local last_crash_folder=`ls -d /var/crash/*/ 2> /dev/null | tail -1`
+	cd $last_crash_folder
+}
+
+# TOMA aliases/fns
+
+# Print TOMA stats
+# Parameters:
+# $1 - One of: all bdev  cfg  disk  dseg  leader  raft  rdma  rtm  topo
+function tmstat() { sudo cat /proc/nvmeibs/toma_status/$1; }
+function tmst() { sudo cat /proc/nvmeibs/toma_status/$1; }
+
+# Kill/Restart TOMA
+alias tmkill="sudo pkill -9 toma"
+alias tmrsrt="sudo /opt/nvmesh/target-repo/services/nvmeshtarget restart-toma; pgrep toma"
+
+# Clear TOMA persistency
+function tmclr()
+{
+    tmkill
+    sudo rm -Rf /var/opt/nvmesh/toma/*
+    tmrsrt
+}
+
+alias tmpid="pgrep toma"
+alias tmerr="cat /var/log/nvmesh/toma_0.err"
+alias tmerr1="cat /var/log/nvmesh/toma_1.err"
+alias tmlog="cat /var/log/nvmesh/toma_0.log"
+alias tmlog1="cat /var/log/nvmesh/toma_1.log"
+
+function tmlgrep() { grep $1 /var/log/nvmesh/toma_0.log; }
+function tmlgrep1() { grep $1 /var/log/nvmesh/toma_1.log; }
+
+# Start/Stop/Restart Client
+alias clntstart="sudo service nvmeshclient start"
+alias clntstop="sudo service nvmeshclient stop"
+alias clntrsrt="sudo service nvmeshclient restart"
+
+function getclntp() { cat /sys/module/nvmeibc/parameters/$1; }
+function setclntp() { echo $2 | sudo tee /sys/module/nvmeibc/parameters/$1; }
+
+function getsrvp() { cat /sys/module/nvmeibs/parameters/$1; }
+function setsrvp() { echo $2 | sudo tee /sys/module/nvmeibs/parameters/$1; }
+
+function getcmnp() { cat /sys/module/nvmeib_common/parameters/$1; }
+function setcmnp() { echo $2 | sudo tee /sys/module/nvmeib_common/parameters/$1; }
+
+function volstat() { cat /proc/nvmeibc/volumes/$1/status; }
+function diskstat() { cat /proc/nvmeibc/disks/$1/status; }
+function diskstatjson() { cat /proc/nvmeibc/disks/$1/status.json; }
+
+alias rhver="cat /etc/redhat-release"
+alias kver="uname -r"
+
+# Version/Start/Stop/Restart OFED
+alias ibver="ofed_info -s"
+alias ibstart="sudo service openibd start"
+alias ibstop="sudo service openibd stop"
+alias ibrsrt="sudo service openibd restart"
+
+alias dmsgclr="sudo dmesg -C"
+alias dmsgrep="dmesg | grep"
+alias jorgrep="sudo journalctl -k | grep"
+
+# Perform reboot using sysrq
+function sctlrbt()
+{
+	sync;
+	sync;
+	echo 1 | sudo tee /proc/sys/kernel/sysrq;
+	echo b | sudo tee /proc/sysrq-trigger;
+}
+
+# Start/Stop/Restart Target
+alias tgtstart="sudo service nvmeshtarget start"
+alias tgtstop="sudo service nvmeshtarget stop"
+alias tgtrsrt="sudo service nvmeshtarget restart"
+alias tgtdisks="cat /proc/nvmeibs/disks.csv | column -t -s,"
+alias tgtnics="cat /proc/nvmeibs/nics.csv | column -t -s,"
+
+# Start/Stop/Restart/Remove NVMesh
+alias nvstop="sudo service nvmeshtarget stop; sudo service nvmeshclient stop; sudo service nvmeshtrace@trace_daemon stop; sudo service nvmeshtrace@siw_tracer stop"
+alias nvstart="sudo service nvmeshtrace@trace_daemon start; sudo service nvmeshtrace@siw_tracer start; sudo service nvmeshtarget start; sudo service nvmeshclient start"
+alias nvrsrt="sudo service nvmeshtarget stop; sudo service nvmeshclient stop; sudo service nvmeshtarget start; sudo service nvmeshclient start"
+alias nvrm="sudo systemctl disable nvmeshtarget; sudo systemctl disable nvmeshclient; sudo yum remove -y nvmesh-base"
+
+# Enable Debug Level
+alias dbgclnt="echo 2 | sudo tee /sys/module/nvmeibc/parameters/debug_level"
+alias dbgsrv="echo 2 | sudo tee /sys/module/nvmeibs/parameters/debug_level"
+alias dbgcmn="echo 2 | sudo tee /sys/module/nvmeib_common/parameters/debug_level"
+alias dbgall="dbgclnt; dbgsrv; dbgcmn"
+
+# Disable Debug Level
+alias ndbgclnt="echo 0 | sudo tee /sys/module/nvmeibc/parameters/debug_level"
+alias ndbgsrv="echo 0 | sudo tee /sys/module/nvmeibs/parameters/debug_level"
+alias ndbgcmn="echo 0 | sudo tee /sys/module/nvmeib_common/parameters/debug_level"
+alias ndbgall="ndbgclnt; ndbgsrv; ndbgcmn"
+
+# Manager Aliases
+alias mgrstop="sudo service nvmeshmgr stop"
+alias mgrstart="sudo service nvmeshmgr start"
+alias mgrrm="sudo service nvmeshmgr stop; sudo yum remove -y nvmesh-management"
+alias mgrclr="sudo mongo management /opt/nvmesh/management/clearDB.js"
+
+alias nvst="source ${HOME}/nvstat.sh --color"
+
+#SERJIO aliases and fns
+
+# Show serjios.csv
+alias srjs="cat /proc/nvmeibs/serjios.csv"
+alias srjmsg="dmesg | grep -i serjio"
+
+# Shows SERJIOs ranges.csv file
+# Parameters:
+# $1 - Disk ID (Leave blank to show all)
+function srjrngs()
+{
+    if [ -z "$1" ]; then
+        for i in /proc/nvmeibs/serjio/*
+        do
+            echo
+            echo `basename $i`
+            echo "-----------------------------------------------------------------------------------------------------"
+            cat $i/ranges.csv | column -t -s,
+        done
+    else
+        cat /proc/nvmeibs/serjio/$1/ranges.csv | column -t -s,
+    fi
+}
+
+# Shows SERJIOs partitions.csv file
+# Parameters:
+# $1 - Disk ID (Leave blank to show all)
+function srjparts()
+{
+    if [ -z "$1" ]; then
+        for i in /proc/nvmeibs/serjio/*
+        do
+            echo
+            echo `basename $i`
+            echo "-----------------------------------------------------------------------------------------------------"
+            cat $i/partitions.csv | column -t -s,
+        done
+    else
+        cat /proc/nvmeibs/serjio/$1/partitions.csv | column -t -s,
+    fi
+}
+
+# Shows serjios.csv, ranges.csv and parts.csv
+function srjstat()
+{
+    echo "SERJIOS"
+    echo "===================================================================================================="
+    cat /proc/nvmeibs/serjios.csv | column -t -s,
+    echo
+    echo "PARTITIONS"
+    echo "===================================================================================================="
+    srjparts
+    echo
+    echo "RANGES"
+    echo "===================================================================================================="
+    srjrngs
+}
+
+# Sets a journal entry to Abandoned
+# Parameters:
+# $1 - Disk ID
+# $2 - Range
+# $3 - Entry
+function srjabnd()
+{
+    echo $2:$3 | sudo tee /proc/nvmeibs/serjio/$1/abandon_entry
+}
+
+# Sets a journal entry to Free
+# Parameters:
+# $1 - Disk ID
+# $2 - Range
+# $3 - Entry
+function srjfree()
+{
+    echo $2:$3 | sudo tee /proc/nvmeibs/serjio/$1/free_entry
+}
+
+# Sets an entry in the SERJIOs JMDC
+# Parameters:
+# $1 - Disk ID
+# $2 - Range
+# $3 - Entry
+# $4 - J2D
+# $5 - TX_ID
+# $6 - TX_BMP (Hex)
+function setjmdc()
+{
+    echo $2:$3:$4:$5:$6 | sudo tee /proc/nvmeibs/serjio/$1/jmdc_set
+}
+
+# Show the JMDC for a journal range
+# Parameters:
+# $1 - Disk ID
+# $2 - Range (with leading 0s)
+function showjmdc()
+{
+    cat /proc/nvmeibs/serjio/$1/jmdc/$2.csv | column -t -s,
+}
+
+# If shell is interactive, run nvstat.sh
+if echo "$-" | grep i > /dev/null; then
+	source ${HOME}/nvstat.sh --color
+fi
+
+# Print IB GID
+# Parameters:
+# $1 - IB Device
+# $2 - Port
+# $3 - GID Number
+function gid()
+{
+	cat /sys/class/infiniband/$1/ports/$2/gids/$3
+}
+
+# Print IB GID Type
+# Parameters:
+# $1 - IB Device
+# $2 - Port
+# $3 - GID Number
+function gidtype()
+{
+	cat /sys/class/infiniband/$1/ports/$2/gid_attrs/types/$3
+}
+
+# Print IB GID Net Device
+# Parameters:
+# $1 - IB Device
+# $2 - Port
+# $3 - GID Number
+function gidndev()
+{
+	cat /sys/class/infiniband/$1/ports/$2/gid_attrs/ndevs/$3
+}
+
+# Get Module Parameter
+# Parameters:
+# $1 - Module
+# $2 - Parameter
+function getmodp()
+{
+	cat /sys/module/$1/parameters/$2
+}
+
+# Set Module Parameter
+# Parameters:
+# $1 - Module
+# $2 - Parameter
+# $3 - Value
+function setmodp()
+{
+	echo $3 | sudo tee /sys/module/$1/parameters/$2
+}
+
+# Install debug symbols for the running kernel
+function instkdbg()
+{
+    sudo yum install -y --enablerepo=base-debuginfo crash kernel-debuginfo-`uname -r`
+}
+
+# Set sniffer on for Mellanox RoCE Device
+# Parameters:
+# $1 eth device name
+function sniffon()
+{
+    sudo ethtool --set-priv-flags $1 sniffer on
+}
+
+# disks.csv fields Todo: Use disks_csv_find_row_val()
+# id,blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,journal_state,status,vendor
+DISKS_CSV_ID_FIELD=0
+DISKS_CSV_BLOCKS_FIELD=1
+DISKS_CSV_BLK_SZ_FIELD=3
+DISKS_CSV_DEV_FIELD=7
+
+# Clear Primary GPT Header for nvme device
+# Parameters:
+# $1 nvme device index 0 - 1000
+function clrgpt()
+{
+    nvme_dev_idx=`expr 1000 + $1`
+    nvme_dev=/dev/nvme${nvme_dev_idx}n1
+    if [ ! -b $nvme_dev ]; then
+        echo "Device $nvme_dev does not exist"
+        exit -1
+    fi
+    disks_csv_line=`grep ${nvme_dev} /proc/nvmeibs/disks.csv`
+    if [ -z $disks_csv_line ]; then
+        echo "Device $nvme_dev not found in disks.csv"
+        exit -1
+    fi
+    IFS="," read -r -a disk_csv_fields <<< $disks_csv_line
+    num_lba_clr=100
+    echo "Clearing GPT of Disk: ${disk_csv_fields[$DISKS_CSV_ID_FIELD]} Block Size: ${disk_csv_fields[$DISKS_CSV_BLK_SZ_FIELD]} Num Blocks: ${disk_csv_fields[$DISKS_CSV_BLOCKS_FIELD]}"
+    echo 1 | sudo tee /proc/nvmeibs/freeze$1  > /dev/null
+    echo "dd if=/dev/zero of=/dev/nvme${nvme_dev_idx}n1 bs=${disk_csv_fields[$DISKS_CSV_BLK_SZ_FIELD]} count=$num_lba_clr"
+    sudo dd if=/dev/zero of=/dev/nvme${nvme_dev_idx}n1 bs=${disk_csv_fields[$DISKS_CSV_BLK_SZ_FIELD]} count=$num_lba_clr > /dev/null
+    echo "dd if=/dev/zero of=/dev/nvme${nvme_dev_idx}n1 bs=${disk_csv_fields[$DISKS_CSV_BLK_SZ_FIELD]} seek=$((${disk_csv_fields[$DISKS_CSV_BLOCKS_FIELD]} - 100)) count=$num_lba_clr"
+    sudo dd if=/dev/zero of=/dev/nvme${nvme_dev_idx}n1 bs=${disk_csv_fields[$DISKS_CSV_BLK_SZ_FIELD]} seek=$((${disk_csv_fields[$DISKS_CSV_BLOCKS_FIELD]} - 100)) count=$num_lba_clr > /dev/null
+    echo 0 | sudo tee /proc/nvmeibs/freeze$1 > /dev/null
+}
+
+# Clear Primary GPT Header for all nvme devices
+function clrgptall()
+{
+    for i in `seq 0 999`; do
+        nvme_idx=`expr 1000 + $i`
+        if [ -e /dev/nvme${nvme_idx}n1 ]; then
+            clrgpt $i
+        fi
+    done
+}
+
+# Send command for volume to nvmeibc cli
+# Parameters:
+# $1 - volume name
+# $2 - command
+# $3 - command parameters
+function volcmd()
+{
+    vol=$1
+    cmd=$2
+    params=$3
+    echo \#${vol}\|${cmd}=${params} | sudo tee /proc/nvmeibc/cli/cli
+}
+
+# Launch volume recovery using nvmeibc cli
+# Parameters:
+# $1 - volume name
+# $2 - chunk
+# $3 - raid
+# $4 - segment
+# $5 - recovery type (dirty, stale or cold)
+function rcvlaunch()
+{
+    vol=$1
+    chunk=$2
+    raid=$3
+    seg=$4
+    case "$5" in
+        dirty)
+            type="1"
+            ;;
+        stale)
+            type="2"
+            ;;
+        cold)
+            type="3"
+            ;;
+        jgc)
+            type="6"
+            ;;
+    esac
+    volcmd $vol recov_launch $chunk,$raid,$seg,$type
+}
+
+# Set volume max_retry_secs
+# Parameters:
+# $1 - volume name
+# $2 - max_retry_secs
+function maxretry()
+{
+    vol=$1
+    secs=$2
+    volcmd $vol max_retry_secs $secs
+}
+
+# Dump volume transfers
+# Parameters:
+# $1 - volume name
+# $2 - address
+function dumptrans()
+{
+    vol=$1
+    addr=$2
+    volcmd $vol dump_transfers $addr
+}
+
+function localread_opt()
+{
+	vol=$1
+	enable=$2
+	volcmd $vol set_lclread_opt $enable
+}
+
+
+alias dev6="scl enable devtoolset-6 bash"
+alias dev7="scl enable devtoolset-7 bash"
+
+# Print all gids of all devices in a table
+function __allgids()
+{
+    echo "Device,Port,GID Num,GID,Net Device,Type"
+    for i in $(grep -vl -e 0000:0000:0000:0000:0000:0000:0000:0000 -e fe80:0000:0000:0000:0000:0000:0000:0000 /sys/class/infiniband/*/ports/*/gids/* 2> /dev/null)
+    do
+        dev=$(echo $i | cut -d'/' -f5)
+        port=$(echo $i | cut -d'/' -f7)
+        gid_num=$(echo $i | cut -d'/' -f9)
+        gid=$(cat $i)
+        ndev=$(cat $(echo $i | sed 's/gids/gid_attrs\/ndevs/') 2> /dev/null)
+        type=$(cat $(echo $i | sed 's/gids/gid_attrs\/types/') 2> /dev/null)
+        echo -e "$dev,$port,$gid_num,$gid,$ndev,$type"
+    done
+}
+
+function allgids()
+{
+    __allgids | column -t -s,
+}
+
+function gdbipmi()
+{
+    local host="$1"
+    local port="$2"
+
+    if [ "x$host" == "x" ]; then
+        echo "Need to specify host"
+        return
+    fi
+
+    if [ "x$port" == "x" ]; then
+        port="1000"
+    fi
+
+    sudo socat TCP4-LISTEN:$port,reuseaddr,fork EXEC:"ipmitool -I lanplus -H 10.0.2.$host -U ADMIN -P ADMIN sol activate" &
+}
+
+function sctlgdb()
+{
+    echo g | sudo tee /proc/sysrq-trigger
+}
+
+function kexecrbt()
+{
+	local kver="$1"
+	if [ -z "$kver" ]; then
+        local kver=`uname -r`
+    fi
+	sudo kexec -l /boot/vmlinuz-$kver --initrd=/boot/initramfs-$kver.img --reuse-cmdline
+	sudo kexec -e
+}
+
+# Run sudo ethtool on base device - Good for Azure
+# ethtool param format is nearly always ethtool mode dev mode_params
+# So we need to translate the 2nd param to the base device
+# Except when there is only 1 param which is the device
+
+function ethtoolb()
+{
+	if [ $# -eq 1 ]; then
+		local DEVICE="$1"
+	else
+		local MODE="$1"
+		shift
+		local DEVICE="$1"
+		shift
+		local MODE_PARAMS="$@"
+	fi
+
+	# Follow "lower" links down to base device (e.g. /sys/class/net/eth0/lower_enPxxx)
+	BASE_DEVICE=$DEVICE
+	LOWER_LINK=$(find /sys/class/net/$BASE_DEVICE/ -name 'lower_*' -type l)
+	while [ ! -z $LOWER_LINK ]; do
+		BASE_DEVICE=$(basename $LOWER_LINK | cut -c 7-)
+		LOWER_LINK=$(find /sys/class/net/$BASE_DEVICE/ -name 'lower_*' -type l)
+	done
+
+	sudo ethtool $MODE $BASE_DEVICE $MODE_PARAMS
+}
+
+# nvmesh ethtool dump - dump all relevant info of nvmesh device N
+function nvethdump()
+{
+	if [ $# -eq 0 ]; then
+		# Get device from nvmesh.conf
+		source /etc/nvmesh/nvmesh.conf
+		DEVICE=$(echo $CONFIGURED_NICS | cut -d' ' -f1)
+	else
+		DEVICE="$1"
+	fi
+
+	echo "Ethtool Dump of $DEVICE"
+	echo "--------------SUMMARY-------------------------------------"
+	# Summary of Device
+	ethtoolb $DEVICE
+	echo "--------------FEATURES-------------------------------------"
+	# Check state of device features
+	ethtoolb -k $DEVICE
+	echo "--------------N-TUPLE RULE---------------------------------"
+	# Show all rules
+	ethtoolb -n $DEVICE
+	echo "--------------RSS HASH-------------------------------------"
+	# retrieve the hash options for TCP flow type.
+	ethtoolb -n $DEVICE rx-flow-hash tcp4
+	echo "--------------CHANNELS-------------------------------------"
+	# show device channels
+	ethtoolb -l $DEVICE
+	echo "--------------RSS INDIRECTION------------------------------"
+	# show Rx flow hash indirection table and/or RSS hash key
+	ethtoolb -x $DEVICE
+	echo "--------------RX STATISTICS--------------------------------"
+	# show rx packet stats
+	ethtoolb -S $DEVICE | grep rx | grep packet
+	echo "--------------TX STATISTICS--------------------------------"
+	ethtoolb -S $DEVICE | grep tx | grep packet
+}
+
+# bluefield
+function rstbf() {
+	echo "SW_RESET 1" | sudo tee /dev/rshim0/misc
+}
+
+function bfcon() {
+	sudo minicom -D /dev/rshim0/console
+}
+
+

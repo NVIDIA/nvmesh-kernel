@@ -1,0 +1,49 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: Apache-2.0
+*/
+
+#ifndef NVMEIBT_CLIENT
+#define NVMEIBT_CLIENT
+
+#include "nvmeibt_common.h"
+#include "nvmeibt_ds.h"
+
+struct nvmeibt_client;
+struct nvmeibt_local_disk;
+
+struct nvmeibt_client {												// Discrebes connection of client to local disk
+	union nvmeib_uuid					client_provided_uuid;		// UUID binary, like: 0x124a1d9f09d21c25eb816ae030a1f98e
+	struct nvmeibt_urn_uuid				client_provided_urn_uuid;	// UUID text formatted, like: 251cd209-9f1d-4a12-8ef9-a130e06a81eb
+	struct nvmeibt_host_name			net;						// Like: nvme112.acme.com
+	struct nvmeibt_ascii_uuid			ldisk_id;					// Like: S3HCNX0JC01988.1
+	struct nvmeibt_local_disk			*local_disk;
+	struct xdlist						topo_link;
+	u32									cid;						// Small number [0..4K]
+	int									n_reg_ctx_refs;				// n segs on this disk that the client registered
+	BOOL								is_connected;				// True if server did not try to unsubscribe the client yet
+	bool								is_delete_in_the_air;
+};
+
+static inline unsigned long long client_messaging_handle_to_cid(unsigned long long client_messaging_handle)
+{
+	return (client_messaging_handle >> 32);
+}
+
+static inline bool nvmeibt_client_is_delete_in_the_air(const struct nvmeibt_client *client)
+{
+	return (!client || client->is_delete_in_the_air);
+}
+
+const char *nvmeibt_client_get_urn_uuid_str(struct nvmeibt_client *client);
+const char *nvmeibt_client_get_hostname(struct nvmeibt_client *client);
+int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *msg_buf, int size);
+
+void handle_subscriber_event(struct nvmeibs_toma_subscriber_change_msg *msg);
+struct nvmeibt_registrant_ctx;
+void handle_client_remove(int cid);
+void handle_client_disconnect_event(int srv_events_fd, struct nvmeibs_toma_client_disconnect_msg_hdr *h);
+void nvmeibt_client_reg_ctx_ref_added(struct nvmeibt_client *client, struct nvmeibt_registrant_ctx *reg_ctx_for_logging);
+void nvmeibt_client_reg_ctx_ref_removed(struct nvmeibt_client *client, struct nvmeibt_registrant_ctx *reg_ctx_for_logging);
+
+#endif

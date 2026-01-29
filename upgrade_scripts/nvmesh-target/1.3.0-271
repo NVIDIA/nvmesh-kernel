@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+
+function error {
+	echo "error: $@"
+	exit 1
+}
+
+function restore {
+	echo "Cleanup started, copying from $bak_dir to $toma_dir"
+	cp "$bak_dir/"* "$toma_dir" || error "***WARNING*** Failed to restore $toma_dir from $bak_dir, setup may be corrupt now ***WARNING***"
+}
+
+function clean_old_backups {
+	echo "Cleaning Old Backup Dirs"
+	ls -dt "$bak_dir_prefix"*/ | tail -n +1000 | tr "\n" "\0" | xargs -0 rm -rf
+}
+
+nvmesh_dir="/var/opt/NVMesh/"
+toma_dir="$nvmesh_dir/toma/" 
+bak_dir_prefix="$nvmesh_dir/toma.bak."
+bak_dir="$bak_dir_prefix"`date +_%d%b%Y_%H%M%S`
+config_file="$toma_dir/toma_config.csv_bufs"
+persistency_file="$toma_dir/toma_persistency.csv_bufs.0"
+major_version_to_upgrade="000101"
+upgraded_version="00010301"
+
+if [[ -f $persistency_file ]]; then
+  if ! grep -q -E "$major_version_to_upgrade[0-9a-fA-F]{2}," "$persistency_file"; then
+    error "toma_software_version in $persistency_file is not supported"
+  fi
+else
+  echo "No persisted topology. Probably no volumes in config. Removing the old $config_file"
+  rm "$config_file" || error "***WARNING*** $config_file Not Found, setup may be corrupt, stopping the upgrade process ***WARNING***" #Removing the file instead of translating it, will get a new config from management 
+  exit 0
+fi
+
+
+tmp_dir=$(mktemp -d -p "$nvmesh_dir")
+echo $tmp_dir
+if [ ! -d "$tmp_dir" ]; then error "***WARNING*** Failed to Create the Temp Dir, Upgrade Never Started ***WARNING***"; fi
+echo "Created temp dir: $tmp_dir"
+
+clean_old_backups
+echo "Creating backup dir: $bak_dir"
+mkdir "$bak_dir" || error "***WARNING*** Failed to Create the Backup Dir, Upgrade Never Started ***WARNING***"
+
+echo "Backing up $toma_dir to $bak_dir"
+cp "$toma_dir/"* "$bak_dir" || error "***WARNING*** Backup Failed, Stopping Upgrade ***WARNING***"
+
+if [[ ! -f $persistency_file ]]; then error "Persistency File is not a Regular File"; fi
+persistency_filename=$(basename -- "$persistency_file")
+persistency_file_tmp="$tmp_dir/$persistency_filename"
+echo "Writing to $persistency_file_tmp"
+cp -p "$persistency_file" "$persistency_file_tmp" || exit 	# preserve the original permissions
+sed -r "s/mgt_DB_uuid/mgmt_DB_uuid/g"  < "$persistency_file" > "$persistency_file_tmp" || error "***WARNING*** Persistency File Fix Failed, Upgrade Failed ***WARNING***"
+sed -i -r "s/$major_version_to_upgrade[0-9a-fA-F]{2}/$upgraded_version/g" "$persistency_file_tmp" || error "***WARNING*** Persistency File Fix Failed, Upgrade Failed ***WARNING***"
+
+echo "Upgrade Process Starting, please dont close this script before it is finished"
+trap restore SIGINT SIGTERM
+echo "Removing $config_file"
+rm "$config_file" || error "***WARNING*** $config_file Not Found, setup may be corrupt, stopping the upgrade process ***WARNING***" #Removing the file instead of translating it, will get a new config from management
+echo "Moving from temp dir to $toma_dir"
+mv -f "$persistency_file_tmp" "$persistency_file" || (restore; error "***WARNING*** Moving fixed persistency file to $toma_dir failed ***WARNING***")
+trap - SIGINT SIGTERM
+echo "Removing $tmp_dir"
+rmdir "$tmp_dir" || echo "$tmp_dir removal failed" 

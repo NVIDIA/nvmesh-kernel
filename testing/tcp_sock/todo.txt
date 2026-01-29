@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+TODO:
+# sock_create vs. sock_create_krenel, what to use? looks lie ocfs2/tcp.hincludes are made for userspace too
+# Use __sk_user_data() //rcu ...
+# How do we make sure static work-item  is not used twice?
+  queue_work(): "Returns %false if @work was already on a queue, %true otherwise"
+# a generl print for sc obj
+# How do we make sure sc/listener work is not queued after sc shutdown work
+# protect static work-item from being reused while queued
+## Can this unprotected mode lead to missing events (new event sees it cant add work and event is missed)
+# sc_get/put/init --> sc_free from kref_put()
+  # Also nice for incomplete tearup where we do rollback and maybe already have ref to the obj we tried to create
+    in this case the last user will free it
+# conns data-structure
+# Add sc_idle_timeout to sc
+# kmemleak
+# packed structre
+
+# Understand copy+pasted code:
+## kernel_sendmsg vs. sc->sc_sock->ops->sendmsg
+## kernel_recvmsg vs. sc->sc_sock->ops->recvmsg //I think it wraps with set_fs(KERNEL_DS);
+## memalloc_noio_save
+## Why only setsockopt needs set_fs(KERNEL_DS);? what about other calls?
+# Hijack all callbacks just so we'll know what happens
+# After first implementation - use dump_stack/perf/Kernel-Shark to see call-trace
+# Use debugfs
+# Use kobject and sysfs_create_file
+# Stuff from ocfs2: DLM, Heartbeat
+# o2net_ensure_shutdown() may also sched/queue shutdown work - so iin the
+  bringup we use it so that the roolback wont be naive.
+
+Advanced:
+# copy less in tcp_recvmsg (called from inet_recvmsg)
+# ocfs2 have several timers e.g. for rx
+# recvmsg -  receiving vector?

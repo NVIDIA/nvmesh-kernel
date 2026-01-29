@@ -1,0 +1,35 @@
+# Use Ubuntu 22.04 (Jammy Jellyfish) as the base image
+FROM ubuntu:22.04
+
+ENV DIRPATH /excelero
+WORKDIR $DIRPATH
+
+# Avoid prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update apt package list and install build essentials and other useful tools
+RUN apt update && apt install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    vim \
+    rsync \
+    rdma-core \
+    librdmacm1 \
+    librdmacm-dev \
+    rdmacm-utils \
+    libelf1 \
+    elfutils \
+    libudev1 \
+    libudev-dev \
+    alien \
+    linux-image-azure-lts-22.04 \
+    linux-headers-azure-lts-22.04 \
+    librdkafka1 \
+    librdkafka-dev \
+    python2
+
+# Set the default command for the container
+#CMD ["/bin/bash"]
+

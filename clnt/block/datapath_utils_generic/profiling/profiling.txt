@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
+1. profiler instances exist per volume in multiple levels
+	1. for each praid - goodpath/sync/preparation
+		1. for each praid segment - locks/disks ops
+
+2. a given profiler has the following properties
+	1. allows one concurrent user
+		1. API consists of start/stop profiling calls
+		2. start attempts to acquire the profiler
+		3. stop releases the profiler if acquired (otherwise nop)
+	2. profiling done in stages whose semantics are unknown to the profiler
+		1. API consists of stage start/stop profiling calls
+		2. there is special end2end stage which counts time between profiling start/stop
+		3. stage start/stop profiling implementation
+			1. if profiler not acquired by the calling object they are just nop
+			2. start - take a time stamp (rdtsc clock ticks)
+			3. stop - computes the ticks delta since stage start
+				1. stage counter is incremented
+				2. the delta is added to accumulated counter
+				3. the delta is also discretized to logarithmic (1-2048 usec) buckets and the relevant bucket is incremented
+
+3. /proc profilers info - per volume /proc entry to dump profilers - for each - the per stage count, bin vals etc
+	1. /proc/nvmeibc/{vol}/profiling.csv
+
+4. /proc profilers clear via cli command
+	1. echo "#|clear_profilers" > /proc/nvmeibc/cli/cli
+
+5. a script to display profiler output for average stage values is provided (nvmesh_profiling.py)
+	1. optionally also displays the breakdown to buckets
+	2. /opt/nvmesh/client-repo/scripts/nvmesh_profiling.py -v {vol}
+
+6. good path profiler stages
+	1. end2end - single operation execution
+	2. locking - acquire locks (release not profiled)
+	3. journal allocation
+	4. pre-read
+		- EC: staging (read old/other) for non full-slice write (for parity and/or reconstruction)
+		- R1: read IO
+	5. calc parities
+	6. write journal
+	7. post journal rdma
+		- EC: write binfo post following write journal (if piggyback could not be done for a certain lock)
+	8. write data and parity
+		- R1: just data
+		- EC: data and parity
+	9. post io rdma
+		- EC: write binfo post write data (if piggyback [..])
+		- R1: same on degraded topology
+		- R1: view lock
+
+7. good path profiler stages under EC write DP optimization
+	1. EC DP does journal allocation in parallel to pre-reads and calculation of parities
+	2. typically parity stage gets to complete when journal alloc completes and hence the measured duration isn't accurate
+	3. regardless, all stages presented and hence e2e is not the stages sum
+
+8. disk profilers (per praid segment)
+	1. Disk profilers hook into goodpath profilers, and can only be used once the relevant goodpath profiler is acquired
+	2. do not use e2e stage as always measure one op (stage)
+	3. stages - read, read+pb, write, write+pb
+
+9. locking profilers (per praid segment)
+	1. similar to disk profilers - hook on GP profiler, no e2e stage
+	2. stages - lock owner, lock copy
+	3. for the lock owner stage, beside average and count also provide information on retries

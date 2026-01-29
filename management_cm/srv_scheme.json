@@ -1,0 +1,12 @@
+{
+	"__globals" : {
+		"__origin_type" : "TARGET",
+		"__scheme_name" : "NVMEIBS_MCS_SRV_SCHEME"
+	},
+	"on_ready" : {
+		"//" : "mcs ready notification to module",
+		"__type" : "msg",
+		"__opcode" : 2,
+		"__typename" : "nvmeibs_mcs_on_ready_message"
+	}
+}

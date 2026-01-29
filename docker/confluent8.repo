@@ -1,0 +1,7 @@
+[Confluent.dist]
+name=Confluent repository (dist)
+baseurl=https://packages.confluent.io/clients/rpm/centos/8/x86_64/
+gpgcheck=1
+gpgkey=https://packages.confluent.io/clients/rpm/archive.key
+enabled=1
+

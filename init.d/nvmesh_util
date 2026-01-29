@@ -1,0 +1,1895 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# -*-Shell-script-*-
+#
+# This file contains functions to be used by nvmesh{client,target}
+#		shell scripts in the /etc/init.d directory.
+#
+
+DRIVES_RESOLVE_FILE=/var/opt/nvmesh/.target_devices
+DRIVES_FILE=/etc/nvmesh/target_devices.conf
+NVME_CLI_PATH=/opt/nvmesh/target-repo/scripts/nvme-cli/nvme
+COMMON_SCRIPTS_PATH=/opt/nvmesh/common-repo/scripts
+SKIP_DRIVE="skip"
+COMMON_PROC_DIR=/proc/nvmeib
+LOG_DIR=/var/log/nvmesh
+EXECUTABLES_DIR=/opt/nvmesh/bin
+MAIN_PID_DIR=/var/run/nvmesh
+TRACE_DAEMON_PID_DIR=$MAIN_PID_DIR
+TRACE_DAEMON_LOCKFILE_DIR=/var/run/nvmesh
+TRACE_DAEMON_DIR=$LOG_DIR/trace_daemon
+TRACE_MAX_BUFF_PER_LOG=25000
+TRACE_MAX_LOGS=4
+DEFAULT_TCP_BASE_PORT_ID=7915	# Corresponds to NVMEIB_IWARP_PORT_ID of
+				# common/nvmeib.h and nvmesh_set_tcp_affinity
+
+DEBUG="Debug"
+RELEASE="Release"
+DELEASE="VerboseRelease"
+
+
+set_nvme_cli_path() {
+	if [ ! -e $NVME_CLI_PATH ]; then
+		NVME_CLI_PATH=`which nvme 2>/dev/null`
+	fi
+}
+
+set_nvme_cli_path
+
+echo_success() {
+  echo -n "$@"
+  [ "$BOOTUP" = "color" ] && $MOVE_TO_COL
+  echo -n "["
+  [ "$BOOTUP" = "color" ] && $SETCOLOR_SUCCESS
+  echo -n $"  OK  "
+  [ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+  echo -n "]"
+  echo -e "\r"
+  return 0
+}
+
+echo_failure() {
+  echo -n "$@"
+  [ "$BOOTUP" = "color" ] && $MOVE_TO_COL
+  echo -n "["
+  [ "$BOOTUP" = "color" ] && $SETCOLOR_FAILURE
+  echo -n $"FAILED"
+  [ "$BOOTUP" = "color" ] && $SETCOLOR_NORMAL
+  echo -n "]"
+  echo -e "\r"
+  return 1
+}
+
+# Log that something succeeded
+success() {
+  [ "$BOOTUP" != "verbose" -a -z "${LSB:-}" ] && echo_success "$@"
+  return 0
+}
+
+# Log that something failed
+failure() {
+  local rc=$?
+  [ "$BOOTUP" != "verbose" -a -z "${LSB:-}" ] && echo_failure "$@"
+  [ -x /bin/plymouth ] && /bin/plymouth --details
+  return $rc
+}
+
+module_up() {
+    if [ -d /sys/module/$1 ]; then
+        true
+    else
+        false
+    fi
+}
+
+is_ubuntu_os() {
+	if grep -i Ubuntu /etc/*release > /dev/null 2>&1; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+is_package_installed() {
+	if is_ubuntu_os; then
+		dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "ok installed"
+	else
+		rpm -q "$1" > /dev/null 2>&1
+	fi
+
+	return $?
+}
+
+verify_package_dependencies() {
+	packages=$@
+
+	if is_k8s_operator; then
+		return 0
+	fi
+
+	echo "Verifying package dependencies..."
+	for pkg in $packages; do
+		#in case there is OR between two dependency packages
+		package=`echo $pkg | awk -F\| '{print $1}'`
+		packageB=`echo $pkg | awk -F\| '{print $2}'`
+
+		if ! is_package_installed $package; then
+			#if there is an OR between two package check if the second package exists
+			if [ ! -z "$packageB" ] && is_package_installed $packageB; then
+				continue
+			fi
+
+			echo "ERROR: Missing dependency package '$pkg'"
+			exit 1
+		fi
+	done
+
+	return 0
+}
+
+decompress_modules_if_needed() {
+	# we should force decompress when this done as part of NDU to avoid the decompress toll
+	# for now, always decmompress
+	# if xz compression is supported by the kernel then no need to decompress
+	#if modprobe -n nvmeib_common > /dev/null 2>&1; then
+	#	return
+	#fi
+
+	if ! which xz > /dev/null 2>&1; then
+		echo "ERROR: could not decompress kernel modules, missing 'xz' tool"
+		exit 1
+	fi
+
+	kos_to_decompress=`find -L $mdir -name '*.ko.xz'`
+
+	if [ -z "$kos_to_decompress" ]; then
+		return
+        fi
+
+	should_run_depmod=false
+        for ko in $kos_to_decompress; do
+		ko_without_xz=${ko%.xz}
+
+		if [ ! -e "$ko_without_xz" ]; then
+			xz -d --keep $ko
+        	        if [ $? -ne 0 ]; then
+                	        echo "ERROR: could not decompress $ko with xz"
+                        	exit 1
+			fi
+			should_run_depmod=true
+                fi
+        done
+
+	if $should_run_depmod; then
+		depmod $kernel
+	fi
+}
+
+process_up() {
+	grep --text "$2" "/proc/$1/cmdline" 2>&1 >/dev/null
+	return $?
+}
+
+process_up_slow() {
+	ps -ef | grep -v grep | grep "$1".*"$2" > /dev/null 2>&1
+	return $?
+}
+
+get_value_by_key_from_json() {
+	json_content=$1
+	key=$2
+
+	value=$(echo -e "import json\ninfo=json.loads('$json_content')\nprint(info['$key'])" | { python 2>/dev/null || python3; })
+
+	if [ $? -ne 0 ]; then
+		echo "ERROR: while trying to read json $json_content"
+		return 1
+	fi
+
+	echo $value
+}
+
+xor() {
+	local res=(`echo "$1" | sed "s/../0x& /g"`)
+	shift 1
+	while [[ "$1" ]]; do
+		local one=(`echo "$1" | sed "s/../0x& /g"`)
+		local count1=${#res[@]}
+		if [ $count1 -lt ${#one[@]} ]
+		then
+			count1=${#one[@]}
+		fi
+		for (( i = 0; i < $count1; i++ ))
+		do
+			res[$i]=$((${one[$i]:-0} ^ ${res[$i]:-0}))
+		done
+		shift 1
+	done
+	printf "%02x" "${res[@]}"
+}
+
+check_root() {
+	if [ "$EUID" != "0" ]; then
+		failure $"Must be run as root "
+		echo
+		exit 4
+	fi
+}
+
+validate_management_server() {
+        local server=$1
+        local default_value="nvmesh-management:4001"
+
+        if [ "$1" ==  $default_value ]; then
+                if which getent >/dev/null; then
+                        if ! getent hosts nvmesh-management; then
+                                echo "Could not resolve Management Server $server from $config_file, please run nvmesh_configure_management_server to setup. $prog not started"
+                                exit 1
+                        fi
+                fi
+        fi
+}
+
+validate_kafka_server() {
+        local server=$1
+        local default_value="kafka-server:9092"
+
+        if [ "$1" ==  $default_value ]; then
+                if which getent >/dev/null; then
+                        if ! getent hosts nvmesh-management; then
+                                echo "Could not resolve Kafka Server $server from $config_file, please configure it accordingly. $prog not started"
+                                exit 1
+                        fi
+                fi
+        fi
+}
+
+run_upgrade_scripts_if_needed() {
+	REPO_DIR="$1"
+	run_from_version=""
+	run_method="exclusive"
+
+	if grep -i Ubuntu /etc/*release > /dev/null 2>&1; then
+		currentinstalledversion=$(dpkg-query -f '${version}' -W nvmesh-$component)
+	else
+		currentinstalledversion=$(rpm -q --queryformat '%{version}-%{release}' nvmesh-$component)
+	fi
+
+	if [ -s $upgradeerrorpath ]; then
+		run_from_version=$(cat $upgradeerrorpath)
+		if [ ! -z "$run_from_version" ]; then
+			run_method="inclusive"
+			echo "$run_from_version" > $upgrade_version_file
+			if [ $? -eq 0 ]; then
+				rm $upgradeerrorpath
+			fi
+		fi
+	fi
+
+	if [ -s $upgrade_version_file ]; then
+		run_from_version=$(cat $upgrade_version_file)
+	fi
+
+	if [ ! -z "$run_from_version" ] && ([ "$run_method" == "inclusive" ] || [ "$run_from_version" != "$currentinstalledversion" ]); then
+		echo "Upgrade needed, upgrading..."
+		upgrader=$REPO_DIR/installation-scripts-$currentinstalledversion/install.py
+		$upgrader -s $scriptsdirectory -f $run_from_version -t $currentinstalledversion -p $productname -m $run_method
+
+		if [ $? -eq 0 ] ; then
+			echo "Done."
+			echo "$currentinstalledversion" > $upgrade_version_file
+		else
+			echo "Failed to upgrade.. Exiting."
+			return 1
+		fi
+	elif [ ! -z "$currentinstalledversion" ]; then
+		echo "$currentinstalledversion" > $upgrade_version_file
+		echo "No upgrade needed."
+	fi
+}
+
+ensure_module_up() {
+	if ! module_up $1; then
+		modprobe $*
+		if [ $? -ne 0 ]; then
+			echo "ERROR: couldn't load module '$1'"
+			exit 1
+		fi
+	fi
+}
+
+ensure_module_down() {
+	module_name=$1
+	use_rmmod=$2
+
+	if module_up $module_name; then
+		if [ ! -z "$use_rmmod" ] && $use_rmmod; then
+			rmmod $module_name
+		else
+			modprobe -r $module_name
+		fi
+
+		if [ $? -ne 0 ]; then
+			echo "ERROR: couldn't unload module '$module_name'"
+			exit 1
+		fi
+	fi
+}
+
+read_conf_file_raw() {
+	config_file="/etc/nvmesh/nvmesh.conf"
+	if [ -f "$config_file" ]; then
+		source "$config_file"
+	fi
+}
+
+read_process_conf_file() {
+	config_file="/etc/nvmesh/configs/nvmeibc/.nvmesh.conf"
+	$EXECUTABLES_DIR/process_config_files
+
+	if [ -f "$config_file" ]; then
+		source "$config_file"
+
+		if [ -z "$MANAGEMENT_SERVERS" ]; then
+			echo "Managment server is not configured in $config_file, target and TOMA will not be able to connect to the management."
+			printf "$config_file content:\n$(cat ${config_file})"
+
+		fi
+
+		validate_management_server $MANAGEMENT_SERVERS
+
+		if [ ! -z "$CONFIGURED_NICS" ]; then
+			get_nics_guids
+
+			#########################################################################################################
+			# [NVMESH-3293]
+			#########################################################################################################
+			# The CONFIGURED_NICS field in nvmesh.conf supports selecting NICs for use by NVMesh
+			#
+			# It accepts one or more of the following in a list:
+			#	- ib_device e.g. mlx5_0
+			#	- ib_device:port e.g. mlx5_0:1
+			#	- IPoIB net-device e.g. ib0
+			#	- RoCE net-device e.g. eno0
+			#	- RoCE net-device with IPv4 or IPv6 Address e.g. eno0:[192.168.1.100], eno0:[2001:db88::1]
+			#	- RoCE net-device with IPv4 or IPv6 Address and Netmask e.g. eno0:[192.168.1.0/16], eno0:[2001:db88::/32]
+			#	- RoCE VLAN net-device e.g. eno0.100
+			#	- RoCE VLAN net-device with IPv4 or IPv6 Address e.g. eno0.100:[192.168.1.100], eno0.100:[2001:db88::1]
+			#	- RoCE VLAN net-device with IPv4 or IPv6 Address and Netmask e.g. eno0.100:[192.168.1.100/16], eno0.100:[2001:db88::/32]
+			#	- non-RDMA net-device (using SoftiWARP over TCP) e.g. eth0
+			#	- non-RDMA net-device (SoftiWARP) with IPv4 or IPv6 Address e.g. eth0:[192.168.1.100], eth0:[2001:db88::1]
+			#	- non-RDMA net-device (SoftiWARP) with IPv4 or IPv6 Address and Netmask e.g. eth0:[192.168.1.100/16], eth0:[2001:db88::/32]
+			#
+			# This list is passed directly to nvmeibc/nvmeibs modules via the ports module-parameter.
+			#
+			# Additionally, the function get_nics_guids above attempts to translate from this list to
+			# a list of HW GIDs to also be passed to nvmeibc/nvmeibs modules via the guids module-parameter.
+			#
+			# This is done in case nvmesh has trouble resolving the entries in the CONFIGURED_NICS list to
+			# actual IB devices from within the kernel. Specifically in the case of IPoIB devices and
+			# (for older versions of the RDMA stack) RoCE net-devices.
+			#
+			# However, this resolution can cause issues when a RoCE device has multiple net-devices (e.g. multiple VLANs)
+			# If nvmesh matches the device using the HW GID instead of the net-device,
+			# it does not know which SW GID (ie IP address) to use and may choose the wrong one.
+			#
+			# For this reason, the following code only passes the guids to nvmeibc/nvmeibs
+			# if there are IB devices present.
+			#
+			############################################################################################################
+
+			if [[ "$ib_device_exists" == "true" ]]; then
+				echo "Attempting using guids: $nics_guids and ports: $nics_ports"
+				module_params="guids=$nics_guids ports=$nics_ports"
+			else
+				echo "Attempting using ports: $nics_ports"
+				module_params="ports=$nics_ports"
+			fi
+		fi
+
+		if [ ! -z "$TOMA_CLOUD_MODE" ]; then
+			toma_cloud_mode_flag="--cloud-mode=$TOMA_CLOUD_MODE"
+		fi
+
+		if [ ! -z "$TOMA_LOG_SIZE" ]; then
+			toma_log_size_flag="--log-size=$TOMA_LOG_SIZE"
+		fi
+
+		if [ "$TOMA_BUILD_TYPE" == "$RELEASE" ]; then
+			tomaDir=$tomaReleasePath
+
+		elif [ "$TOMA_BUILD_TYPE" == "$DELEASE" ]; then
+			tomaDir=$tomaDeleasePath
+
+		elif [ "$TOMA_BUILD_TYPE" == "$DEBUG" ]; then
+			tomaDir=$tomaDebugPath
+		else
+			tomaDir=$tomaReleasePath
+		fi
+		if is_tcp_enabled; then
+			toma_nm_lib_path="--nm-transport $tomaDir/nw_udp.so"
+		else
+			toma_nm_lib_path="--nm-transport $tomaDir/nw_ibud.so"
+		fi
+		if [ -n "$LOGGERS_CGROUP" ]; then
+			toma_cgroup="--tracing-cgroup $LOGGERS_CGROUP"
+		fi
+
+		tomaPath=$tomaDir/$toma
+
+		if [ -z "$CONFIG_PROFILE_ID" ]; then
+			CONFIG_PROFILE_ID="No Profile"
+		fi
+
+		if [ -z "$CONFIG_PROFILE_NAME" ]; then
+			CONFIG_PROFILE_NAME="No Profile"
+		fi
+
+		if [ -z "$CONFIG_PROFILE_VERSION" ]; then
+			CONFIG_PROFILE_VERSION=0
+		fi
+
+		if [ ! -z "$MAX_NIC_SRQS" ]; then
+			echo "Setting Max Nic SRQS: $MAX_NIC_SRQS"
+			module_params="$module_params max_nic_srqs=$MAX_NIC_SRQS"
+		fi
+
+		if [ ! -z "$MAX_SM_QUERY_BURST" ]; then
+			echo "Setting Max SM Query Burst: $MAX_SM_QUERY_BURST"
+			if [ "$prog" == "nvmeshclient" ]; then
+				module_params="$module_params sm_th=$MAX_SM_QUERY_BURST"
+			else
+				toma_sm_query_burst_flag="--sm-query-burst=$MAX_SM_QUERY_BURST"
+			fi
+		fi
+
+		if [ "$prog" == "nvmeshtarget" ]; then
+			if [ -z "$KAFKA_SERVERS" ]; then
+				echo "Kafka servers are not configured in $config_file, target and TOMA will not be able to connect to the management."
+				printf "$config_file content:\n$(cat ${config_file})"
+			fi
+
+			validate_kafka_server $KAFKA_SERVERS
+
+			if [ -z "$TOMA_NUM_OF_TRACE_LOGS" ]; then
+				TOMA_NUM_OF_TRACE_LOGS=40
+			elif [ "$TOMA_NUM_OF_TRACE_LOGS" -lt "2" ] || [ "$TOMA_NUM_OF_TRACE_LOGS" -gt "100" ]; then
+				echo "ERROR: TOMA_NUM_OF_TRACE_LOGS must be between 2 and 100"
+				exit 1
+			fi
+
+			if [ -z "$TOMA_TRACE_LOG_SIZE" ]; then
+				TOMA_TRACE_LOG_SIZE=48
+			elif [ "$TOMA_TRACE_LOG_SIZE" -lt "1" ] || [ "$TOMA_TRACE_LOG_SIZE" -gt "200" ]; then
+				echo "ERROR: TOMA_TRACE_LOG_SIZE must be between 1 and 200"
+				exit 1
+			fi
+
+			if [ "$FORCE_USE_LIBIBCM" == "Yes" ]; then
+				echo "Force use of libibcm"
+				toma_libcm_flag="--use-libibcm"
+			fi
+
+			# MLX5_RDDA_ENABLED is setting mlx_rdda_enabled for all types - not just mlx5
+			#if [ "$MLX5_RDDA_ENABLED" == "Yes" ] || [ "$MLX5_RDDA_ENABLED" == "True" ]; then
+			#	module_params="$module_params mlx_rdda_enabled=Y"
+			#	if [ ! -z "$MAX_CLIENT_RSRC" ]; then
+			#		echo "Setting Max Client RSRC: $MAX_CLIENT_RSRC"
+			#		module_params="$module_params max_client_rsrc=$MAX_CLIENT_RSRC"
+			#	fi
+				# when run without RDDA we set max_client_rsrc to 0 in order to use all qps for local io
+			module_params="$module_params max_client_rsrc=0"
+			if [ ! -z "$MAX_CLIENT_RSRC" ]; then
+				echo "Running in NON-RDDA ignoring MAX_CLIENT_RSRC original value"
+			fi
+			MAX_CLIENT_RSRC="0"
+
+			if [ "$IPV4_ONLY" == "Yes" ] || [ "$IPV4_ONLY" == "True" ]; then
+				echo "IPv4 Only"
+				module_params="$module_params roce_ipv4_only=Y"
+				toma_roce_ipv4_flag="--ipv4-only"
+			fi
+
+		elif [ "$prog" == "nvmeshclient" ]; then
+			if [ ! -z "$MAX_NR_CHANNELS" ]; then
+				echo "Setting Max NR Channels: $MAX_NR_CHANNELS"
+				module_params="$module_params nr_max_channels_per_disk=$MAX_NR_CHANNELS"
+			fi
+			if [ ! -z "$MULTI_SLICE_N" ]; then
+				echo "Setting EC Multi Slice N: $MULTI_SLICE_N"
+				module_params="$module_params nvmeibc_jentry_num_blocks=$MULTI_SLICE_N"
+			fi
+			if [ "$MLX5_RDDA_ENABLED" == "Yes" ] || [ "$MLX5_RDDA_ENABLED" == "True" ]; then
+				# max_rcomp_intr need to be decreased as we face much more sirqs and to prevent soft lockups
+				module_params="$module_params use_rdda=Y max_rcomp_intr=8"
+			else
+				module_params="$module_params use_rdda=N max_rcomp_intr=64"
+			fi
+		fi
+
+		toma_cfg_flags=("--cfg-id=$CONFIG_PROFILE_ID" "--cfg-name=$CONFIG_PROFILE_NAME" "--cfg-version=$CONFIG_PROFILE_VERSION" "--num-bin_logs=$TOMA_NUM_OF_TRACE_LOGS" "--bin_log-size=$TOMA_TRACE_LOG_SIZE")
+		client_cfg_flags=("cfg_id=\"$CONFIG_PROFILE_ID\"" "cfg_name=\"$CONFIG_PROFILE_NAME\"" "cfg_version=\"$CONFIG_PROFILE_VERSION\"")
+
+		if [ "$ROCE_VERSION" != "1" ]; then
+			ROCE_VERSION=2
+
+			if [ "$ofed_version" == "none" ]; then
+				roce_configured_mode="RoCE v2"
+			else
+				roce_configured_mode="RoCE V2"
+			fi
+		else
+			if [ "$ofed_version" == "none" ]; then
+				roce_configured_mode="IB/RoCE v1"
+			else
+				roce_configured_mode="IB/RoCE V1"
+			fi
+		fi
+
+		if is_tcp_enabled || [ -n "$SIW_IFACES" ]; then
+			if [ "_E${CONFIGURED_NICS}" = "_E" ] && [ -z ${SIW_IFACES+x} ]; then
+				echo "ERROR: NVMesh over TCP requires non-empty CONFIGURED_NICS or setting SIW_IFACES"
+				exit 1
+			fi
+
+			if ! $ib_device_exists || [ "$FORCE_TOMA_USE_UDP" == "Yes" ]; then
+				toma_raft_udp="--raft-udp"
+				TOMA_UDP=true
+			fi
+
+			siw_params="${siw_params} iface_list=\"$siw_ifaces\""
+			module_params="$module_params"
+		fi
+
+		if [ -z "$TRACE_TO_RAMDISK" ]; then
+			TRACE_TO_RAMDISK="No"
+		fi
+		if [ -z "$TRACE_RAMDISK_SIZE" ]; then
+			TRACE_RAMDISK_SIZE="20g"
+		fi
+
+	else
+		echo "Error: Config File '$config_file' is missing"
+		exit 1
+	fi
+}
+
+record_current_module_params() {
+	outfile=$1
+	for m in `ls /sys/module/ | grep -E 'nvmeib*|siw'` ; do
+		printf "\n-- %s\n" $m
+		for p in `ls /sys/module/$m/parameters/`; do
+			printf "%-30s\t" $p; cat /sys/module/$m/parameters/$p
+		done
+	done > /var/log/nvmesh/$outfile 2>&1
+}
+
+load_siw_tcp_module_if_needed() {
+	if is_tcp_enabled || [ -n "$SIW_IFACES" ]; then
+			# Enabling TCP
+			# Unloading siw module to allow loading it up again with the correct params in case the client and target are down
+			if module_up siw && ! module_up nvmeibc && ! module_up nvmeibs; then
+				ensure_module_down siw
+			fi
+			# Load softiwarp driver
+			ensure_module_up siw $siw_params
+			if [ "$TCP_SET_AFFINITY" != "No" ] && [ "$TCP_SET_AFFINITY" != "False" ]; then
+				# Configure TCP Affinity for performance
+				ta_opt=""
+
+				get_tcp_base_port_id
+				echo "tcp_base_port_id=$tcp_base_port_id"
+				ta_opt="$ta_opt --port=$tcp_base_port_id"
+
+				if [ ! -z "$TCP_NUM_RX_QUEUE" ]; then
+					ta_opt="$ta_opt --queues=$TCP_NUM_RX_QUEUE"
+				fi
+				if [ "$TCP_SET_NUM_RX_QUEUE" == "Yes" ] || [ "$TCP_SET_NUM_RX_QUEUE" == "True" ]; then
+					ta_opt="$ta_opt --setrxq"
+				fi
+				if [ ! -z "$TCP_NUM_CHANNELS" ]; then
+					ta_opt="$ta_opt --channels=$TCP_NUM_CHANNELS"
+				fi
+				if [ ! -z "$TCP_RX_CPU_AFFINITY_DOMAIN" ]; then
+					ta_opt="$ta_opt --domain=$TCP_RX_CPU_AFFINITY_DOMAIN"
+				fi
+				if [ "$TCP_RX_SET_IRQ_AFFINITY" == "No" ] || [ "$TCP_RX_SET_IRQ_AFFINITY" == "False" ]; then
+					ta_opt="$ta_opt --noirq"
+				fi
+				if [ ! -z "$TCP_FLOW_STEER" ]; then
+					ta_opt="$ta_opt --flowsteer=$TCP_FLOW_STEER"
+				fi
+				if [ ! -z "$TCP_RPS_MODE" ]; then
+					ta_opt="$ta_opt --rpsmode=$TCP_RPS_MODE"
+				fi
+				for i in $(echo $siw_ifaces | tr ',' ' '); do
+					$COMMON_SCRIPTS_PATH/nvmesh_set_tcp_affinity --device=$i $ta_opt
+				done
+			fi
+	fi
+}
+
+load_roce_or_infiniband_modules() {
+	if [ "$ofed_version" == "none" ]; then
+		# Manually load the IB modules
+		if ! module_up mlx4_ib; then
+			try_load_module mlx4_ib
+		fi
+
+		if ! module_up mlx4_en; then
+			try_load_module mlx4_en
+		fi
+
+		if ! module_up mlx5_ib; then
+			try_load_module mlx5_ib
+		fi
+
+		if ! module_up bnxt_re; then
+			try_load_module bnxt_re
+		fi
+
+		if ! module_up ib_cm; then
+			try_load_module ib_cm
+		fi
+
+		if ! module_up rdma_cm; then
+			try_load_module rdma_cm
+		fi
+	fi
+}
+
+fix_guid() {
+	IFS=':' read -r -a nic_parts_arr <<< "$1"
+	counter=0;
+	parsed_nic_guid=""
+
+	for element in "${nic_parts_arr[@]}"
+	do
+		if [ $(($counter%2)) -eq 0 ]
+		then
+			parsed_nic_guid="$parsed_nic_guid:$element"
+		else
+			parsed_nic_guid="$parsed_nic_guid$element"
+		fi
+
+		counter=$(($counter + 1))
+	done
+
+	parsed_nic_guid=$(echo $parsed_nic_guid | cut -c 2-)
+}
+
+# Checks to see if input "$1" matches a netdev with an IPv4/IPv6 address and mask (or without mask) in the format:
+# <ndev>:[<ip_addr>] or <ndev>:[<ip_addr>/<mask>]
+# e.g. eth0:[192.168.1.1] or eth0:[192.168.1.0/24]
+#
+# returns 0 if there is a match, non-zero otherwise
+# also sets globals ret_ndev, ret_addr and ret_mask if there is a match
+is_ndev_with_addr_and_mask() {
+	local input="$1"
+
+	# General pattern to extract <ndev> and <addr/netmask>
+	local general_regex='^([a-zA-Z0-9_.-]+):\[(.+)\]$'
+
+	# IPv4 and IPv6 address patterns
+	local ipv4_addr_regex='^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$'
+	local ipv6_addr_regex='(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))'
+
+	# Step 1: Return non-zero if it doesn't match the general pattern
+	if ! [[ $input =~ $general_regex ]]; then
+		return 1
+	fi
+
+	local ndev="${BASH_REMATCH[1]}"   # Extract the interface name
+	local addr_netmask="${BASH_REMATCH[2]}"  # Extract the address/netmask field in the []
+
+	# Step 2: Check if addr_netmask contains a netmask
+	if [[ "$addr_netmask" == */* ]]; then
+		local addr="${addr_netmask%%/*}"   # Extract address (part before /)
+		local netmask="${addr_netmask##*/}" # Extract netmask (part after /)
+	else
+		local addr="$addr_netmask"  # If no /, the entire string is the address
+		local netmask=""            # No netmask provided
+	fi
+
+	# Step 3: Validate the address as IPv4
+	if [[ $addr =~ $ipv4_addr_regex ]]; then
+		# Validate and handle IPv4
+		if [[ -z $netmask ]]; then
+			netmask=32  # Default netmask for IPv4
+		elif ! [[ $netmask =~ ^([0-9]|[1-2][0-9]|3[0-2])$ ]]; then
+			echo "Invalid IPv4 netmask"
+			return 1
+		fi
+
+		echo "Validated $input as ndev: $ndev with ipv4 addr: $addr and mask: $netmask"
+
+		ret_ndev=$ndev
+		ret_addr=$addr
+		ret_mask=$netmask
+
+		return 0
+	fi
+
+	# Step 4: Validate the address as IPv6
+	if [[ $addr =~ $ipv6_addr_regex ]]; then
+		# Validate and handle IPv6
+		if [[ -z $netmask ]]; then
+			netmask=128  # Default netmask for IPv6
+		elif ! [[ $netmask =~ ^([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$ ]]; then
+			echo "Invalid IPv6 netmask"
+			exit 1
+		fi
+
+		echo "Validated $input as ndev: $ndev with ipv6 addr: $addr and mask: $netmask"
+
+		ret_ndev=$ndev
+		ret_addr=$addr
+		ret_mask=$netmask
+
+		return 0
+	fi
+
+	# Failed to validate address
+	echo "Invalid address format: $addr"
+
+	return 1
+}
+
+process_nic_link_layer() {
+        ibregex="^ib[0-9]+$"
+
+        if [[ $1 =~ $ibregex ]]; then
+		ib_device_exists=true
+	elif [[ "$1" == "mlx"* ]] || [[ "$1" == "roce"* ]]; then
+		IFS=':' read -r -a mlx_arr <<< "$element"
+
+		if [ ${#mlx_arr[@]} -ge 2 ]; then
+			port_dir="$infiniband_base/${mlx_arr[0]}/ports/${mlx_arr[1]}"
+			if [ ! -e $port_dir/link_layer ]; then
+				echo "ERROR: cannot find link_layer for configured nic '$1' - port might be wrong"
+				exit 1
+			fi
+
+			link_layer=`cat $port_dir/link_layer`
+			if echo "$link_layer" | grep -i "InfiniBand" > /dev/null 2>&1; then
+				ib_device_exists=true
+			else
+				roce_device_exists=true
+				[ -z $siw_ifaces ] && siw_ifaces="$1" || siw_ifaces="$siw_ifaces,$1"
+			fi
+		else
+			echo "ERROR: mlx device '$1' under CONFIGURED_NICS should contain port in the following format: 'mlx_interface_name:port'"
+			exit 1
+		fi
+	elif is_ndev_with_addr_and_mask "$1"; then
+		[ -z $siw_ifaces ] && siw_ifaces="$ret_ndev" || siw_ifaces="$siw_ifaces,$ret_ndev"
+	else
+		[ -z $siw_ifaces ] && siw_ifaces="$1" || siw_ifaces="$siw_ifaces,$1"
+	fi
+
+	if $ib_device_exists && is_tcp_enabled; then
+		echo "ERROR: found configured nic with InfiniBand link layer while using TCP_ENABLED=\"Yes\", not supported"
+		exit 1
+	fi
+}
+
+get_nics_guids() {
+	local nics_str="$CONFIGURED_NICS"
+	local tcp_ifaces_str="$SIW_IFACES"
+	local guid_prefix="fe80:0000:0000:0000:"
+	local isfirst=true
+	local isfirstport=true
+	infiniband_base=/sys/class/infiniband
+
+	siw_ifaces=""
+	ib_device_exists=false
+	roce_device_exists=false
+
+	IFS=';' read -r -a nics_arr <<< "$nics_str"
+
+	for element in "${nics_arr[@]}"
+	do
+		$isfirst && isfirst=false && nics_list_str="$element" || nics_list_str="$nics_list_str;$element"
+
+		IFS=':' read -r -a subelements <<< "$element"
+		if [ ${#subelements[@]} -gt 2 ]
+		then
+			[ ${#subelements[@]} -eq 2 ] && nic_port="${subelements[0]}:${subelements[1]}"
+		else
+			nic_port="$element"
+		fi
+		[ -n "$nic_port" ] && $isfirstport && isfirstport=false && nics_ports="$nic_port" || nics_ports="$nics_ports;$nic_port"
+	done
+
+	IFS=';' read -r -a nics_list_arr <<< "$nics_list_str"
+	isfirst=true
+	for element in "${nics_list_arr[@]}"
+	do
+		process_nic_link_layer $element
+
+		nic_found=false
+		if [ -n "$element" ]
+		then
+			if [ -n "$(ethtool -i $element | grep ib_ipoib)" ]; then
+				# IPoIB Device, translate to IB Device
+				ib_port=$(( $(cat /sys/class/net/$element/dev_port) + 1 ))
+				ib_dev=$(ls /sys/class/net/$element/device/infiniband | head -1)
+
+				orig_el=$element
+				element="$ib_dev:$ib_port"
+				echo "$orig_el is IPoIB Device. Translated to: $element"
+			else
+				if is_ndev_with_addr_and_mask "$element"; then
+					element=$ret_ndev
+				fi
+
+				echo "Trying to fetch nic guid from /sys/class/net/$element/address..."
+				nic_guid=$(cat /sys/class/net/$element/address 2> /dev/null)
+				if [ -n "$nic_guid" ]
+				then
+					fix_guid $nic_guid
+					parsed_nic_guid="$parsed_nic_guid"
+					nic_found=true
+				fi
+			fi
+
+			if ! $nic_found
+			then
+				echo "Trying to fetch nic guid from infiniband..."
+				IFS=':' read -r -a mlx_arr <<< "$element"
+
+				if [ ${#mlx_arr[@]} -eq 2 ]
+				then
+					port_dir="$infiniband_base/${mlx_arr[0]}/ports/${mlx_arr[1]}"
+					[ -r $port_dir/gids/0 ] && nic_guid=`cat $port_dir/gids/0`
+					parsed_nic_guid=$nic_guid
+
+					[ -n "$nic_guid" ] && nic_found=true
+				fi
+				if [ ${#mlx_arr[@]} -eq 3 ]
+				then
+					port_dir="$infiniband_base/${mlx_arr[0]}/ports/${mlx_arr[1]}"
+					[ -r $port_dir/gids/${mlx_arr[2]} ] && nic_guid=`cat $port_dir/gids/${mlx_arr[2]}`
+					parsed_nic_guid=$nic_guid
+
+					[ -n "$nic_guid" ] && nic_found=true
+				fi
+			fi
+
+			if ! $nic_found
+			then
+				echo "Warning: could not get nic guid for: $element"
+			else
+				echo "Nic guid found: $parsed_nic_guid"
+
+				if [[ ! $nics_guids == *$parsed_nic_guid* ]]; then
+					$isfirst && nics_guids="$nics_guids$parsed_nic_guid" || nics_guids="$nics_guids,$parsed_nic_guid"
+					isfirst=false
+				else
+					echo "Nic duplication found - ignoring"
+				fi
+			fi
+		fi
+	done
+
+	if [ "$nics_str" != "" ] && [ "$nics_guids" == "" ]; then
+		echo "ERROR: could not get any guids for the configured nics"
+		exit 1
+	fi
+
+	if ([ "$TCP_ENABLED" == "Yes" ] || [ "$TCP_ENABLED" == "True" ]) && [ -z "$siw_ifaces" ]; then
+		echo "ERROR: could not find any suitable nic for TCP use"
+		exit 1
+	fi
+	siw_ifaces="$siw_ifaces,$tcp_ifaces_str"
+}
+
+read_version_info_file() {
+	if [ -f "$version_file" ]; then
+		source "$version_file"
+		echo "$productname Version: $version"
+		echo
+	else
+		echo "Warning: missing $version_file"
+	fi
+}
+
+verify_loaded_kernel_modules_version() {
+	err_msg="WARNING: could not verify if the loaded kernel modules are up to date"
+
+	if [ ! -e $proc_version_file ]; then
+		echo "$err_msg"
+		return
+	fi
+
+	module_json_version_content=`cat $proc_version_file`
+	module_version=`get_value_by_key_from_json "$module_json_version_content" "version"`
+	module_release=`get_value_by_key_from_json "$module_json_version_content" "release"`
+	module_distro=`get_value_by_key_from_json "$module_json_version_content" "distro"`
+	module_build_number=`get_value_by_key_from_json "$module_json_version_content" "build_number"`
+
+
+	if [ -z "$module_version" ] || [ -z "$module_release" ]; then
+		echo "$err_msg"
+	else
+		version_release="$module_version-$module_release$module_distro.$module_build_number"
+
+		# relies on read_version_info_file being called before
+		if [ -z "$version" ]; then
+			echo "$err_msg"
+		elif [ "$version" != "$version_release" ]; then
+			echo "'$version' != '$version_release'"
+			echo "ERROR: found loaded kernel modules which are not up to date with the current installed version, please restart or reboot"
+			exit 1
+		fi
+	fi
+}
+
+check_nics_validity() {
+	if [ -e $infiniband_base ]; then
+		cd $infiniband_base
+		mlx_devices=`ls`
+		isfirst=true
+
+		for dev in $mlx_devices; do
+			cd $infiniband_base/$dev/ports
+			dev_ports=`ls`
+
+			for port in $dev_ports; do
+				if [ ! -r $port/gids/0 ]; then
+					continue
+				fi
+
+				guid=`cat $port/gids/0`
+
+				if [ ! -z $nics_guids ] && [[ $nics_guids != *$guid* ]]; then
+					continue
+				fi
+
+				mlx_configured_nics="$mlx_configured_nics$dev:$port "
+				linklayer=`cat $port/link_layer`
+
+				if ! $isfirst; then
+					if [ "$conflinklayer" != "$linklayer" ]; then
+						echo "Nics error: found both Infiniband and Ethernet devices, not supported"
+						exit 1
+					fi
+				else
+					isfirst=false
+				fi
+
+				conflinklayer=$linklayer
+			done
+		done
+	fi
+
+	if [ "$TCP_ENABLED" == "Yes" ] || [ "$TCP_ENABLED" == "True" ]; then
+		echo "TCP is enabled"
+	elif [ ! -z "$conflinklayer" ]; then
+		echo "Using LinkLayer: $conflinklayer"
+	fi
+}
+
+can_set_roce_version_for_mlx4() {
+	if ! which ofed_info > /dev/null 2>&1; then
+		return 0
+	fi
+
+	if [ ! -e $roce_mode ]; then
+		echo "Warning: missing $roce_mode"
+		return 1
+	fi
+
+	ROCE_MODE=`cat $roce_mode`
+
+	if [ -z "$ROCE_MODE" ]; then
+		if [ "$ROCE_VERSION" -eq "2" ]; then
+			echo "Warning: roce_mode module param doesn't support RoCE V2 for mlx4"
+			return 1
+		else
+			return 0
+		fi
+	fi
+
+	if ([ "$ROCE_MODE" -ge "2" ] && [ "$ROCE_VERSION" -eq "2" ]) || ([ "$ROCE_MODE" -lt "2" ] && [ "$ROCE_VERSION" -eq "1" ]); then
+		return 0
+	else
+		echo "Warning: roce_mode module param doesn't support RoCE V2 for mlx4"
+		return 1
+	fi
+}
+
+set_roce_version_for_ofed_gt_34() {
+	for devport in $@; do
+		IFS=':' read -r -a mlx_arr <<< "$devport"
+		dev=${mlx_arr[0]}
+                port=${mlx_arr[1]}
+
+		set_roce_mode=`cma_roce_mode -d $dev -p $port -m $ROCE_VERSION`
+		get_roce_mode=`cma_roce_mode -d $dev -p $port`
+
+		if [ "$set_roce_mode" != "$get_roce_mode" ]; then
+			echo "Warning: couldn't set RoCE mode: $set_roce_mode on device $dev port $port, RoCE mode is: $get_roce_mode"
+		fi
+	done
+}
+
+set_roce_version_when_no_ofed() {
+	cd $kernel_rdma_cm
+
+        for devport in $@; do
+		IFS=':' read -r -a mlx_arr <<< "$devport"
+		dev=${mlx_arr[0]}
+		port=${mlx_arr[1]}
+
+		if [[ "$dev" =~ "mlx4" ]] && ! can_set_roce_version_for_mlx4; then
+			echo "Warning: couldn't set RoCE mode for device $dev to $roce_configured_mode"
+			continue
+		fi
+
+		mkdir $dev
+		if [ -e $dev/default_roce_mode ]; then
+			default_roce_path=$dev/default_roce_mode
+		elif [ -e $dev/ports/$port/default_roce_mode ]; then
+			default_roce_path=$dev/ports/$port/default_roce_mode
+		else
+			echo "Warning: couldn't set RoCE mode: $roce_configured_mode on device $dev port $port"
+			rmdir $dev
+			continue
+		fi
+
+		bash -c "echo $roce_configured_mode > $default_roce_path" > /dev/null 2>&1
+		get_roce_mode=`cat $default_roce_path`
+
+		if [ "$roce_configured_mode" != "$get_roce_mode" ]; then
+			echo "Warning: couldn't set RoCE mode: $roce_configured_mode on device $dev port $port, RoCE mode is: $get_roce_mode"
+		fi
+		rmdir $dev
+        done
+}
+
+set_roce_version_in_config() {
+	if [ -e $infiniband_base ]; then
+		cd $infiniband_base
+
+		if [ ! -e $kernel_rdma_cm ]; then
+			echo "Warning: $kernel_rdma_cm not exists, couldn't set RoCE mode"
+			return
+		fi
+
+		if which ofed_info > /dev/null 2>&1; then
+			ofed_full_ver=`ofed_info -s`
+			IFS='-' read -r -a ofed_ver_arr <<< "$ofed_full_ver"
+
+			ofed_ver="${ofed_ver_arr[1]}"
+                        if [ X$ofed_ver == X"internal" ]; then
+                                # e.g OFED-internal-3.2-2.0.0
+                                ofed_ver="${ofed_ver_arr[2]}"
+                        fi
+
+			ofed_ver="${ofed_ver//.}"
+
+		        if [ "$ofed_ver" -ge 34 ]; then
+				set_roce_version_for_ofed_gt_34	$mlx_configured_nics
+			elif [ "$ofed_ver" -eq 33 ]; then
+				for devport in $mlx_configured_nics; do
+					IFS=':' read -r -a mlx_arr <<< "$devport"
+					dev=${mlx_arr[0]}
+
+					if [[ "$dev" =~ "mlx4" ]] && ! can_set_roce_version_for_mlx4; then
+						echo "Warning: couldn't set RoCE mode for device $dev to $roce_configured_mode"
+						continue
+					fi
+
+					cma_roce_mode -d $dev -m $ROCE_VERSION > /dev/null 2>&1
+				done
+			else # OFED VERSION < 3.3
+				for devport in $mlx_configured_nics; do
+					IFS=':' read -r -a mlx_arr <<< "$devport"
+					dev=${mlx_arr[0]}
+
+					if [[ "$dev" =~ "mlx4" ]] && ! can_set_roce_version_for_mlx4; then
+						echo "Warning: couldn't set RoCE mode for device $dev to $roce_configured_mode"
+						continue
+					fi
+					# manually setting roce mode to config
+					cd $kernel_rdma_cm
+					mkdir $dev
+					bash -c "echo $roce_configured_mode > $dev/default_roce_mode" > /dev/null 2>&1
+					get_roce_mode=`cat $dev/default_roce_mode`
+
+					if [ "$roce_configured_mode" != "$get_roce_mode" ]; then
+						echo "Warning: couldn't set RoCE mode: $roce_configured_mode on device $dev, RoCE mode is: $get_roce_mode"
+					fi
+					rmdir $dev
+				done
+			fi
+		else
+			#ofed not installed - trying to work with kernel
+			set_roce_version_when_no_ofed $mlx_configured_nics
+		fi
+	fi
+}
+
+check_roce_multipath_config() {
+	arp_ignore_value=`sysctl -n net.ipv4.conf.all.arp_ignore`
+	if [ $? -eq 0 ] && [ "$arp_ignore_value" != "2" ]; then
+		echo "WARNING: RoCE MultiPath configuration is not optimized, sysctl net.ipv4.conf.all.arp_ignore value should be 2"
+	fi
+}
+
+ofed_version_ge() {
+	if [[ $ofed_version =~ MLNX_OFED_LINUX-([0-9]+)\.([0-9]+) ]] ; then
+
+		ofed_version_major="${BASH_REMATCH[1]}"
+		ofed_version_minor="${BASH_REMATCH[2]}"
+
+		if [ "$ofed_version_major" -gt "$1" ] ; then
+			return 0
+		fi
+
+		if [ "$ofed_version_major" == "$1" ] && [ "$ofed_version_minor" -ge "$2" ] ; then
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
+check_modules() {
+	kernel=$(uname -r)
+	mdir=/lib/modules/$kernel/extra/nvmesh
+
+	if $should_check_kos && ! is_k8s_operator; then
+		(
+			if flock -n 9; then
+				for t in $*; do
+					if [ ! -d $mdir/$t ]; then
+						if ls $MDIR/*-repo/$t*$kernel* > /dev/null 2>&1; then
+							echo "Kernel modules are not linked to the current running kernel, running 'nvmesh_update'...."
+							/usr/bin/nvmesh_update -q
+							if [ $? -ne 0 ]; then
+								echo "Error: 'nvmesh_update' falied... cannot load modules correctly"
+								exit 5
+							fi
+						# KMOD IS NOT SUPPORTED ANYMORE - NEED TO ADJUST THE CODE IN CASE IT IS NEEDED AGAIN
+						# check if not kmod installation (nvmeib_common module of some kernel exists on nvmesh-core installation directory)
+						elif [ -e /opt/nvmesh/common-repo/common_*/common/nvmeib_common.ko* ]; then
+							echo "Error: missing kernel modules for current kernel $kernel"
+							exit 5
+						else
+							echo "Error: please install missing kmod-nvmesh-core-$kernel"
+							exit 5
+						fi
+					fi
+				done
+				decompress_modules_if_needed
+			fi
+		) 9>"$dirTreeLockFile"
+	else
+		decompress_modules_if_needed
+	fi
+
+
+	get_ofed_version
+
+	echo "Detected Kernel: "$kernel
+	echo "Installed Ofed: "$ofed_version
+}
+
+get_ofed_version() {
+	ofed_version=$(ofed_info -s 2> /dev/null);
+	if [ "x$ofed_version" == "x" ]; then
+		# OFED not installed
+		ofed_version="none"
+	else
+		ofed_version=${ofed_version//:};
+	fi
+}
+
+should_load_mlx() {
+	mlx=$1; shift
+
+	if is_tcp_only; then
+		return 1
+	fi
+
+	# [NVMESH-3099]: If the module mlxX_ib is already loaded, then return 0 (true)
+	if [ -d "/sys/module/${mlx}_ib" ]; then
+		return 0
+	fi
+
+	IBCONF="/etc/infiniband/openib.conf"
+
+	if [ X$ofed_version == X"none" ]; then
+		return 0
+	fi
+
+	if [ $mlx == "mlx4" ] && ofed_version_ge 5 1; then
+		# Since ofed 5.1 - no mlx4 support
+		return 1
+	fi
+
+	grep -s -q -i "^\s*"$mlx"_LOAD\s*=\s*yes" $IBCONF
+
+	return $?
+}
+
+all_modules_up() {
+	extra_module=$1; shift
+
+  	success=0;
+
+	for mlx in mlx4 mlx5; do
+		if should_load_mlx $mlx; then
+			if ! module_up nvmeib_common_"$mlx"_public; then
+				echo $" Critical module nvmeib_common_"$mlx"_public not running"
+				success=1
+			fi
+		fi
+	done
+
+	if ([ "$extra_module" == nvmeibc ] || [ "$extra_module" == nvmeibs ]) && [ -e $tcp_indicator_module_param_path ]; then
+		tcp_content=`cat $tcp_indicator_module_param_path`
+		if ([ "$tcp_content" != "N" ] && [ "$tcp_content" != "n" ] && [ "$tcp_content" != "0" ]); then
+			# tcp is on - verify siw related modules are up
+			if ! module_up siw; then
+				echo $" Critical module siw not running"
+				success=1
+			fi
+
+			if ! module_up nvmeib_common_siw_public; then
+				echo $" Critical module nvmeib_common_siw_public not running"
+				success=1
+			fi
+		fi
+	fi
+
+	for m in nvmeib_common nvmeib_common_public $extra_module; do
+		if ! module_up $m; then
+			echo $" Critical module $m not running"
+			success=1
+		fi
+	done
+
+	return $success
+}
+
+load_module() {
+        flags=""
+        if [ -f /etc/SuSE-release ]; then
+                flags="--allow-unsupported"
+        fi
+
+        output=$(modprobe $flags "$@" 2>&1)
+        RETVAL=$?
+
+        if [ $RETVAL -ne 0 ]; then
+                echo "Error: failed to load module(s): $* (exit code: $RETVAL)"
+                echo "modprobe output: $output"
+        fi
+
+        return $RETVAL
+}
+
+try_load_module() {
+        output=$(modprobe "$@" 2>&1)
+        RETVAL=$?
+
+        if [ $RETVAL -ne 0 ]; then
+                echo "Error: failed to load module(s): $* (exit code: $RETVAL)"
+                echo "modprobe output: $output"
+        fi
+
+        return $RETVAL
+}
+
+unload_module() {
+        output=$(modprobe -r "$@" 2>&1)
+        RETVAL=$?
+
+        if [ $RETVAL -ne 0 ]; then
+                if echo "$output" | grep -q "FATAL: Module .* not found"; then
+                        # Ignore module not found errors
+                        :
+                else
+                        echo "Error: failed to unload module(s): $* (exit code: $RETVAL)"
+                        echo "modprobe output: $output"
+                fi
+        fi
+
+        return $RETVAL
+}
+
+rmmod_module() {
+	local output
+	output=$(rmmod "$@" 2>&1)
+	local RETVAL=$?
+
+	if [ $RETVAL -ne 0 ]; then
+		if echo "$output" | grep -q "is not currently loaded"; then
+			# this is the ignorable "false positive" error, be silent
+			:
+		else
+			echo "Warning: couldn't unload module '$*' (exit code: $RETVAL)"
+			echo "rmmod output: $output"
+		fi
+	fi
+
+	return $RETVAL
+}
+
+ftrace_init() {
+	if [ "$DUMP_FTRACE_ON_OOPS" == "Yes" ] || [ "$DUMP_FTRACE_ON_OOPS" == "True" ]; then
+		if [ -f /proc/sys/kernel/ftrace_dump_on_oops ]; then
+			echo 1 >  /proc/sys/kernel/ftrace_dump_on_oops;
+		fi
+
+		if [ -f /sys/kernel/debug/tracing/buffer_size_kb ]; then
+			echo 100 > /sys/kernel/debug/tracing/buffer_size_kb;
+		fi
+	fi
+}
+
+loggers_cgroup_init() {
+	if [ -n "$LOGGERS_CGROUP" ]; then
+		WRITE_LIMIT="41943040" #40MB
+		if [ -n "$LOGGERS_CGROUP_WRITE_LIMIT" ]; then
+			WRITE_LIMIT=$LOGGERS_CGROUP_WRITE_LIMIT
+		fi
+		echo "Creating nvmesh_loggers cgroup"
+		mkdir -p /sys/fs/cgroup/blkio/$LOGGERS_CGROUP
+		LOGS_BDEV=$(df -P /var/log/nvmesh/trace_daemon/ | awk 'END{print $1}')
+		MJMI=$(lsblk -rp | grep $LOGS_BDEV | cut -f2 -d ' ')
+		echo "Setting write bw limit to $WRITE_LIMIT for major minor $MJMI"
+		echo "$MJMI $WRITE_LIMIT" > /sys/fs/cgroup/blkio/$LOGGERS_CGROUP/blkio.throttle.write_bps_device
+	fi
+}
+
+loggers_cgroup_free() {
+	if [ -n "$LOGGERS_CGROUP" ]; then
+		rm -rf /sys/fs/cgroup/blkio/$LOGGERS_CGROUP
+	fi
+}
+
+get_nvme_pci_by_devname() {
+	primary_blockdpath="/sys/block/nvme$1c*n*"
+	alternate_blockdpath="/sys/block/nvme$1n*"
+
+	if [ "$(ls $primary_blockdpath | wc -l)" -ge "1" ]; then
+		blockdpath=$primary_blockdpath
+	else
+		if [ "$(ls $alternate_blockdpath | wc -l)" -ge "1" ]; then
+			blockdpath=$alternate_blockdpath
+		else
+			echo "WARNING: could not find: $primary_blockdpath $alternate_blockdpath while trying to get the pci id" >> /var/log/nvmesh/bind.err
+			return 1
+		fi
+	fi
+
+
+	fullpci=`readlink $blockdpath`
+	filename=`basename $fullpci`
+	pciregex="[0-9a-z]{4}:[0-9a-z]{2}:[0-9a-z]{2}\.[0-9a-z]"
+
+	while [[ ! $filename =~ $pciregex ]] && [ ! -z "$filename" ]; do
+		fullpci=`dirname $fullpci`
+		filename=`basename $fullpci`
+	done
+
+	if [ ! -z "$filename" ]; then
+		echo $filename
+		return 0
+	else
+		return 1
+	fi
+}
+
+get_nvme_vendor_and_model_by_serial() {
+	serial=$1
+	nvme_devname=$2 #optional - if device name already resolved
+
+	if [ -z "$NVME_CLI_PATH" ] || [ ! -e $NVME_CLI_PATH ]; then
+		echo "ERROR: could not locate and run 'nvme id-ctrl'"
+		return 1
+	fi
+
+	if [ -z "$nvme_devname" ]; then
+		nvme_devname=$(get_nvme_devname_by_serial $serial)
+		if [ $? -ne 0 ]; then
+			echo $nvme_devname
+			return 1
+		fi
+	fi
+
+	fulldevname="/dev/$nvme_devname"
+	nvme_full_vendor=`$NVME_CLI_PATH id-ctrl $fulldevname 2> /dev/null | grep -e ^vid`
+	if [ $? -ne 0 ]; then
+		echo "ERROR: could not find vendor for nvme serial $serial"
+		return 1
+	fi
+
+	nvme_vendor=`echo $nvme_full_vendor | awk '{print $3}'`
+
+	nvme_mn_regex='^mn[[:space:]]*:[[:space:]]*(.*)'
+	nvme_full_model=`$NVME_CLI_PATH id-ctrl $fulldevname 2> /dev/null | grep -e ^mn[[:space:]]*:`
+
+        if [ $? -eq 0 ] && [[ $(echo $nvme_full_model) =~ $nvme_mn_regex ]]; then
+		nvme_model=${BASH_REMATCH[1]}
+	else
+                echo "ERROR: could not find model number for nvme serial $serial"
+                return 1
+        fi
+
+	echo "$nvme_vendor,$nvme_model"
+	return 0
+}
+
+get_nvme_nsid_by_devname() {
+	nvme_devname=$1
+	nsidregex='NVME Identify Namespace ([0-9]+)'
+
+	if [ -z "$NVME_CLI_PATH" ] || [ ! -e $NVME_CLI_PATH ]; then
+		echo "ERROR: could not locate and run 'nvme id-ctrl'"
+		return 1
+	fi
+
+	fulldevname="/dev/$nvme_devname"
+	nvme_full_nsid=`$NVME_CLI_PATH id-ns $fulldevname`
+
+	if [ $? -eq 0 ] && [ ! -z "$nvme_full_nsid" ] && [[ $(echo $nvme_full_nsid) =~ $nsidregex ]]; then
+        	nvme_nsid=${BASH_REMATCH[1]}
+		if [ $? -eq 0 ] && [ ! -z "$nvme_nsid" ]; then
+			echo $nvme_nsid
+			return 0
+		fi
+	fi
+
+      	echo "ERROR: could not find namespace id of nvme $nvme_devname"
+	return 1
+}
+
+get_nvme_devname_by_serial() {
+	nvme_serial=$1
+	nvme_vendor=$2
+	matched_devices=()
+
+        if [ -z "$nvme_serial" ]; then
+                echo "WARNING: missing serial number for nvme under $DRIVES_FILE, ignoring"
+                return 2
+        fi
+
+	if [ -z "$NVME_CLI_PATH" ] || [ ! -e $NVME_CLI_PATH ]; then
+               	echo "ERROR: could not locate and run 'nvme id-ctrl'"
+                return 1
+	fi
+
+	blocks_base="/sys/block"
+	alldevices=`ls $blocks_base`
+
+	for dev in $alldevices; do
+		if [[ "$dev" == "nvme"* ]]; then
+			fulldevname="/dev/$dev"
+			fullsn=`$NVME_CLI_PATH id-ctrl $fulldevname 2> /dev/null | grep sn`
+
+			if [ "$?" -eq "0" ]; then
+				sn=`echo $fullsn | awk '{print $3}'`
+				if [ ! -z "$nvme_vendor" ]; then
+					if [ "$sn" == "$nvme_serial" ]; then
+						dev_vendor=$(get_nvme_vendor_by_serial $nvme_serial $dev)
+						if [ $? -ne 0 ]; then
+							echo "$dev_vendor"
+				                        return 1
+				                fi
+
+						if [ "$dev_vendor" == "$nvme_vendor" ]; then
+							matched_devices+=($dev)
+						fi
+					fi
+				elif [ "$sn" == "$nvme_serial" ]; then
+					matched_devices+=($dev)
+				fi
+			fi
+		fi
+	done
+
+	if [ "${#matched_devices[@]}" -eq 0 ]; then
+		echo "ERROR: could not find device name for nvme serial: $nvme_serial"
+		return 1
+	elif [ "${#matched_devices[@]}" -ne 1 ]; then
+		if [ ! -z "$nvme_vendor" ]; then
+			echo "ERROR: multiple namespaces found for nvme serial: $nvme_serial"
+		else
+			echo "ERROR: multiple vendors resolves or multiple namespaces resolves nvme serial: $nvme_serial"
+		fi
+		return 1
+	fi
+
+	echo ${matched_devices[0]}
+	return 0
+}
+
+check_arp_configuration() {
+	ALL_PREFIX="net.ipv4.conf.all."
+	DEFAULT_PREFIX="net.ipv4.conf.default."
+	for prefix in $ALL_PREFIX $DEFAULT_PREFIX; do
+		for suffix in "rp_filter" "arp_ignore" "arp_announce"; do
+			ARP_VALUE=$(sysctl -ar "$prefix$suffix" | cut -d '=' -f2)
+			if [ $ARP_VALUE -ne 2 ]; then
+				echo "WARNING: $prefix$suffix is set to $ARP_VALUE. Please set to 2, using 'sysctl -w $prefix$suffix=2'"
+			fi
+		done
+		suffix="arp_filter"
+		ARP_VALUE=$(sysctl -ar "$prefix$suffix" | cut -d '=' -f2)
+		if [ $ARP_VALUE -ne 1 ]; then
+			echo "WARNING: $prefix$suffix is set to $ARP_VALUE. Please set to 1, using 'sysctl -w $prefix$suffix=1'"
+		fi
+	done
+}
+
+get_run_level() {
+	MY_RUNLEVEL=$(runlevel | cut -d ' ' -f2)
+}
+
+check_lsof_procdirs() {
+	prog=$1
+	proc_dir=$2
+
+	if lsof $procdir > /dev/null 2>&1; then
+		echo "Error: some files under $procdir are in use, cannot start $prog, please run 'sudo lsof $procdir' to view details"
+		exit 1
+	fi
+
+        if [ "$prog" == "nvmeshclient" ]; then
+                other=nvmeibs
+        elif [ "$prog" == "nvmeshtarget" ]; then
+                other=nvmeibc
+        else
+                echo "Warning: unknown service $prog"
+                exit 1
+        fi
+
+        #echo "check if '$other' is up"
+        if ! module_up $other; then
+                if lsof $COMMON_PROC_DIR > /dev/null 2>&1; then
+                        echo "Warning: some files under $COMMON_PROC_DIR are in use, cannot start $prog, please run 'sudo lsof $COMMON_PROC_DIR' to view details"
+                        #exit 1
+                fi
+        fi
+}
+
+start_management_CM_and_Agent() {
+	local prog=$1
+	(
+		if ! flock -n 9; then
+			if [ "$prog" == "nvmeshclient" ]; then
+				kill -SIGUSR1 $(cat $managementAgentPID)
+			fi
+			return 0
+		fi
+
+		if [ -r "$managementCMPID" ]; then
+			PID=`cat $managementCMPID`
+
+			if process_up $PID managementCM; then
+				echo $"ManagementCM service is already running"
+			else
+				echo $"Starting ManagementCM service"
+				$EXECUTABLES_DIR/managementCM start &> /dev/null
+			fi
+		else
+			echo $"Starting ManagementCM service"
+			$EXECUTABLES_DIR/managementCM start &> /dev/null
+		fi
+
+		if ! verify_management_Agent_is_running; then
+			start_management_Agent
+		else
+			echo $"ManagementAgent service is already running"
+		fi
+
+		# send signal to Agent to re-attach volumes
+		PID=`cat $managementAgentPID`
+
+		if [ "$prog" == "nvmeshclient" ]; then
+			echo "Signaling re-attach volumes"
+			kill -SIGUSR1 $PID
+		fi
+	) 9>"$servicesLockFile"
+}
+
+start_management_Agent() {
+	echo $"Starting ManagementAgent service"
+	$EXECUTABLES_DIR/managementAgent start &> /dev/null
+
+	if ! verify_management_Agent_is_running; then
+		echo "Error starting managementAgent"
+		exit 1
+	fi
+}
+
+verify_management_Agent_is_running() {
+	if [ -r "$managementAgentPID" ]; then
+		PID=`cat $managementAgentPID`
+
+		if ! process_up $PID managementAgent ; then
+			return 1
+		fi
+	else
+		return 1
+	fi
+
+	return 0
+}
+
+stop_management_CM_and_Agent() {
+	echo "Killing managementCM"
+	$EXECUTABLES_DIR/managementCM stop
+
+	echo "Killing managementAgent"
+	$EXECUTABLES_DIR/managementAgent stop
+}
+
+monitor_module() {
+	module=$1
+	on_shutdown=1
+	#trapping the signal sent when the service is being stop for clean shutdown
+	trap '[ $on_shutdown -eq 1 ] && on_shutdown=0 || on_shutdown=1' SIGUSR1
+
+	echo "INFO: Start monitoring module: $module"
+	while module_up $module; do
+		sleep 5
+	done
+
+	if [ $on_shutdown -ne 0 ]; then
+		echo "ERROR: Module $module got unloaded..."
+		exit 1
+	else
+		echo "Monitoring of $module is being shut down"
+		exit 0
+	fi
+}
+
+signal_monitor_process() {
+	# signaling old monitoring process if exists
+	if [ -r "$monitorPID" ] ; then
+		PID=`cat $monitorPID`
+		if [ "$PID" -gt 0 ] && process_up $PID $prog; then
+			echo "Signaling $1 to existing $module monitoring process with PID: $PID"
+                        kill -s $1 $PID
+		fi
+	fi
+}
+
+fork_and_monitor_module() {
+	module=$1
+	signal_monitor_process SIGKILL
+	monitor_module $1 &
+	echo "$!" > "$monitorPID"
+}
+
+should_start_trace_daemon() {
+	# For siw return 0 only if it is TCP config
+	local target_daemon=$1
+	if [ "$target_daemon" == "siw_tracer" ]; then
+		read_conf_file_raw
+		if [ "$TCP_ENABLED" == "Yes" ] || [ "$TCP_ENABLED" == "True" ] || [ -n "$SIW_IFACES" ]; then
+			return 0
+		fi
+		return 1
+	fi
+	return 0
+}
+
+start_trace_daemon() {
+	check_root
+	read_conf_file_raw
+
+	local target_daemon=$1
+	local extract_dictionaries=no
+	local target_exe
+
+	[ "$target_daemon" == "trace_daemon" ] && target_exe=trace_daemon_2.0/run_trace_daemon.sh && extract_dictionaries=yes
+	[ "$target_daemon" == "siw_tracer"  ] && target_exe=pipe_tracer/build/bin/nvmeib_pipe_tracer
+
+	if [ -z "$target_exe" ]; then
+		echo "WARNING: Invalid input target_daemon=$target_daemon"
+		return 1
+	fi
+
+	trace_daemon_path=/lib/modules/$kernel/extra/nvmesh/common/tools/$target_exe
+	dictionaries_path=/lib/modules/$kernel/extra/nvmesh/common/dictionaries.tar.gz
+	echo "Starting NVMesh Trace Daemon"
+	loggers_cgroup_init
+
+	if [ ! -d $MAIN_PID_DIR ]; then
+		mkdir -p $MAIN_PID_DIR
+	fi
+
+	if [ ! -e $trace_daemon_path ]; then
+		# in case it is a kmod installation
+		trace_daemon_path=/opt/nvmesh/common-repo/tools/$target_exe
+		dictionaries_path=/lib/modules/$kernel/extra/nvmesh/dictionaries.tar.gz
+
+		if [ ! -e $trace_daemon_path ]; then
+			echo "WARNING: NVMesh Trace Daemon tool is missing"
+			return 1
+		fi
+	fi
+
+	if [ ! -d "$TRACE_DAEMON_DIR" ]; then
+		mkdir $TRACE_DAEMON_DIR
+	fi
+
+	if [ "$target_daemon" == "trace_daemon" ] && [ "$TRACE_TO_RAMDISK" == "Yes" ] || [ "$TRACE_TO_RAMDISK" == "True" ]; then
+		# Tracing to Ramdisk.
+
+		# Check if already mounted
+		if mount | grep $TRACE_DAEMON_DIR; then
+			echo "Ramdisk already mounted on $TRACE_DAEMON_DIR"
+		else
+			# Check if not empty
+			if find $TRACE_DAEMON_DIR -mindepth 1 -maxdepth 1 | read; then
+				# folder is not empty, move to <folder_name>.persist
+				echo "Moving $TRACE_DAEMON_DIR to $TRACE_DAEMON_DIR.persist"
+				mv $TRACE_DAEMON_DIR $TRACE_DAEMON_DIR.persist
+				# mkdir folder
+				mkdir $TRACE_DAEMON_DIR
+			fi
+			# Mount ramdisk
+			echo "Mounting tracer ramdisk of $TRACE_RAMDISK_SIZE on $TRACE_DAEMON_DIR"
+			mount -t tmpfs -o size=$TRACE_RAMDISK_SIZE tmpfs $TRACE_DAEMON_DIR
+			if [ -d $TRACE_DAEMON_DIR.persist ]; then
+				# Copy contents from moved .persist folder
+				echo "Copying from $TRACE_DAEMON_DIR.persist to $TRACE_DAEMON_DIR"
+				cp -R $TRACE_DAEMON_DIR.persist/* $TRACE_DAEMON_DIR
+			fi
+		fi
+	fi
+
+	if $sysv_triggered; then
+		PID=""
+		if [ -r "$TRACE_DAEMON_PID_DIR/$target_daemon.pid" ]; then
+			pid_content=`cat $TRACE_DAEMON_PID_DIR/$target_daemon.pid`
+			if [ "$pid_content" -gt 0 ]; then
+				PID=$pid_content
+			fi
+		fi
+
+		if process_up $PID trace_daemon; then
+			echo "nvmesh Trace Daemon is already running"
+			return 0
+		fi
+	fi
+
+	(
+		if ! flock -n 9; then
+			return 0
+		fi
+
+		cd $TRACE_DAEMON_DIR
+		if [ "$extract_dictionaries" == "yes" ]; then 
+			tar -xvzf $dictionaries_path &
+		fi
+		hostname > hostname
+		ulimit -c 0
+		$trace_daemon_path 2>> $TRACE_DAEMON_DIR/$target_daemon.log &
+		echo "$!" > "$TRACE_DAEMON_PID_DIR/$target_daemon.pid"
+		cd - &> /dev/null
+	) 9>"$TRACE_DAEMON_LOCKFILE_DIR/$target_daemon.lock"
+}
+
+stop_trace_daemon() {
+	check_root
+	#bug: we should not read the config file on stop - we should stop the daemon using the configuration it was started with
+	read_conf_file_raw 
+	local target_daemon=$1
+
+	[ "$target_daemon" == "trace_daemon" ] && target_exe=trace_daemon_2.0/trace_daemon && extract_dictionaries=yes
+	[ "$target_daemon" == "siw_tracer"  ] && target_exe=pipe_tracer/build/bin/nvmeib_pipe_tracer
+
+	if [ -z "$target_exe" ]; then
+		echo "WARNING: Invalid input target_daemon=$target_daemon"
+		return 1
+	fi
+
+	if [ -r "$TRACE_DAEMON_PID_DIR/$target_daemon.pid" ] ; then
+		#the code below works in a sunny day only:
+		#* linux OOM killer (or somebody else) may kill the wrapper - the committed pid will remain unchanged
+		#* a new process with the same pid may born - we will kill it
+		PID=`cat $TRACE_DAEMON_PID_DIR/$target_daemon.pid`
+		if [ "$PID" -gt 0 ]; then
+			echo "Killing NVMesh Trace Daemon, waiting for wrapper to be killed"
+			kill -s SIGTERM $PID
+			for i in {1..1000}
+			do
+				kill -0 $PID || { KILLED=1; echo "wrapper is stopped"; break; }
+				sleep 0.01
+			done
+
+			if [ -z "$KILLED" ]; then
+				echo "Killing wrapper"
+				kill -9 $PID
+			fi
+		fi
+		rm $TRACE_DAEMON_PID_DIR/$target_daemon.pid
+	fi
+
+	if [ "$target_daemon" == "trace_daemon" ] && [ "$TRACE_TO_RAMDISK" == "Yes" ] || [ "$TRACE_TO_RAMDISK" == "True" ]; then
+		if mount | grep $TRACE_DAEMON_DIR; then
+			# Ramdisk is mounted - persist contents
+			echo "Persisting Tracer Ramdisk..."
+			if [ ! -d $TRACE_DAEMON_DIR.persist ]; then
+				mkdir $TRACE_DAEMON_DIR.persist
+			fi
+			# Copy contents to .persist folder
+			cp -R $TRACE_DAEMON_DIR/* $TRACE_DAEMON_DIR.persist/
+			# Umount ramdisk
+			umount -l $TRACE_DAEMON_DIR
+			if [ $? -ne 0 ]; then
+				echo "Failed to unmount $TRACE_DAEMON_DIR"
+			else
+				# Remove empty mount point dir
+				rmdir $TRACE_DAEMON_DIR
+				# Rename .persist dir
+				mv $TRACE_DAEMON_DIR.persist $TRACE_DAEMON_DIR
+			fi
+		fi
+	fi
+	loggers_cgroup_free
+}
+
+is_tcp_enabled() {
+    if [ "$TCP_ENABLED" == "Yes" ] || [ "$TCP_ENABLED" == "True" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+is_tcp_only() {
+	if [ "$TCP_ONLY" == "Yes" ] || [ "$TCP_ONLY" == "True" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+is_iommu_enabled() {
+	if [[ -n "$(ls /sys/class/iommu)" ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+get_tcp_base_port_id() {
+    tcp_base_port_id=$DEFAULT_TCP_BASE_PORT_ID
+    if is_tcp_enabled; then
+	if [ ! -z "$TCP_BASE_PORT_ID" ]; then
+		if [ "$TCP_BASE_PORT_ID" -ge $DEFAULT_TCP_BASE_PORT_ID ]; then
+		    tcp_base_port_id="$TCP_BASE_PORT_ID"
+		    tcp_base_port_modparam="tcp_base_port_id=$tcp_base_port_id"
+		    echo "TCP (iWARP) base port-id from conf: $tcp_base_port_id"
+		else
+		    echo "WARNING: Invalid TCP (iWARP) base port-id from conf: $TCP_BASE_PORT_ID, use default $DEFAULT_TCP_BASE_PORT_ID"
+		fi
+	fi
+	if [ ! -z "$TCP_FIND_PATH_SOCK_PORT" ]; then
+		tcp_find_path_sock_port="$TCP_FIND_PATH_SOCK_PORT"
+		tcp_find_path_sock_modparam="iwarp_find_path_sock_port=$tcp_find_path_sock_port"
+		echo "TCP (iWARP) find-path socket port from conf: $tcp_find_path_sock_port"
+	fi
+    fi
+}
+
+is_k8s_operator() {
+	if [ -z "$NVMESH_K8S_OPERATOR" ]; then
+		return 1
+	else
+		return 0
+	fi
+}

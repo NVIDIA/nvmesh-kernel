@@ -1,0 +1,19 @@
+{
+	"lock_server_type_e" : {
+		"//" : "Locking scheme applied to a protection raid",
+		"__type" : "enum",
+		"__def" : {
+			"OWNER_SCHEME_FIRST_L_INC_A"  : 1,
+			"OWNER_SCHEME_SL_START_INC_A" : 2,
+			"OWNER_SCHEME_SL_START_DEC_A" : 3,
+			"OWNER_SCHEME_SL_START_DEC_C" : 4
+		}
+	},
+	"nvmeibc_locks_scheme_conf" : {
+		"//" : "Defines how to lock each raid1, type of: lock_server_type_e",
+		"__type" : "used",
+		"type" : "__codec WithDefaultCodec(PodCodec('I'), 1)",
+		"maxNOwners" : "__codec WithDefaultCodec(PodCodec('I'), 2)",
+		"locksetShift" : "__codec WithDefaultCodec(PodCodec('i'), -1)"
+	}
+}

@@ -1,0 +1,8 @@
+#!/bin/bash
+sudo fdisk -l > $HOSTNAME-fdisk-$(date +%F-%T)
+sudo ibstat > $HOSTNAME-ibstat-$(date +%F-%T)
+sudo iblinkinfo > $HOSTNAME-iblinkinfo-$(date +%F-%T)
+sudo lspci -vvv > $HOSTNAME-lspci-$(date +%F-%T)
+sudo uname -a > $HOSTNAME-uname-$(date +%F-%T)
+sudo vmstat -tw 1 > $HOSTNAME-vmstat-$(date +%F-%T) &
+ofed_info > $HOSTNAME-ofed_info-$(date +%F-%T) 

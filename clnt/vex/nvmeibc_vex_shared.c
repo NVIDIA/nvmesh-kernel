@@ -1,0 +1,49 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+#include "nvmeibc_vex_shared.h"
+
+const struct vex_ops *const vex_ach_clnt_ops_collection[vex_ach_ops_num] = {
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_shared_cfg, vex_ach_shared_cfg_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_io_alloc_disk, vex_ach_get_io_alloc_disk_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_io_port_info, vex_ach_get_io_port_info_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_acs_map_clnt_ionics, vex_ach_acs_map_clnt_ionics_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_acs_map_srv_ionics, vex_ach_acs_map_srv_ionics_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_acs_map_disks, vex_ach_acs_map_disks_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_acs_map_arnics, vex_ach_acs_map_arnics_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_acs_map_disk_info, vex_ach_acs_map_disk_info_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_acs_map_di_rsrc_set, vex_ach_acs_map_di_rsrc_set_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_lock_mem_seg_info, vex_ach_lock_mem_seg_info_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_io, vex_ach_get_io_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_jrange_req, vex_ach_get_jrange_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_jrange_rsp, vex_ach_get_jrange_rsp_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_lock_gids_rsp, vex_ach_get_lock_gids_rsp_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_clnt_toma_req, vex_ach_clnt_toma_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_toma_clnt_req, vex_ach_toma_clnt_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_dbg_cmd, vex_ach_dbg_cmd_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_abnd_free, vex_ach_abnd_free_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_jmdc_rsp, vex_ach_get_jmdc_rsp_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_jmdc_rng_hdr, vex_ach_get_jmdc_rng_hdr_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_ach_get_acs, vex_ach_get_acs_clnt_ops),
+};
+
+/* VEX: No-RDDA Channel Operations */
+const struct vex_ops *const vex_nrch_clnt_ops_collection[vex_nrch_ops_num] = {
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_io_read, vex_nrch_io_read_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_io_other, vex_nrch_io_other_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_io_srv_lock_req, vex_nrch_io_srv_lock_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_io_srv_lock_rsp, vex_nrch_io_srv_lock_rsp_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_io_req, &nvmeib_vex_invalid_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_io_rsp, &nvmeib_vex_invalid_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_br_req, vex_nrch_gen_br_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_uj_req, vex_nrch_gen_uj_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_db_req, vex_nrch_gen_db_req_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_fje, vex_nrch_gen_fje_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_je, vex_nrch_gen_je_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_uj_rsp, vex_nrch_gen_uj_rsp_clnt_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_br_rsp, &nvmeib_vex_invalid_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_db_rsp, &nvmeib_vex_invalid_ops),
+	VEX_OPS_DECLARE_COLLECTION_ENTRY(vex_nrch_gen_fje_ent, vex_nrch_gen_fje_ent_clnt_ops),
+};

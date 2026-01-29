@@ -1,0 +1,151 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+. /etc/nvmesh/nvmesh.conf
+
+# TODO: control mlnx irqs also
+
+if [ "$ASSIGN_NVME_IRQS" == "none" ]; then
+	echo "Skip running nvmesh_set_io1_interrupts - let things be done by irqbalancer"
+	exit
+fi
+
+BIND_NVME_TO_SOCKET=''
+
+if [ "$ASSIGN_NVME_IRQS" == "persocket" ]; then
+	BIND_NVME_TO_SOCKET='Yes'
+elif [ "$ASSIGN_NVME_IRQS" == "fullspread" ]; then
+	BIND_NVME_TO_SOCKET='No'
+fi
+
+if [ ! -z "$BIND_NVME_TO_SOCKET" ]; then
+	declare -a SOCKET_BY_CORE
+	declare -a SOCKET_BY_NUMA
+	NCPUS=0
+	for x in `lscpu -p=cpu,socket,node | grep -v ^#`; do
+		C=`echo $x | cut -d, -f1`
+		S=`echo $x | cut -d, -f2`
+		N=`echo $x | cut -d, -f3`
+		SOCKET_BY_CORE[$C]=$S
+		SOCKET_BY_NUMA[$N]=$S
+		NCPUS=$(($NCPUS+1))
+	done
+
+	CPU=0
+	for x in `ls /proc/nvmeibs/smart* | cut -c 20-`; do
+		echo Working on smart $x
+		# CPU=0
+		NUMA=`grep Numa /proc/nvmeibs/smart$x | cut -d= -f2`
+		for IRQ in `grep "nvme $x io" /proc/interrupts | cut -d: -f1` ; do
+			if [[ $BIND_NVME_TO_SOCKET == 'Yes' ]]; then 
+				LOOP=0
+				# echo $LOOP $CPU $NUMA SBYC=${SOCKET_BY_CORE[$CPU]} SYBN=${SOCKET_BY_NUMA[$NUMA]}
+				while [[ $LOOP -le $NCPUS && ${SOCKET_BY_CORE[$CPU]} != ${SOCKET_BY_NUMA[$NUMA]} ]]; do
+					LOOP=$((LOOP+1))
+					CPU=$((CPU+1))
+					if [[ $CPU == $NCPUS ]]; then CPU=0; fi
+					# echo LOOP$LOOP $CPU $NUMA ${SOCKET_BY_CORE[$CPU]} ${SOCKET_BY_NUMA[$NUMA]}
+				done
+			fi
+			echo $CPU > /proc/irq/$IRQ/smp_affinity_list
+			echo $x, $NUMA, $CPU
+			CPU=$((CPU+1))
+			if [[ $CPU == $NCPUS ]]; then CPU=0; fi
+		done
+	done
+
+else #ASSIGN_NVME_IRQS="pernuma"
+
+	echo "From user space: started script nvmesh_set_io1_interrupts" > /dev/kmsg
+
+	##### Get Interrupts List
+	echo "$0 is running..."
+
+	if [ ! -e /sys/module/nvmeibs/parameters/min_local_nvmeqs ]; then
+		echo "From user space: script nvmesh_set_io1_interrupts exits with error 1" > /dev/kmsg
+		exit
+	fi
+
+	NUM_VECS_PER_DISK=`cat /sys/module/nvmeibs/parameters/min_local_nvmeqs`
+	if (( $NUM_VECS_PER_DISK < 4 )); then
+		NUM_VECS_PER_DISK=4
+	fi
+
+	nvecs=`seq 1 $NUM_VECS_PER_DISK`
+	INTERRUPTS_COUNT=0
+	for nv in $nvecs; do
+		INTERRUPTS_COUNT1=`grep nvme /proc/interrupts | grep "io"$nv"$" | wc -l`
+		INTERRUPTS_COUNT=$((INTERRUPTS_COUNT+INTERRUPTS_COUNT1))
+	done
+	if [[ $INTERRUPTS_COUNT = 0 ]]; then
+		echo "From user space: script nvmesh_set_io1_interrupts exits with error 2" > /dev/kmsg
+		exit
+	fi
+
+	declare -a INTERRUPTS
+	count=0
+	for nv in $nvecs; do
+		for i in `grep nvme /proc/interrupts | grep "io"$nv"$" | cut -d: -f1`; do
+			INTERRUPTS[$count]=$i
+			count=$((count+1))
+		done
+	done
+
+	declare -a SMARTS
+	count=0
+	for nv in $nvecs; do
+		for i in `grep nvme /proc/interrupts | grep "io"$nv"$" | rev | cut -d' ' -f2 | rev`; do
+			SMARTS[$count]=$i
+			count=$((count+1))
+		done
+	done
+
+	##### Get nvmeibs Devices
+
+	if [ ! -e /proc/nvmeibs/disks.csv ]; then
+		echo "From user space: script nvmesh_set_io1_interrupts exits with error 3" > /dev/kmsg
+		exit
+	fi
+
+	DEVICES_COUNT=`cat /proc/nvmeibs/disks.csv | wc -l`
+	DEVICES_COUNT=$((DEVICES_COUNT - 1))
+
+	###### Get CPU cores per CPU
+
+	declare -a NUMAS
+	declare -a NEXT_CPU
+	declare -a CPUS
+	for x in `lscpu -p=cpu,node | grep -v ^#`; do
+		CPU=`echo $x | cut -d, -f1`
+		NUMA=`echo $x | cut -d, -f2`
+		NUMAS[$CPU]=$NUMA
+		CPUS[$NUMA]=${CPUS[$NUMA]}", "$CPU
+		NEXT_CPU[$NUMA]=0
+	done
+
+	##### Let's play the matching game
+
+	for x in `seq 0 $((INTERRUPTS_COUNT - 1))`; do
+		numa_node=`grep Numa /proc/nvmeibs/smart${SMARTS[$x]} | cut -d= -f2`
+		if [ $numa_node -eq -1 ]; then
+			numa_node=0
+		fi
+		next_cpu=${NEXT_CPU[$numa_node]}
+		next_cpu=$((next_cpu + 2))
+		cpu=`echo ${CPUS[$numa_node]} | cut -d, -f$next_cpu`
+		num_cpu=`echo ${CPUS[$numa_node]} | awk -F, '{print NF}'`
+		if [[ $next_cpu == $num_cpu ]]; then
+			NEXT_CPU[$numa_node]=0
+		else
+			NEXT_CPU[$numa_node]=$((NEXT_CPU[$numa_node] + 1))
+		fi
+
+		sudo echo $cpu > /proc/irq/${INTERRUPTS[$x]}/smp_affinity_list
+		echo $cpu, /proc/irq/${INTERRUPTS[$x]}/smp_affinity_list, `cat /proc/irq/${INTERRUPTS[$x]}/smp_affinity`
+	done
+
+	echo "From user space: ended script nvmesh_set_io1_interrupts" > /dev/kmsg
+
+fi

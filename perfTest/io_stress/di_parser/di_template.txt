@@ -1,0 +1,26 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Btest PANIC and logs location
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ /proc/volume/status
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Translate Addr + VLBA/DLBA/SLBA calcualtions
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Reconstructed TimeLine
+Time                  Who,      Toma_ver-Topo,                                  Val                 dlba
+
+2020-07-08 15:07:40   n1049     0x112-Topo  1956: {ALL-RW}          Write D0, 0x00000000002bdf25, 20971905
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Btest Block
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Logs + important greps
+./pager.py -l nvmeibc_trace_eter '-f (not file = nvmeibs_serjio.c) and (not file = nvmeibc_jam.c)' > z_clnt_eter.txt;
+grep tv-21558-24.*vol_short_id z_clnt_eter.txt -m 1
+./pager.py -l nvmeibc_trace_long nvmeibc_trace_eter '-f (not file = nvmeibs_serjio.c) and (not file = nvmeibc_jam.c)' > z_clnt.txt
+grep 'HTR V\.tv-21558-24.B\.0x0*60c' z_clnt.txt
+./pager.py -l nvmeibc_trace_goodpath nvmeibc_trace_long -f '((@VOL_ID=84) or (@DEV_NAME="tv-21558-24")) and ((@VLBA in [495370+10]) or (@RLBA in [495360+320]) or (@SLBA_BLKSETS=1548) or (@SLBA in [49537+32]))' --since "2020-07-08 15:07:40" --until "2020-07-08 15:26:50"  > z_goodpath.txt
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GoodPath logs:
+15:26:41.046454 (1594211201046454373) [22]nvmeibc_block_dp_ec.c:796 [op_dump_bio_wt] {11788864} BIODump EC. OPCODE: NVMEIB_BLOCK_IO_OP_READ, VOL_MINOR: 24, TOPOLOGY: <1507>, TXID: 0x0, START_LBA: 0x78f13, NLBAS: 0x1
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ALL parsed blocks of the slice

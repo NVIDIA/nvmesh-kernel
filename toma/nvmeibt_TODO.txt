@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+By Priority
+------------
+- disk_segment_dirty_bits_table_restore()
+  Reduce the size of nvmeibt_bm_allocate_dma_buffer() and insert nvmeibt_ds_metadata_read_buff() into the loop
+- Add to trace.config "+ output <syslog/LOGDIR>"
+- Add report_to_mgmt types, so that a newer report overrides an old one
+  - Separate leader/applied. Separate by segment
+- Go over all the local disk related accesses (including the mmaps), and make them
+  hot-unplug resilient (only the affected segments should be disabled)
+- Add disk size to the mgmt config and compare it with the local_disk (reduced to 1G upon err).
+- Go over all the deletions from arrays, and turn them into a macro that also updates the idx_in_...
+- Write topology (+ config) in the segment's metadata
+- Go over the sanity checks when parsing the config
+- stale_locks and dirty-rebuild:
+   1. During rebuild (SW_TOPO_U) (or after, maybe better before), copy all the special_locks to the other machine
+   2. When transitioning to SW_TOPO_N, shall we go over the active? Probably not, since we cannot get from W/U to N without client disconnect
+   3. Initialize the stale-locks to CLEAR_ALL
+- Accelerate the leader and follower. Do not wait for the next heartbeat whenever possible
+- When a registrant sends RT_UNREGISTER. We probably do not need to wait for confirm
+  The registrant is not in the middle of an IO.
+  Probably if both TOMA are up and the client disconnected from one of them, then we need to confirm.
+- When in SW_TOPO_U, periodically save the dirty_bits in metadata, as if clean shutdown
+- Refactor cur_topo->my_node to be in a function: is_config_valid
+- Move all FIN to be first line of each function, to capture var init failures. (and be consistent)
+- Rewrite read_config_version so that we will know explicitly what it is doing, the read persistent config should move outside of the main loop probably.
+- Trim physical blocks of disk, on segment delete and init.
+- From Omri
+ JBOD
+  - Unregister all registrants on volume change/deletion
+  - Init (trim disk_segment)
+- Do not send registrable following TR_UNREGISTER. The client tries to register right away
+  - Make sure that it works with recovery too
+- (3 way mirror) When switching owner, copy the dirty_bits (and stale locks)
+- If any disk_segment turns X then turn on all the dirty bits (incl. non-owner slots)
+- When back to NORMAL_STABLE. All dirty_bits should be cleaned (incl. non-owner slots)
+- Just before the leader applies a topology, it sends the topology_version
+  to the management. It is not allowed to elect a leader that has a lower version
+- Do we need to turn on all the dirty-bits on non-clean startup or is it enough to turn on the stale locks.
+- SWITCH_TOPO_* to DEAD. It is a SW_TOPO. Make sure that I reset to SW_TOPO_I
+- Idea: A client that fails lock can release its locks
+- Optimization: Before sending the unregister, the client will erase the unused entries in its active-table
+  (those that are in the client's free list)
+- If recovery thread failed
+  - restart the recovery upon every append-entries
+  - handle the stale locks
+    - beware of rx-thread still working on its queue
+- Shutdown_all
+  Persistent_state_of_locks: Clean / partial / all (determined by the number of stale_locks during the disk_segment scan of locks table)
+  For partial, save a list of them, and provide a function to restore from persistency.
+- Save praid topology in disk_segment's persistency
+- Upon transition to owner, first unregister all clients, and then treat active bits
+- Tune raft_time_from_startup_to_activation_sec
+- How do we communicate with TOMA at run-time
+  - Ordered shutdown
+  - ?
+- RAFT - take care of leader consistency when nodes are added/deleted (beware of two separate majorities)
+- call unrecord_stale_lock()
+- Control the heartbeat resolution with the client. Set it to the TOMA heartbeat resolution
+- Stale tickets reports:- Register the tickets from the segment struct. Add them to the disk_segments's struct
+- Review my_raft->last_leader_heartbeat_time
+- convert many int to (long long) (primarily where n_blocks are involved.
+- Optimization: First transfer a SHA1 of a blkset and not the actual data
+- If no clients are registered then mark disk_segment as stable
+  - Client can unregister if no activity for a long time
+- Add disk-metadata partition that will include disk related metadata, this is a small partition that will hold
+  currently mgmt_uuid and disk_version, and will be used to detect unformatted disks and hot plug/unplug.
+- use nvmeibt_client_unrecord_stale_lock_ticket()
+- is_incoming_msg_valid() & is_incoming_recovery_msg_valid() - Handle the case where node_idx doesn't match node_id
+- Add CRC-64 to the global/local_topology
+- Add a software-version
+- Add another value (discarded) to dirty-bit: None/Dirty/Discarded
+
+
+TOMA
+ * TODO list:
+ * 1. Is there value in checking for changes in the management config?
+ * 2. Replace arrays with lists
+
+-
+- probe_client_and_ask_to_release_lock(struct nvmeibt_topology *cur_topo, struct nvmeibt_open_complaint_ticket *ticket)
+	TODO(First-time: Record a ticket_no that the client provided. Always: Send a msg to the locking client, if too much time since recorded, tell the TOMA-leader)
+- leader_handle_ticket()
+- nvmeibt_client_enable_disable_all_clients_datapath
+	TODO(Send pause to all clients. Ofer will implement it.)
+- use nvmeivt_read_config_line() in raft read persistency
+
+- There are permissions issues
+  - /etc/cache/nvmesh
+  - /etc/udev/rules.d/90-ib.rules
+
+- Clean shutdown:
+  - Record the recovering_dirty location at that time (Hopefully at 100%)
+    - At startup, turn-on the dirty bits following this point.
+
+----------------------------------------------------------------------------------
+
+Thoughts:
+  - At client_load, the client generates a UUID
+??  - A client registers with every TOMA separately. Per (?disk/PRAID/segment/server?) with its UUID, and receives an id_for_locks
+    - Ronen: I suggest per-segment, so that we can assign a new id both on every registration (upon volume and phys disk changes).
+      - Since disks might be reconnected with a new id_for_locks, while other disk continue to work normally, the id cannot be per server.
+      - Changes to the topology do not require a new id
+      - Disconnecting from a disk voids all of the IDs that were used on this disk
+      - There is a "natural" relationship between the domain of locks (per segment), and an id_for_locks.
+      - Future proof, what if we change things like assigning QP per segment (and not per disk) on separate NICs.
+  - New id_for_locks are generated using a (64 bits) counter that increments per assignment (no reuse of id on a running TOMA).
+  - The client uses the same UUID with all the TOMAs
+  - Curently, the UUID has no concrete use. It was proposed in order to identify the client cross servers.
+Use-cases
+- Client disconnects voluntarily, or accidentaly (network), or by TOMA (brute force) (per ???)
+  - TOMA marks the client's id_for_locks as void_and_in_recovery.
+  - TOMA runs locks recovery for this id_for_locks
+  - When done with the recovery, this id_for_locks is forgotten
+  - The client cannot work with this TOMA (server/disk/segment) unless it re-registers
+- Client is paused on disk
+  - Probably due to a QP with the disk that died
+  - All of the client's locks on this disk are lost (might be cleared and recovered by TOMA).
+- Client is paused by TOMA on a RAID(1/5 (RAID0 too? Volume too?)).
+  - Probably due to a change in the topology. Not breaking any QPs
+    - A client returns a pause_ack when it is done with all the current actions.
+  - The client has to re-register in order to validate that it works with the current topology
+    - The client will probably have to get a new topology
+  - Question: Do we keep the old id_for_locks?
+    - Answer: We can. Is it worth it?
+      - Not needed, since there are no active transactions
+      - TOMA side - it requires distinguishing between registrations, instead of always providing a new id_for_locks.
+        id per disk is almost just as easy.
+- Client re-registration
+  - On cont (after pause on disk), the client has to re-register, and re-lock on all the paused disks, using its new id_for_locks.
+    - This is true also for locks that were already aquired successfully.
+      - Since we assume that the old id_for_locks is in recovery, the client cannot trust
+        any of its previously held locks (they might be cleared by TOMA, and even taken by a different client).
+    - Fully completed reads/writes, do not need to be repeated (re-locked ...).
+      - Also, no need (and cannot, release locks that their data was fully completed)
+    - Optimization: The client can overide its prev id_for_locks (cmpxchg with NONE/OLD_id_for_locks)
+      Otherwise, it has complain to TOMA (on segment + lock_idx), if the old lock is still there (not yet recovered)
+- Multiple recoveries
+  - When a client disconnects & TOMA is running a recovery on a segment
+  - The client can have multiple IDs - the current one, and several that are in recovery
+  - With the current design, I cannot think of a scenario where some segments continue
+    to work with a valid old ID, and some have to switch to a new one. but using an ID per
+    segment will put us on the safe side.
+

@@ -1,0 +1,62 @@
+#/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Useful oneliners for Debugging Azure TCP Affinity
+
+# ------------------------------------------------------------------------------
+# oneliners - Listing
+# ------------------------------------------------------------------------------
+
+# show irqs of device
+for i in `ls /sys/class/net/$BASE_DEVICE/device/msi_irqs`; do echo $i; done
+
+# watch irq spreading
+watch -n 1 -d "cat /proc/interrupts | grep -E 'CPU|interrupts|mlx'"
+
+# irq spread for all mlx nics
+lspci | grep Mell | while read nic; do echo nic=$nic; pci=$(echo $nic | cut -d ' ' -f1); echo pci=$pci; \
+for x in `grep mlx /proc/interrupts | grep $pci | cut -d ':' -f1`; do sudo cat /proc/irq/$x/smp_affinity_list; done; done;
+
+# Extract first filtered in NIC
+DEV=$(grep NICS /etc/nvmesh/nvmesh.conf | grep -v "#" | tail -1 | cut -d '"' -f2 | cut -d ';' -f1 | cut -d '.' -f1)
+echo $DEV
+
+# Extract parent of device (depath=1)
+BASE_DEVICE=$(find /sys/class/net/$DEV/ -name 'lower_*' -type l | cut -d '_' -f2)
+echo $BASE_DEVICE
+
+# Check state of ntuple-filters
+ethtool -k $BASE_DEVICE | grep ntuple
+
+# Show all rules
+ethtool -n $BASE_DEVICE
+
+# retrieve the hash options for TCP flow type.
+ethtool -n eth0 rx-flow-hash tcp4
+
+# show device channels
+ethtool -l $BASE_DEVICE
+
+# show Rx flow hash indirection table and/or RSS hash key
+ethtool -x $BASE_DEVICE
+
+# show rx packet stats
+ethtool -S $BASE_DEVICE | grep rx | grep packet
+
+# ------------------------------------------------------------------------------
+# oneliners - Modifying
+# ------------------------------------------------------------------------------
+
+# Set filter rules for TCP dst and src ports for SIW's ports
+NUM_QUEUE=16; for i in $(seq 0 $(($NUM_QUEUE - 1))); do port=$((7915 + $i)); echo $port; ethtool -U $BASE_DEVICE flow-type tcp4 dst-port $port action $i loc $(($i)); ethtool -U $BASE_DEVICE flow-type tcp4 src-port $port action $i loc $(($i + $NUM_QUEUE)); done
+
+# Delete first $NUM_RULES rules
+NUM_RULES=64; for i in $(seq 0 $(($NUM_RULES - 1))); do ethtool -U $BASE_DEVICE delete $i ; done
+
+# Set rps_cpus - let rx-q i trigger si on to cpu i and i+16 ; Useful when we have more cores than min(num-Rx-queues, num-irqs) of device
+NUM_QUEUE=16; for i in $(seq 0 $(($NUM_QUEUE - 1))); do mask=$((0x10001 << $i)) ; printf "%d->%x\n" $i $mask; echo $(printf "%x" $mask) > /sys/class/net/$BASE_DEVICE/queues/rx-$i/rps_cpus ; done
+
+# Disable RFS
+echo 0 > /proc/sys/net/core/rps_sock_flow_entries

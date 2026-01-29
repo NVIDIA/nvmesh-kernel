@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Makefile for binary tracing of kernel modules.
+# ----------------------------------------------
+# Input Defines:
+# ----------------------------------------------
+# TRACE_MODULE - ie nvmeibc
+# TRACE_MODULE_OBJ - list of .o files ie $(nvmeibc-y)
+# TRACE_GEN_SCRIPT - gen_probes2.py - Defined in common.mk
+# PYTHON_RUNTIME, PYTHON_WRAPPER - used for running alternate python versions - Defined in common.mk
+
+
+# The lines below are used to generate unique macro __FILE_LITERAL__
+# for each source file that evaluates to file_name_c without "
+TRACE_MODULE_OBJ := $(filter-out traces_ids.o,$(TRACE_MODULE_OBJ))
+define per_file_cflags_varname_pre_5_0 =
+CFLAGS_$(shell basename $1)
+endef
+define per_file_cflags_varname =
+CFLAGS_$1
+endef
+define per_file_cflags_varval =
+$(CFLAGS_$1)
+endef
+
+define per_file_iflags_varname_pre_5_0 =
+IFLAGS_$(shell basename $1)
+endef
+define per_file_iflags_varname =
+IFLAGS_$1
+endef
+define per_file_iflags_varval =
+$(IFLAGS_$1)
+endef
+
+
+define set_per_file_cflags =
+ $(eval $(call per_file_cflags_varname,$1) += -D__FILE_LITERAL__=$(2:.o=_c))
+ $(eval $(call per_file_cflags_varname_pre_5_0,$1) += -D__FILE_LITERAL__=$(2:.o=_c))
+ $(eval $(call per_file_iflags_varname,$1) += -D__FILE_LITERAL__=$(2:.o=_c))
+ $(eval $(call per_file_iflags_varname_pre_5_0,$1) += -D__FILE_LITERAL__=$(2:.o=_c))
+endef
+
+define set_per_file_cflags2 =
+ $(eval $(call per_file_cflags_varname,$1) += -include $(obj)/.trace_pp_dir/$(2:.o=.c_gen_events.h))
+ $(eval $(call per_file_cflags_varname_pre_5_0,$1) += -include $(obj)/.trace_pp_dir/$(2:.o=.c_gen_events.h))
+endef
+$(foreach fl,$(TRACE_MODULE_OBJ),$(eval $(call set_per_file_cflags,$(fl),$(shell basename $(fl)))))
+$(foreach fl,$(TRACE_MODULE_OBJ),$(eval $(call set_per_file_cflags2,$(fl),$(fl))))
+
+PP_OUTDIR := $(shell realpath $(obj))/.trace_pp_dir
+
+# It is important to keep here = and not := as this line shall be resolved on evaluation
+PREPROCESSED = $(patsubst %.o,$(PP_OUTDIR)/%.i,$(TRACE_MODULE_OBJ))
+
+clean-files += $(PREPROCESSED)
+clean-files += $(shell find $(obj) -name 'dict.*.json')
+
+$(PP_OUTDIR)/%.i: ORIG_OBJ_NAME = $(subst $(PP_OUTDIR)/,,$(patsubst %.i,%.o,$@))
+$(PP_OUTDIR)/%.i: $(src)/%.c
+	$(shell mkdir -p $(dir $@))
+	[ -f $(obj)/.trace_pp_dir/$*.c_gen_events.h ] || touch $(obj)/.trace_pp_dir/$*.c_gen_events.h
+	$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@ $?
+
+$(PP_OUTDIR)/%.i: $(src)/%.S
+	+$(shell mkdir -p $(dir $@))
+	+touch $@
+
+$(patsubst %.o,$(obj)/%.o,$(TRACE_MODULE_OBJ)) : $(obj)/%.o : $(PP_OUTDIR)/%.c_gen_events.h
+
+$(PP_OUTDIR)/%.c_gen_events.h: $(PP_OUTDIR)/%.trace.json
+	cd $(obj); $(PYTHON_WRAPPER) "$(PYTHON_RUNTIME) $(TRACE_GEN_SCRIPT) $< $(TRACE_MODULE) -o $@"
+
+
+$(PP_OUTDIR)/%.trace.json: $(PP_OUTDIR)/%.i
+	$(shell mkdir -p $(dir $@))
+	cd $(obj); ../tools/pre_processor/tracer_pp.py -j 1 $@ $<
+	cd $(obj); ../tools/merge_dictionary.sh $@ ../tools/dictionary.json
+
+$(obj)/traces_ids.o : $(obj)/traces_ids.c
+$(obj)/traces_ids.c: $(patsubst %.o,$(obj)/%.o,$(TRACE_MODULE_OBJ))
+	$(obj)/../tools/pre_processor/merge_multi_gen_events.py $(obj)/$(TRACE_MODULE).trace.json $(obj) $(TRACE_MODULE_OBJ)
+	cd $(obj); $(PYTHON_WRAPPER) "$(PYTHON_RUNTIME) $(TRACE_GEN_SCRIPT) $(TRACE_MODULE).trace.json $(TRACE_MODULE) -o gen_events.h --only_trace_ids"
+
+.PRECIOUS: $(PP_OUTDIR)/%.c_gen_events.h $(PP_OUTDIR)/%.trace.json $(PP_OUTDIR)/%.i

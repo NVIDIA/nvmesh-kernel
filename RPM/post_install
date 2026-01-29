@@ -1,0 +1,51 @@
+#!/bin/bash
+
+if [ `id -un` != "root" ] ; then
+        echo "This script needs to run as root."
+        exit 1
+fi
+
+isUpgrade=$1
+ubuntuOldVer=$2
+version=$3
+release=$4
+rpm_kind=$5
+oldVersionRelease=""
+client_upgrade_file=/var/opt/nvmesh/client_upgrade_version
+target_upgrade_file=/var/opt/nvmesh/target_upgrade_version
+
+if grep -i Ubuntu /etc/*release > /dev/null 2>&1; then
+        if [ "$isUpgrade" == "configure" ] && [ -z "$ubuntuOldVer" ]; then
+                isUpgrade=1
+        elif [ "$isUpgrade" == "abort-upgrade" ] || [ "$isUpgrade" == "abort-remove" ]; then
+                exit 0
+        else
+                isUpgrade=2
+                oldVersionRelease="$ubuntuOldVer"
+        fi
+else
+        oldVersionRelease=`rpm -q --queryformat "%{version}-%{release}|" nvmesh-$rpm_kind | cut -d '|' -f1`
+fi
+
+if [ $isUpgrade -eq 2 ]; then
+        if [ ! -e $client_upgrade_file ] && [ "$rpm_kind" == "client" ]; then
+                echo "$oldVersionRelease" > $client_upgrade_file
+        fi
+
+        if [ ! -e $target_upgrade_file ] && [ "$rpm_kind" == "target" ]; then
+                echo "$oldVersionRelease" > $target_upgrade_file
+        fi
+else
+	if [ "$rpm_kind" == "client" ]; then
+        	echo "$version-$release" > $client_upgrade_file
+	else
+        	echo "$version-$release" > $target_upgrade_file
+	fi
+fi
+
+systemctl daemon-reload > /dev/null 2>&1
+[ "$rpm_kind" == "client" ] && systemctl enable nvmeshclient > /dev/null 2>&1
+
+/sbin/depmod -a
+
+exit 0

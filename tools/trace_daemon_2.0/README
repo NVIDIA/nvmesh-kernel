@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+Trace Daemon Configurations file located under /var/log/nvmesh/trace_daemon and to be named tracedaemon.conf.
+
+TRACE_DAEMON_DBG <\d> - set debug level
+TRACE_BUFS_PER_LOG=<\d+> - how many buffers of 4k will be saved to each log file on the disk
+TRACE_BUFS_PER_LOG_<channel_name>=<\d+)  - how many buffers of 4k will be saved to each log file on the disk for specifc channel_name
+TRACE_MAX_LOGS=<\d+> - how many log files should be saved for this channel - will used with max(set_value, num_of_cpus)
+TRACE_MAX_LOGS_<channel_name> - as above but for specific channel
+TRACE_LOGS_PATH=<\s+> - path to store the logs into, default is current folder. there will special handling if path is of NFS type
+
+These configurations are only supported when running daemon via run_trace_daemon
+NFS_TARGET=<\s+> - Target address, if mentioned the target will be mounted to TRACE_LOGS_PATH and $hostname folder will be created where logs will reside, Example: 10.10.110.2:/var/nfs
+NFS_OPTS=<\s+> - opts to be added to mount cmd, for example -o rdma,port=20049
+NFS_FALLBACK_LOCAL_STORAGE="Yes", if set and mount cmds fails it will just use the TRACE_LOGS_PATH to store the logs locally
+DISABLE_COREDUMP="Yes", if set no coredump for treace daemon will be generated
+
+NFS Server example:
+Taken from https://www.howtoforge.com/tutorial/setting-up-an-nfs-server-and-client-on-centos-7/
+
+yum -y install nfs-utils
+systemctl enable nfs-server.service
+systemctl start nfs-server.service
+mkdir /var/nfs
+chown nfsnobody:nfsnobody /var/nfs
+chmod 755 /var/nfs
+vim /etc/exports:
+/var/nfs        192.168.0.0/16(rw,sync,no_subtree_check)
+exportfs -a
+
+NFS server Tune:
+please use this article http://nfs.sourceforge.net/nfs-howto/ar01s05.html

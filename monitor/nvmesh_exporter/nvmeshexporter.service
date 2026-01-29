@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=NVIDIA NVMesh block storage metrics exporter
+
+[Service]
+ExecStart=/opt/nvmesh/monitor/nvmesh_exporter/nvmesh_exporter
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

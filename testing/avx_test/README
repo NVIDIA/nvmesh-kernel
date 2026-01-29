@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+Avx_runner was designed to detect NVMesh kernel module AVX registers corruption.
+The test loads AVX2 / AVX512 registers with non zero random values
+and verifies that values in these registers did not change over time
+
+The test will not run if AVX512 instruction set is not supported
+
+The test executable receives the following optional command line parameters:
+-t <sec> number of seconds to run the test. If the -t parameter was omitted, 
+the test will run 10 sec. The test will not run more then 100 hr. 
+The test will immediately terminate on corruption discovery.
+-v dump mathematics to screen
+-y AVX2 test
+-z AVX512 test

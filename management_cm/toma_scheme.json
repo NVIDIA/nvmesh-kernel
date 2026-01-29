@@ -1,0 +1,406 @@
+{
+	"__globals" : {
+		"__version" : 100,
+		"__origin_type" : "TOMA",
+		"__scheme_name" : "NVMEIBT_MCS_TOMA_SCHEME"
+	},
+	"clnt_toma_common_scheme.json" : "include",
+	"report_target" : {
+		"//" : "periodic message sent by TOMA",
+		"__type" : "msg",
+		"__opcode" : 1,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename" : "nvmeibt_mcs_report_target_msg",
+		"__route" : "/servers/report",
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"node" :{
+			"__join" : true,
+			"node_id": "__codec HostNameCodec()",
+			"cpu_load" : "__codec ConstCodec(0.0)",
+			"cpu_temp" : "__codec ConstCodec(30.0)",
+			"version" : "__codec VersionCodec()",
+			"branch" : "__codec BranchCodec()",
+			"commit" : "__codec CommitCodec()",
+			"node_status" : "__codec ConstCodec(1)",
+			"dummy_level_to_be_joined" : {
+				"__type" : "array",
+				"__typename" : "json_payload_status_",
+				"__counter" : "n_chars",
+				"__offset" : "json_payload"
+			}
+		}
+	},
+	"toma_keep_alive" : {
+		"//" : "toma keep alive message",
+		"__type" : "msg",
+		"__opcode" : 55,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename" : "nvmeibt_mcs_keep_alive_msg",
+		"__route" : "/toma/keepAlive",
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : true,
+		"__priority" : 1,
+		"tomaToken" : "I",
+		"reportID" : "Q"
+	},
+	"dirty_progress" : {
+		"//" : "periodic message sent by TOMA",
+		"__type" : "msg",
+		"__opcode" : 44,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename" : "nvmeibt_mcs_dirty_progress_msg",
+		"__route" : "/volumes/updateDiskSegmentsDirtyBits",
+		"__priority" : 1,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__join" : true,
+		"dummy_level_to_be_joined" : {
+			"__type" : "array",
+			"__typename" : "json_payload_status_",
+			"__counter" : "n_chars",
+			"__offset" : "json_payload"
+		}
+	},
+	"json_payload_status_" : {
+		"__type" : "used",
+		"character" : "c"
+	},
+	"leader_seg_status" : {
+		"//" : "toma message sent to server to report status of segments",
+		"__type" : "msg",
+		"__opcode" : 16,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename": "nvmeibt_mcs_leader_seg_status_msg",
+		"__route" : "/volumes/updatepRaidStatus",
+		"__priority" : 1,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : true,
+		"__join" : true,
+		"dummy_level_to_be_joined" : {
+			"__type" : "array",
+			"__typename" : "json_payload_status_",
+			"__counter" : "n_chars",
+			"__offset" : "json_payload"
+		}
+	},
+	"register_to_config_events" : {
+		"//" : "message that register toma to management events",
+		"__type" : "msg",
+		"__opcode" : 7,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename": "nvmeibt_mcs_register_to_config_events_msg",
+		"__route" : "/registerToEvents",
+		"__priority" : 1,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : true,
+		"__join" : true,
+		"dummy_level_to_be_joined" :{
+			"__type" : "array",
+			"__typename" : "json_payload_status_",
+			"__counter" : "n_chars",
+			"__offset" : "json_payload"
+		}
+	},
+	"unregister_from_config_events" : {
+		"//" : "message that unregisters toma from management events",
+		"__type" : "msg",
+		"__opcode" : 8,
+		"__upstream" : true,
+		"__downstream" : false,
+		"__typename": "nvmeibt_mcs_unregister_from_config_events_msg",
+		"__route" : "/unregisterFromEvents",
+		"__priority" : 1,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : true,
+		"__join" : true,
+		"dummy_level_to_be_joined" :{
+			"__type" : "array",
+			"__typename" : "json_payload_status_",
+			"__counter" : "n_chars",
+			"__offset" : "json_payload"
+		}
+	},
+	"reg_to_shutdown" : {
+		"__type" : "msg",
+		"__opcode" : 15,
+		"__route" : "/servers/checkForControlJobs/{hostname}",
+		"__typename": "nvmeibt_mcs_register_to_shutdown_msg",
+		"hostname" : "40s",
+		"__priority" : 2,
+		"__resendOnFailover" : true,
+		"__dropOnDisconnection" : false
+	},
+	"management_log_message": {
+		"//" : "toma log message to server to display as alert",
+		"__type": "msg",
+		"__route" : "/log",
+		"__opcode": 28,
+		"__upstream": true,
+		"__downstream": false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"__typename": "nvmeibt_mcs_log_msg",
+		"level": "8s",
+		"header": "96s",
+		"message": "256s"
+	},
+	"management_raft_role_message": {
+		"//" : "toma tells mgmt whether leader or not",
+		"__type": "msg",
+		"__route" : "/raftRole",
+		"__opcode": 29,
+		"__upstream": true,
+		"__downstream": false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"__typename": "nvmeibt_mcs_raft_role_msg",
+		"raftRole": "20s",
+		"praidID" : "37s",
+		"praidVersionMajor" : "I",
+		"praidVersionMinor" : "I",
+		"raftTerm" : "Q"
+	},
+	"shutdown" : {
+		"__type" : "msg",
+		"__opcode" : 12,
+		"__typename": "nvmeibt_mcs_shutdown",
+		"payload" : {
+			"__type" : "used",
+			"control" : "16s"
+		}
+	},
+	"nvmeibt_mcs_disk_" : {
+		"//" : "single disk configuration",
+		"__type" : "used",
+		"uuid": "__codec UuidCodec()",
+		"diskID" : "40s",
+		"version": "__codec WithDefaultCodec(PodCodec('I'), 1)",
+		"isOutOfService": "__codec WithDefaultCodec(MultiValCodec({'True': 1, 'False': 0}), False)",
+		"vendorID": "__codec WithDefaultCodec(PodCodec('I'), 0)"
+	},
+	"nvmeibt_mcs_nic_" : {
+		"//" : "nic configuration",
+		"__type" : "used",
+		"pkey" : "H",
+		"uuid" : "__codec UuidCodec()",
+		"guid": "__codec GuidCodec()",
+		"protocol" : "__codec WithDefaultCodec(MultiValCodec({'Unknown':-1,'Infiniband':0,'RoCE':1,'TCP':2,'MULTI':3,'__DEFAULT':-1}), 'Unknown')",
+		"version": "__codec WithDefaultCodec(PodCodec('I'), 1)"
+	},
+	"nvmeibt_mcs_segment_" :{
+		"__type" : "used",
+		"uuid" : "__codec UuidCodec()",
+		"type" : "__codec MultiValCodec({'data' : 1, 'raftonly' : 2})",
+		"lbs" : "Q",
+		"lbe" : "Q",
+		"pRaidTypeIndex" : "I",
+		"pRaidIndex" : "I",
+		"status" :  "__codec WithDefaultCodec(MultiValCodec({'__DEFAULT' : 0, 'markedForRebuild_old' : 1}), 0)",
+		"diskUUID" : "__codec UuidCodec()",
+		"nodeUUID" : "__codec UuidCodec()",
+		"allocationIndex" : "__codec WithDefaultCodec(PodCodec('I'), 0)"
+	},
+	"nvmeibt_mcs_chunk_" : {
+		"//" : "chunk configuration",
+		"__type" : "used",
+		"uuid" : "__codec UuidCodec()",
+		"vlbs" : "Q",
+		"vlbe" : "Q",
+		"pRaids": {
+			"__type": "array",
+			"__typename": "nvmeibt_mcs_praid_",
+			"__counter": "n_praid",
+			"__offset": "pRaids"
+		}
+	},
+	"nvmeibt_mcs_praid_" : {
+		"__type" : "used",
+		"uuid" : "__codec UuidCodec()",
+		"activated": "H",
+		"stripeIndex": "I",
+        "dataBlocks" : "__codec ParentMessage(Member(WithDefaultCodec(PodCodec('i'), 200), 'dataBlocks'), 2)",
+        "parityBlocks" : "__codec ParentMessage(Member(WithDefaultCodec(PodCodec('i'), 201), 'parityBlocks'), 2)",
+		"lock_scheme" : "__codec ParentMessage(Member(StructEncoder('nvmeibc_locks_scheme_conf'), 'lockServer'), 2)",
+		"diskSegments" :{
+			"__type" : "array",
+			"__typename" : "nvmeibt_mcs_segment_",
+			"__counter" : "n_segments",
+			"__offset" : "segments"
+		 }
+	},
+	"nvmeibt_mcs_volume_" : {
+		"//" : "volume configuration, Todo: change version to reflect layout version ",
+		"__type" : "used",
+		"type" : "__codec WithDefaultCodec(MultiValCodec({'normal':0,'recoverer':1,'carrier':16,'thin':2,'__DEFAULT':0}), 'normal')",
+		"action" : "__codec WithDefaultCodec(MultiValCodec({'__DEFAULT' : 0, 'markedForRebuild_old' : 1, 'markedForDeletion' : 2}), 0)",
+		"RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Striped & Mirrored RAID-10' : 10, 'Concatenated' : 3, 'Erasure Coding' : 60})",
+		"numberOfMirrors" : "__codec IncrementCodec(1, 'H')",
+		"blockSize": "H",
+		"blocks": "Q",
+		"name" : "64s",
+		"version" : "I",
+		"uuid" : "__codec UuidCodec()",
+		"stripeWidth" : "__codec WithDefaultCodec(PodCodec('I'), 1)",
+		"stripeSize" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+		"dataBlocks" : "__codec WithDefaultCodec(PodCodec('i'), 300)",
+		"parityBlocks" : "__codec WithDefaultCodec(PodCodec('i'), 301)",
+		"attributes" : {
+			"//" : "Todo: Start using the version of attributes field",
+			"version" : "__codec WithDefaultCodec(PodCodec('I'), 5)",
+			"relativeRebuildPriority" : "__codec WithDefaultCodec(PodCodec('I'), 10)"
+		},
+		"chunks" : {
+			"__type" : "array",
+			"__typename" : "nvmeibt_mcs_chunk_",
+			"__counter" : "n_chunks",
+			"__offset" : "chunks"
+		}
+	},
+	"nvmeibt_mcs_target_" : {
+		"//" : "toma target description",
+		"__type" : "used",
+		"node_id" : "64s",
+		"uuid" : "__codec UuidCodec()",
+		"version": "__codec WithDefaultCodec(PodCodec('I'), 1)",
+		"disks" : {
+			"__type" : "array",
+			"__typename" : "nvmeibt_mcs_disk_",
+			"__counter" : "n_disks",
+			"__offset" : "disks"
+		},
+		"nics" : {
+			"__type" : "array",
+			"__typename" : "nvmeibt_mcs_nic_",
+			"__counter" : "n_nics",
+			"__offset" : "nics"
+		}
+	},
+	"management_disk_zeroing_progress_message" : {
+		"//" : "toma disk zeroing progress",
+		"__type": "msg",
+		"__route" : "/updateDriveZeroingProgress",
+		"__opcode": 30,
+		"__upstream": true,
+		"__downstream": false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"__typename": "nvmeibt_mcs_disk_zeroing_progress_msg",
+		"diskUUID": "40s",
+		"zeroWriteCounter": "Q",
+		"nZeroedBlks": "Q"
+	},
+	"management_segment_zeroing_progress_message" : {
+		"//" : "toma disk zeroing progress",
+		"__type": "msg",
+		"__route" : "/updateSegmentZeroingProgress",
+		"__opcode": 31,
+		"__upstream": true,
+		"__downstream": false,
+		"__resendOnFailover" : false,
+		"__dropOnDisconnection" : false,
+		"__priority" : 1,
+		"__typename": "nvmeibt_mcs_segment_zeroing_progress_msg",
+		"segmentUUID": "40s",
+		"praidUUID": "40s",
+		"praidVersion" : "__codec MajorMinorCodec()",
+		"nZeroedBlks": "Q",
+		"type": "8s"
+	},
+	"nvmeibt_csv_only_translation" : {
+		"//" : "a message with a string of csvs",
+		"__type" : "msg",
+		"__opcode" : 80,
+		"__upstream" : false,
+		"__downstream" : false
+	},
+	"nvmeibt_mcs_toma_config_" : {
+		"//" : "toma configuration message used",
+		"__type" : "msg",
+		"__opcode" : 17,
+		"__upstream" : false,
+		"__downstream" : true,
+		"targets" : {
+			"__type" : "array",
+			"__typename" : "nvmeibt_mcs_target_",
+			"__counter" : "n_targets",
+			"__offset" : "targets"
+		},
+		"volumes" : {
+			"__type" : "array",
+			"__typename" : "nvmeibt_mcs_volume_",
+			"__counter" : "n_volumes",
+			"__offset" : "volumes"
+		},
+		"managementConfiguration": {
+			"dbUUID": "__codec UuidCodec()",
+			"configurationVersion": "i",
+			"protocolVersion": "I"
+		},
+		"updateType": "__codec MultiValCodec({'full' : 0, 'incremental' : 1})"
+
+	},
+	"nvmeibt_mcs_toma_format_" : {
+		"//" : "toma format message used",
+		"__type" : "msg",
+		"__opcode" : 38,
+		"__upstream" : false,
+		"__downstream" : true,
+		"payload" : {
+			"__type" : "used",
+			"uuid": "__codec UuidCodec()",
+			"diskID" : "40s",
+			"vendor": "__codec WithDefaultCodec(PodCodec('i'), 0)",
+			"writeCounterAtFormat": "__codec WithDefaultCodec(PodCodec('q'), 0)",
+			"blockSize": "__codec WithDefaultCodec(PodCodec('I'), 0)",
+			"metadataSize": "__codec WithDefaultCodec(PodCodec('I'), 0)",
+			"dbUUID": "__codec UuidCodec()",
+			"formatRequestCounter" : "__codec WithDefaultCodec(PodCodec('I'), 0)"
+		}
+	},
+	"nvmeibt_mcs_toma_ledctrl_" : {
+		"//" : "toma led control message used",
+		"__type" : "msg",
+		"__opcode" : 51,
+		"__upstream" : false,
+		"__downstream" : true,
+		"payload" : {
+			"__type" : "used",
+			"diskID" : "40s",
+			"vendorID": "__codec WithDefaultCodec(PodCodec('i'), 0)",
+			"ledValue" : "__codec WithDefaultCodec(PodCodec('I'), 0)"
+		}
+	},
+	"nvmeibt_drive_" : {
+		"//" : "drives",
+		"__type" : "used",
+		"diskID" : "40s",
+		"vendor": "__codec WithDefaultCodec(PodCodec('I'), 0)",
+		"reappearingCounter": "__codec WithDefaultCodec(PodCodec('I'), 0)"
+	},
+	"nvmeibt_mcs_resend_report_event_" : {
+	"//" : "toma resend report event_",
+		"__type" : "msg",
+		"__opcode" : 39,
+		"__upstream" : false,
+		"__downstream" : true,
+		"payload" : {
+			"tomaToken" : "I",
+			"drives" : {
+				"__type" : "array",
+				"__typename" : "nvmeibt_drive_",
+				"__counter" : "n_drives",
+				"__offset" : "drives"
+			}
+		}
+	}
+}

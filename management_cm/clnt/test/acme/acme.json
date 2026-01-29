@@ -1,0 +1,106 @@
+{
+        "__globals" : {
+                "__version" : 100,
+                "__origin_type" : "CLIENT",
+                "__scheme_name" : "NVMEIBC_MCS_CLIENT_SCHEME"
+        },
+        "enum_client_api_version": {
+                "//": "see Versioning & Capabilities for more information",
+                "__type": "enum",
+                "__def": {
+                        "//": "WARNING: increment compatibility version on every new client feature; every means 'every', even extended EC journal support",
+                        "NVMEIB_C_TO_M_FEATURE_COMPATIBILITY_VERSION" : 1
+                }
+        },
+        "header": {
+                "//" : "Golobal message header with fields commot to all messages",
+                "__type" : "__header",
+                "msg_len": {
+                        "__type" : "used",
+                        "msg_len": "H",
+                        "var_offset": "H"
+                },
+                "opcode": "I",
+                "timestamp": "Q",
+                "software_version": "I",
+                "reserved_future_use": "I",
+                "client_generated_uuid": "40s"
+        },
+        "ups_header" : {
+                "__type" : "used",
+                "messageTypeVersion": "__codec WithDefaultCodec(PodCodec('I'), 1)",
+                "messageSequence" : "__codec WithDefaultCodec(PodCodec('I'), 1)",
+                "clientID" : "__codec WithDefaultCodec(PodCodec('I'), 1)",
+                "clientToken" : "__codec WithDefaultCodec(PodCodec('I'), 1)"
+
+        },
+        "factory": {
+                "//": "talbles of employees",
+                "__type": "msg",
+                "__opcode": 1,
+                "__prepack": "set_owner_unknown",
+                "__route" : "/clients/report",
+                "__resendOnFailover" : false,
+                "__dropOnDisconnection" : false,
+                "__priority" : 1,
+                "__messageType": "factory",
+                "upstream_header": "ups_header",
+                "FactoryId" : "Q",
+                "owner" : "32s",
+				"api_version" : "__codec WithDefaultCodec(ClientAPIVersionCodec(), 1)",
+                "employees" : {
+                        "__type" : "array",
+                        "__typename": "employee",
+                        "__counter" : "num_employees",
+                        "__offset" : "employees_offset"
+                }
+        },
+        "nationalities_ids" : {
+                "//" : "hash of all natinalities",
+                "__type" : "used",
+                "val" : "32s"
+        },
+        "employee" : {
+                "//" : "single employee record",
+                "__type" : "used",
+                "first_name" : "16s",
+                "last_name" : "32s",
+                "id" : "Q",
+                "salary" : "h",
+                "have_3_arms" : "__codec WithDefaultCodec(PodCodec('?'), False)",
+                "siblings" : {
+                        "__type" : "array",
+                        "__typename" : "successor",
+                        "__counter" : "num_siblings",
+                        "__offset" : "siblings_offs"
+                },
+                "interests" : {
+                        "__type" : "array",
+                        "__typename" : "interest",
+                        "__counter" : "num_interests",
+                        "__offset" : "interests_offs",
+                        "__codec" : "stringsArrayToHash"
+                },
+                "nationalities" :  {
+                        "__type": "array",
+                        "__codec" : "SimpleStringArrayToHash",
+                        "__typename" : "nationalities_ids",
+                        "__counter" : "n_vols_id",
+                        "__offset" : "attachmentsUUIDHash"
+                }
+        },
+        "successor" : {
+                "//" : "siblings of the emp",
+                "__type" : "used",
+                "first_name" : "16s",
+                "last_name" : "32s",
+                "id" : "Q"
+        },
+        "interest" : {
+                "__type" : "used",
+                "ID" : "32s",
+                "version" : "I"
+        }
+}
+
+

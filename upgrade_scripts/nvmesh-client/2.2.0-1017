@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+. /opt/NVMesh/client-repo/services/nvmesh_util
+
+kernel=$(uname -r)
+mdir=/lib/modules/$kernel/extra/nvmesh
+
+first_ko_dir=`ls -d1 /lib/modules/*/extra/nvmesh/client 2>/dev/null | head -1`
+
+if [ ! -z "$first_ko_dir" ] && [ -L "$first_ko_dir" ]; then
+	find -L /opt/NVMesh -name '*.ko' -type f -exec rm -f {} +
+else
+	find -L /lib/modules/*/extra/nvmesh -name '*.ko' -type f -exec rm -f {} +
+fi
+
+if [ -d $mdir ]; then
+	decompress_modules_if_needed
+fi
