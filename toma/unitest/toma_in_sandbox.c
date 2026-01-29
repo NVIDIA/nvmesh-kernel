@@ -1155,6 +1155,57 @@ int override_close(int fd) {
 	}
 }
 
+// Create a new TSB entry that mirrors an existing fd.
+// Returns the real OS fd, matching the pattern of override_open()/TSB_sock_open().
+int override_dup(int oldfd) {
+	struct t_sandbox_sock *old_s;
+	struct t_sandbox_sock_tbl *TS;
+	struct t_sandbox_sock *new_s;
+	int new_os_fd = -1;
+	int ret = -1;
+
+	old_s = TSB_socket_find_by_fd(oldfd);
+	TS = &sys->TS;
+
+	pthread_mutex_lock(&TS->mutex);
+	new_s = t_sandbox_sock_tbl_find_next_unused(TS);
+
+	// Copy configuration from original socket
+	new_s->dom = old_s->dom;
+	new_s->type = old_s->type;
+	new_s->proto = old_s->proto;
+	new_s->addr = old_s->addr;
+	new_s->len = old_s->len;
+	new_s->ref_cnt = 1;
+	new_s->other_side = old_s->other_side;
+
+	// If there's a real FILE* handle, dup the underlying OS fd
+	if (old_s->f != NULL) {
+		new_os_fd = dup(fileno(old_s->f));
+		if (new_os_fd < 0)
+			goto done;
+
+		new_s->f = fdopen(new_os_fd, sbfd_get_open_mode(new_s));
+		if (new_s->f == NULL)
+			goto done;
+
+		new_s->fd = new_os_fd;
+		new_os_fd = -1;  // Ownership transferred to new_s->f
+	}
+
+	ret = new_s->fd;
+	SANDBOX_PRINT("TSB dup: oldfd=%d -> newfd=%d, path=%s\n", oldfd, ret, new_s->addr.sun_path);
+
+done:
+	if (ret < 0) {
+		if (new_os_fd >= 0)
+			close(new_os_fd);
+		memset(new_s, 0, sizeof(*new_s));
+	}
+	pthread_mutex_unlock(&TS->mutex);
+	return ret;
+}
+
 int override_fcntl(int fd, int cmd, ...) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	/*int value = 0;

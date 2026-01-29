@@ -58,6 +58,7 @@ int     accept( int __fd, struct sockaddr* __addr, unsigned int *__addr_len);
 
 int override_open(const char *path, int flags, ... /*int mode*/);
 int override_close(int fd);
+int override_dup(int fd);
 int override_pipe(int fds[2]);
 int override_fcntl(int fd, int cmd, ...);
 ssize_t override_read(  int fd,       void *buf, size_t nbytes);
@@ -69,6 +70,7 @@ int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restric
 #ifndef TOMA_SANDBOX_BYPASS_REDIRECTS
 #define open    override_open
 #define close   override_close
+#define dup     override_dup
 #define pipe    override_pipe
 #define fcntl   override_fcntl
 #define read    override_read
