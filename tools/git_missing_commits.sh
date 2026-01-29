@@ -22,7 +22,7 @@ escape_branch_name() {
         echo "${branch_name//\//-}"
 }
 
-usage_str="Usage: $0 <source brnach> <target branch> | grep <say... Author name>"
+usage_str="Usage: $0 <source branch> <target branch> | grep <say... Author name>"
 
 # Parse the arguments
 if (( $# < 2 )); then
