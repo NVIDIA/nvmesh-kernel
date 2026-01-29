@@ -1183,15 +1183,9 @@ static int create_ib_private_cq(struct nvmeibs_net *net)
 	if (net->params.use_atomic) {
 		qp_access |= IB_ACCESS_REMOTE_ATOMIC;
 	}
-	if (net->params.rdda_qp ) {
-		net->qp = nvmeib_rdma_create_rdda_qp(net->cm_id.cm_id,
-			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
-			qp_access);
-	} else {
-		net->qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
-			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
-			qp_access);
-	}
+	net->qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
+		P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
+		qp_access);
 	if (!net->qp) {
 		_NE(error_3_net_create_ib, "failed to create_qp");
 		rv = -1;
@@ -1310,15 +1304,9 @@ static int create_ib_per_dev_cq(struct nvmeibs_net *net)
 	qp_init->recv_cq = nvmeib_cq_get_cq(dev_cq);
 
 	/* Create QP */
-	if (net->params.rdda_qp) {
-		qp = nvmeib_rdma_create_rdda_qp(net->cm_id.cm_id,
-			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
-			qp_access);
-	} else {
-		qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
-			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
-			qp_access);
-	}
+	qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
+		P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
+		qp_access);
 	if (!qp) {
 		_NE(create_ib_per_dev_cq_e4, "Failed to create-qp");
 		rv = -1;

@@ -99,8 +99,6 @@ struct nvmeibs_net_init {
 	bool use_atomic;
 	/*pointer to receive queue when no SRQ */
 	struct nvmeib_recvq *recv_q;
-	/*use special create_rdda_qp to create the QP */
-	bool rdda_qp;
 	/*free on net release instead of client release (Secondary Lock Channels) */
 	bool free_on_net_rls;
 
