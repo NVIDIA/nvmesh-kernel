@@ -1984,7 +1984,7 @@ static void print_usage(char *argv[])
 	fprintf(stdout, "  -U, --upgrade-gpt           Fix n_partition_entries to 8192 and recalculate CRC\n");
 	fprintf(stdout, "  -J, --output-json=FILE      Export GPT to JSON file\n");
 	fprintf(stdout, "  -A, --apply-from=FILE       Apply GPT from JSON file (dry-run by default)\n");
-	fprintf(stdout, "  -R, --restore-binary=FILE   Restore device from binary backup\n");
+	fprintf(stdout, "  -R, --restore-binary=FILE   Restore device from binary backup (dry-run by default)\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
 
 	fprintf(stdout, "Display Options:\n");
@@ -3492,6 +3492,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "\n=== Restoring from Modular Binary Backup ===\n");
 	fprintf(stdout, "Manifest file: %s\n", config->restore_binary_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
+	fprintf(stdout, "Mode: %s\n", config->write_mode ? COL_YELLOW "WRITE" COL_RESET : "DRY-RUN (use --write to apply)");
 
 	/* Load and parse manifest file */
 	json_root = load_json_file_or_fail(config->restore_binary_file);
@@ -3684,12 +3685,24 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	}
 	N_Tf(restore_pba_boundaries_match, "All structures within device boundaries (device PBA end: @PBA_E)", config->pba_e);
 
+	/* Dry-run mode: Stop here, don't write */
+	if (!config->write_mode) {
+		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
+		fprintf(stdout, "Would restore %d structures (%lu bytes total)\n", structures_array->array.len,
+				structures_array->array.len > 0 ? (uint64_t)structures_array->array.len * 4096 : 0UL);  /* Rough estimate */
+		fprintf(stdout, "Use --write to actually restore the backup.\n");
+		rv = 0;
+		goto out;
+	}
+
 	/* Confirm before restore */
 	if (!validate_and_confirm_write(config, "Restore from modular backup")) {
 		fprintf(stdout, "Restore cancelled.\n");
 		rv = 0;		/* User cancelled - not an error */
 		goto out;
 	}
+
+	fprintf(stdout, "\n" COL_YELLOW "=== Writing Structures to Device ===" COL_RESET "\n");
 
 	/* Restore each structure */
 	for (i = 0; i < structures_array->array.len; i++) {

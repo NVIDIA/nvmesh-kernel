@@ -2474,7 +2474,7 @@ DEFINE_TEST(binary_backup_restore)
 	}
 
 	/* Step 6: Restore from modular backup */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
@@ -2571,7 +2571,7 @@ DEFINE_TEST(backup_restore_serial_mismatch)
 	}
 
 	/* Try to restore to device B (should be BLOCKED by serial mismatch) */
-	SELF_TEST_ARGV("-a", device_b, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_b, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -2626,7 +2626,7 @@ DEFINE_TEST(backup_restore_missing_file)
 	}
 
 	/* Try to restore (should be BLOCKED by missing file) */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -2684,7 +2684,7 @@ DEFINE_TEST(backup_restore_corrupted_file)
 	}
 
 	/* Try to restore (should be BLOCKED by wrong file size) */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -2733,7 +2733,7 @@ DEFINE_TEST(backup_restore_incomplete_manifest)
 	TEST_INFO("Created incomplete manifest (missing 'structures' field)");
 
 	/* Try to restore (should be BLOCKED by missing structures field) */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("incomplete_manifest"), "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("incomplete_manifest"), "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -2793,7 +2793,7 @@ DEFINE_TEST(backup_restore_pba_overflow)
 	manifest_json = NULL;
 
 	/* Try to restore (should be BLOCKED by PBA overflow) */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -2845,7 +2845,7 @@ DEFINE_TEST(backup_restore_block_size_mismatch)
 	manifest_json = NULL;
 
 	/* Try to restore (should be BLOCKED by block size mismatch) */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -2894,7 +2894,7 @@ DEFINE_TEST(backup_restore_empty_structures)
 	TEST_INFO("Created manifest with empty structures array (structures: [])");
 
 	/* Try to restore (should be BLOCKED by structure count = 0, expected 10) */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("empty_structures"), "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("empty_structures"), "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
@@ -3009,7 +3009,7 @@ DEFINE_TEST(restore_mid_failure_file_deleted)
 	}
 
 	/* Try to restore - should fail with partial restore warning */
-	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
 		goto out;
