@@ -1557,9 +1557,6 @@ VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_acs_map_srv_ionics_srv_base_decode
 	ctx->lionic->disk = cdisk;
 	ctx->lionic->hw_type = port->hw_type;
 	ctx->lionic->may_access = nvmeibs_ib_port_enabled(port); /* ib-port-state active && not filtered-out */
-	ctx->lionic->supports_rdda =
-		nvmeib_device_sup_cap(port->hw_type, NVMEIB_DEVCAP_RDDA) &&
-		nvmeib_ibdr_check_rdda_fw(P2IB(port)) == 0;
 	ctx->lionic->port = port;
 
 	memcpy(ctx->lionic->gid.raw, lnic->gid, 16);
@@ -1737,10 +1734,6 @@ static void free_lnics(struct nvmeibs_client_disk *cdisk)
 	NFIN;
 	for (i = 0; i < cdisk->n_lionics; ++i) {
 		for (j = 0; j < cdisk->lionics[i].n_rionics; ++j) {
-			/*
-			 * RDDA
-			 */
-			/* RDDA io_channels removed */
 			/*
 			 * No-RDDA
 			 */
@@ -2016,9 +2009,7 @@ static int distribute_lionic_resources(struct nvmeibs_client *cl, struct nvmeibs
 	for (i = 0; i < cdisk->n_lionics; ++i) {
 		format_gid_raw(cdisk->lionics[i].gid.raw, guid);
 		n_rionics += cdisk->lionics[i].n_rionics;
-		if (!cdisk->lionics[i].supports_rdda)
-			_NT(distribute_lionic_resources_t1, "lnic @STR not rdda support, skip", guid);
-		else if (!cdisk->lionics[i].may_access)
+		if (!cdisk->lionics[i].may_access)
 			_NT(distribute_lionic_resources_t2, "lnic @STR, no access, skip", guid);
 		else {
 			_NT(distribute_lionic_resources_t3, "Using lnic @STR", guid);
@@ -2040,8 +2031,7 @@ static int distribute_lionic_resources(struct nvmeibs_client *cl, struct nvmeibs
 		per_rionic - 1) : 0;
 	n = 0;
 	for (i = 0; i < cdisk->n_lionics; ++i) {
-		if (!cdisk->lionics[i].supports_rdda ||
-			!cdisk->lionics[i].may_access) {
+		if (!cdisk->lionics[i].may_access) {
 			format_gid_raw(cdisk->lionics[i].gid.raw, guid);
 			_NT(distribute_lionic_resources_t4, "Not using lnic @STR", guid);
 			continue;
@@ -2052,7 +2042,6 @@ static int distribute_lionic_resources(struct nvmeibs_client *cl, struct nvmeibs
 					&cdisk->lionics[i].rionics[j].gid);
 				continue;
 			}
-			/* RDDA io_channels allocation removed */
 			first = false;
 		}
 	}
@@ -7080,11 +7069,9 @@ static ssize_t print_cl_lionic_info(char *buffer, int len,
 		"\"n_rionics\":%d,\n"
 		"\"hw_type\":%d,"
 		"\"hw_type_name\":\"%s\",\n"
-		"\"supports_rdda\":\"%s\",\n"
 		"\"rionics\":[\n",
 		gid, lionic->n_rionics, lionic->hw_type,
-		nvmeib_ib_driver_dev_type(lionic->hw_type),
-		lionic->supports_rdda ? "true" : "false");
+		nvmeib_ib_driver_dev_type(lionic->hw_type));
 
 	for (i = 0; i < lionic->n_rionics; ++i) {
 		if (!first)

@@ -104,7 +104,6 @@ struct nvmeibs_lionic {
 	   when they become active without doing
 	   rediscovery */
 	bool may_access;
-	bool supports_rdda;
 	struct nvmeibs_ib_port *port;
 };
 
