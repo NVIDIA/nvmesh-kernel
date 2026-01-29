@@ -29,9 +29,10 @@
 #include "../interfaces/log/nvmeibt_binary_tracing.h"
 #include "../interfaces/nvme/nvmeibt_nvme_defines.h"
 #include "../nvmeibt_rpc.h"
+#include "../nvmeibt_ds_metadata.h"
 
 
-#define GPT_UTIL_VERSION	"2.0.0-dev"
+#define GPT_UTIL_VERSION	"2.0.1-dev"
 #define MAX_DEV_NAME		256
 
 // Actions (mutually exclusive operations)
@@ -1613,7 +1614,7 @@ static int export_gpt_to_json(int disk_fd,
 	struct nvmeibt_disk_gpt					metadata_gpt;
 	struct nvmeibt_disk_mbr					mbr;
 	struct gpt_buffers						bufs;
-	struct gpt_buffers						metadata_bufs;
+	struct gpt_buffers						metadata_bufs = {0};
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_metadata_partition = NULL;
 	struct nvmeibt_disk_metadata			*disk_md = NULL;
@@ -1634,6 +1635,8 @@ static int export_gpt_to_json(int disk_fd,
 	BOOL									is_mismatch = false;
 	BOOL									has_overlaps = false;
 	char									controller_serial_num[64] = {0};
+	int										seg_md_count = 0;
+	struct nvmeibt_seg_active_metadata_ctrl	*seg_md_ctrl = NULL;
 
 	json_output = NNVMEIBT_STR_ALLOC(trace_gpt_json_export);
 
@@ -1794,7 +1797,7 @@ static int export_gpt_to_json(int disk_fd,
 										metadata_gpt.max_n_entries, json_output, false);
 	}
 
-	// Export disk_metadata (always last section)
+	// Export disk_metadata
 	N_Tf(gpt_export_disk_md, "Exporting disk_metadata structure");
 
 	nvmeibt_Str_sprintf(json_output, "  \"disk_metadata\": {\n");
@@ -1826,8 +1829,82 @@ static int export_gpt_to_json(int disk_fd,
 
 	nvmeibt_Str_sprintf(json_output, "  },\n");
 
-	free_gpt_buffers(&metadata_bufs);
 	NNVMEIBT_BM_FREE(trace_gpt_export_disk_md_free, disk_md);
+
+	// Export segment_metadata control blocks (first 4K of each segment metadata partition)
+	N_Tf(gpt_export_seg_md, "Exporting segment_metadata control blocks");
+
+	nvmeibt_Str_sprintf(json_output, "  \"segment_metadata_partitions\": [\n");
+
+	seg_md_ctrl = NNVMEIBT_BM_ALIGNED_CALLOC(trace_gpt_export_seg_md, PAGE_SIZE, sizeof(*seg_md_ctrl));
+	if (!seg_md_ctrl) {
+		N_Ef(export_alloc_seg_md_failed, "Failed to allocate segment metadata control block");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Cannot allocate memory for segment metadata export" COL_RESET "\n");
+		goto out;
+	}
+
+	for (int k = 0; k < metadata_gpt.max_n_entries; k++) {
+		const struct nvmeibt_disk_gpt_partition_entry	*seg_md_entry = &metadata_bufs.primary_entries[k];
+		struct nvmeibt_urn_uuid							seg_uuid_urn;
+		struct nvmeibt_urn_uuid							seg_mgmt_uuid_urn;
+		char											seg_name[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+		uint64_t										seg_md_pbyte_s;
+
+		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(seg_md_entry)) {
+			continue;
+		}
+
+		if (!ARE_UUID_EQ(&seg_md_entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+			continue;
+		}
+
+		// Read the first 4K block (segment metadata control structure)
+		seg_md_pbyte_s = seg_md_entry->pba_s * config->pblk_size;
+		if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, seg_md_pbyte_s, seg_md_ctrl) < 0) {
+			N_Wf(export_seg_md_read_failed, "Failed to read segment metadata control block at pba=@LLU", seg_md_entry->pba_s);
+			continue;
+		}
+
+		// Convert partition name and UUIDs
+		char16_str_to_str(seg_md_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, seg_name);
+		seg_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&seg_md_ctrl->disk_segment_uuid);
+		seg_mgmt_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&seg_md_ctrl->header.mgmt_db_uuid);
+
+		// Add comma if not first entry
+		if (seg_md_count > 0) {
+			nvmeibt_Str_sprintf(json_output, ",\n");
+		}
+
+		nvmeibt_Str_sprintf(json_output, "    {\n");
+		nvmeibt_Str_sprintf(json_output, "      \"partition_name\": \"%s\",\n", seg_name);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_pba_s\": %llu,\n", seg_md_entry->pba_s);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_pba_e\": %llu,\n", seg_md_entry->pba_e);
+		nvmeibt_Str_sprintf(json_output, "      \"magic_str\": \"%s\",\n", seg_md_ctrl->header.magic_str);
+		nvmeibt_Str_sprintf(json_output, "      \"software_version\": %u,\n", seg_md_ctrl->header.software_version);
+		nvmeibt_Str_sprintf(json_output, "      \"seg_metadata_version\": %u,\n", seg_md_ctrl->header.seg_metadata_version);
+		nvmeibt_Str_sprintf(json_output, "      \"mgmt_db_uuid\": \"%s\",\n", seg_mgmt_uuid_urn.str);
+		nvmeibt_Str_sprintf(json_output, "      \"disk_segment_uuid\": \"%s\",\n", seg_uuid_urn.str);
+		nvmeibt_Str_sprintf(json_output, "      \"save_timespec_tv_sec\": %lld,\n", (long long)seg_md_ctrl->save_timespec_tv_sec);
+		nvmeibt_Str_sprintf(json_output, "      \"locks_table_pbyte_s\": %llu,\n", seg_md_ctrl->locks_table_pbyte_s);
+		nvmeibt_Str_sprintf(json_output, "      \"reservation_mode_version\": %llu,\n", seg_md_ctrl->reservation_mode_version);
+		nvmeibt_Str_sprintf(json_output, "      \"active_praid_version_major\": %d,\n", seg_md_ctrl->active_praid_version_major);
+		nvmeibt_Str_sprintf(json_output, "      \"active_praid_version_minor\": %d,\n", seg_md_ctrl->active_praid_version_minor);
+		nvmeibt_Str_sprintf(json_output, "      \"committed_praid_config_version\": %d,\n", seg_md_ctrl->committed_praid_config_version);
+		nvmeibt_Str_sprintf(json_output, "      \"is_current_shutdown_clean\": %s,\n", seg_md_ctrl->is_current_shutdown_clean ? "true" : "false");
+		nvmeibt_Str_sprintf(json_output, "      \"is_written_on_disk\": %d,\n", seg_md_ctrl->is_written_on_disk);
+		nvmeibt_Str_sprintf(json_output, "      \"hostname\": \"%s\",\n", seg_md_ctrl->hostname);
+		nvmeibt_Str_sprintf(json_output, "      \"metadata_pbyte_s\": %llu,\n", seg_md_ctrl->metadata_pbyte_s);
+		nvmeibt_Str_sprintf(json_output, "      \"n_blksets_scrubbed\": %llu,\n", seg_md_ctrl->n_blksets_scrubbed);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_metadata_ctrl_crc32\": \"0x%08x\",\n", seg_md_ctrl->metadata_ctrl_crc32);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_locks_table_crc32\": \"0x%08x\"\n", seg_md_ctrl->locks_table_crc32);
+		nvmeibt_Str_sprintf(json_output, "    }");
+
+		seg_md_count++;
+	}
+
+	NNVMEIBT_BM_FREE(trace_gpt_export_seg_md_free, seg_md_ctrl);
+	seg_md_ctrl = NULL;
+	nvmeibt_Str_sprintf(json_output, "\n  ],\n");
 
 	/* Export in-memory GPT from TOMA if running */
 	nvmeibt_Str_sprintf(json_output, "  \"=== SECTION 3 ===\": \"TOMA IN-MEMORY GPT - READ-ONLY\",\n");
@@ -1874,8 +1951,8 @@ static int export_gpt_to_json(int disk_fd,
 		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option));
 	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
 
-	// NVMesh devices always have: pMBR, Main GPT, Metadata GPT, disk_metadata
-	fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, disk_metadata\n");
+	// NVMesh devices always have: pMBR, Main GPT, Metadata GPT, segment metadata, disk_metadata
+	fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, segment_metadata_partitions, disk_metadata\n");
 
 	// Warn if mismatch or overlaps detected
 	if (is_mismatch) {
@@ -1903,6 +1980,8 @@ out:
 		close(output_fd);
 	}
 	free_gpt_buffers(&bufs);
+	free_gpt_buffers(&metadata_bufs);
+	NNVMEIBT_BM_FREE(trace_gpt_export_seg_md_cleanup, seg_md_ctrl);
 	NNVMEIBT_STR_FREE(trace_gpt_json_export_free, json_output);
 	return rv;
 }

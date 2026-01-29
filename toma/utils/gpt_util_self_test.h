@@ -74,6 +74,7 @@ struct self_test_entry {
 	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)") \
 	X(nguid_preservation, "Validation - NGUID Preserved on Apply", "gpt_util apply without NGUID in JSON (NGUID unchanged)") \
 	X(warning_fields_apply, "Validation - _WARNING_ Fields Applied", "gpt_util modify last_pba_zeroed + apply --write") \
+	X(export_segment_metadata, "Validation - Segment Metadata Export", "gpt_util exports first 4K of each segment metadata partition") \
 	/* Advanced Features */ \
 	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write") \
 	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)") \
