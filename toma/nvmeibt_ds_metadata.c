@@ -704,3 +704,42 @@ out:
 	return metadata_size_in_pblks;
 }
 
+/**
+ * Read segment metadata control block from disk
+ * Used by gpt_util for JSON export and diagnostic purposes
+ * Returns 0 on success, -1 on error
+ */
+int nvmeibt_ds_metadata_ctrl_blk_read(struct netlink_io_context *nl_ctx, int fd,
+									   int pblk_size, uint64_t pbyte_s,
+									   struct nvmeibt_seg_active_metadata_ctrl *seg_md_ctrl)
+{
+	int				rv = -1;
+	uint32_t		read_crc32;
+	uint32_t		calculated_crc32;
+
+	NFIN;
+	N_Tf(read_seg_md_ctrl, "Reading segment metadata ctrl from pbyte_s=@OFFSET_INT size=@LD", pbyte_s, sizeof(*seg_md_ctrl));
+
+	// Read the 4K control block from disk. Set min_offset_allowed to pblk_size*4 just like disk_metadata_read_disk_metadata.
+	if (nvmeibt_disk_metadata_do_sync_IO_with_disk_netlink_or_not(nl_ctx, fd, seg_md_ctrl, pbyte_s, pblk_size, sizeof(*seg_md_ctrl), NULL, 0, NVMEIB_IO_IS_READ, 0, pblk_size*4) < 0) {
+		N_Ef(read_seg_md_ctrl_io_failed, "Failed to read segment metadata ctrl from pbyte_s=@OFFSET_INT", pbyte_s);
+		goto out;
+	}
+
+	/* Validate CRC (calculate up to but not including metadata_ctrl_crc32 field) */
+	read_crc32 = seg_md_ctrl->metadata_ctrl_crc32;
+	calculated_crc32 = crc32_seedless(seg_md_ctrl, offsetof(typeof(*seg_md_ctrl), metadata_ctrl_crc32));
+
+	if (read_crc32 != calculated_crc32) {
+		N_Ef(read_seg_md_ctrl_crc_mismatch, "Segment metadata error: pbyte_s=@POS read_crc=@X calculated=@X",
+			 pbyte_s, read_crc32, calculated_crc32);
+		goto out;
+	}
+	rv = 0;
+	N_Tf(read_seg_md_ctrl_success, "Successfully read segment metadata ctrl: magic=@STR version=@INT uuid=@UUID_LE",
+		 seg_md_ctrl->header.magic_str, seg_md_ctrl->header.seg_metadata_version, &seg_md_ctrl->disk_segment_uuid);
+out:
+	NFOUT;
+	return rv;
+}
+

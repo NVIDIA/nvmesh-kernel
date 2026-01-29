@@ -107,4 +107,10 @@ int nvmeibt_ds_metadata_ctrl_blk_write(struct seg_persistency_write_params *writ
 
 /* Restore the RAM (locks, TxID, dbits) from persistency (metadata of segment), Or store from RAM to persistrncy */
 int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *);
+
+/* Read segment metadata control block from disk (for gpt_util and diagnostics) */
+int nvmeibt_ds_metadata_ctrl_blk_read(struct netlink_io_context *nl_ctx, int fd,
+									  int pblk_size, uint64_t pbyte_s,
+									  struct nvmeibt_seg_active_metadata_ctrl *seg_md_ctrl);
+
 #endif //NVMEIBR_DS_METADATA_H
