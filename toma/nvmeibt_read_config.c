@@ -1716,6 +1716,7 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 	int												validate_rv;
 	const int										n_entries = MAX_NUM_GPT_ENTRIES;
 	struct nvmeibt_disk_metadata					aligned_disk_metadata __attribute__((aligned(PAGE_SIZE)));
+	int												n_unused_entries = 0;
 
 	NFIN;
 	// Go over all the segments we have in the metadata GPT and read the configuration that is stored inside them.
@@ -1723,7 +1724,7 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 	for (i = 0; i < n_entries; i++) {
 		gpt_entry = &(entry->metadata_gpt.entries[i]);
 		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(gpt_entry)) {
-			N_Tf(wreqygq, "Unused entry #@INT", i);
+			n_unused_entries++;
 			continue;
 		} else if (ARE_UUID_EQ(&gpt_entry->partition_type_guid, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
 			if (nvmeibt_disk_metadata_read_disk_metadata(entry->nl_ctx, entry->fd,
@@ -1777,6 +1778,7 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 			nvmeibt_abort(ES_FATAL);
 		}
 	}
+	N_Tf(wreqygq, "n_unused_entries=@INT", n_unused_entries);
 	rv = 0;
 out:
 	return rv;
