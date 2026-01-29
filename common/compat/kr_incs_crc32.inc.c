@@ -11,28 +11,24 @@
 __attribute__((optimize(4)))
 #endif
 static inline u32 __calculate_crc32c_avx(u32 crc_init, const u8* buffer, u32 num) {
-	#if defined (PARALLELS_COMPILATION_ONLY) && PARALLELS_COMPILATION_ONLY
-		oops;	return 0; // Functions __crc32c..() Not available on MacOS UM VM that runs on the virtual ARM CPU
-	#else
-		u64 crc, data;
-		unsigned int i;
-		#if defined(BUG_ON)
-			BUG_ON(num % sizeof(u64));
-		#endif
-		num /= sizeof(u64);
-		crc = crc_init;                  // For RFC 3720, 0xffffffff
-		for (i = 0; i < num; i++) {
-			data = ((u64 *)buffer)[i];
-			#ifdef __x86_64__
-				asm volatile ("crc32 %1, %0"          : "+r" (crc) : "r" (data));
-			#elif defined(__aarch64__)
-				asm volatile ("crc32cx %w0, %w0, %x1" : "+r" (crc) : "r" (data));
-			#else
-				#error "Unsupported architechture"
-			#endif
-		}
-		return (u32)crc;                      // For RFC 3720, XOR with 0xffffffff
+	u64 crc, data;
+	unsigned int i;
+	#if defined(BUG_ON)
+		BUG_ON(num % sizeof(u64));
 	#endif
+	num /= sizeof(u64);
+	crc = crc_init;                  // For RFC 3720, 0xffffffff
+	for (i = 0; i < num; i++) {
+		data = ((u64 *)buffer)[i];
+		#ifdef __x86_64__
+			asm volatile ("crc32 %1, %0"          : "+r" (crc) : "r" (data));
+		#elif defined(__aarch64__)
+			asm volatile ("crc32cx %w0, %w0, %x1" : "+r" (crc) : "r" (data));
+		#else
+			#error "Unsupported architechture"
+		#endif
+	}
+	return (u32)crc;                      // For RFC 3720, XOR with 0xffffffff
 }
 
 #ifndef __KERNEL__		// Kernel already has those functions. Define as compatibility for user-space

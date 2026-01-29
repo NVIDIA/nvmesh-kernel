@@ -189,10 +189,6 @@ u32 crc32c(u32 init_crc, const void *buf, unsigned int len);
 
 static inline u32 __impl_crc32c(u32 init_crc, const void *buf, unsigned int len)
 {
-#if defined(PARALLELS_COMPILATION_ONLY) && PARALLELS_COMPILATION_ONLY
-	oops;	// Functions __crc32c..() Not available on MacOS UM VM that runs on the virtual ARM CPU
-	return 0;
-#else
 	while (len >= sizeof(uint64_t)) {
 		init_crc = __crc32cd(init_crc, *(uint64_t *)buf);
 		buf += sizeof(uint64_t);
@@ -211,7 +207,6 @@ static inline u32 __impl_crc32c(u32 init_crc, const void *buf, unsigned int len)
 	if (len >= sizeof(uint8_t))
 		init_crc = __crc32cb(init_crc, *(uint8_t *)buf);
 	return init_crc;
-#endif
 }
 /*
    Generate the P[] encoding of the given data. Use 3 indeirect calls.

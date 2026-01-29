@@ -15,9 +15,7 @@
 #include "cpuid.h"
 #include "nvmeibc_block_dp_ec_gf.h"
 #include "nvmeibc_block_dp_ec_gf_arm_um.h"
-#if defined (PARALLELS_COMPILATION_ONLY) && PARALLELS_COMPILATION_ONLY
-	// OferOshri: This is a hack. Please define a proper condition for AVX not enabled
-#elif !defined (__aarch64__)
+#if !defined (__aarch64__)
 	#define USE_GF_AVX2        NVMEIBC_GF_AVX2
 #else
 	int gf_asm_count = -1;
