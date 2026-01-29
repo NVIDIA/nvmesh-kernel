@@ -69,11 +69,9 @@ bool nvmeibs_defer_recv_comps = true;
 module_param_named(defer_recv_comps, nvmeibs_defer_recv_comps, bool, 0644);
 MODULE_PARM_DESC(defer_recv_comps, "Defer handling of IO receive completions, so it is not done in the interrupt context.");
 
-static bool mlx_rdda_enabled = false;
-#ifdef ALLOW_CLIENT_RDDA
-module_param_named(mlx_rdda_enabled, mlx_rdda_enabled, bool, 0444);
-MODULE_PARM_DESC(mlx_rdda_enabled, "Enables mlx RDDA support.");
-#endif
+bool nvmeibs_defer_recv_comps_tcp = false;
+module_param_named(defer_recv_comps_tcp, nvmeibs_defer_recv_comps_tcp, bool, 0644);
+MODULE_PARM_DESC(defer_recv_comps_tcp, "Same as defer_recv_comps, but applied for TCP/SIW NICs.");
 
 unsigned nvmeibs_max_nic_srqs = NVMEIB_MAX_NIC_SRQS;
 module_param_named(max_nic_srqs, nvmeibs_max_nic_srqs, int, 0444);
@@ -127,13 +125,6 @@ static struct list_head used_dev_list;
 static bool disk_scan_done_called = false;
 
 static bool nvmeibs_exit_called = false;
-
-static void set_mlx_rdda_enable_ind(void)
-{
-	nvmeib_ib_driver_enable_cap(DT_mlx5, NVMEIB_DEVCAP_RDDA, mlx_rdda_enabled);
-	_NI(trace_main_set_mlx_rdda_enable_ind,
-		"mlx rdda support is @STR", mlx_rdda_enabled ? "enabled" : "disabled");
-}
 
 int nvmeib_debug_level(void)
 {
@@ -1079,7 +1070,7 @@ static void cl_dma_unmap_resources(struct ib_device *ib, struct nvmeibs_q_info *
 	}
 	/* JH IOMMU: DMA_FROM_DEVICE is correct, used as a sink for Remote RDMA_WRITE */
 	cl_dma_unmap_phys(ib, &info->cq_db, sizeof(*qs->cq_doorbell), DMA_FROM_DEVICE);
-	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE (RDDA) and a source for Remote RDMA_READ (OE) */
+	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE and a source for Remote RDMA_READ (OE) */
 	cl_dma_unmap_virt(ib, &info->cq, PAGE_SIZE, DMA_TO_DEVICE);
 	/* JH IOMMU: DMA_FROM_DEVICE is correct, (Not used, but would be a sink for Remote RDMA_WRITE) */
 	cl_dma_unmap_phys(ib, &info->prpl, PAGE_SIZE, DMA_FROM_DEVICE);
@@ -1132,7 +1123,7 @@ static int cl_dma_map_resources(struct ib_device *ib, struct nvmeibs_q_info *qs,
 		goto err_unmap_rscs;
 	}
 
-	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE (RDDA) and a source for Remote RDMA_READ (OE) */
+	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE and a source for Remote RDMA_READ (OE) */
 	rc = cl_dma_map_virt(ib, qs->cq, PAGE_SIZE, &info->cq, DMA_BIDIRECTIONAL);
 	if (rc) {
 		_NE(error_4_main_cl_dma_map_resources, "Failed mapping NVME CQ to NIC");
@@ -1233,14 +1224,6 @@ static int nvmeibs_register_disk_resources(struct nvmeibs_dev *nis_dev,
 			rv = -EALREADY;
 			goto out;
 		}
-	}
-
-	/* Skip devices that do not support RDDA */
-	if (!nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
-		_NT(trace_register_disk_resources_not_supp,
-		    "device @STR does not support RDDA", ib->name);
-		rv = -ENOTSUPP;
-		goto out;
 	}
 
 	mem = kzalloc(sizeof(*mem), GFP_KERNEL);
@@ -1360,44 +1343,6 @@ void nvmeibs_deregister_disk_resources(struct nvmeibs_dev *nis_dev,
 			free_disk_resources(mem, disk);
 		}
 	NFOUT;
-}
-
-static int register_disks_resources(struct nvmeibs_dev *nis_dev)
-{
-	struct list_head *disks;
-	struct nvmeibs_disk_info *disk;
-	int rv = 0;
-
-	NFIN;
-	if (!nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
-		_NT(trace_2_main_register_disks_resources,
-		    "device @STR does not support RDDA", nis_dev->dev->ib_dev->name);
-		rv = -ENOTSUPP;
-		goto out;
-	}
-	if (!(disks = nvmeibs_disk_get_disks(NULL))) {
-		_NT(trace_main_register_disks_resources, "No disks on controller");
-		goto unlock_disks;
-	}
-	nvmeibs_get_devices(NULL);
-	list_for_each_entry(disk, disks, link) {
-		if (!disk->n_qs) {
-			_NT(trace_3_main_register_disk_resources, "Disk @DISK_NAME has no queues to register", disk->disk_id);
-			continue;
-		}
-		if ((rv = nvmeibs_register_disk_resources(nis_dev, disk)) < 0) {
-			_NT(trace_1_main_register_disks_resources, "Fail (@RV) to register disk @DISK_ID_STR resources", rv, disk->disk_id);
-			goto unlock_devices;
-		}
-	}
-
-unlock_devices:
-	nvmeibs_put_devices();
-unlock_disks:
-	nvmeibs_disk_put_disks();
-out:
-	NFOUT;
-	return rv;
 }
 
 static void deregister_disks_resources(struct nvmeibs_dev *nis_dev)
@@ -1761,14 +1706,6 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 	if ((rv = allocate_fmr(nis_dev)) < 0) {
 		_NE(error_1_main_do_add_one, "@DEVICE_NAME allocate_fmr() failed.", device->name);
 		goto remove_dev;
-	}
-
-	if (nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
-		/* NIC supports RDDA - Register disk resources with the HCA */
-		if ((rv = register_disks_resources(nis_dev)) < 0) {
-			_NE(error_2_main_do_add_one, "@DEVICE_NAME failed to register disk resources", device->name);
-			goto remove_dev;
-		}
 	}
 
 	if ((rv = nvmeibs_disk_lock_disks_map_segs_for_dev(nis_dev))) {
@@ -3982,9 +3919,6 @@ void nvmeibs_register_disk_resources_at_all_nics(struct nvmeibs_disk_info *disk)
 		if (!disk->n_qs) {
 			_NT(trace_4_main_nvmeibs_register_disk_resources_at_all_nics,
 			    "disk @DISK_NAME has no queues to register", disk->disk_id);
-		} else if (!nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
-			_NT(trace_3_main_nvmeibs_register_disk_resources_at_all_nics,
-			    "device @STR does not support RDDA, not registering resources", nis_dev->dev->ib_dev->name);
 		} else {
 			if ((rv = nvmeibs_register_disk_resources(nis_dev, disk) < 0)) {
 				_ND(trace_main_nvmeibs_register_disk_resources_at_all_nics, "Registering disk @DISK_ID_STR failed (@RV)",
@@ -4104,7 +4038,6 @@ int nvmeibs_init(void) /* Constructor */
 		_NE(error_main_nvmeibs_init_pcpu_alloc, "Failed to initialize memmgr metrics");
 		goto unlock;
 	}
-	set_mlx_rdda_enable_ind();
 	set_lock_dev_mode();
 	mutex_lock(&guard);
 	nvmeib_set_debug_level(nvmeib_debug_level);
