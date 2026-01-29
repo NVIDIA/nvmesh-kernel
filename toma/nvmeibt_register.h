@@ -147,7 +147,7 @@ void nvmeibt_register_send_toma_not_ready(
 
 int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int client_id, struct nvmeibt_node *registrant_node);
 
-void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx);
+void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg);
 BOOL nvmeibt_register_is_same_registrant(const struct nvmeibt_registrant_ctx *r1, const struct nvmeibt_registrant_ctx *r2);	// Important! Assumes questen is asked on registrants of the same segment!
 void nvmeibt_register_recalc_seg_active_registrants_align_with_sync_cmd(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_register_is_seg_active_registrable_clients_sync_wise(struct nvmeibt_seg_active *seg_active, int *reason);

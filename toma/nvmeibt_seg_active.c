@@ -123,12 +123,12 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	}
 	unlock_stale_locks_hash(seg_active);
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_hash_by_handle) {
-		free_reg_ctx(reg_ctx);
+		free_reg_ctx(reg_ctx, 1);
 	}
 	NVMEIB_HASH_TBL_FREE(83hhu2l, seg_active->longing_registrants_hash_by_handle);
 	//
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_handle) {
-		free_reg_ctx(reg_ctx);
+		free_reg_ctx(reg_ctx, 1);
 	}
 	NVMEIB_HASH_TBL_FREE(dujyq02, seg_active->active_registrants_hash_by_handle);
 	//
@@ -138,12 +138,12 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	NVMEIB_HASH_TBL_FREE(bhk49ol, seg_active->active_registrants_hash_by_lockid);
 	//
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_lockid) {
-		free_reg_ctx(reg_ctx);
+		free_reg_ctx(reg_ctx, 1);
 	}
 	NVMEIB_HASH_TBL_FREE(9ksl40d, seg_active->stale_registrants_hash_by_lockid);
 	//
 	XDLIST_FOREACH_SAFE(reg_ctx, &seg_active->registrants_on_timeout) {
-		free_reg_ctx(reg_ctx);
+		free_reg_ctx(reg_ctx, 1);
 	}
 	XDLIST_FOREACH_SAFE(wq_entry, &seg_active->owner_lock_ids_to_release) {
 		XDLIST_DEL(&wq_entry->link);

@@ -567,12 +567,12 @@ static void alloc_reg_ctx(struct nvmeibt_registrant_ctx **reg_ctx, struct nvmeib
 	nvmeibt_client_reg_ctx_ref_added((*reg_ctx)->client, *reg_ctx);
 }
 
-void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx)
+void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg)
 {
 	if (reg_ctx) {
 		struct nvmeibt_seg_active *seg_active = reg_ctx->seg_active;
 		XDLIST_DEL(&(reg_ctx->registrant_on_timeout_link));
-		if (seg_active) {
+		if (seg_active && !is_deleting_seg) {
 			nvmeib_hash_delete_uint64_t(seg_active->longing_registrants_hash_by_handle, reg_ctx->client_messaging_handle);
 			nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 			remove_active_registrant(seg_active, reg_ctx);
@@ -1047,7 +1047,7 @@ static void remove_longing_registrant_on_seg(struct nvmeibt_seg_active *seg_acti
 	NFIN;
 	N_Tf(kiru834, "Remove the longing_registrant seg=@UUID_8 handle=@HANDLE",
 		nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->client_messaging_handle);
-	free_reg_ctx(reg_ctx);
+	free_reg_ctx(reg_ctx, 0);
 	NFOUT;
 }
 
@@ -1455,7 +1455,7 @@ void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ct
 		nvmeibt_register_clients_sync_check_and_act_upon(seg_active); // may destroy seg_active
 	}
 	if (nvmeibt_disk_segment_get_seg_active(disk_segment)) {	// If the seg_active was removed, then we were removed too
-		free_reg_ctx(reg_ctx);
+		free_reg_ctx(reg_ctx, 0);
 	}
 out:
 	NFOUT;
@@ -1555,7 +1555,7 @@ void remove_specific_longing_registrant_on_invalid_seg(struct nvmeibt_registrant
 	XDLIST_DEL(&(longing_registrant->longing_on_invalid_seg_link));
 	N_Tf(ju87cwe, "Found longing registrant handle=@HANDLE seg=@UUID_8",
 		 longing_registrant->client_messaging_handle, nvmeib_uuid_first_4_bytes(&longing_registrant->seg_uuid));
-	free_reg_ctx(longing_registrant);
+	free_reg_ctx(longing_registrant, 0);
 }
 
 bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *input_reg_ctx)
@@ -1604,7 +1604,7 @@ void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longi
 			add_longing_registrant_on_seg(longing_registrant);
 			// Free the reg_ctx (when adding registrant as longing to segment new reg_ctx is allocated.
 			longing_registrant->seg_active = NULL;
-			free_reg_ctx(longing_registrant);
+			free_reg_ctx(longing_registrant, 0);
 		}
 	}
 	NFOUT;
