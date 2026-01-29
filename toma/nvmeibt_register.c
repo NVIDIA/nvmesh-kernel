@@ -2099,6 +2099,9 @@ static enum UNREGISTER_RV launch_non_ioable_registrant_removal(
         rv = UNREGISTER_RV_FAILED;
         goto out;
     }
+
+TODO(Move all of the removal. longing, ... to the finalize, The problem is that registrants removal might have a side effect of seg_active and local_disk removel that compicates nvmeibt_register_launch_disconnected_client_removal_from_all_segments());
+
 	if (is_removing_longing) {
 		remove_longing_registrant_on_seg_by_ctx(input_registrant_ctx);
 	}
@@ -2118,6 +2121,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int ci
 {
 	int								rv = 0;
 	int								n_local_disk;
+	int								n_seg_active;
 	struct nvmeibt_registrant_ctx	*unregistering_reg_ctx;
 	struct nvmeibt_local_disk		*local_disk;
 	struct nvmeibt_seg_active		*seg_active;
@@ -2134,6 +2138,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int ci
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			// Go over all the segments active registrants and notify recovery about those that match by client handle + type.
 			// We can't notify only with the tmp registrant as it has no lock id, and we need the lockid for for the recovery.
+			n_seg_active = nvmeib_hash_get_n_elements(local_disk->seg_active_hash_by_uuid);
 			NVMEIB_HASH_FOREACH(unregistering_reg_ctx, seg_active->active_registrants_hash_by_handle) {
 				if (client_messaging_handle_to_cid(unregistering_reg_ctx->client_messaging_handle) != (uint32_t)cid) {
 					continue;
@@ -2141,9 +2146,17 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int ci
 				lock_id_cache_registrant_unregistered(unregistering_reg_ctx);
 				if (nvmeibt_register_launch_unsubscribed_registrant_removal(unregistering_reg_ctx) == UNREGISTER_RV_FAILED)
 					rv = -1;
+				if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
+					N_Tf(cfcreyu, "local_disk removed while looping on registrants");
+					break;
+				}
+				if (n_seg_active != nvmeib_hash_get_n_elements(local_disk->seg_active_hash_by_uuid)) {
+					N_Tf(anijr2b, "seg_active removed");
+					break;
+				}
 			}
 			if (n_local_disk != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
-				N_Tf(fst6623, "Local disk removed");
+				N_Tf(fst6623, "local_disk removed");
 				break;
 			}
 		}
