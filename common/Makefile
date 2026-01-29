@@ -22,7 +22,6 @@ nvmeib_common-y := \
 	nvmeib_version_kernel.o \
 	mlx/nvmeib_mlx5.o \
 	mlx/nvmeib_mlx5p.o \
-	bnxt_re/nvmeib_bnxt_re.o \
 	siw/nvmeib_siw.o \
 	nvmeib_numa.o \
 	nvmeib_buffer.o \
@@ -40,11 +39,6 @@ nvmeib_common-y := \
 ifeq ($(call ofed_ver_check,5,1),no)
   # Ofed below 5.1 - support mlx4 driver
   nvmeib_common-y += mlx/nvmeib_mlx4.o
-endif
-
-ifneq ($(BNXT_DIR),)
-  $(info BNXT_CFLAGS=$(BNXT_CFLAGS))
-  CFLAGS_nvmeib_bnxt_re.o := -I$(BNXT_DIR)/bnxt_en -I$(BNXT_DIR)/bnxt_re/bnxt_qplib -I$(BNXT_DIR)/bnxt_re $(BNXT_CFLAGS)
 endif
 
 ifeq ($(shell uname -r | cut -f1,2,3 -d.), 3.10.0-693)

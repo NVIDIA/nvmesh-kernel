@@ -7,7 +7,6 @@
 #include "nvmeib_public.h"
 #include "mlx/nvmeib_mlx.h"
 #include "siw/nvmeib_siw.h"
-#include "bnxt_re/nvmeib_bnxt_re.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
 #include "nvmeibm_trace.h"
@@ -96,15 +95,6 @@ int nvmeib_ibdr_dev_init(bool paging_enabled)
 		nvmeib_mlx4_cleanup();
 		return ret;
 	}
-
-#if BNXT_RE
-	ret = nvmeib_bnxt_re_init();
-	if (ret) {
-		nvmeib_siw_cleanup();
-		nvmeib_mlx5_cleanup();
-		nvmeib_mlx4_cleanup();
-	}
-#endif
 
 	return ret;
 }
