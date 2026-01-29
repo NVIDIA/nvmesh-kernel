@@ -242,6 +242,7 @@ struct nvme_id_ctrl {
         __u8                    vs[1024];
 };
 
+// Defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01-Ratified.pdf, Figure 116: LBA Format Data Structure, NVM Command Set Specific, p. 91.
 struct nvme_lbaf {
         __le16                  ms;
         __u8                    ds;
