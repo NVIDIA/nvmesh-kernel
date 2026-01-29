@@ -20,11 +20,11 @@ struct nvmeibt_topology;
  *  unresolved locks. Locks are found in the owner-locks table, some are copy-locks
  * All those locks are converted to stale-locks in the owner-locks table, keeping
  *  the lock-id of the unregistered-client, and while doing so, they are added to
- *  the registrant's reg_ctx->stale_locks_hash.
+ *  the registrant's reg_ctx->stale_locks_hash_by_seg_blkset_no.
  * Whenever a (client) recoverer recovers a stale-lock it sends RT_BLKSET_RECOVERED
  *  to all the owners (/active), and those TOMAs remove the relevant blkset_no from
- *  the reg_ctx->stale_locks_hash of the registrant that left the stale lock behind.
- * Once the reg_ctx->stale_locks_hash is empty, we know that the lockid of that
+ *  the reg_ctx->stale_locks_hash_by_seg_blkset_no of the registrant that left the stale lock behind.
+ * Once the reg_ctx->stale_locks_hash_by_seg_blkset_no is empty, we know that the lockid of that
  *  client finished its role, so the registrant can be terminated, and as a result
  *  its lockid can be reused
  */

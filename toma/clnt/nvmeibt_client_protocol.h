@@ -288,7 +288,7 @@ enum NVMEIBT_CLIENT_MSG_TYPES {
 	// Client complains to toma about problematic lock
 	NVMEIBT_CLIENT_MSG_CT_STALE_LOCK  = 0x31 | NVMEIBT_PROTOCOL_SIGNATURE_CLIENT,	// Stale lock prevents clients IO, client asks permission to take over, fix the blockset and release stale lock
 	NVMEIBT_CLIENT_MSG_CT_FAILED_LOCK = 0x32 | NVMEIBT_PROTOCOL_SIGNATURE_CLIENT,	// Regular non stale is taken for too long. Client asks toma to unregister the other client which holds this lock for too long
-	NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED= 0x33 | NVMEIBT_PROTOCOL_SIGNATURE_CLIENT,	// Toma replies that it cleaned the lock and client can safely take it
+	NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED= 0x33 | NVMEIBT_PROTOCOL_SIGNATURE_CLIENT,	// Toma replies that the client with this lockid finished lock&I/O. Once all segs are done, sync can start
 
 	NVMEIBT_CLIENT_MSG_TC_LOCKID_CACHE_PURGE = 0x38 | NVMEIBT_PROTOCOL_SIGNATURE_CLIENT,
 	NVMEIBT_CLIENT_MSG_CT_LOCKID_CACHE_PURGE_ACK = 0x39 | NVMEIBT_PROTOCOL_SIGNATURE_CLIENT,

@@ -16,6 +16,110 @@
 #include "clnt/nvmeibt_client.h"
 #include "local/ram/nvmeibt_ds_blkset_entries.h"
 
+/******************************************************************************/
+/* Stale locks (conversion & use) workflow
+   - lockid: bits 0-3 are idx_in_praid, and bits 4-27 are a serial lockid
+	 Note that every seg has its own range of lockid (due to idx_in_praid)
+   - A client (registrant) receives a legitimate lock_id from all segments (TOMAs),
+	 select one of them, and use it for registration on all segs
+   
+   Objectives:
+   - Say a client that registered with lock_id=0x13 unregistered (using a msg/client-cut-off/whatever)
+	 and the local_disk is still present (the seg preserved its locks table in mem)
+	 - We need to convert all of its lockids 0x13-->0x10000013
+	 - The registrant needs to move to seg_active->stale_registrants_hash_by_lockid,
+	   since we do not want to suggest this lockid to other clients and
+	   Serjio needs to cleanup before the lockid is reused
+   - (Unrelated) lockid-allocation
+	 - get_fresh_reg_lock_id() for a client (in REGISTER_NACK and REGISTRABLE)
+	   scans sequentially from reg_lock_id_cache_last_allocated_lockid looking for
+	   an unused value (by active/stale registrants). Usually it is the first attempt.
+	   - While at it, the range of lockids is sub-divided into zones, and when trying to
+		 allocate from the next zone, we first call
+		 lock_id_cache_zone_purge_launch_ask_all_registrants_to_forget_recoverable_lockids_cache_in_zone()
+	     which usually does nothing, since even if we reuse a zone, it was used ages ago.
+   
+   Players:
+   - seg_active->stale_registrants_hash_by_lockid
+   - reg_ctx->n_stale_locks
+   - nvmeibt_seg_active_add_blkset_to_stale_locks_hash()
+	 - remove_stale_lock_from_seg_stale_locks_hash()
+	   When all the stale_locks of a registrant are recovered, the lockid can be reused
+   - seg_active->owner_lock_ids_to_release
+   - owner_locks_release_group_wrapper()
+   - nvmeibt_seg_active_delete_all_stale_locks_of_registrant()
+   - owner_locks_set_to_release() -- called from registrant_disconnect_wrapper()
+   - get_fresh_reg_lock_id()
+	 - lock_id_cache_alloc()
+	   - __lock_id_cache_alloc
+   - reg_lock_id_cache_last_allocated_lockid
+   
+   Client side
+   - A client registers with a lockid (that was suggested by one of the praid's TOMAs)
+   - A client unregisters (using an UNREGISTER msg / physical-disconnect)
+	 - TOMA converts the lock to stale as described in the TOMA workflow below
+   - A client with a lockid tries to lock a blkset
+	 - If the existing lock is free - no issue
+	 - If the existing lock is taken - wait and retry
+	   - If the lock is stuck, then report FAILED_LOCK to TOMA that will cut-off the locking client
+		 - In TOMA if the locking client is no more an active_registrant (all its locks were already converted to stale), then TOMA sends LOCK_CLEANED
+		   - For the client it means that all of the (stale) locks by that lockid can be synched without asking questions
+		     - The client will remember that lockid (in a cache of ~10 lockids)
+	 - If the existing lock is stale (stale bit was turned on by TOMA)
+	   - If already received LOCK_CLEANED for this lockid (from all the praid's segs. I.e. no lock&I/O activity leftovers on this blkset) then
+	     - recover (sync) the blkset and only then
+		   - lock as usual and continue with the I/O
+		   - send msg to TOMA that BLKSET_RECOVERED
+		   - for the sync itself, Lock with my-lockid, so that if I unregister before BLKSET_RECOVERED,
+			 then TOMA will return the original stale-lock (TOMA is aware of every stale-lock)
+	   - If not yet received LOCK_CLEANED for this lockid then
+	     - Send STALE_LOCK, and wait for LOCK_CLEANED
+   
+   stale-lock Workflow:
+   - Per TOMA
+   - A subscribes with a client_messaging_handle, a 8 bytes number whose 4 MSB bytes
+	 are the CID (Client ID), and the LSB is specific to the segment
+   - The client registers with a lockID (I will skip the registration workflow & longing)
+	 We have a reg_ctx with reg_ctx->reg_lock_id and reg_ctx->client_messaging_handle
+   - This reg_ctx is added to seg_active->active_registrants_hash_by_handle,
+	 and in parallel to seg_active->active_registrants_hash_by_lockid
+   - The registrant is unregistered (We know that it will not perform any lock/IO)
+	 For a stale-lock to be relevant, the seg_active must remain functional,
+	 hence either the client sent an RT_UNREGISTER, or was unsubscribed from the disk
+   
+   
+   - launch_non_ioable_registrant_removal() // Called after we know that the registrant will not access the local segment or its locks
+	 - remove_longing_registrant_on_seg_by_ctx()
+	 - launch_existing_active_registrant_removal()	// For a registrant that was active
+	   - ...
+	   - launch_registrant_removal()	// For a registrant on non-JBOD, that used the locks table
+		 - nvmeibt_registrant_disconnect_add_work		// Assign the work to a WQ (registrant_disconnect_wrapper, registrant_disconnect_finalize, ...)
+		   - nvmeibt_local_disk_specific_add_work() Adds a WQ entry to the local_disk->wq
+		 - (WQ) registrant_disconnect_wrapper
+		   - The WQ-entry does not do the work. It is just adds the lockid to seg_active->owner_lock_ids_to_release in the following call-chain
+		   - owner_locks_set_to_release()
+			 - XDLIST_ADD_TAIL(&seg_active->owner_lock_ids_to_release, &entry->wq_entry);	// The entry from registrant_disconnect_wrapper()
+			 - If it is the first entry in seg_active->owner_lock_ids_to_release
+			   - Create a WQ task (owner_locks_release_group_wrapper, finalize=NULL , ...)
+			   - Add the new task to the same WQ of the original task
+			 - If not the first entry in seg_active->owner_lock_ids_to_release
+			   - We just already added the lockid_to_release to the XDLIST seg_active->owner_lock_ids_to_release
+		 - Now that we have the owner_locks_release_group task in the WQ, we will eventually get to execute owner_locks_release_group_wrapper()
+		   - Scan the seg_active locks table, and for every non-0 entry (very few), See if it any of seg_active->owner_lock_ids_to_release
+		   - In the following order:
+			 - per converted lock: nvmeibt_seg_active_add_blkset_to_stale_locks_hash()
+			   - (under mutex) Since we are in a WQ thread, and the main thread also accesses this hash
+			 - Convert the lock to stale_lock (Add the stale-bit)
+		 - For every entry in XDLIST seg_active->owner_lock_ids_to_release
+		   - Call nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, (void *)wq_entry);
+			 - Actually, triggering the per registrant registrant_disconnect_finalize()
+		 - registrant_disconnect_finalize() (runs in TOMA's main thread)
+		   - For awaiting_registrants (clients awaiting for my stuck lock to become stale)
+			 - nvmeibt_register_send_msg_to_registrant(awaiting_reg_ctx, NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED, ...)
+		   - nvmeibt_register_terminate_registrant
+*/
+
+/******************************************************************************/
 #define NVMEIB_REG_LOCK_ID_ZONE_BITS        2
 
 #define NVMEIB_REG_LOCK_ID_TO_ZONE(lid)     \
@@ -1248,7 +1352,7 @@ static void search_stale_lock_hash_and_fill_response_cuuid(
 	// If the client disconnected (not active), left a stale lock behind, and the stale lock is not fully cleaned yet
 	// For now, we simply scan all the stale_locks of a seg. If needed, we can add a hash by lockid for this
 	lock_stale_locks_hash(seg_active);
-	TODO(Add seg_active->stale_locks_hash_by_lockid and search directly);
+	TODO(Add seg_active->stale_locks_hash_by_seg_blkset_no and search directly);
 	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &(seg_active->stale_locks_hash_by_seg_blkset_no)) {
 		N_Tf(gkit954, "seg=@UUID_8 comparing @X with @X",
 			nvmeibt_seg_active_UUID_8(seg_active),

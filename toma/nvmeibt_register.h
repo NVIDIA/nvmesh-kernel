@@ -48,7 +48,7 @@ struct nvmeibt_registrant_awaiting_lockid {
  *  The client will unregister, and when the seg_active becomes registrable again, TOMA will send a TR_REGISTRABLE to all seg_active->longing...
  * When a seg_active is added, TOMA scans global->longing_registrants_on_invalid_seg, and if their seg matches sends TR_REGISTRABLE.
  * When an active_registrant (that possibly has locks) is unregistered for any reason
- * - In a WQ, Its active locks are scanned, converted to stale, memorized, ...
+ * - In a WQ, Its taken locks are scanned, converted to stale, memorized, ...
  * - At the finalize, the reg_ctx is moved to seg_active->stale...
  *   - Until moved to seg_active->stale... the reg_ctx->n_stale_locks is unstable, and if 0, cannot be trusted
  */
@@ -79,7 +79,7 @@ struct nvmeibt_registrant_ctx {
 	struct xdlist						registrant_on_timeout_link;
 	struct xdlist						longing_on_invalid_seg_link;
 	enum REG_TIMEOUT_REASON				timeout_reason;
-	int									n_stale_locks;	// The stale_locks are held disk_segment->stale_locks_hash
+	int									n_stale_locks;	// The stale_locks are held disk_segment->stale_locks_hash_by_seg_blkset_no
 	u64									reservation_mode_version;
 };
 
