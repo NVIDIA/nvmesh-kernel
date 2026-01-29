@@ -112,9 +112,6 @@ struct nvmeib_device_public_ops {
 				struct nvmeib_send_wr **bad_wr);
 	void (*set_debug_level)(int (*dlf)(void));
 	int (*peek_cq)(struct ib_cq *ibcq, int max);
-	struct ib_qp *(*create_rdda_qp)(struct ib_pd *ib_pd,
-				struct ib_qp_init_attr *qp_init_attr);
-	int (*destroy_rdda_qp)(struct ib_qp *ibqp);
 };
 
 struct nvmeib_public_hwdev {

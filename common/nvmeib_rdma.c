@@ -4305,58 +4305,6 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_rdma_create_qp);
 
-struct ib_qp* nvmeib_rdma_create_rdda_qp(struct nvmeib_rdma_cm *cm_id,
-	struct ib_pd *pd, struct ib_qp_init_attr *qp_init, int port, u16 pkey,
-	int qp_access)
-{
-	struct ib_qp *qp = NULL;
-	struct rdma_connection *conn;
-	struct nvmeib_device_public_ops *pops = nvmeib_ibdr_hwdev_pops_get(pd->device);
-	int rv;
-
-	NFIN;
-	if (!pops) {
-		_NE(error_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "Could not get access to public ops for device @DEVICE_NAME", pd->device->name);
-		goto out;
-	}
-
-	if (cm_id->cm_type != _cm_connection ||
-		cm_id->rdma_type == _rdma_lb ||
-		cm_id->rdma_type == _rdma_lb_accept) {
-		_NE(error_1_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "Invalid cm_id @CM_ID (type @CM_TYPE, rdma_type @RDMA_TYPE) for RDDA",
-		   cm_id, cm_id->cm_type, cm_id->rdma_type);
-		goto out;
-	}
-	else
-		conn = cm_2_c(cm_id);
-
-	if (IS_ERR_OR_NULL(qp = (*pops->create_rdda_qp)(pd, qp_init))) {
-		_NE(error_2_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "create_rdda_qp failed (@PTR_ERR) for device @DEVICE_NAME", PTR_ERR(qp), pd->device->name);
-		qp = NULL;
-		goto out;
-	}
-
-	if (cm_id->rdma_type != _rdma_roce) {
-		if ((rv = ib_init_qp(conn, pd, qp, port, pkey, qp_access))) {
-			_NE(error_3_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "ib_init_qp failed (@RV)", rv);
-			_ib_destroy_qp(qp);
-			qp = NULL;
-			goto out;
-		}
-	}
-
-	conn->qp = qp;
-	conn->rdda_qp = true;
-
-out:
-	if (pops)
-		nvmeib_ibdr_hwdev_pops_put(pops);
-
-	NFOUT;
-	return qp;
-}
-EXPORT_SYMBOL(nvmeib_rdma_create_rdda_qp);
-
 static struct ib_qp *get_cm_qp(struct nvmeib_rdma_cm *cm_id)
 {
 	struct ib_qp *qp = NULL;
@@ -4365,28 +4313,6 @@ static struct ib_qp *get_cm_qp(struct nvmeib_rdma_cm *cm_id)
 		qp = conn->qp;
 
 	return qp;
-}
-
-static void destroy_rdda_qp(struct ib_qp *qp)
-{
-	struct nvmeib_device_public_ops *pops = nvmeib_ibdr_hwdev_pops_get(qp->device);
-	int rv;
-
-	NFIN;
-	if (!pops) {
-		_NE(error_nvmeib_rdma_destroy_rdda_qp, "Could not get access to public ops for device @DEVICE_NAME", qp->device->name);
-		goto out;
-	}
-
-	if ((rv = (*pops->destroy_rdda_qp)(qp))) {
-		_NE(error_1_nvmeib_rdma_destroy_rdda_qp, "destroy_rdda_qp failed (@RV) for qpn: @QP_NUM device @DEVICE_NAME",
-		   rv, qp->qp_num, qp->device->name);
-	}
-out:
-	if (pops)
-		nvmeib_ibdr_hwdev_pops_put(pops);
-
-	NFOUT;
 }
 
 /**
@@ -4408,11 +4334,7 @@ void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id,
 			switch (cm_id->rdma_type) {
 			case _rdma_ib:
 			{
-				struct ib_rdma_connection *ib_conn = cm_2_ibc(cm_id);
-				if (ib_conn && ib_conn->conn.rdda_qp)
-					destroy_rdda_qp(qp);
-				else
-					_ib_destroy_qp(qp);
+				_ib_destroy_qp(qp);
 				break;
 			}
 			case _rdma_lb:
@@ -4428,8 +4350,6 @@ void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id,
 						rdma_destroy_qp(roce_conn->cm_id);
 						roce_conn->cma_internal_qp = false;
 					}
-					else if (roce_conn->conn.rdda_qp)
-						destroy_rdda_qp(qp);
 					else
 						_ib_destroy_qp(qp);
 					roce_conn->conn.qp = NULL;
@@ -4443,10 +4363,7 @@ void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id,
 			{
 				struct roce_rdma_connection *roce_conn = cm_2_rocec(cm_id);
 				if (roce_conn) {
-					if (roce_conn->conn.rdda_qp)
-						destroy_rdda_qp(qp);
-					else
-						_ib_destroy_qp(qp);
+					_ib_destroy_qp(qp);
 				}
 			}
 			break;

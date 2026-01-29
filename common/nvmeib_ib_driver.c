@@ -271,52 +271,6 @@ static int nvmeib_ibdr_hwdev_pops_clear(struct nvmeib_hwdev *dev)
 	return 0;
 }
 
-static struct nvmeib_device_ops *nvmeib_ibdr_hwdev_ops_get(struct nvmeib_hwdev *dev, const char *call_fn)
-{
-	struct nvmeib_device_ops *ops = ERR_PTR(-EINVAL);
-
-	if (!dev || !dev->ops) {
-		_NE(error_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_get, "Invalid device ptr @DEV", dev);
-		goto out;
-	}
-	
-	mutex_lock(&dev->ops_guard);
-	ops = dev->ops;
-
-	if (!try_module_get(ops->module)) {
-		_NE(error_1_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_get, "try_module_get failed for module @MODULE_NAME", ops->module->name);
-		ops = ERR_PTR(-EBUSY);
-	}
-	else
-		_ND(trace_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_get, "module @MODULE_NAME call_fn @CALL_FN ref-cnt +1", ops->module->name, call_fn);
-	mutex_unlock(&dev->ops_guard);
-
-out:
-	return ops;
-}
-
-static struct nvmeib_device_ops *nvmeib_ibdr_hwdev_ops_get_ib(struct ib_device *ib_dev, const char *call_fn)
-{
-	struct nvmeib_hwdev *dev = nvmeib_ibdr_hwdev_get(ib_dev);
-	return nvmeib_ibdr_hwdev_ops_get(dev, call_fn);
-}
-
-static int nvmeib_ibdr_hwdev_ops_put(struct nvmeib_device_ops *ops, const char *call_fn)
-{
-	int rv = 0;
-
-	if (IS_ERR_OR_NULL(ops)) {
-		rv = -EINVAL;
-		goto out;
-	}
-
-	module_put(ops->module);
-	_ND(trace_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_put, "module @MODULE_NAME call_fn @CALL_FN ref-cnt -1", ops->module->name, call_fn);
-
-out:
-	return rv;
-}
-
 struct nvmeib_device_public_ops *nvmeib_ibdr_hwdev_pops_get(struct ib_device *ib_dev)
 {
 	struct nvmeib_hwdev *dev = nvmeib_ibdr_hwdev_get(ib_dev);
@@ -350,38 +304,6 @@ int nvmeib_ibdr_hwdev_pops_put(struct nvmeib_device_public_ops *pops)
 	return 0;
 }
 EXPORT_SYMBOL(nvmeib_ibdr_hwdev_pops_put);
-
-#define NVMEIB_DEV_OPS_CALL(_ibdev, cb, ...) \
-({ \
-	 struct nvmeib_device_ops *ops; \
-	 int rv; \
-	 \
-	 ops = nvmeib_ibdr_hwdev_ops_get_ib(_ibdev, #cb); \
-	 if (!IS_ERR_OR_NULL(ops)) {\
-		 if (ops->cb) \
-			rv = ops->cb(__VA_ARGS__); \
-		else\
-			rv = -ENOSYS;\
-		nvmeib_ibdr_hwdev_ops_put(ops, #cb); \
-	 } \
-	 else \
-		 rv = ops ? PTR_ERR(ops) : -ENOSYS;\
-	 rv; \
- })
-
-#define NVMEIB_DEV_OPS_CALL_RET_PTR(_ibdev, cb, ...) \
-({ \
-	 struct nvmeib_device_ops *ops; \
-	 void *rv = NULL; \
-	 \
-	 ops = nvmeib_ibdr_hwdev_ops_get_ib(_ibdev, #cb); \
-	 if (!IS_ERR_OR_NULL(ops)) {\
-		 if (ops->cb) \
-			rv = ops->cb(__VA_ARGS__); \
-		nvmeib_ibdr_hwdev_ops_put(ops, #cb); \
-	 }\
-	 rv; \
- })
 
 void nvmeib_ibdr_hwdev_pops_call_all(void (*cb)(struct nvmeib_device_public_ops *pops, void *param), void *param)
 {
@@ -449,10 +371,4 @@ int nvmeib_device_get_max_rd_atom_on_wire(enum nvmeib_dev_type t)
 	return rv;
 }
 EXPORT_SYMBOL(nvmeib_device_get_max_rd_atom_on_wire);
-
-int nvmeib_ibdr_check_rdda_fw(struct ib_device *ib_dev)
-{
-	return NVMEIB_DEV_OPS_CALL(ib_dev, check_rdda_fw, ib_dev);
-}
-EXPORT_SYMBOL(nvmeib_ibdr_check_rdda_fw);
 

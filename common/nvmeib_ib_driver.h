@@ -107,7 +107,6 @@ enum nvmeib_dev_type {
 };
 
 enum nvmeib_dev_cap {
-	NVMEIB_DEVCAP_RDDA		= 0x01,
 	NVMEIB_DEVCAP_DUMP_SQ		= 0x02,
 	NVMEIB_DEVCAP_SRQ		= 0x04,
 	NVMEIB_DEVCAP_SRQ_LAST_WQE	= 0x08,
@@ -226,16 +225,8 @@ enum nvmeib_dev_type nvmeib_get_device_type(struct ib_device *ib_dev);
 /* check if device type support rdda connection */
 bool nvmeib_device_sup_cap(enum nvmeib_dev_type t, enum nvmeib_dev_cap cap);
 int nvmeib_device_get_max_rd_atom_on_wire(enum nvmeib_dev_type t);
-/* firmware supports RDDA */
-int nvmeib_ibdr_check_rdda_fw(struct ib_device *ib_dev);
 
 /* Used for memory usage calculation */
-ssize_t nvmeib_ibdr_get_qp_usage(struct ib_device *ib_dev, struct ib_qp *ib_qp,
-								 enum nvmeib_cnt_mem_type mem_type);
-;ssize_t nvmeib_ibdr_get_srq_usage(struct ib_device *ib_dev, struct ib_srq *ib_srq,
-								 enum nvmeib_cnt_mem_type mem_type);
-ssize_t nvmeib_ibdr_get_cq_usage(struct ib_device *ib_dev, struct ib_cq *ib_cq,
-								 enum nvmeib_cnt_mem_type mem_type);
 ssize_t nvmeib_ibdr_get_mr_usage(struct ib_device *ib_dev, struct ib_mr *ib_mr,
 								 enum nvmeib_cnt_mem_type mem_type);
 

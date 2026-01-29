@@ -37,8 +37,6 @@ static struct nvmeib_device_public_ops mlx4 = {
 	.post_send_atomic = nvmeib_public_generic_post_send_atomic,
 	.set_debug_level = nvmeib_public_mlx4_set_debug_level,
 	.peek_cq = mlx4_peek_cq,
-	.create_rdda_qp = ib_create_qp,
-	.destroy_rdda_qp = ib_destroy_qp,
 };
 
 static struct nvmeib_device_public_ops mlx4_odp = {
@@ -51,8 +49,6 @@ static struct nvmeib_device_public_ops mlx4_odp = {
 	.post_send_atomic = nvmeib_public_generic_post_send_atomic,
 	.set_debug_level = nvmeib_public_mlx4_set_debug_level,
 	.peek_cq = mlx4_peek_cq,
-	.create_rdda_qp = ib_create_qp,
-	.destroy_rdda_qp = ib_destroy_qp,
 };
 
 #define DEV_MODNAME "mlx4_ib"

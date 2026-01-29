@@ -244,10 +244,6 @@ struct ib_qp *nvmeib_rdma_create_qp(struct nvmeib_rdma_cm *cm_id,
 	struct ib_pd *pd, struct ib_qp_init_attr *qp_init, int port, u16 pkey,
 	int qp_access);
 
-struct ib_qp *nvmeib_rdma_create_rdda_qp(struct nvmeib_rdma_cm *cm_id,
-	struct ib_pd *pd, struct ib_qp_init_attr *qp_init, int port, u16 pkey,
-	int qp_access);
-
 /**
  *  destroys a QP, will deallocate qp on cm_id in case of roce
  *

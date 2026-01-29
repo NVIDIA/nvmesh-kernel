@@ -1846,47 +1846,6 @@ ssize_t nvmeib_cnt_print(enum nvmeib_cnt_mem_type mem_type, char *buffer, size_t
 
 /* ib functions */
 
-/* QPs */
-struct ib_qp *nvmeib_create_qp_cnt_usage(struct ib_pd *pd, struct ib_qp_init_attr *qp_init_attr,
-									  const char *file, int line, const char *fn,
-									  const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
-#define ib_create_qp(pd, attr) nvmeib_create_qp_cnt_usage(pd, attr, NVMEIB_CNT_ALLOC_LOC_PARAMS)
-
-int nvmeib_destroy_qp_cnt_usage(struct ib_qp *ib_qp, const char *file, int line, const char *fn);
-#define ib_destroy_qp(qp) nvmeib_destroy_qp_cnt_usage(qp, NVMEIB_CNT_FREE_LOC_PARAMS)
-
-/* CQs */
-struct ib_cq *nvmeib_create_cq_cnt_usage(struct ib_device *ib_dev, ib_comp_handler comp_h,
-										 void (*evt_h)(struct ib_event *, void *),
-										 void *ctx, int cqe, int comp_v,
-										const char *file, int line, const char *fn,
-										const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
-#pragma push_macro("nvmeib_create_cq")
-#undef nvmeib_create_cq
-#define nvmeib_create_cq(dev, comp_h, evt_h, ctx, cqe, comp_v)	\
-	nvmeib_create_cq_cnt_usage(dev, comp_h, evt_h, ctx, cqe, comp_v, NVMEIB_CNT_ALLOC_LOC_PARAMS)
-
-int nvmeib_destroy_cq_cnt_usage(struct ib_cq *cq, const char *file, int line, const char *fn);
-#define ib_destroy_cq(cq) nvmeib_destroy_cq_cnt_usage(cq, NVMEIB_CNT_FREE_LOC_PARAMS)
-
-/* SRQs */
-struct ib_srq *nvmeib_create_srq_cnt_usage(struct ib_pd *pd, struct ib_srq_init_attr *srq_init_attr,
-									  const char *file, int line, const char *fn,
-									  const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
-#define ib_create_srq(pd, attr) nvmeib_create_srq_cnt_usage(pd, attr, NVMEIB_CNT_ALLOC_LOC_PARAMS)
-
-int nvmeib_destroy_srq_cnt_usage(struct ib_srq *ib_srq, const char *file, int line, const char *fn);
-#define ib_destroy_srq(srq) nvmeib_destroy_srq_cnt_usage(srq, NVMEIB_CNT_FREE_LOC_PARAMS)
-
-/* MRs */
-struct ib_mr *nvmeib_alloc_mr_cnt_usage(struct ib_pd *pd, enum ib_mr_type mr_type, u32 max_num_sg,
-										const char *file, int line, const char *fn,
-										const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
-#define ib_alloc_mr(pd, mr_type, max_num_sg) nvmeib_alloc_mr_cnt_usage(pd, mr_type, max_num_sg, NVMEIB_CNT_ALLOC_LOC_PARAMS)
-
-int nvmeib_dereg_mr_cnt_usage(struct ib_mr *mr, const char *file, int line, const char *fn);
-#define ib_dereg_mr(mr) nvmeib_dereg_mr_cnt_usage(mr, NVMEIB_CNT_FREE_LOC_PARAMS)
-
 #endif /* !defined(__NVMEIB_C__) && !defined(NVMEIB_NO_MEM_CNT) */
 
 #endif /* defined(NVMEIB_COUNT_MEM_USAGE) */
