@@ -277,7 +277,6 @@ struct rdma_connection {
 	struct rdma_listener *listener;
 	/* the qp */
 	struct ib_qp *qp;
-	bool rdda_qp;
 	enum nvmeib_rdma_expect_last_wqe expect_last_wqe;
 	/* the connection event handler */
 	int (*event_handler)(void *context, struct nvmeib_rdma_event *event);
@@ -4297,7 +4296,6 @@ struct ib_qp* nvmeib_rdma_create_qp(struct nvmeib_rdma_cm *cm_id,
 	}
 
 	conn->qp = qp;
-	conn->rdda_qp = false;
 
 out:
 	NFOUT;

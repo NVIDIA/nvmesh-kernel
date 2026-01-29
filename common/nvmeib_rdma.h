@@ -254,8 +254,6 @@ struct ib_qp *nvmeib_rdma_create_qp(struct nvmeib_rdma_cm *cm_id,
  */
 void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id, struct ib_qp *qp);
 
-void nvmeib_rdma_destroy_rdda_qp(struct nvmeib_rdma_cm *cm_id, struct ib_qp *qp);
-
 struct rdma_conn_param;
 int nvmeib_rdma_accept(struct nvmeib_rdma_cm *cm_id, struct ib_qp *qp,
 	struct rdma_conn_param *conn_params);
