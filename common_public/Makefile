@@ -26,15 +26,15 @@ ifeq ($(call ofed_ver_check,5,1),no)
 # Ofed below 5.1 - support mlx4 driver
 obj-m += nvmeib_common_mlx4_public.o
 nvmeib_common_mlx4_public-y := \
-	nvmeib_public_mlx4.o nvmeib_public_mlx4p.o traces_ids.o
+	nvmeib_public_mlx4.o traces_ids.o
 endif
 
 nvmeib_common_mlx5_public-y := \
-	nvmeib_public_mlx5.o nvmeib_public_mlx5p.o traces_ids.o
+	nvmeib_public_mlx5.o traces_ids.o
 
 ifneq ($(BUILD_TCP),)
 nvmeib_common_siw_public-y := \
-	nvmeib_public_siw.o nvmeib_public_siwp.o traces_ids.o
+	nvmeib_public_siw.o traces_ids.o
 endif
 
 ccflags-y += -DTRACE_INCLUDE_FILE=\"nvmeibp_trace.h\"

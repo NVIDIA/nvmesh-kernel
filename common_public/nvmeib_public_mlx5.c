@@ -4,7 +4,6 @@
 */
 
 #include "nvmeib_ib_driver.h"
-#include "nvmeib_public_mlx5p.h"
 #ifndef NO_OFED
 #include <linux/compat-2.6.h>
 #endif

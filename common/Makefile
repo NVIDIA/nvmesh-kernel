@@ -21,7 +21,6 @@ nvmeib_common-y := \
 	nvmeib_version_shared.o \
 	nvmeib_version_kernel.o \
 	mlx/nvmeib_mlx5.o \
-	mlx/nvmeib_mlx5p.o \
 	siw/nvmeib_siw.o \
 	nvmeib_numa.o \
 	nvmeib_buffer.o \

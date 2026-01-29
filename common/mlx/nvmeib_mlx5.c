@@ -16,6 +16,7 @@
 #	include <net/devlink.h>
 #endif
 #include <linux/netdevice.h>
+#include "nvmeib_mlx.h"
 #include "nvmeib_ib_driver.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
@@ -31,7 +32,6 @@
 #ifdef CONFIG_INFINIBAND_ON_DEMAND_PAGING
 # undef CONFIG_INFINIBAND_ON_DEMAND_PAGING
 #endif
-#include "nvmeib_mlx5_imp.c"
 
 const unsigned long nvmeib_mlx5_dev_caps =
 	NVMEIB_DEVCAP_RDDA |
@@ -146,13 +146,10 @@ static struct nvmeib_device_ops mlx5 = {
 	.check_rdda_fw = nvmeib_mlx5_check_rdda_fw,
 };
 
-extern struct nvmeib_device_ops mlx5_odp;
-
 int nvmeib_mlx5_init(bool paging_enabled)
 {
 	return nvmeib_ibdr_hwdev_register(DT_mlx5, "mlx5",
-					  paging_enabled ?
-					  &mlx5_odp : &mlx5,
+					&mlx5,
 					nvmeib_mlx5_dev_caps,
 					INT_MAX);
 }
