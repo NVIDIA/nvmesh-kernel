@@ -32,7 +32,7 @@
 #include "../nvmeibt_ds_metadata.h"
 
 
-#define GPT_UTIL_VERSION	"2.0.1-dev"
+#define GPT_UTIL_VERSION	"2.0.2-dev"
 #define MAX_DEV_NAME		256
 
 // Actions (mutually exclusive operations)
@@ -711,7 +711,8 @@ struct backup_structure_desc {
 };
 
 /**
- * Backup all 10 NVMesh structures using table-driven approach.
+ * Backup all NVMesh structures using table-driven approach.
+ * Includes: 10 base structures + N segment metadata control blocks (variable)
  * Returns 0 on success, -1 on error.
  */
 static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_size,
@@ -742,12 +743,37 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
 	structures[8] = (struct backup_structure_desc){"metadata_gpt_alternate_hdr", metadata_gpt->header.alternate_pba,                     1,                          false};
 	structures[9] = (struct backup_structure_desc){"disk_metadata",              disk_md_partition->pba_s,                               1,                          false};
 
-	// Execute backups in loop
+	// Execute backups for fixed structures
 	for (i = 0; i < 10; i++) {
 		if (backup_structure_and_append_manifest(disk_fd, structures[i].name, backup_dir,
 												 structures[i].pba_start, structures[i].n_blocks, pblk_size,
 												 manifest_json, total_backup_bytes, structures[i].is_first) < 0) {
 			return -1;
+		}
+	}
+
+	// Backup segment metadata control blocks (variable count)
+	for (i = 0; i < metadata_gpt->max_n_entries; i++) {
+		const struct nvmeibt_disk_gpt_partition_entry	*seg_md_entry = &metadata_gpt->entries[i];
+		char											seg_name[GPT_MAX_PARTITION_NAME_LENGTH + 1];
+		char											structure_name[128];
+
+		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(seg_md_entry)) {
+			continue;
+		}
+		if (!ARE_UUID_EQ(&seg_md_entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+			continue;
+		}
+
+		/* Found segment metadata partition - backup its control block (first block) */
+		char16_str_to_str(seg_md_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, seg_name);
+		snprintf(structure_name, sizeof(structure_name), "seg_md_ctrl_%s", seg_name);
+
+		if (backup_structure_and_append_manifest(disk_fd, structure_name, backup_dir,
+												 seg_md_entry->pba_s, 1, pblk_size,
+												 manifest_json, total_backup_bytes, false) < 0) {
+			N_Wf(backup_seg_md_ctrl_failed, "Failed to backup segment metadata control block: @STR", seg_name);
+			/* Continue with other partitions even if one fails */
 		}
 	}
 
@@ -761,7 +787,7 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
  * Backup format:
  *   - directory: GPT_UTIL_BACKUP_DIR/backup_<device>_<timestamp>/ (0700 permissions)
  *   - manifest: <directory>/manifest.json (0600 permissions)
- *   - structure files: <directory>/<structure>.bin (0600 permissions, 10 files total)
+ *   - structure files: <directory>/<structure>.bin (0600 permissions, 10 base + N segment control blocks)
  * NVMesh-only: REQUIRES Main GPT + Metadata GPT + disk_metadata readable
  */
 static int create_binary_backup(int disk_fd, struct gpt_util_config *config, char *backup_prefix, size_t backup_prefix_size)
@@ -876,7 +902,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	nvmeibt_Str_sprintf(manifest_json, "  \"controller_serial_num\": \"%s\",\n", controller_serial_num);
 	nvmeibt_Str_sprintf(manifest_json, "  \"structures\": [\n");
 
-	/* Backup all 10 NVMesh structures */
+	/* Backup all NVMesh structures (10 base + N segment control blocks) */
 	if (backup_all_structures(disk_fd, backup_dir, config->pblk_size,
 							  main_gpt, metadata_gpt, disk_md_partition,
 							  manifest_json, &total_backup_bytes) < 0) {
@@ -1858,7 +1884,7 @@ static int export_gpt_to_json(int disk_fd,
 			continue;
 		}
 
-		// Read the first 4K block (segment metadata control structure)
+		/* Read the first 4K block (segment metadata control structure) */
 		seg_md_pbyte_s = seg_md_entry->pba_s * config->pblk_size;
 		if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, seg_md_pbyte_s, seg_md_ctrl) < 0) {
 			N_Wf(export_seg_md_read_failed, "Failed to read segment metadata control block at pba=@LLU", seg_md_entry->pba_s);
@@ -1876,27 +1902,34 @@ static int export_gpt_to_json(int disk_fd,
 		}
 
 		nvmeibt_Str_sprintf(json_output, "    {\n");
-		nvmeibt_Str_sprintf(json_output, "      \"partition_name\": \"%s\",\n", seg_name);
+		/* Static fields (constants - do not edit) */
+		nvmeibt_Str_sprintf(json_output, "      \"_STATIC_magic_str\": \"%s\",\n", seg_md_ctrl->header.magic_str);
+
+		/* Readonly fields (from hardware - do not edit) */
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_name\": \"%s\",\n", seg_name);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_pba_s\": %llu,\n", seg_md_entry->pba_s);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_pba_e\": %llu,\n", seg_md_entry->pba_e);
-		nvmeibt_Str_sprintf(json_output, "      \"magic_str\": \"%s\",\n", seg_md_ctrl->header.magic_str);
-		nvmeibt_Str_sprintf(json_output, "      \"software_version\": %u,\n", seg_md_ctrl->header.software_version);
-		nvmeibt_Str_sprintf(json_output, "      \"seg_metadata_version\": %u,\n", seg_md_ctrl->header.seg_metadata_version);
-		nvmeibt_Str_sprintf(json_output, "      \"mgmt_db_uuid\": \"%s\",\n", seg_mgmt_uuid_urn.str);
-		nvmeibt_Str_sprintf(json_output, "      \"disk_segment_uuid\": \"%s\",\n", seg_uuid_urn.str);
-		nvmeibt_Str_sprintf(json_output, "      \"save_timespec_tv_sec\": %lld,\n", (long long)seg_md_ctrl->save_timespec_tv_sec);
-		nvmeibt_Str_sprintf(json_output, "      \"locks_table_pbyte_s\": %llu,\n", seg_md_ctrl->locks_table_pbyte_s);
-		nvmeibt_Str_sprintf(json_output, "      \"reservation_mode_version\": %llu,\n", seg_md_ctrl->reservation_mode_version);
-		nvmeibt_Str_sprintf(json_output, "      \"active_praid_version_major\": %d,\n", seg_md_ctrl->active_praid_version_major);
-		nvmeibt_Str_sprintf(json_output, "      \"active_praid_version_minor\": %d,\n", seg_md_ctrl->active_praid_version_minor);
-		nvmeibt_Str_sprintf(json_output, "      \"committed_praid_config_version\": %d,\n", seg_md_ctrl->committed_praid_config_version);
-		nvmeibt_Str_sprintf(json_output, "      \"is_current_shutdown_clean\": %s,\n", seg_md_ctrl->is_current_shutdown_clean ? "true" : "false");
-		nvmeibt_Str_sprintf(json_output, "      \"is_written_on_disk\": %d,\n", seg_md_ctrl->is_written_on_disk);
-		nvmeibt_Str_sprintf(json_output, "      \"hostname\": \"%s\",\n", seg_md_ctrl->hostname);
-		nvmeibt_Str_sprintf(json_output, "      \"metadata_pbyte_s\": %llu,\n", seg_md_ctrl->metadata_pbyte_s);
-		nvmeibt_Str_sprintf(json_output, "      \"n_blksets_scrubbed\": %llu,\n", seg_md_ctrl->n_blksets_scrubbed);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_software_version\": %u,\n", seg_md_ctrl->header.software_version);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_seg_metadata_version\": %u,\n", seg_md_ctrl->header.seg_metadata_version);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_save_timespec_tv_sec\": %lld,\n", (long long)seg_md_ctrl->save_timespec_tv_sec);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_locks_table_pbyte_s\": %llu,\n", seg_md_ctrl->locks_table_pbyte_s);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_committed_praid_config_version\": %d,\n", seg_md_ctrl->committed_praid_config_version);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_is_written_on_disk\": %d,\n", seg_md_ctrl->is_written_on_disk);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_metadata_pbyte_s\": %llu,\n", seg_md_ctrl->metadata_pbyte_s);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_metadata_ctrl_crc32\": \"0x%08x\",\n", seg_md_ctrl->metadata_ctrl_crc32);
-		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_locks_table_crc32\": \"0x%08x\"\n", seg_md_ctrl->locks_table_crc32);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_locks_table_crc32\": \"0x%08x\",\n", seg_md_ctrl->locks_table_crc32);
+
+		/* Editable fields (safe configuration) */
+		nvmeibt_Str_sprintf(json_output, "      \"mgmt_db_uuid\": \"%s\",\n", seg_mgmt_uuid_urn.str);
+		nvmeibt_Str_sprintf(json_output, "      \"hostname\": \"%s\",\n", seg_md_ctrl->hostname);
+
+		/* Editable with WARNING (system state - dangerous!) */
+		nvmeibt_Str_sprintf(json_output, "      \"_WARNING_disk_segment_uuid\": \"%s\",\n", seg_uuid_urn.str);
+		nvmeibt_Str_sprintf(json_output, "      \"_WARNING_reservation_mode_version\": %llu,\n", seg_md_ctrl->reservation_mode_version);
+		nvmeibt_Str_sprintf(json_output, "      \"_WARNING_active_praid_version_major\": %d,\n", seg_md_ctrl->active_praid_version_major);
+		nvmeibt_Str_sprintf(json_output, "      \"_WARNING_active_praid_version_minor\": %d,\n", seg_md_ctrl->active_praid_version_minor);
+		nvmeibt_Str_sprintf(json_output, "      \"_WARNING_is_current_shutdown_clean\": %s,\n", seg_md_ctrl->is_current_shutdown_clean ? "true" : "false");
+		nvmeibt_Str_sprintf(json_output, "      \"_WARNING_n_blksets_scrubbed\": %llu\n", seg_md_ctrl->n_blksets_scrubbed);
 		nvmeibt_Str_sprintf(json_output, "    }");
 
 		seg_md_count++;
@@ -2531,7 +2564,8 @@ static int execute_fix_mbr(int disk_fd, struct gpt_util_config *config)
 
 		/* Create binary backup before modifying */
 		if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
-			fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
+			fprintf(stderr, COL_RED_BOLD "ERROR: Backup failed - aborting write operation for safety" COL_RESET "\n");
+			goto out;
 		}
 
 		N_IMf(fix_mbr_before, "Fixing MBR on dev=@STR old_signature=@X new_signature=@X pba_e=@ZX",
@@ -2571,7 +2605,8 @@ static int execute_fix_gpt(int disk_fd, struct gpt_util_config *config)
 
 	/* Create binary backup */
 	if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
-		fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Backup failed - aborting write operation for safety" COL_RESET "\n");
+		return -1;
 	}
 
 	N_IMf(fix_gpt_start, "Fixing GPT from another copy: dev=@STR pba_s=@ZX pba_hw_e=@ZX",
@@ -2678,7 +2713,8 @@ static int execute_upgrade_gpt(int disk_fd, struct gpt_util_config *config)
 
 	/* Create binary backup */
 	if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
-		fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Backup failed - aborting write operation for safety" COL_RESET "\n");
+		goto out;
 	}
 
 	// Step 1: Read Main GPT (with backward compatibility validation)
@@ -3097,6 +3133,117 @@ static int prepare_disk_metadata_from_json(struct nvmeibt_disk_metadata *prepare
 }
 
 /**
+ * Prepare segment metadata control block from JSON
+ * Returns 0 on success, -1 on error
+ */
+static int prepare_segment_metadata_from_json(struct nvmeibt_seg_active_metadata_ctrl *prepared_seg_md,
+											   const struct nvmeibt_seg_active_metadata_ctrl *current_seg_md,
+											   struct mm_json_elem *seg_md_json_elem)
+{
+	memset(prepared_seg_md, 0, sizeof(*prepared_seg_md));
+
+	/* Preserve static fields from current (constants that never change) */
+	nvmeibt_strlcpy(prepared_seg_md->header.magic_str, current_seg_md->header.magic_str, sizeof(prepared_seg_md->header.magic_str));
+
+	/* Parse editable fields from JSON (default to current if missing) */
+	json_parse_uuid_or_preserve(&prepared_seg_md->header.mgmt_db_uuid, seg_md_json_elem, "mgmt_db_uuid", &current_seg_md->header.mgmt_db_uuid);
+	json_parse_str_or_preserve(prepared_seg_md->hostname, sizeof(prepared_seg_md->hostname), seg_md_json_elem, "hostname", current_seg_md->hostname);
+
+	/* Parse WARNING fields (default to current if missing) */
+	json_parse_uuid_or_preserve(&prepared_seg_md->disk_segment_uuid, seg_md_json_elem, "_WARNING_disk_segment_uuid", &current_seg_md->disk_segment_uuid);
+	prepared_seg_md->reservation_mode_version = (uint64_t)json_get_dict_num(seg_md_json_elem, "_WARNING_reservation_mode_version", current_seg_md->reservation_mode_version);
+	prepared_seg_md->active_praid_version_major = (int)json_get_dict_num(seg_md_json_elem, "_WARNING_active_praid_version_major", current_seg_md->active_praid_version_major);
+	prepared_seg_md->active_praid_version_minor = (int)json_get_dict_num(seg_md_json_elem, "_WARNING_active_praid_version_minor", current_seg_md->active_praid_version_minor);
+	prepared_seg_md->is_current_shutdown_clean = json_get_dict_bool(seg_md_json_elem, "_WARNING_is_current_shutdown_clean", current_seg_md->is_current_shutdown_clean);
+	prepared_seg_md->n_blksets_scrubbed = (uint64_t)json_get_dict_num(seg_md_json_elem, "_WARNING_n_blksets_scrubbed", current_seg_md->n_blksets_scrubbed);
+
+	/* Preserve readonly fields from current (version-dependent, calculated, or internal state) */
+	prepared_seg_md->header.software_version = current_seg_md->header.software_version;
+	prepared_seg_md->header.seg_metadata_version = current_seg_md->header.seg_metadata_version;
+	prepared_seg_md->save_timespec_tv_sec = current_seg_md->save_timespec_tv_sec;
+	prepared_seg_md->locks_table_pbyte_s = current_seg_md->locks_table_pbyte_s;
+	prepared_seg_md->metadata_pbyte_s = current_seg_md->metadata_pbyte_s;
+	prepared_seg_md->is_written_on_disk = current_seg_md->is_written_on_disk;
+	prepared_seg_md->committed_praid_config_version = current_seg_md->committed_praid_config_version;
+	prepared_seg_md->reserved_was_is_zeroed_after_delete = current_seg_md->reserved_was_is_zeroed_after_delete;
+	prepared_seg_md->UNUSED__Before_3_2_this_and_the_prev_field_were_struct_timecal__16_bytes_together_on_all_machines =
+		current_seg_md->UNUSED__Before_3_2_this_and_the_prev_field_were_struct_timecal__16_bytes_together_on_all_machines;
+
+	/* Calculate CRC (matches production code in nvmeibt_ds_metadata.c) */
+	prepared_seg_md->metadata_ctrl_crc32 = crc32_seedless(prepared_seg_md, offsetof(typeof(*prepared_seg_md), metadata_ctrl_crc32));
+	prepared_seg_md->locks_table_crc32 = current_seg_md->locks_table_crc32;  // Preserve locks table CRC
+
+	return 0;
+}
+
+/**
+ * Compare segment metadata control blocks and display diff
+ * Returns number of changes detected (or 0 if no changes)
+ */
+static int compare_and_show_segment_metadata_diff(const struct nvmeibt_seg_active_metadata_ctrl *current,
+												   const struct nvmeibt_seg_active_metadata_ctrl *json_data,
+												   const char *partition_name)
+{
+	int									n_changes = 0;
+	struct nvmeibt_urn_uuid				current_uuid_urn;
+	struct nvmeibt_urn_uuid				json_uuid_urn;
+
+	fprintf(stdout, "\n=== Segment Metadata: %s ===\n", partition_name);
+
+	/* Check editable fields */
+	if (memcmp(&current->header.mgmt_db_uuid, &json_data->header.mgmt_db_uuid, sizeof(current->header.mgmt_db_uuid)) != 0) {
+		current_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&current->header.mgmt_db_uuid);
+		json_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&json_data->header.mgmt_db_uuid);
+		fprintf(stdout, "  • mgmt_db_uuid: %s -> %s\n", current_uuid_urn.str, json_uuid_urn.str);
+		n_changes++;
+	}
+	if (strcmp(current->hostname, json_data->hostname) != 0) {
+		fprintf(stdout, "  • hostname: %s -> %s\n", current->hostname, json_data->hostname);
+		n_changes++;
+	}
+
+	/* Check WARNING fields */
+	if (memcmp(&current->disk_segment_uuid, &json_data->disk_segment_uuid, sizeof(current->disk_segment_uuid)) != 0) {
+		current_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&current->disk_segment_uuid);
+		json_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&json_data->disk_segment_uuid);
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: disk_segment_uuid: %s -> %s" COL_RESET "\n", current_uuid_urn.str, json_uuid_urn.str);
+		n_changes++;
+	}
+	if (current->reservation_mode_version != json_data->reservation_mode_version) {
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: reservation_mode_version: %llu -> %llu" COL_RESET "\n",
+				current->reservation_mode_version, json_data->reservation_mode_version);
+		n_changes++;
+	}
+	if (current->active_praid_version_major != json_data->active_praid_version_major) {
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: active_praid_version_major: %d -> %d" COL_RESET "\n",
+				current->active_praid_version_major, json_data->active_praid_version_major);
+		n_changes++;
+	}
+	if (current->active_praid_version_minor != json_data->active_praid_version_minor) {
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: active_praid_version_minor: %d -> %d" COL_RESET "\n",
+				current->active_praid_version_minor, json_data->active_praid_version_minor);
+		n_changes++;
+	}
+	if (current->is_current_shutdown_clean != json_data->is_current_shutdown_clean) {
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: is_current_shutdown_clean: %s -> %s" COL_RESET "\n",
+				current->is_current_shutdown_clean ? "true" : "false",
+				json_data->is_current_shutdown_clean ? "true" : "false");
+		n_changes++;
+	}
+	if (current->n_blksets_scrubbed != json_data->n_blksets_scrubbed) {
+		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: n_blksets_scrubbed: %llu -> %llu" COL_RESET "\n",
+				(unsigned long long)current->n_blksets_scrubbed, (unsigned long long)json_data->n_blksets_scrubbed);
+		n_changes++;
+	}
+
+	if (n_changes == 0) {
+		fprintf(stdout, "  No changes\n");
+	}
+
+	return n_changes;
+}
+
+/**
  * Compare disk_metadata structures and display diff
  * Returns number of changes detected (or 0 if no changes)
  */
@@ -3208,12 +3355,179 @@ static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
 	return (n_additions + n_deletions + n_modifications);
 }
 
+// Helper structure to store prepared segment metadata for apply
+struct prepared_seg_md_entry {
+	struct nvmeibt_seg_active_metadata_ctrl		prepared_data;
+	const struct nvmeibt_disk_gpt_partition_entry	*partition;
+	const char									*partition_name;
+	int											has_changes;
+};
+
+/**
+ * Process segment metadata from JSON and prepare for apply
+ * Returns: number of changes detected (>= 0), or -1 on fatal error
+ */
+static int process_segment_metadata_from_json(
+	struct mm_json_elem *seg_metadata_partitions_elem,
+	struct nvmeibt_disk_gpt *current_metadata_gpt,
+	struct gpt_util_config *config,
+	int disk_fd,
+	struct prepared_seg_md_entry **out_prepared,
+	int *out_n_prepared)
+{
+	int		n_seg_md_partitions;
+	int		n_segment_metadata_changes = 0;
+	int		n_prepared_seg_mds = 0;
+	struct prepared_seg_md_entry	*prepared_seg_mds = NULL;
+
+	if (!seg_metadata_partitions_elem || seg_metadata_partitions_elem->type != JSON_E_ARRAY) {
+		*out_prepared = NULL;
+		*out_n_prepared = 0;
+		return 0;		// No segment metadata in JSON
+	}
+
+	n_seg_md_partitions = seg_metadata_partitions_elem->array.len;
+
+	if (n_seg_md_partitions > 0) {
+		/* Sanity check: metadata GPT has MAX_NUM_GPT_ENTRIES limit, minus 1 for disk_metadata */
+		if (n_seg_md_partitions > MAX_NUM_GPT_ENTRIES - 1) {
+			N_Ef(apply_seg_md_count_overflow, "Too many segment metadata partitions in JSON: @INT (max=@INT)",
+				 n_seg_md_partitions, MAX_NUM_GPT_ENTRIES - 1);
+			fprintf(stderr, COL_RED_BOLD "ERROR: JSON contains too many segment metadata partitions (%d, max=%d)" COL_RESET "\n",
+					n_seg_md_partitions, MAX_NUM_GPT_ENTRIES - 1);
+			return -1;
+		}
+
+		fprintf(stdout, "\nProcessing %d segment metadata partition%s...\n",
+				n_seg_md_partitions, n_seg_md_partitions == 1 ? "" : "s");
+
+		// Allocate array to store prepared segment metadata for write phase
+		prepared_seg_mds = NNVMEIBT_BM_CALLOC(trace_apply_seg_md_array, n_seg_md_partitions * sizeof(*prepared_seg_mds));
+		if (!prepared_seg_mds) {
+			N_Ef(apply_seg_md_alloc_failed, "Failed to allocate prepared segment metadata array size=@SIZE_T",
+				 n_seg_md_partitions * sizeof(*prepared_seg_mds));
+			fprintf(stderr, COL_RED_BOLD "ERROR: Memory allocation failed for segment metadata processing" COL_RESET "\n");
+			return -1;
+		}
+	}
+
+	for (int seg_idx = 0; seg_idx < n_seg_md_partitions; seg_idx++) {
+		struct mm_json_elem								*seg_json = seg_metadata_partitions_elem->array.elements[seg_idx];
+		const char										*json_partition_name;
+		const char										*json_seg_uuid_str;
+		union nvmeib_uuid								json_seg_uuid;
+		struct nvmeibt_seg_active_metadata_ctrl			current_seg_md;
+		struct nvmeibt_seg_active_metadata_ctrl			prepared_seg_md;
+		const struct nvmeibt_disk_gpt_partition_entry	*seg_md_partition = NULL;
+		uint64_t										seg_md_pbyte_s;
+		int												seg_changes;
+		uint64_t										json_pba_s;
+		uint64_t										json_pba_e;
+
+		if (!seg_json || seg_json->type != JSON_E_DICT) {
+			continue;
+		}
+
+		// Get partition identifiers from JSON
+		json_partition_name = json_get_dict_str(seg_json, "_READONLY_partition_name", NULL);
+		json_seg_uuid_str = json_get_dict_str(seg_json, "_WARNING_disk_segment_uuid", NULL);
+		if (!json_partition_name || !json_seg_uuid_str) {
+			N_Wf(apply_seg_md_missing_id, "Segment metadata entry missing partition_name or disk_segment_uuid, skipping");
+			fprintf(stderr, COL_YELLOW "Warning: Skipping segment metadata entry %d (missing identifiers)" COL_RESET "\n", seg_idx);
+			continue;
+		}
+
+		// Get PBA range from JSON for validation
+		json_pba_s = (uint64_t)json_get_dict_num(seg_json, "_READONLY_partition_pba_s", 0);
+		json_pba_e = (uint64_t)json_get_dict_num(seg_json, "_READONLY_partition_pba_e", 0);
+
+		// Parse segment UUID from JSON
+		nvmeibt_urn_uuid_str_to_union_uuid(&json_seg_uuid, json_seg_uuid_str);
+
+		// Find matching partition on disk by UUID, validate PBA range
+		for (int k = 0; k < current_metadata_gpt->max_n_entries; k++) {
+			const struct nvmeibt_disk_gpt_partition_entry	*entry = &current_metadata_gpt->entries[k];
+			struct nvmeibt_seg_active_metadata_ctrl			temp_seg_md;
+			uint64_t										temp_pbyte_s;
+
+			if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(entry)) {
+				continue;
+			}
+			if (!ARE_UUID_EQ(&entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+				continue;
+			}
+
+			/* Read segment metadata control block to get its UUID */
+			memset(&temp_seg_md, 0, sizeof(temp_seg_md));
+			temp_pbyte_s = entry->pba_s * config->pblk_size;
+			if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, temp_pbyte_s, &temp_seg_md) < 0) {
+				N_Wf(apply_seg_md_read_for_match_failed, "Failed to read segment metadata for UUID matching at pba=@LLU", entry->pba_s);
+				continue;		/* Skip this entry if we can't read it */
+			}
+
+			// Match by segment UUID (primary key)
+			if (ARE_UUID_EQ(&temp_seg_md.disk_segment_uuid, &json_seg_uuid)) {
+				/* Validate PBA range matches (safety check) */
+				if (json_pba_s != entry->pba_s || json_pba_e != entry->pba_e) {
+					N_Wf(apply_seg_md_pba_mismatch, "Segment metadata PBA mismatch: uuid=@UUID_LE json_pba=@PBA_S-@PBA_E disk_pba=@PBA_S-@PBA_E",
+						 &json_seg_uuid, json_pba_s, json_pba_e, entry->pba_s, entry->pba_e);
+					fprintf(stderr, COL_YELLOW "Warning: Segment '%s' has PBA mismatch (JSON: %lu-%lu, Disk: %lu-%lu), skipping for safety" COL_RESET "\n",
+							json_partition_name, json_pba_s, json_pba_e, entry->pba_s, entry->pba_e);
+					break;		/* Don't match this entry */
+				}
+				seg_md_partition = entry;
+				break;
+			}
+		}
+
+		if (!seg_md_partition) {
+			N_Wf(apply_seg_md_not_found, "Segment metadata partition not found on disk: name=@STR", json_partition_name);
+			fprintf(stderr, COL_YELLOW "Warning: Segment partition '%s' not found on disk, skipping" COL_RESET "\n", json_partition_name);
+			continue;
+		}
+
+		/* Read current segment metadata from disk */
+		memset(&current_seg_md, 0, sizeof(current_seg_md));
+		seg_md_pbyte_s = seg_md_partition->pba_s * config->pblk_size;
+		if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, seg_md_pbyte_s, &current_seg_md) < 0) {
+			N_Wf(apply_seg_md_read_failed, "Failed to read segment metadata: name=@STR pba=@LLU", json_partition_name, seg_md_partition->pba_s);
+			fprintf(stderr, COL_YELLOW "Warning: Cannot read segment metadata '%s', skipping" COL_RESET "\n", json_partition_name);
+			continue;
+		}
+
+		/* Prepare from JSON */
+		memset(&prepared_seg_md, 0, sizeof(prepared_seg_md));
+		if (prepare_segment_metadata_from_json(&prepared_seg_md, &current_seg_md, seg_json) < 0) {
+			fprintf(stderr, COL_YELLOW "Warning: Failed to prepare segment metadata '%s', skipping" COL_RESET "\n", json_partition_name);
+			continue;
+		}
+
+		/* Compare and show diff */
+		seg_changes = compare_and_show_segment_metadata_diff(&current_seg_md, &prepared_seg_md, json_partition_name);
+		n_segment_metadata_changes += seg_changes;
+
+		/* Store prepared data for write phase (if there are changes) */
+		if (seg_changes > 0 && prepared_seg_mds) {
+			prepared_seg_mds[n_prepared_seg_mds].prepared_data = prepared_seg_md;
+			prepared_seg_mds[n_prepared_seg_mds].partition = seg_md_partition;
+			prepared_seg_mds[n_prepared_seg_mds].partition_name = json_partition_name;
+			prepared_seg_mds[n_prepared_seg_mds].has_changes = 1;
+			n_prepared_seg_mds++;
+		}
+	}
+
+	*out_prepared = prepared_seg_mds;
+	*out_n_prepared = n_prepared_seg_mds;
+	return n_segment_metadata_changes;
+}
+
 /**
  * Execute APPLY_JSON action
  * Parse JSON file, validate safety checks, and apply GPT changes
  * Default: dry-run (shows diff without writing)
  * With --write: applies changes to disk
  */
+
 static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 {
 	int							rv = -1;
@@ -3221,6 +3535,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct mm_json_elem			*main_gpt_primary_elem = NULL;
 	struct mm_json_elem			*metadata_gpt_primary_elem = NULL;
 	struct mm_json_elem			*disk_metadata_elem = NULL;
+	struct mm_json_elem			*seg_metadata_partitions_elem = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition = NULL;
 	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition = NULL;
 	struct nvmeibt_disk_gpt		current_main_gpt;
@@ -3229,9 +3544,12 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct nvmeibt_disk_gpt		json_metadata_gpt;
 	struct nvmeibt_disk_metadata current_disk_md;
 	struct nvmeibt_disk_metadata prepared_disk_md;
+	struct prepared_seg_md_entry *prepared_seg_mds = NULL;
+	int							n_prepared_seg_mds = 0;
 	int							n_main_changes = 0;
 	int							n_metadata_changes = 0;
 	int							n_disk_metadata_changes = 0;
+	int							n_segment_metadata_changes = 0;
 	int							total_changes = 0;
 	uint64_t					pbyte_s = 0;
 	const char					*json_serial_num = NULL;
@@ -3242,7 +3560,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	if (config->write_mode) {
 		fprintf(stdout, "Mode: " COL_YELLOW "WRITE" COL_RESET " (changes will be applied to disk)\n");
 	} else {
-		fprintf(stdout, "Mode: DRY-RUN (use --write to apply)\n");
+		fprintf(stdout, "Mode: " COL_YELLOW "DRY-RUN" COL_RESET " (use --write to apply changes)\n");
 		N_Tf(apply_dry_run, "Dry-run apply: dev=@STR json=@STR", config->device_path, config->apply_json_file);
 	}
 	fprintf(stdout, "\n");
@@ -3362,9 +3680,18 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			prepare_disk_metadata_from_json(&prepared_disk_md, &current_disk_md, disk_metadata_elem) == 0) {
 			n_disk_metadata_changes = compare_and_show_disk_metadata_diff(&current_disk_md, &prepared_disk_md);
 	}
+	/* Step 9: Process segment metadata partitions from JSON */
+	seg_metadata_partitions_elem = json_get_dict_value(json_root, "segment_metadata_partitions");
+	n_segment_metadata_changes = process_segment_metadata_from_json(
+		seg_metadata_partitions_elem, &current_metadata_gpt, config, disk_fd,
+		&prepared_seg_mds, &n_prepared_seg_mds);
+	if (n_segment_metadata_changes < 0) {
+		rv = -1;
+		goto out;
+	}
 
-	/* Step 9: Write if in write mode */
-	total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes;
+	/* Step 10: Write if in write mode */
+	total_changes = n_main_changes + n_metadata_changes + n_disk_metadata_changes + n_segment_metadata_changes;
 	if (config->write_mode) {
 		if (total_changes == 0) {
 			fprintf(stdout, "\n" COL_GREEN "=== No Changes Detected - Skipping Write ===" COL_RESET "\n");
@@ -3384,7 +3711,9 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 			/* Create binary backup before modifying */
 			if (create_binary_backup(disk_fd, config, backup_path, sizeof(backup_path)) < 0) {
-				fprintf(stderr, COL_YELLOW "Warning: Backup failed, proceeding anyway" COL_RESET "\n");
+				fprintf(stderr, COL_RED_BOLD "ERROR: Backup failed - aborting write operation for safety" COL_RESET "\n");
+				rv = -1;
+				goto out;
 			}
 
 			fprintf(stdout, "\n" COL_GREEN "=== Writing Changes to Disk ===" COL_RESET "\n");
@@ -3460,17 +3789,53 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			NNVMEIBT_BM_FREE(trace_apply_disk_md_free2, dma_buffer);
 		}
 
+		/* Write segment metadata partitions if there are changes (use prepared data from diff phase) */
+		if (n_segment_metadata_changes > 0 && prepared_seg_mds) {
+			for (int i = 0; i < n_prepared_seg_mds; i++) {
+				char		*dma_buffer = NULL;
+				int			n_bytes_write;
+				uint64_t	seg_md_pbyte_s;
+
+				if (!prepared_seg_mds[i].has_changes) {
+					continue;
+				}
+
+				seg_md_pbyte_s = prepared_seg_mds[i].partition->pba_s * config->pblk_size;
+
+				/* Write segment metadata - Audit trail log */
+				N_IMf(apply_seg_md_write, "Applying segment metadata from JSON: dev=@STR partition=@STR CRC_new=@CRC",
+					  config->device_path, prepared_seg_mds[i].partition_name, prepared_seg_mds[i].prepared_data.metadata_ctrl_crc32);
+
+				n_bytes_write = roundup(sizeof(prepared_seg_mds[i].prepared_data), config->pblk_size);
+				dma_buffer = NNVMEIBT_BM_ALIGNED_CALLOC(trace_apply_seg_md, PAGE_SIZE, n_bytes_write);
+				memcpy(dma_buffer, &prepared_seg_mds[i].prepared_data, sizeof(prepared_seg_mds[i].prepared_data));
+
+				if (NNVMEIBT_PWRITE(trace_apply_seg_md_write, disk_fd, dma_buffer, n_bytes_write, seg_md_pbyte_s, 0) != (ssize_t)n_bytes_write) {
+					N_Ef(apply_seg_md_write_failed, "Failed to write segment metadata: partition=@STR dev=@STR",
+						 prepared_seg_mds[i].partition_name, config->device_path);
+					fprintf(stderr, COL_RED_BOLD "ERROR: Failed to write segment metadata '%s' to disk" COL_RESET "\n",
+							prepared_seg_mds[i].partition_name);
+					NNVMEIBT_BM_FREE(trace_apply_seg_md_free, dma_buffer);
+					rv = -1;
+					goto out;
+				}
+
+				NNVMEIBT_BM_FREE(trace_apply_seg_md_free2, dma_buffer);
+			}
+		}
+
 		if (total_changes > 0) {
 			fprintf(stdout, "\n" COL_GREEN "=== Changes Successfully Applied ===" COL_RESET "\n");
 			fprintf(stdout, "Device: %s\n", config->device_path);
-			fprintf(stdout, "  Main GPT:      %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
-			fprintf(stdout, "  Metadata GPT:  %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
-			fprintf(stdout, "  disk_metadata: %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
+			fprintf(stdout, "  Main GPT:               %d change%s\n", n_main_changes, n_main_changes == 1 ? "" : "s");
+			fprintf(stdout, "  Metadata GPT:           %d change%s\n", n_metadata_changes, n_metadata_changes == 1 ? "" : "s");
+			fprintf(stdout, "  disk_metadata:          %d change%s\n", n_disk_metadata_changes, n_disk_metadata_changes == 1 ? "" : "s");
+			fprintf(stdout, "  segment_metadata (all): %d change%s\n", n_segment_metadata_changes, n_segment_metadata_changes == 1 ? "" : "s");
 		}
 	} else {
 		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
 		if (total_changes > 0) {
-			fprintf(stdout, COL_YELLOW "Use --write flag to apply %d change%s to disk." COL_RESET "\n",
+			fprintf(stdout, COL_YELLOW "Use --write to apply %d change%s to disk." COL_RESET "\n",
 					total_changes, total_changes == 1 ? "" : "s");
 		} else {
 			fprintf(stdout, "No changes detected.\n");
@@ -3483,6 +3848,7 @@ out:
 	if (json_root) {
 		nvmeibt_mm_json_free_kv_tree(json_root);
 	}
+	NNVMEIBT_BM_FREE(trace_apply_seg_md_array_free, prepared_seg_mds);
 	return rv;
 }
 
@@ -3571,7 +3937,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "\n=== Restoring from Modular Binary Backup ===\n");
 	fprintf(stdout, "Manifest file: %s\n", config->restore_binary_file);
 	fprintf(stdout, "Device: %s\n", config->device_path);
-	fprintf(stdout, "Mode: %s\n", config->write_mode ? COL_YELLOW "WRITE" COL_RESET : "DRY-RUN (use --write to apply)");
+	fprintf(stdout, "Mode: %s\n", config->write_mode ? COL_YELLOW "WRITE" COL_RESET : COL_YELLOW "DRY-RUN" COL_RESET " (use --write to restore)");
 
 	/* Load and parse manifest file */
 	json_root = load_json_file_or_fail(config->restore_binary_file);
@@ -3628,15 +3994,53 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "  Block size: %d\n", block_size_in_manifest);
 	fprintf(stdout, "  Structures: %d\n", structures_array->array.len);
 
-	/* NVMesh devices always have exactly 10 structures - validate upfront */
-	if (structures_array->array.len != 10) {
-		N_Ef(restore_wrong_structure_count, "Invalid structure count: expected=10 actual=@INT", structures_array->array.len);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest has wrong number of structures!" COL_RESET "\n");
-		fprintf(stderr, "  Expected: 10 (1 MBR + 4 Main GPT + 4 Metadata GPT + 1 disk_metadata)\n");
+	/* NVMesh devices have at least 10 structures (+ variable segment metadata control blocks) */
+	if (structures_array->array.len < 10) {
+		N_Ef(restore_wrong_structure_count, "Invalid structure count: minimum=10 actual=@INT", structures_array->array.len);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Manifest has too few structures!" COL_RESET "\n");
+		fprintf(stderr, "  Minimum: 10 (1 MBR + 4 Main GPT + 4 Metadata GPT + 1 disk_metadata)\n");
 		fprintf(stderr, "  Actual: %d\n", structures_array->array.len);
 		fprintf(stderr, "  This backup is incomplete or corrupt.\n");
 		rv = -1;
 		goto out;
+	}
+	if (structures_array->array.len > 10) {
+		N_Tf(restore_has_seg_md_ctrls, "Backup includes @INT segment metadata control blocks", structures_array->array.len - 10);
+		fprintf(stdout, "  Note: Backup includes %d segment metadata control blocks (in addition to 10 base structures)\n",
+				structures_array->array.len - 10);
+
+		/* Validate that extra structures (beyond first 10) are segment metadata control blocks */
+		for (i = 10; i < structures_array->array.len; i++) {
+			struct mm_json_elem	*structure_elem = structures_array->array.elements[i];
+			const char			*name;
+			uint64_t			n_blocks;
+
+			if (structure_elem->type != JSON_E_DICT) {
+				continue;		// Will be caught in validation loop below
+			}
+
+			name = json_get_dict_str(structure_elem, "name", NULL);
+			n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
+
+			/* Validate: name starts with "seg_md_ctrl_", n_blocks == 1 */
+			if (!name || strncmp(name, "seg_md_ctrl_", 12) != 0) {
+				N_Ef(restore_invalid_extra_structure, "Structure @INT has invalid name (expected seg_md_ctrl_*): @STR",
+					 i, name ? name : "(null)");
+				fprintf(stderr, COL_RED_BOLD "ERROR: Invalid structure in manifest!" COL_RESET "\n");
+				fprintf(stderr, "  Structure %d: name='%s'\n", i, name ? name : "(null)");
+				fprintf(stderr, "  Expected: Structures beyond first 10 must be segment metadata control blocks (seg_md_ctrl_*).\n");
+				rv = -1;
+				goto out;
+			}
+			if (n_blocks != 1) {
+				N_Ef(restore_invalid_seg_md_size, "Segment metadata structure @INT has invalid size: @INT blocks (expected 1)",
+					 i, (int)n_blocks);
+				fprintf(stderr, COL_RED_BOLD "ERROR: Invalid segment metadata control block size!" COL_RESET "\n");
+				fprintf(stderr, "  Structure %d (%s): %lu blocks (expected 1)\n", i, name, n_blocks);
+				rv = -1;
+				goto out;
+			}
+		}
 	}
 
 	/* Validation 1: Verify all structure files exist and have correct sizes */
@@ -3766,10 +4170,23 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 
 	/* Dry-run mode: Stop here, don't write */
 	if (!config->write_mode) {
+		uint64_t	total_bytes = 0;
+		int			j;
+
+		/* Calculate accurate total bytes from manifest */
+		for (j = 0; j < structures_array->array.len; j++) {
+			struct mm_json_elem	*structure_elem = structures_array->array.elements[j];
+			uint64_t			n_blocks;
+
+			if (structure_elem->type == JSON_E_DICT) {
+				n_blocks = (uint64_t)json_get_dict_num(structure_elem, "n_blocks", 0);
+				total_bytes += n_blocks * config->pblk_size;
+			}
+		}
+
 		fprintf(stdout, "\n" COL_GREEN "=== Dry-Run Complete ===" COL_RESET "\n");
-		fprintf(stdout, "Would restore %d structures (%lu bytes total)\n", structures_array->array.len,
-				structures_array->array.len > 0 ? (uint64_t)structures_array->array.len * 4096 : 0UL);  /* Rough estimate */
-		fprintf(stdout, "Use --write to actually restore the backup.\n");
+		fprintf(stdout, "Would restore %d structures (%lu bytes total)\n", structures_array->array.len, total_bytes);
+		fprintf(stdout, COL_YELLOW "Use --write to apply changes." COL_RESET "\n");
 		rv = 0;
 		goto out;
 	}
@@ -3817,7 +4234,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 			N_Ef(restore_structure_failed, "Failed to restore structure @STR from @STR", name, file);
 			fprintf(stderr, COL_RED_BOLD "ERROR: Failed to restore %s" COL_RESET "\n", name);
 			/* Warn about partial restore (restore is NOT atomic) */
-			fprintf(stderr, "  Structures restored before failure: %d/10\n", n_structures_restored);
+			fprintf(stderr, "  Structures restored before failure: %d/%d\n", n_structures_restored, structures_array->array.len);
 			fprintf(stderr, COL_YELLOW "  WARNING: Device is in INCONSISTENT state!" COL_RESET "\n");
 			fprintf(stderr, "  Some structures from backup, some original.\n");
 			goto out;
@@ -3827,10 +4244,11 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		total_bytes_restored += n_blocks * config->pblk_size;
 	}
 
-	/* NVMesh devices must have all 10 structures restored successfully */
-	if (n_structures_restored != 10) {
-		N_Ef(restore_incomplete, "Incomplete restore: expected=10 actual=@INT", n_structures_restored);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Only %d/10 structures were restored!" COL_RESET "\n", n_structures_restored);
+	/* All structures from manifest must be restored successfully */
+	if (n_structures_restored != structures_array->array.len) {
+		N_Ef(restore_incomplete, "Incomplete restore: expected=@INT actual=@INT", structures_array->array.len, n_structures_restored);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Only %d/%d structures were restored!" COL_RESET "\n",
+				n_structures_restored, structures_array->array.len);
 		fprintf(stderr, "  Device is in INCONSISTENT state!\n");
 		fprintf(stderr, "  Some structures from backup, some original.\n");
 		rv = -1;
@@ -3851,7 +4269,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 
 	fprintf(stdout, "\n" COL_GREEN "=== Device Restored Successfully ===" COL_RESET "\n");
 	fprintf(stdout, "Device: %s\n", config->device_path);
-	fprintf(stdout, "Structures restored: %d/10\n", n_structures_restored);
+	fprintf(stdout, "Structures restored: %d/%d\n", n_structures_restored, structures_array->array.len);
 	fprintf(stdout, "Total bytes: %lu\n", total_bytes_restored);
 
 	rv = 0;

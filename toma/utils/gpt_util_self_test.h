@@ -20,7 +20,7 @@ int SELF_TEST_upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_d
 void SELF_TEST_generate_mock_serial_number_from_path(const char *device_path, char *serial_out, size_t size);
 
 // Self-test mock device constants
-#define SELF_TEST_MOCK_DEVICE_BLOCKS		2000		// 8MB at 4KB blocks (enough for nested GPT)
+#define SELF_TEST_MOCK_DEVICE_BLOCKS		3000		// 12MB at 4KB blocks
 #define SELF_TEST_MOCK_DEVICE_BLOCK_SIZE	4096
 #define GPT_UTIL_BACKUP_DIR TOMA_ROOT_DIR "var/opt/nvmesh/toma"
 
@@ -74,7 +74,7 @@ struct self_test_entry {
 	X(static_fields_validated, "Validation - _STATIC_ Fields Validated", "gpt_util export + edit signature + apply (should succeed)") \
 	X(nguid_preservation, "Validation - NGUID Preserved on Apply", "gpt_util apply without NGUID in JSON (NGUID unchanged)") \
 	X(warning_fields_apply, "Validation - _WARNING_ Fields Applied", "gpt_util modify last_pba_zeroed + apply --write") \
-	X(export_segment_metadata, "Validation - Segment Metadata Export", "gpt_util exports first 4K of each segment metadata partition") \
+	X(export_segment_metadata, "Validation - Segment Metadata Export & Apply", "gpt_util exports segment metadata + applies editable/WARNING fields") \
 	/* Advanced Features */ \
 	X(disk_metadata_apply, "disk_metadata Apply (safe fields)", "gpt_util export + edit disk_metadata + apply --write") \
 	X(zero_change_write_skip, "Optimization - Skip Write When 0 Changes", "gpt_util apply identical JSON (no disk write)") \

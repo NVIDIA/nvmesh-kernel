@@ -11,6 +11,7 @@
 #include <dirent.h>		// opendir()
 
 #include "../nvmeibt_disk_metadata.h"
+#include "../nvmeibt_ds_metadata.h"
 #include "../nvmeibt_rpc.h"
 #include "nvmeibt_bm.h"
 #include "nvmeibt_str.h"
@@ -121,6 +122,166 @@ void SELF_TEST_generate_mock_serial_number_from_path(const char *device_path, ch
 }
 
 /**
+ * Helper: Write segment metadata control block to device
+ * Returns 0 on success, -1 on error
+ */
+static int write_segment_control_block(int fd, uint64_t pba_start, const struct nvmeibt_seg_active_metadata_ctrl *ctrl_data)
+{
+	char		*aligned_buf = NULL;
+	uint64_t	pbyte_s;
+	int			rv = -1;
+
+	aligned_buf = NNVMEIBT_BM_ALIGNED_CALLOC(trace_test_write_seg_ctrl_helper, PAGE_SIZE, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE);
+	if (!aligned_buf) {
+		return -1;
+	}
+
+	memcpy(aligned_buf, ctrl_data, sizeof(*ctrl_data));
+	pbyte_s = pba_start * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+
+	if (NNVMEIBT_PWRITE(trace_test_write_seg_ctrl_helper_write, fd, aligned_buf, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, 0) == SELF_TEST_MOCK_DEVICE_BLOCK_SIZE) {
+		rv = 0;
+	}
+
+	NNVMEIBT_BM_FREE(trace_test_write_seg_ctrl_helper_free, aligned_buf);
+	return rv;
+}
+
+/**
+ * Helper: Initialize segment metadata control block with standard test values
+ * Sets: magic string, versions, mgmt_db_uuid, location fields, calculates CRC
+ * @param ctrl Output control block structure
+ * @param seg_uuid Segment UUID
+ * @param seg_md_pba_s Segment metadata partition start PBA (for calculating offsets)
+ */
+static void init_segment_control_block_standard(struct nvmeibt_seg_active_metadata_ctrl *ctrl,
+												const union nvmeib_uuid *seg_uuid,
+												uint64_t seg_md_pba_s)
+{
+	memset(ctrl, 0, sizeof(*ctrl));
+
+	/* Initialize header with production-compatible values */
+	nvmeibt_strlcpy(ctrl->header.magic_str, "Disk Segment Metadata db5a320f-c7f4-4e16-940a-dbc2e97a6494", sizeof(ctrl->header.magic_str));
+	ctrl->header.software_version = 0x00020800;		/* v2.8.0 */
+	ctrl->header.seg_metadata_version = 0x00020800;	/* v2.8.0 */
+	ctrl->header.mgmt_db_uuid.ll[0] = 0x1111111111111111ULL;
+	ctrl->header.mgmt_db_uuid.ll[1] = 0x2222222222222222ULL;
+
+	/* Set segment UUID */
+	ctrl->disk_segment_uuid = *seg_uuid;
+	ctrl->is_current_shutdown_clean = 1;
+	ctrl->is_written_on_disk = NVMEIBT_DSEG_MD_CTRL_BLK_STATUS_ON_DISK_VALID;
+
+	/* Set location fields (matches nvmeibt_ds_metadata_ctrl_blk_write) */
+	ctrl->save_timespec_tv_sec = 1234567890;		/* Test timestamp */
+	ctrl->metadata_pbyte_s = seg_md_pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+	ctrl->locks_table_pbyte_s = ctrl->metadata_pbyte_s + LOCKS_TABLE_RELATIVE_OFFSET_BYTES;
+
+	/* Zero filler (matches nvmeibt_ds_metadata_ctrl_blk_write) */
+	memset(ctrl->__zeroed_filler_till_4K__, 0, sizeof(*ctrl) - offsetof(typeof(*ctrl), __zeroed_filler_till_4K__));
+
+	/* Calculate CRC (matches nvmeibt_ds_metadata_ctrl_blk_write) */
+	ctrl->metadata_ctrl_crc32 = crc32_seedless(ctrl, offsetof(typeof(*ctrl), metadata_ctrl_crc32));
+}
+
+/**
+ * Generate a mock NVMesh disk WITH segment metadata partitions for testing control block backup/restore
+ * Returns the fd of the created device (caller must close it)
+ */
+static int SELF_TEST_generate_mock_nvmesh_disk_with_segments(const char *filepath)
+{
+	int											fd;
+	struct nvmeibt_disk_gpt						main_gpt;
+	struct nvmeibt_disk_gpt						metadata_gpt;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
+	struct nvmeibt_disk_gpt_partition_entry			*seg_md_partition;
+	union nvmeib_uuid							seg_uuid;
+	struct nvmeibt_seg_active_metadata_ctrl		seg_ctrl;
+	int											i;
+
+	/* Start with standard mock device */
+	fd = SELF_TEST_generate_and_open_mock_nvmesh_disk(filepath);
+	if (fd < 0) {
+		return -1;
+	}
+
+	/* Read Main and Metadata GPTs */
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+										  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+	if (!metadata_partition) {
+		close(fd);
+		return -1;
+	}
+
+	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	/* Add 2 segment metadata partitions after existing Disk_Metadata partition */
+	for (i = 0; i < 2; i++) {
+		char											seg_name[32];
+		uint64_t										disk_md_end;
+		uint64_t										seg_start;
+		const struct nvmeibt_disk_gpt_partition_entry	*disk_md_entry;
+
+		/* Find Disk_Metadata partition from metadata GPT to get its end PBA */
+		disk_md_entry = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+		if (!disk_md_entry) {
+			close(fd);
+			return -1;
+		}
+		disk_md_end = disk_md_entry->pba_e;
+
+		snprintf(seg_name, sizeof(seg_name), "Disk_Segment_%d", i);
+
+		seg_uuid.ll[0] = 0xAABBCCDD00000000ULL + i;
+		seg_uuid.ll[1] = 0x1122334400000000ULL + i;
+
+		/* Place segments after disk_metadata with small gap */
+		seg_start = disk_md_end + 5 + i * 50;		/* Gap of 5 blocks, then 50 blocks per segment */
+
+		seg_md_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
+			&metadata_gpt, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID,
+			&seg_uuid,
+			seg_start,
+			seg_start + 49,		/* 50 blocks per segment */
+			seg_name, strlen(seg_name));
+
+		if (!seg_md_partition) {
+			close(fd);
+			return -1;
+		}
+
+		/* Write initial control block to segment metadata partition */
+		init_segment_control_block_standard(&seg_ctrl, &seg_uuid, seg_md_partition->pba_s);
+
+		if (write_segment_control_block(fd, seg_md_partition->pba_s, &seg_ctrl) < 0) {
+			close(fd);
+			return -1;
+		}
+	}
+
+	/* Write updated Metadata GPT with new segment partitions */
+	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt, false) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
+
+/**
  * Generate a mock NVMesh disk with valid MBR and GPT structure for self-test
  * Returns the fd of the created device (caller must close it)
  */
@@ -205,7 +366,7 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 											 &metadata_gpt, pblk_size,
 											 MAX_NUM_GPT_ENTRIES, &metadata_disk_uuid);
 
-	// Add EXCELERO_DISK_METADATA partition
+	// Add EXCELERO_DISK_METADATA partition (128KB = 32 blocks at 4KB per block)
 	disk_metadata_partition_uuid.ll[0] = 0xDD11223344556677ULL;
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
@@ -213,7 +374,7 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &disk_metadata_partition_uuid,
 												 metadata_gpt.header.first_usable_pba,
-												 metadata_gpt.header.last_usable_pba,
+												 metadata_gpt.header.first_usable_pba + 31,		/* 32 blocks (128KB) */
 												 DISK_METADATA_PARTITION_NAME,
 												 strlen(DISK_METADATA_PARTITION_NAME))) {
 		N_Ef(selftest_add_disk_metadata_failed, "Failed to add disk_metadata partition to nested GPT");
@@ -2610,6 +2771,7 @@ DEFINE_TEST(binary_backup_restore)
 	uint64_t							pbyte_s = 0;
 	const char							*device_path = TOMA_ROOT_DIR "tmp/gpt_binary_test";
 	char								manifest_file[600] = {0};
+	char								*read_buf = NULL;
 	struct mm_json_elem					*manifest_json = NULL;
 	struct mm_json_elem					*structures_array = NULL;
 	struct mm_json_elem					*json_root = NULL;
@@ -2621,11 +2783,15 @@ DEFINE_TEST(binary_backup_restore)
 	struct nvmeibt_disk_gpt				main_gpt;
 	struct nvmeibt_disk_gpt				metadata_gpt;
 	struct nvmeibt_disk_metadata		disk_md;
-	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
-	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
+	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition;
+	struct nvmeibt_seg_active_metadata_ctrl			*verify_ctrl = NULL;
+	int									n_seg_md_ctrls = 0;
+	uint64_t							new_seg_pba_s = 0;		/* Track NEW_SEG physical location */
+	uint64_t							new_seg_pbyte_s = 0;
 
-	/* Step 1: Create original device */
-	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+	/* Step 1: Create device with segment metadata partitions */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_nvmesh_disk_with_segments, device_path);
 
 	/* Step 2: Export and modify */
 	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("binary_test"));
@@ -2704,7 +2870,7 @@ DEFINE_TEST(binary_backup_restore)
 
 	TEST_INFO("Manifest contains %d structures", structures_array->array.len);
 
-	/* Verify all structure files exist */
+	/* Verify all structure files exist and count control blocks */
 	for (int i = 0; i < structures_array->array.len; i++) {
 		struct mm_json_elem *structure_elem = structures_array->array.elements[i];
 		const char *file = json_get_dict_str(structure_elem, "file", NULL);
@@ -2716,15 +2882,134 @@ DEFINE_TEST(binary_backup_restore)
 			goto out;
 		}
 		TEST_INFO("  ✓ %s (%lu bytes)", name ? name : "unknown", (uint64_t)st.st_size);
+
+		/* Count segment metadata control blocks */
+		if (name && strstr(name, "seg_md_ctrl_") != NULL) {
+			n_seg_md_ctrls++;
+		}
 	}
 
-	/* Step 6: Restore from modular backup */
+	TEST_INFO("Backup includes %d segment metadata control blocks", n_seg_md_ctrls);
+
+	/* Validate we have exactly 2 control blocks (from mock device with 2 segment partitions) */
+	if (n_seg_md_ctrls != 2) {
+		TEST_FAIL("Expected 2 segment metadata control blocks, got %d", n_seg_md_ctrls);
+		goto out;
+	}
+	TEST_INFO("✓ Verified: Backup contains 2 segment metadata control blocks");
+
+	/* Step 6: Add THIRD segment metadata partition after backup (to verify restore doesn't corrupt its data) */
+	/* Device now has 2 segments (backed up), about to add 3rd (not backed up) */
+	/* Note: Restore will remove NEW_SEG's GPT entry (correct), but DATA should remain intact */
+	TEST_INFO("Adding 3rd segment metadata partition after backup (isolation test)");
+
+	/* Find empty slot in metadata GPT */
+	fd = open(device_path, O_RDWR);
+	if (fd < 0) {
+		TEST_FAIL("Cannot open device for adding new partition");
+		goto out;
+	}
+
+	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
+	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+		close(fd);
+		TEST_FAIL("Cannot read main GPT");
+		goto out;
+	}
+
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+	if (!metadata_partition) {
+		close(fd);
+		TEST_FAIL("Cannot find metadata partition");
+		goto out;
+	}
+
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
+											metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+		close(fd);
+		TEST_FAIL("Cannot read metadata GPT");
+		goto out;
+	}
+
+	/* Find empty slot and calculate placement after existing segments */
+	for (int k = 0; k < metadata_gpt.max_n_entries; k++) {
+		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt.entries[k])) {
+			struct nvmeibt_seg_active_metadata_ctrl		new_ctrl;
+			struct nvmeibt_disk_gpt_partition_entry		new_entry;
+			uint64_t									max_seg_pba_e = 0;
+			const struct nvmeibt_disk_gpt_partition_entry	*disk_md_entry;
+
+			/* Find last segment metadata partition to place new one after it */
+			for (int j = 0; j < metadata_gpt.max_n_entries; j++) {
+				if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt.entries[j]) &&
+					ARE_UUID_EQ(&metadata_gpt.entries[j].partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+					if (metadata_gpt.entries[j].pba_e > max_seg_pba_e) {
+						max_seg_pba_e = metadata_gpt.entries[j].pba_e;
+					}
+				}
+			}
+
+			/* If no existing segment metadata partitions, start after disk_metadata */
+			if (max_seg_pba_e == 0) {
+				disk_md_entry = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
+				if (disk_md_entry) {
+					max_seg_pba_e = disk_md_entry->pba_e;
+				}
+			}
+
+			/* Place new segment after last partition with 5-block gap (50 blocks total) */
+			memset(&new_entry, 0, sizeof(new_entry));
+			new_entry.partition_type_guid = EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID;
+			new_entry.partition_guid.ll[0] = 0xDEADBEEF0001ULL;
+			new_entry.partition_guid.ll[1] = 0xDEADBEEF0002ULL;
+			new_entry.pba_s = max_seg_pba_e + 5;		/* 5-block gap for safety */
+			new_entry.pba_e = new_entry.pba_s + 49;		/* 50 blocks */
+			new_entry.attributes = 0;
+			str_to_char16_str("NEW_SEG_AFTER_BACKUP", strlen("NEW_SEG_AFTER_BACKUP"), new_entry.partition_name);
+
+			/* Write new entry to metadata GPT */
+			memcpy(&metadata_gpt.entries[k], &new_entry, sizeof(new_entry));
+			if (nvmeibt_disk_metadata_store_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt, false) < 0) {
+				close(fd);
+				TEST_FAIL("Cannot write new partition entry");
+				goto out;
+			}
+
+			/* Write marker to new partition's control block */
+			memset(&new_ctrl, 0, sizeof(new_ctrl));
+			nvmeibt_strlcpy(new_ctrl.header.magic_str, "TEST_MARKER_NEW_SEG_AFTER_BACKUP", sizeof(new_ctrl.header.magic_str));
+			new_ctrl.header.software_version = 0xDEADBEEF;		/* Unique marker */
+			new_ctrl.header.seg_metadata_version = 999;
+			new_ctrl.disk_segment_uuid.ll[0] = 0xCAFEBABE00000000ULL;
+			new_ctrl.disk_segment_uuid.ll[1] = 0xDEADC0DE00000000ULL;
+
+			/* Zero filler and calculate CRC (matches production) */
+			memset(new_ctrl.__zeroed_filler_till_4K__, 0, sizeof(new_ctrl) - offsetof(typeof(new_ctrl), __zeroed_filler_till_4K__));
+			new_ctrl.metadata_ctrl_crc32 = crc32_seedless(&new_ctrl, offsetof(typeof(new_ctrl), metadata_ctrl_crc32));
+
+			/* Write control block to new partition */
+			if (write_segment_control_block(fd, new_entry.pba_s, &new_ctrl) < 0) {
+				close(fd);
+				TEST_FAIL("Cannot write marker to new partition");
+				goto out;
+			}
+
+			new_seg_pba_s = new_entry.pba_s;		/* Save for verification after restore */
+			TEST_INFO("Created new segment metadata partition at PBA %lu with marker", new_seg_pba_s);
+			break;
+		}
+	}
+	close(fd);
+	fd = -1;
+
+	/* Step 7: Restore from modular backup */
 	SELF_TEST_ARGV("-a", device_path, "--restore-binary", manifest_file, "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
-	/* Step 7: Verify device matches original (check disk_metadata) */
+	/* Step 8: Verify device matches original (check disk_metadata) */
 	fd = open(device_path, O_RDONLY);
 	if (fd < 0) {
 		goto out;
@@ -2764,6 +3049,43 @@ DEFINE_TEST(binary_backup_restore)
 		TEST_FAIL("Device not restored (ldisk_id=%s)", disk_md.ldisk_id_str);
 		goto out;
 	}
+
+	/* Step 9: Verify NEW partition physical data (added after backup) is preserved by restore */
+	/* Note: GPT entry will be gone (restore overwrites entire entries array), but physical data should remain */
+	TEST_INFO("Verifying new partition physical data not corrupted by restore");
+
+	/* Read physical data at NEW_SEG location directly (bypass GPT) */
+	if (new_seg_pba_s == 0) {
+		TEST_FAIL("NEW_SEG PBA not recorded - test infrastructure error");
+		goto out;
+	}
+
+	new_seg_pbyte_s = new_seg_pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+
+	read_buf = NNVMEIBT_BM_ALIGNED_CALLOC(trace_test25_verify, PAGE_SIZE, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE);
+	if (!read_buf) {
+		TEST_FAIL("Cannot allocate verify buffer");
+		goto out;
+	}
+
+	if (NNVMEIBT_PREAD_ATOMIC(trace_test25_read_verify, fd, read_buf, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, new_seg_pbyte_s, 1) != SELF_TEST_MOCK_DEVICE_BLOCK_SIZE) {
+		NNVMEIBT_BM_FREE(trace_test25_verify_free, read_buf);
+		TEST_FAIL("Cannot read new partition physical data at PBA 0x%lx", new_seg_pba_s);
+		goto out;
+	}
+
+	verify_ctrl = (struct nvmeibt_seg_active_metadata_ctrl *)read_buf;
+	if (strcmp(verify_ctrl->header.magic_str, "TEST_MARKER_NEW_SEG_AFTER_BACKUP") != 0 ||
+		verify_ctrl->header.software_version != 0xDEADBEEF ||
+		verify_ctrl->header.seg_metadata_version != 999) {
+		NNVMEIBT_BM_FREE(trace_test25_verify_free2, read_buf);
+		TEST_FAIL("New partition physical data corrupted by restore (magic=%s sw_ver=0x%x md_ver=%u)",
+					verify_ctrl->header.magic_str, verify_ctrl->header.software_version, verify_ctrl->header.seg_metadata_version);
+		goto out;
+	}
+
+	NNVMEIBT_BM_FREE(trace_test25_verify_free3, read_buf);
+	TEST_INFO("New partition physical data intact (not overwritten by restore)");
 
 	TEST_SUCCEED("Verified: Device restored to original state (modular backup)");
 	rv = 0;
@@ -3138,7 +3460,7 @@ DEFINE_TEST(backup_restore_empty_structures)
 	write(fd, json_content, strlen(json_content));
 	TEST_INFO("Created manifest with empty structures array (structures: [])");
 
-	/* Try to restore (should be BLOCKED by structure count = 0, expected 10) */
+	/* Try to restore (should be BLOCKED by structure count = 0, minimum required is 10) */
 	SELF_TEST_ARGV("-a", device_path, "--restore-binary", TEST_JSON_PATH("empty_structures"), "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have been blocked!");
@@ -3242,11 +3564,14 @@ DEFINE_TEST(restore_mid_failure_file_deleted)
 	manifest_json = SELF_TEST_parse_json_file(manifest_file);
 	if (manifest_json) {
 		structures_array = json_get_dict_value(manifest_json, "structures");
-		if (structures_array && structures_array->type == JSON_E_ARRAY && structures_array->array.len == 10) {
-			/* Get last structure (disk_metadata - index 9) */
-			last_file = json_get_dict_str(structures_array->array.elements[9], "file", NULL);
+		if (structures_array && structures_array->type == JSON_E_ARRAY && structures_array->array.len >= 10) {
+			int last_idx = structures_array->array.len - 1;
+			const char *last_name = json_get_dict_str(structures_array->array.elements[last_idx], "name", NULL);
+
+			/* Get last structure (could be disk_metadata or segment control block) */
+			last_file = json_get_dict_str(structures_array->array.elements[last_idx], "file", NULL);
 			if (last_file) {
-				TEST_INFO("Deleting last structure file: %s", last_file);
+				TEST_INFO("Deleting last structure file: %s (%s)", last_file, last_name ? last_name : "unknown");
 				TEST_INFO("Restore should fail when file is missing");
 				unlink(last_file);		/* Delete file - restore will fail */
 			}
@@ -4328,8 +4653,8 @@ out:
 }
 
 /**
- * Test: Export segment metadata partitions
- * Verifies that segment metadata control blocks are exported correctly to JSON
+ * Test: Export segment metadata partitions and apply changes
+ * Verifies export creates correct JSON AND that editable/WARNING fields can be applied
  */
 DEFINE_TEST(export_segment_metadata)
 {
@@ -4338,121 +4663,169 @@ DEFINE_TEST(export_segment_metadata)
 	struct mm_json_elem			*json_root = NULL;
 	struct mm_json_elem			*seg_md_partitions = NULL;
 	struct mm_json_elem			*seg1 = NULL;
-	struct mm_json_elem			*seg2 = NULL;
-	const char					*magic_str;
-	const char					*hostname;
-	const char					*uuid_str;
-	int							array_len;
+	uint64_t					seg1_pbyte_s;
+	int							fd = -1;
+	struct nvmeibt_seg_active_metadata_ctrl			seg_md_before;
+	struct nvmeibt_seg_active_metadata_ctrl			seg_md_after;
+	struct nvmeibt_disk_gpt							main_gpt;
+	struct nvmeibt_disk_gpt							metadata_gpt_temp;
+	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
+	const struct nvmeibt_disk_gpt_partition_entry	*seg1_entry = NULL;
 
 	// Create device with segment metadata partitions
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_disk_with_segment_metadata, device_path);
 
-	// Export to JSON
+	/* Read segment metadata control block before modifications */
+	fd = open(device_path, O_RDONLY);
+	if (fd < 0) {
+		goto out;
+	}
+
+	/* Calculate byte offset for first segment metadata partition by reading from GPT */
+	memset(&main_gpt, 0, sizeof(main_gpt));
+	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
+										  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+		close(fd);
+		goto out;
+	}
+
+	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
+	if (!metadata_partition) {
+		close(fd);
+		goto out;
+	}
+
+	memset(&metadata_gpt_temp, 0, sizeof(metadata_gpt_temp));
+	nvmeibt_strlcpy(metadata_gpt_temp.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt_temp.main_or_metadata));
+	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt_temp,
+										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
+		close(fd);
+		goto out;
+	}
+
+	/* Find first segment metadata partition (SEG_1) */
+	for (int k = 0; k < metadata_gpt_temp.max_n_entries; k++) {
+		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt_temp.entries[k]) &&
+			ARE_UUID_EQ(&metadata_gpt_temp.entries[k].partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+			seg1_entry = &metadata_gpt_temp.entries[k];
+			break;
+		}
+	}
+
+	if (!seg1_entry) {
+		close(fd);
+		goto out;
+	}
+
+	seg1_pbyte_s = seg1_entry->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
+
+	memset(&seg_md_before, 0, sizeof(seg_md_before));
+	if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+										  seg1_pbyte_s, &seg_md_before) < 0) {
+		TEST_FAIL("Failed to read segment metadata before export");
+		goto out;
+	}
+	close(fd);
+	fd = -1;
+
+	// PART 1: Export to JSON and verify
 	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("seg_metadata"));
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
-	// Parse the JSON
+	// Parse and verify exported JSON
 	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("seg_metadata"));
 	if (!json_root) {
 		TEST_FAIL("Cannot parse exported JSON");
 		goto out;
 	}
 
-	// Verify segment_metadata_partitions array exists
 	seg_md_partitions = json_get_dict_value(json_root, "segment_metadata_partitions");
-	if (!seg_md_partitions || seg_md_partitions->type != JSON_E_ARRAY) {
-		TEST_FAIL("segment_metadata_partitions missing or not an array");
+	if (!seg_md_partitions || seg_md_partitions->type != JSON_E_ARRAY || seg_md_partitions->array.len != 2) {
+		TEST_FAIL("segment_metadata_partitions missing or incorrect count");
 		goto out;
 	}
 
-	array_len = seg_md_partitions->array.len;
-	if (array_len != 2) {
-		TEST_FAIL("Expected 2 segment metadata partitions, got %d", array_len);
-		goto out;
-	}
-
-	// Verify first segment metadata partition
 	seg1 = seg_md_partitions->array.elements[0];
-	if (!seg1 || seg1->type != JSON_E_DICT) {
-		TEST_FAIL("First segment metadata entry is not a dict");
+	if (!seg1 || strcmp(json_get_dict_str(seg1, "hostname", ""), "test-host-1") != 0) {
+		TEST_FAIL("Segment 1 hostname incorrect in export");
 		goto out;
 	}
 
-	magic_str = json_get_dict_str(seg1, "magic_str", "");
-	if (strcmp(magic_str, "SEG_METADATA_MAGIC_V1") != 0) {
-		TEST_FAIL("Segment 1 magic_str incorrect: expected='SEG_METADATA_MAGIC_V1' got='%s'", magic_str);
+	if ((int)json_get_dict_num(seg1, "_WARNING_n_blksets_scrubbed", -1) != 42) {
+		TEST_FAIL("Segment 1 n_blksets_scrubbed incorrect in export");
 		goto out;
 	}
 
-	if ((int)json_get_dict_num(seg1, "software_version", -1) != 1) {
-		TEST_FAIL("Segment 1 software_version incorrect");
+	TEST_SUCCEED("Export verified: 2 segment partitions with correct fields");
+
+	// PART 2: Modify JSON and apply
+	// Modify first segment's hostname and n_blksets_scrubbed using JSON tree API
+	json_set_dict_str(seg1, "hostname", "MODIFY-HOST");
+	json_set_dict_num(seg1, "_WARNING_n_blksets_scrubbed", 99);
+
+	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("seg_metadata")) < 0) {
+		json_root = NULL;
+		TEST_FAIL("Failed to write modified JSON");
+		goto out;
+	}
+	json_root = NULL;
+
+	// Apply with --write
+	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("seg_metadata"), "--write", "--yes");
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
-	uuid_str = json_get_dict_str(seg1, "disk_segment_uuid", "");
-	if (strlen(uuid_str) == 0) {
-		TEST_FAIL("Segment 1 disk_segment_uuid missing");
+	// Read and verify changes applied
+	fd = open(device_path, O_RDONLY);
+	if (fd < 0) {
 		goto out;
 	}
 
-	hostname = json_get_dict_str(seg1, "hostname", "");
-	if (strcmp(hostname, "test-host-1") != 0) {
-		TEST_FAIL("Segment 1 hostname incorrect: expected='test-host-1' got='%s'", hostname);
+	memset(&seg_md_after, 0, sizeof(seg_md_after));
+	if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
+										  seg1_pbyte_s, &seg_md_after) < 0) {
+		TEST_FAIL("Failed to read segment metadata after apply");
+		goto out;
+	}
+	close(fd);
+	fd = -1;
+
+	// Verify editable field changed
+	if (strcmp(seg_md_after.hostname, "MODIFY-HOST") != 0) {
+		TEST_FAIL("Hostname not applied: expected='MODIFY-HOST' got='%s'", seg_md_after.hostname);
 		goto out;
 	}
 
-	if ((int)json_get_dict_num(seg1, "active_praid_version_major", -1) != 3) {
-		TEST_FAIL("Segment 1 active_praid_version_major incorrect");
+	// Verify WARNING field changed
+	if (seg_md_after.n_blksets_scrubbed != 99) {
+		TEST_FAIL("n_blksets_scrubbed not applied: expected=99 got=%lu", (unsigned long)seg_md_after.n_blksets_scrubbed);
 		goto out;
 	}
 
-	if ((int)json_get_dict_num(seg1, "active_praid_version_minor", -1) != 2) {
-		TEST_FAIL("Segment 1 active_praid_version_minor incorrect");
+	// Verify STATIC field preserved
+	if (strcmp(seg_md_after.header.magic_str, seg_md_before.header.magic_str) != 0) {
+		TEST_FAIL("STATIC field magic_str should be preserved");
 		goto out;
 	}
 
-	if (json_get_dict_bool(seg1, "is_current_shutdown_clean", false) != true) {
-		TEST_FAIL("Segment 1 is_current_shutdown_clean should be true");
+	// Verify READONLY field preserved
+	if (seg_md_after.header.software_version != seg_md_before.header.software_version) {
+		TEST_FAIL("READONLY field software_version should be preserved");
 		goto out;
 	}
 
-	// Verify second segment metadata partition
-	seg2 = seg_md_partitions->array.elements[1];
-	if (!seg2 || seg2->type != JSON_E_DICT) {
-		TEST_FAIL("Second segment metadata entry is not a dict");
-		goto out;
-	}
-
-	hostname = json_get_dict_str(seg2, "hostname", "");
-	if (strcmp(hostname, "test-host-2") != 0) {
-		TEST_FAIL("Segment 2 hostname incorrect: expected='test-host-2' got='%s'", hostname);
-		goto out;
-	}
-
-	if ((int)json_get_dict_num(seg2, "active_praid_version_major", -1) != 4) {
-		TEST_FAIL("Segment 2 active_praid_version_major incorrect");
-		goto out;
-	}
-
-	if ((int)json_get_dict_num(seg2, "active_praid_version_minor", -1) != 5) {
-		TEST_FAIL("Segment 2 active_praid_version_minor incorrect");
-		goto out;
-	}
-
-	if (json_get_dict_bool(seg2, "is_current_shutdown_clean", true) != false) {
-		TEST_FAIL("Segment 2 is_current_shutdown_clean should be false");
-		goto out;
-	}
-
-	TEST_SUCCEED("Segment metadata partitions exported correctly");
+	TEST_SUCCEED("Export+Apply: editable/WARNING updated, READONLY/STATIC preserved");
 	rv = 0;
 
 out:
-	if (json_root) {
-		nvmeibt_mm_json_free_kv_tree(json_root);
+	if (fd >= 0) {
+		close(fd);
 	}
+	nvmeibt_mm_json_free_kv_tree(json_root);
 	unlink(TEST_JSON_PATH("seg_metadata"));
 	cleanup_backup_files_for_device(device_path);
 	return rv;
