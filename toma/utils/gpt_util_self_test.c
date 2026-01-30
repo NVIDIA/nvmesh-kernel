@@ -4860,8 +4860,7 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 		fprintf(stderr, "Self-tests may spawn fake TOMA process and create conflicts.\n");
 		fprintf(stderr, "Please stop TOMA before running tests.\n");
 		fprintf(stderr, "\n");
-		fprintf(stderr, "To stop TOMA: sudo systemctl stop nvmesh-toma\n");
-		fprintf(stderr, "Or: sudo pkill nvmeibt_toma\n");
+		fprintf(stderr, "To stop TOMA: sudo pkill -9 nvmeibt_toma\n");
 		fprintf(stderr, "\n");
 		return 1;
 	}
