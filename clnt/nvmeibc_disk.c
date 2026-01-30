@@ -5305,7 +5305,7 @@ static int on_md_rd_mod_wr_comp(struct nvmeibc_disk_io_command *block_cmd,
 			req->req.disk_block = req->disk_address;
 			req->req.data_len = req->ndb->length;
 
-			if (dp_dbgdi_should_add_info_core(block_cmd))
+			if (dp_dbgdi_should_add_info_core(block_cmd)) {
 				dp_dbgdi_do_add_info_core_pre(
 				    req,
 				    &NVMEIBC_CORE_DBGDI_PARAM(
@@ -5314,6 +5314,7 @@ static int on_md_rd_mod_wr_comp(struct nvmeibc_disk_io_command *block_cmd,
 						.io_id = 0, .ch_ptr = 0, /* local io, TODO: add special handling */
 				        .lock_pgbk = &((struct t_core_dbgdi_lock_piggyback){
 				            .valid = false})));
+			}
 
 			NVMEIB_LOG_GOODPATH_CORE_POST(trace_on_md_rd_mod_wr_comp,
 										  disk, block_cmd,
@@ -6234,7 +6235,7 @@ static inline int execute_io_local_cmd_io(struct nvmeibc_disk *disk,
 		}
 	}
 
-	if (dp_dbgdi_should_add_info_core(block_cmd))
+	if (dp_dbgdi_should_add_info_core(block_cmd)) {
 		dp_dbgdi_do_add_info_core_pre(
 		    req,
 		    &NVMEIBC_CORE_DBGDI_PARAM(
@@ -6243,6 +6244,7 @@ static inline int execute_io_local_cmd_io(struct nvmeibc_disk *disk,
 				.io_id = 0, .ch_ptr = 0, /* local io, TODO: add special handling */
 		        .lock_pgbk =
 		            &((struct t_core_dbgdi_lock_piggyback){.valid = false})));
+	}
 
 	NVMEIB_LOG_GOODPATH_CORE_POST(trace_execute_io_local_cmd_io,
 								  disk, block_cmd,

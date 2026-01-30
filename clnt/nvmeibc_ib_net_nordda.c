@@ -75,17 +75,18 @@ static inline int nvmeibc_post_io(struct nvmeibc_ib_net_nordda *net,
 		struct volume_client_io_req_base *io_req = &creq->io_req.base;
 		struct nvmeibc_disk_io_command *bcmd = info->req.bcmd;
 
-		if (dp_dbgdi_should_add_info_core(bcmd))
+		if (dp_dbgdi_should_add_info_core(bcmd)) {
 			dp_dbgdi_do_add_info_core_pre(
-			    &bcmd->reqs[0],
-			    &NVMEIBC_CORE_DBGDI_PARAM(
-			        pre, net->nrch->base.disk->name, ct_n_rdda,
-			        .io_id  = ++net->nrch->base.dbg_di.io_id,
-			        .ch_ptr = (u64)&net->nrch->base,
+				&bcmd->reqs[0],
+				&NVMEIBC_CORE_DBGDI_PARAM(
+					pre, net->nrch->base.disk->name, ct_n_rdda,
+					.io_id  = ++net->nrch->base.dbg_di.io_id,
+					.ch_ptr = (u64)&net->nrch->base,
 					.reuse_bb = info->req.reused_bb,
-			        .lock_pgbk  = &info->req.lock_pgbk,
-			        .start_dlba = bcmd->reqs[0].disk_address,
+					.lock_pgbk  = &info->req.lock_pgbk,
+					.start_dlba = bcmd->reqs[0].disk_address,
 					.magic_data = &net->nrch->base.dbg_di.magic_data));
+		}
 
 		NVMEIB_LOG_GOODPATH_CORE_POST(trace_nvmeibc_post_io,
 									  net->nrch->base.disk, bcmd,
