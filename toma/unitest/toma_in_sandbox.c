@@ -3,6 +3,7 @@
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
 #include "sandbox_nvme.h"
+#include "mgmt_sim.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -322,8 +323,6 @@ struct t_sandbox_all {
 		rd_kafka_t *obj[10];
 		int n_obj;
 		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
-		// Outgoing mgmt producer message inspection (unit test assertions)
-		char *last_report_target_json;		// owned, NUL-terminated; NULL if not received
 	} kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
 	struct TSB_netlink_mock {
@@ -423,6 +422,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
+	mgmt_sim_init(sys->my_hostname);
 	pthread_mutex_init(&sys->TS.mutex, NULL);
 	sandbox_server_init();
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
@@ -433,7 +433,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
 
 static void sandbox_kafka_validate_report_target(void) {
-	const char *str = sys->kafka_simu.last_report_target_json;
+	const char *str = mgmt_sim_get_last_report_target();
 	const bool ok = str && strstr(str, "NVMD_SN_002.1") && strstr(str, "NVMD_SN_003.1");
 	BUG_ON(!ok);
 }
@@ -445,8 +445,7 @@ void t_sandbox_all_destroy(void) {
 	pthread_mutex_destroy(&sys->TS.mutex);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
-	free(sys->kafka_simu.last_report_target_json);
-	sys->kafka_simu.last_report_target_json = NULL;
+	mgmt_sim_destroy();
 	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	free(sys);
 	sys = NULL;
@@ -1751,12 +1750,7 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (const char*)key, (const char*)payload);
 
 	if (kt->type == 'P') {
-		const char *m_type = strstr(payload, "\"messageType\":");
-		const bool is_report_target = !strncmp(m_type, "\"messageType\": \"reportTarget\"", 28);
-		if (is_report_target) {
-			free(sys->kafka_simu.last_report_target_json);
-			sys->kafka_simu.last_report_target_json = strndup(payload, len);		// Capture outgoing mgmt messages. The buffer is NOT guaranteed to be NUL-terminated.
-		}
+		mgmt_sim_on_toma_produced(payload, len);
 	} else if (kt->type == 'K') {
 		// Todo: handle keepalives
 	} else if (kt->type == 'L') {
@@ -1789,45 +1783,8 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 	return RD_KAFKA_CONF_OK;
 }
 
-#define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
-const char* mgmt_simu_kafka_msg_cache[] = {
-	"{\"messageType\":\"updateLeaderKeepaliveToken\",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":5}}",
-	"{\"messageType\":\"updateTomaKeepaliveToken\""",\"messageTypeVersion\":1,\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":5}}",
-	"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":{\"nodeID\":\"%s\",\"uuid\":\"e8c70c10-db79-11f0-8f35-cb935b7ef6ae\",\"targetsInZone\":0,\"targetUpdatesSequence\":1}}",
-	// hardwareConfiguration message: disk IDs must match those from disks.csv (serial.nsid format)
-	// Simulated disks: NVMD_SN_002.1 (vendor 5122), NVMD_SN_003.1 (vendor 5123) with 2000 blocks each
-	"{\"messageType\":\"hardwareConfiguration\"   "",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\",\"configurationVersion\":17,\"leaderToken\":1,\"kafkaMessageSequence\""
-		":%d,\"raftTerm\":9,\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
-		"\"targets\":["
-			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"cde269b0-c3c0-11f0-bc49-e391b6ca4c2b\","
-				"\"disks\":["
-					"{\"diskID\":\"NVMD_SN_002.1\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"f39cebd0-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
-					"{\"diskID\":\"NVMD_SN_003.1\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"f39cebd1-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false}],"
-				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"n39@google.com\",\"uuid\":\"cde269b1-c3c0-11f0-bc49-e391b6ca4c2b\","
-				"\"disks\":["
-					"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"f39cebd2-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
-					"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"f39cebd3-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":1,\"isOutOfService\":false}],"
-				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
-		"]}",
-	"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"V1\",\"uuid\":\"f1b17590-c52b-11f0-bc49-e391b6ca4c2b\","
-		"\"version\":1,\"name\":\"V1\",\"blockSize\":4096,\"lockServer\":{\"maxNOwners\":1,\"type\":4,\"locksetShift\":-1},\"blocks\":4882432,\"RAIDLevel\":\"Striped RAID-0\",\"numberOfMirrors\":0,\"stripeSize\":32,\"stripeWidth\":2,\"status\":\"unavailable\","
-		"\"action\":\"initializing\",\"relativeRebuildPriority\":10,\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null,\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-		"\"chunks\":["
-			"{\"uuid\":\"09c2f550-c52c-11f0-bc49-e391b6ca4c2b\",\"vlbs\":0,\"vlbe\":4882431,\"pRaids\":["
-				"{\"uuid\":\"09c2f552-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-					"{\"uuid\":\"09c2f551-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":26900224,\"lbe\":29341439,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"f3a2b830-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-				"{\"uuid\":\"09c34371-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false,\"stripeIndex\":1,\"zone\":\"1\",\"diskSegments\":["
-					"{\"uuid\":\"09c34370-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":1509632,\"lbe\":3950847,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"f3a24300-c3c0-11f0-bc49-e391b6ca4c2b\"}"
-		"]}]}]}}",
-	"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1,\"payload\":{\"diskID\":\"%s\",\"uuid\":\"%s\",\"vendor\":%u,\"formatType\":\"format_ec\",\"formatRequestCounter\":%u,\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
-};
-
-/* Mgmt sandbox receives those msg from toma and parses them properly
+/* Management simulation message templates are now in mgmt_sim.c.
+ * Mgmt sandbox receives those msg from toma and parses them properly
  {"originType":"TOMA","messageType":"leaderKeepalive","messageTypeVersion":1,"hostname":"nvme39.mec01.nbulabs.nvidia.com","tomaToken":2,"messageSequence":24312,"leaderToken":1,"keepaliveInterval":5,"payload":{"raftTerm":10,"zone":"1","featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":""}}
  {"originType":"TOMA","messageType":"keepalive","messageTypeVersion":2,"hostname":"nvme34.mec01.nbulabs.nvidia.com","tomaToken":2,"messageSequence":11831,"leaderToken":null,"keepaliveInterval":5,"payload":{"zone":"1","leaderUUID":"nvme39.mec01.nbulabs.nvidia.com","bootTime":1767279770145,"featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":"","rebuildStats":{"nRunningDirtyRebuild":0,"nPendingDirtyRebuild":0,"nRunningStaleRebuild":0,"nPendingStaleRebuild":6,"nRunningTxidRebuild":0,"nPendingTxidRebuild":0,"nRunningColdRecovery":0,"nPendingColdRecovery":0,"nRunningJGCRebuild":0,"nPendingJGCRebuild":0,"nRunningScrubbing":0,"nPendingScrubbing":3}}}
  {"originType":"TOMA","messageType":"driveZeroingProgress","messageTypeVersion":1,"hostname":"nvme37.mec01.nbulabs.nvidia.com","tomaToken":2,"messageSequence":27,"leaderToken":null,"payload":{"zeroWriteCounter":303100870554,"nZeroedBlks":1953536,"diskUUID":"de2eadb0-e972-11f0-8e2a-434e55e1d7f7","node_id":"nvme37.mec01.nbulabs.nvidia.com"}}
@@ -1839,39 +1796,14 @@ const char* mgmt_simu_kafka_msg_cache[] = {
 
 rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	rd_kafka_message_t *m = calloc(1, sizeof(*m));
+	size_t len = 0;
 	BUG_ON((timeout_ms != 0) || (!ko->topic.is_active));
 	m->err = RD_KAFKA_RESP_ERR_NO_ERROR;
-	if (!strncmp(ko->name, "HW", 2)) {
-		static int once_every = 0;
-		if (once_every == 0) {
-			m->payload = malloc(256);
-			m->len = snprintf(m->payload, 256, mgmt_simu_kafka_msg_cache[1], sys->my_hostname);
-			once_every++;
-		} else if (((once_every++ % 4) == 0) && true) {		// Inject conf msg once every few iterations. Todo, make this actual conf msg
-			m->payload = malloc(4096);
-			m->len = snprintf(m->payload, 4096, mgmt_simu_kafka_msg_cache[3], once_every, sys->my_hostname);
-		}
-	} else if (!strncmp(ko->name, "CMD", 3)) {
-		static int cmds_order = 0;
-		if (cmds_order == 0) {					// First command is the zone. Later send keepalive once every 3 requests.
-			m->payload = malloc(256);
-			m->len = snprintf(m->payload, 256, mgmt_simu_kafka_msg_cache[1], sys->my_hostname);
-			cmds_order++;
-		} else if ((cmds_order++ % 3) == 0) {
-			m->payload = strdup(mgmt_simu_kafka_msg_cache[0]);	// Because it is treated by toma not as const
-			m->len = strlen(m->payload);
-		}
-	} else if (!strstr(ko->name, "incrementalTarget")) {
-		// Not called yet, because in toma nvmeibt_kafka_req_start_consuming_leader_TARGET_msgs() is not called yet. Solve it
-		static int cmds_order = 0;
-		if (cmds_order == 0) {
-			m->payload = malloc(256);	// Insert self machine as 1 machine raft domain. Will auto become leader
-			m->len = snprintf(m->payload, 256, mgmt_simu_kafka_msg_cache[2], sys->my_hostname);
-			cmds_order++;
-		}
-	} else {
-		BUG_ON(true);		// Not supported yet. Insert messages to other kafka queues as well
-	}
+
+	/* Delegate message selection to the management simulator */
+	m->payload = mgmt_sim_next_kafka_payload(ko->name, &len);
+	m->len = len;
+
 	if (m->payload == NULL) {			// No message prepared to current consumer
 		free(m);
 		return NULL;

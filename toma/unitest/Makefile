@@ -102,6 +102,7 @@ CXXFLAGS = -std=gnu++20 $(filter-out -std=% -Wstrict-prototypes -Wno-old-style-d
 SOURCES :=
 SOURCES += ./toma_in_sandbox.c
 SOURCES += ./sandbox_nvme.c
+SOURCES += ./mgmt_sim.c
 
 TDIR=./..
 #TDIR=$(realpath ./..)
