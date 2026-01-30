@@ -1312,7 +1312,7 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 }
 
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
-	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 50
+	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 120
 	struct globa_epoll *ep = &sys->TSB_epoll;
 	static uint64_t loop_idx = 0;
 	static bool is_shutting_down = false;
