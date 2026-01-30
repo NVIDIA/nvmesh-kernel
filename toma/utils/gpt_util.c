@@ -1171,37 +1171,37 @@ static void show_entry_diff(const char *change_type,
 	if (old_entry && new_entry) {
 		// Modified
 		if (strcmp(old_name, new_name) != 0) {
-			fprintf(stdout, "    • Name: %s -> %s\n", old_name, new_name);
+			fprintf(stdout, "    - Name: %s -> %s\n", old_name, new_name);
 		}
 		if (old_entry->pba_s != new_entry->pba_s || old_entry->pba_e != new_entry->pba_e) {
-			fprintf(stdout, "    • Range: %lu-%lu -> %lu-%lu\n",
+			fprintf(stdout, "    - Range: %lu-%lu -> %lu-%lu\n",
 					old_entry->pba_s, old_entry->pba_e,
 					new_entry->pba_s, new_entry->pba_e);
 		}
 		if (old_entry->attributes != new_entry->attributes) {
-			fprintf(stdout, "    • Attributes: 0x%lx -> 0x%lx\n",
+			fprintf(stdout, "    - Attributes: 0x%lx -> 0x%lx\n",
 					old_entry->attributes, new_entry->attributes);
 		}
 	} else if (new_entry) {
 		// Added
 		type_uuid = nvmeibt_union_uuid_to_urn_uuid(&new_entry->partition_type_guid);
-		fprintf(stdout, "    • Name: %s\n", new_name);
-		fprintf(stdout, "    • Type: %s\n", type_uuid.str);
-		fprintf(stdout, "    • Range: %lu-%lu\n", new_entry->pba_s, new_entry->pba_e);
+		fprintf(stdout, "    - Name: %s\n", new_name);
+		fprintf(stdout, "    - Type: %s\n", type_uuid.str);
+		fprintf(stdout, "    - Range: %lu-%lu\n", new_entry->pba_s, new_entry->pba_e);
 	} else {
 		// Deleted
 		type_uuid = nvmeibt_union_uuid_to_urn_uuid(&old_entry->partition_type_guid);
-		fprintf(stdout, "    • Name: %s\n", old_name);
-		fprintf(stdout, "    • Type: %s\n", type_uuid.str);
-		fprintf(stdout, "    • Range: %lu-%lu\n", old_entry->pba_s, old_entry->pba_e);
+		fprintf(stdout, "    - Name: %s\n", old_name);
+		fprintf(stdout, "    - Type: %s\n", type_uuid.str);
+		fprintf(stdout, "    - Range: %lu-%lu\n", old_entry->pba_s, old_entry->pba_e);
 
 		// Warn if this is a critical partition
 		if (ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
 			ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
 			N_Wf(delete_critical_partition, "Deleting critical partition: name=@STR type=@UUID_LE",
 				 old_name, &old_entry->partition_type_guid);
-			fprintf(stdout, "    " COL_RED_BOLD "⚠  WARNING: This is a critical NVMesh partition!" COL_RESET "\n");
-			fprintf(stdout, "    " COL_YELLOW "   Deletion will make device unusable by NVMesh." COL_RESET "\n");
+			fprintf(stdout, "    " COL_RED_BOLD "[WARNING] This is a critical NVMesh partition!" COL_RESET "\n");
+			fprintf(stdout, "    " COL_YELLOW "          Deletion will make device unusable by NVMesh." COL_RESET "\n");
 		}
 	}
 }
@@ -1983,9 +1983,6 @@ static int export_gpt_to_json(int disk_fd,
 	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR",
 		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option));
 	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
-
-	// NVMesh devices always have: pMBR, Main GPT, Metadata GPT, segment metadata, disk_metadata
-	fprintf(stdout, "  - Exported: pMBR, Main GPT, Metadata GPT, segment_metadata_partitions, disk_metadata\n");
 
 	// Warn if mismatch or overlaps detected
 	if (is_mismatch) {
@@ -3194,11 +3191,11 @@ static int compare_and_show_segment_metadata_diff(const struct nvmeibt_seg_activ
 	if (memcmp(&current->header.mgmt_db_uuid, &json_data->header.mgmt_db_uuid, sizeof(current->header.mgmt_db_uuid)) != 0) {
 		current_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&current->header.mgmt_db_uuid);
 		json_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&json_data->header.mgmt_db_uuid);
-		fprintf(stdout, "  • mgmt_db_uuid: %s -> %s\n", current_uuid_urn.str, json_uuid_urn.str);
+		fprintf(stdout, "  - mgmt_db_uuid: %s -> %s\n", current_uuid_urn.str, json_uuid_urn.str);
 		n_changes++;
 	}
 	if (strcmp(current->hostname, json_data->hostname) != 0) {
-		fprintf(stdout, "  • hostname: %s -> %s\n", current->hostname, json_data->hostname);
+		fprintf(stdout, "  - hostname: %s -> %s\n", current->hostname, json_data->hostname);
 		n_changes++;
 	}
 
@@ -3206,32 +3203,32 @@ static int compare_and_show_segment_metadata_diff(const struct nvmeibt_seg_activ
 	if (memcmp(&current->disk_segment_uuid, &json_data->disk_segment_uuid, sizeof(current->disk_segment_uuid)) != 0) {
 		current_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&current->disk_segment_uuid);
 		json_uuid_urn = nvmeibt_union_uuid_to_urn_uuid(&json_data->disk_segment_uuid);
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: disk_segment_uuid: %s -> %s" COL_RESET "\n", current_uuid_urn.str, json_uuid_urn.str);
+		fprintf(stdout, COL_YELLOW "  [WARNING] disk_segment_uuid: %s -> %s" COL_RESET "\n", current_uuid_urn.str, json_uuid_urn.str);
 		n_changes++;
 	}
 	if (current->reservation_mode_version != json_data->reservation_mode_version) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: reservation_mode_version: %llu -> %llu" COL_RESET "\n",
+		fprintf(stdout, COL_YELLOW "  [WARNING] reservation_mode_version: %llu -> %llu" COL_RESET "\n",
 				current->reservation_mode_version, json_data->reservation_mode_version);
 		n_changes++;
 	}
 	if (current->active_praid_version_major != json_data->active_praid_version_major) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: active_praid_version_major: %d -> %d" COL_RESET "\n",
+		fprintf(stdout, COL_YELLOW "  [WARNING] active_praid_version_major: %d -> %d" COL_RESET "\n",
 				current->active_praid_version_major, json_data->active_praid_version_major);
 		n_changes++;
 	}
 	if (current->active_praid_version_minor != json_data->active_praid_version_minor) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: active_praid_version_minor: %d -> %d" COL_RESET "\n",
+		fprintf(stdout, COL_YELLOW "  [WARNING] active_praid_version_minor: %d -> %d" COL_RESET "\n",
 				current->active_praid_version_minor, json_data->active_praid_version_minor);
 		n_changes++;
 	}
 	if (current->is_current_shutdown_clean != json_data->is_current_shutdown_clean) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: is_current_shutdown_clean: %s -> %s" COL_RESET "\n",
+		fprintf(stdout, COL_YELLOW "  [WARNING] is_current_shutdown_clean: %s -> %s" COL_RESET "\n",
 				current->is_current_shutdown_clean ? "true" : "false",
 				json_data->is_current_shutdown_clean ? "true" : "false");
 		n_changes++;
 	}
 	if (current->n_blksets_scrubbed != json_data->n_blksets_scrubbed) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: n_blksets_scrubbed: %llu -> %llu" COL_RESET "\n",
+		fprintf(stdout, COL_YELLOW "  [WARNING] n_blksets_scrubbed: %llu -> %llu" COL_RESET "\n",
 				(unsigned long long)current->n_blksets_scrubbed, (unsigned long long)json_data->n_blksets_scrubbed);
 		n_changes++;
 	}
@@ -3258,41 +3255,41 @@ static int compare_and_show_disk_metadata_diff(const struct nvmeibt_disk_metadat
 	if (memcmp(&current->mgmt_db_uuid, &json_data->mgmt_db_uuid, sizeof(current->mgmt_db_uuid)) != 0) {
 		struct nvmeibt_urn_uuid current_uuid = nvmeibt_union_uuid_to_urn_uuid(&current->mgmt_db_uuid);
 		struct nvmeibt_urn_uuid json_uuid = nvmeibt_union_uuid_to_urn_uuid(&json_data->mgmt_db_uuid);
-		fprintf(stdout, "  • mgmt_db_uuid: %s -> %s\n", current_uuid.str, json_uuid.str);
+		fprintf(stdout, "  - mgmt_db_uuid: %s -> %s\n", current_uuid.str, json_uuid.str);
 		n_changes++;
 	}
 	if (strcmp(current->ldisk_id_str, json_data->ldisk_id_str) != 0) {
-		fprintf(stdout, "  • ldisk_id_str: %s -> %s\n", current->ldisk_id_str, json_data->ldisk_id_str);
+		fprintf(stdout, "  - ldisk_id_str: %s -> %s\n", current->ldisk_id_str, json_data->ldisk_id_str);
 		n_changes++;
 	}
 	if (strcmp(current->native_serial_str, json_data->native_serial_str) != 0) {
-		fprintf(stdout, "  • native_serial_str: %s -> %s\n", current->native_serial_str, json_data->native_serial_str);
+		fprintf(stdout, "  - native_serial_str: %s -> %s\n", current->native_serial_str, json_data->native_serial_str);
 		n_changes++;
 	}
 	if (current->disk_metadata_version != json_data->disk_metadata_version) {
-		fprintf(stdout, "  • disk_metadata_version: %u -> %u\n", current->disk_metadata_version, json_data->disk_metadata_version);
+		fprintf(stdout, "  - disk_metadata_version: %u -> %u\n", current->disk_metadata_version, json_data->disk_metadata_version);
 		n_changes++;
 	}
 	if (current->format_pblk_size != json_data->format_pblk_size) {
-		fprintf(stdout, "  • format_pblk_size: %u -> %u\n", current->format_pblk_size, json_data->format_pblk_size);
+		fprintf(stdout, "  - format_pblk_size: %u -> %u\n", current->format_pblk_size, json_data->format_pblk_size);
 		n_changes++;
 	}
 	if (current->format_metadata_size != json_data->format_metadata_size) {
-		fprintf(stdout, "  • format_metadata_size: %u -> %u\n", current->format_metadata_size, json_data->format_metadata_size);
+		fprintf(stdout, "  - format_metadata_size: %u -> %u\n", current->format_metadata_size, json_data->format_metadata_size);
 		n_changes++;
 	}
 	if (current->is_md_supported != json_data->is_md_supported) {
-		fprintf(stdout, "  • is_md_supported: %s -> %s\n", current->is_md_supported ? "true" : "false", json_data->is_md_supported ? "true" : "false");
+		fprintf(stdout, "  - is_md_supported: %s -> %s\n", current->is_md_supported ? "true" : "false", json_data->is_md_supported ? "true" : "false");
 		n_changes++;
 	}
 
 	/* Check WARNING fields */
 	if (current->last_pba_zeroed != json_data->last_pba_zeroed) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: last_pba_zeroed: %lu -> %lu" COL_RESET "\n", current->last_pba_zeroed, json_data->last_pba_zeroed);
+		fprintf(stdout, COL_YELLOW "  [WARNING] last_pba_zeroed: %lu -> %lu" COL_RESET "\n", current->last_pba_zeroed, json_data->last_pba_zeroed);
 		n_changes++;
 	}
 	if (current->format_request_counter != json_data->format_request_counter) {
-		fprintf(stdout, COL_YELLOW "  ⚠  WARNING: format_request_counter: %u -> %u" COL_RESET "\n", current->format_request_counter, json_data->format_request_counter);
+		fprintf(stdout, COL_YELLOW "  [WARNING] format_request_counter: %u -> %u" COL_RESET "\n", current->format_request_counter, json_data->format_request_counter);
 		n_changes++;
 	}
 
@@ -3343,10 +3340,10 @@ static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
 	}
 
 	fprintf(stdout, "\n" COL_WHITE_BOLD "%s Summary:" COL_RESET "\n", gpt_name);
-	fprintf(stdout, "  • Additions:     %d\n", n_additions);
-	fprintf(stdout, "  • Deletions:     %d\n", n_deletions);
-	fprintf(stdout, "  • Modifications: %d\n", n_modifications);
-	fprintf(stdout, "  • Unchanged:     %d\n", n_unchanged);
+	fprintf(stdout, "  - Additions:     %d\n", n_additions);
+	fprintf(stdout, "  - Deletions:     %d\n", n_deletions);
+	fprintf(stdout, "  - Modifications: %d\n", n_modifications);
+	fprintf(stdout, "  - Unchanged:     %d\n", n_unchanged);
 
 	if (n_additions + n_deletions + n_modifications == 0) {
 		fprintf(stdout, COL_GREEN "No changes detected" COL_RESET "\n");
