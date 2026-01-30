@@ -524,15 +524,31 @@ int ioctl(int fd, unsigned long int req, ...) {
 				N_Tf(sbk3456, "ioctl:nvme:id controller fd=@INT reporting sn=@STR mn=@STR", fd, idctrl->sn, idctrl->mn);
 			} else {
 				// NSID > 0 is the NVME storage namespace query.
-				struct nvme_id_ns *response = (void*)cmd->addr;
-				BUG_ON(cmd->data_len < sizeof(*response));
-				memset(response, 0, cmd->data_len);
-				response->flbas = 5; // Choosing index 5 arbitrarily. Range is 0..15.
-				response->lbaf[5].ds = SANDBOX_NVME_BLOCK_SIZE_EXPONENT; // LBA data size (logical sector size) as exponent of 2
 				// Note that LBAF { ms, ds, rp } are defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01
 				// Figure 116: LBA Format Data Structure, NVM Command Set Specific (PDF p. 91).
+				struct nvme_id_ns *response = (void*)cmd->addr;
+				int i;
+				BUG_ON(cmd->data_len < sizeof(*response));
+				memset(response, 0, cmd->data_len);
+
+				// Populate supported LBA formats from the sandbox LBA format table
+				response->nlbaf = SANDBOX_NVME_LBAF_COUNT - 1;  // Number of supported LBA formats minus 1
+				for (i = 0; i < SANDBOX_NVME_LBAF_COUNT; i++) {
+					const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(i);
+					response->lbaf[i].ds = lbaf->block_size_exp;
+					response->lbaf[i].ms = lbaf->metadata_size;
+				}
+
+				// Set current format based on device's format index
+				response->flbas = nvme_dev->current_format_idx;
+
+				// Set metadata capabilities: both inline and separate metadata are supported by the device.
+				// Note: Toma will only use separate metadata (DISK_ALLOW_INLINE_MD == 0).
+				response->mc = NVME_NS_MC_INLINE_MASK | NVME_NS_MC_SEP_MASK;
+
 				response->nsze = nvme_dev->size_in_blocks;
-				N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT reporting ds=4K nsze=@INT64_TD", cmd->nsid, fd, response->nsze);
+				N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT flbas=@INT nlbaf=@INT mc=@INT nsze=@INT64_TD",
+				     cmd->nsid, fd, response->flbas, response->nlbaf, response->mc, response->nsze);
 			}
 		} else if (cmd->opcode == nvme_admin_get_log_page) {
 			struct nvme_smart_log *fill =  (void*)cmd->addr;

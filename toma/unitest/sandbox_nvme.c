@@ -37,10 +37,32 @@ static const char local_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_nv
 
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 
-static const struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  2048 },
-	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 2000 },
-	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 2000 },
+/*
+ * Supported LBA formats for sandbox NVMe devices.
+ * This table is indexed by format ID (0-3).
+ */
+static const struct sandbox_nvme_lbaf lbaf_table[SANDBOX_NVME_LBAF_COUNT] = {
+	[SANDBOX_NVME_FMT_512_0]  = { .block_size_exp = 9,  .metadata_size = 0 },  /* 512+0 */
+	[SANDBOX_NVME_FMT_512_8]  = { .block_size_exp = 9,  .metadata_size = 8 },  /* 512+8 */
+	[SANDBOX_NVME_FMT_4096_0] = { .block_size_exp = 12, .metadata_size = 0 },  /* 4096+0 */
+	[SANDBOX_NVME_FMT_4096_8] = { .block_size_exp = 12, .metadata_size = 8 },  /* 4096+8 */
+};
+
+const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx)
+{
+	BUG_ON(fmt_idx < 0 || fmt_idx >= SANDBOX_NVME_LBAF_COUNT);
+	return &lbaf_table[fmt_idx];
+}
+
+/*
+ * NVMe device definitions.
+ * current_format_idx is mutable so that format operations can update it.
+ * Initial format for NVMesh disks is 4096+0 (SANDBOX_NVME_FMT_4096_0).
+ */
+static struct sandbox_nvme_device nvme_devices[] = {
+	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  2048, SANDBOX_NVME_FMT_4096_0 },
+	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 2000, SANDBOX_NVME_FMT_4096_0 },
+	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 2000, SANDBOX_NVME_FMT_4096_0 },
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
