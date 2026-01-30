@@ -7,4 +7,9 @@
 /_root/var/log/nvmesh/trace_daemon/toma.*
 /_root/var/log/nvmesh/tracelist.txt
 /_root/var/opt/nvmesh/.target_devices
+
+# Output products of the build
 /99bin/
+
+# Output products of running the tests
+/out/
