@@ -102,7 +102,7 @@ ln -s /var/opt/NVMesh %{buildroot}/var/opt/nvmesh
 ln -s /var/run/NVMesh %{buildroot}/var/run/nvmesh
 ln -s /opt/NVMesh/common-repo/tools/traces_post_processor/pager %{buildroot}/var/log/NVMesh/trace_daemon/pager
 ln -s /opt/NVMesh/common-repo/tools/traces_post_processor/pager.py %{buildroot}/var/log/NVMesh/trace_daemon/pager.py
-ln -s /opt/NVMesh/common-repo/tools/toma_rpc/toma_link %{buildroot}/opt/NVMesh/common-repo/tools/gpt_util
+ln -s /opt/NVMesh/common-repo/tools/toma_link %{buildroot}/opt/NVMesh/common-repo/tools/gpt_util
 
 if [ -d %{buildroot}/opt/NVMesh/client-repo/management_cm/exeServices ]; then
 	ln -s /opt/NVMesh/client-repo/management_cm/exeServices/managementAgent %{buildroot}/opt/NVMesh/client-repo/management_cm/managementAgent.py

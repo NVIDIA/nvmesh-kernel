@@ -98,7 +98,9 @@ for kind in $kind_list; do
 		echo "Running tree for $sources_path - Before copying"
 		tree $sources_path
 		cp -r --parents $target_scripts_transfer_list $sources_path
-		cp -r --parents $target_transfer_list $optional_target_transfer_list $target_inner_sources_path
+		cp -r --parents $target_transfer_list $target_inner_sources_path
+		mkdir -p $target_inner_sources_path/tools
+		cp $optional_target_transfer_list $target_inner_sources_path/tools/
 		echo "Running tree for $sources_path - After copying and Before moving"
 		tree $sources_path
 		mv $target_inner_sources_path/srv $target_inner_sources_path/target
