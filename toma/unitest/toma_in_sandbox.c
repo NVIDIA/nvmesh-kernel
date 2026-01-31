@@ -600,6 +600,7 @@ static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
+static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk);
 static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv);
 static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg);
 
@@ -632,6 +633,11 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
 		n_payload_bytes_remainig -= sizeof(pay->zero_disk);
 		TSB_netlink_handle_zero_disk(req_msg);
+	} else if (req_msg->opcode == csc_format_disk) {
+		const union nvmeib_nl_msg_to_srvr_payload *generic_payload = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		const struct nvmeib_format_disk *fmt_disk = &generic_payload->fmt_disk;
+		n_payload_bytes_remainig -= sizeof(*fmt_disk);
+		TSB_netlink_handle_format_disk(req_msg, fmt_disk);
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_other) {
 		struct TSB_server *s = &sys->TSB_toma2srvr;
 		const struct nvmeibs_toma_server_proc_buf *m = (typeof(m))req_msg->data;
@@ -1054,6 +1060,46 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 
 out:
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+// Handle csc_format_disk requests - update device format and queue response
+static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk)
+{
+	char reply_buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *reply_nlhdr = (struct nlmsghdr *)reply_buf;
+	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
+	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
+	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
+	int fmt_idx = fmt_disk->format_id.id;
+
+	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
+	rep->base.opcode = reply_msg->opcode = req_msg->opcode;
+	reply_msg->id = req_msg->id;
+	reply_msg->caller_type = req_msg->caller_type;
+	reply_nlhdr->nlmsg_len = NLMSG_SPACE(reply_msg->len);
+
+	// Reject inline metadata - NVMesh only supports separate metadata
+	BUG_ON(fmt_disk->format_id.is_inline);
+
+	if (!dev) {
+		N_Ef(fmt_nodisk, "format_disk: device not found disk_id=@STR", fmt_disk->disk_id);
+		rep->base.error = csce_failed;
+	} else if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
+		N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
+		rep->base.error = csce_failed;
+	} else {
+		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
+		N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT blk=@INT md=@INT",
+			fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
+		rep->base.error = csce_ok;
+		// Fill in the new format info
+		snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
+		rep->info.new_n_pblk = dev->size_in_blocks;
+		rep->info.new_seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
+	}
+
+	rep->base.latency_ns = 1000;  // Simulate some format latency
+	TSB_netlink_queue_enqueue(reply_buf, reply_nlhdr->nlmsg_len);
 }
 
 static void TSB_netlink_send_extended_msg(void) {

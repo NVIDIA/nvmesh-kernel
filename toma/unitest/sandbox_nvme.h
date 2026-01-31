@@ -49,7 +49,18 @@ struct sandbox_nvme_device {
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path /* == /dev/nvme...n1 */);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id /* e.g. NVMD_SN_002.1 */);
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(const char *disk_id /* e.g. NVMD_SN_002.1 */);
 int sandbox_nvme_get_device_count(void);
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev);
+
+/**
+ * Format a device: update LBA format and erase disk content.
+ * Simulates what a real NVMe format operation does.
+ *
+ * @param dev The device to format (must not be NULL)
+ * @param fmt_idx The new format index (0-3)
+ * @return 0 on success, -1 if format index invalid or I/O error
+ */
+int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, int fmt_idx);
 
 #endif // TOMA_SANDBOX_NVME_H_INCLUDED

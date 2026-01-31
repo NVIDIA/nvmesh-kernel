@@ -213,6 +213,72 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 	return NULL;
 }
 
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(const char *disk_id)
+{
+	// Same logic as the const version, but returns mutable pointer
+	char serial[64];
+	const char *dot = strchr(disk_id, '.');
+	size_t serial_len;
+	int i;
+
+	if (!disk_id)
+		return NULL;
+
+	if (dot) {
+		serial_len = (size_t)(dot - disk_id);
+		if (serial_len >= sizeof(serial))
+			serial_len = sizeof(serial) - 1;
+		memcpy(serial, disk_id, serial_len);
+		serial[serial_len] = '\0';
+	} else {
+		nvmeibt_strlcpy(serial, disk_id, sizeof(serial));
+	}
+
+	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+		struct sandbox_nvme_device *d = &nvme_devices[i];
+		if (!strcmp(d->serial_number, serial))
+			return d;
+	}
+
+	return NULL;
+}
+
+int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, int fmt_idx)
+{
+	const struct sandbox_nvme_lbaf *lbaf;
+	int fd;
+	int rv = 0;
+
+	if (!dev || fmt_idx < 0 || fmt_idx >= SANDBOX_NVME_LBAF_COUNT)
+		return -1;
+
+	lbaf = sandbox_nvme_get_lbaf(fmt_idx);
+	N_Tf(fmt3948, "format disk serial=@STR fmt_idx=@INT blk=@INT md=@INT",
+	     dev->serial_number, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
+
+	// Erase disk content (simulate NVMe format behavior)
+	fd = sandbox_nvme_open(dev);
+	if (fd >= 0) {
+		if (ftruncate(fd, 0) != 0) {
+			N_Ef(fmt_trunc, "format disk truncate failed serial=@STR err=@AUTO_ERRNO", dev->serial_number);
+			rv = -1;
+		} else if (ftruncate(fd, (off_t)(dev->size_in_blocks * (1UL << lbaf->block_size_exp))) != 0) {
+			N_Ef(fmt_expand, "format disk expand failed serial=@STR err=@AUTO_ERRNO", dev->serial_number);
+			rv = -1;
+		}
+		close(fd);
+	} else {
+		N_Ef(fmt_open, "format disk open failed serial=@STR", dev->serial_number);
+		rv = -1;
+	}
+
+	if (rv == 0) {
+		dev->current_format_idx = (uint8_t)fmt_idx;
+		N_Tf(fmt_done, "format disk complete serial=@STR", dev->serial_number);
+	}
+	return rv;
+}
+
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev)
 {
 	if (!dev)
