@@ -60,6 +60,7 @@ struct self_test_entry {
 	X(diff_no_changes, "Diff Comparison - No Changes", "gpt_util -a <path> -J + --apply-from") \
 	X(diff_modifications, "Diff Comparison - Modifications Detected", "gpt_util -a <path> -J + --apply-from") \
 	X(apply_write, "Apply with --write (Binary Roundtrip Fidelity)", "gpt_util export A + apply to B -> A == B") \
+	X(json_roundtrip_fidelity, "JSON Roundtrip Fidelity", "gpt_util export -> edit -> apply -> re-export -> compare JSON") \
 	/* Safety & Blocking (negative tests - expect operation to be blocked) */ \
 	X(missing_section, "Safety - Missing GPT Section", "gpt_util export + remove section + apply (blocked)") \
 	X(overlap_blocking, "Safety - Overlap Blocking", "gpt_util export overlaps + apply (blocked)") \
@@ -210,6 +211,13 @@ int SELF_TEST_remove_json_field(const char *json_path, const char *field);
  * Returns 0 if identical, non-zero if different
  */
 int SELF_TEST_compare_gpt_binary(const char *device_a, const char *device_b, int pblk_size, uint64_t n_blocks);
+
+/**
+ * Compare two JSON files for equality (SELF-TEST helper)
+ * Compares the entire JSON structure recursively
+ * Returns 0 if identical, -1 if different
+ */
+int SELF_TEST_compare_json_files(const char *json_a, const char *json_b, BOOL quiet_mode);
 
 /**
  * Parse JSON file into key-value tree (gpt_util wrapper)

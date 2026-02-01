@@ -1157,6 +1157,64 @@ out:
 }
 
 /**
+ * Check if a JSON key should be skipped during comparison (SELF-TEST specific)
+ * Skips fields that change between edited JSON and re-exported JSON.
+ *
+ * All other fields should match since we're verifying that editable fields
+ * applied correctly and can be re-exported with the same values.
+ */
+static bool SELF_TEST_should_skip_json_key(const char *key)
+{
+	// Skip backup_timestamp (changes on every export)
+	if (strcmp(key, "backup_timestamp") == 0) {
+		return true;
+	}
+
+	// Skip _READONLY_ fields (recalculated when underlying data changes)
+	// Example: _READONLY_crc32 changes when ldisk_id_str is modified
+	if (strncmp(key, "_READONLY_", 10) == 0) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * Compare two JSON files for equality (SELF-TEST helper)
+ * Uses the common json_compare_trees() with test-specific skip callback
+ * Returns 0 if identical, -1 if different
+ */
+int SELF_TEST_compare_json_files(const char *json_a, const char *json_b, BOOL quiet_mode)
+{
+	struct mm_json_elem		*root_a = NULL;
+	struct mm_json_elem		*root_b = NULL;
+	char					mismatch_buf[512] = {0};
+	int						rv = -1;
+
+	root_a = SELF_TEST_parse_json_file(json_a);
+	root_b = SELF_TEST_parse_json_file(json_b);
+
+	if (!root_a || !root_b) {
+		if (!quiet_mode) {
+			fprintf(stdout, "Failed to parse JSON files for comparison\n");
+		}
+		goto out;
+	}
+
+	rv = json_compare_trees(root_a, root_b, "root", SELF_TEST_should_skip_json_key,
+							mismatch_buf, sizeof(mismatch_buf));
+
+	if (rv != 0 && !quiet_mode && mismatch_buf[0] != '\0') {
+		fprintf(stdout, "  JSON mismatch %s\n", mismatch_buf);
+	}
+
+out:
+	nvmeibt_mm_json_free_kv_tree(root_a);
+	nvmeibt_mm_json_free_kv_tree(root_b);
+	return rv;
+}
+
+/**
  * Parse JSON file into key-value tree (gpt_util wrapper)
  */
 struct mm_json_elem *SELF_TEST_parse_json_file(const char *filepath)
@@ -1740,6 +1798,87 @@ out:
 	cleanup_backup_files_for_device(device_b);
 	unlink(device_a);
 	unlink(device_b);
+	return rv;
+}
+
+DEFINE_TEST(json_roundtrip_fidelity)
+{
+	int							rv = -1;
+	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_json_roundtrip";
+	struct mm_json_elem			*json_root = NULL;
+	struct mm_json_elem			*disk_md = NULL;
+
+	/* Step 1: Create device and export initial JSON */
+	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("json_roundtrip_original"));
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		TEST_FAIL("Failed to export initial JSON");
+		goto out;
+	}
+
+	/* Step 2: Parse JSON and modify editable fields */
+	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("json_roundtrip_original"));
+	if (!json_root) {
+		TEST_FAIL("Failed to parse initial JSON");
+		goto out;
+	}
+
+	/* Find disk_metadata section and modify editable field */
+	for (int i = 0; i < json_root->dict.len; i++) {
+		if (strcmp(json_root->dict.elements[i].key, "disk_metadata") == 0) {
+			disk_md = json_root->dict.elements[i].value;
+			break;
+		}
+	}
+	if (!disk_md) {
+		TEST_FAIL("disk_metadata section not found in JSON");
+		goto out;
+	}
+
+	/* Modify editable field: ldisk_id_str */
+	json_set_dict_str(disk_md, "ldisk_id_str", "JSON_ROUNDTRIP_TEST");
+	TEST_INFO("Modified disk_metadata.ldisk_id_str = \"JSON_ROUNDTRIP_TEST\"");
+
+	/* Save edited JSON */
+	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("json_roundtrip_edited")) < 0) {
+		TEST_FAIL("Failed to write edited JSON");
+		goto out;
+	}
+	json_root = NULL;
+
+	/* Step 3: Apply edited JSON to device with --write */
+	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("json_roundtrip_edited"), "--write", "--yes");
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		TEST_FAIL("Failed to apply edited JSON");
+		goto out;
+	}
+
+	/* Step 4: Re-export JSON from device */
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("json_roundtrip_reexported"));
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		TEST_FAIL("Failed to re-export JSON from device");
+		goto out;
+	}
+
+	/* Step 5: Compare edited JSON with re-exported JSON */
+	TEST_INFO("Comparing edited JSON with re-exported JSON...");
+	if (SELF_TEST_compare_json_files(TEST_JSON_PATH("json_roundtrip_edited"),
+									  TEST_JSON_PATH("json_roundtrip_reexported"),
+									  ctx->quiet_mode) != 0) {
+		TEST_FAIL("JSON roundtrip mismatch: edited JSON differs from re-exported JSON");
+		goto out;
+	}
+
+	TEST_SUCCEED("JSON roundtrip fidelity verified: edited JSON matches re-exported JSON");
+	rv = 0;
+
+out:
+	nvmeibt_mm_json_free_kv_tree(json_root);
+	unlink(TEST_JSON_PATH("json_roundtrip_original"));
+	unlink(TEST_JSON_PATH("json_roundtrip_edited"));
+	unlink(TEST_JSON_PATH("json_roundtrip_reexported"));
+	cleanup_backup_files_for_device(device_path);
+	unlink(device_path);
 	return rv;
 }
 
