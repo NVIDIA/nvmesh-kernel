@@ -650,6 +650,7 @@ static inline bool __nvmeib_pet_journal_test_and_set_in_use(struct nvmeib_pet_jo
 	#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR==1
 		return __atomic_test_and_set(&(self->concurrent_access_detector), __ATOMIC_ACQUIRE);
 	#else
+		(void)self;
 		return false;
 	#endif
 }
@@ -658,6 +659,8 @@ static inline void __nvmeib_pet_journal_clear_in_use(struct nvmeib_pet_journal* 
 {
 	#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR==1
 		__atomic_clear(&(self->concurrent_access_detector), __ATOMIC_RELEASE);
+	#else
+		(void)self;
 	#endif
 }
 
