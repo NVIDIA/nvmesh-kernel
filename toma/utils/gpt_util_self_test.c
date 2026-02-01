@@ -2758,13 +2758,6 @@ DEFINE_TEST(disk_metadata_apply)
 {
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_disk_md_test";
-	struct nvmeibt_disk_gpt		main_gpt;
-	struct nvmeibt_disk_gpt		metadata_gpt;
-	struct nvmeibt_disk_metadata disk_md_after;
-	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition = NULL;
-	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition = NULL;
-	uint64_t					pbyte_s = 0;
-	int							fd = -1;
 	struct mm_json_elem			*json_root = NULL;
 	struct mm_json_elem			*disk_md = NULL;
 
@@ -2772,13 +2765,13 @@ DEFINE_TEST(disk_metadata_apply)
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, device_path);
 
 	/* Export to JSON */
-	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("disk_md_test"));
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("disk_md_test_edited"));
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
 	/* Modify disk_metadata fields in JSON */
-	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("disk_md_test"));
+	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("disk_md_test_edited"));
 	if (!json_root) {
 		goto out;
 	}
@@ -2798,78 +2791,41 @@ DEFINE_TEST(disk_metadata_apply)
 	json_set_dict_str(disk_md, "ldisk_id_str", "MODIFIED_LDISK_ID");
 	json_set_dict_num(disk_md, "format_metadata_size", 999999);
 	TEST_INFO("Modified disk_metadata fields (ldisk_id_str, format_metadata_size)");
-	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("disk_md_test")) < 0) {
+	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("disk_md_test_edited")) < 0) {
 		goto out;
 	}
 	json_root = NULL;
 
 	/* Apply with --write */
-	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("disk_md_test"), "--write", "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("disk_md_test_edited"), "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
-	/* Verify disk_metadata changes on disk */
-	fd = open(device_path, O_RDONLY);
-	if (fd < 0) {
+	/* Re-export JSON after apply */
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("disk_md_test_reexported"));
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		TEST_FAIL("Failed to re-export JSON after apply");
 		goto out;
 	}
 
-	memset(&main_gpt, 0, sizeof(main_gpt));
-	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
-										  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
+	/* Comprehensive comparison: edited JSON vs re-exported JSON */
+	TEST_INFO("Comparing ALL fields: edited JSON vs re-exported JSON...");
+	if (SELF_TEST_compare_json_files(TEST_JSON_PATH("disk_md_test_edited"),
+									  TEST_JSON_PATH("disk_md_test_reexported"),
+									  ctx->quiet_mode) != 0) {
+		TEST_FAIL("Comprehensive JSON comparison failed: re-exported differs from edited");
 		goto out;
 	}
 
-	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-	if (!metadata_partition) {
-		goto out;
-	}
-
-	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
-	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
-										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
-		goto out;
-	}
-
-	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-	if (!disk_md_partition) {
-		goto out;
-	}
-
-	pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-	memset(&disk_md_after, 0, sizeof(disk_md_after));
-	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-												 pbyte_s, &disk_md_after) < 0) {
-		goto out;
-	}
-	close(fd);
-	fd = -1;
-
-	if (strcmp(disk_md_after.ldisk_id_str, "MODIFIED_LDISK_ID") != 0) {
-		TEST_FAIL("ldisk_id_str not updated (expected MODIFIED_LDISK_ID, got %s)",
-				  disk_md_after.ldisk_id_str);
-		goto out;
-	}
-
-	if (disk_md_after.format_metadata_size != 999999) {
-		TEST_FAIL("format_metadata_size not updated (expected 999999, got %u)",
-				  disk_md_after.format_metadata_size);
-		goto out;
-	}
-
-	TEST_SUCCEED("Verified: disk_metadata fields successfully applied");
-	TEST_INFO("  ldisk_id_str = %s", disk_md_after.ldisk_id_str);
-	TEST_INFO("  format_metadata_size = %u", disk_md_after.format_metadata_size);
+	TEST_SUCCEED("Comprehensive JSON comparison passed: ALL disk_metadata fields correctly applied");
 	rv = 0;
 
 out:
 	/* Cleanup */
-	if (fd >= 0) { close(fd); }
 	nvmeibt_mm_json_free_kv_tree(json_root);
-	unlink(TEST_JSON_PATH("disk_md_test"));
+	unlink(TEST_JSON_PATH("disk_md_test_edited"));
+	unlink(TEST_JSON_PATH("disk_md_test_reexported"));
 	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
@@ -2907,7 +2863,6 @@ DEFINE_TEST(binary_backup_restore)
 {
 	int									rv = -1;
 	int									fd = -1;
-	uint64_t							pbyte_s = 0;
 	const char							*device_path = TOMA_ROOT_DIR "tmp/gpt_binary_test";
 	char								manifest_file[600] = {0};
 	char								*read_buf = NULL;
@@ -2921,20 +2876,27 @@ DEFINE_TEST(binary_backup_restore)
 	char								backup_dir[512] = {0};
 	struct nvmeibt_disk_gpt				main_gpt;
 	struct nvmeibt_disk_gpt				metadata_gpt;
-	struct nvmeibt_disk_metadata		disk_md;
 	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
-	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition;
 	struct nvmeibt_seg_active_metadata_ctrl			*verify_ctrl = NULL;
 	int									n_seg_md_ctrls = 0;
 	uint64_t							new_seg_pba_s = 0;		/* Track NEW_SEG physical location */
 	uint64_t							new_seg_pbyte_s = 0;
+	char								cp_cmd[512];
 
 	/* Step 1: Create device with segment metadata partitions */
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_nvmesh_disk_with_segments, device_path);
 
-	/* Step 2: Export and modify */
+	/* Step 2: Export and copy baseline for comprehensive comparison */
 	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("binary_test"));
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		goto out;
+	}
+
+	/* Copy to baseline (avoids redundant export) */
+	snprintf(cp_cmd, sizeof(cp_cmd), "cp %s %s",
+			 TEST_JSON_PATH("binary_test"), TEST_JSON_PATH("binary_test_original"));
+	if (system(cp_cmd) != 0) {
+		TEST_FAIL("Failed to copy JSON baseline");
 		goto out;
 	}
 
@@ -3148,44 +3110,26 @@ DEFINE_TEST(binary_backup_restore)
 		goto out;
 	}
 
-	/* Step 8: Verify device matches original (check disk_metadata) */
+	/* Step 8: Export JSON after restore and compare ALL fields with original */
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("binary_test_restored"));
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		TEST_FAIL("Failed to export JSON after restore");
+		goto out;
+	}
+
+	/* Comprehensive comparison: original JSON vs restored JSON */
+	TEST_INFO("Comparing ALL fields: original vs restored JSON...");
+	if (SELF_TEST_compare_json_files(TEST_JSON_PATH("binary_test_original"),
+									  TEST_JSON_PATH("binary_test_restored"),
+									  ctx->quiet_mode) != 0) {
+		TEST_FAIL("Comprehensive JSON comparison failed: restored device differs from original");
+		goto out;
+	}
+	TEST_SUCCEED("Comprehensive JSON comparison passed: ALL fields match after restore");
+
+	/* Re-open device for NEW_SEG isolation test */
 	fd = open(device_path, O_RDONLY);
 	if (fd < 0) {
-		goto out;
-	}
-
-	memset(&main_gpt, 0, sizeof(main_gpt));
-	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt, 1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-		goto out;
-	}
-
-	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-	if (!metadata_partition) {
-		goto out;
-	}
-
-	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
-	nvmeibt_strlcpy(metadata_gpt.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt,
-										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
-		goto out;
-	}
-
-	disk_md_partition = nvmeibt_disk_metadata_get_disk_metadata_entry(&metadata_gpt);
-	if (!disk_md_partition) {
-		goto out;
-	}
-
-	pbyte_s = disk_md_partition->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-	memset(&disk_md, 0, sizeof(disk_md));
-	if (nvmeibt_disk_metadata_read_disk_metadata(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, pbyte_s, &disk_md) < 0) {
-		goto out;
-	}
-
-	/* Original mock has empty ldisk_id_str, check it's back to empty (not MODIFIED_FOR_BACKUP_TEST) */
-	if (disk_md.ldisk_id_str[0] != '\0') {
-		TEST_FAIL("Device not restored (ldisk_id=%s)", disk_md.ldisk_id_str);
 		goto out;
 	}
 
@@ -3235,6 +3179,8 @@ out:
 	nvmeibt_mm_json_free_kv_tree(json_root);
 	nvmeibt_mm_json_free_kv_tree(manifest_json);
 	unlink(TEST_JSON_PATH("binary_test"));
+	unlink(TEST_JSON_PATH("binary_test_original"));
+	unlink(TEST_JSON_PATH("binary_test_restored"));
 	cleanup_backup_files_for_device(device_path);
 	unlink(device_path);
 	return rv;
@@ -4794,6 +4740,7 @@ out:
 /**
  * Test: Export segment metadata partitions and apply changes
  * Verifies export creates correct JSON AND that editable/WARNING fields can be applied
+ * Uses comprehensive JSON comparison to verify ALL fields after apply
  */
 DEFINE_TEST(export_segment_metadata)
 {
@@ -4802,80 +4749,18 @@ DEFINE_TEST(export_segment_metadata)
 	struct mm_json_elem			*json_root = NULL;
 	struct mm_json_elem			*seg_md_partitions = NULL;
 	struct mm_json_elem			*seg1 = NULL;
-	uint64_t					seg1_pbyte_s;
-	int							fd = -1;
-	struct nvmeibt_seg_active_metadata_ctrl			seg_md_before;
-	struct nvmeibt_seg_active_metadata_ctrl			seg_md_after;
-	struct nvmeibt_disk_gpt							main_gpt;
-	struct nvmeibt_disk_gpt							metadata_gpt_temp;
-	const struct nvmeibt_disk_gpt_partition_entry	*metadata_partition;
-	const struct nvmeibt_disk_gpt_partition_entry	*seg1_entry = NULL;
 
 	// Create device with segment metadata partitions
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_disk_with_segment_metadata, device_path);
 
-	/* Read segment metadata control block before modifications */
-	fd = open(device_path, O_RDONLY);
-	if (fd < 0) {
-		goto out;
-	}
-
-	/* Calculate byte offset for first segment metadata partition by reading from GPT */
-	memset(&main_gpt, 0, sizeof(main_gpt));
-	nvmeibt_strlcpy(main_gpt.main_or_metadata, MAIN_GPT_NAME, sizeof(main_gpt.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &main_gpt,
-										  1, SELF_TEST_MOCK_DEVICE_BLOCKS - 1, false) < 0) {
-		close(fd);
-		goto out;
-	}
-
-	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
-	if (!metadata_partition) {
-		close(fd);
-		goto out;
-	}
-
-	memset(&metadata_gpt_temp, 0, sizeof(metadata_gpt_temp));
-	nvmeibt_strlcpy(metadata_gpt_temp.main_or_metadata, METADATA_GPT_NAME, sizeof(metadata_gpt_temp.main_or_metadata));
-	if (nvmeibt_disk_metadata_restore_gpt(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE, &metadata_gpt_temp,
-										  metadata_partition->pba_s, metadata_partition->pba_e, false) < 0) {
-		close(fd);
-		goto out;
-	}
-
-	/* Find first segment metadata partition (SEG_1) */
-	for (int k = 0; k < metadata_gpt_temp.max_n_entries; k++) {
-		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt_temp.entries[k]) &&
-			ARE_UUID_EQ(&metadata_gpt_temp.entries[k].partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
-			seg1_entry = &metadata_gpt_temp.entries[k];
-			break;
-		}
-	}
-
-	if (!seg1_entry) {
-		close(fd);
-		goto out;
-	}
-
-	seg1_pbyte_s = seg1_entry->pba_s * SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
-
-	memset(&seg_md_before, 0, sizeof(seg_md_before));
-	if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-										  seg1_pbyte_s, &seg_md_before) < 0) {
-		TEST_FAIL("Failed to read segment metadata before export");
-		goto out;
-	}
-	close(fd);
-	fd = -1;
-
-	// PART 1: Export to JSON and verify
-	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("seg_metadata"));
+	// PART 1: Export to JSON and verify basic structure
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("seg_metadata_edited"));
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
-	// Parse and verify exported JSON
-	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("seg_metadata"));
+	// Parse and verify exported JSON has correct structure
+	json_root = SELF_TEST_parse_json_file(TEST_JSON_PATH("seg_metadata_edited"));
 	if (!json_root) {
 		TEST_FAIL("Cannot parse exported JSON");
 		goto out;
@@ -4905,7 +4790,7 @@ DEFINE_TEST(export_segment_metadata)
 	json_set_dict_str(seg1, "hostname", "MODIFY-HOST");
 	json_set_dict_num(seg1, "_WARNING_n_blksets_scrubbed", 99);
 
-	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("seg_metadata")) < 0) {
+	if (SELF_TEST_write_json_file_and_free_kv_tree(json_root, TEST_JSON_PATH("seg_metadata_edited")) < 0) {
 		json_root = NULL;
 		TEST_FAIL("Failed to write modified JSON");
 		goto out;
@@ -4913,59 +4798,34 @@ DEFINE_TEST(export_segment_metadata)
 	json_root = NULL;
 
 	// Apply with --write
-	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("seg_metadata"), "--write", "--yes");
+	SELF_TEST_ARGV("-a", device_path, "--apply-from", TEST_JSON_PATH("seg_metadata_edited"), "--write", "--yes");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
 		goto out;
 	}
 
-	// Read and verify changes applied
-	fd = open(device_path, O_RDONLY);
-	if (fd < 0) {
+	// PART 3: Re-export JSON after apply
+	SELF_TEST_ARGV("-a", device_path, "-J", TEST_JSON_PATH("seg_metadata_reexported"));
+	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) != 0) {
+		TEST_FAIL("Failed to re-export JSON after apply");
 		goto out;
 	}
 
-	memset(&seg_md_after, 0, sizeof(seg_md_after));
-	if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, fd, SELF_TEST_MOCK_DEVICE_BLOCK_SIZE,
-										  seg1_pbyte_s, &seg_md_after) < 0) {
-		TEST_FAIL("Failed to read segment metadata after apply");
-		goto out;
-	}
-	close(fd);
-	fd = -1;
-
-	// Verify editable field changed
-	if (strcmp(seg_md_after.hostname, "MODIFY-HOST") != 0) {
-		TEST_FAIL("Hostname not applied: expected='MODIFY-HOST' got='%s'", seg_md_after.hostname);
+	// Comprehensive comparison: edited JSON vs re-exported JSON
+	TEST_INFO("Comparing ALL fields: edited JSON vs re-exported JSON...");
+	if (SELF_TEST_compare_json_files(TEST_JSON_PATH("seg_metadata_edited"),
+									  TEST_JSON_PATH("seg_metadata_reexported"),
+									  ctx->quiet_mode) != 0) {
+		TEST_FAIL("Comprehensive JSON comparison failed: re-exported differs from edited");
 		goto out;
 	}
 
-	// Verify WARNING field changed
-	if (seg_md_after.n_blksets_scrubbed != 99) {
-		TEST_FAIL("n_blksets_scrubbed not applied: expected=99 got=%lu", (unsigned long)seg_md_after.n_blksets_scrubbed);
-		goto out;
-	}
-
-	// Verify STATIC field preserved
-	if (strcmp(seg_md_after.header.magic_str, seg_md_before.header.magic_str) != 0) {
-		TEST_FAIL("STATIC field magic_str should be preserved");
-		goto out;
-	}
-
-	// Verify READONLY field preserved
-	if (seg_md_after.header.software_version != seg_md_before.header.software_version) {
-		TEST_FAIL("READONLY field software_version should be preserved");
-		goto out;
-	}
-
-	TEST_SUCCEED("Export+Apply: editable/WARNING updated, READONLY/STATIC preserved");
+	TEST_SUCCEED("Comprehensive JSON comparison passed: ALL segment_metadata fields correctly applied");
 	rv = 0;
 
 out:
-	if (fd >= 0) {
-		close(fd);
-	}
 	nvmeibt_mm_json_free_kv_tree(json_root);
-	unlink(TEST_JSON_PATH("seg_metadata"));
+	unlink(TEST_JSON_PATH("seg_metadata_edited"));
+	unlink(TEST_JSON_PATH("seg_metadata_reexported"));
 	cleanup_backup_files_for_device(device_path);
 	return rv;
 }
