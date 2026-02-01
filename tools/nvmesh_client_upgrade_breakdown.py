@@ -418,7 +418,7 @@ class JournalctlFileLog(BaseLogSource):
         self.line_regex = re.compile(r'^([A-Z][a-z]{2}\s+\d+\s\d{2}:\d{2}:\d{2}\.\d{6})\s+\S+\s+([^:]+):\s+(.*)$')
 
         # Regex to extract unit from systemd messages
-        self.systemd_unit_regex = re.compile(r'(Stopping|Stopped|Starting|Started)\s+([a-zA-Z0-9@_\-\.]+service)')
+        self.systemd_unit_regex = re.compile(r'(Stopping|Stopped|Starting|Started)\s+([a-zA-Z0-9@_\-\.\(\) ]+)')
 
     def _find_journal_file(self, logs_dir: str) -> Optional[str]:
         # Prioritize current boot log
