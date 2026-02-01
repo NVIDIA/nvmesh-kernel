@@ -3732,6 +3732,10 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 	memset(&net->rcq_stats, 0, sizeof(net->rcq_stats));
 	memset(&net->scq_stats, 0, sizeof(net->scq_stats));
 
+	WQ_INIT_WORK(&net->defer_recv_work, poll_cq_and_process_work);
+	INIT_WORK(&net->defer_recv_kwork, poll_cq_and_process_kwork);
+	INIT_WORK(&net->scq_kwork, scq_kwork_func);
+
 	/* create rcq, scq, arm intrrupts, create QP and modify its state to INIT */
 	if ((rv = create_qp(net, params)) < 0) {
 		_NTn(trace_5_ib_net_nvmeibc_ib_net_alloc, net, "nvmeibc_create_qp(): failed");
@@ -3831,10 +3835,6 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 			goto out;
 		}
 	}
-
-	WQ_INIT_WORK(&net->defer_recv_work, poll_cq_and_process_work);
-	INIT_WORK(&net->defer_recv_kwork, poll_cq_and_process_kwork);
-	INIT_WORK(&net->scq_kwork, scq_kwork_func);
 
 	_NTn(trace_9_ib_net_nvmeibc_ib_net_alloc, net, "allocate - done");
 	goto out;
