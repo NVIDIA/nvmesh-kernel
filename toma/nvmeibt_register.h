@@ -147,7 +147,7 @@ void nvmeibt_register_send_toma_not_ready(
 
 int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int client_id, struct nvmeibt_node *registrant_node);
 
-void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg);
+void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg, bool is_preserving_in_longing_registrants_hash);
 BOOL nvmeibt_register_is_same_registrant(const struct nvmeibt_registrant_ctx *r1, const struct nvmeibt_registrant_ctx *r2);	// Important! Assumes questen is asked on registrants of the same segment!
 void nvmeibt_register_recalc_seg_active_registrants_align_with_sync_cmd(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_register_is_seg_active_registrable_clients_sync_wise(struct nvmeibt_seg_active *seg_active, int *reason);
@@ -174,7 +174,7 @@ void nvmeibt_register_open_disk_eligible_seg_actives_for_use(struct nvmeibt_loca
 struct nvmeibt_registrant_ctx *nvmeibt_register_get_out_reg_ctx_by_in_msg(struct nvmeibt_register_msg *msg);
 void nvmeibt_register_MR_open_seg_active_for_registrations_if_eligable(struct nvmeibt_seg_active *seg_active);
 int nvmeibt_register_timeout_occurred(void);
-void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ctx, BOOL is_force);
+void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ctx, BOOL is_force, bool is_preserving_in_longing_registrants_hash);
 void nvmeibt_register_brute_force_cleanup_all_seg_registrants(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_remove_all_recovery_active_registrants_of_node(struct nvmeibt_urn_uuid *src_node_id);
 int nvmeibt_register_launch_seg_metadata_ctrl_save(struct nvmeibt_seg_active *seg_active);
