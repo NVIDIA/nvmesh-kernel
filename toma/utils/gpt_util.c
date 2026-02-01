@@ -353,8 +353,7 @@ void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out,
 									 const struct nvmeibt_local_disk *local_disk)
 {
 	struct nvmeibt_urn_uuid					urn_uuid;
-	int										i;
-	int										entry_count;
+	int										entry_count = 0;
 	const struct nvmeibt_disk_gpt			*main_gpt = &local_disk->main_gpt;
 	const struct nvmeibt_disk_gpt			*metadata_gpt = &local_disk->metadata_gpt;
 	const struct nvmeibt_disk_mbr			*mbr = &local_disk->mbr;
@@ -385,7 +384,7 @@ void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out,
 	nvmeibt_Str_sprintf(out, "    \"entries\": [\n");
 
 	entry_count = 0;
-	for (i = 0; i < main_gpt->max_n_entries; i++) {
+	for (int i = 0; i < main_gpt->max_n_entries; i++) {
 		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&main_gpt->entries[i])) {
 			const struct nvmeibt_disk_gpt_partition_entry *entry = &main_gpt->entries[i];
 			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
@@ -417,7 +416,7 @@ void gpt_util_format_memory_gpt_json(struct nvmeibt_Str *out,
 	nvmeibt_Str_sprintf(out, "    \"entries\": [\n");
 
 	entry_count = 0;
-	for (i = 0; i < metadata_gpt->max_n_entries; i++) {
+	for (int i = 0; i < metadata_gpt->max_n_entries; i++) {
 		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt->entries[i])) {
 			const struct nvmeibt_disk_gpt_partition_entry *entry = &metadata_gpt->entries[i];
 			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
@@ -538,7 +537,6 @@ static int get_device_serial_num(int fd, struct gpt_util_config *config, char *s
 	struct nvme_id_ctrl		*id_ctrl = NULL;
 	struct nvme_admin_cmd	cmd;
 	int						rv = -1;
-	int						i;
 	int						len;
 	struct stat				st;
 
@@ -559,6 +557,7 @@ static int get_device_serial_num(int fd, struct gpt_util_config *config, char *s
 	rv = ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
 	if (rv == 0) {
 		/* NVMe ioctl succeeded - trim whitespace from serial */
+		int i;
 		len = strnlen(id_ctrl->sn, sizeof(id_ctrl->sn));
 		for (i = len - 1; i >= 0; i--) {
 			if (id_ctrl->sn[i] > ' ') {
@@ -722,7 +721,6 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
 								 struct nvmeibt_Str *manifest_json,
 								 uint64_t *total_backup_bytes)
 {
-	int										i;
 	uint64_t								n_entries_blocks_main;
 	uint64_t								n_entries_blocks_metadata;
 	struct backup_structure_desc			structures[10];
@@ -744,7 +742,7 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
 	structures[9] = (struct backup_structure_desc){"disk_metadata",              disk_md_partition->pba_s,                               1,                          false};
 
 	// Execute backups for fixed structures
-	for (i = 0; i < 10; i++) {
+	for (int i = 0; i < 10; i++) {
 		if (backup_structure_and_append_manifest(disk_fd, structures[i].name, backup_dir,
 												 structures[i].pba_start, structures[i].n_blocks, pblk_size,
 												 manifest_json, total_backup_bytes, structures[i].is_first) < 0) {
@@ -753,7 +751,7 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
 	}
 
 	// Backup segment metadata control blocks (variable count)
-	for (i = 0; i < metadata_gpt->max_n_entries; i++) {
+	for (int i = 0; i < metadata_gpt->max_n_entries; i++) {
 		const struct nvmeibt_disk_gpt_partition_entry	*seg_md_entry = &metadata_gpt->entries[i];
 		char											seg_name[GPT_MAX_PARTITION_NAME_LENGTH + 1];
 		char											structure_name[128];
@@ -1339,7 +1337,6 @@ static void display_gpt_one_copy(const char *gpt_level,
 							 const struct gpt_util_config *config)
 {
 	struct nvmeibt_Str	*outstr;
-	int					i;
 	int					n_displayed = 0;
 
 	if (is_mismatch) {
@@ -1359,7 +1356,7 @@ static void display_gpt_one_copy(const char *gpt_level,
 		fprintf(stdout, "%s-%s-GPT Active Entries (filtered):\n", gpt_level, copy_name);
 		fprintf(stdout, " Idx type_uuid                         partition_guid                         pba_s      pba_e  attributes name\n");
 
-		for (i = 0; i < max_n_entries; i++) {
+		for (int i = 0; i < max_n_entries; i++) {
 			if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[i]) &&
 				matches_filter(&entries[i], config)) {
 				outstr = NNVMEIBT_STR_ALLOC(trace_gpt_util_display_filtered);
@@ -1386,7 +1383,7 @@ static void display_gpt_one_copy(const char *gpt_level,
 
 		// Print zeroing verification commands if requested
 		if (config && config->print_zero_verify_cmds) {
-			for (i = 0; i < max_n_entries; i++) {
+			for (int i = 0; i < max_n_entries; i++) {
 				if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[i])) {
 					print_zero_verify_commands(config->device_path, &entries[i], i, gpt_level);
 				}
@@ -1567,7 +1564,6 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 											BOOL is_last_section)
 {
 	struct nvmeibt_urn_uuid	urn_uuid;
-	int						i;
 	int						entry_count = 0;
 
 	// Build section name from enums using helper functions
@@ -1594,7 +1590,7 @@ static void export_gpt_copy_entries_to_json(enum GPT_LEVEL level,
 	nvmeibt_Str_sprintf(json_output, "    \"entries\": [\n");
 
 	// Export partition entries
-	for (i = 0; i < max_n_entries; i++) {
+	for (int i = 0; i < max_n_entries; i++) {
 		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&entries[i])) {
 			const struct nvmeibt_disk_gpt_partition_entry *entry = &entries[i];
 			struct nvmeibt_urn_uuid type_urn = nvmeibt_union_uuid_to_urn_uuid(&entry->partition_type_guid);
@@ -2175,7 +2171,6 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 {
 	int								rv = 0;
 	int								op;
-	long							i;
 	char							*_argv[argc];
 	struct nvmeibt_Str				*new_config = NULL;
 	static struct option long_options[] =
@@ -2208,7 +2203,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 	static const char short_options[] = "d:a:s:e:b:c:u:l:J:A:R:ZimfFUWDNYh";
 	static int long_idx = -1;
 
-	for (i = 0; i < argc; ++i) {
+	for (int i = 0; i < argc; ++i) {
 		_argv[i] = trim_whitespace(argv[i]);
 	}
 
@@ -2831,8 +2826,6 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 										const char *section_name)
 {
 	int							rv = -1;
-	int							i;
-	int							j;
 	struct mm_json_kv_pair		*kv = NULL;
 	struct mm_json_dict			*dict = NULL;
 	struct mm_json_elem			*entries_array = NULL;
@@ -2878,37 +2871,37 @@ static int parse_gpt_from_json_section(struct nvmeibt_disk_gpt *gpt,
 	n_entries_in_json = entries_array->array.len;
 	fprintf(stdout, "  %s: %d entries in JSON\n", section_name, n_entries_in_json);
 
-	for (j = 0; j < n_entries_in_json; j++) {
-		struct mm_json_elem						*entry_elem = entries_array->array.elements[j];
+	for (int i = 0; i < n_entries_in_json; i++) {
+		struct mm_json_elem						*entry_elem = entries_array->array.elements[i];
 		struct mm_json_dict						*entry_dict = NULL;
 		int										entry_index = -1;
 		struct nvmeibt_disk_gpt_partition_entry	temp_entry;
 
 		if (entry_elem->type != JSON_E_DICT) {
-			N_Ef(parse_gpt_entry_not_dict, "Entry @INT in @STR is not a dict", j, section_name);
+			N_Ef(parse_gpt_entry_not_dict, "Entry @INT in @STR is not a dict", i, section_name);
 			return -1;
 		}
 
 		// Get the index field to know where to place this entry
 		entry_dict = &entry_elem->dict;
-		for (i = 0; i < entry_dict->len; i++) {
-			if (strcmp(entry_dict->elements[i].key, "index") == 0 &&
-				entry_dict->elements[i].value->type == JSON_E_NUM) {
-				entry_index = (int)entry_dict->elements[i].value->num;
+		for (int j = 0; j < entry_dict->len; j++) {
+			if (strcmp(entry_dict->elements[j].key, "index") == 0 &&
+				entry_dict->elements[j].value->type == JSON_E_NUM) {
+				entry_index = (int)entry_dict->elements[j].value->num;
 				break;
 			}
 		}
 
 		if (entry_index < 0 || entry_index >= gpt->max_n_entries) {
 			N_Ef(parse_entry_bad_index, "Entry @INT in @STR has invalid index=@INT (max=@INT)",
-				 j, section_name, entry_index, gpt->max_n_entries);
+				 i, section_name, entry_index, gpt->max_n_entries);
 			return -1;
 		}
 
 		// Parse the entry (returns: 0=normal, 1=delete, -1=error)
 		rv = parse_gpt_entry_from_json(&temp_entry, entry_elem);
 		if (rv < 0) {
-			N_Ef(parse_entry_failed, "Failed to parse entry @INT in @STR", j, section_name);
+			N_Ef(parse_entry_failed, "Failed to parse entry @INT in @STR", i, section_name);
 			return -1;
 		} else if (rv == 1) {
 			// Entry marked for deletion - leave gpt->entries[entry_index] as zero (unused)
@@ -3308,7 +3301,6 @@ static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
 									 const struct nvmeibt_disk_gpt *json_gpt,
 									 const char *gpt_name)
 {
-	int		i;
 	int		n_additions = 0;
 	int		n_deletions = 0;
 	int		n_modifications = 0;
@@ -3319,7 +3311,7 @@ static int compare_and_show_gpt_diff(const struct nvmeibt_disk_gpt *disk_gpt,
 			disk_gpt->header.header_crc32, json_gpt->header.header_crc32,
 			disk_gpt->header.partition_entry_array_crc32, json_gpt->header.partition_entry_array_crc32);
 
-	for (i = 0; i < json_gpt->max_n_entries; i++) {
+	for (int i = 0; i < json_gpt->max_n_entries; i++) {
 		BOOL disk_in_use = nvmeibt_disk_metadata_is_gpt_entry_in_use(&disk_gpt->entries[i]);
 		BOOL json_in_use = nvmeibt_disk_metadata_is_gpt_entry_in_use(&json_gpt->entries[i]);
 
@@ -3927,7 +3919,6 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	const char									*manifest_serial = NULL;
 	const char									*manifest_version = NULL;
 	int											block_size_in_manifest = 0;
-	int											i;
 	int											n_structures_restored = 0;
 	uint64_t									total_bytes_restored = 0;
 
@@ -4007,7 +3998,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 				structures_array->array.len - 10);
 
 		/* Validate that extra structures (beyond first 10) are segment metadata control blocks */
-		for (i = 10; i < structures_array->array.len; i++) {
+		for (int i = 10; i < structures_array->array.len; i++) {
 			struct mm_json_elem	*structure_elem = structures_array->array.elements[i];
 			const char			*name;
 			uint64_t			n_blocks;
@@ -4042,7 +4033,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 
 	/* Validation 1: Verify all structure files exist and have correct sizes */
 	fprintf(stdout, "\nValidating backup files...\n");
-	for (i = 0; i < structures_array->array.len; i++) {
+	for (int i = 0; i < structures_array->array.len; i++) {
 		struct mm_json_elem		*structure_elem = structures_array->array.elements[i];
 		const char				*name;
 		const char				*file;
@@ -4112,7 +4103,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 
 	/* Validation 3: Verify PBA boundaries don't exceed device size */
 	fprintf(stdout, "\nValidating PBA boundaries...\n");
-	for (i = 0; i < structures_array->array.len; i++) {
+	for (int i = 0; i < structures_array->array.len; i++) {
 		struct mm_json_elem		*structure_elem;
 		const char				*name;
 		uint64_t				pba_start;
@@ -4168,10 +4159,9 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	/* Dry-run mode: Stop here, don't write */
 	if (!config->write_mode) {
 		uint64_t	total_bytes = 0;
-		int			j;
 
 		/* Calculate accurate total bytes from manifest */
-		for (j = 0; j < structures_array->array.len; j++) {
+		for (int j = 0; j < structures_array->array.len; j++) {
 			struct mm_json_elem	*structure_elem = structures_array->array.elements[j];
 			uint64_t			n_blocks;
 
@@ -4198,7 +4188,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 	fprintf(stdout, "\n" COL_YELLOW "=== Writing Structures to Device ===" COL_RESET "\n");
 
 	/* Restore each structure */
-	for (i = 0; i < structures_array->array.len; i++) {
+	for (int i = 0; i < structures_array->array.len; i++) {
 		struct mm_json_elem		*structure_elem = structures_array->array.elements[i];
 		const char				*name;
 		const char				*file;
@@ -4414,13 +4404,12 @@ int SELF_TEST_upgrade_gpt_if_needed(int disk_fd, int pblk_size, struct nvmeibt_d
 int gpt_util_main(int argc, char *argv[])
 {
 	int			rv = 1;
-	long		i;
 	BOOL		is_self_test = false;
 	BOOL		quiet_mode = false;
 	const char	*test_selection = NULL;		// NULL = run all tests
 
 	// Quick check for --self-test and --quiet flags (before full parsing)
-	for (i = 1; i < argc; ++i) {
+	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "-T") == 0 || strcmp(argv[i], "--self-test") == 0) {
 			is_self_test = true;
 			// Check if next argument is a test selection (number, range, or list)
