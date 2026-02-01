@@ -4,17 +4,18 @@ import re
 import os
 import abc
 import enum
+import json
 import errno
-import pprint
 import typing
 import pathlib
 import argparse
 import datetime
+import pydantic
 import itertools
-import dataclasses
+
 
 from elftools.elf.elffile import ELFFile
-from elftools.dwarf.die import DIE 
+from elftools.dwarf.die import DIE
 from elftools.dwarf.descriptions import describe_attr_value
 
 from nvmeib_pet_archive import NvmeibPetArchive, KaitaiStream
@@ -74,10 +75,11 @@ NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value
 # ---------------------------------------------------------------------------
 
 
-TypeInfo = typing.Union["BaseType", "EnumType", "StructType", "UnionType", "ArrayType"]
+TypeInfo = typing.Union["ErrnoType", "BaseType", "EnumType", "StructType", "UnionType", "ArrayType"]
 
-@dataclasses.dataclass(frozen=True)
-class ErrnoType:
+class ErrnoType(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	name: str
 
 	def decode(self, view: memoryview) -> str:
@@ -87,8 +89,9 @@ class ErrnoType:
 		raise RuntimeError('unknown errno')
 
 
-@dataclasses.dataclass(frozen=True)
-class BaseType: # actually fundamental type, but DWARF uses "base" as terminology
+class BaseType(pydantic.BaseModel): # actually fundamental type, but DWARF uses "base" as terminology
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	class Encoding(enum.StrEnum):
 		char = 'char'
 		boolean = 'boolean' 
@@ -107,17 +110,22 @@ class BaseType: # actually fundamental type, but DWARF uses "base" as terminolog
 		return value
 
 
-@dataclasses.dataclass(frozen=True)
-class EnumType:
+class EnumType(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	base_type: BaseType
-	enum_info: enum.Enum
+	values: dict[int,str]
+
+	def __hash__(self) -> int:
+		# Convert dict to frozenset of tuples for hashing
+		return hash((self.base_type, frozenset(self.values.items())))
 
 	def decode(self, view: memoryview) -> str:
 		value = self.base_type.decode(view)
-		return self.enum_info(value).name
+		return self.values[value]
 
 	def decode_int(self, value:int) -> str:
-		return self.enum_info(value).name 
+		return self.values[value] 
 
 	@property
 	def name(self) -> str:
@@ -128,36 +136,38 @@ class EnumType:
 		return self.base_type.size
 
 
-@dataclasses.dataclass(frozen=True)
-class MemberVariable:
+class BitLayout(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
+	offset: int # absolute bit offset from the struct start
+	size: int	# size in bits
 
-	@dataclasses.dataclass(frozen=True)
-	class BitLayot:
-		offset: int # absolute bit offset from the struct start
-		size: int	# size in bits
+	@property 
+	def start_byte(self) ->int:
+		return self.offset // 8
+	
+	@property
+	def end_byte(self) -> int:
+		end_bit = self.offset + self.size
+		return (end_bit + 7) // 8
 
-		@property 
-		def start_byte(self) ->int:
-			return self.offset // 8
-		
-		@property
-		def end_byte(self) -> int:
-			end_bit = self.offset + self.size
-			return (end_bit + 7) // 8
+	@property
+	def mask(self):
+		return (1 << self.size) - 1
 
-		@property
-		def mask(self):
-			return (1 << self.size) - 1
+	def decode(self, composite_view: memoryview) ->int:
+		chunk = int.from_bytes(composite_view[self.start_byte:self.end_byte].tobytes(), 'little')
+		shift = self.offset - self.start_byte * 8
+		return (chunk >> shift) & self.mask
 
-		def decode(self, composite_view: memoryview) ->int:
-			chunk = int.from_bytes(composite_view[self.start_byte:self.end_byte].tobytes(), 'little')
-			shift = self.offset - self.start_byte * 8
-			return (chunk >> shift) & self.mask
 
+class MemberVariable(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	name: str
 	type_info: TypeInfo
 	offset: int
-	bit_layout: typing.Optional[BitLayot] = None
+	bit_layout: typing.Optional[BitLayout] = None
 
 	@typing.no_type_check
 	def decode(self, composite_view: memoryview) -> typing.Any:
@@ -173,11 +183,16 @@ class MemberVariable:
 			return self.type_info.decode(composite_view[start:end])
 
 
-@dataclasses.dataclass
-class CompositeType:
+class CompositeType(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	name: str
 	size: int
 	members: list[MemberVariable]
+
+	def __hash__(self) -> int:
+		# Convert list to tuple for hashing
+		return hash((self.name, self.size, tuple(self.members)))
 
 	@typing.no_type_check
 	def decode(self, view: memoryview) -> dict[str, typing.Any]:
@@ -187,21 +202,23 @@ class CompositeType:
 		return result
 
 
-@dataclasses.dataclass
 class StructType(CompositeType):
 	pass 
 
 
-@dataclasses.dataclass
 class UnionType(CompositeType):
 	pass 
 
 
-@dataclasses.dataclass(frozen=True)
-class ArrayType: # not tested yet
+class ArrayType(pydantic.BaseModel): # not tested yet
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	elem: TypeInfo
 	count: int
 	size: int
+
+	def __hash__(self) -> int:
+		return hash((self.elem, self.count, self.size))
 
 	@typing.no_type_check
 	def decode(self, view: memoryview) -> list[typing.Any]:
@@ -227,7 +244,7 @@ class DwarfRuntime:
 		
 	@typing.no_type_check
 	def load_types(self, type_names: set[str]) -> dict[str, TypeInfo]:
-		name_cache: dict[str, TypeInfo] = {'errno' : ErrnoType('errno')}
+		name_cache: dict[str, TypeInfo] = {'errno' : ErrnoType(name='errno')}
 		type_names.discard('errno')
 		if self._dwarf:
 			for type_name in type_names:
@@ -254,7 +271,7 @@ class DwarfRuntime:
 		return die.get_DIE_from_attribute('DW_AT_type')
 
 	@typing.no_type_check
-	def __build_bitfield_layout(self, member_die: DIE, type_info: TypeInfo) -> MemberVariable.BitLayot:
+	def __build_bitfield_layout(self, member_die: DIE, type_info: TypeInfo) -> BitLayout:
 		bit_size_attr = member_die.attributes.get('DW_AT_bit_size')
 		if not bit_size_attr:
 			return None
@@ -264,15 +281,15 @@ class DwarfRuntime:
 
 		data_bit = member_die.attributes.get('DW_AT_data_bit_offset')
 		if data_bit:
-			return MemberVariable.BitLayot(data_bit.value, bit_size)
+			return BitLayout(offset=data_bit.value, size=bit_size)
 
 		bit_off_attr = member_die.attributes.get('DW_AT_bit_offset')
 		if bit_off_attr is None:
-			return MemberVariable.BitLayot(byte_offset_bits, bit_size)
+			return BitLayout(offset=byte_offset_bits, size=bit_size)
 
 		container_bits = type_info.size * 8 if hasattr(type_info, 'size') else self._address_size * 8
 		start = byte_offset_bits + (container_bits - bit_off_attr.value - bit_size)
-		return MemberVariable.BitLayot(start, bit_size)
+		return BitLayout(offset=start, size=bit_size)
 
 	# DWARF traversal --------------------------------------------------------
 	
@@ -347,15 +364,16 @@ class DwarfRuntime:
 
 		type_name:str = self.__get_die_name(die)
 
-		values = {}
+		name2value: dict[str, int] = {}
 		for child in die.iter_children():
 			if child.tag == "DW_TAG_enumerator":
 				value_name = child.attributes["DW_AT_name"].value.decode("utf-8")
 				value_value = child.attributes["DW_AT_const_value"].value
-				values[value_name] = value_value
+				name2value[value_name] = value_value
 		
-		enum_info = enum.Enum(type_name, self.__strip_longest_prefix(values))
-		return EnumType(base_type=base_type, enum_info=enum_info) 
+		name2value = self.__strip_longest_prefix(name2value)
+		value2name:dict[int, str] = {value: name for name, value in name2value.items()}
+		return EnumType(base_type=base_type, values=value2name) 
 
 	@typing.no_type_check
 	def __build_array(self, die: DIE) -> ArrayType:
@@ -388,37 +406,39 @@ class DwarfRuntime:
 			offset = child.attributes.get('DW_AT_data_member_location')
 			byte_offset_val = offset.value if offset else 0
 			bit_layout = self.__build_bitfield_layout(child, mv_type)
-			members.append(MemberVariable(mv_name, mv_type, byte_offset_val, bit_layout))
+			members.append(MemberVariable(name=mv_name, type_info=mv_type, offset=byte_offset_val, bit_layout=bit_layout))
 		
 		if die.tag == 'DW_TAG_structure_type':
 			return StructType(name=name, size=size.value, members=members)
 		else:
-			return UnionType(name=name, size=size.value, members=members)
+			return UnionType(name=name, size=size.value, members=members) 
 
 
-@dataclasses.dataclass(frozen=True)
-class MessageSpec:
+class MessageSpec(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	offset:int 
 	spec: str
 
 
-@dataclasses.dataclass
-class ArgPrintfSpec:
+class ArgPrintfSpec(pydantic.BaseModel):
+	model_config = pydantic.ConfigDict(frozen=True)
+	
 	spec: str
-	tag: str 
-	type_name: str
-	_hex: bool = dataclasses.field(init=False,repr=False)
+	tag: str = ""
+	type_name: str = ""
 
 	@staticmethod
 	def from_re_match(m: re.Match[str]) -> 'ArgPrintfSpec':
-		return ArgPrintfSpec(m.group('spec'), m.group('tag'), m.group('type_name'))
-
-	def __post_init__(self):
-		self._hex = bool(set('xXpP') & set(self.spec))
+		return ArgPrintfSpec(
+			spec=m.group('spec') if m.group('spec') else '',
+			tag=m.group('tag') if m.group('tag') else '',
+			type_name=m.group('type_name') if m.group('type_name') else ''
+		)
 
 	@property
 	def hex(self) -> bool:
-		return self._hex
+		return bool(set('xXpP') & set(self.spec))
 
 
 class ArgDecoder:
@@ -520,10 +540,23 @@ class Template:
 		return Message(fname=fname, entity=entity, ns_stamp=msg.timestamp.uv8, dt_stamp=dt_stamp, text=text) # type: ignore
 
 
-@dataclasses.dataclass(frozen=True)
-class Dictionaty:
-	templates: dict[int, Template]
+class Dictionary(pydantic.BaseModel):
+	specs: list[MessageSpec]
 	user_defined_types: dict[str, TypeInfo] 
+
+	@staticmethod
+	def load_templates(fpath: pathlib.Path) -> dict[int, Template]:
+		with open(fpath, 'r') as fobj:
+			dictionary:Dictionary = Dictionary.model_validate_json(fobj.read())
+			templates:dict[int, Template] = {}
+			for msg in dictionary.specs:
+				templates[msg.offset] = Template(msg, dictionary.user_defined_types)
+			return templates
+
+	def save(self, fpath: pathlib.Path) -> None:
+		with open(fpath, 'w+') as fobj:
+			fobj.write(self.model_dump_json())
+
 
 class TemplatesLoader:
 	def __init__(self, module: pathlib.Path, section_name: str):
@@ -569,15 +602,12 @@ class TemplatesLoader:
 					types.add(f"{m.group('type_name')}")
 		return types
 
-	def load_dictionary(self) -> Dictionaty:
-		msgs = self.__load_messages_spec()
-		user_defined_type_names: set[str] = self.__list_user_defined_types(msgs)
+	def load_dictionary(self) -> Dictionary:
+		specs = self.__load_messages_spec()
+		user_defined_type_names: set[str] = self.__list_user_defined_types(specs)
 		user_defined_types = self.__dwarf_runtime.load_types(user_defined_type_names)
 
-		templates: dict[int, Template] = {}
-		for msg in msgs:
-			templates[msg.offset] = Template(msg, user_defined_types)
-		return Dictionaty(templates=templates, user_defined_types=user_defined_types)
+		return Dictionary(specs=specs, user_defined_types=user_defined_types)
 
 TCommand = typing.TypeVar("TCommand", bound="Command")
 
@@ -591,48 +621,37 @@ class Command(abc.ABC):
 
 	@classmethod
 	@typing.no_type_check
-	def add_common_args(cls, parser) -> None:
+	def add_module_section_args(cls, parser) -> None:
 		parser.set_defaults(klass=cls)
 		parser.add_argument('module', type=pathlib.Path, help='path to the binary file(executable, shared library, kernel module)')
 		parser.add_argument('section', type=str, help='the ELF section name, all the PET strings are stored in')
 
+	@classmethod
+	@typing.no_type_check
+	def add_dict_arg(cls, parser) -> None:
+		parser.set_defaults(klass=cls)
+		parser.add_argument('dictionary', type=pathlib.Path, help='path to the dictionary file')
+
 	def __init__(self, args: argparse.Namespace):
-		self.extractor = TemplatesLoader(args.module, args.section)
+		pass 
 
 	@abc.abstractmethod
 	def __call__(self) -> None:
 		pass
 
 
-class ViewDictionary(Command):
-	@classmethod
-	@typing.no_type_check
-	def register(cls, subparsers) -> None:
-		parser = subparsers.add_parser("view-dictionary", description="list all messages & user defined types within a module")
-		cls.add_common_args(parser)
-
-	def __init__(self, args: argparse.Namespace):
-		super().__init__(args)
-
-	def __call__(self):
-		dictionary = self.extractor.load_dictionary()
-		for msg in dictionary.templates.values():
-			pprint.pprint(dataclasses.asdict(msg.spec))
-		for udt in dictionary.user_defined_types.values():
-			pprint.pprint(dataclasses.asdict(udt))
-			 
-
 class EvaluateInt(Command):
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
 		parser = subparsers.add_parser("evaluate-int", description="given a user defined type (enum/struct/union) and integer - prints the struct content")
-		cls.add_common_args(parser)
+		cls.add_module_section_args(parser)
 		parser.add_argument('user_defined_type', type=str, help='the user defined type ; no need to specify the tag(enum/struct/union)')
 		parser.add_argument('value', type=lambda s: int(s, 0), help='the user defined type ; no need to specify the tag(enum/struct/union)')
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
+		self.extractor = TemplatesLoader(args.module, args.section)
 		self.udt_name = args.user_defined_type
 		self.value = args.value
 
@@ -645,35 +664,30 @@ class EvaluateInt(Command):
 		decoder = ArgDecoder(udt, ArgPrintfSpec('u', '', self.udt_name))
 		print(decoder(self.value))
 
+
 class SaveDictionary(Command):
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
 		parser = subparsers.add_parser("save-dictionary", description="save all messages within a module to the dedicated file")
-		cls.add_common_args(parser)
+		cls.add_module_section_args(parser)
 		parser.add_argument('output', type=pathlib.Path, help='path to the output file')
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
+		self.extractor = TemplatesLoader(args.module, args.section)
 		self.output = args.output
 
 	def __call__(self):
 		dictionary = self.extractor.load_dictionary()
-		with open(self.output, "w+") as fobj:
-			for msg in dictionary.templates.values():
-				fobj.write(pprint.pformat(dataclasses.asdict(msg.spec)))
-				fobj.write('\n\n')
-			for udt in dictionary.user_defined_types.values():
-				fobj.write(pprint.pformat(dataclasses.asdict(udt)))
-				fobj.write('\n\n')
-
+		dictionary.save(self.output)
 
 class ViewMessages(Command):
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
 		parser = subparsers.add_parser("view", description="view all messages")
-		cls.add_common_args(parser)
+		cls.add_dict_arg(parser)
 		parser.add_argument('traces', type=pathlib.Path, nargs='+', help='per entity traces files')
 		parser.add_argument('--no-sort', action='store_true', dest='no_sort', default=False
 							, help="By default, all traces are sorted; '--no-sort' disables the ordering; usefull to see some entity traces in a single screen")
@@ -682,6 +696,8 @@ class ViewMessages(Command):
 		super().__init__(args)
 		self.traces = args.traces
 		self.sort = not args.no_sort
+		with open(args.dictionary) as f:
+			self.templates = Dictionary.load_templates(args.dictionary)
 
 	@typing.no_type_check
 	def __iter_entities(self) -> typing.Generator[NvmeibPetArchive.Entity, None, None]:
@@ -722,12 +738,11 @@ class ViewMessages(Command):
 
 	@typing.no_type_check
 	def __iter_human_messages(self) -> typing.Generator[Message, None, None]:
-		dictionary = self.extractor.load_dictionary()
 		for entity in self.__iter_entities():
 			last_human_msg = None
 			for msg in self.__iter_entity_messages(entity):
 				try:
-					tmpl = dictionary.templates[msg.offset - 1]
+					tmpl = self.templates[msg.offset - 1]
 				except KeyError:
 					raise RuntimeError(f"Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}")
 				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
