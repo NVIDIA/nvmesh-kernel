@@ -111,7 +111,8 @@ import glob
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Generator, List, Dict, Optional, Any, Iterable
+from typing import Generator, List, Dict, Optional, Any, Iterable, Tuple
+
 
 # Default window to analyze in --analyze mode if --until is omitted
 DEFAULT_ANALYSIS_WINDOW_SECONDS = 300
@@ -172,6 +173,10 @@ class BaseLogEntry(ABC):
         self._parse(raw_data)
 
     @abstractmethod
+    def __str__(self) -> str:
+        return ""
+
+    @abstractmethod
     def _parse(self, data: Dict[str, Any]):
         """Subclasses implement this to parse the raw data."""
         pass
@@ -184,6 +189,9 @@ class JournalCTLLogEntry(BaseLogEntry):
         self.message: Optional[str] = None
         self.syslog_id: Optional[str] = None
         super().__init__(timestamp, 'journalctl', raw_data)
+
+    def __str__(self):
+        return f"[{self.timestamp.isoformat()}] {self.syslog_id} ({self.unit}): {self.message}"
 
     def _parse(self, data: Dict[str, Any]):
         """Parses the raw journalctl JSON dictionary."""
@@ -199,6 +207,9 @@ class PagerLogEntry(BaseLogEntry):
         self.message: Optional[str] = None
         self.func_name: Optional[str] = None
         super().__init__(timestamp, 'pager', raw_data)
+
+    def __str__(self):
+        return f"[{self.timestamp.isoformat()}] {self.dev_name} ({self.func_name}): {self.message}"
 
     def _parse(self, data: Dict[str, Any]):
         """Parses the raw pager JSON dictionary."""
@@ -458,8 +469,7 @@ class JournalctlFileLog(BaseLogSource):
         except Exception as e:
             logger.error(f"Error parsing journal file: {e}")
 
-    def _parse_line_context(self, line: str, since: datetime, until: datetime, year: int) -> tuple[
-        Optional[BaseLogEntry], bool]:
+    def _parse_line_context(self, line: str, since: datetime, until: datetime, year: int) -> Tuple[Optional[BaseLogEntry], bool]:
         match = self.line_regex.match(line.strip())
         if not match:
             return None, False
@@ -468,7 +478,7 @@ class JournalctlFileLog(BaseLogSource):
 
         # 1. Filter by Identifier
         # Clean "systemd[1]" -> "systemd"
-        identifier = ident_raw.split('[')[0] if '[' in ident_raw else ident_raw
+        identifier = ident_raw.split('[', 1)[0]  # split always return at least one element
 
         # Check against the passed identifiers list
         if identifier not in self.identifiers:
@@ -686,7 +696,7 @@ class BasePhase(ABC):
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the phase to a dictionary."""
 
-        def format_ts(dt: datetime) -> Optional[str]:
+        def format_ts(dt: Optional[datetime]) -> Optional[str]:
             if not dt:
                 return None
             # 1. Convert to Local Time (matches the text report)
