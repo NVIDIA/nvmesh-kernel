@@ -6,16 +6,19 @@ ifeq ($(UNAME),Darwin)
 	USE_DARWIN=1
 	CFLAGS += -m64
 	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
+	DP_EC_GF_CFILES :=
 	LIBS_PATH = -L/usr/lib
 else ifeq ($(HT),x86_64)
 	USE_64_BITS=1
 	CFLAGS += -m64
 	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
+	DP_EC_GF_CFILES :=
 	LIBS_PATH = -L/usr/lib64
 else ifeq ($(HT),aarch64)
 	USE_ARM=1
 	CFLAGS += -march=armv8.1-a+crc+fp+simd
-	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
+	DP_EC_GF_ASM :=
+	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_arm_neon4.c nvmeibc_block_dp_ec_gf_arm_recov_neon.c nvmeibc_block_dp_ec_gf_arm_um.c
 	LIBS_PATH = -L/usr/lib64
 else
 	$(error Unknown OS/Host)
@@ -61,15 +64,14 @@ LIBS = -lpthread # Libraries to link into executable (with -l): pthread is neede
 # ********** Define Files participating in the build *********
 EC_DIR=$(SSDA)/clnt/block/datapath_ec
 SOURCES  = ./cmp_blocks.c ./kr_incs.c ./cmp_blocks_impl.c
-ifeq ($(USE_ARM),1)
-	SOURCES += $(EC_DIR)/nvmeibc_block_dp_ec_gf_arm_neon4.c $(EC_DIR)/nvmeibc_block_dp_ec_gf_arm_recov_neon.c $(EC_DIR)/nvmeibc_block_dp_ec_gf_arm_um.c
-endif
+SOURCES += $(patsubst %,$(EC_DIR)/%,$(DP_EC_GF_CFILES))
 SOURCES += $(EC_DIR)/nvmeibc_block_dp_ec_gf.c $(EC_DIR)/nvmeibc_block_dp_ec_gf_praid.c
 SOURCES += $(SSDA)/clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.c $(SSDA)/clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_log.c
 
 EXE_NAME = cmp_blocks
 OBJECTS =$(SOURCES:.c=_$(EXE_NAME).o)
-ASMSRC   = $(EC_DIR)/$(DP_EC_GF_ASM)
+
+ASMSRC   = $(patsubst %,$(EC_DIR)/%,$(DP_EC_GF_ASM))
 ASMOBJ   = $(ASMSRC:.S_shipped=.o_shipped)
 
 # ********** Define Rules for building *********
@@ -87,5 +89,5 @@ $(EXE_NAME): $(OBJECTS) $(ASMOBJ)
 	$(CC) -c -x assembler-with-cpp -o $@ $<
 
 clean:
-	$(info -->Cleaning... |$(OBJECTS)|)
-	@rm -f $(OBJECTS) $(EXE_NAME)
+	$(info -->Cleaning... |$(OBJECTS)|$(ASMOBJ))
+	@rm -f $(OBJECTS) $(EXE_NAME) $(ASMOBJ)
