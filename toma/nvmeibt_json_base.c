@@ -573,3 +573,117 @@ int json_set_dict_num(struct mm_json_elem *dict_elem, const char *key, int64_t v
 	elem->num = value;
 	return 0;
 }
+
+/**
+ * Compare two JSON trees recursively
+ * @param a First JSON element
+ * @param b Second JSON element
+ * @param path Current path (for error reporting), pass "root" initially
+ * @param skip_key_fn Optional callback to skip certain dict keys, or NULL to compare all
+ * @param mismatch_out If not NULL and mismatch found, receives description of first mismatch
+ * @param mismatch_out_size Size of mismatch_out buffer
+ * @return 0 if trees match (excluding skipped keys), -1 if different
+ */
+int json_compare_trees(const struct mm_json_elem *a, const struct mm_json_elem *b,
+					   const char *path, json_skip_key_fn skip_key_fn,
+					   char *mismatch_out, size_t mismatch_out_size)
+{
+	char	subpath[512];
+
+	if (!a || !b) {
+		if (mismatch_out && mismatch_out_size > 0) {
+			snprintf(mismatch_out, mismatch_out_size, "at %s: one value is NULL", path);
+		}
+		return -1;
+	}
+
+	if (a->type != b->type) {
+		if (mismatch_out && mismatch_out_size > 0) {
+			snprintf(mismatch_out, mismatch_out_size, "at %s: type differs (%d vs %d)", path, a->type, b->type);
+		}
+		return -1;
+	}
+
+	switch (a->type) {
+	case JSON_E_STR:
+		if (strcmp(a->str, b->str) != 0) {
+			if (mismatch_out && mismatch_out_size > 0) {
+				snprintf(mismatch_out, mismatch_out_size, "at %s: \"%s\" vs \"%s\"", path, a->str, b->str);
+			}
+			return -1;
+		}
+		break;
+
+	case JSON_E_NUM:
+	case JSON_E_BOOL:
+		// Both NUM and BOOL use the num field
+		if (a->num != b->num) {
+			if (mismatch_out && mismatch_out_size > 0) {
+				if (a->type == JSON_E_BOOL) {
+					snprintf(mismatch_out, mismatch_out_size, "at %s: %s vs %s", path,
+							 a->num ? "true" : "false", b->num ? "true" : "false");
+				} else {
+					snprintf(mismatch_out, mismatch_out_size, "at %s: %lld vs %lld", path,
+							 (long long)a->num, (long long)b->num);
+				}
+			}
+			return -1;
+		}
+		break;
+
+	case JSON_E_DICT:
+		// Compare dict entries, optionally skipping certain keys
+		for (int i = 0; i < a->dict.len; i++) {
+			const char			*key = a->dict.elements[i].key;
+			struct mm_json_elem	*val_a = a->dict.elements[i].value;
+			struct mm_json_elem	*val_b = NULL;
+
+			// Skip key if callback says so
+			if (skip_key_fn && skip_key_fn(key)) {
+				continue;
+			}
+
+			// Find matching key in b
+			for (int j = 0; j < b->dict.len; j++) {
+				if (strcmp(b->dict.elements[j].key, key) == 0) {
+					val_b = b->dict.elements[j].value;
+					break;
+				}
+			}
+			if (!val_b) {
+				if (mismatch_out && mismatch_out_size > 0) {
+					snprintf(mismatch_out, mismatch_out_size, "at %s: key \"%s\" missing in second JSON", path, key);
+				}
+				return -1;
+			}
+
+			snprintf(subpath, sizeof(subpath), "%s.%s", path, key);
+			if (json_compare_trees(val_a, val_b, subpath, skip_key_fn, mismatch_out, mismatch_out_size) != 0) {
+				return -1;
+			}
+		}
+		break;
+
+	case JSON_E_ARRAY:
+		if (a->array.len != b->array.len) {
+			if (mismatch_out && mismatch_out_size > 0) {
+				snprintf(mismatch_out, mismatch_out_size, "at %s: array size differs (%d vs %d)",
+						 path, a->array.len, b->array.len);
+			}
+			return -1;
+		}
+		for (int i = 0; i < a->array.len; i++) {
+			snprintf(subpath, sizeof(subpath), "%s[%d]", path, i);
+			if (json_compare_trees(a->array.elements[i], b->array.elements[i], subpath, skip_key_fn, mismatch_out, mismatch_out_size) != 0) {
+				return -1;
+			}
+		}
+		break;
+
+	default:
+		// NULL or unknown type - consider equal
+		break;
+	}
+
+	return 0;
+}

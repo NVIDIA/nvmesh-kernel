@@ -89,6 +89,31 @@ int json_set_dict_str(struct mm_json_elem *dict_elem, const char *key, const cha
 int json_set_dict_num(struct mm_json_elem *dict_elem, const char *key, int64_t value);
 
 /******************************************************************************/
+// JSON Comparison Functions
+/******************************************************************************/
+
+/**
+ * Callback type for determining if a dict key should be skipped during comparison
+ * @param key The key name to check
+ * @return true if the key should be skipped, false to compare it
+ */
+typedef bool (*json_skip_key_fn)(const char *key);
+
+/**
+ * Compare two JSON trees recursively
+ * @param a First JSON element
+ * @param b Second JSON element
+ * @param path Current path (for error reporting), pass "root" initially
+ * @param skip_key_fn Optional callback to skip certain dict keys, or NULL to compare all
+ * @param mismatch_out If not NULL and mismatch found, receives description of first mismatch
+ * @param mismatch_out_size Size of mismatch_out buffer
+ * @return 0 if trees match (excluding skipped keys), -1 if different
+ */
+int json_compare_trees(const struct mm_json_elem *a, const struct mm_json_elem *b,
+					   const char *path, json_skip_key_fn skip_key_fn,
+					   char *mismatch_out, size_t mismatch_out_size);
+
+/******************************************************************************/
 // JSON Parsing Macros - Reusable across all files that need JSON parsing
 /******************************************************************************/
 
