@@ -596,7 +596,7 @@ class BasePhase(ABC):
                 return
             self_end_str = self._end.astimezone().strftime('%H:%M:%S.%f')[:-3]
             ts_str = ts.astimezone().strftime('%H:%M:%S.%f')[:-3]
-            raise RuntimeError(f"[{self.name}] end timestamp overwrite! Old: {self_end_str}, New: {ts_str}")
+            raise RuntimeError(f"[{self.name}] end timestamp overwrite! Old: {self_end_str}, New: {ts_str}. log entries may be absent from source.")
 
         self._end = ts
 
@@ -1865,11 +1865,11 @@ def process_log_stream(
 
     except RuntimeError as e:
         # handle the Strict Setter violation
-        msg = f"Fatal Analysis Error: {e}"
+        msg = f"Fatal: Analysis Error: {e}"
         logger.error(msg)
         ndu_analysis.warnings.append(msg)
         ndu_analysis.status = PhaseStatus.INVALID
-        return True  # Stop processing this stream immediately
+        raise
 
     except KeyboardInterrupt:
         logger.info("\nLog processing interrupted.")
@@ -2020,7 +2020,13 @@ def main():
     if exit_code != 0:
         sys.exit(exit_code)
 
+
 if __name__ == "__main__":
     # DO NOT set a default basicConfig here.
     # main() will set it after args are parsed.
-    main()
+    try:
+        main()
+    except Exception as e:
+        # This will catch the 'raise' from process_log_stream
+        logger.exception("Main processing loop aborted due to fatal error: %s", e)
+
