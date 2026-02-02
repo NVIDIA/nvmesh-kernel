@@ -198,6 +198,9 @@ struct nvmeibs_nr_channel {
 	struct nvmeibs_async_cookie_channel_data *cookie_ch;
 	
 	struct nvmeibs_nrch_lat_meas lat_meas;
+
+	/* Deferred recv completion work */
+	struct work_struct recv_comp_work;
 };
 
 struct nvmeibs_nr_channel *nvmeibs_nordda_alloc_channel(void);
