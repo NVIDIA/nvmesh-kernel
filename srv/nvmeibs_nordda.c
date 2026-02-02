@@ -3129,72 +3129,111 @@ out:
 	return rv;
 }
 
-static void __nordda_recv_completion(struct ib_cq *cq,
-	struct nvmeibs_nr_channel *nrch)
+static void nordda_process_recv_wc(struct nvmeibs_nr_channel *nrch,
+	struct ib_wc *wc)
 {
 	struct nvmeibs_client *cl = NR2C(nrch);
+	int rv;
+
+	if (nvmeib_opcode_from_wc(wc) == NVMEIB_DRAIN_QUEUE) {
+		nvmeibs_rq_drain_comp(nrch->net, wc);
+	} else if (!cl->dismissed) {
+		if ((rv = process_recv_completion(nrch, wc, false))) {
+			_ND(trace_nordda_nordda_recv_completion, "process_recv_completion failed (@RV)", rv);
+		}
+	} else {
+		u32 index = nvmeib_idx_from_wc(wc);
+		struct nvmeib_iu *recv_ioctx = get_recv_iu(nrch, index);
+		if (recv_ioctx)
+			post_recv_iu(nrch, recv_ioctx);
+		else
+			_NE(error_nordda_nordda_recv_completion, "Got null recv_ioctx");
+	}
+}
+
+static int nordda_poll_recv_cq_with_budget(struct ib_cq *cq,
+	struct nvmeibs_nr_channel *nrch, int budget)
+{
 	struct ib_wc *wcs = nrch->rcq_wcs;
 	struct nvmeibs_net *net = nrch->net;
-	int i, n, rv;
-	bool defer = false;
-	__NFIN;
+	int i, n = 0, total = 0;
+	int poll_size;
 
-	BUG_ON(nvmeibs_use_pcpu_cq);
-	if (nvmeibs_defer_recv_comps) {
-		defer = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
-	}
-poll_again:
-	while ((n = ib_poll_cq(cq, NVMEIBS_POLL_SIZE, wcs)) > 0) {
+	while (budget > 0) {
+		poll_size = min(budget, NVMEIBS_POLL_SIZE);
+		n = ib_poll_cq(cq, poll_size, wcs);
+		if (n <= 0) {
+			if (n == 0)
+				nvmeib_qp_stats_on_poll_cq_empty(net->qp_stats);
+			break;
+		}
+
 		nvmeib_qp_stats_on_poll_cq(net->qp_stats, n, recv);
 		nvmeibs_net_dec_recv(net, n);
 		for (i = 0; i < n; ++i) {
-			if (nvmeib_opcode_from_wc(&wcs[i]) == NVMEIB_DRAIN_QUEUE)
-				nvmeibs_rq_drain_comp(net, &wcs[i]);
-			else if (!cl->dismissed) {
-				if ((rv = process_recv_completion(nrch, &wcs[i], defer))) {
-					_ND(trace_nordda_nordda_recv_completion, "process_recv_completion failed (@RV)", rv);
-				}
-			}
-			else {
-				u32 index = nvmeib_idx_from_wc(&wcs[i]);
-				struct nvmeib_iu *recv_ioctx = get_recv_iu(nrch, index);
-				if (recv_ioctx)
-					post_recv_iu(nrch, recv_ioctx);
-				else
-					_NE(error_nordda_nordda_recv_completion, "Got null recv_ioctx");
-			}
+			nordda_process_recv_wc(nrch, &wcs[i]);
 		}
 		if (nvmeibs_defer_recv_comps) {
 			nvmeib_intr_shaper_intr_polled(s_intr_shaper, n);
-			defer = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
 		}
+		total += n;
+		budget -= n;
 	}
-	if (n < 0) {
-		_NT(trace_1_nordda_nordda_recv_completion, "cl @CL_NAME, poll-recv-cq err (@ERR)", cl->name, n);
+
+	if (n < 0)
+		return n;
+
+	return total;
+}
+
+/* returns true if cq is not empty for sure */
+static bool __nordda_recv_completion(struct ib_cq *cq,
+	struct nvmeibs_nr_channel *nrch)
+{
+	struct nvmeibs_client *cl = NR2C(nrch);
+	int _rv, n_processed;
+	unsigned long flags;
+	bool rv = false;
+
+	spin_lock_irqsave(&nrch->spinlock, flags);
+	n_processed = nordda_poll_recv_cq_with_budget(cq, nrch, NVMEIBS_POLL_SIZE);
+	if (n_processed < 0) {
+		_NT(trace_1_nordda_nordda_recv_completion, "cl @CL_NAME, poll-recv-cq err (@ERR)", cl->name, n_processed);
 		nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
-	} else {
-		nvmeib_qp_stats_on_poll_cq_empty(net->qp_stats);
-		if ((rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)) != 0) {
-			if (rv < 0) {
-				_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
-				nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
-			} else {
-				goto poll_again;
-			}
-		}
+		goto out;
 	}
-	__NFOUT;
+
+	if (n_processed == NVMEIBS_POLL_SIZE) {
+		/* we processed all the CQEs, so we need to poll again */
+		rv = true;
+		goto out;
+	}
+
+	/* we procced less than NVMEIBS_POLL_SIZE, so we need to try rearm the CQ */
+	_rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
+	if (_rv < 0) {
+		_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
+		nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
+		goto out;
+	}
+	rv = _rv > 0; // ib_req_notify_cq returns rv>0 when IB_CQ_REPORT_MISSED_EVENTS
+
+out:
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	return rv;
 }
 
 static void __nordda_send_completion(struct ib_cq *cq,
 	struct nvmeibs_nr_channel *nrch, bool from_recv);
-static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
-{
-	struct nvmeibs_nr_channel *nrch = ctx;
-	__NFIN;
 
-	nvmeib_qp_stats_on_interrupt(nrch->net->qp_stats);
-	__nordda_recv_completion(cq, nrch);
+/* Poll recv CQ and handle send completions, returns true if need to poll again */
+static bool nordda_recv_completion_poll(struct ib_cq *cq,
+	struct nvmeibs_nr_channel *nrch)
+{
+	bool poll_again;
+
+	poll_again = __nordda_recv_completion(cq, nrch);
+
 	if (nrch->net && nrch->net->scq)
 		__nordda_send_completion(nrch->net->scq, nrch, true);
 	else {
@@ -3202,6 +3241,36 @@ static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
 		WARN_ON(true);
 	}
 
+	return poll_again;
+}
+
+static void nordda_recv_completion_work(struct work_struct *work)
+{
+	struct nvmeibs_nr_channel *nrch = container_of(work,
+		struct nvmeibs_nr_channel, recv_comp_work);
+
+	if (nordda_recv_completion_poll(nrch->net->rcq, nrch))
+		queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work);
+}
+
+static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
+{
+	struct nvmeibs_nr_channel *nrch = ctx;
+	__NFIN;
+
+	BUG_ON(nvmeibs_use_pcpu_cq);
+
+	nvmeib_qp_stats_on_interrupt(nrch->net->qp_stats);
+
+	do {
+		if (nvmeibs_defer_recv_comps && nvmeibs_nordda_kwq &&
+		    nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper)) {
+			queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work);
+			goto out;
+		}
+	} while (nordda_recv_completion_poll(cq, nrch));
+
+out:
 	__NFOUT;
 }
 
@@ -3641,6 +3710,7 @@ static void connect_nordda_channel_work(struct workqe_struct *work)
 	nrch->n_rxiu = 0;
 	nrch->n_rxiu_tot = 0;
 	nrch->rxiu_dying = 0;
+	INIT_WORK(&nrch->recv_comp_work, nordda_recv_completion_work);
 
 	rsp = kzalloc(sizeof(*rsp), GFP_KERNEL);
 	params = kzalloc(sizeof(*params), GFP_KERNEL);
