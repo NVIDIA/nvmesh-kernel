@@ -17,7 +17,11 @@
 	#define NR_CPUS	MAX_SCHEDULERS
 	typedef struct cpumask {} cpumask_t, *cpumask_var_t;
 	static inline unsigned int smp_processor_id(void) { return scheduler_current_unique_id(); }
-	#define for_each_online_cpu(i)  for (i=0; i< (typeof(i))spdk_env_get_core_count(); i++)
+	static inline unsigned num_online_cpus(void) {
+		 return spdk_env_get_core_count();
+	}
+	#define num_possible_cpus() 	num_online_cpus()
+	#define for_each_online_cpu(i)  for (i=0; i< (typeof(i))num_online_cpus(); i++)
 	#define for_each_possible_cpu(i)   for_each_online_cpu(i)
 	#define __percpu
 	#define get_cpu() smp_processor_id()
@@ -47,6 +51,8 @@
 	// so an aligned allocation will allocate more memory than required but that's ok for a simulator.
 	#define USE_SMP_PER_CPU		// whether the real percpu is in use
 	extern int nr_cpu_ids;
+	static inline unsigned num_online_cpus(void) { return nr_cpu_ids; }
+	#define num_possible_cpus() 	num_online_cpus()
 	#define ____page_aligned __attribute__((__aligned__(PAGE_SIZE)))
 
 	// static per-cpu variable declaration & use

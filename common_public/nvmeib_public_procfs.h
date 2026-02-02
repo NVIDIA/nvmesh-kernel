@@ -8,6 +8,14 @@
 
 #include "kr_incs.h"
 
+/*
+ * Incomplete types for prototypes when linux/proc_fs.h / seq_file.h are not
+ * included (e.g. DP_LIB / nvmeshum). Avoids "struct X declared inside
+ * parameter list will not be visible outside" (-Werror).
+ */
+struct proc_dir_entry;
+struct seq_operations;
+
 struct nvmeib_public_procfs_ent;
 typedef ssize_t proc_fill_t(void *arg, char *buf, size_t len);
 typedef ssize_t proc_chng_t(void *arg, char *buf, size_t len);

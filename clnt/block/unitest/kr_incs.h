@@ -299,9 +299,6 @@ static inline char *sim_kstrdup( const char *s,             gfp_t gfp){ char *d 
 static inline char *sim_kstrndup(const char *s, size_t len, gfp_t gfp){ char *d = sim_kmalloc(len      +1, gfp); if (d) strlcpy(d,s,len); return d; }
 static inline void *sim_kmemdup( const void *s, size_t len, gfp_t gfp){ char *d = sim_kmalloc(len      +1, gfp); if (d) memcpy( d,s,len); return d; }
 
-static inline unsigned num_online_cpus(void) { return NR_CPUS; }
-#define num_possible_cpus num_online_cpus
-
 // linux/sort
 void sort(void *base, size_t num, size_t size, int (*cmp_func)(const void *, const void *), void (*swp_func)(void *, void *, int size));
 
