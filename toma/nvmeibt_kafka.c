@@ -2718,7 +2718,7 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 	(*printf_fn)(printf_ctx, "full_init{applied=%d,init=%d}\nsoft_init{applied=%d,init=%d}\n", kafka_applied_init_counter, kafka_requested_init_counter, kafka_applied_init_preserve_state_vars_counter, kafka_requested_init_preserve_state_vars_counter);
 	if (kafka_bootstrap_servers_str_from_nvmesh_conf)
 		(*printf_fn)(printf_ctx, "\nservers=%*s\n", kafka_bootstrap_servers_str_from_nvmesh_conf->str_len, kafka_bootstrap_servers_str_from_nvmesh_conf->text_buf);
-	(*printf_fn)(printf_ctx, "KeepAlive Mgmt toke={Leader=%ld, Follow=%ld}\n", kafka_leader_keepalive_token_provided_by_mgmt, kafka_follower_keepalive_token_provided_by_mgmt);
+	(*printf_fn)(printf_ctx, "KeepAlive Mgmt token={Leader=%ld, Follow=%ld}\n", kafka_leader_keepalive_token_provided_by_mgmt, kafka_follower_keepalive_token_provided_by_mgmt);
 	(*printf_fn)(printf_ctx, "Leaders Raft-Term:\n\tVolume={req=%ld, apply=%ld}\n\tTarget={req=%ld, apply=%ld}\n", kafka_requested_consuming_leader_VOL_msgs_raft_term, kafka_applied_consuming_leader_VOL_msgs_raft_term, kafka_requested_consuming_leader_TARGET_msgs_raft_term, kafka_applied_consuming_leader_TARGET_msgs_raft_term);
 	if (kafka_mtls_ssl__is_enabled) {
 		__t_certificate_storage_print(&_ssl, printf_fn, printf_ctx);
