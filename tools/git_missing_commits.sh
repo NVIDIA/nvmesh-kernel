@@ -5,8 +5,8 @@ src_tmp_fn=""
 
 # examples:
 #
-# 1. Find commits in branch 3.3.2 that are missing in 3.4.0 and clolor the members of the block team
-# ./git_missing_commits.sh 3.3.2 3.4.0 | grep --color=always -E 'Yaron|Roman|Gan|Gerli|$'
+# 1. Find commits in branch 3.3.2 that are missing in 3.4.0 and color the members of the block team:
+#    ./git_missing_commits.sh 3.3.2 3.4.0 | grep --color=always -E 'Yaron|Roman|Gan|Gerli|$'
 #
 git_top=$(git rev-parse --show-toplevel || echo .) || exit 1
 
@@ -49,7 +49,7 @@ git --no-pager log "$src_branch" --grep='Change-Id:' --all-match --pretty='%b' \
 
 change_ids_unique_to_src=$(comm -23 "$src_tmp_fn" "$tgt_tmp_fn")
 
-echo "In $src_branch not in $tgt_branch"
+echo "echo "In $src_branch but not in $tgt_branch"
 echo "----------------------------------------------"
 for change_id in $change_ids_unique_to_src; do
         git -P log -1 --pretty=format:'%C(yellow)%h %Cgreen%an %Cblue%ad %Creset%<(50,trunc)%s' --date=short --color=always "$src_branch" --grep="$change_id" --all-match "$src_branch"
