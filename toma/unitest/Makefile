@@ -215,6 +215,7 @@ MERGE_MULTI_GEN := $(abspath $(SSDA)/tools/pre_processor/merge_multi_gen_events.
 TRACER_PP := $(abspath $(SSDA)/tools/pre_processor/tracer_pp.py)
 TRACE_GEN_SCRIPT = $(SSDA)/tools/pre_processor/gen_probes2.py
 MERGE_DICTIONARY := $(abspath $(SSDA)/tools/merge_dictionary.sh)
+TRACE_DICT_JSON := $(SSDA)/tools/dictionary.json
 FILE_TR_JSON=$(OBJ_DIR)/nvmeibt.trace.json
 PWD=$(shell pwd)
 
@@ -245,11 +246,16 @@ $(OBJ_DIR)/%.i: %.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(call per_file_cxxflags_varval,$<) $(INCLUDES) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER $< -o $@
 
-%.trace.json: %.i $(MERGE_DICTIONARY) $(TRACER_PP)
-	@echo "Generating trace JSON $@"
+%.trace.raw.json: %.i $(TRACER_PP)
+	@echo "Generating raw trace JSON $@"
 	mkdir -p $(dir $@)
 	$(TRACER_PP) -j 1 $@ $<
-	$(MERGE_DICTIONARY) $@ $(SSDA)/tools/dictionary.json
+
+%.trace.json: %.trace.raw.json $(MERGE_DICTIONARY) $(TRACE_DICT_JSON)
+	@echo "Merging trace JSON $@"
+	mkdir -p $(dir $@)
+	cp -f $< $@
+	$(MERGE_DICTIONARY) $@ $(TRACE_DICT_JSON)
 
 %.c_gen_events.h: %.trace.json $(TRACE_GEN_SCRIPT)
 	@echo "Generating gen_events header $@"
@@ -345,7 +351,7 @@ clean:
 	rm -f $(OBJECTS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 	rm -f $(AUTOGEN_TARGETS)
 	@printf "+-->Removing |\e[1;45mgenerated trace files\e[0;0m|\n"
-	find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
+	find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*.trace.raw.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
 	rm -rf $(OBJ_DIR_ROOT)
 	@printf "+-->Removing |\e[1;45mDictionaries\e[0;0m|\n"
 	rm -f $(TRACES_DIR)/$(FMTLIB) $(TRACES_DIR)/dict*
@@ -368,7 +374,7 @@ test_clean: clean
 	$(MAKE) test
 
 # Prevent the deletion of our tracer intermediate files
-.PRECIOUS: $(patsubst %.o,%.c_gen_events.h,$(OBJECTS)) $(patsubst %.o,%.trace.json,$(OBJECTS)) $(patsubst %.o,%.i,$(OBJECTS))
+.PRECIOUS: $(patsubst %.o,%.c_gen_events.h,$(OBJECTS)) $(patsubst %.o,%.trace.json,$(OBJECTS)) $(patsubst %.o,%.trace.raw.json,$(OBJECTS)) $(patsubst %.o,%.i,$(OBJECTS))
 
 .PHONY: clean all clean_run autogen test test_clean help depend
 
