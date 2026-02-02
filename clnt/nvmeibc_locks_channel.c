@@ -57,7 +57,7 @@ static bool nvmeibc_lock_ch_scq_offload_thread_tcp = true;
 module_param_named(lock_ch_scq_offload_thread_tcp, nvmeibc_lock_ch_scq_offload_thread_tcp, bool, 0644);
 MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for SCQ offload processing (TCP)");
 
-bool nvmeibc_lock_ch_scq_use_kwq = true;
+bool nvmeibc_lock_ch_scq_use_kwq = false;
 module_param_named(lock_ch_scq_use_kwq, nvmeibc_lock_ch_scq_use_kwq, bool, 0644);
 MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Use kernel workqueue instead of kthread for SCQ offload processing (default: false)");
 
