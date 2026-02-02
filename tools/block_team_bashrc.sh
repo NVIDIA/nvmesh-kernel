@@ -387,7 +387,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 	}
 
 	function NVMESH_restart_machine() {
-		# for n34-n39, use 'ping nvme34-ilo.mtl.labs.mlnx -c 1 | grep icmp' to see the ipmi ip. Like: 10.7.112.64/7/9/71 for n34,n37,n38,n39
+		# for n34-n39, use 'ping nvme34-ilo -c 1 | grep icmp' to see the ipmi ip. Like: 10.193.6+[34..39]
 		# If machine rebooted and you dont have ping: login via brawser to with credentials below and open: remote control->iKVM, login with root and find interface with ifconfig. do ifdown ens6f0, ifup ens6f0
 		if false; then
 			[ "$1" == "r" ] && arg=r || arg=u;
@@ -869,6 +869,13 @@ else
 				cp /proc/nvmeibs/*.csv ${toma_dir};
 				systemctl status nvmeshtoma > ${toma_dir}/sysctl.txt;
 				cp ${toma_cfg_file} ${toma_dir}; # See also # src/nvmesh/toma/toma_trace.config, src/nvmesh/toma/debugging_tips/hiccups;
+				local stack_txt="${toma_dir}/stacks.txt";
+				for pid in $(pgrep -x nvmeibt_toma); do
+					echo "=== Process PID $pid ===" > ${stack_txt};
+					for t in /proc/$pid/task/*; do
+						local tid=$(basename "$t"); echo -e "\n--- TID $tid stack ---" >> ${stack_txt}; sudo cat /proc/$pid/task/$tid/stack >> ${stack_txt};
+					done
+				done
 				tail -n +1 ${toma_dir}/* | less;
 				cmd="\t -\t sudo ${td_dir}/pager.py ${td_dir} --toma --since tail-5m | grep -E \"TOMAerr|TOMAwarn\"";
 				echo -e $cmd;
@@ -901,7 +908,7 @@ else
 				echo "sudo cp ./trace/nvmeibt_toma/release/dict.*.json /${NVMESH_DIR_LOG}/trace_daemon/";
 				echo "NVMESH_service toma stop; sudo cp bin/release/nvmeibt_toma ${toma_exe}; NVMESH_service toma restart; sleep 1s; cat /proc/nvmeibs/toma_status/raft | grep commit;";
 			else
-				echo "params: up / start / restart / dump / stop / del_csv / find / recoveries / compile"
+				echo "params: up / start / restart / dump / stop / del_csv / find / recoveries / compile / rpc"
 			fi
 		# -------------------------- all
 		elif [[ $1 == a* ]]; then
