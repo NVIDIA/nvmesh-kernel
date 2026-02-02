@@ -1070,20 +1070,21 @@ static int setup_journal_partitions(struct nvmeibt_local_disk *cur_local_disk) {
 	int rv = -1;
 	union nvmeib_uuid random_journal_guid;
 	union nvmeib_uuid random_serjio_guid;
-	// 2GB
-	uint64_t journal_data_size_in_pblks = 2ull * 1024 * 1024 * 1024 / nvmeibt_local_disk_pblk_size(cur_local_disk);
-	// 32 MB
-	uint64_t serjio_db_size_in_pblks = 32ull * 1024 * 1024 / nvmeibt_local_disk_pblk_size(cur_local_disk);
-
+	const unsigned n_bytes_in_blk = cur_local_disk->from_config.pblk_size;
+#ifndef TOMA_SIMULATOR_SANDBOX
+	const uint64_t journal_data_size_in_pblks = (2ull << 30) / n_bytes_in_blk;		// 2[GB] = Todo, must be == NVMEIB_EC_TOTAL_JOURNAL_BLKS
+	const uint64_t serjio_db_size_in_pblks =   (32ull << 20) / n_bytes_in_blk;		// 32[MB], Todo: Take this define from real serjio
+#else
+	const uint64_t journal_data_size_in_pblks = (1 << 30) / n_bytes_in_blk, serjio_db_size_in_pblks = (1 << 30) / n_bytes_in_blk;		// 1[MB] each. Meaningless
+#endif
 	NFIN;
 
 	generate_random_uuid(&random_journal_guid);
 	generate_random_uuid(&random_serjio_guid);
 
-	// Allocate the journal-data partition inside the GPT.
 	if (nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->main_gpt,
 																	journal_data_size_in_pblks,
-																	nvmeibt_local_disk_pblk_size(cur_local_disk),
+																	n_bytes_in_blk,
 																	&EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID,
 																	&random_journal_guid,
 																	EXCELERO_JOURNAL_PARTITION_NAME,
@@ -1096,7 +1097,7 @@ static int setup_journal_partitions(struct nvmeibt_local_disk *cur_local_disk) {
 	// Allocate the serjio_db partition inside the GPT.
 	if (nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->main_gpt,
 																	serjio_db_size_in_pblks,
-																	nvmeibt_local_disk_pblk_size(cur_local_disk),
+																	n_bytes_in_blk,
 																	&EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID,
 																	&random_serjio_guid,
 																	EXCELERO_SERJIO_DB_PARTITION_NAME,
