@@ -585,9 +585,10 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
 	const struct nlmsghdr *nlh = (const struct nlmsghdr *)buf;
 	const struct nvmeib_nl_uk_comm_msg *req_msg = NLMSG_DATA(nlh);
+	int n_payload_bytes_remainig = (int)n - ((const char*)req_msg->data - (const char*)buf);
 
 	(void)fd; (void)offset; (void)flags;
-	BUG_ON(n < sizeof(struct nlmsghdr));
+	BUG_ON((n < (sizeof(struct nlmsghdr) + sizeof(*req_msg))) || (n != nlh->nlmsg_len) || (nlh->nlmsg_type != NVMESH_NL_MSG_TYPE));
 	nl->n_recv_msgs++;
 	N_Tf(nl_send, "opcode=@INT (@STR), total_n_msgs=@INT", req_msg->opcode, uk_comm_opcode_str(req_msg->opcode), nl->n_recv_msgs);
 	if (req_msg->opcode == csc_get_disks) {
@@ -601,23 +602,31 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	} else if (req_msg->opcode == csc_keep_alive) {
 		N_Tf(nl_keepalive, "Netlink keep_alive received");
 	} else if (req_msg->opcode == csc_io_to_disk) {
+		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		n_payload_bytes_remainig -= sizeof(pay->io2disk);
 		TSB_netlink_handle_io_to_disk(req_msg);
 	} else if (req_msg->opcode == csc_zero_disk) {
+		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		n_payload_bytes_remainig -= sizeof(pay->zero_disk);
 		TSB_netlink_handle_zero_disk(req_msg);
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_other) {
 		struct TSB_server *s = &sys->TSB_toma2srvr;
 		const struct nvmeibs_toma_server_proc_buf *m = (typeof(m))req_msg->data;
 		const ssize_t exec_rv = s->o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
+		if (exec_rv > 0)
+			n_payload_bytes_remainig -= (int)exec_rv;		// Mark Consumed bytes
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_to_io_clients) {
 		struct TSB_server *s = &sys->TSB_toma2clnt;
 		const struct nvmeibs_toma_client_proc_buf *m = (typeof(m))req_msg->data;
 		const ssize_t exec_rv = s->o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
+		if (exec_rv > 0)
+			n_payload_bytes_remainig -= (int)exec_rv;		// Mark Consumed bytes
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
-
+	BUG_ON(n_payload_bytes_remainig != 0);			// Unconsumed bytes, may be treated as next message
 	return (ssize_t)n;
 }
 
@@ -625,6 +634,7 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	const ssize_t len = TSB_netlink_queue_dequeue(buf, n);
 	(void)fd; (void)offset; (void)flags;
+	BUG_ON(n <= (size_t)len);
 	return len;
 }
 
