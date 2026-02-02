@@ -1179,28 +1179,28 @@ ssize_t override_read(int fd, void *buf, size_t nbytes) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->recv(fd, buf, nbytes, OFFSET_NONE, 0);
-	return read(fd, buf, nbytes);		// Backward compatibility for fd's without backend simulator
+	return read(s->fd, buf, nbytes);	// Use real OS fd for passthrough
 }
 
 ssize_t override_write(int fd, const void *buf, size_t count) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->send(fd, buf, count, 0, 0);
-	return write(fd, buf, count);	// Pass through to real file.
+	return write(s->fd, buf, count);	// Use real OS fd for passthrough
 }
 
 ssize_t override_pread(int fd,       void *buf, size_t count, off_t offset) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->recv(fd, buf, count, offset, 0);
-	return pread(fd, buf, count, offset);	// Pass through to real file.
+	return pread(s->fd, buf, count, offset);	// Use real OS fd for passthrough
 }
 
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->send(fd, buf, count, offset, 0);
-	return pwrite(fd, buf, count, offset);	// Pass through to real file.
+	return pwrite(s->fd, buf, count, offset);	// Use real OS fd for passthrough
 }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
