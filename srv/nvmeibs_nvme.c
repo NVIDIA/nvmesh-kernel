@@ -52,7 +52,7 @@ static bool nvmeibs_defer_process_io_cq = false;
 module_param_named(defer_process_io_cq, nvmeibs_defer_process_io_cq, bool, 0644);
 MODULE_PARM_DESC(defer_process_io_cq, "Defer all IO completions to a per completion queue thread, so it is not done in the interrupt context.");
 
-static bool nvmeibs_use_nvme_kwq = true;
+static bool nvmeibs_use_nvme_kwq = false;
 module_param_named(use_nvme_kwq, nvmeibs_use_nvme_kwq, bool, 0444);
 MODULE_PARM_DESC(use_nvme_kwq, "Determines whether to use a kernel workqueue instead of a wakeup thread for processing completion queues.");
 
