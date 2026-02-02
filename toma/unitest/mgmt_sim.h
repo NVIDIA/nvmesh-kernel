@@ -43,6 +43,18 @@ void mgmt_sim_on_toma_produced(const void *payload, size_t len);
 const char *mgmt_sim_get_last_report_target(void);
 
 /**
+ * Check if the format scenario state machine has completed.
+ * @return true if the state machine reached the "done" state.
+ */
+bool mgmt_sim_is_done(void);
+
+/**
+ * Get the current state machine state name (for diagnostics).
+ * @return Human-readable state name.
+ */
+const char *mgmt_sim_get_state_name(void);
+
+/**
  * Destroy the management simulator and free resources.
  */
 void mgmt_sim_destroy(void);
