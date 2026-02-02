@@ -2905,9 +2905,7 @@ static void attempt_handle_pending_recv(struct nvmeibs_nr_channel *nrch)
 		if ((recv_ioctx = list_first_entry_or_null(
 			&nrch->net->pending_received_msgs, struct nvmeib_iu, free_tx_n))) {
 			list_del_init(&recv_ioctx->free_tx_n);
-			spin_unlock_irqrestore(&nrch->spinlock, flags);
 			handle_io_cmd_underway(nrch, recv_ioctx);
-			spin_lock_irqsave(&nrch->spinlock, flags);
 		}
 		else BUG();
 	}
@@ -2979,14 +2977,12 @@ out:
 	NFOUT;
 }
 
+
+// should be called with nrch->spinlock held
 static inline void io_cmd_pending(struct nvmeibs_nr_channel *nrch,
 	struct nvmeib_iu *recv_ioctx)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&nrch->spinlock, flags);
 	list_add_tail(&recv_ioctx->free_tx_n, &nrch->net->pending_received_msgs);
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
 }
 
 static enum can_handle_res can_handle_io_cmd(
