@@ -1335,7 +1335,7 @@ static void __send_cmds_of_stage(struct nvmeibc_block_command *cmds, int n_cmds,
 	} /* Warning: Here cmds can be already free() */
 }
 
-static void __send_or_check_pigbck_view_of_ow_lock(struct nvmeibc_block_command *cmds, int li, int last_cmd, int prev_rv)
+static void __handle_stage_post_io_rdma(struct nvmeibc_block_command *cmds, int li, int last_cmd, int prev_rv)
 {
 	struct nvmeibc_disk_io_command *iocmd = cmds[last_cmd].iocmd;
 	struct nvmeibc_cmd_lock *l = iocmd->comp.pigbck_lock;
@@ -1363,7 +1363,7 @@ static void __exec_stage(struct nvmeibc_block_command *cmds, int li, int prev_rv
 		} else if (nvmeib_block_io_op_is_write(cmds[last_cmd].iocmd->reqs1.op)) {
 			__send_all_db_turn_off(cmds, li, n_cmds, last_cmd, prev_rv);
 		} else {
-			__send_or_check_pigbck_view_of_ow_lock(cmds, li, last_cmd, prev_rv);
+			__handle_stage_post_io_rdma(cmds, li, last_cmd, prev_rv);
 		}
 	} else if (unlikely(cur_stage == E_CMDS_STAGE_CALC_DEG_DATA)) {  /*Degraded reads*/
 		extern void restore_degraded_data_for_read(const struct operation *o, u32 dgrd_segment_bmp, int prev_rv, const bool is_crc_required);
