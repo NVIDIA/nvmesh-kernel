@@ -380,8 +380,11 @@ int nvmeib_mcs_msg_cache_foreach(struct nvmeib_mcs_msg_cache *cache,
 			node, struct nvmeib_mcs_msg_cache_entry, token_node);
 		ret = cb(ent->data, magic);
 		if (ret)
-			break;
+			goto out;
 	}
+	ret = 0;
+
+out:
 	NFOUT;
 	return ret;
 }
