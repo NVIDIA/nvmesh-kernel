@@ -512,32 +512,33 @@ static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
 	NFOUT;
 }
 
-static void __fill_netlink_hdr(struct nvmeibt_km_comm *p, struct msghdr* hdr, struct sockaddr_nl *addr)
+static void __fill_netlink_hdr(struct nvmeibt_km_comm *p, struct msghdr* hdr, struct sockaddr_nl *addr, size_t buf_len)
 {
 	memset(hdr, 0, sizeof(*hdr));
-	//memset(p->nlh, 0, p->max_msg_size.nlink);		// Todo: too much mem set, reduce this. Just memset for debug, not really needed
 	hdr->msg_name = (void *)addr;
 	hdr->msg_namelen = sizeof(*addr);
 	hdr->msg_iov = &p->iov;
 	hdr->msg_iovlen = 1;
+	p->iov.iov_len = buf_len;						// Minimal init for recv msg. For sending, more init is required
 }
 
 static void send_msg_to_kernel(struct nvmeibt_km_comm *p, struct srv_comm_msg *msg, bool is_toma_explicit_msg)
 {
 	struct msghdr hdr;
 	struct nlmsghdr *nlh = p->nlh;
+	const size_t send_len = NLMSG_LENGTH(msg->msg.len);	// Transmit not NLMSG_SPACE() but the exact length to avoid alignment padding of a few bytes, even though server code should consume with optional alignment
 
 	NFIN;
-	if (msg->msg.len > p->max_msg_size.nlink) {
+	if (send_len > (size_t)p->max_msg_size.nlink) {
 		N_Ef(tkmcsmtk0, "msg[@INT].id=@ID size @LEN[b] > max netlink msg @LEN[b]", msg->msg.opcode, msg->msg.id, msg->msg.len, p->max_msg_size.nlink);
 		msg_free(msg);
 		goto out;
 	}
 	msg->msg.caller_type = TOMA_CALLER;
-	__fill_netlink_hdr(p, &hdr, &p->dest_addr);
-	nlh->nlmsg_len = NLMSG_HDRLEN + msg->msg.len;
+	__fill_netlink_hdr(p, &hdr, &p->dest_addr, send_len);
+	nlh->nlmsg_len = send_len; 							// Parsed by server: static void recv_msg_(struct sk_buff *skb)
 	nlh->nlmsg_pid = getpid();							// Important, server uses this pid to pin pages in memory
-	nlh->nlmsg_flags = 0;
+	nlh->nlmsg_flags = 0;								// We dont use lh->nlmsg_seq currently.
 	nlh->nlmsg_type = NVMESH_NL_MSG_TYPE;
 	memcpy(NLMSG_DATA(nlh), &msg->msg, msg->msg.len);
 	N_Tf(tkmcsmtk1, "msg[@INT].id=@ID to kernel pid=@PID", msg->msg.opcode, msg->msg.id, nlh->nlmsg_pid);
@@ -678,7 +679,7 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 	bool is_alive = true;
 
 	NFIN;
-	__fill_netlink_hdr(p, &hdr, &src_addr);
+	__fill_netlink_hdr(p, &hdr, &src_addr, p->max_msg_size.nlink);	// Ensure recvmsg() can fill the entire preallocated buffer
 	n = recvmsg(p->nl_sock_fd, &hdr, 0);
 	if (n < (ssize_t)(NLMSG_HDRLEN + sizeof(struct nvmeib_nl_uk_comm_msg))) {
 		N_Ef(t2shnnm0, "Failed to recieve message from kernel, bytes=@INT", (int)n);
