@@ -43,6 +43,28 @@ RUN apt install -y \
     librdkafka1 \
     librdkafka-dev
 
+# Add python3.10 for poetry compilation
+# Use deadsnakes PPA to get python3.10
+RUN apt install -y ca-certificates curl gnupg
+RUN mkdir -p /etc/apt/keyrings
+
+RUN curl -fsSL https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0x6A755776 \
+  | gpg --dearmor \
+  | tee /etc/apt/keyrings/deadsnakes.gpg > /dev/null
+
+RUN echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] \
+https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu noble main" \
+> /etc/apt/sources.list.d/deadsnakes.list
+
+RUN apt update
+RUN apt install -y \
+  python3.10 \
+  python3.10-venv \
+  python3.10-distutils \
+  python3.10-dev
+
+RUN curl -sSL https://install.python-poetry.org | python3.10 -
+
 # Set the default command for the container
 #CMD ["/bin/bash"]
 
