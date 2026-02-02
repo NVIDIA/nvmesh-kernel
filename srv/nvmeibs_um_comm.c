@@ -2652,7 +2652,7 @@ static struct nvmeib_nl_uk_comm_rep * get_rep(struct nvmeib_nl_uk_comm_msg *msg)
 		break;
 #endif
 	case csc_remove_disk_ack: default:	// All those codes do not require response from the server
-		WARN(true, "nvmeibs BUG: Wrong toma message in_msg->opcode[%d] not expectig a reply, bailing out with wrong reply instead of crash!", msg->opcode);
+		WARN(true, "nvmeibs BUG: Wrong toma message in_msg->opcode[%d] not expecting a reply, bailing out with wrong reply instead of crash!", msg->opcode);
 		rep = &((struct nvmeib_zero_disk_reply *)msg->data)->base;
 		break;
 	};
