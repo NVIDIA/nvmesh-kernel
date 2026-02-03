@@ -641,7 +641,7 @@ static bool __handle_new_srvr_msg(struct nvmeibt_km_comm *p)
 	NFIN;
 	__fill_netlink_hdr(p, &hdr, &src_addr, p->max_msg_size.nlink);	// Ensure recvmsg() can fill the entire preallocated buffer
 	n = recvmsg(p->nl_sock_fd, &hdr, 0);
-	if (n < (ssize_t)(NLMSG_HDRLEN + sizeof(struct nvmeib_nl_uk_comm_msg))) {
+	if (n < (ssize_t)(NLMSG_LENGTH(sizeof(struct nvmeib_nl_uk_comm_msg)))) {
 		N_Ef(t2shnnm0, "Failed to recieve message from kernel, bytes=@INT", (int)n);
 		is_alive = false;
 	} else {
@@ -840,7 +840,7 @@ struct blocking_wait_context {
 	int rv;
 };
 
-static void __on_done_wakeup_sender(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep) {
+static void __on_done_wakeup_sender(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep) {	// Called from netlink main thread
 	struct blocking_wait_context *b = ctx;
 	(void)ok;
 	if (rep) {
@@ -872,7 +872,7 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 	b.rv = -EPERM;							// Not sent to server
 	if (__submit_toma_msg(p, m, buf, buf_len)) {
 		wait_for_completion(&b.comp);	// Server reply will autofill b.rv
-		N_Tf(__AUTOID__, "msg[@INT].id=@ID, (done), rv=@RV", m->msg.opcode, m->msg.id, b.rv);
+		N_Tf(__AUTOID__, "msg[@INT].id=@ID, wait_done, rv=@RV", m->msg.opcode, m->msg.id, b.rv);
 	}	// else, beware: 'm' already freed
 	getnstimeofday_boot(&t2);
 	{
