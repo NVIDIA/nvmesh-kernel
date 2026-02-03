@@ -203,9 +203,8 @@ enum uk_comm_opcode {
 	csc_identify_disk = 10,					// deprecated: t2s: payload struct nvmeib_identify_disk,  s2t reply: struct nvmeib_identify_disk_reply
 
 	csc_t2s_local_client = 11,				// t2s: instruction to local client (control path), like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
-	csc_t2s_blocking_msg_other = 12,		// t2s: blocking message to server any of 'enum nvmeibs_toma_server_msg_type'
-	csc_t2s_blocking_msg_to_io_clients = 13,// t2s: blocking message to pass to registrant client (client which wants to do io to disk segment)
-	csc_s2t_blocking_msg_ack = 14,			// s2t: ack for the 2 above message type, send by server, unblocking Toma thread
+	csc_t2s_blocking_msg_other = 12,		// t2s & s2t: blocking message to server any of 'enum nvmeibs_toma_server_msg_type', Server replies with same opcode
+	csc_t2s_blocking_msg_to_io_clients = 13,// t2s & s2t: blocking message to pass to registrant client (client which wants to do io to disk segment), Server replies with same opcode
 	csc_msg_to_process = 15,				// s2t, generic mechanism to send a message from kernel to user space, payload: struct nvmeib_push_extended_msg
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	csc_contaminate_disk = 16,				// should be the last just before the end
@@ -228,7 +227,6 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_t2s_local_client: return "csc_t2s_local_client";
 	case csc_t2s_blocking_msg_other: return "csc_t2s_blocking_msg_other";
 	case csc_t2s_blocking_msg_to_io_clients: return "csc_t2s_blocking_msg_to_io_clients";
-	case csc_s2t_blocking_msg_ack: return "csc_s2t_blocking_msg_ack";
 	case csc_msg_to_process: return "csc_msg_to_process";
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";
@@ -255,7 +253,7 @@ enum uk_comm_err_opcode {				// s2t error codes, for Toma requests
 };
 
 struct nvmeib_nl_uk_comm_rep {			// s2t, server base reply on toma requests
-	union { enum uk_comm_opcode opcode;       int __just_align4bytes1; };
+	union { enum uk_comm_opcode opcode;       int __just_align4bytes1; };	// same opcode of the original request message
 	union { enum uk_comm_err_opcode error;    int __just_align4bytes2; };
 	long long latency_ns;				// n[ns] it took the kernel to execute Toma request
 };
@@ -303,6 +301,14 @@ struct nvmeib_format_disk {				// t2s - Toma request server to format a disk
 			u32 flag_reset_ctrlr : 1;
 		};
 	};
+};
+
+struct nvmeib_msg_tom_2_local_clnt {	// Toma sets msg to local client via netlink. Used for attach, passing praid configuration
+	struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
+		int copy;						// Always true, if true the message data in the message must be copied before calling the client API
+		unsigned n_pages;				// numebr of pages that are needed to be copied
+		void *data;						// the data to be transfered to the client, must be page aligned
+	} toma_client;
 };
 
 enum nvmeib_main_gpt_update_flags {
@@ -489,7 +495,15 @@ struct nvmeib_push_extended_msg {				// Not used, infrastructure for pushing mes
 	char content[0];
 };
 
-struct nvmeib_nl_msg_to_toma {					// s2t: All possible payloads
+struct nvmeib_nl_uk_comm_msg {			// t2s and s2t netlink header user space (toma/others) send to/from server. Base Header which exists in all messages
+	int len;
+	union { enum uk_comm_opcode opcode; int __just_align4bytes; };
+	char caller_type;					// enum nvmeibs_um_caller_type, server replies with the same type as incomming request
+	unsigned long id __attribute__((aligned(8)));
+	char data[0];						// Content of the message: struct nvmeib_nl_msg_to_toma or nvmeib_nl_msg_to_srvr_payload
+};
+
+struct nvmeib_nl_msg_to_toma {					// s2t: All possible payloads, appear in nvmeib_nl_uk_comm_msg::data
 	union {
 		struct nvmeib_test_zero_reply			test_zero_reply;		// Deprecated
 		struct nvmeib_format_disk_reply			format_disk_reply;
@@ -500,26 +514,11 @@ struct nvmeib_nl_msg_to_toma {					// s2t: All possible payloads
 		struct nvmeib_identify_disk_reply		identify_disk_reply;
 		struct nvmeib_copied_rscs_reply			copied_rscs_reply;
 		struct nvmeib_push_extended_msg			extended_msg;
-		struct nvmeib_nl_uk_comm_rep 			unblock_ack;
+		struct nvmeib_nl_uk_comm_rep 			unblock_ack__used_but_not_by_name;
 	} payload;
 };
 
-struct nvmeib_msg_tom_2_local_clnt {	// Toma sets msg to local client via netlink. Used for attach, passing praid configuration
-	struct nvmeib_toma_client {			// message from toma to local client. if the data is copied, toma will receive a message at the end of a successful copy and error otherwise...
-		int copy;						// Always true, if true the message data in the message must be copied before calling the client API
-		unsigned n_pages;				// numebr of pages that are needed to be copied
-		void *data;						// the data to be transfered to the client, must be page aligned
-	} toma_client;
-};
-
-struct nvmeib_nl_uk_comm_msg {			// t2s user space (toma/others) send to server. Base Header which exists in all messages
-	int len;
-	union { enum uk_comm_opcode opcode; int __just_align4bytes; };
-	char caller_type;					// enum nvmeibs_um_caller_type
-	unsigned long id __attribute__((aligned(8)));
-	char data[0];						// Content of the message
-};
-union nvmeib_nl_msg_to_srvr_payload {			// t2s: All possible payloads, user space (toma/others) send to server.
+union nvmeib_nl_msg_to_srvr_payload {			// t2s: All possible payloads, user space (toma/others) send to server. appear in nvmeib_nl_uk_comm_msg::data
 	struct nvmeib_zero_disk zero_disk;
 	struct nvmeib_io_to_disk  io2disk;
 	struct nvmeib_format_disk fmt_disk;
