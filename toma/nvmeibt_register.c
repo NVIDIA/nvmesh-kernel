@@ -404,7 +404,7 @@ static int lock_id_cache_registrant_unregistered(struct nvmeibt_registrant_ctx *
 	seg_active = reg_ctx->seg_active;
 
 	if (!reg_ctx->is_purging_lock_id_cache) {
-		N_Tf(aasgyr6, "registrant: @HANDLE not marked as purging", reg_ctx->client_messaging_handle);
+		N_Tf(aasgyr6, "registrant: @HANDLE no new lockid_zone. No need for purging", reg_ctx->client_messaging_handle);
 		goto out;
 	}
 
@@ -1353,7 +1353,7 @@ static int handle_stale_lock_report(struct nvmeibt_register_msg *msg)
 					SEG_UUID_8, pl->problematic_seg_uuid_str, pl->disk_blkno_4k, problematic_lock_id.all);
 		}
 	} else {
-		N_Tf(kkori54, "adding handle=@HANDLE with lockid=@T_LID to awaited_lockids for seg=@UUID_8",
+		N_Tf(kkori54, "adding handle=@HANDLE with lockid=@T_LID to awaiting_lockids for seg=@UUID_8",
 			reporting_registrant_ctx->client_messaging_handle, nvmeib_lockid_purify(problematic_lock_id), SEG_UUID_8);
 		add_awaiting_lockid_recipient(seg_active, problematic_lock_id, reporting_registrant_ctx);
 
