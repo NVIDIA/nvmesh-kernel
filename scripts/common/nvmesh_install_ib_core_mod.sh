@@ -100,8 +100,8 @@ MODULES_BASE=/lib/modules
 RUN_KVER=$(uname -r)
 OFED_VER_STRING=$(ofed_info -s 2>/dev/null || echo "none")
 OFED_VER_STRING=${OFED_VER_STRING%:*}
-OFED_FULL_VER=$(echo "$OFED_VER_STRING" | grep -Eo "[0-9.]+[0-9.-]+")
-OFED_VER=$(echo "$OFED_VER_STRING" | grep -Eo "[0-9.]+" | head -1)
+OFED_FULL_VER=$(echo "$OFED_VER_STRING" | (grep -Eo "[0-9.]+[0-9.-]+" || echo "none"))
+OFED_VER=$(echo "$OFED_VER_STRING" | (grep -Eo "[0-9.]+" || echo "none") | head -1)
 reboot_needed=0
 
 [ -d "$REPO_BASE" ] || (log "NVMesh common-repo not found" && exit 0)
