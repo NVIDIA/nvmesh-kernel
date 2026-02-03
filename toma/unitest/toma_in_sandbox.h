@@ -93,11 +93,13 @@ struct nlmsghdr {				// 16[bytes] Copied netlink header from linux include
 	u32		nlmsg_seq;			// Unused
 	u32		nlmsg_pid;
 };
-#define NLMSG_LENGTH(len) ((len) + sizeof(struct nlmsghdr))
-#define NLMSG_ALIGN(len)  (len)
+#define NLMSG_ALIGN(len) (((len)+3U) & ~3U)
 #define NLMSG_HDRLEN	 ((int) NLMSG_ALIGN(sizeof(struct nlmsghdr)))
+#define NLMSG_LENGTH(len) ((len) + NLMSG_HDRLEN)
 #define NLMSG_SPACE(len) NLMSG_ALIGN(NLMSG_LENGTH(len))
-#define NLMSG_DATA(nlh)  ((void *)(((char *)nlh) + sizeof(struct nlmsghdr)))
+#define NLMSG_DATA(nlh)  ((void *)(((char *)nlh) + NLMSG_HDRLEN))
+#define NLMSG_NEXT(nlh, len) ((len) -= NLMSG_ALIGN((nlh)->nlmsg_len), (struct nlmsghdr *)(((char *)(nlh)) + NLMSG_ALIGN((nlh)->nlmsg_len)))
+#define NLMSG_OK(  nlh, len) ((len) >= (int)sizeof(struct nlmsghdr) && (nlh)->nlmsg_len >= sizeof(struct nlmsghdr) && (nlh)->nlmsg_len <= (len))
 #define NLMSG_DONE 0x3
 #define NLMSG_MIN_TYPE		0x10
 
