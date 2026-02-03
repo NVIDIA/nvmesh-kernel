@@ -37,7 +37,6 @@ static ssize_t __nvmeibt_pwrite_atomic(int fd, const void *vptr, size_t size, in
 static inline size_t padded_mmap_length(size_t length) { return length + 2 * PAGE_SIZE; }
 
 #define PADDED_MMAP_MAGIC_NUM 0x726f656568657265LLU		// MAGIC cookie ("roeehere") to protect against buffer overrun in the first page
-
 struct padded_mmap_magic_number {
 	uint64_t magic_num;
 	void *addr;
@@ -141,14 +140,10 @@ int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const c
 /***************************** Generic messages *******************************/
 static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
 {
-	int rv = 0, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
+	int rv = -__LINE__, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
 	if (fd > 0) {
 		const int n_recv_bytes = NNVMEIBT_STR_FREAD_ATOMIC(salgcd2, str, fd);
-		if (n_recv_bytes <= 0) {
-			rv = -__LINE__;
-		}
-	} else {
-		rv = -__LINE__;
+		rv = ((n_recv_bytes <= 0) ? -__LINE__ : 0);
 	}
 	NNVMEIBT_CLOSE(salgcd4, fd);
 	return rv;
@@ -391,12 +386,9 @@ int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 {
 	struct nvmeibt_km_comm *p;
 	int rv = 0;
-	if (_singleton) {
-		N_Ef(__AUTOID__, "Already initialized. Wrong usage");
-		return -EEXIST;
-	}
+	if (_singleton) {											rv = -__LINE__; goto init_fail; }
 	p = _singleton = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
-	if (!p) { 													rv = -__LINE__; goto out; }
+	if (!p) { 													rv = -__LINE__; goto init_fail; }
 	p->params = *params;
 	if (__blocking_msg_api_create(p) < 0) {						rv = -__LINE__; goto free_p; }
 	if (!params->print_status_fn) { 							rv = -__LINE__; goto free_p; }			// The only one which is mandatory
@@ -423,7 +415,8 @@ int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 		buf.type = NVMEIBS_TOMA_LOGIN;
 		(void)nvmeib_srvr_api_lib_send_block_msg_to_server(&buf);
 	}
-	goto out;
+	N_Tf(__AUTOID__, "Done");
+	return 0;
 
 free_nl_buffer:	NNVMEIBT_TOMA_FREE(tscnlssc, p->nlh);
 free_netlink:	NNVMEIBT_CLOSE(tscnlssd, p->nl_sock_fd);
@@ -432,10 +425,8 @@ free_spair:		NNVMEIBT_CLOSE(tscnlsse, p->spair[0]);
 free_guard:		pthread_mutex_destroy(&p->guard);
 free_p:			NNVMEIBT_TOMA_FREE(tscnlssg, p);
 				_singleton = NULL;
-				N_Ef(tscnlssh, "Failed on rv=@INT, aborting. @AUTO_ERRNO", rv);
-out:
-	NFOUT;
-	return _singleton ? 0 : -ENODEV;
+init_fail:		N_Ef(tscnlssh, "Failed on line=@INT, aborting. @AUTO_ERRNO", rv);
+	return _singleton ? -EEXIST : -ENODEV;
 }
 
 static void __remove_disk_and_free(struct nvmeibt_km_comm *p, struct disk_info *disk)
@@ -452,18 +443,6 @@ static void __drain_msg_list(msgs_list_t *l)
 		struct srv_comm_msg *msg = XDLIST_FIRST(l);
 		XDLIST_DEL(&msg->link);
 		msg_free(msg);
-	}
-}
-
-static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len);
-
-void nvmeib_srvr_api_lib_server__detach(void)
-{
-	struct nvmeibt_km_comm *p = _singleton;
-	if (p->comm_thread) {
-		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_stop_callbacks, .on_done = NULL };
-		N_Tf(tscnlvs0, "Send internal stop callbacks, to main thread");
-		(void)_submit_msg_and_wait_for_ack(p, msg.opcode, &msg, sizeof(msg));
 	}
 }
 
@@ -873,11 +852,10 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(const struct km_comm_msg_hdr *h
 struct completion {
 	sem_t s;	// reset(){=0}, done(){change 0->1}, wait(){block until == 1, then reset()}
 };
-static inline void init_completion(    struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_init(&x->s, 0, 0) == 0, "AAA"); }
-static inline void reinit_completion(  struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_init(&x->s, 0, 0) == 0, "AAA"); }
-static inline void wait_for_completion(struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_wait(&x->s) == 0, "AAA"); }
-static inline void complete(           struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_post(&x->s) == 0, "AAA"); }
-static inline void destroy_completion( struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_destroy(&x->s) == 0, "AAA"); }
+static inline void init_completion(    struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_init(&x->s, 0, 0) == 0, "comp=@PTR", x); }
+static inline void wait_for_completion(struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_wait(&x->s)       == 0, "comp=@PTR", x); }
+static inline void complete(           struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_post(&x->s)       == 0, "comp=@PTR", x); }
+static inline void destroy_completion( struct completion *x){ NTOMA_ASSERT(__AUTOID__, sem_destroy(&x->s)    == 0, "comp=@PTR", x); }
 static inline bool completion_is_done( struct completion *x){ return sem_trywait(&x->s); }
 
 struct blocking_wait_context {
@@ -924,7 +902,18 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 		const int64_t m_sec = NSEC_TO_MSEC(timespec_diff_ns(t2, t1));
 		if (m_sec > 20) N_IMf(__AUTOID__, "msg[@INT] Took @LLD[ms]", op, m_sec);
 	}
+	destroy_completion(&b.comp);
 	return b.rv;
+}
+
+void nvmeib_srvr_api_lib_server__detach(void)
+{
+	struct nvmeibt_km_comm *p = _singleton;
+	if (p->comm_thread) {
+		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_stop_callbacks, .on_done = NULL };
+		N_Tf(tscnlvs0, "Send internal stop callbacks, to main thread");
+		(void)_submit_msg_and_wait_for_ack(p, msg.opcode, &msg, sizeof(msg));
+	}
 }
 
 int	nvmeib_srvr_api_lib_send_block_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg)
@@ -951,10 +940,10 @@ int	nvmeib_srvr_api_lib_send_block_msg_to_server(const struct nvmeibs_toma_serve
 	}
 }
 
-int nvmeib_srvr_api_lib_send_block_msg_to_client(const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
+int nvmeib_srvr_api_lib_send_block_msg_to_client(const struct nvmeibs_toma_client_proc_buf *msg, int buf_len)
 {
 	struct nvmeibt_km_comm *p = _singleton;
-	int rv; (void)clnt_host;
+	int rv;
 	NTOMA_ASSERT(__AUTOID__, buf_len <= p->max_msg_size.proc_send, "Msg too large @INT[b]", buf_len);
 	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)	{
 		rv = _submit_msg_and_wait_for_ack(p, csc_t2s_blocking_msg_to_io_clients, msg, buf_len);

@@ -1416,7 +1416,6 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 	const int					buf_len = sizeof(*msg) + data_length;
 
 	NFIN;
-
 	msg = NNVMEIBT_BM_ALLOC(trace_toma_nvmeibt_toma_send_msg_to_client, buf_len);
 	msg->handle = reg_ctx->client_messaging_handle;
 	nvmeibt_client_thick_msg_write(&msg->data,
@@ -1426,7 +1425,7 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 min((u32)reg_ctx->client_protocol_version, (u32)NVMEIBT_CLIENT_PROTO_VERSION),	// Downgrade the protocol
 							 0xDEADBEAF, //nvmeibt_global_get_global()->mgmt_config_version,
 							 nvmeibt_seg_active_active_config_version(reg_ctx->seg_active),
-						     RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_applied),		TODO(PROBABLY USELESS)
+							 RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_applied),		TODO(PROBABLY USELESS)
 							 praid_version,
 							 nvmeibt_union_uuid_to_urn_uuid(&(reg_ctx->seg_uuid)).str,
 							 reg_ctx->reg_lock_id.all,
@@ -1436,11 +1435,11 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 0, // Irrelevant: is_REGISTER_for_recovery
 							 data_length,
 							 data,
-							 msg_id
-							);
-	rv = nvmeib_srvr_api_lib_send_block_msg_to_client(msg, buf_len, reg_ctx->client->net.host_name);
+							 msg_id);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_client(msg, buf_len);
 	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, msg);
-
+	if (rv < 0)
+		N_Tf(trace_msg_to_reg, "failed to send message to registrant @STR", reg_ctx->client->net.host_name);
 	NFOUT;
 	return rv;
 }

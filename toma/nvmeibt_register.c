@@ -869,8 +869,6 @@ int nvmeibt_register_send_msg_to_registrant(struct nvmeibt_registrant_ctx *regis
 		goto out;
 	}
 	rv = nvmeibt_toma_send_msg_to_client(registrant_ctx, praid_version, msg_type, reason, data_length, data, msg_id);
-	if (rv < 0)
-		N_Tf(trace_msg_to_reg, "failed to send message to registrant");
 out:
 	NFOUT;
 	return rv;
