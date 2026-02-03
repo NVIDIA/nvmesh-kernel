@@ -1888,24 +1888,22 @@ int __thread_gen_async_ec_single_slice_io(void* param) {
 	struct clientSimulator *client = &p->sys->clients[0];
 	int rv, round, v = 0;
 	const int n_slices = clientSimulator_sizeof_bdev(client, v) / p->nlbas;	// num slices in volume
+	u8 *mem = sim_kzalloc(p->nlbas * NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 	for (round=0; !kthread_should_stop(); round++) {
 		const int seed = (p->flags & BUNITEST_ASYNC_TEST_RAND_IO_PATTERN) ? rand() : round;
 		const int rand_slice = (seed % n_slices) * p->nlbas;
 		const int len   = (round % p->nlbas) + 1;						// [1..8] blocks
-		const int start = rand_slice + p->nlbas - len;
-		u8 *mem = sim_kzalloc(len*NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
+		const int start = rand_slice + seed % (p->nlbas - len + 1);
 		NVMeshSystem_async_io_gate_wait(p->sys);
 		if (p->op == NVMEIB_BLOCK_IO_OP_READ){
-			rv = osSimulator_readArrFree( &client->OS, v, start, len, mem);
+			rv = osSimulator_readArrWait( &client->OS, v, start, len, mem);
 		} else { // To ensure that the data remains stable throughout it's parity/edic cycle we must generate it for each
 			__unitest_fill_blocks_unique_pattern_and_lba(mem, start, len);
-			rv = osSimulator_writeArrFree(&client->OS, v, start, len, mem);
+			rv = osSimulator_writeArrWait(&client->OS, v, start, len, mem);
 		}
-		BUG_ON(rv != 0);													// nvmeibc_block implementation: All errors are returned via bio_endio(), If falls here - probably a problem with a unitests
-		rv = osSimulator_rv_of_last_io_get(&client->OS, v);					// read the 'rv' of last async IO
 		BUG_ON(rv != 0);
-		udelay(p->mu_delay + ((p->op == NVMEIB_BLOCK_IO_OP_READ) ? 0 : 3));
 	}
+	sim_kfree(mem);
 	p->n_cycles = round;
 	return 0;
 }
@@ -2019,31 +2017,34 @@ static void __async_ec_single_slice_io_cleanup(struct NVMeshSystem *sys) {
 #define unitest_async_pause_cont_during_ec_io_dual_lock_mode(sys) 			__async_pause_cont_during_ec_single_slice_io(sys, "Dual locks" , false)
 #define unitest_async_pause_cont_during_ec_io_unsafe_lock_mode(sys)		__async_pause_cont_during_ec_single_slice_io(sys, "Unsafe", false)
 static int __async_pause_cont_during_ec_single_slice_io(struct NVMeshSystem *sys, const char* lock_modes, const bool with_error){
-	t_async_test_params p[4] = {{0}};
+	t_async_test_params p[32] = {{0}};
 	const int n_threads = ARRAY_SIZE(p), n_blocks = sys->mdb.vols->segs->slice_size, disk_id = -sys->mdb.vols->segs->replicas;		// Read/Write 1-8 blocks, in a single slice
-	int v, n_total_ios = 0, n_total_pauses = 0, num_canceled_ios = 0;
+	const int n_io_threads = n_threads - 1;
+	int v, pc_v = n_io_threads, n_total_ios = 0, n_total_pauses = 0;
 	struct nvmeibc_disk_hooks disk_hooks;
-	for (v=0; v<n_threads; v++)
-		t_async_ec_test_params_init(p[v], sys, disk_id, n_blocks, BUNITEST_ASYNC_TEST_RAND_IO_PATTERN);
 	if (lock_modes) __set_different_lock_modes_of_vol(sys, 0, lock_modes);
 	if (with_error) {
 		struct nvmeibc_disk_hooks disk_hooks_temp = {.args.trerr = {true, true, true, 0, 0, (rand() % INJECT_TRANSPORT_ERROR_CYCLE_SIZE), true, 0, 0}, .inject_transport_error = inject_transport_error};
 		disk_hooks = disk_hooks_temp;
 		NVMeshSystem_gen_cmd_hooks_setup_all_disks(sys, &disk_hooks);
 	}
-	create_async_ec_io_thread(&p[0], NVMEIB_BLOCK_IO_OP_WRITE);
-	create_async_ec_io_thread(&p[1], NVMEIB_BLOCK_IO_OP_READ);
-	p[2].kthread = kthread_run(__thread_async_pause_cont, &p[2], "ut:async pause");		BUG_ON(!p[2].kthread);
+	for (v = 0; v < n_io_threads; v++) {
+		t_async_ec_test_params_init(p[v], sys, -1, n_blocks, BUNITEST_ASYNC_TEST_RAND_IO_PATTERN);
+		create_async_ec_io_thread(&p[v], (v & 0x1) ? NVMEIB_BLOCK_IO_OP_WRITE : NVMEIB_BLOCK_IO_OP_READ);
+	}
+	t_async_ec_test_params_init(p[pc_v], sys, disk_id, 0, 0);
+	p[pc_v].kthread = kthread_run(__thread_async_pause_cont, &p[pc_v], "ut:async pause");		BUG_ON(!p[pc_v].kthread);
 
 	msleep(1500);												// Let the threads run together
-	for (v=0; v<n_threads; v++) if (p[v].kthread) kthread_stop(p[v].kthread);
-	for (v=0; v<2        ; v++) n_total_ios    += p[v].n_cycles;
-	for (   ; v<n_threads; v++) n_total_pauses += p[v].n_cycles;
 
 	if (with_error) { // Clear error injection before drain - can cause abandoned entries in JAM
 		NVMeshSystem_gen_cmd_hooks_clean_all_disks(sys);
 	}
-	num_canceled_ios = __cancel_and_drain_resubmitted_io(sys);	// PAUSE/CONT thread has finished, it is a waste of time to resbumit good path remaining IO.
+
+	for (v = 0; v < n_threads; v++) if (p[v].kthread) kthread_stop(p[v].kthread);
+	for (v = 0; v < n_io_threads; v++) n_total_ios += p[v].n_cycles;
+	for (v = n_io_threads; v < n_threads; v++) n_total_pauses += p[v].n_cycles;
+
 	if (lock_modes) __set_different_lock_modes_of_vol(sys, 0, "Normal");
 
 	// Remaining problems (No dbits coz no degraded topology). Has stale locks and abandoned/unknown journal
@@ -2051,29 +2052,29 @@ static int __async_pause_cont_during_ec_single_slice_io(struct NVMeshSystem *sys
 
 	BUG_ON(!NVMeshSystem_is_stable(sys));
 	NVMeshSystem_gen_cmd_hooks_clean_all_disks(sys);
-	unitest_print("*************** Pauses with%s errors %d, (Sent=%d, Done=%d) IO's, %s\n", ((with_error) ? "   " : "out" ),
-				  n_total_pauses, n_total_ios, n_total_ios - num_canceled_ios, (lock_modes?lock_modes:""));
+	unitest_print("*************** Pauses with%s errors %d, IOs %d, %s\n", ((with_error) ? "   " : "out" ),
+				  n_total_pauses, n_total_ios, (lock_modes?lock_modes:""));
 	return 0;
 }
 
 static int __async_degraded_rebuild_during_ec_single_slice_io(struct NVMeshSystem *sys) {
-	t_async_test_params p[4] = {{0}};
-	const int n_threads = ARRAY_SIZE(p), n_blocks = sys->mdb.vols->segs->slice_size, disk_id = -sys->mdb.vols->segs->replicas;		// Read/Write 1-8 blocks, in a single slice
-	int v, n_total_ios = 0, n_total_rebuilds = 0, num_canceled_ios = 0;
+	t_async_test_params p[32] = {{0}};
+	const int n_threads = ARRAY_SIZE(p), n_blocks = sys->mdb.vols->segs->slice_size;		// Read/Write 1-8 blocks, in a single slice
+	const int n_io_threads = n_threads - 1;
+	int v, deg_v = n_io_threads, n_total_ios = 0, n_total_rebuilds = 0;
 
-	for (v=0; v<n_threads; v++)
-		t_async_ec_test_params_init(p[v], sys, disk_id, n_blocks, BUNITEST_ASYNC_TEST_RAND_IO_PATTERN);
+	for (v = 0; v < n_io_threads; v++) {
+		t_async_ec_test_params_init(p[v], sys, -1, n_blocks, BUNITEST_ASYNC_TEST_RAND_IO_PATTERN);
+		create_async_ec_io_thread(&p[v], (v & 0x1) ? NVMEIB_BLOCK_IO_OP_WRITE : NVMEIB_BLOCK_IO_OP_READ);
+	}
 
-	create_async_ec_io_thread(&p[0], NVMEIB_BLOCK_IO_OP_WRITE);
-	create_async_ec_io_thread(&p[1], NVMEIB_BLOCK_IO_OP_READ);
-	p[2].kthread = kthread_run(__thread_async_degraded_ec_vols, &p[2], "ut:deg_ec");		BUG_ON(!p[2].kthread);
+	t_async_ec_test_params_init(p[deg_v], sys, -1, 0, 0);
+	p[deg_v].kthread = kthread_run(__thread_async_degraded_ec_vols, &p[deg_v], "ut:deg_ec");		BUG_ON(!p[deg_v].kthread);
 
 	msleep(1500);												// Let the threads run together
-	for (v=0; v<n_threads; v++) if (p[v].kthread) kthread_stop(p[v].kthread);
-	for (v=0; v<2        ; v++) n_total_ios    += p[v].n_cycles;
-	for (   ; v<n_threads; v++) n_total_rebuilds += p[v].n_cycles;
-
-	num_canceled_ios = __cancel_and_drain_resubmitted_io(sys);	// rebuild thread has finished, it is a waste of time to resbumit good path remaining IO.
+	for (v = 0; v < n_threads; v++) if (p[v].kthread) kthread_stop(p[v].kthread);
+	for (v = 0; v < n_io_threads; v++) n_total_ios += p[v].n_cycles;
+	for (v = n_io_threads; v < n_threads; v++) n_total_rebuilds += p[v].n_cycles;
 
 	clientSimulator_wait_for_all_sync_ops(&sys->clients[0]);
 
@@ -2081,8 +2082,7 @@ static int __async_degraded_rebuild_during_ec_single_slice_io(struct NVMeshSyste
 	__async_ec_single_slice_io_cleanup(sys);
 
 	BUG_ON(!NVMeshSystem_is_stable(sys));
-	unitest_print("*************** Rebuilds %d, (Sent=%d, Done=%d) IO's\n",
-				  n_total_rebuilds, n_total_ios, n_total_ios - num_canceled_ios);
+	unitest_print("*************** Rebuilds %d, IOs %d\n", n_total_rebuilds, n_total_ios);
 	return 0;
 }
 

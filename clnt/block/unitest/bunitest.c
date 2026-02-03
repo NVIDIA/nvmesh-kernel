@@ -1399,7 +1399,7 @@ int __thread_async_pause_cont(void* param) {
 	const bool should_rotate_disks = (p->disk_id<0);				// -1: [0..NVMESH_N_PHYS_DISKS_REGULAR_USE), <-2: [0..-p->disk_id), >0: Pause only this specific disk
 	const int  n_used_disks = (p->disk_id < -1) ? (-p->disk_id) : NVMESH_N_PHYS_DISKS_REGULAR_USE;
 	int round, cur_disk = p->disk_id, toma_ind;
-	int sleep_time_msecs = (p->is_ec) ? 10 : 1;
+	int sleep_time_msecs = (p->is_ec) ? 100 : 10;
 	for (round=0; !kthread_should_stop(); round++) {
 		if (should_rotate_disks)
 			cur_disk = round % n_used_disks;
