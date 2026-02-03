@@ -107,7 +107,7 @@ void sim_io_pet_controller_rotate(char const* test_id)
 	snprintf(fname, sizeof(fname), "nvmeibc_io_pet.%s.binlog", test_id);
 	pthread_rwlock_wrlock(&io_pet_controller.output.lock);
 	__io_pet_controller_close_fd_unsafe(&io_pet_controller);
-	fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	fd = open(fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
 	if (fd < 0) {
 		fprintf(stderr, "failed to open '%s' file: %s\n", fname, strerror(errno));
 	} else {
