@@ -30,6 +30,7 @@ target_transfer_list="srv/nvmeibs.ko* \
 			toma/bin/*/nvmeibt_toma \
 			toma/scripts/toma_persistence_to_JSON.sh	\
 			toma/scripts/JSON_to_toma_persistence.sh	\
+			toma/scripts/gpt_util.sh	\
 			toma/bin/*/nw_*.so \
 			toma/bin/*/nvmeibt_toma_src_tar.pgp"
 
