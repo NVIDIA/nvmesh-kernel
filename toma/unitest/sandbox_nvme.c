@@ -24,7 +24,6 @@ static int disk_init(const char *dest_path, const char *src_path);
 static int copy_file(const char *source_path, const char *dest_path);
 static int copy_between_fds(int srcfd, int dstfd);
 static void create_simulated_locks_file(const char *serial_number);
-static void create_simulated_smart_file(const char *device_name, const char *serial_number, int vendor, const char *model);
 
 // Constants
 
@@ -35,8 +34,6 @@ static const char stock_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_st
 static const char local_disk_template_file_path[] = TEST_DATA_BUILD_DIR "disk_nvmesh.img";
 
 #define TARGET_DEVICES_FILE TOMA_ROOT_DIR "var/opt/nvmesh/.target_devices"
-#define DISKS_CSV_FILE TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"						// Emulates the work of kernel server.
-#define PROC_SERVER_SMART_FILE_FMT "proc/nvmeibs/smart%d"   // File produced by kernel server - Toma uses the "Pci Address" line
 
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 
@@ -78,16 +75,11 @@ void sandbox_nvme_init(void)
 	// Generate the disk data files.
 	write_file(TARGET_DEVICES_FILE, "nvme,STKD_SN_001,5121,STKD_MN_001,1\n");
 
-	write_file(DISKS_CSV_FILE, NVMEIBS_DISKS_CSV_HEADER "\n"
-		"NVMD_SN_002.1,2000,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122,SAMSUNG MZWLL800HEHP-00003\n"
-		"NVMD_SN_003.1,2000,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123,KIOXIA KXK600-02\n");
-
 	// Create simulated /proc files for NVMesh disks
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		const struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (!d->stock_disk) {
 			create_simulated_locks_file(d->serial_number);
-			create_simulated_smart_file(d->device_name, d->serial_number, d->vendor_id, d->model_number);
 		}
 	}
 	N_Tf(sbu3402, "done initializing NVMe disks");
@@ -111,50 +103,6 @@ static void create_simulated_locks_file(const char *serial_number)
 
 	BUG_ON(close(fd) != 0);
 	N_Tf(sbu3403, "created locks file @STR", locks_path);
-}
-
-static void create_simulated_smart_file(const char *device_name, const char *serial_number, int vendor, const char *model)
-{
-	const char *p;
-	int nvme_num;
-	int smart_idx;
-	char smart_path[256];
-	char smart_content[4000];
-	int n;
-
-	// Expected examples: "nvme1001n1", "nvme1002n1", ...
-	BUG_ON(!device_name);
-	BUG_ON(strncmp(device_name, "nvme", 4) != 0);
-
-	p = device_name + 4;
-	BUG_ON(!isdigit((unsigned char)*p));
-
-	nvme_num = 0;
-	while (isdigit((unsigned char)*p)) {
-		nvme_num = nvme_num * 10 + (*p - '0');
-		p++;
-	}
-
-	smart_idx = nvme_num - 1000;
-	BUG_ON(smart_idx < 0);
-
-	n = snprintf(smart_path, sizeof(smart_path), TOMA_ROOT_DIR PROC_SERVER_SMART_FILE_FMT, smart_idx);
-	BUG_ON(n < 0 || n >= (int)sizeof(smart_path));
-
-	// For now, PCI address is made unique by the smart_idx. Not sure how it's really used, so we can change later.
-	snprintf(smart_content, sizeof(smart_content),
-		"Pci Address=0000:%02x:00.0\n"
-		"Serial Number=%s\n"
-		"Vendor=0x%04x\n"
-		"Model=%s\n"
-		"Submission Queues=128\n"
-		"Completion Queues=128\n"
-		"MSIX Interrupts=129\n"
-		"Num admin cmds=323\n"
-		"Namespace Id=1\n"
-		"Numa Node=1\n",
-	smart_idx, serial_number, vendor, model);
-	write_file(smart_path, smart_content);
 }
 
 static void mkdir_if_not_exists(const char *path)
