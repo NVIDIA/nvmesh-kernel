@@ -288,7 +288,7 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 				}
 				if (reg_ctx && (reg_ctx->client_messaging_handle == msg->toma_conn_proc_handle)) {
 					// Found the right seg for this client_messaging_handle, remove all traces of the reg_ctx
-					nvmeibt_register_launch_unsubscribed_registrant_removal(reg_ctx);
+					nvmeibt_register_launch_unsubscribed_active_registrant_removal(reg_ctx);
 					is_found = 1;
 				}
 				if (is_found) {

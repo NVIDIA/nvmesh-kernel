@@ -37,8 +37,6 @@ struct nvmeibt_registrant_awaiting_lockid {
 	struct xdlist 						awaiting_lockid_link;
 };
 
-#define REG_CTX_N_STALE_LOCKS_UNINITIALIZED (-1)
-
 /*
  * A registrant OBJECT can belong to at most one hash/list:
  * - seg_active->active...
@@ -147,7 +145,6 @@ void nvmeibt_register_send_toma_not_ready(
 
 int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int client_id, struct nvmeibt_node *registrant_node);
 
-void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg, bool is_preserving_in_longing_registrants_hash);
 BOOL nvmeibt_register_is_same_registrant(const struct nvmeibt_registrant_ctx *r1, const struct nvmeibt_registrant_ctx *r2);	// Important! Assumes questen is asked on registrants of the same segment!
 void nvmeibt_register_recalc_seg_active_registrants_align_with_sync_cmd(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_register_is_seg_active_registrable_clients_sync_wise(struct nvmeibt_seg_active *seg_active, int *reason);
@@ -161,7 +158,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_l
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
 struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_reg_lock_id(
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
-enum UNREGISTER_RV nvmeibt_register_launch_unsubscribed_registrant_removal(struct nvmeibt_registrant_ctx *input_registrant_ctx);
+enum UNREGISTER_RV nvmeibt_register_launch_unsubscribed_active_registrant_removal(struct nvmeibt_registrant_ctx *input_registrant_ctx);
 void nvmeibt_register_make_all_seg_active_registrants_sync_praid_topology(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_clients_sync_check_and_act_upon(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longing(struct nvmeibt_seg_active *seg_active);
@@ -174,8 +171,9 @@ void nvmeibt_register_open_disk_eligible_seg_actives_for_use(struct nvmeibt_loca
 struct nvmeibt_registrant_ctx *nvmeibt_register_get_out_reg_ctx_by_in_msg(struct nvmeibt_register_msg *msg);
 void nvmeibt_register_MR_open_seg_active_for_registrations_if_eligable(struct nvmeibt_seg_active *seg_active);
 int nvmeibt_register_timeout_occurred(void);
-void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ctx, BOOL is_force, bool is_preserving_in_longing_registrants_hash);
-void nvmeibt_register_brute_force_cleanup_all_seg_registrants(struct nvmeibt_seg_active *seg_active);
+void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg_active, bool is_delete_from_hashes,
+										bool is_longing, bool is_stale, bool is_longing_on_invalid_seg, bool is_move_from_active_reg_hash_to_stale_reg_hash);
+void nvmeibt_register_brute_force_cleanup_all_active_registrants_and_stales_of_seg(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_remove_all_recovery_active_registrants_of_node(struct nvmeibt_urn_uuid *src_node_id);
 int nvmeibt_register_launch_seg_metadata_ctrl_save(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_open_all_eligible_seg_actives_for_use(void);

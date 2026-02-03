@@ -338,7 +338,7 @@ void nvmeibt_nm_del_key(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nm_link
 	//NFIN_;
 	N_Df(nm_del_key_t1, "@STR link @STR",
 		free_mem ? "Freeing" : "Unlinking", l->name);
-	XHASHTABLE_DEL(&ln->key_val, &l->link);
+	nvmeib_hash_delete_uint64_t(ln->key_val_hash_by_u64_key, l->key);
 	if (free_mem) {
 		if (l->free)
 			l->free(l);
@@ -2057,10 +2057,11 @@ static void free_key_val(struct nvmeibt_nm_local_node *ln)
 	struct nvmeibt_nm_linkable *l;
 
 	NFIN;
-	XHASHTABLE_FOR_EACH_SAFE(l, &ln->key_val) {
+	NVMEIB_HASH_FOREACH(l, ln->key_val_hash_by_u64_key) {
 		N_Df(nm_free_key_val_d1, "l @PTR", l);
 		nvmeibt_nm_del_key(ln, l, 1);
 	}
+	NVMEIB_HASH_TBL_FREE(tvhjks3, ln->key_val_hash_by_u64_key);
 	NFOUT;
 }
 
@@ -2224,7 +2225,7 @@ static struct nvmeibt_nm_local_node * create_local_node(struct nvmeibt_nm_hw_fun
 	XDLIST_HEAD_INIT(&ln->el);
 	XDLIST_HEAD_INIT(&ln->el_pool);
 	XDLIST_HEAD_INIT(&ln->remotes);
-	XHASHTABLE_INIT(&ln->key_val);
+	ln->key_val_hash_by_u64_key = NVMEIB_HASH_CREATE(vtshgve, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nm_key_val", 8);
 	XDLIST_HEAD_INIT(&ln->toma_request_pool);
 	XDLIST_HEAD_INIT(&ln->toma_requests);
 
@@ -2439,17 +2440,7 @@ out:
 
 struct nvmeibt_nm_hash_key_type * find_key(struct nvmeibt_nm_local_node *ln, uint64_t key)
 {
-	struct nvmeibt_nm_linkable *l;
-	int found = 0;
-
-	//NFIN;
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(l, &ln->key_val, key)
-		if (l2kt(l)->guid == key) {
-			found = 1;
-			break;
-		}
-	//NFOUT;
-	return found ? l2kt(l) : NULL;
+	return l2kt(nvmeib_hash_search_uint64_t(ln->key_val_hash_by_u64_key, key));
 }
 
 void nvmeibt_nm_add_key(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nm_linkable *l, uint64_t key,
@@ -2463,10 +2454,11 @@ void nvmeibt_nm_add_key(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nm_link
 	vsnprintf(l->name, sizeof(l->name), namefmt, args);
 	va_end(args);
 	//N_Tf(nm_add_key_t1, "Adding link @STR", l->name);
+	l->key = key;
 	if (!l->free) {
 		N_Tf(nm_add_key_t2, "link @PTR has no free callback", l);
 	}
-	XHASHTABLE_ADD(&ln->key_val, l, key);
+	nvmeib_hash_add_uint64_t(ln->key_val_hash_by_u64_key, key, l);
 	//NFOUT;
 }
 

@@ -181,7 +181,7 @@ struct nvmeibt_srm {
 	/* register senders */
 	int qp_send_count;
 	XDLIST_DECLARE(, struct srm_user, link) user_pool_q;
-	XHASHTABLE_DECLARE(senders, struct srm_user, link, 8) ;
+	struct nvmeib_hash_table		*senders_hash_by_ptr_to_user;
 	bool allow_send;
 	/* receive part */
 	uint32_t recv_srm_id;
@@ -194,7 +194,7 @@ struct nvmeibt_srm {
 	int dispatch;
 	XDLIST_DECLARE(, struct srm_recv_context, link) recv_ctx_q;
 	/* register receivers */
-	XHASHTABLE_DECLARE(receivers, struct srm_user, link, 8) ;
+	struct nvmeib_hash_table		*receivers_hash_by_ptr_to_user;
 	bool allow_receive;
 	/* backport compatability stuff */
 	XDLIST_DECLARE(, struct msg_request_wrapper, link) req_pool_q;
@@ -358,8 +358,8 @@ struct nvmeibt_srm *nvmeibt_srm_create(const struct carrier *car)
 
 	/* init senders and receivers */
 	XDLIST_HEAD_INIT(&srm->user_pool_q);
-	XHASHTABLE_INIT(&srm->senders);
-	XHASHTABLE_INIT(&srm->receivers);
+	srm->senders_hash_by_ptr_to_user = NVMEIB_HASH_CREATE(vysqj29, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "srm->senders", 8);
+	srm->receivers_hash_by_ptr_to_user = NVMEIB_HASH_CREATE(fg6wejh, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "srm->receivers", 8);
 	XDLIST_HEAD_INIT(&srm->req_pool_q);
 	XDLIST_HEAD_INIT(&srm->lock_regions);
 	XDLIST_HEAD_INIT(&srm->wreq_gc_q);
@@ -569,11 +569,10 @@ static int register_receive_user(struct nvmeibt_srm *srm,
 	new_user = NNVMEIBT_ALLOC_ELEM(trace_srm_register_receive_user, &srm->user_pool_q, srm_carrier(srm));
 	new_user->user = *user;
 	if (is_sender) {
-		XHASHTABLE_ADD(&srm->senders, new_user, (uint64_t)new_user->user.user);
+		nvmeib_hash_add_uint64_t(srm->senders_hash_by_ptr_to_user, (uint64_t)new_user->user.user, new_user);
 	}
 	else {
-		XHASHTABLE_ADD(&srm->receivers, new_user,
-			(uint64_t)new_user->user.user);
+		nvmeib_hash_add_uint64_t(srm->receivers_hash_by_ptr_to_user, (uint64_t)new_user->user.user, new_user);
 	}
 
 unlock_l:
@@ -626,15 +625,14 @@ int nvmeibt_srm_stop_sender(struct nvmeibt_srm *srm, void *user)
 	lock(srm);
 	if (srm->allow_send) {
 		/* clear from sender hash */
-		XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(p, &srm->senders, (uint64_t)user) {
-			if (p->user.user == user) {
-				if (p->user.cbs.stop_c) {
-					user_stop_c = p->user.cbs.stop_c;
-					arg = p->user.user;
-				}
-				XHASHTABLE_DEL(&srm->senders, &p->link);
-				XDLIST_ADD_TAIL(&srm->user_pool_q, p);
+		p = nvmeib_hash_search_uint64_t(srm->senders_hash_by_ptr_to_user, (uint64_t)user);
+		if (p) {
+			if (p->user.cbs.stop_c) {
+				user_stop_c = p->user.cbs.stop_c;
+				arg = p->user.user;
 			}
+			nvmeib_hash_delete_uint64_t(srm->senders_hash_by_ptr_to_user, (uint64_t)user);
+			XDLIST_ADD_TAIL(&srm->user_pool_q, p);
 		}
 
 		XDLIST_FOREACH(work, &srm->work_q) {
@@ -670,11 +668,11 @@ static void stop_all_senders_no_lock(struct nvmeibt_srm *srm)
 		}
 	}
 	/* clear from sender hash */
-	XHASHTABLE_FOR_EACH_SAFE(p, &srm->senders) {
+	NVMEIB_HASH_FOREACH(p, srm->senders_hash_by_ptr_to_user) {
 		if (p->user.cbs.stop_c) {
 			p->user.cbs.stop_c(p->user.user, u_stop_all);
 		}
-		XHASHTABLE_DEL(&srm->senders, &p->link);
+		nvmeib_hash_delete_uint64_t(srm->senders_hash_by_ptr_to_user, (int64_t)p->user.user);
 		XDLIST_ADD_TAIL(&srm->user_pool_q, p);
 	}
 	NFOUT;
@@ -711,15 +709,14 @@ int nvmeibt_srm_stop_receiver(struct nvmeibt_srm *srm, void *user)
 	lock(srm);
 	if (srm->allow_receive) {
 		/* clear from sender hash */
-		XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(p, &srm->receivers, (uint64_t)user) {
-			if (p->user.user == user) {
-				if (p->user.cbs.stop_c) {
-					user_stop_c = p->user.cbs.stop_c;
-					arg = p->user.user;
-				}
-				XHASHTABLE_DEL(&srm->receivers, &p->link);
-				XDLIST_ADD_TAIL(&srm->user_pool_q, p);
+		p = nvmeib_hash_search_uint64_t(srm->receivers_hash_by_ptr_to_user, (uint64_t)user);
+		if (p) {
+			if (p->user.cbs.stop_c) {
+				user_stop_c = p->user.cbs.stop_c;
+				arg = p->user.user;
 			}
+			nvmeib_hash_delete_uint64_t(srm->receivers_hash_by_ptr_to_user, (uint64_t)user);
+			XDLIST_ADD_TAIL(&srm->user_pool_q, p);
 		}
 	}
 	unlock(srm);
@@ -739,11 +736,11 @@ static void stop_all_receivers_nolock(struct nvmeibt_srm *srm)
 
 	NFIN;
 	/* clear from sender hash */
-	XHASHTABLE_FOR_EACH_SAFE(p, &srm->receivers) {
+	NVMEIB_HASH_FOREACH(p, srm->receivers_hash_by_ptr_to_user) {
 		if (p->user.cbs.stop_c) {
 			p->user.cbs.stop_c(p->user.user, u_stop_all);
 		}
-		XHASHTABLE_DEL(&srm->receivers, &p->link);
+		nvmeib_hash_delete_uint64_t(srm->receivers_hash_by_ptr_to_user, (uint64_t)p->user.user);
 		XDLIST_ADD_TAIL(&srm->user_pool_q, p);
 	}
 	clear_receive(srm);

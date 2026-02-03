@@ -69,6 +69,7 @@ struct nvmeibt_nm_linkable {
 	char name[LINKABLE_NAME_SIZE];
 	unsigned type;
 	void (*free)(struct nvmeibt_nm_linkable *);
+	uint64_t		key;
 	struct xdlist link;
 };
 
@@ -195,7 +196,7 @@ struct nvmeibt_nm_local_node {
 	/* pool of requests */
 	nvmeibt_nm_l_list_t el_pool;
 	int run;
-	XHASHTABLE_DECLARE(, struct nvmeibt_nm_linkable, link, 12) key_val;
+	struct nvmeib_hash_table		*key_val_hash_by_u64_key;
 	uint64_t guid;
 	nvmeibt_nm_l_list_t remotes;
 	int wire_event_fd;
