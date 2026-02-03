@@ -138,29 +138,6 @@ int nvmeib_srvr_api_lib_disk_nvmeof_sata_bind(const char *dev_file_name, const c
 }
 
 /***************************** Generic messages *******************************/
-static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
-{
-	int rv = -__LINE__, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
-	if (fd > 0) {
-		const int n_recv_bytes = NNVMEIBT_STR_FREAD_ATOMIC(salgcd2, str, fd);
-		rv = ((n_recv_bytes <= 0) ? -__LINE__ : 0);
-	}
-	NNVMEIBT_CLOSE(salgcd4, fd);
-	return rv;
-}
-
-int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str) { return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/disks.csv"); }
-int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str) { return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/nics.csv"); }
-int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
-{
-	char path[256];
-	if (seq >= 1000)
-		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
-	snprintf(path, sizeof(path), TOMA_ROOT_DIR "proc/nvmeibs/smart%d", seq);
-	return __get_srvr_buf_info(str, path);
-}
-
-
 /* Original shell code:
 * 		pcidrivers_base_path=/sys/bus/pci/drivers
 * 		pcifd=$pcidrivers_base_path/nvme/$nvmepci
@@ -972,6 +949,36 @@ int nvmeibt_km_comm_get_disk_info(const char *disk_name, struct nvmeib_disk_info
 	nvmeibt_km_comm_unlock(p);
 	NFOUT;
 	return rv;
+}
+
+static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
+{
+	int rv = -__LINE__, fd = NNVMEIBT_OPEN_READ(salgcd0, path, 1);
+	if (fd > 0) {
+		const int n_recv_bytes = NNVMEIBT_STR_FREAD_ATOMIC(salgcd2, str, fd);
+		rv = ((n_recv_bytes <= 0) ? -__LINE__ : 0);
+	}
+	NNVMEIBT_CLOSE(salgcd4, fd);
+	return rv;
+}
+
+int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str)
+{
+	return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/disks.csv");
+}
+
+int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str)
+{
+	return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/nics.csv");
+}
+
+int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
+{
+	char path[256];
+	if (seq >= 1000)
+		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
+	snprintf(path, sizeof(path), TOMA_ROOT_DIR "proc/nvmeibs/smart%d", seq);
+	return __get_srvr_buf_info(str, path);
 }
 
 /***************************** Status proc reply messages *******************************/
