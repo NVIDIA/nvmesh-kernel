@@ -205,6 +205,7 @@ enum uk_comm_opcode {
 	csc_t2s_local_client = 11,				// t2s: instruction to local client (control path), like attach recovery volume. payload: struct nvmeib_msg_tom_2_local_clnt. s2t, reply: struct nvmeib_copied_rscs_reply
 	csc_t2s_blocking_msg_other = 12,		// t2s & s2t: blocking message to server any of 'enum nvmeibs_toma_server_msg_type', Server replies with same opcode
 	csc_t2s_blocking_msg_to_io_clients = 13,// t2s & s2t: blocking message to pass to registrant client (client which wants to do io to disk segment), Server replies with same opcode
+	csc_t2s_blocking_msg_req_info = 14,		// t2s & s2t: blocking message to request info about the server, Server replies with same opcode
 	csc_msg_to_process = 15,				// s2t, generic mechanism to send a message from kernel to user space, payload: struct nvmeib_push_extended_msg
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	csc_contaminate_disk = 16,				// should be the last just before the end
@@ -227,6 +228,7 @@ static inline const char * uk_comm_opcode_str(int opcode)
 	case csc_t2s_local_client: return "csc_t2s_local_client";
 	case csc_t2s_blocking_msg_other: return "csc_t2s_blocking_msg_other";
 	case csc_t2s_blocking_msg_to_io_clients: return "csc_t2s_blocking_msg_to_io_clients";
+	case csc_t2s_blocking_msg_req_info: return "csc_t2s_blocking_msg_req_info";
 	case csc_msg_to_process: return "csc_msg_to_process";
 #if defined(UK_ZERO_TEST) && UK_ZERO_TEST
 	case csc_contaminate_disk: return "csc_contaminate_disk";
@@ -495,6 +497,20 @@ struct nvmeib_push_extended_msg {				// Not used, infrastructure for pushing mes
 	char content[0];
 };
 
+enum nvmeib_t2s_request_srvr_info_type { NVMEIBS_TOMA_REQ_NICS_CSV = 1, NVMEIBS_TOMA_REQ_DISKS_CSV = 2, NVMEIBS_TOMA_REQ_DISK_SMART_CNT = 3};
+struct nvmeib_t2s_request_srvr_info_req {
+	int opt_arg;						// Optional argument, select smart counter.
+	enum nvmeib_t2s_request_srvr_info_type type;
+	int max_byte_len;					// Max byte length of the reply inlcuding terminating \0
+};
+
+struct nvmeib_t2s_request_srvr_info_rep {
+	struct nvmeib_nl_uk_comm_rep base;
+	int n_bytes_len;
+	bool was_truncated;
+	char content[0];
+};
+
 struct nvmeib_nl_uk_comm_msg {			// t2s and s2t netlink header user space (toma/others) send to/from server. Base Header which exists in all messages
 	int len;
 	union { enum uk_comm_opcode opcode; int __just_align4bytes; };
@@ -514,6 +530,7 @@ struct nvmeib_nl_msg_to_toma {					// s2t: All possible payloads, appear in nvme
 		struct nvmeib_identify_disk_reply		identify_disk_reply;
 		struct nvmeib_copied_rscs_reply			copied_rscs_reply;
 		struct nvmeib_push_extended_msg			extended_msg;
+		struct nvmeib_t2s_request_srvr_info_rep req_info_rep;
 		struct nvmeib_nl_uk_comm_rep 			unblock_ack__used_but_not_by_name;
 	} payload;
 };
@@ -525,6 +542,7 @@ union nvmeib_nl_msg_to_srvr_payload {			// t2s: All possible payloads, user spac
 	struct nvmeib_msg_tom_2_local_clnt msg2clnt;
 	struct nvmeib_remove_disk rmv_disk_ack;
 	struct nvmeib_identify_disk identify_disk;
+	struct nvmeib_t2s_request_srvr_info_req req_info;
 };
 
 /* Toma->Any-Client for registering segment and issuing IO. Sent via local server */

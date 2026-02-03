@@ -579,6 +579,7 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv);
+static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -588,9 +589,9 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	int n_payload_bytes_remainig = (int)n - ((const char*)req_msg->data - (const char*)buf);
 
 	(void)fd; (void)offset; (void)flags;
-	BUG_ON((n < (sizeof(struct nlmsghdr) + sizeof(*req_msg))) || (n != nlh->nlmsg_len) || (nlh->nlmsg_type != NVMESH_NL_MSG_TYPE));
+	BUG_ON((n < (sizeof(struct nlmsghdr) + sizeof(*req_msg))) || (n != nlh->nlmsg_len) || (nlh->nlmsg_type != NVMESH_NL_MSG_TYPE) || (req_msg->caller_type != TOMA_CALLER));
 	nl->n_recv_msgs++;
-	N_Tf(nl_send, "opcode=@INT (@STR), total_n_msgs=@INT", req_msg->opcode, uk_comm_opcode_str(req_msg->opcode), nl->n_recv_msgs);
+	N_Tf(nl_send, "msg[@INT].id=@ID (@STR), total_n_msgs=@INT", req_msg->opcode, req_msg->id, uk_comm_opcode_str(req_msg->opcode), nl->n_recv_msgs);
 	if (req_msg->opcode == csc_get_disks) {
 		int i, count = sandbox_nvme_get_device_count();	// Queue disk info for each mock NVMe device
 		for (i = 0; i < count; i++) {
@@ -623,6 +624,10 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
 		if (exec_rv > 0)
 			n_payload_bytes_remainig -= (int)exec_rv;		// Mark Consumed bytes
+	} else if (req_msg->opcode == csc_t2s_blocking_msg_req_info) {
+		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		n_payload_bytes_remainig -= sizeof(pay->req_info);
+		TSB_netlink_handle_req_info(req_msg);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
@@ -1014,6 +1019,38 @@ static void TSB_netlink_send_extended_msg(void) {
 	struct nvmeib_push_extended_msg *rep = (struct nvmeib_push_extended_msg *)msg->data;
 	msg->opcode = rep->base.opcode = csc_msg_to_process;
 	rep->n_bytes_len = sprintf(&rep->content[0], "%s", "HelloFromClnt");
+	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_t2s_request_srvr_info_rep *rep =         (struct nvmeib_t2s_request_srvr_info_rep *)msg->data;
+	const struct nvmeib_t2s_request_srvr_info_req *req = &((const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data)->req_info;
+	rep->base.error = csce_ok;
+	if (req->type == NVMEIBS_TOMA_REQ_NICS_CSV) {
+		rep->n_bytes_len = sprintf(rep->content, "%s", NVMEIBS_NICS_CSV_HEADER "\n"
+			"mlx5_2,0x0000000000000000bae924fffee5cfd8,1,0xffff,R,ACTIVE,4096,4096,3,true,false,true,ens2f0,0x00000000000000000000ffff0a0a0125\n"
+			"mlx5_3,0x0000000000000000bae924fffee5cfd9,1,0xffff,R,ACTIVE,4096,4096,3,true,false,true,ens2f1,0x00000000000000000000ffff0a0a0225\n");
+	} else if (req->type == NVMEIBS_TOMA_REQ_DISKS_CSV) {
+		rep->n_bytes_len = sprintf(rep->content, "%s", NVMEIBS_DISKS_CSV_HEADER "\n"
+			"NVMD_SN_002.1,2000,2000,4096,32,1,1,/dev/nvme1001n1,8,Ok,5122,SAMSUNG MZWLL800HEHP-00003\n"
+			"NVMD_SN_003.1,2000,2000,4096,32,0,1,/dev/nvme1002n1,8,Ok,5123,KIOXIA KXK600-02\n");
+	} else if (req->type == NVMEIBS_TOMA_REQ_DISK_SMART_CNT) {
+		BUG_ON((req->opt_arg < 1)||(req->opt_arg > 2));
+		rep->n_bytes_len = sprintf(rep->content,
+			"Pci Address=0000:0%d:00.0\n" "Serial Number=NVMD_SN_%03d\n"
+			"Vendor=0x14%02d\n" "Model=NVMD_NN_%03d\n"
+			"Submission Queues=128\nCompletion Queues=128\nMSIX Interrupts=129\nNum admin cmds=323\nNamespace Id=1\nNuma Node=1\n",
+			req->opt_arg - 1, req->opt_arg, req->opt_arg, req->opt_arg);
+	} else {   rep->base.error = csce_dst_not_exist; }
+	rep->n_bytes_len++;			// Trailing zero
+	rep->was_truncated = rep->n_bytes_len > req->max_byte_len;
+	BUG_ON(rep->was_truncated);
+	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);

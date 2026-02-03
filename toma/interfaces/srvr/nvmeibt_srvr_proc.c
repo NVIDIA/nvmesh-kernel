@@ -239,6 +239,7 @@ struct nvmeibt_km_comm {
 		int error_occured;			// if != 0: Object is not operational, closing due to error. Stores error code
 		bool stop_uplink;			// Prevent Toma messages from being sent to
 		bool use_async_api_and_sema_for_blocking_msgs;
+		bool use_async_api_instead_of_proc_files;
 	} state_flags;
 	struct resource_usage_counters_t {
 		int n_lock_maps;
@@ -319,6 +320,7 @@ void __calc_max_msg_size(struct nvmeibt_km_comm *p) {
 	p->max_msg_size.proc_send = clients_topo;
 	if (p->params.use_user_space_api) {
 		p->state_flags.use_async_api_and_sema_for_blocking_msgs = true;									// Kernel has blocking /proc. User space does not have them. Toma Simulator supports both
+		p->state_flags.use_async_api_instead_of_proc_files = true;			// Todo: Do not enable yet. Toma simulator does not support it yet
 		p->max_msg_size.nlink = NLMSG_SPACE(total_max);			// All messages via async api
 	} else {
 		p->max_msg_size.nlink = NLMSG_SPACE(server_nlink);		// Large messages use /proc sync api
@@ -837,13 +839,21 @@ static inline bool completion_is_done( struct completion *x){ return sem_trywait
 
 struct blocking_wait_context {
 	struct completion comp;				// For blocking implementation
-	int rv;
+	struct nvmeibt_Str *reply_str;		// Not needed if waiting for ACK, but if need to process a response store it in a string
+	int rv;								// Netlink main thread will wakeup send-request thread when reply/ack arrives
 };
 
 static void __on_done_wakeup_sender(void *ctx, int ok, struct nvmeib_nl_uk_comm_rep *rep) {	// Called from netlink main thread
 	struct blocking_wait_context *b = ctx;
 	(void)ok;
 	if (rep) {
+		if (b->reply_str && (rep->error == csce_ok)) {	// Fill senders context with reply
+			const struct nvmeib_t2s_request_srvr_info_rep* pl = (typeof(pl))rep;
+			N_Tf(__AUTOID__, "Copy reply rep_msg[@INT], @INT[b], truncate=@BOOL_YN", rep->opcode, pl->n_bytes_len, pl->was_truncated);
+			nvmeibt_Str_strncat(b->reply_str, &pl->content[0], pl->n_bytes_len);
+			if (pl->was_truncated)
+				 rep->error = csce_format_oom;
+		}
 		if (     rep->error == csce_ok)				 b->rv = 0;	// Inverse of uk_comm_err_from_errno
 		else if (rep->error == csce_dst_not_exist)	 b->rv = -ENXIO;
 		else if (rep->error == csce_in_progress)	 b->rv = -EINPROGRESS;
@@ -855,7 +865,7 @@ static void __on_done_wakeup_sender(void *ctx, int ok, struct nvmeib_nl_uk_comm_
 	complete(&b->comp);
 }
 
-static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len)
+static int _submit_msg_and_wait_for_reply(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len, struct nvmeibt_Str *reply_str)
 {
 	struct blocking_wait_context b;
 	struct srv_comm_msg *m = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*m) + sizeof(m->msg) + buf_len);
@@ -869,6 +879,7 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 	m->on_done = &__on_done_wakeup_sender;
 	m->ctx = (void*)&b;
 	init_completion(&b.comp);
+	b.reply_str = reply_str;
 	b.rv = -EPERM;							// Not sent to server
 	if (__submit_toma_msg(p, m, buf, buf_len)) {
 		wait_for_completion(&b.comp);	// Server reply will autofill b.rv
@@ -881,6 +892,11 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 	}
 	destroy_completion(&b.comp);
 	return b.rv;
+}
+
+static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len)
+{
+	return _submit_msg_and_wait_for_reply(p, op, buf, buf_len, NULL);
 }
 
 void nvmeib_srvr_api_lib_server__detach(void)
@@ -964,21 +980,40 @@ static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
 
 int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str)
 {
+	struct nvmeibt_km_comm *p = _singleton;
+	if (p->state_flags.use_async_api_instead_of_proc_files) {
+		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = 0,
+			.type = NVMEIBS_TOMA_REQ_DISKS_CSV, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
+		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
+	}
 	return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/disks.csv");
 }
 
-int nvmeib_srvr_api_lib_get_csv_nics( struct nvmeibt_Str *str)
+int nvmeib_srvr_api_lib_get_csv_nics(struct nvmeibt_Str *str)
 {
+	struct nvmeibt_km_comm *p = _singleton;
+	if (p->state_flags.use_async_api_instead_of_proc_files) {
+		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = 0,
+			.type = NVMEIBS_TOMA_REQ_NICS_CSV, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
+		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
+	}
 	return __get_srvr_buf_info(str, TOMA_ROOT_DIR "proc/nvmeibs/nics.csv");
 }
 
 int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
 {
-	char path[256];
+	struct nvmeibt_km_comm *p = _singleton;
 	if (seq >= 1000)
 		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
-	snprintf(path, sizeof(path), TOMA_ROOT_DIR "proc/nvmeibs/smart%d", seq);
-	return __get_srvr_buf_info(str, path);
+	if (p->state_flags.use_async_api_instead_of_proc_files) {
+		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = seq,
+			.type = NVMEIBS_TOMA_REQ_DISK_SMART_CNT, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
+		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
+	} else {
+		char path[256];
+		snprintf(path, sizeof(path), TOMA_ROOT_DIR "proc/nvmeibs/smart%d", seq);
+		return __get_srvr_buf_info(str, path);
+	}
 }
 
 /***************************** Status proc reply messages *******************************/
