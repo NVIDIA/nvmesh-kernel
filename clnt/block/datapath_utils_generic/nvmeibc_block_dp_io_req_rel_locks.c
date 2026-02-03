@@ -659,8 +659,8 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	if (nvmeibc_operation_does_expire_at(o, retry_time)) {
 		__fail_cmds_of_broken_read_lock(NCL_STATUS_DONE, cmp, -EBUSY);
 	} else if (o->topo->phased_out) {	// Our data is outdated (new topo may have different read owner).
-		__fail_cmds_of_broken_read_lock(NCL_STATUS_DONE, cmp, -EAGAIN);
 		OPERATION_DBG_CNTR_INC(o, n_topo_phased_out);
+		__fail_cmds_of_broken_read_lock(NCL_STATUS_DONE, cmp, -EAGAIN);
 	} else {
 		if (nvmeibc_sync_is_stale(l, holder)) {
 			enum stale_lock_resolve_status ss;
