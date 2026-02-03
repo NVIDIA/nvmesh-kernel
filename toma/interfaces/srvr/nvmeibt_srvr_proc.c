@@ -276,7 +276,7 @@ struct nvmeibt_km_comm {
 		int proc_send;
 		int nlink;					// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time	} max_msg_size;
 	} max_msg_size;
-};
+} *_singleton;
 
 static unsigned long get_guid(struct nvmeibt_km_comm *p)
 {
@@ -387,11 +387,15 @@ static void __blocking_msg_api_destroy(struct nvmeibt_km_comm *p)
 	}
 }
 
-struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
+int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 {
-	struct nvmeibt_km_comm *p = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
+	struct nvmeibt_km_comm *p;
 	int rv = 0;
-
+	if (_singleton) {
+		N_Ef(__AUTOID__, "Already initialized. Wrong usage");
+		return -EEXIST;
+	}
+	p = _singleton = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
 	if (!p) { 													rv = -__LINE__; goto out; }
 	p->params = *params;
 	if (__blocking_msg_api_create(p) < 0) {						rv = -__LINE__; goto free_p; }
@@ -412,6 +416,13 @@ struct nvmeibt_km_comm *nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_
 	XDLIST_HEAD_INIT(&p->msgs2);
 	p->msgs = &p->msgs1;
 	if (start_thread(p) < 0) {									rv = -__LINE__; goto free_nl_buffer;}
+	{		// Connect
+		struct nvmeibs_toma_server_proc_buf buf;
+		N_Tf(__AUTOID__, "Logging in to server");
+		memset(&buf, 0, sizeof(buf));
+		buf.type = NVMEIBS_TOMA_LOGIN;
+		(void)nvmeib_srvr_api_lib_send_block_msg_to_server(&buf);
+	}
 	goto out;
 
 free_nl_buffer:	NNVMEIBT_TOMA_FREE(tscnlssc, p->nlh);
@@ -420,20 +431,11 @@ free_spair:		NNVMEIBT_CLOSE(tscnlsse, p->spair[0]);
 				NNVMEIBT_CLOSE(tscnlssf, p->spair[1]);
 free_guard:		pthread_mutex_destroy(&p->guard);
 free_p:			NNVMEIBT_TOMA_FREE(tscnlssg, p);
+				_singleton = NULL;
 				N_Ef(tscnlssh, "Failed on rv=@INT, aborting. @AUTO_ERRNO", rv);
 out:
 	NFOUT;
-	return p;
-}
-
-int nvmeib_srvr_api_lib_server_connect(struct nvmeibt_km_comm *p) {
-	struct nvmeibs_toma_server_proc_buf buf;
-	NFIN;
-	memset(&buf, 0, sizeof(buf));
-	buf.type = NVMEIBS_TOMA_LOGIN;
-	(void)nvmeib_srvr_api_lib_send_block_msg_to_server(p, &buf);
-	NFOUT;
-	return 0;
+	return _singleton ? 0 : -ENODEV;
 }
 
 static void __remove_disk_and_free(struct nvmeibt_km_comm *p, struct disk_info *disk)
@@ -455,8 +457,9 @@ static void __drain_msg_list(msgs_list_t *l)
 
 static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_opcode op, const void* buf, size_t buf_len);
 
-void nvmeib_srvr_api_lib_server__detach(struct nvmeibt_km_comm *p)
+void nvmeib_srvr_api_lib_server__detach(void)
 {
+	struct nvmeibt_km_comm *p = _singleton;
 	if (p->comm_thread) {
 		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_stop_callbacks, .on_done = NULL };
 		N_Tf(tscnlvs0, "Send internal stop callbacks, to main thread");
@@ -469,7 +472,7 @@ static void __stop_main_thread(struct nvmeibt_km_comm *p)
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
 		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_suicide, .on_done = NULL };
 		N_Tf(tscnlsst, "Send internal suicide message, to main thread");
-		nvmeib_srvr_api_lib_send_async_msg_to_server(p, &msg);	// Issue suicide request to be handled in main thread context
+		nvmeib_srvr_api_lib_send_async_msg_to_server(&msg);	// Issue suicide request to be handled in main thread context
 		if (pthread_join(p->comm_thread, NULL)) {
 			N_Ef(tscnlssk, "join failed @PTHREAD, @AUTO_ERRNO", p->comm_thread);
 		}
@@ -489,19 +492,20 @@ static void __stop_main_thread(struct nvmeibt_km_comm *p)
 	NNVMEIBT_CLOSE(tscnlssr, p->nl_sock_fd);
 }
 
-void nvmeib_srvr_api_lib_destroy(struct nvmeibt_km_comm *p)		// Close blocking msg API
+void nvmeib_srvr_api_lib_destroy()
 {
+	struct nvmeibt_km_comm *p = _singleton;
 	struct nvmeibs_toma_server_proc_buf buf;
 	int rv;
 	memset(&buf, 0, sizeof(buf));
 	buf.type = NVMEIBS_TOMA_LOGOUT;
-	rv = nvmeib_srvr_api_lib_send_block_msg_to_server(p, &buf);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_server(&buf);
 	(void)rv; // Nothing to do with this
 	__stop_main_thread(p);
 	__blocking_msg_api_destroy(p);
 	if (p->resource.n_lock_maps != 0)
 		N_Ef(tscnlssv, "Leaking resources: lock_maps=@INT", p->resource.n_lock_maps);
-	NNVMEIBT_TOMA_FREE(tscnlsss, p);
+	NNVMEIBT_TOMA_FREE(tscnlsss, _singleton);
 }
 
 static void read_toma_wakeup_event(struct nvmeibt_km_comm *p)
@@ -847,8 +851,9 @@ static bool __submit_toma_msg(struct nvmeibt_km_comm *p, struct srv_comm_msg *m,
 	return was_sent;
 }
 
-int nvmeib_srvr_api_lib_send_async_msg_to_server(struct nvmeibt_km_comm *p, const struct km_comm_msg_hdr *hdr)
+int nvmeib_srvr_api_lib_send_async_msg_to_server(const struct km_comm_msg_hdr *hdr)
 {
+	struct nvmeibt_km_comm *p = _singleton;
 	struct srv_comm_msg *m = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*m) + sizeof(m->msg) + hdr->len);
 	int rv;
 	NTOMA_ASSERT(__AUTOID__, (hdr->opcode != csc_start || hdr->opcode < csc_end), "msg[@INT] Invalid type", hdr->opcode);
@@ -922,8 +927,9 @@ static int _submit_msg_and_wait_for_ack(struct nvmeibt_km_comm *p, enum uk_comm_
 	return b.rv;
 }
 
-int	nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_server_proc_buf *msg)
+int	nvmeib_srvr_api_lib_send_block_msg_to_server(const struct nvmeibs_toma_server_proc_buf *msg)
 {
+	struct nvmeibt_km_comm *p = _singleton;
 	int rv = 0, fd = p->kernel.fd_toma2srvr;
 	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)
 		rv = _submit_msg_and_wait_for_ack(p, csc_t2s_blocking_msg_other, msg, sizeof(*msg));
@@ -945,8 +951,9 @@ int	nvmeib_srvr_api_lib_send_block_msg_to_server(struct nvmeibt_km_comm *p, cons
 	}
 }
 
-int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
+int nvmeib_srvr_api_lib_send_block_msg_to_client(const struct nvmeibs_toma_client_proc_buf *msg, int buf_len, const char *clnt_host)
 {
+	struct nvmeibt_km_comm *p = _singleton;
 	int rv; (void)clnt_host;
 	NTOMA_ASSERT(__AUTOID__, buf_len <= p->max_msg_size.proc_send, "Msg too large @INT[b]", buf_len);
 	if (p->state_flags.use_async_api_and_sema_for_blocking_msgs)	{
@@ -957,8 +964,9 @@ int nvmeib_srvr_api_lib_send_block_msg_to_client(struct nvmeibt_km_comm *p, cons
 	return ((rv == 0) || (rv == -ENXIO)) ? 0 : -1;	// Disconenct OK, or client already disconnected
 }
 
-int nvmeibt_km_comm_get_disk_info(struct nvmeibt_km_comm *p, const char *disk_name, struct nvmeib_disk_info *di)
+int nvmeibt_km_comm_get_disk_info(const char *disk_name, struct nvmeib_disk_info *di)
 {
+	struct nvmeibt_km_comm *p = _singleton;
 	struct disk_info *disk;
 	int rv = -1;
 
@@ -1005,7 +1013,7 @@ static int __status_str_printf(void *context, const char *format, ...)			// vsnp
 	return 0;
 }
 
-int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const struct nvmeibs_msg_s2t_toma_status_req *req)
+int nvmeib_srvr_api_lib_send_block_status_reply(const struct nvmeibs_msg_s2t_toma_status_req *req)
 {
 	int fd;
 	char fname[256];
@@ -1027,7 +1035,7 @@ int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const
 		return -__LINE__;
 	}
 
-	p->params.print_status_fn(req->type, &__status_str_printf, &ctx); 	// Print the status to the proc file
+	_singleton->params.print_status_fn(req->type, &__status_str_printf, &ctx); 	// Print the status to the proc file
 	nvmeibt_munmap(ctx.buf, req->max_length);
 	NNVMEIBT_CLOSE(ttsrspfs9, fd);
 
@@ -1038,7 +1046,7 @@ int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const
 	pl->length = ctx.cur_len;
 	pl->is_overflow = ctx.is_overflow;
 	pl->handle_req = req->handle_req;
-	if (nvmeib_srvr_api_lib_send_block_msg_to_server(p , &write_resp) < 0) {
+	if (nvmeib_srvr_api_lib_send_block_msg_to_server(&write_resp) < 0) {
 		N_Wf(ttsrspfsa, "Failed to send response to server (@ERRNO - '@AUTO_ERRNO')", errno);
 		return -__LINE__;
 	}
@@ -1046,7 +1054,7 @@ int nvmeib_srvr_api_lib_send_block_status_reply(struct nvmeibt_km_comm *p, const
 }
 
 /***************************** Lock maps API ***********************/
-struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(struct nvmeibt_km_comm *p, const char *disk_name, uint64_t n_blksets, uint64_t offset, bool allow_write)
+struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(const char *disk_name, uint64_t n_blksets, uint64_t offset, bool allow_write)
 {
 	char file_name[256];
 	struct mmap_tbl rv = { .addr = NULL, .length = 0};
@@ -1066,18 +1074,18 @@ struct mmap_tbl nvmeib_srvr_api_lib_locks_map_get(struct nvmeibt_km_comm *p, con
 		rv.addr = NULL;
 	} else {
 		rv.length = n_bytes;
-		p->resource.n_lock_maps++;
+		_singleton->resource.n_lock_maps++;
 	}
 	NNVMEIBT_CLOSE(salddbmm6, fd); /* closing file descriptor does not unmap the region */
 	return rv;
 }
 
-int nvmeib_srvr_api_lib_locks_map_put(struct nvmeibt_km_comm *p, const char *disk_name, struct mmap_tbl m)
+int nvmeib_srvr_api_lib_locks_map_put(const char *disk_name, struct mmap_tbl m)
 {
 	if (m.addr != NULL) {
 		const int u_rv = nvmeibt_munmap(m.addr, m.length);
 		if (u_rv == 0) {
-			p->resource.n_lock_maps--;
+			_singleton->resource.n_lock_maps--;
 			return 0;
 		}
 	}

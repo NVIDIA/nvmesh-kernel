@@ -1885,7 +1885,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 		handle_client_disconnect_event(&msg_buf->client_disconnect_msg_hdr);
 		break;
 	case NVMEIBS_TOMA_WRITE_STATUS_REQ: {
-		(void)nvmeib_srvr_api_lib_send_block_status_reply(nvmeibt_get_srv_comm(), &msg_buf->status_req_msg);
+		(void)nvmeib_srvr_api_lib_send_block_status_reply(&msg_buf->status_req_msg);
 		break;
 	}
 	case NVMEIBS_TOMA_TRIGGER_JGC:
@@ -1902,7 +1902,7 @@ static int server_handle_local_event(struct nvmeibs_toma_server_proc_buf *msg_bu
 				N_Wf(ju87661, "Got a BLKSET_RECOVERED before mgmt_config. Ignoring.");
 				ack.blkset_recovered_ack_msg.toma_rv = 1;
 			}
-			if (nvmeib_srvr_api_lib_send_block_msg_to_server(nvmeibt_get_srv_comm(), &ack) < 0) {
+			if (nvmeib_srvr_api_lib_send_block_msg_to_server(&ack) < 0) {
 				N_Wf(ww77823, "Failed to send BLKSET_RECOVERED_ACK to server (@ERRNO - '@AUTO_ERRNO')", errno);
 			}
 		}
@@ -2026,10 +2026,9 @@ struct netlink_queue_elem_t {
 };
 
 static struct t_incomming_srvr_msg {
-	struct nvmeibt_km_comm *km_comm;
 	XDLIST_DECLARE(, struct netlink_queue_elem_t, link) head;
 	pthread_mutex_t guard;
-} srvr_msg_queue = {NULL};
+} srvr_msg_queue;
 
 // Called from server comm context. Add to list and allow toma main thread to fetch the message
 static int srvr_msg_queue_add(const struct nvmeib_disk_info *disk_info, char opcode, enum nvmeibs_serjio_status serjio_status, const struct nvmeib_push_extended_msg *ext)
@@ -2161,7 +2160,6 @@ static int nvmeibt_add_local_clnt_msg_to_toma_nl_queue(const struct nvmeib_push_
 void nvmeibt_server_lib_create(void)
 {
 	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
-	if (!smq->km_comm) {	// Just protect agains double mistaken call
 		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 		struct nvmeibt_km_comm_params par;
 		par.on_add_disk = &nvmeibt_add_disk_event_callback;
@@ -2176,22 +2174,16 @@ void nvmeibt_server_lib_create(void)
 		#endif
 		pthread_mutex_init(&smq->guard, NULL);
 		XDLIST_HEAD_INIT(&smq->head);
-		smq->km_comm = nvmeib_srvr_api_lib_create(&par);
-		if (!smq->km_comm) {
+		if (nvmeib_srvr_api_lib_create(&par) < 0) {
 			N_Ef(djut866, "Failed to init srv library, cannot continue");
 			nvmeibt_abort(ES_FATAL);
 		}
-		(void)nvmeib_srvr_api_lib_server_connect(smq->km_comm);
-	}
 }
-
-struct nvmeibt_km_comm *nvmeibt_get_srv_comm(void) { return srvr_msg_queue.km_comm; }
 
 void nvmeibt_server_lib_destroy(void) {
 	struct t_incomming_srvr_msg *smq = &srvr_msg_queue;
-	if (smq->km_comm) {
 		N_Tf(djut867, "");
-		nvmeib_srvr_api_lib_destroy(smq->km_comm);
+		nvmeib_srvr_api_lib_destroy();
 		pthread_mutex_destroy(&smq->guard);
 		while (!XDLIST_EMPTY(&smq->head)) {
 			struct netlink_queue_elem_t *elem = XDLIST_FIRST(&smq->head);
@@ -2199,7 +2191,6 @@ void nvmeibt_server_lib_destroy(void) {
 			NNVMEIBT_TOMA_FREE(djut868, elem);
 		}
 		memset(smq, 0, sizeof(*smq));
-	}
 }
 
 /*****************************************************************************/

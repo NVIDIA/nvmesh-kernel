@@ -122,7 +122,7 @@ int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, enum NVMEIBT_CSV
 	csv_section_header_line_len = nvmeibt_Str_strlen(config_struct);
 	rv = (what == NVMEIBT_CSV_TYPE_LOCAL_DISKS) ?
 			nvmeib_srvr_api_lib_get_csv_disks(config_struct) :
-			nvmeib_srvr_api_lib_get_csv_nics(config_struct);
+			nvmeib_srvr_api_lib_get_csv_nics( config_struct);
 	if (rv < 0) {
 		N_ETf(t_zzz_25, "Error reading @SECTION_TYPE, @AUTO_ERRNO", what);
 	} else {
@@ -895,7 +895,7 @@ static inline int nvmeibr_proc_notify_journal_info(const char* ldisk_id  /*Name 
 	buf.journal_msg.length = journal_length;
 	buf.journal_msg.serjio_db_lba = serjio_db_pba;
 	buf.journal_msg.serjio_db_length = serjio_db_length;
-	if (nvmeib_srvr_api_lib_send_block_msg_to_server(nvmeibt_get_srv_comm(), &buf) < 0) {
+	if (nvmeib_srvr_api_lib_send_block_msg_to_server(&buf) < 0) {
 		N_Ef(t_03_nvmeibt_notify_jour_info, "failed write to local server (@AUTO_ERRNO)");
 		rv = 0;	// DHS: Not sure why ??? seems illegal, but at least since 2020
 	}

@@ -156,7 +156,7 @@ struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmei
 
 	nvmeibt_strlcpy(nl_ctx->nl_msg_payload.disk_id, ldc->ldisk_id.str, sizeof(nl_ctx->nl_msg_payload.disk_id));
 	max_blocks_per_call = !nvmeibt_km_comm_get_disk_info(
-		nvmeibt_get_srv_comm(), nl_ctx->nl_msg_payload.disk_id, &di) ?
+		nl_ctx->nl_msg_payload.disk_id, &di) ?
 		di.max_n_hw_sectors : (unsigned)(ldc->max_request_size - 1); /* we reduce by one for the c ase the disk is formatted with MD */
 	N_Df(trace_mnl_6, "max_blocks_per_call=@LEN", max_blocks_per_call);
 

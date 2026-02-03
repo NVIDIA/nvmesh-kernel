@@ -623,7 +623,7 @@ bool nvmeibt_toma_is_in_shutdown(void)
 
 int nvmeibt_send_msg_to_srv(struct km_comm_msg_hdr *msg)
 {
-	return nvmeib_srvr_api_lib_send_async_msg_to_server(nvmeibt_get_srv_comm(), msg);
+	return nvmeib_srvr_api_lib_send_async_msg_to_server(msg);
 }
 
 static const char single_instance_file[] = TOMA_DIR_RUN_NVMESH "/toma.lock";
@@ -689,7 +689,7 @@ static void terminate_toma(int rv)
 
 	nvmeibt_dumper_exit();
 	nvmeibt_rpc_terminate();
-	nvmeib_srvr_api_lib_server__detach(nvmeibt_get_srv_comm());	// Stop receiving msgs from server
+	nvmeib_srvr_api_lib_server__detach();			// Stop receiving msgs from server
 
 	if (nvmeibt_global_get_global()) {				// Close other resources, like lock maps
 		nvmeibt_local_disk_free_all_resources();
@@ -1438,7 +1438,7 @@ int nvmeibt_toma_send_msg_to_client(struct nvmeibt_registrant_ctx *reg_ctx, int 
 							 data,
 							 msg_id
 							);
-	rv = nvmeib_srvr_api_lib_send_block_msg_to_client(nvmeibt_get_srv_comm(), msg, buf_len, reg_ctx->client->net.host_name);
+	rv = nvmeib_srvr_api_lib_send_block_msg_to_client(msg, buf_len, reg_ctx->client->net.host_name);
 	NNVMEIBT_BM_FREE(trace_4_toma_nvmeibt_toma_send_msg_to_client, msg);
 
 	NFOUT;

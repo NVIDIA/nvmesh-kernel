@@ -65,7 +65,7 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 	}
 	if (strcmp(argv[1], "server_csvs")==0) {
 		(void)nvmeib_srvr_api_lib_get_csv_disks(out);
-		(void)nvmeib_srvr_api_lib_get_csv_nics(out);
+		(void)nvmeib_srvr_api_lib_get_csv_nics( out);
 		return nvmeibt_Str_strlen(out);
 	}
 	nvmeibt_Str_sprintf(out, "Unknown status type '%s'. Use 'status' alone to get a list of available options.\n", argv[1]);
