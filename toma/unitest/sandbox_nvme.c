@@ -12,8 +12,6 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <string.h>
-#include <ctype.h>
-#include "common/nvmeib_shared.h"
 
 #undef BUG_ON
 #define BUG_ON(condition)	do { const int hit__ = !!(condition); if (hit__) {fprintf(stderr, "************************** BUG!!!! at %s, %s() line %d, val=%d, condition=%s\n", __FILE__, __FUNCTION__, __LINE__, hit__, #condition); raise(SIGABRT);} } while(0)

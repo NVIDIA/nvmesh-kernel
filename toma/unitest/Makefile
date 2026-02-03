@@ -103,6 +103,7 @@ SOURCES :=
 SOURCES += ./toma_in_sandbox.c
 SOURCES += ./sandbox_nvme.c
 SOURCES += ./mgmt_sim.c
+SOURCES += $(SSDA)/utils/nvmeib_jdr/nvmeib_txt.c
 
 TDIR=./..
 #TDIR=$(realpath ./..)

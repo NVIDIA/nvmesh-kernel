@@ -52,7 +52,4 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 int sandbox_nvme_get_device_count(void);
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev);
 
-/* Legacy define - will be removed when block-size becomes dynamic (Commit 5) */
-#define SANDBOX_NVME_BLOCK_SIZE_EXPONENT 12 // logical sector size as exponent of 2 (2**12 = 4096 bytes).
-
 #endif // TOMA_SANDBOX_NVME_H_INCLUDED
