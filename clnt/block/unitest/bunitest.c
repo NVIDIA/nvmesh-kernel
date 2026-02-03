@@ -1394,6 +1394,34 @@ int __thread_async_attach_dettach(void* param) {
 	return 0;
 }
 
+static void __thread_async_pause_cont_run_ec_cleanup_recoveries(struct NVMeshSystem *sys) {
+	struct tTopoOfPraid *r1 = tTopoOfVolume_getRaid1(&sys->tcf.vols[0], 0);
+	struct disk_range *seg = &sys->mdb.vols[0].segs[0];
+	const int n_segs = (int)seg->replicas;
+	int i, recov_status;
+
+	// Quiesce SERJIO-initiated JGC recoveries and prevent starting new ones for the cleanup duration
+	NVMeshSystem_set_ignore_jour_gc_launch_requests_from_serjio(sys, true);
+	clientSimulator_wait_for_all_recoveries_done(&sys->clients[0]);
+	tomaSimulator_waitProtoEnd(NULL);
+
+	for (i = 0; i < n_segs; i++) {
+		do {
+			BUG_ON(tomaSimulator_recoverThingStatus(r1, seg + i, RCVR_STALE_REBUILD, &recov_status) < 0);
+		} while (recov_status);
+
+		do {
+			BUG_ON(tomaSimulator_recoverThingStatus(r1, seg + i, RCVR_EC_JOUR_GC, &recov_status) < 0);
+		} while (recov_status);
+	}
+
+	clientSimulator_wait_for_all_recoveries_done(&sys->clients[0]);
+	tomaSimulator_waitProtoEnd(NULL);
+
+	NVMeshSystem_set_ignore_jour_gc_launch_requests_from_serjio(sys, false);
+}
+
+
 int __thread_async_pause_cont(void* param) {
 	t_async_test_params *p = (t_async_test_params*)param;
 	const bool should_rotate_disks = (p->disk_id<0);				// -1: [0..NVMESH_N_PHYS_DISKS_REGULAR_USE), <-2: [0..-p->disk_id), >0: Pause only this specific disk
@@ -1418,6 +1446,11 @@ int __thread_async_pause_cont(void* param) {
 				}
 			}
 		}
+
+		// Resolve abandoned journal entries using stale and JGC recoveries, otherwise IOs can get stuck waiting for JAM
+		if (p->is_ec)
+			__thread_async_pause_cont_run_ec_cleanup_recoveries(p->sys);
+
 		msleep(sleep_time_msecs);
 	}
 	p->n_cycles = round;
