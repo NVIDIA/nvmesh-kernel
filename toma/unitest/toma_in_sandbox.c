@@ -858,6 +858,14 @@ static int TSB_get_seq_from_nvmesh_device_name(const char *device_name) {
 	return (nvme_num < 1000) ? -1 : (nvme_num - 1000);		// NVMesh devices have numbers >= 1000
 }
 
+static void reply_usermode_payload(struct nvmeib_nl_uk_comm_msg *omsg, const struct nvmeib_nl_uk_comm_msg *imsg) {		// See real server function implementation
+	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep*)omsg->data;
+	rep->opcode = omsg->opcode = imsg->opcode;
+	omsg->id = imsg->id;
+	omsg->caller_type = imsg->caller_type;
+	rep->latency_ns = 576;
+}
+
 // Queue a netlink disk info response for a given device
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
@@ -865,14 +873,12 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
 
+	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
-	rep->base.opcode = msg->opcode = req_msg->opcode;
-	msg->id = req_msg->id;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 
 	// Fill nvmeib_disk_info_reply
 	rep->base.error = csce_ok;
-	rep->base.latency_ns = 555;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
 
 	// Fill disk info from sandbox device
@@ -903,9 +909,8 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 	const struct nvmeib_io_to_disk *io_req = (const struct nvmeib_io_to_disk *)req_msg->data;
 	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(io_req->disk_id);
 
+	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
-	rep->base.opcode = msg->opcode = req_msg->opcode;
-	msg->id = req_msg->id;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 
 	if (!dev) {
@@ -936,8 +941,6 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 		nvmeib_strlcpy(rep->disk_id, io_req->disk_id, sizeof(rep->disk_id));
 		rep->vendor_id = io_req->vendor_id;
 	}
-
-	rep->base.latency_ns = 100;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
@@ -955,9 +958,8 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 	uint64_t offset = (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
 	int rv = 0;
 
+	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
-	rep->base.opcode = msg->opcode = req_msg->opcode;
-	msg->id = req_msg->id;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 
 	if (!dev) {
@@ -1002,7 +1004,6 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 	}
 
 out:
-	rep->base.latency_ns = 100;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
@@ -1033,9 +1034,8 @@ static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)msg->data;
 	BUG_ON((req_msg->opcode != csc_t2s_blocking_msg_other) && (req_msg->opcode != csc_t2s_blocking_msg_to_io_clients));
-	msg->opcode = rep->opcode = csc_s2t_blocking_msg_ack;
+	reply_usermode_payload(msg, req_msg);
 	rep->error = uk_comm_err_from_errno(rv);
-	msg->id = req_msg->id;
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
