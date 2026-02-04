@@ -2727,8 +2727,10 @@ int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt,
 	localtime_r(&kafka_last_restart_timestamp.tv_sec, &timeinfo);
 	strftime(time_str, sizeof(time_str), "%b %d %X ", &timeinfo);
 	(*printf_fn)(printf_ctx, "\n- - - - -   Kafka Stats   - - - - -\n");
+	(*printf_fn)(printf_ctx, "librdkafka version=0x%x, %s\n", rd_kafka_version(), rd_kafka_version_str());
+	//(*printf_fn)(printf_ctx,"\tbroker.version=%s\n", rd_kafka_conf_get((rd_kafka_t*)rk, "broker.version.fallback", NULL, NULL) ? "?" : "?");
 	(*printf_fn)(printf_ctx, "Last init at: %s\nparams:\n", time_str);
-	(*printf_fn)(printf_ctx, "\tmtls_ssl_enabled=%c\nhost_verification_disabled=%c\n", bool_YN(kafka_mtls_ssl__is_enabled), bool_YN(kafka_mtls_ssl__is_hostname_verification_disabled));
+	(*printf_fn)(printf_ctx, "\tmtls_ssl_enabled=%c\n\thost_verification_disabled=%c\n", bool_YN(kafka_mtls_ssl__is_enabled), bool_YN(kafka_mtls_ssl__is_hostname_verification_disabled));
 	if (kafka_mtls_ssl__is_enabled) {
 		(*printf_fn)(printf_ctx, "\tssl_cach_path=%*s\n", kafka_mtls_ssl__ca->str_len, kafka_mtls_ssl__ca->text_buf);
 		(*printf_fn)(printf_ctx, "\tssl_cert_path=%*s\n", kafka_mtls_ssl__toma_certificate->str_len, kafka_mtls_ssl__toma_certificate->text_buf);
