@@ -282,6 +282,9 @@ int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, int fmt_idx)
 	     dev->serial_number, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
 
 	// Erase disk content (simulate NVMe format behavior)
+	// Note: The NVMESH_FORMATTED_DISK header is written by Toma's production
+	// code (format_disk_wrapper) after receiving the format reply, not by
+	// the sandbox's format simulation.
 	fd = sandbox_nvme_open(dev);
 	if (fd >= 0) {
 		if (ftruncate(fd, 0) != 0) {

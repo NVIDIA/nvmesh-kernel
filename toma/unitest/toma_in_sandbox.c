@@ -346,6 +346,13 @@ struct t_sandbox_all {
 		struct TSB_sock_otherside o[2];
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
 	} TSB_km_sock_pair;
+	struct TSB_pending_disk_add {
+		// Pending disk ADD event to be sent in a later iteration of the main loop.
+		// This simulates the delay between disk_freeze (REMOVE) and disk_unfreeze (ADD)
+		// that occurs in production during the actual NVMe format operation.
+		bool has_pending;
+		char disk_id[64];  // disk_id to look up device when sending
+	} pending_disk_add;
 	struct mgmt_sim_state *mgmt;
 	char my_hostname[64];
 	bool is_running_as_a_utility;
@@ -606,6 +613,8 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk);
 static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv);
 static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg);
+static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add);
+static void TSB_process_pending_disk_add_event(void);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -659,6 +668,11 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
 		n_payload_bytes_remainig -= sizeof(pay->req_info);
 		TSB_netlink_handle_req_info(req_msg);
+	} else if (req_msg->opcode == csc_remove_disk_ack) {
+		// Toma acknowledges disk removal - no response needed
+		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		n_payload_bytes_remainig -= sizeof(pay->rmv_disk_ack);
+		N_Tf(nl_rm_ack, "Netlink remove_disk_ack received for disk_id=@STR", pay->rmv_disk_ack.disk_id);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
@@ -959,6 +973,73 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
+// Send an unsolicited disk change event to Toma (simulates kernel's disk_freeze/unfreeze behavior)
+// is_add: true = add event (n_blocks > 0), false = remove event (n_blocks = 0)
+// The netlink path uses n_blocks to distinguish between add and remove events:
+//   n_blocks > 0 -> on_add_disk callback
+//   n_blocks == 0 -> on_remove_disk callback
+static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add)
+{
+	static unsigned long unsolicited_msg_id = 0x80000000;
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
+	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
+
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	msg->opcode = csc_get_disks;
+	msg->id = unsolicited_msg_id++;
+	msg->caller_type = TOMA_CALLER;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+
+	rep->base.opcode = csc_get_disks;
+	rep->base.error = csce_ok;
+	rep->selector = nvmeib_disk_info_reply_dinfo;
+
+	// KEY: n_blocks determines add vs remove
+	rep->dinfo.disk.n_blocks = is_add ? dev->size_in_blocks : 0;
+	rep->dinfo.disk.n_hw_blocks = is_add ? dev->size_in_blocks : 0;
+	rep->dinfo.disk.vendor_id = dev->vendor_id;
+	rep->dinfo.disk.block_size = 1 << lbaf->block_size_exp;
+	rep->dinfo.disk.max_request_size = 32;
+	rep->dinfo.disk.max_n_hw_sectors = 32;
+	rep->dinfo.disk.seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
+	rep->dinfo.disk.nsid = 1;
+	rep->dinfo.disk.metadata = lbaf->metadata_size;
+	snprintf(rep->dinfo.disk.disk_id, sizeof(rep->dinfo.disk.disk_id), "%s.1", dev->serial_number);
+	snprintf(rep->dinfo.disk.dev_name, sizeof(rep->dinfo.disk.dev_name), "%s", dev->device_path);
+	snprintf(rep->dinfo.disk.model_str, sizeof(rep->dinfo.disk.model_str), "%s", dev->model_number);
+	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
+	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
+	rep->dinfo.serjio_status = 0;
+
+	N_Tf(nl_disk_event, "Queuing disk @STR event for disk_id=@STR", is_add ? "ADD" : "REMOVE", rep->dinfo.disk.disk_id);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+// Process any pending disk ADD event that was deferred from a format operation.
+// This is called from the main event loop to ensure the REMOVE event has been
+// processed before the ADD event is sent.
+static void TSB_process_pending_disk_add_event(void)
+{
+	const struct sandbox_nvme_device *dev;
+
+	if (!sys->pending_disk_add.has_pending)
+		return;
+
+	dev = sandbox_nvme_get_device_by_disk_id(sys->pending_disk_add.disk_id);
+	if (dev) {
+		N_Tf(nl_pend_send, "Sending deferred disk ADD event for disk_id=@STR", sys->pending_disk_add.disk_id);
+		TSB_netlink_send_disk_change_event(dev, true);  // is_add=true -> n_blocks > 0
+	} else {
+		N_Ef(nl_pend_err, "Pending disk ADD: device not found disk_id=@STR", sys->pending_disk_add.disk_id);
+	}
+
+	sys->pending_disk_add.has_pending = false;
+	sys->pending_disk_add.disk_id[0] = '\0';
+}
+
 // Handle csc_io_to_disk requests - perform disk I/O and queue response
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
@@ -1066,6 +1147,7 @@ out:
 }
 
 // Handle csc_format_disk requests - update device format and queue response
+// Simulates kernel behavior: disk_freeze (REMOVE) -> format -> disk_unfreeze (ADD)
 static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk)
 {
 	char reply_buf[TSB_NL_MSG_SIZE] = {0};
@@ -1073,7 +1155,8 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
 	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
 	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
-	const int fmt_idx = fmt_disk->format_id.id;
+	int fmt_idx = fmt_disk->format_id.id;
+	bool format_succeeded = false;
 
 	reply_usermode_payload(reply_msg, req_msg);
 	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
@@ -1085,20 +1168,43 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	if (!dev) {
 		N_Ef(fmt_nodisk, "format_disk: device not found disk_id=@STR", fmt_disk->disk_id);
 		rep->base.error = csce_failed;
-	} else if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
-		N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
-		rep->base.error = csce_failed;
 	} else {
-		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
-		N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT blk=@INT md=@INT",
-			fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
-		rep->base.error = csce_ok;
-		// Fill in the new format info
-		snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
-		rep->info.new_n_pblk = dev->size_in_blocks;
-		rep->info.new_seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
+		// 1. Send REMOVE event BEFORE format (simulates disk_freeze)
+		TSB_netlink_send_disk_change_event(dev, false);  // is_add=false -> n_blocks=0
+
+		// 2. Perform the format operation (zeros disk)
+		// Note: The NVMESH_FORMATTED_DISK header is written by production code
+		// (format_disk_wrapper) after receiving the format reply.
+		if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
+			N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
+			rep->base.error = csce_failed;
+		} else {
+			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
+			N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT blk=@INT md=@INT",
+				fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
+			rep->base.error = csce_ok;
+			// Fill in the new format info
+			snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
+			rep->info.new_n_pblk = dev->size_in_blocks;
+			rep->info.new_seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
+			format_succeeded = true;
+		}
 	}
+
+	// 3. Send format reply
+	rep->base.latency_ns = 1000;  // Simulate some format latency
 	TSB_netlink_queue_enqueue(reply_buf, reply_nlhdr->nlmsg_len);
+
+	// 4. Schedule ADD event to be sent in a LATER iteration of the main loop
+	// This gives Toma's work queue time to process the REMOVE event before
+	// receiving the ADD event, matching production behavior where the NVMe
+	// format operation takes time between disk_freeze and disk_unfreeze.
+	if (dev && format_succeeded) {
+		snprintf(sys->pending_disk_add.disk_id, sizeof(sys->pending_disk_add.disk_id),
+			 "%s.1", dev->serial_number);
+		sys->pending_disk_add.has_pending = true;
+		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for disk_id=@STR", sys->pending_disk_add.disk_id);
+	}
 }
 
 static void TSB_netlink_send_extended_msg(void) {
@@ -1516,6 +1622,9 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	if (loop_idx < SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 		if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
+		// Process any pending disk ADD event that was deferred from a format operation.
+		// This gives the REMOVE event time to be processed by the work queue.
+		TSB_process_pending_disk_add_event();
 		return n_events;
 	} else {
 		N_IMf(sbexit001, "sandbox shutting down Toma app");
