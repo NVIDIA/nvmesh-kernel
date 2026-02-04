@@ -50,10 +50,14 @@
 #define MAX_NUM_GPT_ENTRIES						8192
 #define LARGE_GPT_MAX_NUM_GPT_ENTRIES			8192
 #define MAX_NUM_GPT_ENTRIES_FOR_BACKWARDS_COMPATIBILITY		(MAX_NUM_GPT_ENTRIES < 1024 ? 1024 : MAX_NUM_GPT_ENTRIES)
+
+#ifndef TOMA_SIMULATOR_SANDBOX
 #define METADATA_PARTITION_RATIO				0.005 /*0.5% from the disk size*/
-#define METADATA_PARTITION_MIN_SIZE_BYTE		(1024*1024*(1024+4))
+#else
+#define METADATA_PARTITION_RATIO				0.15 /* 15% of the disk size for the simulator sandbox with small disks */
+#endif
+
 #define MBR_SIZE								512
 #define UEFI_MIN_GPT_ENTRY_SIZE					128
-
 
 #endif /* NVMEIBT_PARAMS */
