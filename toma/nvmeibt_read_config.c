@@ -1119,15 +1119,32 @@ out:
 static int setup_metadata_gpt(struct nvmeibt_local_disk *cur_local_disk, const union nvmeib_uuid *disk_obj_uuid)
 {
 	int											rv = 0;
-	uint64_t									max_allowed_metadata_partition_size_pblks;
 	uint64_t									metadata_partition_size_in_pblks;
 	struct nvmeibt_disk_gpt_partition_entry		*metadata_gpt_entry;
 
 	NFIN;
 	// The metadata partition is around 0.5% of the disk. The first 0.5% is not used for
 	// disk segment allocations, but includes also the GPT itself, and the PMBR.
-	max_allowed_metadata_partition_size_pblks = cur_local_disk->from_config.n_pblk * METADATA_PARTITION_RATIO - cur_local_disk->main_gpt.header.first_usable_pba - 1;
-	metadata_partition_size_in_pblks = max_allowed_metadata_partition_size_pblks - (2 * (4096 / nvmeibt_local_disk_pblk_size(cur_local_disk)));	// align to 4k spares
+	{
+		// Total blocks of the disk allocated for metadata (0.5% of disk size).
+		const uint64_t disk_space_allocated_for_metadata_pblks = (uint64_t)(cur_local_disk->from_config.n_pblk * METADATA_PARTITION_RATIO);
+		// Blocks consumed by GPT structures (PMBR + GPT header + partition entries array).
+		const uint64_t structures_overhead_pblks = cur_local_disk->main_gpt.header.first_usable_pba + 1;
+		// Blocks reserved for 4KB sector alignment (2 x 4KB blocks regardless of PBA size).
+		const uint64_t alignment_spare_pblks = 2 * (4096 / nvmeibt_local_disk_pblk_size(cur_local_disk));
+		// Total overhead blocks (GPT structures + alignment spare).
+		const uint64_t overhead_pblks = structures_overhead_pblks + alignment_spare_pblks;
+
+		// Validate disk is large enough to avoid unsigned integer underflow.
+		if (overhead_pblks >= disk_space_allocated_for_metadata_pblks) {
+			N_Ef(smgsm01, "Disk too small for metadata partition: disk=@STR n_pblk=@N_PBLKS metadata_disk_space=@N_PBLKS overhead=@N_PBLKS structures_overhead=@N_PBLKS alignment_spare=@N_PBLKS",
+				 nvmeibt_local_disk_display(cur_local_disk), cur_local_disk->from_config.n_pblk, disk_space_allocated_for_metadata_pblks, overhead_pblks, structures_overhead_pblks, alignment_spare_pblks);
+			rv = -1;
+			goto out;
+		}
+		// This will be the amount of actual data space available in the metadata partition on the disk.
+		metadata_partition_size_in_pblks = disk_space_allocated_for_metadata_pblks - overhead_pblks;
+	}
 
 	// Allocate the metadata partition on the disk.
 	metadata_gpt_entry = nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->main_gpt,
