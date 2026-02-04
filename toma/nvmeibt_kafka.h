@@ -143,12 +143,12 @@ void nvmeibt_kafka_req_start_consuming_leader_TARGET_msgs(int64_t kafka_offset_T
 
 void nvmeibt_kafka_outgoing_msgs_queue_add(const char *unique_key, const char *val, size_t val_len, enum NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY outgoing_msg_priority);
 
-void nvmeibt_kafka_send_encrypt_cmd_response(char *vol_name,
-											 struct nvmeibt_urn_uuid *vol_uuid,
+void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name,
+											 const struct nvmeibt_urn_uuid *vol_uuid,
 											 int encrypt_idx,
 											 enum ENCRYPT_CMD_RESPONSE error_code,
 											 bool is_retryable,
-											 char *error_str);
+											 const char *error_str);
 void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset);
 
 int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
