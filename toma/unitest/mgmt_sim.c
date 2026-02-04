@@ -16,8 +16,9 @@
 #include "nvmeibt_debug.h"
 
 /*
- * Management simulation Kafka message templates.
- * These are the messages that the simulated management server sends to Toma.
+ * Management simulation Kafka message formatting functions.
+ * Each function formats a specific message type that the simulated management
+ * server sends to Toma. Returns the number of bytes written to the buffer.
  */
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
@@ -43,56 +44,131 @@
 	MGMT_FSM_DONE
 };
 
-static const char *mgmt_simu_kafka_msg_templates[] = {
-	/* [0] updateLeaderKeepaliveToken */
-	"{\"messageType\":\"updateLeaderKeepaliveToken\",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":5}}",
+/* Format updateLeaderKeepaliveToken message */
+static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"updateLeaderKeepaliveToken\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"token\":1,\"keepaliveInterval\":5}}");
+}
 
-	/* [1] updateTomaKeepaliveToken - %s = hostname */
-	"{\"messageType\":\"updateTomaKeepaliveToken\""
-	",\"messageTypeVersion\":1,\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":5}}",
+/* Format updateTomaKeepaliveToken message */
+static int make_msg_update_toma_keepalive_token(char *buf, size_t capacity, const char *hostname)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"updateTomaKeepaliveToken\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":5}}",
+		hostname);
+}
 
-	/* [2] addTarget - %s = hostname */
-	"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":{\"nodeID\":\"%s\",\"uuid\":\"e8c70c10-db79-11f0-8f35-cb935b7ef6ae\",\"targetsInZone\":0,\"targetUpdatesSequence\":1}}",
+/* Format addTarget message */
+static int make_msg_add_target(char *buf, size_t capacity, const char *hostname)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"addTarget\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"nodeID\":\"%s\""
+		",\"uuid\":\"e8c70c10-db79-11f0-8f35-cb935b7ef6ae\""
+		",\"targetsInZone\":0,\"targetUpdatesSequence\":1}}",
+		hostname);
+}
 
-	/* [3] hardwareConfiguration - %d = kafkaMessageSequence, %s = hostname
-	 * Simulated disks: NVMD_SN_002.1 (vendor 5122), NVMD_SN_003.1 (vendor 5123) with 2000 blocks each
-	 */
-	"{\"messageType\":\"hardwareConfiguration\"   "
-	",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\",\"configurationVersion\":17,\"leaderToken\":1,\"kafkaMessageSequence\""
-	":%d,\"raftTerm\":9,\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
-	"\"targets\":["
-	"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"cde269b0-c3c0-11f0-bc49-e391b6ca4c2b\","
-	"\"disks\":["
-	"{\"diskID\":\"NVMD_SN_002.1\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"f39cebd0-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
-	"{\"diskID\":\"NVMD_SN_003.1\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"f39cebd1-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false}],"
-	"\"nics\":["
-	"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-	"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-	"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"n39@google.com\",\"uuid\":\"cde269b1-c3c0-11f0-bc49-e391b6ca4c2b\","
-	"\"disks\":["
-	"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"f39cebd2-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
-	"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"f39cebd3-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":1,\"isOutOfService\":false}],"
-	"\"nics\":["
-	"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-	"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
-	"]}}",
+/*
+ * Format hardwareConfiguration message.
+ * Simulated disks: NVMD_SN_002.1 (vendor 5122), NVMD_SN_003.1 (vendor 5123) with 2000 blocks each.
+ */
+static int make_msg_hardware_configuration(char *buf, size_t capacity, int kafka_msg_seq, const char *hostname)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"hardwareConfiguration\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
+		",\"configurationVersion\":17,\"leaderToken\":1"
+		",\"kafkaMessageSequence\":%d,\"raftTerm\":9"
+		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
+		"\"targets\":["
+		"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\""
+		",\"uuid\":\"cde269b0-c3c0-11f0-bc49-e391b6ca4c2b\","
+		"\"disks\":["
+		"{\"diskID\":\"NVMD_SN_002.1\",\"blocks\":2000,\"block_size\":4096"
+		",\"activeFormatRequestCounter\":1,\"vendorID\":5122"
+		",\"uuid\":\"f39cebd0-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
+		"{\"diskID\":\"NVMD_SN_003.1\",\"blocks\":2000,\"block_size\":4096"
+		",\"activeFormatRequestCounter\":1,\"vendorID\":5123"
+		",\"uuid\":\"f39cebd1-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false}],"
+		"\"nics\":["
+		"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\""
+		",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1"
+		",\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
+		"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\""
+		",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1"
+		",\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
+		"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"n39@google.com\""
+		",\"uuid\":\"cde269b1-c3c0-11f0-bc49-e391b6ca4c2b\","
+		"\"disks\":["
+		"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096"
+		",\"activeFormatRequestCounter\":1,\"vendorID\":5197"
+		",\"uuid\":\"f39cebd2-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
+		"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024"
+		",\"activeFormatRequestCounter\":0,\"vendorID\":3333"
+		",\"uuid\":\"f39cebd3-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":1,\"isOutOfService\":false}],"
+		"\"nics\":["
+		"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\""
+		",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1"
+		",\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
+		"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\""
+		",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1"
+		",\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
+		"]}}",
+		kafka_msg_seq, hostname);
+}
 
-	/* [4] addVolume */
-	"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"V1\",\"uuid\":\"f1b17590-c52b-11f0-bc49-e391b6ca4c2b\","
-	"\"version\":1,\"name\":\"V1\",\"blockSize\":4096,\"lockServer\":{\"maxNOwners\":1,\"type\":4,\"locksetShift\":-1},\"blocks\":4882432,\"RAIDLevel\":\"Striped RAID-0\",\"numberOfMirrors\":0,\"stripeSize\":32,\"stripeWidth\":2,\"status\":\"unavailable\","
-	"\"action\":\"initializing\",\"relativeRebuildPriority\":10,\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null,\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-	"\"chunks\":["
-	"{\"uuid\":\"09c2f550-c52c-11f0-bc49-e391b6ca4c2b\",\"vlbs\":0,\"vlbe\":4882431,\"pRaids\":["
-	"{\"uuid\":\"09c2f552-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-	"{\"uuid\":\"09c2f551-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":26900224,\"lbe\":29341439,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"f3a2b830-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-	"{\"uuid\":\"09c34371-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false,\"stripeIndex\":1,\"zone\":\"1\",\"diskSegments\":["
-	"{\"uuid\":\"09c34370-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":1509632,\"lbe\":3950847,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"f3a24300-c3c0-11f0-bc49-e391b6ca4c2b\"}"
-	"]}]}]}}",
+/* Format addVolume message */
+__attribute__((unused)) // Not yet used - for reference only
+static int make_msg_add_volume(char *buf, size_t capacity)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"addVolume\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"_id\":\"V1\",\"uuid\":\"f1b17590-c52b-11f0-bc49-e391b6ca4c2b\""
+		",\"version\":1,\"name\":\"V1\",\"blockSize\":4096"
+		",\"lockServer\":{\"maxNOwners\":1,\"type\":4,\"locksetShift\":-1}"
+		",\"blocks\":4882432,\"RAIDLevel\":\"Striped RAID-0\""
+		",\"numberOfMirrors\":0,\"stripeSize\":32,\"stripeWidth\":2,\"status\":\"unavailable\""
+		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
+		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
+		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
+		"\"chunks\":["
+		"{\"uuid\":\"09c2f550-c52c-11f0-bc49-e391b6ca4c2b\",\"vlbs\":0,\"vlbe\":4882431,\"pRaids\":["
+		"{\"uuid\":\"09c2f552-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false"
+		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
+		"{\"uuid\":\"09c2f551-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":26900224,\"lbe\":29341439"
+		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
+		",\"diskUUID\":\"f3a2b830-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
+		"{\"uuid\":\"09c34371-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false"
+		",\"stripeIndex\":1,\"zone\":\"1\",\"diskSegments\":["
+		"{\"uuid\":\"09c34370-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":1509632,\"lbe\":3950847"
+		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
+		",\"diskUUID\":\"f3a24300-c3c0-11f0-bc49-e391b6ca4c2b\"}"
+		"]}]}]}}");
+}
 
-	/* [5] formatDrive - %s = diskID, %s = uuid, %u = vendor, %u = formatRequestCounter, %lu = bootTime */
-	"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1,\"payload\":{\"diskID\":\"%s\",\"uuid\":\"%s\",\"vendor\":%u,\"formatType\":\"format_ec\",\"formatRequestCounter\":%u,\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu, " MGMT_DB_UUID_JSON
-	"}}",
-};
+/* Format formatDrive message */
+static int make_msg_format_drive(char *buf, size_t capacity, const char *disk_id,
+				     const char *uuid, unsigned vendor,
+				     unsigned format_request_counter, unsigned long boot_time)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"formatDrive\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"diskID\":\"%s\",\"uuid\":\"%s\",\"vendor\":%u"
+		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
+		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
+		", " MGMT_DB_UUID_JSON "}}",
+		disk_id, uuid, vendor, format_request_counter, boot_time);
+}
 
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(const char *json, size_t len);
@@ -148,6 +224,7 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 {
 	char *payload = NULL;
 	size_t len = 0;
+	size_t capacity;
 
 	BUG_ON(!g_mgmt_sim || !consumer_name || !out_len);
 
@@ -155,17 +232,19 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 	if (strncmp(consumer_name, "HW", 2) == 0) {
 		if (g_mgmt_sim->hw_msg_count == 0) {
 			/* First message: updateTomaKeepaliveToken */
-			payload = malloc(256);
-			if (payload)
-				len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[1],
-						       g_mgmt_sim->hostname);
+			capacity = 256;
+			payload = malloc(capacity);
+			BUG_ON(!payload);
+			len = (size_t)make_msg_update_toma_keepalive_token(
+				payload, capacity, g_mgmt_sim->hostname);
 			g_mgmt_sim->hw_msg_count++;
 		} else if ((g_mgmt_sim->hw_msg_count++ % 4) == 0) {
 			/* Periodically inject hardwareConfiguration */
-			payload = malloc(4096);
-			if (payload)
-				len = (size_t)snprintf(payload, 4096, mgmt_simu_kafka_msg_templates[3],
-						       g_mgmt_sim->hw_msg_count, g_mgmt_sim->hostname);
+			capacity = 4096;
+			payload = malloc(capacity);
+			BUG_ON(!payload);
+			len = (size_t)make_msg_hardware_configuration(
+				payload, capacity, g_mgmt_sim->hw_msg_count, g_mgmt_sim->hostname);
 		}
 	}
 	/* CMD consumer - command messages */
@@ -179,24 +258,28 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 			N_Tf(msim_cmd, "delivering formatDrive message len=@INT", (int)len);
 		} else if (g_mgmt_sim->cmd_msg_count == 0) {
 			/* First command: updateTomaKeepaliveToken (zone) */
-			payload = malloc(256);
+			capacity = 256;
+			payload = malloc(capacity);
 			BUG_ON(!payload);
-			len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[1], g_mgmt_sim->hostname);
+			len = (size_t)make_msg_update_toma_keepalive_token(
+				payload, capacity, g_mgmt_sim->hostname);
 			g_mgmt_sim->cmd_msg_count++;
 		} else if ((g_mgmt_sim->cmd_msg_count++ % 3) == 0) {
 			/* Periodically send updateLeaderKeepaliveToken */
-			payload = strdup(mgmt_simu_kafka_msg_templates[0]);
+			capacity = 256;
+			payload = malloc(capacity);
 			BUG_ON(!payload);
-			len = strlen(payload);
+			len = (size_t)make_msg_update_leader_keepalive_token(payload, capacity);
 		}
 	}
 	/* Target consumer (not incrementalTarget) - addTarget messages */
 	else if (strstr(consumer_name, "incrementalTarget") == NULL) {
 		if (g_mgmt_sim->target_msg_count == 0) {
 			/* First message: addTarget (self as 1-machine raft domain) */
-			payload = malloc(256);
+			capacity = 256;
+			payload = malloc(capacity);
 			BUG_ON(!payload);
-			len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[2], g_mgmt_sim->hostname);
+			len = (size_t)make_msg_add_target(payload, capacity, g_mgmt_sim->hostname);
 			g_mgmt_sim->target_msg_count++;
 		}
 	}
@@ -393,12 +476,10 @@ static void mgmt_sim_run_fsm(void)
 
 			msg = malloc(1024);
 			BUG_ON(!msg);
-			msg_len = (size_t)snprintf(msg, 1024, mgmt_simu_kafka_msg_templates[5],
-							FORMAT_TARGET_DISK_ID,
-							FORMAT_TARGET_UUID,
-							FORMAT_TARGET_VENDOR,
-							FORMAT_REQUEST_COUNTER,
-							(unsigned long)g_mgmt_sim->boot_time);
+			msg_len = (size_t)make_msg_format_drive(msg, 1024,
+				FORMAT_TARGET_DISK_ID, FORMAT_TARGET_UUID,
+				FORMAT_TARGET_VENDOR, FORMAT_REQUEST_COUNTER,
+				(unsigned long)g_mgmt_sim->boot_time);
 			g_mgmt_sim->pending_format_drive_msg = msg;
 			g_mgmt_sim->pending_format_drive_len = msg_len;
 			g_mgmt_sim->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
