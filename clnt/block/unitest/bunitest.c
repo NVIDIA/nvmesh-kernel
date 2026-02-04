@@ -34,6 +34,7 @@
 #include "nvmeibc_error_tags.h"
 #include "memmgr_metrics_tests.h"
 #include "error_tags_tests.h"
+#include "nvmeib_scatterlist_iter_test.h"
 #include <stdint.h>
 
 /******************************************************************************/
@@ -7181,6 +7182,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 
 	test_memmgr_metrics();
 	test_error_tags();
+	nvmeib_scatterlist_iter_tests();
 
 	if (unlikely(buni->conf->bunitest.nRep == 0))
 		unitest_print("*** Skipping all unitests. Intentional?\n");

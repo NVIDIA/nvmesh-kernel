@@ -158,6 +158,7 @@ SOURCES += ./uni_scenarios/uni_scenario_ec_jam.c
 SOURCES += ./uni_scenarios/uni_scenario_ec_serjio.c
 SOURCES += ./uni_scenarios/uni_scenario_common.c
 SOURCES += ./nvmeibc_tracer_unitest.c
+SOURCES += ./nvmeib_scatterlist_iter_test.c
 
 # Production code: /utils/
 UTILS_DIR := $(SSDA)/utils
@@ -173,6 +174,7 @@ SOURCES += $(CMDIR)/nvmeib_memmgr_metrics.c
 SOURCES += $(CMDIR)/nvmeib_error_tags.c
 SOURCES += $(CMDIR)/nvmeib_pcpu_wq.c
 SOURCES += $(CMDIR)/proc_epilog.c
+SOURCES += $(CMDIR)/nvmeib_scatterlist_iter.c
 SOURCES += $(SSDA)/common_public/nvmeib_public_procfs.c
 SOURCES += $(SSDA)/common_public/kth/nvmeib_public_kth.c
 SOURCES += $(SSDA)/common_public/nvmeib_event.c

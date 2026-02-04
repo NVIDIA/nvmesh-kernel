@@ -16,6 +16,7 @@ nvmeib_common-y := nvmeib.o nvmeib_utils.o nvmeib_ib_driver.o nvmeib_wd.o \
 	traces_ids.o \
 	nvmeib_json.o \
 	nvmeib_metrics_jdr.o nvmeib_memmgr_metrics.o nvmeib_error_tags.o \
+	nvmeib_scatterlist_iter.o \
 	nvmeib_completion_noise.o nvmeib_pcpu_wq.o
 
 ifeq ($(call ofed_ver_check,5,1),no)

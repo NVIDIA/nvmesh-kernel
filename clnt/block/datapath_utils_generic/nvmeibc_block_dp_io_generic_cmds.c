@@ -18,6 +18,7 @@
 #include "nvmeibc_error_tags.h"
 #include "nvmeibc_io_pet.h"
 #include "compat/kr_incs_sgl.h"
+#include "common/nvmeib_scatterlist_iter.h"
 
 /******************************************************************************/
 uint nvmeibc_jentry_num_blocks = 16;						// Todo, rename internally to binje
@@ -254,6 +255,7 @@ static raid_sgmnt_t __dp_get_sgmnt_idx_from_ds(const struct nvmeibc_disk_segment
 
 static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_block_command const *bcmd, bool is_completion)
 {
+	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(bcmd->ds);
 	struct nvmeibc_disk_io_command const* disk_io_cmd =  bcmd->iocmd;
 	if (nvmeib_pet_journal_is_verbose(&bcmd->o->journal) == false){
 		return false;
@@ -267,6 +269,9 @@ static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_b
 	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_WRITE && is_completion == true){ //receiving write response
 		return false;
 	}
+	if (!nvmeibc_raid_is_ec(r) && !nvmeibc_raid_is_mirror(r)) {
+		return false;
+	}
 	return true;
 }
 
@@ -277,12 +282,10 @@ static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_co
 	struct nvmeib_pet_journal* journal = &bcmd->o->journal;
 	bool const enable_edic_check = bcmd->o->nd->dp.enable_edic_check;
 
-	struct scatterlist *sg;
-	u32 i;
 	u64 *data_first_content;
-	union nvmeibc_block_dp_ec_data_block_md *md;
+	struct nvmeib_scatterlist_block_iter it;
+	union nvmeibc_block_dp_ec_data_block_md *md, *md_start;
 	const u32 md_size = nvmeibc_sgmnt_sw_md_size(bcmd->ds);
-	const u32 nlbas = NVMEIBC_BYTE2SECTOR(ndb->length);
 	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(bcmd->ds);
 
 	bool const should_trace = __nvmeibc_cmd_data_and_metadata_pet_should_describe(bcmd, is_completion);
@@ -290,43 +293,37 @@ static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_co
 		return;
 	}
 
-	if (nlbas != ndb->table.nents) {
-		NVMEIBC_IO_PET_MSG_ERROR(journal, "nlbas != cmd->reqs1.ndb->table.nents: %u, %u", nlbas, ndb->table.nents);
-		return;
-	}
-
-	md = (union nvmeibc_block_dp_ec_data_block_md *)disk_io_cmd->reqs1.md;
-	for_each_sg(ndb->table.sgl, sg, ndb->table.nents, i) {
-		data_first_content = sg ? (u64 *)sg_virt(sg) : NULL;
-		if (data_first_content != NULL) {
-			/**
-			* JBOD does not use metadata. Mirroring only cares about EDIC, as
-			* it may be transaction id (used to mark what type of client wrote the
-			* data). EC cares about everything.
-			*/
-			if (nvmeibc_raid_is_ec(r)) {
-				BUG_ON(md == NULL); //we print on write.request & read.response, so md should be allocated
+	BUG_ON(ndb->length & (NVMEIBC_SECTOR_SIZE - 1)); // ndb->length is not a multiple of sector size
+	md_start = (union nvmeibc_block_dp_ec_data_block_md *)disk_io_cmd->reqs1.md;
+	nvmeib_scatterlist_block_iter_init(&it, NVMEIBC_SECTOR_SIZE, ndb->table.sgl, ndb->table.nents);
+	while (nvmeib_scatterlist_block_iter_next(&it)) {
+		md = (union nvmeibc_block_dp_ec_data_block_md *)((u8*)md_start + it.idx * md_size);
+		data_first_content = (u64*)it.data;
+		BUG_ON(data_first_content == NULL);
+		/**
+		* JBOD does not use metadata. Mirroring only cares about EDIC, as
+		* it may be transaction id (used to mark what type of client wrote the
+		* data). EC cares about everything.
+		*/
+		if (nvmeibc_raid_is_ec(r)) {
+			BUG_ON(md_start == NULL); //we print on write.request & read.response, so md should be allocated
+			NVMEIBC_IO_PET_MSG_NORM(
+				journal,
+				"    content(idx=%hhu, first_8b = 0x%llx, is_parity = %hhu, md = 0x%llx<union nvmeibc_block_dp_ec_data_block_md>)",
+				numeric_downcast(u8, it.idx), *data_first_content, (u8)bcmd->is_parity, md->raw);
+		} else if (nvmeibc_raid_is_mirror(r)) {
+			//mirror datapath is configurable and may use or not use edic, but since we are playing with the backdoor, it is better to print it anyway
+			if (enable_edic_check) {
+				BUG_ON(md_start ==
+				       NULL); //we print on write.request & read.response, so md should be allocated
 				NVMEIBC_IO_PET_MSG_NORM(journal,
-							"    content(idx=%hhu, first_8b = 0x%llx, is_parity = %hhu, md = 0x%llx<union nvmeibc_block_dp_ec_data_block_md>)", 
-							numeric_downcast(u8, i), *data_first_content, (u8)bcmd->is_parity, md->raw);
-			} else if (nvmeibc_raid_is_mirror(r)) {
-				//mirror datapath is configurable and may use or not use edic, but since we are playing with the backdoor, it is better to print it anyway
-				if (enable_edic_check){
-					BUG_ON(md == NULL); //we print on write.request & read.response, so md should be allocated
-					NVMEIBC_IO_PET_MSG_NORM(journal,
-								"    content(idx=%hhu, first_8b = 0x%llx, edic = 0x%x)",
-								numeric_downcast(u8, i), *data_first_content, nvmeibc_block_dp_ec_md_get_edic(md, bcmd->is_parity));
-				} else {
-					NVMEIBC_IO_PET_MSG_NORM(journal,
-								"    content(idx=%hhu, first_8b = 0x%llx)",
-								numeric_downcast(u8, i), *data_first_content);
-				}
+							"    content(idx=%hhu, first_8b = 0x%llx, edic = 0x%x)",
+							numeric_downcast(u8, it.idx), *data_first_content,
+							nvmeibc_block_dp_ec_md_get_edic(md, bcmd->is_parity));
+			} else {
+				NVMEIBC_IO_PET_MSG_NORM(journal, "    content(idx=%hhu, first_8b = 0x%llx)",
+							numeric_downcast(u8, it.idx), *data_first_content);
 			}
-			if (md){
-				md = (union nvmeibc_block_dp_ec_data_block_md *)((u8*)md + md_size);
-			}
-		} else if (data_first_content != NULL) {
-			NVMEIBC_IO_PET_MSG_NORM(journal, "    content(idx=%hhu, first_8b = 0x%llx)", numeric_downcast(u8, i), *data_first_content);
 		}
 	}
 }
@@ -802,9 +799,9 @@ static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, st
 		struct nvmeibc_block_command *cmd = &cmds[i];
 		if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
 			continue;
-		NVMEIBC_IO_PET_MSG(&o->journal, 
+		NVMEIBC_IO_PET_MSG(&o->journal,
 						   "dp_cmds_complete_cmd(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
-						   cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,  
+						   cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,
 						   numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
 
 		__nvmeibc_cmd_piggyback_response_pet_describe(o, rldr, cmd);
@@ -1228,8 +1225,8 @@ void nvmeibc_blkset_info_write_pet_describe(struct nvmeibc_block_command *cmds,
 {
 	u32 binfo = dc->lock.bi;
 
-	NVMEIBC_IO_PET_MSG_NORM(&cmds->o->journal, 
-			                "nvmeibc_pd_write_blkset_info(addr=0x%llx binfo=0x%x<union nvmeib_blkset_info>)", 
+	NVMEIBC_IO_PET_MSG_NORM(&cmds->o->journal,
+			                "nvmeibc_pd_write_blkset_info(addr=0x%llx binfo=0x%x<union nvmeib_blkset_info>)",
 							addr, binfo);
 }
 

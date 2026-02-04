@@ -10,7 +10,11 @@ void sg_set_buf(struct scatterlist *sg, const void *buf, unsigned int buflen) {
 	}
 }
 
-void sg_init_table( struct scatterlist *sg, unsigned int len) {	(void)sg; (void)len; BUG_ON(true); }			// Not implemented yet
+void sg_init_table(struct scatterlist *sg, unsigned int nents) {
+	BUG_ON(nents == 0);
+	memset(sg, 0, sizeof(*sg) * nents);
+	sg_mark_end(&sg[nents - 1]);
+}
 
 int sg_alloc_table(struct sg_table *t, unsigned int n, gfp_t flags) {
 	(void)flags;
