@@ -234,7 +234,11 @@ void nvmeibt_local_disk_propagate_needed_bind_and_excluded_and_takeover_to_contr
 	NFIN;
 	// Any local_disk. nvmeibs/stock
 	controller = local_disk->controller;
-	NTOMA_ASSERT(crqwjk4, controller, "local_disk=@STR controller=NULL", nvmeibt_local_disk_display(local_disk));
+	if (!controller) {
+		N_Ef(y7u8iqq, "local_disk=@STR controller=NULL", nvmeibt_local_disk_display(local_disk));
+		sprintf(local_disk->from_config.status, "Error");
+		goto out;
+	}
 	if (local_disk->is_excluded) {
 		if (!(controller->is_excluded)) {
 			controller->is_excluded = 1;
