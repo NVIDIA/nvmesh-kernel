@@ -111,6 +111,31 @@ esac
 shift # past argument or value
 done
 
+# Setup /dev/net/tun if missing.
+setup_tun_device() {
+    case "$(uname -s)" in
+        Linux) ;;
+        *) return 0 ;;
+    esac
+
+    [ -e /dev/net/tun ] && return 0
+
+    echo "Note: /dev/net/tun not found"
+
+    if [ ! -d /dev/net ]; then
+        sudo mkdir -p /dev/net 2>/dev/null
+    fi
+
+    if sudo modprobe tun 2>/dev/null; then
+        echo "Successfully loaded tun kernel module"
+        return 0
+    fi
+
+    echo "Warning: Could not load tun module"
+    echo "If the build fails, run: sudo modprobe tun"
+    return 0
+}
+
 if [ -z $DISTRO ]; then
         DISTRO=rhel7
 fi
@@ -140,6 +165,8 @@ if [ -z $RPM_PATH ] ; then
 fi
 
 IFS='-' read -ra GIT_DESCRIBE <<< "$GIT_DESCRIBE"
+
+setup_tun_device
 
 # Build docker container
 echo "Building nvmesh-build-$DISTRO image from docker/"
