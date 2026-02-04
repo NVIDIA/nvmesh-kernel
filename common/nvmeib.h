@@ -303,7 +303,7 @@ enum nvmeib_wr_opcode {
 
 	/* GEN OPs */
 	NVMEIB_WR_GEN_OP_START,
-	NVMEIB_WR_GEN_OP_END = NVMEIB_WR_GEN_OP_START + MAX_NVMEIB_GEN_OP - 1,
+	NVMEIB_WR_GEN_OP_END = NVMEIB_WR_GEN_OP_START + NVMEIB_GEN_OP_MAX - 1,
 	NVMEIB_WR_GEN_UUID_RSP_JMDC,
 	NVMEIB_WR_GEN_UUID_RSP_ENT_MD,
 
@@ -1013,7 +1013,7 @@ static inline u64 nordda_wr_id_encode_gen(u16 version, enum nvmeib_gen_cmd_op ge
 {
 	union nordda_wr_id wrid = {};
 	BUG_ON(gen_op <= NVMEIB_GEN_OP_UNUSED ||
-		   gen_op >= MAX_NVMEIB_GEN_OP);
+		   gen_op >= NVMEIB_GEN_OP_MAX);
 	wrid.opcode = (unsigned)gen_op + (unsigned)NVMEIB_WR_GEN_OP_START;
 	wrid.index = index;
 	wrid.version = version;

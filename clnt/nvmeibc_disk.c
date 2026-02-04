@@ -14251,7 +14251,7 @@ static int nvmeibc_disk_gen_cmds_stats_fill(struct nvmeibc_disk *disk,
 		PAD_BLANKS_LEN, "Remote");
 
 
-	for (i = NVMEIB_GEN_OP_GET_UUID_JOUR; i < MAX_NVMEIB_GEN_OP; i++) {
+	for (i = NVMEIB_GEN_OP_GET_UUID_JOUR; i < NVMEIB_GEN_OP_MAX; i++) {
 		BUF_ADD("%-*s| %*llu | %*llu | %*llu | %*llu\n",
 			20, nvmeib_gen_op_str(i),
 			PAD_BLANKS_LEN, (u64)atomic64_read(&disk->gen_cmds_cntrs_ok[i]),

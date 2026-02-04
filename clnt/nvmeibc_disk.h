@@ -741,10 +741,10 @@ struct nvmeibc_disk {
 	union nvmeib_version last_tgt_link_ver;
 	union nvmeib_version last_tgt_ver;
 
-	atomic64_t gen_cmds_cntrs_ok[MAX_NVMEIB_GEN_OP];
-	atomic64_t gen_cmds_cntrs_fail[MAX_NVMEIB_GEN_OP];
-	atomic64_t gen_cmds_cntrs_local[MAX_NVMEIB_GEN_OP];
-	atomic64_t gen_cmds_cntrs_remote[MAX_NVMEIB_GEN_OP];
+	atomic64_t gen_cmds_cntrs_ok[NVMEIB_GEN_OP_MAX];
+	atomic64_t gen_cmds_cntrs_fail[NVMEIB_GEN_OP_MAX];
+	atomic64_t gen_cmds_cntrs_local[NVMEIB_GEN_OP_MAX];
+	atomic64_t gen_cmds_cntrs_remote[NVMEIB_GEN_OP_MAX];
 
 	struct workq_struct *local_gen_wq;
 	atomic_t local_gen_wq_cnt;

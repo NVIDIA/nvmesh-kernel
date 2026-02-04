@@ -918,7 +918,7 @@ enum nvmeib_gen_cmd_op {
 	NVMEIB_GEN_OP_GET_JMDC			= 6, /* [clnt: cold recov ] Req serjio for the entire JMDC */
 	NVMEIB_GEN_OP_JENTRY_ERASE		= 7, /* [clnt: Jam        ] Req srv to erase journal entry's Data,MD and JMDC, rsp with status */
 
-	MAX_NVMEIB_GEN_OP
+	NVMEIB_GEN_OP_MAX
 };
 
 static inline const char *nvmeib_gen_op_str(enum nvmeib_gen_cmd_op gen_op)
