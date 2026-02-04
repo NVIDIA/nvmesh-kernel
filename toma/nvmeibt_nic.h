@@ -27,9 +27,8 @@ struct nvmeibt_nic {
 	int								config_tag;
 };
 
-const union nvmeib_uuid *nvmeibt_nic_UUID(struct nvmeibt_nic *nic);
+const union nvmeib_uuid *nvmeibt_nic_UUID(const struct nvmeibt_nic *nic);
 char *nvmeibt_nic_get_node_name(struct nvmeibt_nic *nic);
-void nvmeibt_nic_dump(struct nvmeibt_nic *nic);
 enum nvmeibt_add_rv nvmeibt_nic_add(struct mm_nic_conf *conf, struct mm_node_conf *node, int config_tag);
 #define nvmeibt_nic_get_tx_conn_ctx(nic) ((struct connection_context *)((nic)->tx_conn_ctx))
 void nvmeibt_nic_detach_from_node(struct nvmeibt_nic *nic);

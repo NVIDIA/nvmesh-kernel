@@ -6,16 +6,13 @@
 
 #define MAX_RX_CONNS_ARRAY 256
 
-#ifdef TOMA_DEBUG
-void nvmeibt_node_dump(struct nvmeibt_node *node)
+void nvmeibt_node_dump(__attribute__((__unused__)) const struct nvmeibt_node *node)
 {
-	struct nvmeibt_node_config *f = &node->from_config;
-
+#ifdef TOMA_DEBUG
+	const struct nvmeibt_node_config *f = &node->from_config;
 	N_Tf(yeeu83x, "Config data: id=@UUID_LE version=@VERSION name=@NAME", &f->id, f->version, f->name);
+#endif
 }
-#else	// #ifdef TOMA_DEBUG
-void nvmeibt_node_dump(__attribute__((__unused__)) struct nvmeibt_node *node) {}
-#endif	// #ifdef TOMA_DEBUG
 
 const union nvmeib_uuid *nvmeibt_node_UUID(struct nvmeibt_node *node)
 {

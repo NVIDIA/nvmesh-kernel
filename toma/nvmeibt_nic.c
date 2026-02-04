@@ -9,22 +9,19 @@
 #include "nvmeibt_global.h"
 #include "interfaces/network/network_incs.h"
 
-const union nvmeib_uuid *nvmeibt_nic_UUID(struct nvmeibt_nic *nic)
+const union nvmeib_uuid *nvmeibt_nic_UUID(const struct nvmeibt_nic *nic)
 {
 	return (nic ? &nic->from_config.id : &nvmeib_uuid_null_val);
 }
 
-#ifdef TOMA_DEBUG
-void nvmeibt_nic_dump(struct nvmeibt_nic *nic)
+void nvmeibt_nic_dump(__attribute__((__unused__)) const struct nvmeibt_nic *nic)
 {
-	struct nvmeibt_nic_config *f = &nic->from_config;
-
-	N_Tf(trace_nic_nvmeibt_nic_dump, "Config data: uuid=@UUID_LE version=@VERSION its_node_uuid=@UUID_LE hw_gid_str=@STR sw_gid_str=@STR partition_key=@INT protocol=@STR",
+#ifdef TOMA_DEBUG
+	const struct nvmeibt_nic_config *f = &nic->from_config;
+	N_Tf(__AUTOID__, "Config data: uuid=@UUID_LE version=@VERSION its_node_uuid=@UUID_LE hw_gid_str=@STR sw_gid_str=@STR partition_key=@INT protocol=@STR",
 		nvmeibt_nic_UUID(nic), f->version, &(f->its_node_id), f->hw_gid_str, f->sw_gid_str, f->partition_key, f->protocol);
+#endif
 }
-#else	// #ifdef TOMA_DEBUG
-void nvmeibt_nic_dump(__attribute__((__unused__)) struct nvmeibt_nic *nic) {}
-#endif	// #ifdef TOMA_DEBUG
 
 static void nic_remove(struct nvmeibt_nic *nic)
 {

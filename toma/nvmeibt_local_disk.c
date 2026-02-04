@@ -453,19 +453,15 @@ const char* nvmeibt_local_disk_file_name(const struct nvmeibt_local_disk *local_
 	return (local_disk ? local_disk->from_config.dev_file_name : "???");
 }
 
-#ifdef TOMA_DEBUG
-void nvmeibt_local_disk_dump(struct nvmeibt_local_disk *local_disk)
+void nvmeibt_local_disk_dump(__attribute__((__unused__)) const struct nvmeibt_local_disk *local_disk)
 {
-	struct nvmeibt_local_disk_config *f = &local_disk->from_config;
-
+#ifdef TOMA_DEBUG
+	const struct nvmeibt_local_disk_config *f = &local_disk->from_config;
 	N_Tf(7bstrg1, "Config data: disk=@STR vendor=@VENDOR n_pblk=@LLU pblk_size=@PBLK_SIZE max_request_size=@INT, seq=@INT, dev_name=@DEV_NAME metadata=@INT status=@STATUS_STR",
 		 nvmeibt_local_disk_config_display(f), f->vendor, (unsigned long long)f->n_pblk, f->pblk_size, f->max_request_size, f->seq, f->dev_file_name,
 		 f->metadata_n_bytes, f->status);
+#endif
 }
-#else	// #ifdef TOMA_DEBUG
-void nvmeibt_local_disk_dump(__attribute__((__unused__)) struct nvmeibt_local_disk *local_disk) {}
-#endif	// #ifdef TOMA_DEBUG
-
 
 BOOL nvmeibt_local_disk_is_md_supported(const struct nvmeibt_local_disk *local_disk)
 {

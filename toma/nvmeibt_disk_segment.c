@@ -53,18 +53,16 @@ BOOL nvmeibt_disk_segment_leader_is_waiting_for_stale_locks_init(const struct nv
 			disk_segment->seg_leader.calculated_seg_lot.seg_topo.stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 }
 
-#ifdef TOMA_DEBUG
-void nvmeibt_disk_segment_dump(const struct nvmeibt_disk_segment *seg)
+void nvmeibt_disk_segment_dump(__attribute__((__unused__)) const struct nvmeibt_disk_segment *seg)
 {
+#ifdef TOMA_DEBUG
 	const struct nvmeibt_disk_segment_config *f = &seg->from_config;
 	N_Tf(ghfyr77, "Config data: id=@UUID_LE version=@VERSION praid=@UUID_LE disk=@UUID_LE "
 		"lb_s=@LB_S lb_e=@LB_E idx_in_praid=@IDX_IN_PRAID deprecation_flag=@DEPRECATION_FLAG",
 		&f->id, f->version, &seg->seg_mgmt.praid_id, &seg->seg_mgmt.disk_id,
 		seg->seg_mgmt.lb_s, seg->seg_mgmt.lb_e, f->idx_in_praid, f->deprecation_flag);
+#endif
 }
-#else	// #ifdef TOMA_DEBUG
-void nvmeibt_disk_segment_dump(__attribute__((__unused__)) const struct nvmeibt_disk_segment *disk_segment) {}
-#endif	// #ifdef TOMA_DEBUG
 
 void nvmeibt_seg_lot_set_all_init_modes(struct nvmeibt_seg_lot *seg_lot, enum NVMEIBT_MEM_TBL_INIT_MODE init_mode)
 {

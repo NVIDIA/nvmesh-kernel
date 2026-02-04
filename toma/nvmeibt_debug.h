@@ -211,18 +211,17 @@ int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_
 	}															\
 })
 
-// assert and abort
-
+// Assert
 #ifdef TOMA_DEBUG
-	#define TOMA_ABORT_IF_DEBUG(__nvmeibt_error_severity_es) nvmeibt_abort(__nvmeibt_error_severity_es);
+	#define TOMA_ABORT_IF_DEBUG() nvmeibt_abort(ES_FATAL)
 #else
-	#define TOMA_ABORT_IF_DEBUG(__nvmeibt_error_severity_es)
+	#define TOMA_ABORT_IF_DEBUG()
 #endif
 
 #define NTOMA_ASSERT(name, cond, fmt, ...) do {     	\
 		if (!(cond)) {                                 	\
 			N_ETf(name, fmt, ## __VA_ARGS__);			\
-			TOMA_ABORT_IF_DEBUG(ES_FATAL);          	\
+			TOMA_ABORT_IF_DEBUG();          	\
 		}                                              	\
 	} while (0)
 

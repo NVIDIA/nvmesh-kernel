@@ -128,7 +128,7 @@ static inline bool nvmeibt_praid_is_type_EC(const struct nvmeibt_praid *praid)
 	return (praid && nvmeibt_protocol_is_praid_type_journalled(praid->praid_mgmt.type));
 }
 
-static inline const union nvmeib_uuid *nvmeibt_praid_UUID(struct nvmeibt_praid *praid)
+static inline const union nvmeib_uuid *nvmeibt_praid_UUID(const struct nvmeibt_praid *praid)
 {
 	return (praid ? &praid->from_config.id : &nvmeib_uuid_null_val);
 }

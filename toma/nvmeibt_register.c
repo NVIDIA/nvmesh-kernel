@@ -2292,9 +2292,6 @@ static enum UNREGISTER_RV launch_unregistered_registrant_removal(
 		if (nvmeibt_register_is_processing_registrant_removal(reg_ctx)) {
 		   continue;
 		}
-#ifdef TOMA_DEBUG
-		debug_validate_no_duplicate_lockid_removal(reg_ctx);
-#endif	// #ifdef TOMA_DEBUG
 		rv = launch_existing_active_registrant_removal(reg_ctx);
 
 		// If seg_active was removed as a result, terminate the loop

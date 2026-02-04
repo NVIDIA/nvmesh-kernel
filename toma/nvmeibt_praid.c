@@ -2309,16 +2309,14 @@ out:
 	return rv;
 }
 
-#ifdef TOMA_DEBUG
-void nvmeibt_praid_dump(struct nvmeibt_praid *praid)
+void nvmeibt_praid_dump(__attribute__((__unused__)) const struct nvmeibt_praid *praid)
 {
-	struct nvmeibt_praid_config *f = &praid->from_config;
+#ifdef TOMA_DEBUG
+	const struct nvmeibt_praid_config *f = &praid->from_config;
 	N_Tf(trace_praid_nvmeibt_praid_dump, "Config data: uuid=@UUID_LE @C_VOL_VER type=@TYPE_STR chunk=@UUID_LE stripe_idx=@STRIPE_IDX",
 		 nvmeibt_praid_UUID(praid), f->version, nvmeibt_praid_type_str(praid->praid_mgmt.type), &(praid->praid_mgmt.chunk_id), praid->praid_mgmt.stripe_idx);
+#endif
 }
-#else	// #ifdef TOMA_DEBUG
-void nvmeibt_praid_dump(__attribute__((__unused__)) struct nvmeibt_praid *praid) {}
-#endif	// #ifdef TOMA_DEBUG
 
 #define NFREE_PRAID(name, __praid)																	\
 ({																									\

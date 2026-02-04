@@ -72,17 +72,14 @@ out:
 	return disk;
 }
 
-#ifdef TOMA_DEBUG
-void nvmeibt_disk_dump(struct nvmeibt_disk *disk)
+void nvmeibt_disk_dump(__attribute__((__unused__)) const struct nvmeibt_disk *disk)
 {
-	struct nvmeibt_disk_config *f = &disk->from_config;
-
+#ifdef TOMA_DEBUG
+	const struct nvmeibt_disk_config *f = &disk->from_config;
 	N_Tf(trace_disk_nvmeibt_disk_dump, "Config data: id=@UUID_LE version=@INT name=@NAME its_orig_node_id=@UUID_LE",
 		 &f->id, f->disk_version, f->ldisk_id.str, &f->its_original_node_id);
+#endif
 }
-#else	// #ifdef TOMA_DEBUG
-void nvmeibt_disk_dump(__attribute__((__unused__)) struct nvmeibt_disk *disk) {}
-#endif	// #ifdef TOMA_DEBUG
 
 static void disk_remove(struct nvmeibt_disk *disk)
 {

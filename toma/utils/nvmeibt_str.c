@@ -245,7 +245,7 @@ int nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size)
 	} else if (is_str_overlapping_nvmeibt_Str(this, str)) {
 		TODO("use memmove() in these situations");
 		N_Ef(error_1_str_nvmeibt_Str_strncpy, "Ignoring Copy: Overlapping src&dst. dst=@DST_PTR, src=@SRC_PTR, size=@SIZEOF, dst_string=\n{@TEXT_BUF}\n, src_string=\n{@STR}", this->text_buf, str, size, this->text_buf, str);
-		TOMA_ABORT_IF_DEBUG(ES_FATAL);
+		TOMA_ABORT_IF_DEBUG();
 	} else {
 		this->str_len = 0;
 		if (this->text_buf) *this->text_buf = 0;
