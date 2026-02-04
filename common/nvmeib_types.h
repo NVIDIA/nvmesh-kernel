@@ -66,7 +66,7 @@ enum nvmeib_block_io_op {
 	NVMEIB_BLOCK_IO_OP_MD_READ =               0x20,	// Read by server from RAM
 	NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR =           0x1|NVMEIB_BLOCK_IO_OP_MD_READ,	// 0x21, On TxID wraparound (Server side no-rdda read-modify-write op)
 
-	NVMEIB_BLOCK_IO_ILLEGAL_DBG	= 0xFF, /* Debug Value */
+	NVMEIB_BLOCK_IO_OP_ILLEGAL_DBG	= 0xFF, /* Debug Value */
 };
 
 enum {
@@ -111,7 +111,7 @@ static inline const char *nvmeib_block_io_op_str(const enum nvmeib_block_io_op o
 	case NVMEIB_BLOCK_IO_OP_MD_READ: return "NVMEIB_BLOCK_IO_OP_MD_READ";
 	case NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR: return "NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR";
 
-	case NVMEIB_BLOCK_IO_ILLEGAL_DBG: return "NVMEIB_BLOCK_IO_ILLEGAL_DBG";
+	case NVMEIB_BLOCK_IO_OP_ILLEGAL_DBG: return "NVMEIB_BLOCK_IO_OP_ILLEGAL_DBG";
 	case NVMEIB_BLOCK_IO_OP_LAST_SYNC: return "NVMEIB_BLOCK_IO_OP_LAST_SYNC";
 	/**IMPORATNT: Do not use default clase here, must handle ALL possible values**/
 	}

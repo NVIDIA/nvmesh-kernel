@@ -57,7 +57,7 @@ typedef struct { 						// Parameters for IO async thread
 	p.mu_delay			= ut_conf__get_transport()->is_disk_callback_sync ? 50 : 250; /* 20K IO's per second, in async mode, we submit faster hence much more IO's. so increase delay to reduce load */ \
 	p.n_cycles			= 0; \
 	p.kthread			= NULL; \
-	p.op				= NVMEIB_BLOCK_IO_ILLEGAL_DBG; /* poison */\
+	p.op				= NVMEIB_BLOCK_IO_OP_ILLEGAL_DBG; /* poison */\
 	p.flags 			= _flags; \
 	p.is_ec				= false; \
 } while (0)
