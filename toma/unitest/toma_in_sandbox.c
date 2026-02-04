@@ -1070,12 +1070,10 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
 	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
 	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
-	int fmt_idx = fmt_disk->format_id.id;
+	const int fmt_idx = fmt_disk->format_id.id;
 
+	reply_usermode_payload(reply_msg, req_msg);
 	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
-	rep->base.opcode = reply_msg->opcode = req_msg->opcode;
-	reply_msg->id = req_msg->id;
-	reply_msg->caller_type = req_msg->caller_type;
 	reply_nlhdr->nlmsg_len = NLMSG_SPACE(reply_msg->len);
 
 	// Reject inline metadata - NVMesh only supports separate metadata
@@ -1097,8 +1095,6 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 		rep->info.new_n_pblk = dev->size_in_blocks;
 		rep->info.new_seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
 	}
-
-	rep->base.latency_ns = 1000;  // Simulate some format latency
 	TSB_netlink_queue_enqueue(reply_buf, reply_nlhdr->nlmsg_len);
 }
 
