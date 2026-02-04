@@ -131,8 +131,7 @@ static struct mgmt_sim_state *g_mgmt_sim = NULL;
 void mgmt_sim_init(const char *my_hostname)
 {
 	g_mgmt_sim = calloc(1, sizeof(*g_mgmt_sim));
-	if (!g_mgmt_sim)
-		return;
+	BUG_ON(!g_mgmt_sim);
 
 	if (my_hostname) {
 		strncpy(g_mgmt_sim->hostname, my_hostname, sizeof(g_mgmt_sim->hostname) - 1);
@@ -153,11 +152,7 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 	char *payload = NULL;
 	size_t len = 0;
 
-	if (!g_mgmt_sim || !consumer_name || !out_len) {
-		if (out_len)
-			*out_len = 0;
-		return NULL;
-	}
+	BUG_ON(!g_mgmt_sim || !consumer_name || !out_len);
 
 	/* HW consumer - hardware configuration messages */
 	if (strncmp(consumer_name, "HW", 2) == 0) {
@@ -188,15 +183,14 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 		} else if (g_mgmt_sim->cmd_msg_count == 0) {
 			/* First command: updateTomaKeepaliveToken (zone) */
 			payload = malloc(256);
-			if (payload)
-				len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[1],
-						       g_mgmt_sim->hostname);
+			BUG_ON(!payload);
+			len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[1], g_mgmt_sim->hostname);
 			g_mgmt_sim->cmd_msg_count++;
 		} else if ((g_mgmt_sim->cmd_msg_count++ % 3) == 0) {
 			/* Periodically send updateLeaderKeepaliveToken */
 			payload = strdup(mgmt_simu_kafka_msg_templates[0]);
-			if (payload)
-				len = strlen(payload);
+			BUG_ON(!payload);
+			len = strlen(payload);
 		}
 	}
 	/* Target consumer (not incrementalTarget) - addTarget messages */
@@ -204,9 +198,8 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 		if (g_mgmt_sim->target_msg_count == 0) {
 			/* First message: addTarget (self as 1-machine raft domain) */
 			payload = malloc(256);
-			if (payload)
-				len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[2],
-						       g_mgmt_sim->hostname);
+			BUG_ON(!payload);
+			len = (size_t)snprintf(payload, 256, mgmt_simu_kafka_msg_templates[2], g_mgmt_sim->hostname);
 			g_mgmt_sim->target_msg_count++;
 		}
 	}
@@ -220,8 +213,7 @@ void mgmt_sim_on_toma_produced(const void *payload, size_t len)
 	const char *m_type;
 	bool is_report_target;
 
-	if (!g_mgmt_sim || !payload || len == 0)
-		return;
+	BUG_ON(!g_mgmt_sim || !payload || len == 0);
 
 	/* Check if this is a reportTarget message */
 	m_type = strstr((const char *)payload, "\"messageType\":");
@@ -299,8 +291,7 @@ static void mgmt_sim_extract_disk_status(struct mm_json_elem *disks_array,
 	struct mm_json_elem *disk_elem;
 	const char *disk_id;
 
-	if (!disks_array || disks_array->type != JSON_E_ARRAY || !out)
-		return;
+	BUG_ON(!disks_array || disks_array->type != JSON_E_ARRAY || !out);
 
 	for (i = 0; i < disks_array->array.len; i++) {
 		disk_elem = disks_array->array.elements[i];
@@ -336,8 +327,7 @@ static void mgmt_sim_parse_report_target(const char *json, size_t len)
 	struct mm_json_elem *node;
 	struct mm_json_elem *disks;
 
-	if (!g_mgmt_sim || !json)
-		return;
+	BUG_ON(!g_mgmt_sim || !json);
 
 	root = parse_json_txt_into_kv_tree(json, (int)len);
 	if (!root) {
@@ -389,8 +379,7 @@ static void mgmt_sim_run_fsm(void)
 	char *msg;
 	size_t msg_len;
 
-	if (!g_mgmt_sim)
-		return;
+	BUG_ON(!g_mgmt_sim);
 
 	prev_state = g_mgmt_sim->fsm_state;
 	disk_002_ok = (strcmp(g_mgmt_sim->disk_002.status, "Ok") == 0);
@@ -403,21 +392,19 @@ static void mgmt_sim_run_fsm(void)
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:
 		if (disk_002_ok && disk_003_ok) {
 			/* Both disks are Ok - send formatDrive */
-			N_Tf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD",
-			     g_mgmt_sim->boot_time);
+			N_Tf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", g_mgmt_sim->boot_time);
 
 			msg = malloc(1024);
-			if (msg) {
-				msg_len = (size_t)snprintf(msg, 1024, mgmt_simu_kafka_msg_templates[5],
-							   FORMAT_TARGET_DISK_ID,
-							   FORMAT_TARGET_UUID,
-							   FORMAT_TARGET_VENDOR,
-							   FORMAT_REQUEST_COUNTER,
-							   (unsigned long)g_mgmt_sim->boot_time);
-				g_mgmt_sim->pending_format_drive_msg = msg;
-				g_mgmt_sim->pending_format_drive_len = msg_len;
-				g_mgmt_sim->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
-			}
+			BUG_ON(!msg);
+			msg_len = (size_t)snprintf(msg, 1024, mgmt_simu_kafka_msg_templates[5],
+							FORMAT_TARGET_DISK_ID,
+							FORMAT_TARGET_UUID,
+							FORMAT_TARGET_VENDOR,
+							FORMAT_REQUEST_COUNTER,
+							(unsigned long)g_mgmt_sim->boot_time);
+			g_mgmt_sim->pending_format_drive_msg = msg;
+			g_mgmt_sim->pending_format_drive_len = msg_len;
+			g_mgmt_sim->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
 		}
 		break;
 
