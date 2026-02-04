@@ -49,10 +49,23 @@ git --no-pager log "$src_branch" --grep='Change-Id:' --all-match --pretty='%b' \
 
 change_ids_unique_to_src=$(comm -23 "$src_tmp_fn" "$tgt_tmp_fn")
 
-echo "echo "In $src_branch but not in $tgt_branch"
-echo "----------------------------------------------"
+echo "$change_ids_unique_to_src" > /tmp/change_ids.txt
+
+commits=()
 for change_id in $change_ids_unique_to_src; do
-        git -P log -1 --pretty=format:'%C(yellow)%h %Cgreen%an %Cblue%ad %Creset%<(50,trunc)%s' --date=short --color=always "$src_branch" --grep="$change_id" --all-match "$src_branch"
-        echo
+        commit=$(git -P log -1 --format="%H" --grep="$change_id" "$src_branch")
+        commits+=("$commit")
 done
+
+trunc=()
+for e in "${commits[@]}"; do
+  trunc+=( "${e:0:10}" )   # first 10 chars of each element
+done
+
+# Join with '|'
+grep_str=$( IFS='|'; joined="${trunc[*]}"; echo "$joined" )
+
+echo "In $src_branch but not in $tgt_branch"
+echo "----------------------------------------------"
+git log --pretty=format:'%C(yellow)%h %<(20,trunc)%C(green)%an %Cblue%ad %Creset%<(50,trunc)%s' --date=short --color=always "${commits[@]}" | grep -E "$grep_str"
 
