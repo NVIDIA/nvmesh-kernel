@@ -37,6 +37,20 @@ struct nvmeibt_registrant_awaiting_lockid {
 	struct xdlist 						awaiting_lockid_link;
 };
 
+#define REG_CTX_N_STALE_LOCKS_UNINITIALIZED (-1)
+
+/*
+ * A registrant OBJECT can belong to at most one hash/list:
+ * - seg_active->active...
+ * - seg_active->longing...
+ * - seg_active->stale...
+ * - global->longing_registrants_on_invalid_seg
+ * When TOMA wants an active registrant to re-reg(UNREGISTER & REGISTER) TOMA calls add_to_longing() that allocates yet another copy-object of the
+ *  registrant and adds it to seg_active->longing... and sends TR_UNREGISTER
+ *  The client will unregister, and when the seg_active becomes registrable again, TOMA will send a TR_REGISTRABLE to all seg_active->longing...
+ * When a seg_active is added, TOMA scans global->longing_registrants_on_invalid_seg, and if their seg matches sends TR_REGISTRABLE.
+ */
+
 struct nvmeibt_registrant_ctx {
 	unsigned long long					client_messaging_handle;
 	unsigned int						client_protocol_version;
