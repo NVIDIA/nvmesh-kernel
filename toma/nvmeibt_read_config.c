@@ -1075,7 +1075,7 @@ static int setup_journal_partitions(struct nvmeibt_local_disk *cur_local_disk) {
 	const uint64_t journal_data_size_in_pblks = (2ull << 30) / n_bytes_in_blk;		// 2[GB] = Todo, must be == NVMEIB_EC_TOTAL_JOURNAL_BLKS
 	const uint64_t serjio_db_size_in_pblks =   (32ull << 20) / n_bytes_in_blk;		// 32[MB], Todo: Take this define from real serjio
 #else
-	const uint64_t journal_data_size_in_pblks = (1 << 30) / n_bytes_in_blk, serjio_db_size_in_pblks = (1 << 30) / n_bytes_in_blk;		// 1[MB] each. Meaningless
+	const uint64_t journal_data_size_in_pblks = (1 << 20) / n_bytes_in_blk, serjio_db_size_in_pblks = (1 << 20) / n_bytes_in_blk;		// 1[MB] each. Meaningless
 #endif
 	NFIN;
 
