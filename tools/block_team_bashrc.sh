@@ -873,7 +873,7 @@ else
 				for pid in $(pgrep -x nvmeibt_toma); do
 					echo "=== Process PID $pid ===" > ${stack_txt};
 					for t in /proc/$pid/task/*; do
-						local tid=$(basename "$t"); echo -e "\n--- TID $tid stack ---" >> ${stack_txt}; sudo cat /proc/$pid/task/$tid/stack >> ${stack_txt};
+						local tid=$(basename "$t"); echo -e "\n--- TID $tid stack ---" >> ${stack_txt}; sudo cat /proc/$pid/task/$tid/stack >> ${stack_txt}; sudo pstack $tid >> ${stack_txt};
 					done
 				done
 				tail -n +1 ${toma_dir}/* | less;
