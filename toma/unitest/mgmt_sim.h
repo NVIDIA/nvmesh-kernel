@@ -14,7 +14,8 @@
  * Initialize the management simulator.
  * @param my_hostname The hostname of the simulated Toma node.
  */
-void mgmt_sim_init(const char *my_hostname);
+struct mgmt_sim_state;
+struct mgmt_sim_state *mgmt_sim_init(const char *my_hostname);
 
 /**
  * Get the next Kafka message payload to deliver to Toma.

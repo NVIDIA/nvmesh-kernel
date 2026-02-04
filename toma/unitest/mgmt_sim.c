@@ -109,7 +109,7 @@ struct mgmt_sim_disk_status {
 
 /* Management simulator state */
 struct mgmt_sim_state {
-	char hostname[64];
+	const char *hostname;
 	char *last_report_target_json; /* owned, NUL-terminated; NULL if not received */
 
 	/* Per-consumer state for deterministic message sequencing */
@@ -128,15 +128,11 @@ struct mgmt_sim_state {
 
 static struct mgmt_sim_state *g_mgmt_sim = NULL;
 
-void mgmt_sim_init(const char *my_hostname)
+struct mgmt_sim_state *mgmt_sim_init(const char *my_hostname)
 {
 	g_mgmt_sim = calloc(1, sizeof(*g_mgmt_sim));
-	BUG_ON(!g_mgmt_sim);
-
-	if (my_hostname) {
-		strncpy(g_mgmt_sim->hostname, my_hostname, sizeof(g_mgmt_sim->hostname) - 1);
-		g_mgmt_sim->hostname[sizeof(g_mgmt_sim->hostname) - 1] = '\0';
-	}
+	BUG_ON(!g_mgmt_sim || !my_hostname);
+	g_mgmt_sim->hostname = my_hostname;
 
 	/* Initialize state machine */
 	g_mgmt_sim->fsm_state = MGMT_FSM_WAITING_FOR_BOTH_OK;
@@ -145,6 +141,7 @@ void mgmt_sim_init(const char *my_hostname)
 	nvmeibt_strlcpy(g_mgmt_sim->disk_003.disk_id, "NVMD_SN_003.1", sizeof(g_mgmt_sim->disk_003.disk_id));
 
 	N_Tf(msim_init, "mgmt_sim initialized hostname=@STR", g_mgmt_sim->hostname);
+	return g_mgmt_sim;
 }
 
 char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)

@@ -344,6 +344,7 @@ struct t_sandbox_all {
 		struct TSB_sock_otherside o[2];
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
 	} TSB_km_sock_pair;
+	struct mgmt_sim_state *mgmt;
 	char my_hostname[64];
 	bool is_running_as_a_utility;
 	bool can_use_bin_traces;
@@ -423,7 +424,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
-	mgmt_sim_init(sys->my_hostname);
+	sys->mgmt = mgmt_sim_init(sys->my_hostname);
 	pthread_mutex_init(&sys->TS.mutex, NULL);
 	sandbox_server_init();
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
