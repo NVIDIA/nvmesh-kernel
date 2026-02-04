@@ -323,7 +323,8 @@ struct t_sandbox_all {
 	struct kafka_simulator_t {
 		rd_kafka_t *obj[10];
 		int n_obj;
-		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
+		void (*notify_producer_msg_accepted)( rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque);
+		void (*notify_consumer_offset_commit)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque);
 	} kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
 	struct TSB_netlink_mock {
@@ -1759,6 +1760,7 @@ rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_lis
 	me->topic.commited_offset = max(last_consumed, me->topic.commited_offset);
 	//SANDBOX_PRINT_TMP("%s: Commit %lu\n", me->topic.name, me->topic.commited_offset);
 	(void)is_async;
+	sys->kafka_simu.notify_consumer_offset_commit(me, RD_KAFKA_RESP_ERR_NO_ERROR, pl, NULL);
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -1907,7 +1909,7 @@ rd_kafka_resp_err_t rd_kafka_position(rd_kafka_t *k, rd_kafka_topic_partition_li
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
-void rd_kafka_conf_set_dr_msg_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque)) {
+void rd_kafka_conf_set_dr_msg_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque)) {
 	sys->kafka_simu.notify_producer_msg_accepted = fn;
 	(void)kc;
 }
@@ -1916,7 +1918,8 @@ void rd_kafka_conf_set_rebalance_cb(rd_kafka_conf_t* kc, void (*fn)(rd_kafka_t *
 	(void)kc; (void)fn;
 }
 void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque)) {
-	(void)kc; (void)fn;
+	sys->kafka_simu.notify_consumer_offset_commit = fn;
+	(void)kc;
 }
 
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque) {
