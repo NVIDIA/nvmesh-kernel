@@ -29,7 +29,7 @@ endif
 ifeq ($(BUILD_RELEASE),1)
 	CFLAGS += -O3 -g -DNDEBUG
 else
-	CFLAGS += -g3 -ggdb3
+	CFLAGS += -g3 -ggdb3 -DTOMA_DEBUG
 endif
 
 CFLAGS_x86_64 = -m64  # Always compile as 64 bit in x86
