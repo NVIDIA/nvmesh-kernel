@@ -1509,7 +1509,7 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		rv = execlp("bash", "bash", "-c", entry->run_exec_on_blkdev_ctx->executable_str, NULL);
 		/* NOT REACHED, unless execlp fails*/
 		fprintf(stderr, "execlp failed, %m");
-		_exit(rv);		// From child - ONLY if exec() ITSELF failed
+		_exit(rv);		// From child - ONLY if exec() ITSELF failed. Must not call exit()
 	}
 	N_Tf(idpw53n, "forked child_pid=@PID", (int)child_pid);
 	// Parent goodpath. Wait for child (with timeout), and collect its outputs
