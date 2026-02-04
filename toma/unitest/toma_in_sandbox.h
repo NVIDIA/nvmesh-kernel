@@ -231,10 +231,18 @@ typedef struct rd_kafka_group_result_s rd_kafka_group_result_t;
 typedef struct rd_kafka_acl_result_s rd_kafka_acl_result_t;
 typedef struct rd_kafka_Uuid_s rd_kafka_Uuid_t;
 typedef struct rd_kafka_topic_partition_result_s rd_kafka_topic_partition_result_t;
+typedef enum {
+	RD_KAFKA_RESP_ERR_NO_ERROR = 0, RD_KAFKA_RESP_ERR__SSL = -50, RD_KAFKA_RESP_ERR__AUTHENTICATION, RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_GROUP_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_CLUSTER_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_UNSUPPORTED_SASL_MECHANISM, RD_KAFKA_RESP_ERR_ILLEGAL_SASL_STATE, RD_KAFKA_RESP_ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_SASL_AUTHENTICATION_FAILED, RD_KAFKA_RESP_ERR_DELEGATION_TOKEN_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR__FATAL, RD_KAFKA_RESP_ERR__PARTITION_EOF,
+	RD_KAFKA_RESP_ERR__RETRY = -153, RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS = -175, RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS = -174, RD_KAFKA_RESP_ERR__TRANSPORT = -195, RD_KAFKA_RESP_ERR_BROKER_NOT_AVAILABLE = 8, RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE = 15, RD_KAFKA_RESP_ERR_NOT_COORDINATOR = 16,
+	RD_KAFKA_RESP_ERR__ALL_BROKERS_DOWN = -187, RD_KAFKA_RESP_ERR__TIMED_OUT = -185, RD_KAFKA_RESP_ERR__WAIT_COORD = -180, RD_KAFKA_RESP_ERR__WAIT_CACHE = -164, RD_KAFKA_RESP_ERR__DESTROY = -197, RD_KAFKA_RESP_ERR__INTR = -163, RD_KAFKA_RESP_ERR__MSG_TIMED_OUT = -192,
+	RD_KAFKA_PARTITION_UA = -1
+} rd_kafka_resp_err_t;
+
 typedef struct rd_kafka_topic_partition_s {
 	rd_kafka_t* k;
 	const char *topic;
 	int32_t partition;
+	rd_kafka_resp_err_t err;
 	int64_t offset;
 } rd_kafka_topic_partition_t;
 
@@ -247,11 +255,6 @@ rd_kafka_topic_partition_list_t* rd_kafka_topic_partition_list_new(int n);
 rd_kafka_topic_partition_t *rd_kafka_topic_partition_list_add(    rd_kafka_topic_partition_list_t *, const char* name, int32_t partition);
 void rd_kafka_topic_partition_list_destroy(rd_kafka_topic_partition_list_t*);
 
-typedef enum {
-	RD_KAFKA_RESP_ERR_NO_ERROR = 0, RD_KAFKA_RESP_ERR__SSL = -50, RD_KAFKA_RESP_ERR__AUTHENTICATION, RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_GROUP_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_CLUSTER_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_UNSUPPORTED_SASL_MECHANISM, RD_KAFKA_RESP_ERR_ILLEGAL_SASL_STATE, RD_KAFKA_RESP_ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_SASL_AUTHENTICATION_FAILED, RD_KAFKA_RESP_ERR_DELEGATION_TOKEN_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR__FATAL, RD_KAFKA_RESP_ERR__TIMED_OUT, RD_KAFKA_RESP_ERR__PARTITION_EOF,
-	RD_KAFKA_RESP_ERR__RETRY = -153, RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS = -175, RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS = -174, RD_KAFKA_RESP_ERR__TRANSPORT = -195, RD_KAFKA_RESP_ERR_BROKER_NOT_AVAILABLE = 8, RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE = 15, RD_KAFKA_RESP_ERR_NOT_COORDINATOR = 16,
-	RD_KAFKA_PARTITION_UA = -1
-} rd_kafka_resp_err_t;
 enum rd_kafka_type_t { RD_KAFKA_CONSUMER = 'C', RD_KAFKA_PRODUCER = 'P' };
 char* rd_kafka_err2str(rd_kafka_resp_err_t e);
 char* rd_kafka_err2name(rd_kafka_resp_err_t e);
@@ -267,6 +270,7 @@ rd_kafka_t* rd_kafka_new(enum rd_kafka_type_t who, rd_kafka_conf_t*cfg, char*err
 void rd_kafka_conf_set_error_cb(    rd_kafka_conf_t*, void (*fn)(rd_kafka_t *rk, int err, const char *reason, void *opaque));
 void rd_kafka_conf_set_dr_msg_cb(   rd_kafka_conf_t*, void (*fn)(rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque));
 void rd_kafka_conf_set_rebalance_cb(rd_kafka_conf_t*, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque));
+void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque));
 rd_kafka_resp_err_t rd_kafka_poll_set_consumer(rd_kafka_t* me);
 const char*         rd_kafka_name(   const rd_kafka_t* me);
 void                rd_kafka_set_log_level(rd_kafka_t* me, int lvl);
@@ -293,7 +297,7 @@ const char*         rd_kafka_topic_name(const rd_kafka_topic_t*);
 rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset);
 rd_kafka_resp_err_t rd_kafka_offset_store( rd_kafka_topic_t *kt, int32_t partition, int64_t offset);
 
-static inline void rd_kafka_wait_destroyed(int n_msec) { (void)n_msec; }
+static inline int rd_kafka_wait_destroyed(int n_msec) { (void)n_msec; return 0; }
 enum my_rd_kafka_purge_flags { RD_KAFKA_PURGE_F_INFLIGHT = 0x2, RD_KAFKA_PURGE_F_NON_BLOCKING = 0x4 };
 rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags);
 enum my_rd_kafka_producer_flags { RD_KAFKA_MSG_F_FREE = 0x1, RD_KAFKA_MSG_F_COPY = 0x2 };

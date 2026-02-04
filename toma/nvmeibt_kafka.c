@@ -394,6 +394,11 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	case RD_KAFKA_RESP_ERR_BROKER_NOT_AVAILABLE:
 	case RD_KAFKA_RESP_ERR_NOT_COORDINATOR:
 	case RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE:
+	case RD_KAFKA_RESP_ERR__ALL_BROKERS_DOWN:
+	case RD_KAFKA_RESP_ERR__TIMED_OUT:
+	case RD_KAFKA_RESP_ERR__WAIT_COORD:
+	case RD_KAFKA_RESP_ERR__WAIT_CACHE:
+	case RD_KAFKA_RESP_ERR__DESTROY:
 		return;		// Definitely ignore transient network errors.
 	default:
 		// return;	Should we ignore errors that do not look like security related
@@ -403,6 +408,15 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	if (timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) {
 		N_IMf(hu8a475, "Marking kafka soft init required");
 		kafka_requested_init_preserve_state_vars_counter++;
+	}
+}
+
+static void __print_partitions_list(const rd_kafka_topic_partition_list_t *pl)
+{
+	int i, n_part = (pl ? pl->cnt : 0);
+	for (i = 0; i < n_part; ++i) {
+		const rd_kafka_topic_partition_t *p = &pl->elems[i];
+		N_Tf(cvbz84k21, "@INT) topic=@STR part[@INT].offset=@LD, err=@INT", i, p->topic, p->partition, p->offset, p->err);
 	}
 }
 
@@ -419,8 +433,8 @@ static void error_event_cb(rd_kafka_t *rk, int err, const char *reason, __attrib
 }
 
 // Rebalancing callback is not needed according to current design as in consumer topic has 1 partition only, and consumer group there contains only 1 Toma
-static void rebalance_consumer_cb(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, __attribute__((__unused__)) void *opaque) {
-	N_Tf(u8u8nh6, "@STR: code[@INT]=@STR n_part=@INT", rd_kafka_name(rk), (int)err, rd_kafka_err2str(err), (pl ? pl->cnt : 0));
+static void consumer_cb_on_rebalance(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, __attribute__((__unused__)) void *opaque) {
+	N_Tf(u8u8nh6, "@STR: err[@INT]=@STR n_part=@INT", rd_kafka_name(rk), (int)err, rd_kafka_err2str(err), (pl ? pl->cnt : 0));
 	switch (err) {
 	case RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS:
 		// rd_kafka_assign(rk, pl); // We use manual assignment so no need to do that. The callback just notifies us that a rebalance occurred
@@ -431,6 +445,11 @@ static void rebalance_consumer_cb(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_ka
 	default:
 		break;
 	}
+}
+
+void consumer_cb_on_offset_commit(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, __attribute__((__unused__)) void *opaque) {
+	N_Tf(u8u8nh7, "@STR: err[@INT]=@STR n_part=@INT", rd_kafka_name(rk), (int)err, rd_kafka_err2str(err), (pl ? pl->cnt : 0));
+	__print_partitions_list(pl);
 }
 
 static rd_kafka_conf_t *alloc_and_init_kafka_conf(const struct key_val_strs *kv_array, size_t n_kv, const char *group_id_str,
@@ -500,7 +519,8 @@ static rd_kafka_conf_t *alloc_and_init_kafka_conf(const struct key_val_strs *kv_
 		rd_kafka_conf_set_dr_msg_cb(conf, dr_msg_cb);
 		N_Tf(vfhjiek, "CB=@PTR", dr_msg_cb);
 	} else {			// For consumers, install rebalance callback
-		rd_kafka_conf_set_rebalance_cb(conf, rebalance_consumer_cb);
+		rd_kafka_conf_set_rebalance_cb(    conf, consumer_cb_on_rebalance);
+		rd_kafka_conf_set_offset_commit_cb(conf, consumer_cb_on_offset_commit);
 	}
 	rd_kafka_conf_set(conf, "debug", "security,broker,protocol", errstr, sizeof(errstr));	// Write to stderr (or stdout). Anyway, it is lost.
 	rd_kafka_conf_set_error_cb(conf, error_event_cb);
@@ -871,7 +891,7 @@ static void consumer_close(struct t_consumer_impl *k) {
 		if (k_err)
 			N_Ef(vbsjdy33, "close err (consumer='@STR' err=@STR", rd_kafka_name(k->consumer), rd_kafka_err2str(k_err));
 		rd_kafka_destroy(k->consumer);
-		N_Tf(vbsjdy35, "close ended");
+		N_Tf(vbsjdy35, "destroy ended");
 		k->consumer = NULL;
 	}
 }
@@ -952,12 +972,10 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		if ((++k->cnt_zero_consecutive_consumes % 1024) == 0) {		// Periodically check if we still have partition assignment
 			rd_kafka_topic_partition_list_t *pl = NULL;
 			const rd_kafka_resp_err_t err = rd_kafka_assignment(k->consumer, &pl);
-			int i, n_part = (pl ? pl->cnt : 0);
+			const int n_part = (pl ? pl->cnt : 0);
 			if ((err == RD_KAFKA_RESP_ERR_NO_ERROR) && (n_part != 1)) {
 				N_Wf(cvbz84k2, "(@STR) unexpected num partitions=@INT will reinit", rd_kafka_name(k->consumer), n_part);
-				for (i = 0; i < n_part; ++i) {
-					N_Wf(cvbz84k21, "@INT) topic=@STR part[@INT].offset=@LD", i, pl->elems[i].topic, pl->elems[i].partition, pl->elems[i].offset);
-				}
+				__print_partitions_list(pl);
 				check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__FATAL);
 			}
 			if (pl) rd_kafka_topic_partition_list_destroy(pl);
@@ -2055,7 +2073,8 @@ static void kafka_close_all_blocking(void) {
 	consumer_close(&k_CMD);
 	kafka_apply_stop_consuming_leader_VOL_msgs(0);  // Do not affect the requested_is_raft_leader. Turn off the applied_is_raft_leader and close everything
 	kafka_apply_stop_consuming_leader_TARGET_msgs(0);  // Do not affect the requested_is_raft_leader. Turn off the applied_is_raft_leader and close everything
-	rd_kafka_wait_destroyed(2000);	// Since destroy is async. We want a clean shutdown
+	if (rd_kafka_wait_destroyed(2000) != 0)	// Since destroy is async. We want a clean shutdown
+		N_Ef(__AUTOID___, "Failed wait for kafka destroy. May stuck on next kafka restart");
 	NFOUT;
 }
 
