@@ -363,7 +363,7 @@ static int execute_io_read(struct nvmeibc_ib_net_nordda *net,
 
 	/* send the message */
 	memset(&wr, 0, sizeof(wr));
-	if ((rv = nvmeibc_post_io(net, &wr, &wr, iu, info, wire_len) < 0)) {
+	if ((rv = nvmeibc_post_io(net, &wr, &wr, iu, info, wire_len)) < 0) {
 		info->release_counter = 0;
 		goto out;
 	}
