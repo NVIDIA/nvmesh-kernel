@@ -112,7 +112,7 @@ shift # past argument or value
 done
 
 # Setup /dev/net/tun if missing.
-setup_tun_device() {
+function setup_tun_device() {
     case "$(uname -s)" in
         Linux) ;;
         *) return 0 ;;
