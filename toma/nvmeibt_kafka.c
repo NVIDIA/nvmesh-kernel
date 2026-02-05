@@ -372,6 +372,11 @@ static int generate_topic_name_using_zone(char *dst, size_t dst_size, const char
 	return (len < dst_size);
 }
 
+static bool is_waiting_for_reinit(void)
+{
+	return ((kafka_applied_init_counter < kafka_requested_init_counter) || (kafka_applied_init_preserve_state_vars_counter < kafka_requested_init_preserve_state_vars_counter));
+}
+
 static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err) {
 	struct timespec						now;
 	if (err == RD_KAFKA_RESP_ERR_NO_ERROR)
@@ -405,7 +410,7 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 		break;
 	}
 	getnstimeofday_boot(&now);
-	if (timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) {
+	if ((timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) && !is_waiting_for_reinit()) {
 		N_IMf(hu8a475, "Marking kafka soft init required");
 		kafka_requested_init_preserve_state_vars_counter++;
 	}
@@ -533,11 +538,6 @@ out_err:
 out:
 	NFOUT;
 	return conf;
-}
-
-static bool is_waiting_for_reinit(void)
-{
-	return ((kafka_applied_init_counter < kafka_requested_init_counter) || (kafka_applied_init_preserve_state_vars_counter < kafka_requested_init_preserve_state_vars_counter));
 }
 
 /******************************************************************************/
