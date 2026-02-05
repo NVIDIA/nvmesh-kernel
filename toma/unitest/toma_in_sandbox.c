@@ -1612,21 +1612,32 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 			evs[n_events++] = ep->evs[i];
 		}
 	}
+
 	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s, n_events=%d\n", loop_idx, is_shutting_down ? " (dying)" : "", n_events); loop_idx++;
-	if (loop_idx < SANDBOX_TERMINATE_AFTER_N_LOOPS) {
-		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
-		if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
-		// Process any pending disk ADD event that was deferred from a format operation.
-		// This gives the REMOVE event time to be processed by the work queue.
-		TSB_process_pending_disk_add_event();
-		return n_events;
-	} else {
-		N_IMf(sbexit001, "sandbox shutting down Toma app");
-		is_shutting_down = true;
-		// sys->TSB_sig.sig = 9;	// Daniel: This seems not to work better than epoll failure
-		errno = ENOMEM;
-		return -1;				// Simulate shutdown instruction via kafka from mgmt
+	if (!is_shutting_down) {
+		if (mgmt_sim_is_done()) {
+			SANDBOX_PRINT("format drive test: %s\n", COL_GREEN "passed" COL_RESET);
+			// At some point we'll probably have multiple test scenarios that we'll want to run in sequence,
+			// and finally shut down Toma when they've all passed. For now, there's only one test scenario.
+			SANDBOX_PRINT("%s", "sandbox shutting down Toma app\n");
+			is_shutting_down = true;
+			errno = ENOMEM;
+			return -1;				// Simulate shutdown instruction via kafka from mgmt
+		}
+		if (loop_idx >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
+			SANDBOX_PRINT("failed: test did not complete within %d cycles (mgmt_sim state: %s)\n",
+			SANDBOX_TERMINATE_AFTER_N_LOOPS, mgmt_sim_get_state_name());
+			BUG_ON(true);
+			return -1;  // unreachable
+		}
 	}
+
+	sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
+	if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
+	// Process any pending disk ADD event that was deferred from a format operation.
+	// This gives the REMOVE event time to be processed by the work queue.
+	TSB_process_pending_disk_add_event();
+	return n_events;
 }
 
 /*********************************************************************/
