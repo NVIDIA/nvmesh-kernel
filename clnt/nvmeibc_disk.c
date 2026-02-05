@@ -7074,6 +7074,7 @@ static int execute_io_remote(struct nvmeibc_disk *disk,
 		_NT(trace_disk_execute_io_remote, "Disk is dying - leave");
 		nvmeibc_disk_cmds_stats_direct_exec_err(disk, disk_cmd, rv);
 		nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_DISK_DYING);
+		goto out;
 	}
 
 	/* [NVMESH-6887]: check reuse before splitting to per-cpu, coremask, any-core flow 
