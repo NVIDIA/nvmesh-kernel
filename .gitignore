@@ -123,7 +123,6 @@ perfTest/io_stress/scan_locks/scan_locks_ec
 perfTest/io_stress/gen_md/gen_md
 tools/infra_shared/infra_shared_test
 toma/bin/
-tools/toma_rpc/toma_link
 tools/toma_rpc/toma_rpc
 tools/trace_daemon_2.0/trace_daemon
 *.o.json

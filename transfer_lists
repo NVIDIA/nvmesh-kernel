@@ -35,8 +35,7 @@ target_transfer_list="srv/nvmeibs.ko* \
 			toma/bin/*/nvmeibt_toma_src_tar.pgp"
 
 # Can include both static and compiled files
-optional_target_transfer_list="tools/toma_rpc/toma_rpc \
-            tools/toma_rpc/toma_link"
+optional_target_transfer_list="tools/toma_rpc/toma_rpc"
 
 # Can include both static and compiled files
 client_transfer_list="clnt/atom/nvmeiba.ko* \

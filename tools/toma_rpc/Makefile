@@ -44,21 +44,12 @@ toma_rpc: $(TOOL_OBJ)
 	@echo '>>>>>' $@
 	$(LINK) $(TOOL_OBJ) $(DO_LINK) -o $@ -ldl
 
-toma_link.o: toma_link.c
-	@echo '>>>>> compiling: ' $@
-	@$(COMPILE) $(shell readlink -m toma_link.c) $(autocompdb) -o $@
-
-toma_link: toma_link.o
-	@echo '>>>>>' $@
-	$(LINK) $< $(DO_LINK) -o $@ -ldl
-
-
-all: toma_rpc toma_link
+all: toma_rpc
 
 clean:
 	@rm -f $(TOOL_OBJ)
 	@rm -f $(TOOL_OBJ:.o=.d)
-	@rm -f toma_rpc toma_link
+	@rm -f toma_rpc
 	@rm -f *.[od]
 
 rebuild: clean

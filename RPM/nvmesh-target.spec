@@ -59,7 +59,6 @@ cp -rf %{_builddir}/%{name}/scripts/target %{buildroot}/opt/nvmesh/target-repo/s
 cp -rf %{_builddir}/%{name}/upgrade_scripts/nvmesh-target %{buildroot}/opt/nvmesh/target-repo
 mv %{buildroot}/opt/nvmesh/target-repo/nvmesh-target %{buildroot}/opt/nvmesh/target-repo/upgrade_scripts
 mv -n %{buildroot}/opt/nvmesh/target-repo/target_*/tools/toma_rpc %{buildroot}/opt/nvmesh/common-repo/tools/
-mv -n %{buildroot}/opt/nvmesh/target-repo/target_*/tools/toma_link %{buildroot}/opt/nvmesh/common-repo/tools/
 cp -rf %{_builddir}/%{name}/toma/toma.d/* %{buildroot}/opt/nvmesh/common-repo/toma.d/
 cp -rf %{_builddir}/%{name}/toma/toma_trace.config %{buildroot}/var/log/nvmesh/
 cp -rnf %{buildroot}/opt/nvmesh/target-repo/*/toma/bin/*/nvmeibt_toma_src_tar.pgp %{buildroot}/var/log/nvmesh/ #-n stands to prevent errors on more than once copies
@@ -72,7 +71,8 @@ touch %{buildroot}/var/opt/nvmesh/target_upgrade_version
 touch %{buildroot}/opt/nvmesh/common-repo/tools/toma_rpc.config
 cp -rf %{_builddir}/%{name}/examples/auto_takeover_drives_spec_example %{buildroot}/var/opt/nvmesh
 
-ln -s /opt/nvmesh/common-repo/tools/toma_link %{buildroot}/opt/nvmesh/common-repo/tools/gpt_util
+target_dir_name=$(basename %{buildroot}/opt/nvmesh/target-repo/target_*)
+ln -s /opt/nvmesh/target-repo/$target_dir_name/toma/scripts/gpt_util.sh %{buildroot}/opt/nvmesh/common-repo/tools/gpt_util
 
 
 echo "/opt/nvmesh
