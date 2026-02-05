@@ -544,6 +544,21 @@ int nvmeibs_nordda_add_work(struct nvmeibs_nr_channel *nrch,
 	return wq_add_work(nrch->wq, work) ? 0 : -1;
 }
 
+#define nrch_lock_irqsave(nrch, flags) do {\
+	spin_lock_irqsave(&nrch->spinlock, flags);\
+	nrch->locking_cpu = smp_processor_id();\
+} while(0)
+
+#define nrch_unlock_irqrestore(nrch, flags) do {\
+	nrch->locking_cpu = -1;\
+	spin_unlock_irqrestore(&nrch->spinlock, flags);\
+} while(0)
+
+#define nrch_already_locked(nrch) ({\
+	bool already_locked = irqs_disabled() && nrch->locking_cpu == smp_processor_id();\
+	already_locked;\
+})
+
 static inline bool new_cmd_underway(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioctx)
 {
 	bool ret;
@@ -563,14 +578,14 @@ static inline bool new_cmd_underway(struct nvmeibs_nr_channel *nrch, struct nvme
 		unsigned long flags;
 
 		BUG_ON(index >= cl->nrch_ioreq_num);
-		spin_lock_irqsave(&nrch->spinlock, flags);
+		nrch_lock_irqsave(nrch, flags);
 		if (test_and_set_bit(index, nrch->underway_cmds_bmp)) {
-			_NE(error_s_nordda_new_cmd_underway_already,
-				"nrch @NRCH_NAME (@NRCH), idx @INDEX, already underway. req version @VERSION req channel version @VERSION",
-				nrch->name, nrch, index, version, ch_version);
+				_NE(error_s_nordda_new_cmd_underway_already,
+					"nrch @NRCH_NAME (@NRCH), idx @INDEX, already underway. req version @VERSION req channel version @VERSION",
+					nrch->name, nrch, index, version, ch_version);
 			BUG_ON(1);
 		}
-		spin_unlock_irqrestore(&nrch->spinlock, flags);
+		nrch_unlock_irqrestore(nrch, flags);
 	}
 #else
 	(void)recv_ioctx;
@@ -588,17 +603,17 @@ static inline void cmd_ended(struct nvmeibs_nr_channel *nrch, __be64 req_hdr_tag
 		struct nvmeibs_client *cl = NR2C(nrch);
 		u64 req_tag = be64_to_cpu(req_hdr_tag);
 		u16 index = nordda_tag_decode_index(req_tag);
-		if (index < cl->nrch_ioreq_num) {
-			unsigned long flags;
-			spin_lock_irqsave(&nrch->spinlock, flags);
-			if (unlikely(!test_and_clear_bit(index, nrch->underway_cmds_bmp))) {
+	if (index < cl->nrch_ioreq_num) {
+		unsigned long flags;
+		nrch_lock_irqsave(nrch, flags);
+		if (unlikely(!test_and_clear_bit(index, nrch->underway_cmds_bmp))) {
 				_NE(error_s_nordda_cmd_ended_not_underway,
 					"nrch @NRCH_NAME (@NRCH), idx @INDEX, not underway",
 					nrch->name, nrch, (int)index);
-				BUG_ON(1);
-			}
-			spin_unlock_irqrestore(&nrch->spinlock, flags);
-		} else {
+			BUG_ON(1);
+		}
+		nrch_unlock_irqrestore(nrch, flags);
+	} else {
 			_NE(error_cmd_ended_catch_underway_inv_index,
 			    "NRCH @NRCH - Invalid request index @IDX_LLONG (max supported index is @NRCH_IOREQ_NUM)",
 			    nrch, index, cl->nrch_ioreq_num);
@@ -2903,7 +2918,7 @@ static void attempt_handle_pending_recv(struct nvmeibs_nr_channel *nrch)
 	unsigned long flags;
 	__NFIN;
 
-	spin_lock_irqsave(&nrch->spinlock, flags);
+	nrch_lock_irqsave(nrch, flags);
 	while (unlikely(
 			!list_empty(&nrch->net->pending_received_msgs) &&
 			nrch->net->state == QP_LIVE)) {
@@ -2914,7 +2929,7 @@ static void attempt_handle_pending_recv(struct nvmeibs_nr_channel *nrch)
 		}
 		else BUG();
 	}
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	nrch_unlock_irqrestore(nrch, flags);
 
 	__NFOUT;
 }
@@ -2987,6 +3002,7 @@ out:
 static inline void io_cmd_pending(struct nvmeibs_nr_channel *nrch,
 	struct nvmeib_iu *recv_ioctx)
 {
+	BUG_ON(!nrch_already_locked(nrch));
 	list_add_tail(&recv_ioctx->free_tx_n, &nrch->net->pending_received_msgs);
 }
 
@@ -3191,7 +3207,7 @@ static bool __nordda_recv_completion(struct ib_cq *cq,
 	unsigned long flags;
 	bool rv = false;
 
-	spin_lock_irqsave(&nrch->spinlock, flags);
+	nrch_lock_irqsave(nrch, flags);
 	n_processed = nordda_poll_recv_cq_with_budget(cq, nrch, NVMEIBS_POLL_SIZE);
 	if (n_processed < 0) {
 		_NT(trace_1_nordda_nordda_recv_completion, "cl @CL_NAME, poll-recv-cq err (@ERR)", cl->name, n_processed);
@@ -3215,7 +3231,7 @@ static bool __nordda_recv_completion(struct ib_cq *cq,
 	rv = _rv > 0; // ib_req_notify_cq returns rv>0 when IB_CQ_REPORT_MISSED_EVENTS
 
 out:
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	nrch_unlock_irqrestore(nrch, flags);
 	return rv;
 }
 
@@ -3488,7 +3504,7 @@ static void __nordda_send_completion(
 
 	BUG_ON(nvmeibs_use_pcpu_cq);
 
-	spin_lock_irqsave(&nrch->spinlock, flags);
+	nrch_lock_irqsave(nrch, flags);
 
 again:
 	n = ib_poll_cq(cq, NVMEIBS_POLL_SIZE, wcs);
@@ -3512,7 +3528,7 @@ again:
 		goto again;
 
 unlock:
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	nrch_unlock_irqrestore(nrch, flags);
 
 	if (do_pending_recv)
 		attempt_handle_pending_recv(nrch);
@@ -4517,9 +4533,9 @@ struct nvmeib_iu *rxiu_pop(struct nvmeibs_nr_channel *nrch)
 	unsigned long flags;
 	__NFIN;
 
-	spin_lock_irqsave(&nrch->spinlock, flags);
+	nrch_lock_irqsave(nrch, flags);
 	recv_ioctx = rxiu_pop_(nrch);
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	nrch_unlock_irqrestore(nrch, flags);
 
 	__NFOUT;
 	return recv_ioctx;
@@ -4534,7 +4550,7 @@ void rxiu_drain(struct nvmeibs_nr_channel *nrch)
 	__NFIN;
 
 	/* expecting empty list as we process send-comp even when nrch is dying */
-	spin_lock_irqsave(&nrch->spinlock, flags);
+	nrch_lock_irqsave(nrch, flags);
 	nrch->rxiu_dying = 1;
 	if (!list_empty(&nrch->rxiu_list)) {
 		_NW(rxiu_drain_w1, "Unexpected, found @INT stashed rxiu "
@@ -4557,7 +4573,7 @@ void rxiu_drain(struct nvmeibs_nr_channel *nrch)
 			WARN_ON(1);
 		}
 	}
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	nrch_unlock_irqrestore(nrch, flags);
 
 	__NFOUT;
 }
@@ -4575,7 +4591,7 @@ static int rxiu_push(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioc
 		goto out;
 	}
 
-	spin_lock_irqsave(&nrch->spinlock, flags);
+	nrch_lock_irqsave(nrch, flags);
 	if (nrch->rxiu_dying) {
 		_NE(rxiu_push_e2, "nrch @PTR, rxiu already dying", nrch);
 	}
@@ -4595,7 +4611,7 @@ static int rxiu_push(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioc
 		nrch->n_rxiu_tot++;
 		rv = 0;
 	}
-	spin_unlock_irqrestore(&nrch->spinlock, flags);
+	nrch_unlock_irqrestore(nrch, flags);
 
 out:
 	__NFOUT;
