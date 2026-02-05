@@ -269,11 +269,11 @@ $(OBJ_DIR)/%.i: %.cpp
 # Created with: tar --sparse -c -z -f ./disk_nvmesh.img.tgz ./disk_nvmesh.img
 $(TEST_NVMESH_DISK_IMAGE_OUTPUT): $(TEST_NVMESH_DISK_IMAGE_INPUT)
 	mkdir -p $(TESTDATA_BUILD_DIR)
-	tar -mxz -C $(TESTDATA_BUILD_DIR) < $<
+	tar -mxz --no-same-owner -C $(TESTDATA_BUILD_DIR) < $<
 
 $(TEST_STOCK_DISK_IMAGE_OUTPUT): $(TEST_STOCK_DISK_IMAGE_INPUT)
 	mkdir -p $(TESTDATA_BUILD_DIR)
-	tar -mxz -C $(TESTDATA_BUILD_DIR) < $<
+	tar -mxz --no-same-owner -C $(TESTDATA_BUILD_DIR) < $<
 
 # ********** Define Rules for Autogen *********
 AUTOGEN_DIR=$(abspath $(SSDA)/autogen)
