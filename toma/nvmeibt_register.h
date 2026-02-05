@@ -47,6 +47,10 @@ struct nvmeibt_registrant_awaiting_lockid {
  *  registrant and adds it to seg_active->longing... and sends TR_UNREGISTER
  *  The client will unregister, and when the seg_active becomes registrable again, TOMA will send a TR_REGISTRABLE to all seg_active->longing...
  * When a seg_active is added, TOMA scans global->longing_registrants_on_invalid_seg, and if their seg matches sends TR_REGISTRABLE.
+ * When an active_registrant (that possibly has locks) is unregistered for any reason
+ * - In a WQ, Its active locks are scanned, converted to stale, memorized, ...
+ * - At the finalize, the reg_ctx is moved to seg_active->stale...
+ *   - Until moved to seg_active->stale... the reg_ctx->n_stale_locks is unstable, and if 0, cannot be trusted
  */
 
 struct nvmeibt_registrant_ctx {
@@ -69,7 +73,7 @@ struct nvmeibt_registrant_ctx {
 	BOOL								is_register_for_cold_recovery;
 	BOOL								is_client_waiting_for_ack;
 	BOOL								is_recoverer;
-	u8									is_client_warrant_safe_to_rereg;
+	u8									rt_never_reged_on_seg;
 	struct timespec						reg_disconnect_time;
 	struct timespec						timeout_time;
 	struct xdlist						registrant_on_timeout_link;
@@ -162,7 +166,7 @@ enum UNREGISTER_RV nvmeibt_register_launch_unsubscribed_active_registrant_remova
 void nvmeibt_register_make_all_seg_active_registrants_sync_praid_topology(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_clients_sync_check_and_act_upon(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longing(struct nvmeibt_seg_active *seg_active);
-void nvmeibt_register_remove_longing_registrant_on_invalid_seg(unsigned long long closed_messaging_handle, bool is_complete_removal_from_all_segs);
+void nvmeibt_register_remove_unsubscribed_longing_registrant_on_invalid_seg(unsigned long long closed_messaging_handle, bool is_complete_removal_from_all_segs);
 int nvmeibt_register_handle_incoming_message(struct nvmeibt_register_msg *msg);
 struct timespec nvmeibt_register_get_next_timeout_timespec(void);
 void nvmeibt_register_close_seg_active_for_registration(struct nvmeibt_seg_active *seg_active, bool is_brute_force_disconnect_required);

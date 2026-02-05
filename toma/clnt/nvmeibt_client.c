@@ -129,7 +129,7 @@ int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *
 			&(reg_lock_id_raw),
 			&(registrant_msg.registrant_ctx.reservation_mode_version),
 			&(registrant_msg.registrant_ctx.client_conversation_index),
-			&(registrant_msg.registrant_ctx.is_client_warrant_safe_to_rereg),
+			&(registrant_msg.registrant_ctx.rt_never_reged_on_seg),
 			(u8 *)&(registrant_msg.registrant_ctx.is_recoverer),
 			&(registrant_msg.data_length),
 			(void **)&(registrant_msg.msg_data),
@@ -296,7 +296,7 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 				}
 			}
 		}
-		nvmeibt_register_remove_longing_registrant_on_invalid_seg(msg->toma_conn_proc_handle, 0);	// A subscribe is on a specific seg
+		nvmeibt_register_remove_unsubscribed_longing_registrant_on_invalid_seg(msg->toma_conn_proc_handle, 0);	// A subscribe is on a specific seg
 	}
 	NFOUT;
 }

@@ -1554,7 +1554,7 @@ out:
 	NFOUT;
 }
 
-void remove_specific_longing_registrant_on_invalid_seg(struct nvmeibt_registrant_ctx *longing_registrant)
+void remove_unsubscribed_specific_longing_registrant_on_invalid_seg(struct nvmeibt_registrant_ctx *longing_registrant)
 {
 	// Delete longing registrant from the list on invalid seg.
 	N_Tf(ju87cwe, "Found longing registrant handle=@HANDLE seg=@UUID_8",
@@ -1613,14 +1613,14 @@ void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longi
 	NFOUT;
 }
 
-void nvmeibt_register_remove_longing_registrant_on_invalid_seg(unsigned long long closed_messaging_handle, bool is_complete_removal_from_all_segs)
+void nvmeibt_register_remove_unsubscribed_longing_registrant_on_invalid_seg(unsigned long long closed_messaging_handle, bool is_complete_removal_from_all_segs)
 {
 	struct nvmeibt_registrant_ctx	*longing_registrant;
 
 	NFIN;
 	XDLIST_FOREACH_SAFE(longing_registrant, &(nvmeibt_global_get_global()->longing_on_invalid_seg_list_by_handle)) {
 		if (client_messaging_handle_to_cid(longing_registrant->client_messaging_handle) == client_messaging_handle_to_cid(closed_messaging_handle)) {
-			remove_specific_longing_registrant_on_invalid_seg(longing_registrant);
+			remove_unsubscribed_specific_longing_registrant_on_invalid_seg(longing_registrant);
 			if (is_complete_removal_from_all_segs) {
 				continue;
 			} else if (longing_registrant->client_messaging_handle == closed_messaging_handle) {
@@ -1975,17 +1975,17 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
  * Note: we assume that that registrant (client) will not access the local
  * segment anymore. See launch_non_ioable_registrant_removal() for details.
  */
-static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_active_registrant_removal(struct nvmeibt_registrant_ctx *active_registrant_entry)
+static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_active_registrant_removal(struct nvmeibt_registrant_ctx *active_reg_ctx)
 {
 	struct registrant_disconnect_wq_entry		*registrant_disconnect_task = NULL;
 	enum REGISTRANT_DISCONNECT_LAUNCH_STATUS	rv = REGISTRANT_DISCONNECT_LAUNCH_FAILED;
-	struct nvmeibt_seg_active					*seg_active = active_registrant_entry->seg_active;
+	struct nvmeibt_seg_active					*seg_active = active_reg_ctx->seg_active;
 	struct nvmeibt_local_disk					*its_local_disk = nvmeibt_seg_active_get_local_disk(seg_active);
 
 	NFIN;
 
 	N_Tf(dkiut65, "handle=@HANDLE seg=@UUID_8",
-		 active_registrant_entry->client_messaging_handle, nvmeibt_seg_active_UUID_8(seg_active));
+		 active_reg_ctx->client_messaging_handle, nvmeibt_seg_active_UUID_8(seg_active));
 
 	NTOMA_ASSERT(dki98sa, seg_active != NULL, "seg_active===NULL");
 
@@ -1993,13 +1993,13 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_active_registrant_removal
 		N_Tf(jju8771, "seg=@UUID_8 locks_table_mmap=@PTR local_disk_is_being_deleted=@BOOL", nvmeibt_seg_active_UUID_8(seg_active),
 			 nvmeibt_seg_active_get_locks_tbl_ptr(seg_active), nvmeibt_local_disk_is_being_deleted(its_local_disk));
 		rv = REGISTRANT_DISCONNECT_LAUNCH_SKIPPED;
-		nvmeibt_register_terminate_reg_ctx(active_registrant_entry, 0, 0, 0, 0, 0);	// We will probably be is_deleting_seg_active, but not right away
+		nvmeibt_register_terminate_reg_ctx(active_reg_ctx, 0, 0, 0, 0, 0);	// We will probably be is_deleting_seg_active, but not right away
 		goto free_resources;
 	}
 
 	// all required params a ready, launch the task
 	N_Tf(hhus662, "Handle client reg=@LOCKID seg=@UUID_8",
-		nvmeib_lockid_purify(active_registrant_entry->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
+		nvmeib_lockid_purify(active_reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
 
 	registrant_disconnect_task = NNVMEIBT_BM_CALLOC(karytx3, sizeof(*registrant_disconnect_task));
 
@@ -2008,7 +2008,7 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_active_registrant_removal
 	registrant_disconnect_task->wq_entry.finalize = registrant_disconnect_finalize;
 	registrant_disconnect_task->wq_entry.abort = nvmeibt_toma_wakeup_wq_abort_func;
 	registrant_disconnect_task->wq_entry.free = registrant_disconnect_freer;
-	registrant_disconnect_task->reg_ctx = active_registrant_entry;
+	registrant_disconnect_task->reg_ctx = active_reg_ctx;
 	registrant_disconnect_task->seg_active = seg_active;
 	registrant_disconnect_task->n_owner_locks_converted_to_stale = 0;
 	registrant_disconnect_task->n_owner_locks_converted_to_zero =  0;
@@ -2160,7 +2160,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int ci
 			}
 		}
 	}
-	nvmeibt_register_remove_longing_registrant_on_invalid_seg(((unsigned long long)cid) << 32, 1);
+	nvmeibt_register_remove_unsubscribed_longing_registrant_on_invalid_seg(((unsigned long long)cid) << 32, 1);
 out:
 	NFOUT;
 	return rv;
@@ -2368,7 +2368,7 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		goto toma_not_ready;
 	}
 
-	if (existing_reg_ctx && existing_reg_ctx->is_processing_registrant_removal) {
+	if (nvmeibt_register_is_processing_registrant_removal(existing_reg_ctx)) {
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS;
 		goto toma_not_ready;
 	}
@@ -2378,9 +2378,9 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		goto nack;
 	}
 	if (existing_reg_ctx && !nvmeibt_register_is_same_registrant(existing_reg_ctx, incoming_reg_ctx)) {
-		if (incoming_reg_ctx->is_client_warrant_safe_to_rereg) {
-			existing_reg_ctx->is_client_warrant_safe_to_rereg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
-			nvmeibt_register_terminate_reg_ctx(existing_reg_ctx, 0, 0, 0, 0, 1);
+		if (incoming_reg_ctx->rt_never_reged_on_seg) {
+			existing_reg_ctx->rt_never_reged_on_seg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
+			nvmeibt_register_terminate_reg_ctx(existing_reg_ctx, 0, 0, 0, 0, 0);	// Client wise, never properly registered, no I/O --> no stale_locks
 		} else {
 			N_Tf(t_fg_tomareg, "We have a mess, there is an existing registrant, but with a different handle or lock id: "
 				"@NODE,@HANDLE,reg_@LOCKID  &  @NODE,@HANDLE,reg_@LOCKID",
