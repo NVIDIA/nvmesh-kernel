@@ -56,11 +56,36 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx)
  * NVMe device definitions.
  * current_format_idx is mutable so that format operations can update it.
  * Initial format for NVMesh disks is 4096+0 (SANDBOX_NVME_FMT_4096_0).
+ *
+ * # Disk size requirement
+ *
+ * Relevant constants involved:
+ * - METADATA_PARTITION_RATIO (nvmeibt_params.h) = 0.15 (sandbox) vs 0.005 (production)
+ * - journal_data_size_in_pblks (nvmeibt_read_config.c) = 1MB (sandbox) vs 2GB (production)
+ * - serjio_db_size_in_pblks (nvmeibt_read_config.c) = 1MB (sandbox) vs 32MB (production)
+ *
+ * The allocation uses 1MB (256 block) alignment internally via align_pba_s_up_to_blkset().
+ * For the metadata partition's usable space (first_usable_pba to last_usable_pba) to contain
+ * at least one complete 1MB-aligned region:
+ *   - first_usable_pba = metadata_pba_s + 257
+ *   - last_usable_pba = metadata_pba_e - 257
+ *   - aligned_start = roundup(first_usable_pba, 256)
+ *   - aligned_end = rounddown(last_usable_pba + 1, 256) - 1
+ *   - Need: aligned_end >= aligned_start + 34 (for disk_metadata partition)
+ *
+ * With 8192 blocks, metadata partition is 1024 blocks (PBA 512-1535), giving:
+ *   - aligned_start = roundup(769, 256) = 1024
+ *   - aligned_end = rounddown(1279, 256) - 1 = 1023
+ *   - Result: NO usable 1MB-aligned space (end < start)!
+ *
+ * Required: metadata partition >= 1536 blocks to span two 1MB boundaries.
+ * Calculation: floor(n_pblk * 0.15) - 261 >= 1025 => n_pblk >= 8574 blocks
+ * Using 10240 blocks (40MB) to provide a comfortable margin.
  */
 static struct sandbox_nvme_device nvme_devices[] = {
 	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  2048, SANDBOX_NVME_FMT_4096_0 },
-	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 2000, SANDBOX_NVME_FMT_4096_0 },
-	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 2000, SANDBOX_NVME_FMT_4096_0 },
+	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 10240, SANDBOX_NVME_FMT_4096_0 },
+	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 10240, SANDBOX_NVME_FMT_4096_0 },
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
