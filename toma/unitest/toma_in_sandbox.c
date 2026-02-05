@@ -176,6 +176,13 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 			me->expecting_reply_cookie = false;
 			break;
 		}
+		case NVMEIBS_TOMA_JOURNAL_INFO: {
+			const struct nvmeibs_msg_t2s_journal *pl = &m->journal_msg;
+			SANDBOX_PRINT("SRVR_SIMU->Got: JournalInfo %lu[b] disk=%s lba=%llu len=%llu serjio_lba=%llu serjio_len=%llu\n",
+				n, pl->disk_id, (unsigned long long)pl->lba, (unsigned long long)pl->length,
+				(unsigned long long)pl->serjio_db_lba, (unsigned long long)pl->serjio_db_length);
+			break;
+		}
 		default: BUG_ON(true);		// Not supported yet
 	}
 	errno = 0;						// Failure not supported yet
