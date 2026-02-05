@@ -108,7 +108,7 @@
 /***************************** Debugging & Utils*******************************/
 #define numeric_downcast(type, value) \
 ({	\
-    __auto_type __numeric_cast_value = (value); \
+    __auto_type __numeric_cast_value = (value) + 0; \
     type __numeric_cast_narror_type_same_value = (type)__numeric_cast_value;	\
     BUG_ON(__numeric_cast_narror_type_same_value != __numeric_cast_value);	\
     __numeric_cast_narror_type_same_value;	\
