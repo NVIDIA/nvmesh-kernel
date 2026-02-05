@@ -576,16 +576,21 @@ static inline bool new_cmd_underway(struct nvmeibs_nr_channel *nrch, struct nvme
 		u16 version = nordda_tag_decode_version(req_tag);
 		u32 ch_version = nordda_tag_decode_ch_version(req_tag);
 		unsigned long flags;
+		bool already_locked = nrch_already_locked(nrch);
 
 		BUG_ON(index >= cl->nrch_ioreq_num);
-		nrch_lock_irqsave(nrch, flags);
+		if (!already_locked) {
+			nrch_lock_irqsave(nrch, flags);
+		}
 		if (test_and_set_bit(index, nrch->underway_cmds_bmp)) {
 				_NE(error_s_nordda_new_cmd_underway_already,
 					"nrch @NRCH_NAME (@NRCH), idx @INDEX, already underway. req version @VERSION req channel version @VERSION",
 					nrch->name, nrch, index, version, ch_version);
 			BUG_ON(1);
 		}
-		nrch_unlock_irqrestore(nrch, flags);
+		if (!already_locked) {
+			nrch_unlock_irqrestore(nrch, flags);
+		}
 	}
 #else
 	(void)recv_ioctx;
@@ -4536,11 +4541,16 @@ struct nvmeib_iu *rxiu_pop(struct nvmeibs_nr_channel *nrch)
 {
 	struct nvmeib_iu *recv_ioctx = NULL;
 	unsigned long flags;
+	bool already_locked = nrch_already_locked(nrch);
 	__NFIN;
 
-	nrch_lock_irqsave(nrch, flags);
+	if (!already_locked) {
+		nrch_lock_irqsave(nrch, flags);
+	}
 	recv_ioctx = rxiu_pop_(nrch);
-	nrch_unlock_irqrestore(nrch, flags);
+	if (!already_locked) {
+		nrch_unlock_irqrestore(nrch, flags);
+	}
 
 	__NFOUT;
 	return recv_ioctx;
@@ -4589,6 +4599,7 @@ static int rxiu_push(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioc
 {
 	unsigned long flags;
 	int rv = -1;
+	bool already_locked = nrch_already_locked(nrch);
 	__NFIN;
 
 	if (recv_ioctx->defer) {
@@ -4596,27 +4607,36 @@ static int rxiu_push(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioc
 		goto out;
 	}
 
-	nrch_lock_irqsave(nrch, flags);
+	if (!already_locked) {
+		nrch_lock_irqsave(nrch, flags);
+	}
+
 	if (nrch->rxiu_dying) {
 		_NE(rxiu_push_e2, "nrch @PTR, rxiu already dying", nrch);
+		goto unlock;
 	}
-	else if (!list_empty(&recv_ioctx->free_tx_n)) {
+	if (!list_empty(&recv_ioctx->free_tx_n)) {
 		_NE(rxiu_push_e3, "nrch @PTR, recv_ioctx=@PTR, already linked", nrch, recv_ioctx);
+		goto unlock;
 	}
 	/* after sending io-rsp[i], client may issue another io-req[i] which
 	   its recv-comp may arrive before the send-comp of prev io-rsp[i] */
-	#if 0
-	else if (nrch->n_rxiu == NR2C(nrch)->nrch_ioreq_num) {
+#if 0
+	if (nrch->n_rxiu == NR2C(nrch)->nrch_ioreq_num) {
 		_NE(rxiu_push_e4, "nrch @PTR, rxiu overflow @UINT", nrch, nrch->n_rxiu);
+		goto unlock;
 	}
-	#endif
-	else {
-		list_add_tail(&recv_ioctx->free_tx_n, &nrch->rxiu_list);
-		nrch->n_rxiu++;
-		nrch->n_rxiu_tot++;
-		rv = 0;
+#endif
+
+	list_add_tail(&recv_ioctx->free_tx_n, &nrch->rxiu_list);
+	nrch->n_rxiu++;
+	nrch->n_rxiu_tot++;
+	rv = 0;
+
+unlock:
+	if (!already_locked) {
+		nrch_unlock_irqrestore(nrch, flags);
 	}
-	nrch_unlock_irqrestore(nrch, flags);
 
 out:
 	__NFOUT;
