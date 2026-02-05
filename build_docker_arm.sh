@@ -154,10 +154,12 @@ rsync -e 'docker exec -i' $RSYNC_OPTS . $CONT_UUID:/$BUILD_DIR
 MAKE_OPTIONS="$MAKE_OPTIONS COMMIT_ID=$GIT_COMMIT_ID BRANCH_NAME=$GIT_BRANCH VERSION=${GIT_DESCRIBE[0]} RELEASE=${GIT_DESCRIBE[1]} KERN_VER=$KERN_VER"
 echo "Running Make - $MAKE_OPTIONS"
 docker exec -t $CONT_UUID bash -c "cd $BUILD_DIR; make $MAKE_OPTIONS"
-# Fetch RPM
-NVMESH_RPM=$(docker exec $CONT_UUID bash -c "find /$BUILD_DIR -type f -name '*.rpm' -o -name '*.deb' | head -1" | tr -d '\r\n')
-echo "Fetching RPM $NVMESH_RPM to $RPM_PATH"
-docker cp $CONT_UUID:$NVMESH_RPM $RPM_PATH
+# Fetch RPM(s)
+NVMESH_RPMS=$(docker exec $CONT_UUID bash -c "find /$BUILD_DIR -type f -maxdepth 1 -name '*.rpm' -o -name '*.deb' | xargs")
+echo "Fetching RPM(s) $NVMESH_RPMS to $RPM_PATH"
+for i in $NVMESH_RPMS; do
+	docker cp $CONT_UUID:$i $RPM_PATH
+done
 if [ "$LEAVE_RUNNING" = "true" ]; then
 	echo "Leaving Container $CONT_UUID Running"
 else
