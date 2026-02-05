@@ -126,10 +126,10 @@ BOOL nvmeibt_register_is_processing_registrant_removal(const struct nvmeibt_regi
 	return (reg_ctx && reg_ctx->is_processing_registrant_removal);
 }
 
-static void set_is_processing_registrant_removal(struct nvmeibt_registrant_ctx *reg_ctx)
+static void set_is_processing_registrant_removal(struct nvmeibt_registrant_ctx *reg_ctx, bool val)
 {
 	if (reg_ctx) {
-		reg_ctx->is_processing_registrant_removal = 1;
+		reg_ctx->is_processing_registrant_removal = val;
 	}
 }
 
@@ -1963,6 +1963,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 	if (nvmeibt_disk_segment_get_seg_active(disk_segment))
 		seg_active->last_registrant_disconnect_timespec = nvmeibt_global_get_cur_event_start_time();
 	nvmeibt_register_terminate_registrant(reg_ctx, 0);
+	set_is_processing_registrant_removal(reg_ctx, 0);
 
 	NFOUT;
 }
@@ -2052,7 +2053,7 @@ static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmei
 		}
 
 		if (rv == UNREGISTER_RV_IN_WORK) {
-			set_is_processing_registrant_removal(reg_ctx);
+			set_is_processing_registrant_removal(reg_ctx, 1);
 		}
 	}
 	else {
