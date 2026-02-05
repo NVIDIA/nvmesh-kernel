@@ -153,6 +153,7 @@ struct nvmeibs_nr_channel {
 	struct nvmeib_recvq *recv_q;
 
 	spinlock_t spinlock;
+	int locking_cpu;
 
 	unsigned int n_scq_wcs;
 	unsigned int n_rcq_wcs;
