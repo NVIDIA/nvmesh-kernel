@@ -47,7 +47,7 @@ MAKE_OPTIONS="-j IM_BOTH=yes MK_RPM=yes"
 
 LEAVE_RUNNING="false"
 
-DOCKER="docker"
+CONTAINER_TOOL="docker"
 
 while [[ $# -gt 0 ]]
 do
@@ -98,7 +98,7 @@ case $key in
     shift
     ;;
     --podman)
-    DOCKER="podman"
+    CONTAINER_TOOL="podman"
     ;;
     *)
     # unknown option
@@ -142,36 +142,36 @@ IFS='-' read -ra GIT_DESCRIBE <<< "$GIT_DESCRIBE"
 
 # Build docker container
 echo "Building nvmesh-build-$DISTRO image from docker/"
-$DOCKER build -t nvmesh-build-$DISTRO -f docker/Dockerfile_$DISTRO docker/
+$CONTAINER_TOOL build -t nvmesh-build-$DISTRO -f docker/Dockerfile_$DISTRO docker/
 # Start docker container
 echo "Starting container using nvmesh-build-$DISTRO image"
-CONT_UUID=`$DOCKER run -dit nvmesh-build-$DISTRO bash`
+CONT_UUID=`$CONTAINER_TOOL run -dit nvmesh-build-$DISTRO bash`
 echo "UUID: $CONT_UUID"
 # Get kernel version
-KERN_VER=`$DOCKER exec $CONT_UUID bash -c "ls /lib/modules | head -1" | tr -d '\r\n'`
+KERN_VER=`$CONTAINER_TOOL exec $CONT_UUID bash -c "ls /lib/modules | head -1" | tr -d '\r\n'`
 # Make the build dir
-$DOCKER exec $CONT_UUID bash -c "mkdir -p $BUILD_DIR"
+$CONTAINER_TOOL exec $CONT_UUID bash -c "mkdir -p $BUILD_DIR"
 # Rsync into docker container
 echo "Rsync into container $CONT_UUID:/$BUILD_DIR"
-rsync -e "$DOCKER exec -i" $RSYNC_OPTS . $CONT_UUID:/$BUILD_DIR
+rsync -e "$CONTAINER_TOOL exec -i" $RSYNC_OPTS . $CONT_UUID:/$BUILD_DIR
 # Run make
 MAKE_OPTIONS="$MAKE_OPTIONS COMMIT_ID=$GIT_COMMIT_ID BRANCH_NAME=$GIT_BRANCH VERSION=${GIT_DESCRIBE[0]} RELEASE=${GIT_DESCRIBE[1]} KERN_VER=$KERN_VER MODVERSIONS=0"
 echo "Running Make - $MAKE_OPTIONS"
-$DOCKER exec -t $CONT_UUID bash -c "cd $BUILD_DIR; make $MAKE_OPTIONS"
+$CONTAINER_TOOL exec -t $CONT_UUID bash -c "cd $BUILD_DIR; make $MAKE_OPTIONS"
 # Fetch RPM
-NVMESH_RPMS=$($DOCKER exec $CONT_UUID bash -c "find /$BUILD_DIR -type f -maxdepth 1 -name '*.rpm' -o -name '*.deb' | xargs")
+NVMESH_RPMS=$($CONTAINER_TOOL exec $CONT_UUID bash -c "find /$BUILD_DIR -type f -maxdepth 1 -name '*.rpm' -o -name '*.deb' | xargs")
 echo "Fetching RPM(s) $NVMESH_RPMS to $RPM_PATH"
 for i in $NVMESH_RPMS; do
-	$DOCKER cp $CONT_UUID:$i $RPM_PATH
+	$CONTAINER_TOOL cp $CONT_UUID:$i $RPM_PATH
 done
 if [ "$LEAVE_RUNNING" = "true" ]; then
 	echo "Leaving Container $CONT_UUID Running"
 else
 	# Stopping Container
         echo "Stopping Container $CONT_UUID"
-	$DOCKER container stop -t 0 $CONT_UUID
+	$CONTAINER_TOOL container stop -t 0 $CONT_UUID
 	echo "Removing Container $CONT_UUID"
 	# Removing Container
-	$DOCKER container rm $CONT_UUID
+	$CONTAINER_TOOL container rm $CONT_UUID
 fi
 echo "Done!"
