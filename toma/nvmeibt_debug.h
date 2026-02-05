@@ -302,7 +302,7 @@ struct _tracer {
 
 #define NFOUT_rv N_Tf(__AUTOID__, "<--(rv=@RV)", rv);
 
-void prepare_all_traces(void);
+void dump_traces_list_to_file(void);
 void log_snapshotting_set_active_log_levels(char const *level);
 void read_rpc_config_from_persist(bool is_initial_read);
 int update_traces_turn_all_on_or_off(char plus_or_minus, bool is_forced);

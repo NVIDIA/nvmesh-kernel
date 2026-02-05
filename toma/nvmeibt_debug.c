@@ -508,36 +508,27 @@ void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values,
 	}
 }
 
-void prepare_all_traces(void)
+void dump_traces_list_to_file(void)
 {
 	struct _tracer *t;
-
-	const char *dirname;
-	char *tracelist;
-	size_t tracelist_len;
-
 	FILE *f = 0;
+	const char *dirname = nvmeibt_toma_get_log_dir_name();
+	const size_t tracelist_len = strlen(dirname) + strlen(TRACE_LIST_FILENAME) + 2;
+	char *tracelist = NNVMEIBT_TOMA_MALLOC(hu821mv, tracelist_len);
 	__MEASURE_TOOK_INIT();
-
-	dirname = nvmeibt_toma_get_log_dir_name();
-	tracelist_len = strlen(dirname) + strlen(TRACE_LIST_FILENAME) + 2;
-	tracelist = NNVMEIBT_TOMA_MALLOC(hu821mv, tracelist_len);
 	nvmeibt_strlcpy(tracelist, dirname, tracelist_len);
 	nvmeibt_strlcat(tracelist, TRACE_LIST_FILENAME, tracelist_len);
 	f = fopen(tracelist, "w");
 	__MEASURE_TOOK(N_IMf(warn_prepare_all_traces_measure_0, "fopen() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
 	NNVMEIBT_TOMA_FREE(trace_1_debug_prepare_all_traces, tracelist);
-
+	if (!f)
+		return;
 	FOR_EACH_TRACER_IN_ALL_SECTIONS(t) {
-		if (f) {
-			const char *eol = my_strchrnul(t->format_str, '\n');
-			fprintf(f, "%s, %s, %d, %s, %.*s\n", t->filename, t->function, t->lineno, t->lvl, (int)(eol - t->format_str), t->format_str);
-		}
+		const char *eol = my_strchrnul(t->format_str, '\n');
+		fprintf(f, "%s, %s, %d, %s, %.*s\n", t->filename, t->function, t->lineno, t->lvl, (int)(eol - t->format_str), t->format_str);
 	}
-	if (f) {
-		fclose(f);
-		__MEASURE_TOOK(N_IMf(warn_prepare_all_traces_measure_1, "fclose() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
-	}
+	fclose(f);
+	__MEASURE_TOOK(N_IMf(warn_prepare_all_traces_measure_1, "fclose() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
 }
 
 void print_stack(void) {

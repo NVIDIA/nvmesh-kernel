@@ -2324,8 +2324,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	if (!nvmeibt_toma_is_running_as_a_utility())
 		nm_handle = nvmeibt_nm_tracer_init(toma_nm_transport_lib_path);
 
-	/* any attempts to use _T before this point will not output anything. */
-	prepare_all_traces();
+	dump_traces_list_to_file();
 	nvmeibt_global_init();
 	nvmeibt_common_init();
 	read_rpc_config_from_persist(true);				// Durinng parameters settings checks global topology, so it must be initialized
