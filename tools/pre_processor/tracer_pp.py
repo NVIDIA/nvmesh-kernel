@@ -397,19 +397,25 @@ def main():
     parser = init_argparse()
     args = parser.parse_args()
     
-    pool = multiprocessing.Pool(args.nprocesses)
+    # In some restricted environments (e.g. sandboxed builds), constructing a
+    # multiprocessing.Pool can fail even when -j 1 is used. Avoid creating a
+    # Pool object when running single-process.
+    if args.nprocesses < 1:
+        args.nprocesses = 1
+
     jobs = chunk_list(args.input, args.nprocesses)
 
-    if args.nprocesses != 1:
-        mapres = pool.map(worker_main, jobs)
+    if args.nprocesses == 1:
+        mapres = [worker_main(jobs[0] if jobs else [])]
     else:
-        mapres = [worker_main(jobs[0])]
+        with multiprocessing.Pool(args.nprocesses) as pool:
+            mapres = pool.map(worker_main, jobs)
 
     # Get the results from all processes
     res = []
     for subl in mapres:
         for trace in subl:
-        	res.append(trace)
+            res.append(trace)
         	
     with open(args.output, 'w') as fp:
         json.dump(res, fp, indent=2)
