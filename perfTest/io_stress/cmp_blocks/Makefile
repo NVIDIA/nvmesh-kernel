@@ -2,21 +2,25 @@
 UNAME := $(shell uname)# Which operating system we use?
 HT = $(shell uname -m)
 $(info Building on $(UNAME)/$(HT))
+
+# Architecture-specific required flags (cannot be overridden)
+ARCH_CFLAGS :=
+
 ifeq ($(UNAME),Darwin)
 	USE_DARWIN=1
-	CFLAGS += -m64
+	ARCH_CFLAGS += -m64
 	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
 	DP_EC_GF_CFILES :=
 	LIBS_PATH = -L/usr/lib
 else ifeq ($(HT),x86_64)
 	USE_64_BITS=1
-	CFLAGS += -m64
+	ARCH_CFLAGS += -m64
 	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
 	DP_EC_GF_CFILES :=
 	LIBS_PATH = -L/usr/lib64
 else ifeq ($(HT),aarch64)
 	USE_ARM=1
-	CFLAGS += -march=armv8.1-a+crc+fp+simd
+	ARCH_CFLAGS += -march=armv8.1-a+crc+fp+simd
 	DP_EC_GF_ASM :=
 	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_arm_neon4.c nvmeibc_block_dp_ec_gf_arm_recov_neon.c nvmeibc_block_dp_ec_gf_arm_um.c
 	LIBS_PATH = -L/usr/lib64
@@ -83,7 +87,7 @@ $(EXE_NAME): $(OBJECTS) $(ASMOBJ)
 	 @$(CC) $(LDFLAGS) $(OBJECTS) $(ASMOBJ) -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
 
 %_$(EXE_NAME).o : %.c
-	@$(CC) $(CFLAGS) $(INCLUDES) -c $< $(autocompdb) -o $@
+	@$(CC) $(ARCH_CFLAGS) $(CFLAGS) $(INCLUDES) -c $< $(autocompdb) -o $@
 
 %.o_shipped: %.S_shipped
 	$(CC) -c -x assembler-with-cpp -o $@ $<
