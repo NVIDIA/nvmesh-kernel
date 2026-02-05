@@ -2261,6 +2261,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	BOOL success = 0;
 	time_t		cur_time_t;
 	char		cur_time_t_str_no_newline[32];
+	void *nm_handle = NULL;
 
 	NFIN;
 	/* ------------------------------------------- */
@@ -2321,17 +2322,8 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 
 	nvmeibt_debug_init_tracer_sections();
 
-	if (!nvmeibt_toma_is_running_as_a_utility()) {
-		if ((rv = rsrm_init_work_tmq()) < 0) {
-			N_Ef(rrtt978, "Can't create srm: rv=@RV", rv);
-			goto out;
-		}
-
-		if (!(nw_node = nvmeibt_nm_init(toma_nm_transport_lib_path))) {
-			N_Ef(ddii965, "Failed to start listeners");
-			goto out;
-		}
-	}
+	if (!nvmeibt_toma_is_running_as_a_utility())
+		nm_handle = nvmeibt_nm_tracer_init(toma_nm_transport_lib_path);
 
 	/* any attempts to use _T before this point will not output anything. */
 	prepare_all_traces();
@@ -2418,6 +2410,16 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	nvmeibt_server_lib_create();
 	read_disks_info_from_stock_driver();
+
+	if ((rv = rsrm_init_work_tmq()) < 0) {
+		N_Ef(rrtt978, "Can't create srm: rv=@RV", rv);
+		goto out;
+	}
+
+	if (!(nw_node = nvmeibt_nm_init(nm_handle))) {
+		N_Ef(ddii965, "Failed to start listeners");
+		goto out;
+	}
 
 	if (nvmeibt_topology_probe_local_hardware(NVMEIBT_CSV_TYPE_LOCAL_NICS) < 0)
 		nvmeibt_abort(ES_FATAL);	// Failed reading hardware config.

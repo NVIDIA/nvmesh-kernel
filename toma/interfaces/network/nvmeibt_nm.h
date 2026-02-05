@@ -634,7 +634,8 @@ The follwing API's are for external module (Main Toma/Srm/Raft)
 Init Internal structures, wq and spawn the networking thread.
 Calls nvmeibt_nm_hw_init for specfic hw.
 */
-struct nvmeibt_nm_local_node * nvmeibt_nm_init(const char *lib_path);
+void *nvmeibt_nm_tracer_init(const char *lib_path);
+struct nvmeibt_nm_local_node *nvmeibt_nm_init(void *handle);
 
 /* The function should be called when a new remote nic is detected by
    Toma Configuration, that will call to hw specific */

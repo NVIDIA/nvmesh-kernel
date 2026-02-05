@@ -2272,49 +2272,51 @@ out:
 #include <dlfcn.h>
 #include <linux/limits.h>
 #include <libgen.h>
-struct nvmeibt_nm_local_node * nvmeibt_nm_init(const char *lib_path)
+void *nvmeibt_nm_tracer_init(const char *lib_path)
 {
-	struct nvmeibt_nm_local_node *ln;
 	void *handle;
-	struct nvmeibt_nm_hw_function_table hw_func_table = {0};
-	void (*hw_fill_func) (struct nvmeibt_nm_hw_function_table *);
 	struct _tracer *so_tracer_start;
 	struct _tracer *so_tracer_end;
 
-
-	NFIN;
-
+	N_Tf(j93k4908, "");
 	handle = dlopen(lib_path, RTLD_LAZY);
 	if (handle) {
-		*(void**)(&hw_fill_func) = dlsym(handle, "nvmeibt_nm_hw_fill_hw_function_table");
-		if (hw_fill_func) {
-			hw_fill_func(&hw_func_table);
+		// Register tracer section from the loaded library
+		so_tracer_start = (struct _tracer *)dlsym(handle, "__tracer_start");
+		so_tracer_end = (struct _tracer *)dlsym(handle, "__tracer_end");
 
-			// Register tracer section from the loaded library
-			so_tracer_start = (struct _tracer *)dlsym(handle, "__tracer_start");
-			so_tracer_end = (struct _tracer *)dlsym(handle, "__tracer_end");
-
-			if (so_tracer_start && so_tracer_end) {
-				if (nvmeibt_debug_register_tracer_section(so_tracer_start, so_tracer_end) == 0) {
-					N_Tf(nm_register_so_tracer_success, "Successfully registered tracer section from @STR", lib_path);
-				} else {
-					N_Wf(nm_register_so_tracer_failed, "Failed to register tracer section from @STR", lib_path);
-				}
+		if (so_tracer_start && so_tracer_end) {
+			if (nvmeibt_debug_register_tracer_section(so_tracer_start, so_tracer_end) == 0) {
+				N_Tf(nm_register_so_tracer_success, "Successfully registered tracer section from @STR", lib_path);
 			} else {
-				N_Ef(nm_no_tracer_symbols, "No tracer section symbols found in @STR (this is normal if the library has no traces)", lib_path);
+				N_Wf(nm_register_so_tracer_failed, "Failed to register tracer section from @STR", lib_path);
 			}
 		} else {
-			N_ETf(nm_no_hw_fill_symbol, "couldn't find nvmeibt_nm_hw_fill_hw_function_table in @STR(@AUTO_ERRNO)", lib_path);
-			nvmeibt_abort(ES_FATAL);
+			N_Ef(nm_no_tracer_symbols, "No tracer section symbols found in @STR (this is normal if the library has no traces)", lib_path);
 		}
-
 	} else {
 		N_ETf(nm_no_hw_no_handle, "couldn't find handle to @STR (@AUTO_ERRNO) - @STR", lib_path, dlerror());
 		nvmeibt_abort(ES_FATAL);
 	}
 
+	return handle;
+}
+
+struct nvmeibt_nm_local_node *nvmeibt_nm_init(void *handle)
+{
+	struct nvmeibt_nm_local_node *ln;
+	struct nvmeibt_nm_hw_function_table hw_func_table = {0};
+	void (*hw_fill_func) (struct nvmeibt_nm_hw_function_table *);
+
+	*(void**)(&hw_fill_func) = dlsym(handle, "nvmeibt_nm_hw_fill_hw_function_table");
+	if (hw_fill_func) {
+		hw_fill_func(&hw_func_table);
+	} else {
+		N_ETf(nm_no_hw_fill_symbol, "couldn't find nvmeibt_nm_hw_fill_hw_function_table in lib");
+		nvmeibt_abort(ES_FATAL);
+	}
+
 	ln = create_local_node(&hw_func_table);
-	NFOUT;
 	return ln;
 }
 
