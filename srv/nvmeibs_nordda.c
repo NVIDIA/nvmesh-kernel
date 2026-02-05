@@ -604,15 +604,20 @@ static inline void cmd_ended(struct nvmeibs_nr_channel *nrch, __be64 req_hdr_tag
 		u64 req_tag = be64_to_cpu(req_hdr_tag);
 		u16 index = nordda_tag_decode_index(req_tag);
 	if (index < cl->nrch_ioreq_num) {
+		bool already_locked = nrch_already_locked(nrch);
 		unsigned long flags;
-		nrch_lock_irqsave(nrch, flags);
+		if (!already_locked) {
+			nrch_lock_irqsave(nrch, flags);
+		}
 		if (unlikely(!test_and_clear_bit(index, nrch->underway_cmds_bmp))) {
-				_NE(error_s_nordda_cmd_ended_not_underway,
-					"nrch @NRCH_NAME (@NRCH), idx @INDEX, not underway",
-					nrch->name, nrch, (int)index);
+			_NE(error_s_nordda_cmd_ended_not_underway,
+				"nrch @NRCH_NAME (@NRCH), idx @INDEX, not underway",
+				nrch->name, nrch, (int)index);
 			BUG_ON(1);
 		}
-		nrch_unlock_irqrestore(nrch, flags);
+		if (!already_locked) {
+			nrch_unlock_irqrestore(nrch, flags);
+		}
 	} else {
 			_NE(error_cmd_ended_catch_underway_inv_index,
 			    "NRCH @NRCH - Invalid request index @IDX_LLONG (max supported index is @NRCH_IOREQ_NUM)",
