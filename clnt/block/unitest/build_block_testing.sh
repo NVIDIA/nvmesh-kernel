@@ -116,6 +116,10 @@ case "$1" in
 		shift
 		build ${@} USE_RELEASE=0 USE_SANITIZERS=1
 		;;
+	"build-release")
+		shift
+		build ${@} USE_RELEASE=1 USE_SANITIZERS=1
+		;;
 	"build-tsan")
 		shift
 		build ${@} USE_RELEASE=0 USE_SANITIZERS=0 USE_THREAD_SANITIZER=1

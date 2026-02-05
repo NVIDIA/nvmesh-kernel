@@ -81,7 +81,7 @@ ifeq ($(USE_THREAD_SANITIZER),1)
 endif
 
 ifeq ($(USE_RELEASE),1)
-	CFLAGS += -O2 -g3 -ggdb3
+	CFLAGS += -O2 -g3 -ggdb3 -Wno-array-bounds -fno-omit-frame-pointer -rdynamic
 else
 	CFLAGS += -g3 -ggdb3
 endif
