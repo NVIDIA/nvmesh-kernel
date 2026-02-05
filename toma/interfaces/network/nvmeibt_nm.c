@@ -2275,15 +2275,12 @@ out:
 void *nvmeibt_nm_tracer_init(const char *lib_path)
 {
 	void *handle;
-	struct _tracer *so_tracer_start;
-	struct _tracer *so_tracer_end;
-
 	N_Tf(j93k4908, "");
 	handle = dlopen(lib_path, RTLD_LAZY);
 	if (handle) {
 		// Register tracer section from the loaded library
-		so_tracer_start = (struct _tracer *)dlsym(handle, "__tracer_start");
-		so_tracer_end = (struct _tracer *)dlsym(handle, "__tracer_end");
+		struct _tracer *so_tracer_start = (struct _tracer *)dlsym(handle, "__tracer_start");
+		struct _tracer *so_tracer_end =   (struct _tracer *)dlsym(handle, "__tracer_end");
 
 		if (so_tracer_start && so_tracer_end) {
 			if (nvmeibt_debug_register_tracer_section(so_tracer_start, so_tracer_end) == 0) {
@@ -2298,7 +2295,6 @@ void *nvmeibt_nm_tracer_init(const char *lib_path)
 		N_ETf(nm_no_hw_no_handle, "couldn't find handle to @STR (@AUTO_ERRNO) - @STR", lib_path, dlerror());
 		nvmeibt_abort(ES_FATAL);
 	}
-
 	return handle;
 }
 

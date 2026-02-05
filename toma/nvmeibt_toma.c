@@ -2416,7 +2416,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		goto out;
 	}
 
-	if (!(nw_node = nvmeibt_nm_init(nm_handle))) {
+	if (!(nw_node = nvmeibt_nm_init(nm_handle))) {			// Must be called after server_lib already initialized. Accesses the server
 		N_Ef(ddii965, "Failed to start listeners");
 		goto out;
 	}

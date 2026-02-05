@@ -163,7 +163,7 @@ void rsrm_faults_handle_fifo_comm(void);// Handle fault after wakeup from select
 // nm
 struct nvmeibt_nm_local_node { int dummy; };
 struct nvmeibt_nic; struct nvmeibt_node; struct nvmeibt_msg_request;
-static inline void * nvmeibt_nm_tracer_init(const char *lib_path) { (void)lib_path; return (void *)0xdeadbeef)); }
+static inline void * nvmeibt_nm_tracer_init(const char *lib_path) { (void)lib_path; return ((void *)0xdeadbeef); }
 static inline struct nvmeibt_nm_local_node * nvmeibt_nm_init(void *handle) { (void)handle; return (struct nvmeibt_nm_local_node*)malloc(sizeof(struct nvmeibt_nm_local_node)); }
 static inline void nvmeibt_nm_done(struct nvmeibt_nm_local_node *n) { free(n); }
 #define nvmeibt_nm_add_remote_nic(...)
