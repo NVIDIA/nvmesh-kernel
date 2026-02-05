@@ -4433,6 +4433,17 @@ int gpt_util_main(int argc, char *argv[])
 	// Print version banner
 	print_version_banner();
 
+	{	// Conenct to server in passive mode
+		struct nvmeibt_km_comm_params par;
+		memset(&par, 0, sizeof(par));
+		#ifdef TOMA_USE_USER_SPACE_SERVER_API
+			par.use_user_space_api = true;
+		#endif
+		par.use_only_passive_util_mode = true;
+		if (nvmeib_srvr_api_lib_create(&par) < 0)
+			return 1;
+	}
+
 	// Dispatch to appropriate mode
 	if (is_self_test) {
 		rv = run_self_test(test_selection, quiet_mode);
@@ -4440,6 +4451,7 @@ int gpt_util_main(int argc, char *argv[])
 		rv = run_gpt_util_op(argc, argv, false);
 	}
 
+	nvmeib_srvr_api_lib_destroy();
 	nvmeibt_bm_destroy();
 	nvmeibt_join_all_trace_pollers();		// Clean shutdown of trace threads; beyond this point, no more traces
 

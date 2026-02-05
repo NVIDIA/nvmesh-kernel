@@ -369,8 +369,9 @@ int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 	p = _singleton = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
 	if (!p) { 													rv = -__LINE__; goto init_fail; }
 	p->params = *params;
+	if (params->use_only_passive_util_mode) {	/* Skip active initialization*/ goto done; }
 	if (__blocking_msg_api_create(p) < 0) {						rv = -__LINE__; goto free_p; }
-	if (!params->print_status_fn) { 							rv = -__LINE__; goto free_p; }			// The only one which is mandatory
+	if (!params->print_status_fn) { 							rv = -__LINE__; goto free_p; }			// The only one which is mandatory for Toma
 	if (pthread_mutex_init(&p->guard, NULL) < 0) { 				rv = -__LINE__; goto free_p; }
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
 	if (start_netlink_socket(p))  { 							rv = -__LINE__; goto free_spair; }
@@ -394,7 +395,8 @@ int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 		buf.type = NVMEIBS_TOMA_LOGIN;
 		(void)nvmeib_srvr_api_lib_send_block_msg_to_server(&buf);
 	}
-	N_Tf(__AUTOID__, "Done");
+done:
+	N_Tf(__AUTOID__, "Done. Active=@BOOL_YN", !params->use_only_passive_util_mode);
 	return 0;
 
 free_nl_buffer:	NNVMEIBT_TOMA_FREE(tscnlssc, p->nlh);
@@ -450,17 +452,21 @@ static void __stop_main_thread(struct nvmeibt_km_comm *p)
 	NNVMEIBT_CLOSE(tscnlssr, p->nl_sock_fd);
 }
 
-void nvmeib_srvr_api_lib_destroy()
+void nvmeib_srvr_api_lib_destroy(void)
 {
 	struct nvmeibt_km_comm *p = _singleton;
-	struct nvmeibs_toma_server_proc_buf buf;
-	int rv;
-	memset(&buf, 0, sizeof(buf));
-	buf.type = NVMEIBS_TOMA_LOGOUT;
-	rv = nvmeib_srvr_api_lib_send_block_msg_to_server(&buf);
-	(void)rv; // Nothing to do with this
-	__stop_main_thread(p);
-	__blocking_msg_api_destroy(p);
+	if (!p)
+		return;
+	if (!p->params.use_only_passive_util_mode) {
+		struct nvmeibs_toma_server_proc_buf buf;
+		int rv;
+		memset(&buf, 0, sizeof(buf));
+		buf.type = NVMEIBS_TOMA_LOGOUT;
+		rv = nvmeib_srvr_api_lib_send_block_msg_to_server(&buf);
+		(void)rv; // Nothing to do with this
+		__stop_main_thread(p);
+		__blocking_msg_api_destroy(p);
+	}
 	if (p->resource.n_lock_maps != 0)
 		N_Ef(tscnlssv, "Leaking resources: lock_maps=@INT", p->resource.n_lock_maps);
 	NNVMEIBT_TOMA_FREE(tscnlsss, _singleton);
@@ -978,12 +984,10 @@ static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
 	return rv;
 }
 
-static inline bool __NVMESH_7354_bug_exists(void) { return (!!_singleton); }	// Todo: Utilities (other than Toma) still never initialize server lib and use kernel api directly
-
 int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str)
 {
 	struct nvmeibt_km_comm *p = _singleton;
-	if (__NVMESH_7354_bug_exists() && p->state_flags.use_async_api_instead_of_proc_files) {
+	if (p->state_flags.use_async_api_instead_of_proc_files) {
 		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = 0,
 			.type = NVMEIBS_TOMA_REQ_DISKS_CSV, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
 		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
@@ -994,7 +998,7 @@ int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str)
 int nvmeib_srvr_api_lib_get_csv_nics(struct nvmeibt_Str *str)
 {
 	struct nvmeibt_km_comm *p = _singleton;
-	if (__NVMESH_7354_bug_exists() && p->state_flags.use_async_api_instead_of_proc_files) {
+	if (p->state_flags.use_async_api_instead_of_proc_files) {
 		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = 0,
 			.type = NVMEIBS_TOMA_REQ_NICS_CSV, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
 		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
@@ -1007,7 +1011,7 @@ int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
 	struct nvmeibt_km_comm *p = _singleton;
 	if (seq >= 1000)
 		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
-	if (__NVMESH_7354_bug_exists() && p->state_flags.use_async_api_instead_of_proc_files) {
+	if (p->state_flags.use_async_api_instead_of_proc_files) {
 		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = seq,
 			.type = NVMEIBS_TOMA_REQ_DISK_SMART_CNT, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
 		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);

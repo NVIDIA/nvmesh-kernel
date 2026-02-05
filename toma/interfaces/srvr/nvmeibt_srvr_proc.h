@@ -20,6 +20,7 @@ struct nvmeibt_km_comm_params {
 	int (*process_disk_info)(const char* ldisk_id, u16 vendor_id, const char *model_str, enum nvmeibs_serjio_status serjio_status);
 	void (*print_status_fn)(enum nvmeibs_toma_status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *ctx);
 	bool use_user_space_api;									// ServerLib will connect to Kernel/User-Space nvmeib server.
+	bool use_only_passive_util_mode;							// Not for Toma but other utilities which only passively query server for various things but do not communicate nor issue instructions.
 };
 
 int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params *);		// Singleton, Login into local server, Now can receive messages from server. Initialize your queues/mutexes/etc before calling this function
