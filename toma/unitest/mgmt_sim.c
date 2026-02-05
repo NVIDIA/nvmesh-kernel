@@ -1,19 +1,26 @@
-#define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS/library functions from this module - must be defined before any other includes
-
 /*
  * mgmt_sim.c - Management simulator for Toma sandbox unit tests
  *
  * This module simulates the management server's Kafka message exchanges with Toma.
  */
 
+#define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS/library functions from this module - must be defined before any other includes
+
+// Module interface header
+#include "mgmt_sim.h"
+
+// Sandbox internal headers
+#include "sandbox_util.h"
+
+// Toma headers
+#include "nvmeibt_json_base.h"
+#include "nvmeibt_debug.h"
+
+// Standard library headers
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-
-#include "mgmt_sim.h"
-#include "nvmeibt_json_base.h"
-#include "nvmeibt_debug.h"
 
 /*
  * Management simulation Kafka message formatting functions.
@@ -29,19 +36,13 @@
 #define FORMAT_REQUEST_COUNTER   303
 
 /*
- * State machine for the formatDrive scenario.
- * waitingForBothOk: waiting for both disks to report status="Ok"
- * sentFormatDrive:  formatDrive command sent, waiting for disk to start formatting
- * sawFormatting:    disk reported status="Formatting"
- * sawOkWithCounter: disk reported status="Ok" with new formatRequestCounter
- * done:             test scenario complete
+ * State machine stats for the formatDrive scenario.
  */
  enum mgmt_sim_fsm_state {
-	MGMT_FSM_WAITING_FOR_BOTH_OK,
-	MGMT_FSM_SENT_FORMAT_DRIVE,
-	MGMT_FSM_SAW_FORMATTING,
-	MGMT_FSM_SAW_OK_WITH_COUNTER,
-	MGMT_FSM_DONE
+	MGMT_FSM_WAITING_FOR_BOTH_OK, // waiting for both disks to report status="Ok"
+	MGMT_FSM_SENT_FORMAT_DRIVE, // sent formatDrive message to Toma
+	MGMT_FSM_SAW_FORMATTING, // disk reported status="Formatting"
+	MGMT_FSM_DONE // test scenario complete - we got the updated disk format in Toma's reportTarget message
 };
 
 /* Format updateLeaderKeepaliveToken message */
@@ -181,6 +182,8 @@ struct mgmt_sim_disk_status {
 	char status[32];
 	int64_t format_request_counter;
 	int64_t active_format_request_counter;
+	int64_t block_size;
+	int64_t metadata_size;
 };
 
 /* Management simulator state */
@@ -255,7 +258,7 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 			len = g_mgmt_sim->pending_format_drive_len;
 			g_mgmt_sim->pending_format_drive_msg = NULL;
 			g_mgmt_sim->pending_format_drive_len = 0;
-			N_Tf(msim_cmd, "delivering formatDrive message len=@INT", (int)len);
+			N_IMf(msim_cmd, "delivering formatDrive message len=@INT", (int)len);
 		} else if (g_mgmt_sim->cmd_msg_count == 0) {
 			/* First command: updateTomaKeepaliveToken (zone) */
 			capacity = 256;
@@ -318,6 +321,26 @@ const char *mgmt_sim_get_last_report_target(void)
 	return g_mgmt_sim->last_report_target_json;
 }
 
+void mgmt_sim_verify_at_end(void)
+{
+	const char *state;
+	const struct mgmt_sim_disk_status *d3;
+	bool done;
+
+	BUG_ON(!g_mgmt_sim);
+	state = mgmt_sim_get_state_name();
+	d3 = &g_mgmt_sim->disk_003;
+	done = mgmt_sim_is_done();
+	if (!done) {
+		SANDBOX_PRINT(
+			"failed: format FSM did not reach done, state=%s disk=%s status=%s frc=%lld afrc=%lld bs=%lld ms=%lld\n",
+			state, d3->disk_id, d3->status, (long long)d3->format_request_counter,
+			(long long)d3->active_format_request_counter, (long long)d3->block_size,
+			(long long)d3->metadata_size);
+		BUG_ON(true);
+	}
+}
+
 bool mgmt_sim_is_done(void)
 {
 	if (!g_mgmt_sim)
@@ -353,7 +376,6 @@ static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state)
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:  return "waitingForBothOk";
 	case MGMT_FSM_SENT_FORMAT_DRIVE:    return "sentFormatDrive";
 	case MGMT_FSM_SAW_FORMATTING:       return "sawFormatting";
-	case MGMT_FSM_SAW_OK_WITH_COUNTER:  return "sawOkWithCounter";
 	case MGMT_FSM_DONE:                 return "done";
 	default:                            return "unknown";
 	}
@@ -388,10 +410,13 @@ static void mgmt_sim_extract_disk_status(struct mm_json_elem *disks_array,
 				sizeof(out->status));
 		out->format_request_counter = json_get_dict_num(disk_elem, "formatRequestCounter", -1);
 		out->active_format_request_counter = json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
+		out->block_size = json_get_dict_num(disk_elem, "block_size", -1);
+		out->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
 
-		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT64_TD afrc=@INT64_TD",
+		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT64_TD afrc=@INT64_TD bs=@INT64_TD ms=@INT64_TD",
 		     target_disk_id, out->status,
-		     out->format_request_counter, out->active_format_request_counter);
+		     out->format_request_counter, out->active_format_request_counter,
+		     out->block_size, out->metadata_size);
 		return;
 	}
 }
@@ -455,7 +480,7 @@ static void mgmt_sim_run_fsm(void)
 	bool disk_002_ok;
 	bool disk_003_ok;
 	bool disk_003_formatting;
-	bool disk_003_ok_with_counter;
+	bool disk_003_ok_with_expected_reported_format;
 	char *msg;
 	size_t msg_len;
 
@@ -465,14 +490,17 @@ static void mgmt_sim_run_fsm(void)
 	disk_002_ok = (strcmp(g_mgmt_sim->disk_002.status, "Ok") == 0);
 	disk_003_ok = (strcmp(g_mgmt_sim->disk_003.status, "Ok") == 0);
 	disk_003_formatting = (strcmp(g_mgmt_sim->disk_003.status, "Formatting") == 0);
-	disk_003_ok_with_counter = disk_003_ok &&
-		(g_mgmt_sim->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER);
+	disk_003_ok_with_expected_reported_format = disk_003_ok &&
+		(g_mgmt_sim->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(g_mgmt_sim->disk_003.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(g_mgmt_sim->disk_003.block_size == 4096) &&
+		(g_mgmt_sim->disk_003.metadata_size == 8);
 
 	switch (g_mgmt_sim->fsm_state) {
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:
 		if (disk_002_ok && disk_003_ok) {
 			/* Both disks are Ok - send formatDrive */
-			N_Tf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", g_mgmt_sim->boot_time);
+			N_IMf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", g_mgmt_sim->boot_time);
 
 			msg = malloc(1024);
 			BUG_ON(!msg);
@@ -488,27 +516,21 @@ static void mgmt_sim_run_fsm(void)
 
 	case MGMT_FSM_SENT_FORMAT_DRIVE:
 		if (disk_003_formatting) {
-			N_Tf(msim_fsm2, "disk003 now Formatting");
+			N_IMf(msim_fsm2, "disk003 now Formatting");
 			g_mgmt_sim->fsm_state = MGMT_FSM_SAW_FORMATTING;
-		} else if (disk_003_ok_with_counter) {
+		} else if (disk_003_ok_with_expected_reported_format) {
 			/* Might have missed the Formatting state - go directly to done */
-			N_Tf(msim_fsm2b, "disk003 Ok with counter=@INT (skipped Formatting)",
+			N_IMf(msim_fsm2b, "disk003 Ok with expected format (skipped Formatting) counter=@INT",
 			     FORMAT_REQUEST_COUNTER);
-			g_mgmt_sim->fsm_state = MGMT_FSM_SAW_OK_WITH_COUNTER;
+			g_mgmt_sim->fsm_state = MGMT_FSM_DONE;
 		}
 		break;
 
 	case MGMT_FSM_SAW_FORMATTING:
-		if (disk_003_ok_with_counter) {
-			N_Tf(msim_fsm3, "disk003 Ok with counter=@INT", FORMAT_REQUEST_COUNTER);
-			g_mgmt_sim->fsm_state = MGMT_FSM_SAW_OK_WITH_COUNTER;
+		if (disk_003_ok_with_expected_reported_format) {
+			N_IMf(msim_fsm3, "disk003 Ok with expected format counter=@INT", FORMAT_REQUEST_COUNTER);
+			g_mgmt_sim->fsm_state = MGMT_FSM_DONE;
 		}
-		break;
-
-	case MGMT_FSM_SAW_OK_WITH_COUNTER:
-		/* Format complete - transition to done */
-		N_Tf(msim_fsm4, "format scenario complete");
-		g_mgmt_sim->fsm_state = MGMT_FSM_DONE;
 		break;
 
 	case MGMT_FSM_DONE:
@@ -517,7 +539,7 @@ static void mgmt_sim_run_fsm(void)
 	}
 
 	if (g_mgmt_sim->fsm_state != prev_state) {
-		N_Tf(msim_trans, "FSM transition @STR -> @STR",
+		N_IMf(msim_trans, "FSM transition @STR -> @STR",
 		     mgmt_sim_fsm_state_name(prev_state),
 		     mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state));
 	}

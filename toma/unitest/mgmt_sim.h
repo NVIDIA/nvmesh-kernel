@@ -44,6 +44,12 @@ void mgmt_sim_on_toma_produced(const void *payload, size_t len);
 const char *mgmt_sim_get_last_report_target(void);
 
 /**
+ * Verify end-of-test conditions for the simulator.
+ * Aborts the process if the format scenario did not complete successfully.
+ */
+void mgmt_sim_verify_at_end(void);
+
+/**
  * Check if the format scenario state machine has completed.
  * @return true if the state machine reached the "done" state.
  */

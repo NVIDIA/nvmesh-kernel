@@ -443,15 +443,9 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
 
-static void sandbox_kafka_validate_report_target(void) {
-	const char *str = mgmt_sim_get_last_report_target();
-	const bool ok = str && strstr(str, "NVMD_SN_002.1") && strstr(str, "NVMD_SN_003.1");
-	BUG_ON(!ok);
-}
-
 void t_sandbox_all_destroy(void) {
 	if (!nvmeibt_toma_is_running_as_a_utility())
-		sandbox_kafka_validate_report_target();
+		mgmt_sim_verify_at_end();
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	pthread_mutex_destroy(&sys->TS.mutex);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
