@@ -10,6 +10,7 @@
 #	- Support different distros
 #	- Custom workdir
 
+set -e #exit on first error
 
 print_help() {
 cat << EOF
