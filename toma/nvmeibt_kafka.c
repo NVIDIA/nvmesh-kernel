@@ -381,7 +381,6 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	struct timespec						now;
 	if (err == RD_KAFKA_RESP_ERR_NO_ERROR)
 		return;
-	N_Wf(j911i0a, "kafka err='@STR'", rd_kafka_err2str(err));
 	switch (err) {
 	case RD_KAFKA_RESP_ERR__FATAL:
 	case RD_KAFKA_RESP_ERR__SSL:
@@ -401,14 +400,17 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	case RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE:
 	case RD_KAFKA_RESP_ERR__ALL_BROKERS_DOWN:
 	case RD_KAFKA_RESP_ERR__TIMED_OUT:
+	case RD_KAFKA_RESP_ERR__PARTITION_EOF:		// No more messages in consumer partition
 	case RD_KAFKA_RESP_ERR__WAIT_COORD:
 	case RD_KAFKA_RESP_ERR__WAIT_CACHE:
 	case RD_KAFKA_RESP_ERR__DESTROY:
+		N_Tf(__AUTOID__, "kafka err[@INT]='@STR'", err, rd_kafka_err2str(err));
 		return;		// Definitely ignore transient network errors.
 	default:
 		// return;	Should we ignore errors that do not look like security related
 		break;
 	}
+	N_Wf(__AUTOID__, "kafka err[@INT]='@STR'", err, rd_kafka_err2str(err));
 	getnstimeofday_boot(&now);
 	if ((timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) && !is_waiting_for_reinit()) {
 		N_IMf(hu8a475, "Marking kafka soft init required");
@@ -429,9 +431,9 @@ static void error_event_cb(rd_kafka_t *rk, int err, const char *reason, __attrib
 	if (err == RD_KAFKA_RESP_ERR__FATAL) {
 		char errstr[512];
 		err = rd_kafka_fatal_error(rk, errstr, sizeof(errstr));
-		N_Ef(u8u8nu1, "@STR:, err=@STR errstr=@STR reason=@STR", rd_kafka_name(rk), rd_kafka_err2str(err), errstr, reason);
+		N_Ef(u8u8nu1, "@STR: err[@INT]=@STR errstr=@STR reason=@STR", rd_kafka_name(rk), err, rd_kafka_err2str(err), errstr, reason);
 	} else {
-		N_Wf(u8u8nh4, "@STR: err=@STR not_fatal reason=@STR",    rd_kafka_name(rk), rd_kafka_err2str(err),         reason);
+		N_Wf(u8u8nh4, "@STR: err[@INT]=@STR not_fatal reason=@STR",   rd_kafka_name(rk), err, rd_kafka_err2str(err),         reason);
 	}
 	// Anyhow, something failed, and we do not need to wait for its completion, Can we commit it? Good question. We do not
 	check_if_kafka_init_preserve_state_vars_required(err);
@@ -984,8 +986,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 	}
 	k->cnt_zero_consecutive_consumes = 0;
 	N_Tf(fhs8lad, "(@STR) returned k_msg(err=@STR, k_offset=@LD)", rd_kafka_name(k->consumer), rd_kafka_err2str(k_msg->err), k_msg->offset);
-	switch (k_msg->err) {
-	case RD_KAFKA_RESP_ERR_NO_ERROR: {
+	if (k_msg->err == RD_KAFKA_RESP_ERR_NO_ERROR) {
 		const int64_t new_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, k_msg->offset);
 		if (strstr((char *)(k_msg->payload), "assphrase")) { // Don't print passphrases to log
 			N_IMf(hueom23, "Encrypt msg received, don't print !");
@@ -1005,17 +1006,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		getnstimeofday_boot(&kafka_last_consume_timespec);
 		rv = 0;
 		k->consumer_offset = new_offset;	// Decision: Update offset only if message is well formatetd. Can change it. Decided by Ronen: Change-Id: I37dad733615fdacd58d144245d306f78d2133eb7
-		break;
-	}
-	case RD_KAFKA_RESP_ERR__PARTITION_EOF:
-		N_Tf(brvjh59, "No more messages");
-		rv = 1;
-		break;
-	case RD_KAFKA_RESP_ERR__TIMED_OUT:
-		N_Tf(vmzh7s0, "Timed out");
-		rv = 1;
-		break;
-	default:
+	} else {
 		rv = 1;
 		check_if_kafka_init_preserve_state_vars_required(k_msg->err);
 	}
