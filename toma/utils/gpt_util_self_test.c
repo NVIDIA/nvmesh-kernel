@@ -2513,8 +2513,8 @@ DEFINE_TEST(nguid_preservation)
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_nguid_test";
 	struct nvmeibt_disk_gpt		main_gpt;
 	struct nvmeibt_disk_gpt		metadata_gpt;
-	struct nvmeibt_disk_metadata disk_md_before;
-	struct nvmeibt_disk_metadata disk_md_after;
+	struct nvmeibt_disk_metadata disk_md_before __attribute__((aligned(PAGE_SIZE)));
+	struct nvmeibt_disk_metadata disk_md_after __attribute__((aligned(PAGE_SIZE)));
 	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
 	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
 	uint64_t					pbyte_s;
@@ -2653,7 +2653,7 @@ DEFINE_TEST(warning_fields_apply)
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_warning_test";
 	struct nvmeibt_disk_gpt		main_gpt;
 	struct nvmeibt_disk_gpt		metadata_gpt;
-	struct nvmeibt_disk_metadata disk_md_after;
+	struct nvmeibt_disk_metadata disk_md_after __attribute__((aligned(PAGE_SIZE)));
 	const struct nvmeibt_disk_gpt_partition_entry *metadata_partition;
 	const struct nvmeibt_disk_gpt_partition_entry *disk_md_partition;
 	uint64_t					pbyte_s;

@@ -3531,8 +3531,8 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 	struct nvmeibt_disk_gpt		current_metadata_gpt;
 	struct nvmeibt_disk_gpt		json_main_gpt;
 	struct nvmeibt_disk_gpt		json_metadata_gpt;
-	struct nvmeibt_disk_metadata current_disk_md;
-	struct nvmeibt_disk_metadata prepared_disk_md;
+	struct nvmeibt_disk_metadata current_disk_md __attribute__((aligned(PAGE_SIZE)));
+	struct nvmeibt_disk_metadata prepared_disk_md __attribute__((aligned(PAGE_SIZE)));
 	struct prepared_seg_md_entry *prepared_seg_mds = NULL;
 	int							n_prepared_seg_mds = 0;
 	int							n_main_changes = 0;
