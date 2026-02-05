@@ -978,10 +978,12 @@ static int __get_srvr_buf_info(struct nvmeibt_Str *str, const char *path)
 	return rv;
 }
 
+static inline bool __NVMESH_7354_bug_exists(void) { return (!!_singleton); }	// Todo: Utilities (other than Toma) still never initialize server lib and use kernel api directly
+
 int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str)
 {
 	struct nvmeibt_km_comm *p = _singleton;
-	if (p->state_flags.use_async_api_instead_of_proc_files) {
+	if (__NVMESH_7354_bug_exists() && p->state_flags.use_async_api_instead_of_proc_files) {
 		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = 0,
 			.type = NVMEIBS_TOMA_REQ_DISKS_CSV, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
 		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
@@ -992,7 +994,7 @@ int nvmeib_srvr_api_lib_get_csv_disks(struct nvmeibt_Str *str)
 int nvmeib_srvr_api_lib_get_csv_nics(struct nvmeibt_Str *str)
 {
 	struct nvmeibt_km_comm *p = _singleton;
-	if (p->state_flags.use_async_api_instead_of_proc_files) {
+	if (__NVMESH_7354_bug_exists() && p->state_flags.use_async_api_instead_of_proc_files) {
 		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = 0,
 			.type = NVMEIBS_TOMA_REQ_NICS_CSV, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
 		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
@@ -1005,7 +1007,7 @@ int nvmeib_srvr_api_lib_get_disk_smart_info(int seq, struct nvmeibt_Str *str)
 	struct nvmeibt_km_comm *p = _singleton;
 	if (seq >= 1000)
 		seq = seq - 1000;		// Example: The '2' in /dev/nvme1002n1 -> /proc/nvmeibs/smart2
-	if (p->state_flags.use_async_api_instead_of_proc_files) {
+	if (__NVMESH_7354_bug_exists() && p->state_flags.use_async_api_instead_of_proc_files) {
 		const struct nvmeib_t2s_request_srvr_info_req msg = { .opt_arg = seq,
 			.type = NVMEIBS_TOMA_REQ_DISK_SMART_CNT, .max_byte_len = (p->max_msg_size.nlink - NLMSG_HDRLEN) };
 		return _submit_msg_and_wait_for_reply(p, csc_t2s_blocking_msg_req_info, &msg, sizeof(msg), str);
