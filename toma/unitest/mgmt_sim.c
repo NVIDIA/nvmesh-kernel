@@ -172,7 +172,7 @@ static int make_msg_format_drive(char *buf, size_t capacity, const char *disk_id
 }
 
 /* Forward declarations */
-static void mgmt_sim_parse_report_target(const char *json, size_t len);
+static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_run_fsm(void);
 static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state);
 
@@ -293,32 +293,27 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 
 void mgmt_sim_on_toma_produced(const void *payload, size_t len)
 {
-	const char *m_type;
-	bool is_report_target;
+	struct mm_json_elem *root;
+	const char *message_type;
 
 	BUG_ON(!g_mgmt_sim || !payload || len == 0);
 
-	/* Check if this is a reportTarget message */
-	m_type = strstr((const char *)payload, "\"messageType\":");
-	if (!m_type)
+	root = parse_json_txt_into_kv_tree((const char *)payload, (int)len);
+	if (!root)
 		return;
 
-	is_report_target = (strncmp(m_type, "\"messageType\": \"reportTarget\"", 28) == 0);
-	if (is_report_target) {
-		free(g_mgmt_sim->last_report_target_json);
-		g_mgmt_sim->last_report_target_json = strndup((const char *)payload, len);
+	if (root->type != JSON_E_DICT)
+		goto cleanup;
 
-		/* Parse the reportTarget and run state machine */
-		mgmt_sim_parse_report_target(g_mgmt_sim->last_report_target_json, len);
+	/* Only handle reportTarget produced by Toma */
+	message_type = json_get_dict_str(root, "messageType", NULL);
+	if (message_type && strcmp(message_type, "reportTarget") == 0) {
+		mgmt_sim_parse_report_target(root);
 		mgmt_sim_run_fsm();
 	}
-}
 
-const char *mgmt_sim_get_last_report_target(void)
-{
-	if (!g_mgmt_sim)
-		return NULL;
-	return g_mgmt_sim->last_report_target_json;
+cleanup:
+	nvmeibt_mm_json_free_kv_tree(root);
 }
 
 void mgmt_sim_verify_at_end(void)
@@ -425,18 +420,16 @@ static void mgmt_sim_extract_disk_status(struct mm_json_elem *disks_array,
  * Parse reportTarget JSON and extract relevant information.
  * Updates g_mgmt_sim with bootTime and disk statuses.
  */
-static void mgmt_sim_parse_report_target(const char *json, size_t len)
+static void mgmt_sim_parse_report_target(struct mm_json_elem *root)
 {
-	struct mm_json_elem *root;
 	struct mm_json_elem *payload;
 	struct mm_json_elem *node;
 	struct mm_json_elem *disks;
 
-	BUG_ON(!g_mgmt_sim || !json);
+	BUG_ON(!g_mgmt_sim || !root);
 
-	root = parse_json_txt_into_kv_tree(json, (int)len);
-	if (!root) {
-		N_Wf(msim_parse, "failed to parse reportTarget JSON");
+	if (root->type != JSON_E_DICT) {
+		N_Wf(msim_parse, "reportTarget root is not a dict");
 		return;
 	}
 
@@ -444,13 +437,13 @@ static void mgmt_sim_parse_report_target(const char *json, size_t len)
 	payload = json_get_dict_value(root, "payload");
 	if (!payload || payload->type != JSON_E_DICT) {
 		N_Wf(msim_nopl, "reportTarget missing payload");
-		goto cleanup;
+		return;
 	}
 
 	node = json_get_dict_value(payload, "node");
 	if (!node || node->type != JSON_E_DICT) {
 		N_Wf(msim_nonode, "reportTarget missing payload.node");
-		goto cleanup;
+		return;
 	}
 
 	/* Extract bootTime */
@@ -465,9 +458,6 @@ static void mgmt_sim_parse_report_target(const char *json, size_t len)
 
 	N_Tf(msim_rt, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR",
 	     g_mgmt_sim->boot_time, g_mgmt_sim->disk_002.status, g_mgmt_sim->disk_003.status);
-
-cleanup:
-	nvmeibt_mm_json_free_kv_tree(root);
 }
 
 /*
