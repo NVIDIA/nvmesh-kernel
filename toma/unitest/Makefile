@@ -207,7 +207,7 @@ help:
 	echo
 	$(call print_usage)
 
-all: $(SOURCES) autogen $(EXE_NAME)
+all: $(EXE_NAME)
 	$(info +--->100% Done!)
 
 # ********** Bin traces / lib /utils *********
@@ -318,6 +318,11 @@ define obj_dep_template
 $(1): $(patsubst %.o,%.c_gen_events.h,$(1))
 endef
 $(foreach obj,$(OBJECTS),$(eval $(call obj_dep_template,$(obj))))
+
+# Order-only prerequisites: ensure autogen headers exist before preprocessing/compilation
+# (actual rebuild dependencies are tracked by the compiler-generated .d files via -MD -MP)
+$(patsubst %.o,%.i,$(OBJECTS)): | $(AUTOGEN_TARGETS)
+$(OBJECTS): | $(AUTOGEN_TARGETS)
 
 $(OBJ_DIR)/%.o: %.c
 	mkdir -p $(dir $@)
