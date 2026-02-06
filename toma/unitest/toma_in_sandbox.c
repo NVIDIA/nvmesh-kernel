@@ -2,6 +2,7 @@
 
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
+#include "sandbox_util.h"
 #include "sandbox_nvme.h"
 #include "mgmt_sim.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
@@ -11,10 +12,6 @@
 #include <unistd.h>
 #include <sys/types.h>
 
-/************************************* Logging ********************************/
-
-#define SANDBOX_PRINT(fmt, ...) fprintf(stderr, "SANDBOX: " fmt, __VA_ARGS__)
-#define SANDBOX_PRINT_TMP(fmt, ...)  fprintf(stderr, "SANDBOX: " COL_PURPL fmt COL_RESET, __VA_ARGS__)
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
 #include <pthread.h>
@@ -38,9 +35,6 @@ void syslog(int priority, const char *fmt, ...) {
 #include <signal.h>
 #include <sys/un.h>
 #include <errno.h>
-
-#define BUG_ON(condition)	do { const int hit__ = !!(condition); if (hit__) {fprintf(stderr, "************************** BUG!!!! at %s:%d - %s(), val=%d, condition=%s\n", __FILE__, __LINE__, __FUNCTION__, hit__, #condition); raise(SIGABRT);} } while(0)
-//#define WARN(condition, fmt, ...) 	do { const int hit = !!(condition); if (hit) {/*dump_stack(); */SANDBOX_PRINT("************************** BUG!!!! at %s() line %d, val=%d, condition=%s\n", __FUNCTION__, __LINE__, hit, #condition); raise(SIGABRT);} } while(0)
 
 #include "interfaces/nvme/nvmeibt_nvme_defines.h"
 // ioctl to nvme device
