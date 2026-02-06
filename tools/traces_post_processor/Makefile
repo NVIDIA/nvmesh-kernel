@@ -74,8 +74,18 @@ endif
 
 -include $(PAGER_OBJ:.o=.d) $(GRAMR_OBJ:.o=.d)
 
+# Build dependency libraries if not already built.
+# This allows standalone invocation (e.g. from toma/unitest) without requiring
+# the caller to know cpager's dependency chain.
+$(NVMESH_SRC_DIR)/tools/lz4/lib/liblz4.a:
+	$(MAKE) -C $(NVMESH_SRC_DIR)/tools/lz4/lib liblz4.a
+
+$(NVMESH_SRC_DIR)/tools/trace_compress_lib/libcompress.a:
+	$(MAKE) NVMESH_SRC_DIR=$(abspath $(NVMESH_SRC_DIR)) \
+	  -C $(NVMESH_SRC_DIR)/tools/trace_compress_lib
+
 # -ldl should come last to resolve symbols correctly on some systems
-$(EXEC_NAME): $(PAGER_OBJ) $(GRAMR_OBJ)
+$(EXEC_NAME): $(PAGER_OBJ) $(GRAMR_OBJ) $(COMPRESS_LIBS)
 	@echo '>o>o>' $(EXEC_NAME)
 	@$(LINK_PAGER) -o $(EXEC_NAME) -ldl
 
