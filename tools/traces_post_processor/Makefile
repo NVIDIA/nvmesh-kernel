@@ -75,9 +75,12 @@ endif
 -include $(PAGER_OBJ:.o=.d) $(GRAMR_OBJ:.o=.d)
 
 # -ldl should come last to resolve symbols correctly on some systems
-pager: $(PAGER_OBJ) $(GRAMR_OBJ)
+$(EXEC_NAME): $(PAGER_OBJ) $(GRAMR_OBJ)
 	@echo '>o>o>' $(EXEC_NAME)
 	@$(LINK_PAGER) -o $(EXEC_NAME) -ldl
+
+# Backward-compatible alias (top-level Makefile invokes 'make pager')
+pager: $(EXEC_NAME)
 
 all: pager
 
