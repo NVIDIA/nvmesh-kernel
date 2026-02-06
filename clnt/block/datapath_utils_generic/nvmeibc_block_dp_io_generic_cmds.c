@@ -347,25 +347,33 @@ static void __nvmeibc_cmd_piggyback_request_pet_describe(struct operation *o, st
 	}
 }
 
-static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command const *cmds, int cmd_idx)
+static void __nvmeibc_cmd_execute_disk_io_request_pet_describe(struct nvmeibc_block_command const *cmds, int cmd_idx)
 {
-	struct nvmeibc_block_command const* bcmd = &cmds[cmd_idx];
-	struct nvmeibc_disk_io_command const* cmd =  bcmd->iocmd;
+	struct nvmeibc_block_command const *bcmd = &cmds[cmd_idx];
+	struct nvmeibc_disk_io_command const *cmd = bcmd->iocmd;
+	struct nvmeib_data_buffer const *ndb = cmd->reqs1.ndb;
 	u8 const sgmnt_idx = numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(bcmd->ds));
-	struct nvmeib_data_buffer const* ndb = cmd->reqs1.ndb;
 	enum nvmeib_block_io_op op = cmds->o->op;
 	u32 nlbas;
+
 	if (op == NVMEIB_BLOCK_IO_OP_DISCARD) {
-		nlbas = nvmeib_get_ndb_discard_range(bcmd, NVMEIB_DSM_RANGE_ENCODING_NATIVE).nlb;    // get_dsm.
+		nlbas = nvmeib_get_ndb_discard_range(bcmd, NVMEIB_DSM_RANGE_ENCODING_NATIVE).nlb;
 	} else {
 		nlbas = NVMEIBC_BYTE2SECTOR(ndb->length);
 	}
 
 	NVMEIBC_IO_PET_MSG_NORM(
 		&cmds->o->journal,
-		"dp_cmds_execute_cmd(sgmnt=%hhu, dlba=0x%llx, nlbas=%u, raid_cur_stage=%hhu<enum e_cmds_stage>)",
+		"disk_io.request(sgmnt=%hhu, dlba=0x%llx, nlbas=%u, raid_cur_stage=%hhu<enum e_cmds_stage>)",
 		sgmnt_idx, __cmd_start(*bcmd), nlbas, (u8)cmds->raid_cur_stage);
+}
 
+static void __nvmeibc_cmd_execute_pet_describe(struct nvmeibc_block_command const *cmds, int cmd_idx)
+{
+	struct nvmeibc_block_command const *bcmd = &cmds[cmd_idx];
+	struct nvmeibc_disk_io_command const *cmd = bcmd->iocmd;
+
+	__nvmeibc_cmd_execute_disk_io_request_pet_describe(cmds, cmd_idx);
 	__nvmeibc_cmd_piggyback_request_pet_describe(cmds->o, cmd);
 	__nvmeibc_cmd_data_and_metadata_pet_describe(bcmd, /*is_completion=*/false);
 }
@@ -790,6 +798,14 @@ static void __nvmeibc_cmd_piggyback_response_pet_describe(struct operation *o, s
 	}
 }
 
+static void __nvmeibc_cmd_disk_io_complete_response_pet_describe(struct operation *o, struct nvmeibc_block_command *cmd)
+{
+	NVMEIBC_IO_PET_MSG(&o->journal,
+		"disk_io.response(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
+		cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,
+		numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
+}
+
 static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, struct nvmeibc_block_command *cmds, int li)
 {
 	struct nvmeibc_block_command *rldr = &cmds[li];
@@ -799,11 +815,7 @@ static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, st
 		struct nvmeibc_block_command *cmd = &cmds[i];
 		if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
 			continue;
-		NVMEIBC_IO_PET_MSG(&o->journal,
-						   "dp_cmds_complete_cmd(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
-						   cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,
-						   numeric_downcast(u8, __dp_get_sgmnt_idx_from_ds(cmd->ds)), cmd->o_rv, cmd->iocmd->comp.comp_code);
-
+		__nvmeibc_cmd_disk_io_complete_response_pet_describe(o, cmd);
 		__nvmeibc_cmd_piggyback_response_pet_describe(o, rldr, cmd);
 		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, /*is_completion=*/true);
 	}
