@@ -367,7 +367,21 @@ clean:
 clean_run:
 	$(call clean_prev_run)
 
-test: all
+# Test execution and support
+
+# ********** Pager (cpager) *********
+# Path to cpager binary, referenced by the test recipe.
+CPAGER := $(SSDA)/tools/traces_post_processor/cpager
+
+# Always invoke cpager's Makefile and let it decide what needs rebuilding.
+# This covers the initial build (clean checkout) and incremental rebuilds
+# (cpager source or dependency changes).
+.PHONY: build_cpager
+build_cpager:
+	$(MAKE) NVMESH_SRC_DIR=$(SSDA) -C $(SSDA)/tools/traces_post_processor
+
+# Requires the cpager binary to be built in order to export logs.
+test: all build_cpager
 	mkdir -p $(TEST_OUTPUT_DIR)
 	rm -f $(TEST_OUTPUT_FILE) $(TEST_LOG_FILE) ./_root/var/log/nvmesh/trace_daemon/toma*.binlog* ./_root/var/log/nvmesh/toma_2* ./_root/var/log/nvmesh/tracelist.txt
 	@echo "Running tests..."
