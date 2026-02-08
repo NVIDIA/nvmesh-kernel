@@ -1803,6 +1803,55 @@ _out:
 #undef BUF_ADD
 }
 
+struct io_status_to_string_ctx {
+	struct nvmeibc_block_device *dev;
+	char *buf;
+	size_t len;
+	ssize_t	*count;
+	spinlock_t buf_lock;
+};
+
+static void local_io_status_to_string_fn(void *_ctx)
+{
+	struct io_status_to_string_ctx *ctx = _ctx;
+	const unsigned int cpu = smp_processor_id();
+	struct topo_percore_shared *tps = &ctx->dev->topologies.percore_shared[cpu];
+	int n_wait_list;
+	int n_cpu_ios = topo_get_cpu_ios(&ctx->dev->topologies, cpu);
+	ulong flags;
+
+	spin_lock_irqsave(&tps->list_access, flags);
+	n_wait_list = tps->n_wait_list;
+	spin_unlock_irqrestore(&tps->list_access, flags);
+
+	spin_lock(&ctx->buf_lock);
+	(*ctx->count) += scnprintf(ctx->buf + *ctx->count, ctx->len - *ctx->count, "cpu %3d: n_throttled=%d n_executing=%d\n", cpu, n_wait_list, n_cpu_ios);
+	spin_unlock(&ctx->buf_lock);
+}
+
+static ssize_t io_status_to_string(void *_dev, char *buf, size_t len)
+{
+#define BUF_ADD(...) count += scnprintf(buf+count, len-count, __VA_ARGS__)
+	struct nvmeibc_block_device *dev = _dev;
+	ssize_t	count = 0;
+	struct io_status_to_string_ctx ctx = { .dev = dev, .buf = buf, .len = len, .count = &count };
+
+	spin_lock_init(&ctx.buf_lock);
+
+	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
+		BUF_ADD("Detaching...\n");
+		goto _out;
+	}
+
+	// dump number of IO's in per-cpu waiting list & the the number of ios executing per cpu.
+	BUF_ADD("per-cpu ios:\n");
+	on_each_cpu(local_io_status_to_string_fn, &ctx, true /* wait */);
+
+_out:
+	return count;
+#undef BUF_ADD
+}
+
 static ssize_t __empty_tostring(void *_context, char *buf, size_t len)
 {
 	(void)_context; (void)buf; (void)len;
@@ -1835,6 +1884,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 	p->j_io_st  = RO_proc_open("iostats.json",     p, iostats_detailed_to_json , os);
 	p->opens    = RO_proc_open("client_processes", p, nvmeiba_atom_users_to_string, os);
 	p->throttle = RO_proc_open("io_throttle",      p, io_throttle_to_string    , os->dev);
+	p->io_status = RO_proc_open("io_status"  ,     p, io_status_to_string      , os->dev);
 	p->status   = RO_proc_open("status"     ,      p, cb.dev_status_to_txt     , os->dev);
 	p->stalocks = RO_proc_open("recov_stats",      p, cb.dev_recovs_to_txt     , os->dev);
 	p->profiling= RO_proc_open("profiling",        p, cb.profiling_to_string   , os->dev);
@@ -1870,6 +1920,7 @@ static void __proc_destroy(struct nvmeibc_os_api *os)
 	RM_PROC_FILE(p->cpu_masks.add);
 	RM_PROC_FILE(p->cpu_masks.del);
 	RM_PROC_FILE(p->throttle);
+	RM_PROC_FILE(p->io_status);
 	RM_PROC_FILE(p->opens);
 	RM_PROC_FILE(p->io_st_sum);
 	RM_PROC_FILE(p->j_io_st);

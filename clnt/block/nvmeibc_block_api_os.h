@@ -41,6 +41,7 @@ struct nvmeibc_os_api {
 		struct nvmeib_public_procfs_ent *status;			// Realtme block device status is written to a file <dav_name>/status
 		struct nvmeib_public_procfs_ent *opens; 			// client processes holding an open handle of the volume.
 		struct nvmeib_public_procfs_ent *throttle;			// proc file providing io throttling related information
+		struct nvmeib_public_procfs_ent *io_status;			// proc file providing status of running ios per cpu
 		struct nvmeib_public_procfs_ent *stalocks;			// proc file providing the history of stale locks the client encountered
 		struct nvmeib_public_procfs_ent *profiling;		// proc file providing the current profiling information for this volume
 		//--------- CSV formats for reading profiler
@@ -72,7 +73,7 @@ struct nvmeibc_os_api {
 	bool is_init_error;						// Creation/Initialization/Adoption of OS_API. Calling Destroy upon error
 	//bool 8th byte in u64 of flags.		// Todo make bit field
 	u64  ro_header_sectors;
-	u64 reserved[1];						// Reserve some bytes for future versions
+	//u64 reserved[0];						// Reserve some bytes for future versions
 };
 
 #define get_nvmeibc_os_api_uptime(os) (jiffies - (os)->atom.attach_jiff)
