@@ -1203,7 +1203,10 @@ struct nvmeib_dev *nvmeib_init(struct ib_device *device,
 			       bool create_poll_cq_proc);
 void nvmeib_free(struct nvmeib_dev *dev);
 const char *nvmeib_device_name(struct nvmeib_dev *dev);
+int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev);
 int nvmeib_init_fast_reg(struct nvmeib_dev *dev);
+
+
 
 /**
  * prepares a pool of descriptors that later will be used

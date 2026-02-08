@@ -2690,6 +2690,26 @@ static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 	return sz;
 }
 
+int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
+{
+	int numa_node = NUMA_NO_NODE;
+	if (dev->dev_type == DT_siw) {
+		struct net_device *siw_ndev;
+		if (!dev->ib_dev->get_netdev)
+			goto out;
+		if ((siw_ndev = dev->ib_dev->get_netdev(dev->ib_dev, 1)) == NULL)
+			goto out;
+
+		numa_node = dev_to_node(&siw_ndev->dev);
+		dev_put(siw_ndev);
+		goto out;
+	}
+	numa_node = dev->ib_dev->dma_device->numa_node;
+out:
+	return numa_node;
+}
+EXPORT_SYMBOL(nvmeib_get_dev_numa_node);
+
 static struct kmem_cache *fr_pool_desc_cache;
 
 static int fr_pool_cache_init(void)

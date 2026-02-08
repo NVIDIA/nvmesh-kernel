@@ -1333,7 +1333,7 @@ static int login(struct nvmeibc_ib_admin_channel *ch, bool access_local)
 		rv = -ENOMEM;
 		goto out;
 	}
-	ch->base.base.numa_node = P2IB(ch->net.base.port)->dma_device->numa_node;
+	ch->base.base.numa_node = nvmeib_get_dev_numa_node(P2NV(ch->net.base.port));
 	ch->tx_ring_size = NVMEIBC_CHANNEL_MAX_MAIN_ADMIN_MSGS;
 	ch->net.base.pkey = ch->net.base.port->pkey;
 	ch->net.base.admin_ch = &ch->base;

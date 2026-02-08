@@ -550,7 +550,7 @@ struct nvmeibc_ib_nordda_channel *nvmeibc_ib_nordda_channel_create(
 {
 	struct nvmeibc_ib_nordda_channel *ch = lionic->nr_channels + qpn;
 	struct nvmeibc_ib_admin_channel *ach = ac_to_iac(lionic->rionic->ch);
-	int numa_node = P2IB(lionic->port)->dma_device->numa_node;
+	int numa_node = nvmeib_get_dev_numa_node(P2NV(lionic->port));
 	int rv = -1;
 	NFIN;
 

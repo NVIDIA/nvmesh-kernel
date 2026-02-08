@@ -767,7 +767,7 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 	struct nvmeibc_local_nic_port *lport;
 	int rv = -ENODEV;
 	struct nvmeibc_locks_channel *locks_channel = NULL;
-	int numa_node = ln->nic_dev->dev->ib_dev->dma_device->numa_node;
+	int numa_node = nvmeib_get_dev_numa_node(ln->nic_dev->dev);
 	int i = 0;
 
 	NFIN;
