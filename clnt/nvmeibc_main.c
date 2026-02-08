@@ -1105,38 +1105,38 @@ static int __init nvmeibc_init(void) /* Constructor */
 
 	if (nvmeibc_nordda_channel_wq_init() < 0) {
 		_NE(nvmeibc_init_nordda_wq, "Failed to initialize nordda channel workqueue");
-		goto out;
+		goto err;
 	}
 
 	if (nvmeibc_locks_channel_wq_init() < 0) {
 		_NE(nvmeibc_init_locks_wq, "Failed to initialize locks channel SCQ workqueue");
-		goto out;
+		goto err;
 	}
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
 	rv = nvmesh_memmgr_metrics_alloc_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 	if (rv < 0) {
 		_NE(nvmeibc_init_pcpu_alloc, "Failed to initialize memmgr metrics");
-		goto out;
+		goto err;
 	}
 #endif
 
 	if (!nvmeibc_use_pcpu_cq && !nvmeibc_gf_calc_in_irq_ctx()) {
 		_NE_dmesg(nvmeibc_init_pcpu_must_be_on, "Invalid configuration: EC parity calculations on ARM is done via kernel primitive which require irqs enabled, for that nvmeibc module must use CQ pollers i.e. use_pcpu_cq=1");
-		goto out;
+		goto err;
 	}
 
 	if (nvmeibc_tcp_mode && nvmeibc_use_pcpu_cq) {
 		_NE_dmesg(nvmeibc_init_pcpu_tcp_err, "Invalid configuration: pcpu-cqs is not supported over TCP");
-		goto out;
+		goto err;
 	}
 
 	if (nvmeibc_disk_prefix_priority_masks_validate_module_params()) {
-		goto out;
+		goto err;
 	}
 
 	if (!(p = nvmeibc_cinst_params_get_default()))
-		goto out;
+		goto err;
 	nvmeibc_instance_init_module_params(p);
 	if (nvmeibc_instance_do_blocking(p, mw_inst_add_blocking, false) < 0) /* calls nvmeibc_instance_create_on_modwq */
 		goto err;
