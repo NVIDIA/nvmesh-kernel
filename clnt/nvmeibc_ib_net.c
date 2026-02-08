@@ -923,7 +923,7 @@ static int process_send_cq(struct nvmeibc_ib_net *net, int n)
 	if (unlikely(n > net->n_wc_s))
 		_NW(warn_ib_net_nvmeibc_ib_net_process_send_cq, "@COUNT exceeds q-size (@N_WC_S)", n, net->n_wc_s);
 	else {
-		if (!(net->scq_kthread && net->scq_kwq) || net->drain_sq_done) {
+		if (!(net->scq_kthread || net->scq_kwq) || net->drain_sq_done) {
 			rv = process_send_cq_(net, n);
 			net->scq_stats.n_external += (rv > 0) ? rv : 0;
 		}

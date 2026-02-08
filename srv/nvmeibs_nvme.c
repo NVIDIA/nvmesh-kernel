@@ -4850,6 +4850,7 @@ static int reinit_q(struct nvme_qp *q, bool full_init)
 	//OM: why do we need the lock?
 	spin_lock_irqsave(&q->q_lock, flags);
 	q->cq_head = 0;
+	q->old_cq_head = 0;
 	q->cq_phase = 0;
 	q->sq_head = 0;
 	q->sq_tail = 0;
@@ -7699,9 +7700,7 @@ static int __init nvmeibspci_init(void)
 	nvmeib_ref_init(&rm_all);
 #ifdef CALL_IB
 	if ((err = nvmeibs_init()) != 0) {
-		remove_proc_entry("disks", nvmeibs_proc_dir);
-		remove_proc_entry("nvmeibs", NULL);
-		return err;
+		goto err;
 	}
 #endif
 
