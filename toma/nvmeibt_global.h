@@ -76,6 +76,7 @@ struct nvmeibt_topology {
 	struct timespec						last_global_report_to_mgmt_timespec;
 	struct timespec						last_apply_time;
 	struct timespec						shutdown_start_time;
+	struct timespec						kafka_last_activity_time;
 	int									n_running_dirty_rebuild;
 	int									n_running_stale_rebuild;
 	int									n_running_txid_rebuild;

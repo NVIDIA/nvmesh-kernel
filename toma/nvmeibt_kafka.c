@@ -2165,6 +2165,7 @@ static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__))) {
 	nanosleep(&(struct timespec){0, 100}, NULL);
 	while (1) {
 		N_Df(8sh34bh, "Loop start");
+		getnstimeofday_boot(&(nvmeibt_global_get_global()->kafka_last_activity_time));
 		if (is_consume_skipped_due_to_awaiting_toma_processing) {
 			n_is_consume_skipped_due_to_awaiting_toma_processing++;
 		} else {
@@ -2348,6 +2349,7 @@ int nvmeibt_kafka_launch(void) {
 	NFIN;
 	//nvmeibt_kafka_upd_from_nvmesh_conf();	// No need, was already called by nvmeibt_toma_init(), we did not reread nvmesh conf since then
 	// Launch the nvmeibt_kafka_maintenance_thread (consumer & trigger callbacks)
+	getnstimeofday_boot(&(nvmeibt_global_get_global()->kafka_last_activity_time));
 	if (pthread_create(&kafka_maintenance_thread_tid, NULL, nvmeibt_kafka_main_thread, NULL) == 0) {
 		pthread_setname_np(kafka_maintenance_thread_tid, "kafka_main");
 	} else {

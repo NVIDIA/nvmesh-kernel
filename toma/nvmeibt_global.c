@@ -906,8 +906,11 @@ out:
 
 void nvmeibt_global_idle_time_activities(void)
 {
-	static int64_t		n_calls = 0;
-	const int64_t		n_calls_at_artificial_full_log = 10;
+	static int64_t				n_calls = 0;
+	const int64_t				n_calls_at_artificial_full_log = 10;
+	static int					last_kafka_idle_print_time_sec = 0;
+	int							kafka_idle_time_sec = nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_global()->kafka_last_activity_time.tv_sec;
+
 	NFIN;
 	if (n_calls >= n_calls_at_artificial_full_log) {
 		if (n_calls == n_calls_at_artificial_full_log) {
@@ -916,6 +919,16 @@ void nvmeibt_global_idle_time_activities(void)
 		update_traces();
 	}
 	n_calls++;
+
+	if (kafka_idle_time_sec > 60) { // kafka was idle more than 1 min
+		struct timespec now;
+		getnstimeofday_boot(&now);
+		if (now.tv_sec - last_kafka_idle_print_time_sec > 30) { // print the error every 30 sec
+			N_ETf(i990kss, "Kafka has been idle for @INT sec", kafka_idle_time_sec);
+			last_kafka_idle_print_time_sec = now.tv_sec;
+		}
+	}
+
 	read_rpc_config_from_persist(false);
 	nvmeibt_global_reread_nvmesh_conf_as_needed();
 	//
