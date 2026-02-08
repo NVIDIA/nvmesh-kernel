@@ -517,6 +517,19 @@ static int nvmeibt_local_disk_munmap_mem_tbls(struct nvmeibt_local_disk *local_d
 	return rv;
 }
 
+static int nvmeibt_local_disk_destroy_and_free(struct nvmeibt_local_disk *local_disk)
+{
+	int rv = 0;
+	if (nvmeibt_local_disk_munmap_mem_tbls(local_disk) < 0) {
+		N_Tf(vzyhq03, "failed to munmap mem tbls for disk=@STR (@AUTO_ERRNO)", nvmeibt_local_disk_display(local_disk));
+		rv = -1;
+	}
+	NNVMEIBT_BM_FREE(hu86aw4,   local_disk->dev_nl_ctx);
+	NNVMEIBT_CLOSE(hu86aw5,     local_disk->dev_file_fd);
+	NNVMEIBT_TOMA_FREE(hu86aw6, local_disk);
+	return rv;
+}
+
 // disk_remove() is called when no thread/registrant is accessing the disk
 static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk)
 {
@@ -534,6 +547,7 @@ static void local_disk_remove_from_nvmeibs(struct nvmeibt_local_disk *local_disk
 
 	NNVMEIBT_HASH_DEL_OBJ_ASCII_new(hu86aw3, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str, local_disk, local_disk);
 	nvmeibt_local_disk_munmap_mem_tbls(local_disk);
+	NNVMEIBT_BM_FREE(hu86aw9, local_disk->dev_nl_ctx);
 	nvmeibt_topology_active_mark_reserialization_required();
 	disk = NNVMEIBT_LOCAL_DISK_GET_DISK(ji8u723, local_disk);
 	// local_disk->its_disk = NULL;
@@ -594,13 +608,13 @@ int nvmeibt_local_disk_free_all_resources(void)
 	NFIN;
 
 	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		if (nvmeibt_local_disk_munmap_mem_tbls(local_disk) < 0) {
-			N_Tf(vzyhq03, "failed to munmap mem tbls for disk=@STR (@AUTO_ERRNO)", nvmeibt_local_disk_display(local_disk));
-			rv = -1;
-		}
-		NNVMEIBT_CLOSE(nvmeibt_local_disk_free_all_resources_2, local_disk->dev_file_fd);
+		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(hu86aw7, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, local_disk, local_disk);
+		rv |= nvmeibt_local_disk_destroy_and_free(local_disk);
 	}
-
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->formatting_local_disks_hash_by_ldisk_id_str) {	// Should be empty
+		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(hu86aw8, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, local_disk, local_disk);
+		rv |= nvmeibt_local_disk_destroy_and_free(local_disk);
+	}
 	NFOUT;
 	return rv;
 }
@@ -838,11 +852,9 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	local_disk_tmp = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), cur_topo->formatting_local_disks_hash_by_ldisk_id_str);
 	if (local_disk_tmp) {
 		N_Tf(dgy777w, "disk=@STR finished formatting", nvmeibt_local_disk_display(new_local_disk));
-		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(aki9e84, cur_topo->formatting_local_disks_hash_by_ldisk_id_str, local_disk_tmp, local_disk);
+		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(aki9e84, cur_topo->formatting_local_disks_hash_by_ldisk_id_str, local_disk_tmp, local_disk);	//sdfsdfsd/
 		new_local_disk->reappearing_counter = local_disk_tmp->reappearing_counter;	// Got it from MGMT, and we need it in the next reportTarget
-#if 0	// The local_disk object should move as-is from formatting_hash to local_disks_hash
 		NNVMEIBT_TOMA_FREE(dko089e, local_disk_tmp);
-#endif	// #if 0	// The local_disk object should move as-is from formatting_hash to local_disks_hash
 	}
 
 	local_disk = nvmeibt_local_disk_get_local_disk_by_ldisk_id(nvmeibt_local_disk_UUID(new_local_disk), nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
