@@ -3886,7 +3886,7 @@ int nvmeibt_raft_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...),
 		NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
 
 			elapsed = timespec_sub(nvmeibt_global_get_cur_event_start_time(), peer_member->last_received_voted_for_me_timespec);
-			(*printf_fn)(printf_ctx, "\t\t- %s: time_since_voted_for_me_on_cur_term=%lld.%09lld is_alive_for_topo_msec=ll%d committed(topo_version=%llx kafka_offset=%lld)\n", nvmeibt_raft_member_name(peer_member),
+			(*printf_fn)(printf_ctx, "\t\t- %s: time_since_voted_for_me_on_cur_term=%lld.%09lld is_alive_for_topo_msec=%lld committed(topo_version=%llx kafka_offset=%lld)\n", nvmeibt_raft_member_name(peer_member),
 						 elapsed.tv_sec, elapsed.tv_nsec, timespec_diff_ms(nvmeibt_global_get_cur_event_start_time(), peer_member->is_alive_for_topo_start_timespec),
 						 (nvmeibt_raft_is_leader() ? nvmeibt_tlv_get_idx(&(peer_member->committed_persist_and_wire_buf_hdr.topo_ctx)) : -1LL),
 						 (nvmeibt_raft_is_leader() ? nvmeibt_tlv_get_idx(&(peer_member->committed_persist_and_wire_buf_hdr.kafka_mgmt_config_ctx)) : nvmeibt_offset_and_idx_uninitialized));
