@@ -365,6 +365,8 @@ int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 {
 	struct nvmeibt_km_comm *p;
 	int rv = 0;
+
+	NFIN;
 	if (_singleton) {											rv = -__LINE__; goto init_fail; }
 	p = _singleton = NNVMEIBT_TOMA_CALLOC(tscnlssa, 1, sizeof(*p));
 	if (!p) { 													rv = -__LINE__; goto init_fail; }
