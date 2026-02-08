@@ -888,8 +888,10 @@ static int _submit_msg_and_wait_for_reply(struct nvmeibt_km_comm *p, enum uk_com
 	b.reply_str = reply_str;
 	b.rv = -EPERM;							// Not sent to server
 	if (__submit_toma_msg(p, m, buf, buf_len)) {
+		const unsigned long msg_id = m->msg.id;			// Store on stack as after completion, 'm' will be freee
+		const enum uk_comm_opcode opcode = m->msg.opcode;
 		wait_for_completion(&b.comp);	// Server reply will autofill b.rv
-		N_Tf(__AUTOID__, "msg[@INT].id=@ID, wait_done, rv=@RV", m->msg.opcode, m->msg.id, b.rv);
+		N_Tf(__AUTOID__, "msg[@INT].id=@ID, wait_done, rv=@RV", opcode, msg_id, b.rv);
 	}	// else, beware: 'm' already freed
 	getnstimeofday_boot(&t2);
 	{
