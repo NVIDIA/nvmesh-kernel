@@ -1,10 +1,4 @@
 # Parent Makefile
-#
-MAKE_PID := $(shell echo $$PPID)
-JOBS := $(shell ps T | sed -n 's@.*$(MAKE_PID).*$(MAKE).* \(-j\|--jobs=\) *\([0-9]*[0-9]*\).*@\1\2@p')
-ifeq ($(JOBS),)
-    JOBS = -j1
-endif
 
 ifneq ($(LLVM),)
     export CC=clang
@@ -224,27 +218,29 @@ endif
 
 ifneq ($(COMPILE_SERVER),)
     obj-m += srv/
-    COMPILE_TOOLS= cd utils && make $(JOBS) all
+    COMPILE_TOOLS= cd utils && make all
     CLEAN_TOOLS= cd utils && make clean
 
     ifeq ($(TCM), TCMD)
         INFO_TOMA = Building TOMA in DEBUG mode
-        COMPILE_TOMA = cd toma && make $(JOBS) all $(SECTOR_SHIFT_FLAG)
+        COMPILE_TOMA = cd toma && make all $(SECTOR_SHIFT_FLAG)
         CLEAN_TOMA = cd toma; make clean
     else
         ifeq ($(TCM), TCMR)
             INFO_TOMA = Building TOMA in RELEASE mode
-            COMPILE_TOMA = cd toma && make $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
+            COMPILE_TOMA = cd toma && make all MOD=release $(SECTOR_SHIFT_FLAG)
             CLEAN_TOMA = cd toma; make clean MOD=release
         else
             ifeq ($(TCM), TCMDR)
                 INFO_TOMA = Building TOMA in DEBUG RELEASE mode
-                COMPILE_TOMA = cd toma && make $(JOBS) all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
+                COMPILE_TOMA = cd toma && make all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
                 CLEAN_TOMA = cd toma; make clean MOD=release DEBUG=yes
             else
                 INFO_TOMA = Building TOMA in IB and UDP-only (release) modes
-                COMPILE_TOMA = cd toma && make $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
+                COMPILE_TOMA = cd toma && make all MOD=release $(SECTOR_SHIFT_FLAG)
+                    COMPILE_TOMA = cd toma && make all $(SECTOR_SHIFT_FLAG) && make all MOD=release $(SECTOR_SHIFT_FLAG) && make $(JOBS) all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
                 CLEAN_TOMA = cd toma; make clean; make clean MOD=release; make clean MOD=release DEBUG=yes
+                    COMPILE_TOMA = cd toma && make all $(SECTOR_SHIFT_FLAG) && make all MOD=release $(SECTOR_SHIFT_FLAG)
             endif
         endif
     endif
