@@ -11,11 +11,12 @@
 #include "nvmeibc_ib_nordda_channel_sim_shared.h"
 #include "nvmeibs_nordda_sim_shared.h"
 #include "nvmesh_sim.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "toma/nvmeibr_disk_metadata_sim.h"
 #include "nvmeibs_srv_toma_messages.h"
 #include "nvmeibs_serjio_gpt.h"
 #include "nvmeibs_memmgr_metrics.h"
+#include "nvmeibc_pausable.h"
 
 void *sim_kcalloc(size_t n, size_t size, gfp_t flags);
 
@@ -482,5 +483,4 @@ serverSimulator_get_block_inject_ptrs(struct serverSimulator *self, u64 addr, s3
 
 /*****************************************************************************/
 // EOF.
-
 

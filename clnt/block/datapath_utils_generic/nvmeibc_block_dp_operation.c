@@ -1,6 +1,6 @@
 #include "nvmeib_types.h"
 #include "nvmeibc_block_dp_common.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "block/nvmeibc_topology.h"
 #include "block/nvmeibc_block_common.h"
 #include "nvmeibc_block_dp_dbg_tools.h"

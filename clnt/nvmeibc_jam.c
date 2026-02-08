@@ -6,6 +6,7 @@
 #include "nvmeibc_defs.h"
 #include "nvmeibs_msgs_shared.h"
 #include "nvmeib_utils.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_pausable.h"
 #include "nvmeibc_main.h"
 #include "module/instance/nvmeibc_cinst_params.h"
@@ -1744,6 +1745,7 @@ static int jentry_erase(struct nvmeibc_disk *disk, struct nvmeibc_jam_jidx *jidx
 	u8 jidx_gen_id = jidx->gen_id;
 	struct nvmeibc_disk_gen_cmd *gen_cmd = NULL;
 	int rv = -1;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	if (jidx->n_erase_attempts < NVMEIBC_JAM_MAX_ERASE_ATTEMPTS) {
@@ -1783,7 +1785,7 @@ static int jentry_erase(struct nvmeibc_disk *disk, struct nvmeibc_jam_jidx *jidx
 		gen_cmd->param.je.rng_gen_id, gen_cmd->param.je.ent_erase.ent_idx,
 		gen_cmd->param.je.ent_erase.ent_swlba, jidx->n_erase_attempts);
 
-	rv = nvmeibc_pd_execute_gen(disk, gen_cmd);
+	rv = icore_ops->execute_gen(icore_ops, disk, gen_cmd);
 
 out:
 	if (rv) {
@@ -1803,6 +1805,7 @@ int nvmeibc_jam_jentry_erase_comp(struct nvmeibc_disk_gen_cmd *gen_cmd)
 	struct nvmeibc_disk *disk = gen_cmd->disk;
 	int idx;
 	int rv = -1;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	idx = gen_cmd->param.je.ent_erase.ent_idx;
@@ -1817,7 +1820,7 @@ int nvmeibc_jam_jentry_erase_comp(struct nvmeibc_disk_gen_cmd *gen_cmd)
 
 	// For block simulation above code must run before dec_transfers (otherwise
 	// jam_disk can be released)
-	nvmeibc_pd_cb_called_cmd(disk, &gen_cmd->disk_cmd);
+	icore_ops->cb_called_cmd(icore_ops, disk, &gen_cmd->disk_cmd);
 
 	kfree(gen_cmd);
 	NFOUT;
@@ -2199,11 +2202,12 @@ out:
 int nvmeibc_jam_abandon_lba(struct nvmeibc_disk *disk, u64 jlba, u8 *gen_id)
 {
 	int idx, rv;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	jam_cnts_on_ulp_req_abnd(cdisk2cj(disk));
 
-	if (!nvmeibc_pd_jam_get(disk)) {
+	if (!icore_ops->jam_get(icore_ops, disk)) {
 		idx = lba_2_idx(disk, jlba);
 		_NT(trace_jam_nvmeibc_jam_abandon_lba, "Disk @DISK_NAME(@DISK): abandon journal idx @IDX, jlba=@JLBA",
 		   disk->name, disk, idx, (u32)jlba);
@@ -2225,7 +2229,7 @@ int nvmeibc_jam_abandon_lba(struct nvmeibc_disk *disk, u64 jlba, u8 *gen_id)
 				rv = idx;
 			}
 		}
-		nvmeibc_pd_jam_put(disk);
+		icore_ops->jam_put(icore_ops, disk);
 	}
 	else {
 		rv = -1;
@@ -2479,6 +2483,7 @@ static void rollback_partial_allocation(struct jalloc *sorted, u64 res_jlbas[], 
 
 void pd_rollback_partial_allocation(struct nvmeibc_jam_pending_req *jreq)
 {
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	struct jalloc *sorted = jreq->sorted;
 	u64 *res_jlbas = jreq->res_jlbas;
 	int n = jreq->curr;
@@ -2487,10 +2492,10 @@ void pd_rollback_partial_allocation(struct nvmeibc_jam_pending_req *jreq)
 	NFIN;
 
 	while (--i >= 0) {
-		if (!nvmeibc_pd_jam_get(sorted[i].disk)) {
+		if (!icore_ops->jam_get(icore_ops, sorted[i].disk)) {
 			lba = res_jlbas[sorted[i].orig_pos];
 			jlba_put_unused(sorted[i].disk, lba);
-			nvmeibc_pd_jam_put(sorted[i].disk);
+			icore_ops->jam_put(icore_ops, sorted[i].disk);
 		}
 		else
 			_ND(trace_jam_pd_rollback_partial_allocation, "Pausable reject for disk @DISK", sorted[i].disk);
@@ -2625,6 +2630,7 @@ static void pending_req_resume_bh(struct nvmeibc_jam_pending_req *jreq)
 	u64 *res_jlbas = jreq->res_jlbas;
 	int i;
 	int rv = -1;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	/* on any of these assertions, we leak invalid/zombie jreq its already
@@ -2667,7 +2673,7 @@ static void pending_req_resume_bh(struct nvmeibc_jam_pending_req *jreq)
 	/* First check that ALL disks are still not paused/ing */
 	for (i = 0; i < n_disks; i++)
 		disks[i] = sorted[i].disk;
-	if (nvmeibc_pd_jam_get_all(n_disks, disks)) {
+	if (icore_ops->jam_get_all(icore_ops, n_disks, disks)) {
 		_NT(trace_jam_pending_req_resume_bh, "Fail to get pausable approval for all disks, "
 			"rollback alloc of pausable disks only");
 		pd_rollback_partial_allocation(jreq);
@@ -2679,7 +2685,7 @@ static void pending_req_resume_bh(struct nvmeibc_jam_pending_req *jreq)
 	}
 	rv = (jreq->curr < n_disks) ?
 		lbas_alloc(n_disks, sorted, res_jlbas, jreq->txid, jreq->wait_bound_abnd, jreq->ctx, jreq, jreq->cpu_mask_info, jreq->deadline_jif, jreq->priority) : 0;
-	nvmeibc_pd_jam_put_all(n_disks, disks);
+	icore_ops->jam_put_all(icore_ops, n_disks, disks);
 
 	if (rv == -EINPROGRESS)
 		goto out;
@@ -2713,6 +2719,7 @@ int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
 	const unsigned long now_jif = jiffies;
 	const unsigned long capped_deadline_jif = (deadline_jif > now_jif + max_timeout_jif) ? now_jif + max_timeout_jif : deadline_jif;
 	int rv = -1;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	jam_cnts_on_ulp_req_alloc(c_jam, n_disks);
@@ -2726,13 +2733,13 @@ int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
 	/* initialize with j2d, used for hkey */
 	memcpy(res_jlbas, dlbas, sizeof(res_jlbas[0]) * n_disks);
 
-	if (nvmeibc_pd_jam_get_all(n_disks, disks)) {
+	if (icore_ops->jam_get_all(icore_ops, n_disks, disks)) {
 		_NT(trace_jam_nvmeibc_jam_lbas_alloc, "Fail to get pausable approval for all disks");
 		goto done;
 	}
 
 	rv = lbas_alloc(n_disks, sorted, res_jlbas, txid, wait_bound_abnd, ctx, NULL, cpu_mask_info, capped_deadline_jif, priority);
-	nvmeibc_pd_jam_put_all(n_disks, disks);
+	icore_ops->jam_put_all(icore_ops, n_disks, disks);
 
 	if (rv == -EINPROGRESS)
 		goto out;
@@ -2755,6 +2762,7 @@ void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[
 	struct jalloc *sorted = NULL;
 	int i, orig_pos, idx;
 	u64 lba;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	jam_cnts_on_ulp_req_free(cdisk2cj(disks[0]), n_disks);
@@ -2763,7 +2771,7 @@ void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[
 
 	if ((sorted = sort_disks(n_disks, disks))) {
 		for (i = 0; i < n_disks; i++) {
-			if (!nvmeibc_pd_jam_get(sorted[i].disk)) {
+			if (!icore_ops->jam_get(icore_ops, sorted[i].disk)) {
 				orig_pos = sorted[i].orig_pos;
 				lba = jlbas[orig_pos];
 				idx = lba_2_idx(sorted[i].disk, lba);
@@ -2778,7 +2786,7 @@ void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[
 							NVMEIBC_JIDX_EVT_END_USE : NVMEIBC_JIDX_EVT_ERASE);
 					}
 				}
-				nvmeibc_pd_jam_put(sorted[i].disk);
+				icore_ops->jam_put(icore_ops, sorted[i].disk);
 			}
 			else
 				_ND(trace_1_jam_nvmeibc_jam_lbas_free, "Pausable reject for disk @DISK", sorted[i].disk);

@@ -4,7 +4,7 @@
 #include "kr_incs.h"
 #include "nvmeibc_disk_hooks.h"
 #include "nvmeibc_jam.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_simu_disk.h"
 #include "nvmesh_sim.h"
 #include "server/nvmeibs_serjio_sim_access.h"
@@ -361,7 +361,10 @@ static void __read_jmdc_iter_call_cmds(struct serjio_uni_read_jmdc_ctx *ctx) {
 
 	/* Execute the command */
 	DEBUG_TRANSFERS_init_cb_counters(1, &ctx->hgc->cmd);
-	rv = nvmeibc_pd_execute_gen(gen_cmd->disk, gen_cmd);
+	{
+		struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
+		rv = icore_ops->execute_gen(icore_ops, gen_cmd->disk, gen_cmd);
+	}
 	BUG_ON(rv);
 
 	wait_for_completion(&disk_hooks.args.wait_event);

@@ -3,8 +3,9 @@
 // Includes
 #include "./server/nvmeibs_main_sim.h"
 #include "nvmeib_common_all.h"
-
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_volume.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_pausable.h"
 #include "nvmeibc_jam.h"
 #include "./uni_framework/bunitest_conf.h"
@@ -646,6 +647,7 @@ bool nvmeibc_pd_wait_for_pause_completion_debug(struct nvmeibc_disk *disk){
 	unsigned long flags;
 	int i = 0, max_iters = 10000;
 	int last_transfers = -1;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	BUG_ON(!disk->pausing);
 	// This is the real condition verifying all IO has stopped, by waiting for block to call a completion callback whet it stopped all transferring.
 	/*while (!completion_done(&disk->disk_paused)){
@@ -679,7 +681,7 @@ bool nvmeibc_pd_wait_for_pause_completion_debug(struct nvmeibc_disk *disk){
 			}
 			_Emerg("Transferring = %d, Preventors=%d pausing=%d, should_pause=%d\n", in_transfers, pause_preventers, disk->pausing, disk->should_pause);
 			/* Use This code to debug un-ending transfers which forbit PAUSE to occur */
-			nvmeibc_pd_dump_transfers(disk);
+			icore_ops->dump_transfers(icore_ops, disk);
 			BUG_ON((last_transfers == in_transfers) && (last_transfers != 0));	// we expect the 'in_transfers' to decrease with every iteration BUT, since we count without locking, we might get zero as total 'in_transfers' although we havent got the completion signaled. in that case, we'll go for another round & then both previous/current 'in_transfers' would be zero
 			// If core.* crashed at the above BUG_ON(),see the transfers in GDB use the following commands:
 			// p *((struct nvmeibc_transfer_reason*)((char*)disk->transferring->next - 8))
@@ -912,4 +914,3 @@ u64 nvmeibc_disk_version_get(struct nvmeibc_disk *disk)
 
 /*****************************************************************************/
 // EOF.
-

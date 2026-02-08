@@ -1,7 +1,7 @@
 #include "nvmeibc_block.h" // Must be first for simulator
 #include "block/nvmeibc_block_common.h"
 #include "nvmeibc_b_cp_trs_hash.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 
 #define TOPO_HASH_STARTING_VAL (0x1234) 	  /* unique key generator */
 static DEFINE_SPINLOCK(topologies_rb_l);	  /* Lock on access to hash table */
@@ -219,11 +219,12 @@ static void __tr_destroy(struct nvmeibc_subscription_ctx *tr)
 {
 	int rv;
 	const char *dev_name = "Zombie";
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	tr->nt = NULL; /* Do not use it, device might already kfree */
 	_NT(trace_b_cp_trs_hash_tr_destroy, "@DEV_NAME" SEGMENT_FMT " TOMA unsubscribe: handle=@HANDLE disk=@DISK", dev_name, tr->ch, tr->r1, tr->seg, tr->handle, tr->disk);
 	WARN(tr->status != NVMEIBC_SUBSCRIPTION_STATUS_DEAD, "tr->status=%d\n", tr->status);
 	WARN_ON(!nvmeibc_trs_hash_was_removed(tr));
-	rv = nvmeibc_pd_toma_unsubscribe(tr->disk, (u64)tr->handle);
+	rv = icore_ops->toma_unsubscribe(icore_ops, tr->disk, (u64)tr->handle);
 	if (unlikely(rv < 0)) {
 		_NT(warn_b_cp_trs_hash_tr_destroy, "@DEV_NAME" SEGMENT_FMT " TOMA unsubscribe failed(@RV): disk=@DISK", dev_name, tr->ch, tr->r1, tr->seg, rv, tr->disk);
 	}

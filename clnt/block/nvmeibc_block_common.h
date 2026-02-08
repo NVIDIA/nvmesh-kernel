@@ -41,6 +41,7 @@ const char *nvmeibc_block_status_to_string(enum nvmeibc_block_status);
 
 struct nvmeibc_cinst_params_blk;
 struct nvmeib_pet_base_controller;
+struct nvmeibc_icore_ops;
 struct nvmeibc_block_device {   			// TODO: change this to something shorter
 	//struct nvmeibc_bdev_base_class {		// TODO: Base class for many block devices
 		struct list_head list_n;				// Structure allowing to link block devices in linked list (for higher level app having a few volumes, possible using the same physical disks)

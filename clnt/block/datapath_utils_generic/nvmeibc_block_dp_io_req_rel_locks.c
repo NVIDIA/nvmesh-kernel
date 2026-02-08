@@ -2,7 +2,7 @@
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_block_dp_operation.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "block/recovery/nvmeibc_block_dp_sync_api.h"
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_lock_stages.h"
@@ -245,12 +245,13 @@ int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_co
 {
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
 	const int lock_i = l->lockset_idx, ow_id = l->owner_idx;			// Just for short writing
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	// Warning: operation/cmds might already be free() dont access them!!!
 	(void)tag;
 	__invoke_crash_on_lock_corruption(locksets, lock_i, "release", 1);
 	WARN_ON(NCL_is_failed_to_acquire(dc->lock_status));			// Cant release if we havent acquired lock
 	if (NCL_had_release_callback(dc->lock_status)) {
-		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
 	}
 
 	DEBUG_LOCKS_CONTENTION(dc);
@@ -350,6 +351,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	struct nvmeibc_disk_segment *seg = l->ds;
 	struct nvmeibc_disk *disk = seg->disk;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (unlikely(lo->unlock_val == RELEASE_LOCK__FORCE_ABANDON)) {
 		WARN(NCL_is_failed_to_acquire(l->status), "Bug in nvmeibc! locksets=%p[lsi=%d] %d\n", locksets, lsi, l->status);	// Did we just sent disk cmds, without acquiring locks???
@@ -373,7 +375,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 		__set_cmpxchg_for_release(l, seg);
 		nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds ? locksets->cmds->o : NULL, l);
 		dp_locks_trace_lock_release(locksets->cmds ? locksets->cmds->o : NULL, l);
-		rv = nvmeibc_pd_cmpxchg(disk, handle_of(seg), l->address, dc);
+		rv = icore_ops->run_cmpxchg(icore_ops, disk, handle_of(seg), l->address, dc);
 		if (rv < 0) { // Simulate failed release completion
 			dc->lock_status = NCL_STATUS_FAIL_NO_COMP;
 			dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
@@ -415,6 +417,7 @@ static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	ulong times[3] = {jiffies, 0, 0}, duration;
 
 	struct nvmeibc_block_command const *cmd = dp_cmds_get_cmd_from_comp(cmp);
@@ -427,7 +430,7 @@ static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 	#endif
 
 	nvmeibc_cmd_lock_request_io_pet_describe(cmd->o, l);
-	rv = nvmeibc_pd_read_lock(l->ds->disk, iocmd->lpb.handle, lock_addr, dc);
+	rv = icore_ops->run_read_lock(icore_ops, l->ds->disk, iocmd->lpb.handle, lock_addr, dc);
 	times[1] = jiffies;
 	if (rv) {
 		_ND(t_1srl, "locksets=@LOCKSETS[@LSI] rv=@RV o=@OPERATION c=@CMD_PTR", locksets, l->lockset_idx, rv, cmd->o, cmd);
@@ -608,6 +611,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	struct operation *o = locksets->cmds->o;
 	const u64 holder = get_contending_id(read_comp);
 	const int lsi = l->lockset_idx;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	nvmeibc_cmd_lock_response_io_pet_describe(o, l);
@@ -626,7 +630,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 		__change_lock_status_to(l, new_status);					// Simulate as happens in transport layer via explicit view lock
 	} else {													// Explicit Read-lock view operation via pausable layer
 		if (NCL_had_acquire_callback(l->status))
-			nvmeibc_pd_cb_called_comp(l->ds->disk, read_comp);
+			icore_ops->cb_called_comp(icore_ops, l->ds->disk, read_comp);
 		__squash_transport_lock_status(l, l->status);
 		if (l->status == NCL_STATUS_DISKDEAD) {
 			OPERATION_DBG_CNTR_INC(o, n_lcmd_failed);
@@ -1169,6 +1173,7 @@ static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_r
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
 	const int lsi = l->lockset_idx;
 	const bool rv1 = NCL_is_failed_to_acquire(dc->lock_status) || (dc->lock_status == NCL_STATUS_CONTENDED);
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	_ND(trace_1_lock_cb, "locksets=@LOCKSETS[@LSI] @DLBA", locksets, lsi, l->address);
@@ -1176,7 +1181,7 @@ static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_r
 	nvmeibc_profiling_end_take_cmd_stats_for_op(__raid_gp_profile_for_rwt_op_locks(l, locksets), l->ds->lock_operation_profiler, locksets->cmds->o, l->type, l, rv1);
 
 	if (NCL_had_acquire_callback(dc->lock_status)) {	// Decrease the transferring counter, to allow PAUSE arrive safely
-		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);	// No callback issued -> immediate error -> decreased trasnsferring counter. If callback was issued, we have to decrease it now.
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);	// No callback issued -> immediate error -> decreased trasnsferring counter. If callback was issued, we have to decrease it now.
 	}
 	DEBUG_LOCKS_CONTENTION(dc);
 	l->status = dc->lock_status;		// Copy transport layer 'rv' into locks status
@@ -1196,6 +1201,7 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	int const l_type = l->type; //lock may be free, when we decide to trace it
 	unsigned long started = 0, lock_rqsted = 0, callback = 0;
 	int rv = 0;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	nvmeibc_profiling_start_take_cmd_stats_for_op(__raid_gp_profile_for_rwt_op_locks(l, locksets), seg->lock_operation_profiler, locksets->cmds->o, l->type, l);
 	WARN(l->status != NCL_STATUS_NOTISSUED, "nvmeibc bug: locks=%p[%d].status=%d", locksets, lsi, l->status); // Incorrect flow initialized
@@ -1206,7 +1212,7 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	}
 	l->status = NCL_STATUS_ISSUED;						// Issue owner request
 	nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
-	rv = nvmeibc_pd_cmpxchg(seg->disk, handle_of(seg), l->address, dc);
+	rv = icore_ops->run_cmpxchg(icore_ops, seg->disk, handle_of(seg), l->address, dc);
 	lock_rqsted = jiffies;
 	if (unlikely(rv)) { // handle pausable/transport layer immediate errors
 		__give_failed_lock_cb(dc);
@@ -1343,6 +1349,7 @@ void dp_locks_put_TxID_dbits(struct nvmeibc_cmd_lock *locksets, int owner_i, uni
 void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const union nvmeib_blkset_info *binfo, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag), int prev_rv)
 {
 	int i, err, nlocks = ow_l->n_siblings;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	for (i = 0; i < nlocks; i++) { // Daniel: Note, we traverse all locks, so we do commit binfo to W- segment. This is not mandatory when turning dbits on, but mandatory when turning off. We refrain from optimizations and always commit to W-
 		struct nvmeibc_cmd_lock *l = &ow_l[i];
 		struct nvmeibc_d_rdma_comp *dc = &l->comp;
@@ -1351,7 +1358,7 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 		if (likely(prev_rv == 0)) {	/* Send the lock info */
 			dc->lock_status = NCL_STATUS_NOTISSUED;	// Lock is taken but we use its comp for binfo
 			nvmeibc_blkset_info_write_pet_describe(ow_l->cmds, l->address, dc);
-			err = nvmeibc_pd_write_blkset_info(l->ds->disk, handle_of(l->ds), l->address, dc);
+			err = icore_ops->write_blkset_info(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
 		} else {
 			err = prev_rv;
 		}

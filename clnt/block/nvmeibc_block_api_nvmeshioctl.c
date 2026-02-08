@@ -3,6 +3,7 @@
 #include "nvmeib_event.h"
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_block.h"
+#include "nvmeibc_icore_ops.h"
 #include "recovery/nvmeibc_raid_recovery.h"
 #include "./datapath_ec/nvmeibc_block_dp_ec_gf.h"
 #include "block/controlpath/nvmeibc_b_cp_topo_common.h"
@@ -279,12 +280,12 @@ static int __dump_uncompleted(const struct nvmeibc_cinst_params_blk *p, struct n
 	return 0;
 }
 
-extern void nvmeibc_pd_dump_transfers(struct nvmeibc_disk *disk); //#include "nvmeibc_pausable.h"
 static int __dump_transfers(const struct nvmeibc_cinst_params_blk *unused_p, struct nvmeibc_block_device *dev, const char *cmd)
 {
 
 	struct t_topo_pr p = {NULL, NULL, 0, 0, 0};
 	int rv = -EINVAL, len = strlen(cmd);
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)unused_p;
 	#ifdef DEBUG_TRANSFERS
@@ -306,13 +307,13 @@ static int __dump_transfers(const struct nvmeibc_cinst_params_blk *unused_p, str
 		if (!__pr_for_action_get(dev, &p, cmd, len))
 			goto _out;
 		for (i = 0; i < p.pr->replicas; i++) {
-			nvmeibc_pd_dump_transfers(p.pr->segments[i].disk);
+			icore_ops->dump_transfers(icore_ops, p.pr->segments[i].disk);
 		}
 	} else if (!strncmp(cmd, " ", 1)) { /* Deprecated unsafe v1.2.1 ioctl */
 		u64 diskp = 0;
 		p.action = 'd'; /* Print of single disk, deprecated v1.2.1 ioctls */
 		sscanf(cmd + 1, "%llx", &diskp); /* Skip ' ' */
-		nvmeibc_pd_dump_transfers((struct nvmeibc_disk *)diskp);
+		icore_ops->dump_transfers(icore_ops, (struct nvmeibc_disk *)diskp);
 	} else {
 		_NI_to_user(t_ya_dp_dbg_tools, QA_BLOCK_PREFIX, "@DEV_NAME unknown cmd @CMD_STR", dev->name, cmd);
 		goto _out;

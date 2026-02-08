@@ -1,4 +1,4 @@
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_block_dp_ec_recovery_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "nvmeibc_block_dp_ec_recov_cold.h"
@@ -803,10 +803,11 @@ static void __free_jrnl_ents_cb(struct nvmeibc_disk_free_jrnl_ents_comp *comp)
 	struct nvmeibc_disk_jcmd *djcmd = container_of(comp, struct nvmeibc_disk_jcmd, free_ents);
 	struct jrecovery *jrecov = djcmd->jrecov;
 	struct nvmeibc_recovery *recov = jrecov->recovery;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	int i, err = 0;
 
 	if (NCL_had_acquire_callback(comp->status))
-		nvmeibc_pd_cb_called_free_jrnl_ents(comp->disk, comp);
+		icore_ops->cb_called_free_jrnl_ents(icore_ops, comp->disk, comp);
 	if (!atomic_dec_and_test(&jrecov->reads))
 		return;
 	_NTRR(trace_dp_ec_recov_cold_free_jrnl_ents_cb, "All free jrnl msg to Serjios returned");
@@ -858,6 +859,7 @@ static void __send_msg_free_jrnl_ents(struct nvmeibc_recovery *recov)
 {
 	struct nvmeibc_disk_free_jrnl_ents_comp *fcmd;
 	struct jrecovery *jrecov = recov->priv;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	int rv, i;
 	/* Crucial to cache on stack, coz everythings gets kfree in the last iteration */
 	const ulong bmp = jrecov->bmp;
@@ -873,7 +875,7 @@ static void __send_msg_free_jrnl_ents(struct nvmeibc_recovery *recov)
 	for_each_set_bit(i, &bmp, n_segs) {
 		fcmd = &jrecov->jcmds[i].free_ents;
 		if (fcmd->num_ents) {
-			rv = nvmeibc_pd_free_jrnl_ents(fcmd->disk, fcmd);
+			rv = icore_ops->free_jrnl_ents(icore_ops, fcmd->disk, fcmd);
 			if (rv) {
 				_NTRR(trace_2_dp_ec_recov_cold_send_msg_free_jrnl_ents, "Failed on Serjio_idx=@RV, rv=@RV", i, rv);
 				fcmd->status = NCL_STATUS_DISKDEAD;	// Same as NCL_STATUS_FAIL_COMP
@@ -963,9 +965,10 @@ static void __read_jcmd_cb(struct nvmeibc_disk_jmdc_read_comp *comp)
 {
 	struct nvmeibc_disk_jcmd *djr = container_of(comp, struct nvmeibc_disk_jcmd, comp);
 	struct jrecovery *jrecov = djr->jrecov;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (NCL_had_acquire_callback(comp->rsp.status))
-		nvmeibc_pd_cb_called_jmdc(comp->disk, comp);
+		icore_ops->cb_called_jmdc(icore_ops, comp->disk, comp);
 	if (atomic_dec_and_test(&jrecov->reads)) {				// Last read returned
 		struct nvmeibc_recovery *recov = jrecov->recovery;
 		struct work_struct *work = &jrecov->work;			// interrupt context, schedule the analysis to thread context
@@ -1029,6 +1032,7 @@ static int __jmdc_req_alloc(struct jrecovery *jrecov, struct nvmeibc_raid1 *r1)
 static void __jmdc_req_send(struct jrecovery *jrecov, struct nvmeibc_raid1 *r1)
 {
 	struct nvmeibc_recovery *recov = jrecov->recovery;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	int i, rv = 0, should_auto_fail = false;
 	const ulong req_bmp = jrecov->bmp;
 	const int n_segs = jrecov->n_segs;	// Important cache on stack!
@@ -1060,7 +1064,7 @@ static void __jmdc_req_send(struct jrecovery *jrecov, struct nvmeibc_raid1 *r1)
 		drj->comp.dirty_only = true;
 		memcpy(drj->comp.seg_uuid, r1->segments[i].uuid, NVMEIB_GID_STR_MAX);
 		if (!should_auto_fail) {
-			rv = nvmeibc_pd_jmdc_read(drj->comp.disk, &drj->comp);
+			rv = icore_ops->jmdc_read(icore_ops, drj->comp.disk, &drj->comp);
 			if (rv == 0)
 				continue;
 		}

@@ -1,6 +1,6 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/nvmeibc_topology.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 //#include "nvmeibc_b_cp_send_toma_msg.h"
 
 /* Fill global fields with sensible values */
@@ -36,6 +36,7 @@ static int __send_combined_msg(struct nvmeibc_disk_segment *seg,
 	const struct nvmeibc_subscription_ctx *tr = seg->toma_reg;
 	struct nvmeibc_raid1* r1;
 	struct nvmeibc_topologies *nt;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	int rv;
 
 	BUILD_BUG_ON(((TOMA_HDR_SIZE&0x7)!=4)||(max_size > NVMEIB_TOMA_REQ_MAX_LEN));
@@ -61,7 +62,7 @@ static int __send_combined_msg(struct nvmeibc_disk_segment *seg,
 		}
 	}
 	msg->hdr.cookie = nvmeib_get_guid();
-	rv = nvmeibc_pd_toma_send(seg->disk, seg->toma_reg->handle, &env);
+	rv = icore_ops->toma_send(icore_ops, seg->disk, seg->toma_reg->handle, &env);
 	_NITR(t1_c2t_send, "sent=@BOOL_YN, @PROTOCOL_CLIENT_MSG_STR(@PROTOCOL_CLIENT_MSG_REASON_STR), uuid=@SEG_DBG_UUID, @C_PRV cookie=@COOKIE, "
 					   "c_lid=@C_LID, cnt_@RES_MOD_VER, conv_id=@CLNT_TOMA_PR_CONVER_IND len={t=@X/s=@X} rv=@RV",
 	   (rv == 0), nvmeibt_protocol_client_msg_str(mtype), nvmeibt_protocol_client_msg_reason_str(reason),

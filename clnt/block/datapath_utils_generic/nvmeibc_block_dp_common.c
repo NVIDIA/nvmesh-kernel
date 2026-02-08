@@ -1,4 +1,4 @@
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_block_dp_dbg_tools.h"
 #include "../datapath_ec/nvmeibc_block_dp_ec.h"

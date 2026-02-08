@@ -1,6 +1,6 @@
 #include "nvmeibc_raid_recovery.h"
 #include "block/nvmeibc_block_common.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_cold.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "common/compat/kr_incs_compiler_types.h"
@@ -187,12 +187,13 @@ static int __blocksets_problems_read_cb(struct nvmeibc_d_rdma_comp *dc, struct n
 	const u64 n_elem = dc->dbits_arr.size;
 	const struct nvmeibc_disk_segment *seg = db_req->ds;
 	u64 b_length;								// Exact lenght of the batch (in units of blocksets)
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	u8 *arr = dc->dbits_arr.arr;
 	(void)tag;
 	__sync_worker_clean_topo(__sync_worker_of_o(o));			// Disconnect topology from worker to be able to free it even if worker finishes
 	if (NCL_had_acquire_callback(dc->lock_status))
-		nvmeibc_pd_cb_called_comp(seg->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, seg->disk, dc);
 
 	if (unlikely(!NCL_do_i_have_lock(dc->lock_status))) {
 		_NTRR(trace_raid_recovery_blocksets_problems_read_cb, "Data cannot be obtained: @NCL_STATUS_STR", ncl_status_str(dc->lock_status));
@@ -272,6 +273,7 @@ static void __get_blksets_info_next_work_batch(struct nvmeibc_recovery *recov)
 	bool need_info_from_server = true;
 	struct nvmeibc_cmd_lock *db_req = &o->locks[0];	// Request dbits via 'comp' of first lock
 	struct nvmeibc_d_rdma_comp *dc = &db_req->comp;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	struct nvmeibc_blkst_arr_req *req = &dc->dbits_arr_req;
 
 	dc->callback = __blocksets_problems_read_cb;
@@ -299,7 +301,7 @@ static void __get_blksets_info_next_work_batch(struct nvmeibc_recovery *recov)
 		_NTRR(tr_1_get_next_batch, "requesting blksets: start_@DLBA_BLKSETS length_@DLBA_BLKSETS disk @DISK_NAME",
 			 dlba_start, blocksets_length, seg->disk->name);
 		if (need_info_from_server)
-			rv = nvmeibc_pd_get_blkset_problems(seg->disk, handle_of(seg), dlba_start, blocksets_length, dc);
+			rv = icore_ops->get_blkset_problems(icore_ops, seg->disk, handle_of(seg), dlba_start, blocksets_length, dc);
 		else
 			rv = __simulate_get_problems_array_from_server(dc, blocksets_length);
 	}
@@ -1462,4 +1464,3 @@ static void __recover_next_blockset_delayed_handler(struct work_struct *work) {
 	struct nvmeibc_recov_sync_worker *sw = container_of(work, struct nvmeibc_recov_sync_worker, dwork.work);
 	__recover_next_blockset(sw);
 }
-

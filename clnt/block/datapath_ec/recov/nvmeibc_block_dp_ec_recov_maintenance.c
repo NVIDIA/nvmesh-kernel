@@ -2,7 +2,7 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "nvmeibc_block_dp_ec_recovery_common.h"
 #include "../nvmeibc_block_dp_ec.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_block_dp_ec_sync_txid_wraparound.h"
 #include "nvmeibc_block_dp_ec_recov_stats.h"
@@ -429,11 +429,12 @@ static void __send_all_blockset_recovered(struct recovery_sync_op *so)
 		const u64 holder = get_contending_id(&lock->comp);	// Stale lock we are trying to solve
 		const int si = (lock->ds - so->r1->segments);
 		struct nvmeibc_block_command *cmd = &so->cmds[(si-seg_offset+n_segs)%n_segs+n_read];	// Todo: Make a macro which finds command of lock
+		struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 		err = dp_cmds_gencmd_add(cmd);
 		if (!err) {
 			nvmeibcbdpec_fill_blockset_recovered_info(cmd, HZ, so, holder, so,
 				NVMEIB_EC_INVALID_JOURNAL_RANGE, NVMEIB_EC_INVALID_JOURNAL_ENTRY, true);
-			err = nvmeibc_pd_execute_gen(cmd->ds->disk, cmd->gen_cmd);
+			err = icore_ops->execute_gen(icore_ops, cmd->ds->disk, cmd->gen_cmd);
 		}
 		if (err) {
 			if (cmd->gen_cmd)
@@ -475,4 +476,3 @@ _func_start:
 	WARN(true, "nvmeibc bug! Illegal sync state. IO can stuck\n!");
 	if (0) goto _func_start;	// Never executed. Just to avoid unused label warning
 }
-

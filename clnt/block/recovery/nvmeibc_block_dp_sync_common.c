@@ -1,7 +1,7 @@
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "block/nvmeibc_block_common.h"
 #include "nvmeibc_disk.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_block_dp_sync_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
@@ -501,10 +501,11 @@ static int __do_on_stage_done(struct recovery_sync_op *so) {
 /* Much like: like dp_locks_release_cb() but simpler, does not rereg topo. Used for garbage collection */
 static void __sync_dp_locks_release_cb(struct nvmeibc_cmd_lock *l, struct nvmeibc_d_rdma_comp *dc)
 {
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	_ND(trace_dp_sync_common_sync_dp_locks_release_cb, "release_active=@RELEASE_ACTIVE", l->status);
 	__invoke_crash_on_lock_corruption(l, 0, "release", 1);
 	if (NCL_had_release_callback(dc->lock_status))
-		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
 	l->status = NCL_STATUS_DONE;
 	__invoke_crash_on_lock_corruption(l, 0, "free", 0);
 	nvmeibc_atomic_dec(&dp_locks_get_locks_header(l)->n_uncompleted_locks);
@@ -515,8 +516,9 @@ static int __release_lock_of_sync(struct nvmeibc_cmd_lock *l, struct recovery_sy
 {
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	int rv;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	dp_locks_trace_lock_release(so->o, l);
-	rv = nvmeibc_pd_cmpxchg(l->ds->disk, handle_of(l->ds), l->address, dc);
+	rv = icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
 	if (rv) {
 		__change_lock_status_to(l, NCL_STATUS_FAIL_NO_COMP);
 		so->error = -10016;
@@ -736,10 +738,11 @@ static int __complete_bs_info_write(struct nvmeibc_d_rdma_comp *dc, struct nvmei
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(dc);
 	struct recovery_sync_op *so = l->cmds->o->rso;
 	int rv = 0;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	if (NCL_had_acquire_callback(dc->lock_status))
-		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
 	if (!NCL_do_i_have_lock(dc->lock_status)) { // Handle errors
 		so->error = -10026;						// Todo: Race condition here (3 locks attempt to update same integer), first wait for all locks to return, then test their result and set so->error
 		_NTSO(t_00_binfo_write, "Failed: seg=@SEG_DBG_UUID lock=@LSI, err=@ERR, status=@STATUS", l->ds->dbg_uuid, l->lockset_idx, so->error, dc->lock_status);
@@ -855,6 +858,7 @@ static int __handle_locks_o(struct nvmeibc_d_rdma_comp *lock_comp, struct nvmeib
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(lock_comp);		// Any lock from all siblings
 	struct recovery_sync_op *so = l->cmds->o->rso;
 	int err = 0;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 _func_start:
 
 	(void)tag;
@@ -889,7 +893,7 @@ _func_start:
 			goto _func_start;
 		}
 		so->stage = sync_stage_recov_lo_try_lock_cb;
-		err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_cmpxchg(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+		err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 		if (!err)
 			BLKCMP_SO_ASYNC_RESUME_CUR(0);
 		so->error = -10010;	  // Abort, could not take owner lock
@@ -898,7 +902,7 @@ _func_start:
 
 	case sync_stage_recov_lo_try_lock_cb:{
 		l->status = lock_comp->lock_status;
-		nvmeibc_pd_cb_called_comp(l->ds->disk, lock_comp);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, lock_comp);
 		dp_locks_trace_lock_comp(so->o, l, lock_comp);
 		__invoke_crash_on_lock_corruption(l, 0, "take", 1);
 		if (NCL_do_i_have_lock(lock_comp->lock_status)) {
@@ -1251,6 +1255,7 @@ static int __convert_stale_special_2_dirty_o(struct nvmeibc_d_rdma_comp *lock_co
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(lock_comp); // Always first lock
 	struct recovery_sync_op *so = (void*)l->cmds;
 	int err = 0;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	__ndump_operation(t_00_ss2dbit, &so->o);
@@ -1277,7 +1282,7 @@ _func_start:
 				lock_comp->lock.bi  = (u32)rld.post.all;
 				nvmeibc_blkset_info_write_pet_describe(l->cmds, l->address, lock_comp);
 				// Multiple writes of dirty bits to bi are fine, unlocking will still only be done once
-				err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_write_blkset_info(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+				err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->write_blkset_info(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			}
 			if (!err)
 				BLKCMP_SO_ASYNC_RESUME_CUR(0);
@@ -1288,7 +1293,7 @@ _func_start:
 		}
 
 		case sync_stage_st_to_db_written_db:{
-			nvmeibc_pd_cb_called_comp(l->ds->disk, lock_comp);
+			icore_ops->cb_called_comp(icore_ops, l->ds->disk, lock_comp);
 			__invoke_crash_on_lock_corruption(l, 0, "take", 1);
 			so->stage = sync_stage_st_to_db_stale_released;
 			if (!NCL_do_i_have_lock(lock_comp->lock_status)) {
@@ -1299,7 +1304,7 @@ _func_start:
 			}
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
 			dp_locks_trace_lock_release(so->o, l);
-			err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_cmpxchg(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			if (!err)
 				BLKCMP_SO_ASYNC_RESUME_CUR(0);
 			_NT(t_ss2dbit_error_3, "ss2dbit error 3 - cmpxchg failed, stage=sync_stage_st_to_db_written_db, err=@ERR", err);
@@ -1546,6 +1551,7 @@ static int __jour_garbg_collect_o(struct nvmeibc_d_rdma_comp *lock_comp, struct 
 	struct nvmeibc_cmd_lock *l =  lock_of_bcomp(lock_comp); // Always first lock
 	struct recovery_sync_op *so = (void*)l->cmds;
 	int err = 0;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	__ndump_operation(jour_garbg_collect, &so->o);
@@ -1564,11 +1570,11 @@ _func_start:
 			lock_comp->compare  = lock_comp->exchange = 0ULL;
 			l->comp.code = NVMEIBC_CMD_LOCK_UNLOCK;	// Compare exchange to zero
 			__invoke_crash_on_lock_corruption(l, 0, "take", 1);	// As if was taken before release
-			err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_cmpxchg(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			#else
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
 			l->comp.code = NVMEIBC_CMD_LOCK_READ_DR;	// Important, we are going to only read the lock
-			err = BLKCMP_SO_ASYNC_AWAIT_RV(nvmeibc_pd_read_lock(l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_read_lock(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			#endif
 			if (!err)
 				BLKCMP_SO_ASYNC_RESUME_CUR(0);

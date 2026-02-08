@@ -1,4 +1,4 @@
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_block_dp_ec_recovery_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "nvmeibc_block_dp_ec_recov_cold.h"

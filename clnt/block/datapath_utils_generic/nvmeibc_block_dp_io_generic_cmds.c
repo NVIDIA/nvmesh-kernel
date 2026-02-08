@@ -3,7 +3,7 @@
 #include "nvmeib_types.h"
 #include "nvmeibc_block.h"
 #include "nvmeibc_block_dp_io_req_rel_locks.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "nvmeibc_block_dp_dbg_tools.h"
 #include "block/nvmeibc_block_common.h"
 #include "../datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
@@ -161,8 +161,9 @@ static inline u64 __cmd_to_piggyback_addr(struct nvmeibc_block_command *c)
    casued by dirty bit turn-off */
 static int __post_cmd_dirtybit_turnoff_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_comp_tag tag) {
 	struct nvmeibc_block_command *c = dp_cmds_get_cmd_from_comp(get_d_comp_of_pg(dc));
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	(void)tag;
-	nvmeibc_pd_cb_called_comp(c->ds->disk, dc);
+	icore_ops->cb_called_comp(icore_ops, c->ds->disk, dc);
 	dp_cmds_complete_cmd(c->cmdarr, c->my_leader, c);
 	return 0;
 }
@@ -369,6 +370,7 @@ int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 	struct nvmeibc_disk_io_command *cmd =  bcmd->iocmd;
 	enum nvmeib_block_io_op op = cmds->o->op;
 	int rv = -EDOM;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	struct nvmeibc_profiler *profile = NULL;
 	bool can_do_profiling = cmd->reqs1.op <= NVMEIB_BLOCK_IO_OP_DISCARD && io_op_is_rwt(op);
 	dp_dbgdi_do_add_info(&cmds[cmd_idx], true);
@@ -383,9 +385,9 @@ int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 	_ND(trace_dp_io_generic_cmds_dp_cmds_execute_cmd, "Going to execute: operation_code=@BLOCK_IO_OP cmds[@COMMAND_IDX].nlbas=@NLBAS", op, cmd_idx, bcmd->nlbas);
 	__nvmeibc_cmd_execute_pet_describe(cmds, cmd_idx);
 	if (unlikely(dp_cmds_does_require_jam(bcmd)))
-		rv = nvmeibc_pd_execute_io_jour_blocks(bcmd->ds->disk, cmd);
+		rv = icore_ops->execute_io_jour_blocks(icore_ops, bcmd->ds->disk, cmd);
 	else
-		rv = nvmeibc_pd_execute_io_blocks(     bcmd->ds->disk, cmd);
+		rv = icore_ops->execute_io_blocks(icore_ops, bcmd->ds->disk, cmd);
 	/* Be careful: Here cmds/op/locks might already be kfree() */
 	if (rv < 0) {
 		nflog(t_02_gp_exec_cmd, "Got an error @RV! req_id=@REQ_ID_LLONG, o=@OPERATION", rv, cmd->req_id, cmds->o);
@@ -555,9 +557,10 @@ static void __wq_autofail_lkd_bio_cmd(struct work_struct *w)
 	struct nvmeibc_disk_io_command *io_cmd = container_of(w, struct nvmeibc_disk_io_command, disk_cmd.auto_fail_work);
 	struct nvmeibc_block_command *cmd = io_cmd->comp.cmd;
 	struct nvmeib_data_reuse_buf_params *rcookie = get_rcookie_ptr(io_cmd);
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	if (rcookie->action) { /* If cookie exists, must free it */
 		if (rcookie->channel_ver)
-			nvmeibc_pd_reused_bb_release(cmd->ds->disk, rcookie);
+			icore_ops->reused_bb_release(icore_ops, cmd->ds->disk, rcookie);
 		nvmeib_data_reuse_buf_zero(rcookie);	// Save failed, dont ask anything
 	}
 	cmd->o->nd->dp.cmd_comp_cb(&io_cmd->comp, nvmeibc_d_iocmd_comp_tag_make());
@@ -1213,6 +1216,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 							int n_cmds, int last_cmd, int prev_rv)
 {
 	int ci, err;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	/* Daniel: Loop only over commands in our stage, else when last
 	   cmd is send entire operation completes and 'for' loop breaks */
 	for (ci = (last_cmd + 1 - n_cmds); ci <= last_cmd; ci++) {
@@ -1227,7 +1231,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 		}
 		if (prev_rv == 0) {
 			nvmeibc_blkset_info_write_pet_describe(cmds, iocmd->lpb.addr, dc);
-			err = nvmeibc_pd_write_blkset_info(c->ds->disk, iocmd->lpb.handle, iocmd->lpb.addr, dc);
+			err = icore_ops->write_blkset_info(icore_ops, c->ds->disk, iocmd->lpb.handle, iocmd->lpb.addr, dc);
 			if (err) {
 				OPERATION_DBG_CNTR_INC(cmds->o, n_write_binfo_failed);
 
@@ -1248,10 +1252,11 @@ static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc, st
 	struct nvmeibc_cmd_lock *l = lock_of_bcomp(dc), *locksets = dp_locks_get_locks_header(l);
 	const int lsi = l->lockset_idx;
 	int rv = 0;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	if (NCL_had_acquire_callback(dc->lock_status)) {
-		nvmeibc_pd_cb_called_comp(l->ds->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
 	}
 	if (unlikely(!NCL_do_i_have_owner_lock(dc->lock_status))) {
 		rv = -EIO; // binfo was corrupted by non-ACID error
@@ -1282,6 +1287,7 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 	struct nvmeibc_cmd_lock *dl = __get_data_lock(rldr);	// dl != NULL or else ???
 	struct nvmeibc_d_rdma_comp *dc = &dl->comp;
 	int rv;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	WARN(((dc->lock_status != NCL_STATUS_TAKEN) && (!((dc->lock_status == NCL_STATUS_CONTENDED || dc->lock_status == NCL_STATUS_DISKDEAD) && prev_rv))) || (dc->opr != NVMEIBC_LOCK_CMP_AND_SWAP), "status=%d, opr=%d, prev_rv=%d\n", dc->lock_status, dc->opr, prev_rv);	// Daniel: if Transferred lock - treat as taken
 	WARN(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage), "stage=%d\n", rldr->raid_cur_stage);
 	dc->lock_status = NCL_STATUS_NOTISSUED;			// Lock is taken but we use its comp for binfo
@@ -1291,7 +1297,7 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 		/* Send the lock info */
 		dc->lock.bi = nvmeibc_rldr_get_post_stage_rdma_piggyback(&rldr->rld, rldr->raid_cur_stage).all;
 		nvmeibc_blkset_info_write_pet_describe(rldr, dl->address, dc);
-		rv = nvmeibc_pd_write_blkset_info(dl->ds->disk, handle_of(dl->ds), dl->address, dc);
+		rv = icore_ops->write_blkset_info(icore_ops, dl->ds->disk, handle_of(dl->ds), dl->address, dc);
 	} else {
 		rv = prev_rv;
 	}

@@ -250,6 +250,7 @@ SDIR = $(SSDA)/clnt
 SOURCES += $(SDIR)/nvmeibc_error_tags.c
 SOURCES += $(SDIR)/nvmeibc_block.c
 SOURCES += $(SDIR)/nvmeibc_pausable.c
+SOURCES += $(SDIR)/nvmeibc_client_core_ops.c
 SOURCES += $(SDIR)/nvmeibc_jam.c
 SOURCES += $(SDIR)/nvmeibc_memmgr_metrics.c
 SOURCES += $(SSDA)/toma/utils/nvmeibt_uuid.c

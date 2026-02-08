@@ -6,6 +6,7 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_disk_hooks.h"
+#include "nvmeibc_icore_ops.h"
 #include "block/nvmeibc_block_api_conf.h"
 #include "nvmeibc_main.h"		// Configuration/cci_api/self_detach etc
 #include "nvmeibc_common.h"
@@ -74,7 +75,7 @@ static int block_invoke_disk_pause_on_catastrophic_nvme_errors(int nvme_err, str
 	return nvme_err;
 }
 
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "../common/nvmeib_completion_noise.h"
 
 void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp)
@@ -83,6 +84,7 @@ void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp)
 	struct operation *o = cmd->o;
 	struct nvmeibc_disk_command *disk_cmd = &cmd->iocmd->disk_cmd;
 	struct nvmeibc_disk *disk = cmd->ds->disk;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (unlikely(comp->comp_code)) {
 		int comp_code = comp->comp_code;
@@ -100,7 +102,7 @@ void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp)
 
 	DEBUG_TRANSFERS_detect_double_callback(comp);
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
-	nvmeibc_pd_cb_called_cmd(disk, disk_cmd);
+	icore_ops->cb_called_cmd(icore_ops, disk, disk_cmd);
 
 	o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
@@ -109,9 +111,10 @@ void nvmeibc_block_comp_gencmd(struct nvmeibc_d_iocmd_comp *comp)
 {
 	struct nvmeibc_block_command *cmd = comp->cmd;
 	struct nvmeibc_disk_command *disk_cmd = &cmd->gen_cmd->disk_cmd;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	DEBUG_TRANSFERS_detect_double_callback(comp);
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
-	nvmeibc_pd_cb_called_cmd(cmd->ds->disk, disk_cmd);
+	icore_ops->cb_called_cmd(icore_ops, cmd->ds->disk, disk_cmd);
 	on_disk_hook(nvmeibc_block_comp_gencmd, cmd->ds->disk, before_gen_cmd_comp_cb, comp->cmd->gen_cmd);
 	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }

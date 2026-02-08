@@ -637,7 +637,7 @@ This is described in detail in NVMesh's consistency document.
 ```c
 // Locks are sent first
 for each lock in operation:
-    nvmeibc_pd_cmpxchg(disk, handle, lock_address, compare_swap_data);
+    icore_ops->cmpxchg(icore_ops, disk, handle, lock_address, compare_swap_data);
     // RDMA atomic compare-and-swap operation
 ```
 

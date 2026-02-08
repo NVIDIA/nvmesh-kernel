@@ -45,6 +45,7 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	nvmeibc_locks_channel.o nvmeibc_toma.o \
 	nvmeibc_ib_nordda_channel.o nvmeibc_ib_net_nordda.o nvmeibc_jam.o \
 	nvmeibc_pausable.o \
+	nvmeibc_client_core_ops.o \
 	nvmeibc_capabilities.o \
 	nvmeibc_disk_gen_cmds.o \
 	nvmeibc_error_tags.o \

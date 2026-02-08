@@ -8,7 +8,7 @@
 #include "kth/nvmeib_public_kth.h"
 #include "nvmeib_kth_events.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
-#include "nvmeibc_pausable.h"
+#include "nvmeibc_icore_ops.h"
 #include "../nvmeibc_block_dp_ec.h"
 #include "block/datapath_ec/recov/nvmeibc_block_dp_ec_recovery_hot_dbgdi.h"
 #include "block/datapath_ec/nvmeibc_block_dp_ec_gf_praid.h"
@@ -1057,6 +1057,7 @@ static int read_jmdc(struct htr_ctx *h, int si)
 	struct nvmeibc_block_command *cmd = &h->seg_info[si].cmd;
 	struct nvmeibc_disk_gen_cmd *gen_cmd = cmd->gen_cmd;
 	int rv = -1;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
 	if (h->seg_info[si].clj.valid) {
@@ -1083,7 +1084,7 @@ static int read_jmdc(struct htr_ctx *h, int si)
 	gen_cmd->data_sink[0] = &gen_cmd->param.uj.jmdc_dest;
 	gen_cmd->data_sink[1] = &gen_cmd->param.uj.ent_md_dest;
 
-	rv = (nvmeibc_pd_execute_gen(cmd->ds->disk, gen_cmd) == 0) ? -EINPROGRESS : -1;
+	rv = (icore_ops->execute_gen(icore_ops, cmd->ds->disk, gen_cmd) == 0) ? -EINPROGRESS : -1;
 
 out:
 	NFOUT;
@@ -1287,9 +1288,10 @@ static void __free_jrnl_ents_cb(struct nvmeibc_disk_free_jrnl_ents_comp *comp)
 {
 	struct seg_info *seg_info = container_of(comp, struct seg_info, free_ents_comp);
 	struct nvmeibc_block_command *bcmd = &seg_info->cmd;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (NCL_had_acquire_callback(comp->status))
-		nvmeibc_pd_cb_called_free_jrnl_ents(comp->disk, comp);
+		icore_ops->cb_called_free_jrnl_ents(icore_ops, comp->disk, comp);
 	dp_ec_sync_stale_cb_stg_end(bcmd);
 }
 
@@ -1315,6 +1317,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 {
 	struct nvmeibc_block_command *cmd = &h->seg_info[si].cmd;
 	u32 range_id, entry_id;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	bool pass2toma = h->params.is_hot_jgc ?
 			false :
 			((si == (int)h->owner_si) || __is_seg_parity(si, h));	// Todo: not ideal, explicit assumption on the location of locks
@@ -1366,7 +1369,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 			"Send free-ents, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
 			ds->disk->name, h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, pass2toma, lock_entry.all);
 
-		rv = nvmeibc_pd_free_jrnl_ents(ds->disk, free_ents_comp);
+		rv = icore_ops->free_jrnl_ents(icore_ops, ds->disk, free_ents_comp);
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_entries_failed, h,
 				"Send free-ents failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN rv=@RV",
@@ -1391,7 +1394,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 
 		_NTh(trace_dp_ec_recov_hot_send_recovered, h, "Send blkset-recovered, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
 		   ds->disk->name, range_id, entry_id, pass2toma, lock_entry.all);
-		rv = nvmeibc_pd_execute_gen(ds->disk, cmd->gen_cmd);
+		rv = icore_ops->execute_gen(icore_ops, ds->disk, cmd->gen_cmd);
 
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_failed, h, "Send blkset-recovered failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX rv=@RV",
@@ -3485,4 +3488,3 @@ void dp_ec_sync_stale_cb_stg_end(struct nvmeibc_block_command *cmd)
 	_NTh(trace_dp_ec_recov_hot_dp_ec_sync_stale_cb_stg_end, h, "Comp of cmd=@CMD_PTR, h=@HTR_CTX, ctx(kth)=@HTR_KTH_PTR", cmd, h, h->htr_kth.ptr);
 	add_htr_op_comp_event(h, cmd);	// this is cmd: h->seg_info[i].cmd
 }
-

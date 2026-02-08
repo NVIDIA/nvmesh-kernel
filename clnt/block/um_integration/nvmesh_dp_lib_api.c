@@ -104,6 +104,76 @@ int nvmeibc_pd_jmdc_read(struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_rea
 
 int nvmeibc_pd_reused_bb_release(struct nvmeibc_disk *disk,struct nvmeib_data_reuse_buf_params *p) { (void)disk; (void)p; BUG(); return 0; }
 
+int nvmeibc_pd_dbg_please_kill_yourself(struct nvmeibc_disk *disk,
+	void (*cb)(void*), void *ctx, int rsc_id, u64 dlba)
+{
+	(void)disk; (void)cb; (void)ctx; (void)rsc_id; (void)dlba;
+	return -EOPNOTSUPP;
+}
+
+int nvmeibc_pd_pause(struct nvmeibc_disk *disk, void (*cb)(void *cntx), void *cntx)
+{
+	(void)disk; (void)cb; (void)cntx;
+	return -EOPNOTSUPP;
+}
+
+int nvmeibc_pd_cont(struct nvmeibc_disk *disk)
+{
+	(void)disk;
+	return -EOPNOTSUPP;
+}
+
+void nvmeibc_pd_cb_called_cmd(struct nvmeibc_disk *disk, struct nvmeibc_disk_command *disk_cmd)
+{
+	(void)disk; (void)disk_cmd;
+}
+
+void nvmeibc_pd_dump_transfers(struct nvmeibc_disk *disk)
+{
+	(void)disk;
+}
+
+int nvmeibc_pd_tostring(const struct nvmeibc_disk *disk, char *buf, int buf_len)
+{
+	(void)disk; (void)buf; (void)buf_len;
+	return 0;
+}
+
+int  nvmeibc_pd_jam_get(struct nvmeibc_disk *disk)
+{
+	(void)disk;
+	return 0;
+}
+
+void nvmeibc_pd_jam_put(struct nvmeibc_disk *disk)
+{
+	(void)disk;
+}
+
+int  nvmeibc_pd_jam_get_all(int n_disks, struct nvmeibc_disk *disks[])
+{
+	(void)n_disks; (void)disks;
+	return 0;
+}
+
+void nvmeibc_pd_jam_put_all(int n_disks, struct nvmeibc_disk *disks[])
+{
+	(void)n_disks; (void)disks;
+}
+
+int nvmeibc_pd_toma_send(struct nvmeibc_disk *disk, u64 handle,
+	struct nvmeibc_disk_toma_send_params *params)
+{
+	(void)disk; (void)handle; (void)params;
+	return -EOPNOTSUPP;
+}
+
+int nvmeibc_pd_toma_unsubscribe(struct nvmeibc_disk *disk, u64 handle)
+{
+	(void)disk; (void)handle;
+	return -EOPNOTSUPP;
+}
+
 /***************************** JAM - glue to vfunc **************************/
 #include "nvmeibc_jam.h"
 struct nvmeib_cpu_mask_info;
