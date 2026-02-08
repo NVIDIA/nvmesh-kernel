@@ -1434,6 +1434,8 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 	return pwrite(s->fd, buf, count, offset);	// Use real OS fd for passthrough
 }
 
+static void __temp_wait_sleep(void) { nanosleep(&(struct timespec){0, 10*1000*1000}, NULL); /* 100ms */ }
+
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
 	struct t_sandbox_sock *nl_sock = sys->TSB_netlink.o.sock;
 	struct t_sandbox_sock *ls_sock = sys->TSB_srvr2toma.o.sock;
@@ -1457,7 +1459,7 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 			n_events++;
 		}
 		if (n_events == 0) {
-			msleep(100); (void)timeout;						// Todo: use a real timeout
+			__temp_wait_sleep(); (void)timeout;				// Todo: use a real timeout
 			if (n_iterations > 3)
 				break; 										// Emulate timeout
 		}
@@ -1498,7 +1500,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	static bool is_shutting_down = false;
 	int i, n_events;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
-	nanosleep(&(struct timespec){0, 100*1000*1000}, NULL); // 100ms
+	__temp_wait_sleep();
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
 		const int fd = ep->evs[i].__fd;
 		if (fd != nvmeibt_nm_get_fd()) {	// Todo: Solve this hack!
