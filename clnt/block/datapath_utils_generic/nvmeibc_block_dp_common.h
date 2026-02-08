@@ -150,6 +150,13 @@ static inline void* my_vzalloc(size_t size){
 	return v;
 }
 
+extern bool nvmeibc_dp_alloc_allow_io;
+
+static inline gfp_t nvmeibc_dp_get_allow_io_gfp_flags(void)
+{
+	return (nvmeibc_dp_alloc_allow_io ? GFP_NOFS : GFP_NOIO);
+}
+
 /* Try kzalloc, if fails vzalloc. The only permitted flags are as in vzalloc.
  * Do not use KMALLOC_MAX_SIZE becasue it is large ~32[mb]. This method is used
  * to allocate rdma locks and disk commands */

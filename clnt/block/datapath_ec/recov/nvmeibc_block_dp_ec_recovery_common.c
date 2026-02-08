@@ -30,6 +30,7 @@ static int dp_ec_prepare_full_sync_mssa(struct operation *o, struct dp_io_topo_i
 {
 	const struct nvmeibc_raid1 *pr = it->r;
 	int rv = -ENOMEM;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 	dp_ec_set_allocated_mssa_into_operation(o);
 	{
 		struct multi_snake_slice_analyzer *mssa = o->mssa;
@@ -47,8 +48,8 @@ static int dp_ec_prepare_full_sync_mssa(struct operation *o, struct dp_io_topo_i
 		} else {
 			bitmap_set(mssa->pre_read, 0, mssa->map_size);
 			mssa->n_reads = mssa->n_writes = replicas;
-			mssa->gf_blocks.bio = kzalloc(sizeof(*mssa->gf_blocks.bio)*mssa->map_size, GFP_NOFS);
-			mssa->blocks_md = kzalloc(sizeof(*mssa->blocks_md)*mssa->map_size, GFP_NOFS);
+			mssa->gf_blocks.bio = kzalloc(sizeof(*mssa->gf_blocks.bio)*mssa->map_size, gfp);
+			mssa->blocks_md = kzalloc(sizeof(*mssa->blocks_md)*mssa->map_size, gfp);
 		}
 		memset(mssa->column_to_cmd.read, -1, replicas);
 		memset(mssa->column_to_cmd.write, -1, replicas);
@@ -1398,13 +1399,14 @@ static int dp_ec_sync_md_read_prepare_op(struct recovery_sync_op *so)
 {
 	struct nvmeibc_block_command *c = so->cmds;
 	int i, rv = -ENOMEM;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 
 	for (i = 0; i < c->ncmds; i++) {
 		const u32 md_ssize = nvmeibc_sgmnt_sw_md_size(c[i].ds);
 		struct nvmeibc_block_io_req *req = &c[i].iocmd->reqs1;
 		dp_sync_cmd_init(so, i);
 
-		if (!nvmeib_get_ndb(&c[i], 0, GFP_NOFS))		// MD ops need an NDB with correct length. SG table can be empty (0 entries).
+		if (!nvmeib_get_ndb(&c[i], 0, gfp))		// MD ops need an NDB with correct length. SG table can be empty (0 entries).
 			goto _out;
 
 		req->ndb->length = NVMEIBC_SECTOR2BYTE(c[i].nlbas);
@@ -1470,6 +1472,7 @@ static int dp_ec_sync_operation_page_manager(struct recovery_sync_op *so)
 	const int snake_size = mssa->snake_size;
 	int i;
 	struct nps_block_iter nbi = NPS_BLOCK_ITER_INIT(so->pages);
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 
 	for (i = 0; i < mssa->n_reads; i++) {
 		struct nvmeibc_block_command *cr = &c[i];
@@ -1486,7 +1489,7 @@ static int dp_ec_sync_operation_page_manager(struct recovery_sync_op *so)
 			md = NULL;
 		}
 
-		ndb = nvmeib_get_ndb(cr, so->n_slices /* nentries */, GFP_NOFS);
+		ndb = nvmeib_get_ndb(cr, so->n_slices /* nentries */, gfp);
 		if (!ndb) {
 			nvmeibc_free_md(md);
 			return -ENOMEM;

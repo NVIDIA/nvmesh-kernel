@@ -2658,8 +2658,9 @@ out:
 
 static void* __nvmeib_get_ndb_for_si(struct seg_info *seg_info)
 {
+	const gfp_t alloc_flags = nvmeibc_dp_get_allow_io_gfp_flags();
 	seg_info->cmd.iocmd->reqs1.ndb = &seg_info->ndb;		// Simulate as if ndb was already allocated
-	return nvmeib_get_ndb(&seg_info->cmd, HTR_SG_NENTS, GFP_NOFS);
+	return nvmeib_get_ndb(&seg_info->cmd, HTR_SG_NENTS, alloc_flags);
 }
 
 #define __free_pages_array(arr, size, order)                                   \
@@ -2675,23 +2676,24 @@ static int seg_info_alloc(struct seg_info *seg_info, int jmdc_size, int ent_md_s
 	size_t ents_enc_buf_sz = num_free_ents * sizeof(struct wire_free_ents_entry);
 	int rv = 0;
 	u32 i;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 	BUG_ON(seg_info->dblk.data_addr[0] || seg_info->clj.jmdc || seg_info->clj.ent_md);
 
 	for(i=0; i<NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY; i++) {
-		if (!(seg_info->dblk.data_addr[i] = (void *)htr__get_free_pages(GFP_NOFS | __GFP_ZERO, NVMEBC_PAGES_ORDER_BLOCK)) ||
-			!(seg_info->dblk.md[i] =  (void *)htr__get_free_pages(GFP_NOFS | __GFP_ZERO, get_order(DISK_MAX_MD_SIZE_BYTE)))) {
+		if (!(seg_info->dblk.data_addr[i] = (void *)htr__get_free_pages(gfp | __GFP_ZERO, NVMEBC_PAGES_ORDER_BLOCK)) ||
+			!(seg_info->dblk.md[i] =  (void *)htr__get_free_pages(gfp | __GFP_ZERO, get_order(DISK_MAX_MD_SIZE_BYTE)))) {
 			__free_pages_array(seg_info->dblk.data_addr, NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY, NVMEBC_PAGES_ORDER_BLOCK);
 			__free_pages_array(seg_info->dblk.md, NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY,  get_order(DISK_MAX_MD_SIZE_BYTE));
 		}
 	}
 
 	/* All these buffer are used for RDMA, must by phys contiguous */
-	if (!(seg_info->clj.jmdc = htr_alloc_pages_exact(jmdc_size, GFP_NOFS | __GFP_ZERO)) ||
-		!(seg_info->clj.ent_md = htr_alloc_pages_exact(ent_md_sz, GFP_NOFS | __GFP_ZERO)) ||
-		!(seg_info->cmd.iocmd = htr_kzalloc(sizeof(*seg_info->cmd.iocmd), GFP_NOFS)) ||
+	if (!(seg_info->clj.jmdc = htr_alloc_pages_exact(jmdc_size, gfp | __GFP_ZERO)) ||
+		!(seg_info->clj.ent_md = htr_alloc_pages_exact(ent_md_sz, gfp | __GFP_ZERO)) ||
+		!(seg_info->cmd.iocmd = htr_kzalloc(sizeof(*seg_info->cmd.iocmd), gfp)) ||
 		!(__nvmeib_get_ndb_for_si(seg_info)) ||
-		!(seg_info->cmd.gen_cmd = htr_kzalloc(sizeof(*seg_info->cmd.gen_cmd), GFP_NOFS)) ||
-		!(seg_info->free_ents_comp.ents = htr_kzalloc(sizeof(*seg_info->free_ents_comp.ents) * num_free_ents, GFP_NOFS)) ||
+		!(seg_info->cmd.gen_cmd = htr_kzalloc(sizeof(*seg_info->cmd.gen_cmd), gfp)) ||
+		!(seg_info->free_ents_comp.ents = htr_kzalloc(sizeof(*seg_info->free_ents_comp.ents) * num_free_ents, gfp)) ||
 		!(seg_info->free_ents_comp.ents_enc_buf = nvmeib_alloc(
 			&seg_info->free_ents_comp.ents_enc_ai, ents_enc_buf_sz, dp_recovery_hot)))
 	{
@@ -2761,6 +2763,7 @@ static int htr_init(struct htr_ctx *h)
 	struct seg_info dummy = {0};
 	const struct nvmeibc_raid1 *r1 = h->params.raid1;
 	int i, n_rw, rv = -ENOMEM;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 	NFIN;
 
 	htr_build_checks();
@@ -2788,7 +2791,7 @@ static int htr_init(struct htr_ctx *h)
 		goto out;
 	}
 
-	if (!(h->seg_info = htr_kcalloc(h->n_segs, sizeof(*h->seg_info), GFP_NOFS))) {
+	if (!(h->seg_info = htr_kcalloc(h->n_segs, sizeof(*h->seg_info), gfp))) {
 		_NTh(trace_1_dp_ec_recov_hot_htr_init, h, "Fail to alloc");
 		goto out;
 	}
@@ -2805,12 +2808,12 @@ static int htr_init(struct htr_ctx *h)
 		h->tx_jentries[i].is_valid = false;
 		h->seg_info[i].dblk.edic_sts = HTR_INVALID_EDIC_STS;
 	}
-	if (!(h->regen_vec = htr_kcalloc(h->n_segs, sizeof(*h->regen_vec), GFP_NOFS))) {
+	if (!(h->regen_vec = htr_kcalloc(h->n_segs, sizeof(*h->regen_vec), gfp))) {
 		_NTh(trace_2_dp_ec_recov_hot_htr_init, h, "Fail to alloc");
 		goto err;
 	}
 
-	if (!(h->crc_vec = htr_kcalloc(h->n_segs, sizeof(*h->crc_vec), GFP_NOFS))) {
+	if (!(h->crc_vec = htr_kcalloc(h->n_segs, sizeof(*h->crc_vec), gfp))) {
 		_NTh(trace_3_dp_ec_recov_hot_htr_init, h, "Fail to alloc");
 		goto err;
 	}
@@ -3413,13 +3416,14 @@ static int htr_run(void *arg)
 	int rv = -1;
 	struct htr_ctx *h = NULL;
 	const struct nvmeibc_block_device *nd = htr->so->o->nd;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 	NFIN;
 
 	//Todo: Once KTH is in, replace with kth-resume/resume-wait
 	wait_for_completion(&htr->start);
 
 	nvmeib_public_kth_switch_current_eq(&htr->base.events);
-	if ((h = htr_kzalloc(sizeof(*h), GFP_NOFS))) { //omril: integration pains
+	if ((h = htr_kzalloc(sizeof(*h), gfp))) { //omril: integration pains
 		h->htr_kth = htr->base.kth;
 		h->so = htr->so;
 		htr->so->user_ptr = h; 	// Needed for h->htr_kth.ptr

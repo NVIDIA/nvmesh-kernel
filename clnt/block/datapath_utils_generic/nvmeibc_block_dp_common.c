@@ -7,6 +7,10 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_lock_stages.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_disk_stages.h"
 
+bool nvmeibc_dp_alloc_allow_io = false;		// By default is disabled (default is to use GFP_NOIO)
+module_param(nvmeibc_dp_alloc_allow_io, bool, 0644);
+MODULE_PARM_DESC(nvmeibc_dp_alloc_allow_io, "Do not use GFP_NOIO for data path memory allocations");
+
 /************************* Configuration related methods **********************/
 int __check_layout(u64 nlbas, u64 vlba, const struct nvmeibc_topology *t, bool check_max_write)
 {

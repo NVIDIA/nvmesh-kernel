@@ -99,7 +99,7 @@ static inline struct bio *allocate_and_init_4k_aligned_bio(struct bio *bio, cons
 {
 	struct bio *wrapper_bio = NULL;
 	struct nvmeibc_pages pga = nvmeibc_pages_set_empty();
-	const gfp_t gdp_f = GFP_NOFS | __GFP_NOWARN;
+	const gfp_t gdp_f = nvmeibc_dp_get_allow_io_gfp_flags() | __GFP_NOWARN;
 	const struct nvmeibc_cinst_params_blk* cinst_params_blk = __bio_get_cinst_params_blk(bio);
 	const int tcp_mode = nvmeibc_cinst_params_blk_get_cinst_params_core_tcp_mode(cinst_params_blk);
 	const unsigned int total_bytes = (num_4k_blocks << NVMEIBC_SECTOR_SHIFT);

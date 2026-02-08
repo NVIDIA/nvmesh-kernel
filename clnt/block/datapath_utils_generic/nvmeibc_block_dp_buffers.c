@@ -48,7 +48,7 @@ static inline int __nvmeibc_pages_resize(struct nvmeibc_pages *nps, unsigned int
 int nvmeibc_pages_alloc(struct nvmeibc_pages *nps, unsigned int n_blocks, const int tcp_mode)
 {
 	unsigned int npages = NVMEIBC_BLOCKS_TO_PAGES_ALLOC_COUNT(n_blocks);
-	const gfp_t flags = (GFP_NOFS | __GFP_NOWARN);
+	const gfp_t flags = (nvmeibc_dp_get_allow_io_gfp_flags() | __GFP_NOWARN);
 	unsigned int max_nallocs = 0; // size of the currently allocated array
 	const u8 min_order = NVMEBC_PAGES_ORDER_BLOCK;
 	u8 order = nvmeibc_pages_max_alloc;

@@ -376,12 +376,13 @@ static int __mirror_sync_data_fill_cmds(struct recovery_sync_op *so)
 {
 	struct nvmeibc_block_command *c = so->cmds;
 	struct nps_block_iter nbi = NPS_BLOCK_ITER_INIT(so->pages);
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 	int i;
 	for (i = 0; i < c[0].ncmds; i++) {
 		const bool is_read = (i < n_read_cmds(so));
 		dp_sync_cmd_init(so, i);
 		if (is_read) {
-			struct nvmeib_data_buffer *ndb = nvmeib_get_ndb(&c[i], so->n_slices /* nentries */, GFP_NOFS);
+			struct nvmeib_data_buffer *ndb = nvmeib_get_ndb(&c[i], so->n_slices /* nentries */, gfp);
 			if (unlikely(!ndb))
 				return -ENOMEM;
 

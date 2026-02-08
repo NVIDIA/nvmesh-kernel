@@ -192,9 +192,10 @@ void *nvmeibc_alloc_md(const u64 nlbas, const u32 mdsize) {
 	void *md = NULL;
 	bool page_crossed = false;
 	const u64 totalsize = nlbas * mdsize;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 
 	/* First try allocating with kzalloc */
-	if (!(md = kzalloc(totalsize, GFP_NOFS))) {
+	if (!(md = kzalloc(totalsize, gfp))) {
 		BUG_ON(!PageSlab(virt_to_head_page(md)));
 		goto out;
 	}
@@ -210,7 +211,7 @@ void *nvmeibc_alloc_md(const u64 nlbas, const u32 mdsize) {
 			WARN(true, "nvmeibc bug: nlbas=0x%llx, mdsize=0x%x", nlbas, mdsize);					/* Why this should not happen? On trim operations we do not allocate metadata. On other opertions, we nlbas is limited by blockset size (32). In addition, mdsize is deduced by block size on server vs client. At worst case, it is 4K on client 512b on server, resulting in mdsize = 8*(4096/512) = 64.Hence, we are limited by total mdsize*nlbas = 2048 < 4096. */
 			goto out;
 		}
-		md = (void *)__get_free_page(GFP_NOFS);
+		md = (void *)__get_free_page(gfp);
 		BUG_ON(PageSlab(virt_to_head_page(md)));
 		memset(md, 0, totalsize);
 	}

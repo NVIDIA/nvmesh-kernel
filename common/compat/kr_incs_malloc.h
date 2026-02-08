@@ -37,7 +37,7 @@
 	struct page *ZERO_PAGE(u64 vaddr);
 
 	// Allocation supported flags
-	enum { GFP_NOWAIT = 0, GFP_KERNEL = 0, __GFP_HIGHMEM = 0, GFP_ATOMIC = 0, GFP_NOFS = 0, __GFP_NOWARN = 0, __GFP_ZERO = 0x01000000};
+	enum { GFP_NOWAIT = 0, GFP_KERNEL = 0, __GFP_HIGHMEM = 0, GFP_ATOMIC = 0, GFP_NOFS = 0, GFP_NOIO = 0, __GFP_NOWARN = 0, __GFP_ZERO = 0x01000000};
 	#define KMALLOC_MAX_SIZE	(0x7FFFFFFF) 		// Big enough number
 
 	// Memory allocations emulation: slub_def.h, gfp.h, page_types.h, pgtable.h

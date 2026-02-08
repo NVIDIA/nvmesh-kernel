@@ -947,6 +947,8 @@ static inline void __alloc_md_for_cmd(struct nvmeibc_block_command *cmd)
 static int __ec_cmds_alloc_ndb_and_md(struct multi_snake_slice_analyzer *mssa, struct nvmeibc_block_command *rldr, struct scatterlist **rsgs) {
 	struct nvmeibc_block_io_req *req;
 	int ncmds = mssa->n_reads + mssa->n_writes, c, r = 0;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
+
 	for (c = 0; c < ncmds; c++) {
 		req = &rldr[c].iocmd->reqs1;
 		__alloc_md_for_cmd(&rldr[c]);   	  // EC-5473, here imporve, and search for other calls to this func
@@ -954,7 +956,7 @@ static int __ec_cmds_alloc_ndb_and_md(struct multi_snake_slice_analyzer *mssa, s
 			goto _enomem;
 		if (rldr[c].my_stage == E_CMDS_STAGE_WRITE_JOURNAL)
 			continue;		// Allocate journals after the rest
-		if (!nvmeib_get_ndb(&rldr[c], rldr[c].nlbas, GFP_NOFS))
+		if (!nvmeib_get_ndb(&rldr[c], rldr[c].nlbas, gfp))
 			goto _enomem;
 		req->ndb->length = 0;
 		rsgs[r++] = req->ndb->table.sgl;

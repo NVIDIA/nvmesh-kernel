@@ -443,7 +443,7 @@ size_t dp_cmds_calc_size(u32 ncmds)
 struct nvmeibc_block_command *dp_cmds_kvzalloc(u32 ncmds)
 {
 	size_t alloc_size = dp_cmds_calc_size(ncmds);
-	void *buf = my_kvzalloc(alloc_size, GFP_NOFS);
+	void *buf = my_kvzalloc(alloc_size, nvmeibc_dp_get_allow_io_gfp_flags());
 
 	nvmesh_memmgr_metric_on_alloc_update(dp_commands, alloc_size, buf);
 
@@ -1549,7 +1549,8 @@ struct nvmeibc_cmd_lock * __get_data_lock(struct nvmeibc_block_command *rldr)
 /**************************** API of gen commands *****************************/
 int dp_cmds_gencmd_add(struct nvmeibc_block_command *cmd)
 {
-	if ((cmd->gen_cmd = kzalloc(sizeof(*cmd->gen_cmd), GFP_NOFS)) != NULL) {
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
+	if ((cmd->gen_cmd = kzalloc(sizeof(*cmd->gen_cmd), gfp)) != NULL) {
 		DEBUG_TRANSFERS_init_cb_counter(cmd);
 		cmd->gen_cmd->disk_cmd.owner = cmd->iocmd;
 		return 0;

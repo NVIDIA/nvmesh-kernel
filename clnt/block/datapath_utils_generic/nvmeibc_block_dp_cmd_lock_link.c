@@ -26,7 +26,7 @@ int nvmeibc_clmat_allocate(struct operation *o, bool use_kv_alloc, int n_locks, 
 		} else if (unlikely(use_kv_alloc))
 			o->locks = my_kvzalloc(alloc_size, GFP_KERNEL);
 		else
-			o->locks = my_kzalloc( alloc_size, GFP_NOFS);
+			o->locks = my_kzalloc( alloc_size, nvmeibc_dp_get_allow_io_gfp_flags());
 
 		if (!o->flags.is_clmat_embedded) {
 			o->locks->mem_allocated_size = alloc_size;

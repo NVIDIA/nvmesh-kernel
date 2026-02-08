@@ -482,7 +482,7 @@ static void __fill_sg_req_of_preread(struct nvmeibc_block_io_req *io_req, union 
 #define __mirror_pre_read_add_for_raid(cur_c, req, seg, ncmds, o, vbi, rlba) ({								\
 	(cur_c)->nlbas = 1; dp_cmds_req_fill((o), ncmds, (seg));												\
 	(req)->op = NVMEIB_BLOCK_IO_OP_READ;																	\
-	if (!nvmeib_get_ndb((cur_c), 1, GFP_NOFS)) goto _enomem;												\
+	if (!nvmeib_get_ndb((cur_c), 1, gfp)) goto _enomem;												\
 	__fill_sg_req_of_preread((req), (vbi));																	\
 	(cur_c)->first_rlba = rlba;																				\
 	(req)->disk_address = (seg)->first_lba + rlba;															\
@@ -506,6 +506,7 @@ static int __mirror_cmds_add_for_raid(const struct nvmeibc_raid1 *r1, u64 rlba, 
 	union vv_bio_inter first_vbi;	// Store the iterator, coz ech cmd of write has to restart from the same point.
 	const int first_cmd = ncmds;	// First command in protection raid
 	int role, rv = 0;
+	const gfp_t gfp = nvmeibc_dp_get_allow_io_gfp_flags();
 
 	if (use_stages) {				// Limit nlbas by dma_size of segments of the R/W. Trim and Cow operations are already split well
 		for_each_set_bit(role, &cmds_roles_bmp, r1->replicas) {
@@ -572,7 +573,7 @@ static int __mirror_cmds_add_for_raid(const struct nvmeibc_raid1 *r1, u64 rlba, 
 			const bool is_op_cmp_xcnhg = (!use_stages);						// A bit ugly: !use_stages of Write means cmpxchng write.
 			const int index_in_stage = (ncmds - first_cmd - nprereads - 1);	// Technically, only boolean is enough: Is it first cmd or not.
 			/* nlbas may be more than needed, we could try and optimize by merging adjacent pages..., especially for striped with small stripe! */
-			if (!nvmeib_get_ndb(cur_c, *nlbas, GFP_NOFS))					// Note: Even though R1 cmds are identical - they cannot share ndb/sgl because both cmds are sent together and sg_dma_address() writes inside 'struct scatterlist'
+			if (!nvmeib_get_ndb(cur_c, *nlbas, gfp))					// Note: Even though R1 cmds are identical - they cannot share ndb/sgl because both cmds are sent together and sg_dma_address() writes inside 'struct scatterlist'
 				goto _enomem;
 			if (likely(vbi)) {
 				if (use_stages) {					// Mirror Read/Write

@@ -404,7 +404,7 @@ void nvmeibc_operation_execute_chain(struct operation *o)
 struct operation *nvmeibc_operation_create_with_biopart(u32 op_size, struct nvmeib_pet_base_controller* io_pet_controller)
 {
 	const u32 bp_size = sizeof(struct bio_part);
-	void *buf = kmalloc(PAGE_SIZE, GFP_NOFS);
+	void *buf = kmalloc(PAGE_SIZE, nvmeibc_dp_get_allow_io_gfp_flags());
 	BUILD_BUG_ON((((sizeof(struct bio_part)/8)*8)) != sizeof(struct bio_part));
 	nvmesh_memmgr_metric_on_alloc_update(dp_io_operation, PAGE_SIZE, buf);
 	if (buf) {
