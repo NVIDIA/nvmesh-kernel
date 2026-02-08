@@ -1918,20 +1918,21 @@ int nvmeibt_toma_get_status_str(enum nvmeibs_toma_status_type status_type, struc
 
 static void at_event_end_activities(void)
 {
-	struct timespec					now;
-
-//	NFIN;
-	// nvmeibr_rtm_state_machine();
 	if (nvmeibt_toma_is_in_shutdown()) {
+		struct timespec now;
+		#ifdef TOMA_SIMULATOR_SANDBOX
+			const int64_t n_nano_sec_for_shutdown =	(nvmeibt_raft_get_effective_heartbeat_timeout_ns() * 1);	// No need to wait for anything
+		#else
+			const int64_t n_nano_sec_for_shutdown =	(nvmeibt_raft_get_effective_heartbeat_timeout_ns() * 15);	// During upgrade of we want io-disabled-period to be as short as possible. Give time to notify the leader + Leader will build topology without me (maybe i am a leader), so new leader will already have it.
+		#endif
 		getnstimeofday_boot(&now);
 		if (!is_shutdown_me_only() ||
-			timespec_diff_ns(now, nvmeibt_global_get_global()->shutdown_start_time) > (nvmeibt_raft_get_effective_heartbeat_timeout_ns() * 15)) {
+			timespec_diff_ns(now, nvmeibt_global_get_global()->shutdown_start_time) > n_nano_sec_for_shutdown) {
 			nvmeibt_global_get_global()->is_in_shutdown_active_phase = 1;
 			attempt_stable_local_shutdown();
 		}
 	}
 	calc_next_wait_for_registrant_timeout();
-//	NFOUT;
 }
 
 // idle_time_activities() WAS MOVED TO nvmeibt_global.c

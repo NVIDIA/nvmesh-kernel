@@ -1512,7 +1512,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		}
 	}
 	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s, n_events=%d\n", loop_idx, is_shutting_down ? " (dying)" : "", n_events); loop_idx++;
-	if (loop_idx != SANDBOX_TERMINATE_AFTER_N_LOOPS) {
+	if (loop_idx < SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 		if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
 		return n_events;
