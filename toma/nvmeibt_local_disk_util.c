@@ -604,6 +604,10 @@ bool nvmeibt_local_disk_is_nvmesh_dev_name(const char *dev_file_name, int *outpu
 	return (output_dev_idx >= 1000 && output_dev_idx < 1100);
 }
 
+#define DIR_SYS_NVME  TOMA_ROOT_DIR "sys/class/nvme/"
+#define DIR_SYS_BLOCK TOMA_ROOT_DIR "sys/block/"
+#define DIR_SYS_SLOTS TOMA_ROOT_DIR "sys/bus/pci/slots"
+
 static int get_stock_nvme_driver_chardev_file_idx_by_disk_sn(const char *native_serial)
 {
 	struct dirent		*dir_entry;
@@ -613,9 +617,9 @@ static int get_stock_nvme_driver_chardev_file_idx_by_disk_sn(const char *native_
 	char				*endptr;
 	int					fd = -1;
 	DIR					*dir = NULL;
-	char				class_dir[] = "/sys/class/nvme/";
+	char				class_dir[] = DIR_SYS_NVME;
 	size_t				class_dir_len = strlen(class_dir);
-	char				link_path[256] = "/sys/class/nvme/";
+	char				link_path[256] = DIR_SYS_NVME;
 	char				full_path[256];
 	int					i;
 
@@ -770,22 +774,21 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 			N_Wf(cvsj5ja, "Note that chardev nvme@INT actually controls blkdev @STR @STR", chardev_file_idx, dev_file_name, native_serial->str);
 		}
 #endif	// #ifdef WORKAROUND_FOR_BUG_CONFUSING_CHARDEV_WITH_A_SIBLING_BLKDEV
-		snprintf(block_path, sizeof(block_path), "/sys/class/nvme/nvme%d", chardev_file_idx);
+		snprintf(block_path, sizeof(block_path), DIR_SYS_NVME "nvme%d", chardev_file_idx);
 		rc = readlink(block_path, link_path, sizeof(link_path));
 		if (rc < 0) {
-			N_Wf(big7d5w, "Failed readlink(@STR) block_path=@STR @AUTO_ERRNO. Trying /sys/block", link_path, block_path);
+			N_Wf(big7d5w, "Failed readlink(@STR) block_path=@STR @AUTO_ERRNO. Trying " DIR_SYS_BLOCK, link_path, block_path);
 		} else {
 			link_path[rc] = '\0';
 			extract_BDF_out_of_file_name(link_path, pcie_bdf, bdf_for_slot_file);
 		}
-		if (pcie_bdf[0] == '\0') {	// No success with the previous method
-			// Try another method
+		if (pcie_bdf[0] == '\0') {	// No success with the previous method, Try another method
 			/*
 			 * # ls -l /sys/block/nvme2n1
 			 * lrwxrwxrwx 1 root root 0 Nov  5 15:37 nvme2n1 -> ../devices/pci0000:d7/0000:d7:05.5/pci10004:00/10004:00:01.0/10004:02:00.0/nvme/nvme2/nvme2n1
 			 * We want the last qualifier before "nvme", with & without the function subvalue - I.e. "10004:02:00" & "10004:02:00.0"
 			 */
-			snprintf(block_path, sizeof(block_path), "/sys/block/%s", dev_file_name + 5);
+			snprintf(block_path, sizeof(block_path), DIR_SYS_BLOCK "%s", dev_file_name + 5);
 			rc = readlink(block_path, link_path, sizeof(link_path));
 			if (rc < 0) {
 				N_Ef(fjsi4mw, "Failed readlink(@STR) block_path=@STR @AUTO_ERRNO", link_path, block_path);
@@ -803,7 +806,7 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 	}
 
 	{ // Look in sysfs for the slot whose address file contains our BDF. Each slot is represented by a directory.
-	DIR *dir = opendir("/sys/bus/pci/slots");
+	DIR *dir = opendir(DIR_SYS_SLOTS);
 	if (!dir)
 		goto out;
 	while(1) {
@@ -815,7 +818,7 @@ static void _get_pcie_slot_from_dev_file_name(const char *dev_file_name, struct 
 			char path[512];
 			char addr[32]="";
 			int rc = -1, fd;
-			snprintf(path, sizeof(path), "/sys/bus/pci/slots/%s/address", result->d_name);
+			snprintf(path, sizeof(path), DIR_SYS_SLOTS "/%s/address", result->d_name);
 			fd = open(path, O_RDONLY);
 			if (fd < 0) {
 				N_Ef(5dimslp, "Failed to open file=@STR @AUTO_ERRNO", path);
@@ -852,7 +855,7 @@ void nvmeibt_local_disk_util_set_attention_LED(const char *pcie_slot, int value)
 		return;
 
 	len = sprintf(buf, "%u\n", value);
-	sprintf(path, "/sys/bus/pci/slots/%s/attention", pcie_slot);
+	sprintf(path, DIR_SYS_SLOTS "/%s/attention", pcie_slot);
 	fd = open(path, O_WRONLY);
 	if (fd >= 0) {
 		write(fd, buf, len);
@@ -1124,7 +1127,7 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_udev(struct 
 
 	memset(&st, 0, sizeof(st));
 	stat_rv = stat(path, &st);
-	snprintf(udev_info_path, sizeof(udev_info_path), "/run/udev/data/b%d:%d", major(st.st_rdev), minor(st.st_rdev));
+	snprintf(udev_info_path, sizeof(udev_info_path), TOMA_ROOT_DIR "run/udev/data/b%d:%d", major(st.st_rdev), minor(st.st_rdev));
 	if (stat(udev_info_path, &st) < 0) {
 		N_Ef(error_1_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_udev, "failed getting udev device info from path=@PATH fd=@FD", udev_info_path, stat_rv);
 		rv = false;
