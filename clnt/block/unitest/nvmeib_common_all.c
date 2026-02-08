@@ -72,6 +72,7 @@ int nvmeib_init_fast_reg(struct nvmeib_dev *dev){
 void nvmeib_fast_reg_pool_trace(struct nvmeib_fr_pool *pool){ (void)pool; }
 
 const char *nvmeib_device_name(struct nvmeib_dev *dev){return dev->ib_dev ? dev->ib_dev->name : "???";}
+int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev){ (void)dev; return NUMA_NO_NODE; }
 
 int nvmeib_create_cq_srq(struct nvmeib_dev *dev, int msg_size, void *memmgr_metrics_ctx) { (void)dev; (void)msg_size; (void)memmgr_metrics_ctx; return 0; }
 int nvmeib_dev_cq_stat_hdr(char *buffer, size_t len) { (void)buffer; (void)len; return 0; }
