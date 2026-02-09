@@ -5071,11 +5071,13 @@ static int kthread_process_drive_cq(void *arg)
 				smp_mb();
 
 				/* we may miss an interrupt in the time until we rearm the interrupts, so we need to check if the CQ is not empty */
+
+				/* [NVMESH-7791]: q_lock must be taken before checking is_cq_empty() */
+				spin_lock_irqsave(&q->q_lock, flags);
 				if (!is_cq_empty(q)) {
 					//_ND(cq_not_empty_nvme_kthread_process_drive_cq, "CQ is not empty, disable interrupts and mark as polling again serial=@SERIAL qid=@QID", d->serial, qid);
 					set_current_state(TASK_RUNNING);
 					/* disable interrupts */
-					spin_lock_irqsave(&q->q_lock, flags);
 					local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
 					spin_unlock_irqrestore(&q->q_lock, flags);
 					/* mark as polling again */
@@ -5085,6 +5087,7 @@ static int kthread_process_drive_cq(void *arg)
 					cond_resched();
 					continue;
 				}
+				spin_unlock_irqrestore(&q->q_lock, flags);
 				smp_mb();
 
 				/* Step 6: Check polling again in case interrupt set it to true. This is not a must as
