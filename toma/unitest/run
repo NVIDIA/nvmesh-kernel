@@ -12,7 +12,20 @@ function _print_wait() { cmd=("$@"); echo -en "\e[1;33m************************ 
 
 function __cleanup_prev_run_state() {
 	make clean_run;
-	sudo pkill ${EXE_NAME};
+	kill_process;
+}
+
+function kill_process() {
+	pgrep "${EXE_NAME}" > /dev/null || return 0;
+	echo "process is already running - terminating it; PID: $(pgrep "${EXE_NAME}")"
+	# First try to send SIGTERM to the process as regular user - avoid sudo unless necessary.
+	if ! pkill "${EXE_NAME}"; then
+		echo "unable to send SIGTERM to ${EXE_NAME} as regular user, trying with sudo";
+		sudo pkill ${EXE_NAME} || { echo_red "failed to sudo pkill"; exit 1; }
+	else
+		# Sent SIGTERM successfully as user
+		echo "previously running process was terminated"
+	fi
 }
 
 function __force_rebuild() {
