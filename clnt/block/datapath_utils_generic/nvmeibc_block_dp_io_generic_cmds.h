@@ -263,7 +263,7 @@ int  dp_cmds_gencmd_add(struct nvmeibc_block_command *cmd);
 void dp_cmds_gencmd_del(struct nvmeibc_block_command *cmd);
 
 /**************************** PET APIs  *****************************/
-void nvmeibc_blkset_info_write_pet_describe(struct nvmeibc_block_command *cmds, u64 addr, struct nvmeibc_d_rdma_comp *dc);
+void nvmeibc_blkset_info_write_pet_describe(struct operation* o, u8 sgmnt, u64 addr, struct nvmeibc_d_rdma_comp *dc);
 
 #endif  // H beginning
 

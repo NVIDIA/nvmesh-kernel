@@ -123,23 +123,42 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 
 	if (rdma_comp->opr == NVMEIBC_LOCK_READ){
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
-								"lock.request(sgmnt=%hhu, address=0x%llx, opr=READ, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>)",
+								"lock.request(sgmnt=%hhu, address=0x%llx, opr=READ, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>)",
 								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
 								lock->address,
-								numeric_downcast(u8, lock->type),
 								numeric_downcast(u8, rdma_comp->code));
 
-	} else {
+	} else if (rdma_comp->opr == NVMEIBC_LOCK_BLKSET_INFO_WRITE){
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
-								"lock.request(sgmnt=%hhu, address=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, type=%hhu<enum nvmeibc_rdma_intent>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>))",
+								"rdma.request(sgmnt=%hhu, address=0x%llx, opr=BLKSET_INFO_WRITE, binfo=0x%x<union nvmeib_blkset_info>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>))",
 								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
 								lock->address,
-								numeric_downcast(u8, rdma_comp->opr),
-								numeric_downcast(u8, lock->type),
+								(u32)rdma_comp->lock.bi,
+								numeric_downcast(u8, rdma_comp->code));
+
+	} else if (rdma_comp->opr == NVMEIBC_LOCK_CMP_AND_SWAP){
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+								"lock.request(sgmnt=%hhu, address=0x%llx, opr=CMP_AND_SWAP, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>))",
+								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+								lock->address,
 								numeric_downcast(u8, rdma_comp->code),
 								//casting, since there is no promises about the upper bits content
 								(u32)(rdma_comp->compare),
 								(u32)(rdma_comp->exchange));
+	} else {
+		#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR==1
+		BUG(); //we don't use any other values
+		#endif
+		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+								"lock.request(sgmnt=%hhu, address=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, compare=0x%x<union nvmeib_lock_id>, exchange=0x%x<union nvmeib_lock_id>), id=0x%x<union nvmeib_lock_id>, bi=0x%x<union nvmeib_blkset_info>)",
+								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+								lock->address,
+								numeric_downcast(u8, rdma_comp->opr),
+								numeric_downcast(u8, rdma_comp->code),
+								(u32)(rdma_comp->compare),
+								(u32)(rdma_comp->exchange),
+								(u32)(rdma_comp->lock.id),
+								(u32)(rdma_comp->lock.bi));
 	}
 }
 
@@ -153,16 +172,28 @@ void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct
 		return;
 	}
 
-	//we don't call this function on lock release - mainly because the operation already does not exist
-	//so, rdma_comp->lock.bi should contain a legal value
-	NVMEIBC_IO_PET_MSG(&o->journal,
-						"lock.response(sgmnt=%hhu, rdma_comp(lock_status=%hhu<enum nvmeibc_block_lock_status>, blkset_info=0x%x<union nvmeib_blkset_info>, contending=0x%x<union nvmeib_lock_id>))",
-						severity,
-						numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
-						numeric_downcast(u8, rdma_comp->lock_status),
-						//casting, since there is no promises about the upper bits content
-						(u32)(rdma_comp->lock.bi),
-						(u32)(get_contending_id(rdma_comp)));
+	if (rdma_comp->opr == NVMEIBC_LOCK_BLKSET_INFO_WRITE){
+		//we don't call this function on lock release - mainly because the operation already does not exist
+		//so, rdma_comp->lock.bi should contain a legal value
+		NVMEIBC_IO_PET_MSG(&o->journal,
+							"rdma.response(sgmnt=%hhu, rdma_comp(lock_status=%hhu<enum nvmeibc_block_lock_status>)",
+							severity,
+							numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+							numeric_downcast(u8, rdma_comp->lock_status));
+	} else {
+		//we don't call this function on lock release - mainly because the operation already does not exist
+		//so, rdma_comp->lock.bi should contain a legal value
+		NVMEIBC_IO_PET_MSG(&o->journal,
+							"lock.response(sgmnt=%hhu, opr=%hhu<enum nvmeibc_disk_locks_opr>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, lock_status=%hhu<enum nvmeibc_block_lock_status>, blkset_info=0x%x<union nvmeib_blkset_info>, contending=0x%x<union nvmeib_lock_id>))",
+							severity,
+							numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+							numeric_downcast(u8, rdma_comp->opr),
+							numeric_downcast(u8, rdma_comp->code),
+							numeric_downcast(u8, rdma_comp->lock_status),
+							//casting, since there is no promises about the upper bits content
+							(u32)(rdma_comp->lock.bi),
+							(u32)(get_contending_id(rdma_comp)));
+	}
 }
 
 void dp_locks_free_all(struct nvmeibc_cmd_lock *locks)
@@ -429,6 +460,7 @@ static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 		cmp->pigbck_comp.callback = &__um_completion_unblock_waiting_stack;
 	#endif
 
+	dc->opr = NVMEIBC_LOCK_READ;
 	nvmeibc_cmd_lock_request_io_pet_describe(cmd->o, l);
 	rv = icore_ops->run_read_lock(icore_ops, l->ds->disk, iocmd->lpb.handle, lock_addr, dc);
 	times[1] = jiffies;
@@ -1211,6 +1243,7 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 		l->last_retry_report_time = l->first_try_time = jiffies;
 	}
 	l->status = NCL_STATUS_ISSUED;						// Issue owner request
+	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 	nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
 	rv = icore_ops->run_cmpxchg(icore_ops, seg->disk, handle_of(seg), l->address, dc);
 	lock_rqsted = jiffies;
@@ -1357,7 +1390,7 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 		dc->callback = callback;
 		if (likely(prev_rv == 0)) {	/* Send the lock info */
 			dc->lock_status = NCL_STATUS_NOTISSUED;	// Lock is taken but we use its comp for binfo
-			nvmeibc_blkset_info_write_pet_describe(ow_l->cmds, l->address, dc);
+			nvmeibc_blkset_info_write_pet_describe(ow_l->cmds->o, dp_locks_get_sgmnt_idx_of_lock(l), l->address, dc);
 			err = icore_ops->write_blkset_info(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
 		} else {
 			err = prev_rv;

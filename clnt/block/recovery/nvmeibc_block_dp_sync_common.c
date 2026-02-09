@@ -523,6 +523,7 @@ static int __release_lock_of_sync(struct nvmeibc_cmd_lock *l, struct recovery_sy
 	int rv;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	dp_locks_trace_lock_release(so->o, l);
+	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 	nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 	rv = icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
 	if (rv) {
@@ -903,6 +904,7 @@ _func_start:
 			goto _func_start;
 		}
 		so->stage = sync_stage_recov_lo_try_lock_cb;
+		lock_comp->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 		nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 		err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 		if (!err)
@@ -1289,12 +1291,13 @@ _func_start:
 			so->stage = sync_stage_st_to_db_written_db;
 			{
 				extern void __mirror_sync_calc_post_binfo(struct recovery_sync_op*, struct nvmeibc_raid_leader_cmd_ctx *, bool has_stale_lock);		// EC-1477: Remove after solving this issue
+				u8 const sgmnt = numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(l));
 				struct nvmeibc_raid_leader_cmd_ctx rld;
 				memset(&rld, 0, sizeof(rld));
 				rld.pre.all = lock_comp->lock.bi;						// Check binfo for unknown
 				__mirror_sync_calc_post_binfo(so, &rld, true);			// Here we will commit binfo much like should_blockset_info_commit() but with state machine to only primary owner lock
 				lock_comp->lock.bi  = (u32)rld.post.all;
-				nvmeibc_blkset_info_write_pet_describe(l->cmds, l->address, lock_comp);
+				nvmeibc_blkset_info_write_pet_describe(so->o, sgmnt, l->address, lock_comp);
 				// Multiple writes of dirty bits to bi are fine, unlocking will still only be done once
 				err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->write_blkset_info(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			}
@@ -1319,6 +1322,7 @@ _func_start:
 			}
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
 			dp_locks_trace_lock_release(so->o, l);
+			lock_comp->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 			nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			if (!err)
@@ -1587,6 +1591,7 @@ _func_start:
 			lock_comp->compare  = lock_comp->exchange = 0ULL;
 			l->comp.code = NVMEIBC_CMD_LOCK_UNLOCK;	// Compare exchange to zero
 			__invoke_crash_on_lock_corruption(l, 0, "take", 1);	// As if was taken before release
+			lock_comp->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 			nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
 			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
 			#else

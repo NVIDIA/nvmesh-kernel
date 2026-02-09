@@ -1226,14 +1226,13 @@ _out:
 	*ncmds= n_cmds_in_cur_stage + n_non_exec_cmds;
 }
 
-void nvmeibc_blkset_info_write_pet_describe(struct nvmeibc_block_command *cmds,
-	u64 addr, struct nvmeibc_d_rdma_comp *dc)
+void nvmeibc_blkset_info_write_pet_describe(struct operation* o, u8 sgmnt, u64 addr, struct nvmeibc_d_rdma_comp *dc)
 {
-	u32 binfo = dc->lock.bi;
-
-	NVMEIBC_IO_PET_MSG_NORM(&cmds->o->journal,
-			                "nvmeibc_pd_write_blkset_info(addr=0x%llx binfo=0x%x<union nvmeib_blkset_info>)",
-							addr, binfo);
+	NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+						"rdma.request(sgmnt=%hhu, address=0x%llx, opr=BLKSET_INFO_WRITE, binfo=0x%x<union nvmeib_blkset_info>)",
+						sgmnt,
+						addr,
+						(u32)dc->lock.bi);
 }
 
 static void __nvmeibc_blkset_info_write_failed_to_send_pet_describe(struct operation* o, int prev_rv)
@@ -1259,7 +1258,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 			BUG();
 		}
 		if (prev_rv == 0) {
-			nvmeibc_blkset_info_write_pet_describe(cmds, iocmd->lpb.addr, dc);
+			nvmeibc_blkset_info_write_pet_describe(cmds->o, nvmeibc_dp_get_sgmnt_idx_from_ds(c->ds), iocmd->lpb.addr, dc);
 			err = icore_ops->write_blkset_info(icore_ops, c->ds->disk, iocmd->lpb.handle, iocmd->lpb.addr, dc);
 			if (err) {
 				OPERATION_DBG_CNTR_INC(cmds->o, n_write_binfo_failed);
@@ -1299,12 +1298,18 @@ static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc, st
 	if (1) {    /* Give completion on cmd, Todo: Move to separate func() */
 		struct nvmeibc_block_command *rldr = /* Daniel: Todo save rldr to avoid this search */ nvmeibc_cllink_find_cmd_by_lock(locksets, lsi);
 		WARN(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage), "stage=%d\n", rldr->raid_cur_stage);
+		nvmeibc_cmd_lock_response_io_pet_describe(rldr->o, l);
 		if (rv_storage_of_binfo_write(rldr)) {
 			WARN((rv == 0), "nvmeibc bug rldr(my=%d, cur=%d, rv=%d)\n", rldr->my_stage, rldr->raid_cur_stage, rv_storage_of_binfo_write(rldr));
 		} else if (rv) {
 			rv_storage_of_binfo_write(rldr) = rv;	// Here is a race, a few callbacks may be putting their 'rv' into the same integer, however never will '0' overwrite an error
 			OPERATION_DBG_CNTR_INC(rldr->o, n_write_binfo_failed);
 		}
+		//this is hack; the rldr or any other command are not in rdma_appendix_stage; we use the function below to continue running the state machine
+		//thus the response from set blockset info will not be printed
+		#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR == 1
+			BUG_ON(-1 != dp_cmds_get_first_cmd_of_stage(rldr, rldr->raid_cur_stage));
+		#endif
 		dp_cmds_complete_cmd(rldr->cmdarr, rldr->my_leader, NULL);
 	}
 	return 0;
@@ -1326,7 +1331,7 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 	if (prev_rv == 0) {
 		/* Send the lock info */
 		dc->lock.bi = nvmeibc_rldr_get_post_stage_rdma_piggyback(&rldr->rld, rldr->raid_cur_stage).all;
-		nvmeibc_blkset_info_write_pet_describe(rldr, dl->address, dc);
+		nvmeibc_blkset_info_write_pet_describe(rldr->o, nvmeibc_dp_get_sgmnt_idx_from_ds(dl->ds), dl->address, dc);
 		rv = icore_ops->write_blkset_info(icore_ops, dl->ds->disk, handle_of(dl->ds), dl->address, dc);
 	} else {
 		rv = prev_rv;
@@ -1337,18 +1342,6 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
 	}
 }
-
-/*	Function below is unused beacause we piggyback P,Q and write binfo to owner lock directly. No need to write to 3 locks, like blockset fixup syncs do
-static inline void __dp_ec_write_all_blocksets_info_op(struct nvmeibc_block_command *cmds, int li, int prev_rv) {
-	struct nvmeibc_block_command *rldr = &cmds[li];
-	const int o_lsi = nvmeibc_cllink_find_lock_by_cmd(rldr);		// Note: For operation within a single block, o_lsi == 0
-	struct nvmeibc_cmd_lock *ow_l = &rldr->locksets[o_lsi];
-	struct nvmeibc_d_rdma_comp *dc = &ow_l->comp;
-	const union nvmeib_blkset_info binfo = { .all = nvmeibc_rldr_get_post_stage_rdma_piggyback(&rldr->rld, rldr->raid_cur_stage).all };
-	WARN(((dc->lock_status != NCL_STATUS_TAKEN) && (!((dc->lock_status == NCL_STATUS_CONTENDED || dc->lock_status == NCL_STATUS_DISKDEAD) && prev_rv))) || (dc->opr != NVMEIBC_LOCK_CMP_AND_SWAP), "status=%d, opr=%d, prev_rv=%d\n", dc->lock_status, dc->opr, prev_rv);	// Daniel: if Transferred lock - treat as taken
-	WARN(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage), "stage=%d\n", rldr->raid_cur_stage);
-	dp_locks_write_all_blocksets_info_op(ow_l, &binfo, __send_blkset_info_to_data_lock_cb, prev_rv);
-}*/
 
 static void __send_cmds_of_stage(struct nvmeibc_block_command *cmds, int n_cmds, int last_cmd, int prev_rv)
 {
