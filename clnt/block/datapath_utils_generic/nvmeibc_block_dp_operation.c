@@ -50,14 +50,13 @@ static void __on_complete_update_operation_stats(struct operation *o)
 	};
 	nvmeib_io_stats_update_one(nd->os->stats, NULL, io_op_to_verb(o->op, false), io_counters);
 	#else
-	(void)latency;	// Avoid warning in lib
-	(void)io_exec;	// Avoid warning in lib
+	latency = io_exec = 0;	// Avoid uninitialized warning in lib
 	(void)io_counters;	// Avoid warning in lib
 	#endif
 	if (unlikely(io_duration_nsecs > 30*NSEC_PER_SEC)) {
 		if (nvmeibc_operation_is_bio(o)) {
 			const u64 st_B = get_op_start_lba(o), n_B = get_op_nlbas(o);
-			_NW(t_01_ioop, DMESG_PREFIX("@DEV_NAME") ": slow IO, op=@BLOCK_IO_OP, vlba=[@VLBA..@VLBA)[blks] flags=@LLX {@O_DBG_ID} took @MILISECONDS", nd->name, o->op, st_B, st_B + n_B, o->dbg_cntrs.raw, o->dbg_id, (u32)(io_duration_nsecs/USEC_PER_SEC));
+			_NW(t_01_ioop, DMESG_PREFIX("@DEV_NAME") ": slow IO, op=@BLOCK_IO_OP, vlba=[@VLBA..@VLBA)[blks] flags=@LLX {@O_DBG_ID} took @MILISECONDS (executing @MILISECONDS, last retry @MILISECONDS)", nd->name, o->op, st_B, st_B + n_B, o->dbg_cntrs.raw, o->dbg_id, (u32)(io_duration_nsecs/NSEC_PER_MSEC), (u32)(latency / NSEC_PER_MSEC), (u32)(io_exec / NSEC_PER_MSEC));
 		}
 	}
 }
