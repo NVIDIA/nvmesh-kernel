@@ -145,9 +145,11 @@ struct mgmt_sim_state *mgmt_sim_init(const char *my_hostname)
 	g_mgmt_sim = calloc(1, sizeof(*g_mgmt_sim));
 	BUG_ON(!g_mgmt_sim || !my_hostname);
 	g_mgmt_sim->live.hostname = my_hostname;
-	g_mgmt_sim->live.uuid = "cde269b0-0000-0000-0000-000000000000";
 	g_mgmt_sim->other_tomas[0].hostname = "n37@google.com";
 	g_mgmt_sim->other_tomas[1].hostname = "n39@google.com";
+	g_mgmt_sim->live.uuid =           "cde269b0-0000-0000-0000-000000000000";
+	g_mgmt_sim->other_tomas[0].uuid = "cde269b1-0000-0000-0000-000000000000";
+	g_mgmt_sim->other_tomas[1].uuid = "cde269b2-0000-0000-0000-000000000000";
 
 	/* Initialize state machine */
 	g_mgmt_sim->fsm_state = MGMT_FSM_WAITING_FOR_BOTH_OK;
@@ -168,12 +170,28 @@ static int make_msg_update_toma_keepalive_token(char *buf, size_t capacity) {
 		m->live.hostname);
 }
 
-static int make_msg_add_target(char *buf, size_t capacity) {
-	const struct mgmt_sim_state *m = g_mgmt_sim;
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
-		"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":0,\"targetUpdatesSequence\":0}}",
-		m->live.hostname, m->live.uuid);
+static int make_msg_add_target(char *buf, size_t capacity, int queue_offset) {
+	struct mgmt_sim_state *m = g_mgmt_sim;	// This Kafka queue is never purged. It has 3 messages for 3 targets in raft domain (offsets 0..2)
+	BUG_ON((queue_offset < 0) || (queue_offset>=3));
+	++m->target_msg_count;					// Counter can get high, if leader changes and rereads the target kafka queue from beginning
+	if (queue_offset == 0) {				/* First message: addTarget (self as 1-machine raft domain) */
+		return snprintf(buf, capacity,
+			"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":0,\"targetUpdatesSequence\":0}}",
+			m->live.hostname, m->live.uuid);
+	} else if (queue_offset == 1) {
+		return snprintf(buf, capacity,
+			"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":1,\"targetUpdatesSequence\":1}}",
+			g_mgmt_sim->other_tomas[0].hostname, m->other_tomas[0].uuid);
+	} else if (queue_offset == 2) {
+		return snprintf(buf, capacity,
+			"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":2,\"targetUpdatesSequence\":2}}",
+			g_mgmt_sim->other_tomas[1].hostname, m->other_tomas[1].uuid);
+	}
+	BUG_ON(true);
+	return -1;
 }
 
 static int make_msg_hardware_configuration(char *buf, size_t capacity) {
@@ -198,7 +216,7 @@ static int make_msg_hardware_configuration(char *buf, size_t capacity) {
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
 					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"cde269b1-0000-0000-0000-000000000000\","
+			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
 				"\"disks\":["
 				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096"
 					",\"activeFormatRequestCounter\":1,\"vendorID\":5122"
@@ -211,7 +229,7 @@ static int make_msg_hardware_configuration(char *buf, size_t capacity) {
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c1-11f0-bc49-e391b6ca4c2b\"},"
 					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c1-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"cde269b2-0000-0000-0000-000000000000\","
+			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
 				"\"disks\":["
 				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096"
 					",\"activeFormatRequestCounter\":1,\"vendorID\":5197"
@@ -227,14 +245,15 @@ static int make_msg_hardware_configuration(char *buf, size_t capacity) {
 		"]}}",
 		m->hw.conf_version, m->hw.msg_count,
 		m->live.hostname, m->live.uuid, m->disk_002.disk_id, m->disk_003.disk_id, FORMAT_TARGET_UUID,
-		m->other_tomas[0].hostname, m->other_tomas[1].hostname);
+		m->other_tomas[0].hostname, m->other_tomas[0].uuid,
+		m->other_tomas[1].hostname, m->other_tomas[1].uuid);
 }
 
-char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
+char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len)
 {
 	char *payload = NULL;
 	size_t len = 0;
-	BUG_ON(!g_mgmt_sim || !consumer_name || !out_len);
+	BUG_ON(!g_mgmt_sim || !consumer_name || !out_len || (queue_offset < 0));
 
 	if (strncmp(consumer_name, "HW", 2) == 0) {
 		if ((g_mgmt_sim->hw.msg_count++ % 64) == 0) { 	/* Periodically inject hardwareConfiguration */
@@ -257,23 +276,24 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len)
 			const size_t capacity = 256;
 			payload = malloc(capacity);
 			BUG_ON(!payload);
+			N_Tf(__AUTOID__, "consumer[@STR] << msg=updateZone", consumer_name);
 			len = make_msg_update_toma_keepalive_token(payload, capacity);
 			g_mgmt_sim->cmd_msg_count++;
 		}
-	} else if (strstr(consumer_name, "incrementalTarget") == NULL) {		// Leader raft domain
-		if (g_mgmt_sim->target_msg_count == 0) {
-			/* First message: addTarget (self as 1-machine raft domain) */
+	} else if (strstr(consumer_name, "incrementalTarget") != NULL) {		// Leader raft domain
+		if (queue_offset < 8) {	// Kafka offsets are [7,8,9] for the 3 messages
 			const size_t capacity = 256;
 			payload = malloc(capacity);
 			BUG_ON(!payload);
-			len = make_msg_add_target(payload, capacity);
-			g_mgmt_sim->target_msg_count++;
+			N_Tf(__AUTOID__, "consumer[@STR] << msg=addTarget(koffset=@INT)", consumer_name, queue_offset);
+			len = make_msg_add_target(payload, capacity, queue_offset-7);
 		}
-	} else if (strstr(consumer_name, "incrementalUpdates") == NULL) {		// Leader volumes updates domain
+	} else if (strstr(consumer_name, "incrementalUpdates") != NULL) {		// Leader volumes updates domain
 		if ((g_mgmt_sim->volume_msg_count++ % 15) == 0) {					/* Periodically send updateLeaderKeepaliveToken */
 			const size_t capacity = 256;
 			payload = malloc(capacity);
 			BUG_ON(!payload);
+			N_Tf(__AUTOID__, "consumer[@STR] << msg=updateLeaderKeepaliveToken", consumer_name);
 			len = make_msg_update_leader_keepalive_token(payload, capacity);
 		}// Todo: use make_msg_add_volume() here
 	} else {

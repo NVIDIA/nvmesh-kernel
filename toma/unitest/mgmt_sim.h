@@ -17,15 +17,8 @@
 struct mgmt_sim_state;
 struct mgmt_sim_state *mgmt_sim_init(const char *my_hostname);
 
-/**
- * Get the next Kafka message payload to deliver to Toma.
- * The returned buffer is owned by the caller and must be freed.
- *
- * @param consumer_name The Kafka consumer name (e.g., "HW", "CMD", topic name).
- * @param out_len       Output: length of the returned payload (0 if no message).
- * @return Allocated payload buffer, or NULL if no message is available.
- */
-char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len);
+/* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
+char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len);
 
 /**
  * Called when Toma produces a message (e.g., reportTarget, keepalive).

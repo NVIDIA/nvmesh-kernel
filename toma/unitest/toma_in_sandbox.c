@@ -30,7 +30,6 @@ void syslog(int priority, const char *fmt, ...) {
 	va_end(ap);
 	(void)priority;
 }
-#define N_SANDBOX(name, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_DEBUG, name, NVMEIB_LOG_ETERNAL, "SANDBOX: ", fmt, ## __VA_ARGS__)
 
 /************************************* Kernel ********************************/
 // Determine if running with debugger
@@ -1818,16 +1817,19 @@ static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
 	BUG_ON(offset <= 0);
 	kt->commited_offset = offset;			// Start from some non zero number
 	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
+	N_Tf(__AUTOID__, "@STR, starting from offset @LD", kt->name, kt->cur_offset);
 }
 
 rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset) {
 	kt->is_active = true;
 	__rd_kafka_topic_verify_valid(kt, partition);
-	if ((offset == RD_KAFKA_OFFSET_STORED) || (offset == RD_KAFKA_OFFSET_BEGINNING)) {
-		// Tome relies on Kafka simulator
+	if ((offset == RD_KAFKA_OFFSET_STORED)) {
+		// Toma relies on Kafka simulator
+	} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
+		__reset_offset(kt, 6);
 	} else {
-		BUG_ON(offset < kt->cur_offset);		// Toma should consume messages from the start or from its persistency
-		if (offset > kt->cur_offset)
+		//BUG_ON(offset < kt->cur_offset);		// Toma should consume messages from the start or from its persistency, except for leader queues which are reset on leader change
+		if (offset != kt->cur_offset)
 			__reset_offset(kt, offset);			// Our kafka simulator does not have persistency over destroy and reinit, so just use what toma said
 	}
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -1986,6 +1988,8 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char* name, rd_kafka_t
 		else if (strstr(name, "management.low."))
 			k->topic.type = 'L';
 		else BUG_ON(true);				// unknown topic which management simulator will not listen too
+	} else {
+		N_Tf(__AUTOID__, "alloc new consumer topic @STR, starting from offset @LD", k->topic.name, k->topic.cur_offset);
 	}
 	return &k->topic;
 }
@@ -2102,12 +2106,13 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 
 rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	rd_kafka_message_t *m = calloc(1, sizeof(*m));
+	const char *unique_name = (ko->name[0] != 'L') ? ko->name : ko->topic.name;		// all LEADER consumer groups have the same name. Differenciate them by topic name
 	size_t len = 0;
 	BUG_ON((timeout_ms != 0) || (!ko->topic.is_active));
 	m->err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
 	/* Delegate message selection to the management simulator */
-	m->payload = mgmt_sim_next_kafka_payload(ko->name, &len);
+	m->payload = mgmt_sim_next_kafka_payload(unique_name, (int)ko->topic.cur_offset, &len);
 	m->len = len;
 
 	if (m->payload == NULL) {			// No message prepared to current consumer
@@ -2116,6 +2121,7 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	}
 	m->offset = ko->topic.cur_offset;
 	ko->topic.last_offset = ++ko->topic.cur_offset;
+	N_Tf(__AUTOID__, "consumer[@STR] ++cur_offset=@LD", unique_name, ko->topic.cur_offset);
 	m->_private = NULL;
 	return m;
 }
