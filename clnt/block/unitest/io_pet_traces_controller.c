@@ -22,7 +22,9 @@ static void __io_pet_controller_flush(struct nvmeib_pet_base_controller const* b
 	BUG_ON(data.iov_base == NULL);
 
 	if (severity == NVMEIB_PET_SEVERITY_NORMAL){
+#ifndef NVMEIBC_ENABLE_PET
 		return;
+#endif
 	}
 
 	pthread_rwlock_rdlock((pthread_rwlock_t*)&self->output.lock);
