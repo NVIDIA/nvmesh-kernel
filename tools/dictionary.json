@@ -4288,11 +4288,7 @@
     "@EI": {
         "size": 32,
         "type": "s32",
-        "fmt": "%2d",
-        "final": true,
-        "__histogram": {
-            "%2d": 58
-        }
+        "fmt": "%2d"
     },
     "@ELBA": {
         "size": 64,
@@ -20297,13 +20293,13 @@
     "@IOSTATS_NAME" : {
 	    "size": "string",
 	    "type": "string",
-	    "fmt": "%s" 
+	    "fmt": "%s"
     },
     "@IOSTATS_VERB": {
 	    "size": 32,
 	    "type": "s32",
 	    "fmt": "%d",
-	    "fmt_func": "fmt_iostats_verb"  
+	    "fmt_func": "fmt_iostats_verb"
     },
     "@IOSTATS_IOPS_COUNT": {
 	    "size": 64,

@@ -193,9 +193,9 @@ int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_
 #define N_Df(name, fmt, ...)  LOG_TO_TRACE(Df, name, NVMEIB_LOG_LONGTERM, "", fmt, ## __VA_ARGS__)
 #define N_Tf(name, fmt, ...)  LOG_TO_TRACE(Tf, name, NVMEIB_LOG_LONGTERM, "", fmt, ## __VA_ARGS__)
 #define N_If(name, fmt, ...)  LOG_TO_TRACE(If, name, NVMEIB_LOG_ETERNAL, "", fmt, ## __VA_ARGS__)
-#define N_IMf(name, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_NOTICE, name, NVMEIB_LOG_ETERNAL, TOMA_INFO_MAJOR_STR, fmt, ## __VA_ARGS__)
-#define N_Wf(name, fmt, ...)  _NMIRROR_LOGLEVEL(Wf, LOG_WARNING, name, NVMEIB_LOG_ETERNAL, TOMA_WARN_STR, fmt, ## __VA_ARGS__)
-#define N_Ef(name, fmt, ...)  _NMIRROR_LOGLEVEL(Ef, LOG_ERR, name, NVMEIB_LOG_ETERNAL, TOMA_ERR_STR, fmt, ## __VA_ARGS__)
+#define N_IMf(name, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_NOTICE,  name, NVMEIB_LOG_ETERNAL, TOMA_INFO_MAJOR_STR, fmt, ## __VA_ARGS__)
+#define N_Wf(name, fmt, ...)  _NMIRROR_LOGLEVEL(Wf,  LOG_WARNING, name, NVMEIB_LOG_ETERNAL, TOMA_WARN_STR,       fmt, ## __VA_ARGS__)
+#define N_Ef(name, fmt, ...)  _NMIRROR_LOGLEVEL(Ef,  LOG_ERR,     name, NVMEIB_LOG_ETERNAL, TOMA_ERR_STR,        fmt, ## __VA_ARGS__)
 
 // (Used to be) throttled-warning (once per minute)
 #define N_WTf(name, fmt, ...) N_Wf(name, fmt, ## __VA_ARGS__)

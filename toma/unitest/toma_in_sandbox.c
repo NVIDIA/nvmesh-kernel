@@ -20,12 +20,17 @@
 void syslog(int priority, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	fprintf(stderr, COL_PURPL);
+	if (     priority <= LOG_ERR)		fprintf(stderr, COL_RED_BOLD);
+	else if (priority == LOG_WARNING)	fprintf(stderr, COL_YELLOW);
+	else if (priority == LOG_NOTICE)	fprintf(stderr, COL_PURPL);
+	else if (priority == LOG_INFO)		fprintf(stderr, COL_WHITE_BOLD);
+	else  /* priority == LOG_DEBUG */	fprintf(stderr, COL_RESET);	// Default
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, COL_RESET "\n");
 	va_end(ap);
 	(void)priority;
 }
+#define N_SANDBOX(name, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_DEBUG, name, NVMEIB_LOG_ETERNAL, "SANDBOX: ", fmt, ## __VA_ARGS__)
 
 /************************************* Kernel ********************************/
 // Determine if running with debugger
@@ -161,12 +166,12 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 	const enum nvmeibs_toma_server_msg_type type = m->type;
 	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
 	switch (type) {
-		case NVMEIBS_TOMA_LOGIN:  SANDBOX_PRINT("SRVR_SIMU->Got: Toma_Hello %lu[b] via_netlink=%d\n", n, !!flags); break;
-		case NVMEIBS_TOMA_LOGOUT: SANDBOX_PRINT("SRVR_SIMU->Got: TomaByeBye %lu[b] via_netlink=%d\n", n, !!flags); break;
+		case NVMEIBS_TOMA_LOGIN:  N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: Toma_Hello @ZU[b] via_netlink=@BOOL_YN", n, !!flags); break;
+		case NVMEIBS_TOMA_LOGOUT: N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: TomaByeBye @ZU[b] via_netlink=@BOOL_YN", n, !!flags); break;
 		case NVMEIBS_TOMA_WRITE_STATUS_RESP: {
 			const struct nvmeibs_msg_t2s_toma_status_resp *pl = &m->status_resp_msg;
 			me->n_toma_replies_received++;
-			SANDBOX_PRINT("SRVR_SIMU->Got: TomaStatusRep %lu[b], cnt=%d\n", n, me->n_toma_replies_received);
+			N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: TomaStatusRep @ZU[b], cnt=@INT", n, me->n_toma_replies_received);
 			BUG_ON(me->expecting_reply_cookie <= 0);				// Reply comes without server expecting it
 			BUG_ON(pl->handle != 0 - me->expecting_reply_cookie);
 			BUG_ON(pl->handle_req != me->expecting_reply_cookie);
@@ -178,9 +183,8 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 		}
 		case NVMEIBS_TOMA_JOURNAL_INFO: {
 			const struct nvmeibs_msg_t2s_journal *pl = &m->journal_msg;
-			SANDBOX_PRINT("SRVR_SIMU->Got: JournalInfo %lu[b] disk=%s lba=%llu len=%llu serjio_lba=%llu serjio_len=%llu\n",
-				n, pl->disk_id, (unsigned long long)pl->lba, (unsigned long long)pl->length,
-				(unsigned long long)pl->serjio_db_lba, (unsigned long long)pl->serjio_db_length);
+			N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: JournalInfo @ZU[b] disk=@STR lba=@ZU len=@ZU serjio{lba=@ZU, len=@ZU}",
+				n, pl->disk_id, pl->lba, pl->length, pl->serjio_db_lba, pl->serjio_db_length);
 			break;
 		}
 		default: BUG_ON(true);		// Not supported yet
@@ -194,7 +198,7 @@ static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf,
 	const struct nvmeibs_toma_client_proc_buf *m = buf;
 	const u32 cid = (m->handle >> 32);		// Todo: Find client in hash
 	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
-	SANDBOX_PRINT("SRVR_SIMU->Got: 2_reg_clnt %lu[b] via_netlink=%d\n", n, flags);
+	N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: 2_reg_clnt @ZU[b] via_netlink=@INT", n, flags);
 	me->n_msgs_to_registrants++;
 	if (!m->handle) { errno = ENXIO;	return -1; }
 	if (!cid)		{ errno = EINVAL;	return -1; }
@@ -789,9 +793,11 @@ static void socket_destroy(struct t_sandbox_sock *s) {
 	s->ref_cnt--;
 	if (s->ref_cnt > 0)
 		return;
-	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
-	if (sys->can_use_bin_traces)		// Some fd's are closed after binary traces were shut down
-		N_Df(sbd8465, "sandbox file: close path=@STR fd=@INT mode=@STR delete=@BOOL", s->addr.sun_path, s->fd, sbfd_get_open_mode(s), should_del);
+	if (sys->can_use_bin_traces) {		// Some fd's are closed after binary traces were shut down
+		N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, close, del=@BOOL_YN", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
+	} else {
+		SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
+	}
 	if (s->f != NULL) {
 		fclose(s->f);
 	}
@@ -812,9 +818,8 @@ int TSB_sock_open(struct t_sandbox_sock *s) {
 	}
 	s->fd = fileno(s->f);
 	TSB_connect_sock_to_listener(s);
-	N_Df(sbo0564, "sandbox file: open path=@STR fd=@INT mode=@STR", s->addr.sun_path, s->fd, open_mode);
-	SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, mode=%s (%o), listener=%c\n",
-		 (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, open_mode, s->proto, ((s->other_side) ? 'Y' : 'N'));
+	N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, mode=@STR (@X), listener=@BOOL_YN",
+		 (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, open_mode, s->proto, !!s->other_side);
 	return s->fd;
 }
 
@@ -1427,7 +1432,7 @@ int override_close(int fd) {
 		// This happens during shutdown currently, as Toma closes all fd's before exiting.
 		// To get a clean unit test run, we need to handle this gracefully.
 		// Also, we can't use the binary trace mechanism here during shutdown, as it gets destroyed first.
-		SANDBOX_PRINT("close attempted for invalid fd=%d\n", fd);
+		N_SANDBOX(__AUTOID__, "close attempted for invalid fd=@INT", fd);
 		errno = EBADF;
 		return -1;
 	} else {
@@ -1475,7 +1480,7 @@ int override_dup(int oldfd) {
 	}
 
 	ret = new_s->fd;
-	SANDBOX_PRINT("TSB dup: oldfd=%d -> newfd=%d, path=%s\n", oldfd, ret, new_s->addr.sun_path);
+	N_SANDBOX(__AUTOID__, "TSB dup: oldfd=@INT -> newfd=@INT, path=@STR", oldfd, ret, new_s->addr.sun_path);
 
 done:
 	if (ret < 0) {
@@ -1613,7 +1618,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		}
 	}
 
-	SANDBOX_PRINT("Toma Sandbox epoll loop %lu%s, n_events=%d\n", loop_idx, is_shutting_down ? " (dying)" : "", n_events); loop_idx++;
+	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, is_shutting_down, n_events); loop_idx++;
 	if (!is_shutting_down) {
 		if (mgmt_sim_is_done()) {
 			SANDBOX_PRINT("format drive test: %s\n", COL_GREEN "passed" COL_RESET);
@@ -1673,6 +1678,7 @@ void toma_unitest_env_start(bool is_running_as_a_utility, int trace_debug_level)
 	__verify_correct_dir();
 	atexit(toma_unitest_env_end);
 	t_sandbox_all_init(is_running_as_a_utility);
+	sys->can_use_bin_traces = true;
 }
 
 void toma_unitest_notify_stop_traces(void) {

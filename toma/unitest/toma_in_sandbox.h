@@ -305,7 +305,6 @@ rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags);
 enum my_rd_kafka_producer_flags { RD_KAFKA_MSG_F_FREE = 0x1, RD_KAFKA_MSG_F_COPY = 0x2 };
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque);
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *rk, char *errstr, size_t errstr_size);
-#define LOG_DEBUG (5)
 static inline int         rd_kafka_version(    void)	{ return 0x20102; }
 static inline const char* rd_kafka_version_str(void)	{ return "0x20102"; }
 

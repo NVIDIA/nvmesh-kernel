@@ -7,7 +7,7 @@
 
 #include <stdio.h>
 
-#define SANDBOX_PRINT(fmt, ...) fprintf(stderr, "SANDBOX: " fmt, __VA_ARGS__)
+#define SANDBOX_PRINT(fmt, ...)      fprintf(stderr, "SANDBOX: " fmt, __VA_ARGS__)      // Todo: Remove me, use binary tracing
 #define SANDBOX_PRINT_TMP(fmt, ...)  fprintf(stderr, "SANDBOX: " COL_PURPL fmt COL_RESET, __VA_ARGS__)
 
 #define BUG_ON(condition)	do { const int hit__ = !!(condition); if (hit__) {fprintf(stderr, "************************** BUG!!!! at %s:%d - %s(), val=%d, condition=%s\n", __FILE__, __LINE__, __FUNCTION__, hit__, #condition); raise(SIGABRT);} } while(0)
