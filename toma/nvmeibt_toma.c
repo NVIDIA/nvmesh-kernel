@@ -2625,7 +2625,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		// Handle the expired timeouts
 		getnstimeofday_boot(&now);	// Do not re-sample "now". as we do not handle incoming messages
 		now_millisec = timespec_to_msec(now);
-		//_Tf("Select timeout\n");
 		if (timespec_ge(now, nvmeibt_raft_get_next_timeout_timespec())) {
 			last_raft_timeout_timespec = now;
 			nvmeibt_nm_process_toma_requests(nw_node);
