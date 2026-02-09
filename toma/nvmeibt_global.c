@@ -655,11 +655,15 @@ static void send_report_target_if_needed(void)
 
 	getnstimeofday_boot(&now);
 	diff_timeout = timespec_sub(now, global_ctx.last_local_report_target_to_mgmt_time);
-	if (diff_timeout.tv_sec <= 1) {
-		N_Tf(ianey6d, "Skipping. Waiting 1 sec after prev send");
+	#ifdef TOMA_SIMULATOR_SANDBOX				// Todo: Make this as Toma Param in toma_rpc.config, in live system 1[sec], via sandbox, much faster
+		if ((diff_timeout.tv_sec == 0) && (diff_timeout.tv_nsec/(1000*1000) <= 20))
+	#else
+		if (diff_timeout.tv_sec <= 1)
+	#endif
+	{
+		N_Tf(ianey6d, "Skipping. Waiting 1[sec] after prev send");
 		goto out;
 	}
-
 
 #	define MAX_WAIT_FOR_DISKS_ON_BOOT_SECS 15
 	if (nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_startup_timespec().tv_sec < MAX_WAIT_FOR_DISKS_ON_BOOT_SECS) {
