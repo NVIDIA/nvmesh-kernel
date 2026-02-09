@@ -1835,7 +1835,7 @@ rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partiti
 
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
 	if (pl == NULL) {
-		if (ko->topic.name) {
+		if (ko->topic.name && ko->topic.is_active) {
 			rd_kafka_consume_stop(&ko->topic, ko->topic.partition);
 		} // Topic was never created
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
