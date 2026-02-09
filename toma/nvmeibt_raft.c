@@ -1139,9 +1139,7 @@ out:
 
 struct nvmeibt_raft_member *nvmeibt_raft_get_member_by_id(const union nvmeib_uuid *id)
 {
-	struct nvmeibt_raft_member	*member;
-
-	member = nvmeib_hash_search_uuid(my_raft_global.raft_members_hash_by_uuid, id);
+	struct nvmeibt_raft_member	*member = nvmeib_hash_search_uuid(my_raft_global.raft_members_hash_by_uuid, id);
 	if (!member) {
 		N_Tf(vnekfyx, "Member not found id='@UUID_LE'", id);
 	}
@@ -2459,8 +2457,8 @@ static bool is_srm_ready_to_accept_the_new_msgs(bool is_with_raft_log)
 		goto out;
 	}
 	rv = 1;
-	NFOUT;
 out:
+	NFOUT;
 	return rv;
 }
 
@@ -2468,7 +2466,6 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 {
 	int							rv = 0;
 	struct nvmeibt_raft_member	*member;
-	struct nvmeibt_node			*its_node;
 	int							is_prev_topo_committed = (RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_committed_by_majority) == RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit));
 	static int64_t				prev_topo_to_commit = -1;
 	static int64_t				prev_topo_to_apply = -1;
@@ -2512,7 +2509,7 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 			my_raft_global.leader_first_APPEND_ENTRIES_with_cur_committed_and_applied_topo_timespec = nvmeibt_global_get_global()->last_raft_distribution_timestamp;
 		}
 		NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
-			its_node = nvmeibt_raft_member_get_node(member);
+			struct nvmeibt_node	*its_node = nvmeibt_raft_member_get_node(member);
 			if (its_node) {
 				raft_leader_send_appendentries_to_a_peer(member, is_with_raft_log);
 				member->its_node->peer_statistics.is_awaiting_REP_first_APPEND_ENTRIES_with_cur_committed_and_applied_topo_timespec |= is_new_committed_or_applied;
