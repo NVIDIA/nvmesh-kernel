@@ -32,6 +32,7 @@ static struct t_main_module_single_instance_globals {
 			struct nvmeib_public_procfs_ent *isnt_list;
 			struct msgloop_procfs_ent *inst_ctls_proc;	// msg loop for ioctls
 			struct nvmeib_public_procfs_ent *echo_proc;		// Write only proc to commit text to longterm log
+			struct nvmeib_public_procfs_ent *pages_alloc_stats;	// Pages allocation stats summed over all CPUs
 		} files;
 	} proc_dir;
 	struct t_main_clnt_sched sched;
@@ -154,6 +155,7 @@ static int nvmeibc_module_procs_create(struct t_main_module_single_instance_glob
 	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.dict_sign_proc, "dict_sign"     , fill_dict_sign);
 	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.isnt_list     , "inst_list.json", fill_isntances_info);
 	PROC_FILE_CREATE_WRITABLE(_mg, _mg->proc_dir.files.echo_proc     , "echo"          , __echo_msg_to_longterm_log);
+	PROC_FILE_CREATE_RW(      _mg, _mg->proc_dir.files.pages_alloc_stats, "pages_alloc_stats", fill_pages_alloc_stats, clear_pages_alloc_stats);
 destroy:
 	if (rv) {
 	}
@@ -174,6 +176,7 @@ static void nvmeibc_module_procs_destroy(struct t_main_module_single_instance_gl
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.dict_sign_proc);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.isnt_list);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.echo_proc);
+	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.pages_alloc_stats);
 	remove_proc_entry(_mg->proc_dir.root_name, NULL);
 	NFOUT;
 }

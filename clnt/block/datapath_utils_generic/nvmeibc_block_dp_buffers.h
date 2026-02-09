@@ -101,4 +101,7 @@ static inline unsigned int sgl_block_iter_nblocks(const struct sgl_block_iter *c
 
 bool sgl_block_iter_advance(struct sgl_block_iter *sbi, unsigned int nblocks);
 
+void nvmeibc_pages_alloc_stats_clear(void);
+void nvmeibc_pages_alloc_stats_to_txt(struct nvmeib_txt *txt);
+
 #endif  // H beginning

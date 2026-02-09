@@ -4,6 +4,8 @@
 
 #include "../core_unitest/corecomm_injections.h"
 #include "utils/nvmeib_jdr/nvmeib_jdr.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "block/datapath_utils_generic/nvmeibc_block_dp_buffers.h"
 
 #define VERSION_PROC_FRMT_VER 1
 /********************* Shared proc files for all clnt-instances ***************/
@@ -95,5 +97,32 @@ static inline ssize_t __echo_msg_to_longterm_log(__attribute__ ((unused)) void *
 }
 
 /******************************************************************************/
+
+/* Clear pages allocation stats on all CPUs */
+static ssize_t clear_pages_alloc_stats(void *dummy, char *buf, size_t len)
+{
+	(void)dummy;
+	(void)buf;
+
+	nvmeibc_pages_alloc_stats_clear();
+
+	return len;
+}
+
+#define BLK_PAGES_ALLOC_STATS_PROC_FRMT_VER 1
+
+/* Fill pages allocation stats summed over all CPUs.
+   Latencies are converted from nanoseconds to microseconds with 100-nanosecond (1 decimal point) precision. */
+static ssize_t fill_pages_alloc_stats(void *dummy, char *buffer, size_t len)
+{
+	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = buffer, .len = len});
+
+	(void)dummy;
+
+	nvmeibc_pages_alloc_stats_to_txt(&txt);
+
+	nvmeib_proc_add_txt_proc_epilog_txt(BLK_PAGES_ALLOC_STATS_PROC_FRMT_VER, &txt);
+	return nvmeib_txt_finalize(&txt).len;
+}
 
 #pragma pop_macro("__FILE_LITERAL__")

@@ -1,4 +1,5 @@
 #include "nvmeibc_block_dp_buffers.h"
+#include "nvmeibc_block_dp_common.h"
 #include "nvmeibc_memmgr_metrics.h"
 
 NVMEIBC_MEMMGR_METRIC(dp_data_page_buffers, "component=raid.io.data");
@@ -45,6 +46,99 @@ static inline int __nvmeibc_pages_resize(struct nvmeibc_pages *nps, unsigned int
 	return 0;
 }
 
+#define NVMEIBC_PAGES_ALLOC_STATS_NUM_ORDERS 10
+
+struct nvmeibc_pages_alloc_stats {
+	struct {
+		u64 n_allocs;
+		u64 latency_ns;
+	} per_order[NVMEIBC_PAGES_ALLOC_STATS_NUM_ORDERS];
+};
+
+struct __percpu nvmeibc_pages_alloc_stats_percpu {
+	struct nvmeibc_pages_alloc_stats success;
+	struct nvmeibc_pages_alloc_stats failure;
+};
+
+DEFINE_PER_CPU(struct nvmeibc_pages_alloc_stats_percpu, nvmeibc_pages_alloc_stats_percpu);
+
+static void nvmeibc_pages_alloc_stats_add(u8 order, struct page *result, u64 latency_ns)
+{
+	struct nvmeibc_pages_alloc_stats_percpu *stats_pcpu = &get_cpu_var(nvmeibc_pages_alloc_stats_percpu);
+	struct nvmeibc_pages_alloc_stats *stats = result ? &stats_pcpu->success : &stats_pcpu->failure;
+	const u8 order_bucket = min(order, (u8)(NVMEIBC_PAGES_ALLOC_STATS_NUM_ORDERS - 1));
+	unsigned long flags;
+
+	local_irq_save(flags);
+	stats->per_order[order_bucket].n_allocs++;
+	stats->per_order[order_bucket].latency_ns += latency_ns;
+	local_irq_restore(flags);
+
+	put_cpu_var(nvmeibc_pages_alloc_stats_percpu);
+}
+
+static void __clear_pages_alloc_stats_local(void *dummy)
+{
+	unsigned long flags;
+	(void)dummy;
+
+	/* Disable IRQs to match the protection used during stats update */
+	local_irq_save(flags);
+	memset(this_cpu_ptr(&nvmeibc_pages_alloc_stats_percpu), 0,
+	       sizeof(struct nvmeibc_pages_alloc_stats_percpu));
+	local_irq_restore(flags);
+}
+
+void nvmeibc_pages_alloc_stats_clear(void)
+{
+	/* Run clear on each CPU locally to avoid races with concurrent updates */
+	on_each_cpu(__clear_pages_alloc_stats_local, NULL, 1);
+}
+
+void nvmeibc_pages_alloc_stats_to_txt(struct nvmeib_txt *txt)
+{
+	struct nvmeibc_pages_alloc_stats_percpu total;
+	int cpu, order;
+
+	memset(&total, 0, sizeof(total));
+
+	/* Sum stats from all CPUs. */
+	for_each_possible_cpu(cpu) {
+		struct nvmeibc_pages_alloc_stats_percpu *pcpu =
+			&per_cpu(nvmeibc_pages_alloc_stats_percpu, cpu);
+
+		for (order = 0; order < NVMEIBC_PAGES_ALLOC_STATS_NUM_ORDERS; order++) {
+			total.success.per_order[order].n_allocs +=
+				READ_ONCE(pcpu->success.per_order[order].n_allocs);
+			total.success.per_order[order].latency_ns +=
+				READ_ONCE(pcpu->success.per_order[order].latency_ns);
+			total.failure.per_order[order].n_allocs +=
+				READ_ONCE(pcpu->failure.per_order[order].n_allocs);
+			total.failure.per_order[order].latency_ns +=
+				READ_ONCE(pcpu->failure.per_order[order].latency_ns);
+		}
+	}
+
+	/* Print header - latencies in microseconds with one decimal point */
+	nvmeib_txt_append(txt,
+		"order  success_allocs  success_latency_usec  failure_allocs  failure_latency_usec\n");
+
+	/* Print stats per order */
+	for (order = 0; order < NVMEIBC_PAGES_ALLOC_STATS_NUM_ORDERS; order++) {
+		/* Convert latency to 100ns units, then print as usec with one decimal */
+		const u64 success_lat_100ns = total.success.per_order[order].latency_ns / 100;
+		const u64 failure_lat_100ns = total.failure.per_order[order].latency_ns / 100;
+
+		nvmeib_txt_append(txt,
+			"%5d  %14llu  %14llu.%d  %14llu  %14llu.%d\n",
+			order,
+			total.success.per_order[order].n_allocs,
+			success_lat_100ns / 10, (int)(success_lat_100ns % 10),
+			total.failure.per_order[order].n_allocs,
+			failure_lat_100ns / 10, (int)(failure_lat_100ns % 10));
+	}
+}
+
 int nvmeibc_pages_alloc(struct nvmeibc_pages *nps, unsigned int n_blocks, const int tcp_mode)
 {
 	unsigned int npages = NVMEIBC_BLOCKS_TO_PAGES_ALLOC_COUNT(n_blocks);
@@ -56,7 +150,11 @@ int nvmeibc_pages_alloc(struct nvmeibc_pages *nps, unsigned int n_blocks, const 
 	WARN(nps->nallocs || (0 == npages) || (flags & __GFP_ZERO) || (npages & ((1UL << min_order) - 1)), "invalid arguments! allocs=%u, npages=%u, flags=%u, min_order=%u\n", nps->nallocs, npages, flags, min_order);
 	while (npages &&
 			(order = min(order, __get_max_contained_order(npages))) >= min_order) {
-		struct page *new_pages = alloc_pages(flags, order);
+		struct page *new_pages;
+		struct nvmeib_stop_watch st = { 0 };
+		nvmeib_stop_watch_start(&st);
+		new_pages = alloc_pages(flags, order);
+		nvmeibc_pages_alloc_stats_add(order, new_pages, nvmeib_stop_watch_measureq(&st));
 		nvmesh_memmgr_metric_on_alloc_update(dp_data_page_buffers, (1ull << order) * PAGE_SIZE, new_pages);
 		if (!new_pages) {							// Attempt to alocate lower order
 			if (0 == order)
