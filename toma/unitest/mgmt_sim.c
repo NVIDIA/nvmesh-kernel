@@ -292,11 +292,7 @@ void mgmt_sim_on_toma_produced(const void *payload, size_t len)
 	BUG_ON(!g_mgmt_sim || !payload || len == 0);
 
 	root = parse_json_txt_into_kv_tree((const char *)payload, (int)len);
-	if (!root)
-		return;
-
-	if (root->type != JSON_E_DICT)
-		goto cleanup;
+	BUG_ON((!root) || (root->type != JSON_E_DICT));
 
 	/* Only handle reportTarget produced by Toma */
 	message_type = json_get_dict_str(root, "messageType", NULL);
@@ -304,21 +300,16 @@ void mgmt_sim_on_toma_produced(const void *payload, size_t len)
 		mgmt_sim_parse_report_target(root);
 		mgmt_sim_run_fsm();
 	}
-
-cleanup:
 	nvmeibt_mm_json_free_kv_tree(root);
 }
 
 void mgmt_sim_verify_at_end(void)
 {
-	const char *state;
-	const struct mgmt_sim_disk_status *d3;
-	bool done;
+	const char *state = mgmt_sim_get_state_name();
+	const struct mgmt_sim_disk_status *d3 = &g_mgmt_sim->disk_003;
+	bool done = mgmt_sim_is_done();
 
 	BUG_ON(!g_mgmt_sim);
-	state = mgmt_sim_get_state_name();
-	d3 = &g_mgmt_sim->disk_003;
-	done = mgmt_sim_is_done();
 	if (!done) {
 		SANDBOX_PRINT(
 			"failed: format FSM did not reach done, state=%s disk=%s status=%s frc=%lld afrc=%lld bs=%lld ms=%lld\n",
