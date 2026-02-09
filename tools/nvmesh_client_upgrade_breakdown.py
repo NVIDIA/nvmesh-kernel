@@ -2035,8 +2035,8 @@ if __name__ == "__main__":
     # DO NOT set a default basicConfig here.
     # main() will set it after args are parsed.
     try:
-        main()
+        sys.exit(main())
     except Exception as e:
         # This will catch the 'raise' from process_log_stream
-        logger.exception("Main processing loop aborted due to fatal error: %s", e)
-
+        logger.exception("Main processing loop aborted due to fatal error: %s", str(e))
+        sys.exit(1)
