@@ -29,7 +29,7 @@ fi
 alias ll='ls -lhA --group-directories-first --color=auto'
 alias lsd='ls -lhA --group-directories-first | pr -2Tn -W200'
 #alias which='(alias; declare -f) | /usr/bin/which --tty-only --read-alias --read-functions --show-tilde --show-dot'
-alias grep='grep --color=auto'
+alias grep='grep -a --color=auto'
 alias gg=git_grep
 alias gb=git_branch
 alias view='less -RN'
@@ -210,7 +210,6 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			echo -e "\tlog \t\tShow graphical structure of branches"
 			echo -e "\tlatest  \tShow latest of specific user. Example: latest danielg"
 			echo -e "\tdelpref \tBatch Delete branches by prefix"
-			echo -e "\tdiff_from \tShow diff of commits from specific branch."
 			echo -e "\tstats \t\tShow stats for top commiters."
 			echo -e "\tsquash \t\tSquash <n> top commits. Example: squash 10"
 			echo_title "Git quick help";
@@ -238,7 +237,9 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			return -5
 		fi
 		echo -e "+--------- \e[1;31m change \e[0;39m ------------------------------------------------------------------------+"
-		git status -s;
+		git status -s -uno;	#git status -s;
+		echo -e "+--------- \e[1;31m Untracked \e[0;39m ------- use:   git clean -fd --dry-run   ----------------------------+"
+		git ls-files --others --exclude-standard;
 		echo -e "+--------- \e[1;31m locals \e[0;39m ------------------------------------------------------------------------+"
 		#git branch --set-origin-to=$GIT_USER/#ci_2master
 		_GIT_FMT_CMT="%(align:60,left)%(color:blue)%(refname:short)%(color:reset)%(end) %(color:bold dim yellow)%(objectname:short)%(color:reset) %(align:26,left)";
@@ -276,12 +277,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 	# ------------------------------------ NVMESH stuff ---------------------------
 	function NVMESH_build() {
 		clear;
-		cur_dir=$PWD;
-		echo "cleaning large simulator file"
-		cd toma/unitest/;      make clean; cd ..;
-		cd clnt/block/unitest; make clean;
-		cd ../um_integration;  make clean;
-		cd $cur_dir;
+		NVMESH_simu clean;
 		if [[ $1 == c* ]]; then
 			./build.sh compileonly
 		elif [[ $1 == m* ]]; then
@@ -456,6 +452,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 	function NVMESH_clean_local() {
 		cd ${MY_PROJECTS_DIR}/$cur_branch/;
 		echo -n "Size before = ";  du -hcs . | grep total;
+		NVMESH_simu clean;
 		echo "********* Cleaning *.[d|i|o|gch|log] ***************"
 		find . -type f -name "*.[dio]" -exec rm -f {} \;
 		find . -type f -name "*.gch" -exec rm -f {} \;
@@ -463,7 +460,6 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		find . -type f -name "*binlog*" -exec rm -f {} \;
 		echo "********* Cleaning bunitest ***************"
 		cd ./clnt/block/unitest
-		make clean;
 		find . -type f -name "*.trace.json" -exec rm -f {} \;
 		find . -type f -name "dict*json"    -exec rm -f {} \;
 		find . -type f -name "gen*events*"  -exec rm -f {} \;
@@ -490,8 +486,15 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			echo $cmd; eval $cmd;
 		elif [[ $1 == toma* ]]; then
 			cd ${TOMA_UNITEST}; make all -j; ./nvmeibt_toma
+		elif [[ $1 == clean* ]]; then
+			local cur_dir=$PWD;
+			echo "cleaning large simulator file"
+			cd toma/unitest/;      make clean; cd ../..;
+			cd clnt/block/unitest; make clean;
+			cd ../um_integration;  make clean;
+			cd $cur_dir;
 		else
-			echo "params to run: clnt / toma"
+			echo -e "*\t\t\tparams to run: < clnt / toma / clean >"
 			echo_green "---------------------- BLOCK SIMULATOR EXAMPLES --------------------";
 			echo "make clean_prev_run; make all -j --output-sync=recurse USE_RELEASE=0 USE_SANITIZERS=1; ./blk_unitest -tracedbg 4 -nRep 1 -hsync -ECAllPerm >longdmesg.txt 2>&1";
 			echo -e "\t Can use: 2>&1 | tee longdmesg.txt";
@@ -630,10 +633,8 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		echo "* Ahmash: 0747236000/3, RSOC-Israel@nvidia.com"
 		echo "* DEV: $MY_DEV_SERVER";
 		#eval ${DISABLE_LINE_WRAP};
-		if [[ "$1" == "edit" ]] || [[ "$1" == "bashrc" ]]; then
-			eval "code $THIS_FILE -r"
-		elif [[ $1 == na* ]]; then
-			wsl.exe -l -v; echo "wsl.exe --shutdown";
+		wsl.exe -l -v; echo "wsl.exe --shutdown";
+		if [[ $1 == na* ]]; then
 			export PS1='\[\e]0;'$2'\a\]\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$';
 		fi
 	}
@@ -852,7 +853,7 @@ else
 				fi;
 				NVMESH_service toma up;
 			elif [ "$2" == "find" ]; then
-				find ${NVMESH_DIR_SRC}/ -name nvmeibt_toma;
+				sudo find ${NVMESH_DIR_SRC}/ -name nvmeibt_toma;
 			elif [ "$2" == "rpc" ]; then
 				cmd="sudo ${NVMESH_DIR_SRC}/common-repo/tools/toma_rpc ${@:3}";
 				echo $cmd; eval $cmd;
@@ -903,7 +904,7 @@ else
 				local toma_exe=`NVMESH_service toma find`;
 				echo_green "Compile toma:";
 				echo "cd toma;";
-				echo "make clean; rm ${tfile}; rm -rf obj/*; make -j -debug=verbose all MOD=release make AUTOGEN_DIR='../autogen' AUTOGEN_SUBDIRS_TOMA='common toma' NVMEIBC_SECTOR_SHIFT=12 GIT_COMMIT_ID=0xdddaaa55;  [ -f ${tfile} ] && echo_green "OK" || echo_red "Fail";";
+				echo "make clean; rm ${tfile}; rm -rf obj/*; make -j --debug=verbose all MOD=release make AUTOGEN_DIR='../autogen' AUTOGEN_SUBDIRS_TOMA='common toma' NVMEIBC_SECTOR_SHIFT=12 GIT_COMMIT_ID=0xdddaaa55;  [ -f ${tfile} ] && echo_green "OK" || echo_red "Fail";";
 				echo -e "\nsudo mv ${toma_exe} ${toma_exe}.back";
 				echo "sudo cp ./trace/nvmeibt_toma/release/dict.*.json /${NVMESH_DIR_LOG}/trace_daemon/";
 				echo "NVMESH_service toma stop; sudo cp bin/release/nvmeibt_toma ${toma_exe}; NVMESH_service toma restart; sleep 1s; cat /proc/nvmeibs/toma_status/raft | grep commit;";
