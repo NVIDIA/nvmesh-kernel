@@ -135,7 +135,7 @@ struct self_test_entry {
  * Run comprehensive self-test suite
  * @param test_selection: Comma-separated test numbers or ranges (e.g., "1,3-5,10" or NULL for all)
  * @param quiet_mode: If true, suppress decorative banners (only show results)
- * @return 0 on success
+ * @return 0 if all tests passed, 1 if any test failed
  */
 int run_self_test(const char *test_selection, BOOL quiet_mode);
 

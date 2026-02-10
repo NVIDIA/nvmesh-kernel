@@ -4978,6 +4978,6 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 	unlink(wrong_device_path);
 	cleanup_backup_files_for_device(test_device_path);
 	SELF_TEST_release_toma_lock();
-	return 0;
+	return (tests_failed > 0) ? 1 : 0;
 }
 
