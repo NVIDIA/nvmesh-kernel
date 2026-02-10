@@ -29,6 +29,7 @@ function kill_process() {
 }
 
 function __force_rebuild() {
+	echo "Rebuilding project...";
 	make clean;
 	local compile_cmd="make all -j $@";
 	__run_cmd "$compile_cmd";

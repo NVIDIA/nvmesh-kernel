@@ -289,6 +289,7 @@ void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void);
 void nvmeibt_raft_unlink_member_from_node(struct nvmeibt_raft_member *member, struct nvmeibt_node *node);
 void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_add_fr_mgmt, int64_t kafka_offset, int config_tag);
 void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_del_fr_mgmt, int64_t kafka_offset);
+void nvmeibt_raft_del_all_members_at_exit(void);
 int nvmeibt_raft_ignore_member(char *hostname);
 void nvmeibt_raft_align_members_with_committed_wire_buf(struct nvmeibt_Str *JSON_output);
 // calculated (adaptive)

@@ -2738,6 +2738,7 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_BM_FREE(ycnks48, my_raft->leader_to_commit_wire_raft_members.data_buf);
 	NNVMEIBT_BM_FREE(kiu12qa, cur_topo->buf_of_follower_wire_topo.data_buf);
 	NNVMEIBT_BM_FREE(etnpa51, raft_long_msg_test_buf.data_buf);
+	nvmeibt_raft_del_all_members_at_exit();
 	HW_conf_free_tree(cur_topo->HW_mgmt_conf);
 	__clean_drives_specs();
 	nvmeibt_disk_free_all_at_exit();

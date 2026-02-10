@@ -1004,6 +1004,22 @@ out:
 	NFOUT;
 }
 
+void nvmeibt_raft_del_all_members_at_exit(void)
+{
+	struct nvmeibt_raft_member	*member;
+	struct nvmeib_hash_table	*h = my_raft_global.raft_members_hash_by_uuid;
+	NFIN;
+	NVMEIB_HASH_FOREACH(member, h) {
+		//nvmeib_hash_delete_uuid(h, nvmeibt_raft_member_id(member));
+		//nvmeibt_raft_unlink_member_from_node(member, NULL);
+		N_Tf(__AUTOID__, "Del member hostname=@STR", nvmeibt_raft_member_name(member));
+		NNVMEIBT_TOMA_FREE(__AUTOID__, member);
+	}
+	my_raft_global.n_raft_members = my_raft_global.n_raft_active_members = my_raft_global.n_peers_voted_for_me = 0;
+	NFOUT;
+}
+
+
 static struct nvmeibt_raft_member *raft_get_member_by_name(char *name)
 {
 	struct nvmeibt_raft_member	*member;
@@ -3390,15 +3406,6 @@ void nvmeibt_raft_activate(void)
 	nvmeibt_toma_raft_validity_was_updated();
 }
 
-/**
- * Initializes the internal data structures of raft, and ties it to the current
- * topology.
- *
- * @author max (3/8/17)
- *
- * @return int
- *
- */
 int nvmeibt_raft_one_time_init(void)
 {
 	int							rv = 0;
@@ -3881,7 +3888,6 @@ int nvmeibt_raft_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...),
 		}
 		(*printf_fn)(printf_ctx, "\t- Peer members\n");
 		NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
-
 			elapsed = timespec_sub(nvmeibt_global_get_cur_event_start_time(), peer_member->last_received_voted_for_me_timespec);
 			(*printf_fn)(printf_ctx, "\t\t- %s: time_since_voted_for_me_on_cur_term=%lld.%09lld is_alive_for_topo_msec=%lld committed(topo_version=%llx kafka_offset=%lld)\n", nvmeibt_raft_member_name(peer_member),
 						 elapsed.tv_sec, elapsed.tv_nsec, timespec_diff_ms(nvmeibt_global_get_cur_event_start_time(), peer_member->is_alive_for_topo_start_timespec),
