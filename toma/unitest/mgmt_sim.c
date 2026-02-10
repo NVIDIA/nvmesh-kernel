@@ -129,6 +129,9 @@ struct mgmt_sim_state {
 	int target_msg_count;
 	int volume_msg_count;
 
+	/* Per-Producer state for deterministic message sequencing */
+	int n_leader_keep_alives;
+
 	/* State machine for formatDrive scenario */
 	enum mgmt_sim_fsm_state fsm_state;
 	int64_t boot_time;                      /* from reportTarget payload.node.bootTime */
@@ -304,21 +307,31 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, s
 	return payload;
 }
 
-void mgmt_sim_on_toma_produced(const void *payload, size_t len)
-{
+void mgmt_sim_on_toma_produced(enum sim_topic_type_toma_to_mgmt type, const void *payload, size_t len) {
 	struct mm_json_elem *root;
 	const char *message_type;
 
-	BUG_ON(!g_mgmt_sim || !payload || len == 0);
+	BUG_ON(!g_mgmt_sim || !payload || len == 0 || (type == KTOPIC_TYPE_T2M_UNKNOWN));
+	// N_Tf(__AUTOID__, "[@CHAR] @INT[b] |@STR|", type, len, (const char*)payload);
+	if (type == KTOPIC_TYPE_T2M_LOW) {
+		return;	// Todo: handle drive zeroing reports here
+	}
 
 	root = parse_json_txt_into_kv_tree((const char *)payload, (int)len);
-	BUG_ON((!root) || (root->type != JSON_E_DICT));
-
-	/* Only handle reportTarget produced by Toma */
 	message_type = json_get_dict_str(root, "messageType", NULL);
-	if (message_type && strcmp(message_type, "reportTarget") == 0) {
-		mgmt_sim_parse_report_target(root);
-		mgmt_sim_run_fsm();
+	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type );
+
+	if (type == KTOPIC_TYPE_T2M_KEEPALIVE) {
+		/* Todo: Currently Only handle leader keep alive */
+		if (strcmp(message_type, "leaderKeepalive") == 0) {
+			g_mgmt_sim->n_leader_keep_alives++;
+		}
+	} else {
+		/* Only handle reportTarget produced by Toma */
+		if (strcmp(message_type, "reportTarget") == 0) {
+			mgmt_sim_parse_report_target(root);
+			mgmt_sim_run_fsm();
+		}
 	}
 	nvmeibt_mm_json_free_kv_tree(root);
 }
@@ -329,7 +342,7 @@ void mgmt_sim_verify_at_end(void)
 	const struct mgmt_sim_disk_status *d3 = &g_mgmt_sim->disk_003;
 	bool done = mgmt_sim_is_done();
 
-	BUG_ON(!g_mgmt_sim);
+	BUG_ON((g_mgmt_sim->volume_msg_count < 0) || (g_mgmt_sim->n_leader_keep_alives < 0));
 	if (!done) {
 		SANDBOX_PRINT(
 			"failed: format FSM did not reach done, state=%s disk=%s status=%s frc=%lld afrc=%lld bs=%lld ms=%lld\n",

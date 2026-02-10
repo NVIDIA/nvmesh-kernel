@@ -1766,8 +1766,8 @@ struct rd_kafka_topic_s {
 	int64_t commited_offset, cur_offset, last_offset;
 	// Todo: Linked list of messages for offsets above cur,cur+1,....last_offset
 	int32_t partition;		// Support only 1 partition for now. Store its index
+	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
 	bool is_active;
-	char type;				// For fast comparison, maybe use enum?
 	int temp_store_offset;	// Daniel, not sure is needed - just for two stage store and commit.
 };
 
@@ -1980,14 +1980,11 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char* name, rd_kafka_t
 	BUG_ON(!is_kafka_cp_used(k));
 	__rd_kafka_topic_init(&k->topic, name, conf);
 	k->topic.is_active = true;
-	k->topic.type = '?';
+	k->topic.type = KTOPIC_TYPE_T2M_UNKNOWN;
 	if (k->who == RD_KAFKA_PRODUCER) {
-		if (strstr(name, "management.priority."))
-			k->topic.type = 'P';
-		else if (strstr(name, "management.keepalive."))
-			k->topic.type = 'K';
-		else if (strstr(name, "management.low."))
-			k->topic.type = 'L';
+		if (     strstr(name, "management.priority."))	k->topic.type = KTOPIC_TYPE_T2M_PRIORITY;
+		else if (strstr(name, "management.keepalive."))	k->topic.type = KTOPIC_TYPE_T2M_KEEPALIVE;
+		else if (strstr(name, "management.low."))		k->topic.type = KTOPIC_TYPE_T2M_LOW;
 		else BUG_ON(true);				// unknown topic which management simulator will not listen too
 	} else {
 		N_Tf(__AUTOID__, "alloc new consumer topic @STR, starting from offset @LD", k->topic.name, k->topic.cur_offset);
@@ -2058,15 +2055,7 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (len == 0) || ((key == NULL) != (keylen == 0)));
 	(void)msgflags;
-	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (const char*)key, (const char*)payload);
-
-	if (kt->type == 'P') {
-		mgmt_sim_on_toma_produced(payload, len);
-	} else if (kt->type == 'K') {
-		// Todo: handle keepalives
-	} else if (kt->type == 'L') {
-		// Todo: handle drive zeroing reports here
-	} else { BUG_ON(true);	}
+	mgmt_sim_on_toma_produced(kt->type, payload, len);
 
 	// No, put this on to kt, in a list and then poll_cb will return the callbacks
 	sys->kafka_simu.notify_producer_msg_accepted(ko, &km, NULL);

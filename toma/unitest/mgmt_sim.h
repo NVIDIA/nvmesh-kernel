@@ -20,14 +20,11 @@ struct mgmt_sim_state *mgmt_sim_init(const char *my_hostname);
 /* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
 char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len);
 
-/**
- * Called when Toma produces a message (e.g., reportTarget, keepalive).
- * The simulator can inspect and track these messages.
- *
- * @param payload The message payload (not necessarily NUL-terminated).
- * @param len     Length of the payload.
- */
-void mgmt_sim_on_toma_produced(const void *payload, size_t len);
+enum sim_topic_type_toma_to_mgmt {
+	KTOPIC_TYPE_T2M_UNKNOWN = '?', KTOPIC_TYPE_T2M_PRIORITY = 'P', KTOPIC_TYPE_T2M_KEEPALIVE = 'K', KTOPIC_TYPE_T2M_LOW = 'L',
+};
+
+void mgmt_sim_on_toma_produced(enum sim_topic_type_toma_to_mgmt type, const void *payload, size_t len);
 
 /**
  * Get the last captured reportTarget JSON (for test assertions).
