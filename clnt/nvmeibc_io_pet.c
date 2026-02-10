@@ -5,7 +5,7 @@
 #include "nvmeibc_error_tags.h"
 
 
-#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR 
+#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR
 
 	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create(void)
 	{
@@ -26,7 +26,7 @@
 	unsigned nvmeibc_io_pet_minimal_severity = NVMEIB_PET_SEVERITY_WARNING;
 	module_param(nvmeibc_io_pet_minimal_severity, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_minimal_severity, "IO PET buffers with severity less then minimal will not be written;");
-	
+
 	unsigned nvmeibc_io_pet_verbose = 0;
 	module_param(nvmeibc_io_pet_verbose, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_verbose, "Non zero value will allow IO PET buffers to provide even more information (like first 8 bytes & metadata for every block); But of course it may hurt performance and the buffer size should be taken into account");
@@ -48,12 +48,12 @@
 		BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
 
 		if (self->cfg.pet_buffer_size && self->writer){
-			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg(self->cfg.msg_allocation_size, GFP_NOFS);
+			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg(self->cfg.msg_allocation_size, GFP_NOIO);
 			nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, self->cfg.msg_allocation_size, msg);
 			if (msg) {
 				_ND(__io_pet_controller_get_buffer, "msg=@PTR, msg->data=@PTR", msg, msg->data);
 				return (struct iovec){.iov_base=msg->data, .iov_len=self->cfg.pet_buffer_size};
-			} 
+			}
 		}
 		return (struct iovec){0};
 	}
@@ -86,7 +86,7 @@
 	static void __io_pet_controller_flush(struct nvmeib_pet_base_controller const* base, enum nvmeib_pet_severity severity, struct iovec data)
 	{
 		int sendm_rv = -EINPROGRESS;
-		bool const should_send = __io_pet_controller_should_send(severity, data); 
+		bool const should_send = __io_pet_controller_should_send(severity, data);
 		__auto_type self = (struct io_pet_controller*)(base);
 		if (should_send) {
 			struct msgloop_msg *msg = container_of(data.iov_base, struct msgloop_msg, data);
@@ -96,7 +96,7 @@
 			sendm_rv = nvmeib_msgloop_sendm(self->writer, msg);
 			nvmesh_error_tag_update(io_pet_send_failures, sendm_rv);
 		}
-		_ND(__io_pet_controller_flush1, "severity{min=@INT, curr=@INT}, iovec={iov_base=@PTR, iov_len=@SIZE} - send={should?=@BOOL, rv=@INT}", 
+		_ND(__io_pet_controller_flush1, "severity{min=@INT, curr=@INT}, iovec={iov_base=@PTR, iov_len=@SIZE} - send={should?=@BOOL, rv=@INT}",
 			nvmeibc_io_pet_minimal_severity, severity, data.iov_base, data.iov_len, should_send, sendm_rv);
 	}
 

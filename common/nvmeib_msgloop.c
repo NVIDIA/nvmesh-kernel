@@ -53,6 +53,12 @@ void msgloop_put_msg(void *_msg)
 }
 EXPORT_SYMBOL(msgloop_put_msg);
 
+/*
+ * Allocate a message for the msgloop.
+ * Note: The 'flags' parameter should be preserved and passed through to kzalloc
+ * so that callers can control deferrable allocation behavior (e.g., GFP_ATOMIC
+ * vs GFP_NOIO).
+ */
 struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
 {
 	struct msgloop_msg *msg;
