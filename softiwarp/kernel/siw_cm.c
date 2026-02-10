@@ -308,12 +308,11 @@ out:
 /*
  * siw_sock_nodelay() - Disable Nagle algorithm
  */
-static int siw_cep_socket_restore_ca(struct siw_cep *cep)
+static int siw_socket_restore_ca(struct socket *sock, char *orig_ca_name, size_t orig_ca_name_len)
 {
-	struct socket *sock = cep->llp.sock;
 	int rv;
-	tcp_setsockopt_val_t set_cong_optval = TCP_SETSOCKOPT_VAL_PTR(cep->orig_ca_name);
-	size_t optval_len = sizeof(cep->orig_ca_name);
+	tcp_setsockopt_val_t set_cong_optval = TCP_SETSOCKOPT_VAL_PTR(orig_ca_name);
+	size_t optval_len = orig_ca_name_len;
 
 #if KS_HAS_SET_FS && defined(KERNEL_DS)
 	mm_segment_t oldfs;
@@ -323,7 +322,7 @@ static int siw_cep_socket_restore_ca(struct siw_cep *cep)
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
 #endif
-	if (!cep->orig_ca_name[0]) {
+	if (!strnlen(orig_ca_name, orig_ca_name_len)) {
 		rv = -EALREADY;
 		goto out;
 	}
@@ -336,8 +335,23 @@ static int siw_cep_socket_restore_ca(struct siw_cep *cep)
 			set_cong_optval, optval_len);
 #	endif
 
+out:
+
+#if KS_HAS_SET_FS && defined(KERNEL_DS)
+	set_fs(oldfs);
+#endif
+	return rv;
+}
+
+static int siw_cep_socket_restore_ca(struct siw_cep *cep)
+{
+	int rv;
+
+	rv = siw_socket_restore_ca(cep->llp.sock, cep->orig_ca_name,
+		 sizeof(cep->orig_ca_name));
+
 	if (rv < 0) {
-		dprint_cep(DBG_CM, cep, "Failed (%d) to restore original congestion algorithm %s\n",
+		dprint_cep(DBG_CM|DBG_ON, cep, "Failed (%d) to restore original congestion algorithm %s\n",
 			   rv, cep->orig_ca_name);
 		goto out;
 	}
@@ -346,10 +360,6 @@ static int siw_cep_socket_restore_ca(struct siw_cep *cep)
 	cep->orig_ca_name[0] = 0;
 
 out:
-
-#if KS_HAS_SET_FS && defined(KERNEL_DS)
-	set_fs(oldfs);
-#endif
 	return rv;
 }
 
@@ -1413,6 +1423,8 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	struct siw_cep		*new_cep = NULL;
 	int			rv = 0, val; /* debug only. should disappear */
 	sock_setsockopt_val_t optval = SOCK_SETSOCKOPT_VAL_PTR(&val);
+	char orig_ca_name[TCP_CA_NAME_MAX] = "";
+	bool new_cep_inuse = false;
 
 	if (cep->state != SIW_EPSTATE_LISTENING)
 		goto error;
@@ -1432,6 +1444,10 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	new_cep->sk_data_ready   = cep->sk_data_ready;
 	new_cep->sk_write_space  = cep->sk_write_space;
 	new_cep->sk_error_report = cep->sk_error_report;
+
+	/* Prevent race with SIW_CM_WORK_PEER_CLOSE if socket is closed by peer while we are accepting the new connection */
+	siw_cep_set_inuse(new_cep);
+	new_cep_inuse = true;
 	
 	/* [NVMESH-3371]: Queue the delayed work before we call accept
 	 * in case we get state-change callback with TCP_CLOSE before the
@@ -1468,13 +1484,16 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	rv = sock_setsockopt(new_s, SOL_SOCKET, SO_SNDBUF,
 			     optval, sizeof(val));
 	if (rv < 0) {
-		pr_err("Error %d setting SO_SNDBUF\n", rv);
+		dprint_cep(DBG_CM|DBG_ON, cep, "new_s=" dprint_ptr_str() 
+			", Error %d setting SO_SNDBUF to %d\n", 
+			new_s, rv, sock_buff_sz);
 		goto error;
 	}
 	rv = sock_setsockopt(new_s, SOL_SOCKET, SO_RCVBUF,
 			     optval, sizeof(val));
 	if (rv < 0) {
-		pr_err("Error %d setting SO_SNDBUF\n", rv);
+		dprint_cep(DBG_CM|DBG_ON, cep, "new_s=" dprint_ptr_str()
+			", Error %d setting SO_RCVBUF to %d\n", new_s, rv, sock_buff_sz);
 		goto error;
 	}
 
@@ -1485,12 +1504,13 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	dprint_cep(DBG_CM, cep, "s=" dprint_ptr_str() ", new_s=" dprint_ptr_str() "): "
 		"New LLP connection accepted\n", s, new_s);
 
-	rv = siw_sock_nodelay(new_s, new_cep->orig_ca_name, sizeof(new_cep->orig_ca_name));
+	rv = siw_sock_nodelay(new_s, orig_ca_name, sizeof(orig_ca_name));
 	if (rv != 0) {
 		dprint_cep(DBG_CM|DBG_ON, new_cep, "ERROR: "
 			"siw_sock_nodelay(): rv=%d\n", rv);
 		goto error;
 	}
+	memcpy(new_cep->orig_ca_name, orig_ca_name, sizeof(new_cep->orig_ca_name));
 
 	siw_cep_state_change(new_cep, SIW_EPSTATE_AWAIT_MPAREQ); /* siw-accept-newconn */
 
@@ -1506,9 +1526,7 @@ static void siw_accept_newconn(struct siw_cep *cep)
 		 */
 		dprint_cep(DBG_CM, new_cep, "Immediate MPA req.\n");
 
-		siw_cep_set_inuse(new_cep);
 		rv = siw_proc_mpareq(new_cep);
-		siw_cep_set_free(new_cep);
 
 		if (rv != -EAGAIN) {
 			/* rv is either 0 (succesful read or a critical error).
@@ -1518,13 +1536,13 @@ static void siw_accept_newconn(struct siw_cep *cep)
 			siw_cep_put(cep);
 			new_cep->listen_cep = NULL;
 			if (rv) {
-				/* Remove reference to sock */
-				new_cep->llp.sock = NULL;
 				dprint_cep(DBG_CM|DBG_ON, new_cep, "Immediate MPA req. ERROR: rv=%d\n", rv);
 				goto error;
 			}
 		}
 	}
+	/* Allow any scheduled works to run */
+	siw_cep_set_free(new_cep);
 	return;
 
 error:
@@ -1534,12 +1552,15 @@ error:
 		siw_cep_state_change(new_cep, SIW_EPSTATE_CLOSED);
 		siw_cancel_peer_close(new_cep);
 		siw_cancel_mpatimer(new_cep);
-		siw_cep_socket_restore_ca(new_cep);
+		new_cep->llp.sock = NULL; /* avoid dangling pointer after sock_release */
+		if (new_cep_inuse)
+			siw_cep_set_free(new_cep);
 		siw_cep_put(new_cep);
 	}
 
 	if (new_s) {
 		siw_socket_disassoc(new_s);
+		siw_socket_restore_ca(new_s, orig_ca_name, sizeof(orig_ca_name));
 		sock_release(new_s);
 	}
 	dprint_cep(DBG_CM|DBG_ON, cep, "ERROR: rv=%d\n", rv);
