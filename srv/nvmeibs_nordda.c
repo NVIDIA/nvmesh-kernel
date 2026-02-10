@@ -3,6 +3,8 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "nvmeib_public.h"
+
 #define  S_NORDDA_C
 
 #include "common/kr_incs.h"
@@ -3270,9 +3272,22 @@ static void nordda_recv_completion_work(struct work_struct *work)
 {
 	struct nvmeibs_nr_channel *nrch = container_of(work,
 		struct nvmeibs_nr_channel, recv_comp_work);
+	
+	__NFIN;
 
-	if (nordda_recv_completion_poll(nrch->net->rcq, nrch))
-		queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work);
+	atomic_dec(&nrch->recv_comp_work_ctr);
+
+	if (atomic_read(&nrch->net->dying))
+		goto out;
+
+	if (nordda_recv_completion_poll(nrch->net->rcq, nrch) && atomic_inc_not_zero(&nrch->recv_comp_work_ctr)) {
+		if (!queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work)) {
+			atomic_dec(&nrch->recv_comp_work_ctr);
+		}
+	}
+
+out:
+	__NFOUT;
 }
 
 static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
@@ -3286,13 +3301,37 @@ static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
 
 	do {
 		if (nvmeibs_defer_recv_comps && nvmeibs_nordda_kwq &&
-		    nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper)) {
-			queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work);
+		    nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper) &&
+			atomic_inc_not_zero(&nrch->recv_comp_work_ctr)) 
+		{
+			if (!queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work)) {
+				atomic_dec(&nrch->recv_comp_work_ctr);
+			}
 			goto out;
 		}
 	} while (nordda_recv_completion_poll(cq, nrch));
 
 out:
+	__NFOUT;
+}
+
+static void nordda_wait_recv_completion_work(struct nvmeibs_nr_channel *nrch)
+{
+	int ctr_val;
+
+	__NFIN;
+	/* Stop allowing new work on the nordda kernel-wq to be scheduled */
+	ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
+	/* Always wait for work to finish (or cancel if pending); otherwise the work
+	 * can run after nrch is freed when it had already decremented the ctr. */
+	if (nvmeib_public_cancel_work_sync(&nrch->recv_comp_work)) {
+		/* Work was cancelled (never ran), do the decrement for the queued reference */
+		ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
+	}
+	if (ctr_val > 0) {
+		_NW(warn_nordda_wait_recv_completion_work, "Work was cancelled, but ctr_val is non-zero: @INT", ctr_val);
+		BUG_NON_PRODUCTION(7739);
+	}
 	__NFOUT;
 }
 
@@ -3733,6 +3772,7 @@ static void connect_nordda_channel_work(struct workqe_struct *work)
 	nrch->n_rxiu_tot = 0;
 	nrch->rxiu_dying = 0;
 	INIT_WORK(&nrch->recv_comp_work, nordda_recv_completion_work);
+	atomic_set(&nrch->recv_comp_work_ctr, 1);
 
 	rsp = kzalloc(sizeof(*rsp), GFP_KERNEL);
 	params = kzalloc(sizeof(*params), GFP_KERNEL);
@@ -4414,6 +4454,8 @@ static void nordda_bn_handler(void *context)
 
 	_NT(trace_nordda_nordda_bn_handler, "nrch @NRCH_NAME (@NRCH)", nrch->name, nrch);
 	BUG_ON(nrch->net->state != QP_RELEASING);
+
+	nordda_wait_recv_completion_work(nrch);
 
 	nvmeibs_client_rionic_disconnect_ioch(nrch->rionic, true);
 
