@@ -325,6 +325,11 @@ else	###########################################              my-laptop) code   
 		echo "./_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color";
 		echo "If you dont have pager on your laptop run\n	./build-verify.sh";
 	'
+	alias compile_toma_simulator="
+		rsync --ignore-errors --delete --delete-before --exclude-from=${HOME}/projects/ssda/excludes -rlpgoDv --sparse ~/projects/ssda/ ~/projects/ssda_tmp;
+		cd ~/projects/ssda_tmp/toma/unitest;
+		make clean;    make all -j;
+	"
 	alias my_compile_block_simulator="
 		#rsync --ignore-errors --delete --delete-before --delete-excluded --exclude-from=~/projects/ssda/excludes -rlpgoDv ~/projects/ssda/ ~/projects/ssda_tmp;
 		rsync --ignore-errors --delete --delete-before --exclude-from=/home/alexander/projects/ssda/excludes -rlpgoDv --sparse ~/projects/ssda/ ~/projects/ssda_tmp;
@@ -678,12 +683,16 @@ function open_logs_collecteor_all_hosts {
 }
 
 alias copybug='function __copybug() {
+	bugs_host="nvme1014"
 	bugs_host="nvmeserver2"
+	bugs_dir="/auto/nvmesh_log/logs"
+	bugs_dir="/home/qa/logs"
 	shopt -s nullglob;
-	bugdir=`ssh ${bugs_host} "cd /home/qa/logs; ls -d *${1}*"` || return 1;
+	#bugdir=`ssh ${bugs_host} "cd /home/qa/logs; ls -d *${1}*"` || return 1;
+	bugdir=`ssh ${bugs_host} "cd ${bugs_dir}; ls -d *${1}*"` || return 1;
 	echo --------- $bugdir --------;
-	ssh ${bugs_host} "sudo chmod -R a+r /home/qa/logs/${bugdir}";
-	rsync -avP -zz --sparse --exclude="\*.csv" ${bugs_host}:/home/qa/logs/"${bugdir}" ~/LOGS;
+	ssh ${bugs_host} "sudo chmod -R a+r ${bugs_dir}/${bugdir}";
+	rsync -avP -zz --sparse --exclude="\*.csv" ${bugs_host}:${bugs_dir}"/${bugdir}" ~/LOGS;
 	cd ~/LOGS/"${bugdir}" || return 1;
 	open_logs_collecteor_all_hosts;
 }; __copybug $@'
