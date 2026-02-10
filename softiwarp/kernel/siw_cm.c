@@ -84,7 +84,35 @@ MODULE_PARM_DESC(connect_non_block, "Connect non-blocking");
 
 bool use_so_incoming_cpu = 1;
 module_param(use_so_incoming_cpu, bool, 0644);
-MODULE_PARM_DESC(use_so_incoming_cpu, "Set the RX CPU of socket to RCQ's comp-vector index (after connect/accept)");
+MODULE_PARM_DESC(use_so_incoming_cpu, "Set the RX CPU of socket to RCQ's comp1-vector index (after connect/accept)");
+
+#ifndef NVMESH_IS_PRODUCTION_COMPILATION
+#define NVMEIBNVMESH_IS_PRODUCTION_COMPILATION 0
+#endif
+
+unsigned long siw_cm_err_inj = 0;
+
+#define FOREACH_SIW_CM_ERR_INJ(OP) \
+	OP(0, NVMESH_7719)
+
+#define SIW_CM_ERR_INJ_BIT_ENUM(IDX, BIT) SIW_CM_ERR_INJ_BIT_##BIT,
+#define SIW_CM_ERR_INJ_MASK_ENUM(IDX, BIT) SIW_CM_ERR_INJ_MASK_##BIT = (1 << SIW_CM_ERR_INJ_BIT_##BIT),
+#define SIW_CM_ERR_INJ_BIT_STRING(BIT) #BIT
+#define SIW_CM_ERR_INJ_BIT_MODPARAM_DESC(IDX, BIT) #IDX " = " #BIT "\n"
+
+enum siw_cm_err_inj_bit {
+	FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_BIT_ENUM)
+};
+
+enum siw_cm_err_inj_bit_mask {
+	FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_MASK_ENUM)
+};
+
+#if !NVMESH_IS_PRODUCTION_COMPILATION
+module_param(siw_cm_err_inj, ulong, 0644);
+MODULE_PARM_DESC(siw_cm_err_inj, "SIW CM error injection bits\n"
+	"\t\t\t\t" FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_BIT_MODPARAM_DESC) "\n");
+#endif
 
 atomic64_t siw_cm_wq_work_idx = ATOMIC_INIT(0);
 
@@ -1527,6 +1555,13 @@ static void siw_accept_newconn(struct siw_cep *cep)
 		dprint_cep(DBG_CM, new_cep, "Immediate MPA req.\n");
 
 		rv = siw_proc_mpareq(new_cep);
+
+#if !NVMESH_IS_PRODUCTION_COMPILATION
+		if (test_and_clear_bit(SIW_CM_ERR_INJ_BIT_NVMESH_7719, &siw_cm_err_inj)) {
+			dprint_cep(DBG_CM|DBG_ON, new_cep, "[NVMESH-7719]: Injecting error\n");
+			rv = -EPROTO;
+		}
+#endif
 
 		if (rv != -EAGAIN) {
 			/* rv is either 0 (succesful read or a critical error).
