@@ -1427,11 +1427,12 @@ int override_close(int fd) {
 		socket_destroy(s);
 	pthread_mutex_unlock(&sys->TS.mutex);
 
-	if (!s) {
-		// This happens during shutdown currently, as Toma closes all fd's before exiting.
-		// To get a clean unit test run, we need to handle this gracefully.
-		// Also, we can't use the binary trace mechanism here during shutdown, as it gets destroyed first.
-		N_SANDBOX(__AUTOID__, "close attempted for invalid fd=@INT", fd);
+	if (!s) { // This happens during shutdown currently, as Toma closes all fd's before exiting. To get a clean unit test run, we need to handle this gracefully.
+		if (sys->can_use_bin_traces) {
+			N_SANDBOX(__AUTOID__, "close attempted for invalid fd=@INT", fd);
+		} else {
+			SANDBOX_PRINT("close attempted for invalid fd=%d\n", fd);
+		}
 		errno = EBADF;
 		return -1;
 	} else {
