@@ -18,6 +18,7 @@
 	}														\
 })
 #include "../toma/nvmeibt_ds.h"
+#include "compat/kr_incs_dummy_empty_traces.h"
 #else	// #if IS_HASH_UNITTEST
 void nvmeibt_abort(enum nvmeibt_error_severity es);
 #define NVMEIB_HASH_ASSERT(name, cond, fmt, ...) ({			\
