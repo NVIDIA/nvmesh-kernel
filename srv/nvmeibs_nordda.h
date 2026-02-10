@@ -201,6 +201,7 @@ struct nvmeibs_nr_channel {
 
 	/* Deferred recv completion work */
 	struct work_struct recv_comp_work;
+	atomic_t recv_comp_work_ctr;
 };
 
 struct nvmeibs_nr_channel *nvmeibs_nordda_alloc_channel(void);
