@@ -4760,9 +4760,12 @@ static void nordda_recv_comp_h(void *ctx, struct ib_wc *wcs)
 	if (nvmeib_opcode_from_wc(wcs) == NVMEIB_DRAIN_QUEUE) //TODO: Remove this
 		nvmeibs_rq_drain_comp(net, wcs);
 	else if (!cl->dismissed) {
+		unsigned long flags;
+		nrch_lock_irqsave(nrch, flags);
 		if ((rv = process_recv_completion(nrch, wcs, false))) {
 			_ND(trace_nordda_nordda_recv_comp_h, "process_recv_completion failed (@RV)", rv);
 		}
+		nrch_unlock_irqrestore(&nrch->spinlock, flags);
 	}
 	else {
 		u32 index = nvmeib_idx_from_wc(wcs);
