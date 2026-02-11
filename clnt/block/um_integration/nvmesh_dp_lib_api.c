@@ -6,6 +6,7 @@
 #include "block/recovery/nvmeibc_block_dp_sync_api.h"
 #include "block/nvmeibc_block_common.h"
 #include "block/recovery/nvmeibc_raid_recovery.h"
+#include "nvmeibc_icore_ops.h"
 #ifdef BLKDEV_SIMULATOR
 	#error This file should not include anything from kernel simulator!
 #endif
@@ -39,20 +40,25 @@ int printk(const char *fmt,...) {
 }
 
 /***************************** Pausable layer - glue to vfunc **************************/
-#include "nvmeibc_pausable.h"
-int nvmeibc_pd_cmpxchg(struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
-	(void)handle;
+static int __um_run_cmpxchg(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
+	(void)self;(void)handle;
 	cinst.vtable.run_cmpxchg(disk, addr, dc);
 	return 0;
 }
 
-int nvmeibc_pd_write_blkset_info(struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
-	(void)handle;
+static int __um_write_blkset_info(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
+	(void)self;(void)handle;
 	cinst.vtable.run_write_binfo(disk, addr, dc);
 	return 0;
 }
 
-int nvmeibc_pd_free_jrnl_ents(     struct nvmeibc_disk *disk, struct nvmeibc_disk_free_jrnl_ents_comp *comp) {
+static int __um_execute_gen(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_gen_cmd *cmd) {
+	(void)self;
+	cinst.vtable.run_gen(disk, cmd);
+	return 0;
+}
+
+static int __um_free_jrnl_ents(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_free_jrnl_ents_comp *comp) {
 	comp->gen_cmd->opcode = NVMEIB_GEN_OP_FREE_JRNL_ENTS;
 	memcpy(comp->gen_cmd->param.free_ents.serjio_boot_id, comp->serjio_boot_id, NVMEIB_GID_STR_MAX);
 	memcpy(comp->gen_cmd->param.free_ents.seg_uuid, comp->seg_uuid, NVMEIB_GID_STR_MAX);
@@ -64,115 +70,153 @@ int nvmeibc_pd_free_jrnl_ents(     struct nvmeibc_disk *disk, struct nvmeibc_dis
 	comp->gen_cmd->param.free_ents.pass2toma = comp->pass2toma;
 	comp->gen_cmd->param.free_ents.ents = comp->ents;
 	comp->gen_cmd->ctx = comp;
-	return nvmeibc_pd_execute_gen(disk, comp->gen_cmd);
+	return __um_execute_gen(self, disk, comp->gen_cmd);
 }
 
-int nvmeibc_pd_execute_io_blocks(  struct nvmeibc_disk *disk, struct nvmeibc_disk_io_command *dcmd) {
+static int __um_execute_io_blocks(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_io_command *dcmd) {
+	(void)self;
 	cinst.vtable.run_io_blocks(disk, dcmd);
 	return 0;
 }
 
-int nvmeibc_pd_execute_gen(struct nvmeibc_disk *disk, struct nvmeibc_disk_gen_cmd *cmd) {
-	cinst.vtable.run_gen(disk, cmd);
-	return 0;
-}
 //the following 3 function update the amount of requests that entered the gate
-void nvmeibc_pd_cb_called_comp(          struct nvmeibc_disk *disk, struct nvmeibc_d_rdma_comp *c) {              (void)disk; (void)c; }
-void nvmeibc_pd_cb_called_free_jrnl_ents(struct nvmeibc_disk *disk, struct nvmeibc_disk_free_jrnl_ents_comp *c) { (void)disk; (void)c; }
-void nvmeibc_pd_cb_called_jmdc(          struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_read_comp *c) {      (void)disk; (void)c; }
+static void __um_cb_called_comp(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_d_rdma_comp *c) {
+	(void)self;(void)disk; (void)c; 
+}
 
-int nvmeibc_pd_read_lock(struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
-	(void)handle;
+static void __um_cb_called_free_jrnl_ents(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_free_jrnl_ents_comp *c) { 
+	(void)self;(void)disk; (void)c;
+}
+
+static void __um_cb_called_jmdc(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_read_comp *c) {
+	(void)self;(void)disk; (void)c;
+}
+
+static int __um_run_read_lock(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
+	(void)self;(void)handle;
 	cinst.vtable.run_viewlock(disk, addr, dc);
 	return 0;
 }
 
-int nvmeibc_pd_execute_io_jour_blocks(struct nvmeibc_disk *disk, struct nvmeibc_disk_io_command *cmd) {
-	return nvmeibc_pd_execute_io_blocks(disk, cmd);
+static int __um_execute_io_jour_blocks(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_io_command *cmd) {
+	return __um_execute_io_blocks(self, disk, cmd);
 }
 
-int nvmeibc_pd_get_blkset_problems(struct nvmeibc_disk *disk, void *handle, u64 start, u64 length, struct nvmeibc_d_rdma_comp *dc) {
-	(void)handle;
+static int __um_get_blkset_problems(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 start, u64 length, struct nvmeibc_d_rdma_comp *dc) {
+	(void)self;(void)handle;
 	cinst.vtable.recov.get_problems(disk, start, length, dc);
 	return 0;
 }
 
-int nvmeibc_pd_jmdc_read(struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_read_comp      *dc) {
+static int __um_jmdc_read(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_read_comp      *dc) {
+	(void)self;
 	cinst.vtable.recov.read_jmdc(disk, dc);
 	return 0;
 }
 
-int nvmeibc_pd_reused_bb_release(struct nvmeibc_disk *disk,struct nvmeib_data_reuse_buf_params *p) { (void)disk; (void)p; BUG(); return 0; }
-
-int nvmeibc_pd_dbg_please_kill_yourself(struct nvmeibc_disk *disk,
-	void (*cb)(void*), void *ctx, int rsc_id, u64 dlba)
-{
-	(void)disk; (void)cb; (void)ctx; (void)rsc_id; (void)dlba;
-	return -EOPNOTSUPP;
-}
-
-int nvmeibc_pd_pause(struct nvmeibc_disk *disk, void (*cb)(void *cntx), void *cntx)
-{
-	(void)disk; (void)cb; (void)cntx;
-	return -EOPNOTSUPP;
-}
-
-int nvmeibc_pd_cont(struct nvmeibc_disk *disk)
-{
-	(void)disk;
-	return -EOPNOTSUPP;
-}
-
-void nvmeibc_pd_cb_called_cmd(struct nvmeibc_disk *disk, struct nvmeibc_disk_command *disk_cmd)
-{
-	(void)disk; (void)disk_cmd;
-}
-
-void nvmeibc_pd_dump_transfers(struct nvmeibc_disk *disk)
-{
-	(void)disk;
-}
-
-int nvmeibc_pd_tostring(const struct nvmeibc_disk *disk, char *buf, int buf_len)
-{
-	(void)disk; (void)buf; (void)buf_len;
+static int __um_reused_bb_release(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk,struct nvmeib_data_reuse_buf_params *p) { 
+	(void)self;(void)disk; (void)p; 
+	BUG();
 	return 0;
 }
 
-int  nvmeibc_pd_jam_get(struct nvmeibc_disk *disk)
+static int __um_dbg_please_kill_yourself(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void (*cb)(void*), void *ctx, int rsc_id, u64 dlba)
 {
-	(void)disk;
-	return 0;
-}
-
-void nvmeibc_pd_jam_put(struct nvmeibc_disk *disk)
-{
-	(void)disk;
-}
-
-int  nvmeibc_pd_jam_get_all(int n_disks, struct nvmeibc_disk *disks[])
-{
-	(void)n_disks; (void)disks;
-	return 0;
-}
-
-void nvmeibc_pd_jam_put_all(int n_disks, struct nvmeibc_disk *disks[])
-{
-	(void)n_disks; (void)disks;
-}
-
-int nvmeibc_pd_toma_send(struct nvmeibc_disk *disk, u64 handle,
-	struct nvmeibc_disk_toma_send_params *params)
-{
-	(void)disk; (void)handle; (void)params;
+	(void)self;(void)disk; (void)cb; (void)ctx; (void)rsc_id; (void)dlba;
+	BUG();
 	return -EOPNOTSUPP;
 }
 
-int nvmeibc_pd_toma_unsubscribe(struct nvmeibc_disk *disk, u64 handle)
+static void __um_cb_called_cmd(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_command *disk_cmd)
 {
-	(void)disk; (void)handle;
+	(void)self;(void)disk; (void)disk_cmd;
+	BUG();
+}
+
+static void __um_dump_transfers(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk)
+{
+	(void)self;(void)disk;
+	BUG();
+}
+
+static int __um_tostring(struct nvmeibc_icore_ops const* self, const struct nvmeibc_disk *disk, char *buf, int buf_len)
+{
+	(void)self;(void)disk; (void)buf; (void)buf_len;
+	BUG();
+	return 0;
+}
+
+static int __um_jam_get(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk)
+{
+	(void)self;(void)disk;
+	BUG();
+	return 0;
+}
+
+static void __um_jam_put(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk)
+{
+	(void)self;(void)disk;
+	BUG();
+}
+
+static int __um_jam_get_all(struct nvmeibc_icore_ops const* self, int n_disks, struct nvmeibc_disk *disks[])
+{
+	(void)self;(void)n_disks; (void)disks;
+	BUG();
+	return 0;
+}
+
+static void __um_jam_put_all(struct nvmeibc_icore_ops const* self, int n_disks, struct nvmeibc_disk *disks[])
+{
+	(void)self;(void)n_disks; (void)disks;
+	BUG();
+}
+
+static int __um_toma_send(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, u64 handle, struct nvmeibc_disk_toma_send_params *params)
+{
+	(void)self;(void)disk; (void)handle; (void)params;
+	BUG();
 	return -EOPNOTSUPP;
 }
+
+static int __um_toma_unsubscribe(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, u64 handle)
+{
+	(void)self;(void)disk; (void)handle;
+	BUG();
+	return -EOPNOTSUPP;
+}
+
+
+struct nvmeibc_icore_ops const um_core_ops = {
+	.run_cmpxchg = __um_run_cmpxchg,
+	.run_read_lock = __um_run_read_lock,
+	.jmdc_read = __um_jmdc_read,
+	.free_jrnl_ents = __um_free_jrnl_ents,
+	.dbg_please_kill_yourself = __um_dbg_please_kill_yourself,
+	.write_blkset_info = __um_write_blkset_info,
+	.get_blkset_problems = __um_get_blkset_problems,
+	.execute_io_blocks = __um_execute_io_blocks,
+	.execute_io_jour_blocks = __um_execute_io_jour_blocks,
+	.execute_gen = __um_execute_gen,
+	.cb_called_comp = __um_cb_called_comp,
+	.cb_called_cmd = __um_cb_called_cmd,
+	.cb_called_jmdc = __um_cb_called_jmdc,
+	.cb_called_free_jrnl_ents = __um_cb_called_free_jrnl_ents,
+	.dump_transfers = __um_dump_transfers,
+	.tostring = __um_tostring,
+	.jam_get = __um_jam_get,
+	.jam_put = __um_jam_put,
+	.jam_get_all = __um_jam_get_all,
+	.jam_put_all = __um_jam_put_all,
+	.toma_send = __um_toma_send,
+	.toma_unsubscribe = __um_toma_unsubscribe,
+	.reused_bb_release = __um_reused_bb_release,
+};
+
+struct nvmeibc_icore_ops const* nvmeibc_core_ops_get(void){
+	return &um_core_ops;
+}
+
 
 /***************************** JAM - glue to vfunc **************************/
 #include "nvmeibc_jam.h"
