@@ -182,7 +182,7 @@ static int make_msg_add_target(char *buf, size_t capacity, int queue_offset) {
 	return snprintf(buf, capacity,			/* First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
 		"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
-		node->hostname, node->uuid, queue_offset, queue_offset);
+		node->hostname, node->uuid, queue_offset, queue_offset + 1*0);	// *0 Simulator hack: Because our kafka simulator does not start from offset 0 so kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma() breaks
 	// Todo: Also test remove "deleteTarget" and add it back
 }
 

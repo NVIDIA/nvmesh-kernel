@@ -1645,7 +1645,6 @@ XDLIST_DECLARE(, struct kafka_wakeup_params, kafka_raft_members_sorted_msgs_queu
 		NNVMEIBT_BM_FREE(name ## _1, wakeup_p->event_data);		\
 		NNVMEIBT_BM_FREE(name ## _2, wakeup_p)
 
-static int64_t		first_ever_mgmt_targets_updates_seq_no = 1;		// MGMT starts with 1
 static int64_t		last_sent_to_toma_targets_updates_seq_no = -1;
 void nvmeibt_kafka_set_last_sent_to_toma_targets_updates_seq_no(int64_t seq_no)
 {
@@ -1665,12 +1664,9 @@ static void kafka_raft_members_sorted_msgs_queue_init(void) {
 static void kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma(void)
 {
 	struct kafka_wakeup_params	*wakeup_params;
-	bool						is_accepting;
-
 	XDLIST_FOREACH_SAFE(wakeup_params, &kafka_raft_members_sorted_msgs_queue) {
-		is_accepting = ((wakeup_params->seq_no == first_ever_mgmt_targets_updates_seq_no && is_offset_zero(wakeup_params->kafka_offset)) ||
-						(wakeup_params->seq_no == (last_sent_to_toma_targets_updates_seq_no + 1)));
-		if (!is_accepting) {
+		const int64_t expected_seq_no = is_offset_zero(wakeup_params->kafka_offset) ? ((int64_t)1 /*MGMT start*/) : (last_sent_to_toma_targets_updates_seq_no + 1);
+		if (wakeup_params->seq_no != expected_seq_no) {
 			N_Wf(hwuscri, "First sequence_no=@INT64_TD last_accepted_targets_updates_sequence=@INT64_TD", wakeup_params->seq_no, last_sent_to_toma_targets_updates_seq_no);
 			break;	// The next sequential msg is missing. Try again later
 		}
