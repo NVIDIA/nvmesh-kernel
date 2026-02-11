@@ -65,7 +65,7 @@ static inline bool hash_is_entry_OCCUPIED(const struct nvmeib_hash_entry *entry)
 
 static inline int nvmeib_hash_get_n_elements(struct nvmeib_hash_table *hash_tbl)
 {
-	return (hash_tbl->n_occupied);
+	return (hash_tbl ? hash_tbl->n_occupied : 0);
 }
 
 static inline bool nvmeib_hash_is_ascii(struct nvmeib_hash_table *hash_tbl)
