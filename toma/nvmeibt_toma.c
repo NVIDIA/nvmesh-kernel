@@ -1506,8 +1506,8 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 		{"cloud-mode",				required_argument,	0,	'c'},
 		{"sm-key",					required_argument,	0,	'k'},
 		{"abort",					no_argument,		0,	'a'},
-		{"sm-query-burst",			required_argument,	0,	'b'},
-		{"use-srq",					required_argument,	0,	'S'},
+		//{"sm-query-burst",			required_argument,	0,	'b'},
+		//{"use-srq",					required_argument,	0,	'S'},
 		{"raft-udp",				no_argument,		0,	'u'},
 		{"use-libibcm",				no_argument,		0,	'i'},
 		{"num-bin_logs",			required_argument,	0,	'z'},
@@ -1525,7 +1525,7 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 		{0, 0, 0, 0}
 	};
 
-	static const char short_options[] = "l:n:s:c:k:b:a:z:x:C:D:E:vu:N";
+	static const char short_options[] = "l:n:s:c:k:auiz:x:C:D:E:N:t:f:F:pj";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1533,7 +1533,7 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 	}
 
 	while ((op = getopt_long(argc, _argv, short_options, long_options, &long_idx)) != -1) {
-		fprintf(stdout, "optarg=%s\n", optarg);
+		fprintf(stdout, "op=%c, optarg=%s\n", (char)op, optarg);
 		if (optarg) {
 			optarg = trim_whitespace(optarg);
 		}

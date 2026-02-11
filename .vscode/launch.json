@@ -109,7 +109,7 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/toma/unitest/nvmeibt_toma",
-			"args": ["-x","24","-a"],
+			"args": ["-x","24","-a","-N","nm_dummy.dll"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}/toma/unitest",
 			"environment": [],
