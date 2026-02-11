@@ -2741,5 +2741,6 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 	(*printf_fn)(printf_ctx, "./kafka-consumer-groups.sh  --bootstrap-server <machine>:9092 --describe --group managements-group\n");
 	(*printf_fn)(printf_ctx, "./kafka-console-consumer.sh --bootstrap-server <machine>:9092 --topic zone1.management.priority.1.0.0 | grep updatePRaidReport | jq .\n");
 	(*printf_fn)(printf_ctx, "./kafka-console-consumer.sh --bootstrap-server <machine>:9092 --topic zone1.leader.incrementalUpdates.1.0.0 --from-beginning\n");
+	(*printf_fn)(printf_ctx, "./kafka-dump-log.sh --print-data-log --files /var/lib/kafka/zone1.leader.incremental*/*.log\n");
 	return 0;
 }

@@ -147,7 +147,6 @@ limitations under the License.
    TOMA.*messageType.*reportTarget, updatePRaidReport, encryptionCommandResponse
    messageType.*hardwareConfiguration, updateVolume, formatDrive
 ```
-33. Get kafka queue entry content: `/opt/kafka_2.12-3.2.0/bin/kafka-dump-log.sh --print-data-log --files /var/lib/kafka/zone1.leader.incrementalUpdates.1.0.0-0/00000000000000000000.log`
 34. Search client's logs related to a specific segment
    Example: `seg=(0,1,2)`
    0, 1, and 2 are indexes of chunk, praid, and segment
@@ -175,17 +174,10 @@ Open the following traces if toma has hiccups
 + function nvmeibt_register_handle_incoming_message
 + function nvmeibt_register_send_msg_to_registrant
 # ------------ nvmeibt_disk_segment ------------
-+ function nvmeibt_recovery_execute_dirty_bits_recoveries_as_needed
-+ function stop_dirty_bits_recovery
++ function nvmeibt_recovery_execute_dirty_rebuilds_as_needed
 # ------------ nvmeibt_ib.c ------------
-+ function _mark_conn_usage_by_toma
-#+ function poll_cq
-+ function do_dying_state_timeout
-+ function check_conn_sq_completion_timeout
-+ function disconnect_conn
-+ function free_remote_by_nic
 # ------------ nvmeibt_praid.c ------------
-+ function nvmeibt_praid_leader_calc_segments_states_and_owners
++ function nvmeibt_praid_leader_calc_topo_main
 # ------------ nvmeibt_topology.c ------------
 + function leader_add_disk_to_node
 + function applied_add_disk_to_node
