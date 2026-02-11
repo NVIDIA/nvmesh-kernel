@@ -107,7 +107,7 @@ struct jam_simu_stats {
 /* Peek: Which block will be allocated to next io to this disk:
    -1 if illegal, [0..journal_size) otherwise*/
 int  nvmeibc_jam_simu_alloc_entry(const struct nvmeibc_disk *disk, u64 dlba, u32 txid, bool dry_run);
-void nvmeibc_jam_simu_process_entry_event(const struct nvmeibc_disk *disk, int entry, enum nvmeibc_jam_jidx_event event);
+void nvmeibc_jam_simu_process_entry_event(struct nvmeibc_disk *disk, int entry, enum nvmeibc_jam_jidx_event event);
 
 struct jam_simu_stats nvmeibc_get_jam_simu_stats(const struct nvmeibc_disk *disk);
 void nvmeibc_jam_simu_inject_hash_function(const struct nvmeibc_disk *disk, u64 (*hash64)(u64, unsigned int));
