@@ -1563,12 +1563,7 @@ int   nvmeibc_jam_simu_alloc_entry(const struct nvmeibc_disk *disk, u64 dlba, u3
 }
 
 void nvmeibc_jam_simu_process_entry_event(const struct nvmeibc_disk *disk, int idx, enum nvmeibc_jam_jidx_event event){
-	/*const*/ struct nvmeibc_jam_disk *jam_disk = (void*)disk->jam_disk;
-	ulong flags;
-	int rv = -1;
-	jam_disk_spin_lock_irqsave(jam_disk, &flags);
-	rv = jidx_event((struct nvmeibc_disk *)disk, idx, event);
-	jam_disk_spin_unlock_irqrestore(jam_disk, flags);
+	int rv = jidx_event((struct nvmeibc_disk *)disk, idx, event);
 	BUG_ON(rv != 0);
 }
 
