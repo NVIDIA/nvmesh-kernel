@@ -318,7 +318,7 @@ int  __IO_LT_try_request_transfer(struct nvmeibc_cmd_lock *locks) {	// Caller gi
 			struct nvmeibc_cmd_lock *l = &locks[i];
 			struct nvmeibc_d_rdma_comp *dc = &l->comp;
 			BUG_ON(pls[i].is_already_taken != are_locks_taken_by_caller);	// Sanity: Verify input params: all locks are taken by the caller or none
-			nvmeibc_get_binfo_of_lock(l) = pls[i].binfo.all;
+			nvmeibc_cmd_lock_set_bi(l, pls[i].binfo);
 			__change_lock_status_to(l, NCL_STATUS_TRANSFERRED);
 			dc->lock.id = dc->compare;
 		}
@@ -336,7 +336,7 @@ void __IO_LT_try_transfer_give(struct nvmeibc_cmd_lock *locks, int lsi) {	// IO 
 	int i, n_locks = locks->nlocks;
 	if (lsi == 0) {
 		struct output_generic_t *out = _get_out_struct(sw);
-		_set_out_binfo(out, nvmeibc_get_binfo_of_lock(locks));
+		_set_out_binfo(out, nvmeibc_cmd_lock_get_bi(locks).all);
 	}
 	if (__does_caller_holds_primary_lock(sw)) {
 		for (i = 0; i < n_locks; i++)				// Transfer locks back to caller
@@ -694,7 +694,7 @@ static int __create_dummy_operation_locks_cmds(struct dplib_caller *sw) {
 			dc->compare = 0;
 			dc->exchange = sw->pr.lid.all;
 			if (pls[i].is_already_taken) {
-				nvmeibc_get_binfo_of_lock(l) = pls[i].binfo.all;
+				nvmeibc_cmd_lock_set_bi(l, pls[i].binfo);
 				__change_lock_status_to(l, NCL_STATUS_TAKEN);
 				dc->lock.id = dc->compare;
 			} else {

@@ -52,9 +52,9 @@ static inline bool NCL_is_failed_to_release(enum nvmeibc_block_lock_status s){
 }
 
 static inline bool NCL_is_request_failed(enum nvmeibc_block_lock_status s){
-	return (NCL_STATUS_FAIL_NO_COMP == s) 
-	       || (NCL_STATUS_FAIL_COMP == s) 
-		   || (NCL_STATUS_DISKDEAD == s) 
+	return (NCL_STATUS_FAIL_NO_COMP == s)
+	       || (NCL_STATUS_FAIL_COMP == s)
+		   || (NCL_STATUS_DISKDEAD == s)
 		   || (NCL_STATUS_DISKDEAD_NO_RETRY == s)
 		   || (NCL_STATUS_ABANDONED == s)
 		   || (NCL_STATUS_TAKEN_DISKDEAD == s);
@@ -252,6 +252,29 @@ struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 	struct nvmeibc_disk_command_probes probes; //TBD: move into @nvmeibc_disk_command
 #endif
 };
+
+// Getter helper functions
+__attribute__((nonnull (1)))
+static inline union nvmeib_blkset_info nvmeibc_d_rdma_comp_get_bi(const struct nvmeibc_d_rdma_comp *self)
+{
+	return (union nvmeib_blkset_info){ .all = (u32)self->lock.bi };
+}
+
+__attribute__((nonnull (1)))
+static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_compare_lock_id(const struct nvmeibc_d_rdma_comp *self) {
+    return (union nvmeib_lock_id){ .all = (u32)self->compare };
+}
+
+__attribute__((nonnull (1)))
+static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_exchange_lock_id(const struct nvmeibc_d_rdma_comp *self) {
+    return (union nvmeib_lock_id){ .all = (u32)self->exchange };
+}
+
+__attribute__((nonnull (1)))
+static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_lock_id(const struct nvmeibc_d_rdma_comp *self)
+{
+	return (union nvmeib_lock_id){ .all = (u32)self->lock.id };
+}
 
 #define NVMEIBC_MAX_JAM_RDMA_OPS		1
 

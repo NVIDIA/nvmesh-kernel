@@ -1071,7 +1071,7 @@ static void __copy_only_owner_lock(struct nvmeibc_cmd_lock *l,
 	l->ds =      lock->ds;
 	nvmeibc_b_rdma_comp_init(&l->comp, 0, l);	// Lockset of 1 lock: owner_id = comp->lock_i = 0
 	__change_lock_status_to(l, NCL_STATUS_INVALID);
-	__copy_blockset_info(l, lock);
+	nvmeibc_copy_blockset_info(l, lock);
 	l->n_siblings = l->nlocks = 1;
 	l->comp.code = NVMEIBC_CMD_LOCK_OWNER;	// Daniel: Not sure this line is needed
 	set_callback_as_locks_state_machine(dc, __handle_locks_o);
@@ -1097,7 +1097,7 @@ static void __copy_all_locks(struct recovery_sync_op *so, const struct nvmeibc_c
 			(l->type == NVMEIBC_CMD_LOCK_COPY_OWNER)) {
 			if ((i < ow->n_siblings)&&(NCL_do_i_have_lock(ow[i].status))) {
 				BUG_ON(ow[i].ds != l->ds);
-				__copy_blockset_info(l, &ow[i]);
+				nvmeibc_copy_blockset_info(l, &ow[i]);
 				__change_lock_status_to(l, NCL_STATUS_DONE);		// IO already holds this lock. Daniel: deliberatly not using NCL_STATUS_TRANSFERRED, but DONE. To mark the sync should not do anything with this lock
 			} else {
 				__change_lock_status_to(l, NCL_STATUS_NOTISSUED);	// Sync has to take this lock
@@ -1472,7 +1472,7 @@ int nvmeibc_sync_unknown_binfo_by_io(struct nvmeibc_cmd_lock *lock, nvmeibc_sync
 	}
 	so->when_done_context = context;
 	__copy_only_owner_lock(so->locks, lock);
-	nvmeibc_get_binfo_of_lock(&so->locks[0]) = so->orig_rldr->rld.pre.all;		// binfo is merged from all available lock copies and is set into the sync lock, the original locks retain their value
+	nvmeibc_cmd_lock_set_bi(&so->locks[0], so->orig_rldr->rld.pre);		// binfo is merged from all available lock copies and is set into the sync lock, the original locks retain their value
 	so->assume_caller_holds_locks = true;
 	__syncs_list_op('+', so);
 	rv = 0;

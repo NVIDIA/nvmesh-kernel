@@ -133,7 +133,7 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 								"rdma.request(sgmnt=%hhu, address=0x%llx, opr=BLKSET_INFO_WRITE, binfo=0x%x<union nvmeib_blkset_info>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>))",
 								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
 								lock->address,
-								(u32)rdma_comp->lock.bi,
+								nvmeibc_d_rdma_comp_get_bi(rdma_comp).all,
 								numeric_downcast(u8, rdma_comp->code));
 
 	} else if (rdma_comp->opr == NVMEIBC_LOCK_CMP_AND_SWAP){
@@ -143,8 +143,8 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 								lock->address,
 								numeric_downcast(u8, rdma_comp->code),
 								//casting, since there is no promises about the upper bits content
-								(u32)(rdma_comp->compare),
-								(u32)(rdma_comp->exchange));
+								nvmeibc_d_rdma_comp_get_compare_lock_id(rdma_comp).all,
+								nvmeibc_d_rdma_comp_get_exchange_lock_id(rdma_comp).all);
 	} else {
 		#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR==1
 		BUG(); //we don't use any other values
@@ -155,10 +155,10 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 								lock->address,
 								numeric_downcast(u8, rdma_comp->opr),
 								numeric_downcast(u8, rdma_comp->code),
-								(u32)(rdma_comp->compare),
-								(u32)(rdma_comp->exchange),
-								(u32)(rdma_comp->lock.id),
-								(u32)(rdma_comp->lock.bi));
+								nvmeibc_d_rdma_comp_get_compare_lock_id(rdma_comp).all,
+								nvmeibc_d_rdma_comp_get_exchange_lock_id(rdma_comp).all,
+								nvmeibc_d_rdma_comp_get_lock_id(rdma_comp).all,
+								nvmeibc_d_rdma_comp_get_bi(rdma_comp).all);
 	}
 }
 
@@ -191,8 +191,8 @@ void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct
 							numeric_downcast(u8, rdma_comp->code),
 							numeric_downcast(u8, rdma_comp->lock_status),
 							//casting, since there is no promises about the upper bits content
-							(u32)(rdma_comp->lock.bi),
-							(u32)(get_contending_id(rdma_comp)));
+							nvmeibc_d_rdma_comp_get_bi(rdma_comp).all,
+							nvmeibc_d_rdma_comp_get_lock_id(rdma_comp).all);
 	}
 }
 
@@ -676,7 +676,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	// ----- Step2: Handle piggyback view-lock success
 	if (likely(NCL_do_i_have_lock(l->status)) ||										// Lock is empty
 		(nvmeibc_sync_is_stale(l, holder) && nvmeibc_sync_is_read_only(l, holder))) {	// Or, EC: lock is stale but slice was not corrupted
-		const union nvmeib_blkset_info binfo = { .all = (u32)nvmeibc_get_binfo_of_comp(read_comp) };
+		const union nvmeib_blkset_info binfo = nvmeibc_d_rdma_comp_get_bi(read_comp);
 		if (!verify_binfo_is_legal(l->ds, binfo, l->address, 'r')) {
 			_NE(tr6_dplrcb, DMESG_PREFIX("@DEV_NAME") ": Additional_info: locksets=@LOCKSETS[@LSI], lock_val=@LOCK_ENT_U64", o->nd->name, locksets, lsi, holder);
 			nvmeibc_block_suspend(o->nd, NULL, NULL);
@@ -1343,14 +1343,14 @@ union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *
 	const struct nvmeibc_cmd_lock *lo = &locksets[owner_i];
 	union nvmeib_blkset_info ow_rv, so_rv;
 	struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(lo->ds);
-	ow_rv.all = nvmeibc_get_binfo_of_lock(lo);
+	ow_rv = nvmeibc_cmd_lock_get_bi(lo);
 	if (lo->secondary_id && (!only_owner)) {
 		union nvmeibc_dbits_entry ow_dbits, so_dbits;
 		int i, n_sibs = lo->n_siblings;
 		for (i = 1; i < n_sibs; i++) {  // merge all copy-of-owner to owner
 			if (unlikely(!nvmeibc_is_readable(lo[i].ds)))			// Non readble segments - cant trust their binfo
 				continue;
-			so_rv.all = nvmeibc_get_binfo_of_lock(&lo[i]);
+			so_rv = nvmeibc_cmd_lock_get_bi(&lo[i]);
 			ow_dbits.all_bits = ow_rv.bits.dirty;
 			so_dbits.all_bits = so_rv.bits.dirty;
 			/*TOOD: (Ofir) uncomment, this warn_on if failing because when destroying slice no_Whole sync doesn't commit binfo, instead it returns so->error.
@@ -1359,7 +1359,7 @@ union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *
 			ow_rv.bits.txid = max((u32)ow_rv.bits.txid, (u32)so_rv.bits.txid);
 			ow_rv.bits.dirty = nvmeibc_dbits_intersect_owners(&ow_dbits, &so_dbits, nvmeibc_raid1_get_protect_lvl(pr));
 		}
-		// nvmeibc_get_binfo_of_lock(lo) = ow_rv.val;	// Finally re-inject the merged back to owner. Daniel: for debug reasons dont do that yet
+		// nvmeibc_cmd_lock_set_bi(lo, ow_rv);	// Finally re-inject the merged back to owner. Daniel: for debug reasons dont do that yet
 		// When owner and copies could cmpxchg from different 0/stale values. Only the stale of primary owner counts
 	}
 	return ow_rv;
@@ -1374,7 +1374,7 @@ void dp_locks_put_TxID_dbits(struct nvmeibc_cmd_lock *locksets, int owner_i, uni
 		const bool wrong_txid = (binfo.bits.txid > NVMEIBC_DP_EC_MD_TX_ID_MAX) ||
 						(!can_put_unknown_txid && (binfo.bits.txid == INITIAL_LAZY_READ_TXID));
 		WARN(wrong_txid, "NVMesh Bug: volume %s: o{%u32}.op=%u, Attempt to inject invalid txid=0x%x to locks\n", o->nd->name, o->dbg_id, o->op, binfo.bits.txid);
-		nvmeibc_get_binfo_of_lock(&lo[i]) = binfo.all;
+		nvmeibc_cmd_lock_set_bi(&lo[i], binfo);
 	}
 }
 

@@ -159,11 +159,11 @@ bool dp_sync_common_are_all_binfo_equal(const struct recovery_sync_op *so)
 	/* Daniel: Important!!! If seconday owner exists, must take its value coz
 	   it might be the sole owner in next topology and have higher TxID */
 	const struct nvmeibc_cmd_lock *lo = &so->locks[0];
-	const union nvmeib_blkset_info ow_rv = {.all = nvmeibc_get_binfo_of_lock(lo) };
+	const union nvmeib_blkset_info ow_rv = nvmeibc_cmd_lock_get_bi(lo);
 	bool rv = true;
 	int i, n_sibs = lo->n_siblings;
 	for (i = 1; i < n_sibs; i++) {  // merge all copy-of-owner to owner
-		const union nvmeib_blkset_info so_rv = {.all = nvmeibc_get_binfo_of_lock(&lo[i]) };
+		const union nvmeib_blkset_info so_rv = nvmeibc_cmd_lock_get_bi(&lo[i]);
 		if (unlikely(so_rv.all != ow_rv.all)) {
 			_NTSO(t_04_binfoeq, "binfos aren't equal: owner_@BINFO, seg[@SI]_@BINFO", ow_rv.all, dp_locks_get_sgmnt_idx_of_lock(&lo[i]), so_rv.all);
 			rv = false;
@@ -180,7 +180,7 @@ bool dp_sync_common_has_dbits_anywhere(const struct recovery_sync_op *so)
 	const struct nvmeibc_cmd_lock *lo = &so->locks[0];
 	int i, n_sibs = lo->n_siblings;
 	for (i = 0; i < n_sibs; i++) {
-		const union nvmeib_blkset_info so_rv = {.all = nvmeibc_get_binfo_of_lock(&lo[i]) };
+		const union nvmeib_blkset_info so_rv = nvmeibc_cmd_lock_get_bi(&lo[i]);
 		if (so_rv.bits.dirty) {
 			_NTSO(t_06_binfoeq, "Lock @INT has dbits, seg[@SI]_@BINFO", i, dp_locks_get_sgmnt_idx_of_lock(&lo[i]), so_rv.all);
 			return true;

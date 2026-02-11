@@ -214,7 +214,7 @@ static int __IO_LT_transfer_locks_of_raid(struct nvmeibc_cmd_lock *locksets,
 		case NVMEIBC_CMD_LOCK_COPY_OWNER: {		// Copy owner[i]
 			NVMEIBC_LOCK_SET_UNLOCK(lt, lf->unlock_val, lf->unlock_reason);
 			lt->comp.compare = lf->comp.compare;
-			__copy_blockset_info(lt, lf);
+			nvmeibc_copy_blockset_info(lt, lf);
 			lt->last_retry_report_time = lt->first_try_time = jiffies;
 			break;
 		}

@@ -312,7 +312,7 @@ static u32 __gen_mirror_txid_sync(const struct recovery_sync_op *so)
 static void __dump_bug_NVMESH3032(const struct recovery_sync_op *so, const char *why) {
 	const struct nvmeibc_raid_leader_cmd_ctx *rld = &so->cmds->rld;
 	_NTSO(t_01_nvmesh3032, "NVMESH-3032 fix=@CHAR: op=@OP_CODE {pre=@BINFO, post=@BINFO, n_locks=@INT, locks_pre[@BINFO,@BINFO]}",
-			why[0], so->o->op, rld->pre.all, rld->post.all, so->locks->n_siblings, (u32)nvmeibc_get_binfo_of_lock(&so->locks[0]), (u32)nvmeibc_get_binfo_of_lock(&so->locks[1]));
+			why[0], so->o->op, rld->pre.all, rld->post.all, so->locks->n_siblings, nvmeibc_cmd_lock_get_bi(&so->locks[0]).all, nvmeibc_cmd_lock_get_bi(&so->locks[1]).all);
 }
 
 void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_raid_leader_cmd_ctx *rld, bool has_stale_lock);
@@ -501,7 +501,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		WARN_ON(so->locks->n_siblings == 1);	// with single primary owner, nowhere to copy it! Bug in design, should have called stale-2-dirty sync
 		if (unlikely(rldr->rld.pre.bits.dirty)) {
 			// This is illegal in R1 with 2 mirror {RW,W}! Should have called dbits turn off! This sync is called when no dirtybits exits which can be turned off. Legal with 3 mirror and above. Example {RW,W,D} with Dbit for Seg2, Need to be copied from RW to W, to transition to {RW,RW,D} topo.
-			WARN_ONCE(true, "nvmeibc bug! so=" PRI_SO_NAME " {%u} Sync must turn-off dbits! Abort to prevent data corruption! pre=0x%x, locks_pre[0x%x,0x%x]\n", PRI_SO_NAME_ARGS(so), so->o->dbg_id, rldr->rld.pre.all, (u32)nvmeibc_get_binfo_of_lock(&so->locks[0]), (u32)nvmeibc_get_binfo_of_lock(&so->locks[1]));
+			WARN_ONCE(true, "nvmeibc bug! so=" PRI_SO_NAME " {%u} Sync must turn-off dbits! Abort to prevent data corruption! pre=0x%x, locks_pre[0x%x,0x%x]\n", PRI_SO_NAME_ARGS(so), so->o->dbg_id, rldr->rld.pre.all, nvmeibc_cmd_lock_get_bi(&so->locks[0]).all, nvmeibc_cmd_lock_get_bi(&so->locks[1]).all);
 			nvmeibc_block_suspend(so->o->nd, NULL, NULL); /* Critical error. Any further action will cause corruption. Fail recovery, suspend the device. We require user intervention to exit this state. Should not happen normally. */
 			so->error = -10029;
 		} else if (unlikely(dp_sync_common_has_dbits_anywhere(so))) {

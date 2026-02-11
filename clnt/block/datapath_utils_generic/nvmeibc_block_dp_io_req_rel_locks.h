@@ -14,13 +14,6 @@ u64     get_lockid_for_cmpxchg(const struct nvmeibc_raid1 *r1, enum nvmeib_block
 /* result of tranport layer failed rdma cpxchng (id that holds lock) */
 #define get_contending_id(lock_comp)  ((lock_comp)->lock.id)
 
-/* get blockset info which was read with the cmpxchng of the lock */
-#define nvmeibc_get_binfo_of_comp(lock_comp)  ((lock_comp)->lock.bi)
-#define nvmeibc_get_binfo_of_lock(l) nvmeibc_get_binfo_of_comp(&(l)->comp)
-
-#define __copy_blockset_info(dst, src) ({ \
-	nvmeibc_get_binfo_of_lock(dst) = nvmeibc_get_binfo_of_lock(src); })
-
 /************************************ Locks ***********************************/
 // indicate the value we should put in the lock when we release it.
 enum release_lock_value {
@@ -121,6 +114,23 @@ struct nvmeibc_cmd_lock {
 		};
 	};
 } __attribute__((aligned(sizeof(long))));			// Multiple of 64 bits, for nice allignement
+
+__attribute__((nonnull (1)))
+static inline union nvmeib_blkset_info nvmeibc_cmd_lock_get_bi(const struct nvmeibc_cmd_lock *self)
+{
+	return nvmeibc_d_rdma_comp_get_bi(&self->comp);
+}
+
+__attribute__((nonnull (1)))
+static inline void nvmeibc_cmd_lock_set_bi(struct nvmeibc_cmd_lock *self, union nvmeib_blkset_info binfo)
+{
+	self->comp.lock.bi = binfo.all;
+}
+
+static inline void nvmeibc_copy_blockset_info(struct nvmeibc_cmd_lock *dst, const struct nvmeibc_cmd_lock *src)
+{
+	dst->comp.lock.bi = src->comp.lock.bi;
+}
 
 struct t_abandon {				// Assist struct for calculations whether blockset locks should be abondoned or not.
 	u8 wr_not_issued;			// Raid1: Abandon the locks unless all commands were successful or none of the commands were issued

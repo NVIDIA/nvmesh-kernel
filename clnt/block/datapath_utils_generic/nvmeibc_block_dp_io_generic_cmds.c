@@ -337,7 +337,7 @@ static void __nvmeibc_cmd_piggyback_request_pet_describe(struct operation *o, st
 	} else if (rdma_comp->code == NVMEIBC_CMD_BLKSET_INFO_WR_PB) { // write piggyback
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
 			"    write_pb.request(addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>, binfo=%u<union nvmeib_blkset_info>)",
-			cmd->lpb.addr, numeric_downcast(u8, rdma_comp->opr), numeric_downcast(u8, rdma_comp->code), (u32)rdma_comp->lock.bi);
+			cmd->lpb.addr, numeric_downcast(u8, rdma_comp->opr), numeric_downcast(u8, rdma_comp->code), nvmeibc_d_rdma_comp_get_bi(rdma_comp).all);
 	}
 }
 
@@ -784,7 +784,7 @@ static void __nvmeibc_cmd_piggyback_response_pet_describe(struct operation *o, s
 	if (dc->code == NVMEIBC_CMD_LOCK_READ_PB) { // read piggyback
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
 			"    read_pb.response(contending=0x%x<union nvmeib_lock_id>, lock_bi=0x%x<union nvmeib_blkset_info>)",
-			(u32)dc->lock.id, (u32)dc->lock.bi);
+			nvmeibc_d_rdma_comp_get_lock_id(dc).all, nvmeibc_d_rdma_comp_get_bi(dc).all);
 	} else if (dc->code == NVMEIBC_CMD_BLKSET_INFO_WR_PB) { // write piggyback
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
 			"    write_pb.response(addr=0x%llx, opr=%hhu<enum nvmeibc_disk_locks_opr>, code=%hhu<enum nvmeibc_rdma_intent>)",
@@ -1232,7 +1232,7 @@ void nvmeibc_blkset_info_write_pet_describe(struct operation* o, u8 sgmnt, u64 a
 						"rdma.request(sgmnt=%hhu, address=0x%llx, opr=BLKSET_INFO_WRITE, binfo=0x%x<union nvmeib_blkset_info>)",
 						sgmnt,
 						addr,
-						(u32)dc->lock.bi);
+						nvmeibc_d_rdma_comp_get_bi(dc).all);
 }
 
 static void __nvmeibc_blkset_info_write_failed_to_send_pet_describe(struct operation* o, int prev_rv)
