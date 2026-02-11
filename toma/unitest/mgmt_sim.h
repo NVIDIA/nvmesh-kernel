@@ -10,12 +10,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-/**
- * Initialize the management simulator.
- * @param my_hostname The hostname of the simulated Toma node.
- */
 struct mgmt_sim_state;
-struct mgmt_sim_state *mgmt_sim_init(const char *my_hostname);
+struct mgmt_sim_state *mgmt_sim_init(const char *live_toma_host_name);
 
 /* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
 char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len);
