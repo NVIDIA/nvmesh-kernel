@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-enum { RD_KAFKA_OFFSET_BEGINNING = -2, RD_KAFKA_OFFSET_END  = -1,  RD_KAFKA_OFFSET_STORED = -1000, RD_KAFKA_OFFSET_INVALID = -1001};
+enum { RD_KAFKA_OFFSET_BEGINNING = -2, /*RD_KAFKA_OFFSET_END = -1,*/  RD_KAFKA_OFFSET_STORED = -1000, RD_KAFKA_OFFSET_INVALID = -1001};
 
 typedef struct rd_kafka_s rd_kafka_t;
 typedef struct rd_kafka_topic_s rd_kafka_topic_t;
@@ -76,7 +76,7 @@ void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*, void (*fn)(rd_kafka_t 
 rd_kafka_resp_err_t rd_kafka_poll_set_consumer(rd_kafka_t* me);
 const char*         rd_kafka_name(   const rd_kafka_t* me);
 void                rd_kafka_set_log_level(rd_kafka_t* me, int lvl);
-void                rd_kafka_flush(        rd_kafka_t* me, int x);
+rd_kafka_resp_err_t rd_kafka_flush(        rd_kafka_t *rk, int timeout_ms);
 void                rd_kafka_destroy(      rd_kafka_t* me);
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking);
 rd_kafka_resp_err_t rd_kafka_commit(       rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async);

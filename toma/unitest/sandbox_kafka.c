@@ -194,7 +194,7 @@ rd_kafka_resp_err_t rd_kafka_consumer_close(rd_kafka_t *rk) {
 rd_kafka_resp_err_t rd_kafka_poll_set_consumer(rd_kafka_t* me) { (void)me; return RD_KAFKA_RESP_ERR_NO_ERROR; }
 const char*         rd_kafka_name(   const rd_kafka_t* me) { return me->name; }
 void                rd_kafka_set_log_level(rd_kafka_t* me, int lvl) { me->log_lvl = lvl; }
-void                rd_kafka_flush(        rd_kafka_t* me, int x) { (void)me; (void)x;}
+rd_kafka_resp_err_t rd_kafka_flush(rd_kafka_t *rk, int timeout_ms) { (void)rk; (void)timeout_ms; return RD_KAFKA_RESP_ERR_NO_ERROR; }
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking) { (void)me; (void)is_blocking; return 0; }
 rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async) {
 	const int64_t last_consumed = (pl->elems[0].offset - 1);
