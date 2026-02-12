@@ -3321,6 +3321,8 @@ static void nordda_wait_recv_completion_work(struct nvmeibs_nr_channel *nrch)
 	if (nvmeib_public_cancel_work_sync(&nrch->recv_comp_work)) {
 		/* Work was cancelled (never ran), do the decrement for the queued reference */
 		ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
+	} else {
+		ctr_val = atomic_read(&nrch->recv_comp_work_ctr);
 	}
 	if (ctr_val > 0) {
 		_NW(warn_nordda_wait_recv_completion_work, "Work was cancelled, but ctr_val is non-zero: @INT", ctr_val);
