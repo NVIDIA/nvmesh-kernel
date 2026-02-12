@@ -574,27 +574,16 @@ static ssize_t __ext_blob_to_txt(void *_dev, char *buf, size_t len)
 	return rv;
 }
 
-#define PROFILING_PROC_FRMT_VER 1
-static ssize_t __flow_counters_to_json(void *_dev, char *buf, size_t len)
+void nvmeibc_syncs_stats_tojson(struct jdr *jdr)
 {
-	struct nvmeibc_block_device *dev = _dev;
-	struct jdr jdr = jdr_make((struct charvec){.base=buf,.len=len});
-
-	if (unlikely(nvmeibc_block_status_is_detaching(dev->status))) {
-		goto _out;
-	}
-	{
-		jdr_object_scope(&jdr, "syncs");
-		nvmeibc_htr_status_tojson(&jdr);
-		nvmeibc_cold_stats_tojson(&jdr);
-		nvmeibc_maintain_sync_stats_tojson(&jdr);
-		nvmeibc_nowhole_stats_tojson(&jdr);
-	}
-	nvmeib_proc_add_json_proc_epilog_jdr(PROFILING_PROC_FRMT_VER, &jdr);
-
-_out:
-	return jdr_finalize(&jdr).len;
+	jdr_object_scope(jdr, "syncs");
+	nvmeibc_htr_status_tojson(jdr);
+	nvmeibc_cold_stats_tojson(jdr);
+	nvmeibc_maintain_sync_stats_tojson(jdr);
+	nvmeibc_nowhole_stats_tojson(jdr);
 }
+
+#define PROFILING_PROC_FRMT_VER 1
 
 #define BLK_CPU_MASKS_PROC_FRMT_VER 1
 ssize_t nvmeibc_block_cpu_masks_to_json(const struct nvmeibc_cinst_params_blk *p, char *buf, size_t len)
@@ -772,7 +761,6 @@ static const struct nvmeibc_procfs_cb block_proc_cbs = {
 	.dev_status_to_txt = __block_tostring,
 	.dev_status_to_json = __block_tojson,
 	.dev_recovs_to_txt = __stalocks_tostring,
-	.flows_cntr_to_json = __flow_counters_to_json,
 #if defined(BLKDEV_PROFILING)
 	.profiling_to_string = __profilers_tostring,
 	.profiling_to_csv = __profilers_tocsv,

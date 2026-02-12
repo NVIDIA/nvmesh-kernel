@@ -27,6 +27,7 @@ static struct t_main_module_single_instance_globals {
 		struct t_module_clnt_proc_files {		// Files in root directory of each instance
 			struct nvmeib_public_procfs_ent *version_proc;
 			struct nvmeib_public_procfs_ent *cflags_proc;
+			struct nvmeib_public_procfs_ent *fcntrs_proc;
 			struct nvmeib_public_procfs_ent *dict_sign_proc;
 			struct nvmeib_public_procfs_ent *isnt_list;
 			struct msgloop_procfs_ent *inst_ctls_proc;	// msg loop for ioctls
@@ -123,6 +124,23 @@ static ssize_t get_cflags(void *dummy, char *buffer, size_t len)
 	return nvmeibc_get_compile_flags(buffer, len);
 }
 
+#define FLOW_COUNTERS_PROC_FRMT_VER 1
+
+static ssize_t fill_flow_counters_json(void *dummy, char *buffer, size_t len)
+{
+	struct jdr jdr = jdr_make((struct charvec){ .base = buffer, .len = len });
+
+	(void)dummy;
+
+	{
+		jdr_object_scope(&jdr, "block");
+		nvmeibc_syncs_stats_tojson(&jdr);
+	}
+	nvmeib_proc_add_json_proc_epilog_jdr(FLOW_COUNTERS_PROC_FRMT_VER, &jdr);
+
+	return jdr_finalize(&jdr).len;
+}
+
 static int nvmeibc_module_procs_create(struct t_main_module_single_instance_globals *_mg)
 {
 	int rv = -1;
@@ -132,6 +150,7 @@ static int nvmeibc_module_procs_create(struct t_main_module_single_instance_glob
 	rv = (_mg->proc_dir.files.inst_ctls_proc = nvmeib_msgloop_create(INST_CTLS, _mg->proc_dir.root, &handle_module_cli_input, NULL, NULL, _mg)) ? 0 : -1 ;
 	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.version_proc  , "version"       , fill_version_json);
 	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.cflags_proc   , "cflags"        , get_cflags);
+	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.fcntrs_proc   , "flow_counters.json", fill_flow_counters_json);
 	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.dict_sign_proc, "dict_sign"     , fill_dict_sign);
 	PROC_FILE_CREATE(         _mg, _mg->proc_dir.files.isnt_list     , "inst_list.json", fill_isntances_info);
 	PROC_FILE_CREATE_WRITABLE(_mg, _mg->proc_dir.files.echo_proc     , "echo"          , __echo_msg_to_longterm_log);
@@ -151,6 +170,7 @@ static void nvmeibc_module_procs_destroy(struct t_main_module_single_instance_gl
 	}
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.version_proc);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.cflags_proc);
+	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.fcntrs_proc);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.dict_sign_proc);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.isnt_list);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.echo_proc);

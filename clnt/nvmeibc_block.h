@@ -240,4 +240,6 @@ void nvmeibc_block_trace_stats(const struct nvmeibc_block_device *dev);
 ssize_t nvmeibc_block_cpu_masks_to_json(const struct nvmeibc_cinst_params_blk *p, char *buf, size_t len);
 int nvmeibc_block_get_cpu_masks(const struct nvmeibc_block_device *dev, struct nvmeib_cpu_mask_info *mask_infos, int max_masks);
 
+void nvmeibc_syncs_stats_tojson(struct jdr *jdr);
+
 #endif

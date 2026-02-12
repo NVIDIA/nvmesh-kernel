@@ -1824,7 +1824,6 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 	__set_default_if_null(cb.dev_status_to_txt);
 	__set_default_if_null(cb.dev_status_to_json);
 	__set_default_if_null(cb.dev_recovs_to_txt);
-	__set_default_if_null(cb.flows_cntr_to_json);
 	__set_default_if_null(cb.profiling_to_string);
 	__set_default_if_null(cb.profiling_to_csv);
 	__set_default_if_null(cb.ext_blob_to_txt);
@@ -1841,7 +1840,6 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 	p->profiling= RO_proc_open("profiling",        p, cb.profiling_to_string   , os->dev);
 	p->profcsv  = RO_proc_open("profiling.csv",    p, cb.profiling_to_csv      , os->dev);
 	p->j_status = RO_proc_open("status.json" ,     p, cb.dev_status_to_json    , os->dev);
-	p->j_flow_c = RO_proc_open("flow_cntr.json",   p, cb.flows_cntr_to_json    , os->dev);
 	p->ext_blob = RO_proc_open("blob.txt",         p, cb.ext_blob_to_txt       , os->dev);
 
 	if (cb.cpu_masks.to_json) {
@@ -1855,7 +1853,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 
 _out:
 	return (p->dir && p->io_st_sum && p->status && p->opens && p->throttle &&
-			p->stalocks && p->profiling && p->j_status && p->j_io_st && p->j_flow_c && p->ext_blob &&
+			p->stalocks && p->profiling && p->j_status && p->j_io_st && p->ext_blob &&
 			(!cb.cpu_masks.to_json || (p->cpu_masks.dir && p->cpu_masks.j_show && p->cpu_masks.add && p->cpu_masks.del)));
 }
 
@@ -1880,7 +1878,6 @@ static void __proc_destroy(struct nvmeibc_os_api *os)
 	RM_PROC_FILE(p->profiling);
 	RM_PROC_FILE(p->profcsv);
 	RM_PROC_FILE(p->j_status);
-	RM_PROC_FILE(p->j_flow_c);
 	RM_PROC_FILE(p->ext_blob);
 	if (p->dir) {
 		if (p->cpu_masks.dir) {

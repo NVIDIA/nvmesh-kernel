@@ -48,7 +48,6 @@ struct nvmeibc_os_api {
 		//--------- Json formats for mgmt/NVCK
 		struct nvmeib_public_procfs_ent *j_status;			// Realtme block device status
 		struct nvmeib_public_procfs_ent *j_io_st;			// Detailed   IO stats written as json format
-		struct nvmeib_public_procfs_ent *j_flow_c;			// Detailed counters of various flows and corner cases
 		//--------- Extra blob info about volume
 		struct nvmeib_public_procfs_ent *ext_blob;
 		//--------- Volume's CPU masks
@@ -87,7 +86,6 @@ struct nvmeibc_procfs_cb {
 	proc_fill_t *dev_status_to_txt;		// Print status of block device
 	proc_fill_t *dev_status_to_json;		// Print status of block device
 	proc_fill_t *dev_recovs_to_txt;		// Print status of recoveries
-	proc_fill_t *flows_cntr_to_json;		// Print counters of corner case flows
 	proc_fill_t *profiling_to_string;		// Print profiling information
 	proc_fill_t *profiling_to_csv;			// Print profiling information in CSV format
 	proc_fill_t *ext_blob_to_txt;			// Print exteternal blob informat
