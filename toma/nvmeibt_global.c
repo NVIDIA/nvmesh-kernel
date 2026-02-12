@@ -909,7 +909,7 @@ void nvmeibt_global_idle_time_activities(void)
 	static int64_t				n_calls = 0;
 	const int64_t				n_calls_at_artificial_full_log = 10;
 	static int					last_kafka_idle_print_time_sec = 0;
-	int							kafka_idle_time_sec = nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_global()->kafka_last_activity_time.tv_sec;
+	const int					kafka_idle_time_sec = nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_global()->kafka_last_activity_time.tv_sec;
 
 	NFIN;
 	if (n_calls >= n_calls_at_artificial_full_log) {
@@ -924,7 +924,7 @@ void nvmeibt_global_idle_time_activities(void)
 		struct timespec now;
 		getnstimeofday_boot(&now);
 		if (now.tv_sec - last_kafka_idle_print_time_sec > 30) { // print the error every 30 sec
-			N_ETf(i990kss, "Kafka has been idle for @INT sec", kafka_idle_time_sec);
+			N_ETf(i990kss, "Kafka client deadlock detected (for @INT[sec])! Consider manual restart...", kafka_idle_time_sec);
 			last_kafka_idle_print_time_sec = now.tv_sec;
 		}
 	}
