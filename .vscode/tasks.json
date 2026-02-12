@@ -81,7 +81,7 @@
             "label": "BuildTomaSimulator",
             "type": "shell",
             "command": "make",
-            "args": ["all", "-j", "10", "-C", "toma/unitest"],
+            "args": ["clean_run", "all", "-j", "10", "-C", "toma/unitest"],
             "options": {"cwd": "${workspaceFolder}"},
             "problemMatcher": ["$gcc"],
             "group": {"kind": "build", "isDefault": true }
