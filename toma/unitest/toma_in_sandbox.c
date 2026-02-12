@@ -1782,24 +1782,7 @@ int rsrm_faults_get_fd(void) {
 void rsrm_faults_handle_fifo_comm(void) {}
 
 #include "nvmeibt_global.h"
-int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
-	struct nvmeibt_node *node;
-	struct nvmeib_hash_table *h = nvmeibt_global_get_global()->nodes_hash_by_uuid;
-	NVMEIB_HASH_FOREACH(node, h) {
-		if (!node->conn_ctx) {
-			N_Tf(__AUTOID__, "Establish connection to node: @STR", node->from_config.name);
-			node->conn_ctx = (void*)0x11110000;	// Todo: Just some non null value.
-		}
-	}
-	if (ln->raft_msg_queue_from_other_tomas.n_msgs > 0) {
-		N_Tf(__AUTOID__, "@INT raft msgs arrived", ln->raft_msg_queue_from_other_tomas.n_msgs);
-		for (int i = 0; i < ln->raft_msg_queue_from_other_tomas.n_msgs; i++) {
-			nvmeibt_toma_dispatch_received_msg(ln->raft_msg_queue_from_other_tomas.msg_q[i]);
-		}
-		ln->raft_msg_queue_from_other_tomas.n_msgs = 0;
-	}
-	return 0;
-}
+#include "nvmeibt_raft_msg_fmt.h"
 
 int nvmeibt_nm_add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) {
 	++ln->n_nics;
@@ -1830,19 +1813,61 @@ bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *ln, struc
 	return true;
 }
 
-int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
-	const struct raft_msg *r_msg = (typeof(r_msg))req->cnst_msg;
-	const struct nvmeibt_persist_and_wire_buf *r_topo = (typeof(r_topo))req->cnst_data;
-	N_Tf(__AUTOID__, "node: @STR, received msg=@STR, @INT[b]", node->from_config.name, nvmeibt_ib_protocol_signature_to_str(req->msg_type), req->msg_len);
-	// Todo: Here other_toma sandbox should analyze the message (VOTE request, APPEND entries, Topo, etc..) and create a reply
+int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
+	struct nvmeibt_node *node;
+	struct nvmeib_hash_table *h = nvmeibt_global_get_global()->nodes_hash_by_uuid;
+	NVMEIB_HASH_FOREACH(node, h) {
+		if (!node->conn_ctx) {
+			N_Tf(__AUTOID__, "Establish connection to node: @STR", node->from_config.name);
+			node->conn_ctx = (void*)0x11110000;	// Todo: Just some non null value.
+		}
+	}
+	if (ln->raft_msg_queue_from_other_tomas.n_msgs > 0) {
+		N_Tf(__AUTOID__, "@INT raft msgs arrived", ln->raft_msg_queue_from_other_tomas.n_msgs);
+		for (int i = 0; i < ln->raft_msg_queue_from_other_tomas.n_msgs; i++) {
+			nvmeibt_toma_dispatch_received_msg(ln->raft_msg_queue_from_other_tomas.msg_q[i]);
+		}
+		ln->raft_msg_queue_from_other_tomas.n_msgs = 0;
+	}
+	return 0;
+}
 
+int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
+	const struct raft_msg *in_r_msg = (typeof(in_r_msg))req->cnst_msg;
+	const struct nvmeibt_persist_and_wire_buf *r_topo = (typeof(r_topo))req->cnst_data;
+	const enum nvmeibt_raft_msg_type in_msg_type = LE_SWAP32((uint32_t)in_r_msg->msg_type);
+	N_Tf(__AUTOID__, "node: @STR, received msg=@STR[@X], @INT[b]", node->from_config.name, nvmeibt_ib_protocol_signature_to_str(req->msg_type), in_msg_type, req->msg_len);
+	if (req->cbs.send_c) {
+		req->cbs.send_c(NULL, 0);	// Ack that message was sent to peer
+	}
 	{ // Add reply to to list, no needs for locks. Accessed only from Toma main threads
+		// const int node_idx = sb_cluster_conf_find_node_idx_by_name(&sys->cfg, node->from_config.name);
 		struct t_raft_msg_queue_from_other_tomas *rq = &ln->raft_msg_queue_from_other_tomas;
-		struct nvmeibt_big_msg *msg = calloc(1, sizeof(*msg) + req->msg_len);
-		BUG_ON(rq->n_msgs >= (int)ARRAY_SIZE(rq->msg_q));
-		msg->msg_type = req->msg_type; //NVMEIBT_IB_PROTOCOL_SIGNATURE_RAFT;
-		msg->data_len = req->msg_len;
-		memcpy(msg->data, r_msg, req->msg_len);		// DHS: Copy the incomming message as a reply, completely wrong, just to see that Toma actually gets it.
+		struct nvmeibt_big_msg *msg = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*msg) + req->msg_len + req->data_len);
+		struct raft_msg *out_r_msg = (typeof(out_r_msg))msg->data;
+		BUG_ON(rq->n_msgs >= (int)ARRAY_SIZE(rq->msg_q) || (req->msg_type != NVMEIBT_IB_PROTOCOL_SIGNATURE_RAFT));
+		msg->msg_type = req->msg_type;
+		msg->data_len = (req->msg_len + req->data_len);		// Reply has the same length/payload as request
+		memcpy(out_r_msg, in_r_msg, req->msg_len);			// DHS: Copy the incomming message as a reply so most fields would be already initialized
+		out_r_msg->src_node_id =  in_r_msg->dst_node_id;	// Switch 'src' and 'dst' which will make them both correct
+		out_r_msg->dst_node_id =  in_r_msg->src_node_id;
+		out_r_msg->src_node_idx = in_r_msg->dst_node_idx;
+		out_r_msg->dst_node_idx = in_r_msg->src_node_idx;
+		switch (in_msg_type) {
+			case RAFT_MSG_REQ_VOTE:
+				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_REQ_VOTE_REP);
+				out_r_msg->is_vote_granted = true;			// Currently always vote for live toma.
+				break;
+			case RAFT_MSG_APPEND_ENTRIES:
+				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_APPEND_ENTRIES_REP);
+				if (req->data_len)
+					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incomming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
+				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
+				break;
+			default: BUG_ON(true);							// Currently only support reply as follower on leader/candidate msgs
+		}
+		out_r_msg->raft_hdr_crc = 0;
+		out_r_msg->raft_hdr_crc = LE_SWAP32(crc32(0, out_r_msg, sizeof(*out_r_msg)));
 		rq->msg_q[rq->n_msgs++] = msg;
 	}
 	return 0;
