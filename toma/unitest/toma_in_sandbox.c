@@ -1919,16 +1919,8 @@ void rd_kafka_topic_destroy(rd_kafka_topic_t *kt) {
 	memset(kt, 0, sizeof(*kt));
 }
 
-rd_kafka_resp_err_t rd_kafka_offset_store(rd_kafka_topic_t *kt, int32_t partition, int64_t offset) {
-	__rd_kafka_topic_verify_valid(kt, partition);
-	BUG_ON((offset <= kt->commited_offset) || (offset > kt->cur_offset));		// Todo: Maybe off by 1 here
-	kt->temp_store_offset = offset;
-	// Todo, drop messages for previous offsets from the list.
-	return RD_KAFKA_RESP_ERR_NO_ERROR;
-}
-
 void rd_kafka_consume_stop(rd_kafka_topic_t *kt, int32_t partition) {
-	N_Tf(__AUTOID__, "@STR: stop topic, cur_offset=@LD", kt->name, kt->cur_offset);
+	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->cur_offset);
 	__rd_kafka_topic_verify_valid(kt, partition);
 	kt->is_active = false;
 }
@@ -1997,7 +1989,6 @@ rd_kafka_resp_err_t rd_kafka_poll_set_consumer(rd_kafka_t* me) { (void)me; retur
 const char*         rd_kafka_name(   const rd_kafka_t* me) { return me->name; }
 void                rd_kafka_set_log_level(rd_kafka_t* me, int lvl) { me->log_lvl = lvl; }
 void                rd_kafka_flush(        rd_kafka_t* me, int x) { (void)me; (void)x;}
-rd_kafka_resp_err_t rd_kafka_unsubscribe(  rd_kafka_t* me) { (void)me;return RD_KAFKA_RESP_ERR_NO_ERROR; }
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking) { (void)me; (void)is_blocking; return 0; }
 rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async) {
 	const int64_t last_consumed = (pl->elems[0].offset - 1);
@@ -2223,11 +2214,6 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	N_Tf(__AUTOID__, "consumer[@STR] ++cur_offset=@LD", unique_name, ko->topic.cur_offset);
 	m->_private = NULL;
 	return m;
-}
-
-rd_kafka_message_t* rd_kafka_consume(rd_kafka_topic_t* kt, int32_t partition, int timeout_ms) {
-	BUG_ON(0 != partition);
-	return rd_kafka_consumer_poll(kafka_simu_find_by_topic(kt), timeout_ms);
 }
 
 int nvmeibt_ib_common_device_uuid_str_to_raw(union ibv_gid *ibv_gid, const char *device_uuid_str) {		// Todo: No, do not reimplement, use production code!
