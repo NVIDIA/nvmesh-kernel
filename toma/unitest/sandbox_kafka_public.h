@@ -41,7 +41,7 @@ typedef enum {
 } rd_kafka_resp_err_t;
 
 typedef struct rd_kafka_topic_partition_s {
-	rd_kafka_t* k;
+	rd_kafka_t* k;			// Daniel: In real kafka no such pointer, we keep it to verify that caller does not mistakenly assign partition to wrong consumer
 	const char *topic;
 	int32_t partition;
 	rd_kafka_resp_err_t err;
@@ -89,12 +89,10 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *rk, const char* name, rd_kafka_
 
 void                rd_kafka_topic_destroy(rd_kafka_topic_t *kt);
 rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *rk, int timeout_ms);
-void                rd_kafka_consume_stop( rd_kafka_topic_t *kt, int32_t partition);
 rd_kafka_resp_err_t rd_kafka_consumer_close(rd_kafka_t *rk);
 rd_kafka_resp_err_t rd_kafka_assign(     rd_kafka_t *, const rd_kafka_topic_partition_list_t *pl);
 rd_kafka_resp_err_t rd_kafka_assignment (rd_kafka_t *,       rd_kafka_topic_partition_list_t **pl);
 const char*         rd_kafka_topic_name(const rd_kafka_topic_t*);
-rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset);
 
 static inline int rd_kafka_wait_destroyed(int n_msec) { (void)n_msec; return 0; }
 enum my_rd_kafka_purge_flags { RD_KAFKA_PURGE_F_INFLIGHT = 0x2, RD_KAFKA_PURGE_F_NON_BLOCKING = 0x4 };

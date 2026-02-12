@@ -74,10 +74,6 @@ void sandbox_kafka_destroy(struct kafka_simulator_t *ks) {
 }
 
 /************************************* Static helpers ********************************/
-static inline void __rd_kafka_topic_verify_valid(rd_kafka_topic_t *kt, int32_t partition) {
-	BUG_ON((partition != kt->partition) || (!kt->is_active));
-}
-
 static bool is_kafka_cp_used(const rd_kafka_t* o) {
 	return (o->name != NULL);
 }
@@ -154,44 +150,36 @@ void rd_kafka_topic_destroy(rd_kafka_topic_t *kt) {
 	memset(kt, 0, sizeof(*kt));
 }
 
-void rd_kafka_consume_stop(rd_kafka_topic_t *kt, int32_t partition) {
-	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->cur_offset);
-	__rd_kafka_topic_verify_valid(kt, partition);
-	kt->is_active = false;
-}
-
-rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset) {
-	N_Tf(__AUTOID__, "@STR: start topic consume from offset=@LD", kt->name, offset);
-	kt->is_active = true;
-	__rd_kafka_topic_verify_valid(kt, partition);
-	if ((offset == RD_KAFKA_OFFSET_STORED)) {
-		// Toma relies on Kafka simulator
-	} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
-		__reset_offset(kt, 6);
-	} else {	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
-		__reset_offset(kt, offset - 1);
-	}
-	return RD_KAFKA_RESP_ERR_NO_ERROR;
-}
-
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
-	N_Tf(__AUTOID__, "k_object=@STR", ko->name);
+	rd_kafka_topic_t *kt = &ko->topic;
+	N_Tf(__AUTOID__, "k_object=@STR, has_pl=@BOOL_YN", ko->name, !!pl);
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_active) {
-			rd_kafka_consume_stop(&ko->topic, ko->topic.partition);
+			N_Tf(__AUTOID__, "@STR: stop. cur_offset=@LD", kt->name, kt->cur_offset);
+			kt->is_active = false;
 		} // Topic was never created
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	} else {
+		const int64_t offset = pl->elems[0].offset;
 		if (!pl->elems[0].k) {
 			((rd_kafka_topic_partition_t*)&pl->elems[0])->k = ko;
 			rd_kafka_topic_new(ko, pl->elems[0].topic, NULL);
 		}
-		BUG_ON(ko != pl->elems[0].k);
-		return rd_kafka_consume_start(&ko->topic, ko->topic.partition, pl->elems[0].offset);
+		BUG_ON((ko != pl->elems[0].k) || (kt->partition != pl->elems[0].partition));		// We dont support partitions
+		N_Tf(__AUTOID__, "@STR: start topic consume from offset=@LD", kt->name, offset);
+		kt->is_active = true;
+		if (offset == RD_KAFKA_OFFSET_STORED) {
+			N_Tf(__AUTOID__, "@STR: continue from cur_offset=@LD", kt->name, kt->cur_offset); // Toma relies on Kafka simulator
+		} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
+			__reset_offset(kt, 6);
+		} else {	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
+			__reset_offset(kt, offset - 1);
+		}
+		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	}
 }
 
-rd_kafka_resp_err_t rd_kafka_assignment (rd_kafka_t *ko, rd_kafka_topic_partition_list_t **pl) {
+rd_kafka_resp_err_t rd_kafka_assignment(rd_kafka_t *ko, rd_kafka_topic_partition_list_t **pl) {
 	*pl = NULL;
 	if (!ko->topic.is_active)
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -283,8 +271,7 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char* name, rd_kafka_t
 
 rd_kafka_topic_partition_list_t* rd_kafka_topic_partition_list_new(int n) {
 	rd_kafka_topic_partition_list_t* rv = calloc(1, sizeof(rd_kafka_topic_partition_list_t));
-	BUG_ON(n != 1);
-	rv->cnt = 1;
+	BUG_ON(n != 1);			//  1 element of partition=0
 	rv->size = sizeof(*rv);
 	return rv;
 }
@@ -292,11 +279,9 @@ rd_kafka_topic_partition_list_t* rd_kafka_topic_partition_list_new(int n) {
 rd_kafka_topic_partition_t *rd_kafka_topic_partition_list_add(rd_kafka_topic_partition_list_t *pl, const char* name, int32_t partition) {
 	rd_kafka_topic_partition_t *p = &pl->elems[0];
 	rd_kafka_t* k = kafka_simu_find_by_parition_name(name);
-	BUG_ON(partition != 0);				// Support only 1 partition
-	if (k) {
-		BUG_ON(!k || p->k);		// Must add valid pointer and only 1
-		p->k = k;
-	}
+	pl->cnt++;
+	BUG_ON((pl->cnt != 1) || (partition != 0));	// Our implementation of partition list has only 1 element of partition=0. Do not allow calling add twice
+	p->k = k;									// Store pointer to 'k' for future retrieval. Can be NULL (topic was not created yet, will auto-create when pl is assigned)
 	p->partition = partition;
 	p->offset = RD_KAFKA_OFFSET_INVALID;
 	p->topic = name;
@@ -348,7 +333,6 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 
 	// No, put this on to kt, in a list and then poll_cb will return the callbacks
 	g_kafka_simu->notify_producer_msg_accepted(ko, &km, NULL);
-	// Todo: Here, submit msg to management simulator
 	errno = 0;
 	return 0;
 }
