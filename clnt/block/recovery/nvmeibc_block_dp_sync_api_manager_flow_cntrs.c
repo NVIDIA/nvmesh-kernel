@@ -6,7 +6,7 @@
 struct nvmeibc_flow_counters _gsfc = {	// _global_sync_flow_cntrs
 	.nowh = { ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0) },
 	.jour = { ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0) },
-	.main = { ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0) },
+	.main = { ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0) },
 	.htrs = { ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0),
 			  ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0),
 			  ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0), ATOMIC_INIT(0) },
@@ -79,6 +79,7 @@ void nvmeibc_maintain_sync_stats_tojson(struct jdr *jdr)
 	jdr_write_var(jdr, n_txid_wrap, atomic_read(&st.n_txid_wrap));
 	jdr_write_var(jdr, n_txid_unk, atomic_read(&st.n_txid_resolve));
 	jdr_write_var(jdr, n_dbit_unk, atomic_read(&st.n_dbits_resolve));
+	jdr_write_var(jdr, n_binfo_unk_readfail, atomic_read(&st.n_binfo_resolve_readfail));
 	jdr_write_var(jdr, n_commit_binfo, atomic_read(&st.n_commit_binfo));
 	jdr_write_var(jdr, n_dconv_turnon, atomic_read(&st.n_dconvict_turnon));
 	jdr_write_var(jdr, n_resets, atomic_read(&st.n_resets));

@@ -246,6 +246,7 @@ _func_start:
 		case sync_stage_recov_mainten_resolve_binfo: {
 
 			if (unlikely(so->write_unco_mask)) {
+				atomic_inc(&get_so_fctr(so)->main.n_binfo_resolve_readfail);
 				if (dp_ec_mainten_has_txid_unreslvd(rldr) && !nvmeibc_praid_are_all_readable(so->r1) && !dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))) {
 					// This should never happen, as there is no flow that resolves dbits without TxID or that sets unknown dbits after TxID was already resolved
 					WARN_ONCE(1, "nvmeibc bug! Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail");

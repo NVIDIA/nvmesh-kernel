@@ -47,6 +47,7 @@ struct nvmeibc_maintain_sync_stats {
 	atomic_t n_txid_wrap;
 	atomic_t n_txid_resolve;			// Resolve unknown
 	atomic_t n_dbits_resolve;			// Resolve unknown
+	atomic_t n_binfo_resolve_readfail;	// Unrecoverable read failure while resolving binfo
 	atomic_t n_commit_binfo;
 	atomic_t n_dconvict_turnon;
 	atomic_t n_resets;					// Number of times this structure was reset. Without this field one cannot know of counters are 0 because they were cleaned or nothing happened in the past
