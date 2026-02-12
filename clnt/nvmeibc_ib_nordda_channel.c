@@ -33,11 +33,11 @@ extern bool nr_use_srq_tcp;
 
 bool nr_defer_recv_comps_use_kwq = false;
 module_param(nr_defer_recv_comps_use_kwq, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Use kernel workqueue for deferred receive completions on nordda channels (default: false)");
+MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Use kernel workqueue for deferred receive completions on nordda channels");
 
 bool nvmeibc_nordda_wq_unbound = false;
 module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_wq_unbound, "Use unbound kernel workqueue for nvmeibc_nordda (true) or bound (false, default)");
+MODULE_PARM_DESC(nordda_wq_unbound, "Use unbound kernel workqueue for nvmeibc_nordda (true) or bound (false)");
 
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
 

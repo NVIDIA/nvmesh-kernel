@@ -4893,7 +4893,7 @@ MODULE_PARM_DESC(nordda_use_kernel_wq, "Use kernel workqueue for nordda deferred
 
 bool nvmeibs_nordda_kernel_wq_unbound = false;
 module_param_named(nordda_kernel_wq_unbound, nvmeibs_nordda_kernel_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_kernel_wq_unbound, "Use unbound kernel workqueue (true) or bound (false, default)");
+MODULE_PARM_DESC(nordda_kernel_wq_unbound, "Use unbound kernel workqueue (true) or bound (false)");
 
 struct workqueue_struct *nvmeibs_nordda_kwq;
 

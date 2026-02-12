@@ -59,11 +59,11 @@ MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for SCQ offload p
 
 bool nvmeibc_lock_ch_scq_use_kwq = false;
 module_param_named(lock_ch_scq_use_kwq, nvmeibc_lock_ch_scq_use_kwq, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Use kernel workqueue instead of kthread for SCQ offload processing (default: false)");
+MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Use kernel workqueue instead of kthread for SCQ offload processing");
 
 bool nvmeibc_locks_scq_wq_unbound = false;
 module_param_named(locks_scq_wq_unbound, nvmeibc_locks_scq_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(locks_scq_wq_unbound, "Use unbound kernel workqueue for nvmeibc_locks_scq (true) or bound (false, default)");
+MODULE_PARM_DESC(locks_scq_wq_unbound, "Use unbound kernel workqueue for nvmeibc_locks_scq (true) or bound (false)");
 
 /* Kernel workqueue for locks channel SCQ operations */
 static struct workqueue_struct *nvmeibc_locks_channel_wq;

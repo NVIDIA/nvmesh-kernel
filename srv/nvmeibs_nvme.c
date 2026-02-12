@@ -63,7 +63,7 @@ MODULE_PARM_DESC(use_nvme_kwq, "Use kernel workqueue instead of wakeup thread fo
 
 static bool nvmeibs_nvme_wq_unbound = false;
 module_param_named(nvme_wq_unbound, nvmeibs_nvme_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nvme_wq_unbound, "Use unbound kernel workqueue for nvmeibs_nvme (true) or bound (false, default)");
+MODULE_PARM_DESC(nvme_wq_unbound, "Use unbound kernel workqueue for nvmeibs_nvme (true) or bound (false)");
 
 /* we dont really need to expose this param as we dont fail anything if we alloc less qs.
    it is just used as an initial/default value for when drive has not too many (< 30) qs */
