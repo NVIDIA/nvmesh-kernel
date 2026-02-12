@@ -31,7 +31,6 @@ static struct t_main_module_single_instance_globals {
 			struct nvmeib_public_procfs_ent *isnt_list;
 			struct msgloop_procfs_ent *inst_ctls_proc;	// msg loop for ioctls
 			struct nvmeib_public_procfs_ent *echo_proc;		// Write only proc to commit text to longterm log
-			struct nvmeib_public_procfs_ent *instcaiser;		// Coiser API of module (first instance)
 		} files;
 	} proc_dir;
 	struct t_main_clnt_sched sched;
