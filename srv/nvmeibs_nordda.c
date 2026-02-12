@@ -4757,7 +4757,7 @@ static void nordda_recv_comp_h(void *ctx, struct ib_wc *wcs)
 		if ((rv = process_recv_completion(nrch, wcs, false))) {
 			_ND(trace_nordda_nordda_recv_comp_h, "process_recv_completion failed (@RV)", rv);
 		}
-		nrch_unlock_irqrestore(&nrch->spinlock, flags);
+		nrch_unlock_irqrestore(nrch, flags);
 	}
 	else {
 		u32 index = nvmeib_idx_from_wc(wcs);
