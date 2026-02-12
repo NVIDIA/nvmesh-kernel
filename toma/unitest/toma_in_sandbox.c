@@ -305,7 +305,7 @@ struct t_sandbox_all {
 	} TSB_sig;
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_sock_otherside o;
-	} TSB_udev, TSB_rpc, TSB_syslog, TSB_srm_fault, TSB_srm_timer;
+	} TSB_udev, TSB_rpc, TSB_syslog, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
 	struct TSB_server {
 		struct TSB_sock_otherside o;
 	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
@@ -357,6 +357,7 @@ struct t_sandbox_all {
 		char disk_id[64];  // disk_id to look up device when sending
 	} pending_disk_add;
 	struct mgmt_sim_state *mgmt;
+	struct nvmeibt_nm_local_node *nm;
 	char my_hostname[64];
 	bool is_running_as_a_utility;
 	bool can_use_bin_traces;
@@ -684,45 +685,41 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 	BUG_ON(n <= (size_t)len);
 	return len;
 }
+static bool _recv_has_raft_msgs_for_toma(void);
 
 // Connect the other side which communicates with Toma
 void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
-	if (strstr(s->addr.sun_path, "netlink")) {				BUG_ON(s->other_side); s->other_side = &sys->TSB_netlink.o;
-	} else if (strstr(s->addr.sun_path, "signal")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_sig.o;
+	BUG_ON(s->other_side); 								// Only 1 simulate4d listener works per socket / file descriptor
+	if (strstr(s->addr.sun_path, "netlink")) {					s->other_side = &sys->TSB_netlink.o;
+	} else if (strstr(s->addr.sun_path, "signal")) {			s->other_side = &sys->TSB_sig.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
-	} else if (strstr(s->addr.sun_path, "sys_log")) {		BUG_ON(s->other_side); s->other_side = &sys->TSB_syslog.o;
-	} else if (strstr(s->addr.sun_path, "srm_fault")) {		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_fault.o;
+	} else if (strstr(s->addr.sun_path, "sys_log")) {			s->other_side = &sys->TSB_syslog.o;
+	} else if (strstr(s->addr.sun_path, "srm_fault")) {			s->other_side = &sys->TSB_srm_fault.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
-	} else if (strstr(s->addr.sun_path, "srm_timer")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_srm_timer.o;
-	} else if (strstr(s->addr.sun_path, "udev_monitor")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_udev.o;
+	} else if (strstr(s->addr.sun_path, "srm_timer")) {			s->other_side = &sys->TSB_srm_timer.o;
+	} else if (strstr(s->addr.sun_path, "nm_raft")) {			s->other_side = &sys->TSB_nm_raft.o;
+		s->other_side->has_data = _recv_has_raft_msgs_for_toma;
+	} else if (strstr(s->addr.sun_path, "udev_monitor")) {		s->other_side = &sys->TSB_udev.o;
 		sys->TSB_udev.o.recv = _recv_empty;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
-	} else if (strstr(s->addr.sun_path, "nvmesh/toma_rpc")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_rpc.o;
+	} else if (strstr(s->addr.sun_path, "mesh/toma_rpc")) {		s->other_side = &sys->TSB_rpc.o;
 		sys->TSB_rpc.o.recv = _rpc_inject;
 		sys->TSB_rpc.o.send = _rpc_accept;
-	} else if (strstr(s->addr.sun_path, "epoll")) {			BUG_ON(s->other_side); s->other_side = &sys->TSB_epoll.o;
-	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o[0];
+	} else if (strstr(s->addr.sun_path, "epoll")) {				s->other_side = &sys->TSB_epoll.o;
+	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {	s->other_side = &sys->TSB_wake_pip.o[0];
 		s->other_side->recv = _wakeup_pipe_wakeup_recv;
 		s->other_side->send = _send_illegal_trap;
 		s->other_side->has_data = _wakeup_pipe_should_wakeup;	// o[0] Toma main thread read wakeups messages from other threads. Never writes
-	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair1")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_wake_pip.o[1];
+	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair1")) {	s->other_side = &sys->TSB_wake_pip.o[1];
 		s->other_side->send = _wakeup_pipe_wakeup_send;			// o[1] Toma aux thread write to wakeup toma main thread. Never reads
 		s->other_side->recv = _recv_illegal_trap;
-	} else if (strstr(s->addr.sun_path, "server_events")) { BUG_ON(s->other_side); s->other_side = &sys->TSB_srvr2toma.o;
-	} else if (strstr(s->addr.sun_path, "toma_server")) {   BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2srvr.o;
-	} else if (strstr(s->addr.sun_path, "toma_clients")) {  BUG_ON(s->other_side); s->other_side = &sys->TSB_toma2clnt.o;
-	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[0];
+	} else if (strstr(s->addr.sun_path, "server_events")) {		s->other_side = &sys->TSB_srvr2toma.o;
+	} else if (strstr(s->addr.sun_path, "toma_server")) {		s->other_side = &sys->TSB_toma2srvr.o;
+	} else if (strstr(s->addr.sun_path, "toma_clients")) {		s->other_side = &sys->TSB_toma2clnt.o;
+	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {		s->other_side = &sys->TSB_km_sock_pair.o[0];
 		s->other_side->send = _socket_pair_wakeup_send;			// o[0] Toma writes to it to wakeup server lib main thread. Never reads
 		s->other_side->recv = _recv_illegal_trap;
-	} else if (strstr(s->addr.sun_path, "km_comm_pair1")) {
-		BUG_ON(s->other_side); s->other_side = &sys->TSB_km_sock_pair.o[1];
+	} else if (strstr(s->addr.sun_path, "km_comm_pair1")) {		s->other_side = &sys->TSB_km_sock_pair.o[1];
 		s->other_side->send = _send_illegal_trap;				// o[1] ServerLib reads from it to wakeup. Never writes
 		s->other_side->recv = _socket_pair_wakeup_recv;
 		s->other_side->has_data = _socket_pair_should_wakeup;
@@ -1609,13 +1606,9 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	__temp_wait_sleep();
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
 		const int fd = ep->evs[i].__fd;
-		if (fd != nvmeibt_nm_get_fd()) {	// Todo: Solve this hack!
-			const struct TSB_sock_otherside *o = TSB_socket_find_other_side_by_fd(fd);
-			if (o->has_data())
-				evs[n_events++] = ep->evs[i];
-		} else {
+		const struct TSB_sock_otherside *o = TSB_socket_find_other_side_by_fd(fd);
+		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
-		}
 	}
 
 	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, is_shutting_down, n_events); loop_idx++;
@@ -1730,6 +1723,44 @@ void nvmeibt_udev_put_event(struct nvmeibt_udev_event *rv) { memset(rv, 0, sizeo
 int64_t ibud_enable_periodic_traces = 0;
 int64_t udp_max_header_length = 128;
 
+struct nvmeibt_nm_local_node { 					// Network module simulator. For Toma to communicate with other simulated Toma's
+	const char *dynamic_lib_path;
+	struct t_raft_msg_queue_from_other_tomas {
+		int n_msgs;
+		struct nvmeibt_big_msg *msg_q[10];		// Up to 10 messages
+	} raft_msg_queue_from_other_tomas;
+	int fd;
+	int8_t n_connected_remote_nodes;
+	int8_t n_nics;								// Nics to communicate with with other Tomas
+};
+
+void *nvmeibt_nm_tracer_init(const char *lib_path) { return (void *)lib_path; }
+
+struct nvmeibt_nm_local_node * nvmeibt_nm_init(void *handle) {
+	struct nvmeibt_nm_local_node *rv = calloc(1, sizeof(*rv));
+	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
+	BUG_ON(sys->nm);			// Already initialized
+	rv->dynamic_lib_path = (const char*)handle;
+	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "nm_raft");
+	rv->fd = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
+	sys->nm = rv;
+	return rv;
+}
+
+static bool _recv_has_raft_msgs_for_toma(void) {
+	return (sys->nm->raft_msg_queue_from_other_tomas.n_msgs > 0);
+}
+
+void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln) {
+	BUG_ON(ln != sys->nm);
+	override_close(ln->fd);
+	ln->fd = -1;
+	sys->nm = NULL;
+	free(ln);
+}
+
+int nvmeibt_nm_get_fd(struct nvmeibt_nm_local_node *ln) { return ln->fd; }
+
 int rsrm_init_work_tmq(void) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_srm_timer");
@@ -1750,6 +1781,93 @@ int rsrm_faults_get_fd(void) {
 }
 
 void rsrm_faults_handle_fifo_comm(void) {}
+
+#include "nvmeibt_global.h"
+int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
+	struct nvmeibt_node *node;
+	struct nvmeib_hash_table *h = nvmeibt_global_get_global()->nodes_hash_by_uuid;
+	NVMEIB_HASH_FOREACH(node, h) {
+		if (!node->conn_ctx) {
+			N_Tf(__AUTOID__, "Establish connection to node: @STR", node->from_config.name);
+			node->conn_ctx = (void*)0x11110000;	// Todo: Just some non null value.
+		}
+	}
+	if (ln->raft_msg_queue_from_other_tomas.n_msgs > 0) {
+		N_Tf(__AUTOID__, "@INT raft msgs arrived", ln->raft_msg_queue_from_other_tomas.n_msgs);
+		for (int i = 0; i < ln->raft_msg_queue_from_other_tomas.n_msgs; i++) {
+			nvmeibt_toma_dispatch_received_msg(ln->raft_msg_queue_from_other_tomas.msg_q[i]);
+		}
+		ln->raft_msg_queue_from_other_tomas.n_msgs = 0;
+	}
+	return 0;
+}
+
+int nvmeibt_nm_add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) {
+	++ln->n_nics;
+	(void)nic;
+	return 0;
+}
+
+int nvmeibt_nm_del_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) {
+	--ln->n_nics;
+	(void)nic;
+	return 0;
+}
+
+int nvmeibt_nm_del_remote_node(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node) {
+	--ln->n_connected_remote_nodes;
+	BUG_ON(ln->n_connected_remote_nodes < 0);
+	(void)node;
+	return 0;
+}
+int nvmeibt_nm_cancel_req_node(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node) {
+	(void)ln; (void)node;
+	return 0;
+}
+
+bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node) {
+	N_Tf(__AUTOID__, "node: @STR, Check connection", node->from_config.name);
+	(void)ln;
+	return true;
+}
+
+int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
+	const struct raft_msg *r_msg = (typeof(r_msg))req->cnst_msg;
+	const struct nvmeibt_persist_and_wire_buf *r_topo = (typeof(r_topo))req->cnst_data;
+	N_Tf(__AUTOID__, "node: @STR, received msg=@STR, @INT[b]", node->from_config.name, nvmeibt_ib_protocol_signature_to_str(req->msg_type), req->msg_len);
+	// Todo: Here other_toma sandbox should analyze the message (VOTE request, APPEND entries, Topo, etc..) and create a reply
+
+	{ // Add reply to to list, no needs for locks. Accessed only from Toma main threads
+		struct t_raft_msg_queue_from_other_tomas *rq = &ln->raft_msg_queue_from_other_tomas;
+		struct nvmeibt_big_msg *msg = calloc(1, sizeof(*msg) + req->msg_len);
+		BUG_ON(rq->n_msgs >= (int)ARRAY_SIZE(rq->msg_q));
+		msg->msg_type = req->msg_type; //NVMEIBT_IB_PROTOCOL_SIGNATURE_RAFT;
+		msg->data_len = req->msg_len;
+		memcpy(msg->data, r_msg, req->msg_len);		// DHS: Copy the incomming message as a reply, completely wrong, just to see that Toma actually gets it.
+		rq->msg_q[rq->n_msgs++] = msg;
+	}
+	return 0;
+}
+
+int nvmeibt_nm_rsrm_send_timer(struct nvmeibt_nm_local_node *ln) {
+	(void)ln; return 0;
+}
+void nvmeibt_nm_rsrm_faults_handle_fifo_com(struct nvmeibt_nm_local_node *ln) {
+	(void)ln;
+}
+
+void nvmeibt_nm_rsrm_resend_acks(struct nvmeibt_nm_local_node *ln) {
+	(void)ln;
+}
+
+int nvmeibt_nm_print_status_json(void *ctx, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) {
+	const struct nvmeibt_nm_local_node *ln = ctx;
+	if (ln) {
+		(*printf_fn)(printf_ctx, "fd=%d, n_nodes=%d, n_nics=%d\n", ln->fd, ln->n_connected_remote_nodes, ln->n_nics);
+	}
+	return 0;
+}
+int nvmeibt_nm_print_status(void *ctx, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) { return nvmeibt_nm_print_status_json(ctx, printf_fn, printf_ctx); }
 
 /************************************* Kafka ********************************/
 struct rd_kafka_topic_conf_s {

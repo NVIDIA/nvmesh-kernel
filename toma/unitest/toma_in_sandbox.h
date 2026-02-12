@@ -164,25 +164,24 @@ int  rsrm_faults_init_fifo_comm(void);	// Create Fifo queue (cli file)
 int  rsrm_faults_get_fd(void);			// Get descriptor of fifo to select
 void rsrm_faults_handle_fifo_comm(void);// Handle fault after wakeup from select
 
-// nm
-struct nvmeibt_nm_local_node { int dummy; };
-struct nvmeibt_nic; struct nvmeibt_node; struct nvmeibt_msg_request;
-static inline void * nvmeibt_nm_tracer_init(const char *lib_path) { (void)lib_path; return ((void *)0xdeadbeef); }
-static inline struct nvmeibt_nm_local_node * nvmeibt_nm_init(void *handle) { (void)handle; return (struct nvmeibt_nm_local_node*)malloc(sizeof(struct nvmeibt_nm_local_node)); }
-static inline void nvmeibt_nm_done(struct nvmeibt_nm_local_node *n) { free(n); }
-#define nvmeibt_nm_add_remote_nic(...)
-#define nvmeibt_nm_del_remote_node(...)
-static inline int nvmeibt_nm_del_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) { (void)ln; (void)nic; return 0; }
-#define nvmeibt_nm_cancel_req_node(...)
-static inline int  nvmeibt_nm_queue_srm_req(           struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *remote_node, struct nvmeibt_msg_request *req) { (void)ln; (void)remote_node; (void)req; return 0; }
-static inline bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *remote_node) { (void)ln; (void)remote_node; return true; }
-#define nvmeibt_nm_get_fd(...) (-555)
-#define nvmeibt_nm_rsrm_resend_acks(...)
-#define nvmeibt_nm_rsrm_faults_handle_fifo_com(...)
-#define nvmeibt_nm_rsrm_send_timer(...) (0)
-static inline int nvmeibt_nm_process_toma_requests(void* v) { (void)v; return 0; }
-#define nvmeibt_nm_print_status(...) ({})
-#define nvmeibt_nm_print_status_json(...) ({})
+// Network manager (For raft communication) nm
+struct nvmeibt_nm_local_node; struct nvmeibt_nic; struct nvmeibt_node; struct nvmeibt_msg_request;
+void *nvmeibt_nm_tracer_init(const char *lib_path);
+struct nvmeibt_nm_local_node *nvmeibt_nm_init(void *handle);
+int  nvmeibt_nm_get_fd(         struct nvmeibt_nm_local_node *);			// For Toma epoll
+void nvmeibt_nm_done(           struct nvmeibt_nm_local_node *);
+int  nvmeibt_nm_add_remote_nic( struct nvmeibt_nm_local_node *, struct nvmeibt_nic *);
+int  nvmeibt_nm_del_remote_nic( struct nvmeibt_nm_local_node *, struct nvmeibt_nic *);
+int  nvmeibt_nm_del_remote_node(struct nvmeibt_nm_local_node *, struct nvmeibt_node *);
+int  nvmeibt_nm_cancel_req_node(struct nvmeibt_nm_local_node *, struct nvmeibt_node *);
+int nvmeibt_nm_process_toma_requests(    struct nvmeibt_nm_local_node *);	// Toma call this to process incoming network events
+int  nvmeibt_nm_queue_srm_req(           struct nvmeibt_nm_local_node *, struct nvmeibt_node *, struct nvmeibt_msg_request *req);	// Toma sends messages with this func
+bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *, struct nvmeibt_node *);
+void nvmeibt_nm_rsrm_resend_acks(           struct nvmeibt_nm_local_node *);
+void nvmeibt_nm_rsrm_faults_handle_fifo_com(struct nvmeibt_nm_local_node *);
+int nvmeibt_nm_rsrm_send_timer(             struct nvmeibt_nm_local_node *);
+int nvmeibt_nm_print_status(     void *ctx, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+int nvmeibt_nm_print_status_json(void *ctx, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 
 
 // Todo: Remove. Split nvmeibt_node.c to Toma part (config) and network part:
