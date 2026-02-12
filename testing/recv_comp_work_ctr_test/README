@@ -1,0 +1,41 @@
+recv_comp_work_ctr_test - Test module for nordda recv_comp_work_ctr vs cancel_work_sync
+
+Tests whether recv_comp_work_ctr in srv/nvmeibs_nordda.c is needed or if
+cancel_work_sync alone suffices.
+
+Behavior:
+1. HR-timer simulates interrupt, schedules work on a WQ
+2. Work checks global atomic "run_allowed"; prints error if it is 0
+3. Main thread (module init) runs 1000 iterations:
+   - Set run_allowed=1, start timer
+   - Wait for timer to fire
+   - Decrement run_allowed to 0
+   - Call cancel_work_sync
+   - Wait to observe any hazards
+   - Set run_allowed=1, re-init work, continue
+
+Build:
+  make
+
+Run (cancel_work_sync only - default, 100us interrupt rate):
+  sudo insmod recv_comp_work_ctr_test.ko
+
+Run (with recv_comp_work_ctr pattern like nordda):
+  sudo insmod recv_comp_work_ctr_test.ko use_ctr=1
+
+Run (faster interrupt rate, e.g. 50us for ~20k/sec):
+  sudo insmod recv_comp_work_ctr_test.ko timer_fire_us=50
+
+Run (cross-CPU: timer on CPU 1, main thread on CPU 0 - default):
+  sudo insmod recv_comp_work_ctr_test.ko
+
+Run (same-CPU, timer_cpu=-1):
+  sudo insmod recv_comp_work_ctr_test.ko timer_cpu=-1
+
+Unload:
+  sudo rmmod recv_comp_work_ctr_test
+
+Check results in dmesg:
+  dmesg | tail -20
+
+If hazard_count > 0, work ran with run_allowed=0 (race detected).
