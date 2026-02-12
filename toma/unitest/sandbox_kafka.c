@@ -220,7 +220,6 @@ rd_kafka_conf_t* rd_kafka_conf_new(void) { return calloc(1, sizeof(rd_kafka_conf
 void rd_kafka_conf_destroy(rd_kafka_conf_t* me) { free(me); }
 void rd_kafka_message_destroy(rd_kafka_message_t*msg) { free(msg->payload); free(msg); }
 void rd_kafka_conf_set_error_cb( rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, int err, const char *reason, void *opaque)) { (void)kc; (void)fn; }
-rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags) { (void)rk; (void)purge_flags; return RD_KAFKA_RESP_ERR_NO_ERROR; }
 
 void rd_kafka_destroy(rd_kafka_t* k) {
 	struct kafka_simulator_t *ks = g_kafka_simu;
@@ -298,13 +297,6 @@ rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char 
 	(void)timeout;
 	*low_oldest_beginning_offset = me->topic.cur_offset;
 	*high_newest_end_offset =  me->topic.last_offset + 17;		// +17 is just for fun, meaningless
-	return RD_KAFKA_RESP_ERR_NO_ERROR;
-}
-
-rd_kafka_resp_err_t rd_kafka_position(rd_kafka_t *k, rd_kafka_topic_partition_list_t *pl) {
-	BUG_ON(k != pl->elems[0].k);
-	pl->elems[0].offset = k->topic.cur_offset;
-	pl->elems[0].offset = RD_KAFKA_OFFSET_INVALID; 	// Simulate as if it is unsupported
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 

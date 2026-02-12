@@ -82,7 +82,6 @@ int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking);
 rd_kafka_resp_err_t rd_kafka_commit(       rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async);
 rd_kafka_resp_err_t rd_kafka_committed(    rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int x);
 rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char *str, int32_t partition, int64_t *low_oldest_beginning_offset, int64_t *high_newest_end_offset, int timeout);
-rd_kafka_resp_err_t rd_kafka_position	(  rd_kafka_t *me, rd_kafka_topic_partition_list_t *pl);
 rd_kafka_topic_conf_t* rd_kafka_topic_conf_new(void);
 void rd_kafka_topic_conf_destroy(rd_kafka_topic_conf_t *conf);
 rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *rk, const char* name, rd_kafka_topic_conf_t* conf);
@@ -95,8 +94,6 @@ rd_kafka_resp_err_t rd_kafka_assignment (rd_kafka_t *,       rd_kafka_topic_part
 const char*         rd_kafka_topic_name(const rd_kafka_topic_t*);
 
 static inline int rd_kafka_wait_destroyed(int n_msec) { (void)n_msec; return 0; }
-enum my_rd_kafka_purge_flags { RD_KAFKA_PURGE_F_INFLIGHT = 0x2, RD_KAFKA_PURGE_F_NON_BLOCKING = 0x4 };
-rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags);
 enum my_rd_kafka_producer_flags { RD_KAFKA_MSG_F_FREE = 0x1, RD_KAFKA_MSG_F_COPY = 0x2 };
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque);
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *rk, char *errstr, size_t errstr_size);
