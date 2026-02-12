@@ -7873,7 +7873,7 @@ EXPORT_SYMBOL(nvmeib_rdma_register_net_notifiers);
 
 void nvmeib_rdma_unregister_net_notifiers(void)
 {
-	return 0;
+	return;
 }
 EXPORT_SYMBOL(nvmeib_rdma_unregister_net_notifiers);
 
