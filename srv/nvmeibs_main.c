@@ -2963,20 +2963,20 @@ static int remove_clients_fc(struct nvmeibs_client *cl, void *arg)
 	char *node_name = arg;
 
 	if (!strnstr(cl->name, node_name, NVMEIB_HOST_NAME_LEN))
-		return;
+		return 0;
 
 	_ND(remove_clients_fc_d1, "Removing client @STR", node_name);
 	_ND(remove_clients_fc_d2, "Will call free client @PTR @INT", cl, cl->cid);
 
-	nvmeibs_ib_port_free_client(cl->ib_port, cl->cid);
+	nvmeibs_ib_port_free_client(cl->ib_port, cl->cid, NVMEIBS_LOGOUT_REASON_DEBUG);
+
+	return 0;
 }
 
 static void remove_clients(struct workqe_struct *work)
 {
 	struct snode_workq *swork =
 		container_of(work, struct snode_workq, work);
-	struct hlist_node *hlink;
-	struct nvmeibs_client *cl;
 	unsigned long flags;
 
 	NFIN;
@@ -2989,8 +2989,6 @@ static void remove_clients(struct workqe_struct *work)
 	else
 		nvmeibs_cdb_all_fast_call_locked(remove_clients_fc, swork->node_name);
 
-	kfree(close_acked);
-	close_acked = NULL;
 	nvmeibs_cdb_unlock(flags);
 	NFOUT;
 }
