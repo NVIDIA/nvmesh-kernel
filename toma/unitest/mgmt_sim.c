@@ -50,7 +50,7 @@ static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity)
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"updateLeaderKeepaliveToken\""
 		",\"messageTypeVersion\":1"
-		",\"payload\":{\"token\":1,\"keepaliveInterval\":5}}");
+		",\"payload\":{\"token\":1,\"keepaliveInterval\":1}}");
 }
 
 /* Format addVolume message */
@@ -187,7 +187,7 @@ static int make_msg_update_toma_keepalive_token(char *buf, size_t capacity) {
 	const struct mgmt_sim_state *m = g_mgmt_sim;
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"updateTomaKeepaliveToken\",\"messageTypeVersion\":1"
-		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":5}}",
+		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":1}}",
 		m->cfg->live->hostname);
 }
 
