@@ -352,9 +352,9 @@ struct t_sandbox_all {
 		bool has_pending;
 		char disk_id[64];  // disk_id to look up device when sending
 	} pending_disk_add;
+	struct sb_cluster_conf cfg;
 	struct mgmt_sim_state *mgmt;
 	struct nvmeibt_nm_local_node *nm;
-	char my_hostname[64];
 	bool is_running_as_a_utility;
 	bool can_use_bin_traces;
 } *sys;
@@ -432,8 +432,8 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
-	gethostname(sys->my_hostname, sizeof(sys->my_hostname) - 1);
-	sys->mgmt = mgmt_sim_init(sys->my_hostname);
+	sb_cluster_conf_create(&sys->cfg);
+	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	pthread_mutex_init(&sys->TS.mutex, NULL);
 	sandbox_server_init();
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
@@ -453,6 +453,7 @@ void t_sandbox_all_destroy(void) {
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
 	mgmt_sim_destroy();
+	sb_cluster_conf_destroy(&sys->cfg);
 	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	free(sys);
 	sys = NULL;

@@ -10,8 +10,24 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/************** Cluster config *******************************/
+struct sb_cluster_conf {
+	char my_hostname[64];		// Live Toma (non sandbox, real hostname)
+	struct sb_node_conf {
+		const char *hostname;	// Easily recognizable host name
+		char uuid[40];			// Hex as string format (36 characters + NULL terminated string)
+		uint64_t uuid16b[2];	// Packed 16[b] format
+	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas
+	int n_nodes;
+};
+void sb_cluster_conf_create( struct sb_cluster_conf *);
+void sb_cluster_conf_destroy(struct sb_cluster_conf *);
+int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const char *host_name);
+
+/*********************************************/
+
 struct mgmt_sim_state;
-struct mgmt_sim_state *mgmt_sim_init(const char *live_toma_host_name);
+struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg);
 
 /* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
 char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len);

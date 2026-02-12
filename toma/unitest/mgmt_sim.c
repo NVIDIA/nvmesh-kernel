@@ -104,7 +104,7 @@ static void mgmt_sim_run_fsm(void);
 static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state);
 
 /* Per-disk status extracted from reportTarget */
-struct mgmt_sim_disk_status {
+struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 	char disk_id[64];
 	char status[32];
 	int64_t format_request_counter;
@@ -115,10 +115,7 @@ struct mgmt_sim_disk_status {
 
 /* Management simulator state */
 struct mgmt_sim_state {
-	struct node_conf {
-		const char *hostname;
-		const char *uuid;
-	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas
+	struct sb_cluster_conf *cfg;
 	char *last_report_target_json; /* owned, NUL-terminated; NULL if not received */
 
 	/* Per-consumer state for deterministic message sequencing */
@@ -141,20 +138,40 @@ struct mgmt_sim_state {
 	size_t pending_format_drive_len;
 };
 
+void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
+	int i;
+	gethostname(sb->my_hostname, sizeof(sb->my_hostname) - 1);
+	sb->n_nodes = (int)ARRAY_SIZE(sb->nodes);
+	sb->live =  &sb->nodes[0];
+	sb->other = &sb->nodes[1];
+	   sb->live->hostname = sb->my_hostname;
+	sb->other[0].hostname = "n37@nvidia.com";
+	sb->other[1].hostname = "n39@nvidia.com";
+	for (i = 0; i < sb->n_nodes; i++) {
+		const uint32_t short_uuid = 0xcde269b0 + i;
+		sb->nodes[i].uuid16b[0] = short_uuid;
+		snprintf(sb->nodes[i].uuid, 37, "%8x-0000-0000-0000-000000000000", short_uuid);
+	}
+}
+
+int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, const char *host_name) {
+	for (int i = 0; i < sb->n_nodes; i++) {
+		if (!strcmp(sb->nodes[i].hostname, host_name))
+			return i;
+	}
+	BUG_ON(true); return -1;
+}
+
+void sb_cluster_conf_destroy(struct sb_cluster_conf *sb) {
+	(void)sb;
+}
+
 static struct mgmt_sim_state *g_mgmt_sim = NULL;
 
-struct mgmt_sim_state *mgmt_sim_init(const char *live_toma_hostname)
+struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg)
 {
 	struct mgmt_sim_state *m = g_mgmt_sim = calloc(1, sizeof(*g_mgmt_sim));
-	BUG_ON(!m || !live_toma_hostname);
-	m->live =  &m->nodes[0];
-	m->other = &m->nodes[1];
-	   m->live->hostname = live_toma_hostname;
-	m->other[0].hostname = "n37@nvidia.com";
-	m->other[1].hostname = "n39@nvidia.com";
-	m->live->uuid =    "cde269b0-0000-0000-0000-000000000000";
-	m->other[0].uuid = "cde269b1-0000-0000-0000-000000000000";
-	m->other[1].uuid = "cde269b2-0000-0000-0000-000000000000";
+	m->cfg = initialized_cfg;
 
 	/* Initialize state machine */
 	m->fsm_state = MGMT_FSM_WAITING_FOR_BOTH_OK;
@@ -162,7 +179,7 @@ struct mgmt_sim_state *mgmt_sim_init(const char *live_toma_hostname)
 	nvmeibt_strlcpy(m->disk_002.disk_id, "NVMD_SN_002.1", sizeof(m->disk_002.disk_id));
 	nvmeibt_strlcpy(m->disk_003.disk_id, "NVMD_SN_003.1", sizeof(m->disk_003.disk_id));
 	m->hw.conf_version = 17;		// Start from some number
-	N_Tf(msim_init, "mgmt_sim initialized cluster @INT machines, hw_conf_ver=@INT", (int)ARRAY_SIZE(m->nodes), m->hw.conf_version);
+	N_Tf(msim_init, "mgmt_sim initialized cluster @INT machines, hw_conf_ver=@INT", m->cfg->n_nodes, m->hw.conf_version);
 	return m;
 }
 
@@ -171,13 +188,13 @@ static int make_msg_update_toma_keepalive_token(char *buf, size_t capacity) {
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"updateTomaKeepaliveToken\",\"messageTypeVersion\":1"
 		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"1\",\"keepaliveInterval\":5}}",
-		m->live->hostname);
+		m->cfg->live->hostname);
 }
 
 static int make_msg_add_target(char *buf, size_t capacity, int queue_offset) {
 	struct mgmt_sim_state *m = g_mgmt_sim;	// This Kafka queue is never purged. It has 3 messages for 3 targets in raft domain (offsets 0..2)
-	struct node_conf *node = &m->nodes[queue_offset];
-	BUG_ON((queue_offset < 0) || (queue_offset >= (int)ARRAY_SIZE(m->nodes)));
+	struct sb_node_conf *node = &m->cfg->nodes[queue_offset];
+	BUG_ON((queue_offset < 0) || (queue_offset >= m->cfg->n_nodes));
 	++m->target_msg_count;					// Counter can get high, if leader changes and rereads the target kafka queue from beginning
 	return snprintf(buf, capacity,			/* First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
@@ -188,6 +205,7 @@ static int make_msg_add_target(char *buf, size_t capacity, int queue_offset) {
 
 static int make_msg_hardware_configuration(char *buf, size_t capacity) {
 	const struct mgmt_sim_state *m = g_mgmt_sim;
+	const struct sb_node_conf *other_toma = m->cfg->other;
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"hardwareConfiguration\""
 		",\"messageTypeVersion\":1"
@@ -236,9 +254,9 @@ static int make_msg_hardware_configuration(char *buf, size_t capacity) {
 						",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
 		"]}}",
 		m->hw.conf_version, m->hw.msg_count,
-		m->live->hostname, m->live->uuid, m->disk_002.disk_id, m->disk_003.disk_id, FORMAT_TARGET_UUID,
-		m->other[0].hostname, m->other[0].uuid,
-		m->other[1].hostname, m->other[1].uuid);
+		m->cfg->live->hostname, m->cfg->live->uuid, m->disk_002.disk_id, m->disk_003.disk_id, FORMAT_TARGET_UUID,
+		other_toma[0].hostname, other_toma[0].uuid,
+		other_toma[1].hostname, other_toma[1].uuid);
 }
 
 char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len)
