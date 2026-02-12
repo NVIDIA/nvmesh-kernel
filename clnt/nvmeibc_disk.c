@@ -15440,7 +15440,7 @@ static void write_coremask_stats_json_buf(struct write_status_buf_data *data)
 	WRITE_JSON_STAT(data, n_lock_coremask_not_exist, pcpu_ctx.tot_pcpu_stats, !JSON_LAST_ELEM);
 	WRITE_JSON_STAT(data, n_lock_coremask_no_lock_ch, pcpu_ctx.tot_pcpu_stats, !JSON_LAST_ELEM);
 	WRITE_JSON_STAT(data, n_lock_coremask_submit_cpu_not_in_mask, pcpu_ctx.tot_pcpu_stats, !JSON_LAST_ELEM);
-	WRITE_JSON_STAT(data, n_lock_coremask_uid_mismatch, pcpu_ctx.tot_pcpu_stats, !JSON_LAST_ELEM);
+	WRITE_JSON_STAT(data, n_lock_coremask_uid_mismatch, pcpu_ctx.tot_pcpu_stats, JSON_LAST_ELEM);
 
 out:
 	NFOUT;
