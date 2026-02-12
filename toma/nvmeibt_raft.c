@@ -64,6 +64,7 @@
 #include "nvmeibt_raft.h"
 #include "interfaces/network/network_incs.h"
 #include "nvmeibt_toma.h"
+#include "nvmeibt_topo_bin.h"
 #include "nvmeibt_node.h"
 #include "nvmeibt_important_logs.h"
 #include "nvmeibt_disk_segment.h"
@@ -648,6 +649,229 @@ static void persist_and_wire_buf_copy_data_to_section(struct nvmeibt_wire_type_l
 	*upd_data_ptr += upd_len;
 	*old_data_ptr += old_len;
 	*dst_data_ptr += nvmeibt_tlv_get_len(dst_wire_ctx);
+}
+
+
+/*
+ * @dst_wire_ctx: Destination TLV header (can be NULL for size calculation only)
+ * @old_wire_ctx: Old TLV header (can be NULL for initial complete case)
+ * @upd_wire_ctx: Update TLV header (complete or incremental)
+ * @dst_data_ptr: Pointer to destination data pointer (can be NULL for size calculation). When provided, caller must allocate just enough space for the data.
+ * @old_data_ptr: Pointer to old data pointer (can be NULL)
+ * @upd_data_ptr: Pointer to update data pointer (must be provided)
+ *
+ * Returns: Size of the resulting data, or -1 on error
+ */
+static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+								   char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
+{
+	int			upd_len = 0;
+	int			old_len = 0;
+	int			total_size = -1;
+	int8_t		upd_tlv_type = TLV_TYPE_UNKNOWN;
+
+	NFIN;
+	// Input validation
+	if (!upd_wire_ctx || !upd_data_ptr) {
+		N_Ef(asd923k, "upd_wire_ctx or upd_data_ptr is NULL");
+		goto out;
+	}
+
+	// Get lengths and type
+	upd_len = nvmeibt_tlv_get_len(upd_wire_ctx);
+	old_len = old_wire_ctx ? nvmeibt_tlv_get_len(old_wire_ctx) : 0;
+	upd_tlv_type = nvmeibt_tlv_get_type(upd_wire_ctx);
+
+	// Complete types - just use persist_and_wire_buf_copy_data_to_section
+	if (upd_tlv_type == TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE ||
+		upd_tlv_type == TLV_TYPE_TOPO_CONFIG_COMPLETE ||
+		upd_tlv_type == TLV_TYPE_RAFT_MEMBERS_COMPLETE ||
+		upd_tlv_type == TLV_TYPE_TOPO_COMPLETE) {
+
+		if (dst_wire_ctx) {
+			persist_and_wire_buf_copy_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+													  dst_data_ptr, old_data_ptr, upd_data_ptr);
+		}
+		// Calculate total size
+		total_size = upd_len;
+		goto out;
+	}
+
+	// Process incremental types
+	switch (upd_tlv_type) {
+	case TLV_TYPE_TOPO_INCREMENTAL: {
+		struct nvmeibt_topology_serialized_topo_header	*old_header = NULL;
+		struct nvmeibt_topology_serialized_topo_header	*new_header = NULL;
+		struct nvmeibt_topology_serialized_topo_header	*output_header = NULL;
+		struct nvmeibt_topology_serialized_topo_header	old_serialized_header;
+		struct nvmeibt_topology_serialized_topo_header	new_serialized_header;
+		struct nvmeibt_praid_serialized_topo			*old_praid_ptr = NULL;
+		struct nvmeibt_praid_serialized_topo			*new_praid_ptr = NULL;
+		struct nvmeibt_praid_serialized_topo			*output_praid_ptr = NULL;
+		struct nvmeibt_praid_serialized_topo			*current_new_praid = NULL;
+		int												data_len = 0;
+		int												n_praids_in_result = 0;
+		int												n_segs_in_result = 0;
+		int												new_praids_processed = 0;
+		int												i = 0;
+
+		// Validation: incremental topo requires old complete topo
+		if (!old_wire_ctx || old_len == 0 || nvmeibt_tlv_get_type(old_wire_ctx) != TLV_TYPE_TOPO_COMPLETE) {
+			N_Ef(wer923k, "Old topo is empty or not complete type. Incremental topo update requires old complete topo to merge with");
+			total_size = -1;
+			goto out;
+		}
+
+		// Special case: no new incremental data means keep old data
+		if (upd_len == 0) {
+			if (dst_wire_ctx) {
+				// This function handles upd_len==0 case, by copying old data
+				persist_and_wire_buf_copy_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+														  dst_data_ptr, old_data_ptr, upd_data_ptr);
+			}
+			total_size = old_len;
+			goto out;
+		}
+
+		// Parse headers and convert from wire format
+		old_header = (struct nvmeibt_topology_serialized_topo_header *)*old_data_ptr;
+		new_header = (struct nvmeibt_topology_serialized_topo_header *)*upd_data_ptr;
+		nvmeibt_topology_convert_header_le_be(old_header, &old_serialized_header);
+		nvmeibt_topology_convert_header_le_be(new_header, &new_serialized_header);
+
+		// Initialize pointers to praid data
+		old_praid_ptr = (struct nvmeibt_praid_serialized_topo *)(old_header + 1);
+		new_praid_ptr = (struct nvmeibt_praid_serialized_topo *)(new_header + 1);
+
+		// Start with topo header size for data calculation
+		data_len = sizeof(struct nvmeibt_topology_serialized_topo_header);
+
+		// If generating output, prepare the TLV and topo headers
+		if (dst_wire_ctx && dst_data_ptr) {
+			// Copy TLV header from old (will update fields later)
+			*dst_wire_ctx = *old_wire_ctx;
+
+			// Copy old topo header to output data area
+			output_header = (struct nvmeibt_topology_serialized_topo_header *)*dst_data_ptr;
+			memcpy(output_header, old_header, sizeof(*old_header));
+			output_praid_ptr = (struct nvmeibt_praid_serialized_topo *)(output_header + 1);
+		}
+
+		// Two-pointer merge: old praids are complete set, incremental are subset in same order
+		// We maintain a pointer in incremental buffer and advance it only when we find a match
+		current_new_praid = new_praid_ptr;
+		new_praids_processed = 0;
+
+		for (i = 0; i < old_serialized_header.praids_num; i++) {
+			struct nvmeibt_praid_serialized_topo	*praid_to_copy;
+			struct nvmeibt_praid_serialized_topo	old_serialized_praid, new_serialized_praid;
+			int										segs_size;
+			int										praid_total_size;
+			bool									use_new_praid = false;
+
+			// Convert current old praid to working format
+			nvmeibt_praid_convert_topo_le_be(old_praid_ptr, &old_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
+
+			// Check if current position in incremental buffer matches this old praid
+			if (new_praids_processed < new_serialized_header.praids_num) {
+				nvmeibt_praid_convert_topo_le_be(current_new_praid, &new_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
+
+				if (ARE_UUID_EQ(&old_serialized_praid.uuid, &new_serialized_praid.uuid)) {
+					if (old_serialized_praid.topo_idx_updated < new_serialized_praid.topo_idx_updated) {
+						// Use incremental newer version
+						use_new_praid = true;
+						praid_to_copy = current_new_praid;
+						segs_size = LE_SWAP8(current_new_praid->segs_num) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
+
+						N_Tf(asd82jk, "Found matching praid=@UUID_LE in incremental, segs=@INT, old topo_idx_updated=@INT64_TX < new topo_idx_updated=@INT64_TX",
+							&old_serialized_praid.uuid, LE_SWAP8(current_new_praid->segs_num),
+							old_serialized_praid.topo_idx_updated, new_serialized_praid.topo_idx_updated);
+					}
+					// Advance incremental pointer to next praid; this incremental praid is either newer and used, or older and discarded.
+					current_new_praid = (struct nvmeibt_praid_serialized_topo *)
+						((char *)current_new_praid + sizeof(*current_new_praid) +
+						 LE_SWAP8(current_new_praid->segs_num) * sizeof(struct nvmeibt_serialized_seg_leader_topo));
+					new_praids_processed++;
+				}
+			}
+
+			if (!use_new_praid) {
+				// No match in incremental - keep old version
+				praid_to_copy = old_praid_ptr;
+				segs_size = LE_SWAP8(old_praid_ptr->segs_num) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
+			}
+
+			// Update counters
+			n_praids_in_result++;
+			n_segs_in_result += LE_SWAP8(praid_to_copy->segs_num);
+
+			// Calculate size and update data length
+			praid_total_size = sizeof(*praid_to_copy) + segs_size;
+			data_len += praid_total_size;
+
+			// Copy to output if generating
+			if (output_praid_ptr) {
+				memcpy(output_praid_ptr, praid_to_copy, praid_total_size);
+				output_praid_ptr = (struct nvmeibt_praid_serialized_topo *)
+					((char *)output_praid_ptr + praid_total_size);
+			}
+
+			// Advance to next old praid
+			old_praid_ptr = (struct nvmeibt_praid_serialized_topo *)
+				((char *)old_praid_ptr + sizeof(*old_praid_ptr) +
+				 LE_SWAP8(old_praid_ptr->segs_num) * sizeof(struct nvmeibt_serialized_seg_leader_topo));
+		}
+
+		// Calculate final total size
+		total_size = data_len;
+
+		// Finalize output TLV and topo headers with actual counts
+		if (dst_wire_ctx) {
+			// Update TLV header
+			dst_wire_ctx->tlv_len = LE_SWAP32(data_len);
+			dst_wire_ctx->tlv_idx = upd_wire_ctx->tlv_idx;
+			dst_wire_ctx->seq_no = upd_wire_ctx->seq_no;
+			dst_wire_ctx->tlv_crc = LE_SWAP32(crc32(0, dst_wire_ctx, sizeof(*dst_wire_ctx)));
+
+			// Update topo header within the data
+			if (output_header) {
+				output_header->topo_len = LE_SWAP32(data_len);
+				output_header->praids_num = LE_SWAP32(n_praids_in_result);
+			}
+
+			// Advance destination data pointer
+			if (dst_data_ptr) {
+				*dst_data_ptr += data_len;
+			}
+		}
+
+		// Advance source data pointers
+		*old_data_ptr += old_len;
+		*upd_data_ptr += upd_len;
+
+		break;
+	}
+
+	case TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL:
+		N_Ef(kfk923j, "KAFKA_MGMT_CONFIG_INCREMENTAL not implemented yet - using standard copy");
+		break;
+
+	case TLV_TYPE_TOPO_CONFIG_INCREMENTAL:
+		N_Ef(tpc834k, "TOPO_CONFIG_INCREMENTAL not implemented yet - using standard copy");
+		break;
+
+	case TLV_TYPE_RAFT_MEMBERS_INCREMENTAL:
+		N_Ef(rft923m, "RAFT_MEMBERS_INCREMENTAL not implemented yet - using standard copy");
+		break;
+
+	default:
+		N_Ef(def892k, "Unexpected incremental TLV type=@INT8_TD", upd_tlv_type);
+		goto out;
+	}
+
+out:
+	NFOUT;
+	return total_size;
 }
 
 // returns a newly allocated struct where the new-upd takes presidence (whenever it carries a value)
