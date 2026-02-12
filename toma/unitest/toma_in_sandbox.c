@@ -1928,6 +1928,7 @@ rd_kafka_resp_err_t rd_kafka_offset_store(rd_kafka_topic_t *kt, int32_t partitio
 }
 
 void rd_kafka_consume_stop(rd_kafka_topic_t *kt, int32_t partition) {
+	N_Tf(__AUTOID__, "@STR: stop topic, cur_offset=@LD", kt->name, kt->cur_offset);
 	__rd_kafka_topic_verify_valid(kt, partition);
 	kt->is_active = false;
 }
@@ -1936,25 +1937,25 @@ static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
 	BUG_ON(offset <= 0);
 	kt->commited_offset = offset;			// Start from some non zero number
 	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
-	N_Tf(__AUTOID__, "@STR, starting from offset @LD", kt->name, kt->cur_offset);
+	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->cur_offset);
 }
 
 rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset) {
+	N_Tf(__AUTOID__, "@STR: start topic consume from offset=@LD", kt->name, offset);
 	kt->is_active = true;
 	__rd_kafka_topic_verify_valid(kt, partition);
 	if ((offset == RD_KAFKA_OFFSET_STORED)) {
 		// Toma relies on Kafka simulator
 	} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
 		__reset_offset(kt, 6);
-	} else {
-		//BUG_ON(offset < kt->cur_offset);		// Toma should consume messages from the start or from its persistency, except for leader queues which are reset on leader change
-		if (offset != kt->cur_offset)
-			__reset_offset(kt, offset);			// Our kafka simulator does not have persistency over destroy and reinit, so just use what toma said
+	} else {	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
+		__reset_offset(kt, offset - 1);
 	}
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
+	N_Tf(__AUTOID__, "k_object=@STR", ko->name);
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_active) {
 			rd_kafka_consume_stop(&ko->topic, ko->topic.partition);
@@ -1979,6 +1980,7 @@ rd_kafka_resp_err_t rd_kafka_assignment (rd_kafka_t *ko, rd_kafka_topic_partitio
 
 static void __rd_kafka_topic_init(rd_kafka_topic_t *kt, const char* name, rd_kafka_topic_conf_t* conf) {
 	BUG_ON((kt->name != NULL) || (kt->is_active));
+	N_Tf(__AUTOID__, "@STR: alloc_init", name);
 	kt->name = strdup(name);
 	kt->conf = conf;
 	__reset_offset(kt, 6);
