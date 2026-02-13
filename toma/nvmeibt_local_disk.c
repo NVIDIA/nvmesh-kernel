@@ -612,7 +612,7 @@ int nvmeibt_local_disk_free_all_resources(void)
 		rv |= nvmeibt_local_disk_destroy_and_free(local_disk);
 	}
 	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->formatting_local_disks_hash_by_ldisk_id_str) {	// Should be empty
-		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(hu86aw8, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, local_disk, local_disk);
+		NNVMEIBT_HASH_DEL_OBJ_ASCII_new(hu86aw8, nvmeibt_global_get_global()->formatting_local_disks_hash_by_ldisk_id_str, local_disk, local_disk);
 		rv |= nvmeibt_local_disk_destroy_and_free(local_disk);
 	}
 	NFOUT;
