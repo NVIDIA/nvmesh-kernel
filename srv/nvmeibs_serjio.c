@@ -6267,6 +6267,7 @@ static int rd_jrnl(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				goto wait_comp;
 			}
 		}
+		cond_resched();
 	}
 wait_comp:
 	if (atomic_dec_return(&read_ctr) > 0)
