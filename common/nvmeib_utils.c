@@ -19,6 +19,10 @@
 #define NVMEIB_SIZE_OF_GID_SEC 04
 #define NVMEIB_GID_SECTION_FORMAT "%04x"
 
+unsigned relax_timeouts = 0;
+module_param(relax_timeouts, uint, 0644);
+MODULE_PARM_DESC(relax_timeouts, "Multiplier for default control path timeouts (0 - unset)");
+
 /**
  * convert formated gid to raw
  *
@@ -699,6 +703,12 @@ EXPORT_SYMBOL(nvmeib_set_roce_lossy_mode_on);
 
 #include "compat/kr_incs_str.inc.c"
 EXPORT_SYMBOL(nvmeib_remove_unsafe_symbols);
+
+unsigned nvmeib_get_relax_timeouts(void)
+{
+	return clamp(relax_timeouts, 1U, 10000U);
+}
+EXPORT_SYMBOL(nvmeib_get_relax_timeouts);
 
 NVMEIB_DECLARE_KERNEL_WARNINGS_TRAP
 

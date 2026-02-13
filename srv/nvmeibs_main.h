@@ -19,6 +19,7 @@ extern bool nvmeibs_defer_recv_comps;
 extern bool nvmeibs_defer_recv_comps_tcp;
 extern unsigned nvmeibs_max_nic_srqs;
 extern bool nvmeibs_use_pcpu_cq;
+extern unsigned relax_timeouts;
 
 static inline bool nvmeibs_defer_recv_comps_enabled(enum nvmeib_dev_type dev_type)
 {

@@ -209,6 +209,7 @@ static inline void __drain_send_cq(struct nvmeibs_net *net)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	unsigned long flags;
+	unsigned long timeout;
 	DECLARE_IB_WC_ONSTACK(wc);
 	int rv;
 	int n;
@@ -232,9 +233,11 @@ static inline void __drain_send_cq(struct nvmeibs_net *net)
 	}
 	if (!rv) {
 		n = 0;
+		timeout = NVMEIB_WAIT_DRAIN_SQ * nvmeib_get_relax_timeouts();
+
 		while ((n < NVMEIB_N_WAIT_DRAIN_QP) &&
 			   (rv = wait_for_completion_interruptible_timeout(&done,
-				   NVMEIB_WAIT_DRAIN_SQ)) <= 0) {
+				   timeout)) <= 0) {
 			_NE(trace_2_net_drain_send_cq, "net @PARAMS_NAME, @NET, Fail wait drain-sq (rv @RV) attempt #@NUM_RETRY_ATTEMPTS", net->params.name, net, rv, n);
 
 			/* Debug "Fail to drain SQ"... */

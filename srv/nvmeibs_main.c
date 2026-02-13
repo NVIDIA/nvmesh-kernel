@@ -4053,6 +4053,7 @@ int nvmeibs_init(void) /* Constructor */
 		nvmeib_get_utsname_nodename());
 	atomic64_set(&client_uid, NVMEIBS_CLIENT_UID_BASE);
 	nvmeibs_client_registered = false;
+
 	if (!(s_intr_shaper = nvmeib_get_intr_shaper())) {
 		_NE(error_main_nvmeibs_init, "Failed to get interrupts shaper");
 		rv = -1;
