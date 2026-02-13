@@ -363,6 +363,7 @@ static inline void drain_send_cq(struct nvmeibc_ib_net *net)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	unsigned long flags;
+	unsigned long timeout;
 	int rv;
 	int n;
 	__NFIN;
@@ -396,9 +397,11 @@ static inline void drain_send_cq(struct nvmeibc_ib_net *net)
 	}
 	if (!rv) {
 		n = 0;
+		timeout = NVMEIB_WAIT_DRAIN_SQ * nvmeib_get_relax_timeouts();
+
 		while ((n < NVMEIB_N_WAIT_DRAIN_QP) &&
-			   (rv = wait_for_completion_interruptible_timeout(&done,
-				   NVMEIB_WAIT_DRAIN_SQ)) <= 0) {
+		       (rv = wait_for_completion_interruptible_timeout(&done,
+				   timeout)) <= 0) {
 			_NEn(trace_2_ib_net_drain_send_cq, net,
 				 "Fail wait drain-sq (rv @RV) attempt #@NUM_RETRY_ATTEMPTS, "
 				 "n_send_intrs=@LLU, n_recv_intrs=@LLU, intr_vec=@INT, dev=@DEV_NAME, poll-cq...",

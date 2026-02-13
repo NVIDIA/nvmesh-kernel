@@ -18,6 +18,7 @@
 extern bool nvmeibs_defer_recv_comps;
 extern unsigned nvmeibs_max_nic_srqs;
 extern bool nvmeibs_use_pcpu_cq;
+extern unsigned relax_timeouts;
 
 /*
  * Device private stuff.

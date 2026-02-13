@@ -203,6 +203,9 @@ static inline int mutex_is_locked_by_me(struct mutex *l)
 {
 	return (mutex_is_locked(l) && __mutex_owner(l) == nvmeib_current());
 }
+
+unsigned nvmeib_get_relax_timeouts(void);
+
 #endif//__KERNEL__
 
 #endif /* NVMEIB_UTILS_H */

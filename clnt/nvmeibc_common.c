@@ -49,4 +49,3 @@ void nvmeibc_trace_stats_scheduling_set_next(struct nvmeibc_trace_stats_scheduli
 		trace_stats->next_trace_jiffies = now_jiffies + (get_random_u32() % (trace_stats->trace_stats_period_sec * HZ));
 	}
 }
-
