@@ -193,14 +193,33 @@ static int make_msg_update_toma_keepalive_token(char *buf, size_t capacity) {
 
 static int make_msg_add_target(char *buf, size_t capacity, int queue_offset) {
 	struct mgmt_sim_state *m = g_mgmt_sim;	// This Kafka queue is never purged. It has 3 messages for 3 targets in raft domain (offsets 0..2)
-	struct sb_node_conf *node = &m->cfg->nodes[queue_offset];
-	BUG_ON((queue_offset < 0) || (queue_offset >= m->cfg->n_nodes));
 	++m->target_msg_count;					// Counter can get high, if leader changes and rereads the target kafka queue from beginning
-	return snprintf(buf, capacity,			/* First message: addTarget (self as 1-machine raft domain), then the other 2 */
-		"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
-		"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
-		node->hostname, node->uuid, queue_offset, queue_offset + 1);
-	// Todo: Also test remove "deleteTarget" and add it back
+	if (queue_offset < m->cfg->n_nodes) {
+		struct sb_node_conf *node = &m->cfg->nodes[queue_offset];
+		return snprintf(buf, capacity,			/* First message: addTarget (self as 1-machine raft domain), then the other 2 */
+			"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
+			node->hostname, node->uuid, queue_offset, queue_offset + 1);
+	} else if (queue_offset == 3) {
+		struct sb_node_conf *node = &m->cfg->other[0];
+		return snprintf(buf, capacity,			/* Remove First other target  */
+			"{\"messageType\":\"deleteTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
+			node->hostname, node->uuid, m->cfg->n_nodes, queue_offset + 1);
+	} else if (queue_offset == 4) {
+		struct sb_node_conf *node = &m->cfg->other[0];
+		return snprintf(buf, capacity,			/* Re-add First other again */
+			"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
+			node->hostname, node->uuid, m->cfg->n_nodes-1, queue_offset + 1);
+	} else if (queue_offset == 5) {
+		struct sb_node_conf *node = &m->cfg->other[1];
+		return snprintf(buf, capacity,			/* Re-add last target again, while it already exists, verify Toma can handle this */
+			"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
+			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
+			node->hostname, node->uuid, m->cfg->n_nodes, queue_offset + 1);
+	}
+	return -1;
 }
 
 static int make_msg_hardware_configuration(char *buf, size_t capacity) {
@@ -291,7 +310,7 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, s
 			g_mgmt_sim->cmd_msg_count++;
 		}
 	} else if (strstr(consumer_name, "incrementalTarget") != NULL) {		// Leader raft domain
-		if (queue_offset >= 0 && queue_offset <= 2) {	// Kafka offsets are [0,1,2] for the 3 messages
+		if (queue_offset >= 0 && queue_offset <= 5) {	// Kafka offsets are [0,1,2] for the 3 messages
 			const size_t capacity = 256;
 			payload = malloc(capacity);
 			BUG_ON(!payload);
