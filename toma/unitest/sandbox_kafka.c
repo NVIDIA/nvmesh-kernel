@@ -102,17 +102,6 @@ static rd_kafka_t* kafka_simu_find_by_parition_name(const char* name) {
 	return NULL;
 }
 
-static rd_kafka_t* kafka_simu_find_by_topic(rd_kafka_topic_t *kt) {
-	struct kafka_simulator_t *ks = g_kafka_simu;
-	int i;
-	for (i = 0; i < ks->n_obj; i++) {
-		if (is_kafka_cp_used(ks->obj[i]) && (&ks->obj[i]->topic == kt))
-			return ks->obj[i];
-	}
-	BUG_ON(true);
-	return NULL;
-}
-
 static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
 	BUG_ON(offset < 0);
 	kt->commited_offset = offset - 1;
@@ -314,7 +303,7 @@ void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_
 
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque) {
 	static int fail_once_every = 0;
-	rd_kafka_t *ko = kafka_simu_find_by_topic(kt);
+	rd_kafka_t *ko = container_of(kt, rd_kafka_t, topic);
 	rd_kafka_message_t km;
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
