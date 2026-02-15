@@ -196,8 +196,7 @@ struct nvmeibt_msg_request {
 	const void *cnst_msg;
 	const char *cnst_data;
 	struct nvmeibt_sr_cb_table cbs;
-	//void *arg;
-	void *user;
+	void *arg, *user;
 };
 
 #define SRM_EMPTY_USER ((void *)(~(0ULL)))

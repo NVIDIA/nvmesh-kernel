@@ -1809,10 +1809,14 @@ static int raft_send_msg_to_peer(
 		req.msg_len = sizeof(*msg);
 		req.cnst_data = msg_data_len > 0 ? persist_and_wire_buf->data : NULL;
 		req.data_len = msg_data_len > 0 ? msg_data_len : 0;
-		if (is_with_raft_log) {
+		if (is_with_raft_log) {							// We need a callback of send_msg finish to be able to reuse the buffer for next message
 			if (is_raft_leader_msg(msg_type)) {
+				const int cnt = __sync_add_and_fetch(&cur_topo->in_transmission_cnt, 1); 		// atomic inc
+				N_Tf(t_bb_2, "Start of topo tx, tx_remained=@INT", cnt);
 				req.cbs.send_c = raft_send_topo_cb;
 			} else {
+				const int cnt = __sync_add_and_fetch(&cur_topo->in_transmission_rep_cnt, 1); 	// atomic inc
+				N_Tf(t_bb_20, "Start of topo reply tx, tx_remained=@INT", cnt);
 				req.cbs.send_c = raft_send_topo_reply_cb;
 			}
 		}
@@ -1823,24 +1827,16 @@ static int raft_send_msg_to_peer(
 		rv = nvmeibt_node_send(dst_node, &req);
 		if (rv < 0) {
 			N_Tf(trace_2_raft_raft_send_msg_to_peer, "Failed to send msg to node @NODE_NAME", nvmeibt_node_name(dst_node));
+			if (req.cbs.send_c)
+				req.cbs.send_c(req.arg, -EIO);	// Send Callback will not arrive, simulate failure
 			goto out;
 		}
 		if (!is_raft_leader_msg(msg_type)) {
 			SET_RAFT_COMMIT_LIFECYCLE_VAL(4is0cbh, RAFT_MEMBERS,        follower_sent_to_leader, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS,        follower_committed));
 			SET_RAFT_COMMIT_LIFECYCLE_VAL(bbbxk43, RAFT_MEMBERS_SEQ_NO, follower_sent_to_leader, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed));
 		}
-		if (is_with_raft_log) {
-			if (is_raft_leader_msg(msg_type)) {
-				(void)__sync_add_and_fetch(&(cur_topo->in_transmission_cnt), 1); // atomic inc
-				N_Tf(t_bb_2, "Start of topo tx, tx_remained=@INT", cur_topo->in_transmission_cnt);
-			} else {
-				(void)__sync_add_and_fetch(&(cur_topo->in_transmission_rep_cnt), 1); // atomic inc
-				N_Tf(t_bb_20, "Start of topo reply tx, tx_remained=@INT", cur_topo->in_transmission_rep_cnt);
-			}
-		}
 	} else
 		N_Tf(trace_3_raft_raft_send_msg_to_peer, "No RAFT connection to node @NODE_NAME", nvmeibt_node_name(dst_node));
-//	FOUT;
 out:
 	NNVMEIBT_BM_FREE(vrhjskr, msg);
 	return rv;

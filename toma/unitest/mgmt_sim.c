@@ -291,7 +291,7 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, s
 			g_mgmt_sim->cmd_msg_count++;
 		}
 	} else if (strstr(consumer_name, "incrementalTarget") != NULL) {		// Leader raft domain
-		if (queue_offset < 8) {	// Kafka offsets are [7,8,9] for the 3 messages
+		if (queue_offset >= 7 && queue_offset <= 9) {	// Kafka offsets are [7,8,9] for the 3 messages
 			const size_t capacity = 256;
 			payload = malloc(capacity);
 			BUG_ON(!payload);
