@@ -1750,14 +1750,6 @@ static bool _recv_has_raft_msgs_for_toma(void) {
 	return (sys->nm->raft_msg_queue_from_other_tomas.n_msgs > 0);
 }
 
-void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln) {
-	BUG_ON(ln != sys->nm);
-	override_close(ln->fd);
-	ln->fd = -1;
-	sys->nm = NULL;
-	free(ln);
-}
-
 int nvmeibt_nm_get_fd(struct nvmeibt_nm_local_node *ln) { return ln->fd; }
 
 int rsrm_init_work_tmq(void) {
@@ -1811,6 +1803,21 @@ bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *ln, struc
 	N_Tf(__AUTOID__, "node: @STR, Check connection", node->from_config.name);
 	(void)ln;
 	return true;
+}
+
+void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln) {
+	BUG_ON(ln != sys->nm);
+	override_close(ln->fd);
+	ln->fd = -1;
+	if (ln->raft_msg_queue_from_other_tomas.n_msgs > 0) {		// Toma did not consume some of raft reply messages
+		N_Tf(__AUTOID__, "freeing unconsumed @INT raft msgs", ln->raft_msg_queue_from_other_tomas.n_msgs);
+		for (int i = 0; i < ln->raft_msg_queue_from_other_tomas.n_msgs; i++) {
+			NNVMEIBT_BM_FREE(__AUTOID__, ln->raft_msg_queue_from_other_tomas.msg_q[i]);
+		}
+		ln->raft_msg_queue_from_other_tomas.n_msgs = 0;
+	}
+	sys->nm = NULL;
+	free(ln);
 }
 
 int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
