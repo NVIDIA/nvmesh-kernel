@@ -30,7 +30,7 @@ struct rd_kafka_topic_conf_s {
 
 struct rd_kafka_topic_s {
 	char *name;
-	rd_kafka_topic_conf_t* conf;
+	rd_kafka_topic_conf_t *conf;
 	int64_t commited_offset, cur_offset, last_offset;
 	// Todo: Linked list of messages for offsets above cur,cur+1,....last_offset
 	int32_t partition;		// Support only 1 partition for now. Store its index
@@ -45,10 +45,10 @@ struct rd_kafka_conf_s {
 };
 
 struct rd_kafka_s {
-	char* name;
+	char *name;
 	int log_lvl;
 	enum rd_kafka_type_t who;
-	rd_kafka_conf_t* conf;
+	rd_kafka_conf_t *conf;
 	struct rd_kafka_topic_s topic;
 };
 

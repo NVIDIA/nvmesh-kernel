@@ -433,12 +433,12 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	sb_cluster_conf_create(&sys->cfg);
+	sys->kafka_simu = sandbox_kafka_init();
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	pthread_mutex_init(&sys->TS.mutex, NULL);
 	sandbox_server_init();
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
-	sys->kafka_simu = sandbox_kafka_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 }
 
@@ -448,11 +448,11 @@ void t_sandbox_all_destroy(void) {
 	if (!nvmeibt_toma_is_running_as_a_utility())
 		mgmt_sim_verify_at_end();
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
+	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
 	sandbox_kafka_destroy(sys->kafka_simu);
 	pthread_mutex_destroy(&sys->TS.mutex);
 	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
-	mgmt_sim_destroy();
 	sb_cluster_conf_destroy(&sys->cfg);
 	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	free(sys);

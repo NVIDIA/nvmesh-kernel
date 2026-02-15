@@ -386,12 +386,13 @@ const char *mgmt_sim_get_state_name(void)
 
 void mgmt_sim_destroy(void)
 {
-	if (!g_mgmt_sim)
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	if (!m)
 		return;
 
-	free(g_mgmt_sim->last_report_target_json);
-	free(g_mgmt_sim->pending_format_drive_msg);
-	free(g_mgmt_sim);
+	free(m->last_report_target_json);
+	free(m->pending_format_drive_msg);
+	free(m);
 	g_mgmt_sim = NULL;
 }
 
@@ -497,9 +498,11 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root)
 /*
  * Run the format scenario state machine.
  * Transitions based on disk statuses extracted from reportTarget.
+ * When a formatDrive needs to be sent, it's produced directly to the CMD topic.
  */
 static void mgmt_sim_run_fsm(void)
 {
+	struct mgmt_sim_state *m = g_mgmt_sim;
 	enum mgmt_sim_fsm_state prev_state;
 	bool disk_002_ok;
 	bool disk_003_ok;
@@ -508,52 +511,52 @@ static void mgmt_sim_run_fsm(void)
 	char *msg;
 	size_t msg_len;
 
-	BUG_ON(!g_mgmt_sim);
+	BUG_ON(!m);
 
-	prev_state = g_mgmt_sim->fsm_state;
-	disk_002_ok = (strcmp(g_mgmt_sim->disk_002.status, "Ok") == 0);
-	disk_003_ok = (strcmp(g_mgmt_sim->disk_003.status, "Ok") == 0);
-	disk_003_formatting = (strcmp(g_mgmt_sim->disk_003.status, "Formatting") == 0);
+	prev_state = m->fsm_state;
+	disk_002_ok = (strcmp(m->disk_002.status, "Ok") == 0);
+	disk_003_ok = (strcmp(m->disk_003.status, "Ok") == 0);
+	disk_003_formatting = (strcmp(m->disk_003.status, "Formatting") == 0);
 	disk_003_ok_with_expected_reported_format = disk_003_ok &&
-		(g_mgmt_sim->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(g_mgmt_sim->disk_003.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(g_mgmt_sim->disk_003.block_size == 4096) &&
-		(g_mgmt_sim->disk_003.metadata_size == 8);
+		(m->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(m->disk_003.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(m->disk_003.block_size == 4096) &&
+		(m->disk_003.metadata_size == 8);
 
-	switch (g_mgmt_sim->fsm_state) {
+	switch (m->fsm_state) {
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:
 		if (disk_002_ok && disk_003_ok) {
 			/* Both disks are Ok - send formatDrive */
-			N_IMf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", g_mgmt_sim->boot_time);
+			N_IMf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", m->boot_time);
 
 			msg = malloc(1024);
 			BUG_ON(!msg);
 			msg_len = (size_t)make_msg_format_drive(msg, 1024,
 				FORMAT_TARGET_DISK_ID, FORMAT_TARGET_UUID,
 				FORMAT_TARGET_VENDOR, FORMAT_REQUEST_COUNTER,
-				(unsigned long)g_mgmt_sim->boot_time);
-			g_mgmt_sim->pending_format_drive_msg = msg;
-			g_mgmt_sim->pending_format_drive_len = msg_len;
-			g_mgmt_sim->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
+				(unsigned long)m->boot_time);
+			m->pending_format_drive_msg = msg;
+			m->pending_format_drive_len = msg_len;
+			m->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
 		}
 		break;
 
 	case MGMT_FSM_SENT_FORMAT_DRIVE:
 		if (disk_003_formatting) {
 			N_IMf(msim_fsm2, "disk003 now Formatting");
-			g_mgmt_sim->fsm_state = MGMT_FSM_SAW_FORMATTING;
+			m->fsm_state = MGMT_FSM_SAW_FORMATTING;
 		} else if (disk_003_ok_with_expected_reported_format) {
 			/* Might have missed the Formatting state - go directly to done */
 			N_IMf(msim_fsm2b, "disk003 Ok with expected format (skipped Formatting) counter=@INT",
 			     FORMAT_REQUEST_COUNTER);
-			g_mgmt_sim->fsm_state = MGMT_FSM_DONE;
+			m->fsm_state = MGMT_FSM_DONE;
 		}
 		break;
 
 	case MGMT_FSM_SAW_FORMATTING:
 		if (disk_003_ok_with_expected_reported_format) {
 			N_IMf(msim_fsm3, "disk003 Ok with expected format counter=@INT", FORMAT_REQUEST_COUNTER);
-			g_mgmt_sim->fsm_state = MGMT_FSM_DONE;
+			m->fsm_state = MGMT_FSM_DONE;
 		}
 		break;
 
@@ -562,9 +565,9 @@ static void mgmt_sim_run_fsm(void)
 		break;
 	}
 
-	if (g_mgmt_sim->fsm_state != prev_state) {
+	if (m->fsm_state != prev_state) {
 		N_IMf(msim_trans, "FSM transition @STR -> @STR",
 		     mgmt_sim_fsm_state_name(prev_state),
-		     mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state));
+		     mgmt_sim_fsm_state_name(m->fsm_state));
 	}
 }
