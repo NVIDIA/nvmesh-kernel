@@ -31,7 +31,7 @@ struct rd_kafka_topic_conf_s {
 struct rd_kafka_topic_s {
 	char *name;
 	rd_kafka_topic_conf_t *conf;
-	int64_t commited_offset, cur_offset, last_offset;
+	int64_t commited_offset, cur_offset;
 	// Todo: Linked list of messages for offsets above cur,cur+1,....last_offset
 	int32_t partition;		// Support only 1 partition for now. Store its index
 	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
@@ -105,7 +105,7 @@ static rd_kafka_t* kafka_simu_find_by_parition_name(const char* name) {
 static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
 	BUG_ON(offset < 0);
 	kt->commited_offset = offset - 1;
-	kt->last_offset = kt->cur_offset = offset;
+	kt->cur_offset = offset;
 	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->cur_offset);
 }
 
@@ -284,7 +284,7 @@ rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char 
 	BUG_ON(me->topic.partition != partition);					// Only 1 partition
 	(void)timeout;
 	*low_oldest_beginning_offset = me->topic.cur_offset;
-	*high_newest_end_offset =  me->topic.last_offset + 17;		// +17 is just for fun, meaningless
+	*high_newest_end_offset =      me->topic.cur_offset + 17;		// +17 is just for fun, meaningless
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -351,8 +351,7 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 		free(m);
 		return NULL;
 	}
-	m->offset = ko->topic.cur_offset;
-	ko->topic.last_offset = ++ko->topic.cur_offset;
+	m->offset = ko->topic.cur_offset++;
 	N_Tf(__AUTOID__, "consumer[@STR] ++cur_offset=@LD", unique_name, ko->topic.cur_offset);
 	m->_private = NULL;
 	return m;
