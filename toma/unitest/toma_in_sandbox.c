@@ -1728,6 +1728,10 @@ struct nvmeibt_nm_local_node { 					// Network module simulator. For Toma to com
 		int n_msgs;
 		struct nvmeibt_big_msg *msg_q[10];		// Up to 10 messages
 	} raft_msg_queue_from_other_tomas;
+	struct {
+		int vote_rep;
+		int append_ent_rep;
+	} n_total_msmgs_sent;
 	int fd;
 	int8_t n_connected_remote_nodes;
 	int8_t n_nics;								// Nics to communicate with with other Tomas
@@ -1817,6 +1821,8 @@ void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln) {
 		ln->raft_msg_queue_from_other_tomas.n_msgs = 0;
 	}
 	sys->nm = NULL;
+	BUG_ON(ln->n_total_msmgs_sent.vote_rep <= 0);
+	BUG_ON(ln->n_total_msmgs_sent.append_ent_rep <= 0);
 	free(ln);
 }
 
@@ -1864,12 +1870,14 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 			case RAFT_MSG_REQ_VOTE:
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_REQ_VOTE_REP);
 				out_r_msg->is_vote_granted = true;			// Currently always vote for live toma.
+				ln->n_total_msmgs_sent.vote_rep++;
 				break;
 			case RAFT_MSG_APPEND_ENTRIES:
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_APPEND_ENTRIES_REP);
 				if (req->data_len)
 					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incomming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
+				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
 			default: BUG_ON(true);							// Currently only support reply as follower on leader/candidate msgs
 		}
