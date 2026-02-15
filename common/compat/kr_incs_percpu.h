@@ -43,8 +43,8 @@
 	#define DECLARE_PER_CPU(       type, name)                 extern type name[NR_CPUS]
 	#define DEFINE_PER_CPU_ALIGNED(type, name)  ____cacheline_aligned type name[NR_CPUS]
 	#define DEFINE_PER_CPU_PAGE_ALIGNED(type, name)  ____page_aligned type name[NR_CPUS]
-	#define per_cpu_ptr(ptr,cpu)	(is_kmalloc_percpu(ptr) ? (typeof(ptr))per_cpu_kalloc_ptr(ptr, cpu) : ptr+cpu)
-	#define get_cpu_var(var)		(*per_cpu_var(var, get_cpu())
+	#define per_cpu_ptr(ptr,cpu)	(is_kmalloc_percpu(ptr) ? (typeof(&(ptr)[0]))per_cpu_kalloc_ptr(ptr, cpu) : ptr+cpu)
+	#define get_cpu_var(var)		(*per_cpu_ptr(var, get_cpu()))
 	#define put_cpu_var(var)		({ (void)&(var); put_cpu(); })
 	#define per_cpu(var, cpu)		(*(per_cpu_ptr(var, cpu)))
 	// dynamic allocate percpu
@@ -62,6 +62,8 @@
 	#define alloc_percpu(type)   (typeof(type) __percpu *)__alloc_percpu(sizeof(type), __alignof__(type))
 	#define this_cpu_inc(var) {typeof((var)) *var_ptr = per_cpu_ptr(&var, get_cpu()); (*var_ptr)++; put_cpu();}
 	#define this_cpu_dec(var) {typeof((var)) *var_ptr = per_cpu_ptr(&var, get_cpu()); (*var_ptr)--; put_cpu();}
+	#define READ_ONCE(x) x
+	#define WRITE_ONCE(x, val) x=(val)
 
 	typedef void (*smp_call_func_t)(void *info);
 	int on_each_cpu(smp_call_func_t func, void *info, int wait);
