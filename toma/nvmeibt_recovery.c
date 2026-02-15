@@ -4,6 +4,9 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
+#include <errno.h>
+#include <spawn.h>
+#include <unistd.h>
 
 #include "nvmeibt_toma.h"
 #include "nvmeibt_common.h"
@@ -1478,49 +1481,78 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		goto out;
 	}
 	//
-	child_pid = fork();
-	if (child_pid < 0) {	// Err
-		/* error */
-		N_Ef(tvjks03, "vfork() failed: (@AUTO_ERRNO)");
-		goto out;
-	}
-	if (child_pid == 0) {	// Child (Note: do not use binary tracing logger in this code)
-		int			rv;
+	N_IMf(ji9nhy7, "exec encrypt command: \"@STR\"", entry->run_exec_on_blkdev_ctx->executable_str);
+	{
+		posix_spawn_file_actions_t	fa;
+		posix_spawnattr_t			attr;
+		char						executable_str_with_delay[512];
+		char *const					argv[] = { "bash", "-c", executable_str_with_delay, NULL };
+		int							spawn_err;
 
-		if (setpgid(0, 0) < 0) {	// Set my_pgid = my_pid. All my children should inherit this pgid
-		}
-		// redirect the chils's stdout and stderr to the pipe that the father captures
-		if (dup2(child_fds_stderr[1], STDERR_FILENO) < 0 || dup2(child_fds_stdout[1], STDOUT_FILENO) < 0 || dup2(child_fds_stdin[0], STDIN_FILENO) < 0) {
-			fprintf(stderr, "dup2() failed (%m)");
-			_exit(103);		// From child
-		}
-		// After the dup2() close the pre-dup
-		if (child_fds_stdout[1] != STDOUT_FILENO)
-			close(child_fds_stdout[1]);
-		if (child_fds_stderr[1] != STDERR_FILENO)
-			close(child_fds_stderr[1]);
-		if (child_fds_stdin[0] != STDIN_FILENO)
-			close(child_fds_stdin[0]);
-		nvmeibt_close_all_nonstd_fds(0);		// Dhsh: I dont understand why this line is here
-		//
 		if (nvmeibt_encrypt_delay == ENCRYPT_DELAY_BEFORE_EXECUTION)
-			encrypt_delay(false);
-		syslog(LOG_NOTICE, "%s", entry->run_exec_on_blkdev_ctx->executable_str);
-		rv = execlp("bash", "bash", "-c", entry->run_exec_on_blkdev_ctx->executable_str, NULL);
-		/* NOT REACHED, unless execlp fails*/
-		fprintf(stderr, "execlp failed, %m");
-		_exit(rv);		// From child - ONLY if exec() ITSELF failed
+			strcpy(executable_str_with_delay, "sleep 20; ");
+		else
+			executable_str_with_delay[0] = '\0';
+		strcat(executable_str_with_delay, entry->run_exec_on_blkdev_ctx->executable_str);
+
+		spawn_err = posix_spawn_file_actions_init(&fa);
+		if (spawn_err != 0) {
+			errno = spawn_err;
+			N_Ef(tvjks03, "posix_spawn_file_actions_init() failed: (@AUTO_ERRNO)");
+			goto out;
+		}
+		posix_spawn_file_actions_adddup2(&fa, child_fds_stdin[0], STDIN_FILENO);
+		posix_spawn_file_actions_adddup2(&fa, child_fds_stdout[1], STDOUT_FILENO);
+		posix_spawn_file_actions_adddup2(&fa, child_fds_stderr[1], STDERR_FILENO);
+#if 0
+		if (child_fds_stdin[0] > 2)
+			posix_spawn_file_actions_addclose(&fa, child_fds_stdin[0]);
+		if (child_fds_stdout[1] > 2)
+			posix_spawn_file_actions_addclose(&fa, child_fds_stdout[1]);
+		if (child_fds_stderr[1] > 2)
+			posix_spawn_file_actions_addclose(&fa, child_fds_stderr[1]);
+		posix_spawn_file_actions_addclose(&fa, child_fds_stdout[0]);
+		posix_spawn_file_actions_addclose(&fa, child_fds_stderr[0]);
+		posix_spawn_file_actions_addclose(&fa, child_fds_stdin[1]);
+		for (i = 3; i < 256; i++) {
+			if (i != child_fds_stdin[0] && i != child_fds_stdin[1] &&
+			    i != child_fds_stdout[0] && i != child_fds_stdout[1] &&
+			    i != child_fds_stderr[0] && i != child_fds_stderr[1])
+				posix_spawn_file_actions_addclose(&fa, i);
+		}
+#endif
+		spawn_err = posix_spawnattr_init(&attr);
+		if (spawn_err != 0) {
+			errno = spawn_err;
+			posix_spawn_file_actions_destroy(&fa);
+			N_Ef(5bws0l2, "posix_spawnattr_init() failed: (@AUTO_ERRNO)");
+			goto out;
+		}
+		posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+		posix_spawnattr_setpgroup(&attr, 0);
+		spawn_err = posix_spawnp(&child_pid, "bash", &fa, &attr, argv, environ);
+		posix_spawnattr_destroy(&attr);
+		posix_spawn_file_actions_destroy(&fa);
+		if (spawn_err != 0) {
+			child_pid = -1;
+			errno = spawn_err;
+			entry->run_exec_on_blkdev_ctx->exec_rv = -1;
+			N_Ef(7sh2kwo, "posix_spawnp() failed: (@AUTO_ERRNO)");
+			goto out;
+		}
 	}
-	N_Tf(idpw53n, "forked child_pid=@PID", (int)child_pid);
-	// Parent goodpath. Wait for child (with timeout), and collect its outputs
-	// BTW, we already ignore SIGPIPE (using signal(SIGPIPE, SIG_IGN);)
+	N_Tf(idpw53n, "posix_spawnp child_pid=@PID", (int)child_pid);
+	if (child_pid >= 0) {
+		// Wait for child (with timeout), and collect its outputs
+		// BTW, we already ignore SIGPIPE (using signal(SIGPIPE, SIG_IGN);)
 #if 0	// Use STDIN to feed the passphrase
-	n_written = nvmeibt_write(child_fds_stdin[1], stdin_passphrase, strlen(stdin_passphrase));
-	N_Tf(rsbwuia, "passphrase_stdin_str n_written=@SIZE_T", n_written);
+		n_written = nvmeibt_write(child_fds_stdin[1], stdin_passphrase, strlen(stdin_passphrase));
+		N_Tf(rsbwuia, "passphrase_stdin_str n_written=@SIZE_T", n_written);
 #endif	// #if 0	// Use STDIN to feed the passphrase
-	NNVMEIBT_CLOSE(uqoqmrq, child_fds_stdin[1]);	// EOF at the child
-	entry->run_exec_on_blkdev_ctx->exec_rv = waitpid_with_timeout(child_pid, entry->run_exec_on_blkdev_ctx->timeout_ms,
-																  entry->run_exec_on_blkdev_ctx->executable_str);
+		NNVMEIBT_CLOSE(uqoqmrq, child_fds_stdin[1]);	// EOF at the child
+		entry->run_exec_on_blkdev_ctx->exec_rv = waitpid_with_timeout(child_pid, entry->run_exec_on_blkdev_ctx->timeout_ms,
+																	  entry->run_exec_on_blkdev_ctx->executable_str);
+	}
 out:
 	N_IMf(ecgsuyfjkha, "exec_rv=@INT", entry->run_exec_on_blkdev_ctx->exec_rv);
 	// Read the child's stdout & stderr
