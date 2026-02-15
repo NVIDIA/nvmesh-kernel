@@ -3870,7 +3870,7 @@ int nvmeibt_raft_print_status_json(int (*printf_fn)(void *ctx, const char *fmt, 
 	int								n_members, i;
 
 	NFIN;
-	(*printf_fn)(printf_ctx, "{\"RAFT\": {\"leader_name\": \"%s\", \"n_peers_voted_for_me\": %d, \"Role\":",
+	(*printf_fn)(printf_ctx, "\"RAFT\": {\"leader_name\": \"%s\", \"n_peers_voted_for_me\": %d, \"Role\":",
 				 raft_get_leader_node_name(), my_raft_global.n_peers_voted_for_me);
 	if (my_raft_global.role != RAFT_ROLE_FOLLOWER) {
 		if (my_raft_global.role == RAFT_ROLE_LEADER) {
@@ -3900,7 +3900,7 @@ int nvmeibt_raft_print_status_json(int (*printf_fn)(void *ctx, const char *fmt, 
 	} else {
 		(*printf_fn)(printf_ctx, "\"follower\"");
 	}
-	(*printf_fn)(printf_ctx, "}}\n");
+	(*printf_fn)(printf_ctx, "}\n");
 
 	NFOUT;
 	return 0;

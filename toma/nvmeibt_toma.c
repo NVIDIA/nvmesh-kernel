@@ -1865,8 +1865,11 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 		nvmeibt_print_alloc_free_summary_table(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ZEROING)
 		nvmeibt_block_device_print_zeroing_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL_JSON)
+	if (status_type == NVMEIBS_TOMA_STATUS_ALL_JSON) {
+		(*printf_fn)(printf_ctx, "{");
 		nvmeibt_raft_print_status_json(printf_fn, printf_ctx);
+		(*printf_fn)(printf_ctx, ",\"num_clients\" : %d}\n", nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->clients_hash_by_cid));
+	}
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_KAFKA_INFO)
 		nvmeibt_kafka_print_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_NM_JSON)

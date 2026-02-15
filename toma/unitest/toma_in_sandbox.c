@@ -147,7 +147,7 @@ ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t off
 		BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
 		me->expecting_reply_cookie = 0x1000 + me->n_srvr_msg_idx;
 		msg_buf->type = NVMEIBS_TOMA_WRITE_STATUS_REQ;
-		pl->type = NVMEIBS_TOMA_STATUS_RAFT;
+		pl->type = NVMEIBS_TOMA_STATUS_RAFT;	// NVMEIBS_TOMA_STATUS_ALL_JSON
 		pl->handle = 0 - me->expecting_reply_cookie;
 		pl->handle_req = me->expecting_reply_cookie;
 		strcpy(pl->fname, "placeholder.tmp");		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
