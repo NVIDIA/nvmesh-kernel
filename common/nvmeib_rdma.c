@@ -1399,6 +1399,54 @@ static void iw_event_2_nvmeib_event(struct iw_cm_event *event,
 	NFOUT;
 }
 
+/* Prepare close event structure */
+static void iw_prepare_event(struct nvmeib_rdma_event *rdma_event,
+				    enum nvmeib_rdma_event_type event_type,
+				    int status, void *private_data, u8 private_data_len)
+{
+	rdma_event->event = event_type;
+	rdma_event->status = status;
+	rdma_event->private_data = private_data;
+	rdma_event->private_data_len = private_data_len;
+}
+
+static void iw_send_close_events_with_handler(int (*event_handler)(void *context, struct nvmeib_rdma_event *event),
+					       void *context, int status)
+{
+	struct nvmeib_rdma_event rdma_event = {0};
+
+	NFIN;
+	iw_prepare_event(&rdma_event, NVMEIB_DREQ_RECEIVED, status, NULL, 0);
+	_ND(trace_iw_send_close_events_dreq, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
+		rdma_event.event);
+	event_handler(context, &rdma_event);
+
+	iw_prepare_event(&rdma_event, NVMEIB_DREP_RECEIVED, status, NULL, 0);
+	_ND(trace_iw_send_close_events_drep, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
+		rdma_event.event);
+	event_handler(context, &rdma_event);
+	NFOUT;
+}
+
+static void iw_send_close_events_with_peer_event(int (*on_peer_event)(struct nvmeib_rdma_cm *cm, struct nvmeib_rdma_event *p),
+						   struct nvmeib_rdma_cm *cm, int status)
+{
+	struct nvmeib_rdma_event rdma_event = {0};
+
+	NFIN;
+
+	iw_prepare_event(&rdma_event, NVMEIB_DREQ_RECEIVED, status, NULL, 0);
+	_ND(trace_iw_send_close_events_dreqx, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
+		rdma_event.event);
+	on_peer_event(cm, &rdma_event);
+
+	iw_prepare_event(&rdma_event, NVMEIB_DREP_RECEIVED, status, NULL, 0);
+	_ND(trace_iw_send_close_events_drepx, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
+		rdma_event.event);
+	on_peer_event(cm, &rdma_event);
+	NFOUT;
+}
+
 /* iwarp handler, called when an iwarp event occurs */
 static int iwarp_cm_handler_impl(struct iw_cm_id *cm_id,
 	struct iw_cm_event *event)
@@ -1453,7 +1501,6 @@ static int iwarp_cm_handler_impl(struct iw_cm_id *cm_id,
 			rv = -ENOMEM;
 	}
 	else {
-		iw_event_2_nvmeib_event(event, &rdma_event);
 		/*
 		   this is not a new connection so probably the new event is due to
 		   a change in a client qp.
@@ -1461,7 +1508,16 @@ static int iwarp_cm_handler_impl(struct iw_cm_id *cm_id,
 		if (cm_id != roce->iw_cm_id) {
 			if ((conn = roce_find_rdma_cm(&roce->listener, cm_id))) {
 				roce_conn = conn_2_roce(conn);
-				roce->listener.on_peer_event(&roce_conn->conn.cm, &rdma_event);
+				/* For IW_CM_EVENT_CLOSE, send both DREQ and DREP events as when 
+				   IWCM doesn't pass disconnect event to the cm handler */
+				if (event->event == IW_CM_EVENT_CLOSE) {
+					iw_send_close_events_with_peer_event(roce->listener.on_peer_event,
+									      &roce_conn->conn.cm,
+									      event->status);
+				} else {
+					iw_event_2_nvmeib_event(event, &rdma_event);
+					roce->listener.on_peer_event(&roce_conn->conn.cm, &rdma_event);
+				}
 			}
 			else
 				_NE(error_1_nvmeib_rdma_iwarp_cm_handler_impl, "Received CM event @EVENT but connection is not ours",
@@ -3791,10 +3847,16 @@ static int iw_conn_cm_handler(struct iw_cm_id *cm_id,
 			}
 		}
 		spin_unlock_irqrestore(&conn->conn.lock, flags);
-		break;
+		/* For IW_CM_EVENT_CLOSE, send both DREQ and DREP events as when 
+		   IWCM doesn't pass disconnect event to the cm handler */
+		iw_send_close_events_with_handler(conn->conn.event_handler,
+						  conn->conn.context,
+						  event->status);
+		goto unlock;
 	default:
 		_NE(t_01_iw_conn_cm_handler_got_inv_close_evt, "invalid iwarp event @INT\n", event->event);
 	}
+
 	iw_event_2_nvmeib_event(event, &rdma_event);
 	rdma_event.private_data = &iw_pd->user_pd;
 	rdma_event.private_data_len = user_pd_len;
