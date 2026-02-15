@@ -36,7 +36,6 @@ struct rd_kafka_topic_s {
 	int32_t partition;		// Support only 1 partition for now. Store its index
 	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
 	bool is_active;
-	int temp_store_offset;	// Daniel, not sure is needed - just for two stage store and commit.
 };
 
 struct rd_kafka_conf_s {
@@ -115,9 +114,9 @@ static rd_kafka_t* kafka_simu_find_by_topic(rd_kafka_topic_t *kt) {
 }
 
 static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
-	BUG_ON(offset <= 0);
-	kt->commited_offset = offset;			// Start from some non zero number
-	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
+	BUG_ON(offset < 0);
+	kt->commited_offset = offset - 1;
+	kt->last_offset = kt->cur_offset = offset;
 	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->cur_offset);
 }
 
@@ -126,7 +125,7 @@ static void __rd_kafka_topic_init(rd_kafka_topic_t *kt, const char* name, rd_kaf
 	N_Tf(__AUTOID__, "@STR: alloc_init", name);
 	kt->name = strdup(name);
 	kt->conf = conf;
-	__reset_offset(kt, 6);
+	__reset_offset(kt, 0);
 	kt->partition = 0;
 	kt->is_active = false;
 }
@@ -171,9 +170,9 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 		if (offset == RD_KAFKA_OFFSET_STORED) {
 			N_Tf(__AUTOID__, "@STR: continue from cur_offset=@LD", kt->name, kt->cur_offset); // Toma relies on Kafka simulator
 		} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
-			__reset_offset(kt, 6);
+			__reset_offset(kt, 0);
 		} else {	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
-			__reset_offset(kt, offset - 1);
+			__reset_offset(kt, offset);
 		}
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	}

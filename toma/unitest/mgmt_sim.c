@@ -199,7 +199,7 @@ static int make_msg_add_target(char *buf, size_t capacity, int queue_offset) {
 	return snprintf(buf, capacity,			/* First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		"{\"messageType\":\"addTarget\",\"messageTypeVersion\":1,\"payload\":"
 		"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
-		node->hostname, node->uuid, queue_offset, queue_offset + 1*0);	// *0 Simulator hack: Because our kafka simulator does not start from offset 0 so kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma() breaks
+		node->hostname, node->uuid, queue_offset, queue_offset + 1);
 	// Todo: Also test remove "deleteTarget" and add it back
 }
 
@@ -291,12 +291,12 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, s
 			g_mgmt_sim->cmd_msg_count++;
 		}
 	} else if (strstr(consumer_name, "incrementalTarget") != NULL) {		// Leader raft domain
-		if (queue_offset >= 7 && queue_offset <= 9) {	// Kafka offsets are [7,8,9] for the 3 messages
+		if (queue_offset >= 0 && queue_offset <= 2) {	// Kafka offsets are [0,1,2] for the 3 messages
 			const size_t capacity = 256;
 			payload = malloc(capacity);
 			BUG_ON(!payload);
 			N_Tf(__AUTOID__, "consumer[@STR] << msg=addTarget(koffset=@INT)", consumer_name, queue_offset);
-			len = make_msg_add_target(payload, capacity, queue_offset-7);
+			len = make_msg_add_target(payload, capacity, queue_offset);
 		}
 	} else if (strstr(consumer_name, "incrementalUpdates") != NULL) {		// Leader volumes updates domain
 		if ((g_mgmt_sim->volume_msg_count++ % 15) == 0) {					/* Periodically send updateLeaderKeepaliveToken */
