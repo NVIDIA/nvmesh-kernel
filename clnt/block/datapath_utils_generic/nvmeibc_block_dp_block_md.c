@@ -196,9 +196,9 @@ void *nvmeibc_alloc_md(const u64 nlbas, const u32 mdsize) {
 
 	/* First try allocating with kzalloc */
 	if (!(md = kzalloc(totalsize, gfp))) {
-		BUG_ON(!PageSlab(virt_to_head_page(md)));
 		goto out;
 	}
+	BUG_ON(!PageSlab(virt_to_head_page(md)));
 
 	/* Check alignment - TBD: Check is local bypass */
 	if (((u64)md & PAGE_MASK) != (((u64)md + (totalsize - 1)) & PAGE_MASK)) {
