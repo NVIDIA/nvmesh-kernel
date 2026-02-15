@@ -34,6 +34,7 @@ char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, s
 
 enum sim_topic_type_toma_to_mgmt {
 	KTOPIC_TYPE_T2M_UNKNOWN = '?', KTOPIC_TYPE_T2M_PRIORITY = 'P', KTOPIC_TYPE_T2M_KEEPALIVE = 'K', KTOPIC_TYPE_T2M_LOW = 'L',
+	KTOPIC_TYPE_M2T_HW_CFG = 'H', KTOPIC_TYPE_M2T_CMD = 'C', KTOPIC_TYPE_M2T_TARGETS_RAFT = 'R', KTOPIC_TYPE_M2T_VOLUMES = 'V',
 };
 
 void mgmt_sim_on_toma_produced(enum sim_topic_type_toma_to_mgmt type, const void *payload, size_t len);

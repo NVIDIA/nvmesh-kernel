@@ -28,12 +28,45 @@ struct rd_kafka_topic_conf_s {
 	int dummy;
 };
 
+struct sim_broker_topic {		// A topic = append-only log of messages
+	enum sim_topic_type_toma_to_mgmt type;
+	struct sim_msg {			// A single message stored in a topic log
+		char *payload;
+		size_t len;
+	} *msgs;					// dynamic array (realloc growth)
+	int n_msgs;					// number of stored messages
+	int capacity;				// allocated slots
+	int64_t cur_offset;			// offset of msgs[0]
+	int64_t committed_offset;	// == cur_offset-1. last committed offset (Kafka convention: next-to-consume)
+};
+
+void sim_broker_topic_create(struct sim_broker_topic *t, enum sim_topic_type_toma_to_mgmt type) {
+	t->type = type;
+	t->committed_offset = -1;
+	t->cur_offset = 0;
+}
+
+void sim_broker_topic_append(struct sim_broker_topic *t, const void *payload, size_t len) {
+	if (t->n_msgs >= t->capacity) {
+		t->capacity = (t->capacity == 0) ? 32 : t->capacity * 2;
+		t->msgs = realloc(t->msgs, t->capacity * sizeof(t->msgs[0]));
+		BUG_ON(!t->msgs);
+	}
+	t->msgs[t->n_msgs].payload = malloc(len + 1);
+	BUG_ON(!t->msgs[t->n_msgs].payload);
+	memcpy(t->msgs[t->n_msgs].payload, payload, len);
+	t->msgs[t->n_msgs].payload[len] = '\0';		// NULL-terminate for convenience
+	t->msgs[t->n_msgs].len = len;
+	t->n_msgs++;
+}
+
 struct rd_kafka_topic_s {
 	char *name;
 	rd_kafka_topic_conf_t *conf;
 	int64_t commited_offset, cur_offset;
 	// Todo: Linked list of messages for offsets above cur,cur+1,....last_offset
 	int32_t partition;		// Support only 1 partition for now. Store its index
+	struct sim_broker_topic *broker_topic;
 	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
 	bool is_active;
 };
@@ -52,7 +85,8 @@ struct rd_kafka_s {
 };
 
 struct kafka_simulator_t {
-	rd_kafka_t *obj[10];
+	struct sim_broker_topic topics[7];		// Kafka broker (backend) topics, always exist even if Toma is not connected to them via kafka client
+	rd_kafka_t *obj[7];				// 4 Toma consumers, 3 Toma producers
 	int n_obj;
 	void (*notify_producer_msg_accepted)( rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque);
 	void (*notify_consumer_offset_commit)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque);
@@ -62,12 +96,26 @@ struct kafka_simulator_t {
 static struct kafka_simulator_t *g_kafka_simu = NULL;
 
 struct kafka_simulator_t *sandbox_kafka_init(void) {
-	g_kafka_simu = calloc(1, sizeof(*g_kafka_simu));
+	struct kafka_simulator_t *ks = g_kafka_simu = calloc(1, sizeof(*g_kafka_simu));
+	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG);
+	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD);
+	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT);
+	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES);
+	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY);
+	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE);
+	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW);
 	return g_kafka_simu;
 }
 
 void sandbox_kafka_destroy(struct kafka_simulator_t *ks) {
 	BUG_ON(ks != g_kafka_simu);
+	for (int i = 0; i < (int)ARRAY_SIZE(ks->topics); i++) {
+		struct sim_broker_topic *t = &ks->topics[i];
+		for (int j = 0; j < t->n_msgs; j++) {
+			free(t->msgs[j].payload);
+		}
+		free(t->msgs);
+	}
 	free(g_kafka_simu);
 	g_kafka_simu = NULL;
 }
@@ -109,14 +157,13 @@ static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
 	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->cur_offset);
 }
 
-static void __rd_kafka_topic_init(rd_kafka_topic_t *kt, const char* name, rd_kafka_topic_conf_t* conf) {
-	BUG_ON((kt->name != NULL) || (kt->is_active));
-	N_Tf(__AUTOID__, "@STR: alloc_init", name);
-	kt->name = strdup(name);
-	kt->conf = conf;
-	__reset_offset(kt, 0);
-	kt->partition = 0;
-	kt->is_active = false;
+struct sim_broker_topic *find_broker_topic_by(enum sim_topic_type_toma_to_mgmt type) {
+	struct kafka_simulator_t *ks = g_kafka_simu;
+	for (int i = 0; i < (int)ARRAY_SIZE(ks->topics); i++) {
+		if (ks->topics[i].type == type)
+			return &ks->topics[i];
+	}
+	BUG_ON(true); return NULL;
 }
 
 /************************************* Kafka API implementations ********************************/
@@ -240,20 +287,30 @@ rd_kafka_t* rd_kafka_new(enum rd_kafka_type_t who, rd_kafka_conf_t *cfg, char*er
 	return k;
 }
 
-rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char* name, rd_kafka_topic_conf_t* conf) {
-	BUG_ON(!is_kafka_cp_used(k));
-	__rd_kafka_topic_init(&k->topic, name, conf);
-	k->topic.is_active = true;
-	k->topic.type = KTOPIC_TYPE_T2M_UNKNOWN;
+rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char *name, rd_kafka_topic_conf_t *conf) {
+	rd_kafka_topic_t *kt = &k->topic;
+	BUG_ON(!is_kafka_cp_used(k) || (kt->name != NULL) || (kt->is_active));
+	N_Tf(__AUTOID__, "@STR: alloc_init", name);
+	kt->name = strdup(name);
+	kt->conf = conf;
+	kt->partition = 0;
 	if (k->who == RD_KAFKA_PRODUCER) {
-		if (     strstr(name, "management.priority."))	k->topic.type = KTOPIC_TYPE_T2M_PRIORITY;
-		else if (strstr(name, "management.keepalive."))	k->topic.type = KTOPIC_TYPE_T2M_KEEPALIVE;
-		else if (strstr(name, "management.low."))		k->topic.type = KTOPIC_TYPE_T2M_LOW;
-		else BUG_ON(true);				// unknown topic which management simulator will not listen too
+		if (     strstr(name, "management.priority."))		kt->type = KTOPIC_TYPE_T2M_PRIORITY;
+		else if (strstr(name, "management.keepalive."))		kt->type = KTOPIC_TYPE_T2M_KEEPALIVE;
+		else if (strstr(name, "management.low."))			kt->type = KTOPIC_TYPE_T2M_LOW;
+		else BUG_ON(true);				// Unknown topic which management simulator will not listen too
 	} else {
-		N_Tf(__AUTOID__, "alloc new consumer topic @STR, starting from offset @LD", k->topic.name, k->topic.cur_offset);
+		if (     strstr(name, "hardwareConfiguration"))		kt->type = KTOPIC_TYPE_M2T_HW_CFG;
+		else if (strstr(name, "TOMA.commands."))			kt->type = KTOPIC_TYPE_M2T_CMD;
+		else if (strstr(name, "TargetUpdates"))				kt->type = KTOPIC_TYPE_M2T_TARGETS_RAFT;
+		else if (strstr(name, "incrementalUpdates"))		kt->type = KTOPIC_TYPE_M2T_VOLUMES;
+		else BUG_ON(true);				// Unknown topic which Toma will not listen too
 	}
-	return &k->topic;
+	kt->broker_topic = find_broker_topic_by(kt->type);
+	__reset_offset(kt, 0);
+	kt->is_active = true;
+	N_Tf(__AUTOID__, "alloc new topic @STR[@CHAR], starting from offset @LD", kt->name, kt->type, kt->cur_offset);
+	return kt;
 }
 
 rd_kafka_topic_partition_list_t* rd_kafka_topic_partition_list_new(int n) {
