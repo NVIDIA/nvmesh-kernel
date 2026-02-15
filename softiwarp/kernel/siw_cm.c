@@ -1777,6 +1777,12 @@ static void siw_cm_work_handler(struct work_struct *w)
 				 *       FIXME: is that needed?
 				 */
 				pre_jif = jiffies;
+				if (cep->qp) {
+					/* speed up the close by triggering a QP_FATAL event so we won't be delayed by iw_cm workqueue */
+					dprint_cep(DBG_CM | DBG_ON, cep, " QP: %d/" dprint_ptr_str() " triggering QP_FATAL event",
+						cep->qp ? QP_ID(cep->qp) : -1, cep->qp);
+					siw_qp_event(cep->qp, IB_EVENT_QP_FATAL);
+				}
 				siw_cm_upcall(cep, IW_CM_EVENT_DISCONNECT, 0);
 				siw_cm_upcall(cep, IW_CM_EVENT_CLOSE, 0);
 				post_jif = jiffies;
