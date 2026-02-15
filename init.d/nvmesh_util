@@ -779,6 +779,21 @@ process_nic_link_layer() {
 	fi
 }
 
+replace_nic_in_list() {
+	# Wrap the list in semicolons to make it easier to replace the nic
+	local nics_str=";$1;"
+	local nic_old="$2"
+	local nic_new="$3"
+
+	nics_str="${nics_str//;$nic_old;/;$nic_new;}"
+
+	# Remove the semicolons from the beginning and end
+	nics_str="${nics_str#;}"
+	nics_str="${nics_str%;}"
+
+	echo "$nics_str"
+}
+
 get_nics_guids() {
 	local nics_str="$CONFIGURED_NICS"
 	local tcp_ifaces_str="$SIW_IFACES"
@@ -824,6 +839,9 @@ get_nics_guids() {
 				orig_el=$element
 				element="$ib_dev:$ib_port"
 				echo "$orig_el is IPoIB Device. Translated to: $element"
+
+				# [NVMESH-7780] Replace the IPoIB name in the nics_ports list
+				nics_ports=$(replace_nic_in_list "$nics_ports" "$orig_el" "$element")
 			else
 				if is_ndev_with_addr_and_mask "$element"; then
 					element=$ret_ndev
