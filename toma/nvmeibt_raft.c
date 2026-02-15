@@ -1680,10 +1680,9 @@ static void raft_send_topo_cb(__attribute__((__unused__)) void *arg, int status)
 	struct timespec				now;
 	long long int				diff_timeout_nsec;
 
-	// req->topo->in_transmission_cnt--;
-	(void)__sync_add_and_fetch(&(cur_topo->in_transmission_cnt), -1); // atomic dec
-    N_Tf(t_bb_1, "End of topo tx status=@INT, tx_remained=@INT", status, cur_topo->in_transmission_cnt);
-	if (cur_topo->in_transmission_cnt == 0) {
+	const int cnt = __sync_add_and_fetch(&cur_topo->in_transmission_cnt, -1); // atomic dec
+	N_Tf(t_bb_1, "End of topo tx status=@INT, tx_remained=@INT", status, cnt);
+	if (cnt == 0) {
 		getnstimeofday_boot(&now);
 		diff_timeout_nsec = timespec_diff_ns(now, cur_topo->last_raft_distribution_timestamp);
 		if (diff_timeout_nsec < raft_leader_heartbeat_timeout_nsec)
@@ -1696,9 +1695,8 @@ static void raft_send_topo_cb(__attribute__((__unused__)) void *arg, int status)
 static void raft_send_topo_reply_cb(__attribute__((__unused__)) void *arg, int status)
 {
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
-
-	(void)__sync_add_and_fetch(&(cur_topo->in_transmission_rep_cnt), -1); // atomic dec
-    N_Tf(t_bb_10, "End of topo reply tx status=@INT, tx_remained=@INT", status, cur_topo->in_transmission_rep_cnt);
+	const int cnt = __sync_add_and_fetch(&(cur_topo->in_transmission_rep_cnt), -1); // atomic dec
+	N_Tf(t_bb_10, "End of topo reply tx status=@INT, tx_remained=@INT", status, cnt);
 }
 
 #define NRAFT_DUMP_MSG(name, _raft_msg, node, _msg_data_len)		({													\
