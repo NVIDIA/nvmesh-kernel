@@ -1713,9 +1713,9 @@ static inline int cpu_timers_get_num_active_timers(struct cpu_timers *timers){
 
 /* Call, when holding lock */
 struct timer_list *cpu_timers_remove_locked(struct cpu_timers	*timers,
-											struct rb_node 		*node)
+											struct timer_list 	*t)
 {
-	struct timer_list *t = rb_entry(node, struct timer_list, rb_entry);
+	struct rb_node *node = &t->rb_entry;
 
 	rb_erase(node, &timers->rb_waiting_timers);
 	node->__rb_parent_color = POISON_POINTER_DELTA;			// Mark that this node is outside of the tree
@@ -1724,15 +1724,17 @@ struct timer_list *cpu_timers_remove_locked(struct cpu_timers	*timers,
 }
 /* Call, when NOT holding lock */
 struct timer_list *cpu_timers_remove(struct cpu_timers	*timers,
-									 struct rb_node 	*node)
+									 struct timer_list 	*t)
 {
-	struct timer_list 	*t = NULL;
+	struct rb_node *node = &t->rb_entry;
 	unsigned long 		flags;
 
 	spin_lock_irqsave(&timers->lock, flags);
     // we re-check (under lock) whether timer is still linked to the rbtree.
 	if (likely(node->__rb_parent_color != POISON_POINTER_DELTA)) {
-		t = cpu_timers_remove_locked(timers, node);
+		BUG_ON(cpu_timers_remove_locked(timers, t) != t);
+	} else {
+		t = NULL;
 	}
 	spin_unlock_irqrestore(&timers->lock, flags);
 	return t;
@@ -1756,7 +1758,7 @@ static int cpu_timers_execute_timers(void *param){					// Worker thread which ex
 			struct timer_list *t = rb_entry(node, struct timer_list, rb_entry);
 			wait_time = (long)t->expires-(long)jiffies;
 			if ((wait_time < 0) || (timers->flags & TIMER_FLAG_REQ_FORCED_DRAIN)) {
-				BUG_ON(cpu_timers_remove_locked(timers, node) != t);
+				BUG_ON(cpu_timers_remove_locked(timers, t) != t);
 				__concurrent_store(timers->executing, t);
 				spin_unlock_irqrestore(&timers->lock, flags);	// unlock before invoking callback
 				t->function(t->data); 				// Once this function terminates, 't' may not exist
@@ -1981,13 +1983,7 @@ int mod_timer(struct timer_list *t, unsigned long expires){
 
 // return 0 when timer has already expired, 1 when its found & removed from waiting timers
 int del_timer(struct timer_list *t){
-	int rv = 0;
-	if (t->rb_entry.__rb_parent_color != POISON_POINTER_DELTA) { // In rb-tree
-		if (cpu_timers_remove(kernel_sim.timers.cpu_timer + t->cpu_id, &t->rb_entry) != NULL)
-			rv = 1;
-
-	}
-	return rv;
+	return !!(cpu_timers_remove(kernel_sim.timers.cpu_timer + t->cpu_id, t));
 }
 
 // return 0 or 1 as from del_timer()
