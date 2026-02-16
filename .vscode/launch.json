@@ -110,6 +110,7 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/toma/unitest/nvmeibt_toma",
 			"args": ["-x","24","-a","-N","nm_dummy.dll"],
+			//"args": ["--convert-to-json", "--input-file", "_root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.1", "--output-file", "a.txt.json"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}/toma/unitest",
 			"environment": [],

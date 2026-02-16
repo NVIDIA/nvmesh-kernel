@@ -56,6 +56,12 @@ function T_SANDBOX_main_self_unit_test() {
 	./${EXE_NAME};
 	[ $? -eq 0 ] && echo_green "SUCCESS!" || echo_red "FAILED - status=$?";
 	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
+	echo -e "\n\n";
+	echo_title "Generating Toma persistency";
+	./${EXE_NAME} --convert-to-json --input-file _root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0 --output-file z.json;
+	local conversion_rv=`echo $?`;
+	echo_title "Toma persistency (rv=${conversion_rv})";
+	cat z.json;
 }
 
 function T_SANDBOX_main_live_run() {
