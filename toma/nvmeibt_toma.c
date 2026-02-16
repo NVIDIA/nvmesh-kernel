@@ -2455,9 +2455,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	int 							read_cmdl_rv;
 	struct nvmeibt_toma_fd_in_use	*trigger_fd;
 	//
-	struct nvmeibt_Str				*out_str;
-	int								output_file_fd;
-	int								n_written = 0;
 
 	/* read command line */
 	read_cmdl_rv = read_cmdl(argc, argv, 0);
@@ -2479,10 +2476,14 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		goto exit;
 	}
 	if (nvmeibt_toma_is_running_as_a_utility()) {
-		if (nvmeibt_is_converting_json_to_persistence) {
-			if (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]) {
+		int n_written = 0;
+		int	output_file_fd;
+		const bool has_in_out_files = (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]);
+		if (!has_in_out_files) {
+			N_Ef(macvgh3, "Missing files '@STR' '@STR'", nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
+		} else if (nvmeibt_is_converting_json_to_persistence) {
 				struct nvmeibt_persist_and_wire_buf		*out_persist_and_wire_buf;
-				nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(nvmeibt_toma_cmdline_arg_input_file_name);
+				rv = nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(nvmeibt_toma_cmdline_arg_input_file_name);	// Not Important, Scripts never call this directly, It is used manually
 				out_persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full_complete;
 				output_file_fd = NNVMEIBT_OPEN(wmtuc7d, nvmeibt_toma_cmdline_arg_output_file_name, O_CREAT | O_WRONLY | O_TRUNC, 0755);
 				if (output_file_fd >= 0) {
@@ -2490,12 +2491,8 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 												persist_and_wire_buf_get_total_len(out_persist_and_wire_buf), 0, 0);
 					NNVMEIBT_CLOSE(x82oq0p, output_file_fd);
 				}
-			} else {
-				N_Ef(va6734as9i234j, "");
-			}
 		} else if (nvmeibt_is_converting_persistence_to_json) {
-			if (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]) {
-				out_str = NNVMEIBT_STR_ALLOC(vgsywje);
+				struct nvmeibt_Str *out_str = NNVMEIBT_STR_ALLOC(vgsywje);
 				nvmeibt_Str_sprintf(out_str, "{\n");
 				(void)nvmeibt_raft_read_persistence_and_upd_committed(nvmeibt_toma_cmdline_arg_input_file_name, out_str); // Cannot trust this rv
 				nvmeibt_Str_sprintf(out_str, "\n}\n");
@@ -2504,18 +2501,13 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 					n_written = NNVMEIBT_PWRITE(cbu9o2p, output_file_fd, nvmeibt_Str_str(out_str), nvmeibt_Str_strlen(out_str), 0, 0);
 					NNVMEIBT_CLOSE(bhsykro, output_file_fd);
 				}
-				nvmeibt_raft_del_all_members_at_exit();
 				NNVMEIBT_STR_FREE(bhsykro1, out_str);
-				rv = (n_written > 8) ? 0 : -1;		// Important, logs collector script uses this 'rv'. Empty json is failure ("{}\n")
-			} else {
-				N_Ef(macvgh3, "Missing files '@STR' '@STR'", nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
-			}
 		} else {
 			N_Ef(r0wlsl8, "OOPS! Unexpected state");
 		}
 		N_IMf(v2d7ai3, "n_written=@INT input_file='@STR' output_file='@STR'", n_written, nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
-	}
-	if (nvmeibt_toma_is_running_as_a_utility()) {
+		nvmeibt_topology_free_resources();
+		rv = (n_written > 8) ? 0 : -1;		// Important, logs collector script uses this 'rv'. Empty json is failure ("{}\n") or empty bin topology
 		goto out;
 	}
 	/* let's go to work... */
