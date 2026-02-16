@@ -2497,13 +2497,16 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 			if (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]) {
 				out_str = NNVMEIBT_STR_ALLOC(vgsywje);
 				nvmeibt_Str_sprintf(out_str, "{\n");
-				nvmeibt_raft_read_persistence_and_upd_committed(nvmeibt_toma_cmdline_arg_input_file_name, out_str);
+				(void)nvmeibt_raft_read_persistence_and_upd_committed(nvmeibt_toma_cmdline_arg_input_file_name, out_str); // Cannot trust this rv
 				nvmeibt_Str_sprintf(out_str, "\n}\n");
 				output_file_fd = NNVMEIBT_OPEN(hd82k49, nvmeibt_toma_cmdline_arg_output_file_name, O_CREAT | O_WRONLY | O_TRUNC, 0755);
 				if (output_file_fd >= 0) {
 					n_written = NNVMEIBT_PWRITE(cbu9o2p, output_file_fd, nvmeibt_Str_str(out_str), nvmeibt_Str_strlen(out_str), 0, 0);
 					NNVMEIBT_CLOSE(bhsykro, output_file_fd);
 				}
+				nvmeibt_raft_del_all_members_at_exit();
+				NNVMEIBT_STR_FREE(bhsykro1, out_str);
+				rv = (n_written > 8) ? 0 : -1;		// Important, logs collector script uses this 'rv'. Empty json is failure ("{}\n")
 			} else {
 				N_Ef(macvgh3, "Missing files '@STR' '@STR'", nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
 			}
