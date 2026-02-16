@@ -1409,10 +1409,14 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 		}
 	} else {
 		N_Wf(hsiqok3, "section_buf_len=0 tlv_KAFKA_MGMT_CONFIG_FULL");
+		nvmeibt_Str_strcat(JSON_output, "\"KAFKA_MGMT_CONFIG_FULL\" : {}");
 	}
 	serialize_tlv_JSON(JSON_output, "FULL_TOPO_CONFIG_VOLUMES", &(my_raft_global.follower_to_commit_persist_and_wire_buf_full->topo_config_ctx));
 	if (nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES, JSON_output) < 0) {
 		goto out;
+	}
+	if (nvmeibt_Str_end(JSON_output)[-1] == ',') {	// Missing FULL_TOPO_CONFIG object finishing with ','  Todo: Fix me properly in the above func
+		nvmeibt_Str_strcat(JSON_output, "\"FULL_TOPO_CONFIG\" : {}");
 	}
 	section_buf_len = nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(my_raft_global.follower_to_commit_persist_and_wire_buf_full, TLV_TYPE_TOPO_FULL, &section_buf);
 	serialize_tlv_JSON(JSON_output, "TOPO_FULL", &(my_raft_global.follower_to_commit_persist_and_wire_buf_full->topo_ctx));
@@ -1421,8 +1425,11 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 							  JSON_output) < 0) {
 			goto out;
 		}
+		if (nvmeibt_Str_end(JSON_output)[-1] == ']')	// Missing praids array finishing with '}'  Todo: Fix me properly in the above func
+			nvmeibt_Str_strcat(JSON_output, "}");
 	} else {
 		N_Wf(bfgiker, "section_buf_len=0 tlv_FULL_TOPO_CONFIG_VOLUMES");
+		nvmeibt_Str_strcat(JSON_output, "\"FULL_TOPO\" : {}");
 	}
 	{ // raft_TERM
 		const int64_t parsed_val = persist_and_wire_buf_get_current_raft_TERM(my_raft_global.follower_to_commit_persist_and_wire_buf_full);

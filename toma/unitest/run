@@ -52,21 +52,36 @@ function T_SANDBOX_gpt_util_self_unit_test() {
 
 function T_SANDBOX_toma_persist_json_test() {
 	echo_title "Generating Toma persistency JSON";
-	#./${EXE_NAME} --convert-to-json --input-file _root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0 --output-file z.json;
+	local bin_orig="_root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0";
+	local orig_json="z.json";
+	#./${EXE_NAME} --convert-to-json --input-file ${bin_orig} --output-file z.json;
 	../scripts/toma_persistence_to_JSON.sh <<EOF
-_root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0
-z.json
-./nvmeibt_toma
+${bin_orig}
+${orig_json}
+./${EXE_NAME}
 EOF
 	local conversion_rv=`echo $?`;
-	echo_title "Toma persistency (rv=${conversion_rv})";
-	cat z.json;
-	echo_title "Encoding Toma Persistency";
+	echo_title "Toma persistency JSON (rv=${conversion_rv})";
+	cat ${orig_json};
+	echo_title "Encoding Toma Persistency j2bin";
 	../scripts/JSON_to_toma_persistence.sh <<EOF
-z.json
-z.json.bin
-./nvmeibt_toma
+${orig_json}
+${orig_json}.bin
+./${EXE_NAME}
 EOF
+	echo_title "Toma persistency j2bin (rv=${conversion_rv})";
+	ls -l ${orig_json}*;
+	echo_title "Toma persistency j2bin2j";
+	../scripts/toma_persistence_to_JSON.sh <<EOF
+${orig_json}.bin
+${orig_json}.bin.json
+./${EXE_NAME}
+EOF
+	local conversion_rv=`echo $?`;
+	echo_title "Toma persistency j2bin2j (rv=${conversion_rv})";
+	ls -l ${orig_json}*;
+	__run_cmd "cat ${orig_json} | jq .";
+	__run_cmd "cat ${orig_json}.bin.json | jq .";
 }
 
 function T_SANDBOX_main_self_unit_test() {
