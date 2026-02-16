@@ -3230,7 +3230,7 @@ static bool __nordda_recv_completion(struct ib_cq *cq,
 	/* we procced less than NVMEIBS_POLL_SIZE, so we need to try rearm the CQ */
 	_rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
 	if (_rv < 0) {
-		_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
+		_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", _rv, nrch);
 		nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
 		goto out;
 	}
