@@ -62,9 +62,9 @@ static void *nvmeibt_mmap(size_t length, int fd, uint64_t offset, bool allow_wri
 		return MAP_FAILED;
 	}
 
-	if (mprotect(mapped_padded, 1, PROT_WRITE) >= 0) {		// mprotect() __len == 1 so we only modify permissions for a single page. In case the struct is bigger than the size of one page we crash immediately after when we try to write to the 2nd page
+	if (mprotect(mapped_padded, PAGE_SIZE, PROT_WRITE) >= 0) {		// Modify permissions for the first guard page only
 		init_padded_mmap_magic_number_struct(mapped_padded, padded_length);			// Writing to the first page details about the allocation and setting it back to no access permissions
-		if (mprotect(mapped_padded, 1, PROT_NONE) >= 0) {
+		if (mprotect(mapped_padded, PAGE_SIZE, PROT_NONE) >= 0) {
 			const int permission = PROT_READ | (allow_write ? PROT_WRITE : 0);
 			const int flags = MAP_FIXED | MAP_SHARED;
 			mapped = mmap(mapped_padded + PAGE_SIZE, length, permission, flags, fd, offset);	// Override the last mmap (except for the first and last pages)
@@ -96,14 +96,14 @@ static int nvmeibt_munmap(void *addr, size_t length)
 		errno = EINVAL;
 		goto out;
 	}
-	mprotect(mapped_padded, 1, PROT_READ);
+	mprotect(mapped_padded, PAGE_SIZE, PROT_READ);
 	if ((me->addr != (void*)me) || (me->length != length_padded) || (me->magic_num != PADDED_MMAP_MAGIC_NUM)) {
 		NTOMA_ASSERT(salddbmmf6, false, "Magic number mismatch, expected={@PTR, len=@ZX, magic=@LLX}, found={@PTR, len=@ZX, magic=@LLX}",
 					   mapped_padded, length_padded, PADDED_MMAP_MAGIC_NUM,
 					   me->addr, me->length, me->magic_num);
 		errno = EINVAL;
 	} else {
-		mprotect(mapped_padded, 1, PROT_WRITE);
+		mprotect(mapped_padded, PAGE_SIZE, PROT_WRITE);
 		memset(mapped_padded, 0, sizeof(struct padded_mmap_magic_number));
 		rv = munmap(mapped_padded, length_padded);
 		NTOMA_ASSERT(salddbmmf8, rv == 0, "munmap failed, probably bad args passed. @AUTO_ERRNO");
@@ -247,7 +247,7 @@ struct nvmeibt_km_comm {
 	struct {						// For debug, maximal message sizes. Defined at compile time
 		int proc_recv;
 		int proc_send;
-		int nlink;					// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time	} max_msg_size;
+		int nlink;					// Maximal size of msg that can be sent/recv to/from kernel. Known at compile time
 	} max_msg_size;
 } *_singleton;
 
