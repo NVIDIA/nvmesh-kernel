@@ -645,7 +645,7 @@ static struct t_producer_impl {
 static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_msg *msg) {
 	rd_kafka_topic_t *k_topic = k->msg_to_mgmt_producer_topic;
 	const char 			*key = (msg->unique_key[0] == '\0') ? NULL : (char*)msg->unique_key;
-	const size_t		key_len = key ? (strlen(key) + 1) : 0;
+	const size_t		key_len = key ? (strnlen(key, sizeof(msg->unique_key)) + 1) : 0;
 	char 				*val = msg->val;
 	size_t				val_len = msg->val_len;
 	int	n_in_air, err;
