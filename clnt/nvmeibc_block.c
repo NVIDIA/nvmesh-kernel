@@ -634,7 +634,7 @@ static int __cpu_mask_add_del_on_main_wq(void *_ctx)
 
 	nvmeibc_assert_on_main_wq(nvmeibc_isnt_params_blk2main(nvmeibc_cinst_get_blok_p(dev)));
 
-	rv = bitmap_parse(ctx->buf, strlen(ctx->buf), cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS);
+	rv = bitmap_parse(ctx->buf, strnlen(ctx->buf, ctx->len), cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS);
 	if (rv) {
 		_NI_to_user(i_cpu_mask_add_del_bitmap_parse_fail, QA_BLOCK_PREFIX, "Failed to parse mask, rv=@RV", rv);
 		goto out;

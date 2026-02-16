@@ -149,6 +149,7 @@ struct nvmeib_public_kth_mutex {
 };
 
 #define ANONYMOUS_MUTEX "anon_mutex"
+#define MUTEX_NAME_MAX_LEN 256
 
 static int mutex_wait(void *targ, void *p __attribute__((unused)))
 {
@@ -204,7 +205,7 @@ static struct nvmeib_public_kth_mutex * mutex_create(
 	NFIN;
 	if (name == NULL)
 		name = ANONYMOUS_MUTEX;
-	if ((len = strlen(name)) &&
+	if ((len = strnlen(name, MUTEX_NAME_MAX_LEN)) &&
 		(mutex_name = kzalloc(len + 1, GFP_KERNEL)) &&
 		(m || (m = kzalloc(sizeof(*m), GFP_KERNEL)))) {
 		memcpy(mutex_name, name, len);
@@ -318,7 +319,7 @@ static struct nvmeib_public_kth_semaphore * sema_create(
 	NFIN;
 	if (name == NULL)
 		name = ANONYMOUS_SEMAPHORE;
-	if ((len = strlen(name)) &&
+	if ((len = strnlen(name, MUTEX_NAME_MAX_LEN)) &&
 		(sema_name = kzalloc(len + 1, GFP_KERNEL)) &&
 		(s || (s = kzalloc(sizeof(*s), GFP_KERNEL)))) {
 		memcpy(sema_name, name, len);

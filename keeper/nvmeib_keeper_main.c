@@ -358,7 +358,7 @@ static DEFINE_KEEPER_PUSH_FRS_FN(push_frs_op_fn) {
 		goto out;
 	}
 	
-	if (strlen(inst_name) >= CINST_NAME_LEN) {
+	if (strnlen(inst_name, CINST_NAME_LEN) >= CINST_NAME_LEN) {
 		keeper_print(ERR, "inst_name %s is too long", inst_name);
 		rv = -EINVAL;
 		goto api_done;
