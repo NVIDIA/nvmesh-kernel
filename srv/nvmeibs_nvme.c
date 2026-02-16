@@ -322,6 +322,7 @@ enum local_q_irq_state {
 	LOCAL_Q_IRQ_NONE			= 0,
 	LOCAL_Q_IRQ_DISABLE_NOSYNC	= 1,
 	LOCAL_Q_IRQ_ENABLE  		= 2,
+	LOCAL_Q_IRQ_DISABLE			= 3,
 };
 
 struct nvme_qp {
@@ -1053,9 +1054,15 @@ static inline int local_q_kthread_start_(struct nvme_qp *q)
 static inline void local_q_kthread_stop(struct nvme_qp *q)
 {
 	int qid = q->id - 1;
+	struct device_data *d = q->dev;
 	struct task_struct *t;
 	ulong flags;
 	NFIN;
+
+	/* [NVMESH-7772]: Disable the queue IRQ before clearing q->thread so no interrupt handler
+	 * can run (or is running) when we set q->thread = NULL. Caller will
+	 * free_irq() so we do not re-enable. */
+	local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE);
 
 	spin_lock_irqsave(&q->q_lock, flags);
 	t = q->thread;
@@ -1130,6 +1137,8 @@ static inline void local_q_modify_irq(struct nvme_qp *q,
 			enable_irq(d->msix_entries[q->id].vector);
 		else if (new_state == LOCAL_Q_IRQ_DISABLE_NOSYNC)
 			disable_irq_nosync(d->msix_entries[q->id].vector);
+		else if (new_state == LOCAL_Q_IRQ_DISABLE)
+			disable_irq(d->msix_entries[q->id].vector);
 		else {
 			_NE(error_nvme_local_q_modify_irq, "unknown irq state @NEW_STATE", new_state);
 			BUG();
@@ -1729,7 +1738,10 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 			WRITE_ONCE(q->polling, true);
 			/* Ensure the polling mode is visible before waking up the thread */
 			smp_mb();
-			wake_up_process(q->thread);
+			/* [NVMESH-7772]: Avoid wake_up_process(NULL): local_q_kthread_stop may have set q->thread = NULL
+			 * under the same lock on another CPU before the interrupt ran. */
+			if (q->thread)
+				wake_up_process(q->thread);
 		}
 		if (q->irq_debug < 1 || jiffies > last_time + 5 * HZ) {
 			last_time = jiffies;
