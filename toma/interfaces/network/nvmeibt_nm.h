@@ -38,6 +38,7 @@
 #include "nvmeibt_net.h"
 #include "nvmeibt_topology.h"		// Daniel: Whoever did that - this is an evil hack! todo cleanup the code
 #include "nvmeibt_event_tracker.h"
+#include "nvmeibt_local_nic.h"
 #undef NVMEIBT_IB
 
 #define PFIN \
@@ -129,7 +130,7 @@ struct nvmeibt_nm_local_node;
 
 /* Represnt local nic object, Probably mostly needed only for IB, Transport may inherit */
 struct nvmeibt_nm_per_nic {
-	char dev_name[64];
+	char dev_name[NVMEIBT_DEVICE_NAME_MAX];
 	/* ports which are related to this nic */
 	struct nvmeibt_nm_per_port **ports;
 	int n_ports;
@@ -443,14 +444,13 @@ static inline const char * __attribute__ ((unused)) nvmeibt_nm_r2str(int type)
 	}
 }
 
-#define NIC_NAME_SIZE 35
 struct nvmeibt_nm_add_nic_req {
 	struct nvmeibt_node *node;
 	union nvmeib_uuid node_id;
 	char remote_node[NVMEIB_HOST_NAME_LEN];
 	struct nvmeibt_nic *nic;
 	union nvmeib_uuid nic_id;
-	char remote_nic[NIC_NAME_SIZE];
+	char remote_nic[NVMEIBT_DEVICE_NAME_MAX];
 	int me;
 	union nvmeib_uuid me_id;
 
@@ -462,7 +462,7 @@ struct nvmeibt_nm_del_nic_req {
 	union nvmeib_uuid node_id;
 	char remote_node[NVMEIB_HOST_NAME_LEN];
 	union nvmeib_uuid nic_id;
-	char remote_nic[NIC_NAME_SIZE];
+	char remote_nic[NVMEIBT_DEVICE_NAME_MAX];
 	//int is_roce;
 	enum nvmeib_rdma_transport transport;
 	uint16_t broadcast_id; /* pkey or vlan */

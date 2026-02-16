@@ -1019,6 +1019,13 @@ static void add_port_paths(struct nvmeibt_nm_per_port *pp);
 static void nvmeibt_nm_free_port(struct nvmeibt_nm_per_port *pp);
 
 #define siw_iface_prefix "siw_"
+static int fixed_str_equal(const char *a, const char *b, size_t size)
+{
+	if (strnlen(a, size) != strnlen(b, size))
+		return 1;
+	return strncmp(a, b, size);
+}
+
 void nvmeibt_nm_attach_port(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) {
 	struct nvmeibt_nm_per_port *pp;
 	int nic_idx;
@@ -1038,8 +1045,8 @@ void nvmeibt_nm_attach_port(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic
 		lnic_name += strlen(siw_iface_prefix);
 
 	for (nic_idx=0; nic_idx<ln->n_nics; nic_idx++) {
-		if (!strncmp(lnic_name, ln->nics[nic_idx]->dev_name, sizeof(ln->nics[nic_idx]->dev_name) - 1) ||
-			!strncmp(lnic->from_config.device_network_name, ln->nics[nic_idx]->dev_name, sizeof(ln->nics[nic_idx]->dev_name) - 1))
+		if (fixed_str_equal(lnic_name, ln->nics[nic_idx]->dev_name, sizeof(ln->nics[nic_idx]->dev_name)) == 0 ||
+		    fixed_str_equal(lnic->from_config.device_network_name, ln->nics[nic_idx]->dev_name, sizeof(ln->nics[nic_idx]->dev_name)) == 0)
 			break;
 	}
 
@@ -1354,8 +1361,7 @@ static int handle_local_nic_changed(
 	};
 	found = 0;
 	for (i = 0; i < ln->n_nics; ++i) {
-		if (!strncmp(ln->nics[i]->dev_name, e->dev_name,
-				sizeof(ln->nics[i]->dev_name))) {
+		if (fixed_str_equal(ln->nics[i]->dev_name, e->dev_name, sizeof(ln->nics[i]->dev_name)) == 0) {
 			pn = ln->nics[i];
 			found = 1;
 			break;

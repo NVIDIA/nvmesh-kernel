@@ -19,6 +19,7 @@
 #include <wchar.h>
 #include <fcntl.h>
 #include <malloc.h>
+#include <linux/if.h>
 
 #include "utils/nvmeibt_utils.h"
 #include "utils/nvmeibt_str.h"
@@ -760,6 +761,12 @@ const char *get_file_type_str(const char *path);
 
 #define IS_PERCENTAGE_EXCEEDED(x_part, x_100_percent, x_percent) \
 	(((x_part) * 100) > ((x_100_percent) * (x_percent)))
+
+/* Maximum size for device/network interface names */
+#ifndef IFNAMSIZ
+#define IFNAMSIZ 16
+#endif
+#define NVMEIBT_DEVICE_NAME_MAX ((64) > (IFNAMSIZ) ? (64) : (IFNAMSIZ))
 
 #endif // #ifndef NVMEIBT_COMMON
 

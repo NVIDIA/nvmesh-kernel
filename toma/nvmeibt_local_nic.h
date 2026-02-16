@@ -6,7 +6,7 @@
 #include "../common/nvmeib_hash.h"
 
 struct nvmeibt_local_nic_config {
-	char						device_type[30]; /* Nic name */
+	char						device_type[NVMEIBT_DEVICE_NAME_MAX]; /* Nic name */
 	struct nvmeibt_ascii_uuid	hw_gid_uuid;
 	int 						port;
 	char						pkey[11];
@@ -18,7 +18,7 @@ struct nvmeibt_local_nic_config {
 	bool						roce_v2;
 	bool						roce_ipv6;
 	bool						used;
-	char						device_network_name[30];
+	char						device_network_name[NVMEIBT_DEVICE_NAME_MAX];
 	struct nvmeibt_ascii_uuid	sw_gid_uuid;
 };
 
