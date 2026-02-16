@@ -4,21 +4,23 @@
 # SPDX-License-Identifier: Apache-2.0
 
 while (( 1 )); do
-	persist_and_wire_file_name=`ls ./toma_persistence_*_raft_and_topo.0*persistence`
-	if [ `echo ${persist_and_wire_file_name} | wc -w` == 0 ]; then
-	 	persist_and_wire_file_name=`ls ./toma_persistence_*_raft_and_topo.0`
-		if [ `echo ${persist_and_wire_file_name} | wc -w` == 0 ]; then
-			persist_and_wire_file_name=`ls /var/opt/nvmesh/toma/toma_persistence_*_raft_and_topo.0`
+	# compgen -G returns nothing when no files match (no need for nullglob)
+	persist_and_wire_file_name=( $(compgen -G './toma_persistence_*_raft_and_topo.0*persistence') )
+	if [ ${#persist_and_wire_file_name[@]} -eq 0 ]; then
+		persist_and_wire_file_name=( $(compgen -G './toma_persistence_*_raft_and_topo.0') )
+		if [ ${#persist_and_wire_file_name[@]} -eq 0 ]; then
+			persist_and_wire_file_name=( $(compgen -G '/var/opt/nvmesh/toma/toma_persistence_*_raft_and_topo.0') )
 		fi
 	fi
-	persist_and_wire_file_name=`echo ${persist_and_wire_file_name} | cut -f1 -d' '`
+	# Use first match as default (keep as scalar for prompt)
+	persist_and_wire_file_name="${persist_and_wire_file_name[0]:-}"
 	read -p "TOMA input persistence file (default=${persist_and_wire_file_name})? " in_file_name
 	if [ "_${in_file_name}" != "_" ]; then
 		file_name=`ls ${in_file_name}`
-		if [ `echo ${file_name} | wc -w` == 1 ]; then
+		if [ $(echo ${file_name} | wc -w) -eq 1 ]; then
 			persist_and_wire_file_name=${file_name};
 		else
-			echo "Bad file name '${input_file_name}=${file_name}'"
+			echo "Bad file name '${in_file_name}=${file_name}'"
 			exit;
 		fi;
 	fi;
