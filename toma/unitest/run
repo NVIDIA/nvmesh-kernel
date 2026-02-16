@@ -50,14 +50,8 @@ function T_SANDBOX_gpt_util_self_unit_test() {
 	[ $? -eq 0 ] && echo_green "SUCCESS!" || echo_red "FAILED - status=$?";
 }
 
-function T_SANDBOX_main_self_unit_test() {
-	__cleanup_prev_run_state;
-	__build_if_needed;
-	./${EXE_NAME};
-	[ $? -eq 0 ] && echo_green "SUCCESS!" || echo_red "FAILED - status=$?";
-	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
-	echo -e "\n\n";
-	echo_title "Generating Toma persistency";
+function T_SANDBOX_toma_persist_json_test() {
+	echo_title "Generating Toma persistency JSON";
 	#./${EXE_NAME} --convert-to-json --input-file _root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0 --output-file z.json;
 	../scripts/toma_persistence_to_JSON.sh <<EOF
 _root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0
@@ -67,13 +61,23 @@ EOF
 	local conversion_rv=`echo $?`;
 	echo_title "Toma persistency (rv=${conversion_rv})";
 	cat z.json;
+	echo_title "Encoding Toma Persistency";
+	../scripts/JSON_to_toma_persistence.sh <<EOF
+z.json
+z.json.bin
+./nvmeibt_toma
+EOF
+}
+
+function T_SANDBOX_main_self_unit_test() {
+	__cleanup_prev_run_state;
+	__build_if_needed;
+	./${EXE_NAME};
+	[ $? -eq 0 ] && echo_green "SUCCESS!" || echo_red "FAILED - status=$?";
+	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
 }
 
 function T_SANDBOX_main_live_run() {
-	echo_red "Todo: Test, Not supported yet";
-}
-
-function T_SANDBOX_persistency_to_from_json() {
 	echo_red "Todo: Test, Not supported yet";
 }
 
@@ -83,13 +87,13 @@ case "$1" in
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;
   live*)		T_SANDBOX_main_live_run;;
   gpt*)			T_SANDBOX_gpt_util_self_unit_test;;
-  persi*)		T_SANDBOX_persistency_to_from_json;;
+  persi*)		T_SANDBOX_toma_persist_json_test;;
   ci*)
 	clear;
-	__force_rebuild BUILD_RELEASE=1;
-	T_SANDBOX_main_self_unit_test clean;
+	#__force_rebuild BUILD_RELEASE=1;
+	T_SANDBOX_main_self_unit_test;		echo -e "\n\n";
+	T_SANDBOX_toma_persist_json_test;	echo -e "\n\n";
 	T_SANDBOX_gpt_util_self_unit_test;
-	#T_SANDBOX_persistency_to_from_json;
 	date;
 	echo_green "************************ CI Done";
 	;;
