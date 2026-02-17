@@ -110,8 +110,7 @@ enum siw_cm_err_inj_bit_mask {
 
 #if !NVMESH_IS_PRODUCTION_COMPILATION
 module_param(siw_cm_err_inj, ulong, 0644);
-MODULE_PARM_DESC(siw_cm_err_inj, "SIW CM error injection bits\n"
-	"\t\t\t\t" FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_BIT_MODPARAM_DESC) "\n");
+MODULE_PARM_DESC(siw_cm_err_inj, "SIW CM error injection bits via FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_BIT_MODPARAM_DESC). Not for production use!");
 #endif
 
 atomic64_t siw_cm_wq_work_idx = ATOMIC_INIT(0);

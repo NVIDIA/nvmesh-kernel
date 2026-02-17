@@ -99,7 +99,7 @@ static bool nvmeibp_do_kasan_test = false;
 
 #ifdef CONFIG_KASAN
 module_param_named(do_kasan_test, nvmeibp_do_kasan_test, bool, 0444);
-MODULE_PARM_DESC(do_kasan_test, "Test KASAN on module load. Results in dmesg");
+MODULE_PARM_DESC(do_kasan_test, "When set, run a test KASAN on module load. Results will be found in the system log, i.e., via dmesg.");
 #endif
 
 int *nvmeib_public_panic_on_warn = NULL;

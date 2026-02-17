@@ -161,7 +161,7 @@ static void __mini_elevator_start_plug(struct nvmeibc_block_device *nd)
 #if ELEVATOR_TIMERS_IMPLEMENTATION
 	static ulong mini_elevator_jiffies = 100;
 	module_param(mini_elevator_jiffies, ulong, 0644);
-	MODULE_PARM_DESC(mini_elevator_jiffies, "Max jiffies in mini-elevator");
+	MODULE_PARM_DESC(mini_elevator_jiffies, "Defines the maximum number of jiffies an IO may reside in the mini-elevator.");
 	#if USE_1_ELEV_HASH_TO_ALL_BDEVS
 		static struct nvmeibc_elevator_operation_hash hash_elev;							// Instead of each block device using its hash, use a single hash, because timer gets only a single uint (key), It cannot get as param both key and pointer to hash
 		static bool is_hash_elev_initiliaized = false;

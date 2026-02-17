@@ -86,7 +86,7 @@ MODULE_PARM_DESC(tcp_num_ports, "The number of secondary SIW (iWARP) TCP ports. 
  * before attempting to rearm interrupts (0: disabled) */
 unsigned int nvmeib_pcpu_process_cq_retry_usecs = 0;
 module_param_named(pcpu_process_cq_retry_usecs, nvmeib_pcpu_process_cq_retry_usecs, uint, 0644);
-MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "Time window (us) to keep polling after last completion before rearming interrupts (0: disabled)");
+MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "The time window in micro-seconds to keep polling after last completion before rearming interrupts (0: disabled).");
 
 #define NVMEIB_INT_SHAPER_PROC_NAME "intr_shaper.json"
 #define NVMEIB_FRAME_SIZE_USECS (1000)
@@ -97,15 +97,15 @@ MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "Time window (us) to keep polling 
 
 unsigned int nvmeib_intr_shaper_max_burst = NVMEIB_MAX_BURST;
 module_param_named(intr_shaper_max_burst, nvmeib_intr_shaper_max_burst, uint, 0644);
-MODULE_PARM_DESC(intr_shaper_max_burst, "Max number of recv completions to handle in an interrupt before entering poll mode.");
+MODULE_PARM_DESC(intr_shaper_max_burst, "Defines the maximum number of recv completions to handle in an interrupt before entering poll mode.");
 
 unsigned int nvmeib_intr_shaper_max_pct_cpu = NVMEIB_MAX_COMP_INTR_PCT_CPU;
 module_param_named(intr_shaper_max_pct_cpu, nvmeib_intr_shaper_max_pct_cpu, uint, 0644);
-MODULE_PARM_DESC(intr_shaper_max_pct_cpu, "Max percentage of CPU time to spend processing completions in an interrupt before entering poll mode.");
+MODULE_PARM_DESC(intr_shaper_max_pct_cpu, "Defines the maximum percentage of CPU time to spend processing completions in an interrupt before entering poll mode.");
 
 unsigned int nvmeib_intr_shaper_max_irq_time_usecs = NVMEIB_MAX_IRQ_TIME_USECS;
 module_param_named(intr_shaper_max_irq_time_usecs, nvmeib_intr_shaper_max_irq_time_usecs, uint, 0644);
-MODULE_PARM_DESC(intr_shaper_max_irq_time_usecs, "Max time to spend in an interrupt before entering poll mode");
+MODULE_PARM_DESC(intr_shaper_max_irq_time_usecs, "Defines the maximum time to spend in an interrupt before entering poll mode.");
 
 static struct nvmeib_intr_shaper *nvmeib_intr_shaper = NULL;
 static struct nvmeib_public_procfs_ent *nvmeib_intr_shaper_procfs_ent = NULL;

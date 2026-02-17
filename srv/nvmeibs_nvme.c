@@ -43,7 +43,7 @@ EXPORT_SYMBOL(nvmeibs_nvme_wq);
 /*
 static bool no_rdda = false;
 module_param(no_rdda, bool, 0444);
-MODULE_PARM_DESC(no_rdda, "Disable Remote Direct Disk Access");
+MODULE_PARM_DESC(no_rdda, "Used to disable Remote Direct Disk Access.");
 */
 unsigned max_client_rsrc = NVMEIBS_MAX_DISK_RESOURCES_PER_CLIENT;
 module_param(max_client_rsrc, uint, 0644);
@@ -133,7 +133,7 @@ MODULE_PARM_DESC(fake_large_disk_size_lba, "Do not use for production systems. T
 
 static bool nvmeibs_use_intr_shaper = true;
 module_param_named(use_intr_shaper, nvmeibs_use_intr_shaper, bool, 0644);
-MODULE_PARM_DESC(use_intr_shaper, "Use interrupt shaper for NVMe completions");
+MODULE_PARM_DESC(use_intr_shaper, "Determines whether to use an interrupt shaper for NVMe completions.");
 
 static bool nvmeibs_nvme_doorbell_batch = true;
 module_param_named(nvme_doorbell_batch, nvmeibs_nvme_doorbell_batch, bool, 0644);

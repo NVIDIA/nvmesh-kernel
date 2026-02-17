@@ -39,7 +39,7 @@ MODULE_PARM_DESC(use_block_external_major, "Determines whether to use a dedicate
 
 uint nvmeibc_max_num_partitions_on_vol = DISK_MAX_PARTS;	// Used in internal allocator of minors
 module_param_named(max_num_partitions_on_vol, nvmeibc_max_num_partitions_on_vol, uint, 0444);	// Can be set only when module is going up
-MODULE_PARM_DESC(max_num_partitions_on_vol, "Max number of external partitions reserved as minors range");
+MODULE_PARM_DESC(max_num_partitions_on_vol, "Defines the maximum number of external partitions reserved as minors range.");
 
 void disk_id_allocator_init(struct disk_id_allocator_t* al)
 {

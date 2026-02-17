@@ -107,7 +107,7 @@ MODULE_PARM_DESC(local_skip_disk_access, "Unsafe debug mode. Skip local disk acc
 
 unsigned nvmeibs_nic_io_stats_block_size = 1 << NVMEIBC_SECTOR_SHIFT;
 module_param_named(nic_io_stats_block_size, nvmeibs_nic_io_stats_block_size, uint, 0444);
-MODULE_PARM_DESC(nic_io_stats_block_size, "Block-size to use for NIC iostats.json");
+MODULE_PARM_DESC(nic_io_stats_block_size, "Defines the block-size to use for NIC iostats.json.");
 
 NVMEIBS_MEMMGR_METRIC(s_dev_srq, "component=target.dev.srq");
 NVMEIBS_MEMMGR_METRIC(s_dev_fr_pool, "component=target.dev.fr_pool");

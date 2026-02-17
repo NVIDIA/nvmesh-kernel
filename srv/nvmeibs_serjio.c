@@ -70,23 +70,23 @@ static int next_free_alloc_quarantined_idx = -1;
 #if !defined(NVMESH_IS_PRODUCTION_COMPILATION) || (NVMESH_IS_PRODUCTION_COMPILATION==0)
 
 module_param_named(serjio_init_db_interrupt_range, nvmeibs_serjio_init_db_interrupt_range, uint, 0644);
-MODULE_PARM_DESC(serjio_init_db_interrupt_range, "Interrupt Init DB when it gets to this range");
+MODULE_PARM_DESC(serjio_init_db_interrupt_range, "Interrupt Init DB when it gets to this range.");
 
 module_param_named(serjio_fail_next_gpt_update, nvmeibs_serjio_fail_next_gpt_update, bool, 0644);
-MODULE_PARM_DESC(serjio_fail_next_gpt_update, "SERJIO - Fail the next GPT update (for testing)");
+MODULE_PARM_DESC(serjio_fail_next_gpt_update, "SERJIO - Fail the next GPT update (for testing).");
 
 module_param_named(serjio_fail_next_gpt_init, nvmeibs_serjio_fail_next_gpt_init, bool, 0644);
-MODULE_PARM_DESC(serjio_fail_next_gpt_init, "SERJIO - Fail the next GPT init (for testing)");
+MODULE_PARM_DESC(serjio_fail_next_gpt_init, "SERJIO - Fail the next GPT init (for testing).");
 
 
 module_param_named(serjio_invalid_jris_exist_on_disk, invalid_jris_exist_on_disk, bool, 0444);
-MODULE_PARM_DESC(serjio_invalid_jris_exist_on_disk, "Allocate (but quarantine) invalid JRIs (0,1,2) on disk");
+MODULE_PARM_DESC(serjio_invalid_jris_exist_on_disk, "Allocate (but quarantine) invalid JRIs (0,1,2) on disk.");
 
 module_param_named(serjio_next_free_alloc_quarantined, next_free_alloc_quarantined, bool, 0644);
-MODULE_PARM_DESC(serjio_next_free_alloc_quarantined, "SERJIO - Allocate a quarantined range index for the next allocation (for testing)");
+MODULE_PARM_DESC(serjio_next_free_alloc_quarantined, "SERJIO - Allocate a quarantined range index for the next allocation (for testing).");
 
 module_param_named(serjio_next_free_alloc_quarantined_idx, next_free_alloc_quarantined_idx, int, 0644);
-MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range index for next invalid allocation");
+MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range index for next invalid allocation.");
 #endif
 
 #define SERJIO_WQ_PEND_MAX_WAIT (nvmeibs_serjio_resched_work_wait_max * HZ)
