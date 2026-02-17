@@ -29,11 +29,11 @@
 
 static unsigned int nvmeibc_max_lock_channels = 5; /* backword-compat */
 module_param_named(max_lock_channels, nvmeibc_max_lock_channels, uint, 0644);
-MODULE_PARM_DESC(max_lock_channels, "The maximum number of lock channels for non-TCP transports.");
+MODULE_PARM_DESC(max_lock_channels, "The maximum number of lock channels for non-TCP transports per disk.");
 
 static unsigned int nvmeibc_max_lock_channels_tcp = NVMEIB_MAX_LOCK_TCP_CHANNELS; /* backword-compat */
 module_param_named(max_lock_channels_tcp, nvmeibc_max_lock_channels_tcp, uint, 0644);
-MODULE_PARM_DESC(max_lock_channels_tcp, "The maximum number of lock channels for TCP transports.");
+MODULE_PARM_DESC(max_lock_channels_tcp, "The maximum number of lock channels for TCP transports per disk.");
 
 static int nvmeibc_lock_channel_choosing_method = LOCK_CHANNEL_CHOOSING_METHOD_LRU;
 module_param_named(lock_ch_get_method, nvmeibc_lock_channel_choosing_method, int, 0644);

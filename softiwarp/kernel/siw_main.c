@@ -96,7 +96,7 @@ MODULE_PARM_DESC(loopback_enabled, "Enable loopback (bool).");
 #if SIW_ENABLE_PANIC_REMOTE_ON_RX_ERR
 bool panic_remote_on_rx_err = 0;
 module_param(panic_remote_on_rx_err, bool, 0644);
-MODULE_PARM_DESC(panic_remote_on_rx_err, "Panic remote on RX Error (bool).");
+MODULE_PARM_DESC(panic_remote_on_rx_err, "Panic remote on RX Error (bool) using TCP OOB.");
 #endif
 
 #if SIW_CQ_NOTIFY_WORK_QP_INDEPENDENT

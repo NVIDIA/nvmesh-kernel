@@ -67,7 +67,7 @@ MODULE_PARM_DESC(pcpu_cq_comp_vecs_per_dev, "Y = use first N comp-vectors of dev
 
 unsigned nvmeib_pcpu_cq_user_poll_timeout_msecs = 100;
 module_param_named(pcpu_cq_user_poll_timeout_msecs, nvmeib_pcpu_cq_user_poll_timeout_msecs, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_user_poll_timeout_msecs, "Timeout to switch from user polling back to ipoller for a CQ.");
+MODULE_PARM_DESC(pcpu_cq_user_poll_timeout_msecs, "Timeout to switch from user polling, i.e., polling from a user-space application thread context ,e.g. SPDK, back to ipoller for a CQ.");
 
 int tracer_nvmeibm_debug_level = 3;
 module_param_named(tracer_debug_level, tracer_nvmeibm_debug_level, int, 0644);
@@ -313,7 +313,7 @@ MODULE_PARM_DESC(pcpu_cq2srq_size_margin, "When employing a per CPU shared compl
 
 unsigned nvmeib_pcpu_cq_poll_budget = IB_INTR_POLL_BUDGET_IRQ;
 module_param_named(pcpu_cq_poll_budget, nvmeib_pcpu_cq_poll_budget, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_poll_budget, "percpu cqs polling-mode's budget. This is the maximum number of times to poll for a completion.");
+MODULE_PARM_DESC(pcpu_cq_poll_budget, "The per-cpu CQs polling-mode's budget, which is the maximum number of CQ entries to be processed in an interrupt before offloading to ipoller thread.");
 
 #define CQ_POLL_INTR
 #define IB_POLL_FLAGS (IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)
@@ -321,12 +321,12 @@ MODULE_PARM_DESC(pcpu_cq_poll_budget, "percpu cqs polling-mode's budget. This is
 
 unsigned nvmeib_pcpu_cq_intr_budget = CQ_INTR_PROCESS_BATCH;
 module_param_named(pcpu_cq_intr_budget, nvmeib_pcpu_cq_intr_budget, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_intr_budget, "percpu cqs interrupt-mode's budget. This is the maximum number of completions to handle in a single interrupt.");
+MODULE_PARM_DESC(pcpu_cq_intr_budget, "The per-cpu CQs interrupt-mode's budget. This is the maximum number of completions to handle in a single interrupt.");
 
 #define USER_POLL_BUDGET 64
 unsigned nvmeib_pcpu_cq_user_poll_budget = USER_POLL_BUDGET;
 module_param_named(pcpu_cq_user_poll_budget, nvmeib_pcpu_cq_user_poll_budget, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_user_poll_budget, "percpu cqs user-mode polling budget. This is the maximum number of times to poll for a completion.");
+MODULE_PARM_DESC(pcpu_cq_user_poll_budget, "The per-cpu CQs user-mode polling budget. This is the maximum number of CQ entries to process for each user-mode poll.");
 
 /* Deprecated by intr-shaper - use NVMEIB_MAX_IRQ_TIME_USECS instead
 * #define CQ_INTR_PROCESS_MAX_TIME msecs_to_jiffies(2)

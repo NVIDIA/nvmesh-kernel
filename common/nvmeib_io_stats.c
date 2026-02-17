@@ -80,7 +80,7 @@ static unsigned short io_sizes_hist[MAX_IO_SIZES_HIST_BINS] = {	/* Bins of histo
 static unsigned int io_sizes_hist_n_bins = 8;
 
 module_param_array_named(io_stats_sizes_hist, io_sizes_hist, ushort, &io_sizes_hist_n_bins, 0444);
-MODULE_PARM_DESC(io_stats_sizes_hist, "Defines the sizes of the buckets for iostats histogram.");
+MODULE_PARM_DESC(io_stats_sizes_hist, "Defines the buckets for the iostats histogram using an array.");
 
 /* Look-up-table from io-size (in blocks) to histogram bin */
 #define MAX_IO_SIZES_LUT_BLOCK_SIZE 256 // 128kb / 512b

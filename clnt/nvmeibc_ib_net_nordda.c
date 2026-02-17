@@ -24,7 +24,7 @@ MODULE_PARM_DESC(nr_skip_rdma_write, "This is an unsafe debug mode. RDMA IOs ski
 
 bool nvmeibc_nr_store_fr = true;
 module_param_named(nr_store_fr, nvmeibc_nr_store_fr, bool, 0644);
-MODULE_PARM_DESC(nr_store_fr, "Enables a workaround for RDMA resource usage to avoid rare RDMA protection errors in EC writes.");
+MODULE_PARM_DESC(nr_store_fr, "Enables a workaround for RDMA resource usage to avoid rare RDMA protection errors in EC writes where target-side buffers from journal writes are reused for data writes.");
 
 #define __FIN FINS(net->base.ioch->name)
 #define __FOUT FOUTS(net->base.ioch->name)
