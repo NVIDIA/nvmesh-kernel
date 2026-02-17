@@ -654,7 +654,7 @@ def md_escape(s: str) -> str:
 
 
 def emit_table(lines: List[str], rows: List[ModuleParam]) -> None:
-    lines.append("| name | description | type | permission | default |")
+    lines.append("| Name | Description | Type | Permissions | Defaults |")
     lines.append("|---|---|---|---|---|")
     for r in rows:
         lines.append(
@@ -667,7 +667,7 @@ def emit_table(lines: List[str], rows: List[ModuleParam]) -> None:
 def emit_template_table(rows: List[ModuleParam]) -> List[str]:
     """Emit 5-column table (name, description, type, permission, default) for template doc."""
     lines = [
-        "| name | description | type | permission | default |",
+        "| Name | Description | Type | Permissions | Defaults |",
         "|---|---|---|---|---|",
     ]
     for r in rows:
@@ -766,8 +766,8 @@ def write_report(params: Iterable[ModuleParam], out_file: pathlib.Path, group_by
         "",
         f"_Generated: {dt.datetime.now().isoformat(timespec='seconds')}_",
         "",
-        "Columns: `name`, `description` (from `MODULE_PARM_DESC`), `type`, "
-        "`permission` (read-only or writable), `default` (best-effort from variable declaration).",
+        "Columns: `Name`, `Description` (from `MODULE_PARM_DESC`), `Type`, "
+        "`Permissions` (read-only or writable), `Defaults` (best-effort from variable declaration).",
         "",
         f"Grouping mode: `{group_by}`",
         "",
