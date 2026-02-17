@@ -152,7 +152,7 @@ MODULE_PARM_DESC(nr_max_channels_per_disk, "Maximum number of RDMA IO channels p
 
 bool nvmeibc_use_local_bypass = true;
 module_param_named(use_local_bypass, nvmeibc_use_local_bypass, bool, 0644);
-MODULE_PARM_DESC(use_local_bypass, "Access local drives directly and not via a NIC, i.e. over the network. Mainly used for debugging local disk access.");
+MODULE_PARM_DESC(use_local_bypass, "Access local drives directly and not via a NIC, i.e. over the network. Setting to false is mainly used for debugging local disk access.");
 
 bool nvmeibc_use_norrda_for_io = true;
 module_param_named(use_norrda_for_io, nvmeibc_use_norrda_for_io, bool, 0644);
