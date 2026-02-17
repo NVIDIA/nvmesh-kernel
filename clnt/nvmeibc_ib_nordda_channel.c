@@ -37,7 +37,7 @@ MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Determines whether to use a kerne
 
 bool nvmeibc_nordda_wq_unbound = false;
 module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_nordda (true) or a bound one (false).");
+MODULE_PARM_DESC(nordda_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_nordda (true) or a bound one (false). Relevant only if nr_defer_recv_comps_use_kwq is set to true");
 
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
 
