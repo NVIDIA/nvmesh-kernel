@@ -97,7 +97,7 @@ static void __memmgr_metrics_json_serialize_cpu(struct jdr *jdr_inst, struct nvm
 						struct nvmesh_memmgr_metrics *start, struct nvmesh_memmgr_metrics *stop)
 {
 	char scope_str[32];
-	sprintf(scope_str, "metrics.cpu%d", cpu);
+	snprintf(scope_str, ARRAY_SIZE(scope_str), "metrics.cpu%d", cpu);
 	{
 		struct nvmesh_memmgr_metrics *curr = NULL;
 		jdr_array_scope((jdr_inst), scope_str);
