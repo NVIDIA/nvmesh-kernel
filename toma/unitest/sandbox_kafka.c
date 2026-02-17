@@ -64,9 +64,9 @@ struct rd_kafka_topic_s {
 	char *name;
 	struct sim_broker_topic *broker_topic;	// Connection to broker (when topic is initialized)
 	rd_kafka_topic_conf_t *conf;
-	int32_t partition;		// Support only 1 partition for now. Store its index
+	int32_t partition;						// Support only 1 partition for now. Store its index, always 0
 	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
-	bool is_active;			// REmove
+	bool is_assigned;						// Todo: may remove it and set partition as -1 instead. User can read/write this topic (it has assigned 1 or more partitions)
 };
 
 struct rd_kafka_conf_s {
@@ -187,10 +187,10 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 	rd_kafka_topic_t *kt = &ko->topic;
 	N_Tf(__AUTOID__, "k_object=@STR, has_pl=@BOOL_YN", ko->name, !!pl);
 	if (pl == NULL) {
-		if (ko->topic.name && ko->topic.is_active) {
+		if (ko->topic.name && ko->topic.is_assigned) {
 			N_Tf(__AUTOID__, "@STR: stop. cur_offset=@LD", kt->name, kt->broker_topic->cur_offset);
-			kt->is_active = false;
-		} // Topic was never created
+			kt->is_assigned = false;
+		} // else: Topic was never created, or assign NULL called twice, this is valid
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	} else {
 		const int64_t offset = pl->elems[0].offset;
@@ -199,8 +199,8 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 			rd_kafka_topic_new(ko, pl->elems[0].topic, NULL);
 		}
 		BUG_ON((ko != pl->elems[0].k) || (kt->partition != pl->elems[0].partition));		// We dont support partitions
-		N_Tf(__AUTOID__, "@STR: start topic consume from offset=@LD", kt->name, offset);
-		kt->is_active = true;
+		N_Tf(__AUTOID__, "@STR: start topic consume from partition[@INT], offset=@LD", kt->name, kt->partition, offset);
+		kt->is_assigned = true;
 		if (offset == RD_KAFKA_OFFSET_STORED) {
 			N_Tf(__AUTOID__, "@STR: continue from cur_offset=@LD", kt->name, kt->broker_topic->cur_offset); // Toma relies on Kafka simulator
 		} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
@@ -214,13 +214,13 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 
 rd_kafka_resp_err_t rd_kafka_assignment(rd_kafka_t *ko, rd_kafka_topic_partition_list_t **pl) {
 	*pl = NULL;
-	if (!ko->topic.is_active)
+	if (!ko->topic.is_assigned)
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	return RD_KAFKA_RESP_ERR__RETRY;		// Not implemented yet
 }
 
 rd_kafka_resp_err_t rd_kafka_consumer_close(rd_kafka_t *rk) {
-	rk->topic.is_active = false;
+	BUG_ON(rk->topic.is_assigned);	// Should destroy partition before. This is not a must according to kafka documentation but enforces a cleaner api
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -284,8 +284,8 @@ rd_kafka_t* rd_kafka_new(enum rd_kafka_type_t who, rd_kafka_conf_t *cfg, char*er
 
 rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char *name, rd_kafka_topic_conf_t *conf) {
 	rd_kafka_topic_t *kt = &k->topic;
-	BUG_ON(!is_kafka_cp_used(k) || (kt->name != NULL) || (kt->is_active));
-	N_Tf(__AUTOID__, "@STR: alloc_init", name);
+	BUG_ON(!is_kafka_cp_used(k) || (kt->name != NULL) || (kt->is_assigned));
+	N_Tf(__AUTOID__, "@STR alloc_init topic[@STR]", k->name, name);
 	kt->name = strdup(name);
 	kt->conf = conf;
 	kt->partition = 0;
@@ -302,7 +302,6 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char *name, rd_kafka_t
 		else BUG_ON(true);				// Unknown topic which Toma will not listen too
 	}
 	kt->broker_topic = find_broker_topic_by(kt->type);
-	kt->is_active = true;
 	N_Tf(__AUTOID__, "alloc new topic @STR[@CHAR], starting from offset @LD", kt->name, kt->type, kt->broker_topic->cur_offset);
 	return kt;
 }
@@ -386,9 +385,9 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 
 rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	rd_kafka_message_t *m = calloc(1, sizeof(*m));
-	const char *unique_name = (ko->name[0] != 'L') ? ko->name : ko->topic.name;		// all LEADER consumer groups have the same name. Differenciate them by topic name
+	const char *unique_name = (ko->name[0] != 'L') ? ko->name : ko->topic.name;		// all LEADER consumer groups have the same name. Differentiate them by topic name
 	size_t len = 0;
-	BUG_ON((timeout_ms != 0) || (!ko->topic.is_active));
+	BUG_ON((timeout_ms != 0) || (!ko->topic.is_assigned));
 	m->err = RD_KAFKA_RESP_ERR_NO_ERROR;
 
 	/* Delegate message selection to the management simulator */
