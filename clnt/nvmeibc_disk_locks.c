@@ -37,7 +37,7 @@ MODULE_PARM_DESC(skip_lock_cmds_flags, "This is an unsafe debug mode. Skip locki
 
 bool nvmeibc_disk_locks_use_system_pcpu_wq = false;
 module_param_named(disk_locks_use_system_pcpu_wq, nvmeibc_disk_locks_use_system_pcpu_wq, bool, 0444);
-MODULE_PARM_DESC(disk_locks_use_system_pcpu_wq, "Defines whether disk locks use the system per-cpu workqueues for requests.");
+MODULE_PARM_DESC(disk_locks_use_system_pcpu_wq, "Defines whether disk locks use the system per-cpu workqueues for requests completion handling.");
 
 
 #define DEUBG_SKIP_LOCKS_TX_ID 1234
