@@ -480,19 +480,19 @@ static void nordda_recv_comp_h(void *ctx, struct ib_wc *wcs);
 
 bool nvmeibs_nr_post_recv_on_send_comp = false;
 module_param_named(nr_post_recv_on_send_comp, nvmeibs_nr_post_recv_on_send_comp, bool, 0444);
-MODULE_PARM_DESC(nr_post_recv_on_send_comp, "In percpu CQ and SRQ mode, post recv buff on send comp of io-rsp");
+MODULE_PARM_DESC(nr_post_recv_on_send_comp, "In per-cpu CQ and SRQ mode, post a receive buffer on send completion of an IO response.");
 
 bool nvmeibs_nr_skip_disk_access = false;
 module_param_named(nr_skip_disk_access, nvmeibs_nr_skip_disk_access, bool, 0644);
-MODULE_PARM_DESC(nr_skip_disk_access, "Unsafe debug mode: No-rdda skip disk access");
+MODULE_PARM_DESC(nr_skip_disk_access, "Unsafe debug mode. Skip local disk access, i.e., complete disk operations immediately instead of performing them for remote IO operations. Used for debugging and performance optimization.");
 
 bool nvmeibs_nr_skip_rdma_write_back = false;
 module_param_named(nr_skip_rdma_write_back, nvmeibs_nr_skip_rdma_write_back, bool, 0644);
-MODULE_PARM_DESC(nr_skip_rdma_write_back, "Unsafe debug mode: No-rdda skip rdma write-back in read operation");
+MODULE_PARM_DESC(nr_skip_rdma_write_back, "Unsafe debug mode. Skip performing the RDMA write-back usually done for disk read operations for remote IO operations. Used for debugging and performance optimization.");
 
 bool nvmeibs_nr_wq_set_cpu_affinity = false;
 module_param_named(nr_wq_set_cpu_affinity, nvmeibs_nr_wq_set_cpu_affinity, bool, 0644);
-MODULE_PARM_DESC(nr_wq_set_cpu_affinity, "Set CPU affinity of NR WQ (based on channel index)");
+MODULE_PARM_DESC(nr_wq_set_cpu_affinity, "Set CPU affinity of IO communication work queues, based on channel index.");
 
 void nrch_send_rsp_and_post_recv(struct nvmeibs_nr_channel *nrch,
 	u8 opcode, u64 tag, u16 version_tag, struct nvmeib_iu *send_ioctx, void *p, int len,
@@ -4730,11 +4730,11 @@ out:
 /* Global kernel workqueue for nordda deferred IO commands */
 bool nvmeibs_nordda_use_kernel_wq = true;
 module_param_named(nordda_use_kernel_wq, nvmeibs_nordda_use_kernel_wq, bool, 0444);
-MODULE_PARM_DESC(nordda_use_kernel_wq, "Use kernel workqueue for nordda deferred IO commands (reduces IRQ latency)");
+MODULE_PARM_DESC(nordda_use_kernel_wq, "Determines whether to use a kernel workqueue for nordda deferred IO commands (reduces IRQ latency).");
 
 bool nvmeibs_nordda_kernel_wq_unbound = false;
 module_param_named(nordda_kernel_wq_unbound, nvmeibs_nordda_kernel_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_kernel_wq_unbound, "Use unbound kernel workqueue (true) or bound (false, default)");
+MODULE_PARM_DESC(nordda_kernel_wq_unbound, "Determines whether to use an unbound kernel workqueue (true) or a bound one (false).");
 
 struct workqueue_struct *nvmeibs_nordda_kwq;
 

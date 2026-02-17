@@ -31,7 +31,7 @@ static DEFINE_PER_CPU(struct intr_poller, intr_pollers);
 
 unsigned nvmeib_public_ipoller_poll_duration_jif = 0;
 module_param_named(ipoller_poll_duration_jif, nvmeib_public_ipoller_poll_duration_jif, uint, 0644);
-MODULE_PARM_DESC(ipoller_poll_duration_jif, "ipoller poll duration till reschedule, 0=default");
+MODULE_PARM_DESC(ipoller_poll_duration_jif, "ipoller poll duration till reschedule, 0=default (uint). This is used for RDMA completion queue handling, albeit it can be used for other purposes as a generic NVMesh infrastructure component.");
 
 #if defined (IPOLLER_SCHED_FROM_ANY_CPU) && (IPOLLER_SCHED_FROM_ANY_CPU==1)
 #define ipoller_irq_disable(__p, flags)	spin_lock_irqsave(&(__p)->spinlock, flags);

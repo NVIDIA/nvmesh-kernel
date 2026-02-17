@@ -9,7 +9,7 @@
 	ulong nvmeibc_iter_colldown = 500;			// 0.5[sec]
 #endif
 module_param_named(recovery_iterator_cooldown, nvmeibc_iter_colldown, ulong, 0644);
-MODULE_PARM_DESC(recovery_iterator_cooldown, "Recovery iterator delay for each innefective recovery cycle [msec]");
+MODULE_PARM_DESC(recovery_iterator_cooldown, "Recovery iterator timeout to wait after completing full recovery cycle in jiffies. Increasing this trades recovery load vs. recovery time.");
 
 NVMEIBC_MEMMGR_METRIC(dp_recovery_problems_report, "component=raid.io_ctrl.recovery.problems");
 

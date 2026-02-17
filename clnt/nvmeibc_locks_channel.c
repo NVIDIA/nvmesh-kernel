@@ -24,41 +24,38 @@
 
 static unsigned int nvmeibc_max_lock_channels = 5; /* backword-compat */
 module_param_named(max_lock_channels, nvmeibc_max_lock_channels, uint, 0644);
-MODULE_PARM_DESC(max_lock_channels, "max lock channels - primary plus n-1 secondary channels");
+MODULE_PARM_DESC(max_lock_channels, "The maximum number of lock channels for non-TCP transports.");
 
 static unsigned int nvmeibc_max_lock_channels_tcp = NVMEIB_MAX_LOCK_TCP_CHANNELS; /* backword-compat */
 module_param_named(max_lock_channels_tcp, nvmeibc_max_lock_channels_tcp, uint, 0644);
-MODULE_PARM_DESC(max_lock_channels_tcp, "max lock channels for TCP - primary plus n-1 secondary channels");
+MODULE_PARM_DESC(max_lock_channels_tcp, "The maximum number of lock channels for TCP transports.");
 
 static int nvmeibc_lock_channel_choosing_method = LOCK_CHANNEL_CHOOSING_METHOD_LRU;
 module_param_named(lock_ch_get_method, nvmeibc_lock_channel_choosing_method, int, 0644);
-MODULE_PARM_DESC(lock_ch_get_method, "choose the lock channel based on, Possible values:"
-									 "0) LRU - Tie break by sharding, "
-									 "1) BY_CPU, "
-									 "2) SHARDING by destation address");
+MODULE_PARM_DESC(lock_ch_get_method, "Determines the method for choosing the lock channel for RDMA communication. Possible values: "
+									 "0 = LRU - tie break by sharding, "
+									 "1 = BY_CPU, "
+									 "2 = SHARDING by destination address");
 
 static int nvmeibc_lock_channel_choosing_method_tcp = LOCK_CHANNEL_CHOOSING_METHOD_BY_CPU;
 module_param_named(lock_ch_get_method_tcp, nvmeibc_lock_channel_choosing_method_tcp, int, 0644);
-MODULE_PARM_DESC(lock_ch_get_method_tcp, "choose the lock channel based on (TCP), Possible values:"
-									 "0) LRU - Tie break by sharding, "
-									 "1) BY_CPU, "
-									 "2) SHARDING by destation address");
+MODULE_PARM_DESC(lock_ch_get_method_tcp, "Determines the method for choosing the lock channel for TCP communication, same values as for RDMA, see above.");
 
 static bool nvmeibc_lock_ch_scq_offload_thread = true;
 module_param_named(lock_ch_scq_offload_thread, nvmeibc_lock_ch_scq_offload_thread, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_offload_thread, "Use a thread for SCQ offload processing");
+MODULE_PARM_DESC(lock_ch_scq_offload_thread, "Use a thread for offload processing for RDMA shared completion queue handling.");
 
 static bool nvmeibc_lock_ch_scq_offload_thread_tcp = true;
 module_param_named(lock_ch_scq_offload_thread_tcp, nvmeibc_lock_ch_scq_offload_thread_tcp, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for SCQ offload processing (TCP)");
+MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for offload processing for SIW shared completion queue handling.");
 
 bool nvmeibc_lock_ch_scq_use_kwq = true;
 module_param_named(lock_ch_scq_use_kwq, nvmeibc_lock_ch_scq_use_kwq, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Use kernel workqueue instead of kthread for SCQ offload processing (default: true)");
+MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Determines whether to use kernel workqueue instead of kthread for SCQ offload processing.");
 
 bool nvmeibc_locks_scq_wq_unbound = false;
 module_param_named(locks_scq_wq_unbound, nvmeibc_locks_scq_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(locks_scq_wq_unbound, "Use unbound kernel workqueue for nvmeibc_locks_scq (true) or bound (false, default)");
+MODULE_PARM_DESC(locks_scq_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_locks_scq (true) or a bound one (false).");
 
 /* Kernel workqueue for locks channel SCQ operations */
 static struct workqueue_struct *nvmeibc_locks_channel_wq;
@@ -102,33 +99,28 @@ EXPORT_SYMBOL(nvmeibc_locks_channel_get_wq);
 static unsigned int nvmeibc_lock_ch_2nd_ch_pcpu = 0;
 module_param_named(lock_ch_2nd_ch_pcpu, nvmeibc_lock_ch_2nd_ch_pcpu, uint, 0644);
 MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu,
-		 "Enable/Disable or Set number of secondary lock channels as percpu lock channels; "
-		 "Offline CPUs witnin this configured cpus-range are not compensated for. "
-		 "Possible values:  "
-		 "0 - Disabled, "
-		 "1 - Use max possible channels (min(num-cpus, 128)),"
-		 "Other value (when lock_ch_pcpu_cpus=\"\") -  cpu [0, i) uses per-cpu secondary-channel [0, i). Other cpus share primary channel."
-		);
+		 "Enable, disable or set the number of secondary lock channels as per-cpu lock channels. "
+		 "Offline CPUs within the configured CPUs range are not compensated for. "
+		 "Possible values: "
+		 "0 = disabled, "
+		 "1 = use max possible channels (min(num-cpus, 128)), "
+		 "Other value (when lock_ch_pcpu_cpus=\"\") = cpu [0, i) use a per-cpu secondary-channel [0, i). Other cpus share the primary lock channel.");
 
 static bool nvmeibc_lock_ch_2nd_ch_pcpu_lockless = true;
 module_param_named(lock_ch_2nd_ch_pcpu_lockless, nvmeibc_lock_ch_2nd_ch_pcpu_lockless, bool, 0644);
-MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu_lockless, "Per-CPU Lock Channels are lockless."
-						"This reduces contention and increases performance."
-						"NOTE: There must be a pcpu channel for all submission cores"
-						"or it will fallback to the shared channels with locking");
+MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu_lockless, "Determines whether the per-CPU storage-level lock channels are run lockless compared to other threads and CPUs. This reduces contention and increases performance. NOTE: There must be a pcpu channel for all submission cores or it will fallback to the shared channels with locking.");
 
 static char *nvmeibc_lock_ch_pcpu_cpus = NULL;
 module_param_named(lock_ch_pcpu_cpus, nvmeibc_lock_ch_pcpu_cpus, charp, 0644);
-MODULE_PARM_DESC(lock_ch_pcpu_cpus, "CPUs for Secondary Lockless Per-CPU Channels as hex-mask list where each entry is 32-bits "
-					" (e.g. 1f,ff for CPUS 0-7, 32-36). NOTE: If empty, use all cores");
+MODULE_PARM_DESC(lock_ch_pcpu_cpus, "A list of CPUs on which to pin the secondary per-cpu lock channels. The format is a hex-mask list where each entry is 32-bits, e.g., 1f,ff for CPUS 0-7, 32-36. If the list is empty, use all cores.");
 
 static unsigned int nvmeibc_lock_ch_2nd_ch_coremask = 0;
 module_param_named(lock_ch_2nd_ch_coremask, nvmeibc_lock_ch_2nd_ch_coremask, uint, 0644);
-MODULE_PARM_DESC(lock_ch_2nd_ch_coremask, "Enable/Disable/Set using secondary channels as coremasks channels"
+MODULE_PARM_DESC(lock_ch_2nd_ch_coremask, "Enable, disable or set whether to use secondary channels as coremasks channels. "
 					"Possible values: "
 					"0 - Disabled, "
 					"> 0 - Max number of channels per mask to connect,"
-					"All other IOs use primary channel");
+					"All other IOs use primary channel.");
 
 static int handle_locks_message(struct nvmeibc_ib_net *net, struct ib_wc *wc)
 {

@@ -87,15 +87,15 @@ enum {
 
 int tracer_nvmeibp_debug_level = 3;
 module_param_named(tracer_debug_level, tracer_nvmeibp_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_debug_level, "NVmesh common public module debug level [0..4]");
+MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 EXPORT_SYMBOL(tracer_nvmeibp_debug_level);
 
 static int nvmeib_odp_info = NVMEIB_ODP_UNKNOWN;
 module_param_named(ib_odp_info, nvmeib_odp_info, int, 0644);
 #if !KS_KALLSYMS_LOOKUP
-MODULE_PARM_DESC(ib_odp_info, "Used to inform the driver if Infiniband On-Demand-Paging is enabled. 1 - Enabled, 0 - Disabled.");
+MODULE_PARM_DESC(ib_odp_info, "Defines whether On-Demand-Paging is enabled for RDMA usage and NVMesh should use it. 1 = Enabled, 0 = Disabled, -1 = Auto. On-demand-paging enables using RDMA on non-pinned memory pages.");
 #else
-MODULE_PARM_DESC(ib_odp_info, "Used to inform the driver if Infiniband On-Demand-Paging is enabled. 1 - Enabled, 0 - Disabled, -1 - Auto");
+MODULE_PARM_DESC(ib_odp_info, "Defines whether On-Demand-Paging is enabled for RDMA usage and NVMesh should use it. 1 = Enabled, 0 = Disabled, -1 = Auto. On-demand-paging enables using RDMA on non-pinned memory pages.");
 #endif
 
 static bool nvmeibp_do_kasan_test = false;

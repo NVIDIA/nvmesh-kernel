@@ -48,31 +48,26 @@ int tracer_nvmeibs_debug_level = 4;	// Equivalent to: nvmeibc_debug_level = 2
 int goodpath_nvmeibs_debug_level = 2;
 
 module_param_named(debug_level, nvmeibs_debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Debug tracing level [0..2]");
+MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1. Deprecated.");
 
 module_param_named(tracer_debug_level, tracer_nvmeibs_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_debug_level, "Control path tracing debug level [0..4]");
+MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(goodpath_debug_level, goodpath_nvmeibs_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_debug_level, "Data path tracing debug level");
+MODULE_PARM_DESC(goodpath_debug_level, "This determines the level of tracing for the regular data path. Only traces with this level or lower will be issued, see tracer severities above.");
 
 #define MAX_FP 1024
 static char nvmeibs_filter_ports[MAX_FP] = "";
 module_param_string(ports, nvmeibs_filter_ports, MAX_FP, 0644);
-MODULE_PARM_DESC(ports, "Option to filter nics and ports\n"
-   "\t\t If empty, no filter is used otherwise the format is either:\n"
-   "\t\t    <hca_id> - use this nic and all its ports\n"
-   "\t\t    <hca_id>:port id\n"
-   "\t\t For example:\n"
-   "\t\t    mlx4_0:1,mlx_4:2,mlx4_1:1 - will use three ports of two nics");
+MODULE_PARM_DESC(ports, "Used for port filtering functionality. This is typically set by service startup based on nvmesh.conf information.");
 
 static char nvmeibs_filter_guids[MAX_FP] = "";
 module_param_string(guids, nvmeibs_filter_guids, MAX_FP, 0644);
-MODULE_PARM_DESC(guids, "option to filter ports according to port\'s hardware guids");
+MODULE_PARM_DESC(guids, "Used for port filtering functionality. Typically populated from nvmesh.conf parameters.");
 
 bool nvmeibs_defer_recv_comps = true;
 module_param_named(defer_recv_comps, nvmeibs_defer_recv_comps, bool, 0644);
-MODULE_PARM_DESC(defer_recv_comps, "Defer no-rdda receive completions");
+MODULE_PARM_DESC(defer_recv_comps, "Defer handling of IO receive completions, so it is not done in the interrupt context.");
 
 static bool mlx_rdda_enabled = false;
 #ifdef ALLOW_CLIENT_RDDA
@@ -82,28 +77,27 @@ MODULE_PARM_DESC(mlx_rdda_enabled, "enable mlx rdda support");
 
 unsigned nvmeibs_max_nic_srqs = NVMEIB_MAX_NIC_SRQS;
 module_param_named(max_nic_srqs, nvmeibs_max_nic_srqs, int, 0444);
-MODULE_PARM_DESC(max_nic_srqs, "Maximum SRQs per nic");
+MODULE_PARM_DESC(max_nic_srqs, "Maximum number of shared receive queues to define per NIC.");
 
 static bool roce_ipv4_only = false;
 module_param_named(roce_ipv4_only, roce_ipv4_only, bool, 0444);
-MODULE_PARM_DESC(roce_ipv4_only, "Use IPv4 only for RoCE (Needed for CX-3)");
+MODULE_PARM_DESC(roce_ipv4_only, "Deprecated. Use IPv4 only for RoCE, which was needed for CX-3.");
 
 bool nvmeibs_use_pcpu_cq = false; /* Disabled by service script for TCP */
 module_param_named(use_pcpu_cq, nvmeibs_use_pcpu_cq, bool, 0444);
-MODULE_PARM_DESC(use_pcpu_cq, "Use a per CPU shared completion queue (SCQ) and shared receive queue (SRQ)");
+MODULE_PARM_DESC(use_pcpu_cq, "Use a per-cpu shared completion queue (SCQ) and shared receive queue (SRQ).");
 
 bool nvmeibs_pcpu_cq_poll_proc = false;
 module_param_named(pcpu_cq_poll_proc, nvmeibs_pcpu_cq_poll_proc, bool, 0444);
-MODULE_PARM_DESC(pcpu_cq_poll_proc, "Create proc files for polling the nvmeibs shared completion queues from SPDK - (Requires pcpu_cq_all_cpus=Y for nvmeib_common)");
+MODULE_PARM_DESC(pcpu_cq_poll_proc, "Create /proc files for polling the nvmeibs shared completion queues from SPDK. This requires pcpu_cq_all_cpus=Y for nvmeib_common.");
 
 unsigned max_outstanding_cm_work_items = 8;
 module_param(max_outstanding_cm_work_items, uint, 0644);
-MODULE_PARM_DESC(max_outstanding_cm_work_items, "Max outstanding CM work items");
+MODULE_PARM_DESC(max_outstanding_cm_work_items, "Max outstanding CM (connection manager) work items. Important for larger environments using RDMA.");
 
 unsigned int nvmeibs_tcp_mode = 0;
 module_param_named(tcp_mode, nvmeibs_tcp_mode, uint, 0444);
-MODULE_PARM_DESC(tcp_mode, "TCP transport mode, 0 = RoCE only, 1 = TCP Only, 2 or greater = TCP and RoCE "
-						   "(If TCP is enabled, locks to all disks are done via CPU i.e. RPC or SIW)");
+MODULE_PARM_DESC(tcp_mode, "Activate the SIW communicate mode exclusively, i.e., filter out any RoCE devices. Usually set by service startup from nvmesh.conf information.");
 
 bool nvmeibs_use_tcp_locks = false;
 static void set_lock_dev_mode(void)
@@ -115,7 +109,7 @@ static void set_lock_dev_mode(void)
 
 bool nvmeibs_local_skip_disk_access = false;
 module_param_named(local_skip_disk_access, nvmeibs_local_skip_disk_access, bool, 0644);
-MODULE_PARM_DESC(local_skip_disk_access, "Unsafe debug mode: Local client skip disk access");
+MODULE_PARM_DESC(local_skip_disk_access, "Unsafe debug mode. Skip local disk access, i.e., complete disk operations immediately instead of performing them. Used for debugging and performance optimization.");
 
 unsigned nvmeibs_nic_io_stats_block_size = 1 << NVMEIBC_SECTOR_SHIFT;
 module_param_named(nic_io_stats_block_size, nvmeibs_nic_io_stats_block_size, uint, 0444);
@@ -233,8 +227,7 @@ module_param_call(service_guid, nvmeibs_set_service_guid_param,
 	nvmeibs_get_service_guid_param, &nvmeibs_service_guid, S_IRUGO | S_IWUSR);
 #endif
 
-MODULE_PARM_DESC(service_guid, "Use this value for cm_listen_id"
-	" instead of using the node_guid of the first HCA");
+MODULE_PARM_DESC(service_guid, "Override cm_listen_id with this value.");
 
 u64 nvmeibs_get_service_guid(void)
 {
@@ -243,8 +236,7 @@ u64 nvmeibs_get_service_guid(void)
 
 static int nvmeibs_max_req_size = roundup_pow_of_two(NVMEIBC_MAX_ADMIN_CLIENT_MSG_SIZE);
 module_param_named(max_req_size, nvmeibs_max_req_size, int, 0444);
-MODULE_PARM_DESC(max_req_size,
-	"Maximum size of client/server message in bytes");
+MODULE_PARM_DESC(max_req_size, "Maximum size of client-target messages.");
 
 int nvmeibs_get_max_req_size(void)
 {
@@ -263,7 +255,7 @@ static int nvmeibs_shared_rq_size =
 	NVMEIBS_DEF_MAX_N_DISKS *
 	NVMEIB_MAX_NORDDA_IO_REQ) >> 2;
 module_param_named(shared_rq_size, nvmeibs_shared_rq_size, int, 0644);
-MODULE_PARM_DESC(shared_rq_size, "Shared receive queue (SRQ) size [bytes]");
+MODULE_PARM_DESC(shared_rq_size, "Networking shared receive queue (SRQ) size.");
 
 int nvmeibs_get_shared_recv_queue_size(void)
 {
@@ -272,11 +264,11 @@ int nvmeibs_get_shared_recv_queue_size(void)
 
 static unsigned int nvmeibs_nordda_io_req_num = NVMEIB_MAX_NORDDA_IO_REQ;
 module_param_named(nvmeibs_nordda_io_req_num, nvmeibs_nordda_io_req_num, int, 0644);
-MODULE_PARM_DESC(nvmeibs_nordda_io_req_num, "Number of IO requests per no-RDDA IO channel");
+MODULE_PARM_DESC(nvmeibs_nordda_io_req_num, "Number of IO requests per IO channel. More can increase throughput, but may hurt caching. Less reduces memory consumption.");
 
 uint nvmeibs_nr_max_wrs_per_req = 0;
 module_param_named(nr_max_wrs_per_req, nvmeibs_nr_max_wrs_per_req, int, 0644);
-MODULE_PARM_DESC(nr_max_wrs_per_req, "Maximum of WRs per no-RDDA channel's request, used in response to read-req. If 0, use system's default");
+MODULE_PARM_DESC(nr_max_wrs_per_req, "The maximum number of WRs (RDMA work requests) per IO channel request, used in response to a read request. For 0, use system's default.");
 
 u32 nvmeibs_get_nordda_io_req_num(void)
 {

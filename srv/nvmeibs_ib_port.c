@@ -15,15 +15,15 @@
 
 static unsigned int nvmeibs_tcp_port_prio = NVMEIB_TCP_PORT_PRIORITY;
 module_param_named(tcp_port_prio, nvmeibs_tcp_port_prio, uint, 0644);
-MODULE_PARM_DESC(tcp_port_prio, "TCP Port Priority");
+MODULE_PARM_DESC(tcp_port_prio, "Defines the priority of SIW. Enables overriding the form of network transportation to prefer. See ib_port_prio and roce_port_prio also.");
 
 static unsigned int nvmeibs_roce_port_prio = NVMEIB_ROCE_PORT_PRIORITY;
 module_param_named(roce_port_prio, nvmeibs_roce_port_prio, uint, 0644);
-MODULE_PARM_DESC(roce_port_prio, "RoCE Port Priority");
+MODULE_PARM_DESC(roce_port_prio, "Defines the priority of ROCE. Enables overriding the form of network transportation to prefer. See ib_port_prio and tcp_port_prio also.");
 
 static unsigned int nvmeibs_ib_port_prio = NVMEIB_IB_PORT_PRIORITY;
 module_param_named(ib_port_prio, nvmeibs_ib_port_prio, uint, 0644);
-MODULE_PARM_DESC(ib_port_prio, "IB Port Priority");
+MODULE_PARM_DESC(ib_port_prio, "Defines the priority of Infiniband. Enables overriding the form of network transportation to prefer. See roce_port_prio and tcp_port_prio also.");
 
 /**
  * nvmeibs_mad_send_handler() - Post MAD-send callback function.

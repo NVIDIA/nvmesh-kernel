@@ -51,45 +51,42 @@ struct msgloop_procfs_ent *io_pet_writer = NULL;
 
 int nvmeib_cmn_debug_level = DEBUG_LEVEL;
 module_param_named(debug_level, nvmeib_cmn_debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Enable debug tracing if > 0");
+MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1.");
 
 struct nvmeib_pcpu_wq *nvmeib_system_wq = NULL;
 EXPORT_SYMBOL(nvmeib_system_wq);
 
 unsigned nvmeib_pcpu_cq_max_cqs_per_dev = 0;
 module_param_named(pcpu_cq_max_cqs_per_dev, nvmeib_pcpu_cq_max_cqs_per_dev, uint, 0444);
-MODULE_PARM_DESC(pcpu_cq_max_cqs_per_dev, "Maximum number of percpu cqs per device , if 0 use system default");
+MODULE_PARM_DESC(pcpu_cq_max_cqs_per_dev, "Maximum number of percpu cqs per device. If set to 0, use system default.");
 
 bool nvmeib_pcpu_cq_all_cpus = false;
 module_param_named(pcpu_cq_all_cpus, nvmeib_pcpu_cq_all_cpus, bool, 0444);
-MODULE_PARM_DESC(pcpu_cq_all_cpus, "Allocated CQ per online-cpus per-dev which always process completions on thread context");
+MODULE_PARM_DESC(pcpu_cq_all_cpus, "Allocated CQ per online-cpus (per the Linux kernel) per device, which always process completions in a thread context, i.e. on the ipoller.");
 
 bool nvmeib_pcpu_cq_comp_vecs_per_dev = true;
 module_param_named(pcpu_cq_comp_vecs_per_dev, nvmeib_pcpu_cq_comp_vecs_per_dev, bool, 0444);
-MODULE_PARM_DESC(pcpu_cq_comp_vecs_per_dev, "\n"
-				 "\t\t Y : use first N comp-vectors of device where N='max num of pcpu-cqs per device'\n"
-				 "\t\t N : use all comp-vectors spread globaly between all devices (not recommended)");
+MODULE_PARM_DESC(pcpu_cq_comp_vecs_per_dev, "Y = use first N comp-vectors of device where N='max num of pcpu-cqs per device'. N = use all comp-vectors spread globally between all devices, which is usually not recommended.");
 
 #define USER_POLL_TIMEOUT_GRANULARITY_MSECS 	100
 #define POLL_DISABLE_TIMEOUT_TRACE_MSECS	5
 
 unsigned nvmeib_pcpu_cq_user_poll_timeout_msecs = 100;
 module_param_named(pcpu_cq_user_poll_timeout_msecs, nvmeib_pcpu_cq_user_poll_timeout_msecs, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_user_poll_timeout_msecs, "Timeout where the CQ switches from user polling back to ipoller\n"
-						" (granularity of " NV_PP_STR(USER_POLL_TIMEOUT_GRANULARITY_MSECS) "ms)");
+MODULE_PARM_DESC(pcpu_cq_user_poll_timeout_msecs, "Timeout to switch from user polling back to ipoller for a CQ.");
 
 int tracer_nvmeibm_debug_level = 3;
 module_param_named(tracer_debug_level, tracer_nvmeibm_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_debug_level, "Control path tracing debug level [0..4]");
+MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 EXPORT_SYMBOL(tracer_nvmeibm_debug_level);
 
 unsigned int nvmeib_tcp_base_port_id = NVMEIB_EXCELERO_IWARP_PORT_ID;
 module_param_named(tcp_base_port_id, nvmeib_tcp_base_port_id, uint, 0444);
-MODULE_PARM_DESC(tcp_base_port_id, "TCP: Secondary iWARP listeners base port-id");
+MODULE_PARM_DESC(tcp_base_port_id, "The first (base) port ID for secondary SIW (iWARP) listeners.");
 
 unsigned int nvmeib_tcp_num_ports = NVMEIB_MAX_NR_TCP_CHANNELS_PER_PATH;
 module_param_named(tcp_num_ports, nvmeib_tcp_num_ports, uint, 0444);
-MODULE_PARM_DESC(tcp_num_ports, "TCP: Secondary iWARP listeners number of TCP ports (0 = number of CPUs)");
+MODULE_PARM_DESC(tcp_num_ports, "The number of secondary SIW (iWARP) TCP ports. 0 = number of CPUs.");
 
 /* Keep polling for this many microseconds after the last completion
  * before attempting to rearm interrupts (0: disabled) */
@@ -106,11 +103,11 @@ MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "Time window (us) to keep polling 
 
 unsigned int nvmeib_intr_shaper_max_burst = NVMEIB_MAX_BURST;
 module_param_named(intr_shaper_max_burst, nvmeib_intr_shaper_max_burst, uint, 0644);
-MODULE_PARM_DESC(intr_shaper_max_burst, "Max number of completions to handle in an interrupt before entering poll mode");
+MODULE_PARM_DESC(intr_shaper_max_burst, "Max number of recv completions to handle in an interrupt before entering poll mode.");
 
 unsigned int nvmeib_intr_shaper_max_pct_cpu = NVMEIB_MAX_COMP_INTR_PCT_CPU;
 module_param_named(intr_shaper_max_pct_cpu, nvmeib_intr_shaper_max_pct_cpu, uint, 0644);
-MODULE_PARM_DESC(intr_shaper_max_pct_cpu, "Max percentage of CPU time to spend processing completions in an interrupt before entering poll mode");
+MODULE_PARM_DESC(intr_shaper_max_pct_cpu, "Max percentage of CPU time to spend processing completions in an interrupt before entering poll mode.");
 
 unsigned int nvmeib_intr_shaper_max_irq_time_usecs = NVMEIB_MAX_IRQ_TIME_USECS;
 module_param_named(intr_shaper_max_irq_time_usecs, nvmeib_intr_shaper_max_irq_time_usecs, uint, 0644);
@@ -131,9 +128,7 @@ EXPORT_SYMBOL(nvmeib_get_intr_shaper);
 #define MAX_NIC_BLACKLIST_LEN 256
 static char *nvmeib_nic_blacklist[MAX_NIC_BLACKLIST_LEN];
 module_param_array_named(nic_blacklist, nvmeib_nic_blacklist, charp, NULL, 0444);
-MODULE_PARM_DESC(nic_blacklist, "Option to blacklist RDMA NICs\n"
-"\t\t Format is <hca_id>,<hca_id>,<hca_id>...\n"
-" Example: mlx5_2,mlx5_3");
+MODULE_PARM_DESC(nic_blacklist, "A comma-separated list of NICs to blacklist, i.e. not use.");
 
 /* Check to see if ib_device is in nic blacklist
  * Checks both the ib_device name and the netdevice name */
@@ -314,17 +309,17 @@ static struct nvmeib_intr_pollers_ft intr_poller_ft;
 
 unsigned nvmeib_pcpu_cq_size = PCPU_CQ_MAX_SIZE;
 module_param_named(pcpu_cq_size, nvmeib_pcpu_cq_size, int, 0444);
-MODULE_PARM_DESC(pcpu_cq_size, "The length or size of the shared completion queue when employing a per CPU shared completion and receive queue");
+MODULE_PARM_DESC(pcpu_cq_size, "The length or size of the shared completion queue when employing a per CPU shared completion and receive queue.");
 
 unsigned nvmeib_pcpu_cq2srq_size_margin = PCPU_CQ2SRQ_SIZE_MARGIN;
 module_param_named(pcpu_cq2srq_size_margin, nvmeib_pcpu_cq2srq_size_margin, int, 0444);
-MODULE_PARM_DESC(pcpu_cq2srq_size_margin, "When employing a per CPU shared completion and receive queue, this determines how much bigger the SCQ is than the SRQ. Margin = CQ-size - SRQ-size"); //omril: move to target only
+MODULE_PARM_DESC(pcpu_cq2srq_size_margin, "When employing a per CPU shared completion and receive queue, this determines how much bigger the SCQ is than the SRQ. Margin = CQ-size - SRQ-size.");
 
 #define IB_INTR_POLL_BUDGET_IRQ 256
 
 unsigned nvmeib_pcpu_cq_poll_budget = IB_INTR_POLL_BUDGET_IRQ;
 module_param_named(pcpu_cq_poll_budget, nvmeib_pcpu_cq_poll_budget, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_poll_budget, "percpu cqs polling-mode's budget");
+MODULE_PARM_DESC(pcpu_cq_poll_budget, "percpu cqs polling-mode's budget. This is the maximum number of times to poll for a completion.");
 
 #define CQ_POLL_INTR
 #define IB_POLL_FLAGS (IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)
@@ -332,12 +327,12 @@ MODULE_PARM_DESC(pcpu_cq_poll_budget, "percpu cqs polling-mode's budget");
 
 unsigned nvmeib_pcpu_cq_intr_budget = CQ_INTR_PROCESS_BATCH;
 module_param_named(pcpu_cq_intr_budget, nvmeib_pcpu_cq_intr_budget, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_intr_budget, "percpu cqs interrupt-mode's budget");
+MODULE_PARM_DESC(pcpu_cq_intr_budget, "percpu cqs interrupt-mode's budget. This is the maximum number of completions to handle in a single interrupt.");
 
 #define USER_POLL_BUDGET 64
 unsigned nvmeib_pcpu_cq_user_poll_budget = USER_POLL_BUDGET;
 module_param_named(pcpu_cq_user_poll_budget, nvmeib_pcpu_cq_user_poll_budget, uint, 0644);
-MODULE_PARM_DESC(pcpu_cq_user_poll_budget, "percpu cqs user-mode polling budget");
+MODULE_PARM_DESC(pcpu_cq_user_poll_budget, "percpu cqs user-mode polling budget. This is the maximum number of times to poll for a completion.");
 
 /* Deprecated by intr-shaper - use NVMEIB_MAX_IRQ_TIME_USECS instead
 * #define CQ_INTR_PROCESS_MAX_TIME msecs_to_jiffies(2)
@@ -1008,7 +1003,7 @@ do { \
 
 bool nvmeib_pcpu_cq_flush_del_qps = false;
 module_param_named(pcpu_cq_flush_del_qps, nvmeib_pcpu_cq_flush_del_qps, bool, 0644);
-MODULE_PARM_DESC(pcpu_cq_flush_del_qps, "percpu cqs flush QPs pending for deletion");
+MODULE_PARM_DESC(pcpu_cq_flush_del_qps, "percpu cqs flush QPs pending for deletion (bool). Do not change with consulting support.");
 
 static inline bool is_del_list_time(struct nvmeib_dev_cq *cq)
 {
@@ -3773,24 +3768,18 @@ enum nvmeib_cq_comp_vec_selection_flags {
 
 uint nvmeib_cq_vec_flags = 0;
 module_param_named(cq_vec_flags, nvmeib_cq_vec_flags, uint, 0644);
-MODULE_PARM_DESC(cq_vec_flags, "CQ completion-vector selection flags:\n"
-							   "\t\t b0 : Reserve vec 0 (for userspace)\n"
-							   "\t\t b1 : Index based (set by cq creator)\n"
-							   "\t\t b2 : Same vector for SCQ/RCQ");
+MODULE_PARM_DESC(cq_vec_flags, "CQ (completion queue) completion-vector selection flags, as follows: Bit 0: Reserve vec 0 for userspace. Bit 1: Index based, set by CQ creator. Bit 2: Use the same vector for SCQ/RCQ.");
 
 uint nvmeib_cq_vec_flags_tcp = 2;
 module_param_named(cq_vec_flags_tcp, nvmeib_cq_vec_flags_tcp, uint, 0644);
-MODULE_PARM_DESC(cq_vec_flags_tcp, "CQ completion-vector selection flags (for TCP):\n"
-							   "\t\t b0 : Reserve vec 0 (for userspace)\n"
-							   "\t\t b1 : Index based (set by cq creator)\n"
-							   "\t\t b2 : Same vector for SCQ/RCQ");
+MODULE_PARM_DESC(cq_vec_flags_tcp, "Same as cq_vec_flags for TCP (SIW) completion queues.");
 uint nvmeib_cq_vec_snd_rcv_delta = 0;
 module_param_named(cq_vec_snd_rcv_delta, nvmeib_cq_vec_snd_rcv_delta, uint, 0644);
-MODULE_PARM_DESC(cq_vec_snd_rcv_delta, "CQ completion-vector - delta between SCQ and RCQ Vector (ignored for same vector SCQ/RCQ)");
+MODULE_PARM_DESC(cq_vec_snd_rcv_delta, "If cq_vec_flags (see above) is set to use index-based selection for the vector, then this value will be the delta between the send and receive queue's vector.");
 
 uint nvmeib_cq_vec_snd_rcv_delta_tcp = 0;
 module_param_named(cq_vec_snd_rcv_delta_tcp, nvmeib_cq_vec_snd_rcv_delta_tcp, uint, 0644);
-MODULE_PARM_DESC(cq_vec_snd_rcv_delta_tcp, "CQ completion-vector - delta between SCQ and RCQ Vector (for TCP - ignored for same vector SCQ/RCQ)");
+MODULE_PARM_DESC(cq_vec_snd_rcv_delta_tcp, "Same as cq_vec_snd_rcv_delta for TCP (SIW) completion queues.");
 
 static atomic_t __attribute__((unused)) cq_vector_value = ATOMIC_INIT(0);
 

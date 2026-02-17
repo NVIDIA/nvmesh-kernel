@@ -37,15 +37,15 @@
 
 static unsigned int nvmeibc_nr_max_channels_per_path = 4;
 module_param_named(nr_max_channels_per_path, nvmeibc_nr_max_channels_per_path, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_path, "max nordda channels per path (for RDMA), 0 will set NUM_OF_POSSIBLE_CPUS + 4 channels");
+MODULE_PARM_DESC(nr_max_channels_per_path, "Maximum number of RDMA IO channels per disk per networking path.");
 
 static unsigned int nvmeibc_nr_max_channels_per_path_iommu = 4;
 module_param_named(nr_max_channels_per_path_iommu, nvmeibc_nr_max_channels_per_path_iommu, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_path_iommu, "max nordda channels per path (for IOMMU)");
+MODULE_PARM_DESC(nr_max_channels_per_path_iommu, "Maximum number of RDMA IO channels per disk per networking path when the IOMMU is enabled.");
 
 static unsigned int nvmeibc_nr_max_channels_per_path_tcp = NVMEIB_MAX_NR_TCP_CHANNELS_PER_PATH;
 module_param_named(nr_max_channels_per_path_tcp, nvmeibc_nr_max_channels_per_path_tcp, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_path_tcp, "max nordda channels per path (for TCP)");
+MODULE_PARM_DESC(nr_max_channels_per_path_tcp, "Maximum number of SIW IO channels per disk per networking path.");
 
 static bool is_ach_dying(struct nvmeibc_ib_admin_channel *ch)
 {

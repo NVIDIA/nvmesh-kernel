@@ -42,93 +42,89 @@ MODULE_PARM_DESC(no_rdda, "Disable Remote Direct Disk Access");
 */
 unsigned max_client_rsrc = NVMEIBS_MAX_DISK_RESOURCES_PER_CLIENT;
 module_param(max_client_rsrc, uint, 0644);
-MODULE_PARM_DESC(max_client_rsrc, "Maximum resources(I/O queues) per client");
+MODULE_PARM_DESC(max_client_rsrc, "RDDA is deprecated. Maximum number of RDDA connections per client.");
 
 static int max_completions = 64;
 module_param(max_completions, int, 0644);
-MODULE_PARM_DESC(max_completions, "Maximum nvme completions to poll and process per interrupt or iteration of cq's offload-thread (0: poll until empty-cq)");
+MODULE_PARM_DESC(max_completions, "Maximum number of networking completions to handle per interrupt.");
 
 static bool nvmeibs_defer_process_io_cq = false;
 module_param_named(defer_process_io_cq, nvmeibs_defer_process_io_cq, bool, 0644);
-MODULE_PARM_DESC(defer_process_io_cq, "Defer all io complentions to offload-thread per cq");
+MODULE_PARM_DESC(defer_process_io_cq, "Defer all IO completions to a per completion queue thread, so it is not done in the interrupt context.");
 
 static bool nvmeibs_use_nvme_kwq = true;
 module_param_named(use_nvme_kwq, nvmeibs_use_nvme_kwq, bool, 0444);
-MODULE_PARM_DESC(use_nvme_kwq, "Use kernel workqueue instead of wakeup thread for processing completion queues");
+MODULE_PARM_DESC(use_nvme_kwq, "Determines whether to use a kernel workqueue instead of a wakeup thread for processing completion queues.");
 
 static bool nvmeibs_nvme_wq_unbound = false;
 module_param_named(nvme_wq_unbound, nvmeibs_nvme_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nvme_wq_unbound, "Use unbound kernel workqueue for nvmeibs_nvme (true) or bound (false, default)");
+MODULE_PARM_DESC(nvme_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibs_nvme (true) or a bound one (false).");
 
 /* we dont really need to expose this param as we dont fail anything if we alloc less qs.
    it is just used as an initial/default value for when drive has not too many (< 30) qs */
 static int nvmeibs_min_local_nvmeqs = 1;
 module_param_named(min_local_nvmeqs, nvmeibs_min_local_nvmeqs, int, 0644);
-MODULE_PARM_DESC(min_local_nvmeqs, "Minimum NVMe queues for local operation");
+MODULE_PARM_DESC(min_local_nvmeqs, "Minimum number of NVMe queues per drive to reserve for non-RDDA usage. As RDDA is deprecated, this is obsolete.");
 
 static int nvmeibs_max_local_nvmeqs = 0;
 module_param_named(max_local_nvmeqs, nvmeibs_max_local_nvmeqs, int, 0444);
-MODULE_PARM_DESC(max_local_nvmeqs, "Maximum nvme queues for local operation. "
-								   "0 - use max possible number of nvme-qs of drive considering max_client_rsrc (RDDA)");
+MODULE_PARM_DESC(max_local_nvmeqs, "Maximum NVMe queues for local operation. A value of 0 sets the actual maximum to the lower of the number of CPUs, drive queues, doorbells and MSI-X interrupts available. The value is replaced by the actual number calculated.");
 
 static bool nvmeibs_iommu_enabled = false;
 module_param_named(iommu_enabled, nvmeibs_iommu_enabled, bool, 0444);
-MODULE_PARM_DESC(iommu_enabled, "Used to tell nvme driver that IOMMU is enabled");
+MODULE_PARM_DESC(iommu_enabled, "Informs the internal NVMesh NVMe driver that the IOMMU is enabled on the node.");
 
 static char ignore_disks[1024];
 static char ignore_disks[1024];
 module_param_string(ignore_disks, ignore_disks, sizeof(ignore_disks), 0600);
-MODULE_PARM_DESC(ignore_disks, "Comma separated list of NVMe drives to "
-				 "ignore - for example 0000:03:00.0,0000:12:01.0");
+MODULE_PARM_DESC(ignore_disks, "Comma separated list of PCI IDs of NVMe drives to ignore. For example, \"0000:03:00.0,0000:12:01.0\".");
 
 static char ignore_disks_serials[1024];
 module_param_string(ignore_disks_serials, ignore_disks_serials, sizeof(ignore_disks_serials), 0600);
-MODULE_PARM_DESC(ignore_disks_serials, "Comma separated list of NVMe drives to "
-				 "ignore - for example S23YNAAH201234,S23YNAAH202345");
+MODULE_PARM_DESC(ignore_disks_serials, "Comma separated list of serial IDs of NVMe drives to ignore. For example, \"S23YNAAH201234,S23YNAAH202345\".");
 
 char *dummy_id = NULL;
 module_param(dummy_id, charp, 0444);
-MODULE_PARM_DESC(dummy_id,
-	"ID for dummy partition, /var/opt/nvmesh/metadata_disk_image/<dummy_id>");
+MODULE_PARM_DESC(dummy_id, "Serial ID to be used for drives on drive-less targets. Dummy drives are rarely needed, only for an arbiter on a 2-node system.");
 #define DUMMY_DISK_PATH "/var/opt/nvmesh/metadata_disk_image/"
 static bool dummy_disk_added;
 
 static int nvme_number_offset = 1000;
 module_param(nvme_number_offset, int, 0444);
-MODULE_PARM_DESC(nvme_number_offset, "Offset for /dev/nvme%d device names");
+MODULE_PARM_DESC(nvme_number_offset, "Offset for /dev/nvme%d device names.");
 
 #define NVMEIBS_CAP_MAX_TRANSFER_SIZE (32 * 4096) /* cap max-transfer to 128KB */
 static bool nvmeibs_cap_transfer_size = 1;
 module_param_named(cap_transfer_size, nvmeibs_cap_transfer_size, bool, 0444);
-MODULE_PARM_DESC(cap_transfer_size, "Cap all disks' max-transfer-size to 128KB (set on insmod)");
+MODULE_PARM_DESC(cap_transfer_size, "Cap all disks' max-transfer-size to 128 KB, even if the drive supports larger transfers.");
 
 static char *fake_serial = NULL;
 module_param(fake_serial, charp, 0444);
-MODULE_PARM_DESC(fake_serial, "Fake serial number for NVME drive (should be machine specific)");
+MODULE_PARM_DESC(fake_serial, "Do not use for production systems. Fake serial number for a fake NVMe drive, which should be machine specific.");
 
 #define NVMEIBS_FORMAT_TIMEOUT_SECONDS_FIRST_TRY 300
 static int nvmeibs_format_timeout_seconds_second_try = 3600;
 module_param_named(format_timeout_seconds_seconds_try,
 					nvmeibs_format_timeout_seconds_second_try, int, 0644);
-MODULE_PARM_DESC(format_timeout_seconds_second_try, "Amount of time waiting for a nvme format - second try");
+MODULE_PARM_DESC(format_timeout_seconds_second_try, "Seconds to wait for an NVMe format to complete on a second attempt after a failed first attempt.");
 
 static bool nvmeibs_gcp_mode = false;
 module_param_named(gcp_mode, nvmeibs_gcp_mode, bool, 0644);
-MODULE_PARM_DESC(gcp_mode, "GCP mode - use only drives that are specified in gcp_drives_to_uuid_list");
+MODULE_PARM_DESC(gcp_mode, "Use only drives that are specified in gcp_drives_to_uuid_list.");
 
 #define GCP_MAX_DRIVES 32
 char *gcp_drives_to_uuid_list[GCP_MAX_DRIVES];
 int gcp_num_drives;
 module_param_array(gcp_drives_to_uuid_list, charp, &gcp_num_drives, 0444);
-MODULE_PARM_DESC(gcp_drives_to_uuid_list, "List prepared before nvmeibs was up to specify the drives to be used and their str_id");
+MODULE_PARM_DESC(gcp_drives_to_uuid_list, "Related to GCP mode, i.e., specifically for GCP virtual NVMe drives. This provides a list of UUIDs of drives to be used. This should be provided on module invocation, i.e., during Target service startup.");
 
 static bool nvmeibs_fake_large_disks = false;
 module_param_named(fake_large_disks, nvmeibs_fake_large_disks, bool, 0444);
-MODULE_PARM_DESC(fake_large_disks, "Fake large disks by overriding the size.");
+MODULE_PARM_DESC(fake_large_disks, "Do not use for production systems. Fake the system having larger disks by overriding their size. This is used for developing support for larger drives.");
 
 static uint64_t nvmeibs_fake_large_disk_size_lba = ((uint64_t)1 << (NVMEIB_EC_JMDC_BITS_J2D + NVMEIB_EC_JMDC_BITS_LINK));
 module_param_named(fake_large_disk_size_lba, nvmeibs_fake_large_disk_size_lba, ullong, 0444);
-MODULE_PARM_DESC(fake_large_disk_size_lba, "Fake large disks size (in 4kB LBA)");
+MODULE_PARM_DESC(fake_large_disk_size_lba, "Do not use for production systems. The size of fake large disks, in 4k units.");
 
 static bool nvmeibs_use_intr_shaper = true;
 module_param_named(use_intr_shaper, nvmeibs_use_intr_shaper, bool, 0644);
@@ -136,7 +132,7 @@ MODULE_PARM_DESC(use_intr_shaper, "Use interrupt shaper for NVMe completions");
 
 static bool nvmeibs_nvme_doorbell_batch = true;
 module_param_named(nvme_doorbell_batch, nvmeibs_nvme_doorbell_batch, bool, 0644);
-MODULE_PARM_DESC(nvme_doorbell_batch, "Batch NVMe doorbell requests");
+MODULE_PARM_DESC(nvme_doorbell_batch, "Determines whether to batch NVMe doorbell requests.");
 
 static void nvmeibs_free_drives(struct kref *kref);
 
@@ -250,10 +246,7 @@ static inline u64 NVMEIB_CAP_TIMEOUT(u64 x)
 static ulong nvmeibs_timeout = (15*HZ);
 static ulong submit_wait_timeout = (15*HZ);
 module_param(submit_wait_timeout, ulong, 0644);
-MODULE_PARM_DESC(submit_wait_timeout,
-	"Timeout for NVMe admin operations such as format. May be "
-	"increased for formatting of large drives (measured in system HZ, "
-	"usually milliseconds)");
+MODULE_PARM_DESC(submit_wait_timeout, "Timeout for NVMe admin operations such as drive formatting. Does not affect a second format attempt after a failure, as some drives take a long time to format, especially larger ones. Value in milliseconds.");
 
 static atomic64_t global_uid = ATOMIC64_INIT(0);
 static inline u64 get_guid(void)
@@ -829,7 +822,7 @@ static void ioqm_free(struct device_data *d)
 
 static bool nvmeibs_qid_hint = false;
 module_param_named(qid_hint, nvmeibs_qid_hint, bool, 0644);
-MODULE_PARM_DESC(qid_hint, "Use qid from nvme-req");
+MODULE_PARM_DESC(qid_hint, "Send data on a channel per the CPU id, mainly relevant for SIW.");
 
 static inline int ioqm_get_submit_qid(struct device_data *d, unsigned qid_hint_plus1)
 {

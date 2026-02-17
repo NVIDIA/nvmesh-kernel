@@ -6,7 +6,7 @@ NVMEIBC_MEMMGR_METRIC(dp_data_page_buffers, "component=raid.io.data");
 /************************** Pages allocations *********************************/
 int nvmeibc_pages_max_alloc = (sizeof(unsigned int) * 8 - 1);
 module_param_named(pages_max_alloc, nvmeibc_pages_max_alloc, int, 0644);
-MODULE_PARM_DESC(pages_max_alloc, "Maximum order of page allocations allowed.");
+MODULE_PARM_DESC(pages_max_alloc, "Maximum (kernel) order of page allocations allowed.");
 
 static u8 __get_max_contained_order(u32 i)
 {

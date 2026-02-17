@@ -308,7 +308,7 @@ static void __update_topo_from_volume_hdr(struct nvmeibc_block_device *dev)
 
 bool force_reconf_reboot = true;			// By default, disable hot transition
 module_param(force_reconf_reboot, bool, 0644);
-MODULE_PARM_DESC(force_reconf_reboot, "Force all block device configuration changes to be done via device reboot");
+MODULE_PARM_DESC(force_reconf_reboot, "Force all block device configuration changes to be done via device reboot, i.e. restarting the block device.");
 
 int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *volume)
 {

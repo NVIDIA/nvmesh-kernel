@@ -103,15 +103,15 @@
 
 ulong nvmeibc_jam_pending_req_timeout_jif = NVMEIBC_PENDING_REQ_TIMEOUT;
 module_param_named(jam_pending_req_timeout_jif, nvmeibc_jam_pending_req_timeout_jif, ulong, 0644);
-MODULE_PARM_DESC(jam_pending_req_timeout_jif, "Jam timeout for pending allocation request [jiffies], if 0 use system default ");
+MODULE_PARM_DESC(jam_pending_req_timeout_jif, "JAM timeout for pending allocation request in jiffies. If set to 0, use system default.");
 
 uint nvmeibc_jam_max_used_entries = 0;
 module_param_named(jam_max_used_entries, nvmeibc_jam_max_used_entries, uint, 0644);
-MODULE_PARM_DESC(jam_max_used_entries, "Jam max used journal-entries 1 based, if 0 use system default");
+MODULE_PARM_DESC(jam_max_used_entries, "Sets the maximum journal entries to be used by the JAM (journal allocation manager).");
 
 ulong nvmeibc_jam_non_free_entry_timeout = 300;
 module_param_named(jam_non_free_entry_timeout, nvmeibc_jam_non_free_entry_timeout, ulong, 0644);
-MODULE_PARM_DESC(jam_non_free_entry_timeout, "Jam timeout for jentry in non-free state [sec]");
+MODULE_PARM_DESC(jam_non_free_entry_timeout, "JAM timeout for having a journal entry in a non-free state in seconds.");
 
 #if DEBUG_JAM
 #if defined(NVMESH_IS_PRODUCTION_COMPILATION) && (NVMESH_IS_PRODUCTION_COMPILATION==1)
@@ -126,7 +126,7 @@ MODULE_PARM_DESC(jam_log_metrics_period, "Jam periodic metrics logging period [s
 
 bool nvmeibc_jam_pending_enb = true;
 module_param_named(jam_pending_enb, nvmeibc_jam_pending_enb, bool, 0644);
-MODULE_PARM_DESC(jam_pending_enb, "Jam pending mode control switch");
+MODULE_PARM_DESC(jam_pending_enb, "Controls whether to enable or allow pending allocations on the JAM.");
 
 bool nvmeibc_jam_use_system_pcpu_wq = false;
 module_param_named(jam_use_system_pcpu_wq, nvmeibc_jam_use_system_pcpu_wq, bool, 0444);

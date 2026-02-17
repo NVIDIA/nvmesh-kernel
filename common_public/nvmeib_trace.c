@@ -317,7 +317,7 @@ static struct nvmeib_capuch *__percpu *nvmeib_trace_channel_pcpu[] = {
 
 static char user_config[MAX_CONFIG_STRING] = "";
 module_param_string(config, user_config, MAX_CONFIG_STRING, 0644);
-MODULE_PARM_DESC(config, "Binary tracer engine configuration");
+MODULE_PARM_DESC(config, "This parameter can be used to alter the binary tracer engine configuration. This string can be up to 4 kbytes. The tracer's configuration defines the resources consumed by the tracer, its performance, and aspects of its ephemeral behaviour.");
 
 /**
  * Utility, pretty print the configuration
@@ -1898,7 +1898,7 @@ EXPORT_SYMBOL(nvmeib_public_save_stack_trace_ptr);
 
 bool nvmeib_hide_warnings_stack = NVMESH_IS_PRODUCTION_COMPILATION;							// In production, dont clutter dmesg by default
 module_param_named(hide_warnings_stack, nvmeib_hide_warnings_stack, bool, 0644);
-MODULE_PARM_DESC(hide_warnings_stack, "Hide warnings from dmesg, while keeping them still available in the binary traces.");
+MODULE_PARM_DESC(hide_warnings_stack, "Hide warnings from dmesg, the kernel log, while keeping them in the binary traces.");
 
 bool nvmeib_get_hide_warnings_stack(void);
 bool nvmeib_get_hide_warnings_stack(void) {

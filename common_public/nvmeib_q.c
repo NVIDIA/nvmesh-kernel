@@ -10,11 +10,11 @@
 #define MAX_WQ_PROCESSING_TIME_JIF (3 * HZ)
 ulong nvmeib_wq_max_processing_time = MAX_WQ_PROCESSING_TIME_JIF;
 module_param_named(wq_max_processing_time, nvmeib_wq_max_processing_time, ulong, 0644);
-MODULE_PARM_DESC(wq_max_processing_time, "Maximum wq processing time before doing rescheduling self in jiffies"); // YR: TODO: this should be moved to msec
+MODULE_PARM_DESC(wq_max_processing_time, "The maximum wq (workqueue) processing time before the workqueue reschedules itself in jiffies."); // YR: TODO: this should be moved to msec
 
 int nvmeib_wq_trace_debug_level = NVMEIB_Q_LOG_LEVEL_VERBOSE; /* TRACE */
 module_param_named(tracer_wq_debug_level, nvmeib_wq_trace_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_wq_debug_level, "Set trace level for nvmib_q");
+MODULE_PARM_DESC(tracer_wq_debug_level, "This determines the level of tracing for work queues for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 
 #define nvmeib_debug_level nvmeib_public_debug_level
 

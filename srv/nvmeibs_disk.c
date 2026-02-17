@@ -22,7 +22,7 @@
 
 bool nvmeibs_disk_collect_stats = true;
 module_param_named(disk_collect_stats, nvmeibs_disk_collect_stats, bool, 0644);
-MODULE_PARM_DESC(disk_collect_stats, "Enable collecting stats for disk");
+MODULE_PARM_DESC(disk_collect_stats, "Enable collecting statistics for disk operations. Can be used for performance optimization.");
 
 
 static LIST_HEAD(disk_info_list);
