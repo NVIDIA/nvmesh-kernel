@@ -454,6 +454,9 @@ static int JSON_persistence_tree_to_mgmt_conf(struct mm_mgmt_conf *conf, struct 
 	JSON_ASSIGN_AND_CALL_INIT();
 
 	NFIN;
+	if (!elem) {
+		goto out;
+	}
 	if (elem->type != JSON_E_DICT)
 		return 0;
 	JSON_LOOP_FOR_DICT(kv, dict) {
@@ -463,6 +466,7 @@ static int JSON_persistence_tree_to_mgmt_conf(struct mm_mgmt_conf *conf, struct 
 		JSON_LOOP_ITERATION_END(c5ahlqp, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(4b5ua92);
+out:
 	NFOUT;
 	return 0;
 }
