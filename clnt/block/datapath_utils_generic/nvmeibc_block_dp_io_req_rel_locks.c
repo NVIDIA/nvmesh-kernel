@@ -257,7 +257,7 @@ static inline void DEBUG_LOCKS_CONTENTION(__attribute__((__unused__)) struct nvm
 {
 #if 0									// Set to 1 to hack rdma cmpxcng to succees. Causes data corruption, so use only for measurmenet
 	dc->lock_status = NCL_STATUS_TAKEN;
-	get_contending_id(dc) = dc->compare;
+	nvmeibc_d_rdma_comp_set_lock_id(dc, nvmeibc_d_rdma_comp_get_compare_lock_id(dc));
 #endif
 }
 
@@ -289,16 +289,16 @@ int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_co
 	switch (dc->lock_status) {
 	case NCL_STATUS_CONTENDED:			// remote cmpxchng() failed
 		#ifndef BLKDEV_SIMULATOR		// Simulator, Toma missbehaves with stalelocks
-		WARN(true, "nvmeibc bug: Release failed: %p[%d|ow=%d]=%s cmp=0x%llx lock_id=0x%llx, seg=%s, addr=0x%llx, dc=%px\n",
+		WARN(true, "nvmeibc bug: Release failed: %p[%d|ow=%d]=%s cmp=0x%llx lock_id=0x%x, seg=%s, addr=0x%llx, dc=%px\n",
 		   locksets, lock_i, ow_id, ncl_status_str(dc->lock_status),
-		   dc->compare, get_contending_id(dc), l->ds->uuid, l->address, dc);
+		   dc->compare, nvmeibc_d_rdma_comp_get_contending_id(dc).all, l->ds->uuid, l->address, dc);
 		#endif
 		FALLTHRU;						//
 	case NCL_STATUS_FAIL_COMP:			// Transport could not send request
 	case NCL_STATUS_FAIL_NO_COMP:
 		_NT(trace_1_locks_rel_cb, "Release failed: locksets=@LOCKSETS[@LSI|ow=@OW_ID]=@NCL_STATUS_STR cmp=@CMP rv=@LOCK_ENT_U64",
 		   locksets, lock_i, ow_id, ncl_status_str(dc->lock_status),
-		   dc->compare, get_contending_id(dc));
+		   dc->compare, nvmeibc_d_rdma_comp_get_contending_id(dc).all);
 		__change_lock_status_to(l, NCL_STATUS_TAKEN_DISKDEAD);
 		break;
 
@@ -481,7 +481,7 @@ static void __retry_read_lock(struct nvmeibc_d_iocmd_comp *cmp)
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	_ND(trace_1_retry_rdlock, "Retry cmp=@CMP_PTR, locksets=@LOCKSETS[@LSI]", cmp, locksets, l->lockset_idx);
 	l->retries++;
-	slow_io_stats_t_log_over_retry(&locksets->cmds->o->nd->dp.io_slow, l, get_contending_id(dp_cmds_get_pigbck_comp_dc(iocmd)));
+	slow_io_stats_t_log_over_retry(&locksets->cmds->o->nd->dp.io_slow, l, nvmeibc_d_rdma_comp_get_contending_id(dp_cmds_get_pigbck_comp_dc(iocmd)).all);
 	dp_locks_send_read_lock(cmp);
 }
 
@@ -509,7 +509,7 @@ static void __fail_cmds_of_broken_read_lock(enum nvmeibc_block_lock_status l_sta
 {
 	struct nvmeibc_cmd_lock *l = cmp->pigbck_lock, *locksets = dp_locks_get_locks_header(l);
 	const int lsi = l->lockset_idx;
-	const u64 holder = get_contending_id(&cmp->pigbck_comp);
+	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(&cmp->pigbck_comp).all;
 	_NT(t_1fblr, "locksets=@LOCKSETS[@LSI].status=@STATUS_STR-->@STATUS_STR seg=@SEG, @DLBA, lock=@LOCK_ENT_U64, retries=@RETRIES, comp=@COMP, err=@ERR", locksets, lsi, ncl_status_str(l->status), ncl_status_str(l_status), l->ds->uuid, l->address, holder, l->retries, cmp, cmd_err);
 	cmp->comp_code = cmd_err;
 	__read_lock_and_cmd_complete(cmp, locksets, lsi, l_status);
@@ -540,7 +540,7 @@ static void __schedule_retry_read_lock(struct nvmeibc_cmd_lock *l, struct nvmeib
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	const ulong cur_time = jiffies;
 	if (jiffies_to_msecs(cur_time - l->last_retry_report_time) > __COMPLAIN_LOCK_TIME) {
-		get_contending_id(dc) = get_contending_id(&cmp->pigbck_comp); // == get_contending_id(cmp->cmd->iocmd->lpb.comp); /* Copy the holder for correct toma help invocation */
+		nvmeibc_d_rdma_comp_set_lock_id(dc, nvmeibc_d_rdma_comp_get_contending_id(&cmp->pigbck_comp)); /* Copy the holder for correct toma help invocation */
 		l->last_retry_report_time = cur_time;
 		__send_toma_lock_help(l, l->ds);
 	}
@@ -641,7 +641,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	unsigned long retry_time;
 	struct operation *o = locksets->cmds->o;
-	const u64 holder = get_contending_id(read_comp);
+	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(read_comp).all;
 	const int lsi = l->lockset_idx;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
@@ -841,7 +841,7 @@ static void __retry_owner_lock(struct nvmeibc_cmd_lock *l, bool autofail)
 	_ND(t1_rol, "retry owner locksets=@LOCKSETS[@LSI].retries=@RETRIES time=@MILISECONDS",locksets, lsi, l->retries, jiffies_to_msecs(jiffies - l->first_try_time));
 	if (likely(!autofail)) {
 		l->retries++;
-		slow_io_stats_t_log_over_retry(&o->nd->dp.io_slow, l, get_contending_id(dc));
+		slow_io_stats_t_log_over_retry(&o->nd->dp.io_slow, l, nvmeibc_d_rdma_comp_get_contending_id(dc).all);
 		l->status = NCL_STATUS_NOTISSUED;
 		__request_lock(locksets, lsi);
 		diff = (jiffies - start);
@@ -1055,7 +1055,7 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	#ifdef DEBUG_CONTENDED_LOCKS
 		l->curr_txid = (dc->lock.bi >> dc->lock_cnsts->blkset_info_txid_shift) & dc->lock_cnsts->blkset_info_txid_mask;
 		if (dc->lock_status == NCL_STATUS_CONTENDED) {
-			l->curr_contender_id = get_contending_id(dc);
+			l->curr_contender_id = nvmeibc_d_rdma_comp_get_lock_id(dc).all;
 			if (l->retries == 0) {
 				l->first_try_contender_id = l->curr_contender_id;
 				l->first_try_txid = l->curr_txid;
@@ -1082,7 +1082,7 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	_ND(t_1clap , "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID].status=@STATUS_STR retries=@RETRIES @MILISECONDS @DLBA", locksets, lock_i,owner_id, ncl_status_str(l->status), l->retries, msecs, l->address);
 
 	if (unlikely(l->status == NCL_STATUS_CONTENDED)) {
-		const u64 holder = get_contending_id(dc);
+		const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(dc).all;
 		const ulong retry_time = dp_locks_get_retry_time(l);
 		const bool bad_topo = (o->topo->phased_out);
 		IO_STATS_INCR(&o->nd->dp.io_stats, DP_IO_STATS_LOCK_CONTENDED_COUNT);
@@ -1406,7 +1406,7 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 #define __lock_blockset(l_) (((l_).address - __to4K((l_).ds->first_lba)) >> LOCKSET_4KS_SHIFT)
 void dp_locks_trace_lock_comp(const struct operation *o, const struct nvmeibc_cmd_lock *l, const struct nvmeibc_d_rdma_comp *dc)
 {
-	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: @LOCK_COMPLETION_DUMP", _T, goodpath_nvmeibc_locks, lock_comp,        o->dbg_id    , l->ds->dbg_uuid, __lock_blockset(*l), l->type, dc->lock_status, dc->compare, dc->exchange, get_contending_id(dc), l->retries, (jiffies - l->first_try_time));
+	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: @LOCK_COMPLETION_DUMP", _T, goodpath_nvmeibc_locks, lock_comp,        o->dbg_id    , l->ds->dbg_uuid, __lock_blockset(*l), l->type, dc->lock_status, dc->compare, dc->exchange, nvmeibc_d_rdma_comp_get_contending_id(dc).all, l->retries, (jiffies - l->first_try_time));
 	//do not call PET here - this function is called from multiple contexts
 }
 

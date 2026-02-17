@@ -192,7 +192,7 @@ bool dp_sync_common_has_dbits_anywhere(const struct recovery_sync_op *so)
 static bool __is_write_hole_possible(const struct recovery_sync_op *so)
 {
 	const struct nvmeibc_cmd_lock *l = &so->locks[0];
-	const union nvmeib_lock_id holder = {.all = (u32)get_contending_id(&l->comp)}; // == dc->compare (coz its cmpxchng result
+	const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp); // == dc->compare (coz its cmpxchng result
 	if ((holder.all == 0ULL) || did_caller_of_so_took_this_lock(l))
 		return false; // Caller holds the Primary owner, so even if we encountered stale lock it is not real
 	if (so->cmds->rld.pre.bits.txid == NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS)
@@ -208,7 +208,7 @@ static bool __any_stale(const struct recovery_sync_op *so)
 	int i;
 	for (i = 0; i < so->locks->nlocks; i++) {
 		const struct nvmeibc_cmd_lock *l = &so->locks[i];
-		const union nvmeib_lock_id holder = {.all = (u32)get_contending_id(&l->comp)};
+		const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp);
 		if (holder.bits.is_stale)
 			return true;
 	}

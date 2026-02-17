@@ -1285,7 +1285,7 @@ static void __call_sync_vfunc_internal(struct nvmeibc_recov_sync_worker *sw)
 	const struct nvmeibc_subscription_ctx* tr = recov->args.tr;
 	struct nvmeibc_cmd_lock *l = &o->locks[0];
 	enum stale_lock_resolve_status ss = stale_lock_resolve_safe_to_use;
-	const u64 holder = get_contending_id(&l->comp);
+	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp).all;
 
 	if (( nvmeibc_sync_is_stale(    l, holder)) &&
 		(!nvmeibc_sync_is_read_only(l, holder))) {
@@ -1452,7 +1452,7 @@ static void __recover_next_blockset(struct nvmeibc_recov_sync_worker *sw)
 		case NVMEIBT_RECOVERY_TYPE_EC_FIX_UNK_BINFO:
 			break;
 	}
-	get_contending_id(dc) = lock_initial_val;
+	nvmeibc_d_rdma_comp_set_lock_id(dc, (union nvmeib_lock_id){ .all = lock_initial_val });
 	__call_sync_vfunc_internal(sw);
 _out:
 	if (unlikely(rv)) {

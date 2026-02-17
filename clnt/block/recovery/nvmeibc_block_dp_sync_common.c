@@ -544,7 +544,7 @@ static struct stale_lock_resolver_t *__get_slr_of_so(struct recovery_sync_op *so
 /* Retry retaking owner lock, if contended */
 static inline void __retry_aquire_lock(struct nvmeibc_d_rdma_comp *lock_comp, struct nvmeibc_cmd_lock *l, struct recovery_sync_op *so)
 {
-	const u64 holder = get_contending_id(lock_comp);
+	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(lock_comp).all;
 	if (unlikely(so->o->topo->phased_out)) {
 		so->error = -10011;	/* Immediate failure to speed up topo-free */
 	}
@@ -622,7 +622,7 @@ _out:
 	   hold identical UUID. Can also do it once for first taken lock */
 static inline void __fill_recoveree_uuid(struct nvmeibc_d_rdma_comp *dc, struct recovery_sync_op *so)
 {
-	const union nvmeib_lock_id holder = {.all = (u32)get_contending_id(dc)};
+	const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(dc);
 
 	if (holder.bits.is_stale) {
 		so->should_send_msg_blckst_recovrd = true;		// Assuming we are going to solve the problem (sync mutation will make a decision)
@@ -1084,7 +1084,7 @@ static void __copy_only_owner_lock(struct nvmeibc_cmd_lock *l,
 static void __copy_all_locks(struct recovery_sync_op *so, const struct nvmeibc_cmd_lock *lock)
 {
 	const struct nvmeibc_cmd_lock *ow = dp_locks_get_blockset_owner_lock(lock);			// In rare case lock might be the dual owner.
-	const u64 holder= get_contending_id(&lock->comp);	// Stale lock we are trying to solve
+	const u64 holder= nvmeibc_d_rdma_comp_get_contending_id(&lock->comp).all;	// Stale lock we are trying to solve
 	struct nvmeibc_cmd_lock *l = so->locks;
 	int i, n_missing_olocks = 0;
 	if (is_op_sync_stale(so->o->op))
@@ -1283,10 +1283,10 @@ _func_start:
 	}
 	switch (so->stage) {
 		case sync_stage_start:{
-			_NDSO(t_02_ss2dbit, "ss2dbit stage=sync_stage_start, Holder lock id: @LOCKID", get_contending_id(lock_comp));
+			_NDSO(t_02_ss2dbit, "ss2dbit stage=sync_stage_start, Holder lock id: @LOCKID", nvmeibc_d_rdma_comp_get_contending_id(lock_comp).all);
 			nvmeibc_atomic_set(&l->n_uncompleted_locks, 1 + LARGE_SYNC_DEBUG_VALUE);
 			l->comp.code = NVMEIBC_CMD_LOCK_UNLOCK;						// Important, we are going to unlock it
-			lock_comp->compare = get_contending_id(lock_comp);			//Use the original lock id as the "locking" value (This may be R1_STALE_SPECIAL_BINFO_VAL or a specific lock value with stale bits)
+			lock_comp->compare = nvmeibc_d_rdma_comp_get_lock_id(lock_comp).all;			//Use the original lock id as the "locking" value (This may be R1_STALE_SPECIAL_BINFO_VAL or a specific lock value with stale bits)
 			lock_comp->exchange = lock_comp->lock_cnsts->unlocked_val;
 			so->stage = sync_stage_st_to_db_written_db;
 			{
@@ -1607,7 +1607,7 @@ _func_start:
 
 		case sync_stage_recov_read_cmds_sent:{
 			const bool is_lock_zero = NCL_do_i_have_lock(lock_comp->lock_status);
-			const u64 holder = get_contending_id(lock_comp);
+			const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(lock_comp).all;
 			nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 			dp_locks_trace_lock_comp(so->o, l, lock_comp);
 			__sync_dp_locks_release_cb(l, lock_comp);

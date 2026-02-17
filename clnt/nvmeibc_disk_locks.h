@@ -276,6 +276,18 @@ static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_lock_id(const struct 
 	return (union nvmeib_lock_id){ .all = (u32)self->lock.id };
 }
 
+__attribute__((nonnull (1)))
+static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_contending_id(const struct nvmeibc_d_rdma_comp *self)
+{
+	return nvmeibc_d_rdma_comp_get_lock_id(self);
+}
+
+__attribute__((nonnull (1)))
+static inline void nvmeibc_d_rdma_comp_set_lock_id(struct nvmeibc_d_rdma_comp *self, const union nvmeib_lock_id lock_id)
+{
+	self->lock.id = lock_id.all;
+}
+
 #define NVMEIBC_MAX_JAM_RDMA_OPS		1
 
 struct nvmeibc_jam_rdma_op {			// Piggybacked on journal IO command, or sent directly inside dedicated completion struct

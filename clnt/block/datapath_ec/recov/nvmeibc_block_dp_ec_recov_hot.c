@@ -8,6 +8,7 @@
 #include "kth/nvmeib_public_kth.h"
 #include "nvmeib_kth_events.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
+#include "nvmeibc_disk_locks.h"
 #include "nvmeibc_icore_ops.h"
 #include "../nvmeibc_block_dp_ec.h"
 #include "block/datapath_ec/recov/nvmeibc_block_dp_ec_recovery_hot_dbgdi.h"
@@ -1389,7 +1390,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 
 	if (lock) {
 		lock_entry.blkset_info = nvmeibc_d_rdma_comp_get_bi(&lock->comp);
-		lock_entry.lock_id.all =             get_contending_id(&lock->comp);
+		lock_entry.lock_id = nvmeibc_d_rdma_comp_get_contending_id(&lock->comp);
 	} else {
 		lock_entry.all = h->params.lock_ent.all;
 		pass2toma = false;
@@ -3380,7 +3381,7 @@ static inline void h_init_params_hot(struct nvmeibc_block_dp_ec_recov_hot_params
 	h_init_params_common(hp, so);
 
 	hp->lock_ent.blkset_info.all = so->cmds->rld.pre.all;
-	hp->lock_ent.lock_id.all = get_contending_id(dc);	// Daniel: This is true only coz there is no dual lock. The generic case should be not lock[0] but first lock that sync actually took (status == NCL_STATUS_TAKEN)
+	hp->lock_ent.lock_id = nvmeibc_d_rdma_comp_get_contending_id(dc);	// Daniel: This is true only coz there is no dual lock. The generic case should be not lock[0] but first lock that sync actually took (status == NCL_STATUS_TAKEN)
 	hp->recoveree_cuuid = so->recoveree_cuuid;
 	hp->recoveree_txid = hp->lock_ent.blkset_info.bits.txid;
 	hp->is_cold = nvmeibcbdpec_has_rollfwd_jour_candidate(so);

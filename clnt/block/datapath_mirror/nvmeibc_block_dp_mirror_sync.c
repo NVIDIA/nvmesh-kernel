@@ -283,7 +283,7 @@ static union nvmeib_lock_id __get_worst_stale_possible(struct recovery_sync_op *
 	for (i = 0; i < so->locks->n_siblings; i++) {				// Analyze all onwer locks, crucial for dual locks topology
 		const struct nvmeibc_cmd_lock *l = &so->locks[i];
 		if ((l->type == NVMEIBC_CMD_LOCK_OWNER) || (l->type == NVMEIBC_CMD_LOCK_COPY_OWNER)) {
-			holder.all = (u32)get_contending_id(&l->comp);
+			holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp);
 			if (!((holder.all == 0ULL) || did_caller_of_so_took_this_lock(l))) { // is_read bit is irrelevant for R1: || (holder.bits.is_read))
 				WARN_WRONG_SKIP_CHECK(holder.bits.is_stale == 0, holder.all);
 				return holder;		// Found a stale lock

@@ -11,9 +11,6 @@
 struct nvmeibc_raid1;
 u64     get_lockid_for_cmpxchg(const struct nvmeibc_raid1 *r1, enum nvmeib_block_io_op op);
 
-/* result of tranport layer failed rdma cpxchng (id that holds lock) */
-#define get_contending_id(lock_comp)  ((lock_comp)->lock.id)
-
 /************************************ Locks ***********************************/
 // indicate the value we should put in the lock when we release it.
 enum release_lock_value {
@@ -127,6 +124,7 @@ static inline void nvmeibc_cmd_lock_set_bi(struct nvmeibc_cmd_lock *self, union 
 	self->comp.lock.bi = binfo.all;
 }
 
+__attribute__((nonnull (1, 2)))
 static inline void nvmeibc_copy_blockset_info(struct nvmeibc_cmd_lock *dst, const struct nvmeibc_cmd_lock *src)
 {
 	dst->comp.lock.bi = src->comp.lock.bi;

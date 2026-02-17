@@ -1,5 +1,6 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/nvmeibc_topology.h"
+#include "nvmeibc_disk_locks.h"
 #include "nvmeibc_icore_ops.h"
 //#include "nvmeibc_b_cp_send_toma_msg.h"
 
@@ -137,21 +138,21 @@ int __send_toma_lock_help(const struct nvmeibc_cmd_lock *l, struct nvmeibc_disk_
 	DECLARE_PAYLOAD_ONSTACK(pl);
 	int rv;
 	const struct nvmeibc_d_rdma_comp *dc = &l->comp;
-	const union nvmeib_lock_blkset_entry *lid = (void*)&get_contending_id(dc);
+	const union nvmeib_lock_blkset_entry lid = { .lock_id = nvmeibc_d_rdma_comp_get_contending_id(dc) };
 	enum NVMEIBT_CLIENT_LOCK_OP lock_op = __lock_op_translate_to_toma(dc->opr);
-	enum NVMEIBT_CLIENT_MSG_TYPES msg_type = __lock_op_get_msg_type(lid, l);
+	enum NVMEIBT_CLIENT_MSG_TYPES msg_type = __lock_op_get_msg_type(&lid, l);
 	struct nvmeibt_client_failed_lock_pl *fl = &pl.failed_lock;
-	BUG_ON(!lid->all); /* EC-4937: Toma help with problem = 0 shall never happen */
+	BUG_ON(!lid.all); /* EC-4937: Toma help with problem = 0 shall never happen */
 	fl->lock_op =         lock_op;
 	fl->status =          l->status;
 	fl->is_problem_here = (seg == l->ds); // can send: l->ds->toma_reg->handle
 	fl->disk_blkno_4k =   l->address;
-	fl->curr =            (u64)lid->all;
+	fl->curr =            (u64)lid.all;
 	fl->comp =            dc->compare;
 	fl->xchg =            dc->exchange;
 	fl->num_retries =     l->retries;
 	strlcpy(fl->problematic_seg_uuid_str, l->ds->uuid, sizeof(fl->problematic_seg_uuid_str));
-	_NT(trace_b_cp_send_toma_msg_send_toma_lock_help, "Help request {seg=@SEGMENT_UUID, @DLBA, problem=@LOCK_ENT_U64}, send to seg=@SEGMENT_UUID, problem=@LOCKID", l->ds->uuid, l->address, lid->all, seg->uuid, lid->lock_id.all);
+	_NT(trace_b_cp_send_toma_msg_send_toma_lock_help, "Help request {seg=@SEGMENT_UUID, @DLBA, problem=@LOCK_ENT_U64}, send to seg=@SEGMENT_UUID, problem=@LOCKID", l->ds->uuid, l->address, lid.all, seg->uuid, lid.lock_id.all);
 	rv = nvmeibc_toma_send_direct_msg(seg, msg_type, &pl);
 	return rv;
 }

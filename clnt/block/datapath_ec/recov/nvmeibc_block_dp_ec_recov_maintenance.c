@@ -432,7 +432,7 @@ static void __send_all_blockset_recovered(struct recovery_sync_op *so)
 	nvmeibc_sync_set_uncompleted_cmds(so, nlocks);
 	for (l = 0; l < nlocks; l++) {
 		const struct nvmeibc_cmd_lock *lock = &so->locks[l];
-		const u64 holder = get_contending_id(&lock->comp);	// Stale lock we are trying to solve
+		const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(&lock->comp).all;	// Stale lock we are trying to solve
 		const int si = (lock->ds - so->r1->segments);
 		struct nvmeibc_block_command *cmd = &so->cmds[(si-seg_offset+n_segs)%n_segs+n_read];	// Todo: Make a macro which finds command of lock
 		struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
