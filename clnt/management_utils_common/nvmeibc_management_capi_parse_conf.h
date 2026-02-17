@@ -18,7 +18,5 @@ struct nvmeib_mgmt_to_client_update_targets_nics*
 nvmeib_mgmt_to_client_update_targets_nics_clone(const struct nvmeib_mgmt_to_client_update_targets_nics *src);
 
 void nvmeibc_cc_api_free_update_targets_nics(struct nvmeib_mgmt_to_client_update_targets_nics *msg);
-
+int nvmeibc_setup_volume_configuration(struct nvmeib_mgmt_to_client_volume_configuration *conf, size_t serialized_config_len);
 #endif
-
-

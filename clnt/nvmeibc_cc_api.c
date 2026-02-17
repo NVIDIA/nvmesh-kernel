@@ -449,42 +449,13 @@ _out:
 	return rv;
 }
 
-static void convert_offsets_to_ptrs_in_toma_to_client_volume_configuration_in_place(struct nvmeib_mgmt_to_client_volume_configuration *conf)
+static int convert_offsets_to_ptrs_in_toma_to_client_volume_configuration_in_place(struct nvmeib_mgmt_to_client_volume_configuration *conf, size_t serialized_config_len)
 {
-	int								i, j, k;
-	void							*base_ptr = conf;
-	struct nvmeibc_volume_conf		*vol;
-	struct nvmeibc_chunk_conf		*chunk;
-	struct nvmeibc_praid_conf		*praid;
-	struct nvmeibc_target_conf		*target;
-
+	int rv;
 	NFIN;
-	conf->volumes = (struct nvmeibc_volume_conf *)(base_ptr + (uint64_t)(conf->volumes));
-	_NT(rvasukw, "local_cl n_volumes=@INT conf->volumes=@PTR", conf->n_volumes, conf->volumes);
-	for (i = 0; i < conf->n_volumes; i++) {	// A single message for each volume released after attach attempt
-		vol = &(conf->volumes[i]);
-		vol->chunks = (struct nvmeibc_chunk_conf *)(base_ptr + (uint64_t)(vol->chunks));
-		_NT(6xmig5a, "local_cl vol=@STR n_chunks=@INT vol->chunks=@PTR", vol->name, vol->n_chunks, vol->chunks);
-		for (j = 0; j < vol->n_chunks; j++) {
-			chunk = &(vol->chunks[j]);
-			chunk->praids = (struct nvmeibc_praid_conf *)(base_ptr + (uint64_t)(chunk->praids));
-			_NT(vt83k3c, "local_cl chunk=@STR n_praids=@INT chunk->praids=@PTR", chunk->uuid, chunk->n_praids, chunk->praids);
-			for (k = 0; k < chunk->n_praids; k++) {
-				praid = &(chunk->praids[k]);
-				praid->segments = (struct nvmeibc_segment_conf *)(base_ptr + (uint64_t)(praid->segments));
-				_NT(vkw02ap3, "local_cl praid=@STR n_segments=@INT praid->segments=@PTR", praid->uuid, praid->n_segments, praid->segments);
-			}
-		}
-	}
-	conf->targets = (struct nvmeibc_target_conf *)(base_ptr + (uint64_t)(conf->targets));
-	_NT(03j8els, "local_cl n_targets=@INT conf->targets=@PTR", conf->n_targets, conf->targets);
-	for (i = 0; i < conf->n_targets; i++) {
-		target = &(conf->targets[i]);
-		target->disks = (struct nvmeibc_disk_conf *)(base_ptr + (uint64_t)(target->disks));
-		target->nics = (struct nvmeibc_nic_conf *)(base_ptr + (uint64_t)(target->nics));
-		_NT(unrnsj7, "local_cl target=@STR n_disks=@INT n_nics=@INT target->nics=@PTR target->disks=@PTR", target->node_id, target->n_disks, target->n_nics, target->nics, target->disks);
-	}
+	rv = nvmeibc_setup_volume_configuration(conf, serialized_config_len);
 	NFOUT;
+	return rv;
 }
 
 /* Translates the enum into a string to send to CLI */
@@ -1015,7 +986,10 @@ static int nvmeibc_cc_api_handle_toma_to_local_clnt_msg_process(struct nvmeibc_c
 		toma_to_client_volume_configuration = (struct nvmeib_mgmt_to_client_volume_configuration *)(msg->data);
 		_NT(muxb52b, "local_cl attach_params: msg=@PTR attach_params=@PTR data=@PTR attach_params->msg_type=@INT attach_params->vol_name=@STR toma_to_client_volume_configuration=@PTR",
 			msg, attach_params, toma_to_client_volume_configuration, attach_params->msg_type, attach_params->vol_name, toma_to_client_volume_configuration->volumes[0].name);
-		convert_offsets_to_ptrs_in_toma_to_client_volume_configuration_in_place(toma_to_client_volume_configuration);
+		rv = convert_offsets_to_ptrs_in_toma_to_client_volume_configuration_in_place(toma_to_client_volume_configuration, msg->payload.attach_params.serialized_config_len);
+		if (rv != 0) {
+			break;
+		}
 		// Fixups
 		toma_to_client_volume_configuration->messageTypeVersion = SUPPORTED_MCS_PROTOCOL_VERSION;
 		//

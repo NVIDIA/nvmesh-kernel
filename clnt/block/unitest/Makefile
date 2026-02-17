@@ -159,6 +159,7 @@ SOURCES += ./uni_scenarios/uni_scenario_ec_serjio.c
 SOURCES += ./uni_scenarios/uni_scenario_common.c
 SOURCES += ./nvmeibc_tracer_unitest.c
 SOURCES += ./nvmeib_scatterlist_iter_test.c
+SOURCES += ./nvmeibc_management_capi_parse_conf_test.c
 
 # Production code: /utils/
 UTILS_DIR := $(SSDA)/utils

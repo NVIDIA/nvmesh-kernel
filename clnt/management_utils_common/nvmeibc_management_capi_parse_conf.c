@@ -5,6 +5,7 @@
 #include "common/nvmeib_volume_type.h"
 #include "common/nvmeib_str.h"
 #include "nvmeibc_management_capi_parse_conf.h"
+#include "nvmeibc_management_volume_conf_checks.h"
 
 // The following functions are used to free an allocated configuration message
 static void __free_target_config(struct nvmeibc_target_conf *msg)
@@ -353,4 +354,60 @@ void nvmeibc_cc_api_free_update_targets_nics(struct nvmeib_mgmt_to_client_update
 	msg->n_targets = 0;
 	msg->targets = NULL;
 	kfree(msg);
+}
+
+static inline bool __is_rva_in_range(void *rva, u32 unit_size, void *rva_start, void *rva_end)
+{
+	return (void *)rva >= (void *)rva_start && (void *)rva < (void *)rva_end && (void *)rva + unit_size <= (void *)rva_end;
+}
+
+/** Convert RVA (relative virtual address from base) to typed pointer. Use when deserializing config from a flat buffer. */
+#define NVMEIBC_MGMT_RVA_TO_PTR(base, rva) ((__typeof__(rva))(base + (uint64_t)(rva)))
+#define NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(lhs, rexpr, unit_size, rva_start, rva_end)                              \
+	({                                                                                                        \
+		__auto_type _tmp = (rexpr);                                                                       \
+		if (!__is_rva_in_range(_tmp, unit_size, rva_start, rva_end)) {                                    \
+			_NE(__AUTOID__, "RVA local_cl validation: _tmp=@PTR unit_size=@UINT start=@PTR end=@PTR", \
+			    _tmp, unit_size, rva_start, rva_end);                                                 \
+			return -EINVAL;                                                                           \
+		}                                                                                                 \
+		(lhs) = _tmp;                                                                                     \
+	})
+
+int nvmeibc_setup_volume_configuration(struct nvmeib_mgmt_to_client_volume_configuration *conf, size_t serialized_config_len)
+{
+	int								i, j, k;
+	void							*base_ptr = conf, *rva_end = (u8*)conf + serialized_config_len;
+	struct nvmeibc_volume_conf		*vol;
+	struct nvmeibc_chunk_conf		*chunk;
+	struct nvmeibc_praid_conf		*praid;
+	struct nvmeibc_target_conf		*target;
+
+	NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(conf->volumes, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, conf->volumes), sizeof(struct nvmeibc_volume_conf), base_ptr, rva_end);
+	_NT(rvasukw, "local_cl n_volumes=@INT conf->volumes=@PTR", conf->n_volumes, conf->volumes);
+	for (i = 0; i < conf->n_volumes; i++) {	// A single message for each volume released after attach attempt
+		vol = &(conf->volumes[i]);
+		NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(vol->chunks, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, vol->chunks), sizeof(struct nvmeibc_chunk_conf), base_ptr, rva_end);
+		_NT(6xmig5a, "local_cl vol=@STR n_chunks=@INT vol->chunks=@PTR", vol->name, vol->n_chunks, vol->chunks);
+		for (j = 0; j < vol->n_chunks; j++) {
+			chunk = &(vol->chunks[j]);
+			NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(chunk->praids, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, chunk->praids), sizeof(struct nvmeibc_praid_conf), base_ptr, rva_end);
+			_NT(vt83k3c, "local_cl chunk=@STR n_praids=@INT chunk->praids=@PTR", chunk->uuid, chunk->n_praids, chunk->praids);
+			for (k = 0; k < chunk->n_praids; k++) {
+				praid = &(chunk->praids[k]);
+				NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(praid->segments, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, praid->segments), sizeof(struct nvmeibc_segment_conf), base_ptr, rva_end);
+				_NT(vkw02ap3, "local_cl praid=@STR n_segments=@INT praid->segments=@PTR", praid->uuid, praid->n_segments, praid->segments);
+			}
+		}
+	}
+	NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(conf->targets, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, conf->targets), sizeof(struct nvmeibc_target_conf), base_ptr, rva_end);
+	_NT(03j8els, "local_cl n_targets=@INT conf->targets=@PTR", conf->n_targets, conf->targets);
+	for (i = 0; i < conf->n_targets; i++) {
+		target = &(conf->targets[i]);
+		NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(target->disks, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, target->disks), sizeof(struct nvmeibc_disk_conf), base_ptr, rva_end);
+		NVMEIBC_MGMT_PTR_ASSIGN_OR_RETURN(target->nics, NVMEIBC_MGMT_RVA_TO_PTR(base_ptr, target->nics), sizeof(struct nvmeibc_nic_conf), base_ptr, rva_end);
+		_NT(unrnsj7, "local_cl target=@STR n_disks=@INT n_nics=@INT target->nics=@PTR target->disks=@PTR", target->node_id, target->n_disks, target->n_nics, target->nics, target->disks);
+	}
+
+	return 0;
 }
