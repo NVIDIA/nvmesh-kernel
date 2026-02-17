@@ -18,7 +18,7 @@
 #define MAX_FP 1024
 static char nvmeibc_filter_ports[MAX_FP] = "";
 module_param_string(ports, nvmeibc_filter_ports, MAX_FP, 0644);
-MODULE_PARM_DESC(ports, "Used for port filtering functionality. This is typically set by service startup based on nvmesh.conf information. If empty, no filter is used otherwise the format is either: <hca_id> - use this nic and all its portsor <hca_id>:<port id>. For example: mlx4_0:1,mlx_4:2,mlx4_1:1 - will use three ports of two nics");
+MODULE_PARM_DESC(ports, "Used for port filtering functionality. This is typically set by service startup based on nvmesh.conf information. If empty, no filter is used otherwise the format is either: <hca_id> - use this nic and all its ports or <hca_id>:<port id> or a net-device name. For example: mlx4_0:1,mlx_4:2,mlx4_1:1 - will use three ports of two nics");
 
 static char nvmeibc_filter_guids[MAX_FP] = "";
 module_param_string(guids, nvmeibc_filter_guids, MAX_FP, 0644);
