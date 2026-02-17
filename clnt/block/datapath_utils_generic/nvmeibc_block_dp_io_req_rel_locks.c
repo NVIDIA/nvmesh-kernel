@@ -123,7 +123,7 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 
 	if (rdma_comp->opr == NVMEIBC_LOCK_READ){
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
-								"lock.request(sgmnt=%hhu, address=0x%llx, opr=READ, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>)",
+								"lock.request(sgmnt=%hhu, address=0x%llx, opr=READ, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>))",
 								numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
 								lock->address,
 								numeric_downcast(u8, rdma_comp->code));
@@ -176,7 +176,7 @@ void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct
 		//we don't call this function on lock release - mainly because the operation already does not exist
 		//so, rdma_comp->lock.bi should contain a legal value
 		NVMEIBC_IO_PET_MSG(&o->journal,
-							"rdma.response(sgmnt=%hhu, rdma_comp(lock_status=%hhu<enum nvmeibc_block_lock_status>)",
+							"rdma.response(sgmnt=%hhu, rdma_comp(lock_status=%hhu<enum nvmeibc_block_lock_status>))",
 							severity,
 							numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
 							numeric_downcast(u8, rdma_comp->lock_status));
