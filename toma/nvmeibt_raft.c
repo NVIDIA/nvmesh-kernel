@@ -1423,7 +1423,7 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 							  JSON_output) < 0) {
 			goto out;
 		}
-		if (nvmeibt_Str_end(JSON_output)[-1] == ']')	// Missing praids array finishing with '}'  Todo: Fix me properly in the above func
+		if (JSON_output && nvmeibt_Str_end(JSON_output)[-1] == ']')	// Missing praids array finishing with '}'  Todo: Fix me properly in the above func
 			nvmeibt_Str_strcat(JSON_output, "}");
 	} else {
 		N_Wf(bfgiker, "section_buf_len=0 tlv_FULL_TOPO_CONFIG_VOLUMES");
