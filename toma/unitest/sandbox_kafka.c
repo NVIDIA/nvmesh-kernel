@@ -62,11 +62,11 @@ void sim_broker_topic_append(struct sim_broker_topic *t, const void *payload, si
 
 struct rd_kafka_topic_s {
 	char *name;
+	struct sim_broker_topic *broker_topic;	// Connection to broker (when topic is initialized)
 	rd_kafka_topic_conf_t *conf;
 	int32_t partition;		// Support only 1 partition for now. Store its index
-	struct sim_broker_topic *broker_topic;
 	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
-	bool is_active;
+	bool is_active;			// REmove
 };
 
 struct rd_kafka_conf_s {
@@ -268,15 +268,13 @@ void rd_kafka_destroy(rd_kafka_t* k) {
 			return;
 		}
 	}
-	BUG_ON(i >= ARRAY_SIZE(ks->obj) || (!k));
+	BUG_ON(true);
 }
 
 rd_kafka_t* rd_kafka_new(enum rd_kafka_type_t who, rd_kafka_conf_t *cfg, char*err_str, size_t size_of_err) {
 	struct kafka_simulator_t *ks = g_kafka_simu;
 	rd_kafka_t *k = kafka_simu_find_next_unused(ks);
-	if (who == RD_KAFKA_CONSUMER) {
-	} else {	// RD_KAFKA_PRODUCER
-	}
+	if (who == RD_KAFKA_CONSUMER) {} else {	/* RD_KAFKA_PRODUCER */	}
 	k->conf = cfg;
 	k->name = cfg->group_id;
 	k->who = who;
@@ -318,10 +316,9 @@ rd_kafka_topic_partition_list_t* rd_kafka_topic_partition_list_new(int n) {
 
 rd_kafka_topic_partition_t *rd_kafka_topic_partition_list_add(rd_kafka_topic_partition_list_t *pl, const char* name, int32_t partition) {
 	rd_kafka_topic_partition_t *p = &pl->elems[0];
-	rd_kafka_t* k = kafka_simu_find_by_parition_name(name);
 	pl->cnt++;
 	BUG_ON((pl->cnt != 1) || (partition != 0));	// Our implementation of partition list has only 1 element of partition=0. Do not allow calling add twice
-	p->k = k;									// Store pointer to 'k' for future retrieval. Can be NULL (topic was not created yet, will auto-create when pl is assigned)
+	p->k = kafka_simu_find_by_parition_name(name);	// Store pointer to 'k' for future retrieval. Can be NULL (topic was not created yet, will auto-create when pl is assigned)
 	p->partition = partition;
 	p->offset = RD_KAFKA_OFFSET_INVALID;
 	p->topic = name;
@@ -333,8 +330,7 @@ void rd_kafka_topic_partition_list_destroy(rd_kafka_topic_partition_list_t* pl) 
 }
 
 rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char *str, int32_t partition, int64_t *low_oldest_beginning_offset, int64_t *high_newest_end_offset, int timeout) {
-	BUG_ON(strcmp(me->topic.name, str));
-	BUG_ON(me->topic.partition != partition);					// Only 1 partition
+	BUG_ON(strcmp(me->topic.name, str) || (me->topic.partition != partition));	// Only 1 partition
 	(void)timeout;
 	*low_oldest_beginning_offset = me->topic.broker_topic->cur_offset;
 	*high_newest_end_offset =      me->topic.broker_topic->cur_offset + me->topic.broker_topic->n_msgs;
@@ -355,7 +351,7 @@ void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_
 }
 
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque) {
-	static int fail_once_every = 0;
+	static int fail_once_every = 0;							// Do per topic and not generic?
 	rd_kafka_t *ko = container_of(kt, rd_kafka_t, topic);
 	rd_kafka_message_t km;
 	km._private = msg_opaque;
@@ -377,14 +373,13 @@ rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *k, char *errstr, size_t err
 }
 
 rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, const char *val, char* err_str, size_t size_of_err) {
-	 BUG_ON(!kc || !key || !val);
+	BUG_ON(!kc || !key || !val);
 	if (!strcmp(key, "group.id") || !strcmp(key, "client.id")) {
 		if (!kc->group_id)
 			kc->group_id = strdup(val);
 	} else if (strstr(key, "ssl.") != 0) {
 		kc->enable_ssl = true;
 	}
-	// SANDBOX_PRINT("KAFKA_SIMU::conf_set(): %p) %s=%s\n", kc, key, val);
 	/* Set error 0 */ BUG_ON(size_of_err < 16); err_str[0] = 0;
 	return RD_KAFKA_CONF_OK;
 }

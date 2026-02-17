@@ -68,7 +68,6 @@ function T_SANDBOX_toma_persist_json_test() {
 	../scripts/toma_persistence_to_JSON.sh <<< "$(printf '%s\n%s\n%s\n' "${bin_orig}" "${orig_json}" "./${EXE_NAME}")";
 	__abort_ci_on_failure_silent;
 
-
 	echo_title "Encoding Toma Persistency j2bin";
 	local bin_1="${orig_json}.bin";
 	../scripts/JSON_to_toma_persistence.sh <<< "$(printf '%s\n%s\n%s\n' "${orig_json}" "${bin_1}" "./${EXE_NAME}")";
