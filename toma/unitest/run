@@ -44,51 +44,65 @@ function __build_if_needed() {
 	__run_cmd "$compile_cmd";
 }
 
+function __abort_ci_on_failure_silent() {
+	[ $? -eq 0 ] || { echo_red "FAILED - status=$?" && exit 4; }
+}
+
+function __abort_ci_on_failure() {
+	[ $? -eq 0 ] && echo_green "SUCCESS!\n\n" || { echo_red "FAILED - status=$?" && exit 1; }
+}
+
 function T_SANDBOX_gpt_util_self_unit_test() {
 	__build_if_needed;
 	./${EXE_NAME} gpt_util -T;
-	[ $? -eq 0 ] && echo_green "SUCCESS!" || echo_red "FAILED - status=$?";
+	__abort_ci_on_failure;
 }
 
 function T_SANDBOX_toma_persist_json_test() {
 	echo_title "Generating Toma persistency JSON";
-	local bin_orig="_root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0";
+	local persist="_root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.0";
+	local bin_orig="z.bin";
 	local orig_json="z.json";
-	#./${EXE_NAME} --convert-to-json --input-file ${bin_orig} --output-file z.json;
-	../scripts/toma_persistence_to_JSON.sh <<EOF
-${bin_orig}
-${orig_json}
-./${EXE_NAME}
-EOF
-	local conversion_rv=`echo $?`;
-	echo_title "Toma persistency JSON (rv=${conversion_rv})";
-	cat ${orig_json};
+	#./${EXE_NAME} --convert-to-json --input-file ${persist} --output-file ${orig_json};
+	cp ${persist} ${bin_orig};
+	../scripts/toma_persistence_to_JSON.sh <<< "$(printf '%s\n%s\n%s\n' "${bin_orig}" "${orig_json}" "./${EXE_NAME}")";
+	__abort_ci_on_failure_silent;
+
+
 	echo_title "Encoding Toma Persistency j2bin";
-	../scripts/JSON_to_toma_persistence.sh <<EOF
-${orig_json}
-${orig_json}.bin
-./${EXE_NAME}
-EOF
-	echo_title "Toma persistency j2bin (rv=${conversion_rv})";
-	ls -l ${orig_json}*;
+	local bin_1="${orig_json}.bin";
+	../scripts/JSON_to_toma_persistence.sh <<< "$(printf '%s\n%s\n%s\n' "${orig_json}" "${bin_1}" "./${EXE_NAME}")";
+	__abort_ci_on_failure_silent;
+
 	echo_title "Toma persistency j2bin2j";
-	../scripts/toma_persistence_to_JSON.sh <<EOF
-${orig_json}.bin
-${orig_json}.bin.json
-./${EXE_NAME}
-EOF
-	local conversion_rv=`echo $?`;
-	echo_title "Toma persistency j2bin2j (rv=${conversion_rv})";
-	ls -l ${orig_json}*;
+	local json_1="${bin_1}.json";
+	../scripts/toma_persistence_to_JSON.sh <<< "$(printf '%s\n%s\n%s\n' "${bin_1}" "${json_1}" "./${EXE_NAME}")";
+	__abort_ci_on_failure_silent;
+
+	echo_title "Encoding Toma Persistency j2bin2j2bin";
+	local bin_2="${json_1}.bin";
+	../scripts/JSON_to_toma_persistence.sh <<< "$(printf '%s\n%s\n%s\n' "${json_1}" "${bin_2}" "./${EXE_NAME}")";
+	__abort_ci_on_failure_silent;
+
+	echo_title "Toma persistency j2bin2j2bin2j";
+	local json_2="${bin_2}.json";
+	../scripts/toma_persistence_to_JSON.sh <<< "$(printf '%s\n%s\n%s\n' "${bin_2}" "${json_2}" "./${EXE_NAME}")";
+	__abort_ci_on_failure_silent;
+
+	echo_title "Toma persistency Results";
+	ls -l z.*;
+	cmp -s ${json_1} ${json_2} || { echo_red "FAILED - json not identical" && exit 4; }
+	cmp -s ${bin_1}  ${bin_2}  || { echo_red "FAILED - bins not identical" && exit 4; }
 	__run_cmd "cat ${orig_json} | jq .";
-	__run_cmd "cat ${orig_json}.bin.json | jq .";
+	__run_cmd "cat ${json_2} | jq .";
+	__abort_ci_on_failure;
 }
 
 function T_SANDBOX_main_self_unit_test() {
 	__cleanup_prev_run_state;
 	__build_if_needed;
 	./${EXE_NAME};
-	[ $? -eq 0 ] && echo_green "SUCCESS!" || echo_red "FAILED - status=$?";
+	__abort_ci_on_failure;
 	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
 }
 
@@ -106,8 +120,8 @@ case "$1" in
   ci*)
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
-	T_SANDBOX_main_self_unit_test;		echo -e "\n\n";
-	T_SANDBOX_toma_persist_json_test;	echo -e "\n\n";
+	T_SANDBOX_main_self_unit_test;
+	T_SANDBOX_toma_persist_json_test;
 	T_SANDBOX_gpt_util_self_unit_test;
 	date;
 	echo_green "************************ CI Done";
