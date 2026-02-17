@@ -58,7 +58,7 @@ MODULE_PARM_DESC(use_nvme_kwq, "Determines whether to use a kernel workqueue ins
 
 static bool nvmeibs_nvme_wq_unbound = false;
 module_param_named(nvme_wq_unbound, nvmeibs_nvme_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nvme_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibs_nvme (true) or a bound one (false).");
+MODULE_PARM_DESC(nvme_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibs_nvme (true) or a bound one (false), relevant only if use_nvme_kwq = true.");
 
 /* we dont really need to expose this param as we dont fail anything if we alloc less qs.
    it is just used as an initial/default value for when drive has not too many (< 30) qs */
