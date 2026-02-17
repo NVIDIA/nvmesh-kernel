@@ -97,7 +97,7 @@
 #define RESTART_IO_TIMEOUT_SEC 	(30)
 uint nvmeibc_restart_io_timeout_secs = RESTART_IO_TIMEOUT_SEC;
 module_param_named(restart_io_timeout_secs, nvmeibc_restart_io_timeout_secs, uint, 0644);
-MODULE_PARM_DESC(restart_io_timeout_secs, "Time to wait between full cycles of io channels reconnection");
+MODULE_PARM_DESC(restart_io_timeout_secs, "Time in seconds to wait between full cycles of IO channels reconnection. Upon a disconnection, reconnection attempts will be more often and exponentially backoff as needed up to this value.");
 
 #define CHECK_PATH_KA_INTERVAL 	(2 * NVMEIB_WAIT_FOR_CM_REP_TIMEOUT)
 
@@ -107,7 +107,7 @@ MODULE_PARM_DESC(restart_io_timeout_secs, "Time to wait between full cycles of i
 
 int nvmeibc_max_ioch_path_fails = MAX_LIONIC_START_IOCH_PATH_FAIL_CYCLE;
 module_param_named(max_ioch_path_fail, nvmeibc_max_ioch_path_fails, int, 0644);
-MODULE_PARM_DESC(max_ioch_path_fail, "How many failures allow per path in a connection cycle");
+MODULE_PARM_DESC(max_ioch_path_fail, "Number of failures allowed per path in a connection cycle.");
 
 u64 max_ioch_start_route = MAX_LIONIC_START_IOCH_ATTEMPTS_CYCLE;
 
@@ -148,60 +148,52 @@ extern bool nr_defer_recv_comps;
 
 unsigned nr_max_channels_per_disk = NVMEIB_MAX_NR_CHANNELS_PER_DISK;
 module_param(nr_max_channels_per_disk, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_disk, "Maximum No-RDDA channels per disk; Min of 4 channels for MD enabled disk is forced");
+MODULE_PARM_DESC(nr_max_channels_per_disk, "Maximum number of RDMA IO channels per disk.");
 
 bool nvmeibc_use_local_bypass = true;
 module_param_named(use_local_bypass, nvmeibc_use_local_bypass, bool, 0644);
-MODULE_PARM_DESC(use_local_bypass, "Access local drives directly and not via a NIC");
+MODULE_PARM_DESC(use_local_bypass, "Access local drives directly and not via a NIC, i.e. over the network. Mainly used for debugging local disk access.");
 
 bool nvmeibc_use_norrda_for_io = true;
 module_param_named(use_norrda_for_io, nvmeibc_use_norrda_for_io, bool, 0644);
-MODULE_PARM_DESC(use_norrda_for_io, "Allow using No-RDDA channels for io");
+MODULE_PARM_DESC(use_norrda_for_io, "Allow using non-RDDA operations for IO. As RDDA is deprecated, this should always be true.");
 
 uint nvmeibc_skip_disk_iocmds_flags = 0;
 module_param_named(skip_disk_iocmds_flags, nvmeibc_skip_disk_iocmds_flags, uint, 0644);
-MODULE_PARM_DESC(skip_disk_iocmds_flags, "Unsafe debug mode, skip disk access (remote and local): \n" \
-									"\t\t =0 : Disabled\n" \
-								    "\t\t b0 : Skip Read\n" \
-								    "\t\t b1 : Skip Write\n" \
-									"\t\t b2 : Skip Jour-Writes\n" \
-									"\t\t b3 : Skip All io-cmds, including the above");
+MODULE_PARM_DESC(skip_disk_iocmds_flags, "This is an unsafe debug mode. Skip disk access (remote and local): "
+									"0 = Disabled, "
+									"1 = Skip read operations, "
+									"2 = Skip write operations, "
+									"3 = Skip read & write operations, "
+									"4 = Skip journal write operations or any combination using this operation, "
+									"5 = Skip all IO operations including those not mentioned above. Used for performance tuning and debugging.");
 
 bool nvmeibc_use_only_norrda_for_io = false;
 module_param_named(use_only_norrda_for_io, nvmeibc_use_only_norrda_for_io, bool, 0644);
-MODULE_PARM_DESC(use_only_norrda_for_io, "Allow using only No-RDDA channels for io");
+MODULE_PARM_DESC(use_only_norrda_for_io, "Use only non-RDDA operations for IO. As RDDA is deprecated, this is meaningless.");
 
 unsigned nvmeibc_nr_pcpu_channels_per_disk = 0;
 module_param_named(nr_pcpu_channels_per_disk, nvmeibc_nr_pcpu_channels_per_disk, uint , 0644);
-MODULE_PARM_DESC(nr_pcpu_channels_per_disk ,
-				 "Enable/Disable or Set maximum number of percpu nordda channels on top of the standard any-cpu channels; "
-				 "The total number of nordda channels is limited by nr_max_channels_per_path of both client and target. "
-				 "Offline CPUs witnin this configured cpus-range are not compensated for. "
-				 "Possible values:  "
-				 "0 - Disabled, "
-				 "1 - Use max possible channels (min(num-cpus, 128)), "
-				 "Other value: "
-				 "	- nr_pcpu_ch_lockless=Y - cpu [0, i) uses per-cpu-channel (0, i). Other cpus share nr_max_channels_per_disk "
-				 "	- nr_pcpu_ch_lockless=N - cpu i uses per-cpu-channel (i % (@this -1)) "
-		 );
+MODULE_PARM_DESC(nr_pcpu_channels_per_disk,
+				 "Connect per-cpu RDMA IO channels (up to 128) in addition to the nr_max_channels_per_disk any-cpu channels. "
+				 "The total number of channels between a client and a target's disk is limited by the lower of nr_max_channels_per_path on the Client and the Target. "
+				 "Typically set to true for kernel-based DPU usage.");
 
 bool nvmeibc_nr_pcpu_ch_lockless = false;
 module_param_named(nr_pcpu_ch_lockless, nvmeibc_nr_pcpu_ch_lockless, bool, 0644);
-MODULE_PARM_DESC(nr_pcpu_ch_lockless, "Per-CPU NoRDDA channels are lockless. This reduces contention and increases performance."
-					"NOTE: There must be a pcpu channel for all submission cores or it will fallback to the shared channels with locking");
+MODULE_PARM_DESC(nr_pcpu_ch_lockless, "Per-cpu RDMA IO channels are lockless. This reduces contention and increases performance, but requires a lot more channels typically.");
 
 static char *nvmeibc_nr_pcpu_ch_ll_cpus = NULL;
 module_param_named(nr_pcpu_ch_ll_cpus, nvmeibc_nr_pcpu_ch_ll_cpus, charp, 0644);
-MODULE_PARM_DESC(nr_pcpu_ch_ll_cpus, "CPUs for Lockless Per-CPU Channels as hex-mask list where each entry is 32-bits"
-					"(e.g. 1f,ff for CPUS 0-7, 32-36). NOTE: If empty, use all cpus.");
+MODULE_PARM_DESC(nr_pcpu_ch_ll_cpus, "A list of CPU cores for lockless per-cpu IO RDMA channels. The format is as a hex-mask list of cores, where each entry is 32-bits.");
 
 bool nvmeibc_ioch_ka_only_no_rdda = NVMEIB_IOCH_KA_ONLY_NO_RDDA;
 module_param_named(ioch_ka_only_no_rdda, nvmeibc_ioch_ka_only_no_rdda, bool, 0644);
-MODULE_PARM_DESC(ioch_ka_only_no_rdda, "Use only No-RDDA channnels for io ka, requires disk-discover to take effect");
+MODULE_PARM_DESC(ioch_ka_only_no_rdda, "Use only IO channels for IO keep alive messages, requires disk discovery to take effect.");
 
 bool nvmeibc_disk_prio_pending = true;
 module_param_named(disk_prio_pending, nvmeibc_disk_prio_pending, bool, 0644);
-MODULE_PARM_DESC(disk_prio_pending, "Priorize IO in Pending IO Queue");
+MODULE_PARM_DESC(disk_prio_pending, "Defines whether to prioritize IO in the pending IO queue, which hold both locks and journal entries. This was added to improve the performance of EC rebuilds.");
 
 /*
 This mainly used for ARM when we have using kernel EC calculation which need to be in enable interrupts ctx
@@ -209,7 +201,7 @@ Consider enable it only on ARM
 */
 bool nvmeibc_disk_nrch_defer_block_cb = false;
 module_param_named(disk_nrch_defer_block_cb, nvmeibc_disk_nrch_defer_block_cb, bool, 0644);
-MODULE_PARM_DESC(disk_nrch_defer_block_cb, "Defer nrch block cb after enable back the interrupts");
+MODULE_PARM_DESC(disk_nrch_defer_block_cb, "Defines whether to defer the IO callbacks until after reenabling interrupts.");
 
 bool nvmeibc_disk_local_defer_block_cb = false;
 module_param_named(disk_local_defer_block_cb, nvmeibc_disk_local_defer_block_cb, bool, 0644);
@@ -217,28 +209,28 @@ MODULE_PARM_DESC(disk_local_defer_block_cb, "Defer local IO block cb to non-inte
 
 bool nvmeibc_disk_pcpu_nrch_poll_proc = false;
 module_param_named(disk_pcpu_nrch_poll_proc, nvmeibc_disk_pcpu_nrch_poll_proc, bool, 0444);
-MODULE_PARM_DESC(disk_pcpu_nrch_poll_proc, "Allow polling of per-cpu No-RDDA channels through a proc file (SPDK)");
+MODULE_PARM_DESC(disk_pcpu_nrch_poll_proc, "Allow polling of per-cpu IO channels through a proc file, which is useful for running kernel IO from SPDK. Useful for initial SNAP versions that did some IO from the kernel.");
 
 bool nvmeibc_disk_pause_at_first_discover = true;
 module_param_named(disk_pause_at_first_discover, nvmeibc_disk_pause_at_first_discover, bool, 0644);
-MODULE_PARM_DESC(disk_pause_at_first_discover, "Make disk paused at the first discover attempt");
+MODULE_PARM_DESC(disk_pause_at_first_discover, "Defines whether to set the disk as paused for the first discovery to make attach operations faster. False simulates pre-2.6 behavior.");
 
 bool nvmeibc_disk_use_async_subscribe = true;
 module_param_named(use_async_subscribe, nvmeibc_disk_use_async_subscribe, bool, 0644);
-MODULE_PARM_DESC(use_async_subscribe, "Run subscribes as async");
+MODULE_PARM_DESC(use_async_subscribe, "Determines whether to run \"subscribe\" operations asynchronously. Subscribe operations are used for clients to subscribe to TOMA for instructions regarding a volume's disk segment.");
 
 
 bool nvmeibc_disk_local_io_use_prpl = true;
 module_param_named(local_io_use_prpl, nvmeibc_disk_local_io_use_prpl, bool, 0644);
-MODULE_PARM_DESC(local_io_use_prpl, "Local IO uses PRPL instead of SGL (Needed for IOMMU)");
+MODULE_PARM_DESC(local_io_use_prpl, "Determines whether local IO requests use PRPLs instead of SGLs (see the NVMe standard for more information). PRPLs are needed for environments with the IOMMU enabled.");
 
 bool nvmeibc_disk_local_io_use_rd_md_pool = true;
 module_param_named(local_io_use_rd_md_pool, nvmeibc_disk_local_io_use_rd_md_pool, bool, 0644);
-MODULE_PARM_DESC(local_io_use_rd_md_pool, "Local IO uses pool of preallocated pages for read metadata operations.");
+MODULE_PARM_DESC(local_io_use_rd_md_pool, "Determines whether to use a preallocated pool or to dynamically allocate memory for metadata read operations, as the NVMe standard forces reading the block data with the metadata.");
 
 bool nvmeibc_disk_local_io_use_md_dma_pool = true;
 module_param_named(local_io_use_md_dma_pool, nvmeibc_disk_local_io_use_md_dma_pool, bool, 0644);
-MODULE_PARM_DESC(local_io_use_md_dma_pool, "When metadata is not provided from the ULP, local IO uses pool of preallocated DMA memory.");
+MODULE_PARM_DESC(local_io_use_md_dma_pool, "When a local IO request is made without providing space for the metadata buffer and the drive has metadata enabled, then this determines whether to use a preallocated pool of memory or to dynamically allocate memory per IO.");
 
 /* [NVMESH-3287]: Params for throttling target-nics query to management */
 uint nvmeibc_disk_tgt_nics_query_min_secs = 2;

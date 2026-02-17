@@ -61,11 +61,11 @@
 
 bool notify_on_wq = 1;
 module_param(notify_on_wq, bool, 0644);
-MODULE_PARM_DESC(notify_on_wq, "Notify CQ on Workqueue\n");
+MODULE_PARM_DESC(notify_on_wq, "Notify CQ on Workqueue (bool).");
 
 static bool ack_signal_wr = 1;
 module_param(ack_signal_wr, bool, 0644);
-MODULE_PARM_DESC(ack_signal_wr, "Request responder to ack signalled writes\n");
+MODULE_PARM_DESC(ack_signal_wr, "Request responder to ack signaled writes (bool).");
 
 
 #if DPRINT_MASK > 0

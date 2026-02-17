@@ -90,7 +90,7 @@ static void __mini_elevator_flush_if_needed(struct nvmeibc_block_device *nd, int
 /******************************* Plug *****************************************/
 static bool mini_elevator = false;
 module_param(mini_elevator, bool, 0644);
-MODULE_PARM_DESC(mini_elevator, "Enable mini-elevator which combines writes to erasure coded volumes to fill stripes");
+MODULE_PARM_DESC(mini_elevator, "Enable mini-elevator which combines writes to erasure coded volumes to fill stripes. This functionality was experimental (and promising), but did not reach production quality.");
 #define _NPLUGLOG _ND
 
 // YR: We should have a linked list of all operations put into the cache this way... If the plug works well, we may not need the cache.

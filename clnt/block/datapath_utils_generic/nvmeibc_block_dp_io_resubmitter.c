@@ -168,11 +168,11 @@ static int __resubmitter_should_launch_syncs_or_free_resources(struct nvmeibc_bl
 
 ulong nvmeibc_resub_awake_throttle_threshold_ms = DEFAULT_RESUB_AWAKE_THROTTLE_THRESHOLD_MS;
 module_param_named(resub_awake_throttle_threshold_ms, nvmeibc_resub_awake_throttle_threshold_ms, ulong, 0644);
-MODULE_PARM_DESC(resub_awake_throttle_threshold_ms, "Resubmit thread awake throttle threshold [millis]. 0 - throttle disabled.");
+MODULE_PARM_DESC(resub_awake_throttle_threshold_ms, "Resubmit thread's threshold for throttling, in milliseconds. The thread will yield after running for this amount of time.");
 
 ulong nvmeibc_resub_awake_throttle_sleep_ms = DEFAULT_RESUB_AWAKE_THROTTLE_SLEEP_MS;
 module_param_named(resub_awake_throttle_sleep_ms, nvmeibc_resub_awake_throttle_sleep_ms, ulong, 0644);
-MODULE_PARM_DESC(resub_awake_throttle_sleep_ms, "Resubmit thread awake throttle sleep time [millis].");
+MODULE_PARM_DESC(resub_awake_throttle_sleep_ms, "Resubmit thread's sleep time for throttling, in milliseconds. Should be in the order of scheduler process switching.");
 
 static int __resubmitter_has_paused_ops(struct nvmeibc_block_device *nd)
 {

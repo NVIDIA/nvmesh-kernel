@@ -33,11 +33,11 @@ extern bool nr_use_srq_tcp;
 
 bool nr_defer_recv_comps_use_kwq = false;
 module_param(nr_defer_recv_comps_use_kwq, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Use kernel workqueue for deferred receive completions on nordda channels");
+MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Determines whether to use a kernel workqueue for deferred receive completions on nordda channels.");
 
 bool nvmeibc_nordda_wq_unbound = false;
 module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_wq_unbound, "Use unbound kernel workqueue for nvmeibc_nordda (true) or bound (false)");
+MODULE_PARM_DESC(nordda_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_nordda (true) or a bound one (false).");
 
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
 
@@ -337,13 +337,11 @@ static inline const char *nr_wd_type_to_str(int t)
 
 ulong nvmeibc_nr_wd_long_timeout = 0;
 module_param_named(nr_wd_long_timeout, nvmeibc_nr_wd_long_timeout, ulong, 0644);
-MODULE_PARM_DESC(nr_wd_long_timeout, "No-RDDA channel's watchdog long timeout (considers last-received) in jiffies");
+MODULE_PARM_DESC(nr_wd_long_timeout, "IO watchdog timeout in jiffies.");
 
 ulong nvmeibc_nr_wd_rescue_timeout = 0; //(NVMEIBC_MIN_IO_TIMEOUT * HZ) / 2;
 module_param_named(nr_wd_rescue_timeout, nvmeibc_nr_wd_rescue_timeout, ulong, 0644);
-MODULE_PARM_DESC(nr_wd_rescue_timeout, "No-RDDA channel's watchdog rescue timeout in jiffies - "
-									   "Enable this to detect missing events/switch2polling "
-									   "(0:  Disable, > IO-Timeout: Effectively disabled)");
+MODULE_PARM_DESC(nr_wd_rescue_timeout, "IO watchdog rescue timeout in jiffies. An IO watchdog rescue is an attempt to handle any missed receive interrupts even though there was no interrupt. This functionality was an escape and is considered unnecessary. A value under 1 second disables this functionality.");
 
 static int handle_watchdog_event_nordda(void *cntx, unsigned long time_passed)
 {
@@ -748,7 +746,7 @@ out:
 
 unsigned nr_max_used_reqs_per_channel = 64;
 module_param(nr_max_used_reqs_per_channel, uint, 0644);
-MODULE_PARM_DESC(nr_max_used_reqs_per_channel, "Maximum used reqs per no-rdda channel");
+MODULE_PARM_DESC(nr_max_used_reqs_per_channel, "Maximum number of requests issued simultaneously on a channel.");
 
 static struct nvmeibc_volume_req_info *get_req_info(
 	struct nvmeibc_ib_nordda_channel *ch)

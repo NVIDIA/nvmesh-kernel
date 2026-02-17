@@ -57,15 +57,15 @@
 
 static bool panic_on_rx_err = false;
 module_param(panic_on_rx_err, bool, 0644);
-MODULE_PARM_DESC(panic_on_rx_err, "Panic on RX Error\n");
+MODULE_PARM_DESC(panic_on_rx_err, "Panic on RX Error (bool).");
 
 static unsigned int wait_rqe_delay_ms = 10;
 module_param(wait_rqe_delay_ms, int, 0644);
-MODULE_PARM_DESC(wait_rqe_delay_ms, "Delay to wait on empty S(RQ) (in ms)\n");
+MODULE_PARM_DESC(wait_rqe_delay_ms, "Delay to wait on empty S(RQ) (in ms) (int).");
 
 static unsigned int wait_rqe_max_retries = 10;
 module_param(wait_rqe_max_retries, int, 0644);
-MODULE_PARM_DESC(wait_rqe_max_retries, "Number of retries on empty S(RQ)\n");
+MODULE_PARM_DESC(wait_rqe_max_retries, "Number of retries on empty S(RQ) (int).");
 
 extern struct workqueue_struct *siw_rx_wq;
 

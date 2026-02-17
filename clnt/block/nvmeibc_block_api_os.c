@@ -26,16 +26,16 @@
 
 unsigned max_trim_size_mirrored = 128;		 // 128 locks, 16[megabytes]
 module_param(max_trim_size_mirrored, uint, 0644);
-MODULE_PARM_DESC(max_trim_size_mirrored, "Max longest supported trim on mirrored volumes. units of 128KB");
+MODULE_PARM_DESC(max_trim_size_mirrored, "Maximum size of a single NVMesh internal TRIM operation for mirrored volumes. The value is for multiples of 128 KB.");
 
 unsigned max_trim_size_non_mirrored = 16384;	 // 256[locks]=32[Mb], 16K[locks]=2[Gb]
 module_param(max_trim_size_non_mirrored, uint, 0644);
-MODULE_PARM_DESC(max_trim_size_non_mirrored, "Max longest supported trim on unprotected volumes. units of 128KB");
+MODULE_PARM_DESC(max_trim_size_non_mirrored, "Maximum size of a single NVMesh internal TRIM operation for non-mirrored volumes.");
 
 /************************ Minor ID allocator for volume ***********************/
 bool nvmeibc_use_block_external_major = false;	// Use internal allocator of minors instead of kernel built in
 module_param_named(use_block_external_major, nvmeibc_use_block_external_major, bool, 0444);	// Can be set only when module is going up
-MODULE_PARM_DESC(use_block_external_major, "Use a dedicated block external major");
+MODULE_PARM_DESC(use_block_external_major, "Determines whether to use a dedicated block external major for the NVMesh block devices. This is rarely required.");
 
 uint nvmeibc_max_num_partitions_on_vol = DISK_MAX_PARTS;	// Used in internal allocator of minors
 module_param_named(max_num_partitions_on_vol, nvmeibc_max_num_partitions_on_vol, uint, 0444);	// Can be set only when module is going up
@@ -333,7 +333,7 @@ struct _read_part_t {						// Async work for reading partitions
 
 bool no_part_scan = false;
 module_param(no_part_scan, bool, 0644);
-MODULE_PARM_DESC(no_part_scan, "Disable partition scan on nvmesh block devices");	// Disable both internally triggered and externally triggered
+MODULE_PARM_DESC(no_part_scan, "Disable partition scan on nvmesh block devices.");	// Disable both internally triggered and externally triggered
 #define N_READ_PART_DISABLED  100000				// When disabled counter becomes negative with this factor
 #define __is_self_read_part_enabled(n)  ((n) >= 0)	// False means internally cannot trigger read partition but externally can do that
 static void __read_part_t_destroy(struct _read_part_t *rp)
@@ -995,7 +995,7 @@ static __attribute__((unused)) REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio
 
 bool nvmeibc_bio_noexec = 0;
 module_param_named(bio_noexec, nvmeibc_bio_noexec, bool, 0644);
-MODULE_PARM_DESC(bio_noexec, "Ignore all bios. 0 do not ignore, 1 ignore (complete with success)");
+MODULE_PARM_DESC(bio_noexec, "This is for debugging. When set to true, BIOs (kernel block IOs) are ignored instead of being executed.");
 
 /* request_queue callback, Using this method OS reads/write/trims the disk */
 static REQ_RET nvmeibc_b_req_make(struct request_queue *q, struct bio *bio)

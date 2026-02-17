@@ -21,11 +21,11 @@
 // a module parameter to set limit of concurrent sync operations
 uint nvmeibc_sync_max_operations_per_dev = NVMEIBC_MAX_ALLOWED_SYNC_OPS_DEFAULT;
 module_param(nvmeibc_sync_max_operations_per_dev, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_sync_max_operations_per_dev, "Set the max number of sync operations in execution (per device)");
+MODULE_PARM_DESC(nvmeibc_sync_max_operations_per_dev, "Maximum number of outstanding sync (recovery) operations per volume. Maximum is 6144.");
 
 uint nvmeibc_sync_full_lockset_probability_factor = NVMEIBC_SYNC_PROB_DEFAULT;
 module_param(nvmeibc_sync_full_lockset_probability_factor, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_sync_full_lockset_probability_factor, "Set probability for full blockset fixup [0..100..3200], 0 - minimal fixup, 100 - default, 3200 full");
+MODULE_PARM_DESC(nvmeibc_sync_full_lockset_probability_factor, "Defines the probability of sync'ing full 128K blocks instead of the current IO requested. It is used to avoid very slow IO during recovery, while avoiding wasteful repeat synchronizations. If the entire block is not synchronized, this will still need to be done by the regular recovery mechanism. The probability is computed by multiplying the number of blocks in the IO x param value / 3200. Range is 0 to 3200. 0 = never synchronize the full block. 3200 = always.");
 
 
 NVMEIBC_MEMMGR_METRIC(dp_recov_operation, "component=raid.io_ctrl.recovery");
@@ -249,7 +249,7 @@ static void __free_so(struct recovery_sync_op *so)
 
 bool nvmeibc_should_sync_reuse_memory = true;
 module_param(nvmeibc_should_sync_reuse_memory, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_should_sync_reuse_memory, "Set true to reduce amount of pages alloc/dealloc during syncs");
+MODULE_PARM_DESC(nvmeibc_should_sync_reuse_memory, "Reuse pages across syncs (internal storage recovery operations) to reduce the number of page allocations and deallocations.");
 static bool _resource_reuse_should_resue_if_not_free(struct recovery_sync_op *so)
 {
 	if (nvmeibc_should_sync_reuse_memory && !nvmeibc_pages_is_empty(&so->pages) && (so->n_slices == LOCKSET_SLICES)) {

@@ -28,12 +28,12 @@
 
 uint nvmeibc_skip_lock_cmds_flags = 0;
 module_param_named(skip_lock_cmds_flags, nvmeibc_skip_lock_cmds_flags, uint, 0644);
-MODULE_PARM_DESC(skip_lock_cmds_flags, "Unsafe debug mode: skip lock cmds for non EC volumes (remote and local): \n" \
-										"\t\t =0 : Disabled\n" \
-										"\t\t b0 : Cmp & Exchange\n" \
-										"\t\t b1 : Active Lock\n" \
-										"\t\t b2 : Read Lock\n" \
-										"\t\t b3 : Write Block-Info");
+MODULE_PARM_DESC(skip_lock_cmds_flags, "This is an unsafe debug mode. Skip locking operations for non-EC volumes (remote and local): "
+										"0 = Disabled, "
+										"Bit-0 = skip cmp_exchange (regular locks), "
+										"Bit-1 = skip active table locking, "
+										"Bit-2 = skip read locks, "
+										"Bit-3 = skip writing block-info. Used for performance tuning and debugging.");
 
 bool nvmeibc_disk_locks_use_system_pcpu_wq = false;
 module_param_named(disk_locks_use_system_pcpu_wq, nvmeibc_disk_locks_use_system_pcpu_wq, bool, 0444);
@@ -2386,7 +2386,7 @@ static void bad_opr_comp_callback(struct nvmeibc_locks_channel *ch, struct nvmei
 
 bool nvmeibc_disk_locks_fast_reuse = false;
 module_param_named(disk_locks_fast_reuse, nvmeibc_disk_locks_fast_reuse, bool, 0644);
-MODULE_PARM_DESC(disk_locks_fast_reuse, "Reuse disk-lock opr before calling ulp cb");
+MODULE_PARM_DESC(disk_locks_fast_reuse, "Reuse a disk lock (disk-lock opr) before calling the callback from releasing the lock (ulp cb). This is a boolean. This is a potential optimization.");
 
 /* Called from lock_send_completion (net->call_send_comp_handler)   */
 int nvmeibc_disk_locks_on_completion(struct nvmeibc_locks_channel *ch,

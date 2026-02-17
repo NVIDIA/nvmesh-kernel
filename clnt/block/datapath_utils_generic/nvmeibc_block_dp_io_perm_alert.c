@@ -101,7 +101,7 @@ void nvmeibc_io_perm_alert_periodic_wakeup(struct nvmeibc_block_device *dev, nvm
 
 unsigned long nvmeibc_unprotected_write_period_seconds = jfs2secs(infinite_jiffies);		// Talekd with Josh, 2019/04, Said it is 10[min]
 module_param_named(unprotected_write_period_seconds, nvmeibc_unprotected_write_period_seconds, ulong, 0644);
-MODULE_PARM_DESC(unprotected_write_period_seconds, "Timeout in seconds for an unprotected volume until it is become read only");
+MODULE_PARM_DESC(unprotected_write_period_seconds, "Deprecated. Timeout in seconds for an unprotected volume until it becomes read-only.");
 
 #define __unprotected_countdown_clear(iod)      ({(iod)->unprotected_write_to_read_only_at = 0; })
 #define __unprotected_countdown_start(iod, now) ({(iod)->unprotected_write_to_read_only_at = ((now) + (iod)->config.unprotected_write_period);})

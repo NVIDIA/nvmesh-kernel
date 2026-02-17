@@ -78,7 +78,7 @@ void nvmeiba_proc_remove(void *p)
 
 static bool verbose_debug = !NVMESH_IS_PRODUCTION_COMPILATION;
 module_param(verbose_debug, bool, 0644);
-MODULE_PARM_DESC(verbose_debug, "affects logging level");
+MODULE_PARM_DESC(verbose_debug, "Defines logging level. For production environments, it is recommended to set explicitly to false, in case a non-production compiled version is used.");
 
 bool is_verbose_mode(void)
 {

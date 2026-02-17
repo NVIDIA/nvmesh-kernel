@@ -20,13 +20,11 @@
 
 bool nvmeibc_nr_skip_rdma_write = false;
 module_param_named(nr_skip_rdma_write, nvmeibc_nr_skip_rdma_write, bool, 0644);
-MODULE_PARM_DESC(nr_skip_rdma_write, "Unsafe debug mode: No-rdda skip rdma write in write operation. " \
-									  "Will always work on Legacy volumes and on EC " \
-  									  "when CRC check is off and bs=slice_length_of_volumes");
+MODULE_PARM_DESC(nr_skip_rdma_write, "This is an unsafe debug mode. RDMA IOs skip the RDMA write for write operations. This will always work on Legacy volumes and on EC when CRC check is off and block size is equal to the slice length of the volumes, but it will not store the right data! Used for performance testing only.");
 
 bool nvmeibc_nr_store_fr = true;
 module_param_named(nr_store_fr, nvmeibc_nr_store_fr, bool, 0644);
-MODULE_PARM_DESC(nr_store_fr, "Store fr to work around loc_prot");
+MODULE_PARM_DESC(nr_store_fr, "Enables a workaround for RDMA resource usage to avoid rare RDMA protection errors in EC writes.");
 
 #define __FIN FINS(net->base.ioch->name)
 #define __FOUT FOUTS(net->base.ioch->name)

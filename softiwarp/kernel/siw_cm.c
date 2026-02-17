@@ -72,19 +72,19 @@ module_param(sock_buff_sz, int, 0644);
 static unsigned comp_vector_cpu0 = 0;
 module_param(comp_vector_cpu0, int, 0644);
 
-MODULE_PARM_DESC(mpa_crc_required, "MPA CRC required");
-MODULE_PARM_DESC(mpa_crc_strict, "MPA CRC off enforced");
-MODULE_PARM_DESC(tcp_nodelay, "Set TCP NODELAY");
-MODULE_PARM_DESC(tcp_quickack, "Set TCP QUICKACK");
-MODULE_PARM_DESC(sock_buff_sz, "Socket Buffers Size");
+MODULE_PARM_DESC(mpa_crc_required, "MPA CRC required (bool).");
+MODULE_PARM_DESC(mpa_crc_strict, "MPA CRC off enforced (bool).");
+MODULE_PARM_DESC(tcp_nodelay, "Set TCP NODELAY (bool).");
+MODULE_PARM_DESC(tcp_quickack, "Set TCP QUICKACK (bool).");
+MODULE_PARM_DESC(sock_buff_sz, "Socket buffers size in bytes.");
 
 bool connect_non_block = 1;
 module_param(connect_non_block, bool, 0644);
-MODULE_PARM_DESC(connect_non_block, "Connect non-blocking");
+MODULE_PARM_DESC(connect_non_block, "Perform non-block TCP connects (bool).");
 
 bool use_so_incoming_cpu = 1;
 module_param(use_so_incoming_cpu, bool, 0644);
-MODULE_PARM_DESC(use_so_incoming_cpu, "Set the RX CPU of socket to RCQ's comp1-vector index (after connect/accept)");
+MODULE_PARM_DESC(use_so_incoming_cpu, "Set the RX CPU of socket to RCQ's comp-vector index (after connect/accept).");
 
 #ifndef NVMESH_IS_PRODUCTION_COMPILATION
 #define NVMEIBNVMESH_IS_PRODUCTION_COMPILATION 0

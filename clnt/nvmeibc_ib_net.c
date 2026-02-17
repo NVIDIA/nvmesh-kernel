@@ -34,48 +34,47 @@
 
 bool nr_defer_recv_comps = true;
 module_param(nr_defer_recv_comps, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps, "Defer processing of nrch recv completions (for RDMA)");
+MODULE_PARM_DESC(nr_defer_recv_comps, "Defer processing of IO completions for RDMA transports.");
 
 bool nr_defer_recv_comps_tcp = false;
 module_param(nr_defer_recv_comps_tcp, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps_tcp, "Defer processing of nrch recv completions (for TCP)");
+MODULE_PARM_DESC(nr_defer_recv_comps_tcp, "Defer processing of IO completions for SIW transports.");
 
 
 bool nr_shared_cq = true;
 module_param(nr_shared_cq, bool, 0644);
-MODULE_PARM_DESC(nr_shared_cq, "nrch uses shared cq (for RDMA)");
+MODULE_PARM_DESC(nr_shared_cq, "Use a shared completion queue (SCQ) for RDMA IO.");
 
 bool nr_shared_cq_tcp = false;
 module_param(nr_shared_cq_tcp, bool, 0644);
-MODULE_PARM_DESC(nr_shared_cq_tcp, "nrch uses shared cq (for TCP)");
+MODULE_PARM_DESC(nr_shared_cq_tcp, "Use a shared completion queue (SCQ) for SIW IO.");
 
 bool nr_use_srq = true;
 module_param(nr_use_srq, bool, 0644);
-MODULE_PARM_DESC(nr_use_srq, "nrch uses SRQ (for RDMA)");
+MODULE_PARM_DESC(nr_use_srq, "Use a shared receive queue (RCQ) for RDMA IO.");
 
 bool nr_use_srq_tcp = true;
 module_param(nr_use_srq_tcp, bool, 0644);
-MODULE_PARM_DESC(nr_use_srq_tcp, "nrch uses SRQ (for TCP)");
+MODULE_PARM_DESC(nr_use_srq_tcp, "Use a shared receive queue (RCQ) for SIW IO.");
 
 bool nvmeibc_panic_on_core_dbgdi = false;
 module_param_named(panic_on_core_dbgdi, nvmeibc_panic_on_core_dbgdi, bool, 0644);
-MODULE_PARM_DESC(panic_on_core_dbgdi, "On core-dbgdi detection panic both client and target");
+MODULE_PARM_DESC(panic_on_core_dbgdi, "In \"debug di\" mode, panic on detection of an issue, on both client and target. This is an internal debugging facility.");
 
 bool nvmeibc_map_each_sg_entry = false;
 module_param_named(map_each_sg_entry, nvmeibc_map_each_sg_entry, bool, 0644);
-MODULE_PARM_DESC(map_each_sg_entry, "IB DMA map each sg-entry separately");
+MODULE_PARM_DESC(map_each_sg_entry, "IB DMA map each SG-entry separately.");
 
 uint nvmeibc_map_sg_mode = NVMEIB_DEBUG_RDMA_CORRUPTION ? MAP_SG_MR_REG_WR_ONLY : MAP_SG_MR_COMBINED;
 module_param_named(map_sg_mode, nvmeibc_map_sg_mode, uint, 0644);
-MODULE_PARM_DESC(map_sg_mode, "Mapping data SG list modes:\n"
-							  "\t\t 0 : Combined, use global key when able to collapse all sg-entries to one, otherwise map-mr (map WR and rdma-write WR)\n"
-							  "\t\t 1 : Use only map-mr (IB_WR_REG_MR, IB_WR_FAST_REG_MR)\n"
-							  "\t\t 2 : Use only global dma key, may use multiple rdma-write WRs from clnt/srv in wr/rd, respectively. Target must have enough WRs to write back on read-op");
+MODULE_PARM_DESC(map_sg_mode, "Defines the mode for mapping data SG lists: "
+							  "0 = Combined, use global key when able to collapse all sg-entries to one, otherwise map-mr (map WR and rdma-write WR). "
+							  "1 = Use only map-mr (IB_WR_REG_MR, IB_WR_FAST_REG_MR). "
+							  "2 = Use only the global dma key, which means that multiple rdma-write WRs from clnt/srv in wr/rd, respectively, may be needed. The target must have enough WRs to write the data back for read operations.");
 
 uint nvmeibc_map_sg_result_trace = 0;
 module_param_named(map_sg_result_trace, nvmeibc_map_sg_result_trace, uint, 0644);
-MODULE_PARM_DESC(map_sg_result_trace, "Trace result of map data SG list: "
-									  "0: Disabled, 1: One-shot (edge), 2: Continuous (level)");
+MODULE_PARM_DESC(map_sg_result_trace, "Defines how to trace the result of mapping the data SG list: 0 = Disabled, 1 = One-shot (edge), 2 = Continuous (level)");
 
 bool nvmeibc_ib_net_complete_iocmd_use_pcpu_wq = false;
 module_param_named(ib_net_complete_iocmd_use_pcpu_wq, nvmeibc_ib_net_complete_iocmd_use_pcpu_wq, bool, 0444);

@@ -87,22 +87,22 @@ MODULE_VERSION("0.2");
 #define SIW_MAX_IF 12
 static char *iface_list[SIW_MAX_IF];
 module_param_array(iface_list, charp, NULL, 0444);
-MODULE_PARM_DESC(iface_list, "Interface list siw attaches to if present");
+MODULE_PARM_DESC(iface_list, "Interface list SIW attaches to if present (array of characters).");
 
 static bool loopback_enabled = 1;
 module_param(loopback_enabled, bool, 0644);
-MODULE_PARM_DESC(loopback_enabled, "enable_loopback");
+MODULE_PARM_DESC(loopback_enabled, "Enable loopback (bool).");
 
 #if SIW_ENABLE_PANIC_REMOTE_ON_RX_ERR
 bool panic_remote_on_rx_err = 0;
 module_param(panic_remote_on_rx_err, bool, 0644);
-MODULE_PARM_DESC(panic_remote_on_rx_err, "panic remote on rx error");
+MODULE_PARM_DESC(panic_remote_on_rx_err, "Panic remote on RX Error (bool).");
 #endif
 
 #if SIW_CQ_NOTIFY_WORK_QP_INDEPENDENT
 bool cq_notify_tasklet = true;
 module_param(cq_notify_tasklet, bool, 0444);
-MODULE_PARM_DESC(cq_notify_tasklet, "Use tasklet (instead of WQ) for CQ notify");
+MODULE_PARM_DESC(cq_notify_tasklet, "Use tasklet (instead of WQ) for CQ notify (bool).");
 #else
 bool cq_notify_tasklet = false;
 #endif
@@ -113,7 +113,7 @@ DECLARE_RWSEM(siw_dev_lock);
 #ifdef USE_SQ_KTHREAD
 static char tx_cpu_list[1024] = "";
 module_param_string(tx_cpu_list,tx_cpu_list, 1024, 0444);
-MODULE_PARM_DESC(tx_cpu_list, "List of CPUs siw TX thread shall be bound to (format: comma separated no spaces)");
+MODULE_PARM_DESC(tx_cpu_list, "List of CPUs siw TX thread shall be bound to (format: comma separated no spaces) (string).");
 
 int default_tx_cpu = -1;
 static int tx_on_all_cpus = 1;
@@ -419,7 +419,7 @@ static int siw_tx_qualified(int cpu)
 
 static ulong tx_thread_high_prio_bmp = 0;
 module_param(tx_thread_high_prio_bmp, ulong, 0644);
-MODULE_PARM_DESC(tx_thread_high_prio_bmp, "bitmap of CPU tx-threads to set to high priority");
+MODULE_PARM_DESC(tx_thread_high_prio_bmp, "A bitmap of CPU Tx Threads to set to high priority.");
 
 #ifndef BITS_PER_TYPE
 #define BITS_PER_TYPE(type)	(sizeof(type) * BITS_PER_BYTE)

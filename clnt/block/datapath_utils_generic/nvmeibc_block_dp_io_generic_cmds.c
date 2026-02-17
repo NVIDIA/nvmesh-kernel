@@ -22,11 +22,11 @@
 /******************************************************************************/
 uint nvmeibc_jentry_num_blocks = 16;						// Todo, rename internally to binje
 module_param(nvmeibc_jentry_num_blocks, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_jentry_num_blocks, "EC length of journal entry in blocks");
+MODULE_PARM_DESC(nvmeibc_jentry_num_blocks, "Length of erasure coding journal, in blocks. For erasure coding volumes, increasing this means fewer parallel write IO operations, but more efficient large writes. It is highly recommended to increase for use cases with large writes. Range is 1 to 16.");
 
 bool nvmeibc_ec_reuse_req = true;
 module_param_named(ec_reuse_req, nvmeibc_ec_reuse_req, bool, 0644);
-MODULE_PARM_DESC(ec_reuse_req, "Enable reusing feature for requests(EC)");
+MODULE_PARM_DESC(ec_reuse_req, "Enable reusing feature for requests (EC). This parameter was added to facilitate disabling this reuse as a potential optimization for NVMesh in DPU mode.");
 
 NVMEIBC_MEMMGR_METRIC(dp_commands, "component=raid.io.commands");
 

@@ -77,31 +77,31 @@ bool nvmeibc_local_bypass_enabled = true;
 bool nvmeibc_iommu_enabled = false;
 
 module_param_named(debug_level, nvmeibc_debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Deprecated Debug tracing level [0..2]");
+MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1. Deprecated.");
 
 module_param_named(tracer_debug_level, tracer_nvmeibc_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_debug_level, "Control path tracing debug level [0..4]");
+MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(goodpath_debug_level, goodpath_nvmeibc_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_debug_level, "Data path tracing debug level");
+MODULE_PARM_DESC(goodpath_debug_level, "This determines the level of tracing for the regular data path. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(goodpath_syncs_debug_level, goodpath_nvmeibc_syncs_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_syncs_debug_level, "Data path syncs tracing debug level");
+MODULE_PARM_DESC(goodpath_syncs_debug_level, "This determines the level of tracing for data path syncs. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(goodpath_locks_debug_level, goodpath_nvmeibc_locks_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_locks_debug_level, "Data path locks tracing debug level");
+MODULE_PARM_DESC(goodpath_locks_debug_level, "This determines the level of tracing for the regular data path locks. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(goodpath_transport_debug_level, goodpath_nvmeibc_transport_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_transport_debug_level, "Data path transport layer tracing debug level");
+MODULE_PARM_DESC(goodpath_transport_debug_level, "This determines the level of tracing for the regular data path networking. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(topology_debug_level, topology_debug_level, int, 0644);
-MODULE_PARM_DESC(topology_debug_level, "Topology path tracing debug level");
+MODULE_PARM_DESC(topology_debug_level, "This determines the level of tracing for topology operations, i.e. changes to volume health and layout, for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(recovery_debug_level, recovery_debug_level, int, 0644);
-MODULE_PARM_DESC(recovery_debug_level, "Recovery tracing debug level");
+MODULE_PARM_DESC(recovery_debug_level, "This determines the level of tracing for recovery operations for this module. Only traces with this level or lower will be issued, see tracer severities above.");
 
 module_param_named(iommu_enabled, nvmeibc_iommu_enabled, bool, 0444);
-MODULE_PARM_DESC(iommu_enabled, "Used to tell client that IOMMU is enabled");
+MODULE_PARM_DESC(iommu_enabled, "Informs the internal NVMesh NVMe driver that the IOMMU is enabled on the node.");
 EXPORT_SYMBOL(nvmeibc_iommu_enabled);
 
 NVMEIB_DECLARE_KERNEL_WARNINGS_TRAP;
@@ -121,7 +121,7 @@ bool nvmeib_serial_console(void) { return false; }
 
 bool profiling_enabled = ~true;
 module_param(profiling_enabled, bool, 0644);
-MODULE_PARM_DESC(profiling_enabled, "Enable statistics gathering, should be 0 if clocksource != tsc");
+MODULE_PARM_DESC(profiling_enabled, "Enable statistics gathering, should be turned off if the clocksource is not tsc.");
 
 static const char* nvmeibc_mod_state_to_string(enum nvmeibc_mod_state state)
 {

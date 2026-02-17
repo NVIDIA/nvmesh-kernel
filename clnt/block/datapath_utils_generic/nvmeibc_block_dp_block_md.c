@@ -20,11 +20,11 @@
 #ifndef UM_APP
 bool nvmeibc_warn_on_edic_verification_failure = true;				// Default true
 module_param(nvmeibc_warn_on_edic_verification_failure, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_warn_on_edic_verification_failure, "Issue kernel warning upon crc read block verification failure");
+MODULE_PARM_DESC(nvmeibc_warn_on_edic_verification_failure, "Issue kernel warning upon CRC-based read block verification failure. Useful for detecting data that has been correct on drives.");
 
 uint nvmeibc_jmd_wr_version = NVMEIBC_JOURNAL_MD_VERSION_PACKED;				// Default, backwards compatibale, Todo: Consider using mgmt based trigger, not module param
 module_param(nvmeibc_jmd_wr_version, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_jmd_wr_version, "Version of jmd to write. 0-unpacked, 1-packed");	// Dont touch this! This is part of EC version, in future, make this module param read only! it was needed to upgrade versions.
+MODULE_PARM_DESC(nvmeibc_jmd_wr_version, "Version of JMD (journal metadata) to use to facilitate backwards compatibility: 0 = packed, 1 = unpacked.");	// Dont touch this! This is part of EC version, in future, make this module param read only! it was needed to upgrade versions.
 
 #else // UM_APP
 	#include "module_params.h"

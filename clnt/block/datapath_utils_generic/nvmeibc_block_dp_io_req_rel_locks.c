@@ -18,7 +18,7 @@
 #define __COMPLAIN_LOCK_TIME     12000 /*  12[sec]  , If lock was not acquired for more then X[sec] from last complain, complain to toma */
 unsigned warn_if_lock_took_more_than_n_msec = __SUSPICIONS_LOCK_TIME;
 module_param(warn_if_lock_took_more_than_n_msec, uint, 0644);
-MODULE_PARM_DESC(warn_if_lock_took_more_than_n_msec, "If lock acquisition takes more than X[msec], issue warning to log");
+MODULE_PARM_DESC(warn_if_lock_took_more_than_n_msec, "If lock acquisition takes more than this value in milliseconds, issue a warning to the log.");
 
 #ifdef DEBUG_CONTENDED_LOCKS
 unsigned warn_if_lock_held_more_than_n_msec = __SUSPICIONS_LOCK_TIME / 4;
@@ -31,7 +31,7 @@ MODULE_PARM_DESC(warn_if_lock_held_more_than_n_msec, "If lock held more than X[m
 #define DEFAULT_RETRY_MULT			  (5000)		/* in microseconds */
 unsigned lock_retry_delay_multiplier = DEFAULT_RETRY_MULT;
 module_param(lock_retry_delay_multiplier, uint, 0644);
-MODULE_PARM_DESC(lock_retry_delay_multiplier, "Quadratic backoff retry with this factor [usec]");
+MODULE_PARM_DESC(lock_retry_delay_multiplier, "Lock retry timeout in microseconds when failing to obtain a lock. The retry timeout undergoes exponential backoff.");
 
 /* Formula : delay_time  = func(retry_count) * multiplier + random
  * note that the code arithmetic is in [usec] but the actual delay is based on
@@ -474,7 +474,7 @@ static bool must_do_full_blkset_sync(const struct nvmeibc_block_command *c) {
 
 bool nvmeibc_debug_ram_binfo = true;	// By default check binfo
 module_param(nvmeibc_debug_ram_binfo, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_debug_ram_binfo, "Enforce detection of topological data corruptions in RAM");
+MODULE_PARM_DESC(nvmeibc_debug_ram_binfo, "Enforce detection of topological data corruptions in RAM.");
 
 bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_blkset_info binfo, const u64 dlba, const char action)
 {

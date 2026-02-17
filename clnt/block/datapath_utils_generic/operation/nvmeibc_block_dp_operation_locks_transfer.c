@@ -24,7 +24,7 @@
 
 static uint per_cpu_lock_transfer_num = NVMEIBC_NUM_PREV_OWNERS;
 module_param(per_cpu_lock_transfer_num, uint, 0444);
-MODULE_PARM_DESC(per_cpu_lock_transfer_num, "Number of lock transfer candidates per CPU");
+MODULE_PARM_DESC(per_cpu_lock_transfer_num, "The number of lock transfer candidates or slots per CPU. Lock transfers are used to optimize serial writes and transfer lock ownership from one IO to another to avoid having to wait for it to be released and then acquired again. For production clusters, it is often recommended to set to 32.");
 
 
 //why using hdr->good_path_profile? It was used before, before moving here.

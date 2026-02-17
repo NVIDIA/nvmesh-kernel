@@ -1238,7 +1238,7 @@ err_destroy_scq:
 
 bool nvmeibs_mostly_idle_ch = false;
 module_param_named(mostly_idle_ch, nvmeibs_mostly_idle_ch, bool, 0644);
-MODULE_PARM_DESC(mostly_idle_ch, "Use first shared CQ for mostly idle channels");
+MODULE_PARM_DESC(mostly_idle_ch, "Defines whether to use the first shared CQ for \"mostly\" idle channels.");
 
 
 static void process_per_dev_cq(struct ib_wc *wcs, void *ctx);

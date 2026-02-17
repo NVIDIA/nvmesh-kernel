@@ -41,15 +41,15 @@
 
 static unsigned int nvmeibs_nr_max_channels_per_path = 0;
 module_param_named(nr_max_channels_per_path, nvmeibs_nr_max_channels_per_path, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_path, "max nordda channels per path (for RDMA), 0 will set NUM_OF_POSSIBLE_CPUS + 4 channels");
+MODULE_PARM_DESC(nr_max_channels_per_path, "The maximum number of RDMA IO channels per network path.");
 
 static unsigned int nvmeibs_nr_max_channels_per_path_tcp = NVMEIB_MAX_NR_TCP_CHANNELS_PER_PATH;
 module_param_named(nr_max_channels_per_path_tcp, nvmeibs_nr_max_channels_per_path_tcp, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_path_tcp, "max nordda channels per path (for TCP)");
+MODULE_PARM_DESC(nr_max_channels_per_path_tcp, "The maximum number of SIW IO channels per network path.");
 
 static unsigned int nvmeibs_ioka_timeout_sec = NVMEIB_IOCH_KA_TIMEOUT_SEC;
 module_param_named(ioka_timeout_sec, nvmeibs_ioka_timeout_sec, int, 0644);
-MODULE_PARM_DESC(ioka_timeout_sec, "Control the time to fail channel due to keep alive failure");
+MODULE_PARM_DESC(ioka_timeout_sec, "Keepalive timeout failure for an IO channel, in seconds.");
 
 NVMEIBS_MEMMGR_METRIC(s_clients_msg_area, "component=target.clients.msg_area");
 

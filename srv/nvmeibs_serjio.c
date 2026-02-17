@@ -43,26 +43,23 @@ static bool invalid_jris_exist_on_disk = false;
 
 static bool stamp_jrnl_entries = true;
 module_param_named(stamp_free_jrnl_entries, stamp_jrnl_entries, bool, 0444);
-MODULE_PARM_DESC( stamp_free_jrnl_entries, "Stamp free journal entries");
+MODULE_PARM_DESC(stamp_free_jrnl_entries, "Stamp free journal entries for debugging purposes.");
 
 static unsigned nvmeibs_jrange_num_blocks = (1 << NVMEIB_EC_JOURNAL_MAX_BLKS_PER_RANGE_V1_3_SHIFT);
 module_param_named(nvmeibs_jrange_num_blocks, nvmeibs_jrange_num_blocks, uint, 0444);
-MODULE_PARM_DESC(nvmeibs_jrange_num_blocks, "Total number of journal blocks in journal range. \n"
-					"Combined with \"nvmeibc_jentry_num_blocks\" determines the number of journal entries per client.\n"
-					"Can only be changed when journal is clean.\n"
-					"Must be a power-of-2, min: 512, max: 8192");
+MODULE_PARM_DESC(nvmeibs_jrange_num_blocks, "Total number of journal blocks in journal range, typically allocated to a single client. Should be set to a power of 2, between 64 and 16384.");
 
 static unsigned nvmeibs_serjio_resched_work_wait_max = 10;
 module_param_named(serjio_resched_work_wait_max, nvmeibs_serjio_resched_work_wait_max, uint, 0644);
-MODULE_PARM_DESC(serjio_resched_work_wait_max, "Amount of time (in seconds) to wait for a rescheduled work to run");
+MODULE_PARM_DESC(serjio_resched_work_wait_max, "Amount of time in seconds to wait for a rescheduled SERJIO work item to run. SERJIO work items are related to garbage collection and cleaning up of journal entries.");
 
 static unsigned nvmeibs_serjio_jgc_avail_ent_low_wm_mult = NVMEIB_JGC_AVAIL_ENT_LOW_WM_MULT;
 module_param_named(jgc_avail_ent_low_wm_mult, nvmeibs_serjio_jgc_avail_ent_low_wm_mult, uint, 0644);
-MODULE_PARM_DESC(jgc_avail_ent_low_wm_mult, "Triggers JGC if available range entries falls below low watermark of total-range-entries * mult / div.");
+MODULE_PARM_DESC(jgc_avail_ent_low_wm_mult, "Triggers JGC (journal garbage collection) if the available range of entries falls below the low watermark of total-range-entries * mult / div.");
 
 static unsigned nvmeibs_serjio_jgc_avail_ent_low_wm_div = NVMEIB_JGC_AVAIL_ENT_LOW_WM_DIV;
 module_param_named(jgc_avail_ent_low_wm_div, nvmeibs_serjio_jgc_avail_ent_low_wm_div, uint, 0644);
-MODULE_PARM_DESC(jgc_avail_ent_low_wm_div, "Triggers JGC if available range entries falls below low watermark of total-range-entries * mult / div.");
+MODULE_PARM_DESC(jgc_avail_ent_low_wm_div, "Triggers JGC (journal garbage collection) if the available range of entries falls below the low watermark of total-range-entries * mult / div.");
 
 static unsigned nvmeibs_serjio_init_db_interrupt_range = ~(unsigned)0;
 static bool nvmeibs_serjio_fail_next_gpt_update = false;

@@ -179,7 +179,7 @@ void siw_pbl_free(struct siw_pbl *pbl)
 
 static bool use_pbe_fixed_size = false;
 module_param(use_pbe_fixed_size, bool, 0644);
-MODULE_PARM_DESC(use_pbe_fixed_size, "...");
+MODULE_PARM_DESC(use_pbe_fixed_size, "Use fixed size buffers.");
 
 //omril: @off is 'addr - mr->mem.va;'
 u64 siw_pbl_get_buffer(struct siw_pbl *pbl, u64 off, int *len, int *idx)

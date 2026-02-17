@@ -67,15 +67,15 @@ extern int default_tx_cpu;
 
 static bool zcopy_tx = 1;
 module_param(zcopy_tx, bool, 0644);
-MODULE_PARM_DESC(zcopy_tx, "Zero copy user data transmit if possible");
+MODULE_PARM_DESC(zcopy_tx, "Zero copy user data transmit if possible (bool).");
 
 static bool low_delay_tx = 1;
 module_param(low_delay_tx, bool, 0644);
-MODULE_PARM_DESC(low_delay_tx, "Run tight transmit thread loop if activated\n");
+MODULE_PARM_DESC(low_delay_tx, "Run tight transmit thread loop if activated (bool).");
 
 static bool zero_delay_tx = 1;
 module_param(zero_delay_tx, bool, 0644);
-MODULE_PARM_DESC(zero_delay_tx, "Run tight transmit thread loop always\n");
+MODULE_PARM_DESC(zero_delay_tx, "Run tight transmit thread loop always (bool).");
 
 #if DPRINT_MASK > 0
 extern char siw_qp_state_to_string[SIW_QP_STATE_COUNT][sizeof "TERMINATE"];
@@ -2412,7 +2412,7 @@ DEFINE_PER_CPU(struct tx_task_t, tx_task_g);
 
 static ulong low_delay_tx_cpu_set = ~(0ULL);
 module_param(low_delay_tx_cpu_set, ulong, 0644);
-MODULE_PARM_DESC(low_delay_tx_cpu_set, "bitmap of tx-cpus thread in tight loop");
+MODULE_PARM_DESC(low_delay_tx_cpu_set, "bitmap of tx-cpus thread in tight loop (ulong).");
 
 bool siw_low_delay_tx_cpu(ulong nr_cpu)
 {

@@ -60,7 +60,7 @@
 
 int debug_level = 1;
 module_param(debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Debug level, 1 for errors & events, 2 for more");
+MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1. Deprecated.");
 
 static struct dentry *siw_debugfs = NULL; // MUST !!!
 
