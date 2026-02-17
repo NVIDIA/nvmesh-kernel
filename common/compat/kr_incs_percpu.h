@@ -18,7 +18,14 @@
 	#define get_cpu() smp_processor_id()
 	#define put_cpu() do{} while(0)
 	#define per_cpu_ptr(var, cpu) &((var)[(cpu)])
+	#define get_cpu_var(var)		(*per_cpu_ptr(var, get_cpu()))
+	#define put_cpu_var(var)		({ (void)&(var); put_cpu(); })
+	#define per_cpu(var, cpu)		(*(per_cpu_ptr(var, cpu)))
+	#define this_cpu_ptr(var) ({typeof(var) rv = per_cpu_ptr(var, get_cpu()); put_cpu(); rv; })
 	#define DEFINE_PER_CPU(type, name) type name[MAX_SCHEDULERS]
+	#define DECLARE_PER_CPU(type, name) extern type name[MAX_SCHEDULERS]
+	#define READ_ONCE(x) x
+	#define WRITE_ONCE(x, val) x=(val)
 
 	static inline void on_each_cpu(void (*func)(void *info), void *info, int wait) { (void)func; (void)info; (void)wait; BUG();} /* TODO */
 	#define nvmeib_public_alloc_percpu_zeroed(type) calloc(MAX_SCHEDULERS, sizeof(type))

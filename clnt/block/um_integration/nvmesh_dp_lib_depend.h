@@ -148,6 +148,10 @@ static inline int  	spin_lock_irqsave_(	spinlock_t *l, ulong *flags) { (void)l; 
 static inline int  	spin_unlock_irqre_(	spinlock_t *l, ulong *flags) { (void)l; (void)flags; return 0; }
 #define spin_lock_irqsave(l,f)      spin_lock_irqsave_(l,&f)	// Support for kernel macro definition
 #define spin_unlock_irqrestore(l,f) spin_unlock_irqre_(l,&f)
+static inline void  local_irq_save_(ulong *flags) { (void)flags; }
+static inline void  local_irq_restore_(ulong flags) { (void)flags; }
+#define local_irq_save(f)      local_irq_save_(&f)
+#define local_irq_restore(f)   local_irq_restore_(f)
 #define DEFINE_SPINLOCK(l) spinlock_t (l)
 #define in_interrupt()		false
 struct rw_semaphore {}; // /linux/rwsem.h
