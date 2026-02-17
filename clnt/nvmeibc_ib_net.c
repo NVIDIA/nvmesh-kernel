@@ -73,11 +73,11 @@ MODULE_PARM_DESC(map_sg_result_trace, "Defines how to trace the result of mappin
 
 bool nvmeibc_ib_net_complete_iocmd_use_pcpu_wq = false;
 module_param_named(ib_net_complete_iocmd_use_pcpu_wq, nvmeibc_ib_net_complete_iocmd_use_pcpu_wq, bool, 0444);
-MODULE_PARM_DESC(ib_net_complete_iocmd_use_pcpu_wq, "IB net complete iocmd use pcpu wq for requests");
+MODULE_PARM_DESC(ib_net_complete_iocmd_use_pcpu_wq, "Deteremines whether IB net complete iocmd use per-cpu workqeueus for request handling.");
 
 uint nvmeibc_max_notify_cq_iterations = 10;
 module_param_named(max_notify_cq_iterations, nvmeibc_max_notify_cq_iterations, uint, 0644);
-MODULE_PARM_DESC(max_notify_cq_iterations, "Maximum number of iterations to arm cq");
+MODULE_PARM_DESC(max_notify_cq_iterations, "Defines the maximum number of iterations to ARM completion queues.");
 
 #define __FIN FINS(net ? net->ioch->name : "?")
 #define __FOUT FOUTS(net ? net->ioch->name : "?")
