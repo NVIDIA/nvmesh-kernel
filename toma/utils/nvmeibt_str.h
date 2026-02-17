@@ -95,7 +95,7 @@ int			nvmeibt_Str_fwrite(struct nvmeibt_Str *this, FILE *file);
 int			nvmeibt_Str_strncpy(struct nvmeibt_Str *this, const char *str, size_t size);
 int			nvmeibt_Str_strcpy(struct nvmeibt_Str *this, const char *str);
 const char *nvmeibt_Str_str(const struct nvmeibt_Str *this);
-static inline char *nvmeibt_Str_end(struct nvmeibt_Str *s) { return &s->text_buf[s->str_len]; }
+static inline char *nvmeibt_Str_end(struct nvmeibt_Str *s) { return (s ? &s->text_buf[s->str_len] : '\0'); }
 size_t		nvmeibt_Str_strlen(const struct nvmeibt_Str *this);
 void		nvmeibt_Str_reuse(struct nvmeibt_Str *this);
 int			nvmeibt_Str_strcmp(const struct nvmeibt_Str *str_ctx1, const struct nvmeibt_Str *str_ctx2);
