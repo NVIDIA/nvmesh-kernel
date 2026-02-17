@@ -71,7 +71,7 @@ static inline void nvmeib_iir_reset(struct nvmeib_iir *iir, double new_sample_we
 
 	*iir = (struct nvmeib_iir){"", 0.0, 0.0, 0.0, new_sample_weight};
 	nvmeib_strlcpy(iir->desc, desc1, sizeof(iir->desc));
-	len1 = strnlen(iir->desc, sizeof(iir->desc) - 1);
+	len1 = strnlen(iir->desc, sizeof(iir->desc));
 	nvmeib_strlcpy(iir->desc + len1, desc2, sizeof(iir->desc) - len1);
 }
 
