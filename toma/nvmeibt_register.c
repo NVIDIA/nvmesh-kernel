@@ -857,18 +857,17 @@ BOOL nvmeibt_register_is_any_registered_on_seg_active(const struct nvmeibt_seg_a
 	return !XHASHTABLE_EMPTY(&(seg_active->active_registrants));
 }
 
-BOOL nvmeibt_register_is_any_registered_on_disk(const struct nvmeibt_disk *disk)
+BOOL nvmeibt_register_is_any_registered_on_local_disk(const struct nvmeibt_local_disk *local_disk)
 {
-	int		j;
-	BOOL	is_any = 0;
+	BOOL							is_any = 0;
+	struct nvmeibt_seg_active		*seg_active;
 
 	NFIN;
-	if (!disk) {
+	if (!local_disk) {
 		goto out;
 	}
-	for (j = 0; j < disk->n_segments; j++) {
-		struct nvmeibt_seg_active *seg_active = nvmeibt_disk_segment_get_seg_active(disk->disk_segments[j]);
-		if (seg_active && nvmeibt_register_is_any_registered_on_seg_active(seg_active)) {
+	NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+		if (nvmeibt_register_is_any_registered_on_seg_active(seg_active)) {
 			dump_seg_active_registrants(seg_active, 0);
 			is_any = 1;
 			goto out;
@@ -882,15 +881,10 @@ out:
 BOOL nvmeibt_register_is_any_registered(void)
 {
 	struct nvmeibt_local_disk	*local_disk;
-	struct nvmeibt_disk			*disk;
 	BOOL	rv = 0;
 
 	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		disk = NNVMEIBT_LOCAL_DISK_GET_DISK(nvmeibt_register_is_any_registered_trace, local_disk);
-		if (!disk) {
-			continue;
-		}
-		rv |= nvmeibt_register_is_any_registered_on_disk(disk);
+		rv |= nvmeibt_register_is_any_registered_on_local_disk(local_disk);
 		if (rv) {
 			goto out;
 		}

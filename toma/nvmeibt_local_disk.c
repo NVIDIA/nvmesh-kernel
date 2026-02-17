@@ -1417,7 +1417,7 @@ void nvmeibt_local_disk_munmap_and_rm_if_should_be_removed_and_unused(struct nvm
 			N_Tf(vwrhgvq, "Awaiting recoveries disk=@STR", nvmeibt_local_disk_display(local_disk));
 			goto out;
 		}
-		if (nvmeibt_register_is_any_registered_on_disk(NNVMEIBT_LOCAL_DISK_GET_DISK(84h14hjp, local_disk))) {
+		if (nvmeibt_register_is_any_registered_on_local_disk(local_disk)) {
 			N_Tf(fhyru11, "disk=@STR has_registrants", nvmeibt_local_disk_display(local_disk));
 			goto out;
 		}

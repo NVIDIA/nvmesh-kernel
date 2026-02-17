@@ -136,7 +136,7 @@ BOOL nvmeibt_register_is_seg_active_registrable_clients_sync_wise(struct nvmeibt
 BOOL nvmeibt_register_is_seg_active_accepting_registrations(struct nvmeibt_seg_active *seg_active, int *reason);
 void calc_next_wait_for_registrant_timeout(void);
 BOOL nvmeibt_register_is_any_registered_on_seg_active(const struct nvmeibt_seg_active *seg_active);
-BOOL nvmeibt_register_is_any_registered_on_disk(const struct nvmeibt_disk *disk);
+BOOL nvmeibt_register_is_any_registered_on_local_disk(const struct nvmeibt_local_disk *local_disk);
 BOOL nvmeibt_register_is_any_registered(void);
 bool nvmeibt_register_is_seg_lot_registrable_topo_wise(struct nvmeibt_seg_lot *seg_lot, int *reason);
 struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_lock_id(
