@@ -25,11 +25,11 @@
 
 	unsigned nvmeibc_io_pet_minimal_severity = NVMEIB_PET_SEVERITY_WARNING;
 	module_param(nvmeibc_io_pet_minimal_severity, uint, 0644);
-	MODULE_PARM_DESC(nvmeibc_io_pet_minimal_severity, "IO PET buffers with severity less then minimal will not be written;");
+	MODULE_PARM_DESC(nvmeibc_io_pet_minimal_severity, "Defines the minimal severity for IO per-entity trace buffers to be written.");
 
 	unsigned nvmeibc_io_pet_verbose = 0;
 	module_param(nvmeibc_io_pet_verbose, uint, 0644);
-	MODULE_PARM_DESC(nvmeibc_io_pet_verbose, "Non zero value will allow IO PET buffers to provide even more information (like first 8 bytes & metadata for every block); But of course it may hurt performance and the buffer size should be taken into account");
+	MODULE_PARM_DESC(nvmeibc_io_pet_verbose, "A non-zero value will allow IO per-entity trace buffers to provide even more information such as the first 8 bytes and metadata for every block. This may hurt performance and the buffer size should be taken into account.");
 
 	NVMEIBC_MEMMGR_METRIC(io_pet_buffers, "component=raid.io.pet.buffers");
 
@@ -104,7 +104,7 @@
 	//single pass: [start, complete] or [start, resubmit]
 	unsigned nvmeibc_io_pet_buffer_size = 0; //1024;
 	module_param(nvmeibc_io_pet_buffer_size, uint, 0644);
-	MODULE_PARM_DESC(nvmeibc_io_pet_buffer_size, "IO PET buffer size;");
+	MODULE_PARM_DESC(nvmeibc_io_pet_buffer_size, "IO per-entity trace buffer size.");
 
 	struct nvmeib_pet_base_controller* nvmeibc_io_pet_controller_create()
 	{

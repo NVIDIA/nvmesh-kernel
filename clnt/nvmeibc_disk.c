@@ -201,7 +201,7 @@ MODULE_PARM_DESC(disk_nrch_defer_block_cb, "Defines whether to defer the IO call
 
 bool nvmeibc_disk_local_defer_block_cb = false;
 module_param_named(disk_local_defer_block_cb, nvmeibc_disk_local_defer_block_cb, bool, 0644);
-MODULE_PARM_DESC(disk_local_defer_block_cb, "Defer local IO block cb to non-interrupt context");
+MODULE_PARM_DESC(disk_local_defer_block_cb, "Determines whether to defer local IO block cb to non-interrupt context.");
 
 bool nvmeibc_disk_pcpu_nrch_poll_proc = false;
 module_param_named(disk_pcpu_nrch_poll_proc, nvmeibc_disk_pcpu_nrch_poll_proc, bool, 0444);
@@ -231,11 +231,11 @@ MODULE_PARM_DESC(local_io_use_md_dma_pool, "When a local IO request is made with
 /* [NVMESH-3287]: Params for throttling target-nics query to management */
 uint nvmeibc_disk_tgt_nics_query_min_secs = 2;
 module_param_named(tgt_nics_query_min_secs, nvmeibc_disk_tgt_nics_query_min_secs, uint, 0644);
-MODULE_PARM_DESC(tgt_nics_query_min_secs, "Minimum amount of time allowed between Target NICs query to management");
+MODULE_PARM_DESC(tgt_nics_query_min_secs, "The minimum amount of time allowed between Target NICs query to management.");
 
 uint nvmeibc_disk_tgt_nics_query_min_n_fail = UINT_MAX;
 module_param_named(tgt_nics_query_min_n_fail, nvmeibc_disk_tgt_nics_query_min_n_fail, uint, 0644);
-MODULE_PARM_DESC(tgt_nics_query_min_n_fail, "Minimum number of discovery failures before sending a Target NICs query to management");
+MODULE_PARM_DESC(tgt_nics_query_min_n_fail, "The mnimum number of discovery failures before sending a Target NICs query to management.");
 
 uint nvmeibc_disk_tgt_nics_query_min_fail_secs = 10;
 module_param_named(tgt_nics_query_min_fail_secs, nvmeibc_disk_tgt_nics_query_min_fail_secs, uint, 0644);
@@ -251,30 +251,30 @@ unsigned int nvmeibc_disk_prefix_priority_masks[16]; // Define an array of unsig
 int nvmeibc_disk_prefix_priority_masks_len = 0;          // Variable to hold the size of the array
 
 module_param_array_named(prefix_priority_masks, nvmeibc_disk_prefix_priority_masks, uint, &nvmeibc_disk_prefix_priority_masks_len, 0444); // Register as module parameter
-MODULE_PARM_DESC(prefix_priority_masks, "comma separated list of prefixes length for prioritise paths");
+MODULE_PARM_DESC(prefix_priority_masks, "A comma separated list of prefixes length for paths with priority.");
 
 bool nvmeibc_disk_prefix_priority_masks_rediscover_on_new = false;
 module_param_named(prefix_priority_masks_rediscover_on_new, nvmeibc_disk_prefix_priority_masks_rediscover_on_new, bool, 0644);
-MODULE_PARM_DESC(prefix_priority_masks_rediscover_on_new, "Rediscover on new common prefix priority found");
+MODULE_PARM_DESC(prefix_priority_masks_rediscover_on_new, "Determines whether to rediscover when a new common prefix priority is found.");
 
 NVMEIBC_MEMMGR_METRIC(dirty_bits_mem, "component=client.disk.dirty_bits_mem");
 
 
 bool nvmeibc_disk_coremask_support = 0;
 module_param_named(disk_coremask_support, nvmeibc_disk_coremask_support, bool, 0644);
-MODULE_PARM_DESC(disk_coremask_support, "Set to true to enable disk coremask support. Creates \"disk_max_coremask_nrch\" NRCHs per coremask added (via block CLI). Updated on rediscover");
+MODULE_PARM_DESC(disk_coremask_support, "Set to true to enable disk coremask support. Creates \"disk_max_coremask_nrch\" NRCHs per coremask added via block CLI. Updated on rediscover");
 
 uint nvmeibc_disk_max_coremask_nrch = 2;
 module_param_named(disk_max_coremask_nrch, nvmeibc_disk_max_coremask_nrch, uint, 0644);
-MODULE_PARM_DESC(disk_max_coremask_nrch, "Max nrchs per coremask. Updated on rediscover");
+MODULE_PARM_DESC(disk_max_coremask_nrch, "Determines the maximum number of channels per coremask. Updated on rediscover.");
 
 bool nvmeibc_disk_use_coremask_pending = true;
 module_param_named(disk_use_coremask_pending, nvmeibc_disk_use_coremask_pending, bool, 0644);
-MODULE_PARM_DESC(disk_use_coremask_pending, "Have a pending command list for the coremask. If false, any IOs that cannot be immediately processed by the coremask will be submitted to the any-core channels.");
+MODULE_PARM_DESC(disk_use_coremask_pending, "Determines whether to maintain a pending command list for the coremask. If false, any IOs that cannot be immediately processed by the coremask will be submitted to the any-core channels.");
 
 bool nvmeibc_disk_local_use_system_pcpu_wq = false;
 module_param_named(disk_local_use_system_pcpu_wq, nvmeibc_disk_local_use_system_pcpu_wq, bool, 0644);
-MODULE_PARM_DESC(disk_local_use_system_pcpu_wq, "Local IO uses system pcpu wq for requests");
+MODULE_PARM_DESC(disk_local_use_system_pcpu_wq, "Determines whether local IO uses the system per-cpu workqueue for requests.");
 
 struct nvmeib_cpu_mask_info_node {
 	struct nvmeib_cpu_mask_info mask_info;

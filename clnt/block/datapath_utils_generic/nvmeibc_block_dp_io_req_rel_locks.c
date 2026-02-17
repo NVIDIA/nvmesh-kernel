@@ -20,7 +20,7 @@ MODULE_PARM_DESC(warn_if_lock_took_more_than_n_msec, "If lock acquisition takes 
 #ifdef DEBUG_CONTENDED_LOCKS
 unsigned warn_if_lock_held_more_than_n_msec = __SUSPICIONS_LOCK_TIME / 4;
 module_param(warn_if_lock_held_more_than_n_msec, uint, 0644);
-MODULE_PARM_DESC(warn_if_lock_held_more_than_n_msec, "If lock held more than X[msec], issue warning to log");
+MODULE_PARM_DESC(warn_if_lock_held_more_than_n_msec, "Defines the time in milli-seconds a lock is held before issuing a warning to the log.");
 #endif
 
 /* YR: TODO: should be parameters received via some management system */
