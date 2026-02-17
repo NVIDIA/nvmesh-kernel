@@ -82,9 +82,11 @@ struct nvmeib_hash_table *nvmeib_hash_create(int log2_of_n_arr_entries, const ch
 
 void nvmeib_hash_tbl_free(struct nvmeib_hash_table *hash_tbl);
 #define NVMEIB_HASH_TBL_FREE(name_, __hash_tbl) ({								\
-	NVMEIB_HASH_DUMP_STATISTICS(name_, __hash_tbl);								\
-	nvmeib_hash_tbl_free(__hash_tbl);											\
-	__hash_tbl = NULL;															\
+	if (__hash_tbl) {															\
+		NVMEIB_HASH_DUMP_STATISTICS(name_, __hash_tbl);							\
+		nvmeib_hash_tbl_free(__hash_tbl);										\
+		__hash_tbl = NULL;														\
+	}																			\
 })
 
 void *nvmeib_hash_add_uuid(struct nvmeib_hash_table *hash_tbl, const union nvmeib_uuid *uuid, void *ptr_to_obj);
