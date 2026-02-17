@@ -121,7 +121,7 @@ MODULE_PARM_DESC(jam_non_free_entry_timeout, "JAM timeout for having a journal e
 #endif
 ulong nvmeibc_jam_log_metrics_period = DEFAULT_JAM_LOG_METRICS_PERIOD;
 module_param_named(jam_log_metrics_period, nvmeibc_jam_log_metrics_period, ulong, 0644);
-MODULE_PARM_DESC(jam_log_metrics_period, "Jam periodic metrics logging period [sec]");
+MODULE_PARM_DESC(jam_log_metrics_period, "Defines the journal manager's periodic metrics logging period in seconds.");
 #endif
 
 bool nvmeibc_jam_pending_enb = true;
@@ -130,7 +130,7 @@ MODULE_PARM_DESC(jam_pending_enb, "Controls whether to enable or allow pending a
 
 bool nvmeibc_jam_use_system_pcpu_wq = false;
 module_param_named(jam_use_system_pcpu_wq, nvmeibc_jam_use_system_pcpu_wq, bool, 0444);
-MODULE_PARM_DESC(jam_use_system_pcpu_wq, "Jam use system pcpu wq for pending requests");
+MODULE_PARM_DESC(jam_use_system_pcpu_wq, "Determines whether the journal manager uses the system per-cpu workqueue for pending requests.");
 
 /*
 This IDX will be used when skipping ec locks as we are using the same TXID
