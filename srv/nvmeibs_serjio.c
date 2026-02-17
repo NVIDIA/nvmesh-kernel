@@ -46,7 +46,7 @@ MODULE_PARM_DESC(nvmeibs_jrange_num_blocks, "Total number of journal blocks in j
 
 static unsigned nvmeibs_serjio_resched_work_wait_max = 10;
 module_param_named(serjio_resched_work_wait_max, nvmeibs_serjio_resched_work_wait_max, uint, 0644);
-MODULE_PARM_DESC(serjio_resched_work_wait_max, "Amount of time in seconds to wait for a rescheduled SERJIO work item to run. SERJIO work items are related to garbage collection and cleaning up of journal entries.");
+MODULE_PARM_DESC(serjio_resched_work_wait_max, "Amount of time in seconds to wait for a rescheduled SERJIO work item to run. SERJIO work items are related to garbage collection and cleaning up of journal entries. Works are rescheduled if SERJIO is in a busy state, e.g., due to a GPT update, and cannot process normal work.");
 
 static unsigned nvmeibs_serjio_jgc_avail_ent_low_wm_mult = NVMEIB_JGC_AVAIL_ENT_LOW_WM_MULT;
 module_param_named(jgc_avail_ent_low_wm_mult, nvmeibs_serjio_jgc_avail_ent_low_wm_mult, uint, 0644);
@@ -65,7 +65,7 @@ static int next_free_alloc_quarantined_idx = -1;
 #if !defined(NVMESH_IS_PRODUCTION_COMPILATION) || (NVMESH_IS_PRODUCTION_COMPILATION==0)
 
 module_param_named(serjio_init_db_interrupt_range, nvmeibs_serjio_init_db_interrupt_range, uint, 0644);
-MODULE_PARM_DESC(serjio_init_db_interrupt_range, "Interrupt Init DB when it gets to this range.");
+MODULE_PARM_DESC(serjio_init_db_interrupt_range, "Interrupt Init DB when it gets to this range. Warning: This is for debug only, used for testing SERJIO init failures.");
 
 module_param_named(serjio_fail_next_gpt_update, nvmeibs_serjio_fail_next_gpt_update, bool, 0644);
 MODULE_PARM_DESC(serjio_fail_next_gpt_update, "SERJIO - Fail the next GPT update (for testing).");
@@ -81,7 +81,7 @@ module_param_named(serjio_next_free_alloc_quarantined, next_free_alloc_quarantin
 MODULE_PARM_DESC(serjio_next_free_alloc_quarantined, "SERJIO - Allocate a quarantined range index for the next allocation (for testing).");
 
 module_param_named(serjio_next_free_alloc_quarantined_idx, next_free_alloc_quarantined_idx, int, 0644);
-MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range index for next invalid allocation.");
+MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range index for next invalid allocation. Relevant only if next_free_alloc_quarantined is set to true.");
 #endif
 
 #define SERJIO_WQ_PEND_MAX_WAIT (nvmeibs_serjio_resched_work_wait_max * HZ)
