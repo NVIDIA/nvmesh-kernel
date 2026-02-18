@@ -54,7 +54,11 @@ function __abort_ci_on_failure() {
 
 function T_SANDBOX_gpt_util_self_unit_test() {
 	__build_if_needed;
+	local disks_csv_file="_root/proc/nvmeibs/disks.csv";
+	echo_title "Creating ${disks_csv_file}";
+	echo -e "id,blocks,hw_blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor,model,native_serial\nNVMD_SN_002.1,10240,10240,4096,32,1,1,/dev/nvme1001n1,0,Ok,5122,NVMD_NN_002,NVMD_SN_002\nNVMD_SN_003.1,10240,10240,4096,32,2,1,/dev/nvme1002n1,8,Ok,5123,NVMD_NN_003,NVMD_SN_003" > ${disks_csv_file};
 	./${EXE_NAME} gpt_util -T;
+	rm ${disks_csv_file};
 	__abort_ci_on_failure;
 }
 

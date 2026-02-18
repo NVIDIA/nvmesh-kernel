@@ -3690,7 +3690,7 @@ DEFINE_TEST(csv_parsing_path)
 	 * This test validates the flag is accepted and parsing logic doesn't crash
 	 * Expected: Fails gracefully with "device not found" message
 	 */
-	SELF_TEST_ARGV("-d", "/dev/nvme0n1");
+	SELF_TEST_ARGV("-d", TOMA_ROOT_DIR "/dev/nvme0n1");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have failed (device not in CSV)");
 		goto out;
