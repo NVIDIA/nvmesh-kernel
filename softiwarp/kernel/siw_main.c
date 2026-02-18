@@ -115,6 +115,10 @@ static char tx_cpu_list[1024] = "";
 module_param_string(tx_cpu_list,tx_cpu_list, 1024, 0444);
 MODULE_PARM_DESC(tx_cpu_list, "List of CPUs siw TX thread shall be bound to (format: comma separated no spaces) (string).");
 
+unsigned relax_timeouts = 0;
+module_param(relax_timeouts, uint, 0644);
+MODULE_PARM_DESC(relax_timeouts, "Multiplier for default timeouts (0 - unset)");
+
 int default_tx_cpu = -1;
 static int tx_on_all_cpus = 1;
 extern int siw_run_sq(void *);

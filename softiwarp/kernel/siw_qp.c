@@ -1419,8 +1419,8 @@ void siw_cq_notify(struct siw_cq *cq, u32 flags, bool force)
 		(*cq->ofa_cq.comp_handler)(&cq->ofa_cq, cq->ofa_cq.cq_context);
 		handler_jif = jiffies - handler_start_jif;
 		if (handler_jif > SIW_CQ_HANDLER_TIMEOUT_LOG) {
-			dprint(DBG_ON, "(CQ%d): handler %pF (context " dprint_ptr_str() ") took %u ms\n", OBJ_ID(cq), cq->ofa_cq.comp_handler, cq->ofa_cq.cq_context, jiffies_to_msecs(handler_jif));
-			WARN_ON_ONCE(SIW_CQ_HANDLER_TIMEOUT_WARN && handler_jif > SIW_CQ_HANDLER_TIMEOUT_WARN);
+			dprint(DBG_ON, "(CQ%d): handler %pS (context " dprint_ptr_str() ") took %u ms\n", OBJ_ID(cq), cq->ofa_cq.comp_handler, cq->ofa_cq.cq_context, jiffies_to_msecs(handler_jif));
+			SIW_TIMEOUT_WARN_ON_ONCE(handler_jif, SIW_CQ_HANDLER_TIMEOUT_WARN);
 		}
 	}
 	else {
@@ -1498,10 +1498,8 @@ void siw_cq_notify_task(unsigned long data)
 		if (delay_jif > SIW_CQ_NOTIFY_TASK_DELAY_LOG) {
 			dprint(DBG_ON, "CQ(%d/" dprint_ptr_str() "): siw_cq_notify_work on cpu: %d delayed by %u ms (jif: %lu sched_jif: %lu)\n",
 			       OBJ_ID(cq), cq, smp_processor_id(), jiffies_to_msecs(delay_jif), jif, sched_jif);
-			if (SIW_CQ_NOTIFY_TASK_DELAY_WARN && 
-				delay_jif > SIW_CQ_NOTIFY_TASK_DELAY_WARN) {
-				WARN_ON_ONCE(1);
-			}
+			if (SIW_CQ_NOTIFY_TASK_DELAY_WARN)
+				SIW_TIMEOUT_WARN_ON_ONCE(delay_jif, SIW_CQ_NOTIFY_TASK_DELAY_WARN);
 		}
 	}
 	if (!atomic_read(&cq->dying))
@@ -1521,10 +1519,8 @@ void siw_cq_notify_work(struct work_struct *work)
 	if (delay_jif > SIW_CQ_NOTIFY_WORK_DELAY_LOG) {
 		dprint(DBG_ON, "CQ(%d/" dprint_ptr_str() "): siw_cq_notify_work on cpu: %d delayed by %u ms (jif: %lu sched_jif: %lu)\n",
 		       OBJ_ID(cq), cq, smp_processor_id(), jiffies_to_msecs(delay_jif), jif, cq->notify_sched_jif);
-		if (SIW_CQ_NOTIFY_WORK_DELAY_WARN && 
-			delay_jif > SIW_CQ_NOTIFY_WORK_DELAY_WARN) {
-			SIW_WARN_KNOWN_ONCE(1, 620);
-		}
+		if (SIW_CQ_NOTIFY_WORK_DELAY_WARN)
+			SIW_TIMEOUT_WARN_ON_KNOWN_ONCE(delay_jif, SIW_CQ_NOTIFY_WORK_DELAY_WARN, 620);
 	}
 
 	if (!atomic_read(&cq->dying))
