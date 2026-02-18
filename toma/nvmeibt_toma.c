@@ -704,7 +704,7 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_drain(stat_wq);
 	nvmeibt_wq_destroy(stat_wq);
 	stat_wq = NULL;
-
+	NNVMEIBT_CLOSE(__AUTOID__, epoll_fd);
 	NFOUT;
 
 	nvmeibt_toma_abort_child_processes();	// Here we wait for trace pollers as well. From this point no binary traces prints!

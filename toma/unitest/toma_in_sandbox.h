@@ -112,7 +112,7 @@ struct nlmsghdr {				// 16[bytes] Copied netlink header from linux include
 #include <syslog.h>
 enum sys_log_priorities { LOG_DEBUG = 7, LOG_INFO = 6, LOG_NOTICE = 5, LOG_WARNING = 4, LOG_ERR = 3, LOG_CRIT = 2, LOG_ALERT = 1, LOG_EMERG = 0 };
 void syslog(int priority, const char *format, ...);
-static inline void closelog(void) {}
+void closelog(void);
 #define	_PATH_LOG TOMA_ROOT_DIR "sys_log"
 
 #define	_SYS_IOCTL_H 1

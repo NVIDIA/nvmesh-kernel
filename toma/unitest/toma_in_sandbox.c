@@ -298,11 +298,23 @@ struct t_sandbox_sock* t_sandbox_sock_tbl_find_next_unused(struct t_sandbox_sock
 	}
 }
 
+void t_sandbox_sock_tbl_destroy(struct t_sandbox_sock_tbl *ts) {
+	for (int i = 0; i < ts->n_socks; i++) {
+		const struct t_sandbox_sock *s = &ts->socks[i];
+		if (sbfd_is_used(s)) {		// Leak of this file descriptor
+			SANDBOX_PRINT("TSB[%2d]: " COL_RED_BOLD "Leaking fd=%2d, " COL_RESET " path=%-40s\n", i, s->fd, s->addr.sun_path);
+			//BUG_ON(true); - Toma still have leaks of file descriptors, Todo solve them, enable bug on and remove usage of sys->can_use_bin_traces
+		}
+	}
+}
+
 struct t_sandbox_all {
 	struct t_sandbox_sock_tbl TS;
-	struct TSB_signals_queue {						// Signaling mechanism to toma
+	struct TSB_signals_queue {						// Signaling/Logging mechanism to toma
 		struct TSB_sock_otherside o;
 		int sig;
+		int fd_signal;
+		int fd_syslog;
 	} TSB_sig;
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_sock_otherside o;
@@ -455,6 +467,7 @@ void t_sandbox_all_destroy(void) {
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
 	sb_cluster_conf_destroy(&sys->cfg);
 	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
+	t_sandbox_sock_tbl_destroy(&sys->TS);
 	free(sys);
 	sys = NULL;
 }
@@ -1678,11 +1691,13 @@ void toma_unitest_notify_stop_traces(void) {
 }
 /************************************* logging ********************************/
 int init_signal_handling(const char *exe_name) {
+	struct TSB_signals_queue* tsb_q = &sys->TSB_sig;
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", _PATH_LOG);
-	__connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
+	tsb_q->fd_syslog = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
 	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_signal_%s", exe_name);
-	return __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
+	tsb_q->fd_signal = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
+	return tsb_q->fd_signal;
 }
 
 void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
@@ -1697,6 +1712,12 @@ int nvmeibt_nonblock_fd(int fd) {
 	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
 	(void)s;
 	return 0;
+}
+
+void closelog(void) {
+	struct TSB_signals_queue* tsb_q = &sys->TSB_sig;
+	override_close(tsb_q->fd_syslog); tsb_q->fd_syslog = -1;
+	override_close(tsb_q->fd_signal); tsb_q->fd_signal = -1;
 }
 
 /************************************* nvme ***********************************/
