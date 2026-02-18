@@ -148,7 +148,7 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 		XDLIST_DEL(&wq_entry->link);
 		NNVMEIBT_BM_FREE(bfd8ejv, wq_entry);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(awaited_lockid, &seg_active->awaited_lockids) {
+	XHASHTABLE_FOR_EACH_SAFE(awaited_lockid, &seg_active->awaited_lockids_hash_by_lockid) {
 		XDLIST_DEL(&(awaited_lockid->awaited_lockids_link));
 		NNVMEIBT_BM_FREE(nvmeibt_seg_active_free_trace_2, awaited_lockid);
 	}
@@ -501,7 +501,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8);
 	seg_active->stale_registrants_hash_by_purified_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
 	XHASHTABLE_INIT(&seg_active->stale_locks_hash);
-	XHASHTABLE_INIT(&seg_active->awaited_lockids);
+	XHASHTABLE_INIT(&seg_active->awaited_lockids_hash_by_lockid);
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);
 	XDLIST_HEAD_INIT(&seg_active->owner_lock_ids_to_release);
 	XDLIST_INIT_LINK(&seg_active->global_seg_active_post_update_action_link, NULL);
