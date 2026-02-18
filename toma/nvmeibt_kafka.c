@@ -1445,6 +1445,7 @@ static int64_t		HW_full_config_consumer_highest_version_of_msg_received_to_date 
 static int64_t		HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
 static int64_t		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 static int64_t		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
+static int64_t		incremental_VOL_updates_offset_to_commit = RD_KAFKA_OFFSET_INVALID;
 
 static int HW_full_config_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".TOMA.hardwareConfiguration.1.0.0";
@@ -1594,12 +1595,14 @@ static int incremental_VOL_updates_consume(void) {
 	int									rv;		// -1: err, 0:consumed something, 1:OK_skipped
 	bool								is_delVolCompleted = false, is_new_or_updateVol = false;
 	enum KAFKA_EVENT_TYPE				k_event = KAFKA_EVENT_TYPE_UNKNOWN;
+	static int64_t						incremental_VOL_updates_last_vol_msg_offset = RD_KAFKA_OFFSET_INVALID;
 
 	if (!is_consuming_leader_VOL_msgs()) {
 		N_Tf(hasume5, "Not is_consuming_leader_VOL_msgs, skipping");
 		return 0;
 	}
 	NTOMA_ASSERT(rvar6oa, k_incremental_VOL_updates.consumer, "No incremental_VOL_updates_consumer");
+
 	rv = consumer_read_msg_from_kafka(&k_incremental_VOL_updates, &msg_param, &json_tree_root);
 	if (rv != 0) {
 		if (rv != 1)
@@ -1610,10 +1613,16 @@ static int incremental_VOL_updates_consume(void) {
 	if (strcmp(msg_param.messageType, "deleteVolume"         ) == 0) { k_event = KAFKA_EVENT_TYPE_VOL_DEL; }
 	if (strcmp(msg_param.messageType, "deleteVolumeCompleted") == 0) { k_event = KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED; is_delVolCompleted =  1; }
 	if (strcmp(msg_param.messageType, "updateVolume"         ) == 0) { k_event = KAFKA_EVENT_TYPE_VOL_UPD;           is_new_or_updateVol = 1; }
+	if (incremental_VOL_updates_offset_to_commit < RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority))
+		incremental_VOL_updates_offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
+
 	if (strcmp(msg_param.messageType, "updateLeaderKeepaliveToken") == 0) {
 		struct keepAliveToken_params_ctx keepAliveToken_params;			// The token-update messages are internal to toma_kafka. No need for wakeup
 		rv = parse_updateTomaKeepaliveToken(json_tree_root, &keepAliveToken_params, 0);
 		kafka_set_leader_keepalive_token_provided_by_mgmt(keepAliveToken_params.token, keepAliveToken_params.keepaliveInterval);
+		if (incremental_VOL_updates_last_vol_msg_offset <= k_incremental_VOL_updates.offset_committed) { // The last VOL_XXX msg was committed, so we can commit till this updateLeaderKeepaliveToken msg
+			incremental_VOL_updates_offset_to_commit = k_incremental_VOL_updates.consumer_offset;
+		}
 		rv = 0;
 	} else if (k_event != KAFKA_EVENT_TYPE_UNKNOWN) {
 		struct mm_mgmt_conf *mgmt_conf = NNVMEIBT_BM_CALLOC(rygaj4l,  sizeof(*mgmt_conf));					// Parse them just the same, although deleteVolume has just two fields
@@ -1624,6 +1633,7 @@ static int incremental_VOL_updates_consume(void) {
 		wakeup_params->event_data = (void *)mgmt_conf;
 		wakeup_params->kafka_offset = k_incremental_VOL_updates.consumer_offset;
 		wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs = kafka_applied_consuming_leader_VOL_msgs_raft_term;
+		incremental_VOL_updates_last_vol_msg_offset = k_incremental_VOL_updates.consumer_offset;
 		__wakeup_toma_main_tread(wakeup_params);
 	} else {
 		N_Ef(ajk348z, "Unexpected messageType=@STR", msg_param.messageType);
@@ -2119,10 +2129,9 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	}
 	if (is_consuming_leader_VOL_msgs()) {
 		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
-		const int64_t offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
-		if (purify_offset(offset_to_commit) > purify_offset(k_incremental_VOL_updates.offset_committed)) {
-			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD latest=@INT64_TD", purify_offset(offset_to_commit), purify_offset(k_incremental_VOL_updates.consumer_offset));
-			kafka_commit_by_offset_async(&k_incremental_VOL_updates, offset_to_commit);
+		if (purify_offset(incremental_VOL_updates_offset_to_commit) > purify_offset(k_incremental_VOL_updates.offset_committed)) {
+			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD latest=@INT64_TD", purify_offset(incremental_VOL_updates_offset_to_commit), purify_offset(k_incremental_VOL_updates.consumer_offset));
+			kafka_commit_by_offset_async(&k_incremental_VOL_updates, incremental_VOL_updates_offset_to_commit);
 		}
 	}
 	if (is_consuming_leader_TARGET_msgs()) {
