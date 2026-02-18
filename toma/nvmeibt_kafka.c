@@ -549,7 +549,6 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 	char errstr[512];
 	rd_kafka_t *rv = NULL;
 	const bool is_producer = (who == RD_KAFKA_PRODUCER);
-	rd_kafka_topic_conf_t* topic_conf = rd_kafka_topic_conf_new();
 	if (is_producer)
 		*topic_pptr = NULL;									// Topic was not created yet
 	if (*cfg == NULL)
@@ -572,22 +571,20 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 			rv = NULL;
 		} else {}	// High-level consumers don't need rd_kafka_topic_t handles, Topic assignment is done via rd_kafka_assign() or rd_kafka_subscribe()
 	} else {		// Attach a topic (for producers only)
-		*topic_pptr = rd_kafka_topic_new(rv, topic_name, topic_conf);		// Maybe use rd_kafka_topic_conf_set() ?
+		// rd_kafka_topic_conf_t* topic_conf = rd_kafka_topic_conf_new();
+		*topic_pptr = rd_kafka_topic_new(rv, topic_name, NULL /*topic_conf*/);
 		if (!*topic_pptr) {
 			N_Ef(tkckno3, "Failed kafka_topic_new: @STR, destroying kafka obj", topic_name);
 			rd_kafka_destroy(rv);
 			rv = NULL;
-		} else {
-			topic_conf = NULL;	// topic destroys conf as per rdkafka.h
-		}
+			// rd_kafka_topic_conf_destroy(topic_conf);
+		} else {} // topic destroys its conf as per rdkafka.h
 	}
 _out:
 	if (*cfg) {
 		rd_kafka_conf_destroy(*cfg);
 		*cfg = NULL;
 	}
-	if (topic_conf)
-		rd_kafka_topic_conf_destroy(topic_conf);
 	return rv;
 }
 
