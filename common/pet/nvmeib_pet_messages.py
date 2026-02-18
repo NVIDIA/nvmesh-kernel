@@ -836,7 +836,6 @@ class ViewMessages(Command):
 					raise RuntimeError(f'Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}')
 				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
 				yield human_msg
-			yield human_msg._replace(text=f'entity size={entity.size} bytes')
 
 	def __call__(self):
 		human_msgs: typing.Generator[Message, None, None] = self.__iter_human_messages()
