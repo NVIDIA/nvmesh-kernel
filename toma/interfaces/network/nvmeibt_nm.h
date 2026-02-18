@@ -381,6 +381,7 @@ struct nvmeibt_nm_path {
 	int is_rtr;
 	int is_rts;
 	uint8_t ping_id;
+	uint8_t last_received_ping_request_id;
 	struct nvmeibt_nm_linkable poll_link;
 	int poll_linked;
 	int is_sender;

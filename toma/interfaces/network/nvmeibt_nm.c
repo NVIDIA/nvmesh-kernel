@@ -590,8 +590,9 @@ struct nvmeibt_nm_path * nvmeibt_nm_restart_path(struct nvmeibt_nm_path *path)
 	* */
 	if (!XDLIST_NULL(&path->best_ready_link.link))
 		XDLIST_DEL(&path->best_ready_link.link);
-	path->ping_retry_counter = 0;
+	path->ping_retry_counter = -1;
 	path->ping_id = 0;
+	path->last_received_ping_request_id = 0;
 	path->is_sender = 0;
 	path->last_received_ping_ns_UNUSED = 0;
 
@@ -662,11 +663,8 @@ static int handle_path(void *ctx, int is_read, int is_write, int dry_tries)
 		break;
 	case nvmeibt_nm_ps_connected:
 	case nvmeibt_nm_ps_wait_ping_ack:
-		if (path->ping_retry_counter < QP_PING_UD_NUM_RETRIES) {
-			if (path->ping_retry_counter) {
-				NVMEIBT_PATH_COUNTER_INC(path, ping_retries);
-			}
-			if (pathtoln(path)->hw_func_tbl.send_ping(path, 0, path->ping_id, path->ping_retry_counter)) {
+		if (path->ping_retry_counter < QP_PING_UD_NUM_RETRIES - 1) {
+			if (pathtoln(path)->hw_func_tbl.send_ping(path, 0, path->ping_id, path->ping_retry_counter + 1)) {
 				nvmeibt_nm_path_set_last_error(path, nvmeibt_nm_ple_failed_ping);
 				nvmeibt_nm_restart_path(path);
 			}
@@ -674,6 +672,8 @@ static int handle_path(void *ctx, int is_read, int is_write, int dry_tries)
 				getnstimeofday(&(path->ping_send_timespec));
 				nvmeibt_nm_set_path_state(path, nvmeibt_nm_ps_wait_ping_ack);
 				++path->ping_retry_counter;
+				NVMEIBT_PATH_COUNTER_INC(path, ping_retries);
+				N_If(nm_handle_path_w0, "Path @STR sent ping request ping_retry_counter is now @INT", path->name, path->ping_retry_counter);
 			}
 		}
 		else {
@@ -2595,7 +2595,10 @@ static void path_modify_to_RTS(struct nvmeibt_nm_path *path)
 		XDLIST_ADD_TAIL(&path->ra->ready, &path->base);
 		if (!XDLIST_NULL(&path->best_ready_link.link))
 			XDLIST_DEL(&path->best_ready_link.link);
-		/* add the best_ready list that the remote node maintains */
+		/* add the best_ready list that the remote node maintains.
+		 * Note: We only add to best_ready here when path becomes RTS.
+		 * The ping_id check for promotion happens in nvmeibt_nm_on_recv_ping
+		 * when we receive ping requests with retry_count == 0. */
 		XDLIST_ADD_TAIL(&path->ra->rn->best_ready, &path->best_ready_link);
 		nvmeibt_srm_allow_send(path->srm, path->remote_srm_id);
 		/* use NULL in the following to make the node ready for send.
@@ -2636,7 +2639,7 @@ int nvmeibt_nm_connect_path(struct nvmeibt_nm_path *path) {
 		nvmeibt_nm_restart_path(path);
 		goto out;
 	}
-	path->ping_retry_counter = 0;
+	path->ping_retry_counter = -1;
 	nvmeibt_nm_path_modify_to_rtr(path);
 	if (!wait_first_ping || path->loopback)
 		path_modify_to_RTS(path);
@@ -2655,6 +2658,12 @@ out:
 int64_t nvmeibt_raft_get_roof_leader_heartbeat_timeout_ns(void);
 
 #define PING_EXCEPTIONAL_TO_STD_RATIO 10
+
+static inline bool is_ping_id_newer_or_equal(uint8_t new_ping_id, uint8_t last_received)
+{
+	return (uint8_t)(new_ping_id - last_received) < 128;
+}
+
 void nvmeibt_nm_on_recv_ping(struct nvmeibt_nm_path *path, union nvmeibt_nm_ping_imm_data *v) {
 	int64_t			ns_since_ping;
 	struct nvmeib_iir	*all_ping_IIR = &(path->ra->rn->node->peer_statistics.ping_response_time_IIR);
@@ -2665,7 +2674,7 @@ void nvmeibt_nm_on_recv_ping(struct nvmeibt_nm_path *path, union nvmeibt_nm_ping
 				 v->fields.srm_id_lsb == (uint16_t)path->srm_id &&
 				 v->fields.ping_id == path->ping_id)) {
 			getnstimeofday(&(path->ra->rn->node->peer_statistics.last_ping_response_timespec));
-			path->ping_retry_counter = 0;
+			path->ping_retry_counter = -1;
 			++path->ping_id;
 			//path->pp->pn->ln->renew_status = 1;
 			N_Df(nm_hprc_d1, "Path @STR Received valid ping reply",
@@ -2697,30 +2706,54 @@ void nvmeibt_nm_on_recv_ping(struct nvmeibt_nm_path *path, union nvmeibt_nm_ping
 			NVMEIBT_PATH_COUNTER_INC(path, invalid_ping_response);
 		}
 	}
-	else {
+	else { /* ping request */
 		if (v->fields.srm_id_lsb == (uint16_t)path->srm_id) {
-			N_Df(nm_hprc_d2, "Path @STR recived valid ping request: "
+			if (!is_ping_id_newer_or_equal(v->fields.ping_id, path->last_received_ping_request_id)) {
+				N_If(nm_hprc_d3, "Path @STR ignoring stale ping request: "
+					"ping_id @INT (last received @INT)", path->name,
+					(unsigned)v->fields.ping_id,
+					(unsigned)path->last_received_ping_request_id);
+				goto out;
+			}
+			N_If(nm_hprc_d2y, "Path @STR recived valid ping request: "
 				"ping_id @INT, retry_count @INT", path->name,
 				(unsigned)v->fields.ping_id,
 				(unsigned)v->fields.retry_count);
 			path->last_received_ping_ns_UNUSED = timespec_to_nsec(path->ra->rn->node->peer_statistics.last_ping_response_timespec);
-			/* we are already in the best_ready list so we put
-			 * ourself in the head
-			 **/
+			/* Update last received ping_id */
+			path->last_received_ping_request_id = v->fields.ping_id;
+			
 			if (!XDLIST_NULL(&path->best_ready_link.link)) {
-				XDLIST_DEL(&path->best_ready_link.link);
-				XDLIST_ADD_HEAD(&path->ra->rn->best_ready,
-					&path->best_ready_link);
+				if (path->ping_retry_counter <= 0 && v->fields.retry_count == 0) {
+					/* 
+					only promote stable path to head: 
+					1) We are not currently sending a retry for ping request
+					2) The received ping request is not a retry
+					*/
+					N_If(nm_hprc_dx, "Path @STR promoting to head", path->name);
+					XDLIST_DEL(&path->best_ready_link.link);
+					XDLIST_ADD_HEAD(&path->ra->rn->best_ready,
+						&path->best_ready_link);
+				} else {
+					N_If(nm_hprc_d2, "Path @STR got ping request with retry_count @UINT ping_retry_counter @INT",
+									 path->name, (unsigned)v->fields.retry_count, path->ping_retry_counter);
+				}
 			}
-			if (pathtoln(path)->hw_func_tbl.send_ping(path, 1, v->fields.ping_id, v->fields.retry_count))
+			
+			if (pathtoln(path)->hw_func_tbl.send_ping(path, 1, v->fields.ping_id, v->fields.retry_count)) {
 				N_ETf(nm_hprc_e1, "Path @STR failed to send ping response: "
 					"ping_id @INT, retry_count @INT",
 					path->name,
-					(unsigned)v->fields.ping_id,
+					(unsigned)v->fields.ping_id,	
 					(unsigned)v->fields.retry_count);
+				goto out;
+			}
 			getnstimeofday(&(path->ping_send_timespec));
 		}
 	}
+
+out:
+	return;
 	//PFOUT_;
 }
 
