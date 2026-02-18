@@ -122,15 +122,15 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 		NNVMEIBT_BM_FREE(bnsj29k, stale_lock);
 	}
 	unlock_stale_locks_hash(seg_active);
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_hash_by_cid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_hash_by_handle) {
 		free_reg_ctx(reg_ctx);
 	}
-	NVMEIB_HASH_TBL_FREE(83hhu2l, seg_active->longing_registrants_hash_by_cid);
+	NVMEIB_HASH_TBL_FREE(83hhu2l, seg_active->longing_registrants_hash_by_handle);
 	//
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_cid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_handle) {
 		free_reg_ctx(reg_ctx);
 	}
-	NVMEIB_HASH_TBL_FREE(dujyq02, seg_active->active_registrants_hash_by_cid);
+	NVMEIB_HASH_TBL_FREE(dujyq02, seg_active->active_registrants_hash_by_handle);
 	//
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
 		// free_reg_ctx(reg_ctx);	// Already freed, the same registrants as active_registrants_hash_by_handle
@@ -497,9 +497,9 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active = NNVMEIBT_TOMA_CALLOC(fwwq99a, 1, sizeof(*seg_active));
 	seg_active->uuid = *uuid;
 	NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(v20sslk, seg_active, "LOCAL_DISK", 1);
-	seg_active->longing_registrants_hash_by_cid = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_cid", 4);
+	seg_active->longing_registrants_hash_by_handle = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_handle", 8);
 	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4);
-	seg_active->active_registrants_hash_by_cid = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_cid", 4);
+	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8);
 	seg_active->stale_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
 	XHASHTABLE_INIT(&seg_active->stale_locks_hash);
 	XHASHTABLE_INIT(&seg_active->awaited_lockids);

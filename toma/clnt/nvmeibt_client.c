@@ -277,8 +277,8 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 				// The HANDLE is unique (handle per subscribe).
 				// FYI, The same CID is used also for other segs on this disk (with a different client_messaging_handle)
 				// We might have two+ active handles from the same client (say recoverer + encrypt + attach). same CID different handles
-				reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_hash_by_cid, client_messaging_handle_to_cid(msg->toma_conn_proc_handle));
-				longing_reg_ctx = nvmeib_hash_search_uint32_t(seg_active->longing_registrants_hash_by_cid, client_messaging_handle_to_cid(msg->toma_conn_proc_handle));
+				reg_ctx = nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, msg->toma_conn_proc_handle);
+				longing_reg_ctx = nvmeib_hash_search_uint64_t(seg_active->longing_registrants_hash_by_handle, msg->toma_conn_proc_handle);
 				if (!reg_ctx && !longing_reg_ctx) {
 					continue;
 				}

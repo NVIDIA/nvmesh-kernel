@@ -88,9 +88,9 @@ struct nvmeibt_seg_active {
 	struct nvmeibt_local_disk					*local_disk;	// Might be null if local only in config
 	struct nvmeibt_disk_segment					*disk_segment;
 	//
-	struct nvmeib_hash_table					*longing_registrants_hash_by_cid;
+	struct nvmeib_hash_table					*longing_registrants_hash_by_handle;
 	struct nvmeib_hash_table					*active_registrants_hash_by_lockid;
-	struct nvmeib_hash_table					*active_registrants_hash_by_cid;	// Why by cid and not by client_messaging_handle
+	struct nvmeib_hash_table					*active_registrants_hash_by_handle;	// Why by cid and not by client_messaging_handle
 																					// There should be at most one with the cid. Still need to verify identical client_messaging_handle
 	struct nvmeib_hash_table					*stale_registrants_hash_by_lockid;
 	XHASHTABLE_DECLARE(stale_locks_hash,           struct stale_lock_ctx,                    seg_active_link,      NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE) + 1);	// EC after unreg, record all registrants' stale-locks
@@ -331,7 +331,7 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 #define NVMEIBT_SEG_ACTIVE_REMOVE_ACTIVE_REGISTRANT_FROM_HASHES(__seg_active__, __reg_ctx__)	do {														\
 	if ((__seg_active__) && (__reg_ctx__)) {																												\
 		nvmeib_hash_delete_uint32_t(__seg_active__->active_registrants_hash_by_lockid, nvmeib_lockid_purify(__reg_ctx__->reg_lock_id));						\
-		nvmeib_hash_delete_uint32_t(__seg_active__->active_registrants_hash_by_cid, client_messaging_handle_to_cid(__reg_ctx__->client_messaging_handle));	\
+		nvmeib_hash_delete_uint64_t(__seg_active__->active_registrants_hash_by_handle, __reg_ctx__->client_messaging_handle);								\
 	}																																						\
 } while (0)
 
@@ -339,7 +339,7 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 	if ((__seg_active__) && (__reg_ctx__)) {																															\
 		__seg_active__->active_reservation_mode_version = __seg_active__->committed_reservation_mode_version;															\
 		nvmeib_hash_add_uint32_t(__seg_active__->active_registrants_hash_by_lockid, nvmeib_lockid_purify(__reg_ctx__->reg_lock_id), (__reg_ctx__));						\
-		nvmeib_hash_add_uint32_t(__seg_active__->active_registrants_hash_by_cid, client_messaging_handle_to_cid(__reg_ctx__->client_messaging_handle), (__reg_ctx__));	\
+		nvmeib_hash_add_uint64_t(__seg_active__->active_registrants_hash_by_handle, __reg_ctx__->client_messaging_handle, (__reg_ctx__));								\
 	}																																									\
 } while (0)
 
@@ -557,7 +557,7 @@ static inline int nvmeibt_seg_active_n_active_registrants_on_applied_praid_versi
 	{ return (seg_active ? seg_active->n_active_registrants_on_active_praid_version : 0); }
 
 static inline int nvmeibt_seg_active_n_longing_registrants(const struct nvmeibt_seg_active *seg_active)
-	{ return (seg_active ? nvmeib_hash_get_n_elements(seg_active->longing_registrants_hash_by_cid) : 0); }
+	{ return (seg_active ? nvmeib_hash_get_n_elements(seg_active->longing_registrants_hash_by_handle) : 0); }
 
 static inline int nvmeibt_seg_active_n_awaited_lockids(const struct nvmeibt_seg_active *seg_active)
 	{ return (seg_active ? XHASHTABLE_N_ELEMENTS(&seg_active->awaited_lockids) : 0); }
