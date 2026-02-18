@@ -1562,8 +1562,6 @@ bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *inpu
 {
 	struct nvmeibt_registrant_ctx	*longing_registrant;
 
-	// is_remove_from_all_segs_by_cid=true -> The caller is removing longing client from all segments on disk. Otherwise Only for specific segment
-	// In any case, here it is a CID that fully identifies the client
 	longing_registrant = nvmeib_hash_search_uint64_t(input_reg_ctx->seg_active->longing_registrants_hash_by_handle, input_reg_ctx->client_messaging_handle);
 	if (longing_registrant) {
 		remove_longing_registrant_on_seg(input_reg_ctx->seg_active, longing_registrant);
@@ -1732,7 +1730,6 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 			 nvmeibt_seg_active_UUID_8(seg_active));
 		n++;
 	}
-	NTOMA_ASSERT(fkiuy75, n == n_released_lock_ids, "This is only for initial debug, can be removed before push (@INT, @INT)", n, n_released_lock_ids);
 
 	// YR: TODO: add in qsort once regular search is debugged
 	// qsort();
@@ -1830,15 +1827,7 @@ static void registrant_disconnect_wrapper(struct nvmeibt_wq_entry *wq_entry)
 	struct registrant_disconnect_wq_entry 	*entry;
 	struct nvmeibt_seg_active				*seg_active;
 
-#define DEBUG_ODD 1
-#if DEBUG_ODD
-	struct nvmeibt_registrant_ctx *reg_ctx;
-	unsigned long long save_cmh;
-	union nvmeib_lock_id save_rli;
-#endif
-
 	NFIN;
-
 	entry = container_of(wq_entry, struct registrant_disconnect_wq_entry, wq_entry);
 	seg_active = entry->seg_active;
 	if (nvmeibt_local_disk_is_being_deleted(nvmeibt_seg_active_get_local_disk(seg_active))) {
@@ -1851,27 +1840,7 @@ static void registrant_disconnect_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		nvmeibt_seg_active_UUID_8(seg_active),
 		entry->reg_ctx->client_messaging_handle,
 		nvmeib_lockid_purify(entry->reg_ctx->reg_lock_id));
-
-#if DEBUG_ODD
-	reg_ctx = entry->reg_ctx;
-	save_cmh = entry->reg_ctx->client_messaging_handle;
-	save_rli = entry->reg_ctx->reg_lock_id;
-#endif
-
 	owner_locks_set_to_release(entry);
-
-#if DEBUG_ODD
-	if (reg_ctx != entry->reg_ctx ||
-		save_cmh != entry->reg_ctx->client_messaging_handle ||
-		nvmeib_lockid_purify(save_rli) != nvmeib_lockid_purify(entry->reg_ctx->reg_lock_id)) {
-		N_Ef(iuyrh85, "Inconceivable, @PTR vs. @PTR, @LLX vs @LLX, @X vs. @X. G-d shave the queen",
-			reg_ctx, entry->reg_ctx,
-			save_cmh, entry->reg_ctx->client_messaging_handle,
-			nvmeib_lockid_purify(save_rli), nvmeib_lockid_purify(entry->reg_ctx->reg_lock_id));
-		nvmeibt_abort(ES_FATAL);
-	}
-#endif
-
 out:
 	NFOUT;
 }
