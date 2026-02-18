@@ -4,7 +4,6 @@ import re
 import os
 import abc
 import enum
-import json
 import errno
 import struct
 import typing
@@ -16,6 +15,7 @@ import itertools
 
 
 from elftools.elf.elffile import ELFFile
+from elftools.elf.sections import Section
 from elftools.dwarf.die import DIE
 from elftools.dwarf.descriptions import describe_attr_value
 
@@ -370,8 +370,6 @@ class DwarfRuntime:
 	@typing.no_type_check
 	def __build_enum(self, die: DIE) -> EnumType:
 		base_type = self.__build_base(die)
-
-		type_name: str = self.__get_die_name(die)
 
 		name2value: dict[str, int] = {}
 		for child in die.iter_children():
@@ -829,7 +827,6 @@ class ViewMessages(Command):
 	@typing.no_type_check
 	def __iter_human_messages(self) -> typing.Generator[Message, None, None]:
 		for entity in self.__iter_entities():
-			last_human_msg = None
 			for msg in self.__iter_entity_messages(entity):
 				try:
 					tmpl = self.templates[msg.offset - 1]
@@ -837,7 +834,6 @@ class ViewMessages(Command):
 					raise RuntimeError(f'Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}')
 				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
 				yield human_msg
-				last_human_msg = human_msg
 			yield human_msg._replace(text=f'entity size={entity.size} bytes')
 
 	def __call__(self):
