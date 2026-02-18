@@ -116,7 +116,7 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	nvmeibt_seg_active_stop_recovery_tasks(seg_active);
 
 	lock_stale_locks_hash(seg_active);
-	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &seg_active->stale_locks_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &seg_active->stale_locks_hash_by_seg_blkset_no) {
 		N_Tf(txctahq, "Deleting stale_lock " STALE_BLKSET_FMT, stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(stale_lock->reg_ctx->reg_lock_id));
 		XDLIST_DEL(&(stale_lock->seg_active_link));
 		NNVMEIBT_BM_FREE(bnsj29k, stale_lock);
@@ -500,8 +500,10 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4);
 	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8);
 	seg_active->stale_registrants_hash_by_purified_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
-	XHASHTABLE_INIT(&seg_active->stale_locks_hash);
+	XHASHTABLE_INIT(&seg_active->stale_locks_hash_by_seg_blkset_no);
+	// seg_active->stale_locks_hash_by_seg_blkset_no = NVMEIB_HASH_CREATE(sm6beod, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_locks_hash", 8);
 	XHASHTABLE_INIT(&seg_active->awaited_lockids_hash_by_lockid);
+	// seg_active->awaited_lockids_hash_by_lockid = NVMEIB_HASH_CREATE(4vhga0k, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "awaited_lockids", 4);
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);
 	XDLIST_HEAD_INIT(&seg_active->owner_lock_ids_to_release);
 	XDLIST_INIT_LINK(&seg_active->global_seg_active_post_update_action_link, NULL);
@@ -806,7 +808,7 @@ static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *s
 	seg_active = reg_ctx->seg_active;
 	N_Tf(t_s1_tslh, "Deleting " STALE_BLKSET_FMT,
 		stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
-	XHASHTABLE_DEL(&seg_active->stale_locks_hash, &stale_lock->seg_active_link);
+	XHASHTABLE_DEL(&seg_active->stale_locks_hash_by_seg_blkset_no, &stale_lock->seg_active_link);
 	NNVMEIBT_BM_FREE(trace_1_seg_active_remove_stale_lock_from_seg_stale_locks_hash, stale_lock);
 	// is_processing_registrant_removal only between launch_existing_active_registrant_removal and its finalize
 	// During this time, stale_locks can be added/deleted, and an interim n_stale_locks==0 should not terminate_reg_ctx()
@@ -823,7 +825,7 @@ void nvmeibt_seg_active_delete_all_stale_locks_of_registrant(
 
 	NFIN;
 	lock_stale_locks_hash(seg_active);
-	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &seg_active->stale_locks_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &seg_active->stale_locks_hash_by_seg_blkset_no) {
 		if (stale_lock->reg_ctx == reg_ctx) {
 			remove_stale_lock_from_seg_stale_locks_hash(stale_lock);
 		}
@@ -840,7 +842,7 @@ static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
 
 	NFIN;
 	lock_stale_locks_hash(seg_active);
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(stale_lock, &seg_active->stale_locks_hash, seg_blkset_no) {
+	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(stale_lock, &seg_active->stale_locks_hash_by_seg_blkset_no, seg_blkset_no) {
 		if (stale_lock->seg_blkset_no == seg_blkset_no) {
 			const union nvmeib_lock_id expected_lid = stale_lock->reg_ctx->reg_lock_id;
 			N_Tf(t_02_tstlkrec, "Found " STALE_BLKSET_FMT,
@@ -880,7 +882,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash
 		N_Tf(i9i8ub2, "non journalled praid seg=@UUID_8. Skipping.", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(stale_lock, &seg_active->stale_locks_hash, seg_blkset_no) {
+	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(stale_lock, &seg_active->stale_locks_hash_by_seg_blkset_no, seg_blkset_no) {
 		if (stale_lock->seg_blkset_no == seg_blkset_no) {
 			if (stale_lock->reg_ctx == reg_ctx) {
 				N_Wf(xtvsjw9, "Stale entry already exists " STALE_BLKSET_FMT " client_id=@MY_HOSTNAME",
@@ -919,7 +921,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash
 	stale_lock->seg_blkset_no = seg_blkset_no;
 	stale_lock->reg_ctx = reg_ctx;
 	reg_ctx->n_stale_locks++;
-	XHASHTABLE_ADD(&seg_active->stale_locks_hash, stale_lock, seg_blkset_no);
+	XHASHTABLE_ADD(&seg_active->stale_locks_hash_by_seg_blkset_no, stale_lock, seg_blkset_no);
 	N_Tf(t_s6_tslh, "Adding " STALE_BLKSET_FMT,
 		seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 out:
@@ -961,7 +963,7 @@ void stale_locks_hash_to_string(printf_fn_t printf_fn, void *printf_ctx, struct 
 	struct stale_lock_ctx			*stale_lock = NULL;
 	NFIN;
 	lock_stale_locks_hash(seg_active);
-	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &seg_active->stale_locks_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &seg_active->stale_locks_hash_by_seg_blkset_no) {
 		const struct nvmeibt_registrant_ctx *reg_ctx = stale_lock->reg_ctx;
 		const union nvmeib_uuid *uuid = &reg_ctx->client->client_provided_uuid;
 		(*printf_fn)(printf_ctx, "\t\t\t\t- (blkset=0x%llx, lockid=0x%x cuuid=%016llx-%016llx)\n",	// @UUID_0-@UUID_1

@@ -93,7 +93,7 @@ struct nvmeibt_seg_active {
 	struct nvmeib_hash_table					*active_registrants_hash_by_handle;	// Why by cid and not by client_messaging_handle
 																					// There should be at most one with the cid. Still need to verify identical client_messaging_handle
 	struct nvmeib_hash_table					*stale_registrants_hash_by_purified_lockid;
-	XHASHTABLE_DECLARE(stale_locks_hash,           struct stale_lock_ctx,                    seg_active_link,      NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE) + 1);	// EC after unreg, record all registrants' stale-locks
+	XHASHTABLE_DECLARE(stale_locks_hash_by_seg_blkset_no,           struct stale_lock_ctx,                    seg_active_link,      NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE) + 1);	// EC after unreg, record all registrants' stale-locks
 	XHASHTABLE_DECLARE(awaited_lockids_hash_by_lockid,            struct nvmeibt_seg_active_awaited_lockid, awaited_lockids_link, NVMEIB_XHASHTABLE_N_BITS(REGISTRANTS_HASH_SIZE));
 	XDLIST_DECLARE(, struct nvmeibt_registrant_ctx, registrant_on_timeout_link) registrants_on_timeout;	// Always add last
 	XDLIST_DECLARE(, struct nvmeibt_wq_entry, link) owner_lock_ids_to_release;

@@ -1249,7 +1249,7 @@ static void search_stale_lock_hash_and_fill_response_cuuid(
 	// For now, we simply scan all the stale_locks of a seg. If needed, we can add a hash by lockid for this
 	lock_stale_locks_hash(seg_active);
 	TODO(Add seg_active->stale_locks_hash_by_lockid and search directly);
-	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &(seg_active->stale_locks_hash)) {
+	XHASHTABLE_FOR_EACH_SAFE(stale_lock, &(seg_active->stale_locks_hash_by_seg_blkset_no)) {
 		N_Tf(gkit954, "seg=@UUID_8 comparing @X with @X",
 			nvmeibt_seg_active_UUID_8(seg_active),
 			nvmeib_lockid_purify(stale_lock->reg_ctx->reg_lock_id),
