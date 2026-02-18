@@ -22,10 +22,11 @@ from elftools.dwarf.descriptions import describe_attr_value
 from nvmeib_pet_archive import NvmeibPetArchive, KaitaiStream
 
 
-#I really don't care about goodies, like pos & flags & width & precision & length & spec(sgGaAeEfFn)
-#gGaAeEfF - are used to print floating-point numbers - kernel & pet don't have them
-#s is for string - PET will not have them too; the budget is really thin
-PRINTF_SPEC_RE = printf_enum_re = re.compile(r"""
+# I really don't care about goodies, like pos & flags & width & precision & length & spec(sgGaAeEfFn)
+# gGaAeEfF - are used to print floating-point numbers - kernel & pet don't have them
+# s is for string - PET will not have them too; the budget is really thin
+PRINTF_SPEC_RE = printf_enum_re = re.compile(
+	r"""
 	(?P<spec_prefix>0x?)?
 	%(?P<pos>\d+\$)?
 	(?P<flags>[-+ #0]*)
@@ -34,11 +35,14 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(r"""
 	(?P<length>hh|h|ll|l|j|z|t|L)?
 	(?P<spec>[diuoxXcp%])
 	(?:<(?P<tag>enum|union|struct|const)\s(?P<type_name>[A-Za-z_][A-Za-z0-9_]*)>)?
-""", re.VERBOSE)
+""",
+	re.VERBOSE,
+)
 
 # ---------------------------------------------------------------------------
 # Reconstructed message
 # ---------------------------------------------------------------------------
+
 
 class Message(typing.NamedTuple):
 	fname: str
@@ -47,16 +51,18 @@ class Message(typing.NamedTuple):
 	dt_stamp: datetime.datetime
 	text: str
 
+
 # ---------------------------------------------------------------------------
 # Kaitai helpers
 # ---------------------------------------------------------------------------
+
 
 def pet_variant_get_value_attr_name(self: NvmeibPetArchive.PetVariant) -> str:
 	for vname in ('sv1', 'uv1', 'sv2', 'uv2', 'sv4', 'uv4', 'sv8', 'uv8'):
 		value = getattr(self, vname, None)
 		if value is not None:
 			return vname
-	raise RuntimeError(f"Failed to extract value from the variant: {self}")
+	raise RuntimeError(f'Failed to extract value from the variant: {self}')
 
 
 def pet_variant_get_value(self: NvmeibPetArchive.PetVariant) -> int:
@@ -64,11 +70,11 @@ def pet_variant_get_value(self: NvmeibPetArchive.PetVariant) -> int:
 		value = getattr(self, vname, None)
 		if value is not None:
 			return value
-	raise RuntimeError(f"Failed to extract value from the variant: {self}")
+	raise RuntimeError(f'Failed to extract value from the variant: {self}')
 
 
-NvmeibPetArchive.PetVariant.pet_value = property(pet_variant_get_value) # type: ignore
-NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value_attr_name) # type: ignore
+NvmeibPetArchive.PetVariant.pet_value = property(pet_variant_get_value)  # type: ignore
+NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value_attr_name)  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -76,11 +82,12 @@ NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value
 # ---------------------------------------------------------------------------
 
 
-TypeInfo = typing.Union["ErrnoType", "BaseType", "EnumType", "StructType", "UnionType", "ArrayType"]
+TypeInfo = typing.Union['ErrnoType', 'BaseType', 'EnumType', 'StructType', 'UnionType', 'ArrayType']
+
 
 class ErrnoType(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	name: str
 
 	def decode(self, view: memoryview) -> str:
@@ -90,12 +97,12 @@ class ErrnoType(pydantic.BaseModel):
 		raise RuntimeError('unknown errno')
 
 
-class BaseType(pydantic.BaseModel): # actually fundamental type, but DWARF uses "base" as terminology
+class BaseType(pydantic.BaseModel):  # actually fundamental type, but DWARF uses "base" as terminology
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	class Encoding(enum.StrEnum):
 		char = 'char'
-		boolean = 'boolean' 
+		boolean = 'boolean'
 		signed = 'signed'
 		unsigned = 'unsigned'
 
@@ -104,7 +111,7 @@ class BaseType(pydantic.BaseModel): # actually fundamental type, but DWARF uses 
 	encoding: Encoding
 
 	def decode(self, view: memoryview) -> int:
-		data = view[:self.size].tobytes()
+		data = view[: self.size].tobytes()
 		value = int.from_bytes(data, 'little', signed=(self.encoding == self.Encoding.signed))
 		if self.encoding == self.Encoding.boolean:
 			return bool(value)
@@ -113,9 +120,9 @@ class BaseType(pydantic.BaseModel): # actually fundamental type, but DWARF uses 
 
 class EnumType(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	base_type: BaseType
-	values: dict[int,str]
+	values: dict[int, str]
 
 	def __hash__(self) -> int:
 		# Convert dict to frozenset of tuples for hashing
@@ -125,13 +132,13 @@ class EnumType(pydantic.BaseModel):
 		value = self.base_type.decode(view)
 		return self.values[value]
 
-	def decode_int(self, value:int) -> str:
-		return self.values[value] 
+	def decode_int(self, value: int) -> str:
+		return self.values[value]
 
 	@property
 	def name(self) -> str:
 		return self.base_type.name
-	
+
 	@property
 	def size(self) -> int:
 		return self.base_type.size
@@ -139,14 +146,14 @@ class EnumType(pydantic.BaseModel):
 
 class BitLayout(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
-	offset: int # absolute bit offset from the struct start
-	size: int	# size in bits
 
-	@property 
-	def start_byte(self) ->int:
+	offset: int  # absolute bit offset from the struct start
+	size: int  # size in bits
+
+	@property
+	def start_byte(self) -> int:
 		return self.offset // 8
-	
+
 	@property
 	def end_byte(self) -> int:
 		end_bit = self.offset + self.size
@@ -156,15 +163,15 @@ class BitLayout(pydantic.BaseModel):
 	def mask(self):
 		return (1 << self.size) - 1
 
-	def decode(self, composite_view: memoryview) ->int:
-		chunk = int.from_bytes(composite_view[self.start_byte:self.end_byte].tobytes(), 'little')
+	def decode(self, composite_view: memoryview) -> int:
+		chunk = int.from_bytes(composite_view[self.start_byte : self.end_byte].tobytes(), 'little')
 		shift = self.offset - self.start_byte * 8
 		return (chunk >> shift) & self.mask
 
 
 class MemberVariable(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	name: str
 	type_info: TypeInfo
 	offset: int
@@ -173,7 +180,7 @@ class MemberVariable(pydantic.BaseModel):
 	@typing.no_type_check
 	def decode(self, composite_view: memoryview) -> typing.Any:
 		if self.bit_layout:
-			value:int = self.bit_layout.decode(composite_view)
+			value: int = self.bit_layout.decode(composite_view)
 			if isinstance(self.type_info, EnumType):
 				return self.type_info.decode_int(value)
 			else:
@@ -186,7 +193,7 @@ class MemberVariable(pydantic.BaseModel):
 
 class CompositeType(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	name: str
 	size: int
 	members: list[MemberVariable]
@@ -197,23 +204,23 @@ class CompositeType(pydantic.BaseModel):
 
 	@typing.no_type_check
 	def decode(self, view: memoryview) -> dict[str, typing.Any]:
-		result:dict[str, typing.Any] = {}
+		result: dict[str, typing.Any] = {}
 		for member in self.members:
 			result[member.name] = member.decode(view)
 		return result
 
 
 class StructType(CompositeType):
-	pass 
+	pass
 
 
 class UnionType(CompositeType):
-	pass 
+	pass
 
 
-class ArrayType(pydantic.BaseModel): # not tested yet
+class ArrayType(pydantic.BaseModel):  # not tested yet
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	elem: TypeInfo
 	count: int
 	size: int
@@ -224,16 +231,17 @@ class ArrayType(pydantic.BaseModel): # not tested yet
 	@typing.no_type_check
 	def decode(self, view: memoryview) -> list[typing.Any]:
 		elems = []
-		stride:int = self.elem.size
+		stride: int = self.elem.size
 		for i in range(self.count):
 			start = i * stride
-			elems.append(self.elem.decode(view[start:start + stride]))
+			elems.append(self.elem.decode(view[start : start + stride]))
 		return elems
-	 
+
 
 # ---------------------------------------------------------------------------
 # DWARF reader / resolver
 # ---------------------------------------------------------------------------
+
 
 class DwarfRuntime:
 	@typing.no_type_check
@@ -242,10 +250,10 @@ class DwarfRuntime:
 		self._dwarf = self._elf.get_dwarf_info() if self._elf.has_dwarf_info() else None
 		self._address_size = self._elf.elfclass // 8
 		self._type_cache: dict[int, TypeInfo] = {}
-		
+
 	@typing.no_type_check
 	def load_types(self, type_names: set[str]) -> dict[str, TypeInfo]:
-		name_cache: dict[str, TypeInfo] = {'errno' : ErrnoType(name='errno')}
+		name_cache: dict[str, TypeInfo] = {'errno': ErrnoType(name='errno')}
 		type_names.discard('errno')
 		if self._dwarf:
 			for type_name in type_names:
@@ -261,10 +269,10 @@ class DwarfRuntime:
 		return attr.value.decode() if attr else None
 
 	@typing.no_type_check
-	def __get_die_type_name(self, die:DIE) -> str:
+	def __get_die_type_name(self, die: DIE) -> str:
 		name = self.__get_die_name(die)
 		if not name:
-			name = f"__type{die.offset}"
+			name = f'__type{die.offset}'
 		return name
 
 	@typing.no_type_check
@@ -293,7 +301,7 @@ class DwarfRuntime:
 		return BitLayout(offset=start, size=bit_size)
 
 	# DWARF traversal --------------------------------------------------------
-	
+
 	@typing.no_type_check
 	def __find_type_die(self, name: str) -> DIE:
 		for cu in self._dwarf.iter_CUs():
@@ -310,7 +318,7 @@ class DwarfRuntime:
 		if key in self._type_cache:
 			return self._type_cache[key]
 
-		tag:str = die.tag
+		tag: str = die.tag
 		if tag == 'DW_TAG_base_type':
 			desc = self.__build_base(die)
 		elif tag == 'DW_TAG_array_type':
@@ -322,10 +330,10 @@ class DwarfRuntime:
 		elif tag in {'DW_TAG_const_type', 'DW_TAG_volatile_type', 'DW_TAG_typedef', 'DW_TAG_restrict_type'}:
 			target = die.get_DIE_from_attribute('DW_AT_type')
 			desc = self.__build_any_type(target)
-		elif tag == "DW_TAG_enumeration_type":
+		elif tag == 'DW_TAG_enumeration_type':
 			desc = self.__build_enum(die)
 		else:
-			raise NotImplementedError(f"Unsupported DIE tag: {tag}")
+			raise NotImplementedError(f'Unsupported DIE tag: {tag}')
 
 		self._type_cache[key] = desc
 		return desc
@@ -348,13 +356,13 @@ class DwarfRuntime:
 		return BaseType(name=name, size=size, encoding=BaseType.Encoding(enc))
 
 	@typing.no_type_check
-	def __strip_longest_prefix(self, enum_values: dict[str,int]) -> dict[str,int]:
+	def __strip_longest_prefix(self, enum_values: dict[str, int]) -> dict[str, int]:
 		if len(enum_values) < 2:
 			return enum_values
 		min_name = min(enum_values.keys())
 		max_name = max(enum_values.keys())
 		prefix_len = sum(1 for a, b in itertools.takewhile(lambda p: p[0] == p[1], zip(min_name, max_name)))
-		short_enum_values: dict[str,int] = {}
+		short_enum_values: dict[str, int] = {}
 		for name, value in enum_values.items():
 			short_enum_values[name[prefix_len:]] = value
 		return short_enum_values
@@ -363,18 +371,18 @@ class DwarfRuntime:
 	def __build_enum(self, die: DIE) -> EnumType:
 		base_type = self.__build_base(die)
 
-		type_name:str = self.__get_die_name(die)
+		type_name: str = self.__get_die_name(die)
 
 		name2value: dict[str, int] = {}
 		for child in die.iter_children():
-			if child.tag == "DW_TAG_enumerator":
-				value_name = child.attributes["DW_AT_name"].value.decode("utf-8")
-				value_value = child.attributes["DW_AT_const_value"].value
+			if child.tag == 'DW_TAG_enumerator':
+				value_name = child.attributes['DW_AT_name'].value.decode('utf-8')
+				value_value = child.attributes['DW_AT_const_value'].value
 				name2value[value_name] = value_value
-		
+
 		name2value = self.__strip_longest_prefix(name2value)
-		value2name:dict[int, str] = {value: name for name, value in name2value.items()}
-		return EnumType(base_type=base_type, values=value2name) 
+		value2name: dict[int, str] = {value: name for name, value in name2value.items()}
+		return EnumType(base_type=base_type, values=value2name)
 
 	@typing.no_type_check
 	def __build_array(self, die: DIE) -> ArrayType:
@@ -397,7 +405,7 @@ class DwarfRuntime:
 		name = self.__get_die_type_name(die)
 		size = die.attributes.get('DW_AT_byte_size')
 		if not size:
-			raise ValueError(f"struct {name} missing DW_AT_byte_size")
+			raise ValueError(f'struct {name} missing DW_AT_byte_size')
 		members = []
 		for child in die.iter_children():
 			if child.tag != 'DW_TAG_member':
@@ -407,34 +415,36 @@ class DwarfRuntime:
 			offset = child.attributes.get('DW_AT_data_member_location')
 			byte_offset_val = offset.value if offset else 0
 			bit_layout = self.__build_bitfield_layout(child, mv_type)
-			members.append(MemberVariable(name=mv_name, type_info=mv_type, offset=byte_offset_val, bit_layout=bit_layout))
-		
+			members.append(
+				MemberVariable(name=mv_name, type_info=mv_type, offset=byte_offset_val, bit_layout=bit_layout)
+			)
+
 		if die.tag == 'DW_TAG_structure_type':
 			return StructType(name=name, size=size.value, members=members)
 		else:
-			return UnionType(name=name, size=size.value, members=members) 
+			return UnionType(name=name, size=size.value, members=members)
 
 
 class MessageSpec(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
-	offset:int 
+
+	offset: int
 	spec: str
 
 
 class ArgPrintfSpec(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
-	
+
 	spec: str
-	tag: str = ""
-	type_name: str = ""
+	tag: str = ''
+	type_name: str = ''
 
 	@staticmethod
 	def from_re_match(m: re.Match[str]) -> 'ArgPrintfSpec':
 		return ArgPrintfSpec(
 			spec=m.group('spec') if m.group('spec') else '',
 			tag=m.group('tag') if m.group('tag') else '',
-			type_name=m.group('type_name') if m.group('type_name') else ''
+			type_name=m.group('type_name') if m.group('type_name') else '',
 		)
 
 	@property
@@ -443,11 +453,11 @@ class ArgPrintfSpec(pydantic.BaseModel):
 
 
 class ArgDecoder:
-	def __init__(self, user_defined_type:TypeInfo, printf_spec: ArgPrintfSpec):	
+	def __init__(self, user_defined_type: TypeInfo, printf_spec: ArgPrintfSpec):
 		self.__user_defined_type: TypeInfo = user_defined_type
 		self.__printf_spec = printf_spec
-	
-	def __format(self, value: typing.Union[dict,list,tuple,str,int]) -> str:
+
+	def __format(self, value: typing.Union[dict, list, tuple, str, int]) -> str:
 		if isinstance(value, int):
 			if self.__printf_spec.hex and value:
 				return '0x{:x}'.format(value)
@@ -468,7 +478,7 @@ class ArgDecoder:
 
 	def decode(self, value: int) -> typing.Any:
 		try:
-			memview = memoryview(value.to_bytes(8, byteorder='little', signed=False)) 
+			memview = memoryview(value.to_bytes(8, byteorder='little', signed=False))
 			return self.__user_defined_type.decode(memview)
 		except Exception as error:
 			return str(error)
@@ -484,15 +494,16 @@ class ArgDecoder:
 		else:
 			return '0'
 
+
 class Template:
-	def __init__(self, msg_spec:MessageSpec, user_defined_types: dict[str, TypeInfo]):
+	def __init__(self, msg_spec: MessageSpec, user_defined_types: dict[str, TypeInfo]):
 		self.__user_defined_types = user_defined_types
 		self.__c_spec = msg_spec
-		self.__py_spec: str = ""
-		self.__py_decoders:dict[int,typing.Callable[[int], typing.Any]] = {} 
-		self.__process_c_spec() # updates __py_spec and __py_args
+		self.__py_spec: str = ''
+		self.__py_decoders: dict[int, typing.Callable[[int], typing.Any]] = {}
+		self.__process_c_spec()  # updates __py_spec and __py_args
 
-	def __escape_msg_part(self, part: str ) -> str:
+	def __escape_msg_part(self, part: str) -> str:
 		return part.replace('{', '{{').replace('}', '}}')
 
 	def __process_c_spec(self) -> None:
@@ -500,10 +511,10 @@ class Template:
 		parts: list[str] = []
 		spec = self.__c_spec.spec
 		for idx, m in enumerate(PRINTF_SPEC_RE.finditer(spec)):
-			parts.append(self.__escape_msg_part(spec[last:m.start()]))	# field before separator
-			arg_printf_spec:ArgPrintfSpec = ArgPrintfSpec.from_re_match(m)
+			parts.append(self.__escape_msg_part(spec[last : m.start()]))  # field before separator
+			arg_printf_spec: ArgPrintfSpec = ArgPrintfSpec.from_re_match(m)
 			if m.group('type_name'):
-				udt_found:typing.Optional[TypeInfo] = self.__user_defined_types.get(m.group('type_name'), None)
+				udt_found: typing.Optional[TypeInfo] = self.__user_defined_types.get(m.group('type_name'), None)
 				if udt_found:
 					self.__py_decoders[idx] = ArgDecoder(udt_found, arg_printf_spec)
 				parts.append('{}')
@@ -513,7 +524,7 @@ class Template:
 				else:
 					parts.append('{}')
 			last = m.end()
-		parts.append(self.__escape_msg_part(spec[last:]))				# trailing field
+		parts.append(self.__escape_msg_part(spec[last:]))  # trailing field
 		self.__py_spec = ''.join(parts)
 
 	def __bool__(self):
@@ -524,9 +535,9 @@ class Template:
 		return self.__c_spec
 
 	@typing.no_type_check
-	def __load_args(self, msg:NvmeibPetArchive.Message) -> list[typing.Any]:
+	def __load_args(self, msg: NvmeibPetArchive.Message) -> list[typing.Any]:
 		args: list[int] = []
-		for idx, arg in enumerate(msg.args): # type: ignore
+		for idx, arg in enumerate(msg.args):  # type: ignore
 			decoder = self.__py_decoders.get(idx, None)
 			if decoder:
 				args.append(decoder(arg.pet_value))
@@ -534,11 +545,11 @@ class Template:
 				args.append(arg.pet_value)
 		return args
 
-	def instantiate(self, msg:NvmeibPetArchive.Message, fname: str, entity:int) -> Message:
+	def instantiate(self, msg: NvmeibPetArchive.Message, fname: str, entity: int) -> Message:
 		args: list[typing.Any] = self.__load_args(msg)
 		text = self.__py_spec.format(*args)
-		dt_stamp = datetime.datetime.fromtimestamp(msg.timestamp.uv8/(10**9)) # type: ignore
-		return Message(fname=fname, entity=entity, ns_stamp=msg.timestamp.uv8, dt_stamp=dt_stamp, text=text) # type: ignore
+		dt_stamp = datetime.datetime.fromtimestamp(msg.timestamp.uv8 / (10**9))  # type: ignore
+		return Message(fname=fname, entity=entity, ns_stamp=msg.timestamp.uv8, dt_stamp=dt_stamp, text=text)  # type: ignore
 
 
 class Dictionary(pydantic.BaseModel):
@@ -552,7 +563,7 @@ class Dictionary(pydantic.BaseModel):
 			return Dictionary.model_validate_json(fobj.read())
 
 	def build_templates(self) -> dict[int, Template]:
-		templates:dict[int, Template] = {}
+		templates: dict[int, Template] = {}
 		for msg in self.specs:
 			templates[msg.offset] = Template(msg, self.user_defined_types)
 		return templates
@@ -570,14 +581,14 @@ class TemplatesLoader:
 
 	@typing.no_type_check
 	def __load_messages_blob(self) -> bytes:
-		with open(self.module, "rb") as fobj:
+		with open(self.module, 'rb') as fobj:
 			elf = ELFFile(fobj)
 			section: Section = elf.get_section_by_name(self.section_name)
 			if not section:
-				raise ValueError(f"{self.section_name} section was not found in {self.module}")
+				raise ValueError(f'{self.section_name} section was not found in {self.module}')
 
-			offset:int = section['sh_offset']
-			size:int = section['sh_size']
+			offset: int = section['sh_offset']
+			size: int = section['sh_size']
 
 			fobj.seek(offset)
 			return fobj.read(size)
@@ -586,24 +597,24 @@ class TemplatesLoader:
 		data = self.__load_messages_blob()
 		msgs: list[MessageSpec] = []
 
-		msg_starts_at:int = 0
+		msg_starts_at: int = 0
 		bin_msg = bytearray()
 		for idx, byte in enumerate(data):
 			if byte == 0:
 				if bin_msg:
-					msgs.append(MessageSpec(offset=msg_starts_at, spec=bin_msg.decode("utf-8", 'replace')))
+					msgs.append(MessageSpec(offset=msg_starts_at, spec=bin_msg.decode('utf-8', 'replace')))
 					bin_msg.clear()
-				msg_starts_at = idx+1
+				msg_starts_at = idx + 1
 			else:
 				bin_msg.append(byte)
-		return msgs 
-	
-	def __list_user_defined_types(self, msgs:list[MessageSpec]) -> set[str]:
+		return msgs
+
+	def __list_user_defined_types(self, msgs: list[MessageSpec]) -> set[str]:
 		types: set[str] = set()
 		for msg in msgs:
 			for m in PRINTF_SPEC_RE.finditer(msg.spec):
 				if m.group('tag') and m.group('type_name'):
-					types.add(f"{m.group('type_name')}")
+					types.add(f'{m.group("type_name")}')
 		return types
 
 	def load_dictionary(self) -> Dictionary:
@@ -613,11 +624,12 @@ class TemplatesLoader:
 
 		return Dictionary(specs=specs, user_defined_types=user_defined_types)
 
-TCommand = typing.TypeVar("TCommand", bound="Command")
+
+TCommand = typing.TypeVar('TCommand', bound='Command')
 
 
 class Command(abc.ABC):
-	subcommands: typing.ClassVar[list[type["Command"]]] = []
+	subcommands: typing.ClassVar[list[type['Command']]] = []
 
 	def __init_subclass__(cls: type[TCommand], **kwargs: typing.Any) -> None:
 		super().__init_subclass__(**kwargs)
@@ -627,7 +639,9 @@ class Command(abc.ABC):
 	@typing.no_type_check
 	def add_module_section_args(cls, parser) -> None:
 		parser.set_defaults(klass=cls)
-		parser.add_argument('module', type=pathlib.Path, help='path to the binary file(executable, shared library, kernel module)')
+		parser.add_argument(
+			'module', type=pathlib.Path, help='path to the binary file(executable, shared library, kernel module)'
+		)
 		parser.add_argument('section', type=str, help='the ELF section name, all the PET strings are stored in')
 
 	@classmethod
@@ -637,7 +651,7 @@ class Command(abc.ABC):
 		parser.add_argument('dictionary', type=pathlib.Path, help='path to the dictionary file')
 
 	def __init__(self, args: argparse.Namespace):
-		pass 
+		pass
 
 	@abc.abstractmethod
 	def __call__(self) -> None:
@@ -648,10 +662,19 @@ class EvaluateInt(Command):
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
-		parser = subparsers.add_parser("evaluate-int", description="given a user defined type (enum/struct/union) and integer - prints the struct content")
+		parser = subparsers.add_parser(
+			'evaluate-int',
+			description='given a user defined type (enum/struct/union) and integer - prints the struct content',
+		)
 		cls.add_module_section_args(parser)
-		parser.add_argument('user_defined_type', type=str, help='the user defined type ; no need to specify the tag(enum/struct/union)')
-		parser.add_argument('value', type=lambda s: int(s, 0), help='the user defined type ; no need to specify the tag(enum/struct/union)')
+		parser.add_argument(
+			'user_defined_type', type=str, help='the user defined type ; no need to specify the tag(enum/struct/union)'
+		)
+		parser.add_argument(
+			'value',
+			type=lambda s: int(s, 0),
+			help='the user defined type ; no need to specify the tag(enum/struct/union)',
+		)
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
@@ -663,8 +686,8 @@ class EvaluateInt(Command):
 		dictionary = self.extractor.load_dictionary()
 		udt = dictionary.user_defined_types.get(self.udt_name, None)
 		if udt is None:
-			print(f"Failed to find {self.udt_name}.")
-			return 
+			print(f'Failed to find {self.udt_name}.')
+			return
 		decoder = ArgDecoder(udt, ArgPrintfSpec('u', '', self.udt_name))
 		print(decoder(self.value))
 
@@ -673,11 +696,18 @@ class SaveDictionary(Command):
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
-		parser = subparsers.add_parser("save-dictionary", description="save all messages within a module to the dedicated file")
+		parser = subparsers.add_parser(
+			'save-dictionary', description='save all messages within a module to the dedicated file'
+		)
 		cls.add_module_section_args(parser)
 		parser.add_argument('output', type=pathlib.Path, help='path to the output file')
-		parser.add_argument('--um-trace', action='store_true', dest='um_trace', default=False
-							, help="Mark dictionary as requiring UM tracer buffer header skipping during view")
+		parser.add_argument(
+			'--um-trace',
+			action='store_true',
+			dest='um_trace',
+			default=False,
+			help='Mark dictionary as requiring UM tracer buffer header skipping during view',
+		)
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
@@ -690,8 +720,8 @@ class SaveDictionary(Command):
 		dictionary.um_trace = self.um_trace
 		dictionary.save(self.output)
 
-class ViewMessages(Command):
 
+class ViewMessages(Command):
 	# Size in bytes of the UM tracer buffer header written by _write_initial_header()
 	# in tracer.c. Each header consists of two 32-bit little-endian words:
 	#   word0: flags (upper byte) | metadata (lower 3 bytes)
@@ -701,11 +731,16 @@ class ViewMessages(Command):
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
-		parser = subparsers.add_parser("view", description="view all messages")
+		parser = subparsers.add_parser('view', description='view all messages')
 		cls.add_dict_arg(parser)
 		parser.add_argument('traces', type=pathlib.Path, nargs='+', help='per entity traces files')
-		parser.add_argument('--no-sort', action='store_true', dest='no_sort', default=False
-							, help="By default, all traces are sorted; '--no-sort' disables the ordering; usefull to see some entity traces in a single screen")
+		parser.add_argument(
+			'--no-sort',
+			action='store_true',
+			dest='no_sort',
+			default=False,
+			help="By default, all traces are sorted; '--no-sort' disables the ordering; usefull to see some entity traces in a single screen",
+		)
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
@@ -763,17 +798,19 @@ class ViewMessages(Command):
 					entity_start_position = kstream.pos()
 					entity = NvmeibPetArchive.Entity(kstream)
 					entity.fname = fpath.name if n_files > 1 else ''
-					entity.idx = idx 
+					entity.idx = idx
 					entity.size = kstream.pos() - entity_start_position
 					idx += 1
 					yield entity
-			#The code below loads the whole file into memory - waste of resources 
-			#archive: NvmeibPetArchive = NvmeibPetArchive.from_file(fpath)
-			#for entity in archive.entities:
-				#yield entity
+			# The code below loads the whole file into memory - waste of resources
+			# archive: NvmeibPetArchive = NvmeibPetArchive.from_file(fpath)
+			# for entity in archive.entities:
+			# yield entity
 
 	@typing.no_type_check
-	def __iter_entity_messages(self, entity: NvmeibPetArchive.Entity) -> typing.Generator[NvmeibPetArchive.Message, None, None]:
+	def __iter_entity_messages(
+		self, entity: NvmeibPetArchive.Entity
+	) -> typing.Generator[NvmeibPetArchive.Message, None, None]:
 		prev_ns_stamp = 0
 		for msg in entity.messages:
 			if not msg.offset:
@@ -781,7 +818,7 @@ class ViewMessages(Command):
 
 			if msg.timestamp.pet_value_attr_name != 'uv8':
 				# it means we have time delta from the previous message
-				delta:int = msg.timestamp.pet_value
+				delta: int = msg.timestamp.pet_value
 				setattr(msg.timestamp, msg.timestamp.pet_value_attr_name, None)
 				msg.timestamp.uv8 = delta + prev_ns_stamp
 
@@ -797,46 +834,31 @@ class ViewMessages(Command):
 				try:
 					tmpl = self.templates[msg.offset - 1]
 				except KeyError:
-					raise RuntimeError(f"Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}")
+					raise RuntimeError(f'Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}')
 				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
 				yield human_msg
 				last_human_msg = human_msg
-			yield human_msg._replace(text=f"entity size={entity.size} bytes")
-
+			yield human_msg._replace(text=f'entity size={entity.size} bytes')
 
 	def __call__(self):
-		human_msgs:typing.Generator[Message, None, None] = self.__iter_human_messages()
+		human_msgs: typing.Generator[Message, None, None] = self.__iter_human_messages()
 		if self.sort:
-			human_msgs = sorted(human_msgs, key=lambda hm: hm.ns_stamp) # type: ignore
+			human_msgs = sorted(human_msgs, key=lambda hm: hm.ns_stamp)  # type: ignore
 
 		for human_msg in human_msgs:
-			print(f"{human_msg.dt_stamp} entity={human_msg.fname}[{human_msg.entity}] {human_msg.text}")
+			print(f'{human_msg.dt_stamp} entity={human_msg.fname}[{human_msg.entity}] {human_msg.text}')
 
 
 if __name__ == '__main__':
-	parser = argparse.ArgumentParser(description="extract ASCII strings from a ELF binary .rodata section"
-									 , formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+	parser = argparse.ArgumentParser(
+		description='extract ASCII strings from a ELF binary .rodata section',
+		formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+	)
 	subparsers = parser.add_subparsers(required=True)
 	for subcmd in Command.subcommands:
-		if hasattr(subcmd, "register"):
-			subcmd.register(subparsers) # type: ignore
+		if hasattr(subcmd, 'register'):
+			subcmd.register(subparsers)  # type: ignore
 
 	args = parser.parse_args()
 	handler = args.klass(args)
 	handler()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
