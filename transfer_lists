@@ -142,6 +142,7 @@ client_scripts_transfer_list="init.d/nvmeshclient \
 				modprobe.d/nvmesh_xpnd_jour.conf \
 				modprobe.d/nvmesh_gfn_ms1.conf \
 				modprobe.d/nvmesh_gfn_ms2.conf \
+				modprobe.d/nvmesh_virt.conf \
 				depmod.d/zz02-nvmesh.conf \
 				sysctl/60-nvmesh.conf \
 				bin/nvmesh_client_instance_do \
