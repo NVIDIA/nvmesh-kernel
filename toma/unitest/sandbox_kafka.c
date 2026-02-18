@@ -28,36 +28,105 @@ struct rd_kafka_topic_conf_s {
 	int dummy;
 };
 
-struct sim_broker_topic {		// A topic = append-only log of messages
+struct sim_broker_topic {		// Kafka Broker topic implementation = append-only log of messages
+	pthread_mutex_t lock;		// Toma sends sends/consume messages only from kafka thread. Simulated management may send/consume in other thread
 	enum sim_topic_type_toma_to_mgmt type;
 	struct sim_msg {			// A single message stored in a topic log
 		char *payload;
 		size_t len;
-	} *msgs;					// dynamic array (realloc growth)
-	int n_msgs;					// number of stored messages
-	int capacity;				// allocated slots
-	int64_t cur_offset;			// offset of msgs[0]
-	int64_t committed_offset;	// == cur_offset-1. last committed offset (Kafka convention: next-to-consume)
+	} *msgs;					// Circular buffer storing non commited messages (may be read by other side)
+	uint32_t capacity;			// Allocated size of circular buffer. Defined during constructor, Typically use power of 2
+	uint32_t n_msgs;			// Number of stored messages in the queue. n_msgs <= capacity
+	int64_t committed_offset;	// Last committed offset msgs[committed_offset % capacity] was consumed, acked and deleted
+	int64_t cur_offset;			// Offset of next message to read. msgs[cur_offset % capacity].  cur_offset > committed_offset!
+	// Used buffer slots: [ (committed_offset+1)%capacity .. cur_offset%capacity  .. (committed_offset+msgs)%capacity ), All the rest have ->payload = NULL
+	// Note: cur_offset belongs to client consumer not of broker. We have only 1 consumer so for simplicity and easy of debug, put it here
 };
 
-void sim_broker_topic_create(struct sim_broker_topic *t, enum sim_topic_type_toma_to_mgmt type) {
+static inline int64_t sim_broker_topic_get_msg_offset_last( const struct sim_broker_topic *t) { return t->committed_offset + t->n_msgs; }
+static inline int64_t sim_broker_topic_get_msg_offset_first(const struct sim_broker_topic *t) { return t->committed_offset + 1; }	// Assuming at least 1 message is inside
+static inline void    sim_broker_topic_reset_to_earliest(         struct sim_broker_topic *t) {        t->cur_offset = sim_broker_topic_get_msg_offset_first(t); }
+
+void sim_broker_topic_create(struct sim_broker_topic *t, enum sim_topic_type_toma_to_mgmt type, int max_queue_size) {
+	pthread_mutex_init(&t->lock, NULL);
 	t->type = type;
+	t->capacity = max_queue_size;
+	t->msgs = (struct sim_msg*)calloc(t->capacity, sizeof(struct sim_msg));
 	t->committed_offset = -1;
 	t->cur_offset = 0;
+	t->n_msgs = 0;
 }
 
-void sim_broker_topic_append(struct sim_broker_topic *t, const void *payload, size_t len) {
-	if (t->n_msgs >= t->capacity) {
-		t->capacity = (t->capacity == 0) ? 32 : t->capacity * 2;
-		t->msgs = realloc(t->msgs, t->capacity * sizeof(t->msgs[0]));
-		BUG_ON(!t->msgs);
-	}
-	t->msgs[t->n_msgs].payload = malloc(len + 1);
-	BUG_ON(!t->msgs[t->n_msgs].payload);
-	memcpy(t->msgs[t->n_msgs].payload, payload, len);
-	t->msgs[t->n_msgs].payload[len] = '\0';		// NULL-terminate for convenience
-	t->msgs[t->n_msgs].len = len;
+void sim_broker_topic_destroy(struct sim_broker_topic *t) {
+	for (int64_t i = sim_broker_topic_get_msg_offset_first(t); i <= sim_broker_topic_get_msg_offset_last(t); i++)
+		free(t->msgs[i % t->capacity].payload);		// Can use //for (uint32_t i = 0; i < t->capacity; i++) free(t->msgs[i].payload);
+	free(t->msgs);
+}
+
+void sim_broker_topic_add(struct sim_broker_topic *t, void *payload, size_t len, const bool should_copy) {
+	struct sim_msg *m;
+	uint32_t i;
+	BUG_ON(!payload || !len);				// Wrong input. Must be a valid message
+	BUG_ON(pthread_mutex_lock(&t->lock) != 0);
+	BUG_ON(t->n_msgs >= t->capacity);		// Someone is not consuming the messages from the queue
 	t->n_msgs++;
+	i = sim_broker_topic_get_msg_offset_last(t) % t->capacity; // Slot where message goes
+	m = &t->msgs[i];
+	BUG_ON(m->payload || m->len);			// Circular buffer overrun or commited message not freed
+	if (should_copy){
+		m->payload = (char*)malloc(len + 1);
+		memcpy(m->payload, payload, len);
+		m->payload[len] = '\0';				// NULL-terminate for convenience
+	} else {
+		m->payload = payload;
+	}
+	m->len = len;
+	N_Tf(__AUTOID__, "[@CHAR].offset=@LD, slot[@INT]", t->type, sim_broker_topic_get_msg_offset_last(t), i);
+	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
+}
+
+bool sim_broker_topic_peek(struct sim_broker_topic *t, rd_kafka_message_t *rv) {	// Get current message
+	rv->payload = NULL;											// If no message in queue, preinitialize to NULL
+	BUG_ON(pthread_mutex_lock(&t->lock) != 0);
+	if (t->n_msgs && (t->cur_offset <= sim_broker_topic_get_msg_offset_last(t))) {
+		const uint32_t i = (uint32_t)(t->cur_offset % t->capacity);		// Slot where current message resides
+		struct sim_msg *m = &t->msgs[i];
+		BUG_ON(!m->payload);					// Valid message should exist in the queue
+		rv->len = m->len;						// Just reference, Kafka simu owns the memory
+		rv->payload = m->payload;				// Pointer to buffer in queue. Will remain valid until msg is commited
+		rv->offset = t->cur_offset++;
+		N_Tf(__AUTOID__, "[@CHAR].offset=@LD, slot[@INT]", t->type, rv->offset, i);
+	} else { /* No message at this offset */}
+	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
+	rv->err = RD_KAFKA_RESP_ERR_NO_ERROR;
+	return (rv->payload != NULL);
+}
+
+void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset) {	// Ack that consumer is done with this offset and all which are smaller
+	int64_t i = -1, prev_committed;
+	BUG_ON(pthread_mutex_lock(&t->lock) != 0);
+	prev_committed = t->committed_offset;
+	if ((ack_offset > sim_broker_topic_get_msg_offset_last(t)) || (ack_offset < 0)) {
+		BUG_ON(true); return;						// Wrong argument! This message does not exists in kafka queue
+	} else if (ack_offset == t->committed_offset) {
+		goto _out;									// Already commited, OK and just do nothing
+	} else if (ack_offset < t->committed_offset) {
+		BUG_ON(true); return;						// Rewinding committed offset is valid in kafka but a very bad idea
+	} else if (ack_offset >= t->cur_offset) {
+		BUG_ON(true); return;						// Msg was not read yet. How is it being committed
+	}
+	for (i = t->committed_offset + 1; i <= ack_offset; i++) {		// In kafka, commit is actually for this message and before
+		struct sim_msg *m = &t->msgs[i % t->capacity];
+		BUG_ON(!m->payload);						// Valid message should exist in the queue
+		free(m->payload);
+		m->payload = NULL;
+		m->len = 0;
+		t->n_msgs--;
+	}
+	t->committed_offset = ack_offset;
+	N_Tf(__AUTOID__, "[@CHAR] @LD -> @LD, last_slot[@INT]", t->type, prev_committed, ack_offset, (int)(i % t->capacity));
+ _out:
+	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
 
 struct rd_kafka_topic_s {
@@ -96,24 +165,20 @@ static struct kafka_simulator_t *g_kafka_simu = NULL;
 
 struct kafka_simulator_t *sandbox_kafka_init(void) {
 	struct kafka_simulator_t *ks = g_kafka_simu = calloc(1, sizeof(*g_kafka_simu));
-	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG);
-	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD);
-	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT);
-	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES);
-	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY);
-	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE);
-	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW);
+	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG,			4);		// This queue is always non empty, stores at least the last hardware config
+	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD,			2);		// Toma will consume commands very fast
+	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT,	8);		// This queue might be long and potentially store the entire history.
+	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		32);	// Toma will consume volume commands very fast, but there is Toma issue of not commiting keep alive msgs so the queue grows. Todo solve it
+	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY,		2);		// Mgmt Simu will consume toma reports immediately
+	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		2);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
+	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			2);		// Mgmt Simu will consume toma reports immediately
 	return g_kafka_simu;
 }
 
 void sandbox_kafka_destroy(struct kafka_simulator_t *ks) {
 	BUG_ON(ks != g_kafka_simu);
 	for (int i = 0; i < (int)ARRAY_SIZE(ks->topics); i++) {
-		struct sim_broker_topic *t = &ks->topics[i];
-		for (int j = 0; j < t->n_msgs; j++) {
-			free(t->msgs[j].payload);
-		}
-		free(t->msgs);
+		sim_broker_topic_destroy(&ks->topics[i]);
 	}
 	free(g_kafka_simu);
 	g_kafka_simu = NULL;
@@ -147,13 +212,6 @@ static rd_kafka_t* kafka_simu_find_by_parition_name(const char* name) {
 			return k;
 	}
 	return NULL;
-}
-
-static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
-	BUG_ON(offset < 0);
-	kt->broker_topic->committed_offset = offset - 1;
-	kt->broker_topic->cur_offset = offset;
-	N_Tf(__AUTOID__, "@STR: cur_offset=@LD", kt->name, kt->broker_topic->cur_offset);
 }
 
 struct sim_broker_topic *find_broker_topic_by(enum sim_topic_type_toma_to_mgmt type) {
@@ -191,8 +249,8 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_assigned) {
 			N_Tf(__AUTOID__, "@STR: stop. committed_offset=@LD, cur_offset=@LD", kt->name, bt->committed_offset, bt->cur_offset);
-			if (ko->conf->auto_reset_earliest) {
-			}
+			if (ko->conf->auto_reset_earliest)
+				sim_broker_topic_reset_to_earliest(bt);
 			kt->is_assigned = false;
 		} // else: Topic was never created, or assign NULL called twice, this is valid
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -208,10 +266,14 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 		kt->is_assigned = true;
 		if (offset == RD_KAFKA_OFFSET_STORED) {
 			N_Tf(__AUTOID__, "@STR: continue from committed_offset=@LD, cur_offset=@LD", kt->name, bt->committed_offset, bt->cur_offset); // Toma relies on Kafka simulator
-		} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
-			__reset_offset(kt, 0);
-		} else {	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
-			__reset_offset(kt, offset);
+		} else {
+			if (offset == RD_KAFKA_OFFSET_BEGINNING) {
+				sim_broker_topic_reset_to_earliest(bt);
+			} else {
+				BUG_ON((offset < 0) || (offset <= bt->committed_offset));	// Those messages do not exist in kafka queue
+				bt->cur_offset = offset;	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
+			}
+			N_Tf(__AUTOID__, "@STR: committed_offset=@LD, cur_offset=@LD", kt->name, bt->committed_offset, bt->cur_offset);
 		}
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	}
@@ -235,10 +297,8 @@ void                rd_kafka_set_log_level(rd_kafka_t* me, int lvl) { me->log_lv
 rd_kafka_resp_err_t rd_kafka_flush(rd_kafka_t *rk, int timeout_ms) { (void)rk; (void)timeout_ms; return RD_KAFKA_RESP_ERR_NO_ERROR; }
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking) { (void)me; (void)is_blocking; return 0; }
 rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async) {
-	const int64_t last_consumed = (pl->elems[0].offset - 1);
 	BUG_ON(me != pl->elems[0].k);
-	BUG_ON((last_consumed >= me->topic.broker_topic->cur_offset));		// Todo: Maybe off by 1 here
-	me->topic.broker_topic->committed_offset = max(last_consumed, me->topic.broker_topic->committed_offset);
+	sim_broker_topic_ack_offsets(me->topic.broker_topic, (pl->elems[0].offset - 1) /*last_consumed*/);
 	(void)is_async;
 	g_kafka_simu->notify_consumer_offset_commit(me, RD_KAFKA_RESP_ERR_NO_ERROR, pl, NULL);
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -247,7 +307,7 @@ rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_lis
 rd_kafka_resp_err_t rd_kafka_committed(rd_kafka_t *me, rd_kafka_topic_partition_list_t *pl, int timeout_ms) {
 	BUG_ON(me != pl->elems[0].k);
 	BUG_ON(timeout_ms < 1000);
-	pl->elems[0].offset = me->topic.broker_topic->cur_offset;
+	pl->elems[0].offset = sim_broker_topic_get_msg_offset_first(me->topic.broker_topic);
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 char* rd_kafka_err2str(rd_kafka_resp_err_t e) { (void)e; return "kerr"; }
@@ -255,7 +315,7 @@ char* rd_kafka_err2name(rd_kafka_resp_err_t e) { (void)e; return "kerr"; }
 rd_kafka_resp_err_t rd_kafka_last_error(void) { return RD_KAFKA_RESP_ERR_NO_ERROR; }
 rd_kafka_conf_t* rd_kafka_conf_new(void) { return calloc(1, sizeof(rd_kafka_conf_t)); }
 void rd_kafka_conf_destroy(rd_kafka_conf_t* me) { free(me); }
-void rd_kafka_message_destroy(rd_kafka_message_t *msg) { free(msg->payload); free(msg); }
+void rd_kafka_message_destroy(rd_kafka_message_t *msg) { free(msg); /* msg->payload is a pointer to broker buffer, will auto-free upon msg commit. Dont touch it*/ }
 void rd_kafka_conf_set_error_cb( rd_kafka_conf_t *kc, void (*fn)(rd_kafka_t *rk, int err, const char *reason, void *opaque)) { (void)kc; (void)fn; }
 
 void rd_kafka_destroy(rd_kafka_t* k) {
@@ -336,8 +396,8 @@ void rd_kafka_topic_partition_list_destroy(rd_kafka_topic_partition_list_t* pl) 
 rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char *str, int32_t partition, int64_t *low_oldest_beginning_offset, int64_t *high_newest_end_offset, int timeout) {
 	BUG_ON(strcmp(me->topic.name, str) || (me->topic.partition != partition));	// Only 1 partition
 	(void)timeout;
-	*low_oldest_beginning_offset = me->topic.broker_topic->cur_offset;
-	*high_newest_end_offset =      me->topic.broker_topic->cur_offset + me->topic.broker_topic->n_msgs;
+	*low_oldest_beginning_offset = sim_broker_topic_get_msg_offset_first(me->topic.broker_topic);
+	*high_newest_end_offset =      sim_broker_topic_get_msg_offset_last( me->topic.broker_topic) + 12;	// Just some number to see wide range of watermark
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -361,10 +421,13 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (len == 0) || ((key == NULL) != (keylen == 0)));
-	(void)msgflags;
-	mgmt_sim_on_toma_produced(kt->type, payload, len);
-
-	// No, put this on to kt, in a list and then poll_cb will return the callbacks
+	sim_broker_topic_add(ko->topic.broker_topic, payload, len, (msgflags & RD_KAFKA_MSG_F_COPY));
+	{
+		rd_kafka_message_t m;
+		BUG_ON(!sim_broker_topic_peek(ko->topic.broker_topic, &m));
+		mgmt_sim_on_toma_produced(kt->type, m.payload, m.len);
+		sim_broker_topic_ack_offsets(ko->topic.broker_topic, m.offset);
+	}
 	g_kafka_simu->notify_producer_msg_accepted(ko, &km, NULL);
 	errno = 0;
 	return 0;
@@ -396,17 +459,20 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	const char *unique_name = (ko->name[0] != 'L') ? ko->name : ko->topic.name;		// all LEADER consumer groups have the same name. Differentiate them by topic name
 	size_t len = 0;
 	BUG_ON((timeout_ms != 0) || (!ko->topic.is_assigned));
-	m->err = RD_KAFKA_RESP_ERR_NO_ERROR;
-
-	/* Delegate message selection to the management simulator */
-	m->payload = mgmt_sim_next_kafka_payload(unique_name, (int)ko->topic.broker_topic->cur_offset, &len);
-	m->len = len;
-
-	if (m->payload == NULL) {			// No message prepared to current consumer
-		free(m);
-		return NULL;
+	{/* Delegate message selection to the management simulator */
+		struct sim_broker_topic *t = ko->topic.broker_topic;
+		char *msg = mgmt_sim_next_kafka_payload(unique_name, (int)t->cur_offset, &len);
+		if (msg == NULL) {			// No message prepared to current consumer
+			free(m);
+			return NULL;
+		}
+		if ((t->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) && (sim_broker_topic_get_msg_offset_last(t) >= t->cur_offset)) {
+			free(msg);	// Already in kafka queue, no need to generate it
+		} else {
+			sim_broker_topic_add(t, msg, len, false);
+		}
+		BUG_ON(!sim_broker_topic_peek(t, m));
 	}
-	m->offset = ko->topic.broker_topic->cur_offset++;
 	N_Tf(__AUTOID__, "consumer[@STR] got cur_offset=@LD", unique_name, m->offset);
 	m->_private = NULL;
 	return m;
