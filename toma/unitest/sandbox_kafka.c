@@ -63,7 +63,7 @@ void sim_broker_topic_append(struct sim_broker_topic *t, const void *payload, si
 struct rd_kafka_topic_s {
 	char *name;
 	struct sim_broker_topic *broker_topic;	// Connection to broker (when topic is initialized)
-	rd_kafka_topic_conf_t *conf;
+	struct rd_kafka_topic_conf_s *conf;		// Might be NULL
 	int32_t partition;						// Support only 1 partition for now. Store its index, always 0
 	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
 	bool is_assigned;						// Todo: may remove it and set partition as -1 instead. User can read/write this topic (it has assigned 1 or more partitions)
@@ -72,13 +72,14 @@ struct rd_kafka_topic_s {
 struct rd_kafka_conf_s {
 	char *group_id;
 	bool enable_ssl;
+	bool auto_reset_earliest;	// Represents: "auto.offset.reset",	"earliest"
 };
 
 struct rd_kafka_s {
 	char *name;
 	int log_lvl;
 	enum rd_kafka_type_t who;
-	rd_kafka_conf_t *conf;
+	struct rd_kafka_conf_s *conf;
 	struct rd_kafka_topic_s topic;
 };
 
@@ -185,10 +186,13 @@ void rd_kafka_topic_destroy(rd_kafka_topic_t *kt) {
 
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
 	rd_kafka_topic_t *kt = &ko->topic;
+	struct sim_broker_topic *bt = kt->broker_topic;
 	N_Tf(__AUTOID__, "k_object=@STR, has_pl=@BOOL_YN", ko->name, !!pl);
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_assigned) {
-			N_Tf(__AUTOID__, "@STR: stop. cur_offset=@LD", kt->name, kt->broker_topic->cur_offset);
+			N_Tf(__AUTOID__, "@STR: stop. committed_offset=@LD, cur_offset=@LD", kt->name, bt->committed_offset, bt->cur_offset);
+			if (ko->conf->auto_reset_earliest) {
+			}
 			kt->is_assigned = false;
 		} // else: Topic was never created, or assign NULL called twice, this is valid
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -198,11 +202,12 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 			((rd_kafka_topic_partition_t*)&pl->elems[0])->k = ko;
 			rd_kafka_topic_new(ko, pl->elems[0].topic, NULL);
 		}
+		bt = kt->broker_topic;
 		BUG_ON((ko != pl->elems[0].k) || (kt->partition != pl->elems[0].partition));		// We dont support partitions
 		N_Tf(__AUTOID__, "@STR: start topic consume from partition[@INT], offset=@LD", kt->name, kt->partition, offset);
 		kt->is_assigned = true;
 		if (offset == RD_KAFKA_OFFSET_STORED) {
-			N_Tf(__AUTOID__, "@STR: continue from cur_offset=@LD", kt->name, kt->broker_topic->cur_offset); // Toma relies on Kafka simulator
+			N_Tf(__AUTOID__, "@STR: continue from committed_offset=@LD, cur_offset=@LD", kt->name, bt->committed_offset, bt->cur_offset); // Toma relies on Kafka simulator
 		} else if (offset == RD_KAFKA_OFFSET_BEGINNING) {
 			__reset_offset(kt, 0);
 		} else {	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
@@ -250,8 +255,8 @@ char* rd_kafka_err2name(rd_kafka_resp_err_t e) { (void)e; return "kerr"; }
 rd_kafka_resp_err_t rd_kafka_last_error(void) { return RD_KAFKA_RESP_ERR_NO_ERROR; }
 rd_kafka_conf_t* rd_kafka_conf_new(void) { return calloc(1, sizeof(rd_kafka_conf_t)); }
 void rd_kafka_conf_destroy(rd_kafka_conf_t* me) { free(me); }
-void rd_kafka_message_destroy(rd_kafka_message_t*msg) { free(msg->payload); free(msg); }
-void rd_kafka_conf_set_error_cb( rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, int err, const char *reason, void *opaque)) { (void)kc; (void)fn; }
+void rd_kafka_message_destroy(rd_kafka_message_t *msg) { free(msg->payload); free(msg); }
+void rd_kafka_conf_set_error_cb( rd_kafka_conf_t *kc, void (*fn)(rd_kafka_t *rk, int err, const char *reason, void *opaque)) { (void)kc; (void)fn; }
 
 void rd_kafka_destroy(rd_kafka_t* k) {
 	struct kafka_simulator_t *ks = g_kafka_simu;
@@ -378,6 +383,9 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 			kc->group_id = strdup(val);
 	} else if (strstr(key, "ssl.") != 0) {
 		kc->enable_ssl = true;
+	} else if (strstr(key, "auto.offset.reset") != 0) {
+		BUG_ON(val[0] != 'e');				// Verify this is earliest
+		kc->auto_reset_earliest = true;
 	}
 	/* Set error 0 */ BUG_ON(size_of_err < 16); err_str[0] = 0;
 	return RD_KAFKA_CONF_OK;
@@ -399,7 +407,7 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 		return NULL;
 	}
 	m->offset = ko->topic.broker_topic->cur_offset++;
-	N_Tf(__AUTOID__, "consumer[@STR] ++cur_offset=@LD", unique_name, ko->topic.broker_topic->cur_offset);
+	N_Tf(__AUTOID__, "consumer[@STR] got cur_offset=@LD", unique_name, m->offset);
 	m->_private = NULL;
 	return m;
 }
