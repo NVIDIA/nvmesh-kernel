@@ -122,18 +122,26 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 		NNVMEIBT_BM_FREE(bnsj29k, stale_lock);
 	}
 	unlock_stale_locks_hash(seg_active);
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->longing_registrants_hash_by_cid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_hash_by_cid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_lockid) {
+	NVMEIB_HASH_TBL_FREE(83hhu2l, seg_active->longing_registrants_hash_by_cid);
+	//
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_cid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_cid) {
+	NVMEIB_HASH_TBL_FREE(dujyq02, seg_active->active_registrants_hash_by_cid);
+	//
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
+		// free_reg_ctx(reg_ctx);	// Already freed, the same registrants as active_registrants_hash_by_handle
+	}
+	NVMEIB_HASH_TBL_FREE(bhk49ol, seg_active->active_registrants_hash_by_lockid);
+	//
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_lockid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->stale_registrants_hash_by_lockid) {
-		free_reg_ctx(reg_ctx);
-	}
+	NVMEIB_HASH_TBL_FREE(9ksl40d, seg_active->stale_registrants_hash_by_lockid);
+	//
 	XDLIST_FOREACH_SAFE(reg_ctx, &seg_active->registrants_on_timeout) {
 		free_reg_ctx(reg_ctx);
 	}
@@ -489,10 +497,10 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active = NNVMEIBT_TOMA_CALLOC(fwwq99a, 1, sizeof(*seg_active));
 	seg_active->uuid = *uuid;
 	NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(v20sslk, seg_active, "LOCAL_DISK", 1);
-	XHASHTABLE_INIT(&seg_active->longing_registrants_hash_by_cid);
-	XHASHTABLE_INIT(&seg_active->active_registrants_hash_by_lockid);
-	XHASHTABLE_INIT(&seg_active->active_registrants_hash_by_cid);
-	XHASHTABLE_INIT(&seg_active->stale_registrants_hash_by_lockid);
+	seg_active->longing_registrants_hash_by_cid = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_cid", 4);
+	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4);
+	seg_active->active_registrants_hash_by_cid = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_cid", 4);
+	seg_active->stale_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
 	XHASHTABLE_INIT(&seg_active->stale_locks_hash);
 	XHASHTABLE_INIT(&seg_active->awaited_lockids);
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);
@@ -505,7 +513,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 		N_Ef(ry876ha, "Failed to create stale locks mutex (@AUTO_ERRNO)");
 	    nvmeibt_abort(ES_FATAL);
 	}
-	nvmeibt_register_move_all_longing_registrants_no_seg_to_seg(seg_active);
+	nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longing(seg_active);
 
 	seg_active->dirty_rebuild_ctx.tid = 0;
 	seg_active->stale_rebuild_ctx.tid = 0;

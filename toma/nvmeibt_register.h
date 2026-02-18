@@ -54,10 +54,7 @@ struct nvmeibt_registrant_ctx {
 	struct timespec						reg_disconnect_time;
 	struct timespec						timeout_time;
 	struct xdlist						registrant_on_timeout_link;
-	struct xdlist						active_link;
-	struct xdlist						active_link_by_cid;
-	struct xdlist						stale_link;
-	struct xdlist						longing_link;
+	struct xdlist						longing_on_invalid_seg_link;
 	enum REG_TIMEOUT_REASON				timeout_reason;
 	int									n_stale_locks;	// The stale_locks are held disk_segment->stale_locks_hash
 	u64									reservation_mode_version;
@@ -143,11 +140,11 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_l
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
 struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_reg_lock_id(
 	struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id);
-void nvmeibt_register_totally_remove_registrant(struct nvmeibt_registrant_ctx *input_registrant_ctx);
+void nvmeibt_register_remove_unsubscribed_registrant(struct nvmeibt_registrant_ctx *input_registrant_ctx);
 void nvmeibt_register_make_all_seg_active_registrants_sync_praid_topology(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_clients_sync_check_and_act_upon(struct nvmeibt_seg_active *seg_active);
-void nvmeibt_register_move_all_longing_registrants_no_seg_to_seg(struct nvmeibt_seg_active *seg_active);
-void nvmeibt_remove_longing_registrant_on_invalid_seg(unsigned long long closed_messaging_handle);
+void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longing(struct nvmeibt_seg_active *seg_active);
+void nvmeibt_register_remove_longing_registrant_on_invalid_seg(unsigned long long closed_messaging_handle, bool is_complete_removal_from_all_segs);
 int nvmeibt_register_handle_incoming_message(struct nvmeibt_register_msg *msg);
 struct timespec nvmeibt_register_get_next_timeout_timespec(void);
 void nvmeibt_register_close_seg_active_for_registration(struct nvmeibt_seg_active *seg_active, bool is_brute_force_disconnect_required);
@@ -163,7 +160,7 @@ int nvmeibt_register_launch_seg_metadata_ctrl_save(struct nvmeibt_seg_active *se
 void nvmeibt_register_open_all_eligible_seg_actives_for_use(void);
 void nvmeibt_register_handle_new_reservation_mode(struct nvmeibt_seg_active *seg_active, u64 reservation_mode_version);
 
-bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *input_reg_ctx, bool is_by_cid);
+bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *input_reg_ctx);
 void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_active, int is_err);
 
 int nvmeibt_register_print_status(
