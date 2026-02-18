@@ -708,7 +708,7 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL 
 	__rv__;                                                                               \
 })
 
-int nvmeibt_close_all_nonstd_fds(BOOL is_verbose);
+int nvmeibt_close_all_nonstd_fds(BOOL is_terminate);
 
 int nvmeibt_recursive_mkdir(const char *path, __mode_t mode);
 int nvmeibt_recursive_mkdir_for_path(const char *path, __mode_t mode);

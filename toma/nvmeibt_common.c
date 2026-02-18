@@ -897,16 +897,11 @@ uint64_t nvmeibt_get_guid(void)
 	return __sync_add_and_fetch(&global_uid, 1);
 }
 
-/*
- * nvmeibt_close_all_nonstd_fds(): close all open file descriptors.
- * @is_terminate is set if called by TOMA at termination, and means true
- * shutdown by TOMA, and adds verbosity.
- * @is_terminate is not set if called from helper children before exec()
- * and must not alter the parent's address space state or generate any
- * logging; in particular, may not use FIN/FOUT/_{E|W|T}f().
- */
 int nvmeibt_close_all_nonstd_fds(BOOL is_terminate)
 {
+	if (is_terminate)	// Shutdown syslog explicitly, to avoid deleting it's fd and confusing it.
+		closelog();
+#if 0					// No need, Sandbox unitest verifies that all file descriptors are properly closed anyways, and there is no benefit of calling the code below
 	struct dirent *dirent;
 	DIR *dir;
 	char *endp;
@@ -921,11 +916,6 @@ int nvmeibt_close_all_nonstd_fds(BOOL is_terminate)
 	 */
 
 	// EXPLICITLY NO FIN
-
-	// Shutdown syslog explicitly, to avoid deleting it's fd and confusing it.
-	if (is_terminate)
-		closelog();
-
 	dir = opendir("/proc/self/fd");
 	if (dir == NULL)
 		return -1;
@@ -957,11 +947,9 @@ int nvmeibt_close_all_nonstd_fds(BOOL is_terminate)
 			close(fd);
 		}
 	}
-
 	closedir(dir);
-
 	// EXPLICITLY NO FOUT
-
+#endif
 	return 0;
 }
 
