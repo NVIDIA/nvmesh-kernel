@@ -194,6 +194,8 @@ typedef u8 t_ib_port;
 
 extern int *siw_panic_on_warn;
 
+extern unsigned relax_timeouts;
+
 struct siw_devinfo {
 	unsigned		device;
 	unsigned		version;
@@ -1436,6 +1438,20 @@ static inline struct siw_mr *siw_mem2mr(struct siw_mem *m)
 #define SIW_WARN_KNOWN_EC_ONCE(cond, bug_num) SIW_WARN_KNOWN_COMMON(WARN_ONCE, cond, EC_BUG_PREFIX_FMT, bug_num)
 #define SIW_WARN_KNOWN(cond, bug_num) SIW_WARN_KNOWN_COMMON(WARN, cond, NVMESH_BUG_PREFIX_FMT, bug_num)
 #define SIW_WARN_KNOWN_ONCE(cond, bug_num) SIW_WARN_KNOWN_COMMON(WARN_ONCE, cond, NVMESH_BUG_PREFIX_FMT, bug_num)
+
+#define SIW_TIMEOUT_WARN_ON_ONCE(__delay, __timeout)			\
+	do {								\
+		unsigned long timeout = __timeout;			\
+		timeout *= clamp(relax_timeouts, 1U, 10000U);		\
+		WARN_ON_ONCE(__delay > timeout);			\
+	} while (0)
+
+#define SIW_TIMEOUT_WARN_ON_KNOWN_ONCE(__delay, __timeout, __bug)	\
+	do {								\
+		unsigned long timeout = __timeout;			\
+		timeout *= clamp(relax_timeouts, 1U, 10000U);		\
+		SIW_WARN_KNOWN_ONCE(__delay > timeout, __bug);		\
+	} while (0)
 
 #include "../../common/compat/kr_incs_types.h"
 
