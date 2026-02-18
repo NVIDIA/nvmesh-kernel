@@ -303,7 +303,7 @@ void t_sandbox_sock_tbl_destroy(struct t_sandbox_sock_tbl *ts) {
 		const struct t_sandbox_sock *s = &ts->socks[i];
 		if (sbfd_is_used(s)) {		// Leak of this file descriptor
 			SANDBOX_PRINT("TSB[%2d]: " COL_RED_BOLD "Leaking fd=%2d, " COL_RESET " path=%-40s\n", i, s->fd, s->addr.sun_path);
-			//BUG_ON(true); - Toma still have leaks of file descriptors, Todo solve them, enable bug on and remove usage of sys->can_use_bin_traces
+			BUG_ON(true);
 		}
 	}
 }
@@ -476,8 +476,7 @@ struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void
 	return &sys->s_req_simu;
 }
 
-/// Look up and return a socket object by fd. Returns null if not found.
-static struct t_sandbox_sock * TSB_socket_find_by_fd_opt(int fd) {
+static struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {		// Look up and return a socket object by fd. Bug if not found. Sandbox environment should emulate all fd's
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	int i;
 	if (fd >= sys->TS.debug_offset)
@@ -486,42 +485,16 @@ static struct t_sandbox_sock * TSB_socket_find_by_fd_opt(int fd) {
 		if (TS->socks[i].fd == fd)
 			return &TS->socks[i];
 	}
+	BUG_ON(true);
 	return NULL;
 }
 
-/// Look up and return a socket object by fd. Requires fd to valid: aborts the program if not.
-static struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
-	if (s)
-		return s;
-	fprintf(stderr, "sandbox: no such fd %d\n", fd); BUG_ON(true);
-	return NULL; // not reached
-}
-
-static struct TSB_sock_otherside* TSB_socket_find_other_side_by_fd(int fd) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd_opt(fd);
-	if (s)
-		return s->other_side;
-	fprintf(stderr, "sandbox: no such fd %d\n", fd); BUG_ON(true);
-	return NULL; // not reached
-}
-
-
 int ioctl(int fd, unsigned long int req, ...) {
-	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd_opt(fd);
-	const char *path;
+	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd(fd);
+	const char *path = tsb->addr.sun_path;
 	va_list ap;
 	int rv = 0;
 	va_start(ap, req);
-
-	if (!tsb) {
-		N_Ef(ioc5734, "no such fd=@INT", fd);
-		rv = -1;
-		goto done;
-	}
-
-	path = tsb->addr.sun_path;
-
 	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
 		const struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
@@ -607,8 +580,6 @@ int ioctl(int fd, unsigned long int req, ...) {
 	} else {
 		BUG_ON(true);
 	}
-
-done:
 	va_end(ap);
 	return rv;
 }
@@ -803,7 +774,7 @@ static void socket_destroy(struct t_sandbox_sock *s) {
 		return;
 	if (sys->can_use_bin_traces) {		// Some fd's are closed after binary traces were shut down
 		N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, close, del=@BOOL_YN", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
-	} else {
+	} else {							// Closing syslog when binary traces are disabled
 		SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
 	}
 	if (s->f != NULL) {
@@ -821,8 +792,8 @@ int TSB_sock_open(struct t_sandbox_sock *s) {
 	const char* open_mode = sbfd_get_open_mode(s);
 	s->f = fopen(s->addr.sun_path, open_mode);
 	if (s->f == NULL) {
-		s->fd = -1;
-		return -1;
+		N_Ef(__AUTOID__, "Cannot open file |@STR|. Crashing...", s->addr.sun_path);
+		BUG_ON(true);
 	}
 	s->fd = fileno(s->f);
 	TSB_connect_sock_to_listener(s);
@@ -831,7 +802,7 @@ int TSB_sock_open(struct t_sandbox_sock *s) {
 	return s->fd;
 }
 
-int __connect(int fd, const struct sockaddr_un * addr, unsigned int len) {
+int __connect(int fd, const struct sockaddr_un *addr, unsigned int len) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	struct t_sandbox_sock *s = &TS->socks[fd - TS->debug_offset];
 	s->addr = *addr;
@@ -1431,23 +1402,11 @@ int override_open(const char *path, int flags, ... /*int mode*/) {
 int override_close(int fd) {
 	struct t_sandbox_sock *s;
 	pthread_mutex_lock(&sys->TS.mutex);
-	s = TSB_socket_find_by_fd_opt(fd);
-	if (s)
-		socket_destroy(s);
+	s = TSB_socket_find_by_fd(fd);
+	socket_destroy(s);
 	pthread_mutex_unlock(&sys->TS.mutex);
-
-	if (!s) { // This happens during shutdown currently, as Toma closes all fd's before exiting. To get a clean unit test run, we need to handle this gracefully.
-		if (sys->can_use_bin_traces) {
-			N_SANDBOX(__AUTOID__, "close attempted for invalid fd=@INT", fd);
-		} else {
-			SANDBOX_PRINT("close attempted for invalid fd=%d\n", fd);
-		}
-		errno = EBADF;
-		return -1;
-	} else {
-		errno = 0;
-		return 0;
-	}
+	errno = 0;
+	return 0;
 }
 
 // Create a new TSB entry that mirrors an existing fd.
@@ -1618,7 +1577,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	__temp_wait_sleep();
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
 		const int fd = ep->evs[i].__fd;
-		const struct TSB_sock_otherside *o = TSB_socket_find_other_side_by_fd(fd);
+		const struct TSB_sock_otherside *o = TSB_socket_find_by_fd(fd)->other_side;
 		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
 	}
@@ -1796,6 +1755,7 @@ int rsrm_faults_get_fd(void) {
 	return sys->TSB_srm_fault.o.sock->fd;
 }
 
+void rsrm_destroy_after_run(void) { override_close(rsrm_faults_get_fd()); }
 void rsrm_faults_handle_fifo_comm(void) {}
 
 #include "nvmeibt_global.h"
@@ -1845,6 +1805,7 @@ void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln) {
 	BUG_ON(ln->n_total_msmgs_sent.vote_rep <= 0);
 	BUG_ON(ln->n_total_msmgs_sent.append_ent_rep <= 0);
 	free(ln);
+	override_close(sys->TSB_srm_timer.o.sock->fd); // Like real free_local_node()
 }
 
 int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {

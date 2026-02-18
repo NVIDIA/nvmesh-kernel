@@ -163,6 +163,7 @@ int  rsrm_resend_timer(void);			// Callback for timer
 int  rsrm_faults_init_fifo_comm(void);	// Create Fifo queue (cli file)
 int  rsrm_faults_get_fd(void);			// Get descriptor of fifo to select
 void rsrm_faults_handle_fifo_comm(void);// Handle fault after wakeup from select
+void rsrm_destroy_after_run(void);
 
 // Network manager (For raft communication) nm
 struct nvmeibt_nm_local_node; struct nvmeibt_nic; struct nvmeibt_node; struct nvmeibt_msg_request;

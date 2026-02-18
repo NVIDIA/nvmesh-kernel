@@ -704,7 +704,8 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_drain(stat_wq);
 	nvmeibt_wq_destroy(stat_wq);
 	stat_wq = NULL;
-	NNVMEIBT_CLOSE(__AUTOID__, epoll_fd);
+	NNVMEIBT_CLOSE(tonecfd0, epoll_fd);
+	rsrm_destroy_after_run();
 	NFOUT;
 
 	nvmeibt_toma_abort_child_processes();	// Here we wait for trace pollers as well. From this point no binary traces prints!
@@ -2335,11 +2336,6 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	log_snapshotting_set_active_log_levels("High");	// Only after reading the RPC config, since we overide the persist
 	/* set main thread id */
 	nvmeibt_toma_set_main_thread();
-	/* create internal toma wakeup */
-	if (init_toma_wakeup() < 0) {
-		N_Ef(fjju887, "Failed to setup internal toma wakeup");
-		goto out;
-	}
 	// initialize raft
 	if (nvmeibt_raft_one_time_init() != 0) {
 		N_Ef(qqwo009, "Failed to do raft one time init");
@@ -2349,6 +2345,13 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		success = 1;
 		goto out;
 	}
+
+	/* create internal toma wakeup */
+	if (init_toma_wakeup() < 0) {
+		N_Ef(fjju887, "Failed to setup internal toma wakeup");
+		goto out;
+	}
+
 	/* create work-queues */
 	// Init local_disk wqs hash table.
 	nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
@@ -2673,8 +2676,9 @@ out:
 exit:
 	N_IMf(trace_30_toma_run, "exiting...");
 	NFOUT;
-
+	//	Consider uniting the cleanup code below with terminate_toma()
 	nvmeibt_toma_abort_child_processes();
+	nvmeibt_close_all_nonstd_fds(1);  /* be verbose */
 	return rv;
 }
 

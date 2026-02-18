@@ -197,6 +197,7 @@ int  rsrm_resend_timer(void);			// Callback for timer
 
 // API SRM faults<-->Toma
 int  rsrm_faults_init_fifo_comm(void);	// Create Fifo queue (cli file)
-int  rsrm_faults_get_fd(void);			// Get descriptor of fifo to sleect
+int  rsrm_faults_get_fd(void);			// Get descriptor of fifo to select
 void rsrm_faults_handle_fifo_comm(void);// Handle fault after wakeup from select
-#endif
+void rsrm_destroy_after_run(void);
+#endif	// NVMEIBT_SRM_H

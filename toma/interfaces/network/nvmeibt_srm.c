@@ -2287,6 +2287,11 @@ int rsrm_faults_get_fd(void)
 	return fifo_comm_rd;
 }
 
+void rsrm_destroy_after_run(void)
+{
+	NNVMEIBT_CLOSE(tonecfd1, fifo_comm_rd);
+}
+
 static void open_fifo_comm(void)
 {
 	fifo_comm_rd = NNVMEIBT_OPEN(trace_toma_open_fifo_comm, FIFO_PATH, O_RDONLY | O_NONBLOCK, 0600);
