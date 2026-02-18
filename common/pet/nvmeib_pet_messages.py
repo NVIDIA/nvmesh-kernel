@@ -344,12 +344,14 @@ class DwarfRuntime:
 		name = self.__get_die_type_name(die)
 		size = die.attributes['DW_AT_byte_size'].value
 		enc_attr = die.attributes.get('DW_AT_encoding')
-		encoding = describe_attr_value(enc_attr, die, self._dwarf) if enc_attr else 'DW_ATE_unsigned'
+		encoding = describe_attr_value(enc_attr, die, self._dwarf) if enc_attr else '(unsigned)'
 		if 'unsigned' in encoding:
 			enc = 'unsigned'
 		elif 'boolean' in encoding:
 			enc = 'boolean'
 		elif 'char' in encoding and 'unsigned' not in encoding:
+			enc = 'signed'
+		elif 'signed' in encoding:
 			enc = 'signed'
 		else:
 			enc = 'unsigned'
