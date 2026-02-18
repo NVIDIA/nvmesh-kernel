@@ -211,7 +211,7 @@ static pthread_mutex_t 			kafka_toma_requested_term_and_offset_mutex = PTHREAD_R
 #define IS_AWAITING_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(name)	({																								\
 	bool		is;																																									\
 	int64_t		incremental_TARGET_updates_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);															\
-	is = (purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates) > purify_offset(incremental_TARGET_updates_offset));												\
+	is = (kafka_leader_offset_blocking_incremental_TARGET_updates > incremental_TARGET_updates_offset);																				\
 	if (is) {																																										\
 		N_Tf(name, "Awaiting offset_blocking_incremental_TARGET_updates=@LD>@LD",																									\
 			 purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(incremental_TARGET_updates_offset));												\
@@ -1504,7 +1504,7 @@ static int HW_full_config_consume(void) {
 		N_Tf(y788u33, "Not initialized");
 		return 1;
 	}
-	if (purify_offset(HW_full_config_consumer_offset_committed_by_toma) < purify_offset(HW_full_config_consumer_offset_submitted_to_toma)) {
+	if (HW_full_config_consumer_offset_committed_by_toma < HW_full_config_consumer_offset_submitted_to_toma) {
 		// In order to have 100% control of the offset of the consumed HW_full_configs, we run one at a time
 		N_Tf(tvs84kw, "Skipping, offset_committed_by_toma=@LD < offset_submitted_to_toma=@LD", purify_offset(HW_full_config_consumer_offset_committed_by_toma), purify_offset(HW_full_config_consumer_offset_submitted_to_toma));
 		return 1;
@@ -1994,7 +1994,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			k->offset_committed = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed);
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_VOL,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->kafka_mgmt_config_ctx)));
-			k_err = __consumer_assign_partition_and_offset(k, purify_offset(sampled_req_offset_VOL));
+			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_VOL);
 			N_Tf(evweyha, "rd_kafka_assign(VOL_updates_consumer_offset=@LD)", purify_offset(sampled_req_offset_VOL));
 			if (k_err) {
 				N_Wf(cvn4do8, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
@@ -2018,7 +2018,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			NVMEIBT_KAFKA_SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(rygba82, nvmeibt_offset_and_idx_uninitialized);	// A new leader starts from committed and is not in the middle of adding a target node to raft
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_TARGET,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->raft_members_ctx)));
-			k_err = __consumer_assign_partition_and_offset(k, purify_offset(sampled_req_offset_TARGET));
+			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_TARGET);
 			N_Tf(psiwjrn, "rd_kafka_assign(TARGET_updates_consumer_offset=@INT64_TD)", purify_offset(sampled_req_offset_TARGET));
 			if (k_err) {
 				N_Wf(vybsi4l, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
@@ -2124,12 +2124,12 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	}
 	{ // All HW_full_config updated are handled by TOMA, (in order)
 		const int64_t offset_to_commit = HW_full_config_consumer_offset_committed_by_toma - 1;	// Commit all but the last one
-		if (purify_offset(offset_to_commit) >= 0 && (purify_offset(offset_to_commit) > purify_offset(k_HW_full_config.offset_committed)))
+		if ((purify_offset(offset_to_commit) >= 0) && (offset_to_commit > k_HW_full_config.offset_committed))
 			kafka_commit_by_offset_async(&k_HW_full_config, offset_to_commit);
 	}
 	if (is_consuming_leader_VOL_msgs()) {
 		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
-		if (purify_offset(incremental_VOL_updates_offset_to_commit) > purify_offset(k_incremental_VOL_updates.offset_committed)) {
+		if (incremental_VOL_updates_offset_to_commit > k_incremental_VOL_updates.offset_committed) {
 			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD latest=@INT64_TD", purify_offset(incremental_VOL_updates_offset_to_commit), purify_offset(k_incremental_VOL_updates.consumer_offset));
 			kafka_commit_by_offset_async(&k_incremental_VOL_updates, incremental_VOL_updates_offset_to_commit);
 		}
@@ -2139,7 +2139,7 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 		// They might be handled out-of-order offset-wise, since we have a queue that reorders them according to seq-no
 		// - We only commit (the highest offset ever, already committed by the raft-majority) if the seq_no committed by the raft_majority is equal to the last one we submitted to toma, and the queue is empty
 		const int64_t offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);	// If we decide to commit
-		if (purify_offset(offset_to_commit) > purify_offset(k_incremental_TARGET_updates.offset_committed)) {
+		if (offset_to_commit > k_incremental_TARGET_updates.offset_committed) {
 			const int64_t incremental_TARGET_update_seq_no_committed_by_raft_majority = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_committed_by_majority);
 			if ((incremental_TARGET_update_seq_no_committed_by_raft_majority == last_sent_to_toma_targets_updates_seq_no) && XDLIST_EMPTY(&kafka_raft_members_sorted_msgs_queue)) {
 				kafka_commit_by_offset_async(&k_incremental_TARGET_updates, offset_to_commit);
