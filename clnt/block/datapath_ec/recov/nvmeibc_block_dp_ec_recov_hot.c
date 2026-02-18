@@ -1162,7 +1162,7 @@ static int read_jmdc_comp(struct htr_ctx *h, int si)
 	struct nvmeibc_disk *disk = h->params.raid1->segments[si].disk;
 	int rv = -1;
 	unsigned i;
-	u32 binje;
+	u32 binje = HTR_INVALID_N_SLICE_JOUR;
 	NFIN;
 
 	if (gen_cmd_comp_check(h, si) < 0)
