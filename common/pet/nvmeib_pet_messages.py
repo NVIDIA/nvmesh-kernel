@@ -5,7 +5,9 @@ import os
 import abc
 import enum
 import errno
+import signal
 import struct
+import sys
 import typing
 import pathlib
 import argparse
@@ -856,7 +858,7 @@ class ViewMessages(Command):
 			print(f'{human_msg.dt_stamp} entity={human_msg.fname}[{human_msg.entity}] {human_msg.text}')
 
 
-if __name__ == '__main__':
+def main():
 	parser = argparse.ArgumentParser(
 		description='extract ASCII strings from a ELF binary .rodata section',
 		formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -869,3 +871,13 @@ if __name__ == '__main__':
 	args = parser.parse_args()
 	handler = args.klass(args)
 	handler()
+
+
+if __name__ == '__main__':
+	signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+	try:
+		main()
+	except KeyboardInterrupt:
+		sys.exit(128 + signal.SIGINT)  # 130: terminated by Ctrl+C
+	except BrokenPipeError:
+		sys.exit(128 + signal.SIGPIPE)  # 141: reader closed the pipe (e.g. | head)
