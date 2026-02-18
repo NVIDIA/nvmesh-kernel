@@ -683,7 +683,7 @@ class EvaluateInt(Command):
 		parser.add_argument(
 			'value',
 			type=lambda s: int(s, 0),
-			help='the user defined type ; no need to specify the tag(enum/struct/union)',
+			help='the integer value to decode using the specified type',
 		)
 
 	def __init__(self, args: argparse.Namespace):
@@ -749,7 +749,7 @@ class ViewMessages(Command):
 			action='store_true',
 			dest='no_sort',
 			default=False,
-			help="By default, all traces are sorted; '--no-sort' disables the ordering; usefull to see some entity traces in a single screen",
+			help="By default, all traces are sorted; '--no-sort' disables the ordering; useful to see some entity traces in a single screen",
 		)
 
 	def __init__(self, args: argparse.Namespace):
