@@ -6,6 +6,7 @@ import abc
 import enum
 import json
 import errno
+import struct
 import typing
 import pathlib
 import argparse
@@ -542,16 +543,19 @@ class Template:
 
 class Dictionary(pydantic.BaseModel):
 	specs: list[MessageSpec]
-	user_defined_types: dict[str, TypeInfo] 
+	user_defined_types: dict[str, TypeInfo]
+	um_trace: bool = False
 
 	@staticmethod
-	def load_templates(fpath: pathlib.Path) -> dict[int, Template]:
+	def load(fpath: pathlib.Path) -> 'Dictionary':
 		with open(fpath, 'r') as fobj:
-			dictionary:Dictionary = Dictionary.model_validate_json(fobj.read())
-			templates:dict[int, Template] = {}
-			for msg in dictionary.specs:
-				templates[msg.offset] = Template(msg, dictionary.user_defined_types)
-			return templates
+			return Dictionary.model_validate_json(fobj.read())
+
+	def build_templates(self) -> dict[int, Template]:
+		templates:dict[int, Template] = {}
+		for msg in self.specs:
+			templates[msg.offset] = Template(msg, self.user_defined_types)
+		return templates
 
 	def save(self, fpath: pathlib.Path) -> None:
 		with open(fpath, 'w+') as fobj:
@@ -672,17 +676,28 @@ class SaveDictionary(Command):
 		parser = subparsers.add_parser("save-dictionary", description="save all messages within a module to the dedicated file")
 		cls.add_module_section_args(parser)
 		parser.add_argument('output', type=pathlib.Path, help='path to the output file')
+		parser.add_argument('--um-trace', action='store_true', dest='um_trace', default=False
+							, help="Mark dictionary as requiring UM tracer buffer header skipping during view")
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
 		self.extractor = TemplatesLoader(args.module, args.section)
 		self.output = args.output
+		self.um_trace = args.um_trace
 
 	def __call__(self):
 		dictionary = self.extractor.load_dictionary()
+		dictionary.um_trace = self.um_trace
 		dictionary.save(self.output)
 
 class ViewMessages(Command):
+
+	# Size in bytes of the UM tracer buffer header written by _write_initial_header()
+	# in tracer.c. Each header consists of two 32-bit little-endian words:
+	#   word0: flags (upper byte) | metadata (lower 3 bytes)
+	#   word1: tsc_khz (constant across all headers in a file)
+	_TRACER_HEADER_SIZE = 8  # bytes
+
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
@@ -696,8 +711,44 @@ class ViewMessages(Command):
 		super().__init__(args)
 		self.traces = args.traces
 		self.sort = not args.no_sort
-		with open(args.dictionary) as f:
-			self.templates = Dictionary.load_templates(args.dictionary)
+		dictionary = Dictionary.load(args.dictionary)
+		self.templates = dictionary.build_templates()
+		self.um_trace = dictionary.um_trace
+		# Detect and skip UM tracer buffer headers; learned from first header, verified for subsequent ones.
+		self.__tsc_khz = None
+		self.__hdr_flags = None
+
+	@typing.no_type_check
+	def __skip_tracer_headers(self, kstream: KaitaiStream) -> bool:
+		"""Try to consume an 8-byte tracer buffer header from the stream.
+
+		Detection relies on the constant tsc_khz field (bytes 4-7) and
+		matching flags (high byte of bytes 0-3) written by
+		_write_initial_header() in tracer.c.
+
+		Returns True if a header was consumed, False if the bytes were
+		not a header (stream is rewound to the original position).
+		"""
+		remaining = kstream.size() - kstream.pos()
+		if remaining < self._TRACER_HEADER_SIZE:
+			return False
+
+		pos = kstream.pos()
+		header_bytes = kstream.read_bytes(self._TRACER_HEADER_SIZE)
+		word0 = struct.unpack_from('<I', header_bytes, 0)[0]
+		word1 = struct.unpack_from('<I', header_bytes, 4)[0]
+
+		if self.__tsc_khz is None:
+			# First header in the file: learn tsc_khz and flags
+			self.__tsc_khz = word1
+			self.__hdr_flags = word0 >> 24
+			return True
+
+		if word1 == self.__tsc_khz and (word0 >> 24) == self.__hdr_flags:
+			return True
+
+		kstream.seek(pos)
+		return False
 
 	@typing.no_type_check
 	def __iter_entities(self) -> typing.Generator[NvmeibPetArchive.Entity, None, None]:
@@ -707,6 +758,8 @@ class ViewMessages(Command):
 				idx = 0
 				kstream = KaitaiStream(fobj)
 				while not kstream.is_eof():
+					if self.um_trace and self.__skip_tracer_headers(kstream):
+						continue
 					entity_start_position = kstream.pos()
 					entity = NvmeibPetArchive.Entity(kstream)
 					entity.fname = fpath.name if n_files > 1 else ''
