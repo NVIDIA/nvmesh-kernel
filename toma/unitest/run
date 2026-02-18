@@ -105,6 +105,12 @@ function T_SANDBOX_main_self_unit_test() {
 	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
 }
 
+function T_SANDBOX_main_self_reuse_persistency_unit_test() {
+	./${EXE_NAME};
+	__abort_ci_on_failure;
+}
+
+
 function T_SANDBOX_main_live_run() {
 	echo_red "Todo: Test, Not supported yet";
 }
@@ -120,6 +126,7 @@ case "$1" in
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
 	T_SANDBOX_main_self_unit_test;
+	T_SANDBOX_main_self_reuse_persistency_unit_test;
 	T_SANDBOX_toma_persist_json_test;
 	T_SANDBOX_gpt_util_self_unit_test;
 	date;
