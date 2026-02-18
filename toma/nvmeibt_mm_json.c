@@ -1774,6 +1774,7 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	}
 	JSON_buf = NNVMEIBT_STR_ALLOC(cbrai2g);
 	JSON_len = NNVMEIBT_STR_FREAD(bsj39lw, JSON_buf, fd);
+	NNVMEIBT_CLOSE(tmmjrfp1, fd);
 	if (JSON_len < 10 || (JSON_len != nvmeibt_Str_strlen(JSON_buf))) {
 		N_Ef(cxgw9ph, "Failed reading @STR JSON_len=@SIZE_T strlen=@SIZE_T", JSON_file_name, JSON_len, nvmeibt_Str_strlen(JSON_buf));
 		goto out;
