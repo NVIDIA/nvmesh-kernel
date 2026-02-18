@@ -246,10 +246,20 @@ class ArrayType(pydantic.BaseModel):  # not tested yet
 class DwarfRuntime:
 	@typing.no_type_check
 	def __init__(self, elf_path: pathlib.Path):
-		self._elf = ELFFile(open(elf_path, 'rb'))
-		self._dwarf = self._elf.get_dwarf_info() if self._elf.has_dwarf_info() else None
-		self._address_size = self._elf.elfclass // 8
+		self._fobj = open(elf_path, 'rb')
+		elf = ELFFile(self._fobj)
+		self._dwarf = elf.get_dwarf_info() if elf.has_dwarf_info() else None
+		self._address_size = elf.elfclass // 8
 		self._type_cache: dict[int, TypeInfo] = {}
+
+	def close(self):
+		self._fobj.close()
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, *exc):
+		self.close()
 
 	@typing.no_type_check
 	def load_types(self, type_names: set[str]) -> dict[str, TypeInfo]:
@@ -577,7 +587,6 @@ class TemplatesLoader:
 	def __init__(self, module: pathlib.Path, section_name: str):
 		self.module = module
 		self.section_name = section_name
-		self.__dwarf_runtime = DwarfRuntime(module)
 
 	@typing.no_type_check
 	def __load_messages_blob(self) -> bytes:
@@ -620,7 +629,8 @@ class TemplatesLoader:
 	def load_dictionary(self) -> Dictionary:
 		specs = self.__load_messages_spec()
 		user_defined_type_names: set[str] = self.__list_user_defined_types(specs)
-		user_defined_types = self.__dwarf_runtime.load_types(user_defined_type_names)
+		with DwarfRuntime(self.module) as dwarf_runtime:
+			user_defined_types = dwarf_runtime.load_types(user_defined_type_names)
 
 		return Dictionary(specs=specs, user_defined_types=user_defined_types)
 
