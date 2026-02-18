@@ -191,7 +191,7 @@ void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_active, in
 	NFIN;
 
 	getnstimeofday_boot(&now);
-	NVMEIB_HASH_FOREACH(active_registrant, seg_active->active_registrants_by_lockid) {
+	NVMEIB_HASH_FOREACH(active_registrant, seg_active->active_registrants_hash_by_lockid) {
 		if (is_err && !(active_registrant->is_force_cmd_called) && timespec_lt(active_registrant->timeout_time, now)) {
 			NDUMP_REG_CTX(dhy7462, _Ef, active_registrant);
 		}
@@ -272,7 +272,7 @@ static void lock_id_cache_zone_purge_launch_ask_all_registrants_to_forget_recove
 	N_Tf(dhyt76w, "zone purge start seg=@UUID_8 lock_id_zone=@LOCK_ID_ZONE count=? seqno=@SEQNO",
 		nvmeibt_seg_active_UUID_8(seg_active), zone_no, pl.purge_seqno);
 
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_by_lockid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
 		N_Tf(lock_id_cache_zone_purge_launch_trace,
 			 "send @STR to handle=@HANDLE reg_lock_id=@C_LID",
 			nvmeibt_protocol_client_msg_str(NVMEIBT_CLIENT_MSG_TC_LOCKID_CACHE_PURGE),
@@ -324,7 +324,7 @@ static void lock_id_cache_zone_purge_finish(struct nvmeibt_seg_active *seg_activ
 		seg_active->reg_lock_id_cache_purge_n_purges_in_fly,
 		seg_active->reg_lock_id_cache_purge_seqno);
 
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_by_lockid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
 		if (reg_ctx->is_purging_lock_id_cache) {
 			N_Tf(dkti994, "drop purging registrant: handle=@HANDLE on seg=@UUID_8 purge_seqno=@LD lock_id_zone=@X",
 				 reg_ctx->client_messaging_handle,
@@ -579,8 +579,8 @@ void free_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx)
 		struct nvmeibt_seg_active *seg_active = reg_ctx->seg_active;
 		XDLIST_DEL(&(reg_ctx->registrant_on_timeout_link));
 		if (seg_active) {
-			nvmeib_hash_delete_uint32_t(seg_active->longing_registrants_by_cid, client_messaging_handle_to_cid(reg_ctx->client_messaging_handle));
-			nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+			nvmeib_hash_delete_uint32_t(seg_active->longing_registrants_hash_by_cid, client_messaging_handle_to_cid(reg_ctx->client_messaging_handle));
+			nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 			remove_active_registrant(seg_active, reg_ctx);
 		}
 		nvmeibt_client_reg_ctx_ref_removed(reg_ctx->client, reg_ctx);
@@ -862,7 +862,7 @@ out:
 BOOL nvmeibt_register_is_any_registered_on_seg_active(const struct nvmeibt_seg_active *seg_active)
 {
 	NTOMA_ASSERT(error_register_nvmeibt_register_is_any_registered_on_seg_active, seg_active, "OOPS, called with seg_active=NULL");
-	return (nvmeib_hash_get_n_elements(seg_active->active_registrants_by_lockid) != 0);
+	return (nvmeibt_seg_active_n_active_registrants(seg_active) != 0);
 }
 
 BOOL nvmeibt_register_is_any_registered_on_local_disk(const struct nvmeibt_local_disk *local_disk)
@@ -1060,7 +1060,7 @@ static void remove_longing_registrant_on_seg(struct nvmeibt_seg_active *seg_acti
 	NFIN;
 	N_Tf(kiru834, "Remove the longing_registrant seg=@UUID_8 handle=@HANDLE",
 		nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->client_messaging_handle);
-	nvmeib_hash_delete_uint32_t(seg_active->longing_registrants_by_cid, client_messaging_handle_to_cid(reg_ctx->client_messaging_handle));
+	nvmeib_hash_delete_uint32_t(seg_active->longing_registrants_hash_by_cid, client_messaging_handle_to_cid(reg_ctx->client_messaging_handle));
 	free_reg_ctx(reg_ctx);
 	NFOUT;
 }
@@ -1096,7 +1096,7 @@ static void send_registrable_to_all_longing_registrants(struct nvmeibt_seg_activ
 	if (nvmeibt_register_is_seg_active_accepting_registrations(seg_active, NULL)) {
 		struct nvmeibt_registrant_ctx	*reg_ctx;
 		// If clients tried to register and received TOMA_NOT_READY, tell them that they can register now
-		NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_by_cid) {
+		NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_hash_by_cid) {
 			send_registrable_to_longing_registrant_if_eligable(seg_active, reg_ctx);
 		}
 	}
@@ -1449,7 +1449,7 @@ void nvmeibt_register_terminate_registrant(struct nvmeibt_registrant_ctx *reg_ct
 			nvmeibt_recovery_handle_client_unregistered(reg_ctx);
 
 		// Add to stale_registrants
-		nvmeib_hash_add_uint32_t(seg_active->stale_registrants_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx);
+		nvmeib_hash_add_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx);
 		NDUMP_N_ACTIVE_REGISTRANTS(trace_3_register_nvmeibt_register_terminate_registrant, seg_active);
 	}
 	// Now in stale_registrants. If still has stale locks then skip it, stale-recovery will retry
@@ -1479,7 +1479,7 @@ static void remove_disconnected_client_active_registrant_by_lockid(struct nvmeib
 
 	NFIN;
 
-	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_by_lockid, nvmeib_lockid_purify(reg_lock_id));
+	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_lock_id));
 	if (reg_ctx) {
 		nvmeibt_register_terminate_registrant(reg_ctx, 0);
 	} else {
@@ -1493,10 +1493,10 @@ void nvmeibt_register_brute_force_cleanup_all_seg_registrants(struct nvmeibt_seg
 	struct nvmeibt_registrant_ctx	*reg_ctx;
 
 	NFIN;
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_by_lockid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
 		nvmeibt_register_terminate_registrant(reg_ctx, 1);
 	}
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_by_lockid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_lockid) {
 	    nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
 //		nvmeibt_register_terminate_registrant(curr_topo, reg_ctx, 1);
 	}
@@ -1509,7 +1509,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_l
 {
 	struct nvmeibt_registrant_ctx	*reg_ctx;
 
-	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->stale_registrants_by_lockid, nvmeib_lockid_purify(reg_lock_id));
+	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_lock_id));
 	if (reg_ctx) {
 		N_Tf(floti94, "Found stale registrant seg=@UUID_8 reg_lock_id=@C_LID",
 			 nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
@@ -1522,7 +1522,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_active_registrant_by_reg_
 {
 	struct nvmeibt_registrant_ctx	*reg_ctx;
 
-	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_by_lockid, nvmeib_lockid_purify(reg_lock_id));
+	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_lock_id));
 	if (reg_ctx) {
 		N_Tf(fjiut75, "Found active registrant seg=@UUID_8 reg_lock_id=@C_LID client_disconnext_time=@LLD",
 			 nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx->reg_disconnect_time.tv_sec);
@@ -1542,7 +1542,7 @@ static void add_longing_registrant_on_seg(struct nvmeibt_registrant_ctx *input_r
 		N_Tf(t98ksoc, "Skipping. toma_is_in_shutdown");
 		goto out;
 	}
-	longing_registrant = nvmeib_hash_search_uint32_t(seg_active->longing_registrants_by_cid, input_reg_ctx->client->cid);
+	longing_registrant = nvmeib_hash_search_uint32_t(seg_active->longing_registrants_hash_by_cid, input_reg_ctx->client->cid);
 	if (longing_registrant) {
 		N_Tf(dkiru43, "Already exists");
 		goto out;
@@ -1554,7 +1554,7 @@ static void add_longing_registrant_on_seg(struct nvmeibt_registrant_ctx *input_r
 	}
 	alloc_reg_ctx(&reg_ctx, input_reg_ctx);
 	NDUMP_REG_CTX(fjiur74, _Tf, reg_ctx);
-	old_reg_ctx = nvmeib_hash_add_uint32_t(seg_active->longing_registrants_by_cid, reg_ctx->client->cid, reg_ctx);
+	old_reg_ctx = nvmeib_hash_add_uint32_t(seg_active->longing_registrants_hash_by_cid, reg_ctx->client->cid, reg_ctx);
 	VALIDATE_ADDED_REG_CTX(c4818j2, old_reg_ctx, reg_ctx);
 out:
 	NFOUT;
@@ -1576,7 +1576,7 @@ bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *inpu
 (void)is_by_cid;
 	// is_remove_from_all_segs_by_cid=true -> The caller is removing longing client from all segments on disk. Otherwise Only for specific segment
 	// In any case, here it is a CID that fully identifies the client
-	longing_registrant = nvmeib_hash_search_uint32_t(input_reg_ctx->seg_active->longing_registrants_by_cid, client_messaging_handle_to_cid(input_reg_ctx->client_messaging_handle));
+	longing_registrant = nvmeib_hash_search_uint32_t(input_reg_ctx->seg_active->longing_registrants_hash_by_cid, client_messaging_handle_to_cid(input_reg_ctx->client_messaging_handle));
 	if (longing_registrant) {
 		remove_longing_registrant_on_seg(input_reg_ctx->seg_active, longing_registrant);
 	}
@@ -2149,7 +2149,7 @@ static enum UNREGISTER_RV launch_unregistered_registrant_removal(
 
 	disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
 	input_key = ((is_by_cid) ? client_messaging_handle_to_cid(input_registrant_ctx->client_messaging_handle) : input_registrant_ctx->client_messaging_handle);
-	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(reg_ctx, &seg_active->active_registrants_by_cid, client_messaging_handle_to_cid(input_registrant_ctx->client_messaging_handle)) {
+	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_cid, client_messaging_handle_to_cid(input_registrant_ctx->client_messaging_handle)) {
 		active_key = ((is_by_cid) ? client_messaging_handle_to_cid(reg_ctx->client_messaging_handle) : reg_ctx->client_messaging_handle);
 		if (input_key != active_key) {
 		   continue;
@@ -2194,7 +2194,7 @@ int nvmeibt_register_launch_disconnected_client_removal_from_all_segments(int cl
 			tmp_reg_ctx.seg_active = seg_active;
 			// Go over all the segments active registrants and notify recovery about those that match by client handle + type.
 			// We can't notify only with the tmp registrant as it has no lock id, and we need the lockid for for the recovery.
-			XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(unregistering_reg_ctx, &seg_active->active_registrants_by_cid,
+			XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(unregistering_reg_ctx, &seg_active->active_registrants_hash_by_cid,
 											  client_messaging_handle_to_cid(tmp_reg_ctx.client_messaging_handle)) {
 				if (client_messaging_handle_to_cid(unregistering_reg_ctx->client_messaging_handle) != client_messaging_handle_to_cid(tmp_reg_ctx.client_messaging_handle)) {
 					continue;
@@ -2615,7 +2615,7 @@ void nvmeibt_register_make_all_seg_active_registrants_sync_praid_topology(struct
 		goto out;
 	}
 	// Send all the registrants a request to voluntarily switch_praid_topology/unregister
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_lockid) {
+	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_lockid) {
 		if (nvmeibt_register_is_processing_registrant_removal(reg_ctx) || is_registrant_on_timeout(reg_ctx) || is_force_cmd_called(reg_ctx)) {
 			continue;
 		}
@@ -2671,7 +2671,7 @@ void nvmeibt_register_close_seg_active_for_registration(struct nvmeibt_seg_activ
 
 	if (is_brute_force_disconnect_required) {
 		// Now go and brute force disconnect them
-		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_lockid) {
+		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_lockid) {
 			if (nvmeibt_register_is_processing_registrant_removal(reg_ctx) || is_registrant_on_timeout(reg_ctx)) {
 				continue;
 			}
@@ -2884,15 +2884,15 @@ int nvmeibt_register_print_status(int (*printf_fn)(void *ctx, const char *fmt, .
 	//FIN;
 	if (seg_active) {
 		(*printf_fn)(printf_ctx, "\t\t\t- Active registrants\n");
-		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_lockid) {
+		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_lockid) {
 			dump_reg_ctx_to_status(printf_fn, printf_ctx, reg_ctx, 0);
 		}
 		(*printf_fn)(printf_ctx, "\t\t\t- Longing registrants\n");
-		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->longing_registrants_by_cid) {
+		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->longing_registrants_hash_by_cid) {
 			dump_reg_ctx_to_status(printf_fn, printf_ctx, reg_ctx, 0);
 		}
 		(*printf_fn)(printf_ctx, "\t\t\t- Stale registrants\n");
-		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->stale_registrants) {
+		XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->stale_registrants_hash_by_lockid) {
 			dump_reg_ctx_to_status(printf_fn, printf_ctx, reg_ctx, 0);
 		}
 		(*printf_fn)(printf_ctx, "\t\t\t- Stale Locks Hash:\n");

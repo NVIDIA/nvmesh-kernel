@@ -122,16 +122,16 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 		NNVMEIBT_BM_FREE(bnsj29k, stale_lock);
 	}
 	unlock_stale_locks_hash(seg_active);
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->longing_registrants_by_cid) {
+	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->longing_registrants_hash_by_cid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_lockid) {
+	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_lockid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_by_cid) {
+	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants_hash_by_cid) {
 		free_reg_ctx(reg_ctx);
 	}
-	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->stale_registrants) {
+	XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->stale_registrants_hash_by_lockid) {
 		free_reg_ctx(reg_ctx);
 	}
 	XDLIST_FOREACH_SAFE(reg_ctx, &seg_active->registrants_on_timeout) {
@@ -489,10 +489,10 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active = NNVMEIBT_TOMA_CALLOC(fwwq99a, 1, sizeof(*seg_active));
 	seg_active->uuid = *uuid;
 	NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(v20sslk, seg_active, "LOCAL_DISK", 1);
-	XHASHTABLE_INIT(&seg_active->longing_registrants_by_cid);
-	XHASHTABLE_INIT(&seg_active->active_registrants_by_lockid);
-	XHASHTABLE_INIT(&seg_active->active_registrants_by_cid);
-	XHASHTABLE_INIT(&seg_active->stale_registrants);
+	XHASHTABLE_INIT(&seg_active->longing_registrants_hash_by_cid);
+	XHASHTABLE_INIT(&seg_active->active_registrants_hash_by_lockid);
+	XHASHTABLE_INIT(&seg_active->active_registrants_hash_by_cid);
+	XHASHTABLE_INIT(&seg_active->stale_registrants_hash_by_lockid);
 	XHASHTABLE_INIT(&seg_active->stale_locks_hash);
 	XHASHTABLE_INIT(&seg_active->awaited_lockids);
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);
