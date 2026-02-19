@@ -1865,10 +1865,15 @@ static ssize_t __empty_tostring(void *_context, char *buf, size_t len)
 
 static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 {
+	struct nvmeibc_procfs *p;
+
 	/* Create files named after the volumes. When user reads it, the
 	   file displays the content of buffer filled by cb.
 	   Warning: Don't touch file names!!! they are used in auto scripts*/
-	struct nvmeibc_procfs *p = &os->procfs;
+
+	p = os->procfs = kzalloc(sizeof *p, GFP_KERNEL);
+	if (!p)
+		goto _out;
 
 	__set_default_if_null(cb.dev_status_to_txt);
 	__set_default_if_null(cb.dev_status_to_json);
@@ -1902,7 +1907,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 	}
 
 _out:
-	return (p->dir && p->io_st_sum && p->status && p->opens && p->throttle &&
+	return (p && p->dir && p->io_st_sum && p->status && p->opens && p->throttle &&
 			p->stalocks && p->profiling && p->j_status && p->j_io_st && p->ext_blob &&
 			(!cb.cpu_masks.to_json || (p->cpu_masks.dir && p->cpu_masks.j_show && p->cpu_masks.add && p->cpu_masks.del)));
 }
@@ -1915,7 +1920,11 @@ static void __proc_destroy(struct nvmeibc_os_api *os)
 		(procfs_entry) = NULL;				\
 	}										\
 })
-	struct nvmeibc_procfs *p = &os->procfs;
+	struct nvmeibc_procfs *p = os->procfs;
+
+	if (!p)
+		return;
+
 	RM_PROC_FILE(p->cpu_masks.j_show);
 	RM_PROC_FILE(p->cpu_masks.add);
 	RM_PROC_FILE(p->cpu_masks.del);
@@ -1938,6 +1947,9 @@ static void __proc_destroy(struct nvmeibc_os_api *os)
 		remove_proc_entry(os->atom.dev_name, os->driver_context->proc_root);
 		p->dir = NULL;
 	}
+
+	kfree(p);
+	os->procfs = NULL;
 }
 
 static struct nvmeibc_os_api *__kzalloc_os_api(void)

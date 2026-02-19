@@ -368,7 +368,7 @@ void clientSimulator_print_proc_files_of_vol(struct clientSimulator *client, boo
 	char buff[4096*64];
 	struct proc_print_params p = {.buf = &buff[0], .len = sizeof(buff)};
 	BUG_ON(volInd >= client->nBdevs);
-	procfs_traverse_tree_dfs(bdev->os->procfs.dir, &p, &__print_proc_file);
+	procfs_traverse_tree_dfs(bdev->os->procfs->dir, &p, &__print_proc_file);
 	p.buf[0] = 0;		// Add null terminator
 	if (verbose)
 		unitest_print("%s", buff);
@@ -398,7 +398,7 @@ struct proc_dir_entry* clientSimulator_find_vol_proc_file_by_path(struct clientS
 	BUG_ON(volInd >= client->nBdevs);
 	snprintf(path_including_vol, PATH_MAX, "%s/%s", bdev->name, path);
 	p.query.path = path_including_vol;
-	procfs_traverse_tree_dfs(bdev->os->procfs.dir, &p, &__find_proc_file_by_path);
+	procfs_traverse_tree_dfs(bdev->os->procfs->dir, &p, &__find_proc_file_by_path);
 	return p.e;
 }
 

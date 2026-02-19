@@ -1097,7 +1097,7 @@ bool nvmeibc_block_update_status(struct nvmeibc_block_device* dev, char reason)
 
 void nvmeibc_block_device_disk_stats_remove(struct nvmeibc_block_device *dev)
 {
-	remove_proc_entry(PROCFS_DISKS_STR, dev->os->procfs.dir);
+	remove_proc_entry(PROCFS_DISKS_STR, dev->os->procfs->dir);
 }
 
 int nvmeibc_block_init(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *volume)
@@ -1154,7 +1154,7 @@ int nvmeibc_block_init(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *
 		rv = rv ? : __blockdevice_derrived_classes_init(dev, pr->slice_size, ro_header_sectors);
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 		if (!rv && !dev->os->is_proc_api_disabled) {
-			rv = nvmeibc_volume_disk_stats_create(dev->os->procfs.dir, volume);
+			rv = nvmeibc_volume_disk_stats_create(dev->os->procfs->dir, volume);
 		}
 #endif
 	}

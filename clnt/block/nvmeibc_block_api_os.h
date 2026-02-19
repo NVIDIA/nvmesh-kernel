@@ -58,7 +58,7 @@ struct nvmeibc_os_api {
 			struct nvmeib_public_procfs_ent *add;
 			struct nvmeib_public_procfs_ent *del;
 		} cpu_masks;
-	} procfs;
+	} *procfs;
 
 	char dev_uuid[NVMEIBC_BD_UUID_LEN];		// NVMesh unique identifier of volume(block device) using this api
 	void* dev;								// Private pointer to your device. Not used in OS api.
@@ -73,7 +73,7 @@ struct nvmeibc_os_api {
 	bool is_init_error;						// Creation/Initialization/Adoption of OS_API. Calling Destroy upon error
 	//bool 8th byte in u64 of flags.		// Todo make bit field
 	u64  ro_header_sectors;
-	//u64 reserved[0];						// Reserve some bytes for future versions
+	u64 reserved[15];						// Reserve some bytes for future versions
 };
 
 #define get_nvmeibc_os_api_uptime(os) (jiffies - (os)->atom.attach_jiff)
