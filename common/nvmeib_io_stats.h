@@ -178,6 +178,11 @@ static inline void nvmeib_io_stats_adjust_and_update(struct nvmeib_io_stats *chi
    2. Converts all values to units of 10^-7[secs] (1/10 micro second) */
 void nvmeib_io_stats_readc(struct nvmeib_io_stats *ds,
 	const enum nvmeib_io_stat_verbs verb, const u64 size, struct nvmeib_io_counters *result_c);
+void nvmeib_io_stats_readc_per_bin(struct nvmeib_io_stats *ds,
+	const enum nvmeib_io_stat_verbs verb, const unsigned bin, struct nvmeib_io_counters *result_c);
+unsigned nvmeib_io_stats_get_n_bins(void);
+const char *nvmeib_io_stats_get_bin_name(struct nvmeib_io_stats *ds,
+	const unsigned bin, char *buf, size_t buf_size);
 
 /* Encode IO stats in json, for user space apps */
 ssize_t nvmeib_io_stats_to_json(struct nvmeib_io_stats *ds,
@@ -187,9 +192,9 @@ ssize_t nvmeib_io_stats_to_json(struct nvmeib_io_stats *ds,
 
 #define IO_STAT_VERB_TFMT "VERB: @IO_STAT_VERB"
 #define IO_STAT_VERB_TARG(verb) verb
-#define IO_STAT_COUNTERS_BASIC_TFMT "OPS: @IO_STAT_COUNTER SIZE: @IO_STAT_COUNTER LAT: @IO_STAT_COUNTER LAT_SQR: @IO_STAT_COUNTER"
-#define IO_STAT_COUNTERS_TFMT IO_STAT_COUNTERS_BASIC_TFMT " IO_EXEC_LAT: @IO_STAT_COUNTER E2E_EXEC_LAT: @IO_STAT_COUNTER"
-#define IO_STAT_COUNTERS_BASIC_TARG(c) (c)->total_ops, (c)->total_size, (c)->total_latency, (c)->total_latency_sqr
+#define IO_STAT_COUNTERS_BASIC_TFMT "OPS: @IO_STAT_COUNTER_OPS SIZE: @IO_STAT_COUNTER_SIZE LAT_100NS: @IO_STAT_COUNTER_LAT_100NS LAT_SQR_100NS2: @IO_STAT_COUNTER_LAT_SQR_100NS2"
+#define IO_STAT_COUNTERS_TFMT IO_STAT_COUNTERS_BASIC_TFMT " IO_EXEC_LAT: @IO_STAT_COUNTER_IO_EXEC_LAT E2E_EXEC_LAT: @IO_STAT_COUNTER_E2E_EXEC_LAT"
+#define IO_STAT_COUNTERS_BASIC_TARG(c) (c)->total_ops, (c)->total_size, (c)->total_latency / 10, (c)->total_latency_sqr / 10
 #define IO_STAT_COUNTERS_TARG(c) IO_STAT_COUNTERS_BASIC_TARG(c), (c)->total_io_exec, (c)->total_e2e_exec
 
 void nvmeib_io_stats_trace(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx);

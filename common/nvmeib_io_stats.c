@@ -465,6 +465,34 @@ void nvmeib_io_stats_readc(struct nvmeib_io_stats *ds,
 }
 EXPORT_SYMBOL(nvmeib_io_stats_readc);
 
+void nvmeib_io_stats_readc_per_bin(struct nvmeib_io_stats *ds,
+	const enum nvmeib_io_stat_verbs verb, const unsigned bin, struct nvmeib_io_counters *c)
+{
+	if (bin >= IO_COUNTERS_NUM_BINS(io_sizes_hist_n_bins))
+		return;
+
+	nvmeib_io_stats_readc_bin(ds, verb, (int)bin, c);
+}
+EXPORT_SYMBOL(nvmeib_io_stats_readc_per_bin);
+
+unsigned nvmeib_io_stats_get_n_bins(void)
+{
+	return IO_COUNTERS_NUM_BINS(io_sizes_hist_n_bins);
+}
+EXPORT_SYMBOL(nvmeib_io_stats_get_n_bins);
+
+const char *nvmeib_io_stats_get_bin_name(struct nvmeib_io_stats *ds,
+	const unsigned bin, char *buf, size_t buf_size)
+{
+	if (bin >= IO_COUNTERS_NUM_BINS(io_sizes_hist_n_bins)) {
+		scnprintf(buf, buf_size, "n/a");
+		return buf;
+	}
+
+	return io_sizes_name(buf, buf_size, bin, ds->block_size);
+}
+EXPORT_SYMBOL(nvmeib_io_stats_get_bin_name);
+
 DECLARE_IO_VERBS_ON_EACH_CPU_FN(io_stats_cpu_clear_all, arg)
 {
 	struct nvmeib_io_stats *ds = arg;

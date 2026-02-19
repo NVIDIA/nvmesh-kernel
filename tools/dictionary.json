@@ -20065,9 +20065,40 @@
         "size": 32,
         "type": "s32",
         "fmt": "%d",
+        "fmt_func": "fmt_iostats_verb",
         "final": true
     },
     "@IO_STAT_COUNTER": {
+        "size": 64,
+        "type": "u64",
+        "fmt": "%llu"
+    },
+    "@IO_STAT_COUNTER_OPS": {
+        "size": 64,
+        "type": "u64",
+        "fmt": "%llu"
+    },
+    "@IO_STAT_COUNTER_SIZE": {
+        "size": 64,
+        "type": "u64",
+        "fmt": "%llu"
+    },
+    "@IO_STAT_COUNTER_LAT_100NS": {
+        "size": 64,
+        "type": "u64",
+        "fmt": "%llu"
+    },
+    "@IO_STAT_COUNTER_LAT_SQR_100NS2": {
+        "size": 64,
+        "type": "u64",
+        "fmt": "%llu"
+    },
+    "@IO_STAT_COUNTER_IO_EXEC_LAT": {
+        "size": 64,
+        "type": "u64",
+        "fmt": "%llu"
+    },
+    "@IO_STAT_COUNTER_E2E_EXEC_LAT": {
         "size": 64,
         "type": "u64",
         "fmt": "%llu"
