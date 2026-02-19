@@ -640,8 +640,6 @@ typedef enum {
 	NCS_CONN_DOWN = 2,
 } NVMEIBT_CONN_STATE_T;
 
-uint64_t nvmeibt_get_guid(void);
-
 struct date_time {
 	uint16_t year;
 	uint16_t month;

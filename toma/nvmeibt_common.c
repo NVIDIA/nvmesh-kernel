@@ -886,17 +886,6 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *vptr, size_t size, off_t offset,  B
 	return rv;
 }
 
-static uint64_t global_uid;
-
-uint64_t nvmeibt_get_guid(void)
-{
-	//uint64_t rv = 1;
-	//asm volatile ("	lock xaddq %q0, %1\n" : "+r" (rv), "+m" (global_uid) :: "memory", "cc");
-	//return 1 + rv;
-	//return ++global_uid;
-	return __sync_add_and_fetch(&global_uid, 1);
-}
-
 int nvmeibt_close_all_nonstd_fds(BOOL is_terminate)
 {
 	if (is_terminate)	// Shutdown syslog explicitly, to avoid deleting it's fd and confusing it.
