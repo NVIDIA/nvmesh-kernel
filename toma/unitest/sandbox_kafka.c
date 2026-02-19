@@ -1,27 +1,8 @@
-/*
- * sandbox_kafka.c - Kafka simulator implementation for Toma sandbox
- *
- * Implements all rd_kafka_* functions that production Toma code calls.
- * The Kafka simulator state (kafka_simulator_t) is allocated here and
- * a pointer is stored in the global TSB struct for debugger visibility.
- */
-#define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module
-
-// Module interface headers
-#include "sandbox_kafka_internal.h"
+/* Implements all rd_kafka_* functions that production Toma code calls */
+#include "sandbox_kafka_internal.h"	// Module interface headers
 #include "sandbox_kafka_public.h"
-
-// Sandbox internal headers
-#include "mgmt_sim.h"
-#include "sandbox_util.h"
-
-// NVMesh/Toma headers
+#include "mgmt_sim.h"			// Todo: Remove me
 #include "nvmeibt_debug.h"
-
-// C Standard Library headers
-#include <errno.h>
-#include <stdlib.h>
-#include <string.h>
 
 /************************************* Internal struct definitions ********************************/
 struct rd_kafka_topic_conf_s {
@@ -64,7 +45,7 @@ void sim_broker_topic_destroy(struct sim_broker_topic *t) {
 	free(t->msgs);
 }
 
-void sim_broker_topic_add(struct sim_broker_topic *t, void *payload, size_t len, const bool should_copy) {
+void sim_broker_topic_msg_produce(struct sim_broker_topic *t, void *payload, size_t len, const bool should_copy) {
 	struct sim_msg *m;
 	uint32_t i;
 	BUG_ON(!payload || !len);				// Wrong input. Must be a valid message
@@ -86,7 +67,7 @@ void sim_broker_topic_add(struct sim_broker_topic *t, void *payload, size_t len,
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
 
-bool sim_broker_topic_peek(struct sim_broker_topic *t, rd_kafka_message_t *rv) {	// Get current message
+bool sim_broker_topic_msg_consume(struct sim_broker_topic *t, rd_kafka_message_t *rv) {	// Get current message
 	rv->payload = NULL;											// If no message in queue, preinitialize to NULL
 	BUG_ON(pthread_mutex_lock(&t->lock) != 0);
 	if (t->n_msgs && (t->cur_offset <= sim_broker_topic_get_msg_offset_last(t))) {
@@ -425,10 +406,10 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (len == 0) || ((key == NULL) != (keylen == 0)));
-	sim_broker_topic_add(ko->topic.broker_topic, payload, len, (msgflags & RD_KAFKA_MSG_F_COPY));
+	sim_broker_topic_msg_produce(ko->topic.broker_topic, payload, len, (msgflags & RD_KAFKA_MSG_F_COPY));
 	{
 		rd_kafka_message_t m;
-		BUG_ON(!sim_broker_topic_peek(ko->topic.broker_topic, &m));
+		BUG_ON(!sim_broker_topic_msg_consume(ko->topic.broker_topic, &m));
 		mgmt_sim_on_toma_produced(kt->type, m.payload, m.len);
 		sim_broker_topic_ack_offsets(ko->topic.broker_topic, m.offset);
 	}
@@ -473,9 +454,9 @@ rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 		if ((t->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) && (sim_broker_topic_get_msg_offset_last(t) >= t->cur_offset)) {
 			free(msg);	// Already in kafka queue, no need to generate it
 		} else {
-			sim_broker_topic_add(t, msg, len, false);
+			sim_broker_topic_msg_produce(t, msg, len, false);
 		}
-		BUG_ON(!sim_broker_topic_peek(t, m));
+		BUG_ON(!sim_broker_topic_msg_consume(t, m));
 	}
 	N_Tf(__AUTOID__, "consumer[@STR] got cur_offset=@LD", unique_name, m->offset);
 	m->_private = NULL;

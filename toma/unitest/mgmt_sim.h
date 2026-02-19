@@ -7,8 +7,8 @@
 #ifndef TOMA_UNITEST_MGMT_SIM_H
 #define TOMA_UNITEST_MGMT_SIM_H
 
-#include <stddef.h>
-#include <stdbool.h>
+#include "sandbox_util.h"
+#include "sandbox_kafka_internal.h"
 
 /************** Cluster config *******************************/
 struct sb_cluster_conf {
@@ -31,12 +31,6 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg);
 
 /* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
 char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len);
-
-enum sim_topic_type_toma_to_mgmt {
-	KTOPIC_TYPE_T2M_UNKNOWN = '?', KTOPIC_TYPE_T2M_PRIORITY = 'P', KTOPIC_TYPE_T2M_KEEPALIVE = 'K', KTOPIC_TYPE_T2M_LOW = 'L',
-	KTOPIC_TYPE_M2T_HW_CFG = 'H', KTOPIC_TYPE_M2T_CMD = 'C', KTOPIC_TYPE_M2T_TARGETS_RAFT = 'R', KTOPIC_TYPE_M2T_VOLUMES = 'V',
-};
-
 void mgmt_sim_on_toma_produced(enum sim_topic_type_toma_to_mgmt type, const void *payload, size_t len);
 
 /**

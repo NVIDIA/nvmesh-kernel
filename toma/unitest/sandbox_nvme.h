@@ -1,8 +1,7 @@
 #ifndef TOMA_SANDBOX_NVME_H_INCLUDED
 #define TOMA_SANDBOX_NVME_H_INCLUDED
 
-#include <stdbool.h>
-#include <stdint.h>
+#include "sandbox_util.h"
 
 void sandbox_nvme_init(void);
 

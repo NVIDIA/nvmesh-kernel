@@ -13,10 +13,6 @@
 #ifndef NVMEIBT_TOMA_MSG_Q_API_H
 #define NVMEIBT_TOMA_MSG_Q_API_H	// Bypass contents of "interfaces/nvmeibt_msg_queue_api.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stddef.h>
-
 enum { RD_KAFKA_OFFSET_BEGINNING = -2, /*RD_KAFKA_OFFSET_END = -1,*/  RD_KAFKA_OFFSET_STORED = -1000, RD_KAFKA_OFFSET_INVALID = -1001};
 
 typedef struct rd_kafka_s rd_kafka_t;
@@ -63,7 +59,7 @@ char* rd_kafka_err2str(rd_kafka_resp_err_t e);
 char* rd_kafka_err2name(rd_kafka_resp_err_t e);
 rd_kafka_resp_err_t rd_kafka_last_error(void);
 typedef enum { RD_KAFKA_CONF_UNKNOWN = -2,  RD_KAFKA_CONF_INVALID = -1001,  RD_KAFKA_CONF_OK = 0 } rd_kafka_conf_res_t;
-typedef struct { const char* payload; void *_private; int len; int offset; rd_kafka_resp_err_t err; } rd_kafka_message_t;
+typedef struct rd_kafka_message_s { const char* payload; void *_private; int len; int offset; rd_kafka_resp_err_t err; } rd_kafka_message_t;
 void rd_kafka_message_destroy(rd_kafka_message_t*msg);
 
 rd_kafka_conf_t* rd_kafka_conf_new(void);

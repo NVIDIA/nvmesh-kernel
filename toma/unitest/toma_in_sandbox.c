@@ -4,18 +4,10 @@
 #include "toma_in_sandbox.h"
 #include "sandbox_util.h"
 #include "sandbox_nvme.h"
-#include "sandbox_kafka_internal.h"
 #include "mgmt_sim.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
 
-#include <stdio.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/types.h>
-
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
-
-#include <pthread.h>
 
 #include <stdarg.h>				// va_list
 void syslog(int priority, const char *fmt, ...) {
@@ -34,9 +26,7 @@ void syslog(int priority, const char *fmt, ...) {
 
 /************************************* Kernel ********************************/
 // Determine if running with debugger
-#include <sys/stat.h>
-#include <string.h>
-#include <stdlib.h>
+#include <sys/stat.h>		// fstat()
 #include <signal.h>
 #include <sys/un.h>
 #include <errno.h>
@@ -80,7 +70,6 @@ void syslog(int priority, const char *fmt, ...) {
 #define _IOW_BAD(type,nr,size)	_IOC(_IOC_WRITE,(type),(nr),sizeof(size))
 #define _IOWR_BAD(type,nr,size)	_IOC(_IOC_READ|_IOC_WRITE,(type),(nr),sizeof(size))
 
-#include <stdarg.h>
 #include <linux/fs.h>		// For BLKGETSIZE64, BLKSSZGET
 
 // Offset used to indicate a non-random-access operation like send()/recv() or read()/write(),
@@ -93,7 +82,7 @@ static bool nvmeibt_toma_is_running_as_a_utility(void);
 struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "common/nvmeib_shared.h"
-#include "srv/nvmeibs_srv_toma_messages.h"
+#include "srv/nvmeibs_srv_toma_messages.h"		// For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
 
 struct TSB_server_toma_status_req_simu {
 	int n_srvr_msg_idx;					// Ever increasing number
@@ -873,8 +862,6 @@ static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
 	return len;
 }
 
-#include "srv/nvmeibs_srv_toma_messages.h"  // For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
-
 // Extract the seq (smart file index) from device name.
 // For NVMesh devices like "nvme1001n1", seq = 1001 - 1000 = 1.
 // For stock devices like "nvme0n1", returns -1 (no smart file).
@@ -1611,8 +1598,6 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 
 /*********************************************************************/
 #include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
 static void __verify_correct_dir(void) {
 	DIR *root_dir_exists = opendir(TOMA_ROOT_DIR);
 	if (!root_dir_exists) {
