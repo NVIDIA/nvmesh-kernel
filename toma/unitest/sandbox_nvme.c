@@ -1,6 +1,4 @@
 #define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module - must be defined before any other includes
-#include "nvmeibt_common.h"		// Todo: Remove me
-
 #include "sandbox_nvme.h"
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
@@ -190,7 +188,7 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 		memcpy(serial, disk_id, serial_len);
 		serial[serial_len] = '\0';
 	} else {
-		nvmeibt_strlcpy(serial, disk_id, sizeof(serial));
+		nvmeib_strlcpy(serial, disk_id, sizeof(serial));
 	}
 
 	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
@@ -223,7 +221,7 @@ struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(const char *d
 		memcpy(serial, disk_id, serial_len);
 		serial[serial_len] = '\0';
 	} else {
-		nvmeibt_strlcpy(serial, disk_id, sizeof(serial));
+		nvmeib_strlcpy(serial, disk_id, sizeof(serial));
 	}
 
 	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
