@@ -127,11 +127,11 @@ int nvmeibs_remove_cid_clients(u64 cid, enum nvmeibs_logout_reason reason) {
 		DECLARE_COMPLETION_ONSTACK(comp);
 		client_disk->should_pause = true;	// Simulate as if we are in pause
 		_NT(trace_1_nvmeibs_remove_cid_clients, "Pausing disk @DISK_ID_NAME of Client @CID_LLONG\n",
-			client_disk->name, cid);
+			nvmeibc_disk_get_name(client_disk), cid);
 		nvmeibc_pd_pause(client_disk, __remove_cid_clients_cb, &comp);
 		wait_for_completion(&comp); // Wait for rA exexution (# of pending ios == 2)
 		_NT(trace_2_nvmeibs_remove_cid_clients, "Paused disk @DISK_ID_NAME of Client @CID_LLONG\n",
-			client_disk->name, cid);
+			nvmeibc_disk_get_name(client_disk), cid);
 		nvmeibc_disk_start_release(client_disk, NVMEIBC_DISK_RELEASE_UNKNOWN);
 		rv = 0;
 	} else {
@@ -344,7 +344,7 @@ void serverSimulator_disk_discover(struct serverSimulator *S, struct nvmeibc_dis
 	disk->md_size				 = (D->md_size >> (NVMEIBC_SECTOR_SHIFT - disk->sector_shift));	// md[bytes] per each physical sector
 
 	_NT(tnsdd_1, "got cid @CID for client @CLIENT_UUID for client disk @DISK_ID_STR",
-		cid, cuuid, disk->name);
+		cid, cuuid, nvmeibc_disk_get_name(disk));
 
 	tomaSimulator_onClntDiscovery(&S->simToma, cuuid, disk->local.jrnl.rng_idx);
 }

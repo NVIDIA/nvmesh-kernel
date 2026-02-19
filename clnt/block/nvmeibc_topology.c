@@ -2871,7 +2871,7 @@ static int __subscribe_seg(struct nvmeibc_disk_segment *seg, int c, int r1,
 		char* msg = topo_kmalloc(96, GFP_ATOMIC);
 		_NE_to_user(error_topology_subscribe_seg, DMESG_PREFIX("@DEV_NAME"), "Unexpected error with block size mismatch between a volume and a physical disk, IO will not be possible to this volume. Error code: 1031. Volume block size: @N_BYTES[bytes], Disk block size: @N_BYTES[bytes]", nt->device_name, NVMEIBC_SECTOR_SIZE, (1 << seg->disk->sector_shift));
 		if (msg) {
-			scnprintf(msg, 96, "EVol-Disk Missmatch@Vol %s block=%d[b], disk %s=%d[b]\n", nt->device_name, NVMEIBC_SECTOR_SIZE, seg->disk->name, (1 << seg->disk->sector_shift));
+			scnprintf(msg, 96, "EVol-Disk Missmatch@Vol %s block=%d[b], disk %s=%d[b]\n", nt->device_name, NVMEIBC_SECTOR_SIZE, nvmeibc_disk_get_name(seg->disk), (1 << seg->disk->sector_shift));
 			nvmeibc_block_send_mgmt_allert(nvmeibc_block_nt_to_b(nt), msg);//, 0, false);
 		}
 		rv = -EFAULT;	/* Cannot do IO to this segment */
@@ -5040,7 +5040,7 @@ static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvme
 				const int disk_p_state = __disk_p_state2num(disk);
 				lock_ownership_map_to_string(&seg->lmap, slmap);
 				nvmeib_txt_append(txt, "\t%-6d %-7d %-26s %-21s %-12llx %-12llx %-32.32s [a=%d p=%d acm=%s sy=%d lm(%s) r1v=0x%x lid=0x%x|%c uid=%-.8s]",
-					r, si, __segment_state(r1, si), disk->name,
+					r, si, __segment_state(r1, si), nvmeibc_disk_get_name(disk),
 					seg->first_lba, seg->first_lba + seg->length -1,
 					__host_of(disk),
 					seg->registration_status, disk_p_state, acm,
@@ -5118,7 +5118,7 @@ static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *j
 										jdr->ops.ascii_format(jdr, "reconf", "%c", __segment_reconf_state(seg));
 										{
 											jdr_object_scope(jdr, "disk");
-											jdr->ops.ascii(jdr, "name", disk->name);
+											jdr->ops.ascii(jdr, "name", nvmeibc_disk_get_name(disk));
 											jdr->ops.ascii(jdr, "host", __host_of(disk));
 											jdr_write_var(jdr, paused, __disk_p_state2num(disk));
 										}

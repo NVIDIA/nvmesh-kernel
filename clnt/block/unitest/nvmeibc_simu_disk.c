@@ -43,7 +43,7 @@ int nvmeibc_disk_update_config(struct nvmeibc_disk *disk, struct nvmeibc_disk_up
 ssize_t nvmeibc_disk_print_info(struct nvmeibc_disk *disk, char *buf, int len){ /* Print info of disk in JSON format */
 	#define BUF_ADD(...)	count += scnprintf(buf+count, len-count, __VA_ARGS__)
 	ssize_t count = 0;
-	BUF_ADD("{\"name\":\"%s\"}\n", disk->name);
+	BUF_ADD("{\"name\":\"%s\"}\n", nvmeibc_disk_get_name(disk));
 	return count;
 	#undef BUF_ADD
 }
@@ -289,7 +289,7 @@ static ssize_t stats_fill_buf(void *priv, char *buf, size_t len) {
 	const struct nvmeib_json_ops *jops = &nvmeib_json_ops;
 	ssize_t count  = 0, indent = 0;
 	count += jops->start_obj(                     buf+count, len-count, NULL, indent++);
-	count += jops->data_str(                      buf+count, len-count, "uuid", disk->name, !JSON_LAST_ELEM, indent);
+	count += jops->data_str(                      buf+count, len-count, "uuid", nvmeibc_disk_get_name(disk), !JSON_LAST_ELEM, indent);
 	count += nvmeib_io_stats_to_json(disk->stats, buf+count, len-count, jiffies, jops, indent, false);
 	count += jops->data_uval(                     buf+count, len-count, "overeager", (u64)atomic64_read(&disk->total_overeager), JSON_LAST_ELEM, indent);
 	count += jops->end_obj(                       buf+count, len-count, JSON_LAST_ELEM, --indent);
@@ -302,7 +302,7 @@ static int _init_dirty_bits_mem(struct nvmeibc_disk *disk) {
 	INIT_LIST_HEAD(&disk->db.dirty_bits_pending_reqs);
 	spin_lock_init(&disk->db.dirty_bits_spinlock);
 	disk->db.dirty_bits_stopping = 0;
-	_NT(trace_alloc_dirty_bits_mem, "allocating ec dirty bit pages for @DISK_NAME", disk->name);
+	_NT(trace_alloc_dirty_bits_mem, "allocating ec dirty bit pages for @DISK_NAME", nvmeibc_disk_get_name(disk));
 	disk->db.len = PAGE_SIZE * 1; // no need to allcate long NVMEIBC_DIRTY_BITS_PAGES, we have short disks
 	disk->db.virt = kzalloc(disk->db.len, GFP_KERNEL);
 	disk->db.dirty_bits_mem.sgt.sgl = kzalloc(sizeof(*disk->db.dirty_bits_mem.sgt.sgl), GFP_KERNEL);
@@ -343,12 +343,12 @@ int nvmeibc_disk_create(const struct nvmeibc_cinst_params_core *p, struct nvmeib
 	atomic_set(&disk->n_cont_preventors, 0);
 	disk->n_cont_prevents_waited_too_long = false;
 	strlcpy(disk->name, disk_id->name, sizeof(disk->name)-1);
-	snprintf(disk->full_name, sizeof(disk->full_name), "%.*s-%.*s", NVMEIB_HOST_NAME_LEN, utsname()->nodename, (int)sizeof(disk->name), disk->name);
+	snprintf(disk->full_name, sizeof(disk->full_name), "%.*s-%.*s", NVMEIB_HOST_NAME_LEN, utsname()->nodename, (int)sizeof(disk->name), nvmeibc_disk_get_name(disk));
 	disk->disk_host[0] = '?';
 	disk->access_local = true;							// As if this disk is local to client. Todo: Control it better for elect/local read optimization tests
-	disk->stats = nvmeib_io_stats_create_traced(disk->name, VERB_RW_T_RECOV_BITMASK, NVMEIBC_SECTOR_SIZE);
-	disk->proc_ent_stats =      nvmeib_public_proc_create(disk->name, nvmeibc_get_proc_dir_disks(p), stats_fill_buf, NULL, disk);
-	disk->proc_ent_stats_json = nvmeib_public_proc_create(disk->name, nvmeibc_get_proc_dir_disks(p), stats_fill_buf, NULL, disk);
+	disk->stats = nvmeib_io_stats_create_traced(nvmeibc_disk_get_name(disk), VERB_RW_T_RECOV_BITMASK, NVMEIBC_SECTOR_SIZE);
+	disk->proc_ent_stats =      nvmeib_public_proc_create(nvmeibc_disk_get_name(disk), nvmeibc_get_proc_dir_disks(p), stats_fill_buf, NULL, disk);
+	disk->proc_ent_stats_json = nvmeib_public_proc_create(nvmeibc_disk_get_name(disk), nvmeibc_get_proc_dir_disks(p), stats_fill_buf, NULL, disk);
 	spin_lock_init(&disk->pause_reqs_lock);
 	INIT_LIST_HEAD(&disk->pause_reqs);
 	disk->percpu = nvmeib_public_alloc_percpu_cacheline(struct disk_percpu);
@@ -381,7 +381,7 @@ int nvmeibc_disk_create(const struct nvmeibc_cinst_params_core *p, struct nvmeib
 	disk->remove_wq = wq_create("c_disk_wq");
 	call_discover(disk);
 	mark_disk_admin_channel_is_up(disk);					// Daniels mark
-	_NT(trace_simu_disk_nvmeibc_disk_create, "Disk @DISK_NAME is connected", disk->name);
+	_NT(trace_simu_disk_nvmeibc_disk_create, "Disk @DISK_NAME is connected", nvmeibc_disk_get_name(disk));
 	return rv;
 }
 
@@ -462,7 +462,7 @@ bool nvmeibc_disk_remove(struct nvmeibc_disk_id *disk_id, bool block){
 		mark_disk_admin_channel_is_down(disk);					// Daniels mark
 		_ND(trace_simu_disk_nvmeibc_disk_remove, "finally disk @DISK_NAME is empty", disk_id->name);
 		//set_detach(disk_id->disk);
-		_NT(trace_1_simu_disk_nvmeibc_disk_remove, "calling disk release from nvmeibc_disk_remove disk:@DISK_NAME", disk->name);
+		_NT(trace_1_simu_disk_nvmeibc_disk_remove, "calling disk release from nvmeibc_disk_remove disk:@DISK_NAME", nvmeibc_disk_get_name(disk));
 		disk->detached = true;
 		nvmeibc_disk_start_release(disk, NVMEIBC_DISK_RELEASE_DISK_REMOVE);
 		// Here: pause/cont cannot arrive anymore since admin channel is down. Must wait for pause/cont that are still scheduled on the work queue
@@ -555,7 +555,7 @@ static void complete_disk_pause(void *v) {
 	int rv;
 	if ((rv = atomic_dec_return(&disk->n_volumes_paused)) <= 0) {
 		if (rv < 0)
-			_NW_dmesg(warn_simu_disk_complete_disk_pause, "Block module over triggered the disk @DISK_NAME (@DISK) pause completion (@RV)", disk->name, disk, rv);
+			_NW_dmesg(warn_simu_disk_complete_disk_pause, "Block module over triggered the disk @DISK_NAME (@DISK) pause completion (@RV)", nvmeibc_disk_get_name(disk), disk, rv);
 		complete(&disk->disk_paused);
 	}
 	tomaSimulator_unreg_all(&serverOf(disk)->simToma, inst_id_of_disk(disk)); // ask toma to unregister all segments & then launch recovery
@@ -684,7 +684,7 @@ static int cont_disk_io(struct nvmeibc_disk *disk){
 			is_ready = nvmeibc_volume_is_ready_for_pause_cont(disk_id->volume);
 			if (is_ready>0) {
 				if (nvmeibc_block_cont(disk_id->volume->block_dev, disk)) {
-					_NE_dmesg(error_simu_disk_cont_disk_io, "Failed to start IO on disk @DISK_NAME for volume @DEV_NAME_FULL", disk->name, disk_id->volume->full_name);
+					_NE_dmesg(error_simu_disk_cont_disk_io, "Failed to start IO on disk @DISK_NAME for volume @DEV_NAME_FULL", nvmeibc_disk_get_name(disk), disk_id->volume->full_name);
 					--rv;
 				}
 			} else if (!is_ready) {
@@ -763,13 +763,13 @@ void rediscovery(struct nvmeibc_disk *disk){
 int nvmeibc_disk_release(struct nvmeibc_disk *disk)
 {
 	int dying, rv = 0;
-	_NT(trace_simu_disk_nvmeibc_disk_release, "Starting exceution of disk_release @DISK_NAME", disk->name);
+	_NT(trace_simu_disk_nvmeibc_disk_release, "Starting exceution of disk_release @DISK_NAME", nvmeibc_disk_get_name(disk));
 	if (!nvmeibc_find_disk(disk)) {
 		_NT(trace_1_simu_disk_nvmeibc_disk_release, "Disk @DISK was already removed", disk);
 		goto out;
 	}
 	if ((dying = atomic_inc_return(&disk->dying)) > 1) {
-		_NT(trace_2_simu_disk_nvmeibc_disk_release, "Release in process for disk @DISK_NAME (@DYING)", disk->name, dying);
+		_NT(trace_2_simu_disk_nvmeibc_disk_release, "Release in process for disk @DISK_NAME (@DYING)", nvmeibc_disk_get_name(disk), dying);
 		goto out;
 	}
 
@@ -818,7 +818,7 @@ int nvmeibc_disk_start_release(struct nvmeibc_disk *disk, enum nvmeibc_disk_rele
 		goto out;
 	}
 
-	_NT(info_simu_disk_start_release, "disk @DISK_NAME, attempt start-release with reason: @DISK_RELEASE_OP",	disk->name, reason);
+	_NT(info_simu_disk_start_release, "disk @DISK_NAME, attempt start-release with reason: @DISK_RELEASE_OP",	nvmeibc_disk_get_name(disk), reason);
 
 	if (!(rwork = kzalloc(sizeof(*rwork), GFP_ATOMIC))) {
 		_NE(error_simu_disk_start_release_2, "OOM: Fail to alloc disk-release work");
@@ -835,16 +835,16 @@ retry:
 		if ((rv = nvmeibc_disk_add_work(disk, &rwork->work)) < 0) {
 			restart_called = atomic_read(&disk->restart_called);
 			_NT(trace_simu_disk_start_release_1, "Failed to add disk release work for disk @DISK_NAME",
-				disk->name);
+				nvmeibc_disk_get_name(disk));
 			atomic_set(&disk->restart_called, 0);
 			goto retry;
 		}
 		else
-			_NT(trace_simu_disk_start_release_2, "Initiate disk @DISK_NAME release", disk->name);
+			_NT(trace_simu_disk_start_release_2, "Initiate disk @DISK_NAME release", nvmeibc_disk_get_name(disk));
 	}
 	else {
 		_NT(trace_simu_disk_start_release_3, "disk @DISK_NAME, already called",
-			disk->name);
+			nvmeibc_disk_get_name(disk));
 		if (rwork)
 			kfree(rwork);
 	}
@@ -885,7 +885,7 @@ int nvmeibc_disk_set_next_config(struct nvmeibc_disk_id *disk_id, const char *no
 	struct nvmeibc_disk *disk = disk_id->disk;
 	int rv = 0;
 	spin_lock(&disk->disk_conf_spinlock);
-	_NT(trace_simu_disk_nvmeibc_disk_set_next_config, "New config node id @NODE_ID_STR will replace the existing one disk @DISK_NAME", node_id, disk->name);
+	_NT(trace_simu_disk_nvmeibc_disk_set_next_config, "New config node id @NODE_ID_STR will replace the existing one disk @DISK_NAME", node_id, nvmeibc_disk_get_name(disk));
 	strlcpy(disk->next_config_node_id, node_id, sizeof(disk->next_config_node_id));
 	__clear_arnics_list(&disk->next_arnics);
 	rv = arnics_dup(&disk->next_arnics, nvmeibc_disk_id_to_nics(disk_id));
@@ -918,10 +918,10 @@ static bool __does_node_and_nic_exist(struct nvmeibc_disk *disk) {  // Checking 
 	spin_lock(&disk->disk_conf_spinlock);
 	arnic = list_first_entry_or_null(&disk->arnics, struct nvmeibc_admin_rnic, link);
 	if (!arnic || strcmp(srvr->hardware->node_id, arnic->node_id)) { // Either disk has no arnics or disk resides on a server that is not the same as the arnic it uses
-		_NT(trace_simu_disk_does_node_and_nic_exist, "disk @DISK_NAME: Ignoring msg, due to arnic mismatch server node=@NODE, arnic node=@NODE", disk->name, srvr->hardware->node_id, (arnic ? arnic->node_id : "NULL"));
+		_NT(trace_simu_disk_does_node_and_nic_exist, "disk @DISK_NAME: Ignoring msg, due to arnic mismatch server node=@NODE, arnic node=@NODE", nvmeibc_disk_get_name(disk), srvr->hardware->node_id, (arnic ? arnic->node_id : "NULL"));
 		rv = false;
-	} else if (strcmp(srvr->hardware->disk_name, disk->name)) {   // Disk resides on a different server than this toma
-		_NT(trace_1_simu_disk_does_node_and_nic_exist, "disk @DISK_NAME: Ignoring msg, due to server mismatch (disk @DISK_NAME)", disk->name, srvr->hardware->disk_name);
+	} else if (strcmp(srvr->hardware->disk_name, nvmeibc_disk_get_name(disk))) {   // Disk resides on a different server than this toma
+		_NT(trace_1_simu_disk_does_node_and_nic_exist, "disk @DISK_NAME: Ignoring msg, due to server mismatch (disk @DISK_NAME)", nvmeibc_disk_get_name(disk), srvr->hardware->disk_name);
 		rv = false;
 	}
 	spin_unlock(&disk->disk_conf_spinlock);

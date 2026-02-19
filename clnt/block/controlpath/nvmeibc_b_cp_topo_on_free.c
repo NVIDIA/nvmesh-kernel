@@ -29,7 +29,7 @@ void on_topo_free_cont_preventer_inc(struct nvmeibc_topology *tcp,
 	n_preventors = atomic_inc_return(&disk->n_cont_preventors);
 	BUG_ON(disk->should_pause == 0);
 	wmb();	// if another thread free this topo right after we put it, it MUST see the 'paused_disk' which is not volatile.
-	_NT(t_00_otfcpi, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) ++preventors=@PREVENTORS, rv=@RV", disk->name, nt->device_name, tcp->debug_unique_index, n_preventors, rv);
+	_NT(t_00_otfcpi, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) ++preventors=@PREVENTORS, rv=@RV", nvmeibc_disk_get_name(disk), nt->device_name, tcp->debug_unique_index, n_preventors, rv);
 }
 
 static void __reset_proto_version_for_paused_disks(struct nvmeibc_topology *t)
@@ -51,14 +51,14 @@ void on_topo_free_cont_preventer_dec(struct nvmeibc_topology *t)
 		struct nvmeibc_disk *disk = t->on_free.paused_disk;
 		const int n_preventors = atomic_dec_return(&disk->n_cont_preventors);
 		const bool waited_too_long = disk->n_cont_prevents_waited_too_long;
-		_NT(t_01_otfcpd, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) io_perm=@IO_PERM, --preventors=@PREVENTORS", disk->name,
+		_NT(t_01_otfcpd, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) io_perm=@IO_PERM, --preventors=@PREVENTORS", nvmeibc_disk_get_name(disk),
 		   t->nt->device_name, t_index, t->io_perm, n_preventors);
 		if (waited_too_long) {
 			unsigned long st_ents[16];
 			struct nvmeib_stack_trace st = { .max_entries = ARRAY_SIZE(st_ents), .entries = st_ents, .skip = 0,};
 			nvmeib_public_save_stack_trace(&st);
 			nvmeibcb_dp_io_fail_mgr_blocked_cont(&nvmeibc_block_t_to_b(t)->dp.io_stats.mgr);
-			_NE_TOPO(t_02_otfcpd, t, "I blocked cont for disk @STR, EC-4571 reproduction!", disk->name);
+			_NE_TOPO(t_02_otfcpd, t, "I blocked cont for disk @STR, EC-4571 reproduction!", nvmeibc_disk_get_name(disk));
 			_NE(     t_03_otfcpd, DMESG_PREFIX("@DEV_NAME") " Stack Trace:\n@STACK_TRACE", t->nt->device_name, &st);
 		}
 		WARN_TOPO((n_preventors < 0), t, "preventors=%d\n", n_preventors);

@@ -134,7 +134,7 @@ void __dump_operation_unsafe(const struct operation *o, const struct nvmeibc_blo
 		_N_dmesg(trace_level, t_0a_dp_dbg_tools,
 			"cmd[@COMMAND_IDX|@RAID_LEADER_IDX] rv=@OPERATION_RV/@COMP_CODE opcode=@BLOCK_IO_OP stage=@MY_STAGE, send=@BOOL_YN, disk=@DISK_NAME:[@DLBA..@DLBA)",
 			i, c->my_leader, c->o_rv, c->iocmd->comp.comp_code, io_req->op, c->my_stage, !c->do_not_send,
-			c->ds->disk->name, cmd_start, cmd_end);
+			nvmeibc_disk_get_name(c->ds->disk), cmd_start, cmd_end);
 		if (dp_cmds_pigbck_has_any(c->iocmd)) {
 			const struct nvmeibc_cmd_lock *l = c->iocmd->comp.pigbck_lock;
 			const u32 val =  l ? (l->retries) : (u32)dp_cmds_get_piggyback_val(c);
@@ -158,7 +158,7 @@ void __dump_operation_unsafe(const struct operation *o, const struct nvmeibc_blo
 		_N_dmesg(trace_level, t_0c_dp_dbg_tools, "lck[@LSI|ow=@LSI]) type=@LOCK_TYPE status=@LOCK_STATUS n_pending=@N_PENDING n_cmds=@NCMDS secondary=@LSI, disk=@DISK_NAME:@DLBA",
 			i, l->owner_idx, nvmeibc_rdma_intent_to_string(l->type),ncl_status_str(l->status),
 			nvmeibc_atomic_read(&l->pending),nvmeibc_atomic_read(&l->ncmds), l->secondary_id,
-			l->ds->disk->name, l->address);
+			nvmeibc_disk_get_name(l->ds->disk), l->address);
 	}
 	if(cmds)
 		nvmeibc_clmat_to_string(cmds);

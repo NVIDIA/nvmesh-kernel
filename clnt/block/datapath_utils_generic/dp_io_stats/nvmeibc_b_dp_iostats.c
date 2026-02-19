@@ -30,7 +30,7 @@ bool nvmeibcb_dp_io_fail_mgr_inspect(const struct nvmeibc_block_command *cmds, i
 {
 	struct nvmeibc_block_device *nd = cmds->o->nd;
 	const struct nvmeibc_block_command *c = &cmds[i];
-	const char *vname = nd->name, *dname = c->ds->disk->name;
+	const char *vname = nd->name, *dname = nvmeibc_disk_get_name(c->ds->disk);
 	const u64 dlba = c->iocmd->reqs1.disk_address;
 	const bool is_detaching = nvmeibc_block_status_is_detaching(nd->status);
 	const int n_warns = (is_detaching ?

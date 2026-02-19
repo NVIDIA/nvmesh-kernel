@@ -215,7 +215,7 @@ void dp_locks_free_all(struct nvmeibc_cmd_lock *locks)
 	#ifndef DP_LIB
 	if (t->on_free.paused_disk && t->on_free.paused_disk->n_cont_prevents_waited_too_long) {
 		_NW(t_01_cmplk, DMESG_PREFIX("@DEV_NAME") ": lock held ref too long. @TOPOLOGY(@TOPO_DBG_ID) paused_disk @DISK_NAME (@DISK) locks @LOCKS comp @COMP",
-			t->nt->device_name, t, t->debug_unique_index, t->on_free.paused_disk->name, t->on_free.paused_disk, locks, &locks->comp);
+			t->nt->device_name, t, t->debug_unique_index, nvmeibc_disk_get_name(t->on_free.paused_disk), t->on_free.paused_disk, locks, &locks->comp);
 		#if defined(NVMEIBC_DISK_CMDS_STATS_PROBES) && (NVMEIBC_DISK_CMDS_STATS_PROBES==1)
 		do {
 			struct nvmeibc_disk_command_probes_try_data *current_try = nvmeibc_disk_command_probes_current_try(&locks->comp.probes);
@@ -384,7 +384,7 @@ static void __set_cmpxchg_for_release(struct nvmeibc_cmd_lock*l, struct nvmeibc_
 	dc->compare = holder.all;
 }
 
-#define __print_release_lock_status(trace_name, msg, l) _ND(trace_name, "@STR: locksets=@LOCKSETS[@LSI] @DLBA disk=@DISK_NAME", msg, dp_locks_get_locks_header(l), l->lockset_idx, l->address, l->ds->disk->name);
+#define __print_release_lock_status(trace_name, msg, l) _ND(trace_name, "@STR: locksets=@LOCKSETS[@LSI] @DLBA disk=@DISK_NAME", msg, dp_locks_get_locks_header(l), l->lockset_idx, l->address, nvmeibc_disk_get_name(l->ds->disk));
 
 static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 {
@@ -741,7 +741,7 @@ static void __print_lock_to_log(struct nvmeibc_cmd_lock* locksets, int lsi)
 {	// Daniel: Todo, unite with code of __dump_operation_unsafe()
 	const struct nvmeibc_cmd_lock* l = &locksets[lsi]; (void)l;
 	_ND(trace_lock_to_log, "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] type=@TYPE @DISK_NAME:@DLBA, n_sibs=@N_SIBS", locksets, lsi, l->owner_idx,
-	   l->type, l->ds->disk->name, l->address, l->n_siblings);
+	   l->type, nvmeibc_disk_get_name(l->ds->disk), l->address, l->n_siblings);
 }
 
 /* Add locks to protect given raid. Returns the amount of locks added */
@@ -862,7 +862,7 @@ static void __retry_owner_lock(struct nvmeibc_cmd_lock *l, bool autofail)
 			_NT(trace_1_retry_owner_lock, "Retry locksets=@LOCKSETS[@LSI] rqst=@MILISECONDS", locksets, lsi, jiffies_to_msecs(diff));
 		}
 	} else {
-		_NT(t2_rol, "locksets=@LOCKSETS[@LSI] Error with lock for @DLBA disk=@DISK_NAME", locksets, lsi, l->address, l->ds->disk->name);
+		_NT(t2_rol, "locksets=@LOCKSETS[@LSI] Error with lock for @DLBA disk=@DISK_NAME", locksets, lsi, l->address, nvmeibc_disk_get_name(l->ds->disk));
 		dc->lock_status = NCL_STATUS_DISKDEAD_NO_RETRY;
 		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make()); /* Simulate failure callback */
 		diff = (jiffies - start);

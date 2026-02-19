@@ -720,7 +720,7 @@ static int allocate_serjio_jfree_cmd(struct nvmeibc_disk_jcmd *djr)
 				ents_enc_buf_sz = NVMEIBC_SECTOR_SIZE;
 				_NT(trace_allocate_serjio_jfree_cmd_inv_min_bb,
 					"disk @DISK_NAME has min_gen_cmd_bb not set, probably no NRCHs are connected. Command will be sent to pending with minimum size buffer (@SIZE_T)",
-					disk->name, ents_enc_buf_sz);
+					nvmeibc_disk_get_name(disk), ents_enc_buf_sz);
 			}
 			if (!(fcmd->ents_enc_buf = nvmeib_alloc(&fcmd->ents_enc_ai, ents_enc_buf_sz, dp_recovery_cold))) {
 				_NE(err_allocate_serjio_jfree_cmd_oom, DMESG_PREFIX() "OOM allocating @SIZE_T buffer", fcmd->ents_enc_buf_sz);

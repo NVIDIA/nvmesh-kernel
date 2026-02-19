@@ -1033,6 +1033,11 @@ static inline enum nvmeibc_disk_status nvmeibc_disk_get_status(
 	return (disk && !atomic_read(&disk->paused)) ? d_online : d_offline;
 }
 
+static inline char const *nvmeibc_disk_get_name(struct nvmeibc_disk const *self)
+{
+	return self->name;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {

@@ -75,7 +75,7 @@ void _vf_get_problems(struct nvmeibc_disk *disk, u64 dlba_start, u64 blocksets_l
 }
 
 void  _vf_read_jmdc(struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_read_comp *dc) {
-	pr_recov("read jmdc %s\n", disk->name);
+	pr_recov("read jmdc %s\n", nvmeibc_disk_get_name(disk));
 	// Todo: Fill in here dummy jmdc to trigger cold recovery crac
 	dc->rsp.status = NCL_STATUS_TAKEN;
 	dc->callback(dc);
@@ -136,7 +136,7 @@ static void __init_transport(struct lib_call_api_params_generic *gen) {
 		struct lock_ownership_map *l = &seg->lmap;
 		strlcpy(disk->name, "Disk0", sizeof(disk->name));
 		disk->name[4] += i;
-		strlcpy(disk->full_name, disk->name, sizeof(disk->name));
+		strlcpy(disk->full_name, nvmeibc_disk_get_name(disk), sizeof(disk->name));
 		disk->sector_shift = 12;
 		disk->max_request_size_bytes = (1 << 17);
 		disk->access_local = false;
