@@ -199,7 +199,7 @@ static rd_kafka_t* kafka_simu_find_by_parition_name(const char* name) {
 	return NULL;
 }
 
-struct sim_broker_topic *find_broker_topic_by(enum sim_topic_type_toma_to_mgmt type) {
+struct sim_broker_topic *sim_broker_topic_find_by(enum sim_topic_type_toma_to_mgmt type) {
 	struct kafka_simulator_t *ks = g_kafka_simu;
 	for (int i = 0; i < (int)ARRAY_SIZE(ks->topics); i++) {
 		if (ks->topics[i].type == type)
@@ -351,7 +351,7 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char *name, rd_kafka_t
 		else if (strstr(name, "incrementalUpdates"))		kt->type = KTOPIC_TYPE_M2T_VOLUMES;
 		else BUG_ON(true);				// Unknown topic which Toma will not listen too
 	}
-	kt->broker_topic = find_broker_topic_by(kt->type);
+	kt->broker_topic = sim_broker_topic_find_by(kt->type);
 	N_Tf(__AUTOID__, "alloc new topic @STR[@CHAR], starting from offset @LD", kt->name, kt->type, kt->broker_topic->cur_offset);
 	return kt;
 }
@@ -442,23 +442,23 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	rd_kafka_message_t *m = calloc(1, sizeof(*m));
 	const char *unique_name = (ko->name[0] != 'L') ? ko->name : ko->topic.name;		// all LEADER consumer groups have the same name. Differentiate them by topic name
-	size_t len = 0;
+	struct sim_broker_topic *t = ko->topic.broker_topic;
 	BUG_ON((timeout_ms != 0) || (!ko->topic.is_assigned));
-	{/* Delegate message selection to the management simulator */
-		struct sim_broker_topic *t = ko->topic.broker_topic;
-		char *msg = mgmt_sim_next_kafka_payload(unique_name, (int)t->cur_offset, &len);
-		if (msg == NULL) {			// No message prepared to current consumer
-			free(m);
-			return NULL;
-		}
-		if ((t->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) && (sim_broker_topic_get_msg_offset_last(t) >= t->cur_offset)) {
-			free(msg);	// Already in kafka queue, no need to generate it
-		} else {
+	if (t->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) {		// This topic already filled by unitests correctly
+		(void)sim_broker_topic_msg_consume(t, m);
+	} else {
+		size_t len = 0;
+		char *msg = mgmt_sim_next_kafka_payload(unique_name, &len);
+		if (msg) {
 			sim_broker_topic_msg_produce(t, msg, len, false);
+			BUG_ON(!sim_broker_topic_msg_consume(t, m));
 		}
-		BUG_ON(!sim_broker_topic_msg_consume(t, m));
 	}
-	N_Tf(__AUTOID__, "consumer[@STR] got cur_offset=@LD", unique_name, m->offset);
-	m->_private = NULL;
-	return m;
+	if (m->payload) {
+		N_Tf(__AUTOID__, "consumer[@STR] got cur_offset=@LD", unique_name, m->offset);
+		m->_private = NULL;
+		return m;
+	}
+	free(m);			// No message
+	return NULL;
 }

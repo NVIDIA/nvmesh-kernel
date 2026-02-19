@@ -441,6 +441,15 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
+
+	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
+		for (int i = 0; i < sys->cfg.n_nodes; i++)
+			mgmt_sim_send_msg_change_raft_quorum(i, true);
+		// Just a unitest scenario add/rmv target. Todo: should not be done in init but in a separate unitest function
+		mgmt_sim_send_msg_change_raft_quorum(1, false);			// Remove First other target
+		mgmt_sim_send_msg_change_raft_quorum(1, true);			// Re-add First other again
+		mgmt_sim_send_msg_change_raft_quorum(2, true);			// Re-add last target again, while it already exists, verify Toma can handle this
+	}
 }
 
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }

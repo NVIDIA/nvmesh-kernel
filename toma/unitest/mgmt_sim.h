@@ -28,9 +28,10 @@ int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const
 
 struct mgmt_sim_state;
 struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg);
+void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add);
 
 /* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
-char *mgmt_sim_next_kafka_payload(const char *consumer_name, int queue_offset, size_t *out_len);
+char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len);
 void mgmt_sim_on_toma_produced(enum sim_topic_type_toma_to_mgmt type, const void *payload, size_t len);
 
 /**
