@@ -13,6 +13,7 @@
 
 /* Volume scenario constants */
 #define V_R1_PRAID_UUID          "aaa11111-0000-0000-0000-000000000001"
+#define FORMAT_TARGET_UUID       "d0030000-0000-0000-0000-000000000000"
 
 /*
  * State machine states for the test scenario.
@@ -29,33 +30,59 @@ static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 		",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":1}}");
 }
 
-/* Format addVolume message */
-__attribute__((unused)) // Not yet used - for reference only
-static int make_msg_add_volume(char *buf, size_t capacity)
+/* V_REMOTE1: RAID-1, segments only on remote disks (D0_n38, D0_n39) */
+__attribute__((unused))
+static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 {
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"addVolume\""
 		",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V1\",\"uuid\":\"f1b17590-c52b-11f0-bc49-e391b6ca4c2b\""
-		",\"version\":1,\"name\":\"V1\",\"blockSize\":4096"
+		",\"payload\":{\"_id\":\"V_REMOTE1\",\"uuid\":\"bbb00001-0000-0000-0000-000000000001\""
+		",\"version\":1,\"name\":\"V_REMOTE1\",\"blockSize\":4096"
 		",\"lockServer\":{\"maxNOwners\":1,\"type\":4,\"locksetShift\":-1}"
-		",\"blocks\":4882432,\"RAIDLevel\":\"Striped RAID-0\""
-		",\"numberOfMirrors\":0,\"stripeSize\":32,\"stripeWidth\":2,\"status\":\"unavailable\""
+		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
+		",\"numberOfMirrors\":1,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
 		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
 		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
 		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
 		"\"chunks\":["
-		"{\"uuid\":\"09c2f550-c52c-11f0-bc49-e391b6ca4c2b\",\"vlbs\":0,\"vlbe\":4882431,\"pRaids\":["
-		"{\"uuid\":\"09c2f552-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false"
+		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
+		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000011\",\"activated\":false"
 		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-		"{\"uuid\":\"09c2f551-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":26900224,\"lbe\":29341439"
+		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"f3a2b830-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-		"{\"uuid\":\"09c34371-c52c-11f0-bc49-e391b6ca4c2b\",\"activated\":false"
-		",\"stripeIndex\":1,\"zone\":\"1\",\"diskSegments\":["
-		"{\"uuid\":\"09c34370-c52c-11f0-bc49-e391b6ca4c2b\",\"lbs\":1509632,\"lbe\":3950847"
+		",\"diskUUID\":\"f38cebd0-0000-0000-0000-000000000000\"},"
+		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023"
+		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":1,\"status\":\"initializing\""
+		",\"diskUUID\":\"f39cebd0-0000-0000-0000-000000000000\"}"
+		"]}]}]}}");
+}
+
+/* V_R1: RAID-1, one local segment on NVMD_SN_003.1 + one remote on D0_n38 */
+__attribute__((unused))
+static int make_msg_add_volume_r1(char *buf, size_t capacity)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"addVolume\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"aaa00001-0000-0000-0000-000000000001\""
+		",\"version\":1,\"name\":\"V_R1\",\"blockSize\":4096"
+		",\"lockServer\":{\"maxNOwners\":1,\"type\":4,\"locksetShift\":-1}"
+		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
+		",\"numberOfMirrors\":1,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
+		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
+		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
+		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
+		"\"chunks\":["
+		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
+		"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false"
+		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
+		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000002\",\"lbs\":2048,\"lbe\":3071"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"f3a24300-c3c0-11f0-bc49-e391b6ca4c2b\"}"
+		",\"diskUUID\":\"" FORMAT_TARGET_UUID "\"},"
+		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000003\",\"lbs\":0,\"lbe\":1023"
+		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":1,\"status\":\"initializing\""
+		",\"diskUUID\":\"f38cebd0-0000-0000-0000-000000000000\"}"
 		"]}]}]}}");
 }
 
