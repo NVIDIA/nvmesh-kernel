@@ -885,7 +885,7 @@ uint16_t nvmeibt_mm_mgmt_convert_config_le_be(void *p, struct mm_mgmt_conf *src,
 
 	{ _Static_assert(sizeof(struct mm_mgmt_conf) == 224, "Struct mm_mgmt_conf was changed without updating the packing function!"); }
 	{ _Static_assert(sizeof(struct _packed_mm_mgmt_conf) == 144, "Struct _packed_mm_mgmt_conf was changed without updating the packing function!"); }
-	//CHECK_ALIGN16(mm_mgmt_align_dst);
+	CHECK_ALIGN16(mm_mgmt_align_dst);
 	MEMSET_ZERO_SRC_OR_DST(is_out, src, dst);
 	COPY_FIELD(eyecatcher);
 	SWAP16_FIELD(structVersion);

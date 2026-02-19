@@ -10,7 +10,7 @@ struct memory_buffer {
 	int			  len;
 	BOOL		  is_dma;
 	BOOL		  is_in_use;
-	long long	  data[0];	  // Align to 8
+	unsigned char data[0] __attribute__((aligned(16)));	  // Returned pointer must be 16B-aligned (mm_*_conf structs are aligned(16))
 } /*__attribute((packed))*/;
 
 typedef XDLIST_DECLARE(buffer_pool, struct memory_buffer, link) buffer_pool_t;
