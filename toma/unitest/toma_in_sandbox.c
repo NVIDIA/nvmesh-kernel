@@ -665,7 +665,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, is_shutting_down, n_events); loop_idx++;
 	if (!is_shutting_down) {
 		if (mgmt_sim_is_done()) {
-			SANDBOX_PRINT("format drive test: %s\n", COL_GREEN "passed" COL_RESET);
+			SANDBOX_PRINT("test: %s\n", COL_GREEN "passed" COL_RESET);
 			// At some point we'll probably have multiple test scenarios that we'll want to run in sequence,
 			// and finally shut down Toma when they've all passed. For now, there's only one test scenario.
 			SANDBOX_PRINT("%s", "sandbox shutting down Toma app\n");
