@@ -287,6 +287,8 @@ int main(int argc, char* argv[])
 
 		_info("Control proc available");
 		{
+			char pet_filename[MAX_FILENAME];
+
 			/* Start with mmap manager */
 			mmap_manager_t* mmap = init_mmap_manager(MMAP_PROC);
 			int i = 0;
@@ -314,17 +316,18 @@ int main(int argc, char* argv[])
 			}
 
 			/* Initialize IO PET channel */
-			_info("Initializing IO PET channel");
-			io_pet_ch = init_io_pet_channel(dir, IO_PET_CHANNEL_NAME);
+			snprintf(pet_filename, sizeof(pet_filename), "%s_%012lx", IO_PET_CHANNEL_NAME, (uint64_t)COMMIT_ID);
+			_info("Initializing IO PET channel %s", pet_filename);
+			io_pet_ch = init_io_pet_channel(dir, pet_filename);
 			if(!io_pet_ch){
 				_suicide("Failed to init IO PET channel");
 			}
 			if(start_io_pet_channel(io_pet_ch)){
 				_suicide("Failed to start IO PET channel");
 			}
-			
+
 			_info("Closed control proc, working");
-			//There is a bug here, in some cases, the thread may not start running or trying to read from the proc 
+			//There is a bug here, in some cases, the thread may not start running or trying to read from the proc
 			//but we will call abort functionality. We need some barrier here
 
 			//closing the channels and destroying the mmap manager is an "atomic" operation
@@ -334,7 +337,7 @@ int main(int argc, char* argv[])
 				destroy_trace_channel(ctx[i].ch);
 				ctx[i].ch = NULL;
 			}
-			
+
 			destroy_mmap_manager(mmap);
 
 			destroy_io_pet_channel(io_pet_ch);

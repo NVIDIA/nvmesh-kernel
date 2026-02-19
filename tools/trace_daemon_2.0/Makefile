@@ -2,7 +2,13 @@
 .PHONY: clean all
 .DEFAULT_GOAL := all
 
-CFLAGS  := -ggdb3 -Wall -Werror -D_GNU_SOURCE
+BASH := /bin/bash
+
+ifeq ($(COMMIT_ID),)
+COMMIT_ID = 0x$(shell /bin/bash -c 'source ../../build_common.sh; git_commit_id')
+endif
+
+CFLAGS  := -ggdb3 -Wall -Werror -D_GNU_SOURCE -DCOMMIT_ID=$(COMMIT_ID)
 LDFLAGS := -pthread
 TEST_CFLAGS := $(CFLAGS)
 #TEST_CFLAGS := $(CFLAGS) -fsanitize=address -fsanitize=undefined
