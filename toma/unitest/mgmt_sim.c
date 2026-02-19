@@ -34,7 +34,6 @@ static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 }
 
 /* V_REMOTE1: RAID-1, segments only on remote disks (D0_n38, D0_n39) */
-__attribute__((unused))
 static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 {
 	return snprintf(buf, capacity,
@@ -62,7 +61,6 @@ static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 }
 
 /* V_R1: RAID-1, one local segment on NVMD_SN_003.1 + one remote on D0_n38 */
-__attribute__((unused))
 static int make_msg_add_volume_r1(char *buf, size_t capacity)
 {
 	return snprintf(buf, capacity,
@@ -80,7 +78,7 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
 		"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false"
 		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000002\",\"lbs\":2048,\"lbe\":3071"
+		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000002\",\"lbs\":6176,\"lbe\":7199"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
 		",\"diskUUID\":\"" FORMAT_TARGET_UUID "\"},"
 		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000003\",\"lbs\":0,\"lbe\":1023"
@@ -496,13 +494,33 @@ static void mgmt_sim_run_fsm(void) {
 		}
 		break;
 
-	case MGMT_FSM_FORMAT_DONE:
-		/* Passthrough: will be replaced with volume addition in a later commit */
-		m->fsm_state = MGMT_FSM_DONE;
+	case MGMT_FSM_FORMAT_DONE: {
+		char *buf = malloc(2048);
+		int len;
+		N_IMf(msim_fsm4, "format done, sending addVolume V_REMOTE1");
+		len = make_msg_add_volume_remote1(buf, 2048);
+		sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+		m->fsm_state = MGMT_FSM_SENT_ADD_VOL_REMOTE;
 		break;
+	}
 
 	case MGMT_FSM_SENT_ADD_VOL_REMOTE:
+		if (m->got_report_target) {
+			char *buf = malloc(2048);
+			int len;
+			m->got_report_target = false;
+			N_IMf(msim_fsm5, "reportTarget after V_REMOTE1, sending addVolume V_R1");
+			len = make_msg_add_volume_r1(buf, 2048);
+			sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+			m->fsm_state = MGMT_FSM_SENT_ADD_VOL_R1;
+		}
+		break;
+
 	case MGMT_FSM_SENT_ADD_VOL_R1:
+		if (m->v_r1_praid_reported) {
+			N_IMf(msim_fsm6, "updatePRaidReport received for V_R1, test complete");
+			m->fsm_state = MGMT_FSM_DONE;
+		}
 		break;
 
 	case MGMT_FSM_DONE:
