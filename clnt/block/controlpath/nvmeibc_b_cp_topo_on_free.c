@@ -27,7 +27,7 @@ void on_topo_free_cont_preventer_inc(struct nvmeibc_topology *tcp,
 	BUG_ON(tcp->on_free.paused_disk);
 	tcp->on_free.paused_disk = disk;
 	n_preventors = atomic_inc_return(&disk->n_cont_preventors);
-	BUG_ON(disk->should_pause == 0);
+	BUG_ON(!nvmeibc_disk_should_pause(disk));
 	wmb();	// if another thread free this topo right after we put it, it MUST see the 'paused_disk' which is not volatile.
 	_NT(t_00_otfcpi, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) ++preventors=@PREVENTORS, rv=@RV", nvmeibc_disk_get_name(disk), nt->device_name, tcp->debug_unique_index, n_preventors, rv);
 }
@@ -148,7 +148,7 @@ void on_topo_free_schedule_praid_ack(const struct nvmeibc_subscription_ctx *tr,
 		raid1_for_each_seg(r1_old, seg_old, si) {
 			struct on_topo_free_message *otfm = &t_old->on_free.msgs[si];
 			const bool was_active = is_seg_active(*seg_old);
-			const bool disk_dying = seg_old->disk->should_pause;	// Msg will probably not reach Toma anyways
+			const bool disk_dying = nvmeibc_disk_should_pause(seg_old->disk);	// Msg will probably not reach Toma anyways
 			char disk_dying_status;
 			if ((!disk_dying)&&(!was_active)) {
 				otfm->type =     msg;

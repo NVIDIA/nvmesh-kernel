@@ -195,7 +195,7 @@ static eCPU_cb_ret_type __async_serjio_jam_cmd_cb(eCPU_cb_param_list) {		// Todo
 	struct nvmeibc_disk* disk = S->disk;
 	eCPU_thread_start_execution(p);
 
-	if (atomic_read(&disk->dying) || disk->should_pause) // Do not send in case disk is being freed/pausing. This does not prevent a race condition
+	if (atomic_read(&disk->dying) || nvmeibc_disk_should_pause(disk)) // Do not send in case disk is being freed/pausing. This does not prevent a race condition
 		goto _out;
 
 	if (req->opcode == NVMEIBS_JAM_ABND2FREE) {

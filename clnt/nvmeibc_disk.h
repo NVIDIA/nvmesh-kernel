@@ -1048,6 +1048,11 @@ static inline char const *nvmeibc_disk_get_host_name(struct nvmeibc_disk const *
 	return self->disk_host;
 }
 
+static inline bool nvmeibc_disk_should_pause(struct nvmeibc_disk const *self)
+{
+	return self->should_pause;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {

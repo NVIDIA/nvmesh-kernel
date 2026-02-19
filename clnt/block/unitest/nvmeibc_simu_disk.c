@@ -736,7 +736,7 @@ bool nvmeibc_pd_wait_for_pause_completion_debug(struct nvmeibc_disk *disk){
 				pause_preventers += disk->percpu[i].pause_preventers;
 				in_transfers 	 += disk->percpu[i].in_transfers;
 			}
-			_Emerg("Transferring = %d, Preventors=%d pausing=%d, should_pause=%d\n", in_transfers, pause_preventers, disk->pausing, disk->should_pause);
+			_Emerg("Transferring = %d, Preventors=%d pausing=%d, should_pause=%d\n", in_transfers, pause_preventers, disk->pausing, nvmeibc_disk_should_pause(disk));
 			/* Use This code to debug un-ending transfers which forbit PAUSE to occur */
 			icore_ops->dump_transfers(icore_ops, disk);
 			BUG_ON((last_transfers == in_transfers) && (last_transfers != 0));	// we expect the 'in_transfers' to decrease with every iteration BUT, since we count without locking, we might get zero as total 'in_transfers' although we havent got the completion signaled. in that case, we'll go for another round & then both previous/current 'in_transfers' would be zero
@@ -749,7 +749,7 @@ bool nvmeibc_pd_wait_for_pause_completion_debug(struct nvmeibc_disk *disk){
 		}
 	}
 	if (last_transfers!=-1)
-		_Emerg("-Transferring = %d, Preventors=%d pausing=%d, should_pause=%d\n", disk->percpu->in_transfers, disk->percpu->pause_preventers, disk->pausing, disk->should_pause);
+		_Emerg("-Transferring = %d, Preventors=%d pausing=%d, should_pause=%d\n", disk->percpu->in_transfers, disk->percpu->pause_preventers, disk->pausing, nvmeibc_disk_should_pause(disk));
 
 	return true;
 }

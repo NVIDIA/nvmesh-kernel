@@ -1062,7 +1062,7 @@ static void __set_active_topology(struct nvmeibc_topologies *nt, struct nvmeibc_
 /* 0 - OK, 1 - pausing, 2 - never discovered, 3 - paused */
 static int __disk_p_state2num(const struct nvmeibc_disk *disk)
 {
-	return (disk->should_pause                           ? 1 : 0) +
+	return (nvmeibc_disk_should_pause(disk)              ? 1 : 0) +
 		   ((nvmeibc_disk_get_status(disk) == d_offline) ? 2 : 0);
 }
 
@@ -1094,7 +1094,7 @@ struct t_praid_io_disable_reason {
 
 
 static inline bool __seg_has_problem(struct nvmeibc_disk_segment const *s){
-	return ((bool)((s)->disk->should_pause || !(s)->registration_status));
+	return ((bool)(nvmeibc_disk_should_pause((s)->disk) || !(s)->registration_status));
 }
 
 static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nvmeibc_topology *t, int c, int r, struct t_praid_io_disable_reason *info)
@@ -1133,7 +1133,7 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 
 	if (info) { /* Optional, Check transport layer connectivity according to topology. Covered anyways by later tests, crucial to test first if we are interested in reason */
 		raid1_for_each_seg(r1, seg, si) {
-			if (unlikely(seg->toma_acm != NVMEIBTC_DS_MODE_DEAD) && (seg->disk->should_pause))
+			if (unlikely(seg->toma_acm != NVMEIBTC_DS_MODE_DEAD) && nvmeibc_disk_should_pause(seg->disk))
 				store_seg_error_goto(_out_seg_unreged, t_06_prioperm, "No connection to needed disk");
 		}
 	}
@@ -1393,7 +1393,7 @@ static int __toma_update_mirrored_segment(struct nvmeibc_disk_segment *seg,
 }
 
 /* Disk is inactive. Don't wait for exponential backoff. Request cont now */
-#define __should_spur_disk_discovery(seg) ((seg)->disk->should_pause)
+#define __should_spur_disk_discovery(seg) (nvmeibc_disk_should_pause((seg)->disk))
 
 /* After segment was updated by toma message request registration */
 static int __toma_after_update_send_seg_reg(struct nvmeibc_disk_segment *seg, struct nvmeibc_topology *old_t)
@@ -1666,7 +1666,7 @@ static int __toma_segment_register_succeed(struct nvmeibc_subscription_ctx *tr, 
 	seg = __get_seg_by_tr(t, tr);
 	oa_ver = nvmeibc_seg_on_active_get_version_calc(seg);
 
-	if (seg->disk->should_pause) {
+	if (nvmeibc_disk_should_pause(seg->disk)) {
 		_NT_IR(tr_07_topo_seg_reg_ack, "disk pause");
 		goto ignore_msg;	/* Valid Transport layer race: msg slipped in after pause. toma thinks that we are unregistered. Illegal to accept this msg */
 	}
