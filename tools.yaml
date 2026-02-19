@@ -31,6 +31,11 @@ tools:
   read_dwarf:
     linkdir: /opt/nvmesh/common-repo
     source: tools/read_dwarf.py
+  nvmesh_pet_messages:
+    linkdir: /opt/nvmesh/common-repo
+    source: common/pet/nvmeib_pet_messages.py
+    analysis:
+      pathex: ['common/pet']
   memmgr_monitor:
     linkdir: /opt/nvmesh/common-repo
     source: tools/nvmesh_memmgr_monitor.py
