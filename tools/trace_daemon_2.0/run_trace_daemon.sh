@@ -36,8 +36,8 @@ do
     if [[ ! $lhs =~ ^\ *# && -n $lhs ]]; then
         rhs="${rhs%%\#*}"    # Del in line right comments
         rhs="${rhs%%*( )}"   # Del trailing spaces
-        rhs="${rhs%\"*}"     # Del opening string quotes 
-        rhs="${rhs#\"*}"     # Del closing string quotes 
+        rhs="${rhs%\"*}"     # Del opening string quotes
+        rhs="${rhs#\"*}"     # Del closing string quotes
         declare $lhs="$rhs"
     fi
 done < $private_configfile
@@ -69,7 +69,8 @@ fi
 
 if [ -n "$TRACE_LOGS_PATH" ]; then
     cp /var/log/nvmesh/trace_daemon/pager* $TRACE_LOGS_PATH/$(hostname)
-    cp /var/log/nvmesh/trace_daemon/dict*json $TRACE_LOGS_PATH/$(hostname)
+    cp /var/log/nvmesh/trace_daemon/dict*.json $TRACE_LOGS_PATH/$(hostname)
+    cp -r /var/log/nvmesh/trace_daemon/pet_dictionaries/ $TRACE_LOGS_PATH/$(hostname)/pet_dictionaries
 fi
 
 if [ -f "$cap_file" ]; then
