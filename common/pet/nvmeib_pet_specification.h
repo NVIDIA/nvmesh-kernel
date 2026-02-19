@@ -20,7 +20,10 @@ static inline u64 nvmeib_pet_get_trace_time_ns(void)
 		extern unsigned long nvmeib_trace_tsc_to_ns(unsigned long timestamp);
 		return nvmeib_trace_tsc_to_ns(nvmeib_public_rdtsc());
 	#else
-		return nvmeib_public_rdtsc() + tsc_offset;
+		#define mul_x_div_y__(a, x, y) ((x) * ((a) / (y)) + ((x) * ((a) % (y))) / (y))
+		u64 ticks = nvmeib_public_rdtsc() + tsc_offset;
+		return mul_x_div_y__(ticks, 1000000ULL, (u64)tsc_khz);
+		#undef mul_x_div_y__
 	#endif
 }
 
