@@ -51,7 +51,7 @@ static inline bool nvmeibt_offset_and_idx_is_uninitialized(int64_t offset_and_id
 
 extern int64_t volatile 			kafka_leader_offset_blocking_incremental_TARGET_updates;
 #define NVMEIBT_KAFKA_SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(name, _new_offset_)	({																				\
-	int64_t				_offset_ = _new_offset_;																																		\
+	const int64_t		_offset_ = _new_offset_;																																		\
 	N_Tf(name ## 1, "SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(@INT64_TX-->@INT64_TX)",																				\
 					purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(_offset_));																	\
 	NTOMA_ASSERT(name ## 2, nvmeibt_offset_and_idx_is_uninitialized(_offset_) ||																										\

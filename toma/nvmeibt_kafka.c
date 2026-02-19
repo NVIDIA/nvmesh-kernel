@@ -209,9 +209,8 @@ static unsigned long long		kafka_applied_consuming_leader_TARGET_msgs_raft_term 
 static pthread_mutex_t 			kafka_toma_requested_term_and_offset_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 #define IS_AWAITING_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(name)	({																								\
-	bool		is;																																									\
-	int64_t		incremental_TARGET_updates_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);															\
-	is = (kafka_leader_offset_blocking_incremental_TARGET_updates > incremental_TARGET_updates_offset);																				\
+	const int64_t		incremental_TARGET_updates_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);															\
+	const bool is = (kafka_leader_offset_blocking_incremental_TARGET_updates > incremental_TARGET_updates_offset);																				\
 	if (is) {																																										\
 		N_Tf(name, "Awaiting offset_blocking_incremental_TARGET_updates=@LD>@LD",																									\
 			 purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(incremental_TARGET_updates_offset));												\
