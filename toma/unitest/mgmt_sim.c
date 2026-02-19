@@ -19,10 +19,13 @@
  * State machine states for the test scenario.
  */
  enum mgmt_sim_fsm_state {
-	MGMT_FSM_WAITING_FOR_BOTH_OK, // waiting for both disks to report status="Ok"
-	MGMT_FSM_SENT_FORMAT_DRIVE, // sent formatDrive message to Toma
-	MGMT_FSM_SAW_FORMATTING, // disk reported status="Formatting"
-	MGMT_FSM_DONE // test scenario complete - we got the updated disk format in Toma's reportTarget message
+	MGMT_FSM_WAITING_FOR_BOTH_OK,
+	MGMT_FSM_SENT_FORMAT_DRIVE,
+	MGMT_FSM_SAW_FORMATTING,
+	MGMT_FSM_FORMAT_DONE,
+	MGMT_FSM_SENT_ADD_VOL_REMOTE,
+	MGMT_FSM_SENT_ADD_VOL_R1,
+	MGMT_FSM_DONE
 };
 
 static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
@@ -295,15 +298,19 @@ static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
 	const char *message_type = json_get_dict_str(root, "messageType", NULL);
+	BUG_ON(!m);
 	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
-		if (strcmp(message_type, "leaderKeepalive") == 0) {
-			struct mm_json_elem *payload = json_get_dict_value(root, "payload");
-			m->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
-			m->n_leader_keep_alives++;
-			N_Tf(__AUTOID__, "<< Leader KAL {raftTerm=@INT, gen=@INT}", m->raftTerm, m->n_leader_keep_alives);
-		} else if (strcmp(message_type, "keepalive") == 0) {
-			// {"originType":"TOMA","messageType":"keepalive","messageTypeVersion":2,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":11831,"leaderToken":null,"keepaliveInterval":5,"payload":{"zone":"1","leaderUUID":"nvme39.nvidia.com","bootTime":1767279770145,"featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":"","rebuildStats":{"nRunningDirtyRebuild":0,"nPendingDirtyRebuild":0,"nRunningStaleRebuild":0,"nPendingStaleRebuild":6,"nRunningTxidRebuild":0,"nPendingTxidRebuild":0,"nRunningColdRecovery":0,"nPendingColdRecovery":0,"nRunningJGCRebuild":0,"nPendingJGCRebuild":0,"nRunningScrubbing":0,"nPendingScrubbing":3}}}
-		} else { BUG_ON(true); }
+	if (strcmp(message_type, "leaderKeepalive") == 0) {
+		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
+		m->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
+		m->n_leader_keep_alives++;
+		N_Tf(__AUTOID__, "<< Leader KAL {raftTerm=@INT, gen=@INT}",
+		     m->raftTerm, m->n_leader_keep_alives);
+	} else if (strcmp(message_type, "keepalive") == 0) {
+		// {"originType":"TOMA","messageType":"keepalive","messageTypeVersion":2,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":11831,"leaderToken":null,"keepaliveInterval":5,"payload":{"zone":"1","leaderUUID":"nvme39.nvidia.com","bootTime":1767279770145,"featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":"","rebuildStats":{"nRunningDirtyRebuild":0,"nPendingDirtyRebuild":0,"nRunningStaleRebuild":0,"nPendingStaleRebuild":6,"nRunningTxidRebuild":0,"nPendingTxidRebuild":0,"nRunningColdRecovery":0,"nPendingColdRecovery":0,"nRunningJGCRebuild":0,"nPendingJGCRebuild":0,"nRunningScrubbing":0,"nPendingScrubbing":3}}}
+	} else {
+		BUG_ON(true);
+	}
 	nvmeibt_mm_json_free_kv_tree(root);
 }
 
@@ -326,10 +333,14 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 }
 
 void mgmt_sim_verify_at_end(void) {
+	BUG_ON(!g_mgmt_sim);
 	BUG_ON(!mgmt_sim_is_done() || (g_mgmt_sim->volume_msg_count <= 0) || (g_mgmt_sim->n_leader_keep_alives <= 0));
 }
 
-bool mgmt_sim_is_done(void) { return g_mgmt_sim->fsm_state == MGMT_FSM_DONE; }
+bool mgmt_sim_is_done(void)
+{
+	return g_mgmt_sim && (g_mgmt_sim->fsm_state == MGMT_FSM_DONE);
+}
 
 void mgmt_sim_destroy(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
@@ -378,6 +389,9 @@ static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state) {
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:  return "waitingForBothOk";
 	case MGMT_FSM_SENT_FORMAT_DRIVE:    return "sentFormatDrive";
 	case MGMT_FSM_SAW_FORMATTING:       return "sawFormatting";
+	case MGMT_FSM_FORMAT_DONE:          return "formatDone";
+	case MGMT_FSM_SENT_ADD_VOL_REMOTE:  return "sentAddVolRemote";
+	case MGMT_FSM_SENT_ADD_VOL_R1:      return "sentAddVolR1";
 	case MGMT_FSM_DONE:                 return "done";
 	default:                            return "unknown";
 	}
@@ -467,21 +481,31 @@ static void mgmt_sim_run_fsm(void) {
 			N_IMf(msim_fsm2, "disk003 now Formatting");
 			m->fsm_state = MGMT_FSM_SAW_FORMATTING;
 		} else if (disk_003_ok_with_expected_reported_format) {
-			/* Might have missed the Formatting state - go directly to done */
-			N_IMf(msim_fsm2b, "disk003 Ok with expected format (skipped Formatting) counter=@INT", FORMAT_REQUEST_COUNTER);
-			m->fsm_state = MGMT_FSM_DONE;
+			/* Might have missed the Formatting state - go directly to formatDone */
+			N_IMf(msim_fsm2b,
+			     "disk003 Ok with expected format (skipped Formatting) counter=@INT",
+			     FORMAT_REQUEST_COUNTER);
+			m->fsm_state = MGMT_FSM_FORMAT_DONE;
 		}
 		break;
 
 	case MGMT_FSM_SAW_FORMATTING:
 		if (disk_003_ok_with_expected_reported_format) {
 			N_IMf(msim_fsm3, "disk003 Ok with expected format counter=@INT", FORMAT_REQUEST_COUNTER);
-			m->fsm_state = MGMT_FSM_DONE;
+			m->fsm_state = MGMT_FSM_FORMAT_DONE;
 		}
 		break;
 
+	case MGMT_FSM_FORMAT_DONE:
+		/* Passthrough: will be replaced with volume addition in a later commit */
+		m->fsm_state = MGMT_FSM_DONE;
+		break;
+
+	case MGMT_FSM_SENT_ADD_VOL_REMOTE:
+	case MGMT_FSM_SENT_ADD_VOL_R1:
+		break;
+
 	case MGMT_FSM_DONE:
-		/* Already done - nothing to do */
 		break;
 	}
 
@@ -490,4 +514,9 @@ static void mgmt_sim_run_fsm(void) {
 	}
 }
 
-const char *mgmt_sim_get_state_name(void) { return mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state); }
+const char *mgmt_sim_get_state_name(void)
+{
+	if (!g_mgmt_sim)
+		return "uninitialized";
+	return mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state);
+}
