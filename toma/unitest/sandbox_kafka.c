@@ -43,7 +43,7 @@ struct sim_broker_topic {		// Kafka Broker topic implementation = append-only lo
 	// Note: cur_offset belongs to client consumer not of broker. We have only 1 consumer so for simplicity and easy of debug, put it here
 };
 
-static inline int64_t sim_broker_topic_get_msg_offset_last( const struct sim_broker_topic *t) { return t->committed_offset + t->n_msgs; }
+static inline int64_t sim_broker_topic_get_msg_offset_last( const struct sim_broker_topic *t) { return t->committed_offset + t->n_msgs; }	// Offset of last message. The next to be produced message will be in end + 1
 static inline int64_t sim_broker_topic_get_msg_offset_first(const struct sim_broker_topic *t) { return t->committed_offset + 1; }	// Assuming at least 1 message is inside
 static inline void    sim_broker_topic_reset_to_earliest(         struct sim_broker_topic *t) {        t->cur_offset = sim_broker_topic_get_msg_offset_first(t); }
 
@@ -397,7 +397,7 @@ rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char 
 	BUG_ON(strcmp(me->topic.name, str) || (me->topic.partition != partition));	// Only 1 partition
 	(void)timeout;
 	*low_oldest_beginning_offset = sim_broker_topic_get_msg_offset_first(me->topic.broker_topic);
-	*high_newest_end_offset =      sim_broker_topic_get_msg_offset_last( me->topic.broker_topic) + 12;	// Just some number to see wide range of watermark
+	*high_newest_end_offset =      sim_broker_topic_get_msg_offset_last( me->topic.broker_topic) + 1;
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
