@@ -248,6 +248,13 @@ static ulong submit_wait_timeout = (15*HZ);
 module_param(submit_wait_timeout, ulong, 0644);
 MODULE_PARM_DESC(submit_wait_timeout, "Timeout for NVMe admin operations such as drive formatting. Does not affect a second format attempt after a failure, as some drives take a long time to format, especially larger ones. Value in milliseconds.");
 
+static ulong nvmeibs_nvme_disk_periodic_timer_interval = 30000; /* milliseconds */
+static struct kernel_param_ops nvmeibs_nvme_disk_periodic_timer_interval_ops;
+module_param_cb(nvme_disk_periodic_timer_interval, &nvmeibs_nvme_disk_periodic_timer_interval_ops,
+	&nvmeibs_nvme_disk_periodic_timer_interval, 0644);
+MODULE_PARM_DESC(nvme_disk_periodic_timer_interval,
+	"Interval in milliseconds for periodic timer per disk");
+
 static atomic64_t global_uid = ATOMIC64_INIT(0);
 static inline u64 get_guid(void)
 {
@@ -274,6 +281,7 @@ struct drive_params {
 	struct list_head freeze_link;
 	struct nvmeibs_disk_info info;
 	struct drive_params *next;
+	struct delayed_work periodic_timer_work;
 };
 
 struct req_id {
@@ -4479,6 +4487,7 @@ static void nvmeibs_free_drives(struct kref *kref)
 
 	for (drv = d->drives; drv != NULL; drv = next) {
 		next = drv->next;
+		cancel_delayed_work_sync(&drv->periodic_timer_work);
 		kfree(drv->bio_list);
 		nvmeib_io_stats_free(drv->info.io_stats);
 		kfree(drv);
@@ -4505,6 +4514,9 @@ static void free_drives(struct device_data *d)
 		next = drv->next;
 
 		// nvmeibs_deregister_disk_resources(NULL, info);
+
+		/* Cancel periodic timer if it's scheduled */
+		cancel_delayed_work_sync(&drv->periodic_timer_work);
 
 		if (drv->gendisk)
 			del_gendisk(drv->gendisk);
@@ -6428,6 +6440,77 @@ static void test_done_work(struct work_struct *arg)
 	}
 }
 
+static void disk_periodic_timer_work_func(struct work_struct *arg)
+{
+	struct drive_params *drv = container_of(to_delayed_work(arg),
+							struct drive_params, periodic_timer_work);
+	struct device_data *d = drv->dev;
+	struct nvmeib_io_stats *stats = drv->info.io_stats;
+	unsigned verb, bin;
+	unsigned n_bins;
+	char bin_name[32];
+	struct nvmeib_io_counters c = {};
+
+	if (stats) {
+		/* Trace per-size-bin counters for each verb (all CPUs). */
+		n_bins = nvmeib_io_stats_get_n_bins();
+		for (bin = 0; bin < n_bins; ++bin) {
+			nvmeib_io_stats_get_bin_name(stats, bin, bin_name, sizeof(bin_name));
+			for (verb = 0; verb < N_IO_STAT_VERBS; ++verb) {
+				memset(&c, 0, sizeof(c));
+				nvmeib_io_stats_readc_per_bin(stats, (enum nvmeib_io_stat_verbs)verb, bin, &c);
+				NVMEIB_LOG_METRICS("DISK: @DISK_ID_STR DEV: @SEQ BIN: @STR " IO_STAT_VERB_TFMT " " IO_STAT_COUNTERS_BASIC_TFMT,
+					_T, tracer_nvmeibs, info_disk_periodic_timer_bin_stats,
+					drv->id_str, d->seq, bin_name, IO_STAT_VERB_TARG(verb), IO_STAT_COUNTERS_BASIC_TARG(&c));
+			}
+		}
+	}
+
+	/* Reschedule the timer for the next interval */
+	if (nvmeibs_nvme_disk_periodic_timer_interval > 0) {
+		nvmeib_public_mod_delayed_work(nvmeib_public_get_system_unbound_wq(), &drv->periodic_timer_work,
+					       msecs_to_jiffies(nvmeibs_nvme_disk_periodic_timer_interval));
+	}
+}
+
+static int set_nvmeibs_nvme_disk_periodic_timer_interval(const char *val, const struct kernel_param *kp)
+{
+	struct device_data *d;
+	struct drive_params *drv;
+	int ret;
+
+	/* Set the parameter value */
+	ret = param_set_ulong(val, kp);
+	if (ret)
+		return ret;
+
+	/* Update all existing timers */
+	down_read(&global_lock);
+	for (d = device_list; d != NULL; d = d->next) {
+		for (drv = d->drives; drv != NULL; drv = drv->next) {
+			if (nvmeibs_nvme_disk_periodic_timer_interval > 0) {
+				nvmeib_public_mod_delayed_work(nvmeib_public_get_system_unbound_wq(), &drv->periodic_timer_work,
+								msecs_to_jiffies(nvmeibs_nvme_disk_periodic_timer_interval));
+			} else {
+				cancel_delayed_work(&drv->periodic_timer_work);
+			}
+		}
+	}
+	up_read(&global_lock);
+
+	return 0;
+}
+
+static int get_nvmeibs_nvme_disk_periodic_timer_interval(char *buffer, const struct kernel_param *kp)
+{
+	return param_get_ulong(buffer, kp);
+}
+
+static struct kernel_param_ops nvmeibs_nvme_disk_periodic_timer_interval_ops = {
+	.set = set_nvmeibs_nvme_disk_periodic_timer_interval,
+	.get = get_nvmeibs_nvme_disk_periodic_timer_interval,
+};
+
 static void read_write_test_sector(struct drive_params *drv);
 static void test_sector_done(void *arg, int status, u32 result)
 {
@@ -6782,6 +6865,13 @@ static void nvmeibs_probe1(struct work_struct *arg)
 				drv->id_str);
 			err = -ENOMEM;
 			goto errout;
+		}
+
+		INIT_DELAYED_WORK(&drv->periodic_timer_work, disk_periodic_timer_work_func);
+		/* Initialize and schedule periodic timer for this disk */
+		if (nvmeibs_nvme_disk_periodic_timer_interval > 0) {
+			queue_delayed_work(nvmeib_public_get_system_unbound_wq(), &drv->periodic_timer_work,
+					  msecs_to_jiffies(nvmeibs_nvme_disk_periodic_timer_interval));
 		}
 	}
 

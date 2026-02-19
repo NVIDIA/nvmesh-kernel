@@ -1812,7 +1812,7 @@ void nvmeibs_disk_record_stats(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 #endif
 
 	if (status) { /* Record failure */
-			di->stats.total_err ++;
+			di->stats.total_err++;
 		} else { /* Record success */
 			ktime_t end_time = nvmeib_public_ktime_get();
 			ktime_t start_time = req->stats.start_time;

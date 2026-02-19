@@ -712,8 +712,10 @@ EXPORT_SYMBOL(nvmeib_public_user_pages_for_io_unpin);
 
 #ifdef LLVM
 extern struct workqueue_struct *system_wq;
+extern struct workqueue_struct *system_unbound_wq;
 #else
 extern struct workqueue_struct *system_wq __read_mostly;
+extern struct workqueue_struct *system_unbound_wq __read_mostly;
 #endif
 
 int nvmeib_schedule_delayed_work(struct delayed_work *dwork,
@@ -721,6 +723,18 @@ int nvmeib_schedule_delayed_work(struct delayed_work *dwork,
 	return queue_delayed_work(system_wq, dwork, delay);
 }
 EXPORT_SYMBOL(nvmeib_schedule_delayed_work);
+
+bool nvmeib_public_mod_delayed_work(struct workqueue_struct *wq,
+				     struct delayed_work *dwork, unsigned long delay) {
+	return mod_delayed_work(wq, dwork, delay);
+}
+EXPORT_SYMBOL(nvmeib_public_mod_delayed_work);
+
+struct workqueue_struct *nvmeib_public_get_system_unbound_wq(void)
+{
+	return system_unbound_wq;
+}
+EXPORT_SYMBOL(nvmeib_public_get_system_unbound_wq);
 
 #ifdef __clang__
 #pragma clang diagnostic push

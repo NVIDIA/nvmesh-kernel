@@ -140,6 +140,9 @@ int nvmeib_public_generic_post_send_atomic(struct ib_qp *ibqp,
 bool nvmeib_mlx_on_demand_paging(void);
 
 int nvmeib_schedule_delayed_work(struct delayed_work *dwork, unsigned long delay);
+bool nvmeib_public_mod_delayed_work(struct workqueue_struct *wq,
+				    struct delayed_work *dwork, unsigned long delay);
+struct workqueue_struct *nvmeib_public_get_system_unbound_wq(void);
 
 #if KS_HAS_DISK_PART_ITER
 int nvmeib_public_call_for_each_disk_part(struct gendisk *disk, int (*f)(struct hd_struct *, void *), void *args);

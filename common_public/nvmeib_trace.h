@@ -30,7 +30,7 @@
 		extern struct trace_channel *nvmeibc_trace_long;
 		extern struct trace_channel *nvmeibc_trace_short;
 		extern struct trace_channel *nvmeibc_trace_goodpath;
-		extern struct trace_channel *nvmeibc_trace_metrics;
+		extern struct trace_channel *nvmeib_trace_metrics;
 		extern struct trace_channel *nvmeibc_trace_eph;
 		extern struct trace_channel *nvmeibc_trace_eter;
 	#endif
@@ -50,10 +50,10 @@
 	/* Define channels configuration in one place */
 	#define NVMEIB_TRACE_CH_LIST                                                   \
 		(nvmeibc_trace_eph), (nvmeibs_trace_eph), (nvmeibm_trace_eph), (nvmeibc_trace_long),            \
-			(nvmeibc_trace_short), (nvmeibc_trace_goodpath), (nvmeibc_trace_metrics),                   \
+			(nvmeibc_trace_short), (nvmeibc_trace_goodpath),                 \
 			(nvmeibs_trace_goodpath), (nvmeibc_trace_eter), (nvmeibs_trace_long),  \
 			(nvmeibm_trace_long), (nvmeibp_trace_long), (nvmeibp_trace_eter), 	   \
-			(nvmeibm_trace_eter), (nvmeibs_trace_eter) \
+			(nvmeibm_trace_eter), (nvmeibs_trace_eter), (nvmeibc_trace_metrics), (nvmeibs_trace_metrics) \
 
 	render_per_cpu_declare(NVMEIB_OPEN_BRACKETS(NVMEIB_TRACE_CH_LIST));
 
