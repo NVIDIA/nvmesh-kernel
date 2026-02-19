@@ -5,10 +5,7 @@
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
 
-#include <sys/stat.h>			// mkdir
-
 // Forward declarations
-
 static int disk_init(const char *dest_path, const char *src_path);
 static int copy_file(const char *source_path, const char *dest_path);
 static int copy_between_fds(int srcfd, int dstfd);
@@ -81,7 +78,6 @@ static struct sandbox_nvme_device nvme_devices[] = {
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
 
-static void mkdir_if_not_exists(const char *path);
 static void write_file(const char *path, const char *content);
 
 /// Set up the NVMe disk data. Currently just a static configuration,
@@ -89,7 +85,6 @@ static void write_file(const char *path, const char *content);
 void sandbox_nvme_init(void)
 {
 	N_Tf(sbu3401, "initializing static simulated NVMe disks");
-	mkdir_if_not_exists(SANDBOX_DEV_DIR);
 
 	// Create mock NVMe block device files.
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
@@ -100,13 +95,6 @@ void sandbox_nvme_init(void)
 			N_Ef(kdj3994, "failed to initialize disk @INT", i);
 		}
 	}
-
-	// Create the parent directories if needed.
-	mkdir_if_not_exists(TOMA_ROOT_DIR "proc");
-	mkdir_if_not_exists(TOMA_ROOT_DIR "proc/nvmeibs");
-	mkdir_if_not_exists(TOMA_ROOT_DIR "var");
-	mkdir_if_not_exists(TOMA_ROOT_DIR "var/opt");
-	mkdir_if_not_exists(TOMA_ROOT_DIR "var/opt/nvmesh");
 
 	// Generate the disk data files.
 	write_file(TARGET_DEVICES_FILE, "nvme,STKD_SN_001,5121,STKD_MN_001,1\n");
@@ -125,12 +113,9 @@ static void create_simulated_locks_file(const char *serial_number)
 {
 	// Locks file is named after the disk_id (serial.nsid). Our sandbox disks use nsid=1.
 	char locks_path[256];
-	int n;
+	int n = snprintf(locks_path, sizeof(locks_path), TOMA_ROOT_DIR "proc/nvmeibs/locks.%s.1", serial_number);
 	int fd;
-
-	n = snprintf(locks_path, sizeof(locks_path), TOMA_ROOT_DIR "proc/nvmeibs/locks.%s.1", serial_number);
 	BUG_ON(n < 0 || n >= (int)sizeof(locks_path));
-
 	fd = open(locks_path, O_CREAT | O_RDWR, 0644);
 	BUG_ON(fd < 0);
 
@@ -139,15 +124,6 @@ static void create_simulated_locks_file(const char *serial_number)
 
 	BUG_ON(close(fd) != 0);
 	N_Tf(sbu3403, "created locks file @STR", locks_path);
-}
-
-static void mkdir_if_not_exists(const char *path)
-{
-	if (mkdir(path, 0755) != 0) {
-		if (errno != EEXIST) {
-			N_Ef(gjl3965, "mkdir failed for path=@STR error=@STR", path, strerror(errno));
-		}
-	}
 }
 
 static void write_file(const char *path, const char *content)
