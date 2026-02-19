@@ -929,7 +929,7 @@ int nvmeibt_close_all_nonstd_fds(BOOL is_terminate)
 					if (len != -1)
 						tp[len] = 0;
 					syslog(LOG_WARNING, "closing file %d = %s\n", fd, tp);
-					if (strstr(tp, ".vscode-server") || strstr(tp, "/dev/ptmx"))	// When running in vscode debugging server or terminal emulator, dont close those fd's.
+					if (strstr(tp, ".vscode-server") || strstr(tp, ".cursor-server") || strstr(tp, "/dev/ptmx") || strstr(tp, "/dev/urandom") || strstr(tp, "/dev/random"))	// When running in vscode debugging server or terminal emulator, dont close those fd's.
 						continue;
 				}
 			}
