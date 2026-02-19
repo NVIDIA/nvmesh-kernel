@@ -402,7 +402,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	}
 
 	if (!NCL_do_i_have_lock(l->status)) {
-		WARN(!NCL_is_failed_to_acquire(l->status), "Bug in nvmeibc! locksets=%p[lsi=%d] %d l=%p 0x%llx disk=%s\n", locksets, lsi, l->status, l, l->address, disk->full_name); // Dont have lock and didnt fail to take it. So what was I trying to do???
+		WARN(!NCL_is_failed_to_acquire(l->status), "Bug in nvmeibc! locksets=%p[lsi=%d] %d l=%p 0x%llx disk=%s\n", locksets, lsi, l->status, l, l->address, nvmeibc_disk_get_full_name(disk)); // Dont have lock and didnt fail to take it. So what was I trying to do???
 		__print_release_lock_status(t4_rel_lock, "Not releasing untaken lock", l);
 		return dp_locks_complete_lock(locksets, 1, lsi, true);
 	}

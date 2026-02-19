@@ -1038,6 +1038,11 @@ static inline char const *nvmeibc_disk_get_name(struct nvmeibc_disk const *self)
 	return self->name;
 }
 
+static inline char const *nvmeibc_disk_get_full_name(struct nvmeibc_disk const *self)
+{
+	return self->full_name;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {

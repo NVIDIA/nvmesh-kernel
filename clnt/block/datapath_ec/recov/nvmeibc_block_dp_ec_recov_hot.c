@@ -715,7 +715,7 @@ static u32 _call_for_bitmap(struct htr_ctx *h, const ulong bitmap, enum h_op op,
 		_NTh(trace_4_dp_ec_recov_hot_call_for_bitmap, h, "Failed '@FUNC'(op=@HOT_RECOVERY_OP) for @INT[@BITMAP] of @INT[@BITMAP] segs:", func, op, hweight32(rv_bm), (u32)rv_bm, n_all, bitmap);
 		for_each_set_bit(si, &rv_bm, r1_size) {
 			_NTh(trace_5_dp_ec_recov_hot_call_for_bitmap, h, "[@INDEX] si=@SI, disk=@DISK_NAME seg=@SEGMENT_UUID", i++, si,
-				h->params.raid1->segments[si].disk->full_name,
+				nvmeibc_disk_get_full_name(h->params.raid1->segments[si].disk),
 				h->params.raid1->segments[si].uuid);
 		}
 	}

@@ -1115,7 +1115,7 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 		if (!info) {	// Dont print second time when we are just caluclating the reason
 			const char *s_acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
 			_NT_TOPO(t_02_prioperm, t, "seg=" SEGMENT_FMT " disk=@DISK_NAME acm=@ACM act=@ACT p=@RV, lid=@LID @C_PRV uuid=@SEG_DBG_UUID",
-				c, r, si, disk->full_name, s_acm, seg->registration_status,
+				c, r, si, nvmeibc_disk_get_full_name(disk), s_acm, seg->registration_status,
 				__disk_p_state2num(disk), r1->lid.all, r1->version, seg->dbg_uuid);
 		}
 	}
@@ -1230,7 +1230,7 @@ void nvmeibc_topologies_error_state_reason(struct nvmeibc_topologies *nt, void *
 		nvmeibc_raid1_calc_io_perm(t, c, r, &reason);
 		if (reason.code) {										// We are interested in first problematic praid
 			const struct nvmeibc_disk *disk = ((reason.si < (u32)r1->replicas) ? r1->segments[reason.si].disk : NULL);
-			scnprintf(nt->io_disabled_reason, sizeof(nt->io_disabled_reason), "segment %d,%d,%d disconnected, disk %s, error_code: %d", c, r, reason.si, (disk ? disk->full_name : "?"), reason.code);
+			scnprintf(nt->io_disabled_reason, sizeof(nt->io_disabled_reason), "segment %d,%d,%d disconnected, disk %s, error_code: %d", c, r, reason.si, (disk ? nvmeibc_disk_get_full_name(disk) : "?"), reason.code);
 			return;												// First problematic praid is enough, no need to scan them all
 		}
 	}
@@ -2784,7 +2784,7 @@ void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_disk *
 		tcp = nvmeibc_topology_get(nt);	// Head is the cont preventor topo.
 		t1 = dup_topology(tcp);
 		if (unlikely(t1 == NULL)) {
-			WARN(true, "nvmeibc: out of memory, crashing the system to prevent disk %s from corrupting data of volume %s\n", disk->full_name, nt->device_name);
+			WARN(true, "nvmeibc: out of memory, crashing the system to prevent disk %s from corrupting data of volume %s\n", nvmeibc_disk_get_full_name(disk), nt->device_name);
 			BUG();
 		}
 		__set_active_topology(nt, t1, tcp);
@@ -2846,7 +2846,7 @@ static inline int __toma_disconnect_segment(struct nvmeibc_disk_segment *seg)
 	params->block_dev = nt->nd;
 	// Force workque to free the params if the update doesn't execute
 	nvmeibc_block_set_generic_work_to_main(nvmeibc_cinst_get_blok_p(nt->nd), nt->nd->uuid, nvmeibc_volume_update_volume_single_segment, params, true);
-	_NT_SCOPE(t_02_topods, topology, "@DEV_NAME: One less tie to disk @DISK_NAME", nt->device_name, seg->disk->full_name);
+	_NT_SCOPE(t_02_topods, topology, "@DEV_NAME: One less tie to disk @DISK_NAME", nt->device_name, nvmeibc_disk_get_full_name(seg->disk));
 _out:
 	return rv;
 }
@@ -3806,7 +3806,7 @@ static int __segment_register(struct nvmeibc_disk_segment *seg)
 	BUG_ON(!tr);  		/* Should be already subscribed */
 	nvmeibc_segment_clear_b4_reg(seg, NULL);
 	_NT_TOPO(trace_topology_segment_register, seg->chunk->topology, "toma_register: disk=@DISK,@DISK_NAME seg=@SEG " SEGMENT_FMT " c_lid=@C_LID",
-	   seg->disk, seg->disk->full_name, seg->uuid,
+	   seg->disk, nvmeibc_disk_get_full_name(seg->disk), seg->uuid,
 	   tr->ch, tr->r1, tr->seg, nvmeibc_disk_segment_get_praid(seg)->lid.all);
 	rv = nvmeibc_toma_send_direct_msg(seg,
 						NVMEIBT_CLIENT_MSG_RT_REGISTER_DISK_SEGMENT, NULL);
@@ -4483,7 +4483,7 @@ int nvmeibc_topologies_inform_di_bug_in_raid(struct nvmeibc_topologies *nt, u64 
 		pr = __get_r1_by_t(t, ci, ri);
 		raid1_for_each_seg(pr, seg, si) {
 			rv |= __send_toma_di_help(addrs_array[si], seg);
-			_NE_SCOPE(t_2d_topo, topology, DMESG_PREFIX("@DEV_NAME") ": Sent DI message to @DISK_NAME, seg=@SEG", nt->device_name, seg->disk->full_name, seg->uuid);
+			_NE_SCOPE(t_2d_topo, topology, DMESG_PREFIX("@DEV_NAME") ": Sent DI message to @DISK_NAME, seg=@SEG", nt->device_name, nvmeibc_disk_get_full_name(seg->disk), seg->uuid);
 		}
 	} else {
 		struct nvmeibc_chunk *chunk;
