@@ -1,4 +1,3 @@
-
 #include "capuch_worker.h"
 #include "trace_channel.h"
 #include "unlink_list.h"
@@ -102,8 +101,20 @@ void* _worker(void*);
  */
 int start_capuch_worker(capuch_worker_t* self)
 {
+	size_t stack_size = PTHREAD_STACK_MIN;
 	pthread_attr_t attr = {{0}};
+	int ret;
 
+	ret = pthread_attr_init(&attr);
+	if (ret) {
+		_suicide("Failed to initialize pthread attributes: %s", strerror(ret));
+	}
+	
+	ret = pthread_attr_setstacksize(&attr, max(stack_size, PTHREAD_STACK_MIN));
+	if (ret) {
+		_suicide("Failed to set pthread stack size: %s", strerror(ret));
+	}
+	
 	self->priv.aborted = 0;
 
 	/* Unable to create worker thread is critical error. Better restart. */
