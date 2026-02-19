@@ -1,8 +1,10 @@
 #include "kr_incs.h"
+#include <stdint.h>
 #include "nvmeibc_trace.h"
 #include "di_tracker.h"
 #include "nvmeibc_block.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include <execinfo.h> // backtrace()
 
 enum kernel_status_t get_kernel_status = KERNEL_STATUS_BOOOTING;
 
@@ -206,6 +208,131 @@ void BREAKPOINT(bool dump_kernel) {
 		raise(SIGINT);									// Do not create core dump. Just break point in debugger
 	else
 		raise(SIGABRT);									// No debugger active, create core dump to debug later the core. Use __breakpoint() on windows phone, raise(SIGABRT) on windows
+}
+
+/* Single "request other thread's stack dump" in progress (signal handler is process-wide).
+ * Caller slot: 0 = none, else caller pthread_t as uintptr_t (CAS'd).
+ * Target: which thread should dump when it receives SIGUSR2 (set by caller after winning CAS).
+ * Cast pthread_t <-> uintptr_t is only valid when pthread_t fits in one word (e.g. Linux). */
+_Static_assert(sizeof(pthread_t) <= sizeof(uintptr_t),
+		"pthread_t must fit in uintptr_t for atomic caller slot");
+static struct stack_dump {
+	uintptr_t caller_slot;
+	uintptr_t target_os_id;
+	void *buffer[100];
+	int buffer_nptrs;
+	bool is_initialized;
+} stack_dump = { 0 };
+
+/**
+ * Request that @p target_os_id dump its stack via SIGUSR2; this thread blocks until that dump
+ * and the target has signaled back. Only one such request is in progress process-wide.
+ * @param target_os_id  thread to signal (will run handler and dump its stack).
+ * @param best_effort   if true and another request is in progress, return false without waiting;
+ *                      if false, spin until the slot is free, then proceed.
+ * @return true if the request was performed (target dumped and we returned); false only when
+ *         best_effort is true and the slot was already taken.
+ */
+bool request_other_thread_stack_dump(pthread_t target_os_id_param, bool best_effort)
+{
+	bool is_success = false;
+	const pthread_t self_os_id = pthread_self();
+	uintptr_t expected;
+	uintptr_t desired = (uintptr_t)self_os_id;
+	sigset_t mask;
+	int err;
+
+	if (target_os_id_param == self_os_id)
+		return true; /* no-op: would be dumping our own stack; caller can dump_stack() directly */
+
+	for (;;) {
+		expected = 0;
+		if (__atomic_compare_exchange_n(&stack_dump.caller_slot, &expected, desired,
+					       false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+			break;
+		if (best_effort)
+			return false;
+		/* Spin until slot is free */
+	}
+
+	/* Call backtrace at least once outside of a signal handler to make the subsequent calls async-signal-safe */
+	if (!stack_dump.is_initialized) {
+		backtrace(stack_dump.buffer, ARRAY_SIZE(stack_dump.buffer));
+		stack_dump.is_initialized = true;
+	}
+
+	/* Block the return SIGUSR2 so that we won't miss it if it fires before we sigsuspend() */
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGUSR2);
+	pthread_sigmask(SIG_BLOCK, &mask, NULL);
+
+	__atomic_store_n(&stack_dump.target_os_id, (uintptr_t)target_os_id_param, __ATOMIC_SEQ_CST);
+
+	if ((err = pthread_kill(target_os_id_param, SIGUSR2)) != 0) {
+		pr_emerg("Failed to signal thread to dump stack: pthread_kill() returned %d\n", err);
+		goto out;
+	}
+
+	sigfillset(&mask);
+	sigdelset(&mask, SIGUSR2);
+	sigsuspend(&mask);
+
+	dump_backtrace(stack_dump.buffer, stack_dump.buffer_nptrs);
+
+	is_success = true;
+
+out:
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGUSR2);
+	pthread_sigmask(SIG_UNBLOCK, &mask, NULL);
+	__atomic_store_n(&stack_dump.target_os_id, 0, __ATOMIC_SEQ_CST);
+	__atomic_store_n(&stack_dump.caller_slot, 0, __ATOMIC_SEQ_CST);
+	return is_success;
+}
+
+void dump_this_and_ut_stacks(void)
+{
+	dump_stack();
+
+	if (ut_os_id == 0) {
+		pr_emerg("Not dumping UT thread stack: ut_os_id is not set\n");
+		return;
+	}
+
+	if (pthread_self() == ut_os_id)
+		return;
+
+	/* Wait for our turn so the UT stack is dumped before any thread proceeds to BREAKPOINT/abort.
+	 * Otherwise a second panicking thread can hit BREAKPOINT and raise(SIGABRT) before the first
+	 * thread's UT-dump handshake completes, and the UT stack is never printed. */
+	(void)request_other_thread_stack_dump(ut_os_id, false);
+}
+
+static void __signal_stack_dump_handler(__attribute__((__unused__)) int signr, __attribute__((__unused__)) siginfo_t *info, __attribute__((__unused__)) void *vcontext)
+{
+	const pthread_t self = pthread_self();
+	uintptr_t target_id, caller_id;
+	int err;
+
+	target_id = __atomic_load_n(&stack_dump.target_os_id, __ATOMIC_SEQ_CST);
+	if (self != (pthread_t)target_id)
+		return; /* not the requested target (e.g. caller waking from sigsuspend) */
+
+	stack_dump.buffer_nptrs = backtrace(stack_dump.buffer, ARRAY_SIZE(stack_dump.buffer));
+
+	caller_id = __atomic_load_n(&stack_dump.caller_slot, __ATOMIC_SEQ_CST);
+	if ((err = pthread_kill((pthread_t)caller_id, SIGUSR2)) != 0)
+		pr_emerg("Failed to signal stack dump caller back: pthread_kill() returned %d\n", err);
+}
+
+void set_up_other_thread_stack_dump_handler(void)
+{
+	struct sigaction sa;
+	sigfillset(&sa.sa_mask);
+	sa.sa_flags = SA_SIGINFO;
+	sa.sa_sigaction = __signal_stack_dump_handler;
+	if (sigaction(SIGUSR2, &sa, NULL) != 0)
+		pr_emerg("Failed to set stack dump signal handler: errno=%d\n", errno);
 }
 
 /************************ Simulator of OS testing API ************************/

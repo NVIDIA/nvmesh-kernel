@@ -7172,6 +7172,9 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 	bunitest_s *buni = __alloc_bunny();
 	int sr, rv = 0;
 	struct NVMeshSystem *sys = &buni->_sys;
+
+	ut_os_id = pthread_self();
+
 	bunitest_s_create(buni);
 	if (!buni->conf->bunitest.disableSimulatorTests) {
 		void test_kernel_infra(struct kernel_sim *);
@@ -7424,6 +7427,7 @@ int main(int argc, char* argv[])
 	simulator_alloc_tracking_enable();
 
 	main_os_id  = pthread_self();							// Important! Emulate kernel thread for main(). Must be done before any to print using printk(). This is not part of kernel boot because parsing arguments requires using printk(), and we parse arguments before boot!
+	set_up_other_thread_stack_dump_handler();				// Process-wide: allows request_other_thread_stack_dump() for any thread
 	kthread_self_task = get_current();
 	__start_all_trace_pollers();
 	ut_conf = __parseArgs(argc, argv);

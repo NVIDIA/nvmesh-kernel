@@ -63,6 +63,7 @@ struct task_struct;
 /******************************* Kernel macros *******************************/
 
 extern pthread_t 	main_os_id;
+extern pthread_t	ut_os_id;
 
 typedef unsigned long nodemask_t; /* Not really used, more for compilation */
 
@@ -145,6 +146,7 @@ static inline void simulator_alloc_tracking_enable(void)
 }
 
 void dump_stack(void);
+void dump_backtrace(void **buffer, int nptrs);
 
 int vscnprintf(char *buf, size_t size, const char *fmt, va_list args);
 
@@ -172,7 +174,11 @@ int vscnprintf(char *buf, size_t size, const char *fmt, va_list args);
 bool insert_single_failure(void);				// Daniel's helper function to generate failure only on first call (used for debugging)
 const char* __kget_curr_time_stamp(void);		// Daniel's artificial function
 void BREAKPOINT(bool do_state_dump);			// Daniel's artificial function, Dump state before break point or not
-#define panic(fmt, ...) ({pr_emerg(fmt,  ##__VA_ARGS__); dump_stack(); BREAKPOINT(true);})
+void dump_this_and_ut_stacks(void);
+void set_up_other_thread_stack_dump_handler(void);
+/** Request @p target_os_id dump its stack (best_effort: true = try once, false = spin until slot). */
+bool request_other_thread_stack_dump(pthread_t target_os_id, bool best_effort);
+#define panic(fmt, ...) ({pr_emerg(fmt,  ##__VA_ARGS__); dump_this_and_ut_stacks(); BREAKPOINT(true);})
 
 #define simple_strtoul(str, endPtr, base)		strtoul(str, endPtr, base)
 #define simple_strtoull(str, endPtr, base)		strtoull(str, endPtr, base)

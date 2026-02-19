@@ -36,6 +36,7 @@ const struct nvmesh_memmgr_metrics *unitest_get_memmgr_metric_simulator_total_me
 
 struct kernel_sim	kernel_sim;
 pthread_t 	main_os_id;	// the os_id (pthread_id) of main()
+pthread_t 	ut_os_id;	// the os_id (pthread_id) of blk_unit_test()
 #define _logFile	stderr				// or use: stdout, stderr
 static bool logsEnabled = true;
 void printk_enable(bool on_off){
@@ -122,28 +123,29 @@ int vscnprintf(char *buf, size_t size, const char *fmt, va_list args)
 	return size - 1;
 }
 
-// Taken from http://man7.org/linux/man-pages/man3/backtrace.3.html
-void dump_stack(void){
-	//since we are in the multi threaded system and have multiple logical "queues"
-	//it is possible that we raise exception, just because we did not wait enough
-	//so it is important to see those messages in the traces with timestamp
-   	#define SIZE 100
-   	void *buffer[SIZE];
-   	int j, nptrs = backtrace(buffer, SIZE);
+void dump_backtrace(void **buffer, int nptrs)
+{
    	char **strings = backtrace_symbols(buffer, nptrs);
 
 	pr_emerg("backtrace() returned %d addresses\n", nptrs);
-	//NVMEIB_LOG_LONGTERM("backtrace() returned @INT addresses", _E, /*Deault*/, dump_stake_n_frames, nptrs);
+
 	if (strings == NULL) {
 		pr_emerg("No crash stack available..\n");
-		//NVMEIB_LOG_LONGTERM("No crash stack available..", _E, /*Deault*/, dump_stake_no_frames);
 		return;
 	}
-	for (j = 0; j < nptrs; j++){
+
+	for (int j = 0; j < nptrs; j++){
 		pr_emerg("\t%s\n", strings[j]);
-		//NVMEIB_LOG_LONGTERM("@NAME", _E, /*Deault*/, dump_stack_frame_name, strings[j]);
 	}
+
 	free(strings);
+}
+
+void dump_stack(void)
+{
+	void *buffer[100];
+	int nptrs = backtrace(buffer, ARRAY_SIZE(buffer));
+	dump_backtrace(buffer, nptrs);
 }
 
 bool insert_single_failure(void){
