@@ -11,8 +11,11 @@
 
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
+/* Volume scenario constants */
+#define V_R1_PRAID_UUID          "aaa11111-0000-0000-0000-000000000001"
+
 /*
- * State machine stats for the formatDrive scenario.
+ * State machine states for the test scenario.
  */
  enum mgmt_sim_fsm_state {
 	MGMT_FSM_WAITING_FOR_BOTH_OK, // waiting for both disks to report status="Ok"
@@ -58,6 +61,7 @@ static int make_msg_add_volume(char *buf, size_t capacity)
 
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
+static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
 static void mgmt_sim_run_fsm(void);
 
 /* Per-disk status extracted from reportTarget */
@@ -106,11 +110,13 @@ struct mgmt_sim_state {
 	int n_leader_keep_alives;
 	uint32_t raftTerm;					// AS reported by Toma leader
 
-	/* State machine for formatDrive scenario */
+	/* State machine */
 	enum mgmt_sim_fsm_state fsm_state;
 	int64_t boot_time;                      /* from reportTarget payload.node.bootTime */
 	struct mgmt_sim_disk_status disk_002;   /* NVMD_SN_002.1 */
 	struct mgmt_sim_disk_status disk_003;   /* NVMD_SN_003.1 */
+	bool v_r1_praid_reported;               /* updatePRaidReport contained V_R1's pRaid UUID */
+	bool got_report_target;                 /* reportTarget received since last FSM transition */
 };
 
 void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
@@ -283,6 +289,8 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 			mgmt_sim_parse_report_target(root);
 			mgmt_sim_run_fsm();
 		} else  if (strcmp(message_type, "updatePRaidReport") == 0) {
+			mgmt_sim_parse_praid_report(root);
+			mgmt_sim_run_fsm();
 		 	// {"originType":"TOMA","messageType":"updatePRaidReport","messageTypeVersion":1,"hostname":"nvme39.nvidia.com","tomaToken":2,"messageSequence":85,"leaderToken":1,"payload":{"pRaidsUpdate":[{"uuid":"b60b04b1-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60b04b0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60b2bc0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]},{"uuid":"b60ab692-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60ab691-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60adda0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]}]}}
 		} else if (strcmp(message_type, "segmentZeroingProgress") == 0) {
 			// {"originType":"TOMA","messageType":"segmentZeroingProgress","messageTypeVersion":1,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":335,"leaderToken":null,"payload":{"praidVersion":"258.0","segmentUUID":"98e46d20-ea22-11f0-bad8-af65dd8e6ead","pRaidUUID":"98e44612-ea22-11f0-bad8-af65dd8e6ead","nZeroedBlks":262144}}
@@ -379,10 +387,29 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 		__extract_disk_status_from_report_terget_msg(disks, &m->disk_002);
 		__extract_disk_status_from_report_terget_msg(disks, &m->disk_003);
 	}
+	m->got_report_target = true;
 	N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR", m->boot_time, m->disk_002.status, m->disk_003.status);
 }
 
-/* Run the format scenario state machine.
+static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
+	struct mm_json_elem *payload = json_get_dict_value(root, "payload");
+	struct mm_json_elem *praids_update = json_get_dict_value(payload, "pRaidsUpdate");
+	if (!praids_update || praids_update->type != JSON_E_ARRAY)
+		return;
+	for (int i = 0; i < praids_update->array.len; i++) {
+		struct mm_json_elem *entry = praids_update->array.elements[i];
+		const char *uuid;
+		if (!entry || entry->type != JSON_E_DICT)
+			continue;
+		uuid = json_get_dict_str(entry, "uuid", NULL);
+		if (uuid && strcmp(uuid, V_R1_PRAID_UUID) == 0) {
+			N_IMf(msim_praid, "updatePRaidReport: matched V_R1 pRaid UUID");
+			g_mgmt_sim->v_r1_praid_reported = true;
+		}
+	}
+}
+
+/* Run the test scenario state machine.
  * Transitions based on disk statuses extracted from reportTarget. */
 static void mgmt_sim_run_fsm(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
