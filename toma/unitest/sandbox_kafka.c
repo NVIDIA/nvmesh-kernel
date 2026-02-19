@@ -39,6 +39,7 @@ struct sim_broker_topic {		// Kafka Broker topic implementation = append-only lo
 	uint32_t n_msgs;			// Number of stored messages in the queue. n_msgs <= capacity
 	int64_t committed_offset;	// Last committed offset msgs[committed_offset % capacity] was consumed, acked and deleted
 	int64_t cur_offset;			// Offset of next message to read. msgs[cur_offset % capacity].  cur_offset > committed_offset!
+	int64_t debug_highest_offset_ever_reached;	// Just for debug, kafka does not have it. For strict Verification of user behavior. = max(cur_offset)
 	// Used buffer slots: [ (committed_offset+1)%capacity .. cur_offset%capacity  .. (committed_offset+msgs)%capacity ), All the rest have ->payload = NULL
 	// Note: cur_offset belongs to client consumer not of broker. We have only 1 consumer so for simplicity and easy of debug, put it here
 };
@@ -53,7 +54,7 @@ void sim_broker_topic_create(struct sim_broker_topic *t, enum sim_topic_type_tom
 	t->capacity = max_queue_size;
 	t->msgs = (struct sim_msg*)calloc(t->capacity, sizeof(struct sim_msg));
 	t->committed_offset = -1;
-	t->cur_offset = 0;
+	t->debug_highest_offset_ever_reached = t->cur_offset = 0;
 	t->n_msgs = 0;
 }
 
@@ -96,6 +97,7 @@ bool sim_broker_topic_peek(struct sim_broker_topic *t, rd_kafka_message_t *rv) {
 		rv->payload = m->payload;				// Pointer to buffer in queue. Will remain valid until msg is commited
 		rv->offset = t->cur_offset++;
 		N_Tf(__AUTOID__, "[@CHAR].offset=@LD, slot[@INT]", t->type, rv->offset, i);
+		MAX_WITH(t->debug_highest_offset_ever_reached, t->cur_offset);
 	} else { /* No message at this offset */}
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 	rv->err = RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -112,7 +114,7 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 		goto _out;									// Already commited, OK and just do nothing
 	} else if (ack_offset < t->committed_offset) {
 		BUG_ON(true); return;						// Rewinding committed offset is valid in kafka but a very bad idea
-	} else if (ack_offset >= t->cur_offset) {
+	} else if (ack_offset >= t->debug_highest_offset_ever_reached) {
 		BUG_ON(true); return;						// Msg was not read yet. How is it being committed
 	}
 	for (i = t->committed_offset + 1; i <= ack_offset; i++) {		// In kafka, commit is actually for this message and before
@@ -124,7 +126,9 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 		t->n_msgs--;
 	}
 	t->committed_offset = ack_offset;
-	N_Tf(__AUTOID__, "[@CHAR] @LD -> @LD, last_slot[@INT]", t->type, prev_committed, ack_offset, (int)(i % t->capacity));
+	if (t->committed_offset >= t->cur_offset)		// Msg was N read, cur moved back (to N-x) and now msg N commited. Real kafka does not move cur_offset, but upon restart it will move it to earliest
+		sim_broker_topic_reset_to_earliest(t);		// Implemented not like kafka: We move cur to earliest immediately because we free commited messages
+	N_Tf(__AUTOID__, "[@CHAR] commited:@LD -> @LD, cur=@LD, last_slot[@INT]", t->type, prev_committed, ack_offset, t->cur_offset, (int)(i % t->capacity));
  _out:
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
@@ -168,7 +172,7 @@ struct kafka_simulator_t *sandbox_kafka_init(void) {
 	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG,			4);		// This queue is always non empty, stores at least the last hardware config
 	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD,			2);		// Toma will consume commands very fast
 	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT,	8);		// This queue might be long and potentially store the entire history.
-	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		32);	// Toma will consume volume commands very fast, but there is Toma issue of not commiting keep alive msgs so the queue grows. Todo solve it
+	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		4);		// Toma will consume volume commands very fast, and ack mgmt keepalive to leader also almost immediately
 	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY,		2);		// Mgmt Simu will consume toma reports immediately
 	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		2);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
 	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			2);		// Mgmt Simu will consume toma reports immediately
