@@ -2500,7 +2500,7 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct 
 }
 
 static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
-								 char *encrypt_cmd, char *encrypt_args, char *old_passphrase, char *new_passphrase, int64_t kafka_offset)
+								 const char *encrypt_cmd, const char *encrypt_args, const char *old_passphrase, const char *new_passphrase, int64_t kafka_offset)
 {
 	union nvmeib_uuid					*vol_uuid = &CMD_params->volumeUUID;
 	int									encrypt_idx = CMD_params->encryptionCommandIndex;
@@ -2567,8 +2567,15 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 				 "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s %.256s",
 				 encrypt_args, encrypt_params->old_passphrase_file_name, shadow_vol_name, encrypt_params->new_passphrase_file_name);
 	} else {
-		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str), "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s",
-				 encrypt_args, (old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name), shadow_vol_name);
+		const char *key_path = (old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name);
+		#define CRYPT_SETUP_CMD "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s"
+		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str),
+			#if 1
+				CRYPT_SETUP_CMD,
+			#else					// Enable to run with strace, need to remember clean up tohose files, as each one is ~0.5[mb]
+				"strace -o /tmp/out_%s " CRYPT_SETUP_CMD, shadow_vol_name,
+			#endif
+				encrypt_args, key_path, shadow_vol_name);
 	}
 	nvmeibt_attach_vol_for_encryption(vol, shadow_vol_name, encrypt_params);
 	rv = 0;
