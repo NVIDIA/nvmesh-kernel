@@ -384,6 +384,7 @@ build_cpager:
 
 # Requires the cpager binary to be built in order to export logs.
 test: all build_cpager
+	$(call clean_prev_run)
 	mkdir -p $(TEST_OUTPUT_DIR)
 	rm -f $(TEST_OUTPUT_FILE) $(TEST_LOG_FILE) ./_root/var/log/nvmesh/trace_daemon/toma*.binlog* ./_root/var/log/nvmesh/toma_2* ./_root/var/log/nvmesh/tracelist.txt
 	@echo "Running tests..."
