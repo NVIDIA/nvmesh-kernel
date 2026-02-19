@@ -29,6 +29,13 @@ Since the block code is shared between all of them, we need from the first day t
 
 The idea should cut the bootstrap phase from few weeks to probably one week or even less. The next step would be to introduce "mcs" like file, where those message will be copied to.
 
+## Python dependencies
+
+For `nvmeib_pet_messages.py` (save-dictionary, view, etc.) install:
+
+- **pyelftools** – ELF/DWARF parsing
+- **pydantic** – Type hints enforcing
+
 ## Kaitai
 
 [Kaitai](https://kaitai.io/) is a nice project, which allows to describe a binary data using YAML and generate parsers for it.
