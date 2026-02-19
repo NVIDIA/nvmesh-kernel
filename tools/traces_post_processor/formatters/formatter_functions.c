@@ -159,7 +159,7 @@ int fmt_find_sock_cep_state(char *buf, int len, long arg, int datalen) {
 
 int fmt_iostats_verb(char *buf, int len, long arg, int datalen) {
 	(void)datalen;
-	return scnprintf(buf, len, "%s(%d)", verb_to_string((int)arg, false), (int)arg);
+	return scnprintf(buf, len, "%s", verb_to_string((int)arg, false));
 }
 
 /*******************************************************************************
