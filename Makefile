@@ -1604,6 +1604,7 @@ install_files:
 	@mkdir -p $(TRACE_DAEMON_DIR)
 	@ln -sf $(COMMON_REPO_DIR)/tools/traces_post_processor/cpager $(TRACE_DAEMON_DIR)/cpager
 	@ln -sf $(COMMON_REPO_DIR)/tools/traces_post_processor/pager.py $(TRACE_DAEMON_DIR)/pager.py
+	@ln -sf $(EXECUTABLES_DIR)/nvmesh_pet_messages $(TRACE_DAEMON_DIR)/nvmesh_pet_messages
 	@tar zxvf $(NVMESH_SRC_DIR)/dictionaries.tar.gz -C $(TRACE_DAEMON_DIR)
 	$(info Creating $(DEST_CONF_DIR))
 	@mkdir -p $(DEST_CONF_DIR)

@@ -74,6 +74,8 @@ mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/the-calculator.py %{bui
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_memmgr_monitor.py %{buildroot}/opt/nvmesh/common-repo/tools/
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_metrics.py %{buildroot}/opt/nvmesh/common-repo/tools/
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_client_upgrade_breakdown.py %{buildroot}/opt/nvmesh/common-repo/tools/
+mkdir -p %{buildroot}/opt/nvmesh/common-repo/common/pet
+mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/common/pet/*.py %{buildroot}/opt/nvmesh/common-repo/common/pet/
 cp -rf %{_builddir}/%{name}/bin_client/* %{buildroot}/usr/bin/
 #backward compatible
 mv -n %{buildroot}/usr/bin/nvmesh_clnt_shutdown.py %{buildroot}/usr/bin/nvmesh_clnt_shutdown
@@ -91,6 +93,7 @@ echo "commit=\"%{commit_id}\"" >> %{buildroot}/opt/nvmesh/client-repo/version
 echo "branch=\"%{branch}\"" >> %{buildroot}/opt/nvmesh/client-repo/version
 touch %{buildroot}/var/opt/nvmesh/client_upgrade_version
 
+ln -s /opt/nvmesh/bin/nvmesh_pet_messages %{buildroot}/var/log/nvmesh/trace_daemon/nvmesh_pet_messages
 ln -s /opt/nvmesh/bin/pager %{buildroot}/var/log/nvmesh/trace_daemon/pager
 ln -s /opt/nvmesh/common-repo/tools/traces_post_processor/pager.py %{buildroot}/var/log/nvmesh/trace_daemon/pager.py
 ln -s /opt/nvmesh/common-repo/tools/traces_post_processor/cpager %{buildroot}/var/log/nvmesh/trace_daemon/cpager

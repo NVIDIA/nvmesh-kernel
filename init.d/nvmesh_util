@@ -1865,7 +1865,7 @@ start_trace_daemon() {
 		fi
 
 		cd $TRACE_DAEMON_DIR
-		if [ "$extract_dictionaries" == "yes" ]; then 
+		if [ "$extract_dictionaries" == "yes" ]; then
 			tar -xvzf $dictionaries_path &
 		fi
 		hostname > hostname
@@ -1879,7 +1879,7 @@ start_trace_daemon() {
 stop_trace_daemon() {
 	check_root
 	#bug: we should not read the config file on stop - we should stop the daemon using the configuration it was started with
-	read_conf_file_raw 
+	read_conf_file_raw
 	local target_daemon=$1
 
 	[ "$target_daemon" == "trace_daemon" ] && target_exe=trace_daemon_2.0/trace_daemon && extract_dictionaries=yes

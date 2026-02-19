@@ -71,7 +71,10 @@ optional_common_transfer_list="tools/traces_post_processor/cpager \
 			tools/nvmesh_metrics.py \
 			tools/nvmesh_client_upgrade_breakdown.py \
 			tools/infra_shared/infra_shared.so \
-			tools/the-calculator.py"
+			tools/the-calculator.py \
+			common/pet/nvmeib_pet_messages.py \
+			common/pet/nvmeib_pet_archive.py \
+			common/pet/kaitaistruct.py"
 
 # Can include both static and compiled files
 common_scripts_transfer_list="tools/dictionary.json \
