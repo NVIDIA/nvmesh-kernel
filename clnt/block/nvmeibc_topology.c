@@ -4500,7 +4500,7 @@ _out:
 
 int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 {
-#define __is_unknown_node(seg) ((!seg->disk)||(seg->disk->disk_host[0] == '?'))
+#define __is_unknown_node(seg) ((!seg->disk) || (nvmeibc_disk_get_host_name((seg)->disk)[0] == '?'))
 	struct nvmeibc_topology *t;
 	struct nvmeibc_chunk *chunk;
 	const struct nvmeibc_raid1 *pr;
@@ -4515,9 +4515,9 @@ int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 			for (j = i+1, sj = &pr->segments[j]; j < pr->replicas; j++, sj++) {
 				if (__is_unknown_node(si)) break;    // Cannot verify it
 				if (__is_unknown_node(sj)) continue; // Cannot verify it
-				if (!strcmp(si->disk->disk_host, sj->disk->disk_host)) {
+				if (!strcmp(nvmeibc_disk_get_host_name(si->disk), nvmeibc_disk_get_host_name(sj->disk))) {
 					WARN(1, "%s: Raid(%d,%d) both segs {%d,%d} are on host %s\n",
-					   nt->device_name, c, r, i, j, sj->disk->disk_host);
+					   nt->device_name, c, r, i, j, nvmeibc_disk_get_host_name(sj->disk));
 					rv++;
 				}
 			}
@@ -4529,9 +4529,9 @@ int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 				sj = &pr->segments[j % pr->replicas];
 				if (__is_unknown_node(si)) break;    // Cannot verify it
 				if (__is_unknown_node(sj)) continue; // Cannot verify it
-				if (!strcmp(si->disk->disk_host, sj->disk->disk_host)) {
+				if (!strcmp(nvmeibc_disk_get_host_name(si->disk), nvmeibc_disk_get_host_name(sj->disk))) {
 					WARN(1, "%s: Raid(%d,%d) both parity segs {%d,%d} are on host %s\n",
-					   nt->device_name, c, r, i, j, sj->disk->disk_host);
+					   nt->device_name, c, r, i, j, nvmeibc_disk_get_host_name(sj->disk));
 					rv++;
 				}
 			}
@@ -4991,7 +4991,7 @@ _out:
 }
 
 #define __host_of(disk) \
-	((disk)->disk_host[0] == '?' ? "Unknown" : (disk)->disk_host)
+	(nvmeibc_disk_get_host_name(disk)[0] == '?' ? "Unknown" : nvmeibc_disk_get_host_name(disk))
 
 static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvmeib_txt *txt)
 {
