@@ -30,7 +30,7 @@
 		extern struct trace_channel *nvmeibc_trace_long;
 		extern struct trace_channel *nvmeibc_trace_short;
 		extern struct trace_channel *nvmeibc_trace_goodpath;
-		extern struct trace_channel *nvmeib_trace_metrics;
+		extern struct trace_channel *nvmeibc_trace_metrics;
 		extern struct trace_channel *nvmeibc_trace_eph;
 		extern struct trace_channel *nvmeibc_trace_eter;
 	#endif

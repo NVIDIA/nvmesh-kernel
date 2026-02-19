@@ -248,7 +248,7 @@ static ulong submit_wait_timeout = (15*HZ);
 module_param(submit_wait_timeout, ulong, 0644);
 MODULE_PARM_DESC(submit_wait_timeout, "Timeout for NVMe admin operations such as drive formatting. Does not affect a second format attempt after a failure, as some drives take a long time to format, especially larger ones. Value in milliseconds.");
 
-static ulong nvmeibs_nvme_disk_periodic_timer_interval = 30000; /* milliseconds */
+static ulong nvmeibs_nvme_disk_periodic_timer_interval = 10000; /* milliseconds */
 static struct kernel_param_ops nvmeibs_nvme_disk_periodic_timer_interval_ops;
 module_param_cb(nvme_disk_periodic_timer_interval, &nvmeibs_nvme_disk_periodic_timer_interval_ops,
 	&nvmeibs_nvme_disk_periodic_timer_interval, 0644);
