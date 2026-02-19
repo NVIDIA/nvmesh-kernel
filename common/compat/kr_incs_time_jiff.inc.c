@@ -1,4 +1,5 @@
 #include "kr_incs_time_jiff.h"
+#include "common/nvmeib_math.h"
 
 struct timezone sys_tz = { -120, 0 };				// Israel is -2 hours
 unsigned int tsc_khz = 0;
@@ -29,8 +30,7 @@ static void __estimate_cpu_frequency(void)
 		clock_gettime(CLOCK_REALTIME, &end);	// Deliberatly realtime
 		{
 			const unsigned long long end_ns = end.tv_sec * billion + end.tv_nsec;
-			#define mul_x_div_y(a, x, y) (x) * ((a) / (y)) + ((x) * ((a) % (y))) / (y)	// Division without overflow
-			tsc_offset = mul_x_div_y(end_ns, tsc_khz, 1000000L) - tsc_end;
+			tsc_offset = MUL_X_DIV_Y(end_ns, tsc_khz, 1000000L) - tsc_end;
 		}
 	}
 }

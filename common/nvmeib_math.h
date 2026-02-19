@@ -5,7 +5,7 @@
 
 #ifndef __KERNEL__
 	#include <stdint.h>
-#include <math.h>
+	#include <math.h>
 
 	#include "compat/kr_incs_compiler_types.h"
 	// https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
@@ -116,6 +116,14 @@ typedef struct nvmeib_basic_statistics {
 // Additional Utils for both kernel and user space
 #define MAX_WITH(a,b) { if (a < (b)) a = (b); }
 #define MIN_WITH(a,b) { if (a > (b)) a = (b); }
+
+/**
+ * Overflow-safe (a * x / y) for integer arithmetic.
+ *
+ * Splits into integer and fractional parts to avoid intermediate overflow:
+ *   result = x * (a / y) + x * (a % y) / y
+ */
+#define MUL_X_DIV_Y(a, x, y) ((x) * ((a) / (y)) + ((x) * ((a) % (y))) / (y))
 
 static inline uint32_t ror32_width(uint32_t bm, uint32_t shift, uint32_t width)// Handling segments bitmaps
 {

@@ -1,5 +1,6 @@
 #include "kr_incs.h"
 #include "../common/compat/kr_incs_time.h"
+#include "../common/nvmeib_math.h"
 #include "nvmeib_public_mmap.h"
 #include "nvmeib_public_procfs.h"
 #include "nvmeib_rsc_pool.h"
@@ -87,7 +88,6 @@ MODULE_PARM_DESC(tracer_dbg_mask, "Tracer debug injections mask, internal");
 	for (ch_ = &(conf_)->trace_chs[0];                                         \
 	     ch_ < &(conf_)->trace_chs[nvmeib_trace_channel_max]; ++ch_)
 
-#define mul_x_div_y(a, x, y) (x) * ((a) / (y)) + ((x) * ((a) % (y))) / (y)
 #define MAX_CONFIG_STRING 4096
 
 enum nvmeib_trace_channel_enum {
@@ -1394,7 +1394,7 @@ __init_tracer_md_header(struct nvmeib_trace_system *trace_system) {
 	getnstimeofday_real(&ts);
 	cyc = nvmeib_public_rdtsc();
 	trace_system->md.tsc_offset =
-	    mul_x_div_y(1000000000L * ts.tv_sec + ts.tv_nsec,
+	    MUL_X_DIV_Y(1000000000L * ts.tv_sec + ts.tv_nsec,
 	                trace_system->md.tsc_khz, 1000000L) -
 	    cyc;
 }
