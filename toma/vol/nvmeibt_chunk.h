@@ -55,6 +55,7 @@ static inline const char *nvmeibt_chunk_get_blkdev_name(const struct nvmeibt_chu
 }
 enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt_block_device *blkdev, int idx_in_vol, int config_tag, struct nvmeibt_chunk **output_chunk);
 int					nvmeibt_chunk_remove(struct nvmeibt_chunk *c);
+void 				nvmeibt_chunk_free_all_at_exit(void);
 void				nvmeibt_chunk_trim_specific_chunk(struct nvmeibt_chunk *c, uint8_t trim_flag);
 void				nvmeibt_chunk_trim_unused_entries(int config_tag, uint8_t trim_flag);
 

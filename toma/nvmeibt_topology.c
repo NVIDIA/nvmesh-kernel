@@ -2769,6 +2769,9 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_BM_FREE(etnpa51, raft_long_msg_test_buf.data_buf);
 	nvmeibt_raft_del_all_members_at_exit();
 	HW_conf_free_tree(cur_topo->HW_mgmt_conf);
+	nvmeibt_praid_free_all_at_exit();
+	nvmeibt_chunk_free_all_at_exit();
+	nvmeibt_block_device_free_all_at_exit();
 	__clean_drives_specs();
 	nvmeibt_disk_free_all_at_exit();
 	nvmeibt_nic_free_all_at_exit();

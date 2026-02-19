@@ -240,6 +240,15 @@ void nvmeibt_block_device_trim_specific_block_device(struct nvmeibt_block_device
 	}
 }
 
+void nvmeibt_block_device_free_all_at_exit(void)
+{
+	struct nvmeibt_block_device *block_device;
+	NVMEIB_HASH_FOREACH(block_device, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
+		nvmeibt_block_device_trim_specific_block_device(block_device, CONFIG_TRIM_ALL);
+		block_device_remove(block_device);
+	}
+}
+
 void nvmeibt_block_device_trim_unused_entries(int config_tag, uint8_t trim_flag) {
 	struct nvmeibt_block_device *block_device;
 	const int64_t committed_idx = nvmeibt_global_get_global()->highest_seen_committed_kafka_mgmt_config_idx;

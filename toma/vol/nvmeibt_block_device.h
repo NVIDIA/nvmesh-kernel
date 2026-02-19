@@ -86,6 +86,7 @@ bool nvmeibt_block_device_is_deprecated_in_config( const struct nvmeibt_block_de
 const union nvmeib_uuid *nvmeibt_block_device_UUID(const struct nvmeibt_block_device *block_device);
 const char *nvmeibt_block_device_id_str(const struct nvmeibt_block_device *block_device);
 enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config_tag, struct nvmeibt_block_device **output_block_device, bool is_topo_config);
+void nvmeibt_block_device_free_all_at_exit(void);
 struct nvmeibt_block_device *nvmeibt_block_device_get_block_device_by_id(const union nvmeib_uuid *block_device_id);
 void nvmeibt_block_devices_garbage_collect(bool *is_any_garbage_collected, bool *is_all_garbage_collected);
 void nvmeibt_block_device_trim_specific_block_device(struct nvmeibt_block_device *block_device, uint8_t trim_flag);

@@ -269,6 +269,7 @@ void nvmeibt_disk_free_all_at_exit(void)
 {
 	struct nvmeibt_disk			*disk;
 	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
+		NNVMEIBT_TOMA_FREE(__AUTOID__, disk->disk_segments);
 		NNVMEIBT_BM_FREE(vvtys8k, disk);
 	}
 }

@@ -296,6 +296,7 @@ enum nvmeibt_add_rv nvmeibt_praid_add(struct mm_praid_conf *conf,
 									  int config_tag);
 void nvmeibt_praid_update_committed_lot_config(struct mm_praid_conf *conf, struct mm_vol_conf *vol, struct nvmeibt_praid **praid_out);
 int nvmeibt_praid_remove(struct nvmeibt_praid *praid);
+void nvmeibt_praid_free_all_at_exit(void);
 void nvmeibt_praid_trim_specific_praid(struct nvmeibt_praid *praid, uint8_t trim_flag);
 void nvmeibt_praid_trim_unused_entries(int config_tag, uint8_t trim_flag);
 int nvmeibt_praid_dump_praid_status_line(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_praid *praid, BOOL is_leader, bool is_full_info_needed);

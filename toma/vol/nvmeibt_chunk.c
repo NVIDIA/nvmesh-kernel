@@ -22,6 +22,14 @@ int nvmeibt_chunk_remove(struct nvmeibt_chunk *chunk)
 	return 0;
 }
 
+void nvmeibt_chunk_free_all_at_exit(void)
+{
+	struct nvmeibt_chunk *chunk;
+	NVMEIB_HASH_FOREACH(chunk, nvmeibt_global_get_global()->chunks_hash_by_uuid) {
+		nvmeibt_chunk_remove(chunk);
+	}
+}
+
 enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt_block_device *blkdev, int idx_in_vol, int config_tag, struct nvmeibt_chunk **output_chunk)
 {
 	const union nvmeib_uuid		*id = &(conf->uuid);

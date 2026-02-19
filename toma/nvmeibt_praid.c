@@ -2470,6 +2470,14 @@ out:
 	return rv;
 }
 
+void nvmeibt_praid_free_all_at_exit(void)
+{
+	struct nvmeibt_praid *praid;
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
+		nvmeibt_praid_remove(praid);
+	}
+}
+
 static void praid_lot_forget_all_segs(struct nvmeibt_praid_lot *praid_lot)
 {
 	struct nvmeibt_seg_lot						*seg_lot;
