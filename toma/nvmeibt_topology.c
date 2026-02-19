@@ -2163,6 +2163,7 @@ void nvmeibt_server_lib_create(void)
 	extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 	struct nvmeibt_km_comm_params par;
 	NFIN;
+	memset(&par, 0, sizeof(par));
 	par.on_add_disk = &nvmeibt_add_disk_event_callback;
 	par.on_remove_disk = &nvmeibt_remove_disk_event_callback;
 	par.process_disk_info = &nvmeibt_handle_serjio_state_changed_from_nl_ctx;
