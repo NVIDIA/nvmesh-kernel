@@ -18,7 +18,7 @@ CFLAGS := -Wall -Wextra -ggdb -O2 -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID
 
 TEST_EXE := $(BUILD_DIR)/test
 TEST_OBJ := $(BUILD_DIR)/test.o
-TEST_DCT := $(BUILD_DIR)/messages.dict
+TEST_DCT := $(BUILD_DIR)/dict.${COMMIT_ID}.json
 TEST_OUT := $(BUILD_DIR)/messages.pet
 
 .PHONY: all clean test dirs demo
@@ -46,11 +46,10 @@ demo_dict: dirs test $(PET_BINFILE_READER)
 
 
 demo: dirs test demo_dict $(PET_BINFILE_READER)
-	./nvmeib_pet_messages.py view $(TEST_DCT) $(TEST_OUT)
+	./nvmeib_pet_messages.py view $(BUILD_DIR) $(TEST_OUT)
 
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(PET_BINFILE_READER)
 
-
-
+fast_build: dirs $(TEST_EXE) test

@@ -15,7 +15,6 @@ import datetime
 import pydantic
 import itertools
 
-
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import Section
 from elftools.dwarf.die import DIE
@@ -98,11 +97,18 @@ class ErrnoType(pydantic.BaseModel):
 			return os.strerror(abs(value)).lower()
 		raise RuntimeError('unknown errno')
 
+# The Jenkins build system is using Python 3.8, which does not support `enum.StrEnum`.
+# It's near impossible to upgrade the build system to Python 3.12 due to dependencies
+# such as a specific low version of OpenSSL, so we need to use a workaround to ensure
+# backward compatibility.
+class _StrEnum(str, enum.Enum):
+	def __str__(self) -> str:
+		return self.value
 
 class BaseType(pydantic.BaseModel):  # actually fundamental type, but DWARF uses "base" as terminology
 	model_config = pydantic.ConfigDict(frozen=True)
 
-	class Encoding(enum.StrEnum):
+	class Encoding(_StrEnum):
 		char = 'char'
 		boolean = 'boolean'
 		signed = 'signed'
@@ -507,7 +513,7 @@ class ArgDecoder:
 			return '0'
 
 
-class Template:
+class Template():
 	def __init__(self, msg_spec: MessageSpec, user_defined_types: dict[str, TypeInfo]):
 		self.__user_defined_types = user_defined_types
 		self.__c_spec = msg_spec
@@ -636,7 +642,6 @@ class TemplatesLoader:
 
 		return Dictionary(specs=specs, user_defined_types=user_defined_types)
 
-
 TCommand = typing.TypeVar('TCommand', bound='Command')
 
 
@@ -660,7 +665,7 @@ class Command(abc.ABC):
 	@typing.no_type_check
 	def add_dict_arg(cls, parser) -> None:
 		parser.set_defaults(klass=cls)
-		parser.add_argument('dictionary', type=pathlib.Path, help='path to the dictionary file')
+		parser.add_argument('dicts_dir', type=pathlib.Path, help='path to the directory containing a set of PET dictionaries')
 
 	def __init__(self, args: argparse.Namespace):
 		pass
@@ -732,6 +737,13 @@ class SaveDictionary(Command):
 		dictionary.um_trace = self.um_trace
 		dictionary.save(self.output)
 
+# PET schema is a collection of templates, keyed by commit id
+class PETSchema():
+	def __init__(self, git_commit_id: int, dictionary: Dictionary):
+		self.git_commit_id = git_commit_id
+		self.um_trace = dictionary.um_trace
+		self.templates = dictionary.build_templates()
+
 
 class ViewMessages(Command):
 	# Size in bytes of the UM tracer buffer header written by _write_initial_header()
@@ -754,13 +766,19 @@ class ViewMessages(Command):
 			help="By default, all traces are sorted; '--no-sort' disables the ordering; useful to see some entity traces in a single screen",
 		)
 
+	def __load_schemas(self, dict_dir: pathlib.Path) -> dict[int, PETSchema]:
+		templates: dict[int, PETSchema] = {}
+		for f in dict_dir.glob("dict.*.json"):
+			commit_id = int(f.stem.removeprefix('dict.'), 16)
+			dictionary = Dictionary.load(f)
+			templates[commit_id] = PETSchema(commit_id, dictionary)
+		return templates
+
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
 		self.traces = args.traces
 		self.sort = not args.no_sort
-		dictionary = Dictionary.load(args.dictionary)
-		self.templates = dictionary.build_templates()
-		self.um_trace = dictionary.um_trace
+		self.schemas: dict[int, PETSchema] = self.__load_schemas(args.dicts_dir) # dict of dicts, keyed by commit id
 		# Detect and skip UM tracer buffer headers; learned from first header, verified for subsequent ones.
 		self.__tsc_khz = None
 		self.__hdr_flags = None
@@ -805,10 +823,11 @@ class ViewMessages(Command):
 				idx = 0
 				kstream = KaitaiStream(fobj)
 				while not kstream.is_eof():
-					if self.um_trace and self.__skip_tracer_headers(kstream):
+					entity = NvmeibPetArchive.Entity(kstream)
+					um_trace = self.schemas[entity.commit_id].um_trace
+					if um_trace and self.__skip_tracer_headers(kstream):
 						continue
 					entity_start_position = kstream.pos()
-					entity = NvmeibPetArchive.Entity(kstream)
 					entity.fname = fpath.name if n_files > 1 else ''
 					entity.idx = idx
 					entity.size = kstream.pos() - entity_start_position
@@ -841,9 +860,10 @@ class ViewMessages(Command):
 	@typing.no_type_check
 	def __iter_human_messages(self) -> typing.Generator[Message, None, None]:
 		for entity in self.__iter_entities():
+			schema = self.schemas[entity.commit_id].templates
 			for msg in self.__iter_entity_messages(entity):
 				try:
-					tmpl = self.templates[msg.offset - 1]
+					tmpl = schema[msg.offset - 1]
 				except KeyError:
 					raise RuntimeError(f'Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}')
 				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
