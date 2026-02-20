@@ -715,7 +715,7 @@ static int allocate_serjio_jfree_cmd(struct nvmeibc_disk_jcmd *djr)
 		if (nvmeibc_disk_is_access_local(disk))
 			fcmd->ents_enc_buf = NULL;
 		else {
-			size_t ents_enc_buf_sz = disk->min_gen_cmd_bb;
+			size_t ents_enc_buf_sz = nvmeibc_disk_get_min_gen_cmd_bb(disk);
 			if (!ents_enc_buf_sz) {
 				ents_enc_buf_sz = NVMEIBC_SECTOR_SIZE;
 				_NT(trace_allocate_serjio_jfree_cmd_inv_min_bb,

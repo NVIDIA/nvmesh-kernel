@@ -1073,6 +1073,11 @@ static inline bool nvmeibc_disk_is_access_local(struct nvmeibc_disk const *self)
 	return self->access_local;
 }
 
+static inline size_t nvmeibc_disk_get_min_gen_cmd_bb(struct nvmeibc_disk const *self)
+{
+	return self->min_gen_cmd_bb;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {
