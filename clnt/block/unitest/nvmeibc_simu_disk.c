@@ -572,7 +572,7 @@ void nvmeibc_disk_pause(struct nvmeibc_disk *disk)
 	BUG_ON(disk == NULL);
 	spin_lock_irqsave(&disk->volume_spinlock, flags);
 	disk->should_pause = true;
-	BUG_ON(atomic_read(&disk->n_cont_preventors) < 0);
+	BUG_ON(nvmeibc_disk_read_cont_preventors(disk) < 0);
 	atomic_inc(&disk->paused);
 	list_for_each_entry(disk_id, &disk->volumes, slink)
 		if (disk_id->volume) {

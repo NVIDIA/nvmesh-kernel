@@ -1094,6 +1094,21 @@ static inline struct nvmeibc_disk_client_journal * nvmeibc_disk_get_journal_mut(
 	return &self->jour;
 }
 
+static inline int nvmeibc_disk_read_cont_preventors(struct nvmeibc_disk *self)
+{
+	return atomic_read(&self->n_cont_preventors);
+}
+
+static inline int nvmeibc_disk_inc_cont_preventors(struct nvmeibc_disk *self)
+{
+	return atomic_inc_return(&self->n_cont_preventors);
+}
+
+static inline int nvmeibc_disk_dec_cont_preventors(struct nvmeibc_disk *self)
+{
+	return atomic_dec_return(&self->n_cont_preventors);
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {

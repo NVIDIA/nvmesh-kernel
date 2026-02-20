@@ -26,7 +26,7 @@ void on_topo_free_cont_preventer_inc(struct nvmeibc_topology *tcp,
 	int n_preventors;			// Just for debug
 	BUG_ON(tcp->on_free.paused_disk);
 	tcp->on_free.paused_disk = disk;
-	n_preventors = atomic_inc_return(&disk->n_cont_preventors);
+	n_preventors = nvmeibc_disk_inc_cont_preventors(disk);
 	BUG_ON(!nvmeibc_disk_should_pause(disk));
 	wmb();	// if another thread free this topo right after we put it, it MUST see the 'paused_disk' which is not volatile.
 	_NT(t_00_otfcpi, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) ++preventors=@PREVENTORS, rv=@RV", nvmeibc_disk_get_name(disk), nt->device_name, tcp->debug_unique_index, n_preventors, rv);
@@ -49,7 +49,7 @@ void on_topo_free_cont_preventer_dec(struct nvmeibc_topology *t)
 	if (t->on_free.paused_disk){  /* Guaranteed: No IO on this topo */
 		const u64 t_index = t->debug_unique_index;
 		struct nvmeibc_disk *disk = t->on_free.paused_disk;
-		const int n_preventors = atomic_dec_return(&disk->n_cont_preventors);
+		const int n_preventors = nvmeibc_disk_dec_cont_preventors(disk);
 		const bool waited_too_long = nvmeibc_disk_is_cont_preventors_waited_too_long(disk);
 		_NT(t_01_otfcpd, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) io_perm=@IO_PERM, --preventors=@PREVENTORS", nvmeibc_disk_get_name(disk),
 		   t->nt->device_name, t_index, t->io_perm, n_preventors);
