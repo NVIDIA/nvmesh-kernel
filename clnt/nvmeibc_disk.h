@@ -1053,6 +1053,11 @@ static inline bool nvmeibc_disk_should_pause(struct nvmeibc_disk const *self)
 	return self->should_pause;
 }
 
+static inline int nvmeibc_disk_get_sector_shift(struct nvmeibc_disk const *self)
+{
+	return self->sector_shift;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {

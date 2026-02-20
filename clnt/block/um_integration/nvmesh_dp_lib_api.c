@@ -236,7 +236,7 @@ void nvmeibc_b_cp_loser_aband_jour(struct nvmeibc_b_cp_loser *l, const struct nv
 void nvmeib_set_block_dp_ec_funcs(void (*read_mod_wr_dmd)(void*, u64)) { (void)read_mod_wr_dmd; }
 
 bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk) {
-	return disk->sector_shift == 9 && disk->md_size == 0;
+	return nvmeibc_disk_get_sector_shift(disk) == 9 && disk->md_size == 0;
 }
 
 #include "clnt/block/recovery/nvmeibc_decentralized_unreg.h"

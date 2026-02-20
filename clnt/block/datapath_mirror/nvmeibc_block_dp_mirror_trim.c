@@ -80,7 +80,7 @@ int __concat_discard_op(struct nvmeibc_block_command cmds[], int *pncmds, int nl
 
 	if ((rv = nvmeib_make_discard_ndb(cur_c)) < 0)
 		goto _out;
-	_ND(t_03_r1trim, "(@DISK_NAME) shift=@SHIFT len=@NLBA", disk_um->name, disk_um->sector_shift, io_req->ndb->length);
+	_ND(t_03_r1trim, "(@DISK_NAME) shift=@SHIFT len=@NLBA", disk_um->name, nvmeibc_disk_get_sector_shift(disk_um), io_req->ndb->length);
 	_NDtbuf(t_04_r1trim, io_req->trim, "");
 _out:
 	return rv;

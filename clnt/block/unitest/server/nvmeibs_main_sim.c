@@ -341,7 +341,7 @@ void serverSimulator_disk_discover(struct serverSimulator *S, struct nvmeibc_dis
 	disk->sector_shift           = D->sector_shift;
 	disk->max_request_size_bytes = D->max_dma_size;		// As if after discovery server told client the size of the disk
 	disk->cid               	 = cid;
-	disk->md_size				 = (D->md_size >> (NVMEIBC_SECTOR_SHIFT - disk->sector_shift));	// md[bytes] per each physical sector
+	disk->md_size				 = (D->md_size >> (NVMEIBC_SECTOR_SHIFT - nvmeibc_disk_get_sector_shift(disk)));	// md[bytes] per each physical sector
 
 	_NT(tnsdd_1, "got cid @CID for client @CLIENT_UUID for client disk @DISK_ID_STR",
 		cid, cuuid, nvmeibc_disk_get_name(disk));
