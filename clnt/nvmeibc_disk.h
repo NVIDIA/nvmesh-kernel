@@ -1058,6 +1058,11 @@ static inline int nvmeibc_disk_get_sector_shift(struct nvmeibc_disk const *self)
 	return self->sector_shift;
 }
 
+static inline int nvmeibc_disk_get_md_size(struct nvmeibc_disk const *self)
+{
+	return self->md_size;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {
