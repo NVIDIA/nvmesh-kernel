@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" This is THE one and the ONLY TRUE calculator for \X\LBA translations,
+""" This is THE one and the ONLY TRUE calculator for \\X\\LBA translations,
     All other calculators are false and unholy.
     May its glory shine forever.
 
