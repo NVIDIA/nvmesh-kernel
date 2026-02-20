@@ -578,7 +578,7 @@ static void __create_dummy_segment(struct dplib_caller *sw, int i) {
 	// __toma_segment_register_succeed()
 	seg->disk = p->disk;
 	seg->registration_status = SEG_REGSTATUS_TOMA_OK;
-	seg->max_dma_size = (seg->disk->max_request_size_bytes >> NVMEIBC_SECTOR_SHIFT);
+	seg->max_dma_size = (nvmeibc_disk_get_max_request_size_bytes(seg->disk) >> NVMEIBC_SECTOR_SHIFT);
 	seg->sw_md_size = __nvmeibc_disk_sw_md_size(seg->disk);
 	seg->lmap = p->lmap;
 	seg->sync_safety = p->sync_safety;

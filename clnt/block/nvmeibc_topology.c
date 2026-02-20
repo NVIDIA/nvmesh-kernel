@@ -1784,7 +1784,7 @@ input_checks_done:
 	}
 
 	seg->registration_status = SEG_REGSTATUS_TOMA_OK;
-	seg->max_dma_size = (seg->disk->max_request_size_bytes >> NVMEIBC_SECTOR_SHIFT);
+	seg->max_dma_size = (nvmeibc_disk_get_max_request_size_bytes(seg->disk) >> NVMEIBC_SECTOR_SHIFT);
 	seg->sw_md_size = __nvmeibc_disk_sw_md_size(seg->disk);
 	if (nvmeibc_raid_is_ec(r1)) {
 		if (seg->sw_md_size < NVMEIBC_SGMNT_DEFAULT_MD_SIZE) {
