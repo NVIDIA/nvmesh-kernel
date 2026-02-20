@@ -1476,9 +1476,9 @@ void nvmeibc_raid_wipe_txid(struct nvmeibc_raid1 *raid) {
 
 
 static int __get_jour_size(struct nvmeibc_disk_segment *seg) {
-	return nvmeibc_disk_get_journal(seg->disk)->rng_nlba / nvmeibc_jentry_num_blocks;
+	return ((seg->disk)->base.ops.get_journal(&((seg->disk))->base))->rng_nlba / nvmeibc_jentry_num_blocks;
 }
-static void* __get_seg_journal_md_ptr(struct nvmeibc_disk_segment *seg) { return ramDiskSimulator_get_metadataptr(&serverOf(seg->disk)->ramDisk, nvmeibc_disk_get_journal(seg->disk)->rng_slba); }
+static void* __get_seg_journal_md_ptr(struct nvmeibc_disk_segment *seg) { return ramDiskSimulator_get_metadataptr(&serverOf(seg->disk)->ramDisk, ((seg->disk)->base.ops.get_journal(&((seg->disk))->base))->rng_slba); }
 
 // scan all LOCKSET of raid members & verify the TxID is identical on slice_start & parities.
 void nvmeibc_raid_verify_tx_id_replica_consistency(struct nvmeibc_raid1 *raid) {

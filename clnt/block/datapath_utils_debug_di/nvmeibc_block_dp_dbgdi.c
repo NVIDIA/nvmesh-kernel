@@ -147,13 +147,13 @@ static void t_db_who_cmd_core_cell(struct t_core_dbgdi *s, const struct nvmeibc_
 	const struct nvmeibc_raid1 *r1 = nvmeibc_disk_segment_get_praid(c->ds);
 	const bool is_mirrored = !nvmeibc_raid_is_ec(r1) && !nvmeibc_raid_is_jbod(r1);
 	const int cell = is_mirrored ? c->ds->toma_reg->seg % 2 : 0;
-	strncpy(s->wr[cell].disk_name, nvmeibc_disk_get_name(c->ds->disk), sizeof(s->wr[cell].disk_name));
+	strncpy(s->wr[cell].disk_name, ((c->ds->disk)->base.ops.get_name(&((c->ds->disk))->base)), sizeof(s->wr[cell].disk_name));
 }
 
 static void t_db_who_jcmd_and_md_fill(struct t_db_who_writer *s,
 					const struct nvmeibc_block_command *jc, const void *jmd)
 {
-	const struct nvmeibc_disk_client_journal *dj = nvmeibc_disk_get_journal(jc->ds->disk);
+	const struct nvmeibc_disk_client_journal *dj = ((jc->ds->disk)->base.ops.get_journal(&((jc->ds->disk))->base));
 	struct nvmeibc_block_command* dcmd = dp_cmd_jour_to_data((void*)jc);
 	const void *dmd = (jmd - jc->iocmd->reqs1.md) + dcmd->iocmd->reqs1.md;
 	s->jrnl.is_valid = 1;

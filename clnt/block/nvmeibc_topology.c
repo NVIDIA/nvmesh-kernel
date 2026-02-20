@@ -1062,7 +1062,7 @@ static void __set_active_topology(struct nvmeibc_topologies *nt, struct nvmeibc_
 /* 0 - OK, 1 - pausing, 2 - never discovered, 3 - paused */
 static int __disk_p_state2num(const struct nvmeibc_disk *disk)
 {
-	return (nvmeibc_disk_should_pause(disk)              ? 1 : 0) +
+	return (((disk)->base.ops.should_pause(&((disk))->base))              ? 1 : 0) +
 		   ((nvmeibc_disk_get_status(disk) == d_offline) ? 2 : 0);
 }
 
@@ -1094,7 +1094,7 @@ struct t_praid_io_disable_reason {
 
 
 static inline bool __seg_has_problem(struct nvmeibc_disk_segment const *s){
-	return ((bool)(nvmeibc_disk_should_pause((s)->disk) || !(s)->registration_status));
+	return ((bool)((((s)->disk)->base.ops.should_pause(&(((s)->disk))->base)) || !(s)->registration_status));
 }
 
 static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nvmeibc_topology *t, int c, int r, struct t_praid_io_disable_reason *info)
@@ -1115,7 +1115,7 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 		if (!info) {	// Dont print second time when we are just caluclating the reason
 			const char *s_acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
 			_NT_TOPO(t_02_prioperm, t, "seg=" SEGMENT_FMT " disk=@DISK_NAME acm=@ACM act=@ACT p=@RV, lid=@LID @C_PRV uuid=@SEG_DBG_UUID",
-				c, r, si, nvmeibc_disk_get_full_name(disk), s_acm, seg->registration_status,
+				c, r, si, ((disk)->base.ops.get_full_name(&((disk))->base)), s_acm, seg->registration_status,
 				__disk_p_state2num(disk), r1->lid.all, r1->version, seg->dbg_uuid);
 		}
 	}
@@ -1133,7 +1133,7 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 
 	if (info) { /* Optional, Check transport layer connectivity according to topology. Covered anyways by later tests, crucial to test first if we are interested in reason */
 		raid1_for_each_seg(r1, seg, si) {
-			if (unlikely(seg->toma_acm != NVMEIBTC_DS_MODE_DEAD) && nvmeibc_disk_should_pause(seg->disk))
+			if (unlikely(seg->toma_acm != NVMEIBTC_DS_MODE_DEAD) && ((seg->disk)->base.ops.should_pause(&((seg->disk))->base)))
 				store_seg_error_goto(_out_seg_unreged, t_06_prioperm, "No connection to needed disk");
 		}
 	}
@@ -1153,7 +1153,7 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 				}
 				{ // Test journal area and metadata size.
 					const int md_size = nvmeibc_sgmnt_sw_md_size(seg);
-					const struct nvmeibc_disk_client_journal *jour = nvmeibc_disk_get_journal(seg->disk);
+					const struct nvmeibc_disk_client_journal *jour = ((seg->disk)->base.ops.get_journal(&((seg->disk))->base));
 					if (unlikely((md_size < DISK_MIN_MD_SIZE_BYTE) || (md_size > DISK_MAX_MD_SIZE_BYTE))) {
 						store_seg_error_goto(_out_topo_inv, t_09_prioperm, "Wrong metadata size @MD_SIZE[bytes]", md_size);
 					}
@@ -1231,7 +1231,7 @@ void nvmeibc_topologies_error_state_reason(struct nvmeibc_topologies *nt, void *
 		nvmeibc_raid1_calc_io_perm(t, c, r, &reason);
 		if (reason.code) {										// We are interested in first problematic praid
 			const struct nvmeibc_disk *disk = ((reason.si < (u32)r1->replicas) ? r1->segments[reason.si].disk : NULL);
-			scnprintf(nt->io_disabled_reason, sizeof(nt->io_disabled_reason), "segment %d,%d,%d disconnected, disk %s, error_code: %d", c, r, reason.si, (disk ? nvmeibc_disk_get_full_name(disk) : "?"), reason.code);
+			scnprintf(nt->io_disabled_reason, sizeof(nt->io_disabled_reason), "segment %d,%d,%d disconnected, disk %s, error_code: %d", c, r, reason.si, (disk ? ((disk)->base.ops.get_full_name(&((disk))->base)) : "?"), reason.code);
 			return;												// First problematic praid is enough, no need to scan them all
 		}
 	}
@@ -1394,7 +1394,7 @@ static int __toma_update_mirrored_segment(struct nvmeibc_disk_segment *seg,
 }
 
 /* Disk is inactive. Don't wait for exponential backoff. Request cont now */
-#define __should_spur_disk_discovery(seg) (nvmeibc_disk_should_pause((seg)->disk))
+#define __should_spur_disk_discovery(seg) ((((seg)->disk)->base.ops.should_pause(&(((seg)->disk))->base)))
 
 /* After segment was updated by toma message request registration */
 static int __toma_after_update_send_seg_reg(struct nvmeibc_disk_segment *seg, struct nvmeibc_topology *old_t)
@@ -1667,7 +1667,7 @@ static int __toma_segment_register_succeed(struct nvmeibc_subscription_ctx *tr, 
 	seg = __get_seg_by_tr(t, tr);
 	oa_ver = nvmeibc_seg_on_active_get_version_calc(seg);
 
-	if (nvmeibc_disk_should_pause(seg->disk)) {
+	if (((seg->disk)->base.ops.should_pause(&((seg->disk))->base))) {
 		_NT_IR(tr_07_topo_seg_reg_ack, "disk pause");
 		goto ignore_msg;	/* Valid Transport layer race: msg slipped in after pause. toma thinks that we are unregistered. Illegal to accept this msg */
 	}
@@ -1785,7 +1785,7 @@ input_checks_done:
 	}
 
 	seg->registration_status = SEG_REGSTATUS_TOMA_OK;
-	seg->max_dma_size = (nvmeibc_disk_get_max_request_size_bytes(seg->disk) >> NVMEIBC_SECTOR_SHIFT);
+	seg->max_dma_size = (((seg->disk)->base.ops.get_max_request_size_bytes(&((seg->disk))->base)) >> NVMEIBC_SECTOR_SHIFT);
 	seg->sw_md_size = __nvmeibc_disk_sw_md_size(seg->disk);
 	if (nvmeibc_raid_is_ec(r1)) {
 		if (seg->sw_md_size < NVMEIBC_SGMNT_DEFAULT_MD_SIZE) {
@@ -2785,7 +2785,7 @@ void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_disk *
 		tcp = nvmeibc_topology_get(nt);	// Head is the cont preventor topo.
 		t1 = dup_topology(tcp);
 		if (unlikely(t1 == NULL)) {
-			WARN(true, "nvmeibc: out of memory, crashing the system to prevent disk %s from corrupting data of volume %s\n", nvmeibc_disk_get_full_name(disk), nt->device_name);
+			WARN(true, "nvmeibc: out of memory, crashing the system to prevent disk %s from corrupting data of volume %s\n", ((disk)->base.ops.get_full_name(&((disk))->base)), nt->device_name);
 			BUG();
 		}
 		__set_active_topology(nt, t1, tcp);
@@ -2847,7 +2847,7 @@ static inline int __toma_disconnect_segment(struct nvmeibc_disk_segment *seg)
 	params->block_dev = nt->nd;
 	// Force workque to free the params if the update doesn't execute
 	nvmeibc_block_set_generic_work_to_main(nvmeibc_cinst_get_blok_p(nt->nd), nt->nd->uuid, nvmeibc_volume_update_volume_single_segment, params, true);
-	_NT_SCOPE(t_02_topods, topology, "@DEV_NAME: One less tie to disk @DISK_NAME", nt->device_name, nvmeibc_disk_get_full_name(seg->disk));
+	_NT_SCOPE(t_02_topods, topology, "@DEV_NAME: One less tie to disk @DISK_NAME", nt->device_name, ((seg->disk)->base.ops.get_full_name(&((seg->disk))->base)));
 _out:
 	return rv;
 }
@@ -2870,9 +2870,9 @@ static int __subscribe_seg(struct nvmeibc_disk_segment *seg, int c, int r1,
 	}
 	if (__blk_to_disk_sect_shift(seg->disk) < 0) { //vcfg@"nvmesh block size should be bigger or equal to the disk block size"
 		char* msg = topo_kmalloc(96, GFP_ATOMIC);
-		_NE_to_user(error_topology_subscribe_seg, DMESG_PREFIX("@DEV_NAME"), "Unexpected error with block size mismatch between a volume and a physical disk, IO will not be possible to this volume. Error code: 1031. Volume block size: @N_BYTES[bytes], Disk block size: @N_BYTES[bytes]", nt->device_name, NVMEIBC_SECTOR_SIZE, (1 << nvmeibc_disk_get_sector_shift(seg->disk)));
+		_NE_to_user(error_topology_subscribe_seg, DMESG_PREFIX("@DEV_NAME"), "Unexpected error with block size mismatch between a volume and a physical disk, IO will not be possible to this volume. Error code: 1031. Volume block size: @N_BYTES[bytes], Disk block size: @N_BYTES[bytes]", nt->device_name, NVMEIBC_SECTOR_SIZE, (1 << ((seg->disk)->base.ops.get_sector_shift(&((seg->disk))->base))));
 		if (msg) {
-			scnprintf(msg, 96, "EVol-Disk Missmatch@Vol %s block=%d[b], disk %s=%d[b]\n", nt->device_name, NVMEIBC_SECTOR_SIZE, nvmeibc_disk_get_name(seg->disk), (1 << nvmeibc_disk_get_sector_shift(seg->disk)));
+			scnprintf(msg, 96, "EVol-Disk Missmatch@Vol %s block=%d[b], disk %s=%d[b]\n", nt->device_name, NVMEIBC_SECTOR_SIZE, ((seg->disk)->base.ops.get_name(&((seg->disk))->base)), (1 << ((seg->disk)->base.ops.get_sector_shift(&((seg->disk))->base))));
 			nvmeibc_block_send_mgmt_allert(nvmeibc_block_nt_to_b(nt), msg);//, 0, false);
 		}
 		rv = -EFAULT;	/* Cannot do IO to this segment */
@@ -3807,7 +3807,7 @@ static int __segment_register(struct nvmeibc_disk_segment *seg)
 	BUG_ON(!tr);  		/* Should be already subscribed */
 	nvmeibc_segment_clear_b4_reg(seg, NULL);
 	_NT_TOPO(trace_topology_segment_register, seg->chunk->topology, "toma_register: disk=@DISK,@DISK_NAME seg=@SEG " SEGMENT_FMT " c_lid=@C_LID",
-	   seg->disk, nvmeibc_disk_get_full_name(seg->disk), seg->uuid,
+	   seg->disk, ((seg->disk)->base.ops.get_full_name(&((seg->disk))->base)), seg->uuid,
 	   tr->ch, tr->r1, tr->seg, nvmeibc_disk_segment_get_praid(seg)->lid.all);
 	rv = nvmeibc_toma_send_direct_msg(seg,
 						NVMEIBT_CLIENT_MSG_RT_REGISTER_DISK_SEGMENT, NULL);
@@ -4484,7 +4484,7 @@ int nvmeibc_topologies_inform_di_bug_in_raid(struct nvmeibc_topologies *nt, u64 
 		pr = __get_r1_by_t(t, ci, ri);
 		raid1_for_each_seg(pr, seg, si) {
 			rv |= __send_toma_di_help(addrs_array[si], seg);
-			_NE_SCOPE(t_2d_topo, topology, DMESG_PREFIX("@DEV_NAME") ": Sent DI message to @DISK_NAME, seg=@SEG", nt->device_name, nvmeibc_disk_get_full_name(seg->disk), seg->uuid);
+			_NE_SCOPE(t_2d_topo, topology, DMESG_PREFIX("@DEV_NAME") ": Sent DI message to @DISK_NAME, seg=@SEG", nt->device_name, ((seg->disk)->base.ops.get_full_name(&((seg->disk))->base)), seg->uuid);
 		}
 	} else {
 		struct nvmeibc_chunk *chunk;
@@ -4501,7 +4501,7 @@ _out:
 
 int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 {
-#define __is_unknown_node(seg) ((!seg->disk) || (nvmeibc_disk_get_host_name((seg)->disk)[0] == '?'))
+#define __is_unknown_node(seg) ((!seg->disk) || ((((seg)->disk)->base.ops.get_host_name(&(((seg)->disk))->base))[0] == '?'))
 	struct nvmeibc_topology *t;
 	struct nvmeibc_chunk *chunk;
 	const struct nvmeibc_raid1 *pr;
@@ -4516,9 +4516,9 @@ int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 			for (j = i+1, sj = &pr->segments[j]; j < pr->replicas; j++, sj++) {
 				if (__is_unknown_node(si)) break;    // Cannot verify it
 				if (__is_unknown_node(sj)) continue; // Cannot verify it
-				if (!strcmp(nvmeibc_disk_get_host_name(si->disk), nvmeibc_disk_get_host_name(sj->disk))) {
+				if (!strcmp(((si->disk)->base.ops.get_host_name(&((si->disk))->base)), ((sj->disk)->base.ops.get_host_name(&((sj->disk))->base)))) {
 					WARN(1, "%s: Raid(%d,%d) both segs {%d,%d} are on host %s\n",
-					   nt->device_name, c, r, i, j, nvmeibc_disk_get_host_name(sj->disk));
+					   nt->device_name, c, r, i, j, ((sj->disk)->base.ops.get_host_name(&((sj->disk))->base)));
 					rv++;
 				}
 			}
@@ -4530,9 +4530,9 @@ int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 				sj = &pr->segments[j % pr->replicas];
 				if (__is_unknown_node(si)) break;    // Cannot verify it
 				if (__is_unknown_node(sj)) continue; // Cannot verify it
-				if (!strcmp(nvmeibc_disk_get_host_name(si->disk), nvmeibc_disk_get_host_name(sj->disk))) {
+				if (!strcmp(((si->disk)->base.ops.get_host_name(&((si->disk))->base)), ((sj->disk)->base.ops.get_host_name(&((sj->disk))->base)))) {
 					WARN(1, "%s: Raid(%d,%d) both parity segs {%d,%d} are on host %s\n",
-					   nt->device_name, c, r, i, j, nvmeibc_disk_get_host_name(sj->disk));
+					   nt->device_name, c, r, i, j, ((sj->disk)->base.ops.get_host_name(&((sj->disk))->base)));
 					rv++;
 				}
 			}
@@ -4992,7 +4992,7 @@ _out:
 }
 
 #define __host_of(disk) \
-	(nvmeibc_disk_get_host_name(disk)[0] == '?' ? "Unknown" : nvmeibc_disk_get_host_name(disk))
+	(((disk)->base.ops.get_host_name(&((disk))->base))[0] == '?' ? "Unknown" : ((disk)->base.ops.get_host_name(&((disk))->base)))
 
 static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvmeib_txt *txt)
 {
@@ -5041,7 +5041,7 @@ static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvme
 				const int disk_p_state = __disk_p_state2num(disk);
 				lock_ownership_map_to_string(&seg->lmap, slmap);
 				nvmeib_txt_append(txt, "\t%-6d %-7d %-26s %-21s %-12llx %-12llx %-32.32s [a=%d p=%d acm=%s sy=%d lm(%s) r1v=0x%x lid=0x%x|%c uid=%-.8s]",
-					r, si, __segment_state(r1, si), nvmeibc_disk_get_name(disk),
+					r, si, __segment_state(r1, si), ((disk)->base.ops.get_name(&((disk))->base)),
 					seg->first_lba, seg->first_lba + seg->length -1,
 					__host_of(disk),
 					seg->registration_status, disk_p_state, acm,
@@ -5115,7 +5115,7 @@ static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *j
 										jdr->ops.ascii_format(jdr, "reconf", "%c", __segment_reconf_state(seg));
 										{
 											jdr_object_scope(jdr, "disk");
-											jdr->ops.ascii(jdr, "name", nvmeibc_disk_get_name(disk));
+											jdr->ops.ascii(jdr, "name", ((disk)->base.ops.get_name(&((disk))->base)));
 											jdr->ops.ascii(jdr, "host", __host_of(disk));
 											jdr_write_var(jdr, paused, __disk_p_state2num(disk));
 										}

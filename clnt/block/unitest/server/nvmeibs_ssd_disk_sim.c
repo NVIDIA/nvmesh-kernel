@@ -577,7 +577,7 @@ static inline void __verify_locks_before_io(u64 dlba_bytes, u64 nlba_bytes, cons
 			// but since disk K is paused, its recovery will recover locks into stale-special, causing a lock consistency verification to fail, when done for the IO's on the non paused members.
 			if (!nvmeib_lockid_are_purified_eq(lock_val, r1->lid)) {
 				BUG_ON(seg->disk->pausing_no_transfers != true);	// BEWARE: a quick pause/cont on one member while the other is still executing the IO from before the pause, might not catch the pause & fail !!!
-				_NI_dmesg(t_01vlbi, "member @SI (disk @DISK_NAME) of r1 @R1 is paused - cannot verify lock state", si, nvmeibc_disk_get_name(seg->disk), r1);
+				_NI_dmesg(t_01vlbi, "member @SI (disk @DISK_NAME) of r1 @R1 is paused - cannot verify lock state", si, ((seg->disk)->base.ops.get_name(&((seg->disk))->base)), r1);
 			}
 			spin_unlock(&ram->cmpxchg_lock);
 		}

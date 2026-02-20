@@ -309,7 +309,7 @@ static void __get_blksets_info_next_work_batch(struct nvmeibc_recovery *recov)
 		const u64 dlba_start = recov->b_start + dlba_blksets_ofst(tr);
 		const u64 blocksets_length = (recov->args.r_end - recov->b_start);
 		_NTRR(tr_1_get_next_batch, "requesting blksets: start_@DLBA_BLKSETS length_@DLBA_BLKSETS disk @DISK_NAME",
-			 dlba_start, blocksets_length, nvmeibc_disk_get_name(seg->disk));
+			 dlba_start, blocksets_length, ((seg->disk)->base.ops.get_name(&((seg->disk))->base)));
 		if (need_info_from_server)
 			rv = icore_ops->get_blkset_problems(icore_ops, seg->disk, handle_of(seg), dlba_start, blocksets_length, dc);
 		else

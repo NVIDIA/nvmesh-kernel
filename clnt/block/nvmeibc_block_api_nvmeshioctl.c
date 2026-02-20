@@ -415,7 +415,7 @@ static int __toggle_di_debug_mode(const struct nvmeibc_cinst_params_blk *p, stru
 	(tv)->input.op = NVMEIB_BLOCK_IO_OP_WRITE;  })
 
 #define __host_of(disk) \
-	(nvmeibc_disk_get_host_name(disk)[0] == '?' ? "Unknown" : nvmeibc_disk_get_host_name(disk))
+	(((disk)->base.ops.get_host_name(&((disk))->base))[0] == '?' ? "Unknown" : ((disk)->base.ops.get_host_name(&((disk))->base)))
 
 //TODO: this function can be used to serve information about "prepare" stage.
 static void __trans_vlba_of_bdev(const struct nvmeibc_cinst_params_blk *p, struct nvmeibc_block_device *dev, u64 addr, u32 nlbas, char op, u64 cookie, const int recusive_depth)

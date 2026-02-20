@@ -236,7 +236,7 @@ void nvmeibc_b_cp_loser_aband_jour(struct nvmeibc_b_cp_loser *l, const struct nv
 void nvmeib_set_block_dp_ec_funcs(void (*read_mod_wr_dmd)(void*, u64)) { (void)read_mod_wr_dmd; }
 
 bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk) {
-	return nvmeibc_disk_get_sector_shift(disk) == 9 && nvmeibc_disk_get_md_size(disk) == 0;
+	return ((disk)->base.ops.get_sector_shift(&((disk))->base)) == 9 && ((disk)->base.ops.get_md_size(&((disk))->base)) == 0;
 }
 
 #include "clnt/block/recovery/nvmeibc_decentralized_unreg.h"
@@ -578,7 +578,7 @@ static void __create_dummy_segment(struct dplib_caller *sw, int i) {
 	// __toma_segment_register_succeed()
 	seg->disk = p->disk;
 	seg->registration_status = SEG_REGSTATUS_TOMA_OK;
-	seg->max_dma_size = (nvmeibc_disk_get_max_request_size_bytes(seg->disk) >> NVMEIBC_SECTOR_SHIFT);
+	seg->max_dma_size = (((seg->disk)->base.ops.get_max_request_size_bytes(&((seg->disk))->base)) >> NVMEIBC_SECTOR_SHIFT);
 	seg->sw_md_size = __nvmeibc_disk_sw_md_size(seg->disk);
 	seg->lmap = p->lmap;
 	seg->sync_safety = p->sync_safety;

@@ -127,11 +127,11 @@ int nvmeibs_remove_cid_clients(u64 cid, enum nvmeibs_logout_reason reason) {
 		DECLARE_COMPLETION_ONSTACK(comp);
 		client_disk->should_pause = true;	// Simulate as if we are in pause
 		_NT(trace_1_nvmeibs_remove_cid_clients, "Pausing disk @DISK_ID_NAME of Client @CID_LLONG\n",
-			nvmeibc_disk_get_name(client_disk), cid);
+			((client_disk)->base.ops.get_name(&((client_disk))->base)), cid);
 		nvmeibc_pd_pause(client_disk, __remove_cid_clients_cb, &comp);
 		wait_for_completion(&comp); // Wait for rA exexution (# of pending ios == 2)
 		_NT(trace_2_nvmeibs_remove_cid_clients, "Paused disk @DISK_ID_NAME of Client @CID_LLONG\n",
-			nvmeibc_disk_get_name(client_disk), cid);
+			((client_disk)->base.ops.get_name(&((client_disk))->base)), cid);
 		nvmeibc_disk_start_release(client_disk, NVMEIBC_DISK_RELEASE_UNKNOWN);
 		rv = 0;
 	} else {
@@ -243,7 +243,7 @@ int nvmeibs_nordda_get_jrng_by_uuid(struct serverSimulator *S, struct nvmeibc_di
 }
 
 void nvmeibs_pass_loser_to_serjio(struct serverSimulator *S, struct nvmeibs_lost_srv_resource_payload *p) {
-	int rv = nvmeibs_serjio_abnd_jrnl_ents(as_nvmeibs_disk_info(S), nvmeibc_disk_get_journal(S->disk)->rng_id, p->bmp, p->gen_ids);
+	int rv = nvmeibs_serjio_abnd_jrnl_ents(as_nvmeibs_disk_info(S), ((S->disk)->base.ops.get_journal(&((S->disk))->base))->rng_id, p->bmp, p->gen_ids);
 	if (rv && rv != -EINVAL){
 		//TODO LKJ
 		//Hack: today jri may be released in 2 ways:
@@ -341,10 +341,10 @@ void serverSimulator_disk_discover(struct serverSimulator *S, struct nvmeibc_dis
 	disk->sector_shift           = D->sector_shift;
 	disk->max_request_size_bytes = D->max_dma_size;		// As if after discovery server told client the size of the disk
 	disk->cid               	 = cid;
-	disk->md_size				 = (D->md_size >> (NVMEIBC_SECTOR_SHIFT - nvmeibc_disk_get_sector_shift(disk)));	// md[bytes] per each physical sector
+	disk->md_size				 = (D->md_size >> (NVMEIBC_SECTOR_SHIFT - ((disk)->base.ops.get_sector_shift(&((disk))->base))));	// md[bytes] per each physical sector
 
 	_NT(tnsdd_1, "got cid @CID for client @CLIENT_UUID for client disk @DISK_ID_STR",
-		cid, cuuid, nvmeibc_disk_get_name(disk));
+		cid, cuuid, ((disk)->base.ops.get_name(&((disk))->base)));
 
 	tomaSimulator_onClntDiscovery(&S->simToma, cuuid, disk->local.jrnl.rng_idx);
 }

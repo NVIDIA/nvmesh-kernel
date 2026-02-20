@@ -21,6 +21,7 @@
 #include "nvmeibc_common.h"
 #include "nvmeib_rdma.h"
 #include "common/compat/kr_incs_compiler_types.h"
+#include "nvmeibc_idisk.h"
 
 struct nvmeibc_disk_dirty_bits_rsc {
         u32 n_pages;
@@ -471,6 +472,7 @@ enum nvmeibc_disk_local_defer_work_state {
 };
 
 struct nvmeibc_disk {
+	struct nvmeibc_idisk base; //should be the first element
 	/* the disk id */
 	char name[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];				// like: S3HCNX0K501681.1
 	char full_name[NVMEIB_HOST_NAME_LEN +
@@ -836,6 +838,18 @@ struct nvmeibc_disk {
 	wait_queue_head_t deferred_io_wait;
 };
 
+static inline struct nvmeibc_disk const* __nvmeibc_disk_from_base(struct nvmeibc_idisk const* self)
+{
+	BUILD_BUG_ON(offsetof(struct nvmeibc_disk, base) != 0);
+	return (struct nvmeibc_disk const*)(self);
+}
+
+#define nvmeibc_disk_from_base(self) \
+	__builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_idisk*),	\
+		__nvmeibc_disk_from_base(self),																	\
+		(struct nvmeibc_disk*)__nvmeibc_disk_from_base(self)) 											\
+
+
 #if defined(__KERNEL__)
 static inline void nvmeibc_disk_net_intrs_stats_inc(
 		struct nvmeibc_disk *disk, bool is_send)
@@ -1033,80 +1047,100 @@ static inline enum nvmeibc_disk_status nvmeibc_disk_get_status(
 	return (disk && !atomic_read(&disk->paused)) ? d_online : d_offline;
 }
 
-static inline char const *nvmeibc_disk_get_name(struct nvmeibc_disk const *self)
+static inline char const *__nvmeibc_disk_get_name_impl(struct nvmeibc_idisk const *self)
 {
-	return self->name;
+	return nvmeibc_disk_from_base(self)->name;
 }
 
-static inline char const *nvmeibc_disk_get_full_name(struct nvmeibc_disk const *self)
+static inline char const *__nvmeibc_disk_get_full_name_impl(struct nvmeibc_idisk const *self)
 {
-	return self->full_name;
+	return nvmeibc_disk_from_base(self)->full_name;
 }
 
-static inline char const *nvmeibc_disk_get_host_name(struct nvmeibc_disk const *self)
+static inline char const *__nvmeibc_disk_get_host_name_impl(struct nvmeibc_idisk const *self)
 {
-	return self->disk_host;
+	return nvmeibc_disk_from_base(self)->disk_host;
 }
 
-static inline bool nvmeibc_disk_should_pause(struct nvmeibc_disk const *self)
+static inline bool __nvmeibc_disk_should_pause_impl(struct nvmeibc_idisk const *self)
 {
-	return self->should_pause;
+	return nvmeibc_disk_from_base(self)->should_pause;
 }
 
-static inline bool nvmeibc_disk_is_cont_preventors_waited_too_long(struct nvmeibc_disk const *self)
+static inline bool __nvmeibc_disk_is_cont_preventors_waited_too_long_impl(struct nvmeibc_idisk const *self)
 {
-	return self->n_cont_prevents_waited_too_long;
+	return nvmeibc_disk_from_base(self)->n_cont_prevents_waited_too_long;
 }
 
-static inline int nvmeibc_disk_get_sector_shift(struct nvmeibc_disk const *self)
+static inline int __nvmeibc_disk_get_sector_shift_impl(struct nvmeibc_idisk const *self)
 {
-	return self->sector_shift;
+	return nvmeibc_disk_from_base(self)->sector_shift;
 }
 
-static inline int nvmeibc_disk_get_md_size(struct nvmeibc_disk const *self)
+static inline int __nvmeibc_disk_get_md_size_impl(struct nvmeibc_idisk const *self)
 {
-	return self->md_size;
+	return nvmeibc_disk_from_base(self)->md_size;
 }
 
-static inline int nvmeibc_disk_get_max_request_size_bytes(struct nvmeibc_disk const *self)
+static inline int __nvmeibc_disk_get_max_request_size_bytes_impl(struct nvmeibc_idisk const *self)
 {
-	return self->max_request_size_bytes;
+	return nvmeibc_disk_from_base(self)->max_request_size_bytes;
 }
 
-static inline bool nvmeibc_disk_is_access_local(struct nvmeibc_disk const *self)
+static inline bool __nvmeibc_disk_is_access_local_impl(struct nvmeibc_idisk const *self)
 {
-	return self->access_local;
+	return nvmeibc_disk_from_base(self)->access_local;
 }
 
-static inline size_t nvmeibc_disk_get_min_gen_cmd_bb(struct nvmeibc_disk const *self)
+static inline size_t __nvmeibc_disk_get_min_gen_cmd_bb_impl(struct nvmeibc_idisk const *self)
 {
-	return self->min_gen_cmd_bb;
+	return nvmeibc_disk_from_base(self)->min_gen_cmd_bb;
 }
 
-static inline struct nvmeibc_disk_client_journal const * nvmeibc_disk_get_journal(struct nvmeibc_disk const *self)
+static inline struct nvmeibc_disk_client_journal const *__nvmeibc_disk_get_journal_impl(struct nvmeibc_idisk const *self)
 {
-	return &self->jour;
+	return &nvmeibc_disk_from_base(self)->jour;
 }
 
 //for tests, will be removed in future
-static inline struct nvmeibc_disk_client_journal * nvmeibc_disk_get_journal_mut(struct nvmeibc_disk *self)
+static inline struct nvmeibc_disk_client_journal *__nvmeibc_disk_get_journal_mut_impl(struct nvmeibc_idisk *self)
 {
-	return &self->jour;
+	return &nvmeibc_disk_from_base(self)->jour;
 }
 
-static inline int nvmeibc_disk_read_cont_preventors(struct nvmeibc_disk *self)
+static inline int __nvmeibc_disk_read_cont_preventors_impl(struct nvmeibc_idisk *self)
 {
-	return atomic_read(&self->n_cont_preventors);
+	return atomic_read(&nvmeibc_disk_from_base(self)->n_cont_preventors);
 }
 
-static inline int nvmeibc_disk_inc_cont_preventors(struct nvmeibc_disk *self)
+static inline int __nvmeibc_disk_inc_cont_preventors_impl(struct nvmeibc_idisk *self)
 {
-	return atomic_inc_return(&self->n_cont_preventors);
+	return atomic_inc_return(&nvmeibc_disk_from_base(self)->n_cont_preventors);
 }
 
-static inline int nvmeibc_disk_dec_cont_preventors(struct nvmeibc_disk *self)
+static inline int __nvmeibc_disk_dec_cont_preventors_impl(struct nvmeibc_idisk *self)
 {
-	return atomic_dec_return(&self->n_cont_preventors);
+	return atomic_dec_return(&nvmeibc_disk_from_base(self)->n_cont_preventors);
+}
+
+//the accessors above are temporal only, until block kernel simulator will implement his private version of the disk
+static inline void nvmeibc_disk_base_init(struct nvmeibc_disk *self)
+{
+	self->base.ops.get_name = __nvmeibc_disk_get_name_impl;
+	self->base.ops.get_full_name = __nvmeibc_disk_get_full_name_impl;
+	self->base.ops.get_host_name = __nvmeibc_disk_get_host_name_impl;
+	self->base.ops.should_pause = __nvmeibc_disk_should_pause_impl;
+	self->base.ops.is_cont_preventors_waited_too_long = __nvmeibc_disk_is_cont_preventors_waited_too_long_impl;
+	self->base.ops.get_sector_shift = __nvmeibc_disk_get_sector_shift_impl;
+	self->base.ops.get_md_size = __nvmeibc_disk_get_md_size_impl;
+	self->base.ops.get_max_request_size_bytes = __nvmeibc_disk_get_max_request_size_bytes_impl;
+	self->base.ops.is_access_local = __nvmeibc_disk_is_access_local_impl;
+	self->base.ops.get_min_gen_cmd_bb = __nvmeibc_disk_get_min_gen_cmd_bb_impl;
+	self->base.ops.get_journal = __nvmeibc_disk_get_journal_impl;
+	self->base.ops.get_journal_mut = __nvmeibc_disk_get_journal_mut_impl;
+	self->base.ops.read_cont_preventors = __nvmeibc_disk_read_cont_preventors_impl;
+	self->base.ops.inc_cont_preventors = __nvmeibc_disk_inc_cont_preventors_impl;
+	self->base.ops.dec_cont_preventors = __nvmeibc_disk_dec_cont_preventors_impl;
 }
 
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);

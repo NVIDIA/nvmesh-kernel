@@ -32,7 +32,7 @@ static int nvmeibc_trs_hash_tostring_rec(char *buf, int len, struct rb_node *rb)
 			tr->nt->device_name : "Zombie";
 		BUF_ADD("0x%-14llx- %s(%d,%d,%d), disk %s [%llu..%llu]\n",
 			tr->handle, dev_name, tr->ch, tr->r1, tr->seg,
-			nvmeibc_disk_get_name(tr->disk), tr->first_lba, tr->first_lba+tr->length-1);
+			((tr->disk)->base.ops.get_name(&((tr->disk))->base)), tr->first_lba, tr->first_lba+tr->length-1);
 	}
 	pos += nvmeibc_trs_hash_tostring_rec(buf + pos, len - pos, rb->rb_right);
 	return pos;
@@ -127,7 +127,7 @@ int nvmeibc_trs_detect_config_corruption(const struct nvmeibc_cinst_params_blk *
 				WARN(1, "nvmeibc corruption: segments intersect: disk=%s "
 				   "lba1=%llu, len1=%llu, lba2=%llu, len2=%llu "
 				   "s1=(%d,%d,%d), s2=(%d,%d,%d)\n",
-				   nvmeibc_disk_get_name(tr1->disk),
+				   ((tr1->disk)->base.ops.get_name(&((tr1->disk))->base)),
 				   tr1->first_lba, tr1->length,
 				   tr2->first_lba, tr2->length,
 				   tr1->ch, tr1->r1, tr1->seg,

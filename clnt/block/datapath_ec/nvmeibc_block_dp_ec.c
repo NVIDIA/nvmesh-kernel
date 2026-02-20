@@ -377,7 +377,7 @@ static void prepare_journal_wr_cmds_md(struct nvmeibc_block_command *rldr)
 
 static inline u32 __get_d2j_of_cmd(struct nvmeibc_block_command const* jrnl_cmd)
 {
-	const struct nvmeibc_disk_client_journal *jrnl = nvmeibc_disk_get_journal(jrnl_cmd->ds->disk);
+	const struct nvmeibc_disk_client_journal *jrnl = ((jrnl_cmd->ds->disk)->base.ops.get_journal(&((jrnl_cmd->ds->disk))->base));
 	if(jrnl->rng_id == NVMEIB_EC_INVALID_JOURNAL_RANGE){
 		return NVMEIB_EC_INVALID_JOURNAL_ENTRY;
 	} else {
@@ -396,8 +396,8 @@ static void __prepare_data_wr_cmds_md_with_journal(struct nvmeibc_block_command 
 	for_each_column_for_each_snake_while(mssa, mssa->bio_map, map_i, col, row, (ci++ < (mssa->n_writes / 2))) {
 		struct nvmeibc_block_command *io_cmd = &rldr[mssa->column_to_cmd.write[col]];
 		struct nvmeibc_block_command *jrnl_cmd = &rldr[mssa->column_to_cmd.jour[col]];
-		const struct nvmeibc_disk_client_journal *jrnl = nvmeibc_disk_get_journal(jrnl_cmd->ds->disk);
-		const struct nvmeibc_disk_client_journal *io_jrnl = nvmeibc_disk_get_journal(io_cmd->ds->disk);
+		const struct nvmeibc_disk_client_journal *jrnl = ((jrnl_cmd->ds->disk)->base.ops.get_journal(&((jrnl_cmd->ds->disk))->base));
+		const struct nvmeibc_disk_client_journal *io_jrnl = ((io_cmd->ds->disk)->base.ops.get_journal(&((io_cmd->ds->disk))->base));
 		const u32 d2j = __get_d2j_of_cmd(jrnl_cmd);			// Journal cmd of this data command
 
 		int map_index_for_column = map_i;

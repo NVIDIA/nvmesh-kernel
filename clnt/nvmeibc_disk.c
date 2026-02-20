@@ -10459,6 +10459,7 @@ int nvmeibc_disk_create(const struct nvmeibc_cinst_params_core *p,
 		rv = -ENOMEM;
 		goto out;
 	}
+	nvmeibc_disk_base_init(disk);
 	disk->create_id = atomic_inc_return(&disk_create_id);
 	disk->discover_id = -1; /* First discovery that is forced to fail will be #0. The second (with reduced timeout) is #1 */
 	disk->pause_at_first_discover = nvmeibc_disk_pause_at_first_discover;

@@ -26,10 +26,10 @@ void on_topo_free_cont_preventer_inc(struct nvmeibc_topology *tcp,
 	int n_preventors;			// Just for debug
 	BUG_ON(tcp->on_free.paused_disk);
 	tcp->on_free.paused_disk = disk;
-	n_preventors = nvmeibc_disk_inc_cont_preventors(disk);
-	BUG_ON(!nvmeibc_disk_should_pause(disk));
+	n_preventors = ((disk)->base.ops.inc_cont_preventors(&((disk))->base));
+	BUG_ON(!((disk)->base.ops.should_pause(&((disk))->base)));
 	wmb();	// if another thread free this topo right after we put it, it MUST see the 'paused_disk' which is not volatile.
-	_NT(t_00_otfcpi, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) ++preventors=@PREVENTORS, rv=@RV", nvmeibc_disk_get_name(disk), nt->device_name, tcp->debug_unique_index, n_preventors, rv);
+	_NT(t_00_otfcpi, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) ++preventors=@PREVENTORS, rv=@RV", ((disk)->base.ops.get_name(&((disk))->base)), nt->device_name, tcp->debug_unique_index, n_preventors, rv);
 }
 
 static void __reset_proto_version_for_paused_disks(struct nvmeibc_topology *t)
@@ -49,16 +49,16 @@ void on_topo_free_cont_preventer_dec(struct nvmeibc_topology *t)
 	if (t->on_free.paused_disk){  /* Guaranteed: No IO on this topo */
 		const u64 t_index = t->debug_unique_index;
 		struct nvmeibc_disk *disk = t->on_free.paused_disk;
-		const int n_preventors = nvmeibc_disk_dec_cont_preventors(disk);
-		const bool waited_too_long = nvmeibc_disk_is_cont_preventors_waited_too_long(disk);
-		_NT(t_01_otfcpd, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) io_perm=@IO_PERM, --preventors=@PREVENTORS", nvmeibc_disk_get_name(disk),
+		const int n_preventors = ((disk)->base.ops.dec_cont_preventors(&((disk))->base));
+		const bool waited_too_long = ((disk)->base.ops.is_cont_preventors_waited_too_long(&((disk))->base));
+		_NT(t_01_otfcpd, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) io_perm=@IO_PERM, --preventors=@PREVENTORS", ((disk)->base.ops.get_name(&((disk))->base)),
 		   t->nt->device_name, t_index, t->io_perm, n_preventors);
 		if (waited_too_long) {
 			unsigned long st_ents[16];
 			struct nvmeib_stack_trace st = { .max_entries = ARRAY_SIZE(st_ents), .entries = st_ents, .skip = 0,};
 			nvmeib_public_save_stack_trace(&st);
 			nvmeibcb_dp_io_fail_mgr_blocked_cont(&nvmeibc_block_t_to_b(t)->dp.io_stats.mgr);
-			_NE_TOPO(t_02_otfcpd, t, "I blocked cont for disk @STR, EC-4571 reproduction!", nvmeibc_disk_get_name(disk));
+			_NE_TOPO(t_02_otfcpd, t, "I blocked cont for disk @STR, EC-4571 reproduction!", ((disk)->base.ops.get_name(&((disk))->base)));
 			_NE(     t_03_otfcpd, DMESG_PREFIX("@DEV_NAME") " Stack Trace:\n@STACK_TRACE", t->nt->device_name, &st);
 		}
 		WARN_TOPO((n_preventors < 0), t, "preventors=%d\n", n_preventors);
@@ -148,7 +148,7 @@ void on_topo_free_schedule_praid_ack(const struct nvmeibc_subscription_ctx *tr,
 		raid1_for_each_seg(r1_old, seg_old, si) {
 			struct on_topo_free_message *otfm = &t_old->on_free.msgs[si];
 			const bool was_active = is_seg_active(*seg_old);
-			const bool disk_dying = nvmeibc_disk_should_pause(seg_old->disk);	// Msg will probably not reach Toma anyways
+			const bool disk_dying = ((seg_old->disk)->base.ops.should_pause(&((seg_old->disk))->base));	// Msg will probably not reach Toma anyways
 			char disk_dying_status;
 			if ((!disk_dying)&&(!was_active)) {
 				otfm->type =     msg;
