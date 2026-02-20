@@ -25,7 +25,7 @@
 #   example: PARALLEL=true
 # DRY_RUN=(true|false), default=false
 #   example: DRY_RUN=true
-
+source build_common.sh
 # process command line opts, if any
 usage()
 {
@@ -111,7 +111,7 @@ arr_entries_leave_unique()
 
 # obtain local git state info
 BRANCH_NAME=$(git symbolic-ref --short --quiet HEAD) || BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-COMMIT_ID=$(git log -n1 --format=%h)
+COMMIT_ID=$(git_commit_id)
 CHANGE_ID=$(git log -n1 --format=%b | awk '/^Change-Id: / {print $2}')
 GIT_TOP_DIR=$(git rev-parse --show-toplevel)
 
@@ -391,12 +391,12 @@ install_target_proc()
 	fi
 	sudo sh -c "echo '$append_conf' >> /etc/nvmesh/nvmesh.conf"
 	sudo sh -c "echo '$target_devices' > /etc/nvmesh/target_devices.conf"
-	
+
 	if [ "$no_autostart" = "true" ]; then
 		sudo chkconfig --del nvmeshclient
 		sudo chkconfig --del nvmeshtarget
 	fi
-	
+
 	# start the nvmeshclient service
 	echo Starting nvmeshclient
 	sudo service nvmeshclient start
@@ -414,7 +414,7 @@ install_target()
 	local target_nics="${target_nics[$target_num]}"
 	local log_file="${target_log_file[${target_num}]}"
 	local rpm_path
-	
+
 	if [ "$REPO_RPMS" = "true" ]; then
 		rpm_path="${INSTALL_REMOTE_DIR}/${BRANCH_NAME}/${COMMIT_ID}/${target_tag}"
 	else
@@ -452,7 +452,7 @@ install_client_proc()
     else
         debs="${repo_path}/nvmesh-client*.deb"
     fi
-	
+
 	# install the nvmesh-client package
 	echo Installing nvmesh-client package
 	if test -e /etc/redhat-release; then
@@ -472,7 +472,7 @@ install_client_proc()
 	sudo sed -i {s#^MANAGEMENT_SERVERS=.*#MANAGEMENT_SERVERS=\"$mgmt_servers\"#} /etc/nvmesh/nvmesh.conf
 	sudo sed -i {s#^CONFIGURED_NICS=.*#CONFIGURED_NICS=\"$nics\"#} /etc/nvmesh/nvmesh.conf
 	sudo sh -c "echo '$append_conf' >> /etc/nvmesh/nvmesh.conf"
-	
+
 	if [ "$no_autostart" = "true" ]; then
 		sudo chkconfig --del nvmeshclient
 	fi
@@ -490,7 +490,7 @@ install_client()
 	local client_nics="${client_nics[$client_num]}"
 	local log_file="${client_log_file[${client_num}]}"
 	local rpm_path
-	
+
 	if [ "$REPO_RPMS" = "true" ]; then
 		rpm_path="${INSTALL_REMOTE_DIR}/${BRANCH_NAME}/${COMMIT_ID}/${client_tag}"
 	else

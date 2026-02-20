@@ -11,7 +11,7 @@
 #	- Custom workdir
 
 set -e #exit on first error
-
+source build_common.sh
 print_help() {
 cat << EOF
 usage:
@@ -141,7 +141,7 @@ if [ -z $DISTRO ]; then
 fi
 
 if [ -z $GIT_COMMIT_ID ] ; then
-        GIT_COMMIT_ID=$(git log -n1 --format=%h)
+        GIT_COMMIT_ID=$(git_commit_id)
 fi
 
 if [ -z $GIT_CHANGE_ID ] ; then

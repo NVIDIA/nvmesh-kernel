@@ -36,7 +36,7 @@ static ssize_t fill_version_json(void *a, char *buffer, size_t len)
 			   "{\"module\" : \"common\", \"commit\" : \"%llx\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
 		    (u64)COMMIT_ID, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER), __stringify(BUILD_DISTRO));
 	count += scnprintf(buffer + count, len - count, "}\n");
-	
+
 	return count;
 }
 
@@ -48,7 +48,7 @@ int nvmeib_version_proc_create(struct proc_dir_entry *proc_dir)
 		_NE(error_1_nvmeib_version_nvmeib_version_proc_create, "proc dir NULL");
 		goto out;
 	}
-	
+
 	if (!(version_proc = nvmeib_public_proc_create("version",
 		proc_dir, &fill_version, NULL, NULL))) {
 		_NE(error_nvmeib_version_nvmeib_version_proc_create, "Fail to create proc version");
@@ -59,7 +59,7 @@ int nvmeib_version_proc_create(struct proc_dir_entry *proc_dir)
 		_NE(error_2_nvmeib_version_nvmeib_version_proc_create, "Fail to create proc version.json");
 		goto out;
 	}
-	
+
 	rv = 0;
 
 out:

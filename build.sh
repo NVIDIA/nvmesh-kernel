@@ -47,6 +47,7 @@
 # REPO_MODS=(true|false), default=false, copy modules to local repo
 #   example: REPO_MODS=true
 
+source build_common.sh
 build_started=false
 
 exit_build()
@@ -286,7 +287,7 @@ if [ -z "$BRANCH_NAME" ] ; then
 fi
 
 if [ -z "$COMMIT_ID" ] ; then
-	COMMIT_ID=$(git log -n1 --format=%h)
+	COMMIT_ID=$(git_commit_id)
 fi
 
 if [ -z "$FULL_COMMIT_ID" ] ; then
