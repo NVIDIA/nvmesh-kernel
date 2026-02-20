@@ -255,6 +255,7 @@ void nvmeibc_disk_delete_globals(const struct nvmeibc_cinst_params_core *p) {
 }
 
 static int call_discover(struct nvmeibc_disk *disk){
+	struct nvmeibc_disk_client_journal *jour = nvmeibc_disk_get_journal_mut(disk);
 	void *jrange_handle;
 	atomic_set(&disk->paused, 0);
 	atomic_set(&disk->dying,  0);
@@ -262,21 +263,21 @@ static int call_discover(struct nvmeibc_disk *disk){
 	disk->detached = false;
 	serverSimulator_disk_discover(serverOf(disk), disk, nvmeibc_get_uuid(nvmeibc_cinst_get_core_p(disk)), &jrange_handle);
 	if (disk->local.jrnl.valid) {
-		disk->jour.rng_id = disk->local.jrnl.rng_idx;
-		disk->jour.rng_gen_id = disk->local.jrnl.gen_id;
-		disk->jour.rng_slba = disk->local.jrnl.rng_slba;
-		disk->jour.rng_nlba = disk->local.jrnl.rng_nlba;
-		disk->jour.rng_binje = disk->local.jrnl.rng_binje;
-		disk->jour.rng_nblk = disk->local.jrnl.rng_nblk;
-		disk->jour.max_rng_blk = disk->local.jrnl.max_rng_blk;
-		disk->jour.n_ents = disk->local.jrnl.n_ents;
-		disk->jour.tot_n_rng = disk->local.jrnl.tot_n_rng;
-		memcpy(disk->jour.serjio_boot_id, disk->local.jrnl.serjio_boot_id, NVMEIB_GID_STR_MAX);
-		if (disk->jour.rng_id != NVMEIB_EC_INVALID_JOURNAL_RANGE)
+		jour->rng_id = disk->local.jrnl.rng_idx;
+		jour->rng_gen_id = disk->local.jrnl.gen_id;
+		jour->rng_slba = disk->local.jrnl.rng_slba;
+		jour->rng_nlba = disk->local.jrnl.rng_nlba;
+		jour->rng_binje = disk->local.jrnl.rng_binje;
+		jour->rng_nblk = disk->local.jrnl.rng_nblk;
+		jour->max_rng_blk = disk->local.jrnl.max_rng_blk;
+		jour->n_ents = disk->local.jrnl.n_ents;
+		jour->tot_n_rng = disk->local.jrnl.tot_n_rng;
+		memcpy(jour->serjio_boot_id, disk->local.jrnl.serjio_boot_id, NVMEIB_GID_STR_MAX);
+		if (jour->rng_id != NVMEIB_EC_INVALID_JOURNAL_RANGE)
 			BUG_ON(nvmeibc_jam_disk_add(disk, disk->local.jrnl.free_ents_bmp, disk->local.jrnl.jmdc, disk->local.jrnl.ent_md));
 		disk->local.jrange_handle = jrange_handle;
 	} else {
-		nvmeibc_disk_client_journal_mark_as_no_journal(&disk->jour);
+		nvmeibc_disk_client_journal_mark_as_no_journal(jour);
 	}
 	return 1;
 }
@@ -762,6 +763,7 @@ void rediscovery(struct nvmeibc_disk *disk){
 
 int nvmeibc_disk_release(struct nvmeibc_disk *disk)
 {
+	struct nvmeibc_disk_client_journal *jour = nvmeibc_disk_get_journal_mut(disk);
 	int dying, rv = 0;
 	_NT(trace_simu_disk_nvmeibc_disk_release, "Starting exceution of disk_release @DISK_NAME", nvmeibc_disk_get_name(disk));
 	if (!nvmeibc_find_disk(disk)) {
@@ -784,9 +786,9 @@ int nvmeibc_disk_release(struct nvmeibc_disk *disk)
 	_NT(trace_6_simu_disk_nvmeibc_disk_release, "starting rediscovery...");
 	atomic_set(&disk->paused, 1);
 	nvmeibc_jam_disk_del(disk);
-	if (disk->jour.rng_id != NVMEIB_EC_INVALID_JOURNAL_RANGE) {		// To do: Separate to a function: Server side response to pause
-		serverSimulator_disk_relese(serverOf(disk), disk->jour.rng_id, disk->local.jrange_handle);
-		nvmeibc_disk_client_journal_mark_as_no_journal(&disk->jour);
+	if (jour->rng_id != NVMEIB_EC_INVALID_JOURNAL_RANGE) {		// To do: Separate to a function: Server side response to pause
+		serverSimulator_disk_relese(serverOf(disk), jour->rng_id, disk->local.jrange_handle);
+		nvmeibc_disk_client_journal_mark_as_no_journal(jour);
 	}
 	if (!disk->detached) {
 		rediscovery(disk);

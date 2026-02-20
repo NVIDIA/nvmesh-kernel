@@ -153,7 +153,7 @@ static void t_db_who_cmd_core_cell(struct t_core_dbgdi *s, const struct nvmeibc_
 static void t_db_who_jcmd_and_md_fill(struct t_db_who_writer *s,
 					const struct nvmeibc_block_command *jc, const void *jmd)
 {
-	struct nvmeibc_disk_client_journal *dj = &jc->ds->disk->jour;
+	const struct nvmeibc_disk_client_journal *dj = nvmeibc_disk_get_journal(jc->ds->disk);
 	struct nvmeibc_block_command* dcmd = dp_cmd_jour_to_data((void*)jc);
 	const void *dmd = (jmd - jc->iocmd->reqs1.md) + dcmd->iocmd->reqs1.md;
 	s->jrnl.is_valid = 1;

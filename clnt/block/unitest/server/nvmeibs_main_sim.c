@@ -243,7 +243,7 @@ int nvmeibs_nordda_get_jrng_by_uuid(struct serverSimulator *S, struct nvmeibc_di
 }
 
 void nvmeibs_pass_loser_to_serjio(struct serverSimulator *S, struct nvmeibs_lost_srv_resource_payload *p) {
-	int rv = nvmeibs_serjio_abnd_jrnl_ents(as_nvmeibs_disk_info(S), S->disk->jour.rng_id, p->bmp, p->gen_ids);
+	int rv = nvmeibs_serjio_abnd_jrnl_ents(as_nvmeibs_disk_info(S), nvmeibc_disk_get_journal(S->disk)->rng_id, p->bmp, p->gen_ids);
 	if (rv && rv != -EINVAL){
 		//TODO LKJ
 		//Hack: today jri may be released in 2 ways:

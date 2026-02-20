@@ -1153,11 +1153,12 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 				}
 				{ // Test journal area and metadata size.
 					const int md_size = nvmeibc_sgmnt_sw_md_size(seg);
+					const struct nvmeibc_disk_client_journal *jour = nvmeibc_disk_get_journal(seg->disk);
 					if (unlikely((md_size < DISK_MIN_MD_SIZE_BYTE) || (md_size > DISK_MAX_MD_SIZE_BYTE))) {
 						store_seg_error_goto(_out_topo_inv, t_09_prioperm, "Wrong metadata size @MD_SIZE[bytes]", md_size);
 					}
-					if (!__is_ec_journal_ok(&seg->disk->jour, nd)) {
-						_NI_TOPO(t_0a_prioperm, t, "seg=" SEGMENT_FMT " no valid journal! disk_binje=@BINJE, bdev_binje=@BINJE, jri=@JRI, blocks=@INT", c, r, si, seg->disk->jour.rng_binje, nvmeibc_cinst_get_blok_p(nd)->binje, seg->disk->jour.rng_id, seg->disk->jour.rng_nblk);
+					if (!__is_ec_journal_ok(jour, nd)) {
+						_NI_TOPO(t_0a_prioperm, t, "seg=" SEGMENT_FMT " no valid journal! disk_binje=@BINJE, bdev_binje=@BINJE, jri=@JRI, blocks=@INT", c, r, si, jour->rng_binje, nvmeibc_cinst_get_blok_p(nd)->binje, jour->rng_id, jour->rng_nblk);
 						have_journal_area = false;
 					}
 				}

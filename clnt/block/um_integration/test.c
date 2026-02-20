@@ -132,7 +132,7 @@ static void __init_transport(struct lib_call_api_params_generic *gen) {
 	for (i = 0; i < MY_N_SEG; i++ ) {
 		struct seg_params_t *seg = &gen->pr.segs[i];
 		struct nvmeibc_disk *disk = &_disks[i];
-		struct nvmeibc_disk_client_journal *j = &disk->jour;
+		struct nvmeibc_disk_client_journal *j = nvmeibc_disk_get_journal_mut(disk);
 		struct lock_ownership_map *l = &seg->lmap;
 		strlcpy(disk->name, "Disk0", sizeof(disk->name));
 		disk->name[4] += i;

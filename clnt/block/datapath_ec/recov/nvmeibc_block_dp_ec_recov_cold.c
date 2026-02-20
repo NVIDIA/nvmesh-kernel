@@ -988,11 +988,13 @@ static int __jmdc_read_bufs_alloc(struct jrecovery *jrecov, struct nvmeibc_raid1
 	for_each_set_bit(i, &jrecov->bmp, jrecov->n_segs) {
 		struct nvmeibc_disk_jcmd *djr = &jrecov->jcmds[i];
 		struct nvmeibc_disk *disk = r1->segments[i].disk;
-		djr->rng.len = sizeof(*djr->rng.arr) * disk->jour.tot_n_rng;
+		const struct nvmeibc_disk_client_journal *jour = nvmeibc_disk_get_journal(disk);
+
+		djr->rng.len = sizeof(*djr->rng.arr) * jour->tot_n_rng;
 		djr->rng.arr = nvmeib_alloc(&djr->rng._ai, djr->rng.len, dp_recovery_cold);
-		djr->ent_md.len = sizeof(*djr->ent_md.arr) * disk->jour.tot_n_rng * NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE;
+		djr->ent_md.len = sizeof(*djr->ent_md.arr) * jour->tot_n_rng * NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE;
 		djr->ent_md.arr = nvmeib_alloc(&djr->ent_md._ai, djr->ent_md.len, dp_recovery_cold);
-		djr->md.len =  sizeof(*djr->md.arr) * disk->jour.tot_n_rng * disk->jour.max_rng_blk;
+		djr->md.len =  sizeof(*djr->md.arr) * jour->tot_n_rng * jour->max_rng_blk;
 		djr->md.arr =  nvmeib_alloc(&djr->md._ai, djr->md.len, dp_recovery_cold);
 		if (!djr->rng.arr || !djr->ent_md.arr || !djr->md.arr) {
 			_NE(error_dp_ec_recov_cold_jmdc_read_bufs_alloc, DMESG_PREFIX() ": Out of memory");
@@ -1050,11 +1052,13 @@ static void __jmdc_req_send(struct jrecovery *jrecov, struct nvmeibc_raid1 *r1)
 	atomic_set(&jrecov->reads, hweight32(jrecov->bmp));
 	for_each_set_bit(i, &req_bmp, n_segs) {						// Iterate using stack values
 		struct nvmeibc_disk_jcmd *drj = &jrecov->jcmds[i];
+		const struct nvmeibc_disk_client_journal *jour;
 		drj->jrecov = jrecov;
 		drj->comp.callback = __read_jcmd_cb;
 		drj->comp.disk = r1->segments[i].disk;
+		jour = nvmeibc_disk_get_journal(drj->comp.disk);
 		drj->comp.start_rng = 0;
-		drj->comp.num_rng = drj->comp.disk->jour.tot_n_rng;
+		drj->comp.num_rng = jour->tot_n_rng;
 		drj->comp.rsp.read_jrnl_data = &drj->jrnl_desc;
 		drj->comp.rng_data_ai =        &drj->rng._ai;
 		drj->comp.rsp.rng_data =        drj->rng.arr;

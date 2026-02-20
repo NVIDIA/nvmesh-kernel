@@ -374,13 +374,20 @@ static void prepare_journal_wr_cmds_md(struct nvmeibc_block_command *rldr)
 	} for_each_column_for_each_snake_while_end;
 }
 
+
+static inline u32 __get_d2j_of_cmd(struct nvmeibc_block_command const* jrnl_cmd)
+{
+	const struct nvmeibc_disk_client_journal *jrnl = nvmeibc_disk_get_journal(jrnl_cmd->ds->disk);
+	if(jrnl->rng_id == NVMEIB_EC_INVALID_JOURNAL_RANGE){
+		return NVMEIB_EC_INVALID_JOURNAL_ENTRY;
+	} else {
+		return (jrnl_cmd->iocmd->reqs1.disk_address - jrnl->rng_slba) / jrnl->rng_binje;
+	}
+}
+
 /* prepare the MD objects for cmds writing the data */
 static void __prepare_data_wr_cmds_md_with_journal(struct nvmeibc_block_command *rldr)
 {
-	#define __get_d2j_of_cmd(c)   (u32)(((c)->ds->disk->jour.rng_id == NVMEIB_EC_INVALID_JOURNAL_RANGE ? \
-						NVMEIB_EC_INVALID_JOURNAL_ENTRY : \
-						((c)->iocmd->reqs1.disk_address - (c)->ds->disk->jour.rng_slba) / (c)->ds->disk->jour.rng_binje))
-	#define __get_client_id( c) 										((c)->ds->disk->jour.rng_id)
 	union nvmeibc_dbits_entry dbits = { .all_bits = rldr->rld.post.bits.dirty };
 	const u32 tx_id = rldr->rld.post.bits.txid;
 	const struct multi_snake_slice_analyzer *mssa = rldr->o->mssa;
@@ -389,7 +396,10 @@ static void __prepare_data_wr_cmds_md_with_journal(struct nvmeibc_block_command 
 	for_each_column_for_each_snake_while(mssa, mssa->bio_map, map_i, col, row, (ci++ < (mssa->n_writes / 2))) {
 		struct nvmeibc_block_command *io_cmd = &rldr[mssa->column_to_cmd.write[col]];
 		struct nvmeibc_block_command *jrnl_cmd = &rldr[mssa->column_to_cmd.jour[col]];
+		const struct nvmeibc_disk_client_journal *jrnl = nvmeibc_disk_get_journal(jrnl_cmd->ds->disk);
+		const struct nvmeibc_disk_client_journal *io_jrnl = nvmeibc_disk_get_journal(io_cmd->ds->disk);
 		const u32 d2j = __get_d2j_of_cmd(jrnl_cmd);			// Journal cmd of this data command
+
 		int map_index_for_column = map_i;
 #ifdef DEBUG_SAVE_JENTRY
 		if (!io_cmd->do_not_send) {
@@ -399,8 +409,8 @@ static void __prepare_data_wr_cmds_md_with_journal(struct nvmeibc_block_command 
 					DMESG_PREFIX("@DEV_NAME") ": D2J: @UINT Overflows bitfield - jrnl_cmd @BLOCK_COMMAND disk_address @DISK_ADDRESS rng_slba @SLBA_LONG rng_binje @BINJE io_cmd @BLOCK_COMMAND ",
 					rldr->o->nd->name, d2j, jrnl_cmd,
 					jrnl_cmd->iocmd->reqs1.disk_address,
-					jrnl_cmd->ds->disk->jour.rng_slba,
-					jrnl_cmd->ds->disk->jour.rng_binje, io_cmd);
+					jrnl->rng_slba,
+					jrnl->rng_binje, io_cmd);
 				BUG();
 			}
 		}
@@ -408,9 +418,9 @@ static void __prepare_data_wr_cmds_md_with_journal(struct nvmeibc_block_command 
 		for (b=0; b < io_cmd->nlbas; b++) {								// Slice iterator
 			union nvmeibc_block_dp_ec_data_block_md *md = mssa->blocks_md[map_index_for_column];
 			if (!io_cmd->is_parity)						// Compiler will move this out of the loop
-				nvmeibc_block_dp_ec_md_make_d(md, md->D.edic, __get_client_id(io_cmd), tx_id,   	 d2j);
+				nvmeibc_block_dp_ec_md_make_d(md, md->D.edic, io_jrnl->rng_id, tx_id, d2j);
 			else { // Todo: clear dbit turn on / off bit on per slice calcualtion (multi-slice 'rld' value is an overkill)
-				nvmeibc_block_dp_ec_md_make_p(md, md->P.edic, __get_client_id(io_cmd), tx_id, dbits, d2j);
+				nvmeibc_block_dp_ec_md_make_p(md, md->P.edic, io_jrnl->rng_id, tx_id, dbits, d2j);
 			}
 			advance_rlba_to_next_slice(map_index_for_column, mssa->snake_size, mssa->replicas);
 		}

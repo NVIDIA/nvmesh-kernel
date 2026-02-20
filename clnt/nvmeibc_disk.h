@@ -1078,6 +1078,17 @@ static inline size_t nvmeibc_disk_get_min_gen_cmd_bb(struct nvmeibc_disk const *
 	return self->min_gen_cmd_bb;
 }
 
+static inline struct nvmeibc_disk_client_journal const * nvmeibc_disk_get_journal(struct nvmeibc_disk const *self)
+{
+	return &self->jour;
+}
+
+//for tests, will be removed in future
+static inline struct nvmeibc_disk_client_journal * nvmeibc_disk_get_journal_mut(struct nvmeibc_disk *self)
+{
+	return &self->jour;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {

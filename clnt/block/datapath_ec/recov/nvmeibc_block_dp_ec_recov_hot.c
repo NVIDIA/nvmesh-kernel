@@ -1165,6 +1165,7 @@ static int read_jmdc_comp(struct htr_ctx *h, int si)
 	struct nvmeibc_disk_gen_cmd *gen_cmd = cmd->gen_cmd;
 	struct cl_jour *clj = &h->seg_info[si].clj;
 	struct nvmeibc_disk *disk = h->params.raid1->segments[si].disk;
+	const struct nvmeibc_disk_client_journal *jour = nvmeibc_disk_get_journal(disk);
 	int rv = -1;
 	unsigned i;
 	u32 binje = HTR_INVALID_N_SLICE_JOUR;
@@ -1194,7 +1195,7 @@ static int read_jmdc_comp(struct htr_ctx *h, int si)
 		BUG();
 		goto out;
 	}
-	if (clj->desc.rng_blk > disk->jour.max_rng_blk) {
+	if (clj->desc.rng_blk > jour->max_rng_blk) {
 		_NTh(trace_2_dp_ec_recov_hot_read_jmdc_comp, h, "Version Incompatiblity, potential rdma overflow?!, (#jour-entries=@ENTRIES)", clj->desc.rng_nlba);
 		goto out;
 	}
@@ -2255,7 +2256,7 @@ static int __import_cold_candidate_to_htr(struct htr_ctx *h)
 	for_each_set_bit(si, &txbm_topo_rw, h->n_segs) {
 		struct cl_jour *clj = &h->seg_info[si].clj;
 		const struct candidate_location *loc = &cand->locations[si];
-		__simulate_read_jmdc_descriptor_by_recoverer_descriptor(&clj->desc, &r1->segments[si].disk->jour, loc);
+		__simulate_read_jmdc_descriptor_by_recoverer_descriptor(&clj->desc, nvmeibc_disk_get_journal(r1->segments[si].disk), loc);
 
 		binje = __get_n_jblks_in_jentry_from_disk_cmd(&clj->desc);										   // Enough to do it only once, becuase cold recovery already verified that all the values are equal.
 		if (h->binje == HTR_INVALID_N_SLICE_JOUR) {
