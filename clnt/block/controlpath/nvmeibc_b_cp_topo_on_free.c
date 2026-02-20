@@ -50,7 +50,7 @@ void on_topo_free_cont_preventer_dec(struct nvmeibc_topology *t)
 		const u64 t_index = t->debug_unique_index;
 		struct nvmeibc_disk *disk = t->on_free.paused_disk;
 		const int n_preventors = atomic_dec_return(&disk->n_cont_preventors);
-		const bool waited_too_long = disk->n_cont_prevents_waited_too_long;
+		const bool waited_too_long = nvmeibc_disk_is_cont_preventors_waited_too_long(disk);
 		_NT(t_01_otfcpd, "disk @DISK_NAME: topo(@DEV_NAME:@TOPO_DBG_ID) io_perm=@IO_PERM, --preventors=@PREVENTORS", nvmeibc_disk_get_name(disk),
 		   t->nt->device_name, t_index, t->io_perm, n_preventors);
 		if (waited_too_long) {

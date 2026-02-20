@@ -1053,6 +1053,11 @@ static inline bool nvmeibc_disk_should_pause(struct nvmeibc_disk const *self)
 	return self->should_pause;
 }
 
+static inline bool nvmeibc_disk_is_cont_preventors_waited_too_long(struct nvmeibc_disk const *self)
+{
+	return self->n_cont_prevents_waited_too_long;
+}
+
 static inline int nvmeibc_disk_get_sector_shift(struct nvmeibc_disk const *self)
 {
 	return self->sector_shift;
