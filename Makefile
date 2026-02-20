@@ -832,9 +832,10 @@ ifeq ($(OFED_WE_R), yes)
             INC_DIR += -I$(cma_priv_dir)
         endif
     endif
-
-    $(eval $(call check_ofed_ib_core_modules))
-    $(info obj-m $(obj-m))
+    ifeq ($(COMPILE_COMMON),yes)
+        $(eval $(call check_ofed_ib_core_modules))
+        $(info obj-m $(obj-m))
+    endif
 else
     ifeq ($(OFED_VER_TYPE), OFED)
         # OFA OFED
@@ -878,9 +879,10 @@ else
         else
             cflags += -DHAS_IB_GET_DMA_MR=0
         endif
-
-        $(eval $(call check_ofed_ib_core_modules))
-        $(info obj-m $(obj-m))
+        ifeq ($(COMPILE_COMMON),yes)
+            $(eval $(call check_ofed_ib_core_modules))
+            $(info obj-m $(obj-m))
+        endif
     else
         ifeq ($(OFED_VER_TYPE),none)
             # INBOX Driver - Compile against Kernel Source
@@ -994,18 +996,20 @@ else
                 endif
             endif
 
-            ifneq ($(wildcard $(KERN_FILES_PATH)/drivers/infiniband/core/Makefile),)
-                # If kernel symvers can be found, check the patched modules have the same symbols
-                # RHEL kernels store symvers in /boot/symvers-<kernel-version> or /boot/symvers-<kernel-version>.gz
-                # Ubuntu kernels store symvers in /usr/src/linux-headers-<kernel-version>/Module.symvers
-                KERN_SYMVERS = $(firstword \
-                    $(wildcard /boot/symvers-$(KERN_VER_NO_OFED.gz) \
-                    $(wildcard /boot/symvers-$(KERN_VER_NO_OFED) \
-                    $(wildcard /usr/src/linux-headers-$(KERN_VER_NO_OFED)/Module.symvers))))
+            ifeq ($(COMPILE_COMMON),yes)
+                ifneq ($(wildcard $(KERN_FILES_PATH)/drivers/infiniband/core/Makefile),)
+                    # If kernel symvers can be found, check the patched modules have the same symbols
+                    # RHEL kernels store symvers in /boot/symvers-<kernel-version> or /boot/symvers-<kernel-version>.gz
+                    # Ubuntu kernels store symvers in /usr/src/linux-headers-<kernel-version>/Module.symvers
+                    KERN_SYMVERS = $(firstword \
+                        $(wildcard /boot/symvers-$(KERN_VER_NO_OFED.gz) \
+                        $(wildcard /boot/symvers-$(KERN_VER_NO_OFED) \
+                        $(wildcard /usr/src/linux-headers-$(KERN_VER_NO_OFED)/Module.symvers))))
 
-                $(eval $(call setup_kernel_ib_core_modules,kernels/$(KERN_VER_NO_OFED)/drivers/infiniband/core/Makefile,Kernel $(KERN_VER),$(KERN_SYMVERS)))
-            else
-                INFO_CORE_MOD = NOT Building IB Core Modules for $(KERN_VER)
+                    $(eval $(call setup_kernel_ib_core_modules,kernels/$(KERN_VER_NO_OFED)/drivers/infiniband/core/Makefile,Kernel $(KERN_VER),$(KERN_SYMVERS)))
+                else
+                    INFO_CORE_MOD = NOT Building IB Core Modules for $(KERN_VER)
+                endif
             endif
         else
             # Unknown OFED
