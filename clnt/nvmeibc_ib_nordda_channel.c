@@ -603,8 +603,8 @@ struct nvmeibc_ib_nordda_channel *nvmeibc_ib_nordda_channel_create(
 	INIT_WORK(&ch->pcpu_connect_work, nvmeibc_disk_connect_nrch_pcpu_work);
 	init_completion(&ch->pcpu_connect_comp);
 
-	ch->wait_release_zero_before_cb = nvmeibc_iommu_enabled ||
-		(NVMEIB_SIW_NRCH_WAIT_RLS_ZERO_BEFORE_CB && P2NV(lionic->port)->dev_type == DT_siw);
+	ch->wait_release_zero_before_cb = (P2NV(lionic->port)->dev_type != DT_siw && nvmeibc_iommu_enabled) ||
+		(P2NV(lionic->port)->dev_type == DT_siw && NVMEIB_SIW_NRCH_WAIT_RLS_ZERO_BEFORE_CB);
 
 	_ND(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_create, "Created nrch @BASE_NAME (@CH_PTR), qp @INDEX", ch->base.name, ch, get_ch_ind(ch));
 	rv = 0;
