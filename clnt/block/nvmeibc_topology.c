@@ -5046,10 +5046,6 @@ static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvme
 					seg->registration_status, disk_p_state, acm,
 					seg->sync_safety, slmap, r1->version, r1->lid.all,
 					__segment_reconf_state(seg), seg->uuid);
-				if ((disk_p_state) && (!NVMEIB_TREND_IS_EMPTY(disk->discover_trend))) {
-					// char disk_pause_reason[DISK_DISCOVER_STATUS_LEN]; scnprintf(disk_pause_reason, disk->discover_status, DISK_DISCOVER_STATUS_LEN); // No need to copy on stack. A race can cause the reason to be displayed improperly, but who cares...
-					//nvmeib_txt_append(txt, " %s", disk->discover_status);
-				}
 				if ((seg->toma_reg) && (seg->toma_reg->protocol_version != NVMEIBT_CLIENT_PROTO_VERSION)) {
 					nvmeib_txt_append(txt, " proto=0x%x", seg->toma_reg->protocol_version);
 				}
