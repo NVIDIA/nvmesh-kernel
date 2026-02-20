@@ -712,7 +712,7 @@ static int allocate_serjio_jfree_cmd(struct nvmeibc_disk_jcmd *djr)
 			rv = -ENOMEM;
 			goto out;
 		}
-		if (disk->access_local)
+		if (nvmeibc_disk_is_access_local(disk))
 			fcmd->ents_enc_buf = NULL;
 		else {
 			size_t ents_enc_buf_sz = disk->min_gen_cmd_bb;

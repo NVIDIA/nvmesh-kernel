@@ -145,7 +145,7 @@ static void nvmeibc_raid1_fill_calculated_data(struct nvmeibc_raid1 *r1)
 	memset(&r1->calculated_data, 0, sizeof(r1->calculated_data));
 	raid1_for_each_seg(r1, seg, si) {
 		nvmeibc_raid1_acm2bmp(seg->toma_acm, si, base);
-		if (seg->disk->access_local)
+		if (nvmeibc_disk_is_access_local(seg->disk))
 			base->local_access |= (1 << si);
 	}
 

@@ -1068,6 +1068,11 @@ static inline int nvmeibc_disk_get_max_request_size_bytes(struct nvmeibc_disk co
 	return self->max_request_size_bytes;
 }
 
+static inline bool nvmeibc_disk_is_access_local(struct nvmeibc_disk const *self)
+{
+	return self->access_local;
+}
+
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {
