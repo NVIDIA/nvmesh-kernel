@@ -8,6 +8,8 @@ export PATH=$PATH:~/.local/bin
 type poetry || curl -sSL https://install.python-poetry.org | python${PY:-3} -
 set -x
 [ -n "$PY" ] && poetry env use "$PY"
+# Resolve dependencies for the build environment.
+poetry lock
 poetry install --sync --with=compile --no-root
 poetry run pyinstaller $SPEC_PATH/tools.spec --log-level WARN --clean --workpath=$(mktemp -d) -y
 ls -l dist/*
