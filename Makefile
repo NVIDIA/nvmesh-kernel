@@ -152,7 +152,7 @@ else
     endif
 endif
 
-PY_TO_EXEC_VER ?= "3.10"
+PY_TO_EXEC_VER ?= "3.12"
 ifeq ($(CREATE_PYTHON_TOOLS_EXEC),yes)
     PY_TO_EXEC = PY=$(PY_TO_EXEC_VER) ./py_to_exec.sh
     PY_TO_EXEC_INFO = Building python tools as executables with python $(PY_TO_EXEC_VER)
