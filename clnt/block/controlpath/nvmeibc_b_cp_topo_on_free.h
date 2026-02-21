@@ -31,13 +31,13 @@ void on_topo_free_message_clear(struct on_topo_free_message *);
 /******************************************************************************/
 struct on_topo_free {											// Actions on a single praid, to take when topology is freed
 	struct on_topo_free_message msgs[N_MAX_RAID_SLICE_LEN];		// Send message to each Toma in the protection raid
-	struct nvmeibc_disk *paused_disk;							// If topology was outdated via disk PAUSE, it must finish it's IO before allowing CONTINUE on that disk
+	struct nvmeibc_idisk *paused_disk;							// If topology was outdated via disk PAUSE, it must finish it's IO before allowing CONTINUE on that disk
 };
 
 /* Set cont preventer topology (on disk pause) and remove cont preventer when
    This topology is freed */
 void on_topo_free_cont_preventer_inc(struct nvmeibc_topology *tcp,
-										struct nvmeibc_disk *disk, int rv);
+										struct nvmeibc_idisk *disk, int rv);
 void on_topo_free_cont_preventer_dec(struct nvmeibc_topology *tcp);
 
 /* Must be called when topology is not used anymore by datapath and is about to

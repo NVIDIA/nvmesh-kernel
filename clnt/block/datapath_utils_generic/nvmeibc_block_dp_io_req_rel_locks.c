@@ -213,9 +213,9 @@ void dp_locks_free_all(struct nvmeibc_cmd_lock *locks)
 	DEBUG_TOPO_CNTRS_del_elem_from_topo(locks);
 	__IO_LT_complete_locks(locks);
 	#ifndef DP_LIB
-	if (t->on_free.paused_disk && ((t->on_free.paused_disk)->base.ops.is_cont_preventors_waited_too_long(&((t->on_free.paused_disk))->base))) {
+	if (t->on_free.paused_disk && t->on_free.paused_disk->ops.is_cont_preventors_waited_too_long(t->on_free.paused_disk)) {
 		_NW(t_01_cmplk, DMESG_PREFIX("@DEV_NAME") ": lock held ref too long. @TOPOLOGY(@TOPO_DBG_ID) paused_disk @DISK_NAME (@DISK) locks @LOCKS comp @COMP",
-			t->nt->device_name, t, t->debug_unique_index, ((t->on_free.paused_disk)->base.ops.get_name(&((t->on_free.paused_disk))->base)), t->on_free.paused_disk, locks, &locks->comp);
+			t->nt->device_name, t, t->debug_unique_index, t->on_free.paused_disk->ops.get_name(t->on_free.paused_disk), t->on_free.paused_disk, locks, &locks->comp);
 		#if defined(NVMEIBC_DISK_CMDS_STATS_PROBES) && (NVMEIBC_DISK_CMDS_STATS_PROBES==1)
 		do {
 			struct nvmeibc_disk_command_probes_try_data *current_try = nvmeibc_disk_command_probes_current_try(&locks->comp.probes);

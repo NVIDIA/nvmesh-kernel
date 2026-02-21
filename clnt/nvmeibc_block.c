@@ -53,7 +53,7 @@ int nvmeibc_block_cont(struct nvmeibc_block_device *nd, struct nvmeibc_disk *d)
 		if (unlikely(nvmeibc_block_status_is_detaching(nd->status))) {
 			_NT(t_0a_blk_cont, "@DEV_NAME: CONT ignorred, detaching...", nd->name);
 		} else {
-			nvmeibc_topology_cont(&nd->topologies, d);
+			nvmeibc_topology_cont(&nd->topologies, &(d->base));
 		}
 	}
 	return 0;
@@ -64,7 +64,7 @@ int nvmeibc_block_pause(struct nvmeibc_block_device *nd, struct nvmeibc_disk *d)
 	NFIN;
 	if (nd) {
 		_NT(trace_block_nvmeibc_block_pause, "@DEV_NAME: PAUSE disk @D_FULL_NAME (disk=@DISK)", nd->name, d->full_name, d);
-		nvmeibc_topology_pause(&nd->topologies, d);
+		nvmeibc_topology_pause(&nd->topologies, &(d->base));
 	}
 	NFOUT;
 	return 0;

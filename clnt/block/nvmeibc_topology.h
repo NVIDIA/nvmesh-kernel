@@ -504,8 +504,8 @@ bool nvmeibc_topology_is_being_freed_ID(struct nvmeibc_topology *t);
 bool nvmeibc_topology_is_reconfiguring_now(const struct nvmeibc_topology *t);
 void nvmeibc_topo_update_size_of_bdev(           struct nvmeibc_topology *t);
 
-void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_disk *disk);
-void nvmeibc_topology_cont( struct nvmeibc_topologies *nt, struct nvmeibc_disk *disk);
+void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_idisk *disk);
+void nvmeibc_topology_cont( struct nvmeibc_topologies *nt, struct nvmeibc_idisk *disk);
 
 /* Generate a string describing the current topology. Write it into the buffer
    and return the numb of written bytes. 'nt' not const beacause we take

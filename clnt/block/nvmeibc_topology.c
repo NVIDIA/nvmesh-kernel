@@ -32,7 +32,7 @@ static int __unregister_all_segments_io_is_possible(struct nvmeibc_topologies *n
 static int __unregister_all_segments_on_cleanup_no_io(struct nvmeibc_topologies *nt);
 
 static int   __register_all_segments(struct nvmeibc_topologies *nt);
-static int __all_segments_apply_reconf(struct nvmeibc_topologies *nt, bool force_unrequested, struct nvmeibc_subscription_ctx *optional_tr, struct nvmeibc_disk *disk);
+static int __all_segments_apply_reconf(struct nvmeibc_topologies *nt, bool force_unrequested, struct nvmeibc_subscription_ctx *optional_tr, struct nvmeibc_idisk *disk);
 static int __raid1_try_to_apply_RUD(struct nvmeibc_subscription_ctx *tr, struct nvmeibt_client_msg *pl, int len);
 static int __segment_register(struct nvmeibc_disk_segment *seg);
 static int nvmeibc_warm_raid1_apply_conf_diffs(struct nvmeibc_topologies *nt, struct nvmeibc_subscription_ctx *tr);
@@ -453,11 +453,11 @@ static inline void __nvmeibc_raid1_castle_segs(struct nvmeibc_raid1 *r1)
 }
 
 static inline bool __does_raid1_uses_disk( struct nvmeibc_raid1 *r1,
-										   const struct nvmeibc_disk *disk)
+										   const struct nvmeibc_idisk *disk)
 {
 	int i;
 	for (i=0; i<r1->replicas; i++) {
-		if (r1->segments[i].disk == disk)
+		if (&(r1->segments[i].disk->base) == disk)
 			return true;
 	}
 	return false;
@@ -1320,8 +1320,8 @@ bool nvmeibc_topologies_are_reads_enabled(struct nvmeibc_topologies *nt) {
 	return rv;
 }
 
-void nvmeibc_topology_cont(struct nvmeibc_topologies *nt,
-	struct nvmeibc_disk *disk)
+void nvmeibc_topology_cont(struct nvmeibc_topologies *nt, 
+	struct nvmeibc_idisk *disk)
 {
 	int c, r, si;
 	struct nvmeibc_topology *t = NULL, *t1 = NULL;
@@ -1344,7 +1344,7 @@ void nvmeibc_topology_cont(struct nvmeibc_topologies *nt,
 			struct nvmeibc_raid1 *r1 = &t->chunks[c].raid1s[r]; /* No cashing*/
 			for (si = 0; si < r1->replicas; si++) {
 				struct nvmeibc_disk_segment *seg = &r1->segments[si];
-				if (seg->disk != disk)
+				if (&(seg->disk->base) != disk)
 					continue;
 				t1 = dup_topology(t);
 				if (!t1) {
@@ -2755,7 +2755,7 @@ _out:
 	NFOUT;
 }
 
-void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_disk *disk)
+void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_idisk *disk)
 {
 	int c, r, si, n_unreged_praids = 0, n_segs_on_disk = 0;
 	struct nvmeibc_chunk *chunk;
@@ -2773,7 +2773,7 @@ void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_disk *
 		goto _out;
 	}
 	topo_for_each_seg(tb, chunk, c, r1, r, seg, si) { // Must hold nt lock through the entire loop to prevent other thread from reconfiguring the head topology
-		if (seg->disk == disk) {
+		if (&(seg->disk->base) == disk) {
 			n_unreged_praids += __toma_unregister_raid1_by_seg(seg->toma_reg, NULL, NVMEIBT_CLIENT_RT_REASON_UNREG_DISK_PAUSE);
 			n_segs_on_disk++;
 		}
@@ -2785,7 +2785,7 @@ void nvmeibc_topology_pause(struct nvmeibc_topologies *nt, struct nvmeibc_disk *
 		tcp = nvmeibc_topology_get(nt);	// Head is the cont preventor topo.
 		t1 = dup_topology(tcp);
 		if (unlikely(t1 == NULL)) {
-			WARN(true, "nvmeibc: out of memory, crashing the system to prevent disk %s from corrupting data of volume %s\n", ((disk)->base.ops.get_full_name(&((disk))->base)), nt->device_name);
+			WARN(true, "nvmeibc: out of memory, crashing the system to prevent disk %s from corrupting data of volume %s\n", disk->ops.get_full_name(disk), nt->device_name);
 			BUG();
 		}
 		__set_active_topology(nt, t1, tcp);
@@ -3338,7 +3338,7 @@ static int __chunk_apply_addition(struct nvmeibc_topology *t,
    having to wait for Toma without being able to issue IOs. */
 static int __apply_raid1_reconf(struct nvmeibc_raid1 *r1,
 			struct nvmeibc_topology *old_t, bool force_unrequested,
-			struct nvmeibc_disk *disk)
+			struct nvmeibc_idisk *disk)
 {
 	int si, rv = 0;
 	struct nvmeibc_disk_segment *seg;
@@ -3383,7 +3383,7 @@ static bool __can_hot_reconf_topo(struct nvmeibc_topology *old_t)
 
 /* Assume: if 'disk' is given, nt->lock is locked. Otherwise, not locked */
 static int __all_segments_apply_reconf(struct nvmeibc_topologies *nt,
-					bool force_unrequested, struct nvmeibc_subscription_ctx *optional_tr, struct nvmeibc_disk *disk)
+					bool force_unrequested, struct nvmeibc_subscription_ctx *optional_tr, struct nvmeibc_idisk *disk)
 {
 	struct nvmeibc_topology *t = NULL, *old_t = NULL;
 	int c, r, num_need_reconf = 0, num_reconfed = 0;
