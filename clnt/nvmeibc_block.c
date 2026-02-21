@@ -108,7 +108,7 @@ void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp)
 
 	DEBUG_TRANSFERS_detect_double_callback(comp);
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
-	icore_ops->cb_called_cmd(icore_ops, disk, disk_cmd);
+	icore_ops->cb_called_cmd(icore_ops, &disk->base, disk_cmd);
 
 	o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
@@ -120,7 +120,7 @@ void nvmeibc_block_comp_gencmd(struct nvmeibc_d_iocmd_comp *comp)
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	DEBUG_TRANSFERS_detect_double_callback(comp);
 	nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_COMPLETED);
-	icore_ops->cb_called_cmd(icore_ops, cmd->ds->disk, disk_cmd);
+	icore_ops->cb_called_cmd(icore_ops, &cmd->ds->disk->base, disk_cmd);
 	on_disk_hook(nvmeibc_block_comp_gencmd, cmd->ds->disk, before_gen_cmd_comp_cb, comp->cmd->gen_cmd);
 	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }

@@ -68,7 +68,7 @@ static int __send_combined_msg(struct nvmeibc_disk_segment *seg,
 		}
 	}
 	msg->hdr.cookie = nvmeib_get_guid();
-	rv = icore_ops->toma_send(icore_ops, seg->disk, seg->toma_reg->handle, &env);
+	rv = icore_ops->toma_send(icore_ops, &seg->disk->base, seg->toma_reg->handle, &env);
 	_NITR(t1_c2t_send, "sent=@BOOL_YN, @PROTOCOL_CLIENT_MSG_STR(@PROTOCOL_CLIENT_MSG_REASON_STR), uuid=@SEG_DBG_UUID, @C_PRV cookie=@COOKIE, "
 					   "c_lid=@C_LID, cnt_@RES_MOD_VER, conv_id=@CLNT_TOMA_PR_CONVER_IND len={t=@X/s=@X} rv=@RV",
 	   (rv == 0), nvmeibt_protocol_client_msg_str(mtype), nvmeibt_protocol_client_msg_reason_str(reason),

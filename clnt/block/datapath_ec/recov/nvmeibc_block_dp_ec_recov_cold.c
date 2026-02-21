@@ -812,7 +812,7 @@ static void __free_jrnl_ents_cb(struct nvmeibc_disk_free_jrnl_ents_comp *comp)
 	int i, err = 0;
 
 	if (NCL_had_acquire_callback(comp->status))
-		icore_ops->cb_called_free_jrnl_ents(icore_ops, comp->disk, comp);
+		icore_ops->cb_called_free_jrnl_ents(icore_ops, &comp->disk->base, comp);
 	if (!atomic_dec_and_test(&jrecov->reads))
 		return;
 	_NTRR(trace_dp_ec_recov_cold_free_jrnl_ents_cb, "All free jrnl msg to Serjios returned");
@@ -880,7 +880,7 @@ static void __send_msg_free_jrnl_ents(struct nvmeibc_recovery *recov)
 	for_each_set_bit(i, &bmp, n_segs) {
 		fcmd = &jrecov->jcmds[i].free_ents;
 		if (fcmd->num_ents) {
-			rv = icore_ops->free_jrnl_ents(icore_ops, fcmd->disk, fcmd);
+			rv = icore_ops->free_jrnl_ents(icore_ops, &fcmd->disk->base, fcmd);
 			if (rv) {
 				_NTRR(trace_2_dp_ec_recov_cold_send_msg_free_jrnl_ents, "Failed on Serjio_idx=@RV, rv=@RV", i, rv);
 				fcmd->status = NCL_STATUS_DISKDEAD;	// Same as NCL_STATUS_FAIL_COMP
@@ -973,7 +973,7 @@ static void __read_jcmd_cb(struct nvmeibc_disk_jmdc_read_comp *comp)
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (NCL_had_acquire_callback(comp->rsp.status))
-		icore_ops->cb_called_jmdc(icore_ops, comp->disk, comp);
+		icore_ops->cb_called_jmdc(icore_ops, &comp->disk->base, comp);
 	if (atomic_dec_and_test(&jrecov->reads)) {				// Last read returned
 		struct nvmeibc_recovery *recov = jrecov->recovery;
 		struct work_struct *work = &jrecov->work;			// interrupt context, schedule the analysis to thread context
@@ -1073,7 +1073,7 @@ static void __jmdc_req_send(struct jrecovery *jrecov, struct nvmeibc_raid1 *r1)
 		drj->comp.dirty_only = true;
 		memcpy(drj->comp.seg_uuid, r1->segments[i].uuid, NVMEIB_GID_STR_MAX);
 		if (!should_auto_fail) {
-			rv = icore_ops->jmdc_read(icore_ops, drj->comp.disk, &drj->comp);
+			rv = icore_ops->jmdc_read(icore_ops, &drj->comp.disk->base, &drj->comp);
 			if (rv == 0)
 				continue;
 		}

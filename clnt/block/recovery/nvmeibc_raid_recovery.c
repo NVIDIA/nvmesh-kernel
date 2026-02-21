@@ -203,7 +203,7 @@ static int __blocksets_problems_read_cb(struct nvmeibc_d_rdma_comp *dc, struct n
 	(void)tag;
 	__sync_worker_clean_topo(__sync_worker_of_o(o));			// Disconnect topology from worker to be able to free it even if worker finishes
 	if (NCL_had_acquire_callback(dc->lock_status))
-		icore_ops->cb_called_comp(icore_ops, seg->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, &seg->disk->base, dc);
 
 	if (unlikely(!NCL_do_i_have_lock(dc->lock_status))) {
 		_NTRR(trace_raid_recovery_blocksets_problems_read_cb, "Data cannot be obtained: @NCL_STATUS_STR", ncl_status_str(dc->lock_status));
@@ -311,7 +311,7 @@ static void __get_blksets_info_next_work_batch(struct nvmeibc_recovery *recov)
 		_NTRR(tr_1_get_next_batch, "requesting blksets: start_@DLBA_BLKSETS length_@DLBA_BLKSETS disk @DISK_NAME",
 			 dlba_start, blocksets_length, ((seg->disk)->base.ops.get_name(&((seg->disk))->base)));
 		if (need_info_from_server)
-			rv = icore_ops->get_blkset_problems(icore_ops, seg->disk, handle_of(seg), dlba_start, blocksets_length, dc);
+			rv = icore_ops->get_blkset_problems(icore_ops, &seg->disk->base, handle_of(seg), dlba_start, blocksets_length, dc);
 		else
 			rv = __simulate_get_problems_array_from_server(dc, blocksets_length);
 	}

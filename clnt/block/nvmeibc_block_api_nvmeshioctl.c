@@ -312,13 +312,13 @@ static int __dump_transfers(const struct nvmeibc_cinst_params_blk *unused_p, str
 		if (!__pr_for_action_get(dev, &p, cmd, len))
 			goto _out;
 		for (i = 0; i < p.pr->replicas; i++) {
-			icore_ops->dump_transfers(icore_ops, p.pr->segments[i].disk);
+			icore_ops->dump_transfers(icore_ops, &p.pr->segments[i].disk->base);
 		}
 	} else if (!strncmp(cmd, " ", 1)) { /* Deprecated unsafe v1.2.1 ioctl */
 		u64 diskp = 0;
 		p.action = 'd'; /* Print of single disk, deprecated v1.2.1 ioctls */
 		sscanf(cmd + 1, "%llx", &diskp); /* Skip ' ' */
-		icore_ops->dump_transfers(icore_ops, (struct nvmeibc_disk *)diskp);
+		icore_ops->dump_transfers(icore_ops, &((struct nvmeibc_disk *)diskp)->base);
 	} else {
 		_NI_to_user(t_ya_dp_dbg_tools, QA_BLOCK_PREFIX, "@DEV_NAME unknown cmd @CMD_STR", dev->name, cmd);
 		goto _out;

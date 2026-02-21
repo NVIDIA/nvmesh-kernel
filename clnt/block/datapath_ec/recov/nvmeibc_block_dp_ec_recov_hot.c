@@ -1146,7 +1146,7 @@ static int read_jmdc(struct htr_ctx *h, int si)
 	gen_cmd->data_sink[1] = &gen_cmd->param.uj.ent_md_dest;
 
 	__nvmeibc_read_jmdc_request_pet_describe(h, si, &gen_cmd->param.uj.client_uuid);
-	rv = (icore_ops->execute_gen(icore_ops, cmd->ds->disk, gen_cmd) == 0) ? -EINPROGRESS : -1;
+	rv = (icore_ops->execute_gen(icore_ops, &cmd->ds->disk->base, gen_cmd) == 0) ? -EINPROGRESS : -1;
 
 out:
 	NFOUT;
@@ -1355,7 +1355,7 @@ static void __free_jrnl_ents_cb(struct nvmeibc_disk_free_jrnl_ents_comp *comp)
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (NCL_had_acquire_callback(comp->status))
-		icore_ops->cb_called_free_jrnl_ents(icore_ops, comp->disk, comp);
+		icore_ops->cb_called_free_jrnl_ents(icore_ops, &comp->disk->base, comp);
 	dp_ec_sync_stale_cb_stg_end(bcmd);
 }
 
@@ -1432,7 +1432,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 			"Send free-ents, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
 			((ds->disk)->base.ops.get_name(&((ds->disk))->base)), h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, pass2toma, lock_entry.all);
 		__nvmeibc_free_jrnl_ents_request_pet_describe(h, si, free_ents_comp);
-		rv = icore_ops->free_jrnl_ents(icore_ops, ds->disk, free_ents_comp);
+		rv = icore_ops->free_jrnl_ents(icore_ops, &ds->disk->base, free_ents_comp);
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_entries_failed, h,
 				"Send free-ents failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN rv=@RV",
@@ -1458,7 +1458,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 		_NTh(trace_dp_ec_recov_hot_send_recovered, h, "Send blkset-recovered, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
 		   ((ds->disk)->base.ops.get_name(&((ds->disk))->base)), range_id, entry_id, pass2toma, lock_entry.all);
 		nvmeibc_send_recovered_blkset_request_pet_describe(h->so, cmd, lock_entry.all, si);
-		rv = icore_ops->execute_gen(icore_ops, ds->disk, cmd->gen_cmd);
+		rv = icore_ops->execute_gen(icore_ops, &ds->disk->base, cmd->gen_cmd);
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_failed, h, "Send blkset-recovered failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX rv=@RV",
 			   ((ds->disk)->base.ops.get_name(&((ds->disk))->base)), range_id, entry_id, rv);

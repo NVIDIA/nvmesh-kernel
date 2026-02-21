@@ -229,7 +229,7 @@ static void __tr_destroy(struct nvmeibc_subscription_ctx *tr)
 	_NT(trace_b_cp_trs_hash_tr_destroy, "@DEV_NAME" SEGMENT_FMT " TOMA unsubscribe: handle=@HANDLE disk=@DISK", dev_name, tr->ch, tr->r1, tr->seg, tr->handle, tr->disk);
 	WARN(tr->status != NVMEIBC_SUBSCRIPTION_STATUS_DEAD, "tr->status=%d\n", tr->status);
 	WARN_ON(!nvmeibc_trs_hash_was_removed(tr));
-	rv = icore_ops->toma_unsubscribe(icore_ops, tr->disk, (u64)tr->handle);
+	rv = icore_ops->toma_unsubscribe(icore_ops, &tr->disk->base, (u64)tr->handle);
 	if (unlikely(rv < 0)) {
 		_NT(warn_b_cp_trs_hash_tr_destroy, "@DEV_NAME" SEGMENT_FMT " TOMA unsubscribe failed(@RV): disk=@DISK", dev_name, tr->ch, tr->r1, tr->seg, rv, tr->disk);
 	}

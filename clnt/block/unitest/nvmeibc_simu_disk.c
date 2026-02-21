@@ -740,7 +740,7 @@ bool nvmeibc_pd_wait_for_pause_completion_debug(struct nvmeibc_disk *disk){
 			}
 			_Emerg("Transferring = %d, Preventors=%d pausing=%d, should_pause=%d\n", in_transfers, pause_preventers, disk->pausing, ((disk)->base.ops.should_pause(&((disk))->base)));
 			/* Use This code to debug un-ending transfers which forbit PAUSE to occur */
-			icore_ops->dump_transfers(icore_ops, disk);
+			icore_ops->dump_transfers(icore_ops, &disk->base);
 			BUG_ON((last_transfers == in_transfers) && (last_transfers != 0));	// we expect the 'in_transfers' to decrease with every iteration BUT, since we count without locking, we might get zero as total 'in_transfers' although we havent got the completion signaled. in that case, we'll go for another round & then both previous/current 'in_transfers' would be zero
 			// If core.* crashed at the above BUG_ON(),see the transfers in GDB use the following commands:
 			// p *((struct nvmeibc_transfer_reason*)((char*)disk->transferring->next - 8))

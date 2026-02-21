@@ -292,7 +292,7 @@ int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_co
 	__invoke_crash_on_lock_corruption(locksets, lock_i, "release", 1);
 	WARN_ON(NCL_is_failed_to_acquire(dc->lock_status));			// Cant release if we havent acquired lock
 	if (NCL_had_release_callback(dc->lock_status)) {
-		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
+		icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, dc);
 	}
 
 	DEBUG_LOCKS_CONTENTION(dc);
@@ -472,7 +472,7 @@ static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 
 	dc->opr = NVMEIBC_LOCK_READ;
 	nvmeibc_cmd_lock_request_io_pet_describe(cmd->o, l);
-	rv = icore_ops->run_read_lock(icore_ops, l->ds->disk, iocmd->lpb.handle, lock_addr, dc);
+	rv = icore_ops->run_read_lock(icore_ops, &l->ds->disk->base, iocmd->lpb.handle, lock_addr, dc);
 	times[1] = jiffies;
 	if (rv) {
 		_ND(t_1srl, "locksets=@LOCKSETS[@LSI] rv=@RV o=@OPERATION c=@CMD_PTR", locksets, l->lockset_idx, rv, cmd->o, cmd);
@@ -675,7 +675,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	} else {													// Explicit Read-lock view operation via pausable layer
 		nvmeibc_cmd_lock_response_io_pet_describe(o, l);
 		if (NCL_had_acquire_callback(l->status))
-			icore_ops->cb_called_comp(icore_ops, l->ds->disk, read_comp);
+			icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, read_comp);
 		__squash_transport_lock_status(l, l->status);
 		if (l->status == NCL_STATUS_DISKDEAD) {
 			OPERATION_DBG_CNTR_INC(o, n_lcmd_failed);
@@ -1229,7 +1229,7 @@ static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_r
 	nvmeibc_profiling_end_take_cmd_stats_for_op(__raid_gp_profile_for_rwt_op_locks(l, locksets), l->ds->lock_operation_profiler, locksets->cmds->o, l->type, l, rv1);
 
 	if (NCL_had_acquire_callback(dc->lock_status)) {	// Decrease the transferring counter, to allow PAUSE arrive safely
-		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);	// No callback issued -> immediate error -> decreased trasnsferring counter. If callback was issued, we have to decrease it now.
+		icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, dc);	// No callback issued -> immediate error -> decreased trasnsferring counter. If callback was issued, we have to decrease it now.
 	}
 	DEBUG_LOCKS_CONTENTION(dc);
 	l->status = dc->lock_status;		// Copy transport layer 'rv' into locks status
@@ -1407,7 +1407,7 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 		if (likely(prev_rv == 0)) {	/* Send the lock info */
 			dc->lock_status = NCL_STATUS_NOTISSUED;	// Lock is taken but we use its comp for binfo
 			nvmeibc_blkset_info_write_pet_describe(ow_l->cmds->o, dp_locks_get_sgmnt_idx_of_lock(l), l->address, dc);
-			err = icore_ops->write_blkset_info(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
+			err = icore_ops->write_blkset_info(icore_ops, &l->ds->disk->base, handle_of(l->ds), l->address, dc);
 		} else {
 			err = prev_rv;
 		}
