@@ -2868,7 +2868,7 @@ static int __subscribe_seg(struct nvmeibc_disk_segment *seg, int c, int r1,
 		rv = 0;
 		goto out;
 	}
-	if (__blk_to_disk_sect_shift(seg->disk) < 0) { //vcfg@"nvmesh block size should be bigger or equal to the disk block size"
+	if (nvmeibc_idisk_get_block_to_disk_sector_shift(&(seg->disk->base)) < 0) { //vcfg@"nvmesh block size should be bigger or equal to the disk block size"
 		char* msg = topo_kmalloc(96, GFP_ATOMIC);
 		_NE_to_user(error_topology_subscribe_seg, DMESG_PREFIX("@DEV_NAME"), "Unexpected error with block size mismatch between a volume and a physical disk, IO will not be possible to this volume. Error code: 1031. Volume block size: @N_BYTES[bytes], Disk block size: @N_BYTES[bytes]", nt->device_name, NVMEIBC_SECTOR_SIZE, (1 << ((seg->disk)->base.ops.get_sector_shift(&((seg->disk))->base))));
 		if (msg) {

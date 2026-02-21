@@ -88,7 +88,10 @@ struct nvmeibc_block_device {   			// TODO: change this to something shorter
 #define nvmeibc_volume_short_id(nd) ((nd)->dbg_id)
 #define assert_dev_on_mainwq(dev) nvmeibc_assert_on_main_wq(nvmeibc_isnt_params_blk2main(nvmeibc_cinst_get_blok_p(dev)))	// Attach/Detach actions must be done serialized on main-wq
 
-#define __blk_to_disk_sect_shift(d) (NVMEIBC_SECTOR_SHIFT - ((d)->base.ops.get_sector_shift(&((d))->base)))		// Translation beetween volume block size and NVME disk formatted block size. Daniel: Todo, make this per volume
+static inline int nvmeibc_idisk_get_block_to_disk_sector_shift(struct nvmeibc_idisk const* disk) // Translation beetween volume block size and NVME disk formatted block size. Daniel: Todo, make this per volume
+{
+	return NVMEIBC_SECTOR_SHIFT - disk->ops.get_sector_shift(disk);
+}
 
 
 /* Volume that did not export to kernel an api of issuing bio, can be upgraded

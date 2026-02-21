@@ -15,7 +15,7 @@
  */
 int nvmeib_make_discard_ndb(struct nvmeibc_block_command *cmd)
 {
-	const struct nvmeibc_disk   *d =  cmd->ds->disk;
+	const struct nvmeibc_idisk   *d =  &(cmd->ds->disk->base);
 	struct nvmeibc_block_io_req *ir = &cmd->iocmd->reqs1;
 	struct nvmeib_dsm_range     *r =  ir->trim = my_kmalloc(sizeof(*r), GFP_ATOMIC);
 	int rv = 0;
@@ -27,8 +27,8 @@ int nvmeib_make_discard_ndb(struct nvmeibc_block_command *cmd)
 	}
 	ir->ndb->length = sizeof(*r);
 	r->cattr = cpu_to_le32(0); /* Daniel: NVME rfc forces little endian! */
-	r->nlb =   cpu_to_le32(cmd->nlbas       << __blk_to_disk_sect_shift(d));
-	r->slba =  cpu_to_le64(ir->disk_address << __blk_to_disk_sect_shift(d));
+	r->nlb =   cpu_to_le32(cmd->nlbas       << nvmeibc_idisk_get_block_to_disk_sector_shift(d));
+	r->slba =  cpu_to_le64(ir->disk_address << nvmeibc_idisk_get_block_to_disk_sector_shift(d));
 	sg_set_buf(ir->ndb->table.sgl, r, sizeof(*r));
 	ir->ndb->table.nents = 1;
 out:
@@ -56,12 +56,12 @@ int __concat_discard_op(struct nvmeibc_block_command cmds[], int *pncmds, int nl
 	struct nvmeibc_block_command *cur_c = &cmds[n];
 	const struct nvmeibc_disk_segment * const ds_um = cur_c->ds;
 	struct nvmeibc_block_io_req *io_req = &cur_c->iocmd->reqs1;
-	struct nvmeibc_disk *disk_um = ds_um->disk;
-	const u32 shift = __blk_to_disk_sect_shift(disk_um);
+	struct nvmeibc_idisk *disk_um = &(ds_um->disk->base);
+	const u32 shift = nvmeibc_idisk_get_block_to_disk_sector_shift(disk_um);
 
 	// Check if there is a previous command to merge with
 	for (n--; n >= 0; n--) {
-		if (cmds[n].ds->disk == disk_um) {				// Compare same disk, not same segment.
+		if (&(cmds[n].ds->disk->base) == disk_um) {				// Compare same disk, not same segment.
 			struct nvmeib_dsm_range *range = cmds[n].iocmd->reqs1.trim;
 			const u64 last_slba = le64_to_cpu(range->slba) >> shift;
 			const u32 len =       le32_to_cpu(range->nlb ) >> shift;
@@ -80,7 +80,7 @@ int __concat_discard_op(struct nvmeibc_block_command cmds[], int *pncmds, int nl
 
 	if ((rv = nvmeib_make_discard_ndb(cur_c)) < 0)
 		goto _out;
-	_ND(t_03_r1trim, "(@DISK_NAME) shift=@SHIFT len=@NLBA", disk_um->name, ((disk_um)->base.ops.get_sector_shift(&((disk_um))->base)), io_req->ndb->length);
+	_ND(t_03_r1trim, "(@DISK_NAME) shift=@SHIFT len=@NLBA", disk_um->ops.get_name(disk_um), disk_um->ops.get_sector_shift(disk_um), io_req->ndb->length);
 	_NDtbuf(t_04_r1trim, io_req->trim, "");
 _out:
 	return rv;
