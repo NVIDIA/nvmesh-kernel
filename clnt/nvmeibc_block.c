@@ -624,7 +624,7 @@ struct __cpu_mask_add_del_ctx {
 	int rv;
 };
 
-static int __notify_disk_mask_update(struct nvmeibc_disk *disk, void *ctx)
+static int __notify_disk_mask_update(struct nvmeibc_idisk *disk, void *ctx)
 {
 	(void)ctx;
 	return nvmeibc_disk_notify_coremask_update(disk);
@@ -1505,7 +1505,7 @@ int nvmeibc_block_revive(struct nvmeibc_block_device *dev)
 	return 0;
 }
 
-int nvmeibc_block_call_for_all_disks(struct nvmeibc_block_device *dev, int (*call_fn)(struct nvmeibc_disk *disk, void *ctx), void *ctx)
+int nvmeibc_block_call_for_all_disks(struct nvmeibc_block_device *dev, int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx)
 {
 	return nvmeibc_volume_call_for_all_vol_disks(dev->volume, call_fn, ctx);
 }

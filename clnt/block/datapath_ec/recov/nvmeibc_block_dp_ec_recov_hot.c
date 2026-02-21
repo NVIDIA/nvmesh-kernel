@@ -1164,8 +1164,8 @@ static int read_jmdc_comp(struct htr_ctx *h, int si)
 	struct nvmeibc_block_command *cmd = &h->seg_info[si].cmd;
 	struct nvmeibc_disk_gen_cmd *gen_cmd = cmd->gen_cmd;
 	struct cl_jour *clj = &h->seg_info[si].clj;
-	struct nvmeibc_disk *disk = h->params.raid1->segments[si].disk;
-	const struct nvmeibc_disk_client_journal *jour = ((disk)->base.ops.get_journal(&((disk))->base));
+	struct nvmeibc_idisk *disk = &(h->params.raid1->segments[si].disk->base);
+	const struct nvmeibc_disk_client_journal *jour = disk->ops.get_journal(disk);
 	int rv = -1;
 	unsigned i;
 	u32 binje = HTR_INVALID_N_SLICE_JOUR;

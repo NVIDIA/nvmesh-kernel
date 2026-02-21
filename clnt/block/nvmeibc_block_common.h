@@ -146,7 +146,7 @@ int nvmeibc_block_suspend(struct nvmeibc_block_device *dev,
 				void *susped_context, blk2blk_gen_work_t on_suspend_finish_cb);
 int nvmeibc_block_revive( struct nvmeibc_block_device *dev);
 
-int nvmeibc_block_call_for_all_disks(struct nvmeibc_block_device *dev, int (*call_fn)(struct nvmeibc_disk *disk, void *ctx), void *ctx);
+int nvmeibc_block_call_for_all_disks(struct nvmeibc_block_device *dev, int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx);
 
 /******************************* Error codes *********************************/
 #define is_software_error(err) ((err) < 0) /* Software error */

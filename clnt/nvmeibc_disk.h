@@ -1824,6 +1824,6 @@ struct nvmeibc_disk_coremask_pcpu_stats {
 } while(0)
 
 struct nvmeibc_disk_coremask_pcpu_stats __percpu *nvmeibc_disk_get_coremask_stats_this_cpu(struct nvmeibc_disk *disk);
-int nvmeibc_disk_notify_coremask_update(struct nvmeibc_disk *disk);
+int nvmeibc_disk_notify_coremask_update(struct nvmeibc_idisk *disk);
 
 #endif

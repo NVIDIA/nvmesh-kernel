@@ -177,6 +177,6 @@ void nvmeibc_volume_to_json(const struct nvmeibc_volume *volume, struct jdr* jdr
  * NOTE: volume spinlock is held while calling call_fn.
  * Returns: call_fn return code if stopped otherwise number of disks called.
  */
-int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume, int (*call_fn)(struct nvmeibc_disk *disk, void *ctx), void *ctx);
+int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume, int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx);
 
 #endif

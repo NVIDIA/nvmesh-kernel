@@ -695,7 +695,7 @@ static void __jmdc_read_bufs_free(struct jrecovery *jrecov)
 static int allocate_serjio_jfree_cmd(struct nvmeibc_disk_jcmd *djr)
 {
 	//RRRR: add test that checks cold recovery right after format, without any IO
-	struct nvmeibc_disk *disk = djr->comp.disk;
+	struct nvmeibc_idisk *disk = &(djr->comp.disk->base);
 	struct nvmeibc_disk_free_jrnl_ents_comp *fcmd = &djr->free_ents;
 	int rv;
 	fcmd->ents = NULL;
@@ -712,15 +712,15 @@ static int allocate_serjio_jfree_cmd(struct nvmeibc_disk_jcmd *djr)
 			rv = -ENOMEM;
 			goto out;
 		}
-		if (((disk)->base.ops.is_access_local(&((disk))->base)))
+		if (disk->ops.is_access_local(disk))
 			fcmd->ents_enc_buf = NULL;
 		else {
-			size_t ents_enc_buf_sz = ((disk)->base.ops.get_min_gen_cmd_bb(&((disk))->base));
+			size_t ents_enc_buf_sz = disk->ops.get_min_gen_cmd_bb(disk);
 			if (!ents_enc_buf_sz) {
 				ents_enc_buf_sz = NVMEIBC_SECTOR_SIZE;
 				_NT(trace_allocate_serjio_jfree_cmd_inv_min_bb,
 					"disk @DISK_NAME has min_gen_cmd_bb not set, probably no NRCHs are connected. Command will be sent to pending with minimum size buffer (@SIZE_T)",
-					((disk)->base.ops.get_name(&((disk))->base)), ents_enc_buf_sz);
+					disk->ops.get_name(disk), ents_enc_buf_sz);
 			}
 			if (!(fcmd->ents_enc_buf = nvmeib_alloc(&fcmd->ents_enc_ai, ents_enc_buf_sz, dp_recovery_cold))) {
 				_NE(err_allocate_serjio_jfree_cmd_oom, DMESG_PREFIX() "OOM allocating @SIZE_T buffer", fcmd->ents_enc_buf_sz);
@@ -987,8 +987,8 @@ static int __jmdc_read_bufs_alloc(struct jrecovery *jrecov, struct nvmeibc_raid1
 	int i;
 	for_each_set_bit(i, &jrecov->bmp, jrecov->n_segs) {
 		struct nvmeibc_disk_jcmd *djr = &jrecov->jcmds[i];
-		struct nvmeibc_disk *disk = r1->segments[i].disk;
-		const struct nvmeibc_disk_client_journal *jour = ((disk)->base.ops.get_journal(&((disk))->base));
+		struct nvmeibc_idisk *disk = &(r1->segments[i].disk->base);
+		const struct nvmeibc_disk_client_journal *jour = disk->ops.get_journal(disk);
 
 		djr->rng.len = sizeof(*djr->rng.arr) * jour->tot_n_rng;
 		djr->rng.arr = nvmeib_alloc(&djr->rng._ai, djr->rng.len, dp_recovery_cold);

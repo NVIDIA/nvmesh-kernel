@@ -962,7 +962,7 @@ bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk)
 	(void)disk; return true; // Todo: support toggling this for unitest
 }
 
-int nvmeibc_disk_notify_coremask_update(struct nvmeibc_disk *disk) {
+int nvmeibc_disk_notify_coremask_update(struct nvmeibc_idisk *disk) {
 	(void)disk;
 	return 0;
 }

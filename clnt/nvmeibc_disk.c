@@ -2309,9 +2309,10 @@ static void __notify_coremask_disk_update_done_cb(void *ctx)
 	kfree(disk_update_data);
 }
 
-int nvmeibc_disk_notify_coremask_update(struct nvmeibc_disk *disk)
+int nvmeibc_disk_notify_coremask_update(struct nvmeibc_idisk *disk_base)
 {
 	struct nvmeibc_disk_update_data *disk_update_data;
+	struct nvmeibc_disk* disk = nvmeibc_disk_from_base(disk_base);
 	int rv;
 
 	__NFIND;
@@ -11301,7 +11302,7 @@ int nvmeibc_disk_unsubscribe_toma_service(struct nvmeibc_disk *disk, u64 handle)
 	/* [NVMESH-3829]: Also send the unsubscribe if the subscribe is still in-progress.
 	 * 		(It is serialised on the admin WQ) */
 	if (entry->subscribed == TOMA_ALREADY_SUBSCRIBED || entry->subscribed == TOMA_ASYNC_SUBSCRIBE_SENT) {
-		if (disk->base.ops(&(disk->base)) == d_online) {
+		if (disk->base.ops.get_status(&(disk->base)) == d_online) {
 			_NT(trace_2_disk_nvmeibc_disk_unsubscribe_toma_service, "Disk online");
 			if ((ch = get_alive_admin_ch(disk))) {
 				_NT(trace_3_disk_nvmeibc_disk_unsubscribe_toma_service, "UNSUBSCRIBE disk=@DISK handle=@HANDLE", disk, handle);

@@ -1292,7 +1292,7 @@ void nvmeibc_volume_to_json(const struct nvmeibc_volume *volume, struct jdr *jdr
 }
 
 int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume,
-					  int (*call_fn)(struct nvmeibc_disk *disk, void *ctx), void *ctx)
+					  int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx)
 {
 	struct nvmeibc_disk_id  *disk_id_iter;
 	int rv, n_calls = 0;
@@ -1300,7 +1300,7 @@ int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume,
 
 	spin_lock_irqsave((spinlock_t *)&volume->spinlock, flags);
 	list_for_each_entry(disk_id_iter, &volume->info.disks, link) {
-		if ((rv = (*call_fn)(disk_id_iter->disk, ctx)) < 0)
+		if ((rv = (*call_fn)(&(disk_id_iter->disk->base), ctx)) < 0)
 			goto unlock;
 		n_calls++;
 	}

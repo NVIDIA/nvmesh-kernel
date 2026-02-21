@@ -1230,8 +1230,9 @@ void nvmeibc_topologies_error_state_reason(struct nvmeibc_topologies *nt, void *
 		}
 		nvmeibc_raid1_calc_io_perm(t, c, r, &reason);
 		if (reason.code) {										// We are interested in first problematic praid
-			const struct nvmeibc_disk *disk = ((reason.si < (u32)r1->replicas) ? r1->segments[reason.si].disk : NULL);
-			scnprintf(nt->io_disabled_reason, sizeof(nt->io_disabled_reason), "segment %d,%d,%d disconnected, disk %s, error_code: %d", c, r, reason.si, (disk ? ((disk)->base.ops.get_full_name(&((disk))->base)) : "?"), reason.code);
+			struct nvmeibc_disk_segment const* sgmnt = ((reason.si < (u32)r1->replicas) ? &(r1->segments[reason.si]) : NULL);
+			const struct nvmeibc_idisk *disk = sgmnt ? &(sgmnt->disk->base) : NULL;
+			scnprintf(nt->io_disabled_reason, sizeof(nt->io_disabled_reason), "segment %d,%d,%d disconnected, disk %s, error_code: %d", c, r, reason.si, (disk ? disk->ops.get_full_name(disk) : "?"), reason.code);
 			return;												// First problematic praid is enough, no need to scan them all
 		}
 	}
