@@ -3,6 +3,11 @@
 
 #include "kr_incs.h"
 
+enum nvmeibc_disk_status {
+	d_online,
+	d_offline
+};
+
 struct nvmeibc_disk_client_journal;
 
 struct nvmeibc_idisk { /* shared interface/contract between block & core */
@@ -23,6 +28,7 @@ struct nvmeibc_idisk { /* shared interface/contract between block & core */
 		int (*read_cont_preventors)(struct nvmeibc_idisk *self);
 		int (*inc_cont_preventors)(struct nvmeibc_idisk *self);
 		int (*dec_cont_preventors)(struct nvmeibc_idisk *self);
+		enum nvmeibc_disk_status (*get_status)(struct nvmeibc_idisk const * self);
 	} ops;
 };
 

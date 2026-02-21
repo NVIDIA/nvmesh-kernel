@@ -941,7 +941,7 @@ int nvmeibc_disk_toma_send(struct nvmeibc_disk *disk, u64 handle, struct nvmeibc
 int nvmeibc_disk_subscribe_toma_service(struct nvmeibc_disk *disk, u64 handle, struct nvmeibc_disk_subscription_params *params){
 	struct tomaSimulator* simToma = &serverOf(disk)->simToma;
 	int rv = 0;
-	if (nvmeibc_disk_get_status(disk) != d_online) {
+	if (disk->base.ops.get_status(&(disk->base)) != d_online) {
 		_NI(trace_simu_disk_nvmeibc_disk_subscribe_toma_service, "Deferring SUBSCRIBE disk=@DISK handle=@HANDLE", disk, handle);
 		rv = -EAGAIN; /* This usecase is not an error for upper software layer */
 	}

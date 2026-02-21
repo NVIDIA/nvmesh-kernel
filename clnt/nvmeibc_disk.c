@@ -11301,7 +11301,7 @@ int nvmeibc_disk_unsubscribe_toma_service(struct nvmeibc_disk *disk, u64 handle)
 	/* [NVMESH-3829]: Also send the unsubscribe if the subscribe is still in-progress.
 	 * 		(It is serialised on the admin WQ) */
 	if (entry->subscribed == TOMA_ALREADY_SUBSCRIBED || entry->subscribed == TOMA_ASYNC_SUBSCRIBE_SENT) {
-		if (nvmeibc_disk_get_status(disk) == d_online) {
+		if (disk->base.ops(&(disk->base)) == d_online) {
 			_NT(trace_2_disk_nvmeibc_disk_unsubscribe_toma_service, "Disk online");
 			if ((ch = get_alive_admin_ch(disk))) {
 				_NT(trace_3_disk_nvmeibc_disk_unsubscribe_toma_service, "UNSUBSCRIBE disk=@DISK handle=@HANDLE", disk, handle);

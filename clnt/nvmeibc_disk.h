@@ -905,11 +905,6 @@ struct pause_req {
 	struct list_head reqs;  			// Pointer to next request in the linked list of requests
 };
 
-enum nvmeibc_disk_status {
-	d_online,
-	d_offline
-};
-
 /* create remote disk assets */
 struct nvmeibc_ib_admin_channel;
 struct nvmeibc_block_device;
@@ -1041,9 +1036,9 @@ struct nvmeibc_toma_recv_msg;
 void nvmeibc_disk_toma_recv(struct nvmeibc_disk *disk,
 							struct nvmeibc_toma_recv_msg *toma_recv_msg);
 
-static inline enum nvmeibc_disk_status nvmeibc_disk_get_status(
-	const struct nvmeibc_disk *disk)
+static inline enum nvmeibc_disk_status __nvmeibc_disk_get_status_impl(const struct nvmeibc_idisk *self)
 {
+	struct nvmeibc_disk const* disk = nvmeibc_disk_from_base(self);
 	return (disk && !atomic_read(&disk->paused)) ? d_online : d_offline;
 }
 
@@ -1141,6 +1136,7 @@ static inline void nvmeibc_disk_base_init(struct nvmeibc_disk *self)
 	self->base.ops.read_cont_preventors = __nvmeibc_disk_read_cont_preventors_impl;
 	self->base.ops.inc_cont_preventors = __nvmeibc_disk_inc_cont_preventors_impl;
 	self->base.ops.dec_cont_preventors = __nvmeibc_disk_dec_cont_preventors_impl;
+	self->base.ops.get_status = __nvmeibc_disk_get_status_impl;
 }
 
 void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);

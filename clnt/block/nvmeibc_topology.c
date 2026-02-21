@@ -1060,10 +1060,10 @@ static void __set_active_topology(struct nvmeibc_topologies *nt, struct nvmeibc_
 }
 
 /* 0 - OK, 1 - pausing, 2 - never discovered, 3 - paused */
-static int __disk_p_state2num(const struct nvmeibc_disk *disk)
+static int __disk_p_state2num(const struct nvmeibc_idisk *disk)
 {
-	return (((disk)->base.ops.should_pause(&((disk))->base))              ? 1 : 0) +
-		   ((nvmeibc_disk_get_status(disk) == d_offline) ? 2 : 0);
+	return (disk->ops.should_pause(disk) ? 1 : 0) +
+		   ((disk->ops.get_status(disk) == d_offline) ? 2 : 0);
 }
 
 static inline void io_perm_merge(enum nvmeib_io_type_permission *res, enum nvmeib_io_type_permission val)
@@ -1108,14 +1108,14 @@ static enum nvmeib_io_type_permission nvmeibc_raid1_calc_io_perm(const struct nv
 
 	/* Step 0: Basic optional Config check and print of segs */
 	raid1_for_each_seg(r1, seg, si) {
-		const struct nvmeibc_disk *disk = seg->disk;
+		const struct nvmeibc_idisk *disk = &(seg->disk->base);
 		if (unlikely(!seg->toma_reg || !disk)) {
 			store_seg_error_goto(_out_seg_err, t_01_prioperm, "tr=@TOMA_REG, disk=@DISK", seg->toma_reg, disk); /* Daniel: happens only if code has a BUG */
 		}
 		if (!info) {	// Dont print second time when we are just caluclating the reason
 			const char *s_acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
 			_NT_TOPO(t_02_prioperm, t, "seg=" SEGMENT_FMT " disk=@DISK_NAME acm=@ACM act=@ACT p=@RV, lid=@LID @C_PRV uuid=@SEG_DBG_UUID",
-				c, r, si, ((disk)->base.ops.get_full_name(&((disk))->base)), s_acm, seg->registration_status,
+				c, r, si, disk->ops.get_full_name(disk), s_acm, seg->registration_status,
 				__disk_p_state2num(disk), r1->lid.all, r1->version, seg->dbg_uuid);
 		}
 	}
@@ -4991,8 +4991,14 @@ _out:
 	spin_unlock_irqrestore(&nt->lock, flags);
 }
 
-#define __host_of(disk) \
-	(((disk)->base.ops.get_host_name(&((disk))->base))[0] == '?' ? "Unknown" : ((disk)->base.ops.get_host_name(&((disk))->base)))
+static const char* __host_of(struct nvmeibc_idisk const* disk)
+{
+	const char* name = disk->ops.get_host_name(disk);
+	if (name && name[0] == '?')
+		return "Unknown";
+	else
+		return name;
+}
 
 static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvmeib_txt *txt)
 {
@@ -5035,13 +5041,13 @@ static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvme
 				continue;							// To next r1 in chunk
 			}
 			raid1_for_each_seg(r1, seg, si) {
-				const struct nvmeibc_disk *disk = seg->disk;
+				const struct nvmeibc_idisk *disk = &(seg->disk->base);
 				const char *acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
 				char slmap[LOCK_OWNERSHIP_MAP_STRING_LEN];
 				const int disk_p_state = __disk_p_state2num(disk);
 				lock_ownership_map_to_string(&seg->lmap, slmap);
 				nvmeib_txt_append(txt, "\t%-6d %-7d %-26s %-21s %-12llx %-12llx %-32.32s [a=%d p=%d acm=%s sy=%d lm(%s) r1v=0x%x lid=0x%x|%c uid=%-.8s]",
-					r, si, __segment_state(r1, si), ((disk)->base.ops.get_name(&((disk))->base)),
+					r, si, __segment_state(r1, si), disk->ops.get_name(disk),
 					seg->first_lba, seg->first_lba + seg->length -1,
 					__host_of(disk),
 					seg->registration_status, disk_p_state, acm,
@@ -5116,8 +5122,8 @@ static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *j
 										{
 											jdr_object_scope(jdr, "disk");
 											jdr->ops.ascii(jdr, "name", ((disk)->base.ops.get_name(&((disk))->base)));
-											jdr->ops.ascii(jdr, "host", __host_of(disk));
-											jdr_write_var(jdr, paused, __disk_p_state2num(disk));
+											jdr->ops.ascii(jdr, "host", __host_of(&(disk->base)));
+											jdr_write_var(jdr, paused, __disk_p_state2num(&(disk->base)));
 										}
 									}
 								}
