@@ -45,9 +45,9 @@ int printk(const char *fmt,...) {
 }
 
 /***************************** Pausable layer - glue to vfunc **************************/
-static int __um_run_cmpxchg(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
+static int __um_run_cmpxchg(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *dc) {
 	(void)self;(void)handle;
-	cinst.vtable.run_cmpxchg(disk, addr, dc);
+	cinst.vtable.run_cmpxchg(nvmeibc_disk_from_base(disk), addr, dc);
 	return 0;
 }
 

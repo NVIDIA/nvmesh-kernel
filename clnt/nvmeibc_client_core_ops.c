@@ -9,10 +9,10 @@
 
 #include "nvmeibc_pausable.h"
 
-static int __run_cmpxchg(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *comp)
+static int __run_cmpxchg(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *comp)
 {
 	(void)self;
-	return nvmeibc_pd_cmpxchg(disk, handle, addr, comp);
+	return nvmeibc_pd_cmpxchg(nvmeibc_disk_from_base(disk), handle, addr, comp);
 }
 
 static int __run_read_lock(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *comp)

@@ -416,7 +416,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 		__set_cmpxchg_for_release(l, seg);
 		nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds ? locksets->cmds->o : NULL, l);
 		dp_locks_trace_lock_release(locksets->cmds ? locksets->cmds->o : NULL, l);
-		rv = icore_ops->run_cmpxchg(icore_ops, disk, handle_of(seg), l->address, dc);
+		rv = icore_ops->run_cmpxchg(icore_ops, &disk->base, handle_of(seg), l->address, dc);
 		if (rv < 0) { // Simulate failed release completion
 			dc->lock_status = NCL_STATUS_FAIL_NO_COMP;
 			dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
@@ -1261,7 +1261,7 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	l->status = NCL_STATUS_ISSUED;						// Issue owner request
 	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 	nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
-	rv = icore_ops->run_cmpxchg(icore_ops, seg->disk, handle_of(seg), l->address, dc);
+	rv = icore_ops->run_cmpxchg(icore_ops, &seg->disk->base, handle_of(seg), l->address, dc);
 	lock_rqsted = jiffies;
 	if (unlikely(rv)) { // handle pausable/transport layer immediate errors
 		__give_failed_lock_cb(dc);

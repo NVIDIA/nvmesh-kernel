@@ -7,6 +7,7 @@
 #define NVMEIBC_ICORE_OPS_H
 
 #include "kr_incs.h"
+#include "nvmeibc_idisk.h"
 
 struct nvmeibc_disk;
 struct nvmeibc_d_rdma_comp;
@@ -21,7 +22,7 @@ struct nvmeibc_icore_ops;
 
 //the following struct defines "core" layer functionality towards the block layer
 struct nvmeibc_icore_ops {
-	int (*run_cmpxchg)(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *comp);
+	int (*run_cmpxchg)(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *comp);
 	int (*run_read_lock)(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, void *handle, u64 addr, struct nvmeibc_d_rdma_comp *comp);
 	int (*jmdc_read)(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_jmdc_read_comp *comp);
 	int (*free_jrnl_ents)(struct nvmeibc_icore_ops const* self, struct nvmeibc_disk *disk, struct nvmeibc_disk_free_jrnl_ents_comp *comp);

@@ -538,7 +538,7 @@ static int __release_lock_of_sync(struct nvmeibc_cmd_lock *l, struct recovery_sy
 	dp_locks_trace_lock_release(so->o, l);
 	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 	nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
-	rv = icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
+	rv = icore_ops->run_cmpxchg(icore_ops, &l->ds->disk->base, handle_of(l->ds), l->address, dc);
 	if (rv) {
 		__change_lock_status_to(l, NCL_STATUS_FAIL_NO_COMP);
 		so->error = -10016;
@@ -919,7 +919,7 @@ _func_start:
 		so->stage = sync_stage_recov_lo_try_lock_cb;
 		lock_comp->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 		nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
-		err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+		err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, &l->ds->disk->base, handle_of(l->ds), l->address, lock_comp));
 		if (!err)
 			BLKCMP_SO_ASYNC_RESUME_CUR(0);
 		so->error = -10010;	  // Abort, could not take owner lock
@@ -1337,7 +1337,7 @@ _func_start:
 			dp_locks_trace_lock_release(so->o, l);
 			lock_comp->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 			nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
-			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, &l->ds->disk->base, handle_of(l->ds), l->address, lock_comp));
 			if (!err)
 				BLKCMP_SO_ASYNC_RESUME_CUR(0);
 			_NT(t_ss2dbit_error_3, "ss2dbit error 3 - cmpxchg failed, stage=sync_stage_st_to_db_written_db, err=@ERR", err);
@@ -1606,7 +1606,7 @@ _func_start:
 			__invoke_crash_on_lock_corruption(l, 0, "take", 1);	// As if was taken before release
 			lock_comp->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 			nvmeibc_cmd_lock_request_io_pet_describe(so->o, l);
-			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, l->ds->disk, handle_of(l->ds), l->address, lock_comp));
+			err = BLKCMP_SO_ASYNC_AWAIT_RV(icore_ops->run_cmpxchg(icore_ops, &l->ds->disk->base, handle_of(l->ds), l->address, lock_comp));
 			#else
 			__change_lock_status_to(l, NCL_STATUS_INVALID);
 			l->comp.code = NVMEIBC_CMD_LOCK_READ_DR;	// Important, we are going to only read the lock
