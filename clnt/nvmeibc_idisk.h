@@ -35,7 +35,7 @@ struct nvmeibc_idisk { /* shared interface/contract between block & core */
 static inline const char* nvmeibc_idisk_get_host_name_for_logging(struct nvmeibc_idisk const* disk)
 {
 	const char* name = disk->ops.get_host_name(disk);
-	if (name && name[0] == '?')
+	if (!name || name[0] == '?')
 		return "Unknown";
 	else
 		return name;
