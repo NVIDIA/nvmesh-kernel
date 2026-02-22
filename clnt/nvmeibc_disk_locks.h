@@ -277,6 +277,15 @@ static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_lock_id(const struct 
 }
 
 __attribute__((nonnull (1)))
+static inline union nvmeib_lock_blkset_entry nvmeibc_d_rdma_comp_get_lock_blkset_entry(const struct nvmeibc_d_rdma_comp *self)
+{
+	return (union nvmeib_lock_blkset_entry){
+		.lock_id = nvmeibc_d_rdma_comp_get_lock_id(self), 
+		.blkset_info=nvmeibc_d_rdma_comp_get_bi(self)
+	};
+}
+
+__attribute__((nonnull (1)))
 static inline union nvmeib_lock_id nvmeibc_d_rdma_comp_get_contending_id(const struct nvmeibc_d_rdma_comp *self)
 {
 	return nvmeibc_d_rdma_comp_get_lock_id(self);

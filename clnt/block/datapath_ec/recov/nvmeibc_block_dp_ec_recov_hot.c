@@ -1389,8 +1389,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 	init_block_cmd(cmd, h->so->o, ds);
 
 	if (lock) {
-		lock_entry.blkset_info = nvmeibc_d_rdma_comp_get_bi(&lock->comp);
-		lock_entry.lock_id = nvmeibc_d_rdma_comp_get_contending_id(&lock->comp);
+		lock_entry = nvmeibc_d_rdma_comp_get_lock_blkset_entry(&lock->comp);
 	} else {
 		lock_entry.all = h->params.lock_ent.all;
 		pass2toma = false;
