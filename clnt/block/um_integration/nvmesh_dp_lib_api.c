@@ -559,7 +559,7 @@ static void __create_dummy_segment(struct dplib_caller *sw, int i) {
 	struct nvmeibc_disk_segment *seg = &sw->segs[i];
 	struct nvmeibc_subscription_ctx *tr = &sw->trs[i];
 	const struct seg_params_t *p = &sw->gp->pr.segs[i];
-	seg->disk = p->disk;
+	seg->disk = &p->disk->base;
 
 	// __digest_segment_layout()
 	strlcpy(seg->uuid, p->uuid, sizeof(seg->uuid));
@@ -576,10 +576,10 @@ static void __create_dummy_segment(struct dplib_caller *sw, int i) {
 	tr->length = seg->length = p->dlba_length;
 
 	// __toma_segment_register_succeed()
-	seg->disk = p->disk;
+	seg->disk = &p->disk->base;
 	seg->registration_status = SEG_REGSTATUS_TOMA_OK;
-	seg->max_dma_size = (((seg->disk)->base.ops.get_max_request_size_bytes(&((seg->disk))->base)) >> NVMEIBC_SECTOR_SHIFT);
-	seg->sw_md_size = __nvmeibc_disk_sw_md_size(seg->disk);
+	seg->max_dma_size = (seg->disk->ops.get_max_request_size_bytes(seg->disk) >> NVMEIBC_SECTOR_SHIFT);
+	seg->sw_md_size = __nvmeibc_disk_sw_md_size(nvmeibc_disk_from_base(seg->disk));
 	seg->lmap = p->lmap;
 	seg->sync_safety = p->sync_safety;
 	seg->toma_acm = p->toma_acm;

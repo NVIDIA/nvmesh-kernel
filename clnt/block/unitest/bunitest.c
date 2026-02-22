@@ -840,7 +840,7 @@ struct io_cmd_completion_count_disk_hooks {
 static int __io_cmd_completion_count(struct nvmeibc_disk_hook_args *args, struct nvmeibc_block_command *cmd)
 {
 	struct io_cmd_completion_count_disk_hooks *hooks = container_of(args, struct io_cmd_completion_count_disk_hooks, disk_hooks.args);
-	int disk_i = cmd->ds->disk - hooks->sys->clients[0].physDiscs;
+	int disk_i = nvmeibc_disk_from_base(cmd->ds->disk) - hooks->sys->clients[0].physDiscs;
 	++(hooks->cb_counts[disk_i]);
 	return 0;
 }
@@ -6165,7 +6165,7 @@ TEST_FUNC int unitest_GoodPathLockServer_n_mirrored(struct NVMeshSystem *sys) {
 		ground_thruth_lock_create(gt[0], own_i, NVMEIBC_CMD_LOCK_OWNER, cpr[own_i].dlba_start + disk_offset);	// Owner lock
 		for (i = 1; i < n_locks; i++) {																		// Active locks
 			gt[i].si   = ((n_rdma_segs + gt[i-1].si + step) % n_rdma_segs);
-			gt[i].disk = pr->segments[gt[i].si].disk;
+			gt[i].disk = nvmeibc_disk_from_base(pr->segments[gt[i].si].disk);
 			gt[i].type = sibs_type;
 			gt[i].addr = cpr[gt[i].si].dlba_start + disk_offset;
 		}

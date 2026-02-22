@@ -150,7 +150,7 @@ static void __init_transport(struct lib_call_api_params_generic *gen) {
 		j->tot_n_rng = 4;
 		strlcpy(j->serjio_boot_id, "Serjio", sizeof(j->serjio_boot_id));
 		j->rng_binje = MY_BINJE;
-		seg->disk = disk;
+		seg->disk = &disk->base;
 		seg->dlba_start =  (i << 10);		// Segment offset i*4[Mb]  = i*1[K]blocks
 		seg->dlba_length = (1 << 20);		// Segment length is 4[GB] = 1[M]blocks
 		seg->sync_safety = NVMEIBT_PRAID_IS_PRIMARY_OWNER_LOCK_MOVING_NO;

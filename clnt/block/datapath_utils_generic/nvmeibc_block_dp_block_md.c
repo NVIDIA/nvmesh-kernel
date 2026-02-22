@@ -94,7 +94,7 @@ int nvmeibc_check_metadata_read_cmd(struct nvmeibc_block_command *cmd, u64 rlba,
 					if (unlikely(enable_di_debug_mode)) {
 						dp_dbgdi_mark_edic(blk_data, EDIC_FAIL, read_edic, exp_edic, rlba);
 					}
-					WARN(nvmeibc_warn_on_edic_verification_failure, "EC-7676 - %s: op=%u, Disk %s, Seg %x, stg=%d edic fail: rlba:%llu, P=%d, read_edic=0x%08x, calc_edic=0x%08x, slice_ofst=%u, blk_data=0x%016llx\n", cmd->o->nd->name, cmd->o->op, ((cmd->ds->disk)->base.ops.get_name(&((cmd->ds->disk))->base)), cmd->ds->dbg_uuid, cmd->my_stage, rlba, cmd->is_parity, read_edic, exp_edic, (j / NVMEIBC_SECTOR_SIZE), *(u64*)blk_data);
+					WARN(nvmeibc_warn_on_edic_verification_failure, "EC-7676 - %s: op=%u, Disk %s, Seg %x, stg=%d edic fail: rlba:%llu, P=%d, read_edic=0x%08x, calc_edic=0x%08x, slice_ofst=%u, blk_data=0x%016llx\n", cmd->o->nd->name, cmd->o->op, cmd->ds->disk->ops.get_name(cmd->ds->disk), cmd->ds->dbg_uuid, cmd->my_stage, rlba, cmd->is_parity, read_edic, exp_edic, (j / NVMEIBC_SECTOR_SIZE), *(u64*)blk_data);
 					IO_STATS_INCR(dp_io_stats, DP_IO_STATS_MD_EDIC_CHECK_ERRORS);
 					return EPERM_READ_FAIL;
 				} else if (unlikely(enable_di_debug_mode)) {

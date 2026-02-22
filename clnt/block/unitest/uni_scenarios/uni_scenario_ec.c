@@ -1476,9 +1476,9 @@ void nvmeibc_raid_wipe_txid(struct nvmeibc_raid1 *raid) {
 
 
 static int __get_jour_size(struct nvmeibc_disk_segment *seg) {
-	return ((seg->disk)->base.ops.get_journal(&((seg->disk))->base))->rng_nlba / nvmeibc_jentry_num_blocks;
+	return seg->disk->ops.get_journal(seg->disk)->rng_nlba / nvmeibc_jentry_num_blocks;
 }
-static void* __get_seg_journal_md_ptr(struct nvmeibc_disk_segment *seg) { return ramDiskSimulator_get_metadataptr(&serverOf(seg->disk)->ramDisk, ((seg->disk)->base.ops.get_journal(&((seg->disk))->base))->rng_slba); }
+static void* __get_seg_journal_md_ptr(struct nvmeibc_disk_segment *seg) { return ramDiskSimulator_get_metadataptr(&serverOf(seg->disk)->ramDisk, seg->disk->ops.get_journal(seg->disk)->rng_slba); }
 
 // scan all LOCKSET of raid members & verify the TxID is identical on slice_start & parities.
 void nvmeibc_raid_verify_tx_id_replica_consistency(struct nvmeibc_raid1 *raid) {
@@ -1595,7 +1595,7 @@ TEST_FUNC int unitest_GoodPathIO_block_md_illegal_splits(bunitest_s* B) {
 				ramDiskSimulator_read_txid(&owner_lock_server->ramDisk, &pre__io_tx_id, own_lock_offset, 1);
 				nvmeibc_wait_for_all_jam_entires_to_be_free(sys, &pr, t);
 				for (i=0; i < n_segs; i++) {
-					jour_io_offset[i] = nvmeibc_jam_simu_alloc_entry(raid->segments[i].disk, io_sgmnt2dlba[i], pre__io_tx_id, true /*dry_run*/);
+					jour_io_offset[i] = nvmeibc_jam_simu_alloc_entry(nvmeibc_disk_from_base(raid->segments[i].disk), io_sgmnt2dlba[i], pre__io_tx_id, true /*dry_run*/);
 					BUG_ON(jour_io_offset[i] < 0);
 					seg_jmd[i] = (void*)((u8*)pjmd[i] + md_size[i]*jour_io_offset[i]*nvmeibc_jentry_num_blocks);
 				}

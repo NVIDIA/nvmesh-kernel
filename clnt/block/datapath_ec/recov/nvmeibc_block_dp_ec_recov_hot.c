@@ -715,7 +715,7 @@ static u32 _call_for_bitmap(struct htr_ctx *h, const ulong bitmap, enum h_op op,
 		_NTh(trace_4_dp_ec_recov_hot_call_for_bitmap, h, "Failed '@FUNC'(op=@HOT_RECOVERY_OP) for @INT[@BITMAP] of @INT[@BITMAP] segs:", func, op, hweight32(rv_bm), (u32)rv_bm, n_all, bitmap);
 		for_each_set_bit(si, &rv_bm, r1_size) {
 			_NTh(trace_5_dp_ec_recov_hot_call_for_bitmap, h, "[@INDEX] si=@SI, disk=@DISK_NAME seg=@SEGMENT_UUID", i++, si,
-				((h->params.raid1->segments[si].disk)->base.ops.get_full_name(&((h->params.raid1->segments[si].disk))->base)),
+				h->params.raid1->segments[si].disk->ops.get_full_name(h->params.raid1->segments[si].disk),
 				h->params.raid1->segments[si].uuid);
 		}
 	}
@@ -1146,7 +1146,7 @@ static int read_jmdc(struct htr_ctx *h, int si)
 	gen_cmd->data_sink[1] = &gen_cmd->param.uj.ent_md_dest;
 
 	__nvmeibc_read_jmdc_request_pet_describe(h, si, &gen_cmd->param.uj.client_uuid);
-	rv = (icore_ops->execute_gen(icore_ops, &cmd->ds->disk->base, gen_cmd) == 0) ? -EINPROGRESS : -1;
+	rv = (icore_ops->execute_gen(icore_ops, cmd->ds->disk, gen_cmd) == 0) ? -EINPROGRESS : -1;
 
 out:
 	NFOUT;
@@ -1164,7 +1164,7 @@ static int read_jmdc_comp(struct htr_ctx *h, int si)
 	struct nvmeibc_block_command *cmd = &h->seg_info[si].cmd;
 	struct nvmeibc_disk_gen_cmd *gen_cmd = cmd->gen_cmd;
 	struct cl_jour *clj = &h->seg_info[si].clj;
-	struct nvmeibc_idisk *disk = &(h->params.raid1->segments[si].disk->base);
+	struct nvmeibc_idisk *disk = h->params.raid1->segments[si].disk;
 	const struct nvmeibc_disk_client_journal *jour = disk->ops.get_journal(disk);
 	int rv = -1;
 	unsigned i;
@@ -1410,7 +1410,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 
 		struct nvmeibc_disk_free_jrnl_ents_comp *free_ents_comp = &h->seg_info[si].free_ents_comp;
 		/* If we have a valid jentry, send the free ents command instead */
-		free_ents_comp->disk = h->params.raid1->segments[si].disk;
+		free_ents_comp->disk = nvmeibc_disk_from_base(h->params.raid1->segments[si].disk);
 		memcpy(free_ents_comp->seg_uuid, ds->uuid, NVMEIB_GID_STR_MAX);
 		free_ents_comp->recov_src = NVMEIB_RECOV_SRC_HTR;
 		free_ents_comp->blkset_slba = ds->first_lba + (h->so->rlba / h->so->r1->slice_size);
@@ -1430,13 +1430,13 @@ static int send_recovered(struct htr_ctx *h, int si)
 
 		_NTh(trace_dp_ec_recov_hot_send_recovered_entries, h,
 			"Send free-ents, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
-			((ds->disk)->base.ops.get_name(&((ds->disk))->base)), h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, pass2toma, lock_entry.all);
+			ds->disk->ops.get_name(ds->disk), h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, pass2toma, lock_entry.all);
 		__nvmeibc_free_jrnl_ents_request_pet_describe(h, si, free_ents_comp);
-		rv = icore_ops->free_jrnl_ents(icore_ops, &ds->disk->base, free_ents_comp);
+		rv = icore_ops->free_jrnl_ents(icore_ops, ds->disk, free_ents_comp);
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_entries_failed, h,
 				"Send free-ents failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX gen_id=@JRNL_RNG_GEN:@JRNL_RNG_ENT_GEN rv=@RV",
-				((ds->disk)->base.ops.get_name(&((ds->disk))->base)), h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, rv);
+				ds->disk->ops.get_name(ds->disk), h->seg_info[si].clj.desc.rng_id, h->tx_jentries[si].jent_idx, rng_gen_id, ent_gen_id, rv);
 			/*
 			 * Ideally we (the block team) would like to execute the following two lines;
 			 * (This is the way block code implements failure treatment)
@@ -1456,12 +1456,12 @@ static int send_recovered(struct htr_ctx *h, int si)
 			lock_entry.all, h->so, range_id, entry_id, pass2toma);
 
 		_NTh(trace_dp_ec_recov_hot_send_recovered, h, "Send blkset-recovered, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX, pass2toma=@BOOL lock_id=@LOCK_ENT_U64",
-		   ((ds->disk)->base.ops.get_name(&((ds->disk))->base)), range_id, entry_id, pass2toma, lock_entry.all);
+		   ds->disk->ops.get_name(ds->disk), range_id, entry_id, pass2toma, lock_entry.all);
 		nvmeibc_send_recovered_blkset_request_pet_describe(h->so, cmd, lock_entry.all, si);
-		rv = icore_ops->execute_gen(icore_ops, &ds->disk->base, cmd->gen_cmd);
+		rv = icore_ops->execute_gen(icore_ops, ds->disk, cmd->gen_cmd);
 		if (rv) {
 			_NTh(trace_dp_ec_recov_hot_send_recovered_failed, h, "Send blkset-recovered failed, disk @DISK_NAME, jri=@JRI, jent_idx=@JENT_IDX rv=@RV",
-			   ((ds->disk)->base.ops.get_name(&((ds->disk))->base)), range_id, entry_id, rv);
+			   ds->disk->ops.get_name(ds->disk), range_id, entry_id, rv);
 			if (cmd->gen_cmd)
 				cmd->gen_cmd->comp_code = rv; // Simulate completion
 			/* See the comment above dp_ec_sync_cmd_cb(cmd); */
@@ -2256,7 +2256,7 @@ static int __import_cold_candidate_to_htr(struct htr_ctx *h)
 	for_each_set_bit(si, &txbm_topo_rw, h->n_segs) {
 		struct cl_jour *clj = &h->seg_info[si].clj;
 		const struct candidate_location *loc = &cand->locations[si];
-		__simulate_read_jmdc_descriptor_by_recoverer_descriptor(&clj->desc, ((r1->segments[si].disk)->base.ops.get_journal(&((r1->segments[si].disk))->base)), loc);
+		__simulate_read_jmdc_descriptor_by_recoverer_descriptor(&clj->desc, r1->segments[si].disk->ops.get_journal(r1->segments[si].disk), loc);
 
 		binje = __get_n_jblks_in_jentry_from_disk_cmd(&clj->desc);										   // Enough to do it only once, becuase cold recovery already verified that all the values are equal.
 		if (h->binje == HTR_INVALID_N_SLICE_JOUR) {

@@ -454,7 +454,7 @@ void dp_ec_sync_cmd_cb(struct nvmeibc_block_command *cmd)
 	dp_dbgdi_do_rdr_info(cmd);
 	if (dp_sync_cmd_generic_cb(cmd) != 0)
 		return;	// Waiting for at least 1 remaining read or write
-	on_disk_hook(dp_ec_sync_cmd_cb, cmd->ds->disk, on_sync_cb_stage_end, cmd);	// In simulator only, must be after atomic decs to verify dbits barrier
+	on_disk_hook(dp_ec_sync_cmd_cb, nvmeibc_disk_from_base(cmd->ds->disk), on_sync_cb_stage_end, cmd);	// In simulator only, must be after atomic decs to verify dbits barrier
 	so = cmd->cmdarr->o->rso;
 	switch (so->o->op) {
 		case NVMEIB_BLOCK_IO_OP_RECOVER_STALE:

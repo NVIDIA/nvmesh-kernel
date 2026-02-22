@@ -292,7 +292,7 @@ int dp_locks_release_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_rdma_co
 	__invoke_crash_on_lock_corruption(locksets, lock_i, "release", 1);
 	WARN_ON(NCL_is_failed_to_acquire(dc->lock_status));			// Cant release if we havent acquired lock
 	if (NCL_had_release_callback(dc->lock_status)) {
-		icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, dc);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
 	}
 
 	DEBUG_LOCKS_CONTENTION(dc);
@@ -384,14 +384,14 @@ static void __set_cmpxchg_for_release(struct nvmeibc_cmd_lock*l, struct nvmeibc_
 	dc->compare = holder.all;
 }
 
-#define __print_release_lock_status(trace_name, msg, l) _ND(trace_name, "@STR: locksets=@LOCKSETS[@LSI] @DLBA disk=@DISK_NAME", msg, dp_locks_get_locks_header(l), l->lockset_idx, l->address, ((l->ds->disk)->base.ops.get_name(&((l->ds->disk))->base)));
+#define __print_release_lock_status(trace_name, msg, l) _ND(trace_name, "@STR: locksets=@LOCKSETS[@LSI] @DLBA disk=@DISK_NAME", msg, dp_locks_get_locks_header(l), l->lockset_idx, l->address, l->ds->disk->ops.get_name(l->ds->disk));
 
 static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 {
 	struct nvmeibc_cmd_lock *l = &locksets[lsi], *lo = &locksets[l->owner_idx];
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	struct nvmeibc_disk_segment *seg = l->ds;
-	struct nvmeibc_disk *disk = seg->disk;
+	struct nvmeibc_disk *disk = nvmeibc_disk_from_base(seg->disk);
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (unlikely(lo->unlock_val == RELEASE_LOCK__FORCE_ABANDON)) {
@@ -472,7 +472,7 @@ static void dp_locks_send_read_lock(struct nvmeibc_d_iocmd_comp *cmp) {
 
 	dc->opr = NVMEIBC_LOCK_READ;
 	nvmeibc_cmd_lock_request_io_pet_describe(cmd->o, l);
-	rv = icore_ops->run_read_lock(icore_ops, &l->ds->disk->base, iocmd->lpb.handle, lock_addr, dc);
+	rv = icore_ops->run_read_lock(icore_ops, l->ds->disk, iocmd->lpb.handle, lock_addr, dc);
 	times[1] = jiffies;
 	if (rv) {
 		_ND(t_1srl, "locksets=@LOCKSETS[@LSI] rv=@RV o=@OPERATION c=@CMD_PTR", locksets, l->lockset_idx, rv, cmd->o, cmd);
@@ -675,7 +675,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	} else {													// Explicit Read-lock view operation via pausable layer
 		nvmeibc_cmd_lock_response_io_pet_describe(o, l);
 		if (NCL_had_acquire_callback(l->status))
-			icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, read_comp);
+			icore_ops->cb_called_comp(icore_ops, l->ds->disk, read_comp);
 		__squash_transport_lock_status(l, l->status);
 		if (l->status == NCL_STATUS_DISKDEAD) {
 			OPERATION_DBG_CNTR_INC(o, n_lcmd_failed);
@@ -741,7 +741,7 @@ static void __print_lock_to_log(struct nvmeibc_cmd_lock* locksets, int lsi)
 {	// Daniel: Todo, unite with code of __dump_operation_unsafe()
 	const struct nvmeibc_cmd_lock* l = &locksets[lsi]; (void)l;
 	_ND(trace_lock_to_log, "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] type=@TYPE @DISK_NAME:@DLBA, n_sibs=@N_SIBS", locksets, lsi, l->owner_idx,
-	   l->type, ((l->ds->disk)->base.ops.get_name(&((l->ds->disk))->base)), l->address, l->n_siblings);
+	   l->type, l->ds->disk->ops.get_name(l->ds->disk), l->address, l->n_siblings);
 }
 
 /* Add locks to protect given raid. Returns the amount of locks added */
@@ -836,7 +836,7 @@ void dp_block_translation_unit_calc_locks(struct dp_block_translation_unit *tu, 
 	nvmeibc_clmat_allocate(&o, true, N_MAX_RAID_LOCKS, 0, 0);
 	_out->n_locks = dp_fill_locks_for_raid(it->res.r, tu->input.op, it->res.rlba, o.locks);
 	for (i = 0; i < _out->n_locks; i++) {
-		 _out->ldisks[i] = o.locks[i].ds->disk;
+		 _out->ldisks[i] = nvmeibc_disk_from_base(o.locks[i].ds->disk);
 		 _out->ldescr[i] = nvmeibc_rdma_intent_to_string(o.locks[i].type);
 	}
 	nvmeibc_operation_move_mem_to_locks(&o);			// Simulate as if operation completed
@@ -862,7 +862,7 @@ static void __retry_owner_lock(struct nvmeibc_cmd_lock *l, bool autofail)
 			_NT(trace_1_retry_owner_lock, "Retry locksets=@LOCKSETS[@LSI] rqst=@MILISECONDS", locksets, lsi, jiffies_to_msecs(diff));
 		}
 	} else {
-		_NT(t2_rol, "locksets=@LOCKSETS[@LSI] Error with lock for @DLBA disk=@DISK_NAME", locksets, lsi, l->address, ((l->ds->disk)->base.ops.get_name(&((l->ds->disk))->base)));
+		_NT(t2_rol, "locksets=@LOCKSETS[@LSI] Error with lock for @DLBA disk=@DISK_NAME", locksets, lsi, l->address, l->ds->disk->ops.get_name(l->ds->disk));
 		dc->lock_status = NCL_STATUS_DISKDEAD_NO_RETRY;
 		dc->callback(dc, nvmeibc_d_rdma_comp_tag_make()); /* Simulate failure callback */
 		diff = (jiffies - start);
@@ -1229,7 +1229,7 @@ static int __lock_response_cb(struct nvmeibc_d_rdma_comp *dc, struct nvmeibc_d_r
 	nvmeibc_profiling_end_take_cmd_stats_for_op(__raid_gp_profile_for_rwt_op_locks(l, locksets), l->ds->lock_operation_profiler, locksets->cmds->o, l->type, l, rv1);
 
 	if (NCL_had_acquire_callback(dc->lock_status)) {	// Decrease the transferring counter, to allow PAUSE arrive safely
-		icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, dc);	// No callback issued -> immediate error -> decreased trasnsferring counter. If callback was issued, we have to decrease it now.
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);	// No callback issued -> immediate error -> decreased trasnsferring counter. If callback was issued, we have to decrease it now.
 	}
 	DEBUG_LOCKS_CONTENTION(dc);
 	l->status = dc->lock_status;		// Copy transport layer 'rv' into locks status
@@ -1261,7 +1261,7 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	l->status = NCL_STATUS_ISSUED;						// Issue owner request
 	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
 	nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
-	rv = icore_ops->run_cmpxchg(icore_ops, &seg->disk->base, handle_of(seg), l->address, dc);
+	rv = icore_ops->run_cmpxchg(icore_ops, seg->disk, handle_of(seg), l->address, dc);
 	lock_rqsted = jiffies;
 	if (unlikely(rv)) { // handle pausable/transport layer immediate errors
 		__give_failed_lock_cb(dc);
@@ -1407,7 +1407,7 @@ void dp_locks_write_all_blocksets_info_op(struct nvmeibc_cmd_lock *ow_l, const u
 		if (likely(prev_rv == 0)) {	/* Send the lock info */
 			dc->lock_status = NCL_STATUS_NOTISSUED;	// Lock is taken but we use its comp for binfo
 			nvmeibc_blkset_info_write_pet_describe(ow_l->cmds->o, dp_locks_get_sgmnt_idx_of_lock(l), l->address, dc);
-			err = icore_ops->write_blkset_info(icore_ops, &l->ds->disk->base, handle_of(l->ds), l->address, dc);
+			err = icore_ops->write_blkset_info(icore_ops, l->ds->disk, handle_of(l->ds), l->address, dc);
 		} else {
 			err = prev_rv;
 		}

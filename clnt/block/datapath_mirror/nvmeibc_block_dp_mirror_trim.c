@@ -15,7 +15,7 @@
  */
 int nvmeib_make_discard_ndb(struct nvmeibc_block_command *cmd)
 {
-	const struct nvmeibc_idisk   *d =  &(cmd->ds->disk->base);
+	const struct nvmeibc_idisk   *d = cmd->ds->disk;
 	struct nvmeibc_block_io_req *ir = &cmd->iocmd->reqs1;
 	struct nvmeib_dsm_range     *r =  ir->trim = my_kmalloc(sizeof(*r), GFP_ATOMIC);
 	int rv = 0;
@@ -56,12 +56,12 @@ int __concat_discard_op(struct nvmeibc_block_command cmds[], int *pncmds, int nl
 	struct nvmeibc_block_command *cur_c = &cmds[n];
 	const struct nvmeibc_disk_segment * const ds_um = cur_c->ds;
 	struct nvmeibc_block_io_req *io_req = &cur_c->iocmd->reqs1;
-	struct nvmeibc_idisk *disk_um = &(ds_um->disk->base);
+	struct nvmeibc_idisk *disk_um = ds_um->disk;
 	const u32 shift = nvmeibc_idisk_get_block_to_disk_sector_shift(disk_um);
 
 	// Check if there is a previous command to merge with
 	for (n--; n >= 0; n--) {
-		if (&(cmds[n].ds->disk->base) == disk_um) {				// Compare same disk, not same segment.
+		if (cmds[n].ds->disk == disk_um) {				// Compare same disk, not same segment.
 			struct nvmeib_dsm_range *range = cmds[n].iocmd->reqs1.trim;
 			const u64 last_slba = le64_to_cpu(range->slba) >> shift;
 			const u32 len =       le32_to_cpu(range->nlb ) >> shift;

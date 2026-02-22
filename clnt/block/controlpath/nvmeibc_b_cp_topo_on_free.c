@@ -40,7 +40,7 @@ static void __reset_proto_version_for_paused_disks(struct nvmeibc_topology *t)
 	struct nvmeibc_disk_segment *seg;
 	int c, r, si;
 	topo_for_each_seg(t, chunk, c, r1, r, seg, si) {
-		if ((&(seg->disk->base) == disk)&&(is_toma_reg_valid(seg->toma_reg)))
+		if ((seg->disk == disk)&&(is_toma_reg_valid(seg->toma_reg)))
 			seg->toma_reg->protocol_version = NVMEIBT_CLIENT_PROTO_VERSION;
 	}
 }
@@ -148,7 +148,7 @@ void on_topo_free_schedule_praid_ack(const struct nvmeibc_subscription_ctx *tr,
 		raid1_for_each_seg(r1_old, seg_old, si) {
 			struct on_topo_free_message *otfm = &t_old->on_free.msgs[si];
 			const bool was_active = is_seg_active(*seg_old);
-			const bool disk_dying = ((seg_old->disk)->base.ops.should_pause(&((seg_old->disk))->base));	// Msg will probably not reach Toma anyways
+			const bool disk_dying = seg_old->disk->ops.should_pause(seg_old->disk);	// Msg will probably not reach Toma anyways
 			char disk_dying_status;
 			if ((!disk_dying)&&(!was_active)) {
 				otfm->type =     msg;

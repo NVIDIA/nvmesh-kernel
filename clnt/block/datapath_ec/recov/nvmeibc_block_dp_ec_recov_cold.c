@@ -987,7 +987,7 @@ static int __jmdc_read_bufs_alloc(struct jrecovery *jrecov, struct nvmeibc_raid1
 	int i;
 	for_each_set_bit(i, &jrecov->bmp, jrecov->n_segs) {
 		struct nvmeibc_disk_jcmd *djr = &jrecov->jcmds[i];
-		struct nvmeibc_idisk *disk = &(r1->segments[i].disk->base);
+		struct nvmeibc_idisk *disk = r1->segments[i].disk;
 		const struct nvmeibc_disk_client_journal *jour = disk->ops.get_journal(disk);
 
 		djr->rng.len = sizeof(*djr->rng.arr) * jour->tot_n_rng;
@@ -1055,7 +1055,7 @@ static void __jmdc_req_send(struct jrecovery *jrecov, struct nvmeibc_raid1 *r1)
 		const struct nvmeibc_disk_client_journal *jour;
 		drj->jrecov = jrecov;
 		drj->comp.callback = __read_jcmd_cb;
-		drj->comp.disk = r1->segments[i].disk;
+		drj->comp.disk = nvmeibc_disk_from_base(r1->segments[i].disk);
 		jour = ((drj->comp.disk)->base.ops.get_journal(&((drj->comp.disk))->base));
 		drj->comp.start_rng = 0;
 		drj->comp.num_rng = jour->tot_n_rng;

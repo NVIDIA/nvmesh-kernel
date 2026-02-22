@@ -603,7 +603,7 @@ static int __mirror_cmds_add_for_raid(const struct nvmeibc_raid1 *r1, u64 rlba, 
 			if (rv < 0)
 				goto _out;
 		}
-		nflog(trace_dp_mirror_mirror_cmds_add_for_raid, "cmds[@COMMAND_IDX]: disk=@DISK nlbas=@NLBAS o=@OPERATION", (int)(cur_c - cmds),cur_c->ds->disk, cur_c->nlbas, o);
+		nflog(trace_dp_mirror_mirror_cmds_add_for_raid, "cmds[@COMMAND_IDX]: disk=@DISK nlbas=@NLBAS o=@OPERATION", (int)(cur_c - cmds), nvmeibc_disk_from_base(cur_c->ds->disk), cur_c->nlbas, o);
 	}
 
 	if (use_stages) { // Not DISCARD
@@ -685,7 +685,7 @@ _out:
 	if (bx->exec.do_512b_sub_block_x) {
 		struct nvmeibc_block_command *c = cmds, *end = &cmds[cmds->ncmds];
 		for ( ; c < end; c++) {					// For loop to cover compare exchange (read+write)
-			if (nvmeibc_disk_do_512b_sub_block_x_supported(c->ds->disk)) {
+			if (nvmeibc_disk_do_512b_sub_block_x_supported(nvmeibc_disk_from_base(c->ds->disk))) {
 				struct nvmeibc_block_io_req *req = &c->iocmd->reqs1;
 				struct scatterlist *sgl = req->ndb->table.sgl;
 				req->do_512b_sub_block_x = bx->exec.do_512b_sub_block_x;
@@ -1166,7 +1166,7 @@ static int __translate_addr_by_cfg(struct dp_block_translation_unit *tu)
 	for (i = 0; i < pr->replicas; i++) {
 		const int role = nvmeibc_raid1_seg2role(pr, slice_start_si, i);
 		struct nvmeibc_disk_segment *seg = &pr->segments[i];
-		_out->disks[i] = seg->disk;
+		_out->disks[i] = nvmeibc_disk_from_base(seg->disk);
 		_out->offs[ i] = seg->first_lba + it.res.rlba;
 		_out->descr[i] = ((role == 0) ? "Data" : "Mirror");
 	}
@@ -1235,7 +1235,7 @@ static int __translate_addr_by_topology(struct dp_block_translation_unit *tu)
 	for (i = 0; i < _out->n_cmds; i++) {
 		struct nvmeibc_block_command *cmd = &o.cmds[i];
 		bool is_owner = (cmd->ds == &it.res.r->segments[slice_start_si]);
-		_out->disks[i] = cmd->ds->disk;
+		_out->disks[i] = nvmeibc_disk_from_base(cmd->ds->disk);
 		_out->offs[ i] = cmd->iocmd->reqs1.disk_address;
 		_out->descr[i] = (nvmeib_block_io_op_is_write(o.op)) ?
 				(is_owner ? "Wr Data" : "Wr Mirror") :

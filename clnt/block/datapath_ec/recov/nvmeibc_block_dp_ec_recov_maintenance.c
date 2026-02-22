@@ -446,7 +446,7 @@ static void __send_all_blockset_recovered(struct recovery_sync_op *so)
 			nvmeibcbdpec_fill_blockset_recovered_info(cmd, HZ, so, holder, so,
 				NVMEIB_EC_INVALID_JOURNAL_RANGE, NVMEIB_EC_INVALID_JOURNAL_ENTRY, true);
 			nvmeibc_send_recovered_blkset_request_pet_describe(so, cmd, holder, si);
-			err = icore_ops->execute_gen(icore_ops, &cmd->ds->disk->base, cmd->gen_cmd);
+			err = icore_ops->execute_gen(icore_ops, cmd->ds->disk, cmd->gen_cmd);
 		}
 		if (err) {
 			if (cmd->gen_cmd)

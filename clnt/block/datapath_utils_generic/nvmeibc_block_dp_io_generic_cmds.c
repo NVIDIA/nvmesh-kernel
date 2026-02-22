@@ -173,7 +173,7 @@ static int __post_cmd_dirtybit_turnoff_cb(struct nvmeibc_d_rdma_comp *dc, struct
 	struct nvmeibc_block_command *c = dp_cmds_get_cmd_from_comp(get_d_comp_of_pg(dc));
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	(void)tag;
-	icore_ops->cb_called_comp(icore_ops, &c->ds->disk->base, dc);
+	icore_ops->cb_called_comp(icore_ops, c->ds->disk, dc);
 	dp_cmds_complete_cmd(c->cmdarr, c->my_leader, c);
 	return 0;
 }
@@ -401,9 +401,9 @@ int dp_cmds_execute_cmd(struct nvmeibc_block_command *cmds, int cmd_idx)
 	_ND(trace_dp_io_generic_cmds_dp_cmds_execute_cmd, "Going to execute: operation_code=@BLOCK_IO_OP cmds[@COMMAND_IDX].nlbas=@NLBAS", op, cmd_idx, bcmd->nlbas);
 	__nvmeibc_cmd_execute_pet_describe(cmds, cmd_idx);
 	if (unlikely(dp_cmds_does_require_jam(bcmd)))
-		rv = icore_ops->execute_io_jour_blocks(icore_ops, &bcmd->ds->disk->base, cmd);
+		rv = icore_ops->execute_io_jour_blocks(icore_ops, bcmd->ds->disk, cmd);
 	else
-		rv = icore_ops->execute_io_blocks(icore_ops, &bcmd->ds->disk->base, cmd);
+		rv = icore_ops->execute_io_blocks(icore_ops, bcmd->ds->disk, cmd);
 	/* Be careful: Here cmds/op/locks might already be kfree() */
 	if (rv < 0) {
 		nflog(t_02_gp_exec_cmd, "Got an error @RV! req_id=@REQ_ID_LLONG, o=@OPERATION", rv, cmd->req_id, cmds->o);
@@ -576,7 +576,7 @@ static void __wq_autofail_lkd_bio_cmd(struct work_struct *w)
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	if (rcookie->action) { /* If cookie exists, must free it */
 		if (rcookie->channel_ver)
-			icore_ops->reused_bb_release(icore_ops, &cmd->ds->disk->base, rcookie);
+			icore_ops->reused_bb_release(icore_ops, cmd->ds->disk, rcookie);
 		nvmeib_data_reuse_buf_zero(rcookie);	// Save failed, dont ask anything
 	}
 	cmd->o->nd->dp.cmd_comp_cb(&io_cmd->comp, nvmeibc_d_iocmd_comp_tag_make());
@@ -968,7 +968,7 @@ void dp_cmds_analyze_rv_and_complete(struct nvmeibc_d_iocmd_comp *comp)
 {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp), *cmds = cmd->cmdarr;
 	const int ci = (cmd - cmds);
-	on_disk_hook(dp_cmds_analyze_rv_and_complete, cmd->ds->disk, io_cmd_completion, cmd);
+	on_disk_hook(dp_cmds_analyze_rv_and_complete, nvmeibc_disk_from_base(cmd->ds->disk), io_cmd_completion, cmd);
 
 	if (comp->comp_code && is_transient_disk_error(comp->comp_code)) {
 		OPERATION_DBG_CNTR_INC(cmd->o, n_dcmd_failed);
@@ -1269,7 +1269,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 		}
 		if (prev_rv == 0) {
 			nvmeibc_blkset_info_write_pet_describe(cmds->o, nvmeibc_dp_get_sgmnt_idx_from_ds(c->ds), iocmd->lpb.addr, dc);
-			err = icore_ops->write_blkset_info(icore_ops, &c->ds->disk->base, iocmd->lpb.handle, iocmd->lpb.addr, dc);
+			err = icore_ops->write_blkset_info(icore_ops, c->ds->disk, iocmd->lpb.handle, iocmd->lpb.addr, dc);
 			if (err) {
 				OPERATION_DBG_CNTR_INC(cmds->o, n_write_binfo_failed);
 
@@ -1295,7 +1295,7 @@ static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc, st
 
 	(void)tag;
 	if (NCL_had_acquire_callback(dc->lock_status)) {
-		icore_ops->cb_called_comp(icore_ops, &l->ds->disk->base, dc);
+		icore_ops->cb_called_comp(icore_ops, l->ds->disk, dc);
 	}
 	if (unlikely(!NCL_do_i_have_owner_lock(dc->lock_status))) {
 		rv = -EIO; // binfo was corrupted by non-ACID error
@@ -1342,7 +1342,7 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 		/* Send the lock info */
 		dc->lock.bi = nvmeibc_rldr_get_post_stage_rdma_piggyback(&rldr->rld, rldr->raid_cur_stage).all;
 		nvmeibc_blkset_info_write_pet_describe(rldr->o, nvmeibc_dp_get_sgmnt_idx_from_ds(dl->ds), dl->address, dc);
-		rv = icore_ops->write_blkset_info(icore_ops, &dl->ds->disk->base, handle_of(dl->ds), dl->address, dc);
+		rv = icore_ops->write_blkset_info(icore_ops, dl->ds->disk, handle_of(dl->ds), dl->address, dc);
 	} else {
 		rv = prev_rv;
 	}
