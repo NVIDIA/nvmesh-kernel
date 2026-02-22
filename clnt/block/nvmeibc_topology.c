@@ -4992,15 +4992,6 @@ _out:
 	spin_unlock_irqrestore(&nt->lock, flags);
 }
 
-static const char* __host_of(struct nvmeibc_idisk const* disk)
-{
-	const char* name = disk->ops.get_host_name(disk);
-	if (name && name[0] == '?')
-		return "Unknown";
-	else
-		return name;
-}
-
 static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvmeib_txt *txt)
 {
 	int c, r, si;
@@ -5050,7 +5041,7 @@ static void __topo_status_tostring(const struct nvmeibc_topology *t, struct nvme
 				nvmeib_txt_append(txt, "\t%-6d %-7d %-26s %-21s %-12llx %-12llx %-32.32s [a=%d p=%d acm=%s sy=%d lm(%s) r1v=0x%x lid=0x%x|%c uid=%-.8s]",
 					r, si, __segment_state(r1, si), disk->ops.get_name(disk),
 					seg->first_lba, seg->first_lba + seg->length -1,
-					__host_of(disk),
+					nvmeibc_idisk_get_host_name_for_logging(disk),
 					seg->registration_status, disk_p_state, acm,
 					seg->sync_safety, slmap, r1->version, r1->lid.all,
 					__segment_reconf_state(seg), seg->uuid);
@@ -5123,7 +5114,7 @@ static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *j
 										{
 											jdr_object_scope(jdr, "disk");
 											jdr->ops.ascii(jdr, "name", ((disk)->base.ops.get_name(&((disk))->base)));
-											jdr->ops.ascii(jdr, "host", __host_of(&(disk->base)));
+											jdr->ops.ascii(jdr, "host", nvmeibc_idisk_get_host_name_for_logging(&(disk->base)));
 											jdr_write_var(jdr, paused, __disk_p_state2num(&(disk->base)));
 										}
 									}
