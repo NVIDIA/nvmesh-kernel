@@ -8,12 +8,6 @@
 
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
-/* Format scenario constants */
-#define FORMAT_TARGET_DISK_ID    "NVMD_SN_003.1"
-#define FORMAT_TARGET_UUID       "f39cebd1-c3c0-11f0-bc49-e391b6ca4c2b"
-#define FORMAT_TARGET_VENDOR     5123
-#define FORMAT_REQUEST_COUNTER   303
-
 /*
  * State machine stats for the formatDrive scenario.
  */
@@ -59,34 +53,31 @@ static int make_msg_add_volume(char *buf, size_t capacity)
 		"]}]}]}}");
 }
 
-/* Format formatDrive message */
-static int make_msg_format_drive(char *buf, size_t capacity, const char *disk_id,
-				     const char *uuid, unsigned vendor,
-				     unsigned format_request_counter, unsigned long boot_time)
-{
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"formatDrive\""
-		",\"messageTypeVersion\":1"
-		",\"payload\":{\"diskID\":\"%s\",\"uuid\":\"%s\",\"vendor\":%u"
-		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
-		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
-		", " MGMT_DB_UUID_JSON "}}",
-		disk_id, uuid, vendor, format_request_counter, boot_time);
-}
-
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_run_fsm(void);
 
 /* Per-disk status extracted from reportTarget */
 struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
-	char disk_id[64];
-	char status[32];
+	const char *disk_id;				// Disk name
+	const char *uuid;
+	char status[16];					// As reported by Toma
 	int64_t format_request_counter;
 	int64_t active_format_request_counter;
-	int64_t block_size;
-	int64_t metadata_size;
+	u16 vendor;
+	u16 block_size;						// In bytes
+	u16 metadata_size;					// In bytes
 };
+
+static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_sim_disk_status *d, unsigned format_request_counter, unsigned long boot_time) {
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1"
+		",\"payload\":{\"diskID\":\"%s\",\"uuid\":\"%s\",\"vendor\":%u"
+		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
+		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
+		", " MGMT_DB_UUID_JSON "}}",
+		d->disk_id, d->uuid, d->vendor, format_request_counter, boot_time);
+}
 
 /* Management simulator state */
 struct mgmt_sim_state {
@@ -154,9 +145,12 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 
 	/* Initialize state machine */
 	m->fsm_state = MGMT_FSM_WAITING_FOR_BOTH_OK;
-	m->boot_time = 0;
-	nvmeibt_strlcpy(m->disk_002.disk_id, "NVMD_SN_002.1", sizeof(m->disk_002.disk_id));
-	nvmeibt_strlcpy(m->disk_003.disk_id, "NVMD_SN_003.1", sizeof(m->disk_003.disk_id));
+	m->disk_002.disk_id = "NVMD_SN_002.1";
+	m->disk_003.disk_id = "NVMD_SN_003.1";
+	m->disk_002.uuid = "d0020000-0000-0000-0000-000000000000";
+	m->disk_003.uuid = "d0030000-0000-0000-0000-000000000000";
+	m->disk_002.vendor = 5122;
+	m->disk_003.vendor = 5123;
 	m->hw.conf_version = 17;		// Start from some number
 	N_Tf(msim_init, "mgmt_sim initialized cluster @INT machines, hw_conf_ver=@INT", m->cfg->n_nodes, m->hw.conf_version);
 
@@ -205,20 +199,14 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 	const size_t capacity = 4096;
 	char *msg = malloc(capacity);
 	const size_t len = snprintf(msg, capacity,
-		"{\"messageType\":\"hardwareConfiguration\""
-		",\"messageTypeVersion\":1"
-		",\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
+		"{\"messageType\":\"hardwareConfiguration\",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
 		",\"configurationVersion\":%d,\"leaderToken\":1,\"kafkaMessageSequence\":%d,\"raftTerm\":9"
 		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
 		"\"targets\":["
 			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
 				"\"disks\":["
-				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096"
-					",\"activeFormatRequestCounter\":1,\"vendorID\":5122"
-					",\"uuid\":\"f39cebd0-c3c0-11f0-bc49-e391b6ca4c2b\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096"
-					",\"activeFormatRequestCounter\":1,\"vendorID\":5123"
-					",\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
+				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
 					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
@@ -252,7 +240,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 						",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
 		"]}}",
 		m->hw.conf_version, m->hw.msg_count,
-		m->cfg->live->hostname, m->cfg->live->uuid, m->disk_002.disk_id, m->disk_003.disk_id, FORMAT_TARGET_UUID,
+		m->cfg->live->hostname, m->cfg->live->uuid, m->disk_002.disk_id, m->disk_002.uuid, m->disk_003.disk_id, m->disk_003.uuid,
 		other_toma[0].hostname, other_toma[0].uuid,
 		other_toma[1].hostname, other_toma[1].uuid);
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);
@@ -294,23 +282,13 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 }
 
 void mgmt_sim_verify_at_end(void) {
-	const char *state = mgmt_sim_get_state_name();
-	const struct mgmt_sim_disk_status *d3 = &g_mgmt_sim->disk_003;
-	const bool done = mgmt_sim_is_done();
-	BUG_ON((g_mgmt_sim->volume_msg_count < 0) || (g_mgmt_sim->n_leader_keep_alives < 0));
-	if (!done) {
-		SANDBOX_PRINT("failed: format FSM did not reach done, state=%s disk=%s status=%s frc=%zu afrc=%zu bs=%zu ms=%zu\n",
-			state, d3->disk_id, d3->status, d3->format_request_counter, d3->active_format_request_counter, d3->block_size, d3->metadata_size);
-		BUG_ON(true);
-	}
+	BUG_ON(!mgmt_sim_is_done() || (g_mgmt_sim->volume_msg_count < 0) || (g_mgmt_sim->n_leader_keep_alives < 0));
 }
 
 bool mgmt_sim_is_done(void) { return g_mgmt_sim->fsm_state == MGMT_FSM_DONE; }
 
 void mgmt_sim_destroy(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (!m)
-		return;
 	free(m);
 	g_mgmt_sim = NULL;
 }
@@ -376,7 +354,7 @@ static void __extract_disk_status_from_report_terget_msg(struct mm_json_elem *di
 		out->active_format_request_counter = json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
 		out->block_size = json_get_dict_num(disk_elem, "block_size", -1);
 		out->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
-		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT64_TD afrc=@INT64_TD bs=@INT64_TD ms=@INT64_TD", out->disk_id, out->status, out->format_request_counter, out->active_format_request_counter, out->block_size, out->metadata_size);
+		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT64_TD afrc=@INT64_TD, @UINT+@UINT[b]", out->disk_id, out->status, out->format_request_counter, out->active_format_request_counter, out->block_size, out->metadata_size);
 		return;
 	}
 }
@@ -408,6 +386,7 @@ static void mgmt_sim_run_fsm(void) {
 	bool disk_003_formatting;
 	bool disk_003_ok_with_expected_reported_format;
 	BUG_ON(!m);
+	#define FORMAT_REQUEST_COUNTER   303
 
 	prev_state = m->fsm_state;
 	disk_002_ok = (strcmp(m->disk_002.status, "Ok") == 0);
@@ -421,13 +400,9 @@ static void mgmt_sim_run_fsm(void) {
 
 	switch (m->fsm_state) {
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:
-		if (disk_002_ok && disk_003_ok) {
+		if (disk_002_ok && disk_003_ok) {		/* Both disks are Ok - send formatDrive */
 			char *msg = malloc(1024);
-			/* Both disks are Ok - send formatDrive */
-			const size_t len = (size_t)make_msg_format_drive(msg, 1024,
-				FORMAT_TARGET_DISK_ID, FORMAT_TARGET_UUID,
-				FORMAT_TARGET_VENDOR, FORMAT_REQUEST_COUNTER,
-				(unsigned long)m->boot_time);
+			const size_t len = (size_t)make_msg_format_drive(msg, 1024, &m->disk_003, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
 			N_IMf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", m->boot_time);
 			sim_broker_topic_msg_produce(m->k_producers.cmd, msg, len, false);
 			m->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
@@ -440,8 +415,7 @@ static void mgmt_sim_run_fsm(void) {
 			m->fsm_state = MGMT_FSM_SAW_FORMATTING;
 		} else if (disk_003_ok_with_expected_reported_format) {
 			/* Might have missed the Formatting state - go directly to done */
-			N_IMf(msim_fsm2b, "disk003 Ok with expected format (skipped Formatting) counter=@INT",
-			     FORMAT_REQUEST_COUNTER);
+			N_IMf(msim_fsm2b, "disk003 Ok with expected format (skipped Formatting) counter=@INT", FORMAT_REQUEST_COUNTER);
 			m->fsm_state = MGMT_FSM_DONE;
 		}
 		break;
