@@ -24,12 +24,9 @@
 	MGMT_FSM_DONE // test scenario complete - we got the updated disk format in Toma's reportTarget message
 };
 
-static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity)
-{
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"updateLeaderKeepaliveToken\""
-		",\"messageTypeVersion\":1"
-		",\"payload\":{\"token\":1,\"keepaliveInterval\":1}}");
+static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
+	return snprintf(buf, capacity, "{\"messageType\":\"updateLeaderKeepaliveToken\""
+		",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":1}}");
 }
 
 /* Format addVolume message */
@@ -80,7 +77,6 @@ static int make_msg_format_drive(char *buf, size_t capacity, const char *disk_id
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_run_fsm(void);
-static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state);
 
 /* Per-disk status extracted from reportTarget */
 struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
@@ -95,10 +91,8 @@ struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 /* Management simulator state */
 struct mgmt_sim_state {
 	struct sb_cluster_conf *cfg;
-	char *last_report_target_json; /* owned, NUL-terminated; NULL if not received */
 
-	/* Per-consumer state for deterministic message sequencing */
-	struct {
+	struct {							// Per-consumer state for deterministic message sequencing
 		int msg_count, conf_version;
 	} hw;
 	int cmd_msg_count;
@@ -312,13 +306,11 @@ void mgmt_sim_verify_at_end(void) {
 }
 
 bool mgmt_sim_is_done(void) { return g_mgmt_sim->fsm_state == MGMT_FSM_DONE; }
-const char *mgmt_sim_get_state_name(void) { return mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state); }
 
 void mgmt_sim_destroy(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	if (!m)
 		return;
-	free(m->last_report_target_json);
 	free(m);
 	g_mgmt_sim = NULL;
 }
@@ -351,7 +343,7 @@ void mgmt_sim_do_periodic(void) {
 	if ((m->volume_msg_count++ % 15) == 0) {					/* Periodically send updateLeaderKeepaliveToken */
 		const size_t capacity = 256;
 		char *payload = malloc(capacity);
-		size_t len = make_msg_update_leader_keepalive_token(payload, capacity);
+		const size_t len = make_msg_update_leader_keepalive_token(payload, capacity);
 		sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
 	}	// Todo: use make_msg_add_volume() here
 }
@@ -359,8 +351,7 @@ void mgmt_sim_do_periodic(void) {
 /******************************************************************************/
 /* Static helper functions                                                    */
 /******************************************************************************/
-static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state)
-{
+static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state) {
 	switch (state) {
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:  return "waitingForBothOk";
 	case MGMT_FSM_SENT_FORMAT_DRIVE:    return "sentFormatDrive";
@@ -370,88 +361,38 @@ static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state)
 	}
 }
 
-/*
- * Extract disk status from reportTarget JSON for a specific disk.
- * Searches payload.node.disks[] array for the matching diskID.
- */
-static void mgmt_sim_extract_disk_status(struct mm_json_elem *disks_array,
-					 const char *target_disk_id,
-					 struct mgmt_sim_disk_status *out)
-{
+static void __extract_disk_status_from_report_terget_msg(struct mm_json_elem *disks_array, struct mgmt_sim_disk_status *out) {
 	int i;
-	struct mm_json_elem *disk_elem;
-	const char *disk_id;
-
 	BUG_ON(!disks_array || disks_array->type != JSON_E_ARRAY || !out);
-
 	for (i = 0; i < disks_array->array.len; i++) {
-		disk_elem = disks_array->array.elements[i];
-		if (!disk_elem || disk_elem->type != JSON_E_DICT)
+		struct mm_json_elem *disk_elem = disks_array->array.elements[i];
+		const char *disk_id = json_get_dict_str(disk_elem, "diskID", NULL);
+		BUG_ON(!disk_elem || (disk_elem->type != JSON_E_DICT) || !disk_id);
+		if (strcmp(disk_id, out->disk_id) != 0)
 			continue;
 
-		disk_id = json_get_dict_str(disk_elem, "diskID", NULL);
-		if (!disk_id || strcmp(disk_id, target_disk_id) != 0)
-			continue;
-
-		/* Found matching disk */
-		nvmeibt_strlcpy(out->status,
-				json_get_dict_str(disk_elem, "status", "unknown"),
-				sizeof(out->status));
+		nvmeibt_strlcpy(out->status, json_get_dict_str(disk_elem, "status", "unknown"), sizeof(out->status));
 		out->format_request_counter = json_get_dict_num(disk_elem, "formatRequestCounter", -1);
 		out->active_format_request_counter = json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
 		out->block_size = json_get_dict_num(disk_elem, "block_size", -1);
 		out->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
-
-		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT64_TD afrc=@INT64_TD bs=@INT64_TD ms=@INT64_TD",
-		     target_disk_id, out->status,
-		     out->format_request_counter, out->active_format_request_counter,
-		     out->block_size, out->metadata_size);
+		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT64_TD afrc=@INT64_TD bs=@INT64_TD ms=@INT64_TD", out->disk_id, out->status, out->format_request_counter, out->active_format_request_counter, out->block_size, out->metadata_size);
 		return;
 	}
 }
 
-/*
- * Parse reportTarget JSON and extract relevant information.
- * Updates g_mgmt_sim with bootTime and disk statuses.
- */
-static void mgmt_sim_parse_report_target(struct mm_json_elem *root)
-{
-	struct mm_json_elem *payload;
-	struct mm_json_elem *node;
-	struct mm_json_elem *disks;
+static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
+	struct mm_json_elem *payload = json_get_dict_value(root,    "payload");
+	struct mm_json_elem *node =    json_get_dict_value(payload, "node");
+	struct mm_json_elem *disks =   json_get_dict_value(node,    "disks");
+	struct mgmt_sim_state *m = g_mgmt_sim;
 
-	BUG_ON(!g_mgmt_sim || !root);
-
-	if (root->type != JSON_E_DICT) {
-		N_Wf(msim_parse, "reportTarget root is not a dict");
-		return;
+	m->boot_time = json_get_dict_num(node, "bootTime", 0);
+	if (disks && (disks->type == JSON_E_ARRAY)) {
+		__extract_disk_status_from_report_terget_msg(disks, &m->disk_002);
+		__extract_disk_status_from_report_terget_msg(disks, &m->disk_003);
 	}
-
-	/* Navigate: payload.node */
-	payload = json_get_dict_value(root, "payload");
-	if (!payload || payload->type != JSON_E_DICT) {
-		N_Wf(msim_nopl, "reportTarget missing payload");
-		return;
-	}
-
-	node = json_get_dict_value(payload, "node");
-	if (!node || node->type != JSON_E_DICT) {
-		N_Wf(msim_nonode, "reportTarget missing payload.node");
-		return;
-	}
-
-	/* Extract bootTime */
-	g_mgmt_sim->boot_time = json_get_dict_num(node, "bootTime", 0);
-
-	/* Extract disk statuses */
-	disks = json_get_dict_value(node, "disks");
-	if (disks && disks->type == JSON_E_ARRAY) {
-		mgmt_sim_extract_disk_status(disks, "NVMD_SN_002.1", &g_mgmt_sim->disk_002);
-		mgmt_sim_extract_disk_status(disks, "NVMD_SN_003.1", &g_mgmt_sim->disk_003);
-	}
-
-	N_Tf(msim_rt, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR",
-	     g_mgmt_sim->boot_time, g_mgmt_sim->disk_002.status, g_mgmt_sim->disk_003.status);
+	N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR", m->boot_time, m->disk_002.status, m->disk_003.status);
 }
 
 /*
@@ -459,8 +400,7 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root)
  * Transitions based on disk statuses extracted from reportTarget.
  * When a formatDrive needs to be sent, it's produced directly to the CMD topic.
  */
-static void mgmt_sim_run_fsm(void)
-{
+static void mgmt_sim_run_fsm(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	enum mgmt_sim_fsm_state prev_state;
 	bool disk_002_ok;
@@ -522,3 +462,5 @@ static void mgmt_sim_run_fsm(void)
 		N_IMf(msim_trans, "FSM transition @STR -> @STR", mgmt_sim_fsm_state_name(prev_state), mgmt_sim_fsm_state_name(m->fsm_state));
 	}
 }
+
+const char *mgmt_sim_get_state_name(void) { return mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state); }
