@@ -137,10 +137,10 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	}
 	NVMEIB_HASH_TBL_FREE(bhk49ol, seg_active->active_registrants_hash_by_lockid);
 	//
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_lockid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_purified_lockid) {
 		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, 0, 1, 0, 0);
 	}
-	NVMEIB_HASH_TBL_FREE(9ksl40d, seg_active->stale_registrants_hash_by_lockid);
+	NVMEIB_HASH_TBL_FREE(9ksl40d, seg_active->stale_registrants_hash_by_purified_lockid);
 	//
 	// XDLIST_FOREACH_SAFE(reg_ctx, &seg_active->registrants_on_timeout) { 	// nvmeibt_register_terminate_reg_ctx(reg_ctx);	// registrants_on_timeout are active_registrants, already removed & freed
 	// }
@@ -499,7 +499,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->longing_registrants_hash_by_handle = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_handle", 8);
 	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4);
 	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8);
-	seg_active->stale_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
+	seg_active->stale_registrants_hash_by_purified_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
 	XHASHTABLE_INIT(&seg_active->stale_locks_hash);
 	XHASHTABLE_INIT(&seg_active->awaited_lockids);
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);

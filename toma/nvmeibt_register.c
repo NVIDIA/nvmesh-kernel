@@ -1438,7 +1438,7 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 				N_Tf(dkiruu4, "moving active_registrant to stale. seg=@UUID_8 reg_ctx=@PTR lock=@LOCKID n_locks=@INT)",
 					 nvmeibt_seg_active_UUID_8(seg_active), reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx->n_stale_locks);
 				// Actually, move the reg_ctx object from active to stale
-				nvmeib_hash_add_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx);
+				nvmeib_hash_add_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx);
 				NDUMP_N_ACTIVE_REGISTRANTS(ianwq8i, seg_active);
 				goto out;
 			} else {
@@ -1457,7 +1457,7 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 				 reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
 		}
 		nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
-		nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+		nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 	} else {
 		N_Wf(favewhw, "Unexpected 'else'");
 	}
@@ -1491,7 +1491,7 @@ void nvmeibt_register_brute_force_cleanup_all_active_registrants_and_stales_of_s
 
 	NFIN;
 	// Remove leftovers of stale_locks. This will also remove the stale_registrants
-	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_lockid) {
+	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_purified_lockid) {
 	    nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
 	}
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
@@ -1505,7 +1505,7 @@ struct nvmeibt_registrant_ctx *nvmeibt_register_lookup_stale_registrant_by_reg_l
 {
 	struct nvmeibt_registrant_ctx	*reg_ctx;
 
-	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->stale_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_lock_id));
+	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_lock_id));
 	if (reg_ctx) {
 		N_Tf(floti94, "Found stale registrant seg=@UUID_8 reg_lock_id=@C_LID",
 			 nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
@@ -2844,7 +2844,7 @@ int nvmeibt_register_print_status(int (*printf_fn)(void *ctx, const char *fmt, .
 			dump_reg_ctx_to_status(printf_fn, printf_ctx, reg_ctx, 0);
 		}
 		(*printf_fn)(printf_ctx, "\t\t\t- Stale registrants\n");
-		NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_lockid) {
+		NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_purified_lockid) {
 			dump_reg_ctx_to_status(printf_fn, printf_ctx, reg_ctx, 0);
 		}
 		(*printf_fn)(printf_ctx, "\t\t\t- Stale Locks Hash:\n");
