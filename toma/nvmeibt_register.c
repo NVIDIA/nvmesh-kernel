@@ -1444,10 +1444,10 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 					nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->n_stale_locks);
 				goto out;
 			}
-			N_Wf(dkitu43, "reg_ctx=@PTR lockid=@T_LID seg=@UUID_8 has stale_locks, is_deleting_seg_active=0",
+			N_Ef(dkitu43, "reg_ctx=@PTR lockid=@T_LID seg=@UUID_8 has stale_locks, is_deleting_seg_active=1",
 				 reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
+			nvmeibt_abort(ES_FATAL);
 		}
-		nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
 		nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 	} else {
 		N_Wf(favewhw, "Unexpected 'else'");

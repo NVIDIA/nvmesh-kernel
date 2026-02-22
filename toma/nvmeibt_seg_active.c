@@ -801,12 +801,15 @@ static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *s
 	struct nvmeibt_registrant_ctx	*reg_ctx;
 
 	NFIN;
+	// We get here after (inside) lock_stale_locks_hash(seg_active);
 	reg_ctx = stale_lock->reg_ctx;
 	seg_active = reg_ctx->seg_active;
 	N_Tf(t_s1_tslh, "Deleting " STALE_BLKSET_FMT,
 		stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 	XHASHTABLE_DEL(&seg_active->stale_locks_hash, &stale_lock->seg_active_link);
 	NNVMEIBT_BM_FREE(trace_1_seg_active_remove_stale_lock_from_seg_stale_locks_hash, stale_lock);
+	// is_processing_registrant_removal only between launch_existing_active_registrant_removal and its finalize
+	// During this time, stale_locks can be added/deleted, and an interim n_stale_locks==0 should not terminate_reg_ctx()
 	if (--(reg_ctx->n_stale_locks) == 0 && !nvmeibt_register_is_processing_registrant_removal(reg_ctx)) {
 		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 1, 0, 0);
 	}
