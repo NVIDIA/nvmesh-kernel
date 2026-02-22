@@ -28,16 +28,6 @@
 // This file contains the code for registrant disk_segment registration related functionality
 // #define REGISTRANT_DISCONNECT_QUEUE_DEPTH (512)
 
-#define VALIDATE_ADDED_REG_CTX(name, _old_reg_ctx, _reg_ctx) ({														\
-	struct nvmeibt_registrant_ctx		*_old = (_old_reg_ctx), *_new = (_reg_ctx);									\
-	if (_old && !nvmeibt_register_is_same_registrant(_old, _new) && nvmeib_lockid_purify(_new->reg_lock_id)) {		\
-		N_Ef(name, "seg=@UUID_8 old_reg_ctx!=reg_ctx old:(lockid=@X,handle=@LLX) new:(lockid=@X,handle=@LLX)",		\
-			 nvmeib_uuid_first_4_bytes(&_new->seg_uuid),															\
-			 nvmeib_lockid_purify(_old->reg_lock_id), _old->client_messaging_handle,								\
-			 nvmeib_lockid_purify(_new->reg_lock_id), _new->client_messaging_handle);								\
-	}																												\
-})
-
 static struct timespec next_wait_for_registrant_timeout = TIMESPEC_MAX_C99;
 
 enum REGISTRANT_DISCONNECT_LAUNCH_STATUS {
@@ -1545,7 +1535,6 @@ static void add_longing_registrant_on_seg(struct nvmeibt_registrant_ctx *input_r
 	alloc_reg_ctx(&reg_ctx, input_reg_ctx);
 	old_reg_ctx = nvmeib_hash_add_uint64_t(seg_active->longing_registrants_hash_by_handle, reg_ctx->client_messaging_handle, reg_ctx);
 	if (old_reg_ctx) {
-		VALIDATE_ADDED_REG_CTX(c4818j2, old_reg_ctx, reg_ctx);
 		N_Tf(dkiru43, "Already exists seg=@UUID_8 longing=(@LLX,@X)", nvmeibt_seg_active_UUID_8(seg_active),
 			 old_reg_ctx->client_messaging_handle, nvmeib_lockid_purify(old_reg_ctx->reg_lock_id));
 	}
