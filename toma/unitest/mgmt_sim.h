@@ -29,39 +29,13 @@ int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const
 struct mgmt_sim_state;
 struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg);
 void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add);
-
-/* Get the next Kafka message payload to deliver to Toma. The returned buffer is owned by the caller and must be freed.*/
-char *mgmt_sim_next_kafka_payload(const char *consumer_name, size_t *out_len);
-void mgmt_sim_on_toma_produced(enum sim_topic_type_toma_to_mgmt type, const void *payload, size_t len);
-
-/**
- * Get the last captured reportTarget JSON (for test assertions).
- * @return The last reportTarget JSON string, or NULL if none received.
- *         The returned pointer is owned by the simulator; do not free.
- */
-const char *mgmt_sim_get_last_report_target(void);
-
-/**
- * Verify end-of-test conditions for the simulator.
- * Aborts the process if the format scenario did not complete successfully.
- */
+void mgmt_sim_send_msg_assign_to_zone(int zone_idx);
+void mgmt_sim_send_msg_latest_hw_config(void);
+void mgmt_sim_wakeup_on_incomming_toma_msg(struct sim_broker_topic *);
 void mgmt_sim_verify_at_end(void);
-
-/**
- * Check if the format scenario state machine has completed.
- * @return true if the state machine reached the "done" state.
- */
+void mgmt_sim_do_periodic(void);
 bool mgmt_sim_is_done(void);
-
-/**
- * Get the current state machine state name (for diagnostics).
- * @return Human-readable state name.
- */
 const char *mgmt_sim_get_state_name(void);
-
-/**
- * Destroy the management simulator and free resources.
- */
 void mgmt_sim_destroy(void);
 
 #endif /* TOMA_UNITEST_MGMT_SIM_H */

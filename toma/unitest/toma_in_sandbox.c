@@ -434,7 +434,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->TS.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	sb_cluster_conf_create(&sys->cfg);
-	sys->kafka_simu = sandbox_kafka_init();
+	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	pthread_mutex_init(&sys->TS.mutex, NULL);
 	sandbox_server_init();
@@ -450,6 +450,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 		mgmt_sim_send_msg_change_raft_quorum(1, true);			// Re-add First other again
 		mgmt_sim_send_msg_change_raft_quorum(2, true);			// Re-add last target again, while it already exists, verify Toma can handle this
 	}
+	mgmt_sim_send_msg_assign_to_zone(1);
 }
 
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
@@ -1579,6 +1580,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	}
 
 	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, is_shutting_down, n_events); loop_idx++;
+	mgmt_sim_do_periodic();
 	if (!is_shutting_down) {
 		if (mgmt_sim_is_done()) {
 			SANDBOX_PRINT("format drive test: %s\n", COL_GREEN "passed" COL_RESET);

@@ -1,7 +1,6 @@
 /* Implements all rd_kafka_* functions that production Toma code calls */
 #include "sandbox_kafka_internal.h"	// Module interface headers
 #include "sandbox_kafka_public.h"
-#include "mgmt_sim.h"			// Todo: Remove me
 #include "nvmeibt_debug.h"
 
 /************************************* Internal struct definitions ********************************/
@@ -141,23 +140,25 @@ struct kafka_simulator_t {
 	struct sim_broker_topic topics[7];		// Kafka broker (backend) topics, always exist even if Toma is not connected to them via kafka client
 	rd_kafka_t *obj[7];				// 4 Toma consumers, 3 Toma producers
 	int n_obj;
-	void (*notify_producer_msg_accepted)( rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque);
-	void (*notify_consumer_offset_commit)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque);
+	void (*notify_toma_producer_msg_accepted)( rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque);
+	void (*notify_toma_consumer_offset_commit)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque);
+	void (*notify_mgmt_simu_toma_send_msg)(struct sim_broker_topic *t);
 };
 
 /************************************* Module state ********************************/
 static struct kafka_simulator_t *g_kafka_simu = NULL;
 
-struct kafka_simulator_t *sandbox_kafka_init(void) {
+struct kafka_simulator_t *sandbox_kafka_init(void (*fn)(struct sim_broker_topic *t)) {
 	struct kafka_simulator_t *ks = g_kafka_simu = calloc(1, sizeof(*g_kafka_simu));
 	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG,			4);		// This queue is always non empty, stores at least the last hardware config
 	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD,			2);		// Toma will consume commands very fast
 	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT,	8);		// This queue might be long and potentially store the entire history.
 	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		4);		// Toma will consume volume commands very fast, and ack mgmt keepalive to leader also almost immediately
-	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY,		2);		// Mgmt Simu will consume toma reports immediately
-	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		2);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
-	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			2);		// Mgmt Simu will consume toma reports immediately
-	return g_kafka_simu;
+	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY,		1);		// Mgmt Simu will consume toma reports immediately
+	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		1);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
+	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			1);		// Mgmt Simu will consume toma reports immediately
+	ks->notify_mgmt_simu_toma_send_msg = fn;
+	return ks;
 }
 
 void sandbox_kafka_destroy(struct kafka_simulator_t *ks) {
@@ -285,7 +286,7 @@ rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_lis
 	BUG_ON(me != pl->elems[0].k);
 	sim_broker_topic_ack_offsets(me->topic.broker_topic, (pl->elems[0].offset - 1) /*last_consumed*/);
 	(void)is_async;
-	g_kafka_simu->notify_consumer_offset_commit(me, RD_KAFKA_RESP_ERR_NO_ERROR, pl, NULL);
+	g_kafka_simu->notify_toma_consumer_offset_commit(me, RD_KAFKA_RESP_ERR_NO_ERROR, pl, NULL);
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -387,7 +388,7 @@ rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char 
 }
 
 void rd_kafka_conf_set_dr_msg_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque)) {
-	g_kafka_simu->notify_producer_msg_accepted = fn;
+	g_kafka_simu->notify_toma_producer_msg_accepted = fn;
 	(void)kc;
 }
 
@@ -395,7 +396,7 @@ void rd_kafka_conf_set_rebalance_cb(rd_kafka_conf_t* kc, void (*fn)(rd_kafka_t *
 	(void)kc; (void)fn;
 }
 void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque)) {
-	g_kafka_simu->notify_consumer_offset_commit = fn;
+	g_kafka_simu->notify_toma_consumer_offset_commit = fn;
 	(void)kc;
 }
 
@@ -407,13 +408,8 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
 	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (len == 0) || ((key == NULL) != (keylen == 0)));
 	sim_broker_topic_msg_produce(ko->topic.broker_topic, payload, len, (msgflags & RD_KAFKA_MSG_F_COPY));
-	{
-		rd_kafka_message_t m;
-		BUG_ON(!sim_broker_topic_msg_consume(ko->topic.broker_topic, &m));
-		mgmt_sim_on_toma_produced(kt->type, m.payload, m.len);
-		sim_broker_topic_ack_offsets(ko->topic.broker_topic, m.offset);
-	}
-	g_kafka_simu->notify_producer_msg_accepted(ko, &km, NULL);
+	g_kafka_simu->notify_toma_producer_msg_accepted(ko, &km, NULL);
+	g_kafka_simu->notify_mgmt_simu_toma_send_msg(ko->topic.broker_topic);
 	errno = 0;
 	return 0;
 }
@@ -441,21 +437,10 @@ rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, cons
 
 rd_kafka_message_t* rd_kafka_consumer_poll(rd_kafka_t *ko, int timeout_ms) {
 	rd_kafka_message_t *m = calloc(1, sizeof(*m));
-	const char *unique_name = (ko->name[0] != 'L') ? ko->name : ko->topic.name;		// all LEADER consumer groups have the same name. Differentiate them by topic name
 	struct sim_broker_topic *t = ko->topic.broker_topic;
 	BUG_ON((timeout_ms != 0) || (!ko->topic.is_assigned));
-	if (t->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) {		// This topic already filled by unitests correctly
-		(void)sim_broker_topic_msg_consume(t, m);
-	} else {
-		size_t len = 0;
-		char *msg = mgmt_sim_next_kafka_payload(unique_name, &len);
-		if (msg) {
-			sim_broker_topic_msg_produce(t, msg, len, false);
-			BUG_ON(!sim_broker_topic_msg_consume(t, m));
-		}
-	}
-	if (m->payload) {
-		N_Tf(__AUTOID__, "consumer[@STR] got cur_offset=@LD", unique_name, m->offset);
+	if (sim_broker_topic_msg_consume(t, m)) {
+		N_Tf(__AUTOID__, "consumer[@CHAR] got cur_offset=@LD", t->type, m->offset);
 		m->_private = NULL;
 		return m;
 	}
