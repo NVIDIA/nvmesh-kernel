@@ -25,8 +25,8 @@ alias vault_login_ngc="export VAULT_NAMESPACE=ngc; vault login -method=oidc -pat
 
 ############################### From https://confluence.nvidia.com/display/NSVSREC/NVInit+For+Accessing+SwiftStack+Systems #################################
 
-MTV_EXCELERO1='mtv-excelero1'
 MTV_EXCELERO1='mtv-excelero1.mec01.nbulabs.nvidia.com'
+MTV_EXCELERO1='mtv-excelero1'
 
 # In your ~/.bashrc or equiv
 NVIDIA_USERNAME=`whoami`
@@ -683,10 +683,8 @@ function open_logs_collecteor_all_hosts {
 }
 
 alias copybug='function __copybug() {
-	bugs_host="nvme1014"
-	bugs_host="nvmeserver2"
+	bugs_host="${MTV_EXCELERO1}"
 	bugs_dir="/auto/nvmesh_log/logs"
-	bugs_dir="/home/qa/logs"
 	shopt -s nullglob;
 	#bugdir=`ssh ${bugs_host} "cd /home/qa/logs; ls -d *${1}*"` || return 1;
 	bugdir=`ssh ${bugs_host} "cd ${bugs_dir}; ls -d *${1}*"` || return 1;
