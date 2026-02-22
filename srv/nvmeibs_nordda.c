@@ -3761,6 +3761,7 @@ static void connect_nordda_channel_work(struct workqe_struct *work)
 		goto reject;
 	}
 	spin_lock_init(&nrch->spinlock);
+	nrch->locking_cpu = -1;
 	atomic_set(&nrch->underway_cmds, 1);	// will be decreased to zero by wait_for_all_underway()
 	INIT_LIST_HEAD(&nrch->rxiu_list);
 	nrch->n_rxiu = 0;
