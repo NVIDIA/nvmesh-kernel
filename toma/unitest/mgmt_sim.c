@@ -101,6 +101,7 @@ struct mgmt_sim_state {
 
 	/* Per-Producer state for deterministic message sequencing */
 	int n_leader_keep_alives;
+	uint32_t raftTerm;					// AS reported by Toma leader
 
 	/* State machine for formatDrive scenario */
 	enum mgmt_sim_fsm_state fsm_state;
@@ -247,18 +248,21 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 }
 
 static void __handle_low_prio_msg(__attribute__((unused)) const rd_kafka_message_t *msg) {
-		// {"originType":"TOMA","messageType":"driveZeroingProgress","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":27,"leaderToken":null,"payload":{"zeroWriteCounter":303100870554,"nZeroedBlks":1953536,"diskUUID":"de2eadb0-e972-11f0-8e2a-434e55e1d7f7","node_id":"nvme37.nvidia.com"}}
-		// {"originType":"TOMA","messageType":"updateDiskSegmentsDirtyBits","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":97,"leaderToken":null,"payload":{"segmentsDirtyBitsUpdate":[{"pRaidMinorVersion":2,"pRaidMajorVersion":259,"segmentID":"c1105e50-e97b-11f0-995c-3792ee0db955","pRaidUUID":"c1103742-e97b-11f0-995c-3792ee0db955","remainingDirtyBits":67932,"reappearingCounter":3}]}}
-		return;	// Todo: handle drive zeroing reports here
+	// {"originType":"TOMA","messageType":"driveZeroingProgress","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":27,"leaderToken":null,"payload":{"zeroWriteCounter":303100870554,"nZeroedBlks":1953536,"diskUUID":"de2eadb0-e972-11f0-8e2a-434e55e1d7f7","node_id":"nvme37.nvidia.com"}}
+	// {"originType":"TOMA","messageType":"updateDiskSegmentsDirtyBits","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":97,"leaderToken":null,"payload":{"segmentsDirtyBitsUpdate":[{"pRaidMinorVersion":2,"pRaidMajorVersion":259,"segmentID":"c1105e50-e97b-11f0-995c-3792ee0db955","pRaidUUID":"c1103742-e97b-11f0-995c-3792ee0db955","remainingDirtyBits":67932,"reappearingCounter":3}]}}
+	return;	// Todo: handle drive zeroing reports here
 }
 
 static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
 	const char *message_type = json_get_dict_str(root, "messageType", NULL);
 	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
 		if (strcmp(message_type, "leaderKeepalive") == 0) {
-			// {"originType":"TOMA","messageType":"leaderKeepalive","messageTypeVersion":1,"hostname":"nvme39.nvidia.com","tomaToken":2,"messageSequence":24312,"leaderToken":1,"keepaliveInterval":5,"payload":{"raftTerm":10,"zone":"1","featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":""}}
-			g_mgmt_sim->n_leader_keep_alives++;
+			struct mm_json_elem *payload = json_get_dict_value(root, "payload");
+			m->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
+			m->n_leader_keep_alives++;
+			N_Tf(__AUTOID__, "<< Leader KAL {raftTerm=@INT, gen=@INT}", m->raftTerm, m->n_leader_keep_alives);
 		} else if (strcmp(message_type, "keepalive") == 0) {
 			// {"originType":"TOMA","messageType":"keepalive","messageTypeVersion":2,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":11831,"leaderToken":null,"keepaliveInterval":5,"payload":{"zone":"1","leaderUUID":"nvme39.nvidia.com","bootTime":1767279770145,"featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":"","rebuildStats":{"nRunningDirtyRebuild":0,"nPendingDirtyRebuild":0,"nRunningStaleRebuild":0,"nPendingStaleRebuild":6,"nRunningTxidRebuild":0,"nPendingTxidRebuild":0,"nRunningColdRecovery":0,"nPendingColdRecovery":0,"nRunningJGCRebuild":0,"nPendingJGCRebuild":0,"nRunningScrubbing":0,"nPendingScrubbing":3}}}
 		} else { BUG_ON(true); }
@@ -282,7 +286,7 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 }
 
 void mgmt_sim_verify_at_end(void) {
-	BUG_ON(!mgmt_sim_is_done() || (g_mgmt_sim->volume_msg_count < 0) || (g_mgmt_sim->n_leader_keep_alives < 0));
+	BUG_ON(!mgmt_sim_is_done() || (g_mgmt_sim->volume_msg_count <= 0) || (g_mgmt_sim->n_leader_keep_alives <= 0));
 }
 
 bool mgmt_sim_is_done(void) { return g_mgmt_sim->fsm_state == MGMT_FSM_DONE; }
