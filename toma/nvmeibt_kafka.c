@@ -212,8 +212,8 @@ static pthread_mutex_t 			kafka_toma_requested_term_and_offset_mutex = PTHREAD_R
 	const int64_t		incremental_TARGET_updates_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);															\
 	const bool is = (kafka_leader_offset_blocking_incremental_TARGET_updates > incremental_TARGET_updates_offset);																				\
 	if (is) {																																										\
-		N_Tf(name, "Awaiting offset_blocking_incremental_TARGET_updates=@LD>@LD",																									\
-			 purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(incremental_TARGET_updates_offset));												\
+		N_Tf(name, "Awaiting offset_blocking_incremental_TARGET_updates=@KAFKA_OFST>@KAFKA_OFST",																									\
+			 kafka_leader_offset_blocking_incremental_TARGET_updates, incremental_TARGET_updates_offset);												\
 	}																																												\
 	(is);																																											\
 })
@@ -874,7 +874,7 @@ static struct t_consumer_impl {
 static void __consumer_stop_on_raft(struct t_consumer_impl *k) {
 	if (k->consumer) {
 		rd_kafka_assign(k->consumer, NULL);	// Stop consuming by unassigning all partitions
-		N_Tf(yzbh7dk, "@STR: raft is stopping to receive incremental updates, consumer_offset=@LD", rd_kafka_name(k->consumer), purify_offset(k->consumer_offset));
+		N_Tf(yzbh7dk, "@STR: raft is stopping to receive incremental updates, consumer_@KAFKA_OFST", rd_kafka_name(k->consumer), k->consumer_offset);
 	}
 }
 
@@ -910,10 +910,10 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 	rd_kafka_resp_err_t k_err;
 	if (already_have_starting_point)
 		calc_offset = (k->consumer_offset + 1);			// Non purified
-	N_Tf(90elhjt2, "@STR: initial_offset=@LD", name, purify_offset(calc_offset));
+	N_Tf(90elhjt2, "@STR: initial_@KAFKA_OFST", name, calc_offset);
 	k_err = __consumer_assign_partition_and_offset(k, calc_offset);	// Assign partition - rdkafka will resolve RD_KAFKA_OFFSET_STORED to actual committed offset
 	if (k_err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-		N_Wf(cvniev8, "@STR Failed assign partition, offset=@LD err='@STR'", name, purify_offset(calc_offset), rd_kafka_err2str(k_err));
+		N_Wf(cvniev8, "@STR Failed assign partition_@KAFKA_OFST err='@STR'", name, calc_offset, rd_kafka_err2str(k_err));
 		return -1;
 	}
 
@@ -928,7 +928,7 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 		if ((k_err == RD_KAFKA_RESP_ERR_NO_ERROR) && (pl->elems[0].offset >= 0L)) {	// May return RD_KAFKA_OFFSET_INVALID if queue just created and was never read from
 			calc_offset = pl->elems[0].offset;
 			if ((k_err_watermark == RD_KAFKA_RESP_ERR_NO_ERROR) && ((calc_offset < low_wm) || (calc_offset > high_wm)))
-				N_Wf(minwusk, "@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and "auto.offset.reset" will take the earliest message
+				N_Wf(minwusk, "@STR Kafka error. commited_@KAFKA_OFST is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and "auto.offset.reset" will take the earliest message
 		} else {
 			calc_offset = RD_KAFKA_OFFSET_BEGINNING;	// Now default is use beginning as fallback
 			k_err = __consumer_assign_partition_and_offset(k, calc_offset);
@@ -941,7 +941,7 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 			k->consumer_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, calc_offset - 1);	// Not mandatory: As If previous message was read
 		rd_kafka_topic_partition_list_destroy(pl);
 	}
-	N_Tf(3vx723k3, "@STR: consumer_offset=@LD (next will be @LD)", name, purify_offset(k->consumer_offset), purify_offset(calc_offset));
+	N_Tf(3vx723k3, "@STR: consumer_@KAFKA_OFST, next_@KAFKA_OFST", name, k->consumer_offset, calc_offset);
 	return 0;
 }
 
@@ -981,7 +981,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		return 1;
 	}
 	k->cnt_zero_consecutive_consumes = 0;
-	N_Tf(fhs8lad, "(@STR) returned k_msg(err=@STR, k_offset=@LD)", rd_kafka_name(k->consumer), rd_kafka_err2str(k_msg->err), k_msg->offset);
+	N_Tf(fhs8lad, "(@STR) returned k_msg(err=@STR), msg_@KAFKA_OFST", rd_kafka_name(k->consumer), rd_kafka_err2str(k_msg->err), k_msg->offset);
 	if (k_msg->err == RD_KAFKA_RESP_ERR_NO_ERROR) {
 		const int64_t new_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, k_msg->offset);
 		if (strstr((char *)(k_msg->payload), "assphrase")) { // Don't print passphrases to log
@@ -1336,7 +1336,7 @@ static int CMD_consumer_init(bool is_full_init) {
 }
 
 static void mark_CMD_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_called_by_toma) {
-	N_Tf(vbdsk30, "Done k_offset=@LD", purify_offset(kafka_offset));
+	N_Tf(vbdsk30, "Done msg_@KAFKA_OFST", kafka_offset);
 	if (is_called_by_toma) {
 		atomic_add(-1, &CMD_consumer_n_msgs_awaiting_toma_processing);
 	}
@@ -1482,12 +1482,12 @@ out:
 
 static void mark_HW_full_config_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_called_by_toma, bool is_this_offset_a_good_starting_point_after_the_next_boot)
 {
-	N_Tf(7vsso4l, "Done k_offset=@LD", purify_offset(kafka_offset));
+	N_Tf(7vsso4l, "Done_@KAFKA_OFST", kafka_offset);
 	if (is_called_by_toma) {
 		if (is_this_offset_a_good_starting_point_after_the_next_boot) {
 			HW_full_config_consumer_offset_committed_by_toma = max(HW_full_config_consumer_offset_committed_by_toma, kafka_offset);
 		} else {
-			N_Wf(3178bsm, "k_offset=@LD was ignored. Hopefully recoverable", purify_offset(kafka_offset));
+			N_Wf(3178bsm, "@KAFKA_OFST was ignored. Hopefully recoverable", kafka_offset);
 			HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_committed_by_toma;	// release HW_full_config_consume()
 		}
 	}
@@ -1505,7 +1505,7 @@ static int HW_full_config_consume(void) {
 	}
 	if (HW_full_config_consumer_offset_committed_by_toma < HW_full_config_consumer_offset_submitted_to_toma) {
 		// In order to have 100% control of the offset of the consumed HW_full_configs, we run one at a time
-		N_Tf(tvs84kw, "Skipping, offset_committed_by_toma=@LD < offset_submitted_to_toma=@LD", purify_offset(HW_full_config_consumer_offset_committed_by_toma), purify_offset(HW_full_config_consumer_offset_submitted_to_toma));
+		N_Tf(tvs84kw, "Skipping, committed_by_toma_@KAFKA_OFST < submitted_to_toma_@KAFKA_OFST", HW_full_config_consumer_offset_committed_by_toma, HW_full_config_consumer_offset_submitted_to_toma);
 		return 1;
 	}
 	// We are only interested in the last (highest) configuration. Due to reordering (multi-mgmt) it may not have the highest kafka offset, so we need to read the entire queue, use latest and reset the offset to the last msg in the queue
@@ -1688,7 +1688,7 @@ static void kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma(voi
 
 static bool is_raft_members_wakeup_params_OK(struct kafka_wakeup_params *wakeup_params, int seq_no_for_comparison, bool is_LessEqual) {
 	if (is_LessEqual ? (wakeup_params->seq_no <= seq_no_for_comparison) : (wakeup_params->seq_no == seq_no_for_comparison)) {
-		N_Wf(ak3nxyp, "Ignoring duplicate sequence_no=@INT64_TD (k_offset=@LD)", wakeup_params->seq_no, purify_offset(wakeup_params->kafka_offset));
+		N_Wf(ak3nxyp, "Ignoring duplicate sequence_no=@INT64_TD, @KAFKA_OFST", wakeup_params->seq_no, wakeup_params->kafka_offset);
 		FREE_RAFT_MEMBERS_WAKEUP_PARAMS(vtsie4m, wakeup_params);
 		return false;
 	}
@@ -1893,7 +1893,7 @@ void nvmeibt_kafka_req_stop_consuming_leader_TARGET_msgs(void) {
 void nvmeibt_kafka_req_start_consuming_leader_VOL_msgs(int64_t kafka_offset_VOL, unsigned long long raft_term)
 {
 	// TOMA request runs in the TOMA thread, and only marks for the kafka thread
-	N_Tf(trvgh9x, "k_offset=@LD  raft_term=@LLX", purify_offset(kafka_offset_VOL), raft_term);
+	N_Tf(trvgh9x, "@KAFKA_OFST, raft_term=@LLX", kafka_offset_VOL, raft_term);
 	pthread_mutex_lock(&(kafka_toma_requested_term_and_offset_mutex));
 	requested_incremental_VOL_updates_consumer_offset = kafka_offset_VOL;
 	kafka_requested_consuming_leader_VOL_msgs_raft_term = raft_term;
@@ -1903,7 +1903,7 @@ void nvmeibt_kafka_req_start_consuming_leader_VOL_msgs(int64_t kafka_offset_VOL,
 void nvmeibt_kafka_req_start_consuming_leader_TARGET_msgs(int64_t kafka_offset_TARGET, int64_t seq_no_TARGET, unsigned long long raft_term)
 {
 	// TOMA request runs in the TOMA thread, and only marks for the kafka thread
-	N_Tf(usmek2l, "k_offset=@LD raft_term=@LLX", purify_offset(kafka_offset_TARGET), raft_term);
+	N_Tf(usmek2l, "@KAFKA_OFST, raft_term=@LLX", kafka_offset_TARGET, raft_term);
 	pthread_mutex_lock(&(kafka_toma_requested_term_and_offset_mutex));
 	requested_incremental_TARGET_updates_consumer_offset = kafka_offset_TARGET;
 	requested_incremental_TARGET_updates_consumer_seq_no = seq_no_TARGET;
@@ -1985,7 +1985,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 		} else if (sampled_req_VOL_raft_term > 0) {
 			struct t_consumer_impl *k = &k_incremental_VOL_updates;
 			if (!is_RD_KAFKA_OFFSET_VALID(sampled_req_offset_VOL)) {
-				N_Ef(ggy1218, "Invalid VOL offset=@LD", purify_offset(sampled_req_offset_VOL));
+				N_Ef(ggy1218, "Invalid VOL_@KAFKA_OFST", sampled_req_offset_VOL);
 				nvmeibt_abort(ES_FATAL);
 			}
 			N_Tf(6visumr, "starting VOL consumption with raft_term=@LLX", sampled_req_VOL_raft_term);
@@ -1994,7 +1994,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_VOL,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->kafka_mgmt_config_ctx)));
 			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_VOL);
-			N_Tf(evweyha, "rd_kafka_assign(VOL_updates_consumer_offset=@LD)", purify_offset(sampled_req_offset_VOL));
+			N_Tf(evweyha, "rd_kafka_assign(VOL_updates_@KAFKA_OFST)", sampled_req_offset_VOL);
 			if (k_err) {
 				N_Wf(cvn4do8, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
 				rv = -1;
@@ -2007,7 +2007,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 		} else if (sampled_req_TARGET_raft_term > 0) {
 			struct t_consumer_impl *k = &k_incremental_TARGET_updates;
 			if (!is_RD_KAFKA_OFFSET_VALID(sampled_req_offset_TARGET)) {
-				N_Ef(ggy1214, "Invalid TARGET offset=@LD", purify_offset(sampled_req_offset_TARGET));
+				N_Ef(ggy1214, "Invalid TARGET, @KAFKA_OFST", sampled_req_offset_TARGET);
 				nvmeibt_abort(ES_FATAL);
 			}
 			N_Tf(yvbo3le, "starting TARGET consumption with raft_term=@LLX", sampled_req_TARGET_raft_term);
@@ -2018,7 +2018,7 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_TARGET,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->raft_members_ctx)));
 			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_TARGET);
-			N_Tf(psiwjrn, "rd_kafka_assign(TARGET_updates_consumer_offset=@INT64_TD)", purify_offset(sampled_req_offset_TARGET));
+			N_Tf(psiwjrn, "rd_kafka_assign(TARGET_updates_@KAFKA_OFST)", sampled_req_offset_TARGET);
 			if (k_err) {
 				N_Wf(vybsi4l, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
 				rv = -1;
@@ -2094,11 +2094,11 @@ static int kafka_commit_by_offset_async(struct t_consumer_impl *k, const int64_t
 	rd_kafka_resp_err_t rv = RD_KAFKA_RESP_ERR_NO_ERROR;
 	if (k->consumer) {
 		rd_kafka_topic_partition_list_t *offsets = rd_kafka_topic_partition_list_new(1);
-		N_Tf(76hd89e, "@STR: Commiting k_offset=@LD", rd_kafka_name(k->consumer), purify_offset(offset));
+		N_Tf(76hd89e, "@STR: Committing_@KAFKA_OFST", rd_kafka_name(k->consumer), offset);
 		rd_kafka_topic_partition_list_add(offsets, k->topic_name, k->consumer_partition);
 		offsets->elems[0].offset = purify_offset(offset) + 1;	// The API says "last_consumed(processed) + 1"
 		rv = rd_kafka_commit(k->consumer, offsets, 1 /*async*/);
-		NTOMA_ASSERT(mdvewks, rv == RD_KAFKA_RESP_ERR_NO_ERROR, "@STR: rd_kafka_commit(@INT64) rv=@INT '@STR'", k->topic_name, offsets->elems[0].offset, rv, rd_kafka_err2str(rv));
+		NTOMA_ASSERT(mdvewks, rv == RD_KAFKA_RESP_ERR_NO_ERROR, "@STR: commit_@KAFKA_OFST rv=@INT '@STR'", k->topic_name, offsets->elems[0].offset, rv, rd_kafka_err2str(rv));
 		rd_kafka_topic_partition_list_destroy(offsets);
 		k->offset_committed = offset;
 	}
@@ -2118,7 +2118,7 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 		if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) == 0) {  // Otherwise an older msg did not yet finish processing
 			kafka_commit_by_offset_async(&k_CMD, CMD_kafka_offset_to_commit);	// If nothing is processed by TOMA (and naturally all the immediate ones finished processing), we can commit the latest
 		} else {
-			N_Tf(bs7i2ja, "Skipping Commit k_offset=@LD CMD_consumer_n_msgs_awaiting_toma_processing=@INT", purify_offset(CMD_kafka_offset_to_commit), atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing));
+			N_Tf(bs7i2ja, "Skipping Commit_@KAFKA_OFST CMD_consumer_n_msgs_awaiting_toma_processing=@INT", CMD_kafka_offset_to_commit, atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing));
 		}
 	}
 	{ // All HW_full_config updated are handled by TOMA, (in order)
@@ -2129,7 +2129,7 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	if (is_consuming_leader_VOL_msgs()) {
 		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
 		if (incremental_VOL_updates_offset_to_commit > k_incremental_VOL_updates.offset_committed) {
-			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD latest=@INT64_TD", purify_offset(incremental_VOL_updates_offset_to_commit), purify_offset(k_incremental_VOL_updates.consumer_offset));
+			N_Tf(vnd8oel, "VOL: Committing_@KAFKA_OFST latest_@KAFKA_OFST", incremental_VOL_updates_offset_to_commit, k_incremental_VOL_updates.consumer_offset);
 			kafka_commit_by_offset_async(&k_incremental_VOL_updates, incremental_VOL_updates_offset_to_commit);
 		}
 	}
@@ -2415,7 +2415,7 @@ out:
 
 static int toma_incremental_target_update_handler(struct name_and_uuid_params_ctx *add_del_member_params, enum KAFKA_EVENT_TYPE event_type, int64_t kafka_offset) {
 	if (!nvmeibt_raft_is_leader() && (event_type != KAFKA_EVENT_TYPE_TARGET_ADD)) {
-		N_Tf(tvajhwi, "Not a leader, probably an old msg. Skipping. k_offset=@INT64_TD", purify_offset(kafka_offset));
+		N_Tf(tvajhwi, "Not a leader, probably an old msg. Skipping_@KAFKA_OFST", kafka_offset);
 		return 0;
 	}
 	if (add_del_member_params->targets_updates_sequence <= RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_calculated)) {

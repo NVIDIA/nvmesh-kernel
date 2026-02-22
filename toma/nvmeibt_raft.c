@@ -803,7 +803,7 @@ void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void)
 		members_wire_buf->members[i++] = member->this_member_leader_serialized_wire_buf;
 	}
 	nvmeibt_strlcpy((char *)&(members_wire_buf->members[i]), EYECATCHER_CNF_END, wire_conf_buf->buf_len - (int)((char *)&(members_wire_buf->members[i]) - (char *)(wire_conf_buf->data_buf)));
-	N_Tf(5bcjs82, "New conf ver=@INT64_TD n_members=@INT len=@SIZE_T", RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), LE_SWAP32(members_wire_buf->n_raft_members), wire_conf_buf->buf_len);
+	N_Tf(5bcjs82, "New conf ver=@KAFKA_OFST n_members=@INT len=@SIZE_T", RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), LE_SWAP32(members_wire_buf->n_raft_members), wire_conf_buf->buf_len);
 	NFOUT;
 }
 
@@ -913,7 +913,7 @@ void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add
 	}
 	nvmeibt_raft_leader_generate_member_wire_from_member(member);
 	raft_reset_member_ctx(member);
-	N_Tf(d4v39sa, "Added member hostname=@STR n_members_after=@INT uuid=@UUID_LE k_offset=@LD",
+	N_Tf(d4v39sa, "Added member hostname=@STR n_members_after=@INT uuid=@UUID_LE @KAFKA_OFST",
 		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset);
 	convert_to_follower_if_majority_is_lost();
 	// If I am the first and only member, then convert to candidate that starts from the committed members_list
@@ -964,7 +964,7 @@ void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add
 		nvmeibt_raft_set_voted_for_uuid(NULL);
 	}
 	nvmeibt_raft_unlink_member_from_node(member, NULL);
-	N_Tf(vnhve8w, "Del member hostname=@STR n_members_after=@INT uuid=@UUID_LE k_offset=@LD",
+	N_Tf(vnhve8w, "Del member hostname=@STR n_members_after=@INT uuid=@UUID_LE @KAFKA_OFST",
 		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset);
 	convert_to_follower_if_majority_is_lost();
 	NNVMEIBT_TOMA_FREE(cvgsuyg, member);
@@ -1023,7 +1023,7 @@ int nvmeibt_raft_ignore_member(char *hostname)
 
 #define DUMP_RAFT_MEMBER_CONF(name, _i, _raft_member)	({																										\
 	struct mm_raft_member_conf		*mmb = _raft_member;																										\
-	N_Tf(name, "member[@INT]: eyecatcher=@STR hostname=@STR uuid=@UUID_LE k_offset=@LX", _i, mmb->eyecatcher, mmb->hostname, &(mmb->uuid), mmb->kafka_offset);	\
+	N_Tf(name, "member[@INT]: eyecatcher=@STR hostname=@STR uuid=@UUID_LE @KAFKA_OFST", _i, mmb->eyecatcher, mmb->hostname, &(mmb->uuid), mmb->kafka_offset);	\
 })
 
 static void serialize_tlv_JSON(struct nvmeibt_Str *JSON_output, char *tlv_name, struct nvmeibt_wire_type_len_value *tlv)
@@ -1087,7 +1087,7 @@ void nvmeibt_raft_align_members_with_committed_wire_buf(struct nvmeibt_Str *JSON
 	}
 	n_members_in_wire_buf = LE_SWAP32(members_wire_buf->n_raft_members);
 	NTOMA_ASSERT(tvashj2, members_wire_buf_len == (int)(n_members_in_wire_buf * sizeof(struct mm_raft_member_conf) + sizeof(struct all_members_wire_buf_ctx) + sizeof(EYECATCHER_CNF_END)),
-				 "members_wire_buf_len=@INT n_members_in_wire_buf=@INT sizeof(struct mm_raft_member_conf)=@SIZEOF sizeof(struct all_members_wire_buf_ctx)=@SIZEOF total_len=@INT k_offset=@LD",
+				 "members_wire_buf_len=@INT n_members_in_wire_buf=@INT sizeof(struct mm_raft_member_conf)=@SIZEOF sizeof(struct all_members_wire_buf_ctx)=@SIZEOF total_len=@INT @KAFKA_OFST",
 				 members_wire_buf_len, n_members_in_wire_buf, sizeof(struct mm_raft_member_conf), sizeof(struct all_members_wire_buf_ctx),
 				 persist_and_wire_buf_get_total_len(my_raft_global.follower_to_commit_persist_and_wire_buf_full), kafka_offset);
 	new_seq_num = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed);

@@ -7535,6 +7535,12 @@
             "%ld": 4
         }
     },
+    "@KAFKA_OFST": {
+        "size": 64,
+        "type": "long",
+        "fmt": "k_offset[%zu]",
+        "fmt_func": "fmt_kafka_offset"
+    },
     "@KERNEL_DEV": {
         "size": 64,
         "type": "const void*",
@@ -11934,35 +11940,12 @@
     "@NDU": {
         "size": 8,
         "type": "u8",
-        "fmt": "%d",
-        "fmt_func": "fmt_ndu"
+        "fmt": "NDU(%d)"
     },
     "@OWNER": {
         "size": "string",
         "type": "string",
-        "fmt": "%.8s",
-        "final": true,
-        "__histogram": {
-            "%.8s": 22
-        }
-    },
-    "@OWNERS_DEPRECATING": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 22
-        }
-    },
-    "@OWNER_DEPRECATING": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 34
-        }
+        "fmt": "%.8s"
     },
     "@OWNER_DIED": {
         "size": 32,
