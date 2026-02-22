@@ -1429,6 +1429,7 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 					 nvmeibt_seg_active_UUID_8(seg_active), reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx->n_stale_locks);
 				// Actually, move the reg_ctx object from active to stale
 				nvmeib_hash_add_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id), reg_ctx);
+				NVMEIBT_SEG_ACTIVE_REMOVE_ACTIVE_REGISTRANT_FROM_HASHES(seg_active, reg_ctx);
 				NDUMP_N_ACTIVE_REGISTRANTS(ianwq8i, seg_active);
 				goto out;
 			} else {
