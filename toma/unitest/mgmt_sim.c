@@ -377,26 +377,16 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR", m->boot_time, m->disk_002.status, m->disk_003.status);
 }
 
-/*
- * Run the format scenario state machine.
- * Transitions based on disk statuses extracted from reportTarget.
- * When a formatDrive needs to be sent, it's produced directly to the CMD topic.
- */
+/* Run the format scenario state machine.
+ * Transitions based on disk statuses extracted from reportTarget. */
 static void mgmt_sim_run_fsm(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	enum mgmt_sim_fsm_state prev_state;
-	bool disk_002_ok;
-	bool disk_003_ok;
-	bool disk_003_formatting;
-	bool disk_003_ok_with_expected_reported_format;
-	BUG_ON(!m);
+	const enum mgmt_sim_fsm_state prev_state = m->fsm_state;
+	const bool disk_002_ok = (strcmp(m->disk_002.status, "Ok") == 0);
+	const bool disk_003_ok = (strcmp(m->disk_003.status, "Ok") == 0);
+	const bool disk_003_formatting = (strcmp(m->disk_003.status, "Formatting") == 0);
 	#define FORMAT_REQUEST_COUNTER   303
-
-	prev_state = m->fsm_state;
-	disk_002_ok = (strcmp(m->disk_002.status, "Ok") == 0);
-	disk_003_ok = (strcmp(m->disk_003.status, "Ok") == 0);
-	disk_003_formatting = (strcmp(m->disk_003.status, "Formatting") == 0);
-	disk_003_ok_with_expected_reported_format = disk_003_ok &&
+	const bool disk_003_ok_with_expected_reported_format = disk_003_ok &&
 		(m->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER) &&
 		(m->disk_003.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
 		(m->disk_003.block_size == 4096) &&
