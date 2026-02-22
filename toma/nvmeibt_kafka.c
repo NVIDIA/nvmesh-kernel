@@ -18,6 +18,7 @@
  */
 
 /*******************    offset service functions         **********************/
+#define KAFKA_TOPIC_CHANGE_NO 1		// Between 3.2 and 3.3 we changed the kafka topics naming convention (change_no went 0-->1)
 int64_t purify_offset(int64_t offset_with_topic_change_no) {
 	union offset_with_topic_change_no u = { .all = offset_with_topic_change_no };
 	u.a[7] = u.a[6] = u.a[5];	// Sign extend since the Kafka special values are -1, -2000, etc.

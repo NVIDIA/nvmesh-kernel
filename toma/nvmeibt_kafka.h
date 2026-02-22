@@ -25,8 +25,6 @@
  * 	leader_kafka_offset_blocking_incremental_TARGET_updates	// Can continue when == (KAFKA_OFFSET, leader_committed_by_majority)
  */
 
-#define KAFKA_TOPIC_CHANGE_NO 1		// Between 3.2 and 3.3 we changed the kafka topics naming convention (change_no went 0-->1)
-
 #define MGMT_LOG_MSG_HEADER_LEN		96
 #define MGMT_LOG_MSG_MSG_LEN		256
 
