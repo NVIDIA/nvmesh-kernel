@@ -109,6 +109,7 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 	if (t->committed_offset >= t->cur_offset)		// Msg was N read, cur moved back (to N-x) and now msg N commited. Real kafka does not move cur_offset, but upon restart it will move it to earliest
 		sim_broker_topic_reset_to_earliest(t);		// Implemented not like kafka: We move cur to earliest immediately because we free commited messages
 	N_Tf(__AUTOID__, "[@CHAR] commited:@LD -> @LD, cur=@LD, last_slot[@INT]", t->type, prev_committed, ack_offset, t->cur_offset, (int)(i % t->capacity));
+	BUG_ON((t->n_msgs == 0) && (t->type == KTOPIC_TYPE_M2T_HW_CFG));		// Hardware configuration should always exist. This queue must never be empty
  _out:
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
@@ -231,6 +232,7 @@ void rd_kafka_topic_destroy(rd_kafka_topic_t *kt) {
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
 	rd_kafka_topic_t *kt = &ko->topic;
 	struct sim_broker_topic *bt = kt->broker_topic;
+	BUG_ON(ko->who == RD_KAFKA_PRODUCER);
 	N_Tf(__AUTOID__, "k_object=@STR, has_pl=@BOOL_YN", ko->name, !!pl);
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_assigned) {
