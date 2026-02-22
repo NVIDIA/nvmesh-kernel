@@ -971,7 +971,6 @@ struct nvmeibc_disk_command *nvmeibc_disk_pcpu_nrch_pending_cmd_get(
 	void (*put_req_fn)(struct nvmeibc_ib_nordda_channel *ch, struct nvmeibc_volume_req_info *req));
 void nvmeibc_disk_init_stats(struct nvmeibc_disk *disk);
 void nvmeibc_disk_print_stats(struct nvmeibc_disk *disk, const char *str);
-bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk);
 
 /* A struct for software disk I/O requst. Daniel todo: Missleading name. This io_req has nothing to do with block device */
 struct nvmeibc_block_io_req {

@@ -235,10 +235,6 @@ void nvmeibc_b_cp_loser_aband_jour(struct nvmeibc_b_cp_loser *l, const struct nv
 /************************* glue to nvmeib, cdisk, resolver *******************/
 void nvmeib_set_block_dp_ec_funcs(void (*read_mod_wr_dmd)(void*, u64)) { (void)read_mod_wr_dmd; }
 
-bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk) {
-	return ((disk)->base.ops.get_sector_shift(&((disk))->base)) == 9 && ((disk)->base.ops.get_md_size(&((disk))->base)) == 0;
-}
-
 #include "clnt/block/recovery/nvmeibc_decentralized_unreg.h"
 enum stale_lock_resolve_status stale_lock_resolver_get_status(struct stale_lock_resolver_t *slr, u32 lock_id, const struct nvmeibc_cmd_lock *cmd_lock) {
 	const int rv = cinst.vtable.get_slr_status(slr, lock_id);

@@ -685,7 +685,7 @@ _out:
 	if (bx->exec.do_512b_sub_block_x) {
 		struct nvmeibc_block_command *c = cmds, *end = &cmds[cmds->ncmds];
 		for ( ; c < end; c++) {					// For loop to cover compare exchange (read+write)
-			if (nvmeibc_disk_do_512b_sub_block_x_supported(nvmeibc_disk_from_base(c->ds->disk))) {
+			if (nvmeibc_idisk_is_512b_sub_block_x_supported(c->ds->disk)) {
 				struct nvmeibc_block_io_req *req = &c->iocmd->reqs1;
 				struct scatterlist *sgl = req->ndb->table.sgl;
 				req->do_512b_sub_block_x = bx->exec.do_512b_sub_block_x;

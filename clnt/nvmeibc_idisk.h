@@ -41,4 +41,15 @@ static inline const char* nvmeibc_idisk_get_host_name_for_logging(struct nvmeibc
 		return name;
 }
 
+static inline bool nvmeibc_idisk_is_512b_sub_block_x_supported(const struct nvmeibc_idisk* disk)
+{	//TODO: in near future, the KC simulator will probably have it's own implementation, so this code will move there
+	#if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)
+		(void)disk;
+		return true;
+	#else
+		return disk->ops.get_sector_shift(disk) == 9 && disk->ops.get_md_size(disk) == 0;
+	#endif
+}
+
+
 #endif /* NVMEIBC_IDISK_H */

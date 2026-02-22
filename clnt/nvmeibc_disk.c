@@ -7046,11 +7046,6 @@ void nvmeibc_disk_init_stats(struct nvmeibc_disk *disk)
 	__NFOUTD;
 }
 
-bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk)
-{
-	return disk->sector_shift == 9 && disk->md_size == 0;
-}
-
 void nvmeibc_disk_print_stats(struct nvmeibc_disk *disk, const char *str)
 {
 	struct nvmeibc_disk_info *info __attribute__((unused)) = disk->info;
