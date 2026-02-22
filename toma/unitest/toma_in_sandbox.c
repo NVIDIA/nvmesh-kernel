@@ -996,23 +996,15 @@ static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device 
 // Process any pending disk ADD event that was deferred from a format operation.
 // This is called from the main event loop to ensure the REMOVE event has been
 // processed before the ADD event is sent.
-static void TSB_process_pending_disk_add_event(void)
-{
-	const struct sandbox_nvme_device *dev;
-
-	if (!sys->pending_disk_add.has_pending)
-		return;
-
-	dev = sandbox_nvme_get_device_by_disk_id(sys->pending_disk_add.disk_id);
-	if (dev) {
+static void TSB_process_pending_disk_add_event(void) {
+	if (sys->pending_disk_add.has_pending) {
+		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(sys->pending_disk_add.disk_id);
+		BUG_ON(!dev);
 		N_Tf(nl_pend_send, "Sending deferred disk ADD event for disk_id=@STR", sys->pending_disk_add.disk_id);
 		TSB_netlink_send_disk_change_event(dev, true);  // is_add=true -> n_blocks > 0
-	} else {
-		N_Ef(nl_pend_err, "Pending disk ADD: device not found disk_id=@STR", sys->pending_disk_add.disk_id);
+		sys->pending_disk_add.has_pending = false;
+		sys->pending_disk_add.disk_id[0] = '\0';
 	}
-
-	sys->pending_disk_add.has_pending = false;
-	sys->pending_disk_add.disk_id[0] = '\0';
 }
 
 // Handle csc_io_to_disk requests - perform disk I/O and queue response
@@ -1572,15 +1564,19 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	int i, n_events;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
 	__temp_wait_sleep();
+
+	sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
+	if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
+	TSB_process_pending_disk_add_event();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
+	mgmt_sim_do_periodic();
+
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
 		const int fd = ep->evs[i].__fd;
 		const struct TSB_sock_otherside *o = TSB_socket_find_by_fd(fd)->other_side;
 		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
 	}
-
 	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, is_shutting_down, n_events); loop_idx++;
-	mgmt_sim_do_periodic();
 	if (!is_shutting_down) {
 		if (mgmt_sim_is_done()) {
 			SANDBOX_PRINT("format drive test: %s\n", COL_GREEN "passed" COL_RESET);
@@ -1598,12 +1594,6 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 			return -1;  // unreachable
 		}
 	}
-
-	sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
-	if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
-	// Process any pending disk ADD event that was deferred from a format operation.
-	// This gives the REMOVE event time to be processed by the work queue.
-	TSB_process_pending_disk_add_event();
 	return n_events;
 }
 
