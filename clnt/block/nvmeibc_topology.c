@@ -4513,28 +4513,30 @@ int nvmeibc_topologies_detect_illegal_raid_conf(struct nvmeibc_topologies *nt)
 	topo_for_each_raid1(t, chunk, c, pr, r) {
 		if (pr->slice_size == 1) {
 			/* N-mirror, all segments must be on differnet nodes */
-			for (i = 0  , si = &pr->segments[i]; i < pr->replicas; i++, si++)
-			for (j = i+1, sj = &pr->segments[j]; j < pr->replicas; j++, sj++) {
-				if (__is_unknown_node(si)) break;    // Cannot verify it
-				if (__is_unknown_node(sj)) continue; // Cannot verify it
-				if (!strcmp(si->disk->ops.get_host_name(si->disk), sj->disk->ops.get_host_name(sj->disk))) {
-					WARN(1, "%s: Raid(%d,%d) both segs {%d,%d} are on host %s\n",
-					   nt->device_name, c, r, i, j, sj->disk->ops.get_host_name(sj->disk));
-					rv++;
+			for (i = 0  , si = &pr->segments[i]; i < pr->replicas; i++, si++) {
+				for (j = i+1, sj = &pr->segments[j]; j < pr->replicas; j++, sj++) {
+					if (__is_unknown_node(si)) break;    // Cannot verify it
+					if (__is_unknown_node(sj)) continue; // Cannot verify it
+					if (!strcmp(si->disk->ops.get_host_name(si->disk), sj->disk->ops.get_host_name(sj->disk))) {
+						WARN(1, "%s: Raid(%d,%d) both segs {%d,%d} are on host %s\n",
+						   nt->device_name, c, r, i, j, sj->disk->ops.get_host_name(sj->disk));
+						rv++;
+					}
 				}
 			}
 		} else {
 			/* Raid5/6, Consecutive P segments must be on differnet nodes */
 			int np = nvmeibc_raid1_get_protect_lvl(pr);
-			for (i = 0  , si = &pr->segments[i]; i < pr->replicas; i++, si++)
-			for (j = i+1, sj = &pr->segments[j]; j < i + np      ; j++      ) {
-				sj = &pr->segments[j % pr->replicas];
-				if (__is_unknown_node(si)) break;    // Cannot verify it
-				if (__is_unknown_node(sj)) continue; // Cannot verify it
-				if (!strcmp(si->disk->ops.get_host_name(si->disk), sj->disk->ops.get_host_name(sj->disk))) {
-					WARN(1, "%s: Raid(%d,%d) both parity segs {%d,%d} are on host %s\n",
-					   nt->device_name, c, r, i, j, sj->disk->ops.get_host_name(sj->disk));
-					rv++;
+			for (i = 0  , si = &pr->segments[i]; i < pr->replicas; i++, si++) {
+				for (j = i+1, sj = &pr->segments[j]; j < i + np      ; j++) {
+					sj = &pr->segments[j % pr->replicas];
+					if (__is_unknown_node(si)) break;    // Cannot verify it
+					if (__is_unknown_node(sj)) continue; // Cannot verify it
+					if (!strcmp(si->disk->ops.get_host_name(si->disk), sj->disk->ops.get_host_name(sj->disk))) {
+						WARN(1, "%s: Raid(%d,%d) both parity segs {%d,%d} are on host %s\n",
+						   nt->device_name, c, r, i, j, sj->disk->ops.get_host_name(sj->disk));
+						rv++;
+					}
 				}
 			}
 		}
