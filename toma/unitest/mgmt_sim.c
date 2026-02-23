@@ -246,8 +246,8 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 		"\"targets\":["
 			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
 				"\"disks\":["
-				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
+				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
 					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
@@ -458,41 +458,55 @@ static void mgmt_sim_run_fsm(void) {
 	const enum mgmt_sim_fsm_state prev_state = m->fsm_state;
 	const bool disk_002_ok = (strcmp(m->disk_002.status, "Ok") == 0);
 	const bool disk_003_ok = (strcmp(m->disk_003.status, "Ok") == 0);
+	const bool disk_002_not_initialized = (strcmp(m->disk_002.status, "Not_Initialized") == 0);
+	const bool disk_003_not_initialized = (strcmp(m->disk_003.status, "Not_Initialized") == 0);
+	const bool disk_002_ready_for_format = disk_002_ok || disk_002_not_initialized;
+	const bool disk_003_ready_for_format = disk_003_ok || disk_003_not_initialized;
+	const bool disk_002_formatting = (strcmp(m->disk_002.status, "Formatting") == 0);
 	const bool disk_003_formatting = (strcmp(m->disk_003.status, "Formatting") == 0);
 	#define FORMAT_REQUEST_COUNTER   303
+	const bool disk_002_ok_with_expected_reported_format = disk_002_ok &&
+		(m->disk_002.format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(m->disk_002.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(m->disk_002.block_size == 4096) &&
+		(m->disk_002.metadata_size == 8);
 	const bool disk_003_ok_with_expected_reported_format = disk_003_ok &&
 		(m->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER) &&
 		(m->disk_003.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
 		(m->disk_003.block_size == 4096) &&
 		(m->disk_003.metadata_size == 8);
+	const bool both_disks_have_expected_post_format = disk_002_ok_with_expected_reported_format && disk_003_ok_with_expected_reported_format;
 
 	switch (m->fsm_state) {
 	case MGMT_FSM_WAITING_FOR_BOTH_OK:
-		if (disk_002_ok && disk_003_ok) {		/* Both disks are Ok - send formatDrive */
-			char *msg = malloc(1024);
-			const size_t len = (size_t)make_msg_format_drive(msg, 1024, &m->disk_003, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
-			N_IMf(msim_fsm1, "both disks Ok, sending formatDrive bootTime=@INT64_TD", m->boot_time);
-			sim_broker_topic_msg_produce(m->k_producers.cmd, msg, len, false);
+		if (disk_002_ready_for_format && disk_003_ready_for_format) {		/* Both disks are discovered and can be formatted */
+			char *msg_002 = malloc(1024);
+			char *msg_003 = malloc(1024);
+			const size_t len_002 = (size_t)make_msg_format_drive(msg_002, 1024, &m->disk_002, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
+			const size_t len_003 = (size_t)make_msg_format_drive(msg_003, 1024, &m->disk_003, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
+			N_IMf(msim_fsm1, "both disks ready, sending formatDrive for disk002+disk003 bootTime=@INT64_TD", m->boot_time);
+			sim_broker_topic_msg_produce(m->k_producers.cmd, msg_002, len_002, false);
+			sim_broker_topic_msg_produce(m->k_producers.cmd, msg_003, len_003, false);
 			m->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
 		}
 		break;
 
 	case MGMT_FSM_SENT_FORMAT_DRIVE:
-		if (disk_003_formatting) {
-			N_IMf(msim_fsm2, "disk003 now Formatting");
-			m->fsm_state = MGMT_FSM_SAW_FORMATTING;
-		} else if (disk_003_ok_with_expected_reported_format) {
+		if (both_disks_have_expected_post_format) {
 			/* Might have missed the Formatting state - go directly to formatDone */
 			N_IMf(msim_fsm2b,
-			     "disk003 Ok with expected format (skipped Formatting) counter=@INT",
+			     "both disks Ok with expected format (skipped Formatting) counter=@INT",
 			     FORMAT_REQUEST_COUNTER);
 			m->fsm_state = MGMT_FSM_FORMAT_DONE;
+		} else if (disk_002_formatting || disk_003_formatting) {
+			N_IMf(msim_fsm2, "observed Formatting status disk002=@STR disk003=@STR", m->disk_002.status, m->disk_003.status);
+			m->fsm_state = MGMT_FSM_SAW_FORMATTING;
 		}
 		break;
 
 	case MGMT_FSM_SAW_FORMATTING:
-		if (disk_003_ok_with_expected_reported_format) {
-			N_IMf(msim_fsm3, "disk003 Ok with expected format counter=@INT", FORMAT_REQUEST_COUNTER);
+		if (both_disks_have_expected_post_format) {
+			N_IMf(msim_fsm3, "both disks Ok with expected format counter=@INT", FORMAT_REQUEST_COUNTER);
 			m->fsm_state = MGMT_FSM_FORMAT_DONE;
 		}
 		break;

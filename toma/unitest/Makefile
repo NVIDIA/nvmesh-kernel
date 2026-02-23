@@ -182,9 +182,6 @@ OBJECTS = $(C_OBJECTS) $(CXX_OBJECTS)
 DEPEND_FILES_ALL = $(OBJECTS:.o=.d)
 
 # Generated disk images - uncompressed as part of the build process, and read by sandbox code at runtime.
-TEST_NVMESH_DISK_IMAGE_NAME = disk_nvmesh.img
-TEST_NVMESH_DISK_IMAGE_INPUT = $(TEST_NVMESH_DISK_IMAGE_NAME).tgz
-TEST_NVMESH_DISK_IMAGE_OUTPUT = $(TESTDATA_BUILD_DIR)/$(TEST_NVMESH_DISK_IMAGE_NAME)
 TEST_STOCK_DISK_IMAGE_NAME = disk_stock.img
 TEST_STOCK_DISK_IMAGE_OUTPUT = $(TESTDATA_BUILD_DIR)/$(TEST_STOCK_DISK_IMAGE_NAME)
 TEST_STOCK_DISK_IMAGE_INPUT = $(TEST_STOCK_DISK_IMAGE_NAME).tgz
@@ -268,12 +265,6 @@ $(OBJ_DIR)/%.i: %.cpp
 	mkdir -p $(dir $@)
 	cd $(dir $@); $(TRACE_GEN_SCRIPT) $(abspath $<) nvmeibt --userspace -o $(abspath $@)
 
-# Note: the tgz image uses tar's sparse file handling.
-# Created with: tar --sparse -c -z -f ./disk_nvmesh.img.tgz ./disk_nvmesh.img
-$(TEST_NVMESH_DISK_IMAGE_OUTPUT): $(TEST_NVMESH_DISK_IMAGE_INPUT)
-	mkdir -p $(TESTDATA_BUILD_DIR)
-	tar -mxz --no-same-owner -C $(TESTDATA_BUILD_DIR) < $<
-
 $(TEST_STOCK_DISK_IMAGE_OUTPUT): $(TEST_STOCK_DISK_IMAGE_INPUT)
 	mkdir -p $(TESTDATA_BUILD_DIR)
 	tar -mxz --no-same-owner -C $(TESTDATA_BUILD_DIR) < $<
@@ -299,7 +290,7 @@ autogen: $(AUTOGEN_TARGETS)
 
 # ********** Autogen done *********
 TRACES_DIR=_root/var/log/nvmesh/trace_daemon/
-$(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
+$(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 # Merge all individual trace JSONs
 	@printf "Merging all trace JSONs to \e[0;32m$(FILE_TR_JSON)\e[0;0m\n"
 	$(MERGE_MULTI_GEN) $(FILE_TR_JSON) $(OBJ_DIR_ROOT)/$(BDIR) $(OBJECTS)
@@ -360,7 +351,7 @@ endef
 clean:
 	@printf "+-->Cleaning |\e[1;45mall\e[0;0m|\n"
 	$(call clean_compilation_intermediate,$(OBJ_DIR_ROOT))
-	rm -f $(OBJECTS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_NVMESH_DISK_IMAGE_OUTPUT) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
+	rm -f $(OBJECTS) $(EXE_NAME) $(EXE_NAME).log $(EXE_NAME).err $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 	rm -f $(AUTOGEN_TARGETS)
 	@printf "+-->Removing |\e[1;45mgenerated trace files\e[0;0m|\n"
 	find $(OBJ_DIR_ROOT) -type f \( -name '*.trace.json' -o -name '*.trace.raw.json' -o -name '*_gen_events.h' -o -name '*.i' \) -delete 2>/dev/null || true
