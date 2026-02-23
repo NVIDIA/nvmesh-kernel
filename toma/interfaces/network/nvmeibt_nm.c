@@ -2437,7 +2437,7 @@ struct nvmeibt_nm_hash_key_type * find_key(struct nvmeibt_nm_local_node *ln, uin
 	int found = 0;
 
 	//NFIN;
-	XHASHTABLE_FOR_EACH_POSSIBLE(l, &ln->key_val, key)
+	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(l, &ln->key_val, key)
 		if (l2kt(l)->guid == key) {
 			found = 1;
 			break;
