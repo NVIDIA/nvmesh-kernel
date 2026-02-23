@@ -5,6 +5,7 @@
 #include "sandbox_util.h"
 #include "sandbox_nvme.h"
 #include "mgmt_sim.h"
+#include "kafka/sandbox_kafka_internal.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
 #include "unit_test_main.h"
 

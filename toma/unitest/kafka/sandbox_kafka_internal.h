@@ -1,7 +1,7 @@
 #ifndef TOMA_SANDBOX_KAFKA_INTERNAL_H
 #define TOMA_SANDBOX_KAFKA_INTERNAL_H
 /* Provides interface to the Kafka simulator and broker backend. Used only by simulators/unit-tests. */
-#include "sandbox_util.h"
+#include "../sandbox_util.h"
 
 enum sim_topic_type_toma_to_mgmt {	// Supported Kafka topics for Toma<-->Mgmt communication
 	KTOPIC_TYPE_T2M_UNKNOWN = '?', KTOPIC_TYPE_T2M_PRIORITY = 'P', KTOPIC_TYPE_T2M_KEEPALIVE = 'K', KTOPIC_TYPE_T2M_LOW = 'L',

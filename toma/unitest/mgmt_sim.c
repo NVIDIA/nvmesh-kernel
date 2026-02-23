@@ -1,5 +1,6 @@
 #include "mgmt_sim.h"
-#include "sandbox_kafka_public.h"
+#include "kafka/sandbox_kafka_public.h"
+#include "kafka/sandbox_kafka_internal.h"
 #include "nvmeibt_json_base.h"
 #include "nvmeibt_debug.h"	// Binary tracing
 

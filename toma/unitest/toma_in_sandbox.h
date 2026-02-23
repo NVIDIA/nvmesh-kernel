@@ -213,8 +213,7 @@ int allocate_udp_server(int ip_protocol, union ibv_gid *gid, struct nvmeibt_node
 int start_udp_server(void);
 int nvmeib_register_udp_peer(struct nvmeibt_node *node, const char *peer_name, const char *peer_guid);
 
-/************************************* Kafka ************************************/
-#include "sandbox_kafka_public.h"
+#include "kafka/sandbox_kafka_public.h"
 
 /************************************* udev ************************************/
 #include "interfaces/nvme/nvmeibt_udev.h"

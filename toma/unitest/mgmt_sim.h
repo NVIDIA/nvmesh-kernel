@@ -8,7 +8,6 @@
 #define TOMA_UNITEST_MGMT_SIM_H
 
 #include "sandbox_util.h"
-#include "sandbox_kafka_internal.h"
 
 /************** Cluster config *******************************/
 struct sb_cluster_conf {
@@ -27,6 +26,7 @@ int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const
 /*********************************************/
 
 struct mgmt_sim_state;
+struct sim_broker_topic;
 struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg);
 void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add);
 void mgmt_sim_send_msg_assign_to_zone(int zone_idx);
