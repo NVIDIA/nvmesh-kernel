@@ -203,5 +203,8 @@
 		"tools/traces_post_processor/formatters/build": true,
 		"**/.vscode": true,
 		"**/.vs": true
-	}
+	},
+	"cSpell.words": [
+		"Toma"
+	]
 }

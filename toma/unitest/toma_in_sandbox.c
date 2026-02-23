@@ -27,56 +27,12 @@ void syslog(int priority, const char *fmt, ...) {
 }
 
 /************************************* Kernel ********************************/
-// Determine if running with debugger
+#include "os/os_internal.h"
 #include <sys/stat.h>		// fstat()
-#include <signal.h>
-#include <sys/un.h>
 #include <errno.h>
 
 #include "interfaces/nvme/nvmeibt_nvme_defines.h"
-// ioctl to nvme device
-#define _IOC_NRBITS	8
-#define _IOC_TYPEBITS	8
-#ifndef _IOC_SIZEBITS
-	#define _IOC_SIZEBITS	14
-#endif
-
-#ifndef _IOC_DIRBITS
-	#define _IOC_DIRBITS	2
-#endif
-#define _IOC_NRMASK	((1 << _IOC_NRBITS)-1)
-#define _IOC_TYPEMASK	((1 << _IOC_TYPEBITS)-1)
-#define _IOC_SIZEMASK	((1 << _IOC_SIZEBITS)-1)
-#define _IOC_DIRMASK	((1 << _IOC_DIRBITS)-1)
-
-#define _IOC_NRSHIFT	0
-#define _IOC_TYPESHIFT	(_IOC_NRSHIFT+_IOC_NRBITS)
-#define _IOC_SIZESHIFT	(_IOC_TYPESHIFT+_IOC_TYPEBITS)
-#define _IOC_DIRSHIFT	(_IOC_SIZESHIFT+_IOC_SIZEBITS)
-#ifndef _IOC_NONE
-	#define _IOC_NONE	0U
-#endif
-#ifndef _IOC_WRITE
-	#define _IOC_WRITE	1U
-#endif
-#ifndef _IOC_READ
-	#define _IOC_READ	2U
-#endif
-#define _IOC(dir,type,nr,size) (((dir)  << _IOC_DIRSHIFT) | ((type) << _IOC_TYPESHIFT) | ((nr)   << _IOC_NRSHIFT) | ((size) << _IOC_SIZESHIFT))
-#define _IOC_TYPECHECK(t) (sizeof(t))
-#define _IO(type,nr)		_IOC(_IOC_NONE,(type),(nr),0)
-#define _IOR(type,nr,size)	_IOC(_IOC_READ,(type),(nr),(_IOC_TYPECHECK(size)))
-#define _IOW(type,nr,size)	_IOC(_IOC_WRITE,(type),(nr),(_IOC_TYPECHECK(size)))
-#define _IOWR(type,nr,size)	_IOC(_IOC_READ|_IOC_WRITE,(type),(nr),(_IOC_TYPECHECK(size)))
-#define _IOR_BAD(type,nr,size)	_IOC(_IOC_READ,(type),(nr),sizeof(size))
-#define _IOW_BAD(type,nr,size)	_IOC(_IOC_WRITE,(type),(nr),sizeof(size))
-#define _IOWR_BAD(type,nr,size)	_IOC(_IOC_READ|_IOC_WRITE,(type),(nr),sizeof(size))
-
 #include <linux/fs.h>		// For BLKGETSIZE64, BLKSSZGET
-
-// Offset used to indicate a non-random-access operation like send()/recv() or read()/write(),
-// rather than a random access operation like pread()/pwrite().
-#define OFFSET_NONE ((off_t) -1)
 
 static bool nvmeibt_toma_is_running_as_a_utility(void);
 
@@ -244,32 +200,6 @@ static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int 
 	return n;
 }
 
-struct TSB_fd_otherside {		// Every file descriptor (file, socket, ...) implementation must derive from this sub class. Sandbox injects data to Toma via those functions
-	// The send()/recv() operations act as a generic I/O interface that is common to both: seekable (block device, local file), and non-seekable (pipe, socket, FIFO).
-	// Use offset == OFFSET_NONE to indicate a non-random I/O operation like read()/write() or send()/recv().
-	// When offset != OFFSET_NONE (i.e. > 0) this indicates a pread()/pwrite() operation.
-	ssize_t (*send)(int fd, const void *buf, size_t n, off_t offset, int flags);	// Toma sends data to simulator
-	ssize_t (*recv)(int fd,       void *buf, size_t n, off_t offset, int flags);	// Toma receives data from simulator
-	bool    (*has_data)(void);									// epoll()/select() on this socket/file-descriptor
-	struct TSB_fd_impl *sock;									// Pointer to the file descriptor structure which uses me
-};
-
-struct TSB_all_fds_tbl {	// Operating system, list of all file descriptors used by Toma
-	int n_fds;
-	int debug_offset;		// Prevent confusion between real descriptors and emulated
-	pthread_mutex_t mutex;	// Guard against Toma multi-threaded open()/close()
-	struct TSB_fd_impl {
-		FILE *f;			// Sometimes we need a backend file emulating this file
-		int fd;				// Real system file descriptor emulating this socket/fd
-		int dom;
-		int type;
-		int proto;
-		u32 len;
-		int ref_cnt;								// Same fd' is sometimes use multiple times by the simulator. accept(). Todo, clean this
-		struct sockaddr_un addr;
-		struct TSB_fd_otherside *other_side;		// Here sandbox connects to socket from the other side
-	} fd_arr[32];			// Max amount of fiel descriptors used by toma
-};
 bool sbfd_is_used(const struct TSB_fd_impl *s) {
 	return (s->f != NULL) || (s->addr.sun_path[0] != 0);
 }
@@ -298,51 +228,7 @@ void TSB_all_fds_tbl_destroy(struct TSB_all_fds_tbl *ts) {
 }
 
 struct t_sandbox_all {
-	struct TSB_operating_system_impl {				// Sandbox for all services Toma needs from the operating system
-		struct TSB_all_fds_tbl fs;					// File system (files/sockets) descriptors
-		struct TSB_signals_queue {					// Signaling/Logging mechanism to toma
-			struct TSB_fd_otherside o;
-			int sig;
-			int fd;
-		} TSB_signal;
-		struct TSB_syslog_impl {					// Syslog
-			struct TSB_fd_otherside o;
-			int fd;									// fd assigned to syslog
-		} TSB_syslog;
-		struct TSB_wakeup_pipe_impl {				// Operating system pipe, for communication between toma threads
-			struct TSB_fd_otherside o[2];			// 1 read, 1 write file descriptor
-			pthread_mutex_t mutex;					// Naturally acceesed from multiple threads
-			#define TSB_WU_PIPE_QUEUE_SIZE 32		// Simple fixed-size circular buffer queue of up to 32 wakeup messages
-			#define TSB_WU_PIPE_MSG_SIZE 16			// Toma write wakeup messages of exactly 16[b]
-			struct {
-				char data[TSB_WU_PIPE_MSG_SIZE];
-			} queue[TSB_WU_PIPE_QUEUE_SIZE];		// Wakeup message from toma other threads to toma main thread
-			int q_head, q_tail, q_count;			// Next position to dequeue from, Next position to enqueue to, Number of messages in queue
-		} TSB_wake_pip;
-		struct TSB_globa_epoll_impl {				// Implementation of epoll mechanism
-			struct TSB_fd_otherside o;
-			struct epoll_event evs[16];
-			int n_fds;
-		} TSB_epoll;
-		struct TSB_netlink_mock {
-			struct TSB_fd_otherside o;				// Here server simulator will connect as other side
-			unsigned n_recv_msgs;
-			pthread_mutex_t mutex;					// Thread-safe message queue for netlink responses
-			#define TSB_NL_QUEUE_SIZE 8				// Simple fixed-size queue of messages
-			#define TSB_NL_MSG_SIZE 512
-			struct {
-				char data[TSB_NL_MSG_SIZE];
-				size_t len;
-			} queue[TSB_NL_QUEUE_SIZE];	// Outgoing messages to Toma
-			int queue_head;			// Next position to dequeue from
-			int queue_tail;			// Next position to enqueue to
-			int queue_count;		// Number of messages in queue
-		} TSB_netlink;
-		struct TSB_server_comm_wakeup_mock {
-			struct TSB_fd_otherside o[2];
-			long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
-		} TSB_km_sock_pair;
-	} os;											// Emulates operating system.
+	struct TSB_operating_system_impl os;				// Sandbox for all services Toma needs from the operating system
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_fd_otherside o;
 	} TSB_udev, TSB_rpc, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
