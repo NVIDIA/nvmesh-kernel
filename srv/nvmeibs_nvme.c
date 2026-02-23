@@ -1776,7 +1776,7 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	if (!d_defer_process_io_cq) {
 		num_handled = nvmeibs_process_cq(q);
 		/* nvmeibs_process_cq releases spinlock, so q->thread may have changed */
-		offload_enabled &= (q->thread || nvmeibs_use_nvme_kwq);
+		offload_enabled = offload_enabled && (q->thread || nvmeibs_use_nvme_kwq);
 		if (d_use_intr_shaper && offload_enabled && !is_cq_empty(q)) {
 			nvmeib_intr_shaper_intr_polled(s_intr_shaper, num_handled);
 			d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
@@ -5082,7 +5082,7 @@ unlock_dev:
 	return 0;
 }
 
-static bool can_enable_irq(struct nvme_qp *q)
+static bool can_enable_irq(const struct nvme_qp *q)
 {
 	return !q->dying && (q->state == LOCAL_Q_ON || q->state == LOCAL_Q_STOP_NEW_IO);
 }
