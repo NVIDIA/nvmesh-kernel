@@ -13,7 +13,10 @@
 
 /* Volume scenario constants */
 #define V_R1_PRAID_UUID          "aaa11111-0000-0000-0000-000000000001"
-#define FORMAT_TARGET_UUID       "d0030000-0000-0000-0000-000000000000"
+#define DISK_UUID_LOCAL_002      "d0020000-0000-0000-0000-000000000000"
+#define DISK_UUID_LOCAL_003      "d0030000-0000-0000-0000-000000000000"
+#define DISK_UUID_REMOTE38_D0    "f38cebd0-0000-0000-0000-000000000000"
+#define DISK_UUID_REMOTE39_D0    "f39cebd0-0000-0000-0000-000000000000"
 
 /*
  * State machine states for the test scenario.
@@ -53,10 +56,10 @@ static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
 		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"f38cebd0-0000-0000-0000-000000000000\"},"
+		",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
 		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":1,\"status\":\"initializing\""
-		",\"diskUUID\":\"f39cebd0-0000-0000-0000-000000000000\"}"
+		",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
 		"]}]}]}}");
 }
 
@@ -80,10 +83,10 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
 		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000002\",\"lbs\":6176,\"lbe\":7199"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"" FORMAT_TARGET_UUID "\"},"
+		",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
 		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000003\",\"lbs\":0,\"lbe\":1023"
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":1,\"status\":\"initializing\""
-		",\"diskUUID\":\"f38cebd0-0000-0000-0000-000000000000\"}"
+		",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"}"
 		"]}]}]}}");
 }
 
@@ -185,8 +188,8 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	m->fsm_state = MGMT_FSM_WAITING_FOR_BOTH_OK;
 	m->disk_002.disk_id = "NVMD_SN_002.1";
 	m->disk_003.disk_id = "NVMD_SN_003.1";
-	m->disk_002.uuid = "d0020000-0000-0000-0000-000000000000";
-	m->disk_003.uuid = "d0030000-0000-0000-0000-000000000000";
+	m->disk_002.uuid = DISK_UUID_LOCAL_002;
+	m->disk_003.uuid = DISK_UUID_LOCAL_003;
 	m->disk_002.vendor = 5122;
 	m->disk_003.vendor = 5123;
 	m->hw.conf_version = 17;		// Start from some number
@@ -254,7 +257,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 				"\"disks\":["
 				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096"
 					",\"activeFormatRequestCounter\":1,\"vendorID\":5122"
-					",\"uuid\":\"f38cebd0-0000-0000-0000-000000000000\",\"version\":7,\"isOutOfService\":false},"
+					",\"uuid\":\"" DISK_UUID_REMOTE38_D0 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"D1_n38\",\"blocks\":2000,\"block_size\":4096"
 					",\"activeFormatRequestCounter\":1,\"vendorID\":5123"
 					",\"uuid\":\"f38cebd1-0000-0000-0000-000000000000\",\"version\":7,\"isOutOfService\":false}],"
@@ -267,7 +270,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 				"\"disks\":["
 				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096"
 					",\"activeFormatRequestCounter\":1,\"vendorID\":5197"
-					",\"uuid\":\"f39cebd0-0000-0000-0000-000000000000\",\"version\":7,\"isOutOfService\":false},"
+					",\"uuid\":\"" DISK_UUID_REMOTE39_D0 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024"
 					",\"activeFormatRequestCounter\":0,\"vendorID\":3333"
 					",\"uuid\":\"f39cebd1-0000-0000-0000-000000000000\",\"version\":1,\"isOutOfService\":false}],"
