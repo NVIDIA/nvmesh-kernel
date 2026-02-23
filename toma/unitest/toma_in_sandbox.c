@@ -256,7 +256,7 @@ struct TSB_fd_otherside {		// Every file descriptor (file, socket, ...) implemen
 struct TSB_all_fds_tbl {	// Operating system, list of all file descriptors used by Toma
 	int n_fds;
 	int debug_offset;		// Prevent confusion between real descriptors and emulated
-	pthread_mutex_t mutex;
+	pthread_mutex_t mutex;	// Guard against Toma multi-threaded open()/close()
 	struct TSB_fd_impl {
 		FILE *f;			// Sometimes we need a backend file emulating this file
 		int fd;				// Real system file descriptor emulating this socket/fd
@@ -297,54 +297,59 @@ void TSB_all_fds_tbl_destroy(struct TSB_all_fds_tbl *ts) {
 }
 
 struct t_sandbox_all {
-	struct TSB_all_fds_tbl TS;
-	struct TSB_signals_queue {						// Signaling/Logging mechanism to toma
-		struct TSB_fd_otherside o;
-		int sig;
-		int fd_signal;
-		int fd_syslog;
-	} TSB_sig;
+	struct TSB_operating_system_impl {				// Sandbox for all services Toma needs from the operating system
+		struct TSB_all_fds_tbl fs;					// File system (files/sockets) descriptors
+		struct TSB_signals_queue {					// Signaling/Logging mechanism to toma
+			struct TSB_fd_otherside o;
+			int sig;
+			int fd;
+		} TSB_signal;
+		struct TSB_syslog_impl {					// Syslog
+			struct TSB_fd_otherside o;
+			int fd;									// fd assigned to syslog
+		} TSB_syslog;
+		struct TSB_wakeup_pipe_impl {				// Operating system pipe, for communication between toma threads
+			struct TSB_fd_otherside o[2];			// 1 read, 1 write file descriptor
+			pthread_mutex_t mutex;					// Naturally acceesed from multiple threads
+			#define TSB_WU_PIPE_QUEUE_SIZE 32		// Simple fixed-size circular buffer queue of up to 32 wakeup messages
+			#define TSB_WU_PIPE_MSG_SIZE 16			// Toma write wakeup messages of exactly 16[b]
+			struct {
+				char data[TSB_WU_PIPE_MSG_SIZE];
+			} queue[TSB_WU_PIPE_QUEUE_SIZE];		// Wakeup message from toma other threads to toma main thread
+			int q_head, q_tail, q_count;			// Next position to dequeue from, Next position to enqueue to, Number of messages in queue
+		} TSB_wake_pip;
+		struct TSB_globa_epoll_impl {				// Implementation of epoll mechanism
+			struct TSB_fd_otherside o;
+			struct epoll_event evs[16];
+			int n_fds;
+		} TSB_epoll;
+		struct TSB_netlink_mock {
+			struct TSB_fd_otherside o;				// Here server simulator will connect as other side
+			unsigned n_recv_msgs;
+			pthread_mutex_t mutex;					// Thread-safe message queue for netlink responses
+			#define TSB_NL_QUEUE_SIZE 8				// Simple fixed-size queue of messages
+			#define TSB_NL_MSG_SIZE 512
+			struct {
+				char data[TSB_NL_MSG_SIZE];
+				size_t len;
+			} queue[TSB_NL_QUEUE_SIZE];	// Outgoing messages to Toma
+			int queue_head;			// Next position to dequeue from
+			int queue_tail;			// Next position to enqueue to
+			int queue_count;		// Number of messages in queue
+		} TSB_netlink;
+		struct TSB_server_comm_wakeup_mock {
+			struct TSB_fd_otherside o[2];
+			long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
+		} TSB_km_sock_pair;
+	} os;											// Emulates operating system.
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_fd_otherside o;
-	} TSB_udev, TSB_rpc, TSB_syslog, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
+	} TSB_udev, TSB_rpc, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
 	struct TSB_server {
 		struct TSB_fd_otherside o;
 	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
-	struct TSB_wakeup_pipe {						// Operating system pipe, for communication between toma threads
-		struct TSB_fd_otherside o[2];				// 1 read, 1 write file descriptor
-		pthread_mutex_t mutex;
-		#define TSB_WU_PIPE_QUEUE_SIZE 32			// Simple fixed-size circular buffer queue of wakeup messages
-		#define TSB_WU_PIPE_MSG_SIZE 16				// Toma write wakeup messages of exactly 16[b]
-		struct {
-			char data[TSB_WU_PIPE_MSG_SIZE];
-		} queue[TSB_WU_PIPE_QUEUE_SIZE];			// Wakeup message from toma other threads to toma main thread
-		int queue_head, queue_tail, queue_count;	// Next position to dequeue from, Next position to enqueue to, Number of messages in queue
-	} TSB_wake_pip;
-	struct globa_epoll {
-		struct TSB_fd_otherside o;
-		struct epoll_event evs[16];
-		int n_fds;
-	} TSB_epoll;
 	struct kafka_simulator_t *kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
-	struct TSB_netlink_mock {
-		struct TSB_fd_otherside o;
-		unsigned n_recv_msgs;
-		pthread_mutex_t mutex;			// Thread-safe message queue for netlink responses
-		#define TSB_NL_QUEUE_SIZE 8		// Simple fixed-size queue of messages
-		#define TSB_NL_MSG_SIZE 512
-		struct {
-			char data[TSB_NL_MSG_SIZE];
-			size_t len;
-		} queue[TSB_NL_QUEUE_SIZE];	// Outgoing messages to Toma
-		int queue_head;			// Next position to dequeue from
-		int queue_tail;			// Next position to enqueue to
-		int queue_count;		// Number of messages in queue
-	} TSB_netlink;
-	struct TSB_server_comm_wakeup_mock {
-		struct TSB_fd_otherside o[2];
-		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
-	} TSB_km_sock_pair;
 	struct TSB_pending_disk_add {
 		// Pending disk ADD event to be sent in a later iteration of the main loop.
 		// This simulates the delay between disk_freeze (REMOVE) and disk_unfreeze (ADD)
@@ -360,7 +365,7 @@ struct t_sandbox_all {
 } *sys;
 
 static ssize_t _socket_pair_wakeup_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	struct TSB_server_comm_wakeup_mock *w = &sys->os.TSB_km_sock_pair;
 	long n_wups;
 	BUG_ON((w->o[0].sock->fd != fd) || (n != 1) || (buf == NULL) || (offset != 0) || (flags != 0));
 	n_wups = __atomic_add_fetch(&w->n_wakeup_msgs, 1, __ATOMIC_SEQ_CST);
@@ -369,7 +374,7 @@ static ssize_t _socket_pair_wakeup_send(int fd, const void *buf, size_t n, off_t
 }
 
 static ssize_t _socket_pair_wakeup_recv(int fd, void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	struct TSB_server_comm_wakeup_mock *w = &sys->os.TSB_km_sock_pair;
 	const long n_wups = __atomic_load_n(&w->n_wakeup_msgs, __ATOMIC_SEQ_CST);
 	BUG_ON((w->o[1].sock->fd != fd) || (n != 1) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
 	BUG_ON(n_wups < 0);
@@ -382,42 +387,42 @@ static ssize_t _socket_pair_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 }
 
 static bool _socket_pair_should_wakeup(void) {
-	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	const struct TSB_server_comm_wakeup_mock *w = &sys->os.TSB_km_sock_pair;
 	const long n = __atomic_load_n(&w->n_wakeup_msgs, __ATOMIC_SEQ_CST);
 	return n > 0;
 }
 
 static bool _wakeup_pipe_should_wakeup(void) {
-	struct TSB_wakeup_pipe *w = &sys->TSB_wake_pip;
+	struct TSB_wakeup_pipe_impl *w = &sys->os.TSB_wake_pip;
 	bool rv;
 	pthread_mutex_lock(&w->mutex);
-	rv = (w->queue_count != 0);
+	rv = (w->q_count != 0);
 	pthread_mutex_unlock(&w->mutex);
 	return rv;
 }
 
 static ssize_t _wakeup_pipe_wakeup_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_wakeup_pipe *w = &sys->TSB_wake_pip;
+	struct TSB_wakeup_pipe_impl *w = &sys->os.TSB_wake_pip;
 	int n_wake_ups;
 	pthread_mutex_lock(&w->mutex);
-	BUG_ON((w->o[1].sock->fd != fd) || (offset != 0) || (flags != 0) || (w->queue_count >= TSB_WU_PIPE_QUEUE_SIZE) || (n != TSB_WU_PIPE_MSG_SIZE));
-	memcpy(w->queue[w->queue_tail].data, buf, n);
-	w->queue_tail = (w->queue_tail + 1) % TSB_WU_PIPE_QUEUE_SIZE;
-	n_wake_ups = ++w->queue_count;
+	BUG_ON((w->o[1].sock->fd != fd) || (offset != 0) || (flags != 0) || (w->q_count >= TSB_WU_PIPE_QUEUE_SIZE) || (n != TSB_WU_PIPE_MSG_SIZE));
+	memcpy(w->queue[w->q_tail].data, buf, n);
+	w->q_tail = (w->q_tail + 1) % TSB_WU_PIPE_QUEUE_SIZE;
+	n_wake_ups = ++w->q_count;
 	pthread_mutex_unlock(&w->mutex);
 	N_Tf(__AUTOID__, "n_wake_ups=@INT", n_wake_ups);
 	return n;
 }
 
 static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_wakeup_pipe *w = &sys->TSB_wake_pip;
+	struct TSB_wakeup_pipe_impl *w = &sys->os.TSB_wake_pip;
 	int n_wake_ups = 0;
 	pthread_mutex_lock(&w->mutex);
-	BUG_ON((w->o[0].sock->fd != fd) || (offset != OFFSET_NONE) || (flags != 0) || (w->queue_count < 0) || (n != TSB_WU_PIPE_MSG_SIZE));
-	if (w->queue_count > 0) {
-		memcpy(buf, w->queue[w->queue_head].data, n);
-		w->queue_head = (w->queue_head + 1) % TSB_WU_PIPE_QUEUE_SIZE;
-		n_wake_ups = --w->queue_count;
+	BUG_ON((w->o[0].sock->fd != fd) || (offset != OFFSET_NONE) || (flags != 0) || (w->q_count < 0) || (n != TSB_WU_PIPE_MSG_SIZE));
+	if (w->q_count > 0) {
+		memcpy(buf, w->queue[w->q_head].data, n);
+		w->q_head = (w->q_head + 1) % TSB_WU_PIPE_QUEUE_SIZE;
+		n_wake_ups = --w->q_count;
 	} else {
 		n = -1;			// No data
 		errno = EAGAIN;
@@ -430,14 +435,14 @@ static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 void sandbox_server_init(void);
 void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
-	sys->TS.debug_offset = 10000;
+	sys->os.fs.debug_offset = 10000;
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	sb_cluster_conf_create(&sys->cfg);
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
-	pthread_mutex_init(&sys->TS.mutex, NULL);
+	pthread_mutex_init(&sys->os.fs.mutex, NULL);
 	sandbox_server_init();
-	pthread_mutex_init(&sys->TSB_wake_pip.mutex, NULL);
+	pthread_mutex_init(&sys->os.TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
 	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 
@@ -464,12 +469,12 @@ void t_sandbox_all_destroy(void) {
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
 	sandbox_kafka_destroy(sys->kafka_simu);
-	pthread_mutex_destroy(&sys->TS.mutex);
-	pthread_mutex_destroy(&sys->TSB_netlink.mutex);
-	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
+	pthread_mutex_destroy(&sys->os.fs.mutex);
+	pthread_mutex_destroy(&sys->os.TSB_netlink.mutex);
+	pthread_mutex_destroy(&sys->os.TSB_wake_pip.mutex);
 	sb_cluster_conf_destroy(&sys->cfg);
-	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	TSB_all_fds_tbl_destroy(&sys->TS);
+	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->os.TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
+	TSB_all_fds_tbl_destroy(&sys->os.fs);
 	free(sys);
 	sys = NULL;
 }
@@ -479,9 +484,9 @@ struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void
 }
 
 static struct TSB_fd_impl * TSB_socket_find_by_fd(int fd) {		// Look up and return a socket object by fd. Bug if not found. Sandbox environment should emulate all fd's
-	struct TSB_all_fds_tbl *TS = &sys->TS;
+	struct TSB_all_fds_tbl *TS = &sys->os.fs;
 	int i;
-	if (fd >= sys->TS.debug_offset)
+	if (fd >= sys->os.fs.debug_offset)
 		return &TS->fd_arr[fd - TS->debug_offset];
 	for (i = 0; i < TS->n_fds; i++) {
 		if (TS->fd_arr[i].fd == fd)
@@ -601,7 +606,7 @@ static void TSB_process_pending_disk_add_event(void);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
+	struct TSB_netlink_mock *nl = &sys->os.TSB_netlink;
 	const struct nlmsghdr *nlh = (const struct nlmsghdr *)buf;
 	const struct nvmeib_nl_uk_comm_msg *req_msg = NLMSG_DATA(nlh);
 	int n_payload_bytes_remainig = (int)n - ((const char*)req_msg->data - (const char*)buf);
@@ -675,10 +680,10 @@ static bool _recv_has_raft_msgs_for_toma(void);
 // Connect the other side which communicates with Toma
 void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	BUG_ON(s->other_side); 								// Only 1 simulate4d listener works per socket / file descriptor
-	if (strstr(s->addr.sun_path, "netlink")) {					s->other_side = &sys->TSB_netlink.o;
-	} else if (strstr(s->addr.sun_path, "signal")) {			s->other_side = &sys->TSB_sig.o;
+	if (strstr(s->addr.sun_path, "netlink")) {					s->other_side = &sys->os.TSB_netlink.o;
+	} else if (strstr(s->addr.sun_path, "signal")) {			s->other_side = &sys->os.TSB_signal.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
-	} else if (strstr(s->addr.sun_path, "sys_log")) {			s->other_side = &sys->TSB_syslog.o;
+	} else if (strstr(s->addr.sun_path, "sys_log")) {			s->other_side = &sys->os.TSB_syslog.o;
 	} else if (strstr(s->addr.sun_path, "srm_fault")) {			s->other_side = &sys->TSB_srm_fault.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
 	} else if (strstr(s->addr.sun_path, "srm_timer")) {			s->other_side = &sys->TSB_srm_timer.o;
@@ -690,21 +695,21 @@ void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	} else if (strstr(s->addr.sun_path, "mesh/toma_rpc")) {		s->other_side = &sys->TSB_rpc.o;
 		sys->TSB_rpc.o.recv = _rpc_inject;
 		sys->TSB_rpc.o.send = _rpc_accept;
-	} else if (strstr(s->addr.sun_path, "epoll")) {				s->other_side = &sys->TSB_epoll.o;
-	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {	s->other_side = &sys->TSB_wake_pip.o[0];
+	} else if (strstr(s->addr.sun_path, "epoll")) {				s->other_side = &sys->os.TSB_epoll.o;
+	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {	s->other_side = &sys->os.TSB_wake_pip.o[0];
 		s->other_side->recv = _wakeup_pipe_wakeup_recv;
 		s->other_side->send = _send_illegal_trap;
 		s->other_side->has_data = _wakeup_pipe_should_wakeup;	// o[0] Toma main thread read wakeups messages from other threads. Never writes
-	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair1")) {	s->other_side = &sys->TSB_wake_pip.o[1];
+	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair1")) {	s->other_side = &sys->os.TSB_wake_pip.o[1];
 		s->other_side->send = _wakeup_pipe_wakeup_send;			// o[1] Toma aux thread write to wakeup toma main thread. Never reads
 		s->other_side->recv = _recv_illegal_trap;
 	} else if (strstr(s->addr.sun_path, "server_events")) {		s->other_side = &sys->TSB_srvr2toma.o;
 	} else if (strstr(s->addr.sun_path, "toma_server")) {		s->other_side = &sys->TSB_toma2srvr.o;
 	} else if (strstr(s->addr.sun_path, "toma_clients")) {		s->other_side = &sys->TSB_toma2clnt.o;
-	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {		s->other_side = &sys->TSB_km_sock_pair.o[0];
+	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {		s->other_side = &sys->os.TSB_km_sock_pair.o[0];
 		s->other_side->send = _socket_pair_wakeup_send;			// o[0] Toma writes to it to wakeup server lib main thread. Never reads
 		s->other_side->recv = _recv_illegal_trap;
-	} else if (strstr(s->addr.sun_path, "km_comm_pair1")) {		s->other_side = &sys->TSB_km_sock_pair.o[1];
+	} else if (strstr(s->addr.sun_path, "km_comm_pair1")) {		s->other_side = &sys->os.TSB_km_sock_pair.o[1];
 		s->other_side->send = _send_illegal_trap;				// o[1] ServerLib reads from it to wakeup. Never writes
 		s->other_side->recv = _socket_pair_wakeup_recv;
 		s->other_side->has_data = _socket_pair_should_wakeup;
@@ -725,11 +730,11 @@ void sandbox_server_init(void) {
 	o = &sys->TSB_toma2clnt.o;
 	o->send = _srvr_simu_nvmeibs_toma_client_proc_recv;
 	o->recv = _recv_illegal_trap;
-	o = &sys->TSB_netlink.o;
+	o = &sys->os.TSB_netlink.o;
 	o->send = _netlink_recv_msg_from_toma;
 	o->recv = _netlink_reply_to_toma;
 	o->has_data = TSB_netlink_queue_has_something;
-	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
+	pthread_mutex_init(&sys->os.TSB_netlink.mutex, NULL);
 }
 
 static bool sbfd_is_a_file(const struct TSB_fd_impl* s) {
@@ -759,14 +764,15 @@ static const char* sbfd_get_open_mode(const struct TSB_fd_impl* s) {
 	return "r+";
 }
 
+int TSB_fd_impl_get_index_in_arr(const struct TSB_fd_impl *s) { return (int)(s - sys->os.fs.fd_arr); }
 int socket(int __domain, int __type, int __protocol) {
-	struct TSB_all_fds_tbl *TS = &sys->TS;
+	struct TSB_all_fds_tbl *TS = &sys->os.fs;
 	struct TSB_fd_impl *s = TSB_all_fds_tbl_find_next_unused(TS);
 	s->dom =__domain;
 	s->type = __type;
 	s->proto =__protocol;
 	s->ref_cnt = 1;
-	return TS->debug_offset + (int)(s - sys->TS.fd_arr);
+	return TS->debug_offset + TSB_fd_impl_get_index_in_arr(s);
 }
 
 static void socket_destroy(struct TSB_fd_impl *s) {
@@ -775,9 +781,9 @@ static void socket_destroy(struct TSB_fd_impl *s) {
 	if (s->ref_cnt > 0)
 		return;
 	if (sys->can_use_bin_traces) {		// Some fd's are closed after binary traces were shut down
-		N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, close, del=@BOOL_YN", (int)(s - sys->TS.fd_arr), s->fd, s->addr.sun_path, should_del);
+		N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, close, del=@BOOL_YN", TSB_fd_impl_get_index_in_arr(s), s->fd, s->addr.sun_path, should_del);
 	} else {							// Closing syslog when binary traces are disabled
-		SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.fd_arr), s->fd, s->addr.sun_path, should_del);
+		SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", TSB_fd_impl_get_index_in_arr(s), s->fd, s->addr.sun_path, should_del);
 	}
 	if (s->f != NULL) {
 		fclose(s->f);
@@ -799,22 +805,24 @@ int TSB_sock_open(struct TSB_fd_impl *s) {
 	}
 	s->fd = fileno(s->f);
 	TSB_connect_sock_to_listener(s);
-	N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, mode=@STR (@X), listener=@BOOL_YN",
-		 (int)(s - sys->TS.fd_arr), s->fd, s->addr.sun_path, open_mode, s->proto, !!s->other_side);
+	N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, mode=@STR (@X), listener=@BOOL_YN", TSB_fd_impl_get_index_in_arr(s), s->fd, s->addr.sun_path, open_mode, s->proto, !!s->other_side);
 	return s->fd;
 }
 
+struct TSB_fd_impl * TSB_fd_impl_get_by_fd(int fd) {
+	struct TSB_all_fds_tbl *TS = &sys->os.fs;
+	return &TS->fd_arr[fd - TS->debug_offset];
+}
+
 int __connect(int fd, const struct sockaddr_un *addr, unsigned int len) {
-	struct TSB_all_fds_tbl *TS = &sys->TS;
-	struct TSB_fd_impl *s = &TS->fd_arr[fd - TS->debug_offset];
+	struct TSB_fd_impl *s = TSB_fd_impl_get_by_fd(fd);
 	s->addr = *addr;
 	s->len = len;
 	return TSB_sock_open(s);
 }
 
 int __bind(int fd, const void* __addr, unsigned int len) {
-	struct TSB_all_fds_tbl *TS = &sys->TS;
-	struct TSB_fd_impl *s = &TS->fd_arr[fd - TS->debug_offset];
+	struct TSB_fd_impl *s = TSB_fd_impl_get_by_fd(fd);
 	const struct sockaddr_nl *addr = __addr;
 	s->addr.sun_family = addr->nl_family;
 	if (addr->nl_family == AF_NETLINK) {
@@ -839,15 +847,16 @@ int socketpair(int __domain, int __type, int __protocol, int fds[2]) {
 }
 
 static bool TSB_netlink_queue_has_something(void) {		// Netlink mock queue helpers (thread-safe)
+	struct TSB_netlink_mock *nl = &sys->os.TSB_netlink;
 	bool rv;
-	pthread_mutex_lock(&sys->TSB_netlink.mutex);
-	rv = (sys->TSB_netlink.queue_count != 0);
-	pthread_mutex_unlock(&sys->TSB_netlink.mutex);
+	pthread_mutex_lock(&nl->mutex);
+	rv = (nl->queue_count != 0);
+	pthread_mutex_unlock(&nl->mutex);
 	return rv;
 }
 
 static void TSB_netlink_queue_enqueue(const void *data, size_t len) {
-	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
+	struct TSB_netlink_mock *nl = &sys->os.TSB_netlink;
 	pthread_mutex_lock(&nl->mutex);
 	BUG_ON(!(nl->queue_count < TSB_NL_QUEUE_SIZE && len <= TSB_NL_MSG_SIZE));
 	memcpy(nl->queue[nl->queue_tail].data, data, len);
@@ -858,7 +867,7 @@ static void TSB_netlink_queue_enqueue(const void *data, size_t len) {
 }
 
 static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
-	struct TSB_netlink_mock *nl = &sys->TSB_netlink;
+	struct TSB_netlink_mock *nl = &sys->os.TSB_netlink;
 	ssize_t len = -1;
 	pthread_mutex_lock(&nl->mutex);
 	BUG_ON(nl->queue_count <= 0);	// Wrong Sandbox behaviour. Why is Toma trying to read if no msg scheduled. This will create error in netlink mechanism
@@ -1244,10 +1253,10 @@ int listen(int fd, int n) {
 
 int accept(int fd, struct sockaddr* addr, unsigned int *addr_len) {
 	struct TSB_fd_impl *s;
-	pthread_mutex_lock(&sys->TS.mutex);
+	pthread_mutex_lock(&sys->os.fs.mutex);
 	s = TSB_socket_find_by_fd(fd);
 	s->ref_cnt++;
-	pthread_mutex_unlock(&sys->TS.mutex);
+	pthread_mutex_unlock(&sys->os.fs.mutex);
 	(void)addr;  (void)addr_len;
 	return fd;
 }
@@ -1256,18 +1265,18 @@ int override_open(const char *path, int flags, ... /*int mode*/) {
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	int ret;
 	sprintf(addr.sun_path, "%s", path);
-	pthread_mutex_lock(&sys->TS.mutex);
+	pthread_mutex_lock(&sys->os.fs.mutex);
 	ret = __connect(socket(0, 'f', flags), &addr, 0);
-	pthread_mutex_unlock(&sys->TS.mutex);
+	pthread_mutex_unlock(&sys->os.fs.mutex);
 	return ret;
 }
 
 int override_close(int fd) {
 	struct TSB_fd_impl *s;
-	pthread_mutex_lock(&sys->TS.mutex);
+	pthread_mutex_lock(&sys->os.fs.mutex);
 	s = TSB_socket_find_by_fd(fd);
 	socket_destroy(s);
-	pthread_mutex_unlock(&sys->TS.mutex);
+	pthread_mutex_unlock(&sys->os.fs.mutex);
 	errno = 0;
 	return 0;
 }
@@ -1275,15 +1284,11 @@ int override_close(int fd) {
 // Create a new TSB entry that mirrors an existing fd.
 // Returns the real OS fd, matching the pattern of override_open()/TSB_sock_open().
 int override_dup(int oldfd) {
-	struct TSB_fd_impl *old_s;
-	struct TSB_all_fds_tbl *TS;
+	struct TSB_fd_impl *old_s = TSB_socket_find_by_fd(oldfd);
+	struct TSB_all_fds_tbl *TS = &sys->os.fs;
 	struct TSB_fd_impl *new_s;
 	int new_os_fd = -1;
 	int ret = -1;
-
-	old_s = TSB_socket_find_by_fd(oldfd);
-	TS = &sys->TS;
-
 	pthread_mutex_lock(&TS->mutex);
 	new_s = TSB_all_fds_tbl_find_next_unused(TS);
 
@@ -1374,16 +1379,16 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 static void __temp_wait_sleep(void) { nanosleep(&(struct timespec){0, 10*1000*1000}, NULL); /* 100ms */ }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
-	struct TSB_fd_impl *nl_sock = sys->TSB_netlink.o.sock;
+	struct TSB_fd_impl *nl_sock = sys->os.TSB_netlink.o.sock;
 	struct TSB_fd_impl *ls_sock = sys->TSB_srvr2toma.o.sock;
-	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
+	const struct TSB_server_comm_wakeup_mock *w = &sys->os.TSB_km_sock_pair;
 	const int nl_fd = nl_sock->fd, ls_fd = ls_sock->fd;
 	const bool monitor_nl = FD_ISSET(nl_fd, readfds), monitor_wakup = FD_ISSET(w->o[1].sock->fd, readfds), monitor_ls = FD_ISSET(ls_fd, readfds);
 	int n_events, n_iterations;
 	BUG_ON(!nl_sock || !readfds || !ls_sock || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd) || (nfds <= ls_fd));	// Wrong select from Toma production code
 	FD_ZERO(readfds); if (writefds) FD_ZERO(writefds); FD_ZERO(exceptfds);
 	for (n_events = 0, n_iterations = 0; n_events == 0; n_iterations++) { // Throttled km_comm select, todo, use timeout
-		if (monitor_nl && sys->TSB_netlink.o.has_data()) {	// Check if netlink socket is in the read set and we have queued messages, prepared by server_simu_get_next_msg_for_toma
+		if (monitor_nl && sys->os.TSB_netlink.o.has_data()) {	// Check if netlink socket is in the read set and we have queued messages, prepared by server_simu_get_next_msg_for_toma
 			FD_SET(nl_fd, readfds);
 			n_events++;
 		}
@@ -1407,7 +1412,7 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 
 /************************************* Epoll ********************************/
 int epoll_create1(int flags) {
-	struct globa_epoll *ep = &sys->TSB_epoll;
+	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_epoll_fd");
 	memset(ep->evs, 0, sizeof(ep->evs));
@@ -1416,7 +1421,7 @@ int epoll_create1(int flags) {
 }
 
 int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
-	struct globa_epoll *ep = &sys->TSB_epoll;
+	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
 	BUG_ON(ep->o.sock->fd != efd);
 	switch (op) {
 		case EPOLL_CTL_ADD: {
@@ -1432,7 +1437,7 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
 	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 500
-	struct globa_epoll *ep = &sys->TSB_epoll;
+	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
 	static uint64_t loop_idx = 0;
 	static bool is_shutting_down = false;
 	int i, n_events;
@@ -1440,7 +1445,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
 
-	sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
+	sys->os.TSB_signal.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 	if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
 	TSB_process_pending_disk_add_event();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
 	mgmt_sim_do_periodic();
@@ -1511,13 +1516,13 @@ void toma_unitest_notify_stop_traces(void) {
 }
 /************************************* logging ********************************/
 int init_signal_handling(const char *exe_name) {
-	struct TSB_signals_queue* tsb_q = &sys->TSB_sig;
+	struct TSB_signals_queue* tsb_q = &sys->os.TSB_signal;
 	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
 	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", _PATH_LOG);
-	tsb_q->fd_syslog = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
+	sys->os.TSB_syslog.fd = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
 	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_signal_%s", exe_name);
-	tsb_q->fd_signal = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
-	return tsb_q->fd_signal;
+	tsb_q->fd = __connect(socket(0,0,0), &addr, 0);		// Just open files for educational purposes
+	return tsb_q->fd;
 }
 
 void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
@@ -1535,9 +1540,8 @@ int nvmeibt_nonblock_fd(int fd) {
 }
 
 void closelog(void) {
-	struct TSB_signals_queue* tsb_q = &sys->TSB_sig;
-	override_close(tsb_q->fd_syslog); tsb_q->fd_syslog = -1;
-	override_close(tsb_q->fd_signal); tsb_q->fd_signal = -1;
+	override_close(sys->os.TSB_syslog.fd); sys->os.TSB_syslog.fd = -1;
+	override_close(sys->os.TSB_signal.fd); sys->os.TSB_signal.fd = -1;
 }
 
 /************************************* nvme ***********************************/
