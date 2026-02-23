@@ -253,8 +253,8 @@ struct TSB_fd_otherside {		// Every file descriptor (file, socket, ...) implemen
 	struct TSB_fd_impl *sock;									// Pointer to the file descriptor structure which uses me
 };
 
-struct t_sandbox_sock_tbl {
-	int n_socks;
+struct TSB_all_fds_tbl {	// Operating system, list of all file descriptors used by Toma
+	int n_fds;
 	int debug_offset;		// Prevent confusion between real descriptors and emulated
 	pthread_mutex_t mutex;
 	struct TSB_fd_impl {
@@ -267,29 +267,28 @@ struct t_sandbox_sock_tbl {
 		int ref_cnt;								// Same fd' is sometimes use multiple times by the simulator. accept(). Todo, clean this
 		struct sockaddr_un addr;
 		struct TSB_fd_otherside *other_side;		// Here sandbox connects to socket from the other side
-	} socks[32];			// Max amount of sockets used by toma
+	} fd_arr[32];			// Max amount of fiel descriptors used by toma
 };
 bool sbfd_is_used(const struct TSB_fd_impl *s) {
 	return (s->f != NULL) || (s->addr.sun_path[0] != 0);
 }
 
-struct TSB_fd_impl* t_sandbox_sock_tbl_find_next_unused(struct t_sandbox_sock_tbl *ts) {
-	int i = ts->n_socks;
-	for (i = 0; i < ts->n_socks; i++) {		// Reuse deleted fd
-		if (!sbfd_is_used(&ts->socks[i]))
-			return &ts->socks[i];
+struct TSB_fd_impl* TSB_all_fds_tbl_find_next_unused(struct TSB_all_fds_tbl *ts) {
+	int i = ts->n_fds;
+	for (i = 0; i < ts->n_fds; i++) {		// Reuse deleted fd
+		if (!sbfd_is_used(&ts->fd_arr[i]))
+			return &ts->fd_arr[i];
 	}
 	{										// Allocate next fd
-		struct TSB_fd_impl *s = &ts->socks[ts->n_socks++];
-		BUG_ON(i >= ARRAY_SIZE(ts->socks));
-		BUG_ON(sbfd_is_used(s));
+		struct TSB_fd_impl *s = &ts->fd_arr[ts->n_fds++];
+		BUG_ON((i >= ARRAY_SIZE(ts->fd_arr)) || sbfd_is_used(s));
 		return s;
 	}
 }
 
-void t_sandbox_sock_tbl_destroy(struct t_sandbox_sock_tbl *ts) {
-	for (int i = 0; i < ts->n_socks; i++) {
-		const struct TSB_fd_impl *s = &ts->socks[i];
+void TSB_all_fds_tbl_destroy(struct TSB_all_fds_tbl *ts) {
+	for (int i = 0; i < ts->n_fds; i++) {
+		const struct TSB_fd_impl *s = &ts->fd_arr[i];
 		if (sbfd_is_used(s)) {		// Leak of this file descriptor
 			SANDBOX_PRINT("TSB[%2d]: " COL_RED_BOLD "Leaking fd=%2d, " COL_RESET " path=%-40s\n", i, s->fd, s->addr.sun_path);
 			BUG_ON(true);
@@ -298,7 +297,7 @@ void t_sandbox_sock_tbl_destroy(struct t_sandbox_sock_tbl *ts) {
 }
 
 struct t_sandbox_all {
-	struct t_sandbox_sock_tbl TS;
+	struct TSB_all_fds_tbl TS;
 	struct TSB_signals_queue {						// Signaling/Logging mechanism to toma
 		struct TSB_fd_otherside o;
 		int sig;
@@ -311,7 +310,7 @@ struct t_sandbox_all {
 	struct TSB_server {
 		struct TSB_fd_otherside o;
 	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
-	struct TSB_wakeup_pipe {
+	struct TSB_wakeup_pipe {						// Operating system pipe, for communication between toma threads
 		struct TSB_fd_otherside o[2];				// 1 read, 1 write file descriptor
 		pthread_mutex_t mutex;
 		#define TSB_WU_PIPE_QUEUE_SIZE 32			// Simple fixed-size circular buffer queue of wakeup messages
@@ -470,7 +469,7 @@ void t_sandbox_all_destroy(void) {
 	pthread_mutex_destroy(&sys->TSB_wake_pip.mutex);
 	sb_cluster_conf_destroy(&sys->cfg);
 	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	t_sandbox_sock_tbl_destroy(&sys->TS);
+	TSB_all_fds_tbl_destroy(&sys->TS);
 	free(sys);
 	sys = NULL;
 }
@@ -480,13 +479,13 @@ struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void
 }
 
 static struct TSB_fd_impl * TSB_socket_find_by_fd(int fd) {		// Look up and return a socket object by fd. Bug if not found. Sandbox environment should emulate all fd's
-	struct t_sandbox_sock_tbl *TS = &sys->TS;
+	struct TSB_all_fds_tbl *TS = &sys->TS;
 	int i;
 	if (fd >= sys->TS.debug_offset)
-		return &TS->socks[fd - TS->debug_offset];
-	for (i = 0; i < TS->n_socks; i++) {
-		if (TS->socks[i].fd == fd)
-			return &TS->socks[i];
+		return &TS->fd_arr[fd - TS->debug_offset];
+	for (i = 0; i < TS->n_fds; i++) {
+		if (TS->fd_arr[i].fd == fd)
+			return &TS->fd_arr[i];
 	}
 	BUG_ON(true);
 	return NULL;
@@ -761,13 +760,13 @@ static const char* sbfd_get_open_mode(const struct TSB_fd_impl* s) {
 }
 
 int socket(int __domain, int __type, int __protocol) {
-	struct t_sandbox_sock_tbl *TS = &sys->TS;
-	struct TSB_fd_impl *s = t_sandbox_sock_tbl_find_next_unused(TS);
+	struct TSB_all_fds_tbl *TS = &sys->TS;
+	struct TSB_fd_impl *s = TSB_all_fds_tbl_find_next_unused(TS);
 	s->dom =__domain;
 	s->type = __type;
 	s->proto =__protocol;
 	s->ref_cnt = 1;
-	return TS->debug_offset + (int)(s - sys->TS.socks);
+	return TS->debug_offset + (int)(s - sys->TS.fd_arr);
 }
 
 static void socket_destroy(struct TSB_fd_impl *s) {
@@ -776,9 +775,9 @@ static void socket_destroy(struct TSB_fd_impl *s) {
 	if (s->ref_cnt > 0)
 		return;
 	if (sys->can_use_bin_traces) {		// Some fd's are closed after binary traces were shut down
-		N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, close, del=@BOOL_YN", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
+		N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, close, del=@BOOL_YN", (int)(s - sys->TS.fd_arr), s->fd, s->addr.sun_path, should_del);
 	} else {							// Closing syslog when binary traces are disabled
-		SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, should_del);
+		SANDBOX_PRINT("TSB[%2d]: fd=%2d, path=%-40s, close, del=%u\n", (int)(s - sys->TS.fd_arr), s->fd, s->addr.sun_path, should_del);
 	}
 	if (s->f != NULL) {
 		fclose(s->f);
@@ -801,21 +800,21 @@ int TSB_sock_open(struct TSB_fd_impl *s) {
 	s->fd = fileno(s->f);
 	TSB_connect_sock_to_listener(s);
 	N_SANDBOX(__AUTOID__, "TSB[@EI]: fd=@EI, path=@STR, mode=@STR (@X), listener=@BOOL_YN",
-		 (int)(s - sys->TS.socks), s->fd, s->addr.sun_path, open_mode, s->proto, !!s->other_side);
+		 (int)(s - sys->TS.fd_arr), s->fd, s->addr.sun_path, open_mode, s->proto, !!s->other_side);
 	return s->fd;
 }
 
 int __connect(int fd, const struct sockaddr_un *addr, unsigned int len) {
-	struct t_sandbox_sock_tbl *TS = &sys->TS;
-	struct TSB_fd_impl *s = &TS->socks[fd - TS->debug_offset];
+	struct TSB_all_fds_tbl *TS = &sys->TS;
+	struct TSB_fd_impl *s = &TS->fd_arr[fd - TS->debug_offset];
 	s->addr = *addr;
 	s->len = len;
 	return TSB_sock_open(s);
 }
 
 int __bind(int fd, const void* __addr, unsigned int len) {
-	struct t_sandbox_sock_tbl *TS = &sys->TS;
-	struct TSB_fd_impl *s = &TS->socks[fd - TS->debug_offset];
+	struct TSB_all_fds_tbl *TS = &sys->TS;
+	struct TSB_fd_impl *s = &TS->fd_arr[fd - TS->debug_offset];
 	const struct sockaddr_nl *addr = __addr;
 	s->addr.sun_family = addr->nl_family;
 	if (addr->nl_family == AF_NETLINK) {
@@ -1277,7 +1276,7 @@ int override_close(int fd) {
 // Returns the real OS fd, matching the pattern of override_open()/TSB_sock_open().
 int override_dup(int oldfd) {
 	struct TSB_fd_impl *old_s;
-	struct t_sandbox_sock_tbl *TS;
+	struct TSB_all_fds_tbl *TS;
 	struct TSB_fd_impl *new_s;
 	int new_os_fd = -1;
 	int ret = -1;
@@ -1286,7 +1285,7 @@ int override_dup(int oldfd) {
 	TS = &sys->TS;
 
 	pthread_mutex_lock(&TS->mutex);
-	new_s = t_sandbox_sock_tbl_find_next_unused(TS);
+	new_s = TSB_all_fds_tbl_find_next_unused(TS);
 
 	// Copy configuration from original socket
 	new_s->dom = old_s->dom;

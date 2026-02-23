@@ -1,10 +1,7 @@
 #include "mgmt_sim.h"
-#include "sandbox_util.h"
 #include "sandbox_kafka_public.h"
-
-// Toma headers
 #include "nvmeibt_json_base.h"
-#include "nvmeibt_debug.h"
+#include "nvmeibt_debug.h"	// Binary tracing
 
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
