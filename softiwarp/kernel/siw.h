@@ -160,17 +160,17 @@ enum siw_if_type {
 /* Timeouts */
 #define SIW_IN_USE_ASSERT_TIMEOUT	(1 * HZ) /* Assert if QP has been in_use for longer than this */
 #define SIW_QP_SQ_PROCESS_LOG_TIMEOUT	(HZ / 10)
-#define SIW_QP_SQ_PROCESS_WARN_TIMEOUT	(0)
+#define SIW_QP_SQ_PROCESS_WARN_TIMEOUT	(HZ / 10)
 #define SIW_KERNEL_SENDMSG_LOG_TIMEOUT	(HZ / 20)
-#define SIW_KERNEL_SENDMSG_WARN_TIMEOUT (0)
+#define SIW_KERNEL_SENDMSG_WARN_TIMEOUT (HZ / 20)
 #define SIW_RUN_SQ_DELAY_LOG		(HZ / 5)
-#define SIW_RUN_SQ_DELAY_WARN		(0)
+#define SIW_RUN_SQ_DELAY_WARN		(HZ / 5)
 #define SIW_CQ_NOTIFY_WORK_DELAY_LOG	(HZ / 2)
-#define SIW_CQ_NOTIFY_WORK_DELAY_WARN	(0)
+#define SIW_CQ_NOTIFY_WORK_DELAY_WARN	(HZ / 2)
 #define SIW_CQ_NOTIFY_TASK_DELAY_LOG	(HZ / 10)
 #define SIW_CQ_NOTIFY_TASK_DELAY_WARN	(HZ)
 #define SIW_CQ_HANDLER_TIMEOUT_LOG	(HZ / 5)
-#define SIW_CQ_HANDLER_TIMEOUT_WARN	(0)
+#define SIW_CQ_HANDLER_TIMEOUT_WARN	(HZ / 5)
 
 /* For testing siw_connect failures */
 #define SIW_CONNECT_FAIL_TEST		0
