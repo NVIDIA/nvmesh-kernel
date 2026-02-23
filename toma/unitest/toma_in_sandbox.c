@@ -243,45 +243,44 @@ static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int 
 	return n;
 }
 
-struct TSB_sock_otherside {		// Every implementation must derive from this sub class. Sandbox injects data to Toma via those functions
-	// The send()/recv() operations act as a generic I/O interface that is common to both
-	// seekable like a block device or a local file, and non-seekable resources like a pipe, socket, or FIFO.
+struct TSB_fd_otherside {		// Every file descriptor (file, socket, ...) implementation must derive from this sub class. Sandbox injects data to Toma via those functions
+	// The send()/recv() operations act as a generic I/O interface that is common to both: seekable (block device, local file), and non-seekable (pipe, socket, FIFO).
 	// Use offset == OFFSET_NONE to indicate a non-random I/O operation like read()/write() or send()/recv().
 	// When offset != OFFSET_NONE (i.e. > 0) this indicates a pread()/pwrite() operation.
 	ssize_t (*send)(int fd, const void *buf, size_t n, off_t offset, int flags);	// Toma sends data to simulator
 	ssize_t (*recv)(int fd,       void *buf, size_t n, off_t offset, int flags);	// Toma receives data from simulator
 	bool    (*has_data)(void);									// epoll()/select() on this socket/file-descriptor
-	struct t_sandbox_sock *sock;								// Pointer to the socket structure which uses me
+	struct TSB_fd_impl *sock;									// Pointer to the file descriptor structure which uses me
 };
 
 struct t_sandbox_sock_tbl {
 	int n_socks;
 	int debug_offset;		// Prevent confusion between real descriptors and emulated
 	pthread_mutex_t mutex;
-	struct t_sandbox_sock {
-		FILE *f;
-		int fd;				// File descriptor associated with the socket
+	struct TSB_fd_impl {
+		FILE *f;			// Sometimes we need a backend file emulating this file
+		int fd;				// Real system file descriptor emulating this socket/fd
 		int dom;
 		int type;
 		int proto;
 		u32 len;
 		int ref_cnt;								// Same fd' is sometimes use multiple times by the simulator. accept(). Todo, clean this
 		struct sockaddr_un addr;
-		struct TSB_sock_otherside *other_side;		// Here sandbox connects to socket from the other side
+		struct TSB_fd_otherside *other_side;		// Here sandbox connects to socket from the other side
 	} socks[32];			// Max amount of sockets used by toma
 };
-bool sbfd_is_used(const struct t_sandbox_sock* s) {
+bool sbfd_is_used(const struct TSB_fd_impl *s) {
 	return (s->f != NULL) || (s->addr.sun_path[0] != 0);
 }
 
-struct t_sandbox_sock* t_sandbox_sock_tbl_find_next_unused(struct t_sandbox_sock_tbl *ts) {
+struct TSB_fd_impl* t_sandbox_sock_tbl_find_next_unused(struct t_sandbox_sock_tbl *ts) {
 	int i = ts->n_socks;
 	for (i = 0; i < ts->n_socks; i++) {		// Reuse deleted fd
 		if (!sbfd_is_used(&ts->socks[i]))
 			return &ts->socks[i];
 	}
 	{										// Allocate next fd
-		struct t_sandbox_sock *s = &ts->socks[ts->n_socks++];
+		struct TSB_fd_impl *s = &ts->socks[ts->n_socks++];
 		BUG_ON(i >= ARRAY_SIZE(ts->socks));
 		BUG_ON(sbfd_is_used(s));
 		return s;
@@ -290,7 +289,7 @@ struct t_sandbox_sock* t_sandbox_sock_tbl_find_next_unused(struct t_sandbox_sock
 
 void t_sandbox_sock_tbl_destroy(struct t_sandbox_sock_tbl *ts) {
 	for (int i = 0; i < ts->n_socks; i++) {
-		const struct t_sandbox_sock *s = &ts->socks[i];
+		const struct TSB_fd_impl *s = &ts->socks[i];
 		if (sbfd_is_used(s)) {		// Leak of this file descriptor
 			SANDBOX_PRINT("TSB[%2d]: " COL_RED_BOLD "Leaking fd=%2d, " COL_RESET " path=%-40s\n", i, s->fd, s->addr.sun_path);
 			BUG_ON(true);
@@ -301,19 +300,19 @@ void t_sandbox_sock_tbl_destroy(struct t_sandbox_sock_tbl *ts) {
 struct t_sandbox_all {
 	struct t_sandbox_sock_tbl TS;
 	struct TSB_signals_queue {						// Signaling/Logging mechanism to toma
-		struct TSB_sock_otherside o;
+		struct TSB_fd_otherside o;
 		int sig;
 		int fd_signal;
 		int fd_syslog;
 	} TSB_sig;
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
-		struct TSB_sock_otherside o;
+		struct TSB_fd_otherside o;
 	} TSB_udev, TSB_rpc, TSB_syslog, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
 	struct TSB_server {
-		struct TSB_sock_otherside o;
+		struct TSB_fd_otherside o;
 	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
 	struct TSB_wakeup_pipe {
-		struct TSB_sock_otherside o[2];				// 1 read, 1 write file descriptor
+		struct TSB_fd_otherside o[2];				// 1 read, 1 write file descriptor
 		pthread_mutex_t mutex;
 		#define TSB_WU_PIPE_QUEUE_SIZE 32			// Simple fixed-size circular buffer queue of wakeup messages
 		#define TSB_WU_PIPE_MSG_SIZE 16				// Toma write wakeup messages of exactly 16[b]
@@ -323,14 +322,14 @@ struct t_sandbox_all {
 		int queue_head, queue_tail, queue_count;	// Next position to dequeue from, Next position to enqueue to, Number of messages in queue
 	} TSB_wake_pip;
 	struct globa_epoll {
-		struct TSB_sock_otherside o;
+		struct TSB_fd_otherside o;
 		struct epoll_event evs[16];
 		int n_fds;
 	} TSB_epoll;
 	struct kafka_simulator_t *kafka_simu;
 	struct TSB_server_toma_status_req_simu s_req_simu;
 	struct TSB_netlink_mock {
-		struct TSB_sock_otherside o;
+		struct TSB_fd_otherside o;
 		unsigned n_recv_msgs;
 		pthread_mutex_t mutex;			// Thread-safe message queue for netlink responses
 		#define TSB_NL_QUEUE_SIZE 8		// Simple fixed-size queue of messages
@@ -344,7 +343,7 @@ struct t_sandbox_all {
 		int queue_count;		// Number of messages in queue
 	} TSB_netlink;
 	struct TSB_server_comm_wakeup_mock {
-		struct TSB_sock_otherside o[2];
+		struct TSB_fd_otherside o[2];
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
 	} TSB_km_sock_pair;
 	struct TSB_pending_disk_add {
@@ -480,7 +479,7 @@ struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void
 	return &sys->s_req_simu;
 }
 
-static struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {		// Look up and return a socket object by fd. Bug if not found. Sandbox environment should emulate all fd's
+static struct TSB_fd_impl * TSB_socket_find_by_fd(int fd) {		// Look up and return a socket object by fd. Bug if not found. Sandbox environment should emulate all fd's
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
 	int i;
 	if (fd >= sys->TS.debug_offset)
@@ -494,7 +493,7 @@ static struct t_sandbox_sock * TSB_socket_find_by_fd(int fd) {		// Look up and r
 }
 
 int ioctl(int fd, unsigned long int req, ...) {
-	struct t_sandbox_sock *tsb = TSB_socket_find_by_fd(fd);
+	struct TSB_fd_impl *tsb = TSB_socket_find_by_fd(fd);
 	const char *path = tsb->addr.sun_path;
 	va_list ap;
 	int rv = 0;
@@ -675,7 +674,7 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 static bool _recv_has_raft_msgs_for_toma(void);
 
 // Connect the other side which communicates with Toma
-void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
+void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	BUG_ON(s->other_side); 								// Only 1 simulate4d listener works per socket / file descriptor
 	if (strstr(s->addr.sun_path, "netlink")) {					s->other_side = &sys->TSB_netlink.o;
 	} else if (strstr(s->addr.sun_path, "signal")) {			s->other_side = &sys->TSB_sig.o;
@@ -717,7 +716,7 @@ void TSB_connect_sock_to_listener(struct t_sandbox_sock *s) {
 }
 
 void sandbox_server_init(void) {
-	struct TSB_sock_otherside *o = &sys->TSB_toma2srvr.o;
+	struct TSB_fd_otherside *o = &sys->TSB_toma2srvr.o;
 	o->send = _srvr_simu_nvmeibs_toma_server_proc_recv;
 	o->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
 	o = &sys->TSB_srvr2toma.o;
@@ -734,16 +733,16 @@ void sandbox_server_init(void) {
 	pthread_mutex_init(&sys->TSB_netlink.mutex, NULL);
 }
 
-static bool sbfd_is_a_file(     const struct t_sandbox_sock* s) {
+static bool sbfd_is_a_file(const struct TSB_fd_impl* s) {
 	return (s->type == 'f');
 }
 
-static bool sbfd_should_persist_after_close(const struct t_sandbox_sock* s) {
+static bool sbfd_should_persist_after_close(const struct TSB_fd_impl* s) {
 	// Only regular files should persist after close, but socket/pipe are non-persistent.
 	return sbfd_is_a_file(s);
 }
 
-static const char* sbfd_get_open_mode(const struct t_sandbox_sock* s) {
+static const char* sbfd_get_open_mode(const struct TSB_fd_impl* s) {
 	if (!sbfd_is_a_file(s))
 		return "w+";
 	// Creating or truncating: use "w+" (safe - explicit intent to overwrite)
@@ -763,7 +762,7 @@ static const char* sbfd_get_open_mode(const struct t_sandbox_sock* s) {
 
 int socket(int __domain, int __type, int __protocol) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
-	struct t_sandbox_sock *s = t_sandbox_sock_tbl_find_next_unused(TS);
+	struct TSB_fd_impl *s = t_sandbox_sock_tbl_find_next_unused(TS);
 	s->dom =__domain;
 	s->type = __type;
 	s->proto =__protocol;
@@ -771,7 +770,7 @@ int socket(int __domain, int __type, int __protocol) {
 	return TS->debug_offset + (int)(s - sys->TS.socks);
 }
 
-static void socket_destroy(struct t_sandbox_sock *s) {
+static void socket_destroy(struct TSB_fd_impl *s) {
 	const bool should_del = !sbfd_should_persist_after_close(s);
 	s->ref_cnt--;
 	if (s->ref_cnt > 0)
@@ -792,7 +791,7 @@ static void socket_destroy(struct t_sandbox_sock *s) {
 	memset(s, 0, sizeof(*s));
 };
 
-int TSB_sock_open(struct t_sandbox_sock *s) {
+int TSB_sock_open(struct TSB_fd_impl *s) {
 	const char* open_mode = sbfd_get_open_mode(s);
 	s->f = fopen(s->addr.sun_path, open_mode);
 	if (s->f == NULL) {
@@ -808,7 +807,7 @@ int TSB_sock_open(struct t_sandbox_sock *s) {
 
 int __connect(int fd, const struct sockaddr_un *addr, unsigned int len) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
-	struct t_sandbox_sock *s = &TS->socks[fd - TS->debug_offset];
+	struct TSB_fd_impl *s = &TS->socks[fd - TS->debug_offset];
 	s->addr = *addr;
 	s->len = len;
 	return TSB_sock_open(s);
@@ -816,7 +815,7 @@ int __connect(int fd, const struct sockaddr_un *addr, unsigned int len) {
 
 int __bind(int fd, const void* __addr, unsigned int len) {
 	struct t_sandbox_sock_tbl *TS = &sys->TS;
-	struct t_sandbox_sock *s = &TS->socks[fd - TS->debug_offset];
+	struct TSB_fd_impl *s = &TS->socks[fd - TS->debug_offset];
 	const struct sockaddr_nl *addr = __addr;
 	s->addr.sun_family = addr->nl_family;
 	if (addr->nl_family == AF_NETLINK) {
@@ -1209,43 +1208,43 @@ static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg
 }
 
 ssize_t sendmsg(int __fd, const struct msghdr *__msg, int __flags) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(__fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(__fd);
 	struct iovec *iov = (struct iovec *)__msg->msg_iov;
 	BUG_ON(__msg->msg_iovlen != 1);			// Assert single iovec element (as used by km_comm)
 	return s->other_side->send(__fd, iov[0].iov_base, iov[0].iov_len, OFFSET_NONE, __flags);
 }
 
 ssize_t recvmsg(int __fd, struct msghdr *__msg, int __flags) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(__fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(__fd);
 	struct iovec *iov = (struct iovec *)__msg->msg_iov;
 	BUG_ON(__msg->msg_iovlen != 1);	// Assert single iovec element (as used by km_comm)
 	return s->other_side->recv(__fd, iov[0].iov_base, iov[0].iov_len, OFFSET_NONE, __flags);
 }
 
 ssize_t send(int fd, const void *buf, size_t n , int flags) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	return s->other_side->send(fd, buf, n, OFFSET_NONE, flags);
 }
 
 ssize_t recv(int fd,       void *buf, size_t n , int flags) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	return s->other_side->recv(fd, buf, n, OFFSET_NONE, flags);
 }
 
 int setsockopt(int fd, int lvl, int name, const void *val, unsigned int optlen) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	(void)s; (void)lvl; (void)name; (void)val; (void)optlen;
 	return 0;
 }
 
 int listen(int fd, int n) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	(void)s; (void)n;
 	return 0;
 }
 
 int accept(int fd, struct sockaddr* addr, unsigned int *addr_len) {
-	struct t_sandbox_sock *s;
+	struct TSB_fd_impl *s;
 	pthread_mutex_lock(&sys->TS.mutex);
 	s = TSB_socket_find_by_fd(fd);
 	s->ref_cnt++;
@@ -1265,7 +1264,7 @@ int override_open(const char *path, int flags, ... /*int mode*/) {
 }
 
 int override_close(int fd) {
-	struct t_sandbox_sock *s;
+	struct TSB_fd_impl *s;
 	pthread_mutex_lock(&sys->TS.mutex);
 	s = TSB_socket_find_by_fd(fd);
 	socket_destroy(s);
@@ -1277,9 +1276,9 @@ int override_close(int fd) {
 // Create a new TSB entry that mirrors an existing fd.
 // Returns the real OS fd, matching the pattern of override_open()/TSB_sock_open().
 int override_dup(int oldfd) {
-	struct t_sandbox_sock *old_s;
+	struct TSB_fd_impl *old_s;
 	struct t_sandbox_sock_tbl *TS;
-	struct t_sandbox_sock *new_s;
+	struct TSB_fd_impl *new_s;
 	int new_os_fd = -1;
 	int ret = -1;
 
@@ -1326,7 +1325,7 @@ done:
 }
 
 int override_fcntl(int fd, int cmd, ...) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	/*int value = 0;
 	va_list ap;
 	va_start(ap, cmd);
@@ -1346,28 +1345,28 @@ int override_pipe(int fds[2]) {
 }
 
 ssize_t override_read(int fd, void *buf, size_t nbytes) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->recv(fd, buf, nbytes, OFFSET_NONE, 0);
 	return read(s->fd, buf, nbytes);	// Use real OS fd for passthrough
 }
 
 ssize_t override_write(int fd, const void *buf, size_t count) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->send(fd, buf, count, 0, 0);
 	return write(s->fd, buf, count);	// Use real OS fd for passthrough
 }
 
 ssize_t override_pread(int fd,       void *buf, size_t count, off_t offset) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->recv(fd, buf, count, offset, 0);
 	return pread(s->fd, buf, count, offset);	// Use real OS fd for passthrough
 }
 
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
-	struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	if (s->other_side)
 		return s->other_side->send(fd, buf, count, offset, 0);
 	return pwrite(s->fd, buf, count, offset);	// Use real OS fd for passthrough
@@ -1376,8 +1375,8 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 static void __temp_wait_sleep(void) { nanosleep(&(struct timespec){0, 10*1000*1000}, NULL); /* 100ms */ }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
-	struct t_sandbox_sock *nl_sock = sys->TSB_netlink.o.sock;
-	struct t_sandbox_sock *ls_sock = sys->TSB_srvr2toma.o.sock;
+	struct TSB_fd_impl *nl_sock = sys->TSB_netlink.o.sock;
+	struct TSB_fd_impl *ls_sock = sys->TSB_srvr2toma.o.sock;
 	const struct TSB_server_comm_wakeup_mock *w = &sys->TSB_km_sock_pair;
 	const int nl_fd = nl_sock->fd, ls_fd = ls_sock->fd;
 	const bool monitor_nl = FD_ISSET(nl_fd, readfds), monitor_wakup = FD_ISSET(w->o[1].sock->fd, readfds), monitor_ls = FD_ISSET(ls_fd, readfds);
@@ -1449,7 +1448,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
 		const int fd = ep->evs[i].__fd;
-		const struct TSB_sock_otherside *o = TSB_socket_find_by_fd(fd)->other_side;
+		const struct TSB_fd_otherside *o = TSB_socket_find_by_fd(fd)->other_side;
 		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
 	}
@@ -1523,7 +1522,7 @@ int init_signal_handling(const char *exe_name) {
 }
 
 void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(signals_fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(signals_fd);
 	struct TSB_signals_queue *tsb_q = container_of(s->other_side, struct TSB_signals_queue, o);
 	if (tsb_q->sig) {
 		fn(tsb_q->sig, 0x12345);
@@ -1531,7 +1530,7 @@ void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
 }
 
 int nvmeibt_nonblock_fd(int fd) {
-	const struct t_sandbox_sock *s = TSB_socket_find_by_fd(fd);
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
 	(void)s;
 	return 0;
 }
@@ -1551,7 +1550,7 @@ int  nvmeibt_udev_create(void) {
 }
 
 void nvmeibt_udev_destroy(void) {
-	struct t_sandbox_sock *s = (struct t_sandbox_sock *)sys->TSB_udev.o.sock;
+	struct TSB_fd_impl *s = (struct TSB_fd_impl *)sys->TSB_udev.o.sock;
 	socket_destroy(s);
 }
 
