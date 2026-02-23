@@ -1,17 +1,8 @@
-/*
- * sandbox_kafka_public.h - Kafka simulator public API for sandbox builds
- *
- * This header replaces <rdkafka.h> in the sandbox build.
- * It is included into the Toma build by toma/unitest/toma_in_sandbox.h.
- *
- * It provides the type definitions, constants, and function declarations
- * that production Toma code uses to interact with Kafka.
- *
- * Implemented according to: https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html
- * And https://github.com/confluentinc/librdkafka/blob/v2.13.0/src/rdkafka.h
- */
 #ifndef NVMEIBT_TOMA_MSG_Q_API_H
 #define NVMEIBT_TOMA_MSG_Q_API_H	// Bypass contents of "interfaces/nvmeibt_msg_queue_api.h"
+/* This header replaces <rdkafka.h> in the sandbox build.
+ * Implemented according to: https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html
+ * And https://github.com/confluentinc/librdkafka/blob/v2.13.0/src/rdkafka.h */
 
 enum { RD_KAFKA_OFFSET_BEGINNING = -2, /*RD_KAFKA_OFFSET_END = -1,*/  RD_KAFKA_OFFSET_STORED = -1000, RD_KAFKA_OFFSET_INVALID = -1001};
 
@@ -19,16 +10,6 @@ typedef struct rd_kafka_s rd_kafka_t;
 typedef struct rd_kafka_topic_s rd_kafka_topic_t;
 typedef struct rd_kafka_conf_s rd_kafka_conf_t;
 typedef struct rd_kafka_topic_conf_s rd_kafka_topic_conf_t;
-typedef struct rd_kafka_queue_s rd_kafka_queue_t;
-typedef struct rd_kafka_op_s rd_kafka_event_t;
-typedef struct rd_kafka_topic_result_s rd_kafka_topic_result_t;
-typedef struct rd_kafka_consumer_group_metadata_s rd_kafka_consumer_group_metadata_t;
-typedef struct rd_kafka_error_s rd_kafka_error_t;
-typedef struct rd_kafka_headers_s rd_kafka_headers_t;
-typedef struct rd_kafka_group_result_s rd_kafka_group_result_t;
-typedef struct rd_kafka_acl_result_s rd_kafka_acl_result_t;
-typedef struct rd_kafka_Uuid_s rd_kafka_Uuid_t;
-typedef struct rd_kafka_topic_partition_result_s rd_kafka_topic_partition_result_t;
 typedef enum {
 	RD_KAFKA_RESP_ERR_NO_ERROR = 0, RD_KAFKA_RESP_ERR__SSL = -50, RD_KAFKA_RESP_ERR__AUTHENTICATION, RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_GROUP_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_CLUSTER_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_UNSUPPORTED_SASL_MECHANISM, RD_KAFKA_RESP_ERR_ILLEGAL_SASL_STATE, RD_KAFKA_RESP_ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR_SASL_AUTHENTICATION_FAILED, RD_KAFKA_RESP_ERR_DELEGATION_TOKEN_AUTHORIZATION_FAILED, RD_KAFKA_RESP_ERR__FATAL, RD_KAFKA_RESP_ERR__PARTITION_EOF,
 	RD_KAFKA_RESP_ERR__RETRY = -153, RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS = -175, RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS = -174, RD_KAFKA_RESP_ERR__TRANSPORT = -195, RD_KAFKA_RESP_ERR_BROKER_NOT_AVAILABLE = 8, RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE = 15, RD_KAFKA_RESP_ERR_NOT_COORDINATOR = 16,
@@ -77,7 +58,7 @@ rd_kafka_resp_err_t rd_kafka_flush(        rd_kafka_t *rk, int timeout_ms);
 void                rd_kafka_destroy(      rd_kafka_t* me);
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking);
 rd_kafka_resp_err_t rd_kafka_commit(       rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async);
-rd_kafka_resp_err_t rd_kafka_committed(    rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int x);
+rd_kafka_resp_err_t rd_kafka_committed(    rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int timeout_ms);
 rd_kafka_resp_err_t rd_kafka_query_watermark_offsets(rd_kafka_t *me, const char *str, int32_t partition, int64_t *low_oldest_beginning_offset, int64_t *high_newest_end_offset, int timeout);
 rd_kafka_topic_conf_t* rd_kafka_topic_conf_new(void);
 void rd_kafka_topic_conf_destroy(rd_kafka_topic_conf_t *conf);

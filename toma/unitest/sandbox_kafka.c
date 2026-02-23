@@ -4,10 +4,6 @@
 #include "nvmeibt_debug.h"
 
 /************************************* Internal struct definitions ********************************/
-struct rd_kafka_topic_conf_s {
-	int dummy;
-};
-
 struct sim_broker_topic {		// Kafka Broker topic implementation = append-only log of messages
 	pthread_mutex_t lock;		// Toma sends sends/consume messages only from kafka thread. Simulated management may send/consume in other thread
 	enum sim_topic_type_toma_to_mgmt type;
@@ -114,12 +110,14 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
 
-struct rd_kafka_topic_s {
+struct rd_kafka_topic_conf_s { int dummy; };	// Unused by Toma
+
+struct rd_kafka_topic_s {					// Kafka client topic emulation
 	char *name;
 	struct sim_broker_topic *broker_topic;	// Connection to broker (when topic is initialized)
 	struct rd_kafka_topic_conf_s *conf;		// Might be NULL
 	int32_t partition;						// Support only 1 partition for now. Store its index, always 0
-	enum sim_topic_type_toma_to_mgmt type;	// string name is unique but its comparison is slow.
+	enum sim_topic_type_toma_to_mgmt type;	// String name is unique but its comparison is slow, so use this one.
 	bool is_assigned;						// Todo: may remove it and set partition as -1 instead. User can read/write this topic (it has assigned 1 or more partitions)
 };
 
@@ -129,17 +127,17 @@ struct rd_kafka_conf_s {
 	bool auto_reset_earliest;	// Represents: "auto.offset.reset",	"earliest"
 };
 
-struct rd_kafka_s {
+struct rd_kafka_s {							// Kafka producer/consumer object
 	char *name;
 	int log_lvl;
 	enum rd_kafka_type_t who;
 	struct rd_kafka_conf_s *conf;
-	struct rd_kafka_topic_s topic;
+	struct rd_kafka_topic_s topic;			// We support only 1 topic per consumer/producer
 };
 
 struct kafka_simulator_t {
 	struct sim_broker_topic topics[7];		// Kafka broker (backend) topics, always exist even if Toma is not connected to them via kafka client
-	rd_kafka_t *obj[7];				// 4 Toma consumers, 3 Toma producers
+	rd_kafka_t *obj[7];						// Kafka client: 4 Toma consumers, 3 Toma producers
 	int n_obj;
 	void (*notify_toma_producer_msg_accepted)( rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque);
 	void (*notify_toma_consumer_offset_commit)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque);

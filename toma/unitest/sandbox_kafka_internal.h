@@ -1,18 +1,9 @@
-/*
- * sandbox_kafka_internal.h - Kafka simulator internal interface for sandbox code
- *
- * Provides the init/destroy interface for the Kafka simulator state.
- * The kafka_simulator_t struct is opaque here; its definition lives in sandbox_kafka.c.
- * Other sandbox code (toma_in_sandbox.c) stores a pointer to it in the TSB struct
- * so that the full sandbox state is visible in a debugger.
- */
 #ifndef TOMA_SANDBOX_KAFKA_INTERNAL_H
 #define TOMA_SANDBOX_KAFKA_INTERNAL_H
-
+/* Provides interface to the Kafka simulator and broker backend. Used only by simulators/unit-tests. */
 #include "sandbox_util.h"
 
-// Supported Kafka topics for Toma<-->Mgmt communication
-enum sim_topic_type_toma_to_mgmt {
+enum sim_topic_type_toma_to_mgmt {	// Supported Kafka topics for Toma<-->Mgmt communication
 	KTOPIC_TYPE_T2M_UNKNOWN = '?', KTOPIC_TYPE_T2M_PRIORITY = 'P', KTOPIC_TYPE_T2M_KEEPALIVE = 'K', KTOPIC_TYPE_T2M_LOW = 'L',
 	KTOPIC_TYPE_M2T_HW_CFG = 'H', KTOPIC_TYPE_M2T_CMD = 'C', KTOPIC_TYPE_M2T_TARGETS_RAFT = 'R', KTOPIC_TYPE_M2T_VOLUMES = 'V',
 };
