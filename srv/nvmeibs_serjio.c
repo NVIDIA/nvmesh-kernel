@@ -524,6 +524,7 @@ struct nvme_op_rsrc
 	unsigned n_data_pgs;
 	unsigned n_md_pgs;
 	unsigned n_pages;
+	struct page **pages;
 
 	/* Physical addresses of pages (Used for PRPL) */
 	dma_addr_t *nvme_phys_virt;
@@ -1423,21 +1424,31 @@ static void free_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd
 	for (i = 0; i < NUM_OF_NVME_OP_RSRC; i++) {
 		struct nvme_op_rsrc *rsrc = &serjio_pd->nvme_op_rsrc_pool.pool[i];
 		if (dev) {
+			for (j = 0; j < rsrc->n_pages; j++) {
+				if (rsrc->pages[j])
+					dma_unmap_page(dev, rsrc->nvme_phys_virt[j],
+						       PAGE_SIZE, DMA_BIDIRECTIONAL);
+			}
+
 			if (rsrc->nvme_phys_virt) {
-				for (j = 0; j < rsrc->n_pages; j++) {
-					if (rsrc->nvme_phys_virt[j]) {
-						dma_unmap_single(
-							dev, rsrc->nvme_phys_virt[j], PAGE_SIZE, DMA_BIDIRECTIONAL);
-					}
-				}
-				dma_free_coherent(
-					dev, rsrc->nvme_phys_size, rsrc->nvme_phys_virt, rsrc->nvme_phys_dma);
+				dma_free_coherent(dev, rsrc->nvme_phys_size,
+						  rsrc->nvme_phys_virt, rsrc->nvme_phys_dma);
 				rsrc->nvme_phys_virt = NULL;
 			}
 		}
+
 		if (rsrc->virt) {
-			free_pages((unsigned long)rsrc->virt, get_order(rsrc->n_pages << PAGE_SHIFT));
+			vunmap(rsrc->virt);
 			rsrc->virt = NULL;
+		}
+
+		if (rsrc->pages) {
+			for (j = 0; j < rsrc->n_pages; j++) {
+				if (rsrc->pages[j])
+					__free_page(rsrc->pages[j]);
+			}
+			kfree(rsrc->pages);
+			rsrc->pages = NULL;
 		}
 	}
 }
@@ -1571,25 +1582,42 @@ static int init_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 		rsrc->n_data_pgs = n_data_pgs;
 		rsrc->n_md_pgs = n_md_pgs;
 		rsrc->n_pages = n_data_pgs + n_md_pgs;
-		if (!(rsrc->virt = (u64*)__get_free_pages(GFP_KERNEL | __GFP_ZERO, get_order(rsrc->n_pages << PAGE_SHIFT)))) {
-			_NEs(error_1_serjio_init_nvme_op_rsrc, serjio_pd, "Couldn't get available pages");
+
+		rsrc->pages = kcalloc(rsrc->n_pages, sizeof(struct page *), GFP_KERNEL);
+		if (!rsrc->pages) {
+			_NEs(error_1_serjio_init_nvme_op_rsrc, serjio_pd, "Could not allocate pages array");
 			rv = -ENOMEM;
 			goto free_pages;
 		}
+
+		for (j = 0; j < rsrc->n_pages; j++) {
+			rsrc->pages[j] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+			if (!rsrc->pages[j]) {
+				_NEs(error_2_serjio_init_nvme_op_rsrc, serjio_pd, "Couldn't get a page");
+				rv = -ENOMEM;
+				goto free_pages;
+			}
+		}
+		rsrc->virt = vmap(rsrc->pages, rsrc->n_pages, VM_MAP, PAGE_KERNEL);
+		if (!rsrc->virt) {
+			rv = -ENOMEM;
+			goto free_pages;
+		}
+
 		rsrc->nvme_phys_size = sizeof(*rsrc->nvme_phys_virt) * rsrc->n_pages;
 		rsrc->nvme_phys_virt = dma_alloc_coherent(
 			dev, rsrc->nvme_phys_size, &rsrc->nvme_phys_dma, GFP_KERNEL);
 		if (!rsrc->nvme_phys_virt) {
-			_NE(error_2_serjio_init_nvme_op_rsrc, "Could not allocate DMA memory for PRPL");
+			_NE(error_3_serjio_init_nvme_op_rsrc, "Could not allocate DMA memory for PRPL");
 			rv = -ENOMEM;
 			goto free_pages;
 		}
 		rsrc->nvme_req.use_sg = false;
 		for (j = 0; j < rsrc->n_pages; j++) {
-			rsrc->nvme_phys_virt[j] = dma_map_single(
-				dev, rsrc->virt + (j << PAGE_SHIFT), PAGE_SIZE, DMA_BIDIRECTIONAL);
+			rsrc->nvme_phys_virt[j] = dma_map_page(
+				dev, rsrc->pages[j], 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
 			if (dma_mapping_error(dev, rsrc->nvme_phys_virt[j])) {
-				_NE(error_3_serjio_init_nvme_op_rsrc, "Error mapping memory to disk device");
+				_NE(error_4_serjio_init_nvme_op_rsrc, "Error mapping memory to disk device");
 				rv = -ENOMEM;
 				goto free_pages;
 			}
