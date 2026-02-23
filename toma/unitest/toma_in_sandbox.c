@@ -1186,99 +1186,47 @@ static void TSB_netlink_send_extended_msg(void) {
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-/**
- * Format the disks CSV content into a buffer (formerly written to /proc/nvmeibs/disks.csv).
- * Generates CSV with header and one line per NVMesh disk.
- *
- * @param buf Output buffer
- * @param buf_size Size of buffer in bytes
- * @return Number of bytes written (excluding trailing '\0').
- *
- * This helper is used in unit tests; it must fail-fast on invalid arguments or
- * insufficient buffer space.
- */
-static int format_disks_csv(char *buf, size_t buf_size)
-{
-	int device_count = sandbox_nvme_get_device_count();
+static int format_disks_csv(char *buf, size_t buf_size) {
+	const int device_count = sandbox_nvme_get_device_count();
 	struct nvmeib_txt txt;
-	struct charvec buffer;
+	struct charvec buffer = {.base = buf, .len = buf_size };
 	struct charvec out;
-
-	BUG_ON(buf == NULL);
-	BUG_ON(buf_size == 0);
-
-	buffer.base = buf;
-	buffer.len = buf_size;
+	BUG_ON((buf == NULL)||(buf_size == 0));
 	txt = nvmeib_txt_make(buffer);
+	nvmeib_txt_append(&txt, "%s\n", NVMEIBS_DISKS_CSV_HEADER);		/* Write header */
 
-	/* Write header */
-	nvmeib_txt_append(&txt, "%s\n", NVMEIBS_DISKS_CSV_HEADER);
-
-	/* Write each NVMesh (non-stock) disk */
-	for (int i = 0; i < device_count; ++i) {
+	for (int i = 0; i < device_count; ++i) {						/* Write each NVMesh (non-stock) disk */
 		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_index(i);
-		const struct sandbox_nvme_lbaf *lbaf;
-		int disk_seq;
-
-		if (!d || d->stock_disk)
-			continue;
-
-		disk_seq = TSB_get_seq_from_nvmesh_device_name(d->device_name);
-		BUG_ON(disk_seq < 0);
-		lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
-
-		/* CSV: id,blocks,hw_blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor,model,native_serial */
-		nvmeib_txt_append(&txt,
-			"%s.1,%llu,%llu,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
-			d->serial_number,
-			(unsigned long long)d->size_in_blocks,
-			(unsigned long long)d->size_in_blocks,
-			(1u << lbaf->block_size_exp),
-			disk_seq,
-			d->device_name,
-			lbaf->metadata_size,
-			d->vendor_id,
-			d->model_number,
-			d->serial_number);
+		if (!d->stock_disk) {
+			const int disk_seq = TSB_get_seq_from_nvmesh_device_name(d->device_name);
+			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
+			BUG_ON(disk_seq < 0);
+			nvmeib_txt_append(&txt,
+				"%s.1,%u,%u,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
+				d->serial_number, (unsigned)d->size_in_blocks, (unsigned)d->size_in_blocks, (1u << lbaf->block_size_exp),
+				disk_seq, d->device_name, lbaf->metadata_size, d->vendor_id, d->model_number, d->serial_number);
+		}
 	}
-
 	out = nvmeib_txt_finalize(&txt);
-	BUG_ON(out.base == NULL);     /* buffer overflow/truncation */
-	BUG_ON(out.len >= buf_size);  /* no room for trailing '\0' */
+	BUG_ON((out.base == NULL)||(out.len >= buf_size));		// buffer overflow/truncation or no room for trailing '\0'
 	N_Tf(fdc0001, "formatted disks CSV: @STR", buf);
 	return (int)out.len;
 }
 
-/**
- * Format the smart content into a buffer (formerly written to /proc/nvmeibs/smartX).
- */
- static int format_smart_content(char *buf, size_t buf_size, const struct sandbox_nvme_device *dev)
- {
-	 int seq;
-	 int n;
-	 BUG_ON(!buf);
-	 BUG_ON(!dev);
-
-	 seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
-	 BUG_ON(seq < 0); // should only be called for NVMesh disks -> -1 means stock disk
-
-	 n = snprintf(buf, buf_size,
-		 "Pci Address=0000:%02x:00.0\n"
-		 "Serial Number=%s\n"
-		 "Vendor=0x%04x\n"
-		 "Model=%s\n"
-		 "Submission Queues=128\n"
-		 "Completion Queues=128\n"
-		 "MSIX Interrupts=129\n"
-		 "Num admin cmds=323\n"
-		 "Namespace Id=1\n"
-		 "Numa Node=1\n",
-		 seq, dev->serial_number, dev->vendor_id, dev->model_number);
-	 BUG_ON(n < 0);
-	 BUG_ON((size_t)n >= buf_size);
-
-	 N_Tf(fsc0012, "formatted smart content for disk @STR: @STR", dev->device_name, buf);
-	 return (int)n;
+static int format_smart_content(char *buf, size_t buf_size, const struct sandbox_nvme_device *dev) {	//	/proc/nvmeibs/smartX
+	const int seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
+	int n;
+	BUG_ON(!buf || !dev || (seq < 0)); // should only be called for NVMesh disks -> -1 means stock disk
+	n = snprintf(buf, buf_size,
+		"Pci Address=0000:%02x:00.0\n"
+		"Serial Number=%s\n"
+		"Vendor=0x%04x\n"
+		"Model=%s\n"
+		"Submission Queues=128\nCompletion Queues=128\nMSIX Interrupts=129\nNum admin cmds=323\nNamespace Id=1\nNuma Node=1\n",
+		seq, dev->serial_number, dev->vendor_id, dev->model_number);
+	BUG_ON((n < 0) || ((size_t)n >= buf_size));
+	N_Tf(fsc0012, "formatted smart content for disk @STR: @STR", dev->device_name, buf);
+	return (int)n;
 }
 
 static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg) {
