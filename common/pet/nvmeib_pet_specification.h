@@ -53,23 +53,31 @@ struct nvmeib_pet_base_controller{
 //}}}
 
 //{{{pet storage - implementation details
+
+/* Entity header: commit_id (u8) + num_messages (u2) = 10 bytes; must match nvmeib_pet_specification.ksy */
+enum { NVMEIB_PET_ENTITY_HEADER_SIZE = 10 };
+
 struct nvmeib_pet_stream{
 	struct iovec data;
 	u16 written_bytes;
-	u16* written_msgs; //pointer to data.iov_base[0]
+	u16* written_msgs; /* pointer to data.iov_base[8], num_messages */
 };
 
 enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because written_bytes is u16
+
+/* Offset of `written_msgs` in the stream data buffer */
+enum { NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET = 8 };
 
 static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 {
 	struct nvmeib_pet_stream stream = {
 		.data = data,
-		.written_bytes = data.iov_base ? sizeof(*stream.written_msgs) : 0 , //sizeof(u16) - written_msgs
-		.written_msgs = (u16*)data.iov_base //all C allocation should be aligned to "unsigned long long" or "long double"
+		.written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
+		.written_msgs = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET) : (u16*)NULL
 	};
 
-	if (stream.written_msgs){
+	if (stream.written_msgs){ // If `stream.written_msgs` is not NULL, it implies that `data.iov_base` is not NULL.
+		*(u64*)data.iov_base = (u64)COMMIT_ID;
 		(*stream.written_msgs) = 0;
 	}
 
@@ -146,14 +154,14 @@ struct nvmeib_pet_variant{
 	uint64_t value;
 };
 
-static inline enum nvmeib_pet_store_type 
+static inline enum nvmeib_pet_store_type
 __nvmeib_pet_optimize_store_type_if_zero(enum nvmeib_pet_store_type store_type, uint64_t value)
 {
 	if (value){
 		return store_type;
-	} 
-	return NVMEIB_PET_STORE_TYPE_U_BYTE; 
-	//probably we can optimize even futher, by adding special type, but this is too much work 
+	}
+	return NVMEIB_PET_STORE_TYPE_U_BYTE;
+	//probably we can optimize even futher, by adding special type, but this is too much work
 }
 
 //64bit platform support only
@@ -607,17 +615,17 @@ static inline u16 nvmeib_pet_message_12_write(struct nvmeib_pet_message_12 const
 })
 
 //severity & verbosity
-//the main difference between traditional logging systems and PET is the following: 
+//the main difference between traditional logging systems and PET is the following:
 //* PET must accumulate the whole history and the history will be stored only in case it saw some "problematic" record.
 //  The problematic record is identified by the severity. The severity of the all records is the worst one.
-//Now, "verbose", on the other side defines how much information we collect through the process. 
+//Now, "verbose", on the other side defines how much information we collect through the process.
 //For example, we may decide to print first 8 bytes and edic for every read/write block. Obviously will hurt the performance.
 
 struct nvmeib_pet_journal{
 	struct nvmeib_pet_base_controller const* controller;
 	struct nvmeib_pet_stream stream;
 	enum nvmeib_pet_severity worst_severity;
-	bool verbose; 
+	bool verbose;
 	u8 concurrent_access_detector; //don't bother to remove it in the production build - we have padding here;
 	u64 prev_timestamp_ns; //with high probability the next message may store delta between times, thus saving space
 };

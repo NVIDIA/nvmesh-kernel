@@ -49,6 +49,7 @@ class NvmeibPetArchive(KaitaiStruct):
             self._read()
 
         def _read(self):
+            self.commit_id = self._io.read_u8le()
             self.num_messages = self._io.read_u2le()
             self.messages = []
             for i in range(self.num_messages):

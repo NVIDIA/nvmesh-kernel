@@ -56,6 +56,8 @@ types:
         repeat-expr: num_args
   entity:
     seq:
+      - id: commit_id
+        type: u8
       - id: num_messages
         type: u2
       - id: messages

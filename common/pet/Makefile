@@ -1,5 +1,6 @@
 BUILD_DIR := build
 TESTS_DIR := tests
+SHELL := /bin/bash
 
 #the developer is expected to install it
 KSC = kaitai-struct-compiler
@@ -8,8 +9,12 @@ KSC = kaitai-struct-compiler
 PET_SPEC_FILE = nvmeib_pet_specification.ksy
 PET_BINFILE_READER = nvmeib_pet_archive.py
 
+ifeq ($(COMMIT_ID),)
+COMMIT_ID = 0x$(shell source ../../build_common.sh; git_commit_id)
+endif
+
 CC := gcc
-CFLAGS := -Wall -Wextra -ggdb -O2 -I"." -I".."
+CFLAGS := -Wall -Wextra -ggdb -O2 -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID)
 
 TEST_EXE := $(BUILD_DIR)/test
 TEST_OBJ := $(BUILD_DIR)/test.o
