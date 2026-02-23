@@ -292,7 +292,7 @@ class DwarfRuntime:
 		return die.get_DIE_from_attribute('DW_AT_type')
 
 	@typing.no_type_check
-	def __build_bitfield_layout(self, member_die: DIE, type_info: TypeInfo) -> BitLayout:
+	def __build_bitfield_layout(self, member_die: DIE, type_info: TypeInfo) -> typing.Optional[BitLayout]:
 		bit_size_attr = member_die.attributes.get('DW_AT_bit_size')
 		if not bit_size_attr:
 			return None
