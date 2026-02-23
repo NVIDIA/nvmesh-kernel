@@ -233,7 +233,7 @@ struct dp_block_translation_unit {
 		bool translate_locks;				// Add locks translation as well
 	} input;
 	struct t_dp_block_trans_output { 		// Output of translation
-		const struct nvmeibc_disk* disks[32]; // Array of disks (need raid->n_segs*2)
+		const struct nvmeibc_idisk* disks[32]; // Array of disks (need raid->n_segs*2)
 		u64                         offs[32]; // Phys offsets
 		const char                *descr[32]; // Type of the command
 		u16 io_perm;						// enum nvmeib_io_type_permission, of current topology (May prevent translation if 'op' is illegal)
@@ -242,7 +242,7 @@ struct dp_block_translation_unit {
 		// ---------------------------
 		char 					*mssa_output; // Not mandatory, will be allocated and filled if required
 		// ---------------------------
-		const struct nvmeibc_disk* ldisks[N_MAX_RAID_LOCKS]; // Array of disks of locks
+		const struct nvmeibc_idisk* ldisks[N_MAX_RAID_LOCKS]; // Array of disks of locks
 		const char                *ldescr[N_MAX_RAID_LOCKS]; // Type of the lock
 		u16 n_locks;										// Num elements in the arrays above
 		struct {
@@ -387,4 +387,3 @@ enum edic_result {
 };
 
 #endif  // H beginning
-

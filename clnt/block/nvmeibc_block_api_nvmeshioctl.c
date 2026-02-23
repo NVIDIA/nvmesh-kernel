@@ -414,7 +414,7 @@ static int __toggle_di_debug_mode(const struct nvmeibc_cinst_params_blk *p, stru
 	(tv)->input.translate_locks = false;	\
 	(tv)->input.op = NVMEIB_BLOCK_IO_OP_WRITE;  })
 
-#define __host_of(disk) nvmeibc_idisk_get_host_name_for_logging(&(disk)->base)
+#define __host_of(disk) nvmeibc_idisk_get_host_name_for_logging(disk)
 
 //TODO: this function can be used to serve information about "prepare" stage.
 static void __trans_vlba_of_bdev(const struct nvmeibc_cinst_params_blk *p, struct nvmeibc_block_device *dev, u64 addr, u32 nlbas, char op, u64 cookie, const int recusive_depth)
@@ -452,9 +452,9 @@ static void __trans_vlba_of_bdev(const struct nvmeibc_cinst_params_blk *p, struc
 		_NI_to_user(t_ye_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @DEV_NAME: @OP_CHR Translating range [@VLBA..@VLBA] to @NCMDS dlbas cookie=@COOKIE", tabs, dev->name,  op, addr, (addr+(u64)(nlbas-1)), res->n_cmds, cookie);
 	}
 	for (i = 0; i < res->n_cmds; i++)
-		_NI_to_user(t_yf_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> @DESCR:@DISK_HOST:@DISK_NAME:@DLBA cookie=@COOKIE",  tabs, i, dev->name, addr, res->descr[i], __host_of(res->disks[i]), res->disks[i]->name, res->offs[i], cookie);
+		_NI_to_user(t_yf_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> @DESCR:@DISK_HOST:@DISK_NAME:@DLBA cookie=@COOKIE",  tabs, i, dev->name, addr, res->descr[i], __host_of(res->disks[i]), res->disks[i]->ops.get_name(res->disks[i]), res->offs[i], cookie);
 	for (i = 0; i < res->n_locks; i++)
-		_NI_to_user(t_yg_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> Lock:@DESCR:@DISK_HOST:@DISK_NAME cookie=@COOKIE",   tabs, i, dev->name, addr, res->ldescr[i], __host_of(res->ldisks[i]), res->ldisks[i]->name, cookie);
+		_NI_to_user(t_yg_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> Lock:@DESCR:@DISK_HOST:@DISK_NAME cookie=@COOKIE",   tabs, i, dev->name, addr, res->ldescr[i], __host_of(res->ldisks[i]), res->ldisks[i]->ops.get_name(res->ldisks[i]), cookie);
 	for (i = 0; i < res->d_carriers.n_nds; i++) {
 		_NI_to_user(t_yh_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> @DESCR:@DEV_NAME:@VLBA cookie=@COOKIE",              tabs, i, dev->name, addr, res->d_carriers.descr[i], res->d_carriers.nds[i]->name, res->d_carriers.lbas[i], cookie);
 		if (res->d_carriers.lbas[i] != (~0ULL))

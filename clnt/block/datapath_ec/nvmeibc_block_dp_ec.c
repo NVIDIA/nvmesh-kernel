@@ -2141,7 +2141,7 @@ static int __translate_addr_by_cfg(struct dp_block_translation_unit *tu)
 		struct nvmeibc_disk_segment *segment = &r->segments[i];
 		const u64 dlba = slba + segment->first_lba;
 		const u8 index = nvmeibc_raid1_seg2role(r, d_own_seg, i);
-		_out->disks[i] = nvmeibc_disk_from_base(segment->disk);
+		_out->disks[i] = segment->disk;
 		_out->offs[i] = dlba;
 		if (index < r->slice_size){
 			_out->descr[i] = __data_segment_index_as_str(index, index==start_first_slice);
@@ -2224,7 +2224,7 @@ static int __translate_addr_by_topology(struct dp_block_translation_unit *tu)
 	has_protection = !o.mssa->no_rw_p;
 	for (cmd = o.cmds, end = cmd + _out->n_cmds, i = 0; cmd < end; cmd++) {
 		NVMESH_BUG(cmd->my_stage == E_CMDS_STAGE_WRITE_JOURNAL, __dump_operation_report, &o, "cmd->my_stage=%d", cmd->my_stage); // Skip jour cmds as they dont convey any info
-		_out->disks[i] = nvmeibc_disk_from_base(cmd->ds->disk);
+		_out->disks[i] = cmd->ds->disk;
 		_out->offs[ i] = cmd->iocmd->reqs1.disk_address;
 		if (nvmeib_block_io_op_is_write(o.op))
 			_out->descr[i] = __wr_cmd_type_tostring(cmd, is_update, has_protection);

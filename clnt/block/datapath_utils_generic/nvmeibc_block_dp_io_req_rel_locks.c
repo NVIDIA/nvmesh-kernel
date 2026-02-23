@@ -836,7 +836,7 @@ void dp_block_translation_unit_calc_locks(struct dp_block_translation_unit *tu, 
 	nvmeibc_clmat_allocate(&o, true, N_MAX_RAID_LOCKS, 0, 0);
 	_out->n_locks = dp_fill_locks_for_raid(it->res.r, tu->input.op, it->res.rlba, o.locks);
 	for (i = 0; i < _out->n_locks; i++) {
-		 _out->ldisks[i] = nvmeibc_disk_from_base(o.locks[i].ds->disk);
+		 _out->ldisks[i] = o.locks[i].ds->disk;
 		 _out->ldescr[i] = nvmeibc_rdma_intent_to_string(o.locks[i].type);
 	}
 	nvmeibc_operation_move_mem_to_locks(&o);			// Simulate as if operation completed
