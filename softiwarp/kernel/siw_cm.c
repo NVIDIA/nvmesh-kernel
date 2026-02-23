@@ -1971,6 +1971,32 @@ static void siw_cm_work_handler(struct work_struct *w)
 			pre_jif = jiffies;
 			siw_cep_socket_restore_ca(cep);
 			siw_socket_disassoc(cep->llp.sock);
+			post_jif = jiffies;
+			if (post_jif - pre_jif > HZ / 5) {
+				dprint_cep(DBG_CM | DBG_ON, cep, "QP: %d/" dprint_ptr_str() " siw_socket_disassoc took %lu ms",
+					cep->qp ? QP_ID(cep->qp) : -1, cep->qp,
+					(1000UL * (post_jif - pre_jif)) / HZ);
+			}
+		}
+		if (cep->qp) {
+			/*
+			 * Cancel rx_work after siw_socket_disassoc (no new
+			 * callbacks) but before sock_release (handler may
+			 * still hold a reference to sk).
+			 */
+			struct siw_qp *qp = cep->qp;
+
+			pre_jif = jiffies;
+			siw_rx_cancel_work(qp);
+			post_jif = jiffies;
+			if (post_jif - pre_jif > HZ / 5) {
+				dprint_cep(DBG_CM | DBG_ON, cep, "QP: %d/" dprint_ptr_str() " cancel_delayed_work_sync took %lu ms",
+					   cep->qp ? QP_ID(cep->qp) : -1, cep->qp,
+					   (1000UL * (post_jif - pre_jif)) / HZ);
+			}
+		}
+		if (cep->llp.sock) {
+			pre_jif = jiffies;
 			sock_release(cep->llp.sock);
 			cep->llp.sock = NULL;
 			post_jif = jiffies;
@@ -1981,18 +2007,7 @@ static void siw_cm_work_handler(struct work_struct *w)
 			}
 		}
 		if (cep->qp) {
-			/* Bring down the QP - Part #2 (after siw_socket_disassoc()) */
 			struct siw_qp *qp = cep->qp;
-
-			/* Cancel any rx_work scheduled by data-ready callback */
-			pre_jif = jiffies;
-			siw_rx_cancel_work(qp);
-			post_jif = jiffies;
-			if (post_jif - pre_jif > HZ / 5) {
-				dprint_cep(DBG_CM | DBG_ON, cep, "QP: %d/" dprint_ptr_str() " cancel_delayed_work_sync took %lu ms",
-					   cep->qp ? QP_ID(cep->qp) : -1, cep->qp,
-					   (1000UL * (post_jif - pre_jif)) / HZ);
-			}
 
 			/* Ref put for the cep->qp pointer */
 			siw_qp_put(qp);
