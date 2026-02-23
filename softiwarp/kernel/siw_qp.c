@@ -278,7 +278,7 @@ void siw_qp_llp_close(struct siw_qp *qp)
 
 	write_lock_qp(qp);
 	dprint(DBG_CM|DBG_ON, "(QP%d): state locked\n", QP_ID(qp));
-	qp->attrs.llp_stream_handle = NULL;
+	WRITE_ONCE(qp->attrs.llp_stream_handle, NULL);
 
 	switch (qp->attrs.state) {
 

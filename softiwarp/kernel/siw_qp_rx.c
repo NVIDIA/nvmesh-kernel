@@ -2055,17 +2055,25 @@ void siw_rx_work_handler(struct work_struct* work)
 {
 	struct siw_iwarp_rx *rctx = container_of(work, struct siw_iwarp_rx, rx_work.work);
 	struct siw_qp *qp = RX_QP(rctx);
-	struct sock *sk = qp->attrs.llp_stream_handle->sk;
+	struct socket *s = READ_ONCE(qp->attrs.llp_stream_handle);
+	struct sock *sk;
 	int rv;
 
+	if (unlikely(!s)) {
+		goto put;
+	}
+
+	sk = s->sk;
 	lock_sock(sk);
 	if ((rv = siw_do_rx_work(qp)) < 0) {
 		dprint(DBG_SK|DBG_RX, "(QP%d): "
 		"siw_do_rx_work() returned error %d\n",
 		       QP_ID(qp), rv);
 	}
-	siw_qp_put(qp); /* Put ref from siw_rx_queue_work */
 	release_sock(sk);
+
+put:
+	siw_qp_put(qp); /* Put ref from siw_rx_queue_work */
 }
 
 void siw_rx_queue_work(struct siw_qp *qp, unsigned long delay)
