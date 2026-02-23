@@ -173,8 +173,7 @@ struct udev *udev_new(void) {
 	struct udev *u = (struct udev *)calloc(1, sizeof(*u));
 	u->ref++;
 	N_Tf(dfi1053, "udev_new");
-	assert(sizeof(u->ent) / sizeof(u->ent[0]) >= NVME_DEVICE_COUNT);
-
+	BUG_ON(sizeof(u->ent) / sizeof(u->ent[0]) < NVME_DEVICE_COUNT);
 	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		u->ent[i].name = nvme_devices[i].device_path;
 		u->ent[i].path = nvme_devices[i].device_name;
@@ -182,7 +181,6 @@ struct udev *udev_new(void) {
 			u->ent[i - 1].next = &u->ent[i];
 		}
 	}
-
 	return u;
 }
 
