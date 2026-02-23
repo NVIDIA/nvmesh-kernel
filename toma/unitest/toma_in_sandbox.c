@@ -6,6 +6,7 @@
 #include "sandbox_nvme.h"
 #include "mgmt_sim.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "unit_test_main.h"
 
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
@@ -451,13 +452,17 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 		mgmt_sim_send_msg_change_raft_quorum(2, true);			// Re-add last target again, while it already exists, verify Toma can handle this
 	}
 	mgmt_sim_send_msg_assign_to_zone(1);
+	if (!nvmeibt_toma_is_running_as_a_utility())
+		toma_unit_test_thread_create();
 }
 
 static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
 
 void t_sandbox_all_destroy(void) {
-	if (!nvmeibt_toma_is_running_as_a_utility())
+	if (!nvmeibt_toma_is_running_as_a_utility()) {
+		toma_unit_test_thread_destroy();
 		mgmt_sim_verify_at_end();
+	}
 	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
 	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
 	sandbox_kafka_destroy(sys->kafka_simu);
@@ -1434,6 +1439,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	static bool is_shutting_down = false;
 	int i, n_events;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
+	toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
 
 	sys->TSB_sig.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism

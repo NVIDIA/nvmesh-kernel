@@ -100,11 +100,9 @@ CXXFLAGS = -std=gnu++20 $(filter-out -std=% -Wstrict-prototypes -Wno-old-style-d
 # ********** Define Files participating in the build *********
 # Simulator files
 SOURCES :=
-SOURCES += mgmt_sim.c
-SOURCES += sandbox_kafka.c
-SOURCES += sandbox_nvme.c
-SOURCES += toma_in_sandbox.c
+SOURCES += mgmt_sim.c sandbox_kafka.c sandbox_nvme.c toma_in_sandbox.c
 SOURCES += $(SSDA)/utils/nvmeib_jdr/nvmeib_txt.c
+SOURCES += unit_test_main.c
 
 TDIR=./..
 #TDIR=$(realpath ./..)
