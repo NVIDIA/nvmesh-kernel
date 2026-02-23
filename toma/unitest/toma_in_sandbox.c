@@ -883,24 +883,15 @@ static int TSB_get_seq_from_nvmesh_device_name(const char *device_name) {
 	return (nvme_num < 1000) ? -1 : (nvme_num - 1000);		// NVMesh devices have numbers >= 1000
 }
 
-static const struct sandbox_nvme_device *TSB_find_nvmesh_device_by_seq(int seq)
-{
-	int i;
-	int n;
-	BUG_ON(seq < 0);
-
-	n = sandbox_nvme_get_device_count();
-	for (i = 0; i < n; ++i) {
+static const struct sandbox_nvme_device *TSB_find_nvmesh_device_by_seq(int seq) {
+	const int n = sandbox_nvme_get_device_count();
+	for (int i = 0; i < n; ++i) {
 		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
-		int dev_seq;
-		if (!dev || dev->stock_disk)
-			continue;
-
-		dev_seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
-		if (dev_seq == seq)
-			return dev;
+		if (!dev->stock_disk)
+			if (seq == TSB_get_seq_from_nvmesh_device_name(dev->device_name))
+				return dev;
 	}
-	return NULL;
+	BUG_ON(true); return NULL;
 }
 
 static void reply_usermode_payload(struct nvmeib_nl_uk_comm_msg *omsg, const struct nvmeib_nl_uk_comm_msg *imsg) {		// See real server function implementation
@@ -911,39 +902,34 @@ static void reply_usermode_payload(struct nvmeib_nl_uk_comm_msg *omsg, const str
 	rep->latency_ns = 576;
 }
 
-// Queue a netlink disk info response for a given device
+static void __fill_disk_info(struct nvmeib_disk_info *d, const struct sandbox_nvme_device *dev, bool is_add) {						// Fill disk info from sandbox device, using its current LBA format
+	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
+	d->n_hw_blocks = d->n_blocks = (is_add ? dev->size_in_blocks : 0);
+	d->vendor_id = dev->vendor_id;
+	d->block_size = (1 << lbaf->block_size_exp);
+	d->max_request_size = 32;
+	d->max_n_hw_sectors = 32;
+	d->seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
+	d->nsid = 1;
+	d->metadata = lbaf->metadata_size;
+	snprintf(d->disk_id, sizeof(d->disk_id), "%s.%d", dev->serial_number, d->nsid);
+	snprintf(d->dev_name, sizeof(d->dev_name), "%s", dev->device_path);
+	snprintf(d->model_str, sizeof(d->model_str), "%s", dev->model_number);
+	snprintf(d->native_serial_str, sizeof(d->native_serial_str), "%s", dev->serial_number);
+	snprintf(d->status, sizeof(d->status), "Ok");
+}
+
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
 	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
-
 	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-
-	// Fill nvmeib_disk_info_reply
 	rep->base.error = csce_ok;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
-
-	// Fill disk info from sandbox device, using its current LBA format
-	{
-		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-		rep->dinfo.disk.n_blocks = dev->size_in_blocks;
-		rep->dinfo.disk.n_hw_blocks = dev->size_in_blocks;
-		rep->dinfo.disk.vendor_id = dev->vendor_id;
-		rep->dinfo.disk.block_size = 1 << lbaf->block_size_exp;
-		rep->dinfo.disk.max_request_size = 32;
-		rep->dinfo.disk.max_n_hw_sectors = 32;
-		rep->dinfo.disk.seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
-		rep->dinfo.disk.nsid = 1;
-		rep->dinfo.disk.metadata = lbaf->metadata_size;
-	}
-	snprintf(rep->dinfo.disk.disk_id, sizeof(rep->dinfo.disk.disk_id), "%s.1", dev->serial_number);
-	snprintf(rep->dinfo.disk.dev_name, sizeof(rep->dinfo.disk.dev_name), "%s", dev->device_path);
-	snprintf(rep->dinfo.disk.model_str, sizeof(rep->dinfo.disk.model_str), "%s", dev->model_number);
-	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
-	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
+	__fill_disk_info(&rep->dinfo.disk, dev, true);
 	rep->dinfo.serjio_status = 0;  // nvmeibs_serjio_status_ok
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
@@ -960,35 +946,16 @@ static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device 
 	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
-	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	msg->opcode = csc_get_disks;
 	msg->id = unsolicited_msg_id++;
 	msg->caller_type = TOMA_CALLER;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-
 	rep->base.opcode = csc_get_disks;
 	rep->base.error = csce_ok;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
-
-	// KEY: n_blocks determines add vs remove
-	rep->dinfo.disk.n_blocks = is_add ? dev->size_in_blocks : 0;
-	rep->dinfo.disk.n_hw_blocks = is_add ? dev->size_in_blocks : 0;
-	rep->dinfo.disk.vendor_id = dev->vendor_id;
-	rep->dinfo.disk.block_size = 1 << lbaf->block_size_exp;
-	rep->dinfo.disk.max_request_size = 32;
-	rep->dinfo.disk.max_n_hw_sectors = 32;
-	rep->dinfo.disk.seq = TSB_get_seq_from_nvmesh_device_name(dev->device_name);
-	rep->dinfo.disk.nsid = 1;
-	rep->dinfo.disk.metadata = lbaf->metadata_size;
-	snprintf(rep->dinfo.disk.disk_id, sizeof(rep->dinfo.disk.disk_id), "%s.1", dev->serial_number);
-	snprintf(rep->dinfo.disk.dev_name, sizeof(rep->dinfo.disk.dev_name), "%s", dev->device_path);
-	snprintf(rep->dinfo.disk.model_str, sizeof(rep->dinfo.disk.model_str), "%s", dev->model_number);
-	snprintf(rep->dinfo.disk.native_serial_str, sizeof(rep->dinfo.disk.native_serial_str), "%s", dev->serial_number);
-	snprintf(rep->dinfo.disk.status, sizeof(rep->dinfo.disk.status), "Ok");
+	__fill_disk_info(&rep->dinfo.disk, dev, is_add);
 	rep->dinfo.serjio_status = 0;
-
 	N_Tf(nl_disk_event, "Queuing disk @STR event for disk_id=@STR", is_add ? "ADD" : "REMOVE", rep->dinfo.disk.disk_id);
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
@@ -1019,14 +986,10 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-
-	if (!dev) {
-		rep->base.error = 1;  // Device not found
-		N_Wf(nl_io_err, "IO to unknown disk disk_id=@STR", io_req->disk_id);
-	} else {
-		// Perform the actual I/O on the sandbox disk file
+	BUG_ON(!dev);
+	if (1) {			// Perform the actual I/O on the sandbox disk file
 		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-		int fd = sandbox_nvme_open(dev);
+		const int fd = sandbox_nvme_open(dev);
 		off_t offset = (off_t)io_req->start_sector * (1 << lbaf->block_size_exp);
 		ssize_t result;
 
@@ -1039,22 +1002,19 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 
 		if (result < 0) {
 			rep->base.error = 1;
-			N_Wf(nl_io_fail, "IO failed disk=@STR is_read=@INT offset=@ZX len=@INT err=@AUTO_ERRNO",
-				io_req->disk_id, io_req->is_read, offset, io_req->data_len);
+			N_Wf(nl_io_fail, "IO failed disk=@STR is_read=@INT offset=@ZX len=@INT err=@AUTO_ERRNO", io_req->disk_id, io_req->is_read, offset, io_req->data_len);
 		} else {
 			rep->base.error = 0;  // csce_ok
 			rep->n_data_io = io_req->data_len;
 			rep->n_md_io = 0;
 		}
-		nvmeib_strlcpy(rep->disk_id, io_req->disk_id, sizeof(rep->disk_id));
-		rep->vendor_id = io_req->vendor_id;
 	}
+	nvmeib_strlcpy(rep->disk_id, io_req->disk_id, sizeof(rep->disk_id));
+	rep->vendor_id = io_req->vendor_id;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-// Handle csc_zero_disk requests - perform zeroing and queue response
-static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg)
-{
+static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
 	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
@@ -1063,60 +1023,34 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(zreq->disk_id);
 	int rv = 0;
 
-	BUG_ON(!dev);
 	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-
-	{
-		size_t chunk_bytes = 1024 * 1024;
-		void *zero_buf = NULL;
-		int fd = sandbox_nvme_open(dev);
+	BUG_ON(!dev);
+	if (1) {
+		const size_t chunk_bytes = 1024 * 1024;
+		void *zero_buf = calloc(1, chunk_bytes);
+		const int fd = sandbox_nvme_open(dev);
 		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-		size_t block_size = (size_t)1U << lbaf->block_size_exp;
-		uint64_t total_bytes = (uint64_t)zreq->n_hw_sectors * (uint64_t)block_size;
-		uint64_t offset = (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
-
-		if (fd < 0) {
-			rep->base.error = csce_failed;
-			goto out;
-		}
-
-		if (chunk_bytes % block_size != 0) {
-			chunk_bytes = ((chunk_bytes + block_size - 1) / block_size) * block_size;
-		}
-		zero_buf = calloc(1, chunk_bytes);
-		if (!zero_buf) {
-			rep->base.error = csce_failed;
-			close(fd);
-			goto out;
-		}
-
+		const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
+		uint64_t total_bytes = (uint64_t)zreq->n_hw_sectors    * (uint64_t)block_size;
+		uint64_t offset =      (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
+		BUG_ON((fd < 0) || !zero_buf || (chunk_bytes % block_size));
 		while (total_bytes > 0) {
-			size_t write_bytes = (total_bytes > chunk_bytes) ? chunk_bytes : (size_t)total_bytes;
-			ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
-			if (w < 0 || (size_t)w != write_bytes) {
-				rep->base.error = csce_failed;
-				rv = -1;
-				break;
-			}
+			const size_t write_bytes = (total_bytes > chunk_bytes) ? chunk_bytes : (size_t)total_bytes;
+			const ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
+			BUG_ON((w < 0) || ((size_t)w != write_bytes));
 			offset += (uint64_t)write_bytes;
 			total_bytes -= (uint64_t)write_bytes;
 		}
-
 		free(zero_buf);
 		close(fd);
-		rep->base.error = (rv == 0) ? csce_ok : csce_failed;
 	}
-
-out:
+	rep->base.error = (rv == 0) ? csce_ok : csce_failed;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-// Handle csc_format_disk requests - update device format and queue response
-// Simulates kernel behavior: disk_freeze (REMOVE) -> format -> disk_unfreeze (ADD)
-static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk)
-{
+static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk) {
 	char reply_buf[TSB_NL_MSG_SIZE] = {0};
 	struct nlmsghdr *reply_nlhdr = (struct nlmsghdr *)reply_buf;
 	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
@@ -1128,26 +1062,20 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	reply_usermode_payload(reply_msg, req_msg);
 	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
 	reply_nlhdr->nlmsg_len = NLMSG_SPACE(reply_msg->len);
-
-	// Reject inline metadata - NVMesh only supports separate metadata
-	BUG_ON(fmt_disk->format_id.is_inline);
+	BUG_ON(fmt_disk->format_id.is_inline);					// Reject inline metadata - NVMesh only supports separate metadata
 
 	if (!dev) {
 		N_Ef(fmt_nodisk, "format_disk: device not found disk_id=@STR", fmt_disk->disk_id);
 		rep->base.error = csce_failed;
 	} else {
-		// 1. Send REMOVE event BEFORE format (simulates disk_freeze)
-		TSB_netlink_send_disk_change_event(dev, false);  // is_add=false -> n_blocks=0
-
-		// 2. Perform the format operation (zeros disk)
-		// Note: The NVMESH_FORMATTED_DISK header is written by production code
-		// (format_disk_wrapper) after receiving the format reply.
+		TSB_netlink_send_disk_change_event(dev, false);  // 1. Send REMOVE event BEFORE format (simulates disk_freeze). is_add=false -> n_blocks=0
+		// 2. Perform the format operation (zeros disk). Note: The NVMESH_FORMATTED_DISK header is written by production code (format_disk_wrapper) after receiving the format reply.
 		if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
 			N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
 			rep->base.error = csce_failed;
 		} else {
 			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
-			N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT blk=@INT md=@INT", fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
+			N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT @INT+@INT[b]", fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
 			rep->base.error = csce_ok;
 			// Fill in the new format info
 			snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
@@ -1166,8 +1094,7 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	// receiving the ADD event, matching production behavior where the NVMe
 	// format operation takes time between disk_freeze and disk_unfreeze.
 	if (dev && format_succeeded) {
-		snprintf(sys->pending_disk_add.disk_id, sizeof(sys->pending_disk_add.disk_id),
-			 "%s.1", dev->serial_number);
+		snprintf(sys->pending_disk_add.disk_id, sizeof(sys->pending_disk_add.disk_id), "%s.1", dev->serial_number);
 		sys->pending_disk_add.has_pending = true;
 		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for disk_id=@STR", sys->pending_disk_add.disk_id);
 	}
@@ -1242,10 +1169,7 @@ static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_
 	} else if (req->type == NVMEIBS_TOMA_REQ_DISKS_CSV) {
 		rep->n_bytes_len = format_disks_csv(rep->content, req->max_byte_len);
 	} else if (req->type == NVMEIBS_TOMA_REQ_DISK_SMART_CNT) {
-		const int seq = req->opt_arg;
-		const struct sandbox_nvme_device *dev;
-		dev = TSB_find_nvmesh_device_by_seq(seq);
-		BUG_ON(!dev);
+		const struct sandbox_nvme_device *dev = TSB_find_nvmesh_device_by_seq(req->opt_arg);
 		rep->n_bytes_len = format_smart_content(rep->content, (size_t)req->max_byte_len, dev);
 	} else {   rep->base.error = csce_dst_not_exist; }
 	rep->n_bytes_len++;			// Trailing zero
