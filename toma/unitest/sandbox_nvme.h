@@ -5,34 +5,19 @@
 
 void sandbox_nvme_init(void);
 
-/**
- * NVMe LBA format descriptor.
- * Matches the structure used in NVMe Identify NS response.
- */
-struct sandbox_nvme_lbaf {
-	uint8_t block_size_exp;         // Block size as exponent of 2 (9=512, 12=4096)
-	uint16_t metadata_size;         // Metadata size in bytes (0 or 8)
+struct sandbox_nvme_lbaf {			// NVMe LBA format descriptor. Matches the structure used in NVMe Identify NS response.
+	uint8_t block_size_exp;			// Block size as exponent of 2 (9=512, 12=4096) bytes
+	uint16_t metadata_size;			// Metadata size in bytes (0 or 8) bytes
 };
 
-/**
- * Number of supported LBA formats.
- */
-#define SANDBOX_NVME_LBAF_COUNT 4
-
-/**
- * Get LBA format descriptor by index.
- * Aborts with BUG_ON if index is out of range [0, SANDBOX_NVME_LBAF_COUNT).
- *
- * @param fmt_idx Format index (0-3)
- * @return Pointer to the LBA format descriptor (never NULL)
- */
-const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx);
-
-/* Format index constants for clarity */
-#define SANDBOX_NVME_FMT_512_0   0   /* 512 bytes, no metadata */
-#define SANDBOX_NVME_FMT_512_8   1   /* 512 bytes, 8 bytes metadata */
-#define SANDBOX_NVME_FMT_4096_0  2   /* 4096 bytes, no metadata */
-#define SANDBOX_NVME_FMT_4096_8  3   /* 4096 bytes, 8 bytes metadata */
+enum SANDBOX_NVME_FMT_e {			// Supported LBA formats for sandbox NVMe devices. This table is indexed by format ID (0-3).
+	SANDBOX_NVME_FMT_512_0 = 0,		// 512 bytes, no metadata
+	SANDBOX_NVME_FMT_512_8 = 1,		// 512 bytes, 8 bytes metadata
+	SANDBOX_NVME_FMT_4096_0 = 2,	// 4096 bytes, no metadata
+	SANDBOX_NVME_FMT_4096_8 = 3,	// 4096 bytes, 8 bytes metadata
+	SANDBOX_NVME_LBAF_COUNT = 4,	// Number of supported LBA formats.
+};
+const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int /*enum SANDBOX_NVME_FMT_e*/ fmt_idx);
 
 struct sandbox_nvme_device {
 	int vendor_id;
@@ -42,24 +27,15 @@ struct sandbox_nvme_device {
 	const char *device_path;			// The path we actually use for the device, e.g. `_root/dev/nvme0n1`.
 	bool stock_disk;
 	uint64_t size_in_blocks;
-	uint8_t current_format_idx;         // Index into sandbox_nvme_lbaf_table
+	enum SANDBOX_NVME_FMT_e current_format_idx;
 };
 
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path /* == /dev/nvme...n1 */);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id /* e.g. NVMD_SN_002.1 */);
-struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(const char *disk_id /* e.g. NVMD_SN_002.1 */);
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(  const char *disk_id /* e.g. NVMD_SN_002.1 */);
 int sandbox_nvme_get_device_count(void);
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev);
-
-/**
- * Format a device: update LBA format and erase disk content.
- * Simulates what a real NVMe format operation does.
- *
- * @param dev The device to format (must not be NULL)
- * @param fmt_idx The new format index (0-3)
- * @return 0 on success, -1 if format index invalid or I/O error
- */
-int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, int fmt_idx);
+int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_FMT_e fmt_idx);	// Format a device: update LBA format and erase disk content. return 0 on success, -1 if format index invalid or I/O error
 
 #endif // TOMA_SANDBOX_NVME_H_INCLUDED

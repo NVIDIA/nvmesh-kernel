@@ -3,7 +3,6 @@
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
 
-/* Supported LBA formats for sandbox NVMe devices. This table is indexed by format ID (0-3). */
 static const struct sandbox_nvme_lbaf lbaf_table[SANDBOX_NVME_LBAF_COUNT] = {
 	[SANDBOX_NVME_FMT_512_0]  = { .block_size_exp = 9,  .metadata_size = 0 },  /* 512+0 */
 	[SANDBOX_NVME_FMT_512_8]  = { .block_size_exp = 9,  .metadata_size = 8 },  /* 512+8 */
@@ -48,7 +47,7 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx) {
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  2048, SANDBOX_NVME_FMT_4096_0 },
+	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,   2048, SANDBOX_NVME_FMT_4096_0 },
 	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 10240, SANDBOX_NVME_FMT_4096_0 },
 	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 10240, SANDBOX_NVME_FMT_4096_0 },
 };
@@ -141,7 +140,7 @@ struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(const char *d
 	return (struct sandbox_nvme_device *)sandbox_nvme_get_device_by_disk_id(disk_id); // Same logic as the const version, but returns mutable pointer
 }
 
-int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, int fmt_idx) {
+int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_FMT_e fmt_idx) {
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
 	const int fd = sandbox_nvme_open(dev);
 	int rv = 0;
