@@ -968,7 +968,7 @@ void dp_cmds_analyze_rv_and_complete(struct nvmeibc_d_iocmd_comp *comp)
 {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp), *cmds = cmd->cmdarr;
 	const int ci = (cmd - cmds);
-	on_disk_hook(dp_cmds_analyze_rv_and_complete, nvmeibc_disk_from_base(cmd->ds->disk), io_cmd_completion, cmd);
+	on_disk_hook(dp_cmds_analyze_rv_and_complete, cmd->ds->disk, io_cmd_completion, cmd);
 
 	if (comp->comp_code && is_transient_disk_error(comp->comp_code)) {
 		OPERATION_DBG_CNTR_INC(cmd->o, n_dcmd_failed);

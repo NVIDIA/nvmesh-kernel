@@ -603,7 +603,7 @@ static int __mirror_cmds_add_for_raid(const struct nvmeibc_raid1 *r1, u64 rlba, 
 			if (rv < 0)
 				goto _out;
 		}
-		nflog(trace_dp_mirror_mirror_cmds_add_for_raid, "cmds[@COMMAND_IDX]: disk=@DISK nlbas=@NLBAS o=@OPERATION", (int)(cur_c - cmds), nvmeibc_disk_from_base(cur_c->ds->disk), cur_c->nlbas, o);
+		nflog(trace_dp_mirror_mirror_cmds_add_for_raid, "cmds[@COMMAND_IDX]: disk=@DISK nlbas=@NLBAS o=@OPERATION", (int)(cur_c - cmds), cur_c->ds->disk, cur_c->nlbas, o);
 	}
 
 	if (use_stages) { // Not DISCARD
