@@ -1410,23 +1410,6 @@ static inline int __nvmeibc_disk_hw_md_size(struct nvmeibc_disk *disk)
 }
 */
 
-/* Segment sw_md_size shall be taken from disk.
-   There is a corner case though, if the disk is dead, md may be 0
-   even if it is not.
-   For EC praids, it is a problem as we later rely on metadata non 0.
-   This is why, in case md_size is 0, and it is ec, we will put md = 8
-   anyway. The assumption is that as soon as disk goes up, and discovery
-   runs, new topology size will arive, and we will set correct md_size
-   there.
-
-	BOTTOM LINE: in most cases you should query the topology(segment) for the sw_md_size
-	It will stay unchaged as long as topology leaving;
-*/
-static inline int __nvmeibc_disk_sw_md_size(struct nvmeibc_disk *disk)
-{
-	return disk->md_size << (NVMEIBC_SECTOR_SHIFT - disk->sector_shift);
-}
-
 enum nvmeibc_arnic_attrib {
 	NVMEIBC_ARNIC_ALIVE = (1 << 0),
 	NVMEIBC_ARNIC_HAS_CH = (1 << 1),

@@ -1577,7 +1577,7 @@ TEST_FUNC int unitest_GoodPathIO_block_md_illegal_splits(bunitest_s* B) {
 			// wipe MD of disks we use for test.
 			for (i=0; i < n_segs; i++) {
 				disk = sys->servers[seg_range[i].node_id].disk;
-				md_size[i] = __nvmeibc_disk_sw_md_size(disk);
+				md_size[i] = nvmeibc_idisk_get_sw_md_size(&disk->base);
 				ramDiskSimulator_wipeMD_jour(&serverOf(disk)->ramDisk, nvmeib_jmd_unused_entry_md_max());
 				pjmd[i] = __get_seg_journal_md_ptr(&raid->segments[i]);
 			}

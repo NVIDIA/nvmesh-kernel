@@ -1787,7 +1787,7 @@ input_checks_done:
 
 	seg->registration_status = SEG_REGSTATUS_TOMA_OK;
 	seg->max_dma_size = (seg->disk->ops.get_max_request_size_bytes(seg->disk) >> NVMEIBC_SECTOR_SHIFT);
-	seg->sw_md_size = __nvmeibc_disk_sw_md_size(nvmeibc_disk_from_base(seg->disk));
+	seg->sw_md_size = nvmeibc_idisk_get_sw_md_size(seg->disk);
 	if (nvmeibc_raid_is_ec(r1)) {
 		if (seg->sw_md_size < NVMEIBC_SGMNT_DEFAULT_MD_SIZE) {
 			WARN(true, "%s: ec cannot operate with metadata-size %u < %u. Crashing to prevent data corruption due to config error...", nt->device_name, seg->sw_md_size, (u32)NVMEIBC_SGMNT_DEFAULT_MD_SIZE);
