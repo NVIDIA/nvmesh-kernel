@@ -27,7 +27,7 @@ struct sandbox_nvme_device {
 	const char *device_path;			// The path we actually use for the device, e.g. `_root/dev/nvme0n1`.
 	bool stock_disk;
 	uint64_t size_in_blocks;
-	enum SANDBOX_NVME_FMT_e current_format_idx;
+	enum SANDBOX_NVME_FMT_e current_format_idx;		// Mutable, format operations can update it.
 };
 
 //const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path /* == /dev/nvme...n1 */);

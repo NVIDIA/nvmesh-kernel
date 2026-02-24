@@ -3,7 +3,6 @@
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
 #include "sandbox_util.h"
-#include "sandbox_nvme.h"
 #include "mgmt_sim.h"
 #include "kafka/sandbox_kafka_internal.h"
 #include "unit_test_main.h"
@@ -30,7 +29,8 @@ void syslog(int priority, const char *fmt, ...) {
 #include <sys/stat.h>		// fstat()
 #include <errno.h>
 
-#include "interfaces/nvme/nvmeibt_nvme_defines.h"
+#include "sandbox_nvme.h"
+#include "interfaces/nvme/nvmeibt_nvme_defines.h"	// nvmeioctls
 #include <linux/fs.h>		// For BLKGETSIZE64, BLKSSZGET
 #include "server/sandbox_nvmeibs_toma.h"
 

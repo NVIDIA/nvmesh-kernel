@@ -16,20 +16,13 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx) {
 }
 
 /*
- * NVMe device definitions.
- * current_format_idx is mutable so that format operations can update it.
- * Initial format for NVMesh disks is 4096+0 (SANDBOX_NVME_FMT_4096_0).
- *
  * # Disk size requirement
- *
  * Relevant constants involved:
  * - METADATA_PARTITION_RATIO (nvmeibt_params.h) = 0.15 (sandbox) vs 0.005 (production)
  * - journal_data_size_in_pblks (nvmeibt_read_config.c) = 1MB (sandbox) vs 2GB (production)
  * - serjio_db_size_in_pblks (nvmeibt_read_config.c) = 1MB (sandbox) vs 32MB (production)
- *
  * The allocation uses 1MB (256 block) alignment internally via align_pba_s_up_to_blkset().
- * For the metadata partition's usable space (first_usable_pba to last_usable_pba) to contain
- * at least one complete 1MB-aligned region:
+ * For the metadata partition's usable space (first_usable_pba to last_usable_pba) to contain at least one complete 1MB-aligned region:
  *   - first_usable_pba = metadata_pba_s + 257
  *   - last_usable_pba = metadata_pba_e - 257
  *   - aligned_start = roundup(first_usable_pba, 256)
@@ -40,7 +33,6 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx) {
  *   - aligned_start = roundup(769, 256) = 1024
  *   - aligned_end = rounddown(1279, 256) - 1 = 1023
  *   - Result: NO usable 1MB-aligned space (end < start)!
- *
  * Required: metadata partition >= 1536 blocks to span two 1MB boundaries.
  * Calculation: floor(n_pblk * 0.15) - 261 >= 1025 => n_pblk >= 8574 blocks
  * Using 10240 blocks (40MB) to provide a comfortable margin.
@@ -196,8 +188,7 @@ int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap) {
 	}
 	N_Df(sbioctnv, "ioctl:nvme:admin opcode=@INT", cmd->opcode);
 	if (cmd->opcode == nvme_admin_identify) {
-		if (cmd->nsid == 0) {
-			// NSID 0 is special - controller identify command.
+		if (cmd->nsid == 0) {			// NSID 0 is special - controller identify command.
 			struct nvme_id_ctrl *idctrl = (void*)cmd->addr;
 			BUG_ON(cmd->data_len != sizeof(*idctrl));
 			memset(idctrl, 0, cmd->data_len);
@@ -206,8 +197,7 @@ int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap) {
 			snprintf(idctrl->mn, sizeof(idctrl->mn), "%s", nvme_dev->model_number);
 			snprintf(idctrl->fr, sizeof(idctrl->fr), "0.0.1");
 			N_Tf(sbk3456, "ioctl:nvme:id controller fd=@INT reporting sn=@STR mn=@STR", fd, idctrl->sn, idctrl->mn);
-		} else {
-			// NSID > 0 is the NVME storage namespace query.
+		} else {						// NSID > 0 is the NVME storage namespace query.
 			// Note that LBAF { ms, ds, rp } are defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01
 			// Figure 116: LBA Format Data Structure, NVM Command Set Specific (PDF p. 91).
 			struct nvme_id_ns *response = (void*)cmd->addr;
@@ -222,22 +212,15 @@ int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap) {
 				response->lbaf[i].ds = lbaf->block_size_exp;
 				response->lbaf[i].ms = lbaf->metadata_size;
 			}
-
-			// Set current format based on device's format index
-			response->flbas = nvme_dev->current_format_idx;
-
-			// Set metadata capabilities: both inline and separate metadata are supported by the device.
-			// Note: Toma will only use separate metadata (DISK_ALLOW_INLINE_MD == 0).
-			response->mc = NVME_NS_MC_INLINE_MASK | NVME_NS_MC_SEP_MASK;
-
+			response->flbas = nvme_dev->current_format_idx;					// Set current format based on device's format index
+			response->mc = NVME_NS_MC_INLINE_MASK | NVME_NS_MC_SEP_MASK;	// Set metadata capabilities: both inline and separate metadata are supported by the device. Note: Toma will only use separate metadata (DISK_ALLOW_INLINE_MD == 0).
 			response->nsze = nvme_dev->size_in_blocks;
-			N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT flbas=@INT nlbaf=@INT mc=@INT nsze=@INT64_TD",
-					cmd->nsid, fd, response->flbas, response->nlbaf, response->mc, response->nsze);
+			N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT flbas=@INT nlbaf=@INT mc=@INT nsze=@INT64_TD", cmd->nsid, fd, response->flbas, response->nlbaf, response->mc, response->nsze);
 		}
 	} else if (cmd->opcode == nvme_admin_get_log_page) {
 		struct nvme_smart_log *fill =  (void*)cmd->addr;
 		BUG_ON(cmd->data_len != sizeof(*fill));
-		memset(fill, 0, cmd->data_len);
+		memset(fill, 0, cmd->data_len);										// Todo: do not support those counters yet
 	}
 	return 0;
 }
@@ -288,34 +271,12 @@ static int copy_file(const char *source_path, const char *dest_path) {
 	return err;
 }
 
-//Create a disk image at the given path. We can do this a couple different ways: either generate it programmatically on the fly, or use some predefined example disk image.
-static int disk_init(const char *dest_path, const char *src_path) {
-	// const off_t sector_size = 4096;
-	// const off_t size_bytes = 2000 * sector_size;
-	// int templatefd;
-	// int fd;
-
+static int disk_init(const char *dest_path, const char *src_path) {		//Create a disk image at the given path. We can do this a couple different ways: either generate it programmatically on the fly, or use some predefined example disk image.
+	// const off_t size_bytes = 2000 * 4096;
 	N_Tf(lkg3946, "creating block device=@STR", dest_path);
-	// **Initial implementation**
-	// Copy the template disk image.
-	unlink(dest_path);
+	unlink(dest_path);				// Copy the template disk image.
 	copy_file(src_path, dest_path);	// This .img file is generated by Wentao's GPT util for test purposes. It is 2000 blocks of 4k, so 8 MB, and we probably don't want to commit it directly to Git, especially since it's mostly zero bytes.
 	// TODO modify the serial number in the GPT metadata so each disk is unique?
-
-	// **Alternative implementation**
-	// If we want to build the GPT on the fly using our GPT writing code.
-	// Create a sparse file for the disk image
-	// unlink(path);
-	// fd = open(path, O_CREAT | O_WRONLY, 0644);
-	// if (fd < 0) {
-	//     SANDBOX_PRINT("ERROR: open disk image %s failed: %s", path, strerror(errno));
-	//     return 1;
-	// }
-	// if (ftruncate(fd, size_bytes) != 0) {
-	//     SANDBOX_PRINT("ERROR: ftruncate disk image %s to %jd failed: %s", path, (intmax_t) size_bytes, strerror(errno));
-	//     close(fd);
-	//     return 1;
-	// }
-	// close(fd);
+	// **Alternative implementation**: If we want to build the GPT on the fly using our GPT writing code, call sandbox_nvme_format_disk()
 	return 0;
 }
