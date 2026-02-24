@@ -171,6 +171,14 @@ enum {
 #include <linux/kthread.h>
 #include <linux/pci.h>
 
+#ifndef in_hardirq
+#define in_hardirq() in_irq()
+#endif
+
+#ifndef in_serving_softirq
+#define in_serving_softirq() in_softirq()
+#endif
+
 #define NVMEIB_WORKQ
 #ifdef NVMEIB_WORKQ
 #	include "nvmeib_q.h"

@@ -3309,7 +3309,13 @@ static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
 			}
 			goto out;
 		}
-	} while (nordda_recv_completion_poll(cq, nrch));
+		if (nordda_recv_completion_poll(cq, nrch)) {
+			if (!(in_hardirq() || in_serving_softirq())) {
+				cond_resched();
+			}
+			continue;
+		}
+	} while(0);
 
 out:
 	__NFOUT;
