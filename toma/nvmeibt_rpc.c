@@ -109,6 +109,7 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 				"\treread_conf\n"
 				"\ttoggle_logs\n"
 				"\tkill9\n"
+				"\tincremental-wire-buf enable/disable\n"
 				"\tresend-praids-report all/<volume_name>\n"
 				"\treelect\n");
 		return -1;
