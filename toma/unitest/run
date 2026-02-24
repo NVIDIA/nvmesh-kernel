@@ -60,8 +60,7 @@ function T_SANDBOX_gpt_util_self_unit_test() {
 	./${EXE_NAME} gpt_util -T;
 	local test_rv=$?;
 	rm ${disks_csv_file};
-	(exit $test_rv);
-	__abort_ci_on_failure;
+	[ ${test_rv} -eq 0 ] && echo_green "SUCCESS!\n\n" || { echo_red "FAILED - status=$?" && exit 1; }
 }
 
 function T_SANDBOX_toma_persist_json_test() {
