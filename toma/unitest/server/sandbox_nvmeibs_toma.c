@@ -127,7 +127,7 @@ static const struct sandbox_nvme_device *__find_nvmesh_device_by_seq(int seq) {
 
 static void __fill_disk_info(struct nvmeib_disk_info *d, const struct sandbox_nvme_device *dev, bool is_add) {						// Fill disk info from sandbox device, using its current LBA format
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-	d->n_hw_blocks = d->n_blocks = (is_add ? dev->size_in_blocks : 0);
+	d->n_hw_blocks = d->n_blocks = (is_add ? dev->size_in_blocks : 0);		// Toma uses n_blocks to distinguish between disk add/remove events
 	d->vendor_id = dev->vendor_id;
 	d->block_size = (1 << lbaf->block_size_exp);
 	d->max_request_size = 32;
@@ -140,6 +140,44 @@ static void __fill_disk_info(struct nvmeib_disk_info *d, const struct sandbox_nv
 	snprintf(d->model_str, sizeof(d->model_str), "%s", dev->model_number);
 	snprintf(d->native_serial_str, sizeof(d->native_serial_str), "%s", dev->serial_number);
 	snprintf(d->status, sizeof(d->status), "Ok");
+}
+
+static int format_smart_content(char *buf, size_t buf_size, const struct sandbox_nvme_device *dev) {	//	/proc/nvmeibs/smartX
+	const int seq = __get_smart_seq_from_device_name(dev->device_name);
+	int n;
+	BUG_ON(!buf || !dev || (seq < 0)); // should only be called for NVMesh disks -> -1 means stock disk
+	n = snprintf(buf, buf_size,
+		"Pci Address=0000:%02x:00.0\n"
+		"Serial Number=%s\n"
+		"Vendor=0x%04x\n"
+		"Model=%s\n"
+		"Submission Queues=128\nCompletion Queues=128\nMSIX Interrupts=129\nNum admin cmds=323\nNamespace Id=1\nNuma Node=1\n",
+		seq, dev->serial_number, dev->vendor_id, dev->model_number);
+	BUG_ON((n < 0) || ((size_t)n >= buf_size));
+	N_Tf(fsc0012, "formatted smart content for disk @STR: @STR", dev->device_name, buf);
+	return (int)n;
+}
+
+static int format_disks_csv(char *buf, int buf_size) {
+	const int device_count = sandbox_nvme_get_device_count();
+	int rv = 0;
+	BUG_ON((buf == NULL)||(buf_size == 0));
+	#define BUF_ADD(...) rv += (int)scnprintf(&buf[rv], buf_size - rv, __VA_ARGS__)
+	BUF_ADD("%s\n", NVMEIBS_DISKS_CSV_HEADER);		/* Write header */
+	for (int i = 0; i < device_count; ++i) {						/* Write each NVMesh (non-stock) disk */
+		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_index(i);
+		if (!d->stock_disk) {
+			const int disk_seq = __get_smart_seq_from_device_name(d->device_name);
+			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
+			BUG_ON(disk_seq < 0);
+			BUF_ADD("%s.1,%u,%u,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
+				d->serial_number, (unsigned)d->size_in_blocks, (unsigned)d->size_in_blocks, (1u << lbaf->block_size_exp),
+				disk_seq, d->device_name, lbaf->metadata_size, d->vendor_id, d->model_number, d->serial_number);
+		}
+	}
+	BUG_ON(rv >= buf_size);		// buffer overflow/truncation or no room for trailing '\0'
+	N_Tf(fdc0001, "formatted disks CSV: @STR", buf);
+	return rv;
 }
 
 /********************************* Netlink mock *******************************/
@@ -243,11 +281,161 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
-static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk);
-static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv);
-static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg);
-static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add);
+static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_zero_disk_reply *rep = (struct nvmeib_zero_disk_reply *)msg->data;
+	const struct nvmeib_zero_disk *zreq = (const struct nvmeib_zero_disk *)req_msg->data;
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(zreq->disk_id);
+	int rv = 0;
+
+	reply_usermode_payload(msg, req_msg);
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	BUG_ON(!dev);
+	if (1) {
+		const size_t chunk_bytes = 1024 * 1024;
+		void *zero_buf = calloc(1, chunk_bytes);
+		const int fd = sandbox_nvme_open(dev);
+		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
+		const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
+		uint64_t total_bytes = (uint64_t)zreq->n_hw_sectors    * (uint64_t)block_size;
+		uint64_t offset =      (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
+		BUG_ON((fd < 0) || !zero_buf || (chunk_bytes % block_size));
+		while (total_bytes > 0) {
+			const size_t write_bytes = (total_bytes > chunk_bytes) ? chunk_bytes : (size_t)total_bytes;
+			const ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
+			BUG_ON((w < 0) || ((size_t)w != write_bytes));
+			offset += (uint64_t)write_bytes;
+			total_bytes -= (uint64_t)write_bytes;
+		}
+		free(zero_buf);
+		close(fd);
+	}
+	rep->base.error = (rv == 0) ? csce_ok : csce_failed;
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+// Send an unsolicited disk change event to Toma (simulates kernel's disk_freeze/unfreeze behavior), is_add: add-event/remove-event
+static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add) {
+	static unsigned long unsolicited_msg_id = 0x80000000;
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	msg->opcode = csc_get_disks;
+	msg->id = unsolicited_msg_id++;
+	msg->caller_type = TOMA_CALLER;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	rep->base.opcode = csc_get_disks;
+	rep->base.error = csce_ok;
+	rep->selector = nvmeib_disk_info_reply_dinfo;
+	__fill_disk_info(&rep->dinfo.disk, dev, is_add);
+	rep->dinfo.serjio_status = 0;
+	N_Tf(nl_disk_event, "Queuing disk @STR event for disk_id=@STR", is_add ? "ADD" : "REMOVE", rep->dinfo.disk.disk_id);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk) {
+	char reply_buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *reply_nlhdr = (struct nlmsghdr *)reply_buf;
+	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
+	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
+	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
+	const enum SANDBOX_NVME_FMT_e fmt_idx = fmt_disk->format_id.id;
+	struct ss_pending_disk_add *pend_disk_add = &g_srvr_simu->pending_disk_add;
+	bool format_succeeded = false;
+
+	reply_usermode_payload(reply_msg, req_msg);
+	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
+	reply_nlhdr->nlmsg_len = NLMSG_SPACE(reply_msg->len);
+	BUG_ON(fmt_disk->format_id.is_inline);					// Reject inline metadata - NVMesh only supports separate metadata
+
+	if (!dev) {
+		N_Ef(fmt_nodisk, "format_disk: device not found disk_id=@STR", fmt_disk->disk_id);
+		rep->base.error = csce_failed;
+	} else {
+		TSB_netlink_send_disk_change_event(dev, false);  // 1. Send REMOVE event BEFORE format (simulates disk_freeze). is_add=false -> n_blocks=0
+		// 2. Perform the format operation (zeros disk). Note: The NVMESH_FORMATTED_DISK header is written by production code (format_disk_wrapper) after receiving the format reply.
+		if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
+			N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
+			rep->base.error = csce_failed;
+		} else {
+			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
+			N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT @INT+@INT[b]", fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
+			rep->base.error = csce_ok;
+			// Fill in the new format info
+			snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
+			rep->info.new_n_pblk = dev->size_in_blocks;
+			rep->info.new_seq = __get_smart_seq_from_device_name(dev->device_name);
+			format_succeeded = true;
+		}
+	}
+
+	// 3. Send format reply
+	rep->base.latency_ns = 1000;  // Simulate some format latency
+	TSB_netlink_queue_enqueue(reply_buf, reply_nlhdr->nlmsg_len);
+
+	// 4. Schedule ADD event to be sent in a LATER iteration of the main loop
+	// This gives Toma's work queue time to process the REMOVE event before
+	// receiving the ADD event, matching production behavior where the NVMe
+	// format operation takes time between disk_freeze and disk_unfreeze.
+	if (dev && format_succeeded) {
+		snprintf(pend_disk_add->disk_id, sizeof(pend_disk_add->disk_id), "%s.1", dev->serial_number);
+		pend_disk_add->has_pending = true;
+		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for disk_id=@STR", pend_disk_add->disk_id);
+	}
+}
+
+static inline enum uk_comm_err_opcode uk_comm_err_from_errno(ssize_t rv) {
+	if (rv >= 0) return csce_ok;		// Proc api returns negative value on failure and type of failure in errno
+	rv = errno; errno = 0;				// Convert to msg api which does not use errno and works in userspace as well
+	if (rv == ENXIO) return csce_dst_not_exist;
+	if (rv == EINPROGRESS) return csce_in_progress;
+	if (rv == EALREADY) return csce_already_running;
+	return csce_failed;
+}
+
+static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)msg->data;
+	BUG_ON((req_msg->opcode != csc_t2s_blocking_msg_other) && (req_msg->opcode != csc_t2s_blocking_msg_to_io_clients));
+	reply_usermode_payload(msg, req_msg);
+	rep->error = uk_comm_err_from_errno(rv);
+	msg->len = sizeof(*msg) + sizeof(*rep);
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg) {
+	char buf[TSB_NL_MSG_SIZE] = {0};
+	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
+	struct nvmeib_t2s_request_srvr_info_rep *rep =         (struct nvmeib_t2s_request_srvr_info_rep *)msg->data;
+	const struct nvmeib_t2s_request_srvr_info_req *req = &((const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data)->req_info;
+	rep->base.error = csce_ok;
+	if (req->type == NVMEIBS_TOMA_REQ_NICS_CSV) {
+		rep->n_bytes_len = sprintf(rep->content, "%s", NVMEIBS_NICS_CSV_HEADER "\n"
+			"mlx5_2,0x0000000000000000bae924fffee5cfd8,1,0xffff,R,ACTIVE,4096,4096,3,true,false,true,ens2f0,0x00000000000000000000ffff0a0a0125\n"
+			"mlx5_3,0x0000000000000000bae924fffee5cfd9,1,0xffff,R,ACTIVE,4096,4096,3,true,false,true,ens2f1,0x00000000000000000000ffff0a0a0225\n");
+	} else if (req->type == NVMEIBS_TOMA_REQ_DISKS_CSV) {
+		rep->n_bytes_len = format_disks_csv(rep->content, req->max_byte_len);
+	} else if (req->type == NVMEIBS_TOMA_REQ_DISK_SMART_CNT) {
+		const struct sandbox_nvme_device *dev = __find_nvmesh_device_by_seq(req->opt_arg);
+		rep->n_bytes_len = format_smart_content(rep->content, (size_t)req->max_byte_len, dev);
+	} else {   rep->base.error = csce_dst_not_exist; }
+	rep->n_bytes_len++;			// Trailing zero
+	rep->was_truncated = rep->n_bytes_len > req->max_byte_len;
+	BUG_ON(rep->was_truncated);
+	reply_usermode_payload(msg, req_msg);
+	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
+	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
+	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -312,7 +500,6 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	return (ssize_t)n;
 }
 
-// Netlink recv callback: Toma receives a response from the queue
 static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	const ssize_t len = TSB_netlink_queue_dequeue(buf, n);
 	(void)fd; (void)offset; (void)flags;
@@ -320,125 +507,10 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 	return len;
 }
 
-// Send an unsolicited disk change event to Toma (simulates kernel's disk_freeze/unfreeze behavior)
-// is_add: true = add event (n_blocks > 0), false = remove event (n_blocks = 0)
-// The netlink path uses n_blocks to distinguish between add and remove events:
-//   n_blocks > 0 -> on_add_disk callback
-//   n_blocks == 0 -> on_remove_disk callback
-static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add)
-{
-	static unsigned long unsolicited_msg_id = 0x80000000;
-	char buf[TSB_NL_MSG_SIZE] = {0};
-	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
-	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
-	msg->len = sizeof(*msg) + sizeof(*rep);
-	msg->opcode = csc_get_disks;
-	msg->id = unsolicited_msg_id++;
-	msg->caller_type = TOMA_CALLER;
-	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	rep->base.opcode = csc_get_disks;
-	rep->base.error = csce_ok;
-	rep->selector = nvmeib_disk_info_reply_dinfo;
-	__fill_disk_info(&rep->dinfo.disk, dev, is_add);
-	rep->dinfo.serjio_status = 0;
-	N_Tf(nl_disk_event, "Queuing disk @STR event for disk_id=@STR", is_add ? "ADD" : "REMOVE", rep->dinfo.disk.disk_id);
-	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
-}
-
-static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
-	char buf[TSB_NL_MSG_SIZE] = {0};
-	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
-	struct nvmeib_zero_disk_reply *rep = (struct nvmeib_zero_disk_reply *)msg->data;
-	const struct nvmeib_zero_disk *zreq = (const struct nvmeib_zero_disk *)req_msg->data;
-	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(zreq->disk_id);
-	int rv = 0;
-
-	reply_usermode_payload(msg, req_msg);
-	msg->len = sizeof(*msg) + sizeof(*rep);
-	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	BUG_ON(!dev);
-	if (1) {
-		const size_t chunk_bytes = 1024 * 1024;
-		void *zero_buf = calloc(1, chunk_bytes);
-		const int fd = sandbox_nvme_open(dev);
-		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-		const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
-		uint64_t total_bytes = (uint64_t)zreq->n_hw_sectors    * (uint64_t)block_size;
-		uint64_t offset =      (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
-		BUG_ON((fd < 0) || !zero_buf || (chunk_bytes % block_size));
-		while (total_bytes > 0) {
-			const size_t write_bytes = (total_bytes > chunk_bytes) ? chunk_bytes : (size_t)total_bytes;
-			const ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
-			BUG_ON((w < 0) || ((size_t)w != write_bytes));
-			offset += (uint64_t)write_bytes;
-			total_bytes -= (uint64_t)write_bytes;
-		}
-		free(zero_buf);
-		close(fd);
-	}
-	rep->base.error = (rv == 0) ? csce_ok : csce_failed;
-	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
-}
-
-static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk) {
-	char reply_buf[TSB_NL_MSG_SIZE] = {0};
-	struct nlmsghdr *reply_nlhdr = (struct nlmsghdr *)reply_buf;
-	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
-	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
-	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
-	const enum SANDBOX_NVME_FMT_e fmt_idx = fmt_disk->format_id.id;
-	struct ss_pending_disk_add *pend_disk_add = &g_srvr_simu->pending_disk_add;
-	bool format_succeeded = false;
-
-	reply_usermode_payload(reply_msg, req_msg);
-	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
-	reply_nlhdr->nlmsg_len = NLMSG_SPACE(reply_msg->len);
-	BUG_ON(fmt_disk->format_id.is_inline);					// Reject inline metadata - NVMesh only supports separate metadata
-
-	if (!dev) {
-		N_Ef(fmt_nodisk, "format_disk: device not found disk_id=@STR", fmt_disk->disk_id);
-		rep->base.error = csce_failed;
-	} else {
-		TSB_netlink_send_disk_change_event(dev, false);  // 1. Send REMOVE event BEFORE format (simulates disk_freeze). is_add=false -> n_blocks=0
-		// 2. Perform the format operation (zeros disk). Note: The NVMESH_FORMATTED_DISK header is written by production code (format_disk_wrapper) after receiving the format reply.
-		if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
-			N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
-			rep->base.error = csce_failed;
-		} else {
-			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
-			N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT @INT+@INT[b]", fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
-			rep->base.error = csce_ok;
-			// Fill in the new format info
-			snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
-			rep->info.new_n_pblk = dev->size_in_blocks;
-			rep->info.new_seq = __get_smart_seq_from_device_name(dev->device_name);
-			format_succeeded = true;
-		}
-	}
-
-	// 3. Send format reply
-	rep->base.latency_ns = 1000;  // Simulate some format latency
-	TSB_netlink_queue_enqueue(reply_buf, reply_nlhdr->nlmsg_len);
-
-	// 4. Schedule ADD event to be sent in a LATER iteration of the main loop
-	// This gives Toma's work queue time to process the REMOVE event before
-	// receiving the ADD event, matching production behavior where the NVMe
-	// format operation takes time between disk_freeze and disk_unfreeze.
-	if (dev && format_succeeded) {
-		snprintf(pend_disk_add->disk_id, sizeof(pend_disk_add->disk_id), "%s.1", dev->serial_number);
-		pend_disk_add->has_pending = true;
-		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for disk_id=@STR", pend_disk_add->disk_id);
-	}
-}
-
-// Process any pending disk ADD event that was deferred from a format operation.
-// This is called from the main event loop to ensure the REMOVE event has been
-// processed before the ADD event is sent.
+/********************************* API *******************************/
 void nvmeibs_simu_do_periodic(void) {
 	struct ss_pending_disk_add *pend_disk_add = &g_srvr_simu->pending_disk_add;
-	if (pend_disk_add->has_pending) {
+	if (pend_disk_add->has_pending) {	// Process any pending disk ADD event that was deferred from a format operation. Ensure the REMOVE event has been processed before the ADD event is sent.
 		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(pend_disk_add->disk_id);
 		BUG_ON(!dev);
 		N_Tf(nl_pend_send, "Sending deferred disk ADD event for disk_id=@STR", pend_disk_add->disk_id);
@@ -446,92 +518,6 @@ void nvmeibs_simu_do_periodic(void) {
 		pend_disk_add->has_pending = false;
 		pend_disk_add->disk_id[0] = '\0';
 	}
-}
-
-static int format_disks_csv(char *buf, int buf_size) {
-	const int device_count = sandbox_nvme_get_device_count();
-	int rv = 0;
-	BUG_ON((buf == NULL)||(buf_size == 0));
-	#define BUF_ADD(...) rv += (int)scnprintf(&buf[rv], buf_size - rv, __VA_ARGS__)
-	BUF_ADD("%s\n", NVMEIBS_DISKS_CSV_HEADER);		/* Write header */
-	for (int i = 0; i < device_count; ++i) {						/* Write each NVMesh (non-stock) disk */
-		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_index(i);
-		if (!d->stock_disk) {
-			const int disk_seq = __get_smart_seq_from_device_name(d->device_name);
-			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
-			BUG_ON(disk_seq < 0);
-			BUF_ADD("%s.1,%u,%u,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
-				d->serial_number, (unsigned)d->size_in_blocks, (unsigned)d->size_in_blocks, (1u << lbaf->block_size_exp),
-				disk_seq, d->device_name, lbaf->metadata_size, d->vendor_id, d->model_number, d->serial_number);
-		}
-	}
-	BUG_ON(rv >= buf_size);		// buffer overflow/truncation or no room for trailing '\0'
-	N_Tf(fdc0001, "formatted disks CSV: @STR", buf);
-	return rv;
-}
-
-static int format_smart_content(char *buf, size_t buf_size, const struct sandbox_nvme_device *dev) {	//	/proc/nvmeibs/smartX
-	const int seq = __get_smart_seq_from_device_name(dev->device_name);
-	int n;
-	BUG_ON(!buf || !dev || (seq < 0)); // should only be called for NVMesh disks -> -1 means stock disk
-	n = snprintf(buf, buf_size,
-		"Pci Address=0000:%02x:00.0\n"
-		"Serial Number=%s\n"
-		"Vendor=0x%04x\n"
-		"Model=%s\n"
-		"Submission Queues=128\nCompletion Queues=128\nMSIX Interrupts=129\nNum admin cmds=323\nNamespace Id=1\nNuma Node=1\n",
-		seq, dev->serial_number, dev->vendor_id, dev->model_number);
-	BUG_ON((n < 0) || ((size_t)n >= buf_size));
-	N_Tf(fsc0012, "formatted smart content for disk @STR: @STR", dev->device_name, buf);
-	return (int)n;
-}
-
-static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg) {
-	char buf[TSB_NL_MSG_SIZE] = {0};
-	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
-	struct nvmeib_t2s_request_srvr_info_rep *rep =         (struct nvmeib_t2s_request_srvr_info_rep *)msg->data;
-	const struct nvmeib_t2s_request_srvr_info_req *req = &((const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data)->req_info;
-	rep->base.error = csce_ok;
-	if (req->type == NVMEIBS_TOMA_REQ_NICS_CSV) {
-		rep->n_bytes_len = sprintf(rep->content, "%s", NVMEIBS_NICS_CSV_HEADER "\n"
-			"mlx5_2,0x0000000000000000bae924fffee5cfd8,1,0xffff,R,ACTIVE,4096,4096,3,true,false,true,ens2f0,0x00000000000000000000ffff0a0a0125\n"
-			"mlx5_3,0x0000000000000000bae924fffee5cfd9,1,0xffff,R,ACTIVE,4096,4096,3,true,false,true,ens2f1,0x00000000000000000000ffff0a0a0225\n");
-	} else if (req->type == NVMEIBS_TOMA_REQ_DISKS_CSV) {
-		rep->n_bytes_len = format_disks_csv(rep->content, req->max_byte_len);
-	} else if (req->type == NVMEIBS_TOMA_REQ_DISK_SMART_CNT) {
-		const struct sandbox_nvme_device *dev = __find_nvmesh_device_by_seq(req->opt_arg);
-		rep->n_bytes_len = format_smart_content(rep->content, (size_t)req->max_byte_len, dev);
-	} else {   rep->base.error = csce_dst_not_exist; }
-	rep->n_bytes_len++;			// Trailing zero
-	rep->was_truncated = rep->n_bytes_len > req->max_byte_len;
-	BUG_ON(rep->was_truncated);
-	reply_usermode_payload(msg, req_msg);
-	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
-	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
-}
-
-static inline enum uk_comm_err_opcode uk_comm_err_from_errno(ssize_t rv) {
-	if (rv >= 0) return csce_ok;		// Proc api returns negative value on failure and type of failure in errno
-	rv = errno; errno = 0;				// Convert to msg api which does not use errno and works in userspace as well
-	if (rv == ENXIO) return csce_dst_not_exist;
-	if (rv == EINPROGRESS) return csce_in_progress;
-	if (rv == EALREADY) return csce_already_running;
-	return csce_failed;
-}
-
-static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv) {
-	char buf[TSB_NL_MSG_SIZE] = {0};
-	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
-	struct nvmeib_nl_uk_comm_rep *rep = (struct nvmeib_nl_uk_comm_rep *)msg->data;
-	BUG_ON((req_msg->opcode != csc_t2s_blocking_msg_other) && (req_msg->opcode != csc_t2s_blocking_msg_to_io_clients));
-	reply_usermode_payload(msg, req_msg);
-	rep->error = uk_comm_err_from_errno(rv);
-	msg->len = sizeof(*msg) + sizeof(*rep);
-	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
 void nvmeibs_simu_send_extended_msg(const char *something) {
