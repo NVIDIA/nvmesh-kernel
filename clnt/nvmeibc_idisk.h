@@ -45,6 +45,8 @@ struct nvmeibc_idisk { /* shared interface/contract between block & core */
 		int (*dec_cont_preventors)(struct nvmeibc_idisk *self);
 		__attribute__((nonnull(1)))
 		enum nvmeibc_disk_status (*get_status)(struct nvmeibc_idisk const * self);
+		__attribute__((nonnull(1)))	
+		void (*call_discover)(struct nvmeibc_idisk *self);
 	} ops;
 };
 

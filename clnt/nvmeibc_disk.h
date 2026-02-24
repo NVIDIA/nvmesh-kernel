@@ -1035,6 +1035,8 @@ struct nvmeibc_toma_recv_msg;
 void nvmeibc_disk_toma_recv(struct nvmeibc_disk *disk,
 							struct nvmeibc_toma_recv_msg *toma_recv_msg);
 
+void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
+
 static inline enum nvmeibc_disk_status __nvmeibc_disk_get_status_impl(const struct nvmeibc_idisk *self)
 {
 	struct nvmeibc_disk const* disk = nvmeibc_disk_from_base(self);
@@ -1117,6 +1119,11 @@ static inline int __nvmeibc_disk_dec_cont_preventors_impl(struct nvmeibc_idisk *
 	return atomic_dec_return(&nvmeibc_disk_from_base(self)->n_cont_preventors);
 }
 
+static inline void __nvmeibc_disk_call_discover_impl(struct nvmeibc_idisk *self)
+{
+	nvmeibc_disk_call_discover(nvmeibc_disk_from_base(self));
+}
+
 //the accessors above are temporal only, until block kernel simulator will implement his private version of the disk
 static inline void nvmeibc_disk_base_init(struct nvmeibc_disk *self)
 {
@@ -1136,9 +1143,9 @@ static inline void nvmeibc_disk_base_init(struct nvmeibc_disk *self)
 	self->base.ops.inc_cont_preventors = __nvmeibc_disk_inc_cont_preventors_impl;
 	self->base.ops.dec_cont_preventors = __nvmeibc_disk_dec_cont_preventors_impl;
 	self->base.ops.get_status = __nvmeibc_disk_get_status_impl;
+	self->base.ops.call_discover = __nvmeibc_disk_call_discover_impl;
 }
 
-void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk);
 
 struct nvmeibc_disk_get_segs_locks_flags {
 	unsigned write:1;

@@ -1404,7 +1404,7 @@ static int __toma_after_update_send_seg_reg(struct nvmeibc_disk_segment *seg, st
 	if (!seg->registration_status && seg->toma_acm != NVMEIBTC_DS_MODE_DEAD) {
 		on_topo_free_schedule_seg_msg(seg, old_t, NVMEIBT_CLIENT_MSG_RT_REGISTER_DISK_SEGMENT, NVMEIBT_CLIENT_RT_REASON_REG_ON_PR_UPDATE);
 		if (__should_spur_disk_discovery(seg)) {
-			nvmeibc_disk_call_discover(nvmeibc_disk_from_base(seg->disk));
+			seg->disk->ops.call_discover(seg->disk);
 		}
 	} else if (seg->registration_status && (seg->toma_acm == NVMEIBTC_DS_MODE_DEAD)) {
 		/* Must send unreg explicitly! (Toma is considered dead by leader but,
@@ -1852,7 +1852,7 @@ static void __toma_delayed_update_topo(const struct nvmeibc_subscription_ctx *tr
 {
 	nvmeibc_seg_on_active_schedule(tr, pl, len, inactive);
 	if (__should_spur_disk_discovery(inactive)) {
-		nvmeibc_disk_call_discover(nvmeibc_disk_from_base(inactive->disk));
+			inactive->disk->ops.call_discover(inactive->disk);
 	} else {
 		__segment_register(inactive);
 	}
