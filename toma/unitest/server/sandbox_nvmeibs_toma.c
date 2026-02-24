@@ -144,17 +144,17 @@ static void __fill_disk_info(struct nvmeib_disk_info *d, const struct sandbox_nv
 
 static int format_smart_content(char *buf, size_t buf_size, const struct sandbox_nvme_device *dev) {	//	/proc/nvmeibs/smartX
 	const int seq = __get_smart_seq_from_device_name(dev->device_name);
-	int n;
+	int n, namespace = 1;
 	BUG_ON(!buf || !dev || (seq < 0)); // should only be called for NVMesh disks -> -1 means stock disk
 	n = snprintf(buf, buf_size,
 		"Pci Address=0000:%02x:00.0\n"
 		"Serial Number=%s\n"
 		"Vendor=0x%04x\n"
 		"Model=%s\n"
-		"Submission Queues=128\nCompletion Queues=128\nMSIX Interrupts=129\nNum admin cmds=323\nNamespace Id=1\nNuma Node=1\n",
-		seq, dev->serial_number, dev->vendor_id, dev->model_number);
+		"Submission Queues=128\nCompletion Queues=128\nMSIX Interrupts=129\nNum admin cmds=323\nNamespace Id=%d\nNuma Node=1\n",
+		seq, dev->serial_number, dev->vendor_id, dev->model_number, namespace);
 	BUG_ON((n < 0) || ((size_t)n >= buf_size));
-	N_Tf(fsc0012, "formatted smart content for disk @STR: @STR", dev->device_name, buf);
+	N_Tf(fsc0012, "read[@STR].serial=@STR.@INT", dev->device_name, dev->serial_number, namespace /*, buf*/);
 	return (int)n;
 }
 
