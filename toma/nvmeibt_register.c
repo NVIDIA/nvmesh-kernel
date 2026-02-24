@@ -127,7 +127,7 @@ static inline bool is_registrant_in_active_hash(struct nvmeibt_seg_active *seg_a
 {
 	struct nvmeibt_registrant_ctx		*candidate_reg_ctx;
 
-	candidate_reg_ctx = (seg_active ?
+	candidate_reg_ctx = (seg_active && seg_active->active_registrants_hash_by_handle ?
 						 nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, reg_ctx->client_messaging_handle) :
 						 NULL);
 	return (!!candidate_reg_ctx);
