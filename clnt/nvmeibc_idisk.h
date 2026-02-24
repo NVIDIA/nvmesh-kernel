@@ -70,17 +70,9 @@ static inline bool nvmeibc_idisk_is_512b_sub_block_x_supported(const struct nvme
 	#endif
 }
 
-/* Segment sw_md_size shall be taken from disk.
-   There is a corner case though, if the disk is dead, md may be 0
-   even if it is not.
-   For EC praids, it is a problem as we later rely on metadata non 0.
-   This is why, in case md_size is 0, and it is ec, we will put md = 8
-   anyway. The assumption is that as soon as disk goes up, and discovery
-   runs, new topology size will arive, and we will set correct md_size
-   there.
-
-	BOTTOM LINE: in most cases you should query the topology(segment) for the sw_md_size
-	It will stay unchaged as long as topology leaving;
+/*
+ * The function calculates the segment soft metadata size. 
+ * The function should be used only once - when the segment joins the PRAID.
 */
 static inline int nvmeibc_idisk_get_sw_md_size(struct nvmeibc_idisk *disk)
 {
