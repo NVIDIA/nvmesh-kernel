@@ -323,7 +323,7 @@ struct nvmeibc_disk_id {
 
 /* Used to update disk params according to the volume represented by block_dev*/
 struct nvmeibc_disk_id_update_params{
-	struct nvmeibc_disk *disk;
+	struct nvmeibc_idisk *disk;
 	struct nvmeibc_block_device *block_dev; /* Block device of volume*/
 	bool is_attach;
 };

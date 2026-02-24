@@ -2843,7 +2843,7 @@ static inline int __toma_disconnect_segment(struct nvmeibc_disk_segment *seg)
 		rv = -ENOMEM;
 		goto _out;
 	}
-	params->disk = nvmeibc_disk_from_base(seg->disk);
+	params->disk = seg->disk;
 	params->is_attach = false;
 	params->block_dev = nt->nd;
 	// Force workque to free the params if the update doesn't execute
@@ -2919,7 +2919,7 @@ static int __subscribe_seg(struct nvmeibc_disk_segment *seg, int c, int r1,
 	}
 
 	nd = nvmeibc_block_nt_to_b(nt);
-	disk_id_update->disk = nvmeibc_disk_from_base(seg->disk);
+	disk_id_update->disk = seg->disk;
 	disk_id_update->is_attach = true;
 	disk_id_update->block_dev = nd;
 	// Doron TODO: should we overload the return value (it is used everywhere)

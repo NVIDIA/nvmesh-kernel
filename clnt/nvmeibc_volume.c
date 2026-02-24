@@ -979,7 +979,7 @@ void nvmeibc_volume_update_volume_single_segment(void *context, const struct nvm
 	struct nvmeibc_volume *volume;
 	struct nvmeibc_disk_id *disk_id;
 	struct nvmeibc_disk_id_update_params *params = (struct nvmeibc_disk_id_update_params*)context;
-	struct nvmeibc_disk *disk = params->disk;
+	struct nvmeibc_disk *disk = nvmeibc_disk_from_base(params->disk);
 	struct nvmeibc_block_device *block_dev = params->block_dev;
 	const bool is_attach = params->is_attach;
 	NFIN;
