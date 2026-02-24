@@ -84,7 +84,7 @@ int nvmeibt_get_alloc_free_table_idx(void)
 		nvmeibt_alloc_free_summary_table[1].type = 'F';
 	}
 	idx = static_alloc_free_idx++;
-	if (idx > ALLOC_FREE_TABLE_SIZE) {
+	if (idx >= ALLOC_FREE_TABLE_SIZE) {
 		N_Ef(error_common_nvmeibt_get_alloc_free_table_idx, "Too many ALLOC/FREE in the code");
 		nvmeibt_abort(ES_FATAL);
 	}
