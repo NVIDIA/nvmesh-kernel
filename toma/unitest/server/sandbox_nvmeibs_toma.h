@@ -1,12 +1,11 @@
 #pragma once
 /* Emulation of nvmeibs (server) module */
 
-struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
+#include "srv/nvmeibs_srv_toma_messages.h"		// For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
 #include "interfaces/srvr/nvmeibt_srvr_proc.h"
 #include "common/nvmeib_shared.h"
-#include "srv/nvmeibs_srv_toma_messages.h"		// For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
+#include "../os/os_internal.h"					// Other side of netlink and file descriptors
 
-#include "../os/os_internal.h"
 struct TSB_server_toma_status_req_simu {		// Mechanism for server to request Toma to fill status proc files
 	int n_srvr_msg_idx;							// Ever increasing number
 	int n_toma_replies_received;

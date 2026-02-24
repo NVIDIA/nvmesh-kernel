@@ -585,9 +585,10 @@ struct nvmeibs_simulator *sandbox_server_init(struct TSB_netlink_mock *nl) {
 }
 
 void sandbox_server_destroy(struct nvmeibs_simulator *s, bool do_verify_used) {
+	BUG_ON(s != g_srvr_simu);
 	TSB_server_toma_status_req_simu_destroy(&s->s_req_simu, do_verify_used);
 	pthread_mutex_destroy(&s->nl->mutex);
-	BUG_ON(s != g_srvr_simu);
+	BUG_ON(do_verify_used && (s->nl->n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	free(s);
 	g_srvr_simu = NULL;
 }

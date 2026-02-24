@@ -32,11 +32,7 @@ void syslog(int priority, const char *fmt, ...) {
 
 #include "interfaces/nvme/nvmeibt_nvme_defines.h"
 #include <linux/fs.h>		// For BLKGETSIZE64, BLKSSZGET
-
-static bool nvmeibt_toma_is_running_as_a_utility(void);
-
 #include "server/sandbox_nvmeibs_toma.h"
-
 
 /************************************* FD/Sockets ********************************/
 static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags) {
@@ -184,6 +180,8 @@ static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 	return n;
 }
 
+static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
+
 void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
 	sys->os.fs.debug_offset = 10000;
@@ -209,8 +207,6 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 		toma_unit_test_thread_create();
 }
 
-static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
-
 void t_sandbox_all_destroy(void) {
 	if (!nvmeibt_toma_is_running_as_a_utility()) {
 		toma_unit_test_thread_destroy();
@@ -222,7 +218,6 @@ void t_sandbox_all_destroy(void) {
 	pthread_mutex_destroy(&sys->os.fs.mutex);
 	pthread_mutex_destroy(&sys->os.TSB_wake_pip.mutex);
 	sb_cluster_conf_destroy(&sys->cfg);
-	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->os.TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	TSB_all_fds_tbl_destroy(&sys->os.fs);
 	free(sys);
 	sys = NULL;

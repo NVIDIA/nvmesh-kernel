@@ -48,6 +48,22 @@ struct TSB_all_fds_tbl {					// Operating system, list of all file descriptors u
 };
 
 /*****************************************************************************/
+struct TSB_netlink_mock {
+	struct TSB_fd_otherside o;				// Here server simulator will connect as other side
+	unsigned n_recv_msgs;
+	pthread_mutex_t mutex;					// Thread-safe message queue for netlink access (by server-lib Toma thread and by server simulator )
+	#define TSB_NL_QUEUE_SIZE 8				// Simple fixed-size queue of messages
+	#define TSB_NL_MSG_SIZE 512
+	struct {
+		char data[TSB_NL_MSG_SIZE];
+		size_t len;
+	} queue[TSB_NL_QUEUE_SIZE];	// Outgoing messages to Toma
+	int queue_head;			// Next position to dequeue from
+	int queue_tail;			// Next position to enqueue to
+	int queue_count;		// Number of messages in queue
+};
+
+/*****************************************************************************/
 struct TSB_operating_system_impl {				// Sandbox for all services Toma needs from the operating system
 	struct TSB_all_fds_tbl fs;					// File system (files/sockets) descriptors
 	struct TSB_signals_queue {					// Signaling/Logging mechanism to toma
@@ -74,20 +90,7 @@ struct TSB_operating_system_impl {				// Sandbox for all services Toma needs fro
 		struct epoll_event evs[16];
 		int n_fds;
 	} TSB_epoll;
-	struct TSB_netlink_mock {
-		struct TSB_fd_otherside o;				// Here server simulator will connect as other side
-		unsigned n_recv_msgs;
-		pthread_mutex_t mutex;					// Thread-safe message queue for netlink access (by server-lib Toma thread and by server simulator )
-		#define TSB_NL_QUEUE_SIZE 8				// Simple fixed-size queue of messages
-		#define TSB_NL_MSG_SIZE 512
-		struct {
-			char data[TSB_NL_MSG_SIZE];
-			size_t len;
-		} queue[TSB_NL_QUEUE_SIZE];	// Outgoing messages to Toma
-		int queue_head;			// Next position to dequeue from
-		int queue_tail;			// Next position to enqueue to
-		int queue_count;		// Number of messages in queue
-	} TSB_netlink;
+	struct TSB_netlink_mock TSB_netlink;
 	struct TSB_server_comm_wakeup_mock {
 		struct TSB_fd_otherside o[2];
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
