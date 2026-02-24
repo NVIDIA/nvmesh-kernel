@@ -190,7 +190,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	pthread_mutex_init(&sys->os.fs.mutex, NULL);
-	sys->srvr = sandbox_server_init(&sys->os.TSB_netlink);
+	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);
 	pthread_mutex_init(&sys->os.TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
 
@@ -212,7 +212,7 @@ void t_sandbox_all_destroy(void) {
 		toma_unit_test_thread_destroy();
 		mgmt_sim_verify_at_end();
 	}
-	sandbox_server_destroy(sys->srvr, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
+	nvmeibs_simu_destroy(sys->srvr, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
 	sandbox_kafka_destroy(sys->kafka_simu);
 	pthread_mutex_destroy(&sys->os.fs.mutex);
@@ -713,8 +713,8 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	__temp_wait_sleep();
 
 	sys->os.TSB_signal.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
-	if (loop_idx == 9) TSB_netlink_send_extended_msg();		// Once send an extended message to test the flow
-	TSB_process_pending_disk_add_event();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
+	if (loop_idx == 9) nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Once send an extended message to test the flow
+	nvmeibs_simu_do_periodic();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
 	mgmt_sim_do_periodic();
 
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {

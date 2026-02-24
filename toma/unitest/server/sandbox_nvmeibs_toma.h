@@ -25,10 +25,8 @@ struct nvmeibs_simulator {
 	} pending_disk_add;
 };
 
-struct nvmeibs_simulator *sandbox_server_init(struct TSB_netlink_mock *nl);
-void sandbox_server_destroy(struct nvmeibs_simulator *s, bool do_verify_used);
-
-struct sandbox_nvme_device;
-void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add);
-void TSB_process_pending_disk_add_event(void);
-void TSB_netlink_send_extended_msg(void);
+// API towards unitest environment
+struct nvmeibs_simulator *nvmeibs_simu_init(struct TSB_netlink_mock *nl);
+void nvmeibs_simu_destroy(struct nvmeibs_simulator *s, bool do_verify_used);
+void nvmeibs_simu_do_periodic(void);
+void nvmeibs_simu_send_extended_msg(const char *something);

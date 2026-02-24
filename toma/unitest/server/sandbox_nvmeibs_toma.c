@@ -106,17 +106,40 @@ static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf,
 }
 
 /********************************* Netlink mock *******************************/
-// Forward declarations for netlink queue helpers
-static bool TSB_netlink_queue_has_something(void);
-static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size);
+static bool TSB_netlink_queue_has_something(void) {		// Netlink mock queue helpers (thread-safe)
+	struct TSB_netlink_mock *nl = g_srvr_simu->nl;
+	bool rv;
+	pthread_mutex_lock(&nl->mutex);
+	rv = (nl->queue_count != 0);
+	pthread_mutex_unlock(&nl->mutex);
+	return rv;
+}
+
+static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
+	struct TSB_netlink_mock *nl = g_srvr_simu->nl;
+	ssize_t len = -1;
+	pthread_mutex_lock(&nl->mutex);
+	BUG_ON(nl->queue_count <= 0);	// Wrong Sandbox behaviour. Why is Toma trying to read if no msg scheduled. This will create error in netlink mechanism
+	if (nl->queue_count > 0) {
+		const size_t msg_len = nl->queue[nl->queue_head].len;
+		BUG_ON(msg_len > buf_size);		// Toma gave too small buffer.
+		memcpy(buf, nl->queue[nl->queue_head].data, msg_len);
+		len = (ssize_t)msg_len;
+		nl->queue_head = (nl->queue_head + 1) % TSB_NL_QUEUE_SIZE;
+		nl->queue_count--;
+	}
+	pthread_mutex_unlock(&nl->mutex);
+	N_Tf(nl_recv, "n_msgs_in_q=@INT, cur_msg=@INT[b]", nl->queue_count, (int)len);
+	return len;
+}
+
 static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev, const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg);
 static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *req_msg, const struct nvmeib_format_disk *fmt_disk);
 static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg *req_msg, int rv);
 static void TSB_netlink_handle_req_info(const struct nvmeib_nl_uk_comm_msg *req_msg);
-void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add);
-void TSB_process_pending_disk_add_event(void);
+static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -189,15 +212,6 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 	return len;
 }
 
-static bool TSB_netlink_queue_has_something(void) {		// Netlink mock queue helpers (thread-safe)
-	struct TSB_netlink_mock *nl = g_srvr_simu->nl;
-	bool rv;
-	pthread_mutex_lock(&nl->mutex);
-	rv = (nl->queue_count != 0);
-	pthread_mutex_unlock(&nl->mutex);
-	return rv;
-}
-
 static void TSB_netlink_queue_enqueue(const void *data, size_t len) {
 	struct TSB_netlink_mock *nl = g_srvr_simu->nl;
 	pthread_mutex_lock(&nl->mutex);
@@ -207,24 +221,6 @@ static void TSB_netlink_queue_enqueue(const void *data, size_t len) {
 	nl->queue_tail = (nl->queue_tail + 1) % TSB_NL_QUEUE_SIZE;
 	nl->queue_count++;
 	pthread_mutex_unlock(&nl->mutex);
-}
-
-static ssize_t TSB_netlink_queue_dequeue(void *buf, size_t buf_size) {
-	struct TSB_netlink_mock *nl = g_srvr_simu->nl;
-	ssize_t len = -1;
-	pthread_mutex_lock(&nl->mutex);
-	BUG_ON(nl->queue_count <= 0);	// Wrong Sandbox behaviour. Why is Toma trying to read if no msg scheduled. This will create error in netlink mechanism
-	if (nl->queue_count > 0) {
-		const size_t msg_len = nl->queue[nl->queue_head].len;
-		BUG_ON(msg_len > buf_size);		// Toma gave too small buffer.
-		memcpy(buf, nl->queue[nl->queue_head].data, msg_len);
-		len = (ssize_t)msg_len;
-		nl->queue_head = (nl->queue_head + 1) % TSB_NL_QUEUE_SIZE;
-		nl->queue_count--;
-	}
-	pthread_mutex_unlock(&nl->mutex);
-	N_Tf(nl_recv, "n_msgs_in_q=@INT, cur_msg=@INT[b]", nl->queue_count, (int)len);
-	return len;
 }
 
 // Extract the seq (smart file index) from device name.
@@ -294,7 +290,7 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 // The netlink path uses n_blocks to distinguish between add and remove events:
 //   n_blocks > 0 -> on_add_disk callback
 //   n_blocks == 0 -> on_remove_disk callback
-void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add)
+static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device *dev, bool is_add)
 {
 	static unsigned long unsolicited_msg_id = 0x80000000;
 	char buf[TSB_NL_MSG_SIZE] = {0};
@@ -445,7 +441,7 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 // Process any pending disk ADD event that was deferred from a format operation.
 // This is called from the main event loop to ensure the REMOVE event has been
 // processed before the ADD event is sent.
-void TSB_process_pending_disk_add_event(void) {
+void nvmeibs_simu_do_periodic(void) {
 	struct ss_pending_disk_add *pend_disk_add = &g_srvr_simu->pending_disk_add;
 	if (pend_disk_add->has_pending) {
 		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(pend_disk_add->disk_id);
@@ -543,19 +539,19 @@ static void TSB_netlink_reply_to_blocked_toma(const struct nvmeib_nl_uk_comm_msg
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-void TSB_netlink_send_extended_msg(void) {
+void nvmeibs_simu_send_extended_msg(const char *something) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
 	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_push_extended_msg *rep = (struct nvmeib_push_extended_msg *)msg->data;
 	msg->opcode = rep->base.opcode = csc_msg_to_process;
-	rep->n_bytes_len = sprintf(&rep->content[0], "%s", "HelloFromClnt");
+	rep->n_bytes_len = sprintf(&rep->content[0], "%s", something);
 	msg->len = sizeof(*msg) + sizeof(*rep) + rep->n_bytes_len;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-struct nvmeibs_simulator *sandbox_server_init(struct TSB_netlink_mock *nl) {
+struct nvmeibs_simulator *nvmeibs_simu_init(struct TSB_netlink_mock *nl) {
 	struct nvmeibs_simulator *s = g_srvr_simu = (typeof(s))calloc(1, sizeof(*s));
 	struct TSB_fd_otherside *o = &s->com_toma2srvr_o;
 	o->send = _srvr_simu_nvmeibs_toma_server_proc_recv;
@@ -578,7 +574,7 @@ struct nvmeibs_simulator *sandbox_server_init(struct TSB_netlink_mock *nl) {
 	return s;
 }
 
-void sandbox_server_destroy(struct nvmeibs_simulator *s, bool do_verify_used) {
+void nvmeibs_simu_destroy(struct nvmeibs_simulator *s, bool do_verify_used) {
 	BUG_ON(s != g_srvr_simu);
 	TSB_server_toma_status_req_simu_destroy(&s->s_req_simu, do_verify_used);
 	pthread_mutex_destroy(&s->nl->mutex);
