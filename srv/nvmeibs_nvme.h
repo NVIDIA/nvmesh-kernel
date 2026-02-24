@@ -125,6 +125,21 @@ typedef void nvme_callback_t(void *arg, int status, u32 result);
 struct nvme_qp_cmds_stats {
 		int rd_count;
 		int wr_count;
+		int n_timeout_aborts;
+		u64 n_errors;
+		u64 intr_comps_max;
+		u64 intr_comps_tot;
+		u64 intr_comps_cnt;
+		u64 thread_comps_max;
+		u64 thread_comps_tot;
+		u64 thread_comps_cnt;
+		u64 n_thread_wakeups;
+		u64 n_thread_sleeps;
+		u64 n_spurious_intrs;
+		u64 n_cq_errors;
+		u64 n_dma_errors;
+		u64 n_resets;
+		u64 n_queue_aborts;
 };
 
 struct nvmeibs_nvme_req {
@@ -235,7 +250,10 @@ nvmeibs_q_info_get_by_rsc_id(struct nvmeibs_disk_info *di, int rsc_id);
 ssize_t nvmeibs_nvme_disk_qp_stats_fill(struct nvmeibs_disk_info *di,
 										char *buf, int len);
 void nvmeibs_nvme_disk_qp_stats_reset(struct nvmeibs_disk_info *di);
+void nvmeibs_nvme_qp_stats_reset(struct nvmeibs_disk_info *di);
 ssize_t nvmeibs_nvme_fill_stats_nvme_qps(struct nvmeibs_disk_info *di,
+ char *buf, size_t len);
+ssize_t nvmeibs_nvme_fill_qp_stats_json(struct nvmeibs_disk_info *di,
  char *buf, size_t len);
 void nvmeibs_nvme_free_all_nvmeof(void);
 
