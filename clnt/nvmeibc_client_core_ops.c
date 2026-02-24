@@ -139,6 +139,12 @@ static int __toma_send(struct nvmeibc_icore_ops const* self, struct nvmeibc_idis
 	return nvmeibc_pd_toma_send(nvmeibc_disk_from_base(disk), handle, params);
 }
 
+static int __toma_subscribe(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, u64 handle, struct nvmeibc_disk_subscription_params *params)
+{
+	(void)self;
+	return nvmeibc_disk_subscribe_toma_service(nvmeibc_disk_from_base(disk), handle, params);
+}
+
 static int __toma_unsubscribe(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, u64 handle)
 {
 	(void)self;
@@ -173,6 +179,7 @@ struct nvmeibc_icore_ops const core_ops = {
 	.jam_get_all = __jam_get_all,
 	.jam_put_all = __jam_put_all,
 	.toma_send = __toma_send,
+	.toma_subscribe = __toma_subscribe,
 	.toma_unsubscribe = __toma_unsubscribe,
 	.reused_bb_release = __reused_bb_release,
 };

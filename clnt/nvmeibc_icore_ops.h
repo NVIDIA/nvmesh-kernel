@@ -18,6 +18,7 @@ struct nvmeibc_disk_command;
 struct nvmeibc_disk_toma_send_params;
 struct nvmeib_data_reuse_buf_params;
 struct nvmeibc_icore_ops;
+struct nvmeibc_disk_subscription_params;
 
 //the following struct defines "core" layer functionality towards the block layer
 struct nvmeibc_icore_ops {
@@ -63,6 +64,8 @@ struct nvmeibc_icore_ops {
 	void (*jam_put_all)(struct nvmeibc_icore_ops const* self, int n_disks, struct nvmeibc_idisk *disks[]);
 	__attribute__((nonnull (1,2,4)))
 	int (*toma_send)(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, u64 handle, struct nvmeibc_disk_toma_send_params *params);
+	__attribute__((nonnull (1,2,4)))
+	int (*toma_subscribe)(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, u64 handle, struct nvmeibc_disk_subscription_params *params);
 	__attribute__((nonnull (1,2)))
 	int (*toma_unsubscribe)(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, u64 handle);
 	__attribute__((nonnull (1,2,3)))

@@ -245,8 +245,10 @@ int nvmeibc_trs_hash_subscribe(struct nvmeibc_subscription_ctx *tr,
 							   struct nvmeibc_disk_subscription_params *params)
 {
 	int rv;
+	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	params->arg = tr->handle;
-	rv = nvmeibc_disk_subscribe_toma_service(nvmeibc_disk_from_base(tr->disk), params->arg, params);
+
+	rv = icore_ops->toma_subscribe(icore_ops, tr->disk, params->arg, params);
 	if (unlikely((rv < 0) && (rv != -EAGAIN))) {
 		rv = -ENODEV;
 		nvmeibc_trs_hash_remove(tr);
