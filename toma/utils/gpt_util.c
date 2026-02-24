@@ -2310,6 +2310,12 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 					}
 				}
 			}
+			if (config->pblk_size == 0) {
+				N_Ef(parse_csv_device_not_found, "Device not found in disks CSV: @STR", config->device_path);
+				fprintf(stderr, COL_RED_BOLD "ERROR: Device '%s' not found in disks.csv" COL_RESET "\n", config->device_path);
+				rv = -1;
+				goto out;
+			}
 			break;
 		case 's':
 			config->pba_s = (uint64_t)atoi(optarg);
