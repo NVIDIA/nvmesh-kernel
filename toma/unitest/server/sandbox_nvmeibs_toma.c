@@ -325,11 +325,10 @@ static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device 
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_disk_info_reply *rep = (struct nvmeib_disk_info_reply *)msg->data;
 	msg->len = sizeof(*msg) + sizeof(*rep);
-	msg->opcode = csc_get_disks;
+	rep->base.opcode = msg->opcode = csc_get_disks;		// 3 lines below do the same as reply_usermode_payload()
 	msg->id = unsolicited_msg_id++;
 	msg->caller_type = TOMA_CALLER;
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	rep->base.opcode = csc_get_disks;
 	rep->base.error = csce_ok;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
 	__fill_disk_info(&rep->dinfo.disk, dev, is_add);
@@ -345,7 +344,6 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
 	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
 	const enum SANDBOX_NVME_FMT_e fmt_idx = fmt_disk->format_id.id;
-	struct ss_pending_disk_add *pend_disk_add = &g_srvr_simu->pending_disk_add;
 	bool format_succeeded = false;
 
 	reply_usermode_payload(reply_msg, req_msg);
@@ -383,9 +381,8 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	// receiving the ADD event, matching production behavior where the NVMe
 	// format operation takes time between disk_freeze and disk_unfreeze.
 	if (dev && format_succeeded) {
-		snprintf(pend_disk_add->disk_id, sizeof(pend_disk_add->disk_id), "%s.1", dev->serial_number);
-		pend_disk_add->has_pending = true;
-		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for disk_id=@STR", pend_disk_add->disk_id);
+		g_srvr_simu->pending_disk_add = dev;
+		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for serial=@STR", dev->serial_number);
 	}
 }
 
@@ -509,14 +506,11 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 
 /********************************* API *******************************/
 void nvmeibs_simu_do_periodic(void) {
-	struct ss_pending_disk_add *pend_disk_add = &g_srvr_simu->pending_disk_add;
-	if (pend_disk_add->has_pending) {	// Process any pending disk ADD event that was deferred from a format operation. Ensure the REMOVE event has been processed before the ADD event is sent.
-		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(pend_disk_add->disk_id);
-		BUG_ON(!dev);
-		N_Tf(nl_pend_send, "Sending deferred disk ADD event for disk_id=@STR", pend_disk_add->disk_id);
+	const struct sandbox_nvme_device *dev = g_srvr_simu->pending_disk_add;
+	if (dev) {	// Process any pending disk ADD event that was deferred from a format operation. Ensure the REMOVE event has been processed before the ADD event is sent.
+		N_Tf(nl_pend_send, "Sending deferred disk ADD event for serial=@STR", dev->serial_number);
 		TSB_netlink_send_disk_change_event(dev, true);  // is_add=true -> n_blocks > 0
-		pend_disk_add->has_pending = false;
-		pend_disk_add->disk_id[0] = '\0';
+		g_srvr_simu->pending_disk_add = NULL;
 	}
 }
 
