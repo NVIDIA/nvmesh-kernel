@@ -346,7 +346,7 @@ struct nvmeibc_disk_segments_locks {
  *         null if the lock was not found
  */
 void * nvmeibc_disk_locks_seg_locks_mem_info(
-	struct nvmeibc_disk *disk, int seg_id);
+	struct nvmeibc_idisk *disk, int seg_id);
 
 /**
  * free disk lock mem info struct

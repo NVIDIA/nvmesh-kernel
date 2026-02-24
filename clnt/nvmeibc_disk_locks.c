@@ -248,10 +248,11 @@ out:
 	return (void*)handle;
 }
 
-void *nvmeibc_disk_locks_seg_locks_mem_info(struct nvmeibc_disk *disk,
+void *nvmeibc_disk_locks_seg_locks_mem_info(struct nvmeibc_idisk *base,
 	int seg_id)
 {
 	void *ret = NULL;
+	struct nvmeibc_disk* disk = nvmeibc_disk_from_base(base);
 	struct nvmeibc_disk_segments_locks *disk_segs_locks = NULL;
 
 	NFIN;

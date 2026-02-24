@@ -2890,7 +2890,7 @@ static int __subscribe_seg(struct nvmeibc_disk_segment *seg, int c, int r1,
 		goto _error_on_mem_alloc;
 	}
 
-	handle_of(seg) = nvmeibc_disk_locks_seg_locks_mem_info(nvmeibc_disk_from_base(seg->disk), -1);
+	handle_of(seg) = nvmeibc_disk_locks_seg_locks_mem_info(seg->disk, -1);
 	if (!handle_of(seg)) {
 		rv = -ENOMEM - 2000;
 		goto _error_on_mem_alloc;

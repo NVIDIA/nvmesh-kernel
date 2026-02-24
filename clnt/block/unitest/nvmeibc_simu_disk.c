@@ -225,11 +225,11 @@ int nvmeibc_disk_free_jrnl_ents(struct nvmeibc_disk *disk, struct nvmeibc_disk_f
 	return 0;
 }
 
-void *nvmeibc_disk_locks_seg_locks_mem_info(struct nvmeibc_disk *disk, int seg_id){
+void *nvmeibc_disk_locks_seg_locks_mem_info(struct nvmeibc_idisk *disk, int seg_id){
 	// Todo: connect it with the real locks.
 	struct nvmeibc_disk_used_lock_segment *uls = kzalloc(sizeof(struct nvmeibc_disk_used_lock_segment), GFP_KERNEL);
 	uls->mem_info 	= (void*)0x111111;			// Illegal
-	uls->disk		= disk;
+	uls->disk		= nvmeibc_disk_from_base(disk);
 	uls->seg_id		= seg_id;
 	return (void*)uls;
 }

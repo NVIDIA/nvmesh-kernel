@@ -68,7 +68,7 @@
 #define mark_disk_wait_for_admin_channel(pDisk)	while (atomic_read(&curDisk->num_contended)>0) {usleep(1);}
 
 // Simulating nvmeibc_disk.h API used by block.c
-void *nvmeibc_disk_locks_seg_locks_mem_info(	struct nvmeibc_disk *disk, int seg_id);
+void *nvmeibc_disk_locks_seg_locks_mem_info(	struct nvmeibc_idisk *disk, int seg_id);
 void  nvmeibc_disk_call_discover(				struct nvmeibc_disk *disk);
 int   nvmeibc_disk_execute_io(					struct nvmeibc_disk *disk, struct nvmeibc_disk_io_command *block_cmd);
 int nvmeibc_disk_execute_gen(struct nvmeibc_disk *disk, struct nvmeibc_disk_gen_cmd *gen_cmd);
