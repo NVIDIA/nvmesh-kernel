@@ -5098,7 +5098,7 @@ static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *j
 							{
 								jdr_array_scope(jdr, "segs");
 								raid1_for_each_seg(r1, seg, si) {
-									const struct nvmeibc_disk *disk = nvmeibc_disk_from_base(seg->disk);
+									const struct nvmeibc_idisk *disk = seg->disk;
 									const char *acm = nvmeibt_client_topo_seg_access_mode_to_str(seg->toma_acm);
 									char slmap[LOCK_OWNERSHIP_MAP_STRING_LEN];
 									lock_ownership_map_to_string(&seg->lmap, slmap);
@@ -5115,9 +5115,9 @@ static void __topo_status_tojson(const struct nvmeibc_topology *t, struct jdr *j
 										jdr->ops.ascii_format(jdr, "reconf", "%c", __segment_reconf_state(seg));
 										{
 											jdr_object_scope(jdr, "disk");
-											jdr->ops.ascii(jdr, "name", ((disk)->base.ops.get_name(&((disk))->base)));
-											jdr->ops.ascii(jdr, "host", nvmeibc_idisk_get_host_name_for_logging(&(disk->base)));
-											jdr_write_var(jdr, paused, __disk_p_state2num(&(disk->base)));
+											jdr->ops.ascii(jdr, "name", disk->ops.get_name(disk));
+											jdr->ops.ascii(jdr, "host", nvmeibc_idisk_get_host_name_for_logging(disk));
+											jdr_write_var(jdr, paused, __disk_p_state2num(disk));
 										}
 									}
 								}
