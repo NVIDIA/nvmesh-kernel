@@ -16,16 +16,16 @@ enum SANDBOX_NVME_FMT_e {			// Supported LBA formats for sandbox NVMe devices. T
 	SANDBOX_NVME_FMT_4096_8 = 3,	// 4096 bytes, 8 bytes metadata
 	SANDBOX_NVME_LBAF_COUNT = 4,	// Number of supported LBA formats.
 };
-const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int /*enum SANDBOX_NVME_FMT_e*/ fmt_idx);
+const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fmt_idx);
 
 struct sandbox_nvme_device {
-	int vendor_id;
+	const int vendor_id;
 	const char *serial_number;
 	const char *model_number;
 	const char *device_name;			// Short name for the device
 	const char *device_path;			// The path we actually use for the device, e.g. `_root/dev/nvme0n1`.
-	bool stock_disk;
-	uint64_t size_in_blocks;
+	const bool stock_disk;
+	const uint64_t size_in_blocks;
 	enum SANDBOX_NVME_FMT_e current_format_idx;		// Mutable, format operations can update it.
 };
 

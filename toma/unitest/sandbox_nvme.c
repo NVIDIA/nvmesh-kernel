@@ -10,7 +10,7 @@ static const struct sandbox_nvme_lbaf lbaf_table[SANDBOX_NVME_LBAF_COUNT] = {
 	[SANDBOX_NVME_FMT_4096_8] = { .block_size_exp = 12, .metadata_size = 8 },  /* 4096+8 */
 };
 
-const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(int fmt_idx) {
+const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fmt_idx) {
 	BUG_ON(fmt_idx < 0 || fmt_idx >= SANDBOX_NVME_LBAF_COUNT);
 	return &lbaf_table[fmt_idx];
 }
@@ -142,32 +142,29 @@ int sandbox_nvme_open(const struct sandbox_nvme_device *dev) {
 	return open(dev->device_path, O_RDWR);
 }
 
-struct udev *udev_new(void) {
+struct udev *udev_new(void) {		// Todo: This is udev simulator, unrelated to nvme, should be in os simulator
 	int i;
 	struct udev *u = (struct udev *)calloc(1, sizeof(*u));
 	u->ref++;
 	N_Tf(dfi1053, "udev_new");
-	BUG_ON(sizeof(u->ent) / sizeof(u->ent[0]) < NVME_DEVICE_COUNT);
+	BUG_ON(ARRAY_SIZE(u->ent) != NVME_DEVICE_COUNT);
 	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		u->ent[i].name = nvme_devices[i].device_path;
 		u->ent[i].path = nvme_devices[i].device_name;
-		if (i > 0) {
-			u->ent[i - 1].next = &u->ent[i];
-		}
+		if (i > 0)  u->ent[i - 1].next = &u->ent[i];		// Emulate linked list with our array
 	}
 	return u;
 }
 
 struct udev_device *udev_device_new_from_syspath(struct udev *u, const char *path) {
 	struct udev_device *d = malloc(sizeof(*d));
-	int i;
-	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		if (!strcmp(nvme_devices[i].device_name, path)) {
 			d->e = &u->ent[i];
 			return d;
 		}
 	}
-	N_Ef(dsf3494, "no device found for path=@STR", path);
+	BUG_ON(true); N_Ef(dsf3494, "no device found for path=@STR", path);
 	return NULL;
 }
 
@@ -196,7 +193,7 @@ int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap) {
 			// Note that LBAF { ms, ds, rp } are defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01
 			// Figure 116: LBA Format Data Structure, NVM Command Set Specific (PDF p. 91).
 			struct nvme_id_ns *response = (void*)cmd->addr;
-			int i;
+			enum SANDBOX_NVME_FMT_e i;
 			BUG_ON(cmd->data_len < sizeof(*response));
 			memset(response, 0, cmd->data_len);
 
@@ -224,8 +221,7 @@ int nvme_ioctl_get_size(const char *path, va_list ap) {
 	const struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
 	int *block_size = va_arg(ap, int*);
 	if (nvme_dev) {
-		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(nvme_dev->current_format_idx);
-		*block_size = 1 << lbaf->block_size_exp;
+		*block_size = (1 << sandbox_nvme_get_lbaf(nvme_dev->current_format_idx)->block_size_exp);
 	} else {
 		*block_size = 4096;  // gpt_util tests use files. Default for non-NVMe devices
 	}
