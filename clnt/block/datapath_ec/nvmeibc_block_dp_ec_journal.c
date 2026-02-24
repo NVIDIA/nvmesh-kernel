@@ -43,7 +43,7 @@ int dp_ec_journal_alloc_all_areas(struct nvmeibc_block_command *rldr)
 	const struct multi_snake_slice_analyzer *mssa = rldr->o->mssa;
 	struct nvmeibc_block_command *cmd = &rldr[mssa->n_reads];
 	int c, n_cmds = mssa->n_writes/2, rv;
-	struct nvmeibc_disk *disks[N_MAX_RAID_SLICE_LEN];
+	struct nvmeibc_idisk *disks[N_MAX_RAID_SLICE_LEN];
 	u64 dlbas[N_MAX_RAID_SLICE_LEN];
 	u64 res_jlbas[N_MAX_RAID_SLICE_LEN];
 	u32 n_disks = 0;
@@ -56,7 +56,7 @@ int dp_ec_journal_alloc_all_areas(struct nvmeibc_block_command *rldr)
 	/* Build the query to JAM*/
 	for (c = 0; c < n_cmds; c++) {
 		if (__is_seg_writable(cmd[c].ds)) {
-			disks[n_disks] = nvmeibc_disk_from_base(cmd[c].ds->disk);
+			disks[n_disks] = cmd[c].ds->disk;
 			WARN_ON(         jaddr(&cmd[c       ]) != ILLEGAL_JADDR);// Journal already allocated
 			dlbas[n_disks] = jaddr(&cmd[c+n_cmds]);		 // Jam gets an input: addr of data on disk
 			n_disks++;
@@ -193,7 +193,7 @@ static void __journals_abandon(struct nvmeibc_block_command *cmd, u32 n_cmds)
 		if (__is_seg_writable(cmd[c].ds)) {
 			u64 *j_addr = &jaddr(&cmd[c]);
 			jentry[c] = (s16)nvmeibc_jam_abandon_lba(
-				nvmeibc_disk_from_base(cmd[c].ds->disk), *j_addr, &jentry_gen_id[c]);
+				cmd[c].ds->disk, *j_addr, &jentry_gen_id[c]);
 			if (jentry[c] >= 0) {
 				BUG_ON(jentry_gen_id[c] < nvmeib_jrnl_ent_gen_id_min ||
 					jentry_gen_id[c] > nvmeib_jrnl_ent_gen_id_max);
@@ -216,7 +216,7 @@ static void __journals_abandon(struct nvmeibc_block_command *cmd, u32 n_cmds)
 
 static void __journals_free(struct nvmeibc_block_command *cmd, u32 n_cmds)
 {
-	struct nvmeibc_disk *disks[  N_MAX_RAID_SLICE_LEN];
+	struct nvmeibc_idisk *disks[  N_MAX_RAID_SLICE_LEN];
 	u64                 res_addr[N_MAX_RAID_SLICE_LEN] = {ILLEGAL_JADDR};
 	u32 jrnl_state_unkn = 0;
 	u32 n_disks = 0, c;
@@ -224,7 +224,7 @@ static void __journals_free(struct nvmeibc_block_command *cmd, u32 n_cmds)
 	for (c = 0; c < n_cmds; c++) {	/* Build the query to JAM*/
 		if (__is_seg_writable(cmd[c].ds)) {
 			u64 *j_addr = &jaddr(&cmd[c]);
-			disks[   n_disks] = nvmeibc_disk_from_base(cmd[c].ds->disk);
+			disks[   n_disks] = cmd[c].ds->disk;
 			res_addr[n_disks] = *j_addr;
 			if (cmd[c].o_rv)
 				jrnl_state_unkn |= (1<<n_disks);	// Write succeeded, previous journal was overwritten

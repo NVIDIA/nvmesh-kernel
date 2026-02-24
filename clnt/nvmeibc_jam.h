@@ -36,7 +36,7 @@ void nvmeibc_jam_disk_del(struct nvmeibc_disk *disk);
 /* @wait_bound_abnd - when false, fail allocation with -EDEADLK
  *                    if any entry to be bound is ABANDONED. */
 struct nvmeib_cpu_mask_info;
-int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
+int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_idisk *disks[], u32 txid,
 	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jiffies, unsigned long priority, void *ctx);
 
 /* @wr_sts_bm - bit i is O if journal-write of jlba=jlbas[i]
@@ -44,8 +44,8 @@ int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
  *
  * This can be extended from bitmap to 3 values per entry so
  * in case journal-write was not issued, we wont do remote-erase */
-void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[], u32 wr_sts_bm);
-int  nvmeibc_jam_abandon_lba(struct nvmeibc_disk *disk, u64 jlba, u8 *gen_id);
+void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_idisk *disks[], u64 jlbas[], u32 wr_sts_bm);
+int  nvmeibc_jam_abandon_lba(struct nvmeibc_idisk *disk, u64 jlba, u8 *gen_id);
 
 struct jentry_md;
 int nvmeibc_jam_jmd_set(struct nvmeibc_disk *disk, u64 lba,

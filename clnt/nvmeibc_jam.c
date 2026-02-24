@@ -2199,9 +2199,10 @@ out:
 	NFOUT;
 }
 
-int nvmeibc_jam_abandon_lba(struct nvmeibc_disk *disk, u64 jlba, u8 *gen_id)
+int nvmeibc_jam_abandon_lba(struct nvmeibc_idisk *idisk, u64 jlba, u8 *gen_id)
 {
 	int idx, rv;
+	struct nvmeibc_disk* disk = nvmeibc_disk_from_base(idisk);
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
@@ -2405,7 +2406,7 @@ static int disks_ptr_cmp_func(const void *p1, const void *p2)
 	return 0;
 }
 
-static struct jalloc *sort_disks(int n_disks, struct nvmeibc_disk *disks[])
+static struct jalloc *sort_disks(int n_disks, struct nvmeibc_idisk *disks[])
 {
 	struct jalloc *sorted = NULL;
 	int i;
@@ -2416,7 +2417,7 @@ static struct jalloc *sort_disks(int n_disks, struct nvmeibc_disk *disks[])
 		goto out;
 	}
 	for (i = 0; i < n_disks; i++) {
-		sorted[i].disk = disks[i];
+		sorted[i].disk = nvmeibc_disk_from_base(disks[i]);
 		sorted[i].orig_pos = i;
 		_NF(trace_1_jam_sort_disks, "&sorted[@JRNL_RNG_ENT_IDX]=@PTR: disk=@DISK, orig_pos=@ORIG_POS",
 			i, &sorted[i], sorted[i].disk, sorted[i].orig_pos);
@@ -2710,10 +2711,10 @@ out:
 	return;
 }
 
-int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
+int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_idisk *disks[], u32 txid,
 	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jif, unsigned long priority, void *ctx)
 {
-	struct nvmeibc_jam *c_jam = cdisk2cj(disks[0]);
+	struct nvmeibc_jam *c_jam = cdisk2cj(__nvmeibc_disk_from_base(disks[0]));
 	struct jalloc *sorted = NULL;
 	const unsigned long max_timeout_jif = (nvmeibc_jam_pending_req_timeout_jif ? : NVMEIBC_PENDING_REQ_TIMEOUT);
 	const unsigned long now_jif = jiffies;
@@ -2733,13 +2734,13 @@ int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
 	/* initialize with j2d, used for hkey */
 	memcpy(res_jlbas, dlbas, sizeof(res_jlbas[0]) * n_disks);
 
-	if (icore_ops->jam_get_all(icore_ops, n_disks, (struct nvmeibc_idisk **)disks)) {
+	if (icore_ops->jam_get_all(icore_ops, n_disks, disks)) {
 		_NT(trace_jam_nvmeibc_jam_lbas_alloc, "Fail to get pausable approval for all disks");
 		goto done;
 	}
 
 	rv = lbas_alloc(n_disks, sorted, res_jlbas, txid, wait_bound_abnd, ctx, NULL, cpu_mask_info, capped_deadline_jif, priority);
-	icore_ops->jam_put_all(icore_ops, n_disks, (struct nvmeibc_idisk **)disks);
+	icore_ops->jam_put_all(icore_ops, n_disks, disks);
 
 	if (rv == -EINPROGRESS)
 		goto out;
@@ -2757,7 +2758,7 @@ out:
 	return rv;
 }
 
-void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[], u32 wr_sts_bm)
+void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_idisk *disks[], u64 jlbas[], u32 wr_sts_bm)
 {
 	struct jalloc *sorted = NULL;
 	int i, orig_pos, idx;
@@ -2765,7 +2766,7 @@ void nvmeibc_jam_lbas_free(int n_disks, struct nvmeibc_disk *disks[], u64 jlbas[
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 	NFIN;
 
-	jam_cnts_on_ulp_req_free(cdisk2cj(disks[0]), n_disks);
+	jam_cnts_on_ulp_req_free(cdisk2cj(nvmeibc_disk_from_base(disks[0])), n_disks);
 
 	BUG_ON(n_disks > (int)(sizeof(wr_sts_bm) * BITS_PER_BYTE));
 
