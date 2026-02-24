@@ -30,7 +30,7 @@ struct sandbox_nvme_device {
 	enum SANDBOX_NVME_FMT_e current_format_idx;
 };
 
-const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path /* == /dev/nvme...n1 */);
+//const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path /* == /dev/nvme...n1 */);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id /* e.g. NVMD_SN_002.1 */);
 struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(  const char *disk_id /* e.g. NVMD_SN_002.1 */);
@@ -38,4 +38,7 @@ int sandbox_nvme_get_device_count(void);
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev);
 int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_FMT_e fmt_idx);	// Format a device: update LBA format and erase disk content. return 0 on success, -1 if format index invalid or I/O error
 
+#include <stdarg.h>				// va_list
+int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap);
+int nvme_ioctl_get_size( const char *path,         va_list ap);
 #endif // TOMA_SANDBOX_NVME_H_INCLUDED

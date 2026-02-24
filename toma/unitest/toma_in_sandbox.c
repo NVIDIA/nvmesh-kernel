@@ -244,73 +244,13 @@ int ioctl(int fd, unsigned long int req, ...) {
 	va_start(ap, req);
 	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
-		const struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
-		struct nvme_admin_cmd *cmd =  va_arg(ap, struct nvme_admin_cmd*);
-		if (!nvme_dev) {
-			errno = ENOTTY;		// We presume the failure is because the device is not NVMe.
-			N_Wf(sbioctnv1, "ioctl:nvme:admin: no device found for path=@STR", path);
-			return -1;
-		}
-		N_Df(sbioctnv, "ioctl:nvme:admin opcode=@INT", cmd->opcode);
-		if (cmd->opcode == nvme_admin_identify) {
-			if (cmd->nsid == 0) {
-				// NSID 0 is special - controller identify command.
-				struct nvme_id_ctrl *idctrl = (void*)cmd->addr;
-				BUG_ON(cmd->data_len != sizeof(*idctrl));
-				memset(idctrl, 0, cmd->data_len);
-				idctrl->vid = nvme_dev->vendor_id;
-				snprintf(idctrl->sn, sizeof(idctrl->sn), "%s", nvme_dev->serial_number);
-				snprintf(idctrl->mn, sizeof(idctrl->mn), "%s", nvme_dev->model_number);
-				snprintf(idctrl->fr, sizeof(idctrl->fr), "0.0.1");
-				N_Tf(sbk3456, "ioctl:nvme:id controller fd=@INT reporting sn=@STR mn=@STR", fd, idctrl->sn, idctrl->mn);
-			} else {
-				// NSID > 0 is the NVME storage namespace query.
-				// Note that LBAF { ms, ds, rp } are defined in NVM-Express-NVM-Command-Set-Specification-Revision-1.2-2025.08.01
-				// Figure 116: LBA Format Data Structure, NVM Command Set Specific (PDF p. 91).
-				struct nvme_id_ns *response = (void*)cmd->addr;
-				int i;
-				BUG_ON(cmd->data_len < sizeof(*response));
-				memset(response, 0, cmd->data_len);
-
-				// Populate supported LBA formats from the sandbox LBA format table
-				response->nlbaf = SANDBOX_NVME_LBAF_COUNT - 1;  // Number of supported LBA formats minus 1
-				for (i = 0; i < SANDBOX_NVME_LBAF_COUNT; i++) {
-					const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(i);
-					response->lbaf[i].ds = lbaf->block_size_exp;
-					response->lbaf[i].ms = lbaf->metadata_size;
-				}
-
-				// Set current format based on device's format index
-				response->flbas = nvme_dev->current_format_idx;
-
-				// Set metadata capabilities: both inline and separate metadata are supported by the device.
-				// Note: Toma will only use separate metadata (DISK_ALLOW_INLINE_MD == 0).
-				response->mc = NVME_NS_MC_INLINE_MASK | NVME_NS_MC_SEP_MASK;
-
-				response->nsze = nvme_dev->size_in_blocks;
-				N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT flbas=@INT nlbaf=@INT mc=@INT nsze=@INT64_TD",
-				     cmd->nsid, fd, response->flbas, response->nlbaf, response->mc, response->nsze);
-			}
-		} else if (cmd->opcode == nvme_admin_get_log_page) {
-			struct nvme_smart_log *fill =  (void*)cmd->addr;
-			BUG_ON(cmd->data_len != sizeof(*fill));
-			memset(fill, 0, cmd->data_len);
-		}
+		rv = nvme_ioctl_admin_cmd(path, fd, ap);
 	} else if (req == NVME_IOCTL_ID) {
 		rv = fd;
 	} else if (req == FIONBIO) {
 		rv = 0;
 	} else if (req == BLKSSZGET) {
-		// Return block size from device's current format
-		const struct sandbox_nvme_device *nvme_dev = sandbox_nvme_get_device_by_path(path);
-		int *block_size = va_arg(ap, int*);
-		if (nvme_dev) {
-			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(nvme_dev->current_format_idx);
-			*block_size = 1 << lbaf->block_size_exp;
-		} else {
-			*block_size = 4096;  // Default for non-NVMe devices
-		}
-		rv = 0;
+		rv = nvme_ioctl_get_size(path, ap);
 	} else if (req == BLKGETSIZE64) {
 		// Return device size in bytes
 		uint64_t *size_bytes = va_arg(ap, uint64_t*);
