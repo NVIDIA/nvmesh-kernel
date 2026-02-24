@@ -37,21 +37,8 @@ void syslog(int priority, const char *fmt, ...) {
 static bool nvmeibt_toma_is_running_as_a_utility(void);
 
 /************************************* srvr ***********************************/
-struct nvmeibs_toma_server_proc_buf; struct nvmeibt_host_name;
-#include "interfaces/srvr/nvmeibt_srvr_proc.h"
-#include "common/nvmeib_shared.h"
-#include "srv/nvmeibs_srv_toma_messages.h"		// For nvmeib_nl_uk_comm_msg, nvmeib_disk_info_reply
-
-struct TSB_server_toma_status_req_simu {
-	int n_srvr_msg_idx;					// Ever increasing number
-	int n_toma_replies_received;
-	int expecting_reply_cookie;			// If sent a message to toma and expecting a reply, store it
-	int max_reply_length_bytes;
-	int n_msgs_to_registrants;
-	enum nvmeibs_toma_server_msg_type msg_q[16];
-};
-
-struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void);
+#include "server/sandbox_nvmeibs_toma.h"
+static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
 void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *me) {
 	me->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
@@ -62,7 +49,7 @@ void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu
 }
 
 bool server_simu_has_next_msg_for_toma(void) {
-	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	me->n_srvr_msg_idx++;
 	return (me->n_srvr_msg_idx < 16) && (me->msg_q[me->n_srvr_msg_idx] != 0);
 }
@@ -75,7 +62,7 @@ void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_s
 }
 
 ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
 	enum nvmeibs_toma_server_msg_type msg_type;
 	(void)fd; (void)flags;
@@ -108,7 +95,7 @@ ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t off
 }
 
 static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	const struct nvmeibs_toma_server_proc_buf *m = buf;
 	const enum nvmeibs_toma_server_msg_type type = m->type;
 	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
@@ -141,7 +128,7 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 }
 
 static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_server_toma_status_req_simu *me = TSB_server_toma_status_req_simu_get();
+	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	const struct nvmeibs_toma_client_proc_buf *m = buf;
 	const u32 cid = (m->handle >> 32);		// Todo: Find client in hash
 	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
@@ -154,16 +141,6 @@ static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf,
 }
 
 /************************************* FD/Sockets ********************************/
-static ssize_t _send_illegal_trap(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	BUG_ON(true || (fd < 2) || (n == 0) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
-	return 0;
-}
-
-static ssize_t _recv_illegal_trap(int fd, void *buf, size_t n, off_t offset, int flags) {
-	BUG_ON(true || (fd < 2) || (n == 0) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
-	return 0;
-}
-
 static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags) {
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON((fd < 2) || (n == 0));
@@ -232,11 +209,8 @@ struct t_sandbox_all {
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_fd_otherside o;
 	} TSB_udev, TSB_rpc, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
-	struct TSB_server {
-		struct TSB_fd_otherside o;
-	} TSB_srvr2toma, TSB_toma2srvr, TSB_toma2clnt;	// Toma 3 extern communication via server
 	struct kafka_simulator_t *kafka_simu;
-	struct TSB_server_toma_status_req_simu s_req_simu;
+	struct nvmeibs_simulator *srvr;
 	struct TSB_pending_disk_add {
 		// Pending disk ADD event to be sent in a later iteration of the main loop.
 		// This simulates the delay between disk_freeze (REMOVE) and disk_unfreeze (ADD)
@@ -319,7 +293,6 @@ static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 	return n;
 }
 
-void sandbox_server_init(void);
 void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
 	sys->os.fs.debug_offset = 10000;
@@ -328,10 +301,9 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	pthread_mutex_init(&sys->os.fs.mutex, NULL);
-	sandbox_server_init();
+	sys->srvr = sandbox_server_init(&sys->os.TSB_netlink);
 	pthread_mutex_init(&sys->os.TSB_wake_pip.mutex, NULL);
 	sandbox_nvme_init();
-	TSB_server_toma_status_req_simu_init(&sys->s_req_simu);
 
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		for (int i = 0; i < sys->cfg.n_nodes; i++)
@@ -353,21 +325,16 @@ void t_sandbox_all_destroy(void) {
 		toma_unit_test_thread_destroy();
 		mgmt_sim_verify_at_end();
 	}
-	TSB_server_toma_status_req_simu_destroy(&sys->s_req_simu);
+	sandbox_server_destroy(sys->srvr);
 	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
 	sandbox_kafka_destroy(sys->kafka_simu);
 	pthread_mutex_destroy(&sys->os.fs.mutex);
-	pthread_mutex_destroy(&sys->os.TSB_netlink.mutex);
 	pthread_mutex_destroy(&sys->os.TSB_wake_pip.mutex);
 	sb_cluster_conf_destroy(&sys->cfg);
 	BUG_ON(!nvmeibt_toma_is_running_as_a_utility() && (sys->os.TSB_netlink.n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	TSB_all_fds_tbl_destroy(&sys->os.fs);
 	free(sys);
 	sys = NULL;
-}
-
-struct TSB_server_toma_status_req_simu *TSB_server_toma_status_req_simu_get(void) {
-	return &sys->s_req_simu;
 }
 
 static struct TSB_fd_impl * TSB_socket_find_by_fd(int fd) {		// Look up and return a socket object by fd. Bug if not found. Sandbox environment should emulate all fd's
@@ -493,7 +460,8 @@ static void TSB_process_pending_disk_add_event(void);
 
 // Netlink send callback: Toma sends a request, we parse it and queue responses
 static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	struct TSB_netlink_mock *nl = &sys->os.TSB_netlink;
+	struct nvmeibs_simulator *s = g_srvr_simu;
+	struct TSB_netlink_mock *nl = s->nl;
 	const struct nlmsghdr *nlh = (const struct nlmsghdr *)buf;
 	const struct nvmeib_nl_uk_comm_msg *req_msg = NLMSG_DATA(nlh);
 	int n_payload_bytes_remainig = (int)n - ((const char*)req_msg->data - (const char*)buf);
@@ -526,16 +494,14 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		n_payload_bytes_remainig -= sizeof(*fmt_disk);
 		TSB_netlink_handle_format_disk(req_msg, fmt_disk);
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_other) {
-		struct TSB_server *s = &sys->TSB_toma2srvr;
 		const struct nvmeibs_toma_server_proc_buf *m = (typeof(m))req_msg->data;
-		const ssize_t exec_rv = s->o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
+		const ssize_t exec_rv = s->com_toma2srvr_o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
 		if (exec_rv > 0)
 			n_payload_bytes_remainig -= (int)exec_rv;		// Mark Consumed bytes
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_to_io_clients) {
-		struct TSB_server *s = &sys->TSB_toma2clnt;
 		const struct nvmeibs_toma_client_proc_buf *m = (typeof(m))req_msg->data;
-		const ssize_t exec_rv = s->o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
+		const ssize_t exec_rv =s->com_toma2clnt_o.send(0xDEAD /*s->o.sock->fd*/, m, req_msg->len - (int)sizeof(*req_msg), 0, 'N');
 		TSB_netlink_reply_to_blocked_toma(req_msg, (int)exec_rv);
 		if (exec_rv > 0)
 			n_payload_bytes_remainig -= (int)exec_rv;		// Mark Consumed bytes
@@ -585,19 +551,19 @@ void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	} else if (strstr(s->addr.sun_path, "epoll")) {				s->other_side = &sys->os.TSB_epoll.o;
 	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {	s->other_side = &sys->os.TSB_wake_pip.o[0];
 		s->other_side->recv = _wakeup_pipe_wakeup_recv;
-		s->other_side->send = _send_illegal_trap;
+		s->other_side->send = fd_otherside_read_only_illegal_send;
 		s->other_side->has_data = _wakeup_pipe_should_wakeup;	// o[0] Toma main thread read wakeups messages from other threads. Never writes
 	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair1")) {	s->other_side = &sys->os.TSB_wake_pip.o[1];
 		s->other_side->send = _wakeup_pipe_wakeup_send;			// o[1] Toma aux thread write to wakeup toma main thread. Never reads
-		s->other_side->recv = _recv_illegal_trap;
-	} else if (strstr(s->addr.sun_path, "server_events")) {		s->other_side = &sys->TSB_srvr2toma.o;
-	} else if (strstr(s->addr.sun_path, "toma_server")) {		s->other_side = &sys->TSB_toma2srvr.o;
-	} else if (strstr(s->addr.sun_path, "toma_clients")) {		s->other_side = &sys->TSB_toma2clnt.o;
+		s->other_side->recv = fd_otherside_write_only_illegal_recv;
+	} else if (strstr(s->addr.sun_path, "server_events")) {		s->other_side = &sys->srvr->com_srvr2toma_o;
+	} else if (strstr(s->addr.sun_path, "toma_server")) {		s->other_side = &sys->srvr->com_toma2srvr_o;
+	} else if (strstr(s->addr.sun_path, "toma_clients")) {		s->other_side = &sys->srvr->com_toma2clnt_o;
 	} else if (strstr(s->addr.sun_path, "km_comm_pair0")) {		s->other_side = &sys->os.TSB_km_sock_pair.o[0];
 		s->other_side->send = _socket_pair_wakeup_send;			// o[0] Toma writes to it to wakeup server lib main thread. Never reads
-		s->other_side->recv = _recv_illegal_trap;
+		s->other_side->recv = fd_otherside_write_only_illegal_recv;
 	} else if (strstr(s->addr.sun_path, "km_comm_pair1")) {		s->other_side = &sys->os.TSB_km_sock_pair.o[1];
-		s->other_side->send = _send_illegal_trap;				// o[1] ServerLib reads from it to wakeup. Never writes
+		s->other_side->send = fd_otherside_read_only_illegal_send;			// o[1] ServerLib reads from it to wakeup. Never writes
 		s->other_side->recv = _socket_pair_wakeup_recv;
 		s->other_side->has_data = _socket_pair_should_wakeup;
 	} else {
@@ -605,23 +571,35 @@ void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	}
 	s->other_side->sock = s;
 }
-
-void sandbox_server_init(void) {
-	struct TSB_fd_otherside *o = &sys->TSB_toma2srvr.o;
+struct nvmeibs_simulator *sandbox_server_init(struct TSB_netlink_mock *nl) {
+	struct nvmeibs_simulator *s = g_srvr_simu = (typeof(s))calloc(1, sizeof(*s));
+	struct TSB_fd_otherside *o = &s->com_toma2srvr_o;
 	o->send = _srvr_simu_nvmeibs_toma_server_proc_recv;
-	o->recv = _recv_illegal_trap;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
-	o = &sys->TSB_srvr2toma.o;
+	o->recv = fd_otherside_write_only_illegal_recv;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
+	o = &s->com_srvr2toma_o;
 	o->recv = server_simu_get_next_msg_for_toma;
-	o->send = _send_illegal_trap;				// Via this fd server sends msgs to Tom, Toma never replies back
+	o->send = fd_otherside_read_only_illegal_send;				// Via this fd server sends msgs to Tom, Toma never replies back
 	o->has_data = server_simu_has_next_msg_for_toma;
-	o = &sys->TSB_toma2clnt.o;
+	o = &s->com_toma2clnt_o;
 	o->send = _srvr_simu_nvmeibs_toma_client_proc_recv;
-	o->recv = _recv_illegal_trap;
-	o = &sys->os.TSB_netlink.o;
+	o->recv = fd_otherside_write_only_illegal_recv;
+
+	s->nl = nl;
+	o = &nl->o;
 	o->send = _netlink_recv_msg_from_toma;
 	o->recv = _netlink_reply_to_toma;
 	o->has_data = TSB_netlink_queue_has_something;
-	pthread_mutex_init(&sys->os.TSB_netlink.mutex, NULL);
+	pthread_mutex_init(&nl->mutex, NULL);
+	TSB_server_toma_status_req_simu_init(&s->s_req_simu);
+	return s;
+}
+
+void sandbox_server_destroy(struct nvmeibs_simulator *s) {
+	TSB_server_toma_status_req_simu_destroy(&s->s_req_simu);
+	pthread_mutex_destroy(&s->nl->mutex);
+	BUG_ON(s != g_srvr_simu);
+	free(s);
+	g_srvr_simu = NULL;
 }
 
 static bool sbfd_is_a_file(const struct TSB_fd_impl* s) {
@@ -1266,13 +1244,11 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 static void __temp_wait_sleep(void) { nanosleep(&(struct timespec){0, 10*1000*1000}, NULL); /* 100ms */ }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
-	struct TSB_fd_impl *nl_sock = sys->os.TSB_netlink.o.sock;
-	struct TSB_fd_impl *ls_sock = sys->TSB_srvr2toma.o.sock;
 	const struct TSB_server_comm_wakeup_mock *w = &sys->os.TSB_km_sock_pair;
-	const int nl_fd = nl_sock->fd, ls_fd = ls_sock->fd;
+	const int nl_fd = sys->os.TSB_netlink.o.sock->fd, ls_fd = sys->srvr->com_srvr2toma_o.sock->fd;
 	const bool monitor_nl = FD_ISSET(nl_fd, readfds), monitor_wakup = FD_ISSET(w->o[1].sock->fd, readfds), monitor_ls = FD_ISSET(ls_fd, readfds);
 	int n_events, n_iterations;
-	BUG_ON(!nl_sock || !readfds || !ls_sock || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd) || (nfds <= ls_fd));	// Wrong select from Toma production code
+	BUG_ON(!readfds || (nfds <= nl_fd) || (nfds <= w->o[1].sock->fd) || (nfds <= ls_fd));	// Wrong select from Toma production code
 	FD_ZERO(readfds); if (writefds) FD_ZERO(writefds); FD_ZERO(exceptfds);
 	for (n_events = 0, n_iterations = 0; n_events == 0; n_iterations++) { // Throttled km_comm select, todo, use timeout
 		if (monitor_nl && sys->os.TSB_netlink.o.has_data()) {	// Check if netlink socket is in the read set and we have queued messages, prepared by server_simu_get_next_msg_for_toma
@@ -1283,7 +1259,7 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 			FD_SET(w->o[1].sock->fd, readfds);				// Toma sends message via netlink
 			n_events++;
 		}
-		if (monitor_ls && sys->TSB_srvr2toma.o.has_data()) { // Check if local servers message arrived
+		if (monitor_ls && sys->srvr->com_srvr2toma_o.has_data()) { // Check if local servers message arrived
 			FD_SET(ls_fd, readfds);
 			n_events++;
 		}

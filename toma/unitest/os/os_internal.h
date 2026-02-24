@@ -3,6 +3,7 @@
 /* Emulation of operating system backend which implements the public API */
 #include "os_public.h"
 #include <sys/un.h>
+#include "../sandbox_util.h"
 
 #define OFFSET_NONE ((off_t) -1)				// Offset used to indicate a non-random-access operation like send()/recv() or read()/write(), rather than a random access operation like pread()/pwrite().
 struct TSB_fd_otherside {		// Every file descriptor (file, socket, ...) implementation must derive from this sub class. Sandbox injects data to Toma via those functions
@@ -14,6 +15,16 @@ struct TSB_fd_otherside {		// Every file descriptor (file, socket, ...) implemen
 	bool    (*has_data)(void);									// epoll()/select() on this socket/file-descriptor
 	struct TSB_fd_impl *sock;									// Pointer to the file descriptor structure which uses me
 };
+
+static inline ssize_t fd_otherside_read_only_illegal_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
+	BUG_ON(true || (fd < 2) || (n == 0) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
+	return 0;
+}
+
+static inline ssize_t fd_otherside_write_only_illegal_recv(int fd, void *buf, size_t n, off_t offset, int flags) {
+	BUG_ON(true || (fd < 2) || (n == 0) || (buf == NULL) || (offset != OFFSET_NONE) || (flags != 0));
+	return 0;
+}
 
 /*****************************************************************************/
 struct TSB_fd_impl {			// Implementation of a single file descriptor (file/bdev/socket/etc... used by Toma)
@@ -66,7 +77,7 @@ struct TSB_operating_system_impl {				// Sandbox for all services Toma needs fro
 	struct TSB_netlink_mock {
 		struct TSB_fd_otherside o;				// Here server simulator will connect as other side
 		unsigned n_recv_msgs;
-		pthread_mutex_t mutex;					// Thread-safe message queue for netlink responses
+		pthread_mutex_t mutex;					// Thread-safe message queue for netlink access (by server-lib Toma thread and by server simulator )
 		#define TSB_NL_QUEUE_SIZE 8				// Simple fixed-size queue of messages
 		#define TSB_NL_MSG_SIZE 512
 		struct {
