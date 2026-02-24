@@ -391,7 +391,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	struct nvmeibc_cmd_lock *l = &locksets[lsi], *lo = &locksets[l->owner_idx];
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	struct nvmeibc_disk_segment *seg = l->ds;
-	struct nvmeibc_disk *disk = nvmeibc_disk_from_base(seg->disk);
+	struct nvmeibc_idisk *disk = seg->disk;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (unlikely(lo->unlock_val == RELEASE_LOCK__FORCE_ABANDON)) {
@@ -402,7 +402,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	}
 
 	if (!NCL_do_i_have_lock(l->status)) {
-		WARN(!NCL_is_failed_to_acquire(l->status), "Bug in nvmeibc! locksets=%p[lsi=%d] %d l=%p 0x%llx disk=%s\n", locksets, lsi, l->status, l, l->address, ((disk)->base.ops.get_full_name(&((disk))->base))); // Dont have lock and didnt fail to take it. So what was I trying to do???
+		WARN(!NCL_is_failed_to_acquire(l->status), "Bug in nvmeibc! locksets=%p[lsi=%d] %d l=%p 0x%llx disk=%s\n", locksets, lsi, l->status, l, l->address, disk->ops.get_full_name(disk)); // Dont have lock and didnt fail to take it. So what was I trying to do???
 		__print_release_lock_status(t4_rel_lock, "Not releasing untaken lock", l);
 		return dp_locks_complete_lock(locksets, 1, lsi, true);
 	}
@@ -416,7 +416,7 @@ static void dp_locks_release_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 		__set_cmpxchg_for_release(l, seg);
 		nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds ? locksets->cmds->o : NULL, l);
 		dp_locks_trace_lock_release(locksets->cmds ? locksets->cmds->o : NULL, l);
-		rv = icore_ops->run_cmpxchg(icore_ops, &disk->base, handle_of(seg), l->address, dc);
+		rv = icore_ops->run_cmpxchg(icore_ops, disk, handle_of(seg), l->address, dc);
 		if (rv < 0) { // Simulate failed release completion
 			dc->lock_status = NCL_STATUS_FAIL_NO_COMP;
 			dc->callback(dc, nvmeibc_d_rdma_comp_tag_make());
