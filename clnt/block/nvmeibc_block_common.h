@@ -218,7 +218,7 @@ struct nvmeibc_subscription_ctx {
 	void *mem_handle;		/* Opaque referenence to low level disk-locks */
 	enum nvmeibc_subscription_status status;
 	spinlock_t death_lock;	  /* Atomic write access to live status of this TR, or read access + taking a drainer ref */
-	struct nvmeibc_disk *disk;	// Physical disk on which segment resided
+	struct nvmeibc_idisk *disk;	// Physical disk on which segment resided
 	#ifdef DEBUG_TOPO_CNTRS
 		atomic_t n_registers; /* Allert if segment registered twice */
 	#endif

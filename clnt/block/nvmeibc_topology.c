@@ -274,7 +274,7 @@ static void __seg_prepare_for_free(struct nvmeibc_disk_segment *seg,
 {
 	unsigned long flags;
 	struct nvmeibc_subscription_ctx *tr = seg->toma_reg;	// seg still holds ref to tr.
-	tr->disk = nvmeibc_disk_from_base(seg->disk);
+	tr->disk = seg->disk;
 	if (is_detached_topo) {
 		// Daniel Todo: EXC-1920, This WARN_ON should always be tested, not only on detach.
 	    WARN(seg->registration_status, "nvmeibc bug, segment was not unregistered tr=%p", tr);
@@ -2908,7 +2908,7 @@ static int __subscribe_seg(struct nvmeibc_disk_segment *seg, int c, int r1,
 	seg->toma_reg->r1 = r1;
 	seg->toma_reg->seg= si;
 	seg->toma_reg->protocol_version = NVMEIBT_CLIENT_PROTO_VERSION;		// Default, talk on the latest (highest) protocol version
-	seg->toma_reg->disk = nvmeibc_disk_from_base(seg->disk); // Only for debugging reason
+	seg->toma_reg->disk = seg->disk; // Only for debugging reason
 	seg->toma_reg->nt = nt;			// To be able to print inserted tr right away
 	nvmeibc_trs_hash_insert(seg->toma_reg);
 

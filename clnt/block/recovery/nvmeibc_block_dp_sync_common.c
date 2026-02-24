@@ -5,7 +5,6 @@
 
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "block/nvmeibc_block_common.h"
-#include "nvmeibc_disk.h"
 #include "nvmeibc_icore_ops.h"
 #include "nvmeibc_block_dp_sync_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"
@@ -14,7 +13,6 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 #include "block/recovery/nvmeibc_block_sync_profiling_stages.h"
 #include "block/datapath_ec/nvmeibc_block_dp_ec.h"
-#include "block/datapath_mirror/nvmeibc_block_dp_mirror.h"
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeibc_io_pet.h"

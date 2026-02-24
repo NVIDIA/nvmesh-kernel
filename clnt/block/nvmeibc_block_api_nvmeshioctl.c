@@ -318,7 +318,7 @@ static int __dump_transfers(const struct nvmeibc_cinst_params_blk *unused_p, str
 		u64 diskp = 0;
 		p.action = 'd'; /* Print of single disk, deprecated v1.2.1 ioctls */
 		sscanf(cmd + 1, "%llx", &diskp); /* Skip ' ' */
-		icore_ops->dump_transfers(icore_ops, &((struct nvmeibc_disk *)diskp)->base);
+		icore_ops->dump_transfers(icore_ops, (struct nvmeibc_idisk *)diskp);
 	} else {
 		_NI_to_user(t_ya_dp_dbg_tools, QA_BLOCK_PREFIX, "@DEV_NAME unknown cmd @CMD_STR", dev->name, cmd);
 		goto _out;

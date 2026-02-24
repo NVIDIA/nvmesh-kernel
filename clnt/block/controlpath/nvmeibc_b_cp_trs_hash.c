@@ -32,7 +32,7 @@ static int nvmeibc_trs_hash_tostring_rec(char *buf, int len, struct rb_node *rb)
 			tr->nt->device_name : "Zombie";
 		BUF_ADD("0x%-14llx- %s(%d,%d,%d), disk %s [%llu..%llu]\n",
 			tr->handle, dev_name, tr->ch, tr->r1, tr->seg,
-			((tr->disk)->base.ops.get_name(&((tr->disk))->base)), tr->first_lba, tr->first_lba+tr->length-1);
+			(tr->disk)->ops.get_name(tr->disk), tr->first_lba, tr->first_lba+tr->length-1);
 	}
 	pos += nvmeibc_trs_hash_tostring_rec(buf + pos, len - pos, rb->rb_right);
 	return pos;
@@ -127,7 +127,7 @@ int nvmeibc_trs_detect_config_corruption(const struct nvmeibc_cinst_params_blk *
 				WARN(1, "nvmeibc corruption: segments intersect: disk=%s "
 				   "lba1=%llu, len1=%llu, lba2=%llu, len2=%llu "
 				   "s1=(%d,%d,%d), s2=(%d,%d,%d)\n",
-				   ((tr1->disk)->base.ops.get_name(&((tr1->disk))->base)),
+				   (tr1->disk)->ops.get_name(tr1->disk),
 				   tr1->first_lba, tr1->length,
 				   tr2->first_lba, tr2->length,
 				   tr1->ch, tr1->r1, tr1->seg,
@@ -229,7 +229,7 @@ static void __tr_destroy(struct nvmeibc_subscription_ctx *tr)
 	_NT(trace_b_cp_trs_hash_tr_destroy, "@DEV_NAME" SEGMENT_FMT " TOMA unsubscribe: handle=@HANDLE disk=@DISK", dev_name, tr->ch, tr->r1, tr->seg, tr->handle, tr->disk);
 	WARN(tr->status != NVMEIBC_SUBSCRIPTION_STATUS_DEAD, "tr->status=%d\n", tr->status);
 	WARN_ON(!nvmeibc_trs_hash_was_removed(tr));
-	rv = icore_ops->toma_unsubscribe(icore_ops, &tr->disk->base, (u64)tr->handle);
+	rv = icore_ops->toma_unsubscribe(icore_ops, tr->disk, (u64)tr->handle);
 	if (unlikely(rv < 0)) {
 		_NT(warn_b_cp_trs_hash_tr_destroy, "@DEV_NAME" SEGMENT_FMT " TOMA unsubscribe failed(@RV): disk=@DISK", dev_name, tr->ch, tr->r1, tr->seg, rv, tr->disk);
 	}
@@ -246,7 +246,7 @@ int nvmeibc_trs_hash_subscribe(struct nvmeibc_subscription_ctx *tr,
 {
 	int rv;
 	params->arg = tr->handle;
-	rv = nvmeibc_disk_subscribe_toma_service(tr->disk, params->arg, params);
+	rv = nvmeibc_disk_subscribe_toma_service(nvmeibc_disk_from_base(tr->disk), params->arg, params);
 	if (unlikely((rv < 0) && (rv != -EAGAIN))) {
 		rv = -ENODEV;
 		nvmeibc_trs_hash_remove(tr);
