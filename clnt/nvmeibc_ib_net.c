@@ -1106,7 +1106,7 @@ static int scq_kthread_func(void *arg)
 {
 	struct nvmeibc_ib_net *net = arg;
 	unsigned long flags;
-	int n, tot = 0;
+	int tot = 0;
 	u64 busy_ns;
 	bool continue_polling;
 
@@ -1129,17 +1129,10 @@ static int scq_kthread_func(void *arg)
 		}
 
 		//process_send_cq_offload_enb_
-		n = polling_process_send_cq_(net, REQ_NOTIFY_FALSE, NULL, &busy_ns);
-		if (n >= 0) {
-			tot += n;
-			continue_polling = n > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, n, busy_ns);
-			if (continue_polling) {
-				/* prevent soft lockup */
-				if (kthread_should_stop())
-					goto put_ref;
-				cond_resched();
-				continue;
-			}
+		polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, &busy_ns);
+		if (continue_polling) {
+			cond_resched();
+			continue;
 		}
 
 		_NDn(trace_2_ib_net_scq_kthread_func, net, "transition back to IRQ");
@@ -1181,33 +1174,9 @@ static int scq_kthread_func(void *arg)
 		/* Step 3: Write Barrier */
 		smp_mb();
 
-		/* This step is only needed if the previous poll was successful */
-		if (n >= 0) {
-			/* Step 4: Enable interrupts using ib_req_notify_cq */
-			n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
-		}
-	
-		if (n >= 0) {
-			tot += n;
-			if (continue_polling) {
-				/* We missed an event or didn't manage to empty the CQ, so we need to undo the transition and poll again */
-				_NDn(trace_6_ib_net_scq_kthread_func, net, "failed to arm CQ, keep running");
-				if (kthread_should_stop())
-					goto put_ref;
-				WRITE_ONCE(net->scq_poll_mode, NVMEIBC_IB_CQ_POLLING);
-				set_current_state(TASK_RUNNING);
-				smp_mb();
-				cond_resched();
-				continue;
-			}
-		}
-
-		/* Step 5: Read Barrier */
-		smp_mb();
-
 		/* Step 6: Check state if interrupt has changed it to polling mode */
-		if ((READ_ONCE(net->scq_poll_mode) != NVMEIBC_IB_CQ_INTR) && (n >= 0) &&
-			!atomic_read(&net->dying)) 
+		if ((READ_ONCE(net->scq_poll_mode) != NVMEIBC_IB_CQ_INTR) &&
+			!atomic_read(&net->dying))
 		{
 			_NDn(trace_3_ib_net_scq_kthread_func, net, "intr during transition to intr-mode, keep running");
 			set_current_state(TASK_RUNNING);
@@ -1863,15 +1832,10 @@ static int rcq_kthread_func(void *arg)
 			BUG();
 		}
 
-		n = polling_process_recv_cq_(net, REQ_NOTIFY_FALSE, NULL, &busy_ns);
-		if (n >= 0) {
-			tot += n;
-			continue_polling = n > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, tot, busy_ns);
-			if (continue_polling) {
-				/* prevent soft lockup */
-				cond_resched();
-				continue;
-			}
+		n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, &busy_ns);
+		if (continue_polling) {
+			cond_resched();
+			continue;
 		}
 
 		_NDn(trace_2_ib_net_rcq_kthread_func, net, "transition back to IRQ");
@@ -1910,30 +1874,6 @@ static int rcq_kthread_func(void *arg)
 		set_current_state(TASK_INTERRUPTIBLE);
 
 		/* Step 3: Write Barrier */
-		smp_mb();
-
-		/* This step is only needed if the previous poll was successful */
-		if (n >= 0) {
-			/* Step 4: Enable interrupts using ib_req_notify_cq */
-			n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
-		}
-		
-		if (n >= 0) {
-			tot += n;
-			if (continue_polling) {
-				/* We missed an event or didn't manage to empty the CQ, so we need to undo the transition and poll again */
-				_NDn(trace_7_ib_net_rcq_kthread_func, net, "failed to arm CQ, keep running");
-				if (kthread_should_stop())
-					goto put_ref;
-				WRITE_ONCE(net->rcq_poll_mode, NVMEIBC_IB_CQ_POLLING);
-				set_current_state(TASK_RUNNING);
-				smp_mb();
-				cond_resched();
-				continue;
-			}
-		}
-
-		/* Step 5: Read Barrier */
 		smp_mb();
 
 		/* Step 6/7: Check state if interrupt has changed it to polling mode */
