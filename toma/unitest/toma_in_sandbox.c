@@ -192,7 +192,6 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	pthread_mutex_init(&sys->os.fs.mutex, NULL);
 	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);
 	pthread_mutex_init(&sys->os.TSB_wake_pip.mutex, NULL);
-	sandbox_nvme_init();
 
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		for (int i = 0; i < sys->cfg.n_nodes; i++)

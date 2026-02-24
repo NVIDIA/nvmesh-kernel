@@ -546,6 +546,7 @@ struct nvmeibs_simulator *nvmeibs_simu_init(struct TSB_netlink_mock *nl) {
 	o->has_data = TSB_netlink_queue_has_something;
 	pthread_mutex_init(&nl->mutex, NULL);
 	TSB_server_toma_status_req_simu_init(&s->s_req_simu);
+	sandbox_nvme_init();
 	return s;
 }
 

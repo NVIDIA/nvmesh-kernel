@@ -3,8 +3,7 @@
 
 #include "sandbox_util.h"
 
-void sandbox_nvme_init(void);
-
+// API towards server simulator
 struct sandbox_nvme_lbaf {			// NVMe LBA format descriptor. Matches the structure used in NVMe Identify NS response.
 	uint8_t block_size_exp;			// Block size as exponent of 2 (9=512, 12=4096) bytes
 	uint16_t metadata_size;			// Metadata size in bytes (0 or 8) bytes
@@ -30,7 +29,7 @@ struct sandbox_nvme_device {
 	enum SANDBOX_NVME_FMT_e current_format_idx;		// Mutable, format operations can update it.
 };
 
-//const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *path /* == /dev/nvme...n1 */);
+void sandbox_nvme_init(void);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id /* e.g. NVMD_SN_002.1 */);
 struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(  const char *disk_id /* e.g. NVMD_SN_002.1 */);
@@ -38,6 +37,7 @@ int sandbox_nvme_get_device_count(void);
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev);
 int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_FMT_e fmt_idx);	// Format a device: update LBA format and erase disk content. return 0 on success, -1 if format index invalid or I/O error
 
+// API towards operating system
 #include <stdarg.h>				// va_list
 int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap);
 int nvme_ioctl_get_size( const char *path,         va_list ap);
