@@ -2,7 +2,6 @@
 #include "nvmeibt_debug.h"				// Binary traces
 #include "sandbox_nvmeibs_toma.h"
 #include "../sandbox_nvme.h"
-#include "utils/nvmeib_jdr/nvmeib_txt.h"
 
 static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
@@ -458,31 +457,26 @@ void TSB_process_pending_disk_add_event(void) {
 	}
 }
 
-static int format_disks_csv(char *buf, size_t buf_size) {
+static int format_disks_csv(char *buf, int buf_size) {
 	const int device_count = sandbox_nvme_get_device_count();
-	struct nvmeib_txt txt;
-	struct charvec buffer = {.base = buf, .len = buf_size };
-	struct charvec out;
+	int rv = 0;
 	BUG_ON((buf == NULL)||(buf_size == 0));
-	txt = nvmeib_txt_make(buffer);
-	nvmeib_txt_append(&txt, "%s\n", NVMEIBS_DISKS_CSV_HEADER);		/* Write header */
-
+	#define BUF_ADD(...) rv += (int)scnprintf(&buf[rv], buf_size - rv, __VA_ARGS__)
+	BUF_ADD("%s\n", NVMEIBS_DISKS_CSV_HEADER);		/* Write header */
 	for (int i = 0; i < device_count; ++i) {						/* Write each NVMesh (non-stock) disk */
 		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_index(i);
 		if (!d->stock_disk) {
 			const int disk_seq = TSB_get_seq_from_nvmesh_device_name(d->device_name);
 			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
 			BUG_ON(disk_seq < 0);
-			nvmeib_txt_append(&txt,
-				"%s.1,%u,%u,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
+			BUF_ADD("%s.1,%u,%u,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
 				d->serial_number, (unsigned)d->size_in_blocks, (unsigned)d->size_in_blocks, (1u << lbaf->block_size_exp),
 				disk_seq, d->device_name, lbaf->metadata_size, d->vendor_id, d->model_number, d->serial_number);
 		}
 	}
-	out = nvmeib_txt_finalize(&txt);
-	BUG_ON((out.base == NULL)||(out.len >= buf_size));		// buffer overflow/truncation or no room for trailing '\0'
+	BUG_ON(rv >= buf_size);		// buffer overflow/truncation or no room for trailing '\0'
 	N_Tf(fdc0001, "formatted disks CSV: @STR", buf);
-	return (int)out.len;
+	return rv;
 }
 
 static int format_smart_content(char *buf, size_t buf_size, const struct sandbox_nvme_device *dev) {	//	/proc/nvmeibs/smartX
