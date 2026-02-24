@@ -1320,7 +1320,7 @@ static inline struct nvmeibc_disk_lock_cmd * disk_to_lock(
 /*************************** Cold Recovery ************************************/
 
 struct nvmeibc_disk_jmdc_read_comp {
-	struct nvmeibc_disk *disk;			// Stores on which disk the read is performed
+	struct nvmeibc_idisk *disk;			// Stores on which disk the read is performed
 	u16 start_rng;
 	u16 num_rng;
 	bool dirty_only;
@@ -1351,7 +1351,7 @@ struct nvmeibc_disk_jmdc_read_comp {
 };
 
 struct nvmeibc_disk_free_jrnl_ents_comp {		// Command to serjio to free journal entries
-	struct nvmeibc_disk *disk;
+	struct nvmeibc_idisk *disk;
 	struct nvmeibc_disk_gen_cmd *gen_cmd;
 
 	char serjio_boot_id[NVMEIB_GID_STR_MAX];

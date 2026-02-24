@@ -1355,7 +1355,7 @@ static void __free_jrnl_ents_cb(struct nvmeibc_disk_free_jrnl_ents_comp *comp)
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	if (NCL_had_acquire_callback(comp->status))
-		icore_ops->cb_called_free_jrnl_ents(icore_ops, &comp->disk->base, comp);
+		icore_ops->cb_called_free_jrnl_ents(icore_ops, comp->disk, comp);
 	dp_ec_sync_stale_cb_stg_end(bcmd);
 }
 
@@ -1410,7 +1410,7 @@ static int send_recovered(struct htr_ctx *h, int si)
 
 		struct nvmeibc_disk_free_jrnl_ents_comp *free_ents_comp = &h->seg_info[si].free_ents_comp;
 		/* If we have a valid jentry, send the free ents command instead */
-		free_ents_comp->disk = nvmeibc_disk_from_base(h->params.raid1->segments[si].disk);
+		free_ents_comp->disk = h->params.raid1->segments[si].disk;
 		memcpy(free_ents_comp->seg_uuid, ds->uuid, NVMEIB_GID_STR_MAX);
 		free_ents_comp->recov_src = NVMEIB_RECOV_SRC_HTR;
 		free_ents_comp->blkset_slba = ds->first_lba + (h->so->rlba / h->so->r1->slice_size);
