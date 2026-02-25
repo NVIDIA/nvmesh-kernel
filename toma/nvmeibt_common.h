@@ -735,26 +735,8 @@ static inline BOOL is_128KB_aligned(uint64_t pba, int pblk_size)
 #define nvmeibt_topology_binary_topo_header			"BIN_TOPO"
 #define nvmeibt_topology_binary_active_topo_header	"ACT_TOPO"
 #define NVMEIBT_TOPOLOGY_BIN_NAME_LEN		(sizeof(nvmeibt_topology_binary_topo_header) - 1)
-// Ronen - my compiler unfortunately does not support the following (yet)
-//#if sizeof(nvmeibt_topology_binary_active_topo_header) != NVMEIBT_TOPOLOGY_BIN_NAME_LEN
-//#	error NVMEIBT_TOPOLOGY_BIN_NAME_LEN mismatch
-//#endif
 
-typedef struct {
-	volatile int counter;
-} atomic_t;
-
-#define atomic_read(v) ((v)->counter)
-
-static inline int atomic_add(int i, atomic_t *v)
-{
-	return __sync_add_and_fetch(&v->counter, i);
-}
-
-static inline void atomic_set(atomic_t *v, int i)
-{
-	v->counter = i;
-}
+#include "../common/compat/kr_incs_atomics.h"
 
 const char *get_file_type_str(const char *path);
 

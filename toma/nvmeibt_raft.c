@@ -1685,7 +1685,7 @@ static void raft_send_topo_cb(__attribute__((__unused__)) void *arg, int status)
 	struct timespec				now;
 	long long int				diff_timeout_nsec;
 
-	const int cnt = __sync_add_and_fetch(&cur_topo->in_transmission_cnt, -1); // atomic dec
+	const int cnt = atomic_dec_return(&cur_topo->in_transmission_cnt);
 	N_Tf(t_bb_1, "End of topo tx status=@INT, tx_remained=@INT", status, cnt);
 	if (cnt == 0) {
 		getnstimeofday_boot(&now);
@@ -1700,7 +1700,7 @@ static void raft_send_topo_cb(__attribute__((__unused__)) void *arg, int status)
 static void raft_send_topo_reply_cb(__attribute__((__unused__)) void *arg, int status)
 {
 	struct nvmeibt_topology		*cur_topo = nvmeibt_global_get_global();
-	const int cnt = __sync_add_and_fetch(&(cur_topo->in_transmission_rep_cnt), -1); // atomic dec
+	const int cnt = atomic_dec_return(&cur_topo->in_transmission_rep_cnt);
 	N_Tf(t_bb_10, "End of topo reply tx status=@INT, tx_remained=@INT", status, cnt);
 }
 
@@ -1814,11 +1814,11 @@ static int raft_send_msg_to_peer(
 		req.data_len = msg_data_len > 0 ? msg_data_len : 0;
 		if (is_with_raft_log) {							// We need a callback of send_msg finish to be able to reuse the buffer for next message
 			if (is_raft_leader_msg(msg_type)) {
-				const int cnt = __sync_add_and_fetch(&cur_topo->in_transmission_cnt, 1); 		// atomic inc
+				const int cnt = atomic_inc_return(&cur_topo->in_transmission_cnt);
 				N_Tf(t_bb_2, "Start of topo tx, tx_remained=@INT", cnt);
 				req.cbs.send_c = raft_send_topo_cb;
 			} else {
-				const int cnt = __sync_add_and_fetch(&cur_topo->in_transmission_rep_cnt, 1); 	// atomic inc
+				const int cnt = atomic_inc_return(&cur_topo->in_transmission_rep_cnt);
 				N_Tf(t_bb_20, "Start of topo reply tx, tx_remained=@INT", cnt);
 				req.cbs.send_c = raft_send_topo_reply_cb;
 			}
@@ -2411,10 +2411,11 @@ static bool is_srm_ready_to_accept_the_new_msgs(bool is_with_raft_log)
 	struct nvmeibt_node			*node;
 	struct timespec				now;
 	long long int				diff_timeout_nsec;
+	int int_tm_cnt = atomic_read(&cur_topo->in_transmission_cnt);
 
 	NFIN;
 	// SRM copies the header, but not the data, hence we are not allowed to modify the data when we have a transmission in the air
-	if (	!(cur_topo->in_transmission_cnt) ||
+	if (	!int_tm_cnt ||
 			!is_with_raft_log ||
 			!(cur_topo->is_update_csv_of_config_and_topo_required)) {
 		// This msg will not override the data of an active transmission
@@ -2424,18 +2425,19 @@ static bool is_srm_ready_to_accept_the_new_msgs(bool is_with_raft_log)
 	getnstimeofday_boot(&now);
 	diff_timeout_nsec = timespec_diff_ns(now, cur_topo->last_send_appendentries_timestamp);
 	if (diff_timeout_nsec < (raft_leader_heartbeat_timeout_nsec * RAFT_TX_WAIT_FACTOR)) {
-		N_Tf(c63b3ks, "Skipping. Awaiting previous transmission to finished, tx_remained=@INT, timeout=@INT64 ms", cur_topo->in_transmission_cnt, NSEC_TO_MSEC(diff_timeout_nsec));
+		N_Tf(c63b3ks, "Skipping. Awaiting previous transmission to finished, tx_remained=@INT, timeout=@INT64 ms", int_tm_cnt, NSEC_TO_MSEC(diff_timeout_nsec));
 		rv = 0;
 		goto out;
 	}
-	N_Tf(ysb38kw, "Timeout expired. Canceling all prev sends. tx_remained=@INT, timeout=@INT64 ms", cur_topo->in_transmission_cnt, NSEC_TO_MSEC(diff_timeout_nsec));
+	N_Tf(ysb38kw, "Timeout expired. Canceling all prev sends. tx_remained=@INT, timeout=@INT64 ms", int_tm_cnt, NSEC_TO_MSEC(diff_timeout_nsec));
 	NVMEIB_HASH_FOREACH(node, cur_topo->nodes_hash_by_uuid) {
 		if (!nvmeibt_node_is_my_node(node)) {
 			nvmeibt_node_cancel_send(node);
 		}
 	}
-	if (cur_topo->in_transmission_cnt) {
-		N_Tf(vn92msl, "SRM not ready yet. cancel did not finish its async work. in_transmission_cnt=@INT", cur_topo->in_transmission_cnt);
+	int_tm_cnt = atomic_read(&cur_topo->in_transmission_cnt);	// Reread updated value
+	if (int_tm_cnt) {
+		N_Tf(vn92msl, "SRM not ready yet. cancel did not finish its async work. in_transmission_cnt=@INT", int_tm_cnt);
 		rv = 0;
 		goto out;
 	}

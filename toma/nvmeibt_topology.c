@@ -1134,8 +1134,8 @@ int nvmeibt_topology_serialize_active_topology(void)
 	}
 	N_Tf(u87u86t, "shutdown_state=@INT", shutdown_state);
 
-	if (cur_topo->in_transmission_rep_cnt) {
-		N_Tf(i98nsg5, "Previous transmission not finished, tx_remained=@INT. Skipping for now", cur_topo->in_transmission_rep_cnt);
+	if (atomic_read(&cur_topo->in_transmission_rep_cnt)) {
+		N_Tf(i98nsg5, "Previous transmission not finished, tx_remained=@INT. Skipping for now", atomic_read(&cur_topo->in_transmission_rep_cnt));
 		goto out;
 	}
 

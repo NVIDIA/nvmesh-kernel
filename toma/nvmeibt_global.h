@@ -108,8 +108,8 @@ struct nvmeibt_topology {
 	int64_t						highest_seen_committed_kafka_mgmt_config_idx;
 	int64_t						highest_seen_committed_topo_config_idx;
 	int							config_tag;		// monotonic counter to mark objects added to the hash
-    int							in_transmission_cnt;
-    int							in_transmission_rep_cnt;
+	atomic_t					in_transmission_cnt;
+	atomic_t					in_transmission_rep_cnt;
     BOOL						is_update_csv_of_config_and_topo_required;
     struct nvmeibt_Buf			buf_of_follower_wire_topo;
 	struct nvmeibt_node			*my_node;

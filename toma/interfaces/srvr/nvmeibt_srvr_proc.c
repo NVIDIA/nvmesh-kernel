@@ -222,7 +222,7 @@ struct nvmeibt_km_comm {
 	msgs_list_t in_progress_msgs;	// In air messages, sent to server and awaiting reply, accessed only from main thread, or when it is dead, so no need for locks
 	disk_list_t disks;
 	pthread_mutex_t guard;			// Serialize Toma thread access
-	unsigned long unique_id_generator __attribute__((aligned(sizeof(long))));		// Ever increasing counter for msg id and others
+	atomic64_t unique_id_generator;	// Ever increasing counter for msg id and others
 	int spair[2];					// Wakeup socket-pair: Toma sends msgs to spair[0], our main thread selects on spair[1]. Read from spair[1] and passes msg to kernel or dispatch internally
 	pthread_t comm_thread;			// main thread which processes messages
 	//struct async_server_msg_api {
@@ -253,7 +253,7 @@ struct nvmeibt_km_comm {
 
 static unsigned long get_guid(struct nvmeibt_km_comm *p)
 {
-	return __sync_add_and_fetch(&p->unique_id_generator, 1);
+	return atomic64_inc_return(&p->unique_id_generator);
 }
 
 static void nvmeibt_km_comm_lock(struct nvmeibt_km_comm *p)

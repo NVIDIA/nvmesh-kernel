@@ -613,7 +613,7 @@ struct kafka_outgoing_msg {
 // Function runs in kafka main thread the thread that.
 static void all_producers_msg_to_mgmt_delivery_cb(rd_kafka_t *k, const rd_kafka_message_t *k_msg, void *opaque) {
 	struct kafka_outgoing_msg *msg = (struct kafka_outgoing_msg *)k_msg->_private;
-	const int n_in_air = atomic_add(-1, &kafka_n_sends_in_the_air);
+	const int n_in_air = atomic_dec_return(&kafka_n_sends_in_the_air);
 	NTOMA_ASSERT(tmiiakm1, ((n_in_air >= 0) && msg), "in_air_km=@INT, msgptr=@PTR. Memory corruption", n_in_air, msg);
 	(void)opaque;	// We use static vars instead of generic opaque context. If needed set with rd_kafka_conf_set_opaque()
 	N_Tf(jsnewij1, "@STR: k_handle=@PTR, in_air=@INT, msgptr=@PTR, err=@INT", rd_kafka_name(k), k, n_in_air, msg, k_msg->err);
@@ -644,14 +644,14 @@ static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_ms
 
 	if (val[val_len - 1] == '\0')
 		val_len -= 1;	// Seems as if the string terminating \0 is driving MGMT JSON parser crazy
-	n_in_air = atomic_add(1, &kafka_n_sends_in_the_air);       // If a msg is about to be sent, we know the n_sends_in_the_air was already increased
+	n_in_air = atomic_inc_return(&kafka_n_sends_in_the_air);       // If a msg is about to be sent, we know the n_sends_in_the_air was already increased
 	err = rd_kafka_produce(k_topic, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY, (void*)val, val_len, key, key_len, (void*)msg);
 	if (err == 0) {
 		N_Tf(b5v9skq, "@STR: produced key=@STR msgptr=@PTR, in_air_km=@INT", rd_kafka_topic_name(k_topic), key, msg, n_in_air);
 		NVMEIBT_LONG_TRACE_WRAPPER(tvsh875, "", val, val_len);
 		return 0;
 	}
-	n_in_air = atomic_add(-1, &kafka_n_sends_in_the_air);
+	n_in_air = atomic_dec_return(&kafka_n_sends_in_the_air);
 	NTOMA_ASSERT(tmiiakm0, (n_in_air >= 0), "in_air_km=@INT is negative. Memory corruption", n_in_air);
 	N_Wf(n58skal, "@STR: Failed to produce to kafka msg to err='@STR', in_air_km=@INT  (@AUTO_ERRNO)", rd_kafka_topic_name(k_topic), rd_kafka_err2name(rd_kafka_last_error()), n_in_air);
 	check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__FATAL);
@@ -1063,7 +1063,7 @@ static int parse_name_and_uuid(struct mm_json_elem *root, struct name_and_uuid_p
 /******************************************************************************/
 /*********************             CMD_consumer           *********************/
 /******************************************************************************/
-atomic_t			CMD_consumer_n_msgs_awaiting_toma_processing;		// Ronen Hod: This is a simple criteria. Commit is not mandatory or urgent. It is used only on the next restart, and it is an optimization.
+static atomic_t			CMD_consumer_n_msgs_awaiting_toma_processing;		// Ronen Hod: This is a simple criteria. Commit is not mandatory or urgent. It is used only on the next restart, and it is an optimization.
 struct keepAliveToken_params_ctx {
 	char			nodeID[64];
 	int64_t			zone_number;

@@ -967,7 +967,7 @@ out:
 	return ret;
 }
 
-atomic_t n_entries_in_the_toma_wakeup_pipe;
+static atomic_t n_entries_in_the_toma_wakeup_pipe;
 
 static void free_toma_wakeup(void)
 {
@@ -1051,7 +1051,7 @@ int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
 		N_Ef(tvsjkwi, "Fail to write type @STR to toma wakeup (@AUTO_ERRNO)", toma_wakeup_type_to_str(type));
 		goto out;
 	}
-	atomic_add(1, &n_entries_in_the_toma_wakeup_pipe);
+	atomic_inc(&n_entries_in_the_toma_wakeup_pipe);
 skip:
 	ret = 0;
 out:
@@ -1122,7 +1122,7 @@ static int toma_wakeup_event(void)
 		}
 		//
 		if (prev_read_buf_n_chars == sizeof(buf)) {
-			const int in_air_wakeups = atomic_add(-1, &n_entries_in_the_toma_wakeup_pipe);
+			const int in_air_wakeups = atomic_dec_return(&n_entries_in_the_toma_wakeup_pipe);
 			prev_read_buf_n_chars = 0;
 			N_Tf(trace_2_toma_toma_wakeup_event, "wakeup event type @TOMA_WAKEUP_TYPE_TO_STR ptr @PTR, remaining=@INT", toma_wakeup_type_to_str(buf.type), buf.ptr, in_air_wakeups);
 
