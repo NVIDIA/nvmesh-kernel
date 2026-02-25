@@ -7,6 +7,7 @@
 #include "sandbox_nvme.h"
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
+#include <sys/stat.h>
 
 static const struct sandbox_nvme_lbaf lbaf_table[SANDBOX_NVME_LBAF_COUNT] = {
 	[SANDBOX_NVME_FMT_512_0]  = { .block_size_exp = 9,  .metadata_size = 0 },  /* 512+0 */
@@ -46,7 +47,7 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  (2048ULL << 12),  SANDBOX_NVME_FMT_4096_0 },	/* 8MB */
+	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
 	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
 	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
 };
@@ -71,15 +72,15 @@ static void create_simulated_locks_file(const char *serial_number) {
 }
 
 // Set up the NVMe disk data. Currently just a static configuration, but ultimately we'll add dynamic modification adding and removing disks.
-static void disk_init_stock(const char *dest_path, const char *src_path);
+static void disk_init_stock(struct sandbox_nvme_device *dev, const char *src_path);
 static void disk_init_zeroed(const struct sandbox_nvme_device *dev);
 void sandbox_nvme_init(void) {
 	N_Tf(sbu3401, "initializing static simulated NVMe disks");
 	#define TEST_DATA_BUILD_DIR "99bin/testdata/"
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {	// sandbox_nvme_get_device_count
-		const struct sandbox_nvme_device *d = &nvme_devices[i];
+		struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (d->stock_disk) {
-			disk_init_stock(d->device_path, TEST_DATA_BUILD_DIR "disk_stock.img");
+			disk_init_stock(d, TEST_DATA_BUILD_DIR "disk_stock.img");
 		} else {
 			disk_init_zeroed(d);
 			create_simulated_locks_file(d->serial_number);
@@ -299,10 +300,15 @@ static int copy_file(const char *source_path, const char *dest_path) {
 	return err;
 }
 
-static void disk_init_stock(const char *dest_path, const char *src_path) {
-	N_Tf(lkg3946, "creating block device=@STR", dest_path);
-	unlink(dest_path);
-	copy_file(src_path, dest_path);
+static void disk_init_stock(struct sandbox_nvme_device *dev, const char *src_path) {
+	struct stat st;
+	unlink(dev->device_path);
+	copy_file(src_path, dev->device_path);
+	BUG_ON(stat(dev->device_path, &st) != 0);
+	dev->size_in_bytes = (uint64_t)st.st_size;
+	N_Tf(lkg3946, "creating sandbox stock disk device=@STR from=@STR size=@INT64_TD", dev->device_path, src_path, (int64_t)dev->size_in_bytes);
+	BUG_ON(dev->size_in_bytes == 0);
+	BUG_ON(dev->size_in_bytes % (1U << sandbox_nvme_get_lbaf(dev->current_format_idx)->block_size_exp) != 0);
 }
 
 static void disk_init_zeroed(const struct sandbox_nvme_device *dev) {

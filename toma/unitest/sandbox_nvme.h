@@ -30,7 +30,7 @@ struct sandbox_nvme_device {
 	const char *device_name;			// Short name for the device
 	const char *device_path;			// The path we actually use for the device, e.g. `_root/dev/nvme0n1`.
 	const bool stock_disk;
-	const uint64_t size_in_bytes;			// Physical capacity in bytes. Block count is derived dynamically: size_in_bytes / block_size.
+	uint64_t size_in_bytes;				// Physical capacity in bytes. Block count is derived dynamically: size_in_bytes / block_size. Stock disks derive this from the image file at init time.
 	enum SANDBOX_NVME_FMT_e current_format_idx;		// Mutable, format operations can update it.
 };
 
