@@ -854,7 +854,6 @@ static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
 			nvmeibt_abort(ES_FATAL);
 		}
 	} else {
-		stale_lock = NULL;      // not found
 		if (lockid.all != 0) {	// Client says there is a stale lock here
 			N_Wf(tstkrec, "No stale_lock, " STALE_BLKSET_FMT ". Ignoring",
 				 seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), lockid.all);
