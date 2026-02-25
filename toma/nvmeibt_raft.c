@@ -716,7 +716,9 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 
 		// Validation: incremental topo requires old complete topo
 		if (!old_wire_ctx || old_len == 0 || nvmeibt_tlv_get_type(old_wire_ctx) != TLV_TYPE_TOPO_COMPLETE) {
-			N_Ef(wer923k, "Old topo is empty or not complete type. Incremental topo update requires old complete topo to merge with");
+			N_Ef(wer923k, "Incremental topo update requires old complete topo to merge with. old_wire_ctx=@PTR old_len=@INT tlv_type=@INT8_TD",
+				old_wire_ctx, old_len, old_wire_ctx ? nvmeibt_tlv_get_type(old_wire_ctx) : (int8_t)-1);
+			nvmeibt_abort(ES_FATAL);
 			total_size = -1;
 			goto out;
 		}
