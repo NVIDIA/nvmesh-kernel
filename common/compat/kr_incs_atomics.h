@@ -4,8 +4,8 @@
 	// Kernel already has those functions. Define as compatibility for user-space
 #else
 	// https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
-	typedef struct { long long c; } atomic64_t, atomic_long_t; 	// c - counter. Artificial struct to support {0} initialization
-	typedef struct { int       c; } atomic_t;					// c - counter
+	typedef struct { long long c; } __attribute__((aligned(sizeof(long long)))) atomic64_t, atomic_long_t; 	// c - counter. Artificial struct to support {0} initialization
+	typedef struct { int       c; } __attribute__((aligned(sizeof(int))))       atomic_t;					// c - counter, force alignment to prevent a bug of using atomic fields in packed struct, splitting atomic to cachelines
 
 	// 32[bit]
 	#define ATOMIC_INIT(i)	{i}
@@ -25,9 +25,9 @@
 	static inline int atomic_xchg(       atomic_t *v, int n) { return __atomic_exchange_n(&v->c, n, __ATOMIC_SEQ_CST); } // x = v->c; v->c = n; return x
 	static inline int atomic_cmpxchg(atomic_t *v, int o, int n) {
 		int tmp = o;
-		__atomic_compare_exchange_n(&v->c, &tmp, n, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+		(void)__atomic_compare_exchange_n(&v->c, &tmp, n, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 		return tmp;
-	} // v->c = ((v->c==o)?n:o); return v->c; }
+	} // const int prev = v->c; if (v->c==o) v->c = n; return prev; }
 
 	// 64[bit]
 	static inline void atomic64_set(atomic64_t *v, long long i) {       __atomic_store_n(  &v->c, i, __ATOMIC_SEQ_CST); }
