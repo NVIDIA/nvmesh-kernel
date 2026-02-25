@@ -667,7 +667,16 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 				BUG_ON(ep->evs[i].__fd == __fd);	// Double add to epoll
 			ep->evs[ep->n_fds] = *ev;  ep->evs[ep->n_fds].__fd = __fd; ep->n_fds++;  break;
 		}
-		case EPOLL_CTL_DEL: ep->n_fds--; memset(&ep->evs[ep->n_fds], 0, sizeof(ep->evs[0])); break;
+		case EPOLL_CTL_DEL: {
+			int found = -1;
+			for (int i = 0; i < ep->n_fds; i++) {
+				if (ep->evs[i].__fd == __fd) { found = i; break; }
+			}
+			BUG_ON(found < 0);
+			ep->evs[found] = ep->evs[--ep->n_fds];
+			memset(&ep->evs[ep->n_fds], 0, sizeof(ep->evs[0]));
+			break;
+		}
 		case EPOLL_CTL_MOD: default : BUG_ON(true); break;
 	}
 	return 1;
