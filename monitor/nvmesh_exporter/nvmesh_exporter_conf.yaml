@@ -697,6 +697,66 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
                   help: 'path restarts by reason'
                   type: 'counter'
 
+/proc/nvmeibs/serjio/*/stats.json:
+  metric_prefix: 'nvmesh_target_serjio'
+  glob_labels_re: '/proc/nvmeibs/serjio/(?P<disk_id>\w+(\.\d+)?)/stats.json'
+  collections:
+    work_stats:
+      metric_prefix: 'nvmesh_target_serjio_work'
+      query_labels:
+        work_type: 'work_type'
+      metrics:
+        n_works:
+          help: 'number of works executed'
+          type: 'counter'
+        n_errors:
+          help: 'number of work errors'
+          type: 'counter'
+        n_rescheds:
+          help: 'number of work reschedules'
+          type: 'counter'
+        queued:
+          pattern_labels_re: 'works_queued_(?P<stat>min|max|avg|overall_count|current_count)'
+          help: 'work queue time statistics'
+        exec_time:
+          pattern_labels_re: 'works_exec_time_(?P<stat>min|max|avg|overall_count|current_count)'
+          help: 'work execution time statistics'
+    states_stats:
+      metric_prefix: 'nvmesh_target_serjio_state'
+      query_labels:
+        state: 'state'
+      metrics:
+        min:
+          help: 'state minimum duration'
+        max:
+          help: 'state maximum duration'
+        avg:
+          help: 'state average duration'
+        overall_count:
+          help: 'state overall occurrence count'
+          type: 'counter'
+        current_count:
+          help: 'state current count'
+          type: 'gauge'
+  metrics:
+    io_total_works:
+      pattern_labels_re: 'io_stats_works_io_total_total_works'
+      help: 'total number of IO works'
+      type: 'counter'
+    io_bw:
+      pattern_labels_re: 'io_stats_works_io_total_(?P<op>read|write)_bw_(?P<stat>avg|max)'
+      help: 'IO bandwidth statistics'
+    io_iops:
+      pattern_labels_re: 'io_stats_works_io_total_(?P<op>read|write)_iops_(?P<stat>avg|max)'
+      help: 'IO operations per second statistics'
+    io_errors_count:
+      pattern_labels_re: 'io_stats_works_io_total_(?P<error_type>submit_read_errors|submit_write_errors|read_errors|write_errors)_count'
+      help: 'IO error count'
+      type: 'counter'
+    io_errors_max:
+      pattern_labels_re: 'io_stats_works_io_total_(?P<error_type>submit_read_errors|submit_write_errors|read_errors|write_errors)_max'
+      help: 'IO error maximum'
+
 /proc/nvmeib*/memmgr_info:
   glob_labels_re: '/proc/(?P<module>\w+)/memmgr_info'
   metric_prefix: 'nvmesh_client_memmgr_info'
