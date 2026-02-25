@@ -75,6 +75,11 @@ struct nvmeibt_praid_serialized_topo {
 // Used for backward compatibility during hot upgrade when parsing wire data from older TOMAs.
 #define NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310	48
 
+static inline int8_t nvmeibt_praid_wire_get_n_segs(const struct nvmeibt_praid_serialized_topo *praid)
+{
+	return LE_SWAP8(praid->segs_num);
+}
+
 #define NVMEIBT_PRAID_TOPO_DUMP(name, _uuid, _which_str, _topo) do {					\
 	if (_topo) {																		\
 		N_Tf(name, "praid=@UUID_LE @STR "												\
