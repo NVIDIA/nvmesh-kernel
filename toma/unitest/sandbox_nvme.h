@@ -30,13 +30,12 @@ struct sandbox_nvme_device {
 };
 
 void sandbox_nvme_init(void);
-const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(unsigned i);
+unsigned  sandbox_nvme_get_device_count(void);
+const struct sandbox_nvme_device *sandbox_nvme_get_device_arr(void);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id /* e.g. NVMD_SN_002.1 */);
-int  sandbox_nvme_get_device_count(void);
-int  sandbox_nvme_open(          const struct sandbox_nvme_device *);
-int  sandbox_nvme_format_disk(         struct sandbox_nvme_device *, enum SANDBOX_NVME_FMT_e fmt_idx);	// Format a device: update LBA format and erase disk content. return 0 on success, -1 if format index invalid or I/O error
-void sandbox_nvme_zero_disk_area(const struct sandbox_nvme_device *, size_t start_block, size_t num_blocks);
-int  sandbox_nvme_io_to_disk(    const struct sandbox_nvme_device *, size_t start_block, size_t num_bytes, void *data, bool is_read);
+int  sandbox_nvme_format_disk(   const char* disk_id, enum SANDBOX_NVME_FMT_e fmt_idx);	// Format a device: update LBA format and erase disk content. return 0 on success, -1 if format index invalid or I/O error
+int  sandbox_nvme_zero_disk_area(const char* disk_id, size_t start_block, size_t num_blocks);
+int  sandbox_nvme_io_to_disk(    const char* disk_id, size_t start_block, size_t num_bytes, void *data, bool is_read);
 
 // API towards operating system
 #include <stdarg.h>				// va_list

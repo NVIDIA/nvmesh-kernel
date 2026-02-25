@@ -114,12 +114,11 @@ static int __get_smart_seq_from_device_name(const char *device_name) {
 }
 
 static const struct sandbox_nvme_device *__find_nvmesh_device_by_seq(int seq) {
-	const int n = sandbox_nvme_get_device_count();
-	for (int i = 0; i < n; ++i) {
-		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
-		if (!dev->stock_disk)
-			if (seq == __get_smart_seq_from_device_name(dev->device_name))
-				return dev;
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_arr();
+	const struct sandbox_nvme_device *end = &dev[sandbox_nvme_get_device_count()];
+	for (; dev < end; dev++) {
+		if ((!dev->stock_disk) && (seq == __get_smart_seq_from_device_name(dev->device_name)))
+			return dev;
 	}
 	BUG_ON(true); return NULL;
 }
@@ -158,13 +157,13 @@ static int format_smart_content(char *buf, size_t buf_size, const struct sandbox
 }
 
 static int format_disks_csv(char *buf, int buf_size) {
-	const int device_count = sandbox_nvme_get_device_count();
+	const struct sandbox_nvme_device *d = sandbox_nvme_get_device_arr();
+	const struct sandbox_nvme_device *end = &d[sandbox_nvme_get_device_count()];
 	int rv = 0;
 	BUG_ON((buf == NULL)||(buf_size == 0));
 	#define BUF_ADD(...) rv += (int)scnprintf(&buf[rv], buf_size - rv, __VA_ARGS__)
 	BUF_ADD("%s\n", NVMEIBS_DISKS_CSV_HEADER);		/* Write header */
-	for (int i = 0; i < device_count; ++i) {						/* Write each NVMesh (non-stock) disk */
-		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_index(i);
+	for (; d < end; d++) {
 		if (!d->stock_disk) {
 			const int disk_seq = __get_smart_seq_from_device_name(d->device_name);
 			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
@@ -247,8 +246,7 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_io_to_disk_reply *rep = (struct nvmeib_io_to_disk_reply *)msg->data;
 	const struct nvmeib_io_to_disk *io_req = (const struct nvmeib_io_to_disk *)req_msg->data;
-	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(io_req->disk_id);
-	const int io_result = sandbox_nvme_io_to_disk(dev, io_req->start_sector, io_req->data_len, io_req->data, io_req->is_read);
+	const int io_result = sandbox_nvme_io_to_disk(io_req->disk_id, io_req->start_sector, io_req->data_len, io_req->data, io_req->is_read);
 
 	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
@@ -267,15 +265,10 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_zero_disk_reply *rep = (struct nvmeib_zero_disk_reply *)msg->data;
 	const struct nvmeib_zero_disk *zreq = (const struct nvmeib_zero_disk *)req_msg->data;
-	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(zreq->disk_id);
-	int rv = 0;
-
 	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	BUG_ON(!dev);
-	sandbox_nvme_zero_disk_area(dev, zreq->start_hw_sector, zreq->n_hw_sectors);
-	rep->base.error = (rv == 0) ? csce_ok : csce_failed;
+	rep->base.error = (0 == sandbox_nvme_zero_disk_area(zreq->disk_id, zreq->start_hw_sector, zreq->n_hw_sectors)) ? csce_ok : csce_bad_zero_params;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
@@ -304,48 +297,32 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	struct nlmsghdr *reply_nlhdr = (struct nlmsghdr *)reply_buf;
 	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
 	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
-	struct sandbox_nvme_device *dev = (struct sandbox_nvme_device *)sandbox_nvme_get_device_by_disk_id(fmt_disk->disk_id);	// Mutable
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(fmt_disk->disk_id);
 	const enum SANDBOX_NVME_FMT_e fmt_idx = fmt_disk->format_id.id;
-	bool format_succeeded = false;
 
 	reply_usermode_payload(reply_msg, req_msg);
 	reply_msg->len = sizeof(*reply_msg) + sizeof(*rep);
 	reply_nlhdr->nlmsg_len = NLMSG_SPACE(reply_msg->len);
 	BUG_ON(fmt_disk->format_id.is_inline);					// Reject inline metadata - NVMesh only supports separate metadata
 
-	if (!dev) {
-		N_Ef(fmt_nodisk, "format_disk: device not found disk_id=@STR", fmt_disk->disk_id);
+	TSB_netlink_send_disk_change_event(dev, false);  // 1. Send REMOVE event BEFORE format (simulates disk_freeze). is_add=false -> n_blocks=0
+	// 2. Perform the format operation (zeros disk). Note: The NVMESH_FORMATTED_DISK header is written by production code (format_disk_wrapper) after receiving the format reply.
+	if (sandbox_nvme_format_disk(fmt_disk->disk_id, fmt_idx) != 0) {
+		N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
 		rep->base.error = csce_failed;
 	} else {
-		TSB_netlink_send_disk_change_event(dev, false);  // 1. Send REMOVE event BEFORE format (simulates disk_freeze). is_add=false -> n_blocks=0
-		// 2. Perform the format operation (zeros disk). Note: The NVMESH_FORMATTED_DISK header is written by production code (format_disk_wrapper) after receiving the format reply.
-		if (sandbox_nvme_format_disk(dev, fmt_idx) != 0) {
-			N_Ef(fmt_failed, "format_disk: format failed disk_id=@STR fmt_idx=@INT", fmt_disk->disk_id, fmt_idx);
-			rep->base.error = csce_failed;
-		} else {
-			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
-			N_Tf(fmt_ok, "format_disk: success disk_id=@STR fmt_idx=@INT @INT+@INT[b]", fmt_disk->disk_id, fmt_idx, 1 << lbaf->block_size_exp, lbaf->metadata_size);
-			rep->base.error = csce_ok;
-			// Fill in the new format info
-			snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
-			rep->info.new_n_pblk = dev->size_in_blocks;
-			rep->info.new_seq = __get_smart_seq_from_device_name(dev->device_name);
-			format_succeeded = true;
-		}
+		rep->base.error = csce_ok;
+		// Fill in the new format info
+		snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
+		rep->info.new_n_pblk = dev->size_in_blocks;
+		rep->info.new_seq = __get_smart_seq_from_device_name(dev->device_name);
+		g_srvr_simu->pending_disk_add = dev;	// Schedule ADD event to be sent later. This gives Toma's work queue time to process the REMOVE event before receiving the ADD event, matching production behavior where the NVMe format operation takes time between disk_freeze and disk_unfreeze.
+		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for serial=@STR", dev->serial_number);
 	}
 
 	// 3. Send format reply
 	rep->base.latency_ns = 1000;  // Simulate some format latency
 	TSB_netlink_queue_enqueue(reply_buf, reply_nlhdr->nlmsg_len);
-
-	// 4. Schedule ADD event to be sent in a LATER iteration of the main loop
-	// This gives Toma's work queue time to process the REMOVE event before
-	// receiving the ADD event, matching production behavior where the NVMe
-	// format operation takes time between disk_freeze and disk_unfreeze.
-	if (dev && format_succeeded) {
-		g_srvr_simu->pending_disk_add = dev;
-		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for serial=@STR", dev->serial_number);
-	}
 }
 
 static inline enum uk_comm_err_opcode uk_comm_err_from_errno(ssize_t rv) {
@@ -409,12 +386,11 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 	nl->n_recv_msgs++;
 	N_Tf(nl_send, "msg[@INT].id=@ID (@STR), total_n_msgs=@INT", req_msg->opcode, req_msg->id, uk_comm_opcode_str(req_msg->opcode), nl->n_recv_msgs);
 	if (req_msg->opcode == csc_get_disks) {
-		int i, count = sandbox_nvme_get_device_count();	// Queue disk info for each mock NVMe device
-		for (i = 0; i < count; i++) {
-			const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_index(i);
-			if (dev && !dev->stock_disk) {  // Only queue NVMesh disks, not stock disks
+		const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_arr();
+		const struct sandbox_nvme_device *end = &dev[sandbox_nvme_get_device_count()];
+		for (; dev < end; dev++) {	// Queue disk info for each mock NVMesh disk
+			if (!dev->stock_disk)
 				TSB_netlink_send_disk_response(dev, req_msg);
-			}
 		}
 	} else if (req_msg->opcode == csc_keep_alive) {
 		N_Tf(nl_keepalive, "Netlink keep_alive received");

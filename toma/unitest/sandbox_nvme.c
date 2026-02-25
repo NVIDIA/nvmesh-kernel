@@ -91,11 +91,8 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *pa
 	return NULL;		// gpt_util checks this flow. Should never occur in real toma
 }
 
-int sandbox_nvme_get_device_count(void) { return (int)NVME_DEVICE_COUNT; }
-
-const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(unsigned i) {
-	BUG_ON(i >= (unsigned)NVME_DEVICE_COUNT); return &nvme_devices[i];
-}
+unsigned sandbox_nvme_get_device_count(void) { return (unsigned)NVME_DEVICE_COUNT; }
+const struct sandbox_nvme_device *sandbox_nvme_get_device_arr(void) { return &nvme_devices[0]; }
 
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id) {
 	const char *dot = strchr(disk_id, '.');		// disk_id format is "SERIAL.NSID" e.g. "NVMD_SN_002.1", We need to match the serial number portion
@@ -108,7 +105,10 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 	BUG_ON(true); return NULL;
 }
 
-int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_FMT_e fmt_idx) {
+static int sandbox_nvme_open(const struct sandbox_nvme_device *dev) { return open(dev->device_path, O_RDWR); }
+
+int sandbox_nvme_format_disk(const char* disk_id, enum SANDBOX_NVME_FMT_e fmt_idx) {
+	struct sandbox_nvme_device *dev = (struct sandbox_nvme_device *)sandbox_nvme_get_device_by_disk_id(disk_id);	// Mutable
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
 	const int fd = sandbox_nvme_open(dev);
 	int rv = 0;
@@ -131,7 +131,8 @@ int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_
 	return rv;
 }
 
-void sandbox_nvme_zero_disk_area(const struct sandbox_nvme_device *dev, size_t start_block, size_t num_blocks) {
+int sandbox_nvme_zero_disk_area(const char* disk_id, size_t start_block, size_t num_blocks) {
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(disk_id);
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
 	const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
 	const size_t chunk_bytes = (1 << 20);		// Write units of 1[mb]
@@ -150,9 +151,11 @@ void sandbox_nvme_zero_disk_area(const struct sandbox_nvme_device *dev, size_t s
 	}
 	free(zero_buf);
 	close(fd);
+	return 0;
 }
 
-int sandbox_nvme_io_to_disk(const struct sandbox_nvme_device *dev, size_t start_block, size_t num_bytes, void *data, bool is_read) {
+int sandbox_nvme_io_to_disk(const char* disk_id, size_t start_block, size_t num_bytes, void *data, bool is_read) {
+	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(disk_id);
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
 	const off_t offset = (off_t)start_block * (1 << lbaf->block_size_exp);
 	const int fd = sandbox_nvme_open(dev);
@@ -164,11 +167,6 @@ int sandbox_nvme_io_to_disk(const struct sandbox_nvme_device *dev, size_t start_
 	close(fd);
 	BUG_ON(n_done_bytes != (ssize_t)num_bytes);			// Do not allow IO failure for now
 	return (n_done_bytes == (ssize_t)num_bytes) ? 0 : -1;
-}
-
-int sandbox_nvme_open(const struct sandbox_nvme_device *dev) {
-	BUG_ON(!dev);
-	return open(dev->device_path, O_RDWR);
 }
 
 struct udev *udev_new(void) {		// Todo: This is udev simulator, unrelated to nvme, should be in os simulator
