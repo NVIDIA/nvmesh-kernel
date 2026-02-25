@@ -752,8 +752,8 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 
 		// If generating output, prepare the TLV and topo headers
 		if (dst_wire_ctx && dst_data_ptr) {
-			// Copy TLV header from old (will update fields later)
-			*dst_wire_ctx = *old_wire_ctx;
+			// Start from the update TLV (carries the newer tlv_idx and seq_no)
+			*dst_wire_ctx = *upd_wire_ctx;
 
 			// Copy old topo header to output data area
 			dst_wire_header = (struct nvmeibt_topology_serialized_topo_header *)*dst_data_ptr;
@@ -829,10 +829,9 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 
 		// Finalize output TLV and topo headers with actual counts
 		if (dst_wire_ctx) {
-			// Update TLV header
+			// The merged result is a complete topo; override type and length, recalculate CRC
+			dst_wire_ctx->tlv_type = LE_SWAP8(TLV_TYPE_TOPO_COMPLETE);
 			dst_wire_ctx->tlv_len = LE_SWAP32(data_len);
-			dst_wire_ctx->tlv_idx = upd_wire_ctx->tlv_idx;
-			dst_wire_ctx->seq_no = upd_wire_ctx->seq_no;
 			dst_wire_ctx->tlv_crc = LE_SWAP32(crc32(0, dst_wire_ctx, sizeof(*dst_wire_ctx)));
 
 			// Update topo header within the data
