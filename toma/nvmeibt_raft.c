@@ -723,7 +723,10 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 			goto out;
 		}
 
-		// Special case: no new incremental data means keep old data
+		// The persist_and_wire_buf carries 4 TLV sections (TOPO, TOPO_CONFIG,
+		// KAFKA_MGMT_CONFIG, RAFT_MEMBERS). When the leader generates an incremental
+		// wire buf, only some sections may have changed. A section whose data is
+		// unaffected will have upd_len==0 — in that case, keep the old data as-is.
 		if (upd_len == 0) {
 			if (dst_wire_ctx) {
 				// This function handles upd_len==0 case, by copying old data
