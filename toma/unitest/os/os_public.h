@@ -18,7 +18,7 @@ enum { PF_UNIX = 1, AF_UNIX = 1, AF_INET	= 2, PF_NETLINK = 16, AF_NETLINK = 16, 
 };
 enum __socket_type { SOCK_STREAM = 1, SOCK_DGRAM = 2, SOCK_RAW = 3, SOCK_PACKET = 10, SOCK_CLOEXEC = 02000000, SOCK_NONBLOCK = 00004000, };
 struct sockaddr_un;
-struct sockaddr;
+struct sockaddr {};
 
 int socket(    int __domain, int __type, int __protocol);		// Does not return fd but index pointer to fd storage
 int socketpair(int __domain, int __type, int __protocol, int __fds[2]);
@@ -45,8 +45,9 @@ int     accept( int __fd, struct sockaddr* __addr, unsigned int *__addr_len);
 
 #define	_ARPA_INET_H 1		//#include <arpa/inet.h>
 
-//#include <netinet/in.h>
-#define _NETINET_IN_H
+#define _NETINET_IN_H		// #include <netinet/in.h>
+#define _LINUX_IF_H			// #include <linux/if.h>
+
 #define ntohl(x)	__uint32_identity (x)
 #define ntohs(x)	__uint16_identity (x)
 #define htonl(x)	__uint32_identity (x)

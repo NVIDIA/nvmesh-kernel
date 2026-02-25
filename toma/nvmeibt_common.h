@@ -19,9 +19,8 @@
 #include <wchar.h>
 #include <fcntl.h>
 #include <malloc.h>
-#include <linux/if.h>
-
 #include "utils/nvmeibt_utils.h"
+#include <linux/if.h>
 #include "utils/nvmeibt_str.h"
 
 typedef __CHAR16_TYPE__ char16_t;
