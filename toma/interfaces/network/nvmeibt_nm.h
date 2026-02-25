@@ -325,6 +325,7 @@ static inline const char *nvmeibt_nm_ple_str(int v)
 	case nvmeibt_nm_ple_failed_send_comp: return "Send completion with error";
 	case nvmeibt_nm_ple_failed_recv_comp: return "Receive completion with error";
 	case nvmeibt_nm_ple_unknown_wr_opcode: return "Unknown WR opcode";
+	case nvmeibt_nm_ple_different_srm_id: return "Different SRM ID";
 	case nvmeibt_nm_ple_other:
 	default : return "Internal error";
 	}
