@@ -74,7 +74,6 @@ EXPORT_SYMBOL(nvmeib_proc_add_smart_proc_epilog);
 
 void nvmeib_proc_add_jdr_proc_epilog(int version, struct jdr *jdr)
 {
-	jdr_object_scope(jdr, NULL);
 	jdr_write_var(jdr, format_version, version);
 }
 EXPORT_SYMBOL(nvmeib_proc_add_jdr_proc_epilog);

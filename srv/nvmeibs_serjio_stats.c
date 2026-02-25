@@ -326,7 +326,7 @@ inline static u64 __get_avg(struct nvmeibs_serjio_min_max_avg_stats *stats)
                                     
 #define STATS_JDR_SCOPE_NAME(_stats, __jdr, __name) \
                                     {                               \
-                                        jdr_array_scope((__jdr), __name); \
+                                        jdr_object_scope((__jdr), __name); \
                                         STATS_JDR_ARGS((_stats), (__jdr)); \
                                     }
 
@@ -366,7 +366,7 @@ ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serji
 	}
 	
 	{
-		jdr_array_scope(&jdr, "io_stats");
+		jdr_object_scope(&jdr, "io_stats");
 		u64 total_works = 0;
 		u64 read_bw_sum = 0, write_bw_sum = 0;
 		u64 read_iops_sum = 0, write_iops_sum = 0;
