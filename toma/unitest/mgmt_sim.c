@@ -204,8 +204,8 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 		"\"targets\":["
 			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
 				"\"disks\":["
-				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
+				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"%s\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
 					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
@@ -239,7 +239,9 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 						",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
 		"]}}",
 		m->hw.conf_version, m->hw.msg_count,
-		m->cfg->live->hostname, m->cfg->live->uuid, m->disk_002.disk_id, m->disk_002.uuid, m->disk_003.disk_id, m->disk_003.uuid,
+		m->cfg->live->hostname, m->cfg->live->uuid,
+			m->disk_002.disk_id, m->disk_002.vendor, m->disk_002.uuid,
+			m->disk_003.disk_id, m->disk_003.vendor, m->disk_003.uuid,
 		other_toma[0].hostname, other_toma[0].uuid,
 		other_toma[1].hostname, other_toma[1].uuid);
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);

@@ -93,8 +93,8 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *pa
 
 int sandbox_nvme_get_device_count(void) { return (int)NVME_DEVICE_COUNT; }
 
-const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(int index) {
-	return (index < 0 || index >= (int)NVME_DEVICE_COUNT) ? NULL : &nvme_devices[index];
+const struct sandbox_nvme_device *sandbox_nvme_get_device_by_index(unsigned i) {
+	BUG_ON(i >= (unsigned)NVME_DEVICE_COUNT); return &nvme_devices[i];
 }
 
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id) {
@@ -102,16 +102,10 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 	const int serial_len = (dot ? (int)(dot - disk_id) : (int)strlen(disk_id));
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		const struct sandbox_nvme_device *d = &nvme_devices[i];
-		if (!strncmp(d->serial_number, disk_id, serial_len)) {
-			N_Tf(kdj3947, "found device for disk_id=@STR serial=@STR", disk_id, d->serial_number);
+		if (!strncmp(d->serial_number, disk_id, serial_len))
 			return d;
-		}
 	}
 	BUG_ON(true); return NULL;
-}
-
-struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id_mut(const char *disk_id) {
-	return (struct sandbox_nvme_device *)sandbox_nvme_get_device_by_disk_id(disk_id); // Same logic as the const version, but returns mutable pointer
 }
 
 int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_FMT_e fmt_idx) {
@@ -135,6 +129,41 @@ int sandbox_nvme_format_disk(struct sandbox_nvme_device *dev, enum SANDBOX_NVME_
 		N_Tf(fmt_done, "format disk complete serial=@STR", dev->serial_number);
 	}
 	return rv;
+}
+
+void sandbox_nvme_zero_disk_area(const struct sandbox_nvme_device *dev, size_t start_block, size_t num_blocks) {
+	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
+	const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
+	const size_t chunk_bytes = (1 << 20);		// Write units of 1[mb]
+	void *zero_buf = calloc(1, chunk_bytes);
+	size_t total_bytes = num_blocks  * block_size;
+	size_t offset =      start_block * block_size;
+	const int fd = sandbox_nvme_open(dev);
+	BUG_ON((fd < 0) || !zero_buf || (chunk_bytes % block_size));
+	N_Tf(__AUTOID__, "@STR io[@CHAR] offset=@ZX[blk] len=@INT[blk]", dev->serial_number, 'Z', start_block, num_blocks);
+	while (total_bytes > 0) {
+		const size_t write_bytes = MIN(total_bytes, chunk_bytes);
+		const ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
+		BUG_ON((w < 0) || ((size_t)w != write_bytes));
+		offset += write_bytes;
+		total_bytes -= write_bytes;
+	}
+	free(zero_buf);
+	close(fd);
+}
+
+int sandbox_nvme_io_to_disk(const struct sandbox_nvme_device *dev, size_t start_block, size_t num_bytes, void *data, bool is_read) {
+	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
+	const off_t offset = (off_t)start_block * (1 << lbaf->block_size_exp);
+	const int fd = sandbox_nvme_open(dev);
+	ssize_t n_done_bytes = (is_read ? pread( fd, data, num_bytes, offset) :
+									  pwrite(fd, data, num_bytes, offset));
+	N_Tf(__AUTOID__, "@STR io[@CHAR] offset=@ZX[blk] len=@INT[blk], done=@INT[b]", dev->serial_number, (is_read ? 'R' : 'W'), start_block, (num_bytes >> lbaf->block_size_exp), (int)n_done_bytes);
+	if ((n_done_bytes == 0) && is_read)
+		n_done_bytes = num_bytes;			// Todo: Read beyond eof is considered success. Maybe change this decision
+	close(fd);
+	BUG_ON(n_done_bytes != (ssize_t)num_bytes);			// Do not allow IO failure for now
+	return (n_done_bytes == (ssize_t)num_bytes) ? 0 : -1;
 }
 
 int sandbox_nvme_open(const struct sandbox_nvme_device *dev) {

@@ -1,4 +1,3 @@
-#define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module - must be defined before any other includes
 #include "nvmeibt_debug.h"				// Binary traces
 #include "sandbox_nvmeibs_toma.h"
 #include "../sandbox_nvme.h"
@@ -249,34 +248,14 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 	struct nvmeib_io_to_disk_reply *rep = (struct nvmeib_io_to_disk_reply *)msg->data;
 	const struct nvmeib_io_to_disk *io_req = (const struct nvmeib_io_to_disk *)req_msg->data;
 	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(io_req->disk_id);
+	const int io_result = sandbox_nvme_io_to_disk(dev, io_req->start_sector, io_req->data_len, io_req->data, io_req->is_read);
 
 	reply_usermode_payload(msg, req_msg);
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	BUG_ON(!dev);
-	if (1) {			// Perform the actual I/O on the sandbox disk file
-		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-		const int fd = sandbox_nvme_open(dev);
-		off_t offset = (off_t)io_req->start_sector * (1 << lbaf->block_size_exp);
-		ssize_t result;
-
-		if (io_req->is_read) {
-			result = pread(fd, io_req->data, io_req->data_len, offset);
-		} else {
-			result = pwrite(fd, io_req->data, io_req->data_len, offset);
-		}
-		close(fd);
-		N_Tf(__AUTOID__, "@STR io[@CHAR] offset=@ZX[blk] len=@INT[blk]", io_req->disk_id, (io_req->is_read ? 'R' : 'W'), (offset>>lbaf->block_size_exp), (io_req->data_len>>lbaf->block_size_exp));
-
-		if (result < 0) {
-			rep->base.error = 1;
-			N_Wf(nl_io_fail, "IO failed disk=@STR is_read=@INT offset=@ZX len=@INT err=@AUTO_ERRNO", io_req->disk_id, io_req->is_read, offset, io_req->data_len);
-		} else {
-			rep->base.error = 0;  // csce_ok
-			rep->n_data_io = io_req->data_len;
-			rep->n_md_io = 0;
-		}
-	}
+	rep->n_data_io = io_req->data_len;
+	rep->n_md_io = 0;
+	rep->base.error = (io_result < 0) ? csce_io_failed : csce_ok;
 	nvmeib_strlcpy(rep->disk_id, io_req->disk_id, sizeof(rep->disk_id));
 	rep->vendor_id = io_req->vendor_id;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
@@ -295,25 +274,7 @@ static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
 	BUG_ON(!dev);
-	if (1) {
-		const size_t chunk_bytes = 1024 * 1024;
-		void *zero_buf = calloc(1, chunk_bytes);
-		const int fd = sandbox_nvme_open(dev);
-		const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-		const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
-		uint64_t total_bytes = (uint64_t)zreq->n_hw_sectors    * (uint64_t)block_size;
-		uint64_t offset =      (uint64_t)zreq->start_hw_sector * (uint64_t)block_size;
-		BUG_ON((fd < 0) || !zero_buf || (chunk_bytes % block_size));
-		while (total_bytes > 0) {
-			const size_t write_bytes = (total_bytes > chunk_bytes) ? chunk_bytes : (size_t)total_bytes;
-			const ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
-			BUG_ON((w < 0) || ((size_t)w != write_bytes));
-			offset += (uint64_t)write_bytes;
-			total_bytes -= (uint64_t)write_bytes;
-		}
-		free(zero_buf);
-		close(fd);
-	}
+	sandbox_nvme_zero_disk_area(dev, zreq->start_hw_sector, zreq->n_hw_sectors);
 	rep->base.error = (rv == 0) ? csce_ok : csce_failed;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
@@ -343,7 +304,7 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 	struct nlmsghdr *reply_nlhdr = (struct nlmsghdr *)reply_buf;
 	struct nvmeib_nl_uk_comm_msg *reply_msg = NLMSG_DATA(reply_nlhdr);
 	struct nvmeib_format_disk_reply *rep = (struct nvmeib_format_disk_reply *)reply_msg->data;
-	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id_mut(fmt_disk->disk_id);
+	struct sandbox_nvme_device *dev = (struct sandbox_nvme_device *)sandbox_nvme_get_device_by_disk_id(fmt_disk->disk_id);	// Mutable
 	const enum SANDBOX_NVME_FMT_e fmt_idx = fmt_disk->format_id.id;
 	bool format_succeeded = false;
 
