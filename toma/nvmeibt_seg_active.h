@@ -439,7 +439,8 @@ void nvmeibt_recovery_client_batch_n_blksets_set(int64_t batch_size);
 void nvmeibt_recovery_set_is_scrub_enabled(int64_t is_enabled);
 int64_t nvmeibt_recovery_get_is_scrub_enabled(void);
 void nvmeibt_seg_active_set_zeroing_test(bool zeroing_fail);
-void nvmeibt_seg_active_stop_all_recoveries_and_registrations(struct nvmeibt_seg_active *seg_active, bool is_brute_force_disconnect_required);
+void nvmeibt_seg_active_stop_all_recoveries_and_registrations(struct nvmeibt_seg_active *seg_active, bool is_brute_force_disconnect_required,
+															  bool is_registrants_IO_feasible);
 bool nvmeibt_seg_active_is_conf_corrupted(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_stop_all_recoveries_and_registrations_on_deleted_segs(void);
 void nvmeibt_seg_active_handle_post_update_actions(struct nvmeibt_seg_active *seg_active);

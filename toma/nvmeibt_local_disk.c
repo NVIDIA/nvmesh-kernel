@@ -2986,14 +2986,16 @@ out:
 void nvmeibt_local_disk_stop_all_activities_for_removed_local_disk(struct nvmeibt_local_disk *local_disk)
 {
 	struct nvmeibt_seg_active		*seg_active;
+	int								n_local_disks;
 
 	NFIN;
+	n_local_disks = nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str);
 	if (local_disk && local_disk->is_owned_by_nvmeibs_driver) {
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1);
+			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1, 0); // registrants I/O is irrelevant
 			// The previous func can remove the local disk
-			if (nvmeibt_disk_get_local_disk(disk) == NULL) {
-				N_Tf(nh112aa, "local_disk=@STR was removed", nvmeibt_disk_get_ldisk_id_str(disk));
+			if (n_local_disks != nvmeib_hash_get_n_elements(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str)) {
+				N_Tf(nh112aa, "local_disk=@STR was removed", nvmeibt_local_disk_display(local_disk));
 				break;
 			}
 		}

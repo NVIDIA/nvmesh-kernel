@@ -2218,7 +2218,8 @@ out:
 	NFOUT;
 }
 
-void nvmeibt_seg_active_stop_all_recoveries_and_registrations(struct nvmeibt_seg_active *seg_active, bool is_brute_force_disconnect_required)
+void nvmeibt_seg_active_stop_all_recoveries_and_registrations(struct nvmeibt_seg_active *seg_active, bool is_brute_force_disconnect_required,
+															  bool is_registrants_IO_feasible)
 {
 	struct nvmeibt_disk_segment				*seg;
 
@@ -2228,7 +2229,9 @@ void nvmeibt_seg_active_stop_all_recoveries_and_registrations(struct nvmeibt_seg
 	}
 	seg = nvmeibt_seg_active_get_disk_segment(seg_active);
 	N_Tf(04k2ns7, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
-	nvmeibt_register_close_seg_active_for_registration(seg_active, is_brute_force_disconnect_required);
+	if (is_registrants_IO_feasible) {
+		nvmeibt_register_close_seg_active_for_registration(seg_active, is_brute_force_disconnect_required);
+	}
 	if (nvmeibt_disk_segment_get_seg_active(seg))
 		nvmeibt_seg_active_stop_recovery_tasks(seg_active);
 out:
@@ -2255,7 +2258,7 @@ void nvmeibt_seg_active_stop_all_recoveries_and_registrations_on_deleted_segs(vo
 			continue;
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 			if (nvmeibt_seg_lot_is_X_in_config(nvmeibt_seg_active_get_applied_seg_lot(seg_active))) {
-				nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1);
+				nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1, 1);
 				// The previous func can remove the local disk
 				if (nvmeibt_disk_get_local_disk(disk) == NULL) {
 					N_Tf(nh112cc, "local_disk=@STR was removed", nvmeibt_disk_get_ldisk_id_str(disk));

@@ -2728,7 +2728,7 @@ void nvmeibt_register_close_all_seg_actives_for_registration(void)
 		if (!disk)
 			continue;
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 0);
+			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 0, 1);
 			// The previous func can remove the local disk
 			if (nvmeibt_disk_get_local_disk(disk) == NULL) {
 				N_Tf(nh112bb, "local_disk=@STR was removed", nvmeibt_disk_get_ldisk_id_str(disk));

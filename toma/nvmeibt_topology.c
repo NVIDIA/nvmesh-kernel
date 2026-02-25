@@ -460,7 +460,7 @@ out:
 		nvmeibt_kafka_generic_log_msg_to_mgmt_send(NULL, header, msg, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 		if (rv > 0) {
 			nvmeibt_seg_lot_mark_conf_corrupted(nvmeibt_seg_active_get_applied_seg_lot(seg_active));
-			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1);
+			nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1, 0);
 		}
 	}
 	NFOUT;
@@ -1381,7 +1381,7 @@ static void update_applied_topology(void)
 			seg_active = nvmeibt_disk_segment_get_seg_active(seg);
 			if (seg_active) {
 				if (!nvmeibt_seg_lot_is_config_OK(nvmeibt_seg_active_get_applied_seg_lot(seg_active)))
-					nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1);
+					nvmeibt_seg_active_stop_all_recoveries_and_registrations(seg_active, 1, 1);
 				else
 					nvmeibt_seg_active_upd_active_topo_from_applied_topo(seg_active);
 				disk->is_drive_write_error |= nvmeibt_seg_active_get_applied_seg_lot(seg_active)->seg_topo.active_seg_flags.is_drive_write_error;
