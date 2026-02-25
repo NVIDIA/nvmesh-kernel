@@ -115,7 +115,7 @@
 			//"args": ["gpt_util", "-T"],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}/toma/unitest",
-			"environment": [],
+			"environment": [{"name": "DEBUGINFOD_URLS", "value": ""}],
 			"externalConsole": false,
 			"MIMode": "gdb",
 			"setupCommands": [{"description": "pretty-gdb", "text": "-enable-pretty-printing", "ignoreFailures": true},	],
