@@ -150,7 +150,7 @@ struct cpu_timers {
 #define TIMER_FLAG_REQ_DRAIN			0x0001	// some awaits for draining if all timers but expiration time should be honored !!
 #define TIMER_FLAG_REQ_FORCED_DRAIN		0x0002	// drain all timers, regardless of their expiration time
 #define TIMER_FLAG_DRAIN_COMPLETED		0x0004	// timer engine indicates that it has completed draining (assumes no new timers are added)
-	__concurrent_access struct timer_list * executing;		// the timer that is executing (BEWARE: it might have been freed & now returning). NULL when invocation returns until another timer is picked for expiration.
+	struct timer_list * __concurrent_access executing;		// the timer that is executing (BEWARE: it might have been freed & now returning). NULL when invocation returns until another timer is picked for expiration.
 };
 
 /*

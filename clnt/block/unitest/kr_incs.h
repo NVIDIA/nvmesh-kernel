@@ -1233,7 +1233,7 @@ struct delayed_work {
 struct workqueue_struct{ 						// single thread queue
 	const char		*name;
 	struct list_head w_list;					// List of 'struct work_struct *'
-	__concurrent_access struct work_struct* curr_work;				// the work we are now executing, NULL when none
+	struct work_struct * __concurrent_access curr_work;				// the work we are now executing, NULL when none
 	struct mutex     add_mutex;					// Serialize addition of tasks to the queue
 	struct semaphore sem;						// semaphore counter represent number of work item pending in queue
 	int 			num_pending_works;
