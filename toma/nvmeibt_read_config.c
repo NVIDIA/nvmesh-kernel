@@ -149,6 +149,12 @@ static void connect_seg_to_praid(struct nvmeibt_praid *praid, struct nvmeibt_dis
 	seg->seg_follower.applied_seg_lot.praid_lot = &praid->praid_follower.applied_praid_lot;
 }
 
+static void check_seg_override(struct nvmeibt_disk_segment *old_seg, struct nvmeibt_disk_segment *seg, int idx)
+{
+	if (old_seg && !ARE_UUID_EQ(nvmeibt_seg_UUID(old_seg), nvmeibt_seg_UUID(seg)))
+		N_Wf(jajau87, "segs override! old_seg=@UUID_8 seg=@UUID_8 idx=@INT", nvmeibt_seg_UUID_8(old_seg), nvmeibt_seg_UUID_8(seg), idx);
+}
+
 static void add_seg_to_praid(struct nvmeibt_praid *praid_in, struct nvmeibt_disk_segment *seg)
 {
 	struct nvmeibt_praid					*praid;
@@ -165,12 +171,14 @@ static void add_seg_to_praid(struct nvmeibt_praid *praid_in, struct nvmeibt_disk
 	N_Tf(hduwrn5, "praid=@UUID_LE idx=@IDX seg=@UUID_8 deprecation_flag=@CHAR", nvmeibt_praid_UUID(praid), seg_idx, nvmeibt_seg_UUID_8(seg), seg->from_config.deprecation_flag);
 	switch (seg->from_config.deprecation_flag) {
 	case 'S':			// Substitution
+		check_seg_override(praid->praid_mgmt.replacement_topo_segs[seg_idx], seg, seg_idx);
 		praid->praid_mgmt.replacement_topo_segs[seg_idx] = seg;
 		seg->seg_mgmt.is_replacement = 1;
 		nvmeibt_disk_segment_mark_is_newly_added_seg_in_all_topos(seg);
 		break;
 	case 'R':			// Replaced
 	default:			// Normal or whatever
+		check_seg_override(praid->praid_mgmt.topo_segs[seg_idx], seg, seg_idx);
 		praid->praid_mgmt.topo_segs[seg_idx] = seg;
 		seg->seg_mgmt.is_replacement = 0;
 		break;
@@ -382,6 +390,7 @@ int nvmeibt_read_config_apply_vol_mgmt_conf(struct mm_mgmt_conf *conf, int vol_c
 			for (k = 0; k < chunk_conf->num_praids; k++) {
 				struct mm_praid_conf *praid = &chunk_conf->praids[k];
 				struct nvmeibt_praid *praid_out;
+				int n_rep_seg;
 
 				if (praid->stripeIndex == ILLEGAL_STRIPE_INDEX) {
 					N_Tf(uuenn33, "dummy praid=@UUID_LE, skiping", &praid->uuid);
@@ -389,7 +398,8 @@ int nvmeibt_read_config_apply_vol_mgmt_conf(struct mm_mgmt_conf *conf, int vol_c
 				}
 				praid_add_rv = nvmeibt_praid_add(praid, chunk, vol, is_updating_leader, &praid_out, vol_config_tag);
 				VALIDATE_ADD_RV(4bk32kw, praid_add_rv, praid);
-				if (!praid) {
+				if (!praid_out) {
+					N_Ef(y78uqq2, "praid wasn't added");
 					continue;
 				}
 				for (l = 0; l < praid->num_segments; l++) {
@@ -405,7 +415,12 @@ int nvmeibt_read_config_apply_vol_mgmt_conf(struct mm_mgmt_conf *conf, int vol_c
 						add_seg_to_praid(praid_out, seg_out);
 					}
 				}
-				nvmeibt_praid_validate_replacement_segs(praid_out);
+				n_rep_seg = nvmeibt_praid_validate_replacement_segs(praid_out);
+				if (!nvmeibt_praid_is_deprecated_in_config(praid_out) &&
+					(praid->num_segments != (praid_out->praid_mgmt.n_topo_segs + n_rep_seg))) {
+					nvmeibt_praid_mark_conf_corrupted(praid_out);
+					N_Ef(uu991ng, "n_seg_cfg=@INT, n_seg_top=@INT, n_seg_rep=@INT", praid->num_segments, praid_out->praid_mgmt.n_topo_segs, n_rep_seg);
+				}
 			}
 		}
 		// Now that the volume is complete, it can be serialized

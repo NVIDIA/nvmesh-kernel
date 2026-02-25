@@ -3022,23 +3022,24 @@ int nvmeibt_praid_validate_replacement_segs(struct nvmeibt_praid *praid)
 	struct nvmeibt_praid_mgmt		*praid_mgmt;
 	struct nvmeibt_disk_segment		*seg, *rep_seg;
 	int								i;
+	int								n_rep_seg = 0;
 
-	praid_mgmt = (praid ? &(praid->praid_mgmt) : NULL);
-	if (!praid_mgmt) {
-		N_Wf(skiru5n, "No praid_mgmt for praid=@UUID_LE", nvmeibt_praid_UUID(praid));
-		goto out;
-	}
+	praid_mgmt = &praid->praid_mgmt;
 	for (i = 0; i < praid_mgmt->n_topo_segs; i++) {
 		seg = praid_mgmt->topo_segs[i];
 		rep_seg = praid_mgmt->replacement_topo_segs[i];
-		if (rep_seg && !seg) {
-			N_Tf(mssiii2, "MGMT switch to new seg=@UUID_8 idx=@INT", nvmeibt_seg_UUID_8(rep_seg), i);
-			seg = rep_seg;
-			rep_seg = NULL;
-			praid_mgmt->topo_segs[i] = seg;
-			praid_mgmt->replacement_topo_segs[i] = NULL;
-			seg->from_config.deprecation_flag = 'N';
-			seg->seg_mgmt.is_replacement = 0;
+		if (rep_seg) {
+			if (seg) {
+				n_rep_seg++;
+			} else {
+				N_Tf(mssiii2, "MGMT switch to new seg=@UUID_8 idx=@INT", nvmeibt_seg_UUID_8(rep_seg), i);
+				seg = rep_seg;
+				rep_seg = NULL;
+				praid_mgmt->topo_segs[i] = seg;
+				praid_mgmt->replacement_topo_segs[i] = NULL;
+				seg->from_config.deprecation_flag = 'N';
+				seg->seg_mgmt.is_replacement = 0;
+			}
 		}
 
 		if (seg && (seg_deprecation_flag(seg) != 'X')) {
@@ -3052,6 +3053,5 @@ int nvmeibt_praid_validate_replacement_segs(struct nvmeibt_praid *praid)
 			}
 		}
 	}
-out:
-	return 0;
+	return n_rep_seg;
 }
