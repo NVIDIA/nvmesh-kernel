@@ -19,7 +19,8 @@ struct nvmeibs_simulator {
 	struct TSB_fd_otherside com_srvr2toma_o, com_toma2srvr_o, com_toma2clnt_o;		// Toma 3 extern communication fd's via server
 	struct TSB_netlink_mock *nl;													// Other side of netlink communication
 	struct TSB_server_toma_status_req_simu s_req_simu;
-	const struct sandbox_nvme_device *pending_disk_add;									// Pending disk ADD event to be sent to toma. Simulates the delay between disk_freeze (REMOVE) and disk_unfreeze (ADD) that occurs in production during the actual NVMe format operation.
+	const struct sandbox_nvme_device *pending_disk_adds[3];								// Pending disk ADD events to be sent to toma. Supports concurrent format operations on different disks.
+	int n_pending_disk_adds;
 };
 
 // API towards unitest environment

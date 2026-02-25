@@ -316,8 +316,9 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 		snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
 		rep->info.new_n_pblk = dev->size_in_blocks;
 		rep->info.new_seq = __get_smart_seq_from_device_name(dev->device_name);
-		g_srvr_simu->pending_disk_add = dev;	// Schedule ADD event to be sent later. This gives Toma's work queue time to process the REMOVE event before receiving the ADD event, matching production behavior where the NVMe format operation takes time between disk_freeze and disk_unfreeze.
-		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for serial=@STR", dev->serial_number);
+		BUG_ON(g_srvr_simu->n_pending_disk_adds >= (int)ARRAY_SIZE(g_srvr_simu->pending_disk_adds));
+		g_srvr_simu->pending_disk_adds[g_srvr_simu->n_pending_disk_adds++] = dev;
+		N_Tf(nl_pend_add, "Scheduled pending disk ADD event for serial=@STR (queue depth=@INT)", dev->serial_number, g_srvr_simu->n_pending_disk_adds);
 	}
 
 	// 3. Send format reply
@@ -444,12 +445,12 @@ static ssize_t _netlink_reply_to_toma(int fd, void *buf, size_t n, off_t offset,
 
 /********************************* API *******************************/
 void nvmeibs_simu_do_periodic(void) {
-	const struct sandbox_nvme_device *dev = g_srvr_simu->pending_disk_add;
-	if (dev) {	// Process any pending disk ADD event that was deferred from a format operation. Ensure the REMOVE event has been processed before the ADD event is sent.
+	for (int i = 0; i < g_srvr_simu->n_pending_disk_adds; i++) {
+		const struct sandbox_nvme_device *dev = g_srvr_simu->pending_disk_adds[i];
 		N_Tf(nl_pend_send, "Sending deferred disk ADD event for serial=@STR", dev->serial_number);
-		TSB_netlink_send_disk_change_event(dev, true);  // is_add=true -> n_blocks > 0
-		g_srvr_simu->pending_disk_add = NULL;
+		TSB_netlink_send_disk_change_event(dev, true);
 	}
+	g_srvr_simu->n_pending_disk_adds = 0;
 }
 
 void nvmeibs_simu_send_extended_msg(const char *something) {
