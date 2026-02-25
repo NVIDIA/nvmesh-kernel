@@ -156,7 +156,7 @@ void nvmeibt_topology_remove_disk_from_its_current_node(struct nvmeibt_disk *dis
 		}
 		N_Tf(awe45b9, "its_node of ldisk=@STR set to NULL", nvmeibt_disk_get_ldisk_id_str(disk));
 		disk->its_node_config = NULL;
-		nvmeibt_local_disk_stop_all_activities(disk);
+		nvmeibt_local_disk_stop_all_activities_for_removed_local_disk(disk->its_local_disk);
 
 		nvmeibt_local_disk_munmap_and_rm_if_should_be_removed_and_unused(disk->its_local_disk);
 	}

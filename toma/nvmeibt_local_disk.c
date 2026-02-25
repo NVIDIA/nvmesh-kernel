@@ -2983,10 +2983,9 @@ out:
 	NFOUT;
 }
 
-void nvmeibt_local_disk_stop_all_activities(struct nvmeibt_disk *disk)
+void nvmeibt_local_disk_stop_all_activities_for_removed_local_disk(struct nvmeibt_local_disk *local_disk)
 {
 	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_local_disk		*local_disk = nvmeibt_disk_get_local_disk(disk);	// Since we do not start from nvmeibt_global_get_global()->local_disks_hash, we might get a stock local_disk
 
 	NFIN;
 	if (local_disk && local_disk->is_owned_by_nvmeibs_driver) {
