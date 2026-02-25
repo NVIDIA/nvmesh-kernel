@@ -346,13 +346,13 @@ struct nvmeib_io_to_disk {				// t2s  - Toma request server to do io to a disk
 	char 			disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
 	unsigned int 	vendor_id;
 	int				pid;
-	unsigned long	start_sector;
+	unsigned long	start_sector;			// [blocks] not bytes@
 	char			*data;
 	union {
 		char			*md;
 		const void		*gpt_entries;
 	};
-	unsigned int	data_len;
+	unsigned int	data_len;				// [bytes]
 	unsigned int	md_len;
 	union {
 		struct {

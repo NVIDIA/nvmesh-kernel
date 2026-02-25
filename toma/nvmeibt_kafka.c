@@ -1225,13 +1225,14 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					for (k = 0; k < arr->array.len; k++) {
 						praid_json_dict = &(arr->array.elements[k]->dict);
 						for (l = 0; l < praid_json_dict->len; l++) {
+							struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
 							kv = &(praid_json_dict->elements[l]);
 							if (!strcmp(kv->key, "uuid")) {
-								nvmeibt_strlcpy(CMD_params->praids_to_report[k].praid_uuid, kv->value->str, sizeof(CMD_params->praids_to_report[k].praid_uuid));
+								nvmeibt_strlcpy(pr_rep->praid_uuid, kv->value->str, sizeof(pr_rep->praid_uuid));
 							} else if (!strcmp(kv->key, "lastKnownVersion")) {
 							   // "lastKnownVersion": "<major,minor,raftTerm>"
 							   sscanf(kv->value->str, "<%d,%d,%lu>",
-									  &(CMD_params->praids_to_report[k].lastKnownVersion_major), &(CMD_params->praids_to_report[k].lastKnownVersion_minor), &(CMD_params->praids_to_report[k].lastKnownVersion_raft_term));
+									  &(pr_rep->lastKnownVersion_major), &(pr_rep->lastKnownVersion_minor), &(pr_rep->lastKnownVersion_raft_term));
 							} else {
 								if (kv->value->type == JSON_E_STR) {
 									N_Ef(ctvsauj, "Unexpected @STR=@STR", kv->key, kv->value->str);
@@ -1240,7 +1241,7 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 								}
 							}
 						}
-				   }
+					}
 				} else if (!strcmp(payload_kv->key, "tomaToken")) {
 					CMD_params->tomaToken = payload_kv->value->num;
 				} else if (!strcmp(payload_kv->key, "diskID")) {
