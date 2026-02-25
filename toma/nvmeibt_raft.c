@@ -765,23 +765,25 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 		for (i = 0; i < old_serialized_header.praids_num; i++) {
 			struct nvmeibt_praid_serialized_topo	*praid_to_copy;
 			struct nvmeibt_praid_serialized_topo	old_serialized_praid, new_serialized_praid;
-			int										segs_size;
+			int										old_segs_size;
+			int										new_segs_size = 0;
 			int										praid_total_size;
 			bool									use_new_praid = false;
 
 			// Convert current old praid to working format
 			nvmeibt_praid_convert_topo_le_be(old_praid_ptr, &old_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
+			old_segs_size = nvmeibt_praid_wire_get_n_segs(old_praid_ptr) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 
 			// Check if current position in incremental buffer matches this old praid
 			if (new_praids_processed < new_serialized_header.praids_num) {
 				nvmeibt_praid_convert_topo_le_be(current_new_praid, &new_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
 
 				if (ARE_UUID_EQ(&old_serialized_praid.uuid, &new_serialized_praid.uuid)) {
+					new_segs_size = nvmeibt_praid_wire_get_n_segs(current_new_praid) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 					if (old_serialized_praid.topo_idx_updated < new_serialized_praid.topo_idx_updated) {
 						// Use incremental newer version
 						use_new_praid = true;
 						praid_to_copy = current_new_praid;
-						segs_size = nvmeibt_praid_wire_get_n_segs(current_new_praid) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 
 						N_Tf(asd82jk, "Found matching praid=@UUID_LE in incremental, segs=@INT, old topo_idx_updated=@INT64_TX < new topo_idx_updated=@INT64_TX",
 							&old_serialized_praid.uuid, nvmeibt_praid_wire_get_n_segs(current_new_praid),
@@ -789,8 +791,7 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 					}
 					// Advance incremental pointer to next praid; this incremental praid is either newer and used, or older and discarded.
 					current_new_praid = (struct nvmeibt_praid_serialized_topo *)
-						((char *)current_new_praid + sizeof(*current_new_praid) +
-						 nvmeibt_praid_wire_get_n_segs(current_new_praid) * sizeof(struct nvmeibt_serialized_seg_leader_topo));
+						((char *)current_new_praid + sizeof(*current_new_praid) + new_segs_size);
 					new_praids_processed++;
 				}
 			}
@@ -798,7 +799,6 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 			if (!use_new_praid) {
 				// No match in incremental - keep old version
 				praid_to_copy = old_praid_ptr;
-				segs_size = nvmeibt_praid_wire_get_n_segs(old_praid_ptr) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 			}
 
 			// Update counters
@@ -806,7 +806,7 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 			n_segs_in_result += nvmeibt_praid_wire_get_n_segs(praid_to_copy);
 
 			// Calculate size and update data length
-			praid_total_size = sizeof(*praid_to_copy) + segs_size;
+			praid_total_size = sizeof(*praid_to_copy) + (use_new_praid ? new_segs_size : old_segs_size);
 			data_len += praid_total_size;
 
 			// Copy to output if generating
@@ -818,8 +818,7 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 
 			// Advance to next old praid
 			old_praid_ptr = (struct nvmeibt_praid_serialized_topo *)
-				((char *)old_praid_ptr + sizeof(*old_praid_ptr) +
-				 nvmeibt_praid_wire_get_n_segs(old_praid_ptr) * sizeof(struct nvmeibt_serialized_seg_leader_topo));
+				((char *)old_praid_ptr + sizeof(*old_praid_ptr) + old_segs_size);
 		}
 
 		// Calculate final total size
