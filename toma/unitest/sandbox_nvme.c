@@ -169,13 +169,13 @@ int sandbox_nvme_io_to_disk(const char* disk_id, size_t start_block, size_t num_
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
 	const off_t offset = (off_t)start_block * (1 << lbaf->block_size_exp);
 	const int fd = sandbox_nvme_open(dev);
-	ssize_t n_done_bytes = (is_read ? pread( fd, data, num_bytes, offset) :
-									  pwrite(fd, data, num_bytes, offset));
+	ssize_t n_done_bytes;
+	BUG_ON((uint64_t)(offset + num_bytes) > dev->size_in_bytes);
+	n_done_bytes = (is_read ? pread( fd, data, num_bytes, offset) :
+								  pwrite(fd, data, num_bytes, offset));
 	N_Tf(__AUTOID__, "@STR io[@CHAR] offset=@ZX[blk] len=@INT[blk], done=@INT[b]", dev->serial_number, (is_read ? 'R' : 'W'), start_block, (num_bytes >> lbaf->block_size_exp), (int)n_done_bytes);
-	if ((n_done_bytes == 0) && is_read)
-		n_done_bytes = num_bytes;			// Todo: Read beyond eof is considered success. Maybe change this decision
 	close(fd);
-	BUG_ON(n_done_bytes != (ssize_t)num_bytes);			// Do not allow IO failure for now
+	BUG_ON(n_done_bytes != (ssize_t)num_bytes);
 	return (n_done_bytes == (ssize_t)num_bytes) ? 0 : -1;
 }
 
