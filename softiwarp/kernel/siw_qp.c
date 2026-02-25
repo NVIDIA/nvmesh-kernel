@@ -222,6 +222,7 @@ static void siw_qp_llp_data_ready(struct sock *sk)
 #endif
 {
 	struct siw_qp		*qp;
+	unsigned long		rq_flags;
 	int rv;
 
 	read_lock(&sk->sk_callback_lock);
@@ -233,25 +234,31 @@ static void siw_qp_llp_data_ready(struct sock *sk)
 
 	siw_qp_get(qp);
 
-	/* This check is needed to synchronize with siw_rx_work_handler.
-	 * siw_rx_work_handler acquires a process lock (lock_sock) whereas
-	 * the lock held here is bh_lock_sock. The two locks can be
-	 * held by different threads at the same time, but bh_lock_sock
-	 * allows a thread in BH context to safely check if the process
-	 * lock is held. In this case, if the lock is held, queue work.
+	/*
+	 * Serialize with siw_rx_work_handler using a dedicated flag
+	 * instead of sock_owned_by_user_nocheck(). The socket process
+	 * lock is also held by the TX path (kernel_sendmsg), and
+	 * checking it here would unnecessarily defer RX to the
+	 * workqueue whenever TX is active, hurting latency.
 	 */
-	if (sock_owned_by_user_nocheck(sk)) {
+	lock_rq_rxsave(qp, rq_flags);
+	if (qp->rx_ctx.rx_in_progress) {
+		unlock_rq_rxsave(qp, rq_flags);
 		siw_rx_queue_work(qp, 0);
 		goto put_qp;
 	}
+	qp->rx_ctx.rx_in_progress = 1;
+	unlock_rq_rxsave(qp, rq_flags);
 
-	/* Call siw_rx_work_handler internal work handler.
-	 * No need for socket locks as we are in callback context */
 	if ((rv = siw_do_rx_work(qp)) < 0) {
 		dprint(DBG_SK|DBG_RX, "(QP%d): "
 		"siw_do_rx_work() returned error %d\n",
 		       QP_ID(qp), rv);
 	}
+
+	lock_rq_rxsave(qp, rq_flags);
+	qp->rx_ctx.rx_in_progress = 0;
+	unlock_rq_rxsave(qp, rq_flags);
 
 put_qp:
 	siw_qp_put(qp);

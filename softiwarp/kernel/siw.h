@@ -687,8 +687,9 @@ struct siw_iwarp_rx {
 	union {
 		u32		locked_flags;
 		struct {
-			u32 	rx_suspend:1,	   /* stop rcv DDP segs. */
-				locked_bits:30;
+		u32 	rx_suspend:1,	   /* stop rcv DDP segs. */
+			rx_in_progress:1,
+			locked_bits:29;
 		};
 	};
 

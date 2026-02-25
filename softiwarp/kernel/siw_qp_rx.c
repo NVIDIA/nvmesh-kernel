@@ -2057,6 +2057,7 @@ void siw_rx_work_handler(struct work_struct* work)
 	struct siw_qp *qp = RX_QP(rctx);
 	struct socket *s = READ_ONCE(qp->attrs.llp_stream_handle);
 	struct sock *sk;
+	unsigned long rq_flags;
 	int rv;
 
 	if (unlikely(!s)) {
@@ -2064,12 +2065,25 @@ void siw_rx_work_handler(struct work_struct* work)
 	}
 
 	sk = s->sk;
+	lock_rq_rxsave(qp, rq_flags);
+	if (rctx->rx_in_progress) {
+		unlock_rq_rxsave(qp, rq_flags);
+		siw_qp_put(qp);
+		return;
+	}
+	rctx->rx_in_progress = 1;
+	unlock_rq_rxsave(qp, rq_flags);
+
 	lock_sock(sk);
 	if ((rv = siw_do_rx_work(qp)) < 0) {
 		dprint(DBG_SK|DBG_RX, "(QP%d): "
 		"siw_do_rx_work() returned error %d\n",
 		       QP_ID(qp), rv);
 	}
+	lock_rq_rxsave(qp, rq_flags);
+	rctx->rx_in_progress = 0;
+	unlock_rq_rxsave(qp, rq_flags);
+
 	release_sock(sk);
 
 put:
