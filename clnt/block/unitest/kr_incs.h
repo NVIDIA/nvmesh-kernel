@@ -569,41 +569,7 @@ static inline u32 __bitrev32(u32 x) { return (__bitrev16(x & 0xffff) << 16) | __
 
 /**************************** Atomic Operations ******************************/
 // Atomic operations /inlcude/asm/atomic.h
-typedef struct { long long c; } atomic64_t, atomic_long_t; 	// c - counter. Artificial structto support {0} initialization
-typedef struct { int       c; } atomic_t;					// c - counter
-#define ATOMIC_INIT(i)	{i}
-void atomic_set(             	atomic_t *v, int i);
-int  atomic_read(      const 	atomic_t *v);
-int  atomic_dec_return(			atomic_t *v);
-int  atomic_inc_return(			atomic_t *v);
-int  atomic_sub_return(  int x,	atomic_t *v);
-int  atomic_add_return(  int x,	atomic_t *v);
-void atomic_add(         int x, atomic_t *v);
-void atomic_sub(         int x, atomic_t *v);
-int  atomic_dec_and_test(     	atomic_t *v);
-int  atomic_sub_and_test(int x,	atomic_t *v);
-void atomic_inc(				atomic_t *v);
-void atomic_dec(				atomic_t *v);
-int  atomic_xchg(				atomic_t *v, int n);
-int  atomic_cmpxchg(			atomic_t *v, int o, int n);
-void	  atomic64_set(		  atomic64_t *v, long long i);
-long long atomic64_dec_return(atomic64_t *v);
-long long atomic64_inc_return(atomic64_t *v);
-void 	  atomic64_inc(		  atomic64_t *v);
-long long atomic64_read(const atomic64_t *v);
-
-// Atomically adds @a to @v, so long as @v was not already @u.
-static inline int __atomic_add_unless(atomic_t *v, int a, int u){
-	int c, old;
-	c = atomic_read(v);
-	while (c != u && ((old = atomic_cmpxchg(v, c, c + a)) != c))
-		c = old;
-	return c;
-}
-static inline int atomic_add_unless(atomic_t *v, int a, int u){return __atomic_add_unless(v, a, u) != u; }
-#define atomic_inc_not_zero(v)		atomic_add_unless((v), 1, 0)							// Atomically increments @v by 1, so long as @v is non-zero.
-int atomic_dec_if_positive(atomic_t *v);
-
+#include "../common/compat/kr_incs_atomics.h"
 #ifdef __x86_64__
 #define atomic_inc_volatile_int(i)			asm volatile ("lock; incl %0" : "+m"(i))		// The word lock is critical, or else this will be atomic only on 1 cpu. with more cores this will become non atomic
 #define atomic_dec_volatile_int(i)			asm volatile ("lock; decl %0" : "+m"(i))		// TODO(EBA): consider using __sync_fetch_and_add(&(i), 1) & __sync_fetch_and_sub(&(i), 1)
