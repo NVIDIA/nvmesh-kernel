@@ -130,7 +130,7 @@ static const struct sandbox_nvme_device *__find_nvmesh_device_by_seq(int seq) {
 
 static void __fill_disk_info(struct nvmeib_disk_info *d, const struct sandbox_nvme_device *dev, bool is_add) {						// Fill disk info from sandbox device, using its current LBA format
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-	d->n_hw_blocks = d->n_blocks = (is_add ? dev->size_in_blocks : 0);		// Toma uses n_blocks to distinguish between disk add/remove events
+	d->n_hw_blocks = d->n_blocks = (is_add ? sandbox_nvme_get_n_blocks(dev) : 0);		// Toma uses n_blocks to distinguish between disk add/remove events
 	d->vendor_id = dev->vendor_id;
 	d->block_size = (1 << lbaf->block_size_exp);
 	d->max_request_size = 32;
@@ -174,7 +174,7 @@ static int format_disks_csv(char *buf, int buf_size) {
 			const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(d->current_format_idx);
 			BUG_ON(disk_seq < 0);
 			BUF_ADD("%s.1,%u,%u,%u,32,%d,1,/dev/%s,%u,Ok,%d,%s,%s\n",
-				d->serial_number, (unsigned)d->size_in_blocks, (unsigned)d->size_in_blocks, (1u << lbaf->block_size_exp),
+				d->serial_number, (unsigned)sandbox_nvme_get_n_blocks(d), (unsigned)sandbox_nvme_get_n_blocks(d), (1u << lbaf->block_size_exp),
 				disk_seq, d->device_name, lbaf->metadata_size, d->vendor_id, d->model_number, d->serial_number);
 		}
 	}
@@ -319,7 +319,7 @@ static void TSB_netlink_handle_format_disk(const struct nvmeib_nl_uk_comm_msg *r
 		rep->base.error = csce_ok;
 		// Fill in the new format info
 		snprintf(rep->info.new_dev_file_name, sizeof(rep->info.new_dev_file_name), "%s", dev->device_path);
-		rep->info.new_n_pblk = dev->size_in_blocks;
+		rep->info.new_n_pblk = sandbox_nvme_get_n_blocks(dev);
 		rep->info.new_seq = __get_smart_seq_from_device_name(dev->device_name);
 		BUG_ON(g_srvr_simu->n_pending_disk_adds >= (int)ARRAY_SIZE(g_srvr_simu->pending_disk_adds));
 		g_srvr_simu->pending_disk_adds[g_srvr_simu->n_pending_disk_adds++] = dev;

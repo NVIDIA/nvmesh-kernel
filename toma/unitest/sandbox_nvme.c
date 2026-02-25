@@ -20,6 +20,12 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fm
 	return &lbaf_table[fmt_idx];
 }
 
+uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
+	const unsigned block_size = 1U << sandbox_nvme_get_lbaf(dev->current_format_idx)->block_size_exp;
+	BUG_ON(dev->size_in_bytes % block_size != 0);
+	return dev->size_in_bytes / block_size;
+}
+
 /* Disk size requirement: https://github.com/NVIDIA/nvmesh-documentation/blob/3.4.0-rc1/NVMesh%203.4.0%20User%20Guide.md#4k8-formatting
  * Relevant constants (redefined for sandbox): METADATA_PARTITION_RATIO, journal_data_size_in_pblks, serjio_db_size_in_pblks
  * The allocation uses 1MB (256 block) alignment internally via align_pba_s_up_to_blkset().
@@ -40,9 +46,9 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fm
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,   2048, SANDBOX_NVME_FMT_4096_0 },
-	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, 32768, SANDBOX_NVME_FMT_4096_0 },
-	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, 32768, SANDBOX_NVME_FMT_4096_0 },
+	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  (2048ULL << 12),  SANDBOX_NVME_FMT_4096_0 },	/* 8MB */
+	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
@@ -123,7 +129,7 @@ int sandbox_nvme_format_disk(const char* disk_id, enum SANDBOX_NVME_FMT_e fmt_id
 	if (ftruncate(fd, 0) != 0) {
 		N_Ef(fmt_trunc, "format disk truncate failed serial=@STR err=@AUTO_ERRNO", dev->serial_number);
 		rv = -1;
-	} else if (ftruncate(fd, (off_t)(dev->size_in_blocks * (1UL << lbaf->block_size_exp))) != 0) {
+	} else if (ftruncate(fd, (off_t)dev->size_in_bytes) != 0) {
 		N_Ef(fmt_expand, "format disk expand failed serial=@STR err=@AUTO_ERRNO", dev->serial_number);
 		rv = -1;
 	}
@@ -237,7 +243,7 @@ int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap) {
 			}
 			response->flbas = nvme_dev->current_format_idx;					// Set current format based on device's format index
 			response->mc = NVME_NS_MC_INLINE_MASK | NVME_NS_MC_SEP_MASK;	// Set metadata capabilities: both inline and separate metadata are supported by the device. Note: Toma will only use separate metadata (DISK_ALLOW_INLINE_MD == 0).
-			response->nsze = nvme_dev->size_in_blocks;
+			response->nsze = sandbox_nvme_get_n_blocks(nvme_dev);
 			N_Tf(sbk5443, "ioctl:nvme:id storage ns=@INT fd=@INT flbas=@INT nlbaf=@INT mc=@INT nsze=@INT64_TD", cmd->nsid, fd, response->flbas, response->nlbaf, response->mc, response->nsze);
 		}
 	} else if (cmd->opcode == nvme_admin_get_log_page) {
@@ -300,14 +306,10 @@ static void disk_init_stock(const char *dest_path, const char *src_path) {
 }
 
 static void disk_init_zeroed(const struct sandbox_nvme_device *dev) {
-	const struct sandbox_nvme_lbaf *lbaf;
-	off_t size_bytes;
+	const off_t size_bytes = (off_t)dev->size_in_bytes;
 	int fd;
 
 	BUG_ON(!dev);
-	lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
-	size_bytes = (off_t)(dev->size_in_blocks * (1UL << lbaf->block_size_exp));
-
 	N_Tf(lkg3947, "creating zeroed sparse block device=@STR size=@INT64_TD", dev->device_path, (int64_t)size_bytes);
 	unlink(dev->device_path);
 	fd = open(dev->device_path, O_CREAT | O_RDWR, 0644);
