@@ -58,7 +58,7 @@ static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
 		",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
 		"{\"uuid\":\"bbb00001-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023"
-		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":1,\"status\":\"initializing\""
+		",\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
 		",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
 		"]}]}]}}");
 }
@@ -85,7 +85,7 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
 		",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
 		"{\"uuid\":\"aaa00001-0000-0000-0000-000000000003\",\"lbs\":0,\"lbe\":1023"
-		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":1,\"status\":\"initializing\""
+		",\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
 		",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"}"
 		"]}]}]}}");
 }
