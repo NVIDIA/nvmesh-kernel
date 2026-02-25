@@ -266,6 +266,7 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 			result = pwrite(fd, io_req->data, io_req->data_len, offset);
 		}
 		close(fd);
+		N_Tf(__AUTOID__, "@STR io[@CHAR] offset=@ZX[blk] len=@INT[blk]", io_req->disk_id, (io_req->is_read ? 'R' : 'W'), (offset>>lbaf->block_size_exp), (io_req->data_len>>lbaf->block_size_exp));
 
 		if (result < 0) {
 			rep->base.error = 1;
