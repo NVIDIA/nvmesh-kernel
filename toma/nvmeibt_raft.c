@@ -711,7 +711,6 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 		int												data_len = 0;
 		int												n_praids_in_result = 0;
 		int												n_segs_in_result = 0;
-		int												upd_praids_processed = 0;
 		int												i = 0;
 
 		// Validation: incremental topo requires old complete topo
@@ -761,13 +760,15 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 			dst_wire_praid = (struct nvmeibt_praid_serialized_topo *)(dst_wire_header + 1);
 		}
 
-		// Two-pointer merge: old praids are complete set, incremental are subset in same order
-		// We maintain a pointer in incremental buffer and advance it only when we find a match
-		upd_praids_processed = 0;
-
+		// For each old praid, scan the incremental buffer for a UUID match.
+		// We do not assume same ordering between old and incremental buffers,
+		// since hash table iteration order may differ across serializations
+		// (e.g., due to add/remove/resize). The incremental set is expected to
+		// be small, so O(n*m) is acceptable.
 		for (i = 0; i < old_serialized_header.praids_num; i++) {
 			struct nvmeibt_praid_serialized_topo	*wire_praid_to_copy;
 			struct nvmeibt_praid_serialized_topo	old_serialized_praid, upd_serialized_praid;
+			struct nvmeibt_praid_serialized_topo	*cur_upd_wire_praid;
 			int										old_segs_size;
 			int										upd_segs_size = 0;
 			int										praid_total_size;
@@ -777,30 +778,27 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 			nvmeibt_praid_convert_topo_le_be(old_wire_praid, &old_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
 			old_segs_size = nvmeibt_praid_wire_get_n_segs(old_wire_praid) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 
-			// Check if current position in incremental buffer matches this old praid
-			if (upd_praids_processed < upd_serialized_header.praids_num) {
-				nvmeibt_praid_convert_topo_le_be(upd_wire_praid, &upd_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
+			// Scan incremental buffer for a praid with matching UUID
+			cur_upd_wire_praid = upd_wire_praid;
+			for (int j = 0; j < upd_serialized_header.praids_num; j++) {
+				nvmeibt_praid_convert_topo_le_be(cur_upd_wire_praid, &upd_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
+				upd_segs_size = nvmeibt_praid_wire_get_n_segs(cur_upd_wire_praid) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 
 				if (ARE_UUID_EQ(&old_serialized_praid.uuid, &upd_serialized_praid.uuid)) {
-					upd_segs_size = nvmeibt_praid_wire_get_n_segs(upd_wire_praid) * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 					if (old_serialized_praid.topo_idx_updated < upd_serialized_praid.topo_idx_updated) {
-						// Use incremental newer version
 						use_upd_praid = true;
-						wire_praid_to_copy = upd_wire_praid;
+						wire_praid_to_copy = cur_upd_wire_praid;
 
 						N_Tf(asd82jk, "Found matching praid=@UUID_LE in incremental, segs=@INT, old topo_idx_updated=@INT64_TX < upd topo_idx_updated=@INT64_TX",
-							&old_serialized_praid.uuid, nvmeibt_praid_wire_get_n_segs(upd_wire_praid),
+							&old_serialized_praid.uuid, nvmeibt_praid_wire_get_n_segs(cur_upd_wire_praid),
 							old_serialized_praid.topo_idx_updated, upd_serialized_praid.topo_idx_updated);
 					}
-					// Advance incremental pointer to next praid; this incremental praid is either newer and used, or older and discarded.
-					upd_wire_praid = (struct nvmeibt_praid_serialized_topo *)
-						((char *)upd_wire_praid + sizeof(*upd_wire_praid) + upd_segs_size);
-					upd_praids_processed++;
+					break;
 				}
+				cur_upd_wire_praid = (struct nvmeibt_praid_serialized_topo *)((char *)cur_upd_wire_praid + sizeof(*cur_upd_wire_praid) + upd_segs_size);
 			}
 
 			if (!use_upd_praid) {
-				// No match in incremental - keep old version
 				wire_praid_to_copy = old_wire_praid;
 			}
 
