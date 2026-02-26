@@ -172,6 +172,9 @@ enum siw_if_type {
 #define SIW_CQ_HANDLER_TIMEOUT_LOG	(HZ / 5)
 #define SIW_CQ_HANDLER_TIMEOUT_WARN	(HZ / 5)
 
+/* Time to wait for QP users to process CQEs after flush in destroy_qp */
+#define SIW_QP_SQ_CQ_DRAIN_TIMEOUT	(HZ)
+
 /* For testing siw_connect failures */
 #define SIW_CONNECT_FAIL_TEST		0
 #define SIW_CONNECT_FAIL_TEST_N		40
@@ -888,6 +891,8 @@ struct siw_iwarp_tx {
 	struct list_head flush_sqes;
 
 	atomic_t scq_qp_ref_cnt;
+
+	struct completion scq_qp_comp;
 
 #ifdef SIW_TX_COMP_WAIT_ACK
 	struct siw_iwarp_tx_fpdu *fpdu_in_prog;
