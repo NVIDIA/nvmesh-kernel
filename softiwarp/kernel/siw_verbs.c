@@ -959,6 +959,7 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	INIT_LIST_HEAD(&qp->rx_ctx.flush_rqes);
 
 	atomic_set(&qp->tx_ctx.scq_qp_ref_cnt, 1);
+	init_completion(&qp->tx_ctx.scq_qp_comp);
 	atomic_set(&qp->rx_ctx.rcq_qp_ref_cnt, 1);
 
 	if (!ofa_pd->uobject)
@@ -1358,9 +1359,15 @@ int siw_destroy_qp(struct ib_qp *ofa_qp)
 	flush_delayed_work(&qp->flush_work);
 
 	if ((ref_cnt = atomic_dec_return(&qp->tx_ctx.scq_qp_ref_cnt)) != 0) {
-		WARN_ON_ONCE(1);
-		dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Send CQ not drained. %d un-polled CQEs. "
-			"qp_ptr=" dprint_ptr_str() " scq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->scq);
+		wait_for_completion_timeout(&qp->tx_ctx.scq_qp_comp, SIW_QP_SQ_CQ_DRAIN_TIMEOUT);
+
+		/* check if wait timed out */
+		ref_cnt = atomic_read(&qp->tx_ctx.scq_qp_ref_cnt);
+		if (ref_cnt) {
+			WARN_ON_ONCE(1);
+			dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Send CQ not drained. %d un-polled CQEs. "
+			       "qp_ptr=" dprint_ptr_str() " scq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->scq);
+		}
 	}
 
 	if ((ref_cnt = atomic_dec_return(&qp->rx_ctx.rcq_qp_ref_cnt)) != 0) {
