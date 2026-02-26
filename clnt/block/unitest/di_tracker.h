@@ -19,7 +19,9 @@ struct volume_di_tracker {
 	u64 size;	// LBAs
 	struct volume_di_tracker_conf *conf;
 	struct block_di_tracker *block_di_trackers;
-	pthread_rwlock_t rwlock;	// read lock for each unfinished I/O, write lock when resetting
+	u64 n_ios_inflight;
+	pthread_mutex_t lock;
+	pthread_cond_t idle_cond; // condition variable for no IOs in-flight
 };
 
 struct di_tracker {

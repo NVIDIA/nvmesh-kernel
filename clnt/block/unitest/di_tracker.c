@@ -103,7 +103,9 @@ static void __volume_di_tracker_init(struct volume_di_tracker *vdt, u64 size, st
 	vdt->vol_i = vol_i;
 	vdt->enabled = false;
 	vdt->block_di_trackers = calloc(size, sizeof(struct block_di_tracker));
-	pthread_rwlock_init(&vdt->rwlock, NULL);
+	vdt->n_ios_inflight = 0;
+	pthread_cond_init(&vdt->idle_cond, NULL);
+	pthread_mutex_init(&vdt->lock, NULL);
 
 	for (i = 0; i < (int)size; i++)
 		__block_di_tracker_init(&vdt->block_di_trackers[i], vdt);
@@ -116,34 +118,51 @@ static void __volume_di_tracker_fini(struct volume_di_tracker *vdt)
 	for (i = 0; i < (int)vdt->size; i++)
 		__block_di_tracker_fini(&vdt->block_di_trackers[i]);
 
-	pthread_rwlock_destroy(&vdt->rwlock);
+	pthread_mutex_destroy(&vdt->lock);
+	pthread_cond_destroy(&vdt->idle_cond);
 
 	free(vdt->block_di_trackers);
 }
 
+static void __volume_di_tracker_lock(struct volume_di_tracker *vdt)
+{
+	pthread_mutex_lock(&vdt->lock);
+}
+
+static void __volume_di_tracker_lock_wait_for_idle(struct volume_di_tracker *vdt)
+{
+	pthread_mutex_lock(&vdt->lock);
+	while (vdt->n_ios_inflight)
+		pthread_cond_wait(&vdt->idle_cond, &vdt->lock);
+}
+
+static void __volume_di_tracker_unlock(struct volume_di_tracker *vdt)
+{
+	pthread_mutex_unlock(&vdt->lock);
+}
 
 static void __volume_di_tracker_enable(struct volume_di_tracker *vdt)
 {
-	pthread_rwlock_wrlock(&vdt->rwlock);
+	__volume_di_tracker_lock_wait_for_idle(vdt);
 	BUG_ON(vdt->enabled);
 	vdt->enabled = true;
-	pthread_rwlock_unlock(&vdt->rwlock);
+	__volume_di_tracker_unlock(vdt);
 }
 
 static void __volume_di_tracker_disable(struct volume_di_tracker *vdt)
 {
-	pthread_rwlock_wrlock(&vdt->rwlock);
+	__volume_di_tracker_lock_wait_for_idle(vdt);
 	BUG_ON(!vdt->enabled);
 	vdt->enabled = false;
-	pthread_rwlock_unlock(&vdt->rwlock);
+	__volume_di_tracker_unlock(vdt);
 }
 
 static void __volume_di_tracker_reconf(struct volume_di_tracker *vdt, struct volume_di_tracker_conf *conf)
 {
-	pthread_rwlock_wrlock(&vdt->rwlock);
+	__volume_di_tracker_lock_wait_for_idle(vdt);
 	BUG_ON(vdt->enabled);
 	vdt->conf = conf;
-	pthread_rwlock_unlock(&vdt->rwlock);
+	__volume_di_tracker_unlock(vdt);
 }
 
 
@@ -204,12 +223,12 @@ void volume_di_tracker_reset(struct volume_di_tracker *vdt)
 {
 	int i;
 
-	pthread_rwlock_wrlock(&vdt->rwlock);
+	__volume_di_tracker_lock_wait_for_idle(vdt);
 
 	for (i = 0; i < (int)vdt->size; i++)
-		__block_di_tracker_reset_unsafe(&vdt->block_di_trackers[i]);	// no need to take per-block mutex since we hold volume rwlock for write
+		__block_di_tracker_reset_unsafe(&vdt->block_di_trackers[i]);	// no need to take per-block mutex since we hold volume di tracker lock and there are no IOs
 
-	pthread_rwlock_unlock(&vdt->rwlock);
+	__volume_di_tracker_unlock(vdt);
 }
 
 void di_tracker_reset(struct di_tracker *dit)
@@ -726,11 +745,9 @@ static void __di_tracker_io_context_track_end(struct di_tracker_io_context *ctx,
 		__block_di_tracker_track_io_end(&vdit->block_di_trackers[ctx->start_lba + i], &ctx->per_block[i]);
 }
 
-struct di_tracker_io_context *volume_di_tracker_track_io_start(struct volume_di_tracker *vdit, u64 start_lba, u64 nlbas, unsigned long bi_rw, struct bio_vec *bi_io_vec, unsigned short bi_vcnt)
+static struct di_tracker_io_context *__volume_di_tracker_track_io_start_locked(struct volume_di_tracker *vdit, u64 start_lba, u64 nlbas, unsigned long bi_rw, struct bio_vec *bi_io_vec, unsigned short bi_vcnt)
 {
 	struct di_tracker_io_context *ctx;
-
-	pthread_rwlock_rdlock(&vdit->rwlock);
 
 	if (!vdit->enabled)
 		return NULL;
@@ -753,13 +770,31 @@ struct di_tracker_io_context *volume_di_tracker_track_io_start(struct volume_di_
 	return ctx;
 }
 
-void volume_di_tracker_track_io_end(struct volume_di_tracker *vdit, struct di_tracker_io_context *ctx, int rv)
+struct di_tracker_io_context *volume_di_tracker_track_io_start(struct volume_di_tracker *vdit, u64 start_lba, u64 nlbas, unsigned long bi_rw, struct bio_vec *bi_io_vec, unsigned short bi_vcnt)
+{
+	struct di_tracker_io_context *ctx;
+	__volume_di_tracker_lock(vdit);
+	vdit->n_ios_inflight++;
+	ctx = __volume_di_tracker_track_io_start_locked(vdit, start_lba, nlbas, bi_rw, bi_io_vec, bi_vcnt);
+	__volume_di_tracker_unlock(vdit);
+	return ctx;
+}
+
+
+static void __volume_di_tracker_track_io_end_locked(struct volume_di_tracker *vdit, struct di_tracker_io_context *ctx, int rv)
 {
 	if (ctx) {
 		BUG_ON(!vdit->enabled);
 
 		__di_tracker_io_context_track_end(ctx, vdit, rv);	// might free ctx
 	}
+}
 
-	pthread_rwlock_unlock(&vdit->rwlock);
+void volume_di_tracker_track_io_end(struct volume_di_tracker *vdit, struct di_tracker_io_context *ctx, int rv)
+{
+	__volume_di_tracker_lock(vdit);
+	__volume_di_tracker_track_io_end_locked(vdit, ctx, rv);
+	if (!(--vdit->n_ios_inflight))
+		pthread_cond_signal(&vdit->idle_cond);
+	__volume_di_tracker_unlock(vdit);
 }
