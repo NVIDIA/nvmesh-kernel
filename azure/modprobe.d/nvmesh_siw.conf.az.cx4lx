@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+##############################################################
+# Azure /etc/modprobe.d conf file for VMs with ConnectX-4 Lx #
+##############################################################
+
+# nvmeibs options to enable 32 Local NVME Qs
+options nvmeibs min_local_nvmeqs=32 max_local_nvmeqs=32
+
+# options to enable 32 NRCHs for TCP
+options nvmeibs nr_max_channels_per_path_tcp=32
+options nvmeibc nr_max_channels_per_path_tcp=32 nr_max_channels_per_disk_tcp=32
+
+# SIW Options
+options siw notify_on_wq=N panic_on_rx_err=N tx_flags_from_upstream=Y tx_flags_use_eor=Y

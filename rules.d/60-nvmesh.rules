@@ -1,0 +1,5 @@
+KERNEL=="*/*", OPTIONS:="nowatch", SUBSYSTEM=="block", ACTION=="add|change", ENV{nvmesh_driver}!="nvmesh-*", PROGRAM+="/opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py gen-name %k", ENV{nvmesh_driver}="%c"
+ENV{nvmesh_driver}=="nvmesh-*", OPTIONS:="nowatch", SUBSYSTEM=="block", ACTION=="add|change", PROGRAM+="/opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py by-id %k", \
+    RUN+="/opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py debug-di %k", SYMLINK+="%c"
+ENV{nvmesh_driver}=="nvmesh-*", OPTIONS:="nowatch", SUBSYSTEM=="block", ACTION=="add|change", PROGRAM+="/opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py by-id-scsi %k", SYMLINK+="%c{1+}"
+ENV{nvmesh_driver}=="nvmesh-*", OPTIONS:="nowatch", SUBSYSTEM=="block", ACTION=="add|change", PROGRAM+="/opt/nvmesh/client-repo/scripts/nvmesh_udev_utils.py by-scsid %k", SYMLINK+="%c{1+}"

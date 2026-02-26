@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+############################################################
+# Azure /etc/modprobe.d conf file for VMs with ConnectX-3  #
+############################################################
+
+# nvmeibs options to enable 16 Local NVME Qs
+options nvmeibs min_local_nvmeqs=16 max_local_nvmeqs=16
+
+# SIW Options
+options siw notify_on_wq=N panic_on_rx_err=N tx_flags_from_upstream=Y tx_flags_use_eor=Y
