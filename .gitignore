@@ -31,9 +31,7 @@ nvmeib.vpj
 .cproject
 .settings
 nvmeibt_toma
-excludes
 build_remote.sh
-clnt/block/unitest/blk_unitest
 clnt/block/unitest/out.txt
 clnt/block/unitest/nvmeibc.trace.json.cksum
 clnt/block/unitest/traces_ids.c
@@ -117,7 +115,6 @@ compile_commands.json*
 *.rpm
 perfTest/io_stress/cmp_blocks/cmp_blocks
 perfTest/io_stress/manual_fops/manual_fops
-perfTest/io_stress/linear_di_test
 perfTest/io_stress/aio_in_air
 perfTest/io_stress/di_parser/parse_block
 perfTest/io_stress/di_parser/dbgdi_log_test
@@ -160,3 +157,12 @@ io_pet_messages.binlog
 io_pet_messages.txtlog
 error_tags_run_end.json
 common/pet/build/
+!azure/modprobe.d
+!clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
+!config/nvmesh.conf.d
+!depmod.d
+!modprobe.d
+!rules.d
+!testing/rdma/kernel/excludes
+!toma/toma.d
+!tools/lz4
