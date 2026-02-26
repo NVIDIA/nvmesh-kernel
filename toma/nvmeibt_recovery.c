@@ -210,7 +210,6 @@ void nvmeibt_recovery_set_max_n_simultaneous_dirty_rebuild(int64_t max_n_simulta
 	if (recovery_max_n_simultaneous_dirty_rebuild <= 0) {
 		N_Wf(ssio9ic, "recovery_max_n_simultaneous_dirty_rebuild=@INT", recovery_max_n_simultaneous_dirty_rebuild);
 	}
-	nvmeibt_recovery_execute_dirty_rebuilds_as_needed();
 }
 
 int64_t nvmeibt_recovery_get_max_n_simultaneous_dirty_rebuild(void)
@@ -226,7 +225,6 @@ void nvmeibt_recovery_set_max_n_simultaneous_stale_and_txid_rebuild(int64_t max_
 	if (recovery_max_n_simultaneous_stale_and_txid_rebuild <= 0) {
 		N_Wf(ssq29ic, "recovery_max_n_simultaneous_stale_and_txid_rebuild=@INT", max_n_simultaneous_rebuild);
 	}
-	nvmeibt_recovery_execute_stale_and_txid_rebuilds_as_needed();
 }
 
 int64_t nvmeibt_recovery_get_max_n_simultaneous_stale_and_txid_rebuild(void)
