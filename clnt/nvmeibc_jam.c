@@ -92,7 +92,7 @@
  *   may not (always) be first in line, this may be insignificant improvement.
  */
 #if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)
-	#define NVMEIBC_PENDING_REQ_TIMEOUT (HZ / 1000)
+	#define NVMEIBC_PENDING_REQ_TIMEOUT (HZ / 100)
 	#define JAM_DEBUG_ABORT_ON_ERROR() 	BUG()
 #else
 	#define NVMEIBC_PENDING_REQ_TIMEOUT (HZ / 5) /* 200 milliseconds max., in total for all disks for a single request */
