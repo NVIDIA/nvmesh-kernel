@@ -963,14 +963,21 @@ void stale_locks_hash_to_string(printf_fn_t printf_fn, void *printf_ctx, struct 
 
 /********************************** rebuild ***********************************/
 
-void nvmeibt_seg_active_mark_cold_recovery_required(struct nvmeibt_seg_active *seg_active)
+bool nvmeibt_seg_active_mark_cold_recovery_required_if_needed(struct nvmeibt_seg_active *seg_active)
 {
-	if (seg_active) {
+	bool						needed;
+
+	if (nvmeibt_disk_segment_is_ec_cold_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active)) &&
+		nvmeibt_praid_topo_is_client_sync_cmd_cold_recovery_r(nvmeibt_seg_active_get_registrants_sync_cmd(seg_active))) {
+		needed = 1;
 		if (!nvmeibt_seg_active_is_cold_recovery_required(seg_active)) { NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(eisa910,n_pending_cold_recovery); }
 		N_Tf(ji98nko, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->required_recovery_action.cold_recovery = 1;
 		//NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(behbs71, seg_active);
+	} else {
+		needed = 0;
 	}
+	return needed;
 }
 
 void nvmeibt_seg_active_clear_cold_recovery_required(struct nvmeibt_seg_active *seg_active)
@@ -1021,14 +1028,20 @@ BOOL nvmeibt_seg_active_is_stale_rebuild_required(struct nvmeibt_seg_active *seg
 			0);
 }
 
-void nvmeibt_seg_active_mark_txid_rebuild_required(struct nvmeibt_seg_active *seg_active)
+bool nvmeibt_seg_active_mark_txid_rebuild_required_if_needed(struct nvmeibt_seg_active *seg_active)
 {
-	if (seg_active) {
+	bool						needed;
+
+	if (nvmeibt_disk_segment_is_ec_cold_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
+		needed = 1;
 		if (!nvmeibt_seg_active_is_txid_rebuild_required(seg_active)) { NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(b4jty8, n_pending_txid_rebuild); }
 		N_Tf(sdf23e3, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->required_recovery_action.txid_rebuild = 1;
 		NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(2vvv2k7, seg_active);
+	} else {
+		needed = 0;
 	}
+	return needed;
 }
 
 void nvmeibt_seg_active_clear_txid_rebuild_required(struct nvmeibt_seg_active *seg_active)
@@ -1047,9 +1060,13 @@ BOOL nvmeibt_seg_active_is_txid_rebuild_required(struct nvmeibt_seg_active *seg_
 	return (seg_active ? seg_active->required_recovery_action.txid_rebuild : 0);
 }
 
-void nvmeibt_seg_active_mark_dirty_rebuild_required(struct nvmeibt_seg_active *seg_active)
+bool nvmeibt_seg_active_mark_dirty_rebuild_required_if_needed(struct nvmeibt_seg_active *seg_active)
 {
-	if (seg_active) {
+	bool						needed;
+
+	if (nvmeibt_disk_segment_is_owner_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active)) &&
+		nvmeibt_praid_is_sync_cmd_run_dirty_rebuild(nvmeibt_seg_active_get_registrants_sync_cmd(seg_active))) {
+		needed = 1;
 		if (!nvmeibt_seg_active_is_dirty_rebuild_required(seg_active)) { NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(lbt1g8, n_pending_dirty_rebuild); }
 		N_Tf(wjug4jd, "seg=@UUID_8, old recovery @T_PRV new @T_PRV",
 				nvmeibt_seg_active_UUID_8(seg_active), seg_active->required_recovery_action.praid_version_major, nvmeibt_seg_active_get_active_praid_version_major(seg_active));
@@ -1059,7 +1076,10 @@ void nvmeibt_seg_active_mark_dirty_rebuild_required(struct nvmeibt_seg_active *s
 			seg_active->dirty_rebuild_ctx.prev_report_n_blksets_remaining = U64_MAX;
 		}
 		//NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(x93m328, seg_active);
+	} else {
+		needed = 0;
 	}
+	return needed;
 }
 
 BOOL nvmeibt_seg_active_is_dirty_rebuild_required(struct nvmeibt_seg_active *seg_active)
@@ -1903,11 +1923,8 @@ static void seg_active_done_dirty_rebuild(
 	} else {
 		N_Tf(fgy6207, "Dirty rebuild failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->dirty_rebuild_ctx.praid_version = 0;
-		if (nvmeibt_disk_segment_is_owner_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
-			N_Tf(dkw0gv3, "status=@STATUS but still a recoverer, marking for retry.", recovery_status);
-			nvmeibt_seg_active_mark_dirty_rebuild_required(seg_active);
+		if (nvmeibt_seg_active_mark_dirty_rebuild_required_if_needed(seg_active))
 			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(x93m328, seg_active);
-		}
 	}
 	NFOUT;
 }
@@ -1928,7 +1945,7 @@ static void seg_active_done_txid_rebuild(
 	} else {
 		N_Tf(vn5koy2, "txid rebuild failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		//seg_active->txid_rebuild_ctx.praid_version = 0;
-		nvmeibt_seg_active_mark_txid_rebuild_required(seg_active);
+		nvmeibt_seg_active_mark_txid_rebuild_required_if_needed(seg_active);
 	}
 	NFOUT;
 }
@@ -2003,11 +2020,8 @@ static void seg_active_done_cold_recovery(
 	} else {
 		N_Tf(jdikr4h, "Cold_recovery failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->cold_recovery_ctx.praid_version = 0;
-		if (nvmeibt_disk_segment_is_ec_cold_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
-			N_Tf(uej6m4k, "status=@STATUS but still an ec_cold_recoverer, marking for retry.", recovery_status);
-			nvmeibt_seg_active_mark_cold_recovery_required(seg_active);
+		if (nvmeibt_seg_active_mark_cold_recovery_required_if_needed(seg_active))
 			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(behbs71, seg_active);
-		}
 	}
 	NFOUT;
 }
@@ -2310,18 +2324,11 @@ void nvmeibt_seg_active_handle_post_update_actions(struct nvmeibt_seg_active *se
 	NDUMP_N_ACTIVE_REGISTRANTS(ghu87r5, seg_active);
 	// New raid_version_major. Reset registrants counter.
 	// Follower accepted RECOVERER
-	if (	nvmeibt_disk_segment_is_owner_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active)) &&
-			nvmeibt_praid_is_sync_cmd_run_dirty_rebuild(nvmeibt_seg_active_get_registrants_sync_cmd(seg_active)) &&
-			seg_active->dirty_rebuild_ctx.praid_version < nvmeibt_seg_active_get_active_praid_version_major(seg_active)) {
-		N_Tf(sr4530y, "New praid version. Restarting dirty recovery");
-		nvmeibt_seg_active_mark_dirty_rebuild_required(seg_active);
-	}
-	else if (	nvmeibt_disk_segment_is_ec_cold_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active)) &&
-				nvmeibt_praid_topo_is_client_sync_cmd_cold_recovery_r(nvmeibt_seg_active_get_registrants_sync_cmd(seg_active)) &&
-				seg_active->cold_recovery_ctx.praid_version < nvmeibt_seg_active_get_active_praid_version_major(seg_active)) {
-		N_Tf(ar5tue3, "New praid version. Restarting cold recovery");
-		nvmeibt_seg_active_mark_cold_recovery_required(seg_active);
-	}
+	if (seg_active->dirty_rebuild_ctx.praid_version < nvmeibt_seg_active_get_active_praid_version_major(seg_active))
+		nvmeibt_seg_active_mark_dirty_rebuild_required_if_needed(seg_active);
+	if (seg_active->cold_recovery_ctx.praid_version < nvmeibt_seg_active_get_active_praid_version_major(seg_active))
+		nvmeibt_seg_active_mark_cold_recovery_required_if_needed(seg_active);
+
 	N_Tf(t_d1_tomaseg, "seg=@UUID_8 prev_applied_major=@PRAID_VERSION segp_major=@PRAID_VERSION segp_minor=@PRAID_VERSION",
 		nvmeibt_seg_active_UUID_8(seg_active),
 		seg_active->last_post_update_praid_version_major,

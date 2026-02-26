@@ -386,16 +386,16 @@ struct nvmeibt_registrant_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash
 	struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, bool existing_lock_id_bits_is_read);
 
 /* recovery/rebuild */
-void nvmeibt_seg_active_mark_cold_recovery_required(struct nvmeibt_seg_active *seg_active);
+bool nvmeibt_seg_active_mark_cold_recovery_required_if_needed(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_clear_cold_recovery_required(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_seg_active_is_cold_recovery_required(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_mark_stale_rebuild_required(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_clear_stale_rebuild_required(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_seg_active_is_stale_rebuild_required(struct nvmeibt_seg_active *seg_active);
-void nvmeibt_seg_active_mark_txid_rebuild_required(struct nvmeibt_seg_active *seg_active);
+bool nvmeibt_seg_active_mark_txid_rebuild_required_if_needed(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_clear_txid_rebuild_required(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_seg_active_is_txid_rebuild_required(struct nvmeibt_seg_active *seg_active);
-void nvmeibt_seg_active_mark_dirty_rebuild_required(struct nvmeibt_seg_active *seg_active);
+bool nvmeibt_seg_active_mark_dirty_rebuild_required_if_needed(struct nvmeibt_seg_active *seg_active);
 BOOL nvmeibt_seg_active_is_dirty_rebuild_required(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_clear_dirty_rebuild_required(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_seg_active_mark_JGC_rebuild_required(struct nvmeibt_seg_active *seg_active);

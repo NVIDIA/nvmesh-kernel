@@ -296,9 +296,8 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 			}
 		}
 
-		if ((init_val.blkset_info.bits.txid == INITIAL_LAZY_READ_TXID) &&
-			nvmeibt_disk_segment_is_ec_cold_recoverer(nvmeibt_seg_active_get_active_seg_topo(seg_active)))
-			nvmeibt_seg_active_mark_txid_rebuild_required(seg_active);
+		if (init_val.blkset_info.bits.txid == INITIAL_LAZY_READ_TXID)
+			nvmeibt_seg_active_mark_txid_rebuild_required_if_needed(seg_active);
 	}
 
 _out_success:
