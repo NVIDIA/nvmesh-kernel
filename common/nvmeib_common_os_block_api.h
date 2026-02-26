@@ -3,7 +3,7 @@
 
 #include "kr_version.h"
 
-#if KS_HAS_BLKMODE
+#ifndef FMODE_EXCL
 	#define BLK_MODE_T blk_mode_t
 	#define BLK_MODE_EXCL BLK_OPEN_EXCL
 	#define MODE_WRITES_ALLOWED (BLK_OPEN_READ | BLK_OPEN_WRITE)

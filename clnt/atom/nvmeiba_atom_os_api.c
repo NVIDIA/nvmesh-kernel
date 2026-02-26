@@ -162,7 +162,7 @@ static int __fops_interface_open(struct BLK_MODE_OPEN_OBJ_T *obj, BLK_MODE_T mod
 	return nvmeiba_bdev_open(BLK_MODE_GENDISK(obj), mode, __get_user_pid(), current->comm);
 }
 
-#if KS_HAS_BLKMODE
+#ifndef FMODE_EXCL
 static void __fops_interface_close(struct gendisk *disk)
 {
 	nvmeiba_bdev_close(disk, disk->open_mode, __get_user_pid());

@@ -689,7 +689,7 @@ u16 nvmeibs_nvme_get_vendor(const struct nvmeibs_disk_info *info)
 
 
 static int nvmeibs_open(struct BLK_MODE_OPEN_OBJ_T *bdev, BLK_MODE_T mode);
-#if KS_HAS_BLKMODE
+#ifndef FMODE_EXCL
 static void nvmeibs_release(struct gendisk *disk);
 #elif KS_BLOCK_DEV_DEVICE_CLOSE_VOID
 static void nvmeibs_release(struct gendisk *disk, BLK_MODE_T mode);
@@ -6125,7 +6125,7 @@ static void destroy_local_cdev(struct device_data *d)
 
 static int nvmeibs_open(struct BLK_MODE_OPEN_OBJ_T *disk, BLK_MODE_T mode)
 {
-#if KS_HAS_BLKMODE
+#ifndef FMODE_EXCL
 	struct drive_params *drv = disk->private_data;
 #else
 	struct drive_params *drv = disk->bd_disk->private_data;
@@ -6140,7 +6140,7 @@ static int nvmeibs_open(struct BLK_MODE_OPEN_OBJ_T *disk, BLK_MODE_T mode)
     return 0;
 }
 
-#if KS_HAS_BLKMODE
+#ifndef FMODE_EXCL
 static void nvmeibs_release(struct gendisk *disk)
 #else
 #if KS_BLOCK_DEV_DEVICE_CLOSE_VOID

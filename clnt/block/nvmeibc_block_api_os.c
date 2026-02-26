@@ -235,7 +235,7 @@ int block_api_os_get(struct nvmeibc_os_api *os, const char *owner_name)
 		reason = "Cannot get()";		// Probably user played manually with /dev/... directory
 		goto _critical_error;
 	}
-#if KS_HAS_BLKMODE
+#ifndef FMODE_EXCL
 	if (nvmeiba_atom_open(bdev->bd_disk, owner_name) != 0) {
 #else // KS_HAS_BLKMODE
 	if (nvmeiba_atom_open(bdev, owner_name) != 0) {
