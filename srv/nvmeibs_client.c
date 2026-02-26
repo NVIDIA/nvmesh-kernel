@@ -4745,8 +4745,14 @@ static void handle_msg_work(struct nvmeib_iu *recv_ioctx)
 
 	/* sanity */
 	if (unlikely(nvmeibs_net_get_qp_state(cl->net) != QP_LIVE)) {
-		_ND(dbg_s_client_handle_msg_work,
+		_ND(dbg_0_s_client_handle_msg_work,
 			"@CL_NAME, @NET not live", cl->name, cl->net);
+		goto err;
+	}
+
+	if (unlikely(atomic_read(&cl->net->dying))) {
+		_ND(dbg_1_s_client_handle_msg_work,
+			"@CL_NAME, @NET is dying", cl->name, cl->net);
 		goto err;
 	}
 
