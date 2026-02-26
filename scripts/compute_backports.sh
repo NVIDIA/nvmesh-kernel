@@ -1,0 +1,488 @@
+#!/bin/bash
+# compute_backports.sh - Detect kernel API backports and output -D flags
+#
+# Called from backports.mk via $(shell ...) during the COMPILE_MODULES step.
+# Runs as a single process with file-content caching, replacing ~100+ separate
+# Make $(shell ...) invocations.
+#
+# Usage: compute_backports.sh KSRC1 INC_RDMA INC_RDMA_DRV ARCH [GREP_DEBUG GREP_DEBUG_LOGFILE]
+# Output: Space-separated -DFLAG=value flags on stdout
+
+set -f  # disable globbing
+
+KSRC1="$1"
+INC_RDMA="$2"
+INC_RDMA_DRV="$3"
+ARCH="$4"
+GREP_DEBUG="${5:-0}"
+GREP_DEBUG_LOGFILE="$6"
+
+CFLAGS=""
+
+# ---- File content cache ----
+CACHE_DIR=$(mktemp -d)
+trap 'rm -rf "$CACHE_DIR"' EXIT
+
+# Strip C comments and cache per unique set of input files
+strip_and_grep() {
+    local outer_pattern="$1"
+    shift
+    # Cache key from file paths
+    local cache_key="${*//\//_}"
+    cache_key="${cache_key// /__}"
+    local cache_file="$CACHE_DIR/$cache_key"
+    if [[ ! -f "$cache_file" ]]; then
+        sed -e '/\/\*/,/\*\//{s:/\*.*\*/::g; t; :a; /\/\*/,/\*\//{s:/\*.*\*/::g; t; N; b a}; s:/\*.*\*/::g}' "$@" 2>/dev/null > "$cache_file"
+    fi
+    grep -Poz "$outer_pattern" < "$cache_file"
+}
+
+# ---- Core check function ----
+# Args: define outer_pattern inner_pattern file_paths basepath [found_val] [notfound_val]
+grep_check() {
+    local define="$1"
+    local outer_pattern="$2"
+    local inner_pattern="$3"
+    local file_paths="$4"
+    local basepath="$5"
+    local found_val="${6:-1}"
+    local notfound_val="${7:-0}"
+
+    [[ "$GREP_DEBUG" == "1" ]] && [[ -n "$GREP_DEBUG_LOGFILE" ]] && echo "$define" >> "$GREP_DEBUG_LOGFILE"
+
+    local files=()
+    for f in $file_paths; do
+        files+=("$basepath/$f")
+    done
+
+    if strip_and_grep "$outer_pattern" "${files[@]}" | grep -Pq "$inner_pattern" 2>/dev/null; then
+        CFLAGS="$CFLAGS -D${define}=${found_val}"
+    else
+        CFLAGS="$CFLAGS -D${define}=${notfound_val}"
+    fi
+}
+
+# ---- Pattern-specific wrappers ----
+# Argument order matches the original Make functions for easy comparison.
+
+# grep_struct_member: define struct_name member file_paths basepath [found notfound]
+grep_struct_member() {
+    grep_check "$1" "(?s)${2}\s+\{.*?(?=\n\};)\n\};\n" "$3" "$4" "$5" "$6" "$7"
+}
+
+# grep_func_var: define func_name var_name file_paths basepath [found notfound]
+grep_func_var() {
+    grep_check "$1" "(?s)${2}\s*\(.*?\);\n" "$3" "$4" "$5" "$6" "$7"
+}
+
+# grep_func_rv: define func_name return_type file_paths basepath [found notfound]
+grep_func_rv() {
+    grep_check "$1" "(?s)[^\n]*${2}\s*\(.*?\);\n" "(?s)${3}\s*${2}" "$4" "$5" "$6" "$7"
+}
+
+# grep_macro_param: define macro_name param_name file_paths basepath [found notfound]
+grep_macro_param() {
+    grep_check "$1" "(?s)#define\s+${2}\s*\(.*?\)" "$3" "$4" "$5" "$6" "$7"
+}
+
+# grep_func_ptr_var: define ptr_name var_name file_paths basepath [found notfound]
+grep_func_ptr_var() {
+    grep_func_var "$1" "\\(\\*\\s*${2}\\)" "$3" "$4" "$5" "$6" "$7"
+}
+
+# grep_func_ptr_rv: define ptr_name return_type file_paths basepath [found notfound]
+grep_func_ptr_rv() {
+    grep_func_rv "$1" "\\(\\*\\s*${2}\\)" "$3" "$4" "$5" "$6" "$7"
+}
+
+# grep_typedef: define type_name file_paths basepath [found notfound]
+grep_typedef() {
+    grep_check "$1" "typedef\s+.*?\s+${2}" "" "$3" "$4" "$5" "$6"
+}
+
+# ---- Kernel source (KSRC1) convenience wrappers ----
+grep_ksrc_struct_member() { grep_struct_member "$1" "$2" "$3" "$4" "$KSRC1" "$5" "$6"; }
+grep_ksrc_func_var()      { grep_func_var      "$1" "$2" "$3" "$4" "$KSRC1" "$5" "$6"; }
+grep_ksrc_func_ptr_var()  { grep_func_ptr_var  "$1" "$2" "$3" "$4" "$KSRC1" "$5" "$6"; }
+grep_ksrc_macro_param()   { grep_macro_param   "$1" "$2" "$3" "$4" "$KSRC1" "$5" "$6"; }
+grep_ksrc_typedef()       { grep_typedef       "$1" "$2" "$3" "$KSRC1" "$4" "$5"; }
+grep_ksrc_func_ptr_rv()   { grep_func_ptr_rv   "$1" "$2" "$3" "$4" "$KSRC1" "$5" "$6"; }
+grep_ksrc_func_rv()       { grep_func_rv       "$1" "$2" "$3" "$4" "$KSRC1"; }
+
+# ---- RDMA (INC_RDMA) convenience wrappers ----
+grep_rdma_struct_member() { grep_struct_member "$1" "$2" "$3" "$4" "$INC_RDMA" "$5" "$6"; }
+grep_rdma_func_var()      { grep_func_var      "$1" "$2" "$3" "$4" "$INC_RDMA" "$5" "$6"; }
+grep_rdma_func_rv()       { grep_func_rv       "$1" "$2" "$3" "$4" "$INC_RDMA"; }
+grep_rdma_func_ptr_var()  { grep_func_ptr_var  "$1" "$2" "$3" "$4" "$INC_RDMA" "$5" "$6"; }
+grep_rdma_func_ptr_rv()   { grep_func_ptr_rv   "$1" "$2" "$3" "$4" "$INC_RDMA"; }
+grep_rdma_macro_param()   { grep_macro_param   "$1" "$2" "$3" "$4" "$INC_RDMA" "$5" "$6"; }
+grep_rdma_typedef()       { grep_typedef       "$1" "$2" "$3" "$INC_RDMA" "$4" "$5"; }
+
+# ---- RDMA drivers (INC_RDMA_DRV) convenience wrappers ----
+grep_rdma_drv_struct_member() { grep_struct_member "$1" "$2" "$3" "$4" "$INC_RDMA_DRV" "$5" "$6"; }
+grep_rdma_drv_func_var()      { grep_func_var      "$1" "$2" "$3" "$4" "$INC_RDMA_DRV" "$5" "$6"; }
+grep_rdma_drv_func_rv()       { grep_func_rv       "$1" "$2" "$3" "$4" "$INC_RDMA_DRV"; }
+grep_rdma_drv_func_ptr_var()  { grep_func_ptr_var  "$1" "$2" "$3" "$4" "$INC_RDMA_DRV" "$5" "$6"; }
+grep_rdma_drv_func_ptr_rv()   { grep_func_ptr_rv   "$1" "$2" "$3" "$4" "$INC_RDMA_DRV"; }
+grep_rdma_drv_macro_param()   { grep_macro_param   "$1" "$2" "$3" "$4" "$INC_RDMA_DRV" "$5" "$6"; }
+grep_rdma_drv_typedef()       { grep_typedef       "$1" "$2" "$3" "$INC_RDMA_DRV" "$4" "$5"; }
+
+###############################################################################
+# All backport checks
+###############################################################################
+
+# ---------------------------------------------------------------------------- #
+# Kernel 5.10
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_ptr_rv "KS_IB_DESTROY_CQ_INT_RETURN" "destroy_cq" "int" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_rv "KS_IB_DESTROY_SRQ_INT_RETURN" "destroy_srq" "int" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_rv "KS_IB_DEALLOC_PD_INT_RETURN" "dealloc_pd" "int" "include/rdma/ib_verbs.h"
+grep_rdma_func_rv "KS_IB_DESTROY_SRQ_RETURN_VOID" "ib_destroy_srq" "void" "include/rdma/ib_verbs.h"
+grep_ksrc_struct_member "KS_REQUEST_QUEUE_HAS_REQUEST_FN" "struct request_queue" "make_request_fn" "include/linux/blkdev.h"
+grep_rdma_func_var "KS_IB_REGISTER_DEVICE_HAS_DMA_DEVICE" "int ib_register_device" "struct device \*" "include/rdma/ib_verbs.h"
+
+grep_ksrc_struct_member "KS_MLX5_ACCESS_MODE_1_0" "mlx5_ifc_mkc_bits" "access_mode_1_0 " "include/linux/mlx5/mlx5_ifc.h"
+
+grep_rdma_func_var "HAS_IB_QUERY_GID" "int ib_query_gid" "struct ib_device \*device" "include/rdma/ib_verbs.h"
+grep_rdma_func_var "KS_IB_HAS_RDMA_GET_GID_ATTR" "struct ib_gid_attr \*rdma_get_gid_attr" "int index" "include/rdma/ib_cache.h"
+grep_rdma_struct_member "KS_IB_RDMA_PORT_SPACE" "enum rdma_port_space" "" "include/rdma/rdma_cm.h"
+grep_ksrc_struct_member "KS_TCP_SOCK_HAS_XMIT_SIZE_GOAL_SEGS" "struct tcp_sock" "xmit_size_goal_segs" "include/linux/tcp.h"
+grep_ksrc_struct_member "KS_DEV_ARCHDATA_HAS_DMA_OPS" "struct dev_archdata" "dma_ops" "arch/${ARCH}/include/asm/device.h"
+grep_rdma_func_var "KS_IB_REGISTER_DEVICE_HAS_NAME" "int ib_register_device" "const char \*name" "include/rdma/ib_verbs.h"
+grep_ksrc_func_var "KS_GET_USER_PAGES_HAS_TASK_STRUCT" "long get_user_pages" "struct task_struct \*tsk" "include/linux/mm.h"
+grep_ksrc_func_var "KS_GET_USER_PAGES_REMOTE_HAS_TASK_STRUCT" "long get_user_pages_remote" "struct task_struct \*tsk" "include/linux/mm.h"
+grep_ksrc_func_var "KS_GET_USER_PAGES_HAS_VMAS" "long get_user_pages" "struct vm_area_struct \*\*vmas" "include/linux/mm.h"
+grep_ksrc_func_var "KS_GET_USER_PAGES_REMOTE_HAS_VMAS" "long get_user_pages_remote" "struct vm_area_struct \*\*vmas" "include/linux/mm.h"
+grep_rdma_func_ptr_var "KS_IB_REG_USER_MR_HAS_ATTR" "reg_user_mr" "struct ib_mr_init_attr" "include/rdma/ib_verbs.h"
+grep_rdma_func_var "KS_IB_REGISTER_DEVICE_HAS_KOBJECT" "int ib_register_device" "struct kobject" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_QUERY_DEVICE_HAS_UDATA" "query_device" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_CREATE_CQ_HAS_IB_CQ_INIT_ATTR" "create_cq" "const struct ib_cq_init_attr" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_CREATE_AH_HAS_UDATA" "create_ah" "struct ib_udata" "include/rdma/ib_verbs.h"
+
+grep_rdma_func_ptr_var "KS_PROCESS_MAD_HAS_OUT_MAD_PKEY_INDEX" "process_mad" "u16 \*out_mad_pkey_index" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_PROCESS_MAD_HAS_IB_MAD_HDR" "process_mad" "struct ib_mad_hdr" "include/rdma/ib_verbs.h"
+
+grep_rdma_func_ptr_var "KS_POST_SRQ_RECV_HAS_CONST" "post_srq_recv" "const struct ib_recv_wr" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_POST_SEND_HAS_CONST" "post_send" "const struct ib_send_wr" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_ATTR_HAS_MAX_SEND_SGE" "struct ib_device_attr" "max_send_sge" "include/rdma/ib_verbs.h"
+
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_OPS" "struct ib_device" "ib_device_ops" "include/rdma/ib_verbs.h"
+
+# KS_IB_DEVICE_ATTR_HAS_GET_PORT_IMMUTABLE depends on KS_IB_DEVICE_HAS_OPS
+if echo "$CFLAGS" | grep -q "KS_IB_DEVICE_HAS_OPS=1"; then
+    grep_rdma_struct_member "KS_IB_DEVICE_ATTR_HAS_GET_PORT_IMMUTABLE" "struct ib_device_ops" "get_port_immutable" "include/rdma/ib_verbs.h"
+else
+    grep_rdma_struct_member "KS_IB_DEVICE_ATTR_HAS_GET_PORT_IMMUTABLE" "struct ib_device" "get_port_immutable" "include/rdma/ib_verbs.h"
+fi
+
+grep_ksrc_struct_member "KS_DMA_MAP_OPS_HAS_DMA_ATTR" "struct dma_map_ops" "struct dma_attrs" "include/linux/dma-mapping.h"
+grep_ksrc_func_var "KS_HAS_SMP_STORE_MB" "define smp_store_mb" "value" "include/asm-generic/barrier.h"
+
+# ---------------------------------------------------------------------------- #
+# RH8
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_SOCK_OPT_GETNAME_HAS_UADDR_LEN" "inet_getname" "uaddr_len" "include/net/inet_common.h"
+grep_ksrc_struct_member "KS_THREAD_INFO_HAS_CPU" "struct thread_info" "cpu" "arch/${ARCH}/include/asm/thread_info.h"
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_DEVICE_OPS" "struct ib_device_ops" "ops" "include/rdma/ib_verbs.h"
+grep_ksrc_struct_member "KS_DEVICE_HAS_DEVICE_RH" "struct device" "device_rh" "include/linux/device.h"
+grep_rdma_struct_member "KS_IW_CM_HAS_IFNAME" "struct iw_cm_verbs" "ifname" "include/rdma/iw_cm.h"
+grep_rdma_func_ptr_var "KS_IB_CREATE_AH_HAS_FLAGS" "create_ah" "u32" "include/rdma/ib_verbs.h"
+
+if [[ -f "$KSRC1/include/linux/sched/mm.h" ]]; then
+    CFLAGS="$CFLAGS -DLINUX_SCHED_MM=1"
+else
+    CFLAGS="$CFLAGS -DLINUX_SCHED_MM=0"
+fi
+
+# ---------------------------------------------------------------------------- #
+# Kernel 4.18.0-[147, 193] (CentOS 8.1.1911, 8.2.2004)
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_ptr_var "IB_DEREG_MR_HAS_UDATA" "dereg_mr" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_OPS_HAS_MODULE_OWNER" "struct ib_device_ops" "owner" "include/rdma/ib_verbs.h"
+grep_rdma_func_var "KS_IB_MLX5_WRITE64_HAS_DB_LOCK" "static inline void mlx5_write64" "spinlock_t \*doorbell_lock" "include/linux/mlx5/doorbell.h"
+
+grep_check "KS_HAS___LLIST_ADD_BATCH" "__llist_add_batch" "" "include/linux/llist.h" "$KSRC1"
+grep_check "KS_HAS___LLIST_ADD" "__llist_add" "" "include/linux/llist.h" "$KSRC1"
+grep_check "KS_HAS___LLIST_DEL_ALL" "__llist_del_all" "" "include/linux/llist.h" "$KSRC1"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 4.20
+# ---------------------------------------------------------------------------- #
+grep_ksrc_struct_member "KS_MLX5_IB_FBC_HAS_FRAG_BUF" "mlx5_frag_buf_ctrl" "frag_buf\;" "include/linux/mlx5/driver.h"
+
+# ---------------------------------------------------------------------------- #
+# OFED 5.1
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_RDMA_REJECT_HAS_REASON" "int rdma_reject" "u8 reason" "include/rdma/rdma_cm.h"
+
+# ---------------------------------------------------------------------------- #
+# RH8.3
+# ---------------------------------------------------------------------------- #
+grep_rdma_drv_struct_member "IB_MLX5_MR_HAS_LIVE" "mlx5_ib_mr" "live" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+
+# ---------------------------------------------------------------------------- #
+# RH8.4
+# ---------------------------------------------------------------------------- #
+grep_rdma_drv_struct_member "IB_MLX5_MR_HAS_DEV" "mlx5_ib_mr" "dev" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+grep_rdma_drv_struct_member "IB_MLX5_MR_HAS_NPAGES" "mlx5_ib_mr" "npages" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+grep_rdma_drv_struct_member "IB_MLX5_QP_HAS_WQ_SIG" "mlx5_ib_qp" "wq_sig" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 5.4.0-[1031, 1035] (Ubuntu 18.04 @ Azure)
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_IB_REGISTER_DEVICE_HAS_IB_DEVICE" "int ib_register_device" "struct ib_device" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_OWNER" "struct ib_device" "owner" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_IWCM" "struct ib_device" "iwcm" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_DEVICE_ALLOC_USES_UCONTEXT" "alloc_ucontext" "struct ib_ucontext" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_DESTROY_QP_HAS_UDATA" "destroy_qp" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_DEVICE_PD_USES_UCONTEXT" "alloc_pd" "struct ib_ucontext" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_CREATE_CQ_HAS_IB_DEVICE" "create_cq" "struct ib_device" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_CREATE_CQ_HAS_IB_UCONTEXT" "create_cq" "struct ib_ucontext" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_DESTROY_CQ_HAS_IB_UDATA" "destroy_cq" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_ALLOC_MR_HAS_IB_UDATA" "alloc_mr" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_DEREG_MR_HAS_IB_UDATA" "dereg_mr" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_CREATE_SQR_HAS_IB_PD" "create_srq" "struct ib_pd" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_DESTROY_SQR_HAS_IB_UDATA" "destroy_srq" "struct ib_udata" "include/rdma/ib_verbs.h"
+grep_rdma_func_var "KS_IB_SET_NETDEV_HAS_IB_DEVICE" "int ib_device_set_netdev" "struct ib_device" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_OPS_HAS_SIZES" "struct ib_device_ops" "DECLARE_RDMA_OBJ_SIZE" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# OFED 5.2 (Kernel 5.10)
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_ptr_rv "KS_IB_CLIENT_ADD_RV_IS_INT" "add" "int" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_CLIENT_REMOVE_HAS_CLIENT_DATA" "remove" "client_data" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_VERBS_SUPPORTS_FMR" "struct ib_device_ops" "alloc_fmr" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# Remove the need for the RHEL_BKPORT_MLX5 switch
+# ---------------------------------------------------------------------------- #
+if [[ -f "$INC_RDMA/include/linux/mlx4/qp.h" ]]; then
+    grep_rdma_struct_member "KS_MLX_FENCE_VLAN" "struct mlx4_wqe_ctrl_seg" "qpn_vlan" "include/linux/mlx4/qp.h"
+fi
+
+# Set to 0 if struct mlx5_create_mkey_mbox_in exists
+grep_rdma_struct_member "KS_MLX5_IFC" "struct mlx5_create_mkey_mbox_in" "" "include/linux/mlx5/device.h" "0" "1"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 4.18.0-193
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_ptr_var "KS_IB_CREATE_AH_HAS_PD" "create_ah" "struct ib_pd" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_CREATE_AH_HAS_AH" "create_ah" "struct ib_ah" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_rv "KS_IB_DESTROY_AH_RETURNS_INT" "destroy_ah" "int" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_rv "KS_IB_DESTROY_AH_RETURNS_VOID" "destroy_ah" "void" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 4.18.0-305
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_ptr_var "KS_IB_CREATE_AH_HAS_AH_INIT_ATTR" "create_ah" "struct rdma_ah_init_attr" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_var "KS_IB_DESTROY_AH_HAS_FLAGS" "destroy_ah" "u32" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_HAS_FMR" "struct ib_fmr" "" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 4.18.0-305.10.2.el8_4 (for RH8.4 and vanilla 5.8)
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_TCP_SOCK_SET_NODELAY" "tcp_sock_set_nodelay" "" "include/linux/tcp.h"
+grep_ksrc_func_var "KS_HAS_TCP_SOCK_SET_QUICKACK" "tcp_sock_set_quickack" "" "include/linux/tcp.h"
+grep_ksrc_func_var "KS_HAS_TCP_SETSOCKOPT" "tcp_setsockopt" "" "include/net/tcp.h"
+grep_ksrc_func_var "KS_TCP_SETSOCKOPT_TAKES_SOCKPTR_T" "tcp_setsockopt" "sockptr_t" "include/net/tcp.h"
+grep_ksrc_func_var "KS_HAS_TCP_GETSOCKOPT" "tcp_getsockopt" "" "include/net/tcp.h"
+grep_ksrc_func_var "KS_HAS_SOCK_SETSOCKOPT" "sock_setsockopt" "" "include/net/sock.h"
+grep_ksrc_func_var "KS_SOCK_SETSOCKOPT_TAKES_SOCKPTR_T" "sock_setsockopt" "sockptr_t" "include/net/sock.h"
+
+# ---------------------------------------------------------------------------- #
+# Used for SIW panic_remote_on_rx_err 4.14 and above
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_KERNEL_SENDMSG_LOCKED" "kernel_sendmsg_locked" "" "include/linux/net.h"
+
+# ---------------------------------------------------------------------------- #
+# Used for SIW IB_EVENT_GID_CHANGED 5.4 and above
+# ---------------------------------------------------------------------------- #
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_EVENT_HADNLER_RWSEM" "struct ib_device" "event_handler_rwsem" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# Used for nonexists ib_dma_alloc_coherent 5.11 and above
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_HAS_IB_DMA_ALLOC_COHERENT" "ib_dma_alloc_coherent" "" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# SIW - INET_MATCH sdif
+# ---------------------------------------------------------------------------- #
+grep_ksrc_macro_param "KS_INET_MATCH_HAS_SDIF" "INET_MATCH" "__sdif" "include/net/inet_hashtables.h"
+
+# ---------------------------------------------------------------------------- #
+# SIW - Moved from Makefile
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_SOCK_SET_REUSEADDR" "sock_set_reuseaddr" "" "include/net/sock.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 4.15
+# ---------------------------------------------------------------------------- #
+grep_rdma_struct_member "KS_IB_DEVICE_OPS_HAS_DRIVER_ID" "struct ib_device_ops" "driver_id" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_DRIVER_ID" "struct ib_device" "driver_id" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# 4.18.0-240.el8.x86_64
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_IDR_INIT" "idr_init" "" "include/linux/idr.h"
+
+# ---------------------------------------------------------------------------- #
+# 4.18.0-513.24.1.el8_9.x86_64
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_IB_SA_PATH_REC_GET_CB_HAS_NUM_PRS" "int ib_sa_path_rec_get" "num_prs" "include/rdma/ib_sa.h"
+grep_rdma_func_var "KS_IB_SA_PATH_REC_GET_CB_HAS_NUM_PRS_UINT" "int ib_sa_path_rec_get" "unsigned int num_prs" "include/rdma/ib_sa.h"
+
+# ---------------------------------------------------------------------------- #
+# 5.12 Kernel
+# ---------------------------------------------------------------------------- #
+grep_ksrc_struct_member "KS_HAS_BLOCK_DEVICE_STRUCT" "block_device" "" "include/linux/blk_types.h"
+grep_check "KS_HAS_MODULE_MUTEX" "struct\s+mutex\s+module_mutex" "" "include/linux/module.h" "$KSRC1" "1" "0"
+grep_ksrc_func_var "KS_HAS_REVALIDATE_DISK_FN" "revalidate_disk" "" "include/linux/fs.h"
+grep_ksrc_func_var "KS_HAS_SET_CAPACITY_AND_MODIFY_FN_GENDISK" "set_capacity_and_notify" "" "include/linux/genhd.h"
+grep_ksrc_func_var "KS_HAS_DISK_PART_ITER" "disk_part_iter_init" "" "include/linux/genhd.h"
+grep_ksrc_struct_member "KS_BIO_HAS_BI_BDEV_PTR" "struct bio" "struct block_device.*\*" "include/linux/blk_types.h"
+grep_ksrc_struct_member "KS_BIO_HAS_BI_GENDISK_PTR" "struct bio" "struct gendisk.*\*" "include/linux/blk_types.h"
+grep_ksrc_struct_member "KS_BIO_HAS_BI_OPF" "struct bio" "bi_opf" "include/linux/blk_types.h"
+grep_ksrc_struct_member "KS_BIO_HAS_BI_WRITE_HINT" "struct bio" "bi_write_hint" "include/linux/blk_types.h"
+
+# ---------------------------------------------------------------------------- #
+# 5.13 Kernel
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_LIST_SORT_CMP_FUNC_T" "list_sort" "list_cmp_func_t" "include/linux/list_sort.h"
+grep_rdma_func_var "IB_VERBS_PORT_NUM_IS_U32" "ib_query_port" "u32\s+port_num" "include/rdma/ib_verbs.h"
+grep_ksrc_struct_member "KS_BLOCK_DEV_OPS_HAS_REVALIDATE_DISK" "block_device_operations" "revalidate_disk" "include/linux/blkdev.h"
+
+# ---------------------------------------------------------------------------- #
+# 5.15 Kernel
+# ---------------------------------------------------------------------------- #
+grep_ksrc_struct_member "KS_BDI_PTR_IN_QUEUE" "request_queue" "struct backing_dev_info.*\*" "include/linux/blkdev.h"
+grep_ksrc_struct_member "KS_BDI_IN_QUEUE" "request_queue" "struct backing_dev_info" "include/linux/blkdev.h"
+
+grep_rdma_func_ptr_rv "KS_IB_CREATE_QP_INT_RV" "create_qp" "int" "include/rdma/ib_verbs.h"
+grep_rdma_func_ptr_rv "KS_IB_CREATE_QP_INT_RV" "create_qp" "int" "include/rdma/ib_verbs.h"
+grep_rdma_struct_member "KS_IB_DEVICE_OPS_HAS_QP_SIZE" "struct ib_device_ops" "DECLARE_RDMA_OBJ_SIZE\(ib_qp\);" "include/rdma/ib_verbs.h"
+
+grep_ksrc_func_var "KS_HAS_REVALIDATE_DISK_FN" "revalidate_disk" "" "include/linux/fs.h"
+
+# ---------------------------------------------------------------------------- #
+# SIW - 4.15.0-136-generic
+# ---------------------------------------------------------------------------- #
+grep_rdma_struct_member "KS_IB_VERBS_HAS_DMA_MAPPING_OPS" "struct ib_dma_mapping_ops" "" "include/rdma/ib_verbs.h"
+grep_ksrc_struct_member "KS_DMA_MAP_OPS_HAS_MAPPING_ERROR" "struct dma_map_ops" "mapping_error" "include/linux/dma-mapping.h"
+grep_ksrc_struct_member "KS_DMA_MAP_OPS_HAS_SET_DMA_MASK" "struct dma_map_ops" "set_dma_mask" "include/linux/dma-mapping.h"
+grep_ksrc_struct_member "KS_DMA_MAP_OPS_HAS_IS_PHYS" "struct dma_map_ops" "is_phys" "include/linux/dma-mapping.h"
+grep_rdma_struct_member "KS_IB_DEVICE_HAS_DMA_OPS" "struct ib_device_ops" "ops" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# MLNX_OFED_LINUX-5.7-1.0.0.0 / 4.18.0-477.10.1.el8_8.x86_64
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_RDMA_MLX5_CORE_CREATE_MKEY_MKEY_U32" "int mlx5_core_create_mkey" "u32 \*mkey" "include/linux/mlx5/driver.h"
+grep_rdma_drv_struct_member "KS_RDMA_MLX5_IB_MKEY_HAS_NDESCS" "struct mlx5_ib_mkey" "unsigned int ndescs" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+
+# ---------------------------------------------------------------------------- #
+# Lustre 2.15.2 / 4.18.0-425.3.1.el8_lustre.x86_64
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_RDMA_MLX5_MISSING_MLX5_BUF_OFFSET" "mlx5_buf_offset" "" "include/linux/mlx5/driver.h" "0" "1"
+
+# ---------------------------------------------------------------------------- #
+# Compat for smp_call_function_single_async
+# ---------------------------------------------------------------------------- #
+grep_ksrc_typedef "KS_SMP_CALL_SINGLE_DATA_T" "call_single_data_t" "include/linux/smp.h"
+
+# ---------------------------------------------------------------------------- #
+# SIW - For CQ notification as tasklet
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_TASKLET_SETUP" "tasklet_setup" "" "include/linux/interrupt.h"
+
+# ---------------------------------------------------------------------------- #
+# Missing scatterlist functionality in 3.10 kernels
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_SGL_ALLOC_ORDER" "sgl_alloc_order" "" "include/linux/scatterlist.h"
+grep_ksrc_struct_member "KS_HAS_SG_DMA_PAGE_ITER" "sg_dma_page_iter" "" "include/linux/scatterlist.h"
+
+# ---------------------------------------------------------------------------- #
+# OFED 23.07
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_RDMA_IB_CM_LISTEN_HAS_SERVICE_MASK" "int ib_cm_listen" "__be64 service_mask" "include/rdma/ib_cm.h"
+
+# INET_MATCH - now an inline function on newer kernels
+grep_ksrc_func_var "KS_HAS_NEW_INET_MATCH_LOWER" "inet_match" "" "include/net/inet_hashtables.h"
+grep_ksrc_func_var "KS_HAS_NEW_INET_MATCH_CAPS" "INET_MATCH" "" "include/net/inet_hashtables.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 5.17
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_rv "KS_SUBMIT_BIO_VOID_RV" "submit_bio" "void" "include/linux/bio.h include/linux/fs.h"
+grep_ksrc_func_rv "KS_ADD_DISK_INT_RV" "add_disk" "int\s*__must_check" "include/linux/blkdev.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 5.18
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_BIO_INIT_HAS_BDEV_N_OPF" "bio_init" "opf" "include/linux/bio.h"
+grep_ksrc_func_var "KS_HAS_SET_CAPACITY_AND_MODIFY_FN_BDEV" "set_capacity_and_notify" "" "include/linux/blkdev.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 5.19
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_BLK_MQ_DESTROY_QUEUE" "blk_mq_destroy_queue" "" "include/linux/blk-mq.h"
+grep_ksrc_func_var "KS_HAS_SET_FS" "set_fs" "" "include/asm-generic/uaccess.h"
+grep_ksrc_func_var "KS_BIO_ALLOC_HAS_BLOCK_DEVICE" "bio_alloc" "struct block_device" "include/linux/bio.h"
+grep_ksrc_func_var "KS_BLKDEV_ISSUE_DISCARD_HAS_FLAGS" "blkdev_issue_discard" "unsigned long flags" "include/linux/blkdev.h"
+
+grep_ksrc_func_rv "KS_BLOCK_DEV_MAKE_REQUEST_VOID" "submit_bio" "void" "include/linux/bio.h include/linux/fs.h"
+grep_ksrc_func_rv "KS_BLK_QC_T" "submit_bio" "blk_qc_t" "include/linux/bio.h include/linux/fs.h"
+
+grep_ksrc_func_var "KS_HAS_PROFILE_EVENT_REGISTER" "profile_event_register" "" "include/linux/profile.h"
+grep_ksrc_func_var "KS_PDE_DATA_IS_LOWER" "pde_data" "" "include/linux/proc_fs.h"
+grep_ksrc_func_var "KS_HAS_BLKDEV_IOCTL" "blkdev_ioctl" "" "include/linux/fs.h"
+grep_rdma_func_var "KS_IB_REGISTER_DEVICE_HAS_DEVICE" "int ib_register_device" "struct device" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 6.5
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_BLKDEV_GET_BY_PATH_HAS_HOLDERS" "blkdev_get_by_path" "blk_holder_ops" "include/linux/blkdev.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 6.8
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_VM_FLAGS_SET" "vm_flags_set" "" "include/linux/mm.h"
+grep_ksrc_func_var "KS_HAS_BIO_SET_OP_ATTRS" "bio_set_op_attrs" "" "include/linux/blktypes.h"
+grep_ksrc_func_var "KS_HAS_BDEV_OPEN_BY_PATH" "bdev_open_by_path" "" "include/linux/blkdev.h"
+grep_ksrc_func_var "KS_HAS_BLK_CLEANUP_DISK" "blk_cleanup_disk" "" "include/linux/genhd.h"
+grep_ksrc_func_var "KS_HAS_TCP_SENDPAGE" "tcp_sendpage" "" "include/net/tcp.h"
+grep_ksrc_func_var "KS_HAS_RDMA_FOR_EACH_PORT" "rdma_for_each_port" "" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 6.9
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_BDEV_FILE_OPEN_BY_PATH" "bdev_file_open_by_path" "" "include/linux/blkdev.h"
+grep_ksrc_func_var "KS_HAS_QUEUE_LIMITS_START_UPDATE" "queue_limits_start_update" "" "include/linux/blkdev.h"
+grep_ksrc_macro_param "KS_HAS_BLK_ALLOC_DISK" "blk_alloc_disk" "" "include/linux/blkdev.h include/linux/genhd.h"
+grep_ksrc_macro_param "KS_BLK_ALLOC_DISK_2PARAMS" "blk_alloc_disk" "lim" "include/linux/blkdev.h include/linux/genhd.h"
+
+# ---------------------------------------------------------------------------- #
+# DOCA OFED 24.10
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_ptr_var "KS_IB_CREATE_CQ_HAS_ATTR_BUNDLE" "create_cq" "struct uverbs_attr_bundle" "include/rdma/ib_verbs.h"
+
+# ---------------------------------------------------------------------------- #
+# [NVMESH-5532]
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_SOCK_NOT_OWNED_BY_ME" "sock_not_owned_by_me" "" "include/net/sock.h"
+grep_ksrc_func_var "KS_HAS_FIND_NTH_BIT" "find_nth_bit" "" "include/linux/find.h"
+
+# ---------------------------------------------------------------------------- #
+# Kernel 6.14
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_BDEV_PARTNO" "bdev_partno" "" "include/linux/blkdev.h"
+
+# ---------------------------------------------------------------------------- #
+# Used for keeper
+# ---------------------------------------------------------------------------- #
+grep_rdma_struct_member "KS_RDMA_HAS_RESTRACK" "struct rdma_restrack_entry" "" "include/rdma/restrack.h"
+grep_ksrc_struct_member "KS_HAS_PROC_FS" "struct proc_ops" "" "include/linux/proc_fs.h"
+grep_rdma_func_var "HAS_IB_GET_DMA_MR" "ib_get_dma_mr" "" "include/rdma/ib_verbs.h"
+
+###############################################################################
+# Output
+###############################################################################
+echo "$CFLAGS"
