@@ -1265,24 +1265,6 @@ static void stop_JGC_rebuild(struct nvmeibt_seg_active *seg_active)
 	NFOUT;
 }
 
-void stop_all_JGC_rebuild_tasks(void)
-{
-	struct nvmeibt_local_disk	*local_disk;
-	struct nvmeibt_seg_active	*seg_active;
-
-	if (!nvmeibt_topology_is_HW_config_functional() || (nvmeibt_global_get_global()->n_running_JGC_rebuild == 0))
-		goto out;
-
-	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			stop_JGC_rebuild(seg_active);
-		}
-	}
-
-out:
-	NFOUT;
-}
-
 static void stop_cold_recovery(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
