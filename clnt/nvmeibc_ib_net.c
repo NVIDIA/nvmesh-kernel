@@ -2596,7 +2596,17 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 		     "Shared CQ to use dev @DEV_NAME, intr_vect=@INT",
 			P2NV(net->port)->ib_dev->name, recv_intr);
 	} else {
-		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->ch_index, &send_intr, &recv_intr);
+		int *recv_intr_ptr = &recv_intr;
+		if (params->max_recv_cq == 1) {
+			/* Recv CQ is not used (lock channel):
+				 - Don't ask for a vector or it will screw up the RR algorithm. 
+			 		Just give it vector 0. 
+			*/
+			recv_intr_ptr = NULL;
+			recv_intr = 0;
+		}
+
+		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->ch_index, &send_intr, recv_intr_ptr);
 		_NTn(trace_0_ib_net_create_qp, net,
 			"CQs to use dev @DEV_NAME, send_intr_vect=@INT, recv_intr_vec=@INT",
 			P2NV(net->port)->ib_dev->name, send_intr, recv_intr);
