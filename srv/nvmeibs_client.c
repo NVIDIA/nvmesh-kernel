@@ -622,8 +622,14 @@ int nvmeibs_client_send_msg(struct nvmeibs_client *cl, struct nvmeibs_net *net,
 
 	__NFIN;
 
+	if (atomic_read(&net->dying)) {
+		_NE(error_1_client_nvmeibs_client_send_msg, "net @NET is dying", net);
+		rv = -1;
+		goto out;
+	}
+
 	if (!net->qp) {
-		_NE(error_client_nvmeibs_client_send_msg, "net @NET, qp is NULL", net);
+		_NE(error_2_client_nvmeibs_client_send_msg, "net @NET, qp is NULL", net);
 		rv = -1;
 		goto out;
 	}
