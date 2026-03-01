@@ -223,6 +223,13 @@ struct nvmeibc_icore_ops const* nvmeibc_core_ops_get(void){
 }
 
 
+void nvmeibc_disk_call_discover(struct nvmeibc_disk *disk)
+{
+	(void)disk;
+	BUG();
+}
+
+
 /***************************** JAM - glue to vfunc **************************/
 #include "nvmeibc_jam.h"
 struct nvmeib_cpu_mask_info;
