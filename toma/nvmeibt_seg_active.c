@@ -2947,6 +2947,33 @@ struct nvmeibt_seg_active *nvmeibt_find_seg_active_on_all_local_disks_by_uuid(co
 	return seg_active;
 }
 
+void nvmeibt_seg_active_scan_all(void)
+{
+	struct nvmeibt_seg_active		*seg_active;
+	struct nvmeibt_local_disk		*local_disk;
+	struct nvmeibt_topology			*global_params = nvmeibt_global_get_global();
+
+	NFIN;
+	NVMEIB_HASH_FOREACH(local_disk, global_params->nvmesh_local_disks_hash_by_ldisk_id_str) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+
+			// Validate n_active vs n_applied
+#ifdef TOMA_DEBUG
+			if (nvmeibt_seg_active_n_active_registrants(seg_active) < nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(seg_active)) {
+				N_Ef(t_fk_tomareg, "seg=@UUID_8 n_active=@N_ACTIVE n_applied=@N_APPLIED",
+					nvmeibt_seg_active_UUID_8(seg_active),
+					nvmeibt_seg_active_n_active_registrants(seg_active),
+					nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(seg_active));
+				dump_seg_active_registrants(seg_active, 1);
+				nvmeibt_abort(ES_FATAL);
+			}
+#endif
+
+		}
+	}
+	NFOUT;
+}
+
 bool nvmeibt_seg_active_send_one_seg_rebuild_progress_report_to_mgmt(struct nvmeibt_seg_active *seg_active, struct nvmeibt_Str *json_payload)
 {
 	bool									is_any_written = 0;

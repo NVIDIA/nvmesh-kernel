@@ -170,7 +170,7 @@ static void validate_registrants_on_timeout(const struct nvmeibt_seg_active *seg
 	}
 }
 
-static void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_active, int is_err)
+void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_active, int is_err)
 {
 	struct nvmeibt_registrant_ctx	*active_registrant;
 	struct timespec					now;
@@ -186,29 +186,6 @@ static void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_act
 		}
 	}
 	NFOUT;
-}
-
-void nvmeibt_register_validate_n_active_vs_n_applied(void)
-{
-#ifdef TOMA_DEBUG
-	struct nvmeibt_local_disk	*local_disk;
-	struct nvmeibt_seg_active	*seg_active;
-
-	NFIN;
-	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			if (nvmeibt_seg_active_n_active_registrants(seg_active) < nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(seg_active)) {
-				N_Ef(t_fk_tomareg, "seg=@UUID_8 n_active=@N_ACTIVE n_applied=@N_APPLIED",
-					nvmeibt_seg_active_UUID_8(seg_active),
-					nvmeibt_seg_active_n_active_registrants(seg_active),
-					nvmeibt_seg_active_n_active_registrants_on_applied_praid_version(seg_active));
-				dump_seg_active_registrants(seg_active, 1);
-				nvmeibt_abort(ES_FATAL);
-			}
-		}
-	}
-	NFOUT;
-#endif	// #ifdef TOMA_DEBUG
 }
 
 /*

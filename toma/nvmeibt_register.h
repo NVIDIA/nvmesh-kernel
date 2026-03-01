@@ -164,6 +164,7 @@ void nvmeibt_register_open_all_eligible_seg_actives_for_use(void);
 void nvmeibt_register_handle_new_reservation_mode(struct nvmeibt_seg_active *seg_active, u64 reservation_mode_version);
 
 bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *input_reg_ctx, bool is_by_cid);
+void dump_seg_active_registrants(const struct nvmeibt_seg_active *seg_active, int is_err);
 
 int nvmeibt_register_print_status(
 	int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx,

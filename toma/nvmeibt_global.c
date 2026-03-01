@@ -950,8 +950,8 @@ void nvmeibt_global_idle_time_activities(void)
 	nvmeibt_recovery_execute_stale_and_txid_rebuilds_as_needed();
 	nvmeibt_recovery_execute_JGC_rebuilds_as_needed();
 	nvmeibt_recovery_execute_scrubbing_as_needed();
+	nvmeibt_seg_active_scan_all();
 	nvmeibt_validate_alloc_free_summary_table();
-	nvmeibt_register_validate_n_active_vs_n_applied();
 	nvmeibt_server_lib_consume_incomming_srvr_msgs();
 	nvmeibt_rpc_run();
 	nvmeibt_wq_stuck_pthread_check();
