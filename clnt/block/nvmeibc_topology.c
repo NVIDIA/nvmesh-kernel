@@ -1060,6 +1060,8 @@ static void __set_active_topology(struct nvmeibc_topologies *nt, struct nvmeibc_
 }
 
 /* 0 - OK, 1 - pausing, 2 - never discovered, 3 - paused */
+
+__attribute__((nonnull(1)))
 static int __disk_p_state2num(const struct nvmeibc_idisk *disk)
 {
 	return (disk->ops.should_pause(disk) ? 1 : 0) +
