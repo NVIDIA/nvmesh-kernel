@@ -217,10 +217,12 @@ const char *nvmeib_ib_driver_dev_type(enum nvmeib_dev_type t)
 EXPORT_SYMBOL(nvmeib_ib_driver_dev_type);
 
 #if KS_HAS_MODULE_MUTEX
+#define MODULE_PARAM_NAME(m) m->name
 int nvmeib_ibdr_hwdev_pops_set(enum nvmeib_dev_type t,
                                struct module *m,
                                struct nvmeib_device_public_ops *pops)
 #else
+#define MODULE_PARAM_NAME(m) m
 int nvmeib_ibdr_hwdev_pops_set(enum nvmeib_dev_type t,
                                const char *m,
                                struct nvmeib_device_public_ops *pops)
@@ -245,7 +247,7 @@ int nvmeib_ibdr_hwdev_pops_set(enum nvmeib_dev_type t,
 
 	if (!try_module_get(pops->module)) {
 		_NE(err_ibdr_hwdev_pops_set_ref_fail, 
-		    "Failed to get reference count for @MODULE_NAME", m);
+		    "Failed to get reference count for @MODULE_NAME", MODULE_PARAM_NAME(m));
 		rv = -EBUSY;
 		goto unlock;
 	}
