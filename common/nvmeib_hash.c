@@ -41,6 +41,11 @@ void nvmeibt_abort(enum nvmeibt_error_severity es);
 #define HASH_RELAXED_LOAD_FACTOR_THRESHOLD			51 / 100
 #define HASH_SHRINK_FACTOR_THRESHOLD				10
 
+static bool is_hash_tbl_suitable_for_resize_relaxed_increase(struct nvmeib_hash_table *hash_tbl)
+{
+	return (hash_tbl->n_occupied >= hash_tbl->n_arr_entries * HASH_RELAXED_LOAD_FACTOR_THRESHOLD);
+}
+
 static inline uint32_t hash_scrambled_to_idx(const uint32_t scrambled, const uint32_t scrambled_to_idx_mask)
 {
 	return (scrambled & scrambled_to_idx_mask);
@@ -109,7 +114,7 @@ static void nvmeib_hash_resize(struct nvmeib_hash_table *hash_tbl)
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "nvmeib_hash_resize_1 n_occupied=%d n_arr_entries=%d Threshold(relaxed)=%d\n", hash_tbl->n_occupied, hash_tbl->n_arr_entries, hash_tbl->n_arr_entries * HASH_RELAXED_LOAD_FACTOR_THRESHOLD);
 #endif	// #if IS_HASH_UNITTEST
-	if (hash_tbl->n_occupied >= hash_tbl->n_arr_entries * HASH_RELAXED_LOAD_FACTOR_THRESHOLD) {
+	if (is_hash_tbl_suitable_for_resize_relaxed_increase(hash_tbl)) {
 		// Note we also get here in case of EMERGENCY (on-add)
 		hash_tbl->log2_of_n_arr_entries = hash_tbl->log2_of_n_arr_entries + 1;
 	} else if (hash_tbl->n_occupied * HASH_SHRINK_FACTOR_THRESHOLD < hash_tbl->n_arr_entries) {
