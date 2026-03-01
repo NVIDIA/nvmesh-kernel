@@ -31,6 +31,7 @@ struct nvmeib_hash_table {		// Note that during resize, we keep the object, and 
 	int								initial_log2_of_n_arr_entries;
 	int 							n_arr_entries;
 	int								n_occupied;
+	bool							is_used_outside_main_thread;    // For now, no resize at idle_time_activities. The NVMEIB_HASH_FOREACH is too complicated for an unlock()
 	int8_t							key_len;
 };
 
@@ -73,11 +74,11 @@ static inline bool nvmeib_hash_is_ascii(struct nvmeib_hash_table *hash_tbl)
 	return (hash_tbl->key_len == -1);
 }
 
-struct nvmeib_hash_table *nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len);
-#define NVMEIB_HASH_CREATE(name_, log2_of_n_arr_entries_, desc_, key_len_) ({								\
-	struct nvmeib_hash_table	*__ht__ = nvmeib_hash_create(log2_of_n_arr_entries_, desc_, key_len_);		\
-	NVMEIB_HASH_DUMP_STATISTICS(name_, __ht__);																\
-	__ht__;																									\
+struct nvmeib_hash_table *nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len, bool is_used_outside_main_thread);
+#define NVMEIB_HASH_CREATE(name_, log2_of_n_arr_entries_, desc_, key_len_, is_used_outside_main_thread_) ({								\
+	struct nvmeib_hash_table	*__ht__ = nvmeib_hash_create(log2_of_n_arr_entries_, desc_, key_len_, is_used_outside_main_thread_);	\
+	NVMEIB_HASH_DUMP_STATISTICS(name_, __ht__);																							\
+	__ht__;																																\
 })
 
 void nvmeib_hash_tbl_free(struct nvmeib_hash_table *hash_tbl);

@@ -448,13 +448,14 @@ void *nvmeib_hash_delete_ascii_str(struct nvmeib_hash_table *hash_tbl, const cha
 
 static struct nvmeib_hash_table *all_active_hashs;	// Use a hash for the list of all created/active hashes
 
-static inline struct nvmeib_hash_table *__nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len)
+static inline struct nvmeib_hash_table *__nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len, bool is_used_outside_main_thread)
 {
 	struct nvmeib_hash_table		*hash_tbl = NULL;
 
 	hash_tbl = calloc(1, sizeof(*hash_tbl));
 	strncpy(hash_tbl->description, description, sizeof(hash_tbl->description) - 1);
 	hash_tbl->key_len = key_len;
+	hash_tbl->is_used_outside_main_thread = is_used_outside_main_thread;
 	if (log2_of_n_arr_entries >= 24) {
 #if IS_HASH_UNITTEST
 		fprintf(stdout, "__nvmeib_hash_create log2_of_n_arr_entries=%d\n", log2_of_n_arr_entries);
@@ -477,13 +478,13 @@ static inline struct nvmeib_hash_table *__nvmeib_hash_create(int log2_of_n_arr_e
 	return hash_tbl;
 }
 
-struct nvmeib_hash_table *nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len)
+struct nvmeib_hash_table *nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len, bool is_used_outside_main_thread)
 {
 	struct nvmeib_hash_table		*hash_tbl = NULL;
 
-	hash_tbl = __nvmeib_hash_create(log2_of_n_arr_entries, description, key_len);
+	hash_tbl = __nvmeib_hash_create(log2_of_n_arr_entries, description, key_len, is_used_outside_main_thread);
 	if (!all_active_hashs) {
-		all_active_hashs = __nvmeib_hash_create(HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "Hash_of_all_active_hashes", 8);
+		all_active_hashs = __nvmeib_hash_create(HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "Hash_of_all_active_hashes", 8, 0);
 	}
 	nvmeib_hash_add_uint64_t(all_active_hashs, (uint64_t)hash_tbl, hash_tbl);
 	return hash_tbl;
@@ -525,8 +526,11 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 	last_invocation = now;
 	for (int i = 0; i < all_active_hashs->n_arr_entries; i++) {
 		last_scanned_idx = hash_next_idx_on_collision(last_scanned_idx, all_active_hashs->scrambled_to_idx_mask);	// In range, also if size changed
-		hash_tbl = (struct nvmeib_hash_table *)(all_active_hashs->arr[last_scanned_idx].ptr_to_obj);
 		if (hash_is_entry_OCCUPIED(&(all_active_hashs->arr[last_scanned_idx]))) {
+			hash_tbl = (struct nvmeib_hash_table *)(all_active_hashs->arr[last_scanned_idx].ptr_to_obj);
+			if (hash_tbl->is_used_outside_main_thread) {
+				continue;
+			}
 			nvmeib_hash_resize(hash_tbl);
 		}
 		getnstimeofday_boot(&now);
@@ -590,7 +594,7 @@ int main() {
 
 
 	fprintf(stdout, "\n520 entries - u32- Test collisions and scale\n");
-	ht1 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_uint32", 4);
+	ht1 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_uint32", 4, 0);
 
 	fprintf(stdout, "\n\n523 entries - u32 - (add) Test collisions and scale\n");
 	for (int i = 0; i < 523; i++) {
@@ -632,7 +636,7 @@ int main() {
 	}
 
 	fprintf(stdout, "\n520 entries - uuid - Test collisions and reuse of deleted\n");
-	ht2 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_uuid", 16);
+	ht2 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_uuid", 16, 0);
 
 	fprintf(stdout, "\n\n523 entries - uuid - (add) Test collisions and scale\n");
 	for (int i = 0; i < 523; i++) {
@@ -670,7 +674,7 @@ int main() {
 
 	//
 	fprintf(stdout, "\n\n520 entries - u64 - Test collisions\n");
-	ht3 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_int64", 8);
+	ht3 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_int64", 8, 0);
 	for (int64_t i = 0; i < 523; i++) {
 		ptr_to_obj = (void *)((uint64_t)i << 32);
 		nvmeib_hash_add_uint64_t(ht3, i, ptr_to_obj);
@@ -683,7 +687,7 @@ int main() {
 
 	//
 	fprintf(stdout, "\ntest ASCII deletions\n");
-	ht4 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_ascii", -1);
+	ht4 = NVMEIB_HASH_CREATE(vsgvdhgwe, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "TEST_HASH_ascii", -1, 0);
 
 	fprintf(stdout, "\n\n20 entries - ASCII - (add)\n");
 	for (int i = 0; i < 20; i++) {

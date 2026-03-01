@@ -2225,7 +2225,7 @@ static struct nvmeibt_nm_local_node * create_local_node(struct nvmeibt_nm_hw_fun
 	XDLIST_HEAD_INIT(&ln->el);
 	XDLIST_HEAD_INIT(&ln->el_pool);
 	XDLIST_HEAD_INIT(&ln->remotes);
-	ln->key_val_hash_by_u64_key = NVMEIB_HASH_CREATE(vtshgve, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nm_key_val", 8);
+	ln->key_val_hash_by_u64_key = NVMEIB_HASH_CREATE(vtshgve, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nm_key_val", 8, 1);
 	XDLIST_HEAD_INIT(&ln->toma_request_pool);
 	XDLIST_HEAD_INIT(&ln->toma_requests);
 

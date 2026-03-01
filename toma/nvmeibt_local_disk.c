@@ -761,7 +761,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 
 	new_local_disk = NNVMEIBT_TOMA_CALLOC(trace_local_disk_nvmeibt_local_disk_add_from_config, 1, sizeof(*new_local_disk)); // Read into it, maybe use it.
 	XDLIST_INIT_LINK(&new_local_disk->controller_local_disks_list_link, NULL);
-	new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(4vghs8d, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16);
+	new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(4vghs8d, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16, 0);
 
 	new_local_disk->dev_file_fd = -1;
 	new_local_disk->are_partitions_setup_in_mem = false;
@@ -1341,7 +1341,7 @@ int nvmeibt_local_disk_add_from_stock_driver(struct nvmeibt_udev_event_info *ude
 	sprintf(wqe->new_local_disk->from_config.status, "Not_Initialized");
 	wqe->new_local_disk->from_config.disk_type = udev_event_info->disk_type;
 	XDLIST_INIT_LINK(&wqe->new_local_disk->controller_local_disks_list_link, NULL);
-	wqe->new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(5vgd7j0, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16);
+	wqe->new_local_disk->seg_active_hash_by_uuid = NVMEIB_HASH_CREATE(5vgd7j0, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "seg_active_hash", 16, 0);
 
 	wqe->new_local_disk->are_partitions_setup_in_mem = false;
 	if ((wqe->new_local_disk->dev_file_fd = NNVMEIBT_OPEN_READ_EXCL(rcgdh2k, dev_file_name, 0)) < 0) {

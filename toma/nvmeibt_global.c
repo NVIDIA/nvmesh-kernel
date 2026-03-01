@@ -39,18 +39,18 @@ void nvmeibt_global_init(void)
 	getnstimeofday_boot(&(global_ctx.startup_timespec));
 	getnstimeofday_convert_boot_to_real(&global_ctx.startup_timespec, &tmp_timespec);
 	global_ctx.startup_timestamp_msec = timespec_to_msec(tmp_timespec);		// Don't use timespec_to_nsec() as MGMT will round the LSBs
-	global_ctx.block_devices_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "block_devices_hash", 16);
-	global_ctx.nics_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw3, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nics_hash", 16);
-	global_ctx.disks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw4, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "disks_hash", 16);
-	global_ctx.disk_segments_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 6), "disks_segments_hash", 16);
-	global_ctx.praids_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw5, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 4), "praids_hash", 16);
-	global_ctx.nodes_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw6, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "nodes_hash", 16);
-	global_ctx.chunks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw7, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "chunks_hash", 16);
-	global_ctx.clients_hash_by_cid = NVMEIB_HASH_CREATE(vhghnw8, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 6), "clients_hash", 4);
-	global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnw9, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_disks_hash", -1);
-	global_ctx.stock_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnwa, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_local_disks_hash", -1);
-	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1);
-	global_ctx.local_nics_hash_by_sw_gid_str = NVMEIB_HASH_CREATE(vhghnwd, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_nics_hash", -1);
+	global_ctx.block_devices_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "block_devices_hash", 16, 0);
+	global_ctx.nics_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw3, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nics_hash", 16, 0);
+	global_ctx.disks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw4, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "disks_hash", 16, 0);
+	global_ctx.disk_segments_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 6), "disks_segments_hash", 16, 0);
+	global_ctx.praids_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw5, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 4), "praids_hash", 16, 0);
+	global_ctx.nodes_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw6, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "nodes_hash", 16, 0);
+	global_ctx.chunks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw7, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "chunks_hash", 16, 0);
+	global_ctx.clients_hash_by_cid = NVMEIB_HASH_CREATE(vhghnw8, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 6), "clients_hash", 4, 0);
+	global_ctx.nvmesh_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnw9, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_disks_hash", -1, 0);
+	global_ctx.stock_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnwa, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_local_disks_hash", -1, 0);
+	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1, 0);
+	global_ctx.local_nics_hash_by_sw_gid_str = NVMEIB_HASH_CREATE(vhghnwd, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_nics_hash", -1, 0);
 
 	XDLIST_HEAD_INIT(&(global_ctx.longing_on_invalid_seg_list_by_handle));
 	XDLIST_HEAD_INIT(&(global_ctx.excluded_drives_spec));

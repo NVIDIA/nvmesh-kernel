@@ -2348,7 +2348,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 
 	/* create work-queues */
 	// Init local_disk wqs hash table.
-	nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1);
+	nvmeibt_global_get_global()->ldisks_wq_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(y92jiak, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "ldisk_wq_hash", -1, 0);
 	toma_persistency_wq = nvmeibt_wq_create("Persistency_io");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");

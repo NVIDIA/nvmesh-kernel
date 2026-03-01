@@ -501,12 +501,12 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active = NNVMEIBT_TOMA_CALLOC(fwwq99a, 1, sizeof(*seg_active));
 	seg_active->uuid = *uuid;
 	NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(v20sslk, seg_active, "LOCAL_DISK", 1);
-	seg_active->longing_registrants_hash_by_handle = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_handle", 8);
-	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4);
-	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8);
-	seg_active->stale_registrants_hash_by_purified_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4);
-	seg_active->stale_locks_hash_by_seg_blkset_no = NVMEIB_HASH_CREATE(sm6beod, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_locks_hash", 8);
-	seg_active->awaited_lockids_hash_by_lockid = NVMEIB_HASH_CREATE(4vhga0k, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "awaited_lockids", 4);
+	seg_active->longing_registrants_hash_by_handle = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_handle", 8, 0);
+	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4, 0);
+	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8, 0);
+	seg_active->stale_registrants_hash_by_purified_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4, 0);
+	seg_active->stale_locks_hash_by_seg_blkset_no = NVMEIB_HASH_CREATE(sm6beod, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_locks_hash", 8, 1);
+	seg_active->awaited_lockids_hash_by_lockid = NVMEIB_HASH_CREATE(4vhga0k, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "awaited_lockids", 4, 0);
 	XDLIST_HEAD_INIT(&seg_active->registrants_on_timeout);
 	XDLIST_HEAD_INIT(&seg_active->owner_lock_ids_to_release);
 	XDLIST_INIT_LINK(&seg_active->global_seg_active_post_update_action_link, NULL);

@@ -358,8 +358,8 @@ struct nvmeibt_srm *nvmeibt_srm_create(const struct carrier *car)
 
 	/* init senders and receivers */
 	XDLIST_HEAD_INIT(&srm->user_pool_q);
-	srm->senders_hash_by_ptr_to_user = NVMEIB_HASH_CREATE(vysqj29, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "srm->senders", 8);
-	srm->receivers_hash_by_ptr_to_user = NVMEIB_HASH_CREATE(fg6wejh, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "srm->receivers", 8);
+	srm->senders_hash_by_ptr_to_user = NVMEIB_HASH_CREATE(vysqj29, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "srm->senders", 8, 1);
+	srm->receivers_hash_by_ptr_to_user = NVMEIB_HASH_CREATE(fg6wejh, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "srm->receivers", 8, 1);
 	XDLIST_HEAD_INIT(&srm->req_pool_q);
 	XDLIST_HEAD_INIT(&srm->lock_regions);
 	XDLIST_HEAD_INIT(&srm->wreq_gc_q);

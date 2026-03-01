@@ -3635,7 +3635,7 @@ int nvmeibt_raft_one_time_init(void)
 	int							rv = 0;
 
 	NFIN;
-	my_raft_global.raft_members_hash_by_uuid = NVMEIB_HASH_CREATE(a7y2k49, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "raft_members_hash", 16);
+	my_raft_global.raft_members_hash_by_uuid = NVMEIB_HASH_CREATE(a7y2k49, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "raft_members_hash", 16, 0);
 	my_raft_global.n_raft_members = 0;
 	nvmeibt_raft_recalc_timeout_constants();
 	getnstimeofday_boot(&(my_raft_global.next_election_time));
