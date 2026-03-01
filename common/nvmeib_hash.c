@@ -46,6 +46,12 @@ static bool is_hash_tbl_suitable_for_resize_relaxed_increase(struct nvmeib_hash_
 	return (hash_tbl->n_occupied >= hash_tbl->n_arr_entries * HASH_RELAXED_LOAD_FACTOR_THRESHOLD);
 }
 
+static bool is_hash_tbl_suitable_for_resize_emergency_increase(struct nvmeib_hash_table *hash_tbl)
+{
+	return (hash_tbl->n_occupied >= hash_tbl->n_arr_entries * HASH_EMERGENCY_LOAD_FACTOR_THRESHOLD ||
+			(hash_tbl->is_used_outside_main_thread && is_hash_tbl_suitable_for_resize_relaxed_increase(hash_tbl)));	// Since idle_time_activities will not resize, we don't want to wait
+}
+
 static inline uint32_t hash_scrambled_to_idx(const uint32_t scrambled, const uint32_t scrambled_to_idx_mask)
 {
 	return (scrambled & scrambled_to_idx_mask);
@@ -179,7 +185,7 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "hash_add n_occupied=%d n_arr_entries=%d Threshold(emergency)=%d\n", hash_tbl->n_occupied, hash_tbl->n_arr_entries, hash_tbl->n_arr_entries * HASH_EMERGENCY_LOAD_FACTOR_THRESHOLD);
 #endif	// #if IS_HASH_UNITTEST
-	if (hash_tbl->n_occupied >= hash_tbl->n_arr_entries * HASH_EMERGENCY_LOAD_FACTOR_THRESHOLD) {
+	if (is_hash_tbl_suitable_for_resize_emergency_increase(hash_tbl)) {
 		nvmeib_hash_resize(hash_tbl);
 	}
 	idx = hash_scrambled_to_idx(scrambled, hash_tbl->scrambled_to_idx_mask);
