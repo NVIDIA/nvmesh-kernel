@@ -174,6 +174,7 @@ enum siw_if_type {
 
 /* Time to wait for QP users to process CQEs after flush in destroy_qp */
 #define SIW_QP_SQ_CQ_DRAIN_TIMEOUT	(HZ)
+#define SIW_QP_RQ_CQ_DRAIN_TIMEOUT	(HZ)
 
 /* For testing siw_connect failures */
 #define SIW_CONNECT_FAIL_TEST		0
@@ -717,6 +718,8 @@ struct siw_iwarp_rx {
 	struct list_head flush_rqes;
 
 	atomic_t rcq_qp_ref_cnt;
+
+	struct completion rcq_qp_comp;
 
 #ifdef SIW_DEBUG_RX_CRC
 #define SIW_DEBUG_RX_CRC_MAX_FPDU 65536
