@@ -5363,6 +5363,9 @@ static void process_rcq_completion_imp(
 					_NE(error_client_process_rcq_completion_imp, "Got null recv_ioctx");
 			}
 		}
+		/* CQ was possibly not empty, poll again */
+		if (n == NVMEIBS_POLL_SIZE)
+			continue;
 		if ((rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP |
 			IB_CQ_REPORT_MISSED_EVENTS)) <= 0) {
 			if (rv < 0)
