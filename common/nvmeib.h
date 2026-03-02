@@ -208,6 +208,8 @@ enum {
 
 static const u64 nvmeib_ka_value = 0x4e564d4549424b41; /*NVMEIBKA*/
 
+extern unsigned int nvmeib_tcp_mode;
+
 /* Daniel: utsname() is an unsafe function to call from interrupt context */
 const char *nvmeib_get_utsname_nodename(void);
 

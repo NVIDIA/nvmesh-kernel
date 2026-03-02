@@ -4046,7 +4046,6 @@ int nvmeibs_init(void) /* Constructor */
 		rv = -EINVAL;
 		goto unlock;
 	}
-
 	INIT_LIST_HEAD(&used_dev_list);
 	nvmeib_set_used_dev_list(nvmeibs_filter_ports, MAX_FP, &used_dev_list);
 	nvmeib_set_used_pots_guids(nvmeibs_filter_guids, MAX_FP, &used_dev_list);

@@ -365,6 +365,7 @@ start() {
 		    echo "Setting $tcp_find_path_sock_modparam"
 		    common_module_params="$common_module_params $tcp_find_path_sock_modparam"
 	    fi
+		common_module_params="$common_module_params tcp_mode=1"
 	fi
 
 	if is_iommu_enabled; then

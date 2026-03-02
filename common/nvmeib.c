@@ -93,19 +93,35 @@ MODULE_PARM_DESC(pcpu_process_cq_retry_usecs, "The time window in micro-seconds 
 #define NVMEIB_MAX_BURST (64)
 #define NVMEIB_MAX_IRQ_TIME_USECS (2000)
 #define NVMEIB_MAX_COMP_INTR_PCT_CPU (20)
+#define NVMEIB_MAX_COMP_INTR_PCT_CPU_TCP (4)
 
+unsigned int nvmeib_tcp_mode = 0;
+module_param_named(tcp_mode, nvmeib_tcp_mode, uint, 0444);
+MODULE_PARM_DESC(tcp_mode, "Is TCP mode enabled? 0 = no, 1 = yes");
 
 unsigned int nvmeib_intr_shaper_max_burst = NVMEIB_MAX_BURST;
 module_param_named(intr_shaper_max_burst, nvmeib_intr_shaper_max_burst, uint, 0644);
 MODULE_PARM_DESC(intr_shaper_max_burst, "Defines the maximum number of recv completions to handle in an interrupt before entering poll mode.");
 
+unsigned int nvmeib_intr_shaper_max_burst_tcp = NVMEIB_MAX_BURST;
+module_param_named(intr_shaper_max_burst_tcp, nvmeib_intr_shaper_max_burst_tcp, uint, 0644);
+MODULE_PARM_DESC(intr_shaper_max_burst_tcp, "Same as intr_shaper_max_burst, but used when tcp_mode != 0.");
+
 unsigned int nvmeib_intr_shaper_max_pct_cpu = NVMEIB_MAX_COMP_INTR_PCT_CPU;
 module_param_named(intr_shaper_max_pct_cpu, nvmeib_intr_shaper_max_pct_cpu, uint, 0644);
 MODULE_PARM_DESC(intr_shaper_max_pct_cpu, "Defines the maximum percentage of CPU time to spend processing completions in an interrupt before entering poll mode.");
 
+unsigned int nvmeib_intr_shaper_max_pct_cpu_tcp = NVMEIB_MAX_COMP_INTR_PCT_CPU_TCP;
+module_param_named(intr_shaper_max_pct_cpu_tcp, nvmeib_intr_shaper_max_pct_cpu_tcp, uint, 0644);
+MODULE_PARM_DESC(intr_shaper_max_pct_cpu_tcp, "Same as intr_shaper_max_pct_cpu, but used when tcp_mode != 0.");
+
 unsigned int nvmeib_intr_shaper_max_irq_time_usecs = NVMEIB_MAX_IRQ_TIME_USECS;
 module_param_named(intr_shaper_max_irq_time_usecs, nvmeib_intr_shaper_max_irq_time_usecs, uint, 0644);
 MODULE_PARM_DESC(intr_shaper_max_irq_time_usecs, "Defines the maximum time to spend in an interrupt before entering poll mode.");
+
+unsigned int nvmeib_intr_shaper_max_irq_time_usecs_tcp = NVMEIB_MAX_IRQ_TIME_USECS;
+module_param_named(intr_shaper_max_irq_time_usecs_tcp, nvmeib_intr_shaper_max_irq_time_usecs_tcp, uint, 0644);
+MODULE_PARM_DESC(intr_shaper_max_irq_time_usecs_tcp, "Same as intr_shaper_max_irq_time_usecs, but used when tcp_mode != 0.");
 
 static struct nvmeib_intr_shaper *nvmeib_intr_shaper = NULL;
 static struct nvmeib_public_procfs_ent *nvmeib_intr_shaper_procfs_ent = NULL;
@@ -115,6 +131,32 @@ struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void)
 	return nvmeib_intr_shaper;
 }
 EXPORT_SYMBOL(nvmeib_get_intr_shaper);
+
+static inline bool nvmeib_intr_shaper_use_tcp_params(void)
+{
+	return nvmeib_tcp_mode != 0;
+}
+
+static inline unsigned int nvmeib_intr_shaper_max_burst_get(void)
+{
+	return nvmeib_intr_shaper_use_tcp_params() ?
+		READ_ONCE(nvmeib_intr_shaper_max_burst_tcp) :
+		READ_ONCE(nvmeib_intr_shaper_max_burst);
+}
+
+static inline unsigned int nvmeib_intr_shaper_max_pct_cpu_get(void)
+{
+	return nvmeib_intr_shaper_use_tcp_params() ?
+		READ_ONCE(nvmeib_intr_shaper_max_pct_cpu_tcp) :
+		READ_ONCE(nvmeib_intr_shaper_max_pct_cpu);
+}
+
+static inline unsigned int nvmeib_intr_shaper_max_irq_time_usecs_get(void)
+{
+	return nvmeib_intr_shaper_use_tcp_params() ?
+		READ_ONCE(nvmeib_intr_shaper_max_irq_time_usecs_tcp) :
+		READ_ONCE(nvmeib_intr_shaper_max_irq_time_usecs);
+}
 
 /* option to blacklist NICs
  * Format is <hca_id>:<hca_id> ...
@@ -4019,9 +4061,9 @@ struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs)
 
 	for_each_possible_cpu(i) {
 		pcpu = (struct intr_shaper_percpu *)(shaper->percpu + i *shaper->percpu_size);
-		pcpu->max_burst_size_local = nvmeib_intr_shaper_max_burst;
-		pcpu->max_percent_cpu_local = nvmeib_intr_shaper_max_pct_cpu;
-		pcpu->max_irq_time_usecs_local = nvmeib_intr_shaper_max_irq_time_usecs;
+		pcpu->max_burst_size_local = nvmeib_intr_shaper_max_burst_get();
+		pcpu->max_percent_cpu_local = nvmeib_intr_shaper_max_pct_cpu_get();
+		pcpu->max_irq_time_usecs_local = nvmeib_intr_shaper_max_irq_time_usecs_get();
 	}
 	goto out;
 
@@ -4078,9 +4120,9 @@ static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
 		goto out;
 	}
 
-	pcpu->max_burst_size_local = READ_ONCE(nvmeib_intr_shaper_max_burst);
-	pcpu->max_percent_cpu_local = READ_ONCE(nvmeib_intr_shaper_max_pct_cpu);
-	pcpu->max_irq_time_usecs_local = READ_ONCE(nvmeib_intr_shaper_max_irq_time_usecs);
+	pcpu->max_burst_size_local = nvmeib_intr_shaper_max_burst_get();
+	pcpu->max_percent_cpu_local = nvmeib_intr_shaper_max_pct_cpu_get();
+	pcpu->max_irq_time_usecs_local = nvmeib_intr_shaper_max_irq_time_usecs_get();
 
 	pcpu->last_update_ns = now;
 
