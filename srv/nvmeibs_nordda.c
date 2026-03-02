@@ -3197,7 +3197,7 @@ static int nordda_poll_recv_cq_with_budget(struct ib_cq *cq,
 		for (i = 0; i < n; ++i) {
 			nordda_process_recv_wc(nrch, &wcs[i]);
 		}
-		if (nvmeibs_defer_recv_comps) {
+		if (nvmeibs_defer_recv_comps_enabled(P2NV(NR2P(nrch))->dev_type)) {
 			nvmeib_intr_shaper_intr_polled(s_intr_shaper, n);
 		}
 		total += n;
@@ -3300,7 +3300,7 @@ static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
 	nvmeib_qp_stats_on_interrupt(nrch->net->qp_stats);
 
 	do {
-		if (nvmeibs_defer_recv_comps && nvmeibs_nordda_kwq &&
+		if (nvmeibs_defer_recv_comps_enabled(P2NV(NR2P(nrch))->dev_type) && nvmeibs_nordda_kwq &&
 		    nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper) &&
 			atomic_inc_not_zero(&nrch->recv_comp_work_ctr)) 
 		{

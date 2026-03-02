@@ -135,6 +135,10 @@ static bool nvmeibs_use_intr_shaper = true;
 module_param_named(use_intr_shaper, nvmeibs_use_intr_shaper, bool, 0644);
 MODULE_PARM_DESC(use_intr_shaper, "Determines whether to use an interrupt shaper for NVMe completions.");
 
+static bool nvmeibs_use_intr_shaper_tcp = false;
+module_param_named(use_intr_shaper_tcp, nvmeibs_use_intr_shaper_tcp, bool, 0644);
+MODULE_PARM_DESC(use_intr_shaper_tcp, "Same as use_intr_shaper, but applied when running in TCP-only mode.");
+
 static bool nvmeibs_nvme_doorbell_batch = true;
 module_param_named(nvme_doorbell_batch, nvmeibs_nvme_doorbell_batch, bool, 0644);
 MODULE_PARM_DESC(nvme_doorbell_batch, "Determines whether to batch NVMe doorbell requests.");
@@ -6826,6 +6830,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device_data *d;
 	int bars;
 	int err;
+	extern unsigned int nvmeibs_tcp_mode;
 
 	_NT(trace_nvme_nvmeibs_probe, "--> nvmeibspci_driver probe: pci_dev=@PCI_DEV   @DEV_NAME", pdev, dev_name(&pdev->dev));
 
@@ -6856,7 +6861,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	d->max_msix = max_msix;
 	d->max_completions = max_completions;
 	d->defer_process_io_cq = nvmeibs_defer_process_io_cq;
-	d->use_intr_shaper = nvmeibs_use_intr_shaper;
+	d->use_intr_shaper = nvmeibs_tcp_mode ? nvmeibs_use_intr_shaper_tcp : nvmeibs_use_intr_shaper;
 	INIT_DELAYED_WORK(&d->dwork, nvmeibs_probe1);
 	INIT_WORK(&d->async_work, async_event_work);
 	INIT_WORK(&d->remove_work, nvmeibs_remove_work);

@@ -69,6 +69,10 @@ bool nvmeibs_defer_recv_comps = true;
 module_param_named(defer_recv_comps, nvmeibs_defer_recv_comps, bool, 0644);
 MODULE_PARM_DESC(defer_recv_comps, "Defer handling of IO receive completions, so it is not done in the interrupt context.");
 
+bool nvmeibs_defer_recv_comps_tcp = false;
+module_param_named(defer_recv_comps_tcp, nvmeibs_defer_recv_comps_tcp, bool, 0644);
+MODULE_PARM_DESC(defer_recv_comps_tcp, "Same as defer_recv_comps, but applied for TCP/SIW NICs.");
+
 unsigned nvmeibs_max_nic_srqs = NVMEIB_MAX_NIC_SRQS;
 module_param_named(max_nic_srqs, nvmeibs_max_nic_srqs, int, 0444);
 MODULE_PARM_DESC(max_nic_srqs, "Maximum number of shared receive queues to define per NIC.");
