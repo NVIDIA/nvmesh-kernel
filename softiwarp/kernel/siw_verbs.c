@@ -960,7 +960,9 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 
 	atomic_set(&qp->tx_ctx.scq_qp_ref_cnt, 1);
 	init_completion(&qp->tx_ctx.scq_qp_comp);
+
 	atomic_set(&qp->rx_ctx.rcq_qp_ref_cnt, 1);
+	init_completion(&qp->rx_ctx.rcq_qp_comp);
 
 	if (!ofa_pd->uobject)
 		qp->kernel_verbs = 1;
@@ -1371,9 +1373,15 @@ int siw_destroy_qp(struct ib_qp *ofa_qp)
 	}
 
 	if ((ref_cnt = atomic_dec_return(&qp->rx_ctx.rcq_qp_ref_cnt)) != 0) {
-		WARN_ON_ONCE(1);
-		dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Recv CQ not drained. %d un-polled CQEs. "
-			"qp_ptr=" dprint_ptr_str() " rcq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->rcq);
+		wait_for_completion_timeout(&qp->rx_ctx.rcq_qp_comp, SIW_QP_RQ_CQ_DRAIN_TIMEOUT);
+
+		/* check if wait timed out */
+		ref_cnt = atomic_read(&qp->rx_ctx.rcq_qp_ref_cnt);
+		if (ref_cnt) {
+			WARN_ON_ONCE(1);
+			dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Recv CQ not drained. %d un-polled CQEs. "
+			       "qp_ptr=" dprint_ptr_str() " rcq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->rcq);
+		}
 	}
 
 	/* Free any Flush XQEs in the lists. No need to complete them to CQ as the QP is being destroyed anyway. */

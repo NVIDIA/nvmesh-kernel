@@ -176,11 +176,12 @@ int siw_reap_cqe(struct siw_cq *cq, struct ib_wc *ofa_wc)
 			OBJ_ID(cq), cqe->opcode, cqe->id, cqe);
 
 		if (cq->kernel_verbs) {
-			if (cqe->opcode == SIW_OP_RECEIVE) {
-				atomic_dec(&((struct siw_qp *)cqe->qp)->rx_ctx.rcq_qp_ref_cnt);
-			} else {
-				struct siw_qp *qp = (struct siw_qp *)cqe->qp;
+			struct siw_qp *qp = (struct siw_qp *)cqe->qp;
 
+			if (cqe->opcode == SIW_OP_RECEIVE) {
+				if (atomic_dec_return(&qp->rx_ctx.rcq_qp_ref_cnt) == 0)
+					complete(&qp->rx_ctx.rcq_qp_comp);
+			} else {
 				if (atomic_dec_return(&qp->tx_ctx.scq_qp_ref_cnt) == 0)
 					complete(&qp->tx_ctx.scq_qp_comp);
 			}
