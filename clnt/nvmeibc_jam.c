@@ -2714,7 +2714,7 @@ out:
 int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_idisk *disks[], u32 txid,
 	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jif, unsigned long priority, void *ctx)
 {
-	struct nvmeibc_jam *c_jam = cdisk2cj(__nvmeibc_disk_from_base(disks[0]));
+	struct nvmeibc_jam *c_jam = cdisk2cj(nvmeibc_disk_from_base(disks[0]));
 	struct jalloc *sorted = NULL;
 	const unsigned long max_timeout_jif = (nvmeibc_jam_pending_req_timeout_jif ? : NVMEIBC_PENDING_REQ_TIMEOUT);
 	const unsigned long now_jif = jiffies;
