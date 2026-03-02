@@ -1,0 +1,180 @@
+name: NVMesh Incident Report
+description: Collects all necessary information for reporting an NVMesh incident.
+title: "[Incident]: "
+labels:
+  - "bug"
+  - "incident"
+  - "needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # NVMesh Incident Report
+        Please provide the following information to report an NVMesh incident.
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 1. Incident Overview
+
+  - type: input
+    id: incident-title
+    attributes:
+      label: Title
+      description: Concise, descriptive summary of the reported incident.
+    validations:
+      required: true
+
+  - type: textarea
+    id: incident-summary
+    attributes:
+      label: Summary
+      description: Detailed account of the problem, UX, including the discrepancy between expected and observed behavior. Upload relevant screenshots.
+      placeholder: Enter detailed summary here...
+    validations:
+      required: false
+
+  - type: textarea
+    id: business-impact
+    attributes:
+      label: Business Impact
+      description: Assessment of how the incident affects customer operations, such as service outages, performance degradation, or the status of any workarounds.
+      placeholder: Describe the business impact here...
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 2. Triage Assessment
+
+  - type: input
+    id: severity
+    attributes:
+      label: Severity (0-3)
+      description: Customer-facing classification of the incident's impact on end-users. (0=Highest, 3=Lowest)
+      placeholder: e.g., 1
+    validations:
+      required: true
+
+  - type: input
+    id: priority
+    attributes:
+      label: Priority (0-3)
+      description: Internal classification of the incident's urgency for development planning and resource allocation. (0=Highest, 3=Lowest)
+      placeholder: e.g., 2
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 3. Environmental Details
+
+  - type: dropdown
+    id: environment-type
+    attributes:
+      label: Environment Type
+      description: Specification of the operational environment.
+      options:
+        - Production
+        - Staging
+        - Integration
+        - Development
+    validations:
+      required: true
+
+  - type: textarea
+    id: component-versions
+    attributes:
+      label: Component Versions
+      description: Identification of relevant component versions (nvmesh-base, nvmesh-client, etc.) and other dependencies (OS, Kernel, OFED, K8s, Kafka).
+      placeholder: List all relevant component versions and dependencies...
+    validations:
+      required: true
+
+  - type: textarea
+    id: topology
+    attributes:
+      label: Topology
+      description: Brief description of the cluster's topology.
+      placeholder: Describe the cluster topology briefly...
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 4. Technical Analysis
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Reproduction Steps
+      description: Step-by-step guide detailing how to consistently reproduce the reported issue, if feasible. Include tools and commands that were used.
+      placeholder: Provide step-by-step instructions...
+    validations:
+      required: false
+
+  - type: textarea
+    id: sre-troubleshooting
+    attributes:
+      label: SRE Troubleshooting
+      description: Summary of actions taken by Site Reliability Engineering, including key commands executed and their respective outputs.
+      placeholder: Enter SRE actions and outputs...
+    validations:
+      required: false
+
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Timeline
+      description: Chronological record of significant events related to the incident, including precise timestamps and timezones.
+      placeholder: Provide a chronological record of events...
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 5. Diagnostic Information
+
+  - type: input
+    id: logs-location
+    attributes:
+      label: Logs Location
+      description: A direct link or explicit file path to relevant diagnostic logs.
+      placeholder: e.g., s3://.../logs.tar.gz or /var/log/nvmesh/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-diagnostics
+    attributes:
+      label: Additional Diagnostics
+      description: Any other pertinent diagnostic data, such as monitoring metrics, alerts, trace captures, etc.
+      placeholder: Attach or link any additional diagnostic data...
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 6. Access
+
+  - type: textarea
+    id: access-details
+    attributes:
+      label: Access details
+      description: DL group, Jumpbox, user/password, etc.
+      placeholder: Provide necessary access details...
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **Note on Logs Collector's Output:** The logs collector's output should also include:
+        - Identity of NVMesh management nodes
+        - Kafka outputs
