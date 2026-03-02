@@ -52,17 +52,8 @@ body:
     id: severity
     attributes:
       label: Severity (0-3)
-      description: Customer-facing classification of the incident's impact on end-users. (0=Highest, 3=Lowest)
+      description: Classification of the incident's impact on end-users. 0=Data loss or service unavailability. 1=Functionality broken. 2=Minor. 3=Cosmetic.
       placeholder: e.g., 1
-    validations:
-      required: true
-
-  - type: input
-    id: priority
-    attributes:
-      label: Priority (0-3)
-      description: Internal classification of the incident's urgency for development planning and resource allocation. (0=Highest, 3=Lowest)
-      placeholder: e.g., 2
     validations:
       required: true
 
@@ -85,13 +76,22 @@ body:
       required: true
 
   - type: textarea
+    id: release-version
+    attributes:
+      label: Release Version
+      description: The release version of the NVMesh base component presuming the entire cluster uses the same version. If different versions are used, mark 'Multiple' and list them in the next section.
+      placeholder: Release...
+    validations:
+      required: true
+
+  - type: textarea
     id: component-versions
     attributes:
       label: Component Versions
       description: Identification of relevant component versions (nvmesh-base, nvmesh-client, etc.) and other dependencies (OS, Kernel, OFED, K8s, Kafka).
       placeholder: List all relevant component versions and dependencies...
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: topology
@@ -170,11 +170,3 @@ body:
       placeholder: Provide necessary access details...
     validations:
       required: false
-
-  - type: markdown
-    attributes:
-      value: |
-        ---
-        **Note on Logs Collector's Output:** The logs collector's output should also include:
-        - Identity of NVMesh management nodes
-        - Kafka outputs
