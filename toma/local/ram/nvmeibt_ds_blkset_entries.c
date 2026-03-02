@@ -227,7 +227,7 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 			nvmeibt_seg_active_UUID_8(seg_active), seg_topo_ctx->dirty_bits_init_mode, seg_topo_ctx->txid_init_mode);
 	}
 
-	nvmeibt_register_brute_force_cleanup_all_active_registrants_and_stales_of_seg(seg_active);
+	nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 
 	// First see if we need to read the dirty_bits from persistency
 	if (seg_topo_ctx->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST) {
@@ -399,7 +399,7 @@ static int ds_metadata_prepare_non_EC_stale_locks_init_val(struct nvmeibt_seg_ac
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
 	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:
 		NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(dt7y65z, seg_active, 0);
-		nvmeibt_register_brute_force_cleanup_all_active_registrants_and_stales_of_seg(seg_active);
+		nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 		rv = 1;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:

@@ -1574,7 +1574,7 @@ static void remove_disconnected_client_new_active_registrant_by_lockid(struct nv
 	NFOUT;
 }
 
-void nvmeibt_register_brute_force_cleanup_all_active_registrants_and_stales_of_seg(struct nvmeibt_seg_active *seg_active)
+void nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(struct nvmeibt_seg_active *seg_active)
 {
 	struct nvmeibt_registrant_ctx	*reg_ctx;
 
@@ -1584,7 +1584,7 @@ void nvmeibt_register_brute_force_cleanup_all_active_registrants_and_stales_of_s
 	    nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
 	}
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 0, 0, 1);
+		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 0, 0, 0);
 	}
 	NFOUT;
 }
