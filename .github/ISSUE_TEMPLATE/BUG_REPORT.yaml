@@ -98,7 +98,7 @@ body:
     attributes:
       label: Topology
       description: Brief description of the cluster's topology.
-      placeholder: Describe the cluster topology briefly...
+      placeholder: Describe the cluster topology, i.e., the layout of the cluster including which nodes run which components, including MongoDB, Kafka and Management. A diagram is often the best way to depict this.
     validations:
       required: false
 
