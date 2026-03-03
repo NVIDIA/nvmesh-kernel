@@ -227,14 +227,14 @@ static void set_is_processing_registrant_removal(struct nvmeibt_registrant_ctx *
 	}
 }
 
-static inline bool is_registrant_in_active_hash(struct nvmeibt_seg_active *seg_active, struct nvmeibt_registrant_ctx *reg_ctx)
+static inline struct nvmeibt_registrant_ctx * get_registrant_by_handle_from_active_hash(struct nvmeibt_seg_active *seg_active, struct nvmeibt_registrant_ctx *input_reg_ctx)
 {
 	struct nvmeibt_registrant_ctx		*candidate_reg_ctx;
 
 	candidate_reg_ctx = (seg_active && seg_active->active_registrants_hash_by_handle ?
-						 nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, reg_ctx->client_messaging_handle) :
+						 nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, input_reg_ctx->client_messaging_handle) :
 						 NULL);
-	return (!!candidate_reg_ctx);
+	return (candidate_reg_ctx);
 }
 
 static BOOL upd_registrant_sync_timeout(struct nvmeibt_registrant_ctx *reg_ctx,
@@ -1502,13 +1502,13 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 										bool is_stale_registrant, bool is_longing_on_invalid_seg, bool is_move_from_active_reg_hash_to_stale_reg_hash)
 {
 	struct nvmeibt_seg_active			*seg_active;
-	bool								is_active_registrant = 0;
+	struct nvmeibt_registrant_ctx		*existing_active_registrant = 0;
 	bool								is_change_to_active_registrants = 0;
 
 	NFIN;
 	NDUMP_REG_CTX(gkitu74, _Tf, reg_ctx);
 	seg_active = reg_ctx->seg_active;
-	is_active_registrant = is_registrant_in_active_hash(seg_active, reg_ctx);
+	existing_active_registrant = get_registrant_by_handle_from_active_hash(seg_active, reg_ctx);
 	//
 	if (is_longing_registrant) {
 		if (!is_deleting_seg_active) {
@@ -1516,7 +1516,23 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 		}
 	} else if (is_longing_on_invalid_seg) {
 		XDLIST_DEL(&(reg_ctx->longing_on_invalid_seg_link));
-	} else if (is_active_registrant) {
+	} else if (is_stale_registrant) {
+		if (reg_ctx->n_stale_locks > 0) { // If stale_registrant (might be that recently added) and the seg_active is alive then skip it, stale-recovery will retry
+			if (!is_deleting_seg_active) {
+				N_Tf(djur843, "Skipping. lockid=@T_LID seg=@UUID_8 still has stale_locks n_stale_locks=@INT",
+					nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->n_stale_locks);
+				goto out;
+			}
+			N_Ef(dkitu43, "reg_ctx=@PTR lockid=@T_LID seg=@UUID_8 has stale_locks, is_deleting_seg_active=1",
+				 reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
+			nvmeibt_abort(ES_FATAL);
+		}
+		nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+	} else if (existing_active_registrant) {
+		if (!nvmeibt_register_is_processing_registrant_removal(existing_active_registrant) && (existing_active_registrant != reg_ctx)) {
+			N_Ef(rcs8l30, "existing_active_registrant=@PTR != reg_ctx=@PTR is_stale_registrant=@BOOL", existing_active_registrant, reg_ctx, is_stale_registrant);
+			nvmeibt_abort(ES_FATAL);
+		}
 		registrant_stopped_being_active(seg_active, reg_ctx, 1);
 		is_change_to_active_registrants = 1;
 		if (is_move_from_active_reg_hash_to_stale_reg_hash) {	// Called only from registrant_disconnect_finalize(), after all the locks were converted
@@ -1535,18 +1551,6 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 				// Since it was never added as a stale_registrants, free it as if it is active
 			}
 		}
-	} else if (is_stale_registrant) {
-		if (reg_ctx->n_stale_locks > 0) { // If stale_registrant (might be that recently added) and the seg_active is alive then skip it, stale-recovery will retry
-			if (!is_deleting_seg_active) {
-				N_Tf(djur843, "Skipping. lockid=@T_LID seg=@UUID_8 still has stale_locks n_stale_locks=@INT",
-					nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->n_stale_locks);
-				goto out;
-			}
-			N_Ef(dkitu43, "reg_ctx=@PTR lockid=@T_LID seg=@UUID_8 has stale_locks, is_deleting_seg_active=1",
-				 reg_ctx, nvmeib_lockid_purify(reg_ctx->reg_lock_id), nvmeibt_seg_active_UUID_8(seg_active));
-			nvmeibt_abort(ES_FATAL);
-		}
-		nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
 	} else {
 		N_Wf(favewhw, "Unexpected 'else'");
 	}
