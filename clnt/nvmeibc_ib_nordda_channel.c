@@ -645,7 +645,7 @@ int nvmeibc_ib_nordda_channel_init_reqs(struct nvmeibc_ib_nordda_channel *ch,
 		}
 	}
 
-	if (!(ch->reqs = kzalloc((sizeof(*ch->reqs) * ch->base.disk->nrch_ioreq_num), GFP_KERNEL))) {
+	if (!(ch->reqs = kvzalloc((sizeof(*ch->reqs) * ch->base.disk->nrch_ioreq_num), GFP_KERNEL))) {
 		_NE(error_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_init_reqs, "Failed to allocate requests");
 		goto out;
 	}
@@ -736,7 +736,7 @@ err:
 	}
 
 	INIT_LIST_HEAD(&ch->free_reqs);
-	kfree(ch->reqs);
+	kvfree(ch->reqs);
 	ch->reqs = NULL;
 
 out:
@@ -899,7 +899,7 @@ static void nordda_channel_free_volume_reqs(
 			nvmeibc_ib_net_jmdc_pb_unmap(P2NV(ch->net.base.port), &ch->reqs[i].jmdc_pb);
 		}
 
-		kfree(ch->reqs);
+		kvfree(ch->reqs);
 		ch->reqs = NULL;
 		ch->base.reqs_comp = NULL;
 		INIT_LIST_HEAD(&ch->free_reqs);
