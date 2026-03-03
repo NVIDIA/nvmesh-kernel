@@ -1039,8 +1039,10 @@ static bool is_core_file_new(void)
 	time_t				leader_file_timestamp_sec = 0;
 	bool				is_new = 0;
 	int					rc;
+	struct timespec		now;
 
 	NFIN;
+	getnstimeofday_boot(&now);
 	// Get the newest_core_timestamp_sec
 	// Unfortunatelly, there is no simple generic method to locate the coredump directory
 	d = opendir(systemd_coredump_dir);
@@ -1079,8 +1081,8 @@ static bool is_core_file_new(void)
 		goto out;
 	}
 	// Now that we have the core's date, decide whether is_new
-	if (nvmeibt_global_get_cur_event_start_time().tv_sec - newest_core_timestamp_sec < (2 * 24 * 3600)) {
-		N_Tf(2okex6z, "core=@STR is_new @LLD sec old", core_full_path, nvmeibt_global_get_cur_event_start_time().tv_sec - newest_core_timestamp_sec);
+	if (now.tv_sec - newest_core_timestamp_sec < (2 * 24 * 3600)) {
+		N_Tf(2okex6z, "core=@STR is_new @LLD sec old", core_full_path, now.tv_sec - newest_core_timestamp_sec);
 		is_new = 1;
 	}
 	// Try to detect whether the last TOMA run ended-up with a core dump
@@ -1193,8 +1195,10 @@ static void logs_snapshotting_slowpath_wrapper(struct nvmeibt_wq_entry *wq_entry
 	struct logs_snapshotting_slowpath_wq_entry	*entry;
 	int											system_status;
 	char										log_snapshotting_script_cmd_line[512];
+	struct timespec								now;
 
 	NFIN;
+	getnstimeofday_boot(&now);
 	entry = container_of(wq_entry, struct logs_snapshotting_slowpath_wq_entry, wq_entry);
 	if (nvmeibt_toma_is_in_shutdown()) {
 		N_Tf(trace_logs_snapshotting_slowpath_wrapper_shutdown, "TOMA is in shutdown. Skipping snapshotting");
@@ -1220,7 +1224,7 @@ static void logs_snapshotting_slowpath_wrapper(struct nvmeibt_wq_entry *wq_entry
 		entry->rv = 0;
 		goto out;
 	}
-	if (nvmeibt_global_get_cur_event_start_time().tv_sec - prev_snapshotting_timestamp_sec < (10 * 60)) {	// No more than every 10 min (reboot overrides it)
+	if (now.tv_sec - prev_snapshotting_timestamp_sec < (10 * 60)) {	// No more than every 10 min (reboot overrides it)
 		entry->is_calling_snapshot = 0;
 	}
 	if (entry->is_calling_snapshot) {
@@ -1249,6 +1253,7 @@ out:
 static void logs_snapshotting_slowpath_finalize(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct logs_snapshotting_slowpath_wq_entry		*entry;
+	struct timespec									now;
 
 	NFIN;
 	entry = container_of(wq_entry, struct logs_snapshotting_slowpath_wq_entry, wq_entry);
@@ -1259,7 +1264,8 @@ static void logs_snapshotting_slowpath_finalize(struct nvmeibt_wq_entry *wq_entr
 		N_Wf(xcghasl, "Error logs_snapshotting_slowpath rv=@INT", entry->rv);
 	}
 	if (entry->is_calling_snapshot) {
-		prev_snapshotting_timestamp_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
+		getnstimeofday_boot(&now);
+		prev_snapshotting_timestamp_sec = now.tv_sec;
 	}
 
 	NFOUT;
