@@ -893,7 +893,7 @@ static void udev_event_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 static void wq_entry_free_after_wakeup(struct nvmeibt_wq_entry *wq_entry) {
 	/* finalize() called even if canceled: should test and handle */
-	if (wq_entry->finalize)
+	if (wq_entry->finalize && !nvmeibt_toma_is_in_shutdown())
 		wq_entry->finalize(wq_entry);
 	if (wq_entry->free)
 		wq_entry->free(wq_entry);
