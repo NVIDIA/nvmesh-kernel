@@ -502,7 +502,7 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->uuid = *uuid;
 	NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(v20sslk, seg_active, "LOCAL_DISK", 1);
 	seg_active->longing_registrants_hash_by_handle = NVMEIB_HASH_CREATE(g3w89ka, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "longing_registrants_by_handle", 8, 0);
-	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants", 4, 0);
+	seg_active->active_registrants_hash_by_lockid = NVMEIB_HASH_CREATE(udfn2kw, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_lockid", 4, 0);
 	seg_active->active_registrants_hash_by_handle = NVMEIB_HASH_CREATE(xnj98j2, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "active_registrants_by_handle", 8, 0);
 	seg_active->stale_registrants_hash_by_purified_lockid = NVMEIB_HASH_CREATE(0nzfbt1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_registrants", 4, 0);
 	seg_active->stale_locks_hash_by_seg_blkset_no = NVMEIB_HASH_CREATE(sm6beod, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 5), "stale_locks_hash", 8, 1);
@@ -930,6 +930,7 @@ int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_msg_s2t_blkset_rec
 	int                             rv = 1;
 
 	NFIN;
+	N_Tf(csgf672, "srv sent pre_recov_lock_val=@INT64_TX", blkset_recovered_msg->pre_recov_lock_val);
 	seg_active = nvmeibt_global_get_seg_active_through_seg_by_urn_uuid_str(blkset_recovered_msg->disk_segment_urn_uuid_str);
 	if (!seg_active) {
 		N_Ef(hu8hs03, "Bad blkset_recovered message received, UUID @STR does not point to an active segment!", blkset_recovered_msg->disk_segment_urn_uuid_str);
