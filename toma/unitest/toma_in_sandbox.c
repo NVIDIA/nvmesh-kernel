@@ -693,9 +693,9 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
 	static uint64_t loop_idx = 0;
 	static bool is_shutting_down = false;
-	int i, n_events;
+	int i, n_events, fiber_still_running;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
-	toma_unit_test_thread_switch_to();
+	fiber_still_running = toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
 
 	sys->os.TSB_signal.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
@@ -711,18 +711,16 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	}
 	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, is_shutting_down, n_events); loop_idx++;
 	if (!is_shutting_down) {
-		if (mgmt_sim_is_done()) {
+		if (!fiber_still_running) {
 			SANDBOX_PRINT("test: %s\n", COL_GREEN "passed" COL_RESET);
-			// At some point we'll probably have multiple test scenarios that we'll want to run in sequence,
-			// and finally shut down Toma when they've all passed. For now, there's only one test scenario.
 			SANDBOX_PRINT("%s", "sandbox shutting down Toma app\n");
 			is_shutting_down = true;
 			errno = ENOMEM;
 			return -1;				// Simulate shutdown instruction via kafka from mgmt
 		}
 		if (loop_idx >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
-			SANDBOX_PRINT("failed: test did not complete within %d cycles (mgmt_sim state: %s)\n",
-			SANDBOX_TERMINATE_AFTER_N_LOOPS, mgmt_sim_get_state_name());
+			SANDBOX_PRINT("failed: test did not complete within %d cycles\n",
+			SANDBOX_TERMINATE_AFTER_N_LOOPS);
 			BUG_ON(true);
 			return -1;  // unreachable
 		}

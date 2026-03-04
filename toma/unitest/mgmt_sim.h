@@ -39,8 +39,17 @@ void mgmt_sim_send_msg_latest_hw_config(void);
 void mgmt_sim_wakeup_on_incomming_toma_msg(struct sim_broker_topic *);
 void mgmt_sim_verify_at_end(void);
 void mgmt_sim_do_periodic(void);
-bool mgmt_sim_is_done(void);
-const char *mgmt_sim_get_state_name(void);
 void mgmt_sim_destroy(void);
+
+/* Condition-query functions for fiber-based test scenario */
+bool mgmt_sim_both_disks_ready_for_format(void);
+bool mgmt_sim_both_disks_formatted_ok(void);
+bool mgmt_sim_consume_got_report_target(void);
+bool mgmt_sim_v_r1_praid_reported(void);
+
+/* Message-sender functions for fiber-based test scenario */
+void mgmt_sim_send_format_drives(void);
+void mgmt_sim_send_add_volume_remote1(void);
+void mgmt_sim_send_add_volume_r1(void);
 
 #endif /* TOMA_UNITEST_MGMT_SIM_H */

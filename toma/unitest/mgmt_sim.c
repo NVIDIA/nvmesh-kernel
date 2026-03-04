@@ -18,18 +18,7 @@
 #define DISK_UUID_REMOTE38_D0    "f38cebd0-0000-0000-0000-000000000000"
 #define DISK_UUID_REMOTE39_D0    "f39cebd0-0000-0000-0000-000000000000"
 
-/*
- * State machine states for the test scenario.
- */
- enum mgmt_sim_fsm_state {
-	MGMT_FSM_WAITING_FOR_BOTH_OK,
-	MGMT_FSM_SENT_FORMAT_DRIVE,
-	MGMT_FSM_SAW_FORMATTING,
-	MGMT_FSM_FORMAT_DONE,
-	MGMT_FSM_SENT_ADD_VOL_REMOTE,
-	MGMT_FSM_SENT_ADD_VOL_R1,
-	MGMT_FSM_DONE
-};
+#define FORMAT_REQUEST_COUNTER   303
 
 static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 	return snprintf(buf, capacity, "{\"messageType\":\"updateLeaderKeepaliveToken\""
@@ -93,7 +82,6 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
-static void mgmt_sim_run_fsm(void);
 
 /* Per-disk status extracted from reportTarget */
 struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
@@ -141,8 +129,7 @@ struct mgmt_sim_state {
 	int n_leader_keep_alives;
 	uint32_t raftTerm;					// AS reported by Toma leader
 
-	/* State machine */
-	enum mgmt_sim_fsm_state fsm_state;
+	/* Test scenario state */
 	int64_t boot_time;                      /* from reportTarget payload.node.bootTime */
 	struct mgmt_sim_disk_status disk_002;   /* NVMD_SN_002.1 */
 	struct mgmt_sim_disk_status disk_003;   /* NVMD_SN_003.1 */
@@ -184,8 +171,6 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	struct mgmt_sim_state *m = g_mgmt_sim = calloc(1, sizeof(*g_mgmt_sim));
 	m->cfg = initialized_cfg;
 
-	/* Initialize state machine */
-	m->fsm_state = MGMT_FSM_WAITING_FOR_BOTH_OK;
 	m->disk_002.disk_id = "NVMD_SN_002.1";
 	m->disk_003.disk_id = "NVMD_SN_003.1";
 	m->disk_002.uuid = DISK_UUID_LOCAL_002;
@@ -322,10 +307,8 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 		if (strcmp(message_type, "reportTarget") == 0) {
 			// {"originType":"TOMA","messageType":"reportTarget","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":24,"leaderToken":null,"payload":{"node":{"zone":"1","bootTime":1767535819492,"cpu_temp":"30.0","version":"3.3.0-1340","buildNumber":"","reportID":25,"branch":"master","commit":"18af9e759c828cc1d3776bfdd6cb68ade54ef738","configProfile":{"id":"569407c0-e976-11f0-b6cb-871ca30885b4","name":"Cluster Default","version":"1"},"node_status":"1","node_id":"nvme37.nvidia.com","targetUpdatesSequence":4,"cpu_load":"0.0","disks":[{"diskID":"S3HCNX0JC01918.1","disk_version":0,"blocks":1562500000,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S3HCNX0JC01918","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZWLL800HEHP-00003","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"1_%","Controller_Busy_Time":"0x0","Power_Cycles":"0x5f","Power_On_Hours":"0x10049","Unsafe_Shutdowns":"0x56","Media_Errors":"0x2","Number_of_Error_Information_Log_Entries":"0x1a5d","status":"Not_Initialized","isExcluded":false,"excludeReason":"None","metadataCapabilities":"3","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":512,"metaBS":8},{"dataBS":4096,"metaBS":0},{"dataBS":4096,"metaBS":8}],"writeCounter":25439882564,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0},{"diskID":"S3P8NY0J700220.1","disk_version":0,"blocks":937703088,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S3P8NY0J700220","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZQKW480HMHQ-00003","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"0_%","Controller_Busy_Time":"0x0","Power_Cycles":"0xb4","Power_On_Hours":"0xfb7f","Unsafe_Shutdowns":"0x94","Media_Errors":"0x0","Number_of_Error_Information_Log_Entries":"0x5980","status":"Not_Initialized","isExcluded":false,"excludeReason":"None","metadataCapabilities":"0","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":4096,"metaBS":0}],"writeCounter":4546392587,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0},{"diskID":"S3HCNX0JC01904.1","disk_version":0,"blocks":1562824368,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S3HCNX0JC01904","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZWLL800HEHP-00003","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"2_%","Controller_Busy_Time":"0x0","Power_Cycles":"0x5e","Power_On_Hours":"0x10046","Unsafe_Shutdowns":"0x54","Media_Errors":"0x0","Number_of_Error_Information_Log_Entries":"0x2beb","status":"Not_Initialized","isExcluded":false,"excludeReason":"None","metadataCapabilities":"3","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":512,"metaBS":8},{"dataBS":4096,"metaBS":0},{"dataBS":4096,"metaBS":8}],"writeCounter":49694267592,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0},{"diskID":"S3P8NY0J700164.1","disk_version":0,"blocks":937703088,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S3P8NY0J700164","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZQKW480HMHQ-00003","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"0_%","Controller_Busy_Time":"0x0","Power_Cycles":"0x6e","Power_On_Hours":"0x1062c","Unsafe_Shutdowns":"0x5c","Media_Errors":"0x0","Number_of_Error_Information_Log_Entries":"0x46","status":"Not_Initialized","isExcluded":true,"excludeReason":"In-Use","metadataCapabilities":"0","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":4096,"metaBS":0}],"writeCounter":4675551222,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0},{"diskID":"S3HCNX0K600397.1","disk_version":0,"blocks":1562824368,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S3HCNX0K600397","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZWLL800HEHP-00003","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"0_%","Controller_Busy_Time":"0x0","Power_Cycles":"0xca","Power_On_Hours":"0xe767","Unsafe_Shutdowns":"0xb5","Media_Errors":"0x3","Number_of_Error_Information_Log_Entries":"0x165c","status":"Not_Initialized","isExcluded":false,"excludeReason":"None","metadataCapabilities":"3","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":512,"metaBS":8},{"dataBS":4096,"metaBS":0},{"dataBS":4096,"metaBS":8}],"writeCounter":29489346822,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0},{"disID":"S4C9NF0M500226.1","disk_version":0,"blocks":3125627568,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S4C9NF0M500226","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZWLL1T6HAJQ-00005","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"4_%","Controller_Busy_Time":"0x0","Power_Cycles":"0x56","Power_On_Hours":"0xda5d","Unsafe_Shutdowns":"0x49","Media_Errors":"0x57","Number_of_Error_Information_Log_Entries":"0x1c5a","status":"Not_Initialized","isExcluded":false,"excludeReason":"None","metadataCapabilities":"3","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":512,"metaBS":8},{"dataBS":4096,"metaBS":0},{"dataBS":4096,"metaBS":8}],"writeCounter":303100870572,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0},{"diskID":"S665NE0R702075.1","disk_version":0,"blocks":1875385008,"block_size":512,"metadata_size":0,"pci_address":"","Serial_Number":"S665NE0R702075","nsid":1,"Vendor":"0x144d","Model":"SAMSUNG MZ1L2960HCJR-00A07","Submission_Queues":0,"Completion_Queues":0,"MSIX_Interrupts":0,"Numa_Node":0,"Critical_Warning":"0x0","Available_Spare":"100_%","Available_Spare_Threshold":"10_%","Percentage_Used":"3_%","Controller_Busy_Time":"0x0","Power_Cycles":"0x70","Power_On_Hours":"0x817d","Unsafe_Shutdowns":"0x53","Media_Errors":"0x0","Number_of_Error_Information_Log_Entries":"0x0","status":"Not_Initialized","isExcluded":true,"excludeReason":"In-Use","metadataCapabilities":"0","formatOptions":[{"dataBS":512,"metaBS":0},{"dataBS":4096,"metaBS":0}],"writeCounter":10392940702,"reappearingCounter":2,"formatRequestCounter":0,"activeFormatRequestCounter":0}],"nics":[{"nicID":"0x0000000000000000bae924fffee5cfd8","protocol":1,"status":1,"guid":"0x00000000000000000000ffff0a0a0125","pkey":"0xffff","pci_root":0,"mtu":4096,"deviceType":"mlx5_2"},{"nicID":"0x0000000000000000bae924fffee5cfd9","protocol":1,"status":1,"guid":"0x00000000000000000000ffff0a0a0225","pkey":"0xffff","pci_root":0,"mtu":4096,"deviceType":"mlx5_3"}]}}}
 			mgmt_sim_parse_report_target(root);
-			mgmt_sim_run_fsm();
 		} else  if (strcmp(message_type, "updatePRaidReport") == 0) {
 			mgmt_sim_parse_praid_report(root);
-			mgmt_sim_run_fsm();
 		 	// {"originType":"TOMA","messageType":"updatePRaidReport","messageTypeVersion":1,"hostname":"nvme39.nvidia.com","tomaToken":2,"messageSequence":85,"leaderToken":1,"payload":{"pRaidsUpdate":[{"uuid":"b60b04b1-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60b04b0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60b2bc0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]},{"uuid":"b60ab692-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60ab691-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60adda0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]}]}}
 		} else if (strcmp(message_type, "segmentZeroingProgress") == 0) {
 			// {"originType":"TOMA","messageType":"segmentZeroingProgress","messageTypeVersion":1,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":335,"leaderToken":null,"payload":{"praidVersion":"258.0","segmentUUID":"98e46d20-ea22-11f0-bad8-af65dd8e6ead","pRaidUUID":"98e44612-ea22-11f0-bad8-af65dd8e6ead","nZeroedBlks":262144}}
@@ -335,12 +318,7 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 
 void mgmt_sim_verify_at_end(void) {
 	BUG_ON(!g_mgmt_sim);
-	BUG_ON(!mgmt_sim_is_done() || (g_mgmt_sim->volume_msg_count <= 0) || (g_mgmt_sim->n_leader_keep_alives <= 0));
-}
-
-bool mgmt_sim_is_done(void)
-{
-	return g_mgmt_sim && (g_mgmt_sim->fsm_state == MGMT_FSM_DONE);
+	BUG_ON((g_mgmt_sim->volume_msg_count <= 0) || (g_mgmt_sim->n_leader_keep_alives <= 0));
 }
 
 void mgmt_sim_destroy(void) {
@@ -385,19 +363,6 @@ void mgmt_sim_do_periodic(void) {
 /******************************************************************************/
 /* Static helper functions                                                    */
 /******************************************************************************/
-static const char *mgmt_sim_fsm_state_name(enum mgmt_sim_fsm_state state) {
-	switch (state) {
-	case MGMT_FSM_WAITING_FOR_BOTH_OK:  return "waitingForBothOk";
-	case MGMT_FSM_SENT_FORMAT_DRIVE:    return "sentFormatDrive";
-	case MGMT_FSM_SAW_FORMATTING:       return "sawFormatting";
-	case MGMT_FSM_FORMAT_DONE:          return "formatDone";
-	case MGMT_FSM_SENT_ADD_VOL_REMOTE:  return "sentAddVolRemote";
-	case MGMT_FSM_SENT_ADD_VOL_R1:      return "sentAddVolR1";
-	case MGMT_FSM_DONE:                 return "done";
-	default:                            return "unknown";
-	}
-}
-
 static void __extract_disk_status_from_report_terget_msg(struct mm_json_elem *disks_array, struct mgmt_sim_disk_status *out) {
 	int i;
 	BUG_ON(!disks_array || disks_array->type != JSON_E_ARRAY || !out);
@@ -451,107 +416,70 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	}
 }
 
-/* Run the test scenario state machine.
- * Transitions based on disk statuses extracted from reportTarget. */
-static void mgmt_sim_run_fsm(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	const enum mgmt_sim_fsm_state prev_state = m->fsm_state;
-	const bool disk_002_ok = (strcmp(m->disk_002.status, "Ok") == 0);
-	const bool disk_003_ok = (strcmp(m->disk_003.status, "Ok") == 0);
-	const bool disk_002_not_initialized = (strcmp(m->disk_002.status, "Not_Initialized") == 0);
-	const bool disk_003_not_initialized = (strcmp(m->disk_003.status, "Not_Initialized") == 0);
-	const bool disk_002_ready_for_format = disk_002_ok || disk_002_not_initialized;
-	const bool disk_003_ready_for_format = disk_003_ok || disk_003_not_initialized;
-	const bool disk_002_formatting = (strcmp(m->disk_002.status, "Formatting") == 0);
-	const bool disk_003_formatting = (strcmp(m->disk_003.status, "Formatting") == 0);
-	#define FORMAT_REQUEST_COUNTER   303
-	const bool disk_002_ok_with_expected_reported_format = disk_002_ok &&
-		(m->disk_002.format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(m->disk_002.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(m->disk_002.block_size == 4096) &&
-		(m->disk_002.metadata_size == 8);
-	const bool disk_003_ok_with_expected_reported_format = disk_003_ok &&
-		(m->disk_003.format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(m->disk_003.active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(m->disk_003.block_size == 4096) &&
-		(m->disk_003.metadata_size == 8);
-	const bool both_disks_have_expected_post_format = disk_002_ok_with_expected_reported_format && disk_003_ok_with_expected_reported_format;
-
-	switch (m->fsm_state) {
-	case MGMT_FSM_WAITING_FOR_BOTH_OK:
-		if (disk_002_ready_for_format && disk_003_ready_for_format) {		/* Both disks are discovered and can be formatted */
-			char *msg_002 = malloc(1024);
-			char *msg_003 = malloc(1024);
-			const size_t len_002 = (size_t)make_msg_format_drive(msg_002, 1024, &m->disk_002, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
-			const size_t len_003 = (size_t)make_msg_format_drive(msg_003, 1024, &m->disk_003, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
-			N_IMf(msim_fsm1, "both disks ready, sending formatDrive for disk002+disk003 bootTime=@INT64_TD", m->boot_time);
-			sim_broker_topic_msg_produce(m->k_producers.cmd, msg_002, len_002, false);
-			sim_broker_topic_msg_produce(m->k_producers.cmd, msg_003, len_003, false);
-			m->fsm_state = MGMT_FSM_SENT_FORMAT_DRIVE;
-		}
-		break;
-
-	case MGMT_FSM_SENT_FORMAT_DRIVE:
-		if (both_disks_have_expected_post_format) {
-			/* Might have missed the Formatting state - go directly to formatDone */
-			N_IMf(msim_fsm2b,
-			     "both disks Ok with expected format (skipped Formatting) counter=@INT",
-			     FORMAT_REQUEST_COUNTER);
-			m->fsm_state = MGMT_FSM_FORMAT_DONE;
-		} else if (disk_002_formatting || disk_003_formatting) {
-			N_IMf(msim_fsm2, "observed Formatting status disk002=@STR disk003=@STR", m->disk_002.status, m->disk_003.status);
-			m->fsm_state = MGMT_FSM_SAW_FORMATTING;
-		}
-		break;
-
-	case MGMT_FSM_SAW_FORMATTING:
-		if (both_disks_have_expected_post_format) {
-			N_IMf(msim_fsm3, "both disks Ok with expected format counter=@INT", FORMAT_REQUEST_COUNTER);
-			m->fsm_state = MGMT_FSM_FORMAT_DONE;
-		}
-		break;
-
-	case MGMT_FSM_FORMAT_DONE: {
-		char *buf = malloc(2048);
-		int len;
-		N_IMf(msim_fsm4, "format done, sending addVolume V_REMOTE1");
-		len = make_msg_add_volume_remote1(buf, 2048);
-		sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
-		m->fsm_state = MGMT_FSM_SENT_ADD_VOL_REMOTE;
-		break;
-	}
-
-	case MGMT_FSM_SENT_ADD_VOL_REMOTE:
-		if (m->got_report_target) {
-			char *buf = malloc(2048);
-			int len;
-			m->got_report_target = false;
-			N_IMf(msim_fsm5, "reportTarget after V_REMOTE1, sending addVolume V_R1");
-			len = make_msg_add_volume_r1(buf, 2048);
-			sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
-			m->fsm_state = MGMT_FSM_SENT_ADD_VOL_R1;
-		}
-		break;
-
-	case MGMT_FSM_SENT_ADD_VOL_R1:
-		if (m->v_r1_praid_reported) {
-			N_IMf(msim_fsm6, "updatePRaidReport received for V_R1, test complete");
-			m->fsm_state = MGMT_FSM_DONE;
-		}
-		break;
-
-	case MGMT_FSM_DONE:
-		break;
-	}
-
-	if (m->fsm_state != prev_state) {
-		N_IMf(msim_trans, "FSM transition @STR -> @STR", mgmt_sim_fsm_state_name(prev_state), mgmt_sim_fsm_state_name(m->fsm_state));
-	}
+/******************************************************************************/
+/* Condition-query functions for fiber-based test scenario                     */
+/******************************************************************************/
+static bool __disk_ready_for_format(const struct mgmt_sim_disk_status *d) {
+	return (strcmp(d->status, "Ok") == 0) || (strcmp(d->status, "Not_Initialized") == 0);
 }
 
-const char *mgmt_sim_get_state_name(void)
-{
-	if (!g_mgmt_sim)
-		return "uninitialized";
-	return mgmt_sim_fsm_state_name(g_mgmt_sim->fsm_state);
+static bool __disk_formatted_ok(const struct mgmt_sim_disk_status *d) {
+	return (strcmp(d->status, "Ok") == 0) &&
+		(d->format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(d->active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
+		(d->block_size == 4096) &&
+		(d->metadata_size == 8);
+}
+
+bool mgmt_sim_both_disks_ready_for_format(void) {
+	const struct mgmt_sim_state *m = g_mgmt_sim;
+	return __disk_ready_for_format(&m->disk_002) && __disk_ready_for_format(&m->disk_003);
+}
+
+bool mgmt_sim_both_disks_formatted_ok(void) {
+	const struct mgmt_sim_state *m = g_mgmt_sim;
+	return __disk_formatted_ok(&m->disk_002) && __disk_formatted_ok(&m->disk_003);
+}
+
+bool mgmt_sim_consume_got_report_target(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	if (m->got_report_target) {
+		m->got_report_target = false;
+		return true;
+	}
+	return false;
+}
+
+bool mgmt_sim_v_r1_praid_reported(void) {
+	return g_mgmt_sim->v_r1_praid_reported;
+}
+
+/******************************************************************************/
+/* Message-sender functions for fiber-based test scenario                      */
+/******************************************************************************/
+void mgmt_sim_send_format_drives(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *msg_002 = malloc(1024);
+	char *msg_003 = malloc(1024);
+	const size_t len_002 = (size_t)make_msg_format_drive(msg_002, 1024, &m->disk_002, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
+	const size_t len_003 = (size_t)make_msg_format_drive(msg_003, 1024, &m->disk_003, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
+	N_IMf(msim_fsm1, "sending formatDrive for disk002+disk003 bootTime=@INT64_TD", m->boot_time);
+	sim_broker_topic_msg_produce(m->k_producers.cmd, msg_002, len_002, false);
+	sim_broker_topic_msg_produce(m->k_producers.cmd, msg_003, len_003, false);
+}
+
+void mgmt_sim_send_add_volume_remote1(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(2048);
+	int len = make_msg_add_volume_remote1(buf, 2048);
+	N_IMf(msim_fsm4, "sending addVolume V_REMOTE1");
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+}
+
+void mgmt_sim_send_add_volume_r1(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(2048);
+	int len = make_msg_add_volume_r1(buf, 2048);
+	N_IMf(msim_fsm5, "sending addVolume V_R1");
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
 }

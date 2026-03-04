@@ -5,6 +5,7 @@
 
 #include "sandbox_util.h"
 #include "unit_test_main.h"
+#include "mgmt_sim.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
@@ -56,11 +57,31 @@ static struct t_uni_thread_ctx {
 static void yield(void) { swapcontext(&scheduler.ctx_thread_uni, &scheduler.ctx_main); }	// Yield unitest thread and let Toma main thread to continue
 
 /********************************************************************/
+#define WAIT_UNTIL(cond) do { while (!(cond)) yield(); } while (0)
+
 static void all_test_scenarios(void) {
-	for (int i = 0; i < 10; i++) {
-		N_SANDBOX(__AUTOID__, "Todo: unitest scenario @INT done, returning to Toma", i);
-		yield();
-	}
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks ready for format");
+	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
+
+	N_SANDBOX(__AUTOID__, "unit test thread: sending format drives");
+	mgmt_sim_send_format_drives();
+
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks formatted ok");
+	WAIT_UNTIL(mgmt_sim_both_disks_formatted_ok());
+
+	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_REMOTE1");
+	mgmt_sim_send_add_volume_remote1();
+
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for reportTarget after V_REMOTE1");
+	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+
+	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_R1");
+	mgmt_sim_send_add_volume_r1();
+
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for V_R1 pRaid report");
+	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
+
+	N_SANDBOX(__AUTOID__, "unit test thread: test scenario complete");
 	scheduler.is_unit_test_done = true;
 	yield();
 	BUG_ON(true);														// Cannot reach here or will get stuck
