@@ -219,6 +219,9 @@ extern int siw_poll_cq(struct ib_cq *, int num_entries, struct ib_wc *);
 extern int siw_req_notify_cq(struct ib_cq *, enum ib_cq_notify_flags);
 #if KS_IB_REG_USER_MR_HAS_ATTR
 extern struct ib_mr *siw_reg_user_mr(struct ib_pd *, struct ib_mr_init_attr *, struct ib_udata *);
+#elif KS_IB_REG_USER_MR_HAS_DMAH
+extern struct ib_mr *siw_reg_user_mr(struct ib_pd *, u64, u64, u64, int,
+				     struct ib_dmah *, struct ib_udata *);
 #else
 extern struct ib_mr *siw_reg_user_mr(struct ib_pd *, u64, u64, u64, int,
 				     struct ib_udata *);

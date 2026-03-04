@@ -26,6 +26,13 @@
 #endif
 
 #ifdef __KERNEL__
+#if !KS_HAS_DEL_TIMER_SYNC
+#define del_timer_sync		timer_delete_sync
+#endif
+#if !KS_HAS_HRTIMER_INIT
+#define hrtimer_init(timer, clock_id, mode) \
+	hrtimer_setup((timer), NULL, (clock_id), (mode))
+#endif
 /* IOMMU Future-proof: Fail with error if someone tries to use virt_to_phys or page_to_phys
  * If you are sure you know what are you doing, then re-enable them with #pragma pop_macro before use
  */
@@ -1527,7 +1534,18 @@ void * nvmeib_s_tree_lookup(unsigned long key);
 
 #if !defined(UM_APP)
 	#if KS_NEW_TIMER_API
-		#define INIT_TIMER(x) __init_timer((x), 0, 0)
+		#if KS_HAS___INIT_TIMER
+			#define INIT_TIMER(x) __init_timer((x), 0, 0)
+			#define SETUP_TIMER(_timer, _fn, _data, _flags)                 \
+						do {                                                    \
+								__init_timer((_timer), (_fn), (_flags));        \
+								(_timer)->function = (_fn);                     \
+						} while (0)
+		#else
+			#define INIT_TIMER(x) timer_setup((x), NULL, 0)
+			#define SETUP_TIMER(_timer, _fn, _data, _flags) \
+						timer_setup((_timer), (_fn), (_flags))
+		#endif
 
 		#define TIMER_CALLBACK_DECL(func_name) \
 			void func_name(struct timer_list* _tl);
@@ -1548,12 +1566,6 @@ void * nvmeib_s_tree_lookup(unsigned long key);
 			do { 								\
 				container->container_field ## _data = data;		\
 			} while (0)
-
-		#define SETUP_TIMER(_timer, _fn, _data, _flags)                 \
-					do {                                                    \
-							__init_timer((_timer), (_fn), (_flags));        \
-							(_timer)->function = (_fn);                     \
-					} while (0)
 
 	#else //KS_NEW_TIMER_API
 

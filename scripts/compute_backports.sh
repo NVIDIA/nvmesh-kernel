@@ -13,9 +13,17 @@ set -f  # disable globbing
 KSRC1="$1"
 INC_RDMA="$2"
 INC_RDMA_DRV="$3"
-ARCH="$4"
-GREP_DEBUG="${5:-0}"
-GREP_DEBUG_LOGFILE="$6"
+KERN_SYMVERS="$4"
+RDMA_SYMVERS="$5"
+ARCH="$6"
+GREP_DEBUG="${7:-0}"
+GREP_DEBUG_LOGFILE="$8"
+
+if [[ "$GREP_DEBUG" == "1" && -n "$GREP_DEBUG_LOGFILE" ]]; then
+    exec 19>"$GREP_DEBUG_LOGFILE"
+    BASH_XTRACEFD=19
+    set -x
+fi
 
 CFLAGS=""
 
@@ -47,8 +55,6 @@ grep_check() {
     local basepath="$5"
     local found_val="${6:-1}"
     local notfound_val="${7:-0}"
-
-    [[ "$GREP_DEBUG" == "1" ]] && [[ -n "$GREP_DEBUG_LOGFILE" ]] && echo "$define" >> "$GREP_DEBUG_LOGFILE"
 
     local files=()
     for f in $file_paths; do
@@ -126,6 +132,31 @@ grep_rdma_drv_func_ptr_var()  { grep_func_ptr_var  "$1" "$2" "$3" "$4" "$INC_RDM
 grep_rdma_drv_func_ptr_rv()   { grep_func_ptr_rv   "$1" "$2" "$3" "$4" "$INC_RDMA_DRV"; }
 grep_rdma_drv_macro_param()   { grep_macro_param   "$1" "$2" "$3" "$4" "$INC_RDMA_DRV" "$5" "$6"; }
 grep_rdma_drv_typedef()       { grep_typedef       "$1" "$2" "$3" "$INC_RDMA_DRV" "$4" "$5"; }
+
+# grep_symvers: Base function to check if a symbol is exported
+grep_symvers() {
+    local define="$1"
+    local symbol="$2"
+    local symvers_path="$3"
+    local found_val="${4:-1}"
+    local notfound_val="${5:-0}"
+    if grep -qw "$symbol" "$symvers_path" 2>/dev/null; then
+        CFLAGS="$CFLAGS -D${define}=${found_val}"
+    else
+        CFLAGS="$CFLAGS -D${define}=${notfound_val}"
+    fi
+}
+
+# grep_kern_symvers: Check if a symbol is exported by the kernel Module.symvers
+grep_kern_symvers() {
+    grep_symvers "$1" "$2" "$KERN_SYMVERS" "$3" "$4"
+}
+
+# grep_rdma_symvers: Check if a symbol is exported by the kernel Module.symvers (INBOX) or the OFED Module.symvers
+grep_rdma_symvers() {
+    grep_symvers "$1" "$2" "$RDMA_SYMVERS" "$3" "$4"
+}
+
 
 ###############################################################################
 # All backport checks
@@ -481,6 +512,22 @@ grep_ksrc_func_var "KS_HAS_BDEV_PARTNO" "bdev_partno" "" "include/linux/blkdev.h
 grep_rdma_struct_member "KS_RDMA_HAS_RESTRACK" "struct rdma_restrack_entry" "" "include/rdma/restrack.h"
 grep_ksrc_struct_member "KS_HAS_PROC_FS" "struct proc_ops" "" "include/linux/proc_fs.h"
 grep_rdma_func_var "HAS_IB_GET_DMA_MR" "ib_get_dma_mr" "" "include/rdma/ib_verbs.h"
+
+
+# ---------------------------------------------------------------------------- #
+# Kernel 6.17
+# ---------------------------------------------------------------------------- #
+grep_ksrc_func_var "KS_HAS_DEL_TIMER_SYNC" "del_timer_sync" "" "include/linux/timer.h"
+grep_ksrc_func_var "KS_HAS___INIT_TIMER" "__init_timer" "" "include/linux/timer.h"
+grep_ksrc_func_var "KS_CRC32C_USES_SIZE_T" "crc32c" "size_t" "include/linux/crc32.h"
+grep_ksrc_struct_member "KS_HAS_SKB_CHECKSUM_OPS" "struct skb_checksum_ops" "" "include/linux/skbuff.h include/net/checksum.h"
+grep_ksrc_func_var "KS_HAS___CRC32C_LE_COMBINE" "__crc32c_le_combine" "" "include/linux/crc32.h"
+grep_ksrc_func_var "KS_HAS_HRTIMER_INIT" "hrtimer_init" "" "include/linux/hrtimer.h"
+grep_rdma_func_ptr_var "KS_IB_REG_USER_MR_HAS_DMAH" "reg_user_mr" "ib_dmah" "include/rdma/ib_verbs.h"
+grep_rdma_func_var "KS_HAS_MLX5_GET_UARS_PAGE" "mlx5_get_uars_page" "" "include/linux/mlx5/driver.h"
+
+# Verify tcp_setsockopt is actually exported (declared but unexported in 6.12+)
+grep_kern_symvers "KS_TCP_SETSOCKOPT_EXPORTED" "tcp_setsockopt"
 
 ###############################################################################
 # Output

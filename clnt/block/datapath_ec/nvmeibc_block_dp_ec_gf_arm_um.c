@@ -155,7 +155,11 @@ __attribute__((unused)) static void xor_blocks(unsigned int count, unsigned int 
 	}
 }
 
+#if KS_CRC32C_USES_SIZE_T
+u32 crc32c(u32 init_crc, const void *buf, size_t len);
+#else
 u32 crc32c(u32 init_crc, const void *buf, unsigned int len);
+#endif
 
 static inline u32 __impl_crc32c(u32 init_crc, const void *buf, unsigned int len)
 {
@@ -329,7 +333,7 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
                 are desired. Ptr 0 means we want it. Ptr -1 means we don't.
        Anything else (k > 2) comes later, and probably requires matrix inversion.
     */
-    int i, d_index, p_index, d[k], d_notme;
+    int i, d_index, p_index, d[2], d_notme;
 #ifdef __KERNEL__
 	struct user_fpsimd_state save_buf;
 #endif
@@ -444,7 +448,11 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
 }
 
 #ifdef __KERNEL__
+	#if KS_CRC32C_USES_SIZE_T
+u32 		ec_crc_arm_optimized(u32 init_crc, const void *buf, size_t len)
+	#else
 u32 		ec_crc_arm_optimized(u32 init_crc, const void *buf, unsigned int len)
+	#endif
 #else
 unsigned int 	ec_crc_arm_optimized(unsigned int init_crc, const u8 *buf, unsigned int len)
 #endif

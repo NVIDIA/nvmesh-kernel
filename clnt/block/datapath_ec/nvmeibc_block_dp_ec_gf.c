@@ -36,7 +36,11 @@ typedef void (*ec_decode_data_subfunc_1) (  int, int, int,      u8**, u8**, u32*
 typedef void (*ec_decode_data_subfunc_2) (  int, int, int, int, u8**, u8**, u32*);
 
 #if defined(__KERNEL__) && defined(__aarch64__)
-	typedef u32 (*ec_crc_func) (u32 crc, const void *address, unsigned int length);	// Same as ARM
+	#if KS_CRC32C_USES_SIZE_T
+		typedef u32 (*ec_crc_func) (u32 crc, const void *address, size_t length);
+	#else
+		typedef u32 (*ec_crc_func) (u32 crc, const void *address, unsigned int length);
+	#endif
 	#define CRC32_KERNEL_OR_AVX_FN 			crc32c
 	#define CRC32_KERNEL_OR_UNOPT_FN 		crc32c
 #else
@@ -1074,7 +1078,7 @@ static enum gf_return_val ec_decode_data_1(int len, int k, int rows, unsigned ch
                 are desired. Ptr 0 means we want it. Ptr -1 means we don't.
        Anything else (k > 2) comes later, and probably requires matrix inversion.
     */
-    int i, d_index, p_index, d[k], d_notme;
+    int i, d_index, p_index, d[2], d_notme;
 
     BUG_ON(k > 2); // Not for now
 

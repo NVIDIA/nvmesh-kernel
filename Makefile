@@ -1327,6 +1327,14 @@ else
 cflags += -DENABLE_SIW=0
 endif
 
+# EXTRA_CFLAGS was removed from kbuild in newer kernels (6.x+).
+# Use subdir-ccflags-y so the flags propagate to all subdirectory builds.
+ifeq ($(BACKPORTS_CFLAGS),)
+    BACKPORTS_CFLAGS = $(backports_cflags)
+endif
+
+subdir-ccflags-y += $(EXTRA_CFLAGS)
+
 # ofed_symbol_version
 ifneq ($(OFED_SYM_VER),)
     OFED_SYMVERS = $(OFED_SYM_VER)
@@ -1366,11 +1374,11 @@ LINUX_INCLUDE='\
 #		 LINUXINCLUDE=$(LINUX_INCLUDE) \
 #		 KBUILD_EXTRA_SYMBOLS="$(OFED_SYMVERS) $(BNXT_SYMVERS) $(SIW_SYMVERS)" modules'
 COMPILE_SYMVERS=\
-	$(VV)$(MAKE) -C $(KSRC) M=$(PWD) V=$(V) EXTRA_CFLAGS='$(cflags) $(backports_cflags) $(EXTRA_CFLAGS)' BNXT_CFLAGS="$(BNXT_CFLAGS)" \
+	$(VV)$(MAKE) -C $(KSRC) M=$(PWD) V=$(V) EXTRA_CFLAGS='$(cflags) $(BACKPORTS_CFLAGS) $(EXTRA_CFLAGS)' BNXT_CFLAGS="$(BNXT_CFLAGS)" \
 	LINUXINCLUDE=$(LINUX_INCLUDE) \
 	KBUILD_EXTRA_SYMBOLS="$(OFED_SYMVERS) $(BNXT_SYMVERS) $(SIW_SYMVERS)"
 COMPILE_MODULES=\
-	$(VV)$(MAKE) $(JOBS) -C $(KSRC) M=$(PWD) V=$(V) EXTRA_CFLAGS='$(cflags) $(backports_cflags) $(EXTRA_CFLAGS)' BNXT_CFLAGS="$(BNXT_CFLAGS)" \
+	$(VV)$(MAKE) $(JOBS) -C $(KSRC) M=$(PWD) V=$(V) EXTRA_CFLAGS='$(cflags) $(BACKPORTS_CFLAGS) $(EXTRA_CFLAGS)' BNXT_CFLAGS="$(BNXT_CFLAGS)" \
 	LINUXINCLUDE=$(LINUX_INCLUDE) \
 	KBUILD_EXTRA_SYMBOLS="$(OFED_SYMVERS) $(BNXT_SYMVERS) $(SIW_SYMVERS)" modules
 
@@ -1381,6 +1389,7 @@ all:
 	$(info Kernel: $(KERN_VER) $(KSRC1))
 	$(info OFED: Are we OFED? $(OFED_WE_R), $(INFO_OFED))
 	$(info Other Drivers: $(INFO_BNXT) $(INFO_SIW))
+	$(info Logging backports.mk to $(GREP_DEBUG_LOGFILE))
 	$(info $(INFO_TOMA))
 	$(info $(INFO_SERV_CLNT))
 	$(info $(INFO_TOMA))

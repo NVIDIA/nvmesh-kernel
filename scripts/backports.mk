@@ -3,19 +3,25 @@ SHELL:=/bin/bash
 
 # Uncomment the lines below to debug the grep utility functions below
 GREP_DEBUG:=1
-GREP_DEBUG_LOGFILE:=/tmp/backports_mk_$(strip $(shell date +%s)).log
 
 ifeq ($(GREP_DEBUG),1)
-    $(info Logging backports.mk to $(GREP_DEBUG_LOGFILE))
+  ifeq ($(GREP_DEBUG_LOGFILE),)
+    GREP_DEBUG_LOGFILE:=/tmp/backports_mk_$(strip $(shell date +%s)).log
     $(shell touch $(GREP_DEBUG_LOGFILE))
+    export GREP_DEBUG_LOGFILE
+  endif
 endif
+
+KERN_SYMVERS=$(KSRC1)/Module.symvers
 
 ifneq ($(OFED_SRC_DIR),)
   INC_RDMA=$(OFED_SRC_DIR)
   INC_RDMA_DRV=$(OFED_SRC_DIR)
+  RDMA_SYMVERS=$(OFED_SYMVERS)
 else
   INC_RDMA=$(KSRC1)
   INC_RDMA_DRV=$(KERN_FILES_PATH)
+  RDMA_SYMVERS=$(KERN_SYMVERS)
 endif
 
 ARCH := $(shell uname -m | sed -e s/i.86/x86/ \
@@ -34,5 +40,5 @@ ARCH := $(shell uname -m | sed -e s/i.86/x86/ \
 # This variable uses deferred expansion (=) so the script only runs when
 # $(backports_cflags) is actually referenced in a recipe.
 backports_cflags = $(shell $(SCRIPTS_DIR)/compute_backports.sh \
-	"$(KSRC1)" "$(INC_RDMA)" "$(INC_RDMA_DRV)" "$(ARCH)" \
+	"$(KSRC1)" "$(INC_RDMA)" "$(INC_RDMA_DRV)" "$(KERN_SYMVERS)" "$(RDMA_SYMVERS)" "$(ARCH)" \
 	"$(GREP_DEBUG)" "$(GREP_DEBUG_LOGFILE)")

@@ -45,9 +45,9 @@ int nvmeibc_reed_solomon_fill_missing(const int replicas, const int slice_size, 
 	if (data_restoration) { // Restore data
 		int i, new_data_index = 0;
 		u32 curr;
-		u8 * new_data[parities];
+		u8 * new_data[N_MAX_RAID_SLICE_LEN];
 		u8 * data[    N_MAX_RAID_SLICE_LEN];
-		u32 _crc[     parities];
+		u32 _crc[     N_MAX_RAID_SLICE_LEN];
 		for (i = 0, curr = 1;i < replicas;i++, curr <<= 1) {
 			if (curr & in_bm) { 		// Set all valid inputs
 				data[i] = vec[i];
@@ -76,8 +76,8 @@ int nvmeibc_reed_solomon_fill_missing(const int replicas, const int slice_size, 
 	if (parity_calculation) { // Calculate Parity
 		int i, new_parity_index = 0;
 		u32 curr;
-		u8 * coding[         parities];
-		u8 * data[         slice_size];
+		u8 * coding[         N_MAX_RAID_SLICE_LEN];
+		u8 * data[           N_MAX_RAID_SLICE_LEN];
 		u32 _crc[N_MAX_RAID_SLICE_LEN];
 		for (i = 0, curr = 1;i < replicas;i++, curr <<= 1) {
 			if (i < slice_size) {	// Set all valid inputs (we might have just generated it's data)
@@ -124,12 +124,12 @@ int nvmeibc_reed_solomon_update_parities(const int replicas, const int slice_siz
 	const int  size = DEBUG_DI_SIZE_CALC(is_di_debug);
 	int i, j;
 	bool first_iteration = true;
-	u32 _crc[parities+1];
+	u32 _crc[N_MAX_RAID_SLICE_LEN + 1];
 	int calc_rv = 0;
 
 	for_each_set_bit(i, &data_update, slice_size) {
-		u8 * data[parities+2];
-		u8 * coding[parities];
+		u8 * data[N_MAX_RAID_SLICE_LEN + 2];
+		u8 * coding[N_MAX_RAID_SLICE_LEN];
 
 		// Set old and new data
 		data[0] = old_vec[i];
