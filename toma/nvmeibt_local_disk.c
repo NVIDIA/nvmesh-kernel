@@ -942,6 +942,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	if (should_reread_disk) {
 		// Try to restore the new disk gpt(s) and config.
 		// Read persistent configuration of current disk
+		nvmeibt_local_disk_clear_is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs(local_disk);
 		if (launch_read_of_local_disk_gpt_and_segs_metadata_and_persist(local_disk) < 0) {
 			// We failed reading persisted config from this disk, we ignore it and effectively evict it. Since it is
 			// either unuseable due to a hardware problem or might already have users' data on it.

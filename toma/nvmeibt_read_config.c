@@ -2048,6 +2048,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 		}
 
 		N_Tf(cki7mbt, "Added disk_zero_iter work for disk=@STR", nvmeibt_local_disk_config_display(&(entry->from_config)));
+		nvmeibt_local_disk_mark_is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs(local_disk);
 		goto out;
 	} else {
 		local_disk->mbr = entry->mbr;

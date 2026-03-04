@@ -347,6 +347,11 @@ static inline void nvmeibt_local_disk_mark_is_mem_in_sync_with_disk_metadata_gpt
 	local_disk->is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs = 1;
 }
 
+static inline void nvmeibt_local_disk_clear_is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs(struct nvmeibt_local_disk *local_disk)
+{
+	local_disk->is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs = 0;
+}
+
 static inline bool nvmeibt_local_disk_is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs(struct nvmeibt_local_disk *local_disk)
 {
 	return (local_disk ? local_disk->is_mem_in_sync_with_disk_metadata_gpt_entry_and_ctrl_of_segs : 0);
