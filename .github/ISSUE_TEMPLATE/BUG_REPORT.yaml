@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
+---
 name: NVMesh Incident Report
 description: Collects all necessary information for reporting an NVMesh incident.
 title: "[Incident]: "
@@ -9,7 +9,7 @@ labels:
   - "incident"
   - "needs-triage"
 body:
-   - type: markdown
+  - type: markdown
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report!
@@ -23,7 +23,7 @@ body:
     validations:
       required: true
 
- - type: markdown
+  - type: markdown
     attributes:
       value: |
         # NVMesh Incident Report
