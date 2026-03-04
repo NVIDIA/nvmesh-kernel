@@ -7,6 +7,7 @@
 #define NVMEIBC_BLOCK_DP_DBITS_H_
 
 #include "nvmeib_shared.h"
+#include "block/dp_topology_traits.h"
 
 /************************** nvmeibc_dbits_entry API ***************************/
 // Below is a set of usefull manipulations on entry (via predefined internat actions)
@@ -22,8 +23,10 @@ void nvmeibc_dbits_turn_on_convict(       union nvmeibc_dbits_entry *e, const st
 //void nvmeibc_dbits_turn_on_convict(  union nvmeibc_dbits_entry *e, int segx, int segy); // Deprecated method: If segi != -1 turns convict on it. Supports up to 2 segments
 
 /* Given the dirtybits that read by owner and secondary owner lock, unite them and return the result.all_bits */
-u16 nvmeibc_dbits_merge_owners(    const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, const int np);		// Take worst  problem (unite all problems)
-u16 nvmeibc_dbits_intersect_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, const int np);		// Take lesser problem (intersect all problems)
+__attribute__((nonnull(1, 2, 3)))
+u16 nvmeibc_dbits_merge_owners(    const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, struct dp_topology_traits const* topo_traits);		// Take worst  problem (unite all problems)
+__attribute__((nonnull(1, 2, 3)))
+u16 nvmeibc_dbits_intersect_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, struct dp_topology_traits const* topo_traits);		// Take lesser problem (intersect all problems)
 
 /********************** Dirty-bits Transaction actions ************************/
 // Below is a generic struct to create any possible actions

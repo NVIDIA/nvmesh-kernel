@@ -3,6 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "block/dp_topology_traits.h"
 #include "common/kr_incs.h"
 #include "nvmeib_math.h"
 #include "nvmeibc_block_dp_dbits.h"
@@ -221,7 +222,8 @@ void nvmeibc_dbits_convicts_to_dirty(union nvmeibc_dbits_entry *e, const int np)
 	nvmeibc_dbits_action_to_entry(&a, e);
 }
 
-static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, bool do_unify, const int np)
+__attribute__((nonnull(1, 2, 4)))
+static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, bool do_unify, struct dp_topology_traits const* topo_traits)
 {
 	union nvmeibc_dbits_entry rv;
 	if (      e1->all_bits == 0) {
@@ -230,22 +232,22 @@ static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1
 		rv = (do_unify ? *e1 : *e2);
 	} else {
 		struct nvmeibc_dbits_action a1, a2, a_rv;
-		nvmeibc_dbits_action_init_by_entry(&a1, e1, np);
-		nvmeibc_dbits_action_init_by_entry(&a2, e2, np);
+		nvmeibc_dbits_action_init_by_entry(&a1, e1, topo_traits->n_parities);
+		nvmeibc_dbits_action_init_by_entry(&a2, e2, topo_traits->n_parities);
 		a_rv = nvmeibc_dbits_action_merge(&a1, &a2, do_unify);
 		nvmeibc_dbits_action_to_entry(&a_rv, &rv);
 	}
 	return rv.all_bits;
 }
 
-u16 nvmeibc_dbits_intersect_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, const int np)
+u16 nvmeibc_dbits_intersect_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, struct dp_topology_traits const* topo_traits)
 {
-	return __nvmeibc_dbits_merge_by_strategy(e1, e2, false, np);
+	return __nvmeibc_dbits_merge_by_strategy(e1, e2, false, topo_traits);
 }
 
-u16 nvmeibc_dbits_merge_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, const int np)
+u16 nvmeibc_dbits_merge_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, struct dp_topology_traits const* topo_traits)
 {
-	return __nvmeibc_dbits_merge_by_strategy(e1, e2, true, np);
+	return __nvmeibc_dbits_merge_by_strategy(e1, e2, true, topo_traits);
 }
 
 u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *e_pre,

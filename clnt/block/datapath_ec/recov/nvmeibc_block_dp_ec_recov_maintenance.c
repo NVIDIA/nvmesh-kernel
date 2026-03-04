@@ -78,7 +78,7 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 		if (!c->do_not_send)
 			for (; md < md_end; md += md_size) {
 				const union nvmeibc_dbits_entry cur = fill_nvmeibc_dbits_entry_from_md(md);
-				if (cur.all_bits) res.all_bits = nvmeibc_dbits_merge_owners(&res, &cur, num_parities);
+				if (cur.all_bits) res.all_bits = nvmeibc_dbits_merge_owners(&res, &cur, &so->r1->calculated_data.topo_traits);
 			}
 	}
 	__append_convicts_of_topo(so, &res);

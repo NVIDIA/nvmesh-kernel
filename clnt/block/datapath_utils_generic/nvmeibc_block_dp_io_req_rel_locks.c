@@ -1373,7 +1373,7 @@ union nvmeib_blkset_info dp_locks_get_TxID_dbits(const struct nvmeibc_cmd_lock *
 			  WARN_ON((ow_rv.bits.txid == INITIAL_LAZY_READ_TXID) != (so_rv.bits.txid == INITIAL_LAZY_READ_TXID)); // Should never happen: If one lock has unknown txid_id and the other has valid txid than taking the max of them will result in possibly inaccurate txid (in the dmds it might be greater).
 			*/
 			ow_rv.bits.txid = max((u32)ow_rv.bits.txid, (u32)so_rv.bits.txid);
-			ow_rv.bits.dirty = nvmeibc_dbits_intersect_owners(&ow_dbits, &so_dbits, nvmeibc_raid1_get_protect_lvl(pr));
+			ow_rv.bits.dirty = nvmeibc_dbits_intersect_owners(&ow_dbits, &so_dbits, &pr->calculated_data.topo_traits);
 		}
 		// nvmeibc_cmd_lock_set_bi(lo, ow_rv);	// Finally re-inject the merged back to owner. Daniel: for debug reasons dont do that yet
 		// When owner and copies could cmpxchg from different 0/stale values. Only the stale of primary owner counts

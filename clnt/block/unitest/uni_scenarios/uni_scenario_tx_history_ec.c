@@ -2120,7 +2120,9 @@ static void __merge_rer_binfo_of_recovered_tx_with_completed_tx(struct t_ec_reco
 	const struct test_context env = {.sys = sys, .client = sys->clients,.dev = sys->clients->devs[s->inp.sraid.vsi.volume], .sraid = s->inp.sraid};
 	union nvmeibc_dbits_entry _d = {.all_bits = d->lid.rer.blkset_info.bits.dirty};
 	union nvmeibc_dbits_entry _s = {.all_bits = s->lid.rer.blkset_info.bits.dirty};
-	const int num_parities = __disk_range_get_num_parities(env.sraid.cpr);
+	struct dp_topology_traits const topo_traits = {
+		.n_parities = __disk_range_get_num_parities(env.sraid.cpr),
+	};
 	bool has_candidate_for_blkset;
 	if (!d->inp.rer.io_perm.bits.is_hot_recovery) {
 		has_candidate_for_blkset = (d->rer_bmp.is_jour_committed || s->rer_bmp.is_jour_committed);
@@ -2130,7 +2132,7 @@ static void __merge_rer_binfo_of_recovered_tx_with_completed_tx(struct t_ec_reco
 			d->lid.rer.blkset_info.bits.txid = d->lid.nat.blkset_info.bits.txid;
 		}
 
-		d->lid.rer.blkset_info.bits.dirty = nvmeibc_dbits_merge_owners(&_d, &_s, num_parities);
+		d->lid.rer.blkset_info.bits.dirty = nvmeibc_dbits_merge_owners(&_d, &_s, &topo_traits);
 	}
 
 
