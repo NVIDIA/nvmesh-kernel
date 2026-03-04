@@ -851,7 +851,11 @@ static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
 		N_Tf(stlkrec, "Found " STALE_BLKSET_FMT, seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), pure_recovered_lid.all);
 		if (!nvmeib_lockid_are_purified_eq(expected_lid, pure_recovered_lid)) {
 			N_Ef(tstlkre, "lockid mismatch blkset_lockid=@T_LID stale_lockid=@C_LID", expected_lid.all, lockid.all);
-			nvmeibt_abort(ES_FATAL);
+			if (pure_recovered_lid.all == 0) {
+				N_Ef(signr84, "srv reported recovered_lockid==0. Ignoring the gap from mine");
+			} else {
+				nvmeibt_abort(ES_FATAL);
+			}
 		}
 	} else {
 		if (lockid.all != 0) {	// Client says there is a stale lock here
