@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 name: NVMesh Incident Report
 description: Collects all necessary information for reporting an NVMesh incident.
 title: "[Incident]: "
@@ -6,7 +9,21 @@ labels:
   - "incident"
   - "needs-triage"
 body:
-  - type: markdown
+   - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What version of NVMesh are you running?
+      placeholder: "example: 3.4.0"
+    validations:
+      required: true
+
+ - type: markdown
     attributes:
       value: |
         # NVMesh Incident Report
@@ -32,7 +49,7 @@ body:
       description: Detailed account of the problem, UX, including the discrepancy between expected and observed behavior. Upload relevant screenshots.
       placeholder: Enter detailed summary here...
     validations:
-      required: false
+      required: true
 
   - type: textarea
     id: business-impact
@@ -41,7 +58,7 @@ body:
       description: Assessment of how the incident affects customer operations, such as service outages, performance degradation, or the status of any workarounds.
       placeholder: Describe the business impact here...
     validations:
-      required: true
+      required: false
 
   - type: markdown
     attributes:
@@ -51,8 +68,8 @@ body:
   - type: input
     id: severity
     attributes:
-      label: Severity (0-3)
-      description: Classification of the incident's impact on end-users. 0=Data loss or service unavailability. 1=Functionality broken. 2=Minor. 3=Cosmetic.
+      label: Severity (0-2)
+      description: Classification of the incident's impact on end-users. 0=Data loss or service unavailability. 1=Functionality broken. 2=Minor.
       placeholder: e.g., 1
     validations:
       required: true
@@ -72,15 +89,6 @@ body:
         - Staging
         - Integration
         - Development
-    validations:
-      required: true
-
-  - type: textarea
-    id: release-version
-    attributes:
-      label: Release Version
-      description: The release version of the NVMesh base component presuming the entire cluster uses the same version. If different versions are used, mark 'Multiple' and list them in the next section.
-      placeholder: Release...
     validations:
       required: true
 
@@ -170,3 +178,14 @@ body:
       placeholder: Provide necessary access details...
     validations:
       required: false
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our Code of Conduct
+      options:
+        - label: I agree to follow NVMesh's Code of Conduct
+          required: true
+        - label: I have searched the open bugs and have found no duplicates for this bug report
+          required: true
