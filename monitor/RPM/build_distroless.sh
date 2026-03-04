@@ -69,7 +69,7 @@ buildDistrolessContainer() {
     distroless_image_name="nvmesh-exporter-test:$$"
     
     echo "Building distroless container image: $distroless_image_name"
-    docker build --no-cache --build-arg NVMESH_MONITOR_VERSION="$nvmesh_monitor_version" -t "$distroless_image_name" "$distroless_build_context"
+    docker build --no-cache --platform "linux/$DOCKER_ARCH" --build-arg NVMESH_MONITOR_VERSION="$nvmesh_monitor_version" -t "$distroless_image_name" "$distroless_build_context"
     
     if [ $? -ne 0 ]; then
         echo "ERROR: Docker build failed"
