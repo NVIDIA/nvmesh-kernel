@@ -1890,8 +1890,8 @@ static ssize_t __status_fill_buf(struct nvmeibc_disk *disk, char *buf, size_t le
 	if (status_type == WRITE_STATUS_JSON)
 		BUF_ADD("{\n");
 	write_status_data.ntabs = 1;
-	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false) < 0)) {
-		count = rv;
+	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false)) < 0) {
+		_NE(error_1_status_fill_buf, "nvmeibc_disk_update_config failed rv=@RV", rv);
 		goto out;
 	}
 
@@ -1902,8 +1902,10 @@ static ssize_t __status_fill_buf(struct nvmeibc_disk *disk, char *buf, size_t le
 		BUF_ADD("}\n");
 	}
 #undef BUF_ADD
+
+	rv = count;
 out:
-	return count;
+	return rv;
 }
 
 #define CORE_CLIENT_DISK_STATUS_PROC_FRMT_VER 1
@@ -2360,7 +2362,7 @@ int nvmeibc_disk_notify_coremask_update(struct nvmeibc_disk *disk)
 	disk_update_data->done_cb = __notify_coremask_disk_update_done_cb;
 	disk_update_data->done_cb_ctx = disk_update_data;
 
-	if ((rv = nvmeibc_disk_update_config(disk, disk_update_data, true) < 0)) {
+	if ((rv = nvmeibc_disk_update_config(disk, disk_update_data, true)) < 0) {
 		kfree(disk_update_data);
 	}
 out:
@@ -13579,12 +13581,13 @@ int nvmeibc_disk_handle_rgid_change(struct nvmeibc_disk *disk,
 	u->update_data = w;
 	u->done_cb = handle_rgid_change_done;
 	u->done_cb_ctx = u;
-	if ((rv = nvmeibc_disk_update_config(disk, u, false)))
+	
+	if ((rv = nvmeibc_disk_update_config(disk, u, false)) < 0) {
+		_NE(error_3_nvmeibc_disk_handle_rgid_change, "nvmeibc_disk_update_config failed rv=@RV", rv);
 		goto freer;
-	else {
-		rv = 0;
-		goto out;
 	}
+
+	goto out;
 
 freer:
 		kfree(r);
@@ -13958,7 +13961,7 @@ int nvmeibc_disk_disconnect_io_path(
 	disk_update_data->update_type = DISK_UPDATE_DISCONNECT_IO_PATH;
 	disk_update_data->done_cb = free_disk_disconnect_io_path_data;
 	disk_update_data->done_cb_ctx = disconnect_io_path_work;
-	if ((rv = nvmeibc_disk_update_config(disk, disk_update_data, true) < 0)) {
+	if ((rv = nvmeibc_disk_update_config(disk, disk_update_data, true)) < 0) {
 		_NT(trace_1_disk_nvmeibc_disk_disconnect_io_path, "nvmeibc_disk_update_config failed (@RV)", rv);
 		kfree(disconnect_io_path_work);
 	}
@@ -15112,7 +15115,7 @@ static ssize_t core_masks_fill_buf(void *priv, char *buf, size_t len)
 	NFIN;
 	CALL_JSON_START_OBJ(NULL, write_status_data.ntabs++);
 
-	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false) < 0)) {
+	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false)) < 0) {
 		CALL_JSON_FN(data_sval, "error", rv, JSON_LAST_ELEM, write_status_data.ntabs);
 		goto epilogue;
 	}
@@ -15305,7 +15308,7 @@ static ssize_t coremask_stats_fill_buf(void *priv, char *buf, size_t len)
 	NFIN;
 	CALL_JSON_START_OBJ(NULL, write_status_data.ntabs++);
 	
-	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false) < 0)) {
+	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false)) < 0) {
 		CALL_JSON_FN(data_sval, "error", rv, JSON_LAST_ELEM, write_status_data.ntabs);
 		goto epilogue;
 	}
@@ -15456,7 +15459,8 @@ static ssize_t coremask_stats_reset(void *priv, char *buf, size_t len)
 		rv = -EINVAL;
 		goto out;
 	}
-	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false) < 0)) {
+	if ((rv = nvmeibc_disk_update_config(disk, &disk_update_data, false)) < 0) {
+		_NE(error_1_coremask_stats_reset, "nvmeibc_disk_update_config failed rv=@RV", rv);
 		goto out;
 	}
 
