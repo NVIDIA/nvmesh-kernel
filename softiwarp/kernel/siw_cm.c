@@ -258,8 +258,11 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 	rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_NODELAY,
 				   optval, sizeof(val));
-#	else
+#	elif KS_TCP_SETSOCKOPT_EXPORTED
 	rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_NODELAY,
+			     optval, sizeof(val));
+#	else
+	rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_NODELAY,
 			     optval, sizeof(val));
 #	endif
 #else
@@ -273,8 +276,11 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 		rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_QUICKACK,
 					   optval, sizeof(val));
-#	else
+#	elif KS_TCP_SETSOCKOPT_EXPORTED
 		rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_QUICKACK,
+				     optval, sizeof(val));
+#	else
+		rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_QUICKACK,
 				     optval, sizeof(val));
 #	endif
 #else
@@ -293,8 +299,11 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 		rv = sock->ops->getsockopt(sock, SOL_TCP, TCP_CONGESTION,
 					   get_cong_optval, get_cong_optlen);
-#	else
+#	elif KS_TCP_SETSOCKOPT_EXPORTED
 		rv = tcp_getsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
+				    get_cong_optval, get_cong_optlen);
+#	else
+		rv = sock->sk->sk_prot->getsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
 				    get_cong_optval, get_cong_optlen);
 #	endif
 		if (rv < 0) {
@@ -309,8 +318,11 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 		rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_CONGESTION,
 					set_cong_optval, sizeof(siw_tcp_cong_ctrl_name));
-#	else
+#	elif KS_TCP_SETSOCKOPT_EXPORTED
 		rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
+				set_cong_optval, sizeof(siw_tcp_cong_ctrl_name));
+#	else
+		rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
 				set_cong_optval, sizeof(siw_tcp_cong_ctrl_name));
 #	endif
 		if (rv < 0) {
@@ -357,8 +369,11 @@ static int siw_socket_restore_ca(struct socket *sock, char *orig_ca_name, size_t
 #	if !KS_HAS_TCP_SETSOCKOPT
 	rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_CONGESTION,
 				   set_cong_optval, optval_len);
-#	else
+#	elif KS_TCP_SETSOCKOPT_EXPORTED
 	rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
+			set_cong_optval, optval_len);
+#	else
+	rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
 			set_cong_optval, optval_len);
 #	endif
 

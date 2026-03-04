@@ -105,7 +105,7 @@ void nvmeibc_clmat_to_string(const struct nvmeibc_block_command *cmds)
 	static const char row_bible[] = "Commands";
 	int i, j, nlocks, bible_index;
 	if (cmds && cmds->o && cmds->o->CLmat && cmds->locksets) {
-		const int MAT_SIZE = 30;	// Print up to 30x30
+		#define MAT_SIZE 30	// Print up to 30x30
 		#define CLMAT_LINE_SIZE (1+2+1+MAT_SIZE*2+2)	// 1:{prefix bible}, 2:{cmd index}, 1:{}, separator, 2:{each cmd has state,seperator}, 2:{'@',0x0}
 		char line[CLMAT_LINE_SIZE], *cur = &line[0];
 		nlocks = cmds->locksets->nlocks;

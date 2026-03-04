@@ -1362,6 +1362,7 @@ static inline int siw_irq_empty(struct siw_qp *qp)
 	return qp->irq[qp->irq_get % qp->attrs.irq_size].flags == 0;
 }
 
+#if KS_HAS_SKB_CHECKSUM_OPS
 static inline __wsum siw_csum_update(const void *buff, int len, __wsum sum)
 {
 	return (__force __wsum)crc32c((__force __u32)sum, buff, len);
@@ -1386,6 +1387,24 @@ static inline void siw_crc_skb(struct siw_iwarp_rx *rctx, unsigned int len)
 						 &siw_cs_ops);
 	*(u32 *)shash_desc_ctx(rctx->mpa_crc_hd) = crc;
 }
+#else
+static inline void siw_crc_skb(struct siw_iwarp_rx *rctx, unsigned int len)
+{
+	u32 crc = *(u32 *)shash_desc_ctx(rctx->mpa_crc_hd);
+	unsigned int done = 0;
+
+	while (done < len) {
+		u8 buf[256];
+		unsigned int chunk = min_t(unsigned int, len - done, sizeof(buf));
+
+		if (skb_copy_bits(rctx->skb, rctx->skb_offset + done, buf, chunk))
+			break;
+		crc = crc32c(crc, buf, chunk);
+		done += chunk;
+	}
+	*(u32 *)shash_desc_ctx(rctx->mpa_crc_hd) = crc;
+}
+#endif
 
 #define tx_more_wqe(qp, curr_wqe)	(!siw_sq_empty(qp) || (tx_flags(curr_wqe) & SIW_WQE_MORE_WQES) || !siw_irq_empty(qp))
 

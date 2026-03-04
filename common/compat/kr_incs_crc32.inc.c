@@ -216,7 +216,11 @@ static u32 __attribute__((unused)) __crc32c_unopt_mask(u32 crc, const void *buf,
 
 #if !KS_HAS_CRC32C			// Centos 6.0+ kernels dont have u32 crc32c(
 	// include/linux/crc32x.h
+#if KS_CRC32C_USES_SIZE_T
+	u32 crc32c(u32 crc, const void *buf, size_t length) {	// All implementations return identical results
+#else
 	u32 crc32c(u32 crc, const void *buf, unsigned int length) {	// All implementations return identical results
+#endif
 		#if 0
 			return __crc32c_unopt_table(crc, buf, length);
 		#elif 0

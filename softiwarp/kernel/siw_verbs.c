@@ -2606,6 +2606,11 @@ struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd,
 	u64 len = attr->length;
 	u64 rnic_va = attr->hca_va;
 	int rights = attr->access_flags;
+#elif KS_IB_REG_USER_MR_HAS_DMAH
+struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd, u64 start, u64 len,
+			      u64 rnic_va, int rights,
+			      struct ib_dmah *dmah __attribute__((unused)), struct ib_udata *udata)
+{
 #else
 struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd, u64 start, u64 len,
 			      u64 rnic_va, int rights, struct ib_udata *udata)
