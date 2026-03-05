@@ -97,6 +97,7 @@ class ErrnoType(pydantic.BaseModel):
 			return os.strerror(abs(value)).lower()
 		raise RuntimeError('unknown errno')
 
+
 # The Jenkins build system is using Python 3.8, which does not support `enum.StrEnum`.
 # It's near impossible to upgrade the build system to Python 3.12 due to dependencies
 # such as a specific low version of OpenSSL, so we need to use a workaround to ensure
@@ -104,6 +105,7 @@ class ErrnoType(pydantic.BaseModel):
 class _StrEnum(str, enum.Enum):
 	def __str__(self) -> str:
 		return self.value
+
 
 class BaseType(pydantic.BaseModel):  # actually fundamental type, but DWARF uses "base" as terminology
 	model_config = pydantic.ConfigDict(frozen=True)
@@ -513,7 +515,7 @@ class ArgDecoder:
 			return '0'
 
 
-class Template():
+class Template:
 	def __init__(self, msg_spec: MessageSpec, user_defined_types: dict[str, TypeInfo]):
 		self.__user_defined_types = user_defined_types
 		self.__c_spec = msg_spec
@@ -642,6 +644,7 @@ class TemplatesLoader:
 
 		return Dictionary(specs=specs, user_defined_types=user_defined_types)
 
+
 TCommand = typing.TypeVar('TCommand', bound='Command')
 
 
@@ -665,7 +668,9 @@ class Command(abc.ABC):
 	@typing.no_type_check
 	def add_dict_arg(cls, parser) -> None:
 		parser.set_defaults(klass=cls)
-		parser.add_argument('dicts_dir', type=pathlib.Path, help='path to the directory containing a set of PET dictionaries')
+		parser.add_argument(
+			'dicts_dir', type=pathlib.Path, help='path to the directory containing a set of PET dictionaries'
+		)
 
 	def __init__(self, args: argparse.Namespace):
 		pass
@@ -737,8 +742,9 @@ class SaveDictionary(Command):
 		dictionary.um_trace = self.um_trace
 		dictionary.save(self.output)
 
+
 # PET schema is a collection of templates, keyed by commit id
-class PETSchema():
+class PETSchema:
 	def __init__(self, git_commit_id: int, dictionary: Dictionary):
 		self.git_commit_id = git_commit_id
 		self.um_trace = dictionary.um_trace
@@ -763,22 +769,35 @@ class ViewMessages(Command):
 			action='store_true',
 			dest='no_sort',
 			default=False,
-			help="By default, all traces are sorted; '--no-sort' disables the ordering; useful to see some entity traces in a single screen",
+			help="By default, all traces are sorted; '--no-sort' disables the ordering; "
+			+ 'useful to see some entity traces in a single screen',
 		)
 
 	def __load_schemas(self, dict_dir: pathlib.Path) -> dict[int, PETSchema]:
-		templates: dict[int, PETSchema] = {}
-		for f in dict_dir.glob("dict.*.json"):
-			commit_id = int(f.stem.removeprefix('dict.'), 16)
-			dictionary = Dictionary.load(f)
-			templates[commit_id] = PETSchema(commit_id, dictionary)
-		return templates
+		schemas: dict[int, PETSchema] = {}
+		for f in dict_dir.glob('dict.*.json'):
+			try:
+				# Validate filename format: dict.<hex_commit_id>.json
+				stem_parts = f.stem.split('.', 1)
+				if len(stem_parts) != 2 or stem_parts[0] != 'dict':
+					print(f'Warning: Skipping invalid dictionary filename: {f.name}', file=sys.stderr)
+					continue
+				commit_id = int(stem_parts[1], 16)
+				dictionary = Dictionary.load(f)
+				schemas[commit_id] = PETSchema(commit_id, dictionary)
+			except (ValueError, OSError) as e:
+				print(f'Warning: Failed to load dictionary {f.name}: {e}', file=sys.stderr)
+				continue
+		if not schemas:
+			raise RuntimeError(f'No valid PET dictionaries found in {dict_dir}')
+
+		return schemas
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
 		self.traces = args.traces
 		self.sort = not args.no_sort
-		self.schemas: dict[int, PETSchema] = self.__load_schemas(args.dicts_dir) # dict of dicts, keyed by commit id
+		self.schemas: dict[int, PETSchema] = self.__load_schemas(args.dicts_dir)  # dict of dicts, keyed by commit id
 		# Detect and skip UM tracer buffer headers; learned from first header, verified for subsequent ones.
 		self.__tsc_khz = None
 		self.__hdr_flags = None
@@ -824,6 +843,11 @@ class ViewMessages(Command):
 				kstream = KaitaiStream(fobj)
 				while not kstream.is_eof():
 					entity = NvmeibPetArchive.Entity(kstream)
+					if entity.commit_id not in self.schemas:
+						raise RuntimeError(
+							f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {idx} '
+							f'from file {fpath.name}'
+						)
 					um_trace = self.schemas[entity.commit_id].um_trace
 					if um_trace and self.__skip_tracer_headers(kstream):
 						continue
@@ -860,12 +884,21 @@ class ViewMessages(Command):
 	@typing.no_type_check
 	def __iter_human_messages(self) -> typing.Generator[Message, None, None]:
 		for entity in self.__iter_entities():
-			schema = self.schemas[entity.commit_id].templates
+			if entity.commit_id not in self.schemas:
+				raise RuntimeError(
+					f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {entity.idx} '
+					f'from file {entity.fname}'
+				)
+			schema: PETSchema = self.schemas[entity.commit_id]
 			for msg in self.__iter_entity_messages(entity):
 				try:
-					tmpl = schema[msg.offset - 1]
+					tmpl = schema.templates[msg.offset - 1]
 				except KeyError:
-					raise RuntimeError(f'Unknown PET template offset {msg.offset:#06x} for entity {entity.idx}')
+					msg = (
+						f'Unknown PET message offset {msg.offset:#06x} '
+						f'for entity {entity.idx} in schema {schema.git_commit_id}'
+					)
+					raise RuntimeError(msg)
 				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
 				yield human_msg
 
