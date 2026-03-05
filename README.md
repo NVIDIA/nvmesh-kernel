@@ -28,3 +28,16 @@ TOMA is part of the storage target
 ## Building
 Use `build.sh` to build NVMesh. See `build.sh --help` output for details.
 
+This repo contains the source for the kernel versions of the storage client and target and the user-mode TOMA component that is in integral part of the target.
+
+## NVMesh Open Source Repositories List
+* https://github.com/NVIDIA/nvmesh-documentation
+* https://github.com/NVIDIA/nvmesh-interop-db
+* https://github.com/NVIDIA/nvmesh-infra
+* https://github.com/NVIDIA/nvmesh-kernel
+* https://github.com/NVIDIA/nvmesh-management
+* https://github.com/NVIDIA/nvmesh-upgrader
+* https://github.com/Excelero/nvmesh-csi-driver
+
+The NVMesh Roadmap is published in the documentation repo
+
