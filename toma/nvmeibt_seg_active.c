@@ -131,12 +131,12 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	//
 	unlock_stale_locks_hash(seg_active);
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->longing_registrants_hash_by_handle) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, 1, 0, 0, 0);
+		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING, 0);
 	}
 	NVMEIB_HASH_TBL_FREE(83hhu2l, seg_active->longing_registrants_hash_by_handle);
 	//
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_handle) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, 0, 0, 0, 0);
+		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0);
 	}
 	NVMEIB_HASH_TBL_FREE(dujyq02, seg_active->active_registrants_hash_by_handle);
 	//
@@ -146,7 +146,7 @@ void nvmeibt_seg_active_free_mem_and_processes(struct nvmeibt_seg_active *seg_ac
 	NVMEIB_HASH_TBL_FREE(bhk49ol, seg_active->active_registrants_hash_by_lockid);
 	//
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_purified_lockid) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, 0, 1, 0, 0);
+		nvmeibt_register_terminate_reg_ctx(reg_ctx, 1, NVMEIBT_REGISTER_REGISTRANT_TYPE_STALE, 0);
 	}
 	NVMEIB_HASH_TBL_FREE(9ksl40d, seg_active->stale_registrants_hash_by_purified_lockid);
 	//
@@ -808,20 +808,20 @@ out:
 static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *stale_lock)
 {
 	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_registrant_ctx	*reg_ctx;
+	struct nvmeibt_registrant_ctx	*stale_reg_ctx;
 
 	NFIN;
 	// We get here after (inside) lock_stale_locks_hash(seg_active);
-	reg_ctx = stale_lock->reg_ctx;
-	seg_active = reg_ctx->seg_active;
+	stale_reg_ctx = stale_lock->reg_ctx;
+	seg_active = stale_reg_ctx->seg_active;
 	N_Tf(t_s1_tslh, "Deleting " STALE_BLKSET_FMT,
-		stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+		stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(stale_reg_ctx->reg_lock_id));
 	nvmeib_hash_delete_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, stale_lock->seg_blkset_no);
 	NNVMEIBT_BM_FREE(trace_1_seg_active_remove_stale_lock_from_seg_stale_locks_hash, stale_lock);
 	// is_processing_registrant_removal only between launch_existing_active_registrant_removal and its finalize
 	// During this time, stale_locks can be added/deleted, and an interim n_stale_locks==0 should not terminate_reg_ctx()
-	if (--(reg_ctx->n_stale_locks) == 0 && !nvmeibt_register_is_processing_registrant_removal(reg_ctx)) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 1, 0, 0);
+	if (--(stale_reg_ctx->n_stale_locks) == 0 && !nvmeibt_register_is_processing_registrant_removal(stale_reg_ctx)) {
+		nvmeibt_register_terminate_reg_ctx(stale_reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_STALE, 0);
 	}
 	NFOUT;
 }

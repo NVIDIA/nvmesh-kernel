@@ -1139,7 +1139,7 @@ static void remove_longing_registrant_on_seg(struct nvmeibt_seg_active *seg_acti
 	NFIN;
 	N_Tf(kiru834, "Remove the longing_registrant seg=@UUID_8 handle=@HANDLE",
 		nvmeibt_seg_active_UUID_8(seg_active), reg_ctx->client_messaging_handle);
-	nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 1, 0, 0, 0);
+	nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING, 0);
 	NFOUT;
 }
 
@@ -1503,8 +1503,8 @@ static int handle_data_integrity_issue_report(struct nvmeibt_register_msg *msg)
  *   - active_registrant (finalize) that is moved to stale (the object) whose reg_ctx->n_stale_locks > 0
  *   - stale_registrant that still has locks (reg_ctx->n_stale_locks > 0)
  */
-void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg_active, bool is_longing_registrant,
-										bool is_stale_registrant, bool is_longing_on_invalid_seg, bool is_move_from_active_reg_hash_to_stale_reg_hash)
+void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg_active,
+										enum NVMEIBT_REGISTER_REGISTRANT_TYPE reg_ctx_type, bool is_move_from_active_reg_hash_to_stale_reg_hash)
 {
 	struct nvmeibt_seg_active			*seg_active;
 	struct nvmeibt_registrant_ctx		*existing_active_registrant = 0;
@@ -1513,15 +1513,17 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 	NFIN;
 	NDUMP_REG_CTX(gkitu74, _Tf, reg_ctx);
 	seg_active = reg_ctx->seg_active;
-	existing_active_registrant = get_registrant_by_handle_from_active_hash(seg_active, reg_ctx);
 	//
-	if (is_longing_registrant) {
+	switch (reg_ctx_type) {
+	case NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING:
 		if (!is_deleting_seg_active) {
 			nvmeib_hash_delete_uint64_t(seg_active->longing_registrants_hash_by_handle, reg_ctx->client_messaging_handle);
 		}
-	} else if (is_longing_on_invalid_seg) {
+		break;
+	case NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING_ON_INVALID_SEG:
 		XDLIST_DEL(&(reg_ctx->longing_on_invalid_seg_link));
-	} else if (is_stale_registrant) {
+		break;
+	case NVMEIBT_REGISTER_REGISTRANT_TYPE_STALE:
 		if (reg_ctx->n_stale_locks > 0) { // If stale_registrant (might be that recently added) and the seg_active is alive then skip it, stale-recovery will retry
 			if (!is_deleting_seg_active) {
 				N_Tf(djur843, "Skipping. lockid=@T_LID seg=@UUID_8 still has stale_locks n_stale_locks=@INT",
@@ -1533,9 +1535,11 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 			nvmeibt_abort(ES_FATAL);
 		}
 		nvmeib_hash_delete_uint32_t(seg_active->stale_registrants_hash_by_purified_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
-	} else if (existing_active_registrant) {
+		break;
+	case NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE:
+		existing_active_registrant = get_registrant_by_handle_from_active_hash(seg_active, reg_ctx);
 		if (!nvmeibt_register_is_processing_registrant_removal(existing_active_registrant) && (existing_active_registrant != reg_ctx)) {
-			N_Ef(rcs8l30, "existing_active_registrant=@PTR != reg_ctx=@PTR is_stale_registrant=@BOOL", existing_active_registrant, reg_ctx, is_stale_registrant);
+			N_Ef(rcs8l30, "!nvmeibt_register_is_processing_registrant_removal. existing_active_registrant=@PTR != reg_ctx=@PTR ", existing_active_registrant, reg_ctx);
 			nvmeibt_abort(ES_FATAL);
 		}
 		registrant_stopped_being_active(seg_active, reg_ctx, 1);
@@ -1556,8 +1560,10 @@ void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, 
 				// Since it was never added as a stale_registrants, free it as if it is active
 			}
 		}
-	} else {
-		N_Wf(favewhw, "Unexpected 'else'");
+		break;
+	default:
+		N_Wf(favewhw, "Unexpected reg_ctx_type=@INT", reg_ctx_type);
+		break;
 	}
 	nvmeibt_client_reg_ctx_ref_removed(reg_ctx->client, reg_ctx);
 	NNVMEIBT_TOMA_FREE(vgbsauy, reg_ctx);
@@ -1570,13 +1576,13 @@ out:
 
 static void remove_disconnected_client_new_active_registrant_by_lockid(struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id reg_lock_id)
 {
-	struct nvmeibt_registrant_ctx	*reg_ctx;
+	struct nvmeibt_registrant_ctx	*active_reg_ctx;
 
 	NFIN;
 
-	reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_lock_id));
-	if (reg_ctx) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 0, 0, 0);	// The registrant never registrated (it is new)
+	active_reg_ctx = nvmeib_hash_search_uint32_t(seg_active->active_registrants_hash_by_lockid, nvmeib_lockid_purify(reg_lock_id));
+	if (active_reg_ctx) {
+		nvmeibt_register_terminate_reg_ctx(active_reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0); // The registrant never registrated (it is new)
 	} else {
 		N_Tf(trace_register_remove_client_active_registrant_by_lockid, "Did not find active registrant reg_lock_id=@C_LID", nvmeib_lockid_purify(reg_lock_id));
 	}
@@ -1593,7 +1599,7 @@ void nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_
 	    nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
 	}
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 0, 0, 0);
+		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0);
 	}
 	NFOUT;
 }
@@ -1656,7 +1662,7 @@ void remove_unsubscribed_specific_longing_registrant_on_invalid_seg(struct nvmei
 	// Delete longing registrant from the list on invalid seg.
 	N_Tf(ju87cwe, "Found longing registrant handle=@HANDLE seg=@UUID_8",
 		 longing_registrant->client_messaging_handle, nvmeib_uuid_first_4_bytes(&longing_registrant->seg_uuid));
-	nvmeibt_register_terminate_reg_ctx(longing_registrant, 0, 0, 0, 1, 0);
+	nvmeibt_register_terminate_reg_ctx(longing_registrant, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING_ON_INVALID_SEG, 0);
 }
 
 bool remove_longing_registrant_on_seg_by_ctx(struct nvmeibt_registrant_ctx *input_reg_ctx)
@@ -1704,7 +1710,7 @@ void nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longi
 			add_longing_registrant_on_seg(longing_registrant);
 			// Free the reg_ctx (when adding registrant as longing to segment new reg_ctx is allocated.
 			longing_registrant->seg_active = NULL;
-			nvmeibt_register_terminate_reg_ctx(longing_registrant, 0, 0, 0, 1, 0);
+			nvmeibt_register_terminate_reg_ctx(longing_registrant, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING_ON_INVALID_SEG, 0);
 		}
 	}
 	NFOUT;
@@ -1959,7 +1965,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 	struct registrant_disconnect_wq_entry		*entry;
 	struct nvmeibt_seg_active					*seg_active;
 	struct nvmeibt_disk_segment					*disk_segment;
-	struct nvmeibt_registrant_ctx				*reg_ctx;
+	struct nvmeibt_registrant_ctx				*active_reg_ctx;
 	struct nvmeibt_registrant_awaiting_lockid	*awaiting_registrant_wrapper;
 
 	NFIN;
@@ -1973,7 +1979,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 	seg_active = entry->seg_active;
 	disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
-	reg_ctx = entry->reg_ctx;
+	active_reg_ctx = entry->reg_ctx;
 
 	if (entry->n_owner_locks_converted_to_stale) {
 		N_Tf(vvnnh86, "seg=@UUID_8 marking stale rebuild required, n_owner_locks_converted_to_stale=@N_OWNER_LOCKS_CONVERTED_TO_STALE",
@@ -1983,14 +1989,14 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 	N_Tf(djiur85, "registrant_disconnect succeeded on seg=@UUID_8 n_owner_locks_converted_to_stale=@N_OWNER_LOCKS_CONVERTED_TO_STALE client handle=@HANDLE reg_lock_id=@C_LID n_awaited_lockids=@N_AWAITED_LOCKIDS",
 		nvmeibt_seg_active_UUID_8(seg_active),
 		entry->n_owner_locks_converted_to_stale,
-		reg_ctx->client_messaging_handle,
-		nvmeib_lockid_purify(reg_ctx->reg_lock_id),
+		active_reg_ctx->client_messaging_handle,
+		nvmeib_lockid_purify(active_reg_ctx->reg_lock_id),
 		nvmeibt_seg_active_n_awaited_lockids(seg_active));
 
-	awaited_lockid = nvmeib_hash_search_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+	awaited_lockid = nvmeib_hash_search_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(active_reg_ctx->reg_lock_id));
 	if (awaited_lockid) {
 		N_Tf(bvhht73, "client handle=@HANDLE reg_lock_id=@C_LID pending list size=@SIZE",
-			 reg_ctx->client_messaging_handle, nvmeib_lockid_purify(reg_ctx->reg_lock_id), XDLIST_N_ELEMNTS(&(awaited_lockid->awaiting_registrants)));
+			 active_reg_ctx->client_messaging_handle, nvmeib_lockid_purify(active_reg_ctx->reg_lock_id), XDLIST_N_ELEMNTS(&(awaited_lockid->awaiting_registrants)));
 
 		// Go over the list of all the recipients that are expected to know that this given lockid was dropped.
 		XDLIST_FOREACH_SAFE(awaiting_registrant_wrapper, &(awaited_lockid->awaiting_registrants)) {
@@ -1999,7 +2005,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 			// Create a response payload - containing the original lock_id that the registrant complained about. (with stale bits on)
 			struct nvmeibt_cleaned_stalock_info response_payload;
 			response_payload.lock_id = awaiting_registrant_wrapper->stale_lockid_provided_by_registrant.all;
-			search_stale_lock_hash_and_fill_response_cuuid(seg_active, &response_payload, reg_ctx->reg_lock_id);
+			search_stale_lock_hash_and_fill_response_cuuid(seg_active, &response_payload, active_reg_ctx->reg_lock_id);
 
 			N_Tf(ddhhuu5, "Sending NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED to handle=@HANDLE on seg=@UUID_8 lock_id=@T_LID",
 				 awaiting_reg_ctx->client_messaging_handle, nvmeibt_seg_active_UUID_8(seg_active), response_payload.lock_id);
@@ -2019,7 +2025,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 			// Free the wrapper struct as it is no longer needed.
 			NNVMEIBT_BM_FREE(trace_4_register_registrant_disconnect_finalize, awaiting_registrant_wrapper);
 		}
-		nvmeib_hash_delete_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+		nvmeib_hash_delete_uint32_t(seg_active->awaited_lockids_hash_by_lockid, nvmeib_lockid_purify(active_reg_ctx->reg_lock_id));
 		NNVMEIBT_BM_FREE(trace_5_register_registrant_disconnect_finalize, awaited_lockid);
 	}
 
@@ -2032,7 +2038,7 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 		TODO(Convert XDLIST awaited_lockid->awaiting_registrants to awaited_lockid->awaiting_registrants_hash_by_client_messaging_handle. Well, usually there are very few);
 		XDLIST_FOREACH_SAFE(awaiting_registrant_wrapper, &(awaited_lockid->awaiting_registrants)) {
 			struct nvmeibt_registrant_ctx *awaiting_reg_ctx = awaiting_registrant_wrapper->reg_ctx;
-			if (nvmeibt_register_is_same_registrant(awaiting_reg_ctx, reg_ctx)) {
+			if (nvmeibt_register_is_same_registrant(awaiting_reg_ctx, active_reg_ctx)) {
 				NDUMP_REG_CTX(oiujf87, _Tf, awaiting_reg_ctx);
 				// Remove this recipient from the list of those pending response - since the recipient itslef was just disconnected.
 				XDLIST_DEL(&awaiting_registrant_wrapper->awaiting_lockid_link);
@@ -2048,17 +2054,17 @@ static void registrant_disconnect_finalize(struct nvmeibt_wq_entry *wq_entry)
 		}
 	}
 
-	if (reg_ctx->is_client_waiting_for_ack) {
-		if (nvmeibt_register_send_msg_to_registrant(reg_ctx, NVMEIBT_CLIENT_MSG_TR_UNREGISTER_DISK_SEGMENT_ACK,
+	if (active_reg_ctx->is_client_waiting_for_ack) {
+		if (nvmeibt_register_send_msg_to_registrant(active_reg_ctx, NVMEIBT_CLIENT_MSG_TR_UNREGISTER_DISK_SEGMENT_ACK,
 													NVMEIBT_CLIENT_TR_REASON_NONE, 0, NULL) < 0) {
-			N_Tf(trace_zzz_12, "Fail to send unregister-ACK to (reg_lock_id=@C_LID)", nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+			N_Tf(trace_zzz_12, "Fail to send unregister-ACK to (reg_lock_id=@C_LID)", nvmeib_lockid_purify(active_reg_ctx->reg_lock_id));
 		}
 	}
 
 	if (nvmeibt_disk_segment_get_seg_active(disk_segment))
 		seg_active->last_registrant_disconnect_timespec = nvmeibt_global_get_cur_event_start_time();
-	set_is_processing_registrant_removal(reg_ctx, 0);
-	nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 0, 0, 1);   // The registrant was active, its stale-locks were converted. Need to convert to stale
+	set_is_processing_registrant_removal(active_reg_ctx, 0);
+	nvmeibt_register_terminate_reg_ctx(active_reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 1);   // The registrant was active, its stale-locks were converted. Need to convert to stale
 
 	NFOUT;
 }
@@ -2085,7 +2091,7 @@ static enum REGISTRANT_DISCONNECT_LAUNCH_STATUS launch_active_registrant_removal
 		N_Tf(jju8771, "seg=@UUID_8 locks_table_mmap=@PTR local_disk_is_being_deleted=@BOOL", nvmeibt_seg_active_UUID_8(seg_active),
 			 nvmeibt_seg_active_get_locks_tbl_ptr(seg_active), nvmeibt_local_disk_is_being_deleted(its_local_disk));
 		rv = REGISTRANT_DISCONNECT_LAUNCH_SKIPPED;
-		nvmeibt_register_terminate_reg_ctx(active_reg_ctx, 0, 0, 0, 0, 0);	// We will probably be is_deleting_seg_active, but not right away
+		nvmeibt_register_terminate_reg_ctx(active_reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0);	// We will probably be is_deleting_seg_active, but not right away
 		goto free_resources;
 	}
 
@@ -2125,19 +2131,19 @@ out:
 	return rv;
 }
 
-static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmeibt_registrant_ctx *reg_ctx)
+static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmeibt_registrant_ctx *active_reg_ctx)
 {
 	enum REGISTRANT_DISCONNECT_LAUNCH_STATUS	rvu;
 	enum UNREGISTER_RV				rv = UNREGISTER_RV_IN_WORK;
-	struct nvmeibt_seg_active		*seg_active = reg_ctx->seg_active;
+	struct nvmeibt_seg_active		*seg_active = active_reg_ctx->seg_active;
 
 	NFIN;
-	N_Tf(rcsko3b, "handle=@HANDLE reg_lock_id=@C_LID", reg_ctx->client_messaging_handle, nvmeib_lockid_purify(reg_ctx->reg_lock_id));
-	if (!XDLIST_NULL(&(reg_ctx->registrant_on_timeout_link))) {
-		upd_registrant_sync_timeout(reg_ctx, REG_TIMEOUT_REASON_DEL_ME);	// Not waiting for RT_UNREG
+	N_Tf(rcsko3b, "handle=@HANDLE reg_lock_id=@C_LID", active_reg_ctx->client_messaging_handle, nvmeib_lockid_purify(active_reg_ctx->reg_lock_id));
+	if (!XDLIST_NULL(&(active_reg_ctx->registrant_on_timeout_link))) {
+		upd_registrant_sync_timeout(active_reg_ctx, REG_TIMEOUT_REASON_DEL_ME);	// Not waiting for RT_UNREG
 	}
 	if (!nvmeibt_praid_is_jbod(nvmeibt_seg_active_get_praid(seg_active))) {
-		rvu = launch_active_registrant_removal(reg_ctx);
+		rvu = launch_active_registrant_removal(active_reg_ctx);
 
 		if (rvu == REGISTRANT_DISCONNECT_LAUNCH_FAILED) {
 			rv = UNREGISTER_RV_FAILED;
@@ -2148,23 +2154,23 @@ static enum UNREGISTER_RV launch_existing_active_registrant_removal(struct nvmei
 		}
 
 		if (rv == UNREGISTER_RV_IN_WORK) {
-			set_is_processing_registrant_removal(reg_ctx, 1);
+			set_is_processing_registrant_removal(active_reg_ctx, 1);
 		}
 	}
 	else {
 		//non-praid
 		TODO(Why not cut the networking);
-		if (reg_ctx->is_client_waiting_for_ack) {
-			if (nvmeibt_register_send_msg_to_registrant(reg_ctx, NVMEIBT_CLIENT_MSG_TR_UNREGISTER_DISK_SEGMENT_ACK,
+		if (active_reg_ctx->is_client_waiting_for_ack) {
+			if (nvmeibt_register_send_msg_to_registrant(active_reg_ctx, NVMEIBT_CLIENT_MSG_TR_UNREGISTER_DISK_SEGMENT_ACK,
 														NVMEIBT_CLIENT_TR_REASON_NONE, 0, NULL) < 0) {
-				N_Tf(trace_zzz_11, "Fail to send unregister-ACK to (reg_lock_id=@C_LID)", nvmeib_lockid_purify(reg_ctx->reg_lock_id));
+				N_Tf(trace_zzz_11, "Fail to send unregister-ACK to (reg_lock_id=@C_LID)", nvmeib_lockid_purify(active_reg_ctx->reg_lock_id));
 			}
 		}
-		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, 0, 0, 0, 0);	// JBOD should not have stale-locks
+		nvmeibt_register_terminate_reg_ctx(active_reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0);	// JBOD should not have stale-locks
 		rv = UNREGISTER_RV_OK;
 	}
 	if (rv == UNREGISTER_RV_IN_WORK) {
-		getnstimeofday_boot(&(reg_ctx->reg_disconnect_time));
+		getnstimeofday_boot(&(active_reg_ctx->reg_disconnect_time));
 	}
 	NFOUT;
 	return rv;
@@ -2422,7 +2428,7 @@ out:
 	return existing_reg_ctx;
 }
 
-static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ctx, struct nvmeibt_registrant_ctx *existing_reg_ctx)
+static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ctx, struct nvmeibt_registrant_ctx *existing_active_reg_ctx)
 {
 	int								rv = 0;
 	struct nvmeibt_seg_active		*seg_active = incoming_reg_ctx->seg_active;
@@ -2460,24 +2466,24 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		goto toma_not_ready;
 	}
 
-	if (nvmeibt_register_is_processing_registrant_removal(existing_reg_ctx)) {
+	if (nvmeibt_register_is_processing_registrant_removal(existing_active_reg_ctx)) {
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS;
 		goto toma_not_ready;
 	}
-	if (!existing_reg_ctx && lock_id_cache_is_lockid_taken(seg_active, incoming_reg_ctx->reg_lock_id)) {
+	if (!existing_active_reg_ctx && lock_id_cache_is_lockid_taken(seg_active, incoming_reg_ctx->reg_lock_id)) {
 		// No active registrant, but its journal entries were not fully cleaned yet
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_LOCKID_ALREADY_TAKEN;
 		goto nack;
 	}
-	if (existing_reg_ctx && !nvmeibt_register_is_same_registrant(existing_reg_ctx, incoming_reg_ctx)) {
+	if (existing_active_reg_ctx && !nvmeibt_register_is_same_registrant(existing_active_reg_ctx, incoming_reg_ctx)) {
 		if (incoming_reg_ctx->rt_never_reged_on_seg) {
-			existing_reg_ctx->rt_never_reged_on_seg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
-			nvmeibt_register_terminate_reg_ctx(existing_reg_ctx, 0, 0, 0, 0, 0);	// Client wise, never properly registered, no I/O --> no stale_locks
+			existing_active_reg_ctx->rt_never_reged_on_seg = 1;	// Not used, transfer the safeness to the existing_reg_ctx
+			nvmeibt_register_terminate_reg_ctx(existing_active_reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0);	// Client wise, never properly registered, no I/O --> no stale_locks
 		} else {
 			N_Tf(t_fg_tomareg, "We have a mess, there is an existing registrant, but with a different handle or lock id: "
 				"@NODE,@HANDLE,reg_@LOCKID  &  @NODE,@HANDLE,reg_@LOCKID",
-				existing_reg_ctx->registrant_node_id.str, existing_reg_ctx->client_messaging_handle,
-				nvmeib_lockid_purify(existing_reg_ctx->reg_lock_id),
+				existing_active_reg_ctx->registrant_node_id.str, existing_active_reg_ctx->client_messaging_handle,
+				nvmeib_lockid_purify(existing_active_reg_ctx->reg_lock_id),
 				incoming_reg_ctx->registrant_node_id.str, incoming_reg_ctx->client_messaging_handle,
 				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id));
 			// We have a mess, possibly on the client side too
@@ -2491,12 +2497,12 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 toma_not_ready:
 	nvmeibt_register_send_toma_not_ready(incoming_reg_ctx, refusal_reason, NULL);
 	if (refusal_reason == NVMEIBT_CLIENT_TR_REASON_LOCKID_MESS) {
-		if (!nvmeibt_register_is_processing_registrant_removal(existing_reg_ctx) && !is_force_cmd_called(existing_reg_ctx)) {
+		if (!nvmeibt_register_is_processing_registrant_removal(existing_active_reg_ctx) && !is_force_cmd_called(existing_active_reg_ctx)) {
 			N_Wf(jiut853, "Surprise REGISTER from a registered registrant lockid=@T_LID(@LOCKID) handle=@HANDLE(@HANDLE)",
-				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id), nvmeib_lockid_purify(existing_reg_ctx->reg_lock_id),
-				incoming_reg_ctx->client_messaging_handle, existing_reg_ctx->client_messaging_handle);
+				nvmeib_lockid_purify(incoming_reg_ctx->reg_lock_id), nvmeib_lockid_purify(existing_active_reg_ctx->reg_lock_id),
+				incoming_reg_ctx->client_messaging_handle, existing_active_reg_ctx->client_messaging_handle);
 			brute_force_disconnect_registrant_client(incoming_reg_ctx, 0);
-			brute_force_disconnect_registrant_client(existing_reg_ctx, 0);
+			brute_force_disconnect_registrant_client(existing_active_reg_ctx, 0);
 		}
 	}
 	goto out;
@@ -2539,21 +2545,21 @@ static int handle_register_registrant_on_disk_segment(struct nvmeibt_registrant_
 	int									rv = 0;
 	BOOL								is_send_OK;
 	struct nvmeibt_registrant_ctx		*new_ctx;
-	struct nvmeibt_registrant_ctx		*existing_reg_ctx;
+	struct nvmeibt_registrant_ctx		*existing_active_reg_ctx;
 	struct nvmeibt_seg_active           *seg_active = incoming_reg_ctx->seg_active;
 
 	NFIN;
-	existing_reg_ctx = get_active_registrant_by_client_messaging_handle(seg_active, incoming_reg_ctx);
+	existing_active_reg_ctx = get_active_registrant_by_client_messaging_handle(seg_active, incoming_reg_ctx);
 	// Longing is for clients that hold their registration attempt. Remove it, and possibly add again during processing
 	remove_longing_registrant_on_seg_by_ctx(incoming_reg_ctx);
 
 	nvmeibt_register_handle_new_reservation_mode(seg_active, incoming_reg_ctx->reservation_mode_version);
 
-	if (!is_valid_register_req(incoming_reg_ctx, existing_reg_ctx)) {
+	if (!is_valid_register_req(incoming_reg_ctx, existing_active_reg_ctx)) {
 		goto out;
 	}
 
-	new_ctx = register_on_disk_segment(incoming_reg_ctx, existing_reg_ctx);
+	new_ctx = register_on_disk_segment(incoming_reg_ctx, existing_active_reg_ctx);
 	if (!new_ctx) {
 		N_Tf(trace_register_handle_register_registrant_on_disk_segment, "Failed to register");
 		goto out;
@@ -2563,7 +2569,7 @@ static int handle_register_registrant_on_disk_segment(struct nvmeibt_registrant_
 														 NVMEIBT_CLIENT_MSG_TR_REGISTER_DISK_SEGMENT_ACK, NVMEIBT_CLIENT_TR_REASON_NONE,
 														 0, NULL);
 	if (is_send_OK < 0) {
-		if (!existing_reg_ctx) {
+		if (!existing_active_reg_ctx) {
 			// The client is not aware of this registration. Remove it.
 			// It solves the problem of TR_REGISTER that is handled after the registrant_disconnect. Failing to send ACK
 			remove_disconnected_client_new_active_registrant_by_lockid(seg_active, new_ctx->reg_lock_id);

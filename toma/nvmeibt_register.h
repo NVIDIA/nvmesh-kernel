@@ -31,6 +31,14 @@ enum UNREGISTER_RV {
 	UNREGISTER_RV_SKIPPED = 4,
 };
 
+enum NVMEIBT_REGISTER_REGISTRANT_TYPE {
+	NVMEIBT_REGISTER_REGISTRANT_TYPE_UNKNOWN = 0,
+	NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE = 1,
+	NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING = 2,
+	NVMEIBT_REGISTER_REGISTRANT_TYPE_STALE = 3,
+	NVMEIBT_REGISTER_REGISTRANT_TYPE_LONGING_ON_INVALID_SEG = 4,
+};
+
 struct nvmeibt_seg_active;
 struct nvmeibt_topology;
 struct nvmeibt_registrant_ctx;
@@ -180,8 +188,8 @@ void nvmeibt_register_open_disk_eligible_seg_actives_for_use(struct nvmeibt_loca
 struct nvmeibt_registrant_ctx *nvmeibt_register_get_out_reg_ctx_by_in_msg(struct nvmeibt_register_msg *msg);
 void nvmeibt_register_MR_open_seg_active_for_registrations_if_eligable(struct nvmeibt_seg_active *seg_active);
 int nvmeibt_register_timeout_occurred(void);
-void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg_active, bool is_longing_registrant,
-										bool is_stale_registrant, bool is_longing_on_invalid_seg, bool is_move_from_active_reg_hash_to_stale_reg_hash);
+void nvmeibt_register_terminate_reg_ctx(struct nvmeibt_registrant_ctx *reg_ctx, bool is_deleting_seg_active,
+										enum NVMEIBT_REGISTER_REGISTRANT_TYPE reg_ctx_type, bool is_move_from_active_reg_hash_to_stale_reg_hash);
 void nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(struct nvmeibt_seg_active *seg_active);
 void nvmeibt_register_remove_all_recovery_active_registrants_of_node(struct nvmeibt_urn_uuid *src_node_id);
 int nvmeibt_register_launch_seg_metadata_ctrl_save(struct nvmeibt_seg_active *seg_active);
