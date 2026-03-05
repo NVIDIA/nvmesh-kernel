@@ -2609,7 +2609,7 @@ struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd,
 #elif KS_IB_REG_USER_MR_HAS_DMAH
 struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd, u64 start, u64 len,
 			      u64 rnic_va, int rights,
-			      struct ib_dmah *dmah, struct ib_udata *udata)
+			      struct ib_dmah *dmah __attribute__((unused)), struct ib_udata *udata)
 {
 #else
 struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd, u64 start, u64 len,
