@@ -520,11 +520,11 @@ struct nvme_op_rsrc
 	struct nvmeibs_nvme_req nvme_req;
 
 	/* Pages for Data + MD */
-	void *virt;
 	unsigned n_data_pgs;
 	unsigned n_md_pgs;
 	unsigned n_pages;
 	struct page **pages;
+	struct scatterlist *sgl;
 
 	/* Physical addresses of pages (Used for PRPL) */
 	dma_addr_t *nvme_phys_virt;
@@ -1437,10 +1437,8 @@ static void free_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd
 			}
 		}
 
-		if (rsrc->virt) {
-			vunmap(rsrc->virt);
-			rsrc->virt = NULL;
-		}
+		kfree(rsrc->sgl);
+		rsrc->sgl = NULL;
 
 		if (rsrc->pages) {
 			for (j = 0; j < rsrc->n_pages; j++) {
@@ -1453,6 +1451,12 @@ static void free_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd
 	}
 }
 
+static inline void *nvme_op_rsrc_kaddr(struct nvme_op_rsrc *rsrc, size_t offset)
+{
+	return page_address(rsrc->pages[offset >> PAGE_SHIFT]) +
+		offset_in_page(offset);
+}
+
 static void reset_nvme_op_rsrc_len_md(struct nvme_op_rsrc *rsrc)
 {
 	struct nvmeibs_disk_info *di = rsrc->serjio_pd->di;
@@ -1463,7 +1467,7 @@ static void reset_nvme_op_rsrc_len_md(struct nvme_op_rsrc *rsrc)
 		rsrc->nvme_req.mtdt_size = 0;
 	}
 	else {
-		rsrc->nvme_req.metadata = rsrc->virt + (rsrc->n_data_pgs << PAGE_SHIFT);
+		rsrc->nvme_req.metadata = page_address(rsrc->pages[rsrc->n_data_pgs]);
 		rsrc->nvme_req.mtdt_size = NVMEIB_D2MD_LEN(rsrc->nvme_req.data_len, nvmeibs_disk_info_get_block_shift(di), nvmeibs_disk_info_get_md_size(di));
 	}
 }
@@ -1489,19 +1493,20 @@ static void set_nvme_op_rsrc_md(struct nvme_op_rsrc *rsrc, const void *md, size_
 		size_t copy_sz;
 		size_t sw_md_sz = NVMEIB_D2MD_LEN(NVMEIBC_SECTOR_SIZE,
 						nvmeibs_disk_info_get_block_shift(di), nvmeibs_disk_info_get_md_size(di));
-		void *md_rsrc;
+		size_t sgl_offset;
 		BUG_ON(rsrc->nvme_req.use_hw_blocks); //Not currently supported
-		for (md_rsrc = rsrc->virt + NVMEIBC_SECTOR_SIZE; md_sz > 0;
-			 md_rsrc += NVMEIBC_SECTOR_SIZE + sw_md_sz) {
+		for (sgl_offset = NVMEIBC_SECTOR_SIZE; md_sz > 0;
+			 sgl_offset += NVMEIBC_SECTOR_SIZE + sw_md_sz) {
 			copy_sz = min(sw_md_sz, md_sz);
-			memcpy(md_rsrc, md, copy_sz);
+			sg_pcopy_from_buffer(rsrc->sgl, rsrc->n_pages,
+					     (void *)md, copy_sz, sgl_offset);
 			md += copy_sz;
 			md_sz -= copy_sz;
 		}
 		rsrc->nvme_req.metadata = NULL;
 		rsrc->nvme_req.mtdt_size = 0;
 	} else {
-		rsrc->nvme_req.metadata = rsrc->virt + (rsrc->n_data_pgs << PAGE_SHIFT);
+		rsrc->nvme_req.metadata = page_address(rsrc->pages[rsrc->n_data_pgs]);
 		rsrc->nvme_req.mtdt_size = md_sz;
 		memcpy(rsrc->nvme_req.metadata, md, md_sz);
 		memset(rsrc->nvme_req.metadata + md_sz, 0, hw_md_sz - md_sz);
@@ -1511,19 +1516,20 @@ static void set_nvme_op_rsrc_md(struct nvme_op_rsrc *rsrc, const void *md, size_
 static void get_nvme_op_rsrc_md(struct nvme_op_rsrc *rsrc, void *md, size_t md_sz)
 {
 	struct nvmeibs_disk_info *di = rsrc->serjio_pd->di;
-	void *md_rsrc;
 	size_t sw_md_sz = NVMEIB_D2MD_LEN(NVMEIBC_SECTOR_SIZE, nvmeibs_disk_info_get_block_shift(di), nvmeibs_disk_info_get_md_size(di));
 	size_t copy_sz;
 	if (nvmeibs_disk_info_has_mtdt_extd(di)) {
-		for (md_rsrc = rsrc->virt + NVMEIBC_SECTOR_SIZE; md_sz > 0;
-			 md_rsrc += NVMEIBC_SECTOR_SIZE + sw_md_sz) {
+		size_t sgl_offset;
+		for (sgl_offset = NVMEIBC_SECTOR_SIZE; md_sz > 0;
+			 sgl_offset += NVMEIBC_SECTOR_SIZE + sw_md_sz) {
 			copy_sz = min(sw_md_sz, md_sz);
-			memcpy(md, md_rsrc, copy_sz);
+			sg_pcopy_to_buffer(rsrc->sgl, rsrc->n_pages,
+					   md, copy_sz, sgl_offset);
 			md += copy_sz;
 			md_sz -= copy_sz;
 		}
 	} else {
-		md_rsrc = rsrc->virt + (rsrc->n_data_pgs << PAGE_SHIFT);
+		void *md_rsrc = page_address(rsrc->pages[rsrc->n_data_pgs]);
 		memcpy(md, md_rsrc, md_sz);
 	}
 }
@@ -1598,11 +1604,18 @@ static int init_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 				goto free_pages;
 			}
 		}
-		rsrc->virt = vmap(rsrc->pages, rsrc->n_pages, VM_MAP, PAGE_KERNEL);
-		if (!rsrc->virt) {
+		rsrc->sgl = kcalloc(rsrc->n_pages, sizeof(struct scatterlist),
+				    GFP_KERNEL);
+		if (!rsrc->sgl) {
+			_NEs(error_serjio_init_nvme_op_rsrc_sgl, serjio_pd,
+			     "Could not allocate scatterlist");
 			rv = -ENOMEM;
 			goto free_pages;
 		}
+		sg_init_table(rsrc->sgl, rsrc->n_pages);
+		for (j = 0; j < rsrc->n_pages; j++)
+			sg_set_page(&rsrc->sgl[j], rsrc->pages[j],
+				    PAGE_SIZE, 0);
 
 		rsrc->nvme_phys_size = sizeof(*rsrc->nvme_phys_virt) * rsrc->n_pages;
 		rsrc->nvme_phys_virt = dma_alloc_coherent(
@@ -3613,7 +3626,7 @@ static int write_jrange_to_serjio_db_from_cb(
 	op_rsrc->range_idx = range_idx;
 
 	/* Fill the DB Entry */
-	db_entry = (void *)op_rsrc->virt;
+	db_entry = page_address(op_rsrc->pages[0]);
 	memset(db_entry, 0, SERJIO_DB_ENTS_TO_BYTES(serjio_pd->di, 1));
 	db_entry->hdr.magic = SERJIO_DB_JRANGE_ENTRY_MAGIC;
 	db_entry->hdr.version_major = SERJIO_DB_CURR_VERSION_MAJOR;
@@ -3759,8 +3772,17 @@ static inline int zero_journal_entry_from_cb_vargs(struct nvme_op_rsrc *op_rsrc,
 	int rv = 0;
 
 	/* Set journal data and meta-data */
-	memset(op_rsrc->virt, 0, op_rsrc->n_pages << PAGE_SHIFT);
-	vsnprintf((char *)op_rsrc->virt, PAGE_SIZE, data_str_fmt, data_str_args);
+	{
+		unsigned pg;
+		for (pg = 0; pg < op_rsrc->n_pages; pg++)
+			memset(page_address(op_rsrc->pages[pg]), 0, PAGE_SIZE);
+	}
+	rv = vsnprintf(page_address(op_rsrc->pages[0]), PAGE_SIZE,
+		  data_str_fmt, data_str_args);
+
+	SERJIO_BUG_ON(rv > PAGE_SIZE,
+		err_serjio_zero_journal_entry_from_cb_vargs_data_str_fmt_len,
+		serjio_pd, "Zero Journal Entry Data string too long (@RV)", rv);
 
 	/* Set meta-data to jmdc unused value */
 	md_sz = nvmeib_shared_set_jentry_md_unused(jmd_unused, 1 << op_rsrc->binje_shift);
@@ -4131,48 +4153,58 @@ out:
 
 #define CMP_N_BYTES 8
 
+static bool nvme_op_rsrc_range_filled(struct nvme_op_rsrc *rsrc,
+				      size_t offset, size_t len,
+				      const u8 *pattern)
+{
+	while (len > 0) {
+		size_t pg_off = offset_in_page(offset);
+		size_t chunk = min(len, (size_t)(PAGE_SIZE - pg_off));
+		u8 *addr = (u8 *)page_address(rsrc->pages[offset >> PAGE_SHIFT])
+			   + pg_off;
+		u8 *end = addr + chunk;
+
+		for (; addr < end; addr += CMP_N_BYTES) {
+			if (memcmp(addr, pattern, CMP_N_BYTES) != 0)
+				return false;
+		}
+		offset += chunk;
+		len -= chunk;
+	}
+	return true;
+}
+
 static bool is_nvme_block_zeroed(struct nvme_op_rsrc *op_rsrc, bool check_md)
 {
 	struct nvmeibs_serjio_disk_private_data *serjio_pd = op_rsrc->serjio_pd;
 	struct nvmeibs_disk_info *di = serjio_pd->di;
-	size_t md_sz;
-	bool is_zeroed = true;
+	size_t md_sz, md_offset;
 	u8 data_zero_val[CMP_N_BYTES];
 	u8 md_zero_val[CMP_N_BYTES];
-	u32 *cmp_ptr, *end_ptr;
 
 	memset(data_zero_val, DISK_DATA_INIT_BYTE, CMP_N_BYTES);
 	memset(md_zero_val, DISK_MD_INIT_BYTE, CMP_N_BYTES);
 
 	/* data */
 	BUG_ON(op_rsrc->nvme_req.data_len % CMP_N_BYTES != 0);
-	end_ptr = op_rsrc->virt + op_rsrc->nvme_req.data_len;
-	for (cmp_ptr = op_rsrc->virt; cmp_ptr < end_ptr; cmp_ptr += CMP_N_BYTES) {
-		if (memcmp(cmp_ptr, data_zero_val, CMP_N_BYTES) != 0) {
-			is_zeroed = false;
-			goto out;
-		}
-	}
+	if (!nvme_op_rsrc_range_filled(op_rsrc, 0, op_rsrc->nvme_req.data_len,
+				       data_zero_val))
+		return false;
 
 	if (!check_md)
-		goto out;
+		return true;
 
 	/* md */
-	md_sz = NVMEIB_D2MD_LEN(op_rsrc->nvme_req.data_len, nvmeibs_disk_info_get_block_shift(di), nvmeibs_disk_info_get_md_size(di));
+	md_sz = NVMEIB_D2MD_LEN(op_rsrc->nvme_req.data_len,
+				nvmeibs_disk_info_get_block_shift(di),
+				nvmeibs_disk_info_get_md_size(di));
 	BUG_ON(md_sz % CMP_N_BYTES != 0);
-	cmp_ptr = nvmeibs_disk_info_has_mtdt_extd(di) ?
-		op_rsrc->virt + op_rsrc->nvme_req.data_len :
-		op_rsrc->virt + (op_rsrc->n_data_pgs << PAGE_SHIFT);
-	end_ptr = (void *)cmp_ptr + md_sz;
-	for (; cmp_ptr < end_ptr; cmp_ptr += CMP_N_BYTES) {
-		if (memcmp(cmp_ptr, md_zero_val, CMP_N_BYTES) != 0) {
-			is_zeroed = false;
-			goto out;
-		}
-	}
+	md_offset = nvmeibs_disk_info_has_mtdt_extd(di) ?
+		op_rsrc->nvme_req.data_len :
+		(size_t)(op_rsrc->n_data_pgs << PAGE_SHIFT);
 
-out:
-	return is_zeroed;
+	return nvme_op_rsrc_range_filled(op_rsrc, md_offset, md_sz,
+					 md_zero_val);
 }
 
 #undef CMP_N_BYTES
@@ -4184,7 +4216,7 @@ static void read_serjio_db_cb(void *arg, int status, u32 result)
 	struct jranges_allocation_table *jranges_alloc_tbl = &serjio_pd->jranges_alloc_tbl;
 	struct jrange_entry *jrange;
 	unsigned range_idx = op_rsrc->range_idx;
-	struct serjio_db_jrange_entry *db_entry = op_rsrc->virt;
+	struct serjio_db_jrange_entry *db_entry = page_address(op_rsrc->pages[0]);
 	unsigned long flags;
 	u32 orig_crc32 = be32_to_cpu(db_entry->hdr.crc32);
 	u16 db_entry_len_8b = be16_to_cpu(db_entry->hdr.len_8b);
@@ -4424,7 +4456,6 @@ static void read_gpt_hdr_cb(void *arg, int status, u32 result)
 {
 	struct nvme_op_rsrc *op_rsrc = arg;
 	struct nvmeibs_serjio_disk_private_data *serjio_pd = op_rsrc->serjio_pd;
-	struct gpt_header *rd_gpt_hdr = op_rsrc->virt;
 	struct gpt_header *out_gpt_hdr = op_rsrc->param;
 
 	(void)result;
@@ -4437,7 +4468,8 @@ static void read_gpt_hdr_cb(void *arg, int status, u32 result)
 		goto return_op_rsrc;
 	}
 
-	*out_gpt_hdr = *rd_gpt_hdr;
+	sg_copy_to_buffer(op_rsrc->sgl, op_rsrc->n_pages,
+			  out_gpt_hdr, sizeof(*out_gpt_hdr));
 
 return_op_rsrc:
 	if (op_rsrc->comp)
@@ -4503,7 +4535,6 @@ static void read_gpt_ents_block_cb(void *arg, int status, u32 result)
 {
 	struct nvme_op_rsrc *op_rsrc = arg;
 	struct nvmeibs_serjio_disk_private_data *serjio_pd = op_rsrc->serjio_pd;
-	void *src_gpt_ents_block = op_rsrc->virt;
 	struct read_gpt_ents_cb_param *cb_param = op_rsrc->param;
 	unsigned gpt_ents_per_lba;
 	unsigned gpt_ents_this_lba;
@@ -4519,8 +4550,9 @@ static void read_gpt_ents_block_cb(void *arg, int status, u32 result)
 	gpt_ents_per_lba = DISK_LBAS_TO_BYTES(serjio_pd->di, 1) /
 		le32_to_cpu(cb_param->gpt_hdr->sizeof_partition_entry);
 		gpt_ents_this_lba = min(gpt_ents_per_lba, cb_param->n_gpt_ents - op_rsrc->range_idx * gpt_ents_per_lba);
-	memcpy(cb_param->gpt_ents + op_rsrc->range_idx * gpt_ents_per_lba,
-		   src_gpt_ents_block, gpt_ents_this_lba * sizeof(*cb_param->gpt_ents));
+	sg_copy_to_buffer(op_rsrc->sgl, op_rsrc->n_pages,
+			  cb_param->gpt_ents + op_rsrc->range_idx * gpt_ents_per_lba,
+			  gpt_ents_this_lba * sizeof(*cb_param->gpt_ents));
 
 return_op_rsrc:
 	if (op_rsrc->comp_ctr && op_rsrc->comp) {
