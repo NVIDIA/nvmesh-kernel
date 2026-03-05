@@ -137,7 +137,7 @@ void nvmeibc_volume_disks_stats_clear(const struct nvmeibc_volume *volume, const
 
 void nvmeibc_volume_trace_stats(const struct nvmeibc_volume *volume)
 {
-	nvmeibc_block_trace_stats(volume->block_dev);
+	nvmeibc_block_trace_stats(volume->block_dev, true /* diff_only */);
 }
 
 static bool handle_disk_reappear(struct nvmeibc_disk_id *disk_id,
@@ -1104,6 +1104,7 @@ _func_start:
 		/* Close blkdev for new IO requests. */
 		nvmeibc_assert_on_main_wq(volume->p);
 		if (volume->block_dev) {
+			nvmeibc_block_trace_stats(volume->block_dev, false /* diff_only */);
 			nvmeibc_del_blkdev(volume->block_dev);
 		}
 		if (number_of_linked_detaches) {

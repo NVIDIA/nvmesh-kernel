@@ -198,6 +198,7 @@ ssize_t nvmeib_io_stats_to_json(struct nvmeib_io_stats *ds,
 #define IO_STAT_COUNTERS_TARG(c) IO_STAT_COUNTERS_BASIC_TARG(c), (c)->total_io_exec, (c)->total_e2e_exec
 
 void nvmeib_io_stats_trace(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx);
+void nvmeib_io_stats_trace_ext(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx, bool diff_only);
 
 struct nvmeib_txt;
 void nvmeib_iostats_sum_to_string(struct nvmeib_io_stats *stats, const ulong up_time, const u64 io_prob,

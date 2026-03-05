@@ -765,6 +765,7 @@ struct io_stats_trace_cpu_params {
 	struct nvmeib_io_stats *ds;
 	void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx);
 	void *trace_fn_ctx;
+	bool diff_only;
 };
 
 DECLARE_IO_VERBS_ON_EACH_CPU_FN(io_stats_cpu_trace, arg)
@@ -784,20 +785,30 @@ DECLARE_IO_VERBS_ON_EACH_CPU_FN(io_stats_cpu_trace, arg)
 		struct nvmeib_io_counters c = { 0 };
 		struct nvmeib_io_counters *c_traced = IO_COUNTERS_PER_CPU_TRACED_VERB(cpu_traced_ctrs, ds->n_percpu_traced_ctrs, ds->verbs_bitmask, verb);
 		nvmeib_io_verbs_readc_all_bins(cpu_ctrs, ds->n_percpu_ctrs, ds->verbs_bitmask, verb, &c);
-		if (__stats_update_traced(c_traced, &c))
+		if (__stats_update_traced(c_traced, &c) || !params->diff_only)
 			params->trace_fn(verb, c_traced, params->trace_fn_ctx);
 	}
 }
 
-void nvmeib_io_stats_trace(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx)
+static void __nvmeib_io_stats_trace(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx, bool diff_only)
 {
-	struct io_stats_trace_cpu_params params = { .ds = ds, .trace_fn = trace_fn, .trace_fn_ctx = trace_fn_ctx };
+	struct io_stats_trace_cpu_params params = { .ds = ds, .trace_fn = trace_fn, .trace_fn_ctx = trace_fn_ctx, .diff_only = diff_only };
 
 	io_verbs_on_each_cpu_check();
 	io_verbs_on_each_cpu_wait(ds, io_stats_cpu_trace, &params);
 }
+
+void nvmeib_io_stats_trace(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx)
+{
+	__nvmeib_io_stats_trace(ds, trace_fn, trace_fn_ctx, false /* diff_only */);
+}
 EXPORT_SYMBOL(nvmeib_io_stats_trace);
 
+void nvmeib_io_stats_trace_ext(struct nvmeib_io_stats *ds, void (*trace_fn)(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx), void *trace_fn_ctx, bool diff_only)
+{
+	__nvmeib_io_stats_trace(ds, trace_fn, trace_fn_ctx, diff_only);
+}
+EXPORT_SYMBOL(nvmeib_io_stats_trace_ext);
 
 static inline u64 _diff_sec(u64 exec_time_msec, u64 io_prob_msec)
 {

@@ -4854,7 +4854,7 @@ static void disk_trace_iostats_on_periodic(struct nvmeibc_disk *disk)
 		goto out;
 
 	/* do incremental trace of iostats  */
-	nvmeib_io_stats_trace(disk->stats, disk_trace_verb_counters_fn, disk);
+	nvmeib_io_stats_trace_ext(disk->stats, disk_trace_verb_counters_fn, disk, true /* diff_only */);
 
 	nvmeibc_trace_stats_scheduling_set_next(&disk->trace_stats, now_jiffies);
 

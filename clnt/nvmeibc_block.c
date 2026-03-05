@@ -1536,30 +1536,30 @@ static void __block_disk_trace_verb_counters_fn(enum nvmeib_io_stat_verbs verb, 
 }
 #endif
 
-static void __block_trace_per_disk_stats(const struct nvmeibc_block_device *dev)
+static void __block_trace_per_disk_stats(const struct nvmeibc_block_device *dev, bool diff_only)
 {
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS) && (NVMEIBC_ENABLE_PER_VOLUME_STATS == 1)
 	struct nvmeibc_disk_id *d;
 	list_for_each_entry(d, &dev->volume->info.disks, link) {
-		nvmeib_io_stats_trace(d->v_disk_stats, __block_disk_trace_verb_counters_fn, d);
+		nvmeib_io_stats_trace_ext(d->v_disk_stats, __block_disk_trace_verb_counters_fn, d, diff_only);
 	}
 #else
 	(void)dev;
 #endif
 }
 
-void nvmeibc_block_trace_stats(const struct nvmeibc_block_device *dev)
+void nvmeibc_block_trace_stats(const struct nvmeibc_block_device *dev, bool diff_only)
 {
 	struct nvmeibc_os_api *os = dev->os;
 
 	if ((!os->is_io_api_disabled) && (os->stats)) {
-		nvmeib_io_stats_trace(os->stats, __block_trace_verb_counters_fn, (void *)dev);
+		nvmeib_io_stats_trace_ext(os->stats, __block_trace_verb_counters_fn, (void *)dev, diff_only);
 	}
 
 	//must remove the const in order to let io_stats update trace flag.
-	dp_io_stats_periodic_trace(nvmeibc_volume_short_id(dev), (struct dp_io_stats *)&dev->dp.io_stats);
+	dp_io_stats_trace(nvmeibc_volume_short_id(dev), (struct dp_io_stats *)&dev->dp.io_stats, diff_only /* changed_only */);
 
-	__block_trace_per_disk_stats(dev);
+	__block_trace_per_disk_stats(dev, diff_only);
 }
 
 int nvmeibc_block_get_cpu_masks(const struct nvmeibc_block_device *dev, struct nvmeib_cpu_mask_info *mask_infos, int max_masks)

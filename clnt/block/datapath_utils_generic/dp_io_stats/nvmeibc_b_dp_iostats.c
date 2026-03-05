@@ -272,14 +272,14 @@ static bool __is_counter_in_use(const char *name)
 	return (name && name[0] && name[0] != '?'); // Check if the name is valid and not a placeholder
 }
 
-void dp_io_stats_periodic_trace(u32 blk_dev_id, struct dp_io_stats *t)
+void dp_io_stats_trace(u32 blk_dev_id, struct dp_io_stats *t, bool changed_only)
 {
 	unsigned long flags;
 	struct dp_io_stats_cntrs *n = &t->n;
 	int indx;
 	spin_lock_irqsave(&t->lock, flags);
 	for (indx = 0; indx <= DP_IO_STATS_OTHER; indx++) {
-		if (n->countrs[indx] & COUNTER_CHANGED_MASK) { // If LSB is not set, then no change since last read
+		if (!changed_only || n->countrs[indx] & COUNTER_CHANGED_MASK) { // If LSB is not set, then no change since last read
 			u64 cntr = n->countrs[indx] >> COUNTER_TO_VAL_SHIFT; // Get the value without the LSB
 			NVMEIB_LOG_METRICS("blockid=@UINT @STR=@BLK_FLOW_COUNTER", _I, /*Default Scope*/, dp_info_stats,
 					   blk_dev_id, __dp_io_stats_names(indx), cntr);
@@ -291,11 +291,11 @@ void dp_io_stats_periodic_trace(u32 blk_dev_id, struct dp_io_stats *t)
 	for (indx = 0; indx < NVMEIB_BLOCK_IO_OP_MAX_SYNC_TYPES; indx++) {
 		enum nvmeib_block_io_op sync_type = SYNC_IO_OP(indx);
 		const char *counter_name = nvmeib_block_io_op_str(sync_type);
-		if (__is_counter_in_use(counter_name) && (n->sync_counters[indx] & COUNTER_CHANGED_MASK)) { // If LSB is not set, then no change since last read
+		if (__is_counter_in_use(counter_name) && (!changed_only || n->sync_counters[indx] & COUNTER_CHANGED_MASK)) { // If LSB is not set, then no change since last read
 			u64 cntr = n->sync_counters[indx] >> COUNTER_TO_VAL_SHIFT; // Get the value without LSB
 			NVMEIB_LOG_METRICS("blockid=@UINT @STR counter=@BLK_FLOW_COUNTER", _I, /*Default Scope*/,
 					   dp_info_sync_stats, blk_dev_id, nvmeib_block_io_op_str(sync_type), cntr);
-			n->sync_counters[indx] &= ~1; // Clear the LSB after logging
+			n->sync_counters[indx] &= ~COUNTER_CHANGED_MASK; // Clear the LSB after logging
 		}
 	}
 	spin_unlock_irqrestore(&t->lock, flags);

@@ -101,7 +101,7 @@ void dp_io_stats_clear_counter(struct dp_io_stats *t, enum dp_iostats_names name
 u64 dp_io_stats_get_sync_counter(const struct dp_io_stats *t, enum nvmeib_block_io_op sync_type);
 													//
 /* output all traces of a volume to metrics channel*/
-void dp_io_stats_periodic_trace(u32 blk_dev_id, struct dp_io_stats *t);													//
+void dp_io_stats_trace(u32 blk_dev_id, struct dp_io_stats *t, bool changed_only);
 
 void dp_io_stats_add(struct dp_io_stats *t, u64 *counter, int count);
 
