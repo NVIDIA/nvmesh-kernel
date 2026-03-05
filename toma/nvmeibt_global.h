@@ -65,10 +65,6 @@ struct nvmeibt_topology {
 	BOOL								prev_is_conf_corrupted;
 	enum raft_pause_mode_enm			raft_pause_mode;
 	struct timespec						startup_timespec;
-	struct timespec						cur_event_start_time;	// Avoid some (system) calls to clock_gettime().
-																//	Anyhow, nothing else happened since the start of the cur-event
-																//  Not clear if better to use the event's start-time or the actual "now"
-																//  since the processing-time can generate artifacts
 	struct timespec						last_send_appendentries_timestamp;
 	struct timespec						last_raft_distribution_timestamp;
 	struct timespec						last_progress_report_timestamp;
@@ -320,9 +316,10 @@ static inline struct nvmeibt_mm *nvmeibt_global_get_mm(void)
 	return nvmeibt_global_get_global()->mm;
 }
 
+extern struct timespec nvmeibt_cur_event_start_time; // Defined in nvmeibt_global.c
 static inline struct timespec nvmeibt_global_get_cur_event_start_time(void)
 {
-	return nvmeibt_global_get_global()->cur_event_start_time;
+	return nvmeibt_cur_event_start_time;
 }
 
 static inline struct nvmeibt_seg_active *nvmeibt_global_get_seg_active_through_seg_by_uuid(const union nvmeib_uuid *uuid)

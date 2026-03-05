@@ -2529,7 +2529,7 @@ static void raft_leader_check_validity_of_majority(void)
 	NFIN;
 	time_since_last_majority_nsec = timespec_diff_ns(nvmeibt_global_get_cur_event_start_time(), my_raft_global.last_time_leader_had_a_majority);
 	if (time_since_last_majority_nsec > raft_max_time_leader_survives_without_majority_nsec) {
-		N_Tf(nu390sl, "my_raft_global.last_time_leader_had_a_majority={@LLD.@TIMESPEC_NS}, cur_topo->cur_event_start_time={@LLD.@TIMESPEC_NS}, @LLD>@LLD",
+		N_Tf(nu390sl, "my_raft_global.last_time_leader_had_a_majority={@LLD.@TIMESPEC_NS}, cur_event_start_time={@LLD.@TIMESPEC_NS}, @LLD>@LLD",
 			my_raft_global.last_time_leader_had_a_majority.tv_sec, my_raft_global.last_time_leader_had_a_majority.tv_nsec,
 			nvmeibt_global_get_cur_event_start_time().tv_sec, nvmeibt_global_get_cur_event_start_time().tv_nsec,
 			time_since_last_majority_nsec, raft_max_time_leader_survives_without_majority_nsec);

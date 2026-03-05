@@ -28,6 +28,8 @@ struct nvmeibt_topology *nvmeibt_global_get_global(void)
 
 struct nvmeibt_global_adaptive_timeouts_ctx		my_nvmeibt_global_adaptive_timeouts;
 
+struct timespec nvmeibt_cur_event_start_time; // Declared in nvmeibt_global.h
+
 void nvmeibt_global_init(void)
 {
 	struct timespec						tmp_timespec;

@@ -2550,7 +2550,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		n_fds_returned = epoll_wait(epoll_fd, epoll_events, g_fds_in_use.max_fd_no + 1, epoll_timeout_ms);
 		select_errno = errno;
 
-		getnstimeofday_boot(&(nvmeibt_global_get_global()->cur_event_start_time));
+		getnstimeofday_boot(&nvmeibt_cur_event_start_time);
 		pselect_time_ms = timespec_to_msec(nvmeibt_global_get_cur_event_start_time());
 		pselect_time_ms -= now_millisec;
 		did_pselect_allow_time_to_receive_append_entries = (pselect_time_ms > 1);
