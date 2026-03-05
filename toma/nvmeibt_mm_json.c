@@ -219,6 +219,7 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 															 !strcmp(s, "Striped RAID-0") ? 0 :
 															 !strcmp(s, "Concatenated") ? 0 :
 															 !strcmp(s, "Striped & Mirrored RAID-10") ? 1 :
+															 !strcmp(s, "Striped Erasure Coding") ? 6 :
 															 !strcmp(s, "Erasure Coding") ? 6 :
 															 !strcmp(s, "ELECT") ? 6 : -1));
 			JSON_WARN_and_FIX(vtshwis, "RAIDLevel", vol->raidType,  (typeof(vol->raidType))-1, -1, "key=@STR val=@STR", kv->key, s);
