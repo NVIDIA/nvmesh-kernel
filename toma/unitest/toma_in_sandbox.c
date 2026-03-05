@@ -621,7 +621,7 @@ ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset) {
 	return pwrite(s->fd, buf, count, offset);	// Use real OS fd for passthrough
 }
 
-static void __temp_wait_sleep(void) { nanosleep(&(struct timespec){0, 10*1000*1000}, NULL); /* 100ms */ }
+static void __temp_wait_sleep(void) { nanosleep(&(struct timespec){0, 10*1000*1000}, NULL); /* 10ms */ }
 
 int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict writefds, fd_set *__restrict exceptfds, struct timeval *__restrict timeout) {
 	const struct TSB_server_comm_wakeup_mock *w = &sys->os.TSB_km_sock_pair;
