@@ -145,7 +145,7 @@ struct netlink_io_context {
 	struct netlink_context_io_data nl_io_data;
 	unsigned int max_request_size;
 	unsigned int pblk_size;
-} __attribute__((packed));
+};
 
 struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmeibt_local_disk_config *ldc);
 int nvmeibt_netlink_do_io_sync(struct netlink_io_context *nl_ctx);
