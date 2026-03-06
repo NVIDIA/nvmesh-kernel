@@ -132,17 +132,13 @@ struct local_disk_info;
 struct nvmeibt_local_disk_config;
 struct nvmeibt_Str;
 
-struct netlink_context_io_data {
-	pthread_mutex_t guard_mutex;
-	pthread_cond_t 	completion_signal;
-	int 			rv;
-};
-
 struct netlink_io_context {
 	struct km_comm_msg_hdr nl_msg;
 	struct nvmeib_io_to_disk nl_msg_payload;
 	pthread_condattr_t attr;
-	struct netlink_context_io_data nl_io_data;
+	pthread_mutex_t guard_mutex;
+	pthread_cond_t 	completion_signal;
+	int 			rv;
 	unsigned int max_request_size;
 	unsigned int pblk_size;
 };
