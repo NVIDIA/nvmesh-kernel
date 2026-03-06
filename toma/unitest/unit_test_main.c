@@ -84,6 +84,20 @@ static void all_test_scenarios(void) {
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for V_R1 pRaid report");
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 
+	N_SANDBOX(__AUTOID__, "unit test thread: sending deleteVolume V_R1");
+	mgmt_sim_send_delete_volume_r1();
+
+	/* Zeroing is skipped for FIRST_USE_EVER segments (never activated) — segments go directly to X_DONE */
+
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for V_R1 praid deprecated in report");
+	WAIT_UNTIL(mgmt_sim_v_r1_praid_deprecated());
+
+	N_SANDBOX(__AUTOID__, "unit test thread: sending deleteVolumeCompleted V_R1");
+	mgmt_sim_send_delete_volume_completed_r1();
+
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for reportTarget after deleteVolumeCompleted (gc)");
+	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+
 	N_SANDBOX(__AUTOID__, "unit test thread: test scenario complete");
 	scheduler.is_unit_test_done = true;
 	yield();

@@ -47,10 +47,15 @@ bool mgmt_sim_both_disks_formatted_ok(void);
 bool mgmt_sim_consume_got_report_target(void);
 bool mgmt_sim_v_r1_praid_reported(void);
 bool mgmt_sim_both_disks_zeroing_done(void);
+bool mgmt_sim_v_r1_seg_zeroing_seen(void);
+bool mgmt_sim_v_r1_praid_deprecated(void);
+bool mgmt_sim_v_r1_praid_absent_from_report(void);
 
 /* Message-sender functions for fiber-based test scenario */
 void mgmt_sim_send_format_drives(void);
 void mgmt_sim_send_add_volume_remote1(void);
 void mgmt_sim_send_add_volume_r1(void);
+void mgmt_sim_send_delete_volume_r1(void);
+void mgmt_sim_send_delete_volume_completed_r1(void);
 
 #endif /* TOMA_UNITEST_MGMT_SIM_H */

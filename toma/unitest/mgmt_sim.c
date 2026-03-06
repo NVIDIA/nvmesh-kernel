@@ -12,6 +12,7 @@
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
 /* Volume scenario constants */
+#define V_R1_VOL_UUID            "aaa00100-0000-0000-0000-000000000001"
 #define V_R1_PRAID_UUID          "aaa001a0-0000-0000-0000-000000000001"
 #define DISK_UUID_LOCAL_002      "d0020000-0000-0000-0000-000000000000"
 #define DISK_UUID_LOCAL_003      "d0030000-0000-0000-0000-000000000000"
@@ -79,6 +80,22 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 		"]}]}]}}");
 }
 
+static int make_msg_delete_volume_r1(char *buf, size_t capacity) {
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"deleteVolume\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
+		",\"name\":\"V_R1\",\"version\":1}}");
+}
+
+static int make_msg_delete_volume_completed_r1(char *buf, size_t capacity) {
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"deleteVolumeCompleted\""
+		",\"messageTypeVersion\":1"
+		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
+		",\"name\":\"V_R1\"}}");
+}
+
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
@@ -136,6 +153,10 @@ struct mgmt_sim_state {
 	struct mgmt_sim_disk_status disk_003;   /* NVMD_SN_003.1 */
 	bool v_r1_praid_reported;               /* updatePRaidReport contained V_R1's pRaid UUID */
 	bool got_report_target;                 /* reportTarget received since last FSM transition */
+	bool v_r1_seg_zeroing_progress_seen;    /* segmentZeroingProgress received for V_R1 praid */
+	bool v_r1_praid_deprecated;             /* updatePRaidReport shows all V_R1 segs "deprecated" */
+	bool v_r1_delete_completed_sent;        /* deleteVolumeCompleted was sent */
+	bool v_r1_praid_absent_from_report;     /* praid report received without V_R1 (garbage collected) */
 };
 
 void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
@@ -328,6 +349,12 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 		 	// {"originType":"TOMA","messageType":"updatePRaidReport","messageTypeVersion":1,"hostname":"nvme39.nvidia.com","tomaToken":2,"messageSequence":85,"leaderToken":1,"payload":{"pRaidsUpdate":[{"uuid":"b60b04b1-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60b04b0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60b2bc0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]},{"uuid":"b60ab692-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60ab691-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60adda0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]}]}}
 		} else if (strcmp(message_type, "segmentZeroingProgress") == 0) {
 			// {"originType":"TOMA","messageType":"segmentZeroingProgress","messageTypeVersion":1,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":335,"leaderToken":null,"payload":{"praidVersion":"258.0","segmentUUID":"98e46d20-ea22-11f0-bad8-af65dd8e6ead","pRaidUUID":"98e44612-ea22-11f0-bad8-af65dd8e6ead","nZeroedBlks":262144}}
+			struct mm_json_elem *payload = json_get_dict_value(root, "payload");
+			const char *praid_uuid = json_get_dict_str(payload, "pRaidUUID", NULL);
+			if (praid_uuid && strcmp(praid_uuid, V_R1_PRAID_UUID) == 0) {
+				g_mgmt_sim->v_r1_seg_zeroing_progress_seen = true;
+				N_IMf(msim_szp, "segmentZeroingProgress: V_R1 praid matched");
+			}
 	}
 	nvmeibt_mm_json_free_kv_tree(root);
 }
@@ -417,6 +444,7 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 	struct mm_json_elem *praids_update = json_get_dict_value(payload, "pRaidsUpdate");
+	bool v_r1_found = false;
 	if (!praids_update || praids_update->type != JSON_E_ARRAY)
 		return;
 	for (int i = 0; i < praids_update->array.len; i++) {
@@ -426,9 +454,35 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 			continue;
 		uuid = json_get_dict_str(entry, "uuid", NULL);
 		if (uuid && strcmp(uuid, V_R1_PRAID_UUID) == 0) {
+			struct mm_json_elem *segments;
 			N_IMf(msim_praid, "updatePRaidReport: matched V_R1 pRaid UUID");
 			g_mgmt_sim->v_r1_praid_reported = true;
+			v_r1_found = true;
+
+			/* Check if all segments have status "deprecated" */
+			segments = json_get_dict_value(entry, "segments");
+			if (segments && segments->type == JSON_E_ARRAY && segments->array.len > 0) {
+				bool all_deprecated = true;
+				int j;
+				for (j = 0; j < segments->array.len; j++) {
+					struct mm_json_elem *seg = segments->array.elements[j];
+					const char *status = json_get_dict_str(seg, "status", "");
+					if (strcmp(status, "deprecated") != 0) {
+						all_deprecated = false;
+						break;
+					}
+				}
+				if (all_deprecated) {
+					g_mgmt_sim->v_r1_praid_deprecated = true;
+					N_IMf(msim_praid_dep, "updatePRaidReport: V_R1 all segments deprecated");
+				}
+			}
 		}
+	}
+	/* After deleteVolumeCompleted: if V_R1 praid is absent, it was garbage collected */
+	if (g_mgmt_sim->v_r1_delete_completed_sent && !v_r1_found) {
+		g_mgmt_sim->v_r1_praid_absent_from_report = true;
+		N_IMf(msim_praid_gc, "updatePRaidReport: V_R1 praid absent (garbage collected)");
 	}
 }
 
@@ -475,6 +529,10 @@ bool mgmt_sim_both_disks_zeroing_done(void) {
 	return m->disk_002.zeroing_progress_seen && m->disk_003.zeroing_progress_seen;
 }
 
+bool mgmt_sim_v_r1_seg_zeroing_seen(void)        { return g_mgmt_sim->v_r1_seg_zeroing_progress_seen; }
+bool mgmt_sim_v_r1_praid_deprecated(void)         { return g_mgmt_sim->v_r1_praid_deprecated; }
+bool mgmt_sim_v_r1_praid_absent_from_report(void) { return g_mgmt_sim->v_r1_praid_absent_from_report; }
+
 
 /******************************************************************************/
 /* Message-sender functions for fiber-based test scenario                      */
@@ -504,4 +562,21 @@ void mgmt_sim_send_add_volume_r1(void) {
 	int len = make_msg_add_volume_r1(buf, 2048);
 	N_IMf(msim_fsm5, "sending addVolume V_R1");
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+}
+
+void mgmt_sim_send_delete_volume_r1(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(512);
+	int len = make_msg_delete_volume_r1(buf, 512);
+	N_IMf(msim_del1, "sending deleteVolume V_R1");
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+}
+
+void mgmt_sim_send_delete_volume_completed_r1(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(512);
+	int len = make_msg_delete_volume_completed_r1(buf, 512);
+	N_IMf(msim_del3, "sending deleteVolumeCompleted V_R1");
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+	m->v_r1_delete_completed_sent = true;
 }
