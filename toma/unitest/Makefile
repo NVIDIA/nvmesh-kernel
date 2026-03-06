@@ -101,6 +101,7 @@ CXXFLAGS = -std=gnu++20 $(filter-out -std=% -Wstrict-prototypes -Wno-old-style-d
 # Simulator files
 SOURCES :=
 SOURCES += mgmt_sim.c kafka/sandbox_kafka.c sandbox_nvme.c toma_in_sandbox.c server/sandbox_nvmeibs_toma.c
+SOURCES += toma_test_framework_smoke.c
 SOURCES += $(SSDA)/utils/nvmeib_jdr/nvmeib_txt.c
 SOURCES += unit_test_main.c
 
@@ -149,6 +150,7 @@ $(TDIR)/clnt/nvmeibt_client.c \
 $(TDIR)/local/ram/nvmeibt_ds_blkset_entries.c \
 $(TDIR)/utils/gpt_util.c \
 $(TDIR)/utils/gpt_util_self_test.c \
+$(TDIR)/utils/toma_test_framework.c \
 
 SOURCES += \
 $(TDIR)/interfaces/log/nvmeibt_binary_tracing.c \

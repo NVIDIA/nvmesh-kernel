@@ -2685,6 +2685,9 @@ exit:
 }
 
 extern int gpt_util_main(int argc, char *argv[]);
+#if defined(TOMA_SIMULATOR_SANDBOX)
+extern int test_framework_smoke_main(int argc, char *argv[]);
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 
 static int run_dummy_empty(int argc, char *argv[])
 {
@@ -2699,6 +2702,9 @@ struct {
 } toma_subprogs[] = {
 		{ TOMA_THREAD_NAME, run },
 		{ "gpt_util", gpt_util_main },
+#if defined(TOMA_SIMULATOR_SANDBOX)
+		{ "test_framework", test_framework_smoke_main },
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 		{ "dummy", run_dummy_empty },
 };
 
