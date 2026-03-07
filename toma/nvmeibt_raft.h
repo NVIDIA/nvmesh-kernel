@@ -323,5 +323,16 @@ void nvmeibt_raft_follower_upd_effective_raft_heartbeat_timeout_and_factor(void)
 void nvmeibt_raft_calc_timeouts_based_on_IIRs(void);
 void nvmeibt_raft_reset_leader_calculated_IIRs(void);
 
+#if defined(TOMA_SIMULATOR_SANDBOX)
+//
+// Test hook for topo_merge_test: call merge logic without exposing static function.
+// Returns size of resulting data, or -1 on error.
+//
+int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+		const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+		const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+		char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr);
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
+
 #endif // #ifndef NVMEIBT_RAFT
 

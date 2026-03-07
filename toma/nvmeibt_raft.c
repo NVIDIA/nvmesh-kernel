@@ -878,6 +878,17 @@ out:
 	return total_size;
 }
 
+#if defined(TOMA_SIMULATOR_SANDBOX)
+int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+		const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+		const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+		char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
+{
+	return persist_and_wire_buf_calculate_and_merge_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+			dst_data_ptr, old_data_ptr, upd_data_ptr);
+}
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
+
 // returns a newly allocated struct where the new-upd takes presidence (whenever it carries a value)
 // Always returns a ptr to a valid usable struct (possibly with no data)
 // The old buf is freed / reused
