@@ -286,7 +286,58 @@ void nvmesh_metric_bytes_histogram_clear(struct nvmesh_metric_bytes_histogram* h
 	nvmesh_metric_histogram_clear(hist->bins, ARRAY_SIZE(hist->bins));
 }
 
-static inline 
+enum {
+	NVMESH_METRIC_HIGHRES_HISTOGRAM_SHIFT = 7,  /* 128-tick unit */
+	NVMESH_METRIC_HIGHRES_HISTOGRAM_BINS  = 28  /* covers ~2s+ at CPUs up to 5GHz */
+};
+
+/*
+ * High-resolution time histogram using raw CPU ticks (e.g. TSC on x86).
+ * Bin X accumulates operations with latency in [2^(X + SHIFT), 2^(X + SHIFT + 1)) ticks.
+ * Tick-to-nanosecond conversion is deferred to read time (divide by tsc_khz / 1e6).
+ * Additionally tracks the exact maximum latency for precise p100 reporting.
+ */
+struct nvmesh_metric_highres_histogram {
+	uint64_t bins[NVMESH_METRIC_HIGHRES_HISTOGRAM_BINS];
+	uint64_t max;  /* exact max latency in raw TSC ticks for precise p100 calculation */
+};
+
+static inline
+struct nvmesh_metric_highres_histogram nvmesh_metric_highres_histogram_create(void)
+{
+	return (struct nvmesh_metric_highres_histogram){.bins = {0}, .max = 0};
+}
+
+static inline XDS_NONNULL(1)
+size_t nvmesh_metric_highres_histogram_update(struct nvmesh_metric_highres_histogram *self, uint64_t ticks)
+{
+	size_t const idx = nvmesh_metric_get_bin_index(ticks, NVMESH_METRIC_HIGHRES_HISTOGRAM_SHIFT, ARRAY_SIZE(self->bins));
+	self->bins[idx] += 1;
+	if (ticks > self->max) {
+		self->max = ticks;
+	}
+	return idx;
+}
+
+static inline XDS_NONNULL(1,2)
+void nvmesh_metric_highres_histogram_merge(
+	struct nvmesh_metric_highres_histogram *dst,
+	struct nvmesh_metric_highres_histogram const *src)
+{
+	nvmesh_metric_merge_histograms(dst->bins, src->bins, ARRAY_SIZE(dst->bins));
+	if (src->max > dst->max) {
+		dst->max = src->max;
+	}
+}
+
+static inline XDS_NONNULL(1)
+void nvmesh_metric_highres_histogram_clear(struct nvmesh_metric_highres_histogram *self)
+{
+	nvmesh_metric_histogram_clear(self->bins, ARRAY_SIZE(self->bins));
+	self->max = 0;
+}
+
+static inline
 struct nvmesh_metric_bytes_histogram nvmesh_metric_meta_bytes_histogram_create(void) {
 	struct nvmesh_metric_bytes_histogram hist = nvmesh_metric_bytes_histogram_create();
 	uint64_t idx;
@@ -386,7 +437,9 @@ static inline char const * nvmesh_metric_get_iosize_bin_name(size_t idx)
 		nvmesh_metric_iosize_histogram_create12,																\
 	__builtin_choose_expr(__builtin_types_compatible_p(metric_type, struct nvmesh_metric_iosize_histogram9),	\
 		nvmesh_metric_iosize_histogram_create9,																	\
-	(void)0 ))))))) ()
+	__builtin_choose_expr(__builtin_types_compatible_p(metric_type, struct nvmesh_metric_highres_histogram),	\
+		nvmesh_metric_highres_histogram_create,																\
+	(void)0 )))))))) ()
 //  --------^^^^ number of ) is equal to amount of __builtin_choose_expr
 
 #define nvmesh_metric_create_args(metric_type, ...)															\
@@ -409,7 +462,9 @@ static inline char const * nvmesh_metric_get_iosize_bin_name(size_t idx)
 		nvmesh_metric_iosize_histogram_update12,																	\
 	__builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_iosize_histogram9*),	\
 		nvmesh_metric_iosize_histogram_update9,																		\
-	(void)0 ))))))) ((metric), (value))
+	__builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_highres_histogram*),	\
+		nvmesh_metric_highres_histogram_update,																	\
+	(void)0 )))))))) ((metric), (value))
 
 #define nvmesh_metric_update(metric, value) nvmesh_metric_update_ptr(&(metric), value)
 
@@ -430,7 +485,9 @@ static inline char const * nvmesh_metric_get_iosize_bin_name(size_t idx)
 		nvmesh_metric_iosize_histogram_merge9,																				\
 	__builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric_dst), struct nvmesh_metric_latency_histogram),		\
 		nvmesh_metric_latency_histogram_merge,																				\
-	(void)0 )))))))) ((metric_dst), (metric_src))
+	__builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric_dst), struct nvmesh_metric_highres_histogram*),	\
+		nvmesh_metric_highres_histogram_merge,																			\
+	(void)0 ))))))))) ((metric_dst), (metric_src))
 
 //metrics registry will store a copy of name and labels within the registry
 struct nvmesh_metric_id {
@@ -481,6 +538,11 @@ struct nvmesh_metrics_closure
 									const char* name,
 									struct nvmesh_metric_iosize_histogram9 const * const,
 									struct nvmesh_metric_id);
+
+	void (*visit_highres_histogram)(struct nvmesh_metrics_closure*,
+									const char* name,
+									struct nvmesh_metric_highres_histogram const * const,
+									struct nvmesh_metric_id);
 };
 
 #define nvmesh_metric_visit_ptr(closure, name, metric, id) \
@@ -498,7 +560,9 @@ struct nvmesh_metrics_closure
         (closure)->visit_iosize_histogram12, \
     __builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_iosize_histogram9*), \
         (closure)->visit_iosize_histogram9, \
-    (void)0 ))))))) ((closure), (name), (metric), (id))
+    __builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_highres_histogram*), \
+        (closure)->visit_highres_histogram, \
+    (void)0 )))))))) ((closure), (name), (metric), (id))
 
 #define nvmesh_metric_visit(closure, name, metric, id) nvmesh_metric_visit_ptr(&(closure), name, &(metric), id)
 
@@ -517,7 +581,9 @@ struct nvmesh_metrics_closure
 	nvmesh_metric_iosize_histogram_clear9,									   \
 	__builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_latency_histogram),   \
         nvmesh_metric_latency_histogram_clear,                                                   \
-        (void) 0 ))))))) ((metric))
+    __builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_highres_histogram*), \
+        nvmesh_metric_highres_histogram_clear,                                                \
+        (void) 0 )))))))) ((metric))
 
 #define nvmesh_metric_clear(metric) nvmesh_metric_clear_ptr(&(metric))
 

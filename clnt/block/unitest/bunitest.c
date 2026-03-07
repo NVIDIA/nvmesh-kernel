@@ -33,6 +33,7 @@
 #include "nvmeibs_memmgr_metrics.h"
 #include "nvmeibc_error_tags.h"
 #include "memmgr_metrics_tests.h"
+#include "metrics_test.h"
 #include "error_tags_tests.h"
 #include "nvmeib_scatterlist_iter_test.h"
 #include "nvmeibc_management_capi_parse_conf_test.h"
@@ -7184,6 +7185,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 		return 0;
 	}
 
+	test_metrics();
 	test_memmgr_metrics();
 	test_error_tags();
 	nvmeib_scatterlist_iter_tests();

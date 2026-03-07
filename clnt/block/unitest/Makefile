@@ -136,6 +136,7 @@ LIBS  = -ldl -lpthread -luuid # Libraries to link into executable (with -l): pth
 SOURCES  = tests_conf.c
 SOURCES += bunitest.c kr_incs.c nvmeibc_simu_disk.c ib_incs.c kr_sim_svc.c nvmeib_common_all.c nvmesh_sim.c di_tracker.c
 SOURCES += memmgr_metrics_tests.c
+SOURCES += metrics_test.c
 SOURCES += error_tags_tests.c
 SOURCES += io_pet_traces_controller.c
 SOURCES += ./clnt/nvmeibc_cli_scripts_simu.c ./clnt/nvmeibc_user_space_simu.c

@@ -1,6 +1,7 @@
 #include "nvmeib_jdr.h"
 #include "nvmeib_metrics.h"
 #include "nvmeib_metrics_jdr.h"
+#include "compat/kr_incs_time_rdtsc.h"
 
 static void XDS_NONNULL(1,2)
 jdr_write_passport(struct jdr* writer,
@@ -124,6 +125,23 @@ jdr_write_iosize_histogram9(struct nvmesh_metrics_closure* base,
 	jdr_write_histogram(base, name, "iosize_histogram9", metric->bins, ARRAY_SIZE(metric->bins), id, meta);
 }
 
+static void XDS_NONNULL(1,3)
+jdr_write_highres_histogram(struct nvmesh_metrics_closure* base,
+			       char const* name,
+			       struct nvmesh_metric_highres_histogram const * const metric,
+			       struct nvmesh_metric_id const id)
+{
+	static char const * const meta = "metrics.meta.highres";
+	__auto_type writer = ((struct nvmeib_jdr_write_closure*)(base))->writer;
+
+	jdr_object_scope(writer, name);
+		jdr_write_passport(writer, "highres_histogram", id);
+		jdr_write_var(writer, meta, meta);
+		jdr_write_fundamental_array(writer, "values", metric->bins, ARRAY_SIZE(metric->bins));
+		jdr_write_var(writer, max_ticks, metric->max);
+		jdr_write_var(writer, tsc_khz, (uint64_t)nvmeib_public_tsc_khz());
+}
+
 struct nvmeib_jdr_write_closure nvmeib_jdr_write_closure_create(struct jdr *writer)
 {
 	struct nvmeib_jdr_write_closure jdr_write_closure = {
@@ -135,7 +153,8 @@ struct nvmeib_jdr_write_closure nvmeib_jdr_write_closure_create(struct jdr *writ
 			.visit_latency_histogram = jdr_write_latency_histogram,
 			.visit_bytes_histogram = jdr_write_bytes_histogram,
 			.visit_iosize_histogram12 = jdr_write_iosize_histogram12,
-			.visit_iosize_histogram9 = jdr_write_iosize_histogram9
+			.visit_iosize_histogram9 = jdr_write_iosize_histogram9,
+			.visit_highres_histogram = jdr_write_highres_histogram,
 		},
 		.writer = writer
 	};
@@ -220,6 +239,7 @@ ssize_t nvmeib_jdr_serialize_meta_metrics(void *dummy, char *buffer, size_t len)
 	{
 		jdr_array_scope(&jdr_inst, "all_meta_metrics");
 		nvmesh_metric_encode_histogram_meta(&jdr_inst, "bytes_histogram", NVMESH_METRIC_BYTES_HISTOGRAM_SHIFT, NVMESH_METRIC_BYTES_HISTOGRAM_BINS);
+		nvmesh_metric_encode_histogram_meta(&jdr_inst, "highres_histogram", NVMESH_METRIC_HIGHRES_HISTOGRAM_SHIFT, NVMESH_METRIC_HIGHRES_HISTOGRAM_BINS);
 	}
 
 	result = jdr_finalize(&jdr_inst); /* the resulted json resides in the user-buffer */
