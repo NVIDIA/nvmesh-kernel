@@ -28,6 +28,7 @@ nvmeib_common-y := \
 	nvmeib_json.o \
 	nvmeib_metrics_jdr.o \
 	nvmeib_memmgr_metrics.o \
+	nvmeib_wq_metrics.o \
 	nvmeib_error_tags.o \
 	nvmeib_scatterlist_iter.o \
 	nvmeib_completion_noise.o \
