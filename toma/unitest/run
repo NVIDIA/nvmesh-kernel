@@ -57,7 +57,7 @@ function T_SANDBOX_gpt_util_self_unit_test() {
 	local disks_csv_file="_root/proc/nvmeibs/disks.csv";
 	echo_title "Creating ${disks_csv_file}";
 	echo -e "id,blocks,hw_blocks,block_size,max_request_size,seq,nsid,dev_name,metadata,status,vendor,model,native_serial\nNVMD_SN_002.1,10240,10240,4096,32,1,1,/dev/nvme1001n1,0,Ok,5122,NVMD_NN_002,NVMD_SN_002\nNVMD_SN_003.1,10240,10240,4096,32,2,1,/dev/nvme1002n1,8,Ok,5123,NVMD_NN_003,NVMD_SN_003" > ${disks_csv_file};
-	./${EXE_NAME} gpt_util -T;
+	./${EXE_NAME} gpt_util -T ${@};
 	local test_rv=$?;
 	rm ${disks_csv_file};
 	[ ${test_rv} -eq 0 ] && echo_green "SUCCESS!\n\n" || { echo_red "FAILED - status=$?" && exit 1; }
@@ -105,13 +105,13 @@ function T_SANDBOX_toma_persist_json_test() {
 
 function T_SANDBOX_test_framework() {
 	__build_if_needed;
-	./${EXE_NAME} test_framework;
+	./${EXE_NAME} test_framework ${@};
 	__abort_ci_on_failure;
 }
 
 function T_SANDBOX_topo_merge_test() {
 	__build_if_needed;
-	./${EXE_NAME} topo_merge_test;
+	./${EXE_NAME} topo_merge_test ${@};
 	__abort_ci_on_failure;
 }
 
@@ -121,12 +121,6 @@ function T_SANDBOX_main_self_unit_test() {
 	./${EXE_NAME};
 	__abort_ci_on_failure;
 	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
-}
-
-function T_SANDBOX_unit_test_frame_work_self_check() {
-	__build_if_needed;
-	./${EXE_NAME} test_framework
-	__abort_ci_on_failure;
 }
 
 function T_SANDBOX_main_self_reuse_persistency_unit_test() {
@@ -142,16 +136,15 @@ function T_SANDBOX_main_live_run() {
 # ---------------------------------------------------------------------
 case "$1" in
   rebuild*)		__force_rebuild;;
-  framework*)	T_SANDBOX_test_framework;;
-  topo*)		T_SANDBOX_topo_merge_test;;
+  framework*)	T_SANDBOX_test_framework ${@:2};;
+  topo*)		T_SANDBOX_topo_merge_test ${@:2};;
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;
   live*)		T_SANDBOX_main_live_run;;
-  gpt*)			T_SANDBOX_gpt_util_self_unit_test;;
+  gpt*)			T_SANDBOX_gpt_util_self_unit_test ${@:2};;
   persi*)		T_SANDBOX_toma_persist_json_test;;
   ci*)
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
-	T_SANDBOX_unit_test_frame_work_self_check;
 	T_SANDBOX_main_self_unit_test;
 	T_SANDBOX_main_self_reuse_persistency_unit_test;
 	T_SANDBOX_toma_persist_json_test;
