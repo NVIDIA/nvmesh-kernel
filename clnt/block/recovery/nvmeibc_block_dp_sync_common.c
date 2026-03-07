@@ -13,6 +13,8 @@
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeibc_io_pet.h"
+#include "common/nvmeib_measured_work.h"
+#include "clnt/nvmeibc_wq_metrics.h"
 
 // a module parameter to set limit of concurrent sync operations
 uint nvmeibc_sync_max_operations_per_dev = NVMEIBC_MAX_ALLOWED_SYNC_OPS_DEFAULT;
@@ -25,6 +27,8 @@ MODULE_PARM_DESC(nvmeibc_sync_full_lockset_probability_factor, "Defines the prob
 
 
 NVMEIBC_MEMMGR_METRIC(dp_recov_operation, "component=raid.io_ctrl.recovery");
+NVMEIBC_WQ_METRIC(nvmeibc_rso_execute_wq_latency, "reason=rso_execute");
+
 /****************************** Internal API **********************************/
 static void __cmd_fill_rldr_only(struct recovery_sync_op *so)
 {
@@ -75,6 +79,8 @@ void nvmeibc_mark_sync_wants_to_inject_caller_sgl(const struct nvmeibc_block_com
 }
 #endif
 #ifndef BLKCMP_SO_COMPLETION_PRESERVE_STACK
+NVMEIBC_WQ_METRIC(nvmeibc_rso_resched_wq_latency, "reason=rso_resched");
+
 static void set_callback_as_locks_state_machine(struct nvmeibc_d_rdma_comp *dc, int (*callback)(struct nvmeibc_d_rdma_comp*, struct nvmeibc_d_rdma_comp_tag))
 {
 	dc->callback = callback;	// Continue state machine from lock callback context
@@ -87,17 +93,19 @@ static inline void __verify_unlock_callback_is_correct(struct nvmeibc_d_rdma_com
 
 static void __resume_sync_operation_work(struct workqe_struct *work)
 {
-	struct operation *o = container_of(work, struct operation, work_rso_resched);
+	struct measured_work *mw = measured_work_from(work);
+	struct operation *o = container_of(mw, struct operation, work_rso_resched);
 	struct recovery_sync_op *so = o->rso;
 	struct nvmeibc_d_rdma_comp* dc = &so->locks[0].comp;
+	nvmeib_wq_metrics_update(nvmeibc_rso_resched_wq_latency, measured_work_wait_ticks(mw));
 
 	__handle_locks_o(dc, nvmeibc_d_rdma_comp_tag_make());	// == dc->callback(dc), Only locks SM rescheduling is supported for now. TODO: Support other sync SMs, including nested.
 }
 
 void nvmeibcbdp_sync_reschedule(struct recovery_sync_op *so)
 {
-	WQ_INIT_WORK(&so->o->work_rso_resched, __resume_sync_operation_work);
-	dp_block_schedule_operation_work(so->o, &so->o->work_rso_resched);
+	MEASURED_INIT_WORK(&so->o->work_rso_resched, __resume_sync_operation_work);
+	dp_block_schedule_operation_work(so->o, &so->o->work_rso_resched.work);
 }
 
 #else
@@ -1676,7 +1684,9 @@ static void __execute_sync_operation(struct recovery_sync_op *so)
 
 static void __execute_sync_operation_work(struct workqe_struct *work)
 {
-	struct operation *o = container_of(work, struct operation, work_rso_execute);
+	struct measured_work *mw = measured_work_from(work);
+	struct operation *o = container_of(mw, struct operation, work_rso_execute);
+	nvmeib_wq_metrics_update(nvmeibc_rso_execute_wq_latency, measured_work_wait_ticks(mw));
 	__execute_sync_operation(o->rso);
 }
 
@@ -1692,8 +1702,8 @@ int nvmeibc_sync_submit(struct nvmeibc_block_device *nd)
 	if (should_autofail) {
 		__free_sync_op(so, true);
 	} else if (!NVMEIB_CPU_MASK_INFO_IS_EMPTY(so->o->cpu_mask_info)) {
-		WQ_INIT_WORK(&so->o->work_rso_execute, __execute_sync_operation_work);
-		dp_block_schedule_work(so->o->cpu_id, &so->o->work_rso_execute);
+		MEASURED_INIT_WORK(&so->o->work_rso_execute, __execute_sync_operation_work);
+		dp_block_schedule_work(so->o->cpu_id, &so->o->work_rso_execute.work);
 	} else {
 		__execute_sync_operation(so);
 	}

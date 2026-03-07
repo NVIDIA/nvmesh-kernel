@@ -1,6 +1,11 @@
 #ifndef NVMEIBC_DP_OPERATION_THROTTLING_H
 #define NVMEIBC_DP_OPERATION_THROTTLING_H
 
+#include "common/nvmeib_measured_work.h"
+#include "clnt/nvmeibc_wq_metrics.h"
+
+NVMEIBC_WQ_METRIC(nvmeibc_throttle_wq_latency, "reason=throttle");
+
 /**************************** IO throttleing **********************************/
 unsigned max_ios_per_cpu = 64;
 module_param(max_ios_per_cpu, uint, 0644);
@@ -9,7 +14,9 @@ MODULE_PARM_DESC(max_ios_per_cpu, "Maximum number of concurrent IO operations ha
 static void __execute_chain_noplug(struct operation *o);
 static void wq_execute_throttled_operation_chain(struct workqe_struct *work)
 {
-	struct operation *o = container_of(work, struct operation, work_throttled);
+	struct measured_work *mw = measured_work_from(work);
+	struct operation *o = container_of(mw, struct operation, work_throttled);
+	nvmeib_wq_metrics_update(nvmeibc_throttle_wq_latency, measured_work_wait_ticks(mw));
 	_ND(t_s3_cop, "o=@OPERATION", o);
 	#if ELEVATOR_TIMERS_IMPLEMENTATION
 		__execute_chain_noplug(o);					// Yaniv, Timers will take care of it
@@ -111,8 +118,8 @@ static void nvmeibc_operation_throttling_pull_next(struct nvmeibc_block_device *
 		// take topo now so it wont be freed while were on the queue,
 		// *before* we put the topo !!!
 		next_o->topo = nvmeibc_topology_get(nt);
-		WQ_INIT_WORK(&next_o->work_throttled, wq_execute_throttled_operation_chain);
-		nvmeib_schedule_work_on(cpu_id, &next_o->work_throttled);
+		MEASURED_INIT_WORK(&next_o->work_throttled, wq_execute_throttled_operation_chain);
+		nvmeib_schedule_work_on(cpu_id, &next_o->work_throttled.work);
 	}
 }
 

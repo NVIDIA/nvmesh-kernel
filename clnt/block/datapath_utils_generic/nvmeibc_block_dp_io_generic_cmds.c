@@ -12,6 +12,8 @@
 #include "nvmeibc_block_dp_block_md.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeib_nvme.h"
+#include "common/nvmeib_measured_work.h"
+#include "clnt/nvmeibc_wq_metrics.h"
 // For mssa
 #include "block/datapath_ec/nvmeibc_block_dp_ec.h"
 #include "common/nvmeib_str.h"
@@ -30,6 +32,7 @@ module_param_named(ec_reuse_req, nvmeibc_ec_reuse_req, bool, 0644);
 MODULE_PARM_DESC(ec_reuse_req, "Enable reusing feature for requests (EC). This parameter was added to facilitate disabling this reuse as a potential optimization for NVMesh in DPU mode.");
 
 NVMEIBC_MEMMGR_METRIC(dp_commands, "component=raid.io.commands");
+NVMEIBC_WQ_METRIC(nvmeibc_copy_to_bio_wq_latency, "reason=copy_to_bio");
 
 static void __verify_dirtybits_union_bits(void)
 {
@@ -702,7 +705,9 @@ static void __nvmeibc_operation_comp(struct operation *o)
 
 static void __nvmeibc_operation_wq_copy_and_comp(struct workqe_struct *work)
 {
-	struct operation *o = container_of(work, struct operation, work_throttled);
+	struct measured_work *mw = measured_work_from(work);
+	struct operation *o = container_of(mw, struct operation, work_copy_to_bio);
+	nvmeib_wq_metrics_update(nvmeibc_copy_to_bio_wq_latency, measured_work_wait_ticks(mw));
 	vv_bio_inter_copy_private_read_blocks_to_bio_if_needed(o);
 	__nvmeibc_operation_comp(o);
 	//operation is dead here
@@ -717,8 +722,8 @@ void nvmeibc_operation_put(struct operation *o, int n_refs)
 		return;			// This raid is done, 'o' waits for other raids
 	WARN((remain_o < 0), "Suspected bug in nvmeibc rem=%d!\n", remain_o);
 	if (nvmeibc_operation_is_bio_copy_needed_for_read(o) && get_tcp_mode_of_operation(o)){
-		WQ_INIT_WORK(&o->work_copy_to_bio, __nvmeibc_operation_wq_copy_and_comp);
-		dp_block_schedule_work(o->cpu_id, &o->work_copy_to_bio);
+		MEASURED_INIT_WORK(&o->work_copy_to_bio, __nvmeibc_operation_wq_copy_and_comp);
+		dp_block_schedule_work(o->cpu_id, &o->work_copy_to_bio.work);
 	} else {
 		vv_bio_inter_copy_private_read_blocks_to_bio_if_needed(o);
 		__nvmeibc_operation_comp(o);

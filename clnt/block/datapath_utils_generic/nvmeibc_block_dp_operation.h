@@ -12,6 +12,7 @@
     and uses virtual functions of volume's datapath to execute itself
  */
 #include "nvmeib_stats.h"
+#include "nvmeib_measured_work.h"
 #include "nvmeibc_block.h"		/* external API of the block */
 #include "nvmeibc_block_dp_io_generic_cmds.h"
 #include "nvmeibc_block_dp_buffers.h"
@@ -60,13 +61,13 @@ struct operation {
 	union {										// Throtelling & retries of operation, Todo: Wrap in struct
 		struct list_head list_paused;			// Field to insert the operation into resubmit queue
 		struct list_head per_cpu_wait_list;		// Fields for conencting IO to with list of IO's per cpu to prevent too much IO's beeing in air at once
-		struct workqe_struct work_elev;			// Async launch operation after elevator processing
-		struct workqe_struct work_skip_recov;	// async skip operation on blockset during recovery
-		struct workqe_struct work_throttled;		// Next pulled IO will be executed using this work on a workqueue per cpu
-		struct workqe_struct work_resubmitted;	// IOs from resubmitter paused list are executed on a workqueue per cpu
-		struct workqe_struct work_copy_to_bio;	// copy data to mutable bioi buffers from a work queue and release the operation
-		struct workqe_struct work_rso_execute;	// (Sync operations) execute rso on a workqueue
-		struct workqe_struct work_rso_resched;	// (Sync operations) reschedule rso on a workqueue (locks SM only, invoke __handle_locks_o)
+		struct measured_work work_elev;			// Async launch operation after elevator processing
+		struct measured_work work_skip_recov;	// async skip operation on blockset during recovery
+		struct measured_work work_throttled;		// Next pulled IO will be executed using this work on a workqueue per cpu
+		struct measured_work work_resubmitted;	// IOs from resubmitter paused list are executed on a workqueue per cpu
+		struct measured_work work_copy_to_bio;	// copy data to mutable bioi buffers from a work queue and release the operation
+		struct measured_work work_rso_execute;	// (Sync operations) execute rso on a workqueue
+		struct measured_work work_rso_resched;	// (Sync operations) reschedule rso on a workqueue (locks SM only, invoke __handle_locks_o)
 		BLKCMP_SO_DEFINE_BLOCKING_CONTEXT;		// Datapath library, sleeping context with fiber stack
 	};
 	//struct {									// Statistics about this operation

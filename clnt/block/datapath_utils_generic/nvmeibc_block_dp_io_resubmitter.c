@@ -5,10 +5,16 @@
 #include "block/recovery/nvmeibc_block_dp_sync_api.h"
 #include "nvmeibc_block_dp_io_req_rel_locks.h"
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_locks_transfer.h"
+#include "common/nvmeib_measured_work.h"
+#include "clnt/nvmeibc_wq_metrics.h"
+
+NVMEIBC_WQ_METRIC(nvmeibc_resubmit_wq_latency, "reason=resubmit");
 
 static void __execute_resubmitted_on_wq(struct workqe_struct *work)
 {
-	struct operation *o = container_of(work, struct operation, work_resubmitted);
+	struct measured_work *mw = measured_work_from(work);
+	struct operation *o = container_of(mw, struct operation, work_resubmitted);
+	nvmeib_wq_metrics_update(nvmeibc_resubmit_wq_latency, measured_work_wait_ticks(mw));
 	nvmeibc_operation_execute(o, false);
 };
 
@@ -25,8 +31,8 @@ static void __repeat_op_execution(struct operation* o, bool by_resubmitter)
 	#endif
 
 	if (!by_resubmitter || !NVMEIB_CPU_MASK_INFO_IS_EMPTY(o->cpu_mask_info)) {
-		WQ_INIT_WORK(&o->work_resubmitted, __execute_resubmitted_on_wq);
-		dp_block_schedule_operation_work(o, &o->work_resubmitted);
+		MEASURED_INIT_WORK(&o->work_resubmitted, __execute_resubmitted_on_wq);
+		dp_block_schedule_operation_work(o, &o->work_resubmitted.work);
 	} else {
 		nvmeibc_operation_execute(o, false);
 	}

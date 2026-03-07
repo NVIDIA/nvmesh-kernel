@@ -7,11 +7,15 @@
 #include "nvmeib_event.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
 #include "nvmeibc_io_pet.h"
+#include "common/nvmeib_measured_work.h"
+#include "clnt/nvmeibc_wq_metrics.h"
 
 struct __fake_recovery{ struct{ u64 task_id; const struct nvmeibc_subscription_ctx *tr; } args; enum NVMEIBT_RECOVERY_TYPE type; };
 #define DECL_FAKE_RECOVERY(id, type, tr) struct __fake_recovery __fake_rcvr = {{(id), (tr)}, (type)}, *recov = &__fake_rcvr;	// For prints/traces, when recovery context does not exist
 
 struct nvmeibc_recovery_hooks* rcvr_hooks = NULL;									//cannot make per recovery - the recoveries are managed by topology attach/detach tests destroy topology;
+
+NVMEIBC_WQ_METRIC(nvmeibc_skip_recov_wq_latency, "reason=skip_recov");
 
 /****************** Update stats on batch request **************************/
 int recovery_on_batch_request(struct nvmeibc_recovery *recov)
@@ -1260,16 +1264,18 @@ static int __on_finish_one_sync_cb(void *sw_context, int err)
 /* Asyncrously skip blockset and mark it as success if (o_rv==0) or failure*/
 static void __skip_blockset_cb(struct workqe_struct *w)
 {
-	struct operation *o = container_of(w, struct operation, work_skip_recov);	// Can use: struct nvmeibc_disk_io_command *iocmd = container_of(w, struct nvmeibc_disk_io_command, auto_fail_work); struct nvmeibc_block_command *cmd = iocmd->disk_cmd.owner; o = cmd->o;
+	struct measured_work *mw = measured_work_from(w);
+	struct operation *o = container_of(mw, struct operation, work_skip_recov);	// Can use: struct nvmeibc_disk_io_command *iocmd = container_of(w, struct nvmeibc_disk_io_command, auto_fail_work); struct nvmeibc_block_command *cmd = iocmd->disk_cmd.owner; o = cmd->o;
+	nvmeib_wq_metrics_update(nvmeibc_skip_recov_wq_latency, measured_work_wait_ticks(mw));
 	__on_finish_one_sync_cb(__sync_worker_of_o(o), o->cmds->o_rv);
 }
 
 static void __schedule_skip_blockset(struct operation *o, int err)
 {
-	struct workqe_struct *work = &o->work_skip_recov; // Can use: o->cmds->iocmd->disk_cmd.auto_fail_work;
+	struct measured_work *mw = &o->work_skip_recov;
 	o->cmds->o_rv = err;
-	WQ_INIT_WORK(work, __skip_blockset_cb);
-	BLKCMP_ANY_dp_block_schedule_operation_work(o, work);
+	MEASURED_INIT_WORK(mw, __skip_blockset_cb);
+	BLKCMP_ANY_dp_block_schedule_operation_work(o, &mw->work);
 }
 
 static void __call_sync_vfunc_internal(struct nvmeibc_recov_sync_worker *sw);

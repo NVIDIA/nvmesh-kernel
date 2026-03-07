@@ -2,6 +2,9 @@
 #define NVMEIBC_DP_OPERATION_PER_CPU_INFRA_H
 
 #include "common/compat/kr_incs_compiler_types.h"
+#include "common/nvmeib_measured_work.h"
+#include "clnt/nvmeibc_wq_metrics.h"
+
 /********************** Per cpu counters **************************/
 struct nvmeibc_blk_op_globals {		// Global counters to support block operations. Currently this is a single copy for all clnt instances, because this holds only per_cpu counters
 	struct t_support_operation_cpu {
@@ -178,17 +181,21 @@ static void __remove_from_mini_elevator_cache_unsafe(struct nvmeibc_blk_op_eleva
 	nmoct->op = NULL;
 }
 
+NVMEIBC_WQ_METRIC(nvmeibc_elevator_wq_latency, "reason=elevator");
+
 static void __operation_execute_no_cache(struct operation *o, int rv);
 static void __wq_execute_elevator(struct workqe_struct *work)
 {
-	struct operation *o = container_of(work, struct operation, work_elev);
+	struct measured_work *mw = measured_work_from(work);
+	struct operation *o = container_of(mw, struct operation, work_elev);
+	nvmeib_wq_metrics_update(nvmeibc_elevator_wq_latency, measured_work_wait_ticks(mw));
 	__operation_execute_no_cache(o, 0);
 };
 
 static void __operation_schedule_execute_no_cache(struct operation *o)
 {
-	WQ_INIT_WORK(&o->work_elev, __wq_execute_elevator);
-	dp_block_schedule_work(o->cpu_id, &o->work_elev);
+	MEASURED_INIT_WORK(&o->work_elev, __wq_execute_elevator);
+	dp_block_schedule_work(o->cpu_id, &o->work_elev.work);
 }
 
 #if ELEVATOR_TIMERS_IMPLEMENTATION
