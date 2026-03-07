@@ -222,9 +222,9 @@ struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 			};
 		};
 		struct list_head resubmit_link;				// Block Layer: When ow-lock with its siblings must be resubmitted use this field to link into locks-resubmit list
-		struct workqe_struct transfer_work;			// Block Layer: Execution of locks transfer between operations on a workqueue
+		struct measured_work transfer_work;				// Block Layer: Execution of locks transfer between operations on a workqueue
 		TIMER_LIST_INSTANCE(retry_timer);			// Block Layer: A timer to retry the lock operation. includes a callback method and argument of type nvmeibc_d_iocmd_comp
-		struct workqe_struct retry_work_post_timer;	// Block Layer: Work object that executes contended lock retry, scheduled from within the timer
+		struct measured_work retry_work_post_timer;	// Block Layer: Work object that executes contended lock retry, scheduled from within the timer
 	};
 
 #ifdef DEBUG_D_RDMA_COMP

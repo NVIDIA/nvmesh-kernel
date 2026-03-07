@@ -5,6 +5,10 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_lock_stages.h"
 #include "nvmeibc_block_dp_operation_locks_transfer.h"
+#include "nvmeib_measured_work.h"
+#include "nvmeibc_wq_metrics.h"
+
+NVMEIBC_WQ_METRIC(nvmeibc_lock_transfer_wq_latency, "reason=lock_transfer");
 
 #define do_ow_locks_match(l1, l2) 	\
 			(((l1)->ds == (l2)->ds) && ((l1)->address == (l2)->address))
@@ -110,13 +114,15 @@ int __IO_LT_try_request_transfer(struct nvmeibc_cmd_lock *locksets)
 
 static void __IO_LT_schedule(struct nvmeibc_cmd_lock *lock, void (*work_fn)(struct workqe_struct *))
 {
-	WQ_INIT_WORK(&lock->comp.transfer_work, work_fn);
-	dp_block_schedule_operation_work(lock->cmds->o, &lock->comp.transfer_work);
+	MEASURED_INIT_WORK(&lock->comp.transfer_work, work_fn);
+	dp_block_schedule_operation_work(lock->cmds->o, &lock->comp.transfer_work.work);
 }
 
 static void __IO_LT_no_transfer_on_wq(struct workqe_struct *work)
 {
-	struct nvmeibc_cmd_lock *lock = container_of(work, struct nvmeibc_cmd_lock, comp.transfer_work);
+	struct measured_work *mw = measured_work_from(work);
+	struct nvmeibc_cmd_lock *lock = container_of(mw, struct nvmeibc_cmd_lock, comp.transfer_work);
+	nvmeib_wq_metrics_update(nvmeibc_lock_transfer_wq_latency, measured_work_wait_ticks(mw));
 	dp_locks_resend_raid_locks(lock);
 };
 
@@ -128,7 +134,9 @@ static void __IO_LT_schedule_no_transfer(struct nvmeibc_cmd_lock *lock)
 
 static void __IO_LT_transfer_on_wq(struct workqe_struct *work)
 {
-	struct nvmeibc_cmd_lock *lock = container_of(work, struct nvmeibc_cmd_lock, comp.transfer_work);
+	struct measured_work *mw = measured_work_from(work);
+	struct nvmeibc_cmd_lock *lock = container_of(mw, struct nvmeibc_cmd_lock, comp.transfer_work);
+	nvmeib_wq_metrics_update(nvmeibc_lock_transfer_wq_latency, measured_work_wait_ticks(mw));
 	__IO_LT_complete_transfer_transaction(lock);
 };
 
@@ -281,7 +289,7 @@ void __IO_LT_complete_transfer_transaction(struct nvmeibc_cmd_lock *lo)
 	for (lsi = 0; lsi < n_copies; lsi++) {	// Daniel, Important! First mark all the copies as transferred to avoid double requesting: example, transferring owner which auto requests secondary owner while we transfer secondary owner
 		lo[lsi].comp.lock_status = NCL_STATUS_TRANSFERRED;
 	}
-	
+
 	__IO_LT_end_take_stats(lo);
 
 	for (lsi = 0; lsi < n_copies; lsi++) {  // lo might free() in the loop, cacheded n_copies stops the loop

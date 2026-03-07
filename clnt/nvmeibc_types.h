@@ -9,6 +9,7 @@
 #include "nvmeib_shared.h"
 #include "nvmeib_rdma.h"
 #include "nvmeib_trend.h"
+#include "nvmeib_measured_work.h"
 
 enum {
 	/* max rdma reads to get the disk completion phase bit right */
@@ -539,7 +540,7 @@ struct nvmeibc_disk_command {
 	union {
 		struct work_struct auto_fail_no_rdda_work;	// Transp layer: Autofail in no_rdda_channel
 		struct work_struct auto_fail_work;			// Block  layer: Auto-fail command (without sending to server), do this asyncronously using this work-item
-		struct workqe_struct view_lock_work;		// Block  layer: Retry view lock work
+		struct measured_work view_lock_work;		// Block  layer: Retry view lock work
 		ktime_t start_ts;								// c_disk layer: request start time stamp. Used to measure latency
 	};
 	int cb_comp_code;								// Todo: remove me

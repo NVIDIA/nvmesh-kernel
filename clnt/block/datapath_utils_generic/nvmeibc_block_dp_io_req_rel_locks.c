@@ -9,6 +9,11 @@
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_locks_transfer.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 #include "nvmeibc_io_pet.h"
+#include "nvmeib_measured_work.h"
+#include "nvmeibc_wq_metrics.h"
+
+NVMEIBC_WQ_METRIC(nvmeibc_view_lock_wq_latency, "reason=view_lock");
+NVMEIBC_WQ_METRIC(nvmeibc_retry_lock_wq_latency, "reason=retry_lock");
 
 #define __SUSPICIOUS_LOCK_REQ_TIME 500 /* 0.5[sec], If lock request takes more time, print that to log */
 #define __SUSPICIONS_LOCK_TIME   20000 /*  20[sec]  , If lock finally acquired but it took a lot of time, print that to log */
@@ -524,15 +529,17 @@ static void __schedule_retry_read_lock(struct nvmeibc_cmd_lock *u1, struct nvmei
 #else
 
 static void __retry_read_lock_cb_work(struct workqe_struct *work) {
-	struct nvmeibc_disk_io_command *io_cmd = container_of(work, struct nvmeibc_disk_io_command, disk_cmd.view_lock_work);
+	struct measured_work *mw = measured_work_from(work);
+	struct nvmeibc_disk_io_command *io_cmd = container_of(mw, struct nvmeibc_disk_io_command, disk_cmd.view_lock_work);
+	nvmeib_wq_metrics_update(nvmeibc_view_lock_wq_latency, measured_work_wait_ticks(mw));
 	slow_io_stats_t_rdl_dec(&io_cmd->comp->cmd->o->nd->dp.io_slow);
 	__retry_read_lock(&io_cmd->comp);
 }
 
 TIMER_CALLBACK(__retry_read_lock_cb_timer, struct nvmeibc_d_rdma_comp, retry_timer, struct nvmeibc_d_iocmd_comp, cmp)
 	struct nvmeibc_disk_io_command *io_cmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
-	WQ_INIT_WORK(&io_cmd->disk_cmd.view_lock_work, __retry_read_lock_cb_work);
-	dp_block_schedule_work(WORK_CPU_UNBOUND, &io_cmd->disk_cmd.view_lock_work);
+	MEASURED_INIT_WORK(&io_cmd->disk_cmd.view_lock_work, __retry_read_lock_cb_work);
+	dp_block_schedule_work(WORK_CPU_UNBOUND, &io_cmd->disk_cmd.view_lock_work.work);
 }
 
 static void __schedule_retry_read_lock(struct nvmeibc_cmd_lock *l, struct nvmeibc_d_iocmd_comp *cmp, ulong retry_time)
@@ -802,7 +809,7 @@ int dp_fill_locks_for_io(enum nvmeib_block_io_op op, u64 nlbas, u64 vlba, int c_
 	return lock_i;
 }
 
-raid_sgmnt_t dp_locks_get_sgmnt_idx_of_lock(const struct nvmeibc_cmd_lock *self) 
+raid_sgmnt_t dp_locks_get_sgmnt_idx_of_lock(const struct nvmeibc_cmd_lock *self)
 {
 	struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(self->ds);
 	return self->ds - raid->segments;
@@ -867,11 +874,13 @@ static void __schedule_retry_owner_lock(struct nvmeibc_cmd_lock *l, ulong u1)
 }
 #else
 static void __retry_owner_lock_cb_work(struct workqe_struct *work) {
-	struct nvmeibc_cmd_lock *lock = container_of(work, struct nvmeibc_cmd_lock, comp.retry_work_post_timer);
+	struct measured_work *mw = measured_work_from(work);
+	struct nvmeibc_cmd_lock *lock = container_of(mw, struct nvmeibc_cmd_lock, comp.retry_work_post_timer);
 	#if defined(NVMEIBC_DISK_CMDS_STATS_PROBES) && (NVMEIBC_DISK_CMDS_STATS_PROBES==1)
 		struct nvmeibc_disk_command_probes_try_data *current_try = nvmeibc_disk_command_probes_prev_try(&lock->comp.probes);
 		current_try->retry_work_jif = jiffies;
 	#endif
+	nvmeib_wq_metrics_update(nvmeibc_retry_lock_wq_latency, measured_work_wait_ticks(mw));
 	slow_io_stats_t_wrl_dec(&lock->cmds->o->nd->dp.io_slow);
 	__retry_owner_lock(lock, false);
 }
@@ -881,8 +890,8 @@ TIMER_CALLBACK(__retry_owner_lock_cb_timer, struct nvmeibc_d_rdma_comp, retry_ti
 		struct nvmeibc_disk_command_probes_try_data *current_try = nvmeibc_disk_command_probes_prev_try(&dc->probes);
 		current_try->retry_timer_jif = jiffies;
 	#endif
-	WQ_INIT_WORK(&dc->retry_work_post_timer, __retry_owner_lock_cb_work);
-	dp_block_schedule_work(WORK_CPU_UNBOUND, &dc->retry_work_post_timer);
+	MEASURED_INIT_WORK(&dc->retry_work_post_timer, __retry_owner_lock_cb_work);
+	dp_block_schedule_work(WORK_CPU_UNBOUND, &dc->retry_work_post_timer.work);
 }
 
 static void __schedule_retry_owner_lock(struct nvmeibc_cmd_lock *l, ulong retry_time)
