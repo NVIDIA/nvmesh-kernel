@@ -43,6 +43,7 @@ nvmeibc-y := \
 	nvmeibc_nvme.o \
 	nvmeibc_targets.o \
 	nvmeibc_memmgr_metrics.o \
+	nvmeibc_wq_metrics.o \
 	nvmeibc_io_pet.o \
 	nvmeibc_channel.o \
 	nvmeibc_ib_io_channel.o \

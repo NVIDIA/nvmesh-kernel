@@ -12,6 +12,7 @@
 #include "nvmeibc_cc_api.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeibc_error_tags.h"
+#include "nvmeibc_wq_metrics.h"
 #include "nvmeib_srq.h"
 #include "flog.h"
 #include "nvmeibc_targets.h"
@@ -497,6 +498,16 @@ static ssize_t reset_shared_cq(
 #include "module/nvmeibc_module_main.h"
 #include "module/nvmeibc_module_main.inc.c"				// Todo: Remove
 									//
+static ssize_t __nvmeibc_wq_metrics_aggregated_info(void *ctx, char *buffer, size_t len)
+{
+	return nvmeibc_wq_metrics_info(ctx, buffer, len, false /* dump_per_cpu */);
+}
+
+static ssize_t __nvmeibc_wq_metrics_pcpu_info(void *ctx, char *buffer, size_t len)
+{
+	return nvmeibc_wq_metrics_info(ctx, buffer, len, true /* dump_per_cpu */);
+}
+
 static int per_clnt_inst_proc_files_create(struct t_main_clnt_globals *_mg)
 {
 	int rv = 0;
@@ -512,6 +523,8 @@ static int per_clnt_inst_proc_files_create(struct t_main_clnt_globals *_mg)
 		PROC_FILE_CREATE_RW(_mg, _mg->proc_dir.files.shared_cq, "shared_cq", fill_shared_cq, reset_shared_cq);
 	PROC_FILE_CREATE(_mg, _mg->proc_dir.files.memmgr_info , "memmgr_info", nvmeibc_memmgr_metrics_info);
 	PROC_FILE_CREATE(_mg, _mg->proc_dir.files.error_tags_info , "error_tags_info", nvmeibc_error_tags_info);
+	PROC_FILE_CREATE(_mg, _mg->proc_dir.files.wq_metrics_info, "wq_metrics_info", __nvmeibc_wq_metrics_aggregated_info);
+	PROC_FILE_CREATE(_mg, _mg->proc_dir.files.wq_metrics_pcpu_info, "wq_metrics_pcpu_info", __nvmeibc_wq_metrics_pcpu_info);
 	NFOUT;
 	return rv;
 }
@@ -530,6 +543,8 @@ static void per_clnt_inst_proc_files_remove(struct t_main_clnt_globals *_mg)
 		PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.shared_cq);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.memmgr_info);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.error_tags_info);
+	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.wq_metrics_info);
+	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.wq_metrics_pcpu_info);
 	NFOUT;
 }
 
@@ -1075,6 +1090,7 @@ static void __nvmeibc_exit(void)
 	main_module_single_instance_globals_destroy();
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
+	nvmeib_wq_metrics_free_pcpu(__start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 #endif
 	NFOUT;
@@ -1117,6 +1133,11 @@ static int __init nvmeibc_init(void) /* Constructor */
 	rv = nvmesh_memmgr_metrics_alloc_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 	if (rv < 0) {
 		_NE(nvmeibc_init_pcpu_alloc, "Failed to initialize memmgr metrics");
+		goto err;
+	}
+	rv = nvmeib_wq_metrics_alloc_pcpu(__start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
+	if (rv < 0) {
+		_NE(nvmeibc_init_wq_hist_alloc, "Failed to initialize wq metrics");
 		goto err;
 	}
 #endif

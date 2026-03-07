@@ -259,6 +259,7 @@ SOURCES += $(SDIR)/nvmeibc_pausable.c
 SOURCES += $(SDIR)/nvmeibc_client_core_ops.c
 SOURCES += $(SDIR)/nvmeibc_jam.c
 SOURCES += $(SDIR)/nvmeibc_memmgr_metrics.c
+SOURCES += $(SDIR)/nvmeibc_wq_metrics.c
 SOURCES += $(SSDA)/toma/utils/nvmeibt_uuid.c
 SOURCES += $(SSDA)/toma/clnt/nvmeibt_client_protocol.c
 SOURCES += $(SDIR)/module/instance/nvmeibc_cinst.c

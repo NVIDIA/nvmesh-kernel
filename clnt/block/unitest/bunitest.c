@@ -35,6 +35,7 @@
 #include "memmgr_metrics_tests.h"
 #include "metrics_test.h"
 #include "wq_metrics_tests.h"
+#include "clnt/nvmeibc_wq_metrics.h"
 #include "error_tags_tests.h"
 #include "nvmeib_scatterlist_iter_test.h"
 #include "nvmeibc_management_capi_parse_conf_test.h"
@@ -7430,7 +7431,7 @@ int main(int argc, char* argv[])
 	simulator_alloc_tracking_disable();
 	nvmesh_memmgr_metrics_alloc_pcpu(__start_nvmeibs_memmgr_metrics, __stop_nvmeibs_memmgr_metrics);
 	nvmesh_memmgr_metrics_alloc_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
-	nvmeib_wq_metrics_alloc_pcpu(__start_ut_wq_metrics, __stop_ut_wq_metrics);
+	nvmeib_wq_metrics_alloc_pcpu(__start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 	simulator_alloc_tracking_enable();
 
 	main_os_id  = pthread_self();							// Important! Emulate kernel thread for main(). Must be done before any to print using printk(). This is not part of kernel boot because parsing arguments requires using printk(), and we parse arguments before boot!
@@ -7473,7 +7474,7 @@ int main(int argc, char* argv[])
 	nvmesh_memmgr_metrics_verify_idle(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 	unitest_memmgr_metric_check_client();
 	simulator_alloc_tracking_disable();
-	nvmeib_wq_metrics_free_pcpu(__start_ut_wq_metrics, __stop_ut_wq_metrics);
+	nvmeib_wq_metrics_free_pcpu(__start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibs_memmgr_metrics, __stop_nvmeibs_memmgr_metrics);
 }

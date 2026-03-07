@@ -98,6 +98,14 @@ static inline void nvmeib_wq_metrics_update(struct nvmeib_wq_metrics *wqh, u64 t
 struct nvmeib_wq_metric_counters nvmeib_wq_metrics_merge_cpus(struct nvmeib_wq_metrics const *src);
 
 /**
+ * nvmeib_wq_metrics_visit_cpu() - visit metrics for a specific CPU.
+ * @self:    metric point to visit.
+ * @closure: visitor closure, e.g. a JDR writer.
+ * @cpu:     CPU index to visit, or -1 to merge all CPUs.
+ */
+void nvmeib_wq_metrics_visit_cpu(struct nvmeib_wq_metrics *self, struct nvmesh_metrics_closure *closure, int cpu);
+
+/**
  * nvmeib_wq_metrics_visit() - visit metrics via a metrics closure.
  * @self:          metric point to visit.
  * @closure:       visitor closure, e.g. a JDR writer.
@@ -113,16 +121,19 @@ void nvmeib_wq_metrics_visit(struct nvmeib_wq_metrics *self, struct nvmesh_metri
  * nvmeib_wq_metrics_json_serialize() - serialize a section range as JDR JSON.
  * @buffer:        destination buffer for serialized JSON.
  * @dump_all_cpus: true to merge all CPUs per metric point.
+ * @dump_per_cpu:  true to emit per-CPU sections instead of one aggregate.
  * @start:         first metric in the linker section range.
  * @stop:          one-past-last metric in the linker section range.
  *
- * Iterates all metric points in [@start, @stop) and serializes their
- * aggregated counters into @buffer as a JSON object via JDR.
+ * When @dump_all_cpus && !@dump_per_cpu, emits a single "metrics.all_cpus"
+ * array with merged counters (current behaviour).
+ * When @dump_all_cpus && @dump_per_cpu, emits one "metrics.cpu{N}" array per
+ * online CPU with that CPU's raw counters.
  *
  * Return: number of bytes written into @buffer.
  */
-size_t nvmeib_wq_metrics_json_serialize(struct charvec buffer, bool dump_all_cpus, struct nvmeib_wq_metrics *start,
-					struct nvmeib_wq_metrics *stop);
+size_t nvmeib_wq_metrics_json_serialize(struct charvec buffer, bool dump_all_cpus, bool dump_per_cpu,
+					struct nvmeib_wq_metrics *start, struct nvmeib_wq_metrics *stop);
 
 /**
  * nvmeib_wq_metrics_alloc_pcpu() - allocate per-CPU counters for a section range.

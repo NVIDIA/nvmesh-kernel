@@ -1,11 +1,9 @@
 #include "wq_metrics_tests.h"
 #include "kr_incs.h"
 
-#define UT_WQ_SECTION "ut_wq_metrics"
-
-NVMESH_DEFINE_WQ_METRIC(wq_zero, UT_WQ_SECTION, "reason=zero");
-NVMESH_DEFINE_WQ_METRIC(wq_one, UT_WQ_SECTION, "reason=one");
-NVMESH_DEFINE_WQ_METRIC(wq_two, UT_WQ_SECTION, "reason=two");
+NVMEIBC_WQ_METRIC(wq_zero, "reason=zero");
+NVMEIBC_WQ_METRIC(wq_one, "reason=one");
+NVMEIBC_WQ_METRIC(wq_two, "reason=two");
 
 static void __ut_wq_test_section(void)
 {
@@ -13,7 +11,7 @@ static void __ut_wq_test_section(void)
 	size_t found = 0;
 	struct nvmeib_wq_metrics *curr;
 
-	for (curr = __start_ut_wq_metrics; curr != __stop_ut_wq_metrics; ++curr) {
+	for (curr = __start_nvmeibc_wq_metrics; curr != __stop_nvmeibc_wq_metrics; ++curr) {
 		total_count += 1;
 		found += (curr == wq_zero || curr == wq_one || curr == wq_two);
 	}
@@ -40,10 +38,11 @@ static void __ut_wq_test_update(void)
 
 static void __ut_wq_test_json_serialize(void)
 {
-	struct charvec buffer = {.base = malloc(1024 * 1024), .len = 1024 * 1024};
+	size_t const buf_size = 1024 * 1024;
+	struct charvec buffer = { .base = malloc(buf_size), .len = buf_size };
 
-	nvmeib_wq_metrics_json_serialize(buffer, true /* dump_all_cpus */,
-					 __start_ut_wq_metrics, __stop_ut_wq_metrics);
+	nvmeib_wq_metrics_json_serialize(buffer, true /* dump_all_cpus */, false /* dump_per_cpu */,
+					 __start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 
 #ifdef DO_JSON_DUMP
 	printf("%s\n", buffer.base);
@@ -52,14 +51,32 @@ static void __ut_wq_test_json_serialize(void)
 	nvmeib_wq_metrics_update(wq_two, 100);
 	nvmeib_wq_metrics_update(wq_two, 300);
 
-	nvmeib_wq_metrics_json_serialize(buffer, true /* dump_all_cpus */,
-					 __start_ut_wq_metrics, __stop_ut_wq_metrics);
+	nvmeib_wq_metrics_json_serialize(buffer, true /* dump_all_cpus */, false /* dump_per_cpu */,
+					 __start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 
 #ifdef DO_JSON_DUMP
 	printf("%s\n", buffer.base);
+	fflush(stdout);
 #endif
 
+	free(buffer.base);
+}
+
+static void __ut_wq_test_json_serialize_pcpu(void)
+{
+	size_t const buf_size = 1024 * 1024;
+	struct charvec buffer = { .base = malloc(buf_size), .len = buf_size };
+
+	nvmeib_wq_metrics_update(wq_one, 256);
+
+	nvmeib_wq_metrics_json_serialize(buffer, true /* dump_all_cpus */, true /* dump_per_cpu */,
+					 __start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
+
+#ifdef DO_JSON_DUMP
+	printf("per-cpu:\n%s\n", buffer.base);
 	fflush(stdout);
+#endif
+
 	free(buffer.base);
 }
 
@@ -71,7 +88,7 @@ static void __ut_wq_test_clear(void)
 	merged = nvmeib_wq_metrics_merge_cpus(wq_one);
 	BUG_ON(merged.wait_time.max == 0);
 
-	nvmeib_wq_metrics_clear(__start_ut_wq_metrics, __stop_ut_wq_metrics);
+	nvmeib_wq_metrics_clear(__start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 
 	merged = nvmeib_wq_metrics_merge_cpus(wq_one);
 	BUG_ON(merged.wait_time.max != 0);
@@ -85,5 +102,6 @@ void test_wq_metrics(void)
 	__ut_wq_test_section();
 	__ut_wq_test_update();
 	__ut_wq_test_json_serialize();
+	__ut_wq_test_json_serialize_pcpu();
 	__ut_wq_test_clear();
 }

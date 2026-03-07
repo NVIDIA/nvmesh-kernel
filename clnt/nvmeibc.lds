@@ -19,4 +19,11 @@ SECTIONS {
                 KEEP(*(.nvmeibc_io_pet_msgs))
                 __stop_nvmeibc_io_pet_msgs = .;
         }
+
+        .nvmeibc_wq_metrics : {
+               . = ALIGN(8);
+                __start_nvmeibc_wq_metrics = .;
+                KEEP(*(.nvmeibc_wq_metrics))
+                __stop_nvmeibc_wq_metrics = .;
+        }
 }

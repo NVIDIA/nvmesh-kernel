@@ -41,6 +41,8 @@ struct t_main_clnt_globals {
 			struct nvmeib_public_procfs_ent *memmgr_info;
 			struct nvmeib_public_procfs_ent *error_tags_info;
 			struct nvmeib_public_procfs_ent *cpu_masks_json;
+			struct nvmeib_public_procfs_ent *wq_metrics_info;
+			struct nvmeib_public_procfs_ent *wq_metrics_pcpu_info;
 		} files;
 	} proc_dir;
 	struct t_main_clnt_vols {

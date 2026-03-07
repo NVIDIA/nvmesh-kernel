@@ -20,34 +20,68 @@ struct nvmeib_wq_metric_counters nvmeib_wq_metrics_merge_cpus(struct nvmeib_wq_m
 }
 EXPORT_SYMBOL(nvmeib_wq_metrics_merge_cpus);
 
-void nvmeib_wq_metrics_visit(struct nvmeib_wq_metrics *self, struct nvmesh_metrics_closure *closure,
-			     bool visit_all_cpus)
+void nvmeib_wq_metrics_visit_cpu(struct nvmeib_wq_metrics *self, struct nvmesh_metrics_closure *closure, int cpu)
 {
 	struct nvmesh_metric_id const id = { .name = "wq.wait_time", .labels = self->labels };
 
-	struct nvmeib_wq_metric_counters merged = visit_all_cpus
+	struct nvmeib_wq_metric_counters merged = (cpu == -1)
 			? nvmeib_wq_metrics_merge_cpus(self)
-			: *per_cpu_ptr(self->counters, smp_processor_id());
+			: *per_cpu_ptr(self->counters, cpu);
 
 	nvmesh_metric_visit_ptr(closure, NULL, &merged.wait_time, id);
 }
+EXPORT_SYMBOL(nvmeib_wq_metrics_visit_cpu);
+
+void nvmeib_wq_metrics_visit(struct nvmeib_wq_metrics *self, struct nvmesh_metrics_closure *closure,
+			     bool visit_all_cpus)
+{
+	nvmeib_wq_metrics_visit_cpu(self, closure, visit_all_cpus ? -1 : smp_processor_id());
+}
 EXPORT_SYMBOL(nvmeib_wq_metrics_visit);
 
-size_t nvmeib_wq_metrics_json_serialize(struct charvec buffer, bool dump_all_cpus, struct nvmeib_wq_metrics *start,
-					struct nvmeib_wq_metrics *stop)
+static void __wq_metrics_json_serialize_all_cpus(struct jdr *jdr_inst, struct nvmeib_jdr_write_closure *jdr_writer,
+						 struct nvmeib_wq_metrics *start, struct nvmeib_wq_metrics *stop)
 {
+	static char const *all_cpu = "metrics.all_cpus";
+	struct nvmeib_wq_metrics *curr = NULL;
+
+	jdr_array_scope(jdr_inst, all_cpu);
+	for (curr = start; curr < stop; curr++)
+		nvmeib_wq_metrics_visit_cpu(curr, &(jdr_writer->base), -1 /* visit all cpus */);
+}
+
+static void __wq_metrics_json_serialize_cpu(struct jdr *jdr_inst, struct nvmeib_jdr_write_closure *jdr_writer, int cpu,
+					    struct nvmeib_wq_metrics *start, struct nvmeib_wq_metrics *stop)
+{
+	char scope_str[32];
+
+	snprintf(scope_str, ARRAY_SIZE(scope_str), "metrics.cpu%d", cpu);
+	{
+		struct nvmeib_wq_metrics *curr = NULL;
+
+		jdr_array_scope(jdr_inst, scope_str);
+		for (curr = start; curr < stop; curr++)
+			nvmeib_wq_metrics_visit_cpu(curr, &(jdr_writer->base), cpu);
+	}
+}
+
+size_t nvmeib_wq_metrics_json_serialize(struct charvec buffer, bool dump_all_cpus, bool dump_per_cpu,
+					struct nvmeib_wq_metrics *start, struct nvmeib_wq_metrics *stop)
+{
+	int cpu;
 	struct charvec result = { 0 };
 	struct jdr jdr_inst = jdr_make(buffer);
 	struct nvmeib_jdr_write_closure jdr_writer = nvmeib_jdr_write_closure_create(&jdr_inst);
-	struct nvmeib_wq_metrics *curr = NULL;
 
 	jdr_write_var(&jdr_inst, version, 1);
-	{
-		static char const *all_cpu = "metrics.all_cpus";
-		jdr_array_scope((&jdr_inst), all_cpu);
-		for (curr = start; curr < stop; curr++) {
-			nvmeib_wq_metrics_visit(curr, &(jdr_writer.base), dump_all_cpus);
+	if (dump_all_cpus && !dump_per_cpu) {
+		__wq_metrics_json_serialize_all_cpus(&jdr_inst, &jdr_writer, start, stop);
+	} else if (dump_all_cpus && dump_per_cpu) {
+		for_each_online_cpu(cpu) {
+			__wq_metrics_json_serialize_cpu(&jdr_inst, &jdr_writer, cpu, start, stop);
 		}
+	} else /* dump_all_cpus == false */ {
+		__wq_metrics_json_serialize_cpu(&jdr_inst, &jdr_writer, smp_processor_id(), start, stop);
 	}
 	result = jdr_finalize(&jdr_inst);
 	return result.len;
