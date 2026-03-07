@@ -4,20 +4,34 @@
 include $(M)/scripts/common.mk
 
 obj-m += nvmeib_common.o
-nvmeib_common-y := nvmeib.o nvmeib_utils.o nvmeib_ib_driver.o nvmeib_wd.o \
-	nvmeib_io_stats.o nvmeib_rdma.o \
-	nvmeib_msgloop.o nvmeib_srq.o  \
-	nvmeib_mcs.o nvmeib_mcs_msg_cache.o nvmeib_version_shared.o nvmeib_version_kernel.o \
-	mlx/nvmeib_mlx5.o mlx/nvmeib_mlx5p.o \
-	bnxt_re/nvmeib_bnxt_re.o siw/nvmeib_siw.o \
+nvmeib_common-y := \
+	nvmeib.o \
+	nvmeib_utils.o \
+	nvmeib_ib_driver.o \
+	nvmeib_wd.o \
+	nvmeib_io_stats.o \
+	nvmeib_rdma.o \
+	nvmeib_msgloop.o \
+	nvmeib_srq.o  \
+	nvmeib_mcs.o \
+	nvmeib_mcs_msg_cache.o \
+	nvmeib_version_shared.o \
+	nvmeib_version_kernel.o \
+	mlx/nvmeib_mlx5.o \
+	mlx/nvmeib_mlx5p.o \
+	bnxt_re/nvmeib_bnxt_re.o \
+	siw/nvmeib_siw.o \
 	nvmeib_numa.o \
 	nvmeib_buffer.o \
 	proc_epilog.o \
 	traces_ids.o \
 	nvmeib_json.o \
-	nvmeib_metrics_jdr.o nvmeib_memmgr_metrics.o nvmeib_error_tags.o \
+	nvmeib_metrics_jdr.o \
+	nvmeib_memmgr_metrics.o \
+	nvmeib_error_tags.o \
 	nvmeib_scatterlist_iter.o \
-	nvmeib_completion_noise.o nvmeib_pcpu_wq.o
+	nvmeib_completion_noise.o \
+	nvmeib_pcpu_wq.o
 
 ifeq ($(call ofed_ver_check,5,1),no)
   # Ofed below 5.1 - support mlx4 driver

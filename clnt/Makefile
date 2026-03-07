@@ -35,21 +35,36 @@ ifeq ($(ARCH),arm64)
 endif
 
 obj-m += nvmeibc.o
-nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
-	nvmeibc_cc_api.o nvmeibc_nvme.o nvmeibc_targets.o nvmeibc_memmgr_metrics.o nvmeibc_io_pet.o\
-	nvmeibc_channel.o nvmeibc_ib_io_channel.o \
-	nvmeibc_admin_channel.o nvmeibc_ib_admin_channel.o \
-	nvmeibc_ib_net.o nvmeibc_ib_net_admin.o \
-	nvmeibc_ib_net_io.o nvmeibc_disk.o nvmeibc_disk_locks.o \
+nvmeibc-y := \
+	nvmeibc_main.o \
+	nvmeibc_volume.o \
+	nvmeibc_block.o \
+	nvmeibc_cc_api.o \
+	nvmeibc_nvme.o \
+	nvmeibc_targets.o \
+	nvmeibc_memmgr_metrics.o \
+	nvmeibc_io_pet.o \
+	nvmeibc_channel.o \
+	nvmeibc_ib_io_channel.o \
+	nvmeibc_admin_channel.o \
+	nvmeibc_ib_admin_channel.o \
+	nvmeibc_ib_net.o \
+	nvmeibc_ib_net_admin.o \
+	nvmeibc_ib_net_io.o \
+	nvmeibc_disk.o \
+	nvmeibc_disk_locks.o \
 	nvmeibc_disk_local_dma_pools.o \
-	nvmeibc_locks_channel.o nvmeibc_toma.o \
-	nvmeibc_ib_nordda_channel.o nvmeibc_ib_net_nordda.o nvmeibc_jam.o \
+	nvmeibc_locks_channel.o \
+	nvmeibc_toma.o \
+	nvmeibc_ib_nordda_channel.o \
+	nvmeibc_ib_net_nordda.o \
+	nvmeibc_jam.o \
 	nvmeibc_pausable.o \
 	nvmeibc_client_core_ops.o \
 	nvmeibc_capabilities.o \
 	nvmeibc_disk_gen_cmds.o \
 	nvmeibc_error_tags.o \
-	nvmeibc_memmgr_metrics.o nvmeibc_common.o \
+	nvmeibc_common.o \
 	module/instance/nvmeibc_cinst.o \
 	block/nvmeibc_topology.o \
 	block/nvmeibc_block_api_os.o \
@@ -89,7 +104,6 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	block/datapath_utils_generic/nvmeibc_block_dp_operation.o \
 	block/datapath_utils_generic/nvmeibc_block_dp_lock_server.o \
 	block/datapath_utils_generic/nvmeibc_block_dp_dbits.o \
-	block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.o \
 	block/datapath_utils_generic/nvmeibc_block_dp_locks_scheme.o \
 	block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.o \
 	block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.o \
