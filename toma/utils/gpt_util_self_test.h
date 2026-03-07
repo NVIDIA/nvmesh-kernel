@@ -10,6 +10,7 @@
 #include "../nvmeibt_common.h"
 #include "../nvmeibt_disk_metadata.h"
 #include "../nvmeibt_local_disk.h"
+#include "toma_test_framework.h"
 
 // Self-test wrappers for production functions (from gpt_util.c)
 // These wrappers allow tests to call production functions while keeping them static/encapsulated
@@ -33,15 +34,8 @@ struct self_test_ctx {
 	BOOL		quiet_mode;
 };
 
-// Self-test framework: Test function signature
-typedef int (*self_test_func_t)(struct self_test_ctx *ctx);
-
-// Self-test framework: Test registration structure
-struct self_test_entry {
-	const char			*name;
-	const char			*command;
-	self_test_func_t	func;
-};
+// Cast void* context to self_test_ctx (use as first line in each DEFINE_TEST body)
+#define GPT_TEST_CTX() struct self_test_ctx *ctx = (struct self_test_ctx *)_ctx
 
 // X-Macro: Declare all tests here (order determines test numbers automatically)
 // Format: X(function_name, "Test Name", "Command Description")
@@ -105,11 +99,6 @@ struct self_test_entry {
 	X(memory_sections_ignored, "In-Memory GPT - Memory Sections Ignored in Apply", "gpt_util apply ignores memory_* sections") \
 	X(export_memory_gpt, "Export In-Memory GPT", "gpt_util export with mock memory GPT returning JSON")
 
-// Define test function (searchable marker + function signature)
-// Usage: DEFINE_TEST(normal_gpt) { test body }
-#define DEFINE_TEST(name) \
-	static int test_##name(struct self_test_ctx *ctx)
-
 // Helper macros for test functions
 #define TEST_JSON_PATH(name) TOMA_ROOT_DIR "tmp/test_" name ".json"
 
@@ -140,25 +129,11 @@ struct self_test_entry {
 int run_self_test(const char *test_selection, BOOL quiet_mode);
 
 /**
- * Start a self-test case (SELF-TEST only)
- * Prints test header with the given test number
- * @param quiet_mode: If true, suppress decorative banners
- */
-void SELF_TEST_start(int test_num, const char *description, const char *command, BOOL quiet_mode);
-
-/**
  * Setup device for self-test (SELF-TEST only)
  * Calls the setup function, handles fd, prints status
  * Returns 0 on success, -1 on failure
  */
 int SELF_TEST_setup_device(int (*setup_func)(const char *), const char *device_path);
-
-/**
- * End a self-test case (SELF-TEST only)
- * Prints PASSED/FAILED based on result
- * Returns: 0 if passed, -1 if failed (for counting)
- */
-int SELF_TEST_end(int test_num, int result);
 
 /**
  * Generate a mock NVMesh disk with valid MBR and GPT structure for self-test

@@ -55,21 +55,6 @@ void SELF_TEST_undo_mock_toma_running(void);
 void SELF_TEST_set_mock_local_disk(const struct nvmeibt_local_disk *local_disk);
 
 /**
- * Start a self-test case (SELF-TEST only)
- * Prints test header with the given test number
- */
-void SELF_TEST_start(int test_num, const char *description, const char *command, BOOL quiet_mode)
-{
-	if (!quiet_mode) {
-		fprintf(stdout, "\n");
-		fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
-		fprintf(stdout, COL_WHITE_BOLD "SELF-TEST %d: %s" COL_RESET "\n", test_num, description);
-		fprintf(stdout, "Emulated command: " COL_YELLOW "%s" COL_RESET "\n", command);
-		fprintf(stdout, COL_BLUE "============================================================" COL_RESET "\n");
-	}
-}
-
-/**
  * Setup device for self-test (SELF-TEST only)
  * Calls the setup function, handles fd, prints status
  * Returns 0 on success, -1 on failure
@@ -85,25 +70,6 @@ int SELF_TEST_setup_device(int (*setup_func)(const char *), const char *device_p
 
 	close(fd);
 	return 0;
-}
-
-/**
- * End a self-test case (SELF-TEST only)
- * Prints PASSED/FAILED based on result
- * Convention: result == 0 means PASS, result != 0 means FAIL (always)
- * Returns: 0 if passed, -1 if failed (for counting)
- */
-int SELF_TEST_end(int test_num, int result)
-{
-	BOOL test_passed = (result == 0);
-
-	if (test_passed) {
-		fprintf(stdout, "\n" COL_GREEN ">>> SELF-TEST %d: PASSED <<<" COL_RESET "\n", test_num);
-		return 0;
-	} else {
-		fprintf(stdout, "\n" COL_RED_BOLD ">>> SELF-TEST %d: FAILED <<<" COL_RESET "\n", test_num);
-		return -1;
-	}
 }
 
 /**
@@ -1512,6 +1478,7 @@ static void cleanup_backup_files_for_device(const char *device_path)
 
 DEFINE_TEST(normal_gpt)
 {
+	GPT_TEST_CTX();
 	int rv;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
@@ -1523,6 +1490,7 @@ DEFINE_TEST(normal_gpt)
 
 DEFINE_TEST(mismatch_gpt)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	// Step 1: Display mismatched GPT
@@ -1553,6 +1521,7 @@ out:
 
 DEFINE_TEST(uuid_filtering)
 {
+	GPT_TEST_CTX();
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
 	SELF_TEST_ARGV("-a", ctx->test_device_path, "--filter-uuid", "aabbccdd-1122-3344-5566-778899aabbcc");
 	return SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
@@ -1560,6 +1529,7 @@ DEFINE_TEST(uuid_filtering)
 
 DEFINE_TEST(lba_filtering)
 {
+	GPT_TEST_CTX();
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
 	SELF_TEST_ARGV("-a", ctx->test_device_path, "--filter-lba", "1000");
 	return SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
@@ -1567,6 +1537,7 @@ DEFINE_TEST(lba_filtering)
 
 DEFINE_TEST(overlap_detection)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	// Step 1: Display overlapping GPT
@@ -1597,6 +1568,7 @@ out:
 
 DEFINE_TEST(gpt_upgrade)
 {
+	GPT_TEST_CTX();
 	struct nvmeibt_disk_gpt		main_gpt;
 	struct nvmeibt_disk_gpt		verify_gpt;
 	uint32_t					expected_crc;
@@ -1665,6 +1637,7 @@ out:
 
 DEFINE_TEST(json_export_apply)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
@@ -1689,6 +1662,7 @@ out:
 
 DEFINE_TEST(zeroing_verify)
 {
+	GPT_TEST_CTX();
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
 	SELF_TEST_ARGV("-a", ctx->test_device_path, "-Z");
 	return SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv);
@@ -1696,6 +1670,7 @@ DEFINE_TEST(zeroing_verify)
 
 DEFINE_TEST(diff_no_changes)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
@@ -1720,6 +1695,7 @@ out:
 
 DEFINE_TEST(diff_modifications)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
@@ -1744,6 +1720,7 @@ out:
 
 DEFINE_TEST(apply_write)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_a = TOMA_ROOT_DIR "tmp/gpt_device_a";
 	const char					*device_b = TOMA_ROOT_DIR "tmp/gpt_device_b";
@@ -1803,6 +1780,7 @@ out:
 
 DEFINE_TEST(json_roundtrip_fidelity)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_json_roundtrip";
 	struct mm_json_elem			*json_root = NULL;
@@ -1884,6 +1862,7 @@ out:
 
 DEFINE_TEST(missing_section)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_and_open_mock_nvmesh_disk, ctx->test_device_path);
@@ -1914,6 +1893,7 @@ out:
 
 DEFINE_TEST(overlap_blocking)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_overlaps, ctx->test_device_path);
@@ -1940,6 +1920,7 @@ out:
 
 DEFINE_TEST(mismatch_blocking)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	SELF_TEST_SETUP_OR_ABORT(SELF_TEST_generate_mock_device_with_mismatch, ctx->test_device_path);
@@ -1970,6 +1951,7 @@ out:
 
 DEFINE_TEST(serial_number_mismatch)
 {
+	GPT_TEST_CTX();
 	int						rv = -1;
 	const char				*device_a = TOMA_ROOT_DIR "tmp/gpt_serial_device_a";
 	const char				*device_b = TOMA_ROOT_DIR "tmp/gpt_serial_device_b";
@@ -2029,6 +2011,7 @@ out:
 
 DEFINE_TEST(missing_serial_number)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	/* Create device and export */
@@ -2062,6 +2045,7 @@ out:
 
 DEFINE_TEST(delete_main_entry)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_delete_test";
 	struct nvmeibt_disk_gpt		gpt_before;
@@ -2175,6 +2159,7 @@ out:
 
 DEFINE_TEST(delete_metadata_entry)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_delete_metadata_test";
 	struct nvmeibt_disk_gpt		main_gpt;
@@ -2317,6 +2302,7 @@ out:
 
 DEFINE_TEST(readonly_fields_ignored)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_readonly_test";
 	struct nvmeibt_disk_gpt		gpt_before;
@@ -2427,6 +2413,7 @@ out:
 
 DEFINE_TEST(static_fields_validated)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_static_test";
 	struct nvmeibt_disk_gpt		gpt_after;
@@ -2509,6 +2496,7 @@ out:
 
 DEFINE_TEST(nguid_preservation)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_nguid_test";
 	struct nvmeibt_disk_gpt		main_gpt;
@@ -2649,6 +2637,7 @@ out:
 
 DEFINE_TEST(warning_fields_apply)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_warning_test";
 	struct nvmeibt_disk_gpt		main_gpt;
@@ -2756,6 +2745,7 @@ out:
 
 DEFINE_TEST(disk_metadata_apply)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_disk_md_test";
 	struct mm_json_elem			*json_root = NULL;
@@ -2833,6 +2823,7 @@ out:
 
 DEFINE_TEST(zero_change_write_skip)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	/* Export from device A */
@@ -2861,6 +2852,7 @@ out:
 
 DEFINE_TEST(binary_backup_restore)
 {
+	GPT_TEST_CTX();
 	int									rv = -1;
 	int									fd = -1;
 	const char							*device_path = TOMA_ROOT_DIR "tmp/gpt_binary_test";
@@ -3188,6 +3180,7 @@ out:
 
 DEFINE_TEST(backup_restore_serial_mismatch)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_a = TOMA_ROOT_DIR "tmp/gpt_backup_serial_a";
 	const char					*device_b = TOMA_ROOT_DIR "tmp/gpt_backup_serial_b";
@@ -3244,6 +3237,7 @@ out:
 
 DEFINE_TEST(backup_restore_missing_file)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_missing";
 	char						manifest_file[600] = {0};
@@ -3298,6 +3292,7 @@ out:
 
 DEFINE_TEST(backup_restore_corrupted_file)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_corrupt";
 	char						manifest_file[600] = {0};
@@ -3356,6 +3351,7 @@ out:
 
 DEFINE_TEST(backup_restore_incomplete_manifest)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_incomplete";
 	int							fd;
@@ -3404,6 +3400,7 @@ out:
 
 DEFINE_TEST(backup_restore_pba_overflow)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_overflow";
 	char						manifest_file[600] = {0};
@@ -3465,6 +3462,7 @@ out:
 
 DEFINE_TEST(backup_restore_block_size_mismatch)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_blocksize";
 	char						manifest_file[600] = {0};
@@ -3517,6 +3515,7 @@ out:
 
 DEFINE_TEST(backup_restore_empty_structures)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_backup_empty";
 	int							fd;
@@ -3566,6 +3565,7 @@ out:
 
 DEFINE_TEST(backup_creation_non_nvmesh_device)
 {
+	GPT_TEST_CTX();
 	int									rv = -1;
 	const char							*device_path = TOMA_ROOT_DIR "tmp/gpt_non_nvmesh";
 	int									fd = -1;
@@ -3625,6 +3625,7 @@ out:
 
 DEFINE_TEST(restore_mid_failure_file_deleted)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_restore_mid_fail";
 	char						manifest_file[600] = {0};
@@ -3684,13 +3685,10 @@ out:
 
 DEFINE_TEST(csv_parsing_path)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
-	/* Note: -d flag reads from /proc/nvmeibs/disks.csv which doesn't exist in sandbox
-	 * This test validates the flag is accepted and parsing logic doesn't crash
-	 * Expected: Fails gracefully with "device not found" message
-	 */
-	SELF_TEST_ARGV("-d", TOMA_ROOT_DIR "/dev/nvme0n1");
+	SELF_TEST_ARGV("-d", TOMA_ROOT_DIR "dev/nvme0n1");
 	if (SELF_TEST_run_gpt_util_op(*ctx->test_argc, ctx->test_argv) == 0) {
 		TEST_FAIL("Should have failed (device not in CSV)");
 		goto out;
@@ -3754,6 +3752,7 @@ out:
 
 DEFINE_TEST(json_add_partition_entry)
 {
+	GPT_TEST_CTX();
 	int									rv = -1;
 	int									fd = -1;
 	int									n_entries_after = 0;
@@ -4000,6 +3999,7 @@ out:
 
 DEFINE_TEST(json_modify_metadata_gpt)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_modify_metadata";
 	struct nvmeibt_disk_gpt		main_gpt;
@@ -4108,6 +4108,7 @@ out:
 
 DEFINE_TEST(json_boundary_max_partitions)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	/* Verify system handles LARGE_GPT_MAX_NUM_GPT_ENTRIES (8192) correctly */
@@ -4300,6 +4301,7 @@ out:
 
 DEFINE_TEST(stress_large_gpt_single_modification)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_stress_large";
 	struct nvmeibt_disk_gpt		main_gpt;
@@ -4427,6 +4429,7 @@ out:
 
 DEFINE_TEST(o_direct_flags)
 {
+	GPT_TEST_CTX();
 	int rv = -1;
 
 	/* Create device */
@@ -4455,6 +4458,7 @@ out:
 
 DEFINE_TEST(export_without_toma)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	struct mm_json_elem			*json_root = NULL;
 	BOOL						toma_running;
@@ -4495,6 +4499,7 @@ out:
 
 DEFINE_TEST(write_blocked_toma_running)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	struct mm_json_elem			*json_root = NULL;
 	struct mm_json_elem			*disk_md = NULL;
@@ -4551,6 +4556,7 @@ out:
 
 DEFINE_TEST(memory_sections_ignored)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	struct mm_json_elem			*json_root = NULL;
 
@@ -4598,6 +4604,7 @@ out:
  */
 DEFINE_TEST(export_memory_gpt)
 {
+	GPT_TEST_CTX();
 	int								rv = -1;
 	struct nvmeibt_local_disk		mock_local_disk;
 	union nvmeib_uuid				test_uuid;
@@ -4744,6 +4751,7 @@ out:
  */
 DEFINE_TEST(export_segment_metadata)
 {
+	GPT_TEST_CTX();
 	int							rv = -1;
 	const char					*device_path = TOMA_ROOT_DIR "tmp/gpt_seg_metadata_test";
 	struct mm_json_elem			*json_root = NULL;
@@ -4835,22 +4843,15 @@ out:
  */
 int run_self_test(const char *test_selection, BOOL quiet_mode)
 {
-	int							disk_fd = -1;
-	int							tests_run = 0;
-	int							tests_passed = 0;
-	int							tests_failed = 0;
 	const char					*test_device_path;
 	const char					*wrong_device_path;
 	char						*test_argv[10];
 	int							test_argc;
 	struct self_test_ctx		ctx;
-	BOOL						*tests_to_run = NULL;
-	int							*test_results = NULL;
-	int							num_tests_total = 1;		// Will be updated
+	int							rv;
 
-	// Test registry - auto-generated from SELF_TEST_LIST X-Macro
 	#define X(func, name, cmd) {name, cmd, test_##func},
-	struct self_test_entry tests[] = { SELF_TEST_LIST };
+	struct toma_test_entry tests[] = { SELF_TEST_LIST };
 	#undef X
 
 	/* Safety check: Block self-tests if TOMA is running */
@@ -4864,120 +4865,28 @@ int run_self_test(const char *test_selection, BOOL quiet_mode)
 		return 1;
 	}
 
-	num_tests_total = sizeof(tests) / sizeof(tests[0]);
-
 	mkdir(TOMA_ROOT_DIR "tmp", 0755);
 	test_device_path = TOMA_ROOT_DIR "tmp/gpt_util_self_test";
 	wrong_device_path = TOMA_ROOT_DIR "tmp/gpt_util_wrong_device";
 
-	// Setup context
 	ctx.test_device_path = test_device_path;
 	ctx.wrong_device_path = wrong_device_path;
 	ctx.test_argv = test_argv;
 	ctx.test_argc = &test_argc;
 	ctx.quiet_mode = quiet_mode;
 
-	// Allocate tracking arrays
-	tests_to_run = calloc(num_tests_total, sizeof(BOOL));
-	test_results = calloc(num_tests_total, sizeof(int));		/* 0=not run, 1=passed, -1=failed */
-
-	if (test_selection == NULL) {
-		// Run all tests
-		for (int i = 0; i < num_tests_total; i++) {
-			tests_to_run[i] = true;
-		}
-	} else {
-		// Parse comma-separated list and ranges
-		char *selection_copy = strdup(test_selection);
-		char *token = strtok(selection_copy, ",");
-		while (token != NULL) {
-			char *dash = strchr(token, '-');
-			if (dash) {
-				// Range: "3-5"
-				int start = atoi(token);
-				int end = atoi(dash + 1);
-				for (int j = start; j <= end && j <= num_tests_total; j++) {
-					if (j >= 1) tests_to_run[j - 1] = true;
-				}
-			} else {
-				// Single test: "3"
-				int test_num = atoi(token);
-				if (test_num >= 1 && test_num <= num_tests_total) {
-					tests_to_run[test_num - 1] = true;
-				}
-			}
-			token = strtok(NULL, ",");
-		}
-		free(selection_copy);
-	}
-
-	// Run selected tests
-	for (int i = 0; i < num_tests_total; i++) {
-		if (tests_to_run[i]) {
-			int test_num = i + 1;		// Actual test number (from registry position)
-			int rv;
-
-			SELF_TEST_start(test_num, tests[i].name, tests[i].command, quiet_mode);
-			rv = tests[i].func(&ctx);
-
-			tests_run++;
-			if (SELF_TEST_end(test_num, rv) == 0) {
-				tests_passed++;
-				test_results[i] = 1;		/* Passed */
-			} else {
-				tests_failed++;
-				test_results[i] = -1;		/* Failed */
-			}
-		}
-	}
-
-	// Summary
-	fprintf(stdout, "\n");
-	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
-
-	if (tests_failed == 0) {
-		fprintf(stdout, COL_GREEN "ALL SELF-TESTS PASSED (%d/%d)" COL_RESET "\n", tests_passed, tests_run);
-	} else {
-		fprintf(stdout, COL_RED_BOLD "SOME TESTS FAILED: %d passed, %d failed (%d total)" COL_RESET "\n",
-				tests_passed, tests_failed, tests_run);
-	}
-
-	fprintf(stdout, COL_GREEN "============================================================" COL_RESET "\n");
-
-	/* Always show test list with pass/fail status */
-	fprintf(stdout, "\nTest Results (%d tests):\n", num_tests_total);
-	for (int i = 0; i < num_tests_total; i++) {
-		const char *status;
-		const char *color;
-
-		if (test_results[i] == 1) {
-			status = PASS;
-			color = COL_GREEN;
-		} else if (test_results[i] == -1) {
-			status = FAIL;
-			color = COL_RED_BOLD;
-		} else {
-			status = SKIP;
-			color = COL_YELLOW;
-		}
-
-		fprintf(stdout, "  %s[%s] Test %2d:%s %s\n",
-				color, status, i + 1, COL_RESET, tests[i].name);
-	}
-
-	// Cleanup
-	free(tests_to_run);
-	free(test_results);
-	if (disk_fd >= 0) {
-		close(disk_fd);
-	}
+	rv = test_run_suite("GPT Util Self-Test",
+						tests,
+						sizeof(tests) / sizeof(tests[0]),
+						&ctx,
+						test_selection,
+						quiet_mode);
 
 	/* Safety net cleanup: Remove common test resources if tests crashed/aborted */
-	/* Each test cleans up its own files - this is just for abnormal termination */
 	unlink(test_device_path);
 	unlink(wrong_device_path);
 	cleanup_backup_files_for_device(test_device_path);
 	SELF_TEST_release_toma_lock();
-	return (tests_failed > 0) ? 1 : 0;
+	return rv;
 }
 
