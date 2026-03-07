@@ -3,11 +3,7 @@
 
 #include "common/nvmeib_error_tags.h"
 
-#if defined(__KERNEL__)
-	#define NVMEIBC_ERROR_TAG(name) NVMESH_DEFINE_ERROR_TAG(name, ".nvmeibc_error_tags")
-#else
-	#define NVMEIBC_ERROR_TAG(name) NVMESH_DEFINE_ERROR_TAG(name,  "nvmeibc_error_tags")
-#endif
+#define NVMEIBC_ERROR_TAG(name) NVMESH_DEFINE_ERROR_TAG(name, "nvmeibc_error_tags")
 
 extern struct nvmesh_error_tag __start_nvmeibc_error_tags[];
 extern struct nvmesh_error_tag  __stop_nvmeibc_error_tags[];

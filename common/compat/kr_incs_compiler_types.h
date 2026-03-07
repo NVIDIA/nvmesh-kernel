@@ -8,7 +8,7 @@
 	#endif
 
 	#define __concurrent_access
-	
+
 #else
 	#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 	#define BUILD_BUG_ON_MSG(condition, msg) BUILD_BUG_ON(condition)
@@ -53,7 +53,7 @@
 		#define __concurrent_access _Atomic
 		#define __concurrent_store(p, v) atomic_store(&(p), v)
 		#define __concurrent_load(p)    atomic_load(&(p))
-	#else 
+	#else
 		#define __concurrent_access
 		#define __concurrent_store(p, v) ((p) = (v))
 		#define __concurrent_load(p)    (p)
@@ -62,8 +62,26 @@
 #endif // __KERNEL__
 
 #define NVMESH_USED           __attribute__((__used__))
-#define NVMESH_SECTION(name)  __attribute__((__section__(name)))
 #define NVMESH_ALIGNED(x)     __attribute__((__aligned__(x)))
+
+/**
+ * NVMESH_SECTION() - place a variable into a named ELF section.
+ * @name: section name as a string literal, e.g. "nvmeibc_error_tags".
+ *
+ * In kernel modules, section names must begin with a dot (e.g. ".nvmeibc_error_tags") because the kernel module
+ * loader only recognises dot-prefixed custom sections. The __start_/__stop_ boundary symbols are provided by
+ * linker scripts (e.g. nvmeibc.lds).
+ *
+ * In userspace, the standard ld linker auto-generates __start_<name> and __stop_<name> symbols for any section
+ * whose name is a valid C identifier (no leading dot). Therefore the dot is omitted.
+ *
+ * The macro uses C string-literal concatenation ("." "name" -> ".name") so @name must always be a string literal.
+ */
+#if defined(__KERNEL__)
+	#define NVMESH_SECTION(name)  __attribute__((__section__("." name)))
+#else
+	#define NVMESH_SECTION(name)  __attribute__((__section__(name)))
+#endif
 
 
 #define const_cast_ptr(type, ptr) 																								\
