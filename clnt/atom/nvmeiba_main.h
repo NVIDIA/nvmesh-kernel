@@ -32,7 +32,6 @@ struct nvmeiba_all_os_apis {				// Main object of nvmeiba
 /************************** PRIVATE API for ATOM ******************************/
 struct nvmeiba_atom_os_api;
 char *nvmeiba_atom_get_string_status(const struct nvmeiba_atom_os_api *);
-void nvmeiba_os_api_set_detaching_abandoned(struct nvmeiba_atom_os_api *);
 
 /******************* PRIVATE API for List of all ATOMS ************************/
 void nvmeiba_os_apis_add(struct nvmeiba_atom_os_api *os);		// Call upon creating of block device (attach). Adding atom     to list of all atoms

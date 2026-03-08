@@ -632,7 +632,9 @@ static int __device_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 
 /******************************************************************************/
 static REQ_RET nvmeibc_b_req_make_no_q(  struct bio *bio);
+#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 static REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio);
+#endif
 
 static void __nvmeibc_os_api_layer_destroy(struct nvmeibc_os_apis_container *c)
 {
@@ -677,8 +679,10 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 	H = nvmeiba_os_do_on_nvmeibc_up();			// Connect to nvmeiba
 	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_io);
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
-	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_de);
-	c->bdev_fops_de.submit_bio = nvmeibc_b_req_reject_no_q; // This pointer will replace IO when detaching
+	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
+		nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_de);
+		c->bdev_fops_de.submit_bio = nvmeibc_b_req_reject_no_q; // This pointer will replace IO when detaching
+	#endif
 	c->bdev_fops_io.submit_bio = nvmeibc_b_req_make_no_q;	// This pointer will be used to issue IOs
 #endif
 	nvmeibc_driver_version_init(&c->drv_ver, p);
@@ -973,6 +977,7 @@ static const struct gendisk* block_api_os_get_gendisk(const struct bio *bio)
 	return disk ? disk : block_api_os_get_os(bio)->atom.disk;
 }
 
+#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 /* request_queue callback, Autofails all IO's. Replaces the real cb when volume is unsafe-detaching */
 static REQ_RET nvmeibc_b_req_reject(struct request_queue *q, struct bio *bio)
 {
@@ -988,6 +993,7 @@ static __attribute__((unused)) REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio
 {
 	return nvmeibc_b_req_reject(block_api_os_get_gendisk(bio)->queue, bio);
 }
+#endif
 
 bool nvmeibc_bio_noexec = 0;
 module_param_named(bio_noexec, nvmeibc_bio_noexec, bool, 0644);
@@ -1035,6 +1041,7 @@ static __attribute__((unused)) REQ_RET nvmeibc_b_req_make_no_q(struct bio *bio)
 
 #define __dirver_ctx_of(atom) container_of(atom, struct nvmeibc_os_api, atom)->driver_context
 
+#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 static int __set_make_req_to_reject(struct nvmeiba_atom_os_api *atom)
 {
 #if KS_REQUEST_QUEUE_HAS_REQUEST_FN
@@ -1044,13 +1051,23 @@ static int __set_make_req_to_reject(struct nvmeiba_atom_os_api *atom)
 #endif
 	return 0;
 }
+#endif
 
 void block_api_os_stop_accepting_kernel_io(struct nvmeibc_os_api *os, u32 reason)
 {
 	struct nvmeiba_atom_os_api *atom = &os->atom;
 	if (!os->is_io_api_disabled) {
 		if (reason == 'D') {
-			__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
+#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
+			int (*set_detaching_fn)(struct nvmeiba_atom_os_api *atom) = (void *)os->atom.reserved[0];
+			if (set_detaching_fn) {
+				__exec_for_carrier_and_sub_vols(atom, set_detaching_fn);
+			} else {
+				__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
+			}
+#else
+			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_set_detaching);
+#endif
 		} else {	// If carrier, abandones queue for itself and all sub volumes
 			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_orphan_abandon);
 		}

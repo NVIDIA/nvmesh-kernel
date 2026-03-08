@@ -1248,6 +1248,9 @@ cflags += -DKERN_VER_STRING=\""$(KERN_VER)\"" -DOFED_VER_STRING=\""$(OFED_VER_ST
 cflags += -DIO_POLL_THREAD=1
 # cflags += -DCQ_DEBUG=1
 
+# Support older nvmeiba (without detaching atoms upgrade support) in nvmeibc
+cflags += -DNVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING=1
+
 # EC PERFORMANCE (full-slice oriented)
 cflags += -DEC_PERF_CLNT_NORDDA_REDUCE_SEND_COMPS=0
 cflags += -DEC_PERF_CLNT_NORDDA_SHARED_CQ=1

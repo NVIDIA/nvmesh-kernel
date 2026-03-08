@@ -26,7 +26,7 @@ void disk_id_allocator_mark( struct disk_id_allocator_t* al, struct gendisk *dis
 
 struct nvmeibc_os_apis_container {
 	struct block_device_operations bdev_fops_io;// nvmeibc our block device methods with OS with IO enabled (submit_bio)
-	#if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
+	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING && !KS_REQUEST_QUEUE_HAS_REQUEST_FN
 		struct block_device_operations bdev_fops_de;// nvmeibc our block device methods with OS while detaching (reject bio), when request queue exists, q->function is changed so no need for different fops
 	#endif
 	struct nvmeibc_driver_version  drv_ver;		// nvmeibc driver

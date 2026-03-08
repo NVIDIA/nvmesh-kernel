@@ -265,6 +265,9 @@ char *nvmeiba_atom_get_string_status(const struct nvmeiba_atom_os_api *a)
 
 void nvmeiba_os_api_constructor(struct nvmeiba_atom_os_api *atom)
 {
+#if NVMEIBA_HACK_DETACHING_DYNAMIC_EXPORT
+	atom->reserved[0] = (u64)&nvmeiba_os_api_set_detaching;
+#endif
 	nvmeiba_os_apis_add(atom);
 }
 EXPORT_SYMBOL(nvmeiba_os_api_constructor);
@@ -353,9 +356,7 @@ static REQ_RET nvmeiba_b_req_reject(struct bio *bio)
 	return REQ_RET_ZERO;
 }
 
-/* Replace nvmeibc reject func with nvmeiba one.
- * This function must remain idempotent, for the case of multiple upgrades (otherwise support must be added). */
-void nvmeiba_os_api_set_detaching_abandoned(struct nvmeiba_atom_os_api *atom)
+int nvmeiba_os_api_set_detaching(struct nvmeiba_atom_os_api *atom)
 {
 #if KS_REQUEST_QUEUE_HAS_REQUEST_FN
 	nvmeiba_os_apis_set_default_pops(&atom->disk->fops);
@@ -363,4 +364,6 @@ void nvmeiba_os_api_set_detaching_abandoned(struct nvmeiba_atom_os_api *atom)
 #else
 	nvmeiba_os_apis_set_detaching_pops(&atom->disk->fops);// Replace submit_bio with nvmeiba_b_req_reject
 #endif
+	return 0;
 }
+EXPORT_SYMBOL(nvmeiba_os_api_set_detaching);
