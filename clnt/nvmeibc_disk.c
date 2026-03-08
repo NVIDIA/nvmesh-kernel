@@ -5300,7 +5300,7 @@ uint nvmeibc_nr_get_by_cpu_index = 0;
 module_param_named(nr_get_by_cpu_index, nvmeibc_nr_get_by_cpu_index, uint, 0644);
 MODULE_PARM_DESC(nr_get_by_cpu_index, "Get nrch based on CPU-index: 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
 
-uint nvmeibc_nr_get_by_cpu_index_tcp = 2;
+uint nvmeibc_nr_get_by_cpu_index_tcp = 0;
 module_param_named(nr_get_by_cpu_index_tcp, nvmeibc_nr_get_by_cpu_index_tcp, uint, 0644);
 MODULE_PARM_DESC(nr_get_by_cpu_index_tcp, "Get nrch based on CPU-index (for TCP): 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
 
