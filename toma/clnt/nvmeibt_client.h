@@ -5,10 +5,9 @@
 #include "nvmeibt_ds.h"
 #include "../common/nvmeib_hash.h"
 
-struct nvmeibt_client;
 struct nvmeibt_local_disk;
 
-struct nvmeibt_client {												// Discrebes connection of client to local disk
+struct nvmeibt_client {												// Describes connection of client to local disk
 	union nvmeib_uuid					client_provided_uuid;		// UUID binary, like: 0x124a1d9f09d21c25eb816ae030a1f98e
 	struct nvmeibt_urn_uuid				client_provided_urn_uuid;	// UUID text formatted, like: 251cd209-9f1d-4a12-8ef9-a130e06a81eb
 	struct nvmeibt_host_name			net;						// Like: nvme112.excelero.com
@@ -30,8 +29,8 @@ static inline bool nvmeibt_client_is_delete_in_the_air(const struct nvmeibt_clie
 	return (!client || client->is_delete_in_the_air);
 }
 
-const char *nvmeibt_client_get_urn_uuid_str(struct nvmeibt_client *client);
-const char *nvmeibt_client_get_hostname(struct nvmeibt_client *client);
+static inline const char *nvmeibt_client_get_urn_uuid_str(const struct nvmeibt_client *client) { return (client ? client->client_provided_urn_uuid.str : ""); }
+static inline const char *nvmeibt_client_get_hostname(    const struct nvmeibt_client *client) { return (client ? client->net.host_name : ""); }
 int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *msg_buf, int size);
 
 void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg);

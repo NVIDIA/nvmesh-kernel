@@ -9,18 +9,6 @@
 #include "nvmeibt_global.h"
 
 /**********************                       ***************************/
-static char null_str = '\0';
-
-const char *nvmeibt_client_get_urn_uuid_str(struct nvmeibt_client *client)
-{
-	return (client ? client->client_provided_urn_uuid.str : &null_str);
-}
-
-const char *nvmeibt_client_get_hostname(struct nvmeibt_client *client)
-{
-	return (client ? client->net.host_name : &null_str);
-}
-
 #define NVMEIBT_CLIENT_DUMP(__name__, cl) \
 	N_Tf(__name__, "uuid=@UUID_LE hostname=@HOSTNAME disk=@STR cid=@CID", &(cl)->client_provided_uuid, (cl)->net.host_name, (cl)->ldisk_id.str, (cl)->cid)
 
