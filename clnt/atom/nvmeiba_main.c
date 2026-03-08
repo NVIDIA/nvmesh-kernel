@@ -407,7 +407,7 @@ EXPORT_SYMBOL(nvmeiba_os_do_on_nvmeibc_up);
 void nvmeiba_os_do_on_nvmeibc_down(void)
 {
 	struct nvmeiba_all_os_apis* A = &all;
-	struct nvmeiba_atom_os_api *atom;
+	const struct nvmeiba_atom_os_api *atom;
 	unsigned long flags;
 	bool are_all_orphans;
 	spin_lock_irqsave(&A->lock, flags);
@@ -423,13 +423,6 @@ void nvmeiba_os_do_on_nvmeibc_down(void)
 	if (A->n.osapi && are_all_orphans) {		// Just verify, for debug
 		list_for_each_entry(atom, &A->list, list_all_os_apis) {
 			WARN_INCORRECT_STATUS((atom->status != nvmeiba_status_orphan), atom);
-		}
-	}
-	if (A->n.nvmeibc == 0) {
-		// nvmeibc module is going down, replace nvmeibc reject func with nvmeiba one for all detaching atoms
-		list_for_each_entry(atom, &A->list, list_all_os_apis) {
-			if (atom->status == nvmeiba_status_detaching)
-				nvmeiba_os_api_set_detaching_abandoned(atom);
 		}
 	}
 	spin_unlock_irqrestore(&A->lock, flags);
