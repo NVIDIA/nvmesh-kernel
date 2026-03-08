@@ -1738,7 +1738,7 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 	} else if (rdma_node_get_transport(N2IB(nis_dev)->node_type) == RDMA_TRANSPORT_IWARP) {
 		int primary_tcp_base_port = nvmeib_get_tcp_base_port_id();
 		int _2nd_tcp_base_port = primary_tcp_base_port + 1;
-		int _2nd_tcp_num_ports = nvmeib_get_tcp_num_ports() - 1;
+		int _2nd_tcp_num_ports = nvmeib_get_tcp_num_ports(nis_dev->dev) - 1;
 		int i;
 
 		/* Start iWARP Listener */
@@ -1842,7 +1842,7 @@ static void remove_nis(struct nvmeibs_dev *nis_dev)
 
 	/* stop all listener so no new connection requests */
 	nvmeib_rdma_stop_listen(nis_dev->ib_l_cm_id);
-	for (i = 0; i < nvmeib_get_tcp_num_ports(); i++)
+	for (i = 0; i < nvmeib_get_tcp_num_ports(nis_dev->dev) - 1; i++)
 		nvmeib_rdma_stop_listen(nis_dev->iw_2nd_l_cm_id[i]);
 	nvmeib_rdma_stop_listen(nis_dev->iw_prim_l_cm_id);
 	list_for_each_entry(ib_port, &nis_dev->port_list, port_list_n) {

@@ -2030,7 +2030,7 @@ VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_get_io_port_info_clnt_ext3_decode)
 		/* Fill defaults */
 		if (cur_rionic) {
 			cur_rionic->tcp_base_port = nvmeib_get_tcp_base_port_id();
-			cur_rionic->tcp_num_ports = nvmeib_get_tcp_num_ports();
+			cur_rionic->tcp_num_ports = nvmeib_get_tcp_num_ports(NULL);
 		}
 		return 0;
 	}
@@ -3643,7 +3643,7 @@ VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_get_lock_gids_rsp_clnt_ext2_decode
 	if (!wire_buf) {
 		/* Use defaults */
 		ctx->ib_gids[elem_idx].tcp_base_port = nvmeib_get_tcp_base_port_id();
-		ctx->ib_gids[elem_idx].tcp_num_ports = nvmeib_get_tcp_num_ports();
+		ctx->ib_gids[elem_idx].tcp_num_ports = nvmeib_get_tcp_num_ports(NULL);
 		return 0;
 	}
 

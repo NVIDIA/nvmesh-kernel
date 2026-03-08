@@ -5,6 +5,9 @@
 
 #include "nvmeib.h"
 #include "linux/preempt.h"
+#include "linux/cpumask.h"
+#include "linux/irqflags.h"
+#include "linux/netdevice.h"
 #include "nvmeib_wd.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
@@ -84,9 +87,9 @@ unsigned int nvmeib_tcp_base_port_id = NVMEIB_IWARP_PORT_ID;
 module_param_named(tcp_base_port_id, nvmeib_tcp_base_port_id, uint, 0444);
 MODULE_PARM_DESC(tcp_base_port_id, "The first (base) port ID for secondary SIW (iWARP) listeners.");
 
-unsigned int nvmeib_tcp_num_ports = NVMEIB_MAX_NR_TCP_CHANNELS_PER_PATH;
+unsigned int nvmeib_tcp_num_ports = 0;
 module_param_named(tcp_num_ports, nvmeib_tcp_num_ports, uint, 0444);
-MODULE_PARM_DESC(tcp_num_ports, "The number of secondary SIW (iWARP) TCP ports. 0 = number of CPUs.");
+MODULE_PARM_DESC(tcp_num_ports, "TCP: Secondary iWARP listeners number of TCP ports (0 = number of RX Queues or number of online CPUs)");
 
 /* Keep polling for this many microseconds after the last completion
  * before attempting to rearm interrupts (0: disabled) */
@@ -185,18 +188,34 @@ EXPORT_SYMBOL(nvmeib_get_tcp_base_port_id);
 
 static void nvmeib_set_tcp_num_ports(void)
 {
-	if (nvmeib_tcp_num_ports == 0)
-		nvmeib_tcp_num_ports = num_online_cpus();
-	if (nvmeib_tcp_num_ports > NVMEIB_DFLT_MAX_CPUS) {
-		nvmeib_tcp_num_ports = NVMEIB_DFLT_MAX_CPUS;
-		_NW_dmesg(warn_nvmeib_set_tcp_num_ports,
-			  "restrict tcp_num_ports to @N_PORTS", nvmeib_tcp_num_ports);
+	if (!nvmeib_tcp_num_ports) {
+		_NT(trace_nvmeib_set_tcp_num_ports, "tcp_num_ports dynamically determined by net-device #rx_queues");
+	} else {
+		if (nvmeib_tcp_num_ports > NVMEIB_DFLT_MAX_CPUS) {
+			nvmeib_tcp_num_ports = NVMEIB_DFLT_MAX_CPUS;
+			_NW_dmesg(warn_nvmeib_set_tcp_num_ports,
+				  "restrict tcp_num_ports to @N_PORTS", nvmeib_tcp_num_ports);
+		} else {
+			_NT(trace_2_nvmeib_set_tcp_num_ports, "tcp_num_ports set to @N_PORTS", nvmeib_tcp_num_ports);
+		}
 	}
 }
 
-unsigned int nvmeib_get_tcp_num_ports(void)
+unsigned int nvmeib_get_tcp_num_ports(struct nvmeib_dev *dev)
 {
-	return nvmeib_tcp_num_ports;
+	if (nvmeib_tcp_num_ports != 0)
+		return nvmeib_tcp_num_ports;
+	if (dev && dev->dev_type == DT_siw && dev->ib_dev->get_netdev) {
+		struct net_device *ndev = dev->ib_dev->get_netdev(dev->ib_dev, 1);
+
+		if (ndev) {
+			unsigned int n = ndev->real_num_rx_queues;
+
+			dev_put(ndev);
+			return n ? n : 1;
+		}
+	}
+	return num_online_cpus();
 }
 EXPORT_SYMBOL(nvmeib_get_tcp_num_ports);
 

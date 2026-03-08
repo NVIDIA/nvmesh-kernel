@@ -2096,7 +2096,7 @@ ssize_t nvmeib_qp_stats_fill(struct nvmeib_qp_stats_pcpu *s, char *buf, size_t l
 #endif /* NVMEIB_QP_STATS */
 
 unsigned int nvmeib_get_tcp_base_port_id(void);
-unsigned int nvmeib_get_tcp_num_ports(void);
+unsigned int nvmeib_get_tcp_num_ports(struct nvmeib_dev *dev);
 bool nvmeib_is_dev_in_blacklist(struct ib_device *ib_dev);
 bool nvmeib_dev_use_keeper(struct nvmeib_dev *dev);
 
