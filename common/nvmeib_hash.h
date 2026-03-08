@@ -32,6 +32,7 @@ struct nvmeib_hash_table {		// Note that during resize, we keep the object, and 
 	char							description[128];
 	uint64_t						scrambled_to_idx_mask;
 	struct nvmeib_hash_entry		*arr;
+	pthread_mutex_t					hash_tbl_arr_lock;
 	int								log2_of_n_arr_entries;
 	int								initial_log2_of_n_arr_entries;
 	int 							n_arr_entries;
@@ -39,6 +40,21 @@ struct nvmeib_hash_table {		// Note that during resize, we keep the object, and 
 	bool							is_used_outside_main_thread;    // For now, no resize at idle_time_activities. The NVMEIB_HASH_FOREACH is too complicated for an unlock()
 	int8_t							key_len;
 };
+
+static inline bool nvmeib_hash_tbl_arr_lock(struct nvmeib_hash_table *hash_tbl)
+{
+	if (hash_tbl->is_used_outside_main_thread) {
+		pthread_mutex_lock(&(hash_tbl->hash_tbl_arr_lock));
+	}
+	return 1;
+}
+static inline bool nvmeib_hash_tbl_arr_unlock(struct nvmeib_hash_table *hash_tbl)
+{
+	if (hash_tbl->is_used_outside_main_thread) {
+		pthread_mutex_unlock(&(hash_tbl->hash_tbl_arr_lock));
+	}
+	return 0;
+}
 
 #if IS_HASH_UNITTEST
 #define NVMEIB_HASH_DUMP_STATISTICS(_name_hash_dump, __hash_tbl) ({												\
@@ -71,11 +87,13 @@ static inline bool hash_is_entry_OCCUPIED(const struct nvmeib_hash_entry *entry)
 
 static inline int nvmeib_hash_get_n_elements(struct nvmeib_hash_table *hash_tbl)
 {
+	// No need to lock. hash_tbl itself survives add/del/resize
 	return (hash_tbl ? hash_tbl->n_occupied : 0);
 }
 
 static inline bool nvmeib_hash_is_ascii(struct nvmeib_hash_table *hash_tbl)
 {
+	// No need to lock. hash_tbl itself survives add/del/resize
 	return (hash_tbl->key_len == -1);
 }
 

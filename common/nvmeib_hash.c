@@ -125,6 +125,7 @@ static void nvmeib_hash_resize(struct nvmeib_hash_table *hash_tbl)
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "nvmeib_hash_resize_1 n_occupied=%d n_arr_entries=%d Threshold(relaxed)=%d\n", hash_tbl->n_occupied, hash_tbl->n_arr_entries, hash_tbl->n_arr_entries * HASH_RELAXED_LOAD_FACTOR_THRESHOLD);
 #endif	// #if IS_HASH_UNITTEST
+	nvmeib_hash_tbl_arr_lock(hash_tbl);
 	if (is_hash_tbl_suitable_for_resize_relaxed_increase(hash_tbl)) {
 		// Note we also get here in case of EMERGENCY (on-add)
 		hash_tbl->log2_of_n_arr_entries = hash_tbl->log2_of_n_arr_entries + 1;
@@ -177,7 +178,8 @@ static void nvmeib_hash_resize(struct nvmeib_hash_table *hash_tbl)
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "nvmeib_hash_resize() took %ldns\n", timespec_diff_ns(end_timespec, start_timespec));
 #endif	// #if IS_HASH_UNITTEST
-out:;
+out:
+	nvmeib_hash_tbl_arr_unlock(hash_tbl);
 }
 
 static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_hash_key *key, const uint32_t scrambled, void *in_ptr_to_obj)
@@ -190,6 +192,7 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "hash_add n_occupied=%d n_arr_entries=%d Threshold(emergency)=%d\n", hash_tbl->n_occupied, hash_tbl->n_arr_entries, hash_tbl->n_arr_entries * HASH_EMERGENCY_LOAD_FACTOR_THRESHOLD);
 #endif	// #if IS_HASH_UNITTEST
+	nvmeib_hash_tbl_arr_lock(hash_tbl);
 	if (is_hash_tbl_suitable_for_resize_emergency_increase(hash_tbl)) {
 		nvmeib_hash_resize(hash_tbl);
 	}
@@ -224,6 +227,7 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 	hash_tbl->arr[idx].scrambled = scrambled;
 	rv_ptr_to_obj = NULL;
 out:
+	nvmeib_hash_tbl_arr_unlock(hash_tbl);
 	NVMEIB_HASH_DUMP_STATISTICS(4cghs89, hash_tbl);
 	return rv_ptr_to_obj;
 }
@@ -275,12 +279,13 @@ void *nvmeib_hash_add_ascii_str(struct nvmeib_hash_table *hash_tbl, const char *
 	return hash_add(hash_tbl, &key, scrambled, ptr_to_obj);
 }
 
-static void *hash_search(const struct nvmeib_hash_table *hash_tbl, const union nvmeib_hash_key *key, const uint32_t scrambled)
+static void *hash_search(struct nvmeib_hash_table *hash_tbl, const union nvmeib_hash_key *key, const uint32_t scrambled)
 {
 	int			idx;
 	void		*ptr_to_obj = NULL;
 	int			n_collisions = 0;
 
+	nvmeib_hash_tbl_arr_lock(hash_tbl);
 	idx = hash_scrambled_to_idx(scrambled, hash_tbl->scrambled_to_idx_mask);
 	while (hash_is_entry_OCCUPIED(&(hash_tbl->arr[idx]))) {
 		if (hash_is_same_key_OCCUPIED(&(hash_tbl->arr[idx].key), key, hash_tbl->key_len)) {
@@ -295,6 +300,7 @@ static void *hash_search(const struct nvmeib_hash_table *hash_tbl, const union n
 #endif	// #if IS_HASH_UNITTEST
 		idx = hash_next_idx_on_collision(idx, hash_tbl->scrambled_to_idx_mask);
 	}
+	nvmeib_hash_tbl_arr_unlock(hash_tbl);
 	return ptr_to_obj;
 }
 
@@ -352,6 +358,7 @@ static void *hash_delete_key(struct nvmeib_hash_table *hash_tbl, const union nvm
 	bool		is_scrambled_beyond_deleted;
 	void		*deleted_ptr_to_obj = NULL;
 
+	nvmeib_hash_tbl_arr_lock(hash_tbl);
 	idx = hash_scrambled_to_idx(scrambled, hash_tbl->scrambled_to_idx_mask);
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "hash_delete_key_1 idx=%d n_occupied=%d\n", idx, hash_tbl->n_occupied);
@@ -407,6 +414,7 @@ fprintf(stdout, "gap_from_idx_according_to_scrambled_to_prev_deleted=%d    n_occ
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "hash_delete_key_END n_occupied=%d\n", hash_tbl->n_occupied);
 #endif	// #if IS_HASH_UNITTEST
+	nvmeib_hash_tbl_arr_unlock(hash_tbl);
 	return deleted_ptr_to_obj;
 }
 
@@ -457,7 +465,7 @@ void *nvmeib_hash_delete_ascii_str(struct nvmeib_hash_table *hash_tbl, const cha
 	return hash_delete_key(hash_tbl, &key, scrambled);
 }
 
-static struct nvmeib_hash_table *all_active_hashs;	// Use a hash for the list of all created/active hashes
+static struct nvmeib_hash_table *all_active_hashs;	// Use a hash for the list of all created/active hashes. Its lock is not used, as we do not expect real multithreading
 
 static inline struct nvmeib_hash_table *__nvmeib_hash_create(int log2_of_n_arr_entries, const char *description, int8_t key_len, bool is_used_outside_main_thread)
 {
@@ -506,6 +514,7 @@ void nvmeib_hash_tbl_free(struct nvmeib_hash_table *hash_tbl)
 	if (!hash_tbl) {
 		goto out;
 	}
+	nvmeib_hash_tbl_arr_lock(hash_tbl);
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "nvmeib_hash_tbl_free_1 %s\n", hash_tbl->description);
 #else	// #if IS_HASH_UNITTEST
@@ -516,6 +525,7 @@ void nvmeib_hash_tbl_free(struct nvmeib_hash_table *hash_tbl)
 	hash_tbl->arr = NULL;
 	hash_tbl->n_occupied = 0;
 	hash_tbl->n_arr_entries = 0;
+	nvmeib_hash_tbl_arr_unlock(hash_tbl);
 	free(hash_tbl);
 out:;
 }
