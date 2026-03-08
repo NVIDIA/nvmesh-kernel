@@ -396,12 +396,11 @@
 
 static bool						toma_is_running_as_a_utility = 0;
 
-/* used to wakeup TOMA from timeout in select() */
+/* used to wakeup TOMA main thread due to events from other threads (netlink notification, kafka, work-queue finished task, etc) */
 static pthread_mutex_t toma_wakeup_mutex;
 static int toma_wakeup_pipe[2];
-/* used to track pending TOMA wakeups (with ptr==NULL) to avoid
-   accumulation of repetitive wakeup notices - only hold one. */
-static pthread_mutex_t toma_wakeup_pending_mutex;
+static atomic_t n_entries_in_the_toma_wakeup_pipe;
+static pthread_mutex_t toma_wakeup_pending_mutex;	/* used to track pending TOMA wakeups (with ptr==NULL) to avoid accumulation of repetitive wakeup notices - only hold one. */
 static bool toma_wakeup_pending_by_type[NVMEIBT_TOMA_WAKEUP_TYPE_LAST];
 
 static int						epoll_fd = -1;
@@ -608,8 +607,17 @@ static void self_inflicted_death_on_error(void)
 	pthread_kill(toma_main_thread, SIGTERM);
 }
 
-static void free_toma_wakeup(void);
 static int toma_wakeup_event(void);
+static void free_toma_wakeup(void)
+{
+	if (atomic_read(&n_entries_in_the_toma_wakeup_pipe) != 0) {
+		// Definitely a memory leak... Cant process wakeup events right now. May not have memory buffers, bin traces, etc
+	}
+	close(toma_wakeup_pipe[0]); toma_wakeup_pipe[0] = -1;
+	close(toma_wakeup_pipe[1]); toma_wakeup_pipe[1] = -1;
+	pthread_mutex_destroy(&toma_wakeup_mutex);
+	pthread_mutex_destroy(&toma_wakeup_pending_mutex);
+}
 
 bool is_shutdown_me_only(void)
 {
@@ -696,7 +704,6 @@ static void terminate_toma(int rv)
 		nvmeibt_local_disk_free_stock_fds();
 	}
 
-	free_toma_wakeup();
 	nvmeibt_topology_free_resources();
 	nvmeibt_server_lib_destroy();
 	nvmeibt_toma_cleanup_single_instance();
@@ -709,6 +716,7 @@ static void terminate_toma(int rv)
 	NFOUT;
 
 	nvmeibt_toma_abort_child_processes();	// Here we wait for trace pollers as well. From this point no binary traces prints!
+	free_toma_wakeup();
 	nvmeibt_close_all_nonstd_fds(1);  /* be verbose */
 
 	if (shutdown_from_management || nvmeibt_raft_is_shutdown_triggered()) {
@@ -967,19 +975,6 @@ out:
 	return ret;
 }
 
-static atomic_t n_entries_in_the_toma_wakeup_pipe;
-
-static void free_toma_wakeup(void)
-{
-	NFIN;
-	if (atomic_read(&n_entries_in_the_toma_wakeup_pipe) != 0)
-		toma_wakeup_event();		// Wakup up 1 last time to drain wakeup events and clean memory if needed
-	NNVMEIBT_CLOSE(trace_toma_free_toma_wakeup, toma_wakeup_pipe[0]);
-	NNVMEIBT_CLOSE(trace_1_toma_free_toma_wakeup, toma_wakeup_pipe[1]);
-	pthread_mutex_destroy(&toma_wakeup_mutex);
-	NFOUT;
-}
-
 static const char *toma_wakeup_type_to_str(enum NVMEIBT_TOMA_WAKEUP_TYPE type)
 {
 	switch (type) {
@@ -1124,7 +1119,7 @@ static int toma_wakeup_event(void)
 		if (prev_read_buf_n_chars == sizeof(buf)) {
 			const int in_air_wakeups = atomic_dec_return(&n_entries_in_the_toma_wakeup_pipe);
 			prev_read_buf_n_chars = 0;
-			N_Tf(trace_2_toma_toma_wakeup_event, "wakeup event type @TOMA_WAKEUP_TYPE_TO_STR ptr @PTR, remaining=@INT", toma_wakeup_type_to_str(buf.type), buf.ptr, in_air_wakeups);
+			N_Tf(__AUTOID__, "wakeup event type @TOMA_WAKEUP_TYPE_TO_STR ptr @PTR, remaining=@INT", toma_wakeup_type_to_str(buf.type), buf.ptr, in_air_wakeups);
 
 			if (buf.ptr == NULL)
 				toma_wakeup_test_and_set(buf.type, false);
