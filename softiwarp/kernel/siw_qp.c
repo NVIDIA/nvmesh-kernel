@@ -1540,7 +1540,10 @@ bool siw_schedule_cq_notify_work(struct siw_qp *qp, struct siw_cq *cq)
 		if (atomic_read(&cq->dying))
 			return false;
 		siw_cq_get(cq);
-		cpu = cq->comp_vector % num_possible_cpus();
+		if (cq->hdr.sdev && cq->hdr.sdev->num_tx_vector > 0)
+			cpu = cq->hdr.sdev->tx_vector_cpu[cq->comp_vector % cq->hdr.sdev->num_tx_vector];
+		else
+			cpu = cq->comp_vector % num_possible_cpus();
 		atomic_inc(&cq_notify_sched_cnt[cpu]);
 		if (cpu_online(cpu))
 			queued = queue_work_on(cpu, notify_wq, &cq->notify_work);

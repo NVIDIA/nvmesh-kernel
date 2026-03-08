@@ -231,6 +231,7 @@ struct siw_devinfo {
 	enum siw_if_type	iftype;
 };
 
+#define USE_SQ_KTHREAD
 
 struct siw_dev {
 	struct ib_device	ofa_dev;
@@ -262,6 +263,12 @@ struct siw_dev {
 	atomic_t		num_ctx;
 
 	struct dentry		*debugfs;
+
+#ifdef USE_SQ_KTHREAD
+	/* NUMA-local TX vector CPUs for this device (when tx_cpus=2); NULL otherwise */
+	int			*tx_vector_cpu;
+	int			num_tx_vector;
+#endif
 };
 
 struct siw_objhdr {
@@ -910,8 +917,6 @@ struct siw_iwarp_tx {
 #if defined(SIW_DEBUG_TX_CRC) && !defined(SIW_TX_COMP_WAIT_ACK)
 #error "SIW_DEBUG_TX_CRC requires SIW_TX_COMP_WAIT_ACK"
 #endif
-
-#define USE_SQ_KTHREAD
 
 struct siw_qp {
 	struct ib_qp		ofa_qp;
