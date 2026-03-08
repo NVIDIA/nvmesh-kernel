@@ -41,7 +41,7 @@ function usage()
 	echo -e "\t[-b]--baseq] <base-rx-queue>"
 	echo -e "\t[-p|--port] <siw-base-port>"
 	echo -e "\t[-e|--entries] <rps-sock-flow-entries>"
-	echo -e "\t[-m|--domain] <affinity-domain - pernuma, persocket, fullspread, list-of-cpus e.g. \"16,17,18,19,20,21,22,23,24\" or \`seq -c, 0 15\` >"
+	echo -e "\t[-m|--domain] <affinity-domain - pernuma, persocket, fullspread, pernuma_thread0, persocket_thread0, list-of-cpus e.g. \"16,17,18,19,20,21,22,23,24\" or \`seq -c, 0 15\` >"
 	echo -e "\t[-n|--noirq] Don't set IRQ affinity"
 	echo -e "\t[-f|--flowsteer] <flow-steering-mode - rfs, ntuple, none> (none falls back to RSS if enabled)"
 	echo -e "\t[-s|--rpsmode] <rps-mode - alldomain, irq_range_wrap, irq_neighbour, off, donttouch>"
@@ -451,6 +451,10 @@ NIC_N_CPU=0
 #
 # persocket - All CPUs with the same socket as the NIC
 #
+# pernuma_thread0 - One logical CPU per physical core (first HT) in the NIC's NUMA node
+#
+# persocket_thread0 - One logical CPU per physical core (first HT) in the NIC's socket
+#
 # fullspread - All CPUs
 #
 # custom-list - List of CPUs separated by commas eg "16,17,18,19" - can be generated using seq -c,
@@ -469,6 +473,18 @@ case $AFFINITY_DOMAIN in
 		NIC_N_CPU=${NUM_CPUS_PER_SOCK[$NIC_SOCKET]}
 		for ((i=0;i<$NIC_N_CPU;i++)); do
 			CPU_ARRAY[$i]=${TBL_CPUS_PER_SOCK[$NIC_SOCKET,$i]}
+		done
+		;;
+	pernuma_thread0)
+		NIC_N_CPU=${NUM_CPUS_PER_NUMA_THREAD0[$NIC_NUMA_NODE]}
+		for ((i=0;i<$NIC_N_CPU;i++)); do
+			CPU_ARRAY[$i]=${TBL_CPUS_PER_NUMA_THREAD0[$NIC_NUMA_NODE,$i]}
+		done
+		;;
+	persocket_thread0)
+		NIC_N_CPU=${NUM_CPUS_PER_SOCK_THREAD0[$NIC_SOCKET]}
+		for ((i=0;i<$NIC_N_CPU;i++)); do
+			CPU_ARRAY[$i]=${TBL_CPUS_PER_SOCK_THREAD0[$NIC_SOCKET,$i]}
 		done
 		;;
 	fullspread)

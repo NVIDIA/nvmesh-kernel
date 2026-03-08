@@ -114,21 +114,83 @@ echo "---"
 # TBL_CPUS_PER_X[i][j] where j of row i is within {0..NUM_CPUS_PER_X[i]-1}
 # ---------------------------------------------------------------------------- #
 for x in `lscpu -p=cpu,socket,node | grep -v ^#`; do
-	CORE=`echo $x | cut -d, -f1`
+	CPU=`echo $x | cut -d, -f1`
 	SOCK=`echo $x | cut -d, -f2`
 	NUMA=`echo $x | cut -d, -f3`
 	HOST=0
 	# pernuma
-	TBL_CPUS_PER_NUMA[$NUMA,${NUM_CPUS_PER_NUMA[$NUMA]}]=$CORE
+	TBL_CPUS_PER_NUMA[$NUMA,${NUM_CPUS_PER_NUMA[$NUMA]}]=$CPU
 	NUM_CPUS_PER_NUMA[$NUMA]=$((${NUM_CPUS_PER_NUMA[$NUMA]}+1))
 	# persocket
-	TBL_CPUS_PER_SOCK[$SOCK,${NUM_CPUS_PER_SOCK[$SOCK]}]=$CORE
+	TBL_CPUS_PER_SOCK[$SOCK,${NUM_CPUS_PER_SOCK[$SOCK]}]=$CPU
 	NUM_CPUS_PER_SOCK[$SOCK]=$((${NUM_CPUS_PER_SOCK[$SOCK]}+1))
 	# fullspread
-	TBL_CPUS_PER_HOST[$HOST,${NUM_CPUS_PER_HOST[$HOST]}]=$CORE
+	TBL_CPUS_PER_HOST[$HOST,${NUM_CPUS_PER_HOST[$HOST]}]=$CPU
 	NUM_CPUS_PER_HOST[$HOST]=$((${NUM_CPUS_PER_HOST[$HOST]}+1))
 done
 
+# ---------------------------------------------------------------------------- #
+# Thread0 tables: one logical CPU per physical core (first HT in each core)
+# Use lscpu -p=cpu,core,socket,node; for each (node,core) and (socket,core) keep
+# the minimum CPU id as "thread0". Build TBL_CPUS_PER_NUMA_THREAD0 and
+# TBL_CPUS_PER_SOCK_THREAD0.
+# ---------------------------------------------------------------------------- #
+declare -a NUM_CPUS_PER_NUMA_THREAD0
+declare -A TBL_CPUS_PER_NUMA_THREAD0
+declare -a NUM_CPUS_PER_SOCK_THREAD0
+declare -A TBL_CPUS_PER_SOCK_THREAD0
+for ((i=0;i<N_NUMAS;i++)) do
+	NUM_CPUS_PER_NUMA_THREAD0[$i]=0
+done
+for ((i=0;i<N_SOCKS;i++)) do
+	NUM_CPUS_PER_SOCK_THREAD0[$i]=0
+done
+declare -A min_cpu_numa_core
+declare -A min_cpu_sock_core
+if lscpu -p=cpu,core,socket,node 2>/dev/null | grep -v ^# | grep -q .; then
+	for x in `lscpu -p=cpu,core,socket,node | grep -v ^#`; do
+		CPU=`echo $x | cut -d, -f1`
+		CORE=`echo $x | cut -d, -f2`
+		SOCK=`echo $x | cut -d, -f3`
+		NUMA=`echo $x | cut -d, -f4`
+		if [ -z "${min_cpu_numa_core[$NUMA,$CORE]}" ] || [ "$CPU" -lt "${min_cpu_numa_core[$NUMA,$CORE]}" ]; then
+			min_cpu_numa_core[$NUMA,$CORE]=$CPU
+		fi
+		if [ -z "${min_cpu_sock_core[$SOCK,$CORE]}" ] || [ "$CPU" -lt "${min_cpu_sock_core[$SOCK,$CORE]}" ]; then
+			min_cpu_sock_core[$SOCK,$CORE]=$CPU
+		fi
+	done
+	for x in `lscpu -p=cpu,core,socket,node | grep -v ^#`; do
+		CPU=`echo $x | cut -d, -f1`
+		CORE=`echo $x | cut -d, -f2`
+		SOCK=`echo $x | cut -d, -f3`
+		NUMA=`echo $x | cut -d, -f4`
+		if [ "$CPU" = "${min_cpu_numa_core[$NUMA,$CORE]}" ]; then
+			idx=${NUM_CPUS_PER_NUMA_THREAD0[$NUMA]}
+			TBL_CPUS_PER_NUMA_THREAD0[$NUMA,$idx]=$CPU
+			NUM_CPUS_PER_NUMA_THREAD0[$NUMA]=$(($idx+1))
+		fi
+		if [ "$CPU" = "${min_cpu_sock_core[$SOCK,$CORE]}" ]; then
+			idx=${NUM_CPUS_PER_SOCK_THREAD0[$SOCK]}
+			TBL_CPUS_PER_SOCK_THREAD0[$SOCK,$idx]=$CPU
+			NUM_CPUS_PER_SOCK_THREAD0[$SOCK]=$(($idx+1))
+		fi
+	done
+else
+	for ((i=0;i<N_NUMAS;i++)) do
+		NUM_CPUS_PER_NUMA_THREAD0[$i]=${NUM_CPUS_PER_NUMA[$i]}
+		for ((j=0;j<NUM_CPUS_PER_NUMA[$i];j++)) do
+			TBL_CPUS_PER_NUMA_THREAD0[$i,$j]=${TBL_CPUS_PER_NUMA[$i,$j]}
+		done
+	done
+	for ((i=0;i<N_SOCKS;i++)) do
+		NUM_CPUS_PER_SOCK_THREAD0[$i]=${NUM_CPUS_PER_SOCK[$i]}
+		for ((j=0;j<NUM_CPUS_PER_SOCK[$i];j++)) do
+			TBL_CPUS_PER_SOCK_THREAD0[$i,$j]=${TBL_CPUS_PER_SOCK[$i,$j]}
+		done
+	done
+fi
+
 #print_table "TBL_CPUS_PER_NUMA" $N_NUMAS NUM_CPUS_PER_NUMA[@]
-#print_table "TBL_CPUS_PER_SOCK" $N_SOCKS NUM_CPUS_PER_SOCK[@] 
+#print_table "TBL_CPUS_PER_SOCK" $N_SOCKS NUM_CPUS_PER_SOCK[@]
 #print_table "TBL_CPUS_PER_HOST" $N_HOSTS NUM_CPUS_PER_HOST[@] 
