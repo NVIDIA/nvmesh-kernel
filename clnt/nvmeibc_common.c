@@ -3,7 +3,7 @@
 
 unsigned nvmeibc_trace_stats_period_sec = 10;
 module_param(nvmeibc_trace_stats_period_sec, uint, 0644);
-MODULE_PARM_DESC(trace_stats_period_sec, "periodic iostats metrics logging period [sec], 0 means disabled");
+MODULE_PARM_DESC(trace_stats_period_sec, "periodic metrics logging period [sec], 0 means disabled");
 
 void nvmeibc_trace_stats_scheduling_adjust(struct nvmeibc_trace_stats_scheduling *trace_stats, unsigned long now_jiffies)
 {

@@ -243,6 +243,7 @@ struct t_block_clnt_globals {
 		wait_queue_head_t sleep_q;
 		int thread_counter;
 	} watchdog;
+	struct nvmeibc_trace_stats_scheduling metrics_trace_stats;
 	struct nvmeibc_os_apis_container *osc;
 	struct nvmeibc_b_cp_cpu_masks *cpu_masks;
 	const struct nvmeibc_cinst_params_blk *cips;

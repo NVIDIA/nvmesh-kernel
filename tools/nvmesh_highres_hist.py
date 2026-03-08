@@ -1,21 +1,54 @@
 #!/usr/bin/env python3
 
 """
-Read a highres_histogram JSON from stdin and print an ASCII histogram with percentile summary.
+Read highres_histogram data from stdin and print an ASCII histogram with percentile summary.
+
+Accepts three input formats (auto-detected):
+
+1. Pager text (--mode msg-stream-txt) line:
+	16:44:27... name=wq.wait_time, labels=..., tsc_khz=2400013, max=6395522, bins=[0,66,...]
+
+2. Pager JSON (--mode msg-stream-json), one JSON object per line:
+	{"HIGHRES_HISTOGRAM.TSC_KHZ": "2400013", "HIGHRES_HISTOGRAM.HIST_BINS": "[0,66,...]", ...}
+
+3. JDR JSON (procfs), aggregated:
+	{"metrics.all_cpus": [{"values": [...], "max_ticks": 123, "tsc_khz": 2400000, ...}]}
+
+4. JDR JSON (procfs), per-CPU:
+	{"metrics.cpu0": [...], "metrics.cpu1": [...], ...}
+
+Multiple lines are supported — each trace line or pager JSON line produces one histogram.
+
+Tick values are converted to SI time units (ns, us, ms, s) with appropriate precision
+based on magnitude (e.g. 1.2us, 15.3ms, 1.23s).
 
 Usage:
-    echo '<json>' | python3 highres_hist.py
-    # or pipe a full trace line — the script extracts the JSON automatically
+	./pager --mode msg-stream-json \
+		--dict_preload 99bin/debug/dict.5.json \
+		--log_channels metrics.binlog \
+		| nvmesh_highres_hist.py
+
+	cat /proc/nvmeibc/wq_metrics_info | nvmesh_highres_hist.py
+
+	cat /proc/nvmeibc/wq_metrics_pcpu_info | nvmesh_highres_hist.py
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import TypedDict
 
 MAX_BAR_WIDTH: int = 60
 HIGHRES_HISTOGRAM_SHIFT: int = 7
+
+RE_NAME = re.compile(r'\bname=(\S+?)(?:,|$)')
+RE_LABELS = re.compile(r'\blabels=(.+?)(?:,\s*tsc_khz=|,\s*max=|,\s*bins=|$)')
+RE_TSC = re.compile(r'\btsc_khz=(\d+)')
+RE_MAX = re.compile(r'\bmax=(\d+)')
+RE_BINS = re.compile(r'\bbins=\[([^\]]*)\]')
+RE_METRICS_CPU = re.compile(r'^metrics\.cpu\d+$')
 
 
 class Metric(TypedDict):
@@ -50,22 +83,6 @@ def bin_range_ticks(i: int) -> tuple[int, int]:
 	return (lo, hi)
 
 
-def extract_json(text: str) -> str:
-	# Find first '{' and match to closing '}'
-	start = text.find('{')
-	if start < 0:
-		raise ValueError('no JSON object found in input')
-	depth = 0
-	for i in range(start, len(text)):
-		if text[i] == '{':
-			depth += 1
-		elif text[i] == '}':
-			depth -= 1
-			if depth == 0:
-				return text[start : i + 1]
-	raise ValueError('unbalanced JSON braces')
-
-
 def percentile_bin(bins: list[int], total: int, pct: int) -> int:
 	threshold = total * pct / 100.0
 	cumulative = 0
@@ -74,6 +91,55 @@ def percentile_bin(bins: list[int], total: int, pct: int) -> int:
 		if cumulative >= threshold:
 			return i
 	return len(bins) - 1
+
+
+def parse_trace_text_line(line: str) -> Metric | None:
+	"""Parse a binary trace text line like:
+	16:44:27... name=wq.wait_time, labels=module=nvmeibc;reason=resubmit, tsc_khz=2400013, max=6395522, bins=[0,66,...]
+	"""
+	name_m = RE_NAME.search(line)
+	labels_m = RE_LABELS.search(line)
+	tsc_m = RE_TSC.search(line)
+	max_m = RE_MAX.search(line)
+	bins_m = RE_BINS.search(line)
+
+	if not (tsc_m and max_m and bins_m):
+		return None
+
+	bins_str = bins_m.group(1)
+	values = [int(x) for x in bins_str.split(',') if x.strip()] if bins_str.strip() else []
+
+	return {
+		'name': name_m.group(1) if name_m else '?',
+		'labels': labels_m.group(1).rstrip(', ') if labels_m else '',
+		'values': values,
+		'max_ticks': int(max_m.group(1)),
+		'tsc_khz': int(tsc_m.group(1)),
+	}
+
+
+def parse_pager_json(obj: dict[str, str]) -> Metric | None:
+	"""Parse pager --mode msg-stream-json output like:
+	{"HIGHRES_HISTOGRAM.TSC_KHZ": "2400013", "HIGHRES_HISTOGRAM.HIST_BINS": "[0,66,...]", ...}
+	"""
+	tsc_str = obj.get('HIGHRES_HISTOGRAM.TSC_KHZ', '')
+	max_str = obj.get('HIGHRES_HISTOGRAM.MAX_TICKS', '')
+	bins_str = obj.get('HIGHRES_HISTOGRAM.HIST_BINS', '')
+	name = obj.get('HIGHRES_HISTOGRAM.METRIC_NAME', '?')
+	labels = obj.get('HIGHRES_HISTOGRAM.METRIC_LABELS', '')
+
+	if not (tsc_str and max_str and bins_str):
+		return None
+
+	values = json.loads(bins_str)
+
+	return {
+		'name': name,
+		'labels': labels,
+		'values': values,
+		'max_ticks': int(max_str),
+		'tsc_khz': int(tsc_str),
+	}
 
 
 def print_histogram(metric: Metric) -> None:
@@ -145,26 +211,75 @@ def print_histogram(metric: Metric) -> None:
 	print()
 
 
+def _try_jdr_json(obj: dict[str, list[Metric]]) -> bool:
+	"""Try to print histograms from a JDR JSON object. Returns True if handled."""
+	if 'metrics.all_cpus' in obj:
+		for m in obj['metrics.all_cpus']:
+			print_histogram(m)
+		return True
+
+	cpu_keys = sorted((k for k in obj if RE_METRICS_CPU.match(k)), key=lambda k: int(k.split('cpu')[1]))
+	if cpu_keys:
+		for key in cpu_keys:
+			print(f'--- {key} ---')
+			for m in obj[key]:
+				print_histogram(m)
+		return True
+
+	return False
+
+
+def process_line(line: str) -> None:
+	"""Process a single pager JSON or trace text line."""
+	if line.startswith('{'):
+		try:
+			obj = json.loads(line)
+		except json.JSONDecodeError:
+			return
+
+		# Single-line JDR JSON
+		if _try_jdr_json(obj):
+			return
+
+		# Pager JSON
+		if 'HIGHRES_HISTOGRAM.HIST_BINS' in obj:
+			m = parse_pager_json(obj)
+			if m:
+				print_histogram(m)
+			return
+
+	# Trace text line
+	m = parse_trace_text_line(line)
+	if m:
+		print_histogram(m)
+
+
 def main() -> None:
-	text: str = sys.stdin.read().strip()
-	if not text:
+	# Peek at first non-empty line to detect format
+	first_line = ''
+	for line in sys.stdin:
+		first_line = line.strip()
+		if first_line:
+			break
+
+	if not first_line:
 		print('error: empty input', file=sys.stderr)
 		sys.exit(1)
 
-	raw: str = extract_json(text)
-	try:
-		data: dict[str, list[Metric]] = json.loads(raw)
-	except json.JSONDecodeError as e:
-		snippet = raw[:200] + ('...' if len(raw) > 200 else '')
-		raise ValueError(f'invalid JSON: {e}; input was: {snippet}') from e
+	# Multiline JDR JSON starts with a single '{'
+	if first_line == '{':
+		text = first_line + '\n' + sys.stdin.read()
+		obj = json.loads(text)
+		if isinstance(obj, dict) and _try_jdr_json(obj):
+			return
+		return
 
-	metrics: list[Metric] = data.get('metrics.all_cpus', [])
-	if not metrics:
-		print('error: no metrics found in JSON', file=sys.stderr)
-		sys.exit(1)
-
-	for m in metrics:
-		print_histogram(m)
+	# Stream line-by-line for pager JSON and trace text
+	process_line(first_line)
+	for line in sys.stdin:
+		line = line.strip()
+		if line:
+			process_line(line)
 
 
 if __name__ == '__main__':

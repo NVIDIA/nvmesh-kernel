@@ -10,6 +10,7 @@
 #include "block/nvmeibc_block_api_conf.h"
 #include "nvmeibc_main.h"		// Configuration/cci_api/self_detach etc
 #include "nvmeibc_common.h"
+#include "nvmeibc_wq_metrics.h"
 #include "common/proc_epilog.h"
 #include "common/nvmeib_cpu_masks.h"
 
@@ -1289,6 +1290,17 @@ static void __block_trace_stats_periodic_wakeup(struct nvmeibc_block_device *dev
 	nvmeibc_trace_stats_scheduling_set_next(&dev->trace_stats, now_jiffies);
 }
 
+static void __metrics_trace_periodic(struct nvmeibc_trace_stats_scheduling *sched, unsigned long now_jiffies)
+{
+	nvmeibc_trace_stats_scheduling_adjust(sched, now_jiffies);
+	if (!nvmeibc_trace_stats_scheduling_should_trace(sched, now_jiffies)) {
+		return;
+	}
+	nvmeibc_wq_metrics_trace_dump();
+	// TODO(spolovko): add dump of memmgr metrics here as well.
+	nvmeibc_trace_stats_scheduling_set_next(sched, now_jiffies);
+}
+
 int nvmeibc_block_watchdog_run_once(void *_param)
 {
 	struct t_block_clnt_globals *b = _param;
@@ -1308,6 +1320,10 @@ int nvmeibc_block_watchdog_run_once(void *_param)
 		__block_trace_stats_periodic_wakeup(dev, now_jiffies);
 	}
 	spin_unlock_irqrestore(&b->block_devices_sl, flags);
+
+	/* Global metrics dump, outside spinlock. */
+	__metrics_trace_periodic(&b->metrics_trace_stats, now_jiffies);
+
 	return 0;
 }
 
@@ -1426,7 +1442,7 @@ bool nvmeibc_block_is_during_attach_stabilization_period(struct nvmeibc_block_de
 	if (dev){
 		ulong flags;
 		spin_lock_irqsave(&dev->dp.resub.lock, flags);
-	
+
 		result = nvmeibc_io_perm_alert_is_during_attach_stabilization_period(&dev->dp.io_perm_alert);
 		spin_unlock_irqrestore(&dev->dp.resub.lock, flags);
 	}

@@ -41,4 +41,15 @@ extern struct nvmeib_wq_metrics __stop_nvmeibc_wq_metrics[];
  */
 ssize_t nvmeibc_wq_metrics_info(void *_ctx, char *buffer, size_t len, bool dump_per_cpu);
 
+/**
+ * nvmeibc_wq_metrics_trace_dump() - dump all client WQ metrics to the trace channel.
+ *
+ * Iterates all client work-queue metrics and emits each as a binary
+ * @HIGHRES_HISTOGRAM trace record (name, labels, tsc_khz, max, bins blob).
+ * The post-processor converts the binary data to human-readable form.
+ *
+ * Context: Must be called from process context (kthread). Not under spinlock.
+ */
+void nvmeibc_wq_metrics_trace_dump(void);
+
 #endif /* NVMEIBC_WQ_METRICS_H */

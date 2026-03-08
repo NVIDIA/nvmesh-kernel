@@ -288,6 +288,7 @@ void nvmesh_metric_bytes_histogram_clear(struct nvmesh_metric_bytes_histogram* h
 
 enum {
 	NVMESH_METRIC_HIGHRES_HISTOGRAM_SHIFT = 7,  /* 128-tick unit */
+	/* NOTE: keep in sync with the @HIGHRES_HISTOGRAM type definition in tools/dictionary.json */
 	NVMESH_METRIC_HIGHRES_HISTOGRAM_BINS  = 28  /* covers ~2s+ at CPUs up to 5GHz */
 };
 

@@ -80,6 +80,12 @@ static void __ut_wq_test_json_serialize_pcpu(void)
 	free(buffer.base);
 }
 
+static void __ut_wq_test_trace_dump(void)
+{
+	/* wq_one and wq_two have data from previous tests */
+	nvmeibc_wq_metrics_trace_dump();
+}
+
 static void __ut_wq_test_clear(void)
 {
 	struct nvmeib_wq_metric_counters merged;
@@ -103,5 +109,6 @@ void test_wq_metrics(void)
 	__ut_wq_test_update();
 	__ut_wq_test_json_serialize();
 	__ut_wq_test_json_serialize_pcpu();
+	__ut_wq_test_trace_dump();
 	__ut_wq_test_clear();
 }

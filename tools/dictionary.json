@@ -5801,6 +5801,37 @@
             "%d": 8
         }
     },
+    "@HIGHRES_HISTOGRAM": {
+        "fmt": "name=@METRIC_NAME, labels=@METRIC_LABELS, tsc_khz=@TSC_KHZ, max=@MAX_TICKS, bins=@HIST_BINS",
+        "composite": {
+            "@METRIC_NAME": {
+                "size": "string",
+                "type": "string",
+                "fmt": "%s"
+            },
+            "@METRIC_LABELS": {
+                "size": "string",
+                "type": "string",
+                "fmt": "%s"
+            },
+            "@TSC_KHZ": {
+                "size": 32,
+                "type": "u32",
+                "fmt": "%u"
+            },
+            "@MAX_TICKS": {
+                "size": 64,
+                "type": "u64",
+                "fmt": "%llu"
+            },
+            "@HIST_BINS": {
+                "size": 1792,
+                "type": "array_u64",
+                "fmt": "%s",
+                "doc": "28 u64 bins (1792 bits = 28 histogram buckets x 64-bit counters)"
+            }
+        }
+    },
     "@HKEY": {
         "size": 64,
         "type": "s64",
