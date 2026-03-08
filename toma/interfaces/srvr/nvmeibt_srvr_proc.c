@@ -539,7 +539,7 @@ static bool __handle_incomming_msg_from_toma(struct nvmeibt_km_comm *p)
 				p->params.on_add_disk = NULL;
 				p->params.on_remove_disk = NULL;
 				p->params.process_extend_msg = NULL;
-				// p->params.process_local_srvr_msg = NULL;			// Daniel: I am not sure about this: Pass legacy proc api to Toma for cleaner clients disconnect
+				p->params.process_local_srvr_msg = NULL;
 				p->params.process_disk_info = NULL;
 			} else if (msg->msg.opcode <= csc_internal_suicide) {
 				is_alive = false;									// Stop the main thread
