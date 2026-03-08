@@ -1504,23 +1504,6 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		posix_spawn_file_actions_adddup2(&fa, child_fds_stdin[0], STDIN_FILENO);
 		posix_spawn_file_actions_adddup2(&fa, child_fds_stdout[1], STDOUT_FILENO);
 		posix_spawn_file_actions_adddup2(&fa, child_fds_stderr[1], STDERR_FILENO);
-#if 0
-		if (child_fds_stdin[0] > 2)
-			posix_spawn_file_actions_addclose(&fa, child_fds_stdin[0]);
-		if (child_fds_stdout[1] > 2)
-			posix_spawn_file_actions_addclose(&fa, child_fds_stdout[1]);
-		if (child_fds_stderr[1] > 2)
-			posix_spawn_file_actions_addclose(&fa, child_fds_stderr[1]);
-		posix_spawn_file_actions_addclose(&fa, child_fds_stdout[0]);
-		posix_spawn_file_actions_addclose(&fa, child_fds_stderr[0]);
-		posix_spawn_file_actions_addclose(&fa, child_fds_stdin[1]);
-		for (i = 3; i < 256; i++) {
-			if (i != child_fds_stdin[0] && i != child_fds_stdin[1] &&
-			    i != child_fds_stdout[0] && i != child_fds_stdout[1] &&
-			    i != child_fds_stderr[0] && i != child_fds_stderr[1])
-				posix_spawn_file_actions_addclose(&fa, i);
-		}
-#endif
 		spawn_err = posix_spawnattr_init(&attr);
 		if (spawn_err != 0) {
 			errno = spawn_err;
