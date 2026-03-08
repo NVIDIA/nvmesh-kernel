@@ -3128,12 +3128,20 @@ int siw_run_sq(void *data)
 
 static int siw_qp_to_tx(struct siw_qp *qp, enum siw_tx_ctx_pref tx_ctx_pref)
 {
-
 	int cpu;
 	struct llist_head *tx_list_head;
+	struct siw_dev *sdev = qp->hdr.sdev;
+	int *vec_cpu = qp_tx_vector_cpu;
+	int vec_n = num_tx_vector;
+	int i;
+
+	if (sdev && sdev->num_tx_vector > 0) {
+		vec_cpu = sdev->tx_vector_cpu;
+		vec_n = sdev->num_tx_vector;
+	}
 
 	if ((tx_list_head = READ_ONCE(qp->tx_list_head)) != NULL) {
-		dprint(DBG_TX, "QP(%d/" dprint_ptr_str() ") - already in tx list " dprint_ptr_str() " (%lu jiffies ago)\n", 
+		dprint(DBG_TX, "QP(%d/" dprint_ptr_str() ") - already in tx list " dprint_ptr_str() " (%lu jiffies ago)\n",
 		       QP_ID(qp), qp, tx_list_head, jiffies - qp->tx_list_jif);
 		return -EALREADY;
 	}
@@ -3142,7 +3150,7 @@ static int siw_qp_to_tx(struct siw_qp *qp, enum siw_tx_ctx_pref tx_ctx_pref)
 		qp->cpu = cpu = smp_processor_id();
 		goto wake_up;
 	} else if (tx_ctx_pref == SIW_TX_CTX_PREF_SCQ_VECT) {
-		qp->cpu = cpu = qp_tx_vector_cpu[qp->scq->comp_vector % num_tx_vector];
+		qp->cpu = cpu = vec_cpu[qp->scq->comp_vector % vec_n];
 		goto wake_up;
 	} else
 		cpu = qp->cpu;
@@ -3156,9 +3164,18 @@ static int siw_qp_to_tx(struct siw_qp *qp, enum siw_tx_ctx_pref tx_ctx_pref)
 	}
 	if (!llist_empty(&per_cpu(tx_task_g, cpu).active)) {
 		int new_cpu;
+
+		for (i = 0; i < vec_n; i++) {
+			new_cpu = vec_cpu[i];
+			if (cpu_online(new_cpu) && qp_tx_thread[new_cpu] != NULL &&
+			    llist_empty(&per_cpu(tx_task_g, new_cpu).active)) {
+				cpu = new_cpu;
+				qp->cpu = new_cpu;
+				goto wake_up;
+			}
+		}
 		for_each_online_cpu(new_cpu) {
 			if (qp_tx_thread[new_cpu] != NULL &&
-				//omril: we always use lower CPUs - right?
 			    llist_empty(&per_cpu(tx_task_g, new_cpu).active)) {
 				cpu = new_cpu;
 				qp->cpu = new_cpu;

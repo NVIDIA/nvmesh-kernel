@@ -54,6 +54,8 @@
 
 #include <net/tcp.h>
 #include <net/addrconf.h>
+#include <linux/topology.h>
+#include <linux/cpumask.h>
 
 #include "siw.h"
 #include "siw_obj.h"
@@ -112,11 +114,19 @@ DECLARE_RWSEM(siw_dev_lock);
 
 #ifdef USE_SQ_KTHREAD
 static char tx_cpu_list[1024] = "";
-module_param_string(tx_cpu_list,tx_cpu_list, 1024, 0444);
-MODULE_PARM_DESC(tx_cpu_list, "List of CPUs siw TX thread shall be bound to (format: comma separated no spaces) (string).");
+module_param_string(tx_cpu_list, tx_cpu_list, 1024, 0444);
+MODULE_PARM_DESC(tx_cpu_list, "List of CPUs siw TX thread shall be bound to (format: comma separated no spaces)");
+
+/* 0=tx_cpu_list, 1=all CPUs, 2=choose TX thread NUMA-local to NIC (threads still on all/cpu_list) */
+int tx_cpus = 1;
+module_param(tx_cpus, int, 0444);
+MODULE_PARM_DESC(tx_cpus, "TX CPU selection: 0=tx_cpu_list, 1=all CPUs, 2=NUMA local to NIC when choosing TX thread");
+
+static bool tx_one_ht_per_core = false;
+module_param(tx_one_ht_per_core, bool, 0444);
+MODULE_PARM_DESC(tx_one_ht_per_core, "Use only one hyperthread per physical core for TX threads");
 
 int default_tx_cpu = -1;
-static int tx_on_all_cpus = 1;
 extern int siw_run_sq(void *);
 struct task_struct *qp_tx_thread[NR_CPUS];
 int num_tx_vector = 0;
@@ -361,6 +371,11 @@ static void siw_device_destroy(struct siw_dev *sdev)
 	dprint(DBG_DM, ": destroy siw device at %s\n", sdev->netdev->name);
 
 	siw_idr_release(sdev);
+#ifdef USE_SQ_KTHREAD
+	kfree(sdev->tx_vector_cpu);
+	sdev->tx_vector_cpu = NULL;
+	sdev->num_tx_vector = 0;
+#endif
 #if KS_IB_DEVICE_HAS_IWCM
 	kfree(sdev->ofa_dev.iwcm);
 #endif
@@ -399,22 +414,32 @@ static struct siw_dev *siw_dev_from_netdev(struct net_device *dev)
 #ifdef USE_SQ_KTHREAD
 static int siw_tx_qualified(int cpu)
 {
-	static char __tx_cpu_list[sizeof(tx_cpu_list) + 1];
-	int i = 0;
+	static char __tx_cpu_list[sizeof(tx_cpu_list) + 2];
+	char cpustr[32];
 
-	if (tx_on_all_cpus)
-		return 1;
+	/* Only use one hyperthread per physical core if requested */
+	if (tx_one_ht_per_core) {
+		const struct cpumask *sib = topology_sibling_cpumask(cpu);
 
-	scnprintf(__tx_cpu_list, sizeof(__tx_cpu_list), "%s,", tx_cpu_list);
-
-	for (i = 0; i < NR_CPUS; i++) {
-		char cpustr[32];
-		scnprintf(cpustr, sizeof(cpustr), "%u,", cpu);
-		if (!strncmp(cpustr, __tx_cpu_list, strlen(cpustr))) return 1;
-		scnprintf(cpustr, sizeof(cpustr), ",%u,", cpu);
-		if (strstr(__tx_cpu_list, cpustr)) return 1;
+		if (cpumask_first(sib) != cpu)
+			return 0;
 	}
-	return 0;
+
+	switch (tx_cpus) {
+	case 0:
+		/* tx_cpu_list only */
+		scnprintf(__tx_cpu_list, sizeof(__tx_cpu_list), ",%s,", tx_cpu_list);
+		scnprintf(cpustr, sizeof(cpustr), ",%u,", cpu);
+		if (strstr(__tx_cpu_list, cpustr))
+			return 1;
+		return 0;
+	case 1:
+	case 2:
+		/* 2 = still create threads on all/cpu_list; NUMA preference applied in siw_qp_to_tx */
+		return 1;
+	default:
+		return 1;
+	}
 }
 
 static ulong tx_thread_high_prio_bmp = 0;
@@ -779,7 +804,45 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 #endif
 
 #ifdef USE_SQ_KTHREAD
-	ofa_dev->num_comp_vectors = num_tx_vector;
+	sdev->tx_vector_cpu = NULL;
+	sdev->num_tx_vector = 0;
+	if (tx_cpus == 2 && netdev) {
+		int dev_numa_node = dev_to_node(&netdev->dev);
+		int n_numa = 0;
+		int i;
+		int *vec;
+
+		for (i = 0; i < num_tx_vector; i++) {
+			int c = qp_tx_vector_cpu[i];
+
+			if (cpu_to_node(c) != dev_numa_node)
+				continue;
+			if (tx_one_ht_per_core && cpumask_first(topology_sibling_cpumask(c)) != c)
+				continue;
+			n_numa++;
+		}
+		if (n_numa > 0) {
+			vec = kmalloc_array(n_numa, sizeof(*vec), GFP_KERNEL);
+			if (vec) {
+				int j = 0;
+
+				for (i = 0; i < num_tx_vector && j < n_numa; i++) {
+					int c = qp_tx_vector_cpu[i];
+
+					if (cpu_to_node(c) != dev_numa_node)
+						continue;
+					if (tx_one_ht_per_core && cpumask_first(topology_sibling_cpumask(c)) != c)
+						continue;
+					vec[j++] = c;
+				}
+				sdev->tx_vector_cpu = vec;
+				sdev->num_tx_vector = j;
+			}
+		}
+		ofa_dev->num_comp_vectors = sdev->num_tx_vector ? : 1;
+	}
+	if (!sdev->tx_vector_cpu)
+		ofa_dev->num_comp_vectors = num_tx_vector;
 #else
 	ofa_dev->num_comp_vectors = num_online_cpus();
 #endif
@@ -1292,9 +1355,6 @@ static __init int siw_init_module(void)
 	siw_debug_init();
 	
 #ifdef USE_SQ_KTHREAD
-	if (tx_cpu_list[0])
-		tx_on_all_cpus = 0;
-
 	if (siw_create_tx_threads(NR_CPUS, 1) == 0) {
 		dprint(DBG_KEYP, "Try starting default TX thread\n");
 		if (siw_create_tx_threads(1, 0) == 0) {
