@@ -987,10 +987,7 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	INIT_LIST_HEAD(&qp->rx_ctx.flush_rqes);
 
 	atomic_set(&qp->tx_ctx.scq_qp_ref_cnt, 1);
-	init_completion(&qp->tx_ctx.scq_qp_comp);
-
 	atomic_set(&qp->rx_ctx.rcq_qp_ref_cnt, 1);
-	init_completion(&qp->rx_ctx.rcq_qp_comp);
 
 	if (!ofa_pd->uobject)
 		qp->kernel_verbs = 1;
@@ -1160,10 +1157,12 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	qp->cpu = (smp_processor_id() + 1) % NR_CPUS;
 
 #ifdef USE_SQ_KTHREAD
-	if (sdev->num_tx_vector > 0)
-		qp->cpu = sdev->tx_vector_cpu[scq->comp_vector % sdev->num_tx_vector];
-	else
-		qp->cpu = qp_tx_vector_cpu[scq->comp_vector % num_tx_vector];
+	if (scq) {
+		if (sdev->num_tx_vector > 0)
+			qp->cpu = sdev->tx_vector_cpu[scq->comp_vector % sdev->num_tx_vector];
+		else
+			qp->cpu = qp_tx_vector_cpu[scq->comp_vector % num_tx_vector];
+	}
 #endif
 
 	dprint(DBG_OL, "<--\n");
@@ -1391,27 +1390,15 @@ int siw_destroy_qp(struct ib_qp *ofa_qp)
 	flush_delayed_work(&qp->flush_work);
 
 	if ((ref_cnt = atomic_dec_return(&qp->tx_ctx.scq_qp_ref_cnt)) != 0) {
-		wait_for_completion_timeout(&qp->tx_ctx.scq_qp_comp, SIW_QP_SQ_CQ_DRAIN_TIMEOUT);
-
-		/* check if wait timed out */
-		ref_cnt = atomic_read(&qp->tx_ctx.scq_qp_ref_cnt);
-		if (ref_cnt) {
-			WARN_ON_ONCE(1);
-			dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Send CQ not drained. %d un-polled CQEs. "
-			       "qp_ptr=" dprint_ptr_str() " scq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->scq);
-		}
+		WARN_ON_ONCE(1);
+		dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Send CQ not drained. %d un-polled CQEs. "
+			"qp_ptr=" dprint_ptr_str() " scq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->scq);
 	}
 
 	if ((ref_cnt = atomic_dec_return(&qp->rx_ctx.rcq_qp_ref_cnt)) != 0) {
-		wait_for_completion_timeout(&qp->rx_ctx.rcq_qp_comp, SIW_QP_RQ_CQ_DRAIN_TIMEOUT);
-
-		/* check if wait timed out */
-		ref_cnt = atomic_read(&qp->rx_ctx.rcq_qp_ref_cnt);
-		if (ref_cnt) {
-			WARN_ON_ONCE(1);
-			dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Recv CQ not drained. %d un-polled CQEs. "
-			       "qp_ptr=" dprint_ptr_str() " rcq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->rcq);
-		}
+		WARN_ON_ONCE(1);
+		dprint(DBG_ON | DBG_WR | DBG_CQ, "(QP:%d) Recv CQ not drained. %d un-polled CQEs. "
+			"qp_ptr=" dprint_ptr_str() " rcq_ptr=" dprint_ptr_str() "\n", QP_ID(qp), ref_cnt, qp, qp->rcq);
 	}
 
 	/* Free any Flush XQEs in the lists. No need to complete them to CQ as the QP is being destroyed anyway. */
@@ -3508,14 +3495,14 @@ int siw_post_srq_recv(struct ib_srq *ofa_srq, struct ib_recv_wr *wr,
 			for (i = 0; i < srq->num_rqe; i++) {
 				struct siw_rqe *chk_rqe = &srq->recvq[i % srq->num_rqe];
 				if (chk_rqe->id == wr->wr_id && _load_shared(chk_rqe->flags)) {
-					pr_err("SIW: SRQ " dprint_ptr_str() " double-post of id 0x%llx in wr " dprint_ptr_str() ". Previous post in idx %u - Post call-stack %pS <- %pS <- %pS <- %pS <- %pS\n",
+					pr_err("SIW: SRQ " dprint_ptr_str() " double-post of id 0x%llx in wr " dprint_ptr_str() ". Previous post in idx %u - Post call-stack %pF <- %pF <- %pF <- %pF <- %pF\n",
 					       srq, wr->wr_id, wr, i, (void *)srqe_md->post_bt[0], (void *)srqe_md->post_bt[1], (void *)srqe_md->post_bt[2], (void *)srqe_md->post_bt[3], (void *)srqe_md->post_bt[4]);
 					BUG_ON(1);
 				}
 			}
 			save_stack_trace(&st);
 			srqe_md->post_pid = current->pid;
-			trace_printk("SRQ " dprint_ptr_str() " posting wr_id %llx - Post call-stack %pS <- %pS <- %pS <- %pS <- %pS\n", 
+			trace_printk("SRQ " dprint_ptr_str() " posting wr_id %llx - Post call-stack %pF <- %pF <- %pF <- %pF <- %pF\n", 
 				     srq, wr->wr_id, (void *)srqe_md->post_bt[0], (void *)srqe_md->post_bt[1], (void *)srqe_md->post_bt[2], (void *)srqe_md->post_bt[3], (void *)srqe_md->post_bt[4]);
 			for (i = 0; i < wr->num_sge; i++) {
 				struct siw_mem *mem = siw_mem_id2obj(srq->pd->hdr.sdev, wr->sg_list[i].lkey >> 8);
