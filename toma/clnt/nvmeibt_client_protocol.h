@@ -267,7 +267,7 @@ enum NVMEIBT_RECOVERY_TYPE { // Important: Recovery type does not define uniquel
 	NVMEIBT_RECOVERY_TYPE_EC_JOUR_GC		= 6, 			// Optional:  EC: JournalGarbageCollection. Triggered by a SERJIO request
 	NVMEIBT_RECOVERY_TYPE_SCRUBBING			= 7, 			// Optional: Background scrubbing / integrity check
 	NVMEIBT_RECOVERY_TYPE_VOID_DUMMY		= 8, 			// For debug Only, Dummy recovery which does not require any action, tests clnt-toma communication
-	NVMEIBT_RECOVERY_TYPE_EC_FIX_UNK_BINFO	= 9, 			// Mandatory: EC: Resolve unknown blockset-info
+	NVMEIBT_RECOVERY_TYPE_EC_FIX_UNK_BINFO	= 9, 			// Mandatory: EC: Resolve unknown blockset-info, This is only an optimization for first IO to blockset be fast after cold recovery. Dbits recovery does this work, but it might not run after cold recovery.
 	NVMEIBT_RECOVERY_TYPE_NUM_RECOVERIES,					// Automatically mount of different possible recoveries, Must be a small number
 }  __attribute__ ((packed));
 
