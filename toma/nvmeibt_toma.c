@@ -978,7 +978,6 @@ out:
 static const char *toma_wakeup_type_to_str(enum NVMEIBT_TOMA_WAKEUP_TYPE type)
 {
 	switch (type) {
-	case NVMEIBT_TOMA_WAKEUP_TYPE_IB_SA:		return "WAKEUP_TYPE_IB_SA";
 	case NVMEIBT_TOMA_WAKEUP_TYPE_WQ:			return "WAKEUP_TYPE_WQ";
 	case NVMEIBT_TOMA_WAKEUP_TYPE_NETLINK:		return "WAKEUP_TYPE_NETLINK";
 	case NVMEIBT_TOMA_FD_TYPE_LOCAL_SERVER_EVENTS: return "WAKEUP_TYPE_LOCAL_SERVER";
@@ -997,7 +996,7 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 	NFIN;
 
 	if (pthread_mutex_lock(&toma_wakeup_pending_mutex) != 0) {
-		N_Ef(trace_toma_toma_wakeup_test_and_set, "Failed to lock toma wakeup pending mutex (@AUTO_ERRNO)");
+		N_Ef(twtas0, "Failed to lock toma wakeup pending mutex (@AUTO_ERRNO)");
 		self_inflicted_death_on_error();
 	}
 
@@ -1005,7 +1004,7 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 	toma_wakeup_pending_by_type[type] = val;
 
 	if (pthread_mutex_unlock(&toma_wakeup_pending_mutex) != 0) {
-		N_Ef(trace_1_toma_toma_wakeup_test_and_set, "Failed to unlock toma wakeup pending mutex (@AUTO_ERRNO)");
+		N_Ef(twtas1, "Failed to unlock toma wakeup pending mutex (@AUTO_ERRNO)");
 		self_inflicted_death_on_error();
 	}
 
