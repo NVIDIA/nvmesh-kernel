@@ -1024,12 +1024,14 @@ VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_get_io_port_info_srv_ext2_encode)
 VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_get_io_port_info_srv_ext3_encode)
 {
 	struct wire_get_io_ports_info_ext3 *ext3 = wire_buf;
+	struct nvmeibs_config_get_io_ctx *ctx = arg;
+	struct nvmeib_dev *dev = ctx && ctx->port ? ctx->port->nis_dev->dev : NULL;
 
 	BUG_ON(!wire_buf);
 	BUG_ON(wire_buf + sizeof(*ext3) > wire_buf_end);
 
 	ext3->tcp_base_port = cpu_to_be16(nvmeib_get_tcp_base_port_id());
-	ext3->tcp_num_ports = cpu_to_be16(nvmeib_get_tcp_num_ports());
+	ext3->tcp_num_ports = cpu_to_be16(nvmeib_get_tcp_num_ports(dev));
 
 	return sizeof(*ext3);
 }
@@ -2348,6 +2350,7 @@ struct get_lock_gids_rsp_ctx {
 	enum rdma_link_layer link_layer;
 	enum rdma_transport_type transport_type;
 	unsigned int priority;
+	struct nvmeib_dev *dev;
 };
 
 VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_get_lock_gids_rsp_clnt_base_encode)
@@ -2403,7 +2406,7 @@ VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_get_lock_gids_rsp_clnt_ext2_encode
 	BUG_ON(wire_buf + sizeof(*ext2) > wire_buf_end);
 
 	ext2->tcp_base_port = cpu_to_be16(nvmeib_get_tcp_base_port_id());
-	ext2->tcp_num_ports = cpu_to_be16(nvmeib_get_tcp_num_ports());
+	ext2->tcp_num_ports = cpu_to_be16(nvmeib_get_tcp_num_ports(ctx->dev));
 
 	_NT(vex_ach_get_lock_gids_rsp_clnt_ext2_encode_t1, "lock_n [@INT] gid @GID TCP Ports [@START_PORT, @END_PORT]",
 	    elem_idx, &ctx->gid, ext2->tcp_base_port, ext2->tcp_base_port + ext2->tcp_num_ports - 1);
@@ -2455,6 +2458,7 @@ static int send_lock_devices(struct nvmeibs_client *cl,
 				.link_layer = port->layer,
 				.transport_type = port->transport,
 				.priority = port->transport_priority,
+				.dev = dev->dev,
 			};
 			if ((rv = CALL_VEX_OP(encode_container_elem,
 					vex_ach_get_lock_gids_rsp_srv_ops, TWO_EXT,
@@ -2475,6 +2479,7 @@ static int send_lock_devices(struct nvmeibs_client *cl,
 						.link_layer = port->layer,
 						.transport_type = port->transport,
 						.priority = port->transport_priority,
+						.dev = tdev->dev,
 					};
 					if ((rv = CALL_VEX_OP(encode_container_elem,
 							vex_ach_get_lock_gids_rsp_srv_ops, TWO_EXT,
@@ -2506,6 +2511,7 @@ static int send_lock_devices(struct nvmeibs_client *cl,
 					.link_layer = port->layer,
 					.transport_type = port->transport,
 					.priority = port->transport_priority,
+					.dev = dev->dev,
 				};
 				if ((rv = CALL_VEX_OP(encode_container_elem,
 						vex_ach_get_lock_gids_rsp_srv_ops, TWO_EXT,
@@ -2526,6 +2532,7 @@ static int send_lock_devices(struct nvmeibs_client *cl,
 				.link_layer = port->layer,
 				.transport_type = port->transport,
 				.priority = port->transport_priority,
+				.dev = admin_dev->dev,
 			};
 			if ((rv = CALL_VEX_OP(encode_container_elem,
 					vex_ach_get_lock_gids_rsp_srv_ops, TWO_EXT,
