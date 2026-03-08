@@ -115,27 +115,17 @@ static void netlink_io_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_re
 
 struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmeibt_local_disk_config *ldc)
 {
-	struct netlink_io_context *nl_ctx = NULL;
+	struct netlink_io_context *nl_ctx = NNVMEIBT_BM_CALLOC(trace_mnl_1, sizeof(*nl_ctx));
 	struct nvmeib_disk_info di;
 	unsigned int max_blocks_per_call;
 	int rv = -1;
 
 	NFIN;
-	nl_ctx = NNVMEIBT_BM_CALLOC(trace_mnl_1, sizeof(*nl_ctx));
 	if (!nl_ctx) {
 		N_Ef(trace_mnl_11, "netlink context allocation failure!");
 		goto out;
 	}
-
-#if defined(LLVM) || defined(__clang__)
-	if ((void *)nl_ctx->nl_msg.data != (void *)&nl_ctx->nl_msg_payload) {
-		N_Ef(trace_mnl_111, "Bad packing of netlink struct");
-		goto out;
-	}
-#else
-	{ _Static_assert((void *)nl_ctx->nl_msg.data == (void *)&nl_ctx->nl_msg_payload, "Bad packing of netlink struct"); }
-#endif
-
+	{ _Static_assert((char *)&nl_ctx->nl_msg.data[0] == (char *)&nl_ctx->nl_msg_payload, "Bad packing of netlink struct"); }
 	if (pthread_mutex_init(&nl_ctx->guard_mutex, NULL) != 0) {
 		N_Ef(trace_mnl_2, "Failed to create netlink context guard @AUTO_ERRNO");
 		goto out;

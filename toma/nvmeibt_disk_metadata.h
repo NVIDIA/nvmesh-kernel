@@ -134,7 +134,7 @@ struct nvmeibt_Str;
 
 struct netlink_io_context {
 	struct km_comm_msg_hdr nl_msg;
-	struct nvmeib_io_to_disk nl_msg_payload;
+	struct nvmeib_io_to_disk nl_msg_payload;	// Must follow previous struct, it is a payload for the above header. Verified with static assert in the code
 	pthread_condattr_t attr;
 	pthread_mutex_t guard_mutex;
 	pthread_cond_t 	completion_signal;
