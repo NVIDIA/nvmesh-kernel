@@ -1264,7 +1264,17 @@ void nvmeib_release(struct nvmeib_alloc_info *ai,
 	void *vaddr, struct nvmesh_memmgr_metrics *mem_audit);
 void nvmeib_dump_page(void *page);
 void nvmeib_dump_buf(const void *buf, int len);
-void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, unsigned index, int *scq_vector, int *rcq_vector);
+
+enum nvmeib_cq_vector_get_type {
+	NVMEIB_CQ_VECTOR_GET_TYPE_ADMIN = 0,
+	NVMEIB_CQ_VECTOR_GET_TYPE_LOCK,
+	NVMEIB_CQ_VECTOR_GET_TYPE_IO,
+	NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA,
+	NVMEIB_CQ_VECTOR_GET_TYPE_DEVCQ,
+	MAX_NVMEIB_CQ_VECTOR_GET_TYPE,
+};
+
+void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvmeib_cq_vector_get_type type,unsigned index, int *scq_vector, int *rcq_vector);
 void *nvmeib_alloc_n_map(struct nvmeib_alloc_n_map_info *info);
 void nvmeib_free_n_unmap(void *vaddr, struct nvmeib_alloc_n_map_info *info);
 /* RQ Routines */

@@ -1116,6 +1116,7 @@ static int create_ib_private_cq(struct nvmeibs_net *net)
 	int qp_access = IB_ACCESS_LOCAL_WRITE | IB_ACCESS_REMOTE_READ |
 		IB_ACCESS_REMOTE_WRITE;
 	int rv, scq_vect, rcq_vect;
+	enum nvmeib_cq_vector_get_type vector_type;
 
 	__NFIN;
 	BUG_ON(!params->scq_handler);
@@ -1126,7 +1127,24 @@ static int create_ib_private_cq(struct nvmeibs_net *net)
 	qp_init = kzalloc(sizeof(*qp_init), GFP_KERNEL);
 	if (!qp_init)
 		goto out;
-	nvmeib_cq_vector_get(C2NV(net), params->name, params->ch_index, &scq_vect, params->rcq_size ? &rcq_vect : NULL);
+	switch (params->net_type) {
+		case S_NET_ADMIN:
+			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_ADMIN;
+			break;
+		case S_NET_IO:
+			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_IO;
+			break;
+		case S_NET_LOCK:
+		case S_NET_LOCK_2ND:
+			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_LOCK;
+			break;
+		case S_NET_NORDDA:
+			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA;
+			break;
+		default:
+			BUG();
+	}
+	nvmeib_cq_vector_get(C2NV(net), params->name, vector_type, params->ch_index, &scq_vect, params->rcq_size ? &rcq_vect : NULL);
 	net->scq = nvmeib_create_cq(C2IB(net), s_net_scq_handler, cq_event,
 				    net, params->scq_size, scq_vect);
 	if (IS_ERR(net->scq)) {

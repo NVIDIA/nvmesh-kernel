@@ -2656,7 +2656,7 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 	}
 
 	if (params->shared_cq) {
-		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->ch_index, NULL, &recv_intr);
+		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->vector_type, params->ch_index, NULL, &recv_intr);
 		_NTn(trace_0_ib_net_create_qp_shared_cq, net,
 		     "Shared CQ to use dev @DEV_NAME, intr_vect=@INT",
 			P2NV(net->port)->ib_dev->name, recv_intr);
@@ -2671,7 +2671,7 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 			recv_intr = 0;
 		}
 
-		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->ch_index, &send_intr, recv_intr_ptr);
+		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->vector_type, params->ch_index, &send_intr, recv_intr_ptr);
 		_NTn(trace_0_ib_net_create_qp, net,
 			"CQs to use dev @DEV_NAME, send_intr_vect=@INT, recv_intr_vec=@INT",
 			P2NV(net->port)->ib_dev->name, send_intr, recv_intr);
