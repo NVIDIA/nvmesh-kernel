@@ -3782,7 +3782,7 @@ uint nvmeib_cq_vec_flags = 0;
 module_param_named(cq_vec_flags, nvmeib_cq_vec_flags, uint, 0644);
 MODULE_PARM_DESC(cq_vec_flags, "CQ (completion queue) completion-vector selection flags, as follows: Bit 0: Reserve vec 0 for userspace. Bit 1: Index based, set by CQ creator. Bit 2: Use the same vector for SCQ/RCQ.");
 
-uint nvmeib_cq_vec_flags_tcp = 0;
+uint nvmeib_cq_vec_flags_tcp = 4;
 module_param_named(cq_vec_flags_tcp, nvmeib_cq_vec_flags_tcp, uint, 0644);
 MODULE_PARM_DESC(cq_vec_flags_tcp, "Same as cq_vec_flags for TCP (SIW) completion queues.");
 uint nvmeib_cq_vec_snd_rcv_delta = 0;
