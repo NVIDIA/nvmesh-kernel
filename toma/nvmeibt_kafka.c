@@ -2469,8 +2469,9 @@ static int toma_HW_full_config_handler(struct HW_mgmt_conf **conf_ptr, int64_t k
 	static int64_t			max_configurationVersion = -1;	// The max we have seen in this instance of TOMA
 	NFIN;
 	if (conf->configurationVersion <= max_configurationVersion) {
-		N_Wf(fniz6q3, "Received configurationVersion=@INT64_TD prev max_configurationVersion=@INT64_TD", conf->configurationVersion, max_configurationVersion);
+		N_Tf(fniz6q3, "Received configurationVersion=@INT64_TD prev max_configurationVersion=@INT64_TD", conf->configurationVersion, max_configurationVersion);
 		if (conf->configurationVersion < max_configurationVersion) {
+			N_Wf(vgfu28i, "Received configurationVersion=@INT64_TD prev max_configurationVersion=@INT64_TD", conf->configurationVersion, max_configurationVersion);
 			rv = -1;
 			goto out;
 		} else {
