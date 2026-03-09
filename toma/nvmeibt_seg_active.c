@@ -42,8 +42,6 @@ static nvmeib_heap_t          next_scrub_timeout_heap;	// Holds all the local se
 														// The minimum is taken at O(1), and only this one is
 														//  a candidate for scrubbing
 
-#define IS_RECOVERY_TASK_RUNNING(seg_a, task_t) (seg_a->task_t##_ctx.tid)
-
 static inline struct nvmeibt_disk_segment_topo_ctx *get_applied_seg_topo(struct nvmeibt_seg_active *seg_active)
 {
 	return &(nvmeibt_seg_active_get_applied_seg_lot(seg_active)->seg_topo);
@@ -267,7 +265,7 @@ static inline int64_t calc_tv_sec_of_next_scrub_iteration(struct nvmeibt_seg_act
 	int64_t			random_noise;
 	int64_t			time_by_percentage_scrubbed_sec;
 
-	if (seg_active->scrubbing_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, scrubbing)) {
 		tv_sec = INT_MAX;	// Remove it from the top of the heap, so that we can take the next seg
 							// When done it will be rescheduled
 		goto out;
@@ -647,7 +645,7 @@ void nvmeibt_seg_active_reset_serjio_clean_range_state_on_new_config_or_topo(str
 		 SERJIO_CLEAN_RANGE_STATE_REQUIRED : SERJIO_CLEAN_RANGE_STATE_NOT_NEEDED);
 	N_Tf(bdhas61, "seg=@UUID_8 clean_range=@CLEAN_RANGE", nvmeibt_seg_active_UUID_8(seg_active), serjio_clean_range_state_str(seg_active->applied_serjio_clean_range_state));
 	if (seg_active->applied_serjio_clean_range_state == SERJIO_CLEAN_RANGE_STATE_NOT_NEEDED) {
-		if (seg_active->JGC_rebuild_ctx.tid) {
+		if (IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild)) {
 			nvmeibt_recovery_launch_abort_rebuild(seg_active->JGC_rebuild_ctx.tid);
 		}
 	}
@@ -1217,7 +1215,7 @@ void nvmeibt_seg_active_get_recovery_blkset_range(
 static void stop_txid_rebuild(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
-	if (seg_active && seg_active->txid_rebuild_ctx.tid) {
+	if (seg_active && IS_RECOVERY_TASK_RUNNING(seg_active, txid_rebuild)) {
 		nvmeibt_recovery_launch_abort_rebuild(seg_active->txid_rebuild_ctx.tid);
 	}
 	NFOUT;
@@ -1226,7 +1224,7 @@ static void stop_txid_rebuild(struct nvmeibt_seg_active *seg_active)
 static void stop_stale_rebuild(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
-	if (seg_active && seg_active->stale_rebuild_ctx.tid) {
+	if (seg_active && IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild)) {
 		nvmeibt_recovery_launch_abort_rebuild(seg_active->stale_rebuild_ctx.tid);
 	}
 	NFOUT;
@@ -1254,7 +1252,7 @@ out:
 static void stop_JGC_rebuild(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
-	if (seg_active && seg_active->JGC_rebuild_ctx.tid) {
+	if (seg_active && IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild)) {
 		nvmeibt_recovery_launch_abort_rebuild(seg_active->JGC_rebuild_ctx.tid);
 	}
 	NFOUT;
@@ -1263,7 +1261,7 @@ static void stop_JGC_rebuild(struct nvmeibt_seg_active *seg_active)
 static void stop_cold_recovery(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
-	if (seg_active && seg_active->cold_recovery_ctx.tid) {
+	if (seg_active && IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery)) {
 		// Stop the running thread
 		N_Tf(tyb7bvf, "stopping tid=@TID", seg_active->cold_recovery_ctx.tid);
 		seg_active->cold_recovery_ctx.praid_version = 0;
@@ -1275,7 +1273,7 @@ static void stop_cold_recovery(struct nvmeibt_seg_active *seg_active)
 static void stop_dirty_rebuild(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
-	if (seg_active && seg_active->dirty_rebuild_ctx.tid) {
+	if (seg_active && IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild)) {
 		// Stop the running thread
 		N_Tf(dr5tty6, "stopping tid=@TID", seg_active->dirty_rebuild_ctx.tid);
 		seg_active->dirty_rebuild_ctx.praid_version = 0;
@@ -1287,7 +1285,7 @@ static void stop_dirty_rebuild(struct nvmeibt_seg_active *seg_active)
 static void stop_scrubbing(struct nvmeibt_seg_active *seg_active)
 {
 	NFIN;
-	if (seg_active && seg_active->scrubbing_ctx.tid) {
+	if (seg_active && IS_RECOVERY_TASK_RUNNING(seg_active, scrubbing)) {
 		// Stop the running thread
 		N_Tf(ii9iu34, "stopping tid=@TID", seg_active->scrubbing_ctx.tid);
 		seg_active->scrubbing_ctx.praid_version = 0;
@@ -1350,7 +1348,7 @@ static void nvmeibt_seg_active_dirty_rebuild(struct nvmeibt_seg_active *seg_acti
 
 	nvmeibt_seg_active_stop_recovery_tasks(seg_active);
 
-	if (seg_active->dirty_rebuild_ctx.tid || seg_active->stale_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild) || IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild)) {
 		N_Wf(huy7t65, "old tasks still running, retry later. dirty_rebuild_ctx.tid=@TID stale_rebuild_ctx.tid=@TID",
 			seg_active->dirty_rebuild_ctx.tid, seg_active->stale_rebuild_ctx.tid);
 		goto out;
@@ -1387,7 +1385,7 @@ int nvmeibt_recovery_execute_dirty_rebuilds(struct nvmeibt_seg_active **seg_acti
 		if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
 			nvmeibt_seg_active_dirty_rebuild(seg_active);
 			if (IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild))
-			n_launched_tasks++;
+				n_launched_tasks++;
 		} else {
 			N_Tf(6hdoueb, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
 		}
@@ -1416,8 +1414,8 @@ static void nvmeibt_seg_active_cold_recovery(struct nvmeibt_seg_active *seg_acti
 	stop_all_scrubbing_tasks();
 	nvmeibt_seg_active_stop_recovery_tasks(seg_active);
 
-	if (	seg_active->cold_recovery_ctx.tid || seg_active->dirty_rebuild_ctx.tid || seg_active->stale_rebuild_ctx.tid ||
-			seg_active->JGC_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery) || IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild) ||
+		IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild) || IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild)) {
 		N_Wf(warn_seg_active_nvmeibt_disk_segment_cold_recovery, "seg=@UUID_8 old tasks still running, retry later. "
 			 "cold_rebuild_ctx.tid=@TID dirty_rebuild_ctx.tid=@TID stale_rebuild_ctx.tid=@TID JGC_rebuild_ctx.tid=@TID",
 			 nvmeibt_seg_active_UUID_8(seg_active),
@@ -1460,7 +1458,7 @@ int nvmeibt_recovery_execute_cold_recoveries(struct nvmeibt_seg_active **seg_act
 		if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
 			nvmeibt_seg_active_cold_recovery(seg_active);
 			if (IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery))
-			n_launched_tasks++;
+				n_launched_tasks++;
 		} else {
 			N_Tf(u867cn3, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
 		}
@@ -1475,12 +1473,12 @@ static void nvmeibt_seg_active_txid_rebuild(struct nvmeibt_seg_active *seg_activ
 	NFIN;
 
 	// Run unless already running or terminating an old run
-	if (seg_active->txid_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, txid_rebuild)) {
 		N_Tf(ybsowve, "tx_rebuild seg=@UUID_8 already running", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
 	// We should not get here if dirty-bits rebuild is in the air
-	if (seg_active->dirty_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild)) {
 		N_Ef(sfty78w, "dirty-rebuild seg=@UUID_8 already running", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
@@ -1513,20 +1511,20 @@ static void nvmeibt_seg_active_stale_rebuild(struct nvmeibt_seg_active *seg_acti
 		goto out;
 	}
 	// Run unless already running or terminating an old run
-	if (seg_active->stale_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild)) {
 		N_Tf(ybsow8c, "stale_rebuild seg=@UUID_8 already running", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
 	praid = nvmeibt_seg_active_get_praid(seg_active);
 	if (!nvmeibt_praid_applied_is_qualify_for_sync_stale(praid)) {
 		// Stopping running instance
-		if (seg_active->stale_rebuild_ctx.tid) {
+		if (IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild)) {
 			N_Ef(error_1_seg_active_nvmeibt_seg_active_stale_rebuild, "All running stale_rebuild should have been terminated by now");
 		}
 		goto out;
 	}
 	// We should not get here if dirty-bits rebuild is in the air
-	if (seg_active->dirty_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild)) {
 		N_Ef(sfty7yz, "dirty-rebuild seg=@UUID_8 already running", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
@@ -1652,13 +1650,13 @@ static void nvmeibt_seg_active_JGC_rebuild(struct nvmeibt_seg_active *seg_active
 	if (!nvmeibt_praid_applied_is_qualify_for_JGC(praid)) {
 		N_Tf(hy76tre, "seg=@UUID_8. Skipping JGC", nvmeibt_seg_active_UUID_8(seg_active));
 		// Stopping running instance
-		if (seg_active->JGC_rebuild_ctx.tid && !nvmeibt_recovery_is_aborting_rebuild(seg_active->JGC_rebuild_ctx.tid)) {
+		if (IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild) && !nvmeibt_recovery_is_aborting_rebuild(seg_active->JGC_rebuild_ctx.tid)) {
 			N_Ef(ws43209, "All running JGC should have been terminated by now seg=@UUID_8 tid=@TID", nvmeibt_seg_active_UUID_8(seg_active), seg_active->JGC_rebuild_ctx.tid);
 		}
 		goto out;
 	}
 	// Run unless already running or terminating an old run
-	if (seg_active->JGC_rebuild_ctx.tid) {
+	if (IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild)) {
 		N_Tf(bfhs7hs, "JGC_rebuild seg=@UUID_8 already running", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
@@ -1780,7 +1778,7 @@ again:
 			break;
 		}
 		praid = nvmeibt_disk_segment_get_praid(seg_active->disk_segment);
-		if (seg_active->scrubbing_ctx.tid) {
+		if (IS_RECOVERY_TASK_RUNNING(seg_active, scrubbing)) {
 			N_Wf(4cgsyg8, "OOPS scrubbing already running praid=@UUID_LE seg=@UUID_8 (tid=@TID)",
 				nvmeibt_praid_UUID(praid), nvmeibt_seg_active_UUID_8(seg_active), seg_active->scrubbing_ctx.tid);
 			break;
@@ -3065,7 +3063,7 @@ int nvmeibt_seg_active_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 				seg_active->dirty_rebuild_ctx.n_blksets_remaining,
 				seg_active->stale_rebuild_ctx.n_blksets_remaining,
 				seg_active->txid_rebuild_ctx.n_blksets_remaining,
-				(seg_active->JGC_rebuild_ctx.tid ? ", JGC in_work" : ""));
+				(IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild) ? ", JGC in_work" : ""));
 	}
 	if (is_full_info_needed) {
 		(*printf_fn)(printf_ctx, "\t\t- seg=%08x vol=%s ",

@@ -356,6 +356,8 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 	}																						\
 })
 
+#define IS_RECOVERY_TASK_RUNNING(seg_a, task_t) (seg_a->task_t##_ctx.tid)
+
 /******* Declarations of the ".c" functions ********/
 
 int nvmeibt_seg_active_global_scrubbing_one_time_init(void);
@@ -570,11 +572,11 @@ static inline int nvmeibt_seg_active_n_awaited_lockids(const struct nvmeibt_seg_
 static inline BOOL nvmeibt_seg_active_is_any_recovery_in_the_air(struct nvmeibt_seg_active *seg_active)
 {
 	return (seg_active &&
-			(seg_active->cold_recovery_ctx.tid ||
-			 seg_active->dirty_rebuild_ctx.tid ||
-			 seg_active->stale_rebuild_ctx.tid ||
-			 seg_active->JGC_rebuild_ctx.tid ||
-			 seg_active->scrubbing_ctx.tid));
+			(IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery) ||
+			 IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild) ||
+			 IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild) ||
+			 IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild) ||
+			 IS_RECOVERY_TASK_RUNNING(seg_active, scrubbing)));
 }
 
 static inline struct nvmeibt_disk_segment_topo_ctx *nvmeibt_seg_active_get_active_seg_topo(struct nvmeibt_seg_active *seg_active)
