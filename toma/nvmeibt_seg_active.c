@@ -42,6 +42,8 @@ static nvmeib_heap_t          next_scrub_timeout_heap;	// Holds all the local se
 														// The minimum is taken at O(1), and only this one is
 														//  a candidate for scrubbing
 
+#define IS_RECOVERY_TASK_RUNNING(seg_a, task_t) (seg_a->task_t##_ctx.tid)
+
 static inline struct nvmeibt_disk_segment_topo_ctx *get_applied_seg_topo(struct nvmeibt_seg_active *seg_active)
 {
 	return &(nvmeibt_seg_active_get_applied_seg_lot(seg_active)->seg_topo);
@@ -1370,42 +1372,31 @@ out:
 	NFOUT;
 }
 
-void nvmeibt_recovery_execute_dirty_rebuilds_as_needed(void)
+int nvmeibt_recovery_execute_dirty_rebuilds(struct nvmeibt_seg_active **seg_active_arr, int n_seg_active, int max_n_simultaneous_dirty_rebuild)
 {
+	int								n_launched_tasks = 0;
 	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_local_disk		*local_disk;
-	int								i, max_n_simultaneous_dirty_rebuild;
 
-	NFIN;
-	if (!nvmeibt_topology_is_HW_config_functional())
-		goto out;
-
-	for (i = 0; i < 2; i++) {
-		// Enable double amount of RAID1 rebuilds
-		max_n_simultaneous_dirty_rebuild = nvmeibt_recovery_get_max_n_simultaneous_dirty_rebuild() * (2 - i);
-		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-				// The following is inside the loop since N_RUNNING_TASKS might change.
-				if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild) >= max_n_simultaneous_dirty_rebuild) {
-					N_Tf(ddu8760, "Skipping dirty rebuilds, n_running_dirty_rebuild=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild));
-					goto out;
-				}
-				if (!nvmeibt_seg_active_is_dirty_rebuild_required(seg_active) ||
-					(nvmeibt_seg_active_is_EC(seg_active) ^ i)) {  // During the first loop launch only RAID1 rebuilds, during the second - only EC
-					continue;
-				}
-				// Run recovery thread per this PRAID segment, that resides on this node, and is owner_recoverer
-				if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
-					nvmeibt_seg_active_dirty_rebuild(seg_active);
-				} else {
-					N_Tf(6hdoueb, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
-				}
-			}
+	for (seg_active = *seg_active_arr; n_seg_active > 0; n_seg_active--) {
+		// The following is inside the loop since N_RUNNING_TASKS might change.
+		if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild) >= max_n_simultaneous_dirty_rebuild) {
+			N_Tf(ddu8760, "Skipping dirty rebuilds, n_running_dirty_rebuild=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild));
+			goto out;
 		}
+		// Run recovery thread per this PRAID segment, that resides on this node, and is owner_recoverer
+		if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
+			nvmeibt_seg_active_dirty_rebuild(seg_active);
+			if (IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild))
+			n_launched_tasks++;
+		} else {
+			N_Tf(6hdoueb, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
+		}
+		seg_active = *seg_active_arr;
+		seg_active++;
 	}
 
 out:
-	NFOUT;
+	return n_launched_tasks;
 }
 
 static void nvmeibt_seg_active_cold_recovery(struct nvmeibt_seg_active *seg_active)
@@ -1458,36 +1449,31 @@ out:;
 	NFOUT;
 }
 
-void nvmeibt_recovery_execute_cold_recoveries_as_needed(void)
+int nvmeibt_recovery_execute_cold_recoveries(struct nvmeibt_seg_active **seg_active_arr, int n_seg_active)
 {
+	int								n_launched_tasks = 0;
 	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_local_disk		*local_disk;
 
-	NFIN;
-	if (!nvmeibt_topology_is_HW_config_functional())
-		goto out;
-
-	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			if (!nvmeibt_seg_active_is_cold_recovery_required(seg_active)) {
-				continue;
-			}
-			// The following is inside the loop since N_RUNNING_TASKS might change.
-			if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery) >= MAX_N_RUNNING_COLD_RECOVERY_PER_NODE) {
-				N_Tf(ki982nd, "Skipping, n_running_cold_recovery=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery));
-				goto out;
-			}
-			// Run recovery thread per this PRAID segment, that resides on this node, and is owner_recoverer
-			if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
-				nvmeibt_seg_active_cold_recovery(seg_active);
-			} else {
-				N_Tf(u867cn3, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
-			}
+	for (seg_active = *seg_active_arr; n_seg_active > 0; n_seg_active--) {
+		// The following is inside the loop since N_RUNNING_TASKS might change.
+		if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery) >= MAX_N_RUNNING_COLD_RECOVERY_PER_NODE) {
+			N_Tf(ki982nd, "Skipping, n_running_cold_recovery=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery));
+			goto out;
 		}
+		// Run recovery thread per this PRAID segment, that resides on this node, and is owner_recoverer
+		if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
+			nvmeibt_seg_active_cold_recovery(seg_active);
+			if (IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery))
+			n_launched_tasks++;
+		} else {
+			N_Tf(u867cn3, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
+		}
+		seg_active = *seg_active_arr;
+		seg_active++;
 	}
 
 out:
-	NFOUT;
+	return n_launched_tasks;
 }
 
 static void nvmeibt_seg_active_txid_rebuild(struct nvmeibt_seg_active *seg_active)
@@ -1580,53 +1566,57 @@ out:
 	return;
 }
 
-void nvmeibt_recovery_execute_stale_and_txid_rebuilds_as_needed(void)
+int nvmeibt_recovery_execute_stale_and_txid_rebuilds(struct nvmeibt_seg_active **seg_active_arr, int n_seg_active)
 {
-	struct nvmeibt_seg_active		*seg_active;
-	struct nvmeibt_local_disk		*local_disk;
+	int								n_launched_tasks = 0;
 	struct nvmeibt_praid_topo_ctx	*applied_praid_topo;
+	struct nvmeibt_seg_active		*seg_active;
 
-	NFIN;
-	if (!is_stale_rebuild_enabled) /* For debugging only. Use toma_trace.config to set it */
-		goto out;
-	if (!nvmeibt_topology_is_HW_config_functional())
+	if (!is_stale_rebuild_enabled) /* For debugging only. Use toma rpc to set it */
 		goto out;
 	if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild)) {
 		N_Tf(oi98ne5, "Skipping, n_running_dirty_rebuilds=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild));
 		goto out;
 	}
 
-	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			if (!nvmeibt_seg_active_is_stale_rebuild_required(seg_active) &&
-				!nvmeibt_seg_active_is_txid_rebuild_required(seg_active)) {
-				continue;	// Not needed or already running properly
-			}
-			applied_praid_topo = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
-			if (!applied_praid_topo->is_activated ||
-				!nvmeibt_praid_is_client_sync_cmd_stable(applied_praid_topo->registrants_sync_cmd)) {
-				N_Tf(gttt12q, "Skipping seg=@UUID_8, praid cannot perform stale and txid rebuilds now", nvmeibt_seg_active_UUID_8(seg_active));
-				continue;
-			}
-
-			// The following is inside the loop since N_RUNNING_TASKS might change.
-			if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_stale_rebuild) + NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_txid_rebuild) >= (int)nvmeibt_recovery_get_max_n_simultaneous_stale_and_txid_rebuild()) {
-				N_Tf(guy690f, "Skipping, n_running_stale_rebuild=@INT n_running_txid_rebuild=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_stale_rebuild), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_txid_rebuild));
-				goto out;
-			}
-			// Run recovery thread per this PRAID segment, that resides on this node, and is owner_recoverer
-			if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
-				if (nvmeibt_seg_active_is_stale_rebuild_required(seg_active))
-					nvmeibt_seg_active_stale_rebuild(seg_active);
-				else
-					nvmeibt_seg_active_txid_rebuild(seg_active);
-			} else {
-				N_Tf(u784n22, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
-			}
+	for (seg_active = *seg_active_arr; n_seg_active > 0; n_seg_active--) {
+		applied_praid_topo = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
+		if (!applied_praid_topo->is_activated ||
+			!nvmeibt_praid_is_client_sync_cmd_stable(applied_praid_topo->registrants_sync_cmd)) {
+			N_Tf(gttt12q, "Skipping seg=@UUID_8, praid cannot perform stale and txid rebuilds now", nvmeibt_seg_active_UUID_8(seg_active));
+			continue;
 		}
+		// The following is inside the loop since N_RUNNING_TASKS might change.
+		if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_stale_rebuild) + NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_txid_rebuild) >=
+			(int)nvmeibt_recovery_get_max_n_simultaneous_stale_and_txid_rebuild()) {
+			N_Tf(guy690f, "Skipping, n_running_stale_rebuild=@INT n_running_txid_rebuild=@INT",
+				 NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_stale_rebuild), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_txid_rebuild));
+			goto out;
+		}
+		// Run recovery thread per this PRAID segment, that resides on this node, and is owner_recoverer
+		if (nvmeibt_disk_segment_is_de_facto_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active))) {
+			if (nvmeibt_seg_active_is_stale_rebuild_required(seg_active)) {
+				nvmeibt_seg_active_stale_rebuild(seg_active);
+				if (IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild)) {
+					n_launched_tasks++;
+					nvmeibt_global_get_global()->n_pending_stale_rebuild--;
+				}
+			} else {
+				nvmeibt_seg_active_txid_rebuild(seg_active);
+				if (IS_RECOVERY_TASK_RUNNING(seg_active, txid_rebuild)) {
+					n_launched_tasks++;
+					nvmeibt_global_get_global()->n_pending_txid_rebuild--;
+				}
+			}
+		} else {
+			N_Tf(u784n22, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
+		}
+		seg_active_arr++;
+		seg_active = *seg_active_arr;
 	}
 
 out:
+	return n_launched_tasks;
 	NFOUT;
 }
 
@@ -1723,30 +1713,6 @@ void nvmeibt_recovery_trigger_local_seg_JGC(char *disk_segment_urn_uuid_str, cha
 		goto out;
 	}
 	nvmeibt_seg_active_mark_JGC_rebuild_required(seg_active);
-out:
-	NFOUT;
-}
-
-void nvmeibt_recovery_execute_JGC_rebuilds_as_needed(void)
-{
-	struct nvmeibt_local_disk		*local_disk;
-	struct nvmeibt_seg_active		*seg_active;
-
-	NFIN;
-	if (!nvmeibt_topology_is_HW_config_functional())
-		goto out;
-
-	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		if (!nvmeibt_local_disk_is_ready_for_segments(local_disk) || !nvmeibt_local_disk_is_connected_to_disk(local_disk))
-			continue;
-		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-			if (!nvmeibt_seg_active_is_JGC_rebuild_required(seg_active)) {
-				continue;	// Not needed or already running properly
-			}
-			nvmeibt_seg_active_JGC_rebuild(seg_active);
-		}
-	}
-
 out:
 	NFOUT;
 }
@@ -2943,14 +2909,37 @@ struct nvmeibt_seg_active *nvmeibt_find_seg_active_on_all_local_disks_by_uuid(co
 	return seg_active;
 }
 
+#if 0
+test_if_specific_recovery_needed(struct nvmeibt_seg_active *seg_active)
+{
+	if (func) {
+		if (array_idx < max_array_idx)
+			segs_array[array_idx++] = seg_active;
+		return 1;
+	} else {
+		return 0;
+	}
+}
+#endif
+
 void nvmeibt_seg_active_scan_all(void)
 {
 	struct nvmeibt_seg_active			*seg_active;
 	struct nvmeibt_local_disk			*local_disk;
 	struct nvmeibt_topology				*global_params = nvmeibt_global_get_global();
+	struct nvmeibt_seg_active			**cold_recovery_arr;
+	struct nvmeibt_seg_active			**dirty_rebuild_raid1_arr;
+	struct nvmeibt_seg_active			**dirty_rebuild_ec_arr;
+	struct nvmeibt_seg_active			**stale_and_txid_rebuild_arr;
+	int									cold_recovery_arr_idx = 0;
+	int									dirty_rebuild_raid1_arr_idx = 0;
+	int									dirty_rebuild_ec_arr_idx = 0;
+	int									stale_and_txid_rebuild_arr_idx = 0;
+	int									n_seg_active = 0;
 	//struct pending_rebuild_counters		*scanned_counters = &global_params->scanned_counters;
 
-	NFIN;
+	if (!nvmeibt_topology_is_HW_config_functional())
+		goto out;
 
 	//memset(scanned_counters, 0, sizeof(*scanned_counters));
 	global_params->n_pending_cold_recovery = 0;
@@ -2960,6 +2949,17 @@ void nvmeibt_seg_active_scan_all(void)
 	global_params->n_pending_JGC_rebuild = 0;
 
 	NVMEIB_HASH_FOREACH(local_disk, global_params->nvmesh_local_disks_hash_by_ldisk_id_str) {
+		n_seg_active += nvmeib_hash_get_n_elements(local_disk->seg_active_hash_by_uuid);
+	}
+
+	cold_recovery_arr = NNVMEIBT_BM_ALLOC(hu81bst, sizeof(struct nvmeibt_seg_active *) * 4 * n_seg_active); // 4 arrays
+	dirty_rebuild_raid1_arr = cold_recovery_arr + n_seg_active;
+	dirty_rebuild_ec_arr = dirty_rebuild_raid1_arr + n_seg_active;
+	stale_and_txid_rebuild_arr = dirty_rebuild_ec_arr + n_seg_active;
+
+	NVMEIB_HASH_FOREACH(local_disk, global_params->nvmesh_local_disks_hash_by_ldisk_id_str) {
+		if (!nvmeibt_local_disk_is_ready_for_segments(local_disk) || !nvmeibt_local_disk_is_connected_to_disk(local_disk))
+			continue;
 		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 
 			// Validate n_active vs n_applied
@@ -2973,14 +2973,54 @@ void nvmeibt_seg_active_scan_all(void)
 				nvmeibt_abort(ES_FATAL);
 			}
 #endif
-			global_params->n_pending_cold_recovery += nvmeibt_seg_active_is_cold_recovery_required(seg_active);
-			global_params->n_pending_dirty_rebuild += nvmeibt_seg_active_is_dirty_rebuild_required(seg_active);
-			global_params->n_pending_stale_rebuild += nvmeibt_seg_active_is_stale_rebuild_required(seg_active);
-			global_params->n_pending_txid_rebuild += nvmeibt_seg_active_is_txid_rebuild_required(seg_active);
-			global_params->n_pending_JGC_rebuild += nvmeibt_seg_active_is_JGC_rebuild_required(seg_active);
+
+			if (nvmeibt_seg_active_is_cold_recovery_required(seg_active)) {
+				cold_recovery_arr[cold_recovery_arr_idx++] = seg_active;
+				global_params->n_pending_cold_recovery++;
+			}
+			if (nvmeibt_seg_active_is_dirty_rebuild_required(seg_active)) {
+				if (nvmeibt_seg_active_is_EC(seg_active))
+					dirty_rebuild_ec_arr[dirty_rebuild_ec_arr_idx++] = seg_active;
+				else
+					dirty_rebuild_raid1_arr[dirty_rebuild_raid1_arr_idx++] = seg_active;
+				global_params->n_pending_dirty_rebuild++;
+			}
+			if (nvmeibt_seg_active_is_stale_rebuild_required(seg_active) ||
+				nvmeibt_seg_active_is_txid_rebuild_required(seg_active)) {
+				stale_and_txid_rebuild_arr[stale_and_txid_rebuild_arr_idx++] = seg_active;
+				if (nvmeibt_seg_active_is_stale_rebuild_required(seg_active))
+					global_params->n_pending_stale_rebuild++;
+				if (nvmeibt_seg_active_is_txid_rebuild_required(seg_active))
+					global_params->n_pending_txid_rebuild++;
+			}
+
+			if (nvmeibt_seg_active_is_JGC_rebuild_required(seg_active)) {
+				nvmeibt_seg_active_JGC_rebuild(seg_active);
+				if (!IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild))
+					global_params->n_pending_JGC_rebuild++;
+			}
 		}
 	}
-	NFOUT;
+
+	global_params->n_pending_cold_recovery -= nvmeibt_recovery_execute_cold_recoveries(cold_recovery_arr, cold_recovery_arr_idx);
+	global_params->n_pending_dirty_rebuild -= nvmeibt_recovery_execute_dirty_rebuilds(dirty_rebuild_raid1_arr,
+																					  dirty_rebuild_raid1_arr_idx,
+																					  nvmeibt_recovery_get_max_n_simultaneous_dirty_rebuild() * 2);
+	global_params->n_pending_dirty_rebuild -= nvmeibt_recovery_execute_dirty_rebuilds(dirty_rebuild_ec_arr,
+																					  dirty_rebuild_ec_arr_idx,
+																					  nvmeibt_recovery_get_max_n_simultaneous_dirty_rebuild());
+	nvmeibt_recovery_execute_stale_and_txid_rebuilds(stale_and_txid_rebuild_arr, stale_and_txid_rebuild_arr_idx);
+
+	N_Tf(u878un6, "rebuild counters: cold(p=@INT r=@INT) dirty(p=@INT r=@INT) stale(p=@INT r=@INT) txid(p=@INT r=@INT) JGC(p=@INT r=@INT)",
+		 NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_pending_cold_recovery), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery),
+		 NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_pending_dirty_rebuild), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild),
+		 NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_pending_stale_rebuild), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_stale_rebuild),
+		 NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_pending_txid_rebuild), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_txid_rebuild),
+		 NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_pending_JGC_rebuild), NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_JGC_rebuild));
+
+	NNVMEIBT_BM_FREE(ru82nkk, cold_recovery_arr);
+
+out:;
 }
 
 bool nvmeibt_seg_active_send_one_seg_rebuild_progress_report_to_mgmt(struct nvmeibt_seg_active *seg_active, struct nvmeibt_Str *json_payload)

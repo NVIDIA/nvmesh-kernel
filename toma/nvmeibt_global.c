@@ -942,9 +942,6 @@ void nvmeibt_global_idle_time_activities(void)
 	if (nvmeibt_global_get_global()->is_in_shutdown_active_phase) {
 		goto out;
 	}
-	// New topology were absorbed, Launch recoveries as needed.
-	nvmeibt_recovery_execute_cold_recoveries_as_needed();
-	nvmeibt_recovery_execute_dirty_rebuilds_as_needed();
 	nvmeibt_global_issue_leader_report_praids_status_to_mgmt();
 	nvmeibt_recovery_report_rebuild_progress_to_mgmt();
 
@@ -954,8 +951,6 @@ void nvmeibt_global_idle_time_activities(void)
 	nvmeibt_toma_process_waiting_udev_events();
 	periodic_reread_smart_counters_from_local_disks();
 	garbage_collect_as_needed();
-	nvmeibt_recovery_execute_stale_and_txid_rebuilds_as_needed();
-	nvmeibt_recovery_execute_JGC_rebuilds_as_needed();
 	nvmeibt_recovery_execute_scrubbing_as_needed();
 	nvmeibt_seg_active_scan_all();
 	nvmeibt_validate_alloc_free_summary_table();
