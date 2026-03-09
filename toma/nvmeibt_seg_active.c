@@ -554,8 +554,8 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 
 	seg_active->topo_for_clients.header.praid_version = PRAID_VERSION_INVALID_VALUE;
 
-	return seg_active;
 	NFOUT;
+	return seg_active;
 }
 
 void nvmeibt_seg_active_we_got_its_seg(struct nvmeibt_seg_active *seg_active)
