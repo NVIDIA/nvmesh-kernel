@@ -293,6 +293,8 @@ struct nvmeibc_ib_net_params {
 
 	/* if != NVMEIBC_COMP_CPU_INVALID && use-pcpu-cq is enabled, select cq of this cpu */
 	int comp_cpu;
+
+	enum nvmeib_cq_vector_get_type vector_type;
 };
 
 struct cq_stats {

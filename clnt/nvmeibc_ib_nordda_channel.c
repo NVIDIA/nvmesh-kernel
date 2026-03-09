@@ -1108,6 +1108,7 @@ int nvmeibc_ib_nordda_channel_connect(struct nvmeibc_ib_nordda_channel *ch)
 	params->on_free = NULL;
 	params->ch_index = get_ch_ind(ch);
 	params->comp_cpu = pcpu_nrch_cpu_get(ch);
+	params->vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA;
 
 	if (!nvmeibc_use_pcpu_cq) {
 		params->nr_defer_recv_comps = P2NV(ch->lionic->port)->dev_type == DT_siw ? nr_defer_recv_comps_tcp : nr_defer_recv_comps; //get this from c-disk ?!

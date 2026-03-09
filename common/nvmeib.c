@@ -2236,7 +2236,7 @@ static int init_cqs(struct nvmeib_dev *dev, bool create_poll_cq_proc)
 		else {
 			char dev_cq_name[IB_DEVICE_NAME_MAX + 32];
 			snprintf(dev_cq_name, sizeof(dev_cq_name), "%s_dev_cq[%03d]",dev->ib_dev->name, i);
-			nvmeib_cq_vector_get(dev, dev_cq_name, i, &cq->intr, NULL);
+			nvmeib_cq_vector_get(dev, dev_cq_name, NVMEIB_CQ_VECTOR_GET_TYPE_DEVCQ, i, &cq->intr, NULL);
 		}
 
 		cq->cq = nvmeib_create_cq(
@@ -3793,9 +3793,15 @@ uint nvmeib_cq_vec_snd_rcv_delta_tcp = 0;
 module_param_named(cq_vec_snd_rcv_delta_tcp, nvmeib_cq_vec_snd_rcv_delta_tcp, uint, 0644);
 MODULE_PARM_DESC(cq_vec_snd_rcv_delta_tcp, "Same as cq_vec_snd_rcv_delta for TCP (SIW) completion queues.");
 
-static atomic_t __attribute__((unused)) cq_vector_value = ATOMIC_INIT(0);
+static atomic_t __attribute__((unused)) cq_vector_value[MAX_NVMEIB_CQ_VECTOR_GET_TYPE] = {
+	[NVMEIB_CQ_VECTOR_GET_TYPE_ADMIN] = ATOMIC_INIT(0),
+	[NVMEIB_CQ_VECTOR_GET_TYPE_LOCK] = ATOMIC_INIT(0),
+	[NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA] = ATOMIC_INIT(0),
+	[NVMEIB_CQ_VECTOR_GET_TYPE_IO] = ATOMIC_INIT(0),
+	[NVMEIB_CQ_VECTOR_GET_TYPE_DEVCQ] = ATOMIC_INIT(0),
+};
 
-void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, unsigned index, int *scq_vector, int *rcq_vector)
+void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvmeib_cq_vector_get_type type, unsigned index, int *scq_vector, int *rcq_vector)
 {
 	uint flags = dev->dev_type == DT_siw ? nvmeib_cq_vec_flags_tcp : nvmeib_cq_vec_flags;
 	uint delta = dev->dev_type == DT_siw ? nvmeib_cq_vec_snd_rcv_delta_tcp : nvmeib_cq_vec_snd_rcv_delta;
@@ -3805,19 +3811,22 @@ void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, unsigned 
 	uint num = dev->num_comp_vectors ?: 8;
 	uint mod = num - is_rsrv_v0;
 	unsigned rcq_index = index;
+	atomic_t *cq_vector_value_ptr = &cq_vector_value[type];
+
+	BUG_ON(type >= MAX_NVMEIB_CQ_VECTOR_GET_TYPE);
 
 	if (scq_vector) {
-		*scq_vector = (use_index ? index : atomic_inc_return(&cq_vector_value)) % mod + is_rsrv_v0;
+		*scq_vector = (use_index ? index : atomic_inc_return(cq_vector_value_ptr)) % mod + is_rsrv_v0;
 		_NT(trace_nvmeib_cq_vector_get_scq,
-		    "Dev @DEV_NAME (@IB_DEV_PTR), SCQ vector=@VECTOR selected for ch=@STR index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
-		    dev->ib_dev->name, dev->ib_dev, *scq_vector, ch_name, index, num, mod, flags, delta);
+		    "Dev @DEV_NAME (@IB_DEV_PTR), SCQ vector=@VECTOR selected for ch=@STR type=@IDX index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
+		    dev->ib_dev->name, dev->ib_dev, *scq_vector, ch_name, type, index, num, mod, flags, delta);
 		rcq_index += delta;
 	}
 	if (rcq_vector) {
-		*rcq_vector = (scq_vector && same_scq_rcq) ? *scq_vector : (use_index ? rcq_index : atomic_inc_return(&cq_vector_value)) % mod + is_rsrv_v0;
+		*rcq_vector = (scq_vector && same_scq_rcq) ? *scq_vector : (use_index ? rcq_index : atomic_inc_return(cq_vector_value_ptr)) % mod + is_rsrv_v0;
 		_NT(trace_nvmeib_cq_vector_get_rcq,
-		    "Dev @DEV_NAME (@IB_DEV_PTR), RCQ vector=@VECTOR selected for ch=@STR index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
-		    dev->ib_dev->name, dev->ib_dev, *rcq_vector, ch_name, index, num, mod, flags, delta);
+		    "Dev @DEV_NAME (@IB_DEV_PTR), RCQ vector=@VECTOR selected for ch=@STR type=@IDX index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
+		    dev->ib_dev->name, dev->ib_dev, *rcq_vector, ch_name, type, index, num, mod, flags, delta);
 	}
 	/* TBD: corner case where specific cqs are removed such that balance is broken */
 }

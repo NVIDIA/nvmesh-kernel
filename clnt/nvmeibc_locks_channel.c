@@ -1609,6 +1609,7 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	}
 	params->ch_index = 0;
 	params->comp_cpu = NVMEIB_CPU_INVALID;
+	params->vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_LOCK;
 
 	if ((rv = nvmeibc_ib_net_alloc(&ch->net, params, &req)) < 0) {
 		_NT(error_1_locks_channel_try_connect, "cannot connect. error @RV",rv);

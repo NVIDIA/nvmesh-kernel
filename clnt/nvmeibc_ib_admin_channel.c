@@ -1364,6 +1364,7 @@ static int login(struct nvmeibc_ib_admin_channel *ch, bool access_local)
 	params->rcq_offload_enb = false;
 	params->scq_offload_enb = false;
 	params->comp_cpu = NVMEIB_CPU_INVALID;
+	params->vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_ADMIN;
 
 	if (!params->use_srq) {
 		/* Running without SRQ - Init Channel RQ */
