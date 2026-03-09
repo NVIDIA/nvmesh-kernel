@@ -43,21 +43,26 @@ static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags)
 }
 static bool _recv_always_has_data(void) { return true; }
 
+struct user_rpc_simu {
+	int n_sent, n_recv, n_total;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
+	int sender_fd;
+	const char* cmds[8];			// Todo: This should be a circular buffer to which unit-test env injects rpc and toma extracts them 1 by 1.	return g_rpc_sim;
+	struct TSB_fd_otherside o;
+};
+static struct user_rpc_simu *g_rpc_sim = NULL;
+
 static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags) {
-	static int n_rpcs_sent = 0;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
-	static const char* cmds[] = { "simulate dump_status\n", "simulate reread_conf\n",
-		"simulate dump-clnt-hash 20\n", "simulate bm-garbage-collect 1\n", "simulate resend-praids-report vol1\n", "status\n", "status server_csvs\n", "status errors\n"}; // Todo: This should be a linked list to which unit-test env injects rpc and toma extracts them 1 by 1.
 	const bool only_checking = (flags & MSG_PEEK);
-	(void)fd;
-	BUG_ON(offset != OFFSET_NONE);
-	if (n_rpcs_sent < (int)ARRAY_SIZE(cmds)) {
-		const char* cmd = cmds[n_rpcs_sent];
-		const size_t rv = strlen(cmd);
-		BUG_ON(cmd[rv-1] != '\n');			// Must terminate with eol
+	BUG_ON((offset != OFFSET_NONE) || (fd != g_rpc_sim->sender_fd));
+	if (g_rpc_sim->n_sent < g_rpc_sim->n_total) {
+		const char* cmd = g_rpc_sim->cmds[g_rpc_sim->n_sent];
+		size_t rv = strlen(cmd);
 		BUG_ON(n < rv);						// Need enough space for rpc cmd
 		strncpy(buf, cmd, n);
+		((char*)buf)[rv++] = '\n';			// Must terminate with eol
+		((char*)buf)[rv] = 0;
 		if (!only_checking)
-			n_rpcs_sent++;
+			g_rpc_sim->n_sent++;
 		return rv;
 	}
 	return 0;
@@ -65,10 +70,35 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags)
 
 static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	const int print_n_bytes = min(n, (size_t)640);
-	BUG_ON(offset != OFFSET_NONE);
-	BUG_ON((fd < 2) || (n == 0)); (void)flags;
-	SANDBOX_PRINT("RPC reply %u[b]: " COL_YELLOW "%.*s\n" COL_RESET, (unsigned)n, print_n_bytes, (const char*)buf);
+	BUG_ON((offset != OFFSET_NONE) || (fd != g_rpc_sim->sender_fd) || (n == 0) || (flags != 0));
+	SANDBOX_PRINT("RPC reply on '%.32s' %u[b]: " COL_YELLOW "%.*s\n" COL_RESET, g_rpc_sim->cmds[g_rpc_sim->n_recv], (unsigned)n, print_n_bytes, (const char*)buf);
+	g_rpc_sim->n_recv++;
 	return n;
+}
+
+struct user_rpc_simu *user_rpc_simu_create(void) {
+	struct user_rpc_simu *r = g_rpc_sim = calloc(1, sizeof(*r));
+ 	r->cmds[r->n_total++] = "simulate dump_status";
+	r->cmds[r->n_total++] = "simulate reread_conf";
+	r->cmds[r->n_total++] = "simulate dump-clnt-hash 20";
+	r->cmds[r->n_total++] = "simulate bm-garbage-collect 1";
+	r->cmds[r->n_total++] = "simulate resend-praids-report vol1";
+	r->cmds[r->n_total++] = "status server_csvs";
+	r->cmds[r->n_total++] = "status errors";
+	r->o.recv = _rpc_inject;
+	r->o.send = _rpc_accept;
+	return r;
+}
+
+struct TSB_fd_otherside *user_rpc_simu_connect(struct user_rpc_simu *r, int fd) {
+	r->sender_fd = fd;
+	return &r->o;
+}
+
+void user_rpc_simu_destroy(struct user_rpc_simu *r, bool do_verify_used) {
+	BUG_ON(r->n_sent != r->n_recv);
+	if (do_verify_used)
+		BUG_ON((r->sender_fd == 0) || (r->n_recv != r->n_total));
 }
 
 bool sbfd_is_used(const struct TSB_fd_impl *s) {
@@ -102,12 +132,13 @@ struct t_sandbox_all {
 	struct TSB_operating_system_impl os;				// Sandbox for all services Toma needs from the operating system
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_fd_otherside o;
-	} TSB_udev, TSB_rpc, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
+	} TSB_udev, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
 	struct kafka_simulator_t *kafka_simu;
 	struct nvmeibs_simulator *srvr;
 	struct sb_cluster_conf cfg;
 	struct mgmt_sim_state *mgmt;
 	struct nvmeibt_nm_local_node *nm;
+	struct user_rpc_simu *rpc;
 	bool is_running_as_a_utility;
 	bool can_use_bin_traces;
 } *sys;
@@ -189,6 +220,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sb_cluster_conf_create(&sys->cfg);
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
+	sys->rpc = user_rpc_simu_create();
 	pthread_mutex_init(&sys->os.fs.mutex, NULL);
 	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);
 	pthread_mutex_init(&sys->os.TSB_wake_pip.mutex, NULL);
@@ -213,6 +245,7 @@ void t_sandbox_all_destroy(void) {
 	}
 	nvmeibs_simu_destroy(sys->srvr, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
+	user_rpc_simu_destroy(sys->rpc, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent rpc messages
 	sandbox_kafka_destroy(sys->kafka_simu);
 	pthread_mutex_destroy(&sys->os.fs.mutex);
 	pthread_mutex_destroy(&sys->os.TSB_wake_pip.mutex);
@@ -287,9 +320,7 @@ void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	} else if (strstr(s->addr.sun_path, "udev_monitor")) {		s->other_side = &sys->TSB_udev.o;
 		sys->TSB_udev.o.recv = _recv_empty;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
-	} else if (strstr(s->addr.sun_path, "mesh/toma_rpc")) {		s->other_side = &sys->TSB_rpc.o;
-		sys->TSB_rpc.o.recv = _rpc_inject;
-		sys->TSB_rpc.o.send = _rpc_accept;
+	} else if (strstr(s->addr.sun_path, "mesh/toma_rpc")) {		s->other_side = user_rpc_simu_connect(sys->rpc, s->fd);
 	} else if (strstr(s->addr.sun_path, "epoll")) {				s->other_side = &sys->os.TSB_epoll.o;
 	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {	s->other_side = &sys->os.TSB_wake_pip.o[0];
 		s->other_side->recv = _wakeup_pipe_wakeup_recv;
