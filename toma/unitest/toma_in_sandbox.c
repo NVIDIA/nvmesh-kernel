@@ -71,7 +71,8 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags)
 static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	const int print_n_bytes = min(n, (size_t)640);
 	BUG_ON((offset != OFFSET_NONE) || (fd != g_rpc_sim->sender_fd) || (n == 0) || (flags != 0));
-	SANDBOX_PRINT("RPC reply on '%.32s' %u[b]: " COL_YELLOW "%.*s\n" COL_RESET, g_rpc_sim->cmds[g_rpc_sim->n_recv], (unsigned)n, print_n_bytes, (const char*)buf);
+	((char*)buf)[print_n_bytes] = 0;
+	N_Tf(__AUTOID__, "RPC_reply[@INT]=@INT[b] '@STR'=@STR", g_rpc_sim->n_recv, (int)n, g_rpc_sim->cmds[g_rpc_sim->n_recv], (const char*)buf);
 	g_rpc_sim->n_recv++;
 	return n;
 }
