@@ -29,4 +29,29 @@ struct nvmeib_json_ops {
 
 extern const struct nvmeib_json_ops nvmeib_json_ops;
 
+/* Macros for filling JSON with a struct holding: buf, len, count, ntabs, jops */
+#define CALL_JSON_START_OBJ(data, name)\
+	((data)->count += (*(data)->jops->start_obj)((data)->buf + (data)->count, (data)->len - (data)->count, name, (data)->ntabs++))
+
+#define CALL_JSON_END_OBJ(data, is_last)\
+	((data)->count += (*(data)->jops->end_obj)((data)->buf + (data)->count, (data)->len - (data)->count, is_last, --(data)->ntabs))
+
+#define CALL_JSON_START_ARRAY(data, name)\
+	((data)->count += (*(data)->jops->start_array)((data)->buf + (data)->count, (data)->len - (data)->count, name, (data)->ntabs++))
+
+#define CALL_JSON_END_ARRAY(data, is_last)\
+	((data)->count += (*(data)->jops->end_array)((data)->buf + (data)->count, (data)->len - (data)->count, is_last, --(data)->ntabs))
+
+#define CALL_JSON_DATA_UVAL(data, is_last, name, val)\
+	((data)->count += (*(data)->jops->data_uval)((data)->buf + (data)->count, (data)->len - (data)->count, name, val, is_last, (data)->ntabs))
+
+#define CALL_JSON_DATA_SVAL(data, is_last, name, val)\
+	((data)->count += (*(data)->jops->data_sval)((data)->buf + (data)->count, (data)->len - (data)->count, name, val, is_last, (data)->ntabs))
+
+#define CALL_JSON_DATA_STR(data, is_last, name, str)\
+	((data)->count += (*(data)->jops->data_str)((data)->buf + (data)->count, (data)->len - (data)->count, name, str, is_last, (data)->ntabs))
+
+#define CALL_JSON_DATA_UVAL_FLOAT(data, is_last, name, num, denom, precision)\
+	((data)->count += (*(data)->jops->data_uval_float)((data)->buf + (data)->count, (data)->len - (data)->count, name, num, denom, precision, is_last, (data)->ntabs))
+
 #endif /* _NVMEIB_JSON_H_ */ 

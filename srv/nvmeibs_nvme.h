@@ -125,7 +125,8 @@ typedef void nvme_callback_t(void *arg, int status, u32 result);
 struct nvme_qp_cmds_stats {
 		int rd_count;
 		int wr_count;
-		int n_timeout_aborts;
+		int n_timeout_abort_cmds;
+		u64 q_timeouts;
 		u64 n_errors;
 		u64 intr_comps_max;
 		u64 intr_comps_tot;
@@ -133,13 +134,14 @@ struct nvme_qp_cmds_stats {
 		u64 thread_comps_max;
 		u64 thread_comps_tot;
 		u64 thread_comps_cnt;
+		u64 n_poll_loops;
 		u64 n_thread_wakeups;
 		u64 n_thread_sleeps;
 		u64 n_spurious_intrs;
 		u64 n_cq_errors;
 		u64 n_dma_errors;
-		u64 n_resets;
-		u64 n_queue_aborts;
+		u64 n_abort_cmd_failed;
+		u64 n_queue_abort_cmds;
 };
 
 struct nvmeibs_nvme_req {
