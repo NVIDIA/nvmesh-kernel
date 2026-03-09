@@ -100,10 +100,10 @@ void print_config_to_log(struct mm_mgmt_conf *conf, bool is_topo_config)
 		conf_str = NNVMEIBT_STR_ALLOC(sgvsxc4);
 		mm_print_conf(conf, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, conf_str);
 		if (is_topo_config) {
-			NVMEIBT_LONG_TRACE_WRAPPER(dydi4k0, "TOPO_CONFIG", nvmeibt_Str_str(conf_str), nvmeibt_Str_strlen(conf_str));
+			NVMEIBT_LONG_TRACE_WRAPPER(dydi4k0, 0, "TOPO_CONFIG", nvmeibt_Str_str(conf_str), nvmeibt_Str_strlen(conf_str));
 		}
 		else {
-			NVMEIBT_LONG_TRACE_WRAPPER(dydi4k7, "KAFKA_CONFIG", nvmeibt_Str_str(conf_str), nvmeibt_Str_strlen(conf_str));
+			NVMEIBT_LONG_TRACE_WRAPPER(dydi4k7, 0, "KAFKA_CONFIG", nvmeibt_Str_str(conf_str), nvmeibt_Str_strlen(conf_str));
 		}
 		NNVMEIBT_STR_FREE(jsdueha, conf_str);
 	}
@@ -636,7 +636,7 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		print_s = NNVMEIBT_STR_ALLOC(fhy128e);
 		NNVMEIBT_STR_RESIZE_BUF(gy76e38, print_s, 8192);
 		nvmeibt_topology_print((nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, print_s, &wire_topo_buf, 1);
-		NVMEIBT_LONG_TRACE_WRAPPER(twyui67, "RECEIVED TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
+		NVMEIBT_LONG_TRACE_WRAPPER(twyui67, 0, "RECEIVED TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 		NNVMEIBT_STR_FREE(tuneu71, print_s);
 
 		nvmeibt_topology_print_versions(header);
@@ -697,7 +697,7 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		print_s = NNVMEIBT_STR_ALLOC(uiwwm38);
 		NNVMEIBT_STR_RESIZE_BUF(ieus8n2, print_s, 8192);
 		nvmeibt_topology_follower_print((nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, print_s, tmp_active_serialized_and_wire_topo_buf.data_buf);
-		NVMEIBT_LONG_TRACE_WRAPPER(uy123nf, "RECEIVED ACTIVE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
+		NVMEIBT_LONG_TRACE_WRAPPER(uy123nf, 0, "RECEIVED ACTIVE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 		NNVMEIBT_STR_FREE(wvfa5mk, print_s);
 
 		seg_topo_ptr = (struct nvmeibt_serialized_seg_active_topo *)(header_ptr + 1);

@@ -1188,8 +1188,8 @@ static void detach_shadow_vol_for_encryption_finalize(int attach_detact_rv, stru
 	if (attach_detact_rv)
 		N_Wf(su801x6, "vol=@STR detach failed", shadow_vol->from_config.client_blkdev_name);
 
-	NVMEIBT_LONG_TRACE_WRAPPER(socngw9, "STDOUT", nvmeibt_Str_str(exec_ctx->child_stdout_buf), nvmeibt_Str_strlen(exec_ctx->child_stdout_buf));
-	NVMEIBT_LONG_TRACE_WRAPPER(1c7sjir, "STDERR", nvmeibt_Str_str(exec_ctx->child_stderr_buf), nvmeibt_Str_strlen(exec_ctx->child_stderr_buf));
+	NVMEIBT_LONG_TRACE_WRAPPER(socngw9, 1, "STDOUT", nvmeibt_Str_str(exec_ctx->child_stdout_buf), nvmeibt_Str_strlen(exec_ctx->child_stdout_buf));
+	NVMEIBT_LONG_TRACE_WRAPPER(1c7sjir, 1, "STDERR", nvmeibt_Str_str(exec_ctx->child_stderr_buf), nvmeibt_Str_strlen(exec_ctx->child_stderr_buf));
 	sanitize_str(&exec_ctx->child_stdout_buf);
 	sanitize_str(&exec_ctx->child_stderr_buf);
 	if (exec_ctx->toma_rv)

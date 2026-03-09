@@ -512,7 +512,7 @@ void nvmeibt_disk_metadata_print_all_gpt_entries(const struct nvmeibt_disk_gpt_p
 	nvmeibt_disk_metadata_fill_all_gpt_entries_str(gpt_entries, n_partition_entries, is_skip_inactive, str_ctx, gpt_main_or_metadata_str, gpt_primary_or_alternate_or_mem_str);
 	nvmeibt_Str_chop_last_char(str_ctx);	// The last \n
 	N_Tf(dromw5, "disk=@STR", ldisk_id);
-	NVMEIBT_LONG_TRACE_WRAPPER(usn5jxe, "", nvmeibt_Str_str(str_ctx), nvmeibt_Str_strlen(str_ctx));
+	NVMEIBT_LONG_TRACE_WRAPPER(usn5jxe, 1, "", nvmeibt_Str_str(str_ctx), nvmeibt_Str_strlen(str_ctx));
 	NNVMEIBT_STR_FREE(ysisol3, str_ctx);
 }
 

@@ -257,43 +257,45 @@ struct _tracer {
 		.is_on = TRACE_METADATA_is_on_DEFAULT				\
 	}
 
-#define NVMEIBT_LONG_TRACE_WRAPPER(__name__, __info__, __str_in__, __strlen_in__)	({				\
-	int	MAX_PRINT_SIZE = (TRACE_BUFFER_SIZE - 128);													\
-	char	*__p = (char *)__str_in__;																\
-	char	*__end_of_in__ = __p + min((size_t)__strlen_in__, (size_t)64000);						\
-	char	*end_of_syslog;																			\
-	char	__memorized_end_char, __memorized_syslog_end_char;										\
-	int		__round_no__ = -1;																		\
-	char	*__cur_end;																				\
-	while (__p < __end_of_in__) {																	\
-		__round_no__++;																				\
-		__cur_end = __end_of_in__;																	\
-		if (__cur_end - __p > MAX_PRINT_SIZE) {														\
-			char *__in_eol__ = memrchr(__p, '\n', MAX_PRINT_SIZE);									\
-			if (__in_eol__) {																		\
-				__cur_end = __in_eol__;																\
-			} else {																				\
-				__cur_end = __p + MAX_PRINT_SIZE;													\
-			}																						\
-		}																							\
-		__memorized_end_char = *__cur_end;															\
-		*__cur_end = '\0';																			\
-		if (__round_no__ == 0) {																	\
+#define NVMEIBT_LONG_TRACE_WRAPPER(__name__, __is_syslog__, __info__, __str_in__, __strlen_in__) ({						\
+	int	MAX_PRINT_SIZE = (TRACE_BUFFER_SIZE - 128);																		\
+	char	*__p = (char *)__str_in__;																					\
+	char	*__end_of_in__ = __p + min((size_t)__strlen_in__, (size_t)64000);											\
+	char	*end_of_syslog;																								\
+	char	__memorized_end_char, __memorized_syslog_end_char;															\
+	int		__round_no__ = -1;																							\
+	char	*__cur_end;																									\
+	while (__p < __end_of_in__) {																						\
+		__round_no__++;																									\
+		__cur_end = __end_of_in__;																						\
+		if (__cur_end - __p > MAX_PRINT_SIZE) {																			\
+			char *__in_eol__ = memrchr(__p, '\n', MAX_PRINT_SIZE);														\
+			if (__in_eol__) {																							\
+				__cur_end = __in_eol__;																					\
+			} else {																									\
+				__cur_end = __p + MAX_PRINT_SIZE;																		\
+			}																											\
+		}																												\
+		__memorized_end_char = *__cur_end;																				\
+		*__cur_end = '\0';																								\
+		if (__round_no__ == 0) {																						\
 			LOG_TO_TRACE(IMf, __name__ ## _1, NVMEIB_LOG_ETERNAL, TOMA_INFO_MAJOR_STR, " " __info__ " @STR", __p);		\
-			end_of_syslog = min(__p + 512, __end_of_in__);											\
-			__memorized_syslog_end_char = *end_of_syslog;											\
-			*end_of_syslog = '\0';																	\
-			SEND_TO_SYSLOG(LOG_NOTICE, "%s ", __p);													\
-			*end_of_syslog = __memorized_syslog_end_char;                                           \
-		} else {																					\
-			_NLOGLEVEL_NO_PREFIX(Tf, __name__ ## _2, "@STR", __p);									\
-		}																							\
-		*__cur_end = __memorized_end_char;															\
-		__p = __cur_end + (*__cur_end == '\n' || *__cur_end == '\0' ? 1 : 0);						\
-	}																								\
-	if ((ssize_t)(__p - (__str_in__)) < (ssize_t)(__strlen_in__)) {									\
-		N_IMf(__name__ ## _3, "String was too long @SIZE_T", (__strlen_in__));						\
-	}																								\
+			if (__is_syslog__) {																						\
+				end_of_syslog = min(__p + 512, __end_of_in__);															\
+				__memorized_syslog_end_char = *end_of_syslog;															\
+				*end_of_syslog = '\0';																					\
+				SEND_TO_SYSLOG(LOG_NOTICE, "%s ", __p);																	\
+				*end_of_syslog = __memorized_syslog_end_char;															\
+			}																											\
+		} else {																										\
+			_NLOGLEVEL_NO_PREFIX(Tf, __name__ ## _2, "@STR", __p);														\
+		}																												\
+		*__cur_end = __memorized_end_char;																				\
+		__p = __cur_end + (*__cur_end == '\n' || *__cur_end == '\0' ? 1 : 0);											\
+	}																													\
+	if ((ssize_t)(__p - (__str_in__)) < (ssize_t)(__strlen_in__)) {														\
+		N_IMf(__name__ ## _3, "String was too long @SIZE_T", (__strlen_in__));											\
+	}																													\
 })
 
 /* Auto binary trace ID, resolved to filename_line, requires __FILE_LITERAL__ infra */

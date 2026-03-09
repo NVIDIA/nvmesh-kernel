@@ -653,7 +653,7 @@ static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_ms
 	err = rd_kafka_produce(k_topic, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY, (void*)val, val_len, key, key_len, (void*)msg);
 	if (err == 0) {
 		N_Tf(b5v9skq, "@STR: produced key=@STR msgptr=@PTR, in_air_km=@INT", rd_kafka_topic_name(k_topic), key, msg, n_in_air);
-		NVMEIBT_LONG_TRACE_WRAPPER(tvsh875, "", val, val_len);
+		NVMEIBT_LONG_TRACE_WRAPPER(tvsh875, 1, "", val, val_len);
 		return 0;
 	}
 	n_in_air = atomic_dec_return(&kafka_n_sends_in_the_air);
@@ -993,7 +993,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		if (strstr((char *)(k_msg->payload), "assphrase")) { // Don't print passphrases to log
 			N_IMf(hueom23, "Encrypt msg received, don't print !");
 		} else {
-			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, "", (char *)(k_msg->payload), k_msg->len);
+			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, 1, "", (char *)(k_msg->payload), k_msg->len);
 		}
 		// Parse as much as possible in this thread, and not in TOMA's main thread
 		*out_json_tree_root = parse_json_txt_into_kv_tree(k_msg->payload, k_msg->len);
@@ -2480,7 +2480,7 @@ static int toma_HW_full_config_handler(struct HW_mgmt_conf **conf_ptr, int64_t k
 	{	//	Just print the config to log
 		struct nvmeibt_Str *conf_str = NNVMEIBT_STR_ALLOC(u8u7de4);
 		HW_print_conf(conf, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, conf_str);
-		NVMEIBT_LONG_TRACE_WRAPPER(dmii4k0, "HW_CONFIG", nvmeibt_Str_str(conf_str), nvmeibt_Str_strlen(conf_str));
+		NVMEIBT_LONG_TRACE_WRAPPER(dmii4k0, 1, "HW_CONFIG", nvmeibt_Str_str(conf_str), nvmeibt_Str_strlen(conf_str));
 		NNVMEIBT_STR_FREE(jsdu1ha, conf_str);
 	}
 	HW_conf_free_tree(nvmeibt_global_get_global()->HW_mgmt_conf);	// HACK: Race condition here with printing proc thread! may crash it by freeing during a print

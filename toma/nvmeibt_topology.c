@@ -1118,7 +1118,7 @@ static void nvmeibt_topology_leader_serialize_baseline_topo_to_wire_incremental_
 	print_s = NNVMEIBT_STR_ALLOC(htyw76a);
 	NNVMEIBT_STR_RESIZE_BUF(loazxc6, print_s, 8192);
 	nvmeibt_topology_print((nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, print_s, dst_wire_topo_buf, 1);
-	NVMEIBT_LONG_TRACE_WRAPPER(poiurea, "SERIALIZED BASELINE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
+	NVMEIBT_LONG_TRACE_WRAPPER(poiurea, 0, "SERIALIZED BASELINE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 	NNVMEIBT_STR_FREE(rpsnhs1, print_s);
 	// No need to convert to wire format, we already have a concatenation of praid wire buffers
 	NFOUT;
@@ -1254,7 +1254,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	print_s = NNVMEIBT_STR_ALLOC(ytuqo9c);
 	NNVMEIBT_STR_RESIZE_BUF(loi2wsb, print_s, 8192);
 	nvmeibt_topology_follower_print((nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, print_s, serialized_and_wire_topo_buf->data_buf);
-	NVMEIBT_LONG_TRACE_WRAPPER(bhui345, "SERIALIZED ACTIVE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
+	NVMEIBT_LONG_TRACE_WRAPPER(bhui345, 0, "SERIALIZED ACTIVE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 	NNVMEIBT_STR_FREE(fy67tu9, print_s);
 	// Perform LE/BE convert in_place
 	serialized_and_wire_seg_active_ptr = (struct nvmeibt_serialized_seg_active_topo *)(header_ptr + 1);

@@ -420,7 +420,7 @@ nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in
 
 	while (*(++p)) {
 		if ((out - out_buf.s) > ((long int)sizeof(out_buf.s) - 10)) {
-			NVMEIBT_LONG_TRACE_WRAPPER(crshjwe, "String is too long", in, sizeof(out_buf.s));
+			NVMEIBT_LONG_TRACE_WRAPPER(crshjwe, 1, "String is too long", in, sizeof(out_buf.s));
 			N_Ef(v0wj4iw, "String is too long");
 			nvmeibt_abort(ES_FATAL);
 		}
