@@ -2346,11 +2346,27 @@ out:
 	NFOUT;
 }
 
+static bool __is_compatible_kafka_version(void)
+{
+	const unsigned int v = rd_kafka_version();
+	const char *err_msg = NULL;
+	     if ((v & 0xff) != 0xff) err_msg = "Unstable pre-release";
+	else if (v < 0x1060200)		 err_msg = "Too old, Unsupported";
+	else if (v < 0x20102ff)		 err_msg = "Old Unrecommended";
+	else if (v > 0x20600ff)		 err_msg = "Too new, never tested";
+	if (err_msg) {
+		N_Ef(__AUTOID__, "Wrong librdkafka version=@X, @STR! @STR", v, rd_kafka_version_str(), err_msg);
+		return false;
+	}
+	return true;
+}
+
 int nvmeibt_kafka_launch(void) {
 	int						rv = 0;
 	pthread_t kafka_maintenance_thread_tid;
 	NFIN;
 	//nvmeibt_kafka_upd_from_nvmesh_conf();	// No need, was already called by nvmeibt_toma_init(), we did not reread nvmesh conf since then
+	__is_compatible_kafka_version();		// Upon failure, do nothing. Attempt to work, maybe everything will be fine
 	// Launch the nvmeibt_kafka_maintenance_thread (consumer & trigger callbacks)
 	getnstimeofday_boot(&(nvmeibt_global_get_global()->kafka_last_activity_time));
 	if (pthread_create(&kafka_maintenance_thread_tid, NULL, nvmeibt_kafka_main_thread, NULL) == 0) {

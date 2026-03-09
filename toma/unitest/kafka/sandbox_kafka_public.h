@@ -75,7 +75,7 @@ static inline int rd_kafka_wait_destroyed(int n_msec) { (void)n_msec; return 0; 
 enum my_rd_kafka_producer_flags { RD_KAFKA_MSG_F_FREE = 0x1, RD_KAFKA_MSG_F_COPY = 0x2 };
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque);
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *rk, char *errstr, size_t errstr_size);
-static inline int         rd_kafka_version(    void)	{ return 0x20102; }
-static inline const char* rd_kafka_version_str(void)	{ return "0x20102"; }
+static inline int         rd_kafka_version(    void)	{ return 0x020501ff; }	// hex MM.mm.rr.xx
+static inline const char* rd_kafka_version_str(void)	{ return "2.5.1"; }
 
 #endif // NVMEIBT_TOMA_MSG_Q_API_H
