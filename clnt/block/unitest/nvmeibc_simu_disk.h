@@ -323,6 +323,9 @@ struct ut_conf_transport {
 	bool 		is_disk_callback_sync;
 };
 
+/* Schedule JAM free-abandoned on disk workqueue (simulator: nvmeibc_disk_update_config is a no-op). */
+struct abnd2free;
+int nvmeibc_disk_schedule_abnd2free_work(struct nvmeibc_disk *disk, struct abnd2free *a2f);
 
 #endif  // H beginning
 

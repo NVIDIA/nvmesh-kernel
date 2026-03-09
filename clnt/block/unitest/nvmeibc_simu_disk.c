@@ -8,6 +8,7 @@
 #include "nvmeibc_icore_ops.h"
 #include "nvmeibc_pausable.h"
 #include "nvmeibc_jam.h"
+#include "nvmeib_shared.h"	/* binje_from_be() - must match original decode */
 #include "./uni_framework/bunitest_conf.h"
 #include "nvmeibc_targets.h"
 
@@ -480,6 +481,57 @@ void nvmeibc_disk_add_volume(struct nvmeibc_disk *disk, struct nvmeibc_disk_id *
 }
 
 int nvmeibc_disk_add_work(struct nvmeibc_disk *disk, struct workqe_struct *work){ return wq_add_work(disk->remove_wq, work) ? 0 : -1; }
+
+/* JAM free-abandoned work: run on disk workqueue so ordering is serialized (simulator's
+ * nvmeibc_disk_update_config is a no-op, so we schedule via nvmeibc_disk_add_work here). */
+static void sim_abnd2free_work_fn(struct workqe_struct *work)
+{
+	struct disk_workq *w = container_of(work, struct disk_workq, work);
+	struct nvmeibc_disk *disk = w->disk;
+	struct abnd2free *a2f = w->work_data;
+	struct abnd_free_decode_ctx decode_ctx;
+	const struct volume_server_cmd_jmd_free_abnd_base *base = &a2f->jreq.base;
+	const struct volume_server_cmd_jmd_free_abnd_ext1 *ext1 = &a2f->jreq.ext1;
+	int i, n;
+
+	memset(&decode_ctx, 0, sizeof(decode_ctx));
+	decode_ctx.disk = disk;
+	decode_ctx.rng_num = be32_to_cpu(base->rng_num);
+	decode_ctx.rng_gen_id = be64_to_cpu(base->rng_gen_id);
+	for (n = 0, i = 0; i < NUM_JENTS_JAM_USES_IN_JRI(disk); i++) {
+		if ((be32_to_cpu(base->abnd_free_bitmap[i / 32]) & (1U << (i % 32))) != 0) {
+			decode_ctx.free_idx_gen_id[n] = base->free_ent_md[i].ent_gen_id;
+			decode_ctx.abnd_free_idx_arr[n++] = i;
+		}
+	}
+	decode_ctx.abnd_free_idx_n = n;
+	decode_ctx.binje = binje_from_be(ext1->binje);
+
+	process_jmd_free_abnd_decoded(disk, &decode_ctx);
+	kfree(a2f);
+	kfree(w);
+}
+
+int nvmeibc_disk_schedule_abnd2free_work(struct nvmeibc_disk *disk, struct abnd2free *a2f)
+{
+	struct disk_workq *w;
+	int rv;
+
+	w = kzalloc(sizeof(*w), GFP_KERNEL);
+	if (!w) {
+		_NE(error_sim_schedule_abnd2free_work, "OOM: failed to allocate abnd2free work");
+		return -ENOMEM;
+	}
+	w->disk = disk;
+	w->work_data = a2f;
+	WQ_INIT_WORK(&w->work, sim_abnd2free_work_fn);
+	rv = nvmeibc_disk_add_work(disk, &w->work);
+	if (rv) {
+		kfree(w);
+		_NE(error_1_sim_schedule_abnd2free_work, "Failed to add abnd2free work, disk @DISK_NAME", disk->name);
+	}
+	return rv;
+}
 
 static inline int inst_id_of_disk(const struct nvmeibc_disk *disk) {
 	//const struct nvmeibc_cinst_params *p = container_of(nvmeibc_cinst_get_core_p(disk), struct nvmeibc_cinst_params, core);

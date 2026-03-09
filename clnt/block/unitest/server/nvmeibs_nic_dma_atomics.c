@@ -1,4 +1,5 @@
 #include "nvmeibc_simu_disk.h"
+#include "nvmeibc_jam.h"
 #include "./uni_framework/bunitest_conf.h"
 
 // The includes below are breaking encapsulation concept (Simulator digs into Blocks code). This is done for debug purpose (verify internal states of Block locks).
@@ -158,29 +159,26 @@ int nvmeibc_ib_admin_send_rsp(struct nvmeibc_ib_admin_channel *jrr_as_ch, u64 hd
 	return 0;
 }
 
-/* Immediately schedule the execution*/
-int nvmeibc_ib_admin_schedule_abnd2free(struct nvmeibc_disk *disk, struct volume_server_req *req) {//real method is called on disk workqueue
-	struct nvmeibc_nic_rspreq *jrr = container_of(req, struct nvmeibc_nic_rspreq, req);
-	struct volume_server_cmd_jmd_free_abnd_base *base = &jrr->req.j_req.base;
-	struct volume_server_cmd_jmd_free_abnd_ext1 *ext1 = &jrr->req.j_req.ext1;
-	struct abnd_free_decode_ctx ctx;
-	int i;
+/* Simulator: nvmeibc_disk_update_config() is a no-op, so we schedule JAM free-abandoned
+ * via nvmeibc_disk_add_work() (disk workqueue) to match real client ordering and avoid
+ * eCPU reordering races. */
+int nvmeibc_ib_admin_schedule_abnd2free(struct nvmeibc_disk *disk, struct volume_server_req *req)
+{
+	struct abnd2free *a2f;
+	int rv;
 
-	memset(&ctx, 0, sizeof(ctx));
-	ctx.disk = disk;
-	ctx.rng_num = be32_to_cpu(base->rng_num);
-	ctx.rng_gen_id = be64_to_cpu(base->rng_gen_id);
-
-	for (i = 0; i < NUM_JENTS_JAM_USES_IN_JRI(disk); i++) {
-		if (nvmeib_test_bit_be32(i, base->abnd_free_bitmap)) {
-			ctx.free_idx_gen_id[ctx.abnd_free_idx_n] = base->free_ent_md[i].ent_gen_id;
-			ctx.abnd_free_idx_arr[ctx.abnd_free_idx_n++] = i;
-		}
+	a2f = kzalloc(sizeof(*a2f), GFP_KERNEL);
+	if (!a2f) {
+		_NE(error_sim_schedule_abnd2free, "OOM: failed to allocate abnd2free");
+		return -ENOMEM;
 	}
-	ctx.binje = binje_from_be(ext1->binje);
+	memcpy(&a2f->jreq, &req->j_req, sizeof(req->j_req));
+	a2f->hdr_tag = req->hdr.tag;
 
-	// Todo, Real system prevents shceduling if disk is pausing. Todo add this mechanism
-	return process_jmd_free_abnd_decoded(disk, &ctx);
+	rv = nvmeibc_disk_schedule_abnd2free_work(disk, a2f);
+	if (rv)
+		kfree(a2f);
+	return rv;
 }
 
 static eCPU_cb_ret_type __async_serjio_jam_cmd_cb(eCPU_cb_param_list) {		// Todo: Unify with __async_op_cb(), real method is called on admin workqueue
