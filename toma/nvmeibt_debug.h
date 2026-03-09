@@ -196,6 +196,7 @@ int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_
 #define TOMA_WARN_STR       "*TOMAwarn* "
 #define TOMA_INFO_MAJOR_STR "*TOMAinfo* "
 
+// The first argument is parsed in tools/pre_processor/gen_probes2.py
 #define N_Df(name, fmt, ...)  LOG_TO_TRACE(Df, name, NVMEIB_LOG_LONGTERM, "", fmt, ## __VA_ARGS__)
 #define N_Tf(name, fmt, ...)  LOG_TO_TRACE(Tf, name, NVMEIB_LOG_LONGTERM, "", fmt, ## __VA_ARGS__)
 #define N_If(name, fmt, ...)  LOG_TO_TRACE(If, name, NVMEIB_LOG_ETERNAL, "", fmt, ## __VA_ARGS__)

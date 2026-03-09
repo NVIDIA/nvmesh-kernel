@@ -3018,9 +3018,6 @@ bool nvmeibt_seg_active_send_one_seg_rebuild_progress_report_to_mgmt(struct nvme
 	//char									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Dirty_progress_";
 
 	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
-	if (nvmeibt_disk_segment_is_any_ec_cold_recoverer(seg_topo_ctx)) {
-		N_IMf(74v46dc, "------- Need to add cold_recovery reports -------");
-	}
 	if (	(nvmeibt_disk_segment_is_any_hot_recoverer(seg_topo_ctx)) &&
 			 seg_active->dirty_rebuild_ctx.prev_report_n_blksets_remaining != seg_active->dirty_rebuild_ctx.n_blksets_remaining) {
 		seg_active->dirty_rebuild_ctx.prev_report_n_blksets_remaining = seg_active->dirty_rebuild_ctx.n_blksets_remaining;

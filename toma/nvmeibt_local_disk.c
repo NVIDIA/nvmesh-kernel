@@ -640,18 +640,12 @@ struct nvmeibt_local_disk *nvmeibt_local_disk_get_local_disk_by_ldisk_id(const s
 	return nvmeib_hash_search_ascii_str(local_disks_hash, ldisk_id->str);
 }
 
-static void stock_local_disk_remove_from_hash(struct nvmeibt_local_disk *stock_local_disk)
+static void stock_local_disk_forget_that_a_stock_local_disk(struct nvmeibt_local_disk *stock_local_disk)
 {
 	N_IMf(raomtqu, "Removing stock_local_disk=@STR", nvmeibt_local_disk_display(stock_local_disk));
 	if (!stock_local_disk) {
 		goto out;
 	}
-#if 0	// No need to detach from disk, as our very object will convert into a local_disk
-	if (stock_local_disk->its_disk) {
-		stock_local_disk->its_disk->its_local_disk = NULL;
-		stock_local_disk->its_disk = NULL;
-	}
-#endif	// #if 0	// No need to detach from disk, as our very object will convert into a local_disk
 	if (!(stock_local_disk->is_bind_to_nvmeibs_needed)) {
 		controller_del_local_disk(stock_local_disk->from_config.native_serial.str, stock_local_disk, 0);
 	}
@@ -982,7 +976,7 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 			local_disk->is_bind_to_nvmeibs_needed = 0;
 			local_disk->is_excluded = stock_local_disk->is_excluded;
 			//
-			stock_local_disk_remove_from_hash(stock_local_disk);
+			stock_local_disk_forget_that_a_stock_local_disk(stock_local_disk);
 		}
 	}
 
@@ -1580,7 +1574,7 @@ void nvmeibt_local_disk_remove_stock_local_disk_by_dev_file_name(const char *dev
 				goto out;
 			}
 			N_Tf(5gw8k2o, "Erasing disk=@STR from stock_local_disks", nvmeibt_local_disk_display(stock_local_disk));
-			stock_local_disk_remove_from_hash(stock_local_disk);
+			stock_local_disk_forget_that_a_stock_local_disk(stock_local_disk);
 			goto out;
 		}
 	}

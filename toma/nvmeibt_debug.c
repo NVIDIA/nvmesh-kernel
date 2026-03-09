@@ -446,8 +446,7 @@ static int _debug_config_params_set(struct oper_param_t *param, const char *vals
 	if (strncmp(valstr, "default", 7)==0) {
 		rc = 1;
 		val = param->default_value;
-	}
-	else if (sscanf(valstr, "%" PRIu64, &val) > 0) {
+	} else if (sscanf(valstr, "%" PRIu64, &val) > 0) {
 		rc = 1;
 	}
 	if (rc) {

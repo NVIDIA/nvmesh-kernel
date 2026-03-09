@@ -1541,7 +1541,7 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 																	  entry->run_exec_on_blkdev_ctx->executable_str);
 	}
 out:
-	N_IMf(ecgsuyfjkha, "exec_rv=@INT", entry->run_exec_on_blkdev_ctx->exec_rv);
+	N_IMf(ecgsuyfjkha, "rv=@INT from @STR", entry->run_exec_on_blkdev_ctx->exec_rv, entry->run_exec_on_blkdev_ctx->executable_str);
 	// Read the child's stdout & stderr
 	if (child_fds_stdout[0] >= 0) {
 		nvmeibt_str_read_from_pipe_fd(entry->run_exec_on_blkdev_ctx->child_stdout_buf, child_fds_stdout[0], "out");
