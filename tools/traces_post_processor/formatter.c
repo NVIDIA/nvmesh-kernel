@@ -114,6 +114,22 @@ int fmt_bitmap(char *buf, int len, long ptr, int datalen) {
 	return buf - orig + 1;
 }
 
+int fmt_array_u64(char *buf, int len, long ptr, int datalen) {
+	const u64 *arr = (const u64 *)ptr;
+	const int n = datalen / (int)sizeof(u64);
+	int count = 0;
+
+	count += snprintf(buf, len, "[");
+	if (n > 0) {
+		count += snprintf(buf + count, len - count, "%llu", arr[0]);
+	}
+	for (int i = 1; i < n; i++) {
+		count += snprintf(buf + count, len - count, ",%llu", arr[i]);
+	}
+	count += snprintf(buf + count, len - count, "]");
+	return count;
+}
+
 int fmt_hex(char *buf, int len, long ptr, int datalen) {
 	static char hex_asc[17] = "0123456789abcdef";
 	int i;
@@ -382,6 +398,9 @@ int _lazy_unwrap_etry_format(const char *token_prefix, trace_entry_t *te, struct
 					} else if (strcmp(type, "hex") == 0) {
 						te->args[*arg_i].type = ARG_DATA;
 						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_hex;
+					} else if (strcmp(type, "array_u64") == 0) {
+						te->args[*arg_i].type = ARG_DATA;
+						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_array_u64;
 					} else if (strncmp(type, "string_", sizeof("string_") - 1) == 0) {
 						te->args[*arg_i].type = ARG_DATA;
 						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_string_n;

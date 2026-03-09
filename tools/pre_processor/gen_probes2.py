@@ -413,7 +413,7 @@ class ArgType:
         elif tp == 'double' or tp == 'float':
             key = 'double'
         elif type(size) == int:  # Known length data
-            if tp in {'uuid', 'uuid_le', 'ipv6', 'bitmap', 'hex', 'string_n'}:
+            if tp in {'uuid', 'uuid_le', 'ipv6', 'bitmap', 'hex', 'string_n', 'array_u64'}:
                 key = ((size + 7) // 8)  # Key is the size of the buffer in bytes
             elif is_bitfield:  # For bitfields use 64 bits *always, as it causes compilation errors if not*
                 key = 'u64'
