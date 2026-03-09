@@ -1814,10 +1814,9 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	nvmeib_qp_stats_on_interrupt(q->qp_stats);
 	if (q->polling)
 		q->nvme_qp_stats.n_spurious_intrs++;
-	if (!d_defer_process_io_cq) { {
+	if (!d_defer_process_io_cq) {
 		num_handled = nvmeibs_process_cq(q);
 		nvmeibs_nvme_update_qp_stats_intr_comps(q, num_handled);
-	}
 	
 		/* nvmeibs_process_cq releases spinlock, so q->thread may have changed */
 		offload_enabled = offload_enabled && (q->thread || nvmeibs_use_nvme_kwq);
@@ -4878,6 +4877,7 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 					if (nvmeibs_simulate_timeout ||
 					    time_after(current_time,
 								q->ids[i].issue_time + nvmeibs_timeout)) {
+						q->nvme_qp_stats.q_timeouts++;
 						if (nvmeibs_simulate_timeout) {
 							nvmeibs_simulate_timeout = false;
 							_NW(warn_nvme_thread_process_q_sim, "Simulating timeout on q=@ID_INT id=@IDX", q->id, i);
@@ -4897,7 +4897,7 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 							}
 						}
 						else if(!q->dev->need_reset) {
-							q->nvme_qp_stats.n_resets++;
+							q->nvme_qp_stats.n_abort_cmd_failed++;
 							_NW(warn_nvme_thread_process_q, "Resetting nvme@SEQ due to double timeout", q->dev->seq);
 							initaite_dev_rst(trace_dev_rst_nvme_thread_process_q, q->dev);
 						}
@@ -4907,7 +4907,7 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 			}
 		}
 	}
-	q->nvme_qp_stats.n_timeout_aborts += n_aborts;
+	q->nvme_qp_stats.n_timeout_abort_cmds += n_aborts;
 	q_unlock_irqrestore(q, flags);
 }
 
@@ -4928,7 +4928,7 @@ static void abort_q_cmds(struct nvme_qp *q)
 			nvme_callback_t *cb = rqp->callback;
 			void *arg = rqp->arg;
 			--q->used_ids;
-			q->nvme_qp_stats.n_queue_aborts++;
+			q->nvme_qp_stats.n_queue_abort_cmds++;
 			rqp->callback = NULL;
 			if (cb != NULL) {
 				q_unlock_irqrestore(q, flags);
@@ -5129,7 +5129,7 @@ unlock_dev:
 			if (!a->d->need_reset && abort_cmd(a->d, a->qid, a->cmdid) != 0) {
 				struct nvme_qp *aq = a->d->local_ioq[a->qid - 1];
 				if (aq)
-					aq->nvme_qp_stats.n_resets++;
+					aq->nvme_qp_stats.n_abort_cmd_failed++;
 				_NW(warn_1_nvme_nvmeibs_nvme_thread_func, "Abort Failed on nvme@SEQ Resetting", a->d->seq);
 				initaite_dev_rst(trace_dev_rst_2_nvme_nvmeibs_nvme_thread_func, a->d);
 			}
@@ -5149,10 +5149,11 @@ static bool can_enable_irq(const struct nvme_qp *q)
 	return !q->dying && (q->state == LOCAL_Q_ON || q->state == LOCAL_Q_STOP_NEW_IO);
 }
 
-static inline void nvmeibs_nvme_update_qp_stats_thread_comps(struct nvme_qp *q, int num_completions)
+static inline void nvmeibs_nvme_update_qp_stats_thread_comps(struct nvme_qp *q, int num_completions, int num_poll_loops)
 {
 	q->nvme_qp_stats.thread_comps_tot += num_completions;
 	q->nvme_qp_stats.thread_comps_cnt++;
+	q->nvme_qp_stats.n_poll_loops += num_poll_loops;
 	if (num_completions > q->nvme_qp_stats.thread_comps_max)
 		q->nvme_qp_stats.thread_comps_max = num_completions;
 }
@@ -5164,7 +5165,7 @@ static int kthread_process_drive_cq(void *arg)
 	int qid = q->id - 1;
 	bool cont = false;
 	int total = 0, i;
-	int session_comps = 0;
+	int session_comps = 0, session_poll_loops = 0;
 	bool enb_irq = false;
 	u64 start_ns, busy_ns __attribute__((unused));
 	unsigned long flags;
@@ -5177,6 +5178,7 @@ static int kthread_process_drive_cq(void *arg)
 		q = d->local_ioq[qid];
 		if (q && READ_ONCE(q->polling)) {
 			session_comps = 0;
+			session_poll_loops = 0;
 
 			do {
 				cont = false;
@@ -5192,6 +5194,7 @@ static int kthread_process_drive_cq(void *arg)
 				busy_ns = local_clock() - start_ns;
 				enb_irq = can_enable_irq(q);
 				q_unlock_irqrestore(q, flags);
+				session_poll_loops++;
 				cont = i > 0;
 				total += i;
 				session_comps += i;
@@ -5199,7 +5202,7 @@ static int kthread_process_drive_cq(void *arg)
 			} while (cont);
 
 			if (q) {
-				nvmeibs_nvme_update_qp_stats_thread_comps(q, session_comps);
+				nvmeibs_nvme_update_qp_stats_thread_comps(q, session_comps, session_poll_loops);
 			}
 
 			if (!cont && !d->removed && READ_ONCE(q->polling)) {
@@ -7729,42 +7732,46 @@ EXPORT_SYMBOL(nvmeibs_nvme_fill_stats_nvme_qps);
 ssize_t nvmeibs_nvme_fill_qp_stats_json(struct nvmeibs_disk_info *di, char *buf, size_t len)
 {
 	struct device_data *d = di ? di->dev : NULL;
-	const struct nvmeib_json_ops *jops = &nvmeib_json_ops;
 	int qid;
 	struct nvme_qp *q;
-	ssize_t count = 0;
-	size_t indent = 0;
 	struct nvme_qp_cmds_stats s;
 	u64 sum_rd = 0, sum_wr = 0;
 	u64 sum_intr_comps_cnt = 0, sum_thread_comps_cnt = 0;
+	struct {
+		char *buf;
+		size_t len;
+		ssize_t count;
+		size_t ntabs;
+		const struct nvmeib_json_ops *jops;
+	} jdata = {
+		.buf = buf, .len = len, .count = 0, .ntabs = 0, .jops = &nvmeib_json_ops
+	};
 
 	if (!d)
 		return 0;
 
 	memset(&s, 0, sizeof(s));
 
-	count += jops->start_obj(buf + count, len - count, NULL, indent++);
-	count += jops->start_array(buf + count, len - count, "queues", indent++);
+	CALL_JSON_START_OBJ(&jdata, NULL);
+	CALL_JSON_START_ARRAY(&jdata, "queues");
 
 	for (qid = 0; qid < d->max_ioqs; ++qid) {
 		int is_last = (qid == d->max_ioqs - 1);
 
 		q = d->local_ioq[qid];
-		count += jops->start_obj(buf + count, len - count, NULL, indent++);
-		count += jops->data_uval(buf + count, len - count,
-				"qid", qid, !JSON_LAST_ELEM, indent);
+		CALL_JSON_START_OBJ(&jdata, NULL);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "qid", qid);
 
 		if (!q) {
-			count += jops->data_str(buf + count, len - count,
-					"status", "not_init", JSON_LAST_ELEM, indent);
-			count += jops->end_obj(buf + count, len - count,
-					is_last, --indent);
+			CALL_JSON_DATA_STR(&jdata, JSON_LAST_ELEM, "status", "not_init");
+			CALL_JSON_END_OBJ(&jdata, is_last);
 			continue;
 		}
 
 		sum_rd += q->nvme_qp_stats.rd_count;
 		sum_wr += q->nvme_qp_stats.wr_count;
-		s.n_timeout_aborts += q->nvme_qp_stats.n_timeout_aborts;
+		s.n_timeout_abort_cmds += q->nvme_qp_stats.n_timeout_abort_cmds;
+		s.q_timeouts += q->nvme_qp_stats.q_timeouts;
 		s.n_errors += q->nvme_qp_stats.n_errors;
 		if (q->nvme_qp_stats.intr_comps_max > s.intr_comps_max)
 			s.intr_comps_max = q->nvme_qp_stats.intr_comps_max;
@@ -7774,146 +7781,87 @@ ssize_t nvmeibs_nvme_fill_qp_stats_json(struct nvmeibs_disk_info *di, char *buf,
 			s.thread_comps_max = q->nvme_qp_stats.thread_comps_max;
 		s.thread_comps_tot += q->nvme_qp_stats.thread_comps_tot;
 		sum_thread_comps_cnt += q->nvme_qp_stats.thread_comps_cnt;
+		s.n_poll_loops += q->nvme_qp_stats.n_poll_loops;
 		s.n_thread_wakeups += q->nvme_qp_stats.n_thread_wakeups;
 		s.n_thread_sleeps += q->nvme_qp_stats.n_thread_sleeps;
 		s.n_spurious_intrs += q->nvme_qp_stats.n_spurious_intrs;
 		s.n_cq_errors += q->nvme_qp_stats.n_cq_errors;
 		s.n_dma_errors += q->nvme_qp_stats.n_dma_errors;
-		s.n_resets += q->nvme_qp_stats.n_resets;
-		s.n_queue_aborts += q->nvme_qp_stats.n_queue_aborts;
+		s.n_abort_cmd_failed += q->nvme_qp_stats.n_abort_cmd_failed;
+		s.n_queue_abort_cmds += q->nvme_qp_stats.n_queue_abort_cmds;
 
-		count += jops->data_sval(buf + count, len - count,
-				"rd_count", q->nvme_qp_stats.rd_count,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_sval(buf + count, len - count,
-				"wr_count", q->nvme_qp_stats.wr_count,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_sval(buf + count, len - count,
-				"n_timeout_aborts", q->nvme_qp_stats.n_timeout_aborts,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_errors", q->nvme_qp_stats.n_errors,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_cq_errors", q->nvme_qp_stats.n_cq_errors,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_dma_errors", q->nvme_qp_stats.n_dma_errors,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_resets", q->nvme_qp_stats.n_resets,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_queue_aborts", q->nvme_qp_stats.n_queue_aborts,
-				!JSON_LAST_ELEM, indent);
+		CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "rd_count", q->nvme_qp_stats.rd_count);
+		CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "wr_count", q->nvme_qp_stats.wr_count);
+		CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "n_timeout_abort_cmds", q->nvme_qp_stats.n_timeout_abort_cmds);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "q_timeouts", q->nvme_qp_stats.q_timeouts);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_errors", q->nvme_qp_stats.n_errors);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_cq_errors", q->nvme_qp_stats.n_cq_errors);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_dma_errors", q->nvme_qp_stats.n_dma_errors);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_abort_cmd_failed", q->nvme_qp_stats.n_abort_cmd_failed);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_queue_abort_cmds", q->nvme_qp_stats.n_queue_abort_cmds);
 
-		count += jops->start_obj(buf + count, len - count,
-				"intr_completions", indent++);
-		count += jops->data_uval(buf + count, len - count,
-				"max", q->nvme_qp_stats.intr_comps_max,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval_float(buf + count, len - count,
-				"avg", q->nvme_qp_stats.intr_comps_tot,
-				q->nvme_qp_stats.intr_comps_cnt ? q->nvme_qp_stats.intr_comps_cnt : 1,
-				2, !JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"tot", q->nvme_qp_stats.intr_comps_tot,
-				JSON_LAST_ELEM, indent);
-		count += jops->end_obj(buf + count, len - count,
-				!JSON_LAST_ELEM, --indent);
+		CALL_JSON_START_OBJ(&jdata, "intr_completions");
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", q->nvme_qp_stats.intr_comps_max);
+		CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", q->nvme_qp_stats.intr_comps_tot,
+				q->nvme_qp_stats.intr_comps_cnt ? q->nvme_qp_stats.intr_comps_cnt : 1, 2);
+		CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "tot", q->nvme_qp_stats.intr_comps_tot);
+		CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
 
-		count += jops->start_obj(buf + count, len - count,
-				"thread_completions", indent++);
-		count += jops->data_uval(buf + count, len - count,
-				"max", q->nvme_qp_stats.thread_comps_max,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval_float(buf + count, len - count,
-				"avg", q->nvme_qp_stats.thread_comps_tot,
-				q->nvme_qp_stats.thread_comps_cnt ? q->nvme_qp_stats.thread_comps_cnt : 1,
-				2, !JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"tot", q->nvme_qp_stats.thread_comps_tot,
-				JSON_LAST_ELEM, indent);
-		count += jops->end_obj(buf + count, len - count,
-				!JSON_LAST_ELEM, --indent);
+		CALL_JSON_START_OBJ(&jdata, "thread_completions");
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", q->nvme_qp_stats.thread_comps_max);
+		CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", q->nvme_qp_stats.thread_comps_tot,
+				q->nvme_qp_stats.thread_comps_cnt ? q->nvme_qp_stats.thread_comps_cnt : 1, 2);
+		CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg_per_poll", q->nvme_qp_stats.thread_comps_tot,
+				q->nvme_qp_stats.n_poll_loops ? q->nvme_qp_stats.n_poll_loops : 1, 2);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "tot", q->nvme_qp_stats.thread_comps_tot);
+		CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_poll_loops", q->nvme_qp_stats.n_poll_loops);
+		CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
 
-		count += jops->data_uval(buf + count, len - count,
-				"n_thread_wakeups", q->nvme_qp_stats.n_thread_wakeups,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_thread_sleeps", q->nvme_qp_stats.n_thread_sleeps,
-				!JSON_LAST_ELEM, indent);
-		count += jops->data_uval(buf + count, len - count,
-				"n_spurious_intrs", q->nvme_qp_stats.n_spurious_intrs,
-				JSON_LAST_ELEM, indent);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_wakeups", q->nvme_qp_stats.n_thread_wakeups);
+		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_sleeps", q->nvme_qp_stats.n_thread_sleeps);
+		CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_spurious_intrs", q->nvme_qp_stats.n_spurious_intrs);
 
-		count += jops->end_obj(buf + count, len - count,
-				is_last, --indent);
+		CALL_JSON_END_OBJ(&jdata, is_last);
 	}
 
-	count += jops->end_array(buf + count, len - count,
-			!JSON_LAST_ELEM, --indent);
+	CALL_JSON_END_ARRAY(&jdata, !JSON_LAST_ELEM);
 
-	count += jops->start_obj(buf + count, len - count, "summary", indent++);
-	count += jops->data_uval(buf + count, len - count,
-			"rd_count", sum_rd, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"wr_count", sum_wr, !JSON_LAST_ELEM, indent);
-	count += jops->data_sval(buf + count, len - count,
-			"n_timeout_aborts", s.n_timeout_aborts, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_errors", s.n_errors, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_cq_errors", s.n_cq_errors, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_dma_errors", s.n_dma_errors, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_resets", s.n_resets, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_queue_aborts", s.n_queue_aborts, !JSON_LAST_ELEM, indent);
+	CALL_JSON_START_OBJ(&jdata, "summary");
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "rd_count", sum_rd);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "wr_count", sum_wr);
+	CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "n_timeout_abort_cmds", s.n_timeout_abort_cmds);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "q_timeouts", s.q_timeouts);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_errors", s.n_errors);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_cq_errors", s.n_cq_errors);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_dma_errors", s.n_dma_errors);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_abort_cmd_failed", s.n_abort_cmd_failed);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_queue_abort_cmds", s.n_queue_abort_cmds);
 
-	count += jops->start_obj(buf + count, len - count,
-			"intr_completions", indent++);
-	count += jops->data_uval(buf + count, len - count,
-			"max", s.intr_comps_max, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval_float(buf + count, len - count,
-			"avg", s.intr_comps_tot,
-			sum_intr_comps_cnt ? sum_intr_comps_cnt : 1,
-			2, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"tot", s.intr_comps_tot, JSON_LAST_ELEM, indent);
-	count += jops->end_obj(buf + count, len - count,
-			!JSON_LAST_ELEM, --indent);
+	CALL_JSON_START_OBJ(&jdata, "intr_completions");
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", s.intr_comps_max);
+	CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", s.intr_comps_tot,
+			sum_intr_comps_cnt ? sum_intr_comps_cnt : 1, 2);
+	CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "tot", s.intr_comps_tot);
+	CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
 
-	count += jops->start_obj(buf + count, len - count,
-			"thread_completions", indent++);
-	count += jops->data_uval(buf + count, len - count,
-			"max", s.thread_comps_max, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval_float(buf + count, len - count,
-			"avg", s.thread_comps_tot,
-			sum_thread_comps_cnt ? sum_thread_comps_cnt : 1,
-			2, !JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"tot", s.thread_comps_tot, JSON_LAST_ELEM, indent);
-	count += jops->end_obj(buf + count, len - count,
-			!JSON_LAST_ELEM, --indent);
+	CALL_JSON_START_OBJ(&jdata, "thread_completions");
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", s.thread_comps_max);
+	CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", s.thread_comps_tot,
+			sum_thread_comps_cnt ? sum_thread_comps_cnt : 1, 2);
+	CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg_per_poll", s.thread_comps_tot,
+			s.n_poll_loops ? s.n_poll_loops : 1, 2);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "tot", s.thread_comps_tot);
+	CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_poll_loops", s.n_poll_loops);
+	CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
 
-	count += jops->data_uval(buf + count, len - count,
-			"n_thread_wakeups", s.n_thread_wakeups,
-			!JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_thread_sleeps", s.n_thread_sleeps,
-			!JSON_LAST_ELEM, indent);
-	count += jops->data_uval(buf + count, len - count,
-			"n_spurious_intrs", s.n_spurious_intrs,
-			JSON_LAST_ELEM, indent);
-	count += jops->end_obj(buf + count, len - count,
-			JSON_LAST_ELEM, --indent);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_wakeups", s.n_thread_wakeups);
+	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_sleeps", s.n_thread_sleeps);
+	CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_spurious_intrs", s.n_spurious_intrs);
+	CALL_JSON_END_OBJ(&jdata, JSON_LAST_ELEM);
 
-	count += jops->end_obj(buf + count, len - count,
-			JSON_LAST_ELEM, --indent);
+	CALL_JSON_END_OBJ(&jdata, JSON_LAST_ELEM);
 
-	return count;
+	return jdata.count;
 }
 EXPORT_SYMBOL(nvmeibs_nvme_fill_qp_stats_json);
 

@@ -14458,11 +14458,13 @@ static void disk_coremask_update_admin_work(struct workqe_struct *work)
 		count += (*jops->fn)(buf + count, len - count, name, val, is_last, indent);\
 	} while(0)
 	
+#undef CALL_JSON_START_OBJ
 #define CALL_JSON_START_OBJ(name, indent)\
 	do {\
 		count += (*jops->start_obj)(buf + count, len - count, name, indent);\
 	} while(0)
 	
+#undef CALL_JSON_END_OBJ
 #define CALL_JSON_END_OBJ(is_last, indent)\
 	do {\
 		count += (*jops->end_obj)(buf + count, len - count, is_last, indent);\
@@ -14531,11 +14533,13 @@ do {\
 	*data->count += (*jops->end_obj)(data->buf + *data->count, data->len - *data->count, is_last, --data->ntabs);\
 } while(0)
 
+#undef CALL_JSON_START_ARRAY
 #define CALL_JSON_START_ARRAY(data, name)\
 do {\
 	*data->count += (*jops->start_array)(data->buf + *data->count, data->len - *data->count, name, data->ntabs++);\
 } while(0)
 
+#undef CALL_JSON_END_ARRAY
 #define CALL_JSON_END_ARRAY(data, is_last)\
 do {\
 	*data->count += (*jops->end_array)(data->buf + *data->count, data->len - *data->count, is_last, --data->ntabs);\
@@ -14643,7 +14647,8 @@ out:
 #undef CALL_JSON_FN
 #undef CALL_JSON_START_OBJ
 #undef CALL_JSON_END_OBJ
-#undef CALL_JSON_FN_NAME
+#undef CALL_JSON_START_ARRAY
+#undef CALL_JSON_END_ARRAY
 #undef CALL_JSON_DATA_SPRINTF
 
 #define CALL_JSON_FN(fn, name, val, is_last, indent)\

@@ -4383,41 +4383,6 @@ unsigned int nvmeib_intr_shaper_get_max_burst(struct nvmeib_intr_shaper *shaper)
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_get_max_burst);
 
-#define CALL_JSON_FN(data, fn, name, val, is_last)\
-do {\
-	(data)->count += (*jops->fn)((data)->buf + (data)->count, (data)->len - (data)->count, name, val, is_last, (data)->ntabs);\
-} while(0)
-
-#define CALL_JSON_DATA_UVAL(data, is_last, name, val)\
-do {\
-	(data)->count += (*jops->data_uval)((data)->buf + (data)->count, (data)->len - (data)->count, name, val, is_last, (data)->ntabs);\
-} while(0)
-
-#define CALL_JSON_DATA_STR(data, is_last, name, str)\
-do {\
-	(data)->count += (*jops->data_str)((data)->buf + (data)->count, (data)->len - (data)->count, name, str, is_last, (data)->ntabs);\
-} while(0)
-
-#define CALL_JSON_START_OBJ(data, name)\
-do {\
-	(data)->count += (*jops->start_obj)((data)->buf + (data)->count, (data)->len - (data)->count, name, (data)->ntabs++);\
-} while(0)
-
-#define CALL_JSON_END_OBJ(data, is_last)\
-do {\
-	(data)->count += (*jops->end_obj)((data)->buf + (data)->count, (data)->len - (data)->count, is_last, --(data)->ntabs);\
-} while(0)
-
-#define CALL_JSON_START_ARRAY(data, name)\
-do {\
-	(data)->count += (*jops->start_array)((data)->buf + (data)->count, (data)->len - (data)->count, name, (data)->ntabs++);\
-} while(0)
-
-#define CALL_JSON_END_ARRAY(data, is_last)\
-do {\
-	(data)->count += (*jops->end_array)((data)->buf + (data)->count, (data)->len - (data)->count, is_last, --(data)->ntabs);\
-} while(0)
-
 #define NVMEIB_INTR_SHAPER_PROC_FRMT_VER 1
 static int nvmeib_intr_shaper_print_stats_json(struct nvmeib_intr_shaper *shaper, char *buf, size_t len)
 {
