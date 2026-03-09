@@ -6,6 +6,7 @@
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "block/nvmeibc_topology.h"
 #include "block/controlpath/nvmeibc_b_cp_topo_common.h"
+#include "block/dp_topology_traits.h"
 #include "block/nvmeibc_block_common.h"
 #include "nvmeibc_io_pet.h"
 /* This c file implements algorithmic components of topology
@@ -138,6 +139,7 @@ static void nvmeibc_raid1_fill_calculated_data(struct nvmeibc_raid1 *r1)
 {
 	// Deduce bitmaps based on corresponding segments access mode on each segment level
 	struct nvmeibc_disk_segment *seg;
+	struct dp_topology_traits *topo_traits = &r1->calculated_data.topo_traits;
 	struct nvmeibc_roles_bmps *base = &r1->calculated_data.roles_bmps[0]; // Roles for shift 0 are initially calculated. All other roles are calculated based on them
 	int si;
 	memset(&r1->calculated_data, 0, sizeof(r1->calculated_data));
@@ -154,6 +156,8 @@ static void nvmeibc_raid1_fill_calculated_data(struct nvmeibc_raid1 *r1)
 
 	base->data_sgmnts = nvmeibc_raid1_get_data_bmp(r1);
 	base->pari_sgmnts = nvmeibc_raid1_get_parities_bmp(r1);
+
+	topo_traits->n_parities = r1->replicas - r1->slice_size;
 
 	// Create a variation of bitmaps for each possible role shift to avoid those calculations later
 	for (si = 0; si < r1->replicas; ++si) {

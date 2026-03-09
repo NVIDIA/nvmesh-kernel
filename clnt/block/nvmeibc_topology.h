@@ -23,6 +23,7 @@
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"
 #include "utils/nvmeib_jdr/nvmeib_txt.h"
 #include "utils/nvmeib_jdr/nvmeib_jdr.h"
+#include "block/dp_topology_traits.h"
 
 /************ Todo: Move the generic stuff below to somwhere else *************/
 #define UUID_LEN  (sizeof(((struct nvmeibt_client_topo_disk_segment*)0)->uuid))	// Todo: Remove it, use centralized define
@@ -160,6 +161,7 @@ static inline void nvmeibc_update_roles_bmps_flags(struct nvmeibc_roles_bmps* bm
 struct nvmeibc_raid1_calculated_data {
 	struct nvmeibc_roles_bmps roles_bmps[N_MAX_RAID_SLICE_LEN];	// Precalculated nvmeibc_roles_bmps data structure held for each possible roles shift
 	enum nvmeib_io_type_permission final_io_perm;				// Final io_perm <= r1->toma.io_perm
+	struct dp_topology_traits topo_traits;			// Topology description for the raid1
 };
 
 /* Data protection raid struct: Supports D+P: 1+{0..3}, {2..8}+{1..2} */
@@ -254,7 +256,7 @@ union nvmeibc_raid1_io_pet_status{
 		} __attribute__((packed)) dgrd_sgmnts[2];
 	} info;
 	u64 all;
-}; 
+};
 
 __attribute__((nonnull(1)))
 union nvmeibc_raid1_io_pet_status nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid);
