@@ -1391,8 +1391,8 @@ int nvmeibt_recovery_execute_dirty_rebuilds(struct nvmeibt_seg_active **seg_acti
 		} else {
 			N_Tf(6hdoueb, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
 		}
+		seg_active_arr++;
 		seg_active = *seg_active_arr;
-		seg_active++;
 	}
 
 out:
@@ -1468,8 +1468,8 @@ int nvmeibt_recovery_execute_cold_recoveries(struct nvmeibt_seg_active **seg_act
 		} else {
 			N_Tf(u867cn3, "Skipping seg=@UUID_8 @STR", nvmeibt_seg_active_UUID_8(seg_active), nvmeibt_seg_active_dirty_bits_state_str(seg_active));
 		}
+		seg_active_arr++;
 		seg_active = *seg_active_arr;
-		seg_active++;
 	}
 
 out:
