@@ -830,7 +830,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	snprintf(backup_prefix, backup_prefix_size, "%s", backup_dir);
 	snprintf(manifest_file, sizeof(manifest_file), "%s/manifest.json", backup_dir);
 
-	N_IMf(backup_create_start, "Creating modular binary backup: dev=@STR dir=@STR",
+	N_Tf(backup_create_start, "Creating modular binary backup: dev=@STR dir=@STR",
 		  config->device_path, backup_dir);
 
 	/* Create backup directory with restrictive permissions (0700 - owner only) */
@@ -935,7 +935,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 		goto out;
 	}
 
-	N_IMf(backup_create_success, "Modular backup created: dir=@STR total_bytes=@SIZE_T", backup_dir, total_backup_bytes);
+	N_Tf(backup_create_success, "Modular backup created: dir=@STR total_bytes=@SIZE_T", backup_dir, total_backup_bytes);
 	fprintf(stdout, COL_GREEN "Modular backup created: %s (%lu bytes total)" COL_RESET "\n", backup_dir, total_backup_bytes);
 
 	rv = 0;
@@ -1981,7 +1981,7 @@ static int export_gpt_to_json(int disk_fd,
 		goto out;
 	}
 
-	N_IMf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR",
+	N_Tf(gpt_json_export_success, "GPT exported to JSON: dev=@STR file=@STR bytes=@SIZE_T copy_option=@STR",
 		  config->device_path, output_file, nvmeibt_Str_strlen(json_output), gpt_copy_option_str(config->gpt_copy_option));
 	fprintf(stdout, COL_GREEN "GPT exported to JSON: %s (%lu bytes)" COL_RESET "\n", output_file, nvmeibt_Str_strlen(json_output));
 
@@ -3730,7 +3730,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			/* Location fields (my_pba, alternate_pba, partition_entry_pba) preserved from current_main_gpt */
 
 			/* Write Main GPT - Audit trail log */
-			N_IMf(apply_main_gpt_write, "Applying Main GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
+			N_Tf(apply_main_gpt_write, "Applying Main GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
 				  config->device_path, config->apply_json_file, n_main_changes,
 				  json_main_gpt.header.header_crc32, json_main_gpt.header.partition_entry_array_crc32);
 
@@ -3752,7 +3752,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 			current_metadata_gpt.header.n_partition_entries = json_metadata_gpt.header.n_partition_entries;
 
 			/* Write Metadata GPT - Audit trail log */
-			N_IMf(apply_metadata_gpt_write, "Applying Metadata GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
+			N_Tf(apply_metadata_gpt_write, "Applying Metadata GPT from JSON: dev=@STR json=@STR changes=@INT CRC_new: hdr=@CRC ent=@CRC",
 				  config->device_path, config->apply_json_file, n_metadata_changes,
 				  json_metadata_gpt.header.header_crc32, json_metadata_gpt.header.partition_entry_array_crc32);
 
@@ -3771,7 +3771,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 
 			pbyte_s = disk_md_partition->pba_s * config->pblk_size;
 			/* Write disk_metadata - Audit trail log */
-			N_IMf(apply_disk_md_write, "Applying disk_metadata from JSON: dev=@STR json=@STR changes=@INT CRC_new=@CRC",
+			N_Tf(apply_disk_md_write, "Applying disk_metadata from JSON: dev=@STR json=@STR changes=@INT CRC_new=@CRC",
 				  config->device_path, config->apply_json_file, n_disk_metadata_changes, prepared_disk_md.crc32);
 
 			n_bytes_write = roundup(sizeof(prepared_disk_md), config->pblk_size);
@@ -3803,7 +3803,7 @@ static int execute_apply_json(int disk_fd, struct gpt_util_config *config)
 				seg_md_pbyte_s = prepared_seg_mds[i].partition->pba_s * config->pblk_size;
 
 				/* Write segment metadata - Audit trail log */
-				N_IMf(apply_seg_md_write, "Applying segment metadata from JSON: dev=@STR partition=@STR CRC_new=@CRC",
+				N_Tf(apply_seg_md_write, "Applying segment metadata from JSON: dev=@STR partition=@STR CRC_new=@CRC",
 					  config->device_path, prepared_seg_mds[i].partition_name, prepared_seg_mds[i].prepared_data.metadata_ctrl_crc32);
 
 				n_bytes_write = roundup(sizeof(prepared_seg_mds[i].prepared_data), config->pblk_size);
@@ -4262,7 +4262,7 @@ static int execute_restore_binary(int disk_fd, struct gpt_util_config *config)
 		goto out;
 	}
 
-	N_IMf(restore_success, "Device restored from modular backup: dev=@STR manifest=@STR structures=@INT bytes=@SIZE_T",
+	N_Tf(restore_success, "Device restored from modular backup: dev=@STR manifest=@STR structures=@INT bytes=@SIZE_T",
 		  config->device_path, config->restore_binary_file, n_structures_restored, total_bytes_restored);
 
 	fprintf(stdout, "\n" COL_GREEN "=== Device Restored Successfully ===" COL_RESET "\n");
