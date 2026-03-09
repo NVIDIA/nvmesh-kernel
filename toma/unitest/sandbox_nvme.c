@@ -15,12 +15,8 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fm
 	return &lbaf_table[fmt_idx];
 }
 
-/*
- * # Disk size requirement
- * Relevant constants involved:
- * - METADATA_PARTITION_RATIO (nvmeibt_params.h) = 0.15 (sandbox) vs 0.005 (production)
- * - journal_data_size_in_pblks (nvmeibt_read_config.c) = 1MB (sandbox) vs 2GB (production)
- * - serjio_db_size_in_pblks (nvmeibt_read_config.c) = 1MB (sandbox) vs 32MB (production)
+/* Disk size requirement: https://github.com/NVIDIA/nvmesh-documentation/blob/3.4.0-rc1/NVMesh%203.4.0%20User%20Guide.md#4k8-formatting
+ * Relevant constants (redefined for sandbox): METADATA_PARTITION_RATIO, journal_data_size_in_pblks, serjio_db_size_in_pblks
  * The allocation uses 1MB (256 block) alignment internally via align_pba_s_up_to_blkset().
  * For the metadata partition's usable space (first_usable_pba to last_usable_pba) to contain at least one complete 1MB-aligned region:
  *   - first_usable_pba = metadata_pba_s + 257
