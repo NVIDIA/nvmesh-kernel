@@ -3,7 +3,7 @@ import sys, json, time
 
 """
 Usage:
-./pager.py -t 'now-1m' -l nvmeibs_trace_metrics -f 'func=disk_periodic_timer_work_func' | python3 ./nvmesh_srv_disk_metrics.py
+./pager.py --mode msg-stream-json -t 'now-1m' -l nvmeibs_trace_metrics -f 'func=disk_periodic_timer_work_func' | python3 ./nvmesh_srv_disk_metrics.py
 Output format:
 DATE         TIME            DISK                 DEV   VERB            BIN            IOPS       MBps    LAT(us)
 -----------------------------------------------------------------------------------------------------------------
