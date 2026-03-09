@@ -110,6 +110,12 @@ function T_SANDBOX_main_self_unit_test() {
 	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > z.txt;
 }
 
+function T_SANDBOX_unit_test_frame_work_self_check() {
+	__build_if_needed;
+	./${EXE_NAME} test_framework
+	__abort_ci_on_failure;
+}
+
 function T_SANDBOX_main_self_reuse_persistency_unit_test() {
 	./${EXE_NAME};
 	__abort_ci_on_failure;
@@ -130,6 +136,7 @@ case "$1" in
   ci*)
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
+	T_SANDBOX_unit_test_frame_work_self_check;
 	T_SANDBOX_main_self_unit_test;
 	T_SANDBOX_main_self_reuse_persistency_unit_test;
 	T_SANDBOX_toma_persist_json_test;
