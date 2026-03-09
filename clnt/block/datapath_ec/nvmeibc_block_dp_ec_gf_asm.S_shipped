@@ -1238,4 +1238,6 @@ nvmeib_restore_avx256:
 	ret
 .endfunc
 
+.section .note.GNU-stack,"",@progbits
+
 .end
