@@ -2772,3 +2772,9 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 	(*printf_fn)(printf_ctx, "./kafka-dump-log.sh --print-data-log --files /var/lib/kafka/zone1.leader.incremental*/*.log\n");
 	return 0;
 }
+
+void nvmeibt_kafka_get_real_time_errors_str(struct nvmeibt_Str *out)
+{
+	if (!__is_compatible_kafka_version())
+		nvmeibt_Str_sprintf(out, "Wrong kafka version,\n");
+}

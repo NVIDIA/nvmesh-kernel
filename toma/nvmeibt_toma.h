@@ -77,6 +77,7 @@ void nvmeibt_server_lib_destroy(void);
 
 struct format_details;
 int nvmeibt_toma_get_status_str(enum nvmeibs_toma_status_type status_type, struct nvmeibt_Str *out);
+int nvmeibt_toma_get_real_time_errors_str(struct nvmeibt_Str *out);
 void nvmeibt_toma_udev_event_processing_end(struct nvmeibt_udev_event_info *udev_event_info);
 void nvmeibt_toma_process_waiting_udev_events(void);
 

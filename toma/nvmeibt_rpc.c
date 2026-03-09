@@ -56,6 +56,7 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 			nvmeibt_Str_sprintf(out, "\tstatus %s\n", status_types[i].name);
 		}
 			nvmeibt_Str_sprintf(out, "\tstatus server_csvs\n");
+			nvmeibt_Str_sprintf(out, "\tstatus errors\n");
 	return -1;
 	}
 	for (i=0; i<ARRAY_SIZE(status_types); i++) {
@@ -67,6 +68,9 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 		(void)nvmeib_srvr_api_lib_get_csv_disks(out);
 		(void)nvmeib_srvr_api_lib_get_csv_nics( out);
 		return nvmeibt_Str_strlen(out);
+	}
+	if (strcmp(argv[1], "errors")==0) {
+		return nvmeibt_toma_get_real_time_errors_str(out);
 	}
 	nvmeibt_Str_sprintf(out, "Unknown status type '%s'. Use 'status' alone to get a list of available options.\n", argv[1]);
 	return -1;
