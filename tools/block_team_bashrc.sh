@@ -860,6 +860,7 @@ else
 				cmd="sudo ${NVMESH_DIR_SRC}/common-repo/tools/toma_rpc ${@:3}";
 				echo $cmd; eval $cmd;
 			elif [ "$2" == "dump" ]; then
+				[[ "$toma_pid" == "" ]] && { echo_red "TOMA is Down, cannot dump"; return 1; };
 				local toma_dir="./z_last_toma_$(date +%Y_%m_%d_%H_%M_%S)";
 				local toma_cfg_file="/${NVMESH_DIR_LOG}/toma_trace.config";
 				local td_dir="/${NVMESH_DIR_LOG}/trace_daemon";
@@ -873,17 +874,21 @@ else
 				systemctl status nvmeshtoma > ${toma_dir}/sysctl.txt;
 				cp ${toma_cfg_file} ${toma_dir}; # See also # src/nvmesh/toma/toma_trace.config, src/nvmesh/toma/debugging_tips/hiccups;
 				local stack_txt="${toma_dir}/stacks.txt";
+				echo_title "Gathering stacks to ${stack_txt}";
 				for pid in $(pgrep -x nvmeibt_toma); do
 					echo "=== Process PID $pid ===" > ${stack_txt};
 					for t in /proc/$pid/task/*; do
-						local tid=$(basename "$t"); echo -e "\n--- TID $tid stack ---" >> ${stack_txt}; sudo cat /proc/$pid/task/$tid/stack >> ${stack_txt}; sudo pstack $tid >> ${stack_txt};
+						local tid=$(basename "$t"); echo -e "\n--- TID $tid stack ---" >> ${stack_txt};
+						cmd="sudo cat /proc/$pid/task/$tid/stack >> ${stack_txt}"; echo $cmd; eval $cmd;
+						cmd="sudo pstack $tid >> ${stack_txt}"; echo $cmd; eval $cmd;
 					done
 				done
 				tail -n +1 ${toma_dir}/* | less;
 				cmd="\t -\t sudo ${td_dir}/pager.py ${td_dir} --toma --since tail-5m | grep -E \"TOMAerr|TOMAwarn\"";
 				echo -e $cmd;
 				echo -e "\t -\t $toma_stat_file";
-				echo_title "Toma file:"; NVMESH_service toma find;
+				local toma_exe=`NVMESH_service toma find`;
+				echo_title "Toma file:"; echo ${toma_exe};
 				toma_rpc="${NVMESH_DIR_SRC}/common-repo/tools/toma_rpc";
 				echo -e "Set Param example:\t ${toma_rpc} config max_n_simultaneous_dirty_rebuild 2";
 				echo -e "\t\t\t ${toma_rpc} config tracer_debug_level 5";
@@ -896,6 +901,11 @@ else
 				local toma_trace_conf="/var/log/nvmesh/toma_trace.config";
 				echo "cp ${toma_trace_conf} ${toma_trace_conf}.ORIG_`date +%d%b%Y_%H%M%S`";
 				echo "echo '+ all' > ${toma_trace_conf}";
+				echo_title "Kafka";
+				cmd="dpkg -s librdkafka1  librdkafka-dev| grep -e Package -e Version"; echo $cmd; eval $cmd;
+				cmd="rpm -ql librdkafka | grep librdkafka.so*"; echo "************** $cmd"; eval $cmd;
+				cmd="ll /usr/lib*/librdkafka.so*"; echo "************** $cmd"; eval $cmd;
+				cmd="ldd ${toma_exe} | grep kafka"; echo "************** $cmd"; eval $cmd;
 			elif [[ $2 == recov* ]]; then
 				watch -n 1 -d cat /proc/nvmeibs/toma_status/recover;
 			elif [ "$2" == "del_csv" ]; then

@@ -1476,7 +1476,7 @@ void toma_sig_handler_fn(int32_t n, uint64_t addr)
 	} else if (n == SIGHUP) {
 		nvmeibt_global_mark_is_reread_nvmesh_conf_required();
 	} else {
-		received_sig_no = n;
+		received_sig_no = n;	// Unknown signal, will cause shutdown.
 	}
 }
 /******************************************************************************/
