@@ -101,7 +101,7 @@ void* _worker(void*);
  */
 int start_capuch_worker(capuch_worker_t* self)
 {
-	size_t stack_size = PTHREAD_STACK_MIN;
+	size_t stack_size = PTHREAD_STACK_MIN*2;
 	pthread_attr_t attr = {{0}};
 	int ret;
 
