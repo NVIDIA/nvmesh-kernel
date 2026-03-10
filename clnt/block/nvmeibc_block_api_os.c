@@ -691,6 +691,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 #endif
 	nvmeibc_driver_version_init(&c->drv_ver, p);
 	nvmeibc_driver_version_clear(&c->drv_ver);
+	c->atom_protocol_version = H.protocol_version;
 	c->proc_root = nvmeibc_get_proc_dir_volumes(nvmeibc_isnt_params_blk2main(p));
 	atomic_set(&c->num_read_part_in_flight, 0);
 	if (nvmeibc_driver_version_register(&c->drv_ver) <= 0) {
@@ -1064,6 +1065,11 @@ void block_api_os_stop_accepting_kernel_io(struct nvmeibc_os_api *os, u32 reason
 		if (reason == 'D') {
 #if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 			int (*set_detaching_fn)(struct nvmeiba_atom_os_api *atom) = (void *)os->atom.reserved[0];
+
+			if (os->driver_context->atom_protocol_version > NVMEIBA_2_C_PROTO_VERSION_V_2_0) {
+				BUG_ON(!set_detaching_fn);
+			}
+
 			if (set_detaching_fn) {
 				__exec_for_carrier_and_sub_vols(atom, set_detaching_fn);
 			} else {
