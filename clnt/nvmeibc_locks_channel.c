@@ -1840,6 +1840,7 @@ out:
 
 static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch) {
 	struct nvmeibc_ib_net *net = &ch->net;
+	struct nvmeibc_locks_channel *primary_ch = ch->primary_ch;
 	struct nvmeibc_lock_opr_in_progress *opr_ip;
 	int rv, i;
 
@@ -1855,14 +1856,15 @@ static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch) {
 
 	ch->max_atom_read_ip = ch->net.max_dest_rd_atomic * 2;
 
-#if DEBUG_2ND_LOCK_CH_TEST_ATMOIC
-	/* Copy the common info from the primary channel */
+	/* Copy the common info from the primary channel,
+	   No need to retest */
 	ch->atomic_cap = primary_ch->atomic_cap;
 	ch->masked_atomic_cap = primary_ch->masked_atomic_cap;
 	ch->atomic_req_endian_swap = primary_ch->atomic_req_endian_swap;
 	ch->atomic_reply_endian_swap = primary_ch->atomic_reply_endian_swap;
 	ch->masked_atomic_req_endian_swap = primary_ch->masked_atomic_req_endian_swap;
 	ch->masked_atomic_reply_endian_swap = primary_ch->masked_atomic_reply_endian_swap;
+#if DEBUG_2ND_LOCK_CH_TEST_ATMOIC
 	ch->net.post_send_atomic_fn = primary_ch->net.post_send_atomic_fn;
 	bitmap_copy(ch->local_bypass_bmp, primary_ch->local_bypass_bmp, NVMEIBC_LOCK_NUM_OPR);
 #endif
