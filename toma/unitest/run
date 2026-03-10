@@ -99,6 +99,7 @@ function T_SANDBOX_toma_persist_json_test() {
 	cmp -s ${bin_1}  ${bin_2}  || { echo_red "FAILED - bins not identical" && exit 4; }
 	__run_cmd "cat ${orig_json} | jq .";
 	__run_cmd "cat ${json_2} | jq .";
+	sudo rm ${bin_orig}* ${orig_json}*;
 	__abort_ci_on_failure;
 }
 
