@@ -2339,7 +2339,9 @@ void nvmeibt_praid_dump(__attribute__((__unused__)) const struct nvmeibt_praid *
 	if (__praid) {																					\
 		XDLIST_DEL(&(__praid->global_report_to_mgmt_praid_link));									\
 		XDLIST_DEL(&(__praid->praid_topo_recalc_link));												\
-		NNVMEIBT_BM_FREE(name ## _1, (__praid)->praid_leader.segs_wire_topo_buf.data_buf);			\
+		NNVMEIBT_BUF_FREE(name ## _1, &(__praid)->praid_leader.segs_wire_topo_buf);					\
+		NNVMEIBT_BUF_FREE(name ## _sc, &(__praid)->praid_leader.topo_config_array_of_its_serialized_segs_conf); \
+		NNVMEIBT_BUF_FREE(name ## _wc, &(__praid)->praid_leader.topo_config_praid_and_segs_wire_conf_buf); \
 		NNVMEIBT_TOMA_FREE(name ## _2, __praid);													\
 		(__praid) = NULL;																			\
 	}																								\
