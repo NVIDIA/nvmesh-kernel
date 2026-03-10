@@ -2932,11 +2932,20 @@ static struct nvmeibt_nm_path * get_path_connect_req(
 	struct nvmeibt_nm_remote_node *rn;
 	struct nvmeibt_nm_remote_addr *ra = NULL;
 	struct nvmeibt_nm_path *path = NULL;
+	bool		is_identical_to_last_logged_remote_not_found;
 
 	PFIN;
+	is_identical_to_last_logged_remote_not_found = ARE_UUID_EQ(&(pp->pn->local_node->last_logged_remote_not_found), &(login_data->node_id));
 	if (!(rn = nvmeibt_nm_find_remote_node(pp->pn->local_node, &login_data->node_id))) {
-		N_Ef(abrf, "could not find remote node @UUID_LE", &login_data->node_id);
+		if (!is_identical_to_last_logged_remote_not_found) {
+			N_Wf(abrf, "could not find remote node @UUID_LE", &login_data->node_id);
+			pp->pn->local_node->last_logged_remote_not_found = login_data->node_id;
+		}
 		goto out;
+	} else {
+		if (is_identical_to_last_logged_remote_not_found) {
+			pp->pn->local_node->last_logged_remote_not_found = nvmeib_uuid_null_val;		// No more remote_not_found
+		}
 	}
 	if (!(ra = nvmeibt_nm_find_remote_address_by_gid(rn, &login_data->sgid)))
 		N_Df(fdfsd, "...");

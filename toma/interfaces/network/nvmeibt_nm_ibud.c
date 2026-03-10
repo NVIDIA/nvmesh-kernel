@@ -378,8 +378,11 @@ static int rdmacm_cm_handle_error_event(
 	}
 	if (kt->base.type == kt_connect_cm) {
 		path = cmt2p(kt2ccl(kt));
-		N_Ef(nm_heerr_e2, "path @PATH, got cm event @STR", path->name, rdma_event_str(event->event));
-			switch (event->event) {
+		if (path->last_logged_event_type != event->event) {
+			N_Wf(nm_heerr_e2, "path @PATH, got cm event @STR", path->name, rdma_event_str(event->event));
+			path->last_logged_event_type = event->event;
+		}
+	switch (event->event) {
 	case RDMA_CM_EVENT_ADDR_ERROR:
 		nvmeibt_nm_path_set_last_error(path, nvmeibt_nm_ple_failed_address_resolved);
 		break;

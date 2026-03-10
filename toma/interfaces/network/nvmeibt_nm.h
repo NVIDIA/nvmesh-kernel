@@ -227,6 +227,7 @@ struct nvmeibt_nm_local_node {
 
     struct local_nics_data lnd;
 	struct nvmeibt_nm_hw_function_table hw_func_tbl;
+	union nvmeib_uuid	last_logged_remote_not_found;
 };
 
 /* Represent remote node object created from Toma topology */
@@ -409,7 +410,7 @@ struct nvmeibt_nm_path {
 
 	/* Path counters for monitoring and statistics */
 	struct nvmeibt_nm_path_counters counters;
-
+	enum rdma_cm_event_type 	last_logged_event_type;
 };
 
 enum nvmeibt_nm_periodic_msg_type {

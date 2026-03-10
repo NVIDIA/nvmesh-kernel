@@ -842,6 +842,7 @@ struct nvmeibt_nm_local_node { 					// Network module simulator. For Toma to com
 	int fd;
 	int n_connected_remote_nodes;
 	int n_nics;								// Nics to communicate with with other Tomas
+	union nvmeib_uuid	last_logged_remote_not_found;
 };
 
 void *nvmeibt_nm_tracer_init(const char *lib_path) { return (void *)lib_path; }
