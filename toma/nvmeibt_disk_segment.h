@@ -335,6 +335,7 @@ struct nvmeibt_disk_segment *nvmeibt_disk_segment_get_disk_segment_by_id(const u
 
 void nvmeibt_disk_segment_garbage_collect_old_segments(bool *is_any_garbage_collected, bool *is_all_garbage_collected);
 
+void nvmeibt_disk_segment_free_all_at_exit(void);
 enum nvmeibt_seg_remove_rv nvmeibt_disk_segment_remove(struct nvmeibt_disk_segment *disk_segment);
 void nvmeibt_seg_lot_mark_conf_corrupted(struct nvmeibt_seg_lot *seg_lot);
 void nvmeibt_disk_segment_mark_conf_corrupted(struct nvmeibt_disk_segment *seg);

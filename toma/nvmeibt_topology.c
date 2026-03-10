@@ -2775,6 +2775,7 @@ void nvmeibt_topology_free_resources(void)
 	nvmeibt_raft_del_all_members_at_exit();
 	HW_conf_free_tree(cur_topo->HW_mgmt_conf);
 	nvmeibt_praid_free_all_at_exit();
+	nvmeibt_disk_segment_free_all_at_exit();
 	nvmeibt_chunk_free_all_at_exit();
 	nvmeibt_block_device_free_all_at_exit();
 	__clean_drives_specs();

@@ -710,6 +710,17 @@ out:
 	return rv;
 }
 
+void nvmeibt_disk_segment_free_all_at_exit(void)
+{
+	struct nvmeibt_disk_segment *seg;
+	NVMEIB_HASH_FOREACH(seg, nvmeibt_global_get_global()->disk_segments_hash_by_uuid) {
+		if (seg->seg_follower.seg_active)
+			seg->seg_follower.seg_active->local_disk = NULL; // local_disk already freed in terminate_toma
+		NVMEIBT_SEG_ACTIVE_FREE_MEM_AND_PROCESSES(seg->seg_follower.seg_active);
+		NNVMEIBT_BM_FREE(__AUTOID__, seg);
+	}
+}
+
 void nvmeibt_disk_segment_garbage_collect_old_segments(bool *is_any_garbage_collected, bool *is_all_garbage_collected)
 {
 	struct nvmeibt_disk_segment		*seg;
