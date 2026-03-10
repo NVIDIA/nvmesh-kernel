@@ -127,6 +127,7 @@ u64 nvmeiba_os_apis_get_version(void);
 int nvmeiba_os_apis_get_num(unsigned char req_type);
 
 #define NVMEIBA_2_C_PROTO_VERSION_V_2_0				(2)
+#define NVMEIBA_2_C_PROTO_VERSION_V_2_1				(3)
 struct nvmeiba_to_c_handover {						// Upon connection, handover of nvmeiba to nvmeibc
 	const struct block_device_operations *fops;		// To be overwritten by nvmeibc
 	u32 n_orphan_osapi;								// Amount of orphan atoms that must be taken over by nvmeibc
