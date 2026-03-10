@@ -77,7 +77,7 @@ static int timed_wait(struct nvmeibt_wq *wq, int ms) {
 	struct timespec ts;
 	int rv;
 	if (ms) {
-		getnstimeofday_real(&ts);
+		getnstimeofday_boot(&ts);
 		timespec_update_by_a_few_nsec(&ts, (long)MSEC_TO_NSEC(ms));
 		if ((rv = pthread_cond_timedwait(cond, m, &ts)) != 0 &&
 			rv != ETIMEDOUT) {
@@ -172,6 +172,7 @@ struct nvmeibt_wq *nvmeibt_wq_create(const char *name) {
 		N__E(ttwqce3, "wq=@WQ_NAME failed to create wq cond var attr @AUTO_ERRNO", wq->name);
 		goto free_guard;
 	}
+	pthread_condattr_setclock(&cattr, CLOCK_BOOTTIME);
 	if (pthread_cond_init(&wq->wakeup, &cattr) != 0) {
 		N__E(ttwqce4, "wq=@WQ_NAME failed to create wq cond var @AUTO_ERRNO", wq->name);
 		goto free_guard;

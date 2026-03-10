@@ -1995,6 +1995,7 @@ static int create_offloader(struct ibud_local_node *ln)
 			"Failed to create cond var attr - @AUTO_ERRNO");
 		goto free_eg;
 	}
+	pthread_condattr_setclock(&attr, CLOCK_BOOTTIME);
 	if (pthread_cond_init(&w->wakeup, &attr) != 0) {
 		N_ETf(nm_create_offloader_e3,
 			"Failed to create wakeup - @AUTO_ERRNO");
@@ -2154,7 +2155,7 @@ static int timed_wait(pthread_cond_t *cond, pthread_mutex_t *m, int sec)
 	int rv;
 
 	if (sec) {
-		getnstimeofday_real(&ts);
+		getnstimeofday_boot(&ts);
 		ts.tv_sec += sec;
 		if ((rv = pthread_cond_timedwait(cond, m, &ts)) != 0 &&
 			rv != ETIMEDOUT) {
