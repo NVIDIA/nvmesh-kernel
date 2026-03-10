@@ -6,6 +6,8 @@ MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("nvmesh client hot upgrade core");
 MODULE_LICENSE("Dual BSD/GPL");
 
+#define NVMEIBA_2_C_PROTO_VERSION_CURRENT NVMEIBA_2_C_PROTO_VERSION_V_2_1
+
 /********** List of all active OS/API's, including unsafely detached *********/
 static struct nvmeiba_all_os_apis all;
 
@@ -384,7 +386,7 @@ struct nvmeiba_to_c_handover nvmeiba_os_do_on_nvmeibc_up(void)
 	n = A->n;								// Cache on stack to print outside spinlock
 	H.fops = &A->default_fops;				// KERNEL 5.10+ Default fops include NULL submit_bio, nvmeibc will replace it with a functional submit_bio
 	spin_unlock_irqrestore(&A->lock, flags);
-	H.protocol_version = NVMEIBA_2_C_PROTO_VERSION_V_2_0;
+	H.protocol_version = NVMEIBA_2_C_PROTO_VERSION_CURRENT;
 	if (H.n_orphan_osapi)
 		_NI_to_user(t_04_atom, "Successful hot upgrade handshake between modules nvmeiba and nvmeibc. Internal information {%u/%u/%d/%d}", H.n_orphan_osapi, n.osapi, n.sub_osapi, n.nvmeibc);   //. Error code: 0
 	return H;
