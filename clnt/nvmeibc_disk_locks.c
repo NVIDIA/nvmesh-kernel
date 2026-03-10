@@ -39,6 +39,14 @@ bool nvmeibc_disk_locks_use_system_pcpu_wq = false;
 module_param_named(disk_locks_use_system_pcpu_wq, nvmeibc_disk_locks_use_system_pcpu_wq, bool, 0444);
 MODULE_PARM_DESC(disk_locks_use_system_pcpu_wq, "Defines whether disk locks use the system per-cpu workqueues for requests completion handling.");
 
+enum nvmeibc_module_param_shard_type {
+	NVMEIB_MODULE_PARAM_SHARD_TYPE_HASH_MODULO,
+	NVMEIB_MODULE_PARAM_SHARD_TYPE_LOCKSET_MODULO,
+};
+
+uint nvmeibc_lock_shard_type = NVMEIB_MODULE_PARAM_SHARD_TYPE_HASH_MODULO;
+module_param_named(lock_shard_type, nvmeibc_lock_shard_type, uint, 0644);
+MODULE_PARM_DESC(lock_shard_type, "Lock shard type: 0) HASH_MODULO, 1) LOCKSET_MODULO");
 
 #define DEUBG_SKIP_LOCKS_TX_ID 1234
 
@@ -1751,6 +1759,7 @@ out:
 	return rv;
 }
 
+#define MAKE_LOCK_HINT(ch, addr) ((nvmeibc_lock_shard_type == NVMEIB_MODULE_PARAM_SHARD_TYPE_HASH_MODULO) ? hash_64(addr, 32) : addr >> LOCKSET_SHIFT)
 /* assumes thread is pinned to a cpu */
 #define NVMEIBC_DISK_LOCKS_SHOULD_DEFER_TO_PCPU_WQ(_cpus) NVMEIBC_DISK_SHOULD_DEFER_TO_PCPU_WQ(nvmeibc_disk_locks_use_system_pcpu_wq && !NVMEIBC_DISK_SAFE_TEST_CURRENT_CPU_IN_BITMAP(&_cpus), _cpus)
 
@@ -1796,7 +1805,8 @@ static int execute_opr(struct nvmeibc_disk_seg_locks_mem_info *record, u64 addr,
 		goto out;
 	}
 
-	locks_channel = choose_locks_channel(record->locks_channel, comp->opr, addr, &comp->cpu_mask_info);
+	locks_channel = choose_locks_channel(record->locks_channel, comp->opr,
+					 MAKE_LOCK_HINT(record->locks_channel, addr), &comp->cpu_mask_info);
 	if (!locks_channel) {
 		rv = -EINVAL;
 		goto out;
