@@ -118,98 +118,84 @@ void clientSimulator_rmmod(struct clientSimulator *client) {
 }
 
 /******************************************************************************/
-struct proc_print_params {
-	struct {		// Conditional printing/searching
-		const char* path;
-	} query;
-	union {
-		struct {
-			const char* buf_start;			// Original start of buffer
-			char* buf;						// Current location in buffer to print to. != buf_start if at least 1 byte was printed
-			int len;						// Remaining length
-		};
-		struct proc_dir_entry* e;			// Proc file to find
-	};
+struct proc_path_params {
+	const char* path;				// Remaining path to match (consumed during traversal)
+	struct proc_dir_entry* e;		// For find: the found entry
 };
 
-static int __print_proc_file(struct proc_dir_entry* e, void* _p) {
-	struct proc_print_params *p = _p;
-	int cnt = 0;
-	if (!e->data)
+static int __stream_proc_file(struct proc_dir_entry* e, void* _ctx) {
+	char buf[4096];
+	loff_t offset = 0;
+	int cnt;
+	(void)_ctx;
+
+	if (!e->data) {
 		return true;
-	if (p->len > 0) {
-		cnt = snprintf(p->buf, p->len, "\n" KERN_COL_WHITE_BOLD "File:%s\n" KERN_COL_RESET, e->name);
-		p->buf += cnt; p->len -= cnt;
 	}
-	if (p->len > 0) {
-		loff_t offset = 0;								// Read from the first byte
-		int next_portion = (1<<20);						// Todo: set to smaller number (like 512) to test reading in portions by user space
-		do {
-			next_portion = min(next_portion, p->len);
-			cnt = e->fops->read((void *)e->data, p->buf, next_portion, &offset);
-			p->buf += cnt; p->len -= cnt;
-		} while ((cnt)&&(cnt == next_portion));		// Read succeeded and possibly something is left to read
+
+	unitest_print("\n" KERN_COL_WHITE_BOLD "File:%s\n" KERN_COL_RESET, e->name);
+	for (;;) {
+		cnt = e->fops->read((void *)e->data, buf, sizeof(buf) - 1, &offset);
+		if (cnt <= 0) {
+			break;
+		}
+		buf[cnt] = '\0';
+		unitest_print("%s", buf);
 	}
 	return true; 		// Always enter sub directories
 }
 
-static char __does_proc_entry_match_path(struct proc_dir_entry* e, struct proc_print_params *p) {
-	if (p->query.path) {
+static char __does_proc_path_match(struct proc_dir_entry* e, struct proc_path_params *p) {
+	if (p->path) {
 		const int name_len = strlen(e->name);
-		if (!strncmp(e->name, p->query.path, name_len)) {
+		if (!strncmp(e->name, p->path, name_len)) {
 			if (!e->data) {
-				p->query.path += (name_len + 1);	// skip the directory + '/'
-				return 'S';							// File not found but we found a parent directory so go into sub dirs
-			} else if (p->query.path[name_len] != 0) {
+				p->path += (name_len + 1);	// skip the directory + '/'
+				return 'S';					// File not found but we found a parent directory so go into sub dirs
+			} else if (p->path[name_len] != 0) {
 				// Wrong match, example: path = "abc/file.txt", matched to file = "a"
 			} else {
-				p->query.path = NULL;				// File was already found. Consumed the entire patch, Skip all the rest
-				return 'F';							// File found
+				p->path = NULL;				// File was already found. Consumed the entire patch, Skip all the rest
+				return 'F';					// File found
 			}
 		}
 	}
-	return 0;										// File not found and sub dirs are irrelevant
+	return 0;									// File not found and sub dirs are irrelevant
 }
 
-static int __print_proc_file_if_in_path(struct proc_dir_entry* e, void* _p) {
-	const int rv = __does_proc_entry_match_path(e, _p);
-	if (rv == 'F')
-		__print_proc_file(e, _p);
+static int __stream_proc_file_if_in_path(struct proc_dir_entry* e, void* _p) {
+	const int rv = __does_proc_path_match(e, _p);
+	if (rv == 'F') {
+		__stream_proc_file(e, NULL);
+	}
 	return (rv == 'S');
 }
 
 static int __find_proc_file_by_path(struct proc_dir_entry* e, void* _p) {
-	struct proc_print_params *p = _p;
-	const int rv = __does_proc_entry_match_path(e, p);
-	if (rv == 'F')
+	struct proc_path_params *p = _p;
+	const int rv = __does_proc_path_match(e, p);
+	if (rv == 'F') {
 		p->e = e;
+	}
 	return (rv == 'S');
 }
 
-static int __print_dir_tree(struct proc_dir_entry* e, void* _p) {
-	struct proc_print_params *p = _p;
-	int cnt = (int)((!e->data) ? e->depth : (e->depth-1))*2;
-	if (p->len > cnt) {             // Insert tabulation to offset inner directories
-		memset(p->buf, ' ', cnt);
-		p->buf += cnt; p->len -= cnt;
-	}
-	if (p->len > 0){
-		cnt = snprintf(p->buf, p->len, "%s/%s\n", (e->data ? "|    " : "|_"), e->name);
-		p->buf += cnt; p->len -= cnt;
-	}
+static int __stream_dir_tree(struct proc_dir_entry* e, void* _ctx) {
+	int indent;
+	(void)_ctx;
+
+	indent = (int)((!e->data) ? e->depth : (e->depth-1))*2;
+	unitest_print("%*s%s/%s\n", indent, "", (e->data ? "|    " : "|_"), e->name);
 	return true; 		// Always enter sub directories
 }
 
 /* Read NVMesh info from /proc */
 void clientSimulator_print_proc_dir(struct clientSimulator *client, bool verbose) {
-	char buff[4096*256];												// Print all volumes at once
-	struct proc_print_params p = {.buf = &buff[0], .len = sizeof(buff)};
-	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, &p, &__print_dir_tree);
-	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, &p, &__print_proc_file);
-	WARN_ON(p.len > (int)sizeof(buff));
-	p.buf[0] = 0;		// Add null terminator
-	if (verbose)
-		unitest_print("%s", buff);
+	if (!verbose) {
+		return;
+	}
+	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, NULL, __stream_dir_tree);
+	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, NULL, __stream_proc_file);
 }
 
 /******************************************************************************/
@@ -365,39 +351,31 @@ void clientSimulator_dump_procfs_to_disk(struct clientSimulator *client, const c
 
 void clientSimulator_print_proc_files_of_vol(struct clientSimulator *client, bool verbose, int volInd) {
 	struct nvmeibc_block_device	*bdev = client->devs[volInd];
-	char buff[4096*64];
-	struct proc_print_params p = {.buf = &buff[0], .len = sizeof(buff)};
 	BUG_ON(volInd >= client->nBdevs);
-	procfs_traverse_tree_dfs(bdev->os->procfs->dir, &p, &__print_proc_file);
-	p.buf[0] = 0;		// Add null terminator
-	if (verbose)
-		unitest_print("%s", buff);
+	if (!verbose) {
+		return;
+	}
+	procfs_traverse_tree_dfs(bdev->os->procfs->dir, NULL, __stream_proc_file);
 }
 
 void clientSimulator_print_proc_file_by_path(struct clientSimulator *client, const char *path) {
-	char buff[4096];
-	struct proc_print_params p = {.buf = &buff[0], .len = sizeof(buff)};
-	p.query.path = (path + 1);	// Skip leading '/'
-	p.buf_start = p.buf;
-	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, &p, &__print_proc_file_if_in_path);
-	p.buf[0] = 0;			// Add null terminator
-	unitest_print("%s", buff);
+	struct proc_path_params p = {.path = (path + 1), .e = NULL};	// Skip leading '/'
+	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, &p, __stream_proc_file_if_in_path);
 }
 
 struct proc_dir_entry* clientSimulator_find_proc_file_by_path(struct clientSimulator *client, const char *path) {
-	struct proc_print_params p = {.e = 0};
-	p.query.path = (path + 1);	// Skip leading '/'
+	struct proc_path_params p = {.path = (path + 1), .e = NULL};	// Skip leading '/'
 	procfs_traverse_tree_dfs(&client->OS.kernel->procfs, &p, &__find_proc_file_by_path);
 	return p.e;
 }
 
 struct proc_dir_entry* clientSimulator_find_vol_proc_file_by_path(struct clientSimulator *client, int volInd, const char *path) {
 	struct nvmeibc_block_device	*bdev = client->devs[volInd];
-	struct proc_print_params p = {.e = 0};
 	char path_including_vol[PATH_MAX];
+	struct proc_path_params p = {.path = path_including_vol, .e = NULL};
+
 	BUG_ON(volInd >= client->nBdevs);
 	snprintf(path_including_vol, PATH_MAX, "%s/%s", bdev->name, path);
-	p.query.path = path_including_vol;
 	procfs_traverse_tree_dfs(bdev->os->procfs->dir, &p, &__find_proc_file_by_path);
 	return p.e;
 }
