@@ -1491,12 +1491,13 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		char						executable_str_with_delay[512];
 		char *const					argv[] = { "bash", "-c", executable_str_with_delay, NULL };
 		int							spawn_err;
-
-		if (nvmeibt_encrypt_delay == ENCRYPT_DELAY_BEFORE_EXECUTION)
-			strcpy(executable_str_with_delay, "sleep 20; ");
-		else
-			executable_str_with_delay[0] = '\0';
-		strcat(executable_str_with_delay, entry->run_exec_on_blkdev_ctx->executable_str);
+		const int n_characters = snprintf(executable_str_with_delay, sizeof(executable_str_with_delay), "%s%s",
+				 (nvmeibt_encrypt_delay == ENCRYPT_DELAY_BEFORE_EXECUTION) ? "sleep 20; " : "",
+				 entry->run_exec_on_blkdev_ctx->executable_str);
+		if (n_characters >= (int)sizeof(executable_str_with_delay)) {
+			N_Ef(trunc_e, "executable_str too long @INT[B] needed", n_characters);
+			goto out;
+		}
 
 		spawn_err = posix_spawn_file_actions_init(&fa);
 		if (spawn_err != 0) {
