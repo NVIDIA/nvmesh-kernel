@@ -33,7 +33,8 @@ nvmeib_common-y := \
 	nvmeib_error_tags.o \
 	nvmeib_scatterlist_iter.o \
 	nvmeib_completion_noise.o \
-	nvmeib_pcpu_wq.o
+	nvmeib_pcpu_wq.o \
+	nvmeib_io_histograms.o
 
 ifeq ($(call ofed_ver_check,5,1),no)
   # Ofed below 5.1 - support mlx4 driver

@@ -19,10 +19,12 @@
 #include "nvmeib_public.h"
 #include "nvmeib_public_mmap.h"
 #include "nvmeib_public_procfs.h"
+#include "nvmeib_io_histograms.h"
 #include "nvmeibs_serjio.h"
 
 struct nvmeibs_disk_info;
 struct nvmeibs_dev;
+struct nvmeibs_io_hist_proc_ent;
 
 /*the default size of lock set size in blocks*/
 enum { NVMEIBS_DEFAULT_LOCK_SET_SIZE = 32 };
@@ -64,6 +66,8 @@ struct nvmeibs_disk_private_data {
 		struct nvmeib_public_procfs_ent *qps;
 		/* proc file disk's iostats*/
 		struct nvmeib_public_procfs_ent *iostats;
+		/* proc file disk's io histogram metrics */
+		struct nvmeibs_io_hist_proc_ent *io_histograms;
 		/* proc file disk's nvme_qp stats */
 		struct nvmeib_public_procfs_ent *nvme_qp_stats;
 	} procfs;

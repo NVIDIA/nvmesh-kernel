@@ -20099,6 +20099,11 @@
         "fmt_func": "fmt_iostats_verb",
         "final": true
     },
+    "@NS_12_BINS": {
+        "size": 1024,
+        "type": "array_u64",
+        "fmt": "%s"
+    },
     "@IO_STAT_COUNTER": {
         "size": 64,
         "type": "u64",

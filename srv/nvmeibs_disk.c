@@ -20,6 +20,8 @@
 #include "nvmeibs_um_comm.h"
 #include "nvmeibs_trace.h"
 #include "nvmeib_io_stats.h"
+#include "nvmeib_io_histograms.h"
+#include "nvmeib_jdr_proc.h"
 #include "common/proc_epilog.h"
 //#define CONFIG_NVMEIB_DEBUG
 //#define DEBUG
@@ -391,6 +393,9 @@ static ssize_t reset_disk_qps(void *arg, char *buf, size_t len)
 	return len;
 }
 
+struct nvmeibs_io_hist_proc_ent;
+static void io_hist_proc_remove(struct nvmeibs_io_hist_proc_ent *p);
+
 static void destroy_disk_procfs(struct nvmeibs_disk_info *di)
 {
 	struct nvmeibs_disk_private_data *priv = di->priv;
@@ -411,6 +416,11 @@ static void destroy_disk_procfs(struct nvmeibs_disk_info *di)
 		_NT(destroy_disk_procfs_iostats, "Remove iostats proc");
 		nvmeib_public_proc_remove(priv->procfs.iostats);
 		priv->procfs.iostats = NULL;
+	}
+	if (priv->procfs.io_histograms) {
+		_NT(destroy_disk_procfs_io_histograms, "Remove io_histograms proc");
+		io_hist_proc_remove(priv->procfs.io_histograms);
+		priv->procfs.io_histograms = NULL;
 	}
 	if (priv->procfs.nvme_qp_stats) {
 		_NT(destroy_disk_procfs_nvme_qpstats, "Remove nvme_qp stats proc");
@@ -466,6 +476,61 @@ static ssize_t stats_clear(void *priv, char *buf , size_t len) {
 	return len;
 }
 
+
+struct nvmeibs_io_hist_proc_ent {
+	struct nvmeib_jdr_procfs_ent *ent;
+	struct nvmeib_io_histograms  *hist;
+	char                          labels[128];
+};
+
+static void io_hist_fill(struct jdr *jdr, void *arg)
+{
+	struct nvmeibs_io_hist_proc_ent *d = arg;
+
+	nvmeib_io_histograms_jdr_fill(jdr, d->hist, d->labels);
+}
+
+static void io_hist_reset_cb(void *arg)
+{
+	struct nvmeibs_io_hist_proc_ent *d = arg;
+
+	nvmeib_io_histograms_clear(d->hist);
+}
+
+static ssize_t io_hist_write(void *arg, const char __user *buf,
+			     size_t count, loff_t *ppos)
+{
+	(void)ppos;
+	return nvmeib_jdr_proc_write_reset(io_hist_reset_cb, arg, buf, count);
+}
+
+static struct nvmeibs_io_hist_proc_ent *
+io_hist_proc_create(struct nvmeib_io_histograms *hist, const char *name,
+		    struct proc_dir_entry *dir, const char *labels)
+{
+	struct nvmeibs_io_hist_proc_ent *p = kmalloc(sizeof(*p), GFP_KERNEL);
+
+	if (!p)
+		return NULL;
+
+	p->hist = hist;
+	snprintf(p->labels, sizeof(p->labels), "%s", labels ? labels : "");
+	p->ent = nvmeib_jdr_proc_create(name, dir, io_hist_fill, io_hist_write, p);
+	if (!p->ent) {
+		kfree(p);
+		return NULL;
+	}
+	return p;
+}
+
+static void io_hist_proc_remove(struct nvmeibs_io_hist_proc_ent *p)
+{
+	if (!p)
+		return;
+	nvmeib_jdr_proc_remove(p->ent);
+	kfree(p);
+}
+
 static int create_disk_procfs(struct nvmeibs_disk_info *di) {
 	int rv;
 	struct nvmeibs_disk_private_data *priv = di->priv;
@@ -499,6 +564,18 @@ static int create_disk_procfs(struct nvmeibs_disk_info *di) {
 	                                             &stats_fill_buf_json, &stats_clear, di))) {
 		rv = -EEXIST;
 		goto err;
+	}
+	_NT(create_disk_procfs_io_histograms, "Create file /proc/nvmeibs/disks/@DISK_NAME/io_histograms.json", di->disk_id);
+	{
+		char labels[128];
+		snprintf(labels, sizeof(labels), "module=nvmeibs;component=disk_io_histograms;disk=%s", di->disk_id);
+		if (!(priv->procfs.io_histograms = io_hist_proc_create(di->io_pct,
+								       "io_histograms.json",
+								       priv->procfs.dir,
+								       labels))) {
+			rv = -EEXIST;
+			goto err;
+		}
 	}
 
 	if (!di->external) {
@@ -1827,6 +1904,7 @@ void nvmeibs_disk_record_stats(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 					di->stats.write.total_lat += lat;
 					di->stats.write.max_lat = max(di->stats.write.max_lat, lat);
 					di->stats.write.total_ops ++;
+					nvmeib_io_histograms_update(di->io_pct, IO_STAT_VERB_WRITE, req->data_len, lat);
 					nvmeib_io_stats_adjust_and_update(di->io_stats, NULL,
 									  req->stats.is_recovery ? IO_STAT_VERB_RECOV_WRITE : IO_STAT_VERB_WRITE,
 									  req->data_len, lat, false);
@@ -1837,6 +1915,7 @@ void nvmeibs_disk_record_stats(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 					di->stats.read.total_lat += lat;
 					di->stats.read.max_lat = max(di->stats.read.max_lat, lat);
 					di->stats.read.total_ops ++;
+					nvmeib_io_histograms_update(di->io_pct, IO_STAT_VERB_READ, req->data_len, lat);
 					nvmeib_io_stats_adjust_and_update(di->io_stats, NULL,
 									  req->stats.is_recovery ? IO_STAT_VERB_RECOV_READ : IO_STAT_VERB_READ,
 									  req->data_len, lat, false);
@@ -1847,6 +1926,9 @@ void nvmeibs_disk_record_stats(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 					di->stats.discard.total_lat += lat;
 					di->stats.discard.max_lat = max(di->stats.discard.max_lat, lat);
 					di->stats.discard.total_ops ++;
+					nvmeib_io_histograms_update(di->io_pct, IO_STAT_VERB_DISCARD,
+								 req->n_dsm_lba << di->block_shift,
+								 lat);
 					nvmeib_io_stats_adjust_and_update(di->io_stats, NULL, IO_STAT_VERB_DISCARD,
 									  req->n_dsm_lba << di->block_shift, lat, false);
 					break;
