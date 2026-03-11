@@ -110,7 +110,6 @@ static int ds_metadata_init_EC_prepare_dirty_bits_init_val(struct nvmeibt_seg_ac
  * Prepare lock_id in lock_id_init_val in case needed for init
  * Side effect on @disk_segment:
  * if init mode is INIT_IRRELEVANT will convert it to INIT_DONE.
- * if init mode is TURN_ALL_OFF will set is_expected_to_have_stale_locks
  */
 static int ds_metadata_init_EC_prepare_stale_locks_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id *lock_id_init_val, bool *is_stale_rebuild_required)
 {

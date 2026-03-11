@@ -1789,7 +1789,6 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 	int											n_released_lock_ids, n = 0;
 	struct registrant_disconnect_wq_entry		*reg_disconnect_entry;
 	u32											map_lock_id_purified;
-	bool										set_expect_stale = false;
 	struct nvmeibt_local_disk					*local_disk;
 
 	NFIN;
@@ -1894,12 +1893,8 @@ static void owner_locks_release_group_wrapper(struct nvmeibt_wq_entry *owner_loc
 			} else {
 				released_lock_ids[n].entry->n_owner_locks_converted_to_zero++;
 			}
-			set_expect_stale = true;
 			break;
 		}
-	}
-	if (set_expect_stale) {
-		NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(trace_12_owner_locks_release_group, seg_active, 1);
 	}
 	NNVMEIBT_TOMA_FREE(trace_13_owner_locks_release_group, released_lock_ids);
 

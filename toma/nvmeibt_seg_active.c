@@ -1011,7 +1011,6 @@ void nvmeibt_seg_active_mark_stale_rebuild_required(struct nvmeibt_seg_active *s
 			N_Tf(sdf23q9, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 			seg_active->required_recovery_action.stale_rebuild = 1;
 			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(2vvv2y4, seg_active);
-			NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(tv393c8, seg_active, 1);
 		}
 	}
 }
@@ -1026,10 +1025,7 @@ void nvmeibt_seg_active_clear_stale_rebuild_required(struct nvmeibt_seg_active *
 
 BOOL nvmeibt_seg_active_is_stale_rebuild_required(struct nvmeibt_seg_active *seg_active)
 {
-	return (seg_active ?
-			(seg_active->required_recovery_action.stale_rebuild &&
-			 nvmeibt_seg_active_get_is_expected_to_have_stale_locks(seg_active)) :
-			0);
+	return (seg_active ? seg_active->required_recovery_action.stale_rebuild : 0);
 }
 
 bool nvmeibt_seg_active_mark_txid_rebuild_required_if_needed(struct nvmeibt_seg_active *seg_active)
@@ -1537,12 +1533,9 @@ static void nvmeibt_seg_active_stale_rebuild(struct nvmeibt_seg_active *seg_acti
 		goto out;
 	}
 	// Launch a stale-rebuild
-	NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(pqbx3nf, seg_active, 0);	// Before launching an async rebuild
 	tid = nvmeibt_recovery_start_rebuild(NVMEIBT_RECOVERY_TYPE_STALE_REBUILD, seg_active);
-	if (tid == -1ULL) {
-		NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(dy7ner2, seg_active, 1);	// Failed to launch the rebuild. Probably not accepting registrations reason=SEG_MD_STORING
-		goto out;
-	}
+	if (tid == -1ULL)
+		goto out;	// Failed to launch the rebuild. Probably not accepting registrations reason=SEG_MD_STORING
 
 	nvmeibt_seg_active_clear_stale_rebuild_required(seg_active);
 	NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(xqoalk9, n_running_stale_rebuild);
@@ -1893,7 +1886,6 @@ static void seg_active_done_stale_rebuild(
 		N_Tf(vn5kof4, "Stale rebuild failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->stale_rebuild_ctx.praid_version = 0;
 		nvmeibt_seg_active_mark_stale_rebuild_required(seg_active);
-		NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(6bud83j, seg_active, 1);
 	}
 	NFOUT;
 }

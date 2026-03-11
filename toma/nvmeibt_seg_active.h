@@ -128,7 +128,6 @@ struct nvmeibt_seg_active {
 	enum NVMEIBT_ZEROING_STATE					applied_zeroing_state;
 	struct timespec								last_zeroing_progress_report_time;
 	//
-	BOOL										is_expected_to_have_stale_locks; TODO(Follow-up exactly for EC, since we follow-up on all stales);
 	int											ref_count;
 	BOOL										was_launch_metadata_store_called_during_metadata_store;
 	BOOL										is_locktable_on_disk_corrupted;
@@ -255,22 +254,6 @@ void nvmeibt_global_add_seg_active_post_update_action(struct nvmeibt_seg_active 
 		N_Tf(name, "seg_active=@UUID_8 CLEAR_ARE_POST_UPDATE_ACTIONS_REQUIRED", nvmeibt_seg_active_UUID_8(__seg_active__));		\
 		XDLIST_DEL(&(__seg_active__->global_seg_active_post_update_action_link));												\
 	}																															\
-} while (0)
-
-#define NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(name, __seg_active__, __new_value__)	do {	\
-	if (__seg_active__) {																						\
-		if ((__seg_active__)->is_expected_to_have_stale_locks != (__new_value__)) {								\
-			N_Tf(name, "SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS seg=@UUID_8 (@FLAGS_INT-->@FLAGS_INT)",				\
-				nvmeibt_seg_active_UUID_8((__seg_active__)),													\
-				(__seg_active__)->is_expected_to_have_stale_locks, (__new_value__));							\
-			(__seg_active__)->is_expected_to_have_stale_locks = (__new_value__);								\
-			if (!(__seg_active__)->is_expected_to_have_stale_locks) {											\
-				nvmeibt_seg_active_clear_stale_rebuild_required(__seg_active__);								\
-			}																									\
-		}																										\
-	} else {																									\
-		N_Ef(name ## _error, "SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS seg_active=NULL)");							\
-	}																											\
 } while (0)
 
 #define NNVMEIBT_SEG_ACTIVE_UPDATE_REF_COUNT(name, __seg_active__, __user__, __inc_val__) do {					\
@@ -522,11 +505,6 @@ static inline unsigned int nvmeibt_seg_active_UUID_8(const struct nvmeibt_seg_ac
 static inline BOOL nvmeibt_seg_active_is_waiting_for_serjio_clean_range_done(const struct nvmeibt_seg_active *seg_active)
 {
 	return (seg_active && (seg_active->applied_serjio_clean_range_state & (SERJIO_CLEAN_RANGE_STATE_IN_WORK | SERJIO_CLEAN_RANGE_STATE_REQUIRED)));
-}
-
-static inline bool nvmeibt_seg_active_get_is_expected_to_have_stale_locks(const struct nvmeibt_seg_active *seg_active)
-{
-	return (seg_active ? seg_active->is_expected_to_have_stale_locks : 0);
 }
 
 /* misc helpers */
