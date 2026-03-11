@@ -553,6 +553,7 @@ static inline BOOL nvmeibt_seg_active_is_any_recovery_in_the_air(struct nvmeibt_
 			(IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery) ||
 			 IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild) ||
 			 IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild) ||
+			 IS_RECOVERY_TASK_RUNNING(seg_active, txid_rebuild) ||
 			 IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild) ||
 			 IS_RECOVERY_TASK_RUNNING(seg_active, scrubbing)));
 }

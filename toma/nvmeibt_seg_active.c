@@ -1407,15 +1407,17 @@ static void nvmeibt_seg_active_cold_recovery(struct nvmeibt_seg_active *seg_acti
 	stop_all_scrubbing_tasks();
 	nvmeibt_seg_active_stop_recovery_tasks(seg_active);
 
-	if (IS_RECOVERY_TASK_RUNNING(seg_active, cold_recovery) || IS_RECOVERY_TASK_RUNNING(seg_active, dirty_rebuild) ||
-		IS_RECOVERY_TASK_RUNNING(seg_active, stale_rebuild) || IS_RECOVERY_TASK_RUNNING(seg_active, JGC_rebuild)) {
+	if (nvmeibt_seg_active_is_any_recovery_in_the_air(seg_active)) {
 		N_Wf(warn_seg_active_nvmeibt_disk_segment_cold_recovery, "seg=@UUID_8 old tasks still running, retry later. "
-			 "cold_rebuild_ctx.tid=@TID dirty_rebuild_ctx.tid=@TID stale_rebuild_ctx.tid=@TID JGC_rebuild_ctx.tid=@TID",
+			 "cold_rebuild_ctx.tid=@TID dirty_rebuild_ctx.tid=@TID stale_rebuild_ctx.tid=@TID txid_rebuild_ctx.tid=@TID "
+			 "JGC_rebuild_ctx.tid=@TID scrubbing_ctx.tid=@TID",
 			 nvmeibt_seg_active_UUID_8(seg_active),
 			 seg_active->cold_recovery_ctx.tid,
 			 seg_active->dirty_rebuild_ctx.tid,
 			 seg_active->stale_rebuild_ctx.tid,
-			 seg_active->JGC_rebuild_ctx.tid);
+			 seg_active->txid_rebuild_ctx.tid,
+			 seg_active->JGC_rebuild_ctx.tid,
+			 seg_active->scrubbing_ctx.tid);
 		goto out;
 	}
 
