@@ -423,7 +423,7 @@ out:
 	return rv;
 }
 
-int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *seg_active)
+int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *seg_active, bool *is_stale_rebuild_required)
 {
 	struct nvmeibt_local_disk				*local_disk = nvmeibt_seg_active_get_local_disk(seg_active);
 	struct nvmeibt_disk_segment				*disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
@@ -442,6 +442,7 @@ int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *seg_activ
 	uint32_t								calculated_locks_table_crc32;
 
 	NFIN;
+	*is_stale_rebuild_required = 0;
 	if (!mmapped_locks_tbl || nvmeibt_local_disk_is_being_deleted(local_disk)) {
 		N_Wf(runh737, "Error: seg=@UUID_8, local_disk=@PTR, locks_tbl=@PTR", nvmeibt_seg_UUID_8(disk_segment), local_disk, mmapped_locks_tbl);
 		goto out;
@@ -496,7 +497,7 @@ int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *seg_activ
 	}
 
 	nvmeibt_ds_blkset_entries_sanitize_packed(nvmeibt_praid_is_type_EC(disk_segment->seg_mgmt.its_praid), disk_blk_buf, n_blksets, &n_stale, &n_dirty);
-	NNVMEIBT_SEG_ACTIVE_SET_IS_EXPECTED_TO_HAVE_STALE_LOCKS(trace_3_ds_metadata_nvmeibt_ds_metadata_locks_table_restore, seg_active, (n_stale > 0));
+	*is_stale_rebuild_required = (n_stale > 0);
 	N_Tf(t_88_toma_dsmd, "Restored seg=@UUID_8 dsk_blk_buf==@PTR-@PTR (@ZU), nonzero n_stale=@UINT64_TX n_dirty=@UINT64_TX from disk to memory",
 		 nvmeibt_seg_UUID_8(disk_segment), disk_blk_buf, disk_blk_buf + dma_buf_aligned_size, dma_buf_aligned_size,
 		 n_stale, n_dirty);

@@ -789,12 +789,11 @@ void nvmeibt_seg_active_init_locks_table(struct nvmeibt_seg_active *seg_active)
 		NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(1m9xim4,	seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT);
 	}
 	else {
-		is_stale_rebuild_required = (nvmeibt_seg_active_get_active_seg_topo(seg_active)->stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER);
 		if (nvmeibt_seg_active_is_config_EC(seg_active)) {
 			nvmeibt_seg_active_notify_serjio_clean_range(seg_active, false);
-			is_stale_rebuild_required &= nvmeibt_ds_metadata_init_EC_locks_table(seg_active);
+			is_stale_rebuild_required = nvmeibt_ds_metadata_init_EC_locks_table(seg_active);
 		} else { // RAID1
-			is_stale_rebuild_required &= nvmeibt_ds_metadata_init_non_EC_locks_table(seg_active);
+			is_stale_rebuild_required = nvmeibt_ds_metadata_init_non_EC_locks_table(seg_active);
 		}
 	}
 

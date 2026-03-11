@@ -111,7 +111,7 @@ void nvmeibt_ds_metadata_set_error_injection_md_write_pause(int value);
 int nvmeibt_ds_metadata_ctrl_blk_write(struct seg_persistency_write_params *write_params);
 
 /* Restore the RAM (locks, TxID, dbits) from persistency (metadata of segment), Or store from RAM to persistrncy */
-int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *);
+int nvmeibt_ds_metadata_locks_table_restore(struct nvmeibt_seg_active *seg_active, bool *is_stale_rebuild_required);
 
 /* Read segment metadata control block from disk (for gpt_util and diagnostics) */
 int nvmeibt_ds_metadata_ctrl_blk_read(struct netlink_io_context *nl_ctx, int fd,
