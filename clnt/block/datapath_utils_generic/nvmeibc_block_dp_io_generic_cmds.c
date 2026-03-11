@@ -708,7 +708,7 @@ static void __nvmeibc_operation_comp(struct operation *o)
 	__finish_cmds_comp_oper(o);	   // 'o' was freed: cmds->o == NULL
 }
 
-static void __nvmeibc_operation_wq_copy_and_comp(struct workqe_struct *work)
+static void __nvmeibc_operation_wq_copy_and_comp(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct operation *o = container_of(mw, struct operation, work_copy_to_bio);

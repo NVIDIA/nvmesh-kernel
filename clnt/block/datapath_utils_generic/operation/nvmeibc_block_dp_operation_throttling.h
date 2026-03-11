@@ -17,7 +17,7 @@ module_param(max_ios_per_cpu, uint, 0644);
 MODULE_PARM_DESC(max_ios_per_cpu, "Maximum number of concurrent IO operations handled per core. Can be used to prevent IO flooding. In other words, the upper limit on the number of outstanding IOs to issue via the block driver per CPU core. Some file systems and applications queue or perform read-ahead very aggressively, likely to overcome problems with legacy storage solutions. With NVMesh, large numbers of outstanding read requests may lead to network congestion especially when target bandwidth exceeds client bandwidth. Throttling the number of outstanding requests using this parameter can reduce this congestion and improve overall quality of service. Limiting this value often ends up improving performance for the Client and others on the network. If in doubt, start with a value of 8. This setting can be applied dynamically to the kernel module without restarting services.");
 
 static void __execute_chain_noplug(struct operation *o);
-static void wq_execute_throttled_operation_chain(struct workqe_struct *work)
+static void wq_execute_throttled_operation_chain(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct operation *o = container_of(mw, struct operation, work_throttled);
@@ -124,7 +124,7 @@ static void nvmeibc_operation_throttling_pull_next(struct nvmeibc_block_device *
 		// *before* we put the topo !!!
 		next_o->topo = nvmeibc_topology_get(nt);
 		MEASURED_INIT_WORK(&next_o->work_throttled, wq_execute_throttled_operation_chain);
-		nvmeib_schedule_work_on(cpu_id, &next_o->work_throttled.work);
+		schedule_work_on(cpu_id, &next_o->work_throttled.work);
 	}
 }
 

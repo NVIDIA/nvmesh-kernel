@@ -117,13 +117,13 @@ int __IO_LT_try_request_transfer(struct nvmeibc_cmd_lock *locksets)
 	return lsi_start;
 }
 
-static void __IO_LT_schedule(struct nvmeibc_cmd_lock *lock, void (*work_fn)(struct workqe_struct *))
+static void __IO_LT_schedule(struct nvmeibc_cmd_lock *lock, void (*work_fn)(struct work_struct *))
 {
 	MEASURED_INIT_WORK(&lock->comp.transfer_work, work_fn);
 	dp_block_schedule_operation_work(lock->cmds->o, &lock->comp.transfer_work.work);
 }
 
-static void __IO_LT_no_transfer_on_wq(struct workqe_struct *work)
+static void __IO_LT_no_transfer_on_wq(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct nvmeibc_cmd_lock *lock = container_of(mw, struct nvmeibc_cmd_lock, comp.transfer_work);
@@ -137,7 +137,7 @@ static void __IO_LT_schedule_no_transfer(struct nvmeibc_cmd_lock *lock)
 	__IO_LT_schedule(lock, __IO_LT_no_transfer_on_wq);
 }
 
-static void __IO_LT_transfer_on_wq(struct workqe_struct *work)
+static void __IO_LT_transfer_on_wq(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct nvmeibc_cmd_lock *lock = container_of(mw, struct nvmeibc_cmd_lock, comp.transfer_work);

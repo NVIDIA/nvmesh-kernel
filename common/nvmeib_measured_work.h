@@ -10,8 +10,8 @@
 #include "common/compat/kr_incs_time_rdtsc.h"
 
 /**
- * struct measured_work - a workqe_struct wrapper that records enqueue timestamp.
- * @work:        underlying workqe_struct scheduled on a workqueue.
+ * struct measured_work - a work_struct wrapper that records enqueue timestamp.
+ * @work:          underlying work_struct scheduled on a workqueue.
  * @enqueue_ticks: raw TSC ticks captured at enqueue time via nvmeib_public_rdtsc().
  *
  * Analogous to delayed_work wrapping work_struct with a timer.
@@ -24,10 +24,10 @@
  * Usage:
  *   struct measured_work mw;
  *   MEASURED_INIT_WORK(&mw, my_callback);
- *   nvmeib_schedule_work_on(cpu, &mw.work);     // caller schedules
+ *   schedule_work_on(cpu, &mw.work);        // caller schedules
  *
  * In callback:
- *   void my_callback(struct workqe_struct *work) {
+ *   void my_callback(struct work_struct *work) {
  *       struct measured_work *mw = measured_work_from(work);
  *       nvmeib_wq_metrics_update(my_wq_hist, measured_work_wait_ticks(mw));
  *       struct my_struct *s = container_of(mw, struct my_struct, mw_field);
@@ -35,7 +35,7 @@
  *   }
  */
 struct measured_work {
-	struct workqe_struct work;
+	struct work_struct work;
 	u64 enqueue_ticks;
 };
 
@@ -49,20 +49,20 @@ struct measured_work {
  */
 #define MEASURED_INIT_WORK(mw, fn) \
 	do { \
-		WQ_INIT_WORK(&(mw)->work, (fn)); \
+		INIT_WORK(&(mw)->work, (fn)); \
 		(mw)->enqueue_ticks = nvmeib_public_rdtsc(); \
 	} while (0)
 
 /**
- * measured_work_from() - recover measured_work from a workqe_struct pointer.
- * @work: workqe_struct pointer passed to the callback.
+ * measured_work_from() - recover measured_work from a work_struct pointer.
+ * @work: work_struct pointer passed to the callback.
  *
  * Intended to be called at the beginning of a work callback to obtain
  * the enclosing &struct measured_work and then compute wait time.
  *
  * Return: pointer to the containing &struct measured_work.
  */
-static inline struct measured_work *measured_work_from(struct workqe_struct *work)
+static inline struct measured_work *measured_work_from(struct work_struct *work)
 {
 	return container_of(work, struct measured_work, work);
 }

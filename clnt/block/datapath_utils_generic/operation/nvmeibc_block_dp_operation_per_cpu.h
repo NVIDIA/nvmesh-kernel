@@ -189,7 +189,7 @@ static void __remove_from_mini_elevator_cache_unsafe(struct nvmeibc_blk_op_eleva
 NVMEIBC_WQ_METRIC(nvmeibc_elevator_wq_latency, "reason=elevator");
 
 static void __operation_execute_no_cache(struct operation *o, int rv);
-static void __wq_execute_elevator(struct workqe_struct *work)
+static void __wq_execute_elevator(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct operation *o = container_of(mw, struct operation, work_elev);

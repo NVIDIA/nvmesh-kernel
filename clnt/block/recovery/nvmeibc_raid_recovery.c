@@ -1267,7 +1267,7 @@ static int __on_finish_one_sync_cb(void *sw_context, int err)
 }
 
 /* Asyncrously skip blockset and mark it as success if (o_rv==0) or failure*/
-static void __skip_blockset_cb(struct workqe_struct *w)
+static void __skip_blockset_cb(struct work_struct *w)
 {
 	struct measured_work *mw = measured_work_from(w);
 	struct operation *o = container_of(mw, struct operation, work_skip_recov);	// Can use: struct nvmeibc_disk_io_command *iocmd = container_of(w, struct nvmeibc_disk_io_command, auto_fail_work); struct nvmeibc_block_command *cmd = iocmd->disk_cmd.owner; o = cmd->o;

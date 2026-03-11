@@ -533,7 +533,7 @@ static void __schedule_retry_read_lock(struct nvmeibc_cmd_lock *u1, struct nvmei
 }
 #else
 
-static void __retry_read_lock_cb_work(struct workqe_struct *work) {
+static void __retry_read_lock_cb_work(struct work_struct *work) {
 	struct measured_work *mw = measured_work_from(work);
 	struct nvmeibc_disk_io_command *io_cmd = container_of(mw, struct nvmeibc_disk_io_command, disk_cmd.view_lock_work);
 	nvmeib_wq_metrics_update(nvmeibc_view_lock_wq_latency, measured_work_wait_ticks(mw));
@@ -879,7 +879,7 @@ static void __schedule_retry_owner_lock(struct nvmeibc_cmd_lock *l, ulong u1)
 	__give_failed_lock_cb(&l->comp);
 }
 #else
-static void __retry_owner_lock_cb_work(struct workqe_struct *work) {
+static void __retry_owner_lock_cb_work(struct work_struct *work) {
 	struct measured_work *mw = measured_work_from(work);
 	struct nvmeibc_cmd_lock *lock = container_of(mw, struct nvmeibc_cmd_lock, comp.retry_work_post_timer);
 	#if defined(NVMEIBC_DISK_CMDS_STATS_PROBES) && (NVMEIBC_DISK_CMDS_STATS_PROBES==1)

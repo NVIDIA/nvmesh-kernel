@@ -96,7 +96,7 @@ static inline void __verify_unlock_callback_is_correct(struct nvmeibc_d_rdma_com
 	BUG_ON((dc->callback != __handle_locks_o) && ( dc->callback != __jour_garbg_collect_o));
 }
 
-static void __resume_sync_operation_work(struct workqe_struct *work)
+static void __resume_sync_operation_work(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct operation *o = container_of(mw, struct operation, work_rso_resched);
@@ -1687,7 +1687,7 @@ static void __execute_sync_operation(struct recovery_sync_op *so)
 	}
 };
 
-static void __execute_sync_operation_work(struct workqe_struct *work)
+static void __execute_sync_operation_work(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct operation *o = container_of(mw, struct operation, work_rso_execute);

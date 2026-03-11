@@ -15,7 +15,7 @@
 
 NVMEIBC_WQ_METRIC(nvmeibc_resubmit_wq_latency, "reason=resubmit");
 
-static void __execute_resubmitted_on_wq(struct workqe_struct *work)
+static void __execute_resubmitted_on_wq(struct work_struct *work)
 {
 	struct measured_work *mw = measured_work_from(work);
 	struct operation *o = container_of(mw, struct operation, work_resubmitted);
