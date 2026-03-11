@@ -34,6 +34,8 @@ struct nvmeibs_disk_nvme_cmd_stats {
 	u64 total_ops;
 };
 
+struct nvmeib_io_histograms;
+
 struct nvmeibs_disk_info {
 	struct list_head link;
 	u64 handle;
@@ -91,6 +93,7 @@ struct nvmeibs_disk_info {
 	int min_local_ioqs;
 	int max_local_ioqs;
 	struct nvmeib_io_stats *io_stats;
+	struct nvmeib_io_histograms *io_pct;
 	unsigned long add_jif;
 };
 

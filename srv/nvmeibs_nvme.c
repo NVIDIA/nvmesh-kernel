@@ -24,6 +24,7 @@
 #include "../core_unitest/corecomm_injections.h"
 #include "nvmeib_public.h"
 #include "nvmeib_io_stats.h"
+#include "nvmeib_io_histograms.h"
 #include "nvmeib_common_os_block_api.h"
 #include "common/proc_epilog.h"
 #include "nvmeib_completion_noise.h"
@@ -3261,6 +3262,7 @@ static void set_external_info(struct external_drive *p)
 	info->dev = NULL;
 	info->external = p;
 	info->io_stats = nvmeib_io_stats_create(info->disk_id, VERB_RW_T_RECOV_BITMASK, info->block_size);
+	info->io_pct = nvmeib_io_histograms_create();
 	snprintf(name_buf, sizeof name_buf, "smart%d", info->seq);
 	p->proc_smart =
 		nvmeib_public_proc_create(name_buf, nvmeibs_proc_dir, ext_smart_fill, NULL, p);
@@ -4577,6 +4579,7 @@ static void nvmeibs_free_drives(struct kref *kref)
 		next = drv->next;
 		cancel_delayed_work_sync(&drv->periodic_timer_work);
 		kfree(drv->bio_list);
+		nvmeib_io_histograms_free(drv->info.io_pct);
 		nvmeib_io_stats_free(drv->info.io_stats);
 		kfree(drv);
 	}
@@ -6540,9 +6543,11 @@ static void disk_periodic_timer_work_func(struct work_struct *arg)
 							struct drive_params, periodic_timer_work);
 	struct device_data *d = drv->dev;
 	struct nvmeib_io_stats *stats = drv->info.io_stats;
+	struct nvmeib_io_histograms *io_pct = drv->info.io_pct;
 	unsigned verb, bin;
 	unsigned n_bins;
 	char bin_name[32];
+	char pct_bin_name[32];
 	struct nvmeib_io_counters c = {};
 
 	if (stats) {
@@ -6556,6 +6561,32 @@ static void disk_periodic_timer_work_func(struct work_struct *arg)
 				NVMEIB_LOG_METRICS("DISK: @DISK_ID_STR DEV: @SEQ BIN: @STR " IO_STAT_VERB_TFMT " " IO_STAT_COUNTERS_BASIC_TFMT,
 					_T, tracer_nvmeibs, info_disk_periodic_timer_bin_stats,
 					drv->id_str, d->seq, bin_name, IO_STAT_VERB_TARG(verb), IO_STAT_COUNTERS_BASIC_TARG(&c));
+			}
+		}
+	}
+
+	if (io_pct) {
+		/* We don't track recovery verbs in percentile */
+		static const enum nvmeib_io_stat_verbs pct_verbs[] = {
+			IO_STAT_VERB_READ,
+			IO_STAT_VERB_WRITE,
+			IO_STAT_VERB_DISCARD
+		};
+
+		n_bins = nvmeib_io_histograms_get_n_size_bins();
+		for (bin = 0; bin < n_bins; ++bin) {
+			unsigned i;
+			for (i = 0; i < ARRAY_SIZE(pct_verbs); ++i) {
+				u64 lat_bucket_counts[NVMEIB_IO_HISTOGRAMS_N_LAT_BUCKETS] = {0};
+				enum nvmeib_io_stat_verbs pct_verb = pct_verbs[i];
+
+				nvmeib_io_histograms_get_size_bin_name(bin, pct_bin_name, sizeof(pct_bin_name));
+				nvmeib_io_histograms_read_bucket_counts_per_bin(io_pct, pct_verb, bin,
+										lat_bucket_counts, NULL);
+				NVMEIB_LOG_METRICS("DISK: @DISK_ID_STR DEV: @SEQ BIN: @STR " IO_STAT_VERB_TFMT " " IO_LAT_BUCKETS_TFMT,
+					_T, tracer_nvmeibs, info_disk_periodic_timer_latency_buckets,
+					drv->id_str, d->seq, pct_bin_name, IO_STAT_VERB_TARG(pct_verb),
+					IO_LAT_BUCKETS_TARG(lat_bucket_counts));
 			}
 		}
 	}
@@ -6960,6 +6991,7 @@ static void nvmeibs_probe1(struct work_struct *arg)
 			err = -ENOMEM;
 			goto errout;
 		}
+		drv->info.io_pct = nvmeib_io_histograms_create();
 
 		INIT_DELAYED_WORK(&drv->periodic_timer_work, disk_periodic_timer_work_func);
 		/* Initialize and schedule periodic timer for this disk */
@@ -7101,6 +7133,7 @@ static ssize_t nvmeof_chng(void *arg, char *buf, size_t len)
 		/* wait for all commands to complete */
 		kref_put(&p->done_kref, done_kref_release);
 		wait_for_completion(&p->done);
+		nvmeib_io_histograms_free(p->info.io_pct);
 		nvmeib_io_stats_free(p->info.io_stats);
 		if (p->block_dev)
 			BLOCKDEV_RELEASE;
@@ -7494,6 +7527,7 @@ int nvmeibs_nvme_format_disk(const char *disk_name,
 				"Fail to format disk @DISK_ID_STR (rv @RV)", di->disk_id, rv);
 		else {
 			nvmeib_io_stats_clear(di->io_stats, 'A');
+			nvmeib_io_histograms_clear(di->io_pct);
 			nvmeib_io_stats_set_block_size(di->io_stats, di->block_size);
 			if (fd->flag_reset_ctrlr)
 				rv = reset_controller(di);
@@ -7590,6 +7624,7 @@ void nvmeibs_nvme_free_all_nvmeof(void)
 		blkdev_put(p->block_dev, FMODE_WRITE|FMODE_READ);
 #endif
 #endif
+		nvmeib_io_histograms_free(p->info.io_pct);
 		nvmeib_io_stats_free(p->info.io_stats);
 		kfree(p);
 		down_write(&global_lock);
