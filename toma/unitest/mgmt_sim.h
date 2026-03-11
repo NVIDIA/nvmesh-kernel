@@ -46,6 +46,7 @@ bool mgmt_sim_both_disks_ready_for_format(void);
 bool mgmt_sim_both_disks_formatted_ok(void);
 bool mgmt_sim_consume_got_report_target(void);
 bool mgmt_sim_v_r1_praid_reported(void);
+bool mgmt_sim_both_disks_zeroing_done(void);
 
 /* Message-sender functions for fiber-based test scenario */
 void mgmt_sim_send_format_drives(void);

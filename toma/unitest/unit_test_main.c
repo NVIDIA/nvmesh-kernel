@@ -69,6 +69,9 @@ static void all_test_scenarios(void) {
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks formatted ok");
 	WAIT_UNTIL(mgmt_sim_both_disks_formatted_ok());
 
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for drive zeroing to complete");
+	WAIT_UNTIL(mgmt_sim_both_disks_zeroing_done());
+
 	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_REMOTE1");
 	mgmt_sim_send_add_volume_remote1();
 

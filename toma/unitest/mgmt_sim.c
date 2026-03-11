@@ -93,6 +93,7 @@ struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 	u16 vendor;
 	u16 block_size;						// In bytes
 	u16 metadata_size;					// In bytes
+	bool zeroing_progress_seen;			// true once driveZeroingProgress received
 };
 
 static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_sim_disk_status *d, unsigned format_request_counter, unsigned long boot_time) {
@@ -274,10 +275,25 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);
 }
 
-static void __handle_low_prio_msg(__attribute__((unused)) const rd_kafka_message_t *msg) {
-	// {"originType":"TOMA","messageType":"driveZeroingProgress","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":27,"leaderToken":null,"payload":{"zeroWriteCounter":303100870554,"nZeroedBlks":1953536,"diskUUID":"de2eadb0-e972-11f0-8e2a-434e55e1d7f7","node_id":"nvme37.nvidia.com"}}
-	// {"originType":"TOMA","messageType":"updateDiskSegmentsDirtyBits","messageTypeVersion":1,"hostname":"nvme37.nvidia.com","tomaToken":2,"messageSequence":97,"leaderToken":null,"payload":{"segmentsDirtyBitsUpdate":[{"pRaidMinorVersion":2,"pRaidMajorVersion":259,"segmentID":"c1105e50-e97b-11f0-995c-3792ee0db955","pRaidUUID":"c1103742-e97b-11f0-995c-3792ee0db955","remainingDirtyBits":67932,"reappearingCounter":3}]}}
-	return;	// Todo: handle drive zeroing reports here
+static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
+	const char *message_type = json_get_dict_str(root, "messageType", NULL);
+	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
+	if (strcmp(message_type, "driveZeroingProgress") == 0) {
+		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
+		const char *disk_uuid = json_get_dict_str(payload, "diskUUID", NULL);
+		if (disk_uuid && strcmp(disk_uuid, m->disk_002.uuid) == 0) {
+			m->disk_002.zeroing_progress_seen = true;
+			N_Tf(__AUTOID__, "driveZeroingProgress: disk_002 uuid=@STR", disk_uuid);
+		} else if (disk_uuid && strcmp(disk_uuid, m->disk_003.uuid) == 0) {
+			m->disk_003.zeroing_progress_seen = true;
+			N_Tf(__AUTOID__, "driveZeroingProgress: disk_003 uuid=@STR", disk_uuid);
+		}
+	} else if (strcmp(message_type, "updateDiskSegmentsDirtyBits") == 0) {
+		/* silently ignore */
+	}
+	nvmeibt_mm_json_free_kv_tree(root);
 }
 
 static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
@@ -453,6 +469,12 @@ bool mgmt_sim_consume_got_report_target(void) {
 bool mgmt_sim_v_r1_praid_reported(void) {
 	return g_mgmt_sim->v_r1_praid_reported;
 }
+
+bool mgmt_sim_both_disks_zeroing_done(void) {
+	const struct mgmt_sim_state *m = g_mgmt_sim;
+	return m->disk_002.zeroing_progress_seen && m->disk_003.zeroing_progress_seen;
+}
+
 
 /******************************************************************************/
 /* Message-sender functions for fiber-based test scenario                      */
