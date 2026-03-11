@@ -142,7 +142,7 @@ static int tests_failed = 0;
 static int test_uint32_basic(void) {
 	TEST_START("uint32_t basic operations");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_uint32", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_uint32", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Test add */
@@ -179,7 +179,7 @@ static int test_uint32_basic(void) {
 static int test_uint64_basic(void) {
 	TEST_START("uint64_t basic operations");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_uint64", 8);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_uint64", 8, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	void *obj1 = (void *)0x1000;
@@ -201,7 +201,7 @@ static int test_uint64_basic(void) {
 static int test_uuid_basic(void) {
 	TEST_START("UUID basic operations");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_uuid", 16);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_uuid", 16, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	union nvmeib_uuid uuid1 = {.ints = {1, 2, 3, 4}};
@@ -230,7 +230,7 @@ static int test_uuid_basic(void) {
 static int test_ascii_basic(void) {
 	TEST_START("ASCII string basic operations");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_ascii", -1);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_ascii", -1, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	const char *key1 = "hello_world";
@@ -259,7 +259,7 @@ static int test_ascii_basic(void) {
 static int test_collisions(void) {
 	TEST_START("Collision handling");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(3, "test_collisions", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(3, "test_collisions", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Add multiple entries to force collisions */
@@ -287,7 +287,7 @@ static int test_collisions(void) {
 static int test_resize(void) {
 	TEST_START("Hash table resize");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(3, "test_resize", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(3, "test_resize", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	int initial_size = ht->n_arr_entries;
@@ -321,7 +321,7 @@ static int test_resize(void) {
 static int test_shrink(void) {
 	TEST_START("Hash table shrink");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(8, "test_shrink", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(8, "test_shrink", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Add many entries */
@@ -362,7 +362,7 @@ static int test_shrink(void) {
 static int test_delete_chain(void) {
 	TEST_START("Delete with chain rearrangement");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(3, "test_delete_chain", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(3, "test_delete_chain", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Add entries */
@@ -407,7 +407,7 @@ static int test_delete_chain(void) {
 static int test_foreach(void) {
 	TEST_START("FOREACH macro");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_foreach", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_foreach", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Add entries */
@@ -435,7 +435,7 @@ static int test_foreach(void) {
 static int test_empty_table(void) {
 	TEST_START("Empty hash table operations");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_empty", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_empty", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Search in empty table */
@@ -463,7 +463,7 @@ static int test_empty_table(void) {
 static int test_reuse_deleted_slots(void) {
 	TEST_START("Reuse of deleted slots");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_reuse", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_reuse", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	/* Add and delete entries */
@@ -503,7 +503,7 @@ static int test_reuse_deleted_slots(void) {
 static int test_large_dataset(void) {
 	TEST_START("Large dataset");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(8, "test_large", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(8, "test_large", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	const int N = 10000;
@@ -554,7 +554,7 @@ static int test_large_dataset(void) {
 static int test_ascii_varying_lengths(void) {
 	TEST_START("ASCII strings with varying lengths");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_ascii_var", -1);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(4, "test_ascii_var", -1, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	char buffer[256];
@@ -593,9 +593,9 @@ static int test_ascii_varying_lengths(void) {
 static int test_multiple_tables(void) {
 	TEST_START("Multiple hash tables");
 	
-	struct nvmeib_hash_table *ht1 = nvmeib_hash_create(4, "table1", 4);
-	struct nvmeib_hash_table *ht2 = nvmeib_hash_create(4, "table2", 8);
-	struct nvmeib_hash_table *ht3 = nvmeib_hash_create(4, "table3", 16);
+	struct nvmeib_hash_table *ht1 = nvmeib_hash_create(4, "table1", 4, false);
+	struct nvmeib_hash_table *ht2 = nvmeib_hash_create(4, "table2", 8, false);
+	struct nvmeib_hash_table *ht3 = nvmeib_hash_create(4, "table3", 16, false);
 	
 	ASSERT_TRUE(ht1 != NULL && ht2 != NULL && ht3 != NULL, 
 		"Failed to create hash tables");
@@ -633,7 +633,7 @@ static int test_multiple_tables(void) {
 static int benchmark_operations(void) {
 	TEST_START("Performance benchmark");
 	
-	struct nvmeib_hash_table *ht = nvmeib_hash_create(12, "benchmark", 4);
+	struct nvmeib_hash_table *ht = nvmeib_hash_create(12, "benchmark", 4, false);
 	ASSERT_TRUE(ht != NULL, "Failed to create hash table");
 	
 	struct timespec start, end;
