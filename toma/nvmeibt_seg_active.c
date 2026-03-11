@@ -1010,7 +1010,6 @@ void nvmeibt_seg_active_mark_stale_rebuild_required(struct nvmeibt_seg_active *s
 		if (!(seg_active->required_recovery_action.stale_rebuild)) {
 			N_Tf(sdf23q9, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 			seg_active->required_recovery_action.stale_rebuild = 1;
-			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(2vvv2y4, seg_active);
 		}
 	}
 }
@@ -1036,7 +1035,6 @@ bool nvmeibt_seg_active_mark_txid_rebuild_required_if_needed(struct nvmeibt_seg_
 		needed = 1;
 		N_Tf(sdf23e3, "seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->required_recovery_action.txid_rebuild = 1;
-		NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(2vvv2k7, seg_active);
 	} else {
 		needed = 0;
 	}
@@ -1842,8 +1840,7 @@ static void seg_active_done_dirty_rebuild(
 	} else {
 		N_Tf(fgy6207, "Dirty rebuild failed seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
 		seg_active->dirty_rebuild_ctx.praid_version = 0;
-		if (nvmeibt_seg_active_mark_dirty_rebuild_required_if_needed(seg_active))
-			NVMEIBT_SEG_ACTIVE_MARK_ARE_POST_UPDATE_ACTIONS_REQUIRED(x93m328, seg_active);
+		nvmeibt_seg_active_mark_dirty_rebuild_required_if_needed(seg_active);
 	}
 	NFOUT;
 }
