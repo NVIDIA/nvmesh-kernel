@@ -91,6 +91,7 @@ struct user_rpc_simu *user_rpc_simu_create(void) {
 	r->cmds[r->n_total++] = "simulate resend-praids-report vol1";
 	r->cmds[r->n_total++] = "status server_csvs";
 	r->cmds[r->n_total++] = "status errors";
+	r->cmds[r->n_total++] = "disk-models list";
 	r->o.recv = _rpc_inject;
 	r->o.send = _rpc_accept;
 	return r;
