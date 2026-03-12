@@ -520,7 +520,7 @@ SUPPORTED_TIME_FORMATS = [
 ]
 
 def eprint(*args):
-    print >>sys.stderr, (", ".join(map(str, args)))
+    print(", ".join(map(str, args)), file=sys.stderr)
 
 def wrprint(*args):
     if not SILENT:
