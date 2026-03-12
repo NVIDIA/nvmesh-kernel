@@ -77,6 +77,7 @@ mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/common/pet/*.py %{buildroot}/
 cp -rf %{_builddir}/%{name}/bin_client/* %{buildroot}/usr/bin/
 #backward compatible
 mv -n %{buildroot}/usr/bin/nvmesh_clnt_shutdown.py %{buildroot}/usr/bin/nvmesh_clnt_shutdown
+cp %{_builddir}/%{name}/tools/nvmesh_highres_hist.py %{buildroot}/usr/bin/nvmesh_highres_hist
 
 cp -rf %{_builddir}/%{name}/init.d/nvmeshclient %{buildroot}/opt/nvmesh/client-repo/services/
 cp -rf %{_builddir}/%{name}/init.d/nvmesh_util %{buildroot}/opt/nvmesh/client-repo/services/
@@ -105,6 +106,7 @@ echo "/opt/nvmesh
 /usr/bin/nvmesh_client_instance_do
 /usr/bin/nvmesh_clnt_shutdown
 /usr/bin/nvmesh_update
+/usr/bin/nvmesh_highres_hist
 /lib/systemd/system/nvmeshclient.service
 /lib/systemd/system/nvmeshtrace@.service
 /etc/modprobe.d/nvmesh.conf
