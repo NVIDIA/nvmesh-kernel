@@ -468,7 +468,7 @@ static int siw_create_tx_threads(int max_threads, int check_qualified)
 			qp_tx_thread[cpu] =
 				kthread_create(siw_run_sq,
 					(unsigned long *)(long)cpu,
-					"qp_tx_thread/%d", cpu);
+					"qp_tx_siw/%d", cpu);
 			kthread_bind(qp_tx_thread[cpu], cpu);
 			if (IS_ERR(qp_tx_thread)) {
 				rv = PTR_ERR(qp_tx_thread);
