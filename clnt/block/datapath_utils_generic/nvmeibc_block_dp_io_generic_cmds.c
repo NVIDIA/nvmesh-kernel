@@ -1106,7 +1106,8 @@ static int __get_last_send_cmd(const struct nvmeibc_block_command *rldr, int fir
 			return ci;
 		}
 	}
-	return last;					// All commands in current stage are not sent
+	BUG();	// All commands in current stage are "do not send" - cannot happen
+	return ci;
 }
 
 /* Calculate the amount of commands and last command in the current stage of
