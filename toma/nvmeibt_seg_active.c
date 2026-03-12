@@ -490,7 +490,6 @@ static void nvmeibt_seg_active_topo_reset(struct nvmeibt_seg_active *seg_active)
 	nvmeibt_generic_seg_topo_reset(&(seg_active->active_seg_topo));
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS(shy7623, seg_active, NVMEIBT_SEG_DIRTY_BITS_STATE_UNKNOWN);
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE( djuy723, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
-	NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(       dki98se, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
 	NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(alo9rt4, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
 	getnstimeofday_real(&ts);
 	seg_active->active_seg_topo.active_seg_ser_ver = ((uint64_t)ts.tv_sec << 32) + ts.tv_nsec;	// Hopefully works with disk hot-plug/unplug
@@ -765,11 +764,10 @@ void nvmeibt_seg_active_init_locks_table(struct nvmeibt_seg_active *seg_active)
 	if (!nvmeibt_praid_is_client_sync_cmd_initializing(nvmeibt_seg_active_get_registrants_sync_cmd(seg_active))) {
 		goto out;
 	}
-	N_Tf(7fh3iub, "seg=@UUID_8 sync_cmd=@SYNC_CMD dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE txid_init_mode=@TXID_INIT_MODE",
+	N_Tf(7fh3iub, "seg=@UUID_8 sync_cmd=@SYNC_CMD dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE",
 		nvmeibt_seg_active_UUID_8(seg_active), praid_registrants_sync_cmd_str(nvmeibt_seg_active_get_registrants_sync_cmd(seg_active)),
 		mem_tbl_init_mode_str(nvmeibt_seg_active_get_active_seg_topo(seg_active)->dirty_bits_init_mode),
-		mem_tbl_init_mode_str(nvmeibt_seg_active_get_active_seg_topo(seg_active)->stale_locks_init_mode),
-		mem_tbl_init_mode_str(nvmeibt_seg_active_get_active_seg_topo(seg_active)->txid_init_mode));
+		mem_tbl_init_mode_str(nvmeibt_seg_active_get_active_seg_topo(seg_active)->stale_locks_init_mode));
 	if (	!is_mem_tbl_init_mode_applicable(nvmeibt_seg_active_get_active_seg_topo(seg_active)->dirty_bits_init_mode) &&
 			!is_mem_tbl_init_mode_applicable(nvmeibt_seg_active_get_active_seg_topo(seg_active)->stale_locks_init_mode)) {
 		goto out;
@@ -785,7 +783,6 @@ void nvmeibt_seg_active_init_locks_table(struct nvmeibt_seg_active *seg_active)
 	if (nvmeibt_seg_active_is_jbod(seg_active)) {
 		is_stale_rebuild_required = 0;
 		NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(3bc9adj,	seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT);
-		NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(c8a9l0ss,		seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT);
 		NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(1m9xim4,	seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT);
 	}
 	else {
@@ -2797,7 +2794,6 @@ void nvmeibt_seg_active_upd_active_topo_from_applied_topo(struct nvmeibt_seg_act
 			nvmeibt_seg_active_is_mem_tbl_init_meaningful(applied_topo)) {	// seg_active only takes commands etc.. Ignore INIT_DONE
 		NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(t0b4ks, seg_active, applied_topo->dirty_bits_init_mode);
 		NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(on406xe, seg_active, applied_topo->stale_locks_init_mode);
-		NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(xmo031h, seg_active, applied_topo->txid_init_mode);
 	} else {
 		N_Tf(rbshx5m, "Ignoring dirty_init=@STR(was @STR) stale_init=@STR",
 			 mem_tbl_init_mode_str(applied_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(active_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(applied_topo->stale_locks_init_mode));
@@ -2843,22 +2839,21 @@ mark_applied_post_update_actions_required:
 	if (nvmeibt_disk_segment_is_competent_owner(&prev_active_topo) && nvmeibt_disk_segment_is_competent_owner(active_topo)) {
 		// I was owner in applied, and owner now. I.e., Keeping the old stale & dirty in mem.
 		// Validate that the init_mode does not erase stale or dirty bits from memory
-		if (nvmeibt_disk_segment_is_init_mode_turning_off(active_topo, nvmeibt_seg_active_is_EC(seg_active))) {
+		if (nvmeibt_disk_segment_is_init_mode_turning_off(active_topo)) {
 			if (	!is_accepting_registrations &&
 				   /*nvmeibt_praid_is_client_sync_cmd_capable_to_INIT_TURN_OFF_on_owners(praid_topo_ctx->registrants_sync_cmd) &&*/
 					(nvmeibt_disk_segment_is_ec_cold_recoverer(active_topo) ||
-					 nvmeibt_disk_segment_is_init_mode_turning_off(applied_topo, nvmeibt_seg_active_is_EC(seg_active)))) {
+					 nvmeibt_disk_segment_is_init_mode_turning_off(applied_topo))) {
 				// We are good. either EC_cold_recoverer (that should turn off), or
 				//  the prev topo was turning_off (implying no I/O since), so we do not mind turning off again
 			} else {
 				N_Ef(u4h6gsk, "seg=@UUID_8 dirty_bits_state=@DIRTY_BITS_STATE-->@DIRTY_BITS_STATE_STR "
 					"praid_version=@PRAID_VERSION.@PRAID_VERSION "
-					"dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE txid_init_mode=@TXID_INIT_MODE",
+					"dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE",
 					nvmeibt_seg_active_UUID_8(seg_active),
 					dirty_bits_state_str(prev_active_topo.dirty_bits_state), dirty_bits_state_str(active_topo->dirty_bits_state),
 					active_topo->seg_praid_version_major, active_topo->seg_praid_version_minor,
-					mem_tbl_init_mode_str(active_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(active_topo->stale_locks_init_mode),
-					mem_tbl_init_mode_str(active_topo->txid_init_mode));
+					mem_tbl_init_mode_str(active_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(active_topo->stale_locks_init_mode));
 				nvmeibt_abort(ES_FATAL);
 			}
 		}
@@ -3062,13 +3057,12 @@ int nvmeibt_seg_active_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 	} else {
 		(*printf_fn)(printf_ctx, "\t\t- seg_active ");
 	}
-	(*printf_fn)(printf_ctx, "praid_ver=%x.%x state=%s%s is_synchronizer=%d are_reg_sync=%d init_mode(dirty=%s stale=%s txid=%s) RM_ver=%zu\n",
+	(*printf_fn)(printf_ctx, "praid_ver=%x.%x state=%s%s is_synchronizer=%d are_reg_sync=%d init_mode(dirty=%s stale=%s) RM_ver=%zu\n",
 			seg_topo->seg_praid_version_major, seg_topo->seg_praid_version_minor,
 			dirty_bits_state_str(seg_topo->dirty_bits_state), progress_str,
 			seg_topo->is_registrants_synchronizer,
 			nvmeibt_seg_active_are_registrants_aligned_with_sync_cmd(seg_active),
 			mem_tbl_init_mode_str(seg_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(seg_topo->stale_locks_init_mode),
-			mem_tbl_init_mode_str(seg_topo->txid_init_mode),
 			seg_active->active_reservation_mode_version);
 	nvmeibt_praid_dump_praid_status_line(printf_fn, printf_ctx, nvmeibt_seg_active_get_praid(seg_active), 0, is_full_info_needed);
 	nvmeibt_register_print_status(printf_fn, printf_ctx, seg_active);

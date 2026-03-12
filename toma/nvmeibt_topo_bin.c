@@ -35,12 +35,11 @@ void nvmeibt_disk_segment_print_leader_wire_topo(int (*printf_fn)(void *ctx, con
 	nvmeibt_disk_segment_convert_topo_le_be(seg_wire_topo_ptr, &serialized);
 	seg_uuid = nvmeibt_union_uuid_to_urn_uuid(&(serialized.uuid));
 
-	(*printf_fn)(printf_ctx, "seg=%s ver=(%x,%x) dirty=%s inits=(d=%s s=%s t=%s) ow1=%x is_s=%d flg=%x\n",
+	(*printf_fn)(printf_ctx, "seg=%s ver=(%x,%x) dirty=%s inits=(d=%s s=%s) ow1=%x is_s=%d flg=%x\n",
 		         seg_uuid.str, serialized.praid_version_major, serialized.praid_version_minor,
 		         dirty_bits_state_str(serialized.dirty_bits_state),
 		         mem_tbl_init_mode_str(serialized.dirty_bits_init_mode), mem_tbl_init_mode_str(serialized.stale_locks_init_mode),
-				 mem_tbl_init_mode_str(serialized.txid_init_mode), serialized.owner_idx,
-		         serialized.is_registrants_synchronizer, serialized.leader_seg_flags);
+				 serialized.owner_idx, serialized.is_registrants_synchronizer, serialized.leader_seg_flags);
 }
 
 void nvmeibt_seg_serialized_active_topo(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_serialized_seg_active_topo *serialized_seg_topo_ptr)

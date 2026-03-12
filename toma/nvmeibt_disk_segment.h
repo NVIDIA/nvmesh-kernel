@@ -136,27 +136,6 @@ static inline char get_topo_char(struct nvmeibt_seg_lot *seg_lot)
 		}																										\
 	} while (0)
 
-#define NNVMEIBT_SEG_TOPO_SET_TXID_INIT_MODE(name, _uuid, p_seg_lot, seg_topo, in_val, topo_char) do {			\
-		struct nvmeibt_seg_lot					*__seg_lot_ = (p_seg_lot);										\
-		struct nvmeibt_disk_segment_topo_ctx	*_topo_ctx_ = (seg_topo);										\
-		enum NVMEIBT_MEM_TBL_INIT_MODE			_val_ = (in_val);												\
-    	if (is_init_mode_irrelevant(__seg_lot_, _val_))															\
-			_val_ = NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT;													\
-		if (	(_topo_ctx_->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER &&				\
-				 _val_ == NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED)) {											\
-			_val_ = NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER;													\
-			N_Tf(name ## _a, "@UUID_8 SET_TXID_INIT_MODE Ignoring FIRST_USE_EVER-->INIT_REQUIRED", nvmeib_uuid_first_4_bytes(_uuid));			\
-		}																										\
-		if (_topo_ctx_->txid_init_mode != _val_) {																\
-			N_Tf(name, "SET_TXID_INIT_MODE(@TOPO_CTX_CHAR-@UUID_8: @DIRTY_BITS_STR->@DIRTY_BITS_STR)",			\
-				 topo_char,																						\
-				 nvmeib_uuid_first_4_bytes(_uuid),																\
-				 mem_tbl_init_mode_str(_topo_ctx_->txid_init_mode),												\
-				 mem_tbl_init_mode_str(_val_));																	\
-			_topo_ctx_->txid_init_mode = _val_;																	\
-		}																										\
-	} while (0)
-
 #define NNVMEIBT_SEG_TOPO_SET_DIRTY_BITS_INIT_MODE(name, _uuid, p_seg_lot, seg_topo, in_val, topo_char) do {	\
 		struct nvmeibt_seg_lot					*__seg_lot = (p_seg_lot);										\
 		struct nvmeibt_disk_segment_topo_ctx	*_topo_ctx = (seg_topo);										\
@@ -176,11 +155,6 @@ static inline char get_topo_char(struct nvmeibt_seg_lot *seg_lot)
 				 mem_tbl_init_mode_str(_topo_ctx->dirty_bits_init_mode),										\
                  mem_tbl_init_mode_str(_val));																	\
 			_topo_ctx->dirty_bits_init_mode = _val;																\
-			if (_val &																							\
-				(NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE | NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT)) {			\
-				NNVMEIBT_SEG_TOPO_SET_TXID_INIT_MODE(name ## _txid, _uuid, __seg_lot, _topo_ctx,				\
-														NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE, topo_char);		\
-			}																									\
 		}																										\
 	} while (0)
 
@@ -216,17 +190,6 @@ static inline char get_topo_char(struct nvmeibt_seg_lot *seg_lot)
 		break;																				\
 	}																						\
 	NNVMEIBT_SEG_TOPO_SET_DIRTY_BITS(name, nvmeibt_seg_lot_UUID(_seg_lot),					\
-		_seg_lot, &_seg_lot->seg_topo, in_val, _topo_char);									\
-} while (0)
-
-#define NNVMEIBT_SEG_LOT_SET_TXID_INIT_MODE(name, p_seg_lot, in_val) do {					\
-	struct nvmeibt_seg_lot					*_seg_lot = (p_seg_lot);						\
-	char									_topo_char= get_topo_char(_seg_lot);			\
-	if (!_seg_lot) {																		\
-		N_Wf(name ## _1, "seg_lot=NULL");													\
-		break;																				\
-	}																						\
-	NNVMEIBT_SEG_TOPO_SET_TXID_INIT_MODE(name, nvmeibt_seg_lot_UUID(_seg_lot),				\
 		_seg_lot, &_seg_lot->seg_topo, in_val, _topo_char);									\
 } while (0)
 
@@ -287,18 +250,6 @@ static inline char get_topo_char(struct nvmeibt_seg_lot *seg_lot)
 	}																						\
 	_seg_lot = &_seg_leader->baseline_seg_lot;												\
 	NNVMEIBT_SEG_TOPO_SET_STALE_LOCKS_INIT_MODE(name, nvmeibt_seg_lot_UUID(_seg_lot),		\
-		_seg_lot, &_seg_leader->remote_seg_topo, in_val, 'R');								\
-} while (0)
-
-#define NNVMEIBT_SEG_REMOTE_SET_TXID_INIT_MODE(name, p_seg_leader, in_val) do {				\
-    struct nvmeibt_seg_leader				*_seg_leader = (p_seg_leader);					\
-	struct nvmeibt_seg_lot					*_seg_lot;										\
-    if (!_seg_leader) {																		\
-    	N_Wf(name ## 1, "seg=NULL");														\
-    	break;																				\
-	}																						\
-	_seg_lot = &_seg_leader->baseline_seg_lot;												\
-	NNVMEIBT_SEG_TOPO_SET_TXID_INIT_MODE(name, nvmeibt_seg_lot_UUID(_seg_lot),				\
 		_seg_lot, &_seg_leader->remote_seg_topo, in_val, 'R');								\
 } while (0)
 

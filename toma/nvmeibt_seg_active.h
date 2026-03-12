@@ -189,22 +189,6 @@ extern int64_t nvmeibt_recovery_n_blksets_per_scrub_iteration;
 
 /******************************************************************************/
 
-#define NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(name, I_seg_active, I_txid_init_mode)	do {		\
-	struct nvmeibt_seg_active				*__seg_active = (I_seg_active);							\
-	struct nvmeibt_disk_segment_topo_ctx	*__seg_topo = &(__seg_active->active_seg_topo);			\
-	enum NVMEIBT_MEM_TBL_INIT_MODE			__prev_val;												\
-	if (!__seg_active) {																			\
-		N_Wf(name ## _5, "seg_active=NULL");														\
-		break;																						\
-	}																								\
-	__prev_val = __seg_topo->txid_init_mode;														\
-	NNVMEIBT_SEG_TOPO_SET_TXID_INIT_MODE(name, nvmeibt_seg_active_UUID(__seg_active),				\
-			nvmeibt_seg_active_get_applied_seg_lot(__seg_active),									\
-			__seg_topo, I_txid_init_mode, 'A');														\
-	if (__seg_topo->txid_init_mode != __prev_val)													\
-		nvmeibt_seg_active_mark_serialize_active_topo_for_leader_required(__seg_active);			\
-} while (0)
-
 #define NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(name, I_seg_active, I_dirty_init_mode)	do {	\
 	struct nvmeibt_seg_active				*__seg_active = (I_seg_active);							\
 	struct nvmeibt_disk_segment_topo_ctx	*__seg_topo = &(__seg_active->active_seg_topo);			\

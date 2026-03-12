@@ -682,7 +682,7 @@ static void leader_serialize_seg_topo_to_wire(struct nvmeibt_praid_topo_ctx *pra
 
 	serialized.dirty_bits_init_mode = seg_topo->dirty_bits_init_mode;
 	serialized.stale_locks_init_mode = seg_topo->stale_locks_init_mode;
-	serialized.txid_init_mode = seg_topo->txid_init_mode;
+	serialized.txid_init_mode = serialized.dirty_bits_init_mode; // for backward compatibility only, can be deleted in future versions
 	serialized.is_registrants_synchronizer = seg_topo->is_registrants_synchronizer;
 	serialized.leader_seg_flags = seg_topo->leader_seg_flags;
 	// send_topo_ptr->res_1 = 0;
@@ -1901,13 +1901,11 @@ static void leader_calc_all_segs_init_modes(struct nvmeibt_praid *praid, struct 
 					if (!is_journaled) {
 						NNVMEIBT_SEG_LOT_SET_STALE_LOCKS_INIT_MODE(7dbsh23, calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST);
 					}
-					NNVMEIBT_SEG_LOT_SET_TXID_INIT_MODE(nauWaer,		calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST);
 					NNVMEIBT_SEG_LOT_SET_DIRTY_BITS_INIT_MODE(1vsjytg,	calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST);
 				} else {	// TURN_ALL_ON
 					if (!is_journaled) {
 						NNVMEIBT_SEG_LOT_SET_STALE_LOCKS_INIT_MODE(6cvsjhs, calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);
 					}
-					NNVMEIBT_SEG_LOT_SET_TXID_INIT_MODE(nau3xar,		calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);
 					NNVMEIBT_SEG_LOT_SET_DIRTY_BITS_INIT_MODE(1v4fhag,	calculated_seg_lot ,(n->is_it_possible_that_dirty_bits_were_set ?
 																										 NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON :
 																										 NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF));
@@ -1921,7 +1919,6 @@ static void leader_calc_all_segs_init_modes(struct nvmeibt_praid *praid, struct 
 			if (nvmeibt_disk_segment_is_under_recovery_I(calculated_seg_topo)) {
 				TODO(Consider using this logic all over. First identify a revived disk. Only they require init, other than if a new seg was introduced);
 				NNVMEIBT_SEG_LOT_SET_STALE_LOCKS_INIT_MODE(6g7sg37,	calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF);
-				NNVMEIBT_SEG_LOT_SET_TXID_INIT_MODE(naQwgar,		calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);	// Don't care since will be overide
 				NNVMEIBT_SEG_LOT_SET_DIRTY_BITS_INIT_MODE(1vs8mag,	calculated_seg_lot, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF);
 			}
 		}
@@ -2278,13 +2275,11 @@ calc_owners:
 		}
 		if (	nvmeibt_disk_segment_leader_is_state_progressible(calculated_seg_topo) &&
 				(calculated_seg_topo->dirty_bits_init_mode ==  NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED ||
-				 calculated_seg_topo->stale_locks_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED ||
-				 calculated_seg_topo->txid_init_mode ==        NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED)) {
-			N_Ef(6fvdg31, "seg=@UUID_8 init_mode=(@MEM_CTL_INIT_MODE_STR,@MEM_CTL_INIT_MODE_STR,@TXID_INIT_MODE_STR)",
+				 calculated_seg_topo->stale_locks_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED)) {
+			N_Ef(6fvdg31, "seg=@UUID_8 init_mode=(@MEM_CTL_INIT_MODE_STR,@MEM_CTL_INIT_MODE_STR)",
 				nvmeibt_seg_lot_UUID_8(calculated_seg_lot),
 				mem_tbl_init_mode_str(calculated_seg_topo->dirty_bits_init_mode),
-				mem_tbl_init_mode_str(calculated_seg_topo->stale_locks_init_mode),
-				mem_tbl_init_mode_str(calculated_seg_topo->txid_init_mode));
+				mem_tbl_init_mode_str(calculated_seg_topo->stale_locks_init_mode));
 		}
 	}
 	rv = 0;

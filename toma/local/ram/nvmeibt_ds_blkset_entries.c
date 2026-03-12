@@ -42,51 +42,22 @@ void nvmeibt_ds_blkset_entries_sanitize_packed(
 	*n_dirty_bits = n_dirty;
 }
 
-/* Prepare TXID in dirty_plus_txid_init_val in case needed for init */
-static int ds_metadata_init_EC_prepare_txid_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *dirty_plus_txid_init_val)
-{
-	int rv = 0;
-
-	switch (seg_active->active_seg_topo.txid_init_mode) {
-	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
-		dirty_plus_txid_init_val->bits.txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS;
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:						// Irrelevant, ON or OFF, Toma can just put unknown in both cases
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON:
-		dirty_plus_txid_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
-		// nvmeibt_ds_metadata_locks_table_restore() above should have handled it
-		N_Ef(dgy756r, "seg=@UUID_8 dirty=@DIRTY_UINT txid=TXID_FROM_PERSIST after locks_table_restore()",
-			nvmeibt_seg_active_UUID_8(seg_active), seg_active->active_seg_topo.dirty_bits_init_mode);
-		nvmeibt_abort(ES_FATAL);
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED:
-	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
-	default:
-		N_Ef(akiuy85, "init_mode=@INIT_MODE", seg_active->active_seg_topo.txid_init_mode);
-		rv = -1;
-	}
-
-	return rv;
-}
-
 /* Prepare dirty in dirty_plus_txid_init_val in case needed for init
  * Side effect on @disk_segment: if init mode is INIT_IRRELEVANT will convert it to INIT_DONE.
  */
-static int ds_metadata_init_EC_prepare_dirty_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *dirty_plus_txid_init_val)
+static int ds_metadata_init_EC_prepare_dirty_and_txid_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *dirty_plus_txid_init_val)
 {
 	const enum NVMEIBT_MEM_TBL_INIT_MODE mode = seg_active->active_seg_topo.dirty_bits_init_mode;
 	int rv = 0;
 
 	switch (mode) {
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
+		dirty_plus_txid_init_val->bits.dirty = 0;
+		dirty_plus_txid_init_val->bits.txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS;
+		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:
 		dirty_plus_txid_init_val->bits.dirty = 0;
+		dirty_plus_txid_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
 		break;
@@ -95,6 +66,7 @@ static int ds_metadata_init_EC_prepare_dirty_bits_init_val(struct nvmeibt_seg_ac
 	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON:
 		TODO(make optimization: 2 unknowns is an overkill, put convicts and allow single degraded. Not madatory because client will resolve the unknowns anyways)
 		dirty_plus_txid_init_val->bits.dirty = nvmeib_dbits_entry_build_unk(-1, -1).all_bits;
+		dirty_plus_txid_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED:
@@ -182,7 +154,6 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 {
 	bool									is_stale_rebuild_required = 0;
 	union nvmeib_lock_blkset_entry			init_val = {.all = 0};
-	bool									is_init_txid_required;
 	bool									is_init_dirty_required;
 	bool									is_init_stale_required;
 	union nvmeib_lock_blkset_entry			*mmapped_locks_table;
@@ -195,11 +166,10 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 	disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
 	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
 	praid_topo_ctx = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
-	N_Tf(gtyu765, "seg=@UUID_8 lock_init_mode=@LOCK_INIT_MODE dirty_init_mode=@DIRTY_INIT_MODE txid_init_mode=@TXID_INIT_MODE",
+	N_Tf(gtyu765, "seg=@UUID_8 lock_init_mode=@LOCK_INIT_MODE dirty_init_mode=@DIRTY_INIT_MODE",
 		nvmeibt_seg_active_UUID_8(seg_active),
 		mem_tbl_init_mode_str(seg_topo_ctx->stale_locks_init_mode),
-		mem_tbl_init_mode_str(seg_topo_ctx->dirty_bits_init_mode),
-		mem_tbl_init_mode_str(seg_topo_ctx->txid_init_mode));
+		mem_tbl_init_mode_str(seg_topo_ctx->dirty_bits_init_mode));
 
 	local_disk = nvmeibt_seg_active_get_local_disk(seg_active);
 	if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
@@ -223,14 +193,6 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 		}
 	}
 
-	// we expect init mode of both dirty bits and TXID match
-	if ((seg_topo_ctx->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST) !=
-		(seg_topo_ctx->txid_init_mode ==       NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST)) {
-		// complain if they don't match
-		N_Ef(dt654w9, "seg=@UUID_8 init modes mismatch: dirty @DIRTY_BITS_INIT_MODE_INT, txid @TXID_INIT_MODE_INT",
-			nvmeibt_seg_active_UUID_8(seg_active), seg_topo_ctx->dirty_bits_init_mode, seg_topo_ctx->txid_init_mode);
-	}
-
 	nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 
 	// First see if we need to read the dirty_bits from persistency
@@ -244,16 +206,11 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 			seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
 			N_Ef(hji98fe, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to TURN_ALL_ON",nvmeibt_seg_active_UUID_8(seg_active));
 			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(dhu7875, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);
-			NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(aji98y6, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);
 		}
 	}
 
-	// TXID, (see function comment for side-effects)
-	if (ds_metadata_init_EC_prepare_txid_init_val(seg_active, &init_val.blkset_info) < 0)
-		goto out;
-
 	// Dirty_bits,  (see function comment for side-effects)
-	if (ds_metadata_init_EC_prepare_dirty_bits_init_val(seg_active, &init_val.blkset_info) < 0)
+	if (ds_metadata_init_EC_prepare_dirty_and_txid_bits_init_val(seg_active, &init_val.blkset_info) < 0)
 		goto out;
 
 	// Stale_locks (see function comment for side-effects)
@@ -265,7 +222,6 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 	// on a combination of the two, and try to write it at once
 	// If any of the two is already initialized, then we keep its old value
 
-	is_init_txid_required =  (seg_topo_ctx->txid_init_mode !=        NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 	is_init_dirty_required = (seg_topo_ctx->dirty_bits_init_mode !=  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 	is_init_stale_required = (seg_topo_ctx->stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 
@@ -273,7 +229,7 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 	if (1) { // Todo: Move to separate function
 		const uint64_t n_blksets = num_blksets_in_disk_segment(disk_segment);
 		uint64_t i;
-		bool is_init_all = (is_init_stale_required && is_init_dirty_required && is_init_txid_required);
+		bool is_init_all = (is_init_stale_required && is_init_dirty_required);
 		bool is_blkset_used_LUT[NVMEIBT_MAX_N_SEGMENTS_IN_PRAID];
 
 		applied_praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
@@ -291,11 +247,7 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 					mmapped_locks_table[i].lock_id = init_val.lock_id;
 				}
 				if (is_init_dirty_required) {
-					if (is_init_txid_required) {
-						mmapped_locks_table[i].blkset_info = init_val.blkset_info;
-					} else {
-						mmapped_locks_table[i].blkset_info.bits.dirty = init_val.blkset_info.bits.dirty;
-					}
+					mmapped_locks_table[i].blkset_info = init_val.blkset_info;
 				}
 			}
 		}
@@ -307,13 +259,12 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 _out_success:
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(fhu82ws, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 	NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(bnki98e, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-	NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(sk9835v, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 out:
 	NFOUT;
 	return is_stale_rebuild_required;
 }
 
-static int ds_metadata_prepare_non_EC_dirty_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *blkset_info_init_val)
+static int ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *blkset_info_init_val)
 {
 	int										rv = 0;
 	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
@@ -360,7 +311,7 @@ static int ds_metadata_prepare_non_EC_dirty_bits_init_val(struct nvmeibt_seg_act
 		rv = -1;
 		break;
 	}
-	blkset_info_init_val->all = 0;
+	blkset_info_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
 	blkset_info_init_val->bits.dirty = dbits_entry.dirty.bits;
 
 	NFOUT;
@@ -428,7 +379,6 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	union nvmeib_lock_blkset_entry			*mmapped_locks_tbl = nvmeibt_seg_active_get_locks_tbl_ptr(seg_active);
 	int8_t									idx_in_praid;
 	uint64_t								n_blksets, ii;
-	bool									is_init_txid_required;
 	bool									is_init_dirty_required;
 	bool									is_init_stale_required;
 
@@ -439,11 +389,8 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	dirty_bits_init_mode = seg_topo_ctx->dirty_bits_init_mode;
 	stale_locks_init_mode = seg_topo_ctx->stale_locks_init_mode;
 
-	N_Tf(fr65w2q, "seg=@UUID_8 lock_init_mode=@LOCK_INIT_MODE dirty_init_mode=@DIRTY_INIT_MODE txid_init_mode=@TXID_INIT_MODE",
-		nvmeibt_seg_active_UUID_8(seg_active),
-		mem_tbl_init_mode_str(stale_locks_init_mode),
-		mem_tbl_init_mode_str(dirty_bits_init_mode),
-		mem_tbl_init_mode_str(seg_topo_ctx->txid_init_mode));
+	N_Tf(fr65w2q, "seg=@UUID_8 lock_init_mode=@LOCK_INIT_MODE dirty_init_mode=@DIRTY_INIT_MODE",
+		nvmeibt_seg_active_UUID_8(seg_active), mem_tbl_init_mode_str(stale_locks_init_mode), mem_tbl_init_mode_str(dirty_bits_init_mode));
 
 	if (nvmeibt_local_disk_is_being_deleted(nvmeibt_seg_active_get_local_disk(seg_active))) {
 		N_Tf(doo09da, "seg=@UUID_8 is being deleted (so not local)", nvmeibt_seg_active_UUID_8(seg_active));
@@ -476,7 +423,6 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 			if (nvmeibt_ds_metadata_locks_table_restore(seg_active, &is_stale_rebuild_required) == 0) {
 				NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(fhuy7t5, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 				NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(sj98476, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-				NNVMEIBT_SEG_ACTIVE_SET_TXID_INIT_MODE(skijvb7, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 				/* restore from persistent storage succeeded: all done */
 				goto out;
 			}
@@ -495,7 +441,7 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 		 */
 	}
 
-	rv = ds_metadata_prepare_non_EC_dirty_bits_init_val(seg_active, &lock_blkset_entry_init_val.blkset_info);
+	rv = ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(seg_active, &lock_blkset_entry_init_val.blkset_info);
 	if (rv < 0)
 		goto out;
 	is_init_dirty_required = rv;
@@ -506,15 +452,12 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	is_init_stale_required = rv;
 	rv = 0;
 	
-	is_init_txid_required = !(seg_topo_ctx->txid_init_mode &
-							  (NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE | NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT));
-
-	if (!(is_init_stale_required || is_init_dirty_required || is_init_txid_required)) {
+	if (!(is_init_stale_required || is_init_dirty_required)) {
 		is_stale_rebuild_required = 0;
 		goto out;
 	}
 
-	NTOMA_ASSERT(hq123xc, (is_init_stale_required && is_init_dirty_required && is_init_txid_required), "Init modes mismatch");
+	NTOMA_ASSERT(hq123xc, (is_init_stale_required && is_init_dirty_required), "Init modes mismatch");
 
 	idx_in_praid = nvmeibt_disk_segment_idx_in_praid(disk_segment);
 	n_blksets = num_blksets_in_disk_segment(disk_segment);

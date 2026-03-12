@@ -72,7 +72,6 @@ void nvmeibt_disk_segment_dump(__attribute__((__unused__)) const struct nvmeibt_
 void nvmeibt_seg_lot_set_all_init_modes(struct nvmeibt_seg_lot *seg_lot, enum NVMEIBT_MEM_TBL_INIT_MODE init_mode)
 {
 	NNVMEIBT_SEG_LOT_SET_DIRTY_BITS_INIT_MODE( bgy61na, seg_lot, init_mode);
-	NNVMEIBT_SEG_LOT_SET_TXID_INIT_MODE(       i9k9ks2, seg_lot, init_mode);
 	NNVMEIBT_SEG_LOT_SET_STALE_LOCKS_INIT_MODE(asdfc98, seg_lot, init_mode);
 }
 
@@ -104,7 +103,6 @@ void nvmeibt_seg_remote_reset(struct nvmeibt_disk_segment_topo_ctx *seg_remote_t
 	//
 	NNVMEIBT_SEG_REMOTE_SET_DIRTY_BITS(txvjauk, seg_leader, NVMEIBT_SEG_DIRTY_BITS_STATE_UNKNOWN);
 	NNVMEIBT_SEG_REMOTE_SET_DIRTY_BITS_INIT_MODE(tvsjh83, seg_leader, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
-	NNVMEIBT_SEG_REMOTE_SET_TXID_INIT_MODE(zmcint5, seg_leader, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
 	NNVMEIBT_SEG_REMOTE_SET_STALE_LOCKS_INIT_MODE(xvzy823, seg_leader, NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
 }
 
@@ -547,7 +545,6 @@ enum nvmeibt_add_rv nvmeibt_seg_follower_upd_committed_seg_topo(struct nvmeibt_s
 	in_seg_topo.seg_praid_version_minor = in_leader_serialized_seg_topo->praid_version_minor;
 	in_seg_topo.dirty_bits_init_mode = in_leader_serialized_seg_topo->dirty_bits_init_mode;
 	in_seg_topo.stale_locks_init_mode = in_leader_serialized_seg_topo->stale_locks_init_mode;
-	in_seg_topo.txid_init_mode = in_leader_serialized_seg_topo->txid_init_mode;
 	in_seg_topo.is_registrants_synchronizer = in_leader_serialized_seg_topo->is_registrants_synchronizer;
 	in_seg_topo.leader_seg_flags = in_leader_serialized_seg_topo->leader_seg_flags;
 
@@ -563,9 +560,9 @@ enum nvmeibt_add_rv nvmeibt_seg_follower_upd_committed_seg_topo(struct nvmeibt_s
 		}
 		else {
 			if (topo_owner_idx == DUMMY_OWNER) {
-				N_Wf(u78u4c3, "seg=@UUID_8 dirty_bits=@DIRTY_BITS_STATE_STR inits=(d=@DIRTY_BITS_INIT_MODE s=@STALE_LOCKS_INIT_MODE t=@TXID_INIT_MODE) does not exist in config, probably obsolete raft_only seg",
+				N_Wf(u78u4c3, "seg=@UUID_8 dirty_bits=@DIRTY_BITS_STATE_STR inits=(d=@DIRTY_BITS_INIT_MODE s=@STALE_LOCKS_INIT_MODE) does not exist in config, probably obsolete raft_only seg",
 					 nvmeib_uuid_first_4_bytes(topo_segment_id), dirty_bits_state_str(in_seg_topo.dirty_bits_state),
-					 mem_tbl_init_mode_str(in_seg_topo.dirty_bits_init_mode), mem_tbl_init_mode_str(in_seg_topo.stale_locks_init_mode), mem_tbl_init_mode_str(in_seg_topo.txid_init_mode));
+					 mem_tbl_init_mode_str(in_seg_topo.dirty_bits_init_mode), mem_tbl_init_mode_str(in_seg_topo.stale_locks_init_mode));
 				rv = NVMEIBT_ADD_SKIPPED;
 			} else {
 				N_Wf(xft674b, "Surprise delete seg=@UUID_8. Existed in the old topo (not X), but does not exist in config", nvmeib_uuid_first_4_bytes(topo_segment_id));
@@ -600,9 +597,9 @@ enum nvmeibt_add_rv nvmeibt_seg_follower_upd_committed_seg_topo(struct nvmeibt_s
 		"praid_version=@PRAID_VERSION:@PRAID_VERSION owner_seg=@UUID_8",
 		SEG_UUID_8, dirty_bits_state_str(committed_seg_topo->dirty_bits_state), dirty_bits_state_str(prev_seg_topo.dirty_bits_state),
 		committed_seg_topo->seg_praid_version_major, committed_seg_topo->seg_praid_version_minor, nvmeibt_seg_lot_UUID_8(committed_seg_topo->owner_seg_lot)) ;
-	N_Tf(srtm98x, "dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE txid_init_mode=@TXID_INIT_MODE is_synchronizer=@IS_SYNCHRONIZER",
+	N_Tf(srtm98x, "dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE is_synchronizer=@IS_SYNCHRONIZER",
 		mem_tbl_init_mode_str(committed_seg_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(committed_seg_topo->stale_locks_init_mode),
-		mem_tbl_init_mode_str(committed_seg_topo->txid_init_mode), committed_seg_topo->is_registrants_synchronizer);
+		committed_seg_topo->is_registrants_synchronizer);
 
 out:
 	if (disk_segment && (rv == NVMEIBT_ADD_MODIFIED)) {
@@ -829,16 +826,14 @@ bool nvmeibt_disk_segment_are_topos_actionably_different(const union nvmeib_uuid
 		 !ARE_UUID_EQ(nvmeibt_seg_lot_UUID(new_t->owner_seg_lot), nvmeibt_seg_lot_UUID(old_t->owner_seg_lot)) ||
 		 !ARE_UUID_EQ(nvmeibt_seg_lot_UUID(new_t->secondary_owner_seg_lot), nvmeibt_seg_lot_UUID(old_t->secondary_owner_seg_lot)) ||
 		 (new_t->dirty_bits_init_mode != old_t->dirty_bits_init_mode 	&& new_t->dirty_bits_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE) ||
-		 (new_t->stale_locks_init_mode != old_t->stale_locks_init_mode	&& new_t->stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE) ||
-		 (new_t->txid_init_mode != old_t->txid_init_mode				&& new_t->txid_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE));
+		 (new_t->stale_locks_init_mode != old_t->stale_locks_init_mode	&& new_t->stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE));
 	if (is_diff) {
 		N_Tf(gevs7hi, "seg=@UUID_8 dirty_bits_state=@STR(@STR) owner_seg=@UUID_8(@UUID_8)",
 			nvmeib_uuid_first_4_bytes(uuid), dirty_bits_state_str(new_t->dirty_bits_state), dirty_bits_state_str(old_t->dirty_bits_state),
 			nvmeibt_seg_lot_UUID_8(new_t->owner_seg_lot), nvmeibt_seg_lot_UUID_8(old_t->owner_seg_lot));
-		N_Tf(3mslxwp, "dirty_bits_init_mode=@STR(@STR) stale_locks_init_mode=@STR(@STR) txid_init_mode=@STR(@STR)",
+		N_Tf(3mslxwp, "dirty_bits_init_mode=@STR(@STR) stale_locks_init_mode=@STR(@STR)",
 			mem_tbl_init_mode_str(new_t->dirty_bits_init_mode), mem_tbl_init_mode_str(old_t->dirty_bits_init_mode),
-			mem_tbl_init_mode_str(new_t->stale_locks_init_mode), mem_tbl_init_mode_str(old_t->stale_locks_init_mode),
-			mem_tbl_init_mode_str(new_t->txid_init_mode), mem_tbl_init_mode_str(old_t->txid_init_mode));
+			mem_tbl_init_mode_str(new_t->stale_locks_init_mode), mem_tbl_init_mode_str(old_t->stale_locks_init_mode));
 	}
 	return is_diff;
 }
