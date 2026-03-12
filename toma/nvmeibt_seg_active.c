@@ -1366,9 +1366,10 @@ out:
 int nvmeibt_recovery_execute_dirty_rebuilds(struct nvmeibt_seg_active **seg_active_arr, int n_seg_active, int max_n_simultaneous_dirty_rebuild)
 {
 	int								n_launched_tasks = 0;
+	struct nvmeibt_seg_active 		*seg_active;
 
-	for (; n_seg_active > 0; n_seg_active--, seg_active_arr++) {
-		struct nvmeibt_seg_active *seg_active = *seg_active_arr;
+	for (n_seg_active-- ; n_seg_active >= 0; n_seg_active--) {
+		seg_active = seg_active_arr[n_seg_active];
 		// The following is inside the loop since N_RUNNING_TASKS might change.
 		if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild) >= max_n_simultaneous_dirty_rebuild) {
 			N_Tf(ddu8760, "Skipping dirty rebuilds, n_running_dirty_rebuild=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_dirty_rebuild));
@@ -1441,9 +1442,10 @@ out:;
 int nvmeibt_recovery_execute_cold_recoveries(struct nvmeibt_seg_active **seg_active_arr, int n_seg_active)
 {
 	int								n_launched_tasks = 0;
+	struct nvmeibt_seg_active 		*seg_active;
 
-	for (; n_seg_active > 0; n_seg_active--, seg_active_arr++) {
-		struct nvmeibt_seg_active *seg_active = *seg_active_arr;
+	for (n_seg_active-- ; n_seg_active >= 0; n_seg_active--) {
+		seg_active = seg_active_arr[n_seg_active];
 		// The following is inside the loop since N_RUNNING_TASKS might change.
 		if (NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery) >= MAX_N_RUNNING_COLD_RECOVERY_PER_NODE) {
 			N_Tf(ki982nd, "Skipping, n_running_cold_recovery=@INT", NVMEIBT_GLOBAL_GET_N_TASKS_COUNTER(n_running_cold_recovery));
@@ -1551,6 +1553,7 @@ int nvmeibt_recovery_execute_stale_and_txid_rebuilds(struct nvmeibt_seg_active *
 {
 	int								n_launched_tasks = 0;
 	struct nvmeibt_praid_topo_ctx	*applied_praid_topo;
+	struct nvmeibt_seg_active 		*seg_active;
 
 	if (!is_stale_rebuild_enabled) /* For debugging only. Use toma rpc to set it */
 		goto out;
@@ -1559,8 +1562,8 @@ int nvmeibt_recovery_execute_stale_and_txid_rebuilds(struct nvmeibt_seg_active *
 		goto out;
 	}
 
-	for (; n_seg_active > 0; n_seg_active--, seg_active_arr++) {
-		struct nvmeibt_seg_active *seg_active = *seg_active_arr;
+	for (n_seg_active-- ; n_seg_active >= 0; n_seg_active--) {
+		seg_active = seg_active_arr[n_seg_active];
 		applied_praid_topo = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
 		if (!applied_praid_topo->is_activated ||
 			!nvmeibt_praid_is_client_sync_cmd_stable(applied_praid_topo->registrants_sync_cmd)) {
