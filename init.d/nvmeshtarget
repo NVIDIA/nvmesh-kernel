@@ -358,6 +358,10 @@ start() {
 		module_params="${module_params} iommu_enabled=Y"
 	fi
 
+	if [ "$EMULATE_4KPI" == "Yes" ] || [ "$EMULATE_4KPI" == "True" ]; then
+		module_params="${module_params} emulate_4kpi=Y"
+	fi
+
 	load_module nvmeibs $module_params
 	RETVAL=$?
 

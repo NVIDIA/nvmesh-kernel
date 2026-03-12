@@ -478,7 +478,8 @@ struct nvmeib_data_buffer {			// IO is transmitted clnt->srvr by this
 			u32 dma_pool	: 1;	// SGL memory is from DMA pool
 			u32 md_dma_pool : 1;	// MD memory is from DMA pool
 			u32 md_dummy	: 1;	// MD memory is from dummy area
-			u32 reserved 	: 26;
+			u32 data_copy	: 1;	// Data pages are copies in DMA pool (fake_4kpi write)
+			u32 reserved 	: 25;
 		};
 		u32 ctrl_flags;
 	};
@@ -1308,6 +1309,9 @@ struct nvmeib_local_disk {
 
 	/* Use pool of pages for dummy-metadata operations */
 	bool local_io_use_md_dma_pool;
+
+	/* Copy write data to DMA pool to avoid CRC race with application buffers */
+	bool local_io_use_data_copy;
 
 	size_t md_dma_pool_entry_sz;
 

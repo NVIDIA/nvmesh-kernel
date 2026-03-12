@@ -264,4 +264,6 @@ void nvmeibs_nvme_free_all_nvmeof(void);
 
 ssize_t fill_disks(void *dummy, char *buffer, size_t len);
 
+bool nvmeibs_disk_is_fake_4kpi(struct nvmeibs_disk_info *info);
+
 #endif

@@ -150,6 +150,44 @@ typedef u32 binje_t;
 
 #define NVMESH_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK (1ULL << 50)
 
+/*
+ * Fake 4K+PI: emulate 4096+metadata format on 512b-only drives
+ * using 9 x 512b physical sectors per virtual LBA.
+ */
+enum fake4kpi_integrity_type {
+	FAKE4KPI_INTEGRITY_NONE   = 0,
+	FAKE4KPI_INTEGRITY_CRC32C = 1,
+	FAKE4KPI_INTEGRITY_CRC32  = 2,
+	FAKE4KPI_INTEGRITY_XXHASH = 3,
+	FAKE4KPI_INTEGRITY_XOR    = 4,
+};
+
+#define FAKE4KPI_SECTORS_PER_LBA  9   /* 8 data + 1 metadata/padding */
+#define FAKE4KPI_DATA_SECTORS     8
+#define FAKE4KPI_VIRT_BLOCK_LEN   4096
+#define FAKE4KPI_PHYS_BLOCK_LEN   512
+#define FAKE4KPI_DEFAULT_MD_SIZE  8
+
+#define FAKE4KPI_MAGIC		"Fake4kPI"
+#define FAKE4KPI_MAGIC_LEN	8
+#define FAKE4KPI_VER_MAJOR	1
+#define FAKE4KPI_VER_MINOR	0
+
+struct fake4kpi_sector9_hdr {
+	u8  magic[FAKE4KPI_MAGIC_LEN];	/* "Fake4kPI" */
+	u8  ver_major;
+	u8  ver_minor;
+	u8  integrity_type;		/* enum fake4kpi_integrity_type */
+	u8  md_size;			/* metadata size in bytes */
+	u32 checksum;			/* integrity check value */
+	u64 vlba;			/* virtual LBA (4K+md unit) */
+	u64 plba;			/* physical LBA (512b sector) */
+	/* md bytes follow (md_size bytes starting after header) */
+} __attribute__((packed));
+#define FAKE4KPI_HDR_SIZE	sizeof(struct fake4kpi_sector9_hdr) /* 32 */
+#define FAKE4KPI_MD_OFFSET	FAKE4KPI_HDR_SIZE
+
+
 #define DISK_DATA_INIT_BYTE (0x00)
 #define DISK_MD_INIT_BYTE (0xff)
 #define DISK_MIN_MD_SIZE_BYTE (8)

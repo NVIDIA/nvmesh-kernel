@@ -342,6 +342,7 @@ int alloc_local_io_prpl_pool(struct nvmeibc_disk *disk)
 {
     /* Support 1 partial page at start and end */
     int max_prpl_pgs = (disk->max_request_size_bytes >> PAGE_SHIFT) + 2;
+    size_t alloc_sz;
     int rv;
     int cpu;
 
@@ -350,6 +351,12 @@ int alloc_local_io_prpl_pool(struct nvmeibc_disk *disk)
     /* TBD: Set this based on the disk dma_device */
     disk->local.prpl_eof_marker = ~(dma_addr_t)0;
 
+    /* When data_copy is enabled, double the PRPL allocation so the second
+     * half can store the virtual addresses of the pool buffers (needed
+     * because phys_to_virt doesn't work with IOMMU DMA addresses). */
+    alloc_sz = disk->local.local_io_use_data_copy ?
+               disk->local.max_prpl_sz * 2 : disk->local.max_prpl_sz;
+
     for_each_possible_cpu(cpu) {
         char pool_name[32];
         struct nvmeib_dma_percpu_pools *cpu_pool_ptr = per_cpu_ptr(disk->local.dma_pools, cpu);
@@ -357,7 +364,7 @@ int alloc_local_io_prpl_pool(struct nvmeibc_disk *disk)
         if ((rv = alloc_local_io_dma_pool(disk, pool_name,
                                             &cpu_pool_ptr->pools[NVMEIB_DMA_POOL_TYPE_PRPL].pool,
                                             NVMEIB_MAX_NORDDA_IO_REQ,
-                                            disk->local.max_prpl_sz,
+                                            alloc_sz,
                                             8, /* alignment requirement for PRPL */
                                             PAGE_SIZE)) < 0) {
             _NE(error_disk_alloc_local_io_prpl_pool, "alloc_local_io_dma_pool failed (@RV)", rv);
@@ -438,6 +445,37 @@ free_pools:
     __destroy_percpu_dma_pools(disk);
 
 out:	
+    return rv;
+}
+
+int alloc_local_io_data_pool(struct nvmeibc_disk *disk)
+{
+    int rv;
+    int cpu;
+
+    for_each_possible_cpu(cpu) {
+        char pool_name[32];
+        struct nvmeib_dma_percpu_pools *cpu_pool_ptr = per_cpu_ptr(disk->local.dma_pools, cpu);
+        snprintf(pool_name, sizeof(pool_name), "Local-IO Data-%d", cpu);
+        if ((rv = alloc_local_io_dma_pool(disk, pool_name,
+                                            &cpu_pool_ptr->pools[NVMEIB_DMA_POOL_TYPE_DATA].pool,
+                                            NVMEIB_MAX_NORDDA_IO_REQ,
+                                            PAGE_SIZE,
+                                            PAGE_SIZE,
+                                            0)) < 0) {
+            _NE(error_disk_alloc_local_io_data_pool, "alloc_local_io_dma_pool failed (@RV)", rv);
+            rv = -ENOMEM;
+            goto free_pools;
+        }
+    }
+
+    rv = 0;
+    goto out;
+
+free_pools:
+    __destroy_percpu_dma_pools(disk);
+
+out:
     return rv;
 }
 

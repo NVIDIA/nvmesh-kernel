@@ -232,6 +232,10 @@ bool nvmeibc_disk_local_io_use_md_dma_pool = true;
 module_param_named(local_io_use_md_dma_pool, nvmeibc_disk_local_io_use_md_dma_pool, bool, 0644);
 MODULE_PARM_DESC(local_io_use_md_dma_pool, "When a local IO request is made without providing space for the metadata buffer and the drive has metadata enabled, then this determines whether to use a preallocated pool of memory or to dynamically allocate memory per IO.");
 
+bool nvmeibc_disk_local_write_use_data_copy = false;
+module_param_named(local_write_use_data_copy, nvmeibc_disk_local_write_use_data_copy, bool, 0644);
+MODULE_PARM_DESC(local_write_use_data_copy, "Copy write data to a DMA pool buffer before submitting to the drive. Prevents CRC mismatches when application modifies buffers during DMA. Automatically enabled for fake_4kpi drives.");
+
 /* [NVMESH-3287]: Params for throttling target-nics query to management */
 uint nvmeibc_disk_tgt_nics_query_min_secs = 2;
 module_param_named(tgt_nics_query_min_secs, nvmeibc_disk_tgt_nics_query_min_secs, uint, 0644);
@@ -1738,6 +1742,9 @@ static void write_status_buf(struct write_status_buf_data *data)
 		}
 		if (disk->local.local_io_use_md_dma_pool) {
 			write_dma_pools_buf(disk, data, NVMEIB_DMA_POOL_TYPE_DUMMY_MD, "Dummy MD");
+		}
+		if (disk->local.local_io_use_data_copy) {
+			write_dma_pools_buf(disk, data, NVMEIB_DMA_POOL_TYPE_DATA, "Data Copy");
 		}
 	}
 
@@ -5933,6 +5940,8 @@ static int local_io_req_fill_prpl(struct nvmeibc_disk *disk, struct nvmeibc_bloc
 	struct scatterlist *sg;
 	enum dma_data_direction dma_dir = (req->op == NVMEIB_BLOCK_IO_OP_READ ||
 		req->op == NVMEIB_BLOCK_IO_OP_MD_READ) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
+	bool use_data_copy = disk->local.local_io_use_data_copy &&
+		dma_dir == DMA_TO_DEVICE;
 	
 	int rv;
 	if (!(req->req.buf_addrs = nvmeibc_percpu_dma_pool_alloc(disk->local.dma_pools, GFP_ATOMIC, &req->req.prpl_phys, NVMEIB_DMA_POOL_TYPE_PRPL, disk))) {
@@ -5955,7 +5964,26 @@ static int local_io_req_fill_prpl(struct nvmeibc_disk *disk, struct nvmeibc_bloc
 		}
 		for (j = 0; j < sg_n_pg && len_rem > 0 && sg_len_rem > 0; j++, sg_pg++, prpl_idx++) {
 			BUG_ON(&req->req.buf_addrs[prpl_idx] >= req->req.buf_addrs + disk->local.max_prpl_sz);
-			if (req->ndb->sg_mapped) {
+			if (use_data_copy) {
+				void *pool_virt;
+				dma_addr_t pool_dma;
+				void **virt_ptrs = (void **)((char *)req->req.buf_addrs + disk->local.max_prpl_sz);
+				pool_virt = nvmeibc_percpu_dma_pool_alloc(
+					disk->local.dma_pools, GFP_ATOMIC,
+					&pool_dma, NVMEIB_DMA_POOL_TYPE_DATA,
+					disk);
+				if (!pool_virt) {
+					_NE(err_disk_execute_io_local_cmd_io_data_copy_oom,
+					    "@DISK_STR - Failed to alloc data copy for req @REQ",
+					    di->disk_id, req);
+					req->req.buf_addrs[prpl_idx] = disk->local.prpl_eof_marker;
+					rv = -ENOMEM;
+					goto end_map_prpl;
+				}
+				memcpy(pool_virt, page_address(sg_pg), PAGE_SIZE);
+				req->req.buf_addrs[prpl_idx] = pool_dma;
+				virt_ptrs[prpl_idx] = pool_virt;
+			} else if (req->ndb->sg_mapped) {
 				/* The sg has already been mapped by execute_io_local_md_alloc_sg so it is a bug if dma-address is 0.
 				 * It is also a bug if the dma-address is not the top of a page */
 				BUG_ON(!sg_dma_address(sg) || (sg_dma_address(sg) & ~PAGE_MASK));
@@ -5989,6 +6017,8 @@ static int local_io_req_fill_prpl(struct nvmeibc_disk *disk, struct nvmeibc_bloc
 			break;
 	}
 	BUG_ON(len_rem != 0);
+	if (use_data_copy)
+		req->ndb->data_copy = 1;
 	/* Mark the end of the PRPL */
 	if (&req->req.buf_addrs[prpl_idx] < req->req.buf_addrs + disk->local.max_prpl_sz)
 		req->req.buf_addrs[prpl_idx] = disk->local.prpl_eof_marker;
@@ -6010,7 +6040,19 @@ static int local_io_req_fill_prpl(struct nvmeibc_disk *disk, struct nvmeibc_bloc
 
 end_map_prpl:
 	/* Unwind */
-	if (!req->ndb->sg_mapped) {
+	if (use_data_copy) {
+		int submit_cpu = smp_processor_id();
+		int idx;
+		void **virt_ptrs = (void **)((char *)req->req.buf_addrs + disk->local.max_prpl_sz);
+		for (idx = (int)prpl_idx - 1; idx >= 0; idx--) {
+			if (req->req.buf_addrs[idx] != disk->local.prpl_eof_marker) {
+				nvmeibc_percpu_dma_pool_free(disk->local.dma_pools,
+					virt_ptrs[idx],
+					req->req.buf_addrs[idx],
+					NVMEIB_DMA_POOL_TYPE_DATA, submit_cpu);
+			}
+		}
+	} else if (!req->ndb->sg_mapped) {
 		for (prpl_idx--; prpl_idx > 0; prpl_idx--)
 			dma_unmap_page(dma_dev, req->req.buf_addrs[prpl_idx], PAGE_SIZE, dma_dir);
 	}
@@ -6036,14 +6078,24 @@ static void local_io_req_free_prpl(struct nvmeibc_disk *disk, struct nvmeibc_dis
 		nvme_req->mtdt_dma_ptr = 0;
 	}
 
-	if (!block_cmd->reqs[0].ndb->sg_mapped) {
+	if (block_cmd->reqs[0].ndb->data_copy) {
+		int submit_cpu = block_cmd->reqs[0].submit_cpu;
+		void **virt_ptrs = (void **)((char *)nvme_req->buf_addrs + disk->local.max_prpl_sz);
+		for (i = 0; &nvme_req->buf_addrs[i] < nvme_req->buf_addrs + disk->local.max_prpl_sz &&
+			nvme_req->buf_addrs[i] != disk->local.prpl_eof_marker; i++) {
+			nvmeibc_percpu_dma_pool_free(disk->local.dma_pools,
+				virt_ptrs[i],
+				nvme_req->buf_addrs[i],
+				NVMEIB_DMA_POOL_TYPE_DATA, submit_cpu);
+		}
+		block_cmd->reqs[0].ndb->data_copy = 0;
+	} else if (!block_cmd->reqs[0].ndb->sg_mapped) {
 		for (i = 0; &nvme_req->buf_addrs[i] < nvme_req->buf_addrs + disk->local.max_prpl_sz &&
 			nvme_req->buf_addrs[i] != disk->local.prpl_eof_marker; i++) {
 			dma_unmap_page(dma_dev, nvme_req->buf_addrs[i], PAGE_SIZE, dma_dir);
 		}
 	}
 
-	/* Dec page refcount */
 	nvmeibc_percpu_dma_pool_free(disk->local.dma_pools, nvme_req->buf_addrs, nvme_req->prpl_phys, NVMEIB_DMA_POOL_TYPE_PRPL, block_cmd->reqs[0].submit_cpu);
 	nvme_req->buf_addrs = NULL;
 	nvme_req->prpl_phys = 0;
@@ -8571,6 +8623,9 @@ static int discover(struct nvmeibc_disk *disk, bool is_rediscover)
 			goto out;
 		}
 
+		if (nvmeibc_disk_local_write_use_data_copy && !disk->local.external)
+			disk->local.local_io_use_data_copy = true;
+
 		/* Use a prpl for local-io (instead of sgl). Solves issues with Intel IOMMU on older kernels. Not relevant for external drives. */
 		disk->local.local_io_use_prpl = nvmeibc_disk_local_io_use_prpl && !disk->local.external;
 		if (disk->local.local_io_use_prpl) {
@@ -8587,6 +8642,10 @@ static int discover(struct nvmeibc_disk *disk, bool is_rediscover)
 		disk->local.local_io_use_md_dma_pool = nvmeibc_disk_local_io_use_md_dma_pool && disk->md_size > 0 && !disk->md_extd && !disk->local.external;
 		if (disk->local.local_io_use_md_dma_pool) {
 			if ((rv = alloc_local_io_md_dma_pool(disk)) < 0)
+				goto out;
+		}
+		if (disk->local.local_io_use_data_copy) {
+			if ((rv = alloc_local_io_data_pool(disk)) < 0)
 				goto out;
 		}
 		if (disk->md_size > 0 && !disk->md_extd) {

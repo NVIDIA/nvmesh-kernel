@@ -21,7 +21,8 @@ enum nvmeib_dma_pool_type {
 	NVMEIB_DMA_POOL_TYPE_PRPL = 0,
 	NVMEIB_DMA_POOL_TYPE_DUMMY_MD = 1,
 	NVMEIB_DMA_POOL_TYPE_RD_MD = 2,
-	NVMEIB_DMA_POOL_TYPE_MAX =	3,
+	NVMEIB_DMA_POOL_TYPE_DATA = 3,
+	NVMEIB_DMA_POOL_TYPE_MAX = 4,
 };
 
 struct nvmeib_nvme_req_dma_pool_info {
@@ -83,5 +84,6 @@ void free_percpu_pools(struct nvmeibc_disk *disk, struct nvmeib_dma_percpu_pools
 int alloc_local_io_prpl_pool(struct nvmeibc_disk *disk);
 int alloc_local_io_rd_md_pool(struct nvmeibc_disk *disk);
 int alloc_local_io_md_dma_pool(struct nvmeibc_disk *disk);
+int alloc_local_io_data_pool(struct nvmeibc_disk *disk);
 
 #endif

@@ -280,6 +280,7 @@ static int ldisk_register_fc(struct nvmeibs_client *cl, void *arg)
 	ldisk->md_extd = cl->di->mtdt_extd;
 	ldisk->max_request_size = cl->di->max_request_size;
 	ldisk->external = !!cl->di->external;
+	ldisk->local_io_use_data_copy = nvmeibs_disk_is_fake_4kpi(cl->di);
 	rv = 0;
 
 	goto out;
