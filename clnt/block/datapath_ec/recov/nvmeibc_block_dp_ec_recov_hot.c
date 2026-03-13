@@ -1093,7 +1093,7 @@ static void __nvmeibc_free_jrnl_ents_request_pet_describe(struct htr_ctx *h, int
 		&h->so->o->journal,
 		"free_jrnl_ents.request(sgmnt_idx=%hhu, blkset_slba=%llu, blkset_num=%llu, pass2toma=%hhu, lock_id=0x%llx<union nvmeib_lock_id>)",
 		numeric_downcast(u8, si), free_ents_comp->blkset_slba, free_ents_comp->blkset_num,
-		free_ents_comp->pass2toma, free_ents_comp->lock_ent);
+		(u8)free_ents_comp->pass2toma, free_ents_comp->lock_ent);
 }
 
 static void __nvmeibc_send_recovered_response_pet_describe(struct htr_ctx *h, int si, int rv)
@@ -1103,12 +1103,12 @@ static void __nvmeibc_send_recovered_response_pet_describe(struct htr_ctx *h, in
 	if (h->tx_jentries[si].is_valid) {
 		NVMEIBC_IO_PET_MSG_NORM(
 			&h->so->o->journal,
-			"free_jrnl_ents.response(sgmnt_idx=%hhu, status=%hhu) = %d",
+			"free_jrnl_ents.response(sgmnt_idx=%hhu, status=%d) = %d",
 			numeric_downcast(u8, si), gen_cmd->rsp.br.status, rv);
 	} else {
 		NVMEIBC_IO_PET_MSG_NORM(
 			&h->so->o->journal,
-			"send_recovered_blkset.response(sgmnt_idx=%hhu, status=%hhu) = %d",
+			"send_recovered_blkset.response(sgmnt_idx=%hhu, status=%d) = %d",
 			numeric_downcast(u8, si), gen_cmd->rsp.br.status, rv);
 	}
 }

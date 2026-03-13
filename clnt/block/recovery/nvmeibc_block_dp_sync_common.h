@@ -386,7 +386,7 @@ static inline int dp_sync_cmd_generic_cb(struct nvmeibc_block_command *cmd)
 			NVMEIBC_IO_PET_MSG_NORM(
 				&cmd->o->journal,
 				"sync_cmd.response(op=0x%hhu<enum nvmeib_block_io_op>, seg_idx=%hhu) = %d",
-				cmd->iocmd->reqs1.op, numeric_downcast(u8, nvmeibc_dp_get_sgmnt_idx_from_ds(c0[i].ds)),
+				(u8)cmd->iocmd->reqs1.op, numeric_downcast(u8, nvmeibc_dp_get_sgmnt_idx_from_ds(c0[i].ds)),
 				c0[i].o_rv);
 		}
 	}

@@ -118,7 +118,7 @@ static inline void __jdr_on_object_done(struct jdr** jdr)
 #define UNIQUE_NAME(base) CONCATENATE(base, __COUNTER__)
 
 #define jdr_object_scope(jdr_inst, name) \
-__attribute__((cleanup(__jdr_on_object_done))) struct jdr* UNIQUE_NAME(jdr_object_scope) = (jdr_inst)->ops.object((jdr_inst), (name))
+__attribute__((cleanup(__jdr_on_object_done), unused)) struct jdr* UNIQUE_NAME(jdr_object_scope) = (jdr_inst)->ops.object((jdr_inst), (name))
 
 static inline void __jdr_on_array_done(struct jdr** jdr)
 {
@@ -128,7 +128,7 @@ static inline void __jdr_on_array_done(struct jdr** jdr)
 }
 
 #define jdr_array_scope(jdr_inst, name) \
-__attribute__((cleanup(__jdr_on_array_done))) struct jdr* UNIQUE_NAME(jdr_array_scope) = (jdr_inst)->ops.array((jdr_inst), (name))
+__attribute__((cleanup(__jdr_on_array_done), unused)) struct jdr* UNIQUE_NAME(jdr_array_scope) = (jdr_inst)->ops.array((jdr_inst), (name))
 
 #define jdr_select_writer(jdr_inst, value)														\
 ({																								\
