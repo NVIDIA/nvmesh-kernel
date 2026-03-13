@@ -123,6 +123,7 @@ target_scripts_transfer_list="init.d/nvmeshtarget \
 			toma/toma.d/nvmesh_gcp.rpc	\
 			toma/toma.d/nvmesh_gfn.rpc \
 			toma/toma.d/nvmesh_xpnd_jour.rpc \
+			toma/toma.d/nvmesh_virt.rpc \
 			examples/auto_takeover_drives_spec_example"
 
 # Only include static files here (not compiled ones).

@@ -1,0 +1,1 @@
+raft_leader_heartbeat_timeout_usec=1000000
