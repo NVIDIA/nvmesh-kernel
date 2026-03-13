@@ -81,13 +81,14 @@ static int qthread_func(void *arg)
 	long loop_start_jif, loop_dt, now, work_idx;
 	unsigned long flags;
 	void (*entry_fn)(struct nvmeib_qent *);
+	bool need_resched;
 
 	NFIN;
+	loop_start_jif = jiffies;
+	need_resched = false;
 	while (!kthread_should_stop()) {
 		wait_event_interruptible(q->waitq,
 			!list_empty(&q->list) || kthread_should_stop());
-		loop_start_jif = jiffies; /* we dont catch the corner case where right
-		before we decided to wait/sleep (list was empty) new work was added */
 		spin_lock_irqsave(&q->lock, flags);
 		q->busy = true;
 		while (!list_empty(&q->list)) {
@@ -112,19 +113,28 @@ static int qthread_func(void *arg)
 			now = jiffies;
 			work_dt = now - work_start_jif;
 			loop_dt = now - loop_start_jif;
-			if (work_dt >= MAX_WQ_PROCESSING_TIME_JIF ||
-				loop_dt >= MAX_WQ_PROCESSING_TIME_JIF ) {
+			if (work_dt >= nvmeib_wq_max_processing_time) {
 				NVMEIB_Q_WARN(q, trace_1_nvmeib_q_qthread_func,
 					"wq processsing time exceeded, loop_dt=@DURATION ms, "
 					"work @ENTRY_FN (@ENTRY), work_dt=@DURATION ms",
 				   loop_dt, entry_fn, entry, work_dt);
-				cond_resched();
-				loop_start_jif = jiffies;
+				need_resched = true;
 			}
+
 			NVMEIB_Q_TRACE(q, trace_nvmeib_q_qthread_func_end,
 						   "<-- work-idx=@LONG, work-func='@CALLBACK' "
 						   "(work_dt=@DURATION ms, loop_dt=@DURATION ms)",
 						   work_idx, entry_fn, work_dt, loop_dt);
+
+			if (loop_dt >= nvmeib_wq_max_processing_time)
+				need_resched = true;
+
+			if (need_resched) {
+				cond_resched();
+				loop_start_jif = jiffies;
+				need_resched = false;
+			}
+
 			spin_lock_irqsave(&q->lock, flags);
 			q->current_entry = NULL;
 		}
