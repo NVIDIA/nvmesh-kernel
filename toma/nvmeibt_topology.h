@@ -86,7 +86,23 @@ struct nvmeibt_topology;
 
 #define RAFT_LONG_MSG_TEST_TOTAL_STR_MAX_LEN		(8 * 1024 * 1024)
 #define	RAFT_LONG_MSG_TEST_SIGNATURE 0x7254535454535472 // '0x72 TSTTST 0x72'
-#define NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX 10
+/*
+ * Incremental window sizes for different buffer types.
+ *
+ * We recommend TOPO window to be larger than CONFIG windows, as topo changes more frequently, and every config change must trigger topo change.
+ *
+ * On the other hand, CONFIG windows larger than TOPO window will not take effect, as complete topo will force complete configs to be sent.
+ */
+#define NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX 10
+#define NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX 3
+#define NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET 3
+#define NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO 3
+
+/* Compile-time check to enforce TOPO window > CONFIG/KAFKA windows */
+_Static_assert(NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX,
+               "TOPO window must be larger than TOPO_CONFIG window (CONFIG changes trigger TOPO changes)");
+_Static_assert(NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX > NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET,
+               "TOPO window must be larger than KAFKA_MGMT_CONFIG window (KAFKA changes trigger TOPO changes)");
 struct raft_long_msg_test {
     long long		appendix_len;
     long long		appendix_signature;

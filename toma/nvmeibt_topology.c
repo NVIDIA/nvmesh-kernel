@@ -1052,11 +1052,12 @@ static inline bool omit_praid_in_serialized_topo(struct nvmeibt_praid *praid, bo
 {
 	bool omit_this_praid = (!nvmeibt_praid_is_serialized(praid) || NVMEIBT_OBJ_IS_MARKED_OUTDATED(nvmeibt_praid_get_blkdev(praid)) || nvmeibt_praid_is_being_deleted(praid));
 	if (is_wire_buf_incremental) {
-		// If we are generating an incremental topo, in addition to conditions above, we also need to omit praids that were not updated in the past NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX topology versions.
+		// If we are generating an incremental topo, in addition to conditions above, we also need to omit praids that were not updated in the past NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX topology versions.
 		// Incremental topo doesn't include outdated praids either. They on followers will be garbage collected when followers receive full topo config.
-		int64_t min_version = RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated);
-		min_version = min_version > NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX ? min_version - NVMEIBT_INCREMENTAL_TOPO_IDX_DIFF_MAX : 0;
-		omit_this_praid = omit_this_praid || praid->praid_leader.baseline_praid_lot.topo_ctx.topo_idx_updated < min_version;
+		// Use lower 32 bits for comparison - they are monotonic across term changes
+		int64_t inc_window_start = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated));
+		inc_window_start = inc_window_start > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX? inc_window_start - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0;
+		omit_this_praid = omit_this_praid || (extract_lower_32_bits_idx(praid->praid_leader.baseline_praid_lot.topo_ctx.topo_idx_updated) < inc_window_start);
 	}
 	return omit_this_praid;
 }
