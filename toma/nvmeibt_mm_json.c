@@ -106,6 +106,7 @@ static void _mm_praid_from_json(struct mm_praid_conf *praid, struct mm_json_elem
 		JSON_ASSIGN_VALIDATE_STR_OPTIONAL(28jf0kx, "eyecatcher", "PRD", kv->value->str);	// Exists in persistence->JSON
 		JSON_ASSIGN_OPTIONAL(28jf0kx, "zone");
 		JSON_ASSIGN_PLAIN_OPTIONAL(fzwmqug, "version", praid->version, kv->value->num);	// Exists in persistence->JSON
+		JSON_ASSIGN_PLAIN_OPTIONAL(tk9n3md, "topo_config_idx_updated", praid->topo_config_idx_updated, kv->value->num);	// Topo config idx when praid was last updated
 		JSON_LOOP_ITERATION_END(4vys872, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(iah48fw);
@@ -716,7 +717,8 @@ struct _packed_mm_praid_conf {
 	uint8_t stripeIndex;					// 7
 	uint8_t reserved_1;						// 8
 	uint32_t version;						// 12
-	char	filler_1[20];					// 32
+	char	filler_1[12];					// 24
+	int64_t	topo_config_idx_updated;		// 32
 	union nvmeib_uuid uuid;					// 48
 	char	align[0] __attribute__((aligned(16)));
 } __attribute__((__packed__, aligned(16)));
@@ -820,6 +822,7 @@ static uint16_t nvmeibt_praid_convert_config_le_be(void *p, struct mm_praid_conf
 	SWAP8_FIELD(activated);
 	SWAP8_FIELD(stripeIndex);
 	SWAP_UUID_FIELD(uuid);
+	SWAP64_FIELD(topo_config_idx_updated);
 
 	return sizeof(*dst);
 }
@@ -882,6 +885,7 @@ uint16_t nvmeibt_raft_member_conf_convert_le_be(struct mm_raft_member_conf *dst,
 	MEMCPY_FIELD(dst->hostname, src->hostname);
 	dst->uuid = swap_uuid_LE_BE(&(src->uuid));
 	dst->kafka_offset = LE_SWAP64(src->kafka_offset);
+	dst->raft_members_seq_no_updated = LE_SWAP64(src->raft_members_seq_no_updated);
 	return sizeof(*dst);
 }
 
@@ -975,8 +979,8 @@ void serialize_praid_conf_to_JSON(struct mm_praid_conf *p, struct nvmeibt_Str *J
 		goto out;
 	}
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&(p->uuid));
-	nvmeibt_Str_sprintf(JSON_output, "\n\t\t\t{\"eyecatcher\":\"%.4s\", \"version\":%u, \"activated\":%u, \"stripeIndex\":%u, \"zone\":\"%lld\", \"uuid\":\"%s\", \"diskSegments\":[",
-						p->eyecatcher, p->version, p->activated, p->stripeIndex, nvmeibt_kafka_get_kafka_mgmt_zone_number(), urn_uuid.str);
+	nvmeibt_Str_sprintf(JSON_output, "\n\t\t\t{\"eyecatcher\":\"%.4s\", \"version\":%u, \"activated\":%u, \"stripeIndex\":%u, \"topo_config_idx_updated\":%lld, \"zone\":\"%lld\", \"uuid\":\"%s\", \"diskSegments\":[",
+						p->eyecatcher, p->version, p->activated, p->stripeIndex, (long long)p->topo_config_idx_updated, nvmeibt_kafka_get_kafka_mgmt_zone_number(), urn_uuid.str);
 out:;
 }
 
@@ -1490,6 +1494,7 @@ int parse_raft_member_JSON(struct mm_json_dict *dict)
 	int							rv = 0;
 	int64_t						n = -1;
 	int64_t						kafka_offset = -1;
+	int64_t						raft_members_seq_no_updated = -1;
 	char						hostname[NVMEIB_HOST_NAME_LEN];
 	char						eyecatcher[5];
 	union nvmeib_uuid			uuid = nvmeib_uuid_null_val;
@@ -1501,6 +1506,7 @@ int parse_raft_member_JSON(struct mm_json_dict *dict)
 		JSON_ASSIGN_PLAIN(rj3kis5, "n", n, kv->value->num);
 		JSON_ASSIGN_STR(ujksl3n,   "eyecatcher", eyecatcher, kv->value->str);
 		JSON_ASSIGN_PLAIN(a7bhdtq, "kafka_offset", kafka_offset, kv->value->num);
+		JSON_ASSIGN_PLAIN(tyu83ks, "raft_members_seq_no_updated", raft_members_seq_no_updated, kv->value->num);
 		JSON_ASSIGN_STR(5bh39l0,   "hostname", hostname, kv->value->str);
 		JSON_ASSIGN_PLAIN(uhspwb5, "uuid", uuid, *GET_UNION_UUID_OF_URN_UUID_STR(kv->value->str));
 		JSON_LOOP_ITERATION_END(n4uajfo, kv->key);
@@ -1519,7 +1525,7 @@ int parse_raft_member_JSON(struct mm_json_dict *dict)
 
 		nvmeibt_node_add(&dummy_node_conf, CONFIG_TAG_OUTDATED + 2);
 	}
-	nvmeibt_raft_add_member(hostname, n, &uuid, 0, kafka_offset, CONFIG_TAG_OUTDATED + 2);
+	nvmeibt_raft_add_member(hostname, n, &uuid, 0, kafka_offset, raft_members_seq_no_updated, CONFIG_TAG_OUTDATED + 2);
 	NFOUT;
 	return rv;
 }

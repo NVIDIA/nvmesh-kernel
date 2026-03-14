@@ -45,14 +45,15 @@ struct mm_praid_conf {
 	char	filler_1[5];				// 16
 	union nvmeib_uuid uuid;				// 32
 	struct mm_segment_conf *segments;	// 40
-	char	filler_2[8];				// 48
+	int64_t	topo_config_idx_updated;	// 48
 	char	align[0] __attribute__((aligned(16)));
 } __attribute__((__packed__, aligned(16)));
 
 struct mm_chunk_conf {
 	char eyecatcher[4];					// 4
 	uint8_t num_praids;					// 5
-	char	filler_1[3];				// 8
+	uint8_t num_praids_to_send;			// 6	// Used only for leader to calculate incremental topo_config
+	char	filler_1[2];				// 8
 	uint64_t vlbs;						// 16
 	uint64_t vlbe;						// 24
 	struct mm_praid_conf *praids;		// 32
@@ -66,7 +67,7 @@ struct mm_vol_conf {
 	uint8_t num_chunks;					// 6
 	uint16_t blockSize;					// 8
 	uint32_t version;					// 12
-	char	filler_0;					// 13
+	char filler_0;						// 13
 	char name[26];						// 39
 	char action;						// 40
 	char res_type;						// 41	// Obsolete Elect
@@ -129,7 +130,8 @@ struct mm_raft_member_conf {	// Both wire-packed and serialized
 	char		eyecatcher[4];						// 4
 	int64_t		kafka_offset;						// 12
 	char		hostname[NVMEIB_HOST_NAME_LEN];		// 76
-	char		filler_1[20];						// 96
+	char		filler_1[12];						// 88
+	int64_t		raft_members_seq_no_updated;		// 96 The kafka seq_no in which this member was added
 	union		nvmeib_uuid uuid;					// 112
 	char	align[0] __attribute__((aligned(16)));
 } __attribute__((__packed__, aligned(16)));

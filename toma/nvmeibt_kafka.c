@@ -2447,7 +2447,7 @@ static int toma_incremental_target_update_handler(struct name_and_uuid_params_ct
 	}
 	// N_Tf(cgayh2n, "hostname=@STR uuid=@UUID_LE n_members_total_before_add_del=@INT targets_updates_sequence=@LLD", add_del_member_params->hostname, &(add_del_member_params->uuid), add_del_member_params->n_members_total_before_add_del, name_and_uuid_params->targets_updates_sequence);
 	if (event_type == KAFKA_EVENT_TYPE_TARGET_ADD) {
-		nvmeibt_raft_add_member(add_del_member_params->hostname, add_del_member_params->n_members_total_before_add_del, &(add_del_member_params->uuid), 1, kafka_offset, -1);
+		nvmeibt_raft_add_member(add_del_member_params->hostname, add_del_member_params->n_members_total_before_add_del, &(add_del_member_params->uuid), 1, kafka_offset, add_del_member_params->targets_updates_sequence, -1);
 	} else if (event_type == KAFKA_EVENT_TYPE_TARGET_DEL) {
 		nvmeibt_raft_del_member(add_del_member_params->hostname, add_del_member_params->n_members_total_before_add_del, &(add_del_member_params->uuid), 1, kafka_offset);
 	} else {

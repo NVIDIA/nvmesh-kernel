@@ -812,6 +812,7 @@ static void leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_b
 	praid_conf->activated = f->was_ever_activated;
 	praid_conf->stripeIndex = praid->praid_mgmt.stripe_idx;
 	praid_conf->version = f->version;
+	praid_conf->topo_config_idx_updated = f->topo_config_idx_updated; // Copy the topo_config_idx_updated from runtime structure.
 
 	n_segs = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
 	praid_conf->num_segments = n_segs;
@@ -2380,6 +2381,7 @@ static void build_praid_from_config(struct nvmeibt_praid_config *f, struct mm_pr
 	}
 	f->lock_scheme_type = vol->lockServer_type;
 	f->redundancy = vol->lockServer_maxNOwners - 1;
+	f->topo_config_idx_updated = conf->topo_config_idx_updated;	// Transfer TOPO_CONFIG version from persistence
 }
 
 enum nvmeibt_add_rv nvmeibt_praid_add(struct mm_praid_conf *conf,
@@ -2969,6 +2971,9 @@ bool nvmeibt_praid_upd_calculated_lot_from_praid_mgmt(struct nvmeibt_praid *prai
 		N_Tf(i989ie4, "Conf corrupted, don't update ! conf=@INT", calculated_praid_lot->from_config.version);
 		goto out;
 	}
+
+	// This praid's config is changing - it will be part of the next TOPO_CONFIG commit
+	praid->from_config.topo_config_idx_updated = RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit) + 1;
 
 	calculated_praid_lot->n_topo_seg_lots = praid_mgmt->n_topo_segs;
 	calculated_praid_lot->from_config = praid->from_config;

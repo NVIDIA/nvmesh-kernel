@@ -1048,6 +1048,7 @@ static void nvmeibt_raft_leader_generate_member_wire_from_member(struct nvmeibt_
 	nvmeibt_strlcpy(tmp_conf.hostname, nvmeibt_raft_member_name(member), sizeof(tmp_conf.hostname));
 	tmp_conf.uuid = *nvmeibt_raft_member_id(member);
 	tmp_conf.kafka_offset = member->kafka_offset;
+	tmp_conf.raft_members_seq_no_updated = member->raft_members_seq_no_updated;
 	nvmeibt_raft_member_conf_convert_le_be(&(member->this_member_leader_serialized_wire_buf), &tmp_conf);
 	NFOUT;
 }
@@ -1130,7 +1131,7 @@ static void convert_to_follower_if_majority_is_lost(void)
 		raft_convert_to_follower(nvmeibt_raft_get_voted_for_uuid(), raft_get_leader_node_uuid());
 }
 
-void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_add_fr_mgmt, int64_t kafka_offset, int config_tag)
+void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_add_fr_mgmt, int64_t kafka_offset, int64_t raft_members_seq_no_updated, int config_tag)
 {
 	struct nvmeibt_raft_member		*member;
 	bool							is_me;
@@ -1170,6 +1171,7 @@ void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add
 	member->uuid = *uuid;
 	member->urn_uuid = nvmeibt_union_uuid_to_urn_uuid(uuid);
 	member->kafka_offset = kafka_offset;
+	member->raft_members_seq_no_updated = raft_members_seq_no_updated;
 	//
 	nvmeib_hash_add_uuid(my_raft_global.raft_members_hash_by_uuid, nvmeibt_raft_member_id(member), member);
 	(my_raft_global.n_raft_members)++;
@@ -1293,7 +1295,7 @@ int nvmeibt_raft_ignore_member(char *hostname)
 
 #define DUMP_RAFT_MEMBER_CONF(name, _i, _raft_member)	({																										\
 	struct mm_raft_member_conf		*mmb = _raft_member;																										\
-	N_Tf(name, "member[@INT]: eyecatcher=@STR hostname=@STR uuid=@UUID_LE @KAFKA_OFST", _i, mmb->eyecatcher, mmb->hostname, &(mmb->uuid), mmb->kafka_offset);	\
+	N_Tf(name, "member[@INT]: eyecatcher=@STR hostname=@STR uuid=@UUID_LE @KAFKA_OFST seq_no_updated=@LD", _i, mmb->eyecatcher, mmb->hostname, &(mmb->uuid), mmb->kafka_offset, mmb->raft_members_seq_no_updated);	\
 })
 
 static void serialize_tlv_JSON(struct nvmeibt_Str *JSON_output, char *tlv_name, struct nvmeibt_wire_type_len_value *tlv)
@@ -1316,8 +1318,8 @@ void serialize_raft_member_json(struct nvmeibt_Str *JSON_output, int i, struct m
 	}
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&(member_conf->uuid));
 	nvmeibt_Str_sprintf(JSON_output,
-						"\n\t{\"n\":\"%d\", \"eyecatcher\":\"%.4s\", \"kafka_offset\":%lld, \"hostname\":\"%s\", \"uuid\":\"%s\"}",
-						i, member_conf->eyecatcher, member_conf->kafka_offset, nvmeibt_escape_special_characters(member_conf->hostname).s, urn_uuid.str);
+						"\n\t{\"n\":\"%d\", \"eyecatcher\":\"%.4s\", \"kafka_offset\":%lld, \"raft_members_seq_no_updated\":%lld, \"hostname\":\"%s\", \"uuid\":\"%s\"}",
+						i, member_conf->eyecatcher, member_conf->kafka_offset, member_conf->raft_members_seq_no_updated, nvmeibt_escape_special_characters(member_conf->hostname).s, urn_uuid.str);
 out:;
 }
 
@@ -1373,7 +1375,7 @@ void nvmeibt_raft_align_members_with_committed_wire_buf(struct nvmeibt_Str *JSON
 		DUMP_RAFT_MEMBER_CONF(cbjha2, i, &member_conf);
 		serialize_raft_member_json(JSON_output, i, &member_conf);
 		serialize_end_of_array_obj_to_JSON(i, n_members_in_wire_buf, 0, JSON_output);
-		nvmeibt_raft_add_member(member_conf.hostname, i, &(member_conf.uuid), 0, kafka_offset, config_tag);
+		nvmeibt_raft_add_member(member_conf.hostname, i, &(member_conf.uuid), 0, kafka_offset, member_conf.raft_members_seq_no_updated, config_tag);
 	}
 	// Remove the members that were not in the members_wire_buf
 	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
@@ -3680,6 +3682,14 @@ int nvmeibt_raft_one_time_init(void)
 	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_topo_config_incremental));
 	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental));
 	NVMEIBT_BUF_INIT(&(my_raft_global.leader_to_commit_wire_raft_members_incremental));
+	my_raft_global.follower_to_commit_persist_and_wire_buf_full = NULL;
+	my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete = NULL;
+	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete = NULL;
+	my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental = NULL;
+	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete = NULL;
+	my_raft_global.follower_to_leader_wire_buf = NULL;
+	my_raft_global.last_delete_kafka_mgmt_config_offset = nvmeibt_offset_and_idx_uninitialized;
+	my_raft_global.last_delete_raft_members_kafka_offset = nvmeibt_offset_and_idx_uninitialized;
 	if (nvmeibt_recursive_mkdir(NVMEIBT_PERSISTENCY_CACHE_DIR, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0) {
 		rv = -1;
 		goto out;

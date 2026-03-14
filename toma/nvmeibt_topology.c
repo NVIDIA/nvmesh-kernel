@@ -1579,6 +1579,14 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(vbnxau7, RAFT_MEMBERS_SEQ_NO, leader_calculated, nvmeibt_offset_and_idx_uninitialized);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(vbnxmr5, RAFT_MEMBERS_SEQ_NO, leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed));
 	//
+	// Initialize last delete based on new leader's current state
+	// This forces followers with older views to get complete refresh
+	nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated);
+	nvmeibt_raft_get_my_raft()->last_delete_raft_members_kafka_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_calculated);
+	N_Tf(init_last_delete_offsets, "New leader init for incremental wire buf: last_delete_kafka_mgmt_config=@INT64_TD last_delete_members_kafka=@INT64_TD",
+		 nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset,
+		 nvmeibt_raft_get_my_raft()->last_delete_raft_members_kafka_offset);
+	//
 	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(praid))
 			N_Tf(imfjj2, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
@@ -2763,6 +2771,7 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_TOMA_FREE(c5c84k4, my_raft->leader_to_commit_persist_and_wire_buf_with_conf_complete);
 	NNVMEIBT_TOMA_FREE(c7colp2, my_raft->leader_to_commit_persist_and_wire_buf_topo_only_complete);
 	NNVMEIBT_TOMA_FREE(s8gfds2, my_raft->leader_to_commit_persist_and_wire_buf_with_conf_incremental);
+	NNVMEIBT_TOMA_FREE(c7colp4, my_raft->leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete);
 	NNVMEIBT_BM_FREE(y3mzpuq, my_raft->leader_to_commit_wire_topo_complete.data_buf);
 	NNVMEIBT_BM_FREE(u76yvw2, my_raft->leader_to_commit_wire_topo_config_complete.data_buf);
 	NNVMEIBT_BM_FREE(vivmfw0, my_raft->leader_to_commit_wire_kafka_mgmt_config_complete.data_buf);

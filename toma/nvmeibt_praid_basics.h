@@ -57,6 +57,7 @@ struct nvmeibt_praid_config {
 	int 						redundancy;
 	lock_server_type_e 			lock_scheme_type;
 	BOOL						was_ever_activated;
+	int64_t						topo_config_idx_updated;	// TOPO_CONFIG version when this praid config was last modified
 };
 
 struct nvmeibt_praid_serialized_topo {

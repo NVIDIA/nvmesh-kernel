@@ -66,6 +66,7 @@ struct nvmeibt_raft_member {
 	struct nvmeibt_node						*its_node;
 	struct nvmeibt_disk						*disks_leader[NVMEIBT_MAX_N_DISKS];
 	int64_t									kafka_offset;
+	int64_t									raft_members_seq_no_updated;				// The kafka seq_no in which this member was added
 	int										n_disks_leader;
 	struct mm_raft_member_conf				this_member_leader_serialized_wire_buf;
 	unsigned int							toma_software_version;
@@ -79,6 +80,7 @@ struct nvmeibt_raft_member {
 	BOOL									is_alive_for_topo;
 	struct timespec							is_alive_for_topo_start_timespec;
 	BOOL									is_ignored;
+	BOOL									is_serialized_in_incremental_raft_members_merge;
 	int										config_tag;
 	//
 //	struct xdlist							members_link;
@@ -145,6 +147,7 @@ struct nvmeibt_raft_ctx {
 	// - leader_to_commit_persist_and_wire_buf_with_conf_complete
 	// - leader_to_commit_persist_and_wire_buf_topo_only_complete
 	// - leader_to_commit_persist_and_wire_buf_with_conf_incremental
+	// - leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete
 	// The follower receives a persist_and_wire_buf and updates its follower_to_commit_persist_and_wire_buf_full
 	// - Next it is submitted, and updates the committed lot(s)
 	//   - The committed lots are updated prematurely, since they are used only later on by:
@@ -169,7 +172,13 @@ struct nvmeibt_raft_ctx {
 	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_with_conf_complete;
 	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_topo_only_complete;
 	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_with_conf_incremental;
+	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete;
 	struct nvmeibt_persist_and_wire_buf		*follower_to_leader_wire_buf;
+	//
+	// Kafka offsets when last deletion happened
+	// Peers below these kafka offsets get complete configs to ensure deleted items are reclaimed
+	int64_t					last_delete_kafka_mgmt_config_offset;	// Updated on VOL_DEL_COMPLETED
+	int64_t					last_delete_raft_members_kafka_offset;	// Updated on TARGET_DEL
 	//
 	// committed == (raft's)matched
 	unsigned long long		leader_committed_LOG_index;		// Updated when (any) leader knows this index has a majority, propagated
@@ -312,7 +321,7 @@ void nvmeibt_raft_link_member_to_node(struct nvmeibt_raft_member *member, struct
 void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void);
 void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void);
 void nvmeibt_raft_unlink_member_from_node(struct nvmeibt_raft_member *member, struct nvmeibt_node *node);
-void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_add_fr_mgmt, int64_t kafka_offset, int config_tag);
+void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_add_fr_mgmt, int64_t kafka_offset, int64_t raft_members_seq_no_updated, int config_tag);
 void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add_del, const union nvmeib_uuid *uuid, bool is_incremental_del_fr_mgmt, int64_t kafka_offset);
 void nvmeibt_raft_del_all_members_at_exit(void);
 int nvmeibt_raft_ignore_member(char *hostname);

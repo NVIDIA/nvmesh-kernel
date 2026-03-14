@@ -73,6 +73,7 @@ struct nvmeibt_block_device {
 	struct nvmeibt_Buf						kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf;
 	int										n_chunks;
 	BOOL									is_being_deleted;
+	BOOL									is_serialized_in_incremental_mgmt_config_merge;	// Temporary flag for merge with incremental kafka mgmt config
 	uint8_t									trim_flags;
 	int										config_tag;
 	int										encrypt_idx;

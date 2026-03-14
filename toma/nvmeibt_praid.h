@@ -140,6 +140,7 @@ struct nvmeibt_praid_follower {
 	struct nvmeibt_praid_lot					committed_praid_lot;
 	struct nvmeibt_praid_lot					applied_praid_lot;
 	union io_perms_bitfield						applied_io_perms;
+	BOOL										is_serialized_in_incremental_merge;	// Temporary flag for incremental merge (both TOPO and TOPO_CONFIG)
 };
 
 struct nvmeibt_praid {
