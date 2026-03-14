@@ -787,7 +787,7 @@ struct _packed_mm_vol_conf {
 	}				\
 })
 
-static uint16_t nvmeibt_seg_convert_config_le_be(void *p, struct mm_segment_conf *src, BOOL is_out)
+uint16_t nvmeibt_seg_convert_config_le_be(void *p, struct mm_segment_conf *src, BOOL is_out)
 {
 	struct _packed_mm_segment_conf *dst = p;
 
@@ -808,7 +808,7 @@ static uint16_t nvmeibt_seg_convert_config_le_be(void *p, struct mm_segment_conf
 	return sizeof(*dst);
 }
 
-static uint16_t nvmeibt_praid_convert_config_le_be(void *p, struct mm_praid_conf *src, BOOL is_out)
+uint16_t nvmeibt_praid_convert_config_le_be(void *p, struct mm_praid_conf *src, BOOL is_out)
 {
 	struct _packed_mm_praid_conf *dst = p;
 
@@ -827,7 +827,7 @@ static uint16_t nvmeibt_praid_convert_config_le_be(void *p, struct mm_praid_conf
 	return sizeof(*dst);
 }
 
-static uint16_t nvmeibt_chunk_convert_config_le_be(void *p, struct mm_chunk_conf *src, BOOL is_out)
+uint16_t nvmeibt_chunk_convert_config_le_be(void *p, struct mm_chunk_conf *src, BOOL is_out)
 {
 	struct _packed_mm_chunk_conf *dst = p;
 
@@ -844,7 +844,7 @@ static uint16_t nvmeibt_chunk_convert_config_le_be(void *p, struct mm_chunk_conf
 	return sizeof(*dst);
 }
 
-static uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *src, BOOL is_out)
+uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *src, BOOL is_out)
 {
 	struct _packed_mm_vol_conf *dst = p;
 
@@ -873,6 +873,64 @@ static uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *sr
 	// chunks	// Used only locally
 
 	return sizeof(*dst);
+}
+
+uint16_t nvmeibt_packed_seg_config_size(void) { return sizeof(struct _packed_mm_segment_conf); }
+uint16_t nvmeibt_packed_praid_config_size(void) { return sizeof(struct _packed_mm_praid_conf); }
+uint16_t nvmeibt_packed_chunk_config_size(void) { return sizeof(struct _packed_mm_chunk_conf); }
+uint16_t nvmeibt_packed_vol_config_size(void) { return sizeof(struct _packed_mm_vol_conf); }
+uint16_t nvmeibt_packed_mm_mgmt_config_size(void) { return sizeof(struct _packed_mm_mgmt_conf); }
+
+// Wrappers that convert to wire format via aligned temporary buffers; Use these when dst may not be 16-byte aligned
+TODO(The correct way is to align all fields in the structs to 16-byte boundaries. However, this would break backward compatibility. We use aligned functions for now. In the future, align them, increase the version, and implement logic so new toma can still talk with old toma.)
+uint16_t nvmeibt_seg_convert_to_wire_via_aligned_tmp(void *dst, struct mm_segment_conf *src)
+{
+	struct _packed_mm_segment_conf		tmp __attribute__((aligned(16)));
+	uint16_t							len;
+
+	len = nvmeibt_seg_convert_config_le_be(&tmp, src, true);
+	memcpy(dst, &tmp, len);
+	return len;
+}
+
+uint16_t nvmeibt_praid_convert_to_wire_via_aligned_tmp(void *dst, struct mm_praid_conf *src)
+{
+	struct _packed_mm_praid_conf		tmp __attribute__((aligned(16)));
+	uint16_t							len;
+
+	len = nvmeibt_praid_convert_config_le_be(&tmp, src, true);
+	memcpy(dst, &tmp, len);
+	return len;
+}
+
+uint16_t nvmeibt_chunk_convert_to_wire_via_aligned_tmp(void *dst, struct mm_chunk_conf *src)
+{
+	struct _packed_mm_chunk_conf		tmp __attribute__((aligned(16)));
+	uint16_t							len;
+
+	len = nvmeibt_chunk_convert_config_le_be(&tmp, src, true);
+	memcpy(dst, &tmp, len);
+	return len;
+}
+
+uint16_t nvmeibt_vol_convert_to_wire_via_aligned_tmp(void *dst, struct mm_vol_conf *src)
+{
+	struct _packed_mm_vol_conf			tmp __attribute__((aligned(16)));
+	uint16_t							len;
+
+	len = nvmeibt_vol_convert_config_le_be(&tmp, src, true);
+	memcpy(dst, &tmp, len);
+	return len;
+}
+
+uint16_t nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(void *dst, struct mm_mgmt_conf *src)
+{
+	struct _packed_mm_mgmt_conf			tmp __attribute__((aligned(16)));
+	uint16_t							len;
+
+	len = nvmeibt_mm_mgmt_convert_config_le_be(&tmp, src, true);
+	memcpy(dst, &tmp, len);
+	return len;
 }
 
 #define MEMCPY_FIELD(_dst, _src)	({memcpy((_dst), (_src), sizeof(_dst));})

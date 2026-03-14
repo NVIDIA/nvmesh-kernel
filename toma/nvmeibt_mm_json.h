@@ -218,7 +218,22 @@ int nvmeibt_mm_json_mark_deleted_in_kafka_mgmt_config_vol_chunks_praids_segs_wir
 int mm_conf_get_packed_size(struct mm_mgmt_conf *conf);
 struct nvmeibt_block_device;
 void nvmeibt_mm_json_serialize_vol_and_chunks_and_praids_and_segs_kafka_mgmt_config_to_wire(struct nvmeibt_block_device *blkdev, struct mm_vol_conf *vol);
+uint16_t nvmeibt_seg_convert_config_le_be(void *p, struct mm_segment_conf *src, BOOL is_out);
+uint16_t nvmeibt_praid_convert_config_le_be(void *p, struct mm_praid_conf *src, BOOL is_out);
+uint16_t nvmeibt_chunk_convert_config_le_be(void *p, struct mm_chunk_conf *src, BOOL is_out);
+uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *src, BOOL is_out);
 uint16_t nvmeibt_mm_mgmt_convert_config_le_be(void *p, struct mm_mgmt_conf *src, BOOL is_out);
+uint16_t nvmeibt_packed_seg_config_size(void);
+uint16_t nvmeibt_packed_praid_config_size(void);
+uint16_t nvmeibt_packed_chunk_config_size(void);
+uint16_t nvmeibt_packed_vol_config_size(void);
+uint16_t nvmeibt_packed_mm_mgmt_config_size(void);
+// Wrappers that convert to wire format via aligned temporary buffers; Use these when dst may not be 16-byte aligned
+uint16_t nvmeibt_seg_convert_to_wire_via_aligned_tmp(void *dst, struct mm_segment_conf *src);
+uint16_t nvmeibt_praid_convert_to_wire_via_aligned_tmp(void *dst, struct mm_praid_conf *src);
+uint16_t nvmeibt_chunk_convert_to_wire_via_aligned_tmp(void *dst, struct mm_chunk_conf *src);
+uint16_t nvmeibt_vol_convert_to_wire_via_aligned_tmp(void *dst, struct mm_vol_conf *src);
+uint16_t nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(void *dst, struct mm_mgmt_conf *src);
 struct nvmeibt_persist_and_wire_buf;
 int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name);
 
