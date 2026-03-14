@@ -2759,9 +2759,9 @@ void nvmeibt_topology_free_resources(void)
 	NNVMEIBT_TOMA_FREE(8dj3kss, my_raft->follower_to_commit_persist_and_wire_buf_full);
 	NNVMEIBT_TOMA_FREE(vbs8sl3, my_raft->follower_to_leader_wire_buf);
 	// NNVMEIBT_TOMA_FREE(0vdnzlw, my_raft->follower_submitted_persist_and_wire_buf_full);
-	NNVMEIBT_TOMA_FREE(c5c84k4, my_raft->leader_to_commit_persist_and_wire_buf_full_complete);
+	NNVMEIBT_TOMA_FREE(c5c84k4, my_raft->leader_to_commit_persist_and_wire_buf_with_conf_complete);
 	NNVMEIBT_TOMA_FREE(c7colp2, my_raft->leader_to_commit_persist_and_wire_buf_topo_only_complete);
-	NNVMEIBT_TOMA_FREE(s8gfds2, my_raft->leader_to_commit_persist_and_wire_buf_full_incremental);
+	NNVMEIBT_TOMA_FREE(s8gfds2, my_raft->leader_to_commit_persist_and_wire_buf_with_conf_incremental);
 	NNVMEIBT_BM_FREE(y3mzpuq, my_raft->leader_to_commit_wire_topo_complete.data_buf);
 	NNVMEIBT_BM_FREE(u76yvw2, my_raft->leader_to_commit_wire_topo_config_complete.data_buf);
 	NNVMEIBT_BM_FREE(vivmfw0, my_raft->leader_to_commit_wire_kafka_mgmt_config_complete.data_buf);

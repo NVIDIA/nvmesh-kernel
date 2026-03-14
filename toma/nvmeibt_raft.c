@@ -326,9 +326,9 @@ void nvmeibt_raft_set_effective_min_election_timeout_factor_USED_ONLY_BY_RPC(int
 /********************      persist_and_wire_buf      *********************/
 
 enum PERSIST_AND_WIRE_BUF_DIFF {
-	PERSIST_AND_WIRE_BUF_DIFF_EQUAL =			0,
-	PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY =		1,
-	PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO =		2,
+	PERSIST_AND_WIRE_BUF_DIFF_EQUAL =					0,
+	PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY =				1,
+	PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS =		2,
 };
 
 enum PERSIST_AND_WIRE_BUFS_CMP_RES {
@@ -369,7 +369,7 @@ static enum PERSIST_AND_WIRE_BUF_DIFF compare_persist_and_wire_bufs_tlvs_excl_ra
 
 	if (!b1 || !b2) {
 		if (b1 || b2) {
-			rv = PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO;
+			rv = PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS;
 		} else {
 			rv = PERSIST_AND_WIRE_BUF_DIFF_EQUAL;
 		}
@@ -388,7 +388,7 @@ static enum PERSIST_AND_WIRE_BUF_DIFF compare_persist_and_wire_bufs_tlvs_excl_ra
 	if ((b1->buf_sw_ver != b2->buf_sw_ver) && (b1->buf_sw_ver != 0))
 		N_Wf(t7781vs, "b1->buf_sw_ver=@SOFTWARE_VERSION != b2->buf_sw_ver=@SOFTWARE_VERSION", LE_SWAP32(b1->buf_sw_ver), LE_SWAP32(b2->buf_sw_ver));
 	if (wire_tc1 != wire_tc2 || wire_kmc1 != wire_kmc2 || wire_rm1 != wire_rm2) {
-		rv = PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO;
+		rv = PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS;
 	} else if (wire_t1 != wire_t2) {
 		rv = PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY;
 	} else {
@@ -967,8 +967,8 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 	if (!(nvmeibt_global_get_global()->is_update_csv_of_config_and_topo_required)) {
 		goto out;
 	}
-	NNVMEIBT_TOMA_FREE(ikdm49s, my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete);
-	my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete = nvmeibt_raft_generate_persist_and_wire_buf(
+	NNVMEIBT_TOMA_FREE(ikdm49s, my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete);
+	my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete = nvmeibt_raft_generate_persist_and_wire_buf(
 		false,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
@@ -997,8 +997,8 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, NULL, 0,
 		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, NULL, 0,
 		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
-	NNVMEIBT_TOMA_FREE(sk1lams, my_raft_global.leader_to_commit_persist_and_wire_buf_full_incremental);
-	my_raft_global.leader_to_commit_persist_and_wire_buf_full_incremental = nvmeibt_raft_generate_persist_and_wire_buf(
+	NNVMEIBT_TOMA_FREE(sk1lams, my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental);
+	my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental = nvmeibt_raft_generate_persist_and_wire_buf(
 		true,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
@@ -2615,16 +2615,16 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	// Decided to move forward, Update the header, and if needed, update the data (if is_with_raft_log and we passed the prev validation)
 	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	//
-	// Decide what to send according to the peer's needs. HEADER_ONLY/TOPO_ONLY/FULL
-	tlv_bufs_diff = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(dst_member->committed_persist_and_wire_buf_hdr), my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete);
-	if (memcmp(&(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx), &(my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete->raft_ctx), sizeof(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx)) != 0) {
-		N_Tf(5v7hnak, "raft_ctx diff (the member committed to a different leader). For now send the full buf. When we have a d.b., send only the missing updates");
-		tlv_bufs_diff = PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO;
+	// Decide what to send according to the peer's needs. HEADER_ONLY/TOPO_ONLY/WITH_CONF
+	tlv_bufs_diff = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(dst_member->committed_persist_and_wire_buf_hdr), my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete);
+	if (memcmp(&(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx), &(my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete->raft_ctx), sizeof(dst_member->committed_persist_and_wire_buf_hdr.raft_ctx)) != 0) {
+		N_Tf(5v7hnak, "raft_ctx diff (the member committed to a different leader). For now send the with_conf buf. When we have a d.b., send only the missing updates");
+		tlv_bufs_diff = PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS;
 	}
 	switch (tlv_bufs_diff) {
-	case PERSIST_AND_WIRE_BUF_DIFF_NON_TOPO:
-		// Full CONFIG
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete;
+	case PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS:
+		// Topo and configs changed
+		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete;
 		data_len = persist_and_wire_buf_get_total_len(send_persist_and_wire_buf) - sizeof(struct nvmeibt_persist_and_wire_buf);
 		break;
 	case PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY:
@@ -2634,8 +2634,8 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	case PERSIST_AND_WIRE_BUF_DIFF_EQUAL:
 	default:
 		// Only the header
-		N_Tf(5basjzs, "Sending only the header. The member already has this persist_and_wire_buf_full");
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete;
+		N_Tf(5basjzs, "Sending only the header. The member already has this persist_and_wire_buf");
+		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete;
 		data_len = 0;	// No real data
 		is_with_raft_log = 0;
 		break;
@@ -2934,7 +2934,7 @@ static void raft_convert_to_candidate(char flags)
 	//
 	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		if (!(member->is_me)) {
-			raft_send_msg_to_peer(RAFT_MSG_REQ_VOTE, nvmeibt_raft_member_get_node(member), 0, 0, my_raft_global.leader_to_commit_persist_and_wire_buf_full_complete, flags, 0);  // Only the header
+			raft_send_msg_to_peer(RAFT_MSG_REQ_VOTE, nvmeibt_raft_member_get_node(member), 0, 0, my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete, flags, 0);  // Only the header
 		}
 	}
 	raft_reset_voted_for_me();

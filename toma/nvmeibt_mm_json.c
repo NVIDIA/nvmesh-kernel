@@ -1810,7 +1810,7 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	// Generate persist&wire buf
 	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
 	// Compare the input & output CRCs
-	persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full_complete;
+	persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_with_conf_complete;
 	if (JSON_raft_ctx_crc != persist_and_wire_buf_get_raft_ctx_crc(persist_and_wire_buf)) {
 		N_Wf(vghs2jh, "JSON_raft_ctx_crc=@UINT != persist_and_wire_buf->raft_ctx.raft_ctx_crc=@UINT", JSON_raft_ctx_crc, persist_and_wire_buf->raft_ctx.raft_ctx_crc);
 	}

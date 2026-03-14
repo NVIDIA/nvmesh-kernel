@@ -142,9 +142,9 @@ struct nvmeibt_raft_ctx {
 	struct nvmeibt_Buf			leader_to_commit_wire_raft_members_incremental;
 	int64_t						applied_raft_members_seq_no;
 	// When the leader sends an APPEND_ENTRIES it first generates (roughly speaking a concatenation of the above):
-	// - leader_to_commit_persist_and_wire_buf_full_complete
+	// - leader_to_commit_persist_and_wire_buf_with_conf_complete
 	// - leader_to_commit_persist_and_wire_buf_topo_only_complete
-	// - leader_to_commit_persist_and_wire_buf_full_incremental
+	// - leader_to_commit_persist_and_wire_buf_with_conf_incremental
 	// The follower receives a persist_and_wire_buf and updates its follower_to_commit_persist_and_wire_buf_full
 	// - Next it is submitted, and updates the committed lot(s)
 	//   - The committed lots are updated prematurely, since they are used only later on by:
@@ -166,9 +166,9 @@ struct nvmeibt_raft_ctx {
 	//   - wire --> packed --> parse(upd_praid etc.)
 	TODO(Replace follower_to_commit_persist_and_wire_buf_full that is used as to_submit & submitted & committed by 3 different buffers, so that we can apply a committed buf although we have a new submitted (different praids topos changed));
 	struct nvmeibt_persist_and_wire_buf		*follower_to_commit_persist_and_wire_buf_full;
-	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_full_complete;
+	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_with_conf_complete;
 	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_topo_only_complete;
-	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_full_incremental;
+	struct nvmeibt_persist_and_wire_buf		*leader_to_commit_persist_and_wire_buf_with_conf_incremental;
 	struct nvmeibt_persist_and_wire_buf		*follower_to_leader_wire_buf;
 	//
 	// committed == (raft's)matched
