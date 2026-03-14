@@ -659,7 +659,7 @@ static void praid_leader_check_whether_all_segments_registrants_are_aligned(stru
 	NFOUT;
 }
 
-static void leader_serialize_seg_topo_to_wire(struct nvmeibt_praid_topo_ctx *praid_topo,
+static void serialize_seg_lot_topo_to_wire(struct nvmeibt_praid_topo_ctx *praid_topo,
 											  struct nvmeibt_seg_lot *seg_lot,
 											  struct nvmeibt_serialized_seg_leader_topo *wire_topo_ptr)
 {
@@ -761,7 +761,7 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 
 	seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)praid_leader->segs_wire_topo_buf.data_buf;
 	XDLIST_FOREACH(seg_lot, &praid_lot->all_seg_lot_list) {
-		leader_serialize_seg_topo_to_wire(praid_topo, seg_lot, seg_wire_topo_ptr);
+		serialize_seg_lot_topo_to_wire(praid_topo, seg_lot, seg_wire_topo_ptr);
 		seg_wire_topo_ptr++;
 	}
 	SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cbhj34k);
@@ -773,7 +773,7 @@ out:
 	NFOUT;
 }
 
-void leader_mm_segment_conf_from_seg(struct nvmeibt_seg_lot *seg_lot, struct mm_segment_conf *send_topo_ptr)
+void mm_segment_conf_from_seg(struct nvmeibt_seg_lot *seg_lot, struct mm_segment_conf *send_topo_ptr)
 {
 	struct nvmeibt_disk_segment_config		*f = &(seg_lot->from_config);
 	struct nvmeibt_disk_segment				*seg = seg_lot->my_seg;
@@ -826,7 +826,7 @@ static void leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_b
 	praid_conf->segments = seg_conf_ptr;
 
 	XDLIST_FOREACH(seg_lot, &praid_lot->all_seg_lot_list) {
-		leader_mm_segment_conf_from_seg(seg_lot, seg_conf_ptr);
+		mm_segment_conf_from_seg(seg_lot, seg_conf_ptr);
 		seg_conf_ptr++;
 		n_segs_serialized++;
 	}
