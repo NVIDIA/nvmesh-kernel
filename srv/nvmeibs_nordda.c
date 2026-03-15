@@ -3322,7 +3322,7 @@ static void nordda_wait_recv_completion_work(struct nvmeibs_nr_channel *nrch)
 	ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
 	/* Always wait for work to finish (or cancel if pending); otherwise the work
 	 * can run after nrch is freed when it had already decremented the ctr. */
-	if (nvmeib_public_cancel_work_sync(&nrch->recv_comp_work)) {
+	if (cancel_work_sync(&nrch->recv_comp_work)) {
 		/* Work was cancelled (never ran), do the decrement for the queued reference */
 		ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
 	} else {
