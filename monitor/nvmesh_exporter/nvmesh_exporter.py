@@ -262,9 +262,14 @@ class ParsingStrategy(object):
         self.pattern_re, pattern_labels = self.re_to_labels_data(metrics_conf.get('pattern_labels_re'))
         self.query_labels = metrics_conf.get('query_labels', {})
         self.query_labels_list = metrics_conf.get('query_labels_list', {})
+        self.query_labels_re = {}
+        for field, regex_str in metrics_conf.get('query_labels_re', {}).items():
+            compiled = re.compile(regex_str)
+            self.query_labels_re[field] = compiled
         self.transform = metrics_conf.get('transform')
 
-        general_labels = list(set((parser_labels or []) + list(self.additional_labels().keys()) + glob_labels + pattern_labels + list(self.query_labels.keys()) + self.query_labels_list.get('names', [])))
+        query_labels_re_names = [name for pat in self.query_labels_re.values() for name in pat.groupindex.keys()]
+        general_labels = list(set((parser_labels or []) + list(self.additional_labels().keys()) + glob_labels + pattern_labels + list(self.query_labels.keys()) + self.query_labels_list.get('names', []) + query_labels_re_names))
         self.metrics : Dict[Union[re.Pattern, List], MetricWrapperBase] = {}
         for m_name, m_conf in metrics_conf.get('metrics', {}).items():
             # METRIC specific configurations
@@ -288,7 +293,7 @@ class ParsingStrategy(object):
 
         general_conf = {}
         for k, v in metrics_conf.items():
-            if k not in ['metrics', 'aggregates', 'collections', 'query_labels', 'query_labels_list', 'transform']:
+            if k not in ['metrics', 'aggregates', 'collections', 'query_labels', 'query_labels_list', 'query_labels_re', 'transform']:
                 general_conf[k] = v
 
         self.collections = {}
@@ -1466,6 +1471,18 @@ def get_query_labels_list_values(obj: Any, query_labels_list: Dict[str, str]) ->
     return {k: v for k, v in dict(item.split("=", 1) for item in jmespath.search(query_labels_list['path'], obj).split(";")).items() if k in query_labels_list['names']}
 
 
+def get_query_labels_re_values(obj: Any, query_labels_re: Dict[str, re.Pattern]) -> Dict[str, str]:
+    """ Extract labels by applying regex to a field value """
+    label_values = {}
+    for field, pattern in query_labels_re.items():
+        value = jmespath.search(field, obj)
+        if value and isinstance(value, str):
+            match = pattern.search(value)
+            if match:
+                label_values.update(match.groupdict())
+    return label_values
+
+
 def load_metrics_config() -> Dict[str, list]:
     """ Load metrics configuration from yaml file into a map """
     # TODO: return dict with parser types vs lists, it can be passed over to populate_metrics
@@ -1594,6 +1611,8 @@ def iterate_collection(collection: Any, parsing_strategy: ParsingStrategy, path:
                 e_lables.update(get_query_label_values(obj, parsing_strategy.query_labels))
             if getattr(parsing_strategy, 'query_labels_list'):
                 e_lables.update(get_query_labels_list_values(obj, parsing_strategy.query_labels_list))
+            if getattr(parsing_strategy, 'query_labels_re'):
+                e_lables.update(get_query_labels_re_values(obj, parsing_strategy.query_labels_re))
         except (KeyError, AttributeError) as e:
             logger.debug(f"Unable to calculate general query label of file {path} - {repr(e)}")
 
