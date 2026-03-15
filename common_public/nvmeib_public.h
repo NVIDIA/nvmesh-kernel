@@ -162,10 +162,6 @@ unsigned long nvmeib_kallsyms_lookup_name(const char *name);
 
 bool nvmeib_sym_resolve_kernel_bug_can_happen(void *addr);
 
-#if KS_HAS_BLKDEV_IOCTL
-int nvmeib_blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg);
-#endif
-
 /**
  * nvmeib reference counted objects
  *
