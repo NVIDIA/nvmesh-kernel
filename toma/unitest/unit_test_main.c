@@ -57,7 +57,7 @@ static struct t_uni_thread_ctx {
 static void yield(void) { swapcontext(&scheduler.ctx_thread_uni, &scheduler.ctx_main); }	// Yield unitest thread and let Toma main thread to continue
 
 /********************************************************************/
-#define WAIT_UNTIL(cond) do { while (!(cond)) yield(); } while (0)
+#define WAIT_UNTIL(cond) ({ while (!(cond)) yield(); })
 
 static void all_test_scenarios(void) {
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks ready for format");
