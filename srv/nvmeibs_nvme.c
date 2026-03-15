@@ -7808,7 +7808,7 @@ static int __init nvmeibspci_init(void)
 		unsigned int flags = WQ_MEM_RECLAIM | WQ_SYSFS;
 		if (nvmeibs_nvme_wq_unbound)
 			flags |= WQ_UNBOUND;
-		nvmeibs_nvme_wq = nvmeib_public_alloc_workqueue("nvmeibs_nvme", flags, 0);
+		nvmeibs_nvme_wq = alloc_workqueue("nvmeibs_nvme", flags, 0);
 		if (!nvmeibs_nvme_wq) {
 			_NE(error_2_nvme_nvmeibspci_init_d, "Failed to allocate nvmeibs_nvme work queue");
 			err = -ENOMEM;
@@ -7862,7 +7862,7 @@ err:
 	if (nvmeibs_proc_dir)
 		remove_proc_entry("nvmeibs", NULL);
 	if (nvmeibs_use_nvme_kwq && nvmeibs_nvme_wq)
-		nvmeib_public_destroy_workqueue(nvmeibs_nvme_wq);
+		destroy_workqueue(nvmeibs_nvme_wq);
 
 	_NE(error_3_nvme_nvmeibspci_init, "nvmeibspci_init(): err=@INT", err);
 	return err;
@@ -7904,7 +7904,7 @@ static void __exit nvmeibspci_exit(void)
 	wq_drain(ioqm_wq);
 	wq_destroy(ioqm_wq);
 	if (nvmeibs_use_nvme_kwq && nvmeibs_nvme_wq)
-		nvmeib_public_destroy_workqueue(nvmeibs_nvme_wq);
+		destroy_workqueue(nvmeibs_nvme_wq);
 
 	nvmeib_public_proc_remove(nvmeof_proc);
 	remove_proc_entry("disks", nvmeibs_proc_dir);

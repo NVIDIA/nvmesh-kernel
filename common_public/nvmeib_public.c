@@ -675,55 +675,6 @@ extern struct workqueue_struct *system_wq;
 extern struct workqueue_struct *system_wq __read_mostly;
 #endif
 
-int nvmeib_schedule_delayed_work(struct delayed_work *dwork,
-								 unsigned long delay) {
-	return queue_delayed_work(system_wq, dwork, delay);
-}
-EXPORT_SYMBOL(nvmeib_schedule_delayed_work);
-
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wformat-security"
-#endif
-struct workqueue_struct *nvmeib_public_alloc_workqueue(const char *fmt, unsigned int flags, int max_active)
-{
-	return alloc_workqueue(fmt, flags, max_active);
-}
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-EXPORT_SYMBOL(nvmeib_public_alloc_workqueue);
-
-void nvmeib_public_destroy_workqueue(struct workqueue_struct *wq)
-{
-	destroy_workqueue(wq);
-}
-EXPORT_SYMBOL(nvmeib_public_destroy_workqueue);
-
-void nvmeib_public_flush_workqueue(struct workqueue_struct *wq)
-{
-	flush_workqueue(wq);
-}
-EXPORT_SYMBOL(nvmeib_public_flush_workqueue);
-
-bool nvmeib_public_workqueue_congested(int cpu, struct workqueue_struct *wq)
-{
-	return workqueue_congested(cpu, wq);
-}
-EXPORT_SYMBOL(nvmeib_public_workqueue_congested);
-
-#if KS_BIO_BI_STATUS
-blk_status_t nvmeib_errno_to_blk_status(int errno) {
-	return errno_to_blk_status(errno);
-}
-EXPORT_SYMBOL(nvmeib_errno_to_blk_status);
-
-int nvmeib_blk_status_to_errno(blk_status_t status) {
-	return blk_status_to_errno(status);
-}
-EXPORT_SYMBOL(nvmeib_blk_status_to_errno);
-#endif
-
 struct ring_buffer_event;
 struct ring_buffer;
 struct ftrace_event_call;

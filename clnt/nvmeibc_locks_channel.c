@@ -72,7 +72,7 @@ int nvmeibc_locks_channel_wq_init(void)
 		unsigned int flags = WQ_SYSFS;
 		if (nvmeibc_locks_scq_wq_unbound)
 			flags |= WQ_UNBOUND;
-		nvmeibc_locks_channel_wq = nvmeib_public_alloc_workqueue("nvmeibc_locks_scq", flags, 0);
+		nvmeibc_locks_channel_wq = alloc_workqueue("nvmeibc_locks_scq", flags, 0);
 		if (!nvmeibc_locks_channel_wq) {
 			_NE(error_nvmeibc_locks_channel_wq_init, "Failed to allocate locks channel SCQ workqueue");
 			NFOUT;
@@ -89,7 +89,7 @@ void nvmeibc_locks_channel_wq_destroy(void)
 	NFIN;
 	if (nvmeibc_locks_channel_wq) {
 		_ND(trace_nvmeibc_locks_channel_wq_destroy, "Destroying locks channel SCQ workqueue");
-		nvmeib_public_destroy_workqueue(nvmeibc_locks_channel_wq);
+		destroy_workqueue(nvmeibc_locks_channel_wq);
 		nvmeibc_locks_channel_wq = NULL;
 	}
 	NFOUT;
