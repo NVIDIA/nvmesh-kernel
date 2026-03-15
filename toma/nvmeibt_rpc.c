@@ -344,6 +344,10 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 			nvmeibt_Str_sprintf(out, "Rpc rejected. I'm not a leader.\n");
 		}
 		return 0;
+	} else if (strcmp("reelect", argv[1])==0) {
+		nvmeibt_Str_sprintf(out, "Reelection initiated.\n");
+		nvmeibt_raft_timeout_occurred(1, 1);
+		return 0;
 	} else if (strcmp("dump_status", argv[1])==0) {
 		toma_sig_handler_fn(10, 0xface00000010UL);
 		return nvmeibt_Str_sprintf(out, "see toma latest .stat file...\n");
