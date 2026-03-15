@@ -71,20 +71,27 @@ static void all_test_scenarios(void) {
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for drive zeroing to complete");
 	WAIT_UNTIL(mgmt_sim_both_disks_zeroing_done());
 
+	N_SANDBOX(__AUTOID__, "unit test thread: waiting for leader to exists");
+	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
+	mgmt_sim_send_leader_keep_alive();
+
 	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_REMOTE1");
 	mgmt_sim_send_add_volume_remote1();
 
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for reportTarget after V_REMOTE1");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
 
+	mgmt_sim_send_leader_keep_alive();
 	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_R1");
 	mgmt_sim_send_add_volume_r1();
 
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for V_R1 pRaid report");
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
+	mgmt_sim_send_leader_keep_alive();
 
 	N_SANDBOX(__AUTOID__, "unit test thread: sending deleteVolume V_R1");
 	mgmt_sim_send_delete_volume_r1();
+	mgmt_sim_send_leader_keep_alive();
 
 	/* Zeroing is skipped for FIRST_USE_EVER segments (never activated) — segments go directly to X_DONE */
 

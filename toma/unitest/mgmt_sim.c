@@ -141,7 +141,6 @@ struct mgmt_sim_state {
 	struct t_mgmt_kafka_producers {		// Toma side consumers are mgmt side producers
 		struct sim_broker_topic *hw, *cmd, *l_vol, *l_raft;
 	} k_producers;
-	int volume_msg_count;
 
 	/* Per-Producer state for deterministic message sequencing */
 	int n_leader_keep_alives;
@@ -327,8 +326,7 @@ static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
 		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 		m->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
 		m->n_leader_keep_alives++;
-		N_Tf(__AUTOID__, "<< Leader KAL {raftTerm=@INT, gen=@INT}",
-		     m->raftTerm, m->n_leader_keep_alives);
+		N_Tf(__AUTOID__, "<< Leader KAL {raftTerm=@INT, gen=@INT}", m->raftTerm, m->n_leader_keep_alives);
 	} else if (strcmp(message_type, "keepalive") == 0) {
 		// {"originType":"TOMA","messageType":"keepalive","messageTypeVersion":2,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":11831,"leaderToken":null,"keepaliveInterval":5,"payload":{"zone":"1","leaderUUID":"nvme39.nvidia.com","bootTime":1767279770145,"featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":"","rebuildStats":{"nRunningDirtyRebuild":0,"nPendingDirtyRebuild":0,"nRunningStaleRebuild":0,"nPendingStaleRebuild":6,"nRunningTxidRebuild":0,"nPendingTxidRebuild":0,"nRunningColdRecovery":0,"nPendingColdRecovery":0,"nRunningJGCRebuild":0,"nPendingJGCRebuild":0,"nRunningScrubbing":0,"nPendingScrubbing":3}}}
 	} else {
@@ -361,7 +359,7 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 
 void mgmt_sim_verify_at_end(void) {
 	BUG_ON(!g_mgmt_sim);
-	BUG_ON((g_mgmt_sim->volume_msg_count <= 0) || (g_mgmt_sim->n_leader_keep_alives <= 0));
+	BUG_ON((g_mgmt_sim->n_leader_keep_alives <= 0));
 }
 
 void mgmt_sim_destroy(void) {
@@ -394,13 +392,6 @@ void mgmt_sim_do_periodic(void) {
 		m->hw.conf_version++;				// As if something in configuration changed
 		mgmt_sim_send_msg_latest_hw_config();
 	}
-
-	if ((m->volume_msg_count++ % 15) == 0) {					/* Periodically send updateLeaderKeepaliveToken */
-		const size_t capacity = 256;
-		char *payload = malloc(capacity);
-		const size_t len = make_msg_update_leader_keepalive_token(payload, capacity);
-		sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
-	}	// Todo: use make_msg_add_volume() here
 }
 
 /******************************************************************************/
@@ -520,6 +511,10 @@ bool mgmt_sim_consume_got_report_target(void) {
 	return false;
 }
 
+int mgmt_sim_get_n_leader_keep_alives_received(void) {
+	return g_mgmt_sim->n_leader_keep_alives;
+}
+
 bool mgmt_sim_v_r1_praid_reported(void) {
 	return g_mgmt_sim->v_r1_praid_reported;
 }
@@ -546,6 +541,13 @@ void mgmt_sim_send_format_drives(void) {
 	N_IMf(msim_fsm1, "sending formatDrive for disk002+disk003 bootTime=@INT64_TD", m->boot_time);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, msg_002, len_002, false);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, msg_003, len_003, false);
+}
+
+void mgmt_sim_send_leader_keep_alive(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *payload = malloc(256);
+	const size_t len = make_msg_update_leader_keepalive_token(payload, 256);
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
 }
 
 void mgmt_sim_send_add_volume_remote1(void) {
