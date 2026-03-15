@@ -2,10 +2,9 @@
 * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
-
-#include "sandbox_util.h"
+#include "../sandbox_util.h"
 #include "unit_test_main.h"
-#include "mgmt_sim.h"
+#include "../mgmt_sim.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump

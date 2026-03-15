@@ -10,7 +10,7 @@
 #include "sandbox_util.h"
 #include "mgmt_sim.h"
 #include "kafka/sandbox_kafka_internal.h"
-#include "unit_test_main.h"
+#include "90_tests_black_box/unit_test_main.h"
 
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
