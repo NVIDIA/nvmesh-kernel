@@ -4303,16 +4303,15 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 		}
 
 		/* Add rionic to disk */
+		disk->n_nr_rionics++;
 		if (rionic->nr_prefered) {
 			_ND(trace_3_ib_admin_channel_load_disk_nordda, "Add prefered rionic @RIONIC to disk's nr-rionics", rionic);
 			list_add(&rionic->disk_nrlink, &disk->nr_rionics);
-			disk->n_nr_rionics++;
 			p++;
 		}
 		else {
 			_ND(trace_4_ib_admin_channel_load_disk_nordda, "Add non-prefered rionic @RIONIC to disk's nr-rionics", rionic);
 			list_add_tail(&rionic->disk_nrlink, &disk->nr_rionics);
-			disk->n_nr_rionics++;
 			np++;
 			if (!disk->nr_np_head)
 				disk->nr_np_head = &rionic->disk_nrlink;
