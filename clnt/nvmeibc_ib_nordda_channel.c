@@ -50,7 +50,7 @@ int nvmeibc_nordda_channel_wq_init(void)
 	NFIN;
 	if (nvmeibc_nordda_wq_unbound)
 		flags |= WQ_UNBOUND;
-	nvmeibc_nordda_wq = nvmeib_public_alloc_workqueue("nvmeibc_nordda", flags, 0);
+	nvmeibc_nordda_wq = alloc_workqueue("nvmeibc_nordda", flags, 0);
 	if (!nvmeibc_nordda_wq) {
 		_NE(error_nvmeibc_nordda_channel_wq_init, "Failed to allocate nordda channel workqueue");
 		NFOUT;
@@ -66,7 +66,7 @@ void nvmeibc_nordda_channel_wq_destroy(void)
 	NFIN;
 	if (nvmeibc_nordda_wq) {
 		_ND(trace_nvmeibc_nordda_channel_wq_destroy, "Destroying nordda channel workqueue @PTR", nvmeibc_nordda_wq);
-		nvmeib_public_destroy_workqueue(nvmeibc_nordda_wq);
+		destroy_workqueue(nvmeibc_nordda_wq);
 		nvmeibc_nordda_wq = NULL;
 	}
 	NFOUT;
