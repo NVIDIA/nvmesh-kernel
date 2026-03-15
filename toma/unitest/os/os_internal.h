@@ -93,6 +93,7 @@ struct TSB_operating_system_impl {				// Sandbox for all services Toma needs fro
 	struct TSB_globa_epoll_impl {				// Implementation of epoll mechanism
 		struct TSB_fd_otherside o;
 		struct epoll_event evs[16];
+		uint64_t n_calls_to_wait;
 		int n_fds;
 	} TSB_epoll;
 	struct TSB_netlink_mock TSB_netlink;

@@ -692,14 +692,13 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
 	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 500
 	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
-	static uint64_t loop_idx = 0;			// Todo: move to TSB_epoll struct.
 	int i, n_events, unitest_fiber_ended;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
 	unitest_fiber_ended = !toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
 
-	sys->os.TSB_signal.sig = ((loop_idx % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
-	if (loop_idx == 9) nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Once send an extended message to test the flow
+	sys->os.TSB_signal.sig = ((ep->n_calls_to_wait % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
+	if (ep->n_calls_to_wait == 9) nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Once send an extended message to test the flow
 	nvmeibs_simu_do_periodic();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
 	mgmt_sim_do_periodic();
 
@@ -709,14 +708,14 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
 	}
-	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", loop_idx, sys->all_unitests_finished, n_events); loop_idx++;
+	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", ep->n_calls_to_wait, sys->all_unitests_finished, n_events); ep->n_calls_to_wait++;
 	if (!sys->all_unitests_finished && unitest_fiber_ended) {
 		SANDBOX_PRINT("All unit-tests: %s, \t\tShutting down Toma app\n", COL_GREEN "passed" COL_RESET);
 		sys->all_unitests_finished = true;
 		errno = ENOMEM;
 		return -1;				// Simulate shutdown instruction via kafka from mgmt
 	}
-	if (loop_idx >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
+	if (ep->n_calls_to_wait >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		SANDBOX_PRINT("failed: Toma did not stop within %d cycles\n", SANDBOX_TERMINATE_AFTER_N_LOOPS);
 		BUG_ON(true);
 	}
