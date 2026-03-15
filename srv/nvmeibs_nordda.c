@@ -3,6 +3,8 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "nvmeib_public.h"
+
 #define  S_NORDDA_C
 
 #include "common/kr_incs.h"
@@ -4918,7 +4920,7 @@ int nvmeibs_nordda_kwq_init(void)
 			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS,
 			WQ_UNBOUND_MAX_ACTIVE);
 	} else {
-		nvmeibs_nordda_kwq = nvmeib_public_alloc_workqueue("nvmeibs_nordda", WQ_MEM_RECLAIM | WQ_SYSFS, 0);
+		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda", WQ_MEM_RECLAIM | WQ_SYSFS, 0);
 	}
 
 	if (!nvmeibs_nordda_kwq) {
