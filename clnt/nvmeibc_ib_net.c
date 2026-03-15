@@ -538,7 +538,7 @@ static void defer_recv_intr_wq_drain(struct nvmeibc_ib_net *net)
 					/* Cancel kernel workqueue work */
 					_NTn(trace_defer_recv_intr_wq_drain_1, net,
 						 "canceling defer_recv_intr_kwq work");
-					nvmeib_public_cancel_work_sync(&net->defer_recv_kwork);
+					cancel_work_sync(&net->defer_recv_kwork);
 				} else if (net->defer_recv_intr_wq) {
 					_NTn(trace_defer_recv_intr_wq_drain_1x, net,
 						 "draining defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
@@ -1249,7 +1249,7 @@ void scq_kthread_stop(struct nvmeibc_ib_net *net)
 	if (net->scq_kwq) {
 		/* Cancel kernel workqueue work */
 		_NTn(trace_ib_net_scq_kthread_stop, net, "canceling scq_kwq work");
-		nvmeib_public_cancel_work_sync(&net->scq_kwork);
+		cancel_work_sync(&net->scq_kwork);
 		net->scq_kwq = NULL;
 	} else if (net->scq_kthread) {
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);

@@ -1231,7 +1231,7 @@ static inline int end_use_local_q(struct nvme_qp *q, bool shutdown)
 	q_unlock_irqrestore(q, flags);
 
 	if (nvmeibs_use_nvme_kwq) {
-		nvmeib_public_cancel_work_sync(&q->process_cq_work);
+		cancel_work_sync(&q->process_cq_work);
 	} else {
 		local_q_kthread_stop(q);
 	}
