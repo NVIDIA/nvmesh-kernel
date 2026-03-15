@@ -232,6 +232,8 @@ void rd_kafka_topic_destroy(rd_kafka_topic_t *kt) {
 	memset(kt, 0, sizeof(*kt));
 }
 
+#define ASSIGN_FMT "KBROKER[@CHAR].committed_@KAFKA_OFST, cur_@KAFKA_OFST"
+#define ASSIGN_ARG(bt) bt->type, bt->committed_offset, bt->cur_offset
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
 	rd_kafka_topic_t *kt = &ko->topic;
 	struct sim_broker_topic *bt = kt->broker_topic;
@@ -239,7 +241,7 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 	N_Tf(__AUTOID__, "k_object=@STR, has_pl=@BOOL_YN", ko->name, !!pl);
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_assigned) {
-			N_Tf(__AUTOID__, "@STR: stop. KBROKER[@CHAR].committed_@KAFKA_OFST, cur_@KAFKA_OFST", kt->name, bt->type, bt->committed_offset, bt->cur_offset);
+			N_Tf(__AUTOID__, ASSIGN_FMT "->0, Stop: @STR", ASSIGN_ARG(bt), kt->name);
 			if (ko->conf->auto_reset_earliest)
 				sim_broker_topic_reset_to_earliest(bt);
 			kt->is_assigned = false;
@@ -253,10 +255,10 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 		}
 		bt = kt->broker_topic;
 		BUG_ON((ko != pl->elems[0].k) || (kt->partition != pl->elems[0].partition));		// We dont support partitions
-		N_Tf(__AUTOID__, "@STR: start topic consume from partition[@INT].@KAFKA_OFST", kt->name, kt->partition, offset);
+		N_Tf(__AUTOID__, ASSIGN_FMT ": start topic consume @STR from partition[@INT].@KAFKA_OFST", ASSIGN_ARG(bt), kt->name, kt->partition, offset);
 		kt->is_assigned = true;
 		if (offset == RD_KAFKA_OFFSET_STORED) {
-			N_Tf(__AUTOID__, "@STR: continue from committed_@KAFKA_OFST, cur@KAFKA_OFST", kt->name, bt->committed_offset, bt->cur_offset); // Toma relies on Kafka simulator
+			N_Tf(__AUTOID__, ASSIGN_FMT " Continue from stored", ASSIGN_ARG(bt)); // Toma relies on Kafka simulator
 		} else {
 			if (offset == RD_KAFKA_OFFSET_BEGINNING) {
 				sim_broker_topic_reset_to_earliest(bt);
@@ -264,7 +266,7 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 				BUG_ON((offset < 0) || (offset <= bt->committed_offset));	// Those messages do not exist in kafka queue
 				bt->cur_offset = offset;	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init or leader change).
 			}
-			N_Tf(__AUTOID__, "@STR: KBROKER[@CHAR].committed_@KAFKA_OFST, cur_@KAFKA_OFST, n_msgs=@INT", kt->name, bt->type, bt->committed_offset, bt->cur_offset, bt->n_msgs);
+			N_Tf(__AUTOID__, ASSIGN_FMT " n_msgs=@INT, CurSet", ASSIGN_ARG(bt), bt->n_msgs);
 		}
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	}
