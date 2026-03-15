@@ -19,7 +19,7 @@ nvmeib_common_public-y := \
 	kth/nvmeib_public_kth_sync.o nvmeib_q.o \
 	poll/nvmeib_public_intr_poll.o \
 	nvmeib_trend.o nvmeib_trace.o nvmeib_rsc_pool.o \
-	nvmeib_trace_stress_test.o nvmeib_public_procfs.o nvmeib_public_mmap.o \
+	nvmeib_trace_stress_test.o nvmeib_public_procfs.o nvmeib_jdr_proc.o nvmeib_public_mmap.o \
 	nvmeib_public_raid.o nvmeib_public_keeper.o traces_ids.o nvmeib_event.o ../utils/nvmeib_jdr/nvmeib_jdr.o ../utils/nvmeib_jdr/nvmeib_txt.o
 
 ifeq ($(call ofed_ver_check,5,1),no)
