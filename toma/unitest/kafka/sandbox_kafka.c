@@ -63,7 +63,7 @@ void sim_broker_topic_msg_produce(struct sim_broker_topic *t, void *payload, siz
 		m->payload = payload;
 	}
 	m->len = len;
-	N_Tf(__AUTOID__, "[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, sim_broker_topic_get_msg_offset_last(t), i);
+	N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, sim_broker_topic_get_msg_offset_last(t), i);
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
 
@@ -77,7 +77,7 @@ bool sim_broker_topic_msg_consume(struct sim_broker_topic *t, rd_kafka_message_t
 		rv->len = m->len;						// Just reference, Kafka simu owns the memory
 		rv->payload = m->payload;				// Pointer to buffer in queue. Will remain valid until msg is commited
 		rv->offset = t->cur_offset++;
-		N_Tf(__AUTOID__, "[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, rv->offset, i);
+		N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, rv->offset, i);
 		MAX_WITH(t->debug_highest_offset_ever_reached, t->cur_offset);
 	} else { /* No message at this offset */}
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
@@ -109,7 +109,7 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 	t->committed_offset = ack_offset;
 	if (t->committed_offset >= t->cur_offset)		// Msg was N read, cur moved back (to N-x) and now msg N commited. Real kafka does not move cur_offset, but upon restart it will move it to earliest
 		sim_broker_topic_reset_to_earliest(t);		// Implemented not like kafka: We move cur to earliest immediately because we free commited messages
-	N_Tf(__AUTOID__, "[@CHAR] commited:@KAFKA_OFST -> @KAFKA_OFST, cur_@KAFKA_OFST, last_slot[@INT]", t->type, prev_committed, ack_offset, t->cur_offset, (int)(i % t->capacity));
+	N_Tf(__AUTOID__, "KBROKER[@CHAR].commited:@KAFKA_OFST -> @KAFKA_OFST, cur_@KAFKA_OFST, last_slot[@INT]", t->type, prev_committed, ack_offset, t->cur_offset, (int)(i % t->capacity));
 	BUG_ON((t->n_msgs == 0) && (t->type == KTOPIC_TYPE_M2T_HW_CFG));		// Hardware configuration should always exist. This queue must never be empty
  _out:
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
@@ -239,7 +239,7 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 	N_Tf(__AUTOID__, "k_object=@STR, has_pl=@BOOL_YN", ko->name, !!pl);
 	if (pl == NULL) {
 		if (ko->topic.name && ko->topic.is_assigned) {
-			N_Tf(__AUTOID__, "@STR: stop. committed_@KAFKA_OFST, cur_@KAFKA_OFST", kt->name, bt->committed_offset, bt->cur_offset);
+			N_Tf(__AUTOID__, "@STR: stop. KBROKER[@CHAR].committed_@KAFKA_OFST, cur_@KAFKA_OFST", kt->name, bt->type, bt->committed_offset, bt->cur_offset);
 			if (ko->conf->auto_reset_earliest)
 				sim_broker_topic_reset_to_earliest(bt);
 			kt->is_assigned = false;
@@ -262,9 +262,9 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 				sim_broker_topic_reset_to_earliest(bt);
 			} else {
 				BUG_ON((offset < 0) || (offset <= bt->committed_offset));	// Those messages do not exist in kafka queue
-				bt->cur_offset = offset;	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init orleader change).
+				bt->cur_offset = offset;	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init or leader change).
 			}
-			N_Tf(__AUTOID__, "@STR: committed_@KAFKA_OFST, cur_@KAFKA_OFST", kt->name, bt->committed_offset, bt->cur_offset);
+			N_Tf(__AUTOID__, "@STR: KBROKER[@CHAR].committed_@KAFKA_OFST, cur_@KAFKA_OFST, n_msgs=@INT", kt->name, bt->type, bt->committed_offset, bt->cur_offset, bt->n_msgs);
 		}
 		return RD_KAFKA_RESP_ERR_NO_ERROR;
 	}
@@ -357,7 +357,7 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char *name, rd_kafka_t
 		else BUG_ON(true);				// Unknown topic which Toma will not listen too
 	}
 	kt->broker_topic = sim_broker_topic_find_by(kt->type);
-	N_Tf(__AUTOID__, "@STR: alloc new topic @STR[@CHAR], starting from @KAFKA_OFST", k->name, kt->name, kt->type, kt->broker_topic->cur_offset);
+	N_Tf(__AUTOID__, "@STR: alloc new topic @STR -> KBROKER[@CHAR].cur_@KAFKA_OFST", k->name, kt->name, kt->type, kt->broker_topic->cur_offset);
 	return kt;
 }
 
