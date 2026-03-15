@@ -157,7 +157,7 @@ struct kafka_simulator_t *sandbox_kafka_init(void (*fn)(struct sim_broker_topic 
 	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG,			4);		// This queue is always non empty, stores at least the last hardware config
 	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD,			2);		// Toma will consume commands very fast
 	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT,	8);		// This queue might be long and potentially store the entire history.
-	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		4);		// Toma will consume volume commands very fast, and ack mgmt keepalive to leader also almost immediately
+	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		6);		// Toma will consume volume commands very fast, and ack mgmt keepalive to leader also almost immediately
 	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY,		1);		// Mgmt Simu will consume toma reports immediately
 	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		1);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
 	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			1);		// Mgmt Simu will consume toma reports immediately
@@ -263,8 +263,13 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 			if (offset == RD_KAFKA_OFFSET_BEGINNING) {
 				sim_broker_topic_reset_to_earliest(bt);
 			} else {
+				const bool is_OK_to_loose_msgs = ((bt->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) || (bt->type == KTOPIC_TYPE_M2T_HW_CFG));	// Temp: Config will be re-sent again by mgmt, raft targets are in persistency so not needed
 				BUG_ON((offset < 0) || (offset <= bt->committed_offset));	// Those messages do not exist in kafka queue
 				bt->cur_offset = offset;	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init or leader change).
+				if ((offset > bt->committed_offset) && !is_OK_to_loose_msgs) {		// Toma read this value from persistency. Going to skip messages in kafka queue. Why? Our kafka broker does not have persistency between runs but Toma does
+					BUG_ON(bt->n_msgs != 0);
+					bt->committed_offset = bt->cur_offset - 1;	// Toma will not read the messages pushed by unitest environment
+				}
 			}
 			N_Tf(__AUTOID__, ASSIGN_FMT " n_msgs=@INT, CurSet", ASSIGN_ARG(bt), bt->n_msgs);
 		}
