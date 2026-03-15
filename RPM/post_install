@@ -37,6 +37,7 @@ if [ $isUpgrade -eq 2 ]; then
         fi
 else
 	if [ "$rpm_kind" == "client" ]; then
+		systemctl enable nvmeshclient > /dev/null 2>&1
         	echo "$version-$release" > $client_upgrade_file
 	else
         	echo "$version-$release" > $target_upgrade_file
@@ -44,7 +45,6 @@ else
 fi
 
 systemctl daemon-reload > /dev/null 2>&1
-[ "$rpm_kind" == "client" ] && systemctl enable nvmeshclient > /dev/null 2>&1
 
 # Check if RPM contains updated IB Core modules and print a NOTE if it does
 if [ "$rpm_kind" == "client" ] && [ -n "$(find /opt/nvmesh/common-repo/ -name 'ib_core_modules.tar.gz')" ]; then
