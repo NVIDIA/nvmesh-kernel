@@ -1,6 +1,3 @@
 # [submodule "mgmt"]
 # 	path = management
 # 	url = git@bitbucket.org:yaniv_romem/management.git
-[submodule "tools/crash-cacheutils"]
-	path = tools/crash-cacheutils
-	url = https://github.com/k-hagio/crash-cacheutils.git
