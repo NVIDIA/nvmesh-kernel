@@ -42,11 +42,11 @@ test: dirs $(TEST_EXE)
 	./$(TEST_EXE) $(TEST_OUT)
 
 demo_dict: dirs test $(PET_BINFILE_READER)
-	./nvmeib_pet_messages.py save-dictionary $(TEST_EXE) test_pet_msgs $(TEST_DCT)
+	./pet_messages.sh save-dictionary $(TEST_EXE) test_pet_msgs $(TEST_DCT)
 
 
 demo: dirs test demo_dict $(PET_BINFILE_READER)
-	./nvmeib_pet_messages.py view $(BUILD_DIR) $(TEST_OUT)
+	./pet_messages.sh view $(BUILD_DIR) $(TEST_OUT)
 
 clean:
 	rm -rf $(BUILD_DIR)

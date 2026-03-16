@@ -31,10 +31,36 @@ The idea should cut the bootstrap phase from few weeks to probably one week or e
 
 ## Python dependencies
 
-For `nvmeib_pet_messages.py` (save-dictionary, view, etc.) install:
+Dependencies are managed with [Poetry](https://python-poetry.org/) and declared in `pyproject.toml`:
 
 - **pyelftools** – ELF/DWARF parsing
 - **pydantic** – Type hints enforcing
+- **kaitaistruct** – Kaitai Struct runtime
+
+### Setup
+
+Run `setup.sh` to install the virtual environment:
+
+```bash
+./common/pet/setup.sh
+```
+
+This runs `poetry lock` followed by `poetry install --no-root` inside the `common/pet/` directory, creating an isolated venv with all dependencies pinned.
+
+To activate the environment manually:
+
+```bash
+cd common/pet
+poetry shell
+```
+
+Or use the convenience wrapper `pet_messages.sh`, which invokes `nvmeib_pet_messages.py` through the Poetry venv without requiring manual activation:
+
+```bash
+common/pet/pet_messages.sh [args...]
+```
+
+> **Note:** The Kaitai Struct *compiler* (`ksc`) is not installed by `setup.sh` — it is only needed if you need to regenerate `nvmeib_pet_archive.py` from the `.ksy` spec. See the [Kaitai download page](https://kaitai.io/#download) for installation instructions.
 
 ## Kaitai
 
@@ -42,4 +68,3 @@ For `nvmeib_pet_messages.py` (save-dictionary, view, etc.) install:
 
 + nvmeib_pet_specification.ksy - describes the binary data
 + nvmeib_pet_archive.py - the generated binary data parser
-+ kaitaistruct.py - shamelessly borrowed from [Kaitai Python package](https://github.com/kaitai-io/kaitai_struct_python_runtime)
