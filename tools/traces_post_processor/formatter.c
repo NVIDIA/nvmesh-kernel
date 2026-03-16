@@ -13,6 +13,7 @@
 #include <dlfcn.h>
 #include <time.h>
 #include <unistd.h>
+#include <endian.h>
 
 immutable_string_t SYSTEM_TRACE_NAME = {
 	"SYSTEM_TRACE"
@@ -120,19 +121,70 @@ int fmt_bitmap(char *buf, int len, long ptr, int datalen) {
 }
 
 int fmt_array_u64(char *buf, int len, long ptr, int datalen) {
-	const u64 *arr = (const u64 *)ptr;
-	const int n = datalen / (int)sizeof(u64);
+	const unsigned long long *arr = (const unsigned long long *)ptr;
+	const unsigned int n = datalen / (int)sizeof(unsigned long long);
 	int count = 0;
 
 	count += snprintf(buf, len, "[");
-	if (n > 0) {
-		count += snprintf(buf + count, len - count, "%llu", arr[0]);
-	}
-	for (int i = 1; i < n; i++) {
-		count += snprintf(buf + count, len - count, ",%llu", arr[i]);
+	for (unsigned int i = 0; i < n; i++) {
+		if (i > 0)
+			count += snprintf(buf + count, len - count, ",");
+		count += snprintf(buf + count, len - count, "%llu", arr[i]);
 	}
 	count += snprintf(buf + count, len - count, "]");
 	return count;
+}
+
+typedef enum { FLEX_FMT_UNSIGNED, FLEX_FMT_SIGNED, FLEX_FMT_HEX } flex_elem_fmt_t;
+
+static int fmt_array_flex_generic(char *buf, int len, long ptr, unsigned int elem_size, flex_elem_fmt_t fmt_type)
+{
+	const unsigned char *data = (const unsigned char *)ptr;
+	unsigned int n = le32toh(*(const unsigned int *)data);
+	const unsigned char *arr = data + sizeof(unsigned int);
+	int count = 0;
+
+	count += snprintf(buf, len, "[");
+	for (unsigned int i = 0; i < n; i++) {
+		unsigned long long uval = 0;
+
+		if (i > 0)
+			count += snprintf(buf + count, len - count, ",");
+
+		memcpy(&uval, arr + i * elem_size, elem_size);
+
+		switch (fmt_type) {
+		case FLEX_FMT_UNSIGNED:
+			count += snprintf(buf + count, len - count, "%llu", uval);
+			break;
+		case FLEX_FMT_SIGNED: {
+			long long sval = (elem_size == 4) ? (int)(unsigned int)uval : (long long)uval;
+			count += snprintf(buf + count, len - count, "%lld", sval);
+			break;
+		}
+		case FLEX_FMT_HEX:
+			count += snprintf(buf + count, len - count, "0x%llx", uval);
+			break;
+		}
+	}
+	count += snprintf(buf + count, len - count, "]");
+	return count;
+}
+
+int fmt_array_u64_flex(char *buf, int len, long ptr, int datalen) {
+	return fmt_array_flex_generic(buf, len, ptr, sizeof(unsigned long long), FLEX_FMT_UNSIGNED);
+}
+
+int fmt_array_u32_flex(char *buf, int len, long ptr, int datalen) {
+	return fmt_array_flex_generic(buf, len, ptr, sizeof(unsigned int), FLEX_FMT_UNSIGNED);
+}
+
+int fmt_array_int_flex(char *buf, int len, long ptr, int datalen) {
+	return fmt_array_flex_generic(buf, len, ptr, sizeof(int), FLEX_FMT_SIGNED);
+}
+
+int fmt_array_ptr_flex(char *buf, int len, long ptr, int datalen) {
+	return fmt_array_flex_generic(buf, len, ptr, sizeof(unsigned long long), FLEX_FMT_HEX);
 }
 
 int fmt_hex(char *buf, int len, long ptr, int datalen) {
@@ -406,6 +458,22 @@ int _lazy_unwrap_etry_format(const char *token_prefix, trace_entry_t *te, struct
 					} else if (strcmp(type, "array_u64") == 0) {
 						te->args[*arg_i].type = ARG_DATA;
 						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_array_u64;
+					} else if (strcmp(type, "array_u64_flex") == 0) {
+						te->args[*arg_i].type = ARG_ARR_FLEX;
+						te->args[*arg_i].len  = sizeof(unsigned long long);
+						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_array_u64_flex;
+					} else if (strcmp(type, "array_u32_flex") == 0) {
+						te->args[*arg_i].type = ARG_ARR_FLEX;
+						te->args[*arg_i].len  = sizeof(unsigned int);
+						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_array_u32_flex;
+					} else if (strcmp(type, "array_int_flex") == 0) {
+						te->args[*arg_i].type = ARG_ARR_FLEX;
+						te->args[*arg_i].len  = sizeof(int);
+						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_array_int_flex;
+					} else if (strcmp(type, "array_ptr_flex") == 0) {
+						te->args[*arg_i].type = ARG_ARR_FLEX;
+						te->args[*arg_i].len  = sizeof(unsigned long long);
+						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_array_ptr_flex;
 					} else if (strncmp(type, "string_", sizeof("string_") - 1) == 0) {
 						te->args[*arg_i].type = ARG_DATA;
 						te->args[*arg_i].fmtr = te->args[*arg_i].fmtr ? te->args[*arg_i].fmtr : fmt_string_n;
@@ -414,8 +482,10 @@ int _lazy_unwrap_etry_format(const char *token_prefix, trace_entry_t *te, struct
 					} else {
 						te->args[*arg_i].type = ARG_INT;
 					}
-					te->args[*arg_i].len    = (size + 7) / 8;
-					te->args[*arg_i].bitlen = size;
+					if (te->args[*arg_i].type != ARG_ARR_FLEX) {
+						te->args[*arg_i].len    = (size + 7) / 8;
+						te->args[*arg_i].bitlen = size;
+					}
 				}
 
 				(*arg_i) ++;
@@ -655,6 +725,13 @@ int _build_arg_vec(long *arg_vec, trace_entry_t *entry, void *msg, int *length) 
 			arg_vec[i] = (long)msg;
 			msg += entry->args[i].len;
 			break;
+		case ARG_ARR_FLEX:
+			arg_vec[i] = (long)msg;
+			{
+				unsigned int count = le32toh(*(unsigned int *)msg);
+				msg += sizeof(count) + (count * (unsigned int)entry->args[i].len);
+			}
+			break;
 		case ARG_NONE:
 		case ARG_LAST:
 			fprintf(stderr, "Bad arg type entry->arg_type[%d] = %d\n", i, entry->args[i].type);
@@ -785,8 +862,16 @@ int trace_actual_length(trace_entry_t *entry, void *msg) {
 						++msg;
 					++msg; // Skip the '\0' too.
 					break;
-				case ARG_INT:
 				case ARG_DATA:
+					msg += entry->args[i].len;
+					break;
+				case ARG_ARR_FLEX:
+					{
+						unsigned int count = le32toh(*(unsigned int *)msg);
+						msg += sizeof(count) + (count * (unsigned int)entry->args[i].len);
+					}
+					break;
+				case ARG_INT:
 				case ARG_DOUBLE:
 					msg += entry->args[i].len;
 					break;

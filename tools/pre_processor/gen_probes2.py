@@ -258,7 +258,8 @@ typedef long long int s64;
         # Typedef
         writer.writeln('struct __attribute((packed)) {0} {{'.format(trace.struct))
         writer.writeln('short ____traceid:16;')
-        writer.writeln('\n'.join(arg.struct_field_def for arg in trace.fixed_len_args))
+        if trace.fixed_len_args:
+            writer.writeln('\n'.join(arg.struct_field_def for arg in trace.fixed_len_args))
         if trace.is_bitfield:
             writer.writeln(trace.render_aligner)
         writer.writeln('};')
@@ -353,10 +354,12 @@ class ArgType:
     def is_type_str(self):
         return (isinstance(self.key, str) and self.key.startswith('string'))
 
-    def __init__(self, key, fmt):
+    def __init__(self, key, fmt, tp=None):
         self.typedef = None  # No typedef is needed unless otherwise specified
         self.key = key
-        if self.key in {'symbol', 'stack_trace', 'printf_arg', 'vprintf_arg'} or self.is_type_str():
+        self.tp = tp  # Store the original type name for special handling
+        if self.key in {'symbol', 'stack_trace', 'printf_arg', 'vprintf_arg',
+                        'flex_array_u64', 'flex_array_u32', 'flex_array_int', 'flex_array_ptr'} or self.is_type_str():
             self.is_va_len = True  # Symbols and strings length is known only at runtime. Others known in compile time
         else:
             self.is_va_len = False
@@ -392,6 +395,26 @@ class ArgType:
             self.len_func = lambda arg: ' 0; va_copy(arg_ptr, args); {0}__len = vsnprintf(NULL, 0, {0}, args) + 1;'.format(arg)
             self.cpy_func = lambda dst, arg, l: 'vsnprintf({0}, {2}, {1}, arg_ptr); va_end(arg_ptr);'.format(dst, arg, l)
 
+        elif self.key == 'flex_array_u64':
+            self.proto_type = 'const u64*'
+            self.len_func = lambda arg: '4 + (___COUNT_ARG___ * sizeof(u64))'
+            self.cpy_func = lambda dst, arg, l: 'if ({1}) {{ *((__le32*){0}) = cpu_to_le32(___COUNT_ARG___); memcpy(({0}) + 4, {1}, ___COUNT_ARG___ * sizeof(u64)); }}\nelse {{ *((__le32*){0}) = 0; }}'.format(dst, arg)
+
+        elif self.key == 'flex_array_u32':
+            self.proto_type = 'const u32*'
+            self.len_func = lambda arg: '4 + (___COUNT_ARG___ * sizeof(u32))'
+            self.cpy_func = lambda dst, arg, l: 'if ({1}) {{ *((__le32*){0}) = cpu_to_le32(___COUNT_ARG___); memcpy(({0}) + 4, {1}, ___COUNT_ARG___ * sizeof(u32)); }}\nelse {{ *((__le32*){0}) = 0; }}'.format(dst, arg)
+
+        elif self.key == 'flex_array_int':
+            self.proto_type = 'const int*'
+            self.len_func = lambda arg: '4 + (___COUNT_ARG___ * sizeof(int))'
+            self.cpy_func = lambda dst, arg, l: 'if ({1}) {{ *((__le32*){0}) = cpu_to_le32(___COUNT_ARG___); memcpy(({0}) + 4, {1}, ___COUNT_ARG___ * sizeof(int)); }}\nelse {{ *((__le32*){0}) = 0; }}'.format(dst, arg)
+
+        elif self.key == 'flex_array_ptr':
+            self.proto_type = 'const unsigned long long*'
+            self.len_func = lambda arg: '4 + (___COUNT_ARG___ * sizeof(unsigned long long))'
+            self.cpy_func = lambda dst, arg, l: 'if ({1}) {{ *((__le32*){0}) = cpu_to_le32(___COUNT_ARG___); memcpy(({0}) + 4, {1}, ___COUNT_ARG___ * sizeof(unsigned long long)); }}\nelse {{ *((__le32*){0}) = 0; }}'.format(dst, arg)
+
         elif self.key in {'u8', 'u16', 'u32', 'u64', 'void*', 'float', 'double'}:  # Simple flat types
             self.proto_type = self.struct_type = self.key
             if self.proto_type == 'void*':
@@ -412,6 +435,14 @@ class ArgType:
                 key = "{}_{}".format(tp, fmt)
             else:
                 key = tp    # Va-len data
+        elif tp == 'array_u64_flex':
+            key = 'flex_array_u64'
+        elif tp == 'array_u32_flex':
+            key = 'flex_array_u32'
+        elif tp == 'array_int_flex':
+            key = 'flex_array_int'
+        elif tp == 'array_ptr_flex':
+            key = 'flex_array_ptr'
         elif size == 64 and '*' in tp:
             key = 'void*'  # Flat pointer
         elif tp == 'double' or tp == 'float':
@@ -435,7 +466,7 @@ class ArgType:
             raise UnknownArgType(size, tp)
         argtype = ctx.argtypes.get(key)
         if not argtype:
-            argtype = ArgType(key, fmt)
+            argtype = ArgType(key, fmt, tp)
             if argtype.typedef:
                 ctx.typedefs[argtype.typedef] = 0
             ctx.argtypes[key] = argtype
@@ -460,7 +491,13 @@ class Token:
             self.is_primitive = type(self.size) == int and self.size <= 64
             self.fmt = token_dict.get('dmesg_fmt', token_dict['fmt'])
             self.argtype = ctx.argtype(self.size, token_dict['type'], self.is_bitfield, self.fmt)
-            self.expanded = [self]
+            if token_dict['type'] in {'array_u64_flex', 'array_u32_flex', 'array_int_flex', 'array_ptr_flex'}:
+                count_token_dict = {'size': 32, 'type': 'u32', 'fmt': '%u', 'is_bitfield': False}
+                count_token = Token(ctx, token_name + '_count', count_token_dict)
+                count_token.is_count_arg = True
+                self.expanded = [self, count_token]
+            else:
+                self.expanded = [self]
         else:  # A composite token
             self.fmt = token_dict['fmt']
             self.subtokens = (self.name + '.' + sub[1:] for sub in _extract_tokens_from_fmt(self.fmt))
@@ -501,11 +538,23 @@ class Arg:
 
     @property
     def len_func_call(self):
-        return self.len_var + ' = ' + self.token.argtype.len_func(self.name)
+        len_expr = self.token.argtype.len_func(self.name)
+        if self.token.argtype.key.startswith('flex_array_'):
+            my_idx = self.trace.args.index(self)
+            if my_idx + 1 < len(self.trace.args):
+                count_arg = self.trace.args[my_idx + 1]
+                len_expr = len_expr.replace('___COUNT_ARG___', count_arg.name)
+        return self.len_var + ' = ' + len_expr
 
     @property
     def cpy_func(self):
-        return self.token.argtype.cpy_func('ptr', self.name, self.len_var)
+        cpy_expr = self.token.argtype.cpy_func('ptr', self.name, self.len_var)
+        if self.token.argtype.key.startswith('flex_array_'):
+            my_idx = self.trace.args.index(self)
+            if my_idx + 1 < len(self.trace.args):
+                count_arg = self.trace.args[my_idx + 1]
+                cpy_expr = cpy_expr.replace('___COUNT_ARG___', count_arg.name)
+        return cpy_expr
 
     @property
     def struct_field_def(self):
@@ -590,7 +639,7 @@ class Trace:
         self.proto_args = [arg for arg in self.args if arg.proto_type]
 
         self.va_len_args = [arg for arg in self.args if arg.token.argtype.is_va_len]
-        self.fixed_len_args = [arg for arg in self.args if not arg.token.argtype.is_va_len]
+        self.fixed_len_args = [arg for arg in self.args if not arg.token.argtype.is_va_len and not getattr(arg.token, 'is_count_arg', False)]
 
         self.size_formula = '4 + ' + 'sizeof(struct {0})'.format(self.struct)
         va_len_formula = ' + '.join(arg.len_var for arg in self.va_len_args)

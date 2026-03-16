@@ -43,7 +43,7 @@ enum pager_dbg_flag {
 #include "formatters/formatter_functions.h"
 #include "pager_hashtable.h"
 
-enum arg_types { ARG_NONE, ARG_STRING, ARG_INT, ARG_DATA, ARG_DOUBLE, ARG_LAST };
+enum arg_types { ARG_NONE, ARG_STRING, ARG_INT, ARG_DATA, ARG_DOUBLE, ARG_ARR_FLEX, ARG_LAST };
 
 /**
  * Used to give a dictionary of immutable string tokens for fast string lookups (for token ids and trace ids)
@@ -81,7 +81,7 @@ typedef struct trace_args {
 	formatter_function fmtr;
 } trace_arg_t;
 
-#define IS_VA_LEN(arg) ((arg).type == ARG_STRING)
+#define IS_VA_LEN(arg) ((arg).type == ARG_STRING || (arg).type == ARG_ARR_FLEX)
 
 typedef struct trace_entry {
 	unsigned short trace_id;
