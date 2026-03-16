@@ -193,16 +193,55 @@ void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct
 	} else {
 		//we don't call this function on lock release - mainly because the operation already does not exist
 		//so, rdma_comp->lock.bi should contain a legal value
-		NVMEIBC_IO_PET_MSG(&o->journal,
-							"lock.response(sgmnt=%hhu, opr=%hhu<enum nvmeibc_disk_locks_opr>, rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, lock_status=%hhu<enum nvmeibc_block_lock_status>, blkset_info=0x%x<union nvmeib_blkset_info>, contending=0x%x<union nvmeib_lock_id>))",
-							severity,
-							numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
-							numeric_downcast(u8, rdma_comp->opr),
-							numeric_downcast(u8, rdma_comp->code),
-							numeric_downcast(u8, rdma_comp->lock_status),
-							//casting, since there is no promises about the upper bits content
-							nvmeibc_d_rdma_comp_get_bi(rdma_comp).all,
-							nvmeibc_d_rdma_comp_get_lock_id(rdma_comp).all);
+		if (lock->retries) {
+			//we don't log all retries - not enough space in the journal
+			//instead we will write the last successful command state.
+			//For example, blockset info write is done from the data-path
+			//as piggyback or as standalone command. In both cases we wait
+			//for all commands to finish before logging.
+			NVMEIBC_IO_PET_MSG(
+				&o->journal,
+				"lock.response(sgmnt=%hhu, opr=%hhu<enum nvmeibc_disk_locks_opr>, "
+								"rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, "
+											"lock_status=%hhu<enum nvmeibc_block_lock_status>, "
+											"blkset_info=0x%x<union nvmeib_blkset_info>, "
+											"contending=0x%x<union nvmeib_lock_id>, "
+											"retries=%u, "
+											"compare=0x%x<union nvmeib_lock_id>, "
+											"exchange=0x%x<union nvmeib_lock_id> "
+								")"
+				")",
+				severity,
+				numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+				numeric_downcast(u8, rdma_comp->opr),
+				numeric_downcast(u8, rdma_comp->code),
+				numeric_downcast(u8, rdma_comp->lock_status),
+				//casting, since there is no promises about the upper bits content
+				nvmeibc_d_rdma_comp_get_bi(rdma_comp).all,
+				nvmeibc_d_rdma_comp_get_lock_id(rdma_comp).all,
+				lock->retries,
+				nvmeibc_d_rdma_comp_get_compare_lock_id(rdma_comp).all,
+				nvmeibc_d_rdma_comp_get_exchange_lock_id(rdma_comp).all
+			);
+		} else {
+			NVMEIBC_IO_PET_MSG(
+				&o->journal,
+				"lock.response(sgmnt=%hhu, opr=%hhu<enum nvmeibc_disk_locks_opr>, "
+							"rdma_comp(code=%hhu<enum nvmeibc_rdma_intent>, "
+										"lock_status=%hhu<enum nvmeibc_block_lock_status>, "
+										"blkset_info=0x%x<union nvmeib_blkset_info>, "
+										"contending=0x%x<union nvmeib_lock_id> "
+							")"
+				")",
+				severity,
+				numeric_downcast(u8, dp_locks_get_sgmnt_idx_of_lock(lock)),
+				numeric_downcast(u8, rdma_comp->opr),
+				numeric_downcast(u8, rdma_comp->code),
+				numeric_downcast(u8, rdma_comp->lock_status),
+				//casting, since there is no promises about the upper bits content
+				nvmeibc_d_rdma_comp_get_bi(rdma_comp).all,
+				nvmeibc_d_rdma_comp_get_lock_id(rdma_comp).all);
+		}
 	}
 }
 
@@ -1062,9 +1101,6 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	struct nvmeibc_cmd_lock *owner_lock = &locksets[owner_id];
 	struct operation *o = locksets->cmds->o;
 
-	if (l == owner_lock){
-		nvmeibc_cmd_lock_response_io_pet_describe(o,l);
-	}
 	__squash_transport_lock_status(l, dc->lock_status);
 	BUG_ON((l->status != dc->lock_status) || (l->type == NVMEIBC_CMD_PREDISCARD));		// Just sanity
 	WARN(!(NCL_is_failed_to_acquire(l->status) || (l->status == NCL_STATUS_CONTENDED) || (l->status == NCL_STATUS_TAKEN)), "nvmeibc bug: locks=%p[%d].status=%d", locksets, lock_i, l->status);
@@ -1082,6 +1118,10 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 		}
 	#endif
 	if (l->status == NCL_STATUS_TAKEN) {
+		if (l == owner_lock) {
+			nvmeibc_cmd_lock_response_io_pet_describe(o,l);
+		}
+
 		if (msecs >= warn_if_lock_took_more_than_n_msec) {
 			#ifdef DEBUG_CONTENDED_LOCKS
 			_NW(warn_1_check_lock_actions, DMESG_PREFIX("@DEV_NAME") ": slow I/O: Long lock acqusition. locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] retries=@RETRIES time=@MILISECONDS @DLBA my_id=@LOCKID last_contended=@LOCKID first_contended=@LOCKID last_contended_txid=@TXID first_contended_txid=@TXID",
@@ -1260,7 +1300,12 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	}
 	l->status = NCL_STATUS_ISSUED;						// Issue owner request
 	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;
-	nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
+	if (l->retries == 0) {
+		//don't write retries to the PET journal;
+		//1. It may break single PET journal accessor concept, since it could be done in parallel with other locks.
+		//2. It can finish all free space in the journal
+		nvmeibc_cmd_lock_request_io_pet_describe(locksets->cmds? locksets->cmds->o : NULL, l);
+	}
 	rv = icore_ops->run_cmpxchg(icore_ops, seg->disk, handle_of(seg), l->address, dc);
 	lock_rqsted = jiffies;
 	if (unlikely(rv)) { // handle pausable/transport layer immediate errors
@@ -1297,6 +1342,17 @@ u64 get_lockid_for_cmpxchg(const struct nvmeibc_raid1 *r1, enum nvmeib_block_io_
 	}
 	return rv.all;
 }
+
+//Lock Acquisition State Machine & PET journaling
+//1. The code state is less then optimal (period).
+//2. The PET journal implements "single writer" model. It was done so for performance reasons.
+//3. The integration between PET journaling and lock maintenance state machine is based on the following assumptions:
+//3.1 Owner lock is taken first - single writer on the request and the response paths
+//3.2 Onwer lock issues lock requests for siblings. It was easier to implement journaling before every copy-owner is sent.
+//3.3 Only when the last copy-owner response (lock taken) is arrived, the responses will be written to the journal
+//3.4 Regardless the role (owner or copy) retry attempt will not be journalled
+//3.5 - 3.4 - ensures we have a single writer
+//3.6 In case, a lock was taken after few retries, we will dump more information, so it would be clear what we wrote on the remote server
 
 void dp_locks_send_all(struct nvmeibc_cmd_lock *locksets)
 {
