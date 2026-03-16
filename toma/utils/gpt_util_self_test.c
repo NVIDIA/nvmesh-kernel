@@ -218,7 +218,7 @@ static int SELF_TEST_generate_mock_nvmesh_disk_with_segments(const char *filepat
 		seg_start = disk_md_end + 5 + i * 50;		/* Gap of 5 blocks, then 50 blocks per segment */
 
 		seg_md_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-			&metadata_gpt, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID,
+			&metadata_gpt, &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID,
 			&seg_uuid,
 			seg_start,
 			seg_start + 49,		/* 50 blocks per segment */
@@ -298,7 +298,7 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	// 3. Add EXCELERO_METADATA partition using all available space (test device)
+	// 3. Add NVMESH_METADATA partition using all available space (test device)
 	metadata_start = main_gpt.header.first_usable_pba;
 	metadata_end = main_gpt.header.last_usable_pba;
 
@@ -306,11 +306,11 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
 	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&main_gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID,
 		&metadata_partition_uuid,
 		metadata_start, metadata_end,
-		EXCELERO_METADATA_PARTITION_NAME,
-		strlen(EXCELERO_METADATA_PARTITION_NAME));
+		NVMESH_METADATA_PARTITION_NAME,
+		strlen(NVMESH_METADATA_PARTITION_NAME));
 
 	if (!metadata_partition) {
 		N_Ef(selftest_add_metadata_failed, "Failed to add metadata partition to mock device");
@@ -332,12 +332,12 @@ int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 											 &metadata_gpt, pblk_size,
 											 MAX_NUM_GPT_ENTRIES, &metadata_disk_uuid);
 
-	// Add EXCELERO_DISK_METADATA partition (128KB = 32 blocks at 4KB per block)
+	// Add NVMESH_DISK_METADATA partition (128KB = 32 blocks at 4KB per block)
 	disk_metadata_partition_uuid.ll[0] = 0xDD11223344556677ULL;
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &disk_metadata_partition_uuid,
 												 metadata_gpt.header.first_usable_pba,
 												 metadata_gpt.header.first_usable_pba + 31,		/* 32 blocks (128KB) */
@@ -453,7 +453,7 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	// 3. Add EXCELERO_METADATA partition using all available space
+	// 3. Add NVMESH_METADATA partition using all available space
 	metadata_start = main_gpt.header.first_usable_pba;
 	metadata_end = main_gpt.header.last_usable_pba;
 
@@ -461,11 +461,11 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
 	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&main_gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID,
 		&metadata_partition_uuid,
 		metadata_start, metadata_end,
-		EXCELERO_METADATA_PARTITION_NAME,
-		strlen(EXCELERO_METADATA_PARTITION_NAME));
+		NVMESH_METADATA_PARTITION_NAME,
+		strlen(NVMESH_METADATA_PARTITION_NAME));
 
 	if (!metadata_partition) {
 		N_Ef(selftest_add_metadata_seg_md_failed, "Failed to add metadata partition");
@@ -487,12 +487,12 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 											 &metadata_gpt, pblk_size,
 											 MAX_NUM_GPT_ENTRIES, &metadata_disk_uuid);
 
-	// 6. Add EXCELERO_DISK_METADATA partition (small, just 10 blocks)
+	// 6. Add NVMESH_DISK_METADATA partition (small, just 10 blocks)
 	disk_metadata_partition_uuid.ll[0] = 0xDD11223344556677ULL;
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &disk_metadata_partition_uuid,
 												 metadata_gpt.header.first_usable_pba,
 												 metadata_gpt.header.first_usable_pba + 9,  // Only 10 blocks
@@ -510,7 +510,7 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 	seg_uuid_1.ll[1] = 0x2222222222222222ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID,
 												 &seg_uuid_1,
 												 seg_md_pba_s, seg_md_pba_e,
 												 "SEG_1", strlen("SEG_1"))) {
@@ -525,7 +525,7 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 	seg_uuid_2.ll[1] = 0x4444444444444444ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID,
 												 &seg_uuid_2,
 												 seg_md_pba_s, seg_md_pba_e,
 												 "SEG_2", strlen("SEG_2"))) {
@@ -693,7 +693,7 @@ int SELF_TEST_generate_mock_device_modified(const char *filepath)
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	// Add EXCELERO_METADATA partition with DIFFERENT name
+	// Add NVMESH_METADATA partition with DIFFERENT name
 	metadata_start = main_gpt.header.first_usable_pba;
 	metadata_end = main_gpt.header.last_usable_pba;
 
@@ -701,7 +701,7 @@ int SELF_TEST_generate_mock_device_modified(const char *filepath)
 	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
 	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&main_gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID,
 		&metadata_partition_uuid,
 		metadata_start, metadata_end,
 		"MODIFIED_metadata",  // MODIFIED: different name only
@@ -731,7 +731,7 @@ int SELF_TEST_generate_mock_device_modified(const char *filepath)
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &disk_metadata_partition_uuid,
 												 metadata_gpt.header.first_usable_pba,
 												 metadata_gpt.header.last_usable_pba,
@@ -813,17 +813,17 @@ int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 		return -1;
 	}
 
-	/* Add overlapping partition to Main GPT (overlaps with existing EXCELERO_METADATA at entry 0) */
+	/* Add overlapping partition to Main GPT (overlaps with existing NVMESH_METADATA at entry 0) */
 	overlap_partition_uuid.ll[0] = 0x1122334455667788ULL;
 	overlap_partition_uuid.ll[1] = 0x99AABBCCDDEEFF00ULL;
 
-	/* Existing partition 0: pba_s=258, pba_e=1742 (EXCELERO_METADATA) */
+	/* Existing partition 0: pba_s=258, pba_e=1742 (NVMESH_METADATA) */
 	/* New partition 1: pba_s=1400, pba_e=1742 - OVERLAPS! */
 	overlap_start = main_gpt.entries[0].pba_s + 1142;  // 1400
 	overlap_end = main_gpt.entries[0].pba_e;  // 1742
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
-												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &overlap_partition_uuid,
 												 overlap_start,
 												 overlap_end,
@@ -3036,7 +3036,7 @@ DEFINE_TEST(binary_backup_restore)
 			/* Find last segment metadata partition to place new one after it */
 			for (int j = 0; j < metadata_gpt.max_n_entries; j++) {
 				if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_gpt.entries[j]) &&
-					ARE_UUID_EQ(&metadata_gpt.entries[j].partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+					ARE_UUID_EQ(&metadata_gpt.entries[j].partition_type_guid, &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
 					if (metadata_gpt.entries[j].pba_e > max_seg_pba_e) {
 						max_seg_pba_e = metadata_gpt.entries[j].pba_e;
 					}
@@ -3053,7 +3053,7 @@ DEFINE_TEST(binary_backup_restore)
 
 			/* Place new segment after last partition with 5-block gap (50 blocks total) */
 			memset(&new_entry, 0, sizeof(new_entry));
-			new_entry.partition_type_guid = EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID;
+			new_entry.partition_type_guid = NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID;
 			new_entry.partition_guid.ll[0] = 0xDEADBEEF0001ULL;
 			new_entry.partition_guid.ll[1] = 0xDEADBEEF0002ULL;
 			new_entry.pba_s = max_seg_pba_e + 5;		/* 5-block gap for safety */
@@ -3575,7 +3575,7 @@ DEFINE_TEST(backup_creation_non_nvmesh_device)
 	uint64_t							n_disk_blocks = SELF_TEST_MOCK_DEVICE_BLOCKS;
 	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
 
-	/* Create device with Main GPT ONLY (no EXCELERO_METADATA partition) */
+	/* Create device with Main GPT ONLY (no NVMESH_METADATA partition) */
 	fd = open(device_path, O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
 		TEST_FAIL("SETUP FAILED: Could not create device");
@@ -3598,7 +3598,7 @@ DEFINE_TEST(backup_creation_non_nvmesh_device)
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	/* Write Main GPT (NO EXCELERO_METADATA partition added) */
+	/* Write Main GPT (NO NVMESH_METADATA partition added) */
 	if (nvmeibt_disk_metadata_store_gpt(NULL, fd, pblk_size, &main_gpt, false) < 0) {
 		goto out;
 	}
@@ -3781,7 +3781,7 @@ DEFINE_TEST(json_add_partition_entry)
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition = NULL;
 
 	/* Create LARGER device (4000 blocks) to have room for multiple partitions */
-	/* Standard 2000 blocks has EXCELERO_METADATA taking 258-1742, leaving no room */
+	/* Standard 2000 blocks has NVMESH_METADATA taking 258-1742, leaving no room */
 	memset(&main_gpt, 0, sizeof(main_gpt));
 	memset(&metadata_gpt, 0, sizeof(metadata_gpt));
 	nvmeibt_strlcpy(main_gpt.main_or_metadata, "Main", sizeof(main_gpt.main_or_metadata));
@@ -3803,18 +3803,18 @@ DEFINE_TEST(json_add_partition_entry)
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 												LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	/* Add EXCELERO_METADATA partition (smaller to leave room for new partition) */
+	/* Add NVMESH_METADATA partition (smaller to leave room for new partition) */
 	/* Use PBA 258-1500 (instead of full usable range 258-3742) */
 	metadata_partition_uuid.ll[0] = 0xAABBCCDD11223344ULL;
 	metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
 	metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-		&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
+		&main_gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID,
 		&metadata_partition_uuid,
 		main_gpt.header.first_usable_pba,
 		main_gpt.header.first_usable_pba + 1242,		/* PBA 258-1500 */
-		EXCELERO_METADATA_PARTITION_NAME,
-		strlen(EXCELERO_METADATA_PARTITION_NAME));
+		NVMESH_METADATA_PARTITION_NAME,
+		strlen(NVMESH_METADATA_PARTITION_NAME));
 
 	if (!metadata_partition) {
 		close(fd_large);
@@ -3837,7 +3837,7 @@ DEFINE_TEST(json_add_partition_entry)
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
 	nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-											&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+											&NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
 											&disk_metadata_partition_uuid,
 											metadata_gpt.header.first_usable_pba,
 											metadata_gpt.header.last_usable_pba,
@@ -4154,7 +4154,7 @@ static int create_device_with_many_partitions(const char *filepath, int n_partit
 	uint64_t							n_disk_blocks = 500000;		/* ~2GB device (sparse - minimal disk usage) */
 	int									pblk_size = SELF_TEST_MOCK_DEVICE_BLOCK_SIZE;
 	uint64_t							data_partition_size = 50;		/* Each DATA partition is 50 blocks */
-	uint64_t							metadata_partition_size = 1500;	/* EXCELERO_METADATA needs ~1500 blocks for nested GPT */
+	uint64_t							metadata_partition_size = 1500;	/* NVMESH_METADATA needs ~1500 blocks for nested GPT */
 	uint64_t							current_pba;
 	const struct nvmeibt_disk_gpt_partition_entry	*disk_md_partition;
 	struct nvmeibt_disk_gpt_partition_entry			*metadata_partition;
@@ -4182,7 +4182,7 @@ static int create_device_with_many_partitions(const char *filepath, int n_partit
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
 	/* Add n_partitions non-overlapping partitions */
-	/* First partition: EXCELERO_METADATA */
+	/* First partition: NVMESH_METADATA */
 	/* Remaining partitions: DATA segments */
 	current_pba = main_gpt.header.first_usable_pba;
 	for (int i = 0; i < n_partitions; i++) {
@@ -4202,10 +4202,10 @@ static int create_device_with_many_partitions(const char *filepath, int n_partit
 		part_uuid.ll[0] = 0xAABBCCDD00000000ULL | i;
 		part_uuid.ll[1] = 0x5566778899AABBCCULL;
 
-		/* First partition is EXCELERO_METADATA (contains nested GPT) */
+		/* First partition is NVMESH_METADATA (contains nested GPT) */
 		/* Rest are DATA partitions (normal NVMesh segments) */
-		type_guid = (i == 0) ? &EXCELERO_METADATA_PARTITION_TYPE_GUID
-							 : &EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL;
+		type_guid = (i == 0) ? &NVMESH_METADATA_PARTITION_TYPE_GUID
+							 : &NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL;
 
 		if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
 													 type_guid,
@@ -4240,7 +4240,7 @@ static int create_device_with_many_partitions(const char *filepath, int n_partit
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &disk_metadata_partition_uuid,
 												 metadata_gpt.header.first_usable_pba,
 												 metadata_gpt.header.last_usable_pba,

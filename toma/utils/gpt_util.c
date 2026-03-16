@@ -46,7 +46,7 @@ enum GPT_UTIL_ACTION {
 	ACTION_DISPLAY_MBR,			// -m: display MBR only
 	ACTION_FIX_GPT,				// -f: fix GPT from alternate copy
 	ACTION_FIX_MBR,				// -F: fix MBR
-	ACTION_CHECK_NVMESH		// -i: check if NVMESH_METADATA exists
+	ACTION_CHECK_NVMESH,		// -i: check if NVMESH_METADATA exists
 	ACTION_EXPORT_JSON,			// --output-json: export GPT to JSON
 	ACTION_APPLY_JSON,			// --apply-from: apply GPT from JSON (dry-run by default)
 	ACTION_UPGRADE_GPT,			// -U: upgrade GPT (fix n_partition_entries to 8192 and recalculate CRC)
@@ -764,7 +764,7 @@ static int backup_all_structures(int disk_fd, const char *backup_dir, int pblk_s
 		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(seg_md_entry)) {
 			continue;
 		}
-		if (!ARE_UUID_EQ(&seg_md_entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+		if (!ARE_UUID_EQ(&seg_md_entry->partition_type_guid, &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
 			continue;
 		}
 
@@ -872,7 +872,7 @@ static int create_binary_backup(int disk_fd, struct gpt_util_config *config, cha
 	/* Validate device has Metadata GPT (required for all NVMesh devices) */
 	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(main_gpt);
 	if (!metadata_partition) {
-		N_Ef(backup_no_metadata_partition, "Device has no EXCELERO_METADATA partition");
+		N_Ef(backup_no_metadata_partition, "Device has no NVMESH_METADATA partition");
 		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no metadata partition)" COL_RESET "\n");
 		goto out;
 	}
@@ -1008,7 +1008,7 @@ static BOOL is_action_read_only(struct gpt_util_config *config)
 	switch (config->action) {
 	case ACTION_DISPLAY_GPT:
 	case ACTION_DISPLAY_MBR:
-	case ACTION_CHECK_EXCELERO:
+	case ACTION_CHECK_NVMESH:
 	case ACTION_EXPORT_JSON:
 		return true;
 	case ACTION_APPLY_JSON:
@@ -1199,8 +1199,8 @@ static void show_entry_diff(const char *change_type,
 		fprintf(stdout, "    - Range: %lu-%lu\n", old_entry->pba_s, old_entry->pba_e);
 
 		// Warn if this is a critical partition
-		if (ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
-			ARE_UUID_EQ(&old_entry->partition_type_guid, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
+		if (ARE_UUID_EQ(&old_entry->partition_type_guid, &NVMESH_METADATA_PARTITION_TYPE_GUID) ||
+			ARE_UUID_EQ(&old_entry->partition_type_guid, &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID)) {
 			N_Wf(delete_critical_partition, "Deleting critical partition: name=@STR type=@UUID_LE",
 				 old_name, &old_entry->partition_type_guid);
 			fprintf(stdout, "    " COL_RED_BOLD "[WARNING] This is a critical NVMesh partition!" COL_RESET "\n");
@@ -1740,7 +1740,7 @@ static int export_gpt_to_json(int disk_fd,
 
 	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&main_gpt);
 	if (!metadata_partition) {
-		N_Ef(export_no_metadata_partition, "Device has no EXCELERO_METADATA partition");
+		N_Ef(export_no_metadata_partition, "Device has no NVMESH_METADATA partition");
 		fprintf(stderr, COL_RED_BOLD "ERROR: Device not NVMesh formatted (no metadata partition)" COL_RESET "\n");
 		fprintf(stderr, "  gpt_util only supports NVMesh devices.\n");
 		goto out;
@@ -1784,11 +1784,11 @@ static int export_gpt_to_json(int disk_fd,
 		metadata_bufs.primary_header, metadata_bufs.alternate_header,
 		metadata_bufs.primary_entries, metadata_bufs.alternate_entries);
 
-	// NVMesh-only: REQUIRE EXCELERO_DISK_METADATA partition
+	// NVMesh-only: REQUIRE NVMESH_DISK_METADATA partition
 	for (int k = 0; k < metadata_gpt.max_n_entries; k++) {
 		if (nvmeibt_disk_metadata_is_gpt_entry_in_use(&metadata_bufs.primary_entries[k])) {
 			if (ARE_UUID_EQ(&metadata_bufs.primary_entries[k].partition_type_guid,
-							&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
+							&NVMESH_DISK_METADATA_PARTITION_TYPE_GUID)) {
 				disk_metadata_partition = &metadata_bufs.primary_entries[k];
 				break;
 			}
@@ -1881,7 +1881,7 @@ static int export_gpt_to_json(int disk_fd,
 			continue;
 		}
 
-		if (!ARE_UUID_EQ(&seg_md_entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+		if (!ARE_UUID_EQ(&seg_md_entry->partition_type_guid, &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
 			continue;
 		}
 
@@ -2967,7 +2967,7 @@ static int validate_nvmesh_device_structure(int disk_fd, int pblk_size, uint64_t
 	metadata_partition = nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(main_gpt);
 	if (!metadata_partition) {
 		N_Ef(validate_device_no_metadata, "Device has no metadata partition (not a valid NVMesh device)");
-		fprintf(stderr, COL_RED_BOLD "ERROR: Device must have EXCELERO_METADATA partition" COL_RESET "\n");
+		fprintf(stderr, COL_RED_BOLD "ERROR: Device must have NVMESH_METADATA partition" COL_RESET "\n");
 		return -1;
 	}
 
@@ -3453,7 +3453,7 @@ static int process_segment_metadata_from_json(
 			if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(entry)) {
 				continue;
 			}
-			if (!ARE_UUID_EQ(&entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+			if (!ARE_UUID_EQ(&entry->partition_type_guid, &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
 				continue;
 			}
 
