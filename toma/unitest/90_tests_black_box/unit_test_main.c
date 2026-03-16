@@ -68,6 +68,7 @@ static void do_on_unitests_done(void) {
 
 /********************************************************************/
 #define WAIT_UNTIL(cond) ({ while (!(cond)) yield(); })
+#define SCENARIO_PRINT(id, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_EMERG, id, NVMEIB_LOG_ETERNAL, "<> ", fmt,  ## __VA_ARGS__)
 
 static void scenario_test_signals(void) {
 	os_sim_send_signal_to_toma(SIGUSR2);	yield();
@@ -77,58 +78,58 @@ static void scenario_test_signals(void) {
 
 static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks ready for format");
+	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
 
-	N_SANDBOX(__AUTOID__, "unit test thread: sending format drives");
+	SCENARIO_PRINT(__AUTOID__, "sending format drives");
 	mgmt_sim_send_format_drives();
 
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks formatted ok");
+	SCENARIO_PRINT(__AUTOID__, "waiting for both disks formatted ok");
 	WAIT_UNTIL(mgmt_sim_both_disks_formatted_ok());
 
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for drive zeroing to complete");
+	SCENARIO_PRINT(__AUTOID__, "waiting for drive zeroing to complete");
 	WAIT_UNTIL(mgmt_sim_both_disks_zeroing_done());
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for leader to exists");
+	SCENARIO_PRINT(__AUTOID__, "waiting for leader to exists");
 	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
 	mgmt_sim_send_leader_keep_alive();
 
-	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_REMOTE1");
+	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_REMOTE1");
 	mgmt_sim_send_add_volume_remote1();
 
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for reportTarget after V_REMOTE1");
+	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after V_REMOTE1");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
 
 	mgmt_sim_send_leader_keep_alive();
-	N_SANDBOX(__AUTOID__, "unit test thread: sending addVolume V_R1");
+	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_R1");
 	mgmt_sim_send_add_volume_r1();
 
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for V_R1 pRaid report");
+	SCENARIO_PRINT(__AUTOID__, "waiting for V_R1 pRaid report");
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
-	N_SANDBOX(__AUTOID__, "unit test thread: sending deleteVolume V_R1");
+	SCENARIO_PRINT(__AUTOID__, "sending deleteVolume V_R1");
 	mgmt_sim_send_delete_volume_r1();
 	mgmt_sim_send_leader_keep_alive();
 
 	/* Zeroing is skipped for FIRST_USE_EVER segments (never activated) — segments go directly to X_DONE */
 
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for V_R1 praid deprecated in report");
+	SCENARIO_PRINT(__AUTOID__, "waiting for V_R1 praid deprecated in report");
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_deprecated());
 
-	N_SANDBOX(__AUTOID__, "unit test thread: sending deleteVolumeCompleted V_R1");
+	SCENARIO_PRINT(__AUTOID__, "sending deleteVolumeCompleted V_R1");
 	mgmt_sim_send_delete_volume_completed_r1();
 
-	N_SANDBOX(__AUTOID__, "unit test thread: waiting for reportTarget after deleteVolumeCompleted (gc)");
+	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after deleteVolumeCompleted (gc)");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
 }
 
 static void all_test_scenarios(void) {
 	scenario_create_remove_r1();
 	scenario_test_signals();
-	N_SANDBOX(__AUTOID__, "unit test thread: test scenario complete");
+	SCENARIO_PRINT(__AUTOID__, "test scenario complete");
 	os_sim_send_signal_to_toma(SIGKILL);		// Issue shutdown instruction
 	scheduler.is_unit_test_done = true;
 	do_on_unitests_done();

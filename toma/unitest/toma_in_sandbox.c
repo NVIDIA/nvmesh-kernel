@@ -18,7 +18,8 @@
 void syslog(int priority, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	if (     priority <= LOG_ERR)		fprintf(stderr, COL_RED_BOLD);
+	if (     priority == LOG_EMERG)		fprintf(stderr, COL_GREEN);		// Only used by unitests
+	else if (priority <= LOG_ERR)		fprintf(stderr, COL_RED_BOLD);	// Including LOG_ALERT, LOG_CRIT
 	else if (priority == LOG_WARNING)	fprintf(stderr, COL_YELLOW);
 	else if (priority == LOG_NOTICE)	fprintf(stderr, COL_PURPL);
 	else if (priority == LOG_INFO)		fprintf(stderr, COL_WHITE_BOLD);
