@@ -135,6 +135,13 @@ build() {
 	echo "-->Done"
 }
 
+setup_simulator_dependencies() {
+	echo "-->Setting up simulator dependencies... - skipped"
+	#SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+	#PROJECT_ROOT=$(realpath "$SCRIPT_DIR/../../..")
+	#bash "$PROJECT_ROOT/common/pet/setup.sh"
+}
+
 TRACES_FLAGS="-dbg 1 -tracedbg 3 -good-path-dbg 3"
 # ---------- Allows killing the running execution with ctrl+c
 case "$1" in
@@ -185,6 +192,7 @@ case "$1" in
 		;;
 	"nightly")
 		shift
+		setup_simulator_dependencies
 		NIGHTLY_FLAGS="-async -conf ./nightly.cfg"
 		clean
 		build ${@} USE_SANITIZERS=1
@@ -198,6 +206,7 @@ case "$1" in
 		;;
 	"sanity")
 		shift
+		setup_simulator_dependencies
 		SANITY_FLAGS="-nRep 3 $TRACES_FLAGS" 
 		clean
 		build ${@} USE_RELEASE=0 USE_SANITIZERS=1
@@ -220,11 +229,13 @@ case "$1" in
 		# ---------- For continous integration: generate logs and coredump location, might not die with ctrl+c
 		shift
 
-                if supports_scl; then
-                        MAKE_CMD="scl enable devtoolset-8 -- make"
-                else
-                        MAKE_CMD="make"
-                fi
+		if supports_scl; then
+				MAKE_CMD="scl enable devtoolset-8 -- make"
+		else
+				MAKE_CMD="make"
+		fi
+
+		setup_simulator_dependencies
 		#if [ ! -z "$1" ]; then
 		#	REPEAT=$1
 		#	shift

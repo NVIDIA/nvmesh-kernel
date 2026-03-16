@@ -297,6 +297,7 @@ OBJECTS = $(patsubst %.c, $(OBJ_DIR)/%.o, $(SOURCES)) $(addprefix $(OBJ_DIR)/,$(
 COMPILATION_CMD_FILE = $(OBJ_DIR)/compilation_cmd.txt
 BACKUPS =$(SOURCES:.c=.~) $(ASM_OBJ:.o=.~)
 EXE_NAME = blk_unitest
+EXE_PATH = $(THIS_MKFILE_DIR)/$(EXE_NAME)
 
 PRECOMPILED_HEADERS := $(OBJ_DIR)/pch.h.gch
 IGNORE_PRECOMPILED_HEADERS := kr_incs.c tests_conf.c $(SSDA)/tools/nvmeib_trace_userspace.c $(SSDA)/tools/nvmeib_trace_userspace_poller.c
@@ -344,9 +345,15 @@ autogen: $(AUTOGEN_TARGETS) | ECHO_COMPILING
 	@printf "Autogen code \e[0;32m Done\e[0;0m\n"
 
 
+PET_DICT_DIR = $(THIS_MKFILE_DIR)/$(OBJ_DIR)/io_pet
+PET_DICTIONARY = $(PET_DICT_DIR)/dict.$(COMMIT_ID).json
+PET_MESSAGES_SH = $(SSDA)/common/pet/pet_messages.sh
+
 $(EXE_NAME): $(OBJECTS) $(ASMOBJ) $(OBJ_DIR)/traces_ids.o
 	@$(CC) $(LDFLAGS) $(OBJECTS) $(OBJ_DIR)/traces_ids.o -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
 	$(info -->Linking  ... |$(OBJECTS)|)
+	@mkdir -p $(PET_DICT_DIR)	
+	-$(PET_MESSAGES_SH) save-dictionary $(EXE_PATH) nvmeibc_io_pet_msgs $(PET_DICTIONARY)
 
 $(OBJECTS): $(PRECOMPILED_HEADERS)
 
@@ -448,7 +455,7 @@ clean: clean_prev_run
 	@rm -f $(OBJECTS) $(BACKUPS) $(EXE_NAME)
 	@rm -f $(EXE_NAME).log $(EXE_NAME).err
 	@rm -f $(PERF_OBJ) $(PERF_NAME)
-	@rm -f $(PREPROCESSED) $(OBJ_DIR)/gen_events.h $(FILE_TR_JSON)
+	@rm -f $(PREPROCESSED) $(OBJ_DIR)/gen_events.h $(FILE_TR_JSON) $(PET_DICTIONARY)
 	@rm -f $(PRECOMPILED_HEADERS)
 	@rm -f $(COMPILATION_CMD_FILE) $(FILES_DEPEND) $(AUTOGEN_TARGETS)
 	@printf "+-->Removing |\e[1;45m$(OBJ_DIR)\e[0;0m|\n"
