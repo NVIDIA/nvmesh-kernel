@@ -6,12 +6,8 @@
 #ifndef KERNEL_BASE_TYPES_H
 #define KERNEL_BASE_TYPES_H
 #ifdef __KERNEL__
-	#ifndef sizeof_field
-		#define sizeof_field FIELD_SIZEOF
-	#endif
-	#ifndef FIELD_SIZEOF
-		#define FIELD_SIZEOF sizeof_field
-	#endif
+	#include <linux/stddef.h>
+	#include <linux/types.h>
 #else
 	// Kernel already has those functions. Define as compatibility for user-space
 	#include <stdio.h>
