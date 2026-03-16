@@ -591,6 +591,9 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
     raft_time_since_converted_to_leader:
       help: 'Time since converted to RAFT leader'
       type: 'counter'
+    num_clients:
+      help: 'Number of connected clients'
+      type: 'gauge'
   aggregates:
     raft_leader_name:
       help: 'Raft leader name as seen by current TOMA'
