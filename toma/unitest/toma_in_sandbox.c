@@ -690,7 +690,6 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 }
 
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
-	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 500
 	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
 	int i, n_events, unitest_fiber_ended;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
@@ -710,14 +709,15 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	}
 	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", ep->n_calls_to_wait, sys->all_unitests_finished, n_events); ep->n_calls_to_wait++;
 	if (!sys->all_unitests_finished && unitest_fiber_ended) {
-		SANDBOX_PRINT("All unit-tests: %s, \t\tShutting down Toma app\n", COL_GREEN "passed" COL_RESET);
 		sys->all_unitests_finished = true;
 		errno = ENOMEM;
-		return -1;				// Simulate shutdown instruction via kafka from mgmt
+		return -1;				// Todo: Simulate shutdown instruction via kafka from mgmt, via end of unit-tests and remove this return
 	}
+	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 500
 	if (ep->n_calls_to_wait >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		SANDBOX_PRINT("failed: Toma did not stop within %d cycles\n", SANDBOX_TERMINATE_AFTER_N_LOOPS);
-		BUG_ON(true);
+		errno = ENOMEM;			// Simulate internal os failure to stop Toma.
+		return -1;
 	}
 	return n_events;
 }

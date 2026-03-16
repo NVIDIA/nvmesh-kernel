@@ -55,6 +55,16 @@ static struct t_uni_thread_ctx {
 
 static void yield(void) { swapcontext(&scheduler.ctx_thread_uni, &scheduler.ctx_main); }	// Yield unitest thread and let Toma main thread to continue
 
+static void do_on_unitests_done(void) {
+	const bool ok = scheduler.is_unit_test_done;
+	const char *pass = COL_GREEN "passed" COL_RESET ", \t\tShutting down Toma app";
+	const char *fail = COL_RED   "Did not finish!" COL_RESET ", Crashing... See Toma Bin logs for more info";
+	SANDBOX_PRINT("All unit-tests: %s\n", (ok ? pass : fail));
+	if (ok)
+		yield();					// Last yield back to toma main thread, this fiber will not be continued
+	BUG_ON(true);					// ok==true: Scheduler bug. ok=False: Unit-test did not finish properly
+}
+
 /********************************************************************/
 #define WAIT_UNTIL(cond) ({ while (!(cond)) yield(); })
 
@@ -106,8 +116,7 @@ static void all_test_scenarios(void) {
 
 	N_SANDBOX(__AUTOID__, "unit test thread: test scenario complete");
 	scheduler.is_unit_test_done = true;
-	yield();
-	BUG_ON(true);														// Cannot reach here or will get stuck
+	do_on_unitests_done();
 }
 
 void toma_unit_test_thread_create(void) {
@@ -128,7 +137,8 @@ int toma_unit_test_thread_switch_to(void) {
 }
 
 void toma_unit_test_thread_destroy(void) {
-	BUG_ON(!scheduler.is_unit_test_done);
+	if (!scheduler.is_unit_test_done)
+		do_on_unitests_done();					// Force stop unit-tests
 	if (scheduler.ctx_thread_uni.uc_stack.ss_sp)
 		__free_stack(scheduler.ctx_thread_uni.uc_stack.ss_sp);
 	memset(&scheduler, 0, sizeof(scheduler));
