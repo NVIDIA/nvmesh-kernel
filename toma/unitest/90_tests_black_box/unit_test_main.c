@@ -76,6 +76,7 @@ static void scenario_test_signals(void) {
 }
 
 static void scenario_create_remove_r1(void) {
+	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
 
@@ -88,6 +89,7 @@ static void scenario_create_remove_r1(void) {
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for drive zeroing to complete");
 	WAIT_UNTIL(mgmt_sim_both_disks_zeroing_done());
 
+	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for leader to exists");
 	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
 	mgmt_sim_send_leader_keep_alive();
@@ -106,6 +108,7 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
 
+	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	N_SANDBOX(__AUTOID__, "unit test thread: sending deleteVolume V_R1");
 	mgmt_sim_send_delete_volume_r1();
 	mgmt_sim_send_leader_keep_alive();

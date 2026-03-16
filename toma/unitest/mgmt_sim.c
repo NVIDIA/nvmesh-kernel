@@ -82,18 +82,14 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 
 static int make_msg_delete_volume_r1(char *buf, size_t capacity) {
 	return snprintf(buf, capacity,
-		"{\"messageType\":\"deleteVolume\""
-		",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
-		",\"name\":\"V_R1\",\"version\":1}}");
+		"{\"messageType\":\"deleteVolume\",\"messageTypeVersion\":1,\"payload\":{"
+		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\",\"version\":1}}");
 }
 
 static int make_msg_delete_volume_completed_r1(char *buf, size_t capacity) {
 	return snprintf(buf, capacity,
-		"{\"messageType\":\"deleteVolumeCompleted\""
-		",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
-		",\"name\":\"V_R1\"}}");
+		"{\"messageType\":\"deleteVolumeCompleted\",\"messageTypeVersion\":1,\"payload\":{"
+		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\"}}");
 }
 
 /* Forward declarations */
@@ -127,10 +123,12 @@ static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_s
 struct mgmt_sim_state {
 	struct sb_cluster_conf *cfg;
 
-	struct {							// Per-consumer state for deterministic message sequencing
+	struct t_hw_config_queue_state {	// Per-consumer state for deterministic message sequencing
 		int msg_count, conf_version;
 	} hw;
-	int cmd_msg_count;
+	struct t_cmd_queue_state {
+		int msg_count;
+	} cmd;
 	struct t_raft_quorum_config {
 		short num_nodes;
 		short generation;				// Ever increasing raft domain idx
@@ -221,7 +219,7 @@ void mgmt_sim_send_msg_assign_to_zone(int zone_idx) {
 		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"%d\",\"keepaliveInterval\":1}}",
 		m->cfg->live->hostname, zone_idx);
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.cmd, msg, len, false);
-	m->cmd_msg_count++;
+	m->cmd.msg_count++;
 }
 
 void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add) {
@@ -241,10 +239,12 @@ void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add) {
 }
 
 void mgmt_sim_send_msg_latest_hw_config(void) {
-	const struct mgmt_sim_state *m = g_mgmt_sim;
+	struct mgmt_sim_state *m = g_mgmt_sim;
 	const struct sb_node_conf *other_toma = m->cfg->other;
 	const size_t capacity = 4096;
 	char *msg = malloc(capacity);
+	const int config_ver = (++m->hw.conf_version);				// As if something in configuration changed
+	const int kafka_seq =  (++m->hw.msg_count);
 	const size_t len = snprintf(msg, capacity,
 		"{\"messageType\":\"hardwareConfiguration\",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
 		",\"configurationVersion\":%d,\"leaderToken\":1,\"kafkaMessageSequence\":%d,\"raftTerm\":9"
@@ -286,7 +286,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 					"{\"nicID\":\"0x0000000000000000bae924fffee5f009\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
 		"]}}",
-		m->hw.conf_version, m->hw.msg_count,
+		config_ver, kafka_seq,
 		m->cfg->live->hostname, m->cfg->live->uuid,
 			m->disk_002.disk_id, m->disk_002.vendor, m->disk_002.uuid,
 			m->disk_003.disk_id, m->disk_003.vendor, m->disk_003.uuid,
@@ -385,12 +385,6 @@ void mgmt_sim_do_periodic(void) {
 		mgmt_sim_wakeup_on_incomming_toma_msg(m->k_consumers.high);
 		mgmt_sim_wakeup_on_incomming_toma_msg(m->k_consumers.low);
 		mgmt_sim_wakeup_on_incomming_toma_msg(m->k_consumers.kal);
-	}
-
-	/* 2. Produce periodic messages to Toma */
-	if ((m->hw.msg_count++ % 64) == 0) { 	/* Periodically inject hardwareConfiguration */
-		m->hw.conf_version++;				// As if something in configuration changed
-		mgmt_sim_send_msg_latest_hw_config();
 	}
 }
 
