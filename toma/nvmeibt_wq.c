@@ -8,12 +8,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_wq.h"
 
-#define N__D(__name__, fmt, ...) N_Df(__name__, "(wq=@WQ_NAME) " fmt, ((wq && wq->name) ? wq->name : "?"), ## __VA_ARGS__)
-#define N__W(__name__, fmt, ...) N_Wf(__name__, "(wq=@WQ_NAME) " fmt, ((wq && wq->name) ? wq->name : "?"), ## __VA_ARGS__)
 #define N__E(__name__, fmt, ...) N_Ef(__name__, "(wq=@WQ_NAME) " fmt, ((wq && wq->name) ? wq->name : "?"), ## __VA_ARGS__)
-#define __NFIN  N__D(__AUTOID__, "-->")
-#define __NFOUT N__D(__AUTOID__, "<--")
-
 #define WAIT_WAKEUP_TIMEOUT 5000	/* wait for wakeup timeout in [msec]] */
 
 typedef XDLIST_DECLARE(wq_entries_list, struct nvmeibt_wq_entry, link) wq_entries_list_t;
@@ -92,7 +87,7 @@ static int timed_wait(struct nvmeibt_wq *wq, int ms) {
 }
 
 static int exec_entries(struct nvmeibt_wq *wq, wq_entries_list_t *entries) {
-	__NFIN;
+	// NFIN;
 	while (!XDLIST_EMPTY(entries)) {
 		struct nvmeibt_wq_entry *p = XDLIST_FIRST(entries);
 		XDLIST_DEL(&p->link);
@@ -103,25 +98,25 @@ static int exec_entries(struct nvmeibt_wq *wq, wq_entries_list_t *entries) {
 			p->execute(p);
 		}
 	}
-	__NFOUT;
+	// NFOUT;
 	return 0;
 }
 
 static void delete_wq_thread(struct nvmeibt_wq *wq) {
-	__NFIN;
+	// NFIN;
 	if (pthread_cond_destroy(&wq->wakeup))
 		N_Ef(xx_40, "pthread_cond_destroy failed @AUTO_ERRNO");
 	if (pthread_mutex_destroy(&wq->guard))
 		N_Ef(xx_41, "pthread_mutex_destroy failed @AUTO_ERRNO");
 	NNVMEIBT_TOMA_FREE(trace_wq_delete_wq_thread, wq->name);
 	NNVMEIBT_TOMA_FREE(trace_1_wq_delete_wq_thread, wq);
-	__NFOUT;
+	// NFOUT;
 }
 
 static void *wq_func(void *arg) {
 	struct nvmeibt_wq *wq = arg;
 	wq_entries_list_t *entries;
-	__NFIN;
+	NFIN;
 	while (wq->cont) {
 		if (lock(wq) < 0) {
 			goto out;
@@ -149,7 +144,7 @@ static void *wq_func(void *arg) {
 		unlock(wq);
 	}
 out:
-	__NFOUT;
+	NFOUT;
 	return NULL;
 }
 
@@ -162,7 +157,7 @@ struct nvmeibt_wq *nvmeibt_wq_create(const char *name) {
 		wq->name = NNVMEIBT_TOMA_CALLOC(ttwqce1, len + 1, 1);
 		nvmeibt_strlcpy(wq->name, name, len + 1);
 	}
-	__NFIN;
+	// NFIN;
 	wq->cont = true;
 	if (pthread_mutex_init(&wq->guard, NULL) != 0) {
 		N__E(ttwqce2, "wq=@WQ_NAME failed to create wq guard @AUTO_ERRNO", wq->name);
@@ -207,7 +202,7 @@ free_exec:
 	NNVMEIBT_TOMA_FREE(ttwqce8, wq->name);
 	NNVMEIBT_TOMA_FREE(ttwqce9, wq);
 out:
-	__NFOUT;
+	// NFOUT;
 	return wq;
 }
 
@@ -244,12 +239,12 @@ void nvmeibt_wq_stuck_pthread_check(void) {
 void nvmeibt_wq_destroy(struct nvmeibt_wq *wq) {
 	void	*th_rv;
 	int		jrv;
-	__NFIN;
+	NFIN;
 	if (!wq) {
 		goto out;
 	}
 	wq->cont = false;
-	wakeup(wq);
+	wakeup(wq);			// In logs you will see wq thread prints between after the above FIN and until the below join
 	if (wq->is_one_time)
 		jrv = pthread_tryjoin_np(wq->thr, &th_rv);
 	else
@@ -264,7 +259,7 @@ void nvmeibt_wq_destroy(struct nvmeibt_wq *wq) {
 		wq = NULL;	// Now we can free the WQ thread resources.
 	}
 out:
-	__NFOUT;
+	NFOUT;
 }
 
 int nvmeibt_wq_addw(struct nvmeibt_wq *wq, struct nvmeibt_wq_entry *entry) {
@@ -289,7 +284,6 @@ out:
 int nvmeibt_wq_setw(struct nvmeibt_wq *wq, struct nvmeibt_wq_entry *entry) {
 	struct nvmeibt_wq_entry *e;
 	int rv = -1;
-	__NFIN;
 	if (lock(wq)) {
 		goto out;
 	}
@@ -308,39 +302,12 @@ unlock:
 	(void)unlock(wq);
 	(void)wakeup(wq); // (no harm done in wakeup when destroying, so let this be)
 out:
-	__NFOUT;
 	return rv;
 }
-
-#if 0
-int nvmeibt_wq_delw(struct nvmeibt_wq *wq, struct nvmeibt_wq_entry *entry) {
-	struct nvmeibt_wq_entry *e;
-	int rv = -1;
-	__NFIN;
-	if (lock(wq)) {
-		goto out;
-	}
-	XDLIST_FOREACH(e, wq->entries) {
-		if (e == entry) {
-			rv = 0;
-			break;
-		}
-	}
-	if (rv == 0) {
-		XDLIST_DEL(&entry->link);
-	}
-	if (unlock(wq)) {
-		goto out;
-	}
-out:
-	__NFOUT;
-	return rv;
-}
-#endif
 
 void nvmeibt_wq_flush(struct nvmeibt_wq *wq) {
 	wq_entries_list_t *l;
-	__NFIN;
+	NFIN;
 	if (lock(wq)) {
 		goto out;
 	}
@@ -351,28 +318,26 @@ void nvmeibt_wq_flush(struct nvmeibt_wq *wq) {
 	}
 	exec_entries(wq, l);
 out:
-	__NFOUT;
+	NFOUT;
 }
 
 static int is_wq_empty(struct nvmeibt_wq *wq) {
 	int rv;
-	__NFIN;
 	if (!lock(wq)) {
 		rv = XDLIST_EMPTY(wq->entries) ? 1 : 0;
 		unlock(wq);
 	} else
 		rv = -1;
-	__NFOUT;
 	return rv;
 }
 
 void nvmeibt_wq_drain(struct nvmeibt_wq *wq) {
-	__NFIN;
+	NFIN;
 	do {
 		wq->is_destroying_wq = true;
 		nvmeibt_wq_flush(wq);
 	} while (!is_wq_empty(wq));
-	__NFOUT;
+	NFOUT;
 }
 
 /*****************************************************************************/
