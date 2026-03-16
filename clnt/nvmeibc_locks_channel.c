@@ -17,6 +17,7 @@
 #include "nvmeibc_trend_types.h"
 #include "nvmeib_ib_driver.h"
 #include "nvmeib_cpu_masks.h"
+#include "nvmeib_metrics.h"
 
 #define lock_ch_from_net(net_ptr) \
 	container_of(net_ptr->ioch, struct nvmeibc_locks_channel, base)
@@ -563,6 +564,7 @@ static struct nvmeibc_locks_channel *alloc(
 	ch->total_num_opr = 0;
 	nvmeibc_locks_channel_spin_lock_init(ch);
 	ch->locking_cpu = -1;
+	nvmeibc_lock_ch_metrics_init(&ch->metrics);
 	if ((rv = nvmeibc_channel_init(&ch->base, nvmeibc_cinst_get_core_p(&admin_ch->base)))) {
 		_NE(error_1_locks_channel_alloc, "cannot init base channel");
 		goto out_err;
@@ -1143,6 +1145,7 @@ static int lock_send_completion(struct nvmeibc_ib_net *net,
 	u32 wr_opcode = nvmeib_opcode_from_wc(wc);
 	if (likely(wr_opcode == NVMEIB_DISK_LOCK_OPR)) {
 		ch->n_comp_llp_opr++;
+		nvmesh_metric_update(ch->metrics.opr.count, 1);
 		rv = nvmeibc_disk_locks_on_completion(ch, net, wc, last_wc_in_series);
 		goto out;
 	} else if (wr_opcode == NVMEIB_ATOMIC_TEST) {
@@ -1725,6 +1728,7 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	}
 	ch->total_num_opr = 0;
 	ch->primary_ch = primary_ch;
+	nvmeibc_lock_ch_metrics_init(&ch->metrics);
 	if (!(ch->_2nd_net_params = kmemdup(primary_ch->_2nd_net_params, sizeof(*primary_ch->_2nd_net_params), GFP_KERNEL))) {
 		_NE(error_9_locks_channel_init_2nd_ch, "Memory allocation error");
 		rv = -ENOMEM;

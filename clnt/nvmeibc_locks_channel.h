@@ -12,6 +12,8 @@
 #include "nvmeibc_ib_net.h"
 #include "nvmeibc_disk.h"
 #include "nvmeib_wd.h"
+#include "nvmeib_metrics.h"
+#include "nvmeib_stats.h"
 
 #ifndef LOW_MEM
 enum { NVMEIBC_CHANNEL_MAX_MAIN_LOCKS_MSGS = 16 /*32*/};
@@ -29,6 +31,58 @@ enum { NVMEIBC_CHANNEL_NUM_OF_ALLOC_APR = NVMEIBC_CHANNEL_MAX_MAIN_LOCKS_MSGS *
 #define DEBUG_2ND_LOCK_CH_TEST_ATMOIC 	0
 
 #define DEBUG_LOCK_CH_SPINLOCK 1
+
+
+struct nvmeibc_lock_ch_opr_metrics {
+	struct nvmesh_metric_monotonic_counter count;
+	struct nvmesh_metric_latency_histogram  latency;
+};
+
+static inline void nvmeibc_lock_ch_opr_metrics_init(struct nvmeibc_lock_ch_opr_metrics *m)
+{
+	m->count   = nvmesh_metric_monotonic_counter_create();
+	m->latency = nvmesh_metric_latency_histogram_create();
+}
+
+static inline void nvmeibc_lock_ch_opr_metrics_clear(struct nvmeibc_lock_ch_opr_metrics *m)
+{
+	nvmesh_metric_monotonic_counter_clear(&m->count);
+	nvmesh_metric_latency_histogram_clear(&m->latency);
+}
+
+struct nvmeibc_lock_ch_deferred_metrics {
+	struct nvmesh_metric_max_value         queue_length_max;
+	struct nvmesh_metric_latency_histogram latency;
+};
+
+static inline void nvmeibc_lock_ch_deferred_metrics_init(struct nvmeibc_lock_ch_deferred_metrics *m)
+{
+	m->queue_length_max = nvmesh_metric_max_value_create();
+	m->latency          = nvmesh_metric_latency_histogram_create();
+}
+
+static inline void nvmeibc_lock_ch_deferred_metrics_clear(struct nvmeibc_lock_ch_deferred_metrics *m)
+{
+	nvmesh_metric_max_value_clear(&m->queue_length_max);
+	nvmesh_metric_latency_histogram_clear(&m->latency);
+}
+
+struct nvmeibc_lock_ch_metrics {
+	struct nvmeibc_lock_ch_opr_metrics      opr;
+	struct nvmeibc_lock_ch_deferred_metrics deferred;
+};
+
+static inline void nvmeibc_lock_ch_metrics_init(struct nvmeibc_lock_ch_metrics *m)
+{
+	nvmeibc_lock_ch_opr_metrics_init(&m->opr);
+	nvmeibc_lock_ch_deferred_metrics_init(&m->deferred);
+}
+
+static inline void nvmeibc_lock_ch_metrics_clear(struct nvmeibc_lock_ch_metrics *m)
+{
+	nvmeibc_lock_ch_opr_metrics_clear(&m->opr);
+	nvmeibc_lock_ch_deferred_metrics_clear(&m->deferred);
+}
 
 struct nvmeibc_d_rdma_comp;
 
@@ -80,6 +134,8 @@ struct nvmeibc_lock_opr_in_progress
 	unsigned id_in_row;
 	unsigned long jiffies_start;
 	unsigned long opr_timeout;
+	/* stop watch for latency measurement (nanosecond accuracy) */
+	struct nvmeib_stop_watch latency_sw;
 	/* was aborted */
 	bool aborted;
 	/* version for checking for double-completion */
@@ -191,6 +247,8 @@ struct nvmeibc_locks_channel {
 	u64 n_comp_llp_opr;
 	u64 n_comp_llp_test;
 	u64 n_comp_llp_ka;
+	/* metrics */
+	struct nvmeibc_lock_ch_metrics metrics;
 	/* lock-channel extended KA stats */
 	u64 ka_post_cnt;
 	u64 ka_post_jif;

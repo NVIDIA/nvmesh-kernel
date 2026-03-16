@@ -166,6 +166,7 @@ struct nvmeib_jdr_write_closure nvmeib_jdr_write_closure_create(struct jdr *writ
 
 	return jdr_write_closure;
 }
+EXPORT_SYMBOL(nvmeib_jdr_write_closure_create);
 
 static void __human_readable_size(char *buf, size_t bufsize, u64 size_bytes)
 {

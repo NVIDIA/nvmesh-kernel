@@ -307,7 +307,7 @@ void nvmeib_io_histograms_jdr_fill(struct jdr *jdr_inst,
 					labels_base ? labels_base : "",
 					verb_to_string((enum nvmeib_io_stat_verbs)verb, true),
 					iosize_name);
-				jdr_writer.base.visit_latency_histogram(&jdr_writer.base, NULL, &merged_lat, lat_id);
+				nvmesh_metric_visit(jdr_writer.base, NULL, merged_lat, lat_id);
 			#if SHOW_LATENCY_PERCENTILES
 			{
 				struct nvmesh_metric_latency_percentiles pct = {};

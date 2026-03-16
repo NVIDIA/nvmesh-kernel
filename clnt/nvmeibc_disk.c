@@ -52,6 +52,9 @@
 #include "kr_undef.h"
 #include "common/proc_epilog.h"
 #include "nvmeibc_memmgr_metrics.h"
+#include "nvmeib_jdr.h"
+#include "nvmeib_metrics.h"
+#include "nvmeib_metrics_jdr.h"
 #include "nvmeib_completion_noise.h"
 #include "nvmeib_cpu_masks.h"
 #include "nvmeib_pcpu_wq.h"
@@ -2605,6 +2608,10 @@ static inline void disk_proc_destroy(struct nvmeibc_disk *disk)
 		nvmeib_public_proc_remove(disk->proc_ent_ioch_json);
 		disk->proc_ent_ioch_json = NULL;
 	}
+	if (disk->proc_ent_lock_channels) {
+		nvmeib_jdr_proc_remove(disk->proc_ent_lock_channels);
+		disk->proc_ent_lock_channels = NULL;
+	}
 	if (disk->proc_ent_counters) {
 		nvmeib_public_proc_remove(disk->proc_ent_counters);
 		disk->proc_ent_counters = NULL;
@@ -2885,6 +2892,10 @@ static struct proc_ops poll_pcpu_proc_ops = {
 };
 #endif
 
+
+static void lock_channels_proc_fill(struct jdr *jdr, void *arg);
+static ssize_t lock_channels_proc_write(void *arg, const char __user *buf, size_t count, loff_t *ppos);
+
 static inline int disk_proc_create(struct nvmeibc_disk *disk)
 {
 	struct proc_dir_entry *dir = nvmeibc_get_proc_dir_disks(nvmeibc_cinst_get_core_p(disk));
@@ -2932,6 +2943,11 @@ static inline int disk_proc_create(struct nvmeibc_disk *disk)
 	if (!(disk->proc_ent_ioch_json = nvmeib_public_proc_create(
 		"io_channels.json", disk->proc_dir, io_ch_fill_buf_json, NULL, disk))) {
 		_NE(error_disk_disk_proc_create_ioch_json, "Fail to create disk @DISK_NAME io_ch_json proc entry", disk->name);
+		goto destroy;
+	}
+	if (!(disk->proc_ent_lock_channels = nvmeib_jdr_proc_create("lock_channels", disk->proc_dir,
+		lock_channels_proc_fill, lock_channels_proc_write, disk))) {
+		_NE(error_disk_disk_proc_create_lock_channels, "Fail to create disk @DISK_NAME lock_channels proc entry", disk->name);
 		goto destroy;
 	}
 	if (!(disk->proc_ent_interrupts = nvmeib_public_proc_create(
@@ -3050,6 +3066,7 @@ static void nvmeibc_disk_free(struct nvmeibc_disk *disk)
 	BUG_ON(!list_empty(&disk->volumes));
 	BUG_ON(!list_empty(&disk->db.dirty_bits_pending_reqs));
 	nvmeib_io_stats_trace(disk->stats, disk_trace_verb_counters_fn, disk); /* forced trace before removal */
+	cancel_delayed_work_sync(&disk->periodic_lock_channel_work);
 	 /* called before destroying disk-wq (and disk-obj) but safe to call here as well */
 	disk_proc_destroy(disk);
 	nvmeib_io_stats_free(disk->stats);
@@ -4498,6 +4515,316 @@ static void disk_trace_iostats_on_periodic(struct nvmeibc_disk *disk)
 
 out:
 	return;
+}
+
+static ulong nvmeibc_disk_lock_channel_periodic_timer_interval = 10000; /* milliseconds */
+module_param_named(lock_channel_periodic_timer_interval, nvmeibc_disk_lock_channel_periodic_timer_interval, ulong, 0644);
+MODULE_PARM_DESC(lock_channel_periodic_timer_interval,
+	"Interval in milliseconds for periodic lock channel usage metrics tracing per disk");
+
+/* Bitwise flags for controlling which lock channel metrics to dump */
+#define LOCK_CH_METRIC_COUNT			(1U << 0)  /* Dump lock operation count */
+#define LOCK_CH_METRIC_LATENCY			(1U << 1)  /* Dump lock operation latency histogram */
+#define LOCK_CH_METRIC_DEFERRED_QUEUE_MAX	(1U << 2)  /* Dump max deferred queue length */
+#define LOCK_CH_METRIC_DEFERRED_LATENCY		(1U << 3)  /* Dump deferred operation latency histogram */
+#define LOCK_CH_METRIC_ALL			(LOCK_CH_METRIC_COUNT | LOCK_CH_METRIC_LATENCY | \
+						 LOCK_CH_METRIC_DEFERRED_QUEUE_MAX | LOCK_CH_METRIC_DEFERRED_LATENCY)
+
+static uint nvmeibc_disk_lock_channel_metrics_mask = LOCK_CH_METRIC_ALL;
+module_param_named(lock_channel_metrics_mask, nvmeibc_disk_lock_channel_metrics_mask, uint, 0644);
+MODULE_PARM_DESC(lock_channel_metrics_mask,
+	"Bitwise mask controlling which lock channel metrics to dump in periodic traces:\n"
+	"  bit 0 (0x01): lock_opr_count - lock operation count\n"
+	"  bit 1 (0x02): lock_opr_latency - lock operation latency histogram\n"
+	"  bit 2 (0x04): lock_opr_deferred_queue_length_max - max deferred queue length\n"
+	"  bit 3 (0x08): lock_opr_deferred_latency - deferred operation latency histogram\n"
+	"Note: Proc file always shows all metrics regardless of this mask.\n"
+	"Default: 0x0F (all metrics enabled)");
+
+static void lock_channels_visit_channel_metric(struct nvmeib_jdr_write_closure *jdr_writer,
+						const char *disk_name,
+						struct nvmeibc_locks_channel *lock_ch,
+						int channel_idx,
+						char *labels_buf,
+						size_t labels_buf_size)
+{
+	struct nvmesh_metric_id const metric_id = {
+		.name = "lock_opr_count",
+		.labels = labels_buf
+	};
+	
+	snprintf(labels_buf, labels_buf_size,
+		 "module=nvmeibc;component=lock_channel;disk=%s;channel_index=%d",
+		 disk_name, channel_idx);
+	
+	nvmesh_metric_visit(jdr_writer->base, NULL, lock_ch->metrics.opr.count, metric_id);
+}
+
+static void lock_channels_visit_channel_latency(struct nvmeib_jdr_write_closure *jdr_writer,
+						 const char *disk_name,
+						 struct nvmeibc_locks_channel *lock_ch,
+						 int channel_idx,
+						 char *labels_buf,
+						 size_t labels_buf_size)
+{
+	struct nvmesh_metric_id const metric_id = {
+		.name = "lock_opr_latency",
+		.labels = labels_buf
+	};
+	
+	snprintf(labels_buf, labels_buf_size,
+		 "module=nvmeibc;component=lock_channel;disk=%s;channel_index=%d",
+		 disk_name, channel_idx);
+	
+	nvmesh_metric_visit(jdr_writer->base, NULL, lock_ch->metrics.opr.latency, metric_id);
+}
+
+static void lock_channels_visit_channel_deferred_metrics(struct nvmeib_jdr_write_closure *jdr_writer,
+							  const char *disk_name,
+							  struct nvmeibc_locks_channel *lock_ch,
+							  int channel_idx,
+							  char *labels_buf,
+							  size_t labels_buf_size)
+{
+	struct nvmesh_metric_id max_metric_id = {.name = "lock_opr_deferred_queue_length_max", .labels = labels_buf};
+	struct nvmesh_metric_id latency_metric_id = {.name = "lock_opr_deferred_latency", .labels = labels_buf};
+	
+	snprintf(labels_buf, labels_buf_size,
+		 "module=nvmeibc;component=lock_channel;disk=%s;channel_index=%d",
+		 disk_name, channel_idx);
+	
+	nvmesh_metric_visit(jdr_writer->base, NULL, lock_ch->metrics.deferred.queue_length_max, max_metric_id);
+	nvmesh_metric_visit(jdr_writer->base, NULL, lock_ch->metrics.deferred.latency, latency_metric_id);
+}
+
+static void lock_channels_visit_metrics(struct jdr *jdr,
+						     struct nvmeib_jdr_write_closure *jdr_writer,
+						     const char *disk_name,
+						     struct nvmeibc_locks_channel *lock_ch,
+						     int channel_idx,
+						     char *labels_buf,
+						     size_t labels_buf_size)
+{
+	jdr_object_scope(jdr, NULL);
+	{
+		jdr_write_var(jdr, channel_index, channel_idx);
+		{
+			jdr_array_scope(jdr, "metrics");
+			lock_channels_visit_channel_metric(jdr_writer, disk_name, lock_ch,
+							channel_idx, labels_buf, labels_buf_size);
+			lock_channels_visit_channel_latency(jdr_writer, disk_name, lock_ch,
+								channel_idx, labels_buf, labels_buf_size);
+			lock_channels_visit_channel_deferred_metrics(jdr_writer, disk_name, lock_ch,
+									channel_idx, labels_buf, labels_buf_size);
+		}
+	}
+}
+
+static void lock_channels_trace_latency(struct nvmeibc_disk *disk,
+					struct nvmeibc_locks_channel *lock_ch,
+					int channel_idx)
+{
+	NVMEIB_LOG_METRICS("@DISK_NAME lock_opr_latency channel_index=@INT " NVMESH_METRIC_LATENCY_HISTOGRAM_TFMT,
+		_T, tracer_nvmeibc, info_disk_lock_channel_latency,
+		disk->name, channel_idx,
+		NVMESH_METRIC_LATENCY_HISTOGRAM_TARG(lock_ch->metrics.opr.latency));
+}
+
+static void lock_channels_trace_deferred_latency(struct nvmeibc_disk *disk,
+						  struct nvmeibc_locks_channel *lock_ch,
+						  int channel_idx)
+{
+	NVMEIB_LOG_METRICS("@DISK_NAME lock_opr_deferred_latency channel_index=@INT " NVMESH_METRIC_LATENCY_HISTOGRAM_TFMT,
+		_T, tracer_nvmeibc, info_disk_lock_channel_deferred_latency,
+		disk->name, channel_idx,
+		NVMESH_METRIC_LATENCY_HISTOGRAM_TARG(lock_ch->metrics.deferred.latency));
+}
+
+
+static void lock_channels_proc_fill(struct jdr *jdr, void *arg)
+{
+	struct nvmeibc_disk *disk = arg;
+	struct list_head lock_ch_list;
+	struct unique_list_ent *unique_ent;
+	struct nvmeibc_locks_channel *lock_ch;
+	struct nvmeib_jdr_write_closure jdr_writer;
+	char labels_buf[256];
+	int channel_idx = 0;
+	int i;
+
+	jdr_writer = nvmeib_jdr_write_closure_create(jdr);
+
+	INIT_LIST_HEAD(&lock_ch_list);
+	fill_lock_ch_list(disk, &lock_ch_list);
+
+	{
+		jdr_array_scope(jdr, "lock_channels");
+
+		while ((unique_ent = list_first_entry_or_null(&lock_ch_list, struct unique_list_ent, link))) {
+			lock_ch = unique_ent->ptr;
+
+			lock_channels_visit_metrics(jdr, &jdr_writer, disk->name, lock_ch,
+						    channel_idx, labels_buf, sizeof(labels_buf));
+			channel_idx++;
+
+			for (i = 0; i < lock_ch->n_2nd_ch; i++) {
+				struct nvmeibc_locks_channel *_2nd_lock_ch = lock_ch->_2nd_ch[i];
+				if (_2nd_lock_ch) {
+					lock_channels_visit_metrics(jdr, &jdr_writer, disk->name, _2nd_lock_ch,
+								    channel_idx, labels_buf, sizeof(labels_buf));
+					channel_idx++;
+				}
+			}
+
+			list_del(&unique_ent->link);
+			kfree(unique_ent);
+		}
+	}
+}
+
+static void lock_channels_clear_metrics(struct nvmeibc_locks_channel *lock_ch)
+{
+	int i;
+	
+	nvmeibc_lock_ch_metrics_clear(&lock_ch->metrics);
+	
+	for (i = 0; i < lock_ch->n_2nd_ch; i++) {
+		struct nvmeibc_locks_channel *_2nd_lock_ch = lock_ch->_2nd_ch[i];
+		if (_2nd_lock_ch) {
+			nvmeibc_lock_ch_metrics_clear(&_2nd_lock_ch->metrics);
+		}
+	}
+}
+
+static void lock_channels_reset(void *arg)
+{
+	struct nvmeibc_disk *disk = arg;
+	struct list_head lock_ch_list;
+	struct unique_list_ent *unique_ent;
+	struct nvmeibc_locks_channel *lock_ch;
+
+	INIT_LIST_HEAD(&lock_ch_list);
+	fill_lock_ch_list(disk, &lock_ch_list);
+
+	while ((unique_ent = list_first_entry_or_null(&lock_ch_list, struct unique_list_ent, link))) {
+		lock_ch = unique_ent->ptr;
+		lock_channels_clear_metrics(lock_ch);
+		list_del(&unique_ent->link);
+		kfree(unique_ent);
+	}
+}
+
+static ssize_t lock_channels_proc_write(void *arg, const char __user *buf, size_t count, loff_t *ppos)
+{
+	return nvmeib_jdr_proc_write_reset(lock_channels_reset, arg, buf, count);
+}
+
+static int lock_ch_list_count(struct list_head *lock_ch_list)
+{
+	struct unique_list_ent *unique_ent;
+	struct nvmeibc_locks_channel *lock_ch;
+	int n = 0;
+	int i;
+
+	list_for_each_entry(unique_ent, lock_ch_list, link) {
+		lock_ch = unique_ent->ptr;
+		n++;
+		for (i = 0; i < lock_ch->n_2nd_ch; i++) {
+			if (lock_ch->_2nd_ch[i])
+				n++;
+		}
+	}
+	return n;
+}
+
+static void process_lock_channel_metrics(struct nvmeibc_disk *disk,
+					  struct nvmeibc_locks_channel *lock_ch,
+					  u64 *count_vals, u64 *deferred_max_vals,
+					  int idx)
+{
+	if (count_vals)
+		count_vals[idx] = lock_ch->metrics.opr.count.counter;
+	if (deferred_max_vals)
+		deferred_max_vals[idx] = lock_ch->metrics.deferred.queue_length_max.counter;
+	if (nvmeibc_disk_lock_channel_metrics_mask & LOCK_CH_METRIC_LATENCY)
+		lock_channels_trace_latency(disk, lock_ch, idx);
+	if (nvmeibc_disk_lock_channel_metrics_mask & LOCK_CH_METRIC_DEFERRED_LATENCY)
+		lock_channels_trace_deferred_latency(disk, lock_ch, idx);
+}
+
+static void disk_periodic_lock_channel_work_func(struct work_struct *arg)
+{
+	struct nvmeibc_disk *disk = container_of(to_delayed_work(arg),
+						   struct nvmeibc_disk, periodic_lock_channel_work);
+	struct list_head lock_ch_list;
+	struct unique_list_ent *unique_ent;
+	struct nvmeibc_locks_channel *lock_ch;
+	const bool trace_count = nvmeibc_disk_lock_channel_metrics_mask & LOCK_CH_METRIC_COUNT;
+	const bool trace_deferred_max = nvmeibc_disk_lock_channel_metrics_mask & LOCK_CH_METRIC_DEFERRED_QUEUE_MAX;
+	u64 *count_vals = NULL, *deferred_max_vals = NULL;
+	int n_ch, idx, i;
+
+	__NFIND;
+
+	INIT_LIST_HEAD(&lock_ch_list);
+	fill_lock_ch_list(disk, &lock_ch_list);
+
+	if (trace_count || trace_deferred_max) {
+		n_ch = lock_ch_list_count(&lock_ch_list);
+		if (trace_count) {
+			count_vals = kmalloc_array(n_ch, sizeof(u64), GFP_KERNEL);
+			if (!count_vals)
+				goto out;
+		}
+		if (trace_deferred_max) {
+			deferred_max_vals = kmalloc_array(n_ch, sizeof(u64), GFP_KERNEL);
+			if (!deferred_max_vals)
+				goto out;
+		}
+	}
+
+	idx = 0;
+	list_for_each_entry(unique_ent, &lock_ch_list, link) {
+		lock_ch = unique_ent->ptr;
+
+		process_lock_channel_metrics(disk, lock_ch, count_vals, deferred_max_vals, idx);
+		idx++;
+
+		for (i = 0; i < lock_ch->n_2nd_ch; i++) {
+			struct nvmeibc_locks_channel *_2nd_lock_ch = lock_ch->_2nd_ch[i];
+			if (!_2nd_lock_ch)
+				continue;
+			process_lock_channel_metrics(disk, _2nd_lock_ch, count_vals, deferred_max_vals, idx);
+			idx++;
+		}
+	}
+
+	if (count_vals) {
+		NVMEIB_LOG_METRICS("@DISK_NAME lock_opr_count @LOCK_CH_OPR_ARR",
+			_T, tracer_nvmeibc, info_disk_lock_channel_usage,
+			disk->name, count_vals, idx);
+	}
+	if (deferred_max_vals) {
+		NVMEIB_LOG_METRICS("@DISK_NAME lock_opr_deferred_queue_length_max @LOCK_CH_OPR_ARR",
+			_T, tracer_nvmeibc, info_disk_lock_channel_deferred_queue_max,
+			disk->name, deferred_max_vals, idx);
+	}
+
+out:
+	while ((unique_ent = list_first_entry_or_null(&lock_ch_list, struct unique_list_ent, link))) {
+		list_del(&unique_ent->link);
+		kfree(unique_ent);
+	}
+
+	if (nvmeibc_disk_lock_channel_periodic_timer_interval > 0) {
+		mod_delayed_work(system_unbound_wq, &disk->periodic_lock_channel_work,
+					       msecs_to_jiffies(nvmeibc_disk_lock_channel_periodic_timer_interval));
+	}
+
+	kfree(count_vals);
+	kfree(deferred_max_vals);
+
+	__NFOUTD;
 }
 
 void nvmeibc_disk_start_io_channels_(struct nvmeibc_disk *disk)
@@ -10539,6 +10866,7 @@ int nvmeibc_disk_create(const struct nvmeibc_cinst_params_core *p,
 	INIT_LIST_HEAD(&disk->db.dirty_bits_pending_reqs);
 	INIT_LIST_HEAD(&disk->local_defer_io_list);
 	WQ_INIT_WORK(&disk->local_defer_io_work, local_defer_io_work_fn);
+	INIT_DELAYED_WORK(&disk->periodic_lock_channel_work, disk_periodic_lock_channel_work_func);
 	init_completion(&disk->disk_paused);
 	spin_lock_init(&disk->disk_conf_spinlock);
 	spin_lock_init(&disk->spinlock);
@@ -10659,6 +10987,12 @@ int nvmeibc_disk_create(const struct nvmeibc_cinst_params_core *p,
 
 	/* register disk */
 	nvmeibc_add_disk(disk);
+
+	/* Schedule periodic lock channel usage metrics tracing */
+	if (nvmeibc_disk_lock_channel_periodic_timer_interval > 0) {
+		queue_delayed_work(system_unbound_wq, &disk->periodic_lock_channel_work,
+				   msecs_to_jiffies(nvmeibc_disk_lock_channel_periodic_timer_interval));
+	}
 
 	_NT(trace_disk_nvmeibc_disk_create, "Add (1st) volume @DEV_NAME_FULL to disk @DISK_NAME(@DISK)",
 	   disk_id->volume->full_name, disk->name, disk);

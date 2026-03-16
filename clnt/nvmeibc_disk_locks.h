@@ -11,6 +11,7 @@
 #include "nvmeibc_types.h"
 #include "common/nvmeib_cpu_masks.h"
 #include "nvmeib_wd.h"
+#include "nvmeib_stats.h"
 
 struct nvmeibc_disk;
 struct nvmeibc_ib_net;
@@ -215,6 +216,7 @@ struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 		struct {									// Transport Layer Retry mechanisms
 			uint64_t n_retries_cmpxcng;				// retry count (in case of contention of cmp_xchng)
 			unsigned long deferred_jif;				// Timout implementation: jiffies when the comp was posted to the deferred queue. Used to implement timeout
+			struct nvmeib_stop_watch deferred_sw;		// Stop watch for deferred latency measurement (nanosecond accuracy)
 			union {									// link into defered operations
 				struct list_head link_deferred;		// link into defered operations
 			#ifdef NVMEIBC_LOCK_CH_CB_KERNEL_WQ

@@ -8,6 +8,7 @@
 
 #include "kr_incs.h"
 #include "compat/kr_incs_bit_ops.h"
+
 #if !defined(log2_u64_nonzero)
 	#define log2_u64_nonzero ilog2
 #endif
@@ -234,10 +235,24 @@ void nvmesh_metric_latency_histogram_merge(struct nvmesh_metric_latency_histogra
 }
 
 static inline XDS_NONNULL(1)
+size_t nvmesh_metric_latency_histogram_update_shift(struct nvmesh_metric_latency_histogram *self, uint16_t shift, uint64_t ns)
+{
+	size_t const idx = nvmesh_metric_get_bin_index(ns, shift, ARRAY_SIZE(self->bins));
+	self->bins[idx] += 1;
+	return idx;
+}
+
+static inline XDS_NONNULL(1)
 void nvmesh_metric_latency_histogram_clear(struct nvmesh_metric_latency_histogram* hist)
 {
 	nvmesh_metric_histogram_clear(hist->bins, ARRAY_SIZE(hist->bins));
 }
+
+#define NVMESH_METRIC_LATENCY_HISTOGRAM_BINS 16
+#define NVMESH_METRIC_LATENCY_HISTOGRAM_TFMT \
+	"@NS_12_BINS"
+#define NVMESH_METRIC_LATENCY_HISTOGRAM_TARG(v) \
+	(v).bins
 
 enum {
 	NVMESH_METRIC_BYTES_HISTOGRAM_SHIFT = 3,
@@ -568,7 +583,9 @@ struct nvmesh_metrics_closure
         (closure)->visit_iosize_histogram9, \
     __builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_highres_histogram*), \
         (closure)->visit_highres_histogram, \
-    (void)0 )))))))) ((closure), (name), (metric), (id))
+    __builtin_choose_expr(__builtin_types_compatible_p(__typeof(metric), struct nvmesh_metric_latency_histogram*), \
+        (closure)->visit_latency_histogram, \
+    (void)0 ))))))))) ((closure), (name), (metric), (id))
 
 #define nvmesh_metric_visit(closure, name, metric, id) nvmesh_metric_visit_ptr(&(closure), name, &(metric), id)
 

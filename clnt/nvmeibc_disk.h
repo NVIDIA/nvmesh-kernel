@@ -22,6 +22,9 @@
 #include "nvmeib_rdma.h"
 #include "common/compat/kr_incs_compiler_types.h"
 #include "nvmeibc_idisk.h"
+#ifdef __KERNEL__
+#include "nvmeib_jdr_proc.h"
+#endif
 
 struct nvmeibc_disk_dirty_bits_rsc {
         u32 n_pages;
@@ -528,6 +531,7 @@ struct nvmeibc_disk {
 	struct nvmeib_io_stats *stats;
 	struct nvmeibc_trace_stats_scheduling trace_stats;	/* scheduling state of disk stats tracing for disk periodic timer handler */
 	spinlock_t stats_spinlock;
+	struct delayed_work periodic_lock_channel_work;	/* periodic work for lock channel usage metrics tracing */
 
 	/* op counter */
 	/* atomic64_t ops; */
@@ -660,6 +664,7 @@ struct nvmeibc_disk {
 	struct nvmeib_public_procfs_ent *proc_ent_nrch_status;
 	struct nvmeib_public_procfs_ent *proc_ent_ioch_status;
 	struct nvmeib_public_procfs_ent *proc_ent_ioch_json;
+	struct nvmeib_jdr_procfs_ent *proc_ent_lock_channels;
 #if defined(DISK_COUNT_REUSE) && DISK_COUNT_REUSE
 	struct nvmeib_public_procfs_ent *proc_ent_reuse;
 #endif

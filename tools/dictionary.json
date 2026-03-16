@@ -20095,6 +20095,11 @@
         "type": "array_u64",
         "fmt": "%s"
     },
+    "@LOCK_CH_OPR_ARR": {
+        "size": 64,
+        "type": "array_u64_flex",
+        "fmt": "%s"
+    },
     "@IO_STAT_COUNTER": {
         "size": 64,
         "type": "u64",

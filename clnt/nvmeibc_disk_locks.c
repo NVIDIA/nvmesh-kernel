@@ -26,6 +26,13 @@
 #include "common/nvmeib_cpu_masks.h"
 #include "nvmeib_pcpu_wq.h"
 
+static inline size_t nvmesh_metric_update_latency_stop_watch(struct nvmesh_metric_latency_histogram *self, uint16_t shift,
+							     struct nvmeib_stop_watch *sw)
+{
+	return nvmesh_metric_latency_histogram_update_shift(self, shift,
+		nvmeib_stop_watch_measureq(sw));
+}
+
 uint nvmeibc_skip_lock_cmds_flags = 0;
 module_param_named(skip_lock_cmds_flags, nvmeibc_skip_lock_cmds_flags, uint, 0644);
 MODULE_PARM_DESC(skip_lock_cmds_flags, "This is an unsafe debug mode. Skip locking operations for non-EC volumes (remote and local): "
@@ -76,6 +83,8 @@ enum lock_comp_execute_mode {
 	LOCK_COMP_EXECUTE_ON_WQ_THIS_CPU,
 	LOCK_COMP_EXECUTE_ON_SYSTEM_PCPU_WQ,
 };
+
+#define NVMESH_LOCK_LATENCY_HISTOGRAM_SHIFT 10
 
 static void lock_comp_execute_cb(struct nvmeibc_locks_channel *ch,
 							struct nvmeibc_d_rdma_comp *comp, void *debug_ptr,
@@ -1191,6 +1200,7 @@ static void set_opr_in_progress(struct nvmeibc_locks_channel *ch,
 	if (!opr_ip->disk_piggyb) /* Don't start WD if we are piggy-backing on NRDDA cmd. It has its own WD. */
 		nvmeib_wd_start_wdc(&opr_ip->wdc);
 	opr_ip->jiffies_start = jiffies;
+	nvmeib_stop_watch_start(&opr_ip->latency_sw);
 	opr_ip->opr_timeout = NVMEIB_MAX_LOCK_TIME_INC_RETRIES;
 	comp = opr_ip->comp;
 
@@ -1266,6 +1276,10 @@ static int lock_prepare_and_send(struct nvmeibc_locks_channel *ch,
 				link_deferred);
 			BUG_ON(comp == NULL);
 			list_del_init(&comp->link_deferred); /* defered */
+			
+			nvmesh_metric_update_latency_stop_watch(&ch->metrics.deferred.latency, NVMESH_LOCK_LATENCY_HISTOGRAM_SHIFT,
+										 &comp->deferred_sw);
+			
 			cpus = comp->cpu_mask_info.mask;
 
 			if (DEBUG_BYPASS_ATOMIC_OPS) {
@@ -1365,6 +1379,7 @@ static int lock_prepare_and_send(struct nvmeibc_locks_channel *ch,
 				/* add retry list to head of deferred queue */
 				list_splice_init(&retry_list, &ch->defered);
 				ch->num_defered += n_retry;
+				nvmesh_metric_max_value_update(&ch->metrics.deferred.queue_length_max, ch->num_defered);
 				nvmeib_completion_noise_end(NVMEIB_NOISE_SUBMISSION, cpus.cpus, NVMEIB_CPU_MASK_MAX_CPUS,
 					ch->base.disk->access_local? NVMEIB_NOISE_CTRS_LOCK_SUBMISSION_LOCAL : NVMEIB_NOISE_CTRS_LOCK_SUBMISSION);
 				goto out;
@@ -1856,8 +1871,10 @@ static int execute_opr(struct nvmeibc_disk_seg_locks_mem_info *record, u64 addr,
 	}
 	//ib_req_notify_cq(net->send_cq, IB_CQ_NEXT_COMP);
 	comp->deferred_jif = jiffies;
+	nvmeib_stop_watch_start(&comp->deferred_sw);
 	list_add_tail(&comp->link_deferred, &locks_channel->defered);
 	++locks_channel->num_defered;
+	nvmesh_metric_max_value_update(&locks_channel->metrics.deferred.queue_length_max, locks_channel->num_defered);
 	nvmeibc_disk_cmds_stats_pending_add(locks_channel->base.disk, &comp->lock_cmd);
 
 #if defined(NVMEIBC_DISK_CMDS_STATS_PROBES) && (NVMEIBC_DISK_CMDS_STATS_PROBES==1)
@@ -2420,6 +2437,8 @@ int nvmeibc_disk_locks_on_completion(struct nvmeibc_locks_channel *ch,
 		goto out;
 	}
 
+	nvmesh_metric_update_latency_stop_watch(&ch->metrics.opr.latency, NVMESH_LOCK_LATENCY_HISTOGRAM_SHIFT, &opr_ip->latency_sw);
+
 	if ((ch->num_in_progress + ch->num_of_free + ch->num_aborted) != ch->total_num_opr) {
 		_NE(nvmeibc_disk_locks_on_completion_e1,
 			"BAD SUM: num_in_progress=@INT num_of_free=@INT "
@@ -2460,8 +2479,10 @@ int nvmeibc_disk_locks_on_completion(struct nvmeibc_locks_channel *ch,
 			" lockset @LOCKSET_ID val=@VAL", lock_comp->send_id, lock_comp->opr,
 			lock_comp->exchange, lock_comp->compare, lock_comp->lockset_id, lock_comp->val[0]);
 			lock_comp->deferred_jif = jiffies;
+			nvmeib_stop_watch_start(&lock_comp->deferred_sw);
 			list_add_tail(&lock_comp->link_deferred, &ch->defered);
 			++ch->num_defered;
+			nvmesh_metric_max_value_update(&ch->metrics.deferred.queue_length_max, ch->num_defered);
 			nvmeibc_disk_cmds_stats_err_internal_retry(ch->base.disk, &lock_comp->lock_cmd);
 			execute_callback = false;
 			rv = 0;
