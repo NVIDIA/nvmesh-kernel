@@ -64,6 +64,7 @@ int nvmeibt_read_config_notify_server_about_journal_partition(const struct nvmei
 															  const char *ldisk_id, const char *ld_display);
 int nvmeibt_read_excluded_target_drives(void);
 int nvmeibt_read_auto_takeover_target_drives(void);
+uint16_t nvmeibt_save_praid_wire_data_to(void* wire_out_p, struct mm_praid_conf *praid_conf);
 
 #define CONFIG_TAG_OUTDATED -1
 

@@ -457,6 +457,15 @@ out:
 	return 0;
 }
 
+uint16_t nvmeibt_save_praid_wire_data_to(void* wire_out_p, struct mm_praid_conf *praid_conf) {
+	void *wire_out_p_start = wire_out_p;
+	wire_out_p += nvmeibt_praid_convert_to_wire_via_aligned_tmp(wire_out_p, praid_conf);
+	for (int i = 0; i < praid_conf->num_segments; i++) {
+		wire_out_p += nvmeibt_seg_convert_to_wire_via_aligned_tmp(wire_out_p, &praid_conf->segments[i]);
+	}
+	return (uint16_t)(wire_out_p - wire_out_p_start);
+}
+
 int nvmeibt_read_config_apply_vol_committed_topo_conf(struct mm_mgmt_conf *conf, int vol_config_tag)
 {
 	enum nvmeibt_add_rv				add_rv = NVMEIBT_ADD_UNINITIALIZED;

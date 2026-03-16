@@ -316,6 +316,8 @@ void nvmeibt_praid_lot_upd_registrants_sync_cmd(struct nvmeibt_praid_lot *praid_
 bool nvmeibt_praid_upd_calculated_lot_from_praid_mgmt(struct nvmeibt_praid *praid);
 void nvmeibt_praid_leader_we_have_a_new_baseline(struct nvmeibt_praid *praid, struct nvmeibt_praid_lot *src_praid_lot);
 int nvmeibt_praid_validate_replacement_segs(struct nvmeibt_praid *praid);
+void nvmeibt_serialize_praid_lot_topo_to_wire(struct nvmeibt_praid_lot *praid_lot, const union nvmeib_uuid *praid_uuid, struct nvmeibt_praid_serialized_topo *out_praid_wire_topo, void *out_segs_wire_topo_buf);
+int nvmeibt_follower_praid_calculate_size_and_serialize_topo_config_buf_if_needed(struct nvmeibt_praid *praid, char **dst_data_ptr);
 
 #endif	// #ifndef NVMEIBT_PRAID
 

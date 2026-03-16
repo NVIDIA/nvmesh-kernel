@@ -64,6 +64,10 @@
 #include <sys/stat.h>
 #include <linux/unistd.h>
 #include "nvmeibt_common.h"
+#include "vol/nvmeibt_block_device.h"
+#include "vol/nvmeibt_chunk.h"
+#include "nvmeibt_mm_json.h"
+#include "nvmeibt_read_config.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_raft.h"
@@ -548,6 +552,29 @@ static int fill_persist_and_wire_tlv_and_data(struct nvmeibt_wire_type_len_value
 	tlv->tlv_crc = crc32(0, tlv, sizeof(*tlv));
 	tlv->tlv_crc = LE_SWAP32(crc32(tlv->tlv_crc, in_wire_data, in_data_len));
 	return in_data_len;
+}
+
+static int __attribute__((unused)) calculate_and_serialize_vol_to_wire_format_if_needed(struct mm_vol_conf *vol, char **dst_data_ptr)
+{
+	int total_size = nvmeibt_packed_vol_config_size();
+	if (dst_data_ptr) {
+		*dst_data_ptr += nvmeibt_vol_convert_to_wire_via_aligned_tmp(*dst_data_ptr, vol);
+	}
+	for (int j = 0; j < vol->num_chunks; j++) {
+		struct mm_chunk_conf *chunk = &vol->chunks[j];
+		total_size += nvmeibt_packed_chunk_config_size();
+		if (dst_data_ptr) {
+			*dst_data_ptr += nvmeibt_chunk_convert_to_wire_via_aligned_tmp(*dst_data_ptr, chunk);
+		}
+		for (int k = 0; k < chunk->num_praids; k++) {
+			struct mm_praid_conf *praid = &chunk->praids[k];
+			total_size += nvmeibt_packed_praid_config_size() + praid->num_segments * nvmeibt_packed_seg_config_size();
+			if (dst_data_ptr) {
+				*dst_data_ptr += nvmeibt_save_praid_wire_data_to(*dst_data_ptr, praid);
+			}
+		}
+	}
+	return total_size;
 }
 
 struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(

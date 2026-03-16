@@ -693,16 +693,49 @@ out:
 	NFOUT;
 }
 
-static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
+void nvmeibt_serialize_praid_lot_topo_to_wire(struct nvmeibt_praid_lot *praid_lot,
+											  const union nvmeib_uuid *praid_uuid,
+											  struct nvmeibt_praid_serialized_topo *out_praid_wire_topo,
+											  void *out_segs_wire_topo_buf)
 {
 	struct nvmeibt_seg_lot							*seg_lot;
 	struct nvmeibt_praid_serialized_topo			serialized_praid = {0};
 	struct nvmeibt_serialized_seg_leader_topo		*seg_wire_topo_ptr;
-	int												segs_topo_len;
+	struct nvmeibt_praid_topo_ctx					*praid_topo = NULL;
+	int8_t											n_segs = 0;
 
+	NFIN;
+	praid_topo = &praid_lot->topo_ctx;
+	n_segs = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
+
+	nvmeibt_strlcpy(serialized_praid.eyecatcher, "PTO", sizeof(serialized_praid.eyecatcher));
+	serialized_praid.uuid = *praid_uuid;
+	serialized_praid.praid_version_major = praid_topo->praid_version_major;
+	serialized_praid.praid_version_minor = praid_topo->praid_version_minor;
+	serialized_praid.registrants_sync_cmd = praid_topo->registrants_sync_cmd;
+	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
+	serialized_praid.is_activated = praid_topo->is_activated;
+	serialized_praid.segs_num = n_segs;
+	serialized_praid.topo_idx_updated = praid_topo->topo_idx_updated;
+
+	// Serialize disk_segments
+	seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)out_segs_wire_topo_buf;
+	XDLIST_FOREACH(seg_lot, &praid_lot->all_seg_lot_list) {
+		serialize_seg_lot_topo_to_wire(praid_topo, seg_lot, seg_wire_topo_ptr);
+		seg_wire_topo_ptr++;
+	}
+
+	nvmeibt_praid_convert_topo_le_be(&serialized_praid, out_praid_wire_topo, TOMA_SW_COMPATIBILITY_VER);
+
+	NFOUT;
+}
+
+static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
+{
 	struct nvmeibt_praid_leader						*praid_leader = &praid->praid_leader;
 	struct nvmeibt_praid_lot						*praid_lot = &praid_leader->baseline_praid_lot;
 	struct nvmeibt_praid_topo_ctx					*praid_topo = &praid_lot->topo_ctx;
+	size_t											n_segs = 0;
 
 	NFIN;
 	// The design says that a praid that was re-calculated by the leader
@@ -736,36 +769,16 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 	//  latest global topology (including the old is_activated).
 	//  Once it has new inputs it will calculate a new leader_topo, and send the new is_activated.
 
-	nvmeibt_strlcpy(serialized_praid.eyecatcher, "PTO", sizeof(serialized_praid.eyecatcher));
-	serialized_praid.uuid = *nvmeibt_praid_UUID(praid);
-	serialized_praid.praid_version_major = praid_topo->praid_version_major;
-	serialized_praid.praid_version_minor = praid_topo->praid_version_minor;
-	serialized_praid.registrants_sync_cmd = praid_topo->registrants_sync_cmd;
-	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
-	serialized_praid.is_activated = praid_topo->is_activated;
-	serialized_praid.segs_num = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
-	// Since we may serialize a praid without updating it, topo_idx_updated may not equal to leader_get_next_topology_version().
-	serialized_praid.topo_idx_updated = praid_topo->topo_idx_updated;
-	// send_topo_ptr->res_1 = 0;
-	// send_topo_ptr->res_2 = 0;
-	// send_topo_ptr->res_3 = 0;
-
-	if (serialized_praid.topo_idx_updated != leader_get_next_topology_version()) {
-		N_Tf(ajkld10, "Serializing a praid updated in @INT64_TX while calculating topology @INT64_TX.", serialized_praid.topo_idx_updated, leader_get_next_topology_version());
-	}
-
-	// disk_segments
-	segs_topo_len = sizeof(struct nvmeibt_serialized_seg_leader_topo) * XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
-	NNVMEIBT_BUF_RESIZE(thyujq0, &(praid_leader->segs_wire_topo_buf), (size_t)segs_topo_len);
+	// Allocate and prepare buffer for segments
+	n_segs = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
+	NNVMEIBT_BUF_RESIZE(thyujq0, &(praid_leader->segs_wire_topo_buf), (size_t) (n_segs * sizeof(struct nvmeibt_serialized_seg_leader_topo)));
 	memset(praid_leader->segs_wire_topo_buf.data_buf, 0, praid_leader->segs_wire_topo_buf.buf_len);
 
-	seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)praid_leader->segs_wire_topo_buf.data_buf;
-	XDLIST_FOREACH(seg_lot, &praid_lot->all_seg_lot_list) {
-		serialize_seg_lot_topo_to_wire(praid_topo, seg_lot, seg_wire_topo_ptr);
-		seg_wire_topo_ptr++;
-	}
+	nvmeibt_serialize_praid_lot_topo_to_wire(praid_lot, nvmeibt_praid_UUID(praid),
+								&(praid_leader->praid_wire_topo),
+								praid_leader->segs_wire_topo_buf.data_buf);
+
 	SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cbhj34k);
-	nvmeibt_praid_convert_topo_le_be(&serialized_praid, &(praid_leader->praid_wire_topo), TOMA_SW_COMPATIBILITY_VER);
 	nvmeibt_praid_print_leader_wire_topo_with_segs(praid_leader);
 out:
 	praid_leader->serialized_version_major = praid_topo->praid_version_major;
@@ -835,6 +848,50 @@ static void leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_b
 	nvmeibt_mm_jason_leader_topo_config_mm_praid_conf_and_mm_segs_conf_to_wire_buf(praid);
 //out:
 	NFOUT;
+}
+TODO(merge this with leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_baseline_praid_lot)
+int __attribute__((unused)) nvmeibt_follower_praid_calculate_size_and_serialize_topo_config_buf_if_needed(struct nvmeibt_praid *praid, char **dst_data_ptr)
+{
+	struct nvmeibt_praid_follower					*praid_follower;
+	struct nvmeibt_praid_lot						*praid_lot;
+	int												praid_wire_len;
+	int8_t											n_segs;
+
+	NFIN;
+
+	praid_follower = &praid->praid_follower;
+	praid_lot = &praid_follower->committed_praid_lot;
+	n_segs = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
+	praid_wire_len = nvmeibt_packed_praid_config_size() + n_segs * nvmeibt_packed_seg_config_size();
+	if (dst_data_ptr) {
+		struct mm_praid_conf						praid_conf;
+		struct nvmeibt_seg_lot						*seg_lot;
+		struct nvmeibt_praid_config					*f = &(praid_lot->from_config);
+		struct mm_segment_conf						seg_conf;
+		char										*dst_data_ptr_start = *dst_data_ptr;
+
+		nvmeibt_strlcpy(praid_conf.eyecatcher, "PRD", sizeof(praid_conf.eyecatcher));
+		praid_conf.uuid = f->id;
+		praid_conf.activated = f->was_ever_activated;
+		praid_conf.stripeIndex = praid->praid_mgmt.stripe_idx;
+		praid_conf.version = f->version;
+		praid_conf.topo_config_idx_updated = f->topo_config_idx_updated;
+		praid_conf.num_segments = n_segs;
+		if (praid_conf.num_segments == 0) {
+			N_Wf(fol_ser_no_segs, "praid=@UUID_LE num_segments=@INT", &(praid_conf.uuid), praid_conf.num_segments);
+		}
+
+		*dst_data_ptr += nvmeibt_praid_convert_to_wire_via_aligned_tmp(*dst_data_ptr, &praid_conf);
+		XDLIST_FOREACH(seg_lot, &praid_lot->all_seg_lot_list) {
+			mm_segment_conf_from_seg(seg_lot, &seg_conf);
+			*dst_data_ptr += nvmeibt_seg_convert_to_wire_via_aligned_tmp(*dst_data_ptr, &seg_conf);
+		}
+
+		NTOMA_ASSERT(fol_ser_cnt, (int)(*dst_data_ptr - dst_data_ptr_start) == praid_wire_len, "dst_data_ptr_start=@PTR *dst_data_ptr=@PTR praid_wire_len=@INT", dst_data_ptr_start, *dst_data_ptr, praid_wire_len);
+	}
+
+	NFOUT;
+	return praid_wire_len;
 }
 
 // Upd committed topo on startup (from persist) or when received from the leader
