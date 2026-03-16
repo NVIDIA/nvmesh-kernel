@@ -8,9 +8,12 @@ import os
 import abc
 import enum
 import errno
+import shutil
 import signal
 import struct
+import subprocess
 import sys
+import tempfile
 import typing
 import pathlib
 import argparse
@@ -255,18 +258,62 @@ class ArrayType(pydantic.BaseModel):  # not tested yet
 # DWARF reader / resolver
 # ---------------------------------------------------------------------------
 
+class DwarfResolveRelocationsResult(typing.NamedTuple):
+	elf_path: pathlib.Path
+	resolved: bool
+
+def resolve_dwarf_relocations(elf_path: pathlib.Path) -> DwarfResolveRelocationsResult:
+	"""On some systems it take more then 10 minutes to extract the information we need.
+	The main reason - there is a need to resolve all DWARF relocations. 
+	pyelftools package does noto handle this well. 
+	"""
+	if not shutil.which('eu-strip'):
+		if elf_path.stat().st_size > 10 * 1024 * 1024:
+			print(
+				f'Warning: {elf_path.name} is larger than 10MB and eu-strip is not available. '
+				'Building the PET dictionary may take a long time. '
+				'To avoid this, install the elfutils package.',
+				file=sys.stderr,
+			)
+		return DwarfResolveRelocationsResult(elf_path, False)
+	tmp_dir = tempfile.mkdtemp()
+	tmp_path = pathlib.Path(tmp_dir) / elf_path.name
+	shutil.copy2(elf_path, tmp_path)
+	result = subprocess.run(
+		['eu-strip', '--reloc-debug-sections-only', str(tmp_path)],
+		capture_output=True,
+	)
+	if result.returncode == 0:
+		return DwarfResolveRelocationsResult(tmp_path, result.returncode == 0)
+	else:
+		shutil.rmtree(tmp_dir)
+		return DwarfResolveRelocationsResult(elf_path, False)
 
 class DwarfRuntime:
 	@typing.no_type_check
 	def __init__(self, elf_path: pathlib.Path):
-		self._fobj = open(elf_path, 'rb')
-		elf = ELFFile(self._fobj)
-		self._dwarf = elf.get_dwarf_info() if elf.has_dwarf_info() else None
-		self._address_size = elf.elfclass // 8
-		self._type_cache: dict[int, TypeInfo] = {}
+		result: DwarfResolveRelocationsResult = resolve_dwarf_relocations(elf_path)
+		self.resolved_path: pathlib.Path = result.elf_path
+		self.was_resolved: bool = result.resolved
+		
+		self._fobj = None
+		try:
+			self._fobj = open(self.resolved_path, 'rb')
+			elf = ELFFile(self._fobj)
+			relocate_dwarf_sections = False if self.was_resolved else True
+			self._dwarf = elf.get_dwarf_info(relocate_dwarf_sections) if elf.has_dwarf_info() else None
+			self._address_size = elf.elfclass // 8
+			self._type_cache: dict[int, TypeInfo] = {}
+		except Exception:
+			self.close()
+			raise
 
 	def close(self):
-		self._fobj.close()
+		if self._fobj:
+			self._fobj.close()
+		if self.was_resolved: 
+			self.was_resolved = False
+			shutil.rmtree(self.resolved_path.parent)
 
 	def __enter__(self):
 		return self
