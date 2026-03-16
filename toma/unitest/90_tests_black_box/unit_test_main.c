@@ -8,6 +8,7 @@
 #include "../mgmt_sim.h"
 #include "../os/os_internal.h"
 #include "../server/sandbox_nvmeibs_toma.h"
+#include "../12_user/user_rpc_simu.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
@@ -77,6 +78,20 @@ static void scenario_test_signals(void) {
 	os_sim_send_signal_to_toma(SIGUSR2);	yield();
 }
 
+static void scenario_user_rpcs(void) {
+	SCENARIO_PRINT(__AUTOID__, "Testing RPCs start");
+	user_rpc_send_to_toma("simulate dump_status");
+	user_rpc_send_to_toma("simulate reread_conf");
+	user_rpc_send_to_toma("simulate dump-clnt-hash 20");
+	user_rpc_send_to_toma("simulate bm-garbage-collect 1");
+	user_rpc_send_to_toma("simulate resend-praids-report vol1");
+	user_rpc_send_to_toma("status server_csvs");
+	user_rpc_send_to_toma("status errors");
+	user_rpc_send_to_toma("disk-models list");
+	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
+	SCENARIO_PRINT(__AUTOID__, "Testing RPCs done");
+}
+
 static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
@@ -129,6 +144,7 @@ static void scenario_create_remove_r1(void) {
 }
 
 static void all_test_scenarios(void) {
+	scenario_user_rpcs();
 	scenario_create_remove_r1();
 	scenario_test_signals();
 	SCENARIO_PRINT(__AUTOID__, "test scenario complete");

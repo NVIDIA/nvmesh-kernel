@@ -82,17 +82,18 @@ static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int 
 	g_rpc_sim->n_recv++;
 	return n;
 }
+void user_rpc_send_to_toma(const char* str) {
+	struct user_rpc_simu *r = g_rpc_sim;
+	r->cmds[r->n_total++] = str;
+}
+
+bool user_rpc_did_toma_reply_to_all_rpcs(void) {
+	const struct user_rpc_simu *r = g_rpc_sim;
+	return (r->n_total == r->n_recv);
+}
 
 struct user_rpc_simu *user_rpc_simu_create(void) {
 	struct user_rpc_simu *r = g_rpc_sim = calloc(1, sizeof(*r));
- 	r->cmds[r->n_total++] = "simulate dump_status";
-	r->cmds[r->n_total++] = "simulate reread_conf";
-	r->cmds[r->n_total++] = "simulate dump-clnt-hash 20";
-	r->cmds[r->n_total++] = "simulate bm-garbage-collect 1";
-	r->cmds[r->n_total++] = "simulate resend-praids-report vol1";
-	r->cmds[r->n_total++] = "status server_csvs";
-	r->cmds[r->n_total++] = "status errors";
-	r->cmds[r->n_total++] = "disk-models list";
 	r->o.recv = _rpc_inject;
 	r->o.send = _rpc_accept;
 	return r;
