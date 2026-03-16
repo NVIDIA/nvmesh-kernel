@@ -103,5 +103,6 @@ struct TSB_operating_system_impl {				// Sandbox for all services Toma needs fro
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
 	} TSB_km_sock_pair;
 };												// Emulates operating system.
+void os_sim_destroy(struct TSB_operating_system_impl *os, bool do_verify_used);
 
 void os_sim_send_signal_to_toma(int sig_number);

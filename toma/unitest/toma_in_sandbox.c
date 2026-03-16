@@ -255,10 +255,8 @@ void t_sandbox_all_destroy(void) {
 	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
 	user_rpc_simu_destroy(sys->rpc, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent rpc messages
 	sandbox_kafka_destroy(sys->kafka_simu);
-	pthread_mutex_destroy(&sys->os.fs.mutex);
-	pthread_mutex_destroy(&sys->os.TSB_wake_pip.mutex);
+	os_sim_destroy(&sys->os, !nvmeibt_toma_is_running_as_a_utility());
 	sb_cluster_conf_destroy(&sys->cfg);
-	TSB_all_fds_tbl_destroy(&sys->os.fs);
 	free(sys);
 	sys = NULL;
 }
@@ -793,6 +791,14 @@ void closelog(void) {
 void os_sim_send_signal_to_toma(int sig_number) {
 	N_Tf(__AUTOID__, "Schedule signal: @INT", sig_number);
 	sys->os.TSB_signal.cur_sig = sig_number;
+}
+
+void os_sim_destroy(struct TSB_operating_system_impl *os, bool do_verify_used) {
+	pthread_mutex_destroy(&os->fs.mutex);
+	pthread_mutex_destroy(&os->TSB_wake_pip.mutex);
+	TSB_all_fds_tbl_destroy(&os->fs);
+	if (do_verify_used)
+		BUG_ON(os->TSB_signal.n_sigs_sent <= 0);		// Some signals sent
 }
 
 /************************************* nvme ***********************************/
