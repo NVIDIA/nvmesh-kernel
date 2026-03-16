@@ -3,8 +3,6 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
-#include "nvmeib_public.h"
-
 #define  S_NORDDA_C
 
 #include "common/kr_incs.h"
