@@ -13,7 +13,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "utils/toma_test_framework.h"
+#include "unitest/00_framework/toma_test_framework.h"
 
 //
 // Smoke test definitions

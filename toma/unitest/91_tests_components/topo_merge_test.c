@@ -17,7 +17,7 @@
 #include "nvmeibt_topology.h"
 #include "nvmeibt_topo_bin.h"
 #include "nvmeibt_disk_segment.h"
-#include "utils/toma_test_framework.h"
+#include "unitest/00_framework/toma_test_framework.h"
 #include "topo_merge_test.h"
 #include <stdlib.h>
 #include <string.h>

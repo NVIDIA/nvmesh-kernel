@@ -15,7 +15,7 @@
 #include "../nvmeibt_common.h"
 #include "../nvmeibt_disk_metadata.h"
 #include "../nvmeibt_local_disk.h"
-#include "toma_test_framework.h"
+#include "unitest/00_framework/toma_test_framework.h"
 
 // Self-test wrappers for production functions (from gpt_util.c)
 // These wrappers allow tests to call production functions while keeping them static/encapsulated
