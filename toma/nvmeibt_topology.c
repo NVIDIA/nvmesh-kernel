@@ -1583,7 +1583,7 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 	// This forces followers with older views to get complete refresh
 	nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated);
 	nvmeibt_raft_get_my_raft()->last_delete_raft_members_kafka_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_calculated);
-	N_Tf(init_last_delete_offsets, "New leader init for incremental wire buf: last_delete_kafka_mgmt_config=@INT64_TD last_delete_members_kafka=@INT64_TD",
+	N_Tf(init_last_delete_offsets, "New leader init for incremental wire buf: last_delete_mgmt_config_@KAFKA_OFST last_delete_members_@KAFKA_OFST",
 		 nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset,
 		 nvmeibt_raft_get_my_raft()->last_delete_raft_members_kafka_offset);
 	//

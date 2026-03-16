@@ -2406,7 +2406,7 @@ static void toma_incremental_vol_update_handler(struct mm_mgmt_conf *mgmt_conf, 
 {
 	NFIN;
 	if (!nvmeibt_raft_is_leader()) {
-		N_Tf(sk4i2nw, "Not a leader, probably an old msg. Skipping");
+		N_Tf(sk4i2nw, "Not a leader, probably an old msg. Skipping event=@STR @KAFKA_OFST", kafka_event_type_str(event_type), kafka_offset);
 		goto out;
 	}
 	if (event_type == KAFKA_EVENT_TYPE_VOL_ADD || event_type == KAFKA_EVENT_TYPE_VOL_UPD) {
