@@ -222,15 +222,13 @@ static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_
 
 void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
-	sys->os.fs.debug_offset = 10000;
+	os_sim_init(&sys->os);
 	sys->is_running_as_a_utility = is_running_as_a_utility;
 	sb_cluster_conf_create(&sys->cfg);
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	sys->rpc = user_rpc_simu_create();
-	pthread_mutex_init(&sys->os.fs.mutex, NULL);
 	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);
-	pthread_mutex_init(&sys->os.TSB_wake_pip.mutex, NULL);
 
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		for (int i = 0; i < sys->cfg.n_nodes; i++)
@@ -315,7 +313,6 @@ void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	BUG_ON(s->other_side); 								// Only 1 simulate4d listener works per socket / file descriptor
 	if (strstr(s->addr.sun_path, "netlink")) {					s->other_side = &sys->os.TSB_netlink.o;
 	} else if (strstr(s->addr.sun_path, "signal")) {			s->other_side = &sys->os.TSB_signal.o;
-		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
 	} else if (strstr(s->addr.sun_path, "sys_log")) {			s->other_side = &sys->os.TSB_syslog.o;
 	} else if (strstr(s->addr.sun_path, "srm_fault")) {			s->other_side = &sys->TSB_srm_fault.o;
 		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
@@ -763,12 +760,10 @@ int init_signal_handling(const char *exe_name) {
 void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
 	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(signals_fd);
 	struct TSB_signals_queue *tsb_q = container_of(s->other_side, struct TSB_signals_queue, o);
-	if (tsb_q->cur_sig) {
-		tsb_q->n_sigs_sent++;
-		fprintf(stderr, "fffffffffffffffffffffffffffffffffffffffffff\n!!!! %d\n\n\n", tsb_q->cur_sig);
-		fn(tsb_q->cur_sig, 0x12345);
-		tsb_q->cur_sig = 0;
-	}
+	BUG_ON(tsb_q->cur_sig == 0);		// Why did epoll wakeup Toma on signal if there is no scheduled signal???
+	tsb_q->n_sigs_sent++;
+	fn(tsb_q->cur_sig, 0x12345);
+	tsb_q->cur_sig = 0;
 }
 
 int nvmeibt_nonblock_fd(int fd) {
@@ -786,6 +781,15 @@ void closelog(void) {
 void os_sim_send_signal_to_toma(int sig_number) {
 	N_Tf(__AUTOID__, "Schedule signal: @INT", sig_number);
 	sys->os.TSB_signal.cur_sig = sig_number;
+}
+
+static bool _has_signal_to_send(void) { return (sys->os.TSB_signal.cur_sig != 0); }
+
+void os_sim_init(struct TSB_operating_system_impl *os) {
+	os->fs.debug_offset = 10000;
+	pthread_mutex_init(&os->fs.mutex, NULL);
+	pthread_mutex_init(&os->TSB_wake_pip.mutex, NULL);
+	os->TSB_signal.o.has_data = _has_signal_to_send;
 }
 
 void os_sim_destroy(struct TSB_operating_system_impl *os, bool do_verify_used) {
