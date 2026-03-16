@@ -7,6 +7,7 @@
 #include "nvmeibt_debug.h"				// Binary traces
 #include "../mgmt_sim.h"
 #include "../os/os_internal.h"
+#include "../server/sandbox_nvmeibs_toma.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
@@ -83,6 +84,7 @@ static void scenario_create_remove_r1(void) {
 
 	SCENARIO_PRINT(__AUTOID__, "sending format drives");
 	mgmt_sim_send_format_drives();
+	nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Send once an extended message to test the flow
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks formatted ok");
 	WAIT_UNTIL(mgmt_sim_both_disks_formatted_ok());

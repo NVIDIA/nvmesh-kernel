@@ -686,11 +686,10 @@ int epoll_ctl(int efd, enum EPOLL_CTL op, int __fd, struct epoll_event *ev) {
 
 int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) {
 	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;
-	int i, n_events, unitest_fiber_ended;
+	int i, n_events;
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
-	unitest_fiber_ended = !toma_unit_test_thread_switch_to();
+	toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
-	if (ep->n_calls_to_wait == 9) nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Once send an extended message to test the flow
 	nvmeibs_simu_do_periodic();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
 	mgmt_sim_do_periodic();
 
@@ -700,9 +699,9 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
 	}
-	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", ep->n_calls_to_wait, unitest_fiber_ended, n_events); ep->n_calls_to_wait++;
+	N_SANDBOX(__AUTOID__, "epoll_loop @ZU, n_events=@INT", ep->n_calls_to_wait, n_events);
 	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 500
-	if (ep->n_calls_to_wait >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
+	if (++ep->n_calls_to_wait >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		SANDBOX_PRINT("failed: Toma did not stop within %d cycles\n", SANDBOX_TERMINATE_AFTER_N_LOOPS);
 		errno = ENOMEM;			// Simulate internal os failure to stop Toma.
 		return -1;
