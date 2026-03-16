@@ -148,7 +148,6 @@ struct t_sandbox_all {
 	struct user_rpc_simu *rpc;
 	bool is_running_as_a_utility;
 	bool can_use_bin_traces;
-	bool all_unitests_finished;
 } *sys;
 
 static ssize_t _socket_pair_wakeup_send(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -703,12 +702,7 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 		if (o->has_data())
 			evs[n_events++] = ep->evs[i];
 	}
-	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", ep->n_calls_to_wait, sys->all_unitests_finished, n_events); ep->n_calls_to_wait++;
-	if (!sys->all_unitests_finished && unitest_fiber_ended) {
-		sys->all_unitests_finished = true;
-		errno = ENOMEM;
-		return -1;				// Todo: Simulate shutdown instruction via kafka from mgmt, via end of unit-tests and remove this return
-	}
+	N_SANDBOX(__AUTOID__, "epoll loop @ZU dying=@BOOL_YN, n_events=@INT", ep->n_calls_to_wait, unitest_fiber_ended, n_events); ep->n_calls_to_wait++;
 	#define SANDBOX_TERMINATE_AFTER_N_LOOPS 500
 	if (ep->n_calls_to_wait >= SANDBOX_TERMINATE_AFTER_N_LOOPS) {
 		SANDBOX_PRINT("failed: Toma did not stop within %d cycles\n", SANDBOX_TERMINATE_AFTER_N_LOOPS);
@@ -771,6 +765,7 @@ void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
 	struct TSB_signals_queue *tsb_q = container_of(s->other_side, struct TSB_signals_queue, o);
 	if (tsb_q->cur_sig) {
 		tsb_q->n_sigs_sent++;
+		fprintf(stderr, "fffffffffffffffffffffffffffffffffffffffffff\n!!!! %d\n\n\n", tsb_q->cur_sig);
 		fn(tsb_q->cur_sig, 0x12345);
 		tsb_q->cur_sig = 0;
 	}

@@ -126,6 +126,7 @@ static void all_test_scenarios(void) {
 	scenario_create_remove_r1();
 	scenario_test_signals();
 	N_SANDBOX(__AUTOID__, "unit test thread: test scenario complete");
+	os_sim_send_signal_to_toma(SIGKILL);		// Issue shutdown instruction
 	scheduler.is_unit_test_done = true;
 	do_on_unitests_done();
 }
