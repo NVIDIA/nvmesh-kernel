@@ -695,8 +695,6 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	BUG_ON((ep->o.sock->fd != efd)||(man_events < ep->n_fds)); (void)__timeout;
 	unitest_fiber_ended = !toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
-
-	sys->os.TSB_signal.sig = ((ep->n_calls_to_wait % 5) == 0) ? SIGCHLD : 0; // Once in a while send a signal to toma to test this mechanism
 	if (ep->n_calls_to_wait == 9) nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Once send an extended message to test the flow
 	nvmeibs_simu_do_periodic();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
 	mgmt_sim_do_periodic();
@@ -773,8 +771,10 @@ int init_signal_handling(const char *exe_name) {
 void handle_sig_fd(int signals_fd, void (*fn)(int32_t n, uint64_t addr)) {
 	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(signals_fd);
 	struct TSB_signals_queue *tsb_q = container_of(s->other_side, struct TSB_signals_queue, o);
-	if (tsb_q->sig) {
-		fn(tsb_q->sig, 0x12345);
+	if (tsb_q->cur_sig) {
+		tsb_q->n_sigs_sent++;
+		fn(tsb_q->cur_sig, 0x12345);
+		tsb_q->cur_sig = 0;
 	}
 }
 
@@ -787,6 +787,12 @@ int nvmeibt_nonblock_fd(int fd) {
 void closelog(void) {
 	override_close(sys->os.TSB_syslog.fd); sys->os.TSB_syslog.fd = -1;
 	override_close(sys->os.TSB_signal.fd); sys->os.TSB_signal.fd = -1;
+}
+
+// os internal implementation
+void os_sim_send_signal_to_toma(int sig_number) {
+	N_Tf(__AUTOID__, "Schedule signal: @INT", sig_number);
+	sys->os.TSB_signal.cur_sig = sig_number;
 }
 
 /************************************* nvme ***********************************/

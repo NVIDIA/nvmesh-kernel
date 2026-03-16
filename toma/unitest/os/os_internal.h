@@ -73,7 +73,8 @@ struct TSB_operating_system_impl {				// Sandbox for all services Toma needs fro
 	struct TSB_all_fds_tbl fs;					// File system (files/sockets) descriptors
 	struct TSB_signals_queue {					// Signaling/Logging mechanism to toma
 		struct TSB_fd_otherside o;
-		int sig;
+		int cur_sig;							// Current signal to send, 0 if nothing to send
+		int n_sigs_sent;						// statistics, amount of signals sent
 		int fd;
 	} TSB_signal;
 	struct TSB_syslog_impl {					// Syslog
@@ -102,3 +103,5 @@ struct TSB_operating_system_impl {				// Sandbox for all services Toma needs fro
 		long n_wakeup_msgs __attribute__((aligned(sizeof(long))));
 	} TSB_km_sock_pair;
 };												// Emulates operating system.
+
+void os_sim_send_signal_to_toma(int sig_number);

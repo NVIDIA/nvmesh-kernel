@@ -4,14 +4,15 @@
 */
 #include "../sandbox_util.h"
 #include "unit_test_main.h"
+#include "nvmeibt_debug.h"				// Binary traces
 #include "../mgmt_sim.h"
+#include "../os/os_internal.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
 	#endif
 #endif
 #include <ucontext.h>
-#include "nvmeibt_debug.h"				// Binary traces
 #include <sys/mman.h>
 
 /********************************************************************/
@@ -68,7 +69,13 @@ static void do_on_unitests_done(void) {
 /********************************************************************/
 #define WAIT_UNTIL(cond) ({ while (!(cond)) yield(); })
 
-static void all_test_scenarios(void) {
+static void scenario_test_signals(void) {
+	os_sim_send_signal_to_toma(SIGUSR2);	yield();
+	os_sim_send_signal_to_toma(SIGCHLD);	yield();
+	os_sim_send_signal_to_toma(SIGUSR2);	yield();
+}
+
+static void scenario_create_remove_r1(void) {
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
 
@@ -113,7 +120,11 @@ static void all_test_scenarios(void) {
 
 	N_SANDBOX(__AUTOID__, "unit test thread: waiting for reportTarget after deleteVolumeCompleted (gc)");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+}
 
+static void all_test_scenarios(void) {
+	scenario_create_remove_r1();
+	scenario_test_signals();
 	N_SANDBOX(__AUTOID__, "unit test thread: test scenario complete");
 	scheduler.is_unit_test_done = true;
 	do_on_unitests_done();
