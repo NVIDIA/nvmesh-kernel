@@ -204,6 +204,9 @@ static inline void my_kvfree(void *addr){
 /************************** Operation rescheduling ****************************/
 inline static bool dp_block_schedule_work(int cpu_id, struct work_struct *work)
 {
+	//it looks like in some cases/platforms the schedule_work_on is defined in a such way that cpu_id is not in use.
+	//sonar is complaining.
+	(void)cpu_id; 
 	return schedule_work_on(cpu_id, work);
 }
 

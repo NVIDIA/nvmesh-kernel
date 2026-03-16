@@ -62,7 +62,7 @@ struct measured_work {
  *
  * Return: pointer to the containing &struct measured_work.
  */
-static inline struct measured_work *measured_work_from(struct work_struct *work)
+static inline struct measured_work* measured_work_from(struct work_struct const *work)
 {
 	return container_of(work, struct measured_work, work);
 }
