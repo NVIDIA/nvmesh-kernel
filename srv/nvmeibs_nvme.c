@@ -6562,7 +6562,7 @@ static void disk_periodic_timer_work_func(struct work_struct *arg)
 
 	/* Reschedule the timer for the next interval */
 	if (nvmeibs_nvme_disk_periodic_timer_interval > 0) {
-		nvmeib_public_mod_delayed_work(nvmeib_public_get_system_unbound_wq(), &drv->periodic_timer_work,
+		mod_delayed_work(system_unbound_wq, &drv->periodic_timer_work,
 					       msecs_to_jiffies(nvmeibs_nvme_disk_periodic_timer_interval));
 	}
 }
@@ -6583,7 +6583,7 @@ static int set_nvmeibs_nvme_disk_periodic_timer_interval(const char *val, const 
 	for (d = device_list; d != NULL; d = d->next) {
 		for (drv = d->drives; drv != NULL; drv = drv->next) {
 			if (nvmeibs_nvme_disk_periodic_timer_interval > 0) {
-				nvmeib_public_mod_delayed_work(nvmeib_public_get_system_unbound_wq(), &drv->periodic_timer_work,
+				mod_delayed_work(system_unbound_wq, &drv->periodic_timer_work,
 								msecs_to_jiffies(nvmeibs_nvme_disk_periodic_timer_interval));
 			} else {
 				cancel_delayed_work(&drv->periodic_timer_work);
@@ -6964,7 +6964,7 @@ static void nvmeibs_probe1(struct work_struct *arg)
 		INIT_DELAYED_WORK(&drv->periodic_timer_work, disk_periodic_timer_work_func);
 		/* Initialize and schedule periodic timer for this disk */
 		if (nvmeibs_nvme_disk_periodic_timer_interval > 0) {
-			queue_delayed_work(nvmeib_public_get_system_unbound_wq(), &drv->periodic_timer_work,
+			queue_delayed_work(system_unbound_wq, &drv->periodic_timer_work,
 					  msecs_to_jiffies(nvmeibs_nvme_disk_periodic_timer_interval));
 		}
 	}

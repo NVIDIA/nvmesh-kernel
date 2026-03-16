@@ -915,21 +915,6 @@ out:
 }
 EXPORT_SYMBOL(nvmeib_ref_release_wait_n);
 
-struct task_struct *nvmeib_public_kthread_create_on_cpu(int (*threadfn)(void *data),
-					  void *data, unsigned int cpu,
-					  const char *namefmt)
-{
-	struct task_struct *p;
-
-	p = kthread_create_on_node(threadfn, data, cpu_to_node(cpu), namefmt,
-				   cpu);
-	if (IS_ERR(p))
-		return p;
-	kthread_bind(p, cpu);
-	return p;
-}
-EXPORT_SYMBOL(nvmeib_public_kthread_create_on_cpu);
-
 /* KASAN
  *
  * Enable use of kasan_poison / kasan_unpoison for NVMesh
