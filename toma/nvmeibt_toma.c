@@ -615,8 +615,9 @@ static void self_inflicted_death_on_error(void)
 static int toma_wakeup_event(void);
 static void free_toma_wakeup(void)
 {
-	if (atomic_read(&n_entries_in_the_toma_wakeup_pipe) != 0) {
-		// Definitely a memory leak... Cant process wakeup events right now. May not have memory buffers, bin traces, etc
+	const int n_wakeup_leaks = atomic_read(&n_entries_in_the_toma_wakeup_pipe);
+	if (n_wakeup_leaks!= 0) {
+		fprintf(stderr, "Harmless shutdown %d[memory-leaks]. Cant process wakeup events right now (No memory buffers, bin traces)\n", n_wakeup_leaks);
 	}
 	close(toma_wakeup_pipe[0]); toma_wakeup_pipe[0] = -1;
 	close(toma_wakeup_pipe[1]); toma_wakeup_pipe[1] = -1;
@@ -716,6 +717,10 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_drain(stat_wq);
 	nvmeibt_wq_destroy(stat_wq);
 	stat_wq = NULL;
+	if (atomic_read(&n_entries_in_the_toma_wakeup_pipe)) {	// All 'wq' drained, they put completion wake-up requests for Toma main thread, wakeup last time just to clean the memory. Avoiding this will create a harmless mem leak
+		N_Tf(__AUTOID__, "WQs drained, @INT wakupes await processing", atomic_read(&n_entries_in_the_toma_wakeup_pipe));
+		toma_wakeup_event();
+	}
 	NNVMEIBT_CLOSE(tonecfd0, epoll_fd);
 	rsrm_destroy_after_run();
 	NFOUT;
