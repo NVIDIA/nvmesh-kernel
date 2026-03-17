@@ -1,4 +1,9 @@
 /*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+/*
  * recv_comp_work_ctr_test.c - Test module for recv_comp_work_ctr vs cancel_work_sync
  *
  * Tests whether recv_comp_work_ctr in s_nordda.c is needed or if just
