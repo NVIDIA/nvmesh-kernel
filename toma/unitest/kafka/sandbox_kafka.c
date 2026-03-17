@@ -157,7 +157,7 @@ struct kafka_simulator_t *sandbox_kafka_init(void (*fn)(struct sim_broker_topic 
 	sim_broker_topic_create(&ks->topics[0], KTOPIC_TYPE_M2T_HW_CFG,			4);		// This queue is always non empty, stores at least the last hardware config
 	sim_broker_topic_create(&ks->topics[1], KTOPIC_TYPE_M2T_CMD,			2);		// Toma will consume commands very fast
 	sim_broker_topic_create(&ks->topics[2], KTOPIC_TYPE_M2T_TARGETS_RAFT,	8);		// This queue might be long and potentially store the entire history.
-	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		6);		// Toma will consume volume commands very fast, and ack mgmt keepalive to leader also almost immediately
+	sim_broker_topic_create(&ks->topics[3], KTOPIC_TYPE_M2T_VOLUMES,		4);		// Toma will consume volume commands very fast, and ack mgmt keepalive to leader also almost immediately
 	sim_broker_topic_create(&ks->topics[4], KTOPIC_TYPE_T2M_PRIORITY,		1);		// Mgmt Simu will consume toma reports immediately
 	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		1);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
 	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			1);		// Mgmt Simu will consume toma reports immediately

@@ -141,6 +141,7 @@ static void scenario_create_remove_r1(void) {
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after deleteVolumeCompleted (gc)");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+	mgmt_sim_send_leader_keep_alive();							// Just additional unrelated keepalive to keep more pressure on toma
 }
 
 static void all_test_scenarios(void) {

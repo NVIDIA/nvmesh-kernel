@@ -1619,8 +1619,6 @@ static int incremental_VOL_updates_consume(void) {
 	if (strcmp(msg_param.messageType, "deleteVolume"         ) == 0) { k_event = KAFKA_EVENT_TYPE_VOL_DEL; }
 	if (strcmp(msg_param.messageType, "deleteVolumeCompleted") == 0) { k_event = KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED; is_delVolCompleted =  1; }
 	if (strcmp(msg_param.messageType, "updateVolume"         ) == 0) { k_event = KAFKA_EVENT_TYPE_VOL_UPD;           is_new_or_updateVol = 1; }
-	if (incremental_VOL_updates_offset_to_commit < RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority))
-		incremental_VOL_updates_offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
 
 	if (strcmp(msg_param.messageType, "updateLeaderKeepaliveToken") == 0) {
 		struct keepAliveToken_params_ctx keepAliveToken_params;			// The token-update messages are internal to toma_kafka. No need for wakeup
@@ -2135,6 +2133,8 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	}
 	if (is_consuming_leader_VOL_msgs()) {
 		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
+		if (incremental_VOL_updates_offset_to_commit < RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority))
+			incremental_VOL_updates_offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
 		if (incremental_VOL_updates_offset_to_commit > k_incremental_VOL_updates.offset_committed) {
 			N_Tf(vnd8oel, "VOL: Committing_@KAFKA_OFST latest_@KAFKA_OFST", incremental_VOL_updates_offset_to_commit, k_incremental_VOL_updates.consumer_offset);
 			kafka_commit_by_offset_async(&k_incremental_VOL_updates, incremental_VOL_updates_offset_to_commit);
