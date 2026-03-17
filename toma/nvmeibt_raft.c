@@ -1363,12 +1363,12 @@ void nvmeibt_raft_align_members_with_committed_wire_buf(struct nvmeibt_Str *JSON
 				 members_wire_buf_len, n_members_in_wire_buf, sizeof(struct mm_raft_member_conf), sizeof(struct all_members_wire_buf_ctx),
 				 persist_and_wire_buf_get_total_len(my_raft_global.follower_to_commit_persist_and_wire_buf_full), kafka_offset);
 	new_seq_num = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed);
-	if (my_raft_global.applied_raft_members_seq_no == new_seq_num) {
-		N_Tf(rvsj92j, "Same members as before (seq_no=@INT64_TD). No need to add/del members", new_seq_num);
+	if (my_raft_global.applied_raft_members_seq_no >= new_seq_num) {		// > means, I calculated raft quorum as a leader, but now I am not a leader anymore
+		N_Tf(rvsj92j, "my.applied_raft_members_seq_no=@INT64_TD >= members as before (seq_no=@INT64_TD). No need to add/del members", my_raft_global.applied_raft_members_seq_no, new_seq_num);
 		goto out;
 	}
 	// A rare case. Add/update all members from the members_wire_buf, and delete the missing ones
-	config_tag ++;
+	config_tag++;
 	N_Tf(iwjtgpc, "buf_len=@INT n_wire_members=@INT", members_wire_buf_len, n_members_in_wire_buf);
 	for (i = 0; i < n_members_in_wire_buf; i++) {
 		nvmeibt_raft_member_conf_convert_le_be(&member_conf, &(members_wire_buf->members[i]));
