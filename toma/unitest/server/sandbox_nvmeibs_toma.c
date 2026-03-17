@@ -36,7 +36,7 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 	enum nvmeibs_toma_server_msg_type msg_type;
 	(void)fd; (void)flags;
 	BUG_ON(offset != OFFSET_NONE);
-	BUG_ON(n <= sizeof(struct nvmeibs_toma_server_proc_buf));
+	BUG_ON(n <= sizeof(*msg_buf));
 	msg_type = me->msg_q[me->n_srvr_msg_idx];
 	BUG_ON(msg_type == 0);			// Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
 	if (msg_type == NVMEIBS_TOMA_TRIGGER_JGC) {
@@ -55,12 +55,15 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 		pl->handle_req = me->expecting_reply_cookie;
 		strcpy(pl->fname, "placeholder.tmp");		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
 		pl->max_length = me->max_reply_length_bytes;
-	} else if (msg_type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {
+	} else if (msg_type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {	// Simulates deprecated: nvmeibs_toma_report_event_disk_change()
+		memset(msg_buf, 0, sizeof(*msg_buf));
 		msg_buf->type = NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE; 		// Just meaningless message
+		strcpy(msg_buf->disk_change_msg.disk_id, "dummy_simu_disk");
+		msg_buf->disk_change_msg.op = 'a';							// Add
 	} else {
 		BUG_ON(true); // BUG epoll simulator wrongly told toma that there is a msg from server but there isn't
 	}
-	return sizeof(struct nvmeibs_toma_server_proc_buf);
+	return sizeof(*msg_buf);
 }
 
 static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
