@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef __NVMEIB_PET_SPECIFICATION_H__
 #define __NVMEIB_PET_SPECIFICATION_H__
 

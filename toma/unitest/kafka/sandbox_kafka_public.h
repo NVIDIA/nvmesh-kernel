@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #ifndef NVMEIBT_TOMA_MSG_Q_API_H
 #define NVMEIBT_TOMA_MSG_Q_API_H	// Bypass contents of "interfaces/nvmeibt_msg_queue_api.h"
 /* This header replaces <rdkafka.h> in the sandbox build.

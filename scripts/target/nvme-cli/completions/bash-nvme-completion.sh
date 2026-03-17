@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 # bash tab completion for the nvme command line utility
 # (unfortunately, bash won't let me add descriptions to cmds)
 # Kelly Kaoudis kelly.n.kaoudis at intel.com, Aug. 2015

@@ -2,6 +2,9 @@
 # Build and verify a distroless container for nvmesh-exporter
 # Usage: ./build_distroless.sh <deb_file>
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 set -e
 
 OBSERVABILITY_REPO="${OBSERVABILITY_REPO:-ssh://git@gitlab-master.nvidia.com:12051/nsvsrecs/nvmesh-k8s-observability/containers/nvmesh-exporter.git}"

@@ -1,4 +1,9 @@
 /*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+/*
  * mgmt_sim.h - Management simulator for Toma sandbox unit tests
  *
  * This module simulates the management server's Kafka message exchanges with Toma.

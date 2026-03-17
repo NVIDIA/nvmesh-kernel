@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #pragma once
 
 // API towards epoll sandbox (switch Toma main thread execution with unit test main thread)

@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 /* Implements all rd_kafka_* functions that production Toma code calls */
 #include "sandbox_kafka_internal.h"	// Module interface headers
 #include "sandbox_kafka_public.h"

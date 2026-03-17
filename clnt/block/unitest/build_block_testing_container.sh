@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+
 ########################################################
 # Builds and runs block unit tests inside a container
 # (Podman/Docker) for development in non-linux environments.

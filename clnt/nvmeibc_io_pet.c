@@ -1,3 +1,8 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
 #include "kr_incs.h"
 #include "nvmeibc_io_pet.h"
 #include "nvmeibc_memmgr_metrics.h"
