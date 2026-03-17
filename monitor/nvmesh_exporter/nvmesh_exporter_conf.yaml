@@ -468,6 +468,16 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
       help: 'IO ops for disk by operation'
       type: 'counter'
 
+/proc/nvmeibs/disks/*/qp_stats.json:
+  metric_prefix: 'nvmesh_target_disks_qp_stats'
+  glob_labels_re: '/proc/nvmeibs/disks/(?P<disk_sn>\w+(\.\d+)?)/qp_stats.json'
+  transform: 'summary'
+  metrics:
+    value:
+      pattern_labels_re: 'nvmesh_target_disks_qp_stats_(?P<counter_name>.+)'
+      help: 'NVMe queue pair stats per disk (summary)'
+      type: 'gauge'
+
 /proc/nvmeibs/nic_stats/*/iostats.json:
   metric_prefix: 'nvmesh_target_nics_io'
   glob_labels_re: '/proc/nvmeibs/nic_stats/(?P<nic_guid>\w+)/iostats.json'
