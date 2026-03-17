@@ -892,6 +892,53 @@ static void	nvmeibt_local_disk_generate_ldisk_id_from_native_serial_and_nsid(str
 	}
 }
 
+/** [NVMESH-7967] EMULATE_4KPI: If enabled and drive matches, fill format_options with emulated 4k+8 and return true.
+ *  Otherwise return false (caller should fill from nvme LBAF). */
+static bool fill_format_options_emulate4kpi_if_enabled(struct nvmeibt_local_disk_config *from_config, int *capab_idx)
+{
+	const char *emulate_val = nvmeibt_global_nvmesh_conf_get_val_by_key("EMULATE_4KPI");
+	int n;
+	bool rv = false;
+	
+	NFIN;
+	if (!emulate_val ||
+	    (strcasecmp(emulate_val, "Yes") != 0 &&
+	     strcasecmp(emulate_val, "True") != 0 &&
+	     strcmp(emulate_val, "1") != 0) ||
+	    from_config->pblk_size != FAKE4KPI_PHYS_BLOCK_LEN ||
+	    from_config->metadata_n_bytes != 0)
+		goto out;
+
+	n = snprintf(
+		from_config->smart_info.format_options + *capab_idx,
+		sizeof(from_config->smart_info.format_options) - *capab_idx,
+		"{\"dataBS\": %d, \"metaBS\": %d},",
+		FAKE4KPI_VIRT_BLOCK_LEN, FAKE4KPI_DEFAULT_MD_SIZE);
+	
+	if (n <= 0) {
+		N_Ef(f4kpi_fmt_error, "Unable to write format option for disk=@STR bs=@DS ms=@MS", nvmeibt_local_disk_config_display(from_config), FAKE4KPI_VIRT_BLOCK_LEN, FAKE4KPI_DEFAULT_MD_SIZE);
+		goto out;
+	}
+	*capab_idx += n;
+
+	from_config->smart_info.block_size = FAKE4KPI_VIRT_BLOCK_LEN;
+	from_config->smart_info.metadata_size = FAKE4KPI_DEFAULT_MD_SIZE;
+	from_config->smart_info.metadata_cap = NVME_NS_MC_SEP_MASK;
+	from_config->smart_info.blocks =
+		from_config->n_pblk / FAKE4KPI_SECTORS_PER_LBA;
+
+	N_Tf(f4kpi_fmt, "disk=@STR using emulated 4k+@INT format only (separate MD) blocks=@N_PBLK",
+	     nvmeibt_local_disk_config_display(from_config),
+	     FAKE4KPI_DEFAULT_MD_SIZE,
+	     from_config->smart_info.blocks);
+
+	rv = true;
+
+out:
+	NFOUT;
+	return rv;
+}
+
 BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_nvme_driver(struct nvmeibt_local_disk_config *from_config, const char *dev_file_name, int fd)
 {
 	int i, capab_idx = 0;
@@ -945,69 +992,43 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_nvme_driver(
 			sizeof(from_config->smart_info.Model), sizeof(nvme_drive.ctrl.mn));
 	from_config->smart_info.format_options[capab_idx++] = '[';
 
-	{
-		const char *emulate_val = nvmeibt_global_nvmesh_conf_get_val_by_key("EMULATE_4KPI");
-		bool fake4kpi_replace = false;
-
-		if (emulate_val &&
-		    (strcasecmp(emulate_val, "Yes") == 0 ||
-		     strcasecmp(emulate_val, "True") == 0 ||
-		     strcmp(emulate_val, "1") == 0) &&
-		    from_config->pblk_size == FAKE4KPI_PHYS_BLOCK_LEN &&
-		    from_config->metadata_n_bytes == 0) {
-			int n = snprintf(
-				from_config->smart_info.format_options + capab_idx,
-				sizeof(from_config->smart_info.format_options) - capab_idx,
-				"{\"dataBS\": %d, \"metaBS\": %d},",
-				FAKE4KPI_VIRT_BLOCK_LEN, FAKE4KPI_DEFAULT_MD_SIZE);
-			if (n > 0)
-				capab_idx += n;
-			fake4kpi_replace = true;
-			from_config->smart_info.block_size = FAKE4KPI_VIRT_BLOCK_LEN;
-			from_config->smart_info.metadata_size = FAKE4KPI_DEFAULT_MD_SIZE;
-			from_config->smart_info.metadata_cap = NVME_NS_MC_SEP_MASK;
-			from_config->smart_info.blocks =
-				from_config->n_pblk / FAKE4KPI_SECTORS_PER_LBA;
-			N_Tf(f4kpi_fmt, "disk=@STR using emulated 4k+@INT format only (separate MD) blocks=@N_PBLK",
-			     nvmeibt_local_disk_config_display(from_config),
-			     FAKE4KPI_DEFAULT_MD_SIZE,
-			     from_config->smart_info.blocks);
-		}
-
-		if (!fake4kpi_replace) {
-			params = nvmeibt_disk_flow_params_get(from_config->smart_info.Model, true);
-			for (i = 0; i <= nvme_drive.ns.nlbaf; i++) {
-				struct nvme_lbaf cur_format = nvme_drive.ns.lbaf[i];
-				int n_written = 0;
-
-				if (params && params->ignore_metadata && cur_format.ms > 0) {
-					N_Tf(trace_3_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_nvme_driver,
-							"disk=@STR ignoring LBAF @INT+@INT due to ignore_metadata flow parameter",
-							from_config->smart_info.Serial_Number,
-							1<<cur_format.ds, cur_format.ms);
-					continue;
-				}
-
-				if (params && params->force_512b && cur_format.ds > 9) {
-					N_Tf(trace_3_1_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_nvme_driver, "disk=@STR ignoring LBAF @INT+@INT due to force_512b flow parameter",
-							from_config->smart_info.Serial_Number,
-							1<<cur_format.ds, cur_format.ms);
-					continue;
-				}
-
-				n_written = snprintf(from_config->smart_info.format_options + capab_idx,
-							  sizeof(from_config->smart_info.format_options) - capab_idx,
-							  "{\"dataBS\": %d, \"metaBS\": %d},", 1 << cur_format.ds, cur_format.ms);
-
-				if (n_written < 0) {
-					N_Ef(ca9k3bo, "Unable to write format option for disk=@STR bs=@DS ms=@MS", nvmeibt_local_disk_config_display(from_config), 1 << cur_format.ds, cur_format.ms);
-					rv = false;
-					goto out;
-				}
-				capab_idx += n_written;
-			}
-		}
+	if (fill_format_options_emulate4kpi_if_enabled(from_config, &capab_idx)) {
+		goto wrote_options;
 	}
+
+	params = nvmeibt_disk_flow_params_get(from_config->smart_info.Model, true);
+	for (i = 0; i <= nvme_drive.ns.nlbaf; i++) {
+		struct nvme_lbaf cur_format = nvme_drive.ns.lbaf[i];
+		int n_written = 0;
+
+		if (params && params->ignore_metadata && cur_format.ms > 0) {
+			N_Tf(trace_3_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_nvme_driver,
+					"disk=@STR ignoring LBAF @INT+@INT due to ignore_metadata flow parameter",
+					from_config->smart_info.Serial_Number,
+					1<<cur_format.ds, cur_format.ms);
+			continue;
+		}
+
+		if (params && params->force_512b && cur_format.ds > 9) {
+			N_Tf(trace_3_1_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_nvme_driver, "disk=@STR ignoring LBAF @INT+@INT due to force_512b flow parameter",
+					from_config->smart_info.Serial_Number,
+					1<<cur_format.ds, cur_format.ms);
+			continue;
+		}
+
+		n_written = snprintf(from_config->smart_info.format_options + capab_idx,
+						sizeof(from_config->smart_info.format_options) - capab_idx,
+						"{\"dataBS\": %d, \"metaBS\": %d},", 1 << cur_format.ds, cur_format.ms);
+
+		if (n_written < 0) {
+			N_Ef(ca9k3bo, "Unable to write format option for disk=@STR bs=@DS ms=@MS", nvmeibt_local_disk_config_display(from_config), 1 << cur_format.ds, cur_format.ms);
+			rv = false;
+			goto out;
+		}
+		capab_idx += n_written;
+	}
+
+wrote_options:
 	N_Tf(215ncmu, "disk=@STR wrote format options", nvmeibt_local_disk_config_display(from_config));
 
 	/* Replace trailing comma with closing bracket of array */

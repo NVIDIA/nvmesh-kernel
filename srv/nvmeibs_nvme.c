@@ -481,6 +481,7 @@ struct nvme_qp {
 	dma_addr_t f4kpi_ring_dma;
 	int f4kpi_ring_size;
 	unsigned long *f4kpi_ring_bitmap;
+	struct fake4kpi_cb_ctx *f4kpi_ctx;	/* one per ring slot, no alloc in IO path */
 };
 
 /* q_lock wrappers: set/clear q->locking_cpu so q_already_locked(q) is reliable. */
@@ -511,7 +512,7 @@ struct nvme_qp {
 #define q_already_locked(q) \
 	(irqs_disabled() && (q)->locking_cpu == smp_processor_id())
 
-static inline int f4kpi_ring_alloc(struct nvme_qp *q)
+inline static int f4kpi_ring_alloc(struct nvme_qp *q)
 {
 	int idx = find_first_zero_bit(q->f4kpi_ring_bitmap, q->f4kpi_ring_size);
 	if (idx >= q->f4kpi_ring_size)
@@ -520,19 +521,24 @@ static inline int f4kpi_ring_alloc(struct nvme_qp *q)
 	return idx;
 }
 
-static inline void f4kpi_ring_free(struct nvme_qp *q, int idx)
+inline static void f4kpi_ring_free(struct nvme_qp *q, int idx)
 {
 	clear_bit(idx, q->f4kpi_ring_bitmap);
 }
 
-static inline void *f4kpi_ring_buf(struct nvme_qp *q, int idx)
+inline static void *f4kpi_ring_buf(struct nvme_qp *q, int idx)
 {
 	return q->f4kpi_ring_va + (size_t)idx * PAGE_SIZE;
 }
 
-static inline dma_addr_t f4kpi_ring_dma_addr(struct nvme_qp *q, int idx)
+inline static dma_addr_t f4kpi_ring_dma_addr(struct nvme_qp *q, int idx)
 {
 	return q->f4kpi_ring_dma + (size_t)idx * PAGE_SIZE;
+}
+
+inline static struct fake4kpi_cb_ctx *f4kpi_ring_ctx(struct nvme_qp *q, int idx)
+{
+	return &q->f4kpi_ctx[idx];
 }
 
 /* -------------------------------------------------------------------------- *
@@ -897,6 +903,8 @@ static void free_qp(struct nvme_qp *q)
 		dma_free_coherent(dev,
 			(size_t)q->f4kpi_ring_size * PAGE_SIZE,
 			q->f4kpi_ring_va, q->f4kpi_ring_dma);
+	kfree(q->f4kpi_ctx);
+	q->f4kpi_ctx = NULL;
 	bitmap_free(q->f4kpi_ring_bitmap);
 	if (q->ioqm_alloc_w)
 		_NT(trace_2_nvme_free_qp, "qid @QID: pending work - shall be freed by work itself", q->id -1);
@@ -957,6 +965,9 @@ static struct nvme_qp *alloc_qp(struct device_data *d, int len)
 		q->f4kpi_ring_size = rsz;
 		q->f4kpi_ring_bitmap = bitmap_zalloc(rsz, GFP_KERNEL);
 		if (!q->f4kpi_ring_bitmap)
+			goto out;
+		q->f4kpi_ctx = kcalloc(rsz, sizeof(struct fake4kpi_cb_ctx), GFP_KERNEL);
+		if (!q->f4kpi_ctx)
 			goto out;
 	}
 
@@ -3611,6 +3622,8 @@ struct nvmeibs_bio_ctxt {
 	dma_addr_t f4kpi_bounce_dma;
 	struct nvme_qp *f4kpi_q;
 	int f4kpi_ring_idx;
+	void *f4kpi_data_virt;	/* for read integrity verification */
+	u64 f4kpi_vlba;		/* for read error reporting */
 };
 
 static struct nvmeibs_bio_ctxt *
@@ -3665,6 +3678,46 @@ static void nvmeibs_bio_part_done(void *arg, int status, u32 result)
 		_NT(trace_1_nvme_nvmeibs_bio_part_done, "bio_part_done(status=@STATUS)", status);
 	if ((status & 0x3FF) == EPERM_READ_FAIL)
 		_NT(error_nvme_nvmeibs_bio_part_done, "Unrecovered Read Error");
+
+	/* Fake4kpi local read: verify integrity like remote path (fake4kpi_complete_cb) */
+	if (ctxt->f4kpi_bounce_buf && ctxt->f4kpi_data_virt && status == 0) {
+		u8 *bounce = ctxt->f4kpi_bounce_buf;
+		struct fake4kpi_sector9_hdr *hdr =
+			(struct fake4kpi_sector9_hdr *)bounce;
+		bool has_magic;
+
+		has_magic = memcmp(hdr->magic, FAKE4KPI_MAGIC,
+					FAKE4KPI_MAGIC_LEN) == 0;
+		if (has_magic) {
+			if (hdr->checksum != 0) {
+				u32 computed = fake4kpi_compute_checksum_type(
+					ctxt->f4kpi_data_virt,
+					FAKE4KPI_VIRT_BLOCK_LEN,
+					(enum fake4kpi_integrity_type)
+						hdr->integrity_type);
+				if (computed != hdr->checksum) {
+					u64 f4k_vlba = hdr->vlba;
+					u64 f4k_plba = f4k_vlba *
+						FAKE4KPI_SECTORS_PER_LBA;
+					_NE_dmesg(error_fake4kpi_crc_local,
+					    "fake4kpi local: integrity mismatch "
+					    "(type=@INT) - torn write "
+					    "detected - vlba=@LBA_LLONG, plba=@LBA_LLONG, expected csum=@INT32_HEX, computed csum=@INT32_HEX",
+					    (int)hdr->integrity_type, f4k_vlba,
+					    f4k_plba, hdr->checksum, computed);
+					status = 0x284;
+				}
+			}
+		} else if (memchr_inv(bounce, 0, FAKE4KPI_PHYS_BLOCK_LEN)) {
+			u64 f4k_vlba = ctxt->f4kpi_vlba;
+			u64 f4k_plba = f4k_vlba * FAKE4KPI_SECTORS_PER_LBA;
+			_NE_dmesg(error_fake4kpi_no_magic_local,
+			    "fake4kpi local: sector9 non-zero but missing magic "
+			    "- corrupted or old format - vlba=@LBA_LLONG, plba=@LBA_LLONG",
+			    f4k_vlba, f4k_plba);
+			status = 0x284;
+		}
+	}
 
 	bio_endio(bio, status ? -EIO : 0);
 
@@ -3877,6 +3930,9 @@ static void local_submit_bios(struct nvme_qp *q)
 			if (ridx < 0) {
 				_NE(error_fake4kpi_local_bounce,
 				    "fake4kpi local: bounce ring full");
+				q->ids[cmd_id].callback = NULL;
+				q->ids[cmd_id].arg = NULL;
+				nvmeibs_bio_ctxt_free(ctxt);
 				bio_endio(bio, -ENOMEM);
 				goto cont;
 			}
@@ -3894,6 +3950,9 @@ static void local_submit_bios(struct nvme_qp *q)
 						      f4k_vlba, f4k_plba);
 			} else {
 				memset(bounce, 0, FAKE4KPI_PHYS_BLOCK_LEN);
+				ctxt->f4kpi_data_virt = page_address(vec.bv_page) +
+					vec.bv_offset;
+				ctxt->f4kpi_vlba = f4k_vlba;
 			}
 			ctxt->f4kpi_bounce_buf = bounce;
 			ctxt->f4kpi_bounce_dma = f4kpi_ring_dma_addr(q, ridx);
@@ -3925,6 +3984,9 @@ static void local_submit_bios(struct nvme_qp *q)
 				}
 				if (ctxt->mtdt_page == NULL) {
 					ctxt->mtdt_len = 0;
+					q->ids[cmd_id].callback = NULL;
+					q->ids[cmd_id].arg = NULL;
+					nvmeibs_bio_ctxt_free(ctxt);
 					bio_endio(bio, -ENOMEM);
 					goto cont;
 				}
@@ -4160,8 +4222,7 @@ static void fake4kpi_complete_cb(void *arg, int status, u32 result)
 		}
 		(req->cb)(req->arg, req->status, result);
 	}
-
-	kfree(ctx);
+	/* ctx is from q->f4kpi_ctx[ridx], not allocated per IO */
 }
 
 static int find_f4kpi_conflict(struct nvme_qp *q, sector_t lba, sector_t nlba)
@@ -4415,16 +4476,8 @@ static void process_remote_iops(struct device_data *d, int qid)
 			if (req->use_sg) {
 				cmd->common.dptr_prp1 =
 					sg_dma_address(req->sgp);
-				if (sg_dma_len(req->sgp) <=
-				    FAKE4KPI_VIRT_BLOCK_LEN) {
-					req->sgp = sg_next(req->sgp);
-					--req->table.nents;
-				} else {
-					sg_dma_address(req->sgp) +=
-						FAKE4KPI_VIRT_BLOCK_LEN;
-					sg_dma_len(req->sgp) -=
-						FAKE4KPI_VIRT_BLOCK_LEN;
-				}
+				/* SG advancement deferred until after fctx setup
+				 * so retry sees same sgp if we don't complete. */
 			} else {
 				off_t off = req->buf_offset +
 					(req->data_len - req->resid_len);
@@ -4442,16 +4495,7 @@ static void process_remote_iops(struct device_data *d, int qid)
 			q->ids[id].f4kpi_nlba = 1;
 			INIT_LIST_HEAD(&q->ids[id].f4kpi_waitq);
 
-			fctx = kzalloc(sizeof(*fctx), GFP_NOWAIT);
-			if (!fctx) {
-				f4kpi_ring_free(q, ridx);
-				--q->used_ids;
-				clear_bit(id, q->id_bitmap);
-				if (sq_tail == 0)
-					sq_tail = q->sq_len;
-				--sq_tail;
-				goto out;
-			}
+			fctx = f4kpi_ring_ctx(q, ridx);
 			fctx->bounce_buf = bounce_buf;
 			fctx->bounce_dma = bounce_dma;
 			fctx->dma_dev = &d->pci_dev->dev;
@@ -4464,10 +4508,24 @@ static void process_remote_iops(struct device_data *d, int qid)
 			if (is_read && req->metadata && req->mtdt_size > 0)
 				fctx->md_dst = (u8 *)req->metadata +
 					md_idx * nvmeibs_fake4kpi_md_size;
+			else
+				fctx->md_dst = NULL;
 
 			q->ids[id].callback = fake4kpi_complete_cb;
 			q->ids[id].arg = fctx;
 
+			if (req->use_sg) {
+				if (sg_dma_len(req->sgp) <=
+				    FAKE4KPI_VIRT_BLOCK_LEN) {
+					req->sgp = sg_next(req->sgp);
+					--req->table.nents;
+				} else {
+					sg_dma_address(req->sgp) +=
+						FAKE4KPI_VIRT_BLOCK_LEN;
+					sg_dma_len(req->sgp) -=
+						FAKE4KPI_VIRT_BLOCK_LEN;
+				}
+			}
 			req->disk_block +=
 				(FAKE4KPI_VIRT_BLOCK_LEN >> NVMEIBC_SECTOR_SHIFT);
 			req->resid_len -= FAKE4KPI_VIRT_BLOCK_LEN;

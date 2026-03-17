@@ -1042,6 +1042,62 @@ out:
 	return rv;
 }
 
+/** [NVMESH-7967] EMULATE_4KPI: If EMULATE_4KPI is Yes/True/1, check for GPT or magic at fake-4k offset; if found, mark disk for nvmeibs bind.
+ *  Returns true if found (caller should goto out_OK), false otherwise. */
+static bool try_fake4kpi_gpt_or_magic(struct nvmeibt_local_disk *local_disk)
+{
+	bool rv = false;
+	const char *emulate_val;
+	int f4k_pblk_size;
+	uint64_t fake4kpi_gpt_offset;
+	uint64_t fake4kpi_magic_offset;
+	char *sector_buf;
+	bool found = false;
+	ssize_t rd;
+
+	NFIN;
+	emulate_val = nvmeibt_global_nvmesh_conf_get_val_by_key("EMULATE_4KPI");
+	if (!emulate_val ||
+	    (strcasecmp(emulate_val, "Yes") != 0 &&
+	     strcasecmp(emulate_val, "True") != 0 &&
+	     strcmp(emulate_val, "1") != 0))
+		goto out;
+
+	f4k_pblk_size = local_disk->from_config.pblk_size;
+	fake4kpi_gpt_offset = (uint64_t)FAKE4KPI_SECTORS_PER_LBA * f4k_pblk_size;
+	fake4kpi_magic_offset = (uint64_t)FAKE4KPI_DATA_SECTORS * f4k_pblk_size;
+	sector_buf = NNVMEIBT_BM_ALIGNED_CALLOC(f4kpi_gpt_alloc, PAGE_SIZE, f4k_pblk_size);
+	rd = NNVMEIBT_PREAD(f4kpi_gpt, nvmeibt_local_disk_dev_file_fd(local_disk),
+						sector_buf, f4k_pblk_size, fake4kpi_gpt_offset, 1);
+	if (rd == f4k_pblk_size) {
+		uint64_t gpt_sig;
+		memcpy(&gpt_sig, sector_buf, sizeof(gpt_sig));
+		if (gpt_sig == GPT_SIGNATURE)
+			found = true;
+	}
+
+	if (!found) {
+		rd = NNVMEIBT_PREAD(f4kpi_magic_rd, nvmeibt_local_disk_dev_file_fd(local_disk),
+							sector_buf, f4k_pblk_size, fake4kpi_magic_offset, 1);
+		if (rd == f4k_pblk_size &&
+		    memcmp(sector_buf, FAKE4KPI_MAGIC, FAKE4KPI_MAGIC_LEN) == 0)
+			found = true;
+	}
+
+	if (found) {
+		NNVMEIBT_BM_FREE(f4kpi_gpt_free, sector_buf);
+		nvmeibt_local_disk_mark_is_bind_to_nvmeibs_needed(local_disk);
+		N_Tf(f4kpi_gpt_found, "disk=@STR has GPT/magic at fake_4kpi offset, will be moved to nvmesh driver.",
+			nvmeibt_local_disk_display(local_disk));
+		rv = true;
+		goto out;
+	}
+	NNVMEIBT_BM_FREE(f4kpi_gpt_free2, sector_buf);
+out:
+	NFOUT;
+	return rv;
+}
+
 static void fill_disk_from_stock_driver_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct fill_local_disk_from_stock_driver_wq_entry			*entry;
@@ -1173,40 +1229,8 @@ static void fill_disk_from_stock_driver_wrapper(struct nvmeibt_wq_entry *wq_entr
 										  1,
 										  new_local_disk->from_config.n_pblk - 1,
 										  true) < 0) {
-		{
-			int f4k_pblk_size = new_local_disk->from_config.pblk_size;
-			uint64_t fake4kpi_gpt_offset = (uint64_t)FAKE4KPI_SECTORS_PER_LBA * f4k_pblk_size;
-			uint64_t fake4kpi_magic_offset = (uint64_t)FAKE4KPI_DATA_SECTORS * f4k_pblk_size;
-			char *sector_buf = NNVMEIBT_BM_ALIGNED_CALLOC(f4kpi_gpt_alloc, PAGE_SIZE, f4k_pblk_size);
-			bool found = false;
-			ssize_t rd;
-
-			rd = NNVMEIBT_PREAD(f4kpi_gpt, nvmeibt_local_disk_dev_file_fd(new_local_disk),
-								sector_buf, f4k_pblk_size, fake4kpi_gpt_offset, 1);
-			if (rd == f4k_pblk_size) {
-				uint64_t gpt_sig;
-				memcpy(&gpt_sig, sector_buf, sizeof(gpt_sig));
-				if (gpt_sig == GPT_SIGNATURE)
-					found = true;
-			}
-
-			if (!found) {
-				rd = NNVMEIBT_PREAD(f4kpi_magic_rd, nvmeibt_local_disk_dev_file_fd(new_local_disk),
-									sector_buf, f4k_pblk_size, fake4kpi_magic_offset, 1);
-				if (rd == f4k_pblk_size &&
-				    memcmp(sector_buf, FAKE4KPI_MAGIC, FAKE4KPI_MAGIC_LEN) == 0)
-					found = true;
-			}
-
-			if (found) {
-				NNVMEIBT_BM_FREE(f4kpi_gpt_free, sector_buf);
-				nvmeibt_local_disk_mark_is_bind_to_nvmeibs_needed(new_local_disk);
-				N_Tf(f4kpi_gpt_found, "disk=@STR has GPT/magic at fake_4kpi offset, will be moved to nvmesh driver.",
-					nvmeibt_local_disk_display(new_local_disk));
-				goto out_OK;
-			}
-			NNVMEIBT_BM_FREE(f4kpi_gpt_free2, sector_buf);
-		}
+		if (try_fake4kpi_gpt_or_magic(new_local_disk))
+			goto out_OK;
 		new_local_disk->is_done_reading_gpt_existing_or_not = 0;
 		goto out;
 	}
@@ -2318,15 +2342,8 @@ static void format_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 			goto out;
 		}
 
-#ifdef FAKE4KPI_USE_BLKGETSIZE64
-		if (ioctl(entry->fd, BLKGETSIZE64, &last_block_addr) < 0) {
-			cur_pblk_size = 1 << ns.lbaf[ns.flbas & 0xf].ds;
-			last_block_addr = ns.nsze * cur_pblk_size;
-		}
-#else
 		cur_pblk_size = 1 << ns.lbaf[ns.flbas & 0xf].ds;
 		last_block_addr = ns.nsze * cur_pblk_size;
-#endif
 	}
 	else {
 		last_block_addr = entry->format_details.n_pblk * entry->format_details.block_size;
