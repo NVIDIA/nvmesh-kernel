@@ -140,8 +140,8 @@ void nvmeibt_flush_all_traces(void) {
 
 
 void nvmeibt_flush_all_and_terminate(void) {
-	nvmeib_flush_and_terminate(nvmeibt_trace_long);
-	nvmeib_flush_and_terminate(nvmeibt_trace_eter);
+	if (nvmeibt_trace_long) nvmeib_flush_and_terminate(nvmeibt_trace_long);
+	if (nvmeibt_trace_eter) nvmeib_flush_and_terminate(nvmeibt_trace_eter);
 }
 
 void nvmeibt_toggle_logging(void) {
@@ -170,9 +170,9 @@ void nvmeibt_join_all_trace_pollers(void) {
 	__join_trace_pollers(long_poller, eph_poller, eter_poller);
 	eter_poller = long_poller = eph_poller = 0;
 	// Destroy channels
-	nvmeib_destroy_trace_channel(nvmeibt_trace_eph);
-	nvmeib_destroy_trace_channel(nvmeibt_trace_long);
-	nvmeib_destroy_trace_channel(nvmeibt_trace_eter);
+	nvmeib_destroy_trace_channel(nvmeibt_trace_eph);  nvmeibt_trace_eph =  NULL;
+	nvmeib_destroy_trace_channel(nvmeibt_trace_long); nvmeibt_trace_long = NULL;
+	nvmeib_destroy_trace_channel(nvmeibt_trace_eter); nvmeibt_trace_eter = NULL;
 }
 
 void nvmeibt_start_all_trace_pollers(bool is_running_as_a_utility) {
