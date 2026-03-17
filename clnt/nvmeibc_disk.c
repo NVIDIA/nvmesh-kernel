@@ -239,7 +239,7 @@ MODULE_PARM_DESC(tgt_nics_query_min_secs, "The minimum amount of time allowed be
 
 uint nvmeibc_disk_tgt_nics_query_min_n_fail = UINT_MAX;
 module_param_named(tgt_nics_query_min_n_fail, nvmeibc_disk_tgt_nics_query_min_n_fail, uint, 0644);
-MODULE_PARM_DESC(tgt_nics_query_min_n_fail, "The mnimum number of discovery failures before sending a Target NICs query to management.");
+MODULE_PARM_DESC(tgt_nics_query_min_n_fail, "The minimum number of discovery failures before sending a Target NICs query to management.");
 
 uint nvmeibc_disk_tgt_nics_query_min_fail_secs = 10;
 module_param_named(tgt_nics_query_min_fail_secs, nvmeibc_disk_tgt_nics_query_min_fail_secs, uint, 0644);
