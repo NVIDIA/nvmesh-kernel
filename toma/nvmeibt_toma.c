@@ -1314,8 +1314,8 @@ void wakeup_format_event(const struct nvmeibt_ascii_uuid *ldisk_id,
 			}
 		}
 	} else {
-		N_Tf(aajii9r, "Got format from different mgmt, Accepting regardless of format counter. disk_mgmt_db_uuid=@UUID_LE current mgmt_db_uuid=@UUID_LE",
-			&(local_disk->from_config.disk_metadata.mgmt_db_uuid), nvmeibt_global_get_mgmt_DB_uuid());
+		N_Tf(aajii9r, "disk=@STR, Got format from different mgmt, Accepting regardless of format counter. disk_mgmt_db_uuid=@UUID_LE current mgmt_db_uuid=@UUID_LE",
+			nvmeibt_local_disk_display(local_disk), &(local_disk->from_config.disk_metadata.mgmt_db_uuid), nvmeibt_global_get_mgmt_DB_uuid());
 	}
 	/* We got a new (valid) format command - if it's here it means the format_write_counter is newer, and this is not just a network glitch.
 	   We now save the new format parameters in the local disk
