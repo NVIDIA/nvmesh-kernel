@@ -1602,12 +1602,15 @@ void nvmeibt_topology_reset_due_to_convert_to_leader(void)
 void nvmeibt_topology_serialize_conf_and_topo_if_needed(void)
 {
 	NFIN;
-	// The baseline config & topo, contain only pRAIDs, while the mgmt config also contains the blkdev(s)
-	if (RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_calculated) != RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit)) {
+	// The baseline config & topo, contain only pRAIDs, while the mgmt config also contains the blkdev(s).
+	// Also serialize when the wire buffer was never populated (buf_len==0), so that persistency always contains valid TLV payloads even with zero volumes.
+	if (RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_calculated) != RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit)
+		|| nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_config_complete.buf_len == 0) {
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(7ceuak2, TOPO_CONFIG, leader_to_commit, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_calculated));
 		nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire(-1LL);
 	}
-	if (RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated) != RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit)) {
+	if (RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated) != RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit)
+		|| nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_complete.buf_len == 0) {
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(v6gsjkw, TOPO, leader_to_commit, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated));
 		nvmeibt_topology_leader_serialize_baseline_topo_to_wire();
 	}
@@ -1617,7 +1620,8 @@ void nvmeibt_topology_serialize_conf_and_topo_if_needed(void)
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(tcvshjj, RAFT_MEMBERS_SEQ_NO, leader_to_commit, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_calculated));
 		nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf();
 	}
-	if (RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated) != RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit)) {
+	if (RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated) != RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit)
+		|| nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config_complete.buf_len == 0) {
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(eisms7v, KAFKA_MGMT_CONFIG, leader_to_commit, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated));
 		nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire();
 	}
