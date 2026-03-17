@@ -936,6 +936,7 @@ static void praid_one_time_init(struct nvmeibt_praid *praid)
 	NFIN;
 	NVMEIBT_BUF_INIT(&praid->praid_leader.topo_config_array_of_its_serialized_segs_conf);
 	NVMEIBT_BUF_INIT(&praid->praid_leader.segs_wire_topo_buf);
+	praid->praid_leader.praid_wire_topo.segs_num = LE_SWAP8(ILLEGAL_SEGS_NUM); // Mark as never serialized
 	praid_lot_one_time_init(&praid->praid_leader.baseline_praid_lot, praid, GET_SEG_LOT_OFFSET(seg_leader.baseline_seg_lot));
 	praid_lot_one_time_init(&praid->praid_leader.calculated_praid_lot, praid, GET_SEG_LOT_OFFSET(seg_leader.calculated_seg_lot));
 	praid_lot_one_time_init(&praid->praid_leader.to_report_praid_lot, praid, GET_SEG_LOT_OFFSET(seg_leader.to_report_seg_lot));
