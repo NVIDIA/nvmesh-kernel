@@ -9,9 +9,9 @@ SPDX-License-Identifier: Apache-2.0
 
 - [NVMesh 3.4.0 Module Params Guide](#nvmesh-340-module-params-guide)
   - [Table of Contents](#table-of-contents)
-- [​Copyright and Trademark Information](#copyright-and-trademark-information)
-- [​Preface](#preface)
-- [​Acronyms and Terms](#acronyms-and-terms)
+- [Copyright and Trademark Information](#copyright-and-trademark-information)
+- [Preface](#preface)
+- [Acronyms and Terms](#acronyms-and-terms)
 - [Module Parameters](#module-parameters)
   - [Tracer Severities](#tracer-severities)
   - [nvmeiba](#nvmeiba)
@@ -21,7 +21,7 @@ SPDX-License-Identifier: Apache-2.0
   - [nvmeibs](#nvmeibs)
   - [siw](#siw)
 
-# ​Copyright and Trademark Information
+# Copyright and Trademark Information
 
 © 2026 NVIDIA All rights reserved.
 
@@ -31,7 +31,7 @@ NVMesh® is a registered trademark of NVIDIA.
 
 All other brands or products are trademarks or registered trademarks of their respective holders and should be treated as such.
 
-# ​Preface
+# Preface
 
 **<u>Audience</u>**
 
@@ -41,7 +41,7 @@ The primary audience for this document is intended to be storage and/or applicat
 
 We continually try to improve the quality and usefulness of documentation. If you have any corrections, feedback, or requests for additional documentation, send an e-mail message to <nvmesh-documentation@nvidia.com>.
 
-# ​Acronyms and Terms
+# Acronyms and Terms
 
 | Acronym | Description |
 | --- | --- |
