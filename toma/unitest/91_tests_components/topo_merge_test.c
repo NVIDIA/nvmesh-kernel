@@ -234,7 +234,7 @@ DEFINE_TEST(complete_topo_same_idx_keeps_old)
 
 	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
-	TEST_ASSERT_EQ(merge_size, 0);
+	TEST_ASSERT_EQ(merge_size, old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 5LL);
@@ -468,7 +468,7 @@ DEFINE_TEST(complete_all_sections_mixed)
 
 	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
-	TEST_ASSERT_EQ(merge_size, 0);
+	TEST_ASSERT_EQ(merge_size, 40);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), 40);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 3LL);

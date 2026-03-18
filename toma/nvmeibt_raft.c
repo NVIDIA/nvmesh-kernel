@@ -668,6 +668,77 @@ int nvmeibt_raft_leader_copy_committed_persist_and_wire_buf_sections_into_separa
 	return 0;
 }
 
+static void _advance_ptrs(char **old_data_ptr, const char **upd_data_ptr, int old_len, int upd_len)
+{
+	*upd_data_ptr += upd_len;
+	*old_data_ptr += old_len;
+}
+
+static void __attribute__((unused)) _copy_inc_ctx_old_data_advance_ptrs(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+												  const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+												  const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+												  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
+{
+	const int upd_len = nvmeibt_tlv_get_len(upd_wire_ctx);
+	const int old_len = nvmeibt_tlv_get_len(old_wire_ctx);
+	if (dst_data_ptr) {
+		memcpy(*dst_data_ptr, *old_data_ptr, old_len);
+
+		*dst_wire_ctx = *old_wire_ctx;
+
+		dst_wire_ctx->tlv_idx = upd_wire_ctx->tlv_idx;
+		dst_wire_ctx->seq_no = upd_wire_ctx->seq_no;
+
+		dst_wire_ctx->tlv_crc = 0;
+		dst_wire_ctx->tlv_crc = crc32(0, dst_wire_ctx, sizeof(*dst_wire_ctx));
+		dst_wire_ctx->tlv_crc = LE_SWAP32(crc32(dst_wire_ctx->tlv_crc, *dst_data_ptr, old_len));
+
+		*dst_data_ptr += old_len;
+	}
+	_advance_ptrs(old_data_ptr, upd_data_ptr, old_len, upd_len);
+}
+
+static int _copy_complete_section_advance_ptrs(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+													  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
+{
+	const int upd_len = nvmeibt_tlv_get_len(upd_wire_ctx);
+	const int old_len = nvmeibt_tlv_get_len(old_wire_ctx);
+	const char **src_data_ptr = NULL;
+	const struct nvmeibt_wire_type_len_value *src_wire_ctx = NULL;
+	int src_data_len = 0;
+
+	if (nvmeibt_tlv_get_idx(upd_wire_ctx) > nvmeibt_tlv_get_idx(old_wire_ctx)) {
+		src_data_ptr = upd_data_ptr;
+		src_data_len = upd_len;
+		src_wire_ctx = upd_wire_ctx;
+	} else if (upd_len == 0) {
+		src_data_ptr = (const char **)old_data_ptr;
+		src_data_len = old_len;
+		src_wire_ctx = old_wire_ctx;
+	} else if (old_len == 0) {
+		src_data_ptr = upd_data_ptr;
+		src_data_len = upd_len;
+		src_wire_ctx = upd_wire_ctx;
+	} else {
+		NTOMA_ASSERT(copy_comp_idx_check, nvmeibt_tlv_get_idx(upd_wire_ctx) == nvmeibt_tlv_get_idx(old_wire_ctx), "Complete update received on follower must have same or greater index than old! upd=@INT64_TX old=@INT64_TX", nvmeibt_tlv_get_idx(upd_wire_ctx), nvmeibt_tlv_get_idx(old_wire_ctx));
+		NTOMA_ASSERT(copy_comp_len_check, upd_len == old_len, "Old and upd section with same idx must have same length! upd=@INT old=@INT", upd_len, old_len);
+		NTOMA_ASSERT(copy_comp_data_check, memcmp(*old_data_ptr, *upd_data_ptr, old_len) == 0, "Old and upd section with same idx must have same data! old=@PTR upd=@PTR old_len=@INT upd_len=@INT", *old_data_ptr, *upd_data_ptr, old_len, upd_len);
+		src_data_ptr = (const char **)old_data_ptr;
+		src_data_len = old_len;
+		src_wire_ctx = old_wire_ctx;
+	}
+
+	if (dst_data_ptr) {
+		memcpy(*dst_data_ptr, *src_data_ptr, src_data_len);
+		*dst_wire_ctx = *src_wire_ctx;
+		*dst_data_ptr += src_data_len;
+	}
+
+	_advance_ptrs(old_data_ptr, upd_data_ptr, old_len, upd_len);
+	return src_data_len;
+}
+
+// Legacy helper — still used by realloc_and_upd until the two-pass merge commit replaces it.
 static void persist_and_wire_buf_copy_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
 													  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
 {
@@ -681,21 +752,25 @@ static void persist_and_wire_buf_copy_data_to_section(struct nvmeibt_wire_type_l
 		memcpy(*dst_data_ptr, *old_data_ptr, old_len);	// might be that old_len==0
 		*dst_wire_ctx = *old_wire_ctx;
 	}
-	// Now copy wire-->wire format
 
 	*upd_data_ptr += upd_len;
 	*old_data_ptr += old_len;
 	*dst_data_ptr += nvmeibt_tlv_get_len(dst_wire_ctx);
 }
 
+struct all_members_wire_buf_ctx {
+	int								n_raft_members;
+	int								filler_for_align_8;
+	struct mm_raft_member_conf		members[0];
+} __attribute__((__packed__));
 
 /*
  * @dst_wire_ctx: Destination TLV header (can be NULL for size calculation only)
- * @old_wire_ctx: Old TLV header (can be NULL for initial complete case)
+ * @old_wire_ctx: Old TLV header (must be provided; may have zero-length data for initial case)
  * @upd_wire_ctx: Update TLV header (complete or incremental)
- * @dst_data_ptr: Pointer to destination data pointer (can be NULL for size calculation). When provided, caller must allocate just enough space for the data.
- * @old_data_ptr: Pointer to old data pointer (can be NULL)
- * @upd_data_ptr: Pointer to update data pointer (must be provided)
+ * @dst_data_ptr: Pointer to destination data pointer (can be NULL for size calculation). When provided, caller must allocate just enough space for the data. After call, it will be updated to point to the end of the data.
+ * @old_data_ptr: Pointer to old data pointer (must be provided). After call, it will be updated to point to the end of the data.
+ * @upd_data_ptr: Pointer to update (new) data pointer (must be provided). After call, it will be updated to point to the end of the data.
  *
  * Returns: Size of the resulting data, or -1 on error
  */
@@ -719,18 +794,13 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 	old_len = old_wire_ctx ? nvmeibt_tlv_get_len(old_wire_ctx) : 0;
 	upd_tlv_type = nvmeibt_tlv_get_type(upd_wire_ctx);
 
-	// Complete types - just use persist_and_wire_buf_copy_data_to_section
+	// Complete types - just copy upd data
 	if (upd_tlv_type == TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE ||
 		upd_tlv_type == TLV_TYPE_TOPO_CONFIG_COMPLETE ||
 		upd_tlv_type == TLV_TYPE_RAFT_MEMBERS_COMPLETE ||
 		upd_tlv_type == TLV_TYPE_TOPO_COMPLETE) {
 
-		if (dst_wire_ctx) {
-			persist_and_wire_buf_copy_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
-													  dst_data_ptr, old_data_ptr, upd_data_ptr);
-		}
-		// Calculate total size
-		total_size = upd_len;
+		total_size = _copy_complete_section_advance_ptrs(dst_wire_ctx, old_wire_ctx, upd_wire_ctx, dst_data_ptr, old_data_ptr, upd_data_ptr);
 		goto out;
 	}
 
@@ -1063,12 +1133,6 @@ out:
 }
 
 /**************************        members        *****************************/
-
-struct all_members_wire_buf_ctx {
-	int								n_raft_members;
-	int								filler_for_align_8;
-	struct mm_raft_member_conf		members[0];
-} __attribute__((__packed__));
 
 static void raft_reset_member_ctx(struct nvmeibt_raft_member *member)
 {
