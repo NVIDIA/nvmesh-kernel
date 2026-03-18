@@ -46,10 +46,9 @@ if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ]; then
 	poetry lock
 	poetry install --sync --no-root --only pet
 	PET_PYTHON="poetry run python3"
-	start=$(date +%s.%N)
+	start=$SECONDS
 	if $PET_PYTHON common/pet/nvmeib_pet_messages.py save-dictionary "$PET_MODULE" "$PET_SECTION" "$PET_DICT"; then
-		end=$(date +%s.%N)
-		runtime=$(echo "$end - $start" | bc -l)
+		runtime=$((SECONDS - start))
 		echo "PET dictionary saved to ${PET_DICT} in ${runtime} seconds"
 	else
 		rm -f "$PET_DICT"
