@@ -850,7 +850,7 @@ static void leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_b
 	NFOUT;
 }
 TODO(merge this with leader_generate_topo_config_buf_of_praid_and_its_segs_mm_conf_from_baseline_praid_lot)
-int __attribute__((unused)) nvmeibt_follower_praid_calculate_size_and_serialize_topo_config_buf_if_needed(struct nvmeibt_praid *praid, char **dst_data_ptr)
+int nvmeibt_follower_praid_calculate_size_and_serialize_topo_config_buf_if_needed(struct nvmeibt_praid *praid, char **dst_data_ptr)
 {
 	struct nvmeibt_praid_follower					*praid_follower;
 	struct nvmeibt_praid_lot						*praid_lot;

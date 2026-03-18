@@ -764,6 +764,179 @@ struct all_members_wire_buf_ctx {
 	struct mm_raft_member_conf		members[0];
 } __attribute__((__packed__));
 
+// Volume deletion bumps both TOPO_CONFIG and KAFKA_MGMT_CONFIG indices, but there is
+// no explicit last_delete_topo_config_offset guard. This is safe because the leader's
+// is_configs_and_raft_members_incremental boolean gates all non-topo sections together,
+// and the kafka_mgmt_config deletion guard (last_delete_kafka_mgmt_config_offset) forces
+// complete for all configs — including topo_config — for peers behind a deletion.
+// Therefore this function never receives incremental data with deleted volumes/praids.
+static int merge_topo_config_incremental(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+										 const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+										 const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+										 char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr,
+										 int old_len, int upd_len)
+{
+	struct mm_mgmt_conf					*new_mgmt_conf = NULL;
+	char								*output_start = NULL;
+	uint16_t							mgmt_wire_size = nvmeibt_packed_mm_mgmt_config_size();
+	const uint16_t						seg_wire_size = nvmeibt_packed_seg_config_size();
+	int									total_size = 0;
+	int									n_old_vols = 0;
+	struct nvmeibt_block_device			*block_device = NULL;
+
+	if (nvmeibt_tlv_get_type(old_wire_ctx) != TLV_TYPE_TOPO_CONFIG_COMPLETE) {
+		N_Ef(tc_inc_no_old, "Old topo config is @INT8_TD not complete type. Incremental requires complete old to merge", nvmeibt_tlv_get_type(old_wire_ctx));
+		return -1;
+	}
+
+	if (upd_len == 0) {
+		_copy_inc_ctx_old_data_advance_ptrs(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+											dst_data_ptr, old_data_ptr, upd_data_ptr);
+		return old_len;
+	}
+
+	new_mgmt_conf = mm_wire_buf_to_mm_mgmt_conf(*upd_data_ptr, true, NULL);
+	if (!new_mgmt_conf) {
+		N_Ef(iowkls02a, "Failed to decode new wire buffer");
+		return -1;
+	}
+
+	if (dst_data_ptr) {
+		output_start = *dst_data_ptr;
+	}
+
+	// 1. conf header
+	total_size = mgmt_wire_size;
+	if (dst_data_ptr) {
+		*dst_data_ptr += nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(*dst_data_ptr, new_mgmt_conf);
+	}
+
+	NVMEIB_HASH_FOREACH(block_device, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(block_device)) {
+			n_old_vols++;
+		}
+	}
+
+	NTOMA_ASSERT(tc_inc_counts_chk, new_mgmt_conf->num_vols >= n_old_vols, "Number of new volumes (@INT) should always be >= number of valid old volumes (@INT)", new_mgmt_conf->num_vols, n_old_vols);
+
+	for (int new_vol_idx = 0; new_vol_idx < new_mgmt_conf->num_vols; new_vol_idx++) {
+		struct mm_vol_conf				*new_vol = &new_mgmt_conf->volumes[new_vol_idx];
+		uint16_t						vol_wire_size = nvmeibt_packed_vol_config_size();
+		// 2. vol header
+		total_size += vol_wire_size;
+		if (dst_data_ptr) {
+			*dst_data_ptr += nvmeibt_vol_convert_to_wire_via_aligned_tmp(*dst_data_ptr, new_vol);
+		}
+
+		for (uint8_t new_chunk_idx = 0; new_chunk_idx < new_vol->num_chunks; new_chunk_idx++) {
+			struct mm_chunk_conf			*new_chunk = &new_vol->chunks[new_chunk_idx];
+			void							*out_chunk_hdr_p = NULL;
+			uint8_t							chunk_n_praids = 0;
+			uint16_t						chunk_wire_size = nvmeibt_packed_chunk_config_size();
+			struct nvmeibt_chunk			*old_chunk_obj = nvmeib_hash_search_uuid(nvmeibt_global_get_global()->chunks_hash_by_uuid, &new_chunk->uuid);
+
+			// 3. chunk header — postpone writing until praid count is known
+			total_size += chunk_wire_size;
+			if (dst_data_ptr) {
+				out_chunk_hdr_p = *dst_data_ptr;
+				*dst_data_ptr += chunk_wire_size;
+			}
+
+			if (!old_chunk_obj) {
+				for (uint8_t new_praid_idx = 0; new_praid_idx < new_chunk->num_praids; new_praid_idx++) {
+					struct mm_praid_conf		*new_praid = &new_chunk->praids[new_praid_idx];
+					int							praid_size = nvmeibt_packed_praid_config_size() + new_praid->num_segments * seg_wire_size;
+
+					total_size += praid_size;
+					if (dst_data_ptr) {
+						*dst_data_ptr += nvmeibt_save_praid_wire_data_to(*dst_data_ptr, new_praid);
+					}
+				}
+				chunk_n_praids = new_chunk->num_praids;
+			} else {
+				for (int old_praid_idx = 0; old_praid_idx < old_chunk_obj->n_praids; old_praid_idx++) {
+					struct nvmeibt_praid		*old_praid_obj = old_chunk_obj->praids[old_praid_idx];
+					old_praid_obj->praid_follower.is_serialized_in_incremental_merge = false;
+				}
+				for (uint8_t new_praid_idx = 0; new_praid_idx < new_chunk->num_praids; new_praid_idx++) {
+					struct mm_praid_conf		*new_praid = &new_chunk->praids[new_praid_idx];
+					int							new_praid_size = nvmeibt_packed_praid_config_size() + new_praid->num_segments * seg_wire_size;
+					struct nvmeibt_praid		*old_praid_obj = nvmeibt_praid_get_praid_by_id(&new_praid->uuid);
+
+					if (old_praid_obj) {
+						int64_t		old_committed_idx = old_praid_obj->praid_follower.committed_praid_lot.from_config.topo_config_idx_updated;
+
+						if ((new_praid->topo_config_idx_updated <= old_committed_idx) &&
+							(old_committed_idx != nvmeibt_offset_and_idx_uninitialized)) {
+							continue;
+						}
+						old_praid_obj->praid_follower.is_serialized_in_incremental_merge = true;
+					}
+
+					// 4. praid and segs, from incremental topo config
+					total_size += new_praid_size;
+					if (dst_data_ptr) {
+						*dst_data_ptr += nvmeibt_save_praid_wire_data_to(*dst_data_ptr, new_praid);
+					}
+					chunk_n_praids++;
+				}
+
+				for (int old_praid_idx = 0; old_praid_idx < old_chunk_obj->n_praids; old_praid_idx++) {
+					struct nvmeibt_praid	*old_praid_obj = old_chunk_obj->praids[old_praid_idx];
+					NTOMA_ASSERT(tc_inc_old_praid_not_found, old_praid_obj && !NVMEIBT_OBJ_IS_MARKED_OUTDATED(old_praid_obj), "Old praid=@UUID_LE is outdated", nvmeibt_praid_UUID(old_praid_obj));
+
+					if (old_praid_obj->praid_follower.is_serialized_in_incremental_merge) {
+						continue;
+					}
+
+					old_praid_obj->praid_follower.is_serialized_in_incremental_merge = true;
+					total_size += nvmeibt_follower_praid_calculate_size_and_serialize_topo_config_buf_if_needed(old_praid_obj, dst_data_ptr);
+					chunk_n_praids++;
+				}
+			}
+
+			// 3. chunk header with final merged praid count
+			if (out_chunk_hdr_p) {
+				struct mm_chunk_conf out_chunk_conf = *new_chunk;
+				out_chunk_conf.num_praids = chunk_n_praids;
+				nvmeibt_chunk_convert_to_wire_via_aligned_tmp(out_chunk_hdr_p, &out_chunk_conf);
+			}
+		}
+	}
+
+	total_size += sizeof(EYECATCHER_CNF_END);
+	total_size += (sizeof(struct mm_mgmt_conf) - sizeof(struct _packed_mm_mgmt_conf));
+
+	if (dst_data_ptr) {
+		int actual_written_size;
+		int padding_size = sizeof(struct mm_mgmt_conf) - sizeof(struct _packed_mm_mgmt_conf);
+
+		nvmeibt_strlcpy(*dst_data_ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+		*dst_data_ptr += sizeof(EYECATCHER_CNF_END);
+
+		memset(*dst_data_ptr, 0, padding_size);
+		*dst_data_ptr += padding_size;
+
+		actual_written_size = (int)(*dst_data_ptr - output_start);
+		NTOMA_ASSERT(tc_inc_sz_chk, actual_written_size == total_size,
+					 "Size mismatch! calculated=@INT actual_written=@INT",
+					 total_size, actual_written_size);
+
+		*dst_wire_ctx = *old_wire_ctx;
+		dst_wire_ctx->tlv_len = LE_SWAP32(total_size);
+		dst_wire_ctx->tlv_idx = upd_wire_ctx->tlv_idx;
+		dst_wire_ctx->seq_no = upd_wire_ctx->seq_no;
+		dst_wire_ctx->tlv_crc = 0;
+		dst_wire_ctx->tlv_crc = crc32(0, dst_wire_ctx, sizeof(*dst_wire_ctx));
+		dst_wire_ctx->tlv_crc = LE_SWAP32(crc32(dst_wire_ctx->tlv_crc, output_start, total_size));
+	}
+
+	_advance_ptrs(old_data_ptr, upd_data_ptr, old_len, upd_len);
+
+	mm_conf_free_tree(new_mgmt_conf);
+	return total_size;
+}
+
 static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
 								  const struct nvmeibt_wire_type_len_value *old_wire_ctx,
 								  const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
@@ -970,7 +1143,9 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 		break;
 
 	case TLV_TYPE_TOPO_CONFIG_INCREMENTAL:
-		N_Ef(tpc834k, "TOPO_CONFIG_INCREMENTAL not implemented yet - using standard copy");
+		total_size = merge_topo_config_incremental(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+												   dst_data_ptr, old_data_ptr, upd_data_ptr,
+												   old_len, upd_len);
 		break;
 
 	case TLV_TYPE_RAFT_MEMBERS_INCREMENTAL:
