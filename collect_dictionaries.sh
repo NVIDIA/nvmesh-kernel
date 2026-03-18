@@ -44,7 +44,7 @@ if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ]; then
 		curl -sSL https://install.python-poetry.org | ${PET_PYTHON} -
 	fi
 	poetry lock
-	poetry install --sync --with=compile --no-root
+	poetry install --sync --no-root --only pet
 	PET_PYTHON="poetry run python3"
 	start=$(date +%s.%N)
 	if $PET_PYTHON common/pet/nvmeib_pet_messages.py save-dictionary "$PET_MODULE" "$PET_SECTION" "$PET_DICT"; then
