@@ -1413,3 +1413,11 @@ out:
 	NFOUT;
 }
 
+#if defined(TOMA_SIMULATOR_SANDBOX)
+void TEST_global_init(void)
+{
+	nvmeibt_global_init();
+	nvmeibt_bm_create();	// Buffer manager needed by mm_wire_buf_to_mm_mgmt_conf
+}
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
+
