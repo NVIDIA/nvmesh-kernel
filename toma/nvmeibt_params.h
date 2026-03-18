@@ -3,16 +3,10 @@
 * SPDX-License-Identifier: Apache-2.0
 */
 
-/**
- * @file   nvmeibt_params.h
- * @Author Oren
- * @date   Mar, 2017
- * @brief  Misc compile-time parameters
- */
-
 #ifndef NVMEIBT_PARAMS
 #define NVMEIBT_PARAMS
 
+// Misc compile-time parameters
 #define NVMEIBT_MAX_N_NODES 256
 #define NVMEIBT_MAX_N_BLOCK_DEVICES 20*1000
 #define NVMEIBT_MAX_N_NICS_PER_NODE 10
@@ -37,9 +31,13 @@
 
 #define MAX_N_RUNNING_COLD_RECOVERY_PER_NODE 5	// They should be short, and quickly start the seg/praid life-cycle
 
-#define MAX_TIME_BETWEEN_CHANGED_SEGMENT_REPORTS_NSECS  SEC_TO_NSEC(1)
-#define MIN_NSEC_BETWEEN_REBUILD_PROGRESS_REPORTS_NSECS SEC_TO_NSEC(2)
-
+#ifndef TOMA_SIMULATOR_SANDBOX
+	#define MAX_TIME_BETWEEN_CHANGED_SEGMENT_REPORTS_NSECS  SEC_TO_NSEC(1)
+	#define MIN_NSEC_BETWEEN_REBUILD_PROGRESS_REPORTS_NSECS SEC_TO_NSEC(2)
+#else
+	#define MAX_TIME_BETWEEN_CHANGED_SEGMENT_REPORTS_NSECS  MSEC_TO_NSEC(100)	// Todo: make a constant sandbox factor to run everything xN times faster
+	#define MIN_NSEC_BETWEEN_REBUILD_PROGRESS_REPORTS_NSECS MSEC_TO_NSEC(200)
+#endif
 #define MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_SEC   6
 #define MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_NSEC  SEC_TO_NSEC(MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_SEC)
 
