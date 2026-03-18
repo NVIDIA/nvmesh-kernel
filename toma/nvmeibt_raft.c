@@ -1080,29 +1080,61 @@ static void nvmeibt_raft_leader_generate_member_wire_from_member(struct nvmeibt_
 	NFOUT;
 }
 
-void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void)
+static void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf_complete_or_incremental(bool is_wire_buf_incremental)
 {
 	struct nvmeibt_Buf								*wire_conf_buf;
 	struct nvmeibt_raft_member						*member;
 	struct all_members_wire_buf_ctx					*members_wire_buf;
 	int												i = 0;
+	int												n_members_to_send = 0;
 	size_t											required_size;
+	int64_t											min_seq_no = 0;
 
 	NFIN;
-	wire_conf_buf = &(my_raft_global.leader_to_commit_wire_raft_members_complete);
-	required_size = sizeof(struct all_members_wire_buf_ctx) + my_raft_global.n_raft_members * sizeof(struct mm_raft_member_conf) + sizeof(EYECATCHER_CNF_END);
+	// Select target buffer
+	if (is_wire_buf_incremental) {
+		// Calculate minimum seq_no for incremental window
+		wire_conf_buf = &(my_raft_global.leader_to_commit_wire_raft_members_incremental);
+		min_seq_no = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_calculated);
+		min_seq_no = (min_seq_no > NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO ?
+					  min_seq_no - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO : 0);
+		// Count members within the incremental window
+		NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
+			if (member->raft_members_seq_no_updated >= min_seq_no) {
+				n_members_to_send++;
+			}
+		}
+	} else {
+		// Complete: unconditionally include all members
+		wire_conf_buf = &(my_raft_global.leader_to_commit_wire_raft_members_complete);
+		n_members_to_send = my_raft_global.n_raft_members;
+	}
+
+	// Allocate buffer
+	required_size = sizeof(struct all_members_wire_buf_ctx) + n_members_to_send * sizeof(struct mm_raft_member_conf) + sizeof(EYECATCHER_CNF_END);
 	NNVMEIBT_BUF_RESIZE(gso0snh, wire_conf_buf, required_size);
 	memset(wire_conf_buf->data_buf, 0, wire_conf_buf->buf_len);
 	members_wire_buf = (struct all_members_wire_buf_ctx *)(wire_conf_buf->data_buf);
-	// Fill in
-	members_wire_buf->n_raft_members = LE_SWAP32(my_raft_global.n_raft_members);
+
+	// Fill in members
+	members_wire_buf->n_raft_members = LE_SWAP32(n_members_to_send);
 	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 		// Note that this is not ordered in any way. Those members are in!
-		members_wire_buf->members[i++] = member->this_member_leader_serialized_wire_buf;
+		if (!is_wire_buf_incremental || member->raft_members_seq_no_updated >= min_seq_no) {
+			members_wire_buf->members[i++] = member->this_member_leader_serialized_wire_buf;
+		}
 	}
 	nvmeibt_strlcpy((char *)&(members_wire_buf->members[i]), EYECATCHER_CNF_END, wire_conf_buf->buf_len - (int)((char *)&(members_wire_buf->members[i]) - (char *)(wire_conf_buf->data_buf)));
-	N_Tf(5bcjs82, "New conf ver=@KAFKA_OFST n_members=@INT len=@SIZE_T", RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), LE_SWAP32(members_wire_buf->n_raft_members), wire_conf_buf->buf_len);
+
+	N_Tf(5bcjs82, "New conf ver=@KAFKA_OFST is_incremental=@BOOL min_seq_no=@INT64_TD n_members_to_send=@INT (total=@INT) len=@SIZE_T",
+		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), is_wire_buf_incremental, min_seq_no, n_members_to_send, my_raft_global.n_raft_members, wire_conf_buf->buf_len);
 	NFOUT;
+}
+
+void nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf(void)
+{
+	nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf_complete_or_incremental(false);
+	nvmeibt_raft_leader_generate_leader_to_commit_wire_raft_members_buf_complete_or_incremental(true);
 }
 
 void nvmeibt_raft_link_member_to_node(struct nvmeibt_raft_member *member, struct nvmeibt_node *node, const union nvmeib_uuid *uuid)
