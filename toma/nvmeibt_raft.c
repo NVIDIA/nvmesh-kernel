@@ -3195,6 +3195,17 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	enum PERSIST_AND_WIRE_BUF_DIFF			tlv_bufs_diff;
 	int										rv = 0;
 	struct nvmeibt_node						*node;
+	int64_t									peer_topo_idx;
+	int64_t									peer_topo_config_idx;
+	int64_t									peer_kafka_mgmt_config_offset;
+	int64_t									peer_raft_members_kafka_offset;
+	int64_t									peer_raft_members_seq_no;
+	int64_t									inc_window_start_topo_idx;
+	int64_t									inc_window_start_topo_config_idx;
+	int64_t									inc_window_start_kafka_mgmt_config_offset;
+	int64_t									inc_window_start_raft_members_seq_no;
+	BOOL									is_topo_incremental;
+	BOOL									is_configs_and_raft_members_incremental;
 
 	NFIN;
 	if (!dst_member) {
@@ -3203,6 +3214,48 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	}
 	// Decided to move forward, Update the header, and if needed, update the data (if is_with_raft_log and we passed the prev validation)
 	raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed();
+	//
+	// Compute incremental flags based on feature enable, peer's state, and incremental windows
+	TODO(Merge incremental logic into compare_persist_and_wire_bufs_tlvs_excl_raft_ctx);
+	peer_topo_idx = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.topo_ctx));
+	peer_topo_config_idx = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.topo_config_ctx));
+	peer_kafka_mgmt_config_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.kafka_mgmt_config_ctx));
+	peer_raft_members_kafka_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
+	peer_raft_members_seq_no = nvmeibt_tlv_get_seq_no(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
+
+	// Check TOPO incremental window (use lower 32 bits — monotonic across term changes)
+	inc_window_start_topo_idx = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit));
+	inc_window_start_topo_idx = (inc_window_start_topo_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX ? inc_window_start_topo_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0);
+	is_topo_incremental = raft_is_incremental_wire_buf_enabled && (extract_lower_32_bits_idx(peer_topo_idx) >= inc_window_start_topo_idx);
+
+	// Check configs and raft members incremental windows and deletion thresholds
+	inc_window_start_topo_config_idx			= RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit);
+	inc_window_start_kafka_mgmt_config_offset	= RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit);
+	inc_window_start_raft_members_seq_no		= RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit);
+	inc_window_start_topo_config_idx			= (inc_window_start_topo_config_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX ? inc_window_start_topo_config_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX : 0);
+	inc_window_start_kafka_mgmt_config_offset	= (inc_window_start_kafka_mgmt_config_offset > NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET ? inc_window_start_kafka_mgmt_config_offset - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET : 0);
+	inc_window_start_raft_members_seq_no		= (inc_window_start_raft_members_seq_no > NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO ? inc_window_start_raft_members_seq_no - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO : 0);
+	inc_window_start_kafka_mgmt_config_offset	= max(inc_window_start_kafka_mgmt_config_offset, my_raft_global.last_delete_kafka_mgmt_config_offset);
+	// Note: topo_config has no explicit deletion guard (no last_delete_topo_config_offset).
+	// This is safe because praid deletions only occur through volume deletions, which set
+	// last_delete_kafka_mgmt_config_offset. Since all configs share this single boolean,
+	// the kafka_mgmt_config deletion guard implicitly forces complete topo_config as well.
+	// The follower's merge_topo_config_incremental appends non-visited hash praids, so if
+	// an incremental omitted a deleted praid, the follower would keep it — corrupting topology.
+	// If a future code path allows praid deletion without volume deletion, add an explicit
+	// last_delete_topo_config_offset guard here.
+	is_configs_and_raft_members_incremental = raft_is_incremental_wire_buf_enabled &&
+											  is_topo_incremental &&
+											  (peer_topo_config_idx >= inc_window_start_topo_config_idx) &&
+											  (peer_kafka_mgmt_config_offset >= inc_window_start_kafka_mgmt_config_offset) &&
+											  (peer_raft_members_seq_no >= inc_window_start_raft_members_seq_no) &&
+											  (peer_raft_members_kafka_offset >= my_raft_global.last_delete_raft_members_kafka_offset);
+
+	if (!is_configs_and_raft_members_incremental && raft_is_incremental_wire_buf_enabled) {
+		N_Tf(peer_needs_complete, "Peer needs complete configs: kafka_offset=@INT64_TD (last_delete=@INT64_TD) members_offset=@INT64_TD (last_delete=@INT64_TD)",
+			 peer_kafka_mgmt_config_offset, my_raft_global.last_delete_kafka_mgmt_config_offset,
+			 peer_raft_members_kafka_offset, my_raft_global.last_delete_raft_members_kafka_offset);
+	}
 	//
 	// Decide what to send according to the peer's needs. HEADER_ONLY/TOPO_ONLY/WITH_CONF
 	tlv_bufs_diff = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(dst_member->committed_persist_and_wire_buf_hdr), my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete);
@@ -3213,11 +3266,24 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	switch (tlv_bufs_diff) {
 	case PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS:
 		// Topo and configs changed
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete;
+		if (is_configs_and_raft_members_incremental) {
+			NTOMA_ASSERT(non_topo_inc_assert, is_topo_incremental, "is_configs_incremental==true but is_topo_incremental==false -- impossible case");
+			send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental;
+		} else if (is_topo_incremental) {
+			send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete;
+		} else {
+			send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete;
+		}
 		data_len = persist_and_wire_buf_get_total_len(send_persist_and_wire_buf) - sizeof(struct nvmeibt_persist_and_wire_buf);
 		break;
 	case PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY:
-		send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete;
+		// Only topo changed
+		NTOMA_ASSERT(topo_only_assert, !raft_is_incremental_wire_buf_enabled || is_configs_and_raft_members_incremental, "TOPO_ONLY with incremental enabled but configs not eligible for incremental!");
+		if (is_topo_incremental) {
+			send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental;
+		} else {
+			send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete;
+		}
 		data_len = persist_and_wire_buf_get_total_len(send_persist_and_wire_buf) - sizeof(struct nvmeibt_persist_and_wire_buf);
 		break;
 	case PERSIST_AND_WIRE_BUF_DIFF_EQUAL:
