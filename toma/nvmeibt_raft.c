@@ -674,10 +674,10 @@ static void _advance_ptrs(char **old_data_ptr, const char **upd_data_ptr, int ol
 	*old_data_ptr += old_len;
 }
 
-static void __attribute__((unused)) _copy_inc_ctx_old_data_advance_ptrs(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
-												  const struct nvmeibt_wire_type_len_value *old_wire_ctx,
-												  const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
-												  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
+static void _copy_inc_ctx_old_data_advance_ptrs(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+												const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+												const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+												char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
 {
 	const int upd_len = nvmeibt_tlv_get_len(upd_wire_ctx);
 	const int old_len = nvmeibt_tlv_get_len(old_wire_ctx);
@@ -763,6 +763,117 @@ struct all_members_wire_buf_ctx {
 	int								filler_for_align_8;
 	struct mm_raft_member_conf		members[0];
 } __attribute__((__packed__));
+
+static int merge_raft_members_incremental(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+										  const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+										  const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+										  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr,
+										  int old_len, int upd_len)
+{
+	struct all_members_wire_buf_ctx		*new_members_wire_buf = NULL;
+	struct all_members_wire_buf_ctx		*output_members_wire_buf = NULL;
+	char								*output_start = NULL;
+	int									n_new_members = 0;
+	int									n_output_members = 0;
+	struct mm_raft_member_conf			new_member_conf;
+	struct nvmeibt_raft_member			*raft_member_obj;
+	int									total_size = 0;
+
+	if (nvmeibt_tlv_get_type(old_wire_ctx) != TLV_TYPE_RAFT_MEMBERS_COMPLETE) {
+		N_Ef(rm_inc_no_old, "Old raft members is @INT8_TD not complete type. Incremental requires complete old to merge", nvmeibt_tlv_get_type(old_wire_ctx));
+		return -1;
+	}
+
+	if (upd_len == 0) {
+		_copy_inc_ctx_old_data_advance_ptrs(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+											dst_data_ptr, old_data_ptr, upd_data_ptr);
+		return old_len;
+	}
+
+	new_members_wire_buf = (struct all_members_wire_buf_ctx *)*upd_data_ptr;
+	n_new_members = LE_SWAP32(new_members_wire_buf->n_raft_members);
+
+	if (dst_data_ptr) {
+		output_start = *dst_data_ptr;
+	}
+
+	// 1. Reset serialization flags
+	NVMEIB_HASH_FOREACH(raft_member_obj, my_raft_global.raft_members_hash_by_uuid) {
+		raft_member_obj->is_serialized_in_incremental_raft_members_merge = false;
+	}
+
+	// 2. Process incremental members
+	n_output_members = 0;
+	if (dst_data_ptr) {
+		output_members_wire_buf = (struct all_members_wire_buf_ctx *)*dst_data_ptr;
+		*dst_data_ptr += sizeof(struct all_members_wire_buf_ctx);
+	}
+
+	n_output_members += n_new_members;
+	for (int i = 0; i < n_new_members; i++) {
+		nvmeibt_raft_member_conf_convert_le_be(&new_member_conf, &(new_members_wire_buf->members[i]));
+		raft_member_obj = nvmeibt_raft_get_member_by_id(&new_member_conf.uuid);
+		if (raft_member_obj) {
+			if (raft_member_obj->raft_members_seq_no_updated < new_member_conf.raft_members_seq_no_updated) {
+				if (dst_data_ptr) {
+					memcpy(*dst_data_ptr, &(new_members_wire_buf->members[i]), sizeof(struct mm_raft_member_conf));
+					*dst_data_ptr += sizeof(struct mm_raft_member_conf);
+				}
+			} else {
+				if (dst_data_ptr) {
+					memcpy(*dst_data_ptr, &(raft_member_obj->this_member_leader_serialized_wire_buf), sizeof(struct mm_raft_member_conf));
+					*dst_data_ptr += sizeof(struct mm_raft_member_conf);
+				}
+			}
+			raft_member_obj->is_serialized_in_incremental_raft_members_merge = true;
+		} else {
+			if (dst_data_ptr) {
+				memcpy(*dst_data_ptr, &(new_members_wire_buf->members[i]), sizeof(struct mm_raft_member_conf));
+				*dst_data_ptr += sizeof(struct mm_raft_member_conf);
+			}
+		}
+	}
+
+	// 3. Append non-visited hash members
+	NVMEIB_HASH_FOREACH(raft_member_obj, my_raft_global.raft_members_hash_by_uuid) {
+		if (!raft_member_obj->is_serialized_in_incremental_raft_members_merge) {
+			if (dst_data_ptr) {
+				memcpy(*dst_data_ptr, &(raft_member_obj->this_member_leader_serialized_wire_buf), sizeof(struct mm_raft_member_conf));
+				*dst_data_ptr += sizeof(struct mm_raft_member_conf);
+			}
+			n_output_members++;
+		}
+	}
+
+	total_size = sizeof(struct all_members_wire_buf_ctx) + n_output_members * sizeof(struct mm_raft_member_conf) + sizeof(EYECATCHER_CNF_END);
+
+	if (dst_data_ptr) {
+		int actual_written_size;
+		nvmeibt_strlcpy(*dst_data_ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+		*dst_data_ptr += sizeof(EYECATCHER_CNF_END);
+
+		actual_written_size = (int)(*dst_data_ptr - output_start);
+
+		output_members_wire_buf->n_raft_members = LE_SWAP32(n_output_members);
+		output_members_wire_buf->filler_for_align_8 = 0;
+
+		NTOMA_ASSERT(rm_inc_sz_chk, actual_written_size == total_size,
+					 "Size mismatch! calculated=@INT actual_written=@INT",
+					 total_size, actual_written_size);
+
+		*dst_wire_ctx = *old_wire_ctx;
+		dst_wire_ctx->tlv_type = LE_SWAP8(TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+		dst_wire_ctx->tlv_len = LE_SWAP32(total_size);
+		dst_wire_ctx->tlv_idx = upd_wire_ctx->tlv_idx;
+		dst_wire_ctx->seq_no = upd_wire_ctx->seq_no;
+		dst_wire_ctx->tlv_crc = 0;
+		dst_wire_ctx->tlv_crc = crc32(0, dst_wire_ctx, sizeof(*dst_wire_ctx));
+		dst_wire_ctx->tlv_crc = LE_SWAP32(crc32(dst_wire_ctx->tlv_crc, output_start, total_size));
+	}
+
+	_advance_ptrs(old_data_ptr, upd_data_ptr, old_len, upd_len);
+	return total_size;
+}
 
 static int merge_kafka_mgmt_config_incremental(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
 											   const struct nvmeibt_wire_type_len_value *old_wire_ctx,
@@ -1270,7 +1381,9 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 		break;
 
 	case TLV_TYPE_RAFT_MEMBERS_INCREMENTAL:
-		N_Ef(rft923m, "RAFT_MEMBERS_INCREMENTAL not implemented yet - using standard copy");
+		total_size = merge_raft_members_incremental(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+													dst_data_ptr, old_data_ptr, upd_data_ptr,
+													old_len, upd_len);
 		break;
 
 	default:
