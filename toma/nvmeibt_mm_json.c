@@ -1268,7 +1268,21 @@ static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vo
 	return total_size;
 }
 
-static int generate_vols_kafka_mgmt_config_wire(void *wire_out_p, uint32_t *total_n_vols, void *end_of_buf_p)
+static inline bool omit_blkdev_in_kafka_mgmt_config(struct nvmeibt_block_device *blkdev, bool is_incremental)
+{
+	bool omit_this_blkdev = NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev);
+
+	if (is_incremental) {
+		// For incremental kafka_mgmt_config, omit volumes not updated within the recent window [cur-diff,curr], both inclusive.
+		int64_t inc_window_start_offset = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated);
+		inc_window_start_offset = (inc_window_start_offset > NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET ?
+										inc_window_start_offset - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET : 0);
+		omit_this_blkdev = omit_this_blkdev || blkdev->from_config.mgmt_config_kafka_offset_or_idx < inc_window_start_offset;
+	}
+	return omit_this_blkdev;
+}
+
+static int generate_vols_kafka_mgmt_config_wire(void *wire_out_p, uint32_t *total_n_vols, void *end_of_buf_p, bool is_incremental)
 {
 	int												n_vols = 0;
 	struct nvmeibt_block_device						*vol;
@@ -1276,8 +1290,9 @@ static int generate_vols_kafka_mgmt_config_wire(void *wire_out_p, uint32_t *tota
 
 	NFIN;
 	NVMEIB_HASH_FOREACH(vol, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
-		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(vol) || nvmeibt_blkdev_is_being_deleted(vol))
+		if (omit_blkdev_in_kafka_mgmt_config(vol, is_incremental)) {
 			continue;
+		}
 		n_vols++;
 		if (wire_out_p) {
 			memcpy(wire_out_p, vol->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.data_buf, vol->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.buf_len);
@@ -1404,7 +1419,7 @@ void nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire(uint64_t topo
 	NFOUT;
 }
 
-void nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire(void)
+static unsigned int nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire_incremental_or_complete(bool is_wire_buf_incremental)
 {
 	struct nvmeibt_Buf								*wire_conf_buf;
 	void											*wire_out_p;
@@ -1414,17 +1429,35 @@ void nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire(void)
 	struct mm_mgmt_conf								mgmt_conf;
 
 	NFIN;
-	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config_complete);
-	size = generate_vols_kafka_mgmt_config_wire(NULL, &n_vols, NULL) + sizeof(struct _packed_mm_mgmt_conf);
+	if (is_wire_buf_incremental) {
+		wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config_incremental);
+	} else {
+		wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_kafka_mgmt_config_complete);
+	}
+	size = generate_vols_kafka_mgmt_config_wire(NULL, &n_vols, NULL, is_wire_buf_incremental) + sizeof(struct _packed_mm_mgmt_conf);
 	NNVMEIBT_BUF_RESIZE(viem2ms, wire_conf_buf, size);
 	memset(wire_conf_buf->data_buf, 0, wire_conf_buf->buf_len);
 	wire_out_p = wire_conf_buf->data_buf;
 	serialize_mm_mgmt_conf_itself(&mgmt_conf, "CNF", MM_STRUCT_VER_2067, 1, -1LL, &cur_topo->mgmt_DB_uuid, "fullVolConfig", 1LL, n_vols, 0, 0,
 								  RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated));
 	wire_out_p += nvmeibt_mm_mgmt_convert_config_le_be(wire_out_p, &mgmt_conf, 1);
-	generate_vols_kafka_mgmt_config_wire(wire_out_p, &n_vols, wire_conf_buf->data_buf + size);
+	generate_vols_kafka_mgmt_config_wire(wire_out_p, &n_vols, wire_conf_buf->data_buf + size, is_wire_buf_incremental);
 
-	N_Tf(fndj392, "New conf k_offset=@INT64_TD len=@INT", RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated), size);
+	NFOUT;
+	return size;
+}
+
+void nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire(void)
+{
+	unsigned int									complete_size;
+	unsigned int									incremental_size;
+
+	NFIN;
+	complete_size = nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire_incremental_or_complete(false);
+	incremental_size = nvmeibt_mm_json_leader_serialize_kafka_mgmt_config_to_wire_incremental_or_complete(true);
+
+	N_Tf(fndj392, "New conf k_offset=@INT64_TD complete_len=@INT incremental_len=@INT",
+		 RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated), complete_size, incremental_size);
 	NFOUT;
 }
 
