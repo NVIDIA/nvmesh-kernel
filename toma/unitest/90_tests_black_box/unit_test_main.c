@@ -69,7 +69,22 @@ static void do_on_unitests_done(void) {
 }
 
 /********************************************************************/
-#define WAIT_UNTIL(cond) ({ while (!(cond)) yield(); })
+#define WAIT_UNTIL_MAX_YIELDS  500
+
+#define WAIT_UNTIL_N(cond, max_yields) ({ \
+	int __wu_i = 0; \
+	while (!(cond)) { \
+		if (++__wu_i > (max_yields)) { \
+			fprintf(stderr, "WAIT_UNTIL timed out after %d yields: %s  [%s:%d %s()]\n", \
+				(max_yields), #cond, __FILE__, __LINE__, __FUNCTION__); \
+			BUG_ON(true); \
+		} \
+		yield(); \
+	} \
+})
+
+#define WAIT_UNTIL(cond)  WAIT_UNTIL_N(cond, WAIT_UNTIL_MAX_YIELDS)
+
 #define SCENARIO_PRINT(id, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_EMERG, id, NVMEIB_LOG_ETERNAL, "<> ", fmt,  ## __VA_ARGS__)
 
 static void scenario_test_signals(void) {
