@@ -271,6 +271,7 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 	struct nvmeibt_chunk			*chunk;
 	struct nvmeibt_praid			*praid;
 	struct nvmeibt_disk_segment		*seg;
+	int64_t 						old_last_delete_kafka_mgmt_config_offset;
 
 	NFIN;
 	// vol is deleted from MGMTonly after TOMA confirmed it. It has no activity
@@ -279,6 +280,7 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 		N_Tf(cbhsjwk, "Leader got MGMT config on its follower, nothing to do");
 		goto out;
 	}
+	old_last_delete_kafka_mgmt_config_offset = nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset;
 	for (i = 0; i < conf->num_vols; i++) {
 		struct mm_vol_conf *vol = &conf->volumes[i];
 		blkdev = nvmeibt_block_device_get_block_device_by_id(&(vol->uuid));
@@ -291,6 +293,7 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(f6iso6m, TOPO,        leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(TOPO,        leader_to_commit) + 1);
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(mv0djui, TOPO_CONFIG, leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit) + 1);
 		nvmeibt_topology_leader_mark_recalc_required();
+		nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated);
 
 		// mark MGMT_TRIM for all blkdev objects
 		nvmeibt_block_device_trim_specific_block_device(blkdev, CONFIG_TRIM_MGMT);
@@ -305,6 +308,10 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 				}
 			}
 		}
+	}
+	if (old_last_delete_kafka_mgmt_config_offset != nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset) {
+		N_Tf(vol_del_upd_last_delete, "VOL_DEL_COMPLETED: updated last_delete_kafka_mgmt_config_offset=@INT64_TD from @INT64_TD",
+			 nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset, old_last_delete_kafka_mgmt_config_offset);
 	}
 out:
 	NFOUT;

@@ -1780,6 +1780,7 @@ void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add
 {
 	struct nvmeibt_raft_member		*member;
 	bool							is_me;
+	int64_t							old_last_delete_kafka_offset;
 
 	NFIN;
 	member = nvmeibt_raft_get_member_by_id(uuid);
@@ -1795,6 +1796,12 @@ void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add
 		}
 		if (nvmeibt_raft_is_leader()) {
 			N_Tf(zypgir3, "I am the leader, OK to try and del a member");
+			old_last_delete_kafka_offset = my_raft_global.last_delete_raft_members_kafka_offset;
+			my_raft_global.last_delete_raft_members_kafka_offset = kafka_offset;
+			if (old_last_delete_kafka_offset != my_raft_global.last_delete_raft_members_kafka_offset) {
+				N_Tf(tgt_del_upd_min, "TARGET_DEL: updated last_delete_raft_members_kafka_offset=@INT64_TD from @INT64_TD",
+					 my_raft_global.last_delete_raft_members_kafka_offset, old_last_delete_kafka_offset);
+			}
 		} else {
 			N_Tf(bdut7si, "I am not a leader. got incremental del(@STR). Ignoring", hostname);
 			goto out;
