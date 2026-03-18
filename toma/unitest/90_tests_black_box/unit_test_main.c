@@ -148,6 +148,9 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
 
+	scenario_user_rpcs_generic();
+	scenario_user_rpcs_praid();
+
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "sending deleteVolume V_R1, waiting for V_R1 praid deprecated in report");
 	mgmt_sim_send_delete_volume_r1();
@@ -169,8 +172,6 @@ static void scenario_create_remove_r1(void) {
 }
 
 static void all_test_scenarios(void) {
-	scenario_user_rpcs_generic();
-	scenario_user_rpcs_praid();
 	scenario_create_remove_r1();
 	scenario_test_signals();
 	SCENARIO_PRINT(__AUTOID__, "test scenario complete");
