@@ -1485,16 +1485,14 @@ out:
 	return rv;
 }
 
-static void mark_HW_full_config_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_called_by_toma, bool is_this_offset_a_good_starting_point_after_the_next_boot)
+static void mark_HW_full_config_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_this_offset_a_good_starting_point_after_the_next_boot)
 {
 	N_Tf(7vsso4l, "Done_@KAFKA_OFST", kafka_offset);
-	if (is_called_by_toma) {
-		if (is_this_offset_a_good_starting_point_after_the_next_boot) {
-			HW_full_config_consumer_offset_committed_by_toma = max(HW_full_config_consumer_offset_committed_by_toma, kafka_offset);
-		} else {
-			N_Wf(3178bsm, "@KAFKA_OFST was ignored. Hopefully recoverable", kafka_offset);
-			HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_committed_by_toma;	// release HW_full_config_consume()
-		}
+	if (is_this_offset_a_good_starting_point_after_the_next_boot) {
+		HW_full_config_consumer_offset_committed_by_toma = max(HW_full_config_consumer_offset_committed_by_toma, kafka_offset);
+	} else {
+		N_Wf(3178bsm, "@KAFKA_OFST was ignored. Hopefully recoverable", kafka_offset);
+		HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_committed_by_toma;	// release HW_full_config_consume()
 	}
 }
 
@@ -2496,7 +2494,7 @@ static int toma_HW_full_config_handler(struct HW_mgmt_conf **conf_ptr, int64_t k
 		TODO(nvmeibt_dumper_event_mgmt_config());
 	}
 out:
-	mark_HW_full_config_k_msg_for_kafka_commit(kafka_offset, 1, (conf->configurationVersion >= max_configurationVersion));    // GOOD/BAD config. We do not want to reread. Possibly not commit
+	mark_HW_full_config_k_msg_for_kafka_commit(kafka_offset, (conf->configurationVersion >= max_configurationVersion));    // GOOD/BAD config. We do not want to reread. Possibly not commit
 	max_configurationVersion = max(max_configurationVersion, conf->configurationVersion);
 	NFOUT;
 	return rv;
