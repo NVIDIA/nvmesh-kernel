@@ -2725,7 +2725,7 @@ void nvmeibt_recovery_report_rebuild_progress_to_mgmt(void)
 
 	NFIN;
 	if (	!nvmeibt_global_is_any_rebuild_progress_report_to_mgmt_due() ||
-			(timespec_diff_ns(nvmeibt_global_get_cur_event_start_time(), nvmeibt_global_get_global()->last_progress_report_timestamp) < MIN_NSEC_BETWEEN_PROGRESS_REPORTS)) {
+			(timespec_diff_ns(nvmeibt_global_get_cur_event_start_time(), nvmeibt_global_get_global()->last_progress_report_timestamp) < MIN_NSEC_BETWEEN_REBUILD_PROGRESS_REPORTS_NSECS)) {
 		goto out;
 	}
 
