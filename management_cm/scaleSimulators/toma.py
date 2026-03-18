@@ -895,7 +895,11 @@ class TOMA(Component):
 		return zoneUpdated
 
 	def deleteVolume(self, volumeName):
-		for pRaid, chunk in self.iterateVolumePRaids(self.volumes.get(volumeName)):
+		cachedVolume = self.volumes.get(volumeName)
+		if not cachedVolume:
+			return
+
+		for pRaid, chunk in self.iterateVolumePRaids(cachedVolume):
 			del self.pRaids[pRaid['uuid']]
 
 		if volumeName in self.volumesInZeroing:

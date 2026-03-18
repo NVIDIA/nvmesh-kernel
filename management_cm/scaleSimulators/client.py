@@ -136,7 +136,7 @@ class Client(Component):
 					self.sendUpdateAttachmentStatus(VolumeAttachmentStatus.ATTACHED, [bdev])
 			else:
 				# volume not in block devices - attach!
-				volumesToAttach.append(volume)
+				volumesToAttach.append(volume["configuration"])
 
 			if len(volumesToAttach):
 				self.hasWIPOperations = True
@@ -535,7 +535,8 @@ class ManagementClientConfiguration(object):
 		self.volumeByName = {}
 		self.volumeByUUID = {}
 
-		for v in msgPayload['volumes']:
+		for attachMessage in msgPayload['volumes']:
+			v = attachMessage['configuration']
 			self.volumeByName[v['name']] = v
 			self.volumeByUUID[v['uuid']] = v
 
