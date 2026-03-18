@@ -1447,8 +1447,6 @@ out:
 /******************************************************************************/
 // All the TOMAs consume from the same queue.
 // We do not really care that this is a queue, and we only consume the last message (config)
-static int64_t		HW_full_config_consumer_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
-static int64_t		HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
 static int64_t		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 static int64_t		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
 static int64_t		incremental_VOL_updates_offset_to_commit = RD_KAFKA_OFFSET_INVALID;
@@ -1501,6 +1499,8 @@ static void mark_HW_full_config_k_msg_for_kafka_commit(int64_t kafka_offset, boo
 }
 
 static int HW_full_config_consume(void) {
+	static int64_t						__value_of__highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;		// 2 fields to protect against msg reordering, we care aboust msg with highest config version, not highest kafka offset
+	static int64_t						__offset_of_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
 	struct messageType_params_ctx		highest_version_messageType_params;
 	struct mm_json_elem 				*json_tree_root = NULL;
 	struct HW_mgmt_conf					*highest_HW_mgmt_conf = NULL;
@@ -1532,19 +1532,19 @@ static int HW_full_config_consume(void) {
 		}
 		N_Tf(6wphucs, "msg received");
 		conf = NNVMEIBT_BM_CALLOC(4vs6k9s,  sizeof(*conf));	//	Fully parse it (in order to get payload->configurationVersion)
-		nvmeibt_mm_json_tree_to_HW_mgmt_conf(conf, json_tree_root, HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date);	// Do as much processing as possible before TOMA's main thread
+		nvmeibt_mm_json_tree_to_HW_mgmt_conf(conf, json_tree_root, __offset_of_highest_version_of_msg_received_to_date);	// Do as much processing as possible before TOMA's main thread
 
 		N_Tf(iqhfy6s, "Received configurationVersion=@INT64_TX", conf->configurationVersion);
-		if (conf->configurationVersion < HW_full_config_consumer_highest_version_of_msg_received_to_date) {
-			N_Tf(6sbk3l5, "Received older H/W config version=@INT64_TX<@INT64_TX, skipping", conf->configurationVersion, HW_full_config_consumer_highest_version_of_msg_received_to_date);
+		if (conf->configurationVersion < __value_of__highest_version_of_msg_received_to_date) {
+			N_Tf(6sbk3l5, "Received older H/W config version=@INT64_TX<@INT64_TX, skipping", conf->configurationVersion, __value_of__highest_version_of_msg_received_to_date);
 			HW_conf_free_tree(conf);
 			continue;
 		}
 		// Adopt the new highest ever
 		HW_conf_free_tree(highest_HW_mgmt_conf);
 		highest_HW_mgmt_conf = conf;
-		HW_full_config_consumer_highest_version_of_msg_received_to_date = highest_HW_mgmt_conf->configurationVersion;
-		HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date = k_HW_full_config.consumer_offset;
+		__value_of__highest_version_of_msg_received_to_date = highest_HW_mgmt_conf->configurationVersion;
+		__offset_of_highest_version_of_msg_received_to_date = k_HW_full_config.consumer_offset;
 		highest_version_messageType_params = messageType_params;
 	}	// while()
 	if (highest_HW_mgmt_conf) {	// If we received a higher than ever before
@@ -1552,8 +1552,7 @@ static int HW_full_config_consume(void) {
 		wakeup_params->messageType_params = highest_version_messageType_params;
 		wakeup_params->event_type = KAFKA_EVENT_TYPE_HW_FULL_CONFIG;
 		wakeup_params->event_data = highest_HW_mgmt_conf;
-		wakeup_params->kafka_offset = HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date;
-		HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date;
+		wakeup_params->kafka_offset = HW_full_config_consumer_offset_submitted_to_toma = __offset_of_highest_version_of_msg_received_to_date;
 		__wakeup_toma_main_tread(wakeup_params);
 	}
 	nvmeibt_mm_json_free_kv_tree(json_tree_root);
@@ -1977,10 +1976,10 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 	// raft_term changed. We need to either stop consuming leader msgs or start from scratch
 	// Get all the related values
 	pthread_mutex_lock(&(kafka_toma_requested_term_and_offset_mutex));
-	sampled_req_VOL_raft_term = kafka_requested_consuming_leader_VOL_msgs_raft_term;
+	sampled_req_VOL_raft_term =    kafka_requested_consuming_leader_VOL_msgs_raft_term;
 	sampled_req_TARGET_raft_term = kafka_requested_consuming_leader_TARGET_msgs_raft_term;
-	sampled_req_offset_VOL = requested_incremental_VOL_updates_consumer_offset;
-	sampled_req_offset_TARGET = requested_incremental_TARGET_updates_consumer_offset;
+	sampled_req_offset_VOL =       requested_incremental_VOL_updates_consumer_offset;
+	sampled_req_offset_TARGET =    requested_incremental_TARGET_updates_consumer_offset;
 	nvmeibt_kafka_set_last_sent_to_toma_targets_updates_seq_no(requested_incremental_TARGET_updates_consumer_seq_no);
 	pthread_mutex_unlock(&(kafka_toma_requested_term_and_offset_mutex));
 	//
@@ -2099,7 +2098,7 @@ static int kafka_commit_by_offset_async(struct t_consumer_impl *k, const int64_t
 	rd_kafka_resp_err_t rv = RD_KAFKA_RESP_ERR_NO_ERROR;
 	if (k->consumer) {
 		rd_kafka_topic_partition_list_t *offsets = rd_kafka_topic_partition_list_new(1);
-		N_Tf(76hd89e, "@STR: Committing_@KAFKA_OFST", rd_kafka_name(k->consumer), offset);
+		N_Tf(76hd89e, "@STR: Committing_@KAFKA_OFST, last_read_msg_@KAFKA_OFST", rd_kafka_name(k->consumer), offset, k->consumer_offset);
 		rd_kafka_topic_partition_list_add(offsets, k->topic_name, k->consumer_partition);
 		offsets->elems[0].offset = purify_offset(offset) + 1;	// The API says "last_consumed(processed) + 1"
 		rv = rd_kafka_commit(k->consumer, offsets, 1 /*async*/);
@@ -2117,10 +2116,9 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	// Some CMDs are handled immediately (updKeepaliveToken)
 	// Some CMDs are sent to TOMA, and handled by the TOMA thread.
 	// CMDs are not guaranteed to finish in-order by TOMA (One format might take longer than the other)
-	// We only commit if there are no CMDs awaiting_toma_processing
 	const int64_t CMD_kafka_offset_to_commit = k_CMD.consumer_offset;			// Might be ahead, but not committed because TOMA is still processing an older CMD
 	if (k_CMD.offset_committed != CMD_kafka_offset_to_commit) {
-		if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) == 0) {  // Otherwise an older msg did not yet finish processing
+		if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) == 0) {  // Otherwise an older msg did not yet finish processing, We only commit if there are no CMDs awaiting_toma_processing
 			kafka_commit_by_offset_async(&k_CMD, CMD_kafka_offset_to_commit);	// If nothing is processed by TOMA (and naturally all the immediate ones finished processing), we can commit the latest
 		} else {
 			N_Tf(bs7i2ja, "Skipping Commit_@KAFKA_OFST CMD_consumer_n_msgs_awaiting_toma_processing=@INT", CMD_kafka_offset_to_commit, atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing));
@@ -2131,12 +2129,11 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 		if ((purify_offset(offset_to_commit) >= 0) && (offset_to_commit > k_HW_full_config.offset_committed))
 			kafka_commit_by_offset_async(&k_HW_full_config, offset_to_commit);
 	}
-	if (is_consuming_leader_VOL_msgs()) {
-		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
-		if (incremental_VOL_updates_offset_to_commit < RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority))
-			incremental_VOL_updates_offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
+	if (is_consuming_leader_VOL_msgs()) {	// VOL updates are handled by toma (in order) (VOL), Keep alive Tokens are handled immediately by the kafka code
+		const int64_t offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
+		if (incremental_VOL_updates_offset_to_commit < offset_to_commit)
+			incremental_VOL_updates_offset_to_commit = offset_to_commit;
 		if (incremental_VOL_updates_offset_to_commit > k_incremental_VOL_updates.offset_committed) {
-			N_Tf(vnd8oel, "VOL: Committing_@KAFKA_OFST latest_@KAFKA_OFST", incremental_VOL_updates_offset_to_commit, k_incremental_VOL_updates.consumer_offset);
 			kafka_commit_by_offset_async(&k_incremental_VOL_updates, incremental_VOL_updates_offset_to_commit);
 		}
 	}
