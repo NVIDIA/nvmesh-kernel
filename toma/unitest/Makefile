@@ -235,7 +235,7 @@ endef
 
 FMTLIB := libfmtrs.so
 $(OBJ_DIR)/$(FMTLIB):
-	make SSDA=$(SSDA) -C $(SSDA)/tools/traces_post_processor/formatters
+	$(MAKE) SSDA=$(SSDA) -C $(SSDA)/tools/traces_post_processor/formatters
 	cp $(SSDA)/tools/traces_post_processor/formatters/$(FMTLIB) $(OBJ_DIR)/$(FMTLIB)
 
 $(OBJ_DIR)/%.i: %.c
