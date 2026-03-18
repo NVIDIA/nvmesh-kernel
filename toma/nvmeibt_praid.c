@@ -3143,3 +3143,66 @@ int nvmeibt_praid_validate_replacement_segs(struct nvmeibt_praid *praid)
 	}
 	return n_rep_seg;
 }
+
+#if defined(TOMA_SIMULATOR_SANDBOX)
+//
+// Test helpers: create minimal praid objects for merge unit tests.
+// These praids have only the fields needed by merge_topo_incremental:
+// UUID, topo_idx_updated, is_activated, empty seg list, valid config_tag.
+//
+void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
+							int praid_version_major, int praid_version_minor)
+{
+	struct nvmeibt_praid *praid = NALLOCATE_PRAID(test_praid);
+
+	praid->from_config.id = *uuid;
+	praid->config_tag = 1;
+	XDLIST_HEAD_INIT(&praid->praid_follower.committed_praid_lot.all_seg_lot_list);
+	praid->praid_follower.committed_praid_lot.topo_ctx.topo_idx_updated = topo_idx_updated;
+	praid->praid_follower.committed_praid_lot.topo_ctx.praid_version_major = praid_version_major;
+	praid->praid_follower.committed_praid_lot.topo_ctx.praid_version_minor = praid_version_minor;
+	praid->praid_follower.committed_praid_lot.topo_ctx.is_activated = 1;
+	praid->praid_follower.committed_praid_lot.from_config.id = *uuid;
+	praid->praid_follower.committed_praid_lot.from_config.version = praid_version_major;
+	praid->praid_follower.committed_praid_lot.from_config.topo_config_idx_updated = topo_idx_updated;
+	praid->praid_follower.is_serialized_in_incremental_merge = false;
+
+	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, uuid, praid);
+}
+
+void TEST_clear_praids_hash(void)
+{
+	struct nvmeibt_praid *praid;
+
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
+		nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, &praid->from_config.id);
+		NNVMEIBT_TOMA_FREE(test_free, praid);
+	}
+}
+
+void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
+							int n_praid_uuids, const union nvmeib_uuid *praid_uuids)
+{
+	struct nvmeibt_chunk *chunk = calloc(1, sizeof(*chunk));
+
+	chunk->from_config.id = *chunk_uuid;
+	chunk->config_tag = 1;
+	chunk->n_praids = n_praid_uuids;
+
+	for (int i = 0; i < n_praid_uuids; i++) {
+		chunk->praids[i] = nvmeibt_praid_get_praid_by_id(&praid_uuids[i]);
+	}
+
+	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->chunks_hash_by_uuid, chunk_uuid, chunk);
+}
+
+void TEST_clear_chunks_hash(void)
+{
+	struct nvmeibt_chunk *chunk;
+
+	NVMEIB_HASH_FOREACH(chunk, nvmeibt_global_get_global()->chunks_hash_by_uuid) {
+		nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->chunks_hash_by_uuid, &chunk->from_config.id);
+		free(chunk);
+	}
+}
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)

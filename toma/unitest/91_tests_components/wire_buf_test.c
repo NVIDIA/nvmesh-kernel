@@ -28,6 +28,22 @@ static void make_test_uuid(union nvmeib_uuid *uuid, int id)
 	uuid->ll[1] = (unsigned long long)(0xBBBB000000000000ULL + (unsigned)id);
 }
 
+//
+// Initialize a test_praid_spec AND register it in the praids hash.
+// Combines make_test_uuid + field init + TEST_add_praid_to_hash.
+//
+static void setup_test_praid(struct test_praid_spec *spec, int uuid_id,
+							 int segs_num, int64_t topo_idx_updated,
+							 int praid_version_major, int praid_version_minor)
+{
+	make_test_uuid(&spec->uuid, uuid_id);
+	spec->segs_num = segs_num;
+	spec->topo_idx_updated = topo_idx_updated;
+	spec->praid_version_major = praid_version_major;
+	spec->praid_version_minor = praid_version_minor;
+	TEST_add_praid_to_hash(&spec->uuid, topo_idx_updated, praid_version_major, praid_version_minor);
+}
+
 static void fill_tlv(struct nvmeibt_wire_type_len_value *tlv, int8_t type,
 		int data_len, int64_t idx)
 {
@@ -592,14 +608,117 @@ out:
 
 DEFINE_TEST(incremental_topo_single_praid_not_updated)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_praid_spec				old_praids[1], incr_praids[1];
+	struct nvmeibt_praid_serialized_topo	*found;
+	struct nvmeibt_praid_serialized_topo	host_praid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_praids_hash();
+	setup_test_praid(&old_praids[0], 1, 0, 20, 2, 0);
+
+	incr_praids[0] = old_praids[0];
+	incr_praids[0].topo_idx_updated = 10;
+	incr_praids[0].praid_version_major = 1;
+
+	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_COMPLETE, 20LL, 1, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 20LL, 1, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), merge_size);
+	TEST_ASSERT_EQ(get_topo_praid_count(ctx->dst_buf), 1);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
+	rv = 0;
+out:
+	TEST_clear_praids_hash();
+	return rv;
 }
 
 DEFINE_TEST(incremental_topo_multi_praid_partial_update)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_praid_spec				old_praids[3], incr_praids[1];
+	struct nvmeibt_praid_serialized_topo	*found;
+	struct nvmeibt_praid_serialized_topo	host_praid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_praids_hash();
+	for (int i = 0; i < 3; i++)
+		setup_test_praid(&old_praids[i], i + 1, 0, 10, 1, 0);
+
+	incr_praids[0] = old_praids[1];
+	incr_praids[0].topo_idx_updated = 30;
+	incr_praids[0].praid_version_major = 3;
+
+	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_COMPLETE, 10LL, 3, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 30LL, 1, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), merge_size);
+	TEST_ASSERT_EQ(get_topo_praid_count(ctx->dst_buf), 3);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[1].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 3);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 30);
+
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[2].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	rv = 0;
+out:
+	TEST_clear_praids_hash();
+	return rv;
 }
 
 DEFINE_TEST(incremental_topo_multi_praid_all_updated)
@@ -661,8 +780,77 @@ out:
 
 DEFINE_TEST(incremental_topo_praid_with_segments)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_praid_spec				old_praids[2], incr_praids[1];
+	struct nvmeibt_praid_serialized_topo	*found;
+	struct nvmeibt_praid_serialized_topo	host_praid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+	int									expected_size;
+
+	TEST_clear_praids_hash();
+
+	// Hash has committed state with 0 segs (minimal test praid).
+	// The kept praid will be re-serialized from hash, not copied from old wire buf.
+	// Wire old has 2 segs per praid for the incremental wire buffer parsing.
+	setup_test_praid(&old_praids[0], 1, 2, 10, 1, 0);
+	setup_test_praid(&old_praids[1], 2, 2, 10, 1, 0);
+
+	incr_praids[0] = old_praids[0];
+	incr_praids[0].topo_idx_updated = 20;
+	incr_praids[0].praid_version_major = 2;
+	incr_praids[0].segs_num = 2;
+
+	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_COMPLETE, 10LL, 2, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 20LL, 1, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), merge_size);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	// Updated praid (from incremental wire) has 2 segs, kept praid (from hash) has 0 segs
+	expected_size = (int)sizeof(struct nvmeibt_topology_serialized_topo_header) +
+			((int)sizeof(struct nvmeibt_praid_serialized_topo) +
+				2 * (int)sizeof(struct nvmeibt_serialized_seg_leader_topo)) +
+			(int)sizeof(struct nvmeibt_praid_serialized_topo);
+	TEST_ASSERT_EQ(merge_size, expected_size);
+	TEST_ASSERT_EQ(get_topo_praid_count(ctx->dst_buf), 2);
+
+	// Updated praid: from incremental wire, has 2 segs
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+	TEST_ASSERT_EQ((int)nvmeibt_praid_wire_get_n_segs(found), 2);
+
+	// Kept praid: re-serialized from hash committed state (0 segs in test helper)
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[1].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	TEST_ASSERT_EQ((int)nvmeibt_praid_wire_get_n_segs(found), 0);
+	rv = 0;
+out:
+	TEST_clear_praids_hash();
+	return rv;
 }
 
 DEFINE_TEST(incremental_topo_praid_seg_count_changes)
@@ -728,14 +916,135 @@ out:
 
 DEFINE_TEST(incremental_topo_extra_uuid_ignored)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_praid_spec				old_praids[1], incr_praids[1];
+	struct nvmeibt_praid_serialized_topo	*found;
+	struct nvmeibt_praid_serialized_topo	host_praid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_praids_hash();
+	setup_test_praid(&old_praids[0], 1, 0, 10, 1, 0);
+
+	make_test_uuid(&incr_praids[0].uuid, 99);
+	incr_praids[0].segs_num = 0;
+	incr_praids[0].topo_idx_updated = 50;
+	incr_praids[0].praid_version_major = 9;
+	incr_praids[0].praid_version_minor = 0;
+
+	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_COMPLETE, 10LL, 1, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 50LL, 1, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), merge_size);
+	// Hash-based merge: new UUID from incremental is accepted (leader added it),
+	// old UUID from hash is appended in phase 2. Result: 2 praids.
+	TEST_ASSERT_EQ(get_topo_praid_count(ctx->dst_buf), 2);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	// New praid from incremental is included
+	found = find_praid_in_topo(ctx->dst_buf, &incr_praids[0].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 9);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 50);
+
+	// Old praid from hash is also present (appended in phase 2)
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	rv = 0;
+out:
+	TEST_clear_praids_hash();
+	return rv;
 }
 
 DEFINE_TEST(incremental_topo_ordering_differs)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_praid_spec				old_praids[3], incr_praids[2];
+	struct nvmeibt_praid_serialized_topo	*found;
+	struct nvmeibt_praid_serialized_topo	host_praid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_praids_hash();
+	for (int i = 0; i < 3; i++)
+		setup_test_praid(&old_praids[i], i + 1, 0, 10, 1, 0);
+
+	// Incremental in reverse order: [C, A] instead of [A, B, C]
+	incr_praids[0] = old_praids[2];	// C
+	incr_praids[0].topo_idx_updated = 40;
+	incr_praids[0].praid_version_major = 4;
+
+	incr_praids[1] = old_praids[0];	// A
+	incr_praids[1].topo_idx_updated = 40;
+	incr_praids[1].praid_version_major = 4;
+
+	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_COMPLETE, 10LL, 3, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 40LL, 2, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), merge_size);
+	TEST_ASSERT_EQ(get_topo_praid_count(ctx->dst_buf), 3);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	// A and C updated, B unchanged
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 4);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 40);
+
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[1].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+
+	found = find_praid_in_topo(ctx->dst_buf, &old_praids[2].uuid);
+	TEST_ASSERT_NOT_NULL(found);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	TEST_ASSERT_EQ(host_praid.praid_version_major, 4);
+	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 40);
+	rv = 0;
+out:
+	TEST_clear_praids_hash();
+	return rv;
 }
 
 DEFINE_TEST(incremental_topo_same_idx_keeps_old)
@@ -748,11 +1057,8 @@ DEFINE_TEST(incremental_topo_same_idx_keeps_old)
 	int									rv = -1;
 	int									merge_size;
 
-	make_test_uuid(&old_praids[0].uuid, 1);
-	old_praids[0].segs_num = 0;
-	old_praids[0].topo_idx_updated = 10;
-	old_praids[0].praid_version_major = 1;
-	old_praids[0].praid_version_minor = 0;
+	TEST_clear_praids_hash();
+	setup_test_praid(&old_praids[0], 1, 0, 10, 1, 0);
 
 	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
 			TLV_TYPE_TOPO_COMPLETE, 10LL, 1, old_praids);
@@ -790,13 +1096,72 @@ DEFINE_TEST(incremental_topo_same_idx_keeps_old)
 	}
 	rv = 0;
 out:
+	TEST_clear_praids_hash();
 	return rv;
 }
 
 DEFINE_TEST(incremental_topo_large_praid_count)
 {
-	(void)_ctx;
-	return 0;
+	const int							n_total_praids = 50;
+	const int							n_updated_praids = 10;
+	const int							update_stride = n_total_praids / n_updated_praids;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_praid_spec				old_praids[WIRE_BUF_TEST_MAX_PRAIDS];
+	struct test_praid_spec				incr_praids[WIRE_BUF_TEST_MAX_PRAIDS];
+	struct nvmeibt_praid_serialized_topo	*found;
+	struct nvmeibt_praid_serialized_topo	host_praid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+	int									i;
+
+	TEST_clear_praids_hash();
+	for (i = 0; i < n_total_praids; i++)
+		setup_test_praid(&old_praids[i], i + 1, 0, 100, 1, 0);
+
+	for (i = 0; i < n_updated_praids; i++) {
+		incr_praids[i] = old_praids[i * update_stride];
+		incr_praids[i].topo_idx_updated = 200;
+		incr_praids[i].praid_version_major = 7;
+	}
+
+	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_COMPLETE, 100LL, n_total_praids, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 200LL, n_updated_praids, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), merge_size);
+	TEST_ASSERT_EQ(get_topo_praid_count(ctx->dst_buf), n_total_praids);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	for (i = 0; i < n_total_praids; i++) {
+		int		expected_ver = ((i % update_stride) == 0) ? 7 : 1;
+		int64_t	expected_idx = ((i % update_stride) == 0) ? 200 : 100;
+
+		found = find_praid_in_topo(ctx->dst_buf, &old_praids[i].uuid);
+		TEST_ASSERT_NOT_NULL(found);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		TEST_ASSERT_EQ(host_praid.praid_version_major, expected_ver);
+		TEST_ASSERT_EQ(host_praid.topo_idx_updated, expected_idx);
+	}
+	rv = 0;
+out:
+	TEST_clear_praids_hash();
+	return rv;
 }
 
 DEFINE_TEST(incremental_topo_unknown_type_fails)
@@ -858,28 +1223,927 @@ out:
 	return rv;
 }
 
-// ------------- Incremental: topo config (not yet implemented) ------------
+// ---- Incremental: empty upd keeps old for topo_config, kafka, raft ------
 
-DEFINE_TEST(incremental_topo_config_not_implemented)
+DEFINE_TEST(incremental_topo_config_empty_keeps_old)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len = 0;
+	int									rv = -1;
+	int									merge_size = -1;
+
+	old_len = craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 5LL, 64, 0xAA);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	fill_tlv(&upd_tlv, TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 0, 10LL);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_EQ(merge_size, old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 10LL);
+	TEST_ASSERT_MEM_EQ(ctx->dst_buf, ctx->old_buf, (size_t)old_len);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), old_len);
+	rv = 0;
+out:
+	return rv;
 }
 
-// ---------- Incremental: kafka mgmt config (not yet implemented) ---------
-
-DEFINE_TEST(incremental_kafka_config_not_implemented)
+DEFINE_TEST(incremental_kafka_config_empty_keeps_old)
 {
-	(void)_ctx;
-	return 0;
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len = 0;
+	int									rv = -1;
+	int									merge_size = -1;
+
+	old_len = craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 3LL, 96, 0xCC);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	fill_tlv(&upd_tlv, TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 0, 7LL);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_EQ(merge_size, old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 7LL);
+	TEST_ASSERT_MEM_EQ(ctx->dst_buf, ctx->old_buf, (size_t)old_len);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), old_len);
+	rv = 0;
+out:
+	return rv;
 }
 
-// ----------- Incremental: raft members (not yet implemented) -------------
-
-DEFINE_TEST(incremental_raft_members_not_implemented)
+DEFINE_TEST(incremental_raft_members_empty_keeps_old)
 {
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len = 0;
+	int									rv = -1;
+	int									merge_size = -1;
+
+	old_len = craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 2LL, 48, 0x11);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	fill_tlv(&upd_tlv, TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 0, 5LL);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_EQ(merge_size, old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 5LL);
+	TEST_ASSERT_MEM_EQ(ctx->dst_buf, ctx->old_buf, (size_t)old_len);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), old_len);
+	rv = 0;
+out:
+	return rv;
+}
+
+/*************** Incremental raft_members merge (non-empty) ********************/
+
+struct test_raft_member_spec {
+	union nvmeib_uuid	uuid;
+	char				hostname[NVMEIB_HOST_NAME_LEN];
+	int64_t				seq_no_updated;
+	int64_t				kafka_offset;
+};
+
+static void init_raft_member_spec(struct test_raft_member_spec *spec, int id,
+								  int64_t seq_no, int64_t kafka_offset)
+{
+	memset(spec, 0, sizeof(*spec));
+	make_test_uuid(&spec->uuid, id);
+	snprintf(spec->hostname, sizeof(spec->hostname), "node-%d", id);
+	spec->seq_no_updated = seq_no;
+	spec->kafka_offset = kafka_offset;
+}
+
+//
+// Build a raft_members wire buffer: header + N members + eyecatcher.
+// Members are serialized in wire byte order via nvmeibt_raft_member_conf_convert_le_be.
+//
+static int craft_raft_members_buf(char *buf, int buf_size,
+		struct nvmeibt_wire_type_len_value *tlv_out,
+		int8_t tlv_type, int64_t idx,
+		int n_members, const struct test_raft_member_spec *members)
+{
+	char	*ptr;
+	int		data_len;
+
+	data_len = (int)(sizeof(int) * 2) +
+			n_members * (int)sizeof(struct mm_raft_member_conf) +
+			(int)sizeof(EYECATCHER_CNF_END);
+	if (data_len > buf_size)
+		return -1;
+
+	memset(buf, 0, data_len);
+	ptr = buf;
+
+	// Header: n_raft_members + filler
+	*(int *)ptr = LE_SWAP32(n_members);
+	ptr += sizeof(int) * 2;
+
+	// Members — convert via aligned temp then memcpy (wire buffer may not be 16-byte aligned)
+	for (int i = 0; i < n_members; i++) {
+		struct mm_raft_member_conf host_conf __attribute__((aligned(16)));
+		struct mm_raft_member_conf wire_tmp __attribute__((aligned(16)));
+
+		memset(&host_conf, 0, sizeof(host_conf));
+		memcpy(host_conf.eyecatcher, "MMB", 4);
+		host_conf.uuid = members[i].uuid;
+		host_conf.kafka_offset = members[i].kafka_offset;
+		host_conf.raft_members_seq_no_updated = members[i].seq_no_updated;
+		nvmeibt_strlcpy(host_conf.hostname, members[i].hostname, sizeof(host_conf.hostname));
+		nvmeibt_raft_member_conf_convert_le_be(&wire_tmp, &host_conf);
+		memcpy(ptr, &wire_tmp, sizeof(wire_tmp));
+		ptr += sizeof(struct mm_raft_member_conf);
+	}
+
+	// Eyecatcher
+	nvmeibt_strlcpy(ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+	ptr += sizeof(EYECATCHER_CNF_END);
+
+	fill_tlv(tlv_out, tlv_type, data_len, idx);
+	return data_len;
+}
+
+//
+// Register a test_raft_member_spec in the hash (combines spec init + hash add).
+//
+static void setup_test_raft_member(struct test_raft_member_spec *spec, int id,
+								   int64_t seq_no, int64_t kafka_offset)
+{
+	init_raft_member_spec(spec, id, seq_no, kafka_offset);
+	TEST_add_raft_member_to_hash(&spec->uuid, spec->hostname, seq_no, kafka_offset);
+}
+
+DEFINE_TEST(incremental_raft_members_partial_update)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_raft_member_spec		old_members[3], incr_members[1];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_raft_members_hash();
+	TEST_clear_raft_members_hash();
+	for (int i = 0; i < 3; i++)
+		setup_test_raft_member(&old_members[i], i + 1, 10, 100 + i);
+
+	// Incremental: only member[1] updated with higher seq_no
+	init_raft_member_spec(&incr_members[0], 2, 20, 200);
+
+	old_len = craft_raft_members_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 10LL, 3, old_members);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_raft_members_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 20LL, 1, incr_members);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+
+	// Result: 1 from incremental + 2 non-visited from hash = 3 total
+	{
+		int *n_out = (int *)ctx->dst_buf;
+		TEST_ASSERT_EQ(LE_SWAP32(*n_out), 3);
+	}
+
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+	rv = 0;
+out:
+	TEST_clear_raft_members_hash();
+	return rv;
+}
+
+DEFINE_TEST(incremental_raft_members_new_member_accepted)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_raft_member_spec		old_members[2], incr_members[1];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_raft_members_hash();
+	TEST_clear_raft_members_hash();
+	for (int i = 0; i < 2; i++)
+		setup_test_raft_member(&old_members[i], i + 1, 10, 100 + i);
+
+	// Incremental: new member (id=99) not in hash
+	init_raft_member_spec(&incr_members[0], 99, 30, 300);
+
+	old_len = craft_raft_members_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 10LL, 2, old_members);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_raft_members_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 30LL, 1, incr_members);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+
+	// Result: 1 new + 2 non-visited from hash = 3 total
+	{
+		int *n_out = (int *)ctx->dst_buf;
+		TEST_ASSERT_EQ(LE_SWAP32(*n_out), 3);
+	}
+	rv = 0;
+out:
+	TEST_clear_raft_members_hash();
+	return rv;
+}
+
+DEFINE_TEST(incremental_raft_members_old_seq_keeps_hash)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_raft_member_spec		old_members[1], incr_members[1];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+	struct mm_raft_member_conf			out_member __attribute__((aligned(16)));
+	struct mm_raft_member_conf			host_member __attribute__((aligned(16)));
+
+	TEST_init_raft_members_hash();
+	TEST_clear_raft_members_hash();
+	setup_test_raft_member(&old_members[0], 1, 20, 100);
+
+	// Incremental: same member but OLDER seq_no => keep hash version
+	init_raft_member_spec(&incr_members[0], 1, 5, 50);
+
+	old_len = craft_raft_members_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 20LL, 1, old_members);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_raft_members_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 20LL, 1, incr_members);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+
+	// 1 member total (from hash, since incremental is older)
+	{
+		int *n_out = (int *)ctx->dst_buf;
+		TEST_ASSERT_EQ(LE_SWAP32(*n_out), 1);
+	}
+
+	// Verify the member has seq_no=20 (from hash), not 5 (from incremental)
+	memcpy(&out_member, ctx->dst_buf + sizeof(int) * 2, sizeof(out_member));
+	nvmeibt_raft_member_conf_convert_le_be(&host_member, &out_member);
+	TEST_ASSERT_EQ(host_member.raft_members_seq_no_updated, 20);
+	TEST_ASSERT_EQ(host_member.kafka_offset, 100);
+	rv = 0;
+out:
+	TEST_clear_raft_members_hash();
+	return rv;
+}
+
+/************ Incremental kafka_mgmt_config merge (non-empty) *****************/
+
+extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
+									const void *wire_buf, int wire_len);
+extern void TEST_clear_blkdevs_hash(void);
+
+struct test_vol_spec {
+	union nvmeib_uuid	uuid;
+	uint32_t			version;
+	int64_t				kafka_offset_or_idx;
+};
+
+//
+// Build a minimal kafka_mgmt_config wire buffer with N volumes, each having
+// 1 chunk with 1 praid with 0 segments. Uses production conversion functions.
+// Returns data length on success, -1 on error.
+//
+static int craft_kafka_mgmt_config_buf(char *buf, int buf_size,
+		struct nvmeibt_wire_type_len_value *tlv_out,
+		int8_t tlv_type, int64_t idx,
+		int n_vols, const struct test_vol_spec *vols)
+{
+	struct mm_mgmt_conf			mgmt = {0};
+	struct mm_vol_conf			vol = {0};
+	struct mm_chunk_conf		chunk = {0};
+	struct mm_praid_conf		praid = {0};
+	char						*ptr;
+	int							data_len;
+	int							per_vol_size;
+
+	per_vol_size = (int)(nvmeibt_packed_vol_config_size() +
+				nvmeibt_packed_chunk_config_size() +
+				nvmeibt_packed_praid_config_size());
+	data_len = (int)nvmeibt_packed_mm_mgmt_config_size() +
+			n_vols * per_vol_size +
+			(int)sizeof(EYECATCHER_CNF_END);
+	if (data_len > buf_size)
+		return -1;
+
+	memset(buf, 0, data_len);
+	ptr = buf;
+
+	// Header
+	memcpy(mgmt.eyecatcher, "CNF", 4);
+	mgmt.structVersion = 2067;
+	mgmt.protocolVersion = 1;
+	mgmt.configurationVersion = 1;
+	mgmt.idx = idx;
+	mgmt.num_vols = n_vols;
+	ptr += nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(ptr, &mgmt);
+
+	// Volumes
+	for (int i = 0; i < n_vols; i++) {
+		memset(&vol, 0, sizeof(vol));
+		memcpy(vol.eyecatcher, "VOL", 4);
+		vol.uuid = vols[i].uuid;
+		vol.version = vols[i].version;
+		vol.kafka_offset_or_idx = vols[i].kafka_offset_or_idx;
+		vol.num_chunks = 1;
+		vol.blockSize = 4096;
+		ptr += nvmeibt_vol_convert_to_wire_via_aligned_tmp(ptr, &vol);
+
+		memset(&chunk, 0, sizeof(chunk));
+		memcpy(chunk.eyecatcher, "CHK", 4);
+		make_test_uuid(&chunk.uuid, 1000 + i);
+		chunk.num_praids = 1;
+		ptr += nvmeibt_chunk_convert_to_wire_via_aligned_tmp(ptr, &chunk);
+
+		memset(&praid, 0, sizeof(praid));
+		memcpy(praid.eyecatcher, "PRD", 4);
+		make_test_uuid(&praid.uuid, 2000 + i);
+		praid.num_segments = 0;
+		praid.version = vols[i].version;
+		ptr += nvmeibt_praid_convert_to_wire_via_aligned_tmp(ptr, &praid);
+	}
+
+	// Eyecatcher
+	nvmeibt_strlcpy(ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+
+	fill_tlv(tlv_out, tlv_type, data_len, idx);
+	return data_len;
+}
+
+//
+// Serialize a single volume's wire data for use as a blkdev's pre-serialized buffer.
+// Returns the wire data length.
+//
+static int serialize_vol_wire_data(char *buf, int buf_size __attribute__((unused)), const struct test_vol_spec *vol_spec, int vol_idx)
+{
+	struct mm_vol_conf		vol = {0};
+	struct mm_chunk_conf	chunk = {0};
+	struct mm_praid_conf	praid = {0};
+	char					*ptr = buf;
+
+	memcpy(vol.eyecatcher, "VOL", 4);
+	vol.uuid = vol_spec->uuid;
+	vol.version = vol_spec->version;
+	vol.kafka_offset_or_idx = vol_spec->kafka_offset_or_idx;
+	vol.num_chunks = 1;
+	vol.blockSize = 4096;
+	ptr += nvmeibt_vol_convert_to_wire_via_aligned_tmp(ptr, &vol);
+
+	memcpy(chunk.eyecatcher, "CHK", 4);
+	make_test_uuid(&chunk.uuid, 1000 + vol_idx);
+	chunk.num_praids = 1;
+	ptr += nvmeibt_chunk_convert_to_wire_via_aligned_tmp(ptr, &chunk);
+
+	memcpy(praid.eyecatcher, "PRD", 4);
+	make_test_uuid(&praid.uuid, 2000 + vol_idx);
+	praid.num_segments = 0;
+	praid.version = vol_spec->version;
+	ptr += nvmeibt_praid_convert_to_wire_via_aligned_tmp(ptr, &praid);
+
+	return (int)(ptr - buf);
+}
+
+//
+// Build a topo_config wire buffer. Same layout as kafka_mgmt_config but
+// with topo_config_idx_updated set on praids (used for merge comparison).
+//
+static int craft_topo_config_buf(char *buf, int buf_size,
+		struct nvmeibt_wire_type_len_value *tlv_out,
+		int8_t tlv_type, int64_t idx,
+		int n_vols, const struct test_vol_spec *vols)
+{
+	struct mm_mgmt_conf			mgmt = {0};
+	struct mm_vol_conf			vol = {0};
+	struct mm_chunk_conf		chunk = {0};
+	struct mm_praid_conf		praid = {0};
+	char						*ptr;
+	int							data_len;
+	int							per_vol_size;
+
+	per_vol_size = (int)(nvmeibt_packed_vol_config_size() +
+				nvmeibt_packed_chunk_config_size() +
+				nvmeibt_packed_praid_config_size());
+	data_len = (int)nvmeibt_packed_mm_mgmt_config_size() +
+			n_vols * per_vol_size +
+			(int)sizeof(EYECATCHER_CNF_END);
+	if (data_len > buf_size)
+		return -1;
+
+	memset(buf, 0, data_len);
+	ptr = buf;
+
+	memcpy(mgmt.eyecatcher, "CNF", 4);
+	mgmt.structVersion = 2067;
+	mgmt.protocolVersion = 1;
+	mgmt.configurationVersion = 1;
+	mgmt.idx = idx;
+	mgmt.num_vols = n_vols;
+	ptr += nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(ptr, &mgmt);
+
+	for (int i = 0; i < n_vols; i++) {
+		memset(&vol, 0, sizeof(vol));
+		memcpy(vol.eyecatcher, "VOL", 4);
+		vol.uuid = vols[i].uuid;
+		vol.version = vols[i].version;
+		vol.kafka_offset_or_idx = vols[i].kafka_offset_or_idx;
+		vol.num_chunks = 1;
+		vol.blockSize = 4096;
+		ptr += nvmeibt_vol_convert_to_wire_via_aligned_tmp(ptr, &vol);
+
+		memset(&chunk, 0, sizeof(chunk));
+		memcpy(chunk.eyecatcher, "CHK", 4);
+		make_test_uuid(&chunk.uuid, 1000 + i);
+		chunk.num_praids = 1;
+		ptr += nvmeibt_chunk_convert_to_wire_via_aligned_tmp(ptr, &chunk);
+
+		memset(&praid, 0, sizeof(praid));
+		memcpy(praid.eyecatcher, "PRD", 4);
+		make_test_uuid(&praid.uuid, 2000 + i);
+		praid.num_segments = 0;
+		praid.version = vols[i].version;
+		praid.topo_config_idx_updated = vols[i].kafka_offset_or_idx;
+		ptr += nvmeibt_praid_convert_to_wire_via_aligned_tmp(ptr, &praid);
+	}
+
+	nvmeibt_strlcpy(ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+	fill_tlv(tlv_out, tlv_type, data_len, idx);
+	return data_len;
+}
+
+DEFINE_TEST(incremental_kafka_config_partial_update)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[2], incr_vols[1];
+	char								wire_data[1024];
+	int									wire_len;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_blkdevs_hash();
+
+	// Set up 2 volumes in hash
+	for (int i = 0; i < 2; i++) {
+		make_test_uuid(&old_vols[i].uuid, i + 1);
+		old_vols[i].version = 10;
+		old_vols[i].kafka_offset_or_idx = 100 + i;
+		wire_len = serialize_vol_wire_data(wire_data, (int)sizeof(wire_data), &old_vols[i], i);
+		TEST_add_blkdev_to_hash(&old_vols[i].uuid, 10, wire_data, wire_len);
+	}
+
+	// Incremental: only vol[0] updated with higher version
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;
+
+	old_len = craft_kafka_mgmt_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 100LL, 2, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_kafka_mgmt_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	// Decode merged output and verify content
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, false, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 2);
+		// vol[0] from incremental: version 20
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		// vol[1] from hash: version 10
+		TEST_ASSERT_EQ((int)merged->volumes[1].version, 10);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	TEST_clear_blkdevs_hash();
+	return rv;
+}
+
+DEFINE_TEST(incremental_kafka_config_old_version_keeps_hash)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[1], incr_vols[1];
+	char								wire_data[1024];
+	int									wire_len;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_blkdevs_hash();
+
+	make_test_uuid(&old_vols[0].uuid, 1);
+	old_vols[0].version = 20;
+	old_vols[0].kafka_offset_or_idx = 200;
+	wire_len = serialize_vol_wire_data(wire_data, (int)sizeof(wire_data), &old_vols[0], 0);
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 20, wire_data, wire_len);
+
+	// Incremental: same vol but OLDER version => skip from incremental, use hash
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 5;
+	incr_vols[0].kafka_offset_or_idx = 50;
+
+	old_len = craft_kafka_mgmt_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 200LL, 1, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_kafka_mgmt_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+
+	// Decode merged output: vol should have version 20 (from hash), not 5 (from incremental)
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, false, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	TEST_clear_blkdevs_hash();
+	return rv;
+}
+
+/************* Incremental topo_config merge (non-empty) **********************/
+
+extern void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
+								   int n_praid_uuids, const union nvmeib_uuid *praid_uuids);
+extern void TEST_clear_chunks_hash(void);
+
+DEFINE_TEST(incremental_topo_config_partial_praid_update)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[1], incr_vols[1];
+	union nvmeib_uuid					chunk_uuid, praid_uuid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_praids_hash();
+	TEST_clear_chunks_hash();
+
+	// Set up 1 volume with 1 chunk with 1 praid in hash
+	make_test_uuid(&old_vols[0].uuid, 1);
+	old_vols[0].version = 10;
+	old_vols[0].kafka_offset_or_idx = 100;
+
+	make_test_uuid(&praid_uuid, 2000);
+	TEST_add_praid_to_hash(&praid_uuid, 100, 10, 0);  // topo_config_idx = 100
+
+	make_test_uuid(&chunk_uuid, 1000);
+	TEST_add_chunk_to_hash(&chunk_uuid, 1, &praid_uuid);
+
+	// Incremental: same volume but praid has higher topo_config_idx
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;  // topo_config_idx for the praid
+
+	old_len = craft_topo_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 100LL, 1, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_topo_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	// Decode merged output and verify praid was updated
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, true, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].num_praids, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].praids[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	TEST_clear_chunks_hash();
+	TEST_clear_praids_hash();
+	return rv;
+}
+
+struct test_tc_praid_spec {
+	union nvmeib_uuid	uuid;
+	int64_t				topo_config_idx;
+	uint32_t			version;
+};
+
+//
+// Build a topo_config wire buffer with 1 vol, 1 chunk, N praids.
+// Each praid has its own uuid and topo_config_idx_updated.
+//
+static int craft_topo_config_multi_praid_buf(char *buf, int buf_size,
+		struct nvmeibt_wire_type_len_value *tlv_out,
+		int8_t tlv_type, int64_t idx,
+		const union nvmeib_uuid *vol_uuid, uint32_t vol_version,
+		const union nvmeib_uuid *chunk_uuid,
+		int n_praids, const struct test_tc_praid_spec *praids)
+{
+	struct mm_mgmt_conf		mgmt = {0};
+	struct mm_vol_conf		vol = {0};
+	struct mm_chunk_conf	chunk = {0};
+	struct mm_praid_conf	praid = {0};
+	char					*ptr;
+	int						data_len;
+
+	data_len = (int)(nvmeibt_packed_mm_mgmt_config_size() +
+			nvmeibt_packed_vol_config_size() +
+			nvmeibt_packed_chunk_config_size() +
+			n_praids * (int)nvmeibt_packed_praid_config_size() +
+			sizeof(EYECATCHER_CNF_END));
+	if (data_len > buf_size)
+		return -1;
+
+	memset(buf, 0, data_len);
+	ptr = buf;
+
+	memcpy(mgmt.eyecatcher, "CNF", 4);
+	mgmt.structVersion = 2067;
+	mgmt.protocolVersion = 1;
+	mgmt.configurationVersion = 1;
+	mgmt.idx = idx;
+	mgmt.num_vols = 1;
+	ptr += nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(ptr, &mgmt);
+
+	memset(&vol, 0, sizeof(vol));
+	memcpy(vol.eyecatcher, "VOL", 4);
+	vol.uuid = *vol_uuid;
+	vol.version = vol_version;
+	vol.kafka_offset_or_idx = idx;
+	vol.num_chunks = 1;
+	vol.blockSize = 4096;
+	ptr += nvmeibt_vol_convert_to_wire_via_aligned_tmp(ptr, &vol);
+
+	memset(&chunk, 0, sizeof(chunk));
+	memcpy(chunk.eyecatcher, "CHK", 4);
+	chunk.uuid = *chunk_uuid;
+	chunk.num_praids = (uint8_t)n_praids;
+	ptr += nvmeibt_chunk_convert_to_wire_via_aligned_tmp(ptr, &chunk);
+
+	for (int i = 0; i < n_praids; i++) {
+		memset(&praid, 0, sizeof(praid));
+		memcpy(praid.eyecatcher, "PRD", 4);
+		praid.uuid = praids[i].uuid;
+		praid.version = praids[i].version;
+		praid.topo_config_idx_updated = praids[i].topo_config_idx;
+		praid.num_segments = 0;
+		ptr += nvmeibt_praid_convert_to_wire_via_aligned_tmp(ptr, &praid);
+	}
+
+	nvmeibt_strlcpy(ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+	fill_tlv(tlv_out, tlv_type, data_len, idx);
+	return data_len;
+}
+
+DEFINE_TEST(incremental_topo_config_mixed_keep_and_update)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	union nvmeib_uuid					vol_uuid, chunk_uuid;
+	union nvmeib_uuid					praid_uuids[2];
+	struct test_tc_praid_spec			old_praids[2], incr_praids[1];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_clear_praids_hash();
+	TEST_clear_chunks_hash();
+
+	make_test_uuid(&vol_uuid, 1);
+	make_test_uuid(&chunk_uuid, 1000);
+
+	// 2 praids in hash, both at topo_config_idx = 100
+	for (int i = 0; i < 2; i++) {
+		make_test_uuid(&praid_uuids[i], 2000 + i);
+		TEST_add_praid_to_hash(&praid_uuids[i], 100, 10, 0);
+		old_praids[i].uuid = praid_uuids[i];
+		old_praids[i].topo_config_idx = 100;
+		old_praids[i].version = 10;
+	}
+	TEST_add_chunk_to_hash(&chunk_uuid, 2, praid_uuids);
+
+	// Old: complete with 2 praids
+	old_len = craft_topo_config_multi_praid_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 100LL, &vol_uuid, 10, &chunk_uuid, 2, old_praids);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	// Incremental: only praid[0] updated with higher topo_config_idx.
+	// praid[1] is NOT in the incremental — must be re-serialized from hash.
+	incr_praids[0].uuid = praid_uuids[0];
+	incr_praids[0].topo_config_idx = 200;
+	incr_praids[0].version = 20;
+
+	upd_len = craft_topo_config_multi_praid_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 200LL, &vol_uuid, 20, &chunk_uuid, 1, incr_praids);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
+
+	// Merged result should be larger than incremental (1 praid) because
+	// the old praid[1] was appended from hash. Expected: header + vol + chunk + 2 praids + eyecatcher + padding.
+	TEST_ASSERT_TRUE(merge_size > upd_len);
+
+	// Decode merged output and verify both praids are present with correct versions
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, true, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].num_chunks, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].num_praids, 2);
+		// praid[0] from incremental: version 20
+		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].praids[0].version, 20);
+		// praid[1] from hash (re-serialized): version 10
+		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].praids[1].version, 10);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	TEST_clear_chunks_hash();
+	TEST_clear_praids_hash();
+	return rv;
+}
+
+/***** Leader incremental selection: deletion guard forces complete **********/
+
+/*
+ * Scenario: peer is within all incremental windows, then a volume deletion
+ * sets last_delete_kafka_mgmt_config_offset ahead of the peer's kafka offset.
+ * Expected: is_configs_and_raft_members_incremental == false (complete forced).
+ */
+DEFINE_TEST(deletion_guard_forces_complete_configs)
+{
+	int		rv = -1;
+	int		result;
+
 	(void)_ctx;
-	return 0;
+
+	/* Leader state: topo=100, topo_config=50, kafka=50, raft_members_seq_no=20 */
+	/* Peer is within all windows (close to leader values) */
+	/* No deletion yet => should be incremental */
+	result = TEST_compute_is_configs_incremental(
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 0, 0);
+	TEST_ASSERT_EQ(result, 1);
+
+	/* Volume deletion: last_delete_kafka_mgmt_config_offset = 50 (current offset) */
+	/* Peer's kafka offset (49) < deletion offset (50) => forced complete */
+	result = TEST_compute_is_configs_incremental(
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 50, 0);
+	TEST_ASSERT_EQ(result, 0);
+
+	rv = 0;
+out:
+	return rv;
+}
+
+/*
+ * Scenario: peer has caught up past the deletion offset.
+ * Expected: is_configs_and_raft_members_incremental == true (incremental OK).
+ */
+DEFINE_TEST(deletion_guard_no_effect_when_peer_caught_up)
+{
+	int		rv = -1;
+	int		result;
+
+	(void)_ctx;
+
+	/* Deletion happened at kafka offset 40, but peer is at 49 (past it) */
+	/* Leader is at 50, peer is within window */
+	result = TEST_compute_is_configs_incremental(
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 40, 0);
+	TEST_ASSERT_EQ(result, 1);
+
+	/* Same but with raft_members deletion guard too */
+	result = TEST_compute_is_configs_incremental(
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 40, 40);
+	TEST_ASSERT_EQ(result, 1);
+
+	/* Peer's raft_members_kafka_offset (30) < last_delete (40) => forced complete */
+	result = TEST_compute_is_configs_incremental(
+		/* peer */    98, 49, 49, 19, 30,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 40, 40);
+	TEST_ASSERT_EQ(result, 0);
+
+	rv = 0;
+out:
+	return rv;
 }
 
 /***********************    Realloc & Update tests    *************************/
@@ -942,7 +2206,6 @@ DEFINE_TEST(first_update_without_raft_log)
 	upd = build_test_buf(7, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(NULL, upd, false);
 	TEST_ASSERT_TRUE(dst != NULL);
-	// Only raft_ctx copied, not TLV data
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 7LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_config_ctx), 0);
@@ -969,11 +2232,10 @@ DEFINE_TEST(equal_bufs_only_raft_ctx_updated)
 	memset(tc, 0xBB, sizeof(tc));
 	memset(kmc, 0xCC, sizeof(kmc));
 	memset(rm, 0xDD, sizeof(rm));
-	// Same idx values for all 4 sections => compare returns EQUAL
 	old = build_test_buf(1, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	upd = build_test_buf(5, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
-	TEST_ASSERT_TRUE(dst == old);	// Buffer reused
+	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 5LL);
 	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
@@ -1003,9 +2265,8 @@ DEFINE_TEST(no_raft_log_keeps_old)
 	old = build_test_buf(1, topo_old, 100, 10, tc_old, 50, 20, kmc_old, 30, 30, rm_old, 40, 40);
 	upd = build_test_buf(9, topo_upd, 200, 99, tc_upd, 80, 88, NULL, 0, 77, NULL, 0, 66);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, false);
-	TEST_ASSERT_TRUE(dst == old);	// Buffer reused despite idx diffs
+	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 9LL);
-	// TLV data unchanged from old
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 10LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
 	rv = 0;
@@ -1032,19 +2293,15 @@ DEFINE_TEST(topo_only_same_size_inplace)
 	memset(tc, 0xBB, sizeof(tc));
 	memset(kmc, 0xCC, sizeof(kmc));
 	memset(rm, 0xDD, sizeof(rm));
-	// old: all 4 sections with data
 	old = build_test_buf(1, topo_old, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
-	// upd: topo differs (idx=15 vs 10, same size), other sections same idx with len=0
 	upd = build_test_buf(3, topo_upd, 100, 15, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
-	TEST_ASSERT_TRUE(dst == old);	// In-place optimization
-	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);	// Topo updated
+	TEST_ASSERT_TRUE(dst == old);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
-	// Topo data should be upd's data
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->topo_ctx), &topo_data_out);
 	TEST_ASSERT_TRUE(topo_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(topo_data_out, topo_upd, 100);
-	// Other sections untouched
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_config_ctx), 20LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_config_ctx), 50);
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->topo_config_ctx), &tc_data_out);
@@ -1080,23 +2337,19 @@ DEFINE_TEST(topo_only_diff_size_realloc)
 	memset(rm, 0xDD, sizeof(rm));
 	old = build_test_buf(1, topo_old, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	old_saved = old;
-	// upd: larger topo (200 vs 100), different idx, other sections same idx with len=0
 	upd = build_test_buf(3, topo_upd, 200, 15, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
-	TEST_ASSERT_TRUE(dst != old_saved);	// New allocation (old was freed by function)
+	TEST_ASSERT_TRUE(dst != old_saved);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 200);
-	// Topo data should be upd's data
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->topo_ctx), &topo_data_out);
 	TEST_ASSERT_TRUE(topo_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(topo_data_out, topo_upd, 200);
-	// Other sections preserved from old
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_config_ctx), 20LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_config_ctx), 50);
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->topo_config_ctx), &tc_data_out);
 	TEST_ASSERT_TRUE(tc_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(tc_data_out, tc, 50);
-	// Total length consistent
 	TEST_ASSERT_EQ(persist_and_wire_buf_get_total_len(dst), (int)sizeof(*dst) + 200 + 50 + 30 + 40);
 	persist_and_wire_buf_validate_len(dst);
 	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
@@ -1132,29 +2385,24 @@ DEFINE_TEST(full_alloc_topo_and_configs)
 	memset(rm, 0xDD, sizeof(rm));
 	old = build_test_buf(1, topo_old, 100, 10, tc_old, 50, 20, kmc, 30, 30, rm, 40, 40);
 	old_saved = old;
-	// topo AND topo_config idx differ => TOPO_AND_CONFIGS. kmc/rm same idx with len=0.
 	upd = build_test_buf(5, topo_upd, 120, 15, tc_upd, 60, 25, NULL, 0, 30, NULL, 0, 40);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
-	TEST_ASSERT_TRUE(dst != old_saved);	// New allocation
-	// Topo: uses upd (higher idx)
+	TEST_ASSERT_TRUE(dst != old_saved);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 120);
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->topo_ctx), &topo_data_out);
 	TEST_ASSERT_TRUE(topo_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(topo_data_out, topo_upd, 120);
-	// Topo config: uses upd (higher idx)
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_config_ctx), 25LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_config_ctx), 60);
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->topo_config_ctx), &tc_data_out);
 	TEST_ASSERT_TRUE(tc_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(tc_data_out, tc_upd, 60);
-	// Kafka mgmt config: uses old (same idx, upd_len=0)
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->kafka_mgmt_config_ctx), 30LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->kafka_mgmt_config_ctx), 30);
 	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, nvmeibt_tlv_get_type(&dst->kafka_mgmt_config_ctx), &kmc_data_out);
 	TEST_ASSERT_TRUE(kmc_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(kmc_data_out, kmc, 30);
-	// Total length
 	TEST_ASSERT_EQ(persist_and_wire_buf_get_total_len(dst), (int)sizeof(*dst) + 120 + 60 + 30 + 40);
 	persist_and_wire_buf_validate_len(dst);
 	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
@@ -1183,15 +2431,14 @@ DEFINE_TEST(error_in_pass1_keeps_old)
 	memset(topo_upd, 0xEE, sizeof(topo_upd));
 	memset(tc_upd, 0xFF, sizeof(tc_upd));
 	old = build_test_buf(1, topo_old, 100, 10, tc_old, 50, 20, kmc, 30, 30, rm, 40, 40);
-	// Build upd with different topo+tc idx so compare returns TOPO_AND_CONFIGS
+	// Build upd with different topo+tc idx so compare returns TOPO_AND_CONFIGS.
 	upd = build_test_buf(8, topo_upd, 120, 15, tc_upd, 60, 25, NULL, 0, 30, NULL, 0, 40);
 	// Corrupt topo TLV type to invalid value. The merge function will return -1.
 	upd->topo_ctx.tlv_type = LE_SWAP8((int8_t)99);
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
-	TEST_ASSERT_TRUE(dst == old);	// Error => keeps old
-	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 8LL);	// raft_ctx still updated
+	TEST_ASSERT_TRUE(dst == old);
+	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 8LL);
 	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
-	// TLV data unchanged from old
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 10LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
 	persist_and_wire_buf_validate_len(dst);

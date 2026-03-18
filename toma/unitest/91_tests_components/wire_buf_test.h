@@ -40,7 +40,6 @@ struct section_merge_test_ctx {
 //
 // X-macro test list: X(func_name, "Test Name", "Description")
 //
-
 #define WIRE_BUF_TEST_LIST \
 	/************************* Complete merges *************************/ \
 	/* -- Complete: topo -- */ \
@@ -64,18 +63,29 @@ struct section_merge_test_ctx {
 	X(incremental_topo_multi_praid_all_updated,		"Multi praid all updated",					"3 praids, all in incremental => all replaced") \
 	X(incremental_topo_praid_with_segments,			"Praid with segments preserved",			"Praids with 2 segs each => segment data survives merge") \
 	X(incremental_topo_praid_seg_count_changes,		"Praid segment count changes",				"Old has 2 segs, incremental has 3 => merged has 3, size correct") \
-	X(incremental_topo_extra_uuid_ignored,			"Extra UUID in incremental ignored",		"Incremental has UUID not in old => ignored, old praids survive") \
+	X(incremental_topo_extra_uuid_ignored,			"New UUID in incremental accepted",			"Incremental has UUID not in hash => accepted as new praid") \
 	X(incremental_topo_ordering_differs,			"Incremental ordering differs from old",	"Old=[A,B,C], incr=[C,A] => merge works (O(n*m) scan)") \
 	X(incremental_topo_same_idx_keeps_old,			"Incremental same idx keeps old",			"Incremental with same topo_idx_updated => keeps old praid") \
 	X(incremental_topo_large_praid_count,			"Large praid count (50 praids)",			"50 praids, 10 updated => correct merge, no overruns") \
 	X(incremental_topo_unknown_type_fails,			"Unknown TLV type returns error",			"Bogus incremental type hits default branch, returns -1") \
 	X(incremental_topo_size_only_no_dst,			"Incremental topo size-only (no dst)",		"dst_wire_ctx NULL returns correct size without copying") \
-	/* -- Incremental: topo config (not yet implemented) -- */ \
-	X(incremental_topo_config_not_implemented,		"Topo_config incremental => error",			"TOPO_CONFIG_INCREMENTAL not implemented, returns -1") \
-	/* -- Incremental: kafka mgmt config (not yet implemented) -- */ \
-	X(incremental_kafka_config_not_implemented,		"Kafka_config incremental => error",		"KAFKA_MGMT_CONFIG_INCREMENTAL not implemented, returns -1") \
-	/* -- Incremental: raft members (not yet implemented) -- */ \
-	X(incremental_raft_members_not_implemented,		"Raft_members incremental => error",		"RAFT_MEMBERS_INCREMENTAL not implemented, returns -1") \
+	/* -- Incremental: empty upd keeps old for all section types -- */ \
+	X(incremental_topo_config_empty_keeps_old,		"Empty topo_config incremental keeps old",	"TOPO_CONFIG_INCREMENTAL with upd_len==0 => keeps old data") \
+	X(incremental_kafka_config_empty_keeps_old,		"Empty kafka_config incremental keeps old",	"KAFKA_MGMT_CONFIG_INCREMENTAL with upd_len==0 => keeps old data") \
+	X(incremental_raft_members_empty_keeps_old,		"Empty raft_members incremental keeps old",	"RAFT_MEMBERS_INCREMENTAL with upd_len==0 => keeps old data") \
+	/************** Incremental raft_members merge (non-empty) *****************/ \
+	X(incremental_raft_members_partial_update,		"Raft members partial update",				"3 members, 1 updated => merged has 3 with correct seq_no") \
+	X(incremental_raft_members_new_member_accepted,	"Raft members new member accepted",			"New member in incremental not in hash => accepted") \
+	X(incremental_raft_members_old_seq_keeps_hash,	"Raft members old seq keeps hash",			"Incremental with lower seq_no => keeps hash member data") \
+	/*********** Incremental kafka_mgmt_config merge (non-empty) ****************/ \
+	X(incremental_kafka_config_partial_update,		"Kafka config partial vol update",			"2 vols, 1 updated => merged has both with correct version") \
+	X(incremental_kafka_config_old_version_keeps_hash, "Kafka config old version keeps hash",	"Incremental with lower version => uses hash blkdev wire buf") \
+	/*********** Incremental topo_config merge (non-empty) **********************/ \
+	X(incremental_topo_config_partial_praid_update,	"Topo config partial praid update",			"1 vol, 1 praid updated via chunk hash => merged correctly") \
+	X(incremental_topo_config_mixed_keep_and_update, "Topo config mixed keep and update",		"2 praids, 1 updated + 1 kept from hash via follower re-serialize") \
+	/********** Leader incremental selection: deletion forces complete ***********/ \
+	X(deletion_guard_forces_complete_configs,		"Vol deletion forces complete configs",		"Peer in window but last_delete_kafka > peer offset => complete") \
+	X(deletion_guard_no_effect_when_peer_caught_up,	"Caught-up peer still gets incremental",	"Peer kafka offset >= last_delete => incremental allowed") \
 	/********** Follower realloc_and_upd orchestration **************************/ \
 	X(first_update_with_raft_log,        "First update with raft log",        "old=NULL, raft_log=true => full memcpy of upd") \
 	X(first_update_without_raft_log,     "First update without raft log",     "old=NULL, raft_log=false => only raft_ctx copied") \

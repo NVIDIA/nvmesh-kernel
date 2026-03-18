@@ -1375,6 +1375,14 @@ out:
 	return total_size;
 }
 
+static bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit);
+static bool compute_is_configs_and_raft_members_incremental(
+	bool is_topo_incremental, int64_t peer_topo_config_idx, int64_t peer_kafka_mgmt_config_offset,
+	int64_t peer_raft_members_seq_no, int64_t peer_raft_members_kafka_offset,
+	int64_t leader_topo_config_to_commit, int64_t leader_kafka_mgmt_config_to_commit,
+	int64_t leader_raft_members_seq_no_to_commit,
+	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset);
+
 #if defined(TOMA_SIMULATOR_SANDBOX)
 int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
 		const struct nvmeibt_wire_type_len_value *old_wire_ctx,
@@ -1384,7 +1392,112 @@ int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire
 	return persist_and_wire_buf_calculate_and_merge_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
 			dst_data_ptr, old_data_ptr, upd_data_ptr);
 }
+void TEST_init_raft_members_hash(void)
+{
+	if (!my_raft_global.raft_members_hash_by_uuid)
+		my_raft_global.raft_members_hash_by_uuid = NVMEIB_HASH_CREATE(test_rm_hash, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "test_raft_members_hash", 16, 0);
+}
+
+void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hostname,
+								  int64_t seq_no_updated, int64_t kafka_offset)
+{
+	struct nvmeibt_raft_member *member = calloc(1, sizeof(*member));
+	struct mm_raft_member_conf host_conf __attribute__((aligned(16)));
+
+	member->uuid = *uuid;
+	nvmeibt_strlcpy(member->hostname, hostname, sizeof(member->hostname));
+	member->raft_members_seq_no_updated = seq_no_updated;
+	member->kafka_offset = kafka_offset;
+	member->config_tag = 1;
+	member->is_serialized_in_incremental_raft_members_merge = false;
+
+	// Build the serialized wire buf that merge_raft_members_incremental reads
+	// when keeping old member data (phase 2 and "old is newer" branch).
+	memset(&host_conf, 0, sizeof(host_conf));
+	memcpy(host_conf.eyecatcher, "MMB", 4);
+	host_conf.uuid = *uuid;
+	host_conf.kafka_offset = kafka_offset;
+	host_conf.raft_members_seq_no_updated = seq_no_updated;
+	nvmeibt_strlcpy(host_conf.hostname, hostname, sizeof(host_conf.hostname));
+	nvmeibt_raft_member_conf_convert_le_be(&member->this_member_leader_serialized_wire_buf, &host_conf);
+
+	nvmeib_hash_add_uuid(my_raft_global.raft_members_hash_by_uuid, uuid, member);
+}
+
+void TEST_clear_raft_members_hash(void)
+{
+	struct nvmeibt_raft_member *member;
+
+	if (!my_raft_global.raft_members_hash_by_uuid)
+		return;
+	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
+		nvmeib_hash_delete_uuid(my_raft_global.raft_members_hash_by_uuid, &member->uuid);
+		free(member);
+	}
+}
+
+int TEST_compute_is_configs_incremental(
+	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
+	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,
+	int64_t peer_raft_members_kafka_offset,
+	int64_t leader_topo_to_commit, int64_t leader_topo_config_to_commit,
+	int64_t leader_kafka_mgmt_config_to_commit, int64_t leader_raft_members_seq_no_to_commit,
+	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset)
+{
+	bool is_topo_incremental = compute_is_topo_incremental(peer_topo_idx, leader_topo_to_commit);
+	return compute_is_configs_and_raft_members_incremental(
+		is_topo_incremental, peer_topo_config_idx, peer_kafka_mgmt_config_offset,
+		peer_raft_members_seq_no, peer_raft_members_kafka_offset,
+		leader_topo_config_to_commit,
+		leader_kafka_mgmt_config_to_commit, leader_raft_members_seq_no_to_commit,
+		last_delete_kafka_mgmt_config_offset, last_delete_raft_members_kafka_offset);
+}
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
+
+static bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit)
+{
+	int64_t inc_window_start = extract_lower_32_bits_idx(leader_topo_to_commit);
+	inc_window_start = (inc_window_start > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX ? inc_window_start - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0);
+	return (extract_lower_32_bits_idx(peer_topo_idx) >= inc_window_start);
+}
+
+/*
+ * Compute whether a peer qualifies for incremental configs and raft_members.
+ * Extracted so that raft_leader_send_appendentries_to_a_peer and unit tests
+ * share the same logic.
+ */
+static bool compute_is_configs_and_raft_members_incremental(
+	bool is_topo_incremental,
+	int64_t peer_topo_config_idx,
+	int64_t peer_kafka_mgmt_config_offset,
+	int64_t peer_raft_members_seq_no,
+	int64_t peer_raft_members_kafka_offset,
+	int64_t leader_topo_config_to_commit,
+	int64_t leader_kafka_mgmt_config_to_commit,
+	int64_t leader_raft_members_seq_no_to_commit,
+	int64_t last_delete_kafka_mgmt_config_offset,
+	int64_t last_delete_raft_members_kafka_offset)
+{
+	int64_t		inc_window_start_topo_config_idx;
+	int64_t		inc_window_start_kafka_mgmt_config_offset;
+	int64_t		inc_window_start_raft_members_seq_no;
+
+	if (!is_topo_incremental)
+		return false;
+
+	inc_window_start_topo_config_idx		= leader_topo_config_to_commit;
+	inc_window_start_kafka_mgmt_config_offset	= leader_kafka_mgmt_config_to_commit;
+	inc_window_start_raft_members_seq_no		= leader_raft_members_seq_no_to_commit;
+	inc_window_start_topo_config_idx		= (inc_window_start_topo_config_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX ? inc_window_start_topo_config_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX : 0);
+	inc_window_start_kafka_mgmt_config_offset	= (inc_window_start_kafka_mgmt_config_offset > NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET ? inc_window_start_kafka_mgmt_config_offset - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET : 0);
+	inc_window_start_raft_members_seq_no		= (inc_window_start_raft_members_seq_no > NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO ? inc_window_start_raft_members_seq_no - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO : 0);
+	inc_window_start_kafka_mgmt_config_offset	= max(inc_window_start_kafka_mgmt_config_offset, last_delete_kafka_mgmt_config_offset);
+
+	return (peer_topo_config_idx >= inc_window_start_topo_config_idx) &&
+		   (peer_kafka_mgmt_config_offset >= inc_window_start_kafka_mgmt_config_offset) &&
+		   (peer_raft_members_seq_no >= inc_window_start_raft_members_seq_no) &&
+		   (peer_raft_members_kafka_offset >= last_delete_raft_members_kafka_offset);
+}
 
 // returns a newly allocated struct where the new-upd takes presidence (whenever it carries a value)
 // Always returns a ptr to a valid usable struct (possibly with no data)
@@ -3200,10 +3313,6 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	int64_t									peer_kafka_mgmt_config_offset;
 	int64_t									peer_raft_members_kafka_offset;
 	int64_t									peer_raft_members_seq_no;
-	int64_t									inc_window_start_topo_idx;
-	int64_t									inc_window_start_topo_config_idx;
-	int64_t									inc_window_start_kafka_mgmt_config_offset;
-	int64_t									inc_window_start_raft_members_seq_no;
 	BOOL									is_topo_incremental;
 	BOOL									is_configs_and_raft_members_incremental;
 
@@ -3223,19 +3332,10 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	peer_raft_members_kafka_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
 	peer_raft_members_seq_no = nvmeibt_tlv_get_seq_no(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
 
-	// Check TOPO incremental window (use lower 32 bits — monotonic across term changes)
-	inc_window_start_topo_idx = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit));
-	inc_window_start_topo_idx = (inc_window_start_topo_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX ? inc_window_start_topo_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0);
-	is_topo_incremental = raft_is_incremental_wire_buf_enabled && (extract_lower_32_bits_idx(peer_topo_idx) >= inc_window_start_topo_idx);
+	is_topo_incremental = raft_is_incremental_wire_buf_enabled &&
+		compute_is_topo_incremental(peer_topo_idx, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit));
 
-	// Check configs and raft members incremental windows and deletion thresholds
-	inc_window_start_topo_config_idx			= RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit);
-	inc_window_start_kafka_mgmt_config_offset	= RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit);
-	inc_window_start_raft_members_seq_no		= RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit);
-	inc_window_start_topo_config_idx			= (inc_window_start_topo_config_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX ? inc_window_start_topo_config_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX : 0);
-	inc_window_start_kafka_mgmt_config_offset	= (inc_window_start_kafka_mgmt_config_offset > NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET ? inc_window_start_kafka_mgmt_config_offset - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET : 0);
-	inc_window_start_raft_members_seq_no		= (inc_window_start_raft_members_seq_no > NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO ? inc_window_start_raft_members_seq_no - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO : 0);
-	inc_window_start_kafka_mgmt_config_offset	= max(inc_window_start_kafka_mgmt_config_offset, my_raft_global.last_delete_kafka_mgmt_config_offset);
+	// Check configs and raft members incremental windows and deletion thresholds.
 	// Note: topo_config has no explicit deletion guard (no last_delete_topo_config_offset).
 	// This is safe because praid deletions only occur through volume deletions, which set
 	// last_delete_kafka_mgmt_config_offset. Since all configs share this single boolean,
@@ -3245,11 +3345,14 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	// If a future code path allows praid deletion without volume deletion, add an explicit
 	// last_delete_topo_config_offset guard here.
 	is_configs_and_raft_members_incremental = raft_is_incremental_wire_buf_enabled &&
-											  is_topo_incremental &&
-											  (peer_topo_config_idx >= inc_window_start_topo_config_idx) &&
-											  (peer_kafka_mgmt_config_offset >= inc_window_start_kafka_mgmt_config_offset) &&
-											  (peer_raft_members_seq_no >= inc_window_start_raft_members_seq_no) &&
-											  (peer_raft_members_kafka_offset >= my_raft_global.last_delete_raft_members_kafka_offset);
+		compute_is_configs_and_raft_members_incremental(
+			is_topo_incremental, peer_topo_config_idx, peer_kafka_mgmt_config_offset,
+			peer_raft_members_seq_no, peer_raft_members_kafka_offset,
+			RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit),
+			RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit),
+			RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit),
+			my_raft_global.last_delete_kafka_mgmt_config_offset,
+			my_raft_global.last_delete_raft_members_kafka_offset);
 
 	if (!is_configs_and_raft_members_incremental && raft_is_incremental_wire_buf_enabled) {
 		N_Tf(peer_needs_complete, "Peer needs complete configs: kafka_offset=@INT64_TD (last_delete=@INT64_TD) members_offset=@INT64_TD (last_delete=@INT64_TD)",
