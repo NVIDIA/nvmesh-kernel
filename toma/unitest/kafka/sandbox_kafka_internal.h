@@ -19,6 +19,7 @@ struct sim_broker_topic *sim_broker_topic_find_by(enum sim_topic_type_toma_to_mg
 void sim_broker_topic_msg_produce(struct sim_broker_topic *t, void *payload, size_t len, const bool should_copy);
 bool sim_broker_topic_msg_consume(struct sim_broker_topic *t, struct rd_kafka_message_s *rv);	// Returns true if msg was consumed and fills rv.
 void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset);		// Ack that consumer is done with this offset and all which are smaller
+bool sim_broker_topic_is_empty(const struct sim_broker_topic *t);
 
 struct kafka_simulator_t;
 struct kafka_simulator_t *sandbox_kafka_init(void (*notify_mgmt_simu_toma_send_msg)(struct sim_broker_topic *t));

@@ -115,6 +115,10 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
 
+bool sim_broker_topic_is_empty(const struct sim_broker_topic *t) {
+	return (t->n_msgs == 0);				// Todo, consider using mutex if non atomic access
+}
+
 struct rd_kafka_topic_conf_s { int dummy; };	// Unused by Toma
 
 struct rd_kafka_topic_s {					// Kafka client topic emulation

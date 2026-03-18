@@ -9,6 +9,7 @@
 #include "../os/os_internal.h"
 #include "../server/sandbox_nvmeibs_toma.h"
 #include "../12_user/user_rpc_simu.h"
+#include "../kafka/sandbox_kafka_internal.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
@@ -80,9 +81,11 @@ static void do_on_unitests_done(void) {
 #define SCENARIO_PRINT(id, fmt, ...) _NMIRROR_LOGLEVEL(IMf, LOG_EMERG, id, NVMEIB_LOG_ETERNAL, "<> ", fmt,  ## __VA_ARGS__)
 
 static void scenario_test_signals(void) {
+	SCENARIO_PRINT(__AUTOID__, "start");
 	os_sim_send_signal_to_toma(SIGUSR2);	yield();
 	os_sim_send_signal_to_toma(SIGCHLD);	yield();
 	os_sim_send_signal_to_toma(SIGUSR2);	yield();
+	SCENARIO_PRINT(__AUTOID__, "end");
 }
 
 static void scenario_user_rpcs_generic(void) {
@@ -149,11 +152,16 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_deprecated());
 
 	SCENARIO_PRINT(__AUTOID__, "sending deleteVolumeCompleted V_R1");
+	mgmt_sim_send_leader_keep_alive();							// Just additional unrelated keepalive to keep more pressure on toma
 	mgmt_sim_send_delete_volume_completed_r1();
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after deleteVolumeCompleted (gc)");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
-	mgmt_sim_send_leader_keep_alive();							// Just additional unrelated keepalive to keep more pressure on toma
+	SCENARIO_PRINT(__AUTOID__, "waiting for kafka commit on deleteVolumeCompleted");
+	if (1) {		// Maybe wrap it as a sub function
+		const struct sim_broker_topic *kb = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
+		WAIT_UNTIL(sim_broker_topic_is_empty(kb));		// Verify Toma finished with volume deletion by committing offsets of all volume instructions
+	}
 }
 
 static void all_test_scenarios(void) {
