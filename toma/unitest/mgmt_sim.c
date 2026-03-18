@@ -440,7 +440,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 		uuid = json_get_dict_str(entry, "uuid", NULL);
 		if (uuid && strcmp(uuid, V_R1_PRAID_UUID) == 0) {
 			struct mm_json_elem *segments;
-			N_IMf(msim_praid, "updatePRaidReport: matched V_R1 pRaid UUID");
+			N_IMf(msim_praid, "matched V_R1 pRaid UUID");
 			g_mgmt_sim->v_r1_praid_reported = true;
 			v_r1_found = true;
 
@@ -459,7 +459,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 				}
 				if (all_deprecated) {
 					g_mgmt_sim->v_r1_praid_deprecated = true;
-					N_IMf(msim_praid_dep, "updatePRaidReport: V_R1 all segments deprecated");
+					N_IMf(msim_praid_dep, "V_R1 all segments deprecated");
 				}
 			}
 		}
@@ -467,7 +467,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	/* After deleteVolumeCompleted: if V_R1 praid is absent, it was garbage collected */
 	if (g_mgmt_sim->v_r1_delete_completed_sent && !v_r1_found) {
 		g_mgmt_sim->v_r1_praid_absent_from_report = true;
-		N_IMf(msim_praid_gc, "updatePRaidReport: V_R1 praid absent (garbage collected)");
+		N_IMf(msim_praid_gc, "V_R1 praid absent (garbage collected)");
 	}
 }
 

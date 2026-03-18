@@ -71,7 +71,7 @@ static void do_on_unitests_done(void) {
 /********************************************************************/
 #define WAIT_UNTIL_N(cond, max_yields) ({ \
 	for (int __wu_i = 0; !(cond); ++__wu_i) { \
-		BUG_ON(__wu_i > (max_yields)); \
+		BUG_ON(__wu_i >= (max_yields)); \
 		yield(); \
 	} \
 })
