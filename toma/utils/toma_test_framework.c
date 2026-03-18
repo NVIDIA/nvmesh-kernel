@@ -4,7 +4,7 @@
 */
 
 /**
- * toma_test_framework.c - Minimal test framework runner
+ * toma_test_framework.c - Minimal test framework runner. Used in production. unlike the rest of sandbox/unitest components!
  *
  * Generic test suite execution: selection parsing, iteration, and summary reporting.
  * See toma_test_framework.h for usage.
