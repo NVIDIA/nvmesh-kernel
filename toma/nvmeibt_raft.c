@@ -554,7 +554,7 @@ static int fill_persist_and_wire_tlv_and_data(struct nvmeibt_wire_type_len_value
 	return in_data_len;
 }
 
-static int __attribute__((unused)) calculate_and_serialize_vol_to_wire_format_if_needed(struct mm_vol_conf *vol, char **dst_data_ptr)
+static int calculate_and_serialize_vol_to_wire_format_if_needed(struct mm_vol_conf *vol, char **dst_data_ptr)
 {
 	int total_size = nvmeibt_packed_vol_config_size();
 	if (dst_data_ptr) {
@@ -763,6 +763,125 @@ struct all_members_wire_buf_ctx {
 	int								filler_for_align_8;
 	struct mm_raft_member_conf		members[0];
 } __attribute__((__packed__));
+
+static int merge_kafka_mgmt_config_incremental(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+											   const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+											   const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+											   char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr,
+											   int old_len, int upd_len)
+{
+	struct mm_mgmt_conf					*new_mgmt_conf = NULL;
+	struct nvmeibt_block_device			*blkdev = NULL;
+	char								*output_start = NULL;
+	uint16_t							mgmt_wire_size = nvmeibt_packed_mm_mgmt_config_size();
+	int 								n_vols_from_incremental = 0;
+	int 								n_vols_from_hash = 0;
+	int 								n_output_vols = 0;
+	int 								total_size = 0;
+
+	if (nvmeibt_tlv_get_type(old_wire_ctx) != TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE) {
+		N_Ef(kmc_inc_no_old, "Old kafka mgmt config is @INT8_TD not complete type. Incremental requires complete old to merge", nvmeibt_tlv_get_type(old_wire_ctx));
+		return -1;
+	}
+
+	if (upd_len == 0) {
+		_copy_inc_ctx_old_data_advance_ptrs(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+											dst_data_ptr, old_data_ptr, upd_data_ptr);
+		return old_len;
+	}
+
+	new_mgmt_conf = mm_wire_buf_to_mm_mgmt_conf(*upd_data_ptr, false, NULL);
+	if (!new_mgmt_conf) {
+		N_Ef(kmc_inc_new_decode, "Failed to decode new kafka mgmt config wire buffer");
+		return -1;
+	}
+
+	if (dst_data_ptr) {
+		output_start = *dst_data_ptr;
+	}
+
+	// 1. conf header — will update num_vols after merging
+	total_size = mgmt_wire_size;
+	if (dst_data_ptr) {
+		*dst_data_ptr += nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(*dst_data_ptr, new_mgmt_conf);
+	}
+
+	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
+		blkdev->is_serialized_in_incremental_mgmt_config_merge = false;
+	}
+
+	// Process volumes from incremental — leader sends only updated volumes
+	for (int new_vol_idx = 0; new_vol_idx < new_mgmt_conf->num_vols; new_vol_idx++) {
+		struct mm_vol_conf				*new_vol = &new_mgmt_conf->volumes[new_vol_idx];
+		struct nvmeibt_block_device		*old_blkdev = nvmeibt_block_device_get_block_device_by_id(&new_vol->uuid);
+		int								vol_wire_size;
+
+		if (old_blkdev) {
+			if ((int)new_vol->version <= old_blkdev->from_config.version) {
+				continue;
+			}
+			old_blkdev->is_serialized_in_incremental_mgmt_config_merge = true;
+		}
+
+		vol_wire_size = calculate_and_serialize_vol_to_wire_format_if_needed(new_vol, dst_data_ptr);
+		total_size += vol_wire_size;
+		n_vols_from_incremental++;
+		n_output_vols++;
+	}
+
+	// Append non-visited block devices from hash
+	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
+		int		vol_wire_size;
+
+		if (blkdev->is_serialized_in_incremental_mgmt_config_merge) {
+			continue;
+		}
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev)) {
+			continue;
+		}
+
+		vol_wire_size = blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.buf_len;
+		NTOMA_ASSERT(blkdev_wire_buf_not_empty, vol_wire_size > 0, "blkdev=@UUID_LE has empty kafka_mgmt_config wire buffer!", &blkdev->from_config.id);
+		if (dst_data_ptr) {
+			memcpy(*dst_data_ptr, blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.data_buf, vol_wire_size);
+			*dst_data_ptr += vol_wire_size;
+		}
+		total_size += vol_wire_size;
+		n_vols_from_hash++;
+		n_output_vols++;
+	}
+
+	total_size += sizeof(EYECATCHER_CNF_END);
+
+	if (dst_data_ptr) {
+		int actual_written_size;
+		int new_mgmt_conf_num_vols = new_mgmt_conf->num_vols;
+		nvmeibt_strlcpy(*dst_data_ptr, EYECATCHER_CNF_END, sizeof(EYECATCHER_CNF_END));
+		*dst_data_ptr += sizeof(EYECATCHER_CNF_END);
+
+		actual_written_size = (int)(*dst_data_ptr - output_start);
+		NTOMA_ASSERT(kmc_inc_sz_chk, actual_written_size == total_size,
+					 "Size mismatch! calculated=@INT actual_written=@INT",
+					 total_size, actual_written_size);
+
+		new_mgmt_conf->num_vols = n_output_vols;
+		nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(output_start, new_mgmt_conf);
+		new_mgmt_conf->num_vols = new_mgmt_conf_num_vols;
+
+		*dst_wire_ctx = *old_wire_ctx;
+		dst_wire_ctx->tlv_len = LE_SWAP32(total_size);
+		dst_wire_ctx->tlv_idx = upd_wire_ctx->tlv_idx;
+		dst_wire_ctx->seq_no = upd_wire_ctx->seq_no;
+		dst_wire_ctx->tlv_crc = 0;
+		dst_wire_ctx->tlv_crc = crc32(0, dst_wire_ctx, sizeof(*dst_wire_ctx));
+		dst_wire_ctx->tlv_crc = LE_SWAP32(crc32(dst_wire_ctx->tlv_crc, output_start, total_size));
+	}
+
+	_advance_ptrs(old_data_ptr, upd_data_ptr, old_len, upd_len);
+
+	mm_conf_free_tree(new_mgmt_conf);
+	return total_size;
+}
 
 // Volume deletion bumps both TOPO_CONFIG and KAFKA_MGMT_CONFIG indices, but there is
 // no explicit last_delete_topo_config_offset guard. This is safe because the leader's
@@ -1139,7 +1258,9 @@ static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data
 		break;
 
 	case TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL:
-		N_Ef(kfk923j, "KAFKA_MGMT_CONFIG_INCREMENTAL not implemented yet - using standard copy");
+		total_size = merge_kafka_mgmt_config_incremental(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+														 dst_data_ptr, old_data_ptr, upd_data_ptr,
+														 old_len, upd_len);
 		break;
 
 	case TLV_TYPE_TOPO_CONFIG_INCREMENTAL:
