@@ -1269,7 +1269,6 @@ int nvmeibt_topology_serialize_active_topology(void)
 	// Following the Leader's concept that the buffer is an assembly of several buffers that are serialized beforehand
 	NNVMEIBT_TOMA_FREE(ebwik25, nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf);
 	nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf = nvmeibt_raft_generate_persist_and_wire_buf(
-		false,
 		nvmeibt_raft_get_current_term(),	// Not really important
 		RAFT_COMMIT_LIFECYCLE_VAL(current_raft_TERM, follower_committed),	// Not really important
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),    // Not really important
@@ -1278,10 +1277,10 @@ int nvmeibt_topology_serialize_active_topology(void)
 		nvmeibt_raft_get_persistent_leader_append_entries_time_ns(),	// The follower can only echo back its persistent value
 		nvmeibt_raft_get_persistent_leader_topo_calc_time_ns(),	// The follower can only echo back its persistent value
 		nvmeibt_raft_get_guaranteed_sw_ver(),
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_committed), -1, serialized_and_wire_topo_buf->data_buf, serialized_and_wire_topo_buf->buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_committed), -1, NULL, 0,
-		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed), -1, NULL, 0,
-		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, follower_committed), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed), NULL, 0);
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_committed), -1, serialized_and_wire_topo_buf->data_buf, serialized_and_wire_topo_buf->buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_committed), -1, NULL, 0,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed), -1, NULL, 0,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, follower_committed), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed), NULL, 0);
 out:
 	NFOUT;
 	return rv;
@@ -2347,7 +2346,6 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 		// Following the Leader's concept that the buffer is an assembly of several buffers that are serialized beforehand
 		NNVMEIBT_TOMA_FREE(6dfbsoe, nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf);
 		nvmeibt_raft_get_my_raft()->follower_to_leader_wire_buf = nvmeibt_raft_generate_persist_and_wire_buf(
-			false,
 			nvmeibt_raft_get_current_term(),
 			RAFT_COMMIT_LIFECYCLE_VAL(current_raft_TERM, follower_committed),
 			nvmeibt_kafka_get_kafka_mgmt_zone_number(),
@@ -2356,10 +2354,10 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 			nvmeibt_raft_get_persistent_leader_append_entries_time_ns(),	// The follower can only echo back its persistent value
 			nvmeibt_raft_get_persistent_leader_topo_calc_time_ns(),	// The follower can only echo back its persistent value
 			nvmeibt_raft_get_guaranteed_sw_ver(),
-			RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_committed), -1, follower_wire_topo_buf->data_buf, follower_wire_topo_buf->buf_len,
-			RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_committed), -1, NULL, 0,
-			RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed), -1, NULL, 0,
-			RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, follower_committed), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed), NULL, 0);
+			false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_committed), -1, follower_wire_topo_buf->data_buf, follower_wire_topo_buf->buf_len,
+			false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_committed), -1, NULL, 0,
+			false, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed), -1, NULL, 0,
+			false, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, follower_committed), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, follower_committed), NULL, 0);
 		nvmeibt_raft_align_members_with_committed_wire_buf(NULL);	// With RAFT_MEMBERS, a committed list will be used as if "applied" if I reboot. The leader will require a majority of them
 	}
 	else { /* An error occured during save, now restore the relevant flags.*/

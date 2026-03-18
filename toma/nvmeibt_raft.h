@@ -301,7 +301,6 @@ void nvmeibt_raft_set_discard_append_entries(int discard_num, bool is_permanent)
 int nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(const struct nvmeibt_persist_and_wire_buf *src, int8_t tlv_type, char **out_data);
 int nvmeibt_raft_leader_copy_committed_persist_and_wire_buf_sections_into_separate_to_commit_bufs(void);
 struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
-	const bool is_incremental,
 	unsigned long long current_raft_term,
 	unsigned long long last_rx_append_entries_raft_term,
 	int64_t kafka_mgmt_zone_number,
@@ -311,10 +310,10 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 	int64_t raft_calculated_topo_calc_time_ns,
 	uint32_t guaranteed_sw_ver,
 	//
-	int64_t topo_idx, int64_t topo_seq_no, char *topo_data, int topo_data_len,
-	int64_t topo_config_idx, int64_t topo_config_seq_no, char *topo_config_data, int topo_config_data_len,
-	int64_t mgmt_config_offset, int64_t mgmt_config_seq_no, char *mgmt_config_data, int mgmt_config_data_len,
-	int64_t members_offset, int64_t members_seq_no, char *members_data, int members_data_len);
+	const bool is_topo_incremental, int64_t topo_idx, int64_t topo_seq_no, char *topo_data, int topo_data_len,
+	const bool is_topo_config_incremental, int64_t topo_config_idx, int64_t topo_config_seq_no, char *topo_config_data, int topo_config_data_len,
+	const bool is_kafka_mgmt_config_incremental, int64_t mgmt_config_offset, int64_t mgmt_config_seq_no, char *mgmt_config_data, int mgmt_config_data_len,
+	const bool is_raft_members_incremental, int64_t members_offset, int64_t members_seq_no, char *members_data, int members_data_len);
 
 struct nvmeibt_raft_member *nvmeibt_raft_get_member_by_id(const union nvmeib_uuid *id);
 void nvmeibt_raft_link_member_to_node(struct nvmeibt_raft_member *member, struct nvmeibt_node *node, const union nvmeib_uuid *uuid);

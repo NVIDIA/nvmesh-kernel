@@ -578,7 +578,6 @@ static int __attribute__((unused)) calculate_and_serialize_vol_to_wire_format_if
 }
 
 struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
-	const bool is_incremental,
 	unsigned long long current_raft_term,
 	unsigned long long last_rx_append_entries_raft_term,
 	int64_t kafka_mgmt_zone_number,
@@ -588,29 +587,35 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 	int64_t calculated_topo_calc_time_ns,
 	uint32_t guaranteed_sw_ver,
 	//
-	int64_t topo_idx, int64_t topo_seq_no, char *topo_data, int topo_data_len,
-	int64_t topo_config_idx, int64_t topo_config_seq_no, char *topo_config_data, int topo_config_data_len,
-	int64_t mgmt_config_offset, int64_t mgmt_config_seq_no, char *mgmt_config_data, int mgmt_config_data_len,
-	int64_t members_offset, int64_t members_seq_no, char *members_data, int members_data_len)
+	const bool is_topo_incremental, int64_t topo_idx, int64_t topo_seq_no, char *topo_data, int topo_data_len,
+	const bool is_topo_config_incremental, int64_t topo_config_idx, int64_t topo_config_seq_no, char *topo_config_data, int topo_config_data_len,
+	const bool is_kafka_mgmt_config_incremental, int64_t mgmt_config_offset, int64_t mgmt_config_seq_no, char *mgmt_config_data, int mgmt_config_data_len,
+	const bool is_raft_members_incremental, int64_t members_offset, int64_t members_seq_no, char *members_data, int members_data_len)
 {
 	int										sum_data_len;
 	char									*data_ptr;
 	struct nvmeibt_persist_and_wire_buf		*dst;
-	int8_t									tlv_type_offset;
+	int8_t									topo_tlv_type;
+	int8_t									topo_config_tlv_type;
+	int8_t									kafka_mgmt_config_tlv_type;
+	int8_t									raft_members_tlv_type;
 
 	NFIN;
-	tlv_type_offset = (is_incremental ? TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL - TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE : 0);
+	topo_tlv_type				= (is_topo_incremental ? TLV_TYPE_TOPO_INCREMENTAL : TLV_TYPE_TOPO_COMPLETE);
+	topo_config_tlv_type		= (is_topo_config_incremental ? TLV_TYPE_TOPO_CONFIG_INCREMENTAL : TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	kafka_mgmt_config_tlv_type	= (is_kafka_mgmt_config_incremental ? TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL : TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+	raft_members_tlv_type		= (is_raft_members_incremental ? TLV_TYPE_RAFT_MEMBERS_INCREMENTAL : TLV_TYPE_RAFT_MEMBERS_COMPLETE);
 
 	sum_data_len = mgmt_config_data_len + topo_data_len + topo_config_data_len + members_data_len;
 	dst = alloc_persist_and_wire_buf(sizeof(*dst) + sum_data_len);
 	//
 	data_ptr = (char *)dst + sizeof(*dst);
-	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_ctx), data_ptr, topo_idx, topo_seq_no, topo_data, topo_data_len, TLV_TYPE_TOPO_COMPLETE+tlv_type_offset);
-	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_config_ctx), data_ptr, topo_config_idx, topo_config_seq_no, topo_config_data, topo_config_data_len, TLV_TYPE_TOPO_CONFIG_COMPLETE+tlv_type_offset);
+	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_ctx), data_ptr, topo_idx, topo_seq_no, topo_data, topo_data_len, topo_tlv_type);
+	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->topo_config_ctx), data_ptr, topo_config_idx, topo_config_seq_no, topo_config_data, topo_config_data_len, topo_config_tlv_type);
 	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->kafka_mgmt_config_ctx), data_ptr, mgmt_config_offset, mgmt_config_seq_no, mgmt_config_data,
-												   mgmt_config_data_len, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE+tlv_type_offset);
+												   mgmt_config_data_len, kafka_mgmt_config_tlv_type);
 	data_ptr += fill_persist_and_wire_tlv_and_data(&(dst->raft_members_ctx), data_ptr, members_offset, members_seq_no, members_data,
-												   members_data_len, TLV_TYPE_RAFT_MEMBERS_COMPLETE+tlv_type_offset);
+												   members_data_len, raft_members_tlv_type);
 	// Set the raft_ctx (usually in the leader), and it travels all the way to the follower's persistence as is
 	persist_and_wire_buf_set_current_raft_TERM(dst, current_raft_term, 0);
 	persist_and_wire_buf_set_voted_for_and_last_rx_append_entries_raft_TERM(dst, voted_for_raft_member_uuid, last_rx_append_entries_raft_term, 0);
@@ -996,49 +1001,61 @@ void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 	}
 	NNVMEIBT_TOMA_FREE(ikdm49s, my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete);
 	my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_complete = nvmeibt_raft_generate_persist_and_wire_buf(
-		false,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
-		&(my_raft_global.my_member->uuid),	// The voted_for_raft_member in the follower's persistence
+		&(my_raft_global.my_member->uuid),
 		nvmeibt_global_get_mgmt_DB_uuid(),
 		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_get_guaranteed_sw_ver(),
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_complete.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_config_complete.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_complete.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_config_complete.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
 	NNVMEIBT_TOMA_FREE(6vbwi4k, my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete);
 	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_only_complete = nvmeibt_raft_generate_persist_and_wire_buf(
-		false,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
-		&(my_raft_global.my_member->uuid),	// The voted_for_raft_member in the follower's persistence
+		&(my_raft_global.my_member->uuid),
 		nvmeibt_global_get_mgmt_DB_uuid(),
 		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_get_guaranteed_sw_ver(),
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_complete.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, NULL, 0,
-		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, NULL, 0,
-		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_complete.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, NULL, 0,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, NULL, 0,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
 	NNVMEIBT_TOMA_FREE(sk1lams, my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental);
 	my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental = nvmeibt_raft_generate_persist_and_wire_buf(
-		true,
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_raft_get_current_term(),
 		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
-		&(my_raft_global.my_member->uuid),	// The voted_for_raft_member in the follower's persistence
+		&(my_raft_global.my_member->uuid),
 		nvmeibt_global_get_mgmt_DB_uuid(),
 		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
 		nvmeibt_raft_get_guaranteed_sw_ver(),
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_incremental.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_config_incremental.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental.buf_len,
-		RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_incremental.data_buf, my_raft_global.leader_to_commit_wire_raft_members_incremental.buf_len);
+		true, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_incremental.buf_len,
+		true, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_config_incremental.buf_len,
+		true, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_incremental.buf_len,
+		true, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_incremental.data_buf, my_raft_global.leader_to_commit_wire_raft_members_incremental.buf_len);
+	// Generate mixed variant: incremental topo + complete configs/members
+	NNVMEIBT_TOMA_FREE(mix_buf_free, my_raft_global.leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete);
+	my_raft_global.leader_to_commit_persist_and_wire_buf_topo_inc_configs_complete = nvmeibt_raft_generate_persist_and_wire_buf(
+		nvmeibt_raft_get_current_term(),
+		nvmeibt_raft_get_current_term(),
+		nvmeibt_kafka_get_kafka_mgmt_zone_number(),
+		&(my_raft_global.my_member->uuid),
+		nvmeibt_global_get_mgmt_DB_uuid(),
+		nvmeibt_raft_leader_get_append_entries_rep_time_ns_for_persist_and_wire_buf(),
+		nvmeibt_raft_leader_get_topo_calc_time_ns_for_persist_and_wire_buf(),
+		nvmeibt_raft_get_guaranteed_sw_ver(),
+		true, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_incremental.data_buf, my_raft_global.leader_to_commit_wire_topo_incremental.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_topo_config_complete.data_buf, my_raft_global.leader_to_commit_wire_topo_config_complete.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_to_commit), -1, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.data_buf, my_raft_global.leader_to_commit_wire_kafka_mgmt_config_complete.buf_len,
+		false, RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_to_commit), RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit), my_raft_global.leader_to_commit_wire_raft_members_complete.data_buf, my_raft_global.leader_to_commit_wire_raft_members_complete.buf_len);
 	raft_leader_reset_counters_upon_last_LOG_change();
 	nvmeibt_global_get_global()->is_update_csv_of_config_and_topo_required = false;
 out:
