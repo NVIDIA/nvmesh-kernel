@@ -1156,13 +1156,29 @@ void serialize_mm_mgmt_conf_itself(struct mm_mgmt_conf *mgmt_conf, char *eyecatc
 	NFOUT;
 }
 
-static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vols, void *end_of_buf_p)
+static inline bool omit_praid_in_topo_config(struct nvmeibt_praid *praid, bool is_incremental)
+{
+	int64_t inc_window_start_idx;
+	if (!is_incremental) {
+		return false;
+	}
+	// EXCEPTION: Never omit praids with empty topo_config buffer - they need dummy placeholders for proper incremental merge equivalence with complete mode (both include dummies for uncalculated praids).
+	if (praid->praid_leader.topo_config_praid_and_segs_wire_conf_buf.buf_len == 0) {
+		return false;	// Don't omit - needs dummy placeholder
+	}
+	// For incremental topo_config, omit praids not updated within the recent window [cur-diff,curr], both inclusive.
+	inc_window_start_idx = RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_calculated);
+	inc_window_start_idx = (inc_window_start_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX ?
+										inc_window_start_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX : 0);
+	return praid->from_config.topo_config_idx_updated < inc_window_start_idx;
+}
+
+static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vols, void *end_of_buf_p, bool is_incremental)
 {
 	int												i, j;
 	int												n_vols, n_chunks, n_praids, n_segs;
 	struct nvmeibt_block_device						*blkdev;
 	int												total_size;
-	struct _packed_mm_vol_conf						*vol_wire;
 	struct _packed_mm_praid_conf					dummy_wire_data;
 
 	NFIN;
@@ -1171,33 +1187,55 @@ static int generate_vols_topo_config_wire(void *wire_out_p, uint32_t *total_n_vo
 	n_praids = 0;
 	n_segs = 0;
 
+	TODO(Change entity of topo_config to praids, rather than vol);
 	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
-		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev))
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev)) {
 			continue;
+		}
+		// Always send all volumes and chunks, but only updated praids for incremental. This simplifies merging logic on the follower.
 		n_vols++;
 		if (wire_out_p) {
-			vol_wire = (typeof(vol_wire))wire_out_p;
-			wire_out_p += nvmeibt_vol_convert_config_le_be(wire_out_p, &blkdev->serialized_vol_conf, true);
+			wire_out_p += nvmeibt_vol_convert_config_le_be(wire_out_p, &(blkdev->serialized_vol_conf), true);
 		}
-		n_chunks += blkdev->n_chunks;
+
+		// First pass: count praids to send per chunk
+		for (i = 0; i < blkdev->n_chunks; i++) {
+			struct nvmeibt_chunk	*chunk = blkdev->chunks[i];
+			chunk->its_mm_chunk_conf.num_praids_to_send = 0;
+			for (j = 0; j < chunk->n_praids; j++) {
+				struct nvmeibt_praid *praid = chunk->praids[j];
+				if (omit_praid_in_topo_config(praid, is_incremental))
+					continue;
+				chunk->its_mm_chunk_conf.num_praids_to_send++;
+			}
+		}
+
+		// Second pass: write chunk headers and praid data
 		for (i = 0; i < blkdev->n_chunks; i++) {
 			struct nvmeibt_chunk *chunk = blkdev->chunks[i];
-			if (wire_out_p)
-				wire_out_p += nvmeibt_chunk_convert_config_le_be(wire_out_p, &chunk->its_mm_chunk_conf, true);
-			n_praids += chunk->n_praids;
+			n_chunks++;
+			if (wire_out_p) {
+				struct mm_chunk_conf chunk_conf_temp = chunk->its_mm_chunk_conf;
+				chunk_conf_temp.num_praids = chunk->its_mm_chunk_conf.num_praids_to_send;
+				wire_out_p += nvmeibt_chunk_convert_config_le_be(wire_out_p, &chunk_conf_temp, true);
+			}
+
 			for (j = 0; j < chunk->n_praids; j++) {
 				struct nvmeibt_praid			*praid = chunk->praids[j];
 				struct _packed_mm_praid_conf	*praid_wire_data;
 				size_t							praid_wire_data_len;
 				uint8_t							n_praid_segs;
-
+				if (omit_praid_in_topo_config(praid, is_incremental)) {
+					continue;
+				}
+				n_praids++;
 				if (praid && (praid->praid_leader.topo_config_praid_and_segs_wire_conf_buf.buf_len > 0)) {
 					praid_wire_data = praid->praid_leader.topo_config_praid_and_segs_wire_conf_buf.data_buf;
 					praid_wire_data_len = praid->praid_leader.topo_config_praid_and_segs_wire_conf_buf.buf_len;
 				} else {
 					// Handling of a praid that exists in config but never got its first topo calculated. This topo_config will be replaced with one that matches its next topo
 					struct mm_praid_conf premature_unusable_praid_serialized_conf =
-							{.eyecatcher="PRD", .uuid.ll[0]=0xa1a2a3a4a5a6a7a8, .uuid.ll[1]=0, .stripeIndex=ILLEGAL_STRIPE_INDEX, .num_segments=0};
+							{.eyecatcher="PRD", .uuid.ll[0]=0xa1a2a3a4a5a6a7a8, .uuid.ll[1]=0, .stripeIndex=ILLEGAL_STRIPE_INDEX, .num_segments=0, .topo_config_idx_updated=RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit)};
 					TODO(remove when topo_config contains only pRAIDs);
 
 					nvmeibt_praid_convert_config_le_be(&dummy_wire_data, &premature_unusable_praid_serialized_conf, true);
@@ -1320,7 +1358,7 @@ out:
 	NFOUT;
 }
 
-void nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire(uint64_t topo_config_version)
+static unsigned int nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire_incremental_or_complete(bool is_wire_buf_incremental)
 {
 	struct nvmeibt_Buf								*wire_conf_buf;
 	void											*wire_out_p;
@@ -1330,21 +1368,39 @@ void nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire(uint64_t topo
 	struct mm_mgmt_conf								mgmt_conf;
 
 	NFIN;
-	wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_config_complete);
+	if (is_wire_buf_incremental) {
+		wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_config_incremental);
+	} else {
+		wire_conf_buf = &(nvmeibt_raft_get_my_raft()->leader_to_commit_wire_topo_config_complete);
+	}
 	wire_out_p = wire_conf_buf->data_buf;
 
-	size = generate_vols_topo_config_wire(NULL, &n_vols, NULL) + sizeof(struct mm_mgmt_conf);
+	TODO(should be _packed_mm_mgmt_conf, not struct mm_mgmt_conf. When fixing this, also remove the artificial padding in persist_and_wire_buf_calculate_and_merge_data_to_section, where follower merges incremental topo config);
+	size = generate_vols_topo_config_wire(NULL, &n_vols, NULL, is_wire_buf_incremental) + sizeof(struct mm_mgmt_conf);
 	NNVMEIBT_BUF_RESIZE(xh7610m, wire_conf_buf, size);
 	memset(wire_conf_buf->data_buf, 0, wire_conf_buf->buf_len);
 	wire_out_p = wire_conf_buf->data_buf;
-	cur_topo->leader_config_version = (topo_config_version == -1ULL ? nvmeibt_topology_leader_get_next_config_version() : topo_config_version);
 	serialize_mm_mgmt_conf_itself(&mgmt_conf, "CNF", MM_STRUCT_VER_2067, 1, cur_topo->leader_config_version, &cur_topo->mgmt_DB_uuid, "fullVolConfig", 1LL, n_vols, 0, 0,
 								  RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit));
 	wire_out_p += nvmeibt_mm_mgmt_convert_config_le_be(wire_out_p, &mgmt_conf, 1);
-	generate_vols_topo_config_wire(wire_out_p, &n_vols, wire_conf_buf->data_buf + size);
+	generate_vols_topo_config_wire(wire_out_p, &n_vols, wire_conf_buf->data_buf + size, is_wire_buf_incremental);
+
+	NFOUT;
+	return size;
+}
+
+void nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire(uint64_t topo_config_version) {
+	struct nvmeibt_topology							*cur_topo = nvmeibt_global_get_global();
+	unsigned int									complete_size, incremental_size;
+
+	NFIN;
+	cur_topo->leader_config_version = (topo_config_version == -1ULL ? nvmeibt_topology_leader_get_next_config_version() : topo_config_version);
+
+	complete_size = nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire_incremental_or_complete(false);
+	incremental_size = nvmeibt_mm_json_leader_serialize_baseline_topo_config_to_wire_incremental_or_complete(true);
 
 	nvmeibt_topology_mark_update_csv_of_config_and_topo_required();
-	N_Tf(nnbh334, "New conf ver=@LLD len=@INT", cur_topo->leader_config_version, size);
+	N_Tf(nnbh334, "New conf ver=@LLD complete_len=@INT incremental_len=@INT", cur_topo->leader_config_version, complete_size, incremental_size);
 	NFOUT;
 }
 
