@@ -29,14 +29,11 @@ find . \
 PET_MODULE="${PET_MODULE:-}"
 PET_SECTION="${PET_SECTION:-.nvmeibc_io_pet_msgs}"
 if [ -z "$PET_MODULE" ]; then
-	# Default: client module in repo root build (e.g. clnt/nvmeibc.ko when built in-tree)
-	for candidate in clnt/nvmeibc.ko ./nvmeibc.ko; do
-		if [ -f "$candidate" ]; then
-			PET_MODULE="$candidate"
-			break
-		fi
-	done
+	echo "PET_MODULE is not set, no PET dictionary will be built"
+else
+	echo "PET_MODULE is set to $PET_MODULE"
 fi
+
 if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ]; then
 	PET_DICT="${PET_DIR}/dict.${COMMIT_ID#0x}.json"
 	# Prefer poetry env (has pyelftools+pydantic from pyproject.toml) when available;
