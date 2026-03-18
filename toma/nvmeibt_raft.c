@@ -738,26 +738,6 @@ static int _copy_complete_section_advance_ptrs(struct nvmeibt_wire_type_len_valu
 	return src_data_len;
 }
 
-// Legacy helper — still used by realloc_and_upd until the two-pass merge commit replaces it.
-static void persist_and_wire_buf_copy_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
-													  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
-{
-	int		upd_len = nvmeibt_tlv_get_len(upd_wire_ctx);
-	int		old_len = nvmeibt_tlv_get_len(old_wire_ctx);
-
-	if (upd_len || (nvmeibt_tlv_get_idx(upd_wire_ctx) != nvmeibt_tlv_get_idx(old_wire_ctx))) {
-		memcpy(*dst_data_ptr, *upd_data_ptr, upd_len);
-		*dst_wire_ctx = *upd_wire_ctx;
-	} else {
-		memcpy(*dst_data_ptr, *old_data_ptr, old_len);	// might be that old_len==0
-		*dst_wire_ctx = *old_wire_ctx;
-	}
-
-	*upd_data_ptr += upd_len;
-	*old_data_ptr += old_len;
-	*dst_data_ptr += nvmeibt_tlv_get_len(dst_wire_ctx);
-}
-
 struct all_members_wire_buf_ctx {
 	int								n_raft_members;
 	int								filler_for_align_8;
@@ -1330,7 +1310,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
  *
  * Returns: Size of the resulting data, or -1 on error
  */
-static int __attribute__((unused)) persist_and_wire_buf_calculate_and_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+static int persist_and_wire_buf_calculate_and_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
 								   char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
 {
 	int			upd_len = 0;
@@ -1421,6 +1401,10 @@ static struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and
 	char									*dst_data_ptr;
 	enum PERSIST_AND_WIRE_BUF_DIFF			wire_buffs_diff;
 	bool									is_raft_ctx_eq;
+	int										topo_len;
+	int										topo_config_len;
+	int										kafka_mgmt_config_len;
+	int										raft_members_len;
 
 	NFIN;
 	// upd always exists, it is an embedded struct in the incoming msg
@@ -1444,30 +1428,61 @@ static struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and
 		goto out;
 	}
 	// Non raft_ctx requires update
+
+	// First pass: calculate sizes using the merge function that handles incremental
 	upd_data_ptr = upd->data;
-	if ((wire_buffs_diff == PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY) && (nvmeibt_tlv_get_len(&(upd->topo_ctx)) == nvmeibt_tlv_get_len(&(old->topo_ctx)))) {
-		// A pretty common case. Only the topo details changed, so we can store the incoming topo over the same memory
+	old_data_ptr = old->data;
+
+	topo_len = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &(old->topo_ctx), &(upd->topo_ctx),
+																			NULL, &old_data_ptr, &upd_data_ptr);
+	topo_config_len = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &(old->topo_config_ctx), &(upd->topo_config_ctx),
+																				   NULL, &old_data_ptr, &upd_data_ptr);
+	kafka_mgmt_config_len = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &(old->kafka_mgmt_config_ctx), &(upd->kafka_mgmt_config_ctx),
+																						 NULL, &old_data_ptr, &upd_data_ptr);
+	raft_members_len = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &(old->raft_members_ctx), &(upd->raft_members_ctx),
+																					NULL, &old_data_ptr, &upd_data_ptr);
+
+	if (topo_len < 0 || topo_config_len < 0 || kafka_mgmt_config_len < 0 || raft_members_len < 0) {
+		N_Ef(lenerr91, "Failed to calculate TLV sizes: topo=@INT topo_config=@INT kafka_mgmt_config=@INT raft_members=@INT",
+			 topo_len, topo_config_len, kafka_mgmt_config_len, raft_members_len);
 		dst = old;
-		dst_data_ptr = (char *)dst + sizeof(*dst);
-		old_data_ptr = (char *)old + sizeof(*old);
-		persist_and_wire_buf_copy_data_to_section(&(dst->topo_ctx), &(old->topo_ctx), &(upd->topo_ctx), &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
 		goto out;
 	}
-	// calc dst_sum_len
-	dst_data_len = (nvmeibt_tlv_get_len(nvmeibt_tlv_get_len(&(upd->topo_ctx)) ? &(upd->topo_ctx) : &(old->topo_ctx)) +
-					nvmeibt_tlv_get_len(nvmeibt_tlv_get_len(&(upd->topo_config_ctx)) ? &(upd->topo_config_ctx) : &(old->topo_config_ctx)) +
-					nvmeibt_tlv_get_len(nvmeibt_tlv_get_len(&(upd->kafka_mgmt_config_ctx)) ? &(upd->kafka_mgmt_config_ctx) : &(old->kafka_mgmt_config_ctx)) +
-					nvmeibt_tlv_get_len(nvmeibt_tlv_get_len(&(upd->raft_members_ctx)) ? &(upd->raft_members_ctx) : &(old->raft_members_ctx)));
-	// Allocate new dst according to size and copy into the new dst
+
+	if ((wire_buffs_diff == PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY) &&
+		(topo_len == nvmeibt_tlv_get_len(&(old->topo_ctx)))) {
+		// A pretty common case. Only the topo details changed, so we can store the incoming topo over the same memory. This special case also handles incremental topo.
+		dst = old;
+		dst_data_ptr = dst->data;
+		old_data_ptr = old->data;
+		upd_data_ptr = upd->data;
+		persist_and_wire_buf_calculate_and_merge_data_to_section(&(dst->topo_ctx), &(old->topo_ctx), &(upd->topo_ctx),
+																 &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
+		goto out;
+	}
+
+	// Calculate total data length
+	dst_data_len = topo_len + topo_config_len + kafka_mgmt_config_len + raft_members_len;
+
+	// Allocate new dst according to size
 	dst = alloc_persist_and_wire_buf(sizeof(*dst) + dst_data_len);
 	is_raft_ctx_eq = 0; // we must copy the raft_ctx to the new buf
-	dst_data_ptr = (char *)dst + sizeof(*dst);
-	old_data_ptr = (char *)old + sizeof(*old);
 
-	persist_and_wire_buf_copy_data_to_section(&(dst->topo_ctx), &(old->topo_ctx), &(upd->topo_ctx), &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
-	persist_and_wire_buf_copy_data_to_section(&(dst->topo_config_ctx), &(old->topo_config_ctx), &(upd->topo_config_ctx), &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
-	persist_and_wire_buf_copy_data_to_section(&(dst->kafka_mgmt_config_ctx), &(old->kafka_mgmt_config_ctx), &(upd->kafka_mgmt_config_ctx), &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
-	persist_and_wire_buf_copy_data_to_section(&(dst->raft_members_ctx), &(old->raft_members_ctx), &(upd->raft_members_ctx), &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
+	// Second pass: actually merge the data
+	dst_data_ptr = dst->data;
+	old_data_ptr = old->data;
+	upd_data_ptr = upd->data;
+
+	persist_and_wire_buf_calculate_and_merge_data_to_section(&(dst->topo_ctx), &(old->topo_ctx), &(upd->topo_ctx),
+															 &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
+	persist_and_wire_buf_calculate_and_merge_data_to_section(&(dst->topo_config_ctx), &(old->topo_config_ctx), &(upd->topo_config_ctx),
+															 &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
+	persist_and_wire_buf_calculate_and_merge_data_to_section(&(dst->kafka_mgmt_config_ctx), &(old->kafka_mgmt_config_ctx), &(upd->kafka_mgmt_config_ctx),
+															 &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
+	persist_and_wire_buf_calculate_and_merge_data_to_section(&(dst->raft_members_ctx), &(old->raft_members_ctx), &(upd->raft_members_ctx),
+															 &dst_data_ptr, &old_data_ptr, &upd_data_ptr);
+	NTOMA_ASSERT(pass2_sz_chk, dst_data_ptr == dst->data + dst_data_len,
+				 "Pass-2 wrote @INT bytes, expected @INT", (int)(dst_data_ptr - dst->data), dst_data_len);
 	persist_and_wire_recalc_total_len(dst);
 	NNVMEIBT_TOMA_FREE(iqwv3j4, old);	// We allocated a new one and not reused
 out:
