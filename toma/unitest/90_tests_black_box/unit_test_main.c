@@ -85,18 +85,23 @@ static void scenario_test_signals(void) {
 	os_sim_send_signal_to_toma(SIGUSR2);	yield();
 }
 
-static void scenario_user_rpcs(void) {
-	SCENARIO_PRINT(__AUTOID__, "Testing RPCs start");
-	user_rpc_send_to_toma("simulate dump_status");
-	user_rpc_send_to_toma("simulate reread_conf");
+static void scenario_user_rpcs_generic(void) {
+	SCENARIO_PRINT(__AUTOID__, "start");
 	user_rpc_send_to_toma("simulate dump-clnt-hash 20");
 	user_rpc_send_to_toma("simulate bm-garbage-collect 1");
-	user_rpc_send_to_toma("simulate resend-praids-report vol1");
 	user_rpc_send_to_toma("status server_csvs");
 	user_rpc_send_to_toma("status errors");
 	user_rpc_send_to_toma("disk-models list");
 	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
-	SCENARIO_PRINT(__AUTOID__, "Testing RPCs done");
+	SCENARIO_PRINT(__AUTOID__, "done");
+}
+static void scenario_user_rpcs_praid(void) {
+	SCENARIO_PRINT(__AUTOID__, "start");
+	user_rpc_send_to_toma("simulate dump_status");
+	user_rpc_send_to_toma("simulate reread_conf");
+	user_rpc_send_to_toma("simulate resend-praids-report vol1");
+	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
+	SCENARIO_PRINT(__AUTOID__, "done");
 }
 
 static void scenario_create_remove_r1(void) {
@@ -152,7 +157,8 @@ static void scenario_create_remove_r1(void) {
 }
 
 static void all_test_scenarios(void) {
-	scenario_user_rpcs();
+	scenario_user_rpcs_generic();
+	scenario_user_rpcs_praid();
 	scenario_create_remove_r1();
 	scenario_test_signals();
 	SCENARIO_PRINT(__AUTOID__, "test scenario complete");
