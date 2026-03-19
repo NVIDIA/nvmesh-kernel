@@ -42,6 +42,28 @@ void nvmeibt_ds_blkset_entries_sanitize_packed(
 	*n_dirty_bits = n_dirty;
 }
 
+static u16 calc_dirty_bits_by_topo(struct nvmeibt_seg_active *seg_active)
+{
+	struct nvmeibt_praid_lot				*praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
+	int8_t									n_parity;
+	int8_t									n_non_owners = 0;
+	bool									is_seg_degraded;
+
+	if (!praid_lot) {
+		N_Ef(t01dstidb, "No praid for seg_active, cant set unkown dbits properly!");
+		nvmeibt_abort(ES_FATAL);
+	}
+
+	n_parity = praid_lot->from_config.redundancy;
+	is_seg_degraded = !nvmeibt_disk_segment_is_competent_owner(nvmeibt_seg_active_get_active_seg_topo(seg_active));
+	for (int i = 0; i < praid_lot->n_topo_seg_lots; i++)
+		n_non_owners += !nvmeibt_disk_segment_is_competent_owner(&(praid_lot->topo_seg_lots[i]->seg_topo));
+
+	N_Tf(tyeund1, "seg=@UUID_8: n_non_owners=@INT n_replicas=@INT n_parity=@INT is_degraded=@INT",
+		 nvmeibt_seg_active_UUID_8(seg_active), (int)n_non_owners, (int)(praid_lot->n_topo_seg_lots), (int)n_parity, (int)is_seg_degraded);
+	return nvmeib_dbits_entry_build_unknowns_generic(n_non_owners, praid_lot->n_topo_seg_lots, n_parity, is_seg_degraded).all_bits;
+}
+
 /* Prepare dirty in dirty_plus_txid_init_val in case needed for init
  * Side effect on @disk_segment: if init mode is INIT_IRRELEVANT will convert it to INIT_DONE.
  */
@@ -55,65 +77,17 @@ static int ds_metadata_init_EC_prepare_dirty_and_txid_bits_init_val(struct nvmei
 		dirty_plus_txid_init_val->bits.dirty = 0;
 		dirty_plus_txid_init_val->bits.txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS;
 		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:
-		dirty_plus_txid_init_val->bits.dirty = 0;
+	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
+		dirty_plus_txid_init_val->bits.dirty = calc_dirty_bits_by_topo(seg_active);
 		dirty_plus_txid_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
-		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON:
-		TODO(make optimization: 2 unknowns is an overkill, put convicts and allow single degraded. Not madatory because client will resolve the unknowns anyways)
-		dirty_plus_txid_init_val->bits.dirty = nvmeib_dbits_entry_build_unk(-1, -1).all_bits;
-		dirty_plus_txid_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED:
 	default:
 		N_Ef(dgy76gr, "EC: illegal init_mode=@INIT_MODE_STR", mem_tbl_init_mode_str(mode));
-		rv = -1;
-	}
-
-	return rv;
-}
-
-/*
- * Prepare lock_id in lock_id_init_val in case needed for init
- * Side effect on @disk_segment:
- * if init mode is INIT_IRRELEVANT will convert it to INIT_DONE.
- */
-static int ds_metadata_init_EC_prepare_stale_locks_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id *lock_id_init_val, bool *is_stale_rebuild_required)
-{
-	const enum NVMEIBT_MEM_TBL_INIT_MODE mode =	seg_active->active_seg_topo.stale_locks_init_mode;
-	int rv = 0;
-
-	// - Handle the cases that only modify the init_mode (no TBL writes)
-	// - Prepare lock_id_init_val (lockid+is_stale) in case we do need to init
-
-	*is_stale_rebuild_required = 0;
-	switch (mode) {
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:
-		(*lock_id_init_val).all = 0;
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
-		// For now: Stale locks always handled by cold-recovery from the journal.
-		// So (in EC) this init state is illegal for stale locks!
-		N_Ef(dgfhryq, "seg=@UUID_8 stale=@INIT_MODE_STR illegal", nvmeibt_seg_active_UUID_8(seg_active), mem_tbl_init_mode_str(mode));
-		nvmeibt_abort(ES_FATAL);
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON:
-		*is_stale_rebuild_required = 1;
-		FALLTHRU;
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED:
-	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
-	default:
-		N_Ef(cni874c, "seg=@UUID_8 stale=@INIT_MODE_STR illegal", nvmeibt_seg_active_UUID_8(seg_active), mem_tbl_init_mode_str(mode));
 		rv = -1;
 	}
 
@@ -148,6 +122,19 @@ static void init_is_blkset_used_LUT(const struct nvmeibt_praid_lot *praid_lot, i
 	// Example: Dont save blockset entries of dead segments.
 	N_Tf(t_03_ds_bse, "lock_scheme=@INT, seg_ind=@INT, n_segs=@INT", pr_cfg->lock_scheme_type, seg_ind, n_segs);
 	if (0) blkset_LUT_debug(n_segs, is_blkset_used_LUT);
+}
+
+static inline bool is_init_mode_turn_all(enum NVMEIBT_MEM_TBL_INIT_MODE init_mode)
+{
+	return (init_mode & (NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON | NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF));
+}
+
+static void convert_set_all_to_by_topo(struct nvmeibt_disk_segment_topo_ctx *topo_ctx)
+{
+	if (is_init_mode_turn_all(topo_ctx->dirty_bits_init_mode))
+		topo_ctx->dirty_bits_init_mode = NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO;
+	if (is_init_mode_turn_all(topo_ctx->stale_locks_init_mode))
+		topo_ctx->stale_locks_init_mode = NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO;
 }
 
 bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_active)
@@ -193,6 +180,7 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 		}
 	}
 
+	convert_set_all_to_by_topo(seg_topo_ctx);
 	nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 
 	// First see if we need to read the dirty_bits from persistency
@@ -204,8 +192,8 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 			/* restore from persistent storage failed: fallback (see above) */
 			seg_active->is_last_shutdown_clean = 0;
 			seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
-			N_Ef(hji98fe, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to TURN_ALL_ON",nvmeibt_seg_active_UUID_8(seg_active));
-			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(dhu7875, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);
+			N_Ef(hji98fe, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to BY_TOPO",nvmeibt_seg_active_UUID_8(seg_active));
+			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(dhu7875, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
 		}
 	}
 
@@ -213,9 +201,7 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 	if (ds_metadata_init_EC_prepare_dirty_and_txid_bits_init_val(seg_active, &init_val.blkset_info) < 0)
 		goto out;
 
-	// Stale_locks (see function comment for side-effects)
-	if (ds_metadata_init_EC_prepare_stale_locks_init_val(seg_active, &init_val.lock_id, &is_stale_rebuild_required) < 0)
-		goto out;
+	// Stale_locks are always OFF for EC, nothing to init
 
 	// Now we are left with one of TURN_ALL_OFF or TURN_ALL_ON or INIT_DONE
 	// Since one u64 holds both the lock and the dirty, we prepare a value that is based
@@ -268,9 +254,6 @@ static int ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(struct nvmeib
 {
 	int										rv = 0;
 	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	union nvmeibc_dbits_entry				dbits_entry;
-	const union nvmeibc_dbits_entry			dbits_entry_zero = { .all_bits = 0 };
-	const union nvmeibc_dbits_entry			dbits_entry_unknown = nvmeib_dbits_entry_single_unk();	// Todo: EC-5969, Coz this is R1, onyl 1 unknown possible. Revisit completely for 3 replica
 
 	// NFIN;
 	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
@@ -278,33 +261,19 @@ static int ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(struct nvmeib
 		nvmeibt_seg_active_UUID_8(seg_active),
 		mem_tbl_init_mode_str(seg_topo_ctx->dirty_bits_init_mode));
 
-	dbits_entry = dbits_entry_zero;
 	switch (seg_topo_ctx->dirty_bits_init_mode) {
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
-		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
 		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
-		/* Init with FROM_PERSIST always applies to both stale locks and dirty
-		 * bits, and should have been already applied before we are called -
-		 * see nvmeibt_ds_metadata_init_non_EC_locks_table().
-		 * However, if we did reach here, it means that restore from persistent
-		 * storage has failed; so here we assume worse case and turn all dirty
-		 * bits on.
-		 */
-		// Daniel: This is a trap, here should decide upon topology and either set Y or N
-		dbits_entry = dbits_entry_unknown;
-		rv = 1;
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON:
+	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
 		 // If no convict given client will read data and compare before syncing - previously was marked dirty nvmeib_dbits_entry_build_for_seg(idx_in_praid ^ 1)
-		dbits_entry = dbits_entry_unknown;
+		blkset_info_init_val->bits.dirty = calc_dirty_bits_by_topo(seg_active);
 		rv = 1;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:
 		rv = 1;
 		break;
+	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
 	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
 	default:
 		N_Ef(error_ds_metadata_ds_metadata_init_non_EC_dirty_bits, "init_mode=@INIT_MODE", seg_topo_ctx->dirty_bits_init_mode);
@@ -312,7 +281,6 @@ static int ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(struct nvmeib
 		break;
 	}
 	blkset_info_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
-	blkset_info_init_val->bits.dirty = dbits_entry.dirty.bits;
 
 	NFOUT;
 	return rv;
@@ -329,33 +297,26 @@ static int ds_metadata_prepare_non_EC_stale_locks_init_val(struct nvmeibt_seg_ac
 
 	N_Tf(u876gt2, "Received @MEM_CTL_INIT_MODE_STR", mem_tbl_init_mode_str(seg_topo_ctx->stale_locks_init_mode));
 
-	*is_stale_rebuild_required = 0;
 	*lock_id_init_val = stale_lock_zero;
 	switch (seg_topo_ctx->stale_locks_init_mode) {
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
 		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
-		/*
-		 * Init with FROM_PERSIST always applies to both stale locks and dirty
-		 * bits, and should have been already applied before we are called -
-		 * see nvmeibt_ds_metadata_init_non_EC_locks_table().
-		 * However, if we did reach here, it means that restore from persistent
-		 * storage has failed; so here we assume worse case and turn all dirty
-		 * bits on.
-		 */
-		FALLTHRU;
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON:
-		*lock_id_init_val = nvmeib_stale_special_raid1.lock_id;
-		*is_stale_rebuild_required = 1;
+	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
+		if (nvmeibt_disk_segment_is_competent_owner(seg_topo_ctx)) {
+			*lock_id_init_val = nvmeib_stale_special_raid1.lock_id;
+			*is_stale_rebuild_required = 1;
+		} else {
+			nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
+		}
 		rv = 1;
 		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
-	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF:
 		nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 		rv = 1;
 		break;
+	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
 	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
 	default:
 		N_Ef(gy76x29, "init_mode=@INIT_MODE", seg_topo_ctx->stale_locks_init_mode);
@@ -375,7 +336,7 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	int										rv;
 	bool									is_stale_rebuild_required = 0;
 	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	union nvmeib_lock_blkset_entry			lock_blkset_entry_init_val;
+	union nvmeib_lock_blkset_entry			lock_blkset_entry_init_val = {.all = 0};
 	union nvmeib_lock_blkset_entry			*mmapped_locks_tbl = nvmeibt_seg_active_get_locks_tbl_ptr(seg_active);
 	int8_t									idx_in_praid;
 	uint64_t								n_blksets, ii;
@@ -410,6 +371,7 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	 * set all the stale-locks/dirty-bits.
 	 */
 
+	convert_set_all_to_by_topo(seg_topo_ctx);
 	if (dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST ||
 		stale_locks_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST) {
 
@@ -430,6 +392,8 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 			seg_active->is_last_shutdown_clean = 0;
 			seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
 			N_Ef(gfdu878, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to turn-on-all",nvmeibt_seg_active_UUID_8(seg_active));
+			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(fhu8st5, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
+			NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(sm18476, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
 		} else {
 			/* pesistent storage does not contain valid/clean data: fallback */
 			N_Tf(wuu811n, "seg=@UUID_8 last shutdown not clean, fallback to turn-on-all", nvmeibt_seg_active_UUID_8(seg_active));
@@ -452,11 +416,6 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	is_init_stale_required = rv;
 	rv = 0;
 	
-	if (!(is_init_stale_required || is_init_dirty_required)) {
-		is_stale_rebuild_required = 0;
-		goto out;
-	}
-
 	NTOMA_ASSERT(hq123xc, (is_init_stale_required && is_init_dirty_required), "Init modes mismatch");
 
 	idx_in_praid = nvmeibt_disk_segment_idx_in_praid(disk_segment);

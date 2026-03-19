@@ -192,6 +192,7 @@ enum NVMEIBT_MEM_TBL_INIT_MODE {
 		// Dbits: Same as TURN_OFF
 		// Locks: Same as TURN_OFF
 		// TXID : EC - Special initial value (journal is irrelevant for blockset), R1 - not applicable
+	NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO = (0x1 << 7),			// will replace TURN_ALL_ON and TURN_ALL_OFF in future versions
 	NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST = (0x1 << 8),	// If failing to read from persist, then TURN_ALL_ON.
 															// This init mode is not needed if a follower do it automatically in ALIVE_STABLE
 };

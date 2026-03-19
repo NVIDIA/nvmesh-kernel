@@ -17,6 +17,7 @@ const char *mem_tbl_init_mode_str(enum NVMEIBT_MEM_TBL_INIT_MODE m)
 	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST: return "FROM_PERSIST";
 	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON: return "TURN_ALL_ON";
 	case NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF: return "TURN_ALL_OFF";
+	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO: return "BY_TOPO";
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER: return "FIRST_USE_EVER";
 	default : {
 		static char	unexpected_val_str[] = "unexpected value               ";
