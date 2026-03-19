@@ -56,6 +56,7 @@ Derived from git commit history (January 2024 – March 2026).
 
 | OFED                       | DOCA-OFED       | Notes                                            |
 |----------------------------|-----------------|--------------------------------------------------|
+| OFED-internal-26.01-1.0.0 | DOCA-OFED 3.3.0 |                                                  |
 | OFED 25.10-1.7.1           | DOCA-OFED 3.2.1 | iw_cm + iwpm patching (NVMESH-6447, NVMESH-7377) |
 | OFED 25.04                 | DOCA-OFED 3.0.0 | Fix missing IB_MLX5 define                       |
 | OFED 24.10                 | —               | SIW compat                                       |
