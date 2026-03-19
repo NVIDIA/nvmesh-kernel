@@ -672,8 +672,7 @@ void nvmeib_io_stats_tojson_jdr(struct nvmeib_io_stats *ds, const ulong uptime_j
 		return;
 	}
 
-	sprintf(tmp_str, "%ld.%03ld", uptime_jiff/HZ, 1000*(uptime_jiff%HZ)/HZ);
-	jdr_write_var(jdr, uptime_secs, (const char *)tmp_str);
+	jdr->ops.ascii_format(jdr, "uptime_secs", "%lu.%03lu", uptime_jiff/HZ, 1000*(uptime_jiff%HZ)/HZ);
 	jdr_write_var(jdr, block_size_bytes, ds->block_size);
 
 	{
