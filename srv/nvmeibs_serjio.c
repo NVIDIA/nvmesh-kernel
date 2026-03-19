@@ -3762,9 +3762,9 @@ static void zero_journal_entry_cb(void *arg, int status, u32 result)
 	return_nvme_op_rsrc_sync(op_rsrc->serjio_pd, op_rsrc, NVME_OP_CB);
 }
 
-static inline int zero_journal_entry_from_cb_vargs(struct nvme_op_rsrc *op_rsrc, nvme_callback_t *cb, void *cb_param,
+static inline int zero_journal_entry_from_cb(struct nvme_op_rsrc *op_rsrc, nvme_callback_t *cb, void *cb_param,
 												   enum nvme_op_state exp_op_state,
-												   const char *data_str_fmt, va_list data_str_args)
+												   const char *data_str, size_t data_len)
 {
 	struct nvmeibs_serjio_disk_private_data *serjio_pd = op_rsrc->serjio_pd;
 	union jblock_md jmd_unused[NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY];
@@ -3772,17 +3772,14 @@ static inline int zero_journal_entry_from_cb_vargs(struct nvme_op_rsrc *op_rsrc,
 	int rv = 0;
 
 	/* Set journal data and meta-data */
-	{
-		unsigned pg;
-		for (pg = 0; pg < op_rsrc->n_pages; pg++)
-			memset(page_address(op_rsrc->pages[pg]), 0, PAGE_SIZE);
-	}
-	rv = vsnprintf(page_address(op_rsrc->pages[0]), PAGE_SIZE,
-		  data_str_fmt, data_str_args);
 
-	SERJIO_BUG_ON(rv > PAGE_SIZE,
-		err_serjio_zero_journal_entry_from_cb_vargs_data_str_fmt_len,
-		serjio_pd, "Zero Journal Entry Data string too long (@RV)", rv);
+	/* If there is a data-str, copy it to the SGL for write to data */
+	if (data_str) {
+		sg_copy_from_buffer(op_rsrc->sgl, op_rsrc->n_pages, data_str, data_len);
+	}
+
+	/* Zero the SGL, skipping data-len bytes */
+	sg_zero_buffer(op_rsrc->sgl, op_rsrc->n_pages, data_len, (op_rsrc->n_pages << PAGE_SHIFT) - data_len);
 
 	/* Set meta-data to jmdc unused value */
 	md_sz = nvmeib_shared_set_jentry_md_unused(jmd_unused, 1 << op_rsrc->binje_shift);
@@ -3807,27 +3804,13 @@ static inline int zero_journal_entry_from_cb_vargs(struct nvme_op_rsrc *op_rsrc,
 	return rv;
 }
 
-static /*inline*/ int zero_journal_entry_from_cb(struct nvme_op_rsrc *op_rsrc, nvme_callback_t *cb, void *cb_param,	// Error: can never be inlined because it uses variable argument lists
-											 enum nvme_op_state exp_op_state, const char *data_str_fmt, ...)
-{
-	va_list data_str_args;
-	int rv;
-
-	va_start(data_str_args, data_str_fmt);
-	rv = zero_journal_entry_from_cb_vargs(op_rsrc, cb, cb_param, exp_op_state, data_str_fmt, data_str_args);
-	va_end(data_str_args);
-
-	return rv;
-}
-
 static int zero_journal_entry(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 							  struct jrange_entry *jrange_entry, unsigned entry, atomic_t *comp_ctr,
 							  struct completion *comp, nvme_callback_t *cb, void *cb_param,
-							  const char *data_str_fmt, ...)
+							  const char *data_str, size_t data_len)
 {
 	struct nvme_op_rsrc *op_rsrc;
 	int rv = 0;
-	va_list data_str_args;
 	int ctr_val;
 
 	NFIN;
@@ -3854,13 +3837,11 @@ static int zero_journal_entry(struct nvmeibs_serjio_disk_private_data *serjio_pd
 		op_rsrc->comp_ctr = comp_ctr;
 	}
 
-	va_start(data_str_args, data_str_fmt);
-	if ((rv = zero_journal_entry_from_cb_vargs(op_rsrc, cb, cb_param, NVME_OP_FREE, data_str_fmt, data_str_args)) < 0) {
+	if ((rv = zero_journal_entry_from_cb(op_rsrc, cb, cb_param, NVME_OP_FREE, data_str, data_len)) < 0) {
 		return_nvme_op_rsrc_sync(serjio_pd, op_rsrc, NVME_OP_ERROR);
 		ctr_val = atomic_dec_return(comp_ctr);
 		_NDs(trace_serjio_zero_journal_entry_dec_ctr_val, serjio_pd, "dec comp_ctr: @PTR value: @COUNT", comp_ctr, ctr_val);
 	}
-	va_end(data_str_args);
 
 out:
 	NFOUT;
@@ -3912,8 +3893,15 @@ static int zero_journal_range(struct jrange_entry *jrng, atomic_t *comp_ctr,
 	struct nvme_op_rsrc *op_rsrc;
 	int rv = 0;
 	unsigned i;
+	int zje_len;
+	char *zje_buf = (char *)__get_free_page(GFP_KERNEL);
 
 	NFIN;
+	if (!zje_buf) {
+		rv = -ENOMEM;
+		_NEs(error_serjio_zero_journal_range_oom, serjio_pd, "OOM");
+		goto out;
+	}
 	if (nvmeib_jmd_unused_entry_val.raw == 0) {
 		/* Can use write zeroes */
 		if (!(op_rsrc = get_free_nvme_op_rsrc_sync(serjio_pd,
@@ -3950,13 +3938,18 @@ static int zero_journal_range(struct jrange_entry *jrng, atomic_t *comp_ctr,
 	} else {
 		/* TBD: Update PRPL to write the same data to multiple entries */
 		for (i = 0; i < jrng->n_ents; i++) {
-			if ((rv = zero_journal_entry(serjio_pd, jrng, i, comp_ctr, comp, NULL, NULL,
-				"%s - rng: %u entry: %d", __func__, jrng->range_idx, i)))
+			zje_len = scnprintf(zje_buf, PAGE_SIZE, "%s - rng: %u entry: %d", __func__, jrng->range_idx, i);
+			rv = zero_journal_entry(serjio_pd, jrng, i, comp_ctr, comp, 
+				NULL, NULL,
+				zje_buf, zje_len);
+			if (rv)
 				goto out;
 		}
 	}
 
 out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	NFOUT;
 	return rv;
 }
@@ -3970,6 +3963,7 @@ static void sync_ent_cb(void *arg, int status, u32 result)
 	int entry_idx = op_rsrc->entry;
 	struct jrange_entry *jrange_entry = &serjio_pd->jranges_alloc_tbl.ranges[range_idx];
 	union jblock_md jmdc_entry[NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY];
+	int zje_len;
 
 	(void)result;
 	NFIN;
@@ -4008,12 +4002,16 @@ static void sync_ent_cb(void *arg, int status, u32 result)
 		JENTRY_STATE_CHNG(jrange_entry, entry_idx, JENTRY_SYNCED, false,
 				  JENTRY_STATE_CHNG_REASON_SYNC_DIRTY);
 		if (!is_j2d_in_valid_segment(serjio_pd, j2d_start, j2d_end, NULL, NULL)) {
+			int zje_rv;
+
 			_NTs(trace_serjio_sync_ent_cb_jmdc_inval, serjio_pd,
 				 "Zeroing Range: @JRNL_RNG_IDX Entry: @JRNL_RNG_ENT_IDX with invalid J2D: [@J2D_START, @J2D_END]",
 				range_idx, entry_idx, j2d_start, j2d_end);
-			if (zero_journal_entry_from_cb(op_rsrc, NULL, NULL, NVME_OP_CB,
-					"%s - rng: %u N: %d entry: %u status: %s j2d: [%u,%u] not in valid seg\n", __func__,
-					range_idx, binje_shift, entry_idx, nvmeib_shared_serjio_jrange_status_to_str(jrange_entry->status), j2d_start, j2d_end))
+			zje_len = scnprintf(page_address(op_rsrc->pages[0]), PAGE_SIZE,
+				"%s - rng: %u N: %d entry: %u status: %s j2d: [%llu,%llu] not in valid seg\n", __func__,
+				range_idx, binje_shift, entry_idx, nvmeib_shared_serjio_jrange_status_to_str(jrange_entry->status), j2d_start, j2d_end);
+			zje_rv = zero_journal_entry_from_cb(op_rsrc, NULL, NULL, NVME_OP_CB, NULL, (size_t)zje_len);
+			if (zje_rv)
 				goto return_op_rsrc;
 			else
 				goto out;
@@ -4043,8 +4041,15 @@ static int chk_wait_ret_cln_disk_rng(struct jrange_entry *jrng)
 	struct seg_tree_entry *seg_iter, *tmp;
 	int n_zero_rng = 0;
 	struct seg_tree_entry *j2d_seg;
+	int zje_len;
+	char *zje_buf = (char *)__get_free_page(GFP_KERNEL);
 
 	NFIN;
+	if (!zje_buf) {
+		_NEs(error_serjio_chk_wait_ret_cln_disk_rng_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
+		goto out;
+	}
 	/* Sync all entries that we were waiting to return */
 	down_read(&serjio_pd->gpt_rwsem);
 	if ((rv = rd_jrange(serjio_pd, sync_ent_cb, NULL, jrng,
@@ -4070,9 +4075,13 @@ static int chk_wait_ret_cln_disk_rng(struct jrange_entry *jrng)
 			spin_unlock_irqrestore(&jrng->lock, flags);
 			/* Entry points at a clean segment => Zero it */
 			n_zero_rng++;
-			if ((rv = zero_journal_entry(serjio_pd, jrng, entry, &ctr, &comp, NULL, NULL,
+			zje_len = scnprintf(zje_buf, PAGE_SIZE,
 				"%s - rng: %u binje: %u entry: %d has j2d: %llu in seg: %s\n", __func__,
-				jrng->range_idx, 1 << jrng->binje_shift, entry, j2d, j2d_seg->seg_uuid_str))) {
+				jrng->range_idx, 1 << jrng->binje_shift, entry, j2d, j2d_seg->seg_uuid_str);
+			rv = zero_journal_entry(serjio_pd, jrng, entry, &ctr, &comp, 
+				NULL, NULL,
+				zje_buf, zje_len);
+			if (rv) {
 				if (atomic_dec_return(&ctr) > 0)
 					wait_for_completion(&comp);
 				_NEs(error_serjio_chk_wait_ret_cln_disk_rng, serjio_pd, "zero_journal_entry failed (@RV) for range @JRNL_RNG_IDX entry @JRNL_RNG_ENT_IDX",
@@ -4147,6 +4156,8 @@ static int chk_wait_ret_cln_disk_rng(struct jrange_entry *jrng)
 	}
 
 out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	NFOUT;
 	return rv;
 }
@@ -4761,6 +4772,7 @@ static void read_jmdc_entry_cb(void *arg, int status, u32 result)
 	struct jrange_entry *jrange_entry = &serjio_pd->jranges_alloc_tbl.ranges[range_idx];
 	union jblock_md jmdc_entry[NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY] = {};
 	enum nvmeibs_serjio_jentry_state prev_jentry_state, next_jentry_state;
+	int zje_len;
 
 	(void)result;
 	NFIN;
@@ -4802,17 +4814,22 @@ static void read_jmdc_entry_cb(void *arg, int status, u32 result)
 							(chain_err = nvmeibs_serjio_jmd_decode_j2d_chain(jmdc_entry, 1 << binje_shift, &j2d_start, &j2d_end)) != NVMEIB_JENTRY_CHAIN_OK ||
 							!is_j2d_in_valid_segment(serjio_pd, j2d_start, j2d_end, NULL, NULL))
 					)
-			) {
+			) 
+		{
 			/* J2D not valid - clear on disk and move to free state */
 			_NDs(trace_1_serjio_read_jmdc_entry_cb, serjio_pd, "J2D: [@J2D_START,@J2D_END] in Journal Range @JRNL_RNG_IDX N @BINJE Entry @JRNL_RNG_ENT_IDX not valid at @PTR. Chain Error @ERROR_STR Chain Error Block @IDX",
 				j2d_start, j2d_end, 1 << binje_shift, range_idx, entry_idx, jmdc_entry,
 				nvmeib_shared_jentry_md_chain_err_str(chain_err), nvmeib_shared_jentry_md_chain_err_block_idx(chain_err));
-			if (zero_journal_entry_from_cb(op_rsrc, NULL, NULL, NVME_OP_CB,
-				"%s - rng: %u entry: %u status: %s j2d_start: %llu j2d_end: %llu not in valid seg\n", __func__,
-				range_idx, entry_idx, nvmeib_shared_serjio_jrange_status_to_str(jrange_entry->status), j2d_start, j2d_end))
+			zje_len = scnprintf(page_address(op_rsrc->pages[0]), PAGE_SIZE,
+					"%s - rng: %u entry: %u status: %s j2d_start: %llu j2d_end: %llu not in valid seg\n", __func__,
+					range_idx, entry_idx, nvmeib_shared_serjio_jrange_status_to_str(jrange_entry->status), j2d_start, j2d_end);
+			if (zero_journal_entry_from_cb(op_rsrc, NULL, NULL,
+				NVME_OP_CB, NULL, (size_t)zje_len) < 0)
+			{
 				goto return_op_rsrc;
-			else
+			} else {
 				goto out;
+			}
 		}
 	}
 
@@ -6350,8 +6367,15 @@ static int free_jrnl_rng(struct jrange_entry *rng, struct completion *comp, atom
 	DECLARE_COMPLETION_ONSTACK(int_comp);
 	atomic_t int_ctr = ATOMIC_INIT(1);
 	DECLARE_BITMAP(set_binje_zero_ents_bmp, NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE) = {};
+	int zje_len;
+	char *zje_buf = (char *)__get_free_page(GFP_KERNEL);
 
 	NFIN;
+	if (!zje_buf) {
+		_NEs(error_serjio_free_jrnl_rng_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
+		goto out;
+	}
 	/* First remove from the current list */
 	spin_lock_irqsave(&jranges_alloc_tbl->lock, flags);
 	hlist_del(&rng->link);
@@ -6425,9 +6449,17 @@ static int free_jrnl_rng(struct jrange_entry *rng, struct completion *comp, atom
 		ctr = &int_ctr;
 	}
 	for_each_set_bit(ent_idx, set_binje_zero_ents_bmp, rng->n_ents) {
-		if ((rv = zero_journal_entry(serjio_pd, rng, ent_idx, ctr, comp, NULL, NULL,
+		if (!zje_buf) {
+			rv = -ENOMEM;
+			goto out;
+		}
+		zje_len = scnprintf(zje_buf, PAGE_SIZE,
 			"%s - rng: %u binje: %u entry: %d needs zero due to binje change\n",
-			__func__, rng->range_idx, 1 << rng->binje_shift, ent_idx)) < 0)
+			__func__, rng->range_idx, 1 << rng->binje_shift, ent_idx);
+		rv = zero_journal_entry(serjio_pd, rng, ent_idx, ctr, comp, 
+			NULL, NULL,
+			zje_buf, zje_len);
+		if (rv < 0)
 		{
 			_NWs(warn_serjio_free_jrnl_rng_fail_zero_ent, serjio_pd,
 			     "Failed (@RV) to Zero Range @JRNL_RNG_IDX Entry @JENT_IDX",
@@ -6457,6 +6489,8 @@ static int free_jrnl_rng(struct jrange_entry *rng, struct completion *comp, atom
 
 	rv = 0;
 out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	NFOUT;
 	return rv;
 }
@@ -6852,6 +6886,14 @@ static int upd_alloc_rng(struct jrange_entry *jrange, u32 client_id, unsigned bi
 	DECLARE_BITMAP(zero_ent_bmp, NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE) = {};
 	DECLARE_COMPLETION_ONSTACK(comp);
 	atomic_t comp_ctr = ATOMIC_INIT(1);
+	int zje_len;
+	char *zje_buf = (char *)__get_free_page(GFP_KERNEL);
+
+	if (!zje_buf) {
+		_NEs(error_serjio_upd_alloc_rng_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
+		goto out;
+	}
 
 	spin_lock_irqsave(&jrange->lock, flags);
 	BUG_ON(jrange->status != JRANGE_RESERVED);
@@ -6940,10 +6982,14 @@ unlock_and_read:
 	spin_unlock_irqrestore(&jrange->lock, flags);
 
 	for_each_set_bit(entry, zero_ent_bmp, NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE) {
-		if ((rv = zero_journal_entry(serjio_pd, jrange, entry, &comp_ctr, &comp, zero_journal_entry_cb, (void *)JENTRY_FREE,
-							"jri: %u binje: %d (gen_id: %llu) entry: %u (gen_id: %u)",
-							jrange->range_idx, 1 << jrange->binje_shift,
-							jrange->gen_id, entry, jrange->jentry_md[entry].ent_gen_id)) < 0) {
+		zje_len = scnprintf(zje_buf, PAGE_SIZE,
+			"jri: %u binje: %d (gen_id: %llu) entry: %u (gen_id: %u)",
+			jrange->range_idx, 1 << jrange->binje_shift,
+			jrange->gen_id, entry, jrange->jentry_md[entry].ent_gen_id);
+		rv = zero_journal_entry(serjio_pd, jrange, entry, &comp_ctr, &comp, 
+				zero_journal_entry_cb, (void *)JENTRY_FREE,
+				zje_buf, zje_len);
+		if (rv < 0) {
 			_NEs(err_serjio_upd_alloc_rng_ent_zero, serjio_pd,
 					"Failed (@RV) with zero_journal_entry for Range @JRNL_RNG_IDX N @BINJE Entry @JRNL_RNG_ENT_IDX",
 					rv, jrange->range_idx, 1 << jrange->binje_shift, entry);
@@ -6991,6 +7037,9 @@ unlock_and_read:
 
 unlock_and_out:
 	spin_unlock_irqrestore(&jrange->lock, flags);
+out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	return rv;
 }
 
@@ -7065,6 +7114,8 @@ static DECLARE_IO_WQ_FN(io_alloc_rng_fn)
 	/* Entries that need zeroing due to binje change */
 	DECLARE_BITMAP(binje_chng_zero_ents, NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE) = {};
 	int ctr_val;
+	int zje_len;
+	char *zje_buf = NULL;
 
 	NFIN;
 	if ((srj_state = serjio_state_get(serjio_pd)) != SERJIO_READY) {
@@ -7079,6 +7130,12 @@ static DECLARE_IO_WQ_FN(io_alloc_rng_fn)
 			rv = -ECANCELED;
 			BUG_ON(1);
 		}
+		goto out;
+	}
+
+	if (!(zje_buf = (char *)__get_free_page(GFP_KERNEL))) {
+		_NEs(error_serjio_io_alloc_rng_fn_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
 		goto out;
 	}
 
@@ -7283,10 +7340,15 @@ write_db:
 		/* Mark all taken entries for debug purposes */
 		for (i = 0; i < ret_entry->n_ents; i++) {
 			if (GET_JENTRY_STATE_FROM_BMP(ret_entry->jentry_state_bmp, i) == JENTRY_TAKEN) {
-				if ((rv = zero_journal_entry(serjio_pd, ret_entry, i, &comp_ctr, &comp, zero_journal_entry_cb, (void *)JENTRY_TAKEN,
-								"client: %s uuid: %pUB cid: %u jri: %u binje: %d (gen_id: %llu) entry: %u/%u (gen_id: %u)",
-								client_host, &client_uuid, client_id, ret_entry->range_idx, 1 << ret_entry->binje_shift,
-								ret_entry->gen_id, i, ret_entry->n_ents, ret_entry->jentry_md[i].ent_gen_id)) < 0)
+				zje_len = scnprintf(zje_buf, PAGE_SIZE,
+					"client: %s uuid: %pUB cid: %u jri: %u binje: %d (gen_id: %llu) entry: %u/%u (gen_id: %u)",
+					client_host, &client_uuid, client_id, ret_entry->range_idx, 1 << ret_entry->binje_shift,
+					ret_entry->gen_id, i, ret_entry->n_ents, ret_entry->jentry_md[i].ent_gen_id);
+				rv = zero_journal_entry(serjio_pd, ret_entry, i, 
+					&comp_ctr, &comp, 
+					zero_journal_entry_cb, (void *)JENTRY_TAKEN, 
+					zje_buf, zje_len);
+				if (rv < 0)
 				{
 					union jblock_md *jmdc_entry = get_jmdc_entry(ret_entry, i);
 
@@ -7308,14 +7370,20 @@ write_db:
 		/* We might still need to zero entries due to binje change */
 		for_each_set_bit(i, binje_chng_zero_ents, ret_entry->n_ents) {
 			enum nvmeibs_serjio_jentry_state ent_state = GET_JENTRY_STATE_FROM_BMP(ret_entry->jentry_state_bmp, i);
+
 			SERJIO_BUG_ON(ent_state != JENTRY_TAKEN,
 				      bug_io_alloc_rng_fn_binje_chng_not_taken, serjio_pd,
 					"Range @JRNL_RNG_IDX Entry @JENT_IDX has invalid state @JENTRY_STATE",
 					ret_entry->range_idx, i, ent_state);
-			if ((rv = zero_journal_entry(serjio_pd, ret_entry, i, &comp_ctr, &comp, zero_journal_entry_cb, (void *)JENTRY_TAKEN,
-					"client: %s uuid: %pUB cid: %u jri: %u binje: %d (gen_id: %llu) entry: %u/%u (gen_id: %u)",
-					client_host, &client_uuid, client_id, ret_entry->range_idx, 1 << ret_entry->binje_shift,
-					ret_entry->gen_id, i, ret_entry->n_ents, ret_entry->jentry_md[i].ent_gen_id)) < 0)
+			zje_len = scnprintf(zje_buf, PAGE_SIZE,
+				"client: %s uuid: %pUB cid: %u jri: %u binje: %d (gen_id: %llu) entry: %u/%u (gen_id: %u)",
+				client_host, &client_uuid, client_id, ret_entry->range_idx, 1 << ret_entry->binje_shift,
+				ret_entry->gen_id, i, ret_entry->n_ents, ret_entry->jentry_md[i].ent_gen_id);
+			rv = zero_journal_entry(serjio_pd, ret_entry, i, 
+				&comp_ctr, &comp, 
+				zero_journal_entry_cb, (void *)JENTRY_TAKEN,
+				zje_buf, zje_len);
+			if (rv < 0)
 			{
 				union jblock_md *jmdc_entry = get_jmdc_entry(ret_entry, i);
 
@@ -7369,6 +7437,8 @@ write_db:
 	rv = ret_entry->range_idx;
 
 out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	if (rv < 0)
 		rsp->valid = false;
 	else
@@ -8201,6 +8271,7 @@ static void cln_jrnl_disk_rng_cb(void *arg, int status, u32 result)
 	struct cln_jrnl_disk_rng_cb_param *param = op_rsrc->param;
 	u64 j2d_start = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
 	u64 j2d_end = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
+	int zje_len;
 
 	(void)result;
 	nvme_op_rsrc_chng_state(op_rsrc, NVME_OP_POSTED, NVME_OP_CB);
@@ -8264,11 +8335,16 @@ static void cln_jrnl_disk_rng_cb(void *arg, int status, u32 result)
 			/* For SYNCED entries, we can zero them as they are in our control. */
 			param->n_zero_ent++;
 			set_bit(range_idx, param->cln_rng_bmp);
-			if ((rv = zero_journal_entry_from_cb(op_rsrc, NULL, NULL, NVME_OP_CB,
-				"%s - rng %u N %u ent %u j2d_start %llu j2d_end %llu in seg %s\n",
-				__func__, range_idx, jrng->binje_shift, entry_idx, j2d_start, j2d_end, seg_tree_entry->seg_uuid_str))) {
-				_NEs(error_1_serjio_cln_jrnl_disk_rng_cb, serjio_pd, "Error @RV zeroing journal entry", rv);
-				goto return_op_rsrc;
+			{
+				zje_len = scnprintf(page_address(op_rsrc->pages[0]), PAGE_SIZE,
+					"%s - rng %u N %u ent %u j2d_start %llu j2d_end %llu in seg %s\n",
+					__func__, range_idx, jrng->binje_shift, entry_idx, j2d_start, j2d_end, seg_tree_entry->seg_uuid_str);
+				rv = zero_journal_entry_from_cb(op_rsrc, NULL, NULL, NVME_OP_CB,
+					NULL, (size_t)zje_len);
+				if (rv) {
+					_NEs(error_1_serjio_cln_jrnl_disk_rng_cb, serjio_pd, "Error @RV zeroing journal entry", rv);
+					goto return_op_rsrc;
+				}
 			}
 			goto out;
 		}
@@ -8431,6 +8507,8 @@ static DECLARE_IO_WQ_FN(io_cln_jrnl_disk_rng_fn)
 	struct cln_jrnl_disk_rng_cb_param *cb_param = NULL;
 	int n_zero_ent = 0, tot_zero_ent = 0;
 	DECLARE_BITMAP(wait_rnjs_bmp, NVMEIB_EC_MAX_JOURNAL_RANGES) = {0};
+	int zje_len;
+	char *zje_buf = NULL;
 
 	NFIN;
 	(void)param;
@@ -8449,6 +8527,12 @@ static DECLARE_IO_WQ_FN(io_cln_jrnl_disk_rng_fn)
 			_NTs(io_cln_jrnl_disk_rng_fn_t4, serjio_pd, "SERJIO in invalid state @SERJIO_STATE", srj_state);
 			BUG_ON(1);
 		}
+		goto out;
+	}
+
+	if (!(zje_buf = (char *)__get_free_page(GFP_KERNEL))) {
+		_NEs(error_serjio_io_cln_jrnl_disk_rng_fn_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
 		goto out;
 	}
 
@@ -8525,18 +8609,25 @@ static DECLARE_IO_WQ_FN(io_cln_jrnl_disk_rng_fn)
 				n_zero_ent++;
 				spin_unlock_irqrestore(&jrange->lock, flags);
 				/* Entry points at the segment => Zero it */
-				if ((rv = zero_journal_entry(serjio_pd, jrange, entry, &ctr, &comp, NULL, NULL,
-				"%s - rng: %u binje: %u ent: %u state: %s j2d [%llu,%llu] points to %s seg %s\n",
-				__func__, jrange->range_idx, 1 << jrange->binje_shift, entry, nvmeib_shared_serjio_jentry_state_to_str(jentry_state),
-				j2d_start, j2d_end, seg_tree_entry->seg_delete ? "deleted" : "",
-				seg_tree_entry->seg_uuid_str))) {
-					if (atomic_dec_return(&ctr) > 0)
-						wait_for_completion(&comp);
-					_NEs(error_serjio_io_cln_jrnl_disk_rng_fn, serjio_pd, "zero_journal_entry failed (@RV) for range @JRNL_RNG_IDX entry @JRNL_RNG_ENT_IDX",
-						rv, jrange->range_idx, entry);
-					rv = -EIO;
-					state_err = SERJIO_ERR_WR_JRNL;
-					goto out;
+				{
+					zje_len = scnprintf(zje_buf, PAGE_SIZE,
+						"%s - rng: %u binje: %u ent: %u state: %s j2d [%llu,%llu] points to %s seg %s\n",
+						__func__, jrange->range_idx, 1 << jrange->binje_shift, entry, nvmeib_shared_serjio_jentry_state_to_str(jentry_state),
+						j2d_start, j2d_end, seg_tree_entry->seg_delete ? "deleted" : "",
+						seg_tree_entry->seg_uuid_str);
+					rv = zero_journal_entry(serjio_pd, jrange, entry, 
+						&ctr, &comp, 
+						NULL, NULL,
+						zje_buf, zje_len);
+					if (rv) {
+						if (atomic_dec_return(&ctr) > 0)
+							wait_for_completion(&comp);
+						_NEs(error_serjio_io_cln_jrnl_disk_rng_fn, serjio_pd, "zero_journal_entry failed (@RV) for range @JRNL_RNG_IDX entry @JRNL_RNG_ENT_IDX",
+							rv, jrange->range_idx, entry);
+						rv = -EIO;
+						state_err = SERJIO_ERR_WR_JRNL;
+						goto out;
+					}
 				}
 				spin_lock_irqsave(&jrange->lock, flags);
 			}
@@ -8659,6 +8750,8 @@ next_rng:
 
 out:
 	kfree(cb_param);
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	if (rv) {
 		if (rv != -ECANCELED && rv != -EAGAIN && rv != EBUSY) {
 			/* Clean Failed - Put SERJIO in Error State */
@@ -9040,6 +9133,8 @@ static DECLARE_IO_WQ_FN(io_free_jrnl_ents_fn)
 	unsigned ent_idx;
 	u64 free_rng_gen_id;
 	struct seg_tree_entry *seg_tree_entry = NULL, *seg_rb_iter;
+	int zje_len;
+	char *zje_buf = NULL;
 
 	NFIN;
 	if ((srj_state = serjio_state_get(serjio_pd)) != SERJIO_READY &&
@@ -9055,6 +9150,12 @@ static DECLARE_IO_WQ_FN(io_free_jrnl_ents_fn)
 			_NTs(io_free_jrnl_ents_fn_t3, serjio_pd, "SERJIO in invalid state @SERJIO_STATE", srj_state);
 			rv = -EINVAL;
 		}
+		goto out;
+	}
+
+	if (!(zje_buf = (char *)__get_free_page(GFP_KERNEL))) {
+		_NEs(error_serjio_io_free_jrnl_ents_fn_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
 		goto out;
 	}
 
@@ -9239,10 +9340,15 @@ static DECLARE_IO_WQ_FN(io_free_jrnl_ents_fn)
 		_NDs(trace_serjio_io_free_jrnl_ents_fn_free_ent, serjio_pd, "@NVMEIB_RECOV_SRC_STR: range: @JRNL_RNG_IDX entry: @JRNL_RNG_ENT_IDX gen_id @JRNL_RNG_GEN_ID.@JRNL_ENT_GEN_ID - @JENTRY_STATE => FREE",
 			nvmeib_recov_src_str(recov_src), rng_idx, ent_idx, rng->gen_id,
 			rng->jentry_md[ent_idx].ent_gen_id, jentry_state);
-		if ((rv = zero_journal_entry(serjio_pd, rng, ent_idx, &comp_ctr, &comp, NULL, NULL,
+		zje_len = scnprintf(zje_buf, PAGE_SIZE,
 			"%s - recov: %s rng %d ent %d gen_id %llx.%x - %s => FREE\n",
 			__func__, nvmeib_recov_src_str(recov_src), rng_idx, ent_idx, rng->gen_id,
-			rng->jentry_md[ent_idx].ent_gen_id, nvmeib_shared_serjio_jentry_state_to_str(jentry_state)))) {
+			rng->jentry_md[ent_idx].ent_gen_id, nvmeib_shared_serjio_jentry_state_to_str(jentry_state));
+		rv = zero_journal_entry(serjio_pd, rng, ent_idx, 
+			&comp_ctr, &comp, 
+			NULL, NULL,
+			zje_buf, zje_len);
+		if (rv) {
 			_NWs(warn_serjio_io_free_jrnl_ents_fn_zero_failed, serjio_pd, "zero_journal_entry failed (@RV) for range @JRNL_RNG_IDX entry @JRNL_RNG_ENT_IDX",
 				rv, rng->range_idx, ent_idx);
 		}
@@ -9270,6 +9376,8 @@ static DECLARE_IO_WQ_FN(io_free_jrnl_ents_fn)
 	chk_launch_new_jgc(serjio_pd, false);
 
 out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	NFOUT;
 	return rv;
 }
@@ -10178,6 +10286,8 @@ int nvmeibs_serjio_erase_jam_ent(void *jrange_handle, const binje_t rng_binje, u
 	enum nvmeibs_serjio_jentry_state jentry_state;
 	struct nvmeibs_serjio_disk_private_data *serjio_pd;
 	const struct nvmeib_gen_cmd_jam_ent_erase *erase_ent;
+	int zje_len;
+	char *zje_buf = NULL;
 
 	NFIN;
 	memset(&cb_param, 0, sizeof(cb_param));
@@ -10188,6 +10298,13 @@ int nvmeibs_serjio_erase_jam_ent(void *jrange_handle, const binje_t rng_binje, u
 	}
 	BUG_ON(jrange->status != JRANGE_ALLOCATED);
 	serjio_pd = jrange->serjio_pd;
+
+	zje_buf = (char *)__get_free_page(GFP_KERNEL);
+	if (!zje_buf) {
+		_NEs(error_serjio_erase_jam_ent_oom, serjio_pd, "OOM");
+		rv = -ENOMEM;
+		goto out;
+	}
 
 	if (jrange->gen_id != rng_gen_id) {
 		_NWs(warn_nvmeibs_serjio_c_7400, serjio_pd, "Got Entry Erase for Range: @JRNL_RNG_IDX"
@@ -10234,19 +10351,21 @@ int nvmeibs_serjio_erase_jam_ent(void *jrange_handle, const binje_t rng_binje, u
 			goto out;
 		}
 		spin_unlock_irqrestore(&jrange->lock, flags);
-		if ((rv = zero_journal_entry(serjio_pd, jrange, erase_ent->ent_idx, &comp_ctr,
+		zje_len = scnprintf(zje_buf, PAGE_SIZE, "%s - rng: %u entry: %d", __func__, jrange->range_idx, erase_ent->ent_idx);
+		rv = zero_journal_entry(serjio_pd, jrange, erase_ent->ent_idx, &comp_ctr,
 			&comp, erase_journal_entry_cb, &cb_param,
-			"%s - rng: %u entry: %d", __func__, jrange->range_idx, i)) < 0) {
+			zje_buf, zje_len);
+		if (rv < 0) {
 			_NWs(warn_nvmeibs_serjio_c_7490, serjio_pd, "Failed to erase Range: @JRNL_RNG_IDX"
 			" Entry: @JRNL_RNG_ENT_IDX", jrange->range_idx, erase_ent->ent_idx);
 			rv = NVMEIBS_IO_RSP_ERR_SUBMIT;
 			break;
 		}
 		_NTs(trace_nvmeibs_serjio_c_7494, serjio_pd, "Erased Range: @JRNL_RNG_IDX"
-			" Entry: @JRNL_RNG_ENT_IDX GenID: @JRNL_RNG_GEN_ID.@JRNL_ENT_GEN_ID due to @JAM_ERASE_REASON",
-			jrange->range_idx, erase_ent->ent_idx, jrange->gen_id,
-			jrange->jentry_md[erase_ent->ent_idx].ent_gen_id,
-			get_jam_ent_erase_reason(erase_reason));
+		" Entry: @JRNL_RNG_ENT_IDX GenID: @JRNL_RNG_GEN_ID.@JRNL_ENT_GEN_ID due to @JAM_ERASE_REASON",
+		jrange->range_idx, erase_ent->ent_idx, jrange->gen_id,
+		jrange->jentry_md[erase_ent->ent_idx].ent_gen_id,
+		get_jam_ent_erase_reason(erase_reason));
 	}
 
 	if (atomic_dec_return(&comp_ctr) > 0)
@@ -10262,6 +10381,8 @@ int nvmeibs_serjio_erase_jam_ent(void *jrange_handle, const binje_t rng_binje, u
 	rv = 0;
 
 out:
+	if (zje_buf)
+		free_page((unsigned long)zje_buf);
 	NFOUT;
 	return rv;
 }
