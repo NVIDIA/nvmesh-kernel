@@ -143,7 +143,6 @@ MODULE_PARM_DESC(use_intr_shaper_tcp, "Same as use_intr_shaper, but applied when
 static bool nvmeibs_nvme_doorbell_batch = true;
 module_param_named(nvme_doorbell_batch, nvmeibs_nvme_doorbell_batch, bool, 0644);
 MODULE_PARM_DESC(nvme_doorbell_batch, "Determines whether to batch NVMe doorbell requests.");
-MODULE_PARM_DESC(gcp_drives_to_uuid_list, "List prepared before nvmeibs was up to specify the drives to be used and their str_id");
 
 static bool nvmeibs_simulate_timeout = false;
 module_param_named(simulate_timeout, nvmeibs_simulate_timeout, bool, 0644);
@@ -1812,10 +1811,9 @@ static irqreturn_t nvmeibs_intr(int irq, void *arg)
 	nvmeib_qp_stats_on_interrupt(q->qp_stats);
 	if (q->polling)
 		q->nvme_qp_stats.n_spurious_intrs++;
-	if (!d_defer_process_io_cq) { {
+	if (!d_defer_process_io_cq) {
 		num_handled = nvmeibs_process_cq(q);
 		nvmeibs_nvme_update_qp_stats_intr_comps(q, num_handled);
-	}
 	
 		/* nvmeibs_process_cq releases spinlock, so q->thread may have changed */
 		offload_enabled &= (q->thread || nvmeibs_use_nvme_kwq);
