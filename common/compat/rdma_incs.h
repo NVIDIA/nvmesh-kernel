@@ -21,6 +21,21 @@ static inline void *dma_alloc_coherent(struct device *dev, size_t size,         
 static inline void  dma_free_coherent( struct device *dev, size_t size, void *cpu_addr, dma_addr_t  dma_handle)            { (void)dev; (void)dma_handle; (void)size; kfree(cpu_addr);}
 static inline dma_addr_t dma_map_single(   struct device *dev,      void *addr, size_t size, enum dma_data_direction dir){ (void)dev; (void)size; (void)dir; return (dma_addr_t)addr; }
 static inline void       dma_unmap_single( struct device *dev, dma_addr_t addr, size_t size, enum dma_data_direction dir){ (void)dev; (void)size; (void)dir;              (void)addr; }
+static inline dma_addr_t dma_map_page(struct device *dev, struct page *page, size_t offset, size_t size,
+				      enum dma_data_direction dir)
+{
+	(void)dev;
+	(void)size;
+	(void)dir;
+	return (dma_addr_t)((unsigned char *)page_address(page) + offset);
+}
+static inline void dma_unmap_page(struct device *dev, dma_addr_t addr, size_t size, enum dma_data_direction dir)
+{
+	(void)dev;
+	(void)addr;
+	(void)size;
+	(void)dir;
+}
 static inline int        dma_mapping_error(struct device *dev, dma_addr_t addr)                                          { (void)dev;                              return (addr == 0);}
 static inline void  *ib_dma_alloc_coherent( struct ib_device *dev, size_t size, dma_addr_t *dma_handle, gfp_t  flag)            { (void)dev; (void)dma_handle; return kmalloc(size, flag);}
 static inline void  ib_dma_free_coherent( struct ib_device *dev, size_t size, void *cpu_addr, dma_addr_t  dma_handle)            { (void)dev; (void)dma_handle; (void)size; kfree(cpu_addr);}
