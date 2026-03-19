@@ -19,7 +19,12 @@
 #define DISK_UUID_REMOTE38_D0    "f38cebd0-0000-0000-0000-000000000000"
 #define DISK_UUID_REMOTE39_D0    "f39cebd0-0000-0000-0000-000000000000"
 
-#define FORMAT_REQUEST_COUNTER   303
+enum mgmt_sim_format_state {
+	FMT_IDLE,
+	FMT_SENT,
+	FMT_IN_PROGRESS,
+	FMT_DONE,
+};
 
 static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 	return snprintf(buf, capacity, "{\"messageType\":\"updateLeaderKeepaliveToken\""
@@ -107,6 +112,8 @@ struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 	u16 block_size;						// In bytes
 	u16 metadata_size;					// In bytes
 	bool zeroing_progress_seen;			// true once driveZeroingProgress received
+	enum mgmt_sim_format_state format_state;   // per-drive format tracking
+	int64_t format_counter_sent;               // counter value sent in last formatDrive
 };
 
 static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_sim_disk_status *d, unsigned format_request_counter, unsigned long boot_time) {
@@ -411,6 +418,37 @@ static void __extract_disk_status_from_report_terget_msg(struct mm_json_elem *di
 	}
 }
 
+static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	if (strcmp(drive_name, m->disk_002.disk_id) == 0) return &m->disk_002;
+	if (strcmp(drive_name, m->disk_003.disk_id) == 0) return &m->disk_003;
+	BUG_ON(true); return NULL;
+}
+
+static void __send_format_drive_msg(struct mgmt_sim_disk_status *d) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(1024);
+	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, d->format_counter_sent, (unsigned long)m->boot_time);
+	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
+}
+
+static void __check_format_progress(struct mgmt_sim_disk_status *d) {
+	int64_t n;
+	if (d->format_state == FMT_IDLE || d->format_state == FMT_DONE)
+		return;
+	n = d->format_counter_sent;
+	if (d->format_request_counter == n) {
+		d->format_state = FMT_DONE;
+		N_Tf(__AUTOID__, "format DONE disk=@STR counter=@INT64_TD", d->disk_id, n);
+	} else if (d->active_format_request_counter == n) {
+		d->format_state = FMT_IN_PROGRESS;
+		N_Tf(__AUTOID__, "format IN_PROGRESS disk=@STR counter=@INT64_TD", d->disk_id, n);
+	} else {
+		N_Tf(__AUTOID__, "format NOT_ACCEPTED, re-sending disk=@STR counter=@INT64_TD", d->disk_id, n);
+		__send_format_drive_msg(d);
+	}
+}
+
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	struct mm_json_elem *payload = json_get_dict_value(root,    "payload");
 	struct mm_json_elem *node =    json_get_dict_value(payload, "node");
@@ -424,6 +462,8 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	}
 	m->got_report_target = true;
 	N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR", m->boot_time, m->disk_002.status, m->disk_003.status);
+	__check_format_progress(&m->disk_002);
+	__check_format_progress(&m->disk_003);
 }
 
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
@@ -478,22 +518,9 @@ static bool __disk_ready_for_format(const struct mgmt_sim_disk_status *d) {
 	return (strcmp(d->status, "Ok") == 0) || (strcmp(d->status, "Not_Initialized") == 0);
 }
 
-static bool __disk_formatted_ok(const struct mgmt_sim_disk_status *d) {
-	return (strcmp(d->status, "Ok") == 0) &&
-		(d->format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(d->active_format_request_counter == FORMAT_REQUEST_COUNTER) &&
-		(d->block_size == 4096) &&
-		(d->metadata_size == 8);
-}
-
 bool mgmt_sim_both_disks_ready_for_format(void) {
 	const struct mgmt_sim_state *m = g_mgmt_sim;
 	return __disk_ready_for_format(&m->disk_002) && __disk_ready_for_format(&m->disk_003);
-}
-
-bool mgmt_sim_both_disks_formatted_ok(void) {
-	const struct mgmt_sim_state *m = g_mgmt_sim;
-	return __disk_formatted_ok(&m->disk_002) && __disk_formatted_ok(&m->disk_003);
 }
 
 bool mgmt_sim_consume_got_report_target(void) {
@@ -526,15 +553,19 @@ bool mgmt_sim_v_r1_praid_absent_from_report(void) { return g_mgmt_sim->v_r1_prai
 /******************************************************************************/
 /* Message-sender functions for fiber-based test scenario                      */
 /******************************************************************************/
-void mgmt_sim_send_format_drives(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	char *msg_002 = malloc(1024);
-	char *msg_003 = malloc(1024);
-	const size_t len_002 = (size_t)make_msg_format_drive(msg_002, 1024, &m->disk_002, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
-	const size_t len_003 = (size_t)make_msg_format_drive(msg_003, 1024, &m->disk_003, FORMAT_REQUEST_COUNTER, (unsigned long)m->boot_time);
-	N_IMf(msim_fsm1, "sending formatDrive for disk002+disk003 bootTime=@INT64_TD", m->boot_time);
-	sim_broker_topic_msg_produce(m->k_producers.cmd, msg_002, len_002, false);
-	sim_broker_topic_msg_produce(m->k_producers.cmd, msg_003, len_003, false);
+void mgmt_sim_send_format_drive(const char *drive_name) {
+	struct mgmt_sim_disk_status *d = __lookup_disk_by_name(drive_name);
+	BUG_ON(d->format_state == FMT_SENT || d->format_state == FMT_IN_PROGRESS);
+	d->format_counter_sent++;
+	d->format_state = FMT_SENT;
+	N_IMf(msim_fsm1, "sending formatDrive disk=@STR counter=@INT64_TD bootTime=@INT64_TD", d->disk_id, d->format_counter_sent, g_mgmt_sim->boot_time);
+	__send_format_drive_msg(d);
+}
+
+bool mgmt_sim_drive_format_is_done(const char *drive_name) {
+	struct mgmt_sim_disk_status *d = __lookup_disk_by_name(drive_name);
+	BUG_ON(d->format_state == FMT_IDLE); // should only be called after sending a format command
+	return d->format_state == FMT_DONE;
 }
 
 void mgmt_sim_send_leader_keep_alive(void) {

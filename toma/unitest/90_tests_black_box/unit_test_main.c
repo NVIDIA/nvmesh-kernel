@@ -112,12 +112,14 @@ static void scenario_create_remove_r1(void) {
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
 
-	SCENARIO_PRINT(__AUTOID__, "sending format drives");
-	mgmt_sim_send_format_drives();
+	SCENARIO_PRINT(__AUTOID__, "sending format drive disk_002");
+	mgmt_sim_send_format_drive("NVMD_SN_002.1");
+	SCENARIO_PRINT(__AUTOID__, "sending format drive disk_003");
+	mgmt_sim_send_format_drive("NVMD_SN_003.1");
 	nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Send once an extended message to test the flow
 
-	SCENARIO_PRINT(__AUTOID__, "waiting for both disks formatted ok");
-	WAIT_UNTIL(mgmt_sim_both_disks_formatted_ok());
+	SCENARIO_PRINT(__AUTOID__, "waiting for both disks format done");
+	WAIT_UNTIL(mgmt_sim_drive_format_is_done("NVMD_SN_002.1") && mgmt_sim_drive_format_is_done("NVMD_SN_003.1"));
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for drive zeroing to complete");
 	WAIT_UNTIL(mgmt_sim_both_disks_zeroing_done());
