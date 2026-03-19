@@ -8,6 +8,9 @@
 #ifndef __KERNEL__
 	// Kernel already has those functions. Define as compatibility for user-space
 	#include "kr_incs_malloc.h"
+#ifndef offset_in_page
+#define offset_in_page(p)	((unsigned long)(p) & ~PAGE_MASK)
+#endif
 	// /asm/io.h
 	static inline ulong virt_to_phys(void* address){ return (ulong)((u64)address + 0x0F00000000000000LL); }
 	static inline void* phys_to_virt(ulong address){ return (void*)((u64)address - 0x0F00000000000000LL); }
@@ -47,9 +50,12 @@
 	#define sg_is_last(sg)		((sg)->page_link & SG_END)
 	#define sg_chain_ptr(sg)	((struct scatterlist *) ((sg)->page_link & ~(SG_CHAIN | SG_END)))
 
-	size_t sg_copy_from_buffer(struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen);
+	size_t sg_copy_from_buffer(struct scatterlist *sgl, unsigned int nents, const void *buf, size_t buflen);
 	size_t sg_copy_to_buffer(  struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen);
-	size_t sg_copy_buffer(     struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen, long int skip, bool to_buffer);
+	size_t sg_copy_buffer(     struct scatterlist *sgl, unsigned int nents, const void *buf, size_t buflen, long int skip, bool to_buffer);
+	size_t sg_pcopy_from_buffer(struct scatterlist *sgl, unsigned int nents, const void *buf, size_t buflen, size_t skip);
+	size_t sg_pcopy_to_buffer(  struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen, size_t skip);
+	size_t sg_zero_buffer(struct scatterlist *sgl, unsigned int nents, size_t skip, size_t buflen);
 
 	struct sg_table {
 		struct scatterlist *sgl;												// Aray of sg lists

@@ -99,7 +99,7 @@ static inline void nvmeib_buffer_copy_to_buffer(const struct nvmeib_buffer *buf,
 static inline void nvmeib_buffer_copy_from_buffer_ext(struct nvmeib_buffer *buf, const void *src, size_t src_sz, off_t skip)
 {
 	sg_copy_buffer(buf->sgt.sgl, buf->sgt.nents,
-		       (void *)src, min_t(size_t, buf->size - buf->offset - skip, src_sz), buf->offset + skip, false);
+		       src, min_t(size_t, buf->size - buf->offset - skip, src_sz), buf->offset + skip, false);
 }
 
 static inline void nvmeib_buffer_copy_from_buffer(struct nvmeib_buffer *buf, const void *src, size_t src_sz)
