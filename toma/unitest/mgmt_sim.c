@@ -203,6 +203,8 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	m->disk_003.uuid = DISK_UUID_LOCAL_003;
 	m->disk_002.vendor = 5122;
 	m->disk_003.vendor = 5123;
+	m->disk_002.format_counter_sent = 20;		// Start from some number, different start for each disk for easier logs analysis
+	m->disk_003.format_counter_sent = 30;
 	m->disk_003.format_state = m->disk_002.format_state = FMT_IDLE;
 	m->hw.conf_version = 17;		// Start from some number
 	N_Tf(msim_init, "mgmt_sim initialized cluster @INT machines, hw_conf_ver=@INT", m->cfg->n_nodes, m->hw.conf_version);
@@ -412,7 +414,7 @@ void mgmt_sim_do_periodic(void) {
 /******************************************************************************/
 /* Static helper functions                                                    */
 /******************************************************************************/
-static void __extract_disks_status_from_report_terget_msg(struct mm_json_elem *disks_array) {
+static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *disks_array) {
 	int i;
 	for (i = 0; i < disks_array->array.len; i++) {
 		struct mm_json_elem *disk_elem = disks_array->array.elements[i];
@@ -427,6 +429,7 @@ static void __extract_disks_status_from_report_terget_msg(struct mm_json_elem *d
 		d->block_size = json_get_dict_num(disk_elem, "block_size", -1);
 		d->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
 		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", d->disk_id, d->status, d->format_counter_toma_reply_done, d->format_counter_toma_reply_in_progress, d->block_size, d->metadata_size);
+		__check_format_progress(d, true);
 	}
 }
 
@@ -453,7 +456,7 @@ static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_repo
 			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
 			__send_format_drive_msg(d);
 		}
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, d->format_counter_sent, on_report_target_msg ? "Target" : "ZeroingProgress");
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, expected, on_report_target_msg ? "Target" : "Zeroin");
 	}
 }
 
@@ -464,13 +467,10 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 
 	m->boot_time = json_get_dict_num(node, "bootTime", 0);
-	if (disks && (disks->type == JSON_E_ARRAY)) {
-		__extract_disks_status_from_report_terget_msg(disks);
-	}
+	if (disks && (disks->type == JSON_E_ARRAY))
+		__extract_disks_status_from_report_target_msg(disks);
 	m->got_report_target = true;
-	// N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR", m->boot_time, m->disk_002.status, m->disk_003.status);
-	__check_format_progress(&m->disk_002, true);
-	__check_format_progress(&m->disk_003, true);
+	// N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD", m->boot_time);
 }
 
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
