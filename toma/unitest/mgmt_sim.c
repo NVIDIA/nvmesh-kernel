@@ -23,6 +23,7 @@ enum e_disk_format_state {
 	FMT_IDLE = 'I',
 	FMT_SENT = 'S',
 	FMT_IN_PROGRESS = 'P',
+	FMT_ZEROING = 'Z',
 	FMT_DONE = 'D',
 };
 
@@ -112,7 +113,6 @@ struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 	u16 vendor;
 	u16 block_size;						// In bytes
 	u16 metadata_size;					// In bytes
-	bool zeroing_progress_seen;			// true once driveZeroingProgress received
 	enum e_disk_format_state format_state;   // per-drive format tracking
 };
 
@@ -203,6 +203,7 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	m->disk_003.uuid = DISK_UUID_LOCAL_003;
 	m->disk_002.vendor = 5122;
 	m->disk_003.vendor = 5123;
+	m->disk_003.format_state = m->disk_002.format_state = FMT_IDLE;
 	m->hw.conf_version = 17;		// Start from some number
 	N_Tf(msim_init, "mgmt_sim initialized cluster @INT machines, hw_conf_ver=@INT", m->cfg->n_nodes, m->hw.conf_version);
 
@@ -216,6 +217,24 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	m->k_producers.l_raft = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_TARGETS_RAFT);
 	return m;
 }
+
+static bool __is_disk_fmt_running(enum e_disk_format_state e) { return ((e != FMT_IDLE) && (e != FMT_DONE)); }
+
+static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	if (strcmp(drive_name, m->disk_002.disk_id) == 0) return &m->disk_002;
+	if (strcmp(drive_name, m->disk_003.disk_id) == 0) return &m->disk_003;
+	BUG_ON(drive_name[0] != 'S'); 		// For now, ignore stock drivers in Toma report
+	return NULL;
+}
+
+static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	if (strcmp(disk_uuid, m->disk_002.uuid) == 0) return &m->disk_002;
+	if (strcmp(disk_uuid, m->disk_003.uuid) == 0) return &m->disk_003;
+	BUG_ON(true); return NULL;
+}
+static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_report_target_msg);
 
 void mgmt_sim_send_msg_assign_to_zone(int zone_idx) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
@@ -303,20 +322,15 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 }
 
 static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
 	const char *message_type = json_get_dict_str(root, "messageType", NULL);
 	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
 	if (strcmp(message_type, "driveZeroingProgress") == 0) {
 		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 		const char *disk_uuid = json_get_dict_str(payload, "diskUUID", NULL);
-		if (disk_uuid && strcmp(disk_uuid, m->disk_002.uuid) == 0) {
-			m->disk_002.zeroing_progress_seen = true;
-			N_Tf(__AUTOID__, "driveZeroingProgress: disk_002 uuid=@STR", disk_uuid);
-		} else if (disk_uuid && strcmp(disk_uuid, m->disk_003.uuid) == 0) {
-			m->disk_003.zeroing_progress_seen = true;
-			N_Tf(__AUTOID__, "driveZeroingProgress: disk_003 uuid=@STR", disk_uuid);
-		}
+		struct mgmt_sim_disk_status *d = __lookup_disk_by_uuid(disk_uuid);
+		BUG_ON(!__is_disk_fmt_running(d->format_state));
+		__check_format_progress(d, false);
 	} else if (strcmp(message_type, "updateDiskSegmentsDirtyBits") == 0) {
 		/* silently ignore */
 	}
@@ -398,31 +412,22 @@ void mgmt_sim_do_periodic(void) {
 /******************************************************************************/
 /* Static helper functions                                                    */
 /******************************************************************************/
-static void __extract_disk_status_from_report_terget_msg(struct mm_json_elem *disks_array, struct mgmt_sim_disk_status *out) {
+static void __extract_disks_status_from_report_terget_msg(struct mm_json_elem *disks_array) {
 	int i;
-	BUG_ON(!disks_array || disks_array->type != JSON_E_ARRAY || !out);
 	for (i = 0; i < disks_array->array.len; i++) {
 		struct mm_json_elem *disk_elem = disks_array->array.elements[i];
 		const char *disk_id = json_get_dict_str(disk_elem, "diskID", NULL);
+		struct mgmt_sim_disk_status *d = __lookup_disk_by_name(disk_id);
 		BUG_ON(!disk_elem || (disk_elem->type != JSON_E_DICT) || !disk_id);
-		if (strcmp(disk_id, out->disk_id) != 0)
-			continue;
+		if (!d) continue;		// Ignore stock drivers
 
-		nvmeibt_strlcpy(out->status, json_get_dict_str(disk_elem, "status", "unknown"), sizeof(out->status));
-		out->format_counter_toma_reply_done =        (unsigned)json_get_dict_num(disk_elem, "formatRequestCounter", -1);
-		out->format_counter_toma_reply_in_progress = (unsigned)json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
-		out->block_size = json_get_dict_num(disk_elem, "block_size", -1);
-		out->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
-		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", out->disk_id, out->status, out->format_counter_toma_reply_done, out->format_counter_toma_reply_in_progress, out->block_size, out->metadata_size);
-		return;
+		nvmeibt_strlcpy(d->status, json_get_dict_str(disk_elem, "status", "unknown"), sizeof(d->status));
+		d->format_counter_toma_reply_done =        (unsigned)json_get_dict_num(disk_elem, "formatRequestCounter", -1);
+		d->format_counter_toma_reply_in_progress = (unsigned)json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
+		d->block_size = json_get_dict_num(disk_elem, "block_size", -1);
+		d->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
+		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", d->disk_id, d->status, d->format_counter_toma_reply_done, d->format_counter_toma_reply_in_progress, d->block_size, d->metadata_size);
 	}
-}
-
-static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (strcmp(drive_name, m->disk_002.disk_id) == 0) return &m->disk_002;
-	if (strcmp(drive_name, m->disk_003.disk_id) == 0) return &m->disk_003;
-	BUG_ON(true); return NULL;
 }
 
 static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
@@ -433,21 +438,22 @@ static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
-static bool __is_disk_fmt_running(enum e_disk_format_state e) { return (e == FMT_SENT || e == FMT_IN_PROGRESS); }
-
-static void __check_format_progress(struct mgmt_sim_disk_status *d) {
+static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_report_target_msg) {
 	if (__is_disk_fmt_running(d->format_state)) {
 		const unsigned expected = d->format_counter_sent;
 		enum e_disk_format_state prev_state = d->format_state;
 		if ((d->format_counter_toma_reply_done == expected) && (strcmp(d->status, "Ok") == 0)) {
 			d->format_state = FMT_DONE;
 		} else if (d->format_counter_toma_reply_in_progress == expected) {
-			d->format_state = FMT_IN_PROGRESS;
+			if (!on_report_target_msg)				// Zeroing message
+				d->format_state = FMT_ZEROING;
+			else if (prev_state == FMT_SENT)
+				d->format_state = FMT_IN_PROGRESS;
 		} else {
 			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
 			__send_format_drive_msg(d);
 		}
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT", d->disk_id, prev_state, d->format_state, expected);
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, d->format_counter_sent, on_report_target_msg ? "Target" : "ZeroingProgress");
 	}
 }
 
@@ -459,13 +465,12 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 
 	m->boot_time = json_get_dict_num(node, "bootTime", 0);
 	if (disks && (disks->type == JSON_E_ARRAY)) {
-		__extract_disk_status_from_report_terget_msg(disks, &m->disk_002);
-		__extract_disk_status_from_report_terget_msg(disks, &m->disk_003);
+		__extract_disks_status_from_report_terget_msg(disks);
 	}
 	m->got_report_target = true;
 	// N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD disk002=@STR disk003=@STR", m->boot_time, m->disk_002.status, m->disk_003.status);
-	__check_format_progress(&m->disk_002);
-	__check_format_progress(&m->disk_003);
+	__check_format_progress(&m->disk_002, true);
+	__check_format_progress(&m->disk_003, true);
 }
 
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
@@ -540,11 +545,6 @@ int mgmt_sim_get_n_leader_keep_alives_received(void) {
 
 bool mgmt_sim_v_r1_praid_reported(void) {
 	return g_mgmt_sim->v_r1_praid_reported;
-}
-
-bool mgmt_sim_both_disks_zeroing_done(void) {
-	const struct mgmt_sim_state *m = g_mgmt_sim;
-	return m->disk_002.zeroing_progress_seen && m->disk_003.zeroing_progress_seen;
 }
 
 bool mgmt_sim_v_r1_seg_zeroing_seen(void)        { return g_mgmt_sim->v_r1_seg_zeroing_progress_seen; }

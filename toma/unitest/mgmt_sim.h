@@ -45,7 +45,6 @@ bool mgmt_sim_both_disks_ready_for_format(void);
 bool mgmt_sim_drive_format_is_done(const char *drive_name);
 bool mgmt_sim_consume_got_report_target(void);
 bool mgmt_sim_v_r1_praid_reported(void);
-bool mgmt_sim_both_disks_zeroing_done(void);
 bool mgmt_sim_v_r1_seg_zeroing_seen(void);
 bool mgmt_sim_v_r1_praid_deprecated(void);
 bool mgmt_sim_v_r1_praid_absent_from_report(void);
