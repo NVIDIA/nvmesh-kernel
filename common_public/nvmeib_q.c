@@ -129,14 +129,15 @@ static int qthread_func(void *arg)
 			if (loop_dt >= nvmeib_wq_max_processing_time)
 				need_resched = true;
 
+			spin_lock_irqsave(&q->lock, flags);
+			q->current_entry = NULL;
 			if (need_resched) {
+				spin_unlock_irqrestore(&q->lock, flags);
 				cond_resched();
 				loop_start_jif = jiffies;
 				need_resched = false;
+				spin_lock_irqsave(&q->lock, flags);
 			}
-
-			spin_lock_irqsave(&q->lock, flags);
-			q->current_entry = NULL;
 		}
 		q->busy = false;
 		if (!completion_done(&q->flush_complete))
