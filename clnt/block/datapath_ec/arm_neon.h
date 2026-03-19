@@ -382,7 +382,7 @@ __ai __attribute__((target("neon"))) uint8x16_t vandq_u8(uint8x16_t __p0, uint8x
 })
 #else
 #define vshrq_n_s8(__p0, __p1) __extension__ ({ \
-  int8x16_t __ret; \  
+  int8x16_t __ret; \
   int8x16_t __s0 = __p0; \
   int8x16_t __rev0;  __rev0 = __builtin_shufflevector(__s0, __s0, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0); \
   __ret = (int8x16_t) __builtin_neon_vshrq_n_v((int8x16_t)__rev0, __p1, 32); \
