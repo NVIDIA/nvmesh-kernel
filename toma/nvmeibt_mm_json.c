@@ -1564,7 +1564,7 @@ int parse_raft_member_JSON(struct mm_json_dict *dict)
 		JSON_ASSIGN_PLAIN(rj3kis5, "n", n, kv->value->num);
 		JSON_ASSIGN_STR(ujksl3n,   "eyecatcher", eyecatcher, kv->value->str);
 		JSON_ASSIGN_PLAIN(a7bhdtq, "kafka_offset", kafka_offset, kv->value->num);
-		JSON_ASSIGN_PLAIN(tyu83ks, "raft_members_seq_no_updated", raft_members_seq_no_updated, kv->value->num);
+		JSON_ASSIGN_PLAIN_OPTIONAL(tyu83ks, "raft_members_seq_no_updated", raft_members_seq_no_updated, kv->value->num);
 		JSON_ASSIGN_STR(5bh39l0,   "hostname", hostname, kv->value->str);
 		JSON_ASSIGN_PLAIN(uhspwb5, "uuid", uuid, *GET_UNION_UUID_OF_URN_UUID_STR(kv->value->str));
 		JSON_LOOP_ITERATION_END(n4uajfo, kv->key);
