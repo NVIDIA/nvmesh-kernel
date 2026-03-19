@@ -51,11 +51,12 @@ $(foreach fl,$(TRACE_MODULE_OBJ),$(eval $(call set_per_file_cflags2,$(fl),$(fl))
 
 PP_OUTDIR := $(shell realpath $(obj))/.trace_pp_dir
 
-# It is important to keep here = and not := as this line shall be resolved on evaluation
-PREPROCESSED = $(patsubst %.o,$(PP_OUTDIR)/%.i,$(TRACE_MODULE_OBJ))
-
+# .i file list for clean only: use $(obj)-relative paths so kbuild removes the right files
+# (realpath $(obj) can resolve wrongly when make -C $(KSRC) M=$(PWD) clean runs with cwd in KSRC).
+PREPROCESSED = $(patsubst %.o,$(obj)/.trace_pp_dir/%.i,$(TRACE_MODULE_OBJ))
 clean-files += $(PREPROCESSED)
-clean-files += $(shell find $(obj) -name 'dict.*.json')
+clean-files += $(shell find $(obj) -name 'dict.*.json' 2>/dev/null)
+clean-files += $(shell find $(obj) -name '*.trace.json' 2>/dev/null)
 
 $(PP_OUTDIR)/%.i: ORIG_OBJ_NAME = $(subst $(PP_OUTDIR)/,,$(patsubst %.i,%.o,$@))
 $(PP_OUTDIR)/%.i: $(src)/%.c

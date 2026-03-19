@@ -436,6 +436,7 @@ $(foreach bin,$(BINS),$(eval $(call BINS_template,$(bin))))
 
 clean:
 	@rm -rf $(wildcard $(foreach bin,$(BINS),$(TRAGET_ROOT)/$(OBJ_ROOT)/$(bin)/$(BDIR)) $(foreach bin,$(BINS),$(BIN)/$(bin))) $(TOOLS_DIR)/*.o $(patsubst %.c,%.i,$(shell find . -name '*.c')) $(shell find . -name 'dict.*.json')
+	@rm -rf $(TRAGET_ROOT)/$(TRACE_AUTOGEN_ROOT) $(TRAGET_ROOT)/$(I_ROOT)
 
 .PHONY: clean $(rmbin $(BINS))
 
