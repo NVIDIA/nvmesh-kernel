@@ -14,12 +14,13 @@
 #include "nvmeib_utils.h"
 #include "nvmeibc_main.h"
 
+#define NET_NAME(net) (net ? ((net)->base.ioch ? (net)->base.ioch->name : "?") : "?")
 
-#define __FIN FINS(net->base.ioch->name)
-#define __FOUT FOUTS(net->base.ioch->name)
+#define __FIN FINS(NET_NAME(net))
+#define __FOUT FOUTS(NET_NAME(net))
 
-#define __NFIN NFINS(net->base.ioch->name)
-#define __NFOUT NFOUTS(net->base.ioch->name)
+#define __NFIN NFINS(NET_NAME(net))
+#define __NFOUT NFOUTS(NET_NAME(net))
 
 int nvmeibc_ib_net_admin_alloc(struct nvmeibc_ib_net_admin *net,
 	struct nvmeibc_ib_net_params *params, struct nvmeibc_login_request *lreq)

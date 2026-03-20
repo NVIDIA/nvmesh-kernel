@@ -9933,23 +9933,31 @@ static void disconnect_disk(struct nvmeibc_disk *disk)
 		cid = disk->local_admin_ch->cid;
 
 	list_for_each_entry(arnic, &disk->arnics, link) {
-		if (arnic->alive ||
-			nvmeibc_ib_admin_is_connected(ac_to_iac(arnic->channel))) {
-			nvmeibc_ib_admin_channel_disconnect(ac_to_iac(arnic->channel));
-			if (arnic->alive && arnic->channel->is_main) {
-				nvmeibc_target_arnic_close_conn(arnic);
-				disk->main_ach_wq_pid = 0;
-			}
-		}
-		if (arnic->channel) {
-			if (arnic->local)
-				waited_for_local_lock = true;
-			nvmeibc_ib_admin_channel_free(ac_to_iac(arnic->channel));
-			arnic->alive = false;
-			if (arnic->local) {
-				disk->local_admin_ch = NULL;
+		struct nvmeibc_ib_admin_channel *ach;
 
-			}
+		if (!arnic->channel)
+			continue;
+		ach = ac_to_iac(arnic->channel);
+		if (READ_ONCE(ach->base.remove_wq)) {
+			/*
+			* Disconnect queues async work on remove_wq; 
+			* nvmeibc_ib_admin_channel_free() drains that WQ so teardown 
+			* completes before we free the channel.
+			*/
+			nvmeibc_ib_admin_channel_disconnect(ach);
+		}
+		if (arnic->alive && ach->base.is_main) {
+			nvmeibc_target_arnic_close_conn(arnic);
+			disk->main_ach_wq_pid = 0;
+		}
+		if (arnic->local)
+			waited_for_local_lock = true;
+		arnic->channel = NULL;
+		nvmeibc_ib_admin_channel_free(ach);
+		arnic->alive = false;
+		if (arnic->local) {
+			disk->local_admin_ch = NULL;
+
 		}
 	}
 
