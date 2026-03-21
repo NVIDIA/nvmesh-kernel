@@ -229,7 +229,7 @@ static int siw_map_mr(struct ib_device *ibdev, struct ib_mr *ofa_mr,
 	for (i = 0; i < n_pages; i++) {
 		unsigned long page_vaddr = virt_addr_valid(((void *)pages[i])) ? pages[i] : (unsigned long)phys_to_virt(pages[i]);
 
-		if (page_vaddr & (PAGE_SIZE - 1)) {
+		if (page_vaddr & (mr_page_size - 1)) {
 			_NT(trace_5_nvmeib_public_siw_imp_siw_map_mr, "page @PAGE_NUM is not aligned @PHYS", i, page_vaddr);
 			rv = -EINVAL;
 			goto out;
