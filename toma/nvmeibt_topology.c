@@ -2182,11 +2182,10 @@ static int nvmeibt_add_disk_event_callback(const struct nvmeib_disk_info *disk_i
 static int nvmeibt_remove_disk_event_callback(const struct nvmeib_remove_disk *msg)
 {
 	struct nvmeib_disk_info disk_info;
-	memset(&disk_info, 0, sizeof(disk_info));	// Avoid strcpy() in change_disk_event() below
+	memset(&disk_info, 0, sizeof(disk_info));
 	disk_info.vendor_id = msg->vendor_id;
 	nvmeibt_strlcpy(disk_info.disk_id, msg->disk_id, sizeof(disk_info.disk_id));
 	nvmeibt_strlcpy(disk_info.status, "Remove", sizeof(disk_info.status));
-
 	return srvr_msg_queue_add(&disk_info, 'r', 0, NULL);
 }
 

@@ -12,7 +12,7 @@ struct nvmeibt_event_entry {
 	int event;
 };
 
-struct nvmeibt_event_tracker *nvmeibt_event_tracker_init(struct nvmeibt_event_tracker *tracker, 
+struct nvmeibt_event_tracker *nvmeibt_event_tracker_init(struct nvmeibt_event_tracker *tracker,
 	int max_events, nvmeibt_event_to_str_fn event_to_str)
 {
 	struct nvmeibt_event_tracker *rv = NULL;
@@ -109,8 +109,7 @@ out:
 void nvmeibt_event_tracker_print_jdr(struct nvmeibt_event_tracker *tracker,
 	struct jdr *jdr)
 {
-	int i, idx;
-	struct nvmeibt_event_entry *entry;
+	int i, idx, str_offset;
 	char time_buf[64];
 	struct tm tm_info;
 	time_t sec;
@@ -133,16 +132,14 @@ void nvmeibt_event_tracker_print_jdr(struct nvmeibt_event_tracker *tracker,
 		{ /* event_tracker scope */
 			jdr_array_scope(jdr, "events");
 			for (i = 0, idx = tracker->head - 1; i < tracker->max_events; i++, idx = (idx - 1 + tracker->max_events) % tracker->max_events) {
-				entry = &tracker->events[idx];
-				
+				const struct nvmeibt_event_entry *entry = &tracker->events[idx];
 				if (entry->timestamp.tv_sec == 0 && entry->timestamp.tv_nsec == 0)
 					continue;
 
 				sec = entry->timestamp.tv_sec;
 				localtime_r(&sec, &tm_info);
-				strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
-				snprintf(time_buf + strlen(time_buf), sizeof(time_buf) - strlen(time_buf),
-					".%09ld", entry->timestamp.tv_nsec);
+				str_offset = strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
+				snprintf(time_buf + str_offset, sizeof(time_buf) - str_offset, ".%09ld", entry->timestamp.tv_nsec);
 
 				event_str = tracker->event_to_str ? tracker->event_to_str(entry->event) : "unknown";
 				{
