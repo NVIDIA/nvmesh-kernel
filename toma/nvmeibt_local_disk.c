@@ -1906,7 +1906,7 @@ TODO(make the following work);
 			N_Ef(vxbaj1l, "Cannot open '@STR''! is_auto_takeover=@BOOL @AUTO_ERRNO", path, is_auto_takeover);
 			goto out;
 		}
-		n_bytes = NNVMEIBT_PREAD_ATOMIC(vhwk37d, fd, read_serial, strlen(read_serial), 0, 0);
+		n_bytes = NNVMEIBT_PREAD_ATOMIC(vhwk37d, fd, read_serial, sizeof(read_serial), 0, 0);
 		if (n_bytes <= 0) {
 			// The warning was printed from pread
 			goto out;
@@ -2450,7 +2450,7 @@ static void format_disk_freer(struct nvmeibt_wq_entry *wq_entry) {
 					start = newline+1;
 					newline = strchr(start, '\n');
 					if (*start && !newline)
-						newline = start+strlen(start)-1;
+						newline = start+strnlen(start, (1<<12))-1;
 					if (strncmp(start, entry->format_details.ldisk_id.str, sizeof(entry->format_details.ldisk_id.str)) == 0) {
 						// If the line from disks csv matches the formatted disk then generate a config with only this new line for immediate parsing
 						nvmeibt_Str_strncat(edited_new_config, start, (newline-start)+1);
@@ -2653,7 +2653,7 @@ int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n
 		// DISK_MODELS_PARAMS_V1_3_3:model,is_zeroing_using_test_and_write,is_zeroing_mandatory,is_secure_erase_after_disk_format
 		// DISK_MODELS_PARAMS_V1_3_3=ABC,1,1,1,1
 		cur_param_name = "DISK_MODELS_PARAMS_V1_3_3";
-		cur_prefix_len = strlen(cur_param_name);
+		cur_prefix_len = sizeof("DISK_MODELS_PARAMS_V1_3_3") - 1;
 		if (!strncmp(config, cur_param_name, cur_prefix_len)) {
 			if (config[cur_prefix_len] == ':') {
 				N_Tf(t_15_nvmeibt_dfprm_read, "@STR header consumed", cur_param_name);
@@ -2685,7 +2685,7 @@ int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n
 		// DISK_MODELS_PARAMS_V1_3_4:model,is_zeroing_using_test_and_write,is_zeroing_mandatory,is_secure_erase_after_disk_format,is_using_nvme_trim_before_zero
 		// DISK_MODELS_PARAMS_V1_3_4=ABC,1,1,1,1
 		cur_param_name = "DISK_MODELS_PARAMS_V1_3_4";
-		cur_prefix_len = strlen(cur_param_name);
+		cur_prefix_len = sizeof("DISK_MODELS_PARAMS_V1_3_4") - 1;
 		if (!strncmp(config, cur_param_name, cur_prefix_len)) {
 			if (config[cur_prefix_len] == ':') {
 				N_Tf(t_18_nvmeibt_dfprm_read, "@STR header consumed", cur_param_name);
@@ -2717,7 +2717,7 @@ int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n
 		// DISK_MODELS_PARAMS_V2_1:model,is_zeroing_using_test_and_write,is_zeroing_mandatory,is_secure_erase_after_disk_format,is_using_nvme_trim_before_zero,delete_ns_when_formatting,reset_after_format
 		// DISK_MODELS_PARAMS_V2_1=ABC,1,1,1,1,1,1
 		cur_param_name = "DISK_MODELS_PARAMS_V2_1";
-		cur_prefix_len = strlen(cur_param_name);
+		cur_prefix_len = sizeof("DISK_MODELS_PARAMS_V2_1") - 1;
 		if (!strncmp(config, cur_param_name, cur_prefix_len)) {
 			if (config[cur_prefix_len] == ':') {
 				N_Tf(t_21_nvmeibt_dfprm_read, "@STR header consumed", cur_param_name);
@@ -2828,24 +2828,17 @@ const struct nvmeibt_disk_flow_params_t *nvmeibt_disk_flow_params_get_next_model
 	return NULL;
 }
 
-int nvmeibt_disk_flow_params_set_model_params(struct nvmeibt_disk_flow_params_t *arg)
+int nvmeibt_disk_flow_params_set_model_params(const struct nvmeibt_disk_flow_params_t *arg)
 {
-	int rv = 0;
 	struct nvmeibt_disks_models_flow_params_t *all = &disk_model_flow_params;
 	struct nvmeibt_disk_flow_params_t *p = NULL;
 	int i = -1;
 
-	if (!arg || strlen(arg->model)>=NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE) {
-		rv = -1;
-		goto out;
-	}
-
-	if (strcmp(arg->model, all->dflt.model)==0) {
+	if (strncmp(arg->model, all->dflt.model, NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE)==0) {
 		p = &all->dflt;
 	}
-
 	for (i=0; !p && i<all->n_models; i++) {
-		if (strcmp(arg->model, all->dm[i].model)==0) {
+		if (strncmp(arg->model, all->dm[i].model, NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE)==0) {
 			p = &all->dm[i];
 		}
 	}
@@ -2853,19 +2846,14 @@ int nvmeibt_disk_flow_params_set_model_params(struct nvmeibt_disk_flow_params_t 
 	if (!p) {
 		if (all->n_models < (ARRAY_SIZE(all->dm)-1)) {
 			p = &all->dm[all->n_models++];
-		}
-		else {
-			rv = -2;
-			goto out;
+		} else {
+			return -2;
 		}
 	}
 
 	N_Tf(t_1_set_model_params, "Set new flow params for disk model @STR", arg->model);
 	memcpy(p, arg, sizeof(*p));
-	rv = 0;
-
-out:
-	return rv;
+	return 0;
 }
 
 void nvmeibt_disk_flow_params_remove_model(const char *model)
@@ -2874,7 +2862,7 @@ void nvmeibt_disk_flow_params_remove_model(const char *model)
 	struct nvmeibt_disk_flow_params_t *p = NULL, *last = NULL;
 	int i = -1;
 
-	if (!model || strlen(model)>=NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE) {
+	if (!model || strnlen(model, NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE + 2) >= NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE) {
 		goto out;
 	}
 
