@@ -523,7 +523,7 @@ void dump_traces_list_to_file(void)
 	struct _tracer *t;
 	FILE *f = 0;
 	const char *dirname = nvmeibt_toma_get_log_dir_name();
-	const size_t tracelist_len = strlen(dirname) + strlen(TRACE_LIST_FILENAME) + 2;
+	const size_t tracelist_len = strnlen(dirname, PATH_MAX) + strlen(TRACE_LIST_FILENAME) + 2;
 	char *tracelist = NNVMEIBT_TOMA_MALLOC(hu821mv, tracelist_len);
 	__MEASURE_TOOK_INIT();
 	nvmeibt_strlcpy(tracelist, dirname, tracelist_len);
@@ -556,13 +556,12 @@ void print_stack(void) {
 
 int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* auto_generated_printf_fmt, const char *filename, int line, const char *func_name) {
 	char *p = printf_fmt;
-	const int auto_generated_printf_fmt_len = (int)strlen(auto_generated_printf_fmt);
-    // keep 100 for safety, and needs at least 120
-    if ((printf_fmt_len > 10) && (auto_generated_printf_fmt_len > (int)(printf_fmt_len - 100))) {
-    	p += sprintf(p, "STRING TOO LONG!");
-        return -1;
-    }
-    p += sprintf(p, "%s[%d]:%s:%s", filename, line, func_name, auto_generated_printf_fmt);
+	const int max_len = (printf_fmt_len - 100); 	// keep 100 for safety, and needs at least 120
+	if ((printf_fmt_len > 10) && ((int)strnlen(auto_generated_printf_fmt, max_len) >= (max_len-1))) {
+		p += sprintf(p, "STRING TOO LONG!");
+		return -1;
+	}
+	p += sprintf(p, "%s[%d]:%s:%s", filename, line, func_name, auto_generated_printf_fmt);
 	if (*(p - 1) == '\n')
 		--p;	// remove last "\n"
 	*p = '\0';

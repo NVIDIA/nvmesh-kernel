@@ -666,7 +666,7 @@ static int validate_serial_number_match(int disk_fd, struct gpt_util_config *con
 	char	current_serial[64] = {0};
 
 	/* Validate source serial is present */
-	if (!source_serial || strlen(source_serial) == 0) {
+	if (!source_serial || strnlen(source_serial, sizeof(current_serial)) == 0) {
 		N_Ef(validate_serial_missing, "@STR missing serial number", source_name);
 		fprintf(stderr, COL_RED_BOLD "ERROR: %s missing serial - validation blocked" COL_RESET "\n", source_name);
 		return -1;
