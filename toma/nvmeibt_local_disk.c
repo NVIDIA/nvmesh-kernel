@@ -2843,7 +2843,7 @@ int nvmeibt_disk_flow_params_set_model_params(const struct nvmeibt_disk_flow_par
 		}
 	}
 
-	if (!p) {
+	if (!p) {	// Add new model
 		if (all->n_models < (ARRAY_SIZE(all->dm)-1)) {
 			p = &all->dm[all->n_models++];
 		} else {
@@ -2856,34 +2856,15 @@ int nvmeibt_disk_flow_params_set_model_params(const struct nvmeibt_disk_flow_par
 	return 0;
 }
 
-void nvmeibt_disk_flow_params_remove_model(const char *model)
+void nvmeibt_disk_flow_params_remove_model(const struct nvmeibt_disk_flow_params_t *arg)
 {
 	struct nvmeibt_disks_models_flow_params_t *all = &disk_model_flow_params;
-	struct nvmeibt_disk_flow_params_t *p = NULL, *last = NULL;
-	int i = -1;
-
-	if (!model || strnlen(model, NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE + 2) >= NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE) {
-		goto out;
-	}
-
-	for (i=0; !p && i<all->n_models; i++) {
-		if (strcmp(model, all->dm[i].model)==0) {
-			p = &all->dm[i];
-		}
-	}
-
-	if (!p)
-		goto out;
-
-	N_Tf(t_1_remove_model_params, "Remove flow params for disk model @STR", model);
-	last = &all->dm[all->n_models-1];
-	if (p != last) {
+	struct nvmeibt_disk_flow_params_t *p = (struct nvmeibt_disk_flow_params_t *)arg, *last = &all->dm[all->n_models-1];
+	N_Tf(t_1_remove_model_params, "Remove flow params for disk model @STR", p->model);
+	if (p != last)
 		memcpy(p, last, sizeof(*p));
-	}
+	memset(last, 0, sizeof(*last));		// Just for debug, clean the old data
 	--all->n_models;
-
-out:
-	;
 }
 
 void nvmeibt_disk_flow_params_print(struct nvmeibt_Str *s)

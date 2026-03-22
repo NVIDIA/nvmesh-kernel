@@ -305,8 +305,8 @@ struct nvmeibt_disks_models_flow_params_t {
 int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n_matches);		// Load parameters from config line
 const struct nvmeibt_disk_flow_params_t *nvmeibt_disk_flow_params_get(const char *model, bool use_defaults);
 const struct nvmeibt_disk_flow_params_t *nvmeibt_disk_flow_params_get_next_model(const struct nvmeibt_disk_flow_params_t *arg);
-int nvmeibt_disk_flow_params_set_model_params(const struct nvmeibt_disk_flow_params_t *arg);
-void nvmeibt_disk_flow_params_remove_model(const char *model);
+int  nvmeibt_disk_flow_params_set_model_params(const struct nvmeibt_disk_flow_params_t *arg);
+void nvmeibt_disk_flow_params_remove_model(    const struct nvmeibt_disk_flow_params_t *arg);
 void nvmeibt_disk_flow_params_print(struct nvmeibt_Str *s);
 void nvmeibt_disk_flow_params_reset_models_before_new_scan(void);
 

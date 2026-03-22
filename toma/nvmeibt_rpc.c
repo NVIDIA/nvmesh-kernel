@@ -649,7 +649,7 @@ static int nvmeibt_rpc_command_disk_models(int argc, char *argv[], struct nvmeib
 			return -1;
 		}
 		nvmeibt_Str_sprintf(out, "Disk model %s removed.\n", params->model);
-		nvmeibt_disk_flow_params_remove_model(params->model);
+		nvmeibt_disk_flow_params_remove_model(params);
 		persist_params_in_file();
 		return 0;
 	}
