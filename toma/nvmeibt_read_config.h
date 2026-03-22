@@ -40,6 +40,7 @@ struct mm_mgmt_conf;
 
 bool nvmeibt_read_config_am_i_eligible_to_read_config_directly(void);
 const char *nvmeibt_get_csv_header_by_section_type(enum NVMEIBT_CSV_TYPE);
+size_t      nvmeibt_get_csv_hdrlen_by_section_type(enum NVMEIBT_CSV_TYPE);
 struct nvmeibt_disk_segment;
 void nvmeibt_read_config_add_missing_seg_to_praid(struct nvmeibt_praid *praid, struct nvmeibt_disk_segment *seg);
 int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, enum NVMEIBT_CSV_TYPE);

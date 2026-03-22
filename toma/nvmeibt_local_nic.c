@@ -33,8 +33,7 @@ enum nvmeibt_add_rv nvmeibt_local_nic_add(char *config_str, int config_tag)
 
 	NFIN;
 	new_local_nic = NNVMEIBT_TOMA_CALLOC(trace_local_nic_nvmeibt_local_nic_add, 1, sizeof(*new_local_nic));
-
-	// device,hw_gid,port,pkey,transport,state,mtu,max_mtu,gid_index,roce_v2,roce_ipv6,used,ndev_name,sw_gid
+	// NVMEIBS_NICS_CSV_HEADER
 	// mlx4_0,0xfe80000000000000f4521403007984e1,1,0xffff,I,ACTIVE,4096,4096,0xfe80000000000000f4521403007984e1
 	f = &(new_local_nic->from_config);
 	r = nvmeibt_sscanf_csv_line(config_str,

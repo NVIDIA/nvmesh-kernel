@@ -85,6 +85,11 @@ const char *nvmeibt_get_csv_header_by_section_type(enum NVMEIBT_CSV_TYPE section
 	else													return NULL;
 }
 
+size_t nvmeibt_get_csv_hdrlen_by_section_type(enum NVMEIBT_CSV_TYPE section_type)
+{
+	return ((section_type == NVMEIBT_CSV_TYPE_LOCAL_DISKS) ? sizeof(NVMEIBS_DISKS_CSV_HEADER) : sizeof(NVMEIBS_NICS_CSV_HEADER)) - 1;
+}
+
 enum NVMEIBT_CSV_TYPE nvmeibt_get_section_type_by_section_header(const char *hdr)
 {
 	if (!strncmp(nvmeibt_get_csv_section_header_by_section_type(NVMEIBT_CSV_TYPE_LOCAL_DISKS), hdr, 100))	return NVMEIBT_CSV_TYPE_LOCAL_DISKS;
@@ -131,8 +136,8 @@ int nvmeibt_read_config_file(struct nvmeibt_Str *config_struct, enum NVMEIBT_CSV
 	if (rv < 0) {
 		N_ETf(t_zzz_25, "Error reading @SECTION_TYPE, @AUTO_ERRNO", what);
 	} else {
-		const char *csv_header = nvmeibt_get_csv_header_by_section_type(what);
-		const size_t csv_header_line_len = strlen(csv_header);
+		const char *csv_header =           nvmeibt_get_csv_header_by_section_type(what);
+		const size_t csv_header_line_len = nvmeibt_get_csv_hdrlen_by_section_type(what);
 		const char  *csv_header_line_ptr = nvmeibt_Str_str(config_struct) + csv_section_header_line_len;
 		rv = 0;
 		if (strncmp(csv_header_line_ptr, csv_header, csv_header_line_len)) {
