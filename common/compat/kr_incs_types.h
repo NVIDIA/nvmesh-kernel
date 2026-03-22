@@ -90,8 +90,8 @@
 	static inline bool  IS_ERR_OR_NULL(const void *ptr) { return !ptr || IS_ERR(ptr); }
 #endif // __KERNEL__
 
-#ifndef __clang__
 #ifndef FALLTHRU
+#ifndef __clang__
 	#if (__GNUC__ >= 7)
 		#if __has_attribute(__fallthrough__)
 			#define FALLTHRU __attribute__ ((__fallthrough__))
@@ -101,10 +101,11 @@
 	#else
 		#define FALLTHRU
 	#endif
-#endif
-#else
+#else //clang compilation
 	#define FALLTHRU __attribute__ ((__fallthrough__))
-#endif
+#endif // __clang__
+#endif // FALLTHRU
+
 #ifndef __bitwise
 	#define __bitwise
 #endif

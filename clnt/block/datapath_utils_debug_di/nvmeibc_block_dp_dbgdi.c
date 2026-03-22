@@ -250,7 +250,7 @@ static void __data_blk_poison_before_read_sent(data_blk *s)
 static void __verify_ec_writer_matches_seg_uuid(data_blk *d, const struct nvmeibc_raid1 *pr, const void* _uuid, const char *reason, const struct nvmeibc_block_command *cmd) {
 	const struct t_db_who_writer *s;
 	int writer_exists;
-	const struct t_db_who_writer __s;
+	struct t_db_who_writer __s;
 	int rc;
 	s = &__s;
 	rc = dbgdi_log_get_record_by_type(&d->log, DBG_DI_WRITE, (void *)s, DBG_DI_WRITE_REC_SIZE);

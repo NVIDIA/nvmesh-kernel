@@ -453,7 +453,7 @@ struct vex_encode_dref_alloc_ctx;
  */
 struct vex_ops {
 	union {
-		const char magic_str[8];                /* Magic String / Value - Used for Containers */
+		__attribute__((nonstring)) const char magic_str[8];                /* Magic String / Value - Used for Containers */
 		__be64 magic_val;
 	};
 	union nvmeib_version version;
