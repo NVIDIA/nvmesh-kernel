@@ -236,7 +236,33 @@ static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid)
 	if (strcmp(disk_uuid, m->disk_003.uuid) == 0) return &m->disk_003;
 	BUG_ON(true); return NULL;
 }
-static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_report_target_msg);
+
+static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(1024);
+	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, (unsigned long)m->boot_time);
+	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->disk_id, d->format_counter_sent, m->boot_time);
+	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
+}
+
+static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_report_target_msg) {
+	if (__is_disk_fmt_running(d->format_state)) {
+		const unsigned expected = d->format_counter_sent;
+		enum e_disk_format_state prev_state = d->format_state;
+		if ((d->format_counter_toma_reply_done == expected) && (strcmp(d->status, "Ok") == 0)) {
+			d->format_state = FMT_DONE;
+		} else if (d->format_counter_toma_reply_in_progress == expected) {
+			if (!on_report_target_msg)				// Zeroing message
+				d->format_state = FMT_ZEROING;
+			else if (prev_state == FMT_SENT)
+				d->format_state = FMT_IN_PROGRESS;
+		} else {
+			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
+			__send_format_drive_msg(d);
+		}
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, expected, on_report_target_msg ? "Target" : "Zeroin");
+	}
+}
 
 void mgmt_sim_send_msg_assign_to_zone(int zone_idx) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
@@ -430,33 +456,6 @@ static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *d
 		d->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
 		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", d->disk_id, d->status, d->format_counter_toma_reply_done, d->format_counter_toma_reply_in_progress, d->block_size, d->metadata_size);
 		__check_format_progress(d, true);
-	}
-}
-
-static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	char *buf = malloc(1024);
-	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, (unsigned long)m->boot_time);
-	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->disk_id, d->format_counter_sent, m->boot_time);
-	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
-}
-
-static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_report_target_msg) {
-	if (__is_disk_fmt_running(d->format_state)) {
-		const unsigned expected = d->format_counter_sent;
-		enum e_disk_format_state prev_state = d->format_state;
-		if ((d->format_counter_toma_reply_done == expected) && (strcmp(d->status, "Ok") == 0)) {
-			d->format_state = FMT_DONE;
-		} else if (d->format_counter_toma_reply_in_progress == expected) {
-			if (!on_report_target_msg)				// Zeroing message
-				d->format_state = FMT_ZEROING;
-			else if (prev_state == FMT_SENT)
-				d->format_state = FMT_IN_PROGRESS;
-		} else {
-			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
-			__send_format_drive_msg(d);
-		}
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, expected, on_report_target_msg ? "Target" : "Zeroin");
 	}
 }
 
