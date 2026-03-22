@@ -88,15 +88,27 @@ static void scenario_test_signals(void) {
 	SCENARIO_PRINT(__AUTOID__, "end");
 }
 
+static void scenario_user_rpcs_disk_models(void) {
+	SCENARIO_PRINT(__AUTOID__, "start");
+	user_rpc_send_to_toma("disk-models set dummy1_disk_model ignore_metadata on");
+	user_rpc_send_to_toma("disk-models set dummy1_disk_model is_zeroing_using_test_and_write off");
+	user_rpc_send_to_toma("disk-models set dummy2_disk_model force_512b off");
+	user_rpc_send_to_toma("disk-models list");
+	user_rpc_send_to_toma("disk-models remove dummy1_disk_model");
+	user_rpc_send_to_toma("disk-models remove dummy2_disk_model");
+	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
+	SCENARIO_PRINT(__AUTOID__, "done");
+}
+
 static void scenario_user_rpcs_generic(void) {
 	SCENARIO_PRINT(__AUTOID__, "start");
 	user_rpc_send_to_toma("simulate dump-clnt-hash 20");
 	user_rpc_send_to_toma("simulate bm-garbage-collect 1");
 	user_rpc_send_to_toma("status server_csvs");
 	user_rpc_send_to_toma("status errors");
-	user_rpc_send_to_toma("disk-models list");
 	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
 	SCENARIO_PRINT(__AUTOID__, "done");
+	scenario_user_rpcs_disk_models();
 }
 static void scenario_user_rpcs_praid(void) {
 	SCENARIO_PRINT(__AUTOID__, "start");

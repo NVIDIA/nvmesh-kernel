@@ -52,7 +52,7 @@ static bool _recv_always_has_data(void) { return true; }
 struct user_rpc_simu {
 	int n_sent, n_recv, n_total;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
 	int sender_fd;
-	const char* cmds[8];			// Todo: This should be a circular buffer to which unit-test env injects rpc and toma extracts them 1 by 1.	return g_rpc_sim;
+	const char* cmds[16];			// Todo: This should be a circular buffer to which unit-test env injects rpc and toma extracts them 1 by 1.	return g_rpc_sim;
 	struct TSB_fd_otherside o;
 };
 static struct user_rpc_simu *g_rpc_sim = NULL;
