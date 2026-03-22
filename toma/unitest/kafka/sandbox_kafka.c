@@ -268,11 +268,13 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 				sim_broker_topic_reset_to_earliest(bt);
 			} else {
 				const bool is_OK_to_loose_msgs = ((bt->type == KTOPIC_TYPE_M2T_TARGETS_RAFT) || (bt->type == KTOPIC_TYPE_M2T_HW_CFG));	// Temp: Config will be re-sent again by mgmt, raft targets are in persistency so not needed
+				const bool is_loading_kafka_from_persist = (offset > bt->debug_highest_offset_ever_reached);		// Toma intends to skip messages it never read, ie - it read them in previous run and saved offset to persistency
 				BUG_ON((offset < 0) || (offset <= bt->committed_offset));	// Those messages do not exist in kafka queue
 				bt->cur_offset = offset;	// Toma explicitly asks to start from a specific offset (taken from its RAM upon kafka soft init, or from persistency upon toma init or leader change).
-				if ((offset > bt->committed_offset) && !is_OK_to_loose_msgs) {		// Toma read this value from persistency. Going to skip messages in kafka queue. Why? Our kafka broker does not have persistency between runs but Toma does
-					BUG_ON(bt->n_msgs != 0);
-					bt->committed_offset = bt->cur_offset - 1;	// Toma will not read the messages pushed by unitest environment
+				if (bt->n_msgs == 0) {
+					bt->committed_offset = bt->cur_offset - 1;	// Simulate as if everything from toma persistency was in the past and now unitest is injecting new messages. No need to ack offsets as broker is empty
+				} else if (is_loading_kafka_from_persist && (offset > bt->committed_offset) && !is_OK_to_loose_msgs) {		// Toma read this value from persistency. Going to skip messages in kafka queue. Why? Our kafka broker does not have persistency between runs but Toma does
+					BUG_ON(bt->n_msgs != 0); // Otherwise toma will not read the messages pushed by unitest environment aand tests will break
 				}
 			}
 			N_Tf(__AUTOID__, ASSIGN_FMT " n_msgs=@INT, CurSet", ASSIGN_ARG(bt), bt->n_msgs);
