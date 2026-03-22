@@ -20,6 +20,10 @@ struct nvmeib_data_reuse_buf_params;
 struct nvmeibc_icore_ops;
 struct nvmeibc_disk_subscription_params;
 
+//NOTE: Right now it is not clear whether the icore_ops & idisk interfaces should be merged. 
+//Right now the split criteria was: local with remote access (unrelated to the disk location). 
+//It is a reasonable expectation that to get the disk name we should not go the server.   
+
 //the following struct defines "core" layer functionality towards the block layer
 struct nvmeibc_icore_ops {
 	__attribute__((nonnull (1,2,5)))
