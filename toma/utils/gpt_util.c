@@ -216,35 +216,23 @@ void SELF_TEST_undo_mock_toma_running(void)
 	s_toma_lock_state_gpt = TOMA_LOCK_GPT_SELF_TEST;
 }
 
-/**
- * Create private backup directory with restrictive permissions
- * Returns 0 on success, -1 on error
- */
 static int create_backup_directory(const char *backup_dir)
 {
-	struct stat	st;
-
-	/* Check if directory already exists */
-	if (stat(backup_dir, &st) == 0) {
-		/* Directory exists - verify it's a directory and has correct permissions */
-		if (!S_ISDIR(st.st_mode)) {
-			N_Ef(backup_dir_not_dir, "Backup path exists but is not a directory: @STR", backup_dir);
-			fprintf(stderr, COL_RED_BOLD "ERROR: Backup path exists but is not a directory: %s" COL_RESET "\n", backup_dir);
-			return -1;
-		}
-		/* Directory exists and is valid */
+	if (mkdir(backup_dir, 0700) == 0) {	/* Create directory with restrictive permissions (0700 - owner only) */
+		N_Tf(backup_dir_created, "Created backup directory: @STR", backup_dir);
 		return 0;
 	}
-
-	/* Create directory with restrictive permissions (0700 - owner only) */
-	if (mkdir(backup_dir, 0700) < 0) {
-		N_Ef(backup_dir_create_failed, "Failed to create backup directory @STR @AUTO_ERRNO", backup_dir);
-		fprintf(stderr, COL_RED_BOLD "ERROR: Failed to create backup directory: %s" COL_RESET "\n", backup_dir);
+	if (errno == EEXIST) {
+		struct stat	st;
+		if ((stat(backup_dir, &st) == 0)  && S_ISDIR(st.st_mode))
+			return 0;					// Directory exists and is valid
+		N_Ef(backup_dir_not_dir, "Backup path exists but is not a directory: @STR", backup_dir);
+		fprintf(stderr, COL_RED_BOLD "ERROR: Backup path exists but is not a directory: %s" COL_RESET "\n", backup_dir);
 		return -1;
 	}
-
-	N_Tf(backup_dir_created, "Created backup directory: @STR", backup_dir);
-	return 0;
+	N_Ef(backup_dir_create_failed, "Failed to create backup directory @STR @AUTO_ERRNO", backup_dir);
+	fprintf(stderr, COL_RED_BOLD "ERROR: Failed to create backup directory: %s" COL_RESET "\n", backup_dir);
+	return -1;
 }
 
 /**
