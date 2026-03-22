@@ -320,12 +320,12 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 # ********** Define Rules for building *********
-.PHONY: depend clean gf_perf post_lttng write_compilation_cmd autogen ECHO_COMPILING
+.PHONY: depend clean gf_perf post_lttng write_compilation_cmd autogen ECHO_COMPILING pet_dictionary
 
 $(OBJ_DIR)/%.o : %.S_shipped
 	gcc -x assembler-with-cpp -c $< -o $@
 
-all: $(SOURCES) $(EXE_NAME)
+all: $(SOURCES) $(EXE_NAME) pet_dictionary
 
 AUTOGEN_TARGETS = $(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h $(AUTOGEN_DIR)/clnt/nvmeibc_mcs_stub.h $(AUTOGEN_DIR)/common/nvmeib_mcs_header.h
 
@@ -352,7 +352,9 @@ PET_MESSAGES_SH = $(SSDA)/common/pet/pet_messages.sh
 $(EXE_NAME): $(OBJECTS) $(ASMOBJ) $(OBJ_DIR)/traces_ids.o
 	@$(CC) $(LDFLAGS) $(OBJECTS) $(OBJ_DIR)/traces_ids.o -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
 	$(info -->Linking  ... |$(OBJECTS)|)
-	@mkdir -p $(PET_DICT_DIR)	
+
+pet_dictionary: $(EXE_NAME)
+	@mkdir -p $(PET_DICT_DIR)
 	-$(PET_MESSAGES_SH) save-dictionary $(EXE_PATH) nvmeibc_io_pet_msgs $(PET_DICTIONARY)
 
 $(OBJECTS): $(PRECOMPILED_HEADERS)
