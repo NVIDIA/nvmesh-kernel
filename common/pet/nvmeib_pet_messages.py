@@ -293,14 +293,14 @@ class DwarfRuntime:
 	@typing.no_type_check
 	def __init__(self, elf_path: pathlib.Path):
 		result: DwarfResolveRelocationsResult = resolve_dwarf_relocations(elf_path)
-		self.resolved_path: pathlib.Path = result.elf_path
-		self.was_resolved: bool = result.resolved
+		self._resolved_path: pathlib.Path = result.elf_path
+		self._was_resolved: bool = result.resolved
 		
 		self._fobj = None
 		try:
-			self._fobj = open(self.resolved_path, 'rb')
+			self._fobj = open(self._resolved_path, 'rb')
 			elf = ELFFile(self._fobj)
-			relocate_dwarf_sections = False if self.was_resolved else True
+			relocate_dwarf_sections = False if self._was_resolved else True
 			self._dwarf = elf.get_dwarf_info(relocate_dwarf_sections) if elf.has_dwarf_info() else None
 			self._address_size = elf.elfclass // 8
 			self._type_cache: dict[int, TypeInfo] = {}
@@ -311,9 +311,9 @@ class DwarfRuntime:
 	def close(self):
 		if self._fobj:
 			self._fobj.close()
-		if self.was_resolved: 
-			self.was_resolved = False
-			shutil.rmtree(self.resolved_path.parent)
+		if self._was_resolved: 
+			self._was_resolved = False
+			shutil.rmtree(self._resolved_path.parent)
 
 	def __enter__(self):
 		return self
