@@ -1499,7 +1499,7 @@ static void set_nvme_op_rsrc_md(struct nvme_op_rsrc *rsrc, const void *md, size_
 			 sgl_offset += NVMEIBC_SECTOR_SIZE + sw_md_sz) {
 			copy_sz = min(sw_md_sz, md_sz);
 			sg_pcopy_from_buffer(rsrc->sgl, rsrc->n_pages,
-					     (void *)md, copy_sz, sgl_offset);
+					     md, copy_sz, sgl_offset);
 			md += copy_sz;
 			md_sz -= copy_sz;
 		}

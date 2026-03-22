@@ -87,8 +87,8 @@ static inline void nvmeib_buffer_free_sgl(struct nvmeib_buffer *buf)
 
 static inline void nvmeib_buffer_copy_to_buffer_ext(const struct nvmeib_buffer *buf, void *dest, size_t dest_sz, off_t skip)
 {
-	sg_copy_buffer(buf->sgt.sgl, buf->sgt.nents,
-		       dest, min_t(size_t, buf->size - buf->offset - skip, dest_sz), buf->offset + skip, true);
+	sg_pcopy_to_buffer(buf->sgt.sgl, buf->sgt.nents,
+		       dest, min_t(size_t, buf->size - buf->offset - skip, dest_sz), buf->offset + skip);
 }
 
 static inline void nvmeib_buffer_copy_to_buffer(const struct nvmeib_buffer *buf, void *dest, size_t dest_sz)
@@ -98,8 +98,8 @@ static inline void nvmeib_buffer_copy_to_buffer(const struct nvmeib_buffer *buf,
 
 static inline void nvmeib_buffer_copy_from_buffer_ext(struct nvmeib_buffer *buf, const void *src, size_t src_sz, off_t skip)
 {
-	sg_copy_buffer(buf->sgt.sgl, buf->sgt.nents,
-		       src, min_t(size_t, buf->size - buf->offset - skip, src_sz), buf->offset + skip, false);
+	sg_pcopy_from_buffer(buf->sgt.sgl, buf->sgt.nents,
+		       src, min_t(size_t, buf->size - buf->offset - skip, src_sz), buf->offset + skip);
 }
 
 static inline void nvmeib_buffer_copy_from_buffer(struct nvmeib_buffer *buf, const void *src, size_t src_sz)
