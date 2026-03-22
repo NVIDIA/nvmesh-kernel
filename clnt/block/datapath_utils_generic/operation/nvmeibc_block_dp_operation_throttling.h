@@ -7,6 +7,7 @@
 #define NVMEIBC_DP_OPERATION_THROTTLING_H
 
 #include "common/nvmeib_measured_work.h"
+#include "common/nvmeib_metrics.h"
 #include "clnt/nvmeibc_wq_metrics.h"
 
 NVMEIBC_WQ_METRIC(nvmeibc_throttle_wq_latency, "reason=throttle");
@@ -69,6 +70,8 @@ bool nvmeibc_operation_throttling_check_should_execute(struct operation *o)
 			list_add_tail(&o->per_cpu_wait_list, &tps->io_wait_list);
 			should_execute = false;
 			tps->n_wait_list++;
+			nvmeibc_io_throttle_metrics_record_throttled(&tps->throttle_metrics);
+			o->throttle_enqueue_ticks = nvmeib_public_rdtsc();
 		}
 		spin_unlock_irqrestore(&tps->list_access, flags);
 	}
@@ -100,6 +103,8 @@ static void nvmeibc_operation_throttling_pull_next(struct nvmeibc_block_device *
 								  per_cpu_wait_list);
 		list_del(&next_o->per_cpu_wait_list);
 		tps->n_wait_list--;
+		nvmeibc_io_throttle_metrics_record_dequeued(&tps->throttle_metrics,
+			nvmeib_public_rdtsc() - next_o->throttle_enqueue_ticks);
 		/* Note: Number of in air io's havent changed ('o' completed, but
 		   'next_o' started). tp->ios_issued - tps->ios_completed remains
 		   unchnaged. As optimization we don't do tps->ios_completed++ here

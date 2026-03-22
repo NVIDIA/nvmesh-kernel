@@ -22,6 +22,10 @@
 #include "management_utils_common/nvmeibc_management_volume_conf_checks.h"
 #include "common/compat/kr_incs_compiler_types.h"
 #include "common/proc_epilog.h"
+#include <linux/module.h>
+#include "compat/kr_incs_time_rdtsc.h"
+#include "common_public/nvmeib_trace.h"
+#include "nvmeibc_trace.h"
 
 NVMEIBC_MEMMGR_METRIC(io_ctrl_topologies, "component=raid.io_ctrl.topologies");
 
@@ -5295,4 +5299,66 @@ static void __toma_msg_handlers_drainer_release(struct kref *handlers)
 void toma_msg_handlers_drainer_put(struct toma_msg_handlers_drainer *tmhd)
 {
 	kref_put(&tmhd->handlers, __toma_msg_handlers_drainer_release);
+}
+
+/**************************** IO throttle metrics (trace / module param) ****************************/
+
+uint nvmeibc_io_throttle_metrics_trace_mask = NVMEIBC_IO_THROTTLE_METRIC_COUNT
+	| NVMEIBC_IO_THROTTLE_METRIC_LATENCY | NVMEIBC_IO_THROTTLE_METRIC_NUM_THROTTLED;
+module_param_named(io_throttle_metrics_trace_mask, nvmeibc_io_throttle_metrics_trace_mask, uint, 0644);
+MODULE_PARM_DESC(io_throttle_metrics_trace_mask,
+		 "Bitmask of IO throttle metric traces to emit: bit0=event_count, bit1=latency_highres_histogram, bit2=reserved, bit3=number_of_throttled_ios. 0 disables all.");
+
+void nvmeibc_io_throttle_metrics_trace_selected(const char *dev_name,
+						struct topo_percore_shared *percore_shared,
+						unsigned int trace_mask)
+{
+	int cpu_id;
+	const int n_cpu = MAX_NUM_ACTIVE_CPUS;
+	u64 *count_vals = NULL;
+
+	count_vals = kcalloc(n_cpu, sizeof(u64), GFP_KERNEL);
+	if (!count_vals)
+		goto out;
+
+	if (trace_mask & NVMEIBC_IO_THROTTLE_METRIC_COUNT) {
+		for_each_allocated_cpu(cpu_id) {
+			struct topo_percore_shared *tps = &percore_shared[cpu_id];
+
+			count_vals[cpu_id] = tps->throttle_metrics.count.counter;
+		}
+
+		NVMEIB_LOG_METRICS("@DEV_NAME io_throttle_event_count @IO_THROTTLE_CPU_ARR",
+				   _T, tracer_nvmeibc, info_dev_io_throttle_event_count,
+				   dev_name, count_vals, n_cpu);
+	}
+
+	if (trace_mask & NVMEIBC_IO_THROTTLE_METRIC_LATENCY) {
+		for_each_allocated_cpu(cpu_id) {
+			struct topo_percore_shared *tps = &percore_shared[cpu_id];
+
+			NVMEIB_LOG_METRICS("@DEV_NAME io_throttle_latency cpu_index=@INT @HIGHRES_HISTOGRAM",
+					   _T, tracer_nvmeibc, info_dev_io_throttle_latency,
+					   dev_name, cpu_id,
+					   "io_throttle_latency", "module=nvmeibc;component=io_throttle",
+					   (u32)nvmeib_public_tsc_khz(),
+					   tps->throttle_metrics.latency.max,
+					   tps->throttle_metrics.latency.bins);
+		}
+	}
+
+	if (trace_mask & NVMEIBC_IO_THROTTLE_METRIC_NUM_THROTTLED) {
+		for_each_allocated_cpu(cpu_id) {
+			struct topo_percore_shared *tps = &percore_shared[cpu_id];
+
+			count_vals[cpu_id] = (u64)tps->throttle_metrics.num_throttled.counter;
+		}
+
+		NVMEIB_LOG_METRICS("@DEV_NAME io_throttle_num_throttled @IO_THROTTLE_CPU_ARR",
+				   _T, tracer_nvmeibc, info_dev_io_throttle_num_throttled,
+				   dev_name, count_vals, n_cpu);
+	}
+
+out:
+	kfree(count_vals);
 }

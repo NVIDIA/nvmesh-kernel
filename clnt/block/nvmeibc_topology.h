@@ -18,6 +18,7 @@
  */
 #include "../toma/clnt/nvmeibt_client_protocol.h"
 #include "datapath_utils_generic/nvmeibc_block_dp_lock_server.h"
+#include "nvmeib_metrics.h"
 #include "datapath_utils_generic/profiling/nvmeibc_block_dp_profiling_generic.h"
 #include "block/recovery/nvmeibc_block_sync_profiling_stages.h"
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"
@@ -281,12 +282,56 @@ struct nvmeibc_chunk {
 
 /* Find the chunk which contains given address and return its index */
 int nvmeibc_get_chunk_ind_of_lba(u64 lba, const struct nvmeibc_topology *t);
+
+/* Bitmask for nvmeibc_io_throttle_metrics_trace_selected() and module param io_throttle_metrics_trace_mask.
+ * bit 0 (0x1): per-CPU event-count array
+ * bit 1 (0x2): per-CPU highres throttle latency histogram (includes max_ticks)
+ * bit 2 (0x4): reserved (was max_latency; use HIGHRES_HISTOGRAM.MAX_TICKS)
+ * bit 3 (0x8): number of throttled IOs
+ */
+#define NVMEIBC_IO_THROTTLE_METRIC_COUNT		(1u << 0)
+#define NVMEIBC_IO_THROTTLE_METRIC_LATENCY		(1u << 1)
+#define NVMEIBC_IO_THROTTLE_METRIC_NUM_THROTTLED	(1u << 3)
+
+extern uint nvmeibc_io_throttle_metrics_trace_mask;
+
+struct nvmeibc_io_throttle_metrics {
+	struct nvmesh_metric_monotonic_counter count;       /* IOs throttled (monotonic) */
+	struct nvmesh_metric_highres_histogram latency;     /* time in queue (TSC ticks; includes exact max) */
+	struct nvmesh_metric_gauge            num_throttled; /* number of throttled IOs */
+};
+
+static inline void nvmeibc_io_throttle_metrics_clear(struct nvmeibc_io_throttle_metrics *m)
+{
+	nvmesh_metric_monotonic_counter_clear(&m->count);
+	nvmesh_metric_highres_histogram_clear(&m->latency);
+	nvmesh_metric_gauge_clear(&m->num_throttled);
+}
+
+static inline void nvmeibc_io_throttle_metrics_record_throttled(struct nvmeibc_io_throttle_metrics *m)
+{
+	nvmesh_metric_monotonic_counter_update(&m->count, 1);
+	nvmesh_metric_gauge_update(&m->num_throttled, 1);
+}
+
+static inline void nvmeibc_io_throttle_metrics_record_dequeued(struct nvmeibc_io_throttle_metrics *m, u64 wait_ticks)
+{
+	nvmesh_metric_highres_histogram_update(&m->latency, wait_ticks);
+	nvmesh_metric_gauge_update(&m->num_throttled, -1);
+}
+
+struct topo_percore_shared;
+void nvmeibc_io_throttle_metrics_trace_selected(const char *dev_name,
+						struct topo_percore_shared *percore_shared,
+						unsigned int trace_mask);
+
 /***************** Implementation of real time topology **********************/
 /* This object exist per core BUT unlike percpu all cores update it regularly.*/
 struct topo_percore_shared {				// It must *NOT* be within the percpu pages bcz otherwise it will cause contention for other variables that share the cache line & assume that the data is private for the core.
 	spinlock_t 		list_access;			// Accessing the list below: 1 cpu adds new io's  while another cpu removes when it finishes previous io
 	struct list_head	io_wait_list;		// list of IO's waiting for execution (kernel sent those io to this cpu so they are in its list)
 	u64				ios_completed;			// # of in air io's (originating from this core) that were already completed (by this or other core), monotonically increasing.
+	struct nvmeibc_io_throttle_metrics throttle_metrics;
 	int 			n_wait_list;			// number of 'op' queued in the wait-list
 	#ifdef DEBUG_PERCPU_ISSUED_IO_CNTRS
 		unsigned	n_ios;					// # of io's that are currently in-flight from this core (debugging counter only) == (ios_issued - ios_completed).

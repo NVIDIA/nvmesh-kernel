@@ -20100,6 +20100,12 @@
         "type": "array_u64_flex",
         "fmt": "%s"
     },
+    "@IO_THROTTLE_CPU_ARR": {
+        "size": 64,
+        "type": "array_u64_flex",
+        "fmt": "%s",
+        "doc": "Per-CPU io_throttle metric values (one entry per allocated CPU)"
+    },
     "@IO_STAT_COUNTER": {
         "size": 64,
         "type": "u64",

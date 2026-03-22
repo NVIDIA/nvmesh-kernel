@@ -11,6 +11,7 @@
 #include "nvmeib_json.h"
 #include "nvmeib_io_stats.h"
 #include "nvmeib_utils.h"
+#include "nvmeib_metrics_jdr.h"
 #include "os_api/nvmeibc_block_api_os_common.h"
 #include "os_api/nvmeibc_block_api_os_scsi_ioctls.inc.c"
 #include "os_api/nvmeibc_block_api_os_sub_vols_common.h"
@@ -1831,6 +1832,63 @@ _out:
 #undef BUF_ADD
 }
 
+void nvmeibc_block_io_throttle_metrics_trace(const struct nvmeibc_block_device *dev)
+{
+	nvmeibc_io_throttle_metrics_trace_selected(dev->name, dev->topologies.percore_shared,
+						 nvmeibc_io_throttle_metrics_trace_mask);
+}
+
+static void io_throttle_metrics_proc_fill_to_json(struct jdr *jdr, void *arg)
+{
+	struct nvmeibc_block_device *dev = arg;
+	struct nvmeib_jdr_write_closure jdr_writer;
+	char labels_buf[128];
+	int cpu_id;
+
+	jdr_writer = nvmeib_jdr_write_closure_create(jdr);
+
+	{
+		jdr_array_scope(jdr, "per_cpu");
+		for_each_allocated_cpu(cpu_id) {
+			struct topo_percore_shared *tps = &dev->topologies.percore_shared[cpu_id];
+			struct nvmesh_metric_id count_id       = { .name = "throttle_count",       .labels = labels_buf };
+			struct nvmesh_metric_id latency_id     = { .name = "throttle_latency",     .labels = labels_buf };
+			struct nvmesh_metric_id num_throttled_id = { .name = "throttle_num_throttled", .labels = labels_buf };
+
+			snprintf(labels_buf, sizeof(labels_buf),
+				 "module=nvmeibc;component=io_throttle;cpu=%d", cpu_id);
+			{
+				jdr_object_scope(jdr, NULL);
+				{
+					jdr_write_var(jdr, cpu_index, cpu_id);
+					{
+						jdr_array_scope(jdr, "metrics");
+						nvmesh_metric_visit(jdr_writer.base, NULL, tps->throttle_metrics.count, count_id);
+						nvmesh_metric_visit(jdr_writer.base, NULL, tps->throttle_metrics.latency, latency_id);
+						nvmesh_metric_visit(jdr_writer.base, NULL, tps->throttle_metrics.num_throttled, num_throttled_id);
+					}
+				}
+			}
+		}
+	}
+}
+
+static void io_throttle_metrics_proc_reset(void *arg)
+{
+	struct nvmeibc_block_device *dev = arg;
+	int cpu_id;
+
+	for_each_allocated_cpu(cpu_id) {
+		struct topo_percore_shared *tps = &dev->topologies.percore_shared[cpu_id];
+		nvmeibc_io_throttle_metrics_clear(&tps->throttle_metrics);
+	}
+}
+
+static ssize_t io_throttle_metrics_proc_write(void *arg, const char __user *buf, size_t count, loff_t *ppos)
+{
+	return nvmeib_jdr_proc_write_reset(io_throttle_metrics_proc_reset, arg, buf, count);
+}
+
 struct io_status_to_string_ctx {
 	struct nvmeibc_block_device *dev;
 	char *buf;
@@ -1924,6 +1982,8 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 	p->profcsv  = RO_proc_open("profiling.csv",    p, cb.profiling_to_csv      , os->dev);
 	p->j_status = RO_proc_open("status.json" ,     p, cb.dev_status_to_json    , os->dev);
 	p->ext_blob = RO_proc_open("blob.txt",         p, cb.ext_blob_to_txt       , os->dev);
+	p->io_throttle_metrics = nvmeib_jdr_proc_create("io_throttle_metrics", p->dir,
+		io_throttle_metrics_proc_fill_to_json, io_throttle_metrics_proc_write, os->dev);
 
 	if (cb.cpu_masks.to_json) {
 		p->cpu_masks.dir = proc_mkdir("cpu_masks", p->dir);
@@ -1937,6 +1997,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 _out:
 	return (p && p->dir && p->io_st_sum && p->status && p->opens && p->throttle &&
 			p->stalocks && p->profiling && p->j_status && p->j_io_st && p->ext_blob &&
+			p->io_throttle_metrics &&
 			(!cb.cpu_masks.to_json || (p->cpu_masks.dir && p->cpu_masks.j_show && p->cpu_masks.add && p->cpu_masks.del)));
 }
 
@@ -1967,6 +2028,10 @@ static void __proc_destroy(struct nvmeibc_os_api *os)
 	RM_PROC_FILE(p->profcsv);
 	RM_PROC_FILE(p->j_status);
 	RM_PROC_FILE(p->ext_blob);
+	if (p->io_throttle_metrics) {
+		nvmeib_jdr_proc_remove(p->io_throttle_metrics);
+		p->io_throttle_metrics = NULL;
+	}
 	if (p->dir) {
 		if (p->cpu_masks.dir) {
 			remove_proc_entry("cpu_masks", p->dir);

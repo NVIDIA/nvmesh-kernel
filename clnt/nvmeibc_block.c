@@ -1565,6 +1565,7 @@ void nvmeibc_block_trace_stats(const struct nvmeibc_block_device *dev, bool diff
 	dp_io_stats_trace(nvmeibc_volume_short_id(dev), (struct dp_io_stats *)&dev->dp.io_stats, diff_only /* changed_only */);
 
 	__block_trace_per_disk_stats(dev, diff_only);
+	nvmeibc_block_io_throttle_metrics_trace(dev);
 }
 
 int nvmeibc_block_get_cpu_masks(const struct nvmeibc_block_device *dev, struct nvmeib_cpu_mask_info *mask_infos, int max_masks)

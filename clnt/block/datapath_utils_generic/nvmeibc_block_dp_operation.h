@@ -82,6 +82,7 @@ struct operation {
 												// dropping the time it waited in wait-list but includes all retries.
 		} time;
 	//} stats;
+	u64 throttle_enqueue_ticks;			/* nvmeib_public_rdtsc() when IO entered per-cpu throttle wait-list; 0 if not throttled */
 	u32 io_stat_length;                      	// IO length[blks], supports up to 16[gb] single IO size
 	int    CLmat_elems;							// For debug: Amount of bits in the array above. Todo: remove in final product
 	ulong *CLmat;								// Bitfield matrix of size C (cmds) X L (locks) Where A[c,l] is true iff command c is linked to lock l

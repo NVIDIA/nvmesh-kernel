@@ -185,6 +185,12 @@ void nvmesh_metric_gauge_merge(struct nvmesh_metric_gauge* dst, struct nvmesh_me
 	dst->counter += src->counter;
 }
 
+static inline XDS_NONNULL(1)
+void nvmesh_metric_gauge_clear(struct nvmesh_metric_gauge* self)
+{
+	self->counter = 0;
+}
+
 struct nvmesh_metric_max_value {
 	int64_t counter;
 };

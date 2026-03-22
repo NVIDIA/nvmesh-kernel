@@ -10,6 +10,9 @@
  */
 #include "atom/nvmeiba_nvmesh_api.h"
 #include "nvmeib_public_procfs.h"
+#ifdef __KERNEL__
+#include "nvmeib_jdr_proc.h"
+#endif
 
 struct nvmeibc_cinst_params_blk;
 struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeibc_cinst_params_blk *p);	// When module goes up. Returns positive major number or 0,negative on error
@@ -56,6 +59,8 @@ struct nvmeibc_os_api {
 		struct nvmeib_public_procfs_ent *j_io_st;			// Detailed   IO stats written as json format
 		//--------- Extra blob info about volume
 		struct nvmeib_public_procfs_ent *ext_blob;
+		//--------- IO throttle metrics (count + latency, per-CPU, JSON, read+reset)
+		struct nvmeib_jdr_procfs_ent *io_throttle_metrics;
 		//--------- Volume's CPU masks
 		struct {
 			struct proc_dir_entry *dir;
