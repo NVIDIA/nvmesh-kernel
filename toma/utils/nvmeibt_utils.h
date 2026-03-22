@@ -18,7 +18,7 @@ static inline size_t nvmeibt_strlcpy(char *dst, const char *src, size_t max_len_
 static inline size_t nvmeibt_strlcat(char *dst, const char *src, size_t max_len) {
 	size_t _len = strnlen(dst, max_len);
 	if (_len == max_len)
-		  return _len + strlen(src);
+		  return _len + strnlen(src, max_len);
 	return _len + nvmeib_strlcpy(dst + _len, src, max_len - _len);
 }
 

@@ -62,7 +62,7 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags)
 	BUG_ON((offset != OFFSET_NONE) || (fd != g_rpc_sim->sender_fd));
 	if (g_rpc_sim->n_sent < g_rpc_sim->n_total) {
 		const char* cmd = g_rpc_sim->cmds[g_rpc_sim->n_sent];
-		size_t rv = strlen(cmd);
+		size_t rv = strnlen(cmd, 256);		// Each rpc is short
 		BUG_ON(n < rv);						// Need enough space for rpc cmd
 		strncpy(buf, cmd, n);
 		((char*)buf)[rv++] = '\n';			// Must terminate with eol
@@ -1015,7 +1015,7 @@ int nvmeibt_nm_print_status(void *ctx, int (*printf_fn)(void *ctx, const char *f
 int nvmeibt_ib_common_device_uuid_str_to_raw(union ibv_gid *ibv_gid, const char *device_uuid_str) {		// Todo: No, do not reimplement, use production code!
 	int i;
 	char gid[3];
-	if (strlen(device_uuid_str) != 32) {
+	if (strnlen(device_uuid_str, 40) != 32) {
 		N_Tf(tibc_dustr_t2, "Bad device_uuid_str '@DEVICE_UUID_STR'", device_uuid_str);
 		return -1;
 	}

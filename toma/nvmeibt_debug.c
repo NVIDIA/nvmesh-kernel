@@ -481,10 +481,9 @@ int nvmeibt_debug_config_params_parse(char *line, int *n_matches)
 	if (strncmp(line, "param ", 6) == 0) {
 		line += 6;
 	}
-
 	for (i=0; i<ARRAY_SIZE(oper_params); i++) {
 		struct oper_param_t *param = &oper_params[i];
-		int len = strlen(param->name);
+		const int len = strnlen(param->name, 128);		// All parameters have relatively short name
 		if (strncmp(line, param->name, len)==0) {
 			*n_matches = _debug_config_params_set(param, line+len+1);
 			break;
@@ -523,7 +522,7 @@ void dump_traces_list_to_file(void)
 	struct _tracer *t;
 	FILE *f = 0;
 	const char *dirname = nvmeibt_toma_get_log_dir_name();
-	const size_t tracelist_len = strnlen(dirname, PATH_MAX) + strlen(TRACE_LIST_FILENAME) + 2;
+	const size_t tracelist_len = strnlen(dirname, PATH_MAX) + (sizeof(TRACE_LIST_FILENAME) - 1) + 2;
 	char *tracelist = NNVMEIBT_TOMA_MALLOC(hu821mv, tracelist_len);
 	__MEASURE_TOOK_INIT();
 	nvmeibt_strlcpy(tracelist, dirname, tracelist_len);

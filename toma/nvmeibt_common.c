@@ -955,8 +955,8 @@ int nvmeibt_recursive_mkdir(const char *path, __mode_t mode)
 	if (access(path, X_OK) == 0)
 		return 0;
 
-	if (strlen(path) >= PATH_MAX) {
-		N_ETf(error_common_nvmeibt_recursive_mkdir, "path too long ('@PATH')", path);
+	if (strnlen(path, PATH_MAX) >= (PATH_MAX-2)) {
+		N_ETf(ntrmkdir01, "path too long ('@PATH')", path);
 		return -1;
 	}
 
@@ -968,7 +968,7 @@ int nvmeibt_recursive_mkdir(const char *path, __mode_t mode)
 		nvmeibt_recursive_mkdir(parent, mode);
 
 	if (mkdir(path, mode) != 0 && errno != EEXIST) {
-		N_ETf(error_1_common_nvmeibt_recursive_mkdir, "mkdir ('@PATH') failed, @AUTO_ERRNO", path);
+		N_ETf(ntrmkdir02, "mkdir ('@PATH') failed, @AUTO_ERRNO", path);
 		return -1;
 	}
 
@@ -980,14 +980,13 @@ int nvmeibt_recursive_mkdir_for_path(const char *path, __mode_t mode)
 	char	copy[PATH_MAX];
 	char	*parent;
 
-	if (strlen(path) >= PATH_MAX) {
-		N_Ef(error_common_nvmeibt_recursive_mkdir_for_path, "path too long ('@PATH')", path);
+	if (strnlen(path, PATH_MAX) >= (PATH_MAX-2)) {
+		N_Ef(ntrmkdir03, "path too long ('@PATH')", path);
 		return -1;
 	}
 
 	nvmeibt_strlcpy(copy, path, sizeof(copy));
 	parent = dirname(copy);
-
 	return nvmeibt_recursive_mkdir(parent, mode);
 }
 
@@ -1093,23 +1092,15 @@ uint64_t nvmeibt_host_writes_int128_to_uint64(unsigned char *data)
 */
 char *trim_whitespace(char *str)
 {
-	char *end;
-
-	if (!str || *str == 0) {
+	if (!str || (*str == 0))
 		return "";
-	}
-	end = str + strlen(str) - 1;
-	/* trim leading space */
-	while (isspace(*str))
+
+	while (isspace(*str))		// trim leading space
 		str++;
-	/* all spaces? */
-	if (*str == 0) {
+	if (*str == 0)				// all spaces?
 		return str;
-	}
-	/* trim trailing space */
-	while (end > str && isspace(*end)) {
+	for (char *end = str + strnlen(str, (1<<12)) - 1; (end > str) && isspace(*end); end--) {		// trim trailing space
 		*end = 0;	// write new null terminator
-		end--;
 	}
 	return str;
 }

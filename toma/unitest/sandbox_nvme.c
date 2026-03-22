@@ -107,7 +107,7 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_arr(void) { return &nv
 
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id) {
 	const char *dot = strchr(disk_id, '.');		// disk_id format is "SERIAL.NSID" e.g. "NVMD_SN_002.1", We need to match the serial number portion
-	const int serial_len = (dot ? (int)(dot - disk_id) : (int)strlen(disk_id));
+	const int serial_len = (dot ? (int)(dot - disk_id) : (int)strnlen(disk_id, 32));
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		const struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (!strncmp(d->serial_number, disk_id, serial_len))

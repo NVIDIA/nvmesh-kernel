@@ -263,10 +263,7 @@ static inline uint32_t murmur3_32(const uint8_t* key, size_t len, uint32_t seed)
 	return h;
 }
 
-static inline uint64_t xhash_str_to_32_bits(const char *str)
-{
-	return murmur3_32((uint8_t *)str, strlen(str), 0xa9876543);
-}
+/* Unsafe: static inline uint64_t xhash_str_to_32_bits(const char *str) { return murmur3_32((uint8_t *)str, strlen(str), 0xa9876543);} */
 
 static inline uint64_t xhash_64(uint64_t val, uint32_t bits)
 {
