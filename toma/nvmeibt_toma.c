@@ -2461,7 +2461,6 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	int64_t							now_millisec;
 	int64_t							pselect_time_ms;
 	struct timespec					last_idle_time_activities_time = TIMESPEC_ZERO;
-	int64_t							time_since_last_idle_time_activities_nsec;
 	int 							n_fds_returned;
 	int 							i, fd;
 	int								rv = -1;
@@ -2677,10 +2676,17 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 			got_sigusr2 = 0;
 		}
 		at_event_end_activities();
-		time_since_last_idle_time_activities_nsec = timespec_diff_ns(now, last_idle_time_activities_time);
-		if (time_since_last_idle_time_activities_nsec > MSEC_TO_NSEC(100) || (n_fds_returned == 0 && time_since_last_idle_time_activities_nsec > MSEC_TO_NSEC(50))) {
-			last_idle_time_activities_time = now;
-			nvmeibt_global_idle_time_activities();
+		{	// Run idle time activities if neeed. Throtteled in real Toma, always run in sandbox compilation to repsond faster
+			const int64_t time_since_last_idle_time_activities_nsec = timespec_diff_ns(now, last_idle_time_activities_time);
+			#ifndef TOMA_SIMULATOR_SANDBOX
+				if (time_since_last_idle_time_activities_nsec > MSEC_TO_NSEC(100) || (n_fds_returned == 0 && time_since_last_idle_time_activities_nsec > MSEC_TO_NSEC(50)))
+			#else
+				(void)time_since_last_idle_time_activities_nsec; if (true)
+			#endif
+			{
+				last_idle_time_activities_time = now;
+				nvmeibt_global_idle_time_activities();
+			}
 		}
 	} while (1);
 out:
