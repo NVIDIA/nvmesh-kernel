@@ -36,8 +36,7 @@ static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 {
 	return snprintf(buf, capacity,
-		"{\"messageType\":\"addVolume\""
-		",\"messageTypeVersion\":1"
+		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
 		",\"payload\":{\"_id\":\"V_REMOTE1\",\"uuid\":\"bbb00100-0000-0000-0000-000000000001\""
 		",\"version\":1,\"name\":\"V_REMOTE1\",\"blockSize\":4096"
 		",\"lockServer\":{\"maxNOwners\":2,\"type\":4,\"locksetShift\":-1}"
@@ -46,16 +45,10 @@ static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
 		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
 		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-		"\"chunks\":["
-		"{\"uuid\":\"bbb001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
-		"{\"uuid\":\"bbb001a0-0000-0000-0000-000000000011\",\"activated\":false"
-		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-		"{\"uuid\":\"bbb001e1-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023"
-		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
-		"{\"uuid\":\"bbb001e2-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023"
-		",\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
+		"\"chunks\":[{\"uuid\":\"bbb001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
+			"{\"uuid\":\"bbb001a0-0000-0000-0000-000000000011\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
+				"{\"uuid\":\"bbb001e1-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
+				"{\"uuid\":\"bbb001e2-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
 		"]}]}]}}");
 }
 
@@ -63,8 +56,7 @@ static int make_msg_add_volume_remote1(char *buf, size_t capacity)
 static int make_msg_add_volume_r1(char *buf, size_t capacity)
 {
 	return snprintf(buf, capacity,
-		"{\"messageType\":\"addVolume\""
-		",\"messageTypeVersion\":1"
+		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
 		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"aaa00100-0000-0000-0000-000000000001\""
 		",\"version\":1,\"name\":\"V_R1\",\"blockSize\":4096"
 		",\"lockServer\":{\"maxNOwners\":2,\"type\":4,\"locksetShift\":-1}"
@@ -75,14 +67,9 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
 		"\"chunks\":["
 		"{\"uuid\":\"aaa001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
-		"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false"
-		",\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-		"{\"uuid\":\"aaa001e1-0000-0000-0000-000000000002\",\"lbs\":6176,\"lbe\":7199"
-		",\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
-		"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000003\",\"lbs\":0,\"lbe\":1023"
-		",\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\""
-		",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"}"
+			"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
+				"{\"uuid\":\"aaa001e1-0000-0000-0000-000000000002\",\"lbs\":6176,\"lbe\":7199,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
+				"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000003\",\"lbs\":0" ",\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"}"
 		"]}]}]}}");
 }
 
