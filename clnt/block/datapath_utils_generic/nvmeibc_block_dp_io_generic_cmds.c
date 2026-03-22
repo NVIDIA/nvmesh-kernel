@@ -1214,10 +1214,9 @@ void dp_cmds_prepare_next_stage(struct nvmeibc_block_command *cmds, int li, int 
 		}
 
 		nvmeibc_profiling_end_take_stats_for_stage(prof, rldr->o, rldr->raid_cur_stage, *prev_stage_rv);
-		cmds->o->nd->dp.exec_func_on_stage_end(rldr, prev_stage_rv);
 		n_non_exec_cmds = n_cmds_in_cur_stage = 0; /* Calc how many cmds are in this stage */
-		if (unlikely(rldr->raid_cur_stage > rldr->raid_last_stage)) {
-			goto _out; // Zero commands in the last stage. Finish operation
+		if (!cmds->o->nd->dp.exec_func_on_stage_end(rldr, prev_stage_rv)) {
+			goto _out; // That was the last stage. Finish operation
 		}
 		nvmeibc_profiling_start_take_stats_for_stage(prof, rldr->o, rldr->raid_cur_stage);
 
@@ -1436,20 +1435,21 @@ static int __prepare_and_exec_next_stage(struct nvmeibc_block_command *cmds, int
 void dp_cmds_next_stage_execute(struct nvmeibc_block_command *cmds, int ci)
 {	// Handle next stage if required
 	struct nvmeibc_block_command *rldr = &cmds[ci];
+	int rv;
 	__attribute__ ((unused)) struct operation *o = cmds->o;
-	int rv = dp_cmds_prev_stage_analyze_rv(cmds, ci);
-	const int stage_rv = rv;
-	if (rldr->use_stages) {
-		if ((rldr->raid_cur_stage < rldr->raid_last_stage) && __prepare_and_exec_next_stage(cmds, ci, &rv))
-			return; /* Be careful: Here cmds/op/locks might already be kfree() */
-	}
-	if (rldr->raid_cur_stage <= rldr->raid_last_stage)
-		nvmeibc_profiling_end_take_stats_for_stage(nvmeibc_get_raid_good_path_profile_for_rwt_op(cmds->ds, rldr->o->op), cmds->o, rldr->raid_cur_stage, stage_rv);	// For last stage
+
 	nflog(t_2ctns, "@FUNCTION: o=@OPERATION.uncomp_raid=@UNCOMP_RAID, by cmds=@CMDS[@CI].sibs=@SIBS", __FUNCTION__, cmds->o, nvmeibc_atomic_read(&cmds->o->n_uncomp_raids), cmds, ci, rldr->nraid_siblings);
+
+	rv = dp_cmds_prev_stage_analyze_rv(cmds, ci);
+
 	if (rldr->use_stages) {
+		if (__prepare_and_exec_next_stage(cmds, ci, &rv))
+			return; /* Be careful: Here cmds/op/locks might already be kfree() */
+
 		rldr->all_cmds_sm_done = true;
 		BLKCMP_IO_ASYNC_AWAIT(__release_locks_of_completed_command(cmds, ci));
 	}
+
 	BLKCMP_IO_ASYNC_RESUME_CAL(nvmeibc_operation_put(cmds->o, rldr->nraid_siblings));
 }
 

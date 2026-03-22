@@ -28,7 +28,7 @@ int  dp_mirror_prepare_op(struct operation *o);
 int  dp_mirror_execute_op(struct operation *o);
 void dp_mirror_block_completion(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag);
 int  dp_mirror_exec_func_on_locks_tkn(struct nvmeibc_block_command *rldr, int err);
-void dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv);
+bool dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv);
 void dp_mirror_calc_should_abandon(struct nvmeibc_block_command *cmds, int lsi);
 void dp_mirror_calc_comp_state(const struct nvmeibc_block_command *cmds, int *rv, bool *retry);
 void dp_mirror_complete_locks_debug_val(struct nvmeibc_cmd_lock *locksets);

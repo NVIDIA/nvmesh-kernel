@@ -622,9 +622,12 @@ static void dp_ec_execute_rmw(const struct nvmeibc_block_command *rldr, const u6
 
 /* After we finish stage in execution place execute a callback on the
    commands of the raid */
-void dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv) {
+bool dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv) {
 	//in EC we don't need to finalize the previous stage commands;
 	const bool is_write_op = (nvmeib_block_io_op_is_write(rldr->o->op));
+
+	if (rldr->raid_cur_stage == rldr->raid_last_stage)
+		return false;	// Stop executing stages
 
 	if (is_write_op) { // Read op does nothing in between stages, POST IO RDMA and CALC deg data occur anyway and are setup in advance
 		const bool has_writable_pari = !rldr->o->mssa->no_rw_p;
@@ -684,7 +687,6 @@ void dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv) {
 			if (has_jour) {
 				dp_ec_journal_release_areas(rldr);	// regardless of rv
 			}
-			rldr->raid_cur_stage++;		// Jump to next stage
 			break;
 		default:
 			/* Nothing for other stages */
@@ -692,11 +694,6 @@ void dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv) {
 		}
 	} else { // Read op has 3 stages: PRE_READ (already done), POST_IO_RDMA (if required) and Calculate DEG if required, just set to next stage
 		const enum e_cmds_stage current_stage = rldr->raid_cur_stage;	// Finished current stage
-		TODO(000,"Fix the atrocity below. stage should advance in ++ like in write operations, never jump forward stage!");
-		if (*rv) {
-			rldr->raid_cur_stage = rldr->raid_last_stage;				// Fast fail. DoronL: A bit risky as most of commands will have rv == 0, even though they were not executed, Why do that?
-			return;
-		}
 		switch (current_stage) {
 		case E_CMDS_STAGE_READ_PRE_DATA:					// All reads of pre_read and E_CMDS_STAGE_DO_IO_AND_PAR are done at this stage
 			rldr->raid_cur_stage = E_CMDS_STAGE_POST_IO_RDMA;
@@ -708,6 +705,8 @@ void dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv) {
 			BUG();
 		}
 	}
+
+	return true;
 }
 
 static enum e_cmds_stage __rldr_get_first_stage(struct nvmeibc_block_command *rldr, const enum nvmeib_block_io_op op)

@@ -1070,10 +1070,10 @@ static void __copy_block_and_edic(struct nvmeibc_block_command *dst_cmd, struct 
 	}
 }
 
-void dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv)
+bool dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv)
 {
 	// Note: rldr->raid_cur_stage == E_CMDS_STAGE_DO_IO_AND_PAR)
-	if (*rv) rldr->o_rv = *rv;
+	(void)rv;
 
 	if (rldr->raid_cur_stage == E_CMDS_STAGE_READ_PRE_DATA) {	// For sub-block write we have pre-reads
 		// Copy the pre-read data for the first block and the last block
@@ -1112,8 +1112,14 @@ void dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *r
 			}
 		}
 		rldr->raid_cur_stage = E_CMDS_STAGE_DO_IO_AND_PAR; // Move to DO_IO now that the writes are ready to be sent
-	} else
-		rldr->raid_cur_stage++; // Just advance to next stage
+	} else {
+		if (rldr->raid_cur_stage == rldr->raid_last_stage)
+			return false;	// Exit stages execution
+
+		rldr->raid_cur_stage++; // Advance to next stage
+	}
+
+	return true;
 }
 
 int dp_mirror_should_ignore_op(const struct operation *o)

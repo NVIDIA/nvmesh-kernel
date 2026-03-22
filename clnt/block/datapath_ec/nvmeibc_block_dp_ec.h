@@ -27,7 +27,7 @@ int  dp_ec_prepare_op(            struct operation *o);
 int  dp_ec_execute_op(            struct operation *o);
 void dp_ec_block_completion(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag);
 int  dp_ec_exec_func_on_locks_tkn(struct nvmeibc_block_command *rldr, int rv);
-void dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv);
+bool dp_ec_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv);
 void dp_ec_calc_should_abandon(struct nvmeibc_block_command *cmds, int lsi);
 void dp_ec_calc_comp_state(const struct nvmeibc_block_command *cmds, int *rv, bool *retry);
 

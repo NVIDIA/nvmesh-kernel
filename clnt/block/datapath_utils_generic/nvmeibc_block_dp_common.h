@@ -308,7 +308,7 @@ struct nvmeibc_datapath {
 	int  (*execute_op)( struct operation *o);
 	void (*cmd_comp_cb)(struct nvmeibc_d_iocmd_comp *comp, struct nvmeibc_d_iocmd_comp_tag tag);	// Callback for completion of specific command
 	int  (*exec_func_on_locks_tkn)(struct nvmeibc_block_command *rldr, int rv);			// This function is called after locks are taken/broken and before first stage is launched (transition of locks state machine to cmd leader state machine). Returns Error code <0, or positive code, if execution should be aborted and callback will return
-	void (*exec_func_on_stage_end)(struct nvmeibc_block_command *rldr, int *rv);	// This function is called for each stage the raid leader finishes
+	bool (*exec_func_on_stage_end)(struct nvmeibc_block_command *rldr, int *rv);		// This function is called for each stage the raid leader finishes. Returns false if there are no more stages left.
 	void (*calc_should_abandon)(struct nvmeibc_block_command *cmds, int li);							// After all commands that need lock 'li' calculate if should abandon this lock or not
 	void (*calc_comp_state)(const struct nvmeibc_block_command *cmds, int *o_rv, bool *retry_required);	// Calcualte the completion state of the operation from its commands
 	void (*allow_locks_rel_debug)(struct nvmeibc_cmd_lock *locksets);									// When all commands finished we allow locks release, but not kfree(). Only after this method is called locks can get kfree and put their topo reference
