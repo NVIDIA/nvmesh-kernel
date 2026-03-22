@@ -39,51 +39,77 @@ struct scatterlist *sg_last(struct scatterlist *sg, unsigned int nents){
 	return sg+nents-1;						// Last element in the array
 }
 
-size_t sg_copy_buffer(struct scatterlist *sgl, unsigned int nents, const void *buf, size_t buflen, long int skip, bool to_buffer) {
-	struct scatterlist *cur_sg;
-	unsigned int sg_ind;
-	size_t copied = 0;
-	unsigned char *dst_walk = (unsigned char *)buf;
-	const unsigned char *src_walk = (const unsigned char *)buf;
+#define sg_copy_buffer_to_impl(sgl, nents, buf, buflen, skip) \
+({\
+	struct scatterlist *cur_sg;\
+	unsigned int sg_ind;\
+	size_t copied = 0;\
+	void *walk = (buf);\
+	long int skip_left = (long int)(skip);\
+	\
+	for_each_sg(sgl, cur_sg, nents, sg_ind) {\
+		unsigned ent_skip = min(cur_sg->length, (unsigned)skip_left);\
+		unsigned ent_sz = cur_sg->length - ent_skip;\
+		void *ent_ptr = sg_virt(cur_sg) + ent_skip;\
+		unsigned copy_sz = min(ent_sz, (unsigned)buflen);\
+		memcpy(walk, ent_ptr, copy_sz);\
+		walk += copy_sz;\
+		BUG_ON(buflen < copy_sz);\
+		buflen -= copy_sz;\
+		copied += copy_sz;\
+		BUG_ON(skip_left < (long int)ent_skip);\
+		skip_left -= (long int)ent_skip;\
+	}\
+	copied;\
+})
 
-	for_each_sg(sgl, cur_sg, nents, sg_ind) {
-		unsigned ent_skip = min(cur_sg->length, (unsigned)skip);
-		unsigned ent_sz = cur_sg->length - ent_skip;
-		void *ent_ptr = sg_virt(cur_sg) + ent_skip;
-		unsigned copy_sz = min(ent_sz, (unsigned)buflen);
-		if (to_buffer)
-			memcpy(dst_walk, ent_ptr, copy_sz);
-		else
-			memcpy(ent_ptr, src_walk, copy_sz);
-		if (to_buffer)
-			dst_walk += copy_sz;
-		else
-			src_walk += copy_sz;
-		BUG_ON(buflen < copy_sz);
-		buflen -= copy_sz;
-		copied += copy_sz;
-		BUG_ON(skip < (long int)ent_skip);
-		skip -= (long int)ent_skip;
-	}
-	return copied;
+#define sg_copy_buffer_from_impl(sgl, nents, buf, buflen, skip) \
+({\
+	struct scatterlist *cur_sg;\
+	unsigned int sg_ind;\
+	size_t copied = 0;\
+	const void *walk = (buf);\
+	long int skip_left = (long int)(skip);\
+	\
+	for_each_sg(sgl, cur_sg, nents, sg_ind) {\
+		unsigned ent_skip = min(cur_sg->length, (unsigned)skip_left);\
+		unsigned ent_sz = cur_sg->length - ent_skip;\
+		void *ent_ptr = sg_virt(cur_sg) + ent_skip;\
+		unsigned copy_sz = min(ent_sz, (unsigned)buflen);\
+		memcpy(ent_ptr, walk, copy_sz);\
+		walk += copy_sz;\
+		BUG_ON(buflen < copy_sz);\
+		buflen -= copy_sz;\
+		copied += copy_sz;\
+		BUG_ON(skip_left < (long int)ent_skip);\
+		skip_left -= (long int)ent_skip;\
+	}\
+	copied;\
+})
+
+size_t sg_copy_buffer(struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen, long int skip, bool to_buffer) {
+	if (to_buffer)
+		return sg_copy_buffer_to_impl(sgl, nents, buf, buflen, skip);
+	else
+		return sg_copy_buffer_from_impl(sgl, nents, buf, buflen, skip);
 }
 
 size_t sg_copy_from_buffer(struct scatterlist *sgl, unsigned int nents, const void *buf, size_t buflen) {
-	return sg_copy_buffer(sgl, nents, buf, buflen, 0, false);
+	return sg_copy_buffer_from_impl(sgl, nents, buf, buflen, 0);
 }
 
 size_t sg_copy_to_buffer(struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen) {
-	return sg_copy_buffer(sgl, nents, buf, buflen, 0, true);
+	return sg_copy_buffer_to_impl(sgl, nents, buf, buflen, 0);
 }
 
 size_t sg_pcopy_from_buffer(struct scatterlist *sgl, unsigned int nents, const void *buf, size_t buflen, size_t skip)
 {
-	return sg_copy_buffer(sgl, nents, buf, buflen, (long int)skip, false);
+	return sg_copy_buffer_from_impl(sgl, nents, buf, buflen, skip);
 }
 
 size_t sg_pcopy_to_buffer(struct scatterlist *sgl, unsigned int nents, void *buf, size_t buflen, size_t skip)
 {
-	return sg_copy_buffer(sgl, nents, buf, buflen, (long int)skip, true);
+	return sg_copy_buffer_to_impl(sgl, nents, buf, buflen, skip);
 }
 
 size_t sg_zero_buffer(struct scatterlist *sgl, unsigned int nents, size_t skip, size_t buflen)
