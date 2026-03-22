@@ -53,6 +53,7 @@ struct user_rpc_simu {
 	int n_sent, n_recv, n_total;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
 	int sender_fd;
 	const char* cmds[16];			// Todo: This should be a circular buffer to which unit-test env injects rpc and toma extracts them 1 by 1.	return g_rpc_sim;
+	unsigned    reps[16];			// Amount of bytes to print to log from the reply prefix.
 	struct TSB_fd_otherside o;
 };
 static struct user_rpc_simu *g_rpc_sim = NULL;
@@ -75,17 +76,21 @@ static ssize_t _rpc_inject(int fd, void *buf, size_t n, off_t offset, int flags)
 }
 
 static ssize_t _rpc_accept(int fd, const void *buf, size_t n, off_t offset, int flags) {
-	const int print_n_bytes = min(n, (size_t)640);
-	BUG_ON((offset != OFFSET_NONE) || (fd != g_rpc_sim->sender_fd) || (n == 0) || (flags != 0));
+	struct user_rpc_simu *r = g_rpc_sim;
+	const int print_n_bytes = min(n, (size_t)r->reps[r->n_recv]);
+	BUG_ON((offset != OFFSET_NONE) || (fd != r->sender_fd) || (n == 0) || (flags != 0));
 	((char*)buf)[print_n_bytes] = 0;
-	N_Tf(__AUTOID__, "RPC_reply[@INT]=@INT[b] '@STR'=@STR", g_rpc_sim->n_recv, (int)n, g_rpc_sim->cmds[g_rpc_sim->n_recv], (const char*)buf);
-	g_rpc_sim->n_recv++;
+	N_Tf(__AUTOID__, "RPC_reply[@INT]=@INT[b] '@STR'=@STR", r->n_recv, (int)n, r->cmds[r->n_recv], (const char*)buf);
+	r->n_recv++;
 	return n;
 }
-void user_rpc_send_to_toma(const char* str) {
+
+void user_rpc_send_to_toma_and_set_expected_reply_size(const char *str, unsigned len_bytes) {
 	struct user_rpc_simu *r = g_rpc_sim;
+	r->reps[r->n_total  ] = len_bytes;
 	r->cmds[r->n_total++] = str;
 }
+void user_rpc_send_to_toma(const char *str) { user_rpc_send_to_toma_and_set_expected_reply_size(str, 640 /* default bytes*/); }
 
 bool user_rpc_did_toma_reply_to_all_rpcs(void) {
 	const struct user_rpc_simu *r = g_rpc_sim;

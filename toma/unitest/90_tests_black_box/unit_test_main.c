@@ -93,9 +93,10 @@ static void scenario_user_rpcs_disk_models(void) {
 	user_rpc_send_to_toma("disk-models set dummy1_disk_model ignore_metadata on");
 	user_rpc_send_to_toma("disk-models set dummy1_disk_model is_zeroing_using_test_and_write off");
 	user_rpc_send_to_toma("disk-models set dummy2_disk_model force_512b off");
-	user_rpc_send_to_toma("disk-models list");
+	user_rpc_send_to_toma_and_set_expected_reply_size("disk-models list", (1 << 12));
 	user_rpc_send_to_toma("disk-models remove dummy1_disk_model");
 	user_rpc_send_to_toma("disk-models remove dummy2_disk_model");
+	user_rpc_send_to_toma("disk-models list");
 	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
 	SCENARIO_PRINT(__AUTOID__, "done");
 }
