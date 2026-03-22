@@ -245,7 +245,7 @@ static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
-static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_report_target_msg) {
+static void __check_format_progress(struct mgmt_sim_disk_status *d, uint64_t msg_seq, bool on_report_target_msg) {
 	if (__is_disk_fmt_running(d->format_state)) {
 		const unsigned expected = d->format_counter_sent;
 		enum e_disk_format_state prev_state = d->format_state;
@@ -260,7 +260,7 @@ static void __check_format_progress(struct mgmt_sim_disk_status *d, bool on_repo
 			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
 			__send_format_drive_msg(d);
 		}
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, expected, on_report_target_msg ? "Target" : "Zeroin");
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], seq=@INT, format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format_state, (int)msg_seq, expected, on_report_target_msg ? "Target" : "Zeroin");
 	}
 }
 
@@ -352,13 +352,14 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
 	const char *message_type = json_get_dict_str(root, "messageType", NULL);
+	const uint64_t msg_seq = json_get_dict_num(root, "messageSequence", ~0UL);
 	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
 	if (strcmp(message_type, "driveZeroingProgress") == 0) {
 		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 		const char *disk_uuid = json_get_dict_str(payload, "diskUUID", NULL);
 		struct mgmt_sim_disk_status *d = __lookup_disk_by_uuid(disk_uuid);
 		BUG_ON(!__is_disk_fmt_running(d->format_state));
-		__check_format_progress(d, false);
+		__check_format_progress(d, msg_seq, false);
 	} else if (strcmp(message_type, "updateDiskSegmentsDirtyBits") == 0) {
 		/* silently ignore */
 	}
@@ -424,6 +425,7 @@ void mgmt_sim_wakeup_on_incomming_toma_msg(struct sim_broker_topic *t) {	// Call
 		if (     t == m->k_consumers.high)	__handle_priority_msg(&msg);
 		else if (t == m->k_consumers.low)	__handle_low_prio_msg(&msg);
 		else if (t == m->k_consumers.kal)	__handle_keepalive_msg(&msg);
+		else BUG_ON(true);	// Unsupported topic
 		sim_broker_topic_ack_offsets(t, msg.offset);
 	}
 }
@@ -440,7 +442,7 @@ void mgmt_sim_do_periodic(void) {
 /******************************************************************************/
 /* Static helper functions                                                    */
 /******************************************************************************/
-static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *disks_array) {
+static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *disks_array, uint64_t msg_seq) {
 	int i;
 	for (i = 0; i < disks_array->array.len; i++) {
 		struct mm_json_elem *disk_elem = disks_array->array.elements[i];
@@ -455,7 +457,7 @@ static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *d
 		d->block_size = json_get_dict_num(disk_elem, "block_size", -1);
 		d->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
 		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", d->disk_id, d->status, d->format_counter_toma_reply_done, d->format_counter_toma_reply_in_progress, d->block_size, d->metadata_size);
-		__check_format_progress(d, true);
+		__check_format_progress(d, msg_seq, true);
 	}
 }
 
@@ -463,11 +465,13 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	struct mm_json_elem *payload = json_get_dict_value(root,    "payload");
 	struct mm_json_elem *node =    json_get_dict_value(payload, "node");
 	struct mm_json_elem *disks =   json_get_dict_value(node,    "disks");
+	//const uint64_t msg_seq = json_get_dict_value(root, "messageSequence");
+	const uint64_t msg_seq = json_get_dict_num(root, "messageSequence", ~0UL);
 	struct mgmt_sim_state *m = g_mgmt_sim;
 
 	m->boot_time = json_get_dict_num(node, "bootTime", 0);
 	if (disks && (disks->type == JSON_E_ARRAY))
-		__extract_disks_status_from_report_target_msg(disks);
+		__extract_disks_status_from_report_target_msg(disks, msg_seq);
 	m->got_report_target = true;
 	// N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD", m->boot_time);
 }
