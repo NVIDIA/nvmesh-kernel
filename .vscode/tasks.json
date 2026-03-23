@@ -33,6 +33,24 @@
             "problemMatcher": ["$gcc"]
         },
         {
+            "label": "Build Docker (ub2404_614)",
+            "type": "shell",
+            "command": "./build_docker.sh",
+            "args": ["-d", "ub2404_614", "--build-dir", "${workspaceFolder}"],
+            "options": {"cwd": "${workspaceFolder}"},
+            "problemMatcher": [],
+            "group": "build"
+        },
+        {
+            "label": "Rebuild Block Simulator",
+            "type": "shell",
+            "command": "./build_block_testing.sh",
+            "args": ["rebuild"],
+            "options": {"cwd": "${workspaceFolder}/clnt/block/unitest"},
+            "problemMatcher": ["$gcc"],
+            "group": "build"
+        },
+        {
             "label": "Makefile",
             "type": "shell",
             "command": "make",

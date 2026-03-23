@@ -116,17 +116,17 @@ size_t sg_pcopy_to_buffer(struct scatterlist *sgl, unsigned int nents, void *buf
 	return sg_copy_buffer_to_impl(sgl, nents, buf, buflen, skip);
 }
 
-size_t sg_zero_buffer(struct scatterlist *sgl, unsigned int nents, size_t skip, size_t buflen)
+size_t sg_zero_buffer(struct scatterlist *sgl, unsigned int nents, size_t buflen, off_t skip)
 {
 	struct scatterlist *cur_sg;
 	unsigned int sg_ind;
 	size_t zeroed = 0;
 
 	for_each_sg(sgl, cur_sg, nents, sg_ind) {
-		unsigned ent_skip = min(cur_sg->length, (unsigned)skip);
-		unsigned ent_sz = cur_sg->length - ent_skip;
+		off_t ent_skip = min_t(off_t, (off_t)cur_sg->length, skip);
+		size_t ent_sz = (size_t)cur_sg->length - ent_skip;
 		void *ent_ptr = sg_virt(cur_sg) + ent_skip;
-		unsigned zero_sz = min(ent_sz, (unsigned)buflen);
+		size_t zero_sz = min_t(size_t, ent_sz, buflen);
 
 		if (zero_sz)
 			memset(ent_ptr, 0, zero_sz);

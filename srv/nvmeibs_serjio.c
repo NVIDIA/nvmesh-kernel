@@ -3779,7 +3779,7 @@ static inline int zero_journal_entry_from_cb(struct nvme_op_rsrc *op_rsrc, nvme_
 	}
 
 	/* Zero the SGL, skipping data-len bytes */
-	sg_zero_buffer(op_rsrc->sgl, op_rsrc->n_pages, data_len, (op_rsrc->n_pages << PAGE_SHIFT) - data_len);
+	sg_zero_buffer(op_rsrc->sgl, op_rsrc->n_pages, (op_rsrc->n_pages << PAGE_SHIFT), data_len);
 
 	/* Set meta-data to jmdc unused value */
 	md_sz = nvmeib_shared_set_jentry_md_unused(jmd_unused, 1 << op_rsrc->binje_shift);
