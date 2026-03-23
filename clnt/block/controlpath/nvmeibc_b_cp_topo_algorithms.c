@@ -147,6 +147,7 @@ static void nvmeibc_raid1_fill_calculated_data(struct nvmeibc_raid1 *r1)
 	for (si = 0; si < r1->replicas; ++si) {
 		__calc_rotated_bmps(r1, si);
 	}
+	topo_traits->n_degraded = nvmeibc_praid_get_num_deg_segs(r1);
 	{
 		const bool can_view_lock = __calc_should_use_view_lock_on_read(r1);
 		for (si = 0; si < r1->replicas; ++si)

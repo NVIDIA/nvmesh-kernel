@@ -5,6 +5,7 @@
 
 struct dp_topology_traits {
 	u8 n_parities;
+	u8 n_degraded;
 };
 
 #endif // DP_TOPOLOGY_TRAITS_H
