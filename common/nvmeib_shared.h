@@ -298,27 +298,6 @@ union nvmeibc_dbits_entry {			// 12[bits] field Supports raids of up to 15 segme
 		/* Note: Here 0x?FF is unknown range, have to scan slice by slice during rebuild, much like in dirty suspect */
 		/* Note: Here 0x?{i:5,j:3} such that i+j>=31 is resevered for future use, except for i=0x1F, j=0x7 which is 0x?FF */
 	} __attribute__((packed)) slmod;
-	struct {							// Special mode for raid-1 with 4,5 replicas. Allow 3,4 degraded seg modes.
-		// Note: Even when there is 0,1,2 degraded modes, 4,5 replicas will always use this representation. Never the above
-		struct { // Note: there is no way to know from dbits value that we are in this mode. Only from volume configuration
-			u16 num_unknowns  : 3;	// [0..4], 5,6,7 are special values.
-			u16 deg_bitmap    : 5;	// Bitmap for 5 segs, 1 for degraded. 0 for not. 0x1F is special value, 0 no degraded
-		} __attribute__((packed));
-		union {
-			struct {				// Access dirty convicts 1 by 1.
-				u16 is_d0 : 1;	// Is First (smalles index) degraded seg a dirty convict
-				u16 is_d1 : 1;	// Is d1 ...
-				u16 is_d2 : 1;	// Is d2 ...
-				u16 is_d3 : 1;	// Is highes index degraded seg a dirty convict
-				u16 _dont_use3 : 4;
-			};
-			struct {
-				u16 bmp : 4;	// Use dconvicts as bitmap.
-				u16 _dont_use4 : 4;
-			};
-		} __attribute__((packed)) d_convicts;
-		// There are many special values here. Example: d_convicts.bmp having more 1 bits then in deg_bitmap
-	} __attribute__((packed)) deg34;
 	struct {							// Used to allow access to all dirty bits as a single field
 		u16 bits		: 12;
 		u16 unuseds		: 4;
@@ -409,14 +388,9 @@ static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unk(/* seg inde
 static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unknowns_generic(int n_deg, int n_parities)
 {
 	union nvmeibc_dbits_entry rv = {.all_bits = 0};
-	// ASSERT((n_deg >= 0) && (n_parities >= n_deg) && (n_parities >= 1) && (n_parities <= 4))
-	if (false && (n_parities >= 3)) {			// 4-5 mirror representation, not supported yet
-		rv.deg34.num_unknowns = n_deg;
-		return rv;
-	} else {						// Raid-5/6, R1-2/3mirror
-		if (n_deg > 0) rv.bsmod.dead0 = 0xF;
-		if (n_deg > 1) rv.bsmod.dead1 = 0xF;
-	}
+	(void)n_parities;
+	if (n_deg > 0) rv.bsmod.dead0 = 0xF;
+	if (n_deg > 1) rv.bsmod.dead1 = 0xF;
 	return rv;	// Note (on n_deg==0, returns zero dbits)
 }
 
