@@ -4168,12 +4168,19 @@ static bool nvme_op_rsrc_range_filled(struct nvme_op_rsrc *rsrc,
 				      size_t offset, size_t len,
 				      const u8 *pattern)
 {
+	/* Sanity check - Ensure range does not exceed the number of pages */
+	BUG_ON(offset + len > (rsrc->n_pages << PAGE_SHIFT));
 	while (len > 0) {
 		size_t pg_off = offset_in_page(offset);
 		size_t chunk = min(len, (size_t)(PAGE_SIZE - pg_off));
 		u8 *addr = (u8 *)page_address(rsrc->pages[offset >> PAGE_SHIFT])
 			   + pg_off;
 		u8 *end = addr + chunk;
+
+		/* Sanity check - Ensure memcmp does not overflow page boundary */
+		BUG_ON(((unsigned long)addr & PAGE_MASK) != ((unsigned long)(end - 1) & PAGE_MASK));
+		/* Sanity check - Ensure chunk is a multiple of CMP_N_BYTES */
+		BUG_ON((chunk % CMP_N_BYTES) != 0);
 
 		for (; addr < end; addr += CMP_N_BYTES) {
 			if (memcmp(addr, pattern, CMP_N_BYTES) != 0)
