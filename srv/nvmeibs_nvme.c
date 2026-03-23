@@ -4207,6 +4207,7 @@ static void local_req_cb(void *arg, int status, u32 result)
 		}
 		if (req->metadata && !req->sg_md_already_mapped)
 			dma_unmap_single(dev, req->mtdt_dma, req->mtdt_size, dir);
+		req->f4kpi_translated = 0;
 		(req->cb)(req->arg, req->status, result);
 	}
 }
@@ -4232,15 +4233,14 @@ static void free_prpl_cb(void *arg, int status, u32 result)
 
 extern bool nvmeibs_disk_collect_stats;
 
-/* Trampoline to update stats */
-static void remote_iops_stats_cb(void *arg, int status, u32 result)
+/* NVMe SQ completion: always @arg is @req (not req->arg) so we can clear DSM fake_4kpi state */
+static void remote_iops_nvme_done(void *arg, int status, u32 result)
 {
 	struct nvmeibs_nvme_req *req = arg;
 
-	/* Collect stats */
-	nvmeibs_disk_record_stats(req->disk_info, req, status);
-
-	/* Call req callback */
+	req->f4kpi_translated = 0;
+	if (nvmeibs_disk_collect_stats)
+		nvmeibs_disk_record_stats(req->disk_info, req, status);
 	(*req->cb)(req->arg, status, result);
 }
 
@@ -4297,8 +4297,10 @@ static void fake4kpi_complete_cb(void *arg, int status, u32 result)
 
 	f4kpi_ring_free(ctx->f4kpi_q, ctx->f4kpi_ring_idx);
 
-	if (status != 0)
+	if (status != 0) {
+		/* We may have multiple-parts out, so make the error status sticky. */
 		req->status = status;
+	}
 
 	if (atomic_dec_and_test(&req->parts_out)) {
 		if (req->use_sg && !req->sg_already_mapped) {
@@ -4307,6 +4309,7 @@ static void fake4kpi_complete_cb(void *arg, int status, u32 result)
 			dma_unmap_sg(ctx->dma_dev, req->table.sgl,
 				     req->table.orig_nents, dir);
 		}
+		req->f4kpi_translated = 0;
 		(req->cb)(req->arg, req->status, result);
 	}
 	/* ctx is from q->fake4kpi.ctx[ridx], not allocated per IO */
@@ -4378,14 +4381,8 @@ static void process_remote_iops(struct device_data *d, int qid)
 		id = find_next_zero_bit(q->id_bitmap, q->total_ids, id);
 		BUG_ON(id >= q->total_ids);
 		set_bit(id, q->id_bitmap);
-		if (nvmeibs_disk_collect_stats) {
-			/* Use trampoline to collect stats */
-			q->ids[id].callback = remote_iops_stats_cb;
-			q->ids[id].arg = req;
-		} else {
-			q->ids[id].callback = req->cb;
-			q->ids[id].arg = req->arg;
-		}
+		q->ids[id].callback = remote_iops_nvme_done;
+		q->ids[id].arg = req;
 		q->ids[id].issue_time = jiffies + q->used_ids * HZ;
 		q->ids[id].aborted = false;
 		++q->used_ids;
@@ -4416,17 +4413,20 @@ static void process_remote_iops(struct device_data *d, int qid)
 				int nr_ranges = (req->data_len >> 4);
 				int ri;
 
-				// Only works with IOMMU disabled, since we are using phys_to_virt.
-				dr = req->use_sg ? sg_virt(req->table.sgl) :
-					phys_to_virt(req->buf_addrs[0]);
-				for (ri = 0; ri < nr_ranges; ri++) {
-					u64 vslba = le64_to_cpu(dr[ri].slba);
-					u32 vnlb = le32_to_cpu(dr[ri].nlb);
+				if (!req->f4kpi_translated) {
+					// Only works with IOMMU disabled, since we are using phys_to_virt.
+					dr = req->use_sg ? sg_virt(req->table.sgl) :
+						phys_to_virt(req->buf_addrs[0]);
+					for (ri = 0; ri < nr_ranges; ri++) {
+						u64 vslba = le64_to_cpu(dr[ri].slba);
+						u32 vnlb = le32_to_cpu(dr[ri].nlb);
 
-					dr[ri].slba = cpu_to_le64(
-						vslba * FAKE4KPI_SECTORS_PER_LBA);
-					dr[ri].nlb = cpu_to_le32(
-						vnlb * FAKE4KPI_SECTORS_PER_LBA);
+						dr[ri].slba = cpu_to_le64(
+							vslba * FAKE4KPI_SECTORS_PER_LBA);
+						dr[ri].nlb = cpu_to_le32(
+							vnlb * FAKE4KPI_SECTORS_PER_LBA);
+					}
+					req->f4kpi_translated = 1;
 				}
 				q->ids[id].f4kpi_lba = 0;
 				q->ids[id].f4kpi_nlba = (sector_t)-1;
@@ -4665,6 +4665,7 @@ static void process_remote_iops(struct device_data *d, int qid)
 						if (dma_mapping_error(&d->pci_dev->dev, req->mtdt_dma)) {
 							_NE(error_1_process_remote_iops, "Failed dma_map for metdata size=@M_SIZE", req->mtdt_size);
 							q->nvme_qp_stats.n_dma_errors++;
+							req->f4kpi_translated = 0;
 							(*req->cb)(req->arg, -ENOMEM, 0);
 							dma_unmap_sg(&d->pci_dev->dev, req->table.sgl, req->table.orig_nents, dir);
 							list_del_init(&req->link);
@@ -4772,6 +4773,7 @@ static void process_remote_iops(struct device_data *d, int qid)
 					kfree(prpl);
 					if (req->resid_len != 0)
 						list_del_init(&req->link);
+					req->f4kpi_translated = 0;
 					(*req->cb)(req->arg, -ENOMEM, 0);
 					break;
 				}
@@ -5728,6 +5730,7 @@ static void abort_q_cmds(struct nvme_qp *q)
 					list_del_init(&wreq->link);
 					if (atomic_read(&wreq->parts_out) == 0
 					    && wreq->cb) {
+						wreq->f4kpi_translated = 0;
 						q_unlock_irqrestore(q, flags);
 						(*wreq->cb)(wreq->arg, 0x8, 0);
 						q_lock_irqsave(q, flags);
@@ -5784,6 +5787,7 @@ static void abandon_outstanding(struct device_data *d)
 					struct nvmeibs_nvme_req, link)) != NULL) {
 				list_del_init(&req->link);
 				if (req->cb != NULL) {
+					req->f4kpi_translated = 0;
 					q_unlock_irqrestore(q, flags);
 					(*req->cb)(req->arg, 0x8, 0);
 					q_lock_irqsave(q, flags);

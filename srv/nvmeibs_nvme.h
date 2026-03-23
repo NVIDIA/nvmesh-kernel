@@ -155,6 +155,7 @@ struct nvmeibs_nvme_req {
 			unsigned int use_hw_blocks : 1;
 			unsigned int sg_md_already_mapped : 1; /* When use_sg == 1, MD was already DMA mapped to drive (address in mtdt_dma). 
 								For PRPL, MD is already assumed to be mapped) */
+			unsigned int f4kpi_translated : 1; /* DSM ranges scaled for fake_4kpi (avoid re-apply on f4kpi_waitq retry) */
 		};
 	};
 	union {

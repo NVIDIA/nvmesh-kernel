@@ -1378,7 +1378,7 @@ static void io_cmd_cb(void *arg, int status, u32 result)
 
 	__NFIN;
 
-	/* [NVMESH-2935]: Moved to nvmeibs_nvme.c using trampoline remote_iops_stats_cb
+	/* [NVMESH-2935]: Moved to nvmeibs_nvme.c using trampoline remote_iops_nvme_done
 	 * nvmeibs_disk_record_stats(cl->di, &cmd->req, status);
 	 */
 	nvmeibs_nr_lat_meas_record_io_cmd_cb(nrch, cmd);
