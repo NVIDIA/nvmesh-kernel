@@ -23,7 +23,31 @@ struct sb_cluster_conf {
 		uint64_t uuid16b[2];	// Packed 16[b] format
 	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas
 	int n_nodes;
+	struct sb_volume_conf {							// All volumes configuration
+		const char* name;
+		unsigned uuid;								// For simplicity all uuids are u32
+		unsigned num_blocks;						// Volume size (num of 4KB blocks)
+		unsigned num_chunks;						// Created with ==1
+		struct sb_chunk_conf {
+			unsigned uuid;							// My chunk uuid
+			unsigned vlba_start;					// Implemented volume blocks range via this chunk
+			unsigned vlba_end;
+			unsigned n_raids;						// Striping size (Raid-0 implementation)
+			struct sb_praid_conf {
+				unsigned uuid;						// My praid uuid
+				unsigned D, P;						// (data+parity) protection. R1 = (1+{1..2}), EC = ({2..8}+{1..2})
+				struct sb_seg_conf {
+					const char* disk_uuid;			// Pointer to the physical disk uuid where disk segment resides, Todo consider changing to u32
+					unsigned uuid;					// My disk segment uuid
+					unsigned block_start;			// Disk block address of segment start
+					unsigned block_end;				// All disk segments in chunk have identical length
+				} segs[4];							// Up to 3+1 EC, for now
+			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
+		} chunks[2];								// For now, 2 chunks only, Support for volume extend once
+	} vols[4];										// For now, up to 4 volumes
+	int n_vols, zone_idx;							// All those volume exist in a specific zone
 };
+
 void sb_cluster_conf_create( struct sb_cluster_conf *);
 void sb_cluster_conf_destroy(struct sb_cluster_conf *);
 int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const char *host_name);
