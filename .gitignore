@@ -63,6 +63,7 @@ __pycache__/
 *.log
 tests/messages
 .DS_Store
+**/.DS_Store
 contents.xcworkspacedata
 IDEWorkspaceChecks.plist
 nvmeib.drs.code-workspace
