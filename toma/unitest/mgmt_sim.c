@@ -35,60 +35,6 @@ static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 		",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":1}}");
 }
 
-/* V_REMOTE1: RAID-1, segments only on remote disks (D0_n38, D0_n39) */
-static int make_msg_add_volume_remote1(char *buf, size_t capacity)
-{
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V_REMOTE1\",\"uuid\":\"bbb00100-0000-0000-0000-000000000001\""
-		",\"version\":1,\"name\":\"V_REMOTE1\",\"blockSize\":4096"
-		",\"lockServer\":{\"maxNOwners\":2,\"type\":4,\"locksetShift\":-1}"
-		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
-		",\"numberOfMirrors\":1,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
-		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
-		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
-		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-		"\"chunks\":[{\"uuid\":\"bbb001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
-			"{\"uuid\":\"bbb001a0-0000-0000-0000-000000000011\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-				"{\"uuid\":\"bbb001e1-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
-				"{\"uuid\":\"bbb001e2-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
-		"]}]}]}}");
-}
-
-/* V_R1: RAID-1, one local segment on NVMD_SN_003.1 + one remote on D0_n38 */
-static int make_msg_add_volume_r1(char *buf, size_t capacity)
-{
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
-		",\"version\":1,\"name\":\"V_R1\",\"blockSize\":4096"
-		",\"lockServer\":{\"maxNOwners\":3,\"type\":4,\"locksetShift\":-1}"
-		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
-		",\"numberOfMirrors\":2,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
-		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
-		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
-		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-		"\"chunks\":["
-		"{\"uuid\":\"aaa001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
-			"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-				"{\"uuid\":\"aaa001e1-0000-0000-0000-000000000000\",\"lbs\":6176,\"lbe\":7199,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
-				"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000000\",\"lbs\":1024,\"lbe\":2047,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
-				"{\"uuid\":\"aaa001e3-0000-0000-0000-000000000000\",\"lbs\":0" ",\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":2,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D1 "\"}"
-		"]}]}]}}");
-}
-
-static int make_msg_delete_volume_r1(char *buf, size_t capacity) {
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"deleteVolume\",\"messageTypeVersion\":1,\"payload\":{"
-		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\",\"version\":1}}");
-}
-
-static int make_msg_delete_volume_completed_r1(char *buf, size_t capacity) {
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"deleteVolumeCompleted\",\"messageTypeVersion\":1,\"payload\":{"
-		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\"}}");
-}
-
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
@@ -212,6 +158,60 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	m->k_producers.l_vol =  sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
 	m->k_producers.l_raft = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_TARGETS_RAFT);
 	return m;
+}
+
+/* V_REMOTE1: RAID-1, segments only on remote disks (D0_n38, D0_n39) */
+static int make_msg_add_volume_remote1(char *buf, size_t capacity)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
+		",\"payload\":{\"_id\":\"V_REMOTE1\",\"uuid\":\"bbb00100-0000-0000-0000-000000000001\""
+		",\"version\":1,\"name\":\"V_REMOTE1\",\"blockSize\":4096"
+		",\"lockServer\":{\"maxNOwners\":2,\"type\":4,\"locksetShift\":-1}"
+		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
+		",\"numberOfMirrors\":1,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
+		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
+		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
+		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
+		"\"chunks\":[{\"uuid\":\"bbb001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
+			"{\"uuid\":\"bbb001a0-0000-0000-0000-000000000011\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
+				"{\"uuid\":\"bbb001e1-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
+				"{\"uuid\":\"bbb001e2-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
+		"]}]}]}}");
+}
+
+/* V_R1: RAID-1, one local segment on NVMD_SN_003.1 + one remote on D0_n38 */
+static int make_msg_add_volume_r1(char *buf, size_t capacity)
+{
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
+		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
+		",\"version\":1,\"name\":\"V_R1\",\"blockSize\":4096"
+		",\"lockServer\":{\"maxNOwners\":3,\"type\":4,\"locksetShift\":-1}"
+		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
+		",\"numberOfMirrors\":2,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
+		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
+		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
+		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
+		"\"chunks\":["
+		"{\"uuid\":\"aaa001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
+			"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
+				"{\"uuid\":\"aaa001e1-0000-0000-0000-000000000000\",\"lbs\":6176,\"lbe\":7199,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
+				"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000000\",\"lbs\":1024,\"lbe\":2047,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
+				"{\"uuid\":\"aaa001e3-0000-0000-0000-000000000000\",\"lbs\":0" ",\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":2,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D1 "\"}"
+		"]}]}]}}");
+}
+
+static int make_msg_delete_volume_r1(char *buf, size_t capacity) {
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"deleteVolume\",\"messageTypeVersion\":1,\"payload\":{"
+		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\",\"version\":1}}");
+}
+
+static int make_msg_delete_volume_completed_r1(char *buf, size_t capacity) {
+	return snprintf(buf, capacity,
+		"{\"messageType\":\"deleteVolumeCompleted\",\"messageTypeVersion\":1,\"payload\":{"
+		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\"}}");
 }
 
 static bool __is_disk_fmt_running(enum e_disk_format_state e) { return ((e != FMT_IDLE) && (e != FMT_DONE)); }
