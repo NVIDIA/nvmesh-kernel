@@ -1595,7 +1595,6 @@ static int init_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 			rv = -ENOMEM;
 			goto free_pages;
 		}
-
 		for (j = 0; j < rsrc->n_pages; j++) {
 			rsrc->pages[j] = alloc_page(GFP_KERNEL | __GFP_ZERO);
 			if (!rsrc->pages[j]) {

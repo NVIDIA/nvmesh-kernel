@@ -437,7 +437,8 @@ void serverSimulator_notify_new_disk_sgmnts(struct serverSimulator* self){
 		nvmeibr_disk_metadata_store_gpt(self, &gpt_hdr, primary);
 		n_gpt_ents = le32_to_cpu(gpt_hdr.num_partition_entries);
 		BUG_ON(n_gpt_ents > (int)ARRAY_SIZE(gpt_ents));
-		nvmeibr_disk_metadata_store_entries(self, gpt_ents, GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES, NULL);
+		nvmeibr_disk_metadata_store_entries(self, gpt_ents, 0, GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES,
+						    GPT_HDR_BIOS_WORKAROUND_NUM_ENTRIES, NULL);
 
 		rv = nvmeibs_serjio_gpt_update(as_nvmeibs_disk_info(self), primary, gpt_update, 0, &gpt_hdr, sizeof(gpt_hdr),
 										gpt_ents, n_gpt_ents * sizeof(gpt_ents[0]));

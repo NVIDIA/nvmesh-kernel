@@ -21,6 +21,11 @@ static int __get_num_gpt_entries(struct serverSimulator *srv) {
 	return num_of_segs_on_disk + num_additional_entries;
 }
 
+unsigned nvmeibr_disk_metadata_num_gpt_entries(struct serverSimulator *srv)
+{
+	return (unsigned)__get_num_gpt_entries(srv);
+}
+
 static void __gpt_hdr_encode(struct gpt_header *g) {
 	g->signature =						cpu_to_le64(g->signature);
 	g->revision =						cpu_to_le32(g->revision);
@@ -60,7 +65,7 @@ void nvmeibr_disk_metadata_store_gpt(struct serverSimulator *srv, struct gpt_hea
 	dst->num_partition_entries = hdr_num_ents;
 
 	dst->sizeof_partition_entry = 		sizeof(struct gpt_entry);
-	nvmeibr_disk_metadata_store_entries(srv, NULL, num_gpt_ents, &dst->partition_entry_array_crc32);
+	nvmeibr_disk_metadata_store_entries(srv, NULL, 0, num_gpt_ents, num_gpt_ents, &dst->partition_entry_array_crc32);
 	__gpt_hdr_encode(dst);
 	dst->header_crc32 = 0;											// Must fill at the end
 	dst->header_crc32 = (crc32(~0L, dst, sizeof(*dst)) ^ ~0L);		// != crc32c, != crc32 calculated in reed solomon, but a version compatible to efi
@@ -75,112 +80,93 @@ static void  __gpt_entry_encode(struct gpt_entry *g) {
 #define TOMA_MD_PARTITION_GUID   "12345678-abcd-1414-fefe-543217789801"		// Just a number, no particular reason
 #define JOUR_PARTITION_GUID      "20909090-0000-0000-0000-000000000000"
 #define SERJIO_DB_PARTITION_GUID "30909090-0000-0000-0000-000000000000"
-void nvmeibr_disk_metadata_store_entries(struct serverSimulator *srv, struct gpt_entry *ent, unsigned max_ent, u32 *ent_crc) {
-	struct ramDiskSimulator * D = &srv->ramDisk;
+
+void nvmeibr_disk_metadata_store_entries(struct serverSimulator *srv, struct gpt_entry *ent,
+					 unsigned start_ent, unsigned n_ents, unsigned max_ent, u32 *ent_crc)
+{
+	struct gpt_entry tmp;
+	struct ramDiskSimulator *D = &srv->ramDisk;
 	const union nvmeib_uuid toma_md_uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST;
 	const union nvmeib_uuid journal_uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
 	const union nvmeib_uuid serj_db_uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
 	const union nvmeib_uuid seg_ec__uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
 	u64 serjio_jour_start = ~0, serjio_jour_length = ~0, serjio_db_start = ~0, serjio_db_length = ~0;
-	//const union nvmeib_uuid seg_noj_uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
-	struct gpt_entry tmp;
-	struct gpt_entry *cur = ent ? ent : &tmp;								// Entries iterator
 	struct disk_sgmnts disk_sgmnts = tTopoOfNVMesh_list_disk_sgmnts(srv->simToma.globalTopo, srv->ramDisk.uniqueID, true);
-	u16 sgmnt_idx;
-	unsigned ent_idx = 0;
+	unsigned idx, idx_end;
+	struct gpt_entry *cur;
 
 	BUG_ON(max_ent == 0);
-
-	if (ent_crc)
-		*ent_crc = ~0L;
+	BUG_ON(start_ent + n_ents < start_ent);
+	BUG_ON(start_ent + n_ents > max_ent);
 
 	ramDiskSimulator_get_serjio_partions_sectors_ranges(D, &serjio_jour_start, &serjio_jour_length, &serjio_db_start, &serjio_db_length);
 
-	// Partition 1: Toma metadata partition
-	memcpy(&cur->partition_type_guid, &toma_md_uuid, sizeof(efi_guid_t));
-	uuid_parse(TOMA_MD_PARTITION_GUID, &cur->unique_partition_guid.b[0]);
-	cur->starting_lba = cur->ending_lba = ~0ULL;					// Curently never written nor read by the simulators
-	cur->attributes   = 0;											// Unused
-	memset(&cur->partition_name, 0, sizeof(cur->partition_name));
-	memcpy(&cur->partition_name, TOMA_MD_PARTITION_GUID, 16);
-	__gpt_entry_encode(cur);
+	BUG_ON(!ent_crc && ent == NULL);
+	if (ent_crc && start_ent == 0)
+		*ent_crc = ~0L;
+	if (ent)
+		BUG_ON(n_ents == 0);
 
-	if (ent_crc)
-		*ent_crc = crc32(*ent_crc, cur, sizeof(*cur));
-	if (cur != &tmp)
-		cur++;
+	idx = start_ent;
+	idx_end = start_ent + n_ents;
 
-	if (++ent_idx == max_ent)
-		goto out;
+	for (; idx < idx_end; idx++) {
+		cur = ent ? (ent + (idx - start_ent)) : &tmp;
 
-	// Partition 2: Journal entries (2GB on real disks)
-	memcpy(&cur->partition_type_guid, &journal_uuid, sizeof(efi_guid_t));
-	uuid_parse(JOUR_PARTITION_GUID, &cur->unique_partition_guid.b[0]);
-	cur->starting_lba = serjio_jour_start;
-	cur->ending_lba = serjio_jour_start + serjio_jour_length - 1;
-	cur->attributes   = 0;											// Unused
-	memset(&cur->partition_name, 0, sizeof(cur->partition_name));
-	memcpy(&cur->partition_name, JOUR_PARTITION_GUID, 16);
-	__gpt_entry_encode(cur);
+		BUG_ON(idx >= max_ent);
 
-	if (ent_crc)
-		*ent_crc = crc32(*ent_crc, cur, sizeof(*cur));
-	if (cur != &tmp)
-		cur++;
-	if (++ent_idx == max_ent)
-		goto out;
+		if (idx == 0) {
+			memcpy(&cur->partition_type_guid, &toma_md_uuid, sizeof(efi_guid_t));
+			uuid_parse(TOMA_MD_PARTITION_GUID, &cur->unique_partition_guid.b[0]);
+			cur->starting_lba = cur->ending_lba = ~0ULL;
+			cur->attributes   = 0;
+			memset(&cur->partition_name, 0, sizeof(cur->partition_name));
+			memcpy(&cur->partition_name, TOMA_MD_PARTITION_GUID, 16);
+			__gpt_entry_encode(cur);
+		} else if (idx == 1) {
+			memcpy(&cur->partition_type_guid, &journal_uuid, sizeof(efi_guid_t));
+			uuid_parse(JOUR_PARTITION_GUID, &cur->unique_partition_guid.b[0]);
+			cur->starting_lba = serjio_jour_start;
+			cur->ending_lba = serjio_jour_start + serjio_jour_length - 1;
+			cur->attributes   = 0;
+			memset(&cur->partition_name, 0, sizeof(cur->partition_name));
+			memcpy(&cur->partition_name, JOUR_PARTITION_GUID, 16);
+			__gpt_entry_encode(cur);
+		} else if (idx == 2) {
+			memcpy(&cur->partition_type_guid, &serj_db_uuid, sizeof(efi_guid_t));
+			uuid_parse(SERJIO_DB_PARTITION_GUID, &cur->unique_partition_guid.b[0]);
+			cur->starting_lba = serjio_db_start;
+			cur->ending_lba = serjio_db_start + serjio_db_length - 1;
+			cur->attributes   = 0;
+			memset(&cur->partition_name, 0, sizeof(cur->partition_name));
+			memcpy(&cur->partition_name, SERJIO_DB_PARTITION_GUID, 16);
+			__gpt_entry_encode(cur);
+		} else if (idx >= 3) {
+			unsigned seg_idx = idx - 3;
 
-	// Partition 3: Serjio-db
-	memcpy(&cur->partition_type_guid, &serj_db_uuid, sizeof(efi_guid_t));
-	uuid_parse(SERJIO_DB_PARTITION_GUID, &cur->unique_partition_guid.b[0]);
-	cur->starting_lba = serjio_db_start;
-	cur->ending_lba = serjio_db_start + serjio_db_length - 1;
-	cur->attributes   = 0;											// Unused
-	memset(&cur->partition_name, 0, sizeof(cur->partition_name));
-	memcpy(&cur->partition_name, SERJIO_DB_PARTITION_GUID, 16);
-	__gpt_entry_encode(cur);
+			if (seg_idx < ARRAY_SIZE(disk_sgmnts.sgmnts) &&
+			    disk_sgmnts.sgmnts[seg_idx]) {
+				const struct disk_range *sgmnt = disk_sgmnts.sgmnts[seg_idx];
 
-	if (ent_crc)
-		*ent_crc = crc32(*ent_crc, cur, sizeof(*cur));
-	if (cur != &tmp)
-		cur++;
-	if (++ent_idx == max_ent)
-		goto out;
-
-	// Partition 4..: Segments.  seg_ec__uuid, seg_noj_uuid
-	for (sgmnt_idx = 0; (sgmnt_idx < ARRAY_SIZE(disk_sgmnts.sgmnts)) && disk_sgmnts.sgmnts[sgmnt_idx]; ++sgmnt_idx){
-		const struct disk_range *sgmnt = disk_sgmnts.sgmnts[sgmnt_idx];
-		memcpy(&cur->partition_type_guid, &seg_ec__uuid, sizeof(efi_guid_t));
-		uuid_parse(sgmnt->ruuid, &cur->unique_partition_guid.b[0]);
-		cur->starting_lba = sgmnt->dlba_start;
-		cur->ending_lba =   sgmnt->dlba_start + sgmnt->length;
-		cur->attributes   = 0;											// Unused
-		memset(&cur->partition_name, 0, sizeof(cur->partition_name));
-		memcpy(&cur->partition_name, &cur->unique_partition_guid, sizeof(efi_guid_t));
-		__gpt_entry_encode(cur);
+				memcpy(&cur->partition_type_guid, &seg_ec__uuid, sizeof(efi_guid_t));
+				uuid_parse(sgmnt->ruuid, &cur->unique_partition_guid.b[0]);
+				cur->starting_lba = sgmnt->dlba_start;
+				cur->ending_lba   = sgmnt->dlba_start + sgmnt->length;
+				cur->attributes   = 0;
+				memset(&cur->partition_name, 0, sizeof(cur->partition_name));
+				memcpy(&cur->partition_name, &cur->unique_partition_guid, sizeof(efi_guid_t));
+				__gpt_entry_encode(cur);
+			} else {
+				memset(cur, 0, sizeof(*cur));
+			}
+		}
 
 		if (ent_crc)
 			*ent_crc = crc32(*ent_crc, cur, sizeof(*cur));
-		if (cur != &tmp)
-			cur++;
-		if (++ent_idx == max_ent)
-			goto out;
 	}
 
-	// Fill the rest with empty entries
-	for (; sgmnt_idx < max_ent; sgmnt_idx++) {
-		memset(cur, 0, sizeof(*cur));
-		if (ent_crc)
-			*ent_crc = crc32(*ent_crc, cur, sizeof(*cur));
-		if (cur != &tmp)
-			cur++;
-		if (++ent_idx == max_ent)
-			goto out;
-	}
-
-out:
-	if (ent_crc)
-		*ent_crc = *ent_crc ^ ~0L;
+	if (ent_crc && start_ent + n_ents == max_ent)
+		*ent_crc ^= ~0L;
 }
 
 /*****************************************************************************/
