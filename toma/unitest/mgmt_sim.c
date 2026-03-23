@@ -11,10 +11,8 @@
 
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
-/* Volume scenario constants */
+/* Disk constants */
 #define UUID_from_U32(WHAT) WHAT "-0000-0000-0000-000000000000"
-#define V_R1_VOL_UUID            UUID_from_U32("aaa00000")
-#define V_R1_PRAID_UUID          UUID_from_U32("aaa001a0")
 #define DISK_UUID_LOCAL_002      UUID_from_U32("d0020000")
 #define DISK_UUID_LOCAL_003      UUID_from_U32("d0030000")
 #define DISK_UUID_REMOTE38_D0    UUID_from_U32("f38cebd0")
@@ -206,58 +204,52 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	return m;
 }
 
-/* V_REMOTE1: RAID-1, segments only on remote disks (D0_n38, D0_n39) */
-static int make_msg_add_volume_remote1(char *buf, size_t capacity)
-{
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V_REMOTE1\",\"uuid\":\"bbb00100-0000-0000-0000-000000000001\""
-		",\"version\":1,\"name\":\"V_REMOTE1\",\"blockSize\":4096"
-		",\"lockServer\":{\"maxNOwners\":2,\"type\":4,\"locksetShift\":-1}"
-		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
-		",\"numberOfMirrors\":1,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
-		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
-		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
-		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-		"\"chunks\":[{\"uuid\":\"bbb001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
-			"{\"uuid\":\"bbb001a0-0000-0000-0000-000000000011\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-				"{\"uuid\":\"bbb001e1-0000-0000-0000-000000000012\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
-				"{\"uuid\":\"bbb001e2-0000-0000-0000-000000000013\",\"lbs\":0,\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE39_D0 "\"}"
-		"]}]}]}}");
+static void __send_msg_volume_add(int vol_idx) {
+	#define BUF_ADD(...) rv += snprintf(&buf[rv], msg_size-rv, __VA_ARGS__)
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	const struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
+	const size_t msg_size = 2048;
+	char *buf = malloc(msg_size);
+	unsigned c, r, s;
+	int rv = 0;
+	BUG_ON(vol_idx >= m->cfg->n_vols);
+	BUF_ADD("{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\",\"version\":1,\"name\":\"%s\",\"blockSize\":4096,",
+		V->name, V->uuid, V->name);
+	BUF_ADD("\"lockServer\":{\"maxNOwners\":%u,\"type\":4,\"locksetShift\":-1},\"blocks\":%u,\"RAIDLevel\":\"Mirrored RAID-1\",\"numberOfMirrors\":%d,\"stripeSize\":32,\"stripeWidth\":%u,",
+		V->chunks->raids->P+1, V->num_blocks, V->chunks->raids->P,  V->chunks->n_raids);
+	BUF_ADD("\"status\":\"unavailable\",\"action\":\"initializing\",\"relativeRebuildPriority\":10,\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null,\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,");
+	BUF_ADD("\"chunks\":[");
+	for (c = 0; c < V->num_chunks; c++) {
+		const struct sb_chunk_conf *pc = &V->chunks[c];
+		BUF_ADD("{\"uuid\":\"" UUID_from_U32("%8x") "\",\"vlbs\":%u,\"vlbe\":%u,\"pRaids\":[", pc->uuid, pc->vlba_start, pc->vlba_end);
+		for (r = 0; r < pc->n_raids; r++) {
+			const struct sb_praid_conf *pr = &pc->raids[r];
+			BUF_ADD("{\"uuid\":\"" UUID_from_U32("%8x") "\",\"activated\":false,\"stripeIndex\":%u,\"zone\":\"%d\",\"diskSegments\":[", pr->uuid, r, m->cfg->zone_idx);
+			for (s = 0; s < (pr->D + pr->P); s++) {
+				const struct sb_seg_conf *ps = &pr->segs[s];
+				BUF_ADD("{\"uuid\":\"" UUID_from_U32("%8x") "\",\"lbs\":%u,\"lbe\":%u,\"type\":\"data\",\"pRaidIndex\":%u,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"%s\"},",
+					ps->uuid, ps->block_start, ps->block_end, s, ps->disk_uuid);
+			}
+			rv--;	// Remove the last uneeded ','
+		}
+	}
+	BUF_ADD("]}]}]}}");
+	N_IMf(__AUTOID__, "vol=@STR sending msg addVolume, @INT[b]", m->cfg->vols[vol_idx].name, rv);
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
 }
 
-/* V_R1: RAID-1, one local segment on NVMD_SN_003.1 + one remote on D0_n38 */
-static int make_msg_add_volume_r1(char *buf, size_t capacity)
-{
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"addVolume\",\"messageTypeVersion\":1"
-		",\"payload\":{\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\""
-		",\"version\":1,\"name\":\"V_R1\",\"blockSize\":4096"
-		",\"lockServer\":{\"maxNOwners\":3,\"type\":4,\"locksetShift\":-1}"
-		",\"blocks\":1024,\"RAIDLevel\":\"Mirrored RAID-1\""
-		",\"numberOfMirrors\":2,\"stripeSize\":32,\"stripeWidth\":1,\"status\":\"unavailable\""
-		",\"action\":\"initializing\",\"relativeRebuildPriority\":10"
-		",\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null"
-		",\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,"
-		"\"chunks\":["
-		"{\"uuid\":\"aaa001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
-			"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
-				"{\"uuid\":\"aaa001e1-0000-0000-0000-000000000000\",\"lbs\":6176,\"lbe\":7199,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
-				"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000000\",\"lbs\":1024,\"lbe\":2047,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
-				"{\"uuid\":\"aaa001e3-0000-0000-0000-000000000000\",\"lbs\":0" ",\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":2,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D1 "\"}"
-		"]}]}]}}");
-}
-
-static int make_msg_delete_volume_r1(char *buf, size_t capacity) {
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"deleteVolume\",\"messageTypeVersion\":1,\"payload\":{"
-		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\",\"version\":1}}");
-}
-
-static int make_msg_delete_volume_completed_r1(char *buf, size_t capacity) {
-	return snprintf(buf, capacity,
-		"{\"messageType\":\"deleteVolumeCompleted\",\"messageTypeVersion\":1,\"payload\":{"
-		"\"_id\":\"V_R1\",\"uuid\":\"" V_R1_VOL_UUID "\",\"name\":\"V_R1\"}}");
+static void __send_msg_volume_del(int vol_idx, bool is_completed) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	const struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
+	const char *msg_type = (is_completed ? "deleteVolumeCompleted" : "deleteVolume" );
+	const size_t msg_size = 512;
+	char *buf = malloc(msg_size);
+	int rv = 0;
+	BUG_ON(vol_idx >= m->cfg->n_vols);
+	BUF_ADD("{\"messageType\":\"%s\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\",\"version\":1,\"name\":\"%s\"}}",
+		msg_type, V->name, V->uuid, V->name);
+	N_IMf(__AUTOID__, "vol=@STR sending msg @STR, @INT[b]", m->cfg->vols[vol_idx].name, msg_type, rv);
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
 }
 
 static bool __is_disk_fmt_running(enum e_disk_format_state e) { return ((e != FMT_IDLE) && (e != FMT_DONE)); }
@@ -437,7 +429,9 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 			// {"originType":"TOMA","messageType":"segmentZeroingProgress","messageTypeVersion":1,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":335,"leaderToken":null,"payload":{"praidVersion":"258.0","segmentUUID":"98e46d20-ea22-11f0-bad8-af65dd8e6ead","pRaidUUID":"98e44612-ea22-11f0-bad8-af65dd8e6ead","nZeroedBlks":262144}}
 			struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 			const char *praid_uuid = json_get_dict_str(payload, "pRaidUUID", NULL);
-			if (praid_uuid && strcmp(praid_uuid, V_R1_PRAID_UUID) == 0) {
+			unsigned uuid_u32 = 0;
+			BUG_ON(sscanf(praid_uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
+			if (m->cfg->vols[1].chunks[0].raids[0].uuid == uuid_u32) {
 				m->v_r1_seg_zeroing_progress_seen = true;
 				N_IMf(msim_szp, "segmentZeroingProgress: @STR praid matched", m->cfg->vols[1].name);
 			}
@@ -522,8 +516,10 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	for (int i = 0; i < praids_update->array.len; i++) {
 		struct mm_json_elem *entry = praids_update->array.elements[i];
 		const char *uuid = json_get_dict_str(entry, "uuid", NULL);
+		unsigned uuid_u32 = 0;
 		BUG_ON(!entry || (entry->type != JSON_E_DICT) || !uuid);
-		if (uuid && strcmp(uuid, V_R1_PRAID_UUID) == 0) {
+		BUG_ON(sscanf(uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
+		if (m->cfg->vols[1].chunks[0].raids[0].uuid == uuid_u32) {
 			const struct sb_volume_conf* V = &m->cfg->vols[1];
 			struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
 			N_IMf(msim_praid, "matched @STR pRaid UUID", V->name);
@@ -614,35 +610,12 @@ void mgmt_sim_send_leader_keep_alive(void) {
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
 }
 
-void mgmt_sim_send_add_volume_remote1(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	char *buf = malloc(2048);
-	int len = make_msg_add_volume_remote1(buf, 2048);
-	N_IMf(msim_fsm4, "sending addVolume V_REMOTE1");
-	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
-}
+void mgmt_sim_send_add_volume_remote1(void)         { __send_msg_volume_add(0); }
+void mgmt_sim_send_add_volume_r1(     void)         { __send_msg_volume_add(1); }
 
-void mgmt_sim_send_add_volume_r1(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	char *buf = malloc(2048);
-	int len = make_msg_add_volume_r1(buf, 2048);
-	N_IMf(msim_fsm5, "sending addVolume V_R1");
-	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
-}
-
-void mgmt_sim_send_delete_volume_r1(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	char *buf = malloc(512);
-	int len = make_msg_delete_volume_r1(buf, 512);
-	N_IMf(msim_del1, "sending deleteVolume V_R1");
-	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
-}
-
+void mgmt_sim_send_delete_volume_r1(  void)         { __send_msg_volume_del(1, false); }
 void mgmt_sim_send_delete_volume_completed_r1(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	char *buf = malloc(512);
-	int len = make_msg_delete_volume_completed_r1(buf, 512);
-	N_IMf(msim_del3, "sending deleteVolumeCompleted V_R1");
-	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, len, false);
+	__send_msg_volume_del(1, true);
 	m->v_r1_delete_completed_sent = true;
 }
