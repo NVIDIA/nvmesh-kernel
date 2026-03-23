@@ -21,7 +21,7 @@ bool dp_sync_verify_binfo_is_legal(          struct recovery_sync_op *so, const 
 /* Prepares binfo DB values for dbits turnon */
 static inline void dp_sync_calc_new_binfo_dbits_turnon(struct recovery_sync_op *so, const sgmnts_bmp_t dbits_turnon_bmp) {
 	struct nvmeibc_raid_leader_cmd_ctx *rld = &so->cmds->rld;
-	struct nvmeibc_dbits_tx tx = {.action.db_turn_on_bmp = dbits_turnon_bmp, .action.num_parities = nvmeibc_raid1_get_protect_lvl(so->r1)};
+	struct nvmeibc_dbits_tx tx = {.action.db_turn_on_bmp = dbits_turnon_bmp, .action.num_degraded = nvmeibc_raid1_get_protect_lvl(so->r1)};
 	union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
 	BUG_ON(__is_raid1_mirror(so));  // Currently not being used in mirror
 	rld->post.bits.dirty = nvmeibc_dbits_tx_apply(&pre, &tx);

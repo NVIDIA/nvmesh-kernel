@@ -5,22 +5,16 @@
 
 #ifndef NVMEIBC_BLOCK_DP_DBITS_H_
 #define NVMEIBC_BLOCK_DP_DBITS_H_
-
 #include "nvmeib_shared.h"
 #include "block/dp_topology_traits.h"
 
 /************************** nvmeibc_dbits_entry API ***************************/
-// Below is a set of usefull manipulations on entry (via predefined internat actions)
-sgmnts_bmp_t  nvmeibc_dbits_get_bm( const union nvmeibc_dbits_entry *e, const int np);	    // Get bitmap of dirty segs
-u32  nvmeibc_dbits_get_cv(          const union nvmeibc_dbits_entry *e, const int np);	    // Get bitmap of convict segs
-u32 nvmeibc_dbits_get_dirty_not_cv( const union nvmeibc_dbits_entry *e, const int np); // Get bitmap of dirty seg which aren't convicts
-u32  nvmeibc_dbits_get_n_unk(       const union nvmeibc_dbits_entry *e, const int np);	    // Get amount of unknown dbits
-void nvmeibc_dbits_del_unk(               union nvmeibc_dbits_entry *e, const int np);	    // Remove unknowns, used when we resolve unk from md or topology
-void nvmeibc_dbits_del_non_convict(       union nvmeibc_dbits_entry *e, const int np);	    // Remove all non convicts dbits (used when md overrrides RAM)
-void nvmeibc_dbits_convicts_to_dirty(     union nvmeibc_dbits_entry *e, const int np);     // Change all convicts to regular dbits.
+// Below is a set of usefull manipulations on entry (via predefined internal actions)
+sgmnts_bmp_t  nvmeibc_dbits_get_bm( const union nvmeibc_dbits_entry *e, const int num_deg);	    // Get bitmap of dirty segs
+u32  nvmeibc_dbits_get_n_unk(       const union nvmeibc_dbits_entry *e, const int num_par);	    // Get amount of unknown dbits
+void nvmeibc_dbits_del_unk(               union nvmeibc_dbits_entry *e, const int num_deg);	    // Remove unknowns, used when we resolve unk from md or topology
 struct nvmeibc_raid1;	// TODO: Remove
 void nvmeibc_dbits_turn_on_convict(       union nvmeibc_dbits_entry *e, const struct nvmeibc_raid1 *pr);
-//void nvmeibc_dbits_turn_on_convict(  union nvmeibc_dbits_entry *e, int segx, int segy); // Deprecated method: If segi != -1 turns convict on it. Supports up to 2 segments
 
 /* Given the dirtybits that read by owner and secondary owner lock, unite them and return the result.all_bits */
 __attribute__((nonnull(1, 2, 3)))
@@ -30,15 +24,16 @@ u16 nvmeibc_dbits_intersect_owners(const union nvmeibc_dbits_entry *e1, const un
 
 /********************** Dirty-bits Transaction actions ************************/
 // Below is a generic struct to create any possible actions
-struct nvmeibc_dbits_action {		// Bitmaps representation of dbit action
+struct nvmeibc_dbits_action {		// Bitmaps representation of dbit action, Can represent unpacked 'nvmeibc_dbits_entry' or any transaction (io, sync, etc)
 	union {
 		struct {
 			u16 db_turn_on_bmp;         	// Bit map which segments could not be written  (for dead seg 'i' bit 'i' is turned on).
 			u16 db_turn_off_bmp;        	// Bit map which segments are implicitly synced (for W    seg 'i' bit 'i' is turned off).
 			u16 db_conv_map;          		// Bit map of which degraded segments are also convicts.
-			u16 num_unknowns  :  3;			// Number of unknown dbits: {0,1,2}, must be 3 bits for summation (2+2)
-			u16 num_parities  :  2;			// Maximum number of valid dbits (We currently support only 2)
+			u16 num_unknowns  :  4;			// Number of unknown dbits: Raid6-{0,1,2}, must be 3 bits for summation (2+2). 4 bits for summation of 2 r1 5 mirror
+			u16 num_degraded  :  3;			// Maximum number of valid dbits (We currently support only 2, made for up to 4 degraded in 5 mirror r1)
 			u16 has_slice_info:  1;			// true (1) - has information about dirty slices, false - must be represented as global for blockset
+			u16 reserved      :  8;
 		};
 		u64 raw;							// For prints and comparison
 	} __attribute__ ((packed));
@@ -78,12 +73,9 @@ struct nvmeibc_dbits_tx {				// Map describing the dirtybits of transaction. Rel
 // Private: void nvmeibc_dbits_action_init_by_entry( struct nvmeibc_dbits_action *act,const union nvmeibc_dbits_entry *e);
 // Private: void nvmeibc_dbits_action_to_entry(const struct nvmeibc_dbits_action *act,      union nvmeibc_dbits_entry *e);
 
-//#include "nvmeib_types.h"	// TODO: Remove
-
-void nvmeibc_dbits_tx_init_empty(     struct nvmeibc_dbits_tx*, const int num_parities);
-void nvmeibc_dbits_tx_init_by_bmp(struct nvmeibc_dbits_tx* tx,  const int num_parities, u32 turn_on_dbit_bmp, u32 turn_off_dbit_bmp, u32 turn_on_conv_bmp);
-struct nvmeibc_block_command;	// TODO: Remove
-void nvmeibc_dbits_tx_init_only_dconv(struct nvmeibc_dbits_tx*,  const int num_parities, u32 turn_on_conv_bmp);
+void nvmeibc_dbits_tx_init_empty(     struct nvmeibc_dbits_tx*, const int num_degraded);
+void nvmeibc_dbits_tx_init_by_bmp(    struct nvmeibc_dbits_tx*, const int num_degraded, u32 turn_on_dbit_bmp, u32 turn_off_dbit_bmp, u32 turn_on_conv_bmp);
+void nvmeibc_dbits_tx_init_only_dconv(struct nvmeibc_dbits_tx*, const int num_degraded, u32 turn_on_conv_bmp);
 
 static inline bool nvmeibc_dbits_tx_has_action(const struct nvmeibc_dbits_tx* tx)
 {	// At least 1 segment changed
