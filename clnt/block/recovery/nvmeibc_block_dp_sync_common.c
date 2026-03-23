@@ -833,7 +833,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 	} else if (so->cmds->rld.post.bits.dirty != 0) {		// R1, verify dirty bits
 		const union nvmeib_blkset_info binfo = so->cmds->rld.post;
 		const union nvmeibc_dbits_entry dbits = { .all_bits = binfo.bits.dirty };
-		const u32 num_unknown = nvmeibc_dbits_get_n_unk(&dbits, nvmeibc_raid1_get_protect_lvl(so->r1));
+		const u32 num_unknown = nvmeibc_dbits_get_n_unk(&dbits, &so->r1->calculated_data.topo_traits);
 		if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, 's')) {
 			WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 			nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);

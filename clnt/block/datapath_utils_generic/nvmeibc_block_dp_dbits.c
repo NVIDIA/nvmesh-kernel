@@ -175,10 +175,11 @@ sgmnts_bmp_t nvmeibc_dbits_get_turn_on_bmp(const union nvmeibc_dbits_entry *e, s
 	return a.db_turn_on_bmp;
 }
 
-u32 nvmeibc_dbits_get_n_unk(const union nvmeibc_dbits_entry *e, const int np)
+u32 nvmeibc_dbits_get_n_unk(const union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits)
 {
 	struct nvmeibc_dbits_action a;
-	nvmeibc_dbits_action_init_by_entry(&a, e, np);
+	// Use n_parities as the worst estimate of unknowns. As we rewrite the 3-way mirroring, the number can be tightened to n_degraded.
+	nvmeibc_dbits_action_init_by_entry(&a, e, topo_traits->n_parities);
 	return a.num_unknowns;
 }
 

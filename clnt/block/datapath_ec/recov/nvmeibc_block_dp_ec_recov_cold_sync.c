@@ -128,7 +128,7 @@ static bool __does_dbits_need_reconstruction(const struct recovery_sync_op *so)
 	//in case cold recovery restarts, after we made some progress, dirty bits may be resolved (not unknown)
 	const union nvmeib_blkset_info *bi = &so->cmds->rld.post;
 	union nvmeibc_dbits_entry db = {.all_bits = bi->bits.dirty};
-	return (nvmeibc_dbits_get_n_unk(&db, nvmeibc_raid1_get_protect_lvl(so->r1)) != 0);
+	return (nvmeibc_dbits_get_n_unk(&db, &so->r1->calculated_data.topo_traits) != 0);
 }
 
 static void __reconstruct_blockset_info_from_md(const struct recovery_sync_op *so, struct data_slice_d2j_info *d2j_info)

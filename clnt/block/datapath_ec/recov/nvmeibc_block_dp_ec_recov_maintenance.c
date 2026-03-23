@@ -242,7 +242,7 @@ _func_start:
 									     nvmeibcbdpec_calc_max_dbit_in_ram_md(so);
 				fix->bits.dirty = db.all_bits;
 				atomic_inc(&get_so_fctr(so)->main.n_dbits_resolve);
-				if (nvmeibc_dbits_get_n_unk(&db, nvmeibc_raid1_get_protect_lvl(so->r1))) {
+				if (nvmeibc_dbits_get_n_unk(&db, &so->r1->calculated_data.topo_traits) != 0) {
 					so->error = -10046;	// Daniel: I think this will stuck caller IO in a loop. Todo: Solve this!!!
 				}
 			}

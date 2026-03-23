@@ -1784,9 +1784,10 @@ static inline void calc_new_dbits(struct htr_ctx *h)
 {
 	union nvmeibc_dbits_entry pre_slice, pre_blkset = {.all_bits = h->so->cmds->rld.pre.bits.dirty};
 	const int num_parities = nvmeibc_raid1_get_protect_lvl(h->params.raid1);
+	struct dp_topology_traits const *topo_traits = &h->params.raid1->calculated_data.topo_traits;
 
 	/* Use lockset's Dbits as base, They might be pre or post TX depending on when failure occured */
-	WARN(nvmeibc_dbits_get_n_unk(&pre_blkset, num_parities) != 0, "nvmeibc bug, dbits=0x%x\n", pre_blkset.all_bits);	// Should have resolved them earlier
+	WARN(nvmeibc_dbits_get_n_unk(&pre_blkset, topo_traits) != 0, "nvmeibc bug, dbits=0x%x\n", pre_blkset.all_bits);	// Should have resolved them earlier
 
 	WARN(h->cur_slice_info.pre_slice_dbits.is_initialized == false, "nvmeibc bug\n"); // Sanity
 	pre_slice = h->cur_slice_info.pre_slice_dbits.dbits;
@@ -2907,6 +2908,7 @@ static int htr_rollback_deg_segs(struct htr_ctx *h)
 	roles_bmp_t w_p_bm = ~0;
 	int rv = -1;
 	union nvmeibc_dbits_entry blkset_dbits;
+	struct dp_topology_traits const *topo_traits = &h->params.raid1->calculated_data.topo_traits;
 	NFIN;
 
 	/* sanity */
@@ -2920,7 +2922,7 @@ static int htr_rollback_deg_segs(struct htr_ctx *h)
 	w_p_bm = (nvmeibc_raid1_get_parities_bmp(h->params.raid1) & nvmeibc_raid1_get_roles_bmp(h->params.raid1, h->owner_si, w));
 
 	blkset_dbits.all_bits = h->params.lock_ent.blkset_info.bits.dirty;
-	WARN(nvmeibc_dbits_get_n_unk(&blkset_dbits, nvmeibc_raid1_get_protect_lvl(h->params.raid1)) != 0,
+	WARN(nvmeibc_dbits_get_n_unk(&blkset_dbits, topo_traits) != 0,
 		 "nvmeibc bug, dbits=0x%x\n", blkset_dbits.all_bits);	// Should have resolved them earlier
 	h->so->nwhole_params = no_writehole_params_default;
 	h->so->nwhole_params.dbits_turnon_bmp = d_p_bm;

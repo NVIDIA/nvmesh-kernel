@@ -22,7 +22,7 @@ union nvmeibc_dbits_entry nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(
 static inline bool nvmeibcbdp_binfo_has_unknown_dbits(const struct nvmeibc_block_command *rldr, const struct nvmeibc_raid1 *pr)
 {
 	const union nvmeibc_dbits_entry pre = {.all_bits = rldr->rld.pre.bits.dirty};
-	return nvmeibc_dbits_get_n_unk(&pre, nvmeibc_raid1_get_protect_lvl(pr));
+	return nvmeibc_dbits_get_n_unk(&pre, &pr->calculated_data.topo_traits);
 }
 
 // Todo: Move the functions below to here

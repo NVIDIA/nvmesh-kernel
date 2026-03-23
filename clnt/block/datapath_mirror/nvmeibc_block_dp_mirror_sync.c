@@ -325,13 +325,14 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 {
 	const int n_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 	const union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
+	struct dp_topology_traits const *topo_traits = &so->r1->calculated_data.topo_traits;
 	const u16 dbits_on_topo_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 	struct nvmeibc_dbits_tx tx;
 	if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB) {
 		if (!has_stale_lock) {
 			nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, 0                , 0                              , 0);	// If stale does not exists then do nothing, other client already fixed this
 			BUG();		// Miss-use of the function. This is illegal becuase we never took the lock to know if it is stale or not
-		} else if (nvmeibc_dbits_get_n_unk(&pre, n_parities)) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
+		} else if (nvmeibc_dbits_get_n_unk(&pre, topo_traits)) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
 			const u16 n_dead = hweight16(dbits_on_topo_bmp);
 			nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, 0                , 0                              , 0);
 			tx.action.num_unknowns = n_dead; // Fill Every possible dead with optional unknown (unless it already has dbit)
@@ -347,7 +348,7 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		const u32 turn_off_bmp = (should_db_turn_off ? (turn_off_topo_bmp | turn_off_inv_bmp) : 0);
 		const u32 turn_on_bmp =  (should_db_turn_on  ?  dbits_on_topo_bmp                     : 0);
 		nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, turn_on_bmp, turn_off_bmp, 0);
-		if (nvmeibc_dbits_get_n_unk(&pre, n_parities))
+		if (nvmeibc_dbits_get_n_unk(&pre, topo_traits))
 			so->R1.is_dirty_suspect = true;					// Note here: all syncs (stale/db/bad/read-fail) will run identically. Do all possible reads, compare data and turn off unknown dbits if possible
 
 		__mark_read_to_dirty_w_seg_as_do_not_send(so, pre);
