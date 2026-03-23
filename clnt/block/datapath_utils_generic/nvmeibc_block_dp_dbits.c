@@ -183,7 +183,7 @@ u32 nvmeibc_dbits_get_n_unk(const union nvmeibc_dbits_entry *e, struct dp_topolo
 	return a.num_unknowns;
 }
 
-void nvmeibc_dbits_del_unk(union nvmeibc_dbits_entry *e, const int np)
+static void __nvmeibc_dbits_del_unk(union nvmeibc_dbits_entry *e, u8 np)
 {
 	struct nvmeibc_dbits_action a;
 	nvmeibc_dbits_action_init_by_entry(&a, e, np);
@@ -192,6 +192,16 @@ void nvmeibc_dbits_del_unk(union nvmeibc_dbits_entry *e, const int np)
 		__action_calc_has_slice_info(&a);
 	}
 	nvmeibc_dbits_action_to_entry(&a, e);
+}
+
+void nvmeibc_dbits_del_unk(union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits)
+{
+	__nvmeibc_dbits_del_unk(e, topo_traits->n_degraded);
+}
+
+void nvmeibc_dbits_del_unk_worst_case(union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits)
+{
+	__nvmeibc_dbits_del_unk(e, topo_traits->n_parities);
 }
 
 static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, enum merge_option mo, struct dp_topology_traits const* topo_traits)

@@ -14,7 +14,10 @@ __attribute__((nonnull(1, 2)))
 sgmnts_bmp_t  nvmeibc_dbits_get_turn_on_bmp( const union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Get bitmap of dirty segs
 __attribute__((nonnull(1, 2)))
 u32  nvmeibc_dbits_get_n_unk(       const union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Get amount of unknown dbits
-void nvmeibc_dbits_del_unk(               union nvmeibc_dbits_entry *e, const int num_deg);	    // Remove unknowns, used when we resolve unk from md or topology
+__attribute__((nonnull(1, 2)))
+void nvmeibc_dbits_del_unk(               union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Remove unknowns, used when we resolve unk from md or topology
+__attribute__((nonnull(1, 2)))
+void nvmeibc_dbits_del_unk_worst_case(               union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Remove unknowns, used when we resolve unk from md or topology
 struct nvmeibc_raid1;	// TODO: Remove
 void nvmeibc_dbits_turn_on_convict(       union nvmeibc_dbits_entry *e, const struct nvmeibc_raid1 *pr);
 

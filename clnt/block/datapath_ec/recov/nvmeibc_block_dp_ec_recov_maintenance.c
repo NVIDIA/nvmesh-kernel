@@ -23,6 +23,7 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 	int i, first_p = so->r1->slice_size;
 	const int slice_start = so_get_owner_seg(so);
 	const int num_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
+	struct dp_topology_traits const* topo_traits = &so->r1->calculated_data.topo_traits;
 	const roles_bmp_t non_readable = nvmeibc_raid1_get_inverse_roles_bmp(so->r1, slice_start, readable);
 	const roles_bmp_t pari_bmp =     nvmeibc_raid1_get_roles_bmp(        so->r1, slice_start, raid.pari);
 	const roles_bmp_t non_readable_pari = pari_bmp & non_readable;
@@ -53,8 +54,8 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 			}
 	}
 	nvmeibc_dbits_turn_on_convict(&res, so->r1);
+	nvmeibc_dbits_del_unk_worst_case(&res, topo_traits);
 _resolved:
-	nvmeibc_dbits_del_unk(&res, num_parities);
 
 	if (unlikely(!verify_binfo_is_legal(so->locks->ds, (const union nvmeib_blkset_info){.bits.txid = so->cmds->rld.post.bits.txid, .bits.dirty = res.all_bits}, so->locks->address, 'r'))) { // merge failure, Todo: Check it, dump all metadatas. Probably data corruption
 		for (i = first_p, c = &so->cmds[i]; i < so->r1->replicas; i++, c++) {
@@ -70,9 +71,8 @@ _resolved:
 union nvmeibc_dbits_entry nvmeibcbdpec_calc_worst_case_dbits(const struct recovery_sync_op *so)
 {
 	union nvmeibc_dbits_entry res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology((union nvmeibc_dbits_entry){.all_bits = so->cmds->rld.pre.bits.dirty}, so->r1);
-	const int num_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 
-	nvmeibc_dbits_del_unk(&res, num_parities);
+	nvmeibc_dbits_del_unk_worst_case(&res, &so->r1->calculated_data.topo_traits);
 
 	return res;
 }
