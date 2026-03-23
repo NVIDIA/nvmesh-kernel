@@ -12,13 +12,15 @@
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
 /* Volume scenario constants */
-#define V_R1_VOL_UUID            "aaa00100-0000-0000-0000-000000000001"
-#define V_R1_PRAID_UUID          "aaa001a0-0000-0000-0000-000000000001"
-#define DISK_UUID_LOCAL_002      "d0020000-0000-0000-0000-000000000000"
-#define DISK_UUID_LOCAL_003      "d0030000-0000-0000-0000-000000000000"
-#define DISK_UUID_REMOTE38_D0    "f38cebd0-0000-0000-0000-000000000000"
-#define DISK_UUID_REMOTE38_D1    "f38cebd1-0000-0000-0000-000000000000"
-#define DISK_UUID_REMOTE39_D0    "f39cebd0-0000-0000-0000-000000000000"
+#define UUID_from_U32(WHAT) WHAT "-0000-0000-0000-000000000000"
+#define V_R1_VOL_UUID            UUID_from_U32("aaa00000")
+#define V_R1_PRAID_UUID          UUID_from_U32("aaa001a0")
+#define DISK_UUID_LOCAL_002      UUID_from_U32("d0020000")
+#define DISK_UUID_LOCAL_003      UUID_from_U32("d0030000")
+#define DISK_UUID_REMOTE38_D0    UUID_from_U32("f38cebd0")
+#define DISK_UUID_REMOTE38_D1    UUID_from_U32("f38cebd1")
+#define DISK_UUID_REMOTE39_D0    UUID_from_U32("f39cebd0")
+#define DISK_UUID_REMOTE39_D1    UUID_from_U32("f39cebd1")
 
 enum e_disk_format_state {
 	FMT_IDLE = 'I',
@@ -321,12 +323,8 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c1-11f0-bc49-e391b6ca4c2b\"}]},"
 			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
 				"\"disks\":["
-				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096"
-					",\"activeFormatRequestCounter\":1,\"vendorID\":5197"
-					",\"uuid\":\"" DISK_UUID_REMOTE39_D0 "\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024"
-					",\"activeFormatRequestCounter\":0,\"vendorID\":3333"
-					",\"uuid\":\"f39cebd1-0000-0000-0000-000000000000\",\"version\":1,\"isOutOfService\":false}],"
+				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"" DISK_UUID_REMOTE39_D0 "\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"" DISK_UUID_REMOTE39_D1 "\",\"version\":1,\"isOutOfService\":false}],"
 				"\"nics\":["
 					"{\"nicID\":\"0x0000000000000000bae924fffee5f008\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
