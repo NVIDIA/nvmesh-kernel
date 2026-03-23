@@ -138,28 +138,21 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
 	mgmt_sim_send_leader_keep_alive();
 
-	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_REMOTE1");
+	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_REMOTE1, waiting for report target");
 	mgmt_sim_send_add_volume_remote1();
-
-	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after V_REMOTE1");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
 
 	mgmt_sim_send_leader_keep_alive();
-	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_R1");
+	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_R1, waiting for V_R1 pRaid report");
 	mgmt_sim_send_add_volume_r1();
-
-	SCENARIO_PRINT(__AUTOID__, "waiting for V_R1 pRaid report");
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
-	SCENARIO_PRINT(__AUTOID__, "sending deleteVolume V_R1");
+	SCENARIO_PRINT(__AUTOID__, "sending deleteVolume V_R1, waiting for V_R1 praid deprecated in report");
 	mgmt_sim_send_delete_volume_r1();
 	mgmt_sim_send_leader_keep_alive();
-
 	/* Zeroing is skipped for FIRST_USE_EVER segments (never activated) — segments go directly to X_DONE */
-
-	SCENARIO_PRINT(__AUTOID__, "waiting for V_R1 praid deprecated in report");
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_deprecated());
 
 	SCENARIO_PRINT(__AUTOID__, "sending deleteVolumeCompleted V_R1");
