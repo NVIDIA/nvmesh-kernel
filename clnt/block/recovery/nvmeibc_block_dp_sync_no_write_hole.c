@@ -351,7 +351,7 @@ static inline void __calc_execution_plan_for_dbits_turnoff(struct recovery_sync_
 		return;
 	} else { // No unknowns exist, EC resolves them in advance and R1 was already tested
 		const union nvmeibc_dbits_entry pre_db = { .all_bits = so->cmds->rld.pre.bits.dirty };
-		const sgmnts_bmp_t pre_db_sgmnts_bmp = nvmeibc_dbits_get_bm(&pre_db, nvmeibc_raid1_get_protect_lvl(so->r1));
+		const sgmnts_bmp_t pre_db_sgmnts_bmp = nvmeibc_dbits_get_bm(&pre_db, &so->r1->calculated_data.topo_traits);
 		const roles_bmp_t pre_db_bmp =	ror32_width(pre_db_sgmnts_bmp, slice_start, so->r1->replicas);
 		fixable_binfo_dbits_bmp &= pre_db_bmp;		// Turn off only dbits that are indeed turned on, coz no unknowns exist
 	}

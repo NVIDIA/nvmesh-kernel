@@ -10,7 +10,8 @@
 
 /************************** nvmeibc_dbits_entry API ***************************/
 // Below is a set of usefull manipulations on entry (via predefined internal actions)
-sgmnts_bmp_t  nvmeibc_dbits_get_bm( const union nvmeibc_dbits_entry *e, const int num_deg);	    // Get bitmap of dirty segs
+__attribute__((nonnull(1, 2)))
+sgmnts_bmp_t  nvmeibc_dbits_get_bm( const union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Get bitmap of dirty segs
 u32  nvmeibc_dbits_get_n_unk(       const union nvmeibc_dbits_entry *e, const int num_par);	    // Get amount of unknown dbits
 void nvmeibc_dbits_del_unk(               union nvmeibc_dbits_entry *e, const int num_deg);	    // Remove unknowns, used when we resolve unk from md or topology
 struct nvmeibc_raid1;	// TODO: Remove

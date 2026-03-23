@@ -936,6 +936,19 @@ static u32 __calc_post_recov_dead_topo_for_ram_tx_dbits(struct t_ec_recov_tx *p)
 	return topo_dead;
 }
 
+int ec_tx_calc_topo_ree_num_deg_segs(const struct t_ec_recov_tx *p) {
+	int i, n_segs = p->inp.sraid.cpr->replicas;
+	int num_deg = 0;
+	for (i = 0; i < n_segs; i++) {
+		const struct nvmeibc_disk_segment ds = {.toma_acm = p->inp.rer.topo[i] };	// Dummy segment
+		if (!nvmeibc_is_readable(&ds))
+			num_deg++;
+	}
+	// Daniel: Note, p->rer_bmp.topo.raid.all migt be uninitialized and rer topo may be not degraded the same as ree topo
+	// BUG_ON(num_deg != (int)hweight32((~p->rer_bmp.topo.readable) & p->rer_bmp.topo.raid.all));
+	return num_deg;
+}
+
 static u32 __gen_pre_tx_ram_dbits(struct t_ec_recov_tx *p) {
 	const struct disk_range *pr = p->inp.sraid.cpr;
 	const u32 pre_dbits = p->pre.ram_dbits;
@@ -1006,7 +1019,12 @@ static u32 calc_dbit_rebuild_bm(struct t_ec_recov_tx *p, union nvmeibc_dbits_ent
 {
 	const struct disk_range *pr = p->inp.sraid.cpr;
 	const u32 topo_w_pr = rol32_width(topo_bmp->w, __get_slice_start_seg(p), pr->replicas);
-	sgmnts_bmp_t ram_dbits_bm = nvmeibc_dbits_get_bm(&ram_dbits, __disk_range_get_num_parities(pr));
+
+	struct dp_topology_traits const topo_traits = {
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
+	};
+
+	sgmnts_bmp_t ram_dbits_bm = nvmeibc_dbits_get_bm(&ram_dbits, &topo_traits);
 	return ((ram_dbits_bm) & (topo_w_pr));
 }
 
@@ -1431,10 +1449,14 @@ static u32 __gen_post_recov_slice_dbits(struct t_ec_recov_tx *p, int h) {
 	u32 ree_dbits_bm = (p->rer_bmp.can_see_ree_dbits_in_slice[h]) ? (p->ree_bmp.topo.dead & p->inp.ree.tx_bm[h]) : 0;	// 'rer' may or may not see 'ree' dbits.
 	u32 dbit_bm = 0;
 	const roles_bmp_t bad_sectors_affect_on_nwhole_sync_regen = p->blkset->nwhole.is_sl_by_sl ? p->rer_bmp.bad_sec_bmp[h] : p->blkset->nwhole.bad_sec_bmp;
+
+	struct dp_topology_traits const topo_traits = {
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
+	};
 	bool is_valid_parity = !!((p->rer_bmp.topo.raid.pari) & (p->rer_bmp.topo.readable) & (~bad_sectors_affect_on_nwhole_sync_regen));
 	if (!is_valid_parity) {  // when no RW parities there are no source parities so iserting worst case to slice
 		const union nvmeibc_dbits_entry e = { .all_bits = p->lid.post_recov.blkset_info.bits.dirty };
-		dbits_pr = nvmeibc_dbits_get_bm(&e, __disk_range_get_num_parities(pr));
+		dbits_pr = nvmeibc_dbits_get_bm(&e, &topo_traits);
 	} else {
 		dbit_bm = (((p->pre.slice_dbits[h] | ree_dbits_bm) & (~p->rer_bmp.total.slice_dbits_rebuild[h]) & (~p->rer_bmp.nwhole.regen)) | (p->rer_bmp.roll_fwd_by_dbits_turnon[h]) | (p->rer_bmp.whole.roll_bkw[h]) | (p->rer_bmp.nwhole.ram_dbits_turnon_on_turnoff));
 		dbits_pr = rol32_width(dbit_bm, __get_slice_start_seg(p), pr->replicas);
@@ -1501,7 +1523,12 @@ static u32 ec_tx_calc_rer_slice_dbits_after_nwhole(struct t_ec_recov_tx *p, u32 
 	const union nvmeibc_dbits_entry post_recov_slice_dbits_entry = { .all_bits = post_recov_slice_dbits };
 	const struct disk_range *pr = p->inp.sraid.cpr;
 	const u32 topo_w_pr = rol32_width(p->rer_bmp.topo.w, __get_slice_start_seg(p), pr->replicas);
-	const sgmnts_bmp_t post_recov_dbits_bmp_pr = nvmeibc_dbits_get_bm(&post_recov_slice_dbits_entry, __disk_range_get_num_parities(pr));
+
+	struct dp_topology_traits const topo_traits = {
+		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
+	};
+
+	const sgmnts_bmp_t post_recov_dbits_bmp_pr = nvmeibc_dbits_get_bm(&post_recov_slice_dbits_entry, &topo_traits);
 	const u32 turnoff_bmp_pr = p->rer_bmp.tx.will_call_nwhole_sync ? (post_recov_dbits_bmp_pr & topo_w_pr) : 0;
 	struct nvmeibc_dbits_tx db_tx;
 
@@ -2203,7 +2230,11 @@ static void __inject_full_recov_history(struct NVMeshSystem *sys, struct t_ec_tx
 				const struct disk_range *pr = p->inp.sraid.cpr;
 				struct t_ec_recov_tx *old_tx = p-1;
 				union nvmeibc_dbits_entry e = { .all_bits = old_tx->lid.post_recov.blkset_info.bits.dirty };
-				p->inp.pre.history_ram_dbits = rol32_width(nvmeibc_dbits_get_bm(&e, __disk_range_get_num_parities(pr)), pr->replicas - __get_slice_start_seg(p), pr->replicas);
+				struct dp_topology_traits const topo_traits = {
+					.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
+				};
+
+				p->inp.pre.history_ram_dbits = rol32_width(nvmeibc_dbits_get_bm(&e, &topo_traits), pr->replicas - __get_slice_start_seg(p), pr->replicas);
 			} else {
 				p->inp.pre.history_ram_dbits = 0;
 			}

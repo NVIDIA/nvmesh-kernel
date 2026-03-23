@@ -645,7 +645,7 @@ bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_
 			struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(seg);
 			sgmnts_bmp_t clean_bm = nvmeibc_raid1_get_sgmnts_bmp(pr, readable);
 			const union nvmeibc_dbits_entry dbits_ent = { .all_bits = binfo.bits.dirty };
-			const sgmnts_bmp_t dbits_bm = nvmeibc_dbits_get_bm(&dbits_ent, nvmeibc_raid1_get_protect_lvl(pr));
+			const sgmnts_bmp_t dbits_bm = nvmeibc_dbits_get_bm(&dbits_ent, &pr->calculated_data.topo_traits);
 			if (action == 'w') {			// Write IO/Sync, Strongest verification, Ensure the dbits that we are turning off cannot be set
 				clean_bm |= nvmeibc_raid1_get_sgmnts_bmp(pr, w);
 			} else if (action == 's') {		// Write-by-Sync, Weaker verification, same as above but can turn on convicts for W- topology
