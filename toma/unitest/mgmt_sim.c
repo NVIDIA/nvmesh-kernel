@@ -11,14 +11,17 @@
 
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
-/* Disk constants */
+/* UUID constants, All uuids are generated as 32bits integers */
 #define UUID_from_U32 			 "%8x-0000-0000-0000-000000000000"
-#define DISK_UUID_LOCAL_002      0xd0020000			// prefix 'd' for local disk
-#define DISK_UUID_LOCAL_003      0xd0030000
-#define DISK_UUID_REMOTE38_D0    0xf38000d0			// Encodes node and disk for easier eye catcher debugging
+#define DISK_UUID_LOCAL_002      0xf37000d0			// Encodes 3 nibbles node and 'd' for disk: easier eye catcher debugging
+#define DISK_UUID_LOCAL_003      0xf37000d1
+#define DISK_UUID_REMOTE38_D0    0xf38000d0
 #define DISK_UUID_REMOTE38_D1    0xf38000d1
 #define DISK_UUID_REMOTE39_D0    0xf39000d0
 #define DISK_UUID_REMOTE39_D1    0xf39000d1
+#define NODE_UUID_BASE           0xf37000c0			// First 3 nibbles = node, 'c' for 'computer', last nibble = index of node in cluster for faster search
+#define NIC__UUID_BASE           0xf37000e0			// First 3 nibbles = node, 'e' for 'ethernet', last nibble = index of nic  in this node
+#define VOL__UUID_BASE           0xbd000000			// Vol (Block device) Has first 4 nibbles as bdXX where XX is volume index (up to 256 vols), Last 4 nibbles are 0CRS, where C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
 
 enum e_disk_format_state {
 	FMT_IDLE = 'I',
@@ -111,7 +114,9 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	sb->other[0].hostname = "n38@nvidia.com";
 	sb->other[1].hostname = "n39@nvidia.com";
 	for (i = 0; i < sb->n_nodes; i++) {
-		sb->nodes[i].uuid = 0xc0000000 + i;	// 'c' for computer
+		sb->nodes[i].uuid = NODE_UUID_BASE + (i << 20) + i;
+		sb->nodes[i].nics[0].uuid = (sb->nodes[i].uuid & 0xFFFF0000) | ((NIC__UUID_BASE & 0xFFFF) + 0);
+		sb->nodes[i].nics[1].uuid = (sb->nodes[i].uuid & 0xFFFF0000) | ((NIC__UUID_BASE & 0xFFFF) + 1);
 	}
 
 	{	// Create 2 volumes:		All uuids are generated as 32bits integers 0xaaaV0CRS, where V is volume index, C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
@@ -132,7 +137,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 		sb->vols[1].name = "V_R1";									// RAID-1, one local segment + 2 remote on n38
 		for (i = 0; i < sb->n_vols; i++) {
 			struct sb_volume_conf *pv = &sb->vols[i];
-			pv->uuid = (0xaaa00000 | ((i+1) << 16));				//	aaa10000, aaa20000
+			pv->uuid = (VOL__UUID_BASE | ((i+1) << 16));
 			pv->num_chunks = 1;
 			for (c = 0; c < pv->num_chunks; c++) {
 				struct sb_chunk_conf *pc = &pv->chunks[c];
@@ -347,33 +352,36 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"}]},"
 			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
 				"\"disks\":["
 				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"D1_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c1-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c1-11f0-bc49-e391b6ca4c2b\"}]},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"}]},"
 			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
 				"\"disks\":["
 				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"" UUID_from_U32 "\",\"version\":1,\"isOutOfService\":false}],"
 				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5f008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5f009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5f008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5f009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"}]}"
 		"]}}",
 		config_ver, kafka_seq,
 		m->cfg->live->hostname, m->cfg->live->uuid,
 			m->disk_002.disk_id, m->disk_002.vendor, m->disk_002.uuid,
 			m->disk_003.disk_id, m->disk_003.vendor, m->disk_003.uuid,
+			m->cfg->live->nics[0].uuid, m->cfg->live->nics[1].uuid,
 		other_toma[0].hostname, other_toma[0].uuid,
 			DISK_UUID_REMOTE38_D0,
 			DISK_UUID_REMOTE38_D1,
+			other_toma[0].nics[0].uuid, other_toma[0].nics[1].uuid,
 		other_toma[1].hostname, other_toma[1].uuid,
 			DISK_UUID_REMOTE39_D0,
-			DISK_UUID_REMOTE39_D1);
+			DISK_UUID_REMOTE39_D1,
+		other_toma[1].nics[0].uuid, other_toma[1].nics[1].uuid);
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);
 }
 

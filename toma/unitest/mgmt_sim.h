@@ -20,6 +20,9 @@ struct sb_cluster_conf {
 	struct sb_node_conf {
 		const char *hostname;	// Easily recognizable host name
 		uint32_t uuid;			// uuid of this node
+		struct sb_nics_conf {
+			uint32_t uuid;
+		} nics[2];				// Each node has exactly 2 nics
 	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas
 	int n_nodes;
 	struct sb_volume_conf {							// All volumes configuration
