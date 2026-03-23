@@ -320,11 +320,11 @@ static void dp_ec_set_tx_id_update_piggyback(struct nvmeibc_block_command *rldr)
 	for (column = mssa->slice_size; column < mssa->replicas && !mssa->no_jour; column++) {
 		int i = mssa->column_to_cmd.jour[column];
 		if (i >= 0)
-			dp_cmds_piggyback_info_on_write(&rldr[i], jour_pig);
+			dp_cmds_piggyback_info_on_journal_write(&rldr[i], &rldr[mssa->column_to_cmd.write[column]], jour_pig);
 		if (is_post_io_rdma_and_pig_required) { // If JR RDMA is the same as IO RDMA it's redundant
 			i = mssa->column_to_cmd.write[column];
 			if (i >= 0)
-				dp_cmds_piggyback_info_on_write(&rldr[i], io_pig);
+				dp_cmds_piggyback_info_on_data_write(&rldr[i], io_pig);
 		}
 	}
 
@@ -336,9 +336,9 @@ static void dp_ec_set_tx_id_update_piggyback(struct nvmeibc_block_command *rldr)
 	if (mssa->column_to_cmd.write[0] >= 0) {			// Can piggyback IO to D0
 		WARN_ON(rldr[mssa->column_to_cmd.write[0]].ds != data_lock->ds);	// Todo: remove, just temp debug code
 		if (is_post_io_rdma_and_pig_required)
-			dp_cmds_piggyback_info_on_write(&rldr[mssa->column_to_cmd.write[0]], io_pig);
+			dp_cmds_piggyback_info_on_data_write(&rldr[mssa->column_to_cmd.write[0]], io_pig);
 		if (!mssa->no_jour) {   							// Can piggiback to D0 cmds both journal and io
-			dp_cmds_piggyback_info_on_write(&rldr[mssa->column_to_cmd.jour[0]], jour_pig);
+			dp_cmds_piggyback_info_on_journal_write(&rldr[mssa->column_to_cmd.jour[0]], &rldr[mssa->column_to_cmd.write[0]], jour_pig);
 			goto _out;									// Journal + IO piggybacked, we are done
 		}
 	} else {											// Nothing can be piggybacked

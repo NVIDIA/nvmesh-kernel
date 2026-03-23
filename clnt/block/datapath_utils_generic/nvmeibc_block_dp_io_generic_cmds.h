@@ -101,6 +101,7 @@ struct nvmeibc_block_command {					// IO Command to disk to R/W/T data or metada
 		bool use_jr_apend_stage_data_lock : 1;	// Does the execution plan of this raid involves journal appendix stages (stage which writes TxID to a data lock)
 		bool use_io_apend_stages          : 1;	// Does the execution plan of this raid involves data    appendix stages: View read lock / stage which sends dirty bits and not commands
 		bool use_io_apend_stages_data_lock: 1;	// Bool: Relevant Only if use_io_apend_stages is true. If true - write blockset-info to data lock
+		bool use_io_apend_stages_dbit_off : 1;  // Bool: Relevant Only if use_io_apend_stages is true. If true - Send dirty bit turn off as a separate stage
 		bool use_read_fail_fix_blockset   : 1;	// Does the execution plan of this raid involves fixup of a bad sector, ecnountered by read command (pre read for R/W-IO or READ-IO)
 		bool should_check_view_lock       : 1;	// Flag which marks that lock view was explicitly launched (not done as piggyback)
 		bool all_cmds_sm_done             : 1;	// Becomes true when cmds state machine is ready to transition to unlock state machine
@@ -108,7 +109,7 @@ struct nvmeibc_block_command {					// IO Command to disk to R/W/T data or metada
 		u32  was_transaction_abandoned    : 1;	// Bool: was_journ_success == true, but write of IO failed. Trasnaction (journal+locks) should be abandoned to allow 'sync' to roll the transaction forward
 		u32  is_roll_fwd_guaranteed       : 1;	// Bool: If transaction was abandoned == true, check whether roll-fwd-guaranteed
 		u32  was_abandoned_jr_recovered   : 1;  // Bool: Colliding abandoned jentries were encountered and successfully freed - block on JAM allocation until it gets A2F from Serjio
-		u32  nraid_siblings               : 9;	// Amount of commands which represent transaction to a single blockset (In R1: serires of Wr/Re/Trim, in EC Reads+Writes+Journals....)
+		u32  nraid_siblings               : 8;	// Amount of commands which represent transaction to a single blockset (In R1: serires of Wr/Re/Trim, in EC Reads+Writes+Journals....)
 	};
 	struct /* Stage info of each command*/ { 	// Support (per-raid) multi stage state machine of commands
 		enum e_cmds_stage my_stage        : 4;	// When the IO raid state machine reaches this stage - this command should be executed
@@ -247,8 +248,9 @@ void dp_rldr_set_wr_journal_cookies_to_data(struct nvmeibc_block_command *rldr);
 
 /*************** Piggybacking of RDMA operations on data commands *************/
 struct nvmeibc_dbits_tx;
-void dp_cmds_piggyback_dbR1_on_write(struct nvmeibc_block_command *cmd, const struct nvmeibc_dbits_tx *dbmap, u32 reserved);	// Todo: EC-3043: Remove, deprecated R1 version
-void dp_cmds_piggyback_info_on_write(struct nvmeibc_block_command *cmd, union nvmeib_blkset_info v);
+void dp_cmds_piggyback_info_on_data_write(struct nvmeibc_block_command *cmd, union nvmeib_blkset_info v);
+void dp_cmds_piggyback_info_on_journal_write(struct nvmeibc_block_command *jcmd, struct nvmeibc_block_command *dcmd, union nvmeib_blkset_info v);
+void dp_cmds_fake_piggyback_info_on_data_write(struct nvmeibc_block_command *cmd, union nvmeib_blkset_info v);
 void dp_cmds_add_readlock_to_rldr(   struct nvmeibc_block_command *rldr);
 
 #define dp_cmds_get_piggyback_val(pcmd) (dp_cmds_get_pigbck_comp_dc((pcmd)->iocmd)->lock.bi)

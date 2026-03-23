@@ -13,6 +13,7 @@
 #include "../datapath_utils_generic/nvmeibc_block_dp_cmd_lock_link.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_disk_stages.h"
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_operation_locks_transfer.h"
+#include "block/datapath_utils_generic/binfo/nvmeibc_block_dp_binfo.h"
 
 /****************************** Kernel BIO Path ******************************
   Acronym
@@ -344,48 +345,13 @@ static union vv_bio_inter __fill_sg_req_of_cmd_bio(struct nvmeibc_block_io_req *
 	return rv;
 }
 
-static bool __prepare_mirror_binfo_for_write(struct nvmeibc_block_command *rldr, const enum nvmeib_block_io_op op, int n_cmds, int npreread, const struct nvmeibc_raid1 *r1, u64 nlbas)
-{
-	struct nvmeibc_dbits_tx raid_d;
-	struct nvmeibc_block_command *cur_c, *end = &rldr[n_cmds];
-	const bool implicit_sync = (nlbas == LOCKSET_SLICES);
-
-	NVMESH_BUG(!nvmeib_block_io_op_is_write(op), __dump_operation_report, rldr->o, "opearation is not writei: %d", op);
-
-	// Write can only turn on or off (unlikely), will change existing unknown to exact Dbits
-	nvmeibc_dbits_tx_init_by_bmp(&raid_d, &r1->calculated_data.topo_traits,
-			nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_on_mask) /* turn_on_dbit_bmp */,
-			(implicit_sync ? nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_off_mask) : 0)/* turn_off_dbit_bmp */,
-			0 /* turn_on_conv_bmp */);
-
-	if (true/* EC: 1484, Todo Remove and use dp.exec_func_on_locks_tkn as in EC to merge dbits! */) {
-		/* Only 1 dirty seg possible. Perform Direct calculation without the
-		   need to read old values */
-		nvmeibc_dbits_tx_apply(&zero_dbits, &raid_d);
-	}
-
-	if (nvmeibc_dbits_tx_has_action(&raid_d)) {		// At least 1 dirty marker in raid,  Piggyback dirtybits if needed
-		for (cur_c = &rldr[npreread]; cur_c < end; cur_c++)		// Daniel: This is incorrect !!! Write only to subset of commands?
-			dp_cmds_piggyback_dbR1_on_write(cur_c, &raid_d, op);
-	}
-	return (unlikely(nvmeibc_dbits_has_turn_off(&raid_d)));
-}
-
 /* For Read/Writes Finalize the execution plan of this raid */
-static void __add_mirr_data_cmds_finish_raid(struct operation *o, int first_cmd, int n_cmds, int npreread, const struct nvmeibc_raid1 *r1, u64 nlbas)
+static void __add_mirr_data_cmds_finish_raid(struct operation *o, int first_cmd, int n_cmds, int npreread)
 {
 	struct nvmeibc_block_command *rldr = &o->cmds[first_cmd], *cur_c, *end = &rldr[n_cmds];
-	const enum nvmeib_block_io_op op = o->op;
 
 	rldr->raid_cur_stage = (npreread ? E_CMDS_STAGE_READ_PRE_DATA : E_CMDS_STAGE_DO_IO_AND_PAR);
-	rldr->raid_last_stage = E_CMDS_STAGE_DO_IO_AND_PAR;		// Default
-	if (op != NVMEIB_BLOCK_IO_OP_READ && (r1->replicas > 1)) { // JBOD doesn't apply here
-		const bool has_turn_off = __prepare_mirror_binfo_for_write(rldr, op, n_cmds, npreread, r1, nlbas);		// EC-3043, EC-5969: Todo, change like EC, move this code to be after locks taken. This way we can preserve debug values in TxID for R1 and Actually not create data corruption on N-mirrored
-		if (unlikely(has_turn_off)) {
-			rldr->raid_last_stage = E_CMDS_STAGE_POST_IO_RDMA;
-			rldr->use_io_apend_stages = true;
-		}
-	}
+	rldr->raid_last_stage = E_CMDS_STAGE_DO_IO_AND_PAR;		// Default, might add stages along execution
 	rldr->nraid_siblings = n_cmds;
 	for (cur_c = rldr; cur_c < end; cur_c++) {
 		cur_c->use_stages = true;
@@ -607,7 +573,7 @@ static int __mirror_cmds_add_for_raid(const struct nvmeibc_raid1 *r1, u64 rlba, 
 	}
 
 	if (use_stages) { // Not DISCARD
-		__add_mirr_data_cmds_finish_raid(o, first_cmd, (ncmds - first_cmd), nprereads, r1, *nlbas);
+		__add_mirr_data_cmds_finish_raid(o, first_cmd, (ncmds - first_cmd), nprereads);
 	}
 _out:
 	*pncmds = ncmds;
@@ -674,7 +640,7 @@ static int __prepare_1bmd_cmds(u64 nlbas, u64 start_lba, int c_i, struct nvmeibc
 		o->op = NVMEIB_BLOCK_IO_OP_WRITE;	// Note: Here 'vv_bio_ptr' was not advanced by reads so it is till initialized to start
 		if ((rv = __mirror_cmds_add_for_raid(it.res.r, it.res.rlba, &it.res.nlbas, &vv_bio_ptr, o, &ncmds, false, 0, 0, 0)) < 0)
 			goto _out;
-		__add_mirr_data_cmds_finish_raid(o, 0, ncmds, 1, it.res.r, it.res.nlbas);
+		__add_mirr_data_cmds_finish_raid(o, 0, ncmds, 1);
 	} else {
 		if ((rv = __mirror_cmds_add_for_raid(it.res.r, it.res.rlba, &it.res.nlbas, &vv_bio_ptr, o, &ncmds, (o->op != NVMEIB_BLOCK_IO_OP_DISCARD), 0, 0, 0)) < 0)
 			goto _out;
@@ -943,6 +909,48 @@ int dp_mirror_execute_op(struct operation *o)
 	return 0; // Meaningless
 }
 
+static void __dp_mirror_analyze_binfo_before_write(struct nvmeibc_block_command *rldr)
+{
+	const struct nvmeibc_raid1* pr = nvmeibc_disk_segment_get_praid(rldr->ds);
+
+	rldr->rld.post.all = rldr->rld.pre.all;
+
+	if (nvmeibc_praid_is_topo_no_dbits(pr)) {
+		return;
+	}
+
+	// Resolve unknown dbits - assume worst case, as we don't store dbits in block metadata
+	if (nvmeibcbdp_binfo_has_unknown_dbits(rldr, pr)) {
+		const union nvmeibc_dbits_entry dbits = {.all_bits = rldr->rld.post.bits.dirty};
+
+		// XXX: This also assumes dbits on dirty convict segments. It is already (conceptually) "on" as long as the segment is "W-" in topology, so we might want to reconsider
+		rldr->rld.post.bits.dirty = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(dbits, pr).all_bits;
+	}
+
+	rldr->rld.post.bits.txid = NVMEIB_BLOCK_IO_OP_WRITE;	// TxID is unused, assign it a debug value
+
+	// Turn on dbits for the write
+	{
+		const sgmnts_bmp_t turn_on_dbit_bmp =  nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_on_mask);
+
+		// The only reason to actually write (piggyback) binfo on write commands is so far only if the write must turn the dbits on
+		// (Sorry about the use of 3 "write" all with different meanings)
+		// TODO: No real need to write binfo if all the turned on dbits already existed
+		if (turn_on_dbit_bmp) {
+			const union nvmeibc_dbits_entry pre = { .all_bits = rldr->rld.post.bits.dirty };
+			struct nvmeibc_dbits_tx turn_on_tx;
+			int ci;
+
+			nvmeibc_dbits_tx_init_by_bmp(&turn_on_tx, &pr->calculated_data.topo_traits, turn_on_dbit_bmp, 0, 0);
+			rldr->rld.post.bits.dirty = nvmeibc_dbits_tx_apply(&pre, &turn_on_tx);
+
+			ci = dp_cmds_get_first_cmd_of_stage(rldr, E_CMDS_STAGE_DO_IO_AND_PAR);	// Skip pre-reads
+			for (; ci < rldr->nraid_siblings; ci++)
+				dp_cmds_piggyback_info_on_data_write(&rldr[ci], rldr->rld.post);
+		}
+	}
+}
+
 int dp_mirror_exec_func_on_locks_tkn(struct nvmeibc_block_command *rldr, int err) {
 	struct nvmeibc_profiler *prof = nvmeibc_get_raid_good_path_profile_for_rwt_op(rldr->ds, rldr->o->op);
 	struct dp_io_stats *dp_io_stats = &rldr->o->nd->dp.io_stats;
@@ -953,9 +961,8 @@ int dp_mirror_exec_func_on_locks_tkn(struct nvmeibc_block_command *rldr, int err
 	if (nvmeibc_profiling_end_take_stats_for_stage(prof, rldr->o, E_CMDS_STAGE_WAIT_FOR_LOCK, err))
 		nvmeibc_profiling_start_take_stats_for_stage(prof, rldr->o, rldr->raid_cur_stage);
 	if (nvmeib_block_io_op_is_write(rldr->o->op)) {
-		const struct nvmeibc_datapath *dp = &rldr->o->nd->dp;
 		nvmeibc_operation_compressed_op_dump_bio(rldr->o);
-		BUG_ON(dp->turn_off_dbits_before_io || dp->enable_care_about_txid);	// Todo: refactor common code with ec of __analyze_binfo_sm_cb_b4j()
+		__dp_mirror_analyze_binfo_before_write(rldr);
 	}
 	return err;
 }
@@ -1073,7 +1080,6 @@ static void __copy_block_and_edic(struct nvmeibc_block_command *dst_cmd, struct 
 bool dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *rv)
 {
 	// Note: rldr->raid_cur_stage == E_CMDS_STAGE_DO_IO_AND_PAR)
-	(void)rv;
 
 	if (rldr->raid_cur_stage == E_CMDS_STAGE_READ_PRE_DATA) {	// For sub-block write we have pre-reads
 		// Copy the pre-read data for the first block and the last block
@@ -1110,14 +1116,41 @@ bool dp_mirror_exec_func_on_stage_end(struct nvmeibc_block_command *rldr, int *r
 					__copy_block_and_edic(dst_cmd, src_cmd, first_block, nprereads, enable_edic_check);
 				}
 			}
+			rldr->raid_cur_stage = E_CMDS_STAGE_DO_IO_AND_PAR; // Jump to DO_IO now that the writes are ready to be sent. TODO: Check if we really need to skip the no-op stages
+			return true;
 		}
-		rldr->raid_cur_stage = E_CMDS_STAGE_DO_IO_AND_PAR; // Move to DO_IO now that the writes are ready to be sent
-	} else {
-		if (rldr->raid_cur_stage == rldr->raid_last_stage)
-			return false;	// Exit stages execution
+	} else if (rldr->raid_cur_stage == E_CMDS_STAGE_DO_IO_AND_PAR) {
+		// Add a turn off dbits stage if successfully written full blockset and there are dbits we can turn off
 
-		rldr->raid_cur_stage++; // Advance to next stage
+		// All cmds have the same length, take the last write command to see if this is a full blockset write
+		const struct nvmeibc_block_command *just_io_cmd = &rldr[rldr->nraid_siblings - 1];
+		BUG_ON(just_io_cmd->my_stage != E_CMDS_STAGE_DO_IO_AND_PAR);
+
+		if (nvmeib_block_io_op_is_write(rldr->o->op) && !*rv && just_io_cmd->nlbas == LOCKSET_SLICES) {
+			const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(rldr->ds);
+			sgmnts_bmp_t turn_off_dbit_bmp = nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_off_mask);
+
+			if (turn_off_dbit_bmp != 0) {
+				int ci;
+				const union nvmeibc_dbits_entry pre = { .all_bits = rldr->rld.post.bits.dirty };
+				struct nvmeibc_dbits_tx turn_off_tx;
+
+				nvmeibc_dbits_tx_init_by_bmp(&turn_off_tx, &pr->calculated_data.topo_traits, 0, turn_off_dbit_bmp, 0);
+				rldr->rld.post.bits.dirty = nvmeibc_dbits_tx_apply(&pre, &turn_off_tx);
+				rldr->raid_last_stage = E_CMDS_STAGE_POST_IO_RDMA;
+				rldr->use_io_apend_stages_dbit_off = rldr->use_io_apend_stages = true;
+
+				ci = dp_cmds_get_first_cmd_of_stage(rldr, E_CMDS_STAGE_DO_IO_AND_PAR);		// Skip pre-reads
+				for (; ci < rldr->nraid_siblings; ci++)
+					dp_cmds_fake_piggyback_info_on_data_write(&rldr[ci], rldr->rld.post);
+			}
+		}
 	}
+
+	if (rldr->raid_cur_stage == rldr->raid_last_stage)
+		return false;	// Exit stages execution
+
+	rldr->raid_cur_stage++; // Advance to next stage
 
 	return true;
 }

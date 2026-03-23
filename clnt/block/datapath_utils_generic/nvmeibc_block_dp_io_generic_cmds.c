@@ -156,13 +156,9 @@ void nvmeibc_block_dp_fill_cinst_params_from_module_params(struct nvmeibc_cinst_
 }
 
 /****************************** Generic Commands ******************************/
-#define __data_cmd_to_piggyback_addr(cmd) \
-	__to4K((cmd)->reqs1.disk_address & LOCKSET_MASK)
-
-static inline u64 __cmd_to_piggyback_addr(struct nvmeibc_block_command *c)
+static u64 __data_cmd_to_lock_addr(const struct nvmeibc_block_command *c)
 {
-	const struct nvmeibc_block_command *c_data = dp_cmd_jour_to_data(c);
-	return __data_cmd_to_piggyback_addr(c_data->iocmd);
+	return __to4K(c->iocmd->reqs1.disk_address & LOCKSET_MASK);
 }
 
 /* Note: Dirty bit does not have 'rv' and we don't care if it was a success or
@@ -178,43 +174,41 @@ static int __post_cmd_dirtybit_turnoff_cb(struct nvmeibc_d_rdma_comp *dc, struct
 	return 0;
 }
 
-void dp_cmds_piggyback_dbR1_on_write(struct nvmeibc_block_command *_cmd, const struct nvmeibc_dbits_tx *dbmap, u32 reserved)
+static void __piggyback_info_on_write(struct nvmeibc_block_command *cmd, u64 addr, union nvmeib_blkset_info v, bool is_direct)
 {
-	struct nvmeibc_disk_io_command *cmd  = _cmd->iocmd;
-	struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(cmd);
-	u64 *payload = &dp_cmds_get_piggyback_val(_cmd);
-	cmd->lpb.handle = handle_of(_cmd->ds);
-	cmd->lpb.addr = __data_cmd_to_piggyback_addr(cmd); // Never pigbacked on journal cmds
-	((union nvmeib_blkset_info*)payload)->bits.dirty = dbmap->post.all_bits;
-	((union nvmeib_blkset_info*)payload)->bits.txid  = reserved; 		// Daniel: Tmp debug code (coz those bits are not used)
-	dc->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
-	if (!nvmeibc_dbits_has_turn_off(dbmap)) {		// Piggyback dirtybit turn-on on cmd
-		dp_cmds_add_generic_piggyback(cmd);
-		dc->callback = NULL; 		// No dedicated callback
-		dc->code = NVMEIBC_CMD_BLKSET_INFO_WR_PB;
-	} else { 	// turn-off dbit will be executed at the end of the stage
-		// EC-1473: Here for N-mirror: test for having turn-off and on simultanously. If so piggyback only turn on!
-		cmd->comp.has_piggyback = false;			// By default, no dirtybit
-		dc->callback = &__post_cmd_dirtybit_turnoff_cb;
-		dc->code = NVMEIBC_CMD_BLKSET_INFO_WR_DR;
-	}
-	_ND(t_1pbw, ": Dbits=@DBITS cmd=@PTR has_pb=@BOOL_YN dc->opr=@OPR_TYPE dc->val={@BINFO,@LOCK_ENT_U64}",
-	   dbmap->post.all_bits, _cmd, cmd->comp.has_piggyback, dc->opr, (u32)dc->lock.bi, dc->lock.id);
-}
-
-void dp_cmds_piggyback_info_on_write(struct nvmeibc_block_command *_cmd, union nvmeib_blkset_info v)
-{
-	struct nvmeibc_disk_io_command *cmd = _cmd->iocmd;
-	struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(cmd);
-	u64 *payload = &dp_cmds_get_piggyback_val(_cmd);
-	cmd->lpb.handle = handle_of(_cmd->ds);
-	cmd->lpb.addr =  __cmd_to_piggyback_addr(_cmd); // May be piggbacked on journal
+	struct nvmeibc_disk_io_command *iocmd = cmd->iocmd;
+	struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
+	u64 *payload = &dp_cmds_get_piggyback_val(cmd);
+	iocmd->lpb.handle = handle_of(cmd->ds);
+	iocmd->lpb.addr = addr;
 	*((union nvmeib_blkset_info*)payload) = v;
 	dc->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
-	dp_cmds_add_generic_piggyback(cmd);
-	dc->callback = NULL; // No dedicated callback
-	dc->code = NVMEIBC_CMD_BLKSET_INFO_WR_PB;
-	_ND(t_2pbw, ": Txid=@TXID Dbits=@DBITS cmd=@PTR has_pb=@BOOL_YN", v.bits.txid, v.bits.dirty, _cmd, cmd->comp.has_piggyback);
+	if (!is_direct) {
+		dp_cmds_add_generic_piggyback(iocmd);
+		dc->callback = NULL; // No dedicated callback
+		dc->code = NVMEIBC_CMD_BLKSET_INFO_WR_PB;
+	} else {
+		iocmd->comp.has_piggyback = false;			// By default, no dirtybit
+		dc->callback = &__post_cmd_dirtybit_turnoff_cb;
+		dc->code = NVMEIBC_CMD_BLKSET_INFO_WR_DR;	// Just for debug
+	}
+	_ND(t_2pbw, "cmd=@PTR(addr=@DLBA) addr=@DLBA binfo=@BINFO", cmd, cmd->iocmd->reqs1.disk_address, addr, v.all);
+}
+
+void dp_cmds_piggyback_info_on_data_write(struct nvmeibc_block_command *cmd, union nvmeib_blkset_info v)
+{
+	__piggyback_info_on_write(cmd, __data_cmd_to_lock_addr(cmd), v, false /* is_direct */);
+}
+
+void dp_cmds_piggyback_info_on_journal_write(struct nvmeibc_block_command *jcmd, struct nvmeibc_block_command *dcmd, union nvmeib_blkset_info v)
+{
+	__piggyback_info_on_write(jcmd, __data_cmd_to_lock_addr(dcmd), v, false /* is_direct */);
+}
+
+// Use piggyback rdms commands, but use those to write direct
+void dp_cmds_fake_piggyback_info_on_data_write(struct nvmeibc_block_command *cmd, union nvmeib_blkset_info v)
+{
+	__piggyback_info_on_write(cmd, __data_cmd_to_lock_addr(cmd), v, true /* is_direct */);
 }
 
 void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
@@ -1066,17 +1060,12 @@ bool nvmeibc_disk_io_command_is_timed_out(const struct nvmeibc_disk_io_command* 
 	return ((!o)||((now - o->jiffies1) >= o->nd->max_retry_jiffies)||o->topo->phased_out);
 }
 
-#define need_turn_off_db(pbcomp) ((pbcomp)->code == NVMEIBC_CMD_BLKSET_INFO_WR_DR)
-static int __calc_ncmds_db_turn_off(const struct nvmeibc_block_command *rldr,
-							 enum e_cmds_stage cur_stage, int *ncmds)
+static int __calc_ncmds_db_turn_off(struct nvmeibc_block_command *rldr, int *ncmds)
 {
-	int ci = dp_cmds_get_first_cmd_of_stage(rldr, cur_stage), last_cmd = 0;
-	for (; (ci < rldr->nraid_siblings)&&(rldr[ci].my_stage == cur_stage); ci++) {
-		if (need_turn_off_db(dp_cmds_get_pigbck_comp_dc(rldr[ci].iocmd))) {
-			(*ncmds)++;
-			last_cmd = ci;
-		}
-	}
+	int ci = dp_cmds_get_first_cmd_of_stage(rldr, E_CMDS_STAGE_DO_IO_AND_PAR);
+	const int last_cmd = rldr->nraid_siblings - 1;
+	BUG_ON(rldr[last_cmd].my_stage != E_CMDS_STAGE_DO_IO_AND_PAR);	// Dbit turn off can be piggybacked on last stage commands
+	*ncmds = (rldr->nraid_siblings - ci);
 	return last_cmd;
 }
 
@@ -1145,13 +1134,9 @@ static int __calc_ncmds_in_cur_stage(struct nvmeibc_block_command *rldr,
 				} else {
 					*ncmds = 1;		// Send block info to owner lock
 				}
-			} else {
-				const enum e_cmds_stage prev_stg = cur_stage-1; // Count the commands of "real" previous stage
-				if (unlikely(prev_stage_rv != 0)) {
-									// Propagate the error to dbits turn off, even though it is not mandatory
-				}
-				last_cmd = __calc_ncmds_db_turn_off(rldr, prev_stg, ncmds);
-			}
+			} else if (rldr->use_io_apend_stages_dbit_off) {
+				last_cmd = __calc_ncmds_db_turn_off(rldr, ncmds);
+			} else { BUG(); }		// Why execution plan contains this stage if nothing to do?
 		} else {             // == NVMEIB_BLOCK_IO_OP_READ
 			*ncmds = 1; 	 // View read lock only on the raid leader (last_cmd==0)
 		}
@@ -1258,8 +1243,6 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 		struct nvmeibc_block_command *c = &cmds[ci];
 		struct nvmeibc_disk_io_command *iocmd = c->iocmd;
 		struct nvmeibc_d_rdma_comp *dc = dp_cmds_get_pigbck_comp_dc(iocmd);
-		if (!need_turn_off_db(dc))
-			continue;
 		if (dp_cmds_pigbck_has_any(iocmd)) { /* This dirty-bit action was piggibacked */
 			_NE_to_user(t_01_sadbto, DMESG_PREFIX("@DEV_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1020.", cmds->o->nd->name);
 			BUG();
@@ -1390,7 +1373,7 @@ static void __exec_stage(struct nvmeibc_block_command *cmds, int li, int prev_rv
 			WARN(true, "nvmeibc bug: wrong appendix stage=%d\n", cur_stage);
 		} else if (cmds[li].use_io_apend_stages_data_lock) {
 			__send_blkset_info_to_data_lock(cmds, li, prev_rv);
-		} else if (nvmeib_block_io_op_is_write(cmds[last_cmd].iocmd->reqs1.op)) {
+		} else if (cmds[li].use_io_apend_stages_dbit_off) {
 			__send_all_db_turn_off(cmds, li, n_cmds, last_cmd, prev_rv);
 		} else {
 			__handle_stage_post_io_rdma(cmds, li, last_cmd, prev_rv);
