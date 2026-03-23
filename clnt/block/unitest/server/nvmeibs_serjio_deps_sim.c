@@ -39,19 +39,72 @@ int nvmeibs_serjio_update_disk(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 	bool const is_gpt_related = req->use_hw_blocks && req->disk_block < 3;
 	u8 *data_ptr = is_gpt_related ? NULL : &D->mem[ COMMITTED_ADDR_AS(D, req->disk_block, SECTOR, BYTE)];
 	u8 *md_data_ptr = is_gpt_related ? NULL : ramDiskSimulator_get_metadataptr_unsafe(D, req->disk_block);
-	void *req_data_ptr = req->use_sg ? sg_virt(req->table.sgl) : (void*)req->buf_addrs[0];
+	struct scatterlist *sgl;
+	unsigned int sgl_nents;
+	struct sg_table local_sgt = {};
+	bool free_local_sgt = false;
+
+	/* Not supported: buf_offset != 0 */
+	BUG_ON(req->buf_offset != 0);
+
+	if (req->use_sg) {
+		sgl = req->table.sgl;
+		sgl_nents = req->table.nents;
+	} else {
+		unsigned int n_pages = max_t(unsigned int, 1,
+					     DIV_ROUND_UP(req->data_len, PAGE_SIZE));
+		unsigned int i;
+
+		if (sg_alloc_table(&local_sgt, n_pages, GFP_KERNEL))
+			return -ENOMEM;
+		for (i = 0; i < n_pages; i++) {
+			size_t len = min_t(size_t, PAGE_SIZE,
+					   req->data_len - (size_t)i * PAGE_SIZE);
+
+			sg_set_buf(&local_sgt.sgl[i], (void *)req->buf_addrs[i], len);
+		}
+		sgl = local_sgt.sgl;
+		sgl_nents = n_pages;
+		free_local_sgt = true;
+	}
 
 	// --------------------------------- R/W paritions in units of hardware sectors
 	if (req->use_hw_blocks && req->disk_block < 3) {
 		BUG_ON(req->nvme_op != nvme_cmd_read);							// Only Toma can write GPT, serjio only reads!
-		BUG_ON(req->data_len > (1 << NVMEIBC_SECTOR_SHIFT));									// Serjio is not allowed to read multiple blocks
 		BUG_ON(req->buf_offset != 0);
 		if (req->disk_block == 0) {
 			BUG();														// Serjio should never access MBR
 		} else if (req->disk_block == GPT_PRIMARY_HDR_LBA) {            // GPT read
-			nvmeibr_disk_metadata_store_gpt(srv, req_data_ptr, true);
+			struct gpt_header gpt_hdr;
+
+			BUG_ON(req->data_len > (1 << NVMEIBC_SECTOR_SHIFT));
+			nvmeibr_disk_metadata_store_gpt(srv, &gpt_hdr, true);
+			BUG_ON(sg_copy_from_buffer(sgl, sgl_nents, &gpt_hdr, sizeof(gpt_hdr)) != sizeof(gpt_hdr));
 		} else if (req->disk_block == GPT_PRIMARY_ENTS_START_LBA) {		// GPT entries read
-			nvmeibr_disk_metadata_store_entries(srv, req_data_ptr, req->data_len / sizeof(struct gpt_entry), NULL);
+			unsigned int max_gpt_ent = nvmeibr_disk_metadata_num_gpt_entries(srv);
+			unsigned int sg_idx;
+			struct scatterlist *sg;
+			unsigned int start_ent = 0;
+
+			BUG_ON((req->data_len % sizeof(struct gpt_entry)) != 0);
+
+			for_each_sg(sgl, sg, sgl_nents, sg_idx) {
+				unsigned int seg_len = sg->length;
+				struct gpt_entry *dst = sg_virt(sg);
+				unsigned int n_slice;
+
+				BUG_ON((seg_len % sizeof(struct gpt_entry)) != 0);
+
+				if (start_ent < max_gpt_ent) {
+					n_slice = seg_len / (unsigned int)sizeof(struct gpt_entry);
+					n_slice = min(n_slice, max_gpt_ent - start_ent);
+					nvmeibr_disk_metadata_store_entries(srv, dst, start_ent, n_slice, max_gpt_ent, NULL);
+					start_ent += n_slice;
+				} else {
+					memset(dst, 0, seg_len);
+				}
+			}
+			BUG_ON(start_ent != max_gpt_ent);
 		}
 		goto _out;
 	}
@@ -65,12 +118,12 @@ int nvmeibs_serjio_update_disk(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 	switch (req->nvme_op) {
 		case nvme_cmd_read:{
 			memcpy(req->metadata, md_data_ptr, req->mtdt_size);
-			memcpy(req_data_ptr, data_ptr, req->data_len);
+			BUG_ON(sg_copy_from_buffer(sgl, sgl_nents, data_ptr, req->data_len) != req->data_len);
 			break;
 		}
 		case nvme_cmd_write:{
 			memcpy(md_data_ptr, req->metadata, req->mtdt_size);
-			memcpy(data_ptr, req_data_ptr, req->data_len);
+			BUG_ON(sg_copy_to_buffer(sgl, sgl_nents, data_ptr, req->data_len) != req->data_len);
 			break;
 		}
 		case nvme_cmd_write_zeroes: {
@@ -84,6 +137,8 @@ int nvmeibs_serjio_update_disk(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 		}
 	}
 _out:
+	if (free_local_sgt)
+		sg_free_table(&local_sgt);
 	req->cb(req->arg,/*status*/0,/*result, unused*/0);
 	return 0;
 }
