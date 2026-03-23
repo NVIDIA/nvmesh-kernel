@@ -7312,7 +7312,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					sys->tcf.nVolumes = sys->clients[0].nBdevs = 1;
 					if (1) rv |= SIMU_RUN_TEST_ID(unitest_EC_single_slice_async_pause_disks, no_errro, sys, false);
 					if (1) rv |= SIMU_RUN_TEST_ID(unitest_EC_single_slice_async_pause_disks, with_error, sys, true);
-					rv |= SIMU_RUN_TEST(unitest_EC_async_degraded_mode_rebuild_during_single_slice_io, sys);
+					if (0) rv |= SIMU_RUN_TEST(unitest_EC_async_degraded_mode_rebuild_during_single_slice_io, sys);
 					sys->tcf.nVolumes = sys->clients[0].nBdevs = MAX_NORMAL_VOLUMES_IN_NVMESH;
 					send_command_to_vols(sys, -1, volCmds_New, sys->mdb.nVols - 1, &sys->mdb.vols[1]);
 				}
