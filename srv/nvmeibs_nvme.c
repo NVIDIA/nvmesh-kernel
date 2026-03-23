@@ -153,98 +153,29 @@ MODULE_PARM_DESC(simulate_timeout, "Set to 1 to simulate a timeout on the next o
 
 
 static bool nvmeibs_emulate_4kpi = false;
+static bool nvmeibs_force_fake4kpi = false;
+static char *nvmeibs_fake4kpi_integrity_str = "crc32";
+static int nvmeibs_fake4kpi_md_size = 8;
+static enum fake4kpi_integrity_type fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
+static int nvmeibs_fake4kpi_ring_size = 0;
+
+#if !NVMESH_IS_PRODUCTION_COMPILATION
 module_param_named(emulate_4kpi, nvmeibs_emulate_4kpi, bool, 0444);
 MODULE_PARM_DESC(emulate_4kpi, "Dev only. Emulate 4096+8 format on 512b-only drives by mapping each 4K+8 LBA to 9x512b LBAs.");
 
-static bool nvmeibs_force_fake4kpi = false;
 module_param_named(force_fake4kpi, nvmeibs_force_fake4kpi, bool, 0444);
 MODULE_PARM_DESC(force_fake4kpi, "Dev only. Force fake4kpi on drives that support native 4k+8 but are currently formatted to 512b+0.");
 
-static char *nvmeibs_fake4kpi_integrity_str = "crc32";
 module_param_named(fake4kpi_integrity, nvmeibs_fake4kpi_integrity_str, charp, 0444);
 MODULE_PARM_DESC(fake4kpi_integrity, "Integrity check for fake4kpi sectors: none, crc32c, crc32, xxhash, xor (default: crc32)");
 
-static int nvmeibs_fake4kpi_md_size = 8;
 module_param_named(fake4kpi_md_size, nvmeibs_fake4kpi_md_size, int, 0444);
 MODULE_PARM_DESC(fake4kpi_md_size, "Metadata size in bytes for fake4kpi (8, 16, 32, 64; default: 8)");
 
-static enum fake4kpi_integrity_type fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
-
-static int nvmeibs_fake4kpi_ring_size = 0;
 module_param_named(fake4kpi_ring_size, nvmeibs_fake4kpi_ring_size, int, 0444);
 MODULE_PARM_DESC(fake4kpi_ring_size,
 	"Per-queue bounce buffer ring size for fake4kpi (0 = auto-size to queue depth)");
-
-static u32 fake4kpi_compute_checksum_type(const void *data, size_t len,
-					  enum fake4kpi_integrity_type type)
-{
-	switch (type) {
-	case FAKE4KPI_INTEGRITY_NONE:
-		return 0;
-	case FAKE4KPI_INTEGRITY_CRC32C: {
-		u32 crc = crc32c(~0U, data, len);
-		return crc ? crc : 1;
-	}
-	case FAKE4KPI_INTEGRITY_CRC32: {
-		u32 crc = crc32(~0U, data, len);
-		return crc ? crc : 1;
-	}
-	case FAKE4KPI_INTEGRITY_XXHASH: {
-#ifdef CONFIG_XXHASH
-		u32 h = xxh32(data, len, 0);
-		return h ? h : 1;
-#else
-		u32 crc = crc32(~0U, data, len);
-		return crc ? crc : 1;
 #endif
-	}
-	case FAKE4KPI_INTEGRITY_XOR: {
-		const u32 *p = data;
-		size_t i, n = len / sizeof(u32);
-		u32 x = 0;
-		for (i = 0; i < n; i++)
-			x ^= p[i];
-		return x ? x : 1;
-	}
-	}
-	return 0;
-}
-
-static inline u32 fake4kpi_compute_checksum(const void *data, size_t len)
-{
-	return fake4kpi_compute_checksum_type(data, len, fake4kpi_integrity);
-}
-
-static void fake4kpi_fill_sector9(u8 *bp, const void *md_src, int md_bytes,
-				   u32 checksum, u64 vlba, u64 plba)
-{
-	struct fake4kpi_sector9_hdr *hdr = (struct fake4kpi_sector9_hdr *)bp;
-
-	memset(bp, 0, FAKE4KPI_PHYS_BLOCK_LEN);
-	memcpy(hdr->magic, FAKE4KPI_MAGIC, FAKE4KPI_MAGIC_LEN);
-	hdr->ver_major = FAKE4KPI_VER_MAJOR;
-	hdr->ver_minor = FAKE4KPI_VER_MINOR;
-	hdr->integrity_type = (u8)fake4kpi_integrity;
-	hdr->md_size = (u8)nvmeibs_fake4kpi_md_size;
-	hdr->checksum = checksum;
-	hdr->vlba = vlba;
-	hdr->plba = plba;
-	if (md_src && md_bytes > 0)
-		memcpy(bp + FAKE4KPI_MD_OFFSET, md_src, md_bytes);
-}
-
-struct fake4kpi_cb_ctx {
-	void *bounce_buf;
-	dma_addr_t bounce_dma;
-	struct device *dma_dev;
-	struct nvme_qp *f4kpi_q;
-	int f4kpi_ring_idx;
-	struct nvmeibs_nvme_req *req;
-	void *md_dst;
-	int md_bytes;
-	void *data_virt;
-	bool is_read;
-};
 
 static void nvmeibs_free_drives(struct kref *kref);
 
@@ -439,6 +370,15 @@ enum local_q_irq_state {
 	LOCAL_Q_IRQ_DISABLE_SYNC	= 3, /* WARN: Must be called without holding q_lock! */
 };
 
+struct fake4kpi_cb_ctx;
+struct nvme_qp_fake4kpi {
+	void *ring_va;
+	dma_addr_t ring_dma;
+	int ring_size;
+	unsigned long *ring_bitmap;
+	struct fake4kpi_cb_ctx *ctx;	/* one per ring slot, no alloc in IO path */
+};
+
 struct nvme_qp {
 	struct device_data *dev;
 	void (*complete_fn)(struct nvme_qp *q);
@@ -477,11 +417,7 @@ struct nvme_qp {
 	struct nvmeib_qp_stats_pcpu __percpu * qp_stats;
 	struct nvme_qp_cmds_stats nvme_qp_stats;
 	struct work_struct process_cq_work;
-	void *f4kpi_ring_va;
-	dma_addr_t f4kpi_ring_dma;
-	int f4kpi_ring_size;
-	unsigned long *f4kpi_ring_bitmap;
-	struct fake4kpi_cb_ctx *f4kpi_ctx;	/* one per ring slot, no alloc in IO path */
+	struct nvme_qp_fake4kpi fake4kpi;
 };
 
 /* q_lock wrappers: set/clear q->locking_cpu so q_already_locked(q) is reliable. */
@@ -511,35 +447,6 @@ struct nvme_qp {
 
 #define q_already_locked(q) \
 	(irqs_disabled() && (q)->locking_cpu == smp_processor_id())
-
-inline static int f4kpi_ring_alloc(struct nvme_qp *q)
-{
-	int idx = find_first_zero_bit(q->f4kpi_ring_bitmap, q->f4kpi_ring_size);
-	if (idx >= q->f4kpi_ring_size)
-		return -1;
-	set_bit(idx, q->f4kpi_ring_bitmap);
-	return idx;
-}
-
-inline static void f4kpi_ring_free(struct nvme_qp *q, int idx)
-{
-	clear_bit(idx, q->f4kpi_ring_bitmap);
-}
-
-inline static void *f4kpi_ring_buf(struct nvme_qp *q, int idx)
-{
-	return q->f4kpi_ring_va + (size_t)idx * PAGE_SIZE;
-}
-
-inline static dma_addr_t f4kpi_ring_dma_addr(struct nvme_qp *q, int idx)
-{
-	return q->f4kpi_ring_dma + (size_t)idx * PAGE_SIZE;
-}
-
-inline static struct fake4kpi_cb_ctx *f4kpi_ring_ctx(struct nvme_qp *q, int idx)
-{
-	return &q->f4kpi_ctx[idx];
-}
 
 /* -------------------------------------------------------------------------- *
  *                      IOQM - IO Queues Manager                              *
@@ -859,6 +766,226 @@ bool nvmeibs_disk_is_fake_4kpi(struct nvmeibs_disk_info *info)
 	return info && info->drv && info->drv->fake_4kpi;
 }
 
+static u32 fake4kpi_compute_checksum_type(const void *data, size_t len,
+					  enum fake4kpi_integrity_type type)
+{
+	switch (type) {
+	case FAKE4KPI_INTEGRITY_NONE:
+		return 0;
+	case FAKE4KPI_INTEGRITY_CRC32C: {
+		u32 crc = crc32c(~0U, data, len);
+		return crc ? crc : 1;
+	}
+	case FAKE4KPI_INTEGRITY_CRC32: {
+		u32 crc = crc32(~0U, data, len);
+		return crc ? crc : 1;
+	}
+	case FAKE4KPI_INTEGRITY_XXHASH: {
+#ifdef CONFIG_XXHASH
+		u32 h = xxh32(data, len, 0);
+		return h ? h : 1;
+#else
+		u32 crc = crc32(~0U, data, len);
+		return crc ? crc : 1;
+#endif
+	}
+	case FAKE4KPI_INTEGRITY_XOR: {
+		const u32 *p = data;
+		size_t i, n = len / sizeof(u32);
+		u32 x = 0;
+		for (i = 0; i < n; i++)
+			x ^= p[i];
+		return x ? x : 1;
+	}
+	}
+	return 0;
+}
+
+static inline u32 fake4kpi_compute_checksum(const void *data, size_t len)
+{
+	return fake4kpi_compute_checksum_type(data, len, fake4kpi_integrity);
+}
+
+static inline bool should_use_fake4kpi_on_drive(const struct drive_params *drv, const struct nvme_id_ns *id_ns)
+{
+	int fi;
+	bool ret = false;
+
+	if (!nvmeibs_emulate_4kpi ||
+	    drv->block_len != FAKE4KPI_PHYS_BLOCK_LEN ||
+	    drv->metadata != 0)
+	{
+		ret = false;
+		goto out;
+	}
+	
+	for (fi = 0; fi <= id_ns->nlbaf; fi++) {
+		struct nvme_lbaf lf = id_ns->lbaf[fi];
+		if (lf.ds == ilog2(FAKE4KPI_VIRT_BLOCK_LEN) && le16_to_cpu(lf.ms) == nvmeibs_fake4kpi_md_size) {
+			if (nvmeibs_force_fake4kpi) {
+				_NI(trace_fake4kpi_force,
+					"nvme@NSID: Namespace (@ID_STR) has native @BLOCK_SIZE+@MD_SIZE "
+					"but force_fake4kpi is set",
+					drv->nsid, drv->id_str, FAKE4KPI_VIRT_BLOCK_LEN, nvmeibs_fake4kpi_md_size);
+				break;
+			}
+			_NI(trace_fake4kpi_native,
+				    "nvme@NSID: Namespace (@ID_STR) has native @BLOCK_SIZE+@MD_SIZE, "
+				    "skipping emulation",
+				    drv->nsid, drv->id_str, FAKE4KPI_VIRT_BLOCK_LEN, nvmeibs_fake4kpi_md_size);
+			ret = false;
+			goto out;
+		}
+	}
+
+	ret = true;
+
+out:
+	return ret;
+}
+
+static inline void set_fake4kpi_drv_params(struct drive_params *drv)
+{
+	drv->fake_4kpi = true;
+	drv->phys_block_len = drv->block_len;
+	drv->phys_size = drv->size;
+	drv->block_len = FAKE4KPI_VIRT_BLOCK_LEN;
+	drv->metadata = nvmeibs_fake4kpi_md_size;
+	drv->mtdt_extd = false;
+	drv->size = drv->phys_size /
+					FAKE4KPI_SECTORS_PER_LBA;
+
+	_NI(trace_fake4kpi_get_device_params,
+		"@ID_STR: Emulating 4096+@INT on 512b drive, "
+		"phys_size=@SIZE_LLONG "
+		"virt_size=@SIZE_LLONG integrity=@STR",
+		drv->id_str, nvmeibs_fake4kpi_md_size,
+		drv->phys_size, drv->size,
+		nvmeibs_fake4kpi_integrity_str);
+}
+
+static void fake4kpi_apply_module_params(void)
+{
+	if (!nvmeibs_emulate_4kpi)
+		return;
+	if (nvmeibs_iommu_enabled) {
+		_NE(error_fake4kpi_iommu,
+		    "fake4kpi: emulate_4kpi not supported with "
+		    "iommu_enabled, disabling emulation");
+		nvmeibs_emulate_4kpi = false;
+		return;
+	}
+	if (nvmeibs_fake4kpi_md_size != 8 &&
+	    nvmeibs_fake4kpi_md_size != 16 &&
+	    nvmeibs_fake4kpi_md_size != 32 &&
+	    nvmeibs_fake4kpi_md_size != 64) {
+		_NE(error_fake4kpi_md_size,
+		    "fake4kpi: invalid md_size @INT, "
+		    "must be 8/16/32/64, defaulting to 8",
+		    nvmeibs_fake4kpi_md_size);
+		nvmeibs_fake4kpi_md_size = 8;
+	}
+	if (FAKE4KPI_HDR_SIZE + nvmeibs_fake4kpi_md_size >
+	    FAKE4KPI_PHYS_BLOCK_LEN) {
+		_NE(error_fake4kpi_md_overflow,
+		    "fake4kpi: hdr(@INT)+md(@INT) exceeds "
+		    "sector size, defaulting md to 8",
+		    (int)FAKE4KPI_HDR_SIZE,
+		    nvmeibs_fake4kpi_md_size);
+		nvmeibs_fake4kpi_md_size = 8;
+	}
+	if (strcmp(nvmeibs_fake4kpi_integrity_str, "none") == 0)
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_NONE;
+	else if (strcmp(nvmeibs_fake4kpi_integrity_str, "crc32c") == 0)
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32C;
+	else if (strcmp(nvmeibs_fake4kpi_integrity_str, "crc32") == 0)
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
+	else if (strcmp(nvmeibs_fake4kpi_integrity_str, "xxhash") == 0) {
+#ifdef CONFIG_XXHASH
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_XXHASH;
+#else
+		_NE(error_fake4kpi_no_xxhash,
+		    "fake4kpi: xxhash not available "
+		    "(CONFIG_XXHASH not set), using crc32");
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
+#endif
+	} else if (strcmp(nvmeibs_fake4kpi_integrity_str, "xor") == 0) {
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_XOR;
+	} else {
+		_NE(error_fake4kpi_integrity_str,
+		    "fake4kpi: unknown integrity type '@STR',"
+		    " defaulting to crc32",
+		    nvmeibs_fake4kpi_integrity_str);
+		fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
+	}
+	_NI(trace_fake4kpi_init,
+	    "fake4kpi: enabled, integrity=@STR md_size=@INT "
+	    "ring_size=@INT (0=auto)",
+	    nvmeibs_fake4kpi_integrity_str,
+	    nvmeibs_fake4kpi_md_size,
+	    nvmeibs_fake4kpi_ring_size);
+}
+
+static void fake4kpi_fill_sector9(u8 *bp, const void *md_src, int md_bytes,
+				   u32 checksum, u64 vlba, u64 plba)
+{
+	struct fake4kpi_sector9_hdr *hdr = (struct fake4kpi_sector9_hdr *)bp;
+
+	memset(bp, 0, FAKE4KPI_PHYS_BLOCK_LEN);
+	memcpy(hdr->magic, FAKE4KPI_MAGIC, FAKE4KPI_MAGIC_LEN);
+	hdr->ver_major = FAKE4KPI_VER_MAJOR;
+	hdr->ver_minor = FAKE4KPI_VER_MINOR;
+	hdr->integrity_type = (u8)fake4kpi_integrity;
+	hdr->md_size = (u8)nvmeibs_fake4kpi_md_size;
+	hdr->checksum = checksum;
+	hdr->vlba = vlba;
+	hdr->plba = plba;
+	if (md_src && md_bytes > 0)
+		memcpy(bp + FAKE4KPI_MD_OFFSET, md_src, md_bytes);
+}
+
+struct fake4kpi_cb_ctx {
+	void *bounce_buf;
+	dma_addr_t bounce_dma;
+	struct device *dma_dev;
+	struct nvme_qp *f4kpi_q;
+	int f4kpi_ring_idx;
+	struct nvmeibs_nvme_req *req;
+	void *md_dst;
+	int md_bytes;
+	void *data_virt;
+	bool is_read;
+};
+
+inline static int f4kpi_ring_alloc(struct nvme_qp *q)
+{
+	int idx = find_first_zero_bit(q->fake4kpi.ring_bitmap, q->fake4kpi.ring_size);
+	if (idx >= q->fake4kpi.ring_size)
+		return -1;
+	set_bit(idx, q->fake4kpi.ring_bitmap);
+	return idx;
+}
+
+inline static void f4kpi_ring_free(struct nvme_qp *q, int idx)
+{
+	clear_bit(idx, q->fake4kpi.ring_bitmap);
+}
+
+inline static void *f4kpi_ring_buf(struct nvme_qp *q, int idx)
+{
+	return q->fake4kpi.ring_va + (size_t)idx * PAGE_SIZE;
+}
+
+inline static dma_addr_t f4kpi_ring_dma_addr(struct nvme_qp *q, int idx)
+{
+	return q->fake4kpi.ring_dma + (size_t)idx * PAGE_SIZE;
+}
+
+inline static struct fake4kpi_cb_ctx *f4kpi_ring_ctx(struct nvme_qp *q, int idx)
+{
+	return &q->fake4kpi.ctx[idx];
+}
+
 
 static int nvmeibs_open(struct BLK_MODE_OPEN_OBJ_T *bdev, BLK_MODE_T mode);
 #ifndef FMODE_EXCL
@@ -899,13 +1026,13 @@ static void free_qp(struct nvme_qp *q)
 	if (q->cq)
 		dma_free_coherent(dev, round_up(q->cq_len*sizeof(*q->cq), PAGE_SIZE),
 					q->cq, q->cq_phys);
-	if (q->f4kpi_ring_va)
+	if (q->fake4kpi.ring_va)
 		dma_free_coherent(dev,
-			(size_t)q->f4kpi_ring_size * PAGE_SIZE,
-			q->f4kpi_ring_va, q->f4kpi_ring_dma);
-	kfree(q->f4kpi_ctx);
-	q->f4kpi_ctx = NULL;
-	bitmap_free(q->f4kpi_ring_bitmap);
+			(size_t)q->fake4kpi.ring_size * PAGE_SIZE,
+			q->fake4kpi.ring_va, q->fake4kpi.ring_dma);
+	kfree(q->fake4kpi.ctx);
+	q->fake4kpi.ctx = NULL;
+	bitmap_free(q->fake4kpi.ring_bitmap);
 	if (q->ioqm_alloc_w)
 		_NT(trace_2_nvme_free_qp, "qid @QID: pending work - shall be freed by work itself", q->id -1);
 	kfree(q);
@@ -957,17 +1084,17 @@ static struct nvme_qp *alloc_qp(struct device_data *d, int len)
 		int rsz = nvmeibs_fake4kpi_ring_size > 0 ?
 			  nvmeibs_fake4kpi_ring_size : (len - 1);
 		size_t bytes = (size_t)rsz * PAGE_SIZE;
-		q->f4kpi_ring_va = dma_alloc_coherent(dev, bytes,
-						      &q->f4kpi_ring_dma,
+		q->fake4kpi.ring_va = dma_alloc_coherent(dev, bytes,
+						      &q->fake4kpi.ring_dma,
 						      GFP_KERNEL);
-		if (!q->f4kpi_ring_va)
+		if (!q->fake4kpi.ring_va)
 			goto out;
-		q->f4kpi_ring_size = rsz;
-		q->f4kpi_ring_bitmap = bitmap_zalloc(rsz, GFP_KERNEL);
-		if (!q->f4kpi_ring_bitmap)
+		q->fake4kpi.ring_size = rsz;
+		q->fake4kpi.ring_bitmap = bitmap_zalloc(rsz, GFP_KERNEL);
+		if (!q->fake4kpi.ring_bitmap)
 			goto out;
-		q->f4kpi_ctx = kcalloc(rsz, sizeof(struct fake4kpi_cb_ctx), GFP_KERNEL);
-		if (!q->f4kpi_ctx)
+		q->fake4kpi.ctx = kcalloc(rsz, sizeof(struct fake4kpi_cb_ctx), GFP_KERNEL);
+		if (!q->fake4kpi.ctx)
 			goto out;
 	}
 
@@ -2598,48 +2725,8 @@ static int get_device_params(struct device_data *d)
 		if (drv->metadata != 0)
 			drv->mtdt_extd = ((id_ns->mc & 1) && (id_ns->flbas & 0x10));
 
-		if (nvmeibs_emulate_4kpi &&
-		    drv->block_len == FAKE4KPI_PHYS_BLOCK_LEN &&
-		    drv->metadata == 0) {
-			int fi;
-			bool has_native_4kpi = false;
-
-			for (fi = 0; fi <= id_ns->nlbaf; fi++) {
-				struct nvme_lbaf lf = id_ns->lbaf[fi];
-				if (lf.ds == 12 &&
-				    le16_to_cpu(lf.ms) == nvmeibs_fake4kpi_md_size) {
-					has_native_4kpi = true;
-					break;
-				}
-			}
-			if (has_native_4kpi && !nvmeibs_force_fake4kpi) {
-				_NI(trace_fake4kpi_native,
-				    "nvme@NSID: drive has native 4096+8, "
-				    "skipping emulation",
-				    nsid);
-			} else {
-				if (has_native_4kpi)
-					_NI(trace_fake4kpi_force,
-					    "nvme@NSID: drive has native 4096+8 "
-					    "but force_fake4kpi is set",
-					    nsid);
-				drv->fake_4kpi = true;
-				drv->phys_block_len = drv->block_len;
-				drv->phys_size = drv->size;
-				drv->block_len = FAKE4KPI_VIRT_BLOCK_LEN;
-				drv->metadata = nvmeibs_fake4kpi_md_size;
-				drv->mtdt_extd = false;
-				drv->size = drv->phys_size /
-					FAKE4KPI_SECTORS_PER_LBA;
-				_NI(trace_fake4kpi_get_device_params,
-				    "nvme@NSID: Emulating 4096+@INT on 512b drive, "
-				    "phys_size=@SIZE_LLONG "
-				    "virt_size=@SIZE_LLONG integrity=@STR",
-				    nsid, nvmeibs_fake4kpi_md_size,
-				    drv->phys_size, drv->size,
-				    nvmeibs_fake4kpi_integrity_str);
-			}
-		}
+		if (should_use_fake4kpi_on_drive(drv, id_ns))
+			set_fake4kpi_drv_params(drv);
 
 /* For the time being LIE about max transfer as if we can support large transfers
 		if (drv->mtdt_extd)
@@ -4222,7 +4309,7 @@ static void fake4kpi_complete_cb(void *arg, int status, u32 result)
 		}
 		(req->cb)(req->arg, req->status, result);
 	}
-	/* ctx is from q->f4kpi_ctx[ridx], not allocated per IO */
+	/* ctx is from q->fake4kpi.ctx[ridx], not allocated per IO */
 }
 
 static int find_f4kpi_conflict(struct nvme_qp *q, sector_t lba, sector_t nlba)
@@ -8713,65 +8800,7 @@ static int __init nvmeibspci_init(void)
 		nvmeibs_max_local_nvmeqs = nvmeibs_min_local_nvmeqs;
 	}
 
-	if (nvmeibs_emulate_4kpi) {
-		if (nvmeibs_iommu_enabled) {
-			_NE(error_fake4kpi_iommu,
-			    "fake4kpi: emulate_4kpi not supported with "
-			    "iommu_enabled, disabling emulation");
-			nvmeibs_emulate_4kpi = false;
-		} else {
-			if (nvmeibs_fake4kpi_md_size != 8 &&
-			    nvmeibs_fake4kpi_md_size != 16 &&
-			    nvmeibs_fake4kpi_md_size != 32 &&
-			    nvmeibs_fake4kpi_md_size != 64) {
-				_NE(error_fake4kpi_md_size,
-				    "fake4kpi: invalid md_size @INT, "
-				    "must be 8/16/32/64, defaulting to 8",
-				    nvmeibs_fake4kpi_md_size);
-				nvmeibs_fake4kpi_md_size = 8;
-			}
-			if (FAKE4KPI_HDR_SIZE + nvmeibs_fake4kpi_md_size >
-			    FAKE4KPI_PHYS_BLOCK_LEN) {
-				_NE(error_fake4kpi_md_overflow,
-				    "fake4kpi: hdr(@INT)+md(@INT) exceeds "
-				    "sector size, defaulting md to 8",
-				    (int)FAKE4KPI_HDR_SIZE,
-				    nvmeibs_fake4kpi_md_size);
-				nvmeibs_fake4kpi_md_size = 8;
-			}
-			if (strcmp(nvmeibs_fake4kpi_integrity_str, "none") == 0)
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_NONE;
-			else if (strcmp(nvmeibs_fake4kpi_integrity_str, "crc32c") == 0)
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32C;
-			else if (strcmp(nvmeibs_fake4kpi_integrity_str, "crc32") == 0)
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
-			else if (strcmp(nvmeibs_fake4kpi_integrity_str, "xxhash") == 0) {
-#ifdef CONFIG_XXHASH
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_XXHASH;
-#else
-				_NE(error_fake4kpi_no_xxhash,
-				    "fake4kpi: xxhash not available "
-				    "(CONFIG_XXHASH not set), using crc32");
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
-#endif
-			}
-			else if (strcmp(nvmeibs_fake4kpi_integrity_str, "xor") == 0)
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_XOR;
-			else {
-				_NE(error_fake4kpi_integrity_str,
-				    "fake4kpi: unknown integrity type '@STR',"
-				    " defaulting to crc32",
-				    nvmeibs_fake4kpi_integrity_str);
-				fake4kpi_integrity = FAKE4KPI_INTEGRITY_CRC32;
-			}
-			_NI(trace_fake4kpi_init,
-			    "fake4kpi: enabled, integrity=@STR md_size=@INT "
-			    "ring_size=@INT (0=auto)",
-			    nvmeibs_fake4kpi_integrity_str,
-			    nvmeibs_fake4kpi_md_size,
-			    nvmeibs_fake4kpi_ring_size);
-		}
-	}
+	fake4kpi_apply_module_params();
 
 	nvmeibs_proc_dir = proc_mkdir("nvmeibs", NULL);
 	if (nvmeibs_proc_dir == NULL) {
