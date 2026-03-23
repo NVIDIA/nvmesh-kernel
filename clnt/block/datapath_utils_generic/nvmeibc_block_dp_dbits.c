@@ -258,8 +258,3 @@ void nvmeibc_dbits_tx_init_by_bmp(struct nvmeibc_dbits_tx* tx, const int num_deg
 	tx->action.db_conv_map = turn_on_conv_bmp;
 	__action_calc_has_slice_info(&tx->action);
 }
-
-void nvmeibc_dbits_tx_init_only_dconv(struct nvmeibc_dbits_tx *tx, const int num_degraded, u32 turn_on_conv_bmp)
-{
-	nvmeibc_dbits_tx_init_by_bmp(tx, num_degraded, 0 /* turn_on_dbit_bmp */, 0 /* turn_off_dbit_bmp */, turn_on_conv_bmp);
-}

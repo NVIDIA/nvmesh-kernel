@@ -53,7 +53,7 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 				if (cur.all_bits) res.all_bits = nvmeibc_dbits_merge_owners(&res, &cur, &so->r1->calculated_data.topo_traits);
 			}
 	}
-	nvmeibc_dbits_turn_on_convict(&res, so->r1);
+	nvmeibc_dbits_turn_on_convict(&res, topo_traits);
 	nvmeibc_dbits_del_unk_worst_case(&res, topo_traits);
 _resolved:
 
@@ -346,7 +346,7 @@ void dp_maintenance_execute_op(struct recovery_sync_op *so)
 		// This op finishes syncronously, no callbacks, no cmds. It is the caller responcibility to pedal futher
 		struct nvmeibc_raid_leader_cmd_ctx* rld = &so->cmds->rld;
 		union nvmeibc_dbits_entry rv = {.all_bits = rld->pre.bits.dirty};
-		nvmeibc_dbits_turn_on_convict(&rv, so->r1);
+		nvmeibc_dbits_turn_on_convict(&rv, &so->r1->calculated_data.topo_traits);
 		rld->post.bits.dirty = rv.all_bits;
 		atomic_inc(&get_so_fctr(so)->main.n_dconvict_turnon);
 		mark_blockset_info_not_written(so);	// Must always commit blockset info

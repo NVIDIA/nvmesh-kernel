@@ -18,8 +18,8 @@ __attribute__((nonnull(1, 2)))
 void nvmeibc_dbits_del_unk(               union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Remove unknowns, used when we resolve unk from md or topology
 __attribute__((nonnull(1, 2)))
 void nvmeibc_dbits_del_unk_worst_case(               union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);	    // Remove unknowns, used when we resolve unk from md or topology
-struct nvmeibc_raid1;	// TODO: Remove
-void nvmeibc_dbits_turn_on_convict(       union nvmeibc_dbits_entry *e, const struct nvmeibc_raid1 *pr);
+__attribute__((nonnull(1, 2)))
+void nvmeibc_dbits_turn_on_convict(       union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits);
 
 /* Given the dirtybits that read by owner and secondary owner lock, unite them and return the result.all_bits */
 __attribute__((nonnull(1, 2, 3)))
@@ -80,7 +80,6 @@ struct nvmeibc_dbits_tx {				// Map describing the dirtybits of transaction. Rel
 
 void nvmeibc_dbits_tx_init_empty(     struct nvmeibc_dbits_tx*, const int num_degraded);
 void nvmeibc_dbits_tx_init_by_bmp(    struct nvmeibc_dbits_tx*, const int num_degraded, u32 turn_on_dbit_bmp, u32 turn_off_dbit_bmp, u32 turn_on_conv_bmp);
-void nvmeibc_dbits_tx_init_only_dconv(struct nvmeibc_dbits_tx*, const int num_degraded, u32 turn_on_conv_bmp);
 
 static inline bool nvmeibc_dbits_tx_has_action(const struct nvmeibc_dbits_tx* tx)
 {	// At least 1 segment changed
