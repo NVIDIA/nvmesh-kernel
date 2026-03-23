@@ -967,10 +967,12 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		struct t_raft_msg_queue_from_other_tomas *rq = &ln->raft_msg_queue_from_other_tomas;
 		struct nvmeibt_big_msg *msg = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*msg) + req->msg_len + req->data_len);
 		struct raft_msg *out_r_msg = (typeof(out_r_msg))msg->data;
+		const unsigned my_uuid = LE_SWAP32((uint32_t)in_r_msg->dst_node_id.ll[0]);
 		BUG_ON(rq->n_msgs >= (int)ARRAY_SIZE(rq->msg_q) || (req->msg_type != NVMEIBT_IB_PROTOCOL_SIGNATURE_RAFT));
 		msg->msg_type = req->msg_type;
 		msg->data_len = (req->msg_len + req->data_len);		// Reply has the same length/payload as request
 		memcpy(out_r_msg, in_r_msg, req->msg_len);			// DHS: Copy the incomming message as a reply so most fields would be already initialized
+		BUG_ON(LE_SWAP32((uint32_t)in_r_msg->src_node_id.ll[0]) != sys->cfg.nodes[0].uuid);		// Trap message arriving from simulated Toma, unitest does not support simulating leader yet.
 		out_r_msg->src_node_id =  in_r_msg->dst_node_id;	// Switch 'src' and 'dst' which will make them both correct
 		out_r_msg->dst_node_id =  in_r_msg->src_node_id;
 		out_r_msg->src_node_idx = in_r_msg->dst_node_idx;
@@ -984,8 +986,12 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 			case RAFT_MSG_APPEND_ENTRIES:
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_APPEND_ENTRIES_REP);
 				if (req->data_len)
-					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incomming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
+					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incoming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
+				if (my_uuid == sys->cfg.nodes[2].uuid) {
+					NNVMEIBT_BM_FREE(__AUTOID__, msg);
+					return 0;
+				}
 				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
 			default: BUG_ON(true);							// Currently only support reply as follower on leader/candidate msgs
