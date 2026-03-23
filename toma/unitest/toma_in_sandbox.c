@@ -954,6 +954,11 @@ int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
 	return 0;
 }
 
+void sb_cluster_ignore_append_entries_by_node(int node_idx) {
+	BUG_ON(node_idx != 2);			// Our volumes configuration, currently supports only ignore by node 2
+	sys->cfg.nodes[node_idx].ignore_append_entries = true;
+}
+
 int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
 	const struct raft_msg *in_r_msg = (typeof(in_r_msg))req->cnst_msg;
 	const struct nvmeibt_persist_and_wire_buf *r_topo = (typeof(r_topo))req->cnst_data;
@@ -988,7 +993,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 				if (req->data_len)
 					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incoming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
-				if (my_uuid == sys->cfg.nodes[2].uuid) {
+				if (sys->cfg.nodes[my_uuid&0xF].ignore_append_entries) {
 					NNVMEIBT_BM_FREE(__AUTOID__, msg);
 					return 0;
 				}

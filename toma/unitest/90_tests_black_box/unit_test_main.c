@@ -151,6 +151,10 @@ static void scenario_create_remove_r1(void) {
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();
 
+	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
+	sb_cluster_ignore_append_entries_by_node(2);
+	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
+
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "sending deleteVolume V_R1, waiting for V_R1 praid deprecated in report");
 	mgmt_sim_send_delete_volume_r1();

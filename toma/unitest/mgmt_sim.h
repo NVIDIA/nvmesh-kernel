@@ -23,7 +23,8 @@ struct sb_cluster_conf {
 		struct sb_nics_conf {
 			uint32_t uuid;
 		} nics[2];				// Each node has exactly 2 nics
-	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas
+		bool ignore_append_entries;			// Emulates infinitely slow local disk response time, does not commit raft leaders topo
+	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n49
 	int n_nodes;
 	struct sb_volume_conf {							// All volumes configuration
 		const char* name;
@@ -54,6 +55,8 @@ struct sb_cluster_conf {
 void sb_cluster_conf_create( struct sb_cluster_conf *);
 void sb_cluster_conf_destroy(struct sb_cluster_conf *);
 int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const char *host_name);
+
+void sb_cluster_ignore_append_entries_by_node(int node_idx);
 
 /*********************************************/
 
