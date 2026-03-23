@@ -271,6 +271,7 @@ void mgmt_sim_send_msg_assign_to_zone(int zone_idx) {
 		"{\"messageType\":\"updateTomaKeepaliveToken\",\"messageTypeVersion\":1"
 		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"%d\",\"keepaliveInterval\":1}}",
 		m->cfg->live->hostname, zone_idx);
+	m->cfg->zone_idx = zone_idx;
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.cmd, msg, len, false);
 	m->cmd.msg_count++;
 }
