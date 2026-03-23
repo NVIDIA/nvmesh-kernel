@@ -439,7 +439,7 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 			const char *praid_uuid = json_get_dict_str(payload, "pRaidUUID", NULL);
 			if (praid_uuid && strcmp(praid_uuid, V_R1_PRAID_UUID) == 0) {
 				m->v_r1_seg_zeroing_progress_seen = true;
-				N_IMf(msim_szp, "segmentZeroingProgress: V_R1 praid matched");
+				N_IMf(msim_szp, "segmentZeroingProgress: @STR praid matched", m->cfg->vols[1].name);
 			}
 	}
 	nvmeibt_mm_json_free_kv_tree(root);
@@ -516,23 +516,21 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 	struct mm_json_elem *praids_update = json_get_dict_value(payload, "pRaidsUpdate");
+	struct mgmt_sim_state *m = g_mgmt_sim;
 	bool v_r1_found = false;
-	if (!praids_update || praids_update->type != JSON_E_ARRAY)
-		return;
+	BUG_ON(!praids_update || (praids_update->type != JSON_E_ARRAY));
 	for (int i = 0; i < praids_update->array.len; i++) {
 		struct mm_json_elem *entry = praids_update->array.elements[i];
-		const char *uuid;
-		if (!entry || entry->type != JSON_E_DICT)
-			continue;
-		uuid = json_get_dict_str(entry, "uuid", NULL);
+		const char *uuid = json_get_dict_str(entry, "uuid", NULL);
+		BUG_ON(!entry || (entry->type != JSON_E_DICT) || !uuid);
 		if (uuid && strcmp(uuid, V_R1_PRAID_UUID) == 0) {
-			struct mm_json_elem *segments;
-			N_IMf(msim_praid, "matched V_R1 pRaid UUID");
-			g_mgmt_sim->v_r1_praid_reported = true;
+			const struct sb_volume_conf* V = &m->cfg->vols[1];
+			struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
+			N_IMf(msim_praid, "matched @STR pRaid UUID", V->name);
+			m->v_r1_praid_reported = true;
 			v_r1_found = true;
 
 			/* Check if all segments have status "deprecated" */
-			segments = json_get_dict_value(entry, "segments");
 			if (segments && segments->type == JSON_E_ARRAY && segments->array.len > 0) {
 				bool all_deprecated = true;
 				int j;
@@ -545,16 +543,16 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 					}
 				}
 				if (all_deprecated) {
-					g_mgmt_sim->v_r1_praid_deprecated = true;
-					N_IMf(msim_praid_dep, "V_R1 all segments deprecated");
+					m->v_r1_praid_deprecated = true;
+					N_IMf(msim_praid_dep, "@STR all segments deprecated", V->name);
 				}
 			}
 		}
 	}
-	/* After deleteVolumeCompleted: if V_R1 praid is absent, it was garbage collected */
-	if (g_mgmt_sim->v_r1_delete_completed_sent && !v_r1_found) {
-		g_mgmt_sim->v_r1_praid_absent_from_report = true;
-		N_IMf(msim_praid_gc, "V_R1 praid absent (garbage collected)");
+	/* After deleteVolumeCompleted: if V[1] praid is absent, it was garbage collected */
+	if (m->v_r1_delete_completed_sent && !v_r1_found) {
+		m->v_r1_praid_absent_from_report = true;
+		N_IMf(msim_praid_gc, "@STR praid absent (garbage collected)",  m->cfg->vols[1].name);
 	}
 }
 
