@@ -115,9 +115,55 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	for (i = 0; i < sb->n_nodes; i++) {
 		const uint32_t short_uuid = 0xcde269b0 + i;
 		sb->nodes[i].uuid16b[0] = short_uuid;
-		snprintf(sb->nodes[i].uuid, 37, "%8x-0000-0000-0000-000000000000", short_uuid);
+		snprintf(sb->nodes[i].uuid, 37, UUID_from_U32("%8x"), short_uuid);
+	}
+
+	{	// Create 2 volumes:		All uuids are generated as 32bits integers 0xaaaV0CRS, where V is volume index, C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
+		unsigned c, r, s, disk_seg_n_blocks = 1024;		// 4[mb] disk segments
+		struct sb_seg_conf *ps;
+		{	// Allocate areas on disks, Todo: Here use counter on each disk to auto allocate next segment (instead of manual calculation), when we will add/remove volumes dynamically.
+			ps = &sb->vols[0].chunks[0].raids[0].segs[0];
+			ps[0].disk_uuid = DISK_UUID_REMOTE38_D0;		ps[0].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[1].disk_uuid = DISK_UUID_REMOTE39_D0;		ps[1].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+
+			ps = &sb->vols[1].chunks[0].raids[0].segs[0];
+			ps[0].disk_uuid = DISK_UUID_LOCAL_003;			ps[0].block_start = 6176;	ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[1].disk_uuid = DISK_UUID_REMOTE38_D0;		ps[1].block_start = 1024;	ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[2].disk_uuid = DISK_UUID_REMOTE38_D1;		ps[2].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+		}
+		sb->n_vols = 2;
+		sb->vols[0].name = "V_REMOTE1";								// RAID-1, segments only on remote disks (D0_n38, D0_n39)
+		sb->vols[1].name = "V_R1";									// RAID-1, one local segment + 2 remote on n38
+		for (i = 0; i < sb->n_vols; i++) {
+			struct sb_volume_conf *pv = &sb->vols[i];
+			pv->uuid = (0xaaa00000 | ((i+1) << 16));				//	aaa10000, aaa20000
+			pv->num_chunks = 1;
+			for (c = 0; c < pv->num_chunks; c++) {
+				struct sb_chunk_conf *pc = &pv->chunks[c];
+				pc->n_raids = 1;									// Raid-0, not supported yet. Striping of 1
+				pc->uuid = (pv->uuid | ((c+1) << 8));
+				for (r = 0; r < pc->n_raids; r++) {
+					struct sb_praid_conf *pr = &pc->raids[r];
+					pr->uuid = (pc->uuid | ((r+1) << 4));
+					pr->D = 1;
+					pr->P = 1 + i;									// First volume is Remote R1-2mirror (1+1), Second R1-3mirror (1+2)
+					for (s = 0; s < (pr->D + pr->P); s++) {
+						ps = &pr->segs[s];
+						ps->uuid = (pr->uuid | (s+1));
+						ps->block_end = ps->block_start + (disk_seg_n_blocks - 1);	// Assuming 1 chunk here, Non EC
+					}
+				}
+				pc->vlba_start = (c == 0) ? 0 : (pc[-1].vlba_end + 1);
+				pc->vlba_end = pc->vlba_start + (pc->n_raids * pc->raids[0].D * disk_seg_n_blocks) - 1;
+			}
+			pv->num_blocks = pv->chunks[pv->num_chunks-1].vlba_end + 1;
+		}
 	}
 }
+
+/*static struct sb_seg_conf * __get_first_seg_by_uuid(unsigned uuid_u32) {			// The above uuid design was for easy retrieval of object by uuid.
+	return &g_mgmt_sim->cfg->vols[((uuid_u32>>16)&0xF)-1].chunks[((uuid_u32>>8)&0xF)-1].raids[((uuid_u32>>4)&0xF)-1].segs[((uuid_u32)&0xF)-1];
+}*/
 
 int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, const char *host_name) {
 	for (int i = 0; i < sb->n_nodes; i++) {
@@ -377,6 +423,7 @@ static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
 }
 
 static void __handle_priority_msg(const rd_kafka_message_t *msg) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
 	const char *message_type = json_get_dict_str(root, "messageType", NULL);
 	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
@@ -391,7 +438,7 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 			struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 			const char *praid_uuid = json_get_dict_str(payload, "pRaidUUID", NULL);
 			if (praid_uuid && strcmp(praid_uuid, V_R1_PRAID_UUID) == 0) {
-				g_mgmt_sim->v_r1_seg_zeroing_progress_seen = true;
+				m->v_r1_seg_zeroing_progress_seen = true;
 				N_IMf(msim_szp, "segmentZeroingProgress: V_R1 praid matched");
 			}
 	}
