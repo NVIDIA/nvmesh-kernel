@@ -70,8 +70,8 @@ static int make_msg_add_volume_r1(char *buf, size_t capacity)
 		"{\"uuid\":\"aaa001c0-0000-0000-0000-000000000010\",\"vlbs\":0,\"vlbe\":1023,\"pRaids\":["
 			"{\"uuid\":\"" V_R1_PRAID_UUID "\",\"activated\":false,\"stripeIndex\":0,\"zone\":\"1\",\"diskSegments\":["
 				"{\"uuid\":\"aaa001e1-0000-0000-0000-000000000000\",\"lbs\":6176,\"lbe\":7199,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_LOCAL_003 "\"},"
-				"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000000\",\"lbs\":1024,\"lbe\":2047,\"type\":\"data\",\"pRaidIndex\":0,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
-				"{\"uuid\":\"aaa001e3-0000-0000-0000-000000000000\",\"lbs\":0" ",\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D1 "\"}"
+				"{\"uuid\":\"aaa001e2-0000-0000-0000-000000000000\",\"lbs\":1024,\"lbe\":2047,\"type\":\"data\",\"pRaidIndex\":1,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D0 "\"},"
+				"{\"uuid\":\"aaa001e3-0000-0000-0000-000000000000\",\"lbs\":0" ",\"lbe\":1023,\"type\":\"data\",\"pRaidIndex\":2,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" DISK_UUID_REMOTE38_D1 "\"}"
 		"]}]}]}}");
 }
 
