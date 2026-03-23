@@ -72,6 +72,32 @@ clean () {
 	(cd $TEST_SUB_DIR && $MAKE_CMD clean)
 }
 
+supports_scl() {
+    # Must have rpm ecosystem
+    command -v rpm >/dev/null 2>&1 || return 1
+
+    # If scl-utils installed, good sign
+    if rpm -q scl-utils >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Check for known SCL repos
+    if command -v dnf >/dev/null 2>&1; then
+        dnf repolist all 2>/dev/null | grep -Eiq 'scl|rhscl|sclo' && return 0
+    elif command -v yum >/dev/null 2>&1; then
+        yum repolist all 2>/dev/null | grep -Eiq 'scl|rhscl|sclo' && return 0
+    fi
+
+    # Check whether scl-utils is at least available from repos
+    if command -v dnf >/dev/null 2>&1; then
+        dnf -q list available scl-utils >/dev/null 2>&1 && return 0
+    elif command -v yum >/dev/null 2>&1; then
+        yum -q list available scl-utils >/dev/null 2>&1 && return 0
+    fi
+
+    return 1
+}
+
 write_mutiple () {
 	logger -s "[$(date +%c)]: $0 - $1"
 	echo "[$(date +%c)]: $0 - $1" >> $log_file
@@ -193,7 +219,12 @@ case "$1" in
 	"ci")
 		# ---------- For continous integration: generate logs and coredump location, might not die with ctrl+c
 		shift
-		MAKE_CMD="scl enable devtoolset-8 -- make"
+
+                if supports_scl; then
+                        MAKE_CMD="scl enable devtoolset-8 -- make"
+                else
+                        MAKE_CMD="make"
+                fi
 		#if [ ! -z "$1" ]; then
 		#	REPEAT=$1
 		#	shift
