@@ -8,6 +8,7 @@
 #include "linux/cpumask.h"
 #include "linux/irqflags.h"
 #include "linux/netdevice.h"
+#include <linux/net_namespace.h>
 #include "nvmeib_wd.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
@@ -2711,13 +2712,24 @@ static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 
 int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
 {
+	static const char *siw_prefix = "siw_";
+	int siw_prefix_len = strlen(siw_prefix);
 	int numa_node = NUMA_NO_NODE;
 	if (dev->dev_type == DT_siw) {
-		struct net_device *siw_ndev;
-		if (!dev->ib_dev->get_netdev)
+		struct net_device *siw_ndev = NULL;
+
+		if (dev->ib_dev->get_netdev) {
+			siw_ndev = dev->ib_dev->get_netdev(dev->ib_dev, 1);
+		} else if (!strncmp(dev->ib_dev->name, siw_prefix, siw_prefix_len) && dev->ib_dev->name[siw_prefix_len]) {
+			siw_ndev = dev_get_by_name(&init_net, dev->ib_dev->name + siw_prefix_len);
+		}
+
+		if (!siw_ndev) {
+			_ND(trace_nvmeib_get_dev_numa_node, 
+				"Failed to get net device for SIW device @IB_DEV_NAME. "
+				"Using default numa node.", dev->ib_dev->name);
 			goto out;
-		if ((siw_ndev = dev->ib_dev->get_netdev(dev->ib_dev, 1)) == NULL)
-			goto out;
+		}
 
 		numa_node = dev_to_node(&siw_ndev->dev);
 		dev_put(siw_ndev);
