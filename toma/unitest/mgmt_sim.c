@@ -13,12 +13,12 @@
 
 /* Disk constants */
 #define UUID_from_U32(WHAT) WHAT "-0000-0000-0000-000000000000"
-#define DISK_UUID_LOCAL_002      UUID_from_U32("d0020000")
+#define DISK_UUID_LOCAL_002      UUID_from_U32("d0020000")			// prefix 'd' for local disk
 #define DISK_UUID_LOCAL_003      UUID_from_U32("d0030000")
-#define DISK_UUID_REMOTE38_D0    UUID_from_U32("f38cebd0")
-#define DISK_UUID_REMOTE38_D1    UUID_from_U32("f38cebd1")
-#define DISK_UUID_REMOTE39_D0    UUID_from_U32("f39cebd0")
-#define DISK_UUID_REMOTE39_D1    UUID_from_U32("f39cebd1")
+#define DISK_UUID_REMOTE38_D0    UUID_from_U32("f38000d0")			// encodes node and disk for easier eye catcher debugging
+#define DISK_UUID_REMOTE38_D1    UUID_from_U32("f38000d1")
+#define DISK_UUID_REMOTE39_D0    UUID_from_U32("f39000d0")
+#define DISK_UUID_REMOTE39_D1    UUID_from_U32("f39000d1")
 
 enum e_disk_format_state {
 	FMT_IDLE = 'I',
@@ -108,12 +108,10 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	sb->live =  &sb->nodes[0];
 	sb->other = &sb->nodes[1];
 	   sb->live->hostname = sb->my_hostname;
-	sb->other[0].hostname = "n37@nvidia.com";
+	sb->other[0].hostname = "n38@nvidia.com";
 	sb->other[1].hostname = "n39@nvidia.com";
 	for (i = 0; i < sb->n_nodes; i++) {
-		const uint32_t short_uuid = 0xcde269b0 + i;
-		sb->nodes[i].uuid16b[0] = short_uuid;
-		snprintf(sb->nodes[i].uuid, 37, UUID_from_U32("%8x"), short_uuid);
+		sb->nodes[i].uuid = 0xc0000000 + i;	// 'c' for computer
 	}
 
 	{	// Create 2 volumes:		All uuids are generated as 32bits integers 0xaaaV0CRS, where V is volume index, C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
@@ -323,7 +321,7 @@ void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add) {
 	char *buf = malloc(capacity);	BUG_ON(!buf);
 	++m->raft_quorum.generation;
 	len = snprintf(buf, capacity, "{\"messageType\":\"%s\",\"messageTypeVersion\":1,\"payload\":"
-			"{\"nodeID\":\"%s\",\"uuid\":\"%s\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
+			"{\"nodeID\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
 			msg_type, node->hostname, node->uuid, m->raft_quorum.num_nodes, m->raft_quorum.generation);
 	m->raft_quorum.num_nodes += (do_add ? +1 : -1);
 	N_Tf(__AUTOID__, "<< msg=@STR node=@STR, gen=@INT", msg_type, node->hostname, m->raft_quorum.generation);
@@ -342,7 +340,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 		",\"configurationVersion\":%d,\"leaderToken\":1,\"kafkaMessageSequence\":%d,\"raftTerm\":9"
 		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
 		"\"targets\":["
-			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
+			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\","
 				"\"disks\":["
 				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
@@ -351,7 +349,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
 					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
+			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\","
 				"\"disks\":["
 				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"" DISK_UUID_REMOTE38_D0 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"D1_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"" DISK_UUID_REMOTE38_D1 "\",\"version\":7,\"isOutOfService\":false}],"
@@ -360,7 +358,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c1-11f0-bc49-e391b6ca4c2b\"},"
 					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\""
 						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c1-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"%s\","
+			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\","
 				"\"disks\":["
 				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"" DISK_UUID_REMOTE39_D0 "\",\"version\":7,\"isOutOfService\":false},"
 				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"" DISK_UUID_REMOTE39_D1 "\",\"version\":1,\"isOutOfService\":false}],"
