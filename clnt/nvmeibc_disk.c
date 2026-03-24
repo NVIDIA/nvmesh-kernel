@@ -233,8 +233,11 @@ module_param_named(local_io_use_md_dma_pool, nvmeibc_disk_local_io_use_md_dma_po
 MODULE_PARM_DESC(local_io_use_md_dma_pool, "When a local IO request is made without providing space for the metadata buffer and the drive has metadata enabled, then this determines whether to use a preallocated pool of memory or to dynamically allocate memory per IO.");
 
 bool nvmeibc_disk_local_write_use_data_copy = false;
+
+#if !NVMESH_IS_PRODUCTION_COMPILATION
 module_param_named(local_write_use_data_copy, nvmeibc_disk_local_write_use_data_copy, bool, 0644);
 MODULE_PARM_DESC(local_write_use_data_copy, "Copy write data to a DMA pool buffer before submitting to the drive. Prevents CRC mismatches when application modifies buffers during DMA. Automatically enabled for fake_4kpi drives.");
+#endif
 
 /* [NVMESH-3287]: Params for throttling target-nics query to management */
 uint nvmeibc_disk_tgt_nics_query_min_secs = 2;
