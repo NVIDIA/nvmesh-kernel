@@ -10,8 +10,10 @@
 #include <string.h>
 #include <assert.h>
 
-#define MAX_FILENAME 1024
-#define MAX_CGROUP_NAME 120
+#define MAX_FILENAME_STRLEN 1023
+#define MAX_FILENAME (MAX_FILENAME_STRLEN + 1) /* buffer size including NUL */
+#define MAX_CGROUP_STRLEN 119
+#define MAX_CGROUP_NAME_SIZE (MAX_CGROUP_STRLEN + 1) /* buffer size including NUL */
 
 typedef struct trace_channel_cfg {
 	char *name;
@@ -29,7 +31,7 @@ typedef struct trace_daemon_cfg {
 	trace_channel_cfg_t *channel_cfg;
 	int nfs;
 	int ramfs;
-	char cgroup[MAX_CGROUP_NAME];
+	char cgroup[MAX_CGROUP_NAME_SIZE];
 } trace_daemon_cfg_t;
 
 
