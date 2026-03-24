@@ -4,6 +4,7 @@
  */
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"
 #include "block/nvmeibc_block_common.h"
+#include "block/dp_topology_traits.h"
 
 static inline bool nvmeibcbdp_binfo_has_txid_unreslved(const union nvmeib_blkset_info bi)
 {
@@ -17,12 +18,12 @@ static inline bool nvmeibcbdp_binfo_has_txid_unreslvd(const struct nvmeibc_block
 
 /* We have at least 1 unknown dbits, and cannot resolve them from disk, assume worst case (by topo) */
 union nvmeibc_dbits_entry nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(
-	const union nvmeibc_dbits_entry pre, const struct nvmeibc_raid1 *pr);
+	const union nvmeibc_dbits_entry pre, struct dp_topology_traits const* topo_traits);
 
-static inline bool nvmeibcbdp_binfo_has_unknown_dbits(const struct nvmeibc_block_command *rldr, const struct nvmeibc_raid1 *pr)
+static inline bool nvmeibcbdp_binfo_has_unknown_dbits(const struct nvmeibc_block_command *rldr, struct dp_topology_traits const* topo_traits)
 {
 	const union nvmeibc_dbits_entry pre = {.all_bits = rldr->rld.pre.bits.dirty};
-	return nvmeibc_dbits_get_n_unk(&pre, &pr->calculated_data.topo_traits);
+	return nvmeibc_dbits_get_n_unk(&pre, topo_traits);
 }
 
 // Todo: Move the functions below to here

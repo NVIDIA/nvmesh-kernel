@@ -7,6 +7,8 @@ struct dp_topology_traits {
 	u8 n_parities;
 	u8 n_degraded;
 
+	sgmnts_bmp_t dbits_on;   // write turns ON dirty bits for these (== dead)
+	sgmnts_bmp_t dbits_off;  // full-blockset write turns OFF dirty bits (== W| W-)
 	sgmnts_bmp_t wm;         // W- only (W_IS_DIRTY — convict candidates)
 };
 

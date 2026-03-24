@@ -920,11 +920,11 @@ static void __dp_mirror_analyze_binfo_before_write(struct nvmeibc_block_command 
 	}
 
 	// Resolve unknown dbits - assume worst case, as we don't store dbits in block metadata
-	if (nvmeibcbdp_binfo_has_unknown_dbits(rldr, pr)) {
+	if (nvmeibcbdp_binfo_has_unknown_dbits(rldr, &pr->calculated_data.topo_traits)) {
 		const union nvmeibc_dbits_entry dbits = {.all_bits = rldr->rld.post.bits.dirty};
 
 		// XXX: This also assumes dbits on dirty convict segments. It is already (conceptually) "on" as long as the segment is "W-" in topology, so we might want to reconsider
-		rldr->rld.post.bits.dirty = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(dbits, pr).all_bits;
+		rldr->rld.post.bits.dirty = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(dbits, &pr->calculated_data.topo_traits).all_bits;
 	}
 
 	rldr->rld.post.bits.txid = NVMEIB_BLOCK_IO_OP_WRITE;	// TxID is unused, assign it a debug value

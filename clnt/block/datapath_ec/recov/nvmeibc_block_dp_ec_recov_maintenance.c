@@ -32,14 +32,14 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 
 	WARN((all_pari_degraded && (num_parities > 1)) && (!double_deg_and_deg_parity), "nvmeibc bug, so=%p incorrect topo!, nrp=0%x, ss=%d\n", so, non_readable, slice_start); // sanity
 	if (unlikely(double_deg_and_deg_parity || all_pari_degraded)) { // Exact condition for when on-disk-dbits cannot be used (inaccessible or cannot be trusted). Example: no-whole in the middle of turning-off dbits on D0 in slice -> cold recovery + Q becomes dead, D0 still W and no-whole only turned off the dbits in P (Q has dbits for D0) -> cold recovery needs to turn-on dbits on Q since it's dbits/txid might be invalid.
-		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, so->r1); /* nowhere to read dbits from */
+		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, topo_traits); /* nowhere to read dbits from */
 		goto _resolved;
 	}
 	// Find the first valid parity metadata with with dirty bits
 	for (; (first_p < so->r1->replicas)&&(c[first_p].do_not_send); first_p++);
 	if (first_p >= so->r1->replicas) {
 		WARN(true, "nvmeibc bug, first_p=0x%x, so=%p must exist because readable_pari(0x%x) != all_pari(0x%x)!\n", first_p, so, non_readable_pari, pari_bmp); // sanity
-		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, so->r1); /* nowhere to read dbits from */
+		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, topo_traits); /* nowhere to read dbits from */
 		goto _resolved;
 	}
 
@@ -70,7 +70,7 @@ _resolved:
 
 union nvmeibc_dbits_entry nvmeibcbdpec_calc_worst_case_dbits(const struct recovery_sync_op *so)
 {
-	union nvmeibc_dbits_entry res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology((union nvmeibc_dbits_entry){.all_bits = so->cmds->rld.pre.bits.dirty}, so->r1);
+	union nvmeibc_dbits_entry res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology((union nvmeibc_dbits_entry){.all_bits = so->cmds->rld.pre.bits.dirty}, &so->r1->calculated_data.topo_traits);
 
 	nvmeibc_dbits_del_unk_worst_case(&res, &so->r1->calculated_data.topo_traits);
 
@@ -226,7 +226,7 @@ _func_start:
 				atomic_inc(&get_so_fctr(so)->main.n_binfo_resolve_readfail);
 				if (nvmeibcbdp_binfo_has_txid_unreslvd(rldr) &&
 				    !nvmeibc_praid_are_all_readable(so->r1) &&
-					!nvmeibcbdp_binfo_has_unknown_dbits(rldr, so->r1)) {
+					!nvmeibcbdp_binfo_has_unknown_dbits(rldr, &so->r1->calculated_data.topo_traits)) {
 					// This should never happen, as there is no flow that resolves dbits without TxID or that sets unknown dbits after TxID was already resolved
 					WARN_ONCE(1, "nvmeibc bug! Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail");
 					_NTSO(trace_2_mainten_cb_stg, "Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail, aborting");
@@ -237,7 +237,7 @@ _func_start:
 
 			so->stage = sync_stage_recov_write_binfo;
 
-			if (nvmeibcbdp_binfo_has_unknown_dbits(rldr, so->r1)) {
+			if (nvmeibcbdp_binfo_has_unknown_dbits(rldr, &so->r1->calculated_data.topo_traits)) {
 				const union nvmeibc_dbits_entry db = so->write_unco_mask ?
 									     nvmeibcbdpec_calc_worst_case_dbits(so) :
 									     nvmeibcbdpec_calc_max_dbit_in_ram_md(so);

@@ -148,6 +148,8 @@ static void nvmeibc_raid1_fill_calculated_data(struct nvmeibc_raid1 *r1)
 		__calc_rotated_bmps(r1, si);
 	}
 	topo_traits->n_degraded = nvmeibc_praid_get_num_deg_segs(r1);
+	topo_traits->dbits_on = nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_on_mask);
+	topo_traits->dbits_off = nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_off_mask);
 	topo_traits->wm = nvmeibc_raid1_get_sgmnts_bmp(r1, wm);
 	{
 		const bool can_view_lock = __calc_should_use_view_lock_on_read(r1);

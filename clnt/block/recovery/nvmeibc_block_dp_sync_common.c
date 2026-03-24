@@ -810,7 +810,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		const bool should_post_txid_be_correct = (so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON);			// This is the only sync which will not resolve TxID. It just does not care
 		const bool should_post_dbit_be_correct = ((so->o->op != NVMEIB_BLOCK_IO_OP_REC_COLD) && !is_so_nested(so));	// EC has multiple stages of dbit manipulation, including turning on dbits, only last step guranteed to be without DBITs on 'W'
 		if (is_origininal_sync_should_resolved_binfo) {		// Verify the precondition to launching this state machine. rldr.pre, not post!
-			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, so->r1));		// Was already resolved, and cannot appear, test unknowns in pre-binfo
+			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, &so->r1->calculated_data.topo_traits));		// Was already resolved, and cannot appear, test unknowns in pre-binfo
 			if ((so->o->op == NVMEIB_BLOCK_IO_OP_REC_COMMIT_BINFO) && (!is_so_nested(so)) && (dp_ec_can_fix_dbits(so->cmds))) {
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x copied instead of turning dbits off. n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);

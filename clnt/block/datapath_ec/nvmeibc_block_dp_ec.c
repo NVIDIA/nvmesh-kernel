@@ -536,7 +536,7 @@ BLKCMP_IO_ONLY_IF_PRESERVE_STACK(_func_start:)
 	}
 
 	if (unlikely(nvmeibcbdp_binfo_has_txid_unreslvd(rldr) ||
-		         nvmeibcbdp_binfo_has_unknown_dbits(rldr, nvmeibc_disk_segment_get_praid(rldr->ds)))) {
+		         nvmeibcbdp_binfo_has_unknown_dbits(rldr, &nvmeibc_disk_segment_get_praid(rldr->ds)->calculated_data.topo_traits))) {
 		__call_assist_sync(rldr, __analyze_binfo_sm_cb_b4j, NVMEIB_BLOCK_IO_OP_MAINTAIN_RESOLVE_ALL_BINFO);
 	}
 
