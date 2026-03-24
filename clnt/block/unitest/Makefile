@@ -184,6 +184,7 @@ SOURCES += $(CMDIR)/nvmeib_pcpu_wq.c
 SOURCES += $(CMDIR)/proc_epilog.c
 SOURCES += $(CMDIR)/nvmeib_scatterlist_iter.c
 SOURCES += $(SSDA)/common_public/nvmeib_public_procfs.c
+SOURCES += $(SSDA)/common_public/nvmeib_jdr_proc.c
 SOURCES += $(SSDA)/common_public/kth/nvmeib_public_kth.c
 SOURCES += $(SSDA)/common_public/nvmeib_event.c
 

@@ -3,8 +3,6 @@
 
 #include "kr_incs.h"
 #include "nvmeib_jdr.h"
-#include <linux/proc_fs.h>
-#include <linux/uaccess.h>
 
 typedef void    nvmeib_jdr_proc_fill_t(struct jdr *jdr, void *arg);
 typedef ssize_t nvmeib_jdr_proc_write_t(void *arg, const char __user *buf,

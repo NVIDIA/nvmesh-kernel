@@ -1,6 +1,10 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+ */
+
 #include "common/kr_incs.h"
 #include "nvmeib_jdr_proc.h"
-#include "nvmeibm_trace.h"
 
 struct nvmeib_jdr_procfs_ent {
 	nvmeib_jdr_proc_fill_t  *fill;
@@ -8,6 +12,11 @@ struct nvmeib_jdr_procfs_ent {
 	void			*arg;
 	struct proc_dir_entry   *ent;
 };
+
+#ifdef __KERNEL__
+#include "nvmeibm_trace.h"
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
 
 static int jdr_proc_show(struct seq_file *m, void *v)
 {
@@ -104,3 +113,37 @@ ssize_t nvmeib_jdr_proc_write_reset(nvmeib_jdr_proc_reset_t *reset, void *arg,
 	return count;
 }
 EXPORT_SYMBOL(nvmeib_jdr_proc_write_reset);
+
+#else /* !__KERNEL__ — for now only to support simulation */
+
+static struct nvmeib_jdr_procfs_ent nvmeib_jdr_proc_dummy;
+
+struct nvmeib_jdr_procfs_ent *nvmeib_jdr_proc_create(const char *name,
+						     struct proc_dir_entry *dir,
+						     nvmeib_jdr_proc_fill_t *fill,
+						     nvmeib_jdr_proc_write_t *write,
+						     void *arg)
+{
+	(void)name;
+	(void)dir;
+	(void)fill;
+	(void)write;
+	(void)arg;
+	return &nvmeib_jdr_proc_dummy;
+}
+
+void nvmeib_jdr_proc_remove(struct nvmeib_jdr_procfs_ent *ent)
+{
+	(void)ent;
+}
+
+ssize_t nvmeib_jdr_proc_write_reset(nvmeib_jdr_proc_reset_t *reset, void *arg,
+				     const char __user *buf, size_t count)
+{
+	(void)reset;
+	(void)arg;
+	(void)buf;
+	return (ssize_t)count;
+}
+
+#endif /* __KERNEL__ */

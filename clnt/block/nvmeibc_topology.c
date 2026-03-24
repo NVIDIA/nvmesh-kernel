@@ -24,8 +24,6 @@
 #include "common/proc_epilog.h"
 #include <linux/module.h>
 #include "compat/kr_incs_time_rdtsc.h"
-#include "common_public/nvmeib_trace.h"
-#include "nvmeibc_trace.h"
 
 NVMEIBC_MEMMGR_METRIC(io_ctrl_topologies, "component=raid.io_ctrl.topologies");
 

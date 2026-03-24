@@ -22,6 +22,7 @@
 #if KS_HAS_PART_STAT_H
 #	include <linux/part_stat.h>
 #endif
+#include "nvmeib_jdr_proc.h"
 
 /* Note: The params below have to be translated to units of 512[b]*/
 #define to_kenrel_sects(l) ((l)*(LOCKSET_SLICES << KERNEL_SECTOR_TO_SECTOR_SHIFT))
@@ -1886,6 +1887,7 @@ static void io_throttle_metrics_proc_reset(void *arg)
 
 static ssize_t io_throttle_metrics_proc_write(void *arg, const char __user *buf, size_t count, loff_t *ppos)
 {
+	(void)ppos;
 	return nvmeib_jdr_proc_write_reset(io_throttle_metrics_proc_reset, arg, buf, count);
 }
 
