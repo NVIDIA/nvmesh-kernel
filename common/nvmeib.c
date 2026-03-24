@@ -2692,7 +2692,7 @@ static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 	size_t sz = 0;
 	if (!pool)
 		return sz;
-	
+
 	sz += sizeof(*pool);
 #if !IB_NEW_FR
 	sz += PAGE_ALIGN(sizeof(struct nvmeib_fr_desc) * (pool->max_page_list_len * 8));
