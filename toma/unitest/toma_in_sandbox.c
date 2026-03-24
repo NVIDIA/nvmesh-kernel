@@ -840,8 +840,8 @@ struct nvmeibt_nm_local_node { 					// Network module simulator. For Toma to com
 		int append_ent_rep;
 	} n_total_msmgs_sent;
 	int fd;
-	int8_t n_connected_remote_nodes;
-	int8_t n_nics;								// Nics to communicate with with other Tomas
+	int n_connected_remote_nodes;
+	int n_nics;								// Nics to communicate with with other Tomas
 };
 
 void *nvmeibt_nm_tracer_init(const char *lib_path) { return (void *)lib_path; }
@@ -889,25 +889,26 @@ void rsrm_faults_handle_fifo_comm(void) {}
 #include "nvmeibt_raft_msg_fmt.h"
 
 int nvmeibt_nm_add_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) {
+	N_Tf(__AUTOID__, "dest_uuid=@X::@X", (uint32_t)nic->from_config.its_node_id.ll[0], (uint32_t)nic->from_config.id.ll[0]);
 	++ln->n_nics;
-	(void)nic;
 	return 0;
 }
 
 int nvmeibt_nm_del_remote_nic(struct nvmeibt_nm_local_node *ln, struct nvmeibt_nic *nic) {
+	N_Tf(__AUTOID__, "dest_uuid=@X::@X", (uint32_t)nic->from_config.its_node_id.ll[0], (uint32_t)nic->from_config.id.ll[0]);
 	--ln->n_nics;
-	(void)nic;
 	return 0;
 }
 
 int nvmeibt_nm_del_remote_node(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node) {
 	--ln->n_connected_remote_nodes;
 	BUG_ON(ln->n_connected_remote_nodes < 0);
-	(void)node;
+	N_Tf(__AUTOID__, "@STR", node->from_config.name);
 	return 0;
 }
 int nvmeibt_nm_cancel_req_node(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node) {
-	(void)ln; (void)node;
+	N_Tf(__AUTOID__, "@STR", node->from_config.name);
+	(void)ln;
 	return 0;
 }
 
@@ -972,7 +973,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		struct t_raft_msg_queue_from_other_tomas *rq = &ln->raft_msg_queue_from_other_tomas;
 		struct nvmeibt_big_msg *msg = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*msg) + req->msg_len + req->data_len);
 		struct raft_msg *out_r_msg = (typeof(out_r_msg))msg->data;
-		const unsigned my_uuid = LE_SWAP32((uint32_t)in_r_msg->dst_node_id.ll[0]);
+		const uint32_t my_uuid = LE_SWAP32((uint32_t)in_r_msg->dst_node_id.ll[0]);
 		BUG_ON(rq->n_msgs >= (int)ARRAY_SIZE(rq->msg_q) || (req->msg_type != NVMEIBT_IB_PROTOCOL_SIGNATURE_RAFT));
 		msg->msg_type = req->msg_type;
 		msg->data_len = (req->msg_len + req->data_len);		// Reply has the same length/payload as request

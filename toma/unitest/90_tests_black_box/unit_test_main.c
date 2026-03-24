@@ -122,13 +122,15 @@ static void scenario_user_rpcs_praid(void) {
 
 void scenario_nvmeibs_messages(void) {
 	SCENARIO_PRINT(__AUTOID__, "start");
-	nvmeibs_simu_send_msg(NVMEIBS_TOMA_TRIGGER_JGC);				yield();
-	nvmeibs_simu_send_msg(NVMEIBS_TOMA_WRITE_STATUS_REQ);			yield();
-	nvmeibs_simu_send_msg(NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE);	yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_TRIGGER_JGC);						yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_WRITE_STATUS_REQ);					yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE);			yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE);		yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE);			yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_REPORT_EVENT_SERJIO_RANGE_CLEANED);	yield();
 	nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Send once an extended message to test the flow
-	SCENARIO_PRINT(__AUTOID__, "sent");								yield();
+	SCENARIO_PRINT(__AUTOID__, "sent");										yield();
 }
-
 
 static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change

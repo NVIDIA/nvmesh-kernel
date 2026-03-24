@@ -37,33 +37,37 @@ static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_statu
 static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
-	enum nvmeibs_toma_server_msg_type msg_type;
 	(void)fd; (void)flags;
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON(n <= sizeof(*msg_buf));
 	BUG_ON(me->msgs.n_sent >= me->msgs.n_total);				// Why did epoll wake Toma if there is no message ready. Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
-	msg_type = me->msgs.q[me->msgs.n_sent++];
-	if (msg_type == NVMEIBS_TOMA_TRIGGER_JGC) {
+	memset(msg_buf, 0, sizeof(*msg_buf));
+	msg_buf->type = me->msgs.q[me->msgs.n_sent++];
+	if (msg_buf->type == NVMEIBS_TOMA_TRIGGER_JGC) {
 		struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
-		msg_buf->type = NVMEIBS_TOMA_TRIGGER_JGC;
 		strcpy(pl->disk_segment_urn_uuid_str, "todo_disk_seg");
 		strcpy(pl->disk_id_str, "todo_disk_id");
 		// Currently not expecting reply.
-	} else if (msg_type == NVMEIBS_TOMA_WRITE_STATUS_REQ) {
+	} else if (msg_buf->type == NVMEIBS_TOMA_WRITE_STATUS_REQ) {
 		struct nvmeibs_msg_s2t_toma_status_req *pl = &msg_buf->status_req_msg;
 		BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
 		me->expecting_reply_cookie = 0x1000 + me->msgs.n_sent;
-		msg_buf->type = NVMEIBS_TOMA_WRITE_STATUS_REQ;
 		pl->type = NVMEIBS_TOMA_STATUS_RAFT;	// NVMEIBS_TOMA_STATUS_ALL_JSON
 		pl->handle = 0 - me->expecting_reply_cookie;
 		pl->handle_req = me->expecting_reply_cookie;
 		strcpy(pl->fname, "placeholder.tmp");		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
 		pl->max_length = me->max_reply_length_bytes;
-	} else if (msg_type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {	// Simulates deprecated: nvmeibs_toma_report_event_disk_change()
-		memset(msg_buf, 0, sizeof(*msg_buf));
-		msg_buf->type = NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE; 		// Just meaningless message
+	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {	// Simulates deprecated: nvmeibs_toma_report_event_disk_change()
 		strcpy(msg_buf->disk_change_msg.disk_id, "dummy_simu_disk");
 		msg_buf->disk_change_msg.op = 'a';							// Add
+	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE) {
+		strncpy(msg_buf->port_gid_change_msg.gid_str, "todo_gid_str", 32);
+	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE) {
+		struct nvmeibs_msg_s2t_nic_change *pl = &msg_buf->nic_change_msg;
+		strncpy(pl->ib_dev, "todo_ib_dev", 32);
+		pl->add = true;
+	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_SERJIO_RANGE_CLEANED) {
+		strncpy(msg_buf->serjio_range_cleaned_msg.seg_id, "todo_disk_seg", 32);
 	} else {
 		BUG_ON(true); // Not supported yet
 	}
