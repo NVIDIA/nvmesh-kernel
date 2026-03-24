@@ -6,6 +6,7 @@
 #ifndef NVMEIB_HASH_H
 #define NVMEIB_HASH_H
 
+#include <pthread.h>
 #include "../common_public/nvmeib_uuid_be.h"
 
 #define HASH_ENTRY_EMPTY		(void *)0LL
