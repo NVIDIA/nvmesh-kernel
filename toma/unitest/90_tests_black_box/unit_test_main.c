@@ -120,6 +120,16 @@ static void scenario_user_rpcs_praid(void) {
 	SCENARIO_PRINT(__AUTOID__, "done");
 }
 
+void scenario_nvmeibs_messages(void) {
+	SCENARIO_PRINT(__AUTOID__, "start");
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_TRIGGER_JGC);				yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_WRITE_STATUS_REQ);			yield();
+	nvmeibs_simu_send_msg(NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE);	yield();
+	nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Send once an extended message to test the flow
+	SCENARIO_PRINT(__AUTOID__, "sent");								yield();
+}
+
+
 static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
@@ -128,7 +138,7 @@ static void scenario_create_remove_r1(void) {
 	SCENARIO_PRINT(__AUTOID__, "sending format drives {disk_002, disk_003}");
 	mgmt_sim_send_format_drive("NVMD_SN_002.1");
 	mgmt_sim_send_format_drive("NVMD_SN_003.1");
-	nvmeibs_simu_send_extended_msg("HelloFromClnt");		// Send once an extended message to test the flow
+	scenario_nvmeibs_messages();								// While drives are formatting test server messages
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks format+zeroing done");
 	WAIT_UNTIL(mgmt_sim_drive_format_is_done("NVMD_SN_002.1") && mgmt_sim_drive_format_is_done("NVMD_SN_003.1"));

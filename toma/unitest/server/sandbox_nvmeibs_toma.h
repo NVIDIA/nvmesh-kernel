@@ -12,12 +12,14 @@
 #include "../os/os_internal.h"					// Other side of netlink and file descriptors
 
 struct TSB_server_toma_status_req_simu {		// Mechanism for server to request Toma to fill status proc files
-	int n_srvr_msg_idx;							// Ever increasing number
 	int n_toma_replies_received;
 	int expecting_reply_cookie;					// If sent a message to toma and expecting a reply, store it
 	int max_reply_length_bytes;
 	int n_msgs_to_registrants;
-	enum nvmeibs_toma_server_msg_type msg_q[16];
+	struct server_msg_type_ring_buf_t {
+		int n_sent, n_total;
+		enum nvmeibs_toma_server_msg_type q[8];
+	} msgs;
 };
 
 struct nvmeibs_simulator {
@@ -33,3 +35,4 @@ struct nvmeibs_simulator *nvmeibs_simu_init(struct TSB_netlink_mock *nl);
 void nvmeibs_simu_destroy(struct nvmeibs_simulator *s, bool do_verify_used);
 void nvmeibs_simu_do_periodic(void);
 void nvmeibs_simu_send_extended_msg(const char *something);
+void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type);

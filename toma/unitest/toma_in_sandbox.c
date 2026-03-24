@@ -101,6 +101,7 @@ struct user_rpc_simu *user_rpc_simu_create(void) {
 	struct user_rpc_simu *r = g_rpc_sim = calloc(1, sizeof(*r));
 	r->o.recv = _rpc_inject;
 	r->o.send = _rpc_accept;
+	r->o.has_data = NULL;		// rpc 'fd' is not used in Toma epoll but just non blocking recv()
 	return r;
 }
 

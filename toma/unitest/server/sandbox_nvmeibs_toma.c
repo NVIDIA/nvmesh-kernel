@@ -11,22 +11,26 @@ static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
 static void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *me) {
 	me->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
-	memset(me->msg_q, 0, sizeof(me->msg_q));
-	me->msg_q[3] = NVMEIBS_TOMA_TRIGGER_JGC;		// Todo: Unitest environment should instruct this simulator to send specific messages
-	me->msg_q[5] = NVMEIBS_TOMA_WRITE_STATUS_REQ;
-	me->msg_q[7] = NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE;
+}
+
+void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type) {
+	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
+	BUG_ON(s->msgs.n_total >= ARRAY_SIZE(s->msgs.q));
+	N_Tf(__AUTOID__, "Schedule: srvr_q[@INT]<=msg[@INT] ", s->msgs.n_total, msg_type);
+	s->msgs.q[s->msgs.n_total++] = msg_type;
 }
 
 static bool server_simu_has_next_msg_for_toma(void) {
-	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
-	me->n_srvr_msg_idx++;
-	return (me->n_srvr_msg_idx < 16) && (me->msg_q[me->n_srvr_msg_idx] != 0);
+	const struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
+	return (s->msgs.n_total > s->msgs.n_sent);
 }
 
-static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *me, bool do_veridy_used) {
-	BUG_ON(me->expecting_reply_cookie);				// Did not get a reply from Toma
+static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *s, bool do_veridy_used) {
+	BUG_ON(s->expecting_reply_cookie);				// Did not get a reply from Toma
+	BUG_ON(s->msgs.n_sent != s->msgs.n_total);
 	if (do_veridy_used) {
-		BUG_ON(me->n_toma_replies_received <= 0);	// Coverage tests did not receive any reply from Toma
+		BUG_ON(s->n_toma_replies_received <= 0);	// Coverage tests did not receive any reply from Toma
+		BUG_ON(s->msgs.n_sent <= 0);
 	}
 }
 
@@ -37,8 +41,8 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 	(void)fd; (void)flags;
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON(n <= sizeof(*msg_buf));
-	msg_type = me->msg_q[me->n_srvr_msg_idx];
-	BUG_ON(msg_type == 0);			// Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
+	BUG_ON(me->msgs.n_sent >= me->msgs.n_total);				// Why did epoll wake Toma if there is no message ready. Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
+	msg_type = me->msgs.q[me->msgs.n_sent++];
 	if (msg_type == NVMEIBS_TOMA_TRIGGER_JGC) {
 		struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
 		msg_buf->type = NVMEIBS_TOMA_TRIGGER_JGC;
@@ -48,7 +52,7 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 	} else if (msg_type == NVMEIBS_TOMA_WRITE_STATUS_REQ) {
 		struct nvmeibs_msg_s2t_toma_status_req *pl = &msg_buf->status_req_msg;
 		BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
-		me->expecting_reply_cookie = 0x1000 + me->n_srvr_msg_idx;
+		me->expecting_reply_cookie = 0x1000 + me->msgs.n_sent;
 		msg_buf->type = NVMEIBS_TOMA_WRITE_STATUS_REQ;
 		pl->type = NVMEIBS_TOMA_STATUS_RAFT;	// NVMEIBS_TOMA_STATUS_ALL_JSON
 		pl->handle = 0 - me->expecting_reply_cookie;
@@ -61,8 +65,9 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 		strcpy(msg_buf->disk_change_msg.disk_id, "dummy_simu_disk");
 		msg_buf->disk_change_msg.op = 'a';							// Add
 	} else {
-		BUG_ON(true); // BUG epoll simulator wrongly told toma that there is a msg from server but there isn't
+		BUG_ON(true); // Not supported yet
 	}
+	N_Tf(__AUTOID__, "Delivering: srvr_q[@INT]=>msg[@INT] ", me->msgs.n_sent-1, msg_buf->type);
 	return sizeof(*msg_buf);
 }
 
@@ -81,7 +86,7 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 			BUG_ON(me->expecting_reply_cookie <= 0);				// Reply comes without server expecting it
 			BUG_ON(pl->handle != 0 - me->expecting_reply_cookie);
 			BUG_ON(pl->handle_req != me->expecting_reply_cookie);
-			BUG_ON(pl->length >= (size_t)me->max_reply_length_bytes);		// Cannot reply more than permitted buf size including '\0'
+			BUG_ON(pl->length >=    (size_t)me->max_reply_length_bytes);		// Cannot reply more than permitted buf size including '\0'
 			if ((pl->length + 1) == (size_t)me->max_reply_length_bytes)
 				BUG_ON(!pl->is_overflow);							// Toma status reply was truncated. Verify that
 			me->expecting_reply_cookie = false;
@@ -480,8 +485,8 @@ struct nvmeibs_simulator *nvmeibs_simu_init(struct TSB_netlink_mock *nl) {
 	o->recv = fd_otherside_write_only_illegal_recv;				// Via this fd, Toma only sends to to server. Server does not send anything to toma
 	o = &s->com_srvr2toma_o;
 	o->recv = server_simu_get_next_msg_for_toma;
-	o->send = fd_otherside_read_only_illegal_send;				// Via this fd server sends msgs to Tom, Toma never replies back
-	o->has_data = server_simu_has_next_msg_for_toma;
+	o->send = fd_otherside_read_only_illegal_send;				// Via this fd server sends msgs to Toma, Toma never replies back
+	o->has_data = server_simu_has_next_msg_for_toma;			// ServerLib thread selects() on this
 	o = &s->com_toma2clnt_o;
 	o->send = _srvr_simu_nvmeibs_toma_client_proc_recv;
 	o->recv = fd_otherside_write_only_illegal_recv;
