@@ -56,6 +56,9 @@
 #include <net/addrconf.h>
 #include <linux/topology.h>
 #include <linux/cpumask.h>
+#include <linux/numa.h>
+#include <linux/if_vlan.h>
+#include <linux/if_macvlan.h>
 
 #include "siw.h"
 #include "siw_obj.h"
@@ -668,6 +671,53 @@ static inline void siw_init_ofa_dev_ops(struct ib_device *ofa_dev)
 	ofa_devops->drain_rq = siw_rq_flush_ofa;
 }
 #endif // KS_IB_DEVICE_HAS_DEVICE_OPS
+
+/*
+ * NUMA node for @netdev placement: peel vlan/macvlan (any order, same as nvmeib
+ * nvmeib_netdev_base_for_numa). Caller must hold a ref on @netdev; we take an
+ * extra dev_hold during the walk and always dev_put the final walk pointer.
+ */
+static int siw_netdev_numa_node_resolved(struct net_device *netdev)
+{
+	struct net_device *walk;
+	int depth;
+	int node;
+
+	if (!netdev)
+		return NUMA_NO_NODE;
+
+	dev_hold(netdev);
+	walk = netdev;
+
+	for (depth = 0; depth < 8; depth++) {
+		if (is_vlan_dev(walk)) {
+			struct net_device *real = vlan_dev_real_dev(walk);
+
+			if (!real || real == walk)
+				break;
+			dev_hold(real);
+			dev_put(walk);
+			walk = real;
+			continue;
+		}
+		if (netif_is_macvlan(walk)) {
+			struct net_device *real = macvlan_dev_real_dev(walk);
+
+			if (!real || real == walk)
+				break;
+			dev_hold(real);
+			dev_put(walk);
+			walk = real;
+			continue;
+		}
+		break;
+	}
+
+	node = dev_to_node(&walk->dev);
+	dev_put(walk);
+	return node;
+}
+
 static struct siw_dev *siw_device_create(struct net_device *netdev)
 {
 	struct siw_dev *sdev;
@@ -811,7 +861,7 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 	sdev->tx_vector_cpu = NULL;
 	sdev->num_tx_vector = 0;
 	if (tx_cpus == 2 && netdev) {
-		int dev_numa_node = dev_to_node(&netdev->dev);
+		int dev_numa_node = siw_netdev_numa_node_resolved(netdev);
 		int n_numa = 0;
 		int i;
 		int *vec;
@@ -819,7 +869,8 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 		for (i = 0; i < num_tx_vector; i++) {
 			int c = qp_tx_vector_cpu[i];
 
-			if (cpu_to_node(c) != dev_numa_node)
+			if (dev_numa_node != NUMA_NO_NODE &&
+			    cpu_to_node(c) != dev_numa_node)
 				continue;
 			if (tx_one_ht_per_core && cpumask_first(topology_sibling_cpumask(c)) != c)
 				continue;
@@ -833,7 +884,8 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 				for (i = 0; i < num_tx_vector && j < n_numa; i++) {
 					int c = qp_tx_vector_cpu[i];
 
-					if (cpu_to_node(c) != dev_numa_node)
+					if (dev_numa_node != NUMA_NO_NODE &&
+					    cpu_to_node(c) != dev_numa_node)
 						continue;
 					if (tx_one_ht_per_core && cpumask_first(topology_sibling_cpumask(c)) != c)
 						continue;

@@ -8,6 +8,8 @@
 #include "linux/cpumask.h"
 #include "linux/irqflags.h"
 #include "linux/netdevice.h"
+#include <linux/if_vlan.h>
+#include <linux/if_macvlan.h>
 #include <linux/net_namespace.h>
 #include "nvmeib_wd.h"
 #include "nvmeib_utils.h"
@@ -2695,12 +2697,43 @@ const char *nvmeib_device_name(struct nvmeib_dev *dev)
 }
 EXPORT_SYMBOL(nvmeib_device_name);
 
+/* Peel 802.1Q VLAN / macvlan layers for NUMA (order can be vlan→macvlan→phys or macvlan→vlan→phys). */
+static struct net_device *nvmeib_netdev_base_for_numa(struct net_device *ndev)
+{
+	int depth;
+
+	for (depth = 0; depth < 8; depth++) {
+		if (is_vlan_dev(ndev)) {
+			struct net_device *real = vlan_dev_real_dev(ndev);
+
+			if (!real || real == ndev)
+				break;
+			dev_hold(real);
+			dev_put(ndev);
+			ndev = real;
+			continue;
+		}
+		if (netif_is_macvlan(ndev)) {
+			struct net_device *real = macvlan_dev_real_dev(ndev);
+
+			if (!real || real == ndev)
+				break;
+			dev_hold(real);
+			dev_put(ndev);
+			ndev = real;
+			continue;
+		}
+		break;
+	}
+	return ndev;
+}
+
 static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 {
 	size_t sz = 0;
 	if (!pool)
 		return sz;
-	
+
 	sz += sizeof(*pool);
 #if !IB_NEW_FR
 	sz += PAGE_ALIGN(sizeof(struct nvmeib_fr_desc) * (pool->max_page_list_len * 8));
@@ -2718,20 +2751,28 @@ int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
 	if (dev->dev_type == DT_siw) {
 		struct net_device *siw_ndev = NULL;
 
-		if (dev->ib_dev->get_netdev) {
+		if (dev->ib_dev->get_netdev)
 			siw_ndev = dev->ib_dev->get_netdev(dev->ib_dev, 1);
-		} else if (!strncmp(dev->ib_dev->name, siw_prefix, siw_prefix_len) && dev->ib_dev->name[siw_prefix_len]) {
+		if (!siw_ndev && !strncmp(dev->ib_dev->name, siw_prefix, siw_prefix_len) &&
+		    dev->ib_dev->name[siw_prefix_len])
+		{
 			siw_ndev = dev_get_by_name(&init_net, dev->ib_dev->name + siw_prefix_len);
 		}
 
 		if (!siw_ndev) {
-			_ND(trace_nvmeib_get_dev_numa_node, 
-				"Failed to get net device for SIW device @IB_DEV_NAME. "
-				"Using default numa node.", dev->ib_dev->name);
+			_NE(trace_nvmeib_get_dev_numa_node, 
+				"Failed to get net device for SIW device @IB_DEV_NAME using netdev name @NETDEV_NAME. "
+				"Using default numa node.", dev->ib_dev->name, dev->ib_dev->name + siw_prefix_len);
 			goto out;
 		}
 
+		siw_ndev = nvmeib_netdev_base_for_numa(siw_ndev);
 		numa_node = dev_to_node(&siw_ndev->dev);
+
+		_NI(trace_nvmeib_get_dev_numa_node_2, 
+			"SIW device @IB_DEV_NAME using netdev @NETDEV_NAME base on NUMA node @NODE_ID", 
+			dev->ib_dev->name, siw_ndev->name, dev_to_node(&siw_ndev->dev));
+
 		dev_put(siw_ndev);
 		goto out;
 	}
