@@ -1486,10 +1486,6 @@ else
 		[ ! -f $pg_path ] && pg_path=${NVMESH_DIR_SRC}/common-repo/tools/traces_post_processor/pager.py
 		[ ! -f $pg_path ] && pg_path=".${pg_path}";		# try local to current dir
 		[ ! -f $pg_path ] && echo_red "pager.py could not be found!";
-		# From Laptop: tools/connect_interactive.sh n111;
-		# lba = VLBA("tv-38788-13", 5940581)
-		# lba.dlba; lba.tab
-		#param="'-f (not file = nvmeibs_serjio.c) and (not file = nvmeibc_jam.c)'"
 		param=""
 		if [ "$1" == "clnt" ]; then
 			cmd="sudo $pg_path $tr_path -l nvmeibc_trace_long nvmeibc_trace_eter $param | less"; echo $cmd; eval $cmd;
