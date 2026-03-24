@@ -270,7 +270,8 @@ int start_io_pet_channel(io_pet_channel_t* self)
 	self->priv.aborted = 0;
 
 	/* Unable to create worker thread is critical error. Better restart. */
-	assert(!pthread_create(&self->priv.thread, &attr, _io_pet_worker, (void*)self));
+	if (pthread_create(&self->priv.thread, &attr, _io_pet_worker, (void*)self))
+		_suicide("Failed to create IO PET worker thread");
 
 	self->priv.started = 1;
 	self->started = 1;
