@@ -230,7 +230,7 @@ bool dp_ec_can_fix_dbits(struct nvmeibc_block_command *rldr)
 void nvmeibc_dbits_turn_on_convict(union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits)
 {
 	struct nvmeibc_dbits_tx dbits;
-	nvmeibc_dbits_tx_init_by_bmp(&dbits, topo_traits->n_parities, 0, 0, topo_traits->wm);
+	nvmeibc_dbits_tx_init_by_bmp(&dbits, topo_traits, 0, 0, topo_traits->wm);
 	e->all_bits = nvmeibc_dbits_tx_apply(e, &dbits);
 }
 

@@ -284,14 +284,13 @@ static void __calc_new_binfo_dbits_turnoff(struct recovery_sync_op *so) {
 		struct nvmeibc_dbits_tx tx;
 		struct nvmeibc_dbits_tx tx_turnon;
 		union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
-		const int num_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 
 		/* EC-4697: Dead parities become dirty, because parities contain dirty which is essential data, must be updated */
 		turn_on_dbit_bmp = nvmeibc_calc_db_on_parities_segs(so->cmds);
 		turn_off_dbit_bmp = (nvmeibc_mssa_calc_full_blockset_write_bmp(so->o->mssa) & nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask));
 
-		nvmeibc_dbits_tx_init_by_bmp(&tx_turnon, num_parities, turn_on_dbit_bmp, 0 /* turn_off_dbit_bmp */, 0 /* turn_on_conv_bmp */);
-		nvmeibc_dbits_tx_init_by_bmp(&tx, num_parities, turn_on_dbit_bmp, turn_off_dbit_bmp, 0 /* turn_on_conv_bmp */);
+		nvmeibc_dbits_tx_init_by_bmp(&tx_turnon, &so->r1->calculated_data.topo_traits, turn_on_dbit_bmp, 0 /* turn_off_dbit_bmp */, 0 /* turn_on_conv_bmp */);
+		nvmeibc_dbits_tx_init_by_bmp(&tx, &so->r1->calculated_data.topo_traits, turn_on_dbit_bmp, turn_off_dbit_bmp, 0 /* turn_on_conv_bmp */);
 
 		so->nwhole_exec_plan.ram_dbits_after_turnoff.all_bits = nvmeibc_dbits_tx_apply(&pre, &tx);
 		so->nwhole_exec_plan.ram_dbits_after_first_turnon.all_bits = nvmeibc_dbits_tx_apply(&pre, &tx_turnon);
@@ -320,7 +319,7 @@ static void __update_new_binfo_dbits_on_destroy(struct recovery_sync_op *so) {
 	const roles_bmp_t dead_roles = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dbits_on_mask);
 	BUG_ON(__is_raid1_mirror(so));
 
-	nvmeibc_dbits_tx_init_empty(&tx, nvmeibc_raid1_get_protect_lvl(so->r1));
+	nvmeibc_dbits_tx_init_empty(&tx, &so->r1->calculated_data.topo_traits);
 	tx.action.db_turn_on_bmp = dead_bm;
 	so->nwhole_params.dbits_turnon_bmp |= dead_roles;
 	if (so->nwhole_params.must_turn_off_dbits && so->nwhole_exec_plan.should_turnoff_dbits) {

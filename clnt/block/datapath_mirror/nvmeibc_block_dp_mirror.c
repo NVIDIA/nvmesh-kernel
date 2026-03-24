@@ -353,7 +353,7 @@ static bool __prepare_mirror_binfo_for_write(struct nvmeibc_block_command *rldr,
 	NVMESH_BUG(!nvmeib_block_io_op_is_write(op), __dump_operation_report, rldr->o, "opearation is not writei: %d", op);
 
 	// Write can only turn on or off (unlikely), will change existing unknown to exact Dbits
-	nvmeibc_dbits_tx_init_by_bmp(&raid_d, nvmeibc_raid1_get_protect_lvl(r1),
+	nvmeibc_dbits_tx_init_by_bmp(&raid_d, &r1->calculated_data.topo_traits,
 			nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_on_mask) /* turn_on_dbit_bmp */,
 			(implicit_sync ? nvmeibc_raid1_get_sgmnts_bmp(r1, dbits_off_mask) : 0)/* turn_off_dbit_bmp */,
 			0 /* turn_on_conv_bmp */);
@@ -965,7 +965,7 @@ void dp_mirror_block_completion(struct nvmeibc_d_iocmd_comp *comp, struct nvmeib
 {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp);
 	struct operation *o = cmd->o;
-	
+
 	(void)tag;
 
 	if (nvmeibc_is_mirror_md_enabled(cmd))

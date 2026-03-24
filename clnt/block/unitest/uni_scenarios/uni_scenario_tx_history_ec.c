@@ -957,8 +957,11 @@ static u32 __gen_pre_tx_ram_dbits(struct t_ec_recov_tx *p) {
 	const u32 dconv_pr = rol32_width(pre_tx_dconv, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
 
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
@@ -972,8 +975,11 @@ static u32 __gen_ree_ram_dbits_from_dead_txbm(struct t_ec_recov_tx *p) {
 	const u32 dconv_pr = rol32_width(pre_tx_dconv, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
 
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
@@ -994,8 +1000,11 @@ static u32 __gen_post_recov_ram_dbits_from_dead_txbm(struct t_ec_recov_tx *p) {
 	const u32 dconv_pr = rol32_width(dconv_bm, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
 	p->blkset->resolve_dbits.after_resolve_dbits = after_resolve_dbits;
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, dconv_pr);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
@@ -1007,9 +1016,12 @@ static union nvmeib_blkset_info __gen_toma_lockset_info_for_cold(struct t_ec_rec
 	const u32 dconv_pr = rol32_width(dconv_bm, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
 	union nvmeibc_dbits_entry dbits = {.all_bits = 0};
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
 	if (n_deg)  // Toma don't inject unkowns if no degraded segs
 		dbits.all_bits = nvmeib_dbits_entry_build_unk(-1,-1).all_bits; // puts 2 unknowns
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), 0x0 /*No dbits*/, 0x0 /* No trun-off*/, dconv_pr);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, 0x0 /*No dbits*/, 0x0 /* No trun-off*/, dconv_pr);
 	blkset_info.bits.dirty = dbits.all_bits; //nvmeibc_dbits_tx_apply(&dbits, &db_tx);   // Add the convicts at the expanse of unkonws
 	blkset_info.bits.txid = INITIAL_LAZY_READ_TXID;
 	return blkset_info;
@@ -1036,6 +1048,9 @@ static u32 __gen_rer_ram_dbits(struct t_ec_recov_tx *p) {
 	struct nvmeibc_dbits_tx db_tx;
 	u32 dbits_turn_off_bm_pr = 0;
 	const union nvmeibc_dbits_entry post_recov_dbits = { .all_bits = p->lid.post_recov.blkset_info.bits.dirty };
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
 	if (p->inp.rer.bio_type == NVMEIB_BLOCK_IO_OP_WRITE) {
 		for (h = 0; h < p->inp.tx_height; h++) {
 			dbit_turnon_bm |= ((p->inp.rer.tx_bm[h]) & (p->rer_bmp.topo.dead));
@@ -1049,7 +1064,7 @@ static u32 __gen_rer_ram_dbits(struct t_ec_recov_tx *p) {
 	if (p->blkset->last_tx.is_wraparound)
 		dbits_turnon_pr |= rol32_width(p->rer_bmp.topo.dead, __get_slice_start_seg(p), pr->replicas);
 
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_turnon_pr, dbits_turn_off_bm_pr, 0);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_turnon_pr, dbits_turn_off_bm_pr, 0);
 	return nvmeibc_dbits_tx_apply(&post_recov_dbits, &db_tx);
 }
 
@@ -1111,8 +1126,10 @@ static u32 __gen_pre_tx_slice_dbits(struct t_ec_recov_tx *p, int slice) {
 	const u32 dbits_pr = rol32_width(p->pre.slice_dbits[slice], __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
-
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_pr, 0x0 /* No trun-off*/, 0x0);
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, 0x0);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
@@ -1124,8 +1141,10 @@ static u32 __gen_ree_slice_dbits(struct t_ec_recov_tx *p, int slice) {
 	const u32 dbits_pr = rol32_width(dbit_bm, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
 	union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };
-
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_pr, 0x0 /* No trun-off*/, 0x0);
+	const struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, 0x0);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
@@ -1451,6 +1470,7 @@ static u32 __gen_post_recov_slice_dbits(struct t_ec_recov_tx *p, int h) {
 	const roles_bmp_t bad_sectors_affect_on_nwhole_sync_regen = p->blkset->nwhole.is_sl_by_sl ? p->rer_bmp.bad_sec_bmp[h] : p->blkset->nwhole.bad_sec_bmp;
 
 	struct dp_topology_traits const topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
 		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 	bool is_valid_parity = !!((p->rer_bmp.topo.raid.pari) & (p->rer_bmp.topo.readable) & (~bad_sectors_affect_on_nwhole_sync_regen));
@@ -1462,7 +1482,7 @@ static u32 __gen_post_recov_slice_dbits(struct t_ec_recov_tx *p, int h) {
 		dbits_pr = rol32_width(dbit_bm, __get_slice_start_seg(p), pr->replicas);
 	}
 
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dbits_pr, 0x0 /* No trun-off*/, 0);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dbits_pr, 0x0 /* No trun-off*/, 0);
 	return nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 }
 
@@ -1525,6 +1545,7 @@ static u32 ec_tx_calc_rer_slice_dbits_after_nwhole(struct t_ec_recov_tx *p, u32 
 	const u32 topo_w_pr = rol32_width(p->rer_bmp.topo.w, __get_slice_start_seg(p), pr->replicas);
 
 	struct dp_topology_traits const topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
 		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 
@@ -1532,7 +1553,7 @@ static u32 ec_tx_calc_rer_slice_dbits_after_nwhole(struct t_ec_recov_tx *p, u32 
 	const u32 turnoff_bmp_pr = p->rer_bmp.tx.will_call_nwhole_sync ? (post_recov_dbits_bmp_pr & topo_w_pr) : 0;
 	struct nvmeibc_dbits_tx db_tx;
 
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), 0, turnoff_bmp_pr, 0x0);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, 0, turnoff_bmp_pr, 0x0);
 	return nvmeibc_dbits_tx_apply(&post_recov_slice_dbits_entry, &db_tx);
 }
 
@@ -1540,11 +1561,14 @@ static u32 ec_tx_calc_rer_slice_dbits_after_wraparound(struct t_ec_recov_tx *p, 
 	const struct disk_range *pr = p->inp.sraid.cpr;
 	const u32 topo_d_pr = rol32_width(p->rer_bmp.topo.dead, __get_slice_start_seg(p), pr->replicas);
 	struct nvmeibc_dbits_tx db_tx;
+	struct dp_topology_traits topo_traits = {
+		.n_parities = __disk_range_get_num_parities(pr),
+	};
 
 	if (p->rer_bmp.tx.is_neverwritten_slice[h])  // if slice neverwritten no dbits will be turned on on it.
 		return post_nwhole_dbits.all_bits;
 
-	nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), topo_d_pr, 0, 0x0);
+	nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, topo_d_pr, 0, 0x0);
 	return nvmeibc_dbits_tx_apply(&post_nwhole_dbits, &db_tx);
 }
 
@@ -2269,9 +2293,12 @@ static void __update_expectors_according_to_err_injection(struct t_ec_tx_history
 				struct nvmeibc_dbits_tx db_tx;
 				union nvmeibc_dbits_entry empty_dbits = { .all_bits = 0 };  // All parities degraded at the end of nwhole sync onnly on the dead parities there will be a dbit.
 				union nvmeibc_dbits_entry post_dbits;
+				struct dp_topology_traits topo_traits = {
+					.n_parities = __disk_range_get_num_parities(pr),
+				};
 				*writable_pari = p->rer_bmp.topo.raid.pari & (~p->rer_bmp.topo.dead);
 
-				nvmeibc_dbits_tx_init_by_bmp(&db_tx, __disk_range_get_num_parities(pr), dead_pari_pr, 0x0 /* No trun-off*/, 0);
+				nvmeibc_dbits_tx_init_by_bmp(&db_tx, &topo_traits, dead_pari_pr, 0x0 /* No trun-off*/, 0);
 				post_dbits.all_bits = nvmeibc_dbits_tx_apply(&empty_dbits, &db_tx);
 
 				for (h = 0; h < p->inp.tx_height; h++) {

@@ -244,15 +244,15 @@ u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *e_pre,
 
 /********************** Dirty-bits Raid Policy Info **************************/
 
-void nvmeibc_dbits_tx_init_empty(struct nvmeibc_dbits_tx *tx, const int num_degraded)
+void nvmeibc_dbits_tx_init_empty(struct nvmeibc_dbits_tx *tx, struct dp_topology_traits const* topo_traits)
 {
-	nvmeibc_dbits_action_init(&tx->action, num_degraded);
+	nvmeibc_dbits_action_init(&tx->action, topo_traits->n_parities);
 }
 
-void nvmeibc_dbits_tx_init_by_bmp(struct nvmeibc_dbits_tx* tx, const int num_degraded,
+void nvmeibc_dbits_tx_init_by_bmp(struct nvmeibc_dbits_tx* tx, struct dp_topology_traits const* topo_traits,
 								  u32 turn_on_dbit_bmp, u32 turn_off_dbit_bmp, u32 turn_on_conv_bmp)
 {
-	nvmeibc_dbits_tx_init_empty(tx, num_degraded);
+	nvmeibc_dbits_tx_init_empty(tx, topo_traits);
 	tx->action.db_turn_on_bmp = turn_on_dbit_bmp | turn_on_conv_bmp;
 	tx->action.db_turn_off_bmp = turn_off_dbit_bmp;
 	tx->action.db_conv_map = turn_on_conv_bmp;

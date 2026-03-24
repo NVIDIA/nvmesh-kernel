@@ -1783,7 +1783,6 @@ out:
 static inline void calc_new_dbits(struct htr_ctx *h)
 {
 	union nvmeibc_dbits_entry pre_slice, pre_blkset = {.all_bits = h->so->cmds->rld.pre.bits.dirty};
-	const int num_parities = nvmeibc_raid1_get_protect_lvl(h->params.raid1);
 	struct dp_topology_traits const *topo_traits = &h->params.raid1->calculated_data.topo_traits;
 
 	/* Use lockset's Dbits as base, They might be pre or post TX depending on when failure occured */
@@ -1793,17 +1792,17 @@ static inline void calc_new_dbits(struct htr_ctx *h)
 	pre_slice = h->cur_slice_info.pre_slice_dbits.dbits;
 
 	{
-		nvmeibc_dbits_tx_init_by_bmp(&h->cur_slice_info.new_dbits.slice_after_turnon, num_parities, h->txbm_topo.d, 0, 0); // Turnon bits of D segs on binfo and slice, Use Topo/r1 order (not owner-lock-first).
+		nvmeibc_dbits_tx_init_by_bmp(&h->cur_slice_info.new_dbits.slice_after_turnon, topo_traits, h->txbm_topo.d, 0, 0); // Turnon bits of D segs on binfo and slice, Use Topo/r1 order (not owner-lock-first).
 		nvmeibc_dbits_tx_apply(&pre_slice, &h->cur_slice_info.new_dbits.slice_after_turnon);
 	}
 
 	{
-		nvmeibc_dbits_tx_init_by_bmp(&h->cur_slice_info.new_dbits.slice_after_turnoff, num_parities, h->txbm_topo.d, h->txbm_topo.w, 0); // Turnon bits of D segs on binfo and slice, Use Topo/r1 order (not owner-lock-first).
+		nvmeibc_dbits_tx_init_by_bmp(&h->cur_slice_info.new_dbits.slice_after_turnoff, topo_traits, h->txbm_topo.d, h->txbm_topo.w, 0); // Turnon bits of D segs on binfo and slice, Use Topo/r1 order (not owner-lock-first).
 		nvmeibc_dbits_tx_apply(&pre_slice, &h->cur_slice_info.new_dbits.slice_after_turnoff);
 	}
 
 	{
-		nvmeibc_dbits_tx_init_by_bmp(&h->cur_slice_info.new_dbits.binfo, num_parities, h->txbm_topo.d, 0, 0); // Clean bit of W segs in slice only
+		nvmeibc_dbits_tx_init_by_bmp(&h->cur_slice_info.new_dbits.binfo, topo_traits, h->txbm_topo.d, 0, 0); // Clean bit of W segs in slice only
 		nvmeibc_dbits_tx_apply(&pre_blkset, &h->cur_slice_info.new_dbits.binfo);
 	}
 

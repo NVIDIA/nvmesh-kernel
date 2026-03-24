@@ -77,9 +77,10 @@ struct nvmeibc_dbits_tx {				// Map describing the dirtybits of transaction. Rel
    turn on & off in a single write. */
 // Private: void nvmeibc_dbits_action_init_by_entry( struct nvmeibc_dbits_action *act,const union nvmeibc_dbits_entry *e);
 // Private: void nvmeibc_dbits_action_to_entry(const struct nvmeibc_dbits_action *act,      union nvmeibc_dbits_entry *e);
-
-void nvmeibc_dbits_tx_init_empty(     struct nvmeibc_dbits_tx*, const int num_degraded);
-void nvmeibc_dbits_tx_init_by_bmp(    struct nvmeibc_dbits_tx*, const int num_degraded, u32 turn_on_dbit_bmp, u32 turn_off_dbit_bmp, u32 turn_on_conv_bmp);
+__attribute__((nonnull(1, 2)))
+void nvmeibc_dbits_tx_init_empty(     struct nvmeibc_dbits_tx*, struct dp_topology_traits const* topo_traits);
+__attribute__((nonnull(1, 2)))
+void nvmeibc_dbits_tx_init_by_bmp(    struct nvmeibc_dbits_tx*, struct dp_topology_traits const* topo_traits, u32 turn_on_dbit_bmp, u32 turn_off_dbit_bmp, u32 turn_on_conv_bmp);
 
 static inline bool nvmeibc_dbits_tx_has_action(const struct nvmeibc_dbits_tx* tx)
 {	// At least 1 segment changed

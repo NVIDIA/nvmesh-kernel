@@ -1205,16 +1205,15 @@ static void __update_parity_metadata(struct recovery_sync_op *so, int pi, const 
 	u32 b;
 	struct nvmeibc_dbits_tx tx;
 	const int slice_start = so_get_owner_seg(so);
-	const int num_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 	const bool is_slice_destroyed = nvmeibc_sync_sl_by_sl_is_current_slice_destroyed(so);
 	sgmnts_bmp_t dbits_turnon_bmp_pr = rol32_width(so->nwhole_params.dbits_turnon_bmp, slice_start, so->r1->replicas);
 
     WARN(parity_cmd->do_not_send, "nvmeibc bug, using unread parity MD as valid source src_acm=%d\n", parity_cmd->ds->toma_acm);
 
 	if (dbits_op == DBITS_OP_TURN_OFF) {
-		nvmeibc_dbits_tx_init_by_bmp(&tx, num_parities, 0, nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask), 0);
+		nvmeibc_dbits_tx_init_by_bmp(&tx, &so->r1->calculated_data.topo_traits, 0, nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask), 0);
 	} else if (dbits_op == DBITS_OP_TURN_ON) {
-		nvmeibc_dbits_tx_init_by_bmp(&tx, num_parities, dbits_turnon_bmp_pr, 0, 0);
+		nvmeibc_dbits_tx_init_by_bmp(&tx, &so->r1->calculated_data.topo_traits, dbits_turnon_bmp_pr, 0, 0);
 	}
 
 	// TODO: Ensure we update MD binfo and RAM binfo correctly

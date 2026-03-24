@@ -5,8 +5,7 @@ union nvmeibc_dbits_entry nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(
 	struct nvmeibc_dbits_tx tx;
 	const sgmnts_bmp_t turn_on_dbit_bmp = nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_off_mask) | nvmeibc_raid1_get_sgmnts_bmp(pr, dbits_on_mask);
 	const sgmnts_bmp_t turn_on_conv_bmp = nvmeibc_raid1_get_sgmnts_bmp(pr, wm);
-	const int num_deg = nvmeibc_praid_get_num_deg_segs(pr);
-	nvmeibc_dbits_tx_init_by_bmp(&tx, num_deg, turn_on_dbit_bmp, 0 /* turn_off_dbit_bmp */, turn_on_conv_bmp);
+	nvmeibc_dbits_tx_init_by_bmp(&tx, &pr->calculated_data.topo_traits, turn_on_dbit_bmp, 0 /* turn_off_dbit_bmp */, turn_on_conv_bmp);
 	nvmeibc_dbits_tx_apply(&pre, &tx);
 	nvmeibc_dbits_del_unk(&tx.post, &pr->calculated_data.topo_traits);
 	return tx.post;

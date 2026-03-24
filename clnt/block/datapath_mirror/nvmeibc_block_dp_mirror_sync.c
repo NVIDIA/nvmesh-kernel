@@ -323,22 +323,21 @@ static void __dump_bug_NVMESH3032(const struct recovery_sync_op *so, const char 
 void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_raid_leader_cmd_ctx *rld, bool has_stale_lock);
 void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_raid_leader_cmd_ctx *rld, bool has_stale_lock)		// Equivalent to EC function: __mutate_op_according_to_binfo()
 {
-	const int n_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
 	const union nvmeibc_dbits_entry pre = {.all_bits = rld->pre.bits.dirty};
 	struct dp_topology_traits const *topo_traits = &so->r1->calculated_data.topo_traits;
 	const u16 dbits_on_topo_bmp = nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_on_mask);
 	struct nvmeibc_dbits_tx tx;
 	if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB) {
 		if (!has_stale_lock) {
-			nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, 0                , 0                              , 0);	// If stale does not exists then do nothing, other client already fixed this
+			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);	// If stale does not exists then do nothing, other client already fixed this
 			BUG();		// Miss-use of the function. This is illegal becuase we never took the lock to know if it is stale or not
 		} else if (nvmeibc_dbits_get_n_unk(&pre, topo_traits)) {			// If unknown exists, fill the rest with unknowns. Likely that data on R1 legs is identical, Optimization for cold recovery of R1, Toma turns on stale + unknown
 			const u16 n_dead = hweight16(dbits_on_topo_bmp);
-			nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, 0                , 0                              , 0);
+			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, 0                , 0                              , 0);
 			tx.action.num_unknowns = n_dead; // Fill Every possible dead with optional unknown (unless it already has dbit)
 			//BUG_ON(n_dead != n_parities);	 // Todo: EC-5969: For 3-mirror, this sync is called wrongly and creates data corruption. So this BUG_ON() fails
 		} else {													// If {Real dbit exists or nothing} + stale lock, fill with real dbits. Likely that data on R1 legs differs.
-			nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, dbits_on_topo_bmp, 0                              , 0);
+			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0                              , 0);
 		}
 	} else {	// Note: We dont care about type of sync, only the situation after locks taken
 		const bool should_db_turn_on =  has_stale_lock;										// Stale lock has to turn on dbit for dead segments coz cant access them, Dbit/Read-fail syncs do not introduce new info so can never turn dbits on
@@ -347,7 +346,7 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 		const u32 turn_off_inv_bmp = (~dbits_on_topo_bmp);										// Used in case simulater injected invalid dbits, and we want to clean them as well
 		const u32 turn_off_bmp = (should_db_turn_off ? (turn_off_topo_bmp | turn_off_inv_bmp) : 0);
 		const u32 turn_on_bmp =  (should_db_turn_on  ?  dbits_on_topo_bmp                     : 0);
-		nvmeibc_dbits_tx_init_by_bmp(&tx, n_parities, turn_on_bmp, turn_off_bmp, 0);
+		nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, turn_on_bmp, turn_off_bmp, 0);
 		if (nvmeibc_dbits_get_n_unk(&pre, topo_traits))
 			so->R1.is_dirty_suspect = true;					// Note here: all syncs (stale/db/bad/read-fail) will run identically. Do all possible reads, compare data and turn off unknown dbits if possible
 
