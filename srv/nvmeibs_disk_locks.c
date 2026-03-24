@@ -33,9 +33,8 @@ static DEFINE_MUTEX(locks_guard);
 static int disk_lock_allocate_(struct nvmeibs_disk_info *di, int seg_id,
 	u64 start, u64 lock_set_size, u64 len, u64 init_val);
 static void nvmeibs_disk_lock_dev_set_(struct nvmeibs_disk_info *di,
-	struct nvmeibs_dev *lock_dev, bool is_toma);
-static void nvmeibs_disk_lock_dev_get_(struct nvmeibs_disk_info *di,
-	bool is_toma);
+	struct nvmeibs_dev *lock_dev);
+static void nvmeibs_disk_lock_dev_get_(struct nvmeibs_disk_info *di);
 
 static u32 map_on_dev(struct nvmeibs_dev *nic,
 	struct nvmeib_alloc_n_map *mem)
@@ -686,12 +685,12 @@ bool nvmeibs_disk_locks_is_selected_device(struct nvmeibs_disk_info *di,
 	if (!cl->lock_validated) {
 		if (likely(!nvmeibs_use_tcp_locks)) {
 			if (disk_private_data->lock_dev == NULL) {
-				nvmeibs_disk_lock_dev_set_(di, ib_port->nis_dev, false);
+				nvmeibs_disk_lock_dev_set_(di, ib_port->nis_dev);
 				rv = true;
 			}
 			else if (nvmeib_same_physical_dev(ib_port->nis_dev->dev,
 				disk_private_data->lock_dev->dev)) {
-				nvmeibs_disk_lock_dev_get_(di, false);
+				nvmeibs_disk_lock_dev_get_(di);
 				rv = true;
 			}
 			else
@@ -712,37 +711,6 @@ out:
 	return rv;
 }
 
-/* Called with the nvmeibs_dev_guard lock taken */
-static struct nvmeibs_ib_port *find_active_port(struct nvmeibs_dev *lock_dev)
-{
-	struct nvmeibs_ib_port *port = NULL;
-	struct ib_port_attr a;
-	bool found = false;
-
-	NFIN;
-	list_for_each_entry(port, &lock_dev->port_list, port_list_n) {
-		 if (ib_query_port(P2IB(port), port->port, &a)) {
-			 _NE(error_disk_locks_find_active_port, "ib_query_port() failed.");
-			 continue;
-		 }
-		 if (a.state == IB_PORT_ACTIVE) {
-			 /*do not want use roce port without ip addr*/
-			 if (!port->gid.valid) {
-				_NW(warn_disk_locks_find_active_port, "Not using port with invalid GID. (port @HW_GID)", &port->gid.hw_gid);
-				continue;
-			 }
-			 found = true;
-			 break;
-		 }
-	}
-	if (!found) {
-		port = NULL;
-	}
-
-	NFOUT;
-	return port;
-}
-
 /* check no disk is using this @dev as its lock-dev */
 bool nvmeibs_disk_locks_lock_dev_is_used(struct nvmeibs_dev *dev)
 {
@@ -757,136 +725,13 @@ bool nvmeibs_disk_locks_lock_dev_is_used(struct nvmeibs_dev *dev)
 	list_for_each_entry(di, disk_info_list, link) {
 		disk_pd = di->priv;
 		if (dev == disk_pd->lock_dev) {
-			_NE(error_disk_locks_nvmeibs_disk_locks_lock_dev_is_used, "Disk @DISK_ID_STR still uses lock dev @IB_DEV_NAME (@DEV), refcnt @LOCK_DEV_REFCNT(@LOCK_DEV_REFCNT_TOMA)",
-				di->disk_id, N2IB(dev)->name, dev,
-				disk_pd->lock_dev_refcnt, disk_pd->lock_dev_refcnt_toma);
+			_NE(error_disk_locks_nvmeibs_disk_locks_lock_dev_is_used,
+				"Disk @DISK_ID_STR still uses lock dev @IB_DEV_NAME (@DEV), refcnt @LOCK_DEV_REFCNT",
+				di->disk_id, N2IB(dev)->name, dev, disk_pd->lock_dev_refcnt);
 			rv = true;
 		}
 	}
 	nvmeibs_disk_lock_unguard();
-	nvmeibs_disk_put_disks();
-
-	NFOUT;
-	return rv;
-}
-
-/**
- * Get (or set) the lock-device - Used by either Toma or Local-client.
- * Toma inc ref-cnt whereas Local-client will do the same while connecting
- * loopback lock-channel (on port-wq).
- */
-int nvmeibs_disk_lock_get_local_dev(
-	struct nvmeibs_disk_info *di, struct nvmeibs_ib_port **l_port,
-	int n_ports, bool is_toma)
-{
-	struct nvmeibs_disk_private_data *disk_pd = di->priv;
-	struct nvmeibs_dev *lock_dev;
-	struct nvmeibs_dev *dev;
-	int num_devs;
-	struct list_head *devs;
-	int num_ports = 0;
-
-	NFIN;
-	BUG_ON(disk_pd == NULL);
-	if (n_ports < 1) {
-		_NE(error_disk_locks_nvmeibs_disk_lock_get_local_dev, "Port array size @N_PORTS is too small", n_ports);
-		goto outt;
-	}
-	devs = nvmeibs_get_devices(&num_devs);
-	nvmeibs_disk_locks_guard();
-	lock_dev = disk_pd->lock_dev;
-	if (nvmeibs_use_tcp_locks) {
-		BUG_ON(lock_dev);
-	} else if (!lock_dev) {
-		*l_port = NULL;
-		list_for_each_entry(lock_dev, devs, nvmeibs_dev_list_n) {
-			*l_port = find_active_port(lock_dev);
-			if (*l_port)
-				break;
-		}
-		if (!(*l_port)) {
-			_NE(error_1_disk_locks_nvmeibs_disk_lock_get_local_dev, "No active port for lock-dev");
-			lock_dev = NULL;
-			*l_port = NULL;
-			goto out;
-		}
-		num_ports = 1;
-		nvmeibs_disk_lock_dev_set_(di, lock_dev, is_toma);
-	} else {
-		list_for_each_entry(dev, devs, nvmeibs_dev_list_n) {
-			if (nvmeib_same_physical_dev(dev->dev, lock_dev->dev)) {
-				if (num_ports < n_ports) {
-					l_port[num_ports] = find_active_port(dev);
-					if (l_port[num_ports])
-						num_ports++;
-				}
-				else {
-					_NE(error_2_disk_locks_nvmeibs_disk_lock_get_local_dev, "Port array @N_PORTS is too small", n_ports);
-					num_ports = 0;
-					break;
-				}
-			}
-		}
-		if (num_ports)
-			nvmeibs_disk_lock_dev_get_(di, is_toma);
-		else
-			_NE(error_3_disk_locks_nvmeibs_disk_lock_get_local_dev, "No active ports on curr lock dev @IB_DEV_NAME (@LOCK_DEV), refcnt=@REFCNT",
-				N2IB(disk_pd->lock_dev)->name, lock_dev,
-				disk_pd->lock_dev_refcnt);
-	}
-
-out:
-	nvmeibs_disk_lock_unguard();
-	nvmeibs_put_devices();
-
-outt:
-	NFOUT;
-	return num_ports;
-}
-
-int nvmeibs_disk_locks_get_dev(char *selected_disk_name, union ib_gid *out_gids,
-	int *num_gids)
-{
-	struct list_head *disks;
-	struct nvmeibs_disk_info *disk;
-	int n_lock_ports = *num_gids < MAX_PORTS_FOR_LOCKS_GIDS ?
-		*num_gids : MAX_PORTS_FOR_LOCKS_GIDS;
-	struct nvmeibs_ib_port *lock_ports[n_lock_ports];
-	struct nvmeibs_disk_private_data *disk_private_data;
-	int rv = -ENODEV;
-	int i;
-
-	NFIN;
-	if (!(disks = nvmeibs_disk_get_disks(NULL))) {
-		_NT(trace_disk_locks_nvmeibs_disk_locks_get_dev, "Server does not possess any disks");
-		goto out;
-	}
-
-	list_for_each_entry(disk, disks, link) {
-		disk_private_data = (struct nvmeibs_disk_private_data *)disk->priv;
-		if (!disk_private_data) {
-			_NE(error_disk_locks_nvmeibs_disk_locks_get_dev, "got null private data");
-			continue;
-		}
-		if (strncmp(disk->disk_id, selected_disk_name,
-			NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE))
-			continue;
-
-		*num_gids = nvmeibs_disk_lock_get_local_dev(
-			disk, lock_ports, n_lock_ports, true); /* Toma */
-		if (!*num_gids) {
-			_NE(error_1_disk_locks_nvmeibs_disk_locks_get_dev, "No available lock device");
-			goto out;
-		}
-
-		for (i = 0; i < *num_gids; ++i)
-			out_gids[i] = lock_ports[i]->gid.gid;
-
-		rv = 0;
-		break;
-	}
-
-out:
 	nvmeibs_disk_put_disks();
 
 	NFOUT;
@@ -908,53 +753,10 @@ void nvmeibs_disk_locks_toma_proc_close(void)
 			_NE(error_disk_locks_nvmeibs_disk_locks_toma_proc_close, "got null private data");
 			continue;
 		}
-
-		nvmeibs_disk_locks_guard();
-		if (disk_private_data->lock_dev_refcnt_toma)
-			nvmeibs_disk_lock_dev_put_(disk, true,
-				disk_private_data->lock_dev_refcnt_toma);
-		nvmeibs_disk_lock_unguard();
 	}
 	nvmeibs_disk_put_disks();
 
 	NFOUT;
-}
-
-int nvmeibs_disk_locks_put_dev(char *selected_disk_name)
-{
-	struct list_head *disks;
-	struct nvmeibs_disk_info *disk;
-	struct nvmeibs_disk_private_data *disk_private_data;
-	int rv = -ENODEV;
-	NFIN;
-
-	if (!(disks = nvmeibs_disk_get_disks(NULL))) {
-		_NT(trace_disk_locks_nvmeibs_disk_locks_put_dev, "Server does not possess any disks");
-		goto out;
-	}
-
-	list_for_each_entry(disk, disks, link) {
-		disk_private_data = (struct nvmeibs_disk_private_data *)disk->priv;
-		if (!disk_private_data) {
-			_NE(error_disk_locks_nvmeibs_disk_locks_put_dev, "got null private data");
-			continue;
-		}
-		if (strncmp(disk->disk_id, selected_disk_name,
-			NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE))
-			continue;
-
-		nvmeibs_disk_locks_guard();
-		nvmeibs_disk_lock_dev_put_(disk, true, 1);
-		nvmeibs_disk_lock_unguard();
-		rv = 0;
-		break;
-	}
-
-out:
-	nvmeibs_disk_put_disks();
-
-	NFOUT;
-	return rv;
 }
 
 void nvmeibs_disk_locks_update_mem_gids_(struct nvmeibs_dev *nis_dev,
@@ -1034,7 +836,7 @@ void nvmeibs_disk_locks_update_dev_gids(struct nvmeibs_dev *nis_dev)
 }
 
 static void nvmeibs_disk_lock_dev_set_(struct nvmeibs_disk_info *di,
-	struct nvmeibs_dev *lock_dev, bool is_toma)
+	struct nvmeibs_dev *lock_dev)
 {
 	struct nvmeibs_disk_private_data *disk_pd = di->priv;
 	NFIN;
@@ -1053,14 +855,13 @@ static void nvmeibs_disk_lock_dev_set_(struct nvmeibs_disk_info *di,
 
 	disk_pd->lock_dev = lock_dev;
 	nvmeibs_update_lock_segments(disk_pd);
-	nvmeibs_disk_lock_dev_get_(di, is_toma);
+	nvmeibs_disk_lock_dev_get_(di);
 
 	NFOUT;
 	return;
 }
 
-static void nvmeibs_disk_lock_dev_get_(struct nvmeibs_disk_info *di,
-	bool is_toma)
+static void nvmeibs_disk_lock_dev_get_(struct nvmeibs_disk_info *di)
 {
 	struct nvmeibs_disk_private_data *disk_pd = di->priv;
 	NFIN;
@@ -1080,18 +881,16 @@ static void nvmeibs_disk_lock_dev_get_(struct nvmeibs_disk_info *di,
 	}
 
 	disk_pd->lock_dev_refcnt++;
-	if (is_toma)
-		disk_pd->lock_dev_refcnt_toma++;
-	_NT(trace_disk_locks_nvmeibs_disk_lock_dev_get, "Disk @DISK_ID_STR, @TYPE_STR get lock-dev @IB_DEV_NAME (@LOCK_DEV), inc to @LOCK_DEV_REFCNT(@LOCK_DEV_REFCNT_TOMA)",
-		di->disk_id, is_toma ? "Toma" : "Client",
+	_NT(trace_disk_locks_nvmeibs_disk_lock_dev_get, 
+		"Disk @DISK_ID_STR get lock-dev @IB_DEV_NAME (@LOCK_DEV), Client inc to @LOCK_DEV_REFCNT",
+		di->disk_id,
 		N2IB(disk_pd->lock_dev)->name, disk_pd->lock_dev,
-		disk_pd->lock_dev_refcnt, disk_pd->lock_dev_refcnt_toma);
+		disk_pd->lock_dev_refcnt);
 
 	NFOUT;
 }
 
-void nvmeibs_disk_lock_dev_put_(struct nvmeibs_disk_info *di, bool is_toma,
-	int dec)
+void nvmeibs_disk_lock_dev_put_(struct nvmeibs_disk_info *di)
 {
 	struct nvmeibs_disk_private_data *disk_pd = di->priv;
 	NFIN;
@@ -1103,26 +902,19 @@ void nvmeibs_disk_lock_dev_put_(struct nvmeibs_disk_info *di, bool is_toma,
 		_NE(error_disk_locks_nvmeibs_disk_lock_dev_put, "Disk @DISK_ID_STR, no lock-dev ", di->disk_id);
 		goto out;
 	}
-	if (disk_pd->lock_dev_refcnt < dec) {
-		_NE(error_1_disk_locks_nvmeibs_disk_lock_dev_put, "Disk @DISK_ID_STR, cant dec: lock-dev @LOCK_DEV, refcnt=@REFCNT, dec=@DEC", di->disk_id,
-			disk_pd->lock_dev, disk_pd->lock_dev_refcnt, dec);
-		goto out;
-	}
-	if (is_toma && (disk_pd->lock_dev_refcnt_toma < dec)) {
-		_NE(error_2_disk_locks_nvmeibs_disk_lock_dev_put, "Disk @DISK_ID_STR, Toma attempt put lock-dev it didn't get, "
-		   "toma_cnt=@TOMA_CNT, dec=@DEC",
-			di->disk_id, disk_pd->lock_dev_refcnt_toma, dec);
+	if (disk_pd->lock_dev_refcnt < 1) {
+		_NE(error_1_disk_locks_nvmeibs_disk_lock_dev_put, "Disk @DISK_ID_STR, cant dec: lock-dev @LOCK_DEV, refcnt=@REFCNT", 
+			di->disk_id, disk_pd->lock_dev, disk_pd->lock_dev_refcnt);
 		goto out;
 	}
 
 	/* put lock-dev */
-	disk_pd->lock_dev_refcnt -= dec;
-	if (is_toma)
-		disk_pd->lock_dev_refcnt_toma -= dec;
-	_NT(trace_disk_locks_nvmeibs_disk_lock_dev_put, "Disk @DISK_ID_STR, @TYPE_STR put lock-dev @IB_DEV_NAME (@LOCK_DEV), dec to @LOCK_DEV_REFCNT(@LOCK_DEV_REFCNT_TOMA) from '@__BUILTIN_RETURN_ADDRESS_FUNC'",
-		di->disk_id, is_toma ? "Toma" : "Client",
+	disk_pd->lock_dev_refcnt--;
+	_NT(trace_disk_locks_nvmeibs_disk_lock_dev_put, "Disk @DISK_ID_STR, Client put lock-dev @IB_DEV_NAME (@LOCK_DEV),"
+		" dec to @LOCK_DEV_REFCNT from '@__BUILTIN_RETURN_ADDRESS_FUNC'",
+		di->disk_id,
 		N2IB(disk_pd->lock_dev)->name, disk_pd->lock_dev,
-		disk_pd->lock_dev_refcnt, disk_pd->lock_dev_refcnt_toma,
+		disk_pd->lock_dev_refcnt,
 		 __builtin_return_address(0));
 	if (disk_pd->lock_dev_refcnt == 0)
 		disk_pd->lock_dev = NULL;

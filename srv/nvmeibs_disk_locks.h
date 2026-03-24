@@ -55,8 +55,6 @@ struct nvmeibs_disk_private_data {
 	atomic64_t disk_lock_counter;
 	/* count the number of client + toma that uses lock_dev */
 	int lock_dev_refcnt;
-	/* Toma ref-cnt of lock-dev */
-	int lock_dev_refcnt_toma;
 	struct {
 		/* per disk proc dir */
 		struct proc_dir_entry *dir;
@@ -182,35 +180,8 @@ void nvmeibs_disk_lock_unmap_on_dev(struct nvmeibs_dev *nic);
 bool nvmeibs_disk_locks_is_selected_device(struct nvmeibs_disk_info *di,
 	struct nvmeibs_ib_port *ib_port, struct nvmeibs_client *cl);
 
-/**
- * retrun lock device, if the device was not selected, than the first
- * valid nic will be selected
- *
- * @param disk_pd
- *
- * @return struct nvmeibs_dev*
- */
-int nvmeibs_disk_lock_get_local_dev(
-	struct nvmeibs_disk_info *di,
-	struct nvmeibs_ib_port **lock_port,
-	int n_ports,
-	bool is_toma);
-
 int nvmeibs_disk_mmap_fault(void *arg, unsigned long pg_offset,
 							struct page **page);
-
-/**
- * output the lock device of a given segment
- *
- * @param selected_disk_name the disk that contains the segment
- * @param selected_seg_id segment id in the disk
- * @param out_gid outpu gid
- *
- * @return 0 upon success
- */
-int nvmeibs_disk_locks_get_dev(char *selected_disk_name, union ib_gid *out_gids,
-	int *num_gids);
-int nvmeibs_disk_locks_put_dev(char *selected_disk_name);
 
 int nvmeibs_disk_locks_ldisk_alloc(struct nvmeibs_client *cl,
 	struct nvmeib_local_disk *ldisk);
@@ -238,8 +209,7 @@ void nvmeibs_disk_locks_update_dev_gids(struct nvmeibs_dev *nis_dev);
 
 //called when a nic has been removed
 bool nvmeibs_disk_locks_lock_dev_is_used(struct nvmeibs_dev *dev);
-void nvmeibs_disk_lock_dev_put_(struct nvmeibs_disk_info *di, bool is_toma,
-	int dec);
+void nvmeibs_disk_lock_dev_put_(struct nvmeibs_disk_info *di);
 void nvmeibs_disk_locks_toma_proc_close(void);
 
 int nvmeibs_disk_locks_get_ec_dirty_bytes(struct nvmeibs_disk_private_data *disk_pd,

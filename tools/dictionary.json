@@ -8752,15 +8752,6 @@
             "%d": 6
         }
     },
-    "@LOCK_DEV_REFCNT_TOMA": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 6
-        }
-    },
     "@LOCK_ENT": {
         "size": 32,
         "type": "s32",

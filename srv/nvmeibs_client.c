@@ -6139,11 +6139,11 @@ static noinline void cl_lock_dev_put(struct nvmeibs_client *cl)
 		disks = &cl->disks;
 		list_for_each_entry(cdisk, disks, link) {
 			BUG_ON(!list_is_last(&cdisk->link, disks));
-			nvmeibs_disk_lock_dev_put_(cdisk->di, false, 1);
+			nvmeibs_disk_lock_dev_put_(cdisk->di);
 		}
 	}
 	else
-		nvmeibs_disk_lock_dev_put_(cl->di, false, 1);
+		nvmeibs_disk_lock_dev_put_(cl->di);
 	cl->lock_validated = false;
 	nvmeibs_disk_lock_unguard();
 	NFOUT;
