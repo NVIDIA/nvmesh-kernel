@@ -123,7 +123,8 @@ int start_capuch_worker(capuch_worker_t* self)
 	self->priv.aborted = 0;
 
 	/* Unable to create worker thread is critical error. Better restart. */
-	assert(!pthread_create(&self->priv.thread, &attr, _worker, (void*)self));
+	if (pthread_create(&self->priv.thread, &attr, _worker, (void*)self))
+		_suicide("Failed to create worker thread");
 
 	self->priv.started = 1;
 
