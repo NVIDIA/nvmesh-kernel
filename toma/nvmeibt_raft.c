@@ -601,10 +601,10 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 	int8_t									raft_members_tlv_type;
 
 	NFIN;
-	topo_tlv_type				= (is_topo_incremental ? TLV_TYPE_TOPO_INCREMENTAL : TLV_TYPE_TOPO_COMPLETE);
-	topo_config_tlv_type		= (is_topo_config_incremental ? TLV_TYPE_TOPO_CONFIG_INCREMENTAL : TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	topo_tlv_type				= (is_topo_incremental ?              TLV_TYPE_TOPO_INCREMENTAL              : TLV_TYPE_TOPO_COMPLETE);
+	topo_config_tlv_type		= (is_topo_config_incremental ?       TLV_TYPE_TOPO_CONFIG_INCREMENTAL       : TLV_TYPE_TOPO_CONFIG_COMPLETE);
 	kafka_mgmt_config_tlv_type	= (is_kafka_mgmt_config_incremental ? TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL : TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
-	raft_members_tlv_type		= (is_raft_members_incremental ? TLV_TYPE_RAFT_MEMBERS_INCREMENTAL : TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+	raft_members_tlv_type		= (is_raft_members_incremental ?      TLV_TYPE_RAFT_MEMBERS_INCREMENTAL      : TLV_TYPE_RAFT_MEMBERS_COMPLETE);
 
 	sum_data_len = mgmt_config_data_len + topo_data_len + topo_config_data_len + members_data_len;
 	dst = alloc_persist_and_wire_buf(sizeof(*dst) + sum_data_len);
