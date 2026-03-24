@@ -253,10 +253,9 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 void t_sandbox_all_destroy(void) {
 	if (!nvmeibt_toma_is_running_as_a_utility()) {
 		toma_unit_test_thread_destroy();
-		mgmt_sim_verify_at_end();
 	}
 	nvmeibs_simu_destroy(sys->srvr, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	mgmt_sim_destroy();				// Must destroy mgmt_sim's Kafka objects before the broker
+	mgmt_sim_destroy(               !nvmeibt_toma_is_running_as_a_utility());			// Must destroy mgmt_sim's Kafka objects before the broker
 	user_rpc_simu_destroy(sys->rpc, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent rpc messages
 	sandbox_kafka_destroy(sys->kafka_simu);
 	os_sim_destroy(&sys->os, !nvmeibt_toma_is_running_as_a_utility());

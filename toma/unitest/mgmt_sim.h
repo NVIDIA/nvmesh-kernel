@@ -66,9 +66,8 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg);
 void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add);
 void mgmt_sim_send_msg_assign_to_zone(int zone_idx);
 void mgmt_sim_wakeup_on_incomming_toma_msg(struct sim_broker_topic *);
-void mgmt_sim_verify_at_end(void);
 void mgmt_sim_do_periodic(void);
-void mgmt_sim_destroy(void);
+void mgmt_sim_destroy(bool do_verify_used);
 
 /* Condition-query functions for fiber-based test scenario */
 bool mgmt_sim_both_disks_ready_for_format(void);

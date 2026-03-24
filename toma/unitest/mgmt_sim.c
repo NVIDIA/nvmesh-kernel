@@ -444,13 +444,10 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 	nvmeibt_mm_json_free_kv_tree(root);
 }
 
-void mgmt_sim_verify_at_end(void) {
-	BUG_ON(!g_mgmt_sim);
-	BUG_ON((g_mgmt_sim->n_leader_keep_alives <= 0));
-}
-
-void mgmt_sim_destroy(void) {
+void mgmt_sim_destroy(bool do_verify_used) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
+	if (do_verify_used)
+		BUG_ON((m->n_leader_keep_alives <= 0) || (m->raftTerm == 0));
 	free(m);
 	g_mgmt_sim = NULL;
 }
