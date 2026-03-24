@@ -12,13 +12,13 @@
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
 
 /* Disk constants */
-#define UUID_from_U32(WHAT) WHAT "-0000-0000-0000-000000000000"
-#define DISK_UUID_LOCAL_002      UUID_from_U32("d0020000")			// prefix 'd' for local disk
-#define DISK_UUID_LOCAL_003      UUID_from_U32("d0030000")
-#define DISK_UUID_REMOTE38_D0    UUID_from_U32("f38000d0")			// encodes node and disk for easier eye catcher debugging
-#define DISK_UUID_REMOTE38_D1    UUID_from_U32("f38000d1")
-#define DISK_UUID_REMOTE39_D0    UUID_from_U32("f39000d0")
-#define DISK_UUID_REMOTE39_D1    UUID_from_U32("f39000d1")
+#define UUID_from_U32 			 "%8x-0000-0000-0000-000000000000"
+#define DISK_UUID_LOCAL_002      0xd0020000			// prefix 'd' for local disk
+#define DISK_UUID_LOCAL_003      0xd0030000
+#define DISK_UUID_REMOTE38_D0    0xf38000d0			// Encodes node and disk for easier eye catcher debugging
+#define DISK_UUID_REMOTE38_D1    0xf38000d1
+#define DISK_UUID_REMOTE39_D0    0xf39000d0
+#define DISK_UUID_REMOTE39_D1    0xf39000d1
 
 enum e_disk_format_state {
 	FMT_IDLE = 'I',
@@ -40,7 +40,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
 /* Per-disk status extracted from reportTarget */
 struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 	const char *disk_id;				// Disk name
-	const char *uuid;
+	uint32_t    uuid;
 	char status[16];					// As reported by Toma
 	struct t_format_monitor {
 		unsigned counter_sent;			// Ever increasing generation for for disk format cmd to toma. Value sent in last formatDrive
@@ -57,7 +57,7 @@ struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_sim_disk_status *d, unsigned long boot_time) {
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1"
-		",\"payload\":{\"diskID\":\"%s\",\"uuid\":\"%s\",\"vendor\":%u"
+		",\"payload\":{\"diskID\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"vendor\":%u"
 		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
 		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
 		", " MGMT_DB_UUID_JSON "}}",
@@ -211,7 +211,7 @@ static void __send_msg_volume_add(int vol_idx) {
 	unsigned c, r, s;
 	int rv = 0;
 	BUG_ON(vol_idx >= m->cfg->n_vols);
-	BUF_ADD("{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\",\"version\":1,\"name\":\"%s\",\"blockSize\":4096,",
+	BUF_ADD("{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":1,\"name\":\"%s\",\"blockSize\":4096,",
 		V->name, V->uuid, V->name);
 	BUF_ADD("\"lockServer\":{\"maxNOwners\":%u,\"type\":4,\"locksetShift\":-1},\"blocks\":%u,\"RAIDLevel\":\"Mirrored RAID-1\",\"numberOfMirrors\":%d,\"stripeSize\":32,\"stripeWidth\":%u,",
 		V->chunks->raids->P+1, V->num_blocks, V->chunks->raids->P,  V->chunks->n_raids);
@@ -219,13 +219,13 @@ static void __send_msg_volume_add(int vol_idx) {
 	BUF_ADD("\"chunks\":[");
 	for (c = 0; c < V->num_chunks; c++) {
 		const struct sb_chunk_conf *pc = &V->chunks[c];
-		BUF_ADD("{\"uuid\":\"" UUID_from_U32("%8x") "\",\"vlbs\":%u,\"vlbe\":%u,\"pRaids\":[", pc->uuid, pc->vlba_start, pc->vlba_end);
+		BUF_ADD("{\"uuid\":\"" UUID_from_U32 "\",\"vlbs\":%u,\"vlbe\":%u,\"pRaids\":[", pc->uuid, pc->vlba_start, pc->vlba_end);
 		for (r = 0; r < pc->n_raids; r++) {
 			const struct sb_praid_conf *pr = &pc->raids[r];
-			BUF_ADD("{\"uuid\":\"" UUID_from_U32("%8x") "\",\"activated\":false,\"stripeIndex\":%u,\"zone\":\"%d\",\"diskSegments\":[", pr->uuid, r, m->cfg->zone_idx);
+			BUF_ADD("{\"uuid\":\"" UUID_from_U32 "\",\"activated\":false,\"stripeIndex\":%u,\"zone\":\"%d\",\"diskSegments\":[", pr->uuid, r, m->cfg->zone_idx);
 			for (s = 0; s < (pr->D + pr->P); s++) {
 				const struct sb_seg_conf *ps = &pr->segs[s];
-				BUF_ADD("{\"uuid\":\"" UUID_from_U32("%8x") "\",\"lbs\":%u,\"lbe\":%u,\"type\":\"data\",\"pRaidIndex\":%u,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"%s\"},",
+				BUF_ADD("{\"uuid\":\"" UUID_from_U32 "\",\"lbs\":%u,\"lbe\":%u,\"type\":\"data\",\"pRaidIndex\":%u,\"pRaidTypeIndex\":0,\"status\":\"initializing\",\"diskUUID\":\"" UUID_from_U32 "\"},",
 					ps->uuid, ps->block_start, ps->block_end, s, ps->disk_uuid);
 			}
 			rv--;	// Remove the last uneeded ','
@@ -244,7 +244,7 @@ static void __send_msg_volume_del(int vol_idx, bool is_completed) {
 	char *buf = malloc(msg_size);
 	int rv = 0;
 	BUG_ON(vol_idx >= m->cfg->n_vols);
-	BUF_ADD("{\"messageType\":\"%s\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\",\"version\":1,\"name\":\"%s\"}}",
+	BUF_ADD("{\"messageType\":\"%s\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":1,\"name\":\"%s\"}}",
 		msg_type, V->name, V->uuid, V->name);
 	N_IMf(__AUTOID__, "vol=@STR sending msg @STR, @INT[b]", m->cfg->vols[vol_idx].name, msg_type, rv);
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
@@ -262,8 +262,10 @@ static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name
 
 static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (strcmp(disk_uuid, m->disk_002.uuid) == 0) return &m->disk_002;
-	if (strcmp(disk_uuid, m->disk_003.uuid) == 0) return &m->disk_003;
+	unsigned uuid_u32 = 0;
+	BUG_ON(sscanf(disk_uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
+	if (uuid_u32 == m->disk_002.uuid) return &m->disk_002;
+	if (uuid_u32 == m->disk_003.uuid) return &m->disk_003;
 	BUG_ON(true); return NULL;
 }
 
@@ -321,7 +323,7 @@ void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add) {
 	char *buf = malloc(capacity);	BUG_ON(!buf);
 	++m->raft_quorum.generation;
 	len = snprintf(buf, capacity, "{\"messageType\":\"%s\",\"messageTypeVersion\":1,\"payload\":"
-			"{\"nodeID\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
+			"{\"nodeID\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"targetsInZone\":%d,\"targetUpdatesSequence\":%d}}",
 			msg_type, node->hostname, node->uuid, m->raft_quorum.num_nodes, m->raft_quorum.generation);
 	m->raft_quorum.num_nodes += (do_add ? +1 : -1);
 	N_Tf(__AUTOID__, "<< msg=@STR node=@STR, gen=@INT", msg_type, node->hostname, m->raft_quorum.generation);
@@ -340,40 +342,38 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 		",\"configurationVersion\":%d,\"leaderToken\":1,\"kafkaMessageSequence\":%d,\"raftTerm\":9"
 		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
 		"\"targets\":["
-			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\","
+			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
 				"\"disks\":["
-				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"%s\",\"version\":7,\"isOutOfService\":false}],"
+				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\""
-						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\""
-						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\","
+					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c0-11f0-bc49-e391b6ca4c2b\"},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c0-11f0-bc49-e391b6ca4c2b\"}]},"
+			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
 				"\"disks\":["
-				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"" DISK_UUID_REMOTE38_D0 "\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"D1_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"" DISK_UUID_REMOTE38_D1 "\",\"version\":7,\"isOutOfService\":false}],"
+				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"D1_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false}],"
 				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\""
-						",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c1-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\""
-						",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c1-11f0-bc49-e391b6ca4c2b\"}]},"
-			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32("%8x") "\","
+					"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef0-c3c1-11f0-bc49-e391b6ca4c2b\"},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce10-c3c1-11f0-bc49-e391b6ca4c2b\"}]},"
+			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
 				"\"disks\":["
-				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"" DISK_UUID_REMOTE39_D0 "\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"" DISK_UUID_REMOTE39_D1 "\",\"version\":1,\"isOutOfService\":false}],"
+				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
+				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"" UUID_from_U32 "\",\"version\":1,\"isOutOfService\":false}],"
 				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5f008\",\"protocol\":\"RoCE\""
-						",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5f009\",\"protocol\":\"RoCE\""
-						",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5f008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4cef2-c3c0-11f0-bc49-e391b6ca4c2b\"},"
+					"{\"nicID\":\"0x0000000000000000bae924fffee5f009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"cff4ce12-c3c0-11f0-bc49-e391b6ca4c2b\"}]}"
 		"]}}",
 		config_ver, kafka_seq,
 		m->cfg->live->hostname, m->cfg->live->uuid,
 			m->disk_002.disk_id, m->disk_002.vendor, m->disk_002.uuid,
 			m->disk_003.disk_id, m->disk_003.vendor, m->disk_003.uuid,
 		other_toma[0].hostname, other_toma[0].uuid,
-		other_toma[1].hostname, other_toma[1].uuid);
+			DISK_UUID_REMOTE38_D0,
+			DISK_UUID_REMOTE38_D1,
+		other_toma[1].hostname, other_toma[1].uuid,
+			DISK_UUID_REMOTE39_D0,
+			DISK_UUID_REMOTE39_D1);
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);
 }
 
@@ -384,8 +384,7 @@ static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
 	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
 	if (strcmp(message_type, "driveZeroingProgress") == 0) {
 		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
-		const char *disk_uuid = json_get_dict_str(payload, "diskUUID", NULL);
-		struct mgmt_sim_disk_status *d = __lookup_disk_by_uuid(disk_uuid);
+		struct mgmt_sim_disk_status *d = __lookup_disk_by_uuid(json_get_dict_str(payload, "diskUUID", NULL));
 		__check_format_progress(d, (int)msg_seq, false);
 	} else if (strcmp(message_type, "updateDiskSegmentsDirtyBits") == 0) {
 		/* silently ignore */

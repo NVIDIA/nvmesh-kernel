@@ -36,7 +36,7 @@ struct sb_cluster_conf {
 				uint32_t uuid;						// My praid uuid
 				unsigned D, P;						// (data+parity) protection. R1 = (1+{1..2}), EC = ({2..8}+{1..2})
 				struct sb_seg_conf {
-					const char* disk_uuid;			// Pointer to the physical disk uuid where disk segment resides, Todo consider changing to u32
+					uint32_t disk_uuid;				// Physical disk uuid where disk segment resides, Todo consider changing to u32
 					uint32_t uuid;					// My disk segment uuid
 					unsigned block_start;			// Disk block address of segment start
 					unsigned block_end;				// All disk segments in chunk have identical length
