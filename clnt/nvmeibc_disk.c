@@ -1330,13 +1330,13 @@ static int nr_rionic_status_fill_buf(struct nvmeibc_io_rnic *rionic, void *args,
 			for (i = 0; i < lionic->n_nr_qps; i++) {
 				struct nvmeibc_ib_nordda_channel *io_ch = (struct nvmeibc_ib_nordda_channel *)lionic->nr_channels + i;
 				if (io_ch) {
-					BUF_ADD("\t\t\t- NO-RDDA IO CHANNEL %d (%px) - %s Index: %d, Priority: %u (%d/%d/%d/%d), In-Use: %s, vec[s/r]=%d/%d, cpu=%d(+%d*x), comp-cpu=%d, pcpu_ll=%s, "
+					BUF_ADD("\t\t\t- NO-RDDA IO CHANNEL %d (%px) - %s Index: %d, Priority: %u (%d/%d/%d/%d), In-Use: %s, vec[s/r]=%d/%d, cpu=%d(+%d*x), comp-cpu=%d, pcpu_ll=%s, numa_node=%d, "
 							"Reqs(ulp/used/max/num): %d/%d/%d/%d [%llu], "
 							"reuse-bbs-lru-jif={ts=%lu, dt=%lu} \n", i, io_ch,
 							io_ch->base.name, io_ch->base.index,
 							io_ch->priority.raw, io_ch->priority.bw, io_ch->priority.latency, io_ch->priority.transport, io_ch->priority.numa_dist,
 							BOOL_TO_STRING(io_ch->inuse), io_ch->net.base.recv_intr_vec, io_ch->net.base.send_intr_vec, io_ch->cpu,
-							io_ch->base.disk->info->n_avail_norddas, pcpu_nrch_cpu_get(io_ch), BOOL_TO_STRING(is_ll_pcpu_nrch(io_ch)),
+							io_ch->base.disk->info->n_avail_norddas, pcpu_nrch_cpu_get(io_ch), BOOL_TO_STRING(is_ll_pcpu_nrch(io_ch)), io_ch->base.numa_node,
 							io_ch->base.reused_bb_cnt, io_ch->n_used_reqs, nr_max_used_reqs_per_channel, io_ch->base.disk->nrch_ioreq_num, io_ch->n_uses_ever,
 							io_ch->base.reused_bb_lru_jif,
 							io_ch->base.reused_bb_lru_jif ? io_ch->base.reused_bb_lru_jif - jiffies : 0);
@@ -3580,7 +3580,8 @@ inline static void nvmeibc_disk_available_norddas_add(struct nvmeibc_disk *disk,
 		spin_lock_irqsave(&disk->spinlock, flags);
 		nvmeib_public_plist_add(&nrch->available_link, &disk->info->available_norddas);
 		
-		if (disk->info->avail_norddas_per_numa_node) {
+		if (disk->info->avail_norddas_per_numa_node &&
+		    nrch->base.numa_node != NUMA_NO_NODE) {
 			nvmeib_public_plist_add(&nrch->per_numa_node_link, &disk->info->avail_norddas_per_numa_node[nrch->base.numa_node]);
 		}
 		disk->info->n_avail_norddas++;
@@ -3603,7 +3604,8 @@ void nvmeibc_disk_available_norddas_del(struct nvmeibc_disk *disk,
 		WARN_ON(is_pcpu_nrch(nrch));
 		spin_lock_irqsave(&disk->spinlock, flags);
 		nvmeib_public_plist_del(&nrch->available_link, &disk->info->available_norddas);
-		if (disk->info->avail_norddas_per_numa_node) {
+		if (disk->info->avail_norddas_per_numa_node &&
+		    nrch->base.numa_node != NUMA_NO_NODE) {
 			nvmeib_public_plist_del(&nrch->per_numa_node_link, &disk->info->avail_norddas_per_numa_node[nrch->base.numa_node]);
 		}
 		disk->info->n_avail_norddas--;
@@ -5349,20 +5351,22 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 				}
 			}
 
-			avail_norddas_this_node = &info->avail_norddas_per_numa_node[node];
-			if (!plist_head_empty(avail_norddas_this_node)) {
-				plist_for_each_entry(nrch, avail_norddas_this_node, per_numa_node_link) {
-					_ND(trace_4_disk_nvmeibc_disk_get_channel, "nrch=@NRCH @BASE_NAME info=@INFO_PTR", 
-						nrch, nrch->base.name, info);
-					req_reused_bb_lru_is_timeout_stats(&nrch->base);
-					if ((*context = nvmeibc_ib_nordda_channel_get_io_context(nrch))) {
-						ch = &nrch->base;
-						/* rotate for load balancing */
-						nvmeib_public_plist_requeue(&nrch->per_numa_node_link, avail_norddas_this_node);
-			
-						_ND(trace_5_disk_nvmeibc_disk_get_channel, 
-							"Using NORDDA channel @CH_PTR on NUMA node @NODE_ID", ch, node);
-						goto found;
+			if (node != NUMA_NO_NODE) {
+				avail_norddas_this_node = &info->avail_norddas_per_numa_node[node];
+				if (!plist_head_empty(avail_norddas_this_node)) {
+					plist_for_each_entry(nrch, avail_norddas_this_node, per_numa_node_link) {
+						_ND(trace_4_disk_nvmeibc_disk_get_channel, "nrch=@NRCH @BASE_NAME info=@INFO_PTR", 
+							nrch, nrch->base.name, info);
+						req_reused_bb_lru_is_timeout_stats(&nrch->base);
+						if ((*context = nvmeibc_ib_nordda_channel_get_io_context(nrch))) {
+							ch = &nrch->base;
+							/* rotate for load balancing */
+							nvmeib_public_plist_requeue(&nrch->per_numa_node_link, avail_norddas_this_node);
+				
+							_ND(trace_5_disk_nvmeibc_disk_get_channel, 
+								"Using NORDDA channel @CH_PTR on NUMA node @NODE_ID", ch, node);
+							goto found;
+						}
 					}
 				}
 			}
