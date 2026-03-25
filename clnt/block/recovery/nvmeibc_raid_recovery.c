@@ -1296,11 +1296,10 @@ static void __call_sync_vfunc_internal(struct nvmeibc_recov_sync_worker *sw)
 	const struct nvmeibc_subscription_ctx* tr = recov->args.tr;
 	struct nvmeibc_cmd_lock *l = &o->locks[0];
 	enum stale_lock_resolve_status ss = stale_lock_resolve_safe_to_use;
-	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp).all;
+	const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(&l->comp);
 
-	if (( nvmeibc_sync_is_stale(    l, holder)) &&
-		(!nvmeibc_sync_is_read_only(l, holder))) {
-		ss = stale_lock_resolver_get_status(&tr->hdr->slr, holder, l);
+	if (holder.bits.is_stale && (!holder.bits.is_read)){
+		ss = stale_lock_resolver_get_status(&tr->hdr->slr, holder.all, l);
 	}
 	if (ss == stale_lock_resolve_safe_to_use) { // For stale lock start only if resolved, otherwise ss is initially safe
 		int err = sw->fn(l, __on_finish_one_sync_cb, sw);
@@ -1311,7 +1310,7 @@ static void __call_sync_vfunc_internal(struct nvmeibc_recov_sync_worker *sw)
 	} else { // Handle unresolved stale blockset
 		const bool random_50per_chance = ((get_random_u32()&0x1) == 0);
 		_NTRR(trace_1_sync_vfunc,"Delayed stale: act=@ACT, lid=@LOCK_ENT_U64, retries=@RETRIES, seg=@SEG, @DLBA_BLKSETS",
-			random_50per_chance, holder, l->retries, l->ds->uuid, l->address/LOCKSET_SLICES);
+			random_50per_chance, holder.all, l->retries, l->ds->uuid, l->address/LOCKSET_SLICES);
 		if ((random_50per_chance)||(o->topo->phased_out)) {
 			__schedule_skip_blockset(o, -10015 /* no recoveree uuid */);
 		} else {					// Retry this funcion a bit later
