@@ -21,8 +21,6 @@ int t_blok_clnt_globals_init(const struct nvmeibc_cinst_params_blk *p)
 	extern void nvmeibc_block_dp_ec_dmd_read_mod_wr(void*, u64);
 	extern void init_roles_pair_compression_tables(void);
 	extern int nvmeibc_operation_all_create(void);
-	extern void __praid_init_lock_consts(struct nvmeibc_raid1 *pr);
-
 	int gf_val, rv = -ENOMEM;
 	const bool is_first_instace = nvmeibc_cinst_is_first_blok_instance(p);
 
@@ -44,7 +42,6 @@ int t_blok_clnt_globals_init(const struct nvmeibc_cinst_params_blk *p)
 		__verify_u32_lock_in_blockset_bits();
 		__verify_u64_ec_dmd_bits();
 		__verify_u64_ec_jmd_bits();
-		__praid_init_lock_consts(NULL);
 		nvmeib_set_block_dp_ec_funcs(nvmeibc_block_dp_ec_dmd_read_mod_wr);
 	} else {
 		gf_val = __gf_choose_functions(NVMEIBC_GF_DISPLAY_CURRENT);

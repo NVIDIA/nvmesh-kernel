@@ -61,21 +61,6 @@ nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid)
 	};
 }
 
-struct nvmeib_lock_entry_constants _default_lock_consts;		// Constants for lock (mask, stale_bit_mask, tx_id shift/mask, dirty-bits shift/mask)
-
-void __praid_init_lock_consts(struct nvmeibc_raid1 *pr);
-void __praid_init_lock_consts(struct nvmeibc_raid1 *pr)
-{
-	struct nvmeib_lock_entry_constants *lc = (void*)nvmeibc_raid1_get_lock_consts(pr);
-	lc->unlocked_val = LS_UNLOCKED;
-	/* Uses parts of the lock for Transaction ID and Dirty-bits */
-	lc->blkset_info_txid_shift =  NVMEIB_BLKSET_INFO_TXID_SHIFT;
-	lc->blkset_info_txid_mask =   NVMEIB_BLKSET_INFO_TXID_MASK;
-	lc->blkset_info_dbits_shift = NVMEIB_EC_JMDC_BITS_TX_ID+NVMEIB_BLKSET_INFO_TXID_SHIFT;
-	lc->blkset_info_dbits_mask =  NVMEIB_BLKSET_INFO_DIRTY_MASK;
-	lc->stale_bit_mask =          nvmeib_stale_bit_mask_ec.all;
-}
-
 /*************************** protection raid bitmaps *************************/
 void nvmeibc_raid1_acm2bmp(enum NVMEIBTC_DS_MODE acm, int si, struct nvmeibc_roles_bmps *bmp)
 {

@@ -509,17 +509,6 @@ static inline int nvmeib_blkset_sparse_report_to_str(char *buf, int len, long ar
 	return count;
 }
 
-struct nvmeib_lock_entry_constants {
-	u32 blkset_info_dbits_shift;
-	u32 blkset_info_dbits_mask;
-	u32 blkset_info_txid_shift;
-	u32 blkset_info_txid_mask;
-	unsigned long long unlocked_val;
-	unsigned long long stale_bit_mask;
-};
-#define nvmeib_lock_entry_constants_is_non_embedded_dbits(c) \
-	(!(c)->w_blkset_info || !(c)->blkset_info_dbits_mask)
-
 /*****************************************************************************/
 
 #define NVMEIB_IB_DEVICE_NAME_MAX 64

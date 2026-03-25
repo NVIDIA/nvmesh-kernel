@@ -3958,7 +3958,6 @@ static u64 __digest_chunk_layout(struct nvmeibc_volume_conf *conf, struct nvmeib
 					r1->slice_size = slice_size;
 					r1->use_rdma_locks = (!nvmeibc_raid_is_jbod(r1));
 					r1->toma.conversation_ind = 0x1ULL;		// Arbitrary starts from 1. 0 is illegal value
-					//__praid_init_lock_consts(r1);
 					r1->hdr = nvmeibc_raid_topo_persistent_create();
 					nvmeibc_locks_scheme_build(&r1->lock_scheme, &cur_praid->lockServer);
 					r1->segments = topo_kzalloc(sizeof(struct nvmeibc_disk_segment)*n_max_segs, GFP_ATOMIC);

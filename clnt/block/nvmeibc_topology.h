@@ -183,11 +183,6 @@ struct nvmeibc_raid1 {
 	bool use_rdma_locks;
 };
 
-static inline const struct nvmeib_lock_entry_constants *nvmeibc_raid1_get_lock_consts(const struct nvmeibc_raid1 *pr) {
-	extern struct nvmeib_lock_entry_constants _default_lock_consts; (void)pr;
-	return &_default_lock_consts;
-}
-
 #define nvmeibc_raid1_role2seg(r1, slice_start_seg_ind, role)     (((slice_start_seg_ind) + (role)) % (r1)->replicas)
 #define nvmeibc_raid1_seg2role(r1, slice_start_seg_ind, seg_ind)  (((seg_ind) + ((r1)->replicas) - (slice_start_seg_ind)) % (r1)->replicas)
 
