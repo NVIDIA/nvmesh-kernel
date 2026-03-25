@@ -529,14 +529,9 @@ endif
 # KS_HAS_CALL_USERMODEHELPER_SETFNS, KS_HAS___TCP_SEND_ACK, KS_HAS_TCP_RENO_UNDO_CWND,
 # KS_HAS_MMAP_LOCK_*, KS_HAS_REVALIDATE_DISK_SIZE, KS_HAS_BIO_START_IO_ACCT: see scripts/compute_backports.sh
 
-# Include common.mk
-ifneq ($(M),)
-    include $(M)/scripts/common.mk
-    include $(M)/scripts/backports.mk
-else
-    include scripts/common.mk
-    include scripts/backports.mk
-endif
+# Include common.mk (paths via NVMESH_SRC_DIR, same as M vs pwd above)
+include $(NVMESH_SRC_DIR)/scripts/common.mk
+include $(NVMESH_SRC_DIR)/scripts/backports.mk
 
 cflags += -Wall -Wstrict-prototypes
 cflags += -Werror -Wno-error=unused-function -Wno-vla
