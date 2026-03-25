@@ -19,10 +19,9 @@
 
 #include "rdma/iw_cm.h"
 
-#if !defined(IB_HAS_CMA_PRIV_H)
-#	define IB_HAS_CMA_PRIV_H 0
+#if !IB_HAS_CMA_PRIV_H
 #	define USE_CMA_INTERNAL_QP 1
-#elif IB_HAS_CMA_PRIV_H
+#else
 #	include <infiniband/core/cma_priv.h>
 #	define USE_CMA_INTERNAL_QP 0
 #endif
