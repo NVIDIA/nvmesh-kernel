@@ -289,14 +289,6 @@ static struct cdisk_store {
 	struct corecomm_cdisk_info arr[CORECOMM_MAX_CDISKS];
 } global_cdisk_store = {{{0}}}; /* Global vars initialized to 0 */
 
-static struct nvmeib_lock_entry_constants global_lock_entry_constants = {
-    .blkset_info_txid_shift = NVMEIB_BLKSET_INFO_TXID_SHIFT,
-    .blkset_info_txid_mask  = NVMEIB_BLKSET_INFO_TXID_MASK,
-    .blkset_info_dbits_shift =
-        NVMEIB_EC_JMDC_BITS_TX_ID + NVMEIB_BLKSET_INFO_TXID_SHIFT,
-    .blkset_info_dbits_mask = NVMEIB_BLKSET_INFO_DIRTY_MASK,
-    .stale_bit_mask         = 0 /*Don't care*/
-};
 
 struct nvmeibc_disk_create_on_main_wq_param {
 	const struct nvmeibc_cinst_params_core *p;
@@ -829,7 +821,6 @@ __init_corecomm_pd_op_ctx(gfp_t gfp_flags, struct corecomm_connection_ctx *ctx,
 	if (!op_ctx) return NULL;
 	op_ctx->dinfo         = dinfo;
 	op_ctx->ctx           = ctx;
-	op_ctx->dc.lock_cnsts = &global_lock_entry_constants;
 	return op_ctx;
 }
 
@@ -1616,7 +1607,6 @@ NLRPC_SRV_ASYNC(corecomm_nvmeibc_pd_io_, ctx, (cdisk_handle, cdisk),
 		dp_cmds_add_generic_piggyback(io_ctx->dcmd);
 		io_ctx->dcmd.lpb.handle = dinfo->mem_info;
 		io_ctx->dcmd.lpb.addr   = pb_addr;
-		dc->lock_cnsts          = &global_lock_entry_constants;
 		dc->opr                 = NVMEIBC_LOCK_READ;
 	}
 

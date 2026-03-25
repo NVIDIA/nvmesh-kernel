@@ -197,8 +197,7 @@ struct nvmeibc_d_rdma_comp {	/* Todo: Rename to disk_rdma_comp */
 
 	u64 compare;				/*comparand for nvmeibc_disk_interlocked_cmp_exchange*/
 	u64 exchange;				/*value to exchange the lock value, not relevant for nvmeibc_disk_read_lock*/
-	/* lock id constants */
-	const struct nvmeib_lock_entry_constants *lock_cnsts;
+
 	/*keep a pointer to lock channel when the comp is in process*/
 	struct nvmeibc_disk_seg_locks_mem_info *mem_info;
 	/*callback to be used after operation*/

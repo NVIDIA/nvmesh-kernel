@@ -799,7 +799,6 @@ static int __add_locks_for_raid(const struct nvmeibc_raid1 *r1, const enum nvmei
 		l->n_siblings = rlmap.n_locks;
 		l->ds = &r1->segments[si];
 		l->address = __to4K(dlba);
-		l->comp.lock_cnsts = nvmeibc_raid1_get_lock_consts(r1);
 		if (cpu_mask_info)
 			l->comp.cpu_mask_info = *cpu_mask_info;
 		nvmeibc_b_rdma_comp_init(&l->comp, my_ind, locksets);

@@ -176,7 +176,6 @@ struct nvmeibc_raid1 {
 		enum nvmeib_io_type_permission io_perm;	// Use nvmeibc_raid1_get_io_perm() in datapath. This field represents only the permission given by toma, If raid is validly registered this is the maximal permissions it may have
 		u64 conversation_ind;				// Latest conversatino id with Tomas on which the current lock id was agreed. Ever growing number
 	} toma;
-	//struct nvmeib_lock_entry_constants lock_cnsts; // Pointer to constants for lock (mask, stale_bit_mask, tx_id shift/mask, dirty-bits shift/mask)
 	struct nvmeibc_raid_topo_persistent *hdr; // Persistant header of raid1, not changed with dup_topo()
 	struct nvmeibc_disk_segment *segments;  // Array of 'replicas' allocations
 	struct nvmeibc_locks_scheme lock_scheme;// Locking scheme is relevant for each protection raid

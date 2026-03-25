@@ -1087,7 +1087,6 @@ static void __copy_only_owner_lock(struct nvmeibc_cmd_lock *l,
 	l->n_siblings = l->nlocks = 1;
 	l->comp.code = NVMEIBC_CMD_LOCK_OWNER;	// Daniel: Not sure this line is needed
 	set_callback_as_locks_state_machine(dc, __handle_locks_o);
-	dc->lock_cnsts = lock->comp.lock_cnsts;
 	dc->cpu_mask_info = lock->comp.cpu_mask_info;
 }
 

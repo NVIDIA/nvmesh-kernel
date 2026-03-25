@@ -185,7 +185,6 @@ void dp_cmds_piggyback_dbR1_on_write(struct nvmeibc_block_command *_cmd, const s
 	u64 *payload = &dp_cmds_get_piggyback_val(_cmd);
 	cmd->lpb.handle = handle_of(_cmd->ds);
 	cmd->lpb.addr = __data_cmd_to_piggyback_addr(cmd); // Never pigbacked on journal cmds
-	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(nvmeibc_disk_segment_get_praid(_cmd->ds));
 	((union nvmeib_blkset_info*)payload)->bits.dirty = dbmap->post.all_bits;
 	((union nvmeib_blkset_info*)payload)->bits.txid  = reserved; 		// Daniel: Tmp debug code (coz those bits are not used)
 	dc->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
@@ -210,7 +209,6 @@ void dp_cmds_piggyback_info_on_write(struct nvmeibc_block_command *_cmd, union n
 	u64 *payload = &dp_cmds_get_piggyback_val(_cmd);
 	cmd->lpb.handle = handle_of(_cmd->ds);
 	cmd->lpb.addr =  __cmd_to_piggyback_addr(_cmd); // May be piggbacked on journal
-	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(nvmeibc_disk_segment_get_praid(_cmd->ds));
 	*((union nvmeib_blkset_info*)payload) = v;
 	dc->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
 	dp_cmds_add_generic_piggyback(cmd);
@@ -236,7 +234,6 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 	cmd->comp.pigbck_lock = l;
 	l->last_retry_report_time = l->first_try_time = jiffies;		// Todo: Move to separate func(). Much like in __request_lock()
 
-	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(r1);
 	dc->compare  = LS_UNLOCKED;
 	dc->exchange = r1->lid.all;
 	dc->callback = &dp_locks_view_lock_sm;
