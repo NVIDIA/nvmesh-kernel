@@ -101,8 +101,8 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 
 	m->disk_002.disk_id = "NVMD_SN_002.1";
 	m->disk_003.disk_id = "NVMD_SN_003.1";
-	m->disk_002.uuid = DISK_UUID_LOCAL_002;
-	m->disk_003.uuid = DISK_UUID_LOCAL_003;
+	m->disk_002.uuid = initialized_cfg->live->disks[0].uuid;
+	m->disk_003.uuid = initialized_cfg->live->disks[1].uuid;
 	m->disk_002.vendor = 5122;
 	m->disk_003.vendor = 5123;
 	m->disk_002.format.counter_sent = 20;		// Start from some number, different start for each disk for easier logs analysis
@@ -290,12 +290,12 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 			m->disk_003.disk_id, m->disk_003.vendor, m->disk_003.uuid,
 			m->cfg->live->nics[0].uuid, m->cfg->live->nics[1].uuid,
 		other_toma[0].hostname, other_toma[0].uuid,
-			DISK_UUID_REMOTE38_D0,
-			DISK_UUID_REMOTE38_D1,
+			other_toma[0].disks[0].uuid,
+			other_toma[0].disks[1].uuid,
 			other_toma[0].nics[0].uuid, other_toma[0].nics[1].uuid,
 		other_toma[1].hostname, other_toma[1].uuid,
-			DISK_UUID_REMOTE39_D0,
-			DISK_UUID_REMOTE39_D1,
+			other_toma[1].disks[0].uuid,
+			other_toma[1].disks[1].uuid,
 		other_toma[1].nics[0].uuid, other_toma[1].nics[1].uuid);
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);
 }

@@ -15,6 +15,9 @@ struct sb_cluster_conf {
 		struct sb_nics_conf {
 			uint32_t uuid;
 		} nics[2];				// Each node has exactly 2 nics
+		struct sb_disk_conf {	// Each node has up to 3 local disks
+			uint32_t uuid;
+		} disks[3];
 		bool ignore_append_entries;			// Emulates infinitely slow local disk response time, does not commit raft leaders topo
 	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n49
 	int n_nodes;

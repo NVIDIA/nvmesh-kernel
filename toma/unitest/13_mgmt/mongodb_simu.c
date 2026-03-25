@@ -13,7 +13,7 @@
 #define VOL__UUID_BASE           0xbd000000			// Vol (Block device) Has first 4 nibbles as bdXX where XX is volume index (up to 256 vols), Last 4 nibbles are 0CRS, where C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
 
 void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
-	int i;
+	int i, j;
 	gethostname(sb->my_hostname, sizeof(sb->my_hostname) - 1);
 	sb->n_nodes = (int)ARRAY_SIZE(sb->nodes);
 	sb->live =  &sb->nodes[0];
@@ -22,23 +22,32 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	sb->other[0].hostname = "n38@nvidia.com";
 	sb->other[1].hostname = "n39@nvidia.com";
 	for (i = 0; i < sb->n_nodes; i++) {
-		sb->nodes[i].uuid = NODE_UUID_BASE + (i << 20) + i;
-		sb->nodes[i].nics[0].uuid = (sb->nodes[i].uuid & 0xFFFF0000) | ((NIC__UUID_BASE & 0xFFFF) + 0);
-		sb->nodes[i].nics[1].uuid = (sb->nodes[i].uuid & 0xFFFF0000) | ((NIC__UUID_BASE & 0xFFFF) + 1);
+		struct sb_node_conf *node = &sb->nodes[i];
+		node->uuid = NODE_UUID_BASE + (i << 20) + i;
+		for (j = 0; j < (int)ARRAY_SIZE(node->nics); j++)
+			node->nics[j].uuid =  (node->uuid & 0xFFFF0000) | ((NIC__UUID_BASE & 0xFFFF) + j);
+		for (j = 0; j < (int)ARRAY_SIZE(node->disks); j++)
+			node->disks[j].uuid = (node->uuid & 0xFFFF0000) | ((DISK_UUID_LOCAL_002 & 0xFFFF) + j);
 	}
+			BUG_ON(sb->nodes[0].disks[0].uuid != DISK_UUID_LOCAL_002);
+			BUG_ON(sb->nodes[0].disks[1].uuid != DISK_UUID_LOCAL_003);
+			BUG_ON(sb->nodes[1].disks[0].uuid != DISK_UUID_REMOTE38_D0);
+			BUG_ON(sb->nodes[1].disks[1].uuid != DISK_UUID_REMOTE38_D1);
+			BUG_ON(sb->nodes[2].disks[0].uuid != DISK_UUID_REMOTE39_D0);
+			BUG_ON(sb->nodes[2].disks[1].uuid != DISK_UUID_REMOTE39_D1);
 
 	{	// Create 2 volumes:		All uuids are generated as 32bits integers 0xaaaV0CRS, where V is volume index, C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
 		unsigned c, r, s, disk_seg_n_blocks = 1024;		// 4[mb] disk segments
 		struct sb_seg_conf *ps;
 		{	// Allocate areas on disks, Todo: Here use counter on each disk to auto allocate next segment (instead of manual calculation), when we will add/remove volumes dynamically.
 			ps = &sb->vols[0].chunks[0].raids[0].segs[0];
-			ps[0].disk_uuid = DISK_UUID_REMOTE38_D0;		ps[0].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
-			ps[1].disk_uuid = DISK_UUID_REMOTE39_D0;		ps[1].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[0].disk_uuid = sb->nodes[1].disks[0].uuid;		ps[0].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[1].disk_uuid = sb->nodes[2].disks[0].uuid;		ps[1].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
 
 			ps = &sb->vols[1].chunks[0].raids[0].segs[0];
-			ps[0].disk_uuid = DISK_UUID_LOCAL_003;			ps[0].block_start = 6176;	ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
-			ps[1].disk_uuid = DISK_UUID_REMOTE38_D0;		ps[1].block_start = 1024;	ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
-			ps[2].disk_uuid = DISK_UUID_REMOTE38_D1;		ps[2].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[0].disk_uuid = sb->nodes[0].disks[1].uuid;		ps[0].block_start = 6176;	ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[1].disk_uuid = sb->nodes[1].disks[0].uuid;		ps[1].block_start = 1024;	ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
+			ps[2].disk_uuid = sb->nodes[1].disks[1].uuid;		ps[2].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
 		}
 		sb->n_vols = 2;
 		sb->vols[0].name = "V_REMOTE1";								// RAID-1, segments only on remote disks (D0_n38, D0_n39)
