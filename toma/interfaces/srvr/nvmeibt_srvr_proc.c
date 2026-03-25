@@ -379,7 +379,7 @@ int nvmeib_srvr_api_lib_create(const struct nvmeibt_km_comm_params* params)
 	if (params->use_only_passive_util_mode) {	/* Skip active initialization*/ goto done; }
 	if (__blocking_msg_api_create(p) < 0) {						rv = -__LINE__; goto free_p; }
 	if (!params->print_status_fn) { 							rv = -__LINE__; goto free_p; }			// The only one which is mandatory for Toma
-	if (pthread_mutex_init(&p->guard, NULL) < 0) { 				rv = -__LINE__; goto free_p; }
+	if (pthread_mutex_init(&p->guard, NULL) != 0) { 				rv = -__LINE__; goto free_p; }
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, p->spair) < 0) { 	rv = -__LINE__; goto free_guard; }
 	if (start_netlink_socket(p))  { 							rv = -__LINE__; goto free_spair; }
 	if (nvmeibt_nonblock_fd(p->spair[1]) < 0) {					rv = -__LINE__; goto free_netlink; }

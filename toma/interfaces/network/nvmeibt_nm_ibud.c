@@ -1983,12 +1983,12 @@ static int create_offloader(struct ibud_local_node *ln)
 		N_ETf(nm_create_offloader_e1, "Failed to allocate offloader");
 		goto out;
 	}
-	if (pthread_mutex_init(&w->pool_guard, NULL) < 0) {
+	if (pthread_mutex_init(&w->pool_guard, NULL) != 0) {
 		N_ETf(nm_create_offloader_e2,
 			"Failed to create pool_guard - @AUTO_ERRNO");
 		goto free_w;
 	}
-	if (pthread_mutex_init(&w->exec_guard, NULL) < 0) {
+	if (pthread_mutex_init(&w->exec_guard, NULL) != 0) {
 		N_ETf(nm_create_offloader_e21,
 			"Failed to create exec_guard - @AUTO_ERRNO");
 		goto free_pg;

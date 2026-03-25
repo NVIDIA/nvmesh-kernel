@@ -962,12 +962,12 @@ static int init_toma_wakeup(void)
 		}
 	}
 
-	if (pthread_mutex_init(&toma_wakeup_mutex, NULL) < 0) {
+	if (pthread_mutex_init(&toma_wakeup_mutex, NULL) != 0) {
 		N_Ef(trace_1_toma_init_toma_wakeup, "Failed to create toma wakeup mutex (@AUTO_ERRNO)");
 		goto out;
 	}
 
-	if (pthread_mutex_init(&toma_wakeup_pending_mutex, NULL) < 0) {
+	if (pthread_mutex_init(&toma_wakeup_pending_mutex, NULL) != 0) {
 		N_Ef(trace_2_toma_init_toma_wakeup, "Failed to create toma wakeup pending mutex (@AUTO_ERRNO)");
 		goto out;
 	}

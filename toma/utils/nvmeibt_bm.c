@@ -302,7 +302,7 @@ int nvmeibt_bm_create(void)
 	bm = NNVMEIBT_TOMA_CALLOC(trace_bm_nvmeibt_bm_create, 1, sizeof(*bm));
 	pthread_mutexattr_init(&attr);
 	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-	if (pthread_mutex_init(&bm->guard, &attr) < 0) {
+	if (pthread_mutex_init(&bm->guard, &attr) != 0) {
 		N_Ef(error_1_bm_nvmeibt_bm_create, "Failed to create beffer manager guard");
 		NNVMEIBT_TOMA_FREE(trace_1_bm_nvmeibt_bm_create, bm);
 	} else {

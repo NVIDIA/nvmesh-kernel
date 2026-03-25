@@ -348,7 +348,7 @@ struct nvmeibt_srm *nvmeibt_srm_create(const struct carrier *car)
 	/* init the work queue */
 	XDLIST_HEAD_INIT(&srm->work_q);
 	/* init queue guard */
-	if (pthread_mutex_init(&srm->guard, NULL) < 0) {
+	if (pthread_mutex_init(&srm->guard, NULL) != 0) {
 		N__E(error_1_srm_nvmeibt_srm_create, "Failed to create send/receive manager guard for context @CONN",
 			conn);
 		goto free_works;

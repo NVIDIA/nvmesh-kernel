@@ -2186,7 +2186,7 @@ static struct nvmeibt_nm_local_node * create_local_node(struct nvmeibt_nm_hw_fun
 	ln->status_json_str1_size = ln->status_json_str2_size = STATUS_STR_INIT_SIZE;
 	ln->status_str = ln->status_str1;
 	ln->status_json_str = ln->status_json_str1;
-	if (pthread_mutex_init(&ln->guard, NULL) < 0) {
+	if (pthread_mutex_init(&ln->guard, NULL) != 0) {
 		N_ETf(nm_create_local_node_e2, "Failed to create guard - @AUTO_ERRNO");
 		goto free_ln;
 	}
