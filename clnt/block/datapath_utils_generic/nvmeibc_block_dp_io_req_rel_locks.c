@@ -418,7 +418,7 @@ static void __set_cmpxchg_for_release(struct nvmeibc_cmd_lock*l, struct nvmeibc_
 		dc->exchange = R1_STALE_SPECIAL_BINFO_VAL;				// Convert stale lock to stale special (stale unlocked)
 		_ND(tr_1_set_cmpxchng_release, " locksets=@LOCKSETS release lock to stale-special: reason=@RV\n", l, l->unlock_reason);
 	} else {	/* Unlock lock (keeping the non-lock bits intact) */
-		dc->exchange = dc->lock_cnsts->unlocked_val;
+		dc->exchange = LS_UNLOCKED;
 	}
 	dc->compare = holder.all;
 }
@@ -693,13 +693,13 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 	struct nvmeibc_disk_io_command *iocmd = container_of(cmp, struct nvmeibc_disk_io_command, comp);
 	unsigned long retry_time;
 	struct operation *o = locksets->cmds->o;
-	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(read_comp).all;
+	const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(read_comp);
 	const int lsi = l->lockset_idx;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	(void)tag;
 	l->status = read_comp->lock_status;
-	_ND(t_rlsm0, "locksets=@LOCKSETS[@LSI] cmp=@PTR, val=@LOCK_ENT_U64, lock_status=@STATUS_STR" , locksets, lsi, cmp, holder, ncl_status_str(l->status));
+	_ND(t_rlsm0, "locksets=@LOCKSETS[@LSI] cmp=@PTR, val=@LOCK_ENT_U64, lock_status=@STATUS_STR" , locksets, lsi, cmp, holder.all, ncl_status_str(l->status));
 	dp_locks_trace_lock_comp(o, l, read_comp);
 
 	// ----- Step1: Handle piggyback view-lock send-if-needed
@@ -709,7 +709,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 		dp_locks_send_read_lock(cmp); /*EC-4937 if we do not have lock id yet, do not call for toma help. Maybe we don't need it.*/
 		return 0;												// Will get a future callback from view read lock
 	} else if (l->status == NCL_STATUS_INVALID) {				// Disk-cmd completion with piggybacked view lock. Lock was not requested directly
-		const enum nvmeibc_block_lock_status new_status = ((holder == read_comp->lock_cnsts->unlocked_val) ? NCL_STATUS_TAKEN : NCL_STATUS_CONTENDED);
+		const enum nvmeibc_block_lock_status new_status = ((holder.all == LS_UNLOCKED) ? NCL_STATUS_TAKEN : NCL_STATUS_CONTENDED);
 		__change_lock_status_to(l, new_status);					// Simulate as happens in transport layer via explicit view lock
 	} else {													// Explicit Read-lock view operation via pausable layer
 		nvmeibc_cmd_lock_response_io_pet_describe(o, l);
@@ -727,10 +727,10 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 
 	// ----- Step2: Handle piggyback view-lock success
 	if (likely(NCL_do_i_have_lock(l->status)) ||										// Lock is empty
-		(nvmeibc_sync_is_stale(l, holder) && nvmeibc_sync_is_read_only(l, holder))) {	// Or, EC: lock is stale but slice was not corrupted
+		(holder.bits.is_stale && holder.bits.is_read)) {	// Or, EC: lock is stale but slice was not corrupted
 		const union nvmeib_blkset_info binfo = nvmeibc_d_rdma_comp_get_bi(read_comp);
 		if (!verify_binfo_is_legal(l->ds, binfo, l->address, 'r')) {
-			_NE(tr6_dplrcb, DMESG_PREFIX("@DEV_NAME") ": Additional_info: locksets=@LOCKSETS[@LSI], lock_val=@LOCK_ENT_U64", o->nd->name, locksets, lsi, holder);
+			_NE(tr6_dplrcb, DMESG_PREFIX("@DEV_NAME") ": Additional_info: locksets=@LOCKSETS[@LSI], lock_val=@LOCK_ENT_U64", o->nd->name, locksets, lsi, holder.all);
 			nvmeibc_block_suspend(o->nd, NULL, NULL);
 			__fail_cmds_of_broken_read_lock(NCL_STATUS_DONE, cmp, -EIO);
 		} else																			// _successful_unlocked
@@ -750,7 +750,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 		OPERATION_DBG_CNTR_INC(o, n_topo_phased_out);
 		__fail_cmds_of_broken_read_lock(NCL_STATUS_DONE, cmp, -EAGAIN);
 	} else {
-		if (nvmeibc_sync_is_stale(l, holder)) {
+		if (holder.bits.is_stale) {
 			enum stale_lock_resolve_status ss;
 			/* Daniel: Read cannot complete without sync operation or else it is
 			   data corruption. So it does not matter if lock is stale or stale
@@ -760,7 +760,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 			u16 start_block = 0, n_slices = LOCKSET_SLICES;
 			l->comp.lock = read_comp->lock;			// Copy the holder+binfo, for sync to know how to compare exchange and treat unknown dbits
 			l->comp.opr =  read_comp->opr;			// Copy the type of operation into the lock
-			ss = stale_lock_resolver_get_status(&l->ds->toma_reg->hdr->slr, holder, l);
+			ss = stale_lock_resolver_get_status(&l->ds->toma_reg->hdr->slr, holder.all, l);
 			if (ss == stale_lock_resolve_safe_to_use) { // Treat as stale special
 				if (!must_do_full_blkset_sync(c)) {
 					start_block = (u16)(iocmd->reqs1.disk_address % LOCKSET_SLICES);
@@ -769,7 +769,7 @@ int dp_locks_view_lock_sm(struct nvmeibc_d_rdma_comp *read_comp, struct nvmeibc_
 				if (nvmeibc_sync_fix_some_slices_in_stale(l, start_block, n_slices, __retry_read_lock_cb_sync_done, cmp) == 0)
 					return 0;								// Will get a future callback from sync completion
 			} else { } // Just retry after delay and hope toma will answer us. Same flow as typical contended lock
-		} else if (holder != read_comp->exchange) { /* Just contended lock, retry */
+		} else if (holder.all != nvmeibc_d_rdma_comp_get_exchange_lock_id(read_comp).all) { /* Just contended lock, retry */
 		} else { /* Lock is already mine but another thread locked it */ }
 		__schedule_retry_read_lock(l, cmp, retry_time);
 	}
@@ -944,7 +944,7 @@ static void __schedule_retry_owner_lock(struct nvmeibc_cmd_lock *l, ulong retry_
 	struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	const ulong cur_time = jiffies;
 	_ND(t_1_srol, "setting timer");
-	dc->compare = dc->lock_cnsts->unlocked_val; /* Revert previous attempt to lock a stale or stale special */
+	dc->compare = LS_UNLOCKED; /* Revert previous attempt to lock a stale or stale special */
 	NVMEIBC_LOCK_SET_UNLOCK(l, RELEASE_LOCK__UNLOCKED, RELEASE_LOCK_REASON__NONE);
 	if (jiffies_to_msecs(cur_time - l->last_retry_report_time) > __COMPLAIN_LOCK_TIME) {
 		l->last_retry_report_time = cur_time;
@@ -1105,7 +1105,7 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	BUG_ON((l->status != dc->lock_status) || (l->type == NVMEIBC_CMD_PREDISCARD));		// Just sanity
 	WARN(!(NCL_is_failed_to_acquire(l->status) || (l->status == NCL_STATUS_CONTENDED) || (l->status == NCL_STATUS_TAKEN)), "nvmeibc bug: locks=%p[%d].status=%d", locksets, lock_i, l->status);
 	#ifdef DEBUG_CONTENDED_LOCKS
-		l->curr_txid = (dc->lock.bi >> dc->lock_cnsts->blkset_info_txid_shift) & dc->lock_cnsts->blkset_info_txid_mask;
+		l->curr_txid = nvmeibc_d_rdma_comp_get_bi(dc).bits.txid;		
 		if (dc->lock_status == NCL_STATUS_CONTENDED) {
 			l->curr_contender_id = nvmeibc_d_rdma_comp_get_lock_id(dc).all;
 			if (l->retries == 0) {
@@ -1138,14 +1138,14 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	_ND(t_1clap , "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID].status=@STATUS_STR retries=@RETRIES @MILISECONDS @DLBA", locksets, lock_i,owner_id, ncl_status_str(l->status), l->retries, msecs, l->address);
 
 	if (unlikely(l->status == NCL_STATUS_CONTENDED)) {
-		const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(dc).all;
+		const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(dc);
 		const ulong retry_time = dp_locks_get_retry_time(l);
 		const bool bad_topo = (o->topo->phased_out);
 		IO_STATS_INCR(&o->nd->dp.io_stats, DP_IO_STATS_LOCK_CONTENDED_COUNT);
-		if (nvmeibc_sync_is_stale(l, holder)) {
+		if (holder.bits.is_stale) {
 			IO_STATS_INCR(&o->nd->dp.io_stats, DP_IO_STATS_LOCK_STALE_COUNT);
 		}
-		_ND(tr_2_check_lock_actions, "Contention owner: locksets=@LOCKSETS[@LSI]=@LOCK_ENT_U64", locksets, lock_i, holder);
+		_ND(tr_2_check_lock_actions, "Contention owner: locksets=@LOCKSETS[@LSI]=@LOCK_ENT_U64", locksets, lock_i, holder.all);
 		if (bad_topo || nvmeibc_operation_does_expire_at(o, retry_time)) {	// Abort: Due to primary owner contention
 			_ND(tr_3_check_lock_actions, "Giveup contented owner: retries=@RETRIES topo_fo=@RV", l->retries, bad_topo);
 			IO_STATS_INCR(&o->nd->dp.io_stats, DP_IO_STATS_WAIT_FOR_LOCKSET_CANCELED_COUNT);
@@ -1155,25 +1155,25 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 			}
 		} else {	// Retry primary owner / copy / dual-lock
 			l->cmds = locksets->cmds; /* critical for __retry_owner_lock */
-			if (unlikely(nvmeibc_sync_is_stale(l, holder))) {
+			if (unlikely(holder.bits.is_stale)) {
 				enum stale_lock_resolve_status ss;
-				if (nvmeibc_sync_is_read_only(l, holder)) { 	// EC: lock is stale but slice was not corrupted. No need to sync
-					dc->compare = holder;
+				if (holder.bits.is_read) { 	// EC: lock is stale but slice was not corrupted. No need to sync
+					dc->compare = holder.all;
 					return __retry_owner_lock(l, false);	// Immediately (no timer).
 				}
 
-				ss = stale_lock_resolver_get_status(&l->ds->toma_reg->hdr->slr, holder, l);
+				ss = stale_lock_resolver_get_status(&l->ds->toma_reg->hdr->slr, holder.all, l);
 				if (ss == stale_lock_resolve_safe_to_use) { // Treat as stale special
-					if (__on_stale_resolved_val(locksets, lock_i, o, holder) == 0)
+					if (__on_stale_resolved_val(locksets, lock_i, o, holder.all) == 0)
 						return;
 				} else {
 					/* Just retry after delay and hope toma will answer us. Same flow as typical contended lock */
 				}
-			} else if (holder == dc->lock_cnsts->unlocked_val) {		/* Previously stale, now unlocked. Retry immediately. */
-				WARN_ON(dc->compare == dc->lock_cnsts->unlocked_val);	// Status should not be "contended" in this case
-				dc->compare = dc->lock_cnsts->unlocked_val;
+			} else if (holder.all == LS_UNLOCKED) {		/* Previously stale, now unlocked. Retry immediately. */
+				WARN_ON(dc->compare == LS_UNLOCKED);	// Status should not be "contended" in this case
+				dc->compare = LS_UNLOCKED;
 				return __retry_owner_lock(l, false);
-			} else if (holder != dc->exchange) {
+			} else if (holder.all != dc->exchange) {
 				/* Just contended lock, retry */
 			} else {
 				/* Daniel Todo: Lock is already mine but another thread locked it */
@@ -1370,7 +1370,7 @@ void dp_locks_send_all(struct nvmeibc_cmd_lock *locksets)
 			struct nvmeibc_raid1* r1 = nvmeibc_disk_segment_get_praid(l->ds);
 			dc->code = NVMEIBC_CMD_LOCK_OWNER;		// Daniel: always do cmpxchg (even for copy owners). For debug!
 			dc->callback = &__lock_response_cb;
-			dc->compare = nvmeibc_raid1_get_lock_consts(r1)->unlocked_val;
+			dc->compare = LS_UNLOCKED;
 			dc->exchange = get_lockid_for_cmpxchg(r1, op);
 			end_req_locks = lsi + 1;	// We will loop until last lock to request. After it the operation can finish within the loop
 			break;
