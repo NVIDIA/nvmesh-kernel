@@ -8,15 +8,18 @@
 #include "../sandbox_util.h"
 
 struct sb_cluster_conf {
-	char my_hostname[64];		// Live Toma (non sandbox, real hostname)
 	struct sb_node_conf {
-		const char *hostname;	// Easily recognizable host name
+		char hostname[64];		// Easily recognizable host name
 		uint32_t uuid;			// uuid of this node
 		struct sb_nics_conf {
+			const char *protocol;
 			uint32_t uuid;
 		} nics[2];				// Each node has exactly 2 nics
 		struct sb_disk_conf {	// Each node has up to 3 local disks
+			char name[16];
 			uint32_t uuid;
+			u16 vendor;
+			bool is_out_of_service;
 		} disks[3];
 		bool ignore_append_entries;			// Emulates infinitely slow local disk response time, does not commit raft leaders topo
 	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n49
@@ -50,6 +53,7 @@ struct sb_cluster_conf {
 void sb_cluster_conf_create( struct sb_cluster_conf *);
 void sb_cluster_conf_destroy(struct sb_cluster_conf *);
 int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const char *host_name);
+const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation
 void sb_cluster_ignore_append_entries_by_node(int node_idx);

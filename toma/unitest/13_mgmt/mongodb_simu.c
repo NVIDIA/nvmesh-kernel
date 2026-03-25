@@ -1,41 +1,34 @@
 #include "mongodb_simu.h"
 #include "nvmeibt_debug.h"	// Binary tracing
 
-/* UUID constants, All uuids are generated as 32bits integers */
-#define DISK_UUID_LOCAL_002      0xf37000d0			// Encodes 3 nibbles node and 'd' for disk: easier eye catcher debugging
-#define DISK_UUID_LOCAL_003      0xf37000d1
-#define DISK_UUID_REMOTE38_D0    0xf38000d0
-#define DISK_UUID_REMOTE38_D1    0xf38000d1
-#define DISK_UUID_REMOTE39_D0    0xf39000d0
-#define DISK_UUID_REMOTE39_D1    0xf39000d1
-#define NODE_UUID_BASE           0xf37000c0			// First 3 nibbles = node, 'c' for 'computer', last nibble = index of node in cluster for faster search
-#define NIC__UUID_BASE           0xf37000e0			// First 3 nibbles = node, 'e' for 'ethernet', last nibble = index of nic  in this node
+/* UUID constants, All uuids are generated as 32bits integers.  First 3 nibbles = node {f37 (liveToma), 2 other Tomas: f38, f39} */
+#define NODE_UUID_BASE           0xf37000c0			// 'c' for 'computer',                         last nibble = index of node in cluster for faster search
+#define DISK_UUID_BASE           0x000000d0			// 'd' for disk: easier eye catcher debugging, last nibble = index of disk in this node
+#define NIC__UUID_BASE           0x000000e0			// 'e' for 'ethernet',                         last nibble = index of nic  in this node
 #define VOL__UUID_BASE           0xbd000000			// Vol (Block device) Has first 4 nibbles as bdXX where XX is volume index (up to 256 vols), Last 4 nibbles are 0CRS, where C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
 
 void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	int i, j;
-	gethostname(sb->my_hostname, sizeof(sb->my_hostname) - 1);
 	sb->n_nodes = (int)ARRAY_SIZE(sb->nodes);
 	sb->live =  &sb->nodes[0];
 	sb->other = &sb->nodes[1];
-	   sb->live->hostname = sb->my_hostname;
-	sb->other[0].hostname = "n38@nvidia.com";
-	sb->other[1].hostname = "n39@nvidia.com";
 	for (i = 0; i < sb->n_nodes; i++) {
 		struct sb_node_conf *node = &sb->nodes[i];
 		node->uuid = NODE_UUID_BASE + (i << 20) + i;
-		for (j = 0; j < (int)ARRAY_SIZE(node->nics); j++)
-			node->nics[j].uuid =  (node->uuid & 0xFFFF0000) | ((NIC__UUID_BASE & 0xFFFF) + j);
-		for (j = 0; j < (int)ARRAY_SIZE(node->disks); j++)
-			node->disks[j].uuid = (node->uuid & 0xFFFF0000) | ((DISK_UUID_LOCAL_002 & 0xFFFF) + j);
+		snprintf(node->hostname, sizeof(node->hostname), "%x@nvidia.com", (node->uuid >> 20));
+		for (j = 0; j < (int)ARRAY_SIZE(node->nics); j++) {
+			struct sb_nics_conf *nic = &node->nics[j];
+			nic->uuid =  (node->uuid & 0xFFFF0000) | NIC__UUID_BASE | j;
+			nic->protocol = ((j%2) ? "RoCE" : "IB");
+		}
+		for (j = 0; j < (int)ARRAY_SIZE(node->disks); j++) {
+			struct sb_disk_conf *disk = &node->disks[j];
+			disk->uuid = (node->uuid & 0xFFFF0000) | DISK_UUID_BASE | j;
+			snprintf(disk->name, sizeof(disk->name),"NVMD_%x_00%u.1", (node->uuid >> 20), (j + 2));
+			disk->vendor = 5000 + (i+1) * 100 + j;
+		}
 	}
-			BUG_ON(sb->nodes[0].disks[0].uuid != DISK_UUID_LOCAL_002);
-			BUG_ON(sb->nodes[0].disks[1].uuid != DISK_UUID_LOCAL_003);
-			BUG_ON(sb->nodes[1].disks[0].uuid != DISK_UUID_REMOTE38_D0);
-			BUG_ON(sb->nodes[1].disks[1].uuid != DISK_UUID_REMOTE38_D1);
-			BUG_ON(sb->nodes[2].disks[0].uuid != DISK_UUID_REMOTE39_D0);
-			BUG_ON(sb->nodes[2].disks[1].uuid != DISK_UUID_REMOTE39_D1);
-
+	gethostname(sb->live->hostname, sizeof(sb->live->hostname) - 1);
 	{	// Create 2 volumes:		All uuids are generated as 32bits integers 0xaaaV0CRS, where V is volume index, C,R,S are chunk, raid and seg indices respectively. Counting starts from 1.
 		unsigned c, r, s, disk_seg_n_blocks = 1024;		// 4[mb] disk segments
 		struct sb_seg_conf *ps;
@@ -50,8 +43,8 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 			ps[2].disk_uuid = sb->nodes[1].disks[1].uuid;		ps[2].block_start = 0;		ps->block_end = ps->block_start + disk_seg_n_blocks - 1;
 		}
 		sb->n_vols = 2;
-		sb->vols[0].name = "V_REMOTE1";								// RAID-1, segments only on remote disks (D0_n38, D0_n39)
-		sb->vols[1].name = "V_R1";									// RAID-1, one local segment + 2 remote on n38
+		sb->vols[0].name = "V_REMOTE1";								// RAID-1, segments only on remote disks
+		sb->vols[1].name = "V_R1";									// RAID-1, one local segment + 2 remote
 		for (i = 0; i < sb->n_vols; i++) {
 			struct sb_volume_conf *pv = &sb->vols[i];
 			pv->uuid = (VOL__UUID_BASE | ((i+1) << 16));
