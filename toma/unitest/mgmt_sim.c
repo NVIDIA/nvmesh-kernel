@@ -165,20 +165,12 @@ static void __send_msg_volume_del(int vol_idx, bool is_completed) {
 static bool __is_disk_fmt_running(enum e_disk_format_state e) { return ((e != FMT_IDLE) && (e != FMT_DONE)); }
 
 static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (strcmp(drive_name, m->disks_st[0].conf->name) == 0) return &m->disks_st[0];
-	if (strcmp(drive_name, m->disks_st[1].conf->name) == 0) return &m->disks_st[1];
-	BUG_ON(drive_name[0] != 'S'); 		// For now, ignore stock drivers in Toma report
-	return NULL;
+	return (drive_name[0] == 'S') ? NULL // For now, ignore stock drivers in Toma report
+		: &g_mgmt_sim->disks_st[sb_cluster_get_disk_idx_from_disk_name(g_mgmt_sim->cfg, drive_name)];
 }
 
 static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	unsigned uuid_u32 = 0;
-	BUG_ON(sscanf(disk_uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
-	if (uuid_u32 == m->disks_st[0].conf->uuid) return &m->disks_st[0];
-	if (uuid_u32 == m->disks_st[1].conf->uuid) return &m->disks_st[1];
-	BUG_ON(true); return NULL;
+	return &g_mgmt_sim->disks_st[sb_cluster_get_disk_idx_from_disk_uuid(g_mgmt_sim->cfg, disk_uuid)];
 }
 
 static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {

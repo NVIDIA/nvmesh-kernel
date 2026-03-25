@@ -54,6 +54,8 @@ void sb_cluster_conf_create( struct sb_cluster_conf *);
 void sb_cluster_conf_destroy(struct sb_cluster_conf *);
 int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const char *host_name);
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
+int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
+int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, const char *disk_uuid);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation
 void sb_cluster_ignore_append_entries_by_node(int node_idx);

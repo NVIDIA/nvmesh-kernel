@@ -84,6 +84,23 @@ int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, cons
 	BUG_ON(true); return -1;
 }
 
+int sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *sb, const char *disk_name) {
+	const int n = disk_name[ 7] - '0' - ((NODE_UUID_BASE>>20)&0xF);
+	const int d = disk_name[11] - '0' - 2;
+	BUG_ON(strncmp(sb->nodes[n].disks[d].name, disk_name, 16) != 0);
+	return d;
+}
+
+int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *sb, const char *disk_uuid) {
+	unsigned uuid_u32 = 0, n, d;
+	BUG_ON(sscanf(disk_uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
+	n = (uuid_u32 ^ DISK_UUID_BASE) - (NODE_UUID_BASE & 0xFFFF0000);
+	d = n & 0xF;
+	n = n >> 20;
+	BUG_ON(sb->nodes[n].disks[d].uuid != uuid_u32);
+	return d;
+}
+
 void sb_cluster_conf_destroy(struct sb_cluster_conf *sb) {
 	(void)sb;
 }
