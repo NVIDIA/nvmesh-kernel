@@ -69,7 +69,6 @@ void __praid_init_lock_consts(struct nvmeibc_raid1 *pr)
 	struct nvmeib_lock_entry_constants *lc = (void*)nvmeibc_raid1_get_lock_consts(pr);
 	lc->unlocked_val = LS_UNLOCKED;
 	/* Uses parts of the lock for Transaction ID and Dirty-bits */
-	lc->w_blkset_info =           true;
 	lc->blkset_info_txid_shift =  NVMEIB_BLKSET_INFO_TXID_SHIFT;
 	lc->blkset_info_txid_mask =   NVMEIB_BLKSET_INFO_TXID_MASK;
 	lc->blkset_info_dbits_shift = NVMEIB_EC_JMDC_BITS_TX_ID+NVMEIB_BLKSET_INFO_TXID_SHIFT;

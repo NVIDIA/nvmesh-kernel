@@ -1042,8 +1042,7 @@ static void lock_opr_prepare(struct nvmeibc_locks_channel *ch,
 		nvmeib_send_wr_atomic(*wr).compare_add = comp->compare;
 		nvmeib_send_wr_atomic(*wr).swap = comp->exchange;
 		nvmeib_send_wr_atomic(*wr).rkey = rkey;
-
-		if (comp->lock_cnsts->w_blkset_info) {
+		{
 			/* Lock contains blkset info - Need to use masked cmp-and-swap (if supported) */
 			union nvmeib_lock_blkset_entry *lock_blkset_cmp =
 				(void*)&nvmeib_send_wr_atomic(*wr).compare_add;
@@ -1076,7 +1075,6 @@ static void lock_opr_prepare(struct nvmeibc_locks_channel *ch,
 				}
 			}
 		}
-
 		if (unlikely(ch->atomic_req_endian_swap && nvmeib_send_wr_common(*wr).opcode == IB_WR_ATOMIC_CMP_AND_SWP)) {
 			nvmeib_send_wr_atomic(*wr).compare_add = __swab64(nvmeib_send_wr_atomic(*wr).compare_add);
 			nvmeib_send_wr_atomic(*wr).swap = __swab64(nvmeib_send_wr_atomic(*wr).swap);
@@ -1696,7 +1694,7 @@ static int execute_opr_local_bypass(struct nvmeibc_locks_channel *locks_channel,
 			lock_gen_p.lock_param.atomic.compare_add = comp->compare;
 			lock_gen_p.lock_param.atomic.swap = comp->exchange;
 
-			if (comp->lock_cnsts->w_blkset_info) {
+			{
 				union nvmeib_lock_blkset_entry *lock_blkset_cmp_mask =
 				(void*)&lock_gen_p.lock_param.atomic.compare_add_mask;
 				union nvmeib_lock_blkset_entry *lock_blkset_swap_mask =
@@ -1746,13 +1744,10 @@ static int execute_opr_local_bypass(struct nvmeibc_locks_channel *locks_channel,
 	}
 	atomic64_inc(&disk->gen_cmds_cntrs_ok[NVMEIB_GEN_OP_LOCK]);
 	if (comp->opr == NVMEIBC_LOCK_CMP_AND_SWAP || comp->opr == NVMEIBC_LOCK_READ) {
-		if (comp->lock_cnsts->w_blkset_info) {
+		{
 			union nvmeib_lock_blkset_entry *lock_blkset_ret = (void *)&lock_gen_rsp.lock_rsp.cmp_swap_val;
 			comp->lock.id = lock_blkset_ret->lock_id.all;
 			comp->lock.bi = lock_blkset_ret->blkset_info.all;
-		} else {
-			comp->lock.id = lock_gen_rsp.lock_rsp.cmp_swap_val;
-			comp->lock.bi = 0;
 		}
 		if (comp->opr == NVMEIBC_LOCK_CMP_AND_SWAP)
 			comp->lock_status = comp->lock.id == comp->compare ? NCL_STATUS_TAKEN : NCL_STATUS_CONTENDED;
@@ -1923,9 +1918,7 @@ out:
 #define common_skip_locks(_comp) \
 	do { \
 		(_comp)->lock_status = NCL_STATUS_TAKEN; \
-		if ((_comp)->lock_cnsts->w_blkset_info) { \
 			fill_skipped_binfo(_comp); \
-		} \
 		lock_comp_execute_cb(NULL, _comp, NULL, LOCK_COMP_EXECUTE_INLINE); \
 	} while(0)
 #endif
@@ -1948,9 +1941,9 @@ int nvmeibc_disk_locks_interlocked_cmp_exchange( void *handle, u64 addr,
 
 	_ND(trace_disk_locks_nvmeibc_disk_locks_interlocked_cmp_exchange, "CMPSWAP: comp={@COMP, opr=@OPR, lockset_id=@LOCKSET_ID, "
 	   "compare=@COMPARE, exchange=@EXCHANGE, "
-	   "val[0]=@VA, val[1]=@VA, w_blkset_info=@W_BLKSET_INFO} ",
+	   "val[0]=@VA, val[1]=@VA} ",
 	   comp, comp->opr, comp->lockset_id, comp->compare, comp->exchange,
-	   comp->val[0], comp->val[1], !!comp->lock_cnsts->w_blkset_info);
+	   comp->val[0], comp->val[1]);
 
 #ifdef NVMEIB_TRANSPORT_SKIP_STAGES
 	if (unlikely(nvmeibc_skip_lock_cmds_flags & (1 << 0))) {
@@ -2031,13 +2024,6 @@ int nvmeibc_disk_locks_write_blkset_info(void *handle, u64 addr,
 	NFIN;
 	BUG_ON(comp == NULL);
 	BUG_ON(handle == NULL);
-	if (!comp->lock_cnsts->w_blkset_info) {
-		_NE(error_disk_locks_nvmeibc_disk_locks_write_blkset_info, "lock does not contain Blockset Info");
-		WARN_ON_ONCE(1);
-		rv = -1;
-		goto out;
-	}
-
 	comp->opr = NVMEIBC_LOCK_BLKSET_INFO_WRITE;
 	nvmeibc_disk_cmds_stats_init_lock_cmd(
 		nvmeibc_disk_locks_write_blkset_info_e1, comp);
@@ -2085,13 +2071,6 @@ int nvmeibc_disk_locks_read_blkset_info(void* handle, u64 addr, struct nvmeibc_d
 	NFIN;
 	BUG_ON(comp == NULL);
 	BUG_ON(handle == NULL);
-
-	if (!comp->lock_cnsts->w_blkset_info) {
-		_NE(error_disk_locks_nvmeibc_disk_locks_read_blkset_info, "lock does not contain Blockset Info");
-		WARN_ON_ONCE(1);
-		rv = -1;
-		goto out;
-	}
 
 	comp->opr = NVMEIBC_LOCK_BLKSET_INFO_READ;
 	uls = handle;
@@ -2328,10 +2307,7 @@ static int /*noinline*/ disk_locks_on_completion(struct nvmeibc_locks_channel *c
 		if (unlikely((ch->atomic_reply_endian_swap && wc->opcode == IB_WC_COMP_SWAP) ||
 		(ch->masked_atomic_reply_endian_swap && wc->opcode == IB_WC_MASKED_COMP_SWAP)))
 			opr_ip->val[0] = __swab64(opr_ip->val[0]);
-		if (!lock_comp->lock_cnsts->w_blkset_info) {
-			/* Entire value returned is the lock id */
-			lock_comp->val[0] = opr_ip->val[0];
-		} else {
+		{
 			/* Decompose lock into ID and blkset info */
 			union nvmeib_lock_blkset_entry *ret_lock_blkset = (void*)&opr_ip->val[0];
 			if (wc->opcode == IB_WC_COMP_SWAP &&
@@ -2464,10 +2440,10 @@ int nvmeibc_disk_locks_on_completion(struct nvmeibc_locks_channel *ch,
 	if (lock_comp->opr == NVMEIBC_LOCK_CMP_AND_SWAP) {
 		struct nvmeibc_d_rdma_comp *comp = lock_comp;
 		_ND(trace_disk_locks_nvmeibc_disk_locks_on_completion, "CMPSWAP: comp={@COMP, opr=@OPR, lockset_id=@LOCKSET_ID, compare=@COMPARE, "
-		   "exchange=@EXCHANGE, val[0]=@VA, val[1]=@VA, w_blkset_info=@W_BLKSET_INFO}, "
+		   "exchange=@EXCHANGE, val[0]=@VA, val[1]=@VA}, "
 		   "opr_ip={@OPR_IP, val[0]=@VA, val[1]=@VA}",
 		   comp, comp->opr, comp->lockset_id, comp->compare, comp->exchange,
-		   comp->val[0], comp->val[1], comp->lock_cnsts->w_blkset_info,
+		   comp->val[0], comp->val[1],
 		   opr_ip, opr_ip->val[0], opr_ip->val[1]);
 	}
 

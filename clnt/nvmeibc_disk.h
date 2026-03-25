@@ -1746,12 +1746,8 @@ void nvmeibc_disk_dec_io_chan(struct nvmeibc_disk* disk);
 
 #define nvmeibc_set_lock_read(_bc, _dc, _all, _id, _bi) do { \
 	if ((_bc)->comp.comp_code == 0) { \
-		if (!(_dc)->lock_cnsts->w_blkset_info) \
-			(_dc)->lock.id = _all; \
-		else { \
-			(_dc)->lock.id = _id; \
-			(_dc)->lock.bi = _bi; \
-		} \
+		(_dc)->lock.id = _id; \
+		(_dc)->lock.bi = _bi; \
 	} \
 } while (0)
 

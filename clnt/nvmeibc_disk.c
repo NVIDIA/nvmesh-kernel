@@ -5912,9 +5912,7 @@ void nvmeibc_disk_cmd_piggyback_lock_read_poison_inject(
 	struct nvmeibc_d_rdma_comp *c = dp_cmds_get_pigbck_comp_dc(bcmd);
 	if (c && c->opr == NVMEIBC_LOCK_READ) {
 		c->val[0] = poison;
-		if (c->lock_cnsts->w_blkset_info) {
-			c->val[1] = poison;
-		}
+		c->val[1] = poison;
 	}
 }
 
@@ -5925,8 +5923,7 @@ void nvmeibc_disk_cmd_piggyback_lock_read_poison_verify(
 
 	if (c && c->opr == NVMEIBC_LOCK_READ) {
 		if (nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[0]) ||
-			(c->lock_cnsts->w_blkset_info &&
-			 nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[1]))) {
+			nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[1])) {
 			_NE_to_user(t_00_iicgdcc, DMESG_PD_PREFIX("@DISK_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1017. Internal info {@LLX, @LLX}.",
 				bcmd->disk->name, c->val[0], c->val[1]);
 			BUG();

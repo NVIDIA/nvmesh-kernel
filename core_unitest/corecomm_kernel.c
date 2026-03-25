@@ -290,7 +290,6 @@ static struct cdisk_store {
 } global_cdisk_store = {{{0}}}; /* Global vars initialized to 0 */
 
 static struct nvmeib_lock_entry_constants global_lock_entry_constants = {
-    .w_blkset_info          = true,
     .blkset_info_txid_shift = NVMEIB_BLKSET_INFO_TXID_SHIFT,
     .blkset_info_txid_mask  = NVMEIB_BLKSET_INFO_TXID_MASK,
     .blkset_info_dbits_shift =

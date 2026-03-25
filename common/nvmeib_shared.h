@@ -510,7 +510,6 @@ static inline int nvmeib_blkset_sparse_report_to_str(char *buf, int len, long ar
 }
 
 struct nvmeib_lock_entry_constants {
-	bool w_blkset_info;
 	u32 blkset_info_dbits_shift;
 	u32 blkset_info_dbits_mask;
 	u32 blkset_info_txid_shift;
