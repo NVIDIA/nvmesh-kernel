@@ -555,12 +555,12 @@ static struct stale_lock_resolver_t *__get_slr_of_so(struct recovery_sync_op *so
 /* Retry retaking owner lock, if contended */
 static inline void __retry_aquire_lock(struct nvmeibc_d_rdma_comp *lock_comp, struct nvmeibc_cmd_lock *l, struct recovery_sync_op *so)
 {
-	const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(lock_comp).all;
+	const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(lock_comp);
 	if (unlikely(so->o->topo->phased_out)) {
 		so->error = -10011;	/* Immediate failure to speed up topo-free */
 	}
 
-	if (holder == nvmeibc_raid1_get_lock_consts(so->r1)->unlocked_val) {
+	if (holder.all == LS_UNLOCKED) {
 		if (is_op_sync_stale(so->o->op)){
 			/* Owner is 0. If we hold at least 1 lock than should proceed
 			   (secondary is zero), otherwise abort sync operation, probably other
@@ -602,26 +602,26 @@ static inline void __retry_aquire_lock(struct nvmeibc_d_rdma_comp *lock_comp, st
 		}
 	}
 
-	if (!nvmeibc_sync_is_stale(l, holder)) {
-		_NTSO(t_04_sral, "Canceling sync, not stale, contending @LOCKID", (u32)holder);
+	if (!holder.bits.is_stale) {
+		_NTSO(t_04_sral, "Canceling sync, not stale, contending @LOCKID", holder.all);
 		so->error = -10013;	/* Cancel sync (other clnt already cleaning lock) */
 		goto _out;
 	}
 	{
 		struct stale_lock_resolver_t *slr = __get_slr_of_so(so);
-		const enum stale_lock_resolve_status ss = stale_lock_resolver_get_status(slr, holder, l);
-		if (nvmeibc_sync_is_read_only(l, holder)) { // EC: lock is stale but slice was not corrupted, Must query stale locks resolver, to get recoveree UUID for blockset recovered message
+		const enum stale_lock_resolve_status ss = stale_lock_resolver_get_status(slr, holder.all, l);
+		if (holder.bits.is_read) { // EC: lock is stale but slice was not corrupted, Must query stale locks resolver, to get recoveree UUID for blockset recovered message
 			goto _retry;
 		}
 		if (ss != stale_lock_resolve_safe_to_use) {
-			_NTSO(t_05_sral, "Canceling sync, lock resolve status, contending @LOCKID", (u32)holder);
+			_NTSO(t_05_sral, "Canceling sync, lock resolve status, contending @LOCKID", holder.all);
 			so->error = -10014;	/* Cancel sync (Toma, didnt clean-up yet). */
 			goto _out;
 		}
 	}
 _retry:
 	__invoke_crash_on_lock_corruption(l, 0, "take", -1);
-	lock_comp->compare = holder;
+	lock_comp->compare = holder.all;
 	so->stage = sync_stage_recov_lo_try_lock;
 	if (unlikely(so->o->topo->phased_out)) {				// Cancel 'sync'. dont hold topology too long
 		so->error = -10019;
@@ -660,13 +660,13 @@ static inline void __fill_recoveree_uuid(struct nvmeibc_d_rdma_comp *dc, struct 
 	}
 }
 
-static u64 __get_first_ow_val_that_so_had_to_take(struct recovery_sync_op *so)
+static union nvmeib_lock_id __get_first_ow_val_that_so_had_to_take(struct recovery_sync_op *so)
 {
-	u64 rv = 0;
+	union nvmeib_lock_id rv =  {0};
 	int i;
 	for (i = 0; i < so->locks->nlocks; i++) {
 		if (!did_caller_of_so_took_this_lock(&so->locks[i])) {	// Note: Dont care if lock was actually taken by 'so' or not
-			rv = so->locks[i].comp.compare;
+			rv = nvmeibc_d_rdma_comp_get_compare_lock_id(&(so->locks[i].comp));
 			break;	// Usually locks[0]. In topology with dual lock / copy owner (instead of active in raid1), this can be lock[1]
 		}
 	}
@@ -676,13 +676,15 @@ static u64 __get_first_ow_val_that_so_had_to_take(struct recovery_sync_op *so)
 #define does_so_cleans_stale_lock(so) \
 	(((so)->n_slices == LOCKSET_SLICES)&&(so->error == 0))		// If not all slices fixed, this is partial/empty sync and unlock will be to stale values. Example: (NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE)
 
-static u64 __calc_lock_non_clean_release_to_value_mirror(struct recovery_sync_op *so)
+static union nvmeib_lock_id __calc_lock_non_clean_release_to_value_mirror(struct recovery_sync_op *so)
 {
-	u64 rv = __get_first_ow_val_that_so_had_to_take(so);
-	if (nvmeibc_sync_is_stale(so->locks, rv))
-		rv = R1_STALE_SPECIAL_BINFO_VAL;	// Convert from stale to stale special to boost future sync. This is cosher: If lock was taken --> it was alreay resolved by decentralized unreg. If could not be acquired then there is no meaning to release value as well
-
-	return rv;
+	const union nvmeib_lock_id rv = __get_first_ow_val_that_so_had_to_take(so);
+	if (rv.bits.is_stale){
+		return nvmeib_stale_special_raid1.lock_id;	// Convert from stale to stale special to boost future sync. This is cosher: If lock was taken --> it was alreay resolved by decentralized unreg. If could not be acquired then there is no meaning to release value as well
+	}
+	else {
+		return rv;
+	}
 }
 
 static void __prepare_locks_for_release_to(struct recovery_sync_op *so, u64 exchange)
@@ -696,9 +698,9 @@ static void __prepare_locks_for_release_to_prev(struct recovery_sync_op *so)
 {
 	int i;
 	for (i = 0; i < so->locks->n_siblings; i++) {
-		u64 exchange = so->locks[i].comp.compare;
-		WARN(exchange && !nvmeibc_sync_is_stale(so->locks, exchange), "nvmeibc di bug, unlock to 0x%llx\n", exchange);
-		__prepare_lock_for_release(&so->locks[i], exchange);
+		const union nvmeib_lock_id exchange = nvmeibc_d_rdma_comp_get_compare_lock_id(&so->locks[i].comp);
+		WARN((exchange.all && !exchange.bits.is_stale), "nvmeibc di bug, unlock to 0x%u\n", exchange.all);
+		__prepare_lock_for_release(&so->locks[i], exchange.all);
 	}
 }
 
@@ -714,19 +716,18 @@ static void __prepare_locks_for_release(struct recovery_sync_op *so)
 		// its TOMA's stale lock hash value (EC-3788), and cannot write stale special, so all locks
 		// are just reverted to their previous values.
 		if (!nvmeibc_raid_is_ec(so->r1)) { // Mirror
-			u64 exchange = __calc_lock_non_clean_release_to_value_mirror(so);
+			const union nvmeib_lock_id exchange = __calc_lock_non_clean_release_to_value_mirror(so);
 
 			// NOTE: 'exchange' can be 0 in the case this is a commit stale sync but the owner lock was not stale
-			WARN(exchange && !nvmeibc_sync_is_stale(so->locks, exchange),
-					"nvmeibc di bug, unlock to 0x%llx\n", exchange);
+			WARN(exchange.all && !exchange.bits.is_stale, "nvmeibc di bug, unlock to 0x%u\n", exchange.all);
 
-			__prepare_locks_for_release_to(so, exchange);
+			__prepare_locks_for_release_to(so, exchange.all);
 		} else { // EC
 			__prepare_locks_for_release_to_prev(so);
 		}
 	} else {
 		// Sync's success and not commit stale sync, unlock to 0
-		__prepare_locks_for_release_to(so, nvmeibc_raid1_get_lock_consts(so->r1)->unlocked_val);
+		__prepare_locks_for_release_to(so, LS_UNLOCKED);
 	}
 }
 
@@ -1095,11 +1096,11 @@ static void __copy_only_owner_lock(struct nvmeibc_cmd_lock *l,
 static void __copy_all_locks(struct recovery_sync_op *so, const struct nvmeibc_cmd_lock *lock)
 {
 	const struct nvmeibc_cmd_lock *ow = dp_locks_get_blockset_owner_lock(lock);			// In rare case lock might be the dual owner.
-	const u64 holder= nvmeibc_d_rdma_comp_get_contending_id(&lock->comp).all;	// Stale lock we are trying to solve
+	const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(&lock->comp);	// Stale lock we are trying to solve
 	struct nvmeibc_cmd_lock *l = so->locks;
 	int i, n_missing_olocks = 0;
 	if (is_op_sync_stale(so->o->op))
-		WARN_ON(!nvmeibc_sync_is_stale(lock, holder));				// Sanity check. How can caller complain on non stale lock?
+		WARN_ON(!holder.bits.is_stale);				// Sanity check. How can caller complain on non stale lock?
 	so->locks->nlocks = dp_fill_locks_for_raid(so->r1, so->o->op, so->rlba, so->locks);
 	BUG_ON(ow->n_siblings > so->locks->n_siblings);					// Debug only: Can be less (view read lock only) or equal
 	for (i = 0; i < so->locks->n_siblings; i++, l++) {				// Copy the locks. Sync has to fill only the locks IO could not take
@@ -1112,7 +1113,7 @@ static void __copy_all_locks(struct recovery_sync_op *so, const struct nvmeibc_c
 				__change_lock_status_to(l, NCL_STATUS_DONE);		// IO already holds this lock. Daniel: deliberatly not using NCL_STATUS_TRANSFERRED, but DONE. To mark the sync should not do anything with this lock
 			} else {
 				__change_lock_status_to(l, NCL_STATUS_NOTISSUED);	// Sync has to take this lock
-				dc->compare  = holder;
+				dc->compare  = holder.all;
 				dc->exchange = get_lockid_for_cmpxchg(so->r1, so->o->op);
 				n_missing_olocks++;
 			}
@@ -1298,7 +1299,7 @@ _func_start:
 			nvmeibc_atomic_set(&l->n_uncompleted_locks, 1 + LARGE_SYNC_DEBUG_VALUE);
 			l->comp.code = NVMEIBC_CMD_LOCK_UNLOCK;						// Important, we are going to unlock it
 			lock_comp->compare = nvmeibc_d_rdma_comp_get_lock_id(lock_comp).all;			//Use the original lock id as the "locking" value (This may be R1_STALE_SPECIAL_BINFO_VAL or a specific lock value with stale bits)
-			lock_comp->exchange = lock_comp->lock_cnsts->unlocked_val;
+			lock_comp->exchange = LS_UNLOCKED;
 			so->stage = sync_stage_st_to_db_written_db;
 			{
 				extern void __mirror_sync_calc_post_binfo(struct recovery_sync_op*, struct nvmeibc_raid_leader_cmd_ctx *, bool has_stale_lock);		// EC-1477: Remove after solving this issue
@@ -1618,7 +1619,7 @@ _func_start:
 
 		case sync_stage_recov_read_cmds_sent:{
 			const bool is_lock_zero = NCL_do_i_have_lock(lock_comp->lock_status);
-			const u64 holder = nvmeibc_d_rdma_comp_get_contending_id(lock_comp).all;
+			const union nvmeib_lock_id holder = nvmeibc_d_rdma_comp_get_contending_id(lock_comp);
 			nvmeibc_cmd_lock_response_io_pet_describe(so->o, l);
 			dp_locks_trace_lock_comp(so->o, l, lock_comp);
 			__sync_dp_locks_release_cb(l, lock_comp);
@@ -1626,10 +1627,10 @@ _func_start:
 			if (is_lock_zero) {		// Can free garbage jounrlas
 				so->stage = sync_stage_recov_lo_all_taken;
 				ASYNC_AWAIT_AND_RESUME(so->o->nd->dp.sync_execute_op(so), 0);	// Will return to state machine in state sync_stage_recov_owner_ulock_sm
-			} else if (nvmeibc_sync_is_stale(l, holder)) {
-				_NTSO(t_02_jgco, "Not garbage: journal needed. lock=@LOCK_ENT_U64", holder);
+			} else if (holder.bits.is_stale) {
+				_NTSO(t_02_jgco, "Not garbage: journal needed. lock=@LOCK_ENT_U64", holder.all);
 			} else { /* Error while reading lock or lock is held by other clnt. We can do here analysis like cold recovery and free all except the actual candidate, but simpler solution is just to ignore. On the next garbage collection request, this lock will be unlocked */
-				_NTSO(t_03_jgco, "Not garbage: dc->status=@NCL_STATUS_STR, lock=@LOCK_ENT_U64", ncl_status_str(lock_comp->lock_status), holder);
+				_NTSO(t_03_jgco, "Not garbage: dc->status=@NCL_STATUS_STR, lock=@LOCK_ENT_U64", ncl_status_str(lock_comp->lock_status), holder.all);
 			}
 			so->stage = sync_stage_done;
 			goto _func_start;
