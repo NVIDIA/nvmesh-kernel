@@ -133,17 +133,18 @@ void scenario_nvmeibs_messages(void) {
 }
 
 static void scenario_create_remove_r1(void) {
+	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
 
 	SCENARIO_PRINT(__AUTOID__, "sending format drives {disk_002, disk_003}");
-	mgmt_sim_send_format_drive("NVMD_SN_002.1");
-	mgmt_sim_send_format_drive("NVMD_SN_003.1");
+	mgmt_sim_send_format_drive(cfg->live->disks[0].name);
+	mgmt_sim_send_format_drive(cfg->live->disks[1].name);
 	scenario_nvmeibs_messages();								// While drives are formatting test server messages
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks format+zeroing done");
-	WAIT_UNTIL(mgmt_sim_drive_format_is_done("NVMD_SN_002.1") && mgmt_sim_drive_format_is_done("NVMD_SN_003.1"));
+	WAIT_UNTIL(mgmt_sim_drive_format_is_done(cfg->live->disks[0].name) && mgmt_sim_drive_format_is_done(cfg->live->disks[1].name));
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "waiting for leader to exists");

@@ -29,10 +29,8 @@ static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
 
-/* Per-disk status extracted from reportTarget */
-struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
-	const char *disk_id;				// Disk name
-	uint32_t    uuid;
+struct mgmt_sim_disk_status {			// Per-disk status extracted from reportTarget
+	const struct sb_disk_conf *conf;	// Configuration static non changing info
 	char status[16];					// As reported by Toma
 	struct t_format_monitor {
 		unsigned counter_sent;			// Ever increasing generation for for disk format cmd to toma. Value sent in last formatDrive
@@ -41,7 +39,6 @@ struct mgmt_sim_disk_status {			// Todo: maybe move to cfg?
 		int      msg_seq;				// Msg's can arrive unordered and multiple times. Use sequence to discared already processed messages
 		enum e_disk_format_state state;	// per-drive format tracking
 	} format;
-	u16 vendor;
 	u16 block_size;						// In bytes
 	u16 metadata_size;					// In bytes
 };
@@ -53,7 +50,7 @@ static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_s
 		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
 		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
 		", " MGMT_DB_UUID_JSON "}}",
-		d->disk_id, d->uuid, d->vendor, d->format.counter_sent, boot_time);
+		d->conf->name, d->conf->uuid, d->conf->vendor, d->format.counter_sent, boot_time);
 }
 
 /* Management simulator state */
@@ -83,8 +80,7 @@ struct mgmt_sim_state {
 
 	/* Test scenario state */
 	int64_t boot_time;                      /* from reportTarget payload.node.bootTime */
-	struct mgmt_sim_disk_status disk_002;   /* NVMD_SN_002.1 */
-	struct mgmt_sim_disk_status disk_003;   /* NVMD_SN_003.1 */
+	struct mgmt_sim_disk_status disks_st[3];	// Toma report of up to N disks
 	bool v_r1_praid_reported;               /* updatePRaidReport contained V_R1's pRaid UUID */
 	bool got_report_target;                 /* reportTarget received since last FSM transition */
 	bool v_r1_seg_zeroing_progress_seen;    /* segmentZeroingProgress received for V_R1 praid */
@@ -97,17 +93,13 @@ static struct mgmt_sim_state *g_mgmt_sim = NULL;
 
 struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	struct mgmt_sim_state *m = g_mgmt_sim = calloc(1, sizeof(*g_mgmt_sim));
+	int d;
 	m->cfg = initialized_cfg;
-
-	m->disk_002.disk_id = "NVMD_SN_002.1";
-	m->disk_003.disk_id = "NVMD_SN_003.1";
-	m->disk_002.uuid = initialized_cfg->live->disks[0].uuid;
-	m->disk_003.uuid = initialized_cfg->live->disks[1].uuid;
-	m->disk_002.vendor = 5122;
-	m->disk_003.vendor = 5123;
-	m->disk_002.format.counter_sent = 20;		// Start from some number, different start for each disk for easier logs analysis
-	m->disk_003.format.counter_sent = 30;
-	m->disk_003.format.state = m->disk_002.format.state = FMT_IDLE;
+	for (d = 0; d < (int)ARRAY_SIZE(initialized_cfg->live->disks); d++) {
+		m->disks_st[d].conf = &initialized_cfg->live->disks[d];
+		m->disks_st[d].format.counter_sent = 20 + (10 * d);		// Start from different number for each disk for easier logs analysis
+		m->disks_st[d].format.state = FMT_IDLE;
+	}
 	m->hw.conf_version = 17;		// Start from some number
 	N_Tf(msim_init, "mgmt_sim initialized cluster @INT machines, hw_conf_ver=@INT", m->cfg->n_nodes, m->hw.conf_version);
 
@@ -174,8 +166,8 @@ static bool __is_disk_fmt_running(enum e_disk_format_state e) { return ((e != FM
 
 static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (strcmp(drive_name, m->disk_002.disk_id) == 0) return &m->disk_002;
-	if (strcmp(drive_name, m->disk_003.disk_id) == 0) return &m->disk_003;
+	if (strcmp(drive_name, m->disks_st[0].conf->name) == 0) return &m->disks_st[0];
+	if (strcmp(drive_name, m->disks_st[1].conf->name) == 0) return &m->disks_st[1];
 	BUG_ON(drive_name[0] != 'S'); 		// For now, ignore stock drivers in Toma report
 	return NULL;
 }
@@ -184,8 +176,8 @@ static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid)
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	unsigned uuid_u32 = 0;
 	BUG_ON(sscanf(disk_uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
-	if (uuid_u32 == m->disk_002.uuid) return &m->disk_002;
-	if (uuid_u32 == m->disk_003.uuid) return &m->disk_003;
+	if (uuid_u32 == m->disks_st[0].conf->uuid) return &m->disks_st[0];
+	if (uuid_u32 == m->disks_st[1].conf->uuid) return &m->disks_st[1];
 	BUG_ON(true); return NULL;
 }
 
@@ -193,13 +185,13 @@ static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	char *buf = malloc(1024);
 	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, (unsigned long)m->boot_time);
-	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->disk_id, d->format.counter_sent, m->boot_time);
+	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->conf->name, d->format.counter_sent, m->boot_time);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
 static void __check_format_progress(struct mgmt_sim_disk_status *d, int msg_seq, bool on_report_target_msg) {
 	if (msg_seq <= d->format.msg_seq) {
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], old message, seq=@INT <= @INT, ignoring", d->disk_id, d->format.state, d->format.state, msg_seq, d->format.msg_seq);
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], old message, seq=@INT <= @INT, ignoring", d->conf->name, d->format.state, d->format.state, msg_seq, d->format.msg_seq);
 	} else if (__is_disk_fmt_running(d->format.state)) {
 		const unsigned expected = d->format.counter_sent;
 		enum e_disk_format_state prev_state = d->format.state;
@@ -214,7 +206,7 @@ static void __check_format_progress(struct mgmt_sim_disk_status *d, int msg_seq,
 			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
 			__send_format_drive_msg(d);
 		}
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], seq=@INT, format_gen=@INT, @STR[report]", d->disk_id, prev_state, d->format.state, msg_seq, expected, on_report_target_msg ? "Target" : "Zeroin");
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], seq=@INT, format_gen=@INT, @STR[report]", d->conf->name, prev_state, d->format.state, msg_seq, expected, on_report_target_msg ? "Target" : "Zeroin");
 		d->format.msg_seq = msg_seq;
 	} else {
 		BUG_ON(!on_report_target_msg);				// Illegal to receive zeroing message when no format is running
@@ -252,52 +244,36 @@ void mgmt_sim_send_msg_change_raft_quorum(const int node_idx, bool do_add) {
 
 void mgmt_sim_send_msg_latest_hw_config(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	const struct sb_node_conf *other_toma = m->cfg->other;
-	const size_t capacity = 4096;
-	char *msg = malloc(capacity);
+	size_t msg_size = 4096, rv = 0;
+	char *buf = malloc(msg_size);
 	const int config_ver = (++m->hw.conf_version);				// As if something in configuration changed
 	const int kafka_seq =  (++m->hw.msg_count);
-	const size_t len = snprintf(msg, capacity,
-		"{\"messageType\":\"hardwareConfiguration\",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
+	int n, i;
+	BUF_ADD("{\"messageType\":\"hardwareConfiguration\",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
 		",\"configurationVersion\":%d,\"leaderToken\":1,\"kafkaMessageSequence\":%d,\"raftTerm\":9"
-		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},"
-		"\"targets\":["
-			"{\"_id\":\"nvme37.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
-				"\"disks\":["
-				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false}],"
-				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5d009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"}]},"
-			"{\"_id\":\"nvme38.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
-				"\"disks\":["
-				"{\"diskID\":\"D0_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5122,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"D1_n38\",\"blocks\":2000,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5123,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false}],"
-				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5e009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0a0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"}]},"
-			"{\"_id\":\"nvme39.mlnx\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\","
-				"\"disks\":["
-				"{\"diskID\":\"D0_n39\",\"blocks\":195353046,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":5197,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":false},"
-				"{\"diskID\":\"D1_n39\",\"blocks\":195353046,\"block_size\":1024,\"activeFormatRequestCounter\":0,\"vendorID\":3333,\"uuid\":\"" UUID_from_U32 "\",\"version\":1,\"isOutOfService\":false}],"
-				"\"nics\":["
-					"{\"nicID\":\"0x0000000000000000bae924fffee5f008\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0126\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},"
-					"{\"nicID\":\"0x0000000000000000bae924fffee5f009\",\"protocol\":\"RoCE\",\"guid\":\"0x00000000000000000000ffff0a0b0226\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"}]}"
-		"]}}",
-		config_ver, kafka_seq,
-		m->cfg->live->hostname, m->cfg->live->uuid,
-			m->disk_002.disk_id, m->disk_002.vendor, m->disk_002.uuid,
-			m->disk_003.disk_id, m->disk_003.vendor, m->disk_003.uuid,
-			m->cfg->live->nics[0].uuid, m->cfg->live->nics[1].uuid,
-		other_toma[0].hostname, other_toma[0].uuid,
-			other_toma[0].disks[0].uuid,
-			other_toma[0].disks[1].uuid,
-			other_toma[0].nics[0].uuid, other_toma[0].nics[1].uuid,
-		other_toma[1].hostname, other_toma[1].uuid,
-			other_toma[1].disks[0].uuid,
-			other_toma[1].disks[1].uuid,
-		other_toma[1].nics[0].uuid, other_toma[1].nics[1].uuid);
-	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, msg, len, false);
+		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},\"targets\":[",
+		config_ver, kafka_seq);
+	for (n = 0; n < m->cfg->n_nodes; n++) {
+		const struct sb_node_conf *N = &m->cfg->nodes[n];
+		BUF_ADD("{\"_id\":\"%u\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",""\"disks\":[",
+			N->uuid>>16, N->hostname, N->uuid);
+		for (i = 0; i < (int)ARRAY_SIZE(N->disks); i++) {
+			const struct sb_disk_conf *D = &N->disks[i];
+			BUF_ADD("{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":%s},",
+				D->name, D->vendor, D->uuid, (D->is_out_of_service ? "true" : "false"));
+		}
+		rv--;	// Remove the last uneeded ',' of the above array
+		BUF_ADD("],\"nics\":[");
+		for (i = 0; i < (int)ARRAY_SIZE(N->nics); i++) {
+			const struct sb_nics_conf *E = &N->nics[i];
+			BUF_ADD("{\"nicID\":\"0x%16x%16x\",\"protocol\":\"%s\",\"guid\":\"0x%16x%16x\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},",
+				0xeee000, E->uuid, E->protocol, 0xeee111, E->uuid, E->uuid);
+		}
+		rv--;	// Remove the last uneeded ',' of the above array
+		BUF_ADD("]},");		// Close nics array ']', node '}'
+	}
+	rv--;	// Remove the last uneeded ',' of the above array
+	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, buf, rv, false);
 }
 
 static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
@@ -396,9 +372,9 @@ static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *d
 	int i;
 	for (i = 0; i < disks_array->array.len; i++) {
 		struct mm_json_elem *disk_elem = disks_array->array.elements[i];
-		const char *disk_id = json_get_dict_str(disk_elem, "diskID", NULL);
-		struct mgmt_sim_disk_status *d = __lookup_disk_by_name(disk_id);
-		BUG_ON(!disk_elem || (disk_elem->type != JSON_E_DICT) || !disk_id);
+		const char *disk_name = json_get_dict_str(disk_elem, "diskID", NULL);
+		struct mgmt_sim_disk_status *d = __lookup_disk_by_name(disk_name);
+		BUG_ON(!disk_elem || (disk_elem->type != JSON_E_DICT) || !disk_name);
 		if (!d) continue;		// Ignore stock drivers
 
 		nvmeibt_strlcpy(d->status, json_get_dict_str(disk_elem, "status", "unknown"), sizeof(d->status));
@@ -406,7 +382,7 @@ static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *d
 		d->format.counter_toma_reply_in_progress = (unsigned)json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
 		d->block_size = json_get_dict_num(disk_elem, "block_size", -1);
 		d->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
-		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", d->disk_id, d->status, d->format.counter_toma_reply_done, d->format.counter_toma_reply_in_progress, d->block_size, d->metadata_size);
+		N_Tf(msim_disk, "disk=@STR status=@STR frc=@INT afrc=@INT, @UINT+@UINT[b]", disk_name, d->status, d->format.counter_toma_reply_done, d->format.counter_toma_reply_in_progress, d->block_size, d->metadata_size);
 		__check_format_progress(d, (int)msg_seq, true);
 	}
 }
@@ -479,7 +455,7 @@ static bool __disk_ready_for_format(const struct mgmt_sim_disk_status *d) {
 
 bool mgmt_sim_both_disks_ready_for_format(void) {
 	const struct mgmt_sim_state *m = g_mgmt_sim;
-	return __disk_ready_for_format(&m->disk_002) && __disk_ready_for_format(&m->disk_003);
+	return __disk_ready_for_format(&m->disks_st[0]) && __disk_ready_for_format(&m->disks_st[1]);
 }
 
 bool mgmt_sim_consume_got_report_target(void) {

@@ -47,9 +47,9 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
-	{ 0x1402, "NVMD_SN_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
-	{ 0x1403, "NVMD_SN_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ 0x1401, "STKD_SN_001" , "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
+	{ 0x1402, "NVMD_f37_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ 0x1403, "NVMD_f37_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
@@ -106,7 +106,7 @@ unsigned sandbox_nvme_get_device_count(void) { return (unsigned)NVME_DEVICE_COUN
 const struct sandbox_nvme_device *sandbox_nvme_get_device_arr(void) { return &nvme_devices[0]; }
 
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id) {
-	const char *dot = strchr(disk_id, '.');		// disk_id format is "SERIAL.NSID" e.g. "NVMD_SN_002.1", We need to match the serial number portion
+	const char *dot = strchr(disk_id, '.');		// disk_id format is "SERIAL.NSID", We need to match the serial number portion
 	const int serial_len = (dot ? (int)(dot - disk_id) : (int)strnlen(disk_id, 32));
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		const struct sandbox_nvme_device *d = &nvme_devices[i];

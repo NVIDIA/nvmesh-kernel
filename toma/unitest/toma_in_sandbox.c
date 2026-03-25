@@ -960,6 +960,7 @@ void sb_cluster_ignore_append_entries_by_node(int node_idx) {
 	BUG_ON(node_idx != 2);			// Our volumes configuration, currently supports only ignore by node 2
 	sys->cfg.nodes[node_idx].ignore_append_entries = true;
 }
+const struct sb_cluster_conf *sb_cluster_get_const_conf(void) { return &sys->cfg; }
 
 int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
 	const struct raft_msg *in_r_msg = (typeof(in_r_msg))req->cnst_msg;
@@ -970,7 +971,6 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		req->cbs.send_c(NULL, 0);	// Ack that message was sent to peer
 	}
 	{ // Add reply to to list, no needs for locks. Accessed only from Toma main threads
-		// const int node_idx = sb_cluster_conf_find_node_idx_by_name(&sys->cfg, node->from_config.name);
 		struct t_raft_msg_queue_from_other_tomas *rq = &ln->raft_msg_queue_from_other_tomas;
 		struct nvmeibt_big_msg *msg = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*msg) + req->msg_len + req->data_len);
 		struct raft_msg *out_r_msg = (typeof(out_r_msg))msg->data;
