@@ -237,7 +237,7 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 	l->last_retry_report_time = l->first_try_time = jiffies;		// Todo: Move to separate func(). Much like in __request_lock()
 
 	dc->lock_cnsts = nvmeibc_raid1_get_lock_consts(r1);
-	dc->compare  = dc->lock_cnsts->unlocked_val;
+	dc->compare  = LS_UNLOCKED;
 	dc->exchange = r1->lid.all;
 	dc->callback = &dp_locks_view_lock_sm;
 	dc->cpu_mask_info = *cmd->reqs[0].cpu_mask_info; // STRUCT ASSIGNMENT
