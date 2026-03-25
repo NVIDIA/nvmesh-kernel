@@ -133,9 +133,9 @@ static inline enum NVMEIBT_CLIENT_LOCK_OP __lock_op_translate_to_toma(enum nvmei
 	return rv;
 }
 
-static inline enum NVMEIBT_CLIENT_MSG_TYPES __lock_op_get_msg_type(const union nvmeib_lock_blkset_entry *lid, const struct nvmeibc_cmd_lock *l)
+static inline enum NVMEIBT_CLIENT_MSG_TYPES __lock_op_get_msg_type(const union nvmeib_lock_blkset_entry *lid)
 {
-	return (nvmeibc_sync_is_stale(l, lid->all)) ? NVMEIBT_CLIENT_MSG_CT_STALE_LOCK : NVMEIBT_CLIENT_MSG_CT_FAILED_LOCK;
+	return lid->lock_id.bits.is_stale ? NVMEIBT_CLIENT_MSG_CT_STALE_LOCK : NVMEIBT_CLIENT_MSG_CT_FAILED_LOCK;
 }
 
 int __send_toma_lock_help(const struct nvmeibc_cmd_lock *l, struct nvmeibc_disk_segment *seg)
@@ -145,7 +145,7 @@ int __send_toma_lock_help(const struct nvmeibc_cmd_lock *l, struct nvmeibc_disk_
 	const struct nvmeibc_d_rdma_comp *dc = &l->comp;
 	const union nvmeib_lock_blkset_entry lid = { .lock_id = nvmeibc_d_rdma_comp_get_contending_id(dc) };
 	enum NVMEIBT_CLIENT_LOCK_OP lock_op = __lock_op_translate_to_toma(dc->opr);
-	enum NVMEIBT_CLIENT_MSG_TYPES msg_type = __lock_op_get_msg_type(&lid, l);
+	enum NVMEIBT_CLIENT_MSG_TYPES msg_type = __lock_op_get_msg_type(&lid);
 	struct nvmeibt_client_failed_lock_pl *fl = &pl.failed_lock;
 	BUG_ON(!lid.all); /* EC-4937: Toma help with problem = 0 shall never happen */
 	fl->lock_op =         lock_op;
