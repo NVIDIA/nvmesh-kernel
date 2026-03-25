@@ -58,6 +58,7 @@ static int lock_alloc_free_table(void)
 {
 	const int rv = pthread_mutex_lock(&alloc_free_guard);
 	if (rv != 0) {
+		errno = rv;
 		N_Ef(error_common_lock_alloc_free_table, "Failed to lock rv=@RV, @AUTO_ERRNO", rv);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -68,6 +69,7 @@ static int unlock_alloc_free_table(void)
 {
 	const int rv = pthread_mutex_unlock(&alloc_free_guard);
 	if (rv != 0) {
+		errno = rv;
 		N_Ef(error_common_unlock_alloc_free_table, "Failed to unlock rv=@RV, @AUTO_ERRNO", rv);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -314,6 +316,7 @@ struct zeroing_ctx_data {
 void zero_blks_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_rep *msg)
 {
 	struct zeroing_ctx_data *zero_ctx = ctx;
+	int pt_err;
 
 	NFIN;
 	NTOMA_ASSERT(error_common_zero_blks_on_done, (!msg && !is_ok) || msg->opcode == csc_zero_disk,
@@ -324,7 +327,9 @@ void zero_blks_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_rep *msg)
 		 nvmeibt_abort(ES_FATAL);
 	}
 
-	if (pthread_mutex_lock(&zero_ctx->guard_mutex) != 0) {
+	pt_err = pthread_mutex_lock(&zero_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_2_common_zero_blks_on_done, "Cannot wakeup caller thread, cannot lock_mutex=@LOCK_MUTEX error: @AUTO_ERRNO", &zero_ctx->guard_mutex);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -332,12 +337,16 @@ void zero_blks_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_rep *msg)
 	zero_ctx->rv = is_ok ? 0 : 1;
 
 	// Wake the thread that called this zeroing operation.
-	if (pthread_cond_signal(&zero_ctx->zeroing_signal) != 0) {
+	pt_err = pthread_cond_signal(&zero_ctx->zeroing_signal);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_3_common_zero_blks_on_done, "Cannot wakeup caller thread with cond_var=@COND_VAR pthread signal error: @AUTO_ERRNO", &zero_ctx->zeroing_signal);
 		nvmeibt_abort(ES_FATAL);
 	}
 
-	if (pthread_mutex_unlock(&zero_ctx->guard_mutex) != 0) {
+	pt_err = pthread_mutex_unlock(&zero_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_4_common_zero_blks_on_done, "Cannot wakeup caller thread, cannot unlock_mutex=@UNLOCK_MUTEX error: @AUTO_ERRNO", &zero_ctx->guard_mutex);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -362,6 +371,7 @@ int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *ldisk,
 		uint64_t pba_s, uint64_t n_pblk_to_zero, BOOL are_hw_blks)
 {
 	int						rv = -1;
+	int						pt_err;
 	struct km_comm_msg_hdr *zero_msg;
 	struct nvmeib_zero_disk *zero_msg_payload;
 	struct zeroing_ctx_data *zero_ctx;
@@ -390,21 +400,29 @@ int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *ldisk,
 	zero_msg->ctx = (void *)zero_ctx;
 	zero_msg->len = sizeof(*zero_msg_payload);
 
-	if (pthread_mutex_init(&zero_ctx->guard_mutex, NULL) != 0) {
+	pt_err = pthread_mutex_init(&zero_ctx->guard_mutex, NULL);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_common_nvmeibt_zero_disk_pblks, "Failed to create zero context guard @AUTO_ERRNO");
 		goto out;
 	}
-	if (pthread_condattr_init(&attr) != 0) {
+	pt_err = pthread_condattr_init(&attr);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_1_common_nvmeibt_zero_disk_pblks, "Failed to create cond var attr @AUTO_ERRNO");
 		goto free_mutex;
 	}
-	if (pthread_cond_init(&zero_ctx->zeroing_signal, &attr) != 0) {
+	pt_err = pthread_cond_init(&zero_ctx->zeroing_signal, &attr);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_2_common_nvmeibt_zero_disk_pblks, "Failed to create zero context cond var @AUTO_ERRNO");
 		goto free_mutex;
 	}
 
 	// Lock mutex
-	if (pthread_mutex_lock(&zero_ctx->guard_mutex) != 0) {
+	pt_err = pthread_mutex_lock(&zero_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_3_common_nvmeibt_zero_disk_pblks, "Cannot wakeup caller thread, cannot lock_mutex=@LOCK_MUTEX error: @AUTO_ERRNO", &zero_ctx->guard_mutex);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -415,7 +433,9 @@ int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *ldisk,
 	}
 
 	// Wait for zeroing to finish
-	if (pthread_cond_wait(&zero_ctx->zeroing_signal, &zero_ctx->guard_mutex) != 0) {
+	pt_err = pthread_cond_wait(&zero_ctx->zeroing_signal, &zero_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(error_5_common_nvmeibt_zero_disk_pblks, "Cannot wait for zeroing to finish, cond_var=@COND_VAR error: @AUTO_ERRNO", &zero_ctx->zeroing_signal);
 		// nvmeibt_abort(ES_FATAL);
 		goto free_cond;
@@ -432,15 +452,21 @@ int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *ldisk,
 	rv = 0;
 
 free_cond:
-	if (pthread_mutex_unlock(&zero_ctx->guard_mutex)) {
+	pt_err = pthread_mutex_unlock(&zero_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(xx_30, "Failed to unlock zero context guard @AUTO_ERRNO");
 	}
-	if (pthread_cond_destroy(&zero_ctx->zeroing_signal)) {
+	pt_err = pthread_cond_destroy(&zero_ctx->zeroing_signal);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(xx_31, "Failed to destroy zero context cond var @AUTO_ERRNO");
 	}
 
 free_mutex:
-	if (pthread_mutex_destroy(&zero_ctx->guard_mutex)) {
+	pt_err = pthread_mutex_destroy(&zero_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(xx_32, "Failed to destroy zero context guard @AUTO_ERRNO");
 	}
 

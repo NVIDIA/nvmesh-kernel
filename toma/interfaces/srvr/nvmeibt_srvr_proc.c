@@ -304,10 +304,12 @@ static void * run(void *v);
 static int start_thread(struct nvmeibt_km_comm *p)
 {
 	pthread_attr_t attr;
+	int pt_err;
 	p->comm_thread = 0;
-	if ((pthread_attr_init(&attr) != 0) ||
-		(pthread_create(&p->comm_thread, &attr, run, p) != 0)) {
+	if ((pt_err = pthread_attr_init(&attr)) != 0 ||
+		(pt_err = pthread_create(&p->comm_thread, &attr, run, p)) != 0) {
 		p->comm_thread = 0;
+		errno = pt_err;
 		N_Ef(tscnlss6, "Fail to create srv comm thread @AUTO_ERRNO");
 		return -1;
 	}
@@ -436,11 +438,15 @@ static void __drain_msg_list(msgs_list_t *l)
 
 static void __stop_main_thread(struct nvmeibt_km_comm *p)
 {
+	int pt_err;
+
 	if (p->comm_thread) {		// Block until main thread is stopped and join it
 		const struct km_comm_msg_hdr msg = {.len = 0, .opcode = csc_internal_suicide, .on_done = NULL };
 		N_Tf(tscnlsst, "Send internal suicide message, to main thread");
 		nvmeib_srvr_api_lib_send_async_msg_to_server(&msg);	// Issue suicide request to be handled in main thread context
-		if (pthread_join(p->comm_thread, NULL)) {
+		pt_err = pthread_join(p->comm_thread, NULL);
+		if (pt_err != 0) {
+			errno = pt_err;
 			N_Ef(tscnlssk, "join failed @PTHREAD, @AUTO_ERRNO", p->comm_thread);
 		}
 		p->comm_thread = 0;

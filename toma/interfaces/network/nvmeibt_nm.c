@@ -66,7 +66,9 @@ char * __attribute__ ((unused)) nvmeibt_nm_tss(void *_a, char b[], int len)
 
 void nvmeibt_nm_mutex_lock(pthread_mutex_t *p)
 {
-    if (pthread_mutex_lock(p) != 0) {
+    int pt_err;
+    if ((pt_err = pthread_mutex_lock(p)) != 0) {
+		errno = pt_err;
 		N_ETf(nm_mutex_lock_e1, "Failed to lock - @AUTO_ERRNO");
 		abort();
     }
@@ -74,7 +76,9 @@ void nvmeibt_nm_mutex_lock(pthread_mutex_t *p)
 
 void nvmeibt_nm_mutex_release(pthread_mutex_t *p)
 {
-    if (pthread_mutex_unlock(p) != 0) {
+    int pt_err;
+    if ((pt_err = pthread_mutex_unlock(p)) != 0) {
+		errno = pt_err;
 		N_ETf(nm_mutex_unlock_e1, "Failed to unlock - @AUTO_ERRNO");
 		abort();
     }
@@ -2141,6 +2145,7 @@ static int start_thread(struct nvmeibt_nm_local_node *ln)
 	NFIN;
 	if ((rv = pthread_attr_init(&attr)) != 0 ||
 		(rv = pthread_create(&ln->thr, &attr, run, ln)) != 0) {
+		errno = rv;
 		N_ETf(nm_start_thread_e1, "Fail to create ibud thread - @AUTO_ERRNO");
 		rv = -1;
 	}
@@ -2161,6 +2166,7 @@ static struct nvmeibt_nm_local_node * create_local_node(struct nvmeibt_nm_hw_fun
 		.f = handle_ext_events,
 	};
 	int i;
+	int pt_err;
 
 	NFIN;
 	if (!(ln = tbl->allocate_local_node())) {
@@ -2186,7 +2192,9 @@ static struct nvmeibt_nm_local_node * create_local_node(struct nvmeibt_nm_hw_fun
 	ln->status_json_str1_size = ln->status_json_str2_size = STATUS_STR_INIT_SIZE;
 	ln->status_str = ln->status_str1;
 	ln->status_json_str = ln->status_json_str1;
-	if (pthread_mutex_init(&ln->guard, NULL) != 0) {
+	pt_err = pthread_mutex_init(&ln->guard, NULL);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_ETf(nm_create_local_node_e2, "Failed to create guard - @AUTO_ERRNO");
 		goto free_ln;
 	}

@@ -2255,6 +2255,7 @@ struct format_ctx_data {
 static void format_disk_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_rep *msg)
 {
 	struct format_ctx_data *format_ctx = ctx;
+	int pt_err;
 
 	NFIN;
 	NTOMA_ASSERT(format_disk_on_done_0, (!msg && !is_ok) || msg->opcode == csc_format_disk,
@@ -2265,7 +2266,9 @@ static void format_disk_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_r
 		 nvmeibt_abort(ES_FATAL);
 	}
 
-	if (pthread_mutex_lock(&format_ctx->guard_mutex) != 0) {
+	pt_err = pthread_mutex_lock(&format_ctx->guard_mutex);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_Ef(trace_format_disk_on_done_2, "Cannot wakeup caller thread, cannot lock_mutex=@LOCK_MUTEX error: @AUTO_ERRNO", &format_ctx->guard_mutex);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -2273,12 +2276,14 @@ static void format_disk_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_r
 	format_ctx->rv = is_ok ? 0 : 1;
 
 	// Wake the thread that called this zeroing operation.
-	if (pthread_cond_signal(&format_ctx->completion_signal) != 0) {
+	if ((pt_err = pthread_cond_signal(&format_ctx->completion_signal)) != 0) {
+		errno = pt_err;
 		N_Ef(trace_format_disk_on_done_3, "Cannot wakeup caller thread with cond_var=@COND_VAR pthread signal error: @AUTO_ERRNO", &format_ctx->completion_signal);
 		nvmeibt_abort(ES_FATAL);
 	}
 
-	if (pthread_mutex_unlock(&format_ctx->guard_mutex) != 0) {
+	if ((pt_err = pthread_mutex_unlock(&format_ctx->guard_mutex)) != 0) {
+		errno = pt_err;
 		N_Ef(trace_format_disk_on_done_4, "Cannot wakeup caller thread, cannot unlock_mutex=@UNLOCK_MUTEX error: @AUTO_ERRNO", &format_ctx->guard_mutex);
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -2290,6 +2295,7 @@ static void format_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct local_disk_format_wq_entry *entry;
 	int err;
+	int pt_err;
 	int nsid;
 	struct nvme_id_ns ns;
 	int i;
@@ -2371,19 +2377,24 @@ static void format_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		format_msg_payload = (struct nvmeib_format_disk *)(format_msg->data);
 		format_ctx = NNVMEIBT_BM_CALLOC(trace_format_disk_wrapper_nl_2, sizeof(*format_ctx));
 
-		if (pthread_mutex_init(&format_ctx->guard_mutex, NULL) != 0) {
+		pt_err = pthread_mutex_init(&format_ctx->guard_mutex, NULL);
+		if (pt_err != 0) {
+			errno = pt_err;
 			N_Ef(trace_format_disk_wrapper_nl_2_5, "Failed to create format context guard @AUTO_ERRNO");
 			goto out;
 		}
-		if (pthread_condattr_init(&attr) != 0) {
+		if ((pt_err = pthread_condattr_init(&attr)) != 0) {
+			errno = pt_err;
 			N_Ef(trace_format_disk_wrapper_nl_3, "Failed to create cond var attr @AUTO_ERRNO");
 			goto out;
 		}
-		if (pthread_cond_init(&format_ctx->completion_signal, &attr) != 0) {
+		if ((pt_err = pthread_cond_init(&format_ctx->completion_signal, &attr)) != 0) {
+			errno = pt_err;
 			N_Ef(trace_format_disk_wrapper_nl_4, "Failed to create format context cond var @AUTO_ERRNO");
 			goto out;
 		}
-		if (pthread_mutex_lock(&format_ctx->guard_mutex) != 0) {
+		if ((pt_err = pthread_mutex_lock(&format_ctx->guard_mutex)) != 0) {
+			errno = pt_err;
 			N_Ef(trace_format_disk_wrapper_nl_5, "Cannot wakeup caller thread, cannot lock_mutex=@LOCK_MUTEX error: @AUTO_ERRNO",
 					&format_ctx->guard_mutex);
 			goto out;
@@ -2426,7 +2437,8 @@ static void format_disk_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		}
 
 		// Wait for zeroing to finish
-		if (pthread_cond_wait(&format_ctx->completion_signal, &format_ctx->guard_mutex) != 0) {
+		if ((pt_err = pthread_cond_wait(&format_ctx->completion_signal, &format_ctx->guard_mutex)) != 0) {
+			errno = pt_err;
 			N_Ef(trace_format_disk_wrapper_nl_7, "Cannot wait for format to finish, cond_var=@COND_VAR error: @AUTO_ERRNO", &format_ctx->completion_signal);
 			format_ctx = NULL;	// leak is better than a use-after-free
 			goto out;
@@ -2462,13 +2474,17 @@ mark_disk_as_nvmesh_formatted:
 	}
 out:
 	if (format_ctx) {
-		if (pthread_mutex_unlock(&format_ctx->guard_mutex)) {
+		pt_err = pthread_mutex_unlock(&format_ctx->guard_mutex);
+		if (pt_err != 0) {
+			errno = pt_err;
 			N_Ef(xx_35, "pthread_mutex_unlock failed @AUTO_ERRNO");
 		}
-		if (pthread_cond_destroy(&format_ctx->completion_signal)) {
+		if ((pt_err = pthread_cond_destroy(&format_ctx->completion_signal))) {
+			errno = pt_err;
 			N_Ef(xx_36, "pthread_cond_destroy failed @AUTO_ERRNO");
 		}
-		if (pthread_mutex_destroy(&format_ctx->guard_mutex)) {
+		if ((pt_err = pthread_mutex_destroy(&format_ctx->guard_mutex))) {
+			errno = pt_err;
 			N_Ef(xx_37, "pthread_mutex_destroy failed @AUTO_ERRNO");
 		}
 		NNVMEIBT_BM_FREE(trace_format_disk_wrapper_nl_free_1, format_ctx);

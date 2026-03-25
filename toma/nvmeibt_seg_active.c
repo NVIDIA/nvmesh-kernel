@@ -89,8 +89,13 @@ bool nvmeibt_seg_active_final_free_if_not_in_use(struct nvmeibt_seg_active *seg_
 	} else {
 		N_Tf(gy2555s, "seg_active=@UUID_8 final free", nvmeibt_seg_active_UUID_8(seg_active));
 		NNVMEIBT_BM_FREE(fhyy734, seg_active->persistent_metadata);
-		if (pthread_mutex_destroy(&seg_active->stale_locks_hash_mutex))
-			N_Ef(ry876bq, "Failed to destroy stale locks mutex (@AUTO_ERRNO)");
+		{
+			int pt_err = pthread_mutex_destroy(&seg_active->stale_locks_hash_mutex);
+			if (pt_err) {
+				errno = pt_err;
+				N_Ef(ry876bq, "Failed to destroy stale locks mutex (@AUTO_ERRNO)");
+			}
+		}
 		NNVMEIBT_TOMA_FREE(kkooe42, seg_active);
 		is_freed = true;
 	}
@@ -517,9 +522,13 @@ struct nvmeibt_seg_active *nvmeibt_seg_active_create(const union nvmeib_uuid *uu
 	seg_active->n_registrants_on_timeout = 0;
 	seg_active->n_active_registrants_on_active_praid_version = 0;
 
-	if (pthread_mutex_init(&seg_active->stale_locks_hash_mutex, NULL)) {
-		N_Ef(ry876ha, "Failed to create stale locks mutex (@AUTO_ERRNO)");
-	    nvmeibt_abort(ES_FATAL);
+	{
+		int pt_err = pthread_mutex_init(&seg_active->stale_locks_hash_mutex, NULL);
+		if (pt_err) {
+			errno = pt_err;
+			N_Ef(ry876ha, "Failed to create stale locks mutex (@AUTO_ERRNO)");
+			nvmeibt_abort(ES_FATAL);
+		}
 	}
 	nvmeibt_register_move_all_my_longing_registrants_on_invalid_seg_to_my_longing(seg_active);
 

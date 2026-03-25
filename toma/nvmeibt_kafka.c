@@ -2367,15 +2367,18 @@ static bool __is_compatible_kafka_version(void)
 
 int nvmeibt_kafka_launch(void) {
 	int						rv = 0;
+	int						pt_err;
 	pthread_t kafka_maintenance_thread_tid;
 	NFIN;
 	//nvmeibt_kafka_upd_from_nvmesh_conf();	// No need, was already called by nvmeibt_toma_init(), we did not reread nvmesh conf since then
 	__is_compatible_kafka_version();		// Upon failure, do nothing. Attempt to work, maybe everything will be fine
 	// Launch the nvmeibt_kafka_maintenance_thread (consumer & trigger callbacks)
 	getnstimeofday_boot(&(nvmeibt_global_get_global()->kafka_last_activity_time));
-	if (pthread_create(&kafka_maintenance_thread_tid, NULL, nvmeibt_kafka_main_thread, NULL) == 0) {
+	pt_err = pthread_create(&kafka_maintenance_thread_tid, NULL, nvmeibt_kafka_main_thread, NULL);
+	if (pt_err == 0) {
 		pthread_setname_np(kafka_maintenance_thread_tid, "kafka_main");
 	} else {
+		errno = pt_err;
 		N_Ef(4aikrbw, "failed to launch the nvmeibt_kafka_maintenance_thread (@AUTO_ERRNO)");
 		rv = -1;
 	}

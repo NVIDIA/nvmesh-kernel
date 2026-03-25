@@ -197,6 +197,7 @@ int init_signal_handling(const char *exe_name)
 	struct sigaction act;
 	int signals_fd;
 	int rv = 0;
+	int pt_err;
 
 	NFIN;
 
@@ -247,8 +248,10 @@ int init_signal_handling(const char *exe_name)
 	sigaddset(&mask, SIGUSR1);
 	sigaddset(&mask, SIGUSR2);
 	sigaddset(&mask, SIGHUP);
-	if (pthread_sigmask(SIG_BLOCK, &mask, &block_sig_mask) != 0) {
-		N_Ef(trace_4_toma_init_signal_handling, "pthread_sigmask failed @ERRNO @AUTO_ERRNO", errno);
+	pt_err = pthread_sigmask(SIG_BLOCK, &mask, &block_sig_mask);
+	if (pt_err != 0) {
+		errno = pt_err;
+		N_Ef(trace_4_toma_init_signal_handling, "pthread_sigmask failed @ERRNO @AUTO_ERRNO", pt_err);
 		rv = -1;
 		goto out;
 	}

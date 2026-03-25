@@ -596,16 +596,20 @@ static inline struct nvmeibt_local_disk *nvmeibt_seg_active_get_local_disk(const
 
 static inline void lock_stale_locks_hash(struct nvmeibt_seg_active *seg_active)
 {
-	if (pthread_mutex_lock(&seg_active->stale_locks_hash_mutex)) {
+	int pt_err = pthread_mutex_lock(&seg_active->stale_locks_hash_mutex);
+	if (pt_err) {
+		errno = pt_err;
 		N_Ef(ry876n2, "Failed to lock stale locks mutex (@AUTO_ERRNO)");
-	    nvmeibt_abort(ES_FATAL);
+		nvmeibt_abort(ES_FATAL);
 	}
 }
 static inline void unlock_stale_locks_hash(struct nvmeibt_seg_active *seg_active)
 {
-	if (pthread_mutex_unlock(&seg_active->stale_locks_hash_mutex)) {
+	int pt_err = pthread_mutex_unlock(&seg_active->stale_locks_hash_mutex);
+	if (pt_err) {
+		errno = pt_err;
 		N_Ef(ry876i3, "Failed to unlock stale locks mutex (@AUTO_ERRNO)");
-	    nvmeibt_abort(ES_FATAL);
+		nvmeibt_abort(ES_FATAL);
 	}
 }
 

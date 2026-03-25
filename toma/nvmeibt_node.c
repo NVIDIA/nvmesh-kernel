@@ -65,11 +65,15 @@ enum nvmeibt_add_rv nvmeibt_node_add(struct mm_node_conf *conf, int config_tag)
 	f->version = conf->version;
 	strlcpy(f->name, conf->node_id, sizeof(f->name));
 
-	if (pthread_mutex_init(&new_node->guard, NULL) != 0) {
-		N_Ef(error_node_nvmeibt_node_add, "Failed to create node @NODE_NAME guard @AUTO_ERRNO",
-			nvmeibt_node_name(new_node));
-		rv = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;
-		goto out;
+	{
+		int pt_err = pthread_mutex_init(&new_node->guard, NULL);
+		if (pt_err != 0) {
+			errno = pt_err;
+			N_Ef(error_node_nvmeibt_node_add, "Failed to create node @NODE_NAME guard @AUTO_ERRNO",
+				nvmeibt_node_name(new_node));
+			rv = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;
+			goto out;
+		}
 	}
 
 	rv = NNVMEIBT_HASH_ADD_OBJ_new(4vnfcus,
@@ -160,6 +164,7 @@ static int lock(struct nvmeibt_node *node)
 
 	NFIN;
 	if ((rv = pthread_mutex_lock(&node->guard)) != 0) {
+		errno = rv;
 		N_Ef(error_node_lock, "Failed to lock node @NODE_NAME guard @AUTO_ERRNO", nvmeibt_node_name(node));
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -173,6 +178,7 @@ static int unlock(struct nvmeibt_node *node)
 
 	NFIN;
 	if ((rv = pthread_mutex_unlock(&node->guard)) != 0) {
+		errno = rv;
 		N_Ef(error_node_unlock, "Failed to unlock node @NODE_NAME guard @AUTO_ERRNO", nvmeibt_node_name(node));
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -248,8 +254,12 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 			 */
 			nvmeibt_nm_del_remote_node(nvmeibt_get_nw_node(), node);
 			/* from here on, no one uses this node ... */
-			if (pthread_mutex_destroy(&node->guard)) {
-				N_Ef(xx_33, "Failed to destroy node guard @AUTO_ERRNO");
+			{
+				int pt_err = pthread_mutex_destroy(&node->guard);
+				if (pt_err) {
+					errno = pt_err;
+					N_Ef(xx_33, "Failed to destroy node guard @AUTO_ERRNO");
+				}
 			}
 			nvmeibt_topology_leader_detach_all_disks_from_raft_member(nvmeibt_node_get_raft_member(node));
 			nvmeibt_topology_detach_all_disks_from_node(node);

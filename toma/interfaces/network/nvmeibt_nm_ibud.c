@@ -1977,28 +1977,34 @@ static int create_offloader(struct ibud_local_node *ln)
 	pthread_condattr_t attr;
 	pthread_attr_t tattr;
 	int rv = -1;
+	int pt_err;
 
 	NFIN;
 	if (!(w = NNVMEIBT_TOMA_CALLOC(nm_create_offloader_t1, 1, sizeof(*w)))) {
 		N_ETf(nm_create_offloader_e1, "Failed to allocate offloader");
 		goto out;
 	}
-	if (pthread_mutex_init(&w->pool_guard, NULL) != 0) {
+	pt_err = pthread_mutex_init(&w->pool_guard, NULL);
+	if (pt_err != 0) {
+		errno = pt_err;
 		N_ETf(nm_create_offloader_e2,
 			"Failed to create pool_guard - @AUTO_ERRNO");
 		goto free_w;
 	}
-	if (pthread_mutex_init(&w->exec_guard, NULL) != 0) {
+	if ((pt_err = pthread_mutex_init(&w->exec_guard, NULL)) != 0) {
+		errno = pt_err;
 		N_ETf(nm_create_offloader_e21,
 			"Failed to create exec_guard - @AUTO_ERRNO");
 		goto free_pg;
 	}
-	if (pthread_condattr_init(&attr) != 0) {
+	if ((pt_err = pthread_condattr_init(&attr)) != 0) {
+		errno = pt_err;
 		N_ETf(nm_create_offloader_e22,
 			"Failed to create cond var attr - @AUTO_ERRNO");
 		goto free_eg;
 	}
-	if (pthread_cond_init(&w->wakeup, &attr) != 0) {
+	if ((pt_err = pthread_cond_init(&w->wakeup, &attr)) != 0) {
+		errno = pt_err;
 		N_ETf(nm_create_offloader_e3,
 			"Failed to create wakeup - @AUTO_ERRNO");
 		goto free_eg;
@@ -2007,6 +2013,7 @@ static int create_offloader(struct ibud_local_node *ln)
 	XDLIST_HEAD_INIT(&w->exec_list);
 	if ((rv = pthread_attr_init(&tattr)) != 0 ||
 		(rv = pthread_create(&w->t, &tattr, offload_thread, w)) != 0) {
+		errno = rv;
 		N_ETf(nm_create_offloader_e23,
 			"Failed to start offload thread - @AUTO_ERRNO");
 		goto free_cv;
@@ -2076,6 +2083,7 @@ static int wakeup(pthread_cond_t *cond)
 	int rv;
 
 	if ((rv = pthread_cond_signal(cond)) != 0) {
+		errno = rv;
 		N_ETf(nm_wakeup_e1, "Failed to wakeup offloader cond - @AUTO_ERRNO");
 		nvmeibt_abort(ES_FATAL);
 	}
@@ -2134,12 +2142,14 @@ static struct defer_work * get_defer_work(struct ibud_network_offload *w)
 static void free_offloader(struct ibud_network_offload *w)
 {
 	struct defer_work *d;
+	int pt_err;
 
 	NFIN;
 	if ((d = get_defer_work(w))) {
 		d->base.type = dwt_stop;
 		push_defer_work(w, d);
-		if (pthread_join(w->t, NULL)) {
+		if ((pt_err = pthread_join(w->t, NULL))) {
+			errno = pt_err;
 			N_ETf(nm_free_offloader_e1, "Failed to join offloader - @AUTO_ERRNO");
 		}
 	}
@@ -2161,6 +2171,7 @@ static int timed_wait(pthread_cond_t *cond, pthread_mutex_t *m, int sec)
 		ts.tv_sec += sec;
 		if ((rv = pthread_cond_timedwait(cond, m, &ts)) != 0 &&
 			rv != ETIMEDOUT) {
+			errno = rv;
 			N_ETf(nm_timed_wait_e1, "Failed to timed_wait for offloader cond "
 				"(rv @INT) - @AUTO_ERRNO", rv);
 			rv = -1;
@@ -2171,6 +2182,7 @@ static int timed_wait(pthread_cond_t *cond, pthread_mutex_t *m, int sec)
 	}
 	else {
 		if ((rv = pthread_cond_wait(cond, m)) != 0) {
+			errno = rv;
 			N_ETf(nm_timed_wait_e2,
 				"Failed to wait for offloader cond - @AUTO_ERRNO");
 			rv = -1;
