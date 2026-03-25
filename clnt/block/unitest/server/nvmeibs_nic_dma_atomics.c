@@ -74,7 +74,9 @@ int execute_owner_lock(struct ramDiskSimulator* ram, u64 addr, struct nvmeibc_d_
 	BUG_ON(ram->state & ramDisk_no_rdma); 													// Client must never request locks on this disk
 	switch (dc->code) {
 		case NVMEIBC_CMD_LOCK_UNLOCK:
-			BUG_ON((action->exchange!=LS_UNLOCKED)&&((action->exchange&action->lock_cnsts->stale_bit_mask) == 0));	// Unlock to 0 or to stale lock.
+
+			union nvmeib_lock_id exchange_lock_id = nvmeibc_d_rdma_comp_get_exchange_lock_id(action);
+			BUG_ON(exchange_lock_id.all != 0 && exchange_lock_id.bits.is_stale == 0);
 			action_result = cmpxchg(curLock, action->compare, action->exchange);
 			if (action_result != action->compare) action->lock_status = NCL_STATUS_CONTENDED; 	// Lock cannot be freed, even though it suppose to belong to the client
 			else  								  action->lock_status = NCL_STATUS_TAKEN;
