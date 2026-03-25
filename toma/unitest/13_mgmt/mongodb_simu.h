@@ -18,6 +18,7 @@ struct sb_cluster_conf {
 		struct sb_disk_conf {	// Each node has up to 3 local disks
 			char name[16];
 			uint32_t uuid;
+			uint32_t size_bytes;
 			u16 vendor;
 			bool is_out_of_service;
 		} disks[3];

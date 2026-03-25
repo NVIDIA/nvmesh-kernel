@@ -25,6 +25,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 			struct sb_disk_conf *disk = &node->disks[j];
 			disk->uuid = (node->uuid & 0xFFFF0000) | DISK_UUID_BASE | j;
 			snprintf(disk->name, sizeof(disk->name),"NVMD_%x_00%u.1", (node->uuid >> 20), (j + 2));
+			disk->size_bytes = (32768 << 12);		// 128[MB]
 			disk->vendor = 5000 + (i+1) * 100 + j;
 		}
 	}

@@ -251,8 +251,8 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 			N->uuid>>16, N->hostname, N->uuid);
 		for (i = 0; i < (int)ARRAY_SIZE(N->disks); i++) {
 			const struct sb_disk_conf *D = &N->disks[i];
-			BUF_ADD("{\"diskID\":\"%s\",\"blocks\":32768,\"block_size\":4096,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":%s},",
-				D->name, D->vendor, D->uuid, (D->is_out_of_service ? "true" : "false"));
+			BUF_ADD("{\"diskID\":\"%s\",\"blocks\":%u,\"block_size\":%u,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":%s},",
+				D->name, D->size_bytes >> 12, 1 << 12, D->vendor, D->uuid, (D->is_out_of_service ? "true" : "false"));
 		}
 		rv--;	// Remove the last uneeded ',' of the above array
 		BUF_ADD("],\"nics\":[");
