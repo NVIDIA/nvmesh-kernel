@@ -344,56 +344,9 @@ endif
 # Kernel/RDMA compatibility -D flags for sched/mm, hashtable, genhd, ib_sa, etc.:
 # see scripts/compute_backports.sh ("Moved from top-level Makefile") and scripts/backports.mk
 
-# Check for Broadcom Netxtreme Support
-ifneq ($(BNXT_DIR),)
-    configs+=$(call nconfig_set,BNXT)
-    cflags += -DBNXT_RE=1
-    INFO_BNXT := bnxt from $(BNXT_DIR)
-
-    # Check Broadcom Compatibility
-    ifneq ($(shell grep "RDMA_CORE_CAP_PROT_ROCE_UDP_ENCAP" $(KSRC1)/include/rdma/ib_verbs.h 2> /dev/null),)
-        BNXT_DISTRO_CFLAG += -DENABLE_SHADOW_QP -DENABLE_ROCEV2_QP1
-    endif
-
-    ifneq ($(shell grep "IB_ZERO_BASED" $(KSRC1)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo zero),)
-        BNXT_DISTRO_CFLAG += -DHAVE_IB_ZERO_BASED
-    endif
-
-    ifneq ($(shell grep "IB_ACCESS_ON_DEMAND" $(KSRC1)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo demand),)
-        BNXT_DISTRO_CFLAG += -DHAVE_IB_ACCESS_ON_DEMAND
-    endif
-
-    ifneq ($(shell grep "alloc_mr" $(KSRC1)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo alloc_mr),)
-        BNXT_DISTRO_CFLAG += -DHAVE_IB_ALLOC_MR
-    endif
-
-    ifneq ($(shell grep -so "ib_mw_type" $(KSRC1)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo ib_mw_type),)
-        BNXT_DISTRO_CFLAG += -DHAVE_IB_MW_TYPE
-    endif
-
-    ifneq ($(shell grep -o "PKT_HASH_TYPE" $(KSRC1)/include/linux/skbuff.h),)
-        BNXT_DISTRO_CFLAG += -DHAVE_SKB_HASH_TYPE
-    endif
-
-    ifneq ($(shell grep -o "ether_addr_copy" $(KSRC1)/include/linux/etherdevice.h),)
-        BNXT_DISTRO_CFLAG += -DHAVE_ETHER_ADDR_COPY
-    endif
-
-    ifneq ($(shell grep -o "NETDEV_BONDING_INFO" $(KSRC1)/include/linux/netdevice.h),)
-        BNXT_DISTRO_CFLAG += -DHAVE_NETDEV_BONDING_INFO -DHAVE_ROCE_LAG_SUPPORT
-    endif
-
-    BNXT_CFLAGS := ${BNXT_DISTRO_CFLAG} -DFPGA -g -DCONFIG_BNXT_SRIOV -DCONFIG_BNXT_DCB -DHAVE_NET_VERSION -DENABLE_DEBUGFS -DCONFIG_BNXT_RE -DENABLE_SHADOW_QP -DENABLE_ROCE_TOS -DBIND_MW_FENCE_WQE
-
-    $(info BNXT_CFLAGS=$(BNXT_CFLAGS))
-
-    obj-m += common_public/bnxt/
-
-    BNXT_SYMVERS := $(BNXT_DIR)/bnxt_re/Module.symvers
-else
-    configs+=$(call nconfig_unset,BNXT)
-    cflags += -DBNXT_RE=0
-endif
+# Broadcom Netxtreme Support not supported anymore, disabled by default
+configs+=$(call nconfig_unset,BNXT)
+cflags += -DBNXT_RE=0
 
 ifeq ($(M),)
     NVMESH_SRC_DIR := $(shell pwd)
