@@ -5,11 +5,15 @@
 
 # compute_backports.sh - Detect kernel API backports and output -D flags
 #
+# Includes file-existence and grep-based checks moved from the top-level Makefile
+# (kernel paths use KSRC1; RDMA UAPI uses INC_RDMA = inbox or OFED per backports.mk).
+#
 # Called from backports.mk via $(shell ...) during the COMPILE_MODULES step.
 # Runs as a single process with file-content caching, replacing ~100+ separate
 # Make $(shell ...) invocations.
 #
-# Usage: compute_backports.sh KSRC1 INC_RDMA INC_RDMA_DRV ARCH [GREP_DEBUG GREP_DEBUG_LOGFILE]
+# Usage: compute_backports.sh KSRC1 INC_RDMA INC_RDMA_DRV KERN_SYMVERS RDMA_SYMVERS ARCH [GREP_DEBUG GREP_DEBUG_LOGFILE]
+# INC_RDMA: OFED tree or KSRC1 (UAPI). INC_RDMA_DRV: OFED tree or KERN_FILES_PATH (OFED_SRC_DIR or kernels/ copy per backports.mk).
 # Output: Space-separated -DFLAG=value flags on stdout
 
 set -f  # disable globbing
@@ -161,10 +165,177 @@ grep_rdma_symvers() {
     grep_symvers "$1" "$2" "$RDMA_SYMVERS" "$3" "$4"
 }
 
+# file_exists_define: probe relative path under one or more base directories.
+# Usage: file_exists_define <cpp_define> <relative_path> <base_dirs> <val_if_found> <val_if_not_found> [any|all]
+#   <base_dirs>: whitespace-separated absolute or relative directory paths (e.g. "$INC_RDMA $KSRC1")
+#   [any|all]: optional match mode (default: any)
+#     any: success if the file exists in at least one base directory.
+#     all: success only if the file exists in every non-empty base directory.
+#   Appends -D<cpp_define>=<val> to CFLAGS.
+#   On success sets LAST_EXISTING_FILE_PATH to first matching path (any) or first checked path (all);
+#   clears it on failure.
+# Exit: 0 on success per match mode, 1 otherwise — suitable for: if file_exists_define ...; then ...; fi
+file_exists_define() {
+    local define="$1"
+    local rel="${2#./}"
+    local bases="$3"
+    local found_val="${4:-1}"
+    local notfound_val="${5:-0}"
+    local match_mode="${6:-any}"
+    local base path first_path=""
+    local checked_any=0
+    LAST_EXISTING_FILE_PATH=
+    case "$match_mode" in
+        any)
+            for base in $bases; do
+                [[ -n "$base" ]] || continue
+                path="$base/$rel"
+                if [[ -f "$path" ]]; then
+                    LAST_EXISTING_FILE_PATH="$path"
+                    CFLAGS="$CFLAGS -D${define}=${found_val}"
+                    return 0
+                fi
+            done
+            ;;
+        all)
+            for base in $bases; do
+                [[ -n "$base" ]] || continue
+                checked_any=1
+                path="$base/$rel"
+                [[ -n "$first_path" ]] || first_path="$path"
+                if [[ ! -f "$path" ]]; then
+                    CFLAGS="$CFLAGS -D${define}=${notfound_val}"
+                    return 1
+                fi
+            done
+            if [[ "$checked_any" -eq 1 ]]; then
+                LAST_EXISTING_FILE_PATH="$first_path"
+                CFLAGS="$CFLAGS -D${define}=${found_val}"
+                return 0
+            fi
+            ;;
+        *)
+            echo "file_exists_define: invalid match mode '$match_mode' (use any or all)" >&2
+            CFLAGS="$CFLAGS -D${define}=${notfound_val}"
+            return 1
+            ;;
+    esac
+    CFLAGS="$CFLAGS -D${define}=${notfound_val}"
+    return 1
+}
+
+# hashtable: Makefile logic — 1 only if hashtable.h exists and the five-argument
+# hash_for_each_possible variant is absent (uses two grep_check calls).
+grep_ksrc_hashtable_from_makefile() {
+    grep_check "KS_HASHTABLE_FILE" "(?s)." "" "include/linux/hashtable.h" "$KSRC1" "1" "0"
+    grep_check "KS_HASHTABLE_5ARG" "(?s)#define\s+hash_for_each_possible[^\n]*name, obj, node, member, key" "" "include/linux/hashtable.h" "$KSRC1" "1" "0"
+    local hf h5
+    hf=$(echo "$CFLAGS" | sed -n 's/.*-DKS_HASHTABLE_FILE=\([01]\).*/\1/p')
+    h5=$(echo "$CFLAGS" | sed -n 's/.*-DKS_HASHTABLE_5ARG=\([01]\).*/\1/p')
+    CFLAGS=$(echo "$CFLAGS" | sed 's/ -DKS_HASHTABLE_FILE=[01]//g; s/ -DKS_HASHTABLE_5ARG=[01]//g')
+    if [[ "$hf" == "1" && "$h5" == "0" ]]; then
+        CFLAGS="$CFLAGS -DKS_HASHTABLE=1"
+    else
+        CFLAGS="$CFLAGS -DKS_HASHTABLE=0"
+    fi
+}
+
 
 ###############################################################################
 # All backport checks
 ###############################################################################
+
+# ---------------------------------------------------------------------------- #
+# Moved from top-level Makefile (kernel tree = KSRC1; RDMA UAPI = INC_RDMA)
+# Minimum supported kernel is 4.18 — many probes are constant on that baseline.
+# ---------------------------------------------------------------------------- #
+
+# --- Fixed for >= 4.18 mainline (see kr_version.h K_CHECK_VER fallbacks) ---
+CFLAGS="$CFLAGS -DKSRC_INCLUDE_SCHED_MM=1 -DLINUX_SCHED_MM=1"
+CFLAGS="$CFLAGS -DKS_HAS_I387_HEADER=0"
+CFLAGS="$CFLAGS -DKS_REINIT_COMPLETION=1"
+CFLAGS="$CFLAGS -DKS_HAS_SCHED_SIGNAL_HEADER=1 -DKS_HAS_SCHED_TASK_HEADER=1"
+CFLAGS="$CFLAGS -DKS_HAS_BITMAP_SCNPRINTF=1"
+CFLAGS="$CFLAGS -DKS_NEW_TIMER_API=1"
+CFLAGS="$CFLAGS -DKS_HAS_IRQ_POLL=1"
+CFLAGS="$CFLAGS -DKS_HAS_VM_FAULT_T=1"
+CFLAGS="$CFLAGS -DKS_HAS_SO_INCOMING_CPU=1"
+CFLAGS="$CFLAGS -DKS_DRIVERFS_DEV=0"
+# 4.14+ genhd prototypes use request_queue; min 4.18. Paths that use these only run when
+# KS_HAS_PART_INC_DEC_IN_FLIGHT (kernel < 5.8), which implies genhd.h — so 1 is always right
+# when it matters; when genhd.h is gone (5.15+) that block is compiled out — value unused.
+CFLAGS="$CFLAGS -DKS_PART_INC_IN_FLIGHT_USES_Q=1 -DKS_PART_DEC_IN_FLIGHT_USES_Q=1"
+
+grep_ksrc_hashtable_from_makefile
+
+grep_check "KS_HAVE_REGISTER_NETDEVICE_NOTIFIER_RH" "register_netdevice_notifier_rh" "" "include/linux/netdevice.h" "$KSRC1"
+grep_check "KS_FAULT_EXPECTS_VM_AREA" "\*fault.*struct vm_area_struct" "" "include/linux/mm.h" "$KSRC1"
+
+grep_check "KS_NO_BIO_IS_RW" "bio_is_rw" "" "include/linux/bio.h" "$KSRC1" "0" "1"
+
+grep_check "KS_HAS_SA_PATH_REC" "struct sa_path_rec" "" "include/rdma/ib_sa.h" "$INC_RDMA"
+
+grep_check "KS_HAS_GENHD_H" "(?s)." "" "include/linux/genhd.h" "$KSRC1" "1" "0"
+
+grep_check "KS_HAS_SCSCI_REQUEST_H" "(?s)." "" "include/scsi/scsi_request.h" "$KSRC1" "1" "0"
+
+grep_check "KS_HAS_UUID_BE_GEN" "uuid_be_gen" "" "include/linux/uuid.h" "$KSRC1"
+
+grep_check "KS_HAS_MUTEX_OWNER" "__mutex_owner" "" "include/linux/mutex.h" "$KSRC1"
+grep_ksrc_func_var "KS_HAS_ATOMIC_INC_NOT_ZERO_HINT" "int atomic_inc_not_zero_hint" "" "include/linux/atomic.h"
+
+grep_check "KS_HAS_GPL_SME_ACTIVE" "sme_active.*EXPORT_SYMBOL_GPL" "" "Module.symvers" "$KSRC1"
+
+grep_rdma_func_var "KS_IB_SA_PATH_REC_GET_HAS_RETRIES" "int ib_sa_path_rec_get" "retries" "include/rdma/ib_sa.h"
+
+grep_check "KS_HAS_MMIOWB" "#define\s+mmiowb\s*\(\)" "" "arch/x86/include/asm/io.h" "$KSRC1"
+grep_check "KS_HAS_KERNEL_SOCKPTR" "(?s)." "" "include/linux/sockptr.h" "$KSRC1" "1" "0"
+
+grep_check "KS_HAS_DO_GETTIMEOFDAY" "void do_gettimeofday" "void" "include/linux/time.h include/linux/timekeeping.h include/linux/timekeeping32.h" "$KSRC1"
+grep_check "KS_HAS_GETNSTIMEOFDAY" "void getnstimeofday" "void" "include/linux/timekeeping32.h" "$KSRC1"
+file_exists_define "HAVE_TIMECOUNTER_H" "include/linux/timecounter.h" "$KSRC1" "1" "0"
+file_exists_define "HAVE_CGROUP_RDMA_H" "include/linux/cgroup_rdma.h" "$INC_RDMA $KSRC1" "1" "0" "all"
+
+# ---------------------------------------------------------------------------- #
+# Moved from top-level Makefile (kmod / tcp / mmap_lock / genhd / blkdev probes)
+# ---------------------------------------------------------------------------- #
+grep_check "KS_HAS_CALL_USERMODEHELPER_SETFNS" "call_usermodehelper_setfns" "" "include/linux/kmod.h" "$KSRC1"
+grep_check "KS_HAS___TCP_SEND_ACK" "__tcp_send_ack" "" "include/net/tcp.h" "$KSRC1"
+grep_check "KS_HAS_TCP_RENO_UNDO_CWND" "tcp_reno_undo_cwnd" "" "include/net/tcp.h" "$KSRC1"
+grep_check "KS_HAS_MMAP_LOCK_FUNCTIONS" "mmap_read_lock" "" "include/linux/mmap_lock.h" "$KSRC1"
+grep_check "KS_HAS_MMAP_WRITE_TRYLOCK" "mmap_write_trylock" "" "include/linux/mmap_lock.h" "$KSRC1"
+grep_check "KS_HAS_REVALIDATE_DISK_SIZE" "revalidate_disk_size" "" "include/linux/genhd.h" "$KSRC1"
+grep_check "KS_HAS_BIO_START_IO_ACCT" "bio_start_io_acct" "" "include/linux/blkdev.h" "$KSRC1"
+
+# kref_read: always probe inbox kernel tree (KSRC1), not INC_RDMA / OFED linux headers
+grep_check "KS_HAS_KREF_READ" "kref_read" "" "include/linux/kref.h" "$KSRC1"
+
+# ---------------------------------------------------------------------------- #
+# Moved from top-level Makefile: __ib_alloc_pd, ib_verbs.h, mlx5_ib.h
+# UAPI: $INC_RDMA (OFED_SRC_DIR or KSRC1 per backports.mk). Driver tree: $INC_RDMA_DRV
+# (OFED or KERN_FILES_PATH for NO_OFED).
+# ---------------------------------------------------------------------------- #
+grep_rdma_func_var "KS_HAS_IB_ALLOC_MACRO" "__ib_alloc_pd" "" "include/rdma/ib_verbs.h"
+grep_rdma_func_var "KS_IB_ALLOC_HAS_SKIP_TRACKING" "__ib_alloc_pd" "skip_tracking" "include/rdma/ib_verbs.h"
+
+grep_check "HAS_IB_GET_DMA_MR" "ib_get_dma_mr" "" "include/rdma/ib_verbs.h" "$INC_RDMA"
+grep_check "KS_HAS_VIRT_DMA_SUPPORT" "ib_uses_virt_dma" "" "include/rdma/ib_verbs.h" "$INC_RDMA"
+grep_check "HAS_IB_QUERY_GID" "ib_query_gid" "" "include/rdma/ib_verbs.h" "$INC_RDMA"
+grep_check "KS_IB_DEVICE_HAS_GET_NETDEV" "get_netdev" "" "include/rdma/ib_verbs.h" "$INC_RDMA"
+grep_check "KS_IB_HAS_RDMA_AH_ATTR_TYPE" "rdma_ah_attr_type" "" "include/rdma/ib_verbs.h" "$INC_RDMA"
+
+# Check if mlx5_ib.h exists in the RDMA tree
+if file_exists_define KS_MLX5 "drivers/infiniband/hw/mlx5/mlx5_ib.h" "$INC_RDMA_DRV" 1 0; then
+    grep_rdma_drv_struct_member "MLX5_IB_QP_FRAG_BUF" "struct mlx5_ib_qp" "struct mlx5_frag_buf" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+    # MLX5_IB_WQ_FRAG_BUF_CTRL is independent of MLX5_IB_QP_FRAG_BUF in the code we compile (guarded only by WQ_FRAG_BUF_CTRL).
+    grep_rdma_drv_struct_member "MLX5_IB_WQ_FRAG_BUF_CTRL" "struct mlx5_ib_wq" "struct mlx5_frag_buf_ctrl" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+    grep_rdma_drv_struct_member "MLX5_IB_CQ_FRAG_BUF_CTRL" "struct mlx5_ib_cq_buf" "struct mlx5_frag_buf_ctrl" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+    grep_rdma_drv_struct_member "IB_MLX5_NEW_BF" "struct mlx5_ib_qp" "struct mlx5_bf" "drivers/infiniband/hw/mlx5/mlx5_ib.h"
+    grep_rdma_drv_struct_member "MLX5_IB_FBC_HAS_FRAG_BUF" "mlx5_frag_buf_ctrl" "frag_buf\;" "include/linux/mlx5/driver.h"
+fi
+
+# cma_priv.h under driver tree (OFED or KERN_FILES_PATH per INC_RDMA_DRV in backports.mk)
+file_exists_define IB_HAS_CMA_PRIV_H "drivers/infiniband/core/cma_priv.h" "$INC_RDMA_DRV" 1 0
 
 # ---------------------------------------------------------------------------- #
 # Kernel 5.10
@@ -178,7 +349,6 @@ grep_rdma_func_var "KS_IB_REGISTER_DEVICE_HAS_DMA_DEVICE" "int ib_register_devic
 
 grep_ksrc_struct_member "KS_MLX5_ACCESS_MODE_1_0" "mlx5_ifc_mkc_bits" "access_mode_1_0 " "include/linux/mlx5/mlx5_ifc.h"
 
-grep_rdma_func_var "HAS_IB_QUERY_GID" "int ib_query_gid" "struct ib_device \*device" "include/rdma/ib_verbs.h"
 grep_rdma_func_var "KS_IB_HAS_RDMA_GET_GID_ATTR" "struct ib_gid_attr \*rdma_get_gid_attr" "int index" "include/rdma/ib_cache.h"
 grep_rdma_struct_member "KS_IB_RDMA_PORT_SPACE" "enum rdma_port_space" "" "include/rdma/rdma_cm.h"
 grep_ksrc_struct_member "KS_TCP_SOCK_HAS_XMIT_SIZE_GOAL_SEGS" "struct tcp_sock" "xmit_size_goal_segs" "include/linux/tcp.h"
@@ -223,12 +393,6 @@ grep_ksrc_struct_member "KS_DEVICE_HAS_DEVICE_RH" "struct device" "device_rh" "i
 grep_rdma_struct_member "KS_IW_CM_HAS_IFNAME" "struct iw_cm_verbs" "ifname" "include/rdma/iw_cm.h"
 grep_rdma_func_ptr_var "KS_IB_CREATE_AH_HAS_FLAGS" "create_ah" "u32" "include/rdma/ib_verbs.h"
 
-if [[ -f "$KSRC1/include/linux/sched/mm.h" ]]; then
-    CFLAGS="$CFLAGS -DLINUX_SCHED_MM=1"
-else
-    CFLAGS="$CFLAGS -DLINUX_SCHED_MM=0"
-fi
-
 # ---------------------------------------------------------------------------- #
 # Kernel 4.18.0-[147, 193] (CentOS 8.1.1911, 8.2.2004)
 # ---------------------------------------------------------------------------- #
@@ -239,11 +403,6 @@ grep_rdma_func_var "KS_IB_MLX5_WRITE64_HAS_DB_LOCK" "static inline void mlx5_wri
 grep_check "KS_HAS___LLIST_ADD_BATCH" "__llist_add_batch" "" "include/linux/llist.h" "$KSRC1"
 grep_check "KS_HAS___LLIST_ADD" "__llist_add" "" "include/linux/llist.h" "$KSRC1"
 grep_check "KS_HAS___LLIST_DEL_ALL" "__llist_del_all" "" "include/linux/llist.h" "$KSRC1"
-
-# ---------------------------------------------------------------------------- #
-# Kernel 4.20
-# ---------------------------------------------------------------------------- #
-grep_ksrc_struct_member "KS_MLX5_IB_FBC_HAS_FRAG_BUF" "mlx5_frag_buf_ctrl" "frag_buf\;" "include/linux/mlx5/driver.h"
 
 # ---------------------------------------------------------------------------- #
 # OFED 5.1
@@ -515,8 +674,6 @@ grep_ksrc_func_var "KS_HAS_BDEV_PARTNO" "bdev_partno" "" "include/linux/blkdev.h
 # ---------------------------------------------------------------------------- #
 grep_rdma_struct_member "KS_RDMA_HAS_RESTRACK" "struct rdma_restrack_entry" "" "include/rdma/restrack.h"
 grep_ksrc_struct_member "KS_HAS_PROC_FS" "struct proc_ops" "" "include/linux/proc_fs.h"
-grep_rdma_func_var "HAS_IB_GET_DMA_MR" "ib_get_dma_mr" "" "include/rdma/ib_verbs.h"
-
 
 # ---------------------------------------------------------------------------- #
 # Kernel 6.17

@@ -341,11 +341,8 @@ ifeq ($(MODVERSIONS),)
     endif
 endif
 
-ifneq ($(wildcard $(KSRC1)/include/linux/sched/mm.h),)
-    cflags += -DKSRC_INCLUDE_SCHED_MM=1
-else
-    cflags += -DKSRC_INCLUDE_SCHED_MM=0
-endif
+# Kernel/RDMA compatibility -D flags for sched/mm, hashtable, genhd, ib_sa, etc.:
+# see scripts/compute_backports.sh ("Moved from top-level Makefile") and scripts/backports.mk
 
 # Check for Broadcom Netxtreme Support
 ifneq ($(BNXT_DIR),)
@@ -415,200 +412,6 @@ ifeq ($(KERN_VER_NO_OFED),)
         endif
     endif
 endif
-
-
-ifeq ($(wildcard $(KSRC1)/arch/x86/include/asm/i387.h),)
-    # i387.h does not exist
-    cflags += -DKS_HAS_I387_HEADER=0
-else
-    cflags += -DKS_HAS_I387_HEADER=1
-endif
-
-
-ifeq ($(wildcard $(KSRC1)/include/linux/hashtable.h),)
-    # hashtable.h does not exist
-    cflags += -DKS_HASHTABLE=0
-else
-    ifeq ($(shell grep -w "define hash_for_each_possible" $(KSRC1)/include/linux/hashtable.h | grep "name, obj, node, member, key" 2> /dev/null),)
-        # four argument hash_for_each_possible
-        cflags += -DKS_HASHTABLE=1
-    else
-        # five argument hash_for_each_possible - use NVIDIA implementation
-        cflags += -DKS_HASHTABLE=0
-    endif
-endif
-ifeq ($(shell grep reinit_completion $(KSRC1)/include/linux/completion.h 2> /dev/null),)
-    # reinit_completion is not defined
-    cflags += -DKS_REINIT_COMPLETION=0
-else
-    cflags += -DKS_REINIT_COMPLETION=1
-endif
-
-ifneq ($(shell grep "register_netdevice_notifier_rh" $(KSRC1)/include/linux/netdevice.h 2> /dev/null),)
-    cflags +=-DKS_HAVE_REGISTER_NETDEVICE_NOTIFIER_RH=1
-else
-    cflags +=-DKS_HAVE_REGISTER_NETDEVICE_NOTIFIER_RH=0
-endif
-
-ifneq ($(shell grep "bio_is_rw" $(KSRC1)/include/linux/bio.h 2> /dev/null),)
-    cflags += -DKS_NO_BIO_IS_RW=0
-else
-    cflags += -DKS_NO_BIO_IS_RW=1
-endif
-
-ifneq ($(shell grep "*fault.*struct vm_area_struct" $(KSRC1)/include/linux/mm.h 2> /dev/null),)
-    cflags +=-DKS_FAULT_EXPECTS_VM_AREA=1
-else
-    cflags +=-DKS_FAULT_EXPECTS_VM_AREA=0
-endif
-
-ifneq ($(shell find $(KSRC1)/include/linux/sched/ -type f -name signal.h 2> /dev/null),)
-    cflags +=-DKS_HAS_SCHED_SIGNAL_HEADER=1
-else
-    cflags +=-DKS_HAS_SCHED_SIGNAL_HEADER=0
-endif
-ifneq ($(shell find $(KSRC1)/include/linux/sched/ -type f -name task.h 2> /dev/null),)
-    cflags +=-DKS_HAS_SCHED_TASK_HEADER=1
-else
-    cflags +=-DKS_HAS_SCHED_TASK_HEADER=0
-endif
-
-ifneq ($(shell grep -w bitmap_scnprintf $(KSRC1)/include/linux/bitmap.h 2> /dev/null),)
-    cflags += -DKS_HAS_BITMAP_SCNPRINTF=1
-else
-    cflags += -DKS_HAS_BITMAP_SCNPRINTF=0
-endif
-
-ifneq ($(shell grep -w uuid_be_gen $(KSRC1)/include/linux/uuid.h 2> /dev/null),)
-    cflags += -DKS_HAS_UUID_BE_GEN=1
-else
-    cflags += -DKS_HAS_UUID_BE_GEN=0
-endif
-
-ifneq ($(shell grep -w "struct sa_path_rec" $(KSRC1)/include/rdma/ib_sa.h 2> /dev/null),)
-    cflags += -DKS_HAS_SA_PATH_REC=1
-else
-    cflags += -DKS_HAS_SA_PATH_REC=0
-endif
-
-ifneq ($(shell grep -w "function" $(KSRC1)/include/linux/timer.h $(KSRC1)/include/linux/timer_types.h | grep -w "struct timer_list" 2> /dev/null),)
-    cflags += -DKS_NEW_TIMER_API=1
-else
-    cflags += -DKS_NEW_TIMER_API=0
-endif
-
-ifeq ($(wildcard $(KSRC1)/include/linux/genhd.h),)
-    cflags +=-DKS_HAS_GENHD_H=0
-else
-    cflags +=-DKS_HAS_GENHD_H=1
-
-    ifneq ($(shell grep "driverfs_dev" $(KSRC1)/include/linux/genhd.h 2> /dev/null),)
-        cflags += -DKS_DRIVERFS_DEV=1
-    else
-        cflags += -DKS_DRIVERFS_DEV=0
-    endif
-
-    ifneq ($(shell grep -w "void part_inc_in_flight" $(KSRC1)/include/linux/genhd.h | grep -w "struct request_queue" 2> /dev/null),)
-        cflags += -DKS_PART_INC_IN_FLIGHT_USES_Q=1
-    else
-        cflags += -DKS_PART_INC_IN_FLIGHT_USES_Q=0
-    endif
-
-    ifneq ($(shell grep -w "void part_dec_in_flight" $(KSRC1)/include/linux/genhd.h | grep -w "struct request_queue" 2> /dev/null),)
-        cflags += -DKS_PART_DEC_IN_FLIGHT_USES_Q=1
-    else
-        cflags += -DKS_PART_DEC_IN_FLIGHT_USES_Q=0
-    endif
-endif
-
-ifneq ($(shell grep -w "sme_active" $(KSRC1)/Module.symvers | grep -w "EXPORT_SYMBOL_GPL" 2> /dev/null),)
-    cflags += -DKS_HAS_GPL_SME_ACTIVE=1
-else
-    cflags += -DKS_HAS_GPL_SME_ACTIVE=0
-endif
-
-ib_sa_path_rec_get_match := '(?s)int\s+ib_sa_path_rec_get\s*\([^\)]+\)'
-ifneq ($(shell grep -Poz \'$(ib_sa_path_rec_get_match)\' $(KSRC1)/include/rdma/ib_sa.h | grep retries 2> /dev/null),)
-    cflags += -DKS_IB_SA_PATH_REC_GET_HAS_RETRIES=1
-else
-    cflags += -DKS_IB_SA_PATH_REC_GET_HAS_RETRIES=0
-endif
-
-ifneq ($(shell find $(KSRC1)/include/linux/ -type f -name irq_poll.h 2> /dev/null),)
-    cflags +=-DKS_HAS_IRQ_POLL=1
-else
-    cflags +=-DKS_HAS_IRQ_POLL=0
-endif
-
-ifneq ($(shell grep -w "vm_fault_t" $(KSRC1)/include/linux/mm_types.h 2> /dev/null),)
-    cflags +=-DKS_HAS_VM_FAULT_T=1
-else
-    cflags +=-DKS_HAS_VM_FAULT_T=0
-endif
-
-ifneq ($(shell grep -w 'define mmiowb()' $(KSRC1)/arch/x86/include/asm/io.h 2> /dev/null),)
-    cflags +=-DKS_HAS_MMIOWB=1
-else
-    cflags +=-DKS_HAS_MMIOWB=0
-endif
-
-ifneq ($(shell grep -w '__mutex_owner' $(KSRC1)/include/linux/mutex.h 2> /dev/null),)
-    cflags +=-DKS_HAS_MUTEX_OWNER=1
-else
-    cflags +=-DKS_HAS_MUTEX_OWNER=0
-endif
-
-ifneq ($(shell grep -w 'SO_INCOMING_CPU' $(KSRC1)/include/uapi/asm-generic/socket.h 2> /dev/null),)
-    cflags += -DKS_HAS_SO_INCOMING_CPU=1
-else
-    cflags += -DKS_HAS_SO_INCOMING_CPU=0
-endif
-
-ifneq ($(wildcard $(KSRC1)/include/linux/sockptr.h),)
-    cflags += -DKS_HAS_KERNEL_SOCKPTR=1
-else
-    cflags += -DKS_HAS_KERNEL_SOCKPTR=0
-endif
-
-HAS_DO_GETTIMEOFDAY=0
-ifneq ($(shell grep -w 'void do_gettimeofday' $(KSRC1)/include/linux/time.h 2> /dev/null),)
-    HAS_DO_GETTIMEOFDAY=1
-endif
-ifneq ($(shell grep -w 'void do_gettimeofday' $(KSRC1)/include/linux/timekeeping.h 2> /dev/null),)
-	HAS_DO_GETTIMEOFDAY=1
-endif
-ifneq ($(shell grep -w 'void do_gettimeofday' $(KSRC1)/include/linux/timekeeping32.h 2> /dev/null),)
-    HAS_DO_GETTIMEOFDAY=1
-endif
-ifeq ($(HAS_DO_GETTIMEOFDAY), 1)
-    cflags +=-DKS_HAS_DO_GETTIMEOFDAY=1
-else
-    cflags +=-DKS_HAS_DO_GETTIMEOFDAY=0
-endif
-ifneq ($(shell grep -w 'void getnstimeofday' $(KSRC1)/include/linux/timekeeping32.h 2> /dev/null),)
-    HAS_GETNSTIMEOFDAY=1
-endif
-ifeq ($(HAS_GETNSTIMEOFDAY), 1)
-    cflags +=-DKS_HAS_GETNSTIMEOFDAY=1
-else
-    cflags +=-DKS_HAS_GETNSTIMEOFDAY=0
-endif
-
-ifneq ($(shell grep -w 'int atomic_inc_not_zero_hint' $(KSRC1)/include/linux/atomic.h 2> /dev/null),)
-    cflags +=-DKS_HAS_ATOMIC_INC_NOT_ZERO_HINT=1
-else
-    cflags +=-DKS_HAS_ATOMIC_INC_NOT_ZERO_HINT=0
-endif
-
-ifeq ($(wildcard $(KSRC1)/include/scsi/scsi_request.h),)
-    cflags +=-DKS_HAS_SCSCI_REQUEST_H=0
-else
-    cflags +=-DKS_HAS_SCSCI_REQUEST_H=1
-endif
-
-
-
-
 
 # when we use the OFED package we must use OFED includes before that
 # the default kernel includes otherwise we end up with ib_structures mismatch.
@@ -740,73 +543,12 @@ ifeq ($(OFED_WE_R), yes)
     export OFED_VER_MIN
 
     ifneq (,$(findstring $(OFED_VER_MAJ), 3 4 5))
-
-        # Mellanox OFED 3.X
-        cflags += -DCONFIG_COMPAT_IS_REINIT_COMPLETION -DHAVE_ETHER_ADDR_COPY
-
-        # Check if kernel has timecounter.h
-        ifneq ($(wildcard $(KSRC1)/include/linux/timecounter.h),)
-            cflags += -DHAVE_TIMECOUNTER_H
-        endif
-
-        cflags += -DHAVE_LINUX_PRINTK_H
-
-        # Check for netdev_rss_key_fill in Kernel Module.symvers
-        KERN_HAS_NETDEV_RSS_KEY_FILL := $(shell grep -c netdev_rss_key_fill $(KSRC)/Module.symvers 2> /dev/null)
-        ifeq ($(KERN_HAS_NETDEV_RSS_KEY_FILL),1)
-            cflags += -DHAVE_NETDEV_RSS_KEY_FILL
-        endif
-
-        # Check for dst_get_neighbour in Kernel include/net/dst.h
-        #KERN_HAS_DST_GET_NEIGHBOUR := $(shell grep dst_get_neighbour $(KSRC1)/include/net/dst.h 2> /dev/null)
-        #ifneq ($(KERN_HAS_DST_GET_NEIGHBOUR),)
-        #         cflags += -DHAVE_DST_GET_NEIGHBOUR
-        #endif
-
         # include local dirs mlnx_ofed_X.X
         INC_DIR += -I$(shell pwd)/mlnx_ofed_$(OFED_VER)/include -I$(shell pwd)/mlnx_ofed_$(OFED_VER)/include/linux
-            # Check if kernel has __ib_alloc_pd
-            ifneq ($(shell grep __ib_alloc_pd $(OFED_SRC_DIR)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags += -DKS_HAS_IB_ALLOC_MACRO=1
-                ifneq ($(shell grep -A 1 __ib_alloc_pd $(OFED_SRC_DIR)/include/rdma/ib_verbs.h | grep skip_tracking 2> /dev/null),)
-                    cflags += -DKS_IB_ALLOC_HAS_SKIP_TRACKING=1
-                else
-                    cflags += -DKS_IB_ALLOC_HAS_SKIP_TRACKING=0
-                endif
-            else
-                cflags += -DKS_HAS_IB_ALLOC_MACRO=0
-            endif
-            ifneq ($(shell grep ib_get_dma_mr $(OFED_SRC_DIR)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags += -DHAS_IB_GET_DMA_MR=1
-            else
-                cflags += -DHAS_IB_GET_DMA_MR=0
-            endif
     endif
-    # enable HAVE_CGROUP_RDMA_H for OFED >= 4.1
-    ifneq ($(wildcard $(OFED_SRC_DIR)/include/linux/cgroup_rdma.h),)
-        ifneq ($(wildcard $(KSRC1)/include/linux/cgroup_rdma.h),)
-            cflags += -DHAVE_CGROUP_RDMA_H
-        endif
-    endif
-    ifneq ($(shell grep -w ib_uses_virt_dma $(OFED_SRC_DIR)/include/rdma/ib_verbs.h 2> /dev/null),)
-        cflags += -DKS_HAS_VIRT_DMA_SUPPORT=1
-    else
-        cflags += -DKS_HAS_VIRT_DMA_SUPPORT=0
-    endif
+    # KS_HAS_VIRT_DMA_SUPPORT, HAS_IB_QUERY_GID, __ib_alloc_pd, mlx5_ib.h, etc.: scripts/compute_backports.sh ($INC_RDMA / $INC_RDMA_DRV)
 
-    ifneq ($(shell grep ib_query_gid $(OFED_SRC_DIR)/include/rdma/ib_verbs.h 2> /dev/null),)
-        cflags += -DHAS_IB_QUERY_GID=1
-    else
-        cflags += -DHAS_IB_QUERY_GID=0
-    endif
-
-    ifneq ($(shell grep -w kref_read $(OFED_SRC_DIR)/include/linux/kref.h 2> /dev/null),)
-        cflags +=-DKS_HAS_KREF_READ=1
-    else
-        ifneq ($(shell grep -w kref_read $(KSRC1)/include/linux/kref.h 2> /dev/null),)
-            cflags +=-DKS_HAS_KREF_READ=1
-        endif
-    endif
+    # KS_HAS_KREF_READ: see scripts/compute_backports.sh (probed on KSRC1 only)
 
     # Set a flag if netdev_has_upper_dev_all_rcu is used in core_priv.h but is not defined in the kernel
     ifneq ($(shell grep netdev_has_upper_dev_all_rcu $(OFED_SRC_DIR)/drivers/infiniband/core/core_priv.h 2> /dev/null),)
@@ -815,26 +557,7 @@ ifeq ($(OFED_WE_R), yes)
         endif
     endif
 
-    # Check if cma_priv.h exists
-    ifneq ($(wildcard $(OFED_SRC_DIR)/drivers/infiniband/core/cma_priv.h),)
-        cflags += -DIB_HAS_CMA_PRIV_H=1
-    else
-        ifneq ($(wildcard $(OFED_SRC_DIR)/drivers/infiniband/core/cma.c),)
-            #If cma_priv.h does not exist, try and generate it from cma.c
-            cma_priv_dir := /tmp/__cma_priv_dir
-            $(shell mkdir -p $(cma_priv_dir)/infiniband/core)
-            $(shell echo '#include <rdma/rdma_cm.h>' > $(cma_priv_dir)/infiniband/core/cma_priv.h)
-            # Use sed to extract definition of struct rdma_id_private from cma.c
-            # It works by extracting all lines between:
-            # ^struct rdma_id_private {
-            # and
-            # ^};
-            $(shell sed -rn '/^struct\s+rdma_id_private\s+\{/,/^};/p' $(OFED_SRC_DIR)/drivers/infiniband/core/cma.c >> $(cma_priv_dir)/infiniband/core/cma_priv.h)
-            $(info created cma_priv.h in $(cma_priv_dir)/infiniband/core/)
-            cflags += -DIB_HAS_CMA_PRIV_H=1
-            INC_DIR += -I$(cma_priv_dir)
-        endif
-    endif
+    # IB_HAS_CMA_PRIV_H: scripts/compute_backports.sh (file_exists_define on INC_RDMA_DRV)
     ifeq ($(COMPILE_COMMON),yes)
         $(eval $(call check_ofed_ib_core_modules))
         $(info obj-m $(obj-m))
@@ -866,22 +589,6 @@ else
         cflags += -DCOMPAT_RDMA -DCOMPAT_RDMA_$(OFED_VER_MAJ)_$(OFED_VER_MIN) -DCONFIG_COMPAT_IS_KTHREAD
         cflags += -DOFED_VER_MAJ=$(OFED_VER_MAJ) -DOFED_VER_MIN=$(OFED_VER_MIN)
         INC_DIR += -I$(OFED_SRC_DIR)/drivers -I$(OFA_KERNEL)/include -I$(OFA_KERNEL)/include/linux
-        # Check if kernel has __ib_alloc_pd
-        ifneq ($(shell grep __ib_alloc_pd $(OFED_SRC_DIR)/include/rdma/ib_verbs.h 2> /dev/null),)
-            cflags += -DKS_HAS_IB_ALLOC_MACRO=1
-            ifneq ($(shell grep -A 1 __ib_alloc_pd $(OFED_SRC_DIR)/include/rdma/ib_verbs.h | grep skip_tracking 2> /dev/null),)
-                cflags += -DKS_IB_ALLOC_HAS_SKIP_TRACKING=1
-            else
-                cflags += -DKS_IB_ALLOC_HAS_SKIP_TRACKING=0
-            endif
-        else
-            cflags += -DKS_HAS_IB_ALLOC_MACRO=0
-        endif
-        ifneq ($(shell grep ib_get_dma_mr $(OFED_SRC_DIR)/include/rdma/ib_verbs.h 2> /dev/null),)
-            cflags += -DHAS_IB_GET_DMA_MR=1
-        else
-            cflags += -DHAS_IB_GET_DMA_MR=0
-        endif
         ifeq ($(COMPILE_COMMON),yes)
             $(eval $(call check_ofed_ib_core_modules))
             $(info obj-m $(obj-m))
@@ -902,102 +609,7 @@ else
             INC_DIR += -I$(KERN_FILES_PATH)/include -I $(KERN_FILES_PATH)/drivers
             cflags += -DNO_OFED -DKS_IB_SRQ_TYPE=0
 
-            # Check whether to define KS_MLX5. Its' backported to some kernels so we can't use the version
-            DIR := $(wildcard $(KERN_FILES_PATH)/drivers/infiniband/hw/mlx5/mlx5_ib.h)
-            ifneq ($(DIR),)
-                cflags += -DKS_MLX5=1
-            endif
-
-            #Check whether mlx5_ib_wq has seperate swr_ctx
-            ifneq ($(shell grep swr_ctx $(KERN_FILES_PATH)/drivers/infiniband/hw/mlx5/mlx5_ib.h 2> /dev/null),)
-                cflags += -DMLX5_IB_WQ_SWR_CTX=1
-            else
-                cflags += -DMLX5_IB_WQ_SWR_CTX=0
-            endif
-
-            #Check whether mlx5_ib_qp has 'struct mlx5_frag_buf' or 'struct mlx5_buf'
-            ifneq ($(shell grep -Poz '(?s)struct\s+mlx5_ib_qp\s+\{.*?(?=\n\};)\n\};\n' $(KERN_FILES_PATH)/drivers/infiniband/hw/mlx5/mlx5_ib.h | grep -a "struct mlx5_frag_buf" 2> /dev/null),)
-                cflags += -DMLX5_IB_QP_FRAG_BUF=1
-                # Check whether mlx5_ib_wq has 'struct mlx5_frag_buf_ctrl'
-                ifneq ($(shell grep -Poz '(?s)struct\s+mlx5_ib_wq\s+\{.*?(?=\n\};)\n\};\n' $(KERN_FILES_PATH)/drivers/infiniband/hw/mlx5/mlx5_ib.h | grep -a "struct mlx5_frag_buf_ctrl" 2> /dev/null),)
-                    cflags += -DMLX5_IB_WQ_FRAG_BUF_CTRL=1
-                else
-                    cflags += -DMLX5_IB_WQ_FRAG_BUF_CTRL=0
-                endif
-            else
-                cflags += -DMLX5_IB_QP_FRAG_BUF=0 -DMLX5_IB_WQ_FRAG_BUF_CTRL=0
-            endif
-            #Check whether mlx5_ib_cq_buf has 'struct mlx5_frag_buf_ctrl'
-            ifneq ($(shell grep -Poz '(?s)struct\s+mlx5_ib_cq_buf\s+\{.*?(?=\n\};)\n\};\n' $(KERN_FILES_PATH)/drivers/infiniband/hw/mlx5/mlx5_ib.h | grep -a "struct mlx5_frag_buf_ctrl" 2> /dev/null),)
-                cflags += -DMLX5_IB_CQ_FRAG_BUF_CTRL=1
-            else
-                cflags += -DMLX5_IB_CQ_FRAG_BUF_CTRL=0
-            endif
-
-            #Check whether ib_device has a get_netdev fn pointer. It's backported to some kernels so we can't use the version
-            ifneq ($(shell grep get_netdev $(KSRC1)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags += -DKS_IB_DEVICE_HAS_GET_NETDEV=1
-            else
-                cflags += -DKS_IB_DEVICE_HAS_GET_NETDEV=0
-            endif
-            ifneq ($(shell grep -w ib_uses_virt_dma $(KSRC1)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags += -DKS_HAS_VIRT_DMA_SUPPORT=1
-            else
-                cflags += -DKS_HAS_VIRT_DMA_SUPPORT=0
-            endif
-            # Check if kernel has __ib_alloc_pd
-            ifneq ($(shell grep __ib_alloc_pd $(KSRC1)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags += -DKS_HAS_IB_ALLOC_MACRO=1
-                ifneq ($(shell grep -A 1 __ib_alloc_pd $(KSRC1)/include/rdma/ib_verbs.h | grep skip_tracking 2> /dev/null),)
-                    cflags += -DKS_IB_ALLOC_HAS_SKIP_TRACKING=1
-                else
-                    cflags += -DKS_IB_ALLOC_HAS_SKIP_TRACKING=0
-                endif
-            else
-                cflags += -DKS_HAS_IB_ALLOC_MACRO=0
-            endif
-            ifneq ($(shell grep ib_get_dma_mr $(KSRC1)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags += -DHAS_IB_GET_DMA_MR=1
-            else
-                cflags += -DHAS_IB_GET_DMA_MR=0
-            endif
-
-            ifneq ($(shell grep "struct mlx5_bf[[:space:]]*bf" $(KERN_FILES_PATH)/drivers/infiniband/hw/mlx5/mlx5_ib.h 2> /dev/null),)
-                cflags += -DIB_MLX5_NEW_BF=1
-            endif
-
-            ifneq ($(shell grep -w kref_read $(KSRC1)/include/linux/kref.h 2> /dev/null),)
-                cflags +=-DKS_HAS_KREF_READ=1
-            else
-                cflags +=-DKS_HAS_KREF_READ=0
-            endif
-
-            # Check if ah_attr requires type field
-            ifneq ($(shell grep -w rdma_ah_attr_type $(KSRC1)/include/rdma/ib_verbs.h 2> /dev/null),)
-                cflags +=-DKS_IB_HAS_RDMA_AH_ATTR_TYPE=1
-            else
-                cflags +=-DKS_IB_HAS_RDMA_AH_ATTR_TYPE=0
-            endif
-
-            ifneq ($(wildcard $(KERN_FILES_PATH)/drivers/infiniband/core/cma_priv.h),)
-                cflags += -DIB_HAS_CMA_PRIV_H=1
-            else
-                ifneq ($(wildcard $(KERN_FILES_PATH)/drivers/infiniband/core/cma.c),)
-                    # If cma_priv.h does not exist, try and generate it from cma.c
-                    cma_priv_dir := /tmp/__cma_priv_dir
-                    $(shell mkdir -p $(cma_priv_dir)/infiniband/core)
-                    $(shell echo '#include <rdma/rdma_cm.h>' > $(cma_priv_dir)/infiniband/core/cma_priv.h)
-                    # Use sed to extract definition of struct rdma_id_private from cma.c
-                    # It works by extracting all lines between:
-                    # ^struct rdma_id_private {
-                    # and
-                    # ^};
-                    $(shell sed -rn '/^struct\s+rdma_id_private\s+\{/,/^};/p' $(KERN_FILES_PATH)/drivers/infiniband/core/cma.c >> $(cma_priv_dir)/infiniband/core/cma_priv.h)
-                    $(info created cma_priv.h in $(cma_priv_dir)/infiniband/core/)
-                    INC_DIR += -I$(cma_priv_dir)
-                    cflags += -DIB_HAS_CMA_PRIV_H=1
-                endif
-            endif
+            # KS_MLX5, ib_verbs.h, IB_HAS_CMA_PRIV_H: scripts/compute_backports.sh ($INC_RDMA / $INC_RDMA_DRV)
 
             ifeq ($(COMPILE_COMMON),yes)
                 ifneq ($(wildcard $(KERN_FILES_PATH)/drivers/infiniband/core/Makefile),)
@@ -1021,67 +633,14 @@ else
     endif
 endif
 
-
 export OFED_VER_TYPE
-
-ifeq ($(shell grep -w call_usermodehelper_setfns $(KSRC1)/include/linux/kmod.h 2> /dev/null),)
-    cflags += -DKS_HAS_CALL_USERMODEHELPER_SETFNS=0
-else
-    cflags += -DKS_HAS_CALL_USERMODEHELPER_SETFNS=1
-endif
 
 ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
     INCLUDES = -include linux/compat-2.6.h
 endif
 
-ifneq ($(shell grep -w __tcp_send_ack $(KSRC1)/include/net/tcp.h 2> /dev/null),)
-        cflags += -DKS_HAS___TCP_SEND_ACK=1
-else
-        cflags += -DKS_HAS___TCP_SEND_ACK=0
-endif
-
-ifneq ($(shell grep -w tcp_reno_undo_cwnd $(KSRC1)/include/net/tcp.h 2> /dev/null),)
-        cflags += -DKS_HAS_TCP_RENO_UNDO_CWND=1
-else
-        cflags += -DKS_HAS_TCP_RENO_UNDO_CWND=0
-endif
-
-ifneq ($(shell grep -w tcp_reno_undo_cwnd $(KSRC1)/include/net/tcp.h 2> /dev/null),)
-        cflags += -DKS_HAS_TCP_RENO_UNDO_CWND=1
-else
-        cflags += -DKS_HAS_TCP_RENO_UNDO_CWND=0
-endif
-
-ifneq ($(shell grep -w mmap_read_lock $(KSRC1)/include/linux/mmap_lock.h 2> /dev/null),)
-        cflags += -DKS_HAS_MMAP_LOCK_FUNCTIONS=1
-else
-        cflags += -DKS_HAS_MMAP_LOCK_FUNCTIONS=0
-endif
-
-ifneq ($(shell grep -w mmap_write_trylock $(KSRC1)/include/linux/mmap_lock.h 2> /dev/null),)
-        cflags += -DKS_HAS_MMAP_WRITE_TRYLOCK=1
-else
-        cflags += -DKS_HAS_MMAP_WRITE_TRYLOCK=0
-endif
-
-ifneq ($(shell grep -w revalidate_disk_size $(KSRC1)/include/linux/genhd.h 2> /dev/null),)
-        cflags += -DKS_HAS_REVALIDATE_DISK_SIZE=1
-else
-        cflags += -DKS_HAS_REVALIDATE_DISK_SIZE=0
-endif
-
-ifneq ($(shell grep -w bio_start_io_acct $(KSRC1)/include/linux/blkdev.h 2> /dev/null),)
-        cflags += -DKS_HAS_BIO_START_IO_ACCT=1
-else
-        cflags += -DKS_HAS_BIO_START_IO_ACCT=0
-endif
-
-# on newer kernel set_fs is there only if CONFIG_SET_FS is on
-#ifneq ($(shell grep -w CONFIG_SET_FS $(KSRC1)/include/asm-generic/uaccess.h 2> /dev/null),)
-        #cflags += -DKS_HAS_SET_FS=0
-#else
-        #cflags += -DKS_HAS_SET_FS=1
-#endif
+# KS_HAS_CALL_USERMODEHELPER_SETFNS, KS_HAS___TCP_SEND_ACK, KS_HAS_TCP_RENO_UNDO_CWND,
+# KS_HAS_MMAP_LOCK_*, KS_HAS_REVALIDATE_DISK_SIZE, KS_HAS_BIO_START_IO_ACCT: see scripts/compute_backports.sh
 
 # Include common.mk
 ifneq ($(M),)
@@ -1330,6 +889,10 @@ endif
 ifeq ($(BACKPORTS_CFLAGS),)
     BACKPORTS_CFLAGS = $(backports_cflags)
 endif
+
+# User-space UTILSFLAGS snapshot (see CFLAGS_NO_KERNEL_INCLUDES) predates ENABLE_SIW and
+# backports; append kernel-compat -D flags from compute_backports.sh for parity with modules.
+UTILSFLAGS += $(BACKPORTS_CFLAGS)
 
 subdir-ccflags-y += $(EXTRA_CFLAGS)
 
