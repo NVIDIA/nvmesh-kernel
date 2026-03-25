@@ -14,18 +14,4 @@ enum stale_lock_resolve_status {		// Steps of resolving stale lock
 	stale_lock_resolve_safe_to_use = 3, // Safe to start sync: All Toma's answered that no io is in air to the lock
 };
 
-/* Is lock id stale */
-#define nvmeibc_sync_is_stale(lock_ptr, u64_lock) \
-	(!!((lock_ptr)->comp.lock_cnsts->stale_bit_mask & u64_lock))
-
-#define nvmeibc_sync_is_read_only(lock_ptr, u64_lock) ({ \
-	bool __rv; \
-	if ((lock_ptr)->comp.lock_cnsts->w_blkset_info) { \
-		const union nvmeib_lock_blkset_entry* plid = ((void*)&(u64_lock)); \
-		__rv = plid->lock_id.bits.is_read; \
-	} else { \
-		__rv = false; \
-	} \
-	__rv; \
-})
 #endif // NVMEIBC_DECENTRALIZED_UNREG_ALGO_H
