@@ -475,16 +475,16 @@ bool mgmt_sim_v_r1_praid_absent_from_report(void) { return g_mgmt_sim->v_r1_prai
 /******************************************************************************/
 /* Message-sender functions for fiber-based test scenario                      */
 /******************************************************************************/
-void mgmt_sim_send_format_drive(const char *drive_name) {
-	struct mgmt_sim_disk_status *d = __lookup_disk_by_name(drive_name);
+void mgmt_sim_send_format_drive(int disk_idx) {
+	struct mgmt_sim_disk_status *d = &g_mgmt_sim->disks_st[disk_idx];
 	BUG_ON(__is_disk_fmt_running(d->format.state));
 	d->format.counter_sent++;
 	d->format.state = FMT_SENT;
 	__send_format_drive_msg(d);
 }
 
-bool mgmt_sim_drive_format_is_done(const char *drive_name) {
-	struct mgmt_sim_disk_status *d = __lookup_disk_by_name(drive_name);
+bool mgmt_sim_drive_format_is_done(int disk_idx) {
+	struct mgmt_sim_disk_status *d = &g_mgmt_sim->disks_st[disk_idx];
 	BUG_ON(d->format.state == FMT_IDLE); // should only be called after sending a format command
 	return d->format.state == FMT_DONE;
 }
