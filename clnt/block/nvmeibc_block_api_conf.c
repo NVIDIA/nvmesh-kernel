@@ -382,7 +382,7 @@ int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume
 
 	next_conf.device_name = dev->name;
 	nvmeibc_topo_init_io_perm(&next_conf);
-	rv = nvmeibc_topology_update_configuration(&next_conf, conf, version, true, &volume->targets.disks);
+	rv = nvmeibc_topology_update_configuration(&next_conf, conf, version, true, &volume->targets.base);
 	if (rv < 0) {
 		_NT(t_06_cbrcnf, "@DEV_NAME: update_configuration failed", dev->name);
 		goto _out;
@@ -445,7 +445,7 @@ int nvmeibc_block___conf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume
 	int rv;
 	dev->volume = volume;
 	__update_topo_from_volume_hdr(dev);
-	rv = nvmeibc_topology_update_configuration(&dev->topologies, conf, version, false, &volume->targets.disks);
+	rv = nvmeibc_topology_update_configuration(&dev->topologies, conf, version, false, &volume->targets.base);
 	if (rv < 0)
 		_NE(t_02_cbconf, DMESG_PREFIX("@DEV_NAME") ": Could not set topology, @HDR_UUID, rv=@RV", volume->hdr.devname, volume->hdr.uuid, rv);
 	return rv;

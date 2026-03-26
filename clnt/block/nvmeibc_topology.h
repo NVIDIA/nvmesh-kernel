@@ -17,6 +17,7 @@
  * is not atomic and many tomas are involved
  */
 #include "../toma/clnt/nvmeibt_client_protocol.h"
+#include "block/targets.h"
 #include "datapath_utils_generic/nvmeibc_block_dp_lock_server.h"
 #include "nvmeib_metrics.h"
 #include "datapath_utils_generic/profiling/nvmeibc_block_dp_profiling_generic.h"
@@ -466,7 +467,7 @@ int nvmeibc_topologies_init(struct nvmeibc_topologies *nt, const char *device_na
  */
 int nvmeibc_topology_update_configuration(struct nvmeibc_topologies *nt,
 	struct nvmeibc_volume_conf *conf, int version, bool is_update,
-										  struct list_head *disks);
+										  struct dp_targets const *targets);
 
 /* Given a topology representing a new configuration, calculate diff from the
  * head (of nt) and append the changes to the head (only append changes, do not

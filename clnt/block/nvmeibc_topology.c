@@ -9,7 +9,6 @@
 #include "nvmeib_types.h"
 #include "nvmeib_event.h"
 #include "block/nvmeibc_block_common.h"
-#include "nvmeibc_disk.h"
 #include "nvmeibc_topology.h"
 #include "nvmeib_utils.h"
 #include "recovery/nvmeibc_raid_recovery.h"
@@ -4001,28 +4000,6 @@ static bool __topo_is_valid_seg_pos(struct nvmeibc_topology *topo,
 	return false;
 }
 
-static struct nvmeibc_idisk *get_disk_by_id(const char *diskID, struct list_head *disks
-#if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
-										   , struct nvmeib_io_stats **stats)
-#else
-											)
-#endif
-{
-	struct nvmeibc_disk_id *disk;
-	list_for_each_entry(disk, disks, link) {
-		if (!strcmp(disk->name, diskID)) {
-#if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
-			*stats = disk->v_disk_stats;
-#endif
-			return &disk->disk->base;
-		}
-	}
-#if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
-	*stats = NULL;
-#endif
-	return NULL;
-}
-
 static u32 __parse_seg_dbg_uuid(const char *uuid)
 {
 	int rv;
@@ -4040,7 +4017,7 @@ static u32 __parse_seg_dbg_uuid(const char *uuid)
 /* Digest all raid1s and segments and subsribe with toma */
 static int __digest_segment_layout(struct nvmeibc_volume_conf *conf,
 								   struct nvmeibc_topology *t, bool is_reconf,
-								   struct list_head *disks)
+								   struct dp_targets const *targets)
 {
 	struct nvmeibc_disk_segment *seg = NULL;
 	struct nvmeibc_raid1 *pr;
@@ -4076,16 +4053,18 @@ static int __digest_segment_layout(struct nvmeibc_volume_conf *conf,
 					strlcpy(seg->uuid, cur_seg->uuid, 37);
 					seg->uuid[37] = '\0';	// Why? After strlcpy above seg->uuid is already NULL-terminated...
 					seg->dbg_uuid = __parse_seg_dbg_uuid(seg->uuid);
-					seg->disk = get_disk_by_id(cur_seg->diskID, disks
-#if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
-											   , &seg->v_disk_stats);
-#else
-												);
-#endif
-					if (!seg->disk){
-						_NT_TOPO(trace_1_topology_digest_segment_layout, t, SEGMENT_FMT " target configuration missing disk @DISKID (@DISKUUID)",
-							ci, ri, si, cur_seg->diskID, cur_seg->diskUUID);
-						return -EINVAL;
+
+					{
+						struct dp_target_find_disk_result found = targets->find_disk_by_id(targets, cur_seg->diskID);
+						if (!found.disk){
+							_NT_TOPO(trace_1_topology_digest_segment_layout, t, SEGMENT_FMT " target configuration missing disk @DISKID (@DISKUUID)",
+								ci, ri, si, cur_seg->diskID, cur_seg->diskUUID);
+							return -EINVAL;
+						}
+						seg->disk = found.disk;
+						#if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
+						seg->v_disk_stats = found.v_disk_stats;
+						#endif
 					}
 
 					seg->toma_acm = NVMEIBTC_DS_MODE_INVALID;
@@ -4193,7 +4172,7 @@ static void __print_incoming_topology(const struct nvmeibc_topology *t)
 }
 
 int nvmeibc_topology_update_configuration(struct nvmeibc_topologies *nt,
-	struct nvmeibc_volume_conf *conf, int version, bool is_update, struct list_head *disks)
+	struct nvmeibc_volume_conf *conf, int version, bool is_update, struct dp_targets const *targets)
 {
 	int nsegs, rv = 0, tsegs;
 	u64 next_first_vlba = 0;
@@ -4254,7 +4233,7 @@ int nvmeibc_topology_update_configuration(struct nvmeibc_topologies *nt,
 
 	_ND_TOPO(trace_topology_nvmeibc_topology_update_configuration, t, "Chunk configuration digested. na=@CHUNK_IDX, nsegs=@N_SEGMENTS", __get_topo_num_chunks(t), nsegs);
 
-	if ((tsegs = __digest_segment_layout(conf, t, is_update, disks)) < 0) {
+	if ((tsegs = __digest_segment_layout(conf, t, is_update, targets)) < 0) {
 		_NE_TOPO(warn_topology_nvmeibc_topology_update_configuration, t, "Invalid config rejected. @C_VOL_VER", (u32)t->configuration_version);
 		rv = -EIO;
 		goto err1;
