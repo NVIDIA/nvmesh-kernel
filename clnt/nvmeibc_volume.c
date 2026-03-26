@@ -890,8 +890,8 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 		volume->hdr.type,
 		volume->hdr.vat.res.version, volume->hdr.vat.res.mode, volume->hdr.vat.res.preempt);
 	__set_status(volume, NVS_ATTACHING_STARTED);
-	INIT_LIST_HEAD(&volume->targets.disks);				// Exactly the list of volumes which use transport layer c_disks
-	volume->targets.retain_disks = false;
+
+	nvmeibc_volume_targets_init(&volume->targets);
 
 	/* Type specific initializations */
 	if (nvmeibc_managment_does_vol_need_disks(   &volume->hdr)) { /*Todo*/ }

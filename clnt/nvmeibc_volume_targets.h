@@ -7,6 +7,7 @@
 #define NVMEIBC_VOLUME_TARGETS_H
 
 #include "kr_incs.h"
+#include "block/targets.h"
 
 /**
  * nvmeibc_volume_info: filled by the management.  it contains
@@ -17,9 +18,16 @@
  * target to access the list of it's nics
  */
 struct nvmeibc_volume_targets {
+	struct dp_targets base;
+
 	//struct list_head arnics; // No longer used
 	struct list_head disks; /* list of struct nvmeibc_disk_id */
 	bool retain_disks; // when draining IO during detaching, do not release disks one by one with each destroyed segment, but rather do it in parallel in the detach SM after destroying topologies
+	u64 magic;
 };
+
+void nvmeibc_volume_targets_init(struct nvmeibc_volume_targets* self);
+
+struct dp_target_find_disk_result nvmeibc_volume_targets_find_disk_by_id(struct nvmeibc_volume_targets const* self, const char *diskID);
 
 #endif /* NVMEIBC_VOLUME_TARGETS_H */
