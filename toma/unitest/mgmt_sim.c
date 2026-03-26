@@ -258,13 +258,14 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 		BUF_ADD("],\"nics\":[");
 		for (i = 0; i < (int)ARRAY_SIZE(N->nics); i++) {
 			const struct sb_nics_conf *E = &N->nics[i];
-			BUF_ADD("{\"nicID\":\"0x%16x%16x\",\"protocol\":\"%s\",\"guid\":\"0x%16x%16x\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},",
+			BUF_ADD("{\"nicID\":\"0x%016x%016x\",\"protocol\":\"%s\",\"guid\":\"0x%016x%016x\",\"pkey\":65535,\"version\":1,\"uuid\":\"" UUID_from_U32 "\"},",
 				0xeee000, E->uuid, E->protocol, 0xeee111, E->uuid, E->uuid);
 		}
 		rv--;	// Remove the last uneeded ',' of the above array
 		BUF_ADD("]},");		// Close nics array ']', node '}'
 	}
 	rv--;	// Remove the last uneeded ',' of the above array
+	BUF_ADD("]}}");			// Close targets array, payload and json
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.hw, buf, rv, false);
 }
 
