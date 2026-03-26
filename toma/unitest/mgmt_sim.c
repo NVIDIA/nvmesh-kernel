@@ -39,18 +39,16 @@ struct mgmt_sim_disk_status {			// Per-disk status extracted from reportTarget
 		int      msg_seq;				// Msg's can arrive unordered and multiple times. Use sequence to discared already processed messages
 		enum e_disk_format_state state;	// per-drive format tracking
 	} format;
-	u16 block_size;						// In bytes
-	u16 metadata_size;					// In bytes
 };
 
 static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_sim_disk_status *d, unsigned long boot_time) {
 	return snprintf(buf, capacity,
 		"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1"
-		",\"payload\":{\"diskID\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"vendor\":%u"
+		",\"payload\":{\"diskID\":\"%s.%d\",\"uuid\":\"" UUID_from_U32 "\",\"vendor\":%u"
 		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
 		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
 		", " MGMT_DB_UUID_JSON "}}",
-		d->conf->name, d->conf->uuid, d->conf->vendor, d->format.counter_sent, boot_time);
+		d->conf->serial, d->conf->name_space_id, d->conf->uuid, d->conf->vendor, d->format.counter_sent, boot_time);
 }
 
 /* Management simulator state */
@@ -176,13 +174,13 @@ static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	char *buf = malloc(1024);
 	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, (unsigned long)m->boot_time);
-	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->conf->name, d->format.counter_sent, m->boot_time);
+	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->conf->serial, d->format.counter_sent, m->boot_time);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
 static void __check_format_progress(struct mgmt_sim_disk_status *d, int msg_seq, bool on_report_target_msg) {
 	if (msg_seq <= d->format.msg_seq) {
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], old message, seq=@INT <= @INT, ignoring", d->conf->name, d->format.state, d->format.state, msg_seq, d->format.msg_seq);
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], old message, seq=@INT <= @INT, ignoring", d->conf->serial, d->format.state, d->format.state, msg_seq, d->format.msg_seq);
 	} else if (__is_disk_fmt_running(d->format.state)) {
 		const unsigned expected = d->format.counter_sent;
 		enum e_disk_format_state prev_state = d->format.state;
@@ -197,7 +195,7 @@ static void __check_format_progress(struct mgmt_sim_disk_status *d, int msg_seq,
 			BUG_ON(prev_state != FMT_SENT);			// Incorrect transition
 			__send_format_drive_msg(d);
 		}
-		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], seq=@INT, format_gen=@INT, @STR[report]", d->conf->name, prev_state, d->format.state, msg_seq, expected, on_report_target_msg ? "Target" : "Zeroin");
+		N_Tf(__AUTOID__, "@STR.format_status[@CHAR->@CHAR], seq=@INT, format_gen=@INT, @STR[report]", d->conf->serial, prev_state, d->format.state, msg_seq, expected, on_report_target_msg ? "Target" : "Zeroin");
 		d->format.msg_seq = msg_seq;
 	} else {
 		BUG_ON(!on_report_target_msg);				// Illegal to receive zeroing message when no format is running
@@ -251,7 +249,7 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 		for (i = 0; i < (int)ARRAY_SIZE(N->disks); i++) {
 			const struct sb_disk_conf *D = &N->disks[i];
 			BUF_ADD("{\"diskID\":\"%s\",\"blocks\":%u,\"block_size\":%u,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":%s},",
-				D->name, D->size_bytes >> 12, 1 << 12, D->vendor, D->uuid, (D->is_out_of_service ? "true" : "false"));
+				D->serial, D->num_blocks, D->block_size, D->vendor, D->uuid, (D->is_out_of_service ? "true" : "false"));
 		}
 		rv--;	// Remove the last uneeded ',' of the above array
 		BUF_ADD("],\"nics\":[");
@@ -366,19 +364,22 @@ static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *d
 		struct mm_json_elem *disk_elem = disks_array->array.elements[i];
 		const char *disk_name = json_get_dict_str(disk_elem, "diskID", NULL);
 		struct mgmt_sim_disk_status *d = __lookup_disk_by_name(disk_name);		// Here we could extract 'Serial_Number' which is like id but without name space
+		struct sb_disk_conf *mdb = d->conf;
 		const int nsid = (int)json_get_dict_num(disk_elem, "nsid", -1);
-		BUG_ON(!disk_elem || (disk_elem->type != JSON_E_DICT) || !disk_name);
-		d->block_size =    json_get_dict_num(disk_elem, "block_size", -1);
-		d->metadata_size = json_get_dict_num(disk_elem, "metadata_size", -1);
+		BUG_ON(!disk_elem || (disk_elem->type != JSON_E_DICT));
+		mdb->num_blocks =    json_get_dict_num(disk_elem, "blocks",        1);
+		mdb->block_size =    json_get_dict_num(disk_elem, "block_size",    1);
+		mdb->metadata_size = json_get_dict_num(disk_elem, "metadata_size", 1);
+		sb_cluster_update_disk_vendor_and_verify(d->conf, json_get_dict_str(disk_elem, "Vendor", NULL));
 		nvmeibt_strlcpy(d->status, json_get_dict_str(disk_elem, "status", "????"), sizeof(d->status));
 		if (nsid == 1) {				// Ignore stock drivers for now
 			sb_cluster_update_disk_namespace_from_name(d->conf, disk_name);
 			d->format.counter_toma_reply_done =        (unsigned)json_get_dict_num(disk_elem, "formatRequestCounter", -1);
 			d->format.counter_toma_reply_in_progress = (unsigned)json_get_dict_num(disk_elem, "activeFormatRequestCounter", -1);
-			N_Tf(__AUTOID__, "disk=@STR @UINT+@UINT[b] status=@STR frc=@INT afrc=@INT", disk_name, d->block_size, d->metadata_size, d->status, d->format.counter_toma_reply_done, d->format.counter_toma_reply_in_progress);
+			N_Tf(__AUTOID__, "disk=@STR @UINT+@UINT[b] status=@STR frc=@INT afrc=@INT", disk_name, mdb->block_size, mdb->metadata_size, d->status, d->format.counter_toma_reply_done, d->format.counter_toma_reply_in_progress);
 			__check_format_progress(d, (int)msg_seq, true);
 		} else {
-			N_Tf(__AUTOID__, "disk=@STR @UINT+@UINT[b] status=@STR <<--- stock nvme!" , disk_name, d->block_size, d->metadata_size, d->status);
+			N_Tf(__AUTOID__, "disk=@STR @UINT+@UINT[b] status=@STR <<--- stock nvme!" , disk_name, mdb->block_size, mdb->metadata_size, d->status);
 		}
 	}
 }

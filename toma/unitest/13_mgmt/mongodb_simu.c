@@ -1,5 +1,6 @@
 #include "mongodb_simu.h"
 #include "nvmeibt_debug.h"	// Binary tracing
+#include "../sandbox_nvme.h"		// Compare to the real values
 
 /* UUID constants, All uuids are generated as 32bits integers.  First 3 nibbles = node {f37 (liveToma), 2 other Tomas: f38, f39} */
 #define NODE_UUID_BASE           0xf37000c0			// 'c' for 'computer',                         last nibble = index of node in cluster for faster search
@@ -24,11 +25,10 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 		for (j = 0; j < (int)ARRAY_SIZE(node->disks); j++) {
 			struct sb_disk_conf *disk = &node->disks[j];
 			disk->uuid = (node->uuid & 0xFFFF0000) | DISK_UUID_BASE | j;
-			disk->orig_name_space_id = 9;		// Just arbitrary namespace for all disks
-			// Name = 15[B]: 4[B] prefix + 4[b] _node + 4[b] disk index + '.' + 1[b] namespace + \0
-			snprintf(disk->name, sizeof(disk->name),"NVMD_%3x_%03u.%01u", (node->uuid >> 20), (j + 2), disk->orig_name_space_id);
-			disk->size_bytes = (32768 << 12);		// 128[MB]
-			disk->vendor = 5000 + (i+1) * 100 + j;
+			disk->name_space_id = 9;		// Just arbitrary namespace for all disks != 1 (nvmesh). Will be changed for formatted disks
+			// Name = 13[B]: 4[B] prefix + 4[b] _node + 4[b] _disk_index + \0
+			snprintf(disk->serial, sizeof(disk->serial), "NVMD_%3x_%03u"     , (node->uuid >> 20), (j + 2));
+			disk->size_bytes = disk->num_blocks = disk->block_size = disk->metadata_size = disk->vendor = 0;	// Unknown val, will be updated by Toma
 		}
 	}
 	gethostname(sb->live->hostname, sizeof(sb->live->hostname) - 1);
@@ -91,17 +91,27 @@ int sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *sb, con
 	const int n = disk_name[ 7] - '0' - ((NODE_UUID_BASE>>20)&0xF);
 	const int d = disk_name[11] - '0' - 2;
 	const struct sb_disk_conf *D = &sb->nodes[n].disks[d];
-	BUG_ON(strncmp(D->name, disk_name, 12) != 0);		// Compare without name space, which can change due to formatting
+	BUG_ON(strncmp(D->serial, disk_name, 12) != 0);		// Compare without name space, which can change due to formatting
 	return d;
 }
 
 bool sb_cluster_update_disk_namespace_from_name(struct sb_disk_conf *D, const char *disk_name) {
-	const bool has_name_space_changed = (disk_name[13] != D->name[13]);
+	const u16 new_ns = (u16)(disk_name[13])-'0';
+	const bool has_name_space_changed = (D->name_space_id != new_ns);
 	if (has_name_space_changed) {
-		N_Tf(__AUTOID__, "Disk @STR -> orig_ns[@INT] moved [@INT->@INT]", D->name, D->orig_name_space_id, D->name[13]-'0', disk_name[13]-'0');
-		D->name[13] = disk_name[13];
+		N_Tf(__AUTOID__, "Disk @STR -> moved [@INT->@INT]", D->serial, D->name_space_id, new_ns);
+		D->name_space_id = new_ns;
 	}
 	return has_name_space_changed;
+}
+
+void sb_cluster_update_disk_vendor_and_verify(struct sb_disk_conf *D, const char *vendor) {
+	int v;
+	BUG_ON(sscanf(vendor+2, "%x", &v) != 1);		// Scan 1 argument
+	D->size_bytes = (uint32_t)D->block_size * (uint32_t)D->num_blocks;
+	D->vendor = v;
+	BUG_ON(D->vendor != D->local_nvme->vendor_id);		// Verify got it correctly from Toma
+	BUG_ON((uint64_t)D->size_bytes != D->local_nvme->size_in_bytes);
 }
 
 int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *sb, const char *disk_uuid) {

@@ -138,7 +138,7 @@ static void scenario_create_remove_r1(void) {
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
 
-	SCENARIO_PRINT(__AUTOID__, "sending format 2 drives request: {@STR, @STR}", cfg->live->disks[0].name, cfg->live->disks[1].name);
+	SCENARIO_PRINT(__AUTOID__, "sending format 2 drives request: {@STR, @STR}", cfg->live->disks[0].serial, cfg->live->disks[1].serial);
 	mgmt_sim_send_format_drive(0);
 	mgmt_sim_send_format_drive(1);
 	scenario_nvmeibs_messages();								// While drives are formatting test server messages

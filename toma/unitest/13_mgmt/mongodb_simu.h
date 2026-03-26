@@ -15,12 +15,16 @@ struct sb_cluster_conf {
 			const char *protocol;
 			uint32_t uuid;
 		} nics[2];				// Each node has exactly 2 nics
-		struct sb_disk_conf {	// Each node has up to 3 local disks
-			char name[24];
+		struct sb_disk_conf {	// Each node has up to 3 local disks, represents what management knows
+			char serial[16];							// Unique for each disk
 			uint32_t uuid;
+			struct sandbox_nvme_device *local_nvme;		// Direct pointer to local nvme configuration, for verification that Toma reported correctly the disk to mgmt
 			uint32_t size_bytes;
-			u16 orig_name_space_id;			// When formatted to NVMesh will loose this namespace id (nvmesh namespace is 1)
+			u16 num_blocks;								// In blocks
+			u16 block_size;								// In bytes
+			u16 metadata_size;							// In bytes
 			u16 vendor;
+			u16 name_space_id;							// When formatted to NVMesh namespace id will change (nvmesh namespace is 1)
 			bool is_out_of_service;
 		} disks[3];
 		bool ignore_append_entries;			// Emulates infinitely slow local disk response time, does not commit raft leaders topo
@@ -59,6 +63,7 @@ const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
 int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
 int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, const char *disk_uuid);
 bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
+void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation
 void sb_cluster_ignore_append_entries_by_node(int node_idx);

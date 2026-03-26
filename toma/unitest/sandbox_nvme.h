@@ -24,6 +24,7 @@ enum SANDBOX_NVME_FMT_e {			// Supported LBA formats for sandbox NVMe devices. T
 const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fmt_idx);
 
 struct sandbox_nvme_device {
+	const struct sb_disk_conf *conf;	// Pointer to this disk configuration as seen by mgmt for comparison;
 	const int vendor_id;
 	const char *serial_number;
 	const char *model_number;

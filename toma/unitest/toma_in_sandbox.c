@@ -236,7 +236,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	sys->rpc = user_rpc_simu_create();
-	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);
+	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);		// Must be after configuration init
 
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		for (int i = 0; i < sys->cfg.n_nodes; i++)
@@ -289,7 +289,7 @@ int ioctl(int fd, unsigned long int req, ...) {
 		rv = nvme_ioctl_admin_cmd(path, fd, ap);
 	} else if (req == NVME_IOCTL_ID) {
 		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_full_path(path);
-		rv = (d->stock_disk) ? 9 : 1;		// Get from d->conf
+		rv = d->conf->name_space_id;
 		N_Tf(sbioct1, "NVME_IOCTL_ID[@STR] -> is_stock=@BOOL_YN, ns=@INT", path, d->stock_disk, rv);
 	} else if (req == FIONBIO) {
 		rv = 0;

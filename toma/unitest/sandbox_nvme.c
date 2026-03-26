@@ -7,6 +7,7 @@
 #include "sandbox_nvme.h"
 #include "nvmeibt_debug.h"
 #include "toma_in_sandbox.h"
+#include "13_mgmt/mongodb_simu.h"		// Disk conf
 #include <sys/stat.h>
 
 static const struct sandbox_nvme_lbaf lbaf_table[SANDBOX_NVME_LBAF_COUNT] = {
@@ -47,9 +48,9 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1402, "NVMD_f37_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
-	{ 0x1403, "NVMD_f37_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
-	{ 0x1401, "NVMD_f37_004", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
+	{ NULL, 0x1402, NULL, "DISK_MOD_01", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ NULL, 0x1403, NULL, "DISK_MOD_02", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ NULL, 0x1401, NULL, "DISK_MOD_03", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
@@ -75,9 +76,13 @@ static void create_simulated_locks_file(const char *serial_number) {
 static void disk_init_stock(struct sandbox_nvme_device *dev);
 static void disk_init_zeroed(const struct sandbox_nvme_device *dev);
 void sandbox_nvme_init(void) {
+	const struct sb_disk_conf *mongodb_disks = sb_cluster_get_const_conf()->live->disks;
 	N_Tf(sbu3401, "initializing static simulated NVMe disks");
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {	// sandbox_nvme_get_device_count
 		struct sandbox_nvme_device *d = &nvme_devices[i];
+		d->conf = &mongodb_disks[i];
+		d->serial_number = d->conf->serial;
+		((struct sb_disk_conf *)d->conf)->local_nvme = d;
 		if (d->stock_disk) {
 			disk_init_stock(d);
 		} else {
