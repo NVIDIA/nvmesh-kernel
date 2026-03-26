@@ -167,3 +167,4 @@ common/pet/build/
 !testing/rdma/kernel/excludes
 !toma/toma.d
 !tools/lz4
+clnt/block/unitest/blk_unitest
