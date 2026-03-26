@@ -16,7 +16,7 @@
  * it is held by the target that holds the disk, the disk_id points to the
  * target to access the list of it's nics
  */
-struct nvmeibc_volume_info {
+struct nvmeibc_volume_targets {
 	//struct list_head arnics; // No longer used
 	struct list_head disks; /* list of struct nvmeibc_disk_id */
 	bool retain_disks; // when draining IO during detaching, do not release disks one by one with each destroyed segment, but rather do it in parallel in the detach SM after destroying topologies

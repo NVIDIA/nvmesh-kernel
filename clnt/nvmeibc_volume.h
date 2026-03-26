@@ -81,7 +81,7 @@ struct nvmeibc_volume {
 	struct nvmeibc_multi_completion *job_comp;	// When asked to detach all volumes mark here when the job finishes
 	struct nvmeibc_volume_detach_t detach;		// Assist struct for performing force detach (like unsafe usb removal)
 	struct list_head link;						// Link List of volumes
-	struct nvmeibc_volume_info info;		// a volume configuration info
+	struct nvmeibc_volume_targets targets;		// the volume targets
 	/* -------------- Polymorphic code -------------- */
 	struct nvmeibc_block_device  *block_dev;	// The default block device interface
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)

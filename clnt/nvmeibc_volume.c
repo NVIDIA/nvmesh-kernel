@@ -41,14 +41,14 @@ static struct nvmeibc_disk_id *find_disk_from_block(const struct nvmeibc_cinst_p
 	struct list_head *disks;
 	struct nvmeibc_disk_id *rv = NULL;
 	struct list_head *volumes;
-	struct nvmeibc_volume *vol;
+	struct nvmeibc_volume *volume;
 	struct nvmeibc_disk_id *disk;
 	bool found = false;
 
 	NFIN;
 	volumes = nvmeibc_get_volumes(p);
-	list_for_each_entry(vol, volumes, link) {
-		if (vol->block_dev == block_dev) {
+	list_for_each_entry(volume, volumes, link) {
+		if (volume->block_dev == block_dev) {
 			found = true;
 			break;
 		}
@@ -60,7 +60,7 @@ static struct nvmeibc_disk_id *find_disk_from_block(const struct nvmeibc_cinst_p
 		goto out;
 	}
 
-	disks = &vol->info.disks;
+	disks = &volume->targets.disks;
 	found = false;
 	list_for_each_entry(disk, disks, link)
 		if (disk->disk == disk_inp) {
@@ -84,7 +84,7 @@ out:
 static struct nvmeibc_disk_id *find_disk(struct nvmeibc_volume *volume,
 	const char *disk_name)
 {
-	struct list_head *disks = &volume->info.disks;
+	struct list_head *disks = &volume->targets.disks;
 	struct nvmeibc_disk_id *disk;
 	bool found = false;
 
@@ -117,7 +117,7 @@ static struct nvmeibc_disk_id *disk_id_create(struct nvmeibc_volume *volume,
 	disk_id->volume = volume;
 	disk_id->attachment_version = attachment_ver;
 	disk_id->target = target;
-	list_add_tail(&disk_id->link, &volume->info.disks);
+	list_add_tail(&disk_id->link, &volume->targets.disks);
 	list_add(&disk_id->dlink, &target->disks);
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 	disk_id->v_disk_stats = nvmeib_io_stats_create_traced(volume->hdr.devname, VERB_RW_T_BITMASK, NVMEIBC_SECTOR_SIZE);
@@ -132,7 +132,7 @@ void nvmeibc_volume_disks_stats_clear(const struct nvmeibc_volume *volume, const
 {
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 	struct nvmeibc_disk_id *d;
-	list_for_each_entry(d, &volume->info.disks, link)
+	list_for_each_entry(d, &volume->targets.disks, link)
 		nvmeib_io_stats_clear(d->v_disk_stats, which);
 #else
 	(void)volume;
@@ -420,7 +420,7 @@ static int count_disks(struct nvmeibc_volume *volume)
 {
 	struct nvmeibc_disk_id *d;
 	int n_disks = 0;
-	list_for_each_entry(d, &volume->info.disks, link)
+	list_for_each_entry(d, &volume->targets.disks, link)
 		++n_disks;
 	return n_disks;
 }
@@ -517,7 +517,7 @@ void nvmeibc_volume_disks_stats_destroy(struct nvmeibc_volume *volume)
 	struct proc_dir_entry *disks_dir = volume->disks_dir;
 	if (disks_dir) {	// If root isn't created no need to delete per disk
 		struct nvmeibc_disk_id *d;
-		list_for_each_entry(d, &volume->info.disks, link) {
+		list_for_each_entry(d, &volume->targets.disks, link) {
 			if (d->proc_dir)	// Destroy
 				nvmeibc_volume_disk_stats_destroy(d, disks_dir);
 		}
@@ -544,7 +544,7 @@ int nvmeibc_volume_disk_stats_create(struct proc_dir_entry *vol_dir, struct nvme
 		return -ENOMEM;
 	}
 	disks_dir = volume->disks_dir;
-	list_for_each_entry(d, &volume->info.disks, link) {
+	list_for_each_entry(d, &volume->targets.disks, link) {
 		if (d->proc_dir != NULL) {	// Disk folder exists
 			if (d->proc_ent_stats != NULL) {	// Disk file exists
 				continue;
@@ -605,7 +605,7 @@ static int __setup_block_device_from_volume(struct nvmeibc_volume *volume, const
 		struct nvmeibc_disk_id *disk_id;
 		struct nvmeibc_disk *dd;
 		/* After we have successfully manage to create the volume's block device we scan all new disks that the volume created and if any of them is offline we call its rediscovery process. Previous disks that the volume needs and are offline are running their rediscovery processes independently. */
-		list_for_each_entry(disk_id, &volume->info.disks, link) {
+		list_for_each_entry(disk_id, &volume->targets.disks, link) {
 			if (!disk_id->new_disk)
 				continue;
 			dd = disk_id->disk;
@@ -890,8 +890,8 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 		volume->hdr.type,
 		volume->hdr.vat.res.version, volume->hdr.vat.res.mode, volume->hdr.vat.res.preempt);
 	__set_status(volume, NVS_ATTACHING_STARTED);
-	INIT_LIST_HEAD(&volume->info.disks);				// Exactly the list of volumes which use transport layer c_disks
-	volume->info.retain_disks = false;
+	INIT_LIST_HEAD(&volume->targets.disks);				// Exactly the list of volumes which use transport layer c_disks
+	volume->targets.retain_disks = false;
 
 	/* Type specific initializations */
 	if (nvmeibc_managment_does_vol_need_disks(   &volume->hdr)) { /*Todo*/ }
@@ -991,7 +991,7 @@ void nvmeibc_volume_update_volume_single_segment(void *context, const struct nvm
 		//	disk->name, disk->n_ranges, block_dev->name,
 		//	disk_id->num_ranges, block_dev);
 		//spin_unlock_irqrestore(&disk->volume_spinlock, flags);
-		if (disk_id->num_ranges == 0 && !volume->info.retain_disks)
+		if (disk_id->num_ranges == 0 && !volume->targets.retain_disks)
 			__disconnect_disk_from_volume(disk_id, volume->full_name, true);
 	}
 out:
@@ -1004,7 +1004,7 @@ static void __free_transport_resources_of(struct nvmeibc_volume *volume)
 {
 	struct list_head disks_to_block;
 	struct nvmeibc_disk_id *disk;
-	struct list_head * disks  = &volume->info.disks;
+	struct list_head * disks  = &volume->targets.disks;
 	INIT_LIST_HEAD(&disks_to_block);
 	while ((disk = list_first_entry_or_null(disks, struct nvmeibc_disk_id, link))) {
 		_ND(__free_transport_resources_of_d1, "remove from volume disk @STR", disk->disk->name);
@@ -1026,7 +1026,7 @@ static void __free_transport_resources_of(struct nvmeibc_volume *volume)
 
 static void __retain_transport_resources_of(struct nvmeibc_volume *volume)
 {
-	volume->info.retain_disks = true;
+	volume->targets.retain_disks = true;
 }
 
 
@@ -1205,18 +1205,18 @@ void nvmeibc_volume_set_block_device(struct nvmeibc_volume *volume, struct nvmei
 }
 
 // Iterate over disk_id list of the given volume & dump all disks it is using
-void nvmeibc_volume_dump_disk_ids(struct nvmeibc_volume *vol)
+void nvmeibc_volume_dump_disk_ids(struct nvmeibc_volume *volume)
 {
-	struct list_head        *list_disk_ids = &vol->info.disks;
+	struct list_head        *list_disk_ids = &volume->targets.disks;
 	struct nvmeibc_disk_id  *disk_id_iter;
 	unsigned long flags;
 
-	_NI_to_user(t_b9_dp_dbg_tools, DMESG_PREFIX("@DEV_NAME_FULL"), "Volume is using disks:", vol->full_name);
-	spin_lock_irqsave(&vol->spinlock, flags);
+	_NI_to_user(t_b9_dp_dbg_tools, DMESG_PREFIX("@DEV_NAME_FULL"), "Volume is using disks:", volume->full_name);
+	spin_lock_irqsave(&volume->spinlock, flags);
 	list_for_each_entry(disk_id_iter, list_disk_ids, link) {
 		_NI_to_user(t_ba_dp_dbg_tools, DMESG_PREFIX(), "\tname=@NAME, @DEV_NAME, count=@COUNT", disk_id_iter->name, disk_id_iter->volume->hdr.devname, disk_id_iter->num_ranges);
 	}
-	spin_unlock_irqrestore(&vol->spinlock, flags);
+	spin_unlock_irqrestore(&volume->spinlock, flags);
 }
 
 static const char * __vol_type_2_string(const struct nvmeibc_volume *vol)
@@ -1255,7 +1255,7 @@ int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume,
 	unsigned long flags;
 
 	spin_lock_irqsave((spinlock_t *)&volume->spinlock, flags);
-	list_for_each_entry(disk_id_iter, &volume->info.disks, link) {
+	list_for_each_entry(disk_id_iter, &volume->targets.disks, link) {
 		if ((rv = (*call_fn)(&(disk_id_iter->disk->base), ctx)) < 0)
 			goto unlock;
 		n_calls++;
