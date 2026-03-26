@@ -46,6 +46,7 @@
 #include "kr_incs_bit_ops_test.h"
 #include "nvmeib_scatterlist_iter_test.h"
 #include "nvmeibc_management_capi_parse_conf_test.h"
+#include "nvmeibc_volume_targets_tests.h"
 #include <stdint.h>
 
 /******************************************************************************/
@@ -7547,6 +7548,11 @@ struct nvmesh_memmgr_metric_total_allocations {
 	struct nvmesh_memmgr_metric_counters client_audited;
 };
 
+static bool __unitest_is_synthetic_memmgr_metric(struct nvmesh_memmgr_metrics const *mgr)
+{
+	return strstr(mgr->labels, ";test") != NULL;
+}
+
 void nvmesh_memmgr_total_allocations_update(struct nvmesh_memmgr_metric_total_allocations *self,
 					    struct nvmesh_memmgr_metrics const *mgr)
 {
@@ -7556,6 +7562,8 @@ void nvmesh_memmgr_total_allocations_update(struct nvmesh_memmgr_metric_total_al
 		nvmesh_memmgr_metric_counters_merge(&self->simulator, &merged_cpus);
 	else if (mgr == unitest_get_memmgr_metric_client_total_mem())
 		nvmesh_memmgr_metric_counters_merge(&self->client_total, &merged_cpus);
+	else if (__unitest_is_synthetic_memmgr_metric(mgr))
+		return;
 	else
 		nvmesh_memmgr_metric_counters_merge(&self->client_audited, &merged_cpus);
 }
@@ -7572,6 +7580,11 @@ static void unitest_memmgr_metric_check_client(void)
 	float accounted_pct, non_accounted_pct;
 	struct nvmesh_memmgr_metrics *curr;
 
+	if (ut_conf__get_bunitest()->nRep == 0) {
+		_NI(mat_skip_no_rep, "Skipping client memmgr accounting check because nRep=0");
+		return;
+	}
+
 	/* step 1 - compute the total allocations */
 	for (curr = __start_nvmeibc_memmgr_metrics; curr < __stop_nvmeibc_memmgr_metrics; curr++)
 		nvmesh_memmgr_total_allocations_update(&total_allocations, curr);
@@ -7585,6 +7598,16 @@ static void unitest_memmgr_metric_check_client(void)
 	client_total_allocation = nvmesh_metric_bytes_histogram_total_allocations(&total_allocations.client_total.allocation_distribution);
 	client_accounted_allocation = nvmesh_metric_bytes_histogram_total_allocations(&total_allocations.client_audited.allocation_distribution);
 	client_non_accounted_allocation = nvmesh_metric_bytes_histogram_total_allocations(&client_non_accounted);
+
+	if (client_total_allocation == 0) {
+		_NI(mat_skip_no_total, "Skipping client memmgr accounting check because no client allocations were recorded");
+		return;
+	}
+
+	if (client_accounted_allocation == 0) {
+		_NI(mat_skip_no_audited, "Skipping client memmgr accounting check because no audited client allocations were recorded");
+		return;
+	}
 
 	accounted_pct = ((float)client_accounted_allocation/(float)client_total_allocation)*100;
 	non_accounted_pct = ((float)client_non_accounted_allocation/(float)client_total_allocation)*100;
@@ -7637,6 +7660,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 	kr_incs_bit_ops_tests();
 	nvmeib_scatterlist_iter_tests();
 	nvmeibc_management_capi_parse_conf_tests();
+	nvmeibc_volume_targets_tests();
 
 	if (unlikely(buni->conf->bunitest.nRep == 0))
 		unitest_print("*** Skipping all unitests. Intentional?\n");

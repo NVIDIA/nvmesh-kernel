@@ -4055,7 +4055,7 @@ static int __digest_segment_layout(struct nvmeibc_volume_conf *conf,
 					seg->dbg_uuid = __parse_seg_dbg_uuid(seg->uuid);
 
 					{
-						struct dp_target_find_disk_result found = targets->find_disk_by_id(targets, cur_seg->diskID);
+						struct dp_target_find_disk_result found = targets->find_disk_by_name(targets, cur_seg->diskID);
 						if (!found.disk){
 							_NT_TOPO(trace_1_topology_digest_segment_layout, t, SEGMENT_FMT " target configuration missing disk @DISKID (@DISKUUID)",
 								ci, ri, si, cur_seg->diskID, cur_seg->diskUUID);

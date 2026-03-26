@@ -54,8 +54,37 @@ void __ut_mm_test_json_serialize(void)
 	free(buffer.base);
 }
 
+static void __ut_mm_test_clear(void)
+{
+	struct nvmesh_memmgr_metric_counters merged;
+
+	nvmesh_memmgr_metrics_clear(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
+
+	merged = nvmesh_memmgr_metrics_merge_cpus(mm_zero);
+	BUG_ON(merged.allocated.counter != 0);
+	BUG_ON(merged.active_allocations.counter != 0);
+	BUG_ON(merged.max_allocated.counter != 0);
+	BUG_ON(merged.failures.counter != 0);
+	BUG_ON(nvmesh_metric_bytes_histogram_total_allocations(&merged.allocation_distribution) != 0);
+
+	merged = nvmesh_memmgr_metrics_merge_cpus(mm_one);
+	BUG_ON(merged.allocated.counter != 0);
+	BUG_ON(merged.active_allocations.counter != 0);
+	BUG_ON(merged.max_allocated.counter != 0);
+	BUG_ON(merged.failures.counter != 0);
+	BUG_ON(nvmesh_metric_bytes_histogram_total_allocations(&merged.allocation_distribution) != 0);
+
+	merged = nvmesh_memmgr_metrics_merge_cpus(mm_two);
+	BUG_ON(merged.allocated.counter != 0);
+	BUG_ON(merged.active_allocations.counter != 0);
+	BUG_ON(merged.max_allocated.counter != 0);
+	BUG_ON(merged.failures.counter != 0);
+	BUG_ON(nvmesh_metric_bytes_histogram_total_allocations(&merged.allocation_distribution) != 0);
+}
+
 void test_memmgr_metrics(void)
 {
 	__ut_mm_test_section();
 	__ut_mm_test_json_serialize();
+	__ut_mm_test_clear();
 }

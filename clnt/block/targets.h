@@ -9,7 +9,7 @@ struct dp_target_find_disk_result{
 };
 
 struct dp_targets{
-    struct dp_target_find_disk_result (*find_disk_by_id)(struct dp_targets const* self, const char *diskID);
+    struct dp_target_find_disk_result (*find_disk_by_name)(struct dp_targets const* self, const char *diskID);
 };
 
 #endif//__TARGETS_H__

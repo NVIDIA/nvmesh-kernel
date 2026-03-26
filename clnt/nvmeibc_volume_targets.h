@@ -9,6 +9,9 @@
 #include "kr_incs.h"
 #include "block/targets.h"
 
+struct nvmeibc_disk;
+struct nvmeibc_disk_id;
+
 /**
  * nvmeibc_volume_info: filled by the management.  it contains
  * two lists.  the arnics is a list of struct nvmeibc_admin_rnic
@@ -27,7 +30,17 @@ struct nvmeibc_volume_targets {
 };
 
 void nvmeibc_volume_targets_init(struct nvmeibc_volume_targets* self);
+struct dp_targets const *nvmeibc_volume_targets_base(struct nvmeibc_volume_targets const* self);
+void nvmeibc_volume_targets_add_disk_id(struct nvmeibc_volume_targets* self, struct nvmeibc_disk_id *disk_id);
 
-struct dp_target_find_disk_result nvmeibc_volume_targets_find_disk_by_id(struct nvmeibc_volume_targets const* self, const char *diskID);
+struct list_head *nvmeibc_volume_targets_get_disks(struct nvmeibc_volume_targets const* self);
+
+int nvmeibc_volume_targets_count_disks(struct nvmeibc_volume_targets const* self);
+bool nvmeibc_volume_targets_should_retain_disks(struct nvmeibc_volume_targets const* self);
+void nvmeibc_volume_targets_set_retain_disks(struct nvmeibc_volume_targets* self, bool retain_disks);
+
+struct dp_target_find_disk_result nvmeibc_volume_targets_find_disk_by_name(struct nvmeibc_volume_targets const* self, const char *diskID);
+struct nvmeibc_disk_id *nvmeibc_volume_targets_find_disk_id_by_name(struct nvmeibc_volume_targets const* self, const char *disk_name);
+struct nvmeibc_disk_id *nvmeibc_volume_targets_find_disk_id_by_disk(struct nvmeibc_volume_targets const* self, struct nvmeibc_disk const* disk);
 
 #endif /* NVMEIBC_VOLUME_TARGETS_H */
