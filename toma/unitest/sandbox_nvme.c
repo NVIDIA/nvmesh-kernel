@@ -47,9 +47,9 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ 0x1401, "STKD_SN_001" , "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
 	{ 0x1402, "NVMD_f37_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
 	{ 0x1403, "NVMD_f37_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ 0x1401, "STKD_SN_001" , "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
@@ -72,15 +72,14 @@ static void create_simulated_locks_file(const char *serial_number) {
 }
 
 // Set up the NVMe disk data. Currently just a static configuration, but ultimately we'll add dynamic modification adding and removing disks.
-static void disk_init_stock(struct sandbox_nvme_device *dev, const char *src_path);
+static void disk_init_stock(struct sandbox_nvme_device *dev);
 static void disk_init_zeroed(const struct sandbox_nvme_device *dev);
 void sandbox_nvme_init(void) {
 	N_Tf(sbu3401, "initializing static simulated NVMe disks");
-	#define TEST_DATA_BUILD_DIR "99bin/testdata/"
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {	// sandbox_nvme_get_device_count
 		struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (d->stock_disk) {
-			disk_init_stock(d, TEST_DATA_BUILD_DIR "disk_stock.img");
+			disk_init_stock(d);
 		} else {
 			disk_init_zeroed(d);
 			create_simulated_locks_file(d->serial_number);
@@ -300,7 +299,8 @@ static int copy_file(const char *source_path, const char *dest_path) {
 	return err;
 }
 
-static void disk_init_stock(struct sandbox_nvme_device *dev, const char *src_path) {
+static void disk_init_stock(struct sandbox_nvme_device *dev) {
+	const char* src_path = "99bin/testdata/disk_stock.img";
 	struct stat st;
 	unlink(dev->device_path);
 	copy_file(src_path, dev->device_path);
