@@ -133,7 +133,7 @@ ifeq ($(OFED_WE_R), yes)
 
     ifneq (,$(findstring $(OFED_VER_MAJ), 3 4 5))
         # include local dirs mlnx_ofed_X.X
-        INC_DIR += -I$(shell pwd)/mlnx_ofed_$(OFED_VER)/include -I$(shell pwd)/mlnx_ofed_$(OFED_VER)/include/linux
+        INC_DIR += -I$(NVMESH_SRC_DIR)/mlnx_ofed_$(OFED_VER)/include -I$(NVMESH_SRC_DIR)/mlnx_ofed_$(OFED_VER)/include/linux
     endif
     # KS_HAS_VIRT_DMA_SUPPORT, HAS_IB_QUERY_GID, __ib_alloc_pd, mlx5_ib.h, etc.: scripts/compute_backports.sh ($INC_RDMA / $INC_RDMA_DRV)
 
@@ -213,6 +213,12 @@ else
             $(error Unknown OFED $(OFED_VER_STRING))
         endif
     endif
+endif
+
+# ofed_symbol_version: optional override for Module.symvers path
+ifneq ($(OFED_SYM_VER),)
+    OFED_SYMVERS = $(OFED_SYM_VER)
+    INFO_OFED := Override - Mellanox OFED $(OFED_VER) in $(OFED_SRC_DIR). Symbols from $(OFED_SYMVERS)
 endif
 
 export OFED_VER_TYPE

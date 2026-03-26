@@ -40,11 +40,14 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 AUTOGEN_HEADERS := $(foreach dir,$(AUTOGEN_SUBDIRS_TOMA),$(AUTOGEN_DIR)/$(dir))
 
-TRACER_PP  := $(shell pwd)/../tools/pre_processor/tracer_pp.py
-GEN_PROBES := $(shell pwd)/../tools/pre_processor/gen_probes2.py
-MERGE_MULTI_GEN := $(shell pwd)/../tools/pre_processor/merge_multi_gen_events.py
-MERGE_DICT := $(shell pwd)/../tools/merge_dictionary.sh
-DICT_JSON  := $(shell pwd)/../tools/dictionary.json
+# Repo root (parent of this directory); override from top-level make via NVMESH_SRC_DIR=...
+NVMESH_SRC_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+
+TRACER_PP  := $(NVMESH_SRC_DIR)/tools/pre_processor/tracer_pp.py
+GEN_PROBES := $(NVMESH_SRC_DIR)/tools/pre_processor/gen_probes2.py
+MERGE_MULTI_GEN := $(NVMESH_SRC_DIR)/tools/pre_processor/merge_multi_gen_events.py
+MERGE_DICT := $(NVMESH_SRC_DIR)/tools/merge_dictionary.sh
+DICT_JSON  := $(NVMESH_SRC_DIR)/tools/dictionary.json
 
 EXTRA_SOURCES=$(TOOLS_DIR)/nvmeib_trace_userspace.o $(TOOLS_DIR)/nvmeib_trace_userspace_poller.o
 

@@ -86,7 +86,7 @@ ifeq ($(OFED_INFO),)
         # OFED not found. Check if OFED_VER_TYPE set to NONE
         ifneq ($(OFED_VER_TYPE),none)
             $(info If OFED is installed, provide path with OFED_INFO=/path/to/ofed_info)
-            $(info For building without OFED set OFED_VER_TYPE=none. Requires supported Kernel in $(shell pwd)/kernels)
+            $(info For building without OFED set OFED_VER_TYPE=none. Requires supported Kernel in $(NVMESH_SRC_DIR)/kernels)
             $(error ofed_info not found)
         endif
         OFED_VER_STRING := NONE
@@ -147,7 +147,7 @@ ifeq ($(OFED_VER_TYPE), $(filter $(OFED_VER_TYPE),MLNX_OFED_LINUX OFED-internal)
         #endif
 
         # include local dirs mlnx_ofed_X.X
-        INC_DIR += -I$(shell pwd)/mlnx_ofed_$(OFED_VER)/include -I$(shell pwd)/mlnx_ofed_$(OFED_VER)/include/linux
+        INC_DIR += -I$(NVMESH_SRC_DIR)/mlnx_ofed_$(OFED_VER)/include -I$(NVMESH_SRC_DIR)/mlnx_ofed_$(OFED_VER)/include/linux
     endif
 else
     ifeq ($(OFED_VER_TYPE), OFED)
