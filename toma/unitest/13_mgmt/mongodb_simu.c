@@ -19,7 +19,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 		for (j = 0; j < (int)ARRAY_SIZE(node->nics); j++) {
 			struct sb_nics_conf *nic = &node->nics[j];
 			nic->uuid =  (node->uuid & 0xFFFF0000) | NIC__UUID_BASE | j;
-			nic->protocol = ((j%2) ? "RoCE" : "IB");
+			nic->protocol = ((j%2) ? "RoCE" : "TCP");
 		}
 		for (j = 0; j < (int)ARRAY_SIZE(node->disks); j++) {
 			struct sb_disk_conf *disk = &node->disks[j];
