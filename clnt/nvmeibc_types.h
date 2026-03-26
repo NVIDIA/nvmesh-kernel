@@ -330,19 +330,7 @@ struct nvmeibc_disk_id_update_params{
 	bool is_attach;
 };
 
-/**
- * nvmeibc_volume_info: filled by the management.  it contains
- * two lists.  the arnics is a list of struct nvmeibc_admin_rnic
- * and the disks is a list of struct nvmeibc_disk.
- * MODIFIED: arnics list is no longer used on the volume itself, rather
- * it is held by the target that holds the disk, the disk_id points to the
- * target to access the list of it's nics
- */
-struct nvmeibc_volume_info {
-	//struct list_head arnics; // No longer used
-	struct list_head disks; /* list of struct nvmeibc_disk_id */
-	bool retain_disks; // when draining IO during detaching, do not release disks one by one with each destroyed segment, but rather do it in parallel in the detach SM after destroying topologies
-};
+#include "nvmeibc_volume_targets.h"
 
 #ifdef DEBUG_TRANSFERS
 #define DEBUG_TRANSFERS_STACK_SIZE 8

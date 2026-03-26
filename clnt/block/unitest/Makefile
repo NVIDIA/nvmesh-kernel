@@ -275,6 +275,7 @@ SOURCES += $(SSDA)/toma/clnt/nvmeibt_client_protocol.c
 SOURCES += $(SDIR)/module/instance/nvmeibc_cinst.c
 
 SOURCES += $(SDIR)/nvmeibc_volume.c $(SDIR)/nvmeibc_main.c $(SDIR)/nvmeibc_common.c $(SDIR)/nvmeibc_cc_api.c $(SDIR)/nvmeibc_io_pet.c $(SDIR)/nvmeibc_targets.c
+SOURCES += $(SDIR)/nvmeibc_volume_targets.c
 SOURCES += $(SDIR)/nvmeibc_disk_gen_cmds.c
 SOURCES += $(SDIR)/nvmeibc_capabilities.c
 SOURCES += $(SDIR)/management_utils_common/nvmeibc_management_capi_parse_conf.c
