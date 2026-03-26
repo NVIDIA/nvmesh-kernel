@@ -177,9 +177,6 @@
 #ifndef U64_MAX
 	#define U64_MAX   ((u64)~0ULL)
 #endif
-#ifndef KS_USES_NETDEV_HAS_UPPER_DEV_ALL_RCU
-#	define KS_USES_NETDEV_HAS_UPPER_DEV_ALL_RCU 0
-#endif
 #ifndef KS_MMAP_FAULT_HAS_VMA
 #	define KS_MMAP_FAULT_HAS_VMA			!K_CHECK_VER(4,11,0)
 #endif

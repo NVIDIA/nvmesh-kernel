@@ -437,13 +437,6 @@ ifeq ($(OFED_WE_R), yes)
 
     # KS_HAS_KREF_READ: see scripts/compute_backports.sh (probed on KSRC1 only)
 
-    # Set a flag if netdev_has_upper_dev_all_rcu is used in core_priv.h but is not defined in the kernel
-    ifneq ($(shell grep netdev_has_upper_dev_all_rcu $(OFED_SRC_DIR)/drivers/infiniband/core/core_priv.h 2> /dev/null),)
-        ifeq ($(shell grep netdev_has_upper_dev_all_rcu $(KSRC)/Module.symvers 2> /dev/null),)
-            cflags += -DKS_USES_NETDEV_HAS_UPPER_DEV_ALL_RCU=1
-        endif
-    endif
-
     # IB_HAS_CMA_PRIV_H: scripts/compute_backports.sh (file_exists_define on INC_RDMA_DRV)
     ifeq ($(COMPILE_COMMON),yes)
         $(eval $(call check_ofed_ib_core_modules))
