@@ -284,11 +284,13 @@ int ioctl(int fd, unsigned long int req, ...) {
 	va_list ap;
 	int rv = 0;
 	va_start(ap, req);
-	N_Df(sbioct0, "ioctl fd=@INT path=@STR", fd, path);
+	N_Tf(sbioct0, "ioctl=@LX fd=@INT path=@STR", req, fd, path);
 	if (req == NVME_IOCTL_ADMIN_CMD) {
 		rv = nvme_ioctl_admin_cmd(path, fd, ap);
 	} else if (req == NVME_IOCTL_ID) {
-		rv = fd;
+		const struct sandbox_nvme_device *d = sandbox_nvme_get_device_by_full_path(path);
+		rv = (d->stock_disk) ? 9 : 1;		// Get from d->conf
+		N_Tf(sbioct1, "NVME_IOCTL_ID[@STR] -> is_stock=@BOOL_YN, ns=@INT", path, d->stock_disk, rv);
 	} else if (req == FIONBIO) {
 		rv = 0;
 	} else if (req == BLKSSZGET) {

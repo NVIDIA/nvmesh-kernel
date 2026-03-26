@@ -16,9 +16,10 @@ struct sb_cluster_conf {
 			uint32_t uuid;
 		} nics[2];				// Each node has exactly 2 nics
 		struct sb_disk_conf {	// Each node has up to 3 local disks
-			char name[16];
+			char name[24];
 			uint32_t uuid;
 			uint32_t size_bytes;
+			u16 orig_name_space_id;			// When formatted to NVMesh will loose this namespace id (nvmesh namespace is 1)
 			u16 vendor;
 			bool is_out_of_service;
 		} disks[3];
@@ -57,6 +58,7 @@ int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
 int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
 int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, const char *disk_uuid);
+bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation
 void sb_cluster_ignore_append_entries_by_node(int node_idx);

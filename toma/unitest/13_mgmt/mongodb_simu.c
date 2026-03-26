@@ -24,7 +24,9 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 		for (j = 0; j < (int)ARRAY_SIZE(node->disks); j++) {
 			struct sb_disk_conf *disk = &node->disks[j];
 			disk->uuid = (node->uuid & 0xFFFF0000) | DISK_UUID_BASE | j;
-			snprintf(disk->name, sizeof(disk->name),"NVMD_%x_00%u.1", (node->uuid >> 20), (j + 2));
+			disk->orig_name_space_id = 9;		// Just arbitrary namespace for all disks
+			// Name = 15[B]: 4[B] prefix + 4[b] _node + 4[b] disk index + '.' + 1[b] namespace + \0
+			snprintf(disk->name, sizeof(disk->name),"NVMD_%3x_%03u.%01u", (node->uuid >> 20), (j + 2), disk->orig_name_space_id);
 			disk->size_bytes = (32768 << 12);		// 128[MB]
 			disk->vendor = 5000 + (i+1) * 100 + j;
 		}
@@ -88,8 +90,18 @@ int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, cons
 int sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *sb, const char *disk_name) {
 	const int n = disk_name[ 7] - '0' - ((NODE_UUID_BASE>>20)&0xF);
 	const int d = disk_name[11] - '0' - 2;
-	BUG_ON(strncmp(sb->nodes[n].disks[d].name, disk_name, 16) != 0);
+	const struct sb_disk_conf *D = &sb->nodes[n].disks[d];
+	BUG_ON(strncmp(D->name, disk_name, 12) != 0);		// Compare without name space, which can change due to formatting
 	return d;
+}
+
+bool sb_cluster_update_disk_namespace_from_name(struct sb_disk_conf *D, const char *disk_name) {
+	const bool has_name_space_changed = (disk_name[13] != D->name[13]);
+	if (has_name_space_changed) {
+		N_Tf(__AUTOID__, "Disk @STR -> orig_ns[@INT] moved [@INT->@INT]", D->name, D->orig_name_space_id, D->name[13]-'0', disk_name[13]-'0');
+		D->name[13] = disk_name[13];
+	}
+	return has_name_space_changed;
 }
 
 int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *sb, const char *disk_uuid) {

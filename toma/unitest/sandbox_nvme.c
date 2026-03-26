@@ -49,7 +49,7 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
 static struct sandbox_nvme_device nvme_devices[] = {
 	{ 0x1402, "NVMD_f37_002", "NVMD_NN_002", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
 	{ 0x1403, "NVMD_f37_003", "NVMD_NN_003", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
-	{ 0x1401, "STKD_SN_001" , "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
+	{ 0x1401, "NVMD_f37_004", "STKD_MN_001", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
@@ -110,6 +110,15 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char 
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
 		const struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (!strncmp(d->serial_number, disk_id, serial_len))
+			return d;
+	}
+	BUG_ON(true); return NULL;
+}
+
+const struct sandbox_nvme_device *sandbox_nvme_get_device_by_full_path(const char *path) {
+	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+		const struct sandbox_nvme_device *d = &nvme_devices[i];
+		if (!strncmp(d->device_path, path, 128))
 			return d;
 	}
 	BUG_ON(true); return NULL;
