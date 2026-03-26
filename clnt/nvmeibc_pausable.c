@@ -283,8 +283,11 @@ static void call_for_each_disks_vols_disks(struct nvmeibc_disk *disk, void (*fn)
 	list_for_each_entry(disk_id_out, &disk->volumes, slink) {
 		if (disk_id_out->volume) {
 			nvmeibc_volume_get(disk_id_out->volume, NULL);
-			list_for_each_entry(disk_id_in, &disk_id_out->volume->targets.disks, link) {
-				(*fn)(disk_id_in->disk);
+			{
+				struct list_head *disks = nvmeibc_volume_targets_get_disks(&disk_id_out->volume->targets);
+				list_for_each_entry(disk_id_in, disks, link) {
+					(*fn)(disk_id_in->disk);
+				}
 			}
 			nvmeibc_volume_put(disk_id_out->volume, NULL);
 		}

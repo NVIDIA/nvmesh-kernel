@@ -9,6 +9,7 @@
 #include "nvmeibc_block.h"
 #include "main/cc_api/nvmeibc_main_capi_manipulate_vols.h"  // For nvmeibc_config_volume
 #include "common/pet/nvmeib_pet_specification.h"
+#include "nvmeibc_volume_targets.h"
 #include "block/platform_services.h"
 
 /* Realtime state of the volume. Typical flow:
