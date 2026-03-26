@@ -3,11 +3,6 @@
 
 # Parent Makefile
 #
-MAKE_PID := $(shell echo $$PPID)
-JOBS := $(shell ps T | sed -n 's@.*$(MAKE_PID).*$(MAKE).* \(-j\|--jobs=\) *\([0-9]*[0-9]*\).*@\1\2@p')
-ifeq ($(JOBS),)
-    JOBS = -j1
-endif
 
 ifneq ($(LLVM),)
     export CC=clang
