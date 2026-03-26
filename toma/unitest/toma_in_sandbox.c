@@ -154,7 +154,7 @@ struct t_sandbox_all {
 	struct mgmt_sim_state *mgmt;
 	struct nvmeibt_nm_local_node *nm;
 	struct user_rpc_simu *rpc;
-	bool is_running_as_a_utility;
+	bool is_running_toma_unit_tests;
 	bool can_use_bin_traces;
 } *sys;
 
@@ -226,12 +226,12 @@ static ssize_t _wakeup_pipe_wakeup_recv(int fd, void *buf, size_t n, off_t offse
 	return n;
 }
 
-static bool nvmeibt_toma_is_running_as_a_utility(void) { return sys->is_running_as_a_utility; }
+static bool sandbox_is_running_toma_unit_tests(void) { return sys->is_running_toma_unit_tests; }
 
 void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys = calloc(1, sizeof(*sys));
 	os_sim_init(&sys->os);
-	sys->is_running_as_a_utility = is_running_as_a_utility;
+	sys->is_running_toma_unit_tests = !is_running_as_a_utility;
 	sb_cluster_conf_create(&sys->cfg);
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
@@ -247,19 +247,19 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 		mgmt_sim_send_msg_change_raft_quorum(2, true);			// Re-add last target again, while it already exists, verify Toma can handle this
 	}
 	mgmt_sim_send_msg_assign_to_zone(1);
-	if (!nvmeibt_toma_is_running_as_a_utility())
+	if (sandbox_is_running_toma_unit_tests())
 		toma_unit_test_thread_create();
 }
 
 void t_sandbox_all_destroy(void) {
-	if (!nvmeibt_toma_is_running_as_a_utility()) {
+	if (sandbox_is_running_toma_unit_tests()) {
 		toma_unit_test_thread_destroy();
 	}
-	nvmeibs_simu_destroy(sys->srvr, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
-	mgmt_sim_destroy(               !nvmeibt_toma_is_running_as_a_utility());			// Must destroy mgmt_sim's Kafka objects before the broker
-	user_rpc_simu_destroy(sys->rpc, !nvmeibt_toma_is_running_as_a_utility());			// Only check for replies if we sent rpc messages
+	nvmeibs_simu_destroy(sys->srvr, sandbox_is_running_toma_unit_tests());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
+	mgmt_sim_destroy(               sandbox_is_running_toma_unit_tests());			// Must destroy mgmt_sim's Kafka objects before the broker
+	user_rpc_simu_destroy(sys->rpc, sandbox_is_running_toma_unit_tests());			// Only check for replies if we sent rpc messages
 	sandbox_kafka_destroy(sys->kafka_simu);
-	os_sim_destroy(&sys->os, !nvmeibt_toma_is_running_as_a_utility());
+	os_sim_destroy(&sys->os, sandbox_is_running_toma_unit_tests());
 	sb_cluster_conf_destroy(&sys->cfg);
 	free(sys);
 	sys = NULL;
