@@ -180,6 +180,7 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	bool resrv_inc_ignored = false;
 	enum_vol_status res;
 	struct nvmeibc_control_api* ccapi = &__get_from_params_main_globals_container(p)->cc_api;
+	struct dp_platform_services services = dp_platform_services_make(ccapi->io_pet_controller);
 	
 	int rv = 0;
 
@@ -223,7 +224,7 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
                 nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 0);
 		goto _out;
 	} else {
-		rv = nvmeibc_volume_attach(p, msg, ccapi->io_pet_controller);
+		rv = nvmeibc_volume_attach(p, msg, services);
 		res = _calc_reply_on_attach(hdr->name, volume, rv, resrv_inc_ignored, &reply_hdr);
 		if (rv == -ERROR_VOL_UPDATE_ALREADY_LATEST)
 			rv = 0;

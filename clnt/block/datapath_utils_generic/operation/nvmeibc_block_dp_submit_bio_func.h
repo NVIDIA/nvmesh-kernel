@@ -151,7 +151,7 @@ int execute_bio(struct bio *bio, unsigned long now)
 			if (bio_part_size_b > max_bytes)
 				bio_part_size_b = max_bytes;
 		}
-		io_pet_controller = __is_multiple_blocksets(cur_start_s, bio_part_size_b, nd->dp.p.slice_size) ? NULL : nd->io_pet_controller;
+		io_pet_controller = __is_multiple_blocksets(cur_start_s, bio_part_size_b, nd->dp.p.slice_size) ? NULL : nd->services.io_pet_controller;
 		o = nvmeibc_operation_create_with_biopart(nd->dp.sizeof_operation, io_pet_controller);
 		if (unlikely(!o)) {
 			rv = -ENOMEM;

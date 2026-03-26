@@ -1159,7 +1159,7 @@ static int __init_so(enum nvmeib_block_io_op op, struct recovery_sync_op *so,
 	}
 	o = so->o;
 	o->rso = so;
-	o->journal = nvmeibc_io_pet_journal_make(orig_o->nd->io_pet_controller);
+	o->journal = nvmeibc_io_pet_journal_make(orig_o->nd->services.io_pet_controller);
 	o->jiffies1 = jiffies; // Just for debug
 	BLKCMP_SO_BLOCKING_CONTEXT_ALLOC(o);
 	o->nd = orig_o->nd; // Just for debug

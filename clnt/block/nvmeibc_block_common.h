@@ -19,7 +19,7 @@
 #include "datapath_utils_generic/nvmeibc_block_dp_common.h"
 #include "datapath_utils_generic/nvmeibc_block_dp_elevator.h"
 #include "controlpath/nvmeibc_b_cp_cpu_masks.h"
-
+#include "block/platform_services.h"
 struct nvmeibc_api_of_auto_extend {			// API for auto extendable volume. QCow or other simmilar user space app can use it as thin provisioned volume
 	bool is_api_enabled;					// By default this API is not active.
 	unsigned long allocated_size;			// Stores the actual allocated size of volume (size which OS sees is almost infinity)
@@ -76,7 +76,7 @@ struct nvmeibc_block_device {   			// TODO: change this to something shorter
 	struct nvmeibc_trace_stats_scheduling trace_stats;	// Scheduling state of block stats tracing for block watchdog
 #endif
 	bool ignore_all_recov_toma_speed_req;		// Ignore requests from toma to change recovery speed. Used when manually setting those values
-	struct nvmeib_pet_base_controller* io_pet_controller;
+	struct dp_platform_services services;
 };
 #define nvmeibc_volume_short_id(nd) ((nd)->dbg_id)
 #define assert_dev_on_mainwq(dev) nvmeibc_assert_on_main_wq(nvmeibc_isnt_params_blk2main(nvmeibc_cinst_get_blok_p(dev)))	// Attach/Detach actions must be done serialized on main-wq

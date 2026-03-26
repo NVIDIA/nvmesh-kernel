@@ -1115,7 +1115,7 @@ int nvmeibc_block_init(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *
 	INIT_LIST_HEAD(&dev->list_n);
 	nvmeibc_blk_op_elevator_init(&dev->merge_op);
 	INIT_LIST_HEAD(&dev->reboot_ops);
-	dev->io_pet_controller = volume->io_pet_controller;
+	dev->services = volume->services;
 
 	rv = nvmeibc_topologies_init(&dev->topologies, devname);
 	if (rv < 0) {
