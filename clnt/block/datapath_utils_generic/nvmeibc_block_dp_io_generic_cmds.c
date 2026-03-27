@@ -24,7 +24,7 @@
 #include "common/nvmeib_str.h"
 #include "nvmeibc_error_tags.h"
 #include "nvmeibc_io_pet.h"
-#include "compat/kr_incs_sgl.h"
+#include "common/compat/kr_incs_sgl.h"
 #include "common/nvmeib_scatterlist_iter.h"
 
 /******************************************************************************/
