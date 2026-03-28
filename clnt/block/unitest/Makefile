@@ -142,6 +142,7 @@ SOURCES += memmgr_metrics_tests.c
 SOURCES += metrics_test.c
 SOURCES += wq_metrics_tests.c
 SOURCES += error_tags_tests.c
+SOURCES += kr_incs_bit_ops_test.c
 SOURCES += io_pet_traces_controller.c
 SOURCES += ./clnt/nvmeibc_cli_scripts_simu.c ./clnt/nvmeibc_user_space_simu.c
 SOURCES += ./mgmt/nvmeibm_conf_db.c ./mgmt/nvmeibm_mgmt_simu.c ./mgmt/nvmeibm_mcs_simu.c

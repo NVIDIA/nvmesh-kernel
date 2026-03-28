@@ -42,6 +42,7 @@
 #include "wq_metrics_tests.h"
 #include "clnt/nvmeibc_wq_metrics.h"
 #include "error_tags_tests.h"
+#include "kr_incs_bit_ops_test.h"
 #include "nvmeib_scatterlist_iter_test.h"
 #include "nvmeibc_management_capi_parse_conf_test.h"
 #include <stdint.h>
@@ -7196,6 +7197,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 	test_wq_metrics();
 	test_memmgr_metrics();
 	test_error_tags();
+	kr_incs_bit_ops_tests();
 	nvmeib_scatterlist_iter_tests();
 	nvmeibc_management_capi_parse_conf_tests();
 
