@@ -409,20 +409,26 @@ static inline int bitmap_parse(const char *buf, unsigned int buflen,
 
 #undef CHUNKSZ
 
-#ifdef __x86_64__
-	// Set a bit and return its old value
-	static inline int test_and_set_bit(int nr, volatile unsigned long *addr){
-		int oldbit;
-		asm volatile("lock; bts %2,%1\n\tsbb %0,%0" : "=r" (oldbit), "+m" (*(volatile long *)(addr))  : "Ir" (nr) : "memory");
-		return oldbit;
-	}
-	// Clear a bit and return its old value
-	static inline int test_and_clear_bit(int nr, volatile unsigned long *addr){
-		int oldbit;
-		asm volatile("lock; btr %2,%1\n\tsbb %0,%0" : "=r" (oldbit), "+m" (*(volatile long *)(addr)) : "Ir" (nr) : "memory");
-		return oldbit;
-	}
-#else
+	#ifdef __x86_64__
+		// Set a bit and return its old value
+		static inline int test_and_set_bit(int nr, volatile unsigned long *addr){
+			unsigned char oldbit;
+			asm volatile("lock; bts %2,%1\n\tsetc %0"
+				: "=q" (oldbit), "+m" (*(volatile long *)(addr))
+				: "Ir" (nr)
+				: "cc", "memory");
+			return oldbit;
+		}
+		// Clear a bit and return its old value
+		static inline int test_and_clear_bit(int nr, volatile unsigned long *addr){
+			unsigned char oldbit;
+			asm volatile("lock; btr %2,%1\n\tsetc %0"
+				: "=q" (oldbit), "+m" (*(volatile long *)(addr))
+				: "Ir" (nr)
+				: "cc", "memory");
+			return oldbit;
+		}
+	#else
 	static inline int test_and_set_bit(int nr, unsigned long *addr) {
 		unsigned long mask = BIT_MASK(nr);
 		unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);

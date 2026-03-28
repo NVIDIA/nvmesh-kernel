@@ -23,11 +23,11 @@ static void __ut_bit_primitives(void)
 	BUG_ON(!test_bit(64, map));
 	BUG_ON(!test_bit(129, map));
 
-	BUG_ON(!test_and_set_bit(64, map));
+	BUG_ON(test_and_set_bit(64, map) != 1);
 	BUG_ON(test_and_set_bit(5, map) != 0);
 	BUG_ON(!test_bit(5, map));
 
-	BUG_ON(!test_and_clear_bit(5, map));
+	BUG_ON(test_and_clear_bit(5, map) != 1);
 	BUG_ON(test_and_clear_bit(5, map) != 0);
 	BUG_ON(test_bit(5, map) != 0);
 
