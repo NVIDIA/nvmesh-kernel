@@ -98,7 +98,7 @@ static void __ut_for_each_bit_macros(void)
 	const unsigned long expected_clear[] = { 0, 2, 3, 5 };
 	const unsigned long expected_clear_from[] = { 3, 5 };
 	unsigned long clear_map = BIT(1) | BIT(4);
-	unsigned long bit;
+	unsigned long bit_index;
 	size_t idx;
 
 	set_bit(2, set_map);
@@ -107,35 +107,35 @@ static void __ut_for_each_bit_macros(void)
 	set_bit(129, set_map);
 
 	idx = 0;
-	for_each_set_bit(bit, set_map, 130) {
+	for_each_set_bit(bit_index, set_map, 130) {
 		BUG_ON(idx >= ARRAY_SIZE(expected_set));
-		BUG_ON(bit != expected_set[idx]);
+		BUG_ON(bit_index != expected_set[idx]);
 		idx++;
 	}
 	BUG_ON(idx != ARRAY_SIZE(expected_set));
 
 	idx = 0;
-	bit = 65;
-	for_each_set_bit_from(bit, set_map, 130) {
+	bit_index = 65;
+	for_each_set_bit_from(bit_index, set_map, 130) {
 		BUG_ON(idx >= ARRAY_SIZE(expected_set_from));
-		BUG_ON(bit != expected_set_from[idx]);
+		BUG_ON(bit_index != expected_set_from[idx]);
 		idx++;
 	}
 	BUG_ON(idx != ARRAY_SIZE(expected_set_from));
 
 	idx = 0;
-	for_each_clear_bit(bit, &clear_map, 6) {
+	for_each_clear_bit(bit_index, &clear_map, 6) {
 		BUG_ON(idx >= ARRAY_SIZE(expected_clear));
-		BUG_ON(bit != expected_clear[idx]);
+		BUG_ON(bit_index != expected_clear[idx]);
 		idx++;
 	}
 	BUG_ON(idx != ARRAY_SIZE(expected_clear));
 
 	idx = 0;
-	bit = 3;
-	for_each_clear_bit_from(bit, &clear_map, 6) {
+	bit_index = 3;
+	for_each_clear_bit_from(bit_index, &clear_map, 6) {
 		BUG_ON(idx >= ARRAY_SIZE(expected_clear_from));
-		BUG_ON(bit != expected_clear_from[idx]);
+		BUG_ON(bit_index != expected_clear_from[idx]);
 		idx++;
 	}
 	BUG_ON(idx != ARRAY_SIZE(expected_clear_from));
@@ -143,14 +143,33 @@ static void __ut_for_each_bit_macros(void)
 
 static void __ut_bitmap_set_and_masks(void)
 {
-	DECLARE_BITMAP(map, 130) = { 0 };
-	unsigned long bit;
+	unsigned long bit_index;
+	DECLARE_BITMAP(single_bit_map, 130) = { 0 };
+	DECLARE_BITMAP(byte_aligned_map, 130) = { 0 };
+	DECLARE_BITMAP(generic_map, 130) = { 0 };
 
-	bitmap_set(map, 60, 10);
-	for (bit = 0; bit < 130; ++bit) {
-		const bool expected = bit >= 60 && bit < 70;
+	/* Exercise the nbits == 1 fast path. */
+	bitmap_set(single_bit_map, 9, 1);
+	for (bit_index = 0; bit_index < 130; ++bit_index) {
+		const bool expected = bit_index == 9;
 
-		BUG_ON(!!test_bit(bit, map) != expected);
+		BUG_ON(!!test_bit(bit_index, single_bit_map) != expected);
+	}
+
+	/* Exercise the byte-aligned memset() path. */
+	bitmap_set(byte_aligned_map, 64, 16);
+	for (bit_index = 0; bit_index < 130; ++bit_index) {
+		const bool expected = bit_index >= 64 && bit_index < 80;
+
+		BUG_ON(!!test_bit(bit_index, byte_aligned_map) != expected);
+	}
+
+	/* Exercise the generic __bitmap_set() path. */
+	bitmap_set(generic_map, 60, 10);
+	for (bit_index = 0; bit_index < 130; ++bit_index) {
+		const bool expected = bit_index >= 60 && bit_index < 70;
+
+		BUG_ON(!!test_bit(bit_index, generic_map) != expected);
 	}
 }
 
@@ -161,11 +180,12 @@ static void __ut_bitmap_predicates(void)
 	DECLARE_BITMAP(dst, 130) = { 0 };
 	DECLARE_BITMAP(src1, 130) = { 0 };
 	DECLARE_BITMAP(src2, 130) = { 0 };
+	const unsigned long unused_tail_bit = BIT(70 - BITS_PER_LONG);
 
 	set_bit(5, a);
 	set_bit(69, a);
 	bitmap_copy(b, a, 70);
-	set_bit(70, b);
+	b[1] |= unused_tail_bit;
 	BUG_ON(!bitmap_equal(a, b, 70));
 
 	set_bit(68, b);
@@ -173,8 +193,8 @@ static void __ut_bitmap_predicates(void)
 
 	bitmap_zero(a, 70);
 	bitmap_zero(b, 70);
-	set_bit(70, a);
-	set_bit(70, b);
+	a[1] |= unused_tail_bit;
+	b[1] |= unused_tail_bit;
 	BUG_ON(bitmap_intersects(a, b, 70));
 	BUG_ON(!bitmap_empty(a, 70));
 
