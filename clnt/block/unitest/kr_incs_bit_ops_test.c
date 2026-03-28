@@ -254,6 +254,37 @@ static void __ut_bitmap_parse_and_math_helpers(void)
 	BUG_ON(is_power_of_2(96));
 }
 
+
+/*
+ * Compile-time regression test:
+ * GCC 13 warned about array-bounds in _find_next_bit() when a single-word
+ * bitmap stored in a local scalar was passed by address to for_each_set_bit().
+ */
+
+unsigned long __ut_for_each_set_bit_mutable(unsigned int nbits, unsigned long seed)
+{
+	unsigned long bit_index;
+	unsigned long sum = 0;
+	unsigned long bitmap = seed;
+
+	for_each_set_bit(bit_index, &bitmap, nbits)
+		sum += bit_index;
+
+	return sum;
+}
+
+unsigned long __ut_for_each_set_bit_const(unsigned int nbits, unsigned long seed)
+{
+	unsigned long bit_index;
+	unsigned long sum = 0;
+	const unsigned long bitmap = seed;
+
+	for_each_set_bit(bit_index, &bitmap, nbits)
+		sum += bit_index;
+
+	return sum;
+}
+
 void kr_incs_bit_ops_tests(void)
 {
 	__ut_bit_primitives();
@@ -264,4 +295,6 @@ void kr_incs_bit_ops_tests(void)
 	__ut_bitmap_set_and_masks();
 	__ut_bitmap_predicates();
 	__ut_bitmap_parse_and_math_helpers();
+	__ut_for_each_set_bit_mutable(6, 0b100100);
+	__ut_for_each_set_bit_const(6, 0b100100);
 }

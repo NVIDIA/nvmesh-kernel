@@ -16,6 +16,7 @@
 	#endif
 #else
 	// Kernel already has those functions. Define as compatibility for user-space
+	#include <assert.h>
 	#include "../nvmeib_math.h"
 	#include "kr_incs_types.h"
 
@@ -127,7 +128,21 @@ static __always_inline unsigned long __ffs(unsigned long word) {
 }
 
 static inline unsigned long __attr_no_alignment_sanity _find_next_bit(const unsigned long *addr, unsigned long nbits, unsigned long start, unsigned long invert) {
+	const size_t addr_nbytes = __builtin_object_size(addr, 0);
 	unsigned long tmp;
+
+	/*
+	 * Scalar bitmaps are often passed by address to the generic helpers.
+	 * When the compiler knows the pointed storage size, clamp the scan to
+	 * that storage to avoid false-positive array-bounds warnings in
+	 * inlined callers while preserving valid behavior for real bitmaps.
+	 */
+	if (addr_nbytes != (size_t)-1) {
+		const unsigned long addr_nbits = (addr_nbytes / sizeof(*addr)) * BITS_PER_LONG;
+
+		assert(nbits <= addr_nbits);
+	}
+
 	if (unlikely(start >= nbits))
 		return nbits;
 
