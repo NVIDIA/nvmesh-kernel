@@ -140,6 +140,7 @@ SOURCES  = tests_conf.c
 SOURCES += bunitest.c kr_incs.c nvmeibc_simu_disk.c ib_incs.c kr_sim_svc.c nvmeib_common_all.c nvmesh_sim.c di_tracker.c
 SOURCES += memmgr_metrics_tests.c
 SOURCES += error_tags_tests.c
+SOURCES += kr_incs_bit_ops_test.c
 SOURCES += ./clnt/nvmeibc_cli_scripts_simu.c ./clnt/nvmeibc_user_space_simu.c
 SOURCES += ./mgmt/nvmeibm_conf_db.c ./mgmt/nvmeibm_mgmt_simu.c ./mgmt/nvmeibm_mcs_simu.c
 SOURCES += ./toma/nvmeibt_topology_simu.c ./toma/nvmeibt_toma_simu.c ./toma/nvmeibr_disk_metadata_sim.c

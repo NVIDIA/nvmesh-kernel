@@ -16,6 +16,7 @@
 	#endif
 #else
 	// Kernel already has those functions. Define as compatibility for user-space
+	#include <assert.h>
 	#include "../nvmeib_math.h"
 	#include "kr_incs_types.h"
 
@@ -27,10 +28,10 @@ static inline int ilog2(u32 n){ return fls(n) - 1; }
 #define BITS_PER_BYTE		8
 #define BITS_PER_LONG 		64		// (sizeof(long)<<3)
 #if !defined(BIT) && !defined(UM_APP)
-	#define BIT(nr)				(1UL << (nr))
+	#define BIT(bit_index)		(1UL << (bit_index))
 #endif
-#define BIT_MASK(nr)		(1UL << ((nr) % BITS_PER_LONG))
-#define BIT_WORD(nr)		((nr) / BITS_PER_LONG)
+#define BIT_MASK(bit_index)	(1UL << ((bit_index) % BITS_PER_LONG))
+#define BIT_WORD(bit_index)	((bit_index) / BITS_PER_LONG)
 #define GENMASK(h, l) 		(((~0UL) << (l)) & (~0UL >> (BITS_PER_LONG - 1 - (h))))
 
 #ifdef __LITTLE_ENDIAN
@@ -40,23 +41,23 @@ static inline int ilog2(u32 n){ return fls(n) - 1; }
 #endif
 #define BITMAP_MEM_MASK (BITMAP_MEM_ALIGNMENT - 1)
 
-static inline void __attr_no_alignment_sanity __set_bit(int nr, volatile unsigned long *addr){
-	const unsigned long mask = BIT_MASK(nr);
-	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+static inline void __attr_no_alignment_sanity __set_bit(int bit_index, volatile unsigned long *addr){
+	const unsigned long mask = BIT_MASK(bit_index);
+        volatile unsigned long *p = addr + BIT_WORD(bit_index);
 	*p  |= mask;
 }
 
-static inline void __clear_bit(int nr, volatile unsigned long *addr){
-	const unsigned long mask = BIT_MASK(nr);
-	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+static inline void __clear_bit(int bit_index, volatile unsigned long *addr){
+	const unsigned long mask = BIT_MASK(bit_index);
+	volatile unsigned long *p = addr + BIT_WORD(bit_index);
 	*p &= ~mask;
 }
 
-#define set_bit(  nr, addr) __set_bit(  nr, addr)
-#define clear_bit(nr, addr) __clear_bit(nr, addr)
+#define set_bit(  bit_index, addr) __set_bit(  bit_index, addr)
+#define clear_bit(bit_index, addr) __clear_bit(bit_index, addr)
 
-static inline int __attr_no_alignment_sanity test_bit(int nr, const volatile unsigned long *addr) {
-	return 1UL & (addr[BIT_WORD(nr)] >> (nr & (BITS_PER_LONG-1)));
+static inline int __attr_no_alignment_sanity test_bit(int bit_index, const volatile unsigned long *addr) {
+	return 1UL & (addr[BIT_WORD(bit_index)] >> (bit_index & (BITS_PER_LONG-1)));
 }
 
 static inline u32 rol32(u32 word, unsigned int shift){ return (word << shift) | (word >> ((-shift) & 31)); }
@@ -126,10 +127,47 @@ static __always_inline unsigned long __ffs(unsigned long word) {
 	return num;
 }
 
-static inline unsigned long __attr_no_alignment_sanity _find_next_bit(const unsigned long *addr, unsigned long nbits, unsigned long start, unsigned long invert) {
+/*
+ * Single-word variant of _find_next_bit() for callers that already hold the
+ * bitmap word by value.
+ */
+static inline unsigned long _find_next_bit_copy(unsigned long addr_copy, unsigned long nbits, unsigned long start, unsigned long invert) {
 	unsigned long tmp;
+
+	assert(nbits <= BITS_PER_LONG);
+
 	if (unlikely(start >= nbits))
 		return nbits;
+
+	tmp = addr_copy ^ invert;
+	tmp &= BITMAP_FIRST_WORD_MASK(start);
+	if (!tmp)
+		return nbits;
+
+	return min(__ffs(tmp), nbits);
+}
+
+static inline unsigned long __attr_no_alignment_sanity _find_next_bit(const unsigned long *addr, unsigned long nbits, unsigned long start, unsigned long invert) {
+	const size_t addr_nbytes = __builtin_object_size(addr, 0);
+	unsigned long tmp;
+
+	/*
+	 * Scalar bitmaps are often passed by address to the generic helpers.
+	 * When the compiler knows the pointed storage size, validate that the
+	 * logical scan does not exceed that storage. This keeps scalar callers
+	 * honest and gives the compiler tighter bounds for inlined accesses.
+	 */
+	if (addr_nbytes != (size_t)-1) {
+		const unsigned long addr_nbits = (addr_nbytes / sizeof(*addr)) * BITS_PER_LONG;
+
+		assert(nbits <= addr_nbits);
+	}
+
+	if (unlikely(start >= nbits))
+		return nbits;
+
+	if (nbits <= BITS_PER_LONG)
+		return _find_next_bit_copy(*addr, nbits, start, invert);
 
 	tmp = addr[start / BITS_PER_LONG] ^ invert;
 	tmp &= BITMAP_FIRST_WORD_MASK(start);
@@ -147,8 +185,16 @@ static inline unsigned long find_next_bit(const unsigned long *addr, unsigned lo
 	return _find_next_bit(addr, size, offset, 0UL);
 }
 
+static inline unsigned long find_next_bit_copy(unsigned long addr_copy, unsigned long size, unsigned long offset) {
+	return _find_next_bit_copy(addr_copy, size, offset, 0UL);
+}
+
 static inline unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size, unsigned long offset) {
 	return _find_next_bit(addr, size, offset, ~0UL);
+}
+
+static inline unsigned long find_next_zero_bit_copy(unsigned long addr_copy, unsigned long size, unsigned long offset) {
+	return _find_next_bit_copy(addr_copy, size, offset, ~0UL);
 }
 
 static inline unsigned long __attr_no_alignment_sanity find_first_bit(const unsigned long *addr, unsigned long size) {
@@ -409,30 +455,36 @@ static inline int bitmap_parse(const char *buf, unsigned int buflen,
 
 #undef CHUNKSZ
 
-#ifdef __x86_64__
-	// Set a bit and return its old value
-	static inline int test_and_set_bit(int nr, volatile unsigned long *addr){
-		int oldbit;
-		asm volatile("lock; bts %2,%1\n\tsbb %0,%0" : "=r" (oldbit), "+m" (*(volatile long *)(addr))  : "Ir" (nr) : "memory");
-		return oldbit;
-	}
-	// Clear a bit and return its old value
-	static inline int test_and_clear_bit(int nr, volatile unsigned long *addr){
-		int oldbit;
-		asm volatile("lock; btr %2,%1\n\tsbb %0,%0" : "=r" (oldbit), "+m" (*(volatile long *)(addr)) : "Ir" (nr) : "memory");
-		return oldbit;
-	}
-#else
-	static inline int test_and_set_bit(int nr, unsigned long *addr) {
-		unsigned long mask = BIT_MASK(nr);
-		unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+		#ifdef __x86_64__
+			// Set a bit and return its old value
+			static inline int test_and_set_bit(int bit_index, volatile unsigned long *addr){
+				unsigned char oldbit;
+				asm volatile("lock; bts %2,%1\n\tsetc %0"
+					: "=q" (oldbit), "+m" (*(volatile long *)(addr))
+					: "Ir" (bit_index)
+					: "cc", "memory");
+				return oldbit;
+			}
+			// Clear a bit and return its old value
+			static inline int test_and_clear_bit(int bit_index, volatile unsigned long *addr){
+				unsigned char oldbit;
+				asm volatile("lock; btr %2,%1\n\tsetc %0"
+					: "=q" (oldbit), "+m" (*(volatile long *)(addr))
+					: "Ir" (bit_index)
+					: "cc", "memory");
+				return oldbit;
+			}
+	#else
+	static inline int test_and_set_bit(int bit_index, unsigned long *addr) {
+		unsigned long mask = BIT_MASK(bit_index);
+		unsigned long *p = ((unsigned long *)addr) + BIT_WORD(bit_index);
 		unsigned long old = *p;
 		*p = old | mask;
 		return (old & mask) != 0;
 	}
-	static inline int test_and_clear_bit(int nr, unsigned long *addr) {
-		unsigned long mask = BIT_MASK(nr);
-		unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+	static inline int test_and_clear_bit(int bit_index, unsigned long *addr) {
+		unsigned long mask = BIT_MASK(bit_index);
+		unsigned long *p = ((unsigned long *)addr) + BIT_WORD(bit_index);
 		unsigned long old = *p;
 		*p = old & ~mask;
 		return (old & mask) != 0;
