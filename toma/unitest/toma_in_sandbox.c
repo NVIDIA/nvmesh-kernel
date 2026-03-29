@@ -12,6 +12,7 @@
 #include "kafka/sandbox_kafka_internal.h"
 #include "90_tests_black_box/unit_test_main.h"
 #include "16_otherToma/peer_toma_simu.h"
+#include "17_clnt/clnt_simu.h"
 
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
@@ -242,8 +243,10 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
 		for (int i = 0; i < sys->cfg.n_nodes - 1; i++)
 			sys->cfg.other[i].peer = peer_toma_simu_create(&sys->cfg.other[i]);
-		for (int i = 0; i < sys->cfg.n_nodes; i++)
+		for (int i = 0; i < sys->cfg.n_nodes; i++) {
 			mgmt_sim_send_msg_change_raft_quorum(i, true);
+			(void)clnt_simu_create(&sys->cfg, i);
+		}
 		// Just a unitest scenario add/rmv target. Todo: should not be done in init but in a separate unitest function
 		mgmt_sim_send_msg_change_raft_quorum(1, false);			// Remove First other target
 		mgmt_sim_send_msg_change_raft_quorum(1, true);			// Re-add First other again
@@ -263,6 +266,8 @@ void t_sandbox_all_destroy(void) {
 	user_rpc_simu_destroy(sys->rpc, sandbox_is_running_toma_unit_tests());			// Only check for replies if we sent rpc messages
 	sandbox_kafka_destroy(sys->kafka_simu);
 	os_sim_destroy(&sys->os, sandbox_is_running_toma_unit_tests());
+	for (int i = 0; i < sys->cfg.n_nodes; i++)
+		clnt_simu_destroy(&sys->cfg, i);
 	for (int i = 0; i < sys->cfg.n_nodes - 1; i++)
 		peer_toma_simu_destroy(sys->cfg.other[i].peer);
 	sb_cluster_conf_destroy(&sys->cfg);

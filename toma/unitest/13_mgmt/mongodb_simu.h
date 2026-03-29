@@ -6,6 +6,8 @@
 /* Implements mongo-db which store volumes / cluster configuration and reported states, by Tomas,
     Primarily used by management simulator and unit-test code */
 #include "../sandbox_util.h"
+#include "../../../autogen/clnt/nvmeibc_mcs_stub.h"	// Client simulator - report to mgmt simulator
+#define SB_CLUSTER_CONF_N_NODES_TOTAL (3)			// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n39
 
 struct sb_cluster_conf {
 	struct sb_node_conf {
@@ -28,7 +30,8 @@ struct sb_cluster_conf {
 			bool is_out_of_service;
 		} disks[3];
 		struct peer_toma_simu *peer;				// Relevant for other node only (not the live toma). Pointer to peer Toma
-	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n49
+		struct clnt_simu      *clnt;				// Client running on this node. on 'live' node local client is mandatory for recoveries. On other nodes those are remote clients simulating attach/io's
+	} nodes[SB_CLUSTER_CONF_N_NODES_TOTAL], *live, *other;
 	int n_nodes;
 	struct sb_volume_conf {							// All volumes configuration
 		const char* name;
@@ -51,6 +54,12 @@ struct sb_cluster_conf {
 				} segs[4];							// Up to 3+1 EC, for now
 			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
 		} chunks[2];								// For now, 2 chunks only, Support for volume extend once
+		struct sb_attachment_info {					// Each client can be attached to each volume
+			uint32_t attachment_version;			// 0 if not attached.
+			struct nvmeibc_reservation reserv;		// Todo: Use this to test enforcing reservation version attached by Toma
+			bool ioEnabled;							// Client reports that its IO is enabled (after conversation with Toma).
+			bool is_recovery_attach;
+		} clnts[SB_CLUSTER_CONF_N_NODES_TOTAL];		//
 	} vols[4];										// For now, up to 4 volumes
 	int n_vols;
 	int zone_idx;									// All those volume exist in a specific zone
