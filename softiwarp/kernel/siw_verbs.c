@@ -380,6 +380,8 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 
 	attr->atomic_cap = SIW_ATOMIC_CAP;
 
+	attr->page_size_cap = PAGE_SIZE;
+
 	/*
 	 * TODO: understand what of the following should
 	 * get useful information
