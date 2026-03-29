@@ -2,10 +2,7 @@
 * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
-
-#ifndef TOMA_SANDBOX_UTIL_H
-#define TOMA_SANDBOX_UTIL_H
-
+#pragma once
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,5 +18,3 @@
 	raise(SIGABRT);} \
 })
 //#define WARN(condition, fmt, ...) 	do { const int hit = !!(condition); if (hit) {/*dump_stack(); */SANDBOX_PRINT("************************** BUG!!!! at %s() line %d, val=%d, condition=%s\n", __FUNCTION__, __LINE__, hit, #condition); raise(SIGABRT);} } while(0)
-
-#endif

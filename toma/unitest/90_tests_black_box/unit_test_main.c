@@ -10,6 +10,7 @@
 #include "../server/sandbox_nvmeibs_toma.h"
 #include "../12_user/user_rpc_simu.h"
 #include "../kafka/sandbox_kafka_internal.h"
+#include "../16_otherToma/peer_toma_simu.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
@@ -165,7 +166,7 @@ static void scenario_create_remove_r1(void) {
 	scenario_user_rpcs_praid();
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
-	sb_cluster_ignore_append_entries_by_node(2);
+	peer_toma_simu_ignore_append_entries_by_node(2);
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change

@@ -27,7 +27,7 @@ struct sb_cluster_conf {
 			u16 name_space_id;							// When formatted to NVMesh namespace id will change (nvmesh namespace is 1)
 			bool is_out_of_service;
 		} disks[3];
-		bool ignore_append_entries;			// Emulates infinitely slow local disk response time, does not commit raft leaders topo
+		struct peer_toma_simu *peer;				// Relevant for other node only (not the live toma). Pointer to peer Toma
 	} nodes[3], *live, *other;	// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n49
 	int n_nodes;
 	struct sb_volume_conf {							// All volumes configuration
@@ -66,4 +66,3 @@ bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, cons
 void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation
-void sb_cluster_ignore_append_entries_by_node(int node_idx);

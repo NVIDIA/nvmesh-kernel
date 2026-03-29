@@ -11,6 +11,7 @@
 #include "mgmt_sim.h"
 #include "kafka/sandbox_kafka_internal.h"
 #include "90_tests_black_box/unit_test_main.h"
+#include "16_otherToma/peer_toma_simu.h"
 
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
@@ -239,6 +240,8 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);		// Must be after configuration init
 
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
+		for (int i = 0; i < sys->cfg.n_nodes - 1; i++)
+			sys->cfg.other[i].peer = peer_toma_simu_create(&sys->cfg.other[i]);
 		for (int i = 0; i < sys->cfg.n_nodes; i++)
 			mgmt_sim_send_msg_change_raft_quorum(i, true);
 		// Just a unitest scenario add/rmv target. Todo: should not be done in init but in a separate unitest function
@@ -260,6 +263,8 @@ void t_sandbox_all_destroy(void) {
 	user_rpc_simu_destroy(sys->rpc, sandbox_is_running_toma_unit_tests());			// Only check for replies if we sent rpc messages
 	sandbox_kafka_destroy(sys->kafka_simu);
 	os_sim_destroy(&sys->os, sandbox_is_running_toma_unit_tests());
+	for (int i = 0; i < sys->cfg.n_nodes - 1; i++)
+		peer_toma_simu_destroy(sys->cfg.other[i].peer);
 	sb_cluster_conf_destroy(&sys->cfg);
 	free(sys);
 	sys = NULL;
@@ -998,9 +1003,20 @@ int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
 	return 0;
 }
 
-void sb_cluster_ignore_append_entries_by_node(int node_idx) {
+struct peer_toma_simu *peer_toma_simu_create(struct sb_node_conf *node) {
+	struct peer_toma_simu *peer = calloc(1, sizeof(*peer));
+	peer->node = node;
+	return peer;
+}
+
+void peer_toma_simu_destroy(struct peer_toma_simu *peer) {
+	peer->node->peer = NULL;
+	free(peer);
+}
+
+void peer_toma_simu_ignore_append_entries_by_node(int node_idx) {
 	BUG_ON(node_idx != 2);			// Our volumes configuration, currently supports only ignore by node 2
-	sys->cfg.nodes[node_idx].ignore_append_entries = true;
+	sys->cfg.nodes[node_idx].peer->ignore_append_entries = true;
 }
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void) { return &sys->cfg; }
 
@@ -1037,7 +1053,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 				if (req->data_len)
 					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incoming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
-				if (sys->cfg.nodes[my_uuid&0xF].ignore_append_entries) {
+				if (sys->cfg.nodes[my_uuid&0xF].peer->ignore_append_entries) {
 					NNVMEIBT_BM_FREE(__AUTOID__, msg);
 					return 0;
 				}
