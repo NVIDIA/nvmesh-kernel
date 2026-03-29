@@ -62,9 +62,9 @@ static void write_file(const char *path, const char *content) {
 	BUG_ON(fclose(fp) != 0);
 }
 
-static void create_simulated_locks_file(const char *serial_number) {
+static void create_simulated_locks_file(const struct sandbox_nvme_device *d) {
 	char locks_path[256];	// Locks file is named after the disk_id (serial.nsid). Our sandbox disks use nsid=1.
-	const int n = snprintf(locks_path, sizeof(locks_path), TOMA_ROOT_DIR "proc/nvmeibs/locks.%s.1", serial_number);
+	const int n = snprintf(locks_path, sizeof(locks_path), TOMA_ROOT_DIR "proc/nvmeibs/locks.%s.%d", d->serial_number, 1 + 0 * d->conf->name_space_id);	// Todo: Create locks at correct time: name space became 1
 	int fd = open(locks_path, O_CREAT | O_RDWR, 0644);
 	BUG_ON((n < 0) || (n >= (int)sizeof(locks_path)) || (fd < 0));
 	BUG_ON(ftruncate(fd, 4096) < 0);		// Extend to one page size for mmap.
@@ -87,7 +87,7 @@ void sandbox_nvme_init(void) {
 			disk_init_stock(d);
 		} else {
 			disk_init_zeroed(d);
-			create_simulated_locks_file(d->serial_number);
+			create_simulated_locks_file(d);
 		}
 	}
 	#define TARGET_DEVICES_FILE TOMA_ROOT_DIR "var/opt/nvmesh/.target_devices"
