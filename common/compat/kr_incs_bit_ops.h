@@ -127,15 +127,35 @@ static __always_inline unsigned long __ffs(unsigned long word) {
 	return num;
 }
 
+/*
+ * Single-word variant of _find_next_bit() for callers that already hold the
+ * bitmap word by value.
+ */
+static inline unsigned long _find_next_bit_copy(unsigned long addr_copy, unsigned long nbits, unsigned long start, unsigned long invert) {
+	unsigned long tmp;
+
+	assert(nbits <= BITS_PER_LONG);
+
+	if (unlikely(start >= nbits))
+		return nbits;
+
+	tmp = addr_copy ^ invert;
+	tmp &= BITMAP_FIRST_WORD_MASK(start);
+	if (!tmp)
+		return nbits;
+
+	return min(__ffs(tmp), nbits);
+}
+
 static inline unsigned long __attr_no_alignment_sanity _find_next_bit(const unsigned long *addr, unsigned long nbits, unsigned long start, unsigned long invert) {
 	const size_t addr_nbytes = __builtin_object_size(addr, 0);
 	unsigned long tmp;
 
 	/*
 	 * Scalar bitmaps are often passed by address to the generic helpers.
-	 * When the compiler knows the pointed storage size, clamp the scan to
-	 * that storage to avoid false-positive array-bounds warnings in
-	 * inlined callers while preserving valid behavior for real bitmaps.
+	 * When the compiler knows the pointed storage size, validate that the
+	 * logical scan does not exceed that storage. This keeps scalar callers
+	 * honest and gives the compiler tighter bounds for inlined accesses.
 	 */
 	if (addr_nbytes != (size_t)-1) {
 		const unsigned long addr_nbits = (addr_nbytes / sizeof(*addr)) * BITS_PER_LONG;
@@ -145,6 +165,9 @@ static inline unsigned long __attr_no_alignment_sanity _find_next_bit(const unsi
 
 	if (unlikely(start >= nbits))
 		return nbits;
+
+	if (nbits <= BITS_PER_LONG)
+		return _find_next_bit_copy(*addr, nbits, start, invert);
 
 	tmp = addr[start / BITS_PER_LONG] ^ invert;
 	tmp &= BITMAP_FIRST_WORD_MASK(start);
@@ -162,8 +185,16 @@ static inline unsigned long find_next_bit(const unsigned long *addr, unsigned lo
 	return _find_next_bit(addr, size, offset, 0UL);
 }
 
+static inline unsigned long find_next_bit_copy(unsigned long addr_copy, unsigned long size, unsigned long offset) {
+	return _find_next_bit_copy(addr_copy, size, offset, 0UL);
+}
+
 static inline unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size, unsigned long offset) {
 	return _find_next_bit(addr, size, offset, ~0UL);
+}
+
+static inline unsigned long find_next_zero_bit_copy(unsigned long addr_copy, unsigned long size, unsigned long offset) {
+	return _find_next_bit_copy(addr_copy, size, offset, ~0UL);
 }
 
 static inline unsigned long __attr_no_alignment_sanity find_first_bit(const unsigned long *addr, unsigned long size) {

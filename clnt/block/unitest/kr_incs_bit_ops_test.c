@@ -59,6 +59,29 @@ static void __ut_find_next_bit(void)
 	BUG_ON(find_last_bit(map, 130) != 129);
 }
 
+static void __ut_find_next_bit_copy(void)
+{
+	const unsigned long set_word = BIT(0) | BIT(5) | BIT(63);
+	const unsigned long sparse_word = BIT(2) | BIT(5);
+	const unsigned long full_ten_bits = BITMAP_LAST_WORD_MASK(10);
+	const unsigned long zero_word = full_ten_bits & ~BIT(7);
+
+	BUG_ON(find_next_bit_copy(set_word, 64, 0) != 0);
+	BUG_ON(find_next_bit_copy(set_word, 64, 1) != 5);
+	BUG_ON(find_next_bit_copy(set_word, 64, 6) != 63);
+	BUG_ON(find_next_bit_copy(set_word, 63, 6) != 63);
+	BUG_ON(find_next_bit_copy(set_word, 64, 64) != 64);
+	BUG_ON(find_next_bit_copy(set_word, 64, 1) != _find_next_bit_copy(set_word, 64, 1, 0UL));
+	BUG_ON(find_next_bit_copy(set_word, 64, 1) != _find_next_bit(&set_word, 64, 1, 0UL));
+
+	BUG_ON(find_next_zero_bit_copy(sparse_word, 6, 0) != 0);
+	BUG_ON(find_next_zero_bit_copy(sparse_word, 6, 1) != 1);
+	BUG_ON(find_next_zero_bit_copy(zero_word, 10, 0) != 7);
+	BUG_ON(find_next_zero_bit_copy(full_ten_bits, 10, 0) != 10);
+	BUG_ON(find_next_zero_bit_copy(zero_word, 10, 0) != _find_next_bit_copy(zero_word, 10, 0, ~0UL));
+	BUG_ON(find_next_zero_bit_copy(zero_word, 10, 0) != _find_next_bit(&zero_word, 10, 0, ~0UL));
+}
+
 static void __ut_find_zero_bits(void)
 {
 	DECLARE_BITMAP(map, 130) = { 0 };
@@ -285,10 +308,27 @@ unsigned long __ut_for_each_set_bit_const(unsigned int nbits, unsigned long seed
 	return sum;
 }
 
+unsigned long __ut_for_each_set_bit_copy(unsigned int nbits, unsigned long seed)
+{
+	unsigned long bit_index;
+	unsigned long sum = 0;
+
+	if (nbits > BITS_PER_LONG)
+		nbits = BITS_PER_LONG;
+
+	for (bit_index = find_next_bit_copy(seed, nbits, 0);
+	     bit_index < nbits;
+	     bit_index = find_next_bit_copy(seed, nbits, bit_index + 1))
+		sum += bit_index;
+
+	return sum;
+}
+
 void kr_incs_bit_ops_tests(void)
 {
 	__ut_bit_primitives();
 	__ut_find_next_bit();
+	__ut_find_next_bit_copy();
 	__ut_find_zero_bits();
 	__ut_find_helpers_clip_to_nbits();
 	__ut_for_each_bit_macros();
@@ -297,4 +337,5 @@ void kr_incs_bit_ops_tests(void)
 	__ut_bitmap_parse_and_math_helpers();
 	__ut_for_each_set_bit_mutable(6, 0b100100);
 	__ut_for_each_set_bit_const(6, 0b100100);
+	BUG_ON(__ut_for_each_set_bit_copy(6, 0b100100) != 7);
 }
