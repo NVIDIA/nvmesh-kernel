@@ -20,6 +20,7 @@ struct TSB_server_toma_status_req_simu {		// Mechanism for server to request Tom
 		int n_sent, n_total;
 		enum nvmeibs_toma_server_msg_type q[8];
 	} msgs;
+	struct TSB_os_mmap_impl toma_to_fill_buf;	// mmap between kernel server and toma
 };
 
 struct nvmeibs_simulator {
@@ -36,3 +37,6 @@ void nvmeibs_simu_destroy(struct nvmeibs_simulator *s, bool do_verify_used);
 void nvmeibs_simu_do_periodic(void);
 void nvmeibs_simu_send_extended_msg(const char *something);
 void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type);
+
+struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_name(const char*file_path);
+struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_ptr( void* ptr);

@@ -658,6 +658,46 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	return n_events;
 }
 
+#include <sys/mman.h>
+void TSB_os_mmap_impl_clear(struct TSB_os_mmap_impl *mi, size_t length) {
+	BUG_ON((mi->len + (2UL << PAGE_SHIFT)) != length);		// Do not allow partial unmap
+	mi->addr = NULL;
+	mi->len = 0;
+}
+
+void *override_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+	struct TSB_os_mmap_impl *ram = NULL;
+	if (fd < 0) {		// Regular memory allocations are executed as is
+		return mmap(addr, length, prot, flags, fd, offset);
+	} else {			// Intercept files mmap
+		const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
+		const char *file_name = basename(s->addr.sun_path);
+		BUG_ON((offset != 0) || ((flags & MAP_SHARED) == 0));
+		if (!strncmp(file_name, "locks", 5)) {		// Toma mmap disk RAM files (locks + binfo)
+			struct sandbox_nvme_device *D = sandbox_nvme_get_device_by_disk_id(&file_name[6]);	// sandbox_nvme_get_device_by_full_path
+			ram = &D->ram;							// This ram is accessible by client simulator which can inject stale locks/dbits, etc
+		} else {
+			ram = nvmeibs_simu_get_mem_for_status_file_by_name(file_name);
+		}
+		if (ram) {
+			BUG_ON(ram->addr);					// Already mmapped, Toma double map (memory leak)
+			ram->addr = mmap(addr, length, prot, flags, fd, offset);
+			ram->len = length;
+			return ram->addr;
+		}
+		BUG_ON(true); return MAP_FAILED;
+	}
+}
+
+int override_munmap(void *addr, size_t length) {
+	void *search_addr = addr + (1UL << PAGE_SHIFT);
+	struct sandbox_nvme_device *D = sandbox_nvme_get_device_by_ram_mmap(search_addr);
+	struct TSB_os_mmap_impl *ram = (D ? &D->ram : nvmeibs_simu_get_mem_for_status_file_by_ptr(search_addr));
+	if (ram)
+		TSB_os_mmap_impl_clear(ram, length);
+	return munmap(addr, length);
+}
+
 /************************************* Epoll ********************************/
 int epoll_create1(int flags) {
 	struct TSB_globa_epoll_impl *ep = &sys->os.TSB_epoll;

@@ -6,7 +6,7 @@
 #ifndef TOMA_SANDBOX_NVME_H_INCLUDED
 #define TOMA_SANDBOX_NVME_H_INCLUDED
 
-#include "sandbox_util.h"
+#include "os/os_internal.h"
 
 // API towards server simulator
 struct sandbox_nvme_lbaf {			// NVMe LBA format descriptor. Matches the structure used in NVMe Identify NS response.
@@ -25,6 +25,7 @@ const struct sandbox_nvme_lbaf *sandbox_nvme_get_lbaf(enum SANDBOX_NVME_FMT_e fm
 
 struct sandbox_nvme_device {
 	const struct sb_disk_conf *conf;	// Pointer to this disk configuration as seen by mgmt for comparison;
+	struct TSB_os_mmap_impl ram;		// RAM allocated for this nvme device by the nvmeibs server to hold locks and binfo
 	const int vendor_id;
 	const char *serial_number;
 	const char *model_number;
@@ -39,8 +40,9 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev);
 void sandbox_nvme_init(void);
 unsigned  sandbox_nvme_get_device_count(void);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_arr(void);
-const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(  const char *disk_name);
+      struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(  const char *disk_name);
 const struct sandbox_nvme_device *sandbox_nvme_get_device_by_full_path(const char *path);
+      struct sandbox_nvme_device *sandbox_nvme_get_device_by_ram_mmap( const void *addr);
 int  sandbox_nvme_format_disk(   const char* disk_id, enum SANDBOX_NVME_FMT_e fmt_idx);	// Format a device: update LBA format and erase disk content. return 0 on success, -1 if format index invalid or I/O error
 int  sandbox_nvme_zero_disk_area(const char* disk_id, size_t start_block, size_t num_blocks);
 int  sandbox_nvme_io_to_disk(    const char* disk_id, size_t start_block, size_t num_bytes, void *data, bool is_read);

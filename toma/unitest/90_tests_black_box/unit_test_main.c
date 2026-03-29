@@ -32,13 +32,13 @@ static inline void __init_stack_first_page(struct stack_first_page *me, size_t s
 
 static void *__allocate_stack(size_t length) {
 	const size_t padded_length = length + 2 * PAGE_SIZE;
-	void *stack = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);	// Allocating 2 pages more than length requested with no read/write access
+	void *stack = mmap(NULL, padded_length, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);	// Allocating 2 pages more than length requested with no read/write access
 	void *rv;
 	BUG_ON(stack == MAP_FAILED);
 	BUG_ON(mprotect(stack, PAGE_SIZE, PROT_WRITE) < 0);				// Modify permissions for the first guard page only
 	__init_stack_first_page(stack, padded_length);					// Writing to the first page details about the allocation and setting it back to no access permissions
 	BUG_ON(mprotect(stack, PAGE_SIZE, PROT_NONE) < 0);				// Now first and last pages have zero access permissions
-	rv = mmap(stack + PAGE_SIZE, length, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, 0, 0);
+	rv = mmap(stack + PAGE_SIZE, length, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
 	BUG_ON(rv == MAP_FAILED);
 	return rv;
 }

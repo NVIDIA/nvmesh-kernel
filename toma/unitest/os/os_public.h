@@ -68,6 +68,8 @@ ssize_t override_write( int fd, const void *buf, size_t count);
 ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset);
 ssize_t override_pwrite(int fd, const void *buf, size_t count, off_t offset);
 int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restrict __writefds, fd_set *__restrict __exceptfds, struct timeval *__restrict __timeout);
+void *override_mmap(  void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+int   override_munmap(void *addr, size_t length);
 
 #ifndef TOMA_SANDBOX_BYPASS_REDIRECTS
 #define open    override_open
@@ -80,6 +82,8 @@ int override_select (int __nfds, fd_set *__restrict __readfds, fd_set *__restric
 #define pread   override_pread
 #define pwrite  override_pwrite
 #define select  override_select
+#define mmap    override_mmap
+#define munmap  override_munmap
 #endif // TOMA_SANDBOX_BYPASS_REDIRECTS
 
 /************************************* netlink *************************************/

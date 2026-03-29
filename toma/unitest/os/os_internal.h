@@ -44,6 +44,12 @@ struct TSB_fd_impl {			// Implementation of a single file descriptor (file/bdev/
 	struct TSB_fd_otherside *other_side;		// Here sandbox connects to socket from the other side
 };
 
+struct TSB_os_mmap_impl {						// Intercept file mmap by toma to be able to inject values
+	void *addr;
+	size_t len;
+};
+void TSB_os_mmap_impl_clear(struct TSB_os_mmap_impl *mi, size_t length);
+
 /*****************************************************************************/
 struct TSB_all_fds_tbl {					// Operating system, list of all file descriptors used by Toma
 	int n_fds;								// Number of file descriptors currently opened by Toma

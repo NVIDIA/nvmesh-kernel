@@ -4,8 +4,8 @@
 */
 
 #define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module - must be defined before any other includes
-#include "sandbox_nvme.h"
 #include "nvmeibt_debug.h"
+#include "sandbox_nvme.h"
 #include "toma_in_sandbox.h"
 #include "13_mgmt/mongodb_simu.h"		// Disk conf
 #include <sys/stat.h>
@@ -48,9 +48,9 @@ uint64_t sandbox_nvme_get_n_blocks(const struct sandbox_nvme_device *dev) {
  */
 #define SANDBOX_DEV_DIR TOMA_ROOT_DIR "dev/"			// Location of the virtual /dev directory. We'll create it, and create files in it, at runtime.
 static struct sandbox_nvme_device nvme_devices[] = {
-	{ NULL, 0x1402, NULL, "DISK_MOD_01", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
-	{ NULL, 0x1403, NULL, "DISK_MOD_02", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
-	{ NULL, 0x1401, NULL, "DISK_MOD_03", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
+	{ NULL, {NULL, 0}, 0x1402, NULL, "DISK_MOD_01", "nvme1001n1", SANDBOX_DEV_DIR "nvme1001n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ NULL, {NULL, 0}, 0x1403, NULL, "DISK_MOD_02", "nvme1002n1", SANDBOX_DEV_DIR "nvme1002n1", false, (32768ULL << 12), SANDBOX_NVME_FMT_4096_0 },	/* 128MB */
+	{ NULL, {NULL, 0}, 0x1401, NULL, "DISK_MOD_03", "nvme" "0n1", SANDBOX_DEV_DIR "nvme0" "n1", true,  0,                SANDBOX_NVME_FMT_4096_0 },	/* size derived from stock image at init */
 };
 
 #define NVME_DEVICE_COUNT ARRAY_SIZE(nvme_devices)
@@ -109,11 +109,11 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_path(const char *pa
 unsigned sandbox_nvme_get_device_count(void) { return (unsigned)NVME_DEVICE_COUNT; }
 const struct sandbox_nvme_device *sandbox_nvme_get_device_arr(void) { return &nvme_devices[0]; }
 
-const struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id) {
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_disk_id(const char *disk_id) {
 	const char *dot = strchr(disk_id, '.');		// disk_id format is "SERIAL.NSID", We need to match the serial number portion
 	const int serial_len = (dot ? (int)(dot - disk_id) : (int)strnlen(disk_id, 32));
 	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		const struct sandbox_nvme_device *d = &nvme_devices[i];
+		struct sandbox_nvme_device *d = &nvme_devices[i];
 		if (!strncmp(d->serial_number, disk_id, serial_len))
 			return d;
 	}
@@ -129,10 +129,20 @@ const struct sandbox_nvme_device *sandbox_nvme_get_device_by_full_path(const cha
 	BUG_ON(true); return NULL;
 }
 
+struct sandbox_nvme_device *sandbox_nvme_get_device_by_ram_mmap(const void *addr) {
+	BUG_ON(addr == NULL);
+	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
+		struct sandbox_nvme_device *d = &nvme_devices[i];
+		if (d->ram.addr == addr)
+			return d;
+	}
+	return NULL;
+}
+
 static int sandbox_nvme_open(const struct sandbox_nvme_device *dev) { return open(dev->device_path, O_RDWR); }
 
 int sandbox_nvme_format_disk(const char* disk_id, enum SANDBOX_NVME_FMT_e fmt_idx) {
-	struct sandbox_nvme_device *dev = (struct sandbox_nvme_device *)sandbox_nvme_get_device_by_disk_id(disk_id);	// Mutable
+	struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(disk_id);	// Mutable
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(fmt_idx);
 	const int fd = sandbox_nvme_open(dev);
 	int rv = 0;

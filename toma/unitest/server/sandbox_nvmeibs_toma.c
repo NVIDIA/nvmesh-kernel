@@ -34,6 +34,16 @@ static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_statu
 	}
 }
 
+#define STATUS_REPLY_PROC_FILE "placeholder.tmp"		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
+struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_name(const char*file_path) {
+	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
+	return (strncmp(file_path, STATUS_REPLY_PROC_FILE, 15) == 0) ? &s->toma_to_fill_buf : NULL;
+}
+struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_ptr(void* ptr) {
+	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
+	return s->toma_to_fill_buf.addr == ptr ? &s->toma_to_fill_buf : NULL;
+}
+
 static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, off_t offset, int flags) {
 	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	struct nvmeibs_toma_server_proc_buf *msg_buf = (void*)buf;
@@ -55,7 +65,7 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 		pl->type = NVMEIBS_TOMA_STATUS_RAFT;	// NVMEIBS_TOMA_STATUS_ALL_JSON
 		pl->handle = 0 - me->expecting_reply_cookie;
 		pl->handle_req = me->expecting_reply_cookie;
-		strcpy(pl->fname, "placeholder.tmp");		// In real life should be 1 of toma_stat_proc_fname[]. We use 1 dedicated file to replace them all
+		strcpy(pl->fname, STATUS_REPLY_PROC_FILE);
 		pl->max_length = me->max_reply_length_bytes;
 	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {	// Simulates deprecated: nvmeibs_toma_report_event_disk_change()
 		strcpy(msg_buf->disk_change_msg.disk_id, "dummy_simu_disk");
