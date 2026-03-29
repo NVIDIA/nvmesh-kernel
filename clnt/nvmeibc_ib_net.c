@@ -3926,8 +3926,10 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 	struct nvmeib_dev *nvdev = P2NV(net->port);
 	dma_addr_t dma_addr = sg_dma_address(sg);
 	unsigned dma_len = sg_dma_len(sg);
+	dma_addr_t last_va_addr;
+	unsigned offset;
 	unsigned len;
-	int rv;
+	int rv = 0;
 
 	__NFIN;
 	_ND(trace_ib_net_map_sg_entry, "dma_addr=@DMA_ADDR, dma_len=@DMA_LEN", dma_addr, dma_len);
@@ -3958,76 +3960,92 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 	}
 
 	/*
-	 * Since not all RDMA HW drivers support non-zero page offsets for
-	 * FMR, if we start at an offset into a page, don't merge into the
-	 * current FMR mapping. Finish it out, and use the kernel's MR for
-	 * this sg entry.
-	 */
-	if ((!nvdev->use_fast_reg && (dma_addr & ~nvdev->mr_page_mask)) ||
-	    dma_len > nvdev->mr_max_size) {
-		_ND(trace_3_ib_net_map_sg_entry, "Must leave - dma_len=@DMA_LEN, "
-		   "nvdev->mr_max_size=@MR_MAX_SIZE, dma_addr=@DMA_ADDR, "
-		   "nvdev->use_fast_reg=@USE_FAST_REG",
-			dma_len, nvdev->mr_max_size, dma_addr,
-			nvdev->use_fast_reg ? 'Y' : 'N');
-		if ((rv = finish_mapping(net, state, key, okey))) {
-			_NT(trace_4_ib_net_map_sg_entry, "Finish mapping failed - @RV", rv);
-			goto out;
-		}
-		WARN_ON(!state->allow_dma_key);
-
-		map_desc(state, dma_addr, dma_len, key, okey);
-		map_update_start(state, NULL, 0, 0);
-		goto out;
-	}
-
-	/* If this is the first sg that will be mapped via FMR or via FR, save
-	 * our position. We need to know the first unmapped entry, its index,
+	 * If this is the first sg that will be mapped via FMR or via FR, save
+	 * our position.  We need to know the first unmapped entry, its index,
 	 * and the first unmapped address within that entry to be able to
 	 * restart mapping after an error.
 	 */
 	if (!state->unmapped_sg) {
-		_ND(trace_5_ib_net_map_sg_entry, "state->unmapped_sg is true");
+		_ND(trace_3_ib_net_map_sg_entry, "state->unmapped_sg is true");
+		map_update_start(state, sg, sg_index, dma_addr);
+	}
+
+	/*
+	 * Append this sg entry if it is:
+	 *  - physically contiguous with prior entry (regardless of offset)
+	 *  - starts on page boundary, with no gap from prior entry.
+	 *
+	 * The first rule is for ARM with 64k page size; each sg entry is
+	 * 4K, with an offset, but entries are on the same DMA page.
+	 *
+	 * The second rule is for unrelated pages with no gaps. (x86 & arm)
+	 *
+	 * map_update_start() sets unmapped_sg, unmapped_addr.
+	 * finish_mapping() sets npages/dma_len to 0.
+	 */
+	last_va_addr = state->unmapped_addr + state->dma_len;
+	if ((last_va_addr != dma_addr) &&
+	    ((last_va_addr | dma_addr) & ~nvdev->mr_page_mask)) {
+		_ND(trace_4_ib_net_map_sg_entry, "Finish entry - "
+		    "addr=@DMA_ADDR len=@DMA_LEN dma_addr=@DMA_ADDR",
+		    state->unmapped_addr, state->dma_len, dma_addr);
+		if ((rv = finish_mapping(net, state, key, okey))) {
+			_NT(trace_5_ib_net_map_sg_entry,
+			    "Finish mapping failed - @RV", rv);
+			goto out;
+		}
 		map_update_start(state, sg, sg_index, dma_addr);
 	}
 
 	while (dma_len) {
-		/* we check the offset and can get into two scenarios:
-		   1. this is not the first page so we need to finish the current
-		      registration and start a new one
-		   2. this is the first page so we just marked it as being the first
-		*/
-		unsigned offset = dma_addr & ~nvdev->mr_page_mask;
+		offset = dma_addr & ~nvdev->mr_page_mask;
 		_ND(trace_6_ib_net_map_sg_entry, "offset=@OFFSET_INT", offset);
-		if (state->npages == nvdev->max_pages_per_mr || offset != 0) {
+
+		/*
+		 * Since not all RDMA HW drivers support non-zero page offsets
+		 * for FMR, if we start at an offset into a new page, bail and
+		 * use the kernel's MR for this sg entry.
+		 */
+		if (!nvdev->use_fast_reg && offset && !state->npages) {
+			_ND(trace_7_ib_net_map_sg_entry, "Must leave - "
+			    "dma_addr=@DMA_ADDR offset=@OFFSET",
+			    dma_addr, offset);
 			if ((rv = finish_mapping(net, state, key, okey))) {
-				_NT(trace_7_ib_net_map_sg_entry, "Finish mapping failed - @RV", rv);
+				_NT(trace_8_ib_net_map_sg_entry,
+				    "Finish mapping failed - @RV", rv);
+				goto out;
+			}
+			WARN_ON(!state->allow_dma_key);
+
+			map_desc(state, dma_addr, dma_len, key, okey);
+			map_update_start(state, NULL, 0, 0);
+			goto out;
+		}
+
+		/* No offset, check that a new page can be added. */
+		if (!offset && state->npages == nvdev->max_pages_per_mr) {
+			_ND(trace_9_ib_net_map_sg_entry, "Start page - "
+				"dma_addr=@DMA_ADDR len=@DMA_LEN",
+				dma_addr, dma_len);
+			if ((rv = finish_mapping(net, state, key, okey))) {
+				_NT(trace_10_ib_net_map_sg_entry,
+				    "Finish mapping failed - @RV", rv);
 				goto out;
 			}
 			map_update_start(state, sg, sg_index, dma_addr);
 		}
 
-		len = min_t(unsigned int, dma_len, nvdev->mr_page_size - offset);
-
 		if (!state->npages)
 			state->base_dma_addr = dma_addr;
-		state->pages[state->npages++] = dma_addr & nvdev->mr_page_mask;
+		if (!state->npages || !offset)
+			state->pages[state->npages++] =
+			    dma_addr & nvdev->mr_page_mask;
+
+		len = min_t(unsigned, dma_len, nvdev->mr_page_size - offset);
 		state->dma_len += len;
 		dma_addr += len;
 		dma_len -= len;
 	}
-
-	/*
-	 * Iff the last entry of the MR did not end on a page boundary we
-	 * must close it and start a new one.  If the last entry ends on
-	 * page boundary it is possible that if the next entry starts on a page
-	 * bounday we combine the two and save WQE. And this is real latency
-	 * boost.
-	 */
-	rv = 0;
-	if ((dma_addr & ~nvdev->mr_page_mask) != 0)
-		if (!(rv = finish_mapping(net, state, key, okey)))
-			map_update_start(state, NULL, 0, 0);
 
 out:
 	__NFOUT;
