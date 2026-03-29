@@ -120,9 +120,11 @@ static void __intercept_toma_certificate_copy_file_and_save_content(struct __t_c
 			continue;
 		{	// Step 1: Copy file aaaa.crt -> /var dir aaaa.crt_dont_touch for atomicity
 			char sys_cmd[1024];
+			const char *in_file_name = basename(in_path);
 			int cmd_len;
+			const __mode_t file_permissions = (in_file_name && strstr(in_file_name, "key")) ? 0400 : 0444;	// Read-Only default permissions. For certificate less restrictive than for key
 			s->file_path[i] = NNVMEIBT_STR_ALLOC(titccfasc6);
-			nvmeibt_Str_sprintf(s->file_path[i], "%s/%s_dont_touch", s->dir, basename(in_path));
+			nvmeibt_Str_sprintf(s->file_path[i], "%s/%s_dont_touch", s->dir, in_file_name);
 			out_path = s->file_path[i]->text_buf;
 			unlink(out_path);									// Remove possible file from a previous run.
 			cmd_len = snprintf(sys_cmd, sizeof(sys_cmd), "cp %s %s", in_path, out_path);
@@ -132,7 +134,9 @@ static void __intercept_toma_certificate_copy_file_and_save_content(struct __t_c
 			if (system(sys_cmd) != 0) {							// Copy failed, cannot continue
 				rv = -__LINE__; goto _err;
 			}
-			chmod(out_path, 0444);								// Copy successful, Set as read only to prevent messing with file
+			if (chmod(out_path, file_permissions) != 0) {		// Copy successful, Set as read only to prevent messing with file
+				rv = -__LINE__; goto _err;
+			}
 			*orig_path_ptr[i] = out_path;						// Inject new path back into input variables
 		}
 		{	// Step 2: Now load the certificate file into a buffer, to be able to print it
