@@ -2200,7 +2200,6 @@ out:
 static void toma_wakeup_udev_event(void)
 {
 	struct nvmeibt_udev_event			e;
-	struct nvmeibt_udev_event_info		*udev_event_info;
 	enum nvmeibt_disk_type				disk_type;
 	bool								is_new;
 
@@ -2209,7 +2208,7 @@ static void toma_wakeup_udev_event(void)
 	disk_type = nvmeibt_udev_get_event(&e);
 
 	if (e.action != nvmeibt_udev_none) {
-		udev_event_info = find_udev_event_info_by_dev_file_name(e.dev_file_name, &is_new);
+		struct nvmeibt_udev_event_info *udev_event_info = find_udev_event_info_by_dev_file_name(e.dev_file_name, &is_new);
 		if (is_new) {
 			udev_event_info->disk_type = disk_type;
 			nvmeibt_strlcpy(udev_event_info->dev_file_name, e.dev_file_name, sizeof(udev_event_info->dev_file_name));

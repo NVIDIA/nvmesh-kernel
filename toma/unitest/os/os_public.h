@@ -3,7 +3,6 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
-
 #pragma once
 /* Emulation of operating system (system calls & data structures), Used by Toma */
 
@@ -154,30 +153,29 @@ int epoll_create1(int __flags);
 int epoll_ctl( int efd, enum EPOLL_CTL __op, int __fd, struct epoll_event *ev_ptr);
 int epoll_wait(int efd,                                struct epoll_event *ev_arr, int arr_size, int time_out_ns);
 
-/************************************* udev ************************************/
+/********************* lib-udev: replaces: #include <libudev.h> ***********************/
 #include "interfaces/nvme/nvmeibt_udev.h"
 #define NVMEIBT_TOMA_LIB_UDEV_API_H // #include "interfaces/nvme/nvmeibt_lib_udev_api.h"
-// Code below replaces: #include <libudev.h>
-struct udev_list_entry { const char *name; const char* path; struct udev_list_entry* next; };
-struct udev { int ref; struct udev_list_entry ent[3]; /* amount of local nvme disks */ };
+struct udev;
 struct udev* udev_new(void);
-static inline void udev_unref(struct udev* u) { u->ref--; if (u->ref == 0) free(u); }
+void udev_unref(struct udev* u);
 
-struct udev_enumerate { int ref; };
-static inline struct udev_enumerate* udev_enumerate_new(struct udev* u) {  u->ref++; return (struct udev_enumerate*)u; }
-static inline void udev_enumerate_add_match_subsystem(struct udev_enumerate *e, const char* sub) { (void)e; (void)sub; }
-static inline void udev_enumerate_add_match_property( struct udev_enumerate *e, const char* key, const char* val) { (void)e; (void)key; (void)val; }
-static inline void udev_enumerate_scan_devices(       struct udev_enumerate *e) { (void)e; }
-static inline void udev_enumerate_unref(              struct udev_enumerate* e) { udev_unref((struct udev* )e); }
+struct udev_enumerate;
+struct udev_enumerate* udev_enumerate_new(struct udev* u);
+void udev_enumerate_add_match_subsystem(struct udev_enumerate *e, const char* sub);
+void udev_enumerate_add_match_property( struct udev_enumerate *e, const char* key, const char* val);
+void udev_enumerate_scan_devices(       struct udev_enumerate *e);
+void udev_enumerate_unref(              struct udev_enumerate* e);
 
-static inline struct udev_list_entry* udev_enumerate_get_list_entry(struct udev_enumerate *e) { return ((struct udev*)e)->ent; }
-#define udev_list_entry_foreach(list_entry, first_entry) for (list_entry = first_entry; list_entry != NULL; list_entry = list_entry->next)
-static inline const char* udev_list_entry_get_name(struct udev_list_entry *u) { return u->path; }
+struct udev_list_entry;
+struct udev_list_entry* udev_enumerate_get_list_entry(struct udev_enumerate *e);
+#define udev_list_entry_foreach(list_entry, first_entry) for (list_entry = first_entry; list_entry != NULL; list_entry = udev_list_entry_get_next(list_entry))
+const char*             udev_list_entry_get_name( const struct udev_list_entry *);
+const char*             udev_list_entry_get_value(const struct udev_list_entry *);
+struct udev_list_entry *udev_list_entry_get_next(       struct udev_list_entry *);
 
-struct udev_device { struct udev_list_entry *e; };
+struct udev_device;
 struct udev_device* udev_device_new_from_syspath(struct udev *u, const char *path);
-/// The devpath is the path under /sys to the device. E.g. `/devices/ACPI0004:00/0/host0/block/sda`
-static inline const char* udev_device_get_devpath(struct udev_device* d) { return d->e->path; }
-/// The devnode is the name of the device (full path to the /dev node). E.g. `/dev/sda `
-static inline const char* udev_device_get_devnode(struct udev_device* d) { return d->e->name; }
-static inline void udev_device_unref(             struct udev_device* d) { free(d); }
+const char* udev_device_get_devpath(const struct udev_device* d);	// The devpath is the path under /sys to the device. E.g. `/devices/ACPI0004:00/0/host0/block/sda`
+const char* udev_device_get_devnode(const struct udev_device* d);	// The devnode is the name of the device (full path to the /dev node). E.g. `/dev/sda `
+void udev_device_unref(                   struct udev_device* d);

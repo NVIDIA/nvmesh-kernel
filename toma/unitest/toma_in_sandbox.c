@@ -10,9 +10,10 @@
 #include "sandbox_util.h"
 #include "mgmt_sim.h"
 #include "kafka/sandbox_kafka_internal.h"
-#include "90_tests_black_box/unit_test_main.h"
+#include "os/nvmeibt_udev_simu_internal.h"
 #include "16_otherToma/peer_toma_simu.h"
 #include "17_clnt/clnt_simu.h"
+#include "90_tests_black_box/unit_test_main.h"
 
 #define FILE_SANDBOX_PREFIX TOMA_ROOT_DIR "var/run/nvmesh/sandbox_fd_"
 
@@ -43,12 +44,6 @@ void syslog(int priority, const char *fmt, ...) {
 #include "server/sandbox_nvmeibs_toma.h"
 
 /************************************* FD/Sockets ********************************/
-static ssize_t _recv_empty(int fd, void *buf, size_t n, off_t offset, int flags) {
-	BUG_ON(offset != OFFSET_NONE);
-	BUG_ON((fd < 2) || (n == 0));
-	(void)buf; (void)n; (void)offset; (void)flags;
-	return 0;
-}
 static bool _recv_always_has_data(void) { return true; }
 
 struct user_rpc_simu {
@@ -149,12 +144,13 @@ struct t_sandbox_all {
 	struct TSB_operating_system_impl os;				// Sandbox for all services Toma needs from the operating system
 	struct TSB_basic {								// Unit-test side connections of Toma sockets/fd's
 		struct TSB_fd_otherside o;
-	} TSB_udev, TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
+	} TSB_srm_fault, TSB_srm_timer, TSB_nm_raft;
 	struct kafka_simulator_t *kafka_simu;
 	struct nvmeibs_simulator *srvr;
 	struct sb_cluster_conf cfg;
 	struct mgmt_sim_state *mgmt;
 	struct nvmeibt_nm_local_node *nm;
+	struct nvmeibt_udev_simu *udev;
 	struct user_rpc_simu *rpc;
 	bool is_running_toma_unit_tests;
 	bool can_use_bin_traces;
@@ -238,6 +234,7 @@ void t_sandbox_all_init(bool is_running_as_a_utility) {
 	sys->kafka_simu = sandbox_kafka_init(&mgmt_sim_wakeup_on_incomming_toma_msg);
 	sys->mgmt = mgmt_sim_init(&sys->cfg);
 	sys->rpc = user_rpc_simu_create();
+	sys->udev = nvmeibt_udev_simu_create(sandbox_nvme_get_device_arr(), sandbox_nvme_get_device_count());
 	sys->srvr = nvmeibs_simu_init(&sys->os.TSB_netlink);		// Must be after configuration init
 
 	{ /* Build raft domain, First message: addTarget (self as 1-machine raft domain), then the other 2 */
@@ -264,6 +261,7 @@ void t_sandbox_all_destroy(void) {
 	nvmeibs_simu_destroy(sys->srvr, sandbox_is_running_toma_unit_tests());			// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)
 	mgmt_sim_destroy(               sandbox_is_running_toma_unit_tests());			// Must destroy mgmt_sim's Kafka objects before the broker
 	user_rpc_simu_destroy(sys->rpc, sandbox_is_running_toma_unit_tests());			// Only check for replies if we sent rpc messages
+	nvmeibt_udev_simu_destroy(sys->udev);
 	sandbox_kafka_destroy(sys->kafka_simu);
 	os_sim_destroy(&sys->os, sandbox_is_running_toma_unit_tests());
 	for (int i = 0; i < sys->cfg.n_nodes; i++)
@@ -338,9 +336,7 @@ void TSB_connect_sock_to_listener(struct TSB_fd_impl *s) {
 	} else if (strstr(s->addr.sun_path, "srm_timer")) {			s->other_side = &sys->TSB_srm_timer.o;
 	} else if (strstr(s->addr.sun_path, "nm_raft")) {			s->other_side = &sys->TSB_nm_raft.o;
 		s->other_side->has_data = _recv_has_raft_msgs_for_toma;
-	} else if (strstr(s->addr.sun_path, "udev_monitor")) {		s->other_side = &sys->TSB_udev.o;
-		sys->TSB_udev.o.recv = _recv_empty;
-		s->other_side->has_data = _recv_always_has_data;			// Todo: unitest env should inject
+	} else if (strstr(s->addr.sun_path, "udev_monitor")) {		s->other_side = nvmeibt_udev_simu_connect(sys->udev);
 	} else if (strstr(s->addr.sun_path, "mesh/toma_rpc")) {		s->other_side = user_rpc_simu_connect(sys->rpc, s->fd);
 	} else if (strstr(s->addr.sun_path, "epoll")) {				s->other_side = &sys->os.TSB_epoll.o;
 	} else if (strstr(s->addr.sun_path, "wakeup_pipe_pair0")) {	s->other_side = &sys->os.TSB_wake_pip.o[0];
@@ -866,23 +862,6 @@ void os_sim_destroy(struct TSB_operating_system_impl *os, bool do_verify_used) {
 	if (do_verify_used)
 		BUG_ON(os->TSB_signal.n_sigs_sent <= 0);		// Some signals sent
 }
-
-/************************************* nvme ***********************************/
-#include "interfaces/nvme/nvmeibt_udev.h"
-int  nvmeibt_udev_create(void) {
-	return TSB_all_fds_tbl_create_fd("_udev_monitor", 0);
-}
-
-void nvmeibt_udev_destroy(void) {
-	struct TSB_fd_impl *s = (struct TSB_fd_impl *)sys->TSB_udev.o.sock;
-	socket_destroy(s);
-}
-
-int nvmeibt_udev_get_fd( void) {
-	return sys->TSB_udev.o.sock->fd;
-}
-enum nvmeibt_disk_type nvmeibt_udev_get_event(struct nvmeibt_udev_event *rv) { memset(rv, 0, sizeof(*rv)); return NVMEIBT_NVME_DISK_TYPE; }
-void nvmeibt_udev_put_event(struct nvmeibt_udev_event *rv) { memset(rv, 0, sizeof(*rv));}
 
 /************************************* network ********************************/
 int64_t ibud_enable_periodic_traces = 0;

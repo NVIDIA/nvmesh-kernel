@@ -7,6 +7,7 @@
 #include "nvmeibt_debug.h"				// Binary traces
 #include "../mgmt_sim.h"
 #include "../os/os_internal.h"
+#include "../os/nvmeibt_udev_simu_internal.h"
 #include "../server/sandbox_nvmeibs_toma.h"
 #include "../12_user/user_rpc_simu.h"
 #include "../kafka/sandbox_kafka_internal.h"
@@ -121,6 +122,16 @@ static void scenario_user_rpcs_praid(void) {
 	SCENARIO_PRINT(__AUTOID__, "done");
 }
 
+static void scenario_udev_events(void) {
+	SCENARIO_PRINT(__AUTOID__, "start");
+	nvmeibt_udev_simu_send_disk_event_to_toma(0, nvmeibt_udev_add);		yield();
+	nvmeibt_udev_simu_send_disk_event_to_toma(1, nvmeibt_udev_del);		yield();
+	nvmeibt_udev_simu_send_disk_event_to_toma(2, nvmeibt_udev_none);	yield();
+	nvmeibt_udev_simu_send_sata_event_to_toma(   nvmeibt_udev_none);	yield();
+	WAIT_UNTIL(nvmeibt_udev_simu_did_toma_consume_all_events());
+	SCENARIO_PRINT(__AUTOID__, "done");
+}
+
 void scenario_nvmeibs_messages(void) {
 	SCENARIO_PRINT(__AUTOID__, "start");
 	nvmeibs_simu_send_msg(NVMEIBS_TOMA_TRIGGER_JGC);						yield();
@@ -143,6 +154,7 @@ static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_format_drive(0);
 	mgmt_sim_send_format_drive(1);
 	scenario_nvmeibs_messages();								// While drives are formatting test server messages
+	scenario_udev_events();
 
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks format+zeroing done");
 	WAIT_UNTIL(mgmt_sim_drive_format_is_done(0) && mgmt_sim_drive_format_is_done(1));

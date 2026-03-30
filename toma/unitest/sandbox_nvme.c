@@ -203,32 +203,6 @@ int sandbox_nvme_io_to_disk(const char* disk_id, size_t start_block, size_t num_
 	return (n_done_bytes == (ssize_t)num_bytes) ? 0 : -1;
 }
 
-struct udev *udev_new(void) {		// Todo: This is udev simulator, unrelated to nvme, should be in os simulator
-	int i;
-	struct udev *u = (struct udev *)calloc(1, sizeof(*u));
-	u->ref++;
-	N_Tf(dfi1053, "udev_new");
-	BUG_ON(ARRAY_SIZE(u->ent) != NVME_DEVICE_COUNT);
-	for (i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		u->ent[i].name = nvme_devices[i].device_path;
-		u->ent[i].path = nvme_devices[i].device_name;
-		if (i > 0)  u->ent[i - 1].next = &u->ent[i];		// Emulate linked list with our array
-	}
-	return u;
-}
-
-struct udev_device *udev_device_new_from_syspath(struct udev *u, const char *path) {
-	struct udev_device *d = malloc(sizeof(*d));
-	for (int i = 0; i < (int)NVME_DEVICE_COUNT; ++i) {
-		if (!strcmp(nvme_devices[i].device_name, path)) {
-			d->e = &u->ent[i];
-			return d;
-		}
-	}
-	BUG_ON(true); N_Ef(dsf3494, "no device found for path=@STR", path);
-	return NULL;
-}
-
 #include "interfaces/nvme/nvmeibt_nvme_defines.h"
 #include "../common/nvmeib_shared.h"
 int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap) {
