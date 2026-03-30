@@ -1028,8 +1028,8 @@ else
     cflags += -DKS_HAS_CALL_USERMODEHELPER_SETFNS=1
 endif
 
-ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
-    INCLUDES = -include linux/compat-2.6.h
+ifneq ($(wildcard $(OFA_KERNEL)/compat/config.h),)
+    INCLUDES = -include $(OFA_KERNEL)/compat/config.h
 endif
 
 ifneq ($(shell grep -w __tcp_send_ack $(KSRC1)/include/net/tcp.h 2> /dev/null),)
