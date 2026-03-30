@@ -1068,30 +1068,24 @@ def copy_cert_files(source_cert: Optional[str], source_key: Optional[str], sourc
     try:
         if source_cert and os.path.exists(source_cert):
             dest_cert = os.path.join(dest_dir, 'cert.crt')
-            # Remove existing read-only file if present
             if os.path.exists(dest_cert):
                 os.remove(dest_cert)
             shutil.copy2(source_cert, dest_cert)
-            os.chmod(dest_cert, 0o444)  # Read-only for all
-            logger.info(f"Copied certificate: {source_cert} -> {dest_cert} (read-only)")
+            logger.info(f"Copied certificate: {source_cert} -> {dest_cert}")
 
         if source_key and os.path.exists(source_key):
             dest_key = os.path.join(dest_dir, 'key.key')
-            # Remove existing read-only file if present
             if os.path.exists(dest_key):
                 os.remove(dest_key)
             shutil.copy2(source_key, dest_key)
-            os.chmod(dest_key, 0o400)  # Read-only for owner only (private key)
-            logger.info(f"Copied key: {source_key} -> {dest_key} (read-only, owner only)")
+            logger.info(f"Copied key: {source_key} -> {dest_key}")
 
         if source_ca and os.path.exists(source_ca):
             dest_ca = os.path.join(dest_dir, 'ca.crt')
-            # Remove existing read-only file if present
             if os.path.exists(dest_ca):
                 os.remove(dest_ca)
             shutil.copy2(source_ca, dest_ca)
-            os.chmod(dest_ca, 0o444)  # Read-only for all
-            logger.info(f"Copied CA: {source_ca} -> {dest_ca} (read-only)")
+            logger.info(f"Copied CA: {source_ca} -> {dest_ca}")
 
         return dest_cert, dest_key, dest_ca
     except Exception as e:
