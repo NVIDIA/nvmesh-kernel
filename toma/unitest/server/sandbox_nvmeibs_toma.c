@@ -286,17 +286,39 @@ static void TSB_netlink_handle_io_to_disk(const struct nvmeib_nl_uk_comm_msg *re
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
-static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
+static void __zero_op_enqueue_reply(const struct pending_zero_op *op, enum uk_comm_err_opcode err) {
 	char buf[TSB_NL_MSG_SIZE] = {0};
 	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
 	struct nvmeib_nl_uk_comm_msg *msg = NLMSG_DATA(nlh);
 	struct nvmeib_zero_disk_reply *rep = (struct nvmeib_zero_disk_reply *)msg->data;
-	const struct nvmeib_zero_disk *zreq = (const struct nvmeib_zero_disk *)req_msg->data;
-	reply_usermode_payload(msg, req_msg);
+	rep->base.opcode = msg->opcode = op->reply_opcode;
+	msg->id = op->reply_id;
+	msg->caller_type = op->reply_caller_type;
+	rep->base.latency_ns = 576;
 	msg->len = sizeof(*msg) + sizeof(*rep);
 	nlh->nlmsg_len = NLMSG_SPACE(msg->len);
-	rep->base.error = (0 == sandbox_nvme_zero_disk_area(zreq->disk_id, zreq->start_hw_sector, zreq->n_hw_sectors)) ? csce_ok : csce_bad_zero_params;
+	rep->base.error = err;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
+}
+
+// Defer zeroing to nvmeibs_simu_do_periodic(), simulating real kernel's async NVMe zero behavior
+static void TSB_netlink_handle_zero_disk(const struct nvmeib_nl_uk_comm_msg *req_msg) {
+	const struct nvmeib_zero_disk *zreq = (const struct nvmeib_zero_disk *)req_msg->data;
+	struct pending_zero_op *op = NULL;
+	for (int i = 0; i < (int)ARRAY_SIZE(g_srvr_simu->pending_zero_ops); i++) {
+		if (!g_srvr_simu->pending_zero_ops[i].active) {
+			op = &g_srvr_simu->pending_zero_ops[i];
+			break;
+		}
+	}
+	BUG_ON(!op);
+	op->start_block = zreq->start_hw_sector;
+	op->total_blocks = zreq->n_hw_sectors;
+	op->reply_opcode = req_msg->opcode;
+	op->reply_id = req_msg->id;
+	op->reply_caller_type = req_msg->caller_type;
+	nvmeib_strlcpy(op->disk_id, zreq->disk_id, sizeof(op->disk_id));
+	op->active = true;
 }
 
 // Send an unsolicited disk change event to Toma (simulates kernel's disk_freeze/unfreeze behavior), is_add: add-event/remove-event
@@ -478,6 +500,16 @@ void nvmeibs_simu_do_periodic(void) {
 		TSB_netlink_send_disk_change_event(dev, true);
 	}
 	g_srvr_simu->n_pending_disk_adds = 0;
+
+	for (int i = 0; i < (int)ARRAY_SIZE(g_srvr_simu->pending_zero_ops); i++) {
+		struct pending_zero_op *op = &g_srvr_simu->pending_zero_ops[i];
+		int rv;
+		if (!op->active)
+			continue;
+		rv = sandbox_nvme_zero_disk_area(op->disk_id, op->start_block, op->total_blocks);
+		__zero_op_enqueue_reply(op, (rv == 0) ? csce_ok : csce_bad_zero_params);
+		op->active = false;
+	}
 }
 
 void nvmeibs_simu_send_extended_msg(const char *something) {
@@ -518,6 +550,8 @@ struct nvmeibs_simulator *nvmeibs_simu_init(struct TSB_netlink_mock *nl) {
 
 void nvmeibs_simu_destroy(struct nvmeibs_simulator *s, bool do_verify_used) {
 	BUG_ON(s != g_srvr_simu);
+	for (int i = 0; i < (int)ARRAY_SIZE(s->pending_zero_ops); i++)
+		BUG_ON(s->pending_zero_ops[i].active);
 	TSB_server_toma_status_req_simu_destroy(&s->s_req_simu, do_verify_used);
 	pthread_mutex_destroy(&s->nl->mutex);
 	BUG_ON(do_verify_used && (s->nl->n_recv_msgs <= 0));	// Only check for replies if we sent messages (standalone utilities like gpt_util don't communicate with TOMA)

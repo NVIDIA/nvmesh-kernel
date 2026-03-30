@@ -23,12 +23,23 @@ struct TSB_server_toma_status_req_simu {		// Mechanism for server to request Tom
 	struct TSB_os_mmap_impl toma_to_fill_buf;	// mmap between kernel server and toma
 };
 
+struct pending_zero_op {	// Deferred async zero operation, simulating real kernel's async NVMe zeroing
+	bool active;
+	char disk_id[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];
+	size_t start_block;
+	size_t total_blocks;
+	enum uk_comm_opcode reply_opcode;		// Saved from original request (stack-allocated, gone by periodic time)
+	unsigned long       reply_id;
+	char                reply_caller_type;
+};
+
 struct nvmeibs_simulator {
 	struct TSB_fd_otherside com_srvr2toma_o, com_toma2srvr_o, com_toma2clnt_o;		// Toma 3 extern communication fd's via server
 	struct TSB_netlink_mock *nl;													// Other side of netlink communication
 	struct TSB_server_toma_status_req_simu s_req_simu;
 	const struct sandbox_nvme_device *pending_disk_adds[3];								// Pending disk ADD events to be sent to toma. Supports concurrent format operations on different disks.
 	int n_pending_disk_adds;
+	struct pending_zero_op pending_zero_ops[3];										// Deferred async zero operations (one per sandbox disk)
 };
 
 // API towards unitest environment
