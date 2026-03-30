@@ -1402,10 +1402,13 @@ static void fill_lock_ch_list(struct nvmeibc_disk *disk, struct list_head *lock_
 	disk_segs_locks = nvmeibc_disk_get_segs_locks(
 		disk, (struct nvmeibc_disk_get_segs_locks_flags) { .write = 0, .dont_wait = 0});
 	if (disk_segs_locks) {
-		for (i = 0; i < disk_segs_locks->num_of_segments; i++) {
-			struct nvmeibc_disk_seg_locks_mem_info *lmi = &disk_segs_locks->locks[i];
-			if (lmi->locks_channel)
-				list_add_unique_ptr(lock_ch_list, lmi->locks_channel);
+		if (disk_segs_locks->locks) {
+			/* disk_segs_locks->locks may be NULL if parse_read_lock_mems_msg has not been called yet*/
+			for (i = 0; i < disk_segs_locks->num_of_segments; i++) {
+				struct nvmeibc_disk_seg_locks_mem_info *lmi = &disk_segs_locks->locks[i];
+				if (lmi->locks_channel)
+					list_add_unique_ptr(lock_ch_list, lmi->locks_channel);
+			}
 		}
 		nvmeibc_disk_put_segs_locks(disk_segs_locks, (struct nvmeibc_disk_get_segs_locks_flags){ .write = 0 });
 	}
