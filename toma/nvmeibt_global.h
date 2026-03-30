@@ -158,6 +158,7 @@ struct nvmeibt_topology {
 /******* Declarations of the ".c" functions ********/
 
 struct nvmeibt_topology *nvmeibt_global_get_global(void);
+void nvmeibt_global_ctx_alloc(void);
 void nvmeibt_global_init(void);
 void nvmeibt_global_validate_and_upd_mgmt_DB_uuid(const union nvmeib_uuid *mgmt_DB_uuid);
 void nvmeibt_global_issue_leader_report_praids_status_to_mgmt(void);

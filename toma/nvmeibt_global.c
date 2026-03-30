@@ -35,17 +35,15 @@ struct nvmeibt_global_adaptive_timeouts_ctx		my_nvmeibt_global_adaptive_timeouts
 
 struct timespec nvmeibt_cur_event_start_time; // Declared in nvmeibt_global.h
 
-void nvmeibt_global_init(void)
+// Allocate global context, set sw version, create all hash tables. Idempotent.
+// Separated from nvmeibt_global_init so tests can call just this without runtime state setup.
+void nvmeibt_global_ctx_alloc(void)
 {
-	struct timespec						tmp_timespec;
-
-	NFIN;
+	if (_global_ctx_ptr)
+		return;
 	_global_ctx_ptr = calloc(1, sizeof(*_global_ctx_ptr));
 	global_ctx.persistent_toma_software_version = TOMA_SW_COMPATIBILITY_VER;
 	global_ctx.mgmt_DB_uuid = nvmeib_uuid_null_val;
-	getnstimeofday_boot(&(global_ctx.startup_timespec));
-	getnstimeofday_convert_boot_to_real(&global_ctx.startup_timespec, &tmp_timespec);
-	global_ctx.startup_timestamp_msec = timespec_to_msec(tmp_timespec);		// Don't use timespec_to_nsec() as MGMT will round the LSBs
 	global_ctx.block_devices_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "block_devices_hash", 16, 0);
 	global_ctx.nics_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw3, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nics_hash", 16, 0);
 	global_ctx.disks_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw4, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "disks_hash", 16, 0);
@@ -58,6 +56,17 @@ void nvmeibt_global_init(void)
 	global_ctx.stock_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnwa, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "stock_local_disks_hash", -1, 0);
 	global_ctx.formatting_local_disks_hash_by_ldisk_id_str = NVMEIB_HASH_CREATE(vhghnws, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "formatting_local_disks_hash", -1, 0);
 	global_ctx.local_nics_hash_by_sw_gid_str = NVMEIB_HASH_CREATE(vhghnwd, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "local_nics_hash", -1, 0);
+}
+
+void nvmeibt_global_init(void)
+{
+	struct timespec						tmp_timespec;
+
+	NFIN;
+	nvmeibt_global_ctx_alloc();
+	getnstimeofday_boot(&(global_ctx.startup_timespec));
+	getnstimeofday_convert_boot_to_real(&global_ctx.startup_timespec, &tmp_timespec);
+	global_ctx.startup_timestamp_msec = timespec_to_msec(tmp_timespec);		// Don't use timespec_to_nsec() as MGMT will round the LSBs
 
 	XDLIST_HEAD_INIT(&(global_ctx.longing_on_invalid_seg_list_by_handle));
 	XDLIST_HEAD_INIT(&(global_ctx.excluded_drives_spec));
