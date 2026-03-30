@@ -36,15 +36,21 @@ fi
 
 if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ]; then
 	PET_DICT="${PET_DIR}/dict.${COMMIT_ID#0x}.json"
-	# Prefer poetry env (has pyelftools+pydantic from pyproject.toml) when available;
-	# install poetry with the required packages for save-dictionary.
+	# Install Poetry via pip from PyPI (default index) when missing. Pin matches poetry.lock generator.
 	PET_PYTHON="python3"
-	if ! type poetry; then
-		export PATH=$PATH:~/.local/bin
-		curl -sSL https://install.python-poetry.org | ${PET_PYTHON} -
+	export PATH="${PATH}:${HOME}/.local/bin"
+	if ! command -v poetry >/dev/null 2>&1; then
+		echo "poetry not found, installing with pip (PyPI)..."
+		# Install poetry 1.8.3 to accommodate Python 3.9 on older kernels.
+		"${PET_PYTHON}" -m pip install --user "poetry==1.8.3"
 	fi
-	poetry lock
-	poetry install --sync --no-root --only pet
+
+	# Verify required packages with poetry.
+	start=$SECONDS
+	poetry lock --no-update 2>/dev/null || true
+	poetry install --no-root --only pet
+	echo "poetry verifies required packages in $((SECONDS - start)) seconds"
+
 	PET_PYTHON="poetry run python3"
 	start=$SECONDS
 	if $PET_PYTHON common/pet/nvmeib_pet_messages.py save-dictionary "$PET_MODULE" "$PET_SECTION" "$PET_DICT"; then
