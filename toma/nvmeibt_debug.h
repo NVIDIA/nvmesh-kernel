@@ -132,7 +132,7 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 #define THROTTLE_IIR_SIZE 10
 #include "../common/nvmeib_iir.h"
 
-#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...)	({														\
+#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...)	({													\
 	static struct nvmeib_iir	avg_ns_between_writes_IIR;															\
 	static int64_t				prev_write_time_ns;																	\
 	static int					_n_throttled;																		\
@@ -140,7 +140,7 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 	int64_t						time_since_prev_ns;																	\
 	struct timespec				_now_;																				\
 	int64_t						now_ns;																				\
-	getnstimeofday_boot(&_now_);																							\
+	getnstimeofday_boot(&_now_);																					\
 	now_ns = timespec_to_nsec(_now_);								        									  	\
 	time_since_prev_ns = now_ns - prev_write_time_ns;						       									\
 	if (time_since_prev_ns > VERY_MIN_TIME_BETWEEN_SYSLOG_NS) {														\
@@ -157,7 +157,7 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 			if (_n_throttled) {																						\
 				syslog(LOG_DEBUG, "n_throttled=%d", _n_throttled);													\
 			}																										\
-			syslog(SYSLOG_LOG_LVL, __FMT,  ## __VA_ARGS__);   	     												\
+			syslog(SYSLOG_LOG_LVL, __FMT, ## __VA_ARGS__);   	     												\
 			_n_throttled = 0;																						\
 		}												        													\
 	} else {								        							      					  			\
