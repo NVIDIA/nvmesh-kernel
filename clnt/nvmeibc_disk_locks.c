@@ -1541,7 +1541,7 @@ end_2nd_ch_coremask:
 				continue;
 			
 			_2nd_tot_op = ch->num_of_atom_read_ip;
-			_NT(trace_9_disk_locks_choose_locks_channel, "channel @PTR has @INT in_progress and @INT deferred, total=@INT", ch, ch->num_in_progress, ch->num_defered, _2nd_tot_op);
+			_ND(trace_9_disk_locks_choose_locks_channel, "channel @PTR has @INT in_progress and @INT deferred, total=@INT", ch, ch->num_in_progress, ch->num_defered, _2nd_tot_op);
 			if (DEBUG_2ND_LOCK_CH_KA && nvmeibc_locks_channel_is_ka_timeout(ch)) {
 				chosen_ch = NULL;
 				goto out;
