@@ -161,6 +161,7 @@ static inline unsigned long __attr_no_alignment_sanity _find_next_bit(const unsi
 		const unsigned long addr_nbits = (addr_nbytes / sizeof(*addr)) * BITS_PER_LONG;
 
 		assert(nbits <= addr_nbits);
+		(void)addr_nbits;
 	}
 
 	if (unlikely(start >= nbits))
