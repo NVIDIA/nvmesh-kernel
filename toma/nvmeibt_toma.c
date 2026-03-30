@@ -1706,7 +1706,7 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 
 int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, const struct timespec ts)
 {
-	char time_str[32];
+	char time_str[32];		// 13[B] used: HH:MM:SS.msc + \0
 	size_t strf_len;
 	struct tm	tmp_tm;
 	struct timespec ts_real;
@@ -1717,7 +1717,7 @@ int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *p
 		getnstimeofday_convert_boot_to_real(&ts, &ts_real);
 		localtime_r(&ts_real.tv_sec, &tmp_tm);
 		strf_len = strftime(time_str, sizeof(time_str), "%H:%M:%S", &tmp_tm);
-		sprintf(time_str + strf_len, ".%03lld", NSEC_TO_MSEC(ts_real.tv_nsec));
+		snprintf(time_str + strf_len, sizeof(time_str) - strf_len , ".%03lld", NSEC_TO_MSEC(ts_real.tv_nsec));
 		(*printf_fn)(printf_ctx, "%s", time_str);
 	}
 	return 0;
