@@ -1,0 +1,26 @@
+FROM rockylinux:8
+
+WORKDIR /excelero
+
+RUN yum groupinstall -y "Development Tools"
+RUN yum install -y rsync rdma-core rdma-core-devel kernel kernel-devel kernel-headers
+RUN yum install -y which elfutils-libelf-devel
+RUN yum install -y systemd-devel
+RUN yum install -y rpmdevtools
+RUN yum install -y python2
+
+ADD confluent8.repo /etc/yum.repos.d
+
+RUN yum install -y librdkafka1-2.1.1 librdkafka-devel-2.1.1
+
+WORKDIR /ofed
+RUN yum install -y curl
+RUN yum install -y createrepo python36 ethtool lsof python36-devel kernel-rpm-macros
+RUN yum install -y gcc-gfortran kernel-modules-extra tcl fuse-libs tk tcsh numactl-libs
+RUN curl -f https://content.mellanox.com/ofed/MLNX_OFED-23.10-6.1.6.1/MLNX_OFED_LINUX-23.10-6.1.6.1-rhel8.9-x86_64.tgz | tar -xz
+RUN ./MLNX_OFED_LINUX-23.10-6.1.6.1-rhel8.9-x86_64/mlnxofedinstall -k $(basename $(rpm -ql kernel-devel | head -1)) --add-kernel-support --skip-repo
+
+WORKDIR /excelero
+
+
+
