@@ -203,10 +203,10 @@ static void send_registrable_to_all_longing_registrants(struct nvmeibt_seg_activ
 #define NDUMP_REG_CTX(name, _Tf_OR_If, reg_ctx) do {																\
 		struct timespec		__now, time_left;																		\
 		if (!reg_ctx) {N ## _Tf_OR_If(name ## _1, "reg_ctx=NULL"); break;}											\
-		getnstimeofday_boot(&__now);																		\
+		getnstimeofday_boot(&__now);																				\
 		time_left = timespec_sub((reg_ctx)->timeout_time, __now);													\
 		N ## _Tf_OR_If(name ## _2, "seg=@UUID_8 lock_id=@T_LID handle=@HANDLE "										\
-			"time_left=@LLD.@TIMESPEC_NS is_force_cmd_called=@BOOL disconnect_time=@LLD",							\
+			"time_left=@LU.@LU is_force_cmd_called=@BOOL disconnect_time=@LU",										\
 			nvmeibt_seg_active_UUID_8((reg_ctx)->seg_active),														\
 			nvmeib_lockid_purify((reg_ctx)->reg_lock_id), (reg_ctx)->client_messaging_handle,						\
 			time_left.tv_sec, time_left.tv_nsec,																	\

@@ -690,17 +690,17 @@ ssize_t __nvmeibt_pwrite(int fd, const void *buf, size_t n, off_t offset);
 ssize_t __nvmeibt_pread(int fd, void *vptr, size_t size, off_t offset, BOOL is_exact_size);
 ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL is_exact_size);
 
-#define NNVMEIBT_PWRITE(name, __fd, __buf, __n, __offset, __min_offset) ({				\
-	ssize_t		__rv__;																	\
-	const uint64_t	__min_off_val__ = (uint64_t)(__min_offset);							\
-	__MEASURE_TOOK_INIT();																\
-	if ((uint64_t)(__offset) < __min_off_val__) {										\
-		N_Ef(name ## _err, "offset=@OFFSET_INT min_offset=@OFFSET_INT", __offset, __min_offset);	\
-		nvmeibt_abort(ES_FATAL);																	\
-	}																								\
-	__rv__ = __nvmeibt_pwrite((__fd), (__buf), (__n), (__offset));						\
-	__MEASURE_TOOK(N_IMf(name ## _measure, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));		\
-	__rv__;																				\
+#define NNVMEIBT_PWRITE(name, __fd, __buf, __n, __offset, __min_offset) ({														\
+	ssize_t		__rv__;																											\
+	const uint64_t	__min_off_val__ = (uint64_t)(__min_offset);																	\
+	__MEASURE_TOOK_INIT();																										\
+	if ((uint64_t)(__offset) < __min_off_val__) {																				\
+		N_Ef(name ## _err, "offset=@UINT64_TD min_offset=@UINT64_TD", (uint64_t)__offset, (uint64_t)__min_offset);				\
+		nvmeibt_abort(ES_FATAL);																								\
+	}																															\
+	__rv__ = __nvmeibt_pwrite((__fd), (__buf), (__n), (__offset));																\
+	__MEASURE_TOOK(N_IMf(name ## _measure, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));	\
+	__rv__;																														\
 })
 
 #define NNVMEIBT_PREAD NNVMEIBT_PREAD_ATOMIC

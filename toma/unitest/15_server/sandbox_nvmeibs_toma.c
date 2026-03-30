@@ -108,7 +108,7 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 		}
 		case NVMEIBS_TOMA_JOURNAL_INFO: {
 			const struct nvmeibs_msg_t2s_journal *pl = &m->journal_msg;
-			N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: JournalInfo @ZU[b] disk=@STR lba=@ZU len=@ZU serjio{lba=@ZU, len=@ZU}",
+			N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: JournalInfo @ZU[b] disk=@STR lba=@LLU len=@LLU serjio{lba=@LLU, len=@LLU}",
 				n, pl->disk_id, pl->lba, pl->length, pl->serjio_db_lba, pl->serjio_db_length);
 			break;
 		}

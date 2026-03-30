@@ -454,7 +454,7 @@ int nvmeibt_read_config_apply_vol_mgmt_conf(struct mm_mgmt_conf *conf, int vol_c
 			nvmeibt_praid_trim_unused_entries(vol_config_tag, CONFIG_TRIM_MGMT);
 		}
 		else {
-			N_Wf(ryyd8bq,"committed_idx=@INT64, highest_seen=@INT64. Probably a new leader has old config",
+			N_Wf(ryyd8bq,"committed_idx=@INT64_TD, highest_seen=@INT64_TD. Probably a new leader has old config",
 				 committed_idx, highest_seen_committed_idx);
 		}
 	}
@@ -535,7 +535,7 @@ int nvmeibt_read_config_apply_vol_committed_topo_conf(struct mm_mgmt_conf *conf,
 		nvmeibt_praid_trim_unused_entries(vol_config_tag, CONFIG_TRIM_TOPO);
 	}
 	else {
-		N_Wf(rma18bq,"committed_idx=@INT64, highest_seen=@INT64. Probably a new leader has old config",
+		N_Wf(rma18bq,"committed_idx=@INT64_TD, highest_seen=@INT64_TD. Probably a new leader has old config",
 			 committed_idx, highest_seen_committed_idx);
 	}
 
@@ -1186,7 +1186,7 @@ static int setup_metadata_gpt(struct nvmeibt_local_disk *cur_local_disk, const u
 
 		// Validate disk is large enough to avoid unsigned integer underflow.
 		if (overhead_pblks >= disk_space_allocated_for_metadata_pblks) {
-			N_Ef(smgsm01, "Disk too small for metadata partition: disk=@STR n_pblk=@N_PBLKS metadata_disk_space=@N_PBLKS overhead=@N_PBLKS structures_overhead=@N_PBLKS alignment_spare=@N_PBLKS",
+			N_Ef(smgsm01, "Disk too small for metadata partition: disk=@STR n_pblk=@UINT64_TX metadata_disk_space=@UINT64_TX overhead=@UINT64_TX structures_overhead=@UINT64_TX alignment_spare=@UINT64_TX",
 				 nvmeibt_local_disk_display(cur_local_disk), cur_local_disk->from_config.n_pblk, disk_space_allocated_for_metadata_pblks, overhead_pblks, structures_overhead_pblks, alignment_spare_pblks);
 			rv = -1;
 			goto out;

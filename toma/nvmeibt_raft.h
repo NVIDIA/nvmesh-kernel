@@ -17,21 +17,21 @@ struct name_and_uuid_params_ctx;
 
 /*******************       raft_commit_lifecycle_ctx       ********************/
 #define     RAFT_COMMIT_LIFECYCLE_VAL(      _which_, _field_) (nvmeibt_raft_get_my_raft()->_which_##_commit_lifecycle._field_)
-#define SET_RAFT_COMMIT_LIFECYCLE_VAL(name, _which_, _field_, new_idx) ({																			\
-	struct raft_commit_lifecycle_ctx	*_lifecycle = &(nvmeibt_raft_get_my_raft()->_which_##_commit_lifecycle);									\
-	const int64_t						_val = (new_idx);																							\
-	if (	(offsetof(struct raft_commit_lifecycle_ctx, _field_) == offsetof(struct raft_commit_lifecycle_ctx, leader_to_commit)) ||				\
-			(offsetof(struct raft_commit_lifecycle_ctx, _field_) == offsetof(struct raft_commit_lifecycle_ctx, leader_committed_by_majority))) {	\
-		if ((_val < RAFT_COMMIT_LIFECYCLE_VAL(_which_, _field_) && _val != nvmeibt_offset_and_idx_uninitialized)) {										\
+#define SET_RAFT_COMMIT_LIFECYCLE_VAL(name, _which_, _field_, new_idx) ({																									\
+	struct raft_commit_lifecycle_ctx	*_lifecycle = &(nvmeibt_raft_get_my_raft()->_which_##_commit_lifecycle);															\
+	const int64_t						_val = (new_idx);																													\
+	if (	(offsetof(struct raft_commit_lifecycle_ctx, _field_) == offsetof(struct raft_commit_lifecycle_ctx, leader_to_commit)) ||										\
+			(offsetof(struct raft_commit_lifecycle_ctx, _field_) == offsetof(struct raft_commit_lifecycle_ctx, leader_committed_by_majority))) {							\
+		if ((_val < RAFT_COMMIT_LIFECYCLE_VAL(_which_, _field_) && _val != nvmeibt_offset_and_idx_uninitialized)) {															\
 			N_Wf(name ## _error, "SET_RAFT_COMMIT_LIFECYCLE_commit_lifecycle_ctx_VAL(" MACRO_DEF_TO_STR(_which_) ", " MACRO_DEF_TO_STR(_field_) ")@INT64_TX>@INT64_TX",		\
-				 RAFT_COMMIT_LIFECYCLE_VAL(_which_, _field_), _val);																				\
-			nvmeibt_abort(ES_FATAL);																												\
-		}																																			\
-	}																																				\
-	if (_lifecycle->_field_ != _val) {																												\
-		_lifecycle->_field_ = _val;																													\
-		N_Tf(name, "SET_RAFT_COMMIT_LIFECYCLE_VAL(" MACRO_DEF_TO_STR(_which_) ", " MACRO_DEF_TO_STR(_field_) ")=@INT64_TX", _lifecycle->_field_);	\
-	}																																				\
+				 (int64_t)RAFT_COMMIT_LIFECYCLE_VAL(_which_, _field_), (int64_t)_val);																						\
+			nvmeibt_abort(ES_FATAL);																																		\
+		}																																									\
+	}																																										\
+	if (_lifecycle->_field_ != _val) {																																		\
+		_lifecycle->_field_ = _val;																																			\
+		N_Tf(name, "SET_RAFT_COMMIT_LIFECYCLE_VAL(" MACRO_DEF_TO_STR(_which_) ", " MACRO_DEF_TO_STR(_field_) ")=@INT64_TX", (int64_t)_lifecycle->_field_);					\
+	}																																										\
 })
 
 struct raft_commit_lifecycle_ctx {

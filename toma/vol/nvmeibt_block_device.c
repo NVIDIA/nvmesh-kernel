@@ -262,7 +262,7 @@ void nvmeibt_block_device_trim_unused_entries(int config_tag, uint8_t trim_flag)
 		if (NVMEIBT_OBJ_IS_OLDER(block_device, config_tag)) {
 			const int64_t cfg_offset = block_device->from_config.mgmt_config_kafka_offset_or_idx;
 			if (cfg_offset > committed_idx)
-				N_IMf(gy7887t, "vol=@STR is newer than committed cfg. (vol_kafka_offset=@INT64, committed_kafka_offset=@INT64)", block_device->from_config.client_blkdev_name, cfg_offset, committed_idx);
+				N_IMf(gy7887t, "vol=@STR is newer than committed cfg. (vol_kafka_offset=@INT64_TD, committed_kafka_offset=@INT64_TD)", block_device->from_config.client_blkdev_name, cfg_offset, committed_idx);
 			nvmeibt_block_device_trim_specific_block_device(block_device, trim_flag);
 		}
 	}

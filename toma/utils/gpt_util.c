@@ -1876,7 +1876,7 @@ static int export_gpt_to_json(int disk_fd,
 		/* Read the first 4K block (segment metadata control structure) */
 		seg_md_pbyte_s = seg_md_entry->pba_s * config->pblk_size;
 		if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, seg_md_pbyte_s, seg_md_ctrl) < 0) {
-			N_Wf(export_seg_md_read_failed, "Failed to read segment metadata control block at pba=@LLU", seg_md_entry->pba_s);
+			N_Wf(export_seg_md_read_failed, "Failed to read segment metadata control block at pba=@UINT64_TD", seg_md_entry->pba_s);
 			continue;
 		}
 
@@ -3449,7 +3449,7 @@ static int process_segment_metadata_from_json(
 			memset(&temp_seg_md, 0, sizeof(temp_seg_md));
 			temp_pbyte_s = entry->pba_s * config->pblk_size;
 			if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, temp_pbyte_s, &temp_seg_md) < 0) {
-				N_Wf(apply_seg_md_read_for_match_failed, "Failed to read segment metadata for UUID matching at pba=@LLU", entry->pba_s);
+				N_Wf(apply_seg_md_read_for_match_failed, "Failed to read segment metadata for UUID matching at pba=@UINT64_TD", entry->pba_s);
 				continue;		/* Skip this entry if we can't read it */
 			}
 
@@ -3478,7 +3478,7 @@ static int process_segment_metadata_from_json(
 		memset(&current_seg_md, 0, sizeof(current_seg_md));
 		seg_md_pbyte_s = seg_md_partition->pba_s * config->pblk_size;
 		if (nvmeibt_ds_metadata_ctrl_blk_read(NULL, disk_fd, config->pblk_size, seg_md_pbyte_s, &current_seg_md) < 0) {
-			N_Wf(apply_seg_md_read_failed, "Failed to read segment metadata: name=@STR pba=@LLU", json_partition_name, seg_md_partition->pba_s);
+			N_Wf(apply_seg_md_read_failed, "Failed to read segment metadata: name=@STR pba=@UINT64_TD", json_partition_name, seg_md_partition->pba_s);
 			fprintf(stderr, COL_YELLOW "Warning: Cannot read segment metadata '%s', skipping" COL_RESET "\n", json_partition_name);
 			continue;
 		}

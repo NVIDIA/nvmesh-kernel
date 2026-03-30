@@ -228,7 +228,7 @@ void nvmeibt_recovery_set_max_n_simultaneous_stale_and_txid_rebuild(int64_t max_
 	recovery_max_n_simultaneous_stale_and_txid_rebuild = max_n_simultaneous_rebuild;
 	N_Tf(jiit6hd, "recovery_max_n_simultaneous_stale_and_txid_rebuild=@INT", max_n_simultaneous_rebuild);
 	if (recovery_max_n_simultaneous_stale_and_txid_rebuild <= 0) {
-		N_Wf(ssq29ic, "recovery_max_n_simultaneous_stale_and_txid_rebuild=@INT", max_n_simultaneous_rebuild);
+		N_Wf(ssq29ic, "recovery_max_n_simultaneous_stale_and_txid_rebuild=@INT64_TD", max_n_simultaneous_rebuild);
 	}
 }
 

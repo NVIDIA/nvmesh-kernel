@@ -359,7 +359,7 @@ int nvmeibt_nm_hw_get_max_chunk_size(struct nvmeibt_nm_path *path) {
 	int64_t			mtu = path->pp->mtu;
 
 	if (mtu < (int64_t)(sizeof(struct udp_msg)) + udp_max_header_length + 64) {
-		N_Ef(jssse72, "mtu=@LLD is too short", mtu);
+		N_Ef(jssse72, "mtu=@INT64_TD is too short", mtu);
 		nvmeibt_abort(ES_FATAL);
 	}
 	return (mtu - sizeof(struct udp_msg) - udp_max_header_length);

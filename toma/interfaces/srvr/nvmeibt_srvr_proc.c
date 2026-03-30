@@ -103,7 +103,7 @@ static int nvmeibt_munmap(void *addr, size_t length)
 	}
 	mprotect(mapped_padded, PAGE_SIZE, PROT_READ);
 	if ((me->addr != (void*)me) || (me->length != length_padded) || (me->magic_num != PADDED_MMAP_MAGIC_NUM)) {
-		NTOMA_ASSERT(salddbmmf6, false, "Magic number mismatch, expected={@PTR, len=@ZX, magic=@LLX}, found={@PTR, len=@ZX, magic=@LLX}",
+		NTOMA_ASSERT(salddbmmf6, false, "Magic number mismatch, expected={@PTR, len=@ZX, magic=@LLX}, found={@PTR, len=@ZX, magic=@UINT64_TX}",
 					   mapped_padded, length_padded, PADDED_MMAP_MAGIC_NUM,
 					   me->addr, me->length, me->magic_num);
 		errno = EINVAL;
@@ -907,7 +907,7 @@ static int _submit_msg_and_wait_for_reply(struct nvmeibt_km_comm *p, enum uk_com
 	getnstimeofday_boot(&t2);
 	{
 		const int64_t m_sec = NSEC_TO_MSEC(timespec_diff_ns(t2, t1));
-		if (m_sec > 20) N_IMf(__AUTOID__, "msg[@INT] Took @LLD[ms]", op, m_sec);
+		if (m_sec > 20) N_IMf(__AUTOID__, "msg[@INT] Took @INT64_TD[ms]", op, m_sec);
 	}
 	destroy_completion(&b.comp);
 	return b.rv;

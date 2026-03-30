@@ -294,7 +294,7 @@ struct _tracer {
 		__p = __cur_end + (*__cur_end == '\n' || *__cur_end == '\0' ? 1 : 0);											\
 	}																													\
 	if ((ssize_t)(__p - (__str_in__)) < (ssize_t)(__strlen_in__)) {														\
-		N_IMf(__name__ ## _3, "String was too long @SIZE_T", (__strlen_in__));											\
+		N_IMf(__name__ ## _3, "String was too long @ZU", (size_t)(__strlen_in__));										\
 	}																													\
 })
 
