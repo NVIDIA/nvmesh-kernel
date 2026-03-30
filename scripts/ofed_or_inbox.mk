@@ -79,26 +79,28 @@ ifeq ($(OFED_WE_R), yes)
     # Mellanox OFED
     ifeq ($(OFED_SRC_DIR),)
         # OFED_SRC_DIR not defined - Check for DKMS
-        OFED_DKMS_VER := $(shell ofed_info -l | grep mlnx-ofed-kernel-dkms | awk '{print $3;}')
+        OFED_DKMS_VERS := $(shell ofed_info -l | grep mlnx-ofed-kernel-dkms | awk '{print $3;}')
+        OFED_DKMS_VERS += $(shell ls /var/lib/dkms/mlnx-of*kernel/)
+        OFED_DKMS_VER := $(firstword $(OFED_DKMS_VERS))
         ifneq ($(OFED_DKMS_VER),)
             OFED_DKMS_VER_MAJ_MIN := $(shell echo $(OFED_DKMS_VER) | cut -d. -f1,2)
             OFED_DKMS_VER_MAJ_MIN_POINT := $(shell echo $(OFED_DKMS_VER) | grep -Eo '[0-9]+.[0-9]+[.-]OFED[.-][0-9;.]+')
             # Check for all possibile dkms source dirs
-            DKMS_SRC_DIRS := $(wildcard /var/lib/dkms/mlnx-of*-kernel/$(OFED_DKMS_VER_MAJ_MIN_POINT)/source)
-            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*-kernel-$(OFED_DKMS_VER_MAJ_MIN_POINT))
-            DKMS_SRC_DIRS += $(wildcard /var/lib/dkms/mlnx-of*-kernel/$(OFED_DKMS_VER_MAJ_MIN)/source)
-            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*-kernel-$(OFED_DKMS_VER_MAJ_MIN))
+            DKMS_SRC_DIRS := $(wildcard /var/lib/dkms/mlnx-of*kernel/$(OFED_DKMS_VER_MAJ_MIN_POINT)/source)
+            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_DKMS_VER_MAJ_MIN_POINT))
+            DKMS_SRC_DIRS += $(wildcard /var/lib/dkms/mlnx-of*kernel/$(OFED_DKMS_VER_MAJ_MIN)/source)
+            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_DKMS_VER_MAJ_MIN))
 
             OFED_SRC_DIR := $(firstword $(DKMS_SRC_DIRS))
         endif
     endif
     ifeq ($(OFED_SRC_DIR),)
         # No DKMS, Check for /usr/src/mlnx-of[ed,a]-kernel-X.X
-        DIR := $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER))
-        ifneq ($(DIR),)
-            # Exists
-            OFED_SRC_DIR = $(DIR)
-        endif
+        OFED_SRC_DIRS := $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER))
+        OFED_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER_MAJ).$(OFED_VER_MIN))
+        OFED_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_FULL_VER))
+        OFED_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER_MAJ).$(OFED_VER_MIN).$(OFED_VER_POINT_MAJ))
+        OFED_SRC_DIR := $(firstword $(OFED_SRC_DIRS))
     endif
     ifeq ($(OFED_SRC_DIR),)
         ifeq ($(COMPILE_COMMON),yes)
