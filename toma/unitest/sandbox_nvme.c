@@ -169,21 +169,12 @@ int sandbox_nvme_zero_disk_area(const char* disk_id, size_t start_block, size_t 
 	const struct sandbox_nvme_device *dev = sandbox_nvme_get_device_by_disk_id(disk_id);
 	const struct sandbox_nvme_lbaf *lbaf = sandbox_nvme_get_lbaf(dev->current_format_idx);
 	const size_t block_size = (size_t)(1U << lbaf->block_size_exp);
-	const size_t chunk_bytes = (1 << 20);		// Write units of 1[mb]
-	void *zero_buf = calloc(1, chunk_bytes);
 	size_t total_bytes = num_blocks  * block_size;
 	size_t offset =      start_block * block_size;
 	const int fd = sandbox_nvme_open(dev);
-	BUG_ON((fd < 0) || !zero_buf || (chunk_bytes % block_size));
+	BUG_ON(fd < 0);
 	N_Tf(__AUTOID__, "@STR io[@CHAR] offset=@ZX[blk] len=@INT[blk]", dev->serial_number, 'Z', start_block, num_blocks);
-	while (total_bytes > 0) {
-		const size_t write_bytes = MIN(total_bytes, chunk_bytes);
-		const ssize_t w = pwrite(fd, zero_buf, write_bytes, (off_t)offset);
-		BUG_ON((w < 0) || ((size_t)w != write_bytes));
-		offset += write_bytes;
-		total_bytes -= write_bytes;
-	}
-	free(zero_buf);
+	BUG_ON(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, (off_t)offset, (off_t)total_bytes) != 0);
 	close(fd);
 	return 0;
 }
