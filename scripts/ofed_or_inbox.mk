@@ -225,6 +225,6 @@ endif
 
 export OFED_VER_TYPE
 
-ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
-    INCLUDES = -include linux/compat-2.6.h
+ifneq ($(wildcard $(OFA_KERNEL)/compat/config.h),)
+    INCLUDES = -include $(OFA_KERNEL)/compat/config.h
 endif
