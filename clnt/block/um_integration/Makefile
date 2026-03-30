@@ -108,7 +108,9 @@ ifeq ($(USE_ARM), 1)
 	SOURCES += $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_arm_recov_neon.c
 	ASM_SRC  = $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
 else
-	ASM_SRC  = $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm.S_shipped
+	SOURCES += $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c
+	CFLAGS_nvmeibc_block_dp_ec_gf_avx2.c += -mavx2 -msse4.2
+	ASM_SRC :=
 endif
 
 # Kernel sources that are included in good path io library
@@ -297,6 +299,11 @@ $(LIB_NAME_OUT).so: $(OBJECTS)
 $(LIB_NAME_OUT): $(LIB_NAME_OUT).a $(OBJECTS_UNITEST)
 	$(call print_building_target);
 	$(call link_executable)
+
+$(OBJ_DIR)/$(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o: $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c Makefile
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) $(CFLAGS_nvmeibc_block_dp_ec_gf_avx2.c) $(INCLUDES) $(DFLAGS) -o $@ -c $<
+	$(call print_executed_rule)
 
 $(OBJ_DIR)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)

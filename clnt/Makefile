@@ -14,8 +14,9 @@ ARCH := $(shell uname -m | sed -e s/i.86/x86/ \
                                   -e s/sh[234].*/sh/ -e s/aarch64.*/arm64/ )
 
 ifeq ($(ARCH),x86_64)
-	DP_EC_GF_ASM := block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
-	OBJECT_FILES_NON_STANDARD_block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o := y
+	DP_EC_GF_ASM := block/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o
+	CFLAGS_REMOVE_block/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o += -mgeneral-regs-only
+	CFLAGS_block/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o += -mavx2 -msse4.2
 endif
 ifeq ($(ARCH),arm64)
 	# DP_EC_GF_ASM := block/datapath_ec/nvmeibc_block_dp_ec_gf_asm_arm.o
@@ -121,8 +122,6 @@ endif
 ccflags-y += -DALLOW_SIMULATED_MD -DTRACE_INCLUDE_FILE=\"nvmeibc_trace.h\"
 ldflags-y += -T $(M)/clnt/nvmeibc.lds
 
-OBJECT_FILES_NON_STANDARD_nvmeibc_block_dp_ec_gf_asm.o := y
-STACKTOOL_nvmeibc_block_dp_ec_gf_asm.o := y
 
 # Compile gen_events and dictionary for binary tracing
 TRACE_MODULE := nvmeibc
