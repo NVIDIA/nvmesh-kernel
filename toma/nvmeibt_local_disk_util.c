@@ -1177,7 +1177,7 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_udev(struct 
 	char udev_info_path[64];
 	int udev_info_fd;
 	char *udev_info_buf = NULL;
-	int stat_rv;
+	int stat_rv, udev_stat_rv;
 
 	NFIN;
 	nvmeibt_strlcpy(from_config->dev_file_name, path, sizeof(from_config->dev_file_name));
@@ -1186,8 +1186,9 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_udev(struct 
 	memset(&st, 0, sizeof(st));
 	stat_rv = stat(path, &st);
 	snprintf(udev_info_path, sizeof(udev_info_path), TOMA_ROOT_DIR "run/udev/data/b%d:%d", major(st.st_rdev), minor(st.st_rdev));
-	if (stat(udev_info_path, &st) < 0) {
-		N_Ef(error_1_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_udev, "failed getting udev device info from path=@PATH fd=@FD", udev_info_path, stat_rv);
+	udev_stat_rv = stat(udev_info_path, &st);
+	if (udev_stat_rv < 0) {
+		N_Ef(nrldufldsu0, "failed getting udev device info from path=@PATH rv={stat=@INT, ustat=@INT}", udev_info_path, stat_rv, udev_stat_rv);
 		rv = false;
 		goto out;
 	}
@@ -1213,7 +1214,7 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_udev(struct 
 			goto out;
 		}
 		from_config->n_hw_pblk = from_config->n_pblk = size / from_config->pblk_size;
-		N_Tf(error_2_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_udev, "ioctl SG_IO path=@PATH blksize @INT", path, from_config->pblk_size);
+		N_Tf(nrldufldsu1, "ioctl SG_IO path=@PATH blksize @INT", path, from_config->pblk_size);
 
 		from_config->pcie_slot[0] = 0;
 		from_config->metadata_n_bytes = 0;
@@ -1223,7 +1224,7 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_udev(struct 
 		from_config->nsid = 0;
 	}
 	if (from_config->pblk_size<0 || from_config->pblk_size>4096) {
-		N_Ef(error_3_fill_local_disk_config_from_udev, "Invalid blocksize reported by disk @PATH, aborting.", path);
+		N_Ef(nrldufldsu3, "Invalid blocksize reported by disk @PATH, aborting.", path);
 		rv = false;
 		goto out;
 	}
@@ -1255,7 +1256,7 @@ BOOL nvmeibt_local_disk_util_fill_local_disk_devinfo_and_smart_from_udev(struct 
 	from_config->smart_info.Media_Errors = 0;
 	from_config->smart_info.Number_of_Error_Information_Log_Entries = 0;
 
-	N_Tf(trace_1_local_disk_util_nvmeibt_local_disk_util_fill_local_disk_config_from_udev, "Read local disk=@STR vendor=@VENDOR, dev=\"@DEV_FILE_NAME\" pblk_size=@PBLK_SIZE n_pblk=@N_PBLK metadata_size=@METADATA_SIZE format_options=@FORMAT_OPTIONS",
+	N_Tf(nrldufldsu4, "Read local disk=@STR vendor=@VENDOR, dev=\"@DEV_FILE_NAME\" pblk_size=@PBLK_SIZE n_pblk=@N_PBLK metadata_size=@METADATA_SIZE format_options=@FORMAT_OPTIONS",
 		 nvmeibt_local_disk_config_display(from_config), from_config->vendor, from_config->dev_file_name,
 		from_config->pblk_size, from_config->n_pblk,
 		from_config->metadata_n_bytes,
