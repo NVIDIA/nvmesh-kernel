@@ -171,8 +171,11 @@ IFS='-' read -ra GIT_DESCRIBE <<< "$GIT_DESCRIBE"
 
 setup_tun_device
 
+trap "rm -f docker/pyproject.toml docker/poetry.lock" EXIT
 # Build docker container
 echo "Building nvmesh-build-$DISTRO image from docker/"
+# Expose pyproject.toml and poetry.lock to the container.
+cp pyproject.toml poetry.lock docker/ 2>/dev/null || true
 $CONTAINER_TOOL build -t nvmesh-build-$DISTRO -f docker/Dockerfile_$DISTRO docker/
 # Start docker container
 echo "Starting container using nvmesh-build-$DISTRO image"
