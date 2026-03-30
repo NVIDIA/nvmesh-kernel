@@ -346,15 +346,6 @@ void mgmt_sim_wakeup_on_incomming_toma_msg(struct sim_broker_topic *t) {	// Call
 	}
 }
 
-void mgmt_sim_do_periodic(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (0) { /* 1. Consume Toma's outgoing messages, not done from unitest context but inline from toma context when it sends messages */
-		mgmt_sim_wakeup_on_incomming_toma_msg(m->k_consumers.high);
-		mgmt_sim_wakeup_on_incomming_toma_msg(m->k_consumers.low);
-		mgmt_sim_wakeup_on_incomming_toma_msg(m->k_consumers.kal);
-	}
-}
-
 /******************************************************************************/
 /* Static helper functions                                                    */
 /******************************************************************************/

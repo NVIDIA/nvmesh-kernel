@@ -749,7 +749,6 @@ int epoll_wait(int efd, struct epoll_event *evs, int man_events, int __timeout) 
 	toma_unit_test_thread_switch_to();
 	__temp_wait_sleep();
 	nvmeibs_simu_do_periodic();					// Process any pending disk ADD event that was deferred from a format operation. This gives the REMOVE event time to be processed by the work queue.
-	mgmt_sim_do_periodic();
 
 	for (i = 0, n_events = 0; i < ep->n_fds; i++) {
 		const int fd = ep->evs[i].__fd;
