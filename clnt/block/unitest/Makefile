@@ -285,7 +285,9 @@ ifeq ($(USE_ARM), 1)
 	#ASM_SRC	= $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
 	ARM_SRC :=
 else
-	ASM_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm.S_shipped
+	SOURCES += $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c
+	CFLAGS_nvmeibc_block_dp_ec_gf_avx2.c += -mavx2 -msse4.2
+	ASM_SRC :=
 endif
 ASM_OBJ = $(ASM_SRC:.S_shipped=.o)
 
@@ -303,7 +305,7 @@ EXE_NAME = blk_unitest
 EXE_PATH = $(THIS_MKFILE_DIR)/$(EXE_NAME)
 
 PRECOMPILED_HEADERS := $(OBJ_DIR)/pch.h.gch
-IGNORE_PRECOMPILED_HEADERS := kr_incs.c tests_conf.c $(SSDA)/tools/nvmeib_trace_userspace.c $(SSDA)/tools/nvmeib_trace_userspace_poller.c
+IGNORE_PRECOMPILED_HEADERS := kr_incs.c tests_conf.c $(SSDA)/tools/nvmeib_trace_userspace.c $(SSDA)/tools/nvmeib_trace_userspace_poller.c nvmeibc_block_dp_ec_gf_avx2.c
 FILES_DEPEND =$(OBJECTS:.o=.d) $(PRECOMPILED_HEADERS:.h.gch=.h.d)
 
 # Autogen
@@ -442,7 +444,10 @@ $(ASMOBJ) : $(ASMSRC)
 	@$(MAKE) -C $(CDIR)/datapath_ec $@
 
 PERF_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf.c ./uni_scenarios/uni_scenario_gf.c ./kr_incs.c ./kr_sim_svc.c
-PERF_OBJ = $(PERF_SRC:.c=.o) $(OBJ_DIR)/$(ASM_OBJ)
+PERF_OBJ = $(PERF_SRC:.c=.o)
+ifneq ($(strip $(ASM_OBJ)),)
+PERF_OBJ += $(OBJ_DIR)/$(ASM_OBJ)
+endif
 PERF_NAME= gf_perf
 
 gf_perf:

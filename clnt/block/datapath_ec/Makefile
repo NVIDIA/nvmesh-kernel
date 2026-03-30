@@ -64,12 +64,14 @@ endif
 LIBS  = -lpthread # Libraries to link into executable (with -l): pthread is needed
 
 # ********** Define Files participating in the build *********
-SOURCES =./nvmeibc_block_dp_ec_gf_asm.S_shipped
 ifeq ($(USE_ARM),1)
-	SOURCES =./nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
+	SOURCES = ./nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
+	OBJECTS = $(SOURCES:.S_shipped=.o)
 	$(warning set Sources)
+else
+	SOURCES = ./nvmeibc_block_dp_ec_gf_avx2.c
+	OBJECTS = $(SOURCES:.c=.o)
 endif
-OBJECTS = $(SOURCES:.S_shipped=.o)
 $(warning Objects = $(OBJECTS))
 $(warning SOURCES = $(SOURCES))
 
@@ -81,8 +83,13 @@ all: clean $(OBJECTS)
 clean:
 	rm -f $(OBJECTS)
 
-$(OBJECTS) : $(SOURCES)
+ifeq ($(USE_ARM),1)
+$(OBJECTS): $(SOURCES)
 	gcc -x assembler-with-cpp -c $< -o $@
+else
+$(OBJECTS): $(SOURCES)
+	gcc $(CFLAGS) $(INCLUDES) -I$(SSDA) -mavx2 -msse4.2 -c $< -o $@
+endif
 #ifeq $(USE_64_BIT,1 )
 #	mv $< $($<:.o_shipped=.o)
 #endif

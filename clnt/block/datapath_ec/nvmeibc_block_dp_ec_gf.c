@@ -22,6 +22,10 @@
 	EXPORT_SYMBOL(gf_asm_count);
 #endif
 
+#if defined(USE_GF_AVX2)
+#include "nvmeibc_block_dp_ec_gf_avx2.h"
+#endif
+
 #define POLY 0x1d
 #define POLY64  0x1d1d1d1d1d1d1d1dULL
 
@@ -1273,14 +1277,6 @@ gf_functions_t gf_functions_sse2 = {
 #endif
 
 #if defined(USE_GF_AVX2)
-// Functions below are implemented in assembly directly
-extern void ec_encode_data_p_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy);
-extern void ec_encode_data_q_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy);
-extern void ec_encode_data_pq_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy);
-extern enum gf_return_val ec_encode_data_update_avx2(int len, int k, int vec_i, unsigned char ** data,  unsigned char ** coding, u32 *crc, unsigned char *data_copy);
-extern void ec_decode_data_p_avx2(int len, int rows, int d0, unsigned char ** data,  unsigned char ** new_data, u32 *crc);
-extern void ec_decode_data_q_avx2(int len, int rows, int d0, unsigned char ** data,  unsigned char ** new_data, u32 *crc);
-extern void ec_decode_data_pq_avx2_asm(int len, int rows, int d0, int d1, unsigned char ** data,  unsigned char ** new_data, u32 *crc, unsigned char factor);
 static void ec_decode_data_pq_avx2(int len, int rows, int d0, int d1, unsigned char ** data,  unsigned char ** new_data, u32 *crc) {
 	#ifndef __aarch64__
 		const unsigned char denominator = gff_base[d0] ^ gff_base[d1];
@@ -1558,8 +1554,6 @@ int nvmeibc_gf_optimization_from_string(const char *str)
 #if defined(__KERNEL__) && defined(__x86_64__)	// User spaces preemption already saves registers, !x64 doe snot have those registers
 unsigned long nvmeibc_fpu_flags[NR_CPUS];		// To reduce arr size can use: CONFIG_NR_CPUS, nr_cpu_ids
 void *nvmeibc_fpu_regs[NR_CPUS] ____cacheline_aligned;
-extern void nvmeib_save_avx256(   void  *area);		// In assembly code
-extern void nvmeib_restore_avx256(void  *area);		// In assembly code
 
 static unsigned int nvmeib_get_xsave_size(void) {
 	unsigned int eax, ebx, ecx, edx;

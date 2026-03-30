@@ -9,14 +9,14 @@ ARCH_CFLAGS :=
 ifeq ($(UNAME),Darwin)
 	USE_DARWIN=1
 	ARCH_CFLAGS += -m64
-	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
-	DP_EC_GF_CFILES :=
+	DP_EC_GF_ASM :=
+	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_avx2.c
 	LIBS_PATH = -L/usr/lib
 else ifeq ($(HT),x86_64)
 	USE_64_BITS=1
 	ARCH_CFLAGS += -m64
-	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
-	DP_EC_GF_CFILES :=
+	DP_EC_GF_ASM :=
+	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_avx2.c
 	LIBS_PATH = -L/usr/lib64
 else ifeq ($(HT),aarch64)
 	USE_ARM=1
@@ -88,6 +88,9 @@ $(EXE_NAME): $(OBJECTS) $(ASMOBJ)
 
 %_$(EXE_NAME).o : %.c
 	@$(CC) $(ARCH_CFLAGS) $(CFLAGS) $(INCLUDES) -c $< $(autocompdb) -o $@
+
+$(EC_DIR)/nvmeibc_block_dp_ec_gf_avx2_gen_md.o: $(EC_DIR)/nvmeibc_block_dp_ec_gf_avx2.c
+	@$(CC) $(ARCH_CFLAGS) $(CFLAGS) -mavx2 -msse4.2 $(INCLUDES) -c $< $(autocompdb) -o $@
 
 %.o_shipped: %.S_shipped
 	$(CC) -c -x assembler-with-cpp -o $@ $<

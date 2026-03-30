@@ -4,7 +4,6 @@ compile_commands.json
 Module.symvers
 modules.order
 .nvmeib*
-!clnt/block/datapath_ec/.nvmeibc_block_dp_ec_gf_asm.o.cmd
 *.ko
 *.o
 *.o_shipped
