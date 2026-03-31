@@ -9,7 +9,7 @@
    This file replaces Toma's interfaces with other components, allowing it to
    run in a sandbox. Used for unitesting */
 
-#include "os/os_public.h"
+#include "11_os/os_public.h"
 #define TOMA_USE_USER_SPACE_SERVER_API (1)
 #include "kafka/sandbox_kafka_public.h"
 

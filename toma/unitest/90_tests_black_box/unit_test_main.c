@@ -6,8 +6,8 @@
 #include "unit_test_main.h"
 #include "nvmeibt_debug.h"				// Binary traces
 #include "../mgmt_sim.h"
-#include "../os/os_internal.h"
-#include "../os/nvmeibt_udev_simu_internal.h"
+#include "../11_os/os_internal.h"
+#include "../11_os/nvmeibt_udev_simu_internal.h"
 #include "../server/sandbox_nvmeibs_toma.h"
 #include "../12_user/user_rpc_simu.h"
 #include "../kafka/sandbox_kafka_internal.h"

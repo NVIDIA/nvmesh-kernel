@@ -3,7 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 #pragma once
-#include "../os/os_internal.h"
+#include "../11_os/os_internal.h"
 
 struct sandbox_nvme_lbaf {			// NVMe LBA format descriptor. Matches the structure used in NVMe Identify NS response.
 	uint8_t block_size_exp;			// Block size as exponent of 2 (9=512, 12=4096) bytes

@@ -10,7 +10,7 @@
 #include "sandbox_util.h"
 #include "mgmt_sim.h"
 #include "kafka/sandbox_kafka_internal.h"
-#include "os/nvmeibt_udev_simu_internal.h"
+#include "11_os/nvmeibt_udev_simu_internal.h"
 #include "16_otherToma/peer_toma_simu.h"
 #include "17_clnt/clnt_simu.h"
 #include "90_tests_black_box/unit_test_main.h"
@@ -34,7 +34,7 @@ void syslog(int priority, const char *fmt, ...) {
 }
 
 /************************************* Kernel ********************************/
-#include "os/os_internal.h"
+#include "11_os/os_internal.h"
 #include <sys/stat.h>		// fstat()
 #include <errno.h>
 
