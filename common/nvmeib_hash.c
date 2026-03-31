@@ -192,8 +192,8 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 #if IS_HASH_UNITTEST
 	fprintf(stdout, "hash_add n_occupied=%d n_arr_entries=%d Threshold(emergency)=%d\n", hash_tbl->n_occupied, hash_tbl->n_arr_entries, hash_tbl->n_arr_entries * HASH_EMERGENCY_LOAD_FACTOR_THRESHOLD);
 #endif	// #if IS_HASH_UNITTEST
-	nvmeib_hash_tbl_arr_lock(hash_tbl);
-	if (is_hash_tbl_suitable_for_resize_emergency_increase(hash_tbl)) {
+	while (nvmeib_hash_tbl_arr_lock(hash_tbl) && is_hash_tbl_suitable_for_resize_emergency_increase(hash_tbl)) {
+		nvmeib_hash_tbl_arr_unlock(hash_tbl);
 		nvmeib_hash_resize(hash_tbl);
 	}
 	idx = hash_scrambled_to_idx(scrambled, hash_tbl->scrambled_to_idx_mask);
