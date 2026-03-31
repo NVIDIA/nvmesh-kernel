@@ -112,7 +112,7 @@ static void nvmeibc_dbits_action_to_entry(const struct nvmeibc_dbits_action *act
 	}
 }
 
-enum merge_option { MO_INTERSECT = 0, MO_UNIFY = 1, MO_DIFF = 2 };
+enum merge_option { MERGE_OPT_INTERSECT = 0, MERGE_OPT_UNIFY = 1 };
 static struct nvmeibc_dbits_action nvmeibc_dbits_action_merge(const struct nvmeibc_dbits_action *old, const struct nvmeibc_dbits_action *New, enum merge_option mo)
 {
 	struct nvmeibc_dbits_action rv;
@@ -121,20 +121,13 @@ static struct nvmeibc_dbits_action nvmeibc_dbits_action_merge(const struct nvmei
 	nvmeibc_dbits_action_init(&rv, num_degraded);
 	BUG_ON(old->db_turn_off_bmp);		// Just for debug, old action already turned off what it needed
 
-	if (mo == MO_DIFF) {				// Calculate diff via XOR
-		rv.db_turn_on_bmp =  (old->db_turn_on_bmp  ^ New->db_turn_on_bmp);
-		rv.db_turn_off_bmp = (old->db_turn_off_bmp ^ New->db_turn_off_bmp);
-		rv.db_conv_map =     (old->db_conv_map     ^ New->db_conv_map);
-		rv.num_unknowns =    (old->num_unknowns    ^ New->num_unknowns);
-		return rv;
-	}
 	/* Step 1: basic merge, yields incorrect results */
-	if (mo == MO_UNIFY) {
+	if (mo == MERGE_OPT_UNIFY) {
 		rv.db_turn_on_bmp =  (old->db_turn_on_bmp  | New->db_turn_on_bmp);	// union of dbits
 		rv.db_turn_off_bmp = (old->db_turn_off_bmp | New->db_turn_off_bmp);
 		rv.db_conv_map =     (old->db_conv_map     | New->db_conv_map);
 		rv.num_unknowns =    (old->num_unknowns    + New->num_unknowns);
-	} else {										// MO_INTERSECT
+	} else {										// MERGE_OPT_INTERSECT
 		WARN(!!old->db_turn_off_bmp || !!New->db_turn_off_bmp, "nvmeibc bug! should never be true, turn_off1=%u, turn_off2=%u\n", old->db_turn_off_bmp, New->db_turn_off_bmp); // sanity
 		rv.num_unknowns = min((u32)old->num_unknowns, (u32)New->num_unknowns);
 		if        (((u32)New->num_unknowns > 0) && ((u32)old->num_unknowns == 0)) {
@@ -203,12 +196,10 @@ void nvmeibc_dbits_del_unk(union nvmeibc_dbits_entry *e, const int np)
 static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, enum merge_option mo, struct dp_topology_traits const* topo_traits)
 {
 	union nvmeibc_dbits_entry rv;
-	if (mo != MO_DIFF) {							// Calc quick cases when one of them is zero. Unify takes worst, intersect takes best (0 dbits)
-		if (        e1->all_bits == 0) {
-			return ((mo == MO_UNIFY) ? e2->all_bits : 0);
-		} else if ( e2->all_bits == 0) {
-			return ((mo == MO_UNIFY) ? e1->all_bits : 0);
-		}
+	if (        e1->all_bits == 0) {
+		return ((mo == MERGE_OPT_UNIFY) ? e2->all_bits : 0);
+	} else if ( e2->all_bits == 0) {
+		return ((mo == MERGE_OPT_UNIFY) ? e1->all_bits : 0);
 	}
 	{
 		struct nvmeibc_dbits_action a1, a2, a_rv;
@@ -222,12 +213,12 @@ static u16 __nvmeibc_dbits_merge_by_strategy(const union nvmeibc_dbits_entry *e1
 
 u16 nvmeibc_dbits_intersect_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, struct dp_topology_traits const* topo_traits)
 {
-	return __nvmeibc_dbits_merge_by_strategy(e1, e2, MO_INTERSECT, topo_traits);
+	return __nvmeibc_dbits_merge_by_strategy(e1, e2, MERGE_OPT_INTERSECT, topo_traits);
 }
 
 u16 nvmeibc_dbits_merge_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, struct dp_topology_traits const* topo_traits)
 {
-	return __nvmeibc_dbits_merge_by_strategy(e1, e2, MO_UNIFY, topo_traits);
+	return __nvmeibc_dbits_merge_by_strategy(e1, e2, MERGE_OPT_UNIFY, topo_traits);
 }
 
 u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *e_pre,
@@ -235,7 +226,7 @@ u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *e_pre,
 {
 	struct nvmeibc_dbits_action a_pre, a_post;
 	nvmeibc_dbits_action_init_by_entry(&a_pre, e_pre, tx->action.num_degraded);
-	a_post = nvmeibc_dbits_action_merge(&a_pre, &tx->action, MO_UNIFY);
+	a_post = nvmeibc_dbits_action_merge(&a_pre, &tx->action, MERGE_OPT_UNIFY);
 	nvmeibc_dbits_action_to_entry(&a_post, &tx->post);
 	return tx->post.all_bits;
 }
