@@ -309,8 +309,7 @@ static int start_thread(struct nvmeibt_km_comm *p)
 	if ((pt_err = pthread_attr_init(&attr)) != 0 ||
 		(pt_err = pthread_create(&p->comm_thread, &attr, run, p)) != 0) {
 		p->comm_thread = 0;
-		errno = pt_err;
-		N_Ef(tscnlss6, "Fail to create srv comm thread @AUTO_ERRNO");
+		N_Ef(tscnlss6, "Fail to create srv comm thread err=@INT (@STR)", pt_err, strerror(pt_err));
 		return -1;
 	}
 	pthread_setname_np(p->comm_thread, "km_comm_srv");
@@ -446,8 +445,7 @@ static void __stop_main_thread(struct nvmeibt_km_comm *p)
 		nvmeib_srvr_api_lib_send_async_msg_to_server(&msg);	// Issue suicide request to be handled in main thread context
 		pt_err = pthread_join(p->comm_thread, NULL);
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(tscnlssk, "join failed @PTHREAD, @AUTO_ERRNO", p->comm_thread);
+			N_Ef(tscnlssk, "join failed @PTHREAD, err=@INT (@STR)", p->comm_thread, pt_err, strerror(pt_err));
 		}
 		p->comm_thread = 0;
 	}

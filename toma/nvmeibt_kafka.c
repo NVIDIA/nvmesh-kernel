@@ -2350,8 +2350,7 @@ int nvmeibt_kafka_launch(void) {
 	if (pt_err == 0) {
 		pthread_setname_np(kafka_maintenance_thread_tid, "kafka_main");
 	} else {
-		errno = pt_err;
-		N_Ef(4aikrbw, "failed to launch the nvmeibt_kafka_maintenance_thread (@AUTO_ERRNO)");
+		N_Ef(4aikrbw, "failed to launch the nvmeibt_kafka_maintenance_thread err=@INT (@STR)", pt_err, strerror(pt_err));
 		rv = -1;
 	}
 	NFOUT;

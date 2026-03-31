@@ -68,9 +68,8 @@ enum nvmeibt_add_rv nvmeibt_node_add(struct mm_node_conf *conf, int config_tag)
 	{
 		int pt_err = pthread_mutex_init(&new_node->guard, NULL);
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(error_node_nvmeibt_node_add, "Failed to create node @NODE_NAME guard @AUTO_ERRNO",
-				nvmeibt_node_name(new_node));
+			N_Ef(error_node_nvmeibt_node_add, "Failed to create node @NODE_NAME guard err=@INT (@STR)",
+				nvmeibt_node_name(new_node), pt_err, strerror(pt_err));
 			rv = NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL;
 			goto out;
 		}
@@ -164,8 +163,7 @@ static int lock(struct nvmeibt_node *node)
 
 	NFIN;
 	if ((rv = pthread_mutex_lock(&node->guard)) != 0) {
-		errno = rv;
-		N_Ef(error_node_lock, "Failed to lock node @NODE_NAME guard @AUTO_ERRNO", nvmeibt_node_name(node));
+		N_Ef(error_node_lock, "Failed to lock node @NODE_NAME guard err=@INT (@STR)", nvmeibt_node_name(node), rv, strerror(rv));
 		nvmeibt_abort(ES_FATAL);
 	}
 	NFOUT;
@@ -178,8 +176,7 @@ static int unlock(struct nvmeibt_node *node)
 
 	NFIN;
 	if ((rv = pthread_mutex_unlock(&node->guard)) != 0) {
-		errno = rv;
-		N_Ef(error_node_unlock, "Failed to unlock node @NODE_NAME guard @AUTO_ERRNO", nvmeibt_node_name(node));
+		N_Ef(error_node_unlock, "Failed to unlock node @NODE_NAME guard err=@INT (@STR)", nvmeibt_node_name(node), rv, strerror(rv));
 		nvmeibt_abort(ES_FATAL);
 	}
 	NFOUT;
@@ -257,8 +254,7 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 			{
 				int pt_err = pthread_mutex_destroy(&node->guard);
 				if (pt_err) {
-					errno = pt_err;
-					N_Ef(xx_33, "Failed to destroy node guard @AUTO_ERRNO");
+					N_Ef(xx_33, "Failed to destroy node guard err=@INT (@STR)", pt_err, strerror(pt_err));
 				}
 			}
 			nvmeibt_topology_leader_detach_all_disks_from_raft_member(nvmeibt_node_get_raft_member(node));

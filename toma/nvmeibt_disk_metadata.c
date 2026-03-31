@@ -99,8 +99,7 @@ static void netlink_io_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_re
 
 	pt_err = pthread_mutex_lock(&nl_io_data->io_guard_mutex);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(__AUTOID__, "Cannot wakeup caller thread, cannot lock_mutex error: @AUTO_ERRNO");
+		N_Ef(__AUTOID__, "Cannot wakeup caller thread, cannot lock_mutex error: @INT (@STR)", pt_err, strerror(pt_err));
 		nvmeibt_abort(ES_FATAL);
 	}
 
@@ -109,15 +108,13 @@ static void netlink_io_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_re
 	// Wake the thread that called this netlink operation.
 	pt_err = pthread_cond_signal(&nl_io_data->completion_signal);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(__AUTOID__, "Cannot wakeup caller thread with cond_var=@COND_VAR pthread signal error: @AUTO_ERRNO", &nl_io_data->completion_signal);
+		N_Ef(__AUTOID__, "Cannot wakeup caller thread with cond_var=@COND_VAR pthread signal error: @INT (@STR)", &nl_io_data->completion_signal, pt_err, strerror(pt_err));
 		nvmeibt_abort(ES_FATAL);
 	}
 
 	pt_err = pthread_mutex_unlock(&nl_io_data->io_guard_mutex);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(__AUTOID__, "Cannot wakeup caller thread, cannot unlock_mutex error: @AUTO_ERRNO");
+		N_Ef(__AUTOID__, "Cannot wakeup caller thread, cannot unlock_mutex error: @INT (@STR)", pt_err, strerror(pt_err));
 		nvmeibt_abort(ES_FATAL);
 	}
 	NFOUT;
@@ -139,26 +136,22 @@ struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmei
 	{ _Static_assert((char *)&nl_ctx->nl_msg.data[0] == (char *)&nl_ctx->nl_msg_payload, "Bad packing of netlink struct"); }
 	pt_err = pthread_mutex_init(&nl_ctx->io_guard_mutex, NULL);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(trace_mnl_2, "Failed to create netlink context guard @AUTO_ERRNO");
+		N_Ef(trace_mnl_2, "Failed to create netlink context guard err=@INT (@STR)", pt_err, strerror(pt_err));
 		goto out;
 	}
 	pt_err = pthread_condattr_init(&nl_ctx->attr);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(trace_mnl_3, "Failed to create cond var attr @AUTO_ERRNO");
+		N_Ef(trace_mnl_3, "Failed to create cond var attr err=@INT (@STR)", pt_err, strerror(pt_err));
 		goto out;
 	}
 	pt_err = pthread_cond_init(&nl_ctx->completion_signal, &nl_ctx->attr);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(trace_mnl_4, "Failed to create netlink context cond var @AUTO_ERRNO");
+		N_Ef(trace_mnl_4, "Failed to create netlink context cond var err=@INT (@STR)", pt_err, strerror(pt_err));
 		goto out;
 	}
 	pt_err = pthread_mutex_lock(&nl_ctx->io_guard_mutex);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(trace_mnl_5, "Cannot wakeup caller thread, cannot lock_mutex error: @AUTO_ERRNO");
+		N_Ef(trace_mnl_5, "Cannot wakeup caller thread, cannot lock_mutex error: @INT (@STR)", pt_err, strerror(pt_err));
 		goto out;
 	}
 
@@ -237,16 +230,14 @@ int nvmeibt_netlink_do_io_sync(struct netlink_io_context *nl_ctx)
 		// Wait for netlink IO to finish, this is the only place where we unlock and immediate re-lock mutex upon wakeup.
 		pt_err = pthread_cond_wait(&nl_ctx->completion_signal, &nl_ctx->io_guard_mutex);
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(trace_nnis_2, "Cannot wait for netlink IO to finish, cond_var=@COND_VAR error: @AUTO_ERRNO", &nl_ctx->completion_signal);
+			N_Ef(trace_nnis_2, "Cannot wait for netlink IO to finish, cond_var=@COND_VAR error: @INT (@STR)", &nl_ctx->completion_signal, pt_err, strerror(pt_err));
 			goto out;
 		}
 
 		rv = nl_ctx->rv;
 		pt_err = pthread_cond_init(&nl_ctx->completion_signal, &nl_ctx->attr); // for next call
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(trace_nnis_3, "pthread_cond_init failed @AUTO_ERRNO");
+			N_Ef(trace_nnis_3, "pthread_cond_init failed err=@INT (@STR)", pt_err, strerror(pt_err));
 		}
 
 		data += data_len_bytes;
@@ -265,18 +256,15 @@ void nvmeibt_netlink_io_free(struct netlink_io_context **nl_ctx_p)
 		struct netlink_io_context *nl_ctx = *nl_ctx_p;
 		int pt_err = pthread_mutex_unlock(&nl_ctx->io_guard_mutex);
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(xx_42, "pthread_mutex_unlock failed @AUTO_ERRNO");
+			N_Ef(xx_42, "pthread_mutex_unlock failed err=@INT (@STR)", pt_err, strerror(pt_err));
 		}
 		pt_err = pthread_cond_destroy(&nl_ctx->completion_signal);
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(xx_43, "pthread_cond_destroy failed @AUTO_ERRNO");
+			N_Ef(xx_43, "pthread_cond_destroy failed err=@INT (@STR)", pt_err, strerror(pt_err));
 		}
 		pt_err = pthread_mutex_destroy(&nl_ctx->io_guard_mutex);
 		if (pt_err != 0) {
-			errno = pt_err;
-			N_Ef(xx_44, "pthread_mutex_destroy failed @AUTO_ERRNO");
+			N_Ef(xx_44, "pthread_mutex_destroy failed err=@INT (@STR)", pt_err, strerror(pt_err));
 		}
 		NNVMEIBT_BM_FREE(trace_nnif_1, nl_ctx);
 		*nl_ctx_p = NULL;

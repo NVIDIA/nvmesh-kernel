@@ -33,8 +33,7 @@ const char* nvmeibt_wq_get_name(const struct nvmeibt_wq *wq)
 static int lock(struct nvmeibt_wq *wq) {
 	const int rv = pthread_mutex_lock(&wq->guard);
 	if (rv != 0) {
-		errno = rv;
-		N__E(error_wq_lock, "Failed to lock wq guard (rv=@RV) @AUTO_ERRNO", rv);
+		N__E(error_wq_lock, "Failed to lock wq guard rv=@INT (@STR)", rv, strerror(rv));
 		return -1;
 	}
 	return 0;
@@ -43,8 +42,7 @@ static int lock(struct nvmeibt_wq *wq) {
 static int wakeup(struct nvmeibt_wq *wq) {
 	const int rv = pthread_cond_signal(&wq->wakeup);
 	if (rv != 0) {
-		errno = rv;
-		N__E(error_wq_wakeup, "Failed to signal wq cond (rv=@RV) @AUTO_ERRNO", rv);
+		N__E(error_wq_wakeup, "Failed to signal wq cond rv=@INT (@STR)", rv, strerror(rv));
 		return -1;
 	}
 	return 0;
@@ -53,8 +51,7 @@ static int wakeup(struct nvmeibt_wq *wq) {
 static int unlock(struct nvmeibt_wq *wq) {
 	const int rv = pthread_mutex_unlock(&wq->guard);
 	if (rv != 0) {
-		errno = rv;
-		N__E(error_wq_unlock, "Failed to unlock wq guard (rv=@RV) @AUTO_ERRNO", rv);
+		N__E(error_wq_unlock, "Failed to unlock wq guard rv=@INT (@STR)", rv, strerror(rv));
 		return -1;
 	}
 	return 0;
@@ -83,8 +80,7 @@ static int timed_wait(struct nvmeibt_wq *wq, int ms) {
 			return -1;
 		}
 	} else if ((rv = pthread_cond_wait(cond, m)) != 0) {
-			errno = rv;
-			N__E(ettwwq1, "Failed to wait for wq cond rv=@RV, @AUTO_ERRNO", rv);
+			N__E(ettwwq1, "Failed to wait for wq cond rv=@INT (@STR)", rv, strerror(rv));
 			return -1;
 	}
 	return 0;
@@ -110,12 +106,10 @@ static void delete_wq_thread(struct nvmeibt_wq *wq) {
 	int pt_err;
 	// NFIN;
 	if ((pt_err = pthread_cond_destroy(&wq->wakeup))) {
-		errno = pt_err;
-		N_Ef(xx_40, "pthread_cond_destroy failed @AUTO_ERRNO");
+		N_Ef(xx_40, "pthread_cond_destroy failed err=@INT (@STR)", pt_err, strerror(pt_err));
 	}
 	if ((pt_err = pthread_mutex_destroy(&wq->guard))) {
-		errno = pt_err;
-		N_Ef(xx_41, "pthread_mutex_destroy failed @AUTO_ERRNO");
+		N_Ef(xx_41, "pthread_mutex_destroy failed err=@INT (@STR)", pt_err, strerror(pt_err));
 	}
 	NNVMEIBT_TOMA_FREE(trace_wq_delete_wq_thread, wq->name);
 	NNVMEIBT_TOMA_FREE(trace_1_wq_delete_wq_thread, wq);
@@ -171,20 +165,17 @@ struct nvmeibt_wq *nvmeibt_wq_create(const char *name) {
 	wq->cont = true;
 	pt_err = pthread_mutex_init(&wq->guard, NULL);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N__E(ttwqce2, "wq=@WQ_NAME failed to create wq guard @AUTO_ERRNO", wq->name);
+		N__E(ttwqce2, "wq=@WQ_NAME failed to create wq guard err=@INT (@STR)", wq->name, pt_err, strerror(pt_err));
 		goto free_exec;
 	}
 	pt_err = pthread_condattr_init(&cattr);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N__E(ttwqce3, "wq=@WQ_NAME failed to create wq cond var attr @AUTO_ERRNO", wq->name);
+		N__E(ttwqce3, "wq=@WQ_NAME failed to create wq cond var attr err=@INT (@STR)", wq->name, pt_err, strerror(pt_err));
 		goto free_guard;
 	}
 	pt_err = pthread_cond_init(&wq->wakeup, &cattr);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N__E(ttwqce4, "wq=@WQ_NAME failed to create wq cond var @AUTO_ERRNO", wq->name);
+		N__E(ttwqce4, "wq=@WQ_NAME failed to create wq cond var err=@INT (@STR)", wq->name, pt_err, strerror(pt_err));
 		goto free_guard;
 	}
 	XDLIST_HEAD_INIT(&wq->entries1);
@@ -193,14 +184,12 @@ struct nvmeibt_wq *nvmeibt_wq_create(const char *name) {
 
 	pt_err = pthread_attr_init(&tattr);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N__E(ttwqce5, "wq=@WQ_NAME failed to init wq thread attr @AUTO_ERRNO", wq->name);
+		N__E(ttwqce5, "wq=@WQ_NAME failed to init wq thread attr err=@INT (@STR)", wq->name, pt_err, strerror(pt_err));
 		goto free_cond;
 	}
 	pt_err = pthread_create(&wq->thr, &tattr, wq_func, wq);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N__E(ttwqce6, "wq=@WQ_NAME failed to start the wq thread @AUTO_ERRNO", wq->name);
+		N__E(ttwqce6, "wq=@WQ_NAME failed to start the wq thread err=@INT (@STR)", wq->name, pt_err, strerror(pt_err));
 		goto free_cond;
 	}
 	{
@@ -270,8 +259,7 @@ void nvmeibt_wq_destroy(struct nvmeibt_wq *wq) {
 		jrv = pthread_join(wq->thr, &th_rv);
 
 	if (jrv != 0) {
-		errno = jrv;
-		N_Tf(ttwqd56, "Fail to join thr=@PTHREAD name=@NAME '@AUTO_ERRNO' jrv=@JRV", wq->thr, wq->name, strerror(jrv));
+		N_Tf(ttwqd56, "Fail to join thr=@PTHREAD name=@NAME jrv=@INT (@JRV)", wq->thr, wq->name, jrv, strerror(jrv));
 		nvmeibt_wq_stuck_pthread_add(wq);
 	} else {
 		N_Tf(ttwqd57, "Joined wq thr=@PTHREAD name=@NAME", wq->thr, wq->name);

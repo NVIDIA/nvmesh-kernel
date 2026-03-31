@@ -250,8 +250,7 @@ int init_signal_handling(const char *exe_name)
 	sigaddset(&mask, SIGHUP);
 	pt_err = pthread_sigmask(SIG_BLOCK, &mask, &block_sig_mask);
 	if (pt_err != 0) {
-		errno = pt_err;
-		N_Ef(trace_4_toma_init_signal_handling, "pthread_sigmask failed @ERRNO @AUTO_ERRNO", pt_err);
+		N_Ef(trace_4_toma_init_signal_handling, "pthread_sigmask failed err=@INT (@STR)", pt_err, strerror(pt_err));
 		rv = -1;
 		goto out;
 	}
