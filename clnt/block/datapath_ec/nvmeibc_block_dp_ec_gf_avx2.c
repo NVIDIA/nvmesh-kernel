@@ -24,7 +24,7 @@
 #endif
 
 /* A faithful port of the shipped asm in nvmeibc_block_dp_ec_gf_asm.S_shipped to C + AVX2 intrinsics.
-This removes the need for mucking around with the Kbuild and objtool non-standard asm handling.
+This removes the need for mucking around with the Kbuild and objtool non-standard asm handling which breaks often.
 Tested using unittests in uni_scenarios/uni_scenario_gf.c.
 */
 
@@ -45,23 +45,24 @@ int gf_asm_count = 10;
 #define AVX2_ITER_SIZE 128
 
 /*
- * The shipped asm used vmovntdqa (non-temporal aligned load) and vmovntdq
- * (non-temporal aligned store). These intrinsics do the same.
+ * Non-temporal load/store matching the shipped asm (vmovntdqa / vmovntdq).
+ * Both require 32-byte aligned addresses (#GP otherwise).
  */
 static inline __m256i loadu(const void *p)
 {
-	return _mm256_loadu_si256((const __m256i *)p);
+	return _mm256_stream_load_si256((const __m256i *)p);
 }
 
-static inline void stream_store(void *p, __m256i v)
+static inline void storeu(void *p, __m256i v)
 {
-	_mm256_storeu_si256((__m256i *)p, v);
+	_mm256_stream_si256((__m256i *)p, v);
 }
 
 static inline void prefetch_nta(const void *p)
 {
 	__builtin_prefetch(p, 0, 0);
 }
+
 
 /*
  * CRC32C over one ymm (32 bytes / four u64 lanes).
@@ -108,7 +109,7 @@ void ec_encode_data_p_avx2(int len, int rows, unsigned char **data, unsigned cha
 		for (i = rows - 1; i >= 0; i--) {
 			base = data[i];
 			prefetch_nta(base + j + 128);
-			prefetch_nta(base + j + 196);
+			prefetch_nta(base + j + 192);
 			D0 = loadu(base + j);
 			D1 = loadu(base + j + 32);
 			D2 = loadu(base + j + 64);
@@ -120,10 +121,10 @@ void ec_encode_data_p_avx2(int len, int rows, unsigned char **data, unsigned cha
 
 			if (data_copy && data_copy[i]) {
 				base = data_copy[i];
-				stream_store(base + j, D0);
-				stream_store(base + j + 32, D1);
-				stream_store(base + j + 64, D2);
-				stream_store(base + j + 96, D3);
+				storeu(base + j, D0);
+				storeu(base + j + 32, D1);
+				storeu(base + j + 64, D2);
+				storeu(base + j + 96, D3);
 			}
 
 			if (crcp) {
@@ -138,10 +139,10 @@ void ec_encode_data_p_avx2(int len, int rows, unsigned char **data, unsigned cha
 		}
 
 		base = coding[0];
-		stream_store(base + j, P0);
-		stream_store(base + j + 32, P1);
-		stream_store(base + j + 64, P2);
-		stream_store(base + j + 96, P3);
+		storeu(base + j, P0);
+		storeu(base + j + 32, P1);
+		storeu(base + j + 64, P2);
+		storeu(base + j + 96, P3);
 
 		if (crcp) {
 			u32 c = crcp[rows];
@@ -208,10 +209,10 @@ void ec_encode_data_q_avx2(int len, int rows, unsigned char **data, unsigned cha
 
 		if (data_copy && data_copy[i]) {
 			base = data_copy[i];
-			stream_store(base + j, Q0);
-			stream_store(base + j + 32, Q1);
-			stream_store(base + j + 64, Q2);
-			stream_store(base + j + 96, Q3);
+			storeu(base + j, Q0);
+			storeu(base + j + 32, Q1);
+			storeu(base + j + 64, Q2);
+			storeu(base + j + 96, Q3);
 		}
 
 		if (crcp) {
@@ -239,10 +240,10 @@ void ec_encode_data_q_avx2(int len, int rows, unsigned char **data, unsigned cha
 
 			if (data_copy && data_copy[i]) {
 				base = data_copy[i];
-				stream_store(base + j, D0);
-				stream_store(base + j + 32, D1);
-				stream_store(base + j + 64, D2);
-				stream_store(base + j + 96, D3);
+				storeu(base + j, D0);
+				storeu(base + j + 32, D1);
+				storeu(base + j + 64, D2);
+				storeu(base + j + 96, D3);
 			}
 
 			if (crcp) {
@@ -257,10 +258,10 @@ void ec_encode_data_q_avx2(int len, int rows, unsigned char **data, unsigned cha
 		}
 
 		base = coding[1];
-		stream_store(base + j, Q0);
-		stream_store(base + j + 32, Q1);
-		stream_store(base + j + 64, Q2);
-		stream_store(base + j + 96, Q3);
+		storeu(base + j, Q0);
+		storeu(base + j + 32, Q1);
+		storeu(base + j + 64, Q2);
+		storeu(base + j + 96, Q3);
 
 		if (crcp) {
 			u32 c = crcp[rows + 1];
@@ -304,10 +305,10 @@ void ec_encode_data_pq_avx2(int len, int rows, unsigned char **data, unsigned ch
 
 		if (data_copy && data_copy[i]) {
 			base = data_copy[i];
-			stream_store(base + j, Q0);
-			stream_store(base + j + 32, Q1);
-			stream_store(base + j + 64, Q2);
-			stream_store(base + j + 96, Q3);
+			storeu(base + j, Q0);
+			storeu(base + j + 32, Q1);
+			storeu(base + j + 64, Q2);
+			storeu(base + j + 96, Q3);
 		}
 
 		if (crcp) {
@@ -335,10 +336,10 @@ void ec_encode_data_pq_avx2(int len, int rows, unsigned char **data, unsigned ch
 
 			if (data_copy && data_copy[i]) {
 				base = data_copy[i];
-				stream_store(base + j, D0);
-				stream_store(base + j + 32, D1);
-				stream_store(base + j + 64, D2);
-				stream_store(base + j + 96, D3);
+				storeu(base + j, D0);
+				storeu(base + j + 32, D1);
+				storeu(base + j + 64, D2);
+				storeu(base + j + 96, D3);
 			}
 
 			if (crcp) {
@@ -353,16 +354,16 @@ void ec_encode_data_pq_avx2(int len, int rows, unsigned char **data, unsigned ch
 		}
 
 		base = coding[0];
-		stream_store(base + j, P0);
-		stream_store(base + j + 32, P1);
-		stream_store(base + j + 64, P2);
-		stream_store(base + j + 96, P3);
+		storeu(base + j, P0);
+		storeu(base + j + 32, P1);
+		storeu(base + j + 64, P2);
+		storeu(base + j + 96, P3);
 
 		base = coding[1];
-		stream_store(base + j, Q0);
-		stream_store(base + j + 32, Q1);
-		stream_store(base + j + 64, Q2);
-		stream_store(base + j + 96, Q3);
+		storeu(base + j, Q0);
+		storeu(base + j + 32, Q1);
+		storeu(base + j + 64, Q2);
+		storeu(base + j + 96, Q3);
 
 		if (crcp) {
 			u32 c = crcp[rows];
@@ -415,10 +416,10 @@ enum gf_return_val ec_encode_data_update_avx2(int len, int k, int vec_i, unsigne
 		P3 = loadu(base + j + 96);
 
 		if (data_copy) {
-			stream_store(data_copy + j, P0);
-			stream_store(data_copy + j + 32, P1);
-			stream_store(data_copy + j + 64, P2);
-			stream_store(data_copy + j + 96, P3);
+			storeu(data_copy + j, P0);
+			storeu(data_copy + j + 32, P1);
+			storeu(data_copy + j + 64, P2);
+			storeu(data_copy + j + 96, P3);
 		}
 
 		if (crcp) {
@@ -465,10 +466,10 @@ enum gf_return_val ec_encode_data_update_avx2(int len, int k, int vec_i, unsigne
 			Q3 = _mm256_xor_si256(temp, Q3);
 
 			base = coding[1];
-			stream_store(base + j, Q0);
-			stream_store(base + j + 32, Q1);
-			stream_store(base + j + 64, Q2);
-			stream_store(base + j + 96, Q3);
+			storeu(base + j, Q0);
+			storeu(base + j + 32, Q1);
+			storeu(base + j + 64, Q2);
+			storeu(base + j + 96, Q3);
 
 			if (crcp) {
 				u32 c = crcp[2];
@@ -492,10 +493,10 @@ enum gf_return_val ec_encode_data_update_avx2(int len, int k, int vec_i, unsigne
 		P3 = _mm256_xor_si256(temp, P3);
 
 		base = coding[0];
-		stream_store(base + j, P0);
-		stream_store(base + j + 32, P1);
-		stream_store(base + j + 64, P2);
-		stream_store(base + j + 96, P3);
+		storeu(base + j, P0);
+		storeu(base + j + 32, P1);
+		storeu(base + j + 64, P2);
+		storeu(base + j + 96, P3);
 
 		if (crcp) {
 			u32 c = crcp[1];
@@ -544,10 +545,10 @@ void ec_decode_data_p_avx2(int len, int rows, int d0, unsigned char **data,
 		}
 
 		base = new_data[0];
-		stream_store(base + j, P0);
-		stream_store(base + j + 32, P1);
-		stream_store(base + j + 64, P2);
-		stream_store(base + j + 96, P3);
+		storeu(base + j, P0);
+		storeu(base + j + 32, P1);
+		storeu(base + j + 64, P2);
+		storeu(base + j + 96, P3);
 
 		if (crcp) {
 			u32 c = crcp[0];
@@ -636,10 +637,10 @@ void ec_decode_data_q_avx2(int len, int rows, int d0, unsigned char **data,
 		}
 
 		base = new_data[0];
-		stream_store(base + j, Q0);
-		stream_store(base + j + 32, Q1);
-		stream_store(base + j + 64, Q2);
-		stream_store(base + j + 96, Q3);
+		storeu(base + j, Q0);
+		storeu(base + j + 32, Q1);
+		storeu(base + j + 64, Q2);
+		storeu(base + j + 96, Q3);
 
 		if (crcp) {
 			u32 c = crcp[0];
@@ -755,10 +756,10 @@ void ec_decode_data_pq_avx2_asm(int len, int rows, int d0, int d1, unsigned char
 		}
 
 		base = new_data[0];
-		stream_store(base + j, Q0);
-		stream_store(base + j + 32, Q1);
-		stream_store(base + j + 64, Q2);
-		stream_store(base + j + 96, Q3);
+		storeu(base + j, Q0);
+		storeu(base + j + 32, Q1);
+		storeu(base + j + 64, Q2);
+		storeu(base + j + 96, Q3);
 
 		if (new_data[1]) {
 			P0 = _mm256_xor_si256(Q0, P0);
@@ -766,10 +767,10 @@ void ec_decode_data_pq_avx2_asm(int len, int rows, int d0, int d1, unsigned char
 			P2 = _mm256_xor_si256(Q2, P2);
 			P3 = _mm256_xor_si256(Q3, P3);
 			base = new_data[1];
-			stream_store(base + j, P0);
-			stream_store(base + j + 32, P1);
-			stream_store(base + j + 64, P2);
-			stream_store(base + j + 96, P3);
+			storeu(base + j, P0);
+			storeu(base + j + 32, P1);
+			storeu(base + j + 64, P2);
+			storeu(base + j + 96, P3);
 		}
 
 		if (crcp) {
