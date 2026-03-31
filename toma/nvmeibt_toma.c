@@ -2202,7 +2202,7 @@ static void write_stat_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-static void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
+void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
 {
 	struct timespec				now;
 	struct tm					timeinfo;
