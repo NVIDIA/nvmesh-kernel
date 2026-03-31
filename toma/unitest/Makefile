@@ -107,7 +107,7 @@ SOURCES += 00_framework/toma_test_framework.c 00_framework/toma_test_helpers.c
 SOURCES += 13_mgmt/mongodb_simu.c mgmt_sim.c kafka/sandbox_kafka.c sandbox_nvme.c toma_in_sandbox.c server/sandbox_nvmeibs_toma.c
 SOURCES += os/nvmeibt_udev_simu.c
 SOURCES += 17_clnt/clnt_simu.c
-SOURCES += 91_tests_components/topo_merge_test.c 91_tests_components/toma_test_framework_smoke.c
+SOURCES += 91_tests_components/topo_merge_test.c 91_tests_components/toma_test_framework_smoke.c 91_tests_components/realloc_upd_test.c
 SOURCES += 90_tests_black_box/unit_test_main.c
 
 TDIR=./..

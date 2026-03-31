@@ -36,6 +36,12 @@ extern int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *d
 	const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
 	char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr);
 
+/* Realloc and update — nvmeibt_raft.c */
+extern struct nvmeibt_persist_and_wire_buf *TEST_realloc_and_upd_follower_persist_and_wire_bufs(
+	struct nvmeibt_persist_and_wire_buf *old,
+	const struct nvmeibt_persist_and_wire_buf *upd,
+	bool is_with_raft_log);
+
 /* Validation — nvmeibt_raft.c (non-static, no header decl) */
 extern void persist_and_wire_buf_validate_len(const struct nvmeibt_persist_and_wire_buf *b);
 
