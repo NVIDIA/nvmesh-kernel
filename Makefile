@@ -594,6 +594,9 @@ COMPILE_MODULES=\
 	LINUXINCLUDE=$(LINUX_INCLUDE) \
 	KBUILD_EXTRA_SYMBOLS="$(OFED_SYMVERS) $(BNXT_SYMVERS) $(SIW_SYMVERS)" modules
 
+COMPILE_CMDS_JSON=\
+    -$(VV)$(NVMESH_SRC_DIR)/gen_compile_commands.py -d $(NVMESH_SRC_DIR) -o $(NVMESH_SRC_DIR)/compile_commands.json -r $(KSRC)
+
 all:
 	$(info ============== Build Configuration ================)
 	$(info CC: $(shell which $(CC)) - $(shell $(CC)  --version | head -1))
@@ -645,6 +648,7 @@ ifeq ($(IS_TOMA_FIRST),true)
 	$(COMPILE_MODULES)
 endif
 endif
+	+$(VV)$(COMPILE_CMDS_JSON)
 	+$(VV)$(COMPILE_UTILS)
 	$(MAKE) -C $(TOOLS_DIR)/toma_rpc
 	$(VV)$(COMPILE_PET)
