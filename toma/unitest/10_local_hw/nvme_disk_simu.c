@@ -5,9 +5,9 @@
 
 #define TOMA_SANDBOX_BYPASS_REDIRECTS // allow calling real OS I/O functions from this module - must be defined before any other includes
 #include "nvmeibt_debug.h"
-#include "sandbox_nvme.h"
-#include "toma_in_sandbox.h"
-#include "13_mgmt/mongodb_simu.h"		// Disk conf
+#include "nvme_disk_simu.h"
+#include "../toma_in_sandbox.h"
+#include "../13_mgmt/mongodb_simu.h"		// Disk conf
 #include <sys/stat.h>
 
 static const struct sandbox_nvme_lbaf lbaf_table[SANDBOX_NVME_LBAF_COUNT] = {

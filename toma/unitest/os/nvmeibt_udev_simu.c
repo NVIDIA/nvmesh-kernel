@@ -1,6 +1,6 @@
 #include "nvmeibt_debug.h"	// Binary tracing
 #include "nvmeibt_udev_simu_internal.h"
-#include "../sandbox_nvme.h"
+#include "../10_local_hw/nvme_disk_simu.h"
 
 /************************** internal simulators API **************************/
 static struct nvmeibt_udev_simu *g_t_udev_sim = NULL;

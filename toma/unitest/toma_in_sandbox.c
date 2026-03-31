@@ -38,7 +38,7 @@ void syslog(int priority, const char *fmt, ...) {
 #include <sys/stat.h>		// fstat()
 #include <errno.h>
 
-#include "sandbox_nvme.h"
+#include "10_local_hw/nvme_disk_simu.h"
 #include "interfaces/nvme/nvmeibt_nvme_defines.h"	// nvmeioctls
 #include <linux/fs.h>		// For BLKGETSIZE64, BLKSSZGET
 #include "server/sandbox_nvmeibs_toma.h"

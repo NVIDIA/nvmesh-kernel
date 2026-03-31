@@ -36,7 +36,7 @@ void clnt_simu_vol_unregister(struct sb_cluster_conf *cfg, int node_idx, int vol
 	reg->lock_id = 0;
 }
 
-#include "../sandbox_nvme.h"
+#include "../10_local_hw/nvme_disk_simu.h"
 static void __simulate_io_to_disk(struct clnt_simu *C, struct sandbox_nvme_device *disk, u32 dlba_blockset) {
 	union nvmeib_lock_blkset_entry *ptr = &((union nvmeib_lock_blkset_entry *)disk->ram.addr)[dlba_blockset];
 	struct clnt_praid_reg_ctx *reg = &C->regs[5];	// Todo: properly extract from registered client

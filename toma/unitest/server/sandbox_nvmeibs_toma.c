@@ -5,7 +5,7 @@
 
 #include "nvmeibt_debug.h"				// Binary traces
 #include "sandbox_nvmeibs_toma.h"
-#include "../sandbox_nvme.h"
+#include "../10_local_hw/nvme_disk_simu.h"
 
 static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
