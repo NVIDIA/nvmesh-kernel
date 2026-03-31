@@ -110,7 +110,7 @@ SOURCES += 13_mgmt/mongodb_simu.c mgmt_sim.c kafka/sandbox_kafka.c
 SOURCES += 15_server/sandbox_nvmeibs_toma.c
 SOURCES += toma_in_sandbox.c
 SOURCES += 17_clnt/clnt_simu.c
-SOURCES += 91_tests_components/topo_merge_test.c 91_tests_components/toma_test_framework_smoke.c 91_tests_components/realloc_upd_test.c
+SOURCES += 91_tests_components/wire_buf_test.c 91_tests_components/toma_test_framework_smoke.c
 SOURCES += 90_tests_black_box/unit_test_main.c
 
 TDIR=./..

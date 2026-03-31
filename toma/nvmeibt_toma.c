@@ -2709,8 +2709,7 @@ exit:
 extern int gpt_util_main(int argc, char *argv[]);
 #if defined(TOMA_SIMULATOR_SANDBOX)
 extern int test_framework_smoke_main(int argc, char *argv[]);
-extern int topo_merge_test_main(int argc, char *argv[]);
-extern int realloc_upd_test_main(int argc, char *argv[]);
+extern int wire_buf_test_main(int argc, char *argv[]);
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 
 static int run_dummy_empty(int argc, char *argv[])
@@ -2728,8 +2727,7 @@ struct {
 		{ "gpt_util", gpt_util_main },
 #if defined(TOMA_SIMULATOR_SANDBOX)
 		{ "test_framework", test_framework_smoke_main },
-		{ "topo_merge_test", topo_merge_test_main },
-		{ "realloc_upd_test", realloc_upd_test_main },
+		{ "wire_buf_test", wire_buf_test_main },
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 		{ "dummy", run_dummy_empty },
 };

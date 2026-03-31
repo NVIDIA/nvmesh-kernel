@@ -1,20 +1,20 @@
 /**
- * topo_merge_test.h - Topology merge unit tests
+ * wire_buf_test.h - Wire buffer unit tests
  *
- * Tests for persist_and_wire_buf_calculate_and_merge_data_to_section
- * (incremental topo merge). Uses toma_test_framework for registration and running.
+ * Tests for persist_and_wire_buf operations: per-section merge, follower
+ * realloc_and_upd orchestration, and incremental selection logic.
  *
- * Invoked via: ./nvmeibt_toma topo_merge_test [selection]
+ * Invoked via: ./nvmeibt_toma wire_buf_test [selection]
  */
 
-#ifndef TOPO_MERGE_TEST_H
-#define TOPO_MERGE_TEST_H
+#ifndef WIRE_BUF_TEST_H
+#define WIRE_BUF_TEST_H
 
 #include "nvmeibt_common.h"
 
-#define TOPO_MERGE_MAX_PRAIDS		64
-#define TOPO_MERGE_MAX_SEGS			8
-#define TOPO_MERGE_BUF_SIZE			(32 * 1024)
+#define WIRE_BUF_TEST_MAX_PRAIDS		64
+#define WIRE_BUF_TEST_MAX_SEGS			8
+#define WIRE_BUF_TEST_BUF_SIZE			(32 * 1024)
 
 //
 // Spec for a single praid used by the test helpers.
@@ -28,9 +28,9 @@ struct test_praid_spec {
 };
 
 //
-// Test context for topo merge tests (wire buffers, optional hash state).
+// Test context for section merge tests (wire buffers, optional hash state).
 //
-struct topo_merge_test_ctx {
+struct section_merge_test_ctx {
 	char	*old_buf;
 	char	*upd_buf;
 	char	*dst_buf;
@@ -40,7 +40,8 @@ struct topo_merge_test_ctx {
 //
 // X-macro test list: X(func_name, "Test Name", "Description")
 //
-#define TOPO_MERGE_TEST_LIST \
+
+#define WIRE_BUF_TEST_LIST \
 	/************************* Complete merges *************************/ \
 	/* -- Complete: topo -- */ \
 	X(complete_topo_replaces,						"Complete topo replaces old",				"Old complete + new complete => output == new") \
@@ -74,8 +75,17 @@ struct topo_merge_test_ctx {
 	/* -- Incremental: kafka mgmt config (not yet implemented) -- */ \
 	X(incremental_kafka_config_not_implemented,		"Kafka_config incremental => error",		"KAFKA_MGMT_CONFIG_INCREMENTAL not implemented, returns -1") \
 	/* -- Incremental: raft members (not yet implemented) -- */ \
-	X(incremental_raft_members_not_implemented,		"Raft_members incremental => error",		"RAFT_MEMBERS_INCREMENTAL not implemented, returns -1")
+	X(incremental_raft_members_not_implemented,		"Raft_members incremental => error",		"RAFT_MEMBERS_INCREMENTAL not implemented, returns -1") \
+	/********** Follower realloc_and_upd orchestration **************************/ \
+	X(first_update_with_raft_log,        "First update with raft log",        "old=NULL, raft_log=true => full memcpy of upd") \
+	X(first_update_without_raft_log,     "First update without raft log",     "old=NULL, raft_log=false => only raft_ctx copied") \
+	X(equal_bufs_only_raft_ctx_updated,  "Equal bufs updates raft_ctx only",  "All idx match => dst==old, raft_ctx+sw_ver updated") \
+	X(no_raft_log_keeps_old,             "No raft log keeps old",             "is_with_raft_log=false => dst==old regardless of idx diff") \
+	X(topo_only_same_size_inplace,       "Topo-only same size in-place",      "Only topo idx differs, same size => in-place merge") \
+	X(topo_only_diff_size_realloc,       "Topo-only diff size realloc",       "Only topo idx differs, different size => full alloc") \
+	X(full_alloc_topo_and_configs,       "Full alloc topo and configs",       "Multiple sections differ => new alloc, old freed") \
+	X(error_in_pass1_keeps_old,          "Error in pass1 keeps old buf",      "Bogus TLV type => merge returns -1 => dst==old")
 
-int topo_merge_test_main(int argc, char *argv[]);
+int wire_buf_test_main(int argc, char *argv[]);
 
-#endif // #ifndef TOPO_MERGE_TEST_H
+#endif // #ifndef WIRE_BUF_TEST_H

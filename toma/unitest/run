@@ -109,15 +109,9 @@ function T_SANDBOX_test_framework() {
 	__abort_ci_on_failure;
 }
 
-function T_SANDBOX_topo_merge_test() {
+function T_SANDBOX_wire_buf_test() {
 	__build_if_needed;
-	./${EXE_NAME} topo_merge_test ${@};
-	__abort_ci_on_failure;
-}
-
-function T_SANDBOX_realloc_upd_test() {
-	__build_if_needed;
-	./${EXE_NAME} realloc_upd_test ${@};
+	./${EXE_NAME} wire_buf_test ${@};
 	__abort_ci_on_failure;
 }
 
@@ -144,8 +138,7 @@ function T_SANDBOX_main_live_run() {
 case "$1" in
   rebuild*)		__force_rebuild;;
   framework*)	T_SANDBOX_test_framework ${@:2};;
-  realloc*)		T_SANDBOX_realloc_upd_test ${@:2};;
-  topo*)		T_SANDBOX_topo_merge_test ${@:2};;
+  wire*)		T_SANDBOX_wire_buf_test ${@:2};;
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;
   live*)		T_SANDBOX_main_live_run;;
   gpt*)			T_SANDBOX_gpt_util_self_unit_test ${@:2};;
@@ -159,8 +152,7 @@ case "$1" in
 	T_SANDBOX_toma_persist_json_test;
 	T_SANDBOX_gpt_util_self_unit_test;
 	T_SANDBOX_test_framework;
-	T_SANDBOX_topo_merge_test;
-	T_SANDBOX_realloc_upd_test;
+	T_SANDBOX_wire_buf_test;
 	date;
 	echo_green "************************ CI Done";
 	;;
@@ -171,8 +163,7 @@ case "$1" in
 	echo "    gpt_util          - Self test of gpt utility";
 	echo "    persistency       - Self test of Toma persistency utility";
 	echo "    framework         - Test framework smoke test";
-	echo "    topo_merge        - Topo merge unit tests";
-	echo "    realloc_upd       - Wire buf realloc & update two-pass merge tests";
+	echo "    wire_buf          - Wire buffer unit tests";
 	echo_yellow "  ------------ Debug, development tests:";
 	echo "    rebuild           - Fully recompile Toma. Pass additional make params like release compilation"
 	echo "    live              - Launch Toma to be able to manually play with it, RPC and others";
