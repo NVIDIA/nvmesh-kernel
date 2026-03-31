@@ -232,13 +232,6 @@ u16 nvmeibc_dbits_merge_owners(const union nvmeibc_dbits_entry *e1, const union 
 	return __nvmeibc_dbits_merge_by_strategy(e1, e2, MERGE_OPT_UNIFY, topo_traits);
 }
 
-struct nvmeibc_dbits_action nvmeibc_dbits_calc_diff_owners(const union nvmeibc_dbits_entry *e1, const union nvmeibc_dbits_entry *e2, const int num_parities) {
-	struct nvmeibc_dbits_action a1, a2;
-	nvmeibc_dbits_action_init_by_entry(&a1, e1, num_parities);
-	nvmeibc_dbits_action_init_by_entry(&a2, e2, num_parities);
-	return nvmeibc_dbits_action_merge(&a1, &a2, MO_DIFF);
-}
-
 u32 nvmeibc_dbits_tx_apply(const union nvmeibc_dbits_entry *e_pre,
 									 struct nvmeibc_dbits_tx *tx)
 {
