@@ -285,7 +285,6 @@ class ManagementCM(Daemon):
 
 			for srcCertFile, destCertFile in srcCertFiles:
 				shutil.copy2(srcCertFile, destCertFile)
-				os.chmod(destCertFile, 0o600)
 
 			self.logger.debug(f'Successfully copied TLS certificates to TLS certificates directory {TLS_CERTS_DIR}')
 
