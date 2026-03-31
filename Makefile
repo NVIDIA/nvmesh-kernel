@@ -574,7 +574,6 @@ LINUX_INCLUDE='\
     -I$$(srctree)/include \
     -I$$(srctree)/include/uapi \
     -Iinclude/generated/uapi \
-    $$(if $$(KBUILD_SRC),-Iinclude2 -I$$(srctree)/include) \
     -I$$(srctree)/arch/$$(SRCARCH)/include \
     -Iarch/$$(SRCARCH)/include/generated \
     -I$(NVMESH_SRC_DIR) -I$(NVMESH_SRC_DIR)/common -I$(NVMESH_SRC_DIR)/common_public -I$(NVMESH_SRC_DIR)/srv -I$(NVMESH_SRC_DIR)/clnt -I$(NVMESH_SRC_DIR)/toma\
