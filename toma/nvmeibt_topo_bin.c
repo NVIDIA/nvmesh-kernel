@@ -101,7 +101,7 @@ void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char
 				 serialized.is_activated, serialized.segs_num, serialized.topo_idx_updated);
 }
 
-void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr, unsigned int src_sw_ver)
+void nvmeibt_praid_convert_topo_le_be(const struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr, unsigned int src_sw_ver)
 {
 	{ _Static_assert(sizeof(struct nvmeibt_praid_serialized_topo) == 56, "Struct nvmeibt_praid_serialized_topo was changed without updating the serializing function! Also check all occurrences of the struct!"); }
 
@@ -208,7 +208,7 @@ void nvmeibt_topology_follower_print(int (*printf_fn)(void *ctx, const char *fmt
 	}
 }
 
-void nvmeibt_topology_convert_header_le_be(struct nvmeibt_topology_serialized_topo_header *src_ptr, struct nvmeibt_topology_serialized_topo_header *dst_ptr)
+void nvmeibt_topology_convert_header_le_be(const struct nvmeibt_topology_serialized_topo_header *src_ptr, struct nvmeibt_topology_serialized_topo_header *dst_ptr)
 {
 	memcpy(dst_ptr, src_ptr, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
 	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, sw_ver);

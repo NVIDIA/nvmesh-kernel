@@ -934,7 +934,7 @@ uint16_t nvmeibt_mm_mgmt_convert_to_wire_via_aligned_tmp(void *dst, struct mm_mg
 }
 
 #define MEMCPY_FIELD(_dst, _src)	({memcpy((_dst), (_src), sizeof(_dst));})
-uint16_t nvmeibt_raft_member_conf_convert_le_be(struct mm_raft_member_conf *dst, struct mm_raft_member_conf *src)
+uint16_t nvmeibt_raft_member_conf_convert_le_be(struct mm_raft_member_conf *dst, const struct mm_raft_member_conf *src)
 {
 	{ _Static_assert(sizeof(struct mm_raft_member_conf) == 112, "Struct mm_raft_member_conf was changed without updating the packing function!"); }
 	NTOMA_ASSERT(raft_member_align_dst, (uintptr_t)dst % 16 == 0, "dst=@PTR is not 16-byte aligned", dst);

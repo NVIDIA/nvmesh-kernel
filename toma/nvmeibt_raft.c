@@ -750,7 +750,7 @@ static int merge_raft_members_incremental(struct nvmeibt_wire_type_len_value *ds
 										  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr,
 										  int old_len, int upd_len)
 {
-	struct all_members_wire_buf_ctx		*new_members_wire_buf = NULL;
+	const struct all_members_wire_buf_ctx		*new_members_wire_buf = NULL;
 	struct all_members_wire_buf_ctx		*output_members_wire_buf = NULL;
 	char								*output_start = NULL;
 	int									n_new_members = 0;
@@ -770,7 +770,7 @@ static int merge_raft_members_incremental(struct nvmeibt_wire_type_len_value *ds
 		return old_len;
 	}
 
-	new_members_wire_buf = (struct all_members_wire_buf_ctx *)*upd_data_ptr;
+	new_members_wire_buf = (const struct all_members_wire_buf_ctx *)*upd_data_ptr;
 	n_new_members = LE_SWAP32(new_members_wire_buf->n_raft_members);
 
 	if (dst_data_ptr) {
@@ -1153,10 +1153,10 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 								  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr,
 								  int old_len, int upd_len)
 {
-	struct nvmeibt_topology_serialized_topo_header	*new_header = NULL;
+	const struct nvmeibt_topology_serialized_topo_header	*new_header = NULL;
 	struct nvmeibt_topology_serialized_topo_header	*output_header = NULL;
 	struct nvmeibt_topology_serialized_topo_header	new_serialized_header;
-	struct nvmeibt_praid_serialized_topo			*new_praid_ptr = NULL;
+	const struct nvmeibt_praid_serialized_topo		*new_praid_ptr = NULL;
 	struct nvmeibt_praid_topo_ctx					*old_committed_topo = NULL;
 	struct nvmeibt_praid							*praid_obj = NULL;
 	int												n_praids_in_result = 0;
@@ -1174,9 +1174,9 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 		return old_len;
 	}
 
-	new_header = (struct nvmeibt_topology_serialized_topo_header *)*upd_data_ptr;
+	new_header = (const struct nvmeibt_topology_serialized_topo_header *)*upd_data_ptr;
 	nvmeibt_topology_convert_header_le_be(new_header, &new_serialized_header);
-	new_praid_ptr = (struct nvmeibt_praid_serialized_topo *)(new_header + 1);
+	new_praid_ptr = (const struct nvmeibt_praid_serialized_topo *)(new_header + 1);
 	total_size = sizeof(struct nvmeibt_topology_serialized_topo_header);
 
 	if (dst_data_ptr) {
