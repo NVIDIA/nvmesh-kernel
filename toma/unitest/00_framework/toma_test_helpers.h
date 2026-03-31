@@ -1,0 +1,42 @@
+/**
+ * toma_test_helpers.h - Shared TEST_ function declarations for component tests
+ *
+ * Collects extern declarations for all TEST_ wrappers used by test suites
+ * in 91_tests_components/. Each TEST_ function is defined in the production
+ * source file that owns the state it accesses.
+ */
+
+#ifndef TOMA_TEST_HELPERS_H
+#define TOMA_TEST_HELPERS_H
+
+#include "nvmeibt_persistency_info.h"
+
+/* Test environment init — 00_framework/toma_test_helpers.c */
+extern void TEST_init(void);
+
+/* Praid hash — nvmeibt_praid.c */
+extern void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
+								   int praid_version_major, int praid_version_minor);
+extern void TEST_clear_praids_hash(void);
+
+/* Raft members hash — nvmeibt_raft.c */
+extern void TEST_init_raft_members_hash(void);
+extern void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hostname,
+										 int64_t seq_no_updated, int64_t kafka_offset);
+extern void TEST_clear_raft_members_hash(void);
+
+/* Blkdev hash — nvmeibt_global.c */
+extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
+									const void *wire_buf, int wire_len);
+extern void TEST_clear_blkdevs_hash(void);
+
+/* Per-section merge — nvmeibt_raft.c */
+extern int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+	const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+	const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+	char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr);
+
+/* Validation — nvmeibt_raft.c (non-static, no header decl) */
+extern void persist_and_wire_buf_validate_len(const struct nvmeibt_persist_and_wire_buf *b);
+
+#endif /* TOMA_TEST_HELPERS_H */

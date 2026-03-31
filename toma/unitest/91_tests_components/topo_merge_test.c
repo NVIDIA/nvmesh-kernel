@@ -18,11 +18,10 @@
 #include "nvmeibt_topo_bin.h"
 #include "nvmeibt_disk_segment.h"
 #include "unitest/00_framework/toma_test_framework.h"
+#include "unitest/00_framework/toma_test_helpers.h"
 #include "topo_merge_test.h"
 #include <stdlib.h>
 #include <string.h>
-
-extern void TEST_global_init(void);
 
 #define TOPO_HDR_NAME	"BIN_TOPO"
 
@@ -1325,7 +1324,7 @@ int topo_merge_test_main(int argc, char *argv[])
 	struct toma_test_entry tests[] = { TOPO_MERGE_TEST_LIST };
 	#undef X
 
-	TEST_global_init();
+	TEST_init();
 
 	ctx.buf_size = TOPO_MERGE_BUF_SIZE;
 	ctx.old_buf = (char *)malloc((size_t)ctx.buf_size);
