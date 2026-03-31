@@ -228,10 +228,28 @@ skip:
 	return 0;
 }
 
+static inline long get_current_rss_bytes(void)
+{
+	#if 0
+		const long page_bytes = sysconf(_SC_PAGESIZE);		// Slow method but gets more accurate info
+		long rss_pages = 0;
+		FILE *fp = fopen("/proc/self/statm", "r");
+		if (!fp)
+			return -1;
+		if (fscanf(fp, "%*s %ld", &rss_pages) != 1) {
+			rss_pages = -1;
+		}
+		fclose(fp);
+		return ((rss_pages > 0) && (page_bytes > 0)) ? rss_pages * page_bytes : -2;
+	#else
+		return (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);	// Only Toma internal allocator. Good enough for now
+	#endif
+}
+
 void nvmeibt_validate_alloc_free_summary_table(void)
 {
-	const size_t MAX_UNFREED_BYTES = (30UL << 30);	// 30[GB] mem. Todo: make configurable like raft_leader_heartbeat_timeout_usec
-	const size_t total_alloc_minus_free_bytes = (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);
+	const size_t MAX_UNFREED_BYTES = (30UL << 30);	// N[GB] mem. Todo: make configurable like raft_leader_heartbeat_timeout_usec
+	const size_t total_alloc_minus_free_bytes = get_current_rss_bytes();
 	if (total_alloc_minus_free_bytes >= MAX_UNFREED_BYTES) {		// Crash...
 		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 		struct nvmeibt_Str *mem_print = NNVMEIBT_STR_ALLOC(ttvafst0);
