@@ -22,9 +22,9 @@ function git_commit_id() {
 
         COMMIT_ID=$(git log -n1 --format=%h --abbrev="$abbrev")
         if [ -z "$COMMIT_ID" ]; then
-            COMMIT_ID="0x0"
+            COMMIT_ID="0"
         fi
-  	fi
+    fi
     echo "$COMMIT_ID"
 }
 
