@@ -168,7 +168,7 @@ static struct nvmeibc_dbits_action nvmeibc_dbits_action_merge(const struct nvmei
 	return rv;
 }
 
-sgmnts_bmp_t nvmeibc_dbits_get_bm(const union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits)
+sgmnts_bmp_t nvmeibc_dbits_get_turn_on_bmp(const union nvmeibc_dbits_entry *e, struct dp_topology_traits const* topo_traits)
 {
 	struct nvmeibc_dbits_action a;
 	nvmeibc_dbits_action_init_by_entry(&a, e, topo_traits->n_degraded);

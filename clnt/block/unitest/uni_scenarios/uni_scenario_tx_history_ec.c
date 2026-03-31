@@ -1024,7 +1024,7 @@ static u32 calc_dbit_rebuild_bm(struct t_ec_recov_tx *p, union nvmeibc_dbits_ent
 		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 
-	sgmnts_bmp_t ram_dbits_bm = nvmeibc_dbits_get_bm(&ram_dbits, &topo_traits);
+	sgmnts_bmp_t ram_dbits_bm = nvmeibc_dbits_get_turn_on_bmp(&ram_dbits, &topo_traits);
 	return ((ram_dbits_bm) & (topo_w_pr));
 }
 
@@ -1456,7 +1456,7 @@ static u32 __gen_post_recov_slice_dbits(struct t_ec_recov_tx *p, int h) {
 	bool is_valid_parity = !!((p->rer_bmp.topo.raid.pari) & (p->rer_bmp.topo.readable) & (~bad_sectors_affect_on_nwhole_sync_regen));
 	if (!is_valid_parity) {  // when no RW parities there are no source parities so iserting worst case to slice
 		const union nvmeibc_dbits_entry e = { .all_bits = p->lid.post_recov.blkset_info.bits.dirty };
-		dbits_pr = nvmeibc_dbits_get_bm(&e, &topo_traits);
+		dbits_pr = nvmeibc_dbits_get_turn_on_bmp(&e, &topo_traits);
 	} else {
 		dbit_bm = (((p->pre.slice_dbits[h] | ree_dbits_bm) & (~p->rer_bmp.total.slice_dbits_rebuild[h]) & (~p->rer_bmp.nwhole.regen)) | (p->rer_bmp.roll_fwd_by_dbits_turnon[h]) | (p->rer_bmp.whole.roll_bkw[h]) | (p->rer_bmp.nwhole.ram_dbits_turnon_on_turnoff));
 		dbits_pr = rol32_width(dbit_bm, __get_slice_start_seg(p), pr->replicas);
@@ -1528,7 +1528,7 @@ static u32 ec_tx_calc_rer_slice_dbits_after_nwhole(struct t_ec_recov_tx *p, u32 
 		.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 	};
 
-	const sgmnts_bmp_t post_recov_dbits_bmp_pr = nvmeibc_dbits_get_bm(&post_recov_slice_dbits_entry, &topo_traits);
+	const sgmnts_bmp_t post_recov_dbits_bmp_pr = nvmeibc_dbits_get_turn_on_bmp(&post_recov_slice_dbits_entry, &topo_traits);
 	const u32 turnoff_bmp_pr = p->rer_bmp.tx.will_call_nwhole_sync ? (post_recov_dbits_bmp_pr & topo_w_pr) : 0;
 	struct nvmeibc_dbits_tx db_tx;
 
@@ -2234,7 +2234,7 @@ static void __inject_full_recov_history(struct NVMeshSystem *sys, struct t_ec_tx
 					.n_degraded = ec_tx_calc_topo_ree_num_deg_segs(p),
 				};
 
-				p->inp.pre.history_ram_dbits = rol32_width(nvmeibc_dbits_get_bm(&e, &topo_traits), pr->replicas - __get_slice_start_seg(p), pr->replicas);
+				p->inp.pre.history_ram_dbits = rol32_width(nvmeibc_dbits_get_turn_on_bmp(&e, &topo_traits), pr->replicas - __get_slice_start_seg(p), pr->replicas);
 			} else {
 				p->inp.pre.history_ram_dbits = 0;
 			}

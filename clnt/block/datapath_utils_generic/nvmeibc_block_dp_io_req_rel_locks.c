@@ -645,7 +645,7 @@ bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_
 			struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(seg);
 			sgmnts_bmp_t clean_bm = nvmeibc_raid1_get_sgmnts_bmp(pr, readable);
 			const union nvmeibc_dbits_entry dbits_ent = { .all_bits = binfo.bits.dirty };
-			const sgmnts_bmp_t dbits_bm = nvmeibc_dbits_get_bm(&dbits_ent, &pr->calculated_data.topo_traits);
+			const sgmnts_bmp_t dbits_bm = nvmeibc_dbits_get_turn_on_bmp(&dbits_ent, &pr->calculated_data.topo_traits);
 			if (action == 'w') {			// Write IO/Sync, Strongest verification, Ensure the dbits that we are turning off cannot be set
 				clean_bm |= nvmeibc_raid1_get_sgmnts_bmp(pr, w);
 			} else if (action == 's') {		// Write-by-Sync, Weaker verification, same as above but can turn on convicts for W- topology
@@ -1104,7 +1104,7 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 	BUG_ON((l->status != dc->lock_status) || (l->type == NVMEIBC_CMD_PREDISCARD));		// Just sanity
 	WARN(!(NCL_is_failed_to_acquire(l->status) || (l->status == NCL_STATUS_CONTENDED) || (l->status == NCL_STATUS_TAKEN)), "nvmeibc bug: locks=%p[%d].status=%d", locksets, lock_i, l->status);
 	#ifdef DEBUG_CONTENDED_LOCKS
-		l->curr_txid = nvmeibc_d_rdma_comp_get_bi(dc).bits.txid;		
+		l->curr_txid = nvmeibc_d_rdma_comp_get_bi(dc).bits.txid;
 		if (dc->lock_status == NCL_STATUS_CONTENDED) {
 			l->curr_contender_id = nvmeibc_d_rdma_comp_get_lock_id(dc).all;
 			if (l->retries == 0) {

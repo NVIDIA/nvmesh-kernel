@@ -300,7 +300,7 @@ static union nvmeib_lock_id __get_worst_stale_possible(struct recovery_sync_op *
 
 static void __mark_read_to_dirty_w_seg_as_do_not_send(struct recovery_sync_op *so, const union nvmeibc_dbits_entry pre)
 {
-	u16 pre_dirty_bmp = nvmeibc_dbits_get_bm(&pre, &so->r1->calculated_data.topo_traits); // Use DBits from pre transaction to prevent reads
+	u16 pre_dirty_bmp = nvmeibc_dbits_get_turn_on_bmp(&pre, &so->r1->calculated_data.topo_traits); // Use DBits from pre transaction to prevent reads
 	if (pre_dirty_bmp) { 																		 // If any dirty bits are set (including convicts) we should not read them
 		const int slice_start = so_get_owner_seg(so);
 		if (slice_start) // Convert from seg index in praid to roles within slice

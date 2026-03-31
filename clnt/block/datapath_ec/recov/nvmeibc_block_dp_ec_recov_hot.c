@@ -2553,7 +2553,7 @@ static int htr_update_parity_segs_md(struct htr_ctx *h)
 	}
 
 	/* Convert new Dbits to bitmap */
-	new_dbit_bm = nvmeibc_dbits_get_bm(&h->cur_slice_info.new_dbits.slice_after_turnoff.post, &r1->calculated_data.topo_traits);
+	new_dbit_bm = nvmeibc_dbits_get_turn_on_bmp(&h->cur_slice_info.new_dbits.slice_after_turnoff.post, &r1->calculated_data.topo_traits);
 
 	/* Read RW parity seg, if not done yet */
 	if (!h->cur_slice_info.data_committed_on_rw_seg && h->txbm_topo.w == 0) {
@@ -2583,7 +2583,7 @@ static int htr_update_parity_segs_md(struct htr_ctx *h)
 			nbdpec_md_mark_data_never_written_no_dbits(&h->seg_info[si].dblk.md[h->cur_slice]->dmd, is_parity);  // We are going to write this block so set it to our version's nefverwritten without dbits cause dbits will be written in next stage
 
 		pmd_db = fill_nvmeibc_dbits_entry_from_md(pmd);
-		pmd_dbit_bm = nvmeibc_dbits_get_bm(&pmd_db, &r1->calculated_data.topo_traits);
+		pmd_dbit_bm = nvmeibc_dbits_get_turn_on_bmp(&pmd_db, &r1->calculated_data.topo_traits);
 
 		if (pmd_dbit_bm == new_dbit_bm)
 			continue;
