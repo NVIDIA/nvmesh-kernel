@@ -545,6 +545,7 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 		goto out;
 	}
 	last_invocation = now;
+	nvmeib_hash_tbl_arr_lock(all_active_hashs);
 	for (int i = 0; i < all_active_hashs->n_arr_entries; i++) {
 		last_scanned_idx = hash_next_idx_on_collision(last_scanned_idx, all_active_hashs->scrambled_to_idx_mask);	// In range, also if size changed
 		if (hash_is_entry_OCCUPIED(&(all_active_hashs->arr[last_scanned_idx]))) {
@@ -556,10 +557,12 @@ void nvmeib_hash_resize_all_tables_as_needed(void)
 		}
 		getnstimeofday_boot(&now);
 		if (timespec_diff_ns(now, last_invocation) > MSEC_TO_NSEC(10)) {
-			goto out;
+			goto out_and_unlock;
 		}
 	}
-out:;
+out_and_unlock:
+	nvmeib_hash_tbl_arr_unlock(all_active_hashs);
+out:
 	NFOUT;
 }
 
