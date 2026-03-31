@@ -209,11 +209,10 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		(*printf_fn)(printf_ctx, "total_alloc_minus_free=%jdM\n", total_alloc_minus_free_bytes >> 20);
 		(*printf_fn)(printf_ctx, "\n- - - - -   MEM alloc and free   - - - - -\n");
 		(*printf_fn)(printf_ctx, "File                          [Line] Type         n_calls          sum_sizes  sum_allocated_size\n");
-	}
-	else {
-		N_Tf(trace_0_common_nvmeibt_print_alloc_free_summary_table, "total_alloc_minus_free=@ZU M\n", total_alloc_minus_free_bytes >> 20);
-		N_Tf(trace_common_nvmeibt_print_alloc_free_summary_table, "\n- - - - -   MEM alloc and free   - - - - -");
-		N_Tf(trace_1_common_nvmeibt_print_alloc_free_summary_table, "File                          [Line] Type         n_calls          sum_sizes  sum_allocated_size");
+	} else {
+		N_Tf(ttpafst0, "total_alloc_minus_free=@ZU M\n", total_alloc_minus_free_bytes >> 20);
+		N_Tf(ttpafst1, "\n- - - - -   MEM alloc and free   - - - - -");
+		N_Tf(ttpafst2, "File                          [Line] Type         n_calls          sum_sizes  sum_allocated_size");
 	}
 	for (j = 0; j < 2; j++) {
 		for (i = 0; i < static_alloc_free_idx; i++) {
@@ -223,17 +222,15 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 			}
 			if (printf_fn) {
 				(*printf_fn)(printf_ctx, "%-30s[%4d] %c %18lld %18lld %18lldK\n", e->fname, e->line_no, e->type, e->n_calls, e->sum_sizes, e->sum_allocated_size >> 10);
-			}
-			else {
-				N_Tf(trace_2_common_nvmeibt_print_alloc_free_summary_table, "@FNAME[@LINE_NO] @E_TYPE @N_CALLS @SUM_SIZES sum_allocated_size=@SUM_ALLOCATED_SIZE", e->fname, e->line_no, e->type, e->n_calls, e->sum_sizes, e->sum_allocated_size >> 10);
+			} else {
+				N_Tf(ttpafst3, "@FNAME[@LINE_NO] @CHAR @LLD_18B @LLD_18B @LLD_18B[KB]", e->fname, e->line_no, e->type, e->n_calls, e->sum_sizes, e->sum_allocated_size >> 10);
 			}
 		}
 		if (j == 0) {
 			if (printf_fn) {
 				(*printf_fn)(printf_ctx, "- - - - - - - - - - - - - - - - - - - - - BM allocations - - - - - - - - - - - - - - - - - - - -\n");
-			}
-			else {
-				N_Tf(trace_3_common_nvmeibt_print_alloc_free_summary_table, "- - - - - - - - - - - - - - - - - - - - - BM allocations - - - - - - - - - - - - - - - - - - - -");
+			} else {
+				N_Tf(ttpafst4,           "- - - - - - - - - - - - - - - - - - - - - BM allocations - - - - - - - - - - - - - - - - - - - -");
 			}
 		}
 	}

@@ -1680,14 +1680,10 @@
             "%d": 58
         }
     },
-    "@N_CALLS": {
+    "@LLD_18B": {
         "size": 64,
         "type": "s64",
-        "fmt": "%18lld",
-        "final": true,
-        "__histogram": {
-            "%18lld": 46
-        }
+        "fmt": "%18lld"
     },
     "@CALL_FN": {
         "size": "string",
@@ -1794,11 +1790,7 @@
     "@CHAR": {
         "size": 8,
         "type": "char",
-        "fmt": "%c",
-        "final": true,
-        "__histogram": {
-            "%c": 62
-        }
+        "fmt": "%c"
     },
     "@CHAR_K": {
         "size": 8,
@@ -4823,16 +4815,6 @@
             "%#x": 8
         }
     },
-    "@E_TYPE": {
-        "size": 8,
-        "type": "char",
-        "fmt": "%c",
-        "final": true,
-        "__histogram": {
-            "%c": 46
-        },
-        "__split": true
-    },
     "@E_TYPE_INT": {
         "size": 32,
         "type": "s32",
@@ -5070,13 +5052,7 @@
     "@FNAME": {
         "size": "string",
         "type": "string",
-        "fmt": "%s",
-        "final": true,
-        "__histogram": {
-            "%-30s": 9,
-            "%s": 39
-        },
-        "__collision": true
+        "fmt": "%s"
     },
     "@FN_FUNC": {
         "size": "symbol",
@@ -8275,11 +8251,7 @@
     "@LINE_NO": {
         "size": 32,
         "type": "s32",
-        "fmt": "%4d",
-        "final": true,
-        "__histogram": {
-            "%4d": 46
-        }
+        "fmt": "%4d"
     },
     "@LINK": {
         "size": 64,
@@ -17250,15 +17222,6 @@
             "%d": 62
         }
     },
-    "@SUM_ALLOCATED_SIZE": {
-        "size": 64,
-        "type": "s64",
-        "fmt": "%18lldK",
-        "final": true,
-        "__histogram": {
-            "%18lldK": 46
-        }
-    },
     "@SUM_ALL_PREVENTERS": {
         "size": 32,
         "type": "s32",
@@ -17266,15 +17229,6 @@
         "final": true,
         "__histogram": {
             "%d": 58
-        }
-    },
-    "@SUM_SIZES": {
-        "size": 64,
-        "type": "s64",
-        "fmt": "%18lld",
-        "final": true,
-        "__histogram": {
-            "%18lld": 46
         }
     },
     "@SWAP": {
