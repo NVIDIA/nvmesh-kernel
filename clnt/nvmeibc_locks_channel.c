@@ -420,9 +420,12 @@ static void locks_remove_work(struct workqe_struct *work)
 	locks_rw_disconnect_ch(ch);
 
 	/* Only needs to be done for primary channel */
-	nvmeibc_locks_channel_free(ch);
 	disk = nvmeibc_ib_admin_channel_disk(&net_admin->base);
 	BUG_ON(disk == NULL);
+
+	/* Cancel the periodic lock channel work right before we free the channels */
+	cancel_delayed_work_sync(&disk->periodic_lock_channel_work);
+	nvmeibc_locks_channel_free(ch);
 
 	_ND(trace_3_locks_channel_locks_remove_work, "LOCKS: going to detach...");
 	spin_lock_irqsave(&disk->spinlock, flags);
@@ -481,6 +484,8 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 		}
 		for (i = 0; i < NVMEIB_N_2ND_LOCK_CHS; i++) {
 			if (ch->_2nd_ch[i]) {
+				struct nvmeibc_locks_channel *tmp = ch->_2nd_ch[i];
+				ch->_2nd_ch[i] = NULL;
 				if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
 					destroy_workqueue(ch->callback_wq);
@@ -490,12 +495,12 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 					ch->callback_wq = NULL;
 				}
 
-				if (ch->_2nd_ch[i]->atomic_test_src)
-					kfree(ch->_2nd_ch[i]->atomic_test_src);
+				if (tmp->atomic_test_src)
+					kfree(tmp->atomic_test_src);
 
-				kfree(ch->_2nd_ch[i]->_2nd_net_params);
-				kfree(ch->_2nd_ch[i]->locks_ip_buffer);
-				kfree(ch->_2nd_ch[i]);
+				kfree(tmp->_2nd_net_params);
+				kfree(tmp->locks_ip_buffer);
+				kfree(tmp);
 			}
 		}
 		kfree(ch->_2nd_net_params);

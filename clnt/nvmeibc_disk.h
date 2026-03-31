@@ -1816,4 +1816,6 @@ struct nvmeibc_disk_coremask_pcpu_stats {
 struct nvmeibc_disk_coremask_pcpu_stats __percpu *nvmeibc_disk_get_coremask_stats_this_cpu(struct nvmeibc_disk *disk);
 int nvmeibc_disk_notify_coremask_update(struct nvmeibc_idisk *disk);
 
+extern ulong nvmeibc_disk_lock_channel_periodic_timer_interval;
+
 #endif

@@ -4520,7 +4520,7 @@ out:
 	return;
 }
 
-static ulong nvmeibc_disk_lock_channel_periodic_timer_interval = 10000; /* milliseconds */
+ulong nvmeibc_disk_lock_channel_periodic_timer_interval = 10000; /* milliseconds */
 module_param_named(lock_channel_periodic_timer_interval, nvmeibc_disk_lock_channel_periodic_timer_interval, ulong, 0644);
 MODULE_PARM_DESC(lock_channel_periodic_timer_interval,
 	"Interval in milliseconds for periodic lock channel usage metrics tracing per disk");
@@ -9125,8 +9125,12 @@ static int discover(struct nvmeibc_disk *disk, bool is_rediscover)
 	trace_disk_connection(disk);
 
 out:
-	if (!rv)
+	if (!rv) {
 		DISK_DISCOVER_STATUS(disk, NVMEIBC_DISK_DISCOVER_OK);
+		if (nvmeibc_disk_lock_channel_periodic_timer_interval > 0)
+			queue_delayed_work(system_unbound_wq, &disk->periodic_lock_channel_work,
+					   msecs_to_jiffies(nvmeibc_disk_lock_channel_periodic_timer_interval));
+	}
 	if(!rv != (NVMEIB_TREND_HEAD(disk->discover_trend).data == NVMEIBC_DISK_DISCOVER_OK)) {
 		_NW(trace_discover_reason_not_match, "DTREND: RV is @RV but discover trend is @DISK_DISCOVER_OP",
 		rv, NVMEIB_TREND_HEAD(disk->discover_trend).data);
@@ -10990,12 +10994,6 @@ int nvmeibc_disk_create(const struct nvmeibc_cinst_params_core *p,
 
 	/* register disk */
 	nvmeibc_add_disk(disk);
-
-	/* Schedule periodic lock channel usage metrics tracing */
-	if (nvmeibc_disk_lock_channel_periodic_timer_interval > 0) {
-		queue_delayed_work(system_unbound_wq, &disk->periodic_lock_channel_work,
-				   msecs_to_jiffies(nvmeibc_disk_lock_channel_periodic_timer_interval));
-	}
 
 	_NT(trace_disk_nvmeibc_disk_create, "Add (1st) volume @DEV_NAME_FULL to disk @DISK_NAME(@DISK)",
 	   disk_id->volume->full_name, disk->name, disk);
