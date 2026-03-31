@@ -108,6 +108,7 @@ static void scenario_user_rpcs_generic(void) {
 	user_rpc_send_to_toma("simulate dump-clnt-hash 20");
 	user_rpc_send_to_toma("simulate bm-garbage-collect 1");
 	user_rpc_send_to_toma("status server_csvs");
+	user_rpc_send_to_toma("status nm_json");
 	user_rpc_send_to_toma("status errors");
 	WAIT_UNTIL(user_rpc_did_toma_reply_to_all_rpcs());
 	SCENARIO_PRINT(__AUTOID__, "done");
