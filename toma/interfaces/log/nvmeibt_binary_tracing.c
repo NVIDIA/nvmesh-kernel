@@ -96,12 +96,13 @@ static int __start_trace_pollers(pthread_t *poller_long, pthread_t *poller_eph, 
 		abort();
 	}
 	pthread_setname_np(*poller_long, "poller_long");
-		if ((rv = pthread_create(poller_eter, NULL, trace_poller_thread, descriptor_eter)) != 0) {
+	//
+	if ((rv = pthread_create(poller_eter, NULL, trace_poller_thread, descriptor_eter)) != 0) {
 		fprintf(stderr, "TOMA's poller_eter creation failed rv=%d", rv);
 		abort();
 	}
 	pthread_setname_np(*poller_eter, "poller_eter");
-
+	//
 	if ((rv = pthread_create(poller_eph, NULL, trace_poller_thread, descriptor_eph)) != 0) {
 		fprintf(stderr, "TOMA's poller_eph creation failed rv=%d", rv);
 		abort();
@@ -135,12 +136,14 @@ out:
 
 void nvmeibt_flush_all_traces(void) {
 	nvmeib_flush(nvmeibt_trace_long);
+	nvmeib_flush(nvmeibt_trace_eph);
 	nvmeib_flush(nvmeibt_trace_eter);
 }
 
 
 void nvmeibt_flush_all_and_terminate(void) {
 	if (nvmeibt_trace_long) nvmeib_flush_and_terminate(nvmeibt_trace_long);
+	if (nvmeibt_trace_eph) nvmeib_flush_and_terminate(nvmeibt_trace_eph);
 	if (nvmeibt_trace_eter) nvmeib_flush_and_terminate(nvmeibt_trace_eter);
 }
 
@@ -184,11 +187,11 @@ void nvmeibt_start_all_trace_pollers(bool is_running_as_a_utility) {
 }
 
 unsigned long long nvmeibt_get_total_bytes(void) {
-	return nvmeib_trace_get_total_bytes(nvmeibt_trace_long) + nvmeib_trace_get_total_bytes(nvmeibt_trace_eter);
+	return nvmeib_trace_get_total_bytes(nvmeibt_trace_long) + nvmeib_trace_get_total_bytes(nvmeibt_trace_eter) + nvmeib_trace_get_total_bytes(nvmeibt_trace_eph);
 }
 
 unsigned long long nvmeibt_get_used_bufs(void) {
-	return nvmeib_trace_get_total_bufs_used(nvmeibt_trace_long) + nvmeib_trace_get_total_bufs_used(nvmeibt_trace_eter);
+	return nvmeib_trace_get_total_bufs_used(nvmeibt_trace_long) + nvmeib_trace_get_total_bufs_used(nvmeibt_trace_eter) + nvmeib_trace_get_total_bufs_used(nvmeibt_trace_eph);
 }
 
 void nvmeibt_binary_tracing_set_tracer_debug_level(int64_t tracer_debug_level)
