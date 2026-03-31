@@ -4644,9 +4644,8 @@ static void lock_channels_trace_deferred_latency(struct nvmeibc_disk *disk,
 }
 
 
-static void lock_channels_proc_fill(struct jdr *jdr, void *arg)
+static void lock_channels_do_fill(struct jdr *jdr, struct nvmeibc_disk *disk)
 {
-	struct nvmeibc_disk *disk = arg;
 	struct list_head lock_ch_list;
 	struct unique_list_ent *unique_ent;
 	struct nvmeibc_locks_channel *lock_ch;
@@ -4717,9 +4716,38 @@ static void lock_channels_reset(void *arg)
 	}
 }
 
+static void lock_channels_proc_fill(struct jdr *jdr, void *arg)
+{
+	struct nvmeibc_disk *disk = arg;
+	DECLARE_COMPLETION_ONSTACK(comp);
+	struct nvmeibc_disk_update_data disk_update_data = {
+		.update_type = DISK_UPDATE_FILL_LOCK_CHANNELS,
+		.update_data = jdr,
+		.done_cb = write_status_buf_done_cb,
+		.done_cb_ctx = &comp,
+	};
+	if (nvmeibc_disk_update_config(disk, &disk_update_data, false) < 0)
+		return;
+	wait_for_completion(&comp);
+}
+
+static void lock_channels_reset_dispatch(void *arg)
+{
+	struct nvmeibc_disk *disk = arg;
+	DECLARE_COMPLETION_ONSTACK(comp);
+	struct nvmeibc_disk_update_data disk_update_data = {
+		.update_type = DISK_UPDATE_RESET_LOCK_CHANNELS,
+		.done_cb = write_status_buf_done_cb,
+		.done_cb_ctx = &comp,
+	};
+	if (nvmeibc_disk_update_config(disk, &disk_update_data, false) < 0)
+		return;
+	wait_for_completion(&comp);
+}
+
 static ssize_t lock_channels_proc_write(void *arg, const char __user *buf, size_t count, loff_t *ppos)
 {
-	return nvmeib_jdr_proc_write_reset(lock_channels_reset, arg, buf, count);
+	return nvmeib_jdr_proc_write_reset(lock_channels_reset_dispatch, arg, buf, count);
 }
 
 static int lock_ch_list_count(struct list_head *lock_ch_list)
@@ -12485,6 +12513,10 @@ const char *nvmeibc_disk_update_type_str(enum nvmeibc_disk_update_type update_ty
 		return "Write Status";
 	case DISK_UPDATE_PORT_UPDATE:
 		return "Port Update";
+	case DISK_UPDATE_FILL_LOCK_CHANNELS:
+		return "Fill Lock Channels";
+	case DISK_UPDATE_RESET_LOCK_CHANNELS:
+		return "Reset Lock Channels";
 	default:
 		return "Unknown";
 	}
@@ -12788,6 +12820,10 @@ free_rgidw:
 		if (disk->info && disk->info->coremask_info) {
 			on_each_cpu(__reset_coremask_stats_pcpu_fn, disk->info->coremask_info, true);
 		}
+	} else if (update_data->update_type == DISK_UPDATE_FILL_LOCK_CHANNELS) {
+		lock_channels_do_fill(update_data->update_data, disk);
+	} else if (update_data->update_type == DISK_UPDATE_RESET_LOCK_CHANNELS) {
+		lock_channels_reset(disk);
 	} else if (update_data->update_type == DISK_UPDATE_COREMASK_UPDATE) {
 		struct nvmeibc_disk_coremask_info *cinfo;
 		if (disk->info && (cinfo = disk->info->coremask_info)) {

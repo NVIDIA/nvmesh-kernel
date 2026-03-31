@@ -1198,6 +1198,8 @@ enum nvmeibc_disk_update_type {
 	DISK_UPDATE_RESET_QP_STATS,
 	DISK_UPDATE_RESET_COREMASK_STATS,
 	DISK_UPDATE_COREMASK_UPDATE,
+	DISK_UPDATE_FILL_LOCK_CHANNELS,
+	DISK_UPDATE_RESET_LOCK_CHANNELS,
 };
 
 const char *nvmeibc_disk_update_type_str(enum nvmeibc_disk_update_type update_type);
