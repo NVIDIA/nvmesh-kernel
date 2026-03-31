@@ -2,13 +2,9 @@
 * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
-
-#ifndef TOMA_SANDBOX_NVME_H_INCLUDED
-#define TOMA_SANDBOX_NVME_H_INCLUDED
-
+#pragma once
 #include "os/os_internal.h"
 
-// API towards server simulator
 struct sandbox_nvme_lbaf {			// NVMe LBA format descriptor. Matches the structure used in NVMe Identify NS response.
 	uint8_t block_size_exp;			// Block size as exponent of 2 (9=512, 12=4096) bytes
 	uint16_t metadata_size;			// Metadata size in bytes (0 or 8) bytes
@@ -51,4 +47,3 @@ int  sandbox_nvme_io_to_disk(    const char* disk_id, size_t start_block, size_t
 #include <stdarg.h>				// va_list
 int nvme_ioctl_admin_cmd(const char *path, int fd, va_list ap);
 int nvme_ioctl_get_size( const char *path,         va_list ap);
-#endif // TOMA_SANDBOX_NVME_H_INCLUDED

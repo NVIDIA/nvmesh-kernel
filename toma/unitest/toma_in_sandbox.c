@@ -531,6 +531,16 @@ int override_open(const char *path, int flags, ... /*int mode*/) {
 	return ret;
 }
 
+int TSB_all_fds_tbl_create_fd(const char *name, int flags) {
+	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
+	int ret;
+	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "%s", name);
+	pthread_mutex_lock(&sys->os.fs.mutex);
+	ret = __connect(socket(0, 0, flags), &addr, 0);
+	pthread_mutex_unlock(&sys->os.fs.mutex);
+	return ret;
+}
+
 int override_close(int fd) {
 	struct TSB_fd_impl *s;
 	pthread_mutex_lock(&sys->os.fs.mutex);
@@ -860,9 +870,7 @@ void os_sim_destroy(struct TSB_operating_system_impl *os, bool do_verify_used) {
 /************************************* nvme ***********************************/
 #include "interfaces/nvme/nvmeibt_udev.h"
 int  nvmeibt_udev_create(void) {
-	struct sockaddr_un addr = { .sun_family = 0, .sun_path = {0}};
-	sprintf(addr.sun_path, FILE_SANDBOX_PREFIX "_udev_monitor");
-	return __connect(socket(0,0,0), &addr, 0);
+	return TSB_all_fds_tbl_create_fd("_udev_monitor", 0);
 }
 
 void nvmeibt_udev_destroy(void) {

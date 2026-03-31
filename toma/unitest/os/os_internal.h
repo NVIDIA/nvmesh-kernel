@@ -58,6 +58,8 @@ struct TSB_all_fds_tbl {					// Operating system, list of all file descriptors u
 	struct TSB_fd_impl fd_arr[32];			// Max amount of file descriptors used by toma
 };
 
+int TSB_all_fds_tbl_create_fd(const char *file_name, int flags);		// Production code uses override_open. Simulators use this one to avoid confusion
+
 /*****************************************************************************/
 struct TSB_netlink_mock {
 	struct TSB_fd_otherside o;				// Here server simulator will connect as other side
