@@ -122,7 +122,7 @@ static void __intercept_toma_certificate_copy_file_and_save_content(struct __t_c
 			char sys_cmd[1024];
 			const char *in_file_name = basename(in_path);
 			int cmd_len;
-			const __mode_t file_permissions = (in_file_name && strstr(in_file_name, "key")) ? 0400 : 0444;	// Read-Only default permissions. For certificate less restrictive than for key
+			const __mode_t file_permissions = (in_file_name && strstr(in_file_name, "key")) ? 0440 : 0444;	// Read-Only default permissions. For certificate less restrictive than for key
 			s->file_path[i] = NNVMEIBT_STR_ALLOC(titccfasc6);
 			nvmeibt_Str_sprintf(s->file_path[i], "%s/%s_dont_touch", s->dir, in_file_name);
 			out_path = s->file_path[i]->text_buf;
