@@ -422,7 +422,7 @@ ECHO_COMPILING:
 $(ASMOBJ) : $(ASMSRC)
 	@$(MAKE) -C $(CDIR)/datapath_ec $@
 
-PERF_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf.c ./uni_scenarios/uni_scenario_gf.c ./kr_incs.c ./kr_sim_svc.c
+PERF_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf.c $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c ./uni_scenarios/uni_scenario_gf.c ./kr_incs.c ./kr_sim_svc.c
 PERF_OBJ = $(PERF_SRC:.c=.o)
 ifneq ($(strip $(ASM_OBJ)),)
 PERF_OBJ += $(OBJ_DIR)/$(ASM_OBJ)

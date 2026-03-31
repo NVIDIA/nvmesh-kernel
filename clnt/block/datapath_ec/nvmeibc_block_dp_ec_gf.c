@@ -1578,6 +1578,11 @@ void nvmeib_fpu_begin(void)
 	nvmeib_save_avx256(nvmeibc_fpu_regs[cpu]);
 }
 
+static inline void sfence(void)
+{
+	asm volatile("sfence" ::: "memory");
+}
+
 int nvmeib_fpu_end(void)
 {
 	int cpu = smp_processor_id();
@@ -1585,6 +1590,7 @@ int nvmeib_fpu_end(void)
 	unsigned long flags = *pf;
 
 	BUG_ON(!flags);
+	sfence();
 	nvmeib_restore_avx256(nvmeibc_fpu_regs[cpu]);
 	*pf = 0;
 	local_irq_restore(flags);
