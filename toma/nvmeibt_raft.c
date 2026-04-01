@@ -1214,7 +1214,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 			} else {
 				// Praid not in hash: the follower processes committed configs before committed topo,
 				// and the former adds new praids to hash table, so a new praid may not be in hash yet.
-				old_topo_idx_updated = -2; // praid is newly added. Force incremental praid to be serialized.
+				old_topo_idx_updated = -3; // praid is newly added. Force incremental praid to be serialized.
 			}
 		}
 
