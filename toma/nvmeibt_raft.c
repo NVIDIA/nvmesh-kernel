@@ -1245,8 +1245,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 		}
 		n_praids_in_result++;
 
-		new_praid_ptr = (struct nvmeibt_praid_serialized_topo *)
-			((char *)new_praid_ptr + new_praid_total_size);
+		new_praid_ptr = (const struct nvmeibt_praid_serialized_topo *)((const char *)new_praid_ptr + new_praid_total_size);
 	}
 
 	// 2. Serialize all non-visited hash praids
