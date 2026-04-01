@@ -1169,9 +1169,7 @@ struct generic_CMD_params_ctx {
 
 static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
 	// Somewhat slopy. Parse all the commands parameters at once.  DHS: There are many different cmd messages but a few payloads, so payload parsing code is generic
-	int						i, j, k, l;
-	int						rv = 0;
-
+	int i, j, k, l, rv = 0;
 	NFIN;
 	for (i = 0; i < root->dict.len; i++) {
 		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
@@ -1187,33 +1185,27 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					rv = -1;
 					continue;
 				}
-				if (arr->array.len >= NVMEIBT_MAX_N_DISKS_PER_NODE) {
-					N_Wf(f67fbhw, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-				}
-				CMD_params->n_disks_to_report = arr->array.len;
-				for (k = 0; k < arr->array.len; k++) {
+				if (arr->array.len >= NVMEIBT_MAX_N_DISKS_PER_NODE)
+					N_Wf(f67fbhw, "@STR arr.len=@INT truncated", payload_kv->key, arr->array.len);
+				CMD_params->n_disks_to_report = min(arr->array.len, NVMEIBT_MAX_N_DISKS_PER_NODE);
+				for (k = 0; k < CMD_params->n_disks_to_report; k++) {
 					struct mm_json_dict *drive_json_dict = &(arr->array.elements[k]->dict);
+					struct resend_report_disk_ctx *report = &CMD_params->disks_to_report[k];
 					for (l = 0; l < drive_json_dict->len; l++) {
 						struct mm_json_kv_pair *kv = &(drive_json_dict->elements[l]);
 						if	(!strcmp(kv->key, "diskID")) {
-							nvmeibt_strlcpy(CMD_params->disks_to_report[k].ldiskID, kv->value->str, sizeof(CMD_params->disks_to_report[k].ldiskID));
+							nvmeibt_strlcpy(report->ldiskID, kv->value->str, sizeof(report->ldiskID));
 						} else if	(!strcmp(kv->key, "vendor")) {
-							CMD_params->disks_to_report[k].vendor = kv->value->num;	// Such as 0x144d
+							report->vendor = kv->value->num;	// Such as 0x144d
 						} else if	(!strcmp(kv->key, "reappearingCounter")) {
-							CMD_params->disks_to_report[k].reappearingCounter = kv->value->num;
+							report->reappearingCounter = kv->value->num;
 						} else if	(!strcmp(kv->key, "reappearingOutOfSync")) {
-							CMD_params->disks_to_report[k].reappearingOutOfSync = kv->value->num;
+							report->reappearingOutOfSync = kv->value->num;
 						} else {
-							if (kv->value->type == JSON_E_STR) {
-								N_Ef(cbheujw, "Unexpected @STR=@STR", kv->key, kv->value->str);
-							} else {
-								N_Ef(xvhajk2, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
-							}
+							N_Tf(cbheujw, "Unknown key @STR skipped", kv->key);		// Future compatibility
 						}
 					}
-					N_Tf(rvchs8k,
-							"diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL",
-							CMD_params->disks_to_report[k].ldiskID, CMD_params->disks_to_report[k].vendor, CMD_params->disks_to_report[k].reappearingCounter, CMD_params->disks_to_report[k].reappearingOutOfSync);
+					N_Tf(rvchs8k, "diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL", report->ldiskID, report->vendor, report->reappearingCounter, report->reappearingOutOfSync);
 				}
 			} else if (!strcmp(payload_kv->key, "pRaids")) {
 				struct mm_json_elem	*arr = payload_kv->value;
@@ -1222,26 +1214,22 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					rv = -1;
 					continue;
 				}
-				if (arr->array.len >= NVMEIBT_MAX_N_PRAIDS) {
+				if (arr->array.len >= NVMEIBT_MAX_N_PRAIDS)
 					N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-				}
-				for (k = 0; k < arr->array.len; k++) {
+				CMD_params->n_praids_to_report = min(arr->array.len, NVMEIBT_MAX_N_PRAIDS);
+				for (k = 0; k < CMD_params->n_praids_to_report; k++) {
 					struct mm_json_dict *praid_json_dict = &(arr->array.elements[k]->dict);
+					struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
 					for (l = 0; l < praid_json_dict->len; l++) {
-						struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
 						struct mm_json_kv_pair *kv = &(praid_json_dict->elements[l]);
 						if (!strcmp(kv->key, "uuid")) {
 							nvmeibt_strlcpy(pr_rep->praid_uuid, kv->value->str, sizeof(pr_rep->praid_uuid));
-						} else if (!strcmp(kv->key, "lastKnownVersion")) {
-							// "lastKnownVersion": "<major,minor,raftTerm>"
-							sscanf(kv->value->str, "<%d,%d,%lu>",
-									&(pr_rep->lastKnownVersion_major), &(pr_rep->lastKnownVersion_minor), &(pr_rep->lastKnownVersion_raft_term));
+						} else if (!strcmp(kv->key, "lastKnownVersion")) {	// "lastKnownVersion": "<major,minor,raftTerm>"
+							const int scanf_rv = sscanf(kv->value->str, "<%d,%d,%lu>", &(pr_rep->lastKnownVersion_major), &(pr_rep->lastKnownVersion_minor), &(pr_rep->lastKnownVersion_raft_term));
+							if (scanf_rv != 3)
+								N_Ef(__AUTOID__, "praid report cannot parse known version |@STR|", kv->value->str);
 						} else {
-							if (kv->value->type == JSON_E_STR) {
-								N_Ef(ctvsauj, "Unexpected @STR=@STR", kv->key, kv->value->str);
-							} else {
-								N_Ef(nai3stz, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
-							}
+							N_Tf(__AUTOID__, "Unknown key @STR skipped", kv->key);		// Future compatibility
 						}
 					}
 				}
@@ -1263,15 +1251,11 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
 			} else if (!strcmp(payload_kv->key, "formatType")) {
 				nvmeibt_strlcpy(CMD_params->formatType, payload_kv->value->str, sizeof(CMD_params->formatType));
-			} else if (!strcmp(payload_kv->key, "volumeID")) {
-				// Do nothing, we don't need this param
-			} else if (!strcmp(payload_kv->key, "volumeName")) {
-				// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeID")) {			// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeName")) {		// Do nothing, we don't need this param
 			} else if (!strcmp(payload_kv->key, "volumeUUID")) {
-				nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,
-												(struct nvmeibt_urn_uuid *)(payload_kv->value->str));
-			} else if (!strcmp(payload_kv->key, "reservationMode")) {
-				// Do nothing, we don't need this param
+				nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,(struct nvmeibt_urn_uuid *)(payload_kv->value->str));
+			} else if (!strcmp(payload_kv->key, "reservationMode")) {	// Do nothing, we don't need this param
 			} else if (!strcmp(payload_kv->key, "reservationVersion")) {
 				CMD_params->reservationVersion = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
@@ -1297,13 +1281,9 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else if (!strcmp(payload_kv->key, "nguid")) {
 				nvmeibt_strlcpy(CMD_params->native_nguid, payload_kv->value->str, sizeof(CMD_params->native_nguid));
 			} else {
-				if (payload_kv->value->type == JSON_E_STR) {
-					N_Ef(ct326bd, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
-				} else {
-					N_Ef(meiyzx5, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
-				}
+				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
-		}
+		}		// Payload parsing
 	}
 	N_Tf(4vsdywb,
 		 LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT blockSize=@INT metadataSize=@INT dbUUID=@STR",
