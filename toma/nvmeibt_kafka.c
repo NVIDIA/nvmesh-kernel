@@ -2605,7 +2605,7 @@ static bool encrypt_command_request_response(struct generic_CMD_params_ctx *CMD_
 }
 
 static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t kafka_offset, struct messageType_params_ctx *messageType_params)
-{
+{	// Called by TOMA's main thread from wakeup to process cmds 1 by 1
 	int				i;
 	bool			commit_now = 1;
 	char			encrypt_args[MAX_EXEC_WITH_ARGS_STR_LEN];
@@ -2645,7 +2645,7 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	} else if (strcmp(messageType_params->messageType, "sendPRaidReport") == 0) {
 		N_Ef(rbasdrf78fh2, "******************** Need to send a pRAID report for a specific pRAID");
 		for (i = 0; i < CMD_params->n_praids_to_report; i++) {
-			struct send_praid_report_ctx	*prd = &(CMD_params->praids_to_report[i]);
+			const struct send_praid_report_ctx *prd = &(CMD_params->praids_to_report[i]);
 			N_Ef(stamvuk, "uuid=@STR lastKnownVersion_major=@INT lastKnownVersion_minor=@INT lastKnownVersion_raft_term=@LU",
 				 prd->praid_uuid, prd->lastKnownVersion_major, prd->lastKnownVersion_minor, prd->lastKnownVersion_raft_term);
 		}
@@ -2661,7 +2661,6 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	} else {
 		N_Ef(rvzqi2m, "Unsupported messageType='@STR'", messageType_params->messageType);
 	}
-	// All other CMDs, are handled by TOMA's main thread from wakeup. They receive the parsed json tree
 	if (commit_now)
 		mark_CMD_k_msg_for_kafka_commit(kafka_offset, 1);
 	NFOUT;
