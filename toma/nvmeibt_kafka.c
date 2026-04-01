@@ -1168,149 +1168,141 @@ struct generic_CMD_params_ctx {
 };
 
 static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
-	// Somewhat slopy. Parse all the commands parameters at once
+	// Somewhat slopy. Parse all the commands parameters at once.  DHS: There are many different cmd messages but a few payloads, so payload parsing code is generic
 	int						i, j, k, l;
-	struct mm_json_kv_pair	*root_kv;
-	struct mm_json_kv_pair	*payload_kv;
-	struct mm_json_kv_pair	*kv;
-	struct mm_json_elem		*arr;
-	struct mm_json_dict		*drive_json_dict, *praid_json_dict;
 	int						rv = 0;
 
 	NFIN;
-	CMD_params->n_disks_to_report = 0;
-	CMD_params->n_praids_to_report = 0;
 	for (i = 0; i < root->dict.len; i++) {
-		root_kv = &root->dict.elements[i];
-		if (!strcmp(root_kv->key, "payload")) {
-			N_Tf(657sniw, "parsing payload");
-			for (j = 0; j < root_kv->value->dict.len; j++) {
-				payload_kv = &(root_kv->value->dict.elements[j]);
-				if (!strcmp(payload_kv->key, "drives")) {
-					arr = payload_kv->value;
-					if (arr->type != JSON_E_ARRAY) {
-						N_Ef(bi3jsia, "@STR is supposed to be array", payload_kv->key);
-						rv = -1;
-						continue;
-					}
-					if (arr->array.len >= NVMEIBT_MAX_N_DISKS_PER_NODE) {
-						N_Wf(f67fbhw, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-					}
-					CMD_params->n_disks_to_report = arr->array.len;
-					for (k = 0; k < arr->array.len; k++) {
-						drive_json_dict = &(arr->array.elements[k]->dict);
-						for (l = 0; l < drive_json_dict->len; l++) {
-							kv = &(drive_json_dict->elements[l]);
-							if	(!strcmp(kv->key, "diskID")) {
-								nvmeibt_strlcpy(CMD_params->disks_to_report[k].ldiskID, kv->value->str, sizeof(CMD_params->disks_to_report[k].ldiskID));
-							} else if	(!strcmp(kv->key, "vendor")) {
-								CMD_params->disks_to_report[k].vendor = kv->value->num;	// Such as 0x144d
-							} else if	(!strcmp(kv->key, "reappearingCounter")) {
-								CMD_params->disks_to_report[k].reappearingCounter = kv->value->num;
-							} else if	(!strcmp(kv->key, "reappearingOutOfSync")) {
-								CMD_params->disks_to_report[k].reappearingOutOfSync = kv->value->num;
+		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
+		if (strcmp(root_kv->key, "payload"))			// We parse only payload, not message type
+			continue;
+		N_Tf(657sniw, "parsing payload");
+		for (j = 0; j < root_kv->value->dict.len; j++) {
+			struct mm_json_kv_pair *payload_kv = &(root_kv->value->dict.elements[j]);
+			if (!strcmp(payload_kv->key, "drives")) {
+				struct mm_json_elem	*arr = payload_kv->value;
+				if (arr->type != JSON_E_ARRAY) {
+					N_Ef(bi3jsia, "@STR is supposed to be array", payload_kv->key);
+					rv = -1;
+					continue;
+				}
+				if (arr->array.len >= NVMEIBT_MAX_N_DISKS_PER_NODE) {
+					N_Wf(f67fbhw, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
+				}
+				CMD_params->n_disks_to_report = arr->array.len;
+				for (k = 0; k < arr->array.len; k++) {
+					struct mm_json_dict *drive_json_dict = &(arr->array.elements[k]->dict);
+					for (l = 0; l < drive_json_dict->len; l++) {
+						struct mm_json_kv_pair *kv = &(drive_json_dict->elements[l]);
+						if	(!strcmp(kv->key, "diskID")) {
+							nvmeibt_strlcpy(CMD_params->disks_to_report[k].ldiskID, kv->value->str, sizeof(CMD_params->disks_to_report[k].ldiskID));
+						} else if	(!strcmp(kv->key, "vendor")) {
+							CMD_params->disks_to_report[k].vendor = kv->value->num;	// Such as 0x144d
+						} else if	(!strcmp(kv->key, "reappearingCounter")) {
+							CMD_params->disks_to_report[k].reappearingCounter = kv->value->num;
+						} else if	(!strcmp(kv->key, "reappearingOutOfSync")) {
+							CMD_params->disks_to_report[k].reappearingOutOfSync = kv->value->num;
+						} else {
+							if (kv->value->type == JSON_E_STR) {
+								N_Ef(cbheujw, "Unexpected @STR=@STR", kv->key, kv->value->str);
 							} else {
-								if (kv->value->type == JSON_E_STR) {
-									N_Ef(cbheujw, "Unexpected @STR=@STR", kv->key, kv->value->str);
-								} else {
-									N_Ef(xvhajk2, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
-								}
-							}
-						}
-						N_Tf(rvchs8k,
-							 "diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL",
-							 CMD_params->disks_to_report[k].ldiskID, CMD_params->disks_to_report[k].vendor, CMD_params->disks_to_report[k].reappearingCounter, CMD_params->disks_to_report[k].reappearingOutOfSync);
-					}
-				} else if (!strcmp(payload_kv->key, "pRaids")) {
-					arr = payload_kv->value;
-					if (arr->type != JSON_E_ARRAY) {
-						N_Ef(4vhdj56, "@STR is supposed to be array", payload_kv->key);
-						rv = -1;
-						continue;
-					}
-					if (arr->array.len >= NVMEIBT_MAX_N_PRAIDS) {
-						N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-					}
-					for (k = 0; k < arr->array.len; k++) {
-						praid_json_dict = &(arr->array.elements[k]->dict);
-						for (l = 0; l < praid_json_dict->len; l++) {
-							struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
-							kv = &(praid_json_dict->elements[l]);
-							if (!strcmp(kv->key, "uuid")) {
-								nvmeibt_strlcpy(pr_rep->praid_uuid, kv->value->str, sizeof(pr_rep->praid_uuid));
-							} else if (!strcmp(kv->key, "lastKnownVersion")) {
-							   // "lastKnownVersion": "<major,minor,raftTerm>"
-							   sscanf(kv->value->str, "<%d,%d,%lu>",
-									  &(pr_rep->lastKnownVersion_major), &(pr_rep->lastKnownVersion_minor), &(pr_rep->lastKnownVersion_raft_term));
-							} else {
-								if (kv->value->type == JSON_E_STR) {
-									N_Ef(ctvsauj, "Unexpected @STR=@STR", kv->key, kv->value->str);
-								} else {
-									N_Ef(nai3stz, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
-								}
+								N_Ef(xvhajk2, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
 							}
 						}
 					}
-				} else if (!strcmp(payload_kv->key, "tomaToken")) {
-					CMD_params->tomaToken = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "diskID")) {
-					nvmeibt_strlcpy(CMD_params->ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->ldisk_id.str));
-				} else if (!strcmp(payload_kv->key, "uuid")) {
-					nvmeibt_strlcpy(CMD_params->generic_uuid, payload_kv->value->str, sizeof(CMD_params->generic_uuid));
-				} else if (!strcmp(payload_kv->key, "vendor")) {
-					CMD_params->vendor = payload_kv->value->num;	// Such as 0x144d
-				} else if (!strcmp(payload_kv->key, "formatRequestCounter")) {
-					CMD_params->formatRequestCounter = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "blockSize")) {
-					CMD_params->blockSize = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "metadataSize")) {
-					CMD_params->metadataSize = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "dbUUID")) {
-					nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
-				} else if (!strcmp(payload_kv->key, "formatType")) {
-					nvmeibt_strlcpy(CMD_params->formatType, payload_kv->value->str, sizeof(CMD_params->formatType));
-				} else if (!strcmp(payload_kv->key, "volumeID")) {
-					// Do nothing, we don't need this param
-				} else if (!strcmp(payload_kv->key, "volumeName")) {
-					// Do nothing, we don't need this param
-				} else if (!strcmp(payload_kv->key, "volumeUUID")) {
-					nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,
-												   (struct nvmeibt_urn_uuid *)(payload_kv->value->str));
-				} else if (!strcmp(payload_kv->key, "reservationMode")) {
-					// Do nothing, we don't need this param
-				} else if (!strcmp(payload_kv->key, "reservationVersion")) {
-					CMD_params->reservationVersion = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
-					CMD_params->encryptionCommandIndex = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "slot")) {
-					CMD_params->slot = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "currentSlot")) {
-					CMD_params->slot = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "keySize")) {
-					CMD_params->keySize = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "passphrase")) {
-					nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
-				} else if (!strcmp(payload_kv->key, "currentPassphrase")) {
-					nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
-				} else if (!strcmp(payload_kv->key, "newPassphrase")) {
-					nvmeibt_strlcpy(CMD_params->newPassphrase, payload_kv->value->str, sizeof(CMD_params->newPassphrase));
-				} else if (!strcmp(payload_kv->key, "bootTime")) {
-					CMD_params->bootTime = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "serial")) {
-					nvmeibt_strlcpy(CMD_params->native_serial.str, payload_kv->value->str, sizeof(CMD_params->native_serial.str));
-				} else if (!strcmp(payload_kv->key, "nsid")) {
-					CMD_params->nsid = payload_kv->value->num;
-				} else if (!strcmp(payload_kv->key, "nguid")) {
-					nvmeibt_strlcpy(CMD_params->native_nguid, payload_kv->value->str, sizeof(CMD_params->native_nguid));
-				} else {
-					if (payload_kv->value->type == JSON_E_STR) {
-						N_Ef(ct326bd, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
-					} else {
-						N_Ef(meiyzx5, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
+					N_Tf(rvchs8k,
+							"diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL",
+							CMD_params->disks_to_report[k].ldiskID, CMD_params->disks_to_report[k].vendor, CMD_params->disks_to_report[k].reappearingCounter, CMD_params->disks_to_report[k].reappearingOutOfSync);
+				}
+			} else if (!strcmp(payload_kv->key, "pRaids")) {
+				struct mm_json_elem	*arr = payload_kv->value;
+				if (arr->type != JSON_E_ARRAY) {
+					N_Ef(4vhdj56, "@STR is supposed to be array", payload_kv->key);
+					rv = -1;
+					continue;
+				}
+				if (arr->array.len >= NVMEIBT_MAX_N_PRAIDS) {
+					N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
+				}
+				for (k = 0; k < arr->array.len; k++) {
+					struct mm_json_dict *praid_json_dict = &(arr->array.elements[k]->dict);
+					for (l = 0; l < praid_json_dict->len; l++) {
+						struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
+						struct mm_json_kv_pair *kv = &(praid_json_dict->elements[l]);
+						if (!strcmp(kv->key, "uuid")) {
+							nvmeibt_strlcpy(pr_rep->praid_uuid, kv->value->str, sizeof(pr_rep->praid_uuid));
+						} else if (!strcmp(kv->key, "lastKnownVersion")) {
+							// "lastKnownVersion": "<major,minor,raftTerm>"
+							sscanf(kv->value->str, "<%d,%d,%lu>",
+									&(pr_rep->lastKnownVersion_major), &(pr_rep->lastKnownVersion_minor), &(pr_rep->lastKnownVersion_raft_term));
+						} else {
+							if (kv->value->type == JSON_E_STR) {
+								N_Ef(ctvsauj, "Unexpected @STR=@STR", kv->key, kv->value->str);
+							} else {
+								N_Ef(nai3stz, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
+							}
+						}
 					}
 				}
+			} else if (!strcmp(payload_kv->key, "tomaToken")) {
+				CMD_params->tomaToken = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "diskID")) {
+				nvmeibt_strlcpy(CMD_params->ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->ldisk_id.str));
+			} else if (!strcmp(payload_kv->key, "uuid")) {
+				nvmeibt_strlcpy(CMD_params->generic_uuid, payload_kv->value->str, sizeof(CMD_params->generic_uuid));
+			} else if (!strcmp(payload_kv->key, "vendor")) {
+				CMD_params->vendor = payload_kv->value->num;	// Such as 0x144d
+			} else if (!strcmp(payload_kv->key, "formatRequestCounter")) {
+				CMD_params->formatRequestCounter = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "blockSize")) {
+				CMD_params->blockSize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "metadataSize")) {
+				CMD_params->metadataSize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "dbUUID")) {
+				nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
+			} else if (!strcmp(payload_kv->key, "formatType")) {
+				nvmeibt_strlcpy(CMD_params->formatType, payload_kv->value->str, sizeof(CMD_params->formatType));
+			} else if (!strcmp(payload_kv->key, "volumeID")) {
+				// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeName")) {
+				// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeUUID")) {
+				nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,
+												(struct nvmeibt_urn_uuid *)(payload_kv->value->str));
+			} else if (!strcmp(payload_kv->key, "reservationMode")) {
+				// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "reservationVersion")) {
+				CMD_params->reservationVersion = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
+				CMD_params->encryptionCommandIndex = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "slot")) {
+				CMD_params->slot = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "currentSlot")) {
+				CMD_params->slot = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "keySize")) {
+				CMD_params->keySize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "passphrase")) {
+				nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
+			} else if (!strcmp(payload_kv->key, "currentPassphrase")) {
+				nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
+			} else if (!strcmp(payload_kv->key, "newPassphrase")) {
+				nvmeibt_strlcpy(CMD_params->newPassphrase, payload_kv->value->str, sizeof(CMD_params->newPassphrase));
+			} else if (!strcmp(payload_kv->key, "bootTime")) {
+				CMD_params->bootTime = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "serial")) {
+				nvmeibt_strlcpy(CMD_params->native_serial.str, payload_kv->value->str, sizeof(CMD_params->native_serial.str));
+			} else if (!strcmp(payload_kv->key, "nsid")) {
+				CMD_params->nsid = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "nguid")) {
+				nvmeibt_strlcpy(CMD_params->native_nguid, payload_kv->value->str, sizeof(CMD_params->native_nguid));
+			} else {
+				if (payload_kv->value->type == JSON_E_STR) {
+					N_Ef(ct326bd, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
+				} else {
+					N_Ef(meiyzx5, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
+				}
 			}
-			break;	// Do we need to break after parsing the payload? Probably meaningless
 		}
 	}
 	N_Tf(4vsdywb,
