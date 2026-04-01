@@ -19,10 +19,7 @@
 #include "interfaces/network/network_incs.h"
 #include "../common/nvmeib_shared.h"
 
-#if defined(COMPILE_DEBUG)
-#   define SRM_ENABLE_FAULTS 1
-#endif
-
+// #define SRM_ENABLE_FAULTS 1
 #define USE_ABORT 1
 #define TERMINATE(x) if (USE_ABORT) nvmeibt_abort(ES_FATAL); else goto x
 
