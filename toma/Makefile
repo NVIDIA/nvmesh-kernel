@@ -133,9 +133,8 @@ else
     CFLAGS_common_$(COMP) += -rdynamic
 endif
 CFLAGS_common_$(COMP) += -DUSER_SPACE -DNVMEIBC_SECTOR_SHIFT=$(NVMEIBC_SECTOR_SHIFT)
-CFLAGS_$(DEBUG_STR)_$(COMP) = $(CFLAGS_common_$(COMP)) -DCOMPILE_DEBUG
-#CFLAGS_$(RELEASE_STR)_$(COMP) = $(CFLAGS_common_$(COMP)) -O3 -DCOMPILE_RELEASE
-CFLAGS_$(RELEASE_STR)_$(COMP) = $(CFLAGS_common_$(COMP)) -DCOMPILE_RELEASE -Og
+CFLAGS_$(DEBUG_STR)_$(COMP) = $(CFLAGS_common_$(COMP))
+CFLAGS_$(RELEASE_STR)_$(COMP) = $(CFLAGS_common_$(COMP)) -DNDEBUG -Og
 
 ifeq ($(BUILD_ASAN),1)
 	CFLAGS_COMMON += -fsanitize=address -fno-omit-frame-pointer

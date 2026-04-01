@@ -478,12 +478,10 @@ struct udev_event_wq_entry {
 	u32									vendor_id;
 };
 
-#if defined(COMPILE_DEBUG)
-#	define MOD_STR "debug"
-#elif defined(COMPILE_RELEASE)
-#	define MOD_STR "release"
+#ifdef NDEBUG
+	#define MOD_STR "release"
 #else
-#	define MOD_STR "???"
+	#define MOD_STR "debug"			// Note this is unrelated to TOMA_DEBUG which can be turned on in release compilation as well.
 #endif
 
 int64_t nvmeibt_toma_report_target_min_between_secs = REPORT_TARGET_MIN_BETWEEN_SECS_DEFAULT;
