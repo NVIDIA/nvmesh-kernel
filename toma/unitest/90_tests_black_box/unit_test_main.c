@@ -174,6 +174,7 @@ static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_add_volume_r1();
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
+	mgmt_sim_send_praid_report_req(cfg->vols[0].chunks[0].raids[0].uuid);		// Todo: Send a real value and verify it
 
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();

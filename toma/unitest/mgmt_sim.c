@@ -479,6 +479,15 @@ void mgmt_sim_send_format_drive(int disk_idx) {
 	__send_format_drive_msg(d);
 }
 
+void mgmt_sim_send_praid_report_req(const u32 praid_uuid) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(512);
+	size_t len = snprintf(buf, 512,
+		"{\"messageType\":\"sendPRaidReport\",\"messageTypeVersion\":1,\"payload\":{\"pRaids\":[{\"uuid\":\"" UUID_from_U32 "\",\"lastKnownVersion\":\"<5,2,17>\"},{\"uuid\":\"" UUID_from_U32 "\",\"lastKnownVersion\":\"<6,1,12>\"}],\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
+		praid_uuid, praid_uuid, m->boot_time);
+	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
+}
+
 bool mgmt_sim_drive_format_is_done(int disk_idx) {
 	struct mgmt_sim_disk_status *d = &g_mgmt_sim->disks_st[disk_idx];
 	BUG_ON(d->format.state == FMT_IDLE); // should only be called after sending a format command

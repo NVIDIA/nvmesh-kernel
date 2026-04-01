@@ -34,3 +34,4 @@ void mgmt_sim_send_add_volume_remote1(void);
 void mgmt_sim_send_add_volume_r1(void);
 void mgmt_sim_send_delete_volume_r1(void);
 void mgmt_sim_send_delete_volume_completed_r1(void);
+void mgmt_sim_send_praid_report_req(const u32 praid_uuid);

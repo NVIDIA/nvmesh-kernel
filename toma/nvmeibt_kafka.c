@@ -1140,7 +1140,7 @@ struct send_praid_report_ctx {
 	uint64_t		lastKnownVersion_raft_term;
 };
 
-struct generic_CMD_params_ctx {
+struct generic_CMD_params_ctx {							// A huge ~ 20[KB] struct, reduce it via unions
 	char							generic_uuid[40];	// E.g., disk_obj_guid
 	struct nvmeibt_ascii_uuid		ldisk_id;
 	char							formatType[32];
@@ -1155,7 +1155,7 @@ struct generic_CMD_params_ctx {
 	struct nvmeibt_urn_uuid			dbUUID;
 	struct resend_report_disk_ctx	disks_to_report[NVMEIBT_MAX_N_DISKS_PER_NODE];
 	int								n_disks_to_report;
-	struct send_praid_report_ctx	praids_to_report[NVMEIBT_MAX_N_PRAIDS];
+	struct send_praid_report_ctx	praids_to_report[128 + 0 *NVMEIBT_MAX_N_PRAIDS];		// Dont allow this struct to be huge. If mgmt wants more than N praids in report, Toma will send at most N and later magmt can request the remaining praids
 	int								n_praids_to_report;
 	int								encryptionCommandIndex;
 	int								slot;
@@ -1185,9 +1185,9 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					rv = -1;
 					continue;
 				}
-				if (arr->array.len >= NVMEIBT_MAX_N_DISKS_PER_NODE)
+				CMD_params->n_disks_to_report = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->disks_to_report));
+				if (arr->array.len > CMD_params->n_disks_to_report)
 					N_Wf(f67fbhw, "@STR arr.len=@INT truncated", payload_kv->key, arr->array.len);
-				CMD_params->n_disks_to_report = min(arr->array.len, NVMEIBT_MAX_N_DISKS_PER_NODE);
 				for (k = 0; k < CMD_params->n_disks_to_report; k++) {
 					struct mm_json_dict *drive_json_dict = &(arr->array.elements[k]->dict);
 					struct resend_report_disk_ctx *report = &CMD_params->disks_to_report[k];
@@ -1214,9 +1214,9 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					rv = -1;
 					continue;
 				}
-				if (arr->array.len >= NVMEIBT_MAX_N_PRAIDS)
+				CMD_params->n_praids_to_report = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->praids_to_report));
+				if (arr->array.len > CMD_params->n_praids_to_report)
 					N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-				CMD_params->n_praids_to_report = min(arr->array.len, NVMEIBT_MAX_N_PRAIDS);
 				for (k = 0; k < CMD_params->n_praids_to_report; k++) {
 					struct mm_json_dict *praid_json_dict = &(arr->array.elements[k]->dict);
 					struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
@@ -2645,9 +2645,8 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	} else if (strcmp(messageType_params->messageType, "sendPRaidReport") == 0) {
 		N_Ef(rbasdrf78fh2, "******************** Need to send a pRAID report for a specific pRAID");
 		for (i = 0; i < CMD_params->n_praids_to_report; i++) {
-			const struct send_praid_report_ctx *prd = &(CMD_params->praids_to_report[i]);
-			N_Ef(stamvuk, "uuid=@STR lastKnownVersion_major=@INT lastKnownVersion_minor=@INT lastKnownVersion_raft_term=@LU",
-				 prd->praid_uuid, prd->lastKnownVersion_major, prd->lastKnownVersion_minor, prd->lastKnownVersion_raft_term);
+			const struct send_praid_report_ctx *r = &(CMD_params->praids_to_report[i]);
+			N_Ef(stamvuk, "uuid=@STR <@INT,@INT,@LU>", r->praid_uuid, r->lastKnownVersion_major, r->lastKnownVersion_minor, r->lastKnownVersion_raft_term);
 		}
 	} else if (strcmp(messageType_params->messageType, "--- shutdown_me ---") == 0) {
 		N_Ef(p53ksmnz753bh, "******************** Use handle_update_state_shutdown() in the commands consumer");
