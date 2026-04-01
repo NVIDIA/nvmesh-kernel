@@ -161,6 +161,7 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_drive_format_is_done(0) && mgmt_sim_drive_format_is_done(1));
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
+	mgmt_sim_send_disk_report_req(0); yield();
 	SCENARIO_PRINT(__AUTOID__, "waiting for leader to exists");
 	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
 	mgmt_sim_send_leader_keep_alive();
@@ -181,6 +182,7 @@ static void scenario_create_remove_r1(void) {
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);
+	mgmt_sim_send_volume_exclusive_attach_notify(cfg->vols[0].uuid);
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change

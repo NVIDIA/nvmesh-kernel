@@ -488,6 +488,25 @@ void mgmt_sim_send_praid_report_req(const u32 praid_uuid) {
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
+void mgmt_sim_send_volume_exclusive_attach_notify(const u32 volume_uuid) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	char *buf = malloc(512);
+	size_t len = snprintf(buf, 512,
+		"{\"messageType\":\"reservationModeChange\",\"messageTypeVersion\":1,\"payload\":{\"volumeUUID\":\"" UUID_from_U32 "\",\"reservationMode\":\"Exclusive\",\"reservationVersion\":55656,\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}", volume_uuid, m->boot_time);
+	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
+}
+
+void mgmt_sim_send_disk_report_req(const u32 disk_idx) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	const struct mgmt_sim_disk_status *d = &m->disks_st[disk_idx];
+	char *buf = malloc(512);
+	size_t len = snprintf(buf, 512,
+		"{\"messageType\":\"resendReport\",\"messageTypeVersion\":1,\"payload\":{\"drives\":[{\"diskID\":\"%s.%d\",\"uuid\":\"" UUID_from_U32 "\",\"vendor\":%u,\"reappearingCounter\":789576,\"reappearingOutOfSync\":1}],\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
+		d->conf->serial, d->conf->name_space_id, d->conf->uuid, d->conf->vendor, m->boot_time);
+	// Todo: Inject field reappearingCounter, from incomming message segmentsDirtyBitsUpdate
+	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
+}
+
 bool mgmt_sim_drive_format_is_done(int disk_idx) {
 	struct mgmt_sim_disk_status *d = &g_mgmt_sim->disks_st[disk_idx];
 	BUG_ON(d->format.state == FMT_IDLE); // should only be called after sending a format command
