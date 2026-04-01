@@ -561,8 +561,6 @@ LINUX_INCLUDE='\
     $(INC_DIR) \
     -include $(autoconf_h) \
     $(KCONFIG_H) \
-    $$(if $$(CONFIG_XEN),-D__XEN_INTERFACE_VERSION__=$$(CONFIG_XEN_INTERFACE_VERSION)) \
-    $$(if $$(CONFIG_XEN),-I$$(srctree)/arch/x86/include/mach-xen) \
     -I$$(srctree)/arch/$$(SRCARCH)/include \
     -Iarch/$$(SRCARCH)/include/generated \
     -Iinclude \
