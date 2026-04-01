@@ -34,6 +34,7 @@ build_remote.sh
 clnt/block/unitest/out.txt
 clnt/block/unitest/nvmeibc.trace.json.cksum
 clnt/block/unitest/traces_ids.c
+clnt/block/unitest/build/
 *.pyc
 *.d
 .editorconfig

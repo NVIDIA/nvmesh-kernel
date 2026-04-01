@@ -83,6 +83,11 @@ ifeq ($(USE_THREAD_SANITIZER),1)
 	LDFLAGS += -fsanitize=thread
 endif
 
+ifeq ($(USE_COVERAGE),1)
+	CFLAGS += --coverage -fprofile-abs-path -fprofile-update=atomic
+	LDFLAGS += --coverage
+endif
+
 ifeq ($(USE_RELEASE),1)
 	CFLAGS += -O2 -g3 -ggdb3 -Wno-array-bounds -fno-omit-frame-pointer -rdynamic
 else

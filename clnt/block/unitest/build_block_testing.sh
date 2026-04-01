@@ -45,6 +45,7 @@ if [ $# -eq 0 ] || [ "$1" = "help" ] || [ "$1" = "h" ] || [ "$1" = "-h" ] || [ "
 	echo "ci	  - does: 'run' with 5 iterations + gathers logs (continuos integration)"
 	echo "nightly - does: heavy test - run tests multiple times with/without sanitizers + gathers logs (continuos integration)"
 	echo "sanity  - does: sanity test - run tests several times with/without sanitizers + gathers logs (continuos integration)"
+	echo "coverage- does: 'clean', build with gcov, run tests, generate HTML coverage report"
 	echo "help    - shows this help message, will also be shown without parameters or using -h, h or --help"
 	echo ""
 	echo "In case of failure, this script will output the location of the core file, as expected it to be or hints"
@@ -215,7 +216,7 @@ case "$1" in
 	"sanity")
 		shift
 		setup_simulator_dependencies
-		SANITY_FLAGS="-nRep 3 $TRACES_FLAGS" 
+		SANITY_FLAGS="-nRep 3 $TRACES_FLAGS"
 		clean
 		build ${@} USE_RELEASE=0 USE_SANITIZERS=1
 		runcmd="./blk_unitest $SANITY_FLAGS  2>&1 | tee sanity_sync_r0_s1.out.txt"
@@ -232,6 +233,39 @@ case "$1" in
 		build ${@} USE_RELEASE=1
 		runcmd="./blk_unitest -async $SANITY_FLAGS  2>&1 | tee sanity_async_r1_s0.out.txt"
 		execute_unitest
+		;;
+	"coverage")
+		shift
+		if ! command -v lcov &>/dev/null || ! command -v genhtml &>/dev/null; then
+			echo "Error: lcov and genhtml are required for coverage reports"
+			exit 1
+		fi
+		clean
+		build "${@}" USE_RELEASE=0 USE_SANITIZERS=0 USE_COVERAGE=1
+		runcmd="./blk_unitest -async -conf ./ci.cfg -nRep 1 2>&1 | tee out.txt"
+		execute_unitest
+		echo "Generating coverage report..."
+		LCOV_ROOT_DIR="./build"
+		mkdir -p "$LCOV_ROOT_DIR/coverage_html"
+		lcov --capture \
+			--directory "$TEST_SUB_DIR" \
+			--output-file "$LCOV_ROOT_DIR/coverage_raw.lcov" \
+			--ignore-errors mismatch,negative,gcov,empty \
+			--rc geninfo_unexecuted_blocks=1 \
+			--quiet
+		lcov --remove "$LCOV_ROOT_DIR/coverage_raw.lcov" "*/autogen/*" \
+			'/usr/*' '*/unitest/*' '*/kr_incs.*' '*/99bin/*' \
+			'*/srv/*' '*/toma/*' '*/tools/*' '*/perfTest/*' \
+			'*/atom/*' '*/common_public/*' \
+			--output-file "$LCOV_ROOT_DIR/coverage.lcov" \
+			--ignore-errors unused \
+			--quiet
+		rm -f "$LCOV_ROOT_DIR/coverage_raw.lcov"
+		genhtml "$LCOV_ROOT_DIR/coverage.lcov" \
+			--output-directory "$LCOV_ROOT_DIR/coverage_html" \
+			--ignore-errors unmapped \
+			--quiet
+		echo "Coverage report: $LCOV_ROOT_DIR/coverage_html/index.html"
 		;;
 	"ci")
 		# ---------- For continous integration: generate logs and coredump location, might not die with ctrl+c
