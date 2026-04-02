@@ -20,7 +20,7 @@ FIRST_TRACE_ID = 256
 
 
 def perror(msg):
-    print >> sys.stderr, msg
+    print(msg, file=sys.stderr)
 
 
 class CSourceWriter:

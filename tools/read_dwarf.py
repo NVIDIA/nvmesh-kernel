@@ -460,8 +460,8 @@ def resolve(so):
         except AttributeError as e:
             # To avoid spamming with error messages, assume static functions end with _ or begin with __
             if not func.endswith('_') and not func.startswith('__'):
-                print >> sys.stderr, "Error importing {0}. Static? Probably can ignore this message. {1}".format(
-                    func, str(e))
+                print("Error importing {0}. Static? Probably can ignore this message. {1}".format(
+                    func, str(e)), file=sys.stderr)
 
     return dll, types, funcs, enums
 
