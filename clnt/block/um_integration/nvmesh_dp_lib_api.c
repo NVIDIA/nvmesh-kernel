@@ -135,7 +135,6 @@ static int __um_dbg_please_kill_yourself(struct nvmeibc_icore_ops const* self, s
 static void __um_cb_called_cmd(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk, struct nvmeibc_disk_command *disk_cmd)
 {
 	(void)self;(void)disk; (void)disk_cmd;
-	BUG();
 }
 
 static void __um_dump_transfers(struct nvmeibc_icore_ops const* self, struct nvmeibc_idisk *disk)
@@ -428,18 +427,41 @@ int nvmeibc_block_suspend(struct nvmeibc_block_device *dev, void *ctx, blk2blk_g
 int nvmeibc_block_revive(struct nvmeibc_block_device *dev) { (void)dev; BUG(); return 0; }	// Sync/IO never calls it !
 void __copy_sub_block_by_map(unsigned char *dst, unsigned char *src, const ulong map) { (void)src; (void)dst; (void)map; BUG(); }
 
-void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp) {	// Remove from here!!!!!!!!!!!!!!!!!!!
+/**
+ * nvmeibc_block_completion - IO command completion for the dplib UM bridge.
+ * @comp: completion structure of the finished IO command.
+ *
+ * UM bridge equivalent of nvmeibc_block_completion in nvmeibc_block.c.
+ * Handles error code refinement, transfer counter bookkeeping via
+ * cb_called_cmd, and forwards the completion to the KC state machine
+ * via cmd_comp_cb.
+ *
+ * Piggybacked binfo writes (has_piggyback == true) are dispatched by the
+ * UM transport layer in raidlib_adapters.c before this function is called,
+ * because the piggybacked RDMA must complete synchronously on the current
+ * fiber before the dplib_caller context is freed.
+ */
+void nvmeibc_block_completion(struct nvmeibc_d_iocmd_comp *comp) {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp);
-	if (unlikely(comp->comp_code)) {
-		if (comp->comp_code > 0) {							// NVME error code
-			comp->comp_code = nvmeib_error_code_refine(comp->comp_code);
-		}
+	struct nvmeibc_disk_command *disk_cmd = &cmd->iocmd->disk_cmd;
+	struct nvmeibc_disk *disk = nvmeibc_disk_from_base(cmd->ds->disk);
+	struct nvmeibc_icore_ops const *icore_ops = nvmeibc_core_ops_get();
+
+	if (unlikely(comp->comp_code > 0)) {
+		comp->comp_code = nvmeib_error_code_refine(comp->comp_code);
 	}
+
+	icore_ops->cb_called_cmd(icore_ops, &disk->base, disk_cmd);
 	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
 void nvmeibc_block_comp_gencmd(struct nvmeibc_d_iocmd_comp *comp) {
 	struct nvmeibc_block_command *cmd = dp_cmds_get_cmd_from_comp(comp);
+	struct nvmeibc_disk_command *disk_cmd = &cmd->gen_cmd->disk_cmd;
+	struct nvmeibc_disk *disk = nvmeibc_disk_from_base(cmd->ds->disk);
+	struct nvmeibc_icore_ops const *icore_ops = nvmeibc_core_ops_get();
+
+	icore_ops->cb_called_cmd(icore_ops, &disk->base, disk_cmd);
 	cmd->o->nd->dp.cmd_comp_cb(comp, nvmeibc_d_iocmd_comp_tag_make());
 }
 
@@ -530,8 +552,19 @@ void nvmesh_dp_lib_destroy(void) {
 /***************************** Replacing Topology.c **************************/
 static void __rec_dummy_drainer(void* _dev) { (void)_dev; BUG_ON(1); }
 
+/* TODO(spolovko): io_stats should be allocated and managed by the block
+ * device, not by os_api. Wire io_stats into the dummy block device so that
+ * the KC stale_sync test can run. The stale resolution path calls execute_bio
+ * internally which dereferences nd->os->stats. Currently stats is NULL which
+ * is safe for normal IO because nvmeib_io_stats_operation_start is a no-op in
+ * UM builds, but the internal bio resubmission during stale resolution needs
+ * valid io_stats. The os_api should be removed from the clnt/block
+ * directory. */
+static struct nvmeibc_os_api dummy_os_api;
+
 static void __create_dummy_block_device(const struct dplib_caller *sw, struct nvmeibc_block_device* dev)
 {	// Simulation of nvmeibc_block_init()
+	dev->os = &dummy_os_api;
 	dev->size = 0;
 	strlcpy(dev->name, "slib_bdev_name", sizeof(dev->name));
 	strlcpy(dev->uuid, "slib_bdev_uuid", sizeof(dev->uuid));
