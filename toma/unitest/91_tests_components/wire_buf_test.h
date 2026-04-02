@@ -86,7 +86,14 @@ struct section_merge_test_ctx {
 	/********** Leader incremental selection: deletion forces complete ***********/ \
 	X(deletion_guard_forces_complete_configs,		"Vol deletion forces complete configs",		"Peer in window but last_delete_kafka > peer offset => complete") \
 	X(deletion_guard_no_effect_when_peer_caught_up,	"Caught-up peer still gets incremental",	"Peer kafka offset >= last_delete => incremental allowed") \
+	X(selection_topo_window_boundary,				"Topo window boundary",						"Peer just below topo window => complete, at boundary => incremental") \
+	X(selection_topo_config_window_boundary,		"Topo config window boundary",				"Peer just below topo_config window => complete, at boundary => incremental") \
+	X(selection_kafka_window_boundary,				"Kafka window boundary",					"Peer just below kafka window => complete, at boundary => incremental") \
+	X(selection_raft_members_seq_window_boundary,	"Raft members seq window boundary",			"Peer just below members seq window => complete, at boundary => incremental") \
+	X(selection_topo_guard_blocks_configs,			"Topo guard blocks configs",				"Configs in window still require topo incremental eligibility") \
 	/********** Follower realloc_and_upd orchestration **************************/ \
+	X(topo_incremental_configs_complete_inplace,	"Topo incremental + complete configs",		"Leader mixed buffer shape updates topo in place while configs stay complete") \
+	X(all_sections_incremental_full_merge,			"All sections incremental full merge",		"Incoming all-incremental wire buf merges all sections into complete follower state") \
 	X(first_update_with_raft_log,        "First update with raft log",        "old=NULL, raft_log=true => full memcpy of upd") \
 	X(first_update_without_raft_log,     "First update without raft log",     "old=NULL, raft_log=false => only raft_ctx copied") \
 	X(equal_bufs_only_raft_ctx_updated,  "Equal bufs updates raft_ctx only",  "All idx match => dst==old, raft_ctx+sw_ver updated") \

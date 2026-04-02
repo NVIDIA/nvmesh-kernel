@@ -2146,6 +2146,132 @@ out:
 	return rv;
 }
 
+DEFINE_TEST(selection_topo_window_boundary)
+{
+	int			rv = -1;
+	int			result;
+	int64_t		topo_window_start = 100 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX;
+	int64_t		config_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX;
+	int64_t		kafka_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET;
+	int64_t		raft_members_seq_window_start = 20 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO;
+
+	(void)_ctx;
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start - 1, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 0);
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(selection_topo_config_window_boundary)
+{
+	int			rv = -1;
+	int			result;
+	int64_t		topo_window_start = 100 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX;
+	int64_t		config_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX;
+	int64_t		kafka_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET;
+	int64_t		raft_members_seq_window_start = 20 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO;
+
+	(void)_ctx;
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start - 1, kafka_window_start, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 0);
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(selection_kafka_window_boundary)
+{
+	int			rv = -1;
+	int			result;
+	int64_t		topo_window_start = 100 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX;
+	int64_t		config_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX;
+	int64_t		kafka_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET;
+	int64_t		raft_members_seq_window_start = 20 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO;
+
+	(void)_ctx;
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start, kafka_window_start - 1, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 0);
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(selection_raft_members_seq_window_boundary)
+{
+	int			rv = -1;
+	int			result;
+	int64_t		topo_window_start = 100 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX;
+	int64_t		config_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX;
+	int64_t		kafka_window_start = 50 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET;
+	int64_t		raft_members_seq_window_start = 20 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO;
+
+	(void)_ctx;
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start - 1, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 0);
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(selection_topo_guard_blocks_configs)
+{
+	int			rv = -1;
+	int			result;
+	int64_t		topo_window_start = 100 - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX;
+
+	(void)_ctx;
+
+	result = TEST_compute_is_configs_incremental(
+		topo_window_start - 1, 50, 50, 20, 50,
+		100, 50, 50, 20,
+		0, 0);
+	TEST_ASSERT_EQ(result, 0);
+	rv = 0;
+out:
+	return rv;
+}
+
 /***********************    Realloc & Update tests    *************************/
 
 static struct nvmeibt_persist_and_wire_buf *build_test_buf(
@@ -2164,6 +2290,278 @@ static struct nvmeibt_persist_and_wire_buf *build_test_buf(
 		false, tc_idx, -1LL, tc_data, tc_len,
 		false, kmc_idx, -1LL, kmc_data, kmc_len,
 		false, rm_idx, -1LL, rm_data, rm_len);
+}
+
+static struct nvmeibt_persist_and_wire_buf *build_test_buf_ex(
+	unsigned long long raft_term,
+	bool is_topo_incremental, char *topo_data, int topo_len, int64_t topo_idx,
+	bool is_topo_config_incremental, char *tc_data, int tc_len, int64_t tc_idx,
+	bool is_kafka_mgmt_config_incremental, char *kmc_data, int kmc_len, int64_t kmc_idx,
+	bool is_raft_members_incremental, char *rm_data, int rm_len, int64_t rm_idx, int64_t rm_seq_no)
+{
+	union nvmeib_uuid null_uuid;
+
+	memset(&null_uuid, 0, sizeof(null_uuid));
+	return nvmeibt_raft_generate_persist_and_wire_buf(
+		raft_term, 0, 0, &null_uuid, &null_uuid, 0, 0, 0,
+		is_topo_incremental, topo_idx, -1LL, topo_data, topo_len,
+		is_topo_config_incremental, tc_idx, -1LL, tc_data, tc_len,
+		is_kafka_mgmt_config_incremental, kmc_idx, -1LL, kmc_data, kmc_len,
+		is_raft_members_incremental, rm_idx, rm_seq_no, rm_data, rm_len);
+}
+
+DEFINE_TEST(topo_incremental_configs_complete_inplace)
+{
+	struct nvmeibt_persist_and_wire_buf		*old = NULL;
+	struct nvmeibt_persist_and_wire_buf		*old_saved = NULL;
+	struct nvmeibt_persist_and_wire_buf		*upd = NULL;
+	struct nvmeibt_persist_and_wire_buf		*dst = NULL;
+	struct nvmeibt_wire_type_len_value		tlv_ctx;
+	struct test_praid_spec					old_praids[1], incr_praids[1];
+	char									old_topo_wire[1024], incr_topo_wire[1024];
+	char									tc_wire[128], kmc_wire[128], rm_wire[128];
+	char									*topo_data_out = NULL;
+	int										old_topo_len;
+	int										incr_topo_len;
+	int										tc_len;
+	int										kmc_len;
+	int										rm_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	make_test_uuid(&old_praids[0].uuid, 1);
+	old_praids[0].segs_num = 0;
+	old_praids[0].topo_idx_updated = 10;
+	old_praids[0].praid_version_major = 1;
+	old_praids[0].praid_version_minor = 0;
+	incr_praids[0] = old_praids[0];
+	incr_praids[0].topo_idx_updated = 20;
+	incr_praids[0].praid_version_major = 2;
+
+	old_topo_len = craft_topo_buf(old_topo_wire, (int)sizeof(old_topo_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_COMPLETE, 10LL, 1, old_praids);
+	TEST_ASSERT_TRUE(old_topo_len > 0);
+	incr_topo_len = craft_topo_buf(incr_topo_wire, (int)sizeof(incr_topo_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_INCREMENTAL, 20LL, 1, incr_praids);
+	TEST_ASSERT_TRUE(incr_topo_len > 0);
+	tc_len = craft_section_buf(tc_wire, (int)sizeof(tc_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 20LL, 50, 0xBB);
+	TEST_ASSERT_TRUE(tc_len > 0);
+	kmc_len = craft_section_buf(kmc_wire, (int)sizeof(kmc_wire), &tlv_ctx,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 30LL, 30, 0xCC);
+	TEST_ASSERT_TRUE(kmc_len > 0);
+	rm_len = craft_section_buf(rm_wire, (int)sizeof(rm_wire), &tlv_ctx,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 40LL, 40, 0xDD);
+	TEST_ASSERT_TRUE(rm_len > 0);
+
+	old = build_test_buf_ex(1, false, old_topo_wire, old_topo_len, 10LL,
+			false, tc_wire, tc_len, 20LL,
+			false, kmc_wire, kmc_len, 30LL,
+			false, rm_wire, rm_len, 40LL, -1LL);
+	old_saved = old;
+	upd = build_test_buf_ex(3, true, incr_topo_wire, incr_topo_len, 20LL,
+			false, tc_wire, tc_len, 20LL,
+			false, kmc_wire, kmc_len, 30LL,
+			false, rm_wire, rm_len, 40LL, -1LL);
+
+	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	TEST_ASSERT_TRUE(dst == old_saved);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_ctx), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 20LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_config_ctx), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_config_ctx), 20LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->kafka_mgmt_config_ctx), 30LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->raft_members_ctx), 40LL);
+	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, TLV_TYPE_TOPO_COMPLETE, &topo_data_out);
+	TEST_ASSERT_TRUE(topo_data_out != NULL);
+	TEST_ASSERT_EQ(get_topo_praid_count(topo_data_out), 1);
+	{
+		struct nvmeibt_praid_serialized_topo	*found;
+		struct nvmeibt_praid_serialized_topo	host_praid;
+
+		found = find_praid_in_topo(topo_data_out, &old_praids[0].uuid);
+		TEST_ASSERT_NOT_NULL(found);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+		TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
+	}
+	persist_and_wire_buf_validate_len(dst);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_mixed_dst, dst);
+	NNVMEIBT_TOMA_FREE(test_mixed_upd, upd);
+	return rv;
+}
+
+DEFINE_TEST(all_sections_incremental_full_merge)
+{
+	struct nvmeibt_persist_and_wire_buf		*old = NULL;
+	struct nvmeibt_persist_and_wire_buf		*old_saved = NULL;
+	struct nvmeibt_persist_and_wire_buf		*upd = NULL;
+	struct nvmeibt_persist_and_wire_buf		*dst = NULL;
+	struct nvmeibt_wire_type_len_value		tlv_ctx;
+	struct test_praid_spec					old_praids[1], incr_praids[1];
+	struct test_vol_spec					old_vols[1], incr_vols[1];
+	struct test_raft_member_spec			old_members[1], incr_members[1];
+	char									old_topo_wire[1024], incr_topo_wire[1024];
+	char									old_tc_wire[1024], incr_tc_wire[1024];
+	char									old_kmc_wire[1024], incr_kmc_wire[1024];
+	char									old_rm_wire[1024], incr_rm_wire[1024];
+	char									blkdev_wire[1024];
+	union nvmeib_uuid						chunk_uuid;
+	union nvmeib_uuid						praid_uuid;
+	char									*topo_data_out = NULL;
+	char									*tc_data_out = NULL;
+	char									*kmc_data_out = NULL;
+	char									*rm_data_out = NULL;
+	int										old_topo_len;
+	int										incr_topo_len;
+	int										old_tc_len;
+	int										incr_tc_len;
+	int										old_kmc_len;
+	int										incr_kmc_len;
+	int										old_rm_len;
+	int										incr_rm_len;
+	int										blkdev_wire_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	TEST_init_raft_members_hash();
+	TEST_clear_raft_members_hash();
+	TEST_clear_blkdevs_hash();
+	TEST_clear_chunks_hash();
+	TEST_clear_praids_hash();
+
+	make_test_uuid(&old_praids[0].uuid, 1);
+	old_praids[0].segs_num = 0;
+	old_praids[0].topo_idx_updated = 10;
+	old_praids[0].praid_version_major = 1;
+	old_praids[0].praid_version_minor = 0;
+	incr_praids[0] = old_praids[0];
+	incr_praids[0].topo_idx_updated = 20;
+	incr_praids[0].praid_version_major = 2;
+	old_topo_len = craft_topo_buf(old_topo_wire, (int)sizeof(old_topo_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_COMPLETE, 10LL, 1, old_praids);
+	TEST_ASSERT_TRUE(old_topo_len > 0);
+	incr_topo_len = craft_topo_buf(incr_topo_wire, (int)sizeof(incr_topo_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_INCREMENTAL, 20LL, 1, incr_praids);
+	TEST_ASSERT_TRUE(incr_topo_len > 0);
+
+	make_test_uuid(&old_vols[0].uuid, 1);
+	old_vols[0].version = 10;
+	old_vols[0].kafka_offset_or_idx = 100;
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;
+	old_tc_len = craft_topo_config_buf(old_tc_wire, (int)sizeof(old_tc_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 100LL, 1, old_vols);
+	TEST_ASSERT_TRUE(old_tc_len > 0);
+	incr_tc_len = craft_topo_config_buf(incr_tc_wire, (int)sizeof(incr_tc_wire), &tlv_ctx,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(incr_tc_len > 0);
+	old_kmc_len = craft_kafka_mgmt_config_buf(old_kmc_wire, (int)sizeof(old_kmc_wire), &tlv_ctx,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 100LL, 1, old_vols);
+	TEST_ASSERT_TRUE(old_kmc_len > 0);
+	incr_kmc_len = craft_kafka_mgmt_config_buf(incr_kmc_wire, (int)sizeof(incr_kmc_wire), &tlv_ctx,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(incr_kmc_len > 0);
+
+	init_raft_member_spec(&old_members[0], 1, 10, 100);
+	init_raft_member_spec(&incr_members[0], 1, 20, 200);
+	setup_test_raft_member(&old_members[0], 1, 10, 100);
+	old_rm_len = craft_raft_members_buf(old_rm_wire, (int)sizeof(old_rm_wire), &tlv_ctx,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 100LL, 1, old_members);
+	TEST_ASSERT_TRUE(old_rm_len > 0);
+	incr_rm_len = craft_raft_members_buf(incr_rm_wire, (int)sizeof(incr_rm_wire), &tlv_ctx,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 200LL, 1, incr_members);
+	TEST_ASSERT_TRUE(incr_rm_len > 0);
+
+	make_test_uuid(&praid_uuid, 2000);
+	TEST_add_praid_to_hash(&praid_uuid, 100, 10, 0);
+	make_test_uuid(&chunk_uuid, 1000);
+	TEST_add_chunk_to_hash(&chunk_uuid, 1, &praid_uuid);
+	blkdev_wire_len = serialize_vol_wire_data(blkdev_wire, (int)sizeof(blkdev_wire), &old_vols[0], 0);
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, blkdev_wire, blkdev_wire_len);
+
+	old = build_test_buf_ex(1, false, old_topo_wire, old_topo_len, 10LL,
+			false, old_tc_wire, old_tc_len, 100LL,
+			false, old_kmc_wire, old_kmc_len, 100LL,
+			false, old_rm_wire, old_rm_len, 100LL, 10LL);
+	old_saved = old;
+	upd = build_test_buf_ex(5, true, incr_topo_wire, incr_topo_len, 20LL,
+			true, incr_tc_wire, incr_tc_len, 200LL,
+			true, incr_kmc_wire, incr_kmc_len, 200LL,
+			true, incr_rm_wire, incr_rm_len, 200LL, 20LL);
+
+	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	TEST_ASSERT_TRUE(dst != old_saved);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_ctx), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_config_ctx), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->kafka_mgmt_config_ctx), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->raft_members_ctx), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 20LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_config_ctx), 200LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->kafka_mgmt_config_ctx), 200LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->raft_members_ctx), 200LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_seq_no(&dst->raft_members_ctx), 20LL);
+
+	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, TLV_TYPE_TOPO_COMPLETE, &topo_data_out);
+	TEST_ASSERT_TRUE(topo_data_out != NULL);
+	{
+		struct nvmeibt_praid_serialized_topo	*found;
+		struct nvmeibt_praid_serialized_topo	host_praid;
+
+		found = find_praid_in_topo(topo_data_out, &old_praids[0].uuid);
+		TEST_ASSERT_NOT_NULL(found);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+		TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
+	}
+
+	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, TLV_TYPE_TOPO_CONFIG_COMPLETE, &tc_data_out);
+	TEST_ASSERT_TRUE(tc_data_out != NULL);
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(tc_data_out, true, NULL);
+
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].praids[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+
+	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, &kmc_data_out);
+	TEST_ASSERT_TRUE(kmc_data_out != NULL);
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(kmc_data_out, false, NULL);
+
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+
+	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(dst, TLV_TYPE_RAFT_MEMBERS_COMPLETE, &rm_data_out);
+	TEST_ASSERT_TRUE(rm_data_out != NULL);
+	{
+		struct mm_raft_member_conf	out_member __attribute__((aligned(16)));
+		struct mm_raft_member_conf	host_member __attribute__((aligned(16)));
+
+		memcpy(&out_member, rm_data_out + sizeof(int) * 2, sizeof(out_member));
+		nvmeibt_raft_member_conf_convert_le_be(&host_member, &out_member);
+		TEST_ASSERT_EQ(host_member.raft_members_seq_no_updated, 20);
+		TEST_ASSERT_EQ(host_member.kafka_offset, 200);
+	}
+
+	persist_and_wire_buf_validate_len(dst);
+	rv = 0;
+out:
+	TEST_clear_raft_members_hash();
+	TEST_clear_blkdevs_hash();
+	TEST_clear_chunks_hash();
+	TEST_clear_praids_hash();
+	NNVMEIBT_TOMA_FREE(test_inc_full_dst, dst);
+	NNVMEIBT_TOMA_FREE(test_inc_full_upd, upd);
+	return rv;
 }
 
 DEFINE_TEST(first_update_with_raft_log)
