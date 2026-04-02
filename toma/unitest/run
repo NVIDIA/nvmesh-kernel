@@ -1,5 +1,5 @@
 #!/bin/bash
-# Assume we are in project directory
+cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 
 if declare -F NVMESH_help > /dev/null; then
 	echo "help scripts already exist";
