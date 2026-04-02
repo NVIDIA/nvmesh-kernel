@@ -169,7 +169,6 @@ def verified_decoder(ordered_pairs):
     for k, v in ordered_pairs:
         if k in d:
             raise ValueError('Duplicate key in dictionary: "{}"'.format(k))
-            print ('ValueError(Duplicate key in dictionary: "{}")'.format(k))
         else:
             d[k] = v
     return d
