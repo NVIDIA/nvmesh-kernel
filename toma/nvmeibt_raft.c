@@ -221,6 +221,11 @@ void nvmeibt_raft_set_incremental_wire_buf_enabled(bool is_enabled)
 	}
 }
 
+static bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
+{
+	return (peer_sw_ver != 0) && (peer_sw_ver >= TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
+}
+
 static __kernel_suseconds_t		max_wait_for_non_registrable_seg_nsec = PRAID_LEADER_MAX_NSEC_WAIT_FOR_NON_REGISTRABLE_SEG_TO_APPLY_DEFAULT;
 
 #define RAFT_RANDOM_ELECTION_TIMEOUT_NSEC	(raft_min_election_timeout_nsec + \
@@ -3313,6 +3318,7 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	int64_t									peer_kafka_mgmt_config_offset;
 	int64_t									peer_raft_members_kafka_offset;
 	int64_t									peer_raft_members_seq_no;
+	BOOL									is_peer_incremental_wire_buf_supported;
 	BOOL									is_topo_incremental;
 	BOOL									is_configs_and_raft_members_incremental;
 
@@ -3331,8 +3337,10 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	peer_kafka_mgmt_config_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.kafka_mgmt_config_ctx));
 	peer_raft_members_kafka_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
 	peer_raft_members_seq_no = nvmeibt_tlv_get_seq_no(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
+	is_peer_incremental_wire_buf_supported = raft_is_peer_incremental_wire_buf_supported(dst_member->toma_software_version);
 
 	is_topo_incremental = raft_is_incremental_wire_buf_enabled &&
+		is_peer_incremental_wire_buf_supported &&
 		compute_is_topo_incremental(peer_topo_idx, RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit));
 
 	// Check configs and raft members incremental windows and deletion thresholds.
@@ -3345,6 +3353,7 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	// If a future code path allows praid deletion without volume deletion, add an explicit
 	// last_delete_topo_config_offset guard here.
 	is_configs_and_raft_members_incremental = raft_is_incremental_wire_buf_enabled &&
+		is_peer_incremental_wire_buf_supported &&
 		compute_is_configs_and_raft_members_incremental(
 			is_topo_incremental, peer_topo_config_idx, peer_kafka_mgmt_config_offset,
 			peer_raft_members_seq_no, peer_raft_members_kafka_offset,
@@ -3353,6 +3362,11 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 			RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_to_commit),
 			my_raft_global.last_delete_kafka_mgmt_config_offset,
 			my_raft_global.last_delete_raft_members_kafka_offset);
+
+	if (raft_is_incremental_wire_buf_enabled && !is_peer_incremental_wire_buf_supported) {
+		N_Tf(peer_old_wire_buf, "peer=@STR sw_ver=@SOFTWARE_VERSION needs complete wire buf (min_supported=@SOFTWARE_VERSION)",
+			 dst_member->hostname, dst_member->toma_software_version, TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
+	}
 
 	if (!is_configs_and_raft_members_incremental && raft_is_incremental_wire_buf_enabled) {
 		N_Tf(peer_needs_complete, "Peer needs complete configs: kafka_offset=@INT64_TD (last_delete=@INT64_TD) members_offset=@INT64_TD (last_delete=@INT64_TD)",
