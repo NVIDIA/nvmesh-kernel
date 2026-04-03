@@ -855,8 +855,10 @@ static void release_work(struct workqe_struct *w)
 		break;
 	case QP_DRAINING:
 		//wait = true;
+		run_drain_cqs = true;
 		break;
 	case QP_RELEASING:
+		run_drain_cqs = true;
 		break;
 	}
 	if (wait_for_drep && net->drep_comp && !cl->drep_timeout) {
