@@ -31,6 +31,15 @@ extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
 extern void TEST_clear_blkdevs_hash(void);
 
 /* Incremental selection — nvmeibt_raft.c */
+extern int TEST_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver);
+extern int TEST_is_configs_incremental_allowed_for_peer_sw_ver(
+	uint32_t peer_sw_ver,
+	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
+	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,
+	int64_t peer_raft_members_kafka_offset,
+	int64_t leader_topo_to_commit, int64_t leader_topo_config_to_commit,
+	int64_t leader_kafka_mgmt_config_to_commit, int64_t leader_raft_members_seq_no_to_commit,
+	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset);
 extern int TEST_compute_is_configs_incremental(
 	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
 	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,

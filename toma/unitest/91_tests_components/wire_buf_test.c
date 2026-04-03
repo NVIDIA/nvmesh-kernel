@@ -2272,6 +2272,60 @@ out:
 	return rv;
 }
 
+DEFINE_TEST(selection_old_peer_version_forces_complete)
+{
+	int		rv = -1;
+	int		is_incremental_allowed;
+
+	(void)_ctx;
+
+	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
+		TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED - 1,
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 0, 0);
+	TEST_ASSERT_EQ(is_incremental_allowed, 0);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(selection_supported_peer_version_allows_incremental)
+{
+	int		rv = -1;
+	int		is_incremental_allowed;
+
+	(void)_ctx;
+
+	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
+		TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED,
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 0, 0);
+	TEST_ASSERT_EQ(is_incremental_allowed, 1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(selection_unknown_peer_version_forces_complete)
+{
+	int		rv = -1;
+	int		is_incremental_allowed;
+
+	(void)_ctx;
+
+	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
+		0,
+		/* peer */    98, 49, 49, 19, 50,
+		/* leader */  100, 50, 50, 20,
+		/* deletes */ 0, 0);
+	TEST_ASSERT_EQ(is_incremental_allowed, 0);
+	rv = 0;
+out:
+	return rv;
+}
+
 /***********************    Realloc & Update tests    *************************/
 
 static struct nvmeibt_persist_and_wire_buf *build_test_buf(

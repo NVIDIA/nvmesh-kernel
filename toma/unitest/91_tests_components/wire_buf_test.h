@@ -91,6 +91,9 @@ struct section_merge_test_ctx {
 	X(selection_kafka_window_boundary,				"Kafka window boundary",					"Peer just below kafka window => complete, at boundary => incremental") \
 	X(selection_raft_members_seq_window_boundary,	"Raft members seq window boundary",			"Peer just below members seq window => complete, at boundary => incremental") \
 	X(selection_topo_guard_blocks_configs,			"Topo guard blocks configs",				"Configs in window still require topo incremental eligibility") \
+	X(selection_old_peer_version_forces_complete,	"Old peer version forces complete",			"Old peer stays complete even when indices qualify for incremental") \
+	X(selection_supported_peer_version_allows_incremental, "Supported peer version allows incremental", "Peer at support threshold may use incremental when indices qualify") \
+	X(selection_unknown_peer_version_forces_complete, "Unknown peer version forces complete",	"Peer version 0 is treated conservatively as complete-only") \
 	/********** Follower realloc_and_upd orchestration **************************/ \
 	X(topo_incremental_configs_complete_inplace,	"Topo incremental + complete configs",		"Leader mixed buffer shape updates topo in place while configs stay complete") \
 	X(all_sections_incremental_full_merge,			"All sections incremental full merge",		"Incoming all-incremental wire buf merges all sections into complete follower state") \

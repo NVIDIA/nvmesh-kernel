@@ -1457,6 +1457,30 @@ int TEST_compute_is_configs_incremental(
 		leader_kafka_mgmt_config_to_commit, leader_raft_members_seq_no_to_commit,
 		last_delete_kafka_mgmt_config_offset, last_delete_raft_members_kafka_offset);
 }
+
+int TEST_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
+{
+	return raft_is_peer_incremental_wire_buf_supported(peer_sw_ver);
+}
+
+int TEST_is_configs_incremental_allowed_for_peer_sw_ver(
+	uint32_t peer_sw_ver,
+	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
+	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,
+	int64_t peer_raft_members_kafka_offset,
+	int64_t leader_topo_to_commit, int64_t leader_topo_config_to_commit,
+	int64_t leader_kafka_mgmt_config_to_commit, int64_t leader_raft_members_seq_no_to_commit,
+	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset)
+{
+	return raft_is_peer_incremental_wire_buf_supported(peer_sw_ver) &&
+		TEST_compute_is_configs_incremental(
+			peer_topo_idx, peer_topo_config_idx,
+			peer_kafka_mgmt_config_offset, peer_raft_members_seq_no,
+			peer_raft_members_kafka_offset,
+			leader_topo_to_commit, leader_topo_config_to_commit,
+			leader_kafka_mgmt_config_to_commit, leader_raft_members_seq_no_to_commit,
+			last_delete_kafka_mgmt_config_offset, last_delete_raft_members_kafka_offset);
+}
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 
 static bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit)
