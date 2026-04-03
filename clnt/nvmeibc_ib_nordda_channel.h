@@ -146,7 +146,11 @@ struct nvmeibc_ib_nordda_channel {
 	   server allowed to have over this lionic:rionic pair
 	   toward this disk via nordda */
 	/* int index; ----- now in the base class ----- */
-	/* link in disk's norddas list */
+	/*
+	 * Plist anchor: either disk->info->available_norddas (non-pcpu NRCHs only),
+	 * or a coremask's nrchs_plist (pcpu + coremask). Never both at once —
+	 * see nvmeibc_disk_available_norddas_add().
+	 */
 	struct plist_node available_link;
 	struct plist_node per_numa_node_link;
 	bool inuse;

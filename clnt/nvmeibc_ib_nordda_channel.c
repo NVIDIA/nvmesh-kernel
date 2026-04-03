@@ -2554,7 +2554,7 @@ void nvmeibc_ib_nordda_channel_free(struct nvmeibc_ib_nordda_channel *ch)
 	}
 
 	if (!plist_node_empty(&ch->available_link)) {
-		_NT(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_free, "nrch @BASE_NAME (@CH_PTR), still linked to available list", ch->base.name, ch);
+		_NT(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_free, "nrch @BASE_NAME (@CH_PTR), still on a plist (available or coremask)", ch->base.name, ch);
 		WARN_ON(1);
 	}
 

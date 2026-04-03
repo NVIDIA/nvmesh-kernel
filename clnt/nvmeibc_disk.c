@@ -480,7 +480,7 @@ struct nvmeibc_disk_coremask_chs {
 	struct list_head pending_cmds; /* list of struct disk_command */
 	int n_pending;
 	int max_pending;
-	struct list_head nrchs_list; /* list of struct nvmeibc_ib_nordda_channel */
+	struct plist_head nrchs_plist; /* pcpu NRCHs in this mask; plist_node is nrch->available_link */
 	u64 uid; /* copy of unique-id for core_mask from DB */
 	struct nvmeib_cpu_mask cpu_coremask; /* copy of core_mask from DB */
 	int n_cpus;
@@ -5361,7 +5361,7 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 						nvmeib_public_plist_requeue(&nrch->per_numa_node_link, avail_norddas_this_node);
 			
 						_ND(trace_5_disk_nvmeibc_disk_get_channel, 
-							"Using NORDDA channel @CH_PTR on NUMA node @NODE_ID", ch, numa_node);
+							"Using NORDDA channel @CH_PTR on NUMA node @NODE_ID", ch, node);
 						goto found;
 					}
 				}
@@ -5490,8 +5490,12 @@ struct nvmeibc_disk_command *nvmeibc_disk_get_disk_cmd_nordda(
 					LOCK_OPR_BYPASS_IN_PENDING, LOCK_OPR_USING_BYPASS);
 			}
 
-			if (nvmeibc_nr_rotate_in_pending) {
+			if (nvmeibc_nr_rotate_in_pending && !is_pcpu_nrch(ch) &&
+			    !plist_node_empty(&ch->available_link)) {
 				nvmeib_public_plist_requeue(&ch->available_link, &info->available_norddas);
+				if (info->avail_norddas_per_numa_node)
+					nvmeib_public_plist_requeue(&ch->per_numa_node_link,
+						&info->avail_norddas_per_numa_node[ch->base.numa_node]);
 			}
 		}
 		else
@@ -14430,7 +14434,7 @@ static int disk_coremask_add(struct nvmeibc_disk *disk, u64 uid, struct nvmeib_c
 	entry->disk = disk;
 	spin_lock_init(&entry->spinlock);
 	INIT_LIST_HEAD(&entry->pending_cmds);
-	INIT_LIST_HEAD(&entry->nrchs_list);
+	plist_head_init(&entry->nrchs_plist);
 	kref_init(&entry->refcnt);
 	entry->uid = uid;
 	NVMEIB_CPU_MASK_COPY(entry->cpu_coremask, *cpumask);
@@ -14447,7 +14451,7 @@ static int disk_coremask_add(struct nvmeibc_disk *disk, u64 uid, struct nvmeib_c
 			kref_get(&entry->refcnt);
 			set_coremask_nrch_cookie(nrch, entry);
 			
-			list_add(&nrch->available_link, &entry->nrchs_list);
+			nvmeib_public_plist_add(&nrch->available_link, &entry->nrchs_plist);
 			NVMEIB_CPU_MASK_SET_CPU(mask_cpu, entry->nrchs_coremask);
 			entry->n_nrchs++;
 		}
@@ -14572,7 +14576,7 @@ static void disk_coremask_disconnect_extra_nrch(struct nvmeibc_disk *disk)
 	struct nvmeibc_disk_info *dinfo = disk->info;
 	struct nvmeibc_disk_coremask_info *info = dinfo->coremask_info;
 	struct nvmeibc_disk_coremask_chs *entry;
-	struct nvmeibc_ib_nordda_channel *nrch;
+	struct nvmeibc_ib_nordda_channel *nrch, *tmp;
 	int n_nrchs;
 	unsigned long flags;
 	
@@ -14582,7 +14586,7 @@ static void disk_coremask_disconnect_extra_nrch(struct nvmeibc_disk *disk)
 		spin_lock(&entry->spinlock);
 		n_nrchs = entry->n_nrchs;
 		if (n_nrchs > info->curr_max_coremask_nrch) {
-			list_for_each_entry(nrch, &entry->nrchs_list, available_link) {
+			plist_for_each_entry_safe(nrch, tmp, &entry->nrchs_plist, available_link) {
 				nvmeibc_ib_nordda_channel_try_disconnect(nrch);
 				_NT(trace_disk_check_coremask_update_disconnect_extra_nrch,
 					"Disk @DISK_NAME - Disconnecting coremask @COREMASK_UID extra NRCH @NRCH_NAME",
@@ -14630,7 +14634,7 @@ static void disk_coremask_clean_dying(struct nvmeibc_disk *disk, struct list_hea
 	struct nvmeibc_disk_info *dinfo = disk->info;
 	struct nvmeibc_disk_coremask_info *info = dinfo->coremask_info;
 	struct nvmeibc_disk_coremask_chs *entry;
-	struct nvmeibc_ib_nordda_channel *nrch;
+	struct nvmeibc_ib_nordda_channel *nrch, *tmp;
 	unsigned long flags;
 
 	__NFIND;
@@ -14647,7 +14651,7 @@ static void disk_coremask_clean_dying(struct nvmeibc_disk *disk, struct list_hea
 		spin_lock_irqsave(&entry->spinlock, flags);
 		
 		/* Disconnect all nrch channels */
-		list_for_each_entry(nrch, &entry->nrchs_list, available_link) {
+		plist_for_each_entry_safe(nrch, tmp, &entry->nrchs_plist, available_link) {
 			nvmeibc_ib_nordda_channel_try_disconnect(nrch);
 			_NT(trace_disk_check_coremask_update_disconnect_nrch,
 			    "Disk @DISK_NAME - Disconnecting coremask @COREMASK_UID NRCH @NRCH_NAME",
@@ -14989,12 +14993,12 @@ static void write_coremask_json_buf(struct write_status_buf_data *data)
 		CALL_JSON_FN(data, data_uval, "n_reuse_io_mask_uid_mismatch", entry->n_reuse_io_mask_uid_mismatch, !JSON_LAST_ELEM);
 		CALL_JSON_FN(data, data_uval, "n_reuse_io_mask_chan", entry->n_reuse_io_mask_chan, !JSON_LAST_ELEM);
 		CALL_JSON_START_ARRAY(data, "nr_channels");
-		list_for_each_entry(nrch, &entry->nrchs_list, available_link) {
+		plist_for_each_entry(nrch, &entry->nrchs_plist, available_link) {
 			CALL_JSON_START_OBJ(data, NULL);
 			CALL_JSON_FN(data, data_str, "name", nrch->base.name, !JSON_LAST_ELEM);
 			CALL_JSON_FN(data, data_sval, "cpu", pcpu_nrch_cpu_get(nrch), JSON_LAST_ELEM);
-			CALL_JSON_END_OBJ(data, 
-					  nrch->available_link.next == &entry->nrchs_list ? 
+			CALL_JSON_END_OBJ(data,
+					  nrch == plist_last_entry(&entry->nrchs_plist, typeof(*nrch), available_link) ?
 					  JSON_LAST_ELEM : !JSON_LAST_ELEM);
 		}
 		CALL_JSON_END_ARRAY(data, !JSON_LAST_ELEM);
@@ -15447,7 +15451,7 @@ static bool pcpu_nrch_add_coremask_ch(struct nvmeibc_disk *disk,
 	/* Refcount increase for nrch cookie ptr to the coremask */
 	kref_get(&coremask_chs->refcnt);
 	set_coremask_nrch_cookie(nrch, coremask_chs);
-	list_add_tail(&nrch->available_link, &coremask_chs->nrchs_list);
+	nvmeib_public_plist_add(&nrch->available_link, &coremask_chs->nrchs_plist);
 	NVMEIB_CPU_MASK_SET_CPU(cpu, coremask_chs->nrchs_coremask);
 	coremask_chs->n_nrchs++;
 	ret = true;
@@ -15558,7 +15562,7 @@ static void pcpu_nrch_del_coremask_ch(struct nvmeibc_disk *disk,
 
 	/* Remove nrch from coremask */
 	set_coremask_nrch_cookie(nrch, NULL);
-	list_del_init(&nrch->available_link);
+	nvmeib_public_plist_del(&nrch->available_link, &coremask_chs->nrchs_plist);
 	was_set = NVMEIB_CPU_MASK_TEST_AND_CLEAR_CPU(cpu, coremask_chs->nrchs_coremask);
 	BUG_ON(!was_set);
 
@@ -15713,7 +15717,7 @@ static int pcpu_nrch_get_coremask_channel(struct nvmeibc_disk *disk,
 		coremask_chs->n_io_mask_uid_mismatch++;
 		goto unlock_and_put_ref;
 	}
-	if (list_empty(&coremask_chs->nrchs_list)) {
+	if (plist_head_empty(&coremask_chs->nrchs_plist)) {
 		/* If there are no channels, instead of adding to the pending list
 		 * where the IO can be stuck for a long time, return error to the caller
 		 * and it will fallback to the any-core channels
@@ -15724,12 +15728,12 @@ static int pcpu_nrch_get_coremask_channel(struct nvmeibc_disk *disk,
 		COREMASK_PCPU_STAT_INC(disk_pcpu_stats, n_io_coremask_no_nrch);
 		goto unlock_and_put_ref;
 	}
-	list_for_each_entry(nrch, &coremask_chs->nrchs_list, available_link) {
+	plist_for_each_entry(nrch, &coremask_chs->nrchs_plist, available_link) {
 		if ((ri = nvmeibc_ib_nordda_channel_get_io_context(nrch))) {
 			*ch = &nrch->base;
 			*context = ri;
-			/* Rotate nrch in list */
-			list_move_tail(&nrch->available_link, &coremask_chs->nrchs_list);
+			/* Rotate nrch within same priority band (matches any-core plist RR) */
+			nvmeib_public_plist_requeue(&nrch->available_link, &coremask_chs->nrchs_plist);
 			found = true;
 			coremask_chs->n_io_mask_chan++;
 			COREMASK_PCPU_STAT_INC(disk_pcpu_stats, n_io_coremask_nrch);
@@ -16031,7 +16035,7 @@ static void pcpu_nrch_coremask_check_empty(struct nvmeibc_disk *disk)
 	struct nvmeibc_disk_coremask_chs *entry;
 	__NFIND;
 	while ((entry = list_first_entry_or_null(&info->coremask_chs, struct nvmeibc_disk_coremask_chs, link))) {
-		if (!list_empty(&entry->nrchs_list)) {
+		if (!plist_head_empty(&entry->nrchs_plist)) {
 			_NE_dmesg(err_pcpu_nrch_coremask_check_empty_still_nrch,
 				  "oops coremask @PTR from disk @DISK_NAME (@PTR) still has nrchs",
 				  entry, disk->name, disk);
