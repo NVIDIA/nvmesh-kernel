@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 | Symbology:   Normal text, Important, to be defined issue, ~~inferior alternative,~~ future version,  |
 | :---- |
 
-[Interfaces](#interfaces)x
+[Interfaces](#interfaces)
 
 [OS interface](#os-interface)
 
@@ -80,7 +80,7 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Major components](#major-components)
 
-[Toma subscriptions](#heading=h.452snld)
+[Toma subscriptions](#toma-subscriptions)
 
 [Version control RCU of topologies](#version-control-rcu-of-topologies)
 
@@ -132,7 +132,7 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Operation Retry](#io-operation-retry)
 
-[Operation \- Abandon locks](#heading=h.2k82xt6)
+[Operation \- Abandon locks](#operation-abandon-locks)
 
 [Datapath virtual functions](#datapath-virtual-functions)
 
@@ -178,7 +178,7 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Block metadata](#block-metadata)
 
-[Datapath known bottlenecks](#heading)
+[Datapath known bottlenecks](#datapath-known-bottlenecks)
 
 [Datapath Types](#datapath-types)[Block metadata](https://docs.google.com/document/d/1ULXPLt_2AisgdTHcBJKBmnxsyvpROUKAEdg67rC2dac/edit?ts=60d81764#heading=h.b4z933wf0x07)
 
@@ -254,9 +254,9 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [CRC calculations](#crc-calculations)
 
-[Copy input EC buffers during gf calculations](#heading=h.zdd80z)
+[Copy input EC buffers during gf calculations](#copy-input-ec-buffers-during-gf-calculations)
 
-[Datapath: Block-Transport API](#heading=h.3jd0qos)
+[Datapath: Block-Transport API](#datapath-block-transport-api)
 
 [Pausable layer](#pausable-layer)
 
@@ -314,7 +314,7 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Recoveries](#recoveries)
 
-[Recoveries API](#heading=h.1yib0wl)
+[Recoveries API](#recoveries-api)
 
 [Recoveries batches](#recoveries-batches)
 
@@ -392,15 +392,13 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Datapath components](#serjio)
 
-[Dbits mechanism](#heading=h.4ihyjke)
+[Blockset Info](#blockset-info-in-ram)
 
-[Blockset Info](#heading=h.2xn8ts7)
+[Dirty markers (Dirty bits) mechanism](#dirty-markers-mechanism)
 
-[Dirty markers (Dirty bits) mechanism](#heading=h.1csj400)
+[Understanding dirty bits action](#understanding-dirty-bits-action)
 
-[Understanding dirty bits action](#heading=h.3ws6mnt)
-
-[Detailed description of configuration changes:](#heading=h.2bxgwvm)
+[Detailed description of configuration changes:](#volume-reconfiguration)
 
 [Utils](#utils)
 
@@ -432,7 +430,7 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Volume derives apis:](#volume-derives-apis:)
 
-[Todo](#heading=h.r2r73f)
+[Carrier](#carrier:)
 
 [Appendices:](#appendices:)
 
@@ -446,17 +444,15 @@ Prologue
 
 1. Please see the related documents via NVMESH\_docs command videos on Server 2 describing  
    1. R\&D structure, NVMesh high-level & the relation to R\&D teams  
-   2. Block related videos \- ([here](https://web.microsoftstream.com/group/64b85a1b-f132-4d76-9def-44facc840eb6?view=videos))  
+   2. Block related videos — (internal Google drive).  
    3. Other teams resources, including list of webinars \- outdated.  
 2. Link to google drive directory ([here](https://drive.google.com/drive/u/1/folders/0B9wtITu7vFuUdGJTUEtLR1BVdU0)) and inside the system architecture directory ([here](https://drive.google.com/drive/u/1/folders/0B9wtITu7vFuUOVFRS2dkTXVnc2c))  
-3. ./scripts/block\_team\_bashrc.sh \- Very important, please make sure you understand it. A lot of code which describes how to use the system [SysArch](https://drive.google.com/drive/u/1/folders/0B9wtITu7vFuUOVFRS2dkTXVnc2c)
+3. `./tools/block_team_bashrc.sh` — Very important, please make sure you understand it. A lot of code which describes how to use the system [SysArch](https://drive.google.com/drive/u/1/folders/0B9wtITu7vFuUOVFRS2dkTXVnc2c)
 
 # Interfaces {#interfaces}
 
 4. Block device (volume) is located inside the client's .ko driver. The driver can attach/detach or reconfigure any number of volumes. Each volume is implemented via a block device  
-5. Make sure you watch the videos  
-   1. server2:/home/qa/training/data\_services\_team/02\_daniel\_intro\_nvmesh\_eng.mp4  
-   2. server2:/home/qa/training/data\_services\_team/03\_daniel\_block\_services\_eng.mp4  
+5. Historical training videos were stored on an internal host (`server2:/home/qa/training/...`).  
 6. Interface to OS
    1. Block device presents a long array of virtual blocks which represent the volume (example \[0..100GB\]). OS issue read/write/trim commands on blocks of size 4KB in the array.  
    2. Showing the device via /dev/ directory and lsblk.  
@@ -556,7 +552,7 @@ The nvmeiba code could be found under `/[project root]/clnt/atom` directory.
 ### Proc files {#proc-files}
 
 1.  Read-only files, Give a snapshot in time of the state of the system. Crucial for debugging a live system.  
-    1. More info about how to debug using proc files in the document ([here](https://TBD))  
+    1. See the [Proc files](#proc-files) section in this document and `/proc/nvmeibc/` on a live system.  
 2.  Writable /proc files are used to change the behavior of / pass messages to the client  
 3.  Important procs  
     1. /proc/nvmeiba/  \- overview of all block devices. Useful with regard to hot upgrade  
@@ -1057,7 +1053,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 
      6. 
 
-### Toma subscriptions
+### Toma subscriptions {#toma-subscriptions}
 
 156. What is channel, zombie TRs/ etc  
 157. Explain here
@@ -1182,7 +1178,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 
 ## Internal ioctls and module params {#internal-ioctls-and-module-params}
 
-195. Run ***NVMESH\_show\_info ioctls*** (defined in *scripts/block\_team\_bashrc.sh*) to get comprehensive help. Each NVMesh version might have a slightly different list of ioctls, and parameters.
+195. Run ***NVMESH\_show\_info ioctls*** (defined in `tools/block_team_bashrc.sh`) to get comprehensive help. Each NVMesh version might have a slightly different list of ioctls, and parameters.
 196. Ioctls are just string commands to the client module via cli. Do not confuse them with scsi external ioctls.
 
 ### String ioctls types {#string-ioctls-types}
@@ -1394,7 +1390,7 @@ LBA \= Logical block address
 | Same as above but operation execution already took too much time that timeout (say of 30\[sec\] reached) | \-X | False | False | False | True |
 
 250. Please make sure you understand the table above  
-251. Each datapath (R1/R6/Raid-0/EC-QLC), has its own virtual function to determine failure properties
+251. Each datapath implementation (`enum nvmeibc_data_path_type`, e.g. JBOD/R0, mirror `NVMEIBC_DATA_PATH_MIR_BIO`, EC `NVMEIBC_DATA_PATH_EC_R6`, plus QLC-related carriers), has its own virtual function to determine failure properties
 
 ### IO Operation Retry {#io-operation-retry}
 
@@ -1426,7 +1422,7 @@ LBA \= Logical block address
      3. When sync returns 0 (success) this means that sync fixed the problem in the blockset (parities match the data \+ metadata is correct \+ blockset entry was fixed). In most cases this is a desired outcome for the caller, except for 1 special caser  
         1. EC 8+2: Caller IO encountered a bad sector. Sync tried to fix it but discovered that this slice contains 3 bad sectors and fixup is impossible. Data loss is imminent. So sync destroys the entire slice. Technically it fixed the blockset (because xor of bad sectors \= bad sector, so parities match the data). However, the data is still inaccessible to the caller and it will receive a permanent read failure (no retry) error and will be force to propagate the failure upwards.
 
-### Operation \- Abandon locks
+### Operation \- Abandon locks {#operation-abandon-locks}
 
 255. Upon termination of an operation, locks can be abandoned. Abandoning locks is done to let other clients break the locks and fix the “mess” or interim update that the current operation created in the blockset. Each data path has its own condition to when locks are abandoned, but the general rule of thumb is  
      1. If there is a chance that the blockset is corrupted on disk then locks are abandoned. Corruption on disk is  
@@ -1808,9 +1804,7 @@ LBA \= Logical block address
         3. Optimization: May store dbits in metadata of parity. This optimization exists in EC datapath and EC-qlc datapath. But it does not exist in Raid1. This Implies that when RAM is lost in degraded mode \- R1 has to assume that all dbits were turned off and rebuild the entire protection raid. EC on the other has, has to read the praid to load dbits from metadata on disks and reconstruct the the ram dbit, without the need for full rebuild  
 367. Some disks do not support metadata, so this structure is irrelevant. EC uses metadata so EC volumes cannot be created on disks that do not support metadata.
 
-### {#heading}
-
-### Datapath known bottlenecks
+### Datapath known bottlenecks {#datapath-known-bottlenecks}
 
 368. Alternative names (for grepping the document): io performance, io limits  
 369. **Block layer contention**:  
@@ -2281,7 +2275,7 @@ LBA \= Logical block address
 531. The bio does not always have to be copied. There are cases where user space application behave nicely so each operation decided whether copy is needed or not via a flag:  
      1. o-\>flags.need\_to\_copy\_bio
 
-### Copy input EC buffers during gf calculations
+### Copy input EC buffers during gf calculations {#copy-input-ec-buffers-during-gf-calculations}
 
 532. In EC we always have to read the input bio buffers due to crc / parity calculations. So there is only 1 flow for copying blocks. Within the gf functions.  
 533. EC calculations read source BIO buffers and do 3 things  
@@ -2298,13 +2292,13 @@ LBA \= Logical block address
 
 # Datapath Mathematical algorithms
 
-## Blockset Info in RAM
+## Blockset Info in RAM {#blockset-info-in-ram}
 
-### Dirty markers mechanism
+### Dirty markers mechanism {#dirty-markers-mechanism}
 
 538. Alternative names: Dirty-markers / Dirty bits  
 539. Dbits reside in 2 places:
-     1. During IO: Servers RAM in a packed struct of size 12-bits union nvmeibc\_dbits\_entry, and on disk in even more packed version of 8 bits, only on Parity blocks of EC. R1 dbits are never written to disk  
+     1. During IO: Servers RAM in a packed struct of size 12-bits `union nvmeibc_dbits_entry`, and on disk in an even more packed 8-bit form on EC parity blocks. For **two-way** RAID1, dirty markers are not stored as EC parity metadata on disk; **N-replica mirroring (N>2)** uses the dirty-bits engine in RAM for multiple degraded segments.  
      2. During cluster shutdown and restart, Toma saves RAM dbits to special place on disks and restores them  
 540. Dirty markers mark which segments require rebuild (Don't have the latest Data)  
 541. Dirty markers can include indices of degraded segments, Unknown values, Convicts and more.  
@@ -2333,11 +2327,11 @@ LBA \= Logical block address
      6. Convert Action-post into the post packed representation which can be written back to servers RAM  
 546. Function of convert pre-\>Action, Action-\>post deal only with the packed structure of dbits in RAM. Functions of apply(), merge() deal with mathematical logic of dbits  
      1. Action is represented as a few bit fields so apply(), merge() are fast logical operations.  
-     2. Actions are described by ‘struct nvmeibc\_dbits\_action’  
+     2. Actions are described by `struct nvmeibc_dbits_action`(bitmap fields `db_turn_on_bmp`, `db_turn_off_bmp`, `db_conv_map`, plus counters such as `num_unknowns` / `num_parities` in the packed layout; see the header for the authoritative definition).  
 547. Representation of packed RAM 12 bits dbit  
      1. There are 2 modes: Blockset mode and slice mode. In single degraded mode we have spare bits to mark which slices within the blockset are dirty. In double degraded mode or with convicts \- we switch to Blockset (global) mode
 
-### Understanding dirty bits action
+### Understanding dirty bits action {#understanding-dirty-bits-action}
 
 548. Please read the document and repeat or at least make sure you understand the test plan  
      1. [https://docs.google.com/document/d/1kX8BnSJYhIHKW\_1S\_r3PH1EdXiVAQ\_CbMTjacew1uS0/edit\#heading=h.plq6n4c70zmj](https://docs.google.com/document/d/1kX8BnSJYhIHKW_1S_r3PH1EdXiVAQ_CbMTjacew1uS0/edit#heading=h.plq6n4c70zmj)
@@ -2350,7 +2344,7 @@ LBA \= Logical block address
      3. But when a disk is removed and a new disk is inserted, replacing the previous disk, this is a special case of degraded mode. Our dirty markers become invalid.  
      4. Moreover there is an even more acute problem.Typically, dirty markers on disk are stronger than RAM dbits. At any moment RAM wipeout can delete RAM dirty markers and they will have to be reconstructed from dirty markers on disk. But during segment replacement, the dirty markers on disk become invalid as well.  
      5. To handle this case we introduce a special dirty marker which is named dirty convict. It says that dirty markers on disks and in RAM for specific segments are irrelevant.  
-     6. There can be at most 2 dirty markers (because raids are at most D \+ 2 parities). For this reason there can be at most 2 dirty convicts  
+     6. EC raids are at most D \+ 2 parities (on-wire `nvmeibc_dbits_entry` is 12-bit). The in-memory `nvmeibc_dbits_action` may track additional degraded/unknown state for extended mirror topologies; **dirty convicts** remain a RAM-only mechanism, and the "at most two convicts" statement reflects the classic EC-oriented limit.  
      7. Dirty convicts are turned on in RAM only. They are never written to disk because they exactly say that disk metadata is invalid, so they cannot invalidate themselves. Furthermore there are not enough bits in disk metadata to store the dirty convicts.  
      8. In case of cold recovery the RAM is lost but dirty convicts can still be recovered from Topology.  
      9. Please see the section about segment access mode to understand how this is done.
@@ -2374,7 +2368,7 @@ LBA \= Logical block address
      3. fine grained retry time  
 553. The random value in retry is taken from middle pointers bits. They are used as pseudo random generators. Lowest bits tend to be zero, especially lowest 2 bits or at least the amount of bits which is the log of the struct size. Highest bits tend to be constant.
 
-# Datapath: Block-Transport API
+# Datapath: Block-Transport API {#datapath-block-transport-api}
 
 ## Pausable layer {#pausable-layer}
 
@@ -2692,12 +2686,12 @@ Some thoughts & observations:
 
 ## Datapath debug utils  {#datapath-debug-utils}
 
-621. Please make sure you are familiar with ./scripts/block\_team\_bashrc.sh.  
+621. Please make sure you are familiar with `tools/block_team_bashrc.sh`.  
      1. It has explanations about debug utilities  
      2. There is a video overview of the most important functions and scripts  
      3. Please try yourself using the functions (git related stuff on your laptop and NVMEsh related stuff on remote machines)  
 622. Debugging and diagnosing most common problems
-     1. Debugging client ([here](https://TBD))
+     1. Debugging client: use proc files, binary traces, and the utilities referenced in `tools/block_team_bashrc.sh`.  
 
 ### Debug-DI mechanism
 
@@ -2729,7 +2723,7 @@ Some thoughts & observations:
 ### BtestEX
 
 634. BtestEX is a utility built on top of btest which allows a few clients to read/write to the same volume with data verification \+ use our debug DI.  
-635. BtestEX resides in a dedicated repository in gitlab ([here](http://10.0.3.5/yaron/btest))
+635. BtestEX resides in a dedicated internal repository.  
 
 ## Datapath Optimization {#datapath-optimization}
 
@@ -2833,7 +2827,7 @@ Some thoughts & observations:
         1. After an ineffective batch we take a break for \~0.5\[sec\]. The exact delay is defined via module param: recovery\_iterator\_cooldown  
         2. The delay is employed to reduce a pressure of continuously failing sync to a specific blockset, which stalls the entire system
 
-### Recoveries API
+### Recoveries API {#recoveries-api}
 
 655. **nvmeibc\_recovery\_start()** \- starting recovery based on toma message. Ioctls just simulate toma messages. Messages include various parameters like recovery effort, range of rlba’s to process, is fixup of blocksets mandatory or not. Another important parameter is only\_owners. It will be explained below  
 656. **nvmeibc\_recovery\_handle\_request()** \- handle various requests, include a t least 3 types of requests  
@@ -3536,9 +3530,7 @@ Some thoughts & observations:
 810. Link telecto directory of documents ([here](https://drive.google.com/drive/u/1/folders/1Zuv8_t1rklQjiwADOjKWEKMkUNQCGQKN))  
 811. Initial design ([here](https://docs.google.com/document/d/1RWLFXqajkVF9jWMZhAidhlcfE2PvtahZr3bOsqc3VsM/edit)), Detailed design ([herelecte](https://docs.google.com/document/d/1ci-koSPE_KzI6RXsl6im3n0Ds3to-hxUTekJ4OrGJKw/edit))  
 812. QLC datapath ([link](https://docs.google.com/document/d/1qOaXSKXbrIZ3VwRWKPvbGIGXpvXIYXOEquFwRTy8dvs/edit))  
-813. Elect testing suites:  
-     1. [Performance](http://10.0.1.142:8080/view/all/job/Test-Runner/14809/rebuild/parameterized)  
-     2. [Stability](http://n142:8080/view/Private_CI/job/Test-Runner/14815/rebuild/parameterized) (1 random disaster)
+813. Elect testing suites: Performance and Stability.  
 
 ## Cache pool management {#cache-pool-management}
 
@@ -3599,7 +3591,7 @@ Some thoughts & observations:
 
 # Volume derives apis:  {#volume-derives-apis:}
 
-836. Todo, QLC/ WCV / MD carrier… D carrier
+836. Todo, QLC/ WCV / MD carrier… D carrier  {#carrier:}
 
 # Appendices:  {#appendices:}
 
@@ -3607,8 +3599,8 @@ Some thoughts & observations:
 
 ### VV thin volume datapath
 
-837. Attempt to implement thin provisioning on top of regular nvmesh volumes. The code was abandoned. Resides in NVMesh repository clnt/va\_block. Link to spec ([here](https://docs.google.com/document/d/1OkPx3tUbxiHd_l19mbogjLfr-rChsYN-mFbwun4kyy8/edit))  
-838. Linear\_di\_test.c \- A utility for running io verification to block devices. Completely abandoned. Instead btestEX, fio and el-bencho are used  
+837. Attempt to implement thin provisioning on top of regular nvmesh volumes. The code was abandoned; the historical `clnt/va_block` tree is no longer in the repository. Link to spec ([here](https://docs.google.com/document/d/1OkPx3tUbxiHd_l19mbogjLfr-rChsYN-mFbwun4kyy8/edit))  
+838. `Linear_di_test.c` — a utility for running IO verification to block devices; **abandoned** (source no longer shipped). Use btestEX, fio, and el-bencho instead.  
 839. nvmesh\_client\_analyzer.py \- automatic script which analyzes clients logs (dmesg) and tries to detect problems. Once we moved to binary traces, it became obsolete
 
 ## Performance {#performance}
@@ -3627,7 +3619,7 @@ Some thoughts & observations:
 844. We use FIO, BtestEX an dd. Most common abbreviations are the following commands  
      1. NVMESH\_io\_1block,  NVMESH\_io\_btest,   NVMESH\_io\_fio,   NVMESH\_io\_Nblock  
 845. Another utility which is used for performance is El-bencho  
-     1. Please refer to a video through this wiki page ([here](https://TBD))
+     1. Refer to internal wiki or training for performance walkthrough videos.  
 
 ## Serjio {#serjio}
 
