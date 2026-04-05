@@ -374,7 +374,8 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0, 0);
 		else {}					// Sync executed when stale lock exists, but other client already solved it. Just do nothing
 	} else {	// Note: We dont care about type of sync, only the situation after locks taken
-		const bool should_db_turn_on =  has_stale_lock;										// Stale lock has to turn on dbit for dead segments coz cant access them, Dbit/Read-fail syncs do not introduce new info so can never turn dbits on
+		const bool should_db_turn_on =  has_stale_lock || has_unknown_dbits;	// Stale lock has to turn on dbit for dead segments coz cant access them, Dbit/Read-fail syncs do not introduce new info so can never turn dbits on
+																				// If there are unknown dbits though, we (partially) resolve them by "turning on" dbits on all the dead segments
 		const bool should_db_turn_off = (so->n_slices == LOCKSET_SLICES);					// Only if we fix all slices
 		const u32 turn_off_topo_bmp = (nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask));
 		const u32 turn_off_inv_bmp = ~(dbits_on_topo_bmp | turn_off_topo_bmp) & nvmeibc_dbits_get_turn_on_bmp(&pre, topo_traits);	// Used in case simulator injected invalid dbits, and we want to clean them as well

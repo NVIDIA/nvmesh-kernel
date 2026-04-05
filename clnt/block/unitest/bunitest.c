@@ -4235,6 +4235,9 @@ static union nvmeibc_dbits_entry t_n_mirror_tester_r1_binfo_calc_expected(const 
 					has_unknowns_in_post = true;
 				} else
 					d_segs[n_dirty++] = seg_i; 								// Turn-on dbit for Dead seg because of stale lock
+			} else if (t->lv.cur_op == NVMEIB_BLOCK_IO_OP_RECOVER_READFAIL) {
+				if (has_unknowns_in_pre)
+					d_segs[n_dirty++] = seg_i; 								// Turn-on dbit for Dead seg because readfail resolves unknown
 			}
 		} else if (!is_dbit_visible_in_pre || t->lv.do_full_blkset_fixup) {	// Dbit was auto resolved via merge with other locks binfo / Dbit was cleaned by implicit/explicit sync
 			/* No dbit for this seg */
