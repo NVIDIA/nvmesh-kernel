@@ -8,4 +8,4 @@
 
 void test_safe_casting(void);
 
-#endif /* __SAFE_CSTING_TESTS_H__ */
+#endif /* __SAFE_CASTING_TESTS_H__ */
