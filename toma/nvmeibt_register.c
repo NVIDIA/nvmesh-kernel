@@ -1723,10 +1723,10 @@ void nvmeibt_register_remove_unsubscribed_longing_registrant_on_invalid_seg(unsi
 	NFIN;
 	XDLIST_FOREACH_SAFE(longing_registrant, &(nvmeibt_global_get_global()->longing_on_invalid_seg_list_by_handle)) {
 		if (client_messaging_handle_to_cid(longing_registrant->client_messaging_handle) == client_messaging_handle_to_cid(closed_messaging_handle)) {
-			remove_unsubscribed_specific_longing_registrant_on_invalid_seg(longing_registrant);
 			if (is_complete_removal_from_all_segs) {
-				continue;
+				remove_unsubscribed_specific_longing_registrant_on_invalid_seg(longing_registrant);
 			} else if (longing_registrant->client_messaging_handle == closed_messaging_handle) {
+				remove_unsubscribed_specific_longing_registrant_on_invalid_seg(longing_registrant);
 				break;	// There should be only one that matches
 			}
 		}
