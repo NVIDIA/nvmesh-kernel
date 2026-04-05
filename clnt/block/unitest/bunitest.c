@@ -39,6 +39,7 @@
 #include "nvmeibc_error_tags.h"
 #include "memmgr_metrics_tests.h"
 #include "metrics_test.h"
+#include "safe_casting_tests.h"
 #include "wq_metrics_tests.h"
 #include "clnt/nvmeibc_wq_metrics.h"
 #include "error_tags_tests.h"
@@ -7627,7 +7628,8 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 		sim_kfree(buni);
 		return 0;
 	}
-
+	
+	test_safe_casting();
 	test_metrics();
 	test_wq_metrics();
 	test_memmgr_metrics();

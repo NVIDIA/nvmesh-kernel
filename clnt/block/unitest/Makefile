@@ -141,6 +141,7 @@ SOURCES += bunitest.c kr_incs.c nvmeibc_simu_disk.c ib_incs.c kr_sim_svc.c nvmei
 SOURCES += memmgr_metrics_tests.c
 SOURCES += metrics_test.c
 SOURCES += wq_metrics_tests.c
+SOURCES += safe_casting_tests.c
 SOURCES += error_tags_tests.c
 SOURCES += kr_incs_bit_ops_test.c
 SOURCES += io_pet_traces_controller.c
