@@ -1022,50 +1022,40 @@ out:
 	return rv;
 }
 
-static int parse_name_and_uuid(struct mm_json_elem *root, struct name_and_uuid_params_ctx *name_and_uuid_params)
+static int parse_name_and_uuid(struct mm_json_elem *root, struct name_and_uuid_params_ctx *out)
 {
-	int						i, j;
-	struct mm_json_kv_pair	*root_kv;
-	struct mm_json_kv_pair	*payload_kv;
+	int						i, j, rv;
 	unsigned int			parsed_mask = 0;
-	int						rv;
 
 	NFIN;
 	for (i = 0; i < root->dict.len; i++) {
-		root_kv = &root->dict.elements[i];
-		if (!strcmp(root_kv->key, "payload")) {
-			N_Tf(4cs64ha, "parsing payload");
-			for (j = 0; j < root_kv->value->dict.len; j++) {
-				payload_kv = &root_kv->value->dict.elements[j];
-				if 			(!strcmp(payload_kv->key, "nodeID")) {
-					parsed_mask |= 0x1;
-					nvmeibt_strlcpy(name_and_uuid_params->hostname, payload_kv->value->str, sizeof(name_and_uuid_params->hostname));
-				} else if	(!strcmp(payload_kv->key, "uuid")) {
-					parsed_mask |= 0x2;
-					nvmeibt_urn_uuid_str_to_union_uuid(&(name_and_uuid_params->uuid), payload_kv->value->str);
-				} else if	(!strcmp(payload_kv->key, "targetsInZone")) {
-					parsed_mask |= 0x4;
-					name_and_uuid_params->n_members_total_before_add_del = payload_kv->value->num;
-				} else if	(!strcmp(payload_kv->key, "targetUpdatesSequence")) {
-					parsed_mask |= 0x8;
-					name_and_uuid_params->targets_updates_sequence = payload_kv->value->num;
-				} else {
-					if (payload_kv->value->type == JSON_E_STR) {
-						N_Ef(0an3hja, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
-					} else {
-						N_Ef(7vcbkje, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
-					}
-				}
+		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
+		if (strcmp(root_kv->key, "payload"))
+			continue;
+		for (j = 0; j < root_kv->value->dict.len; j++) {
+			struct mm_json_kv_pair *payload_kv = &root_kv->value->dict.elements[j];
+			if 			(!strcmp(payload_kv->key, "nodeID")) {
+				parsed_mask |= 0x1;
+				nvmeibt_strlcpy(out->hostname, payload_kv->value->str, sizeof(out->hostname));
+			} else if	(!strcmp(payload_kv->key, "uuid")) {
+				parsed_mask |= 0x2;
+				nvmeibt_urn_uuid_str_to_union_uuid(&(out->uuid), payload_kv->value->str);
+			} else if	(!strcmp(payload_kv->key, "targetsInZone")) {
+				parsed_mask |= 0x4;
+				out->n_members_total_before_add_del = payload_kv->value->num;
+			} else if	(!strcmp(payload_kv->key, "targetUpdatesSequence")) {
+				parsed_mask |= 0x8;
+				out->targets_updates_sequence = payload_kv->value->num;
+			} else {
+				N_Tf(0an3hja, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
-			break;
 		}
 	}
 	// N_Tf(rbzi3l2, "hostname=@STR uuid=@UUID_LE n_members_total_before_add_del=@INT targets_updates_sequence=@LLD", name_and_uuid_params->hostname, &(name_and_uuid_params->uuid), name_and_uuid_params->n_members_total_before_add_del, name_and_uuid_params->targets_updates_sequence);
-	NFOUT;
 	rv = (parsed_mask == 0xf ? 0 : -1);
-	if (rv < 0) {
-		N_Ef(vb6kiem, "Failed to find the exact fields");
-	}
+	if (rv < 0)
+		N_Ef(vb6kiem, "Failed to find the exact fields @X", parsed_mask);
+	NFOUT;
 	return rv;
 }
 
@@ -1080,48 +1070,38 @@ struct keepAliveToken_params_ctx {
 	uint64_t		keepaliveInterval;
 };
 
-static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keepAliveToken_params_ctx *out_keepAliveToken_params, bool is_updateTomaKeepaliveToken_msg)
+static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keepAliveToken_params_ctx *out, bool is_updateTomaKeepaliveToken_msg)
 {
-	int						i, j;
-	struct mm_json_kv_pair	*root_kv;
-	struct mm_json_kv_pair	*payload_kv;
+	int						i, j, rv;
 	unsigned int			parsed_mask = 0;
-	int						rv;
 
 	NFIN;
 	for (i = 0; i < root->dict.len; i++) {
-		root_kv = &root->dict.elements[i];
-		if (!strcmp(root_kv->key, "payload")) {
-			N_Tf(8x03498, "parsing payload");
-			for (j = 0; j < root_kv->value->dict.len; j++) {
-				payload_kv = &root_kv->value->dict.elements[j];
-				if 			(!strcmp(payload_kv->key, "nodeID")) {
-					parsed_mask |= 0x1;
-					nvmeibt_strlcpy(out_keepAliveToken_params->nodeID, payload_kv->value->str, sizeof(out_keepAliveToken_params->nodeID));
-				} else if	(!strcmp(payload_kv->key, "zone")) {
-					parsed_mask |= 0x2;
-					out_keepAliveToken_params->zone_number = atoll(payload_kv->value->str);
-				} else if	(!strcmp(payload_kv->key, "token")) {
-					parsed_mask |= 0x4;
-					out_keepAliveToken_params->token = payload_kv->value->num;
-				} else if	(!strcmp(payload_kv->key, "keepaliveInterval")) {
-					parsed_mask |= 0x8;
-					out_keepAliveToken_params->keepaliveInterval = payload_kv->value->num;
-				} else {
-					if (payload_kv->value->type == JSON_E_STR) {
-						N_Ef(cvmau3j, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
-					} else {
-						N_Ef(362has7, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
-					}
-				}
+		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
+		if (strcmp(root_kv->key, "payload"))
+			continue;
+		for (j = 0; j < root_kv->value->dict.len; j++) {
+			struct mm_json_kv_pair *payload_kv = &root_kv->value->dict.elements[j];
+			if 			(!strcmp(payload_kv->key, "nodeID")) {
+				parsed_mask |= 0x1;
+				nvmeibt_strlcpy(out->nodeID, payload_kv->value->str, sizeof(out->nodeID));
+			} else if	(!strcmp(payload_kv->key, "zone")) {
+				parsed_mask |= 0x2;
+				out->zone_number = atoll(payload_kv->value->str);
+			} else if	(!strcmp(payload_kv->key, "token")) {
+				parsed_mask |= 0x4;
+				out->token = payload_kv->value->num;
+			} else if	(!strcmp(payload_kv->key, "keepaliveInterval")) {
+				parsed_mask |= 0x8;
+				out->keepaliveInterval = payload_kv->value->num;
+			} else {
+				N_Tf(cvmau3j, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
-			break;
 		}
 	}
 	rv = (is_updateTomaKeepaliveToken_msg ? (parsed_mask == 0xF ? 0 : -1) : (parsed_mask == 0xC ? 0 : -1));
-	if (rv < 0) {
-		N_Ef(jsuwmna, "Failed to find the exact fields");
-	}
+	if (rv < 0)
+		N_Ef(jsuwmna, "Failed to find the exact fields @X", parsed_mask);
 	NFOUT;
 	return rv;
 }
@@ -2711,6 +2691,11 @@ out:
 	NFOUT;
 }
 
+static void __print_kafka_consumer_info(const struct t_consumer_impl *k, char who, int (*fn)(void *ctx, const char *fmt, ...), void *ctx)
+{
+	(*fn)(ctx, "\t[%c]: commit=%ld, last_read=%ld\n", who, purify_offset(k->offset_committed), purify_offset(k->consumer_offset));
+}
+
 int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) {
 	struct tm					timeinfo;
 	char						time_str[64];
@@ -2737,6 +2722,11 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 		(*printf_fn)(printf_ctx, "\nservers=%*s\n", kafka_bootstrap_servers_str_from_nvmesh_conf->str_len, kafka_bootstrap_servers_str_from_nvmesh_conf->text_buf);
 	(*printf_fn)(printf_ctx, "KeepAlive Mgmt token={Leader=%ld, Follow=%ld}\n", kafka_leader_keepalive_token_provided_by_mgmt, kafka_follower_keepalive_token_provided_by_mgmt);
 	(*printf_fn)(printf_ctx, "Leaders Raft-Term:\n\tVolume={req=%ld, apply=%ld}\n\tTarget={req=%ld, apply=%ld}\n", kafka_requested_consuming_leader_VOL_msgs_raft_term, kafka_applied_consuming_leader_VOL_msgs_raft_term, kafka_requested_consuming_leader_TARGET_msgs_raft_term, kafka_applied_consuming_leader_TARGET_msgs_raft_term);
+	(*printf_fn)(printf_ctx, "Consumer offsets:\n");
+	__print_kafka_consumer_info(&k_CMD,                        'C', printf_fn, printf_ctx);
+	__print_kafka_consumer_info(&k_HW_full_config,             'H', printf_fn, printf_ctx);
+	__print_kafka_consumer_info(&k_incremental_VOL_updates,    'V', printf_fn, printf_ctx);
+	__print_kafka_consumer_info(&k_incremental_TARGET_updates, 'R', printf_fn, printf_ctx);
 	if (kafka_mtls_ssl__is_enabled) {
 		__t_certificate_storage_print(&_ssl, printf_fn, printf_ctx);
 	}
