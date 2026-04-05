@@ -691,8 +691,8 @@ alias copybug='function __copybug() {
 	#bugdir=`ssh ${bugs_host} "cd /home/qa/logs; ls -d *${1}*"` || return 1;
 	bugdir=`ssh ${bugs_host} "cd ${bugs_dir}; ls -d *${1}*"` || return 1;
 	echo --------- $bugdir --------;
-	ssh ${bugs_host} "sudo chmod -R a+r ${bugs_dir}/${bugdir}";
-	rsync -avP -zz --sparse --exclude="\*.csv" ${bugs_host}:${bugs_dir}"/${bugdir}" ~/LOGS;
+	ssh ${bugs_host} "cd ${bugs_dir}/${bugdir}; sudo chmod -R a+xr . ./*/";
+	rsync -avP -zz --copy-links --keep-dirlinks --hard-links --sparse --exclude="\*.csv" ${bugs_host}:${bugs_dir}"/${bugdir}" ~/LOGS;
 	cd ~/LOGS/"${bugdir}" || return 1;
 	open_logs_collecteor_all_hosts;
 }; __copybug $@'
@@ -708,8 +708,8 @@ alias copyCI='function __copyCI() {
 	fi
 	bugdir=`ssh ${bugs_host} "cd ${jenkins_log_dir}; ls -d *${dir_search_name}*"` || return 1;
 	echo --------- $bugdir --------;
-	ssh ${bugs_host} "sudo chmod -R a+xr ${jenkins_log_dir}/${bugdir} ${jenkins_log_dir}/${bugdir}/*";
-	rsync -avP -zz --copy-links --sparse --exclude="\*.csv" ${bugs_host}:${jenkins_log_dir}/${bugdir} ~/LOGS; cd ~/LOGS/${bugdir}/ || return 1;
+	ssh ${bugs_host} "cd ${jenkins_log_dir}/${bugdir}; sudo chmod -R a+xr . ./*/";
+	rsync -avP -zz --copy-links --keep-dirlinks --hard-links --sparse --exclude="\*.csv" ${bugs_host}:${jenkins_log_dir}/${bugdir} ~/LOGS; cd ~/LOGS/${bugdir}/ || return 1;
 	for j in ~/LOGS/${bugdir}/*; do
 		cd ${j}
 		open_logs_collecteor_all_hosts;
