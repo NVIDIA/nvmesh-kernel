@@ -52,6 +52,7 @@ struct nvmeibc_block_device {   			// TODO: change this to something shorter
 		struct list_head list_n;				// Structure allowing to link block devices in linked list (for higher level app having a few volumes, possible using the same physical disks)
 		ulong size; 							// Size is the size of the device (in blocks)
 		struct nvmeibc_os_api *os;				// struct to communicate with kernel (receive IO and control API)
+		struct nvmeib_io_stats *stats;			// IO statistics filled when IO terminates and serialized into /proc directory
 		char uuid[NVMEIBC_BD_UUID_LEN];			// Defined by user, Unique in the universe
 		char name[NVMEIBC_BD_NAME_LEN];			// Defined by user, how user sees it (C:\, my_disk, etc), might be not unique
 		u32 dbg_id;								// Running number, for tracing. Printed instead of dev. Minor in the case of visible attach, negative on hidden attach

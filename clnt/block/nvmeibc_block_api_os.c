@@ -1427,11 +1427,6 @@ int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 
 	os->ro_header_sectors = ro_header_sectors;
 
-	if (!(os->stats = nvmeib_io_stats_create_traced(atom->dev_name, VERB_RW_T_BITMASK, NVMEIBC_SECTOR_SIZE))) {
-		rv = -ENOMEM | 0x1000;
-		goto _out;
-	}
-
 	q_data = reqq_data_create(__is_nvmeibc_bdev_destroying, fn);
 	if (!q_data) {
 		rv = -ENOMEM | 0x2000;
@@ -1632,31 +1627,6 @@ static void nvmeiba_atom_io_resources_destructor(struct nvmeiba_atom_os_api *ato
 	} else { /* Hidden attach / Sub volume with shared queue / destroy upon creation failure */}
 }
 
-#if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR == 1)
-#define ASSERT_COUNTERS(...) NVMESH_BUG(__VA_ARGS__)
-#else
-#define ASSERT_COUNTERS(...) NVMESH_WARN(__VA_ARGS__)
-#endif
-
-static void __assert_no_inflight_io(struct nvmeibc_os_api *os)
-{
-	int i;
-
-	if (!os->stats) {
-		_NT(trace_api_os_assert_no_inflight_io, "@DEV_NAME: stats not initialized", os->atom.dev_name);
-		return;
-	}
-
-	for (i = 0; i < IO_STAT_VERB_DISCARD; i++) {
-		struct nvmeib_io_counters counters = {0};
-		nvmeib_io_stats_readc(os->stats, i, 0 /* All sizes */, &counters);
-		ASSERT_COUNTERS(counters.inflight_ops > 0, NO_REPORT, NULL,
-				"nvmeibc bug: %s: inflight IO's found in stats verb=%d, inflight=%d\n",
-				os->atom.dev_name, i, counters.inflight_ops);
-	}
-
-}
-
 static void __proc_destroy(struct nvmeibc_os_api *os);
 void block_api_os_destroy(struct nvmeibc_os_api *os)
 {
@@ -1697,11 +1667,6 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 	   scalabale_refcount_get_count(&rq_ctx->io_refcount) : -ENODEV);
 	if (!os->is_proc_api_disabled)
 		__proc_destroy(os);
-	if (os->stats) {			// No more IO, nor /proc files so stats are not used regardless of ref-count.
-		__assert_no_inflight_io(os);	// Assert that no IO is inflight, so stats are not used anymore
-		nvmeib_io_stats_free(os->stats);
-		os->stats = NULL;
-	}
 	reqq_data_destroy(rq_ctx);	// OK to free q context because atom either autofails or enqueues IOs and does not aware of the context
 	os = NULL; 					// Dont use 'OS' anymore. It does not exist, and might kfree thorugh atom destructor asyncronously!
 
@@ -1770,11 +1735,12 @@ u64 block_api_os_get_max_supported_trim_blks(struct nvmeibc_os_api *os)
 static ssize_t iostats_to_non_json(void *_os, char *buf, size_t len)
 {
 	const struct nvmeibc_os_api *os = _os;
-	const u64 io_prob = ((u64)((struct nvmeibc_block_device *)os->dev)->dp.io_perm_alert.stats.longest_io_problem_duration_msec);	// Daniel: This is very ugly, think of a better solution
+	const struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)os->dev;
+	const u64 io_prob = (u64)dev->dp.io_perm_alert.stats.longest_io_problem_duration_msec;
 	const ulong cur_time = get_nvmeibc_os_api_uptime(os);
 	struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base=buf,.len=len});
 
-	nvmeib_iostats_sum_to_string(os->stats, cur_time, io_prob, &txt);
+	nvmeib_iostats_sum_to_string(dev->stats, cur_time, io_prob, &txt);
 
 	nvmeib_proc_add_txt_proc_epilog_txt(IOSTATS_PROC_FRMT_VER, &txt);
 
@@ -1783,15 +1749,14 @@ static ssize_t iostats_to_non_json(void *_os, char *buf, size_t len)
 
 static ssize_t iostats_detailed_to_json(void *_os, char *buf, size_t len)
 {
-	const struct nvmeibc_os_api *os	= _os;
+	const struct nvmeibc_os_api *os = _os;
+	const struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)os->dev;
 	struct jdr jdr = jdr_make((struct charvec){ .base = buf, .len = len });
-	const u32 hex_type =
-		((struct nvmeibc_block_device *)os->dev)->type; // Daniel: This is very ugly, think of a better solution
-	if (unlikely(!os->stats)) {
+	if (unlikely(!dev->stats)) {
 		goto _out;
 	}
-	nvmeib_io_stats_tojson_jdr(os->stats, get_nvmeibc_os_api_uptime(os), &jdr);
-	jdr_write_var(&jdr, type, hex_type);
+	nvmeib_io_stats_tojson_jdr(dev->stats, get_nvmeibc_os_api_uptime(os), &jdr);
+	jdr_write_var(&jdr, type, dev->type);
 	jdr_write_var(&jdr, uuid, (const char *)os->dev_uuid);
 	nvmeib_proc_add_json_proc_epilog_jdr(IOSTATS_PROC_FRMT_VER, &jdr);
 
@@ -2172,9 +2137,10 @@ ssize_t block_api_os_dump_users(struct nvmeibc_os_api *os, char *buf, size_t len
 
 void block_api_os_clear_io_stats(struct nvmeibc_os_api *os, const int which)
 {
+	struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)os->dev;
 	_NT(trace_api_os_block_api_os_clear_io_stats, "volume @DEV_NAME clearing IO stats: @INT", os->atom.dev_name, (char)which);
-	if ((!os->is_io_api_disabled)&&(os->stats))
-		nvmeib_io_stats_clear(os->stats, which);
+	if ((!os->is_io_api_disabled) && dev && dev->stats)
+		nvmeib_io_stats_clear(dev->stats, which);
 }
 
 /*************** Realtime reconfiguration of IO params ***********************/

@@ -53,7 +53,7 @@ static void __on_complete_update_operation_stats(struct operation *o)
 		.worst_e2e_exec = io_duration_nsecs,
 		.total_sub_block = 0
 	};
-	nvmeib_io_stats_update_one(nd->os->stats, NULL, io_op_to_verb(o->op, false), io_counters);
+	nvmeib_io_stats_update_one(nd->stats, NULL, io_op_to_verb(o->op, false), io_counters);
 	#else
 	latency = io_exec = 0;	// Avoid uninitialized warning in lib
 	(void)io_counters;	// Avoid warning in lib
@@ -509,7 +509,7 @@ void nvmeibc_operation_destroy(struct operation *o, int rv)
 	enum nvmeib_pet_severity const severity = rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL;
 	if (o->op < NVMEIB_BLOCK_IO_OP_DISCARD) {
 		const u64 nlbas = get_op_nlbas(o);
-		nvmeib_io_stats_operation_end(o->nd->os->stats, io_op_to_verb(o->op, false),
+		nvmeib_io_stats_operation_end(o->nd->stats, io_op_to_verb(o->op, false),
 					      nlbas << NVMEIBC_SECTOR_SHIFT);
 	}
 	if (rv < 0 && (now_jiffies - o->jiffies1 > nd->max_retry_jiffies)) {

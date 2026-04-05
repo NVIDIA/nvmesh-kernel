@@ -562,12 +562,18 @@ static void __rec_dummy_drainer(void* _dev) { (void)_dev; BUG_ON(1); }
  * directory. */
 static struct nvmeibc_os_api dummy_os_api;
 
-static void __create_dummy_block_device(const struct dplib_caller *sw, struct nvmeibc_block_device* dev)
+static int __create_dummy_block_device(const struct dplib_caller *sw, struct nvmeibc_block_device* dev)
 {	// Simulation of nvmeibc_block_init()
 	dev->os = &dummy_os_api;
 	dev->size = 0;
 	strlcpy(dev->name, "slib_bdev_name", sizeof(dev->name));
 	strlcpy(dev->uuid, "slib_bdev_uuid", sizeof(dev->uuid));
+	//TODO 
+	// - nvmeib_io_stats_create_traced(dev->name, VERB_RW_T_BITMASK, NVMEIBC_SECTOR_SIZE);
+	//Right now too much compilation errors.
+	dev->stats = NULL; 
+	//if (unlikely(!dev->stats))
+	//	return -ENOMEM;
 	nvmeibc_volume_short_id(dev) = sw->gp->dbg_id;
 	dev->status = NCBD_ATTACHED;
 	dev->max_retry_jiffies = 300 * HZ;
@@ -589,6 +595,7 @@ static void __create_dummy_block_device(const struct dplib_caller *sw, struct nv
 				      0 /*read_has_mutable_bio_buffers */, pr->slice_size, dp_par);
 		nvmeibc_recovs_drainer_init(&dev->dp.running_recovs, __rec_dummy_drainer, dev);
 	}
+	return 0;
 }
 
 static void __create_dummy_segment(struct dplib_caller *sw, int i) {
@@ -781,6 +788,8 @@ static void __update_stats_on_finish(struct dplib_caller *sw) {
 }
 
 static void dplib_caller_free(struct dplib_caller *sw) {
+	if (!sw)
+		return;
 	sw->sync->exec.cancellation_context = NULL;		// It does not matter which type of operation is that, all have the same 'exec' struct in the same offset
 	dp_cmds_free_all(sw->o.cmds);
 	nvmeibc_operation_move_mem_to_locks(&sw->o);
@@ -788,6 +797,11 @@ static void dplib_caller_free(struct dplib_caller *sw) {
 	__update_stats_on_finish(sw);
 	if (__is_recov(sw)) {
 		nvmeibc_recoveries_destroy(&sw->hdr);
+	}
+	if (sw->nd.stats) {
+		//TODO
+		//nvmeib_io_stats_free(sw->nd.stats);
+		sw->nd.stats = NULL;
 	}
 	kfree(sw);
 }
@@ -799,13 +813,16 @@ static struct dplib_caller *dplib_caller_create(void *s) {
 		return sw;
 	WARN(!_is_library_already_initialized(), "library was not initialized properly");
 	sw->gp = s;
-	__create_dummy_block_device(sw, &sw->nd);
+	if (unlikely(__create_dummy_block_device(sw, &sw->nd) < 0)) {
+		kfree(sw);
+		return NULL;
+	}
 	__create_dummy_topology(sw);
 	sw->sync->exec.cancellation_context = sw;
 	if (__is_sync(sw)) {
 		if (unlikely(__create_dummy_operation_locks_cmds(sw) < 0)) {
 			dplib_caller_free(sw);
-			sw = NULL;
+			return NULL;
 		}
 	} else if (__is_recov(sw)) {
 	} else {
@@ -841,13 +858,14 @@ static struct nvmeibc_cmd_lock * _first_missing_lock_or_primary_owner(struct dpl
 void nvmesh_dp_lib_do_sync_op(struct lib_call_api_sync *s) {
 	struct dplib_caller *sw = dplib_caller_create(mark_negative_rv(s));
 	const struct lib_call_api_params_sync* sp = &s->sync_params;
-	struct nvmeibc_cmd_lock *work_lock = _first_missing_lock_or_primary_owner(sw);
+	struct nvmeibc_cmd_lock *work_lock;
 	int rv;
-	BUG_ON(!__is_sync(sw));		// Sanity
 	if (!sw) {
 		mark_not_started(s);
 		return;
 	}
+	BUG_ON(!__is_sync(sw));		// Sanity
+	work_lock = _first_missing_lock_or_primary_owner(sw);
 
 	rv = nvmeibc_sync_generic_by_op(work_lock, sp->start_slice, sp->n_slices, sw->gp->op, sync_done_return_to_caler, sw);
 	if (rv < 0) {
@@ -880,12 +898,12 @@ void block_api_os_end_io(struct bio_part *cur, ulong start_time, int rv) {
 void nvmesh_dp_lib_do_rwt_op(struct lib_call_api_io* io) {
 	struct dplib_caller *sw = dplib_caller_create(mark_negative_rv(io));
 	int rv = 0;
-	BUG_ON(!__is_io(sw));		// Sanity
-	BUG_ON(__get_bio_op(NULL, io->io_params.bio) != io->gen_params.op);		// Sanity
 	if (!sw) {
 		mark_not_started(io);
 		return;
 	}
+	BUG_ON(!__is_io(sw));		// Sanity
+	BUG_ON(__get_bio_op(NULL, io->io_params.bio) != io->gen_params.op);		// Sanity
 	if (io->gen_params.op == NVMEIB_BLOCK_IO_OP_DISCARD)
 		rv = -EPERM;
 	if (rv == 0)
@@ -901,6 +919,10 @@ void nvmesh_dp_lib_do_rwt_op(struct lib_call_api_io* io) {
 void nvmesh_dp_lib_do_trim_op( struct lib_call_api_io* io) {
 	struct dplib_caller *sw = dplib_caller_create(mark_negative_rv(io));
 	struct bio_part bp = {.bio = io->io_params.bio};
+	if (!sw) {
+		mark_not_started(io);
+		return;
+	}
 	mark_not_started(io);	// Not supported yet
 	block_api_os_end_io(&bp, 0, -EPERM);
 	dplib_caller_free(sw);

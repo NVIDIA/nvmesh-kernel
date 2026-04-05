@@ -1125,6 +1125,11 @@ int nvmeibc_block_init(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *
 	nvmeibc_cinst_get_blok_p(dev) = nvmeibc_isnt_params_main2blk(volume->p);
 	strlcpy(dev->name, devname, sizeof(dev->name));
 	strlcpy(dev->uuid, uuid   , sizeof(dev->uuid));
+	dev->stats = nvmeib_io_stats_create_traced(dev->name, VERB_RW_T_BITMASK, NVMEIBC_SECTOR_SIZE);
+	if (unlikely(!dev->stats)) {
+		rv = -ENOMEM;
+		goto err_do_exit;
+	}
 	nvmeibc_volume_short_id(dev) = ((++dbg_id_counter) | (1u << 31));		// Visible bdevs to user are positive, hidden bdevs are negative
 	nvmeibc_block_update_status(dev, 'A');
 	INIT_LIST_HEAD(&dev->list_n);
@@ -1468,12 +1473,39 @@ void nvmeibc_del_blkdev(struct nvmeibc_block_device	*dev)
 	_NT(t_03_cdetach, "@DEV_NAME was removed from the system", dev->name);
 }
 
+#if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR == 1)
+#define ASSERT_COUNTERS(...) NVMESH_BUG(__VA_ARGS__)
+#else
+#define ASSERT_COUNTERS(...) NVMESH_WARN(__VA_ARGS__)
+#endif
+
+static void __assert_no_inflight_io(const struct nvmeibc_block_device *dev)
+{
+	int i;
+
+	if (!dev->stats)
+		return;
+
+	for (i = 0; i < IO_STAT_VERB_DISCARD; i++) {
+		struct nvmeib_io_counters counters = {0};
+		nvmeib_io_stats_readc(dev->stats, i, 0 /* All sizes */, &counters);
+		ASSERT_COUNTERS(counters.inflight_ops > 0, NO_REPORT, NULL,
+				"nvmeibc bug: %s: inflight IO's found in stats verb=%d, inflight=%d\n",
+				dev->name, i, counters.inflight_ops);
+	}
+}
+
 int nvmeibc_block_exit(struct nvmeibc_block_device *dev)		// Todo: Unify this function into previous
 {
 	if (dev) {
 		dev->os = NULL;
 		nvmeibc_blk_op_elevator_destroy(&dev->merge_op);
 		nvmeibc_topologies_free(&dev->topologies);
+		if (dev->stats) {
+			__assert_no_inflight_io(dev);
+			nvmeib_io_stats_free(dev->stats);
+			dev->stats = NULL;
+		}
 		my_kfree(dev);
 	}
 	return 0;
@@ -1557,8 +1589,8 @@ void nvmeibc_block_trace_stats(const struct nvmeibc_block_device *dev, bool diff
 {
 	struct nvmeibc_os_api *os = dev->os;
 
-	if ((!os->is_io_api_disabled) && (os->stats)) {
-		nvmeib_io_stats_trace_ext(os->stats, __block_trace_verb_counters_fn, (void *)dev, diff_only);
+	if ((!os->is_io_api_disabled) && (dev->stats)) {
+		nvmeib_io_stats_trace_ext(dev->stats, __block_trace_verb_counters_fn, (void *)dev, diff_only);
 	}
 
 	//must remove the const in order to let io_stats update trace flag.

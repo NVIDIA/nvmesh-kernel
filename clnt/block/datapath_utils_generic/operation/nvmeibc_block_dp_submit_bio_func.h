@@ -185,7 +185,7 @@ int execute_bio(struct bio *bio, unsigned long now)
 		o->cpu_mask_info = cpu_mask_info; /* STRUCT ASSIGNMENT */
 		if (o->op < NVMEIB_BLOCK_IO_OP_DISCARD) {
 			const u64 nlbas = get_op_nlbas(o);
-			nvmeib_io_stats_operation_start(o->nd->os->stats, io_op_to_verb(o->op, false), nlbas << NVMEIBC_SECTOR_SHIFT);
+			nvmeib_io_stats_operation_start(o->nd->stats, io_op_to_verb(o->op, false), nlbas << NVMEIBC_SECTOR_SHIFT);
 		}
 
 		__pet_nvmeibc_log_operation_create(o, nvmeibc_volume_short_id(nd));

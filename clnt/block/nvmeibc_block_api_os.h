@@ -70,7 +70,6 @@ struct nvmeibc_os_api {
 
 	char dev_uuid[NVMEIBC_BD_UUID_LEN];		// NVMesh unique identifier of volume(block device) using this api
 	void* dev;								// Private pointer to your device. Not used in OS api.
-	struct nvmeib_io_stats *stats;  		// Pointer to statistics structure which is filled when IO terminates and later serialized into /proc directory.
 
 	u8   slice_size;						// Cache this value for optimizing io sizes of file system
 	enum nvmeibc_os_ap_revalidation_job_type disk_reval_task;		// Which revalidation task should be done
@@ -124,8 +123,6 @@ struct nvmeibc_os_api * block_api_os_create(const struct nvmeibc_cinst_params_bl
  */
 int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 		      bool is_read_only, const int slice_size, u64 ro_header_sectors);
-
-u64 stats_get_n_ops(const struct nvmeibc_os_api *os, enum nvmeib_block_io_op type);
 
 /* OS can start issuing IO before this function terminates. If IO is still not
    enabled, the requests will accumulate in resubmition queue. Call after
