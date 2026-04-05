@@ -30,17 +30,16 @@ void nvmeibt_udev_simu_destroy(struct nvmeibt_udev_simu *u) {
 
 /******************************** lib-udev API *******************************/
 struct udev_list_entry {
-	const char *name;
-	const char *path;
+	const struct sandbox_nvme_device *disk;
 	struct udev_list_entry* next;
 };
-const char* udev_list_entry_get_name(const struct udev_list_entry *e) { return e->path; }
+const char* udev_list_entry_get_name(const struct udev_list_entry *e) { return e->disk->device_name; }
 struct udev_list_entry *udev_list_entry_get_next(struct udev_list_entry *e) { return e->next; }
 
 struct udev {
 	int ref;
 	int reserved;
-	struct udev_list_entry ent[0];
+	struct udev_list_entry ent[0];	// Must be last
 };
 
 struct udev *udev_new(void) {		// Todo: This is udev simulator, unrelated to nvme, should be in os simulator
@@ -49,8 +48,7 @@ struct udev *udev_new(void) {		// Todo: This is udev simulator, unrelated to nvm
 	u->ref++;
 	N_Tf(dfi1053, "udev_new, @INT bdevs", n_entries);
 	for (i = 0; i < n_entries; ++i) {
-		u->ent[i].name = g_t_udev_sim->local_disks[i].device_path;
-		u->ent[i].path = g_t_udev_sim->local_disks[i].device_name;
+		u->ent[i].disk = &g_t_udev_sim->local_disks[i];
 		if (i > 0) u->ent[i - 1].next = &u->ent[i];		// Emulate linked list with our array
 	}
 	return u;
@@ -90,12 +88,15 @@ struct udev_list_entry* udev_enumerate_get_list_entry(struct udev_enumerate *e) 
 	return ((struct udev*)e)->ent;
 }
 
-struct udev_device { const struct udev_list_entry *e; };
+struct udev_device {					// Can be created from scanning entries or from event
+	const struct udev_list_entry *e;
+	struct nvmeibt_udev_event_simu ev;
+};
 
 struct udev_device *udev_device_new_from_syspath(struct udev *u, const char *path) {
 	for (const struct udev_list_entry *e = u->ent; e != NULL; e = e->next) {
-		if (!strncmp(e->path, path, 128)) {
-			struct udev_device *d = malloc(sizeof(*d));
+		if (!strncmp(e->disk->device_name, path, 128)) {
+			struct udev_device *d = calloc(1, sizeof(*d));
 			d->e = e;
 			return d;
 		}
@@ -104,60 +105,72 @@ struct udev_device *udev_device_new_from_syspath(struct udev *u, const char *pat
 	return NULL;
 }
 
-const char* udev_device_get_devpath(const struct udev_device* d) { return d->e->path; }
-const char* udev_device_get_devnode(const struct udev_device* d) { return d->e->name; }
-void udev_device_unref(             struct udev_device* d) { free(d); }
+const char* udev_device_get_devnode(const struct udev_device* d) { return d->e ? d->e->disk->device_path : d->ev.dev_file_name; }
+void udev_device_unref(                   struct udev_device* d) { free(d); }
+const char* udev_device_get_devpath(const struct udev_device* d) { return udev_device_get_devnode(d); }
+const char* udev_device_get_syspath(const struct udev_device *d) { return udev_device_get_devnode(d); }
+const char* udev_device_get_action(const struct udev_device *d) { return d->ev.action_is_add ? "add" : "del"; }
+const char* udev_device_get_subsystem(const struct udev_device *d) { (void)d;  return "block"; }
+const char* udev_device_get_devtype(  const struct udev_device *d) { (void)d;  return "disk"; }
+const char* udev_device_get_property_value(const struct udev_device *d, const char *property) { (void)d;  (void)property;  return NULL; }
 
-/******************************** public API *********************************/
-#include "nvmeibt_local_disk_util.h"
-int  nvmeibt_udev_create(void) {  return TSB_all_fds_tbl_create_fd("_udev_monitor", 0); }
-void nvmeibt_udev_destroy(void) { override_close(g_t_udev_sim->o.sock->fd); }
-int  nvmeibt_udev_get_fd(void) {          return g_t_udev_sim->o.sock->fd; } // For epoll waiting
+struct udev_monitor {
+	struct nvmeibt_udev_simu *us;
+	bool enable_recv;
+};
 
-enum nvmeibt_disk_type nvmeibt_udev_get_event(struct nvmeibt_udev_event *e) {	// Add sda
-	struct nvmeibt_udev_simu *u = g_t_udev_sim;
-	struct nvmeibt_udev_event *next_e = &u->events[u->n_sent % (int)ARRAY_SIZE(u->events)];
-	enum nvmeibt_disk_type disk_type;
+struct udev_monitor *udev_monitor_new_from_netlink(struct udev *u, const char *name) {
+	struct udev_monitor *um = calloc(1, sizeof(*um));
+	BUG_ON(strncmp(name, "udev", 4));
+	um->us = g_t_udev_sim;
+	(void)TSB_all_fds_tbl_create_fd("_udev_monitor", 0);
+	(void)u;
+	return um;
+}
+
+int udev_monitor_get_fd(const struct udev_monitor *um) { return um->us->o.sock->fd; } // For epoll waiting
+struct udev_monitor *udev_monitor_unref(struct udev_monitor *um) {
+	override_close(udev_monitor_get_fd(um));
+	free(um);
+	return NULL;
+}
+
+int udev_monitor_filter_add_match_subsystem_devtype(struct udev_monitor *um, const char *subsystem, const char *devtype) {
+	BUG_ON(um->us != g_t_udev_sim);
+	BUG_ON((strncmp(subsystem, "block", 5) != 0) || (strncmp(devtype, "disk", 4) != 0));
+	return 0;
+}
+
+int udev_monitor_enable_receiving(struct udev_monitor *um) { um->enable_recv = true; return 0;}
+
+struct udev_device *udev_monitor_receive_device(struct udev_monitor *um) {	// Create from event
+	struct nvmeibt_udev_simu *u = um->us;
+	struct nvmeibt_udev_event_simu *next_e = &u->events[u->n_sent % (int)ARRAY_SIZE(u->events)];
+	struct udev_device *rv = calloc(1, sizeof(*rv));
 	BUG_ON(u->n_sent >= u->n_total);		// No new event to send. Why did epoll trigger this flow???
-	u->n_sent++;;
-	*e = *next_e;
+	u->n_sent++;
+	rv->ev = *next_e;
 	memset(next_e, 0, sizeof(*next_e));		// Clean this event
-	disk_type = nvmeibt_local_disk_get_stock_disk_type_by_dev_file_name(e->dev_file_name, NULL);
-	switch (disk_type) {
-		case NVMEIBT_NVME_DISK_TYPE:
-		case NVMEIBT_EXTERNAL_DISK_TYPE:
-		case NVMEIBT_VIRTUAL_DISK_TYPE:
-			break;							// Todo: add info here
-		case NVMEIBT_NVMESH_DISK_TYPE:
-		default:
-			e->action = nvmeibt_udev_none;	// Ignoring already existing NVMesh drives
-	}
-	N_Tf(__AUTOID__, "udev_event on @STR, action=@INT, disk_type=@INT", e->dev_file_name, e->action, (int)disk_type);
-	return disk_type;
+	return rv;
 }
 
-void nvmeibt_udev_put_event(struct nvmeibt_udev_event *e) {
-	memset(e, 0, sizeof(*e));
-}
-
-void nvmeibt_udev_simu_send_disk_event_to_toma(unsigned disk_idx, enum nvmeibt_udev_event_action action) {
+void nvmeibt_udev_simu_send_disk_event_to_toma(unsigned disk_idx, bool action_is_add) {
 	struct nvmeibt_udev_simu *u = g_t_udev_sim;
-	struct nvmeibt_udev_event *e = &u->events[u->n_total % (int)ARRAY_SIZE(u->events)];
-	const struct sandbox_nvme_device *disk = &u->local_disks[disk_idx];
+	struct nvmeibt_udev_event_simu *e = &u->events[u->n_total % (int)ARRAY_SIZE(u->events)];
+	e->dev = &u->local_disks[disk_idx];
 	BUG_ON(disk_idx >= u->n_disks);
+	e->action_is_add = action_is_add;
+	e->dev_file_name = e->dev->device_path;
 	u->n_total++;
-	e->action = action;
-	e->dev_file_name = disk->device_path;
-	e->ctx = (void*)disk;
 }
 
-void nvmeibt_udev_simu_send_sata_event_to_toma(enum nvmeibt_udev_event_action action) {
+void nvmeibt_udev_simu_send_sata_event_to_toma(bool action_is_add) {
 	struct nvmeibt_udev_simu *u = g_t_udev_sim;
-	struct nvmeibt_udev_event *e = &u->events[u->n_total % (int)ARRAY_SIZE(u->events)];
-	u->n_total++;
-	e->action = action;
+	struct nvmeibt_udev_event_simu *e = &u->events[u->n_total % (int)ARRAY_SIZE(u->events)];
+	e->dev = NULL;
+	e->action_is_add = action_is_add;
 	e->dev_file_name = TOMA_ROOT_DIR "dev/sda";		// Sata drive
-	e->ctx = 0;
+	u->n_total++;
 }
 
 bool nvmeibt_udev_simu_did_toma_consume_all_events(void) {

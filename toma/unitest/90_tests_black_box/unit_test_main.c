@@ -125,10 +125,11 @@ static void scenario_user_rpcs_praid(void) {
 
 static void scenario_udev_events(void) {
 	SCENARIO_PRINT(__AUTOID__, "start");
-	nvmeibt_udev_simu_send_disk_event_to_toma(0, nvmeibt_udev_add);		yield();
-	nvmeibt_udev_simu_send_disk_event_to_toma(1, nvmeibt_udev_del);		yield();
-	nvmeibt_udev_simu_send_disk_event_to_toma(2, nvmeibt_udev_none);	yield();
-	nvmeibt_udev_simu_send_sata_event_to_toma(   nvmeibt_udev_none);	yield();
+	nvmeibt_udev_simu_send_disk_event_to_toma(0, true);			yield();
+	nvmeibt_udev_simu_send_disk_event_to_toma(1, false);		yield();
+	nvmeibt_udev_simu_send_disk_event_to_toma(2, true);			yield();
+  //nvmeibt_udev_simu_send_sata_event_to_toma(   true);			yield();
+	nvmeibt_udev_simu_send_sata_event_to_toma(   false);		yield();
 	WAIT_UNTIL(nvmeibt_udev_simu_did_toma_consume_all_events());
 	SCENARIO_PRINT(__AUTOID__, "done");
 }

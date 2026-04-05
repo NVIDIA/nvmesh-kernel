@@ -165,6 +165,7 @@ $(TDIR)/../tools/nvmeib_trace_userspace.c \
 $(TDIR)/../tools/nvmeib_trace_userspace_poller.c \
 $(TDIR)/interfaces/srvr/nvmeibt_srvr_proc.c \
 $(TDIR)/interfaces/network/nvmeibt_event_tracker.c \
+$(TDIR)/interfaces/nvme/nvmeibt_udev.c \
 
 #$(TDIR)/interfaces/os/nvmeibt_os_signal.c
 

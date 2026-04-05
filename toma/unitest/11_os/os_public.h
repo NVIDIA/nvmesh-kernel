@@ -154,7 +154,6 @@ int epoll_ctl( int efd, enum EPOLL_CTL __op, int __fd, struct epoll_event *ev_pt
 int epoll_wait(int efd,                                struct epoll_event *ev_arr, int arr_size, int time_out_ns);
 
 /********************* lib-udev: replaces: #include <libudev.h> ***********************/
-#include "interfaces/nvme/nvmeibt_udev.h"
 #define NVMEIBT_TOMA_LIB_UDEV_API_H // #include "interfaces/nvme/nvmeibt_lib_udev_api.h"
 struct udev;
 struct udev* udev_new(void);
@@ -176,6 +175,19 @@ struct udev_list_entry *udev_list_entry_get_next(       struct udev_list_entry *
 
 struct udev_device;
 struct udev_device* udev_device_new_from_syspath(struct udev *u, const char *path);
-const char* udev_device_get_devpath(const struct udev_device* d);	// The devpath is the path under /sys to the device. E.g. `/devices/ACPI0004:00/0/host0/block/sda`
-const char* udev_device_get_devnode(const struct udev_device* d);	// The devnode is the name of the device (full path to the /dev node). E.g. `/dev/sda `
-void udev_device_unref(                   struct udev_device* d);
+const char* udev_device_get_devpath(       const struct udev_device*);	// The devpath is the path under /sys to the device. E.g. `/devices/ACPI0004:00/0/host0/block/sda`
+const char* udev_device_get_syspath(       const struct udev_device*);
+const char* udev_device_get_devtype(       const struct udev_device*);
+const char* udev_device_get_devnode(       const struct udev_device*);	// The devnode is the name of the device (full path to the /dev node). E.g. `/dev/sda `
+const char* udev_device_get_action(        const struct udev_device*);
+const char* udev_device_get_subsystem(     const struct udev_device*);
+const char* udev_device_get_property_value(const struct udev_device*, const char *property);
+void udev_device_unref(                          struct udev_device*);
+
+struct udev_monitor;
+struct udev_monitor *udev_monitor_new_from_netlink( struct udev *u, const char *name);
+struct udev_monitor *udev_monitor_unref(            struct udev_monitor *);
+int                  udev_monitor_get_fd(     const struct udev_monitor *);
+int udev_monitor_filter_add_match_subsystem_devtype(struct udev_monitor *, const char *subsystem, const char *devtype);
+int udev_monitor_enable_receiving(                  struct udev_monitor *);
+struct udev_device *udev_monitor_receive_device(    struct udev_monitor *);

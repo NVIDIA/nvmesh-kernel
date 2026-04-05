@@ -2115,15 +2115,10 @@ static void read_disks_info_from_stock_driver(void)
 	struct udev							*udev = NULL;
 	struct udev_enumerate				*enumerate = NULL;
 	struct udev_list_entry				*devices, *dev_list_entry;
-	struct udev_device					*dev;
-	const char							*path;
 	enum nvmeibt_disk_type				disk_type;
-	const char							*dev_file_name;
-	struct nvmeibt_udev_event_info		*udev_event_info;
 	bool								is_new;
 
 	NFIN;
-
 	udev = udev_new();
 	if (!udev) {
 		N_Ef(trace_no_udev_ctx, "Cannot create udev context");
@@ -2148,11 +2143,9 @@ static void read_disks_info_from_stock_driver(void)
 	}
 
 	udev_list_entry_foreach(dev_list_entry, devices) {
-
-		path = udev_list_entry_get_name(dev_list_entry);
-		dev = udev_device_new_from_syspath(udev, path);
-
-		dev_file_name = udev_device_get_devnode(dev);
+		const char *path = udev_list_entry_get_name(dev_list_entry);
+		struct udev_device *dev = udev_device_new_from_syspath(udev, path);
+		const char *dev_file_name = udev_device_get_devnode(dev);
 		if (!dev_file_name) {
 			N_Wf(mn8ub5v3, "dev_file_name empty path=@STR", path);
 			goto loop_continue;
@@ -2163,7 +2156,7 @@ static void read_disks_info_from_stock_driver(void)
 		}
 		disk_type = nvmeibt_local_disk_get_stock_disk_type_by_dev_file_name(dev_file_name, udev_device_get_devpath(dev));
 		if (IS_SUPPORTED_STOCK_DISK_TYPE(disk_type)) {
-			udev_event_info = find_udev_event_info_by_dev_file_name(dev_file_name, &is_new);
+			struct nvmeibt_udev_event_info *udev_event_info = find_udev_event_info_by_dev_file_name(dev_file_name, &is_new);
 			if (!is_new) {
 				N_Wf(sdfg765c, "dev_file_name=@STR somehow already exists", dev_file_name);
 				goto loop_continue;
