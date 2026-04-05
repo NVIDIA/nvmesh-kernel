@@ -674,6 +674,23 @@ int override_select(int nfds, fd_set *__restrict readfds, fd_set *__restrict wri
 	return n_events;
 }
 
+int override_fstat(int fd, struct stat *rv) {
+	const struct TSB_fd_impl *s = TSB_socket_find_by_fd(fd);
+	const char *file_name = basename(s->addr.sun_path);
+	N_Tf(__AUTOID__, "@STR", file_name);
+	if (!strncmp(file_name, "nvme", 4)) {		// fstat on emulated disk
+		const struct sandbox_nvme_device *D = sandbox_nvme_get_device_by_full_path(s->addr.sun_path);
+		memset(rv, 0, sizeof(*rv));
+		rv->st_mode = S_IFBLK;
+		rv->st_size = D->size_in_bytes;
+		rv->st_blksize = (1 << 9);
+		rv->st_blocks = rv->st_size / rv->st_blksize;
+		return 0;
+	}
+	// Fallback
+	return fstat(fd, rv);
+}
+
 #include <sys/mman.h>
 void TSB_os_mmap_impl_clear(struct TSB_os_mmap_impl *mi, size_t length) {
 	BUG_ON((mi->len + (2UL << PAGE_SHIFT)) != length);		// Do not allow partial unmap

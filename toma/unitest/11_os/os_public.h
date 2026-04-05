@@ -62,6 +62,7 @@ int override_close(int fd);
 int override_dup(int fd);
 int override_pipe(int fds[2]);
 int override_fcntl(int fd, int cmd, ...);
+int override_fstat(int fd, struct stat *buf);
 ssize_t override_read(  int fd,       void *buf, size_t nbytes);
 ssize_t override_write( int fd, const void *buf, size_t count);
 ssize_t override_pread( int fd,       void *buf, size_t count, off_t offset);
@@ -83,6 +84,7 @@ int   override_munmap(void *addr, size_t length);
 #define select  override_select
 #define mmap    override_mmap
 #define munmap  override_munmap
+#define fstat  override_fstat
 #endif // TOMA_SANDBOX_BYPASS_REDIRECTS
 
 /************************************* netlink *************************************/
