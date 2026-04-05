@@ -1133,10 +1133,16 @@ struct generic_CMD_params_ctx {							// A huge ~ 20[KB] struct, reduce it via u
 	int								blockSize;
 	int								metadataSize;
 	struct nvmeibt_urn_uuid			dbUUID;
-	struct resend_report_disk_ctx	disks_to_report[NVMEIBT_MAX_N_DISKS_PER_NODE];
-	int								n_disks_to_report;
-	struct send_praid_report_ctx	praids_to_report[128 + 0 *NVMEIBT_MAX_N_PRAIDS];		// Dont allow this struct to be huge. If mgmt wants more than N praids in report, Toma will send at most N and later magmt can request the remaining praids
-	int								n_praids_to_report;
+	union {
+		struct report_disks_t {
+			struct resend_report_disk_ctx	arr[NVMEIBT_MAX_N_DISKS_PER_NODE];
+			int								num;
+		} report_disks;
+		struct report_praids_t {
+			struct send_praid_report_ctx	arr[128 + 0 *NVMEIBT_MAX_N_PRAIDS];		// Dont allow this struct to be huge. If mgmt wants more than N praids in report, Toma will send at most N and later magmt can request the remaining praids
+			int								num;
+		} report_praids;
+	};
 	int								encryptionCommandIndex;
 	int								slot;
 	int								keySize;
@@ -1165,12 +1171,12 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					rv = -1;
 					continue;
 				}
-				CMD_params->n_disks_to_report = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->disks_to_report));
-				if (arr->array.len > CMD_params->n_disks_to_report)
+				CMD_params->report_disks.num = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->report_disks.arr));
+				if (arr->array.len > CMD_params->report_disks.num)
 					N_Wf(f67fbhw, "@STR arr.len=@INT truncated", payload_kv->key, arr->array.len);
-				for (k = 0; k < CMD_params->n_disks_to_report; k++) {
+				for (k = 0; k < CMD_params->report_disks.num; k++) {
 					struct mm_json_dict *drive_json_dict = &(arr->array.elements[k]->dict);
-					struct resend_report_disk_ctx *report = &CMD_params->disks_to_report[k];
+					struct resend_report_disk_ctx *report = &CMD_params->report_disks.arr[k];
 					for (l = 0; l < drive_json_dict->len; l++) {
 						struct mm_json_kv_pair *kv = &(drive_json_dict->elements[l]);
 						if	(!strcmp(kv->key, "diskID")) {
@@ -1194,12 +1200,12 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 					rv = -1;
 					continue;
 				}
-				CMD_params->n_praids_to_report = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->praids_to_report));
-				if (arr->array.len > CMD_params->n_praids_to_report)
+				CMD_params->report_praids.num = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->report_praids.arr));
+				if (arr->array.len > CMD_params->report_praids.num)
 					N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-				for (k = 0; k < CMD_params->n_praids_to_report; k++) {
+				for (k = 0; k < CMD_params->report_praids.num; k++) {
 					struct mm_json_dict *praid_json_dict = &(arr->array.elements[k]->dict);
-					struct send_praid_report_ctx *pr_rep = &CMD_params->praids_to_report[k];
+					struct send_praid_report_ctx *pr_rep = &CMD_params->report_praids.arr[k];
 					for (l = 0; l < praid_json_dict->len; l++) {
 						struct mm_json_kv_pair *kv = &(praid_json_dict->elements[l]);
 						if (!strcmp(kv->key, "uuid")) {
@@ -2598,8 +2604,8 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	} else if (strcmp(messageType_params->messageType, "reservationModeChange") == 0) {
 		nvmeibt_block_device_reservation_mode_change(&CMD_params->volumeUUID, CMD_params->reservationVersion);
 	} else if (strcmp(messageType_params->messageType, "resendReport") == 0) {
-		for (i = 0; i < CMD_params->n_disks_to_report; i++) {
-			struct resend_report_disk_ctx	*dsk = &(CMD_params->disks_to_report[i]);
+		for (i = 0; i < CMD_params->report_disks.num; i++) {
+			struct resend_report_disk_ctx	*dsk = &(CMD_params->report_disks.arr[i]);
 			nvmeibt_local_disk_mark_is_specific_disk_report_req(dsk->ldiskID, dsk->reappearingCounter);
 		}
 	} else if (strcmp(messageType_params->messageType, "initEncryption") == 0) {
@@ -2623,8 +2629,8 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 		commit_now = encrypt_command_request_response(CMD_params);
 	} else if (strcmp(messageType_params->messageType, "sendPRaidReport") == 0) {
 		N_Ef(rbasdrf78fh2, "******************** Need to send a pRAID report for a specific pRAID");
-		for (i = 0; i < CMD_params->n_praids_to_report; i++) {
-			const struct send_praid_report_ctx *r = &(CMD_params->praids_to_report[i]);
+		for (i = 0; i < CMD_params->report_praids.num; i++) {
+			const struct send_praid_report_ctx *r = &(CMD_params->report_praids.arr[i]);
 			N_Ef(stamvuk, "uuid=@STR <@INT,@INT,@LU>", r->praid_uuid, r->lastKnownVersion_major, r->lastKnownVersion_minor, r->lastKnownVersion_raft_term);
 		}
 	} else if (strcmp(messageType_params->messageType, "--- shutdown_me ---") == 0) {
