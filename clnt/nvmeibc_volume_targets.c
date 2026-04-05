@@ -93,14 +93,14 @@ void nvmeibc_volume_targets_set_retain_disks(struct nvmeibc_volume_targets* self
 
 struct dp_target_find_disk_result nvmeibc_volume_targets_find_disk_by_name(struct nvmeibc_volume_targets const* self, const char *diskID)
 {
-	struct nvmeibc_disk_id *disk = nvmeibc_volume_targets_find_disk_id_by_name(self, diskID);
+	struct nvmeibc_disk_id *disk_id = nvmeibc_volume_targets_find_disk_id_by_name(self, diskID);
     struct dp_target_find_disk_result found = {0};
 
-	if (disk) {
+	if (disk_id && disk_id->disk) {
 		found = (struct dp_target_find_disk_result){
-			.disk = &disk->disk->base
+			.disk = &disk_id->disk->base
 			#if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
-			, .v_disk_stats = disk->v_disk_stats
+			, .v_disk_stats = disk_id->v_disk_stats
 			#endif
 		};
 	}
