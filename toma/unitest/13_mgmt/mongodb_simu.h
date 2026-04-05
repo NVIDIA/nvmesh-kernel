@@ -71,7 +71,10 @@ int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
 int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
 int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, const char *disk_uuid);
+int  sb_cluster_get_node_idx_from_disk_uuid(const struct sb_cluster_conf *, uint32_t    disk_uuid);
 bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
 void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
+
+const struct sb_seg_conf* sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *, uint32_t seg_uuid);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation

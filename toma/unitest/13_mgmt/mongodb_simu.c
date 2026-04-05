@@ -75,9 +75,9 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	}
 }
 
-/*static struct sb_seg_conf * __get_first_seg_by_uuid(unsigned uuid_u32) {			// The above uuid design was for easy retrieval of object by uuid.
-	return &g_mgmt_sim->cfg->vols[((uuid_u32>>16)&0xF)-1].chunks[((uuid_u32>>8)&0xF)-1].raids[((uuid_u32>>4)&0xF)-1].segs[((uuid_u32)&0xF)-1];
-}*/
+const struct sb_seg_conf* sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *D, uint32_t u) { // The above uuid design was for easy retrieval of object by uuid.
+	return &D->vols[((u>>16)&0xF)-1].chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1].segs[((u)&0xF)-1];
+}
 
 int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, const char *host_name) {
 	for (int i = 0; i < sb->n_nodes; i++) {
@@ -114,12 +114,17 @@ void sb_cluster_update_disk_vendor_and_verify(struct sb_disk_conf *D, const char
 	BUG_ON((uint64_t)D->size_bytes != D->local_nvme->size_in_bytes);
 }
 
-int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *sb, const char *disk_uuid) {
+#define DISK_UUID_GET_IDX_MASK(u) ((u ^ DISK_UUID_BASE) - (NODE_UUID_BASE & 0xFFFF0000))
+int sb_cluster_get_node_idx_from_disk_uuid(const struct sb_cluster_conf *D, uint32_t u) {
+	(void)D; return DISK_UUID_GET_IDX_MASK(u) >> 20;
+}
+
+int sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *sb, const char *disk_uuid) {
 	unsigned uuid_u32 = 0, n, d;
 	BUG_ON(sscanf(disk_uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
-	n = (uuid_u32 ^ DISK_UUID_BASE) - (NODE_UUID_BASE & 0xFFFF0000);
-	d = n & 0xF;
-	n = n >> 20;
+	n = DISK_UUID_GET_IDX_MASK(uuid_u32);
+	d = (n & 0xF);
+	n = (n >> 20);
 	BUG_ON(sb->nodes[n].disks[d].uuid != uuid_u32);
 	return d;
 }
