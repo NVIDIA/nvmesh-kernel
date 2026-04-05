@@ -6658,11 +6658,9 @@ TEST_FUNC int unitest_n_mirr_degraded_exhaustive(bunitest_s* B) {
 							for (t->lv.do_full_blkset_fixup = 0; t->lv.do_full_blkset_fixup <= 1; t->lv.do_full_blkset_fixup++) {
 								{	// Write IO
 									const int n_io_blocks = t->lv.do_full_blkset_fixup ? LOCKSET_SLICES : 1;		// IO, 1 slice (cannot turn off dbit), 32 slices  (can turn off dbits)
-									const bool is_dbit_visible_in_pre = t_n_mirror_tester_r1_binfo_is_pre_dbit_visible(t);
 									const bool io_changes_dbits =	(t->lv.do_full_blkset_fixup ||		// Full blockset inplicit  sync
 																	(n_dgrd==0) ||						// Auto clean up all dbits in perfect topology
-																	(n_dead > 0) ||						// IO Turn dbits on for dead seg
-																	(is_dbit_visible_in_pre && (n_dgrd > 1)));	// See generic algorithm optimization, IO changes dbits only if sees commited dbits in multi degraded mode
+																	(n_dead > 0));						// IO Turn dbits on for dead seg
 									t->lv.cur_op = NVMEIB_BLOCK_IO_OP_WRITE;
 									t_n_mirror_tester_r1_print_iter(t, "write\n");
 									t_n_mirror_tester_r1_binfo_inject(t);
