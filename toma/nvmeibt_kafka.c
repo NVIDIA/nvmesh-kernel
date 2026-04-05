@@ -1120,18 +1120,12 @@ struct send_praid_report_ctx {
 	uint64_t		lastKnownVersion_raft_term;
 };
 
-struct generic_CMD_params_ctx {							// A huge ~ 20[KB] struct, reduce it via unions
+struct generic_CMD_params_ctx {							// A ~ 8.5[KB] struct
 	char							generic_uuid[40];	// E.g., disk_obj_guid
-	struct nvmeibt_ascii_uuid		ldisk_id;
-	char							formatType[32];
 	union nvmeib_uuid				volumeUUID;
 	uint64_t						reservationVersion;
 	int64_t							bootTime;
-	unsigned int					vendor;
 	int								tomaToken;
-	int								formatRequestCounter;
-	int								blockSize;
-	int								metadataSize;
 	struct nvmeibt_urn_uuid			dbUUID;
 	union {
 		struct report_disks_t {
@@ -1142,15 +1136,25 @@ struct generic_CMD_params_ctx {							// A huge ~ 20[KB] struct, reduce it via u
 			struct send_praid_report_ctx	arr[128 + 0 *NVMEIBT_MAX_N_PRAIDS];		// Dont allow this struct to be huge. If mgmt wants more than N praids in report, Toma will send at most N and later magmt can request the remaining praids
 			int								num;
 		} report_praids;
+		struct encrypt_cmd_t {
+			int								commandIndex;
+			int								slot;
+			int								keySize;
+			char							passphrase[   PASSPHRASE_MAX_LEN];
+			char							newPassphrase[PASSPHRASE_MAX_LEN];
+		} enc;
+		struct format_disk_cmd_t {
+			struct nvmeibt_ascii_uuid		ldisk_id;
+			char							formatType[32];
+			struct nvmeibt_ascii_uuid		native_serial;
+			int								nsid;
+			int								formatRequestCounter;
+			char							native_nguid[32];
+			int								blockSize;
+			int								metadataSize;
+			unsigned int					vendor;
+		} fmt;
 	};
-	int								encryptionCommandIndex;
-	int								slot;
-	int								keySize;
-	char							passphrase[PASSPHRASE_MAX_LEN];
-	char							newPassphrase[PASSPHRASE_MAX_LEN];
-	struct nvmeibt_ascii_uuid		native_serial;
-	int								nsid;
-	char							native_nguid[32];
 };
 
 static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
@@ -1222,21 +1226,21 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else if (!strcmp(payload_kv->key, "tomaToken")) {
 				CMD_params->tomaToken = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "diskID")) {
-				nvmeibt_strlcpy(CMD_params->ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->ldisk_id.str));
+				nvmeibt_strlcpy(CMD_params->fmt.ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->fmt.ldisk_id.str));
 			} else if (!strcmp(payload_kv->key, "uuid")) {
 				nvmeibt_strlcpy(CMD_params->generic_uuid, payload_kv->value->str, sizeof(CMD_params->generic_uuid));
 			} else if (!strcmp(payload_kv->key, "vendor")) {
-				CMD_params->vendor = payload_kv->value->num;	// Such as 0x144d
+				CMD_params->fmt.vendor = payload_kv->value->num;	// Such as 0x144d
 			} else if (!strcmp(payload_kv->key, "formatRequestCounter")) {
-				CMD_params->formatRequestCounter = payload_kv->value->num;
+				CMD_params->fmt.formatRequestCounter = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "blockSize")) {
-				CMD_params->blockSize = payload_kv->value->num;
+				CMD_params->fmt.blockSize = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "metadataSize")) {
-				CMD_params->metadataSize = payload_kv->value->num;
+				CMD_params->fmt.metadataSize = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "dbUUID")) {
 				nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
 			} else if (!strcmp(payload_kv->key, "formatType")) {
-				nvmeibt_strlcpy(CMD_params->formatType, payload_kv->value->str, sizeof(CMD_params->formatType));
+				nvmeibt_strlcpy(CMD_params->fmt.formatType, payload_kv->value->str, sizeof(CMD_params->fmt.formatType));
 			} else if (!strcmp(payload_kv->key, "volumeID")) {			// Do nothing, we don't need this param
 			} else if (!strcmp(payload_kv->key, "volumeName")) {		// Do nothing, we don't need this param
 			} else if (!strcmp(payload_kv->key, "volumeUUID")) {
@@ -1245,36 +1249,32 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else if (!strcmp(payload_kv->key, "reservationVersion")) {
 				CMD_params->reservationVersion = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
-				CMD_params->encryptionCommandIndex = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "slot")) {
-				CMD_params->slot = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "currentSlot")) {
-				CMD_params->slot = payload_kv->value->num;
+				CMD_params->enc.commandIndex = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "slot") || !strcmp(payload_kv->key, "currentSlot")) {
+				CMD_params->enc.slot = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "keySize")) {
-				CMD_params->keySize = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "passphrase")) {
-				nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
-			} else if (!strcmp(payload_kv->key, "currentPassphrase")) {
-				nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
+				CMD_params->enc.keySize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "passphrase") || !strcmp(payload_kv->key, "currentPassphrase")) {
+				nvmeibt_strlcpy(CMD_params->enc.passphrase, payload_kv->value->str, sizeof(CMD_params->enc.passphrase));
 			} else if (!strcmp(payload_kv->key, "newPassphrase")) {
-				nvmeibt_strlcpy(CMD_params->newPassphrase, payload_kv->value->str, sizeof(CMD_params->newPassphrase));
+				nvmeibt_strlcpy(CMD_params->enc.newPassphrase, payload_kv->value->str, sizeof(CMD_params->enc.newPassphrase));
 			} else if (!strcmp(payload_kv->key, "bootTime")) {
 				CMD_params->bootTime = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "serial")) {
-				nvmeibt_strlcpy(CMD_params->native_serial.str, payload_kv->value->str, sizeof(CMD_params->native_serial.str));
+				nvmeibt_strlcpy(CMD_params->fmt.native_serial.str, payload_kv->value->str, sizeof(CMD_params->fmt.native_serial.str));
 			} else if (!strcmp(payload_kv->key, "nsid")) {
-				CMD_params->nsid = payload_kv->value->num;
+				CMD_params->fmt.nsid = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "nguid")) {
-				nvmeibt_strlcpy(CMD_params->native_nguid, payload_kv->value->str, sizeof(CMD_params->native_nguid));
+				nvmeibt_strlcpy(CMD_params->fmt.native_nguid, payload_kv->value->str, sizeof(CMD_params->fmt.native_nguid));
 			} else {
 				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
 		}		// Payload parsing
 	}
 	N_Tf(4vsdywb,
-		 LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT blockSize=@INT metadataSize=@INT dbUUID=@STR",
-		 LOCAL_DISK_LOG_obj_ARGS(CMD_params), CMD_params->vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->formatType, CMD_params->formatRequestCounter, CMD_params->blockSize,
-		 CMD_params->metadataSize, CMD_params->dbUUID.str);
+		 LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT @INT+@INT[B] dbUUID=@STR",
+		 LOCAL_DISK_LOG_obj_ARGS(&CMD_params->fmt), CMD_params->fmt.vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->fmt.formatType, CMD_params->fmt.formatRequestCounter, CMD_params->fmt.blockSize,
+		 CMD_params->fmt.metadataSize, CMD_params->dbUUID.str);
 	NFOUT;
 	return rv;
 }
@@ -2485,7 +2485,7 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 								 const char *encrypt_cmd, const char *encrypt_args, const char *old_passphrase, const char *new_passphrase, int64_t kafka_offset)
 {
 	union nvmeib_uuid					*vol_uuid = &CMD_params->volumeUUID;
-	int									encrypt_idx = CMD_params->encryptionCommandIndex;
+	int									encrypt_idx = CMD_params->enc.commandIndex;
 	struct nvmeibt_block_device			*vol;
 	struct nvmeibt_encrypt_params		*encrypt_params = NULL;
 	bool								rv = 1;
@@ -2572,7 +2572,7 @@ out:
 
 static bool encrypt_command_request_response(struct generic_CMD_params_ctx *CMD_params) {
 	union nvmeib_uuid					*vol_uuid = &CMD_params->volumeUUID;
-	int									encrypt_idx = CMD_params->encryptionCommandIndex;
+	int									encrypt_idx = CMD_params->enc.commandIndex;
 	struct nvmeibt_block_device			*vol;
 	NFIN;
 	vol = nvmeibt_block_device_get_block_device_by_id(vol_uuid);
@@ -2597,9 +2597,10 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 
 	NFIN;
 	if (strcmp(messageType_params->messageType, "formatDrive") == 0) {
-		wakeup_format_event(&(CMD_params->ldisk_id), CMD_params->vendor, CMD_params->generic_uuid, CMD_params->blockSize,
-							CMD_params->metadataSize, CMD_params->formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
-							&(CMD_params->native_serial), CMD_params->nsid, CMD_params->native_nguid);
+		const struct format_disk_cmd_t *fmt = &CMD_params->fmt;
+		wakeup_format_event(&fmt->ldisk_id, fmt->vendor, CMD_params->generic_uuid, fmt->blockSize,
+							fmt->metadataSize, fmt->formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
+							&fmt->native_serial, fmt->nsid, fmt->native_nguid);
 		TODO(Make sure that when this is done, the format will go all the way even if we boot, and there is no need for resend of format CMD by MGMT);
 	} else if (strcmp(messageType_params->messageType, "reservationModeChange") == 0) {
 		nvmeibt_block_device_reservation_mode_change(&CMD_params->volumeUUID, CMD_params->reservationVersion);
@@ -2611,20 +2612,20 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	} else if (strcmp(messageType_params->messageType, "initEncryption") == 0) {
 		// since cryptsetup did not autodetect sector size in versions <2.5.0 we force it to 4096, note the block autodetection is enable in 2.5.0 and later.
 		#define LUKS_ARGS "--verbose --force-password --pbkdf-force-iterations 1000 --pbkdf-memory 100 --pbkdf-parallel 1"
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksFormat --sector-size=4096 " LUKS_ARGS " --key-slot=%d --key-size=%d", CMD_params->slot, CMD_params->keySize);
-		commit_now = start_encrypt_action(CMD_params, "init_enc", encrypt_args, "", CMD_params->passphrase, kafka_offset);
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksFormat --sector-size=4096 " LUKS_ARGS " --key-slot=%d --key-size=%d", CMD_params->enc.slot, CMD_params->enc.keySize);
+		commit_now = start_encrypt_action(CMD_params, "init_enc", encrypt_args, "", CMD_params->enc.passphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "rotatePassphrase") == 0) {
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksChangeKey " LUKS_ARGS " --key-slot=%d", CMD_params->slot);
-		commit_now = start_encrypt_action(CMD_params, "rotate_pass", encrypt_args, CMD_params->passphrase, CMD_params->newPassphrase, kafka_offset);
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksChangeKey " LUKS_ARGS " --key-slot=%d", CMD_params->enc.slot);
+		commit_now = start_encrypt_action(CMD_params, "rotate_pass", encrypt_args, CMD_params->enc.passphrase, CMD_params->enc.newPassphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "deletePassphrase") == 0) {
 		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksRemoveKey --verbose");
-		commit_now = start_encrypt_action(CMD_params, "del_pass", encrypt_args, CMD_params->passphrase, "", kafka_offset);
+		commit_now = start_encrypt_action(CMD_params, "del_pass", encrypt_args, CMD_params->enc.passphrase, "", kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "addPassphrase") == 0) {
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksAddKey " LUKS_ARGS " --key-slot=%d", CMD_params->slot);
-		commit_now = start_encrypt_action(CMD_params, "add_pass", encrypt_args, CMD_params->passphrase, CMD_params->newPassphrase, kafka_offset);
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksAddKey " LUKS_ARGS " --key-slot=%d", CMD_params->enc.slot);
+		commit_now = start_encrypt_action(CMD_params, "add_pass", encrypt_args, CMD_params->enc.passphrase, CMD_params->enc.newPassphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "testPassphrase") == 0) {
 		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "open --verbose --test-passphrase /dev/nvmesh/d_<vol_name>");
-		commit_now = start_encrypt_action(CMD_params, "test_pass", encrypt_args, CMD_params->passphrase, "", kafka_offset);
+		commit_now = start_encrypt_action(CMD_params, "test_pass", encrypt_args, CMD_params->enc.passphrase, "", kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "encryptionRequestResponse") == 0) {
 		commit_now = encrypt_command_request_response(CMD_params);
 	} else if (strcmp(messageType_params->messageType, "sendPRaidReport") == 0) {
