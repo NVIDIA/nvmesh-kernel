@@ -884,7 +884,7 @@ static struct t_consumer_impl {
 static void __consumer_stop_on_raft(struct t_consumer_impl *k) {
 	if (k->consumer) {
 		rd_kafka_assign(k->consumer, NULL);	// Stop consuming by unassigning all partitions
-		N_Tf(yzbh7dk, "@STR: raft is stopping to receive incremental updates, consumer_@KAFKA_OFST", rd_kafka_name(k->consumer), k->consumer_offset);
+		N_Tf(yzbh7dk, "@STR: raft is stopping to receive incremental updates, consumer->@KAFKA_OFST", rd_kafka_name(k->consumer), k->consumer_offset);
 	}
 }
 
@@ -910,6 +910,11 @@ static rd_kafka_resp_err_t __consumer_assign_partition_and_offset(struct t_consu
 	rd_kafka_topic_partition_list_add(pl, k->topic_name, k->consumer_partition)->offset = purify_offset(start_offset);
 	k_err = rd_kafka_assign(k->consumer, pl);
 	rd_kafka_topic_partition_list_destroy(pl);
+	if (k_err == RD_KAFKA_RESP_ERR_NO_ERROR) {
+		N_Tf(evweyha, "@STR, @STR rd_kafka_assign(@KAFKA_OFST), consumer->@KAFKA_OFST", rd_kafka_name(k->consumer), k->topic_name, start_offset, k->consumer_offset);
+		if (start_offset > 0)
+			k->consumer_offset = start_offset - 1;	// As If previous message was read
+	}
 	return k_err;
 }
 
@@ -948,10 +953,10 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 			}
 		}
 		if (calc_offset > 0)
-			k->consumer_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, calc_offset - 1);	// Not mandatory: As If previous message was read
+			k->consumer_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, calc_offset - 1);	// As If previous message was read
 		rd_kafka_topic_partition_list_destroy(pl);
 	}
-	N_Tf(3vx723k3, "@STR: consumer_@KAFKA_OFST, next_@KAFKA_OFST", name, k->consumer_offset, calc_offset);
+	N_Tf(3vx723k3, "@STR: consumer->@KAFKA_OFST, next_@KAFKA_OFST", name, k->consumer_offset, calc_offset);
 	return 0;
 }
 
@@ -967,7 +972,7 @@ void nvmeibt_kafka_new_kafka_mgmt_zone_number_received(int64_t zone_number) {
 }
 
 static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messageType_params_ctx *out_msg, struct mm_json_elem **out_json_tree_root) {
-	rd_kafka_message_t					*k_msg = NULL;
+	rd_kafka_message_t					*k_msg;
 	int									rv;		// -1:err msg, 0:consumed, 1:stop reading
 	NTOMA_ASSERT(fvwu2ic, k->consumer, "k_consumer=NULL");
 
@@ -991,7 +996,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		return 1;
 	}
 	k->cnt_zero_consecutive_consumes = 0;
-	N_Tf(fhs8lad, "(@STR) returned k_msg(err=@STR), msg_@KAFKA_OFST", rd_kafka_name(k->consumer), rd_kafka_err2str(k_msg->err), k_msg->offset);
+	N_Tf(fhs8lad, "(@STR, @STR) returned k_msg(err=@STR), msg_@KAFKA_OFST, consumer->@KAFKA_OFST", rd_kafka_name(k->consumer), k->topic_name, rd_kafka_err2str(k_msg->err), k_msg->offset, k->consumer_offset);
 	if (k_msg->err == RD_KAFKA_RESP_ERR_NO_ERROR) {
 		const int64_t new_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, k_msg->offset);
 		if (strstr((char *)(k_msg->payload), "assphrase")) { // Don't print passphrases to log
@@ -999,6 +1004,12 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		} else {
 			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, 1, "", (char *)(k_msg->payload), k_msg->len);
 		}
+		if (k->consumer_offset >= new_offset) {
+			N_Ef(__AUTOID__, "(@STR) @STR: offset going back consumer->@KAFKA_OFST >= msg_@KAFKA_OFST, ignorring message", rd_kafka_name(k->consumer), k->topic_name, k->consumer_offset, k_msg->offset);
+			rv = 1;		// Ignore the message
+			goto out;
+		}
+
 		// Parse as much as possible in this thread, and not in TOMA's main thread
 		*out_json_tree_root = parse_json_txt_into_kv_tree(k_msg->payload, k_msg->len);
 		if (!*out_json_tree_root) {
@@ -1017,8 +1028,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		check_if_kafka_init_preserve_state_vars_required(k_msg->err);
 	}
 out:
-	if (k_msg)
-		rd_kafka_message_destroy(k_msg);	// Done with this message
+	rd_kafka_message_destroy(k_msg);	// Done with this message
 	return rv;
 }
 
@@ -1594,9 +1604,8 @@ static int incremental_VOL_updates_consume(void) {
 		wakeup_params->messageType_params = msg_param;
 		wakeup_params->event_type = k_event;
 		wakeup_params->event_data = (void *)mgmt_conf;
-		wakeup_params->kafka_offset = k_incremental_VOL_updates.consumer_offset;
+		wakeup_params->kafka_offset = incremental_VOL_updates_last_vol_msg_offset = k_incremental_VOL_updates.consumer_offset;
 		wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs = kafka_applied_consuming_leader_VOL_msgs_raft_term;
-		incremental_VOL_updates_last_vol_msg_offset = k_incremental_VOL_updates.consumer_offset;
 		__wakeup_toma_main_tread(wakeup_params);
 	} else {
 		N_Ef(ajk348z, "Unexpected messageType=@STR", msg_param.messageType);
@@ -1903,7 +1912,7 @@ static void fix_start_offset_if_topic_was_reset(int64_t *offset, int8_t topic_ch
 	}
 
 	topic_change_no_from_offset = get_topic_change_no_from_offset(*offset);
-	N_Tf(nchfi42, "in_offset=@INT64_TX topic_change_no_from_v_3_3_persistence=@INT8_TX", *offset, topic_change_no_from_v_3_3_persistence);
+	N_Tf(nchfi42, "in_@KAFKA_OFST topic_change_no_from_v_3_3_persistence=@INT8_TX", *offset, topic_change_no_from_v_3_3_persistence);
 	if (topic_change_no_from_offset == KAFKA_TOPIC_CHANGE_NO)
 		return;
 
@@ -1958,7 +1967,6 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_VOL,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->kafka_mgmt_config_ctx)));
 			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_VOL);
-			N_Tf(evweyha, "rd_kafka_assign(VOL_updates_@KAFKA_OFST)", sampled_req_offset_VOL);
 			if (k_err) {
 				N_Wf(cvn4do8, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
 				rv = -1;
@@ -1982,7 +1990,6 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_TARGET,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->raft_members_ctx)));
 			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_TARGET);
-			N_Tf(psiwjrn, "rd_kafka_assign(TARGET_updates_@KAFKA_OFST)", sampled_req_offset_TARGET);
 			if (k_err) {
 				N_Wf(vybsi4l, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
 				rv = -1;
