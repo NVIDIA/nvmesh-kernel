@@ -2326,6 +2326,374 @@ out:
 	return rv;
 }
 
+/* Forward declarations for helpers defined in Realloc section */
+static struct nvmeibt_persist_and_wire_buf *build_test_buf(
+	unsigned long long raft_term,
+	char *topo_data, int topo_len, int64_t topo_idx,
+	char *tc_data, int tc_len, int64_t tc_idx,
+	char *kmc_data, int kmc_len, int64_t kmc_idx,
+	char *rm_data, int rm_len, int64_t rm_idx);
+static struct nvmeibt_persist_and_wire_buf *build_test_buf_ex(
+	unsigned long long raft_term,
+	bool is_topo_incremental, char *topo_data, int topo_len, int64_t topo_idx,
+	bool is_topo_config_incremental, char *tc_data, int tc_len, int64_t tc_idx,
+	bool is_kafka_mgmt_config_incremental, char *kmc_data, int kmc_len, int64_t kmc_idx,
+	bool is_raft_members_incremental, char *rm_data, int rm_len, int64_t rm_idx, int64_t rm_seq_no);
+
+/*****  compare_persist_and_wire_bufs_tlvs_excl_raft_ctx direct tests  *******/
+
+DEFINE_TEST(compare_both_null_returns_equal)
+{
+	int		rv = -1;
+
+	(void)_ctx;
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(NULL, NULL), 0);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(compare_one_null_returns_topo_and_configs)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	buf = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(buf, NULL), 2);
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(NULL, buf), 2);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp1, buf);
+	return rv;
+}
+
+DEFINE_TEST(compare_equal_bufs_returns_equal)
+{
+	struct nvmeibt_persist_and_wire_buf		*b1 = NULL, *b2 = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	b1 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	b2 = build_test_buf(5, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(b1);
+	TEST_ASSERT_NOT_NULL(b2);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 0);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp2a, b1);
+	NNVMEIBT_TOMA_FREE(test_cmp2b, b2);
+	return rv;
+}
+
+DEFINE_TEST(compare_topo_only_diff)
+{
+	struct nvmeibt_persist_and_wire_buf		*b1 = NULL, *b2 = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	b1 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	b2 = build_test_buf(1, topo, 64, 99, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(b1);
+	TEST_ASSERT_NOT_NULL(b2);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 1);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp3a, b1);
+	NNVMEIBT_TOMA_FREE(test_cmp3b, b2);
+	return rv;
+}
+
+DEFINE_TEST(compare_topo_config_only_diff)
+{
+	struct nvmeibt_persist_and_wire_buf		*b1 = NULL, *b2 = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	b1 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	b2 = build_test_buf(1, topo, 64, 10, NULL, 0, 99, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(b1);
+	TEST_ASSERT_NOT_NULL(b2);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp4a, b1);
+	NNVMEIBT_TOMA_FREE(test_cmp4b, b2);
+	return rv;
+}
+
+DEFINE_TEST(compare_kafka_config_only_diff)
+{
+	struct nvmeibt_persist_and_wire_buf		*b1 = NULL, *b2 = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	b1 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	b2 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 99, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(b1);
+	TEST_ASSERT_NOT_NULL(b2);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp5a, b1);
+	NNVMEIBT_TOMA_FREE(test_cmp5b, b2);
+	return rv;
+}
+
+DEFINE_TEST(compare_raft_members_only_diff)
+{
+	struct nvmeibt_persist_and_wire_buf		*b1 = NULL, *b2 = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	b1 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	b2 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 99);
+	TEST_ASSERT_NOT_NULL(b1);
+	TEST_ASSERT_NOT_NULL(b2);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp6a, b1);
+	NNVMEIBT_TOMA_FREE(test_cmp6b, b2);
+	return rv;
+}
+
+DEFINE_TEST(compare_topo_and_config_diff)
+{
+	struct nvmeibt_persist_and_wire_buf		*b1 = NULL, *b2 = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	b1 = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	b2 = build_test_buf(1, topo, 64, 99, NULL, 0, 88, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(b1);
+	TEST_ASSERT_NOT_NULL(b2);
+
+	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_cmp7a, b1);
+	NNVMEIBT_TOMA_FREE(test_cmp7b, b2);
+	return rv;
+}
+
+/***********  CRC and length validation tests  **********/
+
+DEFINE_TEST(crc_valid_buf_passes)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64], tc[32], kmc[16], rm[16];
+	int										data_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	memset(tc, 0xBB, sizeof(tc));
+	memset(kmc, 0xCC, sizeof(kmc));
+	memset(rm, 0xDD, sizeof(rm));
+	buf = build_test_buf(1, topo, 64, 10, tc, 32, 20, kmc, 16, 30, rm, 16, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+	data_len = 64 + 32 + 16 + 16;
+
+	TEST_ASSERT_TRUE(TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_crc1, buf);
+	return rv;
+}
+
+DEFINE_TEST(crc_corrupted_topo_data_fails)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64], tc[32];
+	char									*topo_data_out;
+	int										data_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	memset(tc, 0xBB, sizeof(tc));
+	buf = build_test_buf(1, topo, 64, 10, tc, 32, 20, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+	data_len = 64 + 32;
+
+	// Corrupt topo section data
+	nvmeibt_raft_get_data_from_persist_and_wire_buf_by_tlv_type(buf, TLV_TYPE_TOPO_COMPLETE, &topo_data_out);
+	TEST_ASSERT_NOT_NULL(topo_data_out);
+	topo_data_out[0] ^= 0xFF;
+
+	TEST_ASSERT_TRUE(!TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_crc2, buf);
+	return rv;
+}
+
+DEFINE_TEST(crc_corrupted_raft_ctx_fails)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64];
+	int										data_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	buf = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+	data_len = 64;
+
+	// Corrupt raft_ctx CRC field
+	buf->raft_ctx.raft_ctx_crc ^= 0xDEADBEEF;
+
+	TEST_ASSERT_TRUE(!TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_crc3, buf);
+	return rv;
+}
+
+DEFINE_TEST(crc_length_mismatch_fails)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	buf = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+
+	// Pass wrong data_len (actual is 64, pass 128)
+	TEST_ASSERT_TRUE(!TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, 128));
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_crc4, buf);
+	return rv;
+}
+
+/***********  Merge error paths: old is incremental (not complete)  **********/
+
+DEFINE_TEST(merge_topo_old_incremental_fails)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv;
+	char								*old_ptr;
+	const char							*upd_ptr;
+	int									rv = -1;
+	int									merge_size;
+
+	craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 1LL, 64, 0xAA);
+	craft_section_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_INCREMENTAL, 2LL, 32, 0xBB);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+			NULL, &old_ptr, &upd_ptr);
+	TEST_ASSERT_EQ(merge_size, -1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(merge_topo_config_old_incremental_fails)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv;
+	char								*old_ptr;
+	const char							*upd_ptr;
+	int									rv = -1;
+	int									merge_size;
+
+	craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 1LL, 64, 0xAA);
+	craft_section_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 2LL, 32, 0xBB);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+			NULL, &old_ptr, &upd_ptr);
+	TEST_ASSERT_EQ(merge_size, -1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(merge_kafka_config_old_incremental_fails)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv;
+	char								*old_ptr;
+	const char							*upd_ptr;
+	int									rv = -1;
+	int									merge_size;
+
+	craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 1LL, 64, 0xAA);
+	craft_section_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 2LL, 32, 0xBB);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+			NULL, &old_ptr, &upd_ptr);
+	TEST_ASSERT_EQ(merge_size, -1);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(merge_raft_members_old_incremental_fails)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv;
+	char								*old_ptr;
+	const char							*upd_ptr;
+	int									rv = -1;
+	int									merge_size;
+
+	craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 1LL, 64, 0xAA);
+	craft_section_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 2LL, 32, 0xBB);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+			NULL, &old_ptr, &upd_ptr);
+	TEST_ASSERT_EQ(merge_size, -1);
+	rv = 0;
+out:
+	return rv;
+}
+
 /***********************    Realloc & Update tests    *************************/
 
 static struct nvmeibt_persist_and_wire_buf *build_test_buf(
@@ -2898,6 +3266,157 @@ DEFINE_TEST(error_in_pass1_keeps_old)
 out:
 	NNVMEIBT_TOMA_FREE(test8_dst, dst);
 	NNVMEIBT_TOMA_FREE(test8_upd, upd);
+	return rv;
+}
+
+/**********  Leader wire buf generation verification  ************/
+
+DEFINE_TEST(generate_complete_buf_types_correct)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64], tc[32], kmc[16], rm[16];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	memset(tc, 0xBB, sizeof(tc));
+	memset(kmc, 0xCC, sizeof(kmc));
+	memset(rm, 0xDD, sizeof(rm));
+	buf = build_test_buf(1, topo, 64, 10, tc, 32, 20, kmc, 16, 30, rm, 16, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->topo_ctx), TLV_TYPE_TOPO_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->topo_config_ctx), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->kafka_mgmt_config_ctx), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->raft_members_ctx), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->topo_ctx), 64);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->topo_config_ctx), 32);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->kafka_mgmt_config_ctx), 16);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->raft_members_ctx), 16);
+	persist_and_wire_buf_validate_len(buf);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_gen1, buf);
+	return rv;
+}
+
+DEFINE_TEST(generate_incremental_buf_types_correct)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64], tc[32], kmc[16], rm[16];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	memset(tc, 0xBB, sizeof(tc));
+	memset(kmc, 0xCC, sizeof(kmc));
+	memset(rm, 0xDD, sizeof(rm));
+	buf = build_test_buf_ex(1, true, topo, 64, 10,
+			true, tc, 32, 20,
+			true, kmc, 16, 30,
+			true, rm, 16, 40, -1LL);
+	TEST_ASSERT_NOT_NULL(buf);
+
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->topo_ctx), TLV_TYPE_TOPO_INCREMENTAL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->topo_config_ctx), TLV_TYPE_TOPO_CONFIG_INCREMENTAL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->kafka_mgmt_config_ctx), TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->raft_members_ctx), TLV_TYPE_RAFT_MEMBERS_INCREMENTAL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->topo_ctx), 64);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->topo_config_ctx), 32);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->kafka_mgmt_config_ctx), 16);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&buf->raft_members_ctx), 16);
+	persist_and_wire_buf_validate_len(buf);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_gen2, buf);
+	return rv;
+}
+
+DEFINE_TEST(generate_mixed_buf_types_correct)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64], tc[32], kmc[16], rm[16];
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	memset(tc, 0xBB, sizeof(tc));
+	memset(kmc, 0xCC, sizeof(kmc));
+	memset(rm, 0xDD, sizeof(rm));
+	buf = build_test_buf_ex(1, true, topo, 64, 10,
+			false, tc, 32, 20,
+			false, kmc, 16, 30,
+			false, rm, 16, 40, -1LL);
+	TEST_ASSERT_NOT_NULL(buf);
+
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->topo_ctx), TLV_TYPE_TOPO_INCREMENTAL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->topo_config_ctx), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->kafka_mgmt_config_ctx), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&buf->raft_members_ctx), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+	persist_and_wire_buf_validate_len(buf);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_gen3, buf);
+	return rv;
+}
+
+DEFINE_TEST(generate_buf_crc_valid)
+{
+	struct nvmeibt_persist_and_wire_buf		*buf = NULL;
+	char									topo[64], tc[32], kmc[16], rm[16];
+	int										data_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo, 0xAA, sizeof(topo));
+	memset(tc, 0xBB, sizeof(tc));
+	memset(kmc, 0xCC, sizeof(kmc));
+	memset(rm, 0xDD, sizeof(rm));
+	buf = build_test_buf(1, topo, 64, 10, tc, 32, 20, kmc, 16, 30, rm, 16, 40);
+	TEST_ASSERT_NOT_NULL(buf);
+	data_len = 64 + 32 + 16 + 16;
+
+	TEST_ASSERT_TRUE(TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	persist_and_wire_buf_validate_len(buf);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_gen4, buf);
+	return rv;
+}
+
+/**********  Follower merge CRC validity  ************/
+
+DEFINE_TEST(follower_merge_produces_valid_crc)
+{
+	struct nvmeibt_persist_and_wire_buf		*old = NULL;
+	struct nvmeibt_persist_and_wire_buf		*upd = NULL;
+	struct nvmeibt_persist_and_wire_buf		*dst = NULL;
+	char									topo_old[100], topo_upd[200];
+	char									tc[50], kmc[30], rm[40];
+	int										data_len;
+	int										rv = -1;
+
+	(void)_ctx;
+	memset(topo_old, 0xAA, sizeof(topo_old));
+	memset(topo_upd, 0xEE, sizeof(topo_upd));
+	memset(tc, 0xBB, sizeof(tc));
+	memset(kmc, 0xCC, sizeof(kmc));
+	memset(rm, 0xDD, sizeof(rm));
+	old = build_test_buf(1, topo_old, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
+	upd = build_test_buf(3, topo_upd, 200, 15, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
+	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	TEST_ASSERT_NOT_NULL(dst);
+
+	data_len = nvmeibt_tlv_get_len(&dst->topo_ctx) +
+			   nvmeibt_tlv_get_len(&dst->topo_config_ctx) +
+			   nvmeibt_tlv_get_len(&dst->kafka_mgmt_config_ctx) +
+			   nvmeibt_tlv_get_len(&dst->raft_members_ctx);
+	TEST_ASSERT_TRUE(TEST_is_persist_and_wire_buf_crc_and_len_ok(dst, data_len));
+	persist_and_wire_buf_validate_len(dst);
+	rv = 0;
+out:
+	NNVMEIBT_TOMA_FREE(test_fcrc_dst, dst);
+	NNVMEIBT_TOMA_FREE(test_fcrc_upd, upd);
 	return rv;
 }
 

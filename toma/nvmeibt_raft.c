@@ -1635,6 +1635,8 @@ out:
 	return dst;
 }
 
+static bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len);
+
 #if defined(TOMA_SIMULATOR_SANDBOX)
 struct nvmeibt_persist_and_wire_buf *TEST_realloc_and_upd_follower_persist_and_wire_bufs(
 	struct nvmeibt_persist_and_wire_buf *old,
@@ -1642,6 +1644,17 @@ struct nvmeibt_persist_and_wire_buf *TEST_realloc_and_upd_follower_persist_and_w
 	bool is_with_raft_log)
 {
 	return realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, is_with_raft_log);
+}
+
+int TEST_compare_persist_and_wire_bufs(const struct nvmeibt_persist_and_wire_buf *b1,
+									   const struct nvmeibt_persist_and_wire_buf *b2)
+{
+	return (int)compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2);
+}
+
+bool TEST_is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len)
+{
+	return is_persist_and_wire_buf_crc_and_len_ok(buf, data_len);
 }
 #endif
 

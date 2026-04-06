@@ -60,6 +60,14 @@ extern struct nvmeibt_persist_and_wire_buf *TEST_realloc_and_upd_follower_persis
 	const struct nvmeibt_persist_and_wire_buf *upd,
 	bool is_with_raft_log);
 
+/* Compare wire bufs (excl raft_ctx) — nvmeibt_raft.c */
+extern int TEST_compare_persist_and_wire_bufs(const struct nvmeibt_persist_and_wire_buf *b1,
+											  const struct nvmeibt_persist_and_wire_buf *b2);
+
+/* CRC and length validation — nvmeibt_raft.c */
+extern bool TEST_is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf,
+														int data_len);
+
 /* Validation — nvmeibt_raft.c (non-static, no header decl) */
 extern void persist_and_wire_buf_validate_len(const struct nvmeibt_persist_and_wire_buf *b);
 
