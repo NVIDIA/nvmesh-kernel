@@ -25,4 +25,8 @@ struct kafka_simulator_t;
 struct kafka_simulator_t *sandbox_kafka_init(void (*notify_mgmt_simu_toma_send_msg)(struct sim_broker_topic *t));
 void sandbox_kafka_destroy(struct kafka_simulator_t *ks);
 
+// Errors injection:
+void sim_broker_topic_msg_inject_next_msg_offset(struct sim_broker_topic *t, int delta_offset);
+
+
 #endif // TOMA_SANDBOX_KAFKA_INTERNAL_H

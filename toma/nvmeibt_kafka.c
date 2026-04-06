@@ -1005,7 +1005,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, 1, "", (char *)(k_msg->payload), k_msg->len);
 		}
 		if (k->consumer_offset >= new_offset) {
-			N_Ef(__AUTOID__, "(@STR) @STR: offset going back consumer->@KAFKA_OFST >= msg_@KAFKA_OFST, ignorring message", rd_kafka_name(k->consumer), k->topic_name, k->consumer_offset, k_msg->offset);
+			N_Ef(__AUTOID__, "(@STR) @STR: offset going back consumer->@KAFKA_OFST >= msg_@KAFKA_OFST, ignorring message", rd_kafka_name(k->consumer), k->topic_name, k->consumer_offset, new_offset);
 			rv = 1;		// Ignore the message
 			goto out;
 		}

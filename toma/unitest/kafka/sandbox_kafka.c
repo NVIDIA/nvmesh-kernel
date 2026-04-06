@@ -23,6 +23,9 @@ struct sim_broker_topic {		// Kafka Broker topic implementation = append-only lo
 	int64_t debug_highest_offset_ever_reached;	// Just for debug, kafka does not have it. For strict Verification of user behavior. = max(cur_offset)
 	// Used buffer slots: [ (committed_offset+1)%capacity .. cur_offset%capacity  .. (committed_offset+msgs)%capacity ), All the rest have ->payload = NULL
 	// Note: cur_offset belongs to client consumer not of broker. We have only 1 consumer so for simplicity and easy of debug, put it here
+	struct error_inject_t {
+		int next_msg_delta_offset;
+	} err_inj;
 };
 
 static inline int64_t sim_broker_topic_get_msg_offset_last( const struct sim_broker_topic *t) { return t->committed_offset + t->n_msgs; }	// Offset of last message. The next to be produced message will be in end + 1
@@ -66,6 +69,11 @@ void sim_broker_topic_msg_produce(struct sim_broker_topic *t, void *payload, siz
 	N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, sim_broker_topic_get_msg_offset_last(t), i);
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
+void sim_broker_topic_msg_inject_next_msg_offset(struct sim_broker_topic *t, int delta_offset) {
+	BUG_ON(t->err_inj.next_msg_delta_offset);		// Previous injection did not happen
+	t->err_inj.next_msg_delta_offset = delta_offset;
+}
+
 
 bool sim_broker_topic_msg_consume(struct sim_broker_topic *t, rd_kafka_message_t *rv) {	// Get current message
 	rv->payload = NULL;											// If no message in queue, preinitialize to NULL
@@ -77,7 +85,13 @@ bool sim_broker_topic_msg_consume(struct sim_broker_topic *t, rd_kafka_message_t
 		rv->len = m->len;						// Just reference, Kafka simu owns the memory
 		rv->payload = m->payload;				// Pointer to buffer in queue. Will remain valid until msg is commited
 		rv->offset = t->cur_offset++;
-		N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, rv->offset, i);
+		if (t->err_inj.next_msg_delta_offset) {
+			N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST+@INT, slot[@INT]", t->type, rv->offset, t->err_inj.next_msg_delta_offset, i);
+			rv->offset += t->err_inj.next_msg_delta_offset;
+			t->err_inj.next_msg_delta_offset = 0;
+		} else {
+			N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, rv->offset, i);
+		}
 		MAX_WITH(t->debug_highest_offset_ever_reached, t->cur_offset);
 	} else { /* No message at this offset */}
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);

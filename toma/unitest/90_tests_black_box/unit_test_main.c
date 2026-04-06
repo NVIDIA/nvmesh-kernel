@@ -148,6 +148,7 @@ void scenario_nvmeibs_messages(void) {
 
 static void scenario_create_remove_r1(void) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
+	struct sim_broker_topic *kb_vol = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
 	WAIT_UNTIL(mgmt_sim_both_disks_ready_for_format());
@@ -170,6 +171,12 @@ static void scenario_create_remove_r1(void) {
 	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_REMOTE1, waiting for report target");
 	mgmt_sim_send_add_volume_remote1();
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+	if (1) {		// Simulate as if kafka resent an old message again
+		WAIT_UNTIL(sim_broker_topic_is_empty(kb_vol));
+		SCENARIO_PRINT(__AUTOID__, "sending old(-1) add volume msg, Will be ignored by Toma");
+		sim_broker_topic_msg_inject_next_msg_offset(kb_vol, -1);
+		mgmt_sim_send_add_volume_r1();		// Will be ignored by Toma
+	}
 
 	mgmt_sim_send_leader_keep_alive();
 	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_R1, waiting for V_R1 pRaid report");
@@ -177,6 +184,12 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
 	mgmt_sim_send_praid_report_req(cfg->vols[0].chunks[0].raids[0].uuid);		// Todo: Send a real value and verify it
+
+	if (1) {		// Simulate as if kafka resent a very old message again
+		SCENARIO_PRINT(__AUTOID__, "sending old(-2) add volume msg, Will be ignored by Toma");
+		sim_broker_topic_msg_inject_next_msg_offset(kb_vol, -2);
+		mgmt_sim_send_add_volume_r1();		// Will be ignored by Toma
+	}
 
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();
@@ -200,10 +213,7 @@ static void scenario_create_remove_r1(void) {
 	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after deleteVolumeCompleted (gc)");
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
 	SCENARIO_PRINT(__AUTOID__, "waiting for kafka commit on deleteVolumeCompleted");
-	if (1) {		// Maybe wrap it as a sub function
-		const struct sim_broker_topic *kb = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
-		WAIT_UNTIL(sim_broker_topic_is_empty(kb));		// Verify Toma finished with volume deletion by committing offsets of all volume instructions
-	}
+	WAIT_UNTIL(sim_broker_topic_is_empty(kb_vol));		// Verify Toma finished with volume deletion by committing offsets of all volume instructions
 }
 
 static void all_test_scenarios(void) {
