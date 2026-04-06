@@ -330,12 +330,74 @@ inline static u64 __get_avg(struct nvmeibs_serjio_min_max_avg_stats *stats)
                                         STATS_JDR_ARGS((_stats), (__jdr)); \
                                     }
 
+#define FOR_EACH_SERJIO_IO_STAT(_fn, _stats, ...) \
+	_fn(&(_stats)->read_submitted_bytes __VA_OPT__(, &(__VA_ARGS__)->read_submitted_bytes)); \
+	_fn(&(_stats)->read_submitted_lbas __VA_OPT__(, &(__VA_ARGS__)->read_submitted_lbas)); \
+	_fn(&(_stats)->write_submitted_bytes __VA_OPT__(, &(__VA_ARGS__)->write_submitted_bytes)); \
+	_fn(&(_stats)->write_submitted_lbas __VA_OPT__(, &(__VA_ARGS__)->write_submitted_lbas)); \
+	_fn(&(_stats)->read_completed_bytes __VA_OPT__(, &(__VA_ARGS__)->read_completed_bytes)); \
+	_fn(&(_stats)->read_completed_lbas __VA_OPT__(, &(__VA_ARGS__)->read_completed_lbas)); \
+	_fn(&(_stats)->read_bw __VA_OPT__(, &(__VA_ARGS__)->read_bw)); \
+	_fn(&(_stats)->read_iops __VA_OPT__(, &(__VA_ARGS__)->read_iops)); \
+	_fn(&(_stats)->write_completed_bytes __VA_OPT__(, &(__VA_ARGS__)->write_completed_bytes)); \
+	_fn(&(_stats)->write_completed_lbas __VA_OPT__(, &(__VA_ARGS__)->write_completed_lbas)); \
+	_fn(&(_stats)->write_bw __VA_OPT__(, &(__VA_ARGS__)->write_bw)); \
+	_fn(&(_stats)->write_iops __VA_OPT__(, &(__VA_ARGS__)->write_iops)); \
+	_fn(&(_stats)->n_submit_read_errors __VA_OPT__(, &(__VA_ARGS__)->n_submit_read_errors)); \
+	_fn(&(_stats)->n_submit_write_errors __VA_OPT__(, &(__VA_ARGS__)->n_submit_write_errors)); \
+	_fn(&(_stats)->n_read_errors __VA_OPT__(, &(__VA_ARGS__)->n_read_errors)); \
+	_fn(&(_stats)->error_read_bytes __VA_OPT__(, &(__VA_ARGS__)->error_read_bytes)); \
+	_fn(&(_stats)->error_read_lbas __VA_OPT__(, &(__VA_ARGS__)->error_read_lbas)); \
+	_fn(&(_stats)->n_write_errors __VA_OPT__(, &(__VA_ARGS__)->n_write_errors)); \
+	_fn(&(_stats)->error_write_bytes __VA_OPT__(, &(__VA_ARGS__)->error_write_bytes)); \
+	_fn(&(_stats)->error_write_lbas __VA_OPT__(, &(__VA_ARGS__)->error_write_lbas)); \
+	_fn(&(_stats)->io_duration __VA_OPT__(, &(__VA_ARGS__)->io_duration));
+
+static void init_serjio_agg_stats(struct nvmeibs_serjio_min_max_avg_stats *stats)
+{
+	stats->_min = U64_MAX;
+}
+
+static void sum_serjio_agg_stats(struct nvmeibs_serjio_min_max_avg_stats *total,
+				 const struct nvmeibs_serjio_min_max_avg_stats *stats)
+{
+	total->_sum += stats->_sum;
+	total->overall_count += stats->overall_count;
+	total->current_count += stats->current_count;
+	total->_max = max(total->_max, stats->_max);
+	if (stats->_min != U64_MAX) {
+		total->_min = min(total->_min, stats->_min);
+	}
+}
+
+static void init_serjio_io_stats_totals(struct nvmeibs_serjio_io_stats *stats)
+{
+	memset(stats, 0, sizeof(*stats));
+	FOR_EACH_SERJIO_IO_STAT(init_serjio_agg_stats, stats)
+}
+
+static void sum_serjio_io_stats_totals(struct nvmeibs_serjio_io_stats *total,
+				       const struct nvmeibs_serjio_io_stats *stats)
+{
+	FOR_EACH_SERJIO_IO_STAT(sum_serjio_agg_stats, total, stats)
+}
+
 ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serjio_stats, char *buffer, size_t len)
 {
     unsigned long flags = 0;
+    ssize_t rv;
     int i;
-    struct jdr jdr = jdr_make((struct charvec){.base = buffer, .len = len});
+    struct nvmeibs_serjio_io_stats *io_totals = NULL;
+    struct jdr jdr;
     struct charvec result;
+
+    if (!(io_totals = kzalloc(sizeof(*io_totals), GFP_KERNEL))) {
+        rv = -ENOMEM;
+        goto out;
+    }
+
+    init_serjio_io_stats_totals(io_totals);
+    jdr = jdr_make((struct charvec){.base = buffer, .len = len});
     spin_lock_irqsave(&serjio_stats->lock, flags);
     {
 		jdr_array_scope(&jdr, "work_stats");
@@ -368,71 +430,12 @@ ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serji
 	{
 		jdr_object_scope(&jdr, "io_stats");
 		u64 total_works = 0;
-		u64 read_bw_sum = 0, write_bw_sum = 0;
-		u64 read_iops_sum = 0, write_iops_sum = 0;
-		u64 read_bw_count = 0, write_bw_count = 0;
-		u64 read_iops_count = 0, write_iops_count = 0;
-		u64 read_bw_max = 0, write_bw_max = 0;
-		u64 read_iops_max = 0, write_iops_max = 0;
-
-		u64 submit_read_errors_count = 0, submit_write_errors_count = 0;
-		u64 submit_read_errors_max = 0, submit_write_errors_max = 0;
-
-        u64 read_errors_count = 0, write_errors_count = 0;
-        u64 read_errors_max = 0, write_errors_max = 0;
 
 		for (i = 0; i < NVMEIBS_SERJIO_WORK_TYPE_MAX; i++) {
 			struct nvmeibs_serjio_io_stats *io_stats = &serjio_stats->io_stats[i];
 
 			total_works += serjio_stats->work_stats_by_type[i].n_works;
-
-			// read_bw
-			if (io_stats->read_bw.overall_count != 0) {
-				read_bw_sum += io_stats->read_bw._sum;
-				read_bw_count += io_stats->read_bw.overall_count;
-                read_bw_max = max_t(u64,read_bw_max, io_stats->read_bw._max);
-			}
-
-			// write_bw
-			if (io_stats->write_bw.overall_count != 0) {
-				write_bw_sum += io_stats->write_bw._sum;
-				write_bw_count += io_stats->write_bw.overall_count;
-				write_bw_max = max_t(u64, write_bw_max, io_stats->write_bw._max);
-			}
-
-			// read_iops
-			if (io_stats->read_iops.overall_count != 0) {
-				read_iops_sum += io_stats->read_iops._sum;
-				read_iops_count += io_stats->read_iops.overall_count;
-				read_iops_max = max_t(u64, read_iops_max, io_stats->read_iops._max);
-			}
-
-			// write_iops
-			if (io_stats->write_iops.overall_count != 0) {
-				write_iops_sum += io_stats->write_iops._sum;
-				write_iops_count += io_stats->write_iops.overall_count;
-				write_iops_max = max_t(u64, write_iops_max, io_stats->write_iops._max);
-			}
-
-            if (io_stats->n_submit_read_errors.overall_count != 0) {
-                submit_read_errors_count += io_stats->n_submit_read_errors.overall_count;
-                submit_read_errors_max = max_t(u64, submit_read_errors_max, io_stats->n_submit_read_errors._max);
-            }
-
-            if (io_stats->n_submit_write_errors.overall_count != 0) {
-                submit_write_errors_count += io_stats->n_submit_write_errors.overall_count;
-                submit_write_errors_max = max_t(u64, submit_write_errors_max, io_stats->n_submit_write_errors._max);
-            }
-
-            if (io_stats->n_read_errors.overall_count != 0) {
-                read_errors_count += io_stats->n_read_errors.overall_count;
-                read_errors_max = max_t(u64, read_errors_max, io_stats->n_read_errors._max);
-            }
-
-            if (io_stats->n_write_errors.overall_count != 0) {
-                write_errors_count += io_stats->n_write_errors.overall_count;
-                write_errors_max = max_t(u64, write_errors_max, io_stats->n_write_errors._max);
-            }
+			sum_serjio_io_stats_totals(io_totals, io_stats);
 
 			// Write original per-work-type stats
 			{
@@ -474,32 +477,49 @@ ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serji
 			jdr_object_scope(&jdr, "works_io_total");
 			jdr_write_var(&jdr, total_works, total_works);
 
-			// Average: weighted by all samples, or 0 if none
-			jdr_write_var(&jdr, read_bw_avg,   read_bw_count   ? (read_bw_sum   / read_bw_count)   : 0);
-			jdr_write_var(&jdr, write_bw_avg,  write_bw_count  ? (write_bw_sum  / write_bw_count)  : 0);
-			jdr_write_var(&jdr, read_iops_avg, read_iops_count ? (read_iops_sum / read_iops_count) : 0);
-			jdr_write_var(&jdr, write_iops_avg,write_iops_count? (write_iops_sum/ write_iops_count): 0);
+			jdr_write_var(&jdr, read_bw_avg, __get_avg(&io_totals->read_bw));
+			jdr_write_var(&jdr, write_bw_avg, __get_avg(&io_totals->write_bw));
+			jdr_write_var(&jdr, read_iops_avg, __get_avg(&io_totals->read_iops));
+			jdr_write_var(&jdr, write_iops_avg, __get_avg(&io_totals->write_iops));
 
-			jdr_write_var(&jdr, read_bw_max, read_bw_max);
-			jdr_write_var(&jdr, write_bw_max, write_bw_max);
-			jdr_write_var(&jdr, read_iops_max, read_iops_max);
-			jdr_write_var(&jdr, write_iops_max, write_iops_max);
+			jdr_write_var(&jdr, read_bw_max, io_totals->read_bw._max);
+			jdr_write_var(&jdr, write_bw_max, io_totals->write_bw._max);
+			jdr_write_var(&jdr, read_iops_max, io_totals->read_iops._max);
+			jdr_write_var(&jdr, write_iops_max, io_totals->write_iops._max);
 
-            jdr_write_var(&jdr, submit_read_errors_count, submit_read_errors_count);
-            jdr_write_var(&jdr, submit_write_errors_count, submit_write_errors_count);
-            jdr_write_var(&jdr, read_errors_count, read_errors_count);
-            jdr_write_var(&jdr, write_errors_count, write_errors_count);
-            jdr_write_var(&jdr, submit_read_errors_max, submit_read_errors_max);
-            jdr_write_var(&jdr, submit_write_errors_max, submit_write_errors_max);
-            jdr_write_var(&jdr, read_errors_max, read_errors_max);
-            jdr_write_var(&jdr, write_errors_max, write_errors_max);
+			jdr_write_var(&jdr, read_submitted_bytes_sum, io_totals->read_submitted_bytes._sum);
+			jdr_write_var(&jdr, read_submitted_lbas_sum, io_totals->read_submitted_lbas._sum);
+			jdr_write_var(&jdr, read_completed_bytes_sum, io_totals->read_completed_bytes._sum);
+			jdr_write_var(&jdr, read_completed_lbas_sum, io_totals->read_completed_lbas._sum);
+			jdr_write_var(&jdr, write_submitted_bytes_sum, io_totals->write_submitted_bytes._sum);
+			jdr_write_var(&jdr, write_submitted_lbas_sum, io_totals->write_submitted_lbas._sum);
+			jdr_write_var(&jdr, write_completed_bytes_sum, io_totals->write_completed_bytes._sum);
+			jdr_write_var(&jdr, write_completed_lbas_sum, io_totals->write_completed_lbas._sum);
+			jdr_write_var(&jdr, error_read_bytes_sum, io_totals->error_read_bytes._sum);
+			jdr_write_var(&jdr, error_read_lbas_sum, io_totals->error_read_lbas._sum);
+			jdr_write_var(&jdr, error_write_bytes_sum, io_totals->error_write_bytes._sum);
+			jdr_write_var(&jdr, error_write_lbas_sum, io_totals->error_write_lbas._sum);
+			jdr_write_var(&jdr, io_duration_sum, io_totals->io_duration._sum);
+
+			jdr_write_var(&jdr, submit_read_errors_count, io_totals->n_submit_read_errors.overall_count);
+			jdr_write_var(&jdr, submit_write_errors_count, io_totals->n_submit_write_errors.overall_count);
+			jdr_write_var(&jdr, read_errors_count, io_totals->n_read_errors.overall_count);
+			jdr_write_var(&jdr, write_errors_count, io_totals->n_write_errors.overall_count);
+			jdr_write_var(&jdr, submit_read_errors_max, io_totals->n_submit_read_errors._max);
+			jdr_write_var(&jdr, submit_write_errors_max, io_totals->n_submit_write_errors._max);
+			jdr_write_var(&jdr, read_errors_max, io_totals->n_read_errors._max);
+			jdr_write_var(&jdr, write_errors_max, io_totals->n_write_errors._max);
 		}
 
 	}
     nvmeib_proc_add_jdr_proc_epilog(CORE_SERVER_STATS_PROC_FRMT_VER, &jdr);
     spin_unlock_irqrestore(&serjio_stats->lock, flags);
     result = jdr_finalize(&jdr);
-    return result.len;
+    rv = result.len;
+
+out:
+    kfree(io_totals);
+    return rv;
 }
 
 
