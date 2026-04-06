@@ -108,6 +108,7 @@ SOURCES += 10_local_hw/nvme_disk_simu.c
 SOURCES += 11_os/nvmeibt_udev_simu.c
 SOURCES += 13_mgmt/mongodb_simu.c mgmt_sim.c kafka/sandbox_kafka.c
 SOURCES += 15_server/sandbox_nvmeibs_toma.c
+SOURCES += 16_otherToma/peer_toma_simu.c
 SOURCES += toma_in_sandbox.c
 SOURCES += 17_clnt/clnt_simu.c
 SOURCES += 91_tests_components/wire_buf_test.c 91_tests_components/toma_test_framework_smoke.c

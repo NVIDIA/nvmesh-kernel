@@ -1011,21 +1011,6 @@ int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
 	return 0;
 }
 
-struct peer_toma_simu *peer_toma_simu_create(struct sb_node_conf *node) {
-	struct peer_toma_simu *peer = calloc(1, sizeof(*peer));
-	peer->node = node;
-	return peer;
-}
-
-void peer_toma_simu_destroy(struct peer_toma_simu *peer) {
-	peer->node->peer = NULL;
-	free(peer);
-}
-
-void peer_toma_simu_ignore_append_entries_by_node(int node_idx) {
-	BUG_ON(node_idx != 2);			// Our volumes configuration, currently supports only ignore by node 2
-	sys->cfg.nodes[node_idx].peer->ignore_append_entries = true;
-}
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void) { return &sys->cfg; }
 
 int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
