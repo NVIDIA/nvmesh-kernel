@@ -63,7 +63,14 @@ RUN apt install -y \
   python3.10-distutils \
   python3.10-dev
 
-RUN curl -sSL https://install.python-poetry.org | python3.10 -
+# Install Poetry with pip (no install.python-poetry.org). ensurepip bootstraps pip for python3.10; --user -> /root/.local/bin to persist into all subsequent RUN layers.
+ENV PATH="${PATH}:/root/.local/bin"
+RUN python3.10 -m ensurepip --upgrade --default-pip && \
+    python3.10 -m pip install --user --no-cache-dir "poetry==2.3.1"
+# Note: pyproject.toml and poetry.lock must be copied into the build context
+# by build_docker.sh before building this Dockerfile.
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --no-root --only pet
 
 # Install python2 for 2.7.2
 RUN apt install -y zlib1g-dev
