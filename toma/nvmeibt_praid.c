@@ -3149,7 +3149,22 @@ int nvmeibt_praid_validate_replacement_segs(struct nvmeibt_praid *praid)
 // Test helpers: create minimal praid objects for merge unit tests.
 // These praids have only the fields needed by merge_topo_incremental:
 // UUID, topo_idx_updated, is_activated, empty seg list, valid config_tag.
-//
+void TEST_init_praids_hash(void)
+{
+	struct nvmeib_hash_table		*hash_tbl;
+
+	nvmeibt_global_ctx_alloc();
+	hash_tbl = nvmeibt_global_get_global()->praids_hash_by_uuid;
+	if (hash_tbl) {
+		nvmeibt_praid_free_all_at_exit();
+		nvmeib_hash_tbl_free(hash_tbl);
+		nvmeibt_global_get_global()->praids_hash_by_uuid = NULL;
+	}
+
+	nvmeibt_global_get_global()->praids_hash_by_uuid = NVMEIB_HASH_CREATE(test_prh_hash,
+			(HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 4), "praids_hash", 16, 0);
+}
+
 void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
 							int praid_version_major, int praid_version_minor)
 {
@@ -3170,14 +3185,20 @@ void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_upda
 	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, uuid, praid);
 }
 
-void TEST_clear_praids_hash(void)
+void TEST_init_chunks_hash(void)
 {
-	struct nvmeibt_praid *praid;
+	struct nvmeib_hash_table		*hash_tbl;
 
-	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
-		nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, &praid->from_config.id);
-		NNVMEIBT_TOMA_FREE(test_free, praid);
+	nvmeibt_global_ctx_alloc();
+	hash_tbl = nvmeibt_global_get_global()->chunks_hash_by_uuid;
+	if (hash_tbl) {
+		nvmeibt_chunk_free_all_at_exit();
+		nvmeib_hash_tbl_free(hash_tbl);
+		nvmeibt_global_get_global()->chunks_hash_by_uuid = NULL;
 	}
+
+	nvmeibt_global_get_global()->chunks_hash_by_uuid = NVMEIB_HASH_CREATE(test_chh_hash,
+			(HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "chunks_hash", 16, 0);
 }
 
 void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
@@ -3194,15 +3215,5 @@ void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
 	}
 
 	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->chunks_hash_by_uuid, chunk_uuid, chunk);
-}
-
-void TEST_clear_chunks_hash(void)
-{
-	struct nvmeibt_chunk *chunk;
-
-	NVMEIB_HASH_FOREACH(chunk, nvmeibt_global_get_global()->chunks_hash_by_uuid) {
-		nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->chunks_hash_by_uuid, &chunk->from_config.id);
-		free(chunk);
-	}
 }
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)

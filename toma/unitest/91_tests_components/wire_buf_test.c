@@ -518,6 +518,7 @@ DEFINE_TEST(incremental_topo_empty_keeps_old)
 	int									rv = -1;
 	int									merge_size = -1;
 
+	TEST_init_praids_hash();
 	make_test_uuid(&praids[0].uuid, 1);
 	praids[0].segs_num = 0;
 	praids[0].topo_idx_updated = 10;
@@ -560,6 +561,7 @@ DEFINE_TEST(incremental_topo_single_praid_updated)
 	int									rv = -1;
 	int									merge_size;
 
+	TEST_init_praids_hash();
 	make_test_uuid(&old_praids[0].uuid, 1);
 	old_praids[0].segs_num = 0;
 	old_praids[0].topo_idx_updated = 10;
@@ -618,7 +620,7 @@ DEFINE_TEST(incremental_topo_single_praid_not_updated)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 	setup_test_praid(&old_praids[0], 1, 0, 20, 2, 0);
 
 	incr_praids[0] = old_praids[0];
@@ -653,7 +655,6 @@ DEFINE_TEST(incremental_topo_single_praid_not_updated)
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -669,7 +670,7 @@ DEFINE_TEST(incremental_topo_multi_praid_partial_update)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 	for (int i = 0; i < 3; i++)
 		setup_test_praid(&old_praids[i], i + 1, 0, 10, 1, 0);
 
@@ -717,7 +718,6 @@ DEFINE_TEST(incremental_topo_multi_praid_partial_update)
 	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -733,6 +733,7 @@ DEFINE_TEST(incremental_topo_multi_praid_all_updated)
 	int									rv = -1;
 	int									merge_size;
 
+	TEST_init_praids_hash();
 	for (int i = 0; i < 3; i++) {
 		make_test_uuid(&old_praids[i].uuid, i + 1);
 		old_praids[i].segs_num = 0;
@@ -791,7 +792,7 @@ DEFINE_TEST(incremental_topo_praid_with_segments)
 	int									merge_size;
 	int									expected_size;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 
 	// Hash has committed state with 0 segs (minimal test praid).
 	// The kept praid will be re-serialized from hash, not copied from old wire buf.
@@ -849,7 +850,6 @@ DEFINE_TEST(incremental_topo_praid_with_segments)
 	TEST_ASSERT_EQ((int)nvmeibt_praid_wire_get_n_segs(found), 0);
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -866,6 +866,7 @@ DEFINE_TEST(incremental_topo_praid_seg_count_changes)
 	int									merge_size;
 	int									expected_size;
 
+	TEST_init_praids_hash();
 	make_test_uuid(&old_praids[0].uuid, 1);
 	old_praids[0].segs_num = 2;
 	old_praids[0].topo_idx_updated = 10;
@@ -926,7 +927,7 @@ DEFINE_TEST(incremental_topo_extra_uuid_ignored)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 	setup_test_praid(&old_praids[0], 1, 0, 10, 1, 0);
 
 	make_test_uuid(&incr_praids[0].uuid, 99);
@@ -973,7 +974,6 @@ DEFINE_TEST(incremental_topo_extra_uuid_ignored)
 	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -989,7 +989,7 @@ DEFINE_TEST(incremental_topo_ordering_differs)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 	for (int i = 0; i < 3; i++)
 		setup_test_praid(&old_praids[i], i + 1, 0, 10, 1, 0);
 
@@ -1043,7 +1043,6 @@ DEFINE_TEST(incremental_topo_ordering_differs)
 	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 40);
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -1057,7 +1056,7 @@ DEFINE_TEST(incremental_topo_same_idx_keeps_old)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 	setup_test_praid(&old_praids[0], 1, 0, 10, 1, 0);
 
 	old_len = craft_topo_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
@@ -1096,7 +1095,6 @@ DEFINE_TEST(incremental_topo_same_idx_keeps_old)
 	}
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -1117,7 +1115,7 @@ DEFINE_TEST(incremental_topo_large_praid_count)
 	int									merge_size;
 	int									i;
 
-	TEST_clear_praids_hash();
+	TEST_init_praids_hash();
 	for (i = 0; i < n_total_praids; i++)
 		setup_test_praid(&old_praids[i], i + 1, 0, 100, 1, 0);
 
@@ -1160,7 +1158,6 @@ DEFINE_TEST(incremental_topo_large_praid_count)
 	}
 	rv = 0;
 out:
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -1413,7 +1410,6 @@ DEFINE_TEST(incremental_raft_members_partial_update)
 	int									merge_size;
 
 	TEST_init_raft_members_hash();
-	TEST_clear_raft_members_hash();
 	for (int i = 0; i < 3; i++)
 		setup_test_raft_member(&old_members[i], i + 1, 10, 100 + i);
 
@@ -1447,7 +1443,6 @@ DEFINE_TEST(incremental_raft_members_partial_update)
 	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), merge_size);
 	rv = 0;
 out:
-	TEST_clear_raft_members_hash();
 	return rv;
 }
 
@@ -1462,7 +1457,6 @@ DEFINE_TEST(incremental_raft_members_new_member_accepted)
 	int									merge_size;
 
 	TEST_init_raft_members_hash();
-	TEST_clear_raft_members_hash();
 	for (int i = 0; i < 2; i++)
 		setup_test_raft_member(&old_members[i], i + 1, 10, 100 + i);
 
@@ -1492,7 +1486,6 @@ DEFINE_TEST(incremental_raft_members_new_member_accepted)
 	}
 	rv = 0;
 out:
-	TEST_clear_raft_members_hash();
 	return rv;
 }
 
@@ -1509,7 +1502,6 @@ DEFINE_TEST(incremental_raft_members_old_seq_keeps_hash)
 	struct mm_raft_member_conf			host_member __attribute__((aligned(16)));
 
 	TEST_init_raft_members_hash();
-	TEST_clear_raft_members_hash();
 	setup_test_raft_member(&old_members[0], 1, 20, 100);
 
 	// Incremental: same member but OLDER seq_no => keep hash version
@@ -1543,15 +1535,10 @@ DEFINE_TEST(incremental_raft_members_old_seq_keeps_hash)
 	TEST_ASSERT_EQ(host_member.kafka_offset, 100);
 	rv = 0;
 out:
-	TEST_clear_raft_members_hash();
 	return rv;
 }
 
 /************ Incremental kafka_mgmt_config merge (non-empty) *****************/
-
-extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
-									const void *wire_buf, int wire_len);
-extern void TEST_clear_blkdevs_hash(void);
 
 struct test_vol_spec {
 	union nvmeib_uuid	uuid;
@@ -1742,7 +1729,7 @@ DEFINE_TEST(incremental_kafka_config_partial_update)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_blkdevs_hash();
+	TEST_init_blkdevs_hash();
 
 	// Set up 2 volumes in hash
 	for (int i = 0; i < 2; i++) {
@@ -1790,7 +1777,6 @@ DEFINE_TEST(incremental_kafka_config_partial_update)
 	}
 	rv = 0;
 out:
-	TEST_clear_blkdevs_hash();
 	return rv;
 }
 
@@ -1806,7 +1792,7 @@ DEFINE_TEST(incremental_kafka_config_old_version_keeps_hash)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_blkdevs_hash();
+	TEST_init_blkdevs_hash();
 
 	make_test_uuid(&old_vols[0].uuid, 1);
 	old_vols[0].version = 20;
@@ -1845,15 +1831,10 @@ DEFINE_TEST(incremental_kafka_config_old_version_keeps_hash)
 	}
 	rv = 0;
 out:
-	TEST_clear_blkdevs_hash();
 	return rv;
 }
 
 /************* Incremental topo_config merge (non-empty) **********************/
-
-extern void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
-								   int n_praid_uuids, const union nvmeib_uuid *praid_uuids);
-extern void TEST_clear_chunks_hash(void);
 
 DEFINE_TEST(incremental_topo_config_partial_praid_update)
 {
@@ -1866,8 +1847,8 @@ DEFINE_TEST(incremental_topo_config_partial_praid_update)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
-	TEST_clear_chunks_hash();
+	TEST_init_praids_hash();
+	TEST_init_chunks_hash();
 
 	// Set up 1 volume with 1 chunk with 1 praid in hash
 	make_test_uuid(&old_vols[0].uuid, 1);
@@ -1915,8 +1896,6 @@ DEFINE_TEST(incremental_topo_config_partial_praid_update)
 	}
 	rv = 0;
 out:
-	TEST_clear_chunks_hash();
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -2005,8 +1984,8 @@ DEFINE_TEST(incremental_topo_config_mixed_keep_and_update)
 	int									rv = -1;
 	int									merge_size;
 
-	TEST_clear_praids_hash();
-	TEST_clear_chunks_hash();
+	TEST_init_praids_hash();
+	TEST_init_chunks_hash();
 
 	make_test_uuid(&vol_uuid, 1);
 	make_test_uuid(&chunk_uuid, 1000);
@@ -2067,8 +2046,6 @@ DEFINE_TEST(incremental_topo_config_mixed_keep_and_update)
 	}
 	rv = 0;
 out:
-	TEST_clear_chunks_hash();
-	TEST_clear_praids_hash();
 	return rv;
 }
 
@@ -2751,6 +2728,7 @@ DEFINE_TEST(topo_incremental_configs_complete_inplace)
 	int										rv = -1;
 
 	(void)_ctx;
+	TEST_init_praids_hash();
 	make_test_uuid(&old_praids[0].uuid, 1);
 	old_praids[0].segs_num = 0;
 	old_praids[0].topo_idx_updated = 10;
@@ -2849,10 +2827,9 @@ DEFINE_TEST(all_sections_incremental_full_merge)
 
 	(void)_ctx;
 	TEST_init_raft_members_hash();
-	TEST_clear_raft_members_hash();
-	TEST_clear_blkdevs_hash();
-	TEST_clear_chunks_hash();
-	TEST_clear_praids_hash();
+	TEST_init_blkdevs_hash();
+	TEST_init_chunks_hash();
+	TEST_init_praids_hash();
 
 	make_test_uuid(&old_praids[0].uuid, 1);
 	old_praids[0].segs_num = 0;
@@ -2977,10 +2954,6 @@ DEFINE_TEST(all_sections_incremental_full_merge)
 	persist_and_wire_buf_validate_len(dst);
 	rv = 0;
 out:
-	TEST_clear_raft_members_hash();
-	TEST_clear_blkdevs_hash();
-	TEST_clear_chunks_hash();
-	TEST_clear_praids_hash();
 	NNVMEIBT_TOMA_FREE(test_inc_full_dst, dst);
 	NNVMEIBT_TOMA_FREE(test_inc_full_upd, upd);
 	return rv;

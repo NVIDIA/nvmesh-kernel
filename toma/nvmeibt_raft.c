@@ -1397,10 +1397,22 @@ int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire
 	return persist_and_wire_buf_calculate_and_merge_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
 			dst_data_ptr, old_data_ptr, upd_data_ptr);
 }
+
 void TEST_init_raft_members_hash(void)
 {
-	if (!my_raft_global.raft_members_hash_by_uuid)
-		my_raft_global.raft_members_hash_by_uuid = NVMEIB_HASH_CREATE(test_rm_hash, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "test_raft_members_hash", 16, 0);
+	struct nvmeib_hash_table			*hash_tbl = my_raft_global.raft_members_hash_by_uuid;
+
+	if (hash_tbl) {
+		nvmeibt_raft_del_all_members_at_exit();
+		nvmeib_hash_tbl_free(hash_tbl);
+		my_raft_global.raft_members_hash_by_uuid = NULL;
+		my_raft_global.my_member = NULL;
+		my_raft_global.n_raft_members = 0;
+		my_raft_global.n_raft_active_members = 0;
+		my_raft_global.n_peers_voted_for_me = 0;
+	}
+
+	my_raft_global.raft_members_hash_by_uuid = NVMEIB_HASH_CREATE(test_rm_hash, HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "test_raft_members_hash", 16, 0);
 }
 
 void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hostname,
@@ -1427,18 +1439,6 @@ void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hos
 	nvmeibt_raft_member_conf_convert_le_be(&member->this_member_leader_serialized_wire_buf, &host_conf);
 
 	nvmeib_hash_add_uuid(my_raft_global.raft_members_hash_by_uuid, uuid, member);
-}
-
-void TEST_clear_raft_members_hash(void)
-{
-	struct nvmeibt_raft_member *member;
-
-	if (!my_raft_global.raft_members_hash_by_uuid)
-		return;
-	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
-		nvmeib_hash_delete_uuid(my_raft_global.raft_members_hash_by_uuid, &member->uuid);
-		free(member);
-	}
 }
 
 int TEST_compute_is_configs_incremental(

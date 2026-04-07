@@ -1422,6 +1422,22 @@ out:
 }
 
 #if defined(TOMA_SIMULATOR_SANDBOX)
+void TEST_init_blkdevs_hash(void)
+{
+	struct nvmeib_hash_table			*hash_tbl;
+
+	nvmeibt_global_ctx_alloc();
+	hash_tbl = nvmeibt_global_get_global()->block_devices_hash_by_uuid;
+	if (hash_tbl) {
+		nvmeibt_block_device_free_all_at_exit();
+		nvmeib_hash_tbl_free(hash_tbl);
+		nvmeibt_global_get_global()->block_devices_hash_by_uuid = NULL;
+	}
+
+	nvmeibt_global_get_global()->block_devices_hash_by_uuid = NVMEIB_HASH_CREATE(test_bdh_hash,
+			(HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "block_devices_hash", 16, 0);
+}
+
 void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
 							 const void *wire_buf, int wire_len)
 {
@@ -1433,22 +1449,10 @@ void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
 	blkdev->is_being_deleted = 0;
 	blkdev->is_serialized_in_incremental_mgmt_config_merge = false;
 	if (wire_buf && wire_len > 0) {
-		blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.data_buf = malloc(wire_len);
+		NNVMEIBT_BUF_RESIZE(test_blkdev_wire, &(blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf), (size_t)wire_len);
 		memcpy(blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.data_buf, wire_buf, wire_len);
-		blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.buf_len = wire_len;
 	}
 
 	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->block_devices_hash_by_uuid, uuid, blkdev);
-}
-
-void TEST_clear_blkdevs_hash(void)
-{
-	struct nvmeibt_block_device *blkdev;
-
-	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
-		nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->block_devices_hash_by_uuid, &blkdev->from_config.id);
-		free(blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf.data_buf);
-		free(blkdev);
-	}
 }
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)

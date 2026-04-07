@@ -15,20 +15,24 @@
 extern void TEST_init(void);
 
 /* Praid hash — nvmeibt_praid.c */
+extern void TEST_init_praids_hash(void);
 extern void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
 								   int praid_version_major, int praid_version_minor);
-extern void TEST_clear_praids_hash(void);
 
 /* Raft members hash — nvmeibt_raft.c */
 extern void TEST_init_raft_members_hash(void);
 extern void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hostname,
 										 int64_t seq_no_updated, int64_t kafka_offset);
-extern void TEST_clear_raft_members_hash(void);
 
 /* Blkdev hash — nvmeibt_global.c */
+extern void TEST_init_blkdevs_hash(void);
 extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
 									const void *wire_buf, int wire_len);
-extern void TEST_clear_blkdevs_hash(void);
+
+/* Chunk hash — nvmeibt_praid.c */
+extern void TEST_init_chunks_hash(void);
+extern void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
+	int n_praid_uuids, const union nvmeib_uuid *praid_uuids);
 
 /* Incremental selection — nvmeibt_raft.c */
 extern int TEST_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver);
