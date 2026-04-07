@@ -11,8 +11,7 @@
 /**************************** H interface **********************************/
 enum nvmeibc_internal_bio_indicator {
     EXTERNAL_BIO			= 0,		// Any bio not originating outside will have a function pointer in bi_end_io therefore the pointer will be aligned
-    CARRIER_BIO				= 1 <<	0,	// Carrier bio masked with nvmeibc_os_api pointer
-    WRAPPER_FOR_BIO			= 1 <<	1,	// Wrapper for bio may be created under different conditions:
+    WRAPPER_FOR_BIO			= 1 <<	0,	// Wrapper for bio may be created under different conditions:
 										// bio is not 4KB aligned
 										// bio buffers are muttable
 										// 	 write via cache 
@@ -28,11 +27,6 @@ static inline bool __check_bio_indicator(struct bio const* bio, enum nvmeibc_int
 static inline bool __is_bio_wrapper_for_bio(struct bio const* bio)
 {
 	return __check_bio_indicator(bio, WRAPPER_FOR_BIO);
-}
-
-static inline bool __is_bio_from_carrier(struct bio const* bio)
-{
-	return __check_bio_indicator(bio, CARRIER_BIO);
 }
 
 // Get the original bio from the wrapper BIO

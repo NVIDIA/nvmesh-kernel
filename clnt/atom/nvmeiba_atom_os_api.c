@@ -297,7 +297,7 @@ static REQ_RET nvmeiba_b_req_push(struct request_queue *q, struct bio *bio)
 static REQ_RET nvmeiba_b_req_push(struct bio *bio)
 #endif
 {
-	struct nvmeiba_atom_os_api *atom = gendisk_get_atom_api_os(bio_gendisk(bio)); // TODO: Ensure that rider IO to carrier never gets here as bio->bi_disk/bi_bdev is NULL and can crash
+	struct nvmeiba_atom_os_api *atom = gendisk_get_atom_api_os(bio_gendisk(bio));
 	struct nvmeiba_bio_pending_list *p = &atom->pender;
 	bool is_still_orphan;
 	ulong flags;

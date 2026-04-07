@@ -240,7 +240,7 @@
 	"nvmeibt_mcs_volume_" : {
 		"//" : "volume configuration, Todo: change version to reflect layout version ",
 		"__type" : "used",
-		"type" : "__codec WithDefaultCodec(MultiValCodec({'normal':0,'recoverer':1,'carrier':16,'thin':2,'__DEFAULT':0}), 'normal')",
+		"type" : "__codec WithDefaultCodec(MultiValCodec({'normal':0,'recoverer':1,'thin':2,'__DEFAULT':0}), 'normal')",
 		"action" : "__codec WithDefaultCodec(MultiValCodec({'__DEFAULT' : 0, 'markedForRebuild_old' : 1, 'markedForDeletion' : 2}), 0)",
 		"RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Striped & Mirrored RAID-10' : 10, 'Concatenated' : 3, 'Erasure Coding' : 60})",
 		"numberOfMirrors" : "__codec IncrementCodec(1, 'H')",

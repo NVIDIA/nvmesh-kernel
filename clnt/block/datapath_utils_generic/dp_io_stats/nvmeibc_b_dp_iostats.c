@@ -152,7 +152,6 @@ static const char *__dp_io_stats_names(enum dp_iostats_names name)
 	case DP_IO_STATS_TIMED_OUT: return "timed_out";
 	case DP_IO_STATS_SUSPED_FAIL: return "suspended_fail";
 	case DP_IO_STATS_IGNORED_ERR: return "ignored_err";
-	case DP_IO_STATS_CANCELED_BY_RIDER: return "canceled_by_rider";
 	case DP_IO_STATS_ILLEGAL_TRIMS: return "illegal_trims";
 	case DP_IO_STATS_RESUBMITTED: return "resubmitted";
 	case DP_IO_STATS_RESUBMITTED_STARTED: return "started resubmission";
@@ -228,8 +227,8 @@ void dp_io_stats_clear_counter(struct dp_io_stats *t, enum dp_iostats_names name
 #define IO_ERRS_VALS                                                                                           \
 	__get_cnt_val(t, DP_IO_STATS_CRITICAL_FAIL), __get_cnt_val(t, DP_IO_STATS_TIMED_OUT),                  \
 	__get_cnt_val(t, DP_IO_STATS_SUSPED_FAIL), __get_cnt_val(t, DP_IO_STATS_IGNORED_ERR),                  \
-	__get_cnt_val(t, DP_IO_STATS_CANCELED_BY_RIDER), __get_cnt_val(t, DP_IO_STATS_ILLEGAL_TRIMS),          \
-	__get_cnt_val(t, DP_IO_STATS_DNR_BAD_SECTORS), __get_cnt_val(t, DP_IO_STATS_MD_MARKED_INVALID_ERRORS), \
+	__get_cnt_val(t, DP_IO_STATS_ILLEGAL_TRIMS), __get_cnt_val(t, DP_IO_STATS_DNR_BAD_SECTORS),            \
+	__get_cnt_val(t, DP_IO_STATS_MD_MARKED_INVALID_ERRORS),                                                 \
 	__get_cnt_val(t, DP_IO_STATS_MD_EDIC_CHECK_ERRORS), __get_cnt_val(t, DP_IO_STATS_LOCK_OP_FAILED),      \
 	__get_cnt_val(t, DP_IO_STATS_LOCKSET_FAILED), __get_cnt_val(t, DP_IO_STATS_RESUBMITTED_STARTED),       \
 	__get_cnt_val(t, DP_IO_STATS_RESUBMITTED), __get_cnt_val(t, DP_IO_STATS_TIMED_OUT)
@@ -238,7 +237,7 @@ void dp_io_stats_tostring(const struct dp_io_stats *_t, struct nvmeib_txt *txt)
 {
 	const struct dp_io_stats_cntrs *t = &_t->n; // Cast to non-const for easier access
 
-	nvmeib_txt_append(txt, "Failed IO: crit=%llu, detach=%llu, ignore=%llu, rider=%llu, trim=%llu, other=%llu,"
+	nvmeib_txt_append(txt, "Failed IO: crit=%llu, detach=%llu, ignore=%llu, trim=%llu, other=%llu,"
 		" bad_sectors=%llu, metadata_marked_invalid_err=%llu, edic_discrepencies=%llu, "
 		"lock_cmds_failed=%llu, lockset_failed=%llu, (resub: in=%llu, out=%llu, tout=%llu)",
 		IO_ERRS_VALS);
@@ -254,7 +253,6 @@ void dp_io_stats_tojson(const struct dp_io_stats *_t, struct jdr *jdr)
 		jdr_write_var(jdr, critical, __get_cnt_val(t, DP_IO_STATS_CRITICAL_FAIL));
 		jdr_write_var(jdr, detach, __get_cnt_val(t, DP_IO_STATS_SUSPED_FAIL));
 		jdr_write_var(jdr, ignore, __get_cnt_val(t, DP_IO_STATS_IGNORED_ERR));
-		jdr_write_var(jdr, rider_cancel, __get_cnt_val(t, DP_IO_STATS_CANCELED_BY_RIDER));
 		jdr_write_var(jdr, illegal_trims, __get_cnt_val(t, DP_IO_STATS_ILLEGAL_TRIMS));
 		jdr_write_var(jdr, other, __get_cnt_val(t, DP_IO_STATS_OTHER));
 	}

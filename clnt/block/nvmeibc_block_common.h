@@ -26,10 +26,6 @@ struct nvmeibc_api_of_auto_extend {			// API for auto extendable volume. QCow or
 	unsigned long max_write_lba;			// Stores the highest address which was written by serial write. When comes close to 'allocated_size' volume should be auto extended by a new chunk
 };
 
-// C++ like derrived classes of block-device
-#include "derived_apis/nvmeibc_block_api_d_carrier.h"
-#include "derived_apis/nvmeibc_block_api_md_carrier.h"
-
 #define HTR_INVALID_COMP_CODE (0xB19B00B5U)
 
 /******************************** Block Device *******************************/
@@ -71,16 +67,12 @@ struct nvmeibc_block_device {   			// TODO: change this to something shorter
 #ifndef DP_LIB									// Rest of the fields are needed for control path only
 	struct topo_stats_t topo_stats;				// Gathers cumulative statistics regarding topologies.
 	struct nvmeibc_blk_op_elevator merge_op;	// IO scheduler, unify small io's into a big one to improve throughput
-	union {										// Extention of block device to up to 1 of the below inherried classes
-		struct nvmeibc_api_of_d_carrier c_d_api;// Used for CARRIER_D_VOLUME.
-	};
 
 	// struct { /* Safe reboot/Shutdown/nvmeibc upgrade mechanism */
 		struct list_head reboot_ops;			// A queue of reboot operations. The first one is currently executing, the rest are queued.
 		bool ignore_all_toma_msgs;				// If true will ignore toma and force toma to brutally unregister this block device
 		bool ignore_all_recov_requests;			// Debug only: If true will ignore all toma request for recoveries
 	// };
-	bool allow_external_io_on_carrier;			// Allow other nvmesh volume to transfer BIO to this volume (treat it as disk). This allows volumes stacking
 	struct nvmeibc_trace_stats_scheduling trace_stats;	// Scheduling state of block stats tracing for block watchdog
 #endif
 	bool ignore_all_recov_toma_speed_req;		// Ignore requests from toma to change recovery speed. Used when manually setting those values

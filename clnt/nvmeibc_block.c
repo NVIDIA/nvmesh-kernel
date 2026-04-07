@@ -145,12 +145,6 @@ static enum nvmeibc_io_perm_arm __convert_io_type_permission_to_alert(enum nvmei
 	}
 }
 
-static void __notify_all_riders_about_io_perm_change(struct nvmeibc_block_device *nd)
-{
-	if ((nvmeibc_block_is_d_carrier(nd)) && (nd->c_d_api.on_io_perm_change_cb))
-		nd->c_d_api.on_io_perm_change_cb(&nd->c_d_api);
-}
-
 static inline const char* __get_reason_for_io_disable(const struct nvmeibc_block_device *nd, struct nvmeibc_topologies *nt, void *ctx)
 {
 	if (nvmeibc_block_status_is_preempted(nd->status)) {
@@ -209,7 +203,6 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			const char *reason = __get_reason_for_io_disable(nd, nt, ctx);
 			_NI(tr_3_block_bling, "@NDU @EVENT_TAG @DEV_NAME: Disabling I/O@STR for a volume. Error code: 1049. Internal IO permissions: @IO_PERM. Internal additional info: @STR",
 			    0, EV_VOLUME_IO_DISABLED(), nd->name, (can_do_syncs? ", recoveries enabled" : " and recoveries"), new_io_perm, reason);
-			__notify_all_riders_about_io_perm_change(nd);
 			WARN(nt->dbg_disabling_ts, wrong_ctr_msg, nd->name, new_io_perm);	//
 			nt->dbg_disabling_ts = jiffies;
 			if (IS_PATH_VDISK(nd->name) && !nvmeibc_block_is_recoverer_or_hidden(nd)) {
@@ -233,7 +226,6 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			_NI(tr_5_block_bling, "@NDU @EVENT_TAG @DEV_NAME:Enabling I/O and recoveries for a volume after @SECONDS. Internal information (toggles=@DBG_NUM_ENABLING_IO_TOGGLES, IO permissions: @IO_PERM).",
 			    0, EV_VOLUME_IO_ENABLED(), nd->name, (size_t)(dt/HZ), nt->dbg_num_enabling_io_toggles, new_io_perm);  //. Error code: 0
 			block_api_os_change_size(nd, is_first_bio_enabled);
-			__notify_all_riders_about_io_perm_change(nd);
 			if (unlikely(nt->debug_on_io_enabled.cb))
 				nt->debug_on_io_enabled.cb(nt, nt->debug_on_io_enabled.ctx);
 			if (IS_PATH_VDISK(nd->name) && new_io_perm == NVMEIB_IO_TYPE_PERMIT_ALL && !nvmeibc_block_is_recoverer_or_hidden(nd)) {
@@ -245,8 +237,6 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			}
 		} else {
 			_ND(tr_6_block_bling, "@DEV_NAME: BIO stays enabled for. Switch-Topo transitions", nd->name);
-			if (old_io_perm != new_io_perm)
-				__notify_all_riders_about_io_perm_change(nd);					// EC has NO_PROTECTION FLAG that might need to be updated when returning to normal
 		}
 	}
 
@@ -409,8 +399,8 @@ static void __topo_stats_tojson(const struct topo_stats_t *ts, struct jdr *jdr)
 
 static void __dev_unsorted_tostring(const struct nvmeibc_block_device *dev, struct nvmeib_txt *txt)
 {
-	const bool deprecated = dev->os->atom.conf.enforce_readonly;	// Safe access to os! os has proc files through which this function is called so, 'os' was not destroyed yet and block device exists.
-	nvmeib_txt_append(txt, "Enforce Read Only: %c, Retry Timeout: %u[sec], ext_car_io=%c\n", (deprecated ? 'Y' : 'N'), (u32)(dev->max_retry_jiffies/HZ), (dev->allow_external_io_on_carrier ? 'Y' : 'N'));
+	const bool enforce_readonly = dev->os->atom.conf.enforce_readonly;	// Safe access to os! os has proc files through which this function is called so, 'os' was not destroyed yet and block device exists.
+	nvmeib_txt_append(txt, "Enforce Read Only: %c, Retry Timeout: %u[sec]\n", (enforce_readonly ? 'Y' : 'N'), (u32)(dev->max_retry_jiffies/HZ));
 }
 
 static void __dev_unsorted_tojson(const struct nvmeibc_block_device *dev, struct jdr *jdr)
@@ -418,7 +408,6 @@ static void __dev_unsorted_tojson(const struct nvmeibc_block_device *dev, struct
 	const bool deprecated = dev->os->atom.conf.enforce_readonly;
 	jdr_write_var(jdr, enforce_read_only, deprecated);
 	jdr_write_var(jdr, retry_timeout_sec, (u32)(dev->max_retry_jiffies/HZ));
-	jdr_write_var(jdr, allow_extern_carrier_io, dev->allow_external_io_on_carrier);
 }
 
 static void __nvmeibc_dev_flags_tostring(const struct nvmeibc_block_device *dev, struct nvmeib_txt *txt)
@@ -827,20 +816,14 @@ static void __blockdevice_init_profilers(struct nvmeibc_block_device *dev)
 	nvmeibc_topology_put(t);
 }
 
-static inline enum nvmeibc_data_path_type __select_datapath_type(const struct nvmeibc_block_device *dev, int max_slice_size, int max_protect_level)
+static inline enum nvmeibc_data_path_type __select_datapath_type(int max_slice_size, int max_protect_level)
 {
 	const bool is_ec = (max_slice_size > 1);
 	if (is_ec)
 		return NVMEIBC_DATA_PATH_EC_R6;
-	if (max_protect_level > 0) {
-		if (nvmeibc_block_is_any_carrier(dev)) {
-			// WARN_ON(!nvmeibc_block_is_wcv(dev));		// Currently only WCV is supported here
-			return NVMEIBC_DATA_PATH_MIR_D_CARRIER;
-		} else
-			return NVMEIBC_DATA_PATH_MIR_BIO;
-	} else {
-		return NVMEIBC_DATA_PATH_JBODS;					// Jbod without locks
-	}
+	if (max_protect_level > 0)
+		return NVMEIBC_DATA_PATH_MIR_BIO;
+	return NVMEIBC_DATA_PATH_JBODS;					// Jbod without locks
 }
 
 static inline bool __should_optimize_local_reads(const struct nvmeibc_block_device *dev, bool is_enabled)
@@ -854,7 +837,7 @@ static inline bool __should_optimize_local_reads(const struct nvmeibc_block_devi
 static int __bdev_datapath_init(struct nvmeibc_block_device *dev, int max_slice_size, struct nvmeibc_dp_params par, int max_protect_level, bool enable_crc_check, bool use_debug_di, bool enable_local_read_optimization, int read_has_mutable_bio_buffers)
 {
 	const enum nvmeibc_config_volume_type type = dev->type;
-	const enum nvmeibc_data_path_type dp_type = __select_datapath_type(dev, max_slice_size, max_protect_level);
+	const enum nvmeibc_data_path_type dp_type = __select_datapath_type(max_slice_size, max_protect_level);
 	const bool optimize_local_reads = __should_optimize_local_reads(dev, enable_local_read_optimization);
 	_NT(t_00_bdev_init, "@DEV_NAME: @HDR_TYPE @DATAPATH_TYPE, crc=@BOOL_YN, local_reads=@BOOL_YN", dev->name, type, dp_type, enable_crc_check, optimize_local_reads);
 	nvmeibc_datapath_init(&dev->dp, dev->name, dp_type, enable_crc_check, use_debug_di, optimize_local_reads, read_has_mutable_bio_buffers, max_slice_size, par);
@@ -879,8 +862,6 @@ static void __bdev_datapath_destroy(struct nvmeibc_block_device *dev)
 static void __blockdevice_derrived_classes_destroy(struct nvmeibc_block_device *dev)
 {
 	assert_dev_on_mainwq(dev);					// Either detach or failed attach
-	if (nvmeibc_block_is_any_carrier(dev))
-		nvmeibc_api_of_d_carrier_destroy(dev);
 	if (dev->os)								// False only when this is a cleanup of failed initialization
 		block_api_os_destroy(dev->os);
 	dev->os = (void*)0x4;	/* For debug: Put dummy NULL to detect crashes */
@@ -901,10 +882,6 @@ static int __blockdevice_derrived_classes_init(struct nvmeibc_block_device *dev,
 		dev->autoext.is_api_enabled = true;
 		dev->autoext.allocated_size = dev->size;
 		dev->size = 244140625000UL;			// = 1000^4 / 4096
-	}
-	if (nvmeibc_block_is_d_carrier(dev)) {
-		if ((rv = nvmeibc_api_of_d_carrier_init(dev)) < 0)
-			goto _init_err;
 	}
 	if (rv < 0) {
 		goto _init_err;
@@ -1051,13 +1028,11 @@ bool nvmeibc_block_update_status(struct nvmeibc_block_device* dev, char reason)
 		spin_lock_irqsave(&dev->dp.resub.lock, flags);
 		if (dev->status == NCBD_ATTACHING_NO_IO) { /* First activation of IO */
 			dev->status = NCBD_ATTACHED;
-			if (!nvmeibc_block_is_any_carrier(dev)) {	// consider to add '&& bio_enabled'
-				if (nvmeibc_block_is_shadow(dev)){
-					dev->max_retry_jiffies = (nvmeibc_io_max_retry_encrypted_secs ? : IO_TIME_OUT_NORMAL) * HZ;
-				} else {
-					dev->max_retry_jiffies = (nvmeibc_io_max_retry_secs ? : (IS_PATH_VDISK(dev->name)? 4 : IO_TIME_OUT_NORMAL)) * HZ;
-				}
-			} else { /* Rider will setup timeout for its carriers during mounting */}
+			if (nvmeibc_block_is_shadow(dev)){
+				dev->max_retry_jiffies = (nvmeibc_io_max_retry_encrypted_secs ? : IO_TIME_OUT_NORMAL) * HZ;
+			} else {
+				dev->max_retry_jiffies = (nvmeibc_io_max_retry_secs ? : (IS_PATH_VDISK(dev->name)? 4 : IO_TIME_OUT_NORMAL)) * HZ;
+			}
 			revalidate_bdev = bio_enabled;
 			nvmeibc_block_set_generic_work_to_main(nvmeibc_cinst_get_blok_p(dev), dev->uuid,
 					nvmeibc_cc_api_notify_io_changed, dev->uuid, false);
@@ -1244,17 +1219,6 @@ unsigned self_recovery_detach_idle_time_sec = 60; //	Auto detach after 60 second
 module_param(self_recovery_detach_idle_time_sec, uint, 0644);
 MODULE_PARM_DESC(self_recovery_detach_idle_time_sec, "Time-out for idle recoverer volume (after recovery finished) until self detached [sec]");
 
-unsigned self_recovery_detach_carrier_grace_time_sec = 10; //	Give enough time to rider to attach after the carrier for recovery purposes, before self-detaching
-module_param(self_recovery_detach_carrier_grace_time_sec, uint, 0644);
-MODULE_PARM_DESC(self_recovery_detach_carrier_grace_time_sec, "Do not self detach recovery carrier volume if no rider uses it yet for this time [sec]");
-
-static inline bool __is_still_used_carrier(struct nvmeibc_block_device *dev, const ulong up_time_sec)
-{
-	return (nvmeibc_block_is_any_carrier(dev) &&
-			(block_api_os_is_mounted(dev->os) ||				// Has rider
-			(up_time_sec <= self_recovery_detach_carrier_grace_time_sec)));
-}
-
 static void __self_detatch_old_recovering_bdev(struct nvmeibc_block_device *dev)
 {
 	//const struct nvmeibc_os_api *os = dev->os;	 // Safe access to 'os' because holds block_devices_sl spinlock so traversing list of devs with non destroyed os
@@ -1266,9 +1230,7 @@ static void __self_detatch_old_recovering_bdev(struct nvmeibc_block_device *dev)
 		} else {
 			const ulong up_time_sec = (get_nvmeibc_os_api_uptime(dev->os) / HZ);
 			const ulong threshold_msec = ((num_finished == 0) ? self_recovery_detach_initial_time_sec : self_recovery_detach_idle_time_sec) * 1000;
-			const bool no_recov_preventers = (time_stamp_msec > threshold_msec);
-			const bool no_riders_preventers = !__is_still_used_carrier(dev, up_time_sec);
-			if (no_recov_preventers && no_riders_preventers) {
+			if (time_stamp_msec > threshold_msec) {
 				_NI(info_A_block_nvmeibc_block_try_detach, "@DEV_NAME: Initiating self hidden detach, num_recov_finished=@INT, last recov @MILISECONDS ago, attached @SECONDS ago", dev->name, num_finished, time_stamp_msec, up_time_sec);
 				nvmeibc_block_set_generic_work_to_main(nvmeibc_cinst_get_blok_p(dev), dev->uuid, nvmeibc_cc_api_request_self_recov_detach, (void*)dev->uuid, false);
 			}
@@ -1386,9 +1348,7 @@ int nvmeibc_block_try_detach(struct nvmeibc_block_device *dev, const struct nvme
 			}
 		}
 	} else if (how.force) {
-		if (nvmeibc_block_is_any_carrier(dev) && block_api_os_is_mounted(dev->os)) {
-			rv = -ECHILD;							// The only case where force detach can fail. Daniel: By design we dont forward the detach request to rider. If user wants, he should detach the top most rider. Also this makes the detach --all volumes more natural, as carriers disagree but rider agrees
-		} else if (how.abandon) {
+		if (how.abandon) {
 			nvmeibc_block_update_status(dev, 'U');
 			dev->ignore_all_toma_msgs = true;		// Daniel: Why?
 		} else {

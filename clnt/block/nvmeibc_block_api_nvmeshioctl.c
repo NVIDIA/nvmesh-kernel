@@ -372,14 +372,6 @@ static int __toggle_lclread(const struct nvmeibc_cinst_params_blk *p, struct nvm
 	return 0;
 }
 
-static int __toggle_ext_car_io(const struct nvmeibc_cinst_params_blk *p, struct nvmeibc_block_device *dev, const char *cmd)
-{
-	int len = strlen(cmd);
-	const bool do_enable = ((len > 1)&&(cmd[1] == '1')); /* Skip '=' or ' ' */
-	do_for_bdev(p, dev, dev->allow_external_io_on_carrier = do_enable);
-	return 0;
-}
-
 static int __show_struct_size(const struct nvmeibc_cinst_params_blk *p, struct nvmeibc_block_device *dev, const char *cmd)
 {
 	(void)p; (void)dev; (void)cmd;
@@ -406,8 +398,6 @@ static int __toggle_di_debug_mode(const struct nvmeibc_cinst_params_blk *p, stru
 
 #define t_vlba_trans_init(tv, _dev, _addr, _nlbas) ({\
 	(tv)->output.n_cmds = (tv)->output.n_locks = 0;	\
-	(tv)->output.d_carriers.n_nds = 0;	\
-	(tv)->output.md_carrier.nd = NULL;	\
 	(tv)->input.nd = _dev;		\
 	(tv)->input.vlba = _addr;	\
 	(tv)->input.nlbas = _nlbas;	\
@@ -443,7 +433,7 @@ static void __trans_vlba_of_bdev(const struct nvmeibc_cinst_params_blk *p, struc
 		goto _out;
 	}
 	rv = dev->dp.dbg_trans_addr(tv);
-	if (rv || (res->n_cmds == 0 && res->d_carriers.n_nds == 0)) {
+	if (rv || res->n_cmds == 0) {
 		_NT(t_a2_ncioctl, "@STR @DEV_NAME: Address translation failed! [@VLBA..@VLBA] rv=@RV cookie=@COOKIE", tabs, dev->name, addr, (addr+(u64)(nlbas-1)), rv, cookie);
 		goto _out;
 	} else if (nlbas == 1) {
@@ -455,15 +445,6 @@ static void __trans_vlba_of_bdev(const struct nvmeibc_cinst_params_blk *p, struc
 		_NI_to_user(t_yf_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> @DESCR:@DISK_HOST:@DISK_NAME:@DLBA cookie=@COOKIE",  tabs, i, dev->name, addr, res->descr[i], __host_of(res->disks[i]), res->disks[i]->ops.get_name(res->disks[i]), res->offs[i], cookie);
 	for (i = 0; i < res->n_locks; i++)
 		_NI_to_user(t_yg_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> Lock:@DESCR:@DISK_HOST:@DISK_NAME cookie=@COOKIE",   tabs, i, dev->name, addr, res->ldescr[i], __host_of(res->ldisks[i]), res->ldisks[i]->ops.get_name(res->ldisks[i]), cookie);
-	for (i = 0; i < res->d_carriers.n_nds; i++) {
-		_NI_to_user(t_yh_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> @DESCR:@DEV_NAME:@VLBA cookie=@COOKIE",              tabs, i, dev->name, addr, res->d_carriers.descr[i], res->d_carriers.nds[i]->name, res->d_carriers.lbas[i], cookie);
-		if (res->d_carriers.lbas[i] != (~0ULL))
-			__trans_vlba_of_bdev(p, res->d_carriers.nds[i], res->d_carriers.lbas[i], nlbas, op, cookie, recusive_depth+1);	// Recursive call
-	}
-	if (res->md_carrier.nd) {
-		_NI_to_user(t_yi_dp_dbg_tools, QA_BLOCK_PREFIX, "@STR @INDEX) @DEV_NAME:@VLBA ==> @DESCR:@DEV_NAME:@VLBA cookie=@COOKIE",         tabs, i, dev->name, addr, "MDV", res->md_carrier.nd->name, res->md_carrier.lba, cookie);
-		__trans_vlba_of_bdev(p, res->md_carrier.nd, res->md_carrier.lba, nlbas, op, cookie, recusive_depth+1);				// Recursive call
-	}
 	if (res->mssa_output) { // Prints all MSSA MAPS
 		char *line = res->mssa_output;
 		_NI_to_user(t_z0_dp_dbg_tools, QA_BLOCK_PREFIX, "@DEV_NAME: MSSA OUTPUT MAPS cookie=@COOKIE", dev->name, cookie);
@@ -637,18 +618,10 @@ static void __report_di_bug_on_addr_on_bdev(struct nvmeibc_block_device *dev, u6
 		t_vlba_trans_init(&tv, dev, addr, 1);
 		tv.input.translate_by_cfg = true;
 		if (dev->dp.dbg_trans_addr && (dev->dp.dbg_trans_addr(&tv) == 0)) {
-			int i;
 			rv |= __stop_bdev(dev);
 			if (res->n_cmds > 0) {
 				rv |= nvmeibc_topologies_inform_di_bug_in_raid(&dev->topologies, res->offs, res->ci, res->ri);
 			}
-
-			// Report recursively on MD volumes and carriers, if any
-			if (res->md_carrier.nd)
-				__report_di_bug_on_addr_on_bdev(res->md_carrier.nd, res->md_carrier.lba);
-
-			for (i = 0; i < (int)res->d_carriers.n_nds; i++)
-				__report_di_bug_on_addr_on_bdev(res->d_carriers.nds[i], res->d_carriers.lbas[i]);
 
 		} else { /*Address is wrong or translation not supported*/ }
 
@@ -1028,7 +1001,6 @@ static struct t_ioctl ioctls[] = {
 	{"set_read_edic"   , 13, &__toggle_edic          , "=<1 or 0>", "Enable Edic Calc on Write, Check on Read"},
 	{"read_has_mutable_bio_buffers", 28, &__toggle_read_has_mutable_bio_buffers, "=<2 or 1 or 0>", "Use private buffers for read (2 always, 1 during degraded topo, 0 don't use"},
 	{"set_lclread_opt" , 15, &__toggle_lclread       , "=<1 or 0>", "Enable local read optimization on R1"},
-	{"set_car_ext_io"  , 14, &__toggle_ext_car_io    , "=<1 or 0>", "Allow external kernel io to carrier volumes"},
 	{"show_struct_size", 16, &__show_struct_size     , "", "Show sizes of structs in datapath"},
 	{"translate_addr"  , 14, &__translate_vlba       , "=<addr>,<?len>,<?R/W/C/L>,<?cookie?", "VLBA->DLBA, len=1, W, cookie=0"},
 	{"translate_dlba2" , 15, &__translate_dlba_new   , __d2_v_lba_fmt, __d2_v_lba_help},

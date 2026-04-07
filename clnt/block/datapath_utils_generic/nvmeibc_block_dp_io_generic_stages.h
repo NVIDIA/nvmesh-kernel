@@ -94,17 +94,6 @@ static inline const char* nvmeibc_profiling_e_cmds_stage_stage2name_mirror(u8 st
 	}
 };
 
-static inline u8 nvmeibc_profiling_translate_e_cmds_stage_carrier(int /*enum e_cmds_stage*/ cmd_stage) {
-	if (unlikely(cmd_stage == PROFILING_GET_N_STAGES)){
-		return 1;
-	}
-	return 0;
-}
-
-static inline const char* nvmeibc_profiling_e_cmds_stage_stage2name_carrier(u8 stage){
-	(void)stage;
-	return "total";
-};
 
 static inline const char* nvmeibc_profiling_e_preparation_stage_stage2name(u8 stage){
 	(void)stage;

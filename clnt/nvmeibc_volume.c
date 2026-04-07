@@ -916,12 +916,6 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 
 	/* Type specific initializations */
 	if (nvmeibc_managment_does_vol_need_disks(   &volume->hdr)) { /*Todo*/ }
-	if (nvmeibc_block_is_any_rider(&volume->hdr)) {
-		_NE(e_03_vol_attach, DMESG_PREFIX("@DEV_NAME") ": Rider without any carrier, @HDR_TYPE", devname, volume->hdr.type);
-		if (rv) {
-			goto _free_volume_no_attach;
-		}
-	}
 	/* Add volume to the driver internal lists */
 	if ((rv = nvmeibc_add_volume(volume)) < 0) {
 		_NE(t_03_vol_attach, DMESG_PREFIX("@DEV_NAME") ": nvmeibc is going down. attach canceled", devname);
@@ -1102,9 +1096,6 @@ _func_start:
 
 
 	case volume_detach_state_no_io: {
-		#define N_MAX_LINKED_DETACHES (2)	// MTV detaches WCV and QLC. QLC detaches MDV
-		struct nvmeibc_volume *auto_detach_list[N_MAX_LINKED_DETACHES] = {NULL};
-		int number_of_linked_detaches = 0, i;
 		__set_status(volume, NVS_DETACHING_IO_DRAINED);		// Only when IO is drained, will blockdevice start to ignore disk_pause
 		/* Close blkdev for new IO requests. */
 		nvmeibc_assert_on_main_wq(volume->p);
@@ -1112,25 +1103,11 @@ _func_start:
 			nvmeibc_block_trace_stats(volume->block_dev, false /* diff_only */);
 			nvmeibc_del_blkdev(volume->block_dev);
 		}
-		if (number_of_linked_detaches) {
-			const struct nvmeibc_vol_detach_cmd how = (detach->cmd.err_attach) ? nvmeibc_vol_detach_cmd_default() : detach->cmd;	// Even if rider detaches due to attach error, carrier already did normal attach
-			if (volume->job_comp)
-				nvmeibc_multi_completion_add_aux_jobs(volume->job_comp, number_of_linked_detaches);
-			for (i=0; i<number_of_linked_detaches; i++)	{					// Could be init error (should still force detach)
-				struct nvmeibc_volume *auto_detach_vol = auto_detach_list[i];
-				if (auto_detach_vol) {										// Carriers may not exists, only if detach is due to attach failure of rider
-					try_detach_volume_with_multicomplete(auto_detach_vol, how, volume->job_comp);
-				} else {
-					WARN_ON(!detach->cmd.err_attach);
-				}
-			}
-		}
-
-		detach->state = volume_detach_state_carriers_auto_detach_req;
+		detach->state = volume_detach_state_cleanup;
 		goto _func_start;
 	}
 
-	case volume_detach_state_carriers_auto_detach_req:
+	case volume_detach_state_cleanup:
 		nvmeibc_assert_on_main_wq(volume->p);
 		nvmeibc_del_volume(volume);
 		__free_transport_resources_of(volume);

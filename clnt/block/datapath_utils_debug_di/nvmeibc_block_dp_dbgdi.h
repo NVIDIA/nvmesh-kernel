@@ -56,10 +56,6 @@
 	static inline bool dp_dbgdi_should_add_info_core(  struct nvmeibc_disk_io_command *iocmd) { (void)iocmd; return false; }
 	#define            dp_dbgdi_do_add_info_core_pre( req, p)
 	#define            dp_dbgdi_do_add_info_core_post(req, p)   (0)
-	static inline bool dp_dbgdi_should_add_rider_info(const struct operation *o) { (void)o; return false; }
-	static inline void dp_dbgdi_do_add_rider_info(void *d, const struct nvmeibc_block_device *car, const struct operation *o) { (void)o; (void)car; (void)d; }
-	static inline void dp_dbgdi_do_add_rider_rdr_info(void *bext, const struct nvmeibc_block_device *car) { (void)bext; (void)car; }
-	static inline bool dp_dbgdi_should_add_rider_rdr_info(void *bext) { (void)bext; return false; }
 	              int  dp_dbgdi_get_sizeof_injected_data(void);
 	              void dp_dbgdi_mark_edic(void *data, enum edic_result pass, u32 read_edic, u32 calc_edic, u64 rlba);
 
@@ -84,14 +80,6 @@ bool dp_dbgdi_should_add_info_core(  struct nvmeibc_disk_io_command *iocmd);
 void dp_dbgdi_do_add_info_core_pre( struct nvmeibc_block_io_req *req, struct t_core_dbgdi_params_pre  * p);
 int  dp_dbgdi_do_add_info_core_post(struct nvmeibc_block_io_req *req, struct t_core_dbgdi_params_post * p);
 
-
-/* Rider-carrier injection */
-struct d_carrier_base_block_io;
-bool dp_dbgdi_should_add_rider_info(const struct operation *o);
-void dp_dbgdi_do_add_rider_info(struct d_carrier_base_block_io *d, const struct nvmeibc_block_device *car, const struct operation *o);
-void dp_dbgdi_do_add_rider_rdr_info(const struct bio_extention *bext, const struct nvmeibc_block_device *car);
-bool dp_dbgdi_should_add_rider_rdr_info(const struct bio_extention *bext);
-
 /* Returns the size (in bytes) of the injected area inside each block */
 int  dp_dbgdi_get_sizeof_injected_data(void);
 
@@ -104,4 +92,3 @@ void* dp_dbgdi_get_core_area_container (const void *c);
 void dp_dbgdi_mark_edic(void *data, enum edic_result pass, u32 read_edic, u32 calc_edic, u64 rlba);
 #endif	// DBGDI_REMOVED_IN_PRODUCTION
 #endif  // H beginning
-

@@ -646,62 +646,29 @@ static inline ssize_t t_db_who_sync_to_string(const struct t_db_who_sync *sync, 
 }
 
 
-static inline ssize_t t_db_who_d_carrier_to_string(const struct t_db_who_d_carrier *d_carrier, char *buf, ssize_t len)
-{
-	ssize_t cnt = 0;
-	BUF_ADD("Data carrier: name=%s, vlba=%d\n", d_carrier->name, d_carrier->d_carrier_vlba);
-	return cnt;
-}
-
-static inline ssize_t t_db_who_bext_to_string(const struct t_db_who_bext *bext, char *buf, ssize_t len)
-{
-	ssize_t cnt = 0;
-	BUF_ADD("Bio extention: force_read_b4_write=%d, give_1st_md_blk_on_endio=%d, after_locks_taken=%d, after_md_read_stage=%d, before_first_write_cmd=%d, before_md_last_write=%d\n",
-		bext->force_read_b4_write, bext->give_1st_md_blk_on_endio, bext->after_locks_taken, bext->after_md_read_stage, bext->before_first_write_cmd, bext->before_md_last_write);
-	return cnt;
-}
-
 static inline ssize_t t_db_who_mtv_to_string(const struct t_db_who_mtv *mtv, mtv_data_analysis *an, char* buf, ssize_t len)
 {
 	ssize_t cnt = 0;
 	const struct t_db_who_mtv_writer *writer = &mtv->writer;
 	const struct t_db_who_mtv_reader *reader = &mtv->reader;
-	const struct t_db_who_mtv_stage *stager = &mtv->stager;
-	const struct t_db_who_mtv_destage *destager = &mtv->destager;
-	bool wr_exists, r_exists, stage_exists, destage_exists;
+	bool wr_exists, r_exists;
 
-	(void)stager;
 	(void)an;
-	(void)destager;
 	(void)r_exists;
-	(void)stage_exists;
-	(void)destage_exists;
 
 	if (mtv->magic != DBG_DI_MAGIC_MO)
 		goto _out;
 
 	wr_exists = (writer->magic == DBG_DI_MAGIC_WR);
 	if (wr_exists) {
-		const struct t_db_who_clnt *cl = &writer->clnt;
-		const struct t_db_who_bio *bio = &writer->bio;
-		const struct t_db_who_d_carrier *wcv = &writer->d_carrier_wcv;
-		const struct t_db_who_bext *bext = &writer->bext;
-		cnt += t_db_who_clnt_to_string(cl, buf + cnt, len - cnt, "write started");
-		cnt += t_db_who_bio_to_string(bio, buf + cnt, len - cnt);
-		cnt += t_db_who_d_carrier_to_string(wcv, buf + cnt, len - cnt);
-		cnt += t_db_who_bext_to_string(bext, buf + cnt, len - cnt);
+		cnt += t_db_who_clnt_to_string(&writer->clnt, buf + cnt, len - cnt, "write started");
+		cnt += t_db_who_bio_to_string(&writer->bio, buf + cnt, len - cnt);
 	}
 
 	r_exists = data_blk_does_reader_exists(*reader);
 	if (r_exists) {
-		const struct t_db_who_clnt *cl = &reader->clnt;
-		const struct t_db_who_bio *bio = &reader->bio;
-		const struct t_db_who_d_carrier *d_carrier = &reader->d_carrier;
-		const struct t_db_who_bext *bext = &reader->bext;
-		cnt += t_db_who_clnt_to_string(cl, buf + cnt, len - cnt, "write started");
-		cnt += t_db_who_bio_to_string(bio, buf + cnt, len - cnt);
-		cnt += t_db_who_d_carrier_to_string(d_carrier, buf + cnt, len - cnt);
-		cnt += t_db_who_bext_to_string(bext, buf + cnt, len - cnt);
+		cnt += t_db_who_clnt_to_string(&reader->clnt, buf + cnt, len - cnt, "write started");
+		cnt += t_db_who_bio_to_string(&reader->bio, buf + cnt, len - cnt);
 	}
 
 _out:

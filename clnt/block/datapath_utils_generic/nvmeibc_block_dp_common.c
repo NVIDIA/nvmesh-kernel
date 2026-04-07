@@ -8,7 +8,6 @@
 #include "nvmeibc_block_dp_dbg_tools.h"
 #include "../datapath_ec/nvmeibc_block_dp_ec.h"
 #include "../datapath_mirror/nvmeibc_block_dp_mirror.h"
-#include "../datapath_mirror/nvmeibc_block_dp_mirror_cmpxchng.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_lock_stages.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_profiling_disk_stages.h"
 
@@ -312,8 +311,7 @@ MODULE_PARM_DESC(nvmeibc_default_debug_di, "Upon volume attach, enable \"debug d
 // use_debug_di from mgmt configuration, will be set once and will override local nvmeibc_default_debug_di parameter value
 static inline bool __can_enable_debug_di_for_volume(enum nvmeibc_data_path_type e, const bool use_debug_di)
 {
-	if (e == NVMEIBC_DATA_PATH_MIR_MDBLK_BIO)
-		return false;			// Disable for Metadata volumes
+	(void)e;
 	return (use_debug_di) ? use_debug_di : nvmeibc_default_debug_di;
 }
 

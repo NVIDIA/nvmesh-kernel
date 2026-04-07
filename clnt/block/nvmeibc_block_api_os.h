@@ -216,11 +216,6 @@ int block_api_os_sub_vol_detach(struct nvmeibc_os_api *carrier, const char* dev_
 #define block_api_os_sub_vol_name(carrier, dev_name, dev_uuid) \
 			block_api_os_sub_vol_attach(carrier, 0UL, 0UL, dev_name, dev_uuid);
 
-/*************************** Riders on Top of Carriers ***********************/
-void block_api_os_carrier_ref_add(struct nvmeibc_os_api *carrier, const struct nvmeibc_os_api *rider);		// Rider mounts carrier
-void block_api_os_carrier_ref_del(struct nvmeibc_os_api *carrier, const struct nvmeibc_os_api *rider);		// Rider umounts carrier
-
-
 /*************************** Sub-block operations***** ***********************/
 static inline unsigned get_logical_block_size_from_os(const struct nvmeibc_os_api* os) {
 	return (os->atom.queue) ? os->atom.queue->limits.logical_block_size : NVMEIBC_SECTOR_SIZE;
@@ -291,4 +286,3 @@ static inline uint get_numer_of_required_4k_blocks_from_512B_IO(const ulong offs
 #endif
 
 #endif  // H beginning
-

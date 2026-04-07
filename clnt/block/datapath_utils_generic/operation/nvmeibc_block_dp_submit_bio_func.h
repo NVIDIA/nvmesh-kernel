@@ -6,7 +6,7 @@
 #ifndef NVMEIBC_DP_SUBMIT_BIO_FUNC_H
 #define NVMEIBC_DP_SUBMIT_BIO_FUNC_H
 /* Datapath Utils function for BIO execution. Used for submitting BIO into krnel request
-	queue, IO from rider volume or externally via other mechanism.
+	queue, or IO arriving through another internal submission path.
 */
 
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"

@@ -1460,7 +1460,6 @@ else
 			sudo bash -c "echo 1 > /sys/module/nvmeiba/parameters/verbose_debug";	# nvmeiba
 		elif [ "$1" == "speed" ]; then
 			sudo cpupower frequency-set --governor performance; #https://askubuntu.com/questions/1021748/set-cpu-governor-to-performance-in-18-04
-			sudo bash -c "echo -n '#|set_car_ext_io=1' > /proc/nvmeibc/cli/cli";
 			sudo bash -c "echo -n '#|set_read_edic=0' > /proc/nvmeibc/cli/cli";
 			sudo bash -c "echo 0 > /sys/block/nvmesh\!*/queue/iostats"
 			#sudo bash -c "echo 4096 > /sys/block/nvmesh\!*/queue/read_ahead_kb"

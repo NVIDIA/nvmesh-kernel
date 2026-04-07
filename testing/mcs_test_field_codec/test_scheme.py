@@ -151,7 +151,7 @@
 	"nvmeibt_mcs_volume_" : {
 		"//" : "volume configuration",
 		"__type" : "used",
-		"type" : "__codec MultiValCodec({'normal' : 0, 'recoverer' : 1, 'carrier' : 2, 'thin' : 3})",
+		"type" : "__codec MultiValCodec({'normal' : 0, 'recoverer' : 1, 'thin' : 3})",
 		"status" : "__codec WithDefaultCodec(MultiValCodec({'__DEFAULT' : 0, 'markedForRebuild_old' : 1, 'markedForDeletion' : 2}), 0)",
 		"RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Striped & Mirrored RAID-10' : 10, 'Concatenated' : 3})",
 		"numberOfMirrors" : "__codec IncrementCodec(1, 'H')",

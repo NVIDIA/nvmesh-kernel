@@ -122,7 +122,6 @@ nvmeibc-y := \
 	block/recovery/nvmeibc_decentralized_unreg.o \
 	block/recovery/nvmeibc_block_dp_sync_api_manager_flow_cntrs.o \
 	block/recovery/nvmeibc_block_dp_sync_no_write_hole.o \
-	block/derived_apis/nvmeibc_block_api_d_carrier.o \
 	../toma/clnt/nvmeibt_client_protocol.o \
 	vex/nvmeibc_vex_shared.o \
 	traces_ids.o
@@ -146,4 +145,3 @@ ccflags-remove-y += -pg
 
 # Include trace.mk
 include $(M)/scripts/trace.mk
-

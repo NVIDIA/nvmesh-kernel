@@ -769,16 +769,6 @@ void dp_dbgdi_do_add_info_unitest(void *_d, const char *seg_uuid)
 	dbgdi_log_add_rec(&d->log, &w, DBG_DI_WRITE, DBG_DI_WRITE_REC_SIZE);
 }
 
-bool dp_dbgdi_should_add_rider_info(const struct operation *o) { (void)o; return false; }
-void dp_dbgdi_do_add_rider_info(struct d_carrier_base_block_io *d, const struct nvmeibc_block_device *car, const struct operation *o) { (void)d; (void)car; (void)o; }
-void dp_dbgdi_do_add_rider_rdr_info(const struct bio_extention *bext, const struct nvmeibc_block_device *car) { (void)bext; (void)car; }
-
-bool dp_dbgdi_should_add_rider_rdr_info(const struct bio_extention *bext)
-{
-	const struct operation *rider_o = bext->rider.o;
-	return (rider_o && dbg_di_enabled(rider_o) && rider_o->op == NVMEIB_BLOCK_IO_OP_READ);
-}
-
 int dp_dbgdi_get_sizeof_injected_data(void)
 {
 	return data_blk_get_injection_size();
@@ -802,4 +792,3 @@ void* dp_dbgdi_get_core_area_container(const void *c)
 	return container_of(c, data_blk, core);
 }
 #endif	// DBGDI_REMOVED_IN_PRODUCTION
-

@@ -106,8 +106,7 @@ struct operation {
 	struct nvmeib_pet_journal journal; //mutable
 
 	union {
-		struct {								// Extended rider->carrier bio
-			struct bio_extention *bx;
+		struct {
 			void **orig_sgls;					// QLC partial destage can manipulate the sgl and must be freed from original pointer
 		} md_op;								// Confusing name, Fix for 'elect op'
 		void* user_data; 						// Auxiliary payload (used in recovery->sync operation)
@@ -144,9 +143,6 @@ void nvmeibc_operation_compressed_op_pet_dump_bio(const struct operation *o);
 /* Get/Put reference count on operation to prevent it from being free */
 void nvmeibc_operation_get(struct operation *o, int n_refs);
 void nvmeibc_operation_put(struct operation *o, int n_refs);
-
-#define nvmeibc_operation_has_bio_extention(o) ((o)->md_op.bx != NULL)
-bool nvmeibc_operation_is_valid_carrier_op(struct operation *o);
 
 #define nvmeibc_operation_is_exclusive(o) (nvmeibc_block_get_res_vat((o)->nd)->res.mode == NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_EX)
 
@@ -261,4 +257,3 @@ void nvmeibc_operation_free_bio_part(struct bio_part *b);
 void nvmeibc_operation_free(struct operation *o);
 
 #endif  // H beginning
-

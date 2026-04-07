@@ -153,50 +153,26 @@ struct t_db_who_rb_recovery {
 	u64 nwhole_params; 				// == union no_writehole_params
 };
 
-struct t_db_who_d_carrier {
-	char name[16];					// 15 letters + \'0' Of device name
-	u32 d_carrier_vlba;
-} __attribute__ ((packed));
-
-struct t_db_who_bext {
-	bool force_read_b4_write;
-	bool give_1st_md_blk_on_endio;
-	bool after_locks_taken;
-	bool after_md_read_stage;
-	bool before_first_write_cmd;
-	bool before_md_last_write;
-} __attribute__ ((packed));
-
 struct t_db_who_mtv_writer {
 	u64 magic;
 	struct t_db_who_clnt clnt;
 	struct t_db_who_bio bio;
-	struct t_db_who_d_carrier d_carrier_wcv;
-	struct t_db_who_bext bext;
 } __attribute__ ((packed));
 
 struct t_db_who_mtv_reader {
 	u64 magic;
 	struct t_db_who_clnt clnt;
 	struct t_db_who_bio bio;
-	struct t_db_who_d_carrier d_carrier;
-	struct t_db_who_bext bext;
 } __attribute__ ((packed));
 
 struct t_db_who_mtv_stage {
 	u64 magic;
 	struct t_db_who_clnt clnt;
-	struct t_db_who_d_carrier d_carrier_qlc;
-	struct t_db_who_d_carrier d_carrier_wcv;
-	struct t_db_who_bext bext;
 } __attribute__ ((packed));
 
 struct t_db_who_mtv_destage {
 	u64 magic;
 	struct t_db_who_clnt clnt;
-	struct t_db_who_d_carrier d_carrier_qlc;
-	struct t_db_who_d_carrier d_carrier_wcv;
-	struct t_db_who_bext bext;
 } __attribute__ ((packed));
 
 struct t_db_who_mtv {

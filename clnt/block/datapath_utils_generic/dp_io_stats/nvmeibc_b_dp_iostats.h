@@ -53,7 +53,6 @@ enum dp_iostats_names {
 	DP_IO_STATS_TIMED_OUT,			// Amount of io's since the start of the report that failed due to time out
 	DP_IO_STATS_SUSPED_FAIL,		// Amount of io's since the start of the report that auto-failed due to device being suspended/unsafely detached
 	DP_IO_STATS_IGNORED_ERR,		// Amount of ignored io's with failure
-	DP_IO_STATS_CANCELED_BY_RIDER,	// Amount of ignored io's with failure
 	DP_IO_STATS_ILLEGAL_TRIMS,		// Amount of disobedient discard operations
 	DP_IO_STATS_RESUBMITTED,		// Amount of io's which have been resubmitted and may succeed in future
 	DP_IO_STATS_RESUBMITTED_STARTED,	// Amount of io's scheduled for resubmition
@@ -130,6 +129,5 @@ void dp_io_stats_add(struct dp_io_stats *t, u64 *counter, int count);
 #define IO_STATS_SYNC_DEC(t, sync_type) IO_STATS_SYNC_ADD((t), (sync_type), -1)
 
 #endif  // ifdef NVMEIBC_B_DP_IOSTATS_H
-
 
 

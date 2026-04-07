@@ -749,9 +749,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 71. Configuration arrives to the client and is verified against request\_id. This is needed in case the user already aborted the attach request with ctrl+C  
 72. The block device layer takes the configuration and  
     1. Subscribes to each segment with the transport layer (manifesting the intention to use it)  
-    2. If a rider volume is attached it finds all its carrier volumes  
-       1. Side note: A rider volume like an ELECT volume comprises multiple carrier volumes.  
-    3. For each segment, it tries to register with Toma (get permission to use it) according to the toma defined topology.  
+    2. For each segment, it tries to register with Toma (get permission to use it) according to the toma defined topology.  
 73. Relevant scripts: nvmesh\_attach\_volume.py nvmesh\_detach\_volume.py
 
 ### Reservation mode {#reservation-mode}
@@ -771,14 +769,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 
 ### Volumes stacking  {#volumes-stacking}
 
-82. NVMe drive is a carrier for information stored on NVMesh volumes.  
-83. Volumes can be carriers for other volumes (called rider volumes). A rider volume may ride on top of other volumes and/or disks, effectively allowing a stack of volumes to exist, much like the way the linux device manager works  
-84. The volume stacking mechanism is used in  
-    1. Elect volumes: (1 \- “MDV”) carrier volume for metadata, (2 \- “WCV”) carrier volume for a write cache, (3 \- “QLC”) carrier volume for data at rest and a rider volume (“MTV”)  on top  
-    2. Tiering mechanism: Cold tier (say cheap large drives arranged in raid6: 8+2), warm tier (say expensive raid1 2 disks) and hot tier of optane or battery backed ram disks.  
-85. Volume stacking works by carrier translating its IO into vlba’s (1 or more IOs) to carrier volumes  
-86. Note: volume stacking has a penalty in latency, potential additional memory allocations and context rescheduling.
-    1. For this reason: sub-volumes and named attachments are implemented a bit differently.
+> **REMOVED**: Volume stacking (carrier/rider volumes) has been removed from the product. Attaching a volume with a carrier or rider type now returns `-EINVAL`. The sub-volume and named-attach mechanisms described below are unrelated and remain active.
 
 ### Detach state machine {#detach-state-machine}
 
@@ -796,12 +787,11 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
        2. Drain recoveries, destages and other control path tasks  
        3. Start rejecting incoming IOs and drain all IOs in the system (in resubmission queue, etc)  
        4. Drain toma messages. Ignore all incoming messages and drain the processing of existing messages  
-    5. Schedule detach for rider volumes  
-    6. Delete block device (clean it up, don’t free memory yet)  
-    7. All atom’s of block device and its subvolumes/aliases will be freed once user space does last close() and can survive detach. In detach for upgrade, they definitely survive the detach process.  
-    8. Free transport layer resources of volume (connections to disks which were needed only by this volume)  
-    9. Free memory of the block device and stop its threads.  
-    10. Put (release) the extra reference on the os\_api  
+    5. Delete block device (clean it up, don’t free memory yet)  
+    6. All atom’s of block device and its subvolumes/aliases will be freed once user space does last close() and can survive detach. In detach for upgrade, they definitely survive the detach process.  
+    7. Free transport layer resources of volume (connections to disks which were needed only by this volume)  
+    8. Free memory of the block device and stop its threads.  
+    9. Put (release) the extra reference on the os\_api  
 92. Note: detach can be executed upon attaching failure to clean up a failed attachment.
 
 ### Sub-volumes {#sub-volumes}
@@ -2530,17 +2520,13 @@ LBA \= Logical block address
 
            **Changed in 3.4**: lock transfer happens on the global per-CPU queue, without touching the resubmitter
 
-     3. Callbacks from carrier volume to rider volume upon configuration testing  
-
-        ***Hidden product*** functionality, not used in production;
-
-     4. Insert requests for syncs to specific blockset
-     5. Launch syncs, up to a limit (throttling the amount of in air sync operations)  
+     3. Insert requests for syncs to specific blockset
+     4. Launch syncs, up to a limit (throttling the amount of in air sync operations)  
         **Changed in 3.4**: In the past, the resubmitter was executing few initial & heavy steps of sync operation execution. In 3.4 the resubmitter will ask the relevant CPU to start the sync execution. No heavy work on the resubmitter thread.
 
         We still need the resubmitter in this area, since it also manages different sync resources and controls the amount of being executed syncs.
 
-     6. Pop IO operation from the queue and either send it to execution or complete it with timeout error  
+     5. Pop IO operation from the queue and either send it to execution or complete it with timeout error  
         **Changed in 3.4**: Like in the sync operation case, the resubmitter will not execute any heavy work for the operation, but will ask the relevant CPU to do this.
 
 581. If no tasks exist, resubmitter goes to sleep  
@@ -3527,6 +3513,8 @@ Some thoughts & observations:
 
 # Elect Project {#elect-project}
 
+> **REMOVED**: The Elect project (carrier/rider volume stacking — MDV, WCV, QLC/DRV, MTV) has been removed from the product. This section is retained for historical reference only.
+
 810. Link telecto directory of documents ([here](https://drive.google.com/drive/u/1/folders/1Zuv8_t1rklQjiwADOjKWEKMkUNQCGQKN))  
 811. Initial design ([here](https://docs.google.com/document/d/1RWLFXqajkVF9jWMZhAidhlcfE2PvtahZr3bOsqc3VsM/edit)), Detailed design ([herelecte](https://docs.google.com/document/d/1ci-koSPE_KzI6RXsl6im3n0Ds3to-hxUTekJ4OrGJKw/edit))  
 812. QLC datapath ([link](https://docs.google.com/document/d/1qOaXSKXbrIZ3VwRWKPvbGIGXpvXIYXOEquFwRTy8dvs/edit))  
@@ -3591,7 +3579,7 @@ Some thoughts & observations:
 
 # Volume derives apis:  {#volume-derives-apis:}
 
-836. Todo, QLC/ WCV / MD carrier… D carrier  {#carrier:}
+> **REMOVED**: Carrier/rider derived volume APIs (QLC, WCV, MD carrier, D carrier) have been removed from the product.
 
 # Appendices:  {#appendices:}
 

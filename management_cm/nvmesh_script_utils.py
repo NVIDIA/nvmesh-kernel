@@ -865,14 +865,6 @@ class MultiClientUtils(object):
         path = os.path.join(self.dev_root, alias[:self.max_block_device_path])
         atom_by_path = next((atom for atom in atom_list if atom.get("path") == path), None)
         if atom_by_path:
-            attributes = atom_by_path.get("attr")
-            if 'sub' in attributes.get("str_flags"): # A previous alias is using this path, we want to find it's carrier
-                carrier_name = self.get_carrier_volume_of_alias(atom_by_path.get("name"))
-                if carrier_name:
-                    self.logger.debug("Path {0} is in use by alias {1} of volume {2}.".format(path, atom_by_path.get("name"), carrier_name))
-                    return carrier_name
-                else:
-                    self.logger.debug("Path {0} is in use by alias {1}.".format(path, atom_by_path.get("name")))
             return atom_by_path.get("name")
         self.logger.debug("Exhausted search of ATOM info.")
         return carrier_disk

@@ -188,7 +188,7 @@
                 "numberOfMirrors" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
                 "stripeSize" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "stripeWidth" : "__codec WithDefaultCodec(PodCodec('H'), 1)",
-                "type" : "__codec WithDefaultCodec(MultiValCodec({'normal':0,'recoverer':1,'WCV':40,'QLC':4384,'MDV':72,'MTV':8960,'carrier':16,'thin':4,'__DEFAULT':0}), 'normal')",
+                "type" : "__codec WithDefaultCodec(MultiValCodec({'normal':0,'recoverer':1,'thin':4,'__DEFAULT':0}), 'normal')",
                 "wcvName" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
                 "wcvUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
                 "mdvName" : "__codec WithDefaultCodec(PodCodec('32s'), '')",

@@ -154,7 +154,6 @@ ifeq ($(CPP_INLCUDE_CONFIG),1)
 	SOURCES += $(CBDIR)/nvmeibc_block_api_conf.c
 	SOURCES += $(CBDIR)/nvmeibc_block_api_nvmeshioctl.c
 	SOURCES += $(CBDIR)/datapath_utils_generic/nvmeibc_block_dp_io_perm_alert.c
-	SOURCES += $(CBDIR)/derived_apis/nvmeibc_block_api_d_carrier.c
 	SOURCES += $(CBDIR)/controlpath/nvmeibc_b_cp_lost_srv_resources.c
 	SOURCES += $(CBDIR)/controlpath/nvmeibc_b_cp_send_toma_msg.c
 	SOURCES += $(CBDIR)/controlpath/nvmeibc_b_cp_topo_on_free.c

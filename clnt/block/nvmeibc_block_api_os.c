@@ -933,27 +933,9 @@ static void __end_512B_wrapper_replacement_bio(struct bio *wrapper_bio, unsigned
 	__end_kernel_bio(bio, start_time, rv);		// Complete the original bio
 }
 
-static void __end_rider_to_carrier_bio(struct bio *bio, ulong start_time, int rv)
-{
-	// For carrier BIO there is no disk use OS api and get the queue from ATOM
-	const struct nvmeiba_atom_os_api *atom = &block_api_os_get_os(bio)->atom;
-	struct request_queue *q = atom->queue;
-	(void)start_time;
-	reqq_data_end_io(q);
-	if (unlikely((rv) && nvmeiba_os_api_is_queue_orphan(atom))) {
-		CALL_SUBMIT_BIO_FN(q, atom->disk, bio);		// Last chance to save bio from error by upgrading to new nvmeibc
-	} else {
-		extern void rider_bio_endio(struct bio *bio, int rv);	// Carrier responds with this function
-		rider_bio_endio(bio, rv);
-	}
-}
-
 const struct nvmeibc_os_api* block_api_os_get_os(const struct bio *bio)
 {
-	if (!__is_bio_from_carrier(bio))
-		return gendisk_get_api_os(__get_gendisk_of_kernel_bio(bio));
-	else
-		return (const struct nvmeibc_os_api*)((u64)bio->bi_end_io & (~1ULL)); // CARRIER_BIO
+	return gendisk_get_api_os(__get_gendisk_of_kernel_bio(bio));
 }
 
 int block_api_os_verify_bio_geometry(const struct bio *bio)
@@ -981,8 +963,7 @@ int block_api_os_verify_bio_geometry(const struct bio *bio)
 
 static const struct gendisk* block_api_os_get_gendisk(const struct bio *bio)
 {
-	struct gendisk *disk = __get_gendisk_of_kernel_bio(bio);	// For carrier BIO there is no disk use OS api and get the disk from ATOM, otherwise os_api might be invalid use disk
-	return disk ? disk : block_api_os_get_os(bio)->atom.disk;
+	return __get_gendisk_of_kernel_bio(bio);
 }
 
 #if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
@@ -990,11 +971,7 @@ static const struct gendisk* block_api_os_get_gendisk(const struct bio *bio)
 static REQ_RET nvmeibc_b_req_reject(struct request_queue *q, struct bio *bio)
 {
 	nflog(flog_api_os_nvmeibc_b_req_reject, "IO reject: bio=@BIO, off=@OFF_LLONG[s] q=@QUEUE", bio, (u64)__GET_BI_SECTOR(bio), q);
-	if (!__is_bio_from_carrier(bio)) {
-		bio_io_error(bio);
-	} else {
-		rider_bio_endio(bio, -EIO);
-	}
+	bio_io_error(bio);
 	return REQ_RET_ZERO;
 }
 static __attribute__((unused)) REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio)
@@ -1026,14 +1003,9 @@ static REQ_RET nvmeibc_b_req_make(struct request_queue *q, struct bio *bio)
 			bio_io_error(bio);
 		} else {
 			nflog(flog_api_os_nvmeibc_b_req_make, "IO begin: b=@BIO, now=@NOW, off=@OFF_LLONG[s], size=@SIZE", bio, now_jiffies, (u64)__GET_BI_SECTOR(bio), (u32)__GET_BI_SIZE(bio));
-			if (!__is_bio_from_carrier(bio)) { // Carrier bio does not take stats
-				start_stats(bio);
-				if ((rv = (reqq_data_get(q)->bio_executor)(bio, now_jiffies))){
-					__end_kernel_bio(bio, now_jiffies, rv);
-				}
-			} else {
-				if ((rv = (reqq_data_get(q)->bio_executor)(bio, now_jiffies)))
-					__end_rider_to_carrier_bio(bio, now_jiffies, rv);
+			start_stats(bio);
+			if ((rv = (reqq_data_get(q)->bio_executor)(bio, now_jiffies))){
+				__end_kernel_bio(bio, now_jiffies, rv);
 			}
 		}
 	} else {
@@ -1682,9 +1654,7 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 
 void block_api_os_end_io(struct bio_part *cur, unsigned long start_time, int rv)
 {
-	if (unlikely(__is_bio_from_carrier(cur->bio)))
-		__end_rider_to_carrier_bio(cur->bio, start_time, rv);
-	else if (unlikely(__is_bio_wrapper_for_bio(cur->bio)))
+	if (unlikely(__is_bio_wrapper_for_bio(cur->bio)))
 		__end_512B_wrapper_replacement_bio(cur->bio, start_time, rv);
 	else
 		__end_kernel_bio(cur->bio, start_time, rv);
@@ -2143,22 +2113,6 @@ void block_api_os_clear_io_stats(struct nvmeibc_os_api *os, const int which)
 		nvmeib_io_stats_clear(dev->stats, which);
 }
 
-/*************** Realtime reconfiguration of IO params ***********************/
-static void __mark_carrier_should_update_rider_on_reconf(struct nvmeibc_block_device *dev, int n_segs, bool was_size_changed)
-{
-	union nvmeibc_reconf_msg_car2rider *msg = NULL;
-	if (nvmeibc_block_is_d_carrier(dev)) {
-		msg = &dev->c_d_api.reconf_msg;
-	}
-	if (msg) {											// Merge with previously unhandled msg -> Update message only with non empty fields
-		if (n_segs)
-			msg->n_segs = n_segs;
-		if (was_size_changed)
-			msg->was_size_changed = was_size_changed;
-	}
-	nvmeibc_io_resubmitter_wakeup(&dev->dp.resub);	/* Reconf notification passed via resub thread */
-}
-
 /* Configure the OS request queue for TRIM IO operations. Trim's should be
    short for mirrored vols to avoid taking large amount of locks */
 void block_api_os_change_mirorring(struct nvmeibc_block_device *dev)
@@ -2174,7 +2128,6 @@ void block_api_os_change_mirorring(struct nvmeibc_block_device *dev)
 		const unsigned int r = ((n_replicas>1) ? m : n);
 		__set_max_trim(os->atom.queue, r, dev->name);
 	}
-	__mark_carrier_should_update_rider_on_reconf(dev, n_replicas, 0);
 }
 
 /* Allways called when IO is enabled for block device */
@@ -2203,7 +2156,6 @@ void block_api_os_change_size(struct nvmeibc_block_device *dev, bool force_reval
 	}
 	if (resize_occured) {
 		_NT(t_06_api_os_resize, "@DEV_NAME: resized to @SZ[blks]", dev->name, dev->size);
-		__mark_carrier_should_update_rider_on_reconf(dev, 0, 1);
 	}
 }
 
@@ -2457,21 +2409,3 @@ static int __revalidate_sub_vols_of_carrier(struct nvmeiba_atom_os_api *atom)
 }
 
 /*************************** Riders on Top of Carriers ***********************/
-void block_api_os_carrier_ref_add(struct nvmeibc_os_api *car, const struct nvmeibc_os_api *rider)
-{
-	struct nvmeibc_os_api_self_ref *ref = &car->unsafe_self_ref;
-	__verify_on_main_wq_osapi(car);
-	_NT(t_q0_capios, "@DEV_NAME: mounting carrier @DEV_NAME", rider->atom.dev_name, car->atom.dev_name);
-	nvmeiba_atom_part_add(&car->atom);	// Same refcount mechanism as sub-vols/aliases/partitions. As if rider creates an alias for carrier, thus holding a reference
-	WARN(ref->bdev_during_detach != NULL, "nvmeibc flow error\n");		// Detach could not be started because carrier will be used
-}
-
-void block_api_os_carrier_ref_del(struct nvmeibc_os_api *car, const struct nvmeibc_os_api *rider)
-{
-	struct nvmeibc_os_api_self_ref *ref = &car->unsafe_self_ref;
-	__verify_on_main_wq_osapi(car);
-	_NT(t_q1_capios, "@DEV_NAME: umounting carrier @DEV_NAME", rider->atom.dev_name, car->atom.dev_name);
-	WARN(ref->bdev_during_detach != NULL, "nvmeibc flow error\n");		// Detach could not be started because carrier is in use
-	nvmeiba_atom_part_del(&car->atom);
-}
-

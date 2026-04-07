@@ -1870,11 +1870,6 @@ static bool __dp_ec_prepare_op_calc_need_to_copy_bio(struct operation *o, const 
 		return false; //we alreay copied the buffers
 	}
 
-	//the following check was not in EC datapath. Should I enable it?
-	//if (nvmeibc_operation_has_bio_extention(o)){
-	//	return false; //extended rider to carrier bio - rider was supposed to handle this
-	//}
-
 	if (nvmeib_block_io_op_is_write(op)) {
 		return nvmeibc_copy_bio_buffers;
 	}

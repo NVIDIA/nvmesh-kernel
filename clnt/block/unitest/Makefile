@@ -247,7 +247,6 @@ SOURCES += $(CDIR)/recovery/nvmeibc_block_dp_sync_common.c
 SOURCES += $(CDIR)/recovery/nvmeibc_decentralized_unreg.c
 SOURCES += $(CDIR)/recovery/nvmeibc_block_dp_sync_no_write_hole.c
 SOURCES += $(CDIR)/recovery/nvmeibc_block_dp_sync_api_manager_flow_cntrs.c
-SOURCES += $(CDIR)/derived_apis/nvmeibc_block_api_d_carrier.c
 
 # Production code: utilities
 SOURCES += $(SSDA)/perfTest/io_stress/cmp_blocks/cmp_blocks_impl.c

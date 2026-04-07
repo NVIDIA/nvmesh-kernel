@@ -213,17 +213,6 @@ static void __calc_alloc_counts_for_prepare_op(enum nvmeib_block_io_op op, u64 n
 	}
 }
 
-static void __calc_alloc_counts_for_1bmd_op(enum nvmeib_block_io_op op, struct bio_extention *bx, const struct nvmeibc_topology *t, int *pmax_locks, int *pmax_cmds, int *pmax_trim_split_cmds)
-{
-	const int max_replicas = nvmeibc_topology_get_max_num_replicas(t);
-	*pmax_locks = __calc_max_locks_per_blockset(max_replicas, op, t);
-	*pmax_trim_split_cmds = 0;
-	if (op == NVMEIB_BLOCK_IO_OP_READ)
-		*pmax_cmds = 1;
-	else
-		*pmax_cmds = max_replicas + (bx->exec.force_read_b4_write ? 1 : 0);	// Write + pre-read
-}
-
 static int __allocate_commands(int max_commands, struct nvmeibc_block_command **cmds, struct operation *o)
 {
 	NVMESH_BUG(max_commands <= 0, __dump_operation_report, o, "max_commands=%d", max_commands);
@@ -622,47 +611,6 @@ _out:
 	return rv;
 }
 
-// Much like __prepare_commands() but for 1[block] md commands (read/write/cmpxchng)
-static int __prepare_1bmd_cmds(u64 nlbas, u64 start_lba, int c_i, struct nvmeibc_topology *t, struct operation *o, struct bio_extention *bx)
-{
-	int ncmds = 0, rv = 0;
-	struct dp_io_topo_iterator it;
-	struct nvmeibc_block_command *cmds = o->cmds;
-	union vv_bio_inter vv_bio_ptr;
-	vv_bio_inter_init_thick(&vv_bio_ptr, o);
-	dp_io_topo_iterator_init(&it, start_lba, nlbas, t, c_i);
-	dp_io_topo_iterator_next(&it, 'r');
-	NVMESH_WARN((o->op == NVMEIB_BLOCK_IO_OP_DISCARD) || (nlbas != 1), __dump_operation_report, o, "Unexpected op=%d, nlbas=%llu", o->op, nlbas);
-	if (bx->exec.force_read_b4_write) {
-		o->op = NVMEIB_BLOCK_IO_OP_READ;
-		if ((rv = __mirror_cmds_add_for_raid(it.res.r, it.res.rlba, &it.res.nlbas, &vv_bio_ptr, o, &ncmds, false, 0, 0, 0)) < 0)
-			goto _out;
-		o->op = NVMEIB_BLOCK_IO_OP_WRITE;	// Note: Here 'vv_bio_ptr' was not advanced by reads so it is till initialized to start
-		if ((rv = __mirror_cmds_add_for_raid(it.res.r, it.res.rlba, &it.res.nlbas, &vv_bio_ptr, o, &ncmds, false, 0, 0, 0)) < 0)
-			goto _out;
-		__add_mirr_data_cmds_finish_raid(o, 0, ncmds, 1);
-	} else {
-		if ((rv = __mirror_cmds_add_for_raid(it.res.r, it.res.rlba, &it.res.nlbas, &vv_bio_ptr, o, &ncmds, (o->op != NVMEIB_BLOCK_IO_OP_DISCARD), 0, 0, 0)) < 0)
-			goto _out;
-	}
-	nvmeibc_atomic_set(&o->n_uncomp_raids, ncmds);
-_out:
-	cmds[0].ncmds = ncmds; // Needed in any case, for dp_cmds_free_all().
-	if (bx->exec.do_512b_sub_block_x) {
-		struct nvmeibc_block_command *c = cmds, *end = &cmds[cmds->ncmds];
-		for ( ; c < end; c++) {					// For loop to cover compare exchange (read+write)
-			if (nvmeibc_idisk_is_512b_sub_block_x_supported(c->ds->disk)) {
-				struct nvmeibc_block_io_req *req = &c->iocmd->reqs1;
-				struct scatterlist *sgl = req->ndb->table.sgl;
-				req->do_512b_sub_block_x = bx->exec.do_512b_sub_block_x;
-				sgl->offset += (do_512b_sub_block_x_val(req->do_512b_sub_block_x)*512);	// Mark sgl that it is sub block
-				req->ndb->length = sgl->length = 512;
-			}
-		}
-	}
-	return rv;
-}
-
 /* split_rv: negative - split failed, 1 - split not needed, 0 - split done */
 void relink_trim_split_cmds(struct nvmeibc_cmd_lock *ls, int split_rv)
 {
@@ -731,10 +679,6 @@ static bool __dp_mirror_prepare_op_calc_need_to_copy_bio(struct operation *o, in
 		return false; //we alreay copied the buffers
 	}
 
-	if (nvmeibc_operation_has_bio_extention(o)){
-		return false; //extended rider to carrier bio - rider was supposed to handle this
-	}
-
 	if (nvmeib_block_io_op_is_write(op)) {
 		extern bool nvmeibc_copy_bio_buffers;
 		if (!nvmeibc_copy_bio_buffers){
@@ -768,7 +712,7 @@ int dp_mirror_prepare_op(struct operation *o)
 	int max_locks, max_cmds, max_new_cmds;
 	struct nvmeibc_block_command *new_cmds = NULL;
 	//E_PREP_VERIFY
-	const bool is_op_write = (nvmeib_block_io_op_is_write(op)), has_bio_ext = nvmeibc_operation_has_bio_extention(o), is_wrapper = __is_bio_wrapper_for_bio(o->bios[0]->bio);
+	const bool is_op_write = (nvmeib_block_io_op_is_write(op)), is_wrapper = __is_bio_wrapper_for_bio(o->bios[0]->bio);
 	int rv = __check_layout(nlbas, start_lba, t, is_op_write), nprereads = 0;
 	nvmeibc_profiling_start_take_stats(o->nd->preparation_profiler, o);
 	if (unlikely(rv)) {
@@ -778,11 +722,7 @@ int dp_mirror_prepare_op(struct operation *o)
 	for (i = 0; i < o->num_bios; ++i)
 		nflog(t_01_r1prp, "start allocating resources: bio=@BIO, op=@BLOCK_IO_OP, s_lba=@VLBA, nlbas=@NLBAS, bio-vec-len=@LEN", o->bios[i], o->op, start_lba, nlbas, o->bios[i]->bio->bi_vcnt);
 	//E_PREP_COUNT_CMDS_AND_LOCKS
-	if (has_bio_ext && (nlbas == 1)) {
-		__calc_alloc_counts_for_1bmd_op(op, o->md_op.bx, t, &max_locks, &max_cmds, &max_new_cmds);
-	} else {
-		__calc_alloc_counts_for_prepare_op(op, nlbas, t, true /* is_trim_continous */, &max_locks, &max_cmds, &max_new_cmds);
-	}
+	__calc_alloc_counts_for_prepare_op(op, nlbas, t, true /* is_trim_continous */, &max_locks, &max_cmds, &max_new_cmds);
 	if (is_wrapper && is_op_write) {	// Check if we require pre-read for read modify write flow
 		const u64 preread_maps = get_valid_wrapper_block_maps(o->bios[0]);
 		if (unlikely(preread_maps)) {
@@ -839,11 +779,7 @@ int dp_mirror_prepare_op(struct operation *o)
 
 	pos = nvmeibc_get_chunk_ind_of_lba(start_lba, t);
 	dp_fill_locks_for_io(op, nlbas, start_lba, pos, t, o->locks, max_locks, &o->cpu_mask_info);
-	if (has_bio_ext && (nlbas == 1)) {
-		rv = __prepare_1bmd_cmds(nlbas, start_lba, pos, t, o, o->md_op.bx);
-	} else {
-		rv = __prepare_commands( nlbas, start_lba, pos, t, o, max_cmds, nprereads);
-	}
+	rv = __prepare_commands( nlbas, start_lba, pos, t, o, max_cmds, nprereads);
 	nflog(t_03_r1prp, "done allocating resources: o=@OPERATION, max_locks=@N_LOCKS, rv=@RV, o->locks=@LOCKS, o->cmds=@CMDS", o, max_locks, rv, o->locks, o->cmds);
 	if (rv < 0) {
 		_NW(t_04_r1prp, DMESG_PREFIX("@DEV_NAME") ": Error preparing commands=@RV", dev_name, rv);

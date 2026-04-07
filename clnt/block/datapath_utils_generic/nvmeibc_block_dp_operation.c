@@ -241,21 +241,18 @@ void __non_direct_init_verification(struct operation *o)
 static inline void __operation_extended_end_bio(struct operation *o, int rv)
 {
 	int i;
-	if ((rv) && (rv != -EXDEV)) {									// If error occured and not autofailed by rider
+	if (rv) {
 		const u64 slba = get_op_start_lba(o), nlbas = get_op_nlbas(o);
 		BUILD_BUG_ON(sizeof(o->dbg_cntrs.raw) < sizeof(o->dbg_cntrs));
 		for (i = 0; i < o->num_bios; ++i)
 			_NW(warn_dp_operation_extended_end_bio, DMESG_PREFIX("@DEV_NAME") ": Failed IO, operation_type=@BLOCK_IO_OP, vlba=[@VLBA..@VLBA)[blks]. operation=@OPERATION flags=@LLX bio=@BIO, rv=@RV", o->nd->name, o->op, slba, slba + nlbas, o, o->dbg_cntrs.raw, o->bios[i], rv);
 	}
 	__verify_non_direct_bug(o);
-	// __operation_extended_rider_io_end_bio(o, rv);
 	__complete_all_bparts(o, rv);
 }
 
 static void __operation_extended_resubmit(struct operation *o)
 {
- 	//__operation_extended_rider_io_resubmit(o);
-	//__dump_operation(o);
 	if (o->mssa) {	// Topology can change we need to reset previous MSSA values
 		memset(o->mssa, 0, sizeof(*o->mssa));
 		o->mssa = NULL;
@@ -287,26 +284,13 @@ void nvmeibc_operation_move_mem_to_locks(struct operation *o)
 	}
 }
 
-static bool __check_rider_error(struct dp_io_stats *io_stats, int o_rv)
-{
-	if (o_rv == -EXDEV) {
-
-		IO_STATS_INCR(io_stats, DP_IO_STATS_CANCELED_BY_RIDER);
-		return true;
-	}
-	return false;
-}
-
 static void __on_complete_io_stats(struct dp_io_stats *io_stats, struct operation *o, int o_rv)
 {
 	if (!o_rv)
 		return;
 
 	IO_STATS_ADD(io_stats, DP_IO_STATS_LOCK_OP_FAILED, o->dbg_cntrs.n_lcmd_failed);
-
-	if (!__check_rider_error(io_stats, o_rv)) {
-		IO_STATS_INCR(io_stats, DP_IO_STATS_OTHER);
-	}
+	IO_STATS_INCR(io_stats, DP_IO_STATS_OTHER);
 }
 
 void nvmeibc_operation_complete(struct operation *o, bool do_retry, int o_rv)

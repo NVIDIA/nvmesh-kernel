@@ -315,7 +315,6 @@ static int __parse_single_volume_conf(
 	int i, rv;
 	const bool is_hidden =    CHECK_HIDDEN__MAGIC(src->cli_unique_id);
 	const bool is_recoverer = CHECK_RECOVER_MAGIC(src->cli_unique_id);
-	const bool is_carrier = nvmeibc_block_is_any_carrier(&src->volumes[vol_i]);
 	const bool is_shadow = CHECK_SHADOW__MAGIC(src->cli_unique_id);
 	bool attach_volume_as_512B = false;
 
@@ -336,9 +335,6 @@ static int __parse_single_volume_conf(
 	} else if (is_hidden) {
 		_NT(t_psvc06, "making the volume[@VOL_I] attachment hidden @HDR_TYPE", vol_i, dst->volumes->type);
 		dst->volumes->type |= HIDDEN_VOLUME; // Slightly different than RECOVERER_VOLUME
-	}
-	if (is_carrier) { //Remove hidden flag from carriers as we use the queue to issue extended IOs, keep recoverer flag
-		dst->volumes->type &= (~HIDDEN_VOLUME);	// Here recoverer volume becomes visible, mainly for debug
 	}
 	if (is_shadow) {
 		dst->volumes->type |= SHADOW_VOLUME;

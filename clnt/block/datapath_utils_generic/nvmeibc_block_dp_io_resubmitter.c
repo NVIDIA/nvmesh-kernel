@@ -161,12 +161,8 @@ static int __resubmitter_should_launch_syncs_or_free_resources(struct nvmeibc_bl
 	return result;
 }
 
-#define carrier_d_wakeup_cond(nd) \
-	(nvmeibc_block_is_d_carrier(nd) && (nd->c_d_api.reconf_msg.all_bits))
-
 #define basic_wakeup_cond(nd) \
 	__resubmitter_should_launch_syncs_or_free_resources(nd) || \
-	carrier_d_wakeup_cond(nd) || \
 	kthread_should_stop()
 
 #define DEFAULT_RESUB_AWAKE_THROTTLE_THRESHOLD_MS	(1000)
@@ -210,11 +206,6 @@ static int __resubmitter_func(void *p)
 			} else
 				cond_resched(); /* Prevent soft lockup */
 			count = 0;
-		}
-
-		if (nvmeibc_block_is_d_carrier(nd) && (nd->c_d_api.reconf_msg.all_bits) && nd->c_d_api.on_reconf_cb) {
-			nd->c_d_api.on_reconf_cb(&nd->c_d_api);
-			nd->c_d_api.reconf_msg.all_bits = 0;
 		}
 
 		#ifndef BLKCMP_SO_LAUNCH_ON_CALLER_STACK

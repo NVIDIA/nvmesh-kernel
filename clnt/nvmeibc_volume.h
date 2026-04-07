@@ -46,7 +46,7 @@ struct nvmeibc_volume_detach_t {				// unsafe detach assist struct
 	enum volume_detach_state_e {
 		volume_detach_state_start,
 		volume_detach_state_no_io,
-		volume_detach_state_carriers_auto_detach_req,
+		volume_detach_state_cleanup,
 		volume_detach_state_error_retry,
 		volume_detach_state_error_done,
 		volume_detach_state_success_done,
@@ -83,16 +83,6 @@ struct nvmeibc_volume {
 	struct nvmeibc_volume_info info;		// a volume configuration info
 	/* -------------- Polymorphic code -------------- */
 	struct nvmeibc_block_device  *block_dev;	// The default block device interface
-	union {				// Derrived API's of volumes (C++ inherritance)
-		struct {
-			struct nvmeibc_volume* mdv_carrier;
-		} qlc;
-		struct {
-			struct nvmeibc_volume* mdv_carrier;
-			struct nvmeibc_volume* qlc_carrier;
-			struct nvmeibc_volume* wcv_carrier;
-		} mtv;
-	};
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 	struct proc_dir_entry *disks_dir;			// The volumes /proc/.../vol_name/disks/ directory, where disk proc folders and files will reside
 #endif

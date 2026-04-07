@@ -245,16 +245,6 @@ struct dp_block_translation_unit {
 		const struct nvmeibc_idisk* ldisks[N_MAX_RAID_LOCKS]; // Array of disks of locks
 		const char                *ldescr[N_MAX_RAID_LOCKS]; // Type of the lock
 		u16 n_locks;										// Num elements in the arrays above
-		struct {
-			struct nvmeibc_block_device *nds[2];
-			u64                         lbas[2];		// can be ~0ULL if data is not at that device
-			const char                *descr[2];
-			u16 n_nds;
-		} d_carriers;
-		struct {
-			struct nvmeibc_block_device *nd;		// NULL if no MD carrier
-			u64                         lba;
-		} md_carrier;
 	} output;
 };
 /* Generic, unrelated to a specific datapath */
@@ -287,8 +277,6 @@ enum nvmeibc_data_path_type {
 	NVMEIBC_DATA_PATH_ILLEGAL		= 0x0,			// Illegal/Unknown value, IO will be auto disabled
 	NVMEIBC_DATA_PATH_JBODS			= 0x8,			// JBOD/R0 (Without RDMA locks)
 	NVMEIBC_DATA_PATH_MIR_BIO		= 0x2,			// R1/R10, Or Locked-JBOD/R0 (with RDMA locks)
-	NVMEIBC_DATA_PATH_MIR_MDBLK_BIO	= 0x7,			// Mirroring metadata carrier, Mostly R1 datapath
-	NVMEIBC_DATA_PATH_MIR_D_CARRIER	= 0x9,			// Same as above but supports being data carrier (WCV)
 	NVMEIBC_DATA_PATH_EC_R6			= 0x4,			// D+P Erasure coding. Supports R5/R6/R50/R60
 };
 

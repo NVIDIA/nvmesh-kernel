@@ -64,10 +64,6 @@ int try_detach_volume_with_multicomplete(struct nvmeibc_volume *volume, const st
 			reply_detach_error(NVMEIB_C_TO_M_VOLUME_ACK_BUSY);
 			_NE_to_user(t_03_main_det, DMESG_PREFIX("@DEV_NAME"), "Failed to detach volume as it is busy, retry later after there are no processes holding handles to the volume, more information can be found in /proc/@STR/volumes/@DEV_NAME/@STR. Error code: 1048.", volume->hdr.devname, p->proc_dir_root_name, volume->hdr.devname, "client_processes");
 			break;
-		case -ECHILD:				// Busy, should not retry
-			reply_detach_error(NVMEIB_C_TO_M_VOLUME_ACK_BUSY);
-			_NT(t_07_main_det, DMESG_PREFIX("@DEV_NAME: ") "volume has rider, force detach ignored. rv=@RV", volume->hdr.devname, rv);
-			break;
 		case -EXDEV:				// Busy should not retry
 			reply_detach_error(NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED);
 			_NT(t_06_main_det, "volume @DEV_NAME is fully attached, hidden detach ignored", volume->hdr.devname);
