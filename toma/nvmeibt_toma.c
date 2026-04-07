@@ -543,21 +543,14 @@ struct nvmeibt_nm_local_node * nvmeibt_get_nw_node(void)
 static void udev_event_wrapper(struct nvmeibt_wq_entry *wq_entry)
 {
 	NFIN;
-
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, (void *) wq_entry);
 	NFOUT;
 }
 
 static void udev_event_freer(struct nvmeibt_wq_entry *wq_entry)
 {
-	struct udev_event_wq_entry *entry;
-
-	NFIN;
-
-	entry = container_of(wq_entry, struct udev_event_wq_entry, wq_entry);
+	struct udev_event_wq_entry *entry = container_of(wq_entry, struct udev_event_wq_entry, wq_entry);
 	NNVMEIBT_BM_FREE(trace_toma_udev_event_freer, entry);
-
-	NFOUT;
 }
 
 void nvmeibt_toma_mark_is_need_to_update_the_main_select_fds(void)
