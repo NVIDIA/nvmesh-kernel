@@ -435,11 +435,6 @@ char toma_cfg_name[PATH_MAX] = "Unknown-Config-Name";
 char toma_cfg_version[PATH_MAX] = "Unknown-Config-Version";
 //
 static char toma_nm_transport_lib_path[PATH_MAX];
-static int toma_log_file_n = 2;					// Was default value for at least 9 years.
-#ifndef FILE_SIZE_BITS
-	#define FILE_SIZE_BITS 30					/* 1[GB] default log size unless specified otherwise in make file */
-#endif
-static long long toma_log_file_size = (1UL << FILE_SIZE_BITS);
 static unsigned int toma_bin_log_file_n = 40;
 static unsigned int toma_bin_log_file_size_mega = 48;
 //
@@ -573,16 +568,6 @@ void nvmeibt_toma_mark_is_need_to_update_the_main_select_fds(void)
 const char *nvmeibt_toma_get_log_dir_name(void)
 {
 	return (toma_log_dir_name[0] == '\0') ? TOMA_LOG_DIR : toma_log_dir_name;
-}
-
-int nvmeibt_toma_get_n_log_file(void)
-{
-	return toma_log_file_n;
-}
-
-long long nvmeibt_toma_get_log_file_max_size(void)
-{
-	return toma_log_file_size;
 }
 
 unsigned int nvmeibt_toma_get_bin_log_file_n(void)
@@ -1506,8 +1491,8 @@ void nvmeibt_local_disk_set_is_periodic_smart_polling_enabled(bool val, bool pri
 
 static int read_cmdl(int argc, char *argv[], bool is_logable)
 {
-	int op, size_len, rv = 0;
-	long i, size_factor = 1;
+	int op, rv = 0;
+	long i;
 	char *_argv[argc];
 
 	static struct option long_options[] =
@@ -1578,11 +1563,10 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 			toma_bin_log_file_n = (unsigned)atoi(optarg);
 			if (toma_bin_log_file_n > TOMA_BIN_LOG_MAX_N) {
 				toma_bin_log_file_n = TOMA_BIN_LOG_MAX_N;
-			}
-			else if (toma_bin_log_file_n < TOMA_BIN_LOG_MIN_N) {
+			} else if (toma_bin_log_file_n < TOMA_BIN_LOG_MIN_N) {
 				toma_bin_log_file_n = TOMA_BIN_LOG_MIN_N;
 			}
-			fprintf(stdout, "TOMA n bin logs is %d\n", toma_bin_log_file_n);
+			fprintf(stdout, "TOMA num bin logs is %d\n", toma_bin_log_file_n);
 			break;
 		case 'x':
 			toma_bin_log_file_size_mega = (unsigned)atoi(optarg);
@@ -1593,37 +1577,6 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 			}
 			fprintf(stdout, "TOMA bin log size is %d[mb]\n", toma_bin_log_file_size_mega);
 			break;
-		case 'n':
-			toma_log_file_n = (unsigned)atoi(optarg);
-			if (toma_log_file_n > TOMA_LOG_MAX_N) {
-				toma_log_file_n = TOMA_LOG_MAX_N;
-			}
-			fprintf(stdout, "TOMA n logs is %d\n", toma_log_file_n);
-			break;
-		case 's':
-			size_len = (int)strlen(optarg);
-			if (optarg[size_len - 1] == 'K') {
-				optarg[size_len - 1] = '\0';
-				size_factor = 1024;
-			}
-			if (optarg[size_len - 1] == 'M') {
-				optarg[size_len - 1] = '\0';
-				size_factor = 1024 * 1024;
-			}
-			if (optarg[size_len - 1] == 'G') {
-				optarg[size_len - 1] = '\0';
-				size_factor = 1024 * 1024 * 1024;
-			}
-			fprintf(stdout, "optarg=%s\n", optarg);
-			toma_log_file_size = strtoll(optarg, NULL, 0) * size_factor;
-			if (toma_log_file_size < TOMA_LOG_MIN_SIZE ||
-				toma_log_file_size > TOMA_LOG_MAX_SIZE) {
-				fprintf(stdout, "TOMA log file must be >= %lld and <= %lld\n",
-					TOMA_LOG_MIN_SIZE, TOMA_LOG_MAX_SIZE);
-				toma_log_file_size = TOMA_LOG_MAX_SIZE;
-			}
-			fprintf(stdout, "TOMA logfile size %lld\n", toma_log_file_size);
-			break;
 		case 'c':
 			nvmeibt_local_disk_set_is_periodic_smart_polling_enabled(strcasecmp(optarg, "Yes") != 0 &&
 																	 strcasecmp(optarg, "True") != 0 &&
@@ -1632,6 +1585,8 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 			fprintf(stdout, "TOMA cloud-mode is %s\n", optarg);
 			N_Tf(467sagnstdout, "TOMA cloud-mode is @STR", optarg);
 			break;
+		case 's':
+		case 'n':
 		case '4':
 		case 'k':
 			fprintf(stdout, "Deprecated: Param %c val=%s\n", op, optarg);
@@ -1671,8 +1626,6 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 			} else {
 				fprintf(stdout, "usage: %s\n", argv[0]);
 				fprintf(stdout, "\t[-l TOMA log file name]\n");
-				fprintf(stdout, "\t[-n number of log files]\n");
-				fprintf(stdout, "\t[-s log file size in K or M or G]\n");
 				fprintf(stdout, "\t[-c cloud-mode <Yes/No>]\n");
 				fprintf(stdout, "\t[-m max sm query rate (per second)\n");
 				fprintf(stdout, "\t[-S use_srq]\n");

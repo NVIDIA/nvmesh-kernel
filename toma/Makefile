@@ -2,11 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # TOMA make file
-
 # Supported command line options (the default is in ()):
 # MOD=<(debug),release> for compilation mode
 # DEBUG=<yes,(no)> if yes in release compilation it adds the TOMA_DEBUG define
-# FILE_SIZE_BITS=<bits> the size of TOMA log file (1 << FILE_SIZE_BITS)
 #
 
 $(info TOMA_MAKEFILE_START MOD=$(MOD))
@@ -62,14 +60,6 @@ SHARED_DIRS_nvmeibt_toma =
 PROJECT_DIRS_EXCLUDES_nvmeibt_toma = ./interfaces/network/nvmeibt_nm_udp.c ./interfaces/network/nvmeibt_nm_ibud.c
 # the binary compiler defines
 COMPILER_DEFINES_nvmeibt_toma = TOMA TOMA_IB_ROCE
-
-# set the log file size
-ifneq ($(LOGSIZEB),)
-else
-# make the default in debug mode to be 1GB
-LOGSIZEB=30
-endif
-COMPILER_DEFINES_nvmeibt_toma += FILE_SIZE_BITS=$(LOGSIZEB)
 ifeq ($(MOD),$(DEBUG_STR))
 COMPILER_DEFINES_nvmeibt_toma += TOMA_DEBUG
 else ifeq ($(MOD),$(RELEASE_STR))

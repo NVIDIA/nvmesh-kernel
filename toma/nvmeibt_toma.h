@@ -51,8 +51,6 @@ void nvmeibt_toma_set_main_thread(void);
 bool nvmeibt_toma_is_main_thread(void);
 const char *nvmeibt_toma_get_executable_dir(void);
 const char *nvmeibt_toma_get_log_dir_name(void);
-int nvmeibt_toma_get_n_log_file(void);
-long long nvmeibt_toma_get_log_file_max_size(void);
 unsigned int nvmeibt_toma_get_bin_log_file_n(void);
 unsigned int nvmeibt_toma_get_bin_log_file_size(void);
 void *nvmeibt_toma_extract_user(void *buf);

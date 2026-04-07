@@ -10,7 +10,6 @@
 #include "linux/limits.h"
 
 struct trace_channel *nvmeibt_trace_long;
-//struct trace_channel *nvmeibt_trace_short;
 struct trace_channel *nvmeibt_trace_eph;
 struct trace_channel *nvmeibt_trace_eter;		// Toma Error / Warning, Possible info
 
