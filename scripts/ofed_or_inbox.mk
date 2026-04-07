@@ -79,7 +79,7 @@ ifeq ($(OFED_WE_R), yes)
     # Mellanox OFED
     ifeq ($(OFED_SRC_DIR),)
         # OFED_SRC_DIR not defined - Check for DKMS
-        OFED_DKMS_VERS := $(shell ofed_info -l | grep mlnx-ofed-kernel-dkms | awk '{print $3;}')
+        OFED_DKMS_VERS := $(shell ofed_info -l | grep mlnx-ofed-kernel-dkms | awk '{print $$3;}')
         OFED_DKMS_VERS += $(shell ls /var/lib/dkms/mlnx-of*kernel/)
         OFED_DKMS_VER := $(firstword $(OFED_DKMS_VERS))
         ifneq ($(OFED_DKMS_VER),)
