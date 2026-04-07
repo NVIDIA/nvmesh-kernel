@@ -43,9 +43,9 @@ trap 'rm -rf "$CACHE_DIR"' EXIT
 strip_and_grep() {
     local outer_pattern="$1"
     shift
-    # Cache key from file paths
-    local cache_key="${*//\//_}"
-    cache_key="${cache_key// /__}"
+    # Cache key: hash of paths (joined path strings can exceed NAME_MAX as a filename)
+    local cache_key
+    cache_key=$(printf '%s\0' "$@" | sha256sum | awk '{print $1}')
     local cache_file="$CACHE_DIR/$cache_key"
     if [[ ! -f "$cache_file" ]]; then
         sed -e '/\/\*/,/\*\//{s:/\*.*\*/::g; t; :a; /\/\*/,/\*\//{s:/\*.*\*/::g; t; N; b a}; s:/\*.*\*/::g}' "$@" 2>/dev/null > "$cache_file"
@@ -291,8 +291,8 @@ grep_rdma_func_var "KS_IB_SA_PATH_REC_GET_HAS_RETRIES" "int ib_sa_path_rec_get" 
 grep_check "KS_HAS_MMIOWB" "#define\s+mmiowb\s*\(\)" "" "arch/x86/include/asm/io.h" "$KSRC1"
 grep_check "KS_HAS_KERNEL_SOCKPTR" "(?s)." "" "include/linux/sockptr.h" "$KSRC1" "1" "0"
 
-grep_check "KS_HAS_DO_GETTIMEOFDAY" "void do_gettimeofday" "void" "include/linux/time.h include/linux/timekeeping.h include/linux/timekeeping32.h" "$KSRC1"
-grep_check "KS_HAS_GETNSTIMEOFDAY" "void getnstimeofday" "void" "include/linux/timekeeping32.h" "$KSRC1"
+grep_ksrc_func_var "KS_HAS_DO_GETTIMEOFDAY" "void do_gettimeofday" "" "include/linux/time.h include/linux/timekeeping.h include/linux/timekeeping32.h"
+grep_ksrc_func_var "KS_HAS_GETNSTIMEOFDAY" "void getnstimeofday" "" "include/linux/time.h include/linux/timekeeping.h include/linux/timekeeping32.h"
 file_exists_define "HAVE_TIMECOUNTER_H" "include/linux/timecounter.h" "$KSRC1" "1" "0"
 file_exists_define "HAVE_CGROUP_RDMA_H" "include/linux/cgroup_rdma.h" "$INC_RDMA $KSRC1" "1" "0" "all"
 
