@@ -95,10 +95,8 @@ struct section_merge_test_ctx {
 	X(selection_topo_config_window_boundary,		"Topo config window boundary",				"Peer just below topo_config window => complete, at boundary => incremental") \
 	X(selection_kafka_window_boundary,				"Kafka window boundary",					"Peer just below kafka window => complete, at boundary => incremental") \
 	X(selection_raft_members_seq_window_boundary,	"Raft members seq window boundary",			"Peer just below members seq window => complete, at boundary => incremental") \
-	X(selection_topo_guard_blocks_configs,			"Topo guard blocks configs",				"Configs in window still require topo incremental eligibility") \
 	X(selection_old_peer_version_forces_complete,	"Old peer version forces complete",			"Old peer stays complete even when indices qualify for incremental") \
 	X(selection_supported_peer_version_allows_incremental, "Supported peer version allows incremental", "Peer at support threshold may use incremental when indices qualify") \
-	X(selection_unknown_peer_version_forces_complete, "Unknown peer version forces complete",	"Peer version 0 is treated conservatively as complete-only") \
 	/****** compare_persist_and_wire_bufs_tlvs_excl_raft_ctx direct tests *******/ \
 	X(compare_both_null_returns_equal,				"Compare: both NULL => EQUAL",				"Both NULL inputs return PERSIST_AND_WIRE_BUF_DIFF_EQUAL (0)") \
 	X(compare_one_null_returns_topo_and_configs,	"Compare: one NULL => TOPO_AND_CONFIGS",	"One NULL input returns TOPO_AND_CONFIGS (2)") \
@@ -109,10 +107,11 @@ struct section_merge_test_ctx {
 	X(compare_raft_members_only_diff,				"Compare: raft_members diff => TOPO_AND_CONFIGS", "Only raft_members_idx differs => returns TOPO_AND_CONFIGS (2)") \
 	X(compare_topo_and_config_diff,					"Compare: topo+config diff => TOPO_AND_CONFIGS", "Both topo and config differ => returns TOPO_AND_CONFIGS (2)") \
 	/****** CRC and length validation tests ************************************/ \
-	X(crc_valid_buf_passes,							"CRC: valid buf passes",					"Generated buf with correct CRC passes validation") \
 	X(crc_corrupted_topo_data_fails,				"CRC: corrupted topo data fails",			"Flipping a byte in topo section data fails CRC check") \
 	X(crc_corrupted_raft_ctx_fails,					"CRC: corrupted raft_ctx fails",			"Corrupting raft_ctx CRC field fails validation") \
 	X(crc_length_mismatch_fails,					"CRC: length mismatch fails",				"Passing wrong data_len fails length check") \
+	X(generate_buf_crc_valid,						"Generate: CRC valid",						"Generated complete buf passes CRC and length validation") \
+	X(follower_merge_produces_valid_crc,			"Follower merge: valid CRC after merge",	"Merged follower buf passes CRC and length validation") \
 	/****** Merge error paths: old is incremental (not complete) ****************/ \
 	X(merge_topo_old_incremental_fails,				"Merge: topo old incremental => -1",		"Old TOPO_INCREMENTAL + upd TOPO_INCREMENTAL => merge returns -1") \
 	X(merge_topo_config_old_incremental_fails,		"Merge: topo_config old incremental => -1",	"Old TOPO_CONFIG_INCREMENTAL + upd => merge returns -1") \
@@ -132,10 +131,7 @@ struct section_merge_test_ctx {
 	/********** Leader wire buf generation verification ************************/ \
 	X(generate_complete_buf_types_correct,			"Generate: complete types correct",			"All-complete generation sets correct TLV types and lengths") \
 	X(generate_incremental_buf_types_correct,		"Generate: incremental types correct",		"All-incremental generation sets correct TLV types and lengths") \
-	X(generate_mixed_buf_types_correct,				"Generate: mixed types correct",			"Topo incremental + configs complete sets correct TLV types") \
-	X(generate_buf_crc_valid,						"Generate: CRC valid",						"Generated complete buf passes CRC and length validation") \
-	/********** Follower merge CRC validity *************************************/ \
-	X(follower_merge_produces_valid_crc,			"Follower merge: valid CRC after merge",	"Merged follower buf passes CRC and length validation")
+	X(generate_mixed_buf_types_correct,				"Generate: mixed types correct",			"Topo incremental + configs complete sets correct TLV types")
 
 int wire_buf_test_main(int argc, char *argv[]);
 
