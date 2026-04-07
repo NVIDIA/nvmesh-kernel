@@ -870,7 +870,7 @@ int nvmeibt_kafka_generic_log_msg_to_mgmt_send(const char *unique_key, char *hea
 /******************************************************************************/
 /************                   CONSUMERS                       ***************/
 /******************************************************************************/
-#define CONSUMER_DEFAULT_INIT {{0}, NULL, 0 /*zero partition*/, 0, RD_KAFKA_OFFSET_INVALID, RD_KAFKA_OFFSET_INVALID}
+#define CONSUMER_DEFAULT_INIT(c_type) {{0}, NULL, 0 /*zero partition*/, 0, RD_KAFKA_OFFSET_INVALID, RD_KAFKA_OFFSET_INVALID, c_type}
 static struct t_consumer_impl {
 	char topic_name[128];					// Topic name for high-level consumer API
 	rd_kafka_t *consumer;
@@ -878,26 +878,30 @@ static struct t_consumer_impl {
 	int32_t	cnt_zero_consecutive_consumes;
 	int64_t consumer_offset;				// Latest received message
 	int64_t	offset_committed;				// ACK'ed to kafka
-} k_CMD = CONSUMER_DEFAULT_INIT, k_HW_full_config = CONSUMER_DEFAULT_INIT,		// Each Toma consumes such queue
-  k_incremental_VOL_updates = CONSUMER_DEFAULT_INIT, k_incremental_TARGET_updates = CONSUMER_DEFAULT_INIT;	// Only leader consumes from here
+	char type;								// 1[byte] logging to which identifies consumer, instead of long name and topic_name
+} k_CMD = CONSUMER_DEFAULT_INIT('C'), k_HW_full_config = CONSUMER_DEFAULT_INIT('H'),		// Each Toma consumes such queue
+  k_incremental_VOL_updates = CONSUMER_DEFAULT_INIT('V'), k_incremental_TARGET_updates = CONSUMER_DEFAULT_INIT('R');	// Only leader consumes from here
 
+#define KC_TYPE     "KCONSUMER@CHAR_K"			// Short efficient print to logs
+#define KC_FULL_FMT KC_TYPE "(@STR|@STR)"		// Full info
+#define KC_FULL_VAL(K) (K)->type, rd_kafka_name((K)->consumer), (K)->topic_name
 static void __consumer_stop_on_raft(struct t_consumer_impl *k) {
 	if (k->consumer) {
 		rd_kafka_assign(k->consumer, NULL);	// Stop consuming by unassigning all partitions
-		N_Tf(yzbh7dk, "@STR: raft is stopping to receive incremental updates, consumer->@KAFKA_OFST", rd_kafka_name(k->consumer), k->consumer_offset);
+		N_Tf(yzbh7dk, KC_TYPE " Stopping msgs consumer->@KAFKA_OFST", k->type, k->consumer_offset);
 	}
 }
 
 static void consumer_close(struct t_consumer_impl *k) {
 	rd_kafka_resp_err_t			k_err;
 	if (k->consumer) {
-		N_Tf(vbsjdy3, "@STR @STR", rd_kafka_name(k->consumer), k->topic_name);
+		N_Tf(vbsjdy3, KC_FULL_FMT, KC_FULL_VAL(k));
 		rd_kafka_assign(k->consumer, NULL);		// Unassign all partitions (stops consumption)
 		N_Tf(vbsjdy30, "rd_kafka_assign(NULL) ended");
 		k_err = rd_kafka_consumer_close(k->consumer);
 		N_Tf(vbsjdy34, "close ended");
 		if (k_err)
-			N_Ef(vbsjdy33, "close err (consumer='@STR' err=@STR", rd_kafka_name(k->consumer), rd_kafka_err2str(k_err));
+			N_Ef(vbsjdy33, KC_FULL_FMT " close err=@STR", KC_FULL_VAL(k), rd_kafka_err2str(k_err));
 		rd_kafka_destroy(k->consumer);
 		N_Tf(vbsjdy35, "destroy ended");
 		k->consumer = NULL;
@@ -911,7 +915,7 @@ static rd_kafka_resp_err_t __consumer_assign_partition_and_offset(struct t_consu
 	k_err = rd_kafka_assign(k->consumer, pl);
 	rd_kafka_topic_partition_list_destroy(pl);
 	if (k_err == RD_KAFKA_RESP_ERR_NO_ERROR) {
-		N_Tf(evweyha, "@STR, @STR rd_kafka_assign(@KAFKA_OFST), consumer->@KAFKA_OFST", rd_kafka_name(k->consumer), k->topic_name, start_offset, k->consumer_offset);
+		N_Tf(evweyha, KC_FULL_FMT " rd_kafka_assign(@KAFKA_OFST), consumer->@KAFKA_OFST", KC_FULL_VAL(k), start_offset, k->consumer_offset);
 		if (start_offset > 0)
 			k->consumer_offset = start_offset - 1;	// As If previous message was read
 	}
@@ -981,13 +985,13 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 
 	k_msg = rd_kafka_consumer_poll(k->consumer, 0 /* non-blocking*/);
 	if (!k_msg) {
-		N_Df(cvbz84k, "(@STR) returned NULL", rd_kafka_name(k->consumer));
+		N_Df(cvbz84k, KC_TYPE " returned NULL", k->type);
 		if ((++k->cnt_zero_consecutive_consumes % 1024) == 0) {		// Periodically check if we still have partition assignment
 			rd_kafka_topic_partition_list_t *pl = NULL;
 			const rd_kafka_resp_err_t err = rd_kafka_assignment(k->consumer, &pl);
 			const int n_part = (pl ? pl->cnt : 0);
 			if ((err == RD_KAFKA_RESP_ERR_NO_ERROR) && (n_part != 1)) {
-				N_Wf(cvbz84k2, "(@STR) unexpected num partitions=@INT will reinit", rd_kafka_name(k->consumer), n_part);
+				N_Wf(cvbz84k2, KC_FULL_FMT " unexpected num partitions=@INT will reinit", KC_FULL_VAL(k), n_part);
 				__print_partitions_list(pl);
 				check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__FATAL);
 			}
@@ -996,7 +1000,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 		return 1;
 	}
 	k->cnt_zero_consecutive_consumes = 0;
-	N_Tf(fhs8lad, "(@STR, @STR) returned k_msg(err=@STR), msg_@KAFKA_OFST, consumer->@KAFKA_OFST", rd_kafka_name(k->consumer), k->topic_name, rd_kafka_err2str(k_msg->err), k_msg->offset, k->consumer_offset);
+	N_Tf(fhs8lad, KC_TYPE ".k_msg(err=@INT).msg_@KAFKA_OFST, consumer->@KAFKA_OFST", k->type, (int)k_msg->err, k_msg->offset, k->consumer_offset);
 	if (k_msg->err == RD_KAFKA_RESP_ERR_NO_ERROR) {
 		const int64_t new_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, k_msg->offset);
 		if (strstr((char *)(k_msg->payload), "assphrase")) { // Don't print passphrases to log
@@ -1005,7 +1009,7 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, 1, "", (char *)(k_msg->payload), k_msg->len);
 		}
 		if (k->consumer_offset >= new_offset) {
-			N_Ef(__AUTOID__, "(@STR) @STR: offset going back consumer->@KAFKA_OFST >= msg_@KAFKA_OFST, ignorring message", rd_kafka_name(k->consumer), k->topic_name, k->consumer_offset, new_offset);
+			N_Ef(__AUTOID__, KC_FULL_FMT " offset going back consumer->@KAFKA_OFST >= msg_@KAFKA_OFST, ignorring message", KC_FULL_VAL(k), k->consumer_offset, new_offset);
 			rv = 1;		// Ignore the message
 			goto out;
 		}
@@ -2065,11 +2069,11 @@ static int kafka_commit_by_offset_async(struct t_consumer_impl *k, const int64_t
 	rd_kafka_resp_err_t rv = RD_KAFKA_RESP_ERR_NO_ERROR;
 	if (k->consumer) {
 		rd_kafka_topic_partition_list_t *offsets = rd_kafka_topic_partition_list_new(1);
-		N_Tf(76hd89e, "@STR: Committing_@KAFKA_OFST, last_read_msg_@KAFKA_OFST", rd_kafka_name(k->consumer), offset, k->consumer_offset);
+		N_Tf(76hd89e, KC_TYPE " committing_@KAFKA_OFST, last_read_msg_@KAFKA_OFST", k->type, offset, k->consumer_offset);
 		rd_kafka_topic_partition_list_add(offsets, k->topic_name, k->consumer_partition);
 		offsets->elems[0].offset = purify_offset(offset) + 1;	// The API says "last_consumed(processed) + 1"
 		rv = rd_kafka_commit(k->consumer, offsets, 1 /*async*/);
-		NTOMA_ASSERT(mdvewks, rv == RD_KAFKA_RESP_ERR_NO_ERROR, "@STR: commit_@KAFKA_OFST rv=@INT '@STR'", k->topic_name, offsets->elems[0].offset, rv, rd_kafka_err2str(rv));
+		NTOMA_ASSERT(mdvewks, rv == RD_KAFKA_RESP_ERR_NO_ERROR, KC_FULL_FMT " commit_@KAFKA_OFST rv=@INT '@STR'", KC_FULL_VAL(k), offsets->elems[0].offset, rv, rd_kafka_err2str(rv));
 		rd_kafka_topic_partition_list_destroy(offsets);
 		k->offset_committed = offset;
 	}

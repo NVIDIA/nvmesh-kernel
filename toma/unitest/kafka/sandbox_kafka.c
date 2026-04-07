@@ -48,6 +48,7 @@ void sim_broker_topic_destroy(struct sim_broker_topic *t) {
 	free(t->msgs);
 }
 
+#define B_TYPE "KBROKER@CHAR_K."
 void sim_broker_topic_msg_produce(struct sim_broker_topic *t, void *payload, size_t len, const bool should_copy) {
 	struct sim_msg *m;
 	uint32_t i;
@@ -66,7 +67,7 @@ void sim_broker_topic_msg_produce(struct sim_broker_topic *t, void *payload, siz
 		m->payload = payload;
 	}
 	m->len = len;
-	N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, sim_broker_topic_get_msg_offset_last(t), i);
+	N_Tf(__AUTOID__, B_TYPE "@KAFKA_OFST, slot[@INT]", t->type, sim_broker_topic_get_msg_offset_last(t), i);
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
 }
 void sim_broker_topic_msg_inject_next_msg_offset(struct sim_broker_topic *t, int delta_offset) {
@@ -86,11 +87,11 @@ bool sim_broker_topic_msg_consume(struct sim_broker_topic *t, rd_kafka_message_t
 		rv->payload = m->payload;				// Pointer to buffer in queue. Will remain valid until msg is commited
 		rv->offset = t->cur_offset++;
 		if (t->err_inj.next_msg_delta_offset) {
-			N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST+@INT, slot[@INT]", t->type, rv->offset, t->err_inj.next_msg_delta_offset, i);
+			N_Tf(__AUTOID__, B_TYPE "@KAFKA_OFST+@INT, slot[@INT]", t->type, rv->offset, t->err_inj.next_msg_delta_offset, i);
 			rv->offset += t->err_inj.next_msg_delta_offset;
 			t->err_inj.next_msg_delta_offset = 0;
 		} else {
-			N_Tf(__AUTOID__, "KBROKER[@CHAR].@KAFKA_OFST, slot[@INT]", t->type, rv->offset, i);
+			N_Tf(__AUTOID__, B_TYPE "@KAFKA_OFST, slot[@INT]", t->type, rv->offset, i);
 		}
 		MAX_WITH(t->debug_highest_offset_ever_reached, t->cur_offset);
 	} else { /* No message at this offset */}
@@ -123,7 +124,7 @@ void sim_broker_topic_ack_offsets(struct sim_broker_topic *t, int64_t ack_offset
 	t->committed_offset = ack_offset;
 	if (t->committed_offset >= t->cur_offset)		// Msg was N read, cur moved back (to N-x) and now msg N commited. Real kafka does not move cur_offset, but upon restart it will move it to earliest
 		sim_broker_topic_reset_to_earliest(t);		// Implemented not like kafka: We move cur to earliest immediately because we free commited messages
-	N_Tf(__AUTOID__, "KBROKER[@CHAR].commited:@KAFKA_OFST -> @KAFKA_OFST, cur_@KAFKA_OFST, last_slot[@INT]", t->type, prev_committed, ack_offset, t->cur_offset, (int)(i % t->capacity));
+	N_Tf(__AUTOID__, B_TYPE "commited:@KAFKA_OFST -> @KAFKA_OFST, cur_@KAFKA_OFST, last_slot[@INT]", t->type, prev_committed, ack_offset, t->cur_offset, (int)(i % t->capacity));
 	BUG_ON((t->n_msgs == 0) && (t->type == KTOPIC_TYPE_M2T_HW_CFG));		// Hardware configuration should always exist. This queue must never be empty
  _out:
 	BUG_ON(pthread_mutex_unlock(&t->lock) != 0);
@@ -250,7 +251,7 @@ void rd_kafka_topic_destroy(rd_kafka_topic_t *kt) {
 	memset(kt, 0, sizeof(*kt));
 }
 
-#define ASSIGN_FMT "KBROKER[@CHAR].committed_@KAFKA_OFST, cur_@KAFKA_OFST"
+#define ASSIGN_FMT B_TYPE "committed_@KAFKA_OFST, cur_@KAFKA_OFST"
 #define ASSIGN_ARG(bt) bt->type, bt->committed_offset, bt->cur_offset
 rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partition_list_t *pl) {
 	rd_kafka_topic_t *kt = &ko->topic;
@@ -328,8 +329,8 @@ rd_kafka_resp_err_t rd_kafka_committed(rd_kafka_t *me, rd_kafka_topic_partition_
 	pl->elems[0].offset = sim_broker_topic_get_msg_offset_first(me->topic.broker_topic);
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
-char* rd_kafka_err2str(rd_kafka_resp_err_t e) { (void)e; return "kerr"; }
-char* rd_kafka_err2name(rd_kafka_resp_err_t e) { (void)e; return "kerr"; }
+char* rd_kafka_err2str( rd_kafka_resp_err_t e) { return e ? "kerr2do" : "OK"; }
+char* rd_kafka_err2name(rd_kafka_resp_err_t e) { return e ? "kerr2do" : "OK"; }
 rd_kafka_resp_err_t rd_kafka_last_error(void) { return RD_KAFKA_RESP_ERR_NO_ERROR; }
 rd_kafka_conf_t* rd_kafka_conf_new(void) { return calloc(1, sizeof(rd_kafka_conf_t)); }
 void rd_kafka_conf_destroy(rd_kafka_conf_t* me) { free(me); }
@@ -384,7 +385,7 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char *name, rd_kafka_t
 		else BUG_ON(true);				// Unknown topic which Toma will not listen too
 	}
 	kt->broker_topic = sim_broker_topic_find_by(kt->type);
-	N_Tf(__AUTOID__, "@STR: alloc new topic @STR -> KBROKER[@CHAR].cur_@KAFKA_OFST", k->name, kt->name, kt->type, kt->broker_topic->cur_offset);
+	N_Tf(__AUTOID__, "@STR: alloc new topic @STR -> " B_TYPE "cur_@KAFKA_OFST", k->name, kt->name, kt->type, kt->broker_topic->cur_offset);
 	return kt;
 }
 

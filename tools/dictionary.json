@@ -1792,6 +1792,11 @@
         "type": "char",
         "fmt": "%c"
     },
+    "@CHAR_K": {
+        "size": 8,
+        "type": "char",
+        "fmt": "<%c>"
+    },
     "@CHUNK": {
         "size": "string",
         "type": "string",
