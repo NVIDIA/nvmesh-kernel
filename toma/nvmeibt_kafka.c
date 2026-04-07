@@ -20,6 +20,20 @@
 /*
  * The protocol with MGMT is described in:
  * https://nvidia-my.sharepoint.com/:w:/r/personal/tleibo_nvidia_com/_layouts/15/doc2.aspx?sourcedoc=%7B42ddc038-38b6-493c-a722-cd3c63c48d06%7D&action=edit&wdPid=79c0c0e&cid=59845700-e917-4431-a94a-eab1034bff32
+ * There are several variables that hold the kafka_offset :
+ *  k_incremental_updates_consumer_offset	// Only the leader actually uses it
+ *  										// A target-node that was just added (has no persistence) also reads it, and can become a raft candidate only if it is the first added target
+ *  										// When kafka reads a new record it sends it to the toma leader using a TOMA_WAKEUP_TYPE_KAFKA
+ *
+ *  leader_kafka_offset_mgmt;					// Updated upon TOMA_WAKEUP_TYPE_KAFKA, when updating the mgmt_config
+ *	leader_kafka_offset_calculating;			// The offset_mgmt used in calculate, will become offset_to_commit upon successful calculate
+ *	leader_kafka_offset_to_commit;				// Updated after calc (that updated from mgmt config)
+ *	leader_kafka_offset_committed_by_majority;	// Updated when offset has a majority
+ *	follower_kafka_offset_submitted;			// To persistence
+ *	follower_kafka_offset_committed;			// On persistence
+ *  follower_kafka_offset_applied;				// When told to apply
+ *
+ * 	leader_kafka_offset_blocking_incremental_TARGET_updates	// Can continue when == (KAFKA_OFFSET, leader_committed_by_majority)
  */
 
 /*******************    offset service functions         **********************/

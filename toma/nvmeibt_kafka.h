@@ -10,25 +10,10 @@
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
-#include "interfaces/nvmeibt_msg_queue_api.h"
-#include "../common/nvmeib_hash.h"
-
-/* kafka_offset life-cycle
- * There are several variables that hold the kafka_offset :
- *  k_incremental_updates_consumer_offset	// Only the leader actually uses it
- *  										// A target-node that was just added (has no persistence) also reads it, and can become a raft candidate only if it is the first added target
- *  										// When kafka reads a new record it sends it to the toma leader using a TOMA_WAKEUP_TYPE_KAFKA
- *
- *  leader_kafka_offset_mgmt;					// Updated upon TOMA_WAKEUP_TYPE_KAFKA, when updating the mgmt_config
- *	leader_kafka_offset_calculating;			// The offset_mgmt used in calculate, will become offset_to_commit upon successful calculate
- *	leader_kafka_offset_to_commit;				// Updated after calc (that updated from mgmt config)
- *	leader_kafka_offset_committed_by_majority;	// Updated when offset has a majority
- *	follower_kafka_offset_submitted;			// To persistence
- *	follower_kafka_offset_committed;			// On persistence
- *  follower_kafka_offset_applied;				// When told to apply
- *
- * 	leader_kafka_offset_blocking_incremental_TARGET_updates	// Can continue when == (KAFKA_OFFSET, leader_committed_by_majority)
- */
+#ifndef NVMEIBT_TOMA_MSG_Q_API_H
+	#define NVMEIBT_TOMA_MSG_Q_API_H
+	#include <librdkafka/rdkafka.h>		// Implemented via kafka but to debug it, can be replaced with a different msg queue injection system
+#endif
 
 #define MGMT_LOG_MSG_HEADER_LEN		96
 #define MGMT_LOG_MSG_MSG_LEN		256

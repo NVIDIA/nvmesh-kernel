@@ -3,10 +3,9 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
-#ifndef NVMEIBT_TOMA_MSG_Q_API_H
-#define NVMEIBT_TOMA_MSG_Q_API_H	// Bypass contents of "interfaces/nvmeibt_msg_queue_api.h"
-/* This header replaces <rdkafka.h> in the sandbox build.
- * Implemented according to: https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html
+#pragma once
+#define NVMEIBT_TOMA_MSG_Q_API_H	// Bypass #include <librdkafka/rdkafka.h> in the sandbox build.
+/* Implemented according to: https://docs.confluent.io/platform/current/clients/librdkafka/html/rdkafka_8h.html
  * And https://github.com/confluentinc/librdkafka/blob/v2.13.0/src/rdkafka.h */
 
 enum { RD_KAFKA_OFFSET_BEGINNING = -2, /*RD_KAFKA_OFFSET_END = -1,*/  RD_KAFKA_OFFSET_STORED = -1000, RD_KAFKA_OFFSET_INVALID = -1001};
@@ -82,5 +81,3 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *rk, char *errstr, size_t errstr_size);
 static inline int         rd_kafka_version(    void)	{ return 0x020501ff; }	// hex MM.mm.rr.xx
 static inline const char* rd_kafka_version_str(void)	{ return "2.5.1"; }
-
-#endif // NVMEIBT_TOMA_MSG_Q_API_H
