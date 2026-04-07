@@ -33,9 +33,9 @@ struct dp_targets const *nvmeibc_volume_targets_base(struct nvmeibc_volume_targe
 	return &self->base;
 }
 
-struct list_head *nvmeibc_volume_targets_get_disks(struct nvmeibc_volume_targets const* self)
+struct list_head const* __nvmeibc_volume_targets_get_disks_impl(struct nvmeibc_volume_targets const* self)
 {
-	return (struct list_head *)&self->disks;
+	return &self->disks;
 }
 
 void nvmeibc_volume_targets_add_disk_id(struct nvmeibc_volume_targets* self, struct nvmeibc_disk_id *disk_id)
@@ -46,7 +46,7 @@ void nvmeibc_volume_targets_add_disk_id(struct nvmeibc_volume_targets* self, str
 struct nvmeibc_disk_id *nvmeibc_volume_targets_find_disk_id_by_name(struct nvmeibc_volume_targets const* self, const char *disk_name)
 {
 	struct nvmeibc_disk_id *disk_id;
-	struct list_head *disks = nvmeibc_volume_targets_get_disks(self);
+	struct list_head const *disks = nvmeibc_volume_targets_get_disks(self);
 
 	list_for_each_entry(disk_id, disks, link) {
 		if (!strncmp(disk_id->name, disk_name, sizeof(disk_id->name))) {
@@ -59,7 +59,7 @@ struct nvmeibc_disk_id *nvmeibc_volume_targets_find_disk_id_by_name(struct nvmei
 struct nvmeibc_disk_id *nvmeibc_volume_targets_find_disk_id_by_disk(struct nvmeibc_volume_targets const* self, struct nvmeibc_disk const* disk)
 {
 	struct nvmeibc_disk_id *disk_id;
-	struct list_head *disks = nvmeibc_volume_targets_get_disks(self);
+	struct list_head const* disks = nvmeibc_volume_targets_get_disks(self);
 
 	list_for_each_entry(disk_id, disks, link) {
 		if (disk_id->disk == disk) {
@@ -72,7 +72,7 @@ struct nvmeibc_disk_id *nvmeibc_volume_targets_find_disk_id_by_disk(struct nvmei
 int nvmeibc_volume_targets_count_disks(struct nvmeibc_volume_targets const* self)
 {
 	struct nvmeibc_disk_id *disk_id;
-	struct list_head *disks = nvmeibc_volume_targets_get_disks(self);
+	struct list_head const* disks = nvmeibc_volume_targets_get_disks(self);
 	int n_disks = 0;
 
 	list_for_each_entry(disk_id, disks, link) {

@@ -15,6 +15,7 @@
 #include "nvmeib_rdma.h"
 #include "nvmeib_trend.h"
 #include "nvmeib_measured_work.h"
+#include "nvmeibc_volume_targets.h"
 
 enum {
 	/* max rdma reads to get the disk completion phase bit right */
@@ -330,7 +331,6 @@ struct nvmeibc_disk_id_update_params{
 	bool is_attach;
 };
 
-#include "nvmeibc_volume_targets.h"
 
 #ifdef DEBUG_TRANSFERS
 #define DEBUG_TRANSFERS_STACK_SIZE 8

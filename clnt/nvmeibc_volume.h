@@ -150,7 +150,7 @@ int nvmeibc_volume_get_cpu_masks(struct nvmeibc_volume *volume, struct nvmeib_cp
 #define PROCFS_DISKS_STR "disks"
 int  nvmeibc_volume_disk_stats_create(struct proc_dir_entry *vol_dir, struct nvmeibc_volume *volume);
 void nvmeibc_volume_disks_stats_destroy(struct nvmeibc_volume *volume);
-void nvmeibc_volume_disks_stats_clear(const struct nvmeibc_volume *volume, const int which);
+void nvmeibc_volume_disks_stats_clear(struct nvmeibc_volume *volume, const int which);
 /*
  * For debug: dump (to log) all disks that are being used by the volume
  */
@@ -168,6 +168,6 @@ void nvmeibc_volume_to_json(const struct nvmeibc_volume *volume, struct jdr* jdr
  * NOTE: volume spinlock is held while calling call_fn.
  * Returns: call_fn return code if stopped otherwise number of disks called.
  */
-int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume, int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx);
+int nvmeibc_volume_call_for_all_vol_disks(struct nvmeibc_volume *volume, int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx);
 
 #endif

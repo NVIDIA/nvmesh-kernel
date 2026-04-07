@@ -33,7 +33,13 @@ void nvmeibc_volume_targets_init(struct nvmeibc_volume_targets* self);
 struct dp_targets const *nvmeibc_volume_targets_base(struct nvmeibc_volume_targets const* self);
 void nvmeibc_volume_targets_add_disk_id(struct nvmeibc_volume_targets* self, struct nvmeibc_disk_id *disk_id);
 
-struct list_head *nvmeibc_volume_targets_get_disks(struct nvmeibc_volume_targets const* self);
+struct list_head const* __nvmeibc_volume_targets_get_disks_impl(struct nvmeibc_volume_targets const* self);
+
+#define nvmeibc_volume_targets_get_disks(self) \
+    __builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_volume_targets*), \
+        __nvmeibc_volume_targets_get_disks_impl(self), \
+        (struct list_head*)__nvmeibc_volume_targets_get_disks_impl(self))
+
 
 int nvmeibc_volume_targets_count_disks(struct nvmeibc_volume_targets const* self);
 bool nvmeibc_volume_targets_should_retain_disks(struct nvmeibc_volume_targets const* self);

@@ -103,7 +103,7 @@ out:
 	return disk_id;
 }
 
-void nvmeibc_volume_disks_stats_clear(const struct nvmeibc_volume *volume, const int which)
+void nvmeibc_volume_disks_stats_clear(struct nvmeibc_volume *volume, const int which)
 {
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 	struct nvmeibc_disk_id *d;
@@ -1219,7 +1219,7 @@ void nvmeibc_volume_to_json(const struct nvmeibc_volume *volume, struct jdr *jdr
 	jdr_write_var(jdr, attachment_version, h->attachment_version);
 }
 
-int nvmeibc_volume_call_for_all_vol_disks(const struct nvmeibc_volume *volume,
+int nvmeibc_volume_call_for_all_vol_disks(struct nvmeibc_volume *volume,
 					  int (*call_fn)(struct nvmeibc_idisk *disk, void *ctx), void *ctx)
 {
 	struct nvmeibc_disk_id  *disk_id_iter;

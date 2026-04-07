@@ -1524,7 +1524,7 @@ static void __block_trace_verb_counters_fn(enum nvmeib_io_stat_verbs verb, const
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS) && (NVMEIBC_ENABLE_PER_VOLUME_STATS == 1)
 static void __block_disk_trace_verb_counters_fn(enum nvmeib_io_stat_verbs verb, const struct nvmeib_io_counters *c, void *ctx)
 {
-	struct nvmeibc_disk_id *d = ctx;
+	struct nvmeibc_disk_id const* d = ctx;
 	const struct nvmeibc_block_device *dev = d->volume->block_dev;
 	const u32 vol_id = nvmeibc_volume_short_id(dev);
 
@@ -1536,7 +1536,7 @@ static void __block_trace_per_disk_stats(const struct nvmeibc_block_device *dev,
 {
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS) && (NVMEIBC_ENABLE_PER_VOLUME_STATS == 1)
 	struct nvmeibc_disk_id *d;
-	struct list_head *disks = nvmeibc_volume_targets_get_disks(&dev->volume->targets);
+	struct list_head const* disks = nvmeibc_volume_targets_get_disks(&dev->volume->targets);
 	list_for_each_entry(d, disks, link) {
 		nvmeib_io_stats_trace_ext(d->v_disk_stats, __block_disk_trace_verb_counters_fn, d, diff_only);
 	}

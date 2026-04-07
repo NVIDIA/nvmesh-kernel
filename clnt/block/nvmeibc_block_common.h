@@ -56,7 +56,7 @@ struct nvmeibc_block_device {   			// TODO: change this to something shorter
 		ulong max_retry_jiffies; 				// When OS requests IO, we may wait no longer than X[sec] before returning result. If we could not execute the IO during that time (example: disk got disconnected) we will inform OS that IO failed. min 1 second, max 600.
 		const struct nvmeibc_cinst_params_blk *cips;
 		enum nvmeibc_config_volume_type type;	// Copy from the field of volume
-		const struct nvmeibc_volume *volume;	// Access volume reservation info when initialzing / updating the device
+		struct nvmeibc_volume *volume;	// Access volume reservation info when initialzing / updating the device
 		struct nvmeibc_datapath dp;
 		struct nvmeibc_topologies topologies;	// Linked list of topologies. Normally, the block device (volume) will have one topology but it may have a few. Whenever a disk access command or lock is built, it refers to the topology that was used to make	it.	When a new topology arrives, the block device should move to it, but it can't throw out the previous topologies until all remaining cmds and locks generated on it have drained out. So there could be multiple active topologies. They are	stored in a linked list.
 		struct nvmeibc_profiler *preparation_profiler; // Profile preparation stage of io
