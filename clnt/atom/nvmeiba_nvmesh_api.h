@@ -55,16 +55,16 @@ struct nvmeiba_atom_os_api {
 	} users;
 	struct list_head list_all_os_apis;		// Connect to list of all OS api's.
 	char dev_name[32 /*NVMEIBC_BD_NAME_LEN*/];// Name of the volume (If device name is very long, the kernel disk name will be truncated). Not NULL !
-	struct nvmeiba_part {					// Todo: Move to nvmeibc? Allows creating sub atoms (much like partitions on an atom)
+	struct nvmeiba_part {					// Legacy partition metadata, currently unused
 		ulong offset;						// Offset in vlba from parent block device. unit of [bytes]. Length is written inside gen_disk
 		struct nvmeiba_atom_os_api *parent;	// Direct ptr to parents. Self reference for non sub atoms
 		struct list_head part_list;			// Link list of sub bdevs of parent
-		spinlock_t list_lock_unused;		// Protects sub volumes list. Currently not needed because all nvmeibc sub vol add/del are serialized on a workqueue
+		spinlock_t list_lock_unused;
 		union nvmeiba_part_flags {
 			struct {
 				u32 is_sub_atom : 1;		// By default false. Is atom a sub class (partition) of another atom
 				u32 is_sub_auto_resize : 1;	// By default false. For sub atom - when carrier is resized, should sub atom be resized as well. For carrier - true if at lease 1 sub atom needs auto resizing
-				u32 is_sub_unique_name : 1;	// By default false. If True sub atom name is prefixed by carriers name. If true - does not get prefix (strong assumption about uniqueness of the name of sub volume)
+				u32 is_sub_unique_name : 1;
 				u32 is_owner_of_reqctx : 1;	// By default false. If true, each sub atom will have non shared request queue data (bio execution/elevator/etc). If false, request data of carrier atom is shared to all sub atoms
 				u32 is_sub_share_reqq  : 1;	// By default false. Deprecated, If True sub atom shares request queue with carrier. Support was removed for kernel 4+. Obviously: is_owner_of_reqctx=1 -> is_sub_share_reqq=0.
 			};
@@ -113,10 +113,6 @@ ssize_t nvmeiba_atom_users_to_string(void *_atom, char *buf, size_t len);	// con
 
 int  nvmeiba_atom_open( struct BLK_MODE_OPEN_OBJ_T *bdev, const char *name);
 void nvmeiba_atom_close(struct gendisk *disk);
-
-// Update atom that sub atom is created/removed as partition. Daniel: this is only basic (ref-count) logic and the remaining is implemented in nvmeibc
-void nvmeiba_atom_part_add(struct nvmeiba_atom_os_api *atom);	// See nvmeibc_atom_part_add()
-void nvmeiba_atom_part_del(struct nvmeiba_atom_os_api *atom);	// See nvmeibc_atom_part_del()
 
 /*********************** API for List of all ATOMS ****************************/
 /* Get the git commit version of nvmeiba module (for future compatibility)*/

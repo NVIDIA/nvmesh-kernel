@@ -1220,23 +1220,6 @@ void nvmeibc_cc_api_notify_detach_completion(/*const*/ struct nvmeibc_volume *vo
 	nvmeibc_cc_api_reply_vol_cmd_status(volume->p, &volume->hdr, status, nvmeibc_get_io_perm_for_reporting(NULL), send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
 }
 
-// Notify the script of the request status
-int nvmeibc_cc_api_sub_vol_notification(    /*const*/ struct nvmeibc_volume *volume, u32 /*enum_vol_status*/ status)
-{
-	int rv;
-	const bool send_to_cli = true; // Always update CLI (sub volume can only come from CLI)
-	const bool send_to_mcs = false; // Never update MGMT about sub_volumes
-	unsigned int io_perm = nvmeibc_get_io_perm_for_reporting(volume->block_dev);
-	rv = nvmeibc_cc_api_reply_vol_cmd_status(volume->p, &volume->hdr, status, io_perm, send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
-	return rv;
-}
-
-// Notify the script that the volume is unknown
-int nvmeibc_cc_api_sub_vol_unknown(const struct nvmeibc_cinst_params_main *p, const char *vol_name, const bool is_uuid)
-{
-	return send_unknown_volume_to_cli(&__get_from_params_main_globals_container(p)->cc_api, vol_name, is_uuid);
-}
-
 #include "main/nvmeibc_main_ioctls.h"
 #include "main/nvmeibc_main_ioctls.inc.c"		// Todo: Remove me
 

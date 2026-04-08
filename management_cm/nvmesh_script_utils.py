@@ -5,7 +5,6 @@
 
 import errno
 import os
-import glob
 import json
 import contextlib
 import traceback
@@ -31,8 +30,6 @@ MAX_ATOM_STATUS_READ = 128*1024*2 # Max file size if 128k it will break if it re
 PERSISTENCY_ROOT_FOLDER = "/var/opt/nvmesh/clnt_instance_configuration/{0}"
 DEFAULT_PERSISTENCY_VOLUMES_PATH = "/var/opt/nvmesh/block_devices_configuration"
 PERSISTENCY_VOLUMES_PATH = "/var/opt/nvmesh/clnt_instance_configuration/{0}/block_devices_configuration"
-DEFAULT_PERSISTENCY_ALIASES_PATH = "/var/opt/nvmesh/block_devices_sub_vols"
-PERSISTENCY_ALIASES_PATH = "/var/opt/nvmesh/clnt_instance_configuration/{0}/block_devices_sub_vols"
 NVMESH_SPDK_RPCPY_PATH = "/opt/nvmesh/nvmft/spdk/scripts/rpc.py"
 PROC_FILE_PATH = "/proc/{0}/cli/cli"
 MCS_CACHE_FOLDER = "/var/opt/nvmesh/mcs/"
@@ -81,13 +78,11 @@ class MultiClientUtils(object):
         self.persistency_root_folder = PERSISTENCY_ROOT_FOLDER
         if multi_client_instance == DEFAULT_MODULE_NAME:
             self.volume_persistency_folder = DEFAULT_PERSISTENCY_VOLUMES_PATH
-            self.alias_persistency_folder = DEFAULT_PERSISTENCY_ALIASES_PATH
             self.persistency_root_folder = PERSISTENCY_ROOT_FOLDER.format("")
             if dev_root != DEFAULT_DEV_ROOT:
                 logger.debug("Default NVMesh instance should not give a dev_root folder. Using the given root folder {0}.".format(dev_root))
         else:
             self.volume_persistency_folder = PERSISTENCY_VOLUMES_PATH.format(multi_client_instance)
-            self.alias_persistency_folder = PERSISTENCY_ALIASES_PATH.format(multi_client_instance)
             self.persistency_root_folder = PERSISTENCY_ROOT_FOLDER.format(multi_client_instance)
             if dev_root is None:
                 dev_root = self.get_dev_root_folder()
@@ -302,7 +297,6 @@ class MultiClientUtils(object):
             fd = os.open(self.persistency_root_folder+"/ioctl", os.O_APPEND | os.O_CREAT|os.O_RDWR)
             os.write(fd, ioctl.encode('utf-8'))
             os.close(fd)
-            os.makedirs(self.alias_persistency_folder)
         except (IOError, OSError) as err:
             self.logger.error("Error creating persistency folders. Possible corruption to the folder structure. ErrorID: 1044; Client Instance: {0}".format(self.instance_name))
             self.logger.error("Additional info {0}.".format(str(err)))
@@ -310,7 +304,6 @@ class MultiClientUtils(object):
     def remove_persistency(self):
         try:
             os.rmdir(self.volume_persistency_folder)
-            os.rmdir(self.alias_persistency_folder)
             os.remove(self.persistency_root_folder+"/ioctl")
             os.rmdir(self.persistency_root_folder)
         except (IOError, OSError) as err:
@@ -586,25 +579,6 @@ class MultiClientUtils(object):
             result.append((volume_uuid, attributes if attributes else None))
         return result
 
-    def get_alias_persistency(self):
-        result = []
-        attributes = None
-        for entry in os.listdir(self.alias_persistency_folder):
-            volume_uuid = entry.split('_')[0]
-            volume_alias = '_'.join(entry.split('_')[1:])
-            try:
-                with open(os.path.join(self.alias_persistency_folder, entry), 'r') as fd:
-                    attributes = json.load(fd)
-            except ValueError:
-                try:
-                    with open(os.path.join(self.alias_persistency_folder, entry), 'r') as fd:
-                        attributes = fd.readline()
-                except Exception:
-                    self.logger.error("Error reading persistency file for alias {0} of volume {1}, alias will created with default values.".format(volume_alias, volume_uuid))
-                    attributes = None
-            result.append((volume_uuid, volume_alias, attributes if attributes else None))
-        return result
-
     def check_volume_persistency(self, volume_uuid):
         return os.path.exists(os.path.join(self.volume_persistency_folder, volume_uuid))
 
@@ -631,33 +605,6 @@ class MultiClientUtils(object):
                 else:
                     return False
         return True
-
-    def check_alias_persistency(self, volume_uuid, alias):
-        file_path = os.path.join(self.alias_persistency_folder, volume_uuid + "_" + alias)
-        return os.path.exists(file_path)
-
-    # Creates a persistency between a volume uuid and its alias
-    def create_alias_persistency(self, volume_uuid, alias, attributes):
-        file_path = os.path.join(self.alias_persistency_folder, volume_uuid + "_" + alias)
-        with open(file_path, 'w') as fd:
-            json.dump(attributes, fd)
-
-    # Deletes the persistency between a volume uuid and its alias
-    def delete_alias_persistency(self, volume_uuid, alias):
-        try:
-            file_path = os.path.join(self.alias_persistency_folder, volume_uuid + "_" + alias)
-            os.remove(file_path)
-        except OSError as err:
-            if err.errno == errno.ENOENT:
-                pass
-
-    # Deletes all of a volumes persistent aliases
-    def purge_alias_persistency(self, volume_uuid):
-        dir_regexp = self.alias_persistency_folder + "/" + volume_uuid + "*"
-        aliasesList = glob.glob(dir_regexp)
-        self.logger.debug("Removing all aliases of vol uuid={0} from persistency. aliases_list={1}".format(volume_uuid, ', '.join([file.split(volume_uuid)[1][1:] for file in aliasesList])))
-        for file_path in aliasesList:
-            os.remove(file_path)
 
     def get_name_and_uuid_from_volume_status(self, volume_status_json):
         name = None
@@ -820,33 +767,6 @@ class MultiClientUtils(object):
         if mode == EXCLUSIVE_READ_WRITE:
             return EX_FLAG
 
-    # Use atom json to find sub volume with alias name
-    # Match carrier_gendisk with gendisk and return volume name
-    # Only called in error
-    def get_carrier_volume_of_alias(self, alias):
-        atom_file = os.open(ATOM_STATUS_JSON, os.O_RDONLY)
-        try:
-            atom_info = json.loads(os.read(atom_file, MAX_ATOM_STATUS_READ))
-        except ValueError as err:
-            self.logger.debug("Error parsing ATOM info. ATOM STATUS FILE: {0}".format(ATOM_STATUS_JSON))
-            return None
-        finally:
-            os.close(atom_file)
-        atom_list = atom_info.get("atoms")
-
-        carrier_disk = next((atom.get("carrier_gendisk") for atom in atom_list if atom.get("name") == alias), None)
-        if carrier_disk:
-            carrier_name = next((atom.get("name") for atom in atom_list if atom.get("gendisk") in carrier_disk), None)
-            if not carrier_name:
-                self.logger.debug("We found the carrier_disk={0} but not the volume itself!".format(carrier_disk))
-            return carrier_name
-        path = os.path.join(self.dev_root, alias[:self.max_block_device_path])
-        atom_by_path = next((atom for atom in atom_list if atom.get("path") == path), None)
-        if atom_by_path:
-            return atom_by_path.get("name")
-        self.logger.debug("Exhausted search of ATOM info.")
-        return carrier_disk
-
     # Function required to remove any of the following cases:
     # Given uuid/s that are not attached
     # Given both a volume name and it's uuid in the same request
@@ -912,26 +832,6 @@ class MultiClientUtils(object):
         if is_dir:
             is_blk = is_block_device(full_path)
         return is_dir, is_blk
-
-    def normalize_volume_names_and_aliases(self, volumes, alias, attach=False):
-        normalized_volumes = []
-        if alias and len(alias) > MAX_VOLUME_NAME:
-            self.logger.error("Alias name is greater than the max length for an alias, truncating name. Requested: {0}; Alias: {1}".format(alias, alias[:MAX_VOLUME_NAME]))
-            alias = alias[:MAX_VOLUME_NAME]
-        for vol in volumes:
-            if not is_valid_uuid(vol):
-                if len(vol) > MAX_VOLUME_NAME:
-                    self.logger.error("Volume name is greater than the max length for a volume name, truncating name. Requested {0}; Volume name: {1}".format(vol, vol[:MAX_VOLUME_NAME]))
-                normalized_volumes.append(vol[:MAX_VOLUME_NAME])
-            else:
-                normalized_volumes.append(vol)
-        if attach:
-            if alias and len(alias) > self.max_block_device_path:
-                self.logger.error("Alias name is greater than the device directory limit, truncating directory. Alias: {0}; Device path: {1}".format(alias, self.get_device_path_for_volume(alias)))
-            for vol in normalized_volumes:
-                if len(vol) > self.max_block_device_path:
-                    self.logger.error("Volume name is greater than the device directory limit, truncating directory. Volume: {0}; Device path: {1}".format(vol, self.get_device_path_for_volume(vol)))
-        return normalized_volumes, alias
 
     # Json response code, update volumes as statuses arive, or before sending, print at exit or error
     def init_json_response(self):

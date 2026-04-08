@@ -1500,16 +1500,6 @@ TEST_FUNC int unitest_recovery_volume(struct NVMeshSystem *sys)
 		send_command_to_all(sys, -1, volCmds_RecoveryUpdate);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 		send_command_to_all(sys, -1, volCmds_RecoveryUpdate);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 	}
-	if (1) {							// Verify sub volumes are not created on a recoverer volume
-		const int expected_num_of_executed_ioctls = clientSimulator_get_num_executed_ioctls(client)+1;		// One succeed
-		char cmd[256];
-		sprintf(cmd, "#%s|sub_vol_add name=P_01 start=0 len=256", sys->mdb.vols[0].info.devname);
-		reset_cli_status_verification(client);
-		set_cli_status_verification_expector(client, cli_generic_string(&sys->mdb.vols[0], CLI_ALIAS_CREATE_FAIL, true), 0);
-		clientSimulator_send_to_cli_and_wait(client, cmd);
-		BUG_ON(expected_num_of_executed_ioctls != clientSimulator_get_num_executed_ioctls(client));
-	}
-
 	reset_cli_status_verification(client);
 	for (v = 0; v < sys->mdb.nVols; ++v ) {
 		__unitest_volume_config_version_inc(&sys->mdb.vols[v], &sys->tcf.vols[v]);/* Auto increase the version of configuration */
@@ -1535,7 +1525,6 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 	char cmd[256];
 	DECLARE_COMPLETION_ONSTACK(comp0);					// Daniel: Todo, design multicompletion for bio
 	DECLARE_COMPLETION_ONSTACK(comp1);
-	DECLARE_COMPLETION_ONSTACK(comp2);
 	send_command_to_all(sys, -1, volCmds_Detach);
 	for (v=0; v<nVols; v++) {
 		sys->mdb.vols[v].nextCmd = (v%2) ? volCmds_RecoveryAttach : volCmds_New;				// Some volumes are attached for recovery, some are regular attaches
@@ -1557,15 +1546,6 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 		BUG_ON(atoms[v]->pender.n_bios != 0);			// IO is still not in waiting upgrade list
 	}
 
-	if (1) {	// ----------------------- Create sub volume to verify upgrade with sub volume
-		int expected_num_of_executed_ioctls = clientSimulator_get_num_executed_ioctls(client);
-		sprintf(cmd, "#%s|sub_vol_add name=P_04 start=4 len=32", atoms[io_vol_ind]->dev_name);
-		reset_cli_status_verification(client);
-		set_cli_status_verification_expector(client, cli_generic_string(&client->vols[io_vol_ind], CLI_ALIAS_CREATED, false), io_vol_ind);
-		clientSimulator_send_to_cli_and_wait(client, cmd); expected_num_of_executed_ioctls++;
-		BUG_ON(expected_num_of_executed_ioctls != clientSimulator_get_num_executed_ioctls(client));
-	}
-
 	// Detach all volumes for upgrade
 	sprintf(cmd, "#|atom_read_part=0");	clientSimulator_send_to_cli(client, cmd);
 	send_command_to_all(sys, -1, volCmds_DetachUpgrade);
@@ -1574,10 +1554,9 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 		if (v%2) { atoms[v] = NULL; }					// Those atoms were freed
 	}
 
-	// 2 Volumes were detached (Vol1, Vol3), 2 were abandoned (Vol0, Vol2) + 1 sub vol abandoned (v0_p04)
-	BUG_ON(nvmeiba_os_apis_get_num('A') != 3);
-	BUG_ON(nvmeiba_os_apis_get_num('O') != 3);
-	BUG_ON(nvmeiba_os_apis_get_num('S') != 1);
+	// 2 Volumes were detached (Vol1, Vol3), 2 were abandoned (Vol0, Vol2)
+	BUG_ON(nvmeiba_os_apis_get_num('A') != 2);
+	BUG_ON(nvmeiba_os_apis_get_num('O') != 2);
 
 	if (1) {	// ----------------------- Test open()/close()/IO on orphan atom
 		struct block_device	*bdev;
@@ -1588,9 +1567,6 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 		BUG_ON(bio_list_size(&atoms[v]->pender.bio_list) != 2);
 		BUG_ON(atoms[v]->pender.n_bios != 2);
 		rv = osSimulator_diskCloseIdx(OS, v); BUG_ON(rv);
-	}
-	if (1) {	// ----------------------- Test IO on orphan sub atom
-		osSimulator_writeArr_async_wait(OS, 4, 1, 1, page_address(ZERO_PAGE(0)), &comp2);
 	}
 	if (1) {	// ----------------------- Test mount()/umount() on orphan atom
 		v = 2;
@@ -1615,7 +1591,7 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 		set_cli_status_verification_expector(client, fail_recovery_attach_string(&client->vols[io_vol_ind]), io_vol_ind);
 		send_command_to_vol(sys, -1, io_vol_ind, volCmds_RecoveryAttach);
 		BUG_ON(atoms[v]->pender.n_bios != 1);		// pending IOs remained
-		BUG_ON(nvmeiba_os_apis_get_num('O') != 3);	// DEspite failed attach, orphan remained
+		BUG_ON(nvmeiba_os_apis_get_num('O') != 2);	// Despite failed attach, orphan remained
 	}
 
 	// --------------------- Attach first 3 volumes, varify orphans are adopted and all IO completes
@@ -1629,20 +1605,8 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 			BUG_ON(atoms[v]->pender.n_bios != 0);						// All IO's adopted and resubmitted
 		}
 	}
-	BUG_ON(nvmeiba_os_apis_get_num('A') != 4);	// Vol0..3, sub0_p4
+	BUG_ON(nvmeiba_os_apis_get_num('A') != 3);	// Vol0..2
 	BUG_ON(nvmeiba_os_apis_get_num('O') != 0);
-	BUG_ON(nvmeiba_os_apis_get_num('S') != 1);
-
-	if (1) {	// ----------------------- Delete Subvol
-		int expected_num_of_executed_ioctls = clientSimulator_get_num_executed_ioctls(client);
-		wait_for_completion(&comp2);
-		sprintf(cmd, "#%s|sub_vol_del name=P_04 start=4 len=32", atoms[io_vol_ind]->dev_name);
-		reset_cli_status_verification(client);
-		set_cli_status_verification_expector(client, cli_generic_string(&client->vols[io_vol_ind], CLI_ALIAS_DELETED, false), io_vol_ind);
-		clientSimulator_send_to_cli_and_wait(client, cmd); expected_num_of_executed_ioctls++;
-		BUG_ON(expected_num_of_executed_ioctls != clientSimulator_get_num_executed_ioctls(client));
-		BUG_ON(nvmeiba_os_apis_get_num('S') != 0);
-	}
 
 	wait_for_completion(&comp0);
 	wait_for_completion(&comp1);
@@ -1673,156 +1637,6 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 	atoms[v] = &client->devs[v]->os->atom;
 	return 0;
 //	__reset_predefined_command(sys);
-}
-
-static void __fill_atoms_of_carrier_and_sub(struct clientSimulator *clnt, int vol_ind, struct nvmeiba_atom_os_api **car_atom, struct nvmeiba_atom_os_api **sub_atom) {
-	struct nvmeibc_os_api *car_api = clnt->devs[vol_ind]->os;
-	struct nvmeiba_part *part;
-	(*car_atom) = &car_api->atom;
-	part = list_first_entry(&(*car_atom)->sub.part_list, struct nvmeiba_part, part_list);
-	(*sub_atom) = container_of(part, struct nvmeiba_atom_os_api, sub);
-}
-
-static void __test_ioctls_to_sub_vol(struct NVMeshSystem *sys, int carrier_ind) {
-	struct clientSimulator *clnt = &sys->clients[0];
-	struct nvmeiba_atom_os_api *car_atom, *sub_atom;
-	__fill_atoms_of_carrier_and_sub(clnt, carrier_ind, &car_atom, &sub_atom);
-	__unitest_issue_ioctls_todisk(sub_atom->disk, (void*)sub_atom);
-}
-
-TEST_FUNC int unitest_sub_vols(struct NVMeshSystem *sys) {
-	struct clientSimulator *clnt = &sys->clients[0];
-	int vol_ind = 0, sub_ind = 4, rv = 0;
-	int sub_ofst = LOCKSET_SLICES-1, sub_len = 3;			// Force sub volume to span accros 2 blocksets even though it is small
-	struct nvmeibc_block_device *carrier = clnt->devs[vol_ind];
-	char carrier_name[32];
-	struct osSimulator *OS = &clnt->OS;
-	char cmd[256];
-	strlcpy(carrier_name, carrier->os->atom.dev_name, sizeof(carrier_name));
-
-	if (1) {	// Verify sub volumes with very long names that get cut off
-		const char *ioctl_add_fmt_long_alias = "#%s|sub_vol_%s name=P_0%d_a123456789012345678901234567890123456789abcdef start=0 len=%d";
-		int expected_num_of_executed_ioctls = clientSimulator_get_num_executed_ioctls(clnt);        // None succeed
-		int i;
-		for (i = 0; i < 2; i++) {
-			reset_cli_status_verification(clnt);
-			set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_CREATED, false), vol_ind);
-			sprintf(cmd, ioctl_add_fmt_long_alias, carrier_name, "add", sub_ind, i);
-			clientSimulator_send_to_cli_and_wait(clnt, cmd);	expected_num_of_executed_ioctls++;
-			BUG_ON(nvmeiba_os_apis_get_num('A') != 5);
-			sprintf(cmd, ioctl_add_fmt_long_alias, carrier_name, "del", sub_ind, i);
-			reset_cli_status_verification(clnt);
-			set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_DELETED, false), vol_ind);
-			clientSimulator_send_to_cli_and_wait(clnt, cmd);	expected_num_of_executed_ioctls++;
-			BUG_ON(nvmeiba_os_apis_get_num('A') != 4);
-			BUG_ON(expected_num_of_executed_ioctls != clientSimulator_get_num_executed_ioctls(clnt));
-		}
-	}
-	if (1) {												// Verify sub volumes are not created in wrong conditions
-		const char *ioctl_add_fmt = "#%s|sub_vol_add name=P_0%d start=%d len=%d";
-		int expected_num_of_executed_ioctls = clientSimulator_get_num_executed_ioctls(clnt);        // None succeed
-		sprintf(cmd, "#%s|sub_vol_del name=P_0%d", carrier_name, sub_ind);
-		reset_cli_status_verification(clnt);
-		set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_DELETE_FAIL, false), vol_ind);
-		clientSimulator_send_to_cli_and_wait(clnt, cmd);							// Deleting non existing sub volme is a silent error
-		sprintf(cmd, ioctl_add_fmt, carrier_name, sub_ind, sub_ofst, sub_len);
-		reset_cli_status_verification(clnt);
-		set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_CREATED, false), vol_ind);
-		clientSimulator_send_to_cli_and_wait(clnt, cmd);				expected_num_of_executed_ioctls++;
-		BUG_ON(nvmeiba_os_apis_get_num('A') != 5);
-		__test_ioctls_to_sub_vol(sys, vol_ind);							expected_num_of_executed_ioctls++;
-		reset_cli_status_verification(clnt);
-		set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_CREATE_FAIL, false), vol_ind);
-		clientSimulator_send_to_cli_and_wait(clnt, cmd);							// Fail to create sub volume with identical name once again
-		sprintf(cmd, ioctl_add_fmt, "zz1zz3", sub_ind, sub_ofst, sub_len); expected_num_of_executed_ioctls++;
-		reset_cli_status_verification(clnt);
-		set_cli_status_verification_expector(clnt, cli_unknown_string("zz1zz3", false), vol_ind);
-		clientSimulator_send_to_cli_and_wait(clnt, cmd);							// Fail to create sub vol of non existing carrier volume
-		sprintf(cmd, ioctl_add_fmt, carrier_name, sub_ind, sub_ofst, 100040); expected_num_of_executed_ioctls++;
-		reset_cli_status_verification(clnt);
-		set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_CREATE_FAIL, false), vol_ind);
-		clientSimulator_send_to_cli_and_wait(clnt, cmd);							// Fail to create sub vol outside of carriers lba
-		sprintf(cmd, ioctl_add_fmt, "*", sub_ind, 0, 32);				expected_num_of_executed_ioctls++;
-		reset_cli_status_verification(clnt);
-		set_cli_error_expector(clnt, INVALID_IOCTL_COMMAND);
-		clientSimulator_send_to_cli_and_wait(clnt, cmd);							// Fail to create sub vol of multiple carrier volumes
-		BUG_ON(expected_num_of_executed_ioctls != clientSimulator_get_num_executed_ioctls(clnt));
-		BUG_ON(nvmeiba_os_apis_get_num('A') != 5);
-	}
-	// Test non forced detach on carrier volume, we should get busy status to cli And we need to see that the volume didn't start to detach
-	reset_cli_status_verification(clnt);
-	set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_BUSY, false), vol_ind);
-	send_command_to_vol_safe_detach_no_wait(sys, -1, vol_ind);
-	BUG_ON(!nvmeibc_topo_is_io_ok(&carrier->topologies));
-	BUG_ON(block_api_os_is_mounted(carrier->os) != 1);		// sub volume took 1 ref on carrier
-
-	if (1) { // -------------------------- Verify IO goes to correct offset (Write through sub volume, read through carrier
-		u64       magic_pattern;    								// unique 64b signaturre filling the array
-		const int memSize = 4*NVMEIBC_SECTOR_SIZE;					// Total array in bytes
-		u8        *mem = sim_kmalloc(memSize, GFP_KERNEL);				// Array to read/write to disk
-		int startBlock = 1, lenBlocks = 2;
-		magic_pattern = __unitest_fill_blocks_unique_pattern(mem, lenBlocks);	// Set a pattern.
-		osSimulator_writeArrWait(OS, sub_ind, startBlock,          lenBlocks, mem);
-		memset(mem, 0, memSize);								// Clear the array
-		osSimulator_readArrWait( OS, vol_ind, startBlock+sub_ofst, lenBlocks, mem);
-		__unitest_verify_blocks_pattern(mem, lenBlocks, magic_pattern, false);			// Verify that read and write matched.
-
-		// -------------------------- Verify illegal IO range for sub volume is rejected (though it is legal for carrier
-		dp_io_stats_clear_counter(&carrier->dp.io_stats, DP_IO_STATS_CRITICAL_FAIL);
-		BUG_ON(osSimulator_writeArr(OS, sub_ind, -1, 100, mem));
-		BUG_ON(osSimulator_writeArr(OS, sub_ind, sub_len, 1, mem)); //
-		BUG_ON(osSimulator_writeArr(OS, sub_ind, 1, sub_len, mem)); //
-		BUG_ON(dp_io_stats_get_counter(&carrier->dp.io_stats, DP_IO_STATS_CRITICAL_FAIL) != 3); // all utests failed as expected
-		dp_io_stats_clear_counter(&carrier->dp.io_stats, DP_IO_STATS_CRITICAL_FAIL);
-		sim_kfree(mem);
-	}
-	if (1) {// -------------------------- Verify sub vol is mountable
-		struct nvmeibc_os_api *sub = (void*)OS->disks[sub_ind]->private_data;
-		BUG_ON(osSimulator_mount(OS, sub_ind, FMODE_READ|FMODE_EXCL));
-		BUG_ON(block_api_os_is_mounted(sub) != 1);		// sub volume took 1 ref on carrier
-		BUG_ON(sub->atom.sub.parent != &carrier->os->atom);
-		osSimulator_unmount(OS, sub_ind);
-	}
-
-	if (1) {// -------------------------- Test Force detach on carrier with sub volume
-		struct gendisk **disk = &OS->disks[vol_ind];
-		struct nvmeiba_atom_os_api *car_atom, *sub_atom;
-		int do_mount_car, do_mount_sub;
-		__fill_atoms_of_carrier_and_sub(clnt, vol_ind, &car_atom, &sub_atom);
-		for (do_mount_car = false; do_mount_car <= 1; do_mount_car++) {					// 2 options, with or without mounting of carrier
-		for (do_mount_sub = false; do_mount_sub <= 1; do_mount_sub++) {					// 2 options, with or without mounting of sub vol
-			if (do_mount_car) BUG_ON(osSimulator_mount(OS, vol_ind, FMODE_WRITE));
-			if (do_mount_sub) BUG_ON(osSimulator_mount(OS, sub_ind, FMODE_WRITE));
-			BUG_ON(atomic_read(&car_atom->users.n_opens) != (1+do_mount_car));			// 1 sub volume + optional mounting
-			BUG_ON(atomic_read(&sub_atom->users.n_opens) != (  do_mount_sub));
-			send_command_to_vol(sys, -1, vol_ind, volCmds_ForceDetach);
-			if (do_mount_car) osSimulator_unmount(OS, vol_ind);
-			if (do_mount_sub) osSimulator_unmount(OS, sub_ind);
-			clientSimulator_wait_for_detach_drain(clnt);
-			BUG_ON((disk[vol_ind] != NULL)||(disk[sub_ind] != NULL));									// Here both the carrier and sub volume were detached and cleared
-			BUG_ON(nvmeiba_os_apis_get_num('A') != 3);
-			BUG_ON(nvmeiba_os_apis_get_num('S') != 0);
-
-			// Reattach back for next iteration
-			send_command_to_vol(sys, -1, vol_ind, volCmds_New);
-			sprintf(cmd, "#%s|sub_vol_add name=P_0%d start=%d len=%d", carrier_name, sub_ind, sub_ofst, sub_len);
-			reset_cli_status_verification(clnt);
-			set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_CREATED, false), vol_ind);
-			clientSimulator_send_to_cli_and_wait(clnt, cmd);							//expected_num_of_executed_ioctls++;
-
-			__fill_atoms_of_carrier_and_sub(clnt, vol_ind, &car_atom, &sub_atom);
-			BUG_ON((*disk == NULL) || (atomic_read(&car_atom->users.n_opens) != 1));
-		}}
-		carrier = clnt->devs[vol_ind];
-	}
-
-	//unitest_IO(clnt, sub_ind, 1, 2);					// Todo: Insert also tests for TRIM
-	sprintf(cmd, "#%s|sub_vol_del name=P_0%d", carrier_name, sub_ind);
-	reset_cli_status_verification(clnt);
-	set_cli_status_verification_expector(clnt, cli_generic_string(&clnt->vols[vol_ind], CLI_ALIAS_DELETED, false), vol_ind);
-	clientSimulator_send_to_cli(clnt, cmd);				// Daniel: no need to wait, mainwq is drained to wait for cli submit and processing is syncronous
-	BUG_ON(block_api_os_is_mounted(carrier->os) != 0);	// sub volume took 1 ref on carrier
-	return rv;
 }
 
 TEST_FUNC int unitest_multi_clnt_instances(struct NVMeshSystem *sys){
@@ -1944,7 +1758,6 @@ TEST_FUNC int unitest_volumes_config(struct NVMeshSystem *sys) {
 	int rv = 0;
 	rv |= SIMU_RUN_TEST(unitest_FS_InvalidCfg,sys);
 	rv |= SIMU_RUN_TEST(unitest_ioctls_fs_proc,sys);
-	rv |= SIMU_RUN_TEST(unitest_sub_vols,sys);
         rv |= SIMU_RUN_TEST(unitest_update_non_existing_volume, sys);
 	rv |= SIMU_RUN_TEST(unitest_DetachAttachVolume,sys);
 	rv |= SIMU_RUN_TEST(unitest_AttachExistingVolume,sys);

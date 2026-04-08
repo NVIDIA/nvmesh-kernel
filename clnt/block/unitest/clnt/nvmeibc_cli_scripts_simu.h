@@ -47,10 +47,6 @@ void cli_send_command_to_clnt(struct cli_status_verification *csv, char *cmd);
 #define CLI_UPDATE_READY 	  "UpdateReady"   // Attached volume has been detached and passed to ATOM to be re-taken after upgrade
 #define CLI_RV_DENIED	      "ReservationDenied"		// Attach volume request reservation version is older than in DB
 #define CLI_RV_MODE_DENIED    "ReservationModeDenied"	// Attach volume request reservation mode is not allowed
-#define CLI_ALIAS_CREATED     "Created"  	  // Alias for this volume has been succeesfully created
-#define CLI_ALIAS_CREATE_FAIL "CreateFailed"  // Alias creation failed for this volume
-#define CLI_ALIAS_DELETED 	  "Deleted"		  // Alias delete succeeded for this volume
-#define CLI_ALIAS_DELETE_FAIL "DeleteFailed"  // Alias delete failed for this volume
 #define CLI_UNKNOWN			  "Unknown"       // Request to detach a volume which is not attached. In this case client does not even now anything about this volume (including its UUID).
 
 #define CLI_MSG_FORMAT "status=%s version=%d io_blocked=%s uuid=%s name=%s rv=%llu"

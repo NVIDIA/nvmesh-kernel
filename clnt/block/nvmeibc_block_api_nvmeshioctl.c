@@ -896,64 +896,6 @@ _out:
 	return rv;
 }
 
-#define __sub_vol_fmt_scanf "name=%63s start=%llu len=%llu"
-#define __sub_vol_fmt "{add/del} " __sub_vol_fmt_scanf
-#define __sub_vol_help ""
-
-static int __sub_vol_do(const struct nvmeibc_cinst_params_blk *p, struct nvmeibc_block_device *dev, const char *cmd)
-{
-	u64 lba = 0, nlba = 0;
-	char name[64], uuid[32], action;
-	int rv = -EINVAL, len = strlen(cmd), n_args = 0, act_len = 3;
-
-	if (!dev) {
-		_NI_to_user(t_yE_dp_dbg_tools, QA_BLOCK_PREFIX, "cmd must be executed on specific bdev!");
-		goto _out;
-	}
-	(void)p;
-	memset(name, 0, sizeof(name));
-	memset(uuid, 0, sizeof(uuid));			// Todo: Sub vols get empty ("") uuid. Not the best practice....
-	action = cmd[0];
-	if (len <= act_len+1) {
-		_NI_to_user(t_yF_dp_dbg_tools, QA_BLOCK_PREFIX, "@DEV_NAME cmd @CMD_STR without args", dev->name, cmd);
-		goto _out;
-	} else if (!strncmp(cmd, "add", act_len)) {
-	} else if (!strncmp(cmd, "del", act_len)) {
-	} else {
-		_NI_to_user(t_yG_dp_dbg_tools, QA_BLOCK_PREFIX, "@DEV_NAME unknown cmd @CMD_STR", dev->name, cmd);
-		goto _out;
-	}
-	len -= (act_len+1);  /* Skip '=' or ' ' */
-	cmd += (act_len+1);
-	n_args = sscanf(cmd, __sub_vol_fmt_scanf, name, &lba, &nlba);
-
-	switch (action) {
-		case 'a': {
-			if (n_args < 1) {		/* Mising Name, ... */
-				goto _out;
-			} else if (n_args == 1) {
-				rv = block_api_os_sub_vol_name(dev->os, name, uuid);
-			} else if (n_args < 3) {	/* Missing Name, start, len, ... */
-				goto _out;
-			} else {
-				rv = block_api_os_sub_vol_attach(dev->os, lba, nlba, name, uuid);
-			}
-			break;
-		}
-		case 'd': {
-			if (n_args < 1) {		/* Delete all subvols is not supported yet ... */
-				goto _out;
-			} else {
-				rv = block_api_os_sub_vol_detach(dev->os, name);
-			}
-			break;
-		}
-		default:;
-	}
-_out:
-	return rv;
-}
-
 static int __change_gf_func(const struct nvmeibc_cinst_params_blk *p, struct nvmeibc_block_device *dev, const char *cmd)
 {
 	int index = nvmeibc_gf_optimization_from_string(&cmd[1]), rv = 0;
@@ -1014,7 +956,6 @@ static struct t_ioctl ioctls[] = {
 	{"ignore_toma_msg" , 15, &__ignore_toma_msg      , "=<1 or 0>", "debug: toggle ignore all msgs from toma"},
 	{"ignore_toma_rcv" , 15, &__ignore_toma_recovs   , "=<1 or 0>", "debug: toggle ignore all recovery requests from toma"},
 	{"os_ptr"          ,  6, &__os_ptr               , "++/--", "Blk_get/put"},
-	{SUB_VOL_CMD       ,  8, &__sub_vol_do           , __sub_vol_fmt, __sub_vol_help},
 	{"topo_"           ,  5, &__topo_action          , "{dup/Dup/manual/flush/check}", "flush=restart clnt-toma protocol, dup=is_stuck?, Dup=multi-dup, manual=???, check=if config/topo for bugs"},
 	{"STLR_"           ,  5, &__stale_lock_resolver  , "{print/clear}=<ci,ri>", ""},
 	{"recov_set_num_sw", 16, &__raid_rcvrs_set_n_sw  , "=N:<ci,ri>", "Set number of sync workers"},

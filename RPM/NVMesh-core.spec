@@ -72,7 +72,6 @@ cp /opt/NVMesh/common-repo/tools/toma_rpc.config /opt/nvmesh/common-repo/tools/t
 cp /var/opt/NVMesh/.target_devices /var/opt/nvmesh/.target_devices 2>/dev/null
 cp -r /var/opt/NVMesh/toma/* /var/opt/nvmesh/toma/ 2>/dev/null
 cp -r /var/opt/NVMesh/block_devices_configuration/* /var/opt/nvmesh/block_devices_configuration/ 2>/dev/null
-cp -r /var/opt/NVMesh/block_devices_sub_vols/* /var/opt/nvmesh/block_devices_sub_vols/ 2>/dev/null
 cp -r /var/opt/NVMesh/clnt_instance_configuration/* /var/opt/nvmesh/clnt_instance_configuration 2>/dev/null
 cp -r /var/opt/NVMesh/mcs/* /var/opt/nvmesh/mcs/ 2>/dev/null
 cp -r /etc/opt/NVMesh/keys/* /etc/nvmesh/keys/ 2>/dev/null
@@ -89,7 +88,6 @@ rm /opt/NVMesh/common-repo/tools/toma_rpc.config 2>/dev/null
 rm /var/opt/NVMesh/.target_devices 2>/dev/null
 rm -r /var/opt/NVMesh/toma/* 2>/dev/null
 rm -r /var/opt/NVMesh/block_devices_configuration/* 2>/dev/null
-rm -r /var/opt/NVMesh/block_devices_sub_vols/* 2>/dev/null
 rm -r /var/opt/NVMesh/clnt_instance_configuration/* 2>/dev/null
 rm -r /var/opt/NVMesh/mcs/CLIENT/* 2>/dev/null
 rm -r /var/opt/NVMesh/mcs/TOMA/* 2>/dev/null

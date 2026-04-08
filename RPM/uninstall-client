@@ -120,7 +120,6 @@ if ! $isUpgrade; then
 
 	echo "Removing persistent volumes"
 	/bin/rm -rf /var/opt/nvmesh/block_devices_configuration/*
-	/bin/rm -rf /var/opt/nvmesh/block_devices_sub_vols/*
 	/bin/rm -rf /var/opt/nvmesh/clnt_instance_configuration/*
 
 	echo "Removing mcs cache"

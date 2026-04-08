@@ -136,9 +136,6 @@ void nvmeibc_cc_api_notify_io_changed(/*const char*/ void *volume_uuid,
 void nvmeibc_cc_api_notify_detach_completion(/*const*/ struct nvmeibc_volume*,
 									u32 /*enum_vol_status */ status);
 void nvmeibc_cc_api_request_volume_config_in_atomic_context(const struct nvmeibc_cinst_params_main *p, const char *vol_name);
-int  nvmeibc_cc_api_sub_vol_notification(/*const*/ struct nvmeibc_volume*,
-									u32 /*enum_vol_status */ status);
-int  nvmeibc_cc_api_sub_vol_unknown(const struct nvmeibc_cinst_params_main *p, const char *vol_name, const bool is_uuid);
 void nvmeibc_cc_api_request_self_recov_detach(/*const char*/ void *volume_uuid,
 									 const struct nvmeibc_cinst_params_main *p);
 

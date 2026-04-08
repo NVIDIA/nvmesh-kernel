@@ -120,7 +120,7 @@ static int __init nvmeiba_all_os_apis_init(void)
 	memset(A, 0, sizeof(*A));
 	INIT_LIST_HEAD(&A->list);
 	spin_lock_init(&A->lock);
-	A->n.sub_osapi = A->n.nvmeibc = A->n.orphan_osapi = A->n.osapi = 0;
+	A->n.nvmeibc = A->n.orphan_osapi = A->n.osapi = 0;
 	rv = nvmeiba_procs_create(A);
 	nvmeiba_os_apis_set_default_fops(&A->default_fops);
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
@@ -159,24 +159,10 @@ module_exit(nvmeiba_all_os_apis_exit);
 #define BUF_ADD(...) pos += scnprintf(buf + pos, buf_len - pos, __VA_ARGS__)
 static void _atom_attr_to_string(const struct nvmeiba_atom_os_api *atom, char *buf, int buf_len, bool is_fmt_human)
 {
-	const union nvmeiba_part_flags *f = &atom->sub.flags;
-	const char *line_fmt = NULL;
-	int pos = 0;
-
-	line_fmt = (is_fmt_human) ? "flags=0x%x " : "\"flags\" :\"0x%x\", \"str_flags\" : [";
-	BUF_ADD(line_fmt, f->all);
-	if (f->is_sub_atom) {
-		BUF_ADD("\"sub\"");
-		if (f->is_sub_auto_resize)
-			BUF_ADD(", \"alias\"");			// Nick name, mimics the carrier in every way, auto resizable with the carrier
-	} else if (!list_empty(&atom->sub.part_list)) {
-		BUF_ADD("\"car\"");	// is carrier
-	} else {
-		if (is_fmt_human) {
-			buf[0] = (char)0; //BUF_ADD("");	// Empty description for regular volumes
-		}
-	}
-	BUF_ADD((is_fmt_human) ? "" : "]");
+	(void)atom;
+	(void)buf_len;
+	(void)is_fmt_human;
+	buf[0] = (char)0;
 }
 
 /* Print live attached OS API's,
@@ -206,14 +192,6 @@ static int nvmeiba_os_apis_tostring(struct nvmeiba_all_os_apis* A, char *buf, in
 		BUF_ADD(line_fmt,
 				i++, atom->dev_name, nvmeiba_atom_get_string_status(atom),
 				n_opens, disk_name, (u64)atom->disk, (u64)atom, atom->pender.n_bios, attr);
-		if (atom->sub.flags.is_sub_atom) {
-			ulong len_4kb = 0;					// Optional: user knows the length via 'lsblk | grep nvmesh'. Need to show only the offset
-			len_4kb = (ulong)((atom->disk) ? (get_capacity(atom->disk) >> 3) : 0);
-			line_fmt = (is_fmt_human) ?
-				", offset=%lu[4k] len=%lu[4k], carrier_disk=0x%llx" :
-				", \"offset_4k\" :%lu, \"len_4k\" :%lu, \"carrier_gendisk\" : \"0x%llx\"";
-			BUF_ADD(line_fmt, (atom->sub.offset >> 12), len_4kb, (u64)atom->sub.parent->disk);
-		}
 		spin_unlock(&atom->disk_lock);
 		BUF_ADD((is_fmt_human) ? "\n" : "},\n");
 		n_total_opens += n_opens;
@@ -226,9 +204,9 @@ static int nvmeiba_os_apis_tostring(struct nvmeiba_all_os_apis* A, char *buf, in
 	}
 
 	line_fmt = (is_fmt_human) ?
-		"nvmeiba_ptr=%p, num:{atoms=%d, orphans=%d, sub=%d, opens=%d, nvmeibc=%d}\n" :
-		 "\t\"nvmeiba_ptr\": \"%p\",\n\t\"counters\": {\"atoms\": %d, \"orphans\": %d, \"sub\": %d, \"opens\" :%d, \"nvmeibc\" :%d},\n" ;
-	BUF_ADD(line_fmt, A, A->n.osapi, A->n.orphan_osapi, A->n.sub_osapi, n_total_opens, A->n.nvmeibc);
+		"nvmeiba_ptr=%p, num:{atoms=%d, orphans=%d, opens=%d, nvmeibc=%d}\n" :
+		 "\t\"nvmeiba_ptr\": \"%p\",\n\t\"counters\": {\"atoms\": %d, \"orphans\": %d, \"opens\" :%d, \"nvmeibc\" :%d},\n" ;
+	BUF_ADD(line_fmt, A, A->n.osapi, A->n.orphan_osapi, n_total_opens, A->n.nvmeibc);
 
 	if (is_fmt_human) {
 		list_for_each_entry(atom, &A->list, list_all_os_apis) {
@@ -262,7 +240,6 @@ int nvmeiba_os_apis_get_num(unsigned char req_type)
 		case 'O' : res = all.n.orphan_osapi; break;
 		case 'A' : res = all.n.osapi;        break;
 		case 'C' : res = all.n.nvmeibc;      break;
-		case 'S' : res = all.n.sub_osapi;    break;
 		default  : res = -EINVAL;            break;
 	}
 	spin_unlock_irqrestore(&all.lock, flags);
@@ -280,8 +257,6 @@ void nvmeiba_os_apis_add(struct nvmeiba_atom_os_api *os)
 		 __module_get(A->default_fops.owner);	// Can use THIS_MODULE as well. Daniel: Should use try_module_get(me), but here we know that module cannot be unloaded in this context
 	}
 	A->n.osapi++;
-	if (os->sub.flags.is_sub_atom)
-		A->n.sub_osapi++;
 	list_add_tail(&os->list_all_os_apis, &A->list);
 	spin_unlock_irqrestore(&A->lock, flags);
 }
@@ -295,8 +270,6 @@ void nvmeiba_os_apis_del(struct nvmeiba_atom_os_api *os)
 	spin_lock_irqsave(&A->lock, flags);
 	if (os->status == nvmeiba_status_orphan)
 		A->n.orphan_osapi--;
-	if (os->sub.flags.is_sub_atom)
-		A->n.sub_osapi--;
 	A->n.osapi--;
 	if (A->n.osapi == 0) {							// Put self reference on last detached atom
 		module_put(A->default_fops.owner);		// Can use THIS_MODULE as well
@@ -357,9 +330,6 @@ struct nvmeiba_atom_os_api *nvmeiba_os_apis_adopt_by(const char* dev_dir, const 
 _out:
 	if (rv) {
 		A->n.orphan_osapi--;
-		if (atom->sub.flags.is_sub_atom) {
-			/* Adopting sub volume as a result of adoption of volume*/
-		}
 		WARN((rv->status != nvmeiba_status_orphan), A_DMESG_PREFIX "%s: Unexpected Internal error during hot upgrade. Machine reboot might be required. Error code: 1002. Internal information {%s,%d}.", rv->dev_name, (dev_dir ? dev_dir : "/"), rv->status);  // Acts as _NE_to_user()
 	}
 	WARN_INCORRECT_COUNTERS(A->n.orphan_osapi < 0);
@@ -372,7 +342,7 @@ void nvmeiba_os_apis_abandon_by(struct nvmeiba_atom_os_api *atom)
 	struct nvmeiba_all_os_apis* A = &all;
 	unsigned long flags;
 	spin_lock_irqsave(&A->lock, flags);
-	WARN_INCORRECT_STATUS((atom->queue && !nvmeiba_os_api_is_queue_orphan(atom)), atom);		// Verify correctness. sub volumes dont have request queue on atom
+	WARN_INCORRECT_STATUS((atom->queue && !nvmeiba_os_api_is_queue_orphan(atom)), atom);
 	WARN_INCORRECT_STATUS((atom->status == nvmeiba_status_orphan), atom);							// Only abandoning, cannot already be abandoned
 	A->n.orphan_osapi++;
 	WARN_INCORRECT_COUNTERS(A->n.osapi < A->n.orphan_osapi);
@@ -393,7 +363,7 @@ struct nvmeiba_to_c_handover nvmeiba_os_do_on_nvmeibc_up(void)
 	spin_unlock_irqrestore(&A->lock, flags);
 	H.protocol_version = NVMEIBA_2_C_PROTO_VERSION_CURRENT;
 	if (H.n_orphan_osapi)
-		_NI_to_user(t_04_atom, "Successful hot upgrade handshake between modules nvmeiba and nvmeibc. Internal information {%u/%u/%d/%d}", H.n_orphan_osapi, n.osapi, n.sub_osapi, n.nvmeibc);   //. Error code: 0
+		_NI_to_user(t_04_atom, "Successful hot upgrade handshake between modules nvmeiba and nvmeibc. Internal information {%u/%u/%d}", H.n_orphan_osapi, n.osapi, n.nvmeibc);   //. Error code: 0
 	return H;
 }
 EXPORT_SYMBOL(nvmeiba_os_do_on_nvmeibc_up);
@@ -409,7 +379,7 @@ void nvmeiba_os_do_on_nvmeibc_down(void)
 	A->n.nvmeibc--;
 
 	if (A->n.orphan_osapi) {
-		_NI_to_user(t_05_atom, "Hot upgrade of nvmeibc module started. Internal information {%u/%u/%d/%d}\n", A->n.orphan_osapi, A->n.osapi, A->n.sub_osapi, A->n.nvmeibc);   //. Error code: 0
+		_NI_to_user(t_05_atom, "Hot upgrade of nvmeibc module started. Internal information {%u/%u/%d}\n", A->n.orphan_osapi, A->n.osapi, A->n.nvmeibc);   //. Error code: 0
 		if (A->n.nvmeibc == 0) {
 			WARN_INCORRECT_COUNTERS(!are_all_orphans);
 		}

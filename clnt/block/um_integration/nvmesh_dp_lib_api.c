@@ -481,8 +481,8 @@ const struct nvmeibc_os_api* block_api_os_get_os(const struct bio *bio);
 const struct nvmeibc_os_api* block_api_os_get_os(const struct bio *bio) { return (void*)bio->bi_private; }
 const struct nvmeibc_block_device* get_bdev_of_bio(const struct bio *bio);
 const struct nvmeibc_block_device* get_bdev_of_bio(const struct bio *bio){ return (const struct nvmeibc_block_device*)block_api_os_get_os(bio); }
-struct nvmeibc_block_device* block_api_os_get_base_bdev(const struct nvmeibc_os_api* os, ulong *s, ulong *l);
-struct nvmeibc_block_device* block_api_os_get_base_bdev(const struct nvmeibc_os_api* os, ulong *s, ulong *l) { (void)s; (void)l; return (void*)os; }
+struct nvmeibc_block_device* block_api_os_get_bdev(const struct nvmeibc_os_api* os);
+struct nvmeibc_block_device* block_api_os_get_bdev(const struct nvmeibc_os_api* os) { return (void*)os; }
 struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeibc_cinst_params_blk *p);
 struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeibc_cinst_params_blk *p) { (void)p; return (struct nvmeibc_os_apis_container *)0xFFFF; }
 struct nvmeibc_b_cp_cpu_masks *nvmeibc_b_cp_cpu_masks_create(void);
@@ -496,7 +496,7 @@ void nvmeibc_os_api_layer_destroy(const struct nvmeibc_cinst_params_blk *p) { (v
 int block_api_os_verify_bio_geometry(const struct bio *bio);
 int block_api_os_verify_bio_geometry(const struct bio *bio)
 {
-	ulong sub_len = ~0UL;					// len - Irrelevant for testing of size (volume can be auto extandable)
+	const ulong max_lba_s = ~0UL;			// UM integration has no sub-volume capacity model.
 	const struct nvmeibc_os_api *os = block_api_os_get_os(bio);
 	const ulong lba_bio_start_s = (ulong)__GET_BI_SECTOR(bio);
 	const long total_size_b = __GET_BI_SIZE(bio);
@@ -508,7 +508,7 @@ int block_api_os_verify_bio_geometry(const struct bio *bio)
 
 	/* Subset of out of bound tests taken from operation code. Needed to avoid wrong split */
 	if (unlikely((lba_bio_start_s > (1ULL << 63)) || (total_size_b == 0) ||
-				 (lba_bio_start_s + (total_size_b>>KERNEL_SECTOR_SHIFT) > sub_len))){
+				 (lba_bio_start_s + (total_size_b>>KERNEL_SECTOR_SHIFT) > max_lba_s))){
 		return -EINVAL;
 	}
 

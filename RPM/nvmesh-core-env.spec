@@ -44,7 +44,6 @@ mkdir -pv %{buildroot}/var/run/NVMesh/nvmeshtarget
 mkdir -pv %{buildroot}/var/opt/NVMesh/toma
 mkdir -pv %{buildroot}/etc/opt/NVMesh
 mkdir -pv %{buildroot}/var/opt/NVMesh/block_devices_configuration
-mkdir -pv %{buildroot}/var/opt/NVMesh/block_devices_sub_vols
 mkdir -pv %{buildroot}/var/opt/NVMesh/clnt_instance_configuration
 mkdir -pv %{buildroot}/var/opt/NVMesh/mcs/CLIENT
 mkdir -pv %{buildroot}/var/opt/NVMesh/mcs/TOMA

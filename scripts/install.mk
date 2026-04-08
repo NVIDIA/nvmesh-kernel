@@ -131,7 +131,6 @@ install_files:
 	@mkdir -p $(VAR_OPT_DIR)/mcs
 	@mkdir -p $(VAR_OPT_DIR)/toma
 	@mkdir -p $(VAR_OPT_DIR)/block_devices_configuration
-	@mkdir -p $(VAR_OPT_DIR)/block_devices_sub_vols
 	@mkdir -p $(VAR_OPT_DIR)/clnt_instance_configuration
 	$(info Installing tracing to $(TRACE_DAEMON_DIR))
 	@mkdir -p $(TRACE_DAEMON_DIR)

@@ -129,19 +129,6 @@ static void nvmeiba_bdev_close(struct gendisk *disk, BLK_MODE_T mode, pid_t pgid
 	__dec_ref_and_destroy_if_needed(atom, disk, mode, pgid);
 }
 
-void nvmeiba_atom_part_add(struct nvmeiba_atom_os_api *atom)
-{
-	const int counter = atomic_inc_return(&atom->users.n_opens);
-	_NT(t_0g_atom, "%s: add_sub to atm=%p opens=%d\n", atom->dev_name, atom, counter);
-}
-EXPORT_SYMBOL(nvmeiba_atom_part_add);
-
-void nvmeiba_atom_part_del(struct nvmeiba_atom_os_api *atom)
-{
-	__dec_ref_and_destroy_if_needed(atom, NULL, FMODE_LSEEK, 0);
-}
-EXPORT_SYMBOL(nvmeiba_atom_part_del);
-
 /* Remove leaking client process information.*/
 static void __clean_leaking_users(struct nvmeiba_atom_os_api *atom)
 {

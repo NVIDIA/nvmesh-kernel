@@ -14,7 +14,6 @@
 #include "nvmeib_metrics_jdr.h"
 #include "os_api/nvmeibc_block_api_os_common.h"
 #include "os_api/nvmeibc_block_api_os_scsi_ioctls.inc.c"
-#include "os_api/nvmeibc_block_api_os_sub_vols_common.h"
 #include "common/proc_epilog.h"
 #ifndef KR_VERSION_H
 #	include <kr_version.h>
@@ -494,7 +493,7 @@ static void __revalidate_and_reread_work(void *_os) {
 	if ((os->is_io_api_disabled)||(!os->disk_reval_task))
 		return;
 
-	__verify_on_main_wq_osapi(os);									// Must be on main work queue to serialize with sub volume add/del, Alternatively must acquire sub.list_lock_unused
+	__verify_on_main_wq_osapi(os);
 	spin_lock_irqsave(&atom->disk_lock, flags);
 	os_disk = atom->disk;
 	n_blocks_size = (ulong)(get_capacity(os_disk)>>KERNEL_SECTOR_TO_SECTOR_SHIFT);
@@ -523,7 +522,6 @@ static void __revalidate_and_reread_work(void *_os) {
 	__disk_revalidation_internal_call(os_disk);
 	_NT(t_05_ospairrrw, "@DEV_NAME: revalidation not implemented, resize may not be visible in fs", atom->dev_name);
 #endif
-	__revalidate_sub_vols_of_carrier(atom);
 	if ((no_part_scan)||(os->disk_reval_task == NVMEIBC_OS_DISK_ONLY_REVAL) || nvmeibc_block_dev_is_shadow(bdev)) {
 		_NT(t_02_ospairrrw, "@DEV_NAME: read partition is skipped", atom->dev_name);
 		goto _scheduling_done;
@@ -845,18 +843,6 @@ static void* reqq_data_create(scalabale_refcount_condition _cb, bio_exec_fn *bio
 	return reqq;
 }
 
-static void *reqq_data_copy_constructor(struct reqq_data *src, bool by_val)
-{
-	struct reqq_data *reqq;
-	if (!by_val) {			// Pass by reference. Sub volume points to reqq data of volume
-		reqq = src;
-		reqq->vol_refcount++;
-	} else {
-		reqq = reqq_data_create(src->io_refcount.cond_cb , src->bio_executor);
-	}
-	return reqq;
-}
-
 #define reqq_data_get(q) ((struct reqq_data*)(q->queuedata))
 
 // TODO: for Kernel 5.10+ consider spliting into two declaraitons (but we have a lot of callers that will also need refactoring)
@@ -940,14 +926,14 @@ const struct nvmeibc_os_api* block_api_os_get_os(const struct bio *bio)
 
 int block_api_os_verify_bio_geometry(const struct bio *bio)
 {
-	ulong sub_offset = 0, sub_len = ~0UL;							// len - Irrelevant for testing of size (volume can be auto extandable)
 	const struct nvmeibc_os_api *os = block_api_os_get_os(bio);
-	const struct nvmeibc_block_device *nd = block_api_os_get_base_bdev(os, &sub_offset, &sub_len);	// Important: os != nd->os
 	const ulong lba_bio_start_s = (ulong)__GET_BI_SECTOR(bio);
 	const long total_size_b = __GET_BI_SIZE(bio);
+	/* Keep the historical behavior for regular volumes: the full end-of-device
+	 * check happens later in the normal IO path and reports -EIO in unit tests.
+	 * Only sub-volumes needed an early truncated-length check here. */
+	const ulong max_lba_s = os->atom.sub.flags.is_sub_atom ? get_capacity(os->atom.disk) : ~0UL;
 	const enum nvmeib_block_io_op op = __get_bio_op(os, bio);						//Even if sub-read is done, there will be no change to the operation
-
-	(void)nd;
 
 	if ((int)op < 0){// enum is uint so convert to signed error code
 		return -EINVAL;
@@ -955,7 +941,7 @@ int block_api_os_verify_bio_geometry(const struct bio *bio)
 
 	/* Subset of out of bound tests taken from operation code. Needed to avoid wrong split */
 	if (unlikely((lba_bio_start_s > (1ULL << 63)) || (total_size_b == 0) ||
-				 (lba_bio_start_s + (total_size_b>>KERNEL_SECTOR_SHIFT) > sub_len))){
+				 (lba_bio_start_s + (total_size_b>>KERNEL_SECTOR_SHIFT) > max_lba_s))){
 		return -EINVAL;
 	}
 	return 0;
@@ -1046,15 +1032,15 @@ void block_api_os_stop_accepting_kernel_io(struct nvmeibc_os_api *os, u32 reason
 			}
 
 			if (set_detaching_fn) {
-				__exec_for_carrier_and_sub_vols(atom, set_detaching_fn);
+				set_detaching_fn(atom);
 			} else {
-				__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
+				__set_make_req_to_reject(atom);
 			}
 #else
-			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_set_detaching);
+			nvmeiba_os_api_set_detaching(atom);
 #endif
-		} else {	// If carrier, abandones queue for itself and all sub volumes
-			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_orphan_abandon);
+		} else {
+			nvmeiba_os_api_orphan_abandon(atom);
 		}
 		wmb();	// make sure all cores see this ASAP
 	}
@@ -1079,12 +1065,10 @@ static void __adopt_atom_submit_pending_list(struct nvmeiba_atom_os_api *atom)
 {
 	struct nvmeiba_bio_pending_list *p = &atom->pender;
 	struct bio *bio;
-	const union nvmeiba_part_flags *f = &atom->sub.flags;
-	struct nvmeiba_atom_os_api *fops_atom = ((f->is_sub_atom && f->is_sub_share_reqq) ? atom->sub.parent : atom);	// Send through real volume fops
 	_NT(t_01_submit_plist, "@DEV_NAME: adoption completed atom=@ATOM, nios=@NIOS", atom->dev_name, atom, p->n_bios);
 	// Note: Here p->bio_list cannot grow. no need to hold atom->pender->lock because new IO's do not enter the list, and ioctls of drain cannot run on main-wq
 	while ((bio = bio_list_pop(&p->bio_list)) != NULL) {
-		CALL_SUBMIT_BIO_FN(fops_atom->queue, fops_atom->disk, bio);
+		CALL_SUBMIT_BIO_FN(atom->queue, atom->disk, bio);
 		p->n_bios--;
 	}
 }
@@ -1113,17 +1097,9 @@ int block_api_os_autofail_upgrade_io(struct nvmeibc_os_api *os, int n_autofails_
 	return (n_autofails_orig-n_autofails);				// Number of autofailed io's
 }
 
-static void __sub_vol_inherit_carrier_fields(struct nvmeibc_os_api *sub, const struct nvmeibc_os_api *car)
-{
-	sub->slice_size = car->slice_size;			// Currently this is the only important field, other than that all fields in os_api except for atom itself are zero
-	WARN_ON(sub->slice_size == 0);				// Illegal configuration
-}
-
 static int __atom_adoption_start_accepting_io(struct nvmeiba_atom_os_api *atom)		// Adoption completed
 {
-	if (atom->sub.flags.is_sub_atom)
-		__sub_vol_inherit_carrier_fields((void*)atom, (void*)atom->sub.parent);
-	__adopt_atom_redirect_new_bio(atom);		// Sub atoms use carriers request queue, so new IO's always go there
+	__adopt_atom_redirect_new_bio(atom);
 	__adopt_atom_submit_pending_list(atom);		// Daniel: Todo, if a lot of bio, maybe delay to external context?
 	atom->status = nvmeiba_status_live;			// orphan --> live
 	_NT(t_11_api_os_start_bio, "@DEV_NAME: adoption completed, atom=@ATOM", atom->dev_name, atom);
@@ -1145,14 +1121,9 @@ static bool __is_nvmeibc_bdev_destroying(struct scalabale_refcount *s, void *ctx
 static int nvmeiba_atom_drain_io(struct nvmeiba_atom_os_api *atom)
 {
 	struct request_queue *q = atom->queue; 		// Same as atom->disk->queue;
-	const union nvmeiba_part_flags *f = &atom->sub.flags;
 	struct scalabale_refcount *cnt = &(reqq_data_get(q)->io_refcount);
-	const bool should_skip_draining = (f->is_sub_atom && (!f->is_owner_of_reqctx));	// Impossible to drain incomming IO's via queue context because they are flowing to the carrier (directly or via other sub volumes). No need to drain because Carrier will serve the IOs anyway
 	int	i = 1, n_ios;
 
-	if (unlikely(should_skip_draining)) {
-		return -EPERM;
-	}
 	for (; (n_ios = scalabale_refcount_get_count(cnt)) > 0; i++) {
 		if ((i&0xFF) == 0) {		// Print once every 256[msecs]
 			_NT(trace_api_os_nvmeiba_atom_drain_io, "@DEV_NAME: detach iter=@ITER, nios=@NIOS", atom->dev_name, i, n_ios);
@@ -1190,14 +1161,14 @@ void block_api_os_drain_io(struct nvmeibc_os_api *os)
 		int rv;
 		ASSERT_ATOM_STATUS(atom, nvmeiba_status_live);
 		WARN(!__is_nvmeibc_bdev_destroying(NULL, CALL_BIO_Q_CONTEXT(atom)), "nvmeibc bug\n");	// Wrong draining sequence. First call block_api_os_stop_accepting_kernel_io(), then drain the rest
-		rv = __exec_for_carrier_and_sub_vols(atom, nvmeiba_atom_drain_io);
+		rv = nvmeiba_atom_drain_io(atom);
 		is_abandoning = nvmeiba_os_api_is_queue_orphan(atom);
 		_NT(trace_1_api_os_block_api_os_drain_io, "@DEV_NAME: Draining ios=@RV. q=@QUEUE", atom->dev_name, rv, atom->queue);
 	}
 	if (is_abandoning) {
-		__exec_for_carrier_and_sub_vols(atom, __set_atom_status_orphan);
+		__set_atom_status_orphan(atom);
 	} else {
-		__exec_for_carrier_and_sub_vols(atom, __set_atom_status_detaching);
+		__set_atom_status_detaching(atom);
 	}
 }
 
@@ -1317,39 +1288,12 @@ static int __gendisk_set_name(struct nvmeiba_atom_os_api *atom, const char *dir_
 	return 0;
 }
 
-static int __adopt_queue_and_disk_of_sub_vol(struct nvmeiba_atom_os_api *atom)
-{
-	struct nvmeiba_atom_os_api *car = atom->sub.parent;
-	struct request_queue *q = atom->queue;
-	void *q_data = reqq_data_copy_constructor(car->queue->queuedata, atom->sub.flags.is_owner_of_reqctx);
-	atom->disk->fops = car->disk->fops;
-	if ((q_data)&&(q)) {
-		reqq_data_connect_to_q(q_data, q, &atom->disk->fops);
-		return 0;
-	} else {
-		return -ENOMEM;
-	}
-}
-
-static int __adopt_queue_and_disk_carrier_with_sub_vol(struct nvmeiba_atom_os_api *atom, void *q_data, const struct nvmeibc_os_apis_container *c)
-{
-	int rv = -ENOMEM;
-	// Conenct to existing queue
-	reqq_data_connect_to_q(q_data, atom->queue, &atom->disk->fops);
-	atom->disk->fops = &c->bdev_fops_io;
-	rv = __exec_for_each_sub_vol(atom, __adopt_queue_and_disk_of_sub_vol);
-	return rv;
-}
-
 static inline void block_api_os_destroy_on_init_error_io_never_started(struct nvmeibc_os_api *os, int rv, const char *dev_name, const char *fn_name)
 {
 	_NE(t5_sub_vol_create, DMESG_PREFIX("@DEV_NAME") ": error=@RV in function @STR", dev_name, rv, fn_name);
 	if (os) {
 		os->is_init_error = true;						// In most cases this is already 'true' except from when upgrading hidden volume to visible (in this case init succeeded but we reinit it
-		if (!os->atom.sub.flags.is_sub_atom)			// Much like Virtual destructor
-			block_api_os_destroy(os);
-		else
-			block_api_os_destroy_sub_vol(&os->atom);
+		block_api_os_destroy(os);
 	}
 }
 
@@ -1363,7 +1307,7 @@ static struct request_queue * __alloc_disk_and_maybe_queue(struct nvmeiba_atom_o
 		#endif
 		BUG_ON(!should_add_q);					// Todo: disk is added with queue, free the queue and only let disk remain
 		atom->queue = atom->disk->queue;
-		atom->disk->queue = NULL;				// We will use atom->queue. For sub volumes this may be the queue of parent
+		atom->disk->queue = NULL;
 	#else
 		/* Yoav Cohen: on newer kernel versions will just use BLOCK_EXT_MAJOR, actually
 		this what eventully happens for other kernels due to GENHD_FL_EXT_DEVT
@@ -1406,10 +1350,8 @@ int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 	}
 
 	if (atom->status == nvmeiba_status_orphan) {
-		rv = __adopt_queue_and_disk_carrier_with_sub_vol(atom, q_data, c);
-		if (rv < 0) {
-			goto _out;
-		}
+		reqq_data_connect_to_q(q_data, atom->queue, &atom->disk->fops);
+		atom->disk->fops = &c->bdev_fops_io;
 		if ((u32)atom->disk->major != c->drv_ver.nvmeibc_major) {
 			_NT(t_baoi_03, "@DEV_NAME major=@DEV_MAJOR change to @DEV_MAJOR", atom->disk->disk_name, atom->disk->major, c->drv_ver.nvmeibc_major);
 			// atom->disk->major = c->drv_ver.nvmeibc_major;
@@ -1506,7 +1448,7 @@ int block_api_os_start_accepting_kernel_io(struct nvmeibc_os_api *os)
 	size = get_capacity(atom->disk);
 	_NT(t_01_api_os_start_bio, "@DEV_NAME: start bio @GENDISK sz=@SZ[sectors], @DEV_SIZE[blks]", atom->dev_name, atom->disk, (ulong)size, (ulong)(size>>KERNEL_SECTOR_TO_SECTOR_SHIFT));
 	if (atom->status == nvmeiba_status_orphan) {
-		__exec_for_carrier_and_sub_vols(atom, __atom_adoption_start_accepting_io);
+		__atom_adoption_start_accepting_io(atom);
 	} else {
 		if (__add_disk_io_starts_b4_func_ends(os)) {
 			rv = -1;
@@ -1515,9 +1457,6 @@ int block_api_os_start_accepting_kernel_io(struct nvmeibc_os_api *os)
 	}
 
 	_NI(t_02_api_os_start_bio, DMESG_PREFIX("@DEV_NAME") ": started accepting kernel_io, ver=(@DEV_MAJOR:@VOL_ID)", atom->disk->disk_name, MAJOR(disk_devt(atom->disk)), MINOR(disk_devt(atom->disk)));
-
-	if (atom->sub.flags.is_sub_atom)			// Daniel: currently equals to (!dev)
-		goto _out;			// Sub volumes, skip revalidation. Daniel: Todo, maybe enable?
 
 	if (nvmeibc_topologies_are_reads_enabled(&dev->topologies)) {
 		block_api_os_async_revalidate(dev); /* In rare cases Toma's
@@ -1537,25 +1476,15 @@ const struct nvmeibc_block_device* get_bdev_of_bio(const struct bio *bio)
 	return (const struct nvmeibc_block_device*)(os->dev);
 }
 
-//TODO: very bad interface; should be split to two functions
-struct nvmeibc_block_device * block_api_os_get_base_bdev(const struct nvmeibc_os_api* os, ulong *sub_offset, ulong *sub_len)
+struct nvmeibc_block_device * block_api_os_get_bdev(const struct nvmeibc_os_api* os)
 {
-	const bool is_sub = (os->atom.sub.flags.is_sub_atom);
-	if (likely(!is_sub))
-		return (struct nvmeibc_block_device *)os->dev;
-	if (sub_offset){
-		*sub_offset = (os->atom.sub.offset >> KERNEL_SECTOR_SHIFT);		// Always zero for non sub volume
-	}
-	if (sub_len){
-		*sub_len = get_capacity(os->atom.disk);
-	}
-	return (struct nvmeibc_block_device *)((struct nvmeibc_os_api*)os->atom.sub.parent)->dev;
+	return (struct nvmeibc_block_device *)os->dev;
 }
 
 struct nvmeibc_block_device* get_bdev_or_parent_bdev_of_bio(const struct bio* bio)
 {
 	const struct nvmeibc_os_api *os = block_api_os_get_os(bio);
-	struct nvmeibc_block_device* bdev = block_api_os_get_base_bdev(os, NULL, NULL);
+	struct nvmeibc_block_device* bdev = block_api_os_get_bdev(os);
 	BUG_ON(bdev == NULL);
 	return bdev;
 }
@@ -1596,7 +1525,7 @@ static void nvmeiba_atom_io_resources_destructor(struct nvmeiba_atom_os_api *ato
 		/* Queue is cleaned up by blk_cleanup_disk or by the newer (kernel 6.5+) implementation of put_disk */
 #endif
 		atom->queue = NULL;
-	} else { /* Hidden attach / Sub volume with shared queue / destroy upon creation failure */}
+	} else { /* Hidden attach / destroy upon creation failure */}
 }
 
 static void __proc_destroy(struct nvmeibc_os_api *os);
@@ -1628,11 +1557,9 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 		}
 	} else if ((atom->status == nvmeiba_status_orphan)&&(!os->is_init_error)) {		// Resources should not be freed, left for upgrade
 		atom->queue->queuedata = NULL;							// For debug: Queue always exists. Disconnect nvmeibc context from nvmeiba queue
-		__exec_for_each_sub_vol(atom, block_api_os_destroy_sub_vol);
 	} else {													// Regular detach / init error / adopt error
 		if (!os->is_init_error)
 			ASSERT_ATOM_STATUS(atom, nvmeiba_status_detaching);	// Sanity assertion. If no init error and os_api enabled then atom was live and became detaching
-		__exec_for_each_sub_vol(atom, block_api_os_destroy_sub_vol);			// Recursively call destructor on each sub volume
 		nvmeiba_atom_io_resources_destructor(atom);
 	}
 	_NT(trace_api_os_block_api_os_destroy, "@DEV_NAME request_queue destroyed: refcount=@REFCOUNT", atom->dev_name, rq_ctx ?
@@ -1645,9 +1572,7 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 	if (!can_other_threads_open_atom)	{	// Free atom inline. LKJ: Replace the condition and destructor to ref_put()
 		nvmeiba_os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
 		atom = NULL;		 /* Both were kfree(), dont use them */
-	} else if (atom->status == nvmeiba_status_orphan) {
-		/* Dont call __exec_for_carrier_and_sub_vols(atom,destructor). Each atom holds resources for future adoption or will free itelf on adoption error */
-	} else {
+	} else if (atom->status != nvmeiba_status_orphan) {
 		atom = NULL; /* Destructor, is auto called upon last close() on atom. os/atom, might already be kfree() */
 	}
 }
@@ -2034,19 +1959,6 @@ static void __set_dev_and_uuid(struct nvmeibc_os_api *os, void* dev, const char*
 	os->driver_context = c;						// Connect os_api to multi-client instance
 	os->dev	= dev;
 	UUID_COPY(os->dev_uuid, dev_uuid);
-	if (!dev)
-		os->is_proc_api_disabled = true;		// Sub volumes dont have /proc entries. They use carriers /proc
-}
-
-static int __get_mem_for_os_api_sub_vols(struct nvmeiba_atom_os_api *atom)
-{
-	struct nvmeibc_os_api *carrier = container_of(atom->sub.parent, struct nvmeibc_os_api, atom);
-	const struct nvmeibc_os_apis_container *c = carrier->driver_context;
-	struct nvmeibc_os_api *os = __get_mem_for_os_api(c->drv_ver.dir_lsblk, atom->dev_name);
-	BUG_ON(&os->atom != atom);
-	__set_dev_and_uuid(os, NULL, atom->dev_name, c);
-	_NT(t_baoc_10, "@DEV_NAME: adopted sub_atom=@ATOM", atom->dev_name, &os->atom);
-	return 0;
 }
 
 struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk *p,
@@ -2073,14 +1985,13 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 			   but a recoverer attach happened before regular attach. Fail the recoverer attach, or else we risk DI due to wrong reservation version */
 			_NT(t_baoc_01, "@DEV_NAME: Failing recoverer attach. Volume during upgrade! Reabandoning", dev_name);
 			os->atom.status = nvmeiba_status_live;		// We mistakenly adopted the atom, so abandon it again. Sorry bro...
-			nvmeiba_os_api_orphan_abandon(&os->atom);	// Note: No need to call '__exec_for_carrier_and_sub_vols' because we havent adopted the sub volumes yet
+			nvmeiba_os_api_orphan_abandon(&os->atom);
 			__set_atom_status_orphan(&os->atom);
 			rv = -EACCES;
 			os = NULL;
 			goto _out;
 		}
 		_NT(t_baoc_02, "@DEV_NAME: adopted atom=@ATOM", dev_name, &os->atom);
-		__exec_for_each_sub_vol(&os->atom, __get_mem_for_os_api_sub_vols); // Auto adopting all sub-vols of this carrier
 	}
 
 	/* Proc API */
@@ -2157,255 +2068,6 @@ void block_api_os_change_size(struct nvmeibc_block_device *dev, bool force_reval
 	if (resize_occured) {
 		_NT(t_06_api_os_resize, "@DEV_NAME: resized to @SZ[blks]", dev->name, dev->size);
 	}
-}
-
-/********************************** Sub Volume *******************************/
-#include "os_api/nvmeibc_block_api_os_sub_vols_common.inc.c"	// Todo: Remove
-
-static void __copy_gendisk(struct gendisk *dst, const struct gendisk *src)
-{
-	dst->major = nvmeibc_use_block_external_major ? 0 : src->major;
-	dst->flags = src->flags;
-	dst->fops =  src->fops;
-	dst->queue = src->queue;
-}
-
-// Find sub volume of carrier, assuming carrier has sub.list_lock_unused locked for addition/deletion (or serialized onon main_wq)
-static struct nvmeibc_os_api * __find_sub_atom_carrier_locked(struct nvmeiba_atom_os_api *car, const char* dev_name)
-{
-	const u32 car_name_len = (u32)strlen(car->dev_name) + 1;	// Skip prefix of carrier
-	struct nvmeiba_part *part;
-	struct nvmeibc_os_api *rv = NULL;
-	const int max_len = sizeof(car->dev_name);
-	list_for_each_entry(part, &car->sub.part_list, part_list) {		// LKJ: take spinlock of sub-volume here
-		struct nvmeiba_atom_os_api *atom = container_of(part, struct nvmeiba_atom_os_api, sub);
-		const u32 skip_prefix = (atom->sub.flags.is_sub_unique_name ? 0 : car_name_len);
-		if (!strncmp(&atom->dev_name[skip_prefix], dev_name, (max_len-skip_prefix-1))) {
-			rv = (struct nvmeibc_os_api*)atom;
-			goto _out;
-		}
-	}
-_out:
-	return rv;
-}
-
-static int nvmeibc_atom_part_add(struct nvmeiba_atom_os_api *atom, struct nvmeiba_atom_os_api *car, ulong start_lba, const char *dir_lsblk, const char* dev_name, union nvmeiba_part_flags f)
-{
-	int rv = 0;
-	__verify_on_main_wq_atom(atom);							// Must be on main work queue to serialize with sub volume add/del, Alternatively must acquire sub.list_lock_unused
-	atom->sub.offset = (start_lba << NVMEIBC_SECTOR_SHIFT);		// Bytes
-	f.is_sub_atom = true;										// Regardless of what the caller passed
-	atom->sub.flags.all = f.all;
-	disk_id_allocator_alloc(get_dia(atom), atom->disk, atom->dev_name);
-	__copy_gendisk(atom->disk, car->disk);
-	atom->users.readonly = car->users.readonly;					// Inherit the same reservation flags from carrier
-	if (!f.is_sub_share_reqq) {
-		atom->disk->queue = atom->queue;
-	}
-	atom->disk->private_data = atom;
-
-	if (1) {
-		int n;
-		if (f.is_sub_unique_name) {
-			n = snprintf(&atom->dev_name[0], DISK_NAME_LEN, "%s",                             dev_name);
-		} else {
-			#define SUB_VOL_NAME_FMT	"%s_%s"				// <carrier>_<sub>
-			n = snprintf(&atom->dev_name[0], DISK_NAME_LEN, SUB_VOL_NAME_FMT, car->dev_name, dev_name);
-		}
-		ALLERT_NAME_TRUNCATION((n > DISK_NAME_LEN), dev_name, atom->dev_name);
-		if ((rv = __gendisk_set_name(atom, dir_lsblk)) < 0)
-			goto _out;
-	}
-
-	// Sub volume creation succeeded, proceeed to add it to the carrier
-	//car->sub.flags.is_sub_auto_resize |= f.is_sub_auto_resize;	// True if at least one of them is auto resizable. Todo add this line when upon removing nickname this flag is updated
-	atom->sub.parent = car;
-	list_add_tail(&atom->sub.part_list, &car->sub.part_list);
-	nvmeiba_atom_part_add(car);
-_out:
-	return rv;
-}
-
-static void nvmeibc_atom_part_del(struct nvmeiba_atom_os_api *atom)
-{
-	struct nvmeiba_atom_os_api *car = atom->sub.parent;
-	__verify_on_main_wq_atom(atom);				// Must be on main work queue to serialize with sub volume add/del, Alternatively must acquire sub.list_lock_unused
-	if (atom->sub.flags.is_sub_atom) {			// Protect against incorrect call on non sub volume
-		if (car && (car != atom)) {
-			list_del(&atom->sub.part_list);     // Delete form carrier so take lock on carrier
-			__atom_set_self_parent(atom);
-			nvmeiba_atom_part_del(car);
-		} else {}								// Cleanup of failed constructor: Rare case when creation of sub volume failed before it could connect to carrier
-	}
-}
-
-int block_api_os_sub_vol_attach(struct nvmeibc_os_api *carrier,			// Equivalent of carrier attach
-						ulong start_lba, ulong size,
-						const char* dev_name, const char* dev_uuid)
-{
-	int rv = -ENOMEM;
-	struct nvmeibc_os_api *os = NULL;
-	struct nvmeiba_atom_os_api *atom = NULL;
-	struct gendisk *disk = NULL;
-	const char* dir_lsblk;
-	union nvmeiba_part_flags f = {.all = 0};
-	if (carrier->atom.sub.flags.is_sub_atom) {
-		_NT(t0_sub_vol_create, "@DEV_NAME: cannot be created on sub @DEV_NAME", dev_name, carrier->atom.dev_name);
-		rv = -ENODEV;
-		goto _out;
-	}
-	if (carrier->is_io_api_disabled) {
-		_NT(t1_sub_vol_create, "@DEV_NAME: cannot be created on hidden @DEV_NAME", dev_name, carrier->atom.dev_name);
-		rv = -ENODEV;
-		goto _out;
-	}
-	if (unlikely(__find_sub_atom_carrier_locked(&carrier->atom, dev_name))) {
-		rv = -EEXIST;
-		goto _out;
-	}
-	if (1) {		// Capacity settings
-		const ulong carrier_cap_sectors = (ulong)get_capacity(carrier->atom.disk);
-		const ulong carrier_cap_blocks = (carrier_cap_sectors >> KERNEL_SECTOR_TO_SECTOR_SHIFT);
-		if ((start_lba + size) > carrier_cap_blocks) {
-			_NE(t2_sub_vol_create, DMESG_PREFIX("@DEV_NAME") ": cannot be created with lba > last lba of @DEV_NAME", dev_name, carrier->atom.dev_name);
-			rv = -ENODEV;
-			goto _out;
-		}
-		if ((start_lba == 0) && (size == 0)) {	// Just sub volume spanning on all the entire carrier (named attach)
-			size = carrier_cap_blocks;
-			f.is_sub_auto_resize = true;
-			f.is_sub_unique_name = true;		// 2019.11.29 - Yanivs request for POC, aliases are not prefixed by volume name
-		}
-	}
-	// ******** Default flags for sub volumes, ******
-	f.is_owner_of_reqctx = false;				// Daniel: Make module params? Sub vols requse context of carrier
-	if (f.is_owner_of_reqctx)
-		f.is_sub_share_reqq = false;			// If sub volus use different context then they must use different request queues as well
-
-	// ******** Equivalent to block_api_os_create() of regular volume ******
-	if ((os = __kzalloc_os_api()) == NULL) {
-		goto _out;
-	}
-	__set_dev_and_uuid(os, NULL /*No device*/, dev_uuid, carrier->driver_context);
-	atom = &os->atom;
-	nvmeibc_atom_constructor(atom, dev_name, true);
-
-	// ******** Equivalent to block_api_os_init() of regular volume ******
-
-	__sub_vol_inherit_carrier_fields(os, carrier);
-	__alloc_disk_and_maybe_queue(atom, !f.is_sub_share_reqq);
-	disk = atom->disk;
-	if (!f.is_sub_share_reqq) {
-		struct request_queue *q = atom->queue;
-		void *q_data = reqq_data_copy_constructor(carrier->atom.queue->queuedata, f.is_owner_of_reqctx);
-		if (!q_data) {
-			rv = -ENOMEM | 0x2000;
-			goto _out;
-		}
-		if (unlikely(!q)) {
-			rv = -ENOMEM | 0x3000;
-			goto _out;
-		}
-		reqq_data_connect_to_q(q_data, q, &carrier->atom.disk->fops);
-		__request_queue_set_default_params(q, dev_name, __init_request_queue_params(carrier));
-	}
-	if (!os->atom.disk) {
-		rv = -ENOMEM | 0x4000;
-		goto _out;
-	}
-
-	dir_lsblk = carrier->driver_context->drv_ver.dir_lsblk;
-	rv = nvmeibc_atom_part_add(atom, &carrier->atom, start_lba, dir_lsblk, dev_name, f);
-	if (unlikely(rv < 0)) {
-		_NE(t_03_nvmeibc_atom_prt_add, DMESG_PREFIX("@DEV_NAME") ": sb_vol @DEV_NAME error rv=@RV", carrier->atom.dev_name, dev_name, rv);
-		goto _out;
-	}
-
-	set_capacity(disk, (size<<KERNEL_SECTOR_TO_SECTOR_SHIFT));
-	atom->status = nvmeiba_status_live;
-	block_api_os_start_accepting_kernel_io(os);
-	_NI(t3_sub_vol_create, DMESG_PREFIX("@DEV_NAME") ": ver=(@DEV_MAJOR:@VOL_ID)/@GENDISK_MAJOR dev=@DEV, osapi=@PTR, registering with OS...", disk->disk_name, MAJOR(disk_devt(disk)), MINOR(disk_devt(disk)), disk->major, os->dev, os);
-	rv = 0;
-_out:
-	if (unlikely(rv))
-		block_api_os_destroy_on_init_error_io_never_started(os, rv, dev_name, __FUNCTION__);
-	else
-		os->is_init_error = false;
-	return rv;
-}
-
-static int block_api_os_destroy_sub_vol(struct nvmeiba_atom_os_api *atom)
-{
-	struct nvmeibc_os_api *os = container_of(atom, struct nvmeibc_os_api, atom);
-	const bool can_other_threads_open_atom = (atom->disk && is_gendisk_ready_for_io(atom));
-	const bool should_take_self_ref = (can_other_threads_open_atom && (atom->status != nvmeiba_status_orphan));
-
-	int rv;
-	if (os->is_init_error) {
-		ASSERT_ATOM_STATUS(atom, nvmeiba_status_hidden);
-		nvmeibc_atom_part_del(&os->atom);						// Remove possibly half initialized connection of sub voluem to carrier
-	} else if (atom->status == nvmeiba_status_detaching) {
-		nvmeibc_atom_part_del(&os->atom);						// Remove connection of sub voluem to carrier
-	} else {													// Detach for upgrade
-		ASSERT_ATOM_STATUS(atom, nvmeiba_status_orphan);
-	}
-	if (should_take_self_ref) {
-		if (block_api_os_get(os, "Detach_SubVol") < 0) {		// Carrier/Regular os_apis have the volume layer to take external ref. Sub volumes dont have that
-			rv = -ENODEV;
-			goto _out;
-		}
-	}
-	block_api_os_destroy(os);
-	if (should_take_self_ref) {
-		block_api_os_put(os);
-	}
-	rv = 0;
-_out:
-	return rv;
-}
-
-int block_api_os_sub_vol_detach(struct nvmeibc_os_api *carrier, const char* dev_name)		// Equivalent of carrier detach wihtout --force
-{
-	struct nvmeibc_os_api *os = __find_sub_atom_carrier_locked(&carrier->atom, dev_name);
-	const char *carrier_name = &carrier->atom.dev_name[0];
-	int rv = 0;
-	__verify_on_main_wq_osapi(carrier);				// Must be on main work queue to serialize with sub volume add/del, Alternatively must acquire sub.list_lock_unused
-	if (!os) {
-		rv = -ENODEV;
-		goto _out;
-	}
-	if (block_api_os_is_mounted(os)) {
-		rv = -EBUSY;
-		goto _out;
-	}
-	if (!os->atom.sub.flags.is_sub_share_reqq) {
-		block_api_os_stop_accepting_kernel_io(os, 'D');
-		block_api_os_drain_io(os);
-	}
-	rv = block_api_os_destroy_sub_vol(&os->atom);
-_out:
-	if (rv) {
-		_NE(t_00_sub_vol_del, DMESG_PREFIX("@DEV_NAME") ": cannot delete sub vol of @DEV_NAME, rv=@RV", dev_name, carrier_name, rv);
-	}
-	return rv;
-}
-
-static int __atom_mimic_carrier_properties(struct nvmeiba_atom_os_api *atom)		// Adoption completed
-{
-	struct nvmeiba_atom_os_api *car = atom->sub.parent;
-	__verify_on_main_wq_atom(atom);				// Must be on main work queue to serialize with sub volume add/del, Alternatively must acquire sub.list_lock_unused
-	if (atom->sub.flags.is_sub_auto_resize) {
-		set_capacity(atom->disk, get_capacity(car->disk));
-		// Daniel: Not sure if we need to do block_api_os_async_revalidate(car), Figure that out
-		_NT(t_07_api_os_resize, "@DEV_NAME: mimicked resize of carrier", atom->dev_name);
-	}
-	return 0;
-}
-
-static int __revalidate_sub_vols_of_carrier(struct nvmeiba_atom_os_api *atom)
-{
-	__exec_for_each_sub_vol(atom, __atom_mimic_carrier_properties);
-	return 0;
 }
 
 /*************************** Riders on Top of Carriers ***********************/

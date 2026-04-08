@@ -183,7 +183,6 @@ def setupPaths():
 	os.symlink(varOptNvmeshPath, '/var/opt/nvmesh')
 
 	subprocess.check_call('mkdir -p /var/opt/nvmesh/block_devices_configuration', shell=True)
-	subprocess.check_call('mkdir -p /var/opt/nvmesh/block_devices_sub_vols', shell=True)
 
 	## create hidden nvmesh conf
 	hidden_conf_dir = '/etc/nvmesh/configs/nvmeibc/'

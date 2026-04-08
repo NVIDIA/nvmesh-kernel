@@ -189,7 +189,7 @@ static inline bool block_api_os_is_io_api_enabled(const struct nvmeibc_os_api *o
 /*********************** IO executing methods ********************************/
 /* In your bio_exec_fn extract your device from the kernels bio */
 const struct nvmeibc_os_api* block_api_os_get_os(const struct bio *bio);
-struct nvmeibc_block_device* block_api_os_get_base_bdev(const struct nvmeibc_os_api* os, ulong *sub_offset, ulong *sub_len);
+struct nvmeibc_block_device* block_api_os_get_bdev(const struct nvmeibc_os_api* os);
 int block_api_os_verify_bio_geometry(const struct bio *bio);
 
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_submit_bio_part.h"
@@ -205,16 +205,6 @@ void block_api_os_change_size(     struct nvmeibc_block_device *dev,
 											bool force_revalidation);
 void block_api_os_change_mirorring(struct nvmeibc_block_device *dev);
 void block_api_os_async_revalidate(struct nvmeibc_block_device *dev);
-
-/********************************** Sub Volume *******************************/
-int block_api_os_sub_vol_attach(struct nvmeibc_os_api *carrier,
-						ulong start_lba, ulong size,
-						const char* dev_name, const char* dev_uuid);
-int block_api_os_sub_vol_detach(struct nvmeibc_os_api *carrier, const char* dev_name);
-
-// Creating sub volume spanning on the entire carrier (effectively alliasing carrier by different name)
-#define block_api_os_sub_vol_name(carrier, dev_name, dev_uuid) \
-			block_api_os_sub_vol_attach(carrier, 0UL, 0UL, dev_name, dev_uuid);
 
 /*************************** Sub-block operations***** ***********************/
 static inline unsigned get_logical_block_size_from_os(const struct nvmeibc_os_api* os) {

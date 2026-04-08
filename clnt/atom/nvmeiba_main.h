@@ -16,7 +16,6 @@ struct nvmeiba_all_os_apis {				// Main object of nvmeiba
 	struct list_head list;					// List of atoms
 	struct nvmeiba_all_debug_cntrs {		// Various debug counters to verify abandon/adopt flows
 		int	osapi;							// Num total atoms
-		int sub_osapi;						// Num of sub atoms
 		int orphan_osapi;					// From the Total, How many orphans exist (for debug)
 		int nvmeibc;						// Number of nvmeibc instances connected to nvmeiba
 	} n;

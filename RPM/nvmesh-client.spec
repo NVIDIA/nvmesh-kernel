@@ -45,7 +45,6 @@ mkdir -pv %{buildroot}/etc/nvmesh
 mkdir -pv %{buildroot}/var/run/nvmesh/nvmeshclient
 mkdir -pv %{buildroot}/var/opt/nvmesh
 mkdir -pv %{buildroot}/var/opt/nvmesh/block_devices_configuration
-mkdir -pv %{buildroot}/var/opt/nvmesh/block_devices_sub_vols
 mkdir -pv %{buildroot}/var/opt/nvmesh/clnt_instance_configuration
 mkdir -pv %{buildroot}/var/opt/nvmesh/mcs/CLIENT
 mkdir -pv %{buildroot}/var/log/nvmesh/trace_daemon

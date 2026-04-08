@@ -90,7 +90,6 @@ Ideally, the features matrix should be a mix of components & processes on pretty
       + dimensions
         + hot - *I/O-enabled*
         + cold - *I/O disabled*
-    + create/delete sub-volume **hidden product**
   + block device flows
     + read partition - *client triggers this process after the volume becomes IOable*
     + disk rescan, revalidation - *on expand, notify the OS, so the file system will be aware of new free space* 

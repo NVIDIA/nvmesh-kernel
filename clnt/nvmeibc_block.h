@@ -130,7 +130,6 @@ int nvmeibc_block_qa_config(const struct nvmeibc_cinst_params_blk *p,
 #define MAIN_IOCTL_PREFIX "main-ioctl"
 #define DMESG_PD_PREFIX(id)   "diskp " id
 #define DMESG_MOD_PREFIX  "module"
-#define SUB_VOL_CMD       "sub_vol_"
 
 /**
  * @brief Try detach bdev,

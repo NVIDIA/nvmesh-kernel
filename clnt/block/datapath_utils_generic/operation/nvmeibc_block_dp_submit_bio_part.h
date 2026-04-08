@@ -38,7 +38,7 @@ struct bio_part {		// Array of such structs for together the full vlba of bio
 	struct bio *bio;	/* All bio_parts point to the same original bio */
 	u32 bio_offst;		/* Offset into bi_sector in within the bio. unites of 512[bytes] */
 	u32 size;			/* length [bytes], within the bio. Sum of all sizes of bio parts is the original bio */
-	ulong start_vlba_s;	/* Caching the vlba offset. unites of 512[bytes], Includes sub volumes offset */
+	ulong start_vlba_s;	/* Caching the vlba offset in units of 512[bytes]. */
 	struct bio_part *ref; /*All bio parts point to the first one in the list*/
 	nvmeibc_atomic_t n_ref;		/* Only the first elemenet (leader) has a ref count */
 	int rv;		/* Only the leader has this value, stores the error of last erronous part*/

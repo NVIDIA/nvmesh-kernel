@@ -562,7 +562,7 @@ The nvmeiba code could be found under `/[project root]/clnt/atom` directory.
 
 ### Client persistency {#client-persistency}
 
-14. Client/Server stores some persistency on local disk. In case of machine reboot, the client uses this persistency to return to the same state as prior to reboot (for example: attach to the same volumes, recreate the same aliases for volumes, recreate the same client instances, etc).
+14. Client/Server stores some persistency on local disk. In case of machine reboot, the client uses this persistency to return to the same state as prior to reboot (for example: attach to the same volumes and recreate the same client instances).
 15. Persistency stores also the latest configuration/topology for Toma  
 16. Please attach some volumes and explore the following directories to learn more:  
     1. /var/opt/NVMesh/block\_devices\_configuration  
@@ -570,7 +570,7 @@ The nvmeiba code could be found under `/[project root]/clnt/atom` directory.
     3. /var/opt/NVMesh/clnt\_instance\_configuration  
 17. Persistency has the following goals  
     1. Recreate the same client instances after machine reboot. For this reason persistence stores for each instance the exact parameters with which it was created  
-    2. For each instance, reattach all the previously attached volumes and add their aliases. This is crucial as nvmesh is loaded pretty early in the machine boot, before user space applications start loading and expect nvmesh disks to exist.
+    2. For each instance, reattach all the previously attached volumes. This is crucial as nvmesh is loaded pretty early in the machine boot, before user space applications start loading and expect nvmesh disks to exist.
 18. Boot order:  
     1. creating all instances and attaching volumes is a crucial blocking step in the boot process, because if the file system starts when block devices do not exist, all hell breaks loose in customers' scripts and environment.  
     2. NVMesh drivers load after nic / nvme drivers were already loaded.
@@ -760,16 +760,11 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 
 ### Named attach {#named-attach}
 
-77. Spec is here ([here](https://docs.google.com/document/d/1LvcQFVaAr9-VnqL1MBTKB2zCal6PcnzP4r8C71-77no/edit)).
-78. Create an alias to the volume upon attachment. Same volume may be attached many times under different aliases \- thus allowing isolation to user space app attach/detach request  
-79. All volume resources are reused or conversely there are no resources dedicated to a specific alias.
-80. Aliases are implemented via the sub-volume (partition) mechanism.  
-81. Aliases, unlike sub volume, do grow with the volume when it is extended.
-    1. Example: volume of 1\[gb\]. Add sub volume to the first 0.5\[gb\]. Add alias (of size 1\[gb\]). Now extend the volume to size 2\[gb\]. Sub volume will remain 0.5\[gb\], alias grows to 2\[gb\]
+> **REMOVED**: Named attach / alias functionality has been removed from the product.
 
 ### Volumes stacking  {#volumes-stacking}
 
-> **REMOVED**: Volume stacking (carrier/rider volumes) has been removed from the product. Attaching a volume with a carrier or rider type now returns `-EINVAL`. The sub-volume and named-attach mechanisms described below are unrelated and remain active.
+> **REMOVED**: Volume stacking (carrier/rider volumes) has been removed from the product. Attaching a volume with a carrier or rider type now returns `-EINVAL`.
 
 ### Detach state machine {#detach-state-machine}
 
@@ -788,7 +783,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
        3. Start rejecting incoming IOs and drain all IOs in the system (in resubmission queue, etc)  
        4. Drain toma messages. Ignore all incoming messages and drain the processing of existing messages  
     5. Delete block device (clean it up, don’t free memory yet)  
-    6. All atom’s of block device and its subvolumes/aliases will be freed once user space does last close() and can survive detach. In detach for upgrade, they definitely survive the detach process.  
+    6. All atom resources of the block device will be freed once user space does last close() and can survive detach. In detach for upgrade, they definitely survive the detach process.
     7. Free transport layer resources of volume (connections to disks which were needed only by this volume)  
     8. Free memory of the block device and stop its threads.  
     9. Put (release) the extra reference on the os\_api  
@@ -796,12 +791,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 
 ### Sub-volumes {#sub-volumes}
 
-93. Sub-volumes are a mechanism for creating partitions on volumes. Mainly used for testing and implementation of aliases.  
-94. Sub volume has minimal os API to mimic a block device to the kernel.
-95. All incoming IO is passed as-is to the carrier volume, apart from minor manipulations to the vlba offset. Sub volumes can be implemented in 3 different ways  
-    1. **Minimal** \- The sub-volume has a kernel block device but no request queue for IO’s. It uses the carrier volume’s  request queue. This is compatible with old kernels but cannot be used on new versions  
-    2. **Distinct request queue** \- The sub-volume has its own request queue, but the internal private data structures of the request queue are shared with the carrier volume. This is the optimal implementation. There is 1 counter of in-flight IO on the carrier.  
-    3. Distinct request queue \+ private data \- The sub-volume also allocates internal data structures. Each sub-volume counts its own IO in flight. Less effective and more difficult to implement force-detach functionality correctly
+> **REMOVED**: Sub-volume functionality has been removed from the product.
 
 ## Volume reconfiguration {#volume-reconfiguration}
 
@@ -874,7 +864,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
      1. Attach/Detach tasks require a lot of subtasks unknown in advance so it is hard to wait for such conditions. A waiting mechanism is implemented via multi-completion, which is a completion (semaphore) \+ atomic variable.
      2. Each new task increases the counter, each completed task decreases it. Upon reaching zero, the completion struct wakes up whoever is sleeping
      3. Example: Detach-all-volumes request  
-        1. Starts 1 task \- find and detach all volumes. Say 10 volumes are found so the counter gets \+10, and \-1 for completion of the “find” task. Volume V7 has 3 aliases so it does \+3 for that. Etc  
+        1. Starts 1 task \- find and detach all volumes. Say 10 volumes are found so the counter gets \+10, and \-1 for completion of the “find” task.
      4. Example: Client shutdown  
         1. Starts as 1 task \- find and shutdown all client instances  
         2. Each instance does \+1 for self deletion and \+1 for task “detach all volumes from instance” as explained above.

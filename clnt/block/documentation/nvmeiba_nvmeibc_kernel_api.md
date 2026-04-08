@@ -40,7 +40,6 @@ struct nvmeiba_all_os_apis {
     struct list_head list;          // linked list of all atoms (attached, detaching, orphan)
     struct {
         int osapi;                  // total atoms
-        int sub_osapi;              // sub-atoms (aliases / sub-volumes)
         int orphan_osapi;           // currently orphaned (upgrading)
         int nvmeibc;                // number of nvmeibc instances connected
     } n;
@@ -235,7 +234,7 @@ new I/O in flight.
 `block_api_os_stop_accepting_kernel_io(os, reason='D')` (line 1048):
 
 ```c
-__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
+__set_make_req_to_reject(atom);
 wmb();
 ```
 
@@ -253,7 +252,7 @@ Any BIO arriving after the memory barrier is immediately failed with `-EIO`.
   inside nvmeibc. This blocks until all in-flight BIOs complete.
 - Since `is_abandoning = false` (queue is not orphan), calls:
   ```c
-  __exec_for_carrier_and_sub_vols(atom, __set_atom_status_detaching);
+  __set_atom_status_detaching(atom);
   // atom->status = nvmeiba_status_detaching
   ```
 
@@ -355,7 +354,7 @@ present. The sequence from the block device perspective:
 `block_api_os_stop_accepting_kernel_io(os, reason='U')` (line 1048):
 
 ```c
-__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_orphan_abandon);
+nvmeiba_os_api_orphan_abandon(atom);
 ```
 
 `nvmeiba_os_api_orphan_abandon` (line 323, `nvmeiba_atom_os_api.c`):
@@ -380,7 +379,7 @@ exists in `/dev/`.** Users with open handles remain unaffected.
 - `is_abandoning = nvmeiba_os_api_is_queue_orphan(atom)` → **true**.
 - Status transitions:
   ```c
-  __exec_for_carrier_and_sub_vols(atom, __set_atom_status_orphan);
+  __set_atom_status_orphan(atom);
   // atom->status = nvmeiba_status_orphan
   ```
 
@@ -389,7 +388,6 @@ exists in `/dev/`.** Users with open handles remain unaffected.
 ```c
 } else if ((atom->status == nvmeiba_status_orphan) && (!os->is_init_error)) {
     atom->queue->queuedata = NULL;   // disconnect nvmeibc context from queue
-    __exec_for_each_sub_vol(atom, block_api_os_destroy_sub_vol);
     // NOTE: nvmeiba_atom_io_resources_destructor is NOT called
 ```
 
@@ -439,7 +437,7 @@ new `nvmeibc_os_api` is needed — the existing one is reused.
 
 ```c
 if (atom->status == nvmeiba_status_orphan) {
-    __adopt_queue_and_disk_carrier_with_sub_vol(…);
+    reqq_data_connect_to_q(q_data, atom->queue, &atom->disk->fops);
 }
 ```
 
@@ -457,7 +455,7 @@ if (atom->status == nvmeiba_status_orphan) {
 
 ```c
 if (atom->status == nvmeiba_status_orphan) {
-    __exec_for_carrier_and_sub_vols(atom, __atom_adoption_start_accepting_io);
+    __atom_adoption_start_accepting_io(atom);
 }
 ```
 

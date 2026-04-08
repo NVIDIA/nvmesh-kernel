@@ -21,7 +21,7 @@
 int execute_bio(struct bio *bio, ulong now);
 
 /**************************** C implement **********************************/
-#include "block/nvmeibc_block_api_os.h"					// Get bdev + sub_vol offset from bio
+#include "block/nvmeibc_block_api_os.h"					// Get bdev geometry from bio
 
 static inline bool __ops_in_same_blockset(struct bio_part *o1, struct bio_part *o2, u64 slice_size) {
 	const u64 num_kern_sectors_in_blockset = ((slice_size * LOCKSET_SLICES) << KERNEL_SECTOR_TO_SECTOR_SHIFT);
@@ -121,9 +121,8 @@ int execute_bio(struct bio *bio, unsigned long now)
 	int rv = 0;
 	struct operation *o;
 	struct operation *chain_head = NULL, *chain_prev = NULL;
-	ulong sub_offset = 0, sub_len = ~0UL;							// len - Irrelevant for testing of size (volume can be auto extandable)
 	const struct nvmeibc_os_api *os = block_api_os_get_os(bio);
-	struct nvmeibc_block_device *nd = block_api_os_get_base_bdev(os, &sub_offset, &sub_len);	// Important: os != nd->os
+	struct nvmeibc_block_device *nd = block_api_os_get_bdev(os);
 	struct bio_part *ldr = NULL;													// Leader part of bio
 	const enum nvmeib_block_io_op op = __get_bio_op(os, bio);						//Even if sub-read is done, there will be no change to the operation
 	const u32 split_s = __get_split(nd, op);
@@ -170,7 +169,7 @@ int execute_bio(struct bio *bio, unsigned long now)
 		o->bios[0]->bio = bio;
 		o->bios[0]->bio_offst = bio_part_ofst_s;
 		o->bios[0]->size = bio_part_size_b;
-		o->bios[0]->start_vlba_s = sub_offset + (ulong)cur_start_s;	// Sub vol offset + bio start offset + bio_part offset
+		o->bios[0]->start_vlba_s = (ulong)cur_start_s;
 		o->num_bios = 1;
 		o->op = op;
 		o->jiffies1 = now;

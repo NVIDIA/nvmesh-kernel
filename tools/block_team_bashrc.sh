@@ -1155,26 +1155,6 @@ else
 		fi
 	}
 
-	function NVMESH_vol_sub_add {
-		if [ $# -lt 2 ]; then
-			echo "input: <vol_name> <part_name> <start_blk?> <len_blk?>";
-		else
-			cmd="#$1|sub_vol_add name=$2";
-			[[ $# -gt 2 ]] && cmd+=" start=$3 len=$4";
-			CCC="echo '${cmd}' > /proc/nvmeibc/cli/cli";
-			echo $CCC; sudo bash -c "$CCC"; NVMESH_vol_watch "{l}";
-		fi
-	}
-
-	function NVMESH_vol_sub_del {
-		if [ $# -lt 2 ]; then
-			echo "input: <vol_name> <part_name>";
-		else
-			CCC="echo '#$1|sub_vol_del name=$2' > /proc/nvmeibc/cli/cli";
-			echo $CCC; sudo bash -c "$CCC"; NVMESH_vol_watch "{l}";
-		fi
-	}
-
 	function NVMESH_port() {
 		if [ $# -eq 0 ]; then
 			PORT=ens7
@@ -1295,11 +1275,11 @@ else
 			NVMESH_clnt_inst rmv 2
 			# instaces 0 and mc0003 are still connected
 
-			echo "--------------- Hot Upgrade -------------";  #instances/volumes/aliases are recreated
+			echo "--------------- Hot Upgrade -------------";  #instances/volumes are recreated
 			NVMESH_unitest upgrade;
 			# Note: Here age of volume > age of isntance
 
-			echo "--------------- Restart client -------------";  #instances/volumes/aliases are recreated
+			echo "--------------- Restart client -------------";  #instances/volumes are recreated
 			NVMESH_service all restart;
 
 			echo "--------------- Cleanup -------------"

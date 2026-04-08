@@ -628,29 +628,12 @@ out:
 	return rv;
 }
 
-static int __reply_to_sub_volume_request(struct nvmeibc_volume *volume, const bool add, int rv)
-{
-	u32 reply_status;
-	if (add) {
-		if (rv) reply_status = NVMEIB_C_TO_M_VOLUME_ALIAS_CREATE_FAILED;
-		else    reply_status = NVMEIB_C_TO_M_VOLUME_ALIAS_CREATED;
-	} else {
-		if (!rv) reply_status = NVMEIB_C_TO_M_VOLUME_ALIAS_DELETED;
-		else {
-			if (rv == -EBUSY) reply_status = NVMEIB_C_TO_M_VOLUME_ACK_BUSY;
-			else              reply_status = NVMEIB_C_TO_M_VOLUME_ALIAS_DELETE_FAILED;
-		}
-	}
-	return nvmeibc_cc_api_sub_vol_notification(volume, reply_status);
-}
-
 int nvmeibc_volume_ioctl_config(const struct nvmeibc_cinst_params_main *p, const char* cmd /*, int len*/)
 {
 	struct nvmeibc_volume *volume = NULL;
 	char dev_name[NVMEIBC_BD_NAME_LEN];
 	const char *end;
-	int len, rv = -ENOENT, sub_vol_prefix_size = (sizeof(SUB_VOL_CMD)-1);
-	bool is_sub_vol_request = false;
+	int len, rv = -ENOENT;
 
 	/* Split cmd into name of the volume and command */
 	end = my_strchrnul(cmd, '|');
@@ -662,7 +645,6 @@ int nvmeibc_volume_ioctl_config(const struct nvmeibc_cinst_params_main *p, const
 	memcpy(dev_name, cmd, len);
 	dev_name[len] = 0;
 	cmd = end+1;
-	is_sub_vol_request = (!strncmp(cmd, SUB_VOL_CMD, sub_vol_prefix_size));			// Todo: Eventually clean this hack, not urgent
 
 	if ((len==0) || ((len==1) && (dev_name[0]=='*'))) {							// All volumes - if name is empty or '*'
 		rv = nvmeibc_block_qa_config(nvmeibc_isnt_params_main2blk(p), NULL, cmd); /* To all bdevs */
@@ -671,8 +653,6 @@ int nvmeibc_volume_ioctl_config(const struct nvmeibc_cinst_params_main *p, const
 	volume = nvmeibc_volume_get_by_name(p, dev_name, NORMAL_VOLUME);
 	if (!volume) {
 		_NI(t_02vioctlconf, QA_BLOCK_PREFIX "@DEV_NAME: Volume does not exist", dev_name);
-		if (is_sub_vol_request)
-			rv = nvmeibc_cc_api_sub_vol_unknown(p, dev_name, false);
 		goto _out;
 	}
 	nvmeibc_assert_on_main_wq(volume->p);	// Ioclts are handled on main-wq. So no need to lock volume as its status cannot change
@@ -680,10 +660,6 @@ int nvmeibc_volume_ioctl_config(const struct nvmeibc_cinst_params_main *p, const
 		_NI(t_03vioctlconf, QA_BLOCK_PREFIX "@DEV_NAME: Volume is not attached yet", dev_name);
 	} else {
 		rv = nvmeibc_block_qa_config(nvmeibc_isnt_params_main2blk(p), volume->block_dev, cmd);
-		if (is_sub_vol_request) {
-			const bool add = (cmd[sub_vol_prefix_size] == 'a');				// Todo: Not urgent, encode this in 'rv'
-			rv = __reply_to_sub_volume_request(volume, add, rv);
-		}
 	}
 _out:
 	return rv;
