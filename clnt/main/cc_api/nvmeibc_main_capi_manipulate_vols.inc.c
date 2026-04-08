@@ -41,10 +41,10 @@ struct avolume_workq {				/* Volume command work */
 int try_detach_volume_with_multicomplete(struct nvmeibc_volume *volume, const struct nvmeibc_vol_detach_cmd how, struct nvmeibc_multi_completion* on_finish)
 {
 	const struct nvmeibc_cinst_params_main *p = volume->p;
-	const bool send_to_cli = (is_sim() || nvmeibc_block_is_recoverer_or_hidden(&volume->hdr) || nvmeibc_vol_detach_recoverer_or_hidden(&how));
+	const bool send_to_cli = (is_sim() || nvmeibc_block_is_recoverer(&volume->hdr) || nvmeibc_vol_detach_recoverer(&how));
 	const bool send_to_mcs = true; // Always update MGMT with detach info, update CLI only if hidden (or simulator, TODO - replace cli parsing with MCS response for simulator)
 	int rv = 0;
-	_NI(i_00_main_det, "@DEV_NAME: status=@STATUS, how{recovery=@BOOL_YN, hidden=@BOOL_YN, force=@BOOL_YN, abandon=@BOOL_YN} on_finish=@PTR", volume->hdr.devname, volume->status, how.recov, how.hidden, how.force, how.abandon, on_finish);
+	_NI(i_00_main_det, "@DEV_NAME: status=@STATUS, how{recovery=@BOOL_YN, force=@BOOL_YN, abandon=@BOOL_YN} on_finish=@PTR", volume->hdr.devname, volume->status, how.recov, how.force, how.abandon, on_finish);
 	// Dont allow to start another detach when already detaching (avoid race with the ongoing detach)
 	if (volume->status >= NVS_DETACHING) {
 		if (!volume->job_comp) { 			// Detach is running and no-one waiting. We will start waiting
@@ -66,7 +66,7 @@ int try_detach_volume_with_multicomplete(struct nvmeibc_volume *volume, const st
 			break;
 		case -EXDEV:				// Busy should not retry
 			reply_detach_error(NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED);
-			_NT(t_06_main_det, "volume @DEV_NAME is fully attached, hidden detach ignored", volume->hdr.devname);
+			_NT(t_06_main_det, "volume @DEV_NAME is not attached for recovery, recovery detach ignored", volume->hdr.devname);
 			break;
 		default:
 			break;
@@ -136,11 +136,10 @@ static inline bool change_incomming_msg_and_find(const struct nvmeibc_volume *vo
 		_NT(t_cimaf01, "Update only forces type: @HDR_TYPE <-- @HDR_TYPE", new_hdr->type, volume->hdr.type);
 		new_hdr->type = volume->hdr.type;		// Type change is not allowed!
 	}
-	if (nvmeibc_block_is_recoverer_or_hidden(new_hdr)) { 	// Both hidden and recoverer do not use any reservation info
-		_NT(t_cimaf02, DMESG_PREFIX("@DEV_NAME: ") "Removing attach_t info of hidden volume", new_hdr->name);
-		if (volume && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr)) { // Issue NVMESH-276
-			// Race condition: Mgmt/Cli wanted to hidden attach (volume) did not exist then, but meanwhile it was attached. This is not a bug. Just return success
-			// WARN, "Invalid volume type transition %x <-- %x\n", new_hdr->type, volume->hdr.type);	// Cannot convert visible to hidden
+	if (nvmeibc_block_is_recoverer(new_hdr)) { 	// Recoverer attach does not use reservation info
+		_NT(t_cimaf02, DMESG_PREFIX("@DEV_NAME: ") "Removing attach_t info of recoverer volume", new_hdr->name);
+		if (volume && !nvmeibc_block_is_recoverer(&volume->hdr)) { // Issue NVMESH-276
+			// Race condition: Mgmt/Cli wanted to attach for recovery while the volume was meanwhile attached regularly. This is not a bug. Just return success
 		}
 		nvmeibc_volume_attach_t_init((struct nvmeibc_volume_attach_t *)&new_hdr->reservation);
 	}
@@ -181,8 +180,8 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	const struct nvmeibc_volume_conf *hdr = &msg->volumes[0];
 	const struct nvmeibc_volume *volume = nvmeibc_volume_get_by_uuid(p, hdr->uuid, UNKNOWN_ILLEGAL);
 	const bool found = change_incomming_msg_and_find(volume, &msg->volumes[0], update_only);
-	const bool is_explicit_hidden_attach = (nvmeibc_block_is_recoverer_or_hidden(hdr) && update_only);	// If Toma requests hidden attach via cli, it must get a reply via cli
-	const bool send_to_cli = (is_sim() || is_explicit_hidden_attach), send_to_mcs = true; // Update CLI except when full config (block simulator requires CLI updates, until parsing MCS replaces CLI parse)
+	const bool is_explicit_recoverer_attach = (nvmeibc_block_is_recoverer(hdr) && update_only);	// If Toma requests recoverer attach via cli, it must get a reply via cli
+	const bool send_to_cli = (is_sim() || is_explicit_recoverer_attach), send_to_mcs = true; // Update CLI except when full config (block simulator requires CLI updates, until parsing MCS replaces CLI parse)
 	bool resrv_inc_ignored = false;
 	enum_vol_status res;
 	struct nvmeibc_control_api* ccapi = &__get_from_params_main_globals_container(p)->cc_api;

@@ -542,9 +542,9 @@ The nvmeiba code could be found under `/[project root]/clnt/atom` directory.
 
 1. The main one - to allow NDU - nvmeibc module may be replaced, during this time the incoming I/O will be accumulated in the internal list
 2. The secondary one - on NVMesh volume force detach, while the block device is still in use, the volume will be completely removed, but the atom will keep receiving & rejecting incoming I/O. Thus preventing the system crash.
-3. In the past, the same NVMesh volume was used by the internal recovery procedure & the user processes. The volume under recovery was hidden, so the users would not be able to access it. But once, the user asked to attach the volume to the node, the volume should become public and register itself within the OS. Obviously, there is a complex volume state machine, which describes transitions between those states. So the third purpose of the struct was/is supporting such transitions. Practically it means: the `nvmeiba_atom_os_api` instance will have `struct gendisk* disk` variable set to `NULL`.
+3. Historically, the same NVMesh volume could transition between a recovery-only internal attachment and a user-visible attachment. The old hidden-volume model was removed, but the struct still supports the "no gendisk yet" state that recovery-only and upgrade-related flows need. Practically it means: the `nvmeiba_atom_os_api` instance can have `struct gendisk* disk` set to `NULL`.
 
-    **NOTE:** today we use hidden, specially crafted volume, which consists from a single RAID to execute the recovery procedure. So there is no need to expose such volumes to the nvmeiba module.
+    **NOTE:** today recovery uses recoverer / recovery-only attaches rather than the removed hidden-volume type. Those attaches are not exposed as `/dev` devices while they stay recovery-only.
 
 4. `struct nvmeiba_atom_os_api` is used as the "base" class for `struct nvmeibc_os_api`. This way, nvmeibc module get access to the `struct gendisk` instance. While nvmeibc module is loaded, it almost fully controls the atom state. `struct gendisk::fops` contains virtual table - the contract between OS & custom driver. nvmeibc module controls that table too.
 
@@ -735,7 +735,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
     2. Owning Management: Actually this is not per volume information but rather per client instance. This is the management \+ mongo db that is in charge of this volume. A feature of multi-client-instances allows few management to control volumes, each with its own subset of protection raids and database  
     3. Attachment properties  
        1. Reservation mode, rebuild speed  
-       2. Special attachment flags: is hidden? Is it a recoverer volume?
+       2. Special attachment flags: is it a recoverer volume? Is it a shadow volume?
 
 ### Attach flow {#attach-flow}
 
@@ -808,7 +808,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 96. Changing existing configuration of an attached volume. Here is a partial reason how volume might be reconfigured  
     1. Change in vlba mapping. For example, extending the volume, evicting a disk and remapping a segment to a new disk, possibly on a new target machine  
     2. Changing some attachment properties  
-       1. Example: Hidden volume becomes visible and allows IO.  
+       1. Example: a recoverer volume becomes visible and allows IO.  
        2. Note: many properties cannot change after attach, like datapath type.  
 97. Additional information:  
     1. Volume reconfiguration spec ([here](https://docs.google.com/document/d/1x-RWkYLe21cTV7cykzuml3xeLiW-oPr4nD-uXIyRV6Y/edit))  
@@ -842,7 +842,7 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 107. The block device converts the configuration to a topology and compares it with its own topology to calculate diffs in segments (vlba to dlba mapping). However, the configuration includes other components besides this mapping which need to be verified, like volume type and others.  
 108. Moreover, sometimes the configuration itself remains unchanged, just the attachment property changes.  
 109. The block device is in charge of making safe transitions. Example:  
-     1. Hidden attached volume (IO api not visible to the operating system) is reconfiguring to visible attach. The configuration itself does not change, just the attachment type. In this case, the block device reinits its os api to reflect the IO api, which is a step that was skipped in the original constructor of os api, because it was created as hidden
+     1. A recoverer-attached volume (I/O API not visible to the operating system) is reconfiguring to a visible attach. The configuration itself does not change, just the attachment type. In this case, the block device reinits its OS API to reflect the new I/O visibility, which is a step that was skipped in the original constructor because the attachment started as recovery-only
      2. Change of reservation mode. Some transitions are invalid.
 
 ## MCS  {#mcs}
@@ -2610,7 +2610,7 @@ Some thoughts & observations:
 
 603. Note: All the counters below are relevant as long as volume is attached. Once volume is detached all counters disappear and reset to 0 on the next attachment.  
      1. Moreover, the counters reflect only a point of view of a specific client. One needs to sum up all counters from all clients in the system which are attached to specific block device to understand the full picture  
-     2. Recovery task may be done by Toma via a request for recovery attach (hidden volume), doing the rebuild and detaching the volume. In this case recovery and other volume counters will exist only while recovery is running  
+     2. Recovery task may be done by Toma via a request for recovery attach (recoverer volume), doing the rebuild and detaching the volume. In this case recovery and other volume counters will exist only while recovery is running  
      3. Even after detach of the volume and loss of the counters, some information exists in the logs  
 604. **Io stats**: via /proc file it is possible to view io stats , how many io’s partitioned by io size, see the latency etc. Those are internal statistics which represent the latency from block device point of view not from user space app point of view  
 605. **Sync counters:** help to inspect various fixes that occured on block devices. Each corner case / type of sync has its own counter.  

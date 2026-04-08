@@ -63,7 +63,7 @@ struct proc_dir_entry* clientSimulator_find_proc_file_by_path(struct clientSimul
 struct proc_dir_entry* clientSimulator_find_vol_proc_file_by_path(struct clientSimulator *client, int volInd, const char *path);
 int clientSimulator_get_num_executed_ioctls(struct clientSimulator *client);
 
-bool    clientSimulator_is_vol_hidden_attached(struct clientSimulator *client, int volInd);
+bool    clientSimulator_is_vol_recoverer_attached(struct clientSimulator *client, int volInd);
 bool    clientSimulator_does_vol_allow_512B_IO(struct clientSimulator *client, int volInd);
 #define clientSimulator_sizeof_bdev(         client, vol_i)	(((client)->OS.disks[vol_i]->nr_sects) >> KERNEL_SECTOR_TO_SECTOR_SHIFT) // Alternative can use: client->devs[vol_i]->size
 
@@ -167,4 +167,3 @@ static inline void wait_for_cli_status_verification(struct clientSimulator *clie
 }
 
 #endif // NVMEIBC_USER_SPACE_SIMU_H
-

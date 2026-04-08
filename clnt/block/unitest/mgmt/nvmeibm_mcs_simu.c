@@ -77,7 +77,6 @@ static void __mgmt_reply_with_vol_conf_on_clnts_request(struct mcs_simu *mcs, st
 			switch (vol->nextCmd) {
 			case volCmds_AttachReadOnly:
 			case volCmds_AttachExclusive:
-			case volCmds_HiddenAttach:
 			case volCmds_ShadowAttach:
 			case volCmds_RecoveryAttach:
 			case volCmds_Update:

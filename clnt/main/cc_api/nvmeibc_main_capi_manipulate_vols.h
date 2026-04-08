@@ -88,47 +88,41 @@ struct nvmeib_mgmt_to_client_update_targets_nics;
 int update_targets_nics_generic(const struct nvmeibc_cinst_params_main *p,
 		struct nvmeib_mgmt_to_client_update_targets_nics *m);
 
-int setup_multi_tier_block_device(const struct nvmeibc_cinst_params_main *p, const int n_vols, const char *uuids, const int prev_rv, const bool hidden_attach);
 struct nvmeibc_vol_detach_cmd {	// Instructions how to detach. Todo: make bit fields enum instead of list of booleans
-	bool hidden;		// True=Detach only volumes in hidden mode, False=All volumes
-	bool recov;			// True=Detach only volumes in recoverer mode or hidden mode, False=All volumes
-	bool force;			// True=Detach all volumes by force. False=Allow failure on busy (hidden volumes are busy when recoveries run, Normal volumes are busy when user space app has opens)
-	bool abandon;		// True=Does 'force==true' and allow future attach to reconnect (used for software upgrade). Irrelevant for hidden volumes
+	bool recov;			// True=Detach only volumes in recoverer mode, False=All volumes
+	bool force;			// True=Detach all volumes by force. False=Allow failure on busy (recoverer volumes are busy when recoveries run, normal volumes are busy when user space app has opens)
+	bool abandon;		// True=Does 'force==true' and allow future attach to reconnect (used for software upgrade)
 	bool err_attach;	// This detach is actually a cleanup upon attach error so volume can be partially initialized
 	bool shutdown;		// True=Detach all volumes as part of shutdown (force==true)
 } __attribute__ ((packed));
 
 static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_shutdown(void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 0, .recov = 0, .force = 1, .abandon = 0, .err_attach = 0, .shutdown = 1};
+	struct nvmeibc_vol_detach_cmd rv = {.recov = 0, .force = 1, .abandon = 0, .err_attach = 0, .shutdown = 1};
 	return rv;
 }
 static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_upgrade( void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 0, .recov = 0, .force = 1, .abandon = 1, .err_attach = 0, .shutdown = 0};
+	struct nvmeibc_vol_detach_cmd rv = {.recov = 0, .force = 1, .abandon = 1, .err_attach = 0, .shutdown = 0};
 	return rv;
 }
 static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_nice(    void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 0, .recov = 0, .force = 0, .abandon = 0, .err_attach = 0, .shutdown = 0};
-	return rv;
-}
-static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_hidden(  void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 1, .recov = 0, .force = 0, .abandon = 0, .err_attach = 0, .shutdown = 0};
+	struct nvmeibc_vol_detach_cmd rv = {.recov = 0, .force = 0, .abandon = 0, .err_attach = 0, .shutdown = 0};
 	return rv;
 }
 static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_recov(  void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 0, .recov = 1, .force = 0, .abandon = 0, .err_attach = 0, .shutdown = 0};
+	struct nvmeibc_vol_detach_cmd rv = {.recov = 1, .force = 0, .abandon = 0, .err_attach = 0, .shutdown = 0};
 	return rv;
 }
 static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_error(   void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 0, .recov = 0, .force = 0, .abandon = 0, .err_attach = 1, .shutdown = 0};
+	struct nvmeibc_vol_detach_cmd rv = {.recov = 0, .force = 0, .abandon = 0, .err_attach = 1, .shutdown = 0};
 	return rv;
 }
 static inline struct nvmeibc_vol_detach_cmd nvmeibc_vol_detach_cmd_default(void) {
-	struct nvmeibc_vol_detach_cmd rv = {.hidden = 0, .recov = 0, .force = 1, .abandon = 0, .err_attach = 0, .shutdown = 0};
+	struct nvmeibc_vol_detach_cmd rv = {.recov = 0, .force = 1, .abandon = 0, .err_attach = 0, .shutdown = 0};
 	return rv;
 }
 
-static inline bool nvmeibc_vol_detach_recoverer_or_hidden(const struct nvmeibc_vol_detach_cmd *how) {
-	return (how->recov || how->hidden);
+static inline bool nvmeibc_vol_detach_recoverer(const struct nvmeibc_vol_detach_cmd *how) {
+	return how->recov;
 }
 
 /* Try detach a given volume (either due to command given by mcs, volume delete

@@ -1395,7 +1395,6 @@ typedef char proc_name_t[PROC_NAME_LEN];
 #define MAGIC_CONFIG_SHADOW_TOKEN "FBAAAAAAAAAAAAA"			// Used by toma to attach encrypted volume; the volume behaves like usual volume, but reports attach_type=SHADOW in status.* files
 #define MAGIC_CONFIG_IGNORE_TOKEN "FBBBBBBBBBBBBBB"			// New Token to replace above token on init_mcs message, will prevent overriding persitency only variables
 #define MAGIC_RECOVR_ATTACH_TOKEN "AAAAAAAAAAAAAAA"			// Use config to attach recovery volume or update existing volume. Used for recovery
-#define MAGIC_HIDDEN_ATTACH_TOKEN "BBBBBBBBBBBBBBB"			// Use config to attach hidden volume or update existing volume. Used for hidden only
 
 
 #endif //_NVMEIB_SHARED_

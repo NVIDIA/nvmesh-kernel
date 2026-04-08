@@ -64,10 +64,14 @@ preventing `rmmod` as long as any volume is attached.
 The `nvmeiba_status` enum (`clnt/atom/nvmeiba_nvmesh_api.h`) encodes the
 current relationship between the atom and the kernel as a bitfield:
 
+`nvmeiba_status_hidden` is a legacy internal enum name. The old hidden-volume
+product feature was removed; this state now simply means the atom exists
+without a registered kernel block device yet.
+
 | Status | Value (bits) | `gendisk` | Meaning |
 |---|---|---|---|
 | `nvmeiba_status_illegal` | `0x0` | — | Zeroed, uninitialized |
-| `nvmeiba_status_hidden` | `0x1` (init) | `NULL` | Hidden attach — no kernel block device, no I/O |
+| `nvmeiba_status_hidden` | `0x1` (init) | `NULL` | Legacy "no-gendisk" atom state, used for recovery-only attach and similar pre-registration paths; no kernel block device, no I/O |
 | `nvmeiba_status_orphan` | `0x3` (init\|kernel) | non-NULL | NDU in progress — nvmeibc is gone, gendisk stays, BIOs buffered |
 | `nvmeiba_status_live` | `0x7` (init\|kernel\|nvmeibc) | non-NULL | Normal operation — nvmeibc receives all BIOs |
 | `nvmeiba_status_detaching` | `0xB` (init\|kernel\|detach) | `NULL` becoming | Volume detaching — BIOs auto-failed, gendisk being removed |
@@ -78,9 +82,9 @@ State transitions:
                   attach (normal)
 [illegal] ──────────────────────────────► [live]
     │                                       │
-    │ hidden attach                         │ NDU (upgrade)
+    │ recovery-only attach                  │ NDU (upgrade)
     ▼                                       ▼
-[hidden] ──────────────────────────────► [orphan]
+[hidden/no-gendisk] ───────────────────► [orphan]
                                             │
                                             │ new nvmeibc adopts
                                             ▼

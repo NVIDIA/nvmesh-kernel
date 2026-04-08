@@ -43,7 +43,7 @@ int clientSimulator_incoming_cli_msg_cb(void *_ctx, const char *buf, size_t len)
 			if (!client->devs[v])
 				client->devs[v] = nvmeibc_volume_get_by_uuid(c_inst, info.uuid, info.type)->block_dev; // does not work if blockedv does not register with OS: (struct nvmeibc_block_device*)client->OS.disks[v]->queue->queuedata
 			if (client->devs[v]->os->is_io_api_disabled)
-				osSimulator_nullify(&client->OS, v);				// Just for debug for recovery or carrier volumes
+				osSimulator_nullify(&client->OS, v);				// Just for debug for recovery volumes
 		}
 	}
 	return 0;
@@ -55,8 +55,8 @@ int clientSimulator_get_num_executed_ioctls(struct clientSimulator *clnt) {
 	return cc_api->ioctls.num_executed_ioctls;	// Only works for first client instance
 }
 
-bool clientSimulator_is_vol_hidden_attached(struct clientSimulator *client, int v) {
-	return client->devs[v]->os->is_io_api_disabled; // Daniel: Todo, test also: client->devs[v]->rec.is_io_api_enabled;
+bool clientSimulator_is_vol_recoverer_attached(struct clientSimulator *client, int v) {
+	return client->devs[v] && client->devs[v]->os->is_io_api_disabled;
 }
 
 bool clientSimulator_does_vol_allow_512B_IO(struct clientSimulator *client, int v) {
@@ -396,7 +396,7 @@ int clientSimulator_get_volumes_config(struct clientSimulator *client, struct mg
 	const struct volumeDescriptor* vols = client->vols;
 	struct nvmeibc_block_device** devs = client->devs;
 	char token[16];
-	//TODO - should be possible to replace all non hidden stuff with a message to the mgmt simulator to send the attach message
+	//TODO - should be possible to replace all non recovery attaches with a message to the mgmt simulator to send the attach message
 	//1. weak preempt might require some work around if required and we can remove that verification if it's not going to happen from mgmt anymore,
 	//	the reason was debugability to see that we requested EX access (and got it) without preempt request.
 	reset_cli_status_verification(client);
@@ -434,28 +434,21 @@ int clientSimulator_get_volumes_config(struct clientSimulator *client, struct mg
 		} else if (vols[v].nextCmd == volCmds_RecoveryUpdate) {				// Same as above
 			set_cli_status_verification_expector(client, cli_generic_string(&vols[v], CLI_ATTACHED, true), v); // Update can no longer arrive from CLI instead generate an MCS attach message directly
 			generate_mcs_attach_message_for_volume(&mgmt->mcs[client->inst_id], &vols[v], MCS_ATTACH_VOLUMES_MESSAGE_MSG, false, MAGIC_CONFIG_UPDATE_TOKEN, NVMEIB_MCS_MSG_WITH_NO_ERROR);
-		} else if (vols[v].nextCmd == volCmds_HiddenAttach) {
-			set_cli_status_verification_expector(client, hidden_attach_string(&vols[v], (devs[v] != NULL)), v);
-			snprintf(cli_command, len, "attach%c %s %s", vur, vol_id, MAGIC_HIDDEN_ATTACH_TOKEN); // MAGIC_HIDDEN_ATTACH_TOKEN
-		} else if (vols[v].nextCmd == volCmds_HiddenDetach) {
-			const bool is_recoverer_attached = nvmeibc_block_is_recoverer(devs[v]);
-			set_cli_status_verification_expector(client, detach_hidden_string(&vols[v], (&(*devs[v]) != NULL) && devs[v]->os->is_io_api_disabled && !is_recoverer_attached, is_recoverer_attached), v);
-			snprintf(cli_command, len, "detach%c %s --hidden", vur, vol_id);
 		} else if (vols[v].nextCmd == volCmds_RecoveryAttach) {
-			set_cli_status_verification_expector(client, hidden_attach_string(&vols[v], (devs[v] != NULL)), v);
+			set_cli_status_verification_expector(client, recovery_attach_string(&vols[v], (devs[v] != NULL)), v);
 			snprintf(cli_command, len, "attach%c %s %s", vur, vol_id, MAGIC_RECOVR_ATTACH_TOKEN); // MAGIC_RECOVR_ATTACH_TOKEN
 		} else if (vols[v].nextCmd == volCmds_ForceRecoveryDetach) {
-			const bool is_recoverer_attached = nvmeibc_block_is_recoverer(devs[v]);
-			set_cli_status_verification_expector(client, (&(*devs[v]) != 0) ? detach_recov_string(&vols[v], devs[v]->os->is_io_api_disabled, is_recoverer_attached) : cli_unknown_string(vol_id, (vur == 'u')), v);
+			const bool is_recoverer_attached = (devs[v] != NULL) && nvmeibc_block_is_recoverer(devs[v]);
+			set_cli_status_verification_expector(client, (devs[v] != NULL) ? detach_recov_string(&vols[v], is_recoverer_attached) : cli_unknown_string(vol_id, (vur == 'u')), v);
 			snprintf(cli_command, len, "detach%c %s --recov --force", vur, vol_id);
 		} else if (vols[v].nextCmd == volCmds_RecoveryDetach) {
-			const bool is_recoverer_attached = nvmeibc_block_is_recoverer(devs[v]);
-			set_cli_status_verification_expector(client, detach_recov_string(&vols[v], (&(*devs[v]) != NULL) && devs[v]->os->is_io_api_disabled, is_recoverer_attached), v);
+			const bool is_recoverer_attached = (devs[v] != NULL) && nvmeibc_block_is_recoverer(devs[v]);
+			set_cli_status_verification_expector(client, detach_recov_string(&vols[v], is_recoverer_attached), v);
 			snprintf(cli_command, len, "detach%c %s --recov", vur, vol_id);
-		} else if (vols[v].nextCmd == volCmds_DetachUpgradeHiddenRecoveryForce) {
-			const bool is_recoverer_attached = nvmeibc_block_is_recoverer(devs[v]);
-			set_cli_status_verification_expector(client, detach_hidden_string(&vols[v], (&(*devs[v]) != NULL) && devs[v]->os->is_io_api_disabled, is_recoverer_attached), v);
-			snprintf(cli_command, len, "detach%c %s --hidden --recov --force --upgrade", vur, vol_id);
+		} else if (vols[v].nextCmd == volCmds_DetachUpgradeRecoveryForce) {
+			const bool is_recoverer_attached = (devs[v] != NULL) && nvmeibc_block_is_recoverer(devs[v]);
+			set_cli_status_verification_expector(client, detach_recov_string(&vols[v], is_recoverer_attached), v);
+			snprintf(cli_command, len, "detach%c %s --recov --force --upgrade", vur, vol_id);
 		} else if (vols[v].nextCmd == volCmds_AttachReadOnly) {
 			snprintf(&token[0], sizeof(token), "%015llu", ++token_generator);
 			set_cli_status_verification_expector(client, attach_string(&vols[v]), v);
@@ -572,7 +565,7 @@ bool clientSimulator_is_stable(const struct clientSimulator *client) {
 		struct nvmeibc_block_device* bdev = client->devs[v];
 		struct nvmeibc_topologies* nt = &bdev->topologies;
 		BUG_ON(!bdev || __are_syncs_still_running(bdev, true));
-		if (!nvmeibc_block_is_hidden(bdev))				// Non hidden volumes must be known by the os
+		if (!nvmeibc_block_is_recoverer(bdev))			// Non recoverer volumes must be known by the os
 			BUG_ON(!client->OS.bds[v].bd_disk);
 
 		clientSimulator_wait_for_all_topo_users_to_finish(nt);	// Verify topology is stable, Wait for the last changed, if any

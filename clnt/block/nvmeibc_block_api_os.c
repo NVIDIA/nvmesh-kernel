@@ -2050,7 +2050,7 @@ static int __get_mem_for_os_api_sub_vols(struct nvmeiba_atom_os_api *atom)
 }
 
 struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk *p,
-	bool is_hidden, const char* dev_name, const char* dev_uuid, void* dev,
+	bool is_io_api_disabled, const char* dev_name, const char* dev_uuid, void* dev,
 	const struct nvmeibc_procfs_cb cb)
 {
 	const struct nvmeibc_os_apis_container *c = get_os_api_cints(p);
@@ -2060,7 +2060,7 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 		rv = -ENOMEM;
 		goto _out;
 	}
-	os->is_io_api_disabled = is_hidden;
+	os->is_io_api_disabled = is_io_api_disabled;
 	__set_dev_and_uuid(os, dev, dev_uuid, c);
 
 	/* Atom initialization */
@@ -2070,8 +2070,8 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 	} else {									// If adopting
 		if (unlikely(os->is_io_api_disabled)) {
 			/* Unlikely scenario, after upgrade we are adopting atom upon attach,
-			   but hidden attach happened before regular attach. Fail hidden attach, or else we risk DI due to wron reservation version */
-			_NT(t_baoc_01, "@DEV_NAME: Failing hidden attach. Volume during upgrade! Reabandoning", dev_name);
+			   but a recoverer attach happened before regular attach. Fail the recoverer attach, or else we risk DI due to wrong reservation version */
+			_NT(t_baoc_01, "@DEV_NAME: Failing recoverer attach. Volume during upgrade! Reabandoning", dev_name);
 			os->atom.status = nvmeiba_status_live;		// We mistakenly adopted the atom, so abandon it again. Sorry bro...
 			nvmeiba_os_api_orphan_abandon(&os->atom);	// Note: No need to call '__exec_for_carrier_and_sub_vols' because we havent adopted the sub volumes yet
 			__set_atom_status_orphan(&os->atom);

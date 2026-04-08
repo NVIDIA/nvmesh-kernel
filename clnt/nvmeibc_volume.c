@@ -307,7 +307,7 @@ static void nvmeibc_volume_detach(struct nvmeibc_volume *volume, const struct nv
 int nvmeibc_volume_try_detach(struct nvmeibc_volume *volume, struct nvmeibc_vol_detach_cmd how, struct nvmeibc_multi_completion *on_finish)
 {
 	int rv;
-	_NI(trace_volume_nvmeibc_volume_try_detach, "@NDU " DMESG_PREFIX("@DEV_NAME") ": Detach started. Flags = {F=@BOOL_YN, R=@BOOL_YN, H=@BOOL_YN, A=@BOOL_YN}", 0, volume->hdr.devname, how.force, how.recov, how.hidden, how.abandon);
+	_NI(trace_volume_nvmeibc_volume_try_detach, "@NDU " DMESG_PREFIX("@DEV_NAME") ": Detach started. Flags = {F=@BOOL_YN, R=@BOOL_YN, A=@BOOL_YN}", 0, volume->hdr.devname, how.force, how.recov, how.abandon);
 	rv = nvmeibc_block_try_detach(volume->block_dev, how);
 	if (rv == 0) {
 		how.err_attach = false;
@@ -1242,10 +1242,10 @@ void nvmeibc_volume_dump_disk_ids(struct nvmeibc_volume *vol)
 
 static const char * __vol_type_2_string(const struct nvmeibc_volume *vol)
 {
-	const bool is_hidden = nvmeibc_block_is_hidden(&vol->hdr);			// == (dev->os->is_io_api_disabled)
+	const bool is_recoverer = nvmeibc_block_is_recoverer(&vol->hdr);		// == (dev->os->is_io_api_disabled)
 	const bool is_shadow = nvmeibc_block_is_shadow(&vol->hdr);			// == (dev->os->is_io_api_disabled)
-	if (is_hidden) {
-		return "hidden";
+	if (is_recoverer) {
+		return "recoverer";
 	}
 	if (is_shadow) {
 		return "shadow";

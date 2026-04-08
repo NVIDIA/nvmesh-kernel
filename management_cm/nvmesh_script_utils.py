@@ -659,28 +659,6 @@ class MultiClientUtils(object):
         for file_path in aliasesList:
             os.remove(file_path)
 
-    # Future: When using a DB access the one related to multi_client_instance
-    #           Replace the api implementation with a DB centric one
-    def get_is_hidden_from_volume_status(self, volume_status_json):
-        volume_type = None
-        try:
-            with open(volume_status_json, 'r') as status_file:
-                status_info = json.load(status_file)
-            volume_type = status_info.get('type')
-        except:
-            pass
-        if volume_type and volume_type != "hidden":
-            return False
-        elif volume_type:
-            return True
-        else:
-            self.logger.debug("Couldn't extract volume type from status json from file {0}".format(volume_status_json))
-        return volume_type
-
-    def is_volume_attachment_hidden(self, volume):
-        status_file_path = os.path.join(self.volume_status_folder, volume, "status.json")
-        return self.get_is_hidden_from_volume_status(status_file_path)
-
     def get_name_and_uuid_from_volume_status(self, volume_status_json):
         name = None
         uuid = None

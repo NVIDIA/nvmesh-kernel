@@ -54,27 +54,25 @@ void cli_send_command_to_clnt(struct cli_status_verification *csv, char *cmd);
 #define CLI_UNKNOWN			  "Unknown"       // Request to detach a volume which is not attached. In this case client does not even now anything about this volume (including its UUID).
 
 #define CLI_MSG_FORMAT "status=%s version=%d io_blocked=%s uuid=%s name=%s rv=%llu"
-char *cli_generic_string(  const struct volumeDescriptor *vol, const char* status, bool is_hidden);
+char *cli_generic_string(  const struct volumeDescriptor *vol, const char* status, bool is_io_blocked);
 char *detach_string(       const struct volumeDescriptor *vol, const bool uuid, const bool attached); // Called from get_volumes_configuration
-char *shutdown_string(     const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_hidden); // When shutting down we notify mgmt
-char *update_ready_string( const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_hidden); // When we do detach --upgrade or --shutdown --upgrade
+char *shutdown_string(     const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_io_blocked); // When shutting down we notify mgmt
+char *update_ready_string( const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_io_blocked); // When we do detach --upgrade or --shutdown --upgrade
 char *invalid_token_status(const struct volumeDescriptor *vol); // Reply with a detached status on invalid tokens
 char *failed_attach_string(const struct volumeDescriptor *vol, const char *status);
 char *failed_update_non_exis_vol(const struct volumeDescriptor *vol, const char *status);
-char *fail_hidattch_string(const struct volumeDescriptor *vol);
+char *fail_recovery_attach_string(const struct volumeDescriptor *vol);
 char *attach_string(       const struct volumeDescriptor *vol);
 char *update_string(       const struct volumeDescriptor *vol);
 char *update_string_reject_reserv(const struct volumeDescriptor *vol);
 
 
 char *attach_string_no_io( const struct volumeDescriptor *vol);
-char *detach_hidden_string(const struct volumeDescriptor *vol, const bool hidden_attached, const bool recoverer_attached);
-char *detach_recov_string(const struct volumeDescriptor *vol, const bool hidden_attached, const bool recoverer_attached);
-char *hidden_attach_string(const struct volumeDescriptor *vol, const bool already_attached);
+char *detach_recov_string(const struct volumeDescriptor *vol, const bool recoverer_attached);
+char *recovery_attach_string(const struct volumeDescriptor *vol, const bool already_attached);
 char *cli_unknown_string(  const char *idnet, const bool by_uuid);
 char *attach_string_rv(              const struct volumeDescriptor *vol, const char* status, const u64 reservation_version);
 char *reservation_mode_denied_string(const struct volumeDescriptor *vol, const bool is_uuid);
 char *reservation_denied_string(     const struct volumeDescriptor *vol, const bool is_uuid);
 
 #endif // NVMEIBC_CLI_SCRIPTS_SIMU_H
-

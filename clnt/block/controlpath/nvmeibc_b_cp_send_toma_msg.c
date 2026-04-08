@@ -23,7 +23,7 @@ static inline void __prepare_toma_thick_msg(struct nvmeibc_disk_segment *seg,
 		nvmeib_get_utsname_nodename(), seg->toma_reg->protocol_version, 0x35003500, /*hdr*/
 		t->configuration_version, t->topology_version, praid_version, /*thick*/
 		seg->uuid, r1->lid.all, t->nt->reservation_version_max_seen, r1->toma.conversation_ind, /*thick*/
-		never_reged_on_seg, nvmeibc_block_is_hidden(t->nt->nd), pl_size, pl, nvmeib_get_guid());
+		never_reged_on_seg, nvmeibc_block_is_recoverer(t->nt->nd), pl_size, pl, nvmeib_get_guid());
 }
 
 #define TOMA_HDR_SIZE sizeof(struct nvmeibt_client_msg)

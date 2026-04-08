@@ -106,12 +106,12 @@ struct nvmeibc_procfs_cb {
 
 /* First of 3 steps of OS API. Does allocations, /proc , IO stats, etc..
    On success returns 0.
-   is_hidden - if TRUE user space apps will not see this device -> no IO
+   is_io_api_disabled - if TRUE user space apps will not see this device -> no IO
    proc_func - set of function which describes volume in /proc. If /proc
 		api is enabled all functions must not be NULL.
    Does not enable IO yet! */
 struct nvmeibc_os_api * block_api_os_create(const struct nvmeibc_cinst_params_blk *p,
-		bool is_hidden, const char* dev_name, const char* dev_uuid, void* dev,
+		bool is_io_api_disabled, const char* dev_name, const char* dev_uuid, void* dev,
 		 const struct nvmeibc_procfs_cb cb);
 
 /* fn - your method which performs the IO request, might be async, but

@@ -45,7 +45,7 @@ We continually try to improve the quality and usefulness of documentation. If yo
 
 | Acronym | Description |
 | --- | --- |
-| Hidden volume | A hidden volume is volume attached to a client for the client to perform recovery operations on it. This should only happen on targets. <br>As volume is only attached for recovery by the storage system, it does not have a /dev device |
+| Recoverer volume | A recoverer volume is attached to a client only so the storage system can perform recovery operations on it. <br>It is not exposed to user space as a `/dev` device. |
 | NVLustre | Lustre-over-NVMesh. |
 | RDMA IO | This is IO executed using RoCE or Infiniband for communication. |
 | SIW | SoftiWarp, which provides an RDMA API, but performs communication over TCP without RDMA. <br>Often referred to as TCP in module parameter names. |

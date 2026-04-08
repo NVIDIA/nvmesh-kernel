@@ -205,7 +205,7 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			    0, EV_VOLUME_IO_DISABLED(), nd->name, (can_do_syncs? ", recoveries enabled" : " and recoveries"), new_io_perm, reason);
 			WARN(nt->dbg_disabling_ts, wrong_ctr_msg, nd->name, new_io_perm);	//
 			nt->dbg_disabling_ts = jiffies;
-			if (IS_PATH_VDISK(nd->name) && !nvmeibc_block_is_recoverer_or_hidden(nd)) {
+			if (IS_PATH_VDISK(nd->name) && !nvmeibc_block_is_recoverer(nd)) {
 				if ((uevent_rv = nvmeibc_run_on_main_wq(nvmeibc_isnt_params_blk2main(nd->cips),
 										vdisk_disabled_work, nd, false, false, NULL)))
 					_NE(__error_state_d_uevent_f, "add io-disable uevent wq entry for @DEV_NAME failed(@RV)", nd->name, uevent_rv);
@@ -228,7 +228,7 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			block_api_os_change_size(nd, is_first_bio_enabled);
 			if (unlikely(nt->debug_on_io_enabled.cb))
 				nt->debug_on_io_enabled.cb(nt, nt->debug_on_io_enabled.ctx);
-			if (IS_PATH_VDISK(nd->name) && new_io_perm == NVMEIB_IO_TYPE_PERMIT_ALL && !nvmeibc_block_is_recoverer_or_hidden(nd)) {
+			if (IS_PATH_VDISK(nd->name) && new_io_perm == NVMEIB_IO_TYPE_PERMIT_ALL && !nvmeibc_block_is_recoverer(nd)) {
 				if ((uevent_rv = nvmeibc_run_on_main_wq(nvmeibc_isnt_params_blk2main(nd->cips),
 								 		vdisk_enabled_work, nd, false, false, NULL)))
 					_NE(__error_state_e_uevent_f, "add io-enable uevent wq entry for @DEV_NAME failed(@RV)", nd->name, uevent_rv);
@@ -290,11 +290,16 @@ static ssize_t __profilers_tocsv(void *_dev, char *buf, size_t len)
 
 static const char * __dev_type_2_string(const struct nvmeibc_block_device *dev)
 {
-	const bool is_hidden = nvmeibc_block_is_hidden(dev);			// == (dev->os->is_io_api_disabled)
+	const bool is_recoverer = nvmeibc_block_is_recoverer(dev);		// == (dev->os->is_io_api_disabled)
+	const bool is_shadow = nvmeibc_block_is_shadow(&dev->volume->hdr);
 	// Dont use os for 2 reasons:
 	// 1. This access is unsafe. os_api could create /proc files through which to string is called but os was not conected to bdev
 	// 2. dev->type holds much more information, for future exact to string of this enum
-	return (is_hidden ? "hidden" : "visible");
+	if (is_recoverer)
+		return "recoverer";
+	if (is_shadow)
+		return "shadow";
+	return "visible";
 }
 
 // dev must not be NULL
@@ -780,7 +785,7 @@ static bool __block_api_os_will_execute_bio_with_wrapper(struct nvmeibc_block_de
 int nvmeibc_block_upgrade_os_to_ioable(struct nvmeibc_block_device *dev, const int slice_size, u64 ro_header_sectors)
 {
 	const bool is_ro = (nvmeibc_block_get_res_vat(dev)->res.mode == NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_RO);
-	const u32 hidden_dbg_id = nvmeibc_volume_short_id(dev);
+	const u32 old_dbg_id = nvmeibc_volume_short_id(dev);
 	const bool is_bio_wrapper_needed = __block_api_os_will_execute_bio_with_wrapper(dev);
 	int rv;
 	assert_dev_on_mainwq(dev);
@@ -793,9 +798,9 @@ int nvmeibc_block_upgrade_os_to_ioable(struct nvmeibc_block_device *dev, const i
 	}
 
 	rv = block_api_os_start_accepting_kernel_io(dev->os);
-	if ((rv >= 0) && !nvmeibc_block_is_hidden(dev)) {
+	if ((rv >= 0) && !nvmeibc_block_is_recoverer(dev)) {
 		nvmeibc_volume_short_id(dev) = MINOR(disk_devt(dev->os->atom.disk));
-		_NT(t_01_bdev_init, "@DEV_NAME: os_api is ioable, vol_id changed from @VOL_ID to @VOL_ID", dev->name, hidden_dbg_id, nvmeibc_volume_short_id(dev));
+		_NT(t_01_bdev_init, "@DEV_NAME: os_api is ioable, vol_id changed from @VOL_ID to @VOL_ID", dev->name, old_dbg_id, nvmeibc_volume_short_id(dev));
 	}
 	return rv;
 }
@@ -871,7 +876,7 @@ static int __blockdevice_derrived_classes_init(struct nvmeibc_block_device *dev,
 {
 	int rv = 0;
 	dev->os = block_api_os_create(nvmeibc_cinst_get_blok_p(dev),
-				      (!!nvmeibc_block_is_hidden(dev)),
+				      (!!nvmeibc_block_is_recoverer(dev)),
 				      dev->name, dev->uuid, dev, block_proc_cbs);
 	if (dev->os == NULL) {
 		rv = -ENODEV;
@@ -1105,7 +1110,7 @@ int nvmeibc_block_init(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *
 		rv = -ENOMEM;
 		goto err_do_exit;
 	}
-	nvmeibc_volume_short_id(dev) = ((++dbg_id_counter) | (1u << 31));		// Visible bdevs to user are positive, hidden bdevs are negative
+	nvmeibc_volume_short_id(dev) = ((++dbg_id_counter) | (1u << 31));		// Visible bdevs to user are positive, recoverer bdevs are negative
 	nvmeibc_block_update_status(dev, 'A');
 	INIT_LIST_HEAD(&dev->list_n);
 	nvmeibc_blk_op_elevator_init(&dev->merge_op);
@@ -1231,7 +1236,7 @@ static void __self_detatch_old_recovering_bdev(struct nvmeibc_block_device *dev)
 			const ulong up_time_sec = (get_nvmeibc_os_api_uptime(dev->os) / HZ);
 			const ulong threshold_msec = ((num_finished == 0) ? self_recovery_detach_initial_time_sec : self_recovery_detach_idle_time_sec) * 1000;
 			if (time_stamp_msec > threshold_msec) {
-				_NI(info_A_block_nvmeibc_block_try_detach, "@DEV_NAME: Initiating self hidden detach, num_recov_finished=@INT, last recov @MILISECONDS ago, attached @SECONDS ago", dev->name, num_finished, time_stamp_msec, up_time_sec);
+				_NI(info_A_block_nvmeibc_block_try_detach, "@DEV_NAME: Initiating self recoverer detach, num_recov_finished=@INT, last recov @MILISECONDS ago, attached @SECONDS ago", dev->name, num_finished, time_stamp_msec, up_time_sec);
 				nvmeibc_block_set_generic_work_to_main(nvmeibc_cinst_get_blok_p(dev), dev->uuid, nvmeibc_cc_api_request_self_recov_detach, (void*)dev->uuid, false);
 			}
 		}
@@ -1321,16 +1326,10 @@ int nvmeibc_block_try_detach(struct nvmeibc_block_device *dev, const struct nvme
 {
 	int rv = 0;
 	assert_dev_on_mainwq(dev);
-	if (how.recov || how.hidden) {
-		const char *type = (how.recov) ? "recovery" : "hidden";
-		if (how.recov) {
-			if (!nvmeibc_block_is_recoverer_or_hidden(dev)) {	// Can be recoverer and/or hidden - if niether abort detach request
-				rv = -EXDEV;								// Recovery detach ignored, the volume is attached by user
-			}
-		} else {
-			if (!nvmeibc_block_is_hidden(dev) || nvmeibc_block_is_recoverer(dev)) {	// Must only be hidden, if recoverer must be detach with recov flag
-				rv = -EXDEV;								// Hidden detach ignored, the volume is attached by user
-			}
+	if (how.recov) {
+		const char *type = "recovery";
+		if (!nvmeibc_block_is_recoverer(dev)) {
+			rv = -EXDEV;								// Recovery detach ignored, the volume is attached by user
 		}
 		if (!rv) {
 			ulong time_stamp = 0;

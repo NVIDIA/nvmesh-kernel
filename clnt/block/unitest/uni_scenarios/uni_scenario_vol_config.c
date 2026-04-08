@@ -354,7 +354,7 @@ TEST_FUNC int unitest_DetachAttachVolume(struct NVMeshSystem *sys){
 	send_command_to_vol(sys, -1, volInd, volCmds_New);				// Reattach
 
 	// -----------------------------------						// Detach with all possible flags, and reattach volume 0
-	send_command_to_vol(sys, -1, volInd, volCmds_DetachUpgradeHiddenRecoveryForce);
+	send_command_to_vol(sys, -1, volInd, volCmds_DetachUpgradeRecoveryForce);
 	BUG_ON(!nvmeibc_topo_is_io_ok(&client->devs[1]->topologies));			// Test IO on all other disks
 	BUG_ON(!nvmeibc_topo_is_io_ok(&client->devs[2]->topologies));
 	send_command_to_vol(sys, -1, volInd, volCmds_New);				// Reattach
@@ -616,12 +616,12 @@ int verify_reservation_mode_io(struct clientSimulator *client, int volInd, int s
 	return rv;
 }
 
-static void __test_hidden_attach_must_always_succeed(struct NVMeshSystem *sys, int volInd) {
+static void __test_recovery_attach_must_always_succeed(struct NVMeshSystem *sys, int volInd) {
 	struct clientSimulator *client = &sys->clients[0];			// Test via the first client
 	const struct nvmeibc_reservation *reserv;
 	send_command_to_vol(sys, -1, volInd, volCmds_RecoveryAttach);
 	NVMeshSystem_serialize(sys);
-	BUG_ON(!clientSimulator_is_vol_hidden_attached(client, volInd));
+	BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, volInd));
 	BUG_ON((client->devs[volInd]->topologies.io_perm != NVMEIB_IO_TYPE_PERMIT_NO_IO));
 	reserv = &nvmeibc_block_get_res_vat(client->devs[volInd])->res;
 	BUG_ON((reserv->version != RESERVATION_MODE_IRRELEVANT) || (reserv->mode != NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_RC) || (reserv->preempt != NVMEIB_C_TO_M_VOLUME_PREEMPT_UNKNOWN));
@@ -763,7 +763,7 @@ TEST_FUNC int unitest_VolumeReservation(struct NVMeshSystem *sys){
 		} else
 			cur_version++; // Detach increases version
 
-		__test_hidden_attach_must_always_succeed(sys, volInd);
+		__test_recovery_attach_must_always_succeed(sys, volInd);
 
 		// Reattach with mode and expect success (For EX we will have to use a real cur_version (the first is 1 and used throught our unitests)
 		reset_cli_status_verification(client);
@@ -813,7 +813,7 @@ TEST_FUNC int unitest_VolumeReservation(struct NVMeshSystem *sys){
 		*nextCmd = volCmds_Illegal;
 		BUG_ON(client->devs[volInd] != NULL);
 
-		__test_hidden_attach_must_always_succeed(sys, volInd);
+		__test_recovery_attach_must_always_succeed(sys, volInd);
 
 		// Test using preempt succeeds if the given RV is the same as mgmt (0 will fetch from mgmt) and increases the version by 1
 		for (other_mode=NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_RO;other_mode<=NVMEIB_C_TO_M_VOLUME_ACTION_REQUEST_EX;other_mode++) {
@@ -874,7 +874,7 @@ TEST_FUNC int unitest_VolumeReservation(struct NVMeshSystem *sys){
 		cur_version++;
 	}	// for (mode=
 
-	__test_hidden_attach_must_always_succeed(sys, volInd);
+	__test_recovery_attach_must_always_succeed(sys, volInd);
 	if (1) {	// Test volume requests attach with lower version
 		int preempt;
 		for (preempt = false;preempt<=true;preempt++) {
@@ -1472,38 +1472,35 @@ TEST_FUNC int unitest_FS_InvalidCfg (struct NVMeshSystem *sys) {
 	return 0;
 }
 
-TEST_FUNC int unitest_recovery_hidden_volume(struct NVMeshSystem *sys)
+TEST_FUNC int unitest_recovery_volume(struct NVMeshSystem *sys)
 {
 	int v;
 	struct clientSimulator *client = &sys->clients[0];	//the single client in the system
 	const unsigned orig_self_recovery_detach_time_sec = self_recovery_detach_initial_time_sec;
 	self_recovery_detach_initial_time_sec = (1 << 20); // Make auto-detach not happen
-	send_command_to_all(sys, -1, volCmds_RecoveryDetach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] == NULL);}								// Hidden detach on visible volume does not trigger detach
+	send_command_to_all(sys, -1, volCmds_RecoveryDetach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] == NULL);}								// Recovery detach on visible volume does not trigger detach
 	send_command_to_all(sys, -1, volCmds_Detach);			for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);           }
-	send_command_to_all(sys, -1, volCmds_HiddenAttach);		for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}	// Hidden not recovery
-	send_command_to_all(sys, -1, volCmds_HiddenDetach);		for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);} 							// Hidden only detach
-	send_command_to_all(sys, -1, volCmds_HiddenAttach);		for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}	// Hidden not recovery
-	send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}	// Hidden->recovery
-	send_command_to_all(sys, -1, volCmds_HiddenDetach);		for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] == NULL);BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}// Hidden only detach - will fail
+	send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 	send_command_to_all(sys, -1, volCmds_RecoveryDetach); 	for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);}
-	send_command_to_all(sys, -1, volCmds_ShadowAttach);		for (v=0; v<client->nBdevs; v++) {BUG_ON( clientSimulator_is_vol_hidden_attached(client, v));}	// Hidden->Visible
+	send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
+	send_command_to_all(sys, -1, volCmds_ShadowAttach);		for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}
 	send_command_to_all(sys, -1, volCmds_Detach);			for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);           }
-	send_command_to_all(sys, -1, volCmds_New);				for (v=0; v<client->nBdevs; v++) {BUG_ON( clientSimulator_is_vol_hidden_attached(client, v));}	// Hidden->Visible
+	send_command_to_all(sys, -1, volCmds_New);				for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}
 	if (true) { // Test: NVMESH-276 bug due to race condition
 		const bool prev = cli_attach_check_if_already_attached; cli_attach_check_if_already_attached = false;
 		reset_cli_status_verification(client); set_cli_status_verification_expector(client, failed_attach_string(&client->vols[0], CLI_UPDATE_FAILED), 0);
-		send_command_to_vol(sys, -1, 0, volCmds_HiddenAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_hidden_attached(client, v));}	// Hidden attach request while volume is attached as visible, remains visible
+		send_command_to_vol(sys, -1, 0, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}	// Recovery attach request while volume is attached as visible, remains visible
 		cli_attach_check_if_already_attached = prev;
 	}
 	send_command_to_all(sys, -1, volCmds_Detach);			for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);           }
 
 	if (1) { // Test recovery volume update
-		send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}
+		send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 		__unitest_volume_config_version_inc(&sys->mdb.vols[0], &sys->tcf.vols[0]);		// Increase the version of configuration for vol 0
-		send_command_to_all(sys, -1, volCmds_RecoveryUpdate);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}
-		send_command_to_all(sys, -1, volCmds_RecoveryUpdate);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_hidden_attached(client, v));}
+		send_command_to_all(sys, -1, volCmds_RecoveryUpdate);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
+		send_command_to_all(sys, -1, volCmds_RecoveryUpdate);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 	}
-	if (1) {							// Verify sub volumes is not created on hidden volume
+	if (1) {							// Verify sub volumes are not created on a recoverer volume
 		const int expected_num_of_executed_ioctls = clientSimulator_get_num_executed_ioctls(client)+1;		// One succeed
 		char cmd[256];
 		sprintf(cmd, "#%s|sub_vol_add name=P_01 start=0 len=256", sys->mdb.vols[0].info.devname);
@@ -1520,9 +1517,9 @@ TEST_FUNC int unitest_recovery_hidden_volume(struct NVMeshSystem *sys)
 	}
 
 	clientSimulator_send_to_cli_and_wait(client, "%get_full_conf");
-	for (v=0; v<client->nBdevs; v++) {BUG_ON( !clientSimulator_is_vol_hidden_attached(client, v));}
+	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 	//send_command_to_all(sys, -1, volCmds_Update);
-	send_command_to_all(sys, -1, volCmds_New); 			for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_hidden_attached(client, v));}
+	send_command_to_all(sys, -1, volCmds_New); 			for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}
 	send_command_to_all(sys, -1, volCmds_Detach);
 	send_command_to_all(sys, -1, volCmds_New);
 	self_recovery_detach_initial_time_sec = orig_self_recovery_detach_time_sec;
@@ -1541,11 +1538,11 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 	DECLARE_COMPLETION_ONSTACK(comp2);
 	send_command_to_all(sys, -1, volCmds_Detach);
 	for (v=0; v<nVols; v++) {
-		sys->mdb.vols[v].nextCmd = (v%2) ? volCmds_RecoveryAttach : volCmds_New;				// Some volumes are hidden attach, some regular attach
+		sys->mdb.vols[v].nextCmd = (v%2) ? volCmds_RecoveryAttach : volCmds_New;				// Some volumes are attached for recovery, some are regular attaches
 	}
 	send_command_predefined_to_all(sys, -1);
 	for (v=0; v<nVols; v++) {
-		BUG_ON(clientSimulator_is_vol_hidden_attached(client, v) != (v%2));
+		BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v) != (v%2));
 		BUG_ON(client->devs[v] == NULL);
 		atoms[v] = &client->devs[v]->os->atom;
 	}
@@ -1613,9 +1610,9 @@ TEST_FUNC int unitest_upgrade_nvmeibc_with_volumes(struct NVMeshSystem *sys){
 		reup(&comp0);														// Reinit completion for the correct place where IO would finish if we autofailing test is disabled
 	}
 
-	if (1) { // --------------------- Simulate hidden attach attempt on volume V0 - should fail
+	if (1) { // --------------------- Simulate recovery attach attempt on volume V0 - should fail
 		reset_cli_status_verification(client);
-		set_cli_status_verification_expector(client, fail_hidattch_string(&client->vols[io_vol_ind]), io_vol_ind);
+		set_cli_status_verification_expector(client, fail_recovery_attach_string(&client->vols[io_vol_ind]), io_vol_ind);
 		send_command_to_vol(sys, -1, io_vol_ind, volCmds_RecoveryAttach);
 		BUG_ON(atoms[v]->pender.n_bios != 1);		// pending IOs remained
 		BUG_ON(nvmeiba_os_apis_get_num('O') != 3);	// DEspite failed attach, orphan remained
@@ -1951,7 +1948,7 @@ TEST_FUNC int unitest_volumes_config(struct NVMeshSystem *sys) {
         rv |= SIMU_RUN_TEST(unitest_update_non_existing_volume, sys);
 	rv |= SIMU_RUN_TEST(unitest_DetachAttachVolume,sys);
 	rv |= SIMU_RUN_TEST(unitest_AttachExistingVolume,sys);
-	rv |= SIMU_RUN_TEST(unitest_recovery_hidden_volume,sys);
+	rv |= SIMU_RUN_TEST(unitest_recovery_volume,sys);
 	rv |= SIMU_RUN_TEST(unitest_upgrade_nvmeibc_with_volumes,sys);
 	rv |= SIMU_RUN_TEST(unitest_delayed_volume_reboot,sys);
 	rv |= SIMU_RUN_TEST(unitest_multi_clnt_instances,sys);

@@ -40,7 +40,7 @@ static const int NVMEIBC_CLI_MAX_MSG = 5000;
 
 static inline bool __is_special_token(const char *t)
 {
-	return CHECK_RECOVER_MAGIC(t)||CHECK_UPDATE__MAGIC(t)||CHECK_FORCE___MAGIC(t) || CHECK_SHADOW__MAGIC(t) ||CHECK_HIDDEN__MAGIC(t);
+	return CHECK_RECOVER_MAGIC(t) || CHECK_UPDATE__MAGIC(t) || CHECK_FORCE___MAGIC(t) || CHECK_SHADOW__MAGIC(t);
 }
 
 static void __update_msg(struct get_client_configuration_msg *msg,
@@ -48,7 +48,7 @@ static void __update_msg(struct get_client_configuration_msg *msg,
 {
 	if (__is_special_token(send_token)) {
 		strlcpy(msg->cli_unique_id, send_token, sizeof(msg->cli_unique_id));
-		if (CHECK_RECOVER_MAGIC(send_token)||CHECK_HIDDEN__MAGIC(send_token)) { // For mgmt to ignore reservation mode if hidden/recoverer
+		if (CHECK_RECOVER_MAGIC(send_token)) { // For mgmt to ignore reservation mode if recoverer
 			msg->volumes->is_hidden = RECOVERER_VOLUME;
 		}
 	}
@@ -313,7 +313,6 @@ static int __parse_single_volume_conf(
 	const int vol_i)
 {
 	int i, rv;
-	const bool is_hidden =    CHECK_HIDDEN__MAGIC(src->cli_unique_id);
 	const bool is_recoverer = CHECK_RECOVER_MAGIC(src->cli_unique_id);
 	const bool is_shadow = CHECK_SHADOW__MAGIC(src->cli_unique_id);
 	bool attach_volume_as_512B = false;
@@ -331,10 +330,7 @@ static int __parse_single_volume_conf(
 	if (is_recoverer) { //Mgmt can give recovery reservation mode, but type will be normal
 		/* Real mgmt does not set the type to recoverer properly! */
 		_NT(t_psvc05, "making the volume[@VOL_I] attachment recoverer @HDR_TYPE", vol_i, dst->volumes->type);
-		dst->volumes->type |= (RECOVERER_VOLUME | HIDDEN_VOLUME); // Slightly different than TYPE_RECOVERER
-	} else if (is_hidden) {
-		_NT(t_psvc06, "making the volume[@VOL_I] attachment hidden @HDR_TYPE", vol_i, dst->volumes->type);
-		dst->volumes->type |= HIDDEN_VOLUME; // Slightly different than RECOVERER_VOLUME
+		dst->volumes->type |= RECOVERER_VOLUME;
 	}
 	if (is_shadow) {
 		dst->volumes->type |= SHADOW_VOLUME;
@@ -544,7 +540,7 @@ static void __fill_msg_vol_info(struct nvmeibc_volume_status_payload *vol,
 	}
 	vol->ioEnabled = is_io_enabled_new(vol->io_perm);
 	__copy_vol_reservation_from_vat(vol, &hdr->vat);
-	vol->is_hidden = (nvmeibc_block_is_recoverer_or_hidden(hdr) || nvmeibc_block_is_shadow(hdr)) ? 1 : 0;
+	vol->is_hidden = (nvmeibc_block_is_recoverer(hdr) || nvmeibc_block_is_shadow(hdr)) ? 1 : 0;
 	vol->attachment_version_per_volume = hdr->attachment_version_per_volume;
 	vol->n_ref_ids = hdr->ext_blob.n_ref_ids;
 	vol->referenceIDs = hdr->ext_blob.referenceIDs;	// No need to copy or lock (ext_blob_modify_guard), we are sending msg from main-wq and volume still exists, so use its memory
@@ -1193,15 +1189,15 @@ static void __nvmeibc_cc_api_notify_vol_io_changed(struct nvmeibc_volume *volume
 {
 	enum_io_perm io_perm;
 	bool send_to_mcs = true; // Update mgmt
-	bool send_to_cli = !volume->hdr.first_io_enabled_was_sent_to_cli && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr); // Send only on first time and not hidden
+	bool send_to_cli = !volume->hdr.first_io_enabled_was_sent_to_cli && !nvmeibc_block_is_recoverer(&volume->hdr); // Send only on first time and not recoverer
 
 	io_perm = nvmeibc_get_io_perm_for_reporting(volume->block_dev);
 	if (volume->hdr.last_sent_io_perm == io_perm) { // We are sending the exact same IO permission from WD context, probably a race
 		_ND(nvmeibc_cc_api_notify_io_changed, "@DEV_NAME_FULL: Volume @HDR_UUID sending the previously sent IO Perm @IO_PERM to mgmt", volume->full_name, volume->hdr.uuid, io_perm);
 	}
 	nvmeibc_cc_api_reply_vol_cmd_status(p, &volume->hdr, NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED, io_perm, send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
-	// Only upon first IO enabled send to CLI - if hidden attached and changing to fully attached will update cli only once (mgmt still gets every update)
-	volume->hdr.first_io_enabled_was_sent_to_cli = volume->hdr.first_io_enabled_was_sent_to_cli || (!io_perm_is_blocked_no_io(io_perm) && !nvmeibc_block_is_recoverer_or_hidden(&volume->hdr));
+	// Only upon first IO enabled send to CLI - if attached in recovery mode and changing to fully attached will update cli only once (mgmt still gets every update)
+	volume->hdr.first_io_enabled_was_sent_to_cli = volume->hdr.first_io_enabled_was_sent_to_cli || (!io_perm_is_blocked_no_io(io_perm) && !nvmeibc_block_is_recoverer(&volume->hdr));
 }
 
 
@@ -1220,7 +1216,7 @@ void nvmeibc_cc_api_notify_io_changed(void *_volume_uuid, const struct nvmeibc_c
 
 void nvmeibc_cc_api_notify_detach_completion(/*const*/ struct nvmeibc_volume *volume, u32 /*enum_vol_status*/ status)
 {
-	const bool send_to_cli = (is_sim() || nvmeibc_block_is_recoverer_or_hidden(&volume->hdr)), send_to_mcs = true; // Always update MGMT (update CLI if recoverer), Simulator TODO - replace cli parsing with MCS response for simulator, then remove is_sim() condition
+	const bool send_to_cli = (is_sim() || nvmeibc_block_is_recoverer(&volume->hdr)), send_to_mcs = true; // Always update MGMT (update CLI if recoverer), Simulator TODO - replace cli parsing with MCS response for simulator, then remove is_sim() condition
 	nvmeibc_cc_api_reply_vol_cmd_status(volume->p, &volume->hdr, status, nvmeibc_get_io_perm_for_reporting(NULL), send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
 }
 
@@ -1505,10 +1501,8 @@ static int __handle_cancel_cli(struct nvmeibc_control_api* cc_api, char *buf, si
 
 #define CLI_FLAG_FORCE "--force"		// Force detach
 #define CLI_FLAG_ABAND "--upgrade"		// Force detach the volume for software upgrade
-#define CLI_FLAG_HIDDN "--hidden"		// will detach only if the volume is hidden attached (will ignore recoverers)
-#define CLI_FLAG_RECOV "--recov"		// will detach only if the volume is recivery or hidden attached
-#define is_upgrading_to_normal(vol, send_token)   (nvmeibc_block_is_recoverer_or_hidden(&(vol)->hdr) && !CHECK_HIDDEN__MAGIC(send_token) && !CHECK_RECOVER_MAGIC(send_token))
-#define is_upgrading_to_recovery(vol, send_token) (nvmeibc_block_is_hidden(&(vol)->hdr)      && !nvmeibc_block_is_recoverer(&(vol)->hdr) &&  CHECK_RECOVER_MAGIC(send_token))
+#define CLI_FLAG_RECOV "--recov"		// will detach only if the volume is attached for recovery
+#define is_upgrading_to_normal(vol, send_token)   (nvmeibc_block_is_recoverer(&(vol)->hdr) && !CHECK_RECOVER_MAGIC(send_token))
 
 bool cli_attach_check_if_already_attached = true;
 module_param(cli_attach_check_if_already_attached, bool, 0644);
@@ -1536,7 +1530,7 @@ static int __handle_cli_attach(struct nvmeibc_control_api* cc_api, const char *t
 		goto _out;
 	}
 	if (volume && cli_attach_check_if_already_attached) {	// We are already attached
-		const bool need_update = is_upgrading_to_normal(volume, token) || is_upgrading_to_recovery(volume, token);	// updating from hidden/recoverer -> visible or from hidden->recoverer
+		const bool need_update = is_upgrading_to_normal(volume, token);	// updating from recoverer -> visible
 		if (!need_update) {	// Just report success and do nothing
 			__fill_msg_vol_info(msg->volumes, &volume->hdr, NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED, nvmeibc_get_io_perm_for_reporting(volume->block_dev));
 			__vol_info_to_string(msg->volumes, cli_reply);
@@ -1570,7 +1564,7 @@ static int __handle_cli_detach(struct nvmeibc_control_api* cc_api, struct nvmeib
 {
 	const enum nvmeibc_inst_state state = __get_from_params_main_globals_container(__get_cinst_params_from_cc_api(cc_api))->priv_sched.state;
 	int rv = 0;
-	_NT(trace_cc_api_handle_cli_detach, "handling detach, flags: hidden=@BOOL recov=@BOOL force=@BOOL aband=@BOOL, vol=@VOL is_uuid=@BOOL_YN", how->hidden, how->recov, how->force, how->abandon, !volume ? "?" : volume->full_name, is_uuid);
+	_NT(trace_cc_api_handle_cli_detach, "handling detach, flags: recov=@BOOL force=@BOOL aband=@BOOL, vol=@VOL is_uuid=@BOOL_YN", how->recov, how->force, how->abandon, !volume ? "?" : volume->full_name, is_uuid);
 	WARN_ON(!how); //sanity
 	if (!volume) {
 		rv = send_unknown_volume_to_cli(cc_api, v_id, is_uuid);
@@ -1686,7 +1680,7 @@ static bool __parse_optional_attach_arguments(struct cli_handler_param *p, struc
 // attachv volume 123412341234123 --RW 0 --preempt --512
 // attachu 123e4567-e89b-12d3... AAAAAAAAAAAAAAA		(**)
 // attachv volume 123412341234123 --EX 10
-// Recovery attach (hidden) has a unique token and does not require reservation info see (**)
+// Recovery attach has a unique token and does not require reservation info see (**)
 static bool __parse_attach_token(char **token, struct cli_handler_param *p, struct nvmeibc_volume_attach_t *vat)
 {
 	char *params_string = __get_params_string(p);
@@ -1706,7 +1700,7 @@ static bool __parse_attach_token(char **token, struct cli_handler_param *p, stru
 		*token = param;
 	}
 
-	if (CHECK_RECOVER_MAGIC(*token) || CHECK_HIDDEN__MAGIC(*token))  // Hidden volumes have no reservation info
+	if (CHECK_RECOVER_MAGIC(*token))  // Recoverer volumes have no reservation info
 		return true;
 
 	// --------------- Extract Reservation mode
@@ -1752,14 +1746,12 @@ static bool __parse_attach_token(char **token, struct cli_handler_param *p, stru
 // cli command format:
 // <cmd name><u/v> <volume id no spaces> <detach flags>
 // Detach:
-// detach<v/u> <vol id> optionals: --force/--hidden/--recov/--upgrade
+// detach<v/u> <vol id> optionals: --force/--recov/--upgrade
 //
 // Examples:
 // detachv volume --force
 // detachu 123e4567-e89b-12d3...
-// detachv volume --hidden
 // detachv volume --recov
-// detachv volume --hidden --force --upgrade
 static bool __parse_detach_flags(struct nvmeibc_vol_detach_cmd *detach_cmd, struct cli_handler_param *p)
 {
 	int len = p->len;
@@ -1774,8 +1766,6 @@ static bool __parse_detach_flags(struct nvmeibc_vol_detach_cmd *detach_cmd, stru
 		} else if (!strcmp(param, CLI_FLAG_ABAND)) {
 			detach_cmd->force = true;
 			detach_cmd->abandon = true;
-		} else if (!strcmp(param, CLI_FLAG_HIDDN)) {
-			detach_cmd->hidden = true;
 		} else if (!strcmp(param, CLI_FLAG_RECOV)) {
 			detach_cmd->recov = true;
 		} else {

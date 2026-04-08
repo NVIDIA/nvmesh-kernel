@@ -144,7 +144,6 @@ enum volumeCommands{										// Commands which can be given to the .ko driver r
 	volCmds_Illegal 		= 0,							// Artificial illegal command
 	volCmds_New				,								// Default action is attach when everything is memset() to zero
 	volCmds_RecoveryAttach	,								// recovery attach, speacial case where toma wishes to attach volume for recovery
-	volCmds_HiddenAttach	,								// hidden attach, no OS registration
 	volCmds_ShadowAttach	,								// shadow attach, no report
 	volCmds_Update			,								// Update already attached volume
 	volCmds_RecoveryUpdate	,								// Update already attached recovery volume
@@ -152,13 +151,9 @@ enum volumeCommands{										// Commands which can be given to the .ko driver r
 	volCmds_Delete			,								// Delete volume
 	volCmds_ForceDetach		,								// Force detach (unsafe detach)
 	volCmds_ForceRecoveryDetach,							// Force recovery detach (Used by toma)
-	volCmds_ForceHiddenDetach,								// Force hidden detach
 	volCmds_RecoveryDetach	,								// Detach only recovery volumes
-	volCmds_HiddenDetach	,								// Detach only hidden volumes
-	volCmds_DetachUpgrade	,								// Detach hidden / recovery volumes, abandon non hidden / recovery volumes
-	volCmds_DetachUpgradeHiddenRecoveryForce,				// Detach hidden + recovery + force + upgrade.
+	volCmds_DetachUpgrade	,								// Detach recoverer volumes, abandon regular volumes
 	volCmds_DetachUpgradeRecoveryForce,						// Detach recovery + force + upgrade.
-	volCmds_DetachUpgradeHiddenForce,						// Detach hidden + force + upgrade.
 	volCmds_AttachReadOnly	,								// Read only reservation
 	volCmds_AttachExclusive									// Exclusive mode reservation
 };

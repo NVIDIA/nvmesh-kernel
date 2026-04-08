@@ -149,10 +149,10 @@ u64 calc_expected_reserv_ver(const struct volumeDescriptor *vol) {
 	return (vol->vat.res.version > RESERVATION_MODE_IRRELEVANT) ? 1 : RESERVATION_MODE_IRRELEVANT;		// Version is not updated after attach.
 }
 
-char *cli_generic_string(const struct volumeDescriptor *vol, const char* status, bool is_hidden) {
+char *cli_generic_string(const struct volumeDescriptor *vol, const char* status, bool is_io_blocked) {
 	char output[MAX_VOL_INFO_STRING];
 	const char* msg_format = CLI_MSG_FORMAT;
-	int len = snprintf(output, MAX_VOL_INFO_STRING, msg_format, status, vol->info.version, "false", vol->info.uuid, vol->info.devname, (is_hidden) ? RESERVATION_MODE_IRRELEVANT : vol->vat.res.version);
+	int len = snprintf(output, MAX_VOL_INFO_STRING, msg_format, status, vol->info.version, "false", vol->info.uuid, vol->info.devname, (is_io_blocked) ? RESERVATION_MODE_IRRELEVANT : vol->vat.res.version);
 	BUG_ON(len >= MAX_VOL_INFO_STRING);		// May cause stack corruption
 	return sim_kstrdup(output, GFP_KERNEL);
 }
@@ -190,7 +190,7 @@ static char *__attach_string_status(const struct volumeDescriptor *vol, const ch
 	return sim_kstrdup(output, GFP_KERNEL);
 }
 
-char *hidden_attach_string(const struct volumeDescriptor *vol, const bool already_attached)
+char *recovery_attach_string(const struct volumeDescriptor *vol, const bool already_attached)
 {
 	char output[MAX_VOL_INFO_STRING];
 	const char* msg_format = CLI_MSG_FORMAT;
@@ -209,16 +209,16 @@ char *detach_string(const struct volumeDescriptor *vol, const bool uuid, const b
 	return cli_generic_string(vol, CLI_DETACHED, false);
 }
 
-char *update_ready_string(const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_hidden) {
+char *update_ready_string(const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_io_blocked) {
 	if (!attached) // The detached status doesn't have the entire volume info
 		return __failed_string(vol, CLI_UNKNOWN, uuid);
-	return cli_generic_string(vol, CLI_UPDATE_READY, is_hidden);
+	return cli_generic_string(vol, CLI_UPDATE_READY, is_io_blocked);
 }
 
-char *shutdown_string(const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_hidden) {
+char *shutdown_string(const struct volumeDescriptor *vol, const bool uuid, const bool attached, const bool is_io_blocked) {
 	if (!attached) // The detached status doesn't have the entire volume info
 		return __failed_string(vol, CLI_UNKNOWN, uuid);
-	return cli_generic_string(vol, CLI_SHUTDOWN, is_hidden);
+	return cli_generic_string(vol, CLI_SHUTDOWN, is_io_blocked);
 }
 
 char *invalid_token_status(const struct volumeDescriptor *vol) {
@@ -233,7 +233,7 @@ char *failed_update_non_exis_vol(const struct volumeDescriptor *vol, const char 
 	return __attach_string_status(vol, status, true, calc_expected_reserv_ver(vol));
 }
 
-char *fail_hidattch_string(const struct volumeDescriptor *vol) {
+char *fail_recovery_attach_string(const struct volumeDescriptor *vol) {
 	return __attach_string_status(vol, CLI_ATTACH_FAILED, true, 0);
 }
 
@@ -241,15 +241,7 @@ char *attach_string(const struct volumeDescriptor *vol) {
 	return __attach_string_status(vol, CLI_ATTACHED, false, calc_expected_reserv_ver(vol));
 }
 
-char *detach_hidden_string(const struct volumeDescriptor *vol, const bool hidden_attached, const bool recoverer_attached) {
-	(void)recoverer_attached; //note that if the volume can be attached by user and therefore hidden_attached will be false
-	if (!hidden_attached)
-		return __detach_string_failed_status(vol);
-	return cli_generic_string(vol, CLI_DETACHED, true);
-}
-
-char *detach_recov_string(const struct volumeDescriptor *vol, const bool hidden_attached, const bool recoverer_attached) {
-	(void)hidden_attached;
+char *detach_recov_string(const struct volumeDescriptor *vol, const bool recoverer_attached) {
 	if (!recoverer_attached)
 		return __detach_string_failed_status(vol);
 	return cli_generic_string(vol, CLI_DETACHED, true);

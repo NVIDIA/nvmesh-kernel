@@ -339,7 +339,7 @@ int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume
 		}
 	}
 
-	need_reconnect_os = (!nvmeibc_block_is_hidden(&volume->hdr)) && dev->os->is_io_api_disabled;	// Recoverer volume that was upgraded to normal io-able volume
+	need_reconnect_os = (!nvmeibc_block_is_recoverer(&volume->hdr)) && dev->os->is_io_api_disabled;	// Recoverer volume that was upgraded to normal io-able volume
 	upgrade_from_recovery_only_to_visible = (!nvmeibc_block_is_recoverer(&volume->hdr)) && nvmeibc_block_is_recoverer(dev);
 	if (has_reservation_version_changed) {
 		_NT(t_10_cbrcnf, "@DEV_NAME: reservation change: @RES_MOD_VER->@RES_MOD_VER", dev->name, dev->topologies.reservation_version, conf->reservation.version);
@@ -351,14 +351,6 @@ int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume
 		BUG_ON(conf->reservation.version == RESERVATION_MODE_IRRELEVANT);
 		__update_topo_from_volume_hdr(dev);	// The only case that updation of 'vat' is allowed
 	}
-	if (dev->type != volume->hdr.type) { // Should only be Hidden->Recoverer (AND HIDDEN)
-		WARN_ON(!nvmeibc_block_is_hidden(dev));
-		WARN_ON(nvmeibc_block_is_recoverer(dev));
-		WARN_ON(!nvmeibc_block_is_hidden(&volume->hdr));
-		WARN_ON(!nvmeibc_block_is_recoverer(&volume->hdr));
-		dev->type = volume->hdr.type;	// Update block dev type as well
-	}
-
 	/* Check if we haven't fully applied the previous configuration yet */
 	t = nvmeibc_topology_get(&dev->topologies);
 	warm_fallback = (nvmeibc_topology_is_reconfiguring_now(t) || need_update_vat);			// Ilelgal to update VAT in hot fashion
@@ -473,4 +465,3 @@ int nvmeibc_wait_for_io_drain(struct nvmeibc_block_device *dev,
 	}
 	return rv;
 }
-

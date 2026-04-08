@@ -1298,7 +1298,7 @@ static void __set_error_state(struct nvmeibc_topology *t)
 		nvmeibc_topo_update_size_of_bdev(t);
 		t->resize.n_last_disabled_chunks = 0;
 	}
-	if (nvmeibc_block_is_hidden(nd))	// Hidden attach
+	if (nvmeibc_block_is_recoverer(nd))	// Recoverer attach
 		io_perm_merge(&errE, NVMEIB_IO_TYPE_PERMIT_NO_IO);
 	if (is_suspended(*nt))
 		errE = NVMEIB_IO_TYPE_PERMIT_NONE_SUS; /* Regardless of prev topo errors */
