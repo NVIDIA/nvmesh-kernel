@@ -639,6 +639,15 @@ static int nvmeib_fill_attach_message_from_volume_descriptor(struct mgmt_simu *m
 	return rv;
 }
 
+static void override_volume_type_from_client_attachment(const struct mongo_db_simu *mdb, int inst_id,
+	struct nvmeibc_volume_conf *dst, const struct volumeDescriptor *vol)
+{
+	const int v = mongo_db_simu_get_thick_vol_ind(vol->info.uuid);
+
+	if ((v >= 0) && mdb->vol_is_attached[inst_id][v])
+		dst->type = (int)mdb->vol_attached_type[inst_id][v];
+}
+
 static int __calculate_attachmet_version_hack(const struct mongo_db_simu *_mdb) {
 	struct mongo_db_simu *mdb = (struct mongo_db_simu *)_mdb;	// Remove const, becasue this function is a hack
 	// There should be a proper logic of when attachment version is increased (much like in real mgmt)
@@ -673,6 +682,7 @@ static int __mgmt_reply_with_full_conf_on_clnts_request(struct mcs_simu *mcs, co
 		const struct volumeDescriptor *vol = &mdb->vols[v];
 		// Each seg will add it's target disk to uniqueDisks thus allowing adding only the relevant disks and nics
 		num_disks += fill_volume_from_discriptor(mgmt, &msg->volumes[v], vol, uniqueDisks);
+		override_volume_type_from_client_attachment(mdb, mcs->inst_id, &msg->volumes[v], vol);
 	}
 	if (num_disks)
 		msg->targets = sim_kzalloc(sizeof(*msg->targets) * num_disks , GFP_KERNEL);
@@ -782,7 +792,9 @@ _out:
 // This function is called for each MCS message generation, currently ATTACH/UPDATE volume and allows injection of error into the scheme header
 int generate_mcs_attach_message_for_volume(struct mcs_simu *mcs, const struct volumeDescriptor *vol, int opcode, int preempt, const char *token, const enum NVMEIB_MCS_MSG_ERROR_TYPES error) {
 	int rv = 0, i;
+	const struct mongo_db_simu *mdb = mcs_simu_get_mdb(mcs);
 	for (i = 0; i < vol->nVols; i++) {	// For each related volume send one configuration at a time (in required order)
+		const struct volumeDescriptor *curr_vol = (vol->nVols == 1) ? vol : vol->links[i];
 		struct nvmeib_mgmt_to_client_volume_configuration *msg = (struct nvmeib_mgmt_to_client_volume_configuration *)sim_kzalloc(sizeof(*msg), GFP_KERNEL);
 		strlcpy(msg->cli_unique_id, token, sizeof(msg->cli_unique_id));
 		_fill_message_type_version(&msg->messageTypeVersion, error);
@@ -791,6 +803,7 @@ int generate_mcs_attach_message_for_volume(struct mcs_simu *mcs, const struct vo
 		else {
 			void *new_info = replace_upstream_with_downstream(mcs->mq.mcs->handle);
 			msg->volumes[0].reservation.preempt = preempt;
+			override_volume_type_from_client_attachment(mdb, mcs->inst_id, msg->volumes, curr_vol);
 			rv = mcs_gather(mcs, new_info, msg, opcode, error);
 			sim_kfree(new_info);
 		}
@@ -803,7 +816,9 @@ int generate_mcs_attach_message_for_volume_with_res_version(
 	struct mcs_simu *mcs, const struct volumeDescriptor *vol, int opcode, int preempt,
 	const char *token, const enum NVMEIB_MCS_MSG_ERROR_TYPES error, unsigned long long version) {
 	int rv = 0, i;
+	const struct mongo_db_simu *mdb = mcs_simu_get_mdb(mcs);
 	for (i = 0; i < vol->nVols; i++) {	// For each related volume send one configuration at a time (in required order)
+		const struct volumeDescriptor *curr_vol = (vol->nVols == 1) ? vol : vol->links[i];
 		struct nvmeib_mgmt_to_client_volume_configuration *msg = (struct nvmeib_mgmt_to_client_volume_configuration *)sim_kzalloc(sizeof(*msg), GFP_KERNEL);
 		strlcpy(msg->cli_unique_id, token, sizeof(msg->cli_unique_id));
 		_fill_message_type_version(&msg->messageTypeVersion, error);
@@ -813,6 +828,7 @@ int generate_mcs_attach_message_for_volume_with_res_version(
 			void *new_info = replace_upstream_with_downstream(mcs->mq.mcs->handle);
 			msg->volumes[0].reservation.preempt = preempt;
 			msg->volumes[0].reservation.version = max(vol->vat.res.version, version);
+			override_volume_type_from_client_attachment(mdb, mcs->inst_id, msg->volumes, curr_vol);
 			rv = mcs_gather(mcs, new_info, msg, opcode, error);
 			sim_kfree(new_info);
 		}

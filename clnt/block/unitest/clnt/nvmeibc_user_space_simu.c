@@ -403,6 +403,9 @@ int clientSimulator_get_volumes_config(struct clientSimulator *client, struct mg
 	for (v=0; v<client->nBdevs; v++){
 		const struct nvmeibc_volume_header *info = &vols[v].info;
 		const char *vol_id;
+		const bool is_attached = (devs[v] != NULL);
+		const bool is_recoverer_attached = is_attached && nvmeibc_block_is_recoverer(devs[v]);
+		const bool is_shadow_attached = is_attached && nvmeibc_block_is_shadow(devs[v]);
 		BUG_ON(info->devname[0] == 0);
 		if (vur == 'r')
 			vur = (exec_counter%2 ? 'u' : 'v');						// Random decision: give command by uuid or by name
@@ -423,10 +426,14 @@ int clientSimulator_get_volumes_config(struct clientSimulator *client, struct mg
 			generate_mcs_delete_message_for_volume(&mgmt->mcs[client->inst_id], &vols[v], MCS_VOLUME_DELETION_MESSAGE_MSG);
 		} else if (vols[v].nextCmd == volCmds_New) {				// Attach command is sent via CLI
 			snprintf(&token[0], sizeof(token), "%015llu", ++token_generator);
-			set_cli_status_verification_expector(client, attach_string(&vols[v]), v);
+			set_cli_status_verification_expector(client,
+				(is_recoverer_attached || is_shadow_attached) ? failed_attach_string(&vols[v], CLI_UPDATE_FAILED) : attach_string(&vols[v]),
+				v);
 			snprintf(cli_command, len, "attach%c %s %s --RW %llu%s%s", vur, vol_id, token, reservation_version, (preempt) ? " --preempt" : "", (allow_sub_block_io) ? " --512" : "");
 		} else if (vols[v].nextCmd == volCmds_ShadowAttach) {				// Attach command is sent via CLI
-			set_cli_status_verification_expector(client, attach_string(&vols[v]), v);
+			set_cli_status_verification_expector(client,
+				(is_attached && !is_shadow_attached) ? failed_attach_string(&vols[v], CLI_UPDATE_FAILED) : attach_string(&vols[v]),
+				v);
 			snprintf(cli_command, len, "attach%c %s %s --RW %llu%s%s", vur, vol_id, MAGIC_CONFIG_SHADOW_TOKEN, reservation_version, (preempt) ? " --preempt" : "", (allow_sub_block_io) ? " --512" : "");
 		} else if (vols[v].nextCmd == volCmds_Update) {				// Update command is generated via MCS ATTACH volume message (TODO(Doron): once we have more specific MCS commands such as volumeExtendedEvent use them)
 			set_cli_status_verification_expector(client, update_string(&vols[v]), v); // Update can no longer arrive from CLI instead generate an MCS attach message directly
@@ -435,27 +442,30 @@ int clientSimulator_get_volumes_config(struct clientSimulator *client, struct mg
 			set_cli_status_verification_expector(client, cli_generic_string(&vols[v], CLI_ATTACHED, true), v); // Update can no longer arrive from CLI instead generate an MCS attach message directly
 			generate_mcs_attach_message_for_volume(&mgmt->mcs[client->inst_id], &vols[v], MCS_ATTACH_VOLUMES_MESSAGE_MSG, false, MAGIC_CONFIG_UPDATE_TOKEN, NVMEIB_MCS_MSG_WITH_NO_ERROR);
 		} else if (vols[v].nextCmd == volCmds_RecoveryAttach) {
-			set_cli_status_verification_expector(client, recovery_attach_string(&vols[v], (devs[v] != NULL)), v);
+			set_cli_status_verification_expector(client,
+				(is_attached && !is_recoverer_attached) ? failed_attach_string(&vols[v], CLI_UPDATE_FAILED) : recovery_attach_string(&vols[v], is_attached),
+				v);
 			snprintf(cli_command, len, "attach%c %s %s", vur, vol_id, MAGIC_RECOVR_ATTACH_TOKEN); // MAGIC_RECOVR_ATTACH_TOKEN
 		} else if (vols[v].nextCmd == volCmds_ForceRecoveryDetach) {
-			const bool is_recoverer_attached = (devs[v] != NULL) && nvmeibc_block_is_recoverer(devs[v]);
 			set_cli_status_verification_expector(client, (devs[v] != NULL) ? detach_recov_string(&vols[v], is_recoverer_attached) : cli_unknown_string(vol_id, (vur == 'u')), v);
 			snprintf(cli_command, len, "detach%c %s --recov --force", vur, vol_id);
 		} else if (vols[v].nextCmd == volCmds_RecoveryDetach) {
-			const bool is_recoverer_attached = (devs[v] != NULL) && nvmeibc_block_is_recoverer(devs[v]);
 			set_cli_status_verification_expector(client, detach_recov_string(&vols[v], is_recoverer_attached), v);
 			snprintf(cli_command, len, "detach%c %s --recov", vur, vol_id);
 		} else if (vols[v].nextCmd == volCmds_DetachUpgradeRecoveryForce) {
-			const bool is_recoverer_attached = (devs[v] != NULL) && nvmeibc_block_is_recoverer(devs[v]);
 			set_cli_status_verification_expector(client, detach_recov_string(&vols[v], is_recoverer_attached), v);
 			snprintf(cli_command, len, "detach%c %s --recov --force --upgrade", vur, vol_id);
 		} else if (vols[v].nextCmd == volCmds_AttachReadOnly) {
 			snprintf(&token[0], sizeof(token), "%015llu", ++token_generator);
-			set_cli_status_verification_expector(client, attach_string(&vols[v]), v);
+			set_cli_status_verification_expector(client,
+				(is_recoverer_attached || is_shadow_attached) ? failed_attach_string(&vols[v], CLI_UPDATE_FAILED) : attach_string(&vols[v]),
+				v);
 			snprintf(cli_command, len, "attach%c %s %s --RO %llu%s%s", vur, vol_id, token, reservation_version, (preempt) ? " --preempt" : "", (allow_sub_block_io) ? " --512" : "");
 		} else if (vols[v].nextCmd == volCmds_AttachExclusive) {
 			snprintf(&token[0], sizeof(token), "%015llu", ++token_generator);
-			set_cli_status_verification_expector(client, attach_string(&vols[v]), v);
+			set_cli_status_verification_expector(client,
+				(is_recoverer_attached || is_shadow_attached) ? failed_attach_string(&vols[v], CLI_UPDATE_FAILED) : attach_string(&vols[v]),
+				v);
 			snprintf(cli_command, len, "attach%c %s %s --EX %llu%s%s", vur, vol_id, token, reservation_version,
 				(preempt) ? " --preempt" : "",
 				(allow_sub_block_io) ? " --512" : "");

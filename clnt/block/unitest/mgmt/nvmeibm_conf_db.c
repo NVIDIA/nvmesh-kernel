@@ -205,7 +205,7 @@ void volumeDescriptor_ref_ids_verify(const struct volumeDescriptor* vol, const s
 }
 
 void mongo_db_simu_alloc_volumes(struct mongo_db_simu *mdb, struct nvmeibc_disk *physDiscs) {
-	int v, i, s;
+	int c, v, i, s;
 	const int n_servers = NVMESH_N_PHYS_DISKS;
 	// index I describes volI
 	const int __nChunks[MAX_VOLUMES_IN_NVMESH] = {1,5,2,2,/*QLC*/ 1,1,/*MTV*/0,0};	// Amount of chunks
@@ -304,6 +304,10 @@ void mongo_db_simu_alloc_volumes(struct mongo_db_simu *mdb, struct nvmeibc_disk 
 	// Arbitrary decision, volumes 0,3 will have ref-ids, others dont
 	for (v=0; v<mdb->nVols; v++) {
 		mdb->vols[v].attachmentVersion = 1;
+		for (c = 0; c < NVMESH_N_MAX_CLIENTS; c++) {
+			mdb->vol_is_attached[c][v] = false;
+			mdb->vol_attached_type[c][v] = mdb->vols[v].info.type;
+		}
 	}
 	volumeDescriptor_ref_ids_generate(&mdb->vols[0]);
 	volumeDescriptor_ref_ids_generate(&mdb->vols[3]);
@@ -343,8 +347,19 @@ void mongo_db_simu_update_clnt_vol_attachment(struct mongo_db_simu *mdb, int ins
 	struct volumeDescriptor *vol = &mdb->vols[v];
 	mdb->vol_is_attached[inst_id][v] = is_attached;
 	if (is_attached) {
+		enum nvmeibc_config_volume_type attached_type = vol->info.type;
+
+		/* Upstream status does not carry a raw volume type, so recover it from
+		 * the attached-state semantics that the real product preserves.
+		 */
+		if (msg->is_hidden) {
+			attached_type = (msg->reservation.version == RESERVATION_MODE_IRRELEVANT) ?
+				RECOVERER_VOLUME : SHADOW_VOLUME;
+		}
+		mdb->vol_attached_type[inst_id][v] = attached_type;
 		volumeDescriptor_ref_ids_verify(vol, msg);
 	} else { // Reset mode to 0, increase RV
+		mdb->vol_attached_type[inst_id][v] = vol->info.type;
 		nvmeibc_volume_detach_request_update_reservation_info(&mdb->vols[v]);
 	}
 }

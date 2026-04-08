@@ -324,7 +324,7 @@ int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume
 	struct nvmeibc_block_device *dev = volume->block_dev;
 	const bool has_reservation_version_changed = (conf->reservation.version != dev->topologies.reservation_version);
 	bool warm_fallback = false;	/* default is hot relocation */
-	bool need_reconnect_os, upgrade_from_recovery_only_to_visible, need_update_vat = false;
+	bool need_reconnect_os;
 	u64 ro_header_sectors;
 
 	_NT(t_01_cbrcnf, "@DEV_NAME: Reconfigure to @C_VOL_VER, @HDR_UUID", dev->name, version, dev->uuid);
@@ -338,28 +338,26 @@ int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume
 			snprintf(dev->name, sizeof(dev->name), "%s", volume->hdr.devname);
 		}
 	}
+	if (dev->type != volume->hdr.type) {
+		_NE(t_03a_cbrcnf, DMESG_PREFIX("@DEV_NAME") ": rejecting type change on attached block device @HDR_TYPE -> @HDR_TYPE", dev->name, dev->type, volume->hdr.type);
+		rv = -EINVAL;
+		goto _out;
+	}
 
-	need_reconnect_os = (!nvmeibc_block_is_recoverer(&volume->hdr)) && dev->os->is_io_api_disabled;	// Recoverer volume that was upgraded to normal io-able volume
-	upgrade_from_recovery_only_to_visible = (!nvmeibc_block_is_recoverer(&volume->hdr)) && nvmeibc_block_is_recoverer(dev);
+	need_reconnect_os = (!nvmeibc_block_is_recoverer(&volume->hdr)) && dev->os->is_io_api_disabled;	// Visible volume whose OS path still needs to be re-enabled
 	if (has_reservation_version_changed) {
 		_NT(t_10_cbrcnf, "@DEV_NAME: reservation change: @RES_MOD_VER->@RES_MOD_VER", dev->name, dev->topologies.reservation_version, conf->reservation.version);
 		// Here we know that when IO will be enabled, volume will become preempted
 	}
-	if (unlikely(need_reconnect_os || upgrade_from_recovery_only_to_visible)) {			// Done in 3 steps: update reserv_ver --> unregister --> enable io. Otherwise if we enable IO too soon we may cause a data corruption
-		dev->type = volume->hdr.type;			// Remove the recoverer property
-		need_update_vat = has_reservation_version_changed; // Update from RESERVATION_MODE_IRRELEVANT -> Another
-		BUG_ON(conf->reservation.version == RESERVATION_MODE_IRRELEVANT);
-		__update_topo_from_volume_hdr(dev);	// The only case that updation of 'vat' is allowed
-	}
 	/* Check if we haven't fully applied the previous configuration yet */
 	t = nvmeibc_topology_get(&dev->topologies);
-	warm_fallback = (nvmeibc_topology_is_reconfiguring_now(t) || need_update_vat);			// Ilelgal to update VAT in hot fashion
+	warm_fallback = nvmeibc_topology_is_reconfiguring_now(t);
 	nvmeibc_topology_put(t);
 	if (warm_fallback) { /* Existing state (Previous configuration) fall-back to warm */
 		rv = nvmeibc_warm_apply_conf_diffs(&dev->topologies);
 	}
 	if (need_reconnect_os) {	// Step 3 of reconnect_os
-		_NT(t_04_cbrcnf, "@DEV_NAME: reconnecting os for io, need_update_vat=@BOOL_YN", dev->name, need_update_vat);
+		_NT(t_04_cbrcnf, "@DEV_NAME: reconnecting os for io", dev->name);
 		dev->os->is_io_api_disabled = 0;
 		ro_header_sectors = nvmeibc_block_get_ro_header_sectors(conf);
 		if (ro_header_sectors != dev->os->ro_header_sectors) {

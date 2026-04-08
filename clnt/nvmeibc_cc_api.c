@@ -369,7 +369,7 @@ static int __parse_array_volume_conf(const struct nvmeib_mgmt_to_client_volume_c
 	// Todo: Insert optimization that nics are used for all volumes
 
 	if (is_recoverer) {	// Recoverer attachments are out of bounds and the attachmentsVersion must be ignored
-		_NT(t_pavc_01, "Hidden attachment request ignorring attachmentsVersion=@INT", src->attachmentsVersion);
+		_NT(t_pavc_01, "Recovery-only attachment request ignorring attachmentsVersion=@INT", src->attachmentsVersion);
 	} else if ((rv = __schedule_update_current_attachment_version_from_mgmt(cc_api, src->attachmentsVersion)) != 0)		// NVMESH-4837: Why schedule work here?
 		goto _out;
 
@@ -1196,7 +1196,7 @@ static void __nvmeibc_cc_api_notify_vol_io_changed(struct nvmeibc_volume *volume
 		_ND(nvmeibc_cc_api_notify_io_changed, "@DEV_NAME_FULL: Volume @HDR_UUID sending the previously sent IO Perm @IO_PERM to mgmt", volume->full_name, volume->hdr.uuid, io_perm);
 	}
 	nvmeibc_cc_api_reply_vol_cmd_status(p, &volume->hdr, NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED, io_perm, send_to_cli, send_to_mcs, 1 /* inc_report_id_if_needed */);
-	// Only upon first IO enabled send to CLI - if attached in recovery mode and changing to fully attached will update cli only once (mgmt still gets every update)
+	// Only upon first IO enabled send to CLI, and never for recovery-only attachments.
 	volume->hdr.first_io_enabled_was_sent_to_cli = volume->hdr.first_io_enabled_was_sent_to_cli || (!io_perm_is_blocked_no_io(io_perm) && !nvmeibc_block_is_recoverer(&volume->hdr));
 }
 
@@ -1485,7 +1485,18 @@ static int __handle_cancel_cli(struct nvmeibc_control_api* cc_api, char *buf, si
 #define CLI_FLAG_FORCE "--force"		// Force detach
 #define CLI_FLAG_ABAND "--upgrade"		// Force detach the volume for software upgrade
 #define CLI_FLAG_RECOV "--recov"		// will detach only if the volume is attached for recovery
-#define is_upgrading_to_normal(vol, send_token)   (nvmeibc_block_is_recoverer(&(vol)->hdr) && !CHECK_RECOVER_MAGIC(send_token))
+
+static enum nvmeibc_config_volume_type __calc_cli_attach_type(const char *token)
+{
+	enum nvmeibc_config_volume_type type = NORMAL_VOLUME;
+
+	if (CHECK_RECOVER_MAGIC(token))
+		type |= RECOVERER_VOLUME;
+	if (CHECK_SHADOW__MAGIC(token))
+		type |= SHADOW_VOLUME;
+
+	return type;
+}
 
 bool cli_attach_check_if_already_attached = true;
 module_param(cli_attach_check_if_already_attached, bool, 0644);
@@ -1500,6 +1511,7 @@ static int __handle_cli_attach(struct nvmeibc_control_api* cc_api, const char *t
 	int rv = -EINVAL;
 	struct get_client_configuration_msg *msg = NULL;
 	char cli_reply[MAX_VOL_INFO_STRING];
+	enum nvmeibc_config_volume_type requested_type = NORMAL_VOLUME;
 	if (state != NVMEIBC_INST_STATE_READY) {	// Optimization for fast fail: Even if attach request would be sent to mgmt, upon configuration arrival we would fail it becasue state is not ready
 		_NI(trace_cc_api_handle_cli_attach, DMESG_PREFIX("@V_ID") ": Attach request is rejected. state=@STATE", v_id, state);
 		send_cli_error_reply(cc_api, CLIENT_SHUTTING_DOWN, v_id);
@@ -1507,22 +1519,24 @@ static int __handle_cli_attach(struct nvmeibc_control_api* cc_api, const char *t
 	}
 
 	WARN_ON(!token); // sanity
+	if (token)
+		requested_type = __calc_cli_attach_type(token);
 	_NT(trace_2_cc_api_handle_cli_attach, "@HDR_UUID: attach_status=@ATTACH_STATUS", v_id, (volume ? "already attached" : "attaching"));
 	if (!(msg = get_client_configuration_msg_create(1))) {
 		rv = -ENOMEM;
 		goto _out;
 	}
 	if (volume && cli_attach_check_if_already_attached) {	// We are already attached
-		const bool need_update = is_upgrading_to_normal(volume, token);	// updating from recoverer -> visible
-		if (!need_update) {	// Just report success and do nothing
-			__fill_msg_vol_info(msg->volumes, &volume->hdr, NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED, nvmeibc_get_io_perm_for_reporting(volume->block_dev));
-			__vol_info_to_string(msg->volumes, cli_reply);
-			if ((rv = nvmeibc_send_to_cli(cc_api, cli_reply)) < 0 )
-				_NE(error_cc_api_handle_cli_attach1, DMESG_PREFIX("CLI Error") ": Could not reply");
-			goto _out;		// Already attached - nothing to do
-		}
+		const enum_vol_status status = (volume->hdr.type == requested_type) ? NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED : NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED;
+		if (status == NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED)
+			_NE(trace_cc_api_handle_cli_attach_type_mismatch, DMESG_PREFIX("@V_ID") ": rejecting attach type change @HDR_TYPE -> @HDR_TYPE", v_id, volume->hdr.type, requested_type);
+		__fill_msg_vol_info(msg->volumes, &volume->hdr, status, nvmeibc_get_io_perm_for_reporting(volume->block_dev));
+		__vol_info_to_string(msg->volumes, cli_reply);
+		if ((rv = nvmeibc_send_to_cli(cc_api, cli_reply)) < 0 )
+			_NE(error_cc_api_handle_cli_attach1, DMESG_PREFIX("CLI Error") ": Could not reply");
+		goto _out;		// Already attached - either no-op or rejected type mismatch
 	}
-	// Send registerToEvents for this volume to initiate attach - request reservation mode if upgrading recoverer
+	// Send registerToEvents for this volume to initiate attach using the requested immutable type.
 	fill_msg_vol_info_empty(msg->volumes, vat, v_id, is_uuid);
 	__vol_info_to_string(msg->volumes, cli_reply);
 	_ND(trace_3_cc_api_handle_cli_attach, "Sending message=@STR", &cli_reply[0]);

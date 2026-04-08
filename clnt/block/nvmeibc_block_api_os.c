@@ -1981,9 +1981,9 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 		_NT(t_baoc_00, "@DEV_NAME: will @YES_NO_STATUS accept kernel IO", dev_name, ((os->is_io_api_disabled) ? "not" : "do"));
 	} else {									// If adopting
 		if (unlikely(os->is_io_api_disabled)) {
-			/* Unlikely scenario, after upgrade we are adopting atom upon attach,
-			   but a recoverer attach happened before regular attach. Fail the recoverer attach, or else we risk DI due to wrong reservation version */
-			_NT(t_baoc_01, "@DEV_NAME: Failing recoverer attach. Volume during upgrade! Reabandoning", dev_name);
+			/* Do not convert an adopted recovery-only atom into a different attachment type in place.
+			   Require detach + reattach instead, or we risk using the wrong reservation state. */
+			_NT(t_baoc_01, "@DEV_NAME: Failing attach on adopted recovery-only atom. Detach and reattach required", dev_name);
 			os->atom.status = nvmeiba_status_live;		// We mistakenly adopted the atom, so abandon it again. Sorry bro...
 			nvmeiba_os_api_orphan_abandon(&os->atom);
 			__set_atom_status_orphan(&os->atom);

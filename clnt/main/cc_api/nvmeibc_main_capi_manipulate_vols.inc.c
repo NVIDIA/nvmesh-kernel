@@ -130,17 +130,10 @@ static int __verify_reservation_version_correctness(struct nvmeibc_volume_conf *
 	return rv;
 }
 
-static inline bool change_incomming_msg_and_find(const struct nvmeibc_volume *volume, struct nvmeibc_volume_conf *new_hdr, bool update_only)
+static inline bool change_incomming_msg_and_find(const struct nvmeibc_volume *volume, struct nvmeibc_volume_conf *new_hdr)
 {
-	if (update_only && volume) {
-		_NT(t_cimaf01, "Update only forces type: @HDR_TYPE <-- @HDR_TYPE", new_hdr->type, volume->hdr.type);
-		new_hdr->type = volume->hdr.type;		// Type change is not allowed!
-	}
 	if (nvmeibc_block_is_recoverer(new_hdr)) { 	// Recoverer attach does not use reservation info
 		_NT(t_cimaf02, DMESG_PREFIX("@DEV_NAME: ") "Removing attach_t info of recoverer volume", new_hdr->name);
-		if (volume && !nvmeibc_block_is_recoverer(&volume->hdr)) { // Issue NVMESH-276
-			// Race condition: Mgmt/Cli wanted to attach for recovery while the volume was meanwhile attached regularly. This is not a bug. Just return success
-		}
 		nvmeibc_volume_attach_t_init((struct nvmeibc_volume_attach_t *)&new_hdr->reservation);
 	}
 	return (volume != NULL);
@@ -152,6 +145,7 @@ static enum_vol_status _calc_reply_on_attach(const char *vol_name, const struct 
 	const bool found = (volume != NULL);
 	if (found) { // Volume existed before attach request. Merge its lates information to into the reply
 		nvmeibc_volume_attach_t_copy(&reply_hdr->vat, &volume->hdr.vat);
+		reply_hdr->type = volume->hdr.type;
 		reply_hdr->last_sent_io_perm = volume->hdr.last_sent_io_perm;
 	}
 	if (resrv_inc_ignored)
@@ -179,9 +173,10 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	struct nvmeibc_volume_header reply_hdr = {0};
 	const struct nvmeibc_volume_conf *hdr = &msg->volumes[0];
 	const struct nvmeibc_volume *volume = nvmeibc_volume_get_by_uuid(p, hdr->uuid, UNKNOWN_ILLEGAL);
-	const bool found = change_incomming_msg_and_find(volume, &msg->volumes[0], update_only);
+	const bool found = change_incomming_msg_and_find(volume, &msg->volumes[0]);
 	const bool is_explicit_recoverer_attach = (nvmeibc_block_is_recoverer(hdr) && update_only);	// If Toma requests recoverer attach via cli, it must get a reply via cli
-	const bool send_to_cli = (is_sim() || is_explicit_recoverer_attach), send_to_mcs = true; // Update CLI except when full config (block simulator requires CLI updates, until parsing MCS replaces CLI parse)
+	const bool send_to_cli = (is_sim() || is_explicit_recoverer_attach);
+	const bool send_to_mcs = true; // Update CLI except when full config (block simulator requires CLI updates, until parsing MCS replaces CLI parse)
 	bool resrv_inc_ignored = false;
 	enum_vol_status res;
 	struct nvmeibc_control_api* ccapi = &__get_from_params_main_globals_container(p)->cc_api;
@@ -216,7 +211,11 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		_NI(i_tsbd02, "volume @DEV_NAME @HDR_UUID @C_VOL_VER - got command @STR. @STR.", hdr->name, hdr->uuid, hdr->version, __action(found), vat_str);
 		_NT(t_tsbd08, "referenceIDs=@INT", hdr->attachment.n_ref_ids);
 	}
-	if ((msg->updateType != UPDATETYPE_TOMA_VOL_CONFIG_TO_LOCAL_CLNT &&
+	if (found && (volume->hdr.type != (enum nvmeibc_config_volume_type)hdr->type)) {
+		_NE(t_tsbd09, DMESG_PREFIX("@DEV_NAME") ": rejecting type change for attached volume @HDR_TYPE -> @HDR_TYPE", hdr->name, volume->hdr.type, (enum nvmeibc_config_volume_type)hdr->type);
+		rv = -EINVAL;
+		res = _calc_reply_on_attach(hdr->name, volume, -EINVAL, false, &reply_hdr);
+	} else if ((msg->updateType != UPDATETYPE_TOMA_VOL_CONFIG_TO_LOCAL_CLNT &&
 	     __verify_reservation_version_correctness(&msg->volumes[0], volume, p, &resrv_inc_ignored))) { // Verify reservation info, if fails send current volume information
 		res = _calc_reply_on_attach(hdr->name, volume, -1, resrv_inc_ignored, &reply_hdr);
 	} else if (update_only && !found) {

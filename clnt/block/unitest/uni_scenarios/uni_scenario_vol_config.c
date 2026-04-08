@@ -1482,14 +1482,11 @@ TEST_FUNC int unitest_recovery_volume(struct NVMeshSystem *sys)
 	send_command_to_all(sys, -1, volCmds_Detach);			for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);           }
 	send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
 	send_command_to_all(sys, -1, volCmds_RecoveryDetach); 	for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);}
-	send_command_to_all(sys, -1, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
-	send_command_to_all(sys, -1, volCmds_ShadowAttach);		for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}
-	send_command_to_all(sys, -1, volCmds_Detach);			for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);           }
 	send_command_to_all(sys, -1, volCmds_New);				for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}
 	if (true) { // Test: NVMESH-276 bug due to race condition
 		const bool prev = cli_attach_check_if_already_attached; cli_attach_check_if_already_attached = false;
 		reset_cli_status_verification(client); set_cli_status_verification_expector(client, failed_attach_string(&client->vols[0], CLI_UPDATE_FAILED), 0);
-		send_command_to_vol(sys, -1, 0, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}	// Recovery attach request while volume is attached as visible, remains visible
+		send_command_to_vol(sys, -1, 0, volCmds_RecoveryAttach);	for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}	// Recovery attach request while volume is attached as visible is rejected, so the visible attach remains in place
 		cli_attach_check_if_already_attached = prev;
 	}
 	send_command_to_all(sys, -1, volCmds_Detach);			for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);           }
@@ -1508,9 +1505,8 @@ TEST_FUNC int unitest_recovery_volume(struct NVMeshSystem *sys)
 
 	clientSimulator_send_to_cli_and_wait(client, "%get_full_conf");
 	for (v=0; v<client->nBdevs; v++) {BUG_ON(!clientSimulator_is_vol_recoverer_attached(client, v));}
-	//send_command_to_all(sys, -1, volCmds_Update);
-	send_command_to_all(sys, -1, volCmds_New); 			for (v=0; v<client->nBdevs; v++) {BUG_ON(clientSimulator_is_vol_recoverer_attached(client, v));}
-	send_command_to_all(sys, -1, volCmds_Detach);
+	send_command_to_all(sys, -1, volCmds_RecoveryDetach); 	for (v=0; v<client->nBdevs; v++) {BUG_ON(client->devs[v] != NULL);}
+
 	send_command_to_all(sys, -1, volCmds_New);
 	self_recovery_detach_initial_time_sec = orig_self_recovery_detach_time_sec;
 	return 0;

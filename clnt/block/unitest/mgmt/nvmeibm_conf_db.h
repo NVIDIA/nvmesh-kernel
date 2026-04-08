@@ -206,6 +206,7 @@ struct mongo_db_simu {										// Full mongo database with many tables (semgnet
 	struct mdb_target_conf srvrs[NVMESH_N_PHYS_DISKS];		// Array of all servers
 	uint disk_range_uniqueID;								// unique ID generator for each segment
 	bool vol_is_attached[NVMESH_N_MAX_CLIENTS][MAX_VOLUMES_IN_NVMESH];	// Management sees attachment of clients to volumes (can be different from what clients think, due to network problems and races). In stable situation should be identical to the point of view of the client
+	enum nvmeibc_config_volume_type vol_attached_type[NVMESH_N_MAX_CLIENTS][MAX_VOLUMES_IN_NVMESH]; // The type the client is currently attached with, for generating consistent follow-up configs.
 };
 
 /* Simulate as if sys-admin allocates all the needed volumes for the testing environment, and stores the allocations in mongo db */

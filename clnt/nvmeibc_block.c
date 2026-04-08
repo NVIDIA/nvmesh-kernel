@@ -1227,7 +1227,7 @@ MODULE_PARM_DESC(self_recovery_detach_idle_time_sec, "Time-out for idle recovere
 static void __self_detatch_old_recovering_bdev(struct nvmeibc_block_device *dev)
 {
 	//const struct nvmeibc_os_api *os = dev->os;	 // Safe access to 'os' because holds block_devices_sl spinlock so traversing list of devs with non destroyed os
-	if (unlikely(nvmeibc_block_is_recoverer(dev))) { // Hidden. Extreme rare race condition here! while upgrading volume from hidden to visible, autodetach of hidden volume is fired. It will just fail. No one cares
+	if (unlikely(nvmeibc_block_is_recoverer(dev))) { // Recovery-only volume may race with its own auto-detach timer while other attach attempts are being rejected.
 		ulong time_stamp_msec = 0;
 		uint num_finished = 0, n_running_weak = 0, n_running_recov = (uint)nvmeibc_recovs_drainer_get_num(&dev->dp.running_recovs, &time_stamp_msec, &num_finished, &n_running_weak);
 		if ((n_running_recov - n_running_weak) > 0) {

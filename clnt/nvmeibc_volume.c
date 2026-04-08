@@ -759,9 +759,10 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 				const struct nvmeib_mgmt_to_client_volume_configuration *msg)
 {
 	const struct nvmeibc_volume_conf *hdr = &msg->volumes[0];
+	const enum nvmeibc_config_volume_type requested_type = (enum nvmeibc_config_volume_type)hdr->type;
 	const char *devname = hdr->name;
 	struct nvmeibc_volume_header prev_hdr = volume->hdr;
-	const struct nvmeibc_volume *temp_volume = nvmeibc_volume_get_by_name(volume->p, devname, hdr->type);
+	const struct nvmeibc_volume *temp_volume = nvmeibc_volume_get_by_name(volume->p, devname, UNKNOWN_ILLEGAL);
 	// const bool should_update_ref_ids = (msg->attachmentsVersion > volume->hdr.attachment_version);
 	const bool should_update_ref_ids = (hdr->attachment.version > volume->hdr.attachment_version_per_volume);
 	int rv = 0;
@@ -776,6 +777,11 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 	_NI(i01nvlu, "Volume @DEV_NAME is already attached, volume will update, take_ref_ids=@BOOL_YN", devname, should_update_ref_ids);
 	if (volume->status >= NVS_DETACHING) {
 		_NE(t02nvlu, DMESG_PREFIX("@DEV_NAME") ": cannot attach while it is being detached", devname);
+		rv = -EINVAL;
+		goto out;
+	}
+	if (prev_hdr.type != requested_type) {
+		_NE(t03nvlu, DMESG_PREFIX("@DEV_NAME") ": rejecting volume type change @HDR_TYPE -> @HDR_TYPE", devname, prev_hdr.type, requested_type);
 		rv = -EINVAL;
 		goto out;
 	}
@@ -822,8 +828,6 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 		spin_unlock_irqrestore(&volume->hdr.ext_blob_modify_guard, flags);
 	}	// Here: all volume attachment (not config) is identical volume->hdr.attachment == prev_hdr.attachment;
 
-	if (prev_hdr.type != volume->hdr.type)
-		_NT(t06nvlu, "@DEV_NAME: type updated @HDR_TYPE-->@HDR_TYPE", devname, prev_hdr.type, volume->hdr.type);
 	if ((rv = __setup_block_device_from_volume(volume, msg, true)) < 0) {
 		_NE(t07nvlu, DMESG_PREFIX("@DEV_NAME") ": failed reconfigure from ver @C_VOL_VER to @C_VOL_VER. rv=@RV - rolling back", devname, prev_hdr.version, volume->hdr.version, rv);
 		/* goto detach_volume - No!!!! this volume is attach and has IO detach attemp will lead to crash!!! */
@@ -838,8 +842,7 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 	__set_status(volume, NVS_ATTACHED);
 	if (!rv) {	// Sanity, Crash if updated to wrong version to prevent data corruption
 		const int version_diff = (volume->hdr.version - prev_hdr.version);
-		const bool invalid_update = (version_diff < 0) ||
-									((version_diff == 0) && (prev_hdr.type == volume->hdr.type));	// Accept same configuration only to change attachment type (like recoverer -> visible volume)
+		const bool invalid_update = (version_diff <= 0);
 		if (invalid_update) {
 			_NE(t08nvlu, DMESG_PREFIX("@DEV_NAME") ": used wrong configuration @C_VOL_VER, prev=@C_VOL_VER, @HDR_TYPE", devname, volume->hdr.version, prev_hdr.version, volume->hdr.type);
 			BUG_ON(invalid_update);
@@ -862,10 +865,10 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 
 	NFINS(devname);
 
-	if ((volume = nvmeibc_volume_get_by_uuid(p, uuid, hdr->type))) {
+	if ((volume = nvmeibc_volume_get_by_uuid(p, uuid, UNKNOWN_ILLEGAL))) {
 		rv = nvmeibc_volume_update(volume, msg);
 		goto out;
-	} else if (nvmeibc_volume_get_by_name(p, devname, hdr->type)) {
+	} else if (nvmeibc_volume_get_by_name(p, devname, UNKNOWN_ILLEGAL)) {
 		_NE(t_0b_vol_attach, DMESG_PREFIX("@DEV_NAME") ": Volume with that name already exists (different uuid)", devname);
 		rv = -EINVAL;
 		goto out;

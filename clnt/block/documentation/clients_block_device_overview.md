@@ -798,8 +798,8 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 96. Changing existing configuration of an attached volume. Here is a partial reason how volume might be reconfigured  
     1. Change in vlba mapping. For example, extending the volume, evicting a disk and remapping a segment to a new disk, possibly on a new target machine  
     2. Changing some attachment properties  
-       1. Example: a recoverer volume becomes visible and allows IO.  
-       2. Note: many properties cannot change after attach, like datapath type.  
+       1. Example: reservation-related reporting fields may change as new configuration versions arrive.
+       2. Note: many properties cannot change after attach, including volume type. A type change requires detach and reattach.
 97. Additional information:  
     1. Volume reconfiguration spec ([here](https://docs.google.com/document/d/1x-RWkYLe21cTV7cykzuml3xeLiW-oPr4nD-uXIyRV6Y/edit))  
     2. Segment relocation spec ([here](https://docs.google.com/document/d/1banZCe8WN4YKym8Vr4aMYAuZ-mlhs0pueno9qzxlj0Y/))  
@@ -830,9 +830,9 @@ nvmeshclient restart should be as short as possible. During the NDU(non distrupt
 105. Implemented via nvmeibc\_block\_api\_conf.c/h  
 106. From ‘struct volume’ perspective \- if it is already attached then an arriving configuration is doing an update. It passes the configuration to the block device.
 107. The block device converts the configuration to a topology and compares it with its own topology to calculate diffs in segments (vlba to dlba mapping). However, the configuration includes other components besides this mapping which need to be verified, like volume type and others.  
-108. Moreover, sometimes the configuration itself remains unchanged, just the attachment property changes.  
+108. Some attachment-related metadata may change while the type stays constant.
 109. The block device is in charge of making safe transitions. Example:  
-     1. A recoverer-attached volume (I/O API not visible to the operating system) is reconfiguring to a visible attach. The configuration itself does not change, just the attachment type. In this case, the block device reinits its OS API to reflect the new I/O visibility, which is a step that was skipped in the original constructor because the attachment started as recovery-only
+     1. Type changes are rejected for attached volumes. A recoverer, normal, or shadow attach must be detached before being reattached as another type.
      2. Change of reservation mode. Some transitions are invalid.
 
 ## MCS  {#mcs}
