@@ -2743,26 +2743,29 @@ static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 	return sz;
 }
 
+#define SIW_PREFIX "siw_"
+#define PREFIX_LEN (sizeof(SIW_PREFIX) - 1)
+
 int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
 {
-	static const char *siw_prefix = "siw_";
-	int siw_prefix_len = strlen(siw_prefix);
+	struct ib_device *ib_dev = dev->ib_dev;
 	int numa_node = NUMA_NO_NODE;
+
 	if (dev->dev_type == DT_siw) {
 		struct net_device *siw_ndev = NULL;
 
-		if (dev->ib_dev->get_netdev)
-			siw_ndev = dev->ib_dev->get_netdev(dev->ib_dev, 1);
-		if (!siw_ndev && !strncmp(dev->ib_dev->name, siw_prefix, siw_prefix_len) &&
-		    dev->ib_dev->name[siw_prefix_len])
-		{
-			siw_ndev = dev_get_by_name(&init_net, dev->ib_dev->name + siw_prefix_len);
+		if (ib_dev->get_netdev)
+			siw_ndev = ib_dev->get_netdev(ib_dev, 1);
+		if (!siw_ndev &&
+		    !strncmp(ib_dev->name, SIW_PREFIX, PREFIX_LEN) &&
+		    ib_dev->name[PREFIX_LEN]) {
+			siw_ndev = dev_get_by_name(&init_net, ib_dev->name + PREFIX_LEN);
 		}
 
 		if (!siw_ndev) {
 			_NE(trace_nvmeib_get_dev_numa_node, 
 				"Failed to get net device for SIW device @IB_DEV_NAME using netdev name @NETDEV_NAME. "
-				"Using default numa node.", dev->ib_dev->name, dev->ib_dev->name + siw_prefix_len);
+				"Using default numa node.", ib_dev->name, ib_dev->name + PREFIX_LEN);
 			goto out;
 		}
 
@@ -2771,12 +2774,12 @@ int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
 
 		_NI(trace_nvmeib_get_dev_numa_node_2, 
 			"SIW device @IB_DEV_NAME using netdev @NETDEV_NAME base on NUMA node @NODE_ID", 
-			dev->ib_dev->name, siw_ndev->name, dev_to_node(&siw_ndev->dev));
+			ib_dev->name, siw_ndev->name, dev_to_node(&siw_ndev->dev));
 
 		dev_put(siw_ndev);
 		goto out;
 	}
-	numa_node = dev->ib_dev->dma_device->numa_node;
+	numa_node = ib_dev->dma_device->numa_node;
 out:
 	return numa_node;
 }
@@ -4345,7 +4348,7 @@ void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvme
 {
 	uint flags = dev->dev_type == DT_siw ? nvmeib_cq_vec_flags_tcp : nvmeib_cq_vec_flags;
 	uint delta = dev->dev_type == DT_siw ? nvmeib_cq_vec_snd_rcv_delta_tcp : nvmeib_cq_vec_snd_rcv_delta;
-	bool is_rsrv_v0 = flags & NVMEIB_CQ_COMP_VEC_RSRV_VEC_0 ? 1 : 0;
+	uint is_rsrv_v0 = flags & NVMEIB_CQ_COMP_VEC_RSRV_VEC_0 ? 1 : 0;
 	bool use_index  = flags & NVMEIB_CQ_COMP_VEC_INDEX_BASED;
 	bool same_scq_rcq = flags & NVMEIB_CQ_COMP_VEC_SAME_SCQ_RCQ;
 	uint num = dev->num_comp_vectors ?: 8;
@@ -4353,17 +4356,23 @@ void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvme
 	unsigned rcq_index = index;
 	atomic_t *cq_vector_value_ptr = &cq_vector_value[type];
 
+	(void)ch_name;
 	BUG_ON(type >= MAX_NVMEIB_CQ_VECTOR_GET_TYPE);
 
+#define get_scq_vector(_index) \
+	((use_index ? _index : atomic_inc_return(cq_vector_value_ptr)) % \
+	    mod + is_rsrv_v0)
+
 	if (scq_vector) {
-		*scq_vector = (use_index ? index : atomic_inc_return(cq_vector_value_ptr)) % mod + is_rsrv_v0;
+		*scq_vector = get_scq_vector(index);
 		_NT(trace_nvmeib_cq_vector_get_scq,
 		    "Dev @DEV_NAME (@IB_DEV_PTR), SCQ vector=@VECTOR selected for ch=@STR type=@IDX index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
 		    dev->ib_dev->name, dev->ib_dev, *scq_vector, ch_name, type, index, num, mod, flags, delta);
 		rcq_index += delta;
 	}
 	if (rcq_vector) {
-		*rcq_vector = (scq_vector && same_scq_rcq) ? *scq_vector : (use_index ? rcq_index : atomic_inc_return(cq_vector_value_ptr)) % mod + is_rsrv_v0;
+		*rcq_vector = (scq_vector && same_scq_rcq) ?
+		    *scq_vector : get_scq_vector(rcq_index);
 		_NT(trace_nvmeib_cq_vector_get_rcq,
 		    "Dev @DEV_NAME (@IB_DEV_PTR), RCQ vector=@VECTOR selected for ch=@STR type=@IDX index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
 		    dev->ib_dev->name, dev->ib_dev, *rcq_vector, ch_name, type, index, num, mod, flags, delta);
