@@ -3805,7 +3805,7 @@ void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvme
 {
 	uint flags = dev->dev_type == DT_siw ? nvmeib_cq_vec_flags_tcp : nvmeib_cq_vec_flags;
 	uint delta = dev->dev_type == DT_siw ? nvmeib_cq_vec_snd_rcv_delta_tcp : nvmeib_cq_vec_snd_rcv_delta;
-	bool is_rsrv_v0 = flags & NVMEIB_CQ_COMP_VEC_RSRV_VEC_0 ? 1 : 0;
+	uint is_rsrv_v0 = flags & NVMEIB_CQ_COMP_VEC_RSRV_VEC_0 ? 1 : 0;
 	bool use_index  = flags & NVMEIB_CQ_COMP_VEC_INDEX_BASED;
 	bool same_scq_rcq = flags & NVMEIB_CQ_COMP_VEC_SAME_SCQ_RCQ;
 	uint num = dev->num_comp_vectors ?: 8;
@@ -3813,17 +3813,23 @@ void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvme
 	unsigned rcq_index = index;
 	atomic_t *cq_vector_value_ptr = &cq_vector_value[type];
 
+	(void)ch_name;
 	BUG_ON(type >= MAX_NVMEIB_CQ_VECTOR_GET_TYPE);
 
+#define get_scq_vector(_index) \
+	((use_index ? _index : atomic_inc_return(cq_vector_value_ptr)) % \
+	    mod + is_rsrv_v0)
+
 	if (scq_vector) {
-		*scq_vector = (use_index ? index : atomic_inc_return(cq_vector_value_ptr)) % mod + is_rsrv_v0;
+		*scq_vector = get_scq_vector(index);
 		_NT(trace_nvmeib_cq_vector_get_scq,
 		    "Dev @DEV_NAME (@IB_DEV_PTR), SCQ vector=@VECTOR selected for ch=@STR type=@IDX index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
 		    dev->ib_dev->name, dev->ib_dev, *scq_vector, ch_name, type, index, num, mod, flags, delta);
 		rcq_index += delta;
 	}
 	if (rcq_vector) {
-		*rcq_vector = (scq_vector && same_scq_rcq) ? *scq_vector : (use_index ? rcq_index : atomic_inc_return(cq_vector_value_ptr)) % mod + is_rsrv_v0;
+		*rcq_vector = (scq_vector && same_scq_rcq) ?
+		    *scq_vector : get_scq_vector(rcq_index);
 		_NT(trace_nvmeib_cq_vector_get_rcq,
 		    "Dev @DEV_NAME (@IB_DEV_PTR), RCQ vector=@VECTOR selected for ch=@STR type=@IDX index=@IDX (num=@UINT, mod=@UINT, flags=@INT32_HEX, delta=@UINT)",
 		    dev->ib_dev->name, dev->ib_dev, *rcq_vector, ch_name, type, index, num, mod, flags, delta);
