@@ -2042,6 +2042,9 @@ VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_get_io_port_info_clnt_ext3_decode)
 		_NT(trace_vex_ach_get_io_port_info_clnt_ext3_decode,
 			"Rionic TCP Ports: [@START_PORT, @END_PORT]",
 			cur_rionic->tcp_base_port, cur_rionic->tcp_base_port + cur_rionic->tcp_num_ports - 1);
+		/* sanity check against divide by zero elsewhere */
+		if (!cur_rionic->tcp_num_ports)
+			return -EINVAL;
 	}
 	return sizeof(*ext3);
 }
@@ -3655,6 +3658,9 @@ VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_get_lock_gids_rsp_clnt_ext2_decode
 		elem_idx, &ctx->ib_gids[elem_idx].gid,
 		ctx->ib_gids[elem_idx].tcp_base_port,
 		ctx->ib_gids[elem_idx].tcp_base_port + ctx->ib_gids[elem_idx].tcp_num_ports - 1);
+	/* sanity check against divide by zero elsewhere */
+	if (!ctx->ib_gids[elem_idx].tcp_num_ports)
+		return -EINVAL;
 
 	BUG_ON(wire_buf + sizeof(*ext2) > wire_buf_end);
 
