@@ -932,7 +932,7 @@ static int merge_kafka_mgmt_config_incremental(struct nvmeibt_wire_type_len_valu
 		if (blkdev->is_serialized_in_incremental_mgmt_config_merge) {
 			continue;
 		}
-		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev)) {
+		if (NVMEIBT_OBJ_IS_MARKED_OUTDATED(blkdev) || nvmeibt_blkdev_is_being_deleted(blkdev)) {
 			continue;
 		}
 
@@ -1027,7 +1027,7 @@ static int merge_topo_config_incremental(struct nvmeibt_wire_type_len_value *dst
 	}
 
 	NVMEIB_HASH_FOREACH(block_device, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
-		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(block_device)) {
+		if (!NVMEIBT_OBJ_IS_MARKED_OUTDATED(block_device) && !nvmeibt_blkdev_is_being_deleted(block_device)) {
 			n_old_vols++;
 		}
 	}
