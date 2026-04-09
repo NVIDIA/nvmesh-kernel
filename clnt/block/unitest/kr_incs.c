@@ -429,7 +429,7 @@ void *per_cpu_kalloc_ptr(void __percpu *ptr, int cpu) {
 	void *real_ptr;
 	size_t allocated_size;
 	BUG_ON(!ptr);
-	BUG_ON(cpu < 0 || cpu >= nr_cpu_ids);
+	BUG_ON(cpu < 0 || cpu >= (int)nr_cpu_ids);
 	BUG_ON(!((uintptr_t)ptr & PER_CPU_DYN_MEM));	// Must be 1 aligned
 	real_ptr = (void *)((uintptr_t)ptr & ~PER_CPU_DYN_MEM);
 	BUG_ON(!real_ptr);
@@ -1442,7 +1442,7 @@ long __wait_event_interruptible_timeout(wait_queue_head_t *q, unsigned long jiff
 // 2) assigning a "cpu" to a kthread upon creation.
 // 3) creating a lock per cpu & having the lock acquired/release upon get/put cpu, to allow only one kthread to execute the critical section of percpu on the cpu it is executing.
 // in the future, we can change the assignment of task_struct to cpu, when the state indicate that the getcpu() critical section hasnt been taken.
-int nr_cpu_ids = CONFIG_NR_CPUS;
+unsigned nr_cpu_ids = CONFIG_NR_CPUS;
 
 
 

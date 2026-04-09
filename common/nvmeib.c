@@ -2743,8 +2743,9 @@ static inline size_t calc_fr_pool_alloc_sz(struct nvmeib_fr_pool *pool)
 	return sz;
 }
 
-#define SIW_PREFIX "siw_"
-#define PREFIX_LEN (sizeof(SIW_PREFIX) - 1)
+/* should match define in softiwarp/common/siw_user.h */
+#define SIW_IBDEV_PREFIX "siw_"
+#define PREFIX_LEN (sizeof(SIW_IBDEV_PREFIX) - 1)
 
 int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
 {
@@ -2757,7 +2758,7 @@ int nvmeib_get_dev_numa_node(struct nvmeib_dev *dev)
 		if (ib_dev->get_netdev)
 			siw_ndev = ib_dev->get_netdev(ib_dev, 1);
 		if (!siw_ndev &&
-		    !strncmp(ib_dev->name, SIW_PREFIX, PREFIX_LEN) &&
+		    !strncmp(ib_dev->name, SIW_IBDEV_PREFIX, PREFIX_LEN) &&
 		    ib_dev->name[PREFIX_LEN]) {
 			siw_ndev = dev_get_by_name(&init_net, ib_dev->name + PREFIX_LEN);
 		}
