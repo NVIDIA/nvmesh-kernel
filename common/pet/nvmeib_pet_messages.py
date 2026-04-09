@@ -886,21 +886,26 @@ class ViewMessages(Command):
 
 	@typing.no_type_check
 	def __iter_entities(self) -> typing.Generator[NvmeibPetArchive.Entity, None, None]:
+		um_trace = any(s.um_trace for s in self.schemas.values())
 		n_files = len(self.traces)
 		for fpath in self.traces:
+			self.__tsc_khz = None
+			self.__hdr_flags = None
 			with open(fpath, 'rb') as fobj:
 				idx = 0
 				kstream = KaitaiStream(fobj)
 				while not kstream.is_eof():
+					if um_trace:
+						while self.__skip_tracer_headers(kstream):
+							pass
+						if kstream.is_eof():
+							break
 					entity = NvmeibPetArchive.Entity(kstream)
 					if entity.commit_id not in self.schemas:
 						raise RuntimeError(
 							f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {idx} '
 							f'from file {fpath.name}'
 						)
-					um_trace = self.schemas[entity.commit_id].um_trace
-					if um_trace and self.__skip_tracer_headers(kstream):
-						continue
 					entity_start_position = kstream.pos()
 					entity.fname = fpath.name if n_files > 1 else ''
 					entity.idx = idx
