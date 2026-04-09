@@ -16208,11 +16208,7 @@
     "@SOFTWARE_VERSION": {
         "size": 32,
         "type": "s32",
-        "fmt": "%x",
-        "final": true,
-        "__histogram": {
-            "%x": 21
-        }
+        "fmt": "0x%x"
     },
     "@SO_ERR": {
         "size": 32,

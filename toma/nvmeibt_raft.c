@@ -223,7 +223,7 @@ void nvmeibt_raft_set_incremental_wire_buf_enabled(bool is_enabled)
 
 static bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
 {
-	return (peer_sw_ver != 0) && (peer_sw_ver >= TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
+	return (peer_sw_ver >= TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
 }
 
 static __kernel_suseconds_t		max_wait_for_non_registrable_seg_nsec = PRAID_LEADER_MAX_NSEC_WAIT_FOR_NON_REGISTRABLE_SEG_TO_APPLY_DEFAULT;
@@ -3401,12 +3401,11 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 			my_raft_global.last_delete_raft_members_kafka_offset);
 
 	if (raft_is_incremental_wire_buf_enabled && !is_peer_incremental_wire_buf_supported) {
-		N_Tf(peer_old_wire_buf, "peer=@STR sw_ver=@SOFTWARE_VERSION needs complete wire buf (min_supported=@SOFTWARE_VERSION)",
+		N_Df(peer_old_wire_buf, "peer=@STR sw_ver=@SOFTWARE_VERSION needs complete wire buf (min_supported=@SOFTWARE_VERSION)",
 			 dst_member->hostname, dst_member->toma_software_version, TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
 	}
-
-	if (!is_configs_and_raft_members_incremental && raft_is_incremental_wire_buf_enabled) {
-		N_Tf(peer_needs_complete, "Peer needs complete configs: kafka_offset=@INT64_TD (last_delete=@INT64_TD) members_offset=@INT64_TD (last_delete=@INT64_TD)",
+	if (raft_is_incremental_wire_buf_enabled && !is_configs_and_raft_members_incremental) {
+		N_Df(peer_needs_complete, "Peer needs complete configs: kafka_offset=@INT64_TD (last_delete=@INT64_TD) members_offset=@INT64_TD (last_delete=@INT64_TD)",
 			 peer_kafka_mgmt_config_offset, my_raft_global.last_delete_kafka_mgmt_config_offset,
 			 peer_raft_members_kafka_offset, my_raft_global.last_delete_raft_members_kafka_offset);
 	}
