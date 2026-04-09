@@ -14,6 +14,11 @@ set -x
 [ -n "$PY" ] && poetry env use "$PY"
 # Resolve dependencies for the build environment.
 poetry lock
-poetry install --sync --with=compile --no-root
+poetry install --sync --with=compile --no-root || {
+    echo "Poetry install failed (likely corrupted venv), recreating and retrying..."
+    poetry env remove --all 2>/dev/null || true
+    [ -n "$PY" ] && poetry env use "$PY"
+    poetry install --sync --with=compile --no-root
+}
 poetry run pyinstaller $SPEC_PATH/tools.spec --log-level WARN --clean --workpath=$(mktemp -d) -y
 ls -l dist/*
