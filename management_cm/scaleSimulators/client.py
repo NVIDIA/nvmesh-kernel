@@ -215,8 +215,7 @@ class Client(Component):
 		self.checkIfAttachmentReadyForIoEnabled()
 
 	def getFeatureCompatibilityVersion(self):
-		return 1 # TODO: Dear management team, feel free to override this value
-				 # I have no idea how to extract it from our schema JSON file when this code is executed
+		return 2
 
 	def getAttachmentsUUIDHash(self):
 		if not self.blockDevices:

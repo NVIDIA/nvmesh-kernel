@@ -27,7 +27,7 @@ class Agent(Component):
 		self.snapshotsStatus = []
 		self.nvmeshUMStatus = NvmeshUMStatus.UP
 		self.isStatsSamplingEnabled = False
-		self.featureCompatibilityVersion = 1 # must match client's reported version
+		self.featureCompatibilityVersion = 2 # must match client's reported version
 		self.readConfigFromFile(updateInitState=True)
 		self.managementAPIServers = self.getManagementAPIServers()
 
