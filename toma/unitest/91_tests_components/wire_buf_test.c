@@ -1538,6 +1538,54 @@ out:
 	return rv;
 }
 
+/*
+ * Scenario: 2 raft members exist in hash, leader removes one.
+ * Incremental carries only 1 member. Non-visited hash member is appended.
+ * Result: 2 members (raft members are not deleted via incremental merge).
+ */
+DEFINE_TEST(incremental_raft_members_removed_member_kept)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_raft_member_spec		old_members[2], incr_members[1];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_raft_members_hash();
+	for (int i = 0; i < 2; i++)
+		setup_test_raft_member(&old_members[i], i + 1, 10, 100 + i);
+
+	// Incremental: only member[0] with updated seq_no — member[1] absent
+	init_raft_member_spec(&incr_members[0], 1, 20, 200);
+
+	old_len = craft_raft_members_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 10LL, 2, old_members);
+	TEST_ASSERT_TRUE(old_len > 0);
+	upd_len = craft_raft_members_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 20LL, 1, incr_members);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+
+	// Non-visited member[1] appended from hash => 2 total
+	{
+		int *n_out = (int *)ctx->dst_buf;
+		TEST_ASSERT_EQ(LE_SWAP32(*n_out), 2);
+	}
+	rv = 0;
+out:
+	return rv;
+}
+
 /************ Incremental kafka_mgmt_config merge (non-empty) *****************/
 
 struct test_vol_spec {
@@ -1737,7 +1785,7 @@ DEFINE_TEST(incremental_kafka_config_partial_update)
 		old_vols[i].version = 10;
 		old_vols[i].kafka_offset_or_idx = 100 + i;
 		wire_len = serialize_vol_wire_data(wire_data, (int)sizeof(wire_data), &old_vols[i], i);
-		TEST_add_blkdev_to_hash(&old_vols[i].uuid, 10, wire_data, wire_len);
+		TEST_add_blkdev_to_hash(&old_vols[i].uuid, 10, wire_data, wire_len, false);
 	}
 
 	// Incremental: only vol[0] updated with higher version
@@ -1798,7 +1846,7 @@ DEFINE_TEST(incremental_kafka_config_old_version_keeps_hash)
 	old_vols[0].version = 20;
 	old_vols[0].kafka_offset_or_idx = 200;
 	wire_len = serialize_vol_wire_data(wire_data, (int)sizeof(wire_data), &old_vols[0], 0);
-	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 20, wire_data, wire_len);
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 20, wire_data, wire_len, false);
 
 	// Incremental: same vol but OLDER version => skip from incremental, use hash
 	incr_vols[0] = old_vols[0];
@@ -1827,6 +1875,134 @@ DEFINE_TEST(incremental_kafka_config_old_version_keeps_hash)
 		TEST_ASSERT_NOT_NULL(merged);
 		TEST_ASSERT_EQ(merged->num_vols, 1);
 		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	return rv;
+}
+
+/*
+ * Scenario: 2 volumes exist, 1 is being deleted. Leader serializes incremental
+ * with only 1 vol. Follower merge skips being-deleted blkdev from hash.
+ */
+DEFINE_TEST(incremental_kafka_config_vol_deleted)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[2], incr_vols[1];
+	char								wire_data[1024];
+	int									wire_len;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_blkdevs_hash();
+
+	// Set up 2 volumes: vol[0] active with wire data, vol[1] being deleted
+	for (int i = 0; i < 2; i++) {
+		make_test_uuid(&old_vols[i].uuid, i + 1);
+		old_vols[i].version = 10;
+		old_vols[i].kafka_offset_or_idx = 100 + i;
+	}
+	wire_len = serialize_vol_wire_data(wire_data, (int)sizeof(wire_data), &old_vols[0], 0);
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, wire_data, wire_len, false);
+	TEST_add_blkdev_to_hash(&old_vols[1].uuid, 10, NULL, 0, true);
+
+	// Old: complete with 2 volumes
+	old_len = craft_kafka_mgmt_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 100LL, 2, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	// Incremental: only 1 volume (leader skipped being-deleted vol)
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;
+	upd_len = craft_kafka_mgmt_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+
+	// Merged: 1 vol (active), being-deleted vol excluded
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, false, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	return rv;
+}
+
+/*
+ * Scenario: 1 volume exists, a new volume is added. Leader serializes
+ * incremental with 2 volumes. Follower merge produces 2 volumes.
+ */
+DEFINE_TEST(incremental_kafka_config_vol_added)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[1], incr_vols[2];
+	char								wire_data[1024];
+	int									wire_len;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_blkdevs_hash();
+
+	// Set up 1 volume in hash
+	make_test_uuid(&old_vols[0].uuid, 1);
+	old_vols[0].version = 10;
+	old_vols[0].kafka_offset_or_idx = 100;
+	wire_len = serialize_vol_wire_data(wire_data, (int)sizeof(wire_data), &old_vols[0], 0);
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, wire_data, wire_len, false);
+
+	// Old: complete with 1 volume
+	old_len = craft_kafka_mgmt_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE, 100LL, 1, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	// Incremental: 2 volumes (existing + new)
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;
+	make_test_uuid(&incr_vols[1].uuid, 2);
+	incr_vols[1].version = 20;
+	incr_vols[1].kafka_offset_or_idx = 200;
+
+	upd_len = craft_kafka_mgmt_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_KAFKA_MGMT_CONFIG_INCREMENTAL, 200LL, 2, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
+
+	// Merged: 2 vols — vol[0] updated from incremental, vol[1] new from incremental
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, false, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 2);
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		TEST_ASSERT_EQ((int)merged->volumes[1].version, 20);
 		mm_conf_free_tree(merged);
 	}
 	rv = 0;
@@ -2042,6 +2218,156 @@ DEFINE_TEST(incremental_topo_config_mixed_keep_and_update)
 		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].praids[0].version, 20);
 		// praid[1] from hash (re-serialized): version 10
 		TEST_ASSERT_EQ((int)merged->volumes[0].chunks[0].praids[1].version, 10);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	return rv;
+}
+
+/*
+ * Scenario: 2 volumes exist, 1 is being deleted. Leader serializes incremental
+ * with only 1 vol (skipping the being-deleted vol). Follower merge must handle
+ * num_new_vols < n_old_vols (because being-deleted vols are excluded).
+ */
+DEFINE_TEST(incremental_topo_config_vol_deleted)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[2], incr_vols[1];
+	union nvmeib_uuid					chunk_uuids[2], praid_uuids[2];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_praids_hash();
+	TEST_init_chunks_hash();
+	TEST_init_blkdevs_hash();
+
+	// Set up 2 volumes: vol[0] active, vol[1] being deleted
+	for (int i = 0; i < 2; i++) {
+		make_test_uuid(&old_vols[i].uuid, i + 1);
+		old_vols[i].version = 10;
+		old_vols[i].kafka_offset_or_idx = 100;
+
+		make_test_uuid(&praid_uuids[i], 2000 + i);
+		TEST_add_praid_to_hash(&praid_uuids[i], 100, 10, 0);
+
+		make_test_uuid(&chunk_uuids[i], 1000 + i);
+		TEST_add_chunk_to_hash(&chunk_uuids[i], 1, &praid_uuids[i]);
+	}
+
+	// vol[0] is active, vol[1] is being deleted
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, NULL, 0, false);
+	TEST_add_blkdev_to_hash(&old_vols[1].uuid, 10, NULL, 0, true);
+
+	// Old: complete with 2 volumes
+	old_len = craft_topo_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 100LL, 2, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	// Incremental: only 1 volume (leader skipped the being-deleted vol)
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;
+	upd_len = craft_topo_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 200LL, 1, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+
+	// Merged output should have 1 volume (the active one)
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, true, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 1);
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		mm_conf_free_tree(merged);
+	}
+	rv = 0;
+out:
+	return rv;
+}
+
+/*
+ * Scenario: 1 volume exists, a new volume is added. Leader serializes
+ * incremental with 2 volumes. Follower merge must handle
+ * num_new_vols > n_old_vols (new volume added).
+ */
+DEFINE_TEST(incremental_topo_config_vol_added)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				old_vols[1], incr_vols[2];
+	union nvmeib_uuid					chunk_uuids[2], praid_uuids[2];
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size;
+
+	TEST_init_praids_hash();
+	TEST_init_chunks_hash();
+	TEST_init_blkdevs_hash();
+
+	// Set up 1 existing volume in hash
+	make_test_uuid(&old_vols[0].uuid, 1);
+	old_vols[0].version = 10;
+	old_vols[0].kafka_offset_or_idx = 100;
+
+	make_test_uuid(&praid_uuids[0], 2000);
+	TEST_add_praid_to_hash(&praid_uuids[0], 100, 10, 0);
+
+	make_test_uuid(&chunk_uuids[0], 1000);
+	TEST_add_chunk_to_hash(&chunk_uuids[0], 1, &praid_uuids[0]);
+
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, NULL, 0, false);
+
+	// Old: complete with 1 volume
+	old_len = craft_topo_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 100LL, 1, old_vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	// Incremental: 2 volumes (existing vol + newly added vol)
+	incr_vols[0] = old_vols[0];
+	incr_vols[0].version = 20;
+	incr_vols[0].kafka_offset_or_idx = 200;
+
+	make_test_uuid(&incr_vols[1].uuid, 2);
+	incr_vols[1].version = 20;
+	incr_vols[1].kafka_offset_or_idx = 200;
+
+	// Add chunk/praid for the new vol so merge can find them
+	make_test_uuid(&praid_uuids[1], 2001);
+	make_test_uuid(&chunk_uuids[1], 1001);
+
+	upd_len = craft_topo_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 200LL, 2, incr_vols);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_TRUE(merge_size > 0);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+
+	// Merged output should have 2 volumes
+	{
+		struct mm_mgmt_conf *merged = mm_wire_buf_to_mm_mgmt_conf(ctx->dst_buf, true, NULL);
+		TEST_ASSERT_NOT_NULL(merged);
+		TEST_ASSERT_EQ(merged->num_vols, 2);
+		TEST_ASSERT_EQ((int)merged->volumes[0].version, 20);
+		TEST_ASSERT_EQ((int)merged->volumes[1].version, 20);
 		mm_conf_free_tree(merged);
 	}
 	rv = 0;
@@ -2880,7 +3206,7 @@ DEFINE_TEST(all_sections_incremental_full_merge)
 	make_test_uuid(&chunk_uuid, 1000);
 	TEST_add_chunk_to_hash(&chunk_uuid, 1, &praid_uuid);
 	blkdev_wire_len = serialize_vol_wire_data(blkdev_wire, (int)sizeof(blkdev_wire), &old_vols[0], 0);
-	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, blkdev_wire, blkdev_wire_len);
+	TEST_add_blkdev_to_hash(&old_vols[0].uuid, 10, blkdev_wire, blkdev_wire_len, false);
 
 	old = build_test_buf_ex(1, false, old_topo_wire, old_topo_len, 10LL,
 			false, old_tc_wire, old_tc_len, 100LL,

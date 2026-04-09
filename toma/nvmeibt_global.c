@@ -1439,14 +1439,15 @@ void TEST_init_blkdevs_hash(void)
 }
 
 void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
-							 const void *wire_buf, int wire_len)
+							 const void *wire_buf, int wire_len,
+							 bool is_being_deleted)
 {
 	struct nvmeibt_block_device *blkdev = calloc(1, sizeof(*blkdev));
 
 	blkdev->from_config.id = *uuid;
 	blkdev->from_config.version = version;
 	blkdev->config_tag = 1;
-	blkdev->is_being_deleted = 0;
+	blkdev->is_being_deleted = is_being_deleted;
 	blkdev->is_serialized_in_incremental_mgmt_config_merge = false;
 	if (wire_buf && wire_len > 0) {
 		NNVMEIBT_BUF_RESIZE(test_blkdev_wire, &(blkdev->kafka_mgmt_config_vol_chunks_praids_segs_wire_conf_buf), (size_t)wire_len);

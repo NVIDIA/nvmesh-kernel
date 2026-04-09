@@ -27,7 +27,8 @@ extern void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const ch
 /* Blkdev hash — nvmeibt_global.c */
 extern void TEST_init_blkdevs_hash(void);
 extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
-									const void *wire_buf, int wire_len);
+									const void *wire_buf, int wire_len,
+									bool is_being_deleted);
 
 /* Chunk hash — nvmeibt_praid.c */
 extern void TEST_init_chunks_hash(void);

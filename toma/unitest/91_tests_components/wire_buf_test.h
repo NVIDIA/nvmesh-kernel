@@ -77,12 +77,17 @@ struct section_merge_test_ctx {
 	X(incremental_raft_members_partial_update,		"Raft members partial update",				"3 members, 1 updated => merged has 3 with correct seq_no") \
 	X(incremental_raft_members_new_member_accepted,	"Raft members new member accepted",			"New member in incremental not in hash => accepted") \
 	X(incremental_raft_members_old_seq_keeps_hash,	"Raft members old seq keeps hash",			"Incremental with lower seq_no => keeps hash member data") \
+	X(incremental_raft_members_removed_member_kept,	"Raft members removed member kept",			"2 members, incremental has 1 => non-visited member appended from hash") \
 	/*********** Incremental kafka_mgmt_config merge (non-empty) ****************/ \
 	X(incremental_kafka_config_partial_update,		"Kafka config partial vol update",			"2 vols, 1 updated => merged has both with correct version") \
 	X(incremental_kafka_config_old_version_keeps_hash, "Kafka config old version keeps hash",	"Incremental with lower version => uses hash blkdev wire buf") \
+	X(incremental_kafka_config_vol_deleted,			"Kafka config vol deleted",					"2 vols, 1 being deleted => incremental has 1, merge skips deleted") \
+	X(incremental_kafka_config_vol_added,			"Kafka config vol added",					"1 vol exists, incremental has 2 => merge produces 2") \
 	/*********** Incremental topo_config merge (non-empty) **********************/ \
 	X(incremental_topo_config_partial_praid_update,	"Topo config partial praid update",			"1 vol, 1 praid updated via chunk hash => merged correctly") \
 	X(incremental_topo_config_mixed_keep_and_update, "Topo config mixed keep and update",		"2 praids, 1 updated + 1 kept from hash via follower re-serialize") \
+	X(incremental_topo_config_vol_deleted,			"Topo config vol deleted",					"2 vols, 1 being deleted => incremental has 1 vol, merge succeeds") \
+	X(incremental_topo_config_vol_added,			"Topo config vol added",					"1 vol exists, incremental has 2 vols => merge succeeds with 2") \
 	/********** Leader incremental selection: deletion forces complete ***********/ \
 	X(deletion_guard_forces_complete_configs,		"Vol deletion forces complete configs",		"Peer in window but last_delete_kafka > peer offset => complete") \
 	X(deletion_guard_no_effect_when_peer_caught_up,	"Caught-up peer still gets incremental",	"Peer kafka offset >= last_delete => incremental allowed") \
