@@ -124,8 +124,11 @@ void tomaSimulator_disable_msg_q_to_client(struct tomaSimulator*_this) {
 void nvmeibr_ds_metadata_init_EC_lock_and_dirty(struct tomaSimulator* T, struct TstPRaid *pra) {
 	struct ramDiskSimulator *ram = serverSimulator_get_ram_by_toma(T);
 	const int n_parity = __disk_range_get_num_parities(pra->cpr);
+	const int replicas = pra->cpr->replicas;
 	const int n_deg = tTopoOfPraid_gen_num_non_readble_segs(pra->tpr);
-	const union nvmeibc_dbits_entry dbits = nvmeib_dbits_entry_build_unknowns_generic(n_deg, n_parity);	// Real Toma implements logic in __calc_unknown_dbit_seg_init()
+	const enum NVMEIBTC_DS_MODE seg_acm = pra->tpr->s[pra->vsi.segment].access_mode;
+	const bool is_seg_degraded = (seg_acm != NVMEIBTC_DS_MODE_RW);
+	const union nvmeibc_dbits_entry dbits = nvmeib_dbits_entry_build_unknowns_generic(n_deg, replicas, n_parity, is_seg_degraded);	// Real Toma implements logic in __calc_unknown_dbit_seg_init()
 	const struct disk_range *seg = &pra->cpr[pra->vsi.segment];
 	u32 i, bi, n_locks = (seg->length/LOCKSET_4KS);
 	u64 b_start = COMMITTED_ADDR_AS(ram, seg->dlba_start, 4KB, LOCK);

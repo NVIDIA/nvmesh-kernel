@@ -385,10 +385,15 @@ static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unk(/* seg inde
 	return rv;
 }
 
-static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unknowns_generic(int n_deg, int n_parities)
+static inline union nvmeibc_dbits_entry nvmeib_dbits_entry_build_unknowns_generic(int n_deg, int replicas, int n_parities, bool is_seg_degraded)
 {
 	union nvmeibc_dbits_entry rv = {.all_bits = 0};
-	(void)n_parities;
+	if (replicas - n_parities == 1 && n_parities == 1) {	// R1-2
+		// R1-2 Optimization: Zero init of degraded segments RAM, allows to skip committing binfo for all blocksets in dbits recovery
+		// TODO: Expand to R1-3
+		if (is_seg_degraded)
+			return rv;	// Zero dbits
+	}
 	if (n_deg > 0) rv.bsmod.dead0 = 0xF;
 	if (n_deg > 1) rv.bsmod.dead1 = 0xF;
 	return rv;	// Note (on n_deg==0, returns zero dbits)
