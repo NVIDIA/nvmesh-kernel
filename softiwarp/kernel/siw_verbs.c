@@ -1157,12 +1157,10 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	qp->cpu = (smp_processor_id() + 1) % NR_CPUS;
 
 #ifdef USE_SQ_KTHREAD
-	if (scq) {
-		if (sdev->num_tx_vector > 0)
-			qp->cpu = sdev->tx_vector_cpu[scq->comp_vector % sdev->num_tx_vector];
-		else
-			qp->cpu = qp_tx_vector_cpu[scq->comp_vector % num_tx_vector];
-	}
+	if (sdev->num_tx_vector > 0)
+		qp->cpu = sdev->tx_vector_cpu[scq->comp_vector % sdev->num_tx_vector];
+	else
+		qp->cpu = qp_tx_vector_cpu[scq->comp_vector % num_tx_vector];
 #endif
 
 	dprint(DBG_OL, "<--\n");
