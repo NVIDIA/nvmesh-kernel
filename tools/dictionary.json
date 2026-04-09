@@ -1800,6 +1800,11 @@
             "%c": 62
         }
     },
+    "@CHAR_K": {
+        "size": 8,
+        "type": "char",
+        "fmt": "<%c>"
+    },
     "@CHUNK": {
         "size": "string",
         "type": "string",
@@ -7583,6 +7588,12 @@
             "%ld": 4
         }
     },
+    "@KAFKA_OFST": {
+        "size": 64,
+        "type": "long",
+        "fmt": "k_offset[%zu]",
+        "fmt_func": "fmt_kafka_offset"
+    },
     "@KERNEL_DEV": {
         "size": 64,
         "type": "const void*",
@@ -12412,7 +12423,7 @@
     "@PBA": {
         "size": 64,
         "type": "long",
-        "fmt": "%zx",
+        "fmt": "0x%zx",
         "final": true,
         "__histogram": {
             "%zx": 42,
@@ -12435,7 +12446,7 @@
     "@PBA_LONG": {
         "size": 64,
         "type": "long",
-        "fmt": "%lx",
+        "fmt": "0x%lx",
         "final": true,
         "__histogram": {
             "%lx": 14
@@ -16423,7 +16434,7 @@
     "@SOFTWARE_VERSION": {
         "size": 32,
         "type": "s32",
-        "fmt": "%x",
+        "fmt": "0x%x",
         "final": true,
         "__histogram": {
             "%x": 21
@@ -20502,13 +20513,13 @@
     "@IOSTATS_NAME" : {
 	    "size": "string",
 	    "type": "string",
-	    "fmt": "%s" 
+	    "fmt": "%s"
     },
     "@IOSTATS_VERB": {
 	    "size": 32,
 	    "type": "s32",
 	    "fmt": "%d",
-	    "fmt_func": "fmt_iostats_verb"  
+	    "fmt_func": "fmt_iostats_verb"
     },
     "@IOSTATS_IOPS_COUNT": {
 	    "size": 64,

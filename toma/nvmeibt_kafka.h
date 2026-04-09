@@ -9,28 +9,11 @@
 #include "nvmeibt_common.h"
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_params.h"
-#include "nvmeibt_uuid.h"
 #include "nvmeibt_ds.h"
-#include "interfaces/nvmeibt_msg_queue_api.h"
-
-/* kafka_offset life-cycle
- * There are several variables that hold the kafka_offset :
- *  k_incremental_updates_consumer_offset	// Only the leader actually uses it
- *  										// A target-node that was just added (has no persistence) also reads it, and can become a raft candidate only if it is the first added target
- *  										// When kafka reads a new record it sends it to the toma leader using a TOMA_WAKEUP_TYPE_KAFKA
- *
- *  leader_kafka_offset_mgmt;					// Updated upon TOMA_WAKEUP_TYPE_KAFKA, when updating the mgmt_config
- *	leader_kafka_offset_calculating;			// The offset_mgmt used in calculate, will become offset_to_commit upon successful calculate
- *	leader_kafka_offset_to_commit;				// Updated after calc (that updated from mgmt config)
- *	leader_kafka_offset_committed_by_majority;	// Updated when offset has a majority
- *	follower_kafka_offset_submitted;			// To persistence
- *	follower_kafka_offset_committed;			// On persistence
- *  follower_kafka_offset_applied;				// When told to apply
- *
- * 	leader_kafka_offset_blocking_incremental_TARGET_updates	// Can continue when == (KAFKA_OFFSET, leader_committed_by_majority)
- */
-
-#define KAFKA_TOPIC_CHANGE_NO 1		// Between 3.2 and 3.3 we changed the kafka topics naming convention (change_no went 0-->1)
+#ifndef NVMEIBT_TOMA_MSG_Q_API_H
+	#define NVMEIBT_TOMA_MSG_Q_API_H
+	#include <librdkafka/rdkafka.h>		// Implemented via kafka but to debug it, can be replaced with a different msg queue injection system
+#endif
 
 #define MGMT_LOG_MSG_HEADER_LEN		96
 #define MGMT_LOG_MSG_MSG_LEN		256
@@ -56,12 +39,14 @@ static inline bool nvmeibt_offset_and_idx_is_uninitialized(int64_t offset_and_id
 
 extern int64_t volatile 			kafka_leader_offset_blocking_incremental_TARGET_updates;
 #define NVMEIBT_KAFKA_SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(name, _new_offset_)	({																				\
-	int64_t				_offset_ = _new_offset_;																																		\
-	N_Tf(name ## 1, "SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(@INT64_TX-->@INT64_TX)", kafka_leader_offset_blocking_incremental_TARGET_updates, _offset_);			\
+	const int64_t		_offset_ = _new_offset_;																																		\
+	N_Tf(name ## 1, "SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(@INT64_TX-->@INT64_TX)",																				\
+					purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(_offset_));																	\
 	NTOMA_ASSERT(name ## 2, nvmeibt_offset_and_idx_is_uninitialized(_offset_) ||																										\
 							nvmeibt_offset_and_idx_is_uninitialized(kafka_leader_offset_blocking_incremental_TARGET_updates) ||															\
-							(purify_offset(_offset_) > purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates)),															\
-				 "OOPS SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(@INT64_TX-->@INT64_TX)", kafka_leader_offset_blocking_incremental_TARGET_updates, _offset_);			\
+							(_offset_ > kafka_leader_offset_blocking_incremental_TARGET_updates),																						\
+							"OOPS SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(@INT64_TX-->@INT64_TX)",																	\
+							purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(_offset_));															\
 	kafka_leader_offset_blocking_incremental_TARGET_updates = _offset_;																													\
 })
 
@@ -151,11 +136,7 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name,
 											 const char *error_str);
 void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset);
 
-int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
-
-/******* Static inline forward declarations ********/
-/******* Static inline with no external dependencies ********/
-/******* Includes needed for static inline functions ********/
-/******* Static inline functions that depend on other functions ******/
+int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+void nvmeibt_kafka_get_real_time_errors_str(struct nvmeibt_Str *out);
 
 #endif	// #ifdef NVMEIBT_KAFKA
