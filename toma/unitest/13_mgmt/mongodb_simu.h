@@ -8,6 +8,7 @@
 #include "../sandbox_util.h"
 #include "../../../autogen/clnt/nvmeibc_mcs_stub.h"	// Client simulator - report to mgmt simulator
 #define SB_CLUSTER_CONF_N_NODES_TOTAL (3)			// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n39
+#define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
 
 struct sb_cluster_conf {
 	struct sb_node_conf {
@@ -60,7 +61,7 @@ struct sb_cluster_conf {
 			bool ioEnabled;							// Client reports that its IO is enabled (after conversation with Toma).
 			bool is_recovery_attach;
 		} clnts[SB_CLUSTER_CONF_N_NODES_TOTAL];		//
-	} vols[4];										// For now, up to 4 volumes
+	} vols[SB_CLUSTER_CONF_MAX_VOLS];				// For now, up to 4 volumes
 	int n_vols;
 	int zone_idx;									// All those volume exist in a specific zone
 };
