@@ -23,6 +23,7 @@ struct peer_toma_simu {
 struct peer_toma_simu *peer_toma_simu_create( struct sb_node_conf *node);
 void                   peer_toma_simu_destroy(struct peer_toma_simu *);
 void                   peer_toma_simu_ignore_append_entries_by_node(int node_idx);
+void                   peer_toma_simu_resume_append_entries_by_node(int node_idx);
 
 /** Build a per-peer ACT_TOPO reply from the leader's BIN_TOPO.
  *  Decodes the leader's topology, filters to segments on this peer's disks,

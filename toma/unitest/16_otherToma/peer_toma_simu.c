@@ -29,6 +29,11 @@ void peer_toma_simu_ignore_append_entries_by_node(int node_idx) {
 	cfg->nodes[node_idx].peer->ignore_append_entries = true;
 }
 
+void peer_toma_simu_resume_append_entries_by_node(int node_idx) {
+	struct sb_cluster_conf *cfg = (struct sb_cluster_conf *)sb_cluster_get_const_conf();
+	cfg->nodes[node_idx].peer->ignore_append_entries = false;
+}
+
 static unsigned int peer_toma_simu_lookup_dirty_bits_override(
 	struct peer_toma_simu *peer, const union nvmeib_uuid *seg_uuid,
 	unsigned int default_state)
