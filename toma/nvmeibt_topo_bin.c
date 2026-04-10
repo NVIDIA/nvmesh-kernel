@@ -353,6 +353,64 @@ void nvmeibt_convert_topo_le_be(void *src_topo, void* dst_topo, BOOL is_src_the_
 	}
 }
 
+/**
+ * ACT_TOPO builder — shared by production serialize_active_topology() and
+ * the sandbox peer simulator.  Both callers append segments from different
+ * sources, then call to_wire() to finalize.
+ */
+
+void nvmeibt_act_topo_builder_init(struct nvmeibt_act_topo_builder *b,
+	char *buf, int buf_size)
+{
+	b->buf = buf;
+	b->buf_size = buf_size;
+	b->n_segs = 0;
+	b->topo_len = (int)sizeof(struct nvmeibt_active_topo_header);
+	b->next_seg = (struct nvmeibt_serialized_seg_active_topo *)
+		(buf + sizeof(struct nvmeibt_active_topo_header));
+}
+
+struct nvmeibt_serialized_seg_active_topo *
+nvmeibt_act_topo_builder_append(struct nvmeibt_act_topo_builder *b)
+{
+	int needed = b->topo_len + (int)sizeof(struct nvmeibt_serialized_seg_active_topo);
+	struct nvmeibt_serialized_seg_active_topo *seg;
+
+	if (needed > b->buf_size)
+		return NULL;
+
+	seg = b->next_seg;
+	memset(seg, 0, sizeof(*seg));
+	b->next_seg++;
+	b->n_segs++;
+	b->topo_len = needed;
+	return seg;
+}
+
+void nvmeibt_act_topo_builder_to_wire(struct nvmeibt_act_topo_builder *b)
+{
+	struct nvmeibt_active_topo_header *header_ptr =
+		(struct nvmeibt_active_topo_header *)b->buf;
+	struct nvmeibt_serialized_seg_active_topo *seg_ptr =
+		(struct nvmeibt_serialized_seg_active_topo *)(header_ptr + 1);
+	int i;
+
+	// Write header in host byte order
+	memcpy(header_ptr->topo_name, nvmeibt_topology_binary_active_topo_header,
+		sizeof(header_ptr->topo_name));
+	header_ptr->sw_ver = TOMA_SW_COMPATIBILITY_VER;
+	header_ptr->topo_len = (unsigned int)b->topo_len;
+	header_ptr->segs_num = b->n_segs;
+	header_ptr->res = 0;
+
+	// Convert segments to wire byte order
+	for (i = 0; i < b->n_segs; i++)
+		nvmeibt_disk_segment_convert_active_bin_topo_le_be(&seg_ptr[i]);
+
+	// Convert header to wire byte order
+	nvmeibt_topology_convert_follower_header_le_be(header_ptr);
+}
+
 bool nvmeibt_topology_is_global_bin_topo(const void *topo_ptr)
 {
 	return !memcmp(topo_ptr, nvmeibt_topology_binary_topo_header, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);

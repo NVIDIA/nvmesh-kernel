@@ -1146,7 +1146,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	struct nvmeibt_seg_active						*seg_active;
 	unsigned int									topo_len, n_seg;
 	struct nvmeibt_active_topo_header				*header_ptr = NULL;
-	struct nvmeibt_serialized_seg_active_topo		*serialized_and_wire_seg_active_ptr = NULL;	TODO(Starts as serialized, and converted to wire in_place)
+	struct nvmeibt_act_topo_builder					builder;
 	struct nvmeibt_Str 								*print_s;
 
 	NFIN;
@@ -1180,11 +1180,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	topo_len = sizeof(struct nvmeibt_serialized_seg_active_topo) * n_seg + sizeof(struct nvmeibt_active_topo_header);
 	NNVMEIBT_BUF_RESIZE(uiop2wn, serialized_and_wire_topo_buf, topo_len);
 	header_ptr = (struct nvmeibt_active_topo_header *)(serialized_and_wire_topo_buf->data_buf);
-	memcpy(header_ptr->topo_name, nvmeibt_topology_binary_active_topo_header, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
-	header_ptr->sw_ver = TOMA_SW_COMPATIBILITY_VER;
-	header_ptr->res = 0;
-	serialized_and_wire_seg_active_ptr = (struct nvmeibt_serialized_seg_active_topo *)(header_ptr + 1);
-	n_seg = 0;
+	nvmeibt_act_topo_builder_init(&builder, serialized_and_wire_topo_buf->data_buf, (int)topo_len);
 
 	NVMEIB_HASH_FOREACH(local_disk, cur_topo->nvmesh_local_disks_hash_by_ldisk_id_str) {
 		if (nvmeibt_local_disk_is_being_deleted(local_disk)) {
@@ -1216,39 +1212,38 @@ int nvmeibt_topology_serialize_active_topology(void)
 
 			// Always serialize all the local segs, otherwise the leader will consider them dead
 			if (shutdown_state == NVMEIBT_SHUTDOWN_NONE) {
+				struct nvmeibt_serialized_seg_active_topo *seg_wire = nvmeibt_act_topo_builder_append(&builder);
 				applied_seg_topo_ctx = &disk_segment->seg_follower.applied_seg_lot.seg_topo;
-				nvmeibt_strlcpy(serialized_and_wire_seg_active_ptr->eyecatcher, "SFW",
-								sizeof(serialized_and_wire_seg_active_ptr->eyecatcher));
-				serialized_and_wire_seg_active_ptr->uuid = *nvmeibt_seg_UUID(disk_segment);
-				serialized_and_wire_seg_active_ptr->dirty_bits_state = active_seg_topo_ctx->dirty_bits_state;
-				serialized_and_wire_seg_active_ptr->active_praid_version_major = applied_seg_topo_ctx->seg_praid_version_major;
-				serialized_and_wire_seg_active_ptr->active_praid_version_minor = applied_seg_topo_ctx->seg_praid_version_minor;
-				serialized_and_wire_seg_active_ptr->active_seg_flags = active_seg_topo_ctx->active_seg_flags;
-				serialized_and_wire_seg_active_ptr->active_seg_flags.is_drive_write_error |= (disk_segment->is_drive_write_error | disk->is_drive_write_error);
-				serialized_and_wire_seg_active_ptr->dirty_bits_init_mode = active_seg_topo_ctx->dirty_bits_init_mode;
-				serialized_and_wire_seg_active_ptr->stale_locks_init_mode = active_seg_topo_ctx->stale_locks_init_mode;
-				serialized_and_wire_seg_active_ptr->res_1 = 0;
-				serialized_and_wire_seg_active_ptr->res_2 = 0;
-				serialized_and_wire_seg_active_ptr->res_3 = 0;
-				serialized_and_wire_seg_active_ptr->active_seg_ser_ver = 0; // for comparation
+				nvmeibt_strlcpy(seg_wire->eyecatcher, "SFW", sizeof(seg_wire->eyecatcher));
+				seg_wire->uuid = *nvmeibt_seg_UUID(disk_segment);
+				seg_wire->dirty_bits_state = active_seg_topo_ctx->dirty_bits_state;
+				seg_wire->active_praid_version_major = applied_seg_topo_ctx->seg_praid_version_major;
+				seg_wire->active_praid_version_minor = applied_seg_topo_ctx->seg_praid_version_minor;
+				seg_wire->active_seg_flags = active_seg_topo_ctx->active_seg_flags;
+				seg_wire->active_seg_flags.is_drive_write_error |= (disk_segment->is_drive_write_error | disk->is_drive_write_error);
+				seg_wire->dirty_bits_init_mode = active_seg_topo_ctx->dirty_bits_init_mode;
+				seg_wire->stale_locks_init_mode = active_seg_topo_ctx->stale_locks_init_mode;
+				seg_wire->active_seg_ser_ver = 0; // for comparation
 
-				if (memcmp(serialized_and_wire_seg_active_ptr, &seg_active->prev_serialized_topo, sizeof(*serialized_and_wire_seg_active_ptr))) {
-					seg_active->prev_serialized_topo = *serialized_and_wire_seg_active_ptr;
+				if (memcmp(seg_wire, &seg_active->prev_serialized_topo, sizeof(*seg_wire))) {
+					seg_active->prev_serialized_topo = *seg_wire;
 					active_seg_topo_ctx->active_seg_ser_ver++;
 				}
 				// Report a client problem only once, leader remembers our report if needed
 				active_seg_topo_ctx->active_seg_flags.did_any_client_report_about_problems = 0;
-				serialized_and_wire_seg_active_ptr->active_seg_ser_ver = active_seg_topo_ctx->active_seg_ser_ver;
-				n_seg++;
-				serialized_and_wire_seg_active_ptr++;
+				seg_wire->active_seg_ser_ver = active_seg_topo_ctx->active_seg_ser_ver;
 			}
 		}
 	}
 	nvmeibt_topology_active_clear_reserialization_required();	// Might be redundant
 
 	// RESIZE() After recalc of the actual n_seg
+	n_seg = (unsigned int)builder.n_segs;
 	topo_len = sizeof(struct nvmeibt_serialized_seg_active_topo) * n_seg + sizeof(struct nvmeibt_active_topo_header);
 	NNVMEIBT_BUF_RESIZE(nu65fq9, serialized_and_wire_topo_buf, topo_len);
+	// Set header fields for trace (to_wire will overwrite and byte-swap)
+	memcpy(header_ptr->topo_name, nvmeibt_topology_binary_active_topo_header, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
+	header_ptr->sw_ver = TOMA_SW_COMPATIBILITY_VER;
 	header_ptr->topo_len = topo_len;
 	header_ptr->segs_num = n_seg;
 	//
@@ -1257,13 +1252,8 @@ int nvmeibt_topology_serialize_active_topology(void)
 	nvmeibt_topology_follower_print((nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, print_s, serialized_and_wire_topo_buf->data_buf);
 	NVMEIBT_LONG_TRACE_WRAPPER(bhui345, 0, "SERIALIZED ACTIVE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 	NNVMEIBT_STR_FREE(fy67tu9, print_s);
-	// Perform LE/BE convert in_place
-	serialized_and_wire_seg_active_ptr = (struct nvmeibt_serialized_seg_active_topo *)(header_ptr + 1);
-	for (j = 0; j < header_ptr->segs_num; j++) {
-		nvmeibt_disk_segment_convert_active_bin_topo_le_be(serialized_and_wire_seg_active_ptr);
-		serialized_and_wire_seg_active_ptr++;
-	}
-	nvmeibt_topology_convert_follower_header_le_be(header_ptr);
+	// Write header and convert header+segments to wire byte order
+	nvmeibt_act_topo_builder_to_wire(&builder);
 	// Slightly inefficient. First serialize into the topo_buf, and then copy it into the follower_to_leader_wire_buf
 	//  Memory wise, I could first allocate the follower_to_leader_wire_buf and serialize the topo in there
 	// Following the Leader's concept that the buffer is an assembly of several buffers that are serialized beforehand
