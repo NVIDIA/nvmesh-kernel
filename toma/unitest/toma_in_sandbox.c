@@ -1041,17 +1041,50 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 				out_r_msg->is_vote_granted = true;			// Currently always vote for live toma.
 				ln->n_total_msmgs_sent.vote_rep++;
 				break;
-			case RAFT_MSG_APPEND_ENTRIES:
+			case RAFT_MSG_APPEND_ENTRIES: {
+				struct peer_toma_simu *peer = sys->cfg.nodes[my_uuid & 0xF].peer;
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_APPEND_ENTRIES_REP);
-				if (req->data_len)
-					memcpy(out_r_msg->persist_and_wire_buf.data, req->cnst_data, req->data_len);	// DHS: Copy the incoming topology as a reply. All fields are ok. Todo: Parse and analyze degraded modes
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
-				if (sys->cfg.nodes[my_uuid&0xF].peer->ignore_append_entries) {
+				if (peer->ignore_append_entries) {
 					NNVMEIBT_BM_FREE(__AUTOID__, msg);
 					return 0;
 				}
+				if (req->data_len) {
+					int leader_topo_len = LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len);
+					int non_topo_len = (int)req->data_len - leader_topo_len;
+					int act_topo_len, new_data_len;
+
+					// Build peer's ACT_TOPO directly into reply buffer
+					act_topo_len = peer_toma_simu_build_act_topo_reply(peer,
+						req->cnst_data, leader_topo_len,
+						out_r_msg->persist_and_wire_buf.data, (int)req->data_len);
+
+					// Echo non-topo sections from leader after the ACT_TOPO
+					if (non_topo_len > 0)
+						memcpy(out_r_msg->persist_and_wire_buf.data + act_topo_len,
+							(const char *)req->cnst_data + leader_topo_len, (size_t)non_topo_len);
+
+					// Update topo TLV: length and CRC (CRC covers TLV header + data)
+					out_r_msg->persist_and_wire_buf.topo_ctx.tlv_len = LE_SWAP32(act_topo_len);
+					out_r_msg->persist_and_wire_buf.topo_ctx.tlv_crc = 0;
+					{
+						uint32_t crc = crc32(0, &out_r_msg->persist_and_wire_buf.topo_ctx,
+							sizeof(out_r_msg->persist_and_wire_buf.topo_ctx));
+						crc = crc32(crc, out_r_msg->persist_and_wire_buf.data, (size_t)act_topo_len);
+						out_r_msg->persist_and_wire_buf.topo_ctx.tlv_crc = LE_SWAP32(crc);
+					}
+
+					// Update persist_and_wire_total_len = header + all section lengths
+					new_data_len = act_topo_len + non_topo_len;
+					out_r_msg->persist_and_wire_buf.persist_and_wire_total_len =
+						LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + new_data_len);
+
+					// Update total message data length
+					msg->data_len = req->msg_len + new_data_len;
+				}
 				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
+			}
 			default: BUG_ON(true);							// Currently only support reply as follower on leader/candidate msgs
 		}
 		out_r_msg->raft_hdr_crc = 0;
