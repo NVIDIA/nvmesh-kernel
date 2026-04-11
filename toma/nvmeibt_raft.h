@@ -215,7 +215,8 @@ int64_t nvmeibt_raft_get_effective_min_election_timeout_factor(void);
 int64_t nvmeibt_raft_get_effective_leader_heartbeat_timeout_usec_USED_ONLY_BY_RPC(void);
 void nvmeibt_raft_set_max_wait_for_non_registrable_seg_sec(int64_t wait_sec);
 int64_t nvmeibt_raft_get_max_wait_for_non_registrable_seg_sec(void);
-void nvmeibt_raft_set_incremental_wire_buf_enabled(bool is_enabled);
+void nvmeibt_raft_set_incremental_wire_buf_enabled(int64_t is_enabled);
+int64_t nvmeibt_raft_get_incremental_wire_buf_enabled(void);
 
 extern struct nvmeibt_raft_ctx     my_raft_global;
 static inline struct nvmeibt_raft_ctx *nvmeibt_raft_get_my_raft(void)

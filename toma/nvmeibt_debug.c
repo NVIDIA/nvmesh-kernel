@@ -432,6 +432,8 @@ struct oper_param_t {
 			NULL, nvmeibt_raft_set_max_wait_for_non_registrable_seg_sec, nvmeibt_raft_get_max_wait_for_non_registrable_seg_sec},
 		{"freeze_topology",									0,
 				&nvmeibt_topology_freeze_topo, NULL, NULL},
+		{"is_incremental_wire_buf",							0,
+				NULL, nvmeibt_raft_set_incremental_wire_buf_enabled, nvmeibt_raft_get_incremental_wire_buf_enabled},
 #ifdef TOMA_IB_ROCE
 		{"enable_networking_periodic_traces",				ENABLE_NETWORKING_PERIODIC_TRACES_DEFAULT,
 			&ibud_enable_periodic_traces, NULL, NULL},

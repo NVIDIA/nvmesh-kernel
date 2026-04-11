@@ -116,12 +116,19 @@ function T_SANDBOX_wire_buf_test() {
 }
 
 TOMA_TXT_LOGS="z.txt";
+TOMA_RPC_CONFIG="_root/opt/nvmesh/common-repo/tools/toma_rpc.config";
 function T_SANDBOX_main_self_unit_test() {
 	__cleanup_prev_run_state;
 	__build_if_needed;
 	./${EXE_NAME};
 	__abort_ci_on_failure;
 	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > ${TOMA_TXT_LOGS};
+}
+
+function T_SANDBOX_incremental_topo_main() {
+	echo "+ param is_incremental_wire_buf 1" >> ${TOMA_RPC_CONFIG};
+	T_SANDBOX_main_self_unit_test;
+	grep -v 'is_incremental_wire_buf' ${TOMA_RPC_CONFIG} > ${TOMA_RPC_CONFIG}.tmp && mv ${TOMA_RPC_CONFIG}.tmp ${TOMA_RPC_CONFIG};
 }
 
 function T_SANDBOX_main_self_reuse_persistency_unit_test() {
@@ -140,6 +147,7 @@ case "$1" in
   framework*)	T_SANDBOX_test_framework ${@:2};;
   wire*)		T_SANDBOX_wire_buf_test ${@:2};;
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;
+  incr*)		T_SANDBOX_incremental_topo_main ${@:2};;
   live*)		T_SANDBOX_main_live_run;;
   gpt*)			T_SANDBOX_gpt_util_self_unit_test ${@:2};;
   persi*)		T_SANDBOX_toma_persist_json_test;;
@@ -147,6 +155,8 @@ case "$1" in
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
 	T_SANDBOX_main_self_unit_test;
+	rm -f ${TOMA_TXT_LOGS};			# Not needed, if run succeeded, CI does not have to save the logs.
+	T_SANDBOX_incremental_topo_main;
 	rm -f ${TOMA_TXT_LOGS};			# Not needed, if run succeeded, CI does not have to save the logs.
 	T_SANDBOX_main_self_reuse_persistency_unit_test;
 	T_SANDBOX_toma_persist_json_test;
@@ -160,6 +170,7 @@ case "$1" in
 	echo $"Usage: $0 {1 of the options below}";
 	echo_yellow "  ------------ Unit-tests of sub components:";
 	echo "    main              - Self test of toma main executable";
+	echo "    incremental_topo  - Main test with incremental wire buf enabled";
 	echo "    gpt_util          - Self test of gpt utility";
 	echo "    persistency       - Self test of Toma persistency utility";
 	echo "    framework         - Test framework smoke test";

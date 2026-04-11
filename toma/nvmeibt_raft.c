@@ -211,15 +211,17 @@ static int64_t					raft_max_time_leader_survives_without_majority_nsec;
 static int64_t					raft_max_time_non_responsive_member_is_considered_alive_for_topo_nsec;
 static int64_t					praid_leader_max_nsec_wait_for_registrable_seg_to_apply;
 static int64_t					praid_leader_max_nsec_wait_for_non_registrable_seg_to_apply;
-static bool						raft_is_incremental_wire_buf_enabled = false;
+static bool						raft_is_incremental_wire_buf_enabled = 0;
 
-void nvmeibt_raft_set_incremental_wire_buf_enabled(bool is_enabled)
+void nvmeibt_raft_set_incremental_wire_buf_enabled(int64_t is_enabled)
 {
 	if (raft_is_incremental_wire_buf_enabled != is_enabled) {
 		N_Tf(jfdn1al, "raft_is_incremental_wire_buf_enabled: @BOOL-->@BOOL", raft_is_incremental_wire_buf_enabled, is_enabled);
 		raft_is_incremental_wire_buf_enabled = is_enabled;
 	}
 }
+
+int64_t nvmeibt_raft_get_incremental_wire_buf_enabled(void)	{ return raft_is_incremental_wire_buf_enabled; }
 
 static bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
 {
