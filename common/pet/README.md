@@ -31,36 +31,40 @@ The idea should cut the bootstrap phase from few weeks to probably one week or e
 
 ## Python dependencies
 
-Dependencies are managed with [Poetry](https://python-poetry.org/) and declared in `pyproject.toml`:
+- **pyelftools** -- ELF/DWARF parsing
+- **pydantic** -- Type hints enforcing
+- **kaitaistruct** -- Kaitai Struct runtime
 
-- **pyelftools** – ELF/DWARF parsing
-- **pydantic** – Type hints enforcing
-- **kaitaistruct** – Kaitai Struct runtime
+Exact versions of all dependencies (including transitive) are pinned in
+`requirements.txt`. Packages are installed from the internal NVIDIA Artifactory
+PyPI mirror (`nv-shared-pypi`).
 
-### Setup
+### Usage
 
-Run `setup.sh` to install the virtual environment:
-
-```bash
-./common/pet/setup.sh
-```
-
-This runs `poetry lock` followed by `poetry install --no-root` inside the `common/pet/` directory, creating an isolated venv with all dependencies pinned.
-
-To activate the environment manually:
+Use the wrapper script `pet_messages.sh` to run `nvmeib_pet_messages.py`. It
+automatically creates a Python virtual environment on first use and installs
+the pinned dependencies:
 
 ```bash
-cd common/pet
-poetry shell
+common/pet/pet_messages.sh save-dictionary MODULE SECTION OUTPUT
 ```
 
-Or use the convenience wrapper `pet_messages.sh`, which invokes `nvmeib_pet_messages.py` through the Poetry venv without requiring manual activation:
+By default the venv is created at `common/pet/.venv`. To place it elsewhere
+(for example in a build directory), set the `PET_VENV` environment variable:
 
 ```bash
-common/pet/pet_messages.sh [args...]
+PET_VENV=/path/to/build/pet-venv common/pet/pet_messages.sh save-dictionary ...
 ```
 
-> **Note:** The Kaitai Struct *compiler* (`ksc`) is not installed by `setup.sh` — it is only needed if you need to regenerate `nvmeib_pet_archive.py` from the `.ksy` spec. See the [Kaitai download page](https://kaitai.io/#download) for installation instructions.
+### Updating dependencies
+
+To regenerate `requirements.txt` after changing the dependency versions in
+`pyproject.toml`, see the instructions at the top of `requirements.txt`.
+
+> **Note:** The Kaitai Struct *compiler* (`ksc`) is not needed at runtime. It
+> is only required to regenerate `nvmeib_pet_archive.py` from the `.ksy` spec.
+> See the [Kaitai download page](https://kaitai.io/#download) for installation
+> instructions.
 
 ## Kaitai
 

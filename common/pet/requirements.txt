@@ -1,0 +1,18 @@
+# Frozen PET dependencies. To regenerate this file:
+#
+#   python3 -m venv --without-pip --system-site-packages /tmp/pet-venv
+#   /tmp/pet-venv/bin/python3 -m pip install --ignore-installed \
+#       --index-url https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple \
+#       'pydantic>=2.12.5' \
+#       'pyelftools>=0.32' \
+#       'kaitaistruct==0.11'
+#   /tmp/pet-venv/bin/python3 -m pip freeze --local
+#   rm -rf /tmp/pet-venv
+#
+annotated-types==0.7.0
+kaitaistruct==0.11
+pydantic==2.12.5
+pydantic_core==2.41.5
+pyelftools==0.32
+typing-inspection==0.4.2
+typing_extensions==4.15.0
