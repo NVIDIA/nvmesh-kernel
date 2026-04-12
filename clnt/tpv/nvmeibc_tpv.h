@@ -37,9 +37,14 @@ enum nvmeibc_volume_class {
  * A single mapping entry: virtual_extent_index -> physical byte offset in CDV.
  * phys_offset == 0 means unmapped.  CDV offset 0 is inside the allocator area
  * and is never a valid TPV_extent location, so 0 is a safe sentinel.
+ *
+ * cdv_extent_index records which data CDV_extent holds this slot.  This lets
+ * nvmeibc_tpv_free_extent() find the parent nvmeibc_cdv_extent_ref and
+ * decrement its allocated_count without needing A and E from the CDV config.
  */
 struct nvmeibc_tpv_extent_entry {
 	u64 phys_offset;
+	u64 cdv_extent_index;	/* data CDV_extent index; for ref-count bookkeeping on free */
 };
 
 /*
@@ -63,11 +68,27 @@ struct nvmeibc_tpv_allocator {
 	u32              tpv_extent_size_kb;
 	u64              virtual_extents_total;
 
+	/*
+	 * CDV geometry — learned from the parent CDV's config at attach time.
+	 * Needed to compute n_slots and physical offsets of each TPV_extent slot
+	 * within a newly allocated CDV_extent.
+	 */
+	u32              cdv_extent_size_mb;	/* E in MB; CDV property */
+	u64              allocator_size_gb;	/* A in GB; byte offset of first data extent */
+
 	struct list_head cdv_extent_list;	/* nvmeibc_cdv_extent_ref entries */
 	u64              cdv_extents_count;
 
 	struct list_head free_tpv_extents;	/* available physical TPV_extent slots */
 	u64              free_tpv_extent_count;
+
+	/*
+	 * CDV_extents whose allocated_count reached zero (all TPV_extents freed).
+	 * Kept here rather than freed immediately so that nvmeibc_tpv_free_extent()
+	 * can run without blocking in IO context.  cdv_alloc_work processes this
+	 * list before requesting new CDV_extents.
+	 */
+	struct list_head pending_return_list;	/* nvmeibc_cdv_extent_ref entries */
 
 	u64              low_watermark;		/* schedule CDV alloc when count drops below */
 						/* default: 50 MB / tpv_extent_size */
@@ -133,12 +154,18 @@ struct tpv_tree_entry {
 
 /* ── Public API (implemented in nvmeibc_tpv.c) ────────────────────────── */
 
-/* Returns the new nvmeibc_tpv on success, NULL on error. */
+/*
+ * Returns the new nvmeibc_tpv on success, NULL on error.
+ * cdv_extent_size_mb and allocator_size_gb are properties of the parent CDV,
+ * received from management in the AttachVolumes MCS cdvConf payload.
+ */
 struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					const char *tpv_name,
 					const char *tpv_uuid,
 					u64 virtual_size_bytes,
-					u32 tpv_extent_size_kb);
+					u32 tpv_extent_size_kb,
+					u32 cdv_extent_size_mb,
+					u64 allocator_size_gb);
 
 void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv);
 

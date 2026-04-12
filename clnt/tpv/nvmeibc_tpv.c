@@ -41,6 +41,7 @@ extern REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio
 
 /* nvmeibc_tpv_allocator.c */
 extern void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
+extern void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
 
 /* nvmeibc_tpv_persist.c */
 extern void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
@@ -113,7 +114,9 @@ static u64 nvmeibc_tpv_calc_watermark(u32 tpv_extent_size_kb)
 
 static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 				       u32 tpv_extent_size_kb,
-				       u64 virtual_size_bytes)
+				       u64 virtual_size_bytes,
+				       u32 cdv_extent_size_mb,
+				       u64 allocator_size_gb)
 {
 	xa_init(&alloc->extent_map);
 	spin_lock_init(&alloc->lock);
@@ -122,11 +125,16 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 	alloc->virtual_extents_total   = virtual_size_bytes /
 					 ((u64)tpv_extent_size_kb << 10);
 
+	alloc->cdv_extent_size_mb      = cdv_extent_size_mb;
+	alloc->allocator_size_gb       = allocator_size_gb;
+
 	INIT_LIST_HEAD(&alloc->cdv_extent_list);
 	alloc->cdv_extents_count       = 0;
 
 	INIT_LIST_HEAD(&alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count   = 0;
+
+	INIT_LIST_HEAD(&alloc->pending_return_list);
 
 	alloc->low_watermark           = nvmeibc_tpv_calc_watermark(tpv_extent_size_kb);
 }
@@ -142,19 +150,21 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 		kfree(entry);
 	xa_destroy(&alloc->extent_map);
 
-	/* Free CDV_extent reference list. */
+	/* Free CDV_extent reference list (active and pending-return). */
 	list_for_each_entry_safe(ref, tmp, &alloc->cdv_extent_list, node) {
+		list_del(&ref->node);
+		kfree(ref);
+	}
+	list_for_each_entry_safe(ref, tmp, &alloc->pending_return_list, node) {
 		list_del(&ref->node);
 		kfree(ref);
 	}
 
 	/*
-	 * free_tpv_extents entries: these track available physical slots within
-	 * allocated CDV_extents.  The concrete struct is defined in
-	 * nvmeibc_tpv_allocator.c (step 11b); freeing logic will be added there.
-	 * For now, reset the list head and counters.
+	 * free_tpv_extents: list of struct nvmeibc_tpv_free_slot entries (type
+	 * defined in nvmeibc_tpv_allocator.c).  Delegate to the allocator module.
 	 */
-	INIT_LIST_HEAD(&alloc->free_tpv_extents);
+	nvmeibc_tpv_free_slots_list(&alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count = 0;
 	alloc->cdv_extents_count     = 0;
 }
@@ -297,7 +307,9 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					const char *tpv_name,
 					const char *tpv_uuid,
 					u64 virtual_size_bytes,
-					u32 tpv_extent_size_kb)
+					u32 tpv_extent_size_kb,
+					u32 cdv_extent_size_mb,
+					u64 allocator_size_gb)
 {
 	struct nvmeibc_tpv *tpv;
 	int rv;
@@ -347,7 +359,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 	/* ── 3a. Initialise allocator ───────────────────────────────────── */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
-				   virtual_size_bytes);
+				   virtual_size_bytes, cdv_extent_size_mb,
+				   allocator_size_gb);
 
 	/* ── 3b. Load allocator state from CDV_extent[0] ────────────────── */
 	rv = nvmeibc_tpv_load_state(tpv);
@@ -393,10 +406,13 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	atomic_set(&tpv->state, TPV_ATTACHED);
 
 	pr_info("nvmeibc_tpv: %s (uuid=%s) attached, virtual_size=%llu MB, "
-		"extent=%u KB, watermark=%llu extents\n",
+		"tpv_extent=%u KB, cdv_extent=%u MB, allocator=%llu GB, "
+		"watermark=%llu extents\n",
 		tpv_name, tpv_uuid,
 		virtual_size_bytes >> 20,
 		tpv_extent_size_kb,
+		cdv_extent_size_mb,
+		allocator_size_gb,
 		tpv->allocator.low_watermark);
 
 	return tpv;

@@ -316,8 +316,60 @@ enum nvmeibc_config_ops {
 	NVMEIBC_MA_GET_DISK_MEMS = 0x07,
 	NVMEIBC_MA_ALLOC_NR_NET  = 0x08,
 	NVMEIBC_MA_GET_LOCK_GIDS = 0x09,
-	NVMEIBC_MA_GET_JRANGE	= 0x10,
+	NVMEIBC_MA_GET_JRANGE		= 0x10,
+
+	/*
+	 * CDV_extent allocation / deallocation — sent by a client TPV.allocator
+	 * to the CDV.allocator TOMA via the per-disk ADMIN channel (§2.8).
+	 */
+	NVMEIBC_MA_CDV_ALLOC_EXTENT	= 0x20,
+	NVMEIBC_MA_CDV_FREE_EXTENT	= 0x21,
 };
+
+/* ── CDV_extent allocation protocol (§2.8) ──────────────────────────────────
+ *
+ * Client TPV.allocator → CDV.allocator TOMA via ADMIN channel.
+ *
+ * These are application-level C structs passed between the TPV allocator and
+ * the IB admin channel layer.  The IB admin channel layer is responsible for
+ * encoding them into the actual wire format (VEX / volume_client_req payload).
+ *
+ * UUIDs are NUL-terminated ASCII strings of length NVMEIBC_BD_UUID_LEN,
+ * consistent with the rest of the NVMesh codebase.
+ */
+
+/* NVMEIBC_MA_CDV_ALLOC_EXTENT request */
+struct nvmeibc_cdv_alloc_req {
+	char tpv_uuid[NVMEIBC_BD_UUID_LEN];	/* owning TPV UUID (ASCII string) */
+	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* parent CDV UUID (ASCII string) */
+	u64  req_id;				/* monotonically increasing per-TPV; for idempotency */
+	u64  client_generation;			/* allocator_generation client believes is current */
+};
+
+/* NVMEIBC_MA_CDV_ALLOC_EXTENT response status codes */
+enum nvmeibc_cdv_alloc_status {
+	NVMEIBC_CDV_ALLOC_OK		= 0,	/* extent_index is valid */
+	NVMEIBC_CDV_ALLOC_CDV_FULL	= 1,	/* no free extents; CDVCapacityWarning sent to mgmt */
+	NVMEIBC_CDV_ALLOC_WRONG_GEN	= 2,	/* client_generation stale; re-fetch CDV topology */
+	NVMEIBC_CDV_ALLOC_ERROR		= 3,	/* generic TOMA-side error */
+};
+
+/* NVMEIBC_MA_CDV_ALLOC_EXTENT response */
+struct nvmeibc_cdv_alloc_resp {
+	u64  req_id;			/* echoes request req_id */
+	u64  extent_index;		/* data CDV_extent index i; 0 on failure */
+	u64  allocator_generation;	/* current allocator generation on TOMA side */
+	u8   status;			/* enum nvmeibc_cdv_alloc_status */
+};
+
+/* NVMEIBC_MA_CDV_FREE_EXTENT request (no dedicated response; fire-and-forget) */
+struct nvmeibc_cdv_free_req {
+	char tpv_uuid[NVMEIBC_BD_UUID_LEN];	/* owning TPV UUID */
+	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* parent CDV UUID */
+	u64  extent_index;			/* data CDV_extent index to return to the pool */
+};
+
+/* ── end CDV_extent allocation protocol ──────────────────────────────────── */
 
 enum {
 	NVMEIBC_CFG_SHARE_MAX_CONST = 32,
