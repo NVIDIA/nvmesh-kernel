@@ -1050,37 +1050,26 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 					return 0;
 				}
 				if (req->data_len) {
-					int leader_topo_len = LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len);
-					int non_topo_len = (int)req->data_len - leader_topo_len;
-					int act_topo_len, new_data_len;
-
-					// Build peer's ACT_TOPO directly into reply buffer
-					act_topo_len = peer_toma_simu_build_act_topo_reply(peer,
-						req->cnst_data, leader_topo_len,
-						out_r_msg->persist_and_wire_buf.data, (int)req->data_len);
-
-					// Echo non-topo sections from leader after the ACT_TOPO
-					if (non_topo_len > 0)
-						memcpy(out_r_msg->persist_and_wire_buf.data + act_topo_len,
-							(const char *)req->cnst_data + leader_topo_len, (size_t)non_topo_len);
+					const int leader_topo_len = LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len);
+					const int non_topo_len = (int)req->data_len - leader_topo_len;
+					const int act_topo_len = peer_toma_simu_build_act_topo_reply(peer, req->cnst_data, leader_topo_len, out_r_msg->persist_and_wire_buf.data, (int)req->data_len);		// Build peer's ACT_TOPO directly into reply buffer
+					struct nvmeibt_wire_type_len_value *out_topo_ctx = &out_r_msg->persist_and_wire_buf.topo_ctx;
+					if (non_topo_len > 0)		// Copy non-topo sections from leader after the ACT_TOPO
+						memcpy(out_r_msg->persist_and_wire_buf.data + act_topo_len, (const char *)req->cnst_data + leader_topo_len, (size_t)non_topo_len);
 
 					// Update topo TLV: length and CRC (CRC covers TLV header + data)
-					out_r_msg->persist_and_wire_buf.topo_ctx.tlv_len = LE_SWAP32(act_topo_len);
-					out_r_msg->persist_and_wire_buf.topo_ctx.tlv_crc = 0;
+					out_topo_ctx->tlv_len = LE_SWAP32(act_topo_len);
+					out_topo_ctx->tlv_crc = 0;
 					{
-						uint32_t crc = crc32(0, &out_r_msg->persist_and_wire_buf.topo_ctx,
-							sizeof(out_r_msg->persist_and_wire_buf.topo_ctx));
+						uint32_t crc = crc32(0, out_topo_ctx, sizeof(*out_topo_ctx));
 						crc = crc32(crc, out_r_msg->persist_and_wire_buf.data, (size_t)act_topo_len);
-						out_r_msg->persist_and_wire_buf.topo_ctx.tlv_crc = LE_SWAP32(crc);
+						out_topo_ctx->tlv_crc = LE_SWAP32(crc);
 					}
-
-					// Update persist_and_wire_total_len = header + all section lengths
-					new_data_len = act_topo_len + non_topo_len;
-					out_r_msg->persist_and_wire_buf.persist_and_wire_total_len =
-						LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + new_data_len);
-
-					// Update total message data length
-					msg->data_len = req->msg_len + new_data_len;
+					{	// Update persist_and_wire_total_len = header + all section lengths
+						const int new_data_len = act_topo_len + non_topo_len;
+						out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + new_data_len);
+						msg->data_len = req->msg_len + new_data_len; // Update total message data length
+					}
 				}
 				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
