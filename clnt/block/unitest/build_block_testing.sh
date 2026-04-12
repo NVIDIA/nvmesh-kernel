@@ -177,6 +177,14 @@ case "$1" in
 		;;
 	"run-tsan")
 		shift
+		if [ -r /proc/sys/kernel/randomize_va_space ]; then
+			aslr=$(cat /proc/sys/kernel/randomize_va_space)
+			if [ -n "$aslr" ] && [ "$aslr" != "0" ]; then
+				echo "Error: run-tsan requires ASLR off (kernel.randomize_va_space=0); current value is $aslr."
+				echo "Example: sudo sysctl -w kernel.randomize_va_space=0"
+				exit 1
+			fi
+		fi
 		runcmd="TSAN_OPTIONS=\"suppressions=suppressions.tsan\" ./blk_unitest $TRACES_FLAGS ${@} 2>&1 | tee out.txt"
 		execute_unitest
 		# If it crashed analyze the core files
