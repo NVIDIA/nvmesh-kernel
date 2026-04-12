@@ -5,7 +5,7 @@
 #pragma once
 /* Implements other Tomas in raft quorum of the alive Toma */
 #include "../sandbox_util.h"
-#include "nvmeibt_common.h"
+#include "common_public/nvmeib_uuid_be.h"
 
 #define PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES 8
 
