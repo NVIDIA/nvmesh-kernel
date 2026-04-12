@@ -2639,6 +2639,20 @@ VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_acs_map_clnt_ionics_clnt_base_enco
 	return sizeof(*lnic);
 }
 
+VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_acs_map_clnt_ionics_clnt_ext1_encode)
+{
+	struct nvmeibc_access_map_ctx *ctx = arg;
+	struct nvmeibc_io_lnic *lionic = ctx->lionic;
+	struct wire_acs_map_clnt_ionics_ext1 *ext1 = wire_buf;
+	u32 mps = P2NV(lionic->port)->mr_page_size;
+
+	BUG_ON(!wire_buf);
+	BUG_ON(wire_buf + sizeof(*ext1) > wire_buf_end);
+
+	ext1->mr_page_size = cpu_to_be32(mps);
+	return sizeof(*ext1);
+}
+
 /* WAS: fill_rionic_map_base */
 VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_acs_map_srv_ionics_clnt_base_encode)
 {
@@ -2674,8 +2688,9 @@ VEX_OPS_DECLARE_OP_FN(encode, static, vex_ach_acs_map_srv_ionics_clnt_base_encod
 	/* loop on all local io nics that access the remote io nic */
 	list_for_each_entry(ctx->lionic, lionics, rionic_link) {
 		rv = CALL_VEX_OP(encode_container_elem,
-			vex_ach_acs_map_srv_ionics_clnt_ops, BASE_ONLY,
-				base, vex_ach_acs_map_srv_ionics_clnt_base_encode,
+			vex_ach_acs_map_clnt_ionics_clnt_ops, ONE_EXT,
+				base, vex_ach_acs_map_clnt_ionics_clnt_base_encode,
+				ext1, vex_ach_acs_map_clnt_ionics_clnt_ext1_encode,
 				   clnt_ionics_ops, &rnic->clnt_ionics_map, wire_buf_end, ctx);
 		if (rv < 0)
 			goto out;

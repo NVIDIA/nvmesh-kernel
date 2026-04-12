@@ -1115,9 +1115,14 @@ struct wire_acs_map_clnt_ionics_base {
 	u8	may_access;
 } __attribute__((packed));
 
+struct wire_acs_map_clnt_ionics_ext1 {
+	__be32	mr_page_size;
+} __attribute__((packed));
+
 struct wire_acs_map_clnt_ionics {
 	struct wire_acs_map_clnt_ionics_base base;
-};
+	struct wire_acs_map_clnt_ionics_ext1 ext1;
+} __attribute__((packed));
 
 struct wire_acs_map_srv_ionics_base {
 	char gid[16];

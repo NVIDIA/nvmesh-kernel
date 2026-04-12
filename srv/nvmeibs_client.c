@@ -1506,6 +1506,31 @@ out:
 	return rv;
 }
 
+VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_acs_map_clnt_ionics_srv_ext1_decode)
+{
+	struct nvmeibs_access_map_decode_ctx *ctx = arg;
+	struct nvmeibs_lionic *lionic = ctx->lionic;
+	struct nvmeibs_rionic *rionic;
+	const struct wire_acs_map_clnt_ionics_ext1 *ext1 = wire_buf;
+
+	BUG_ON(!lionic);
+	BUG_ON(elem_idx < 0 || elem_idx >= lionic->n_rionics);
+
+	rionic = &lionic->rionics[elem_idx];
+
+	if (!wire_buf) {
+		/* Negotiated base-only clnt ionics (no ext1 on wire): use lionic HCA MR page size */
+		rionic->mr_page_size = P2NV(lionic->port)->mr_page_size;
+		return 0;
+	}
+
+	BUG_ON(wire_buf + sizeof(*ext1) > wire_buf_end);
+
+	rionic->mr_page_size = be32_to_cpu(ext1->mr_page_size);
+
+	return sizeof(*ext1);
+}
+
 /* Called with nvmeibs_dev_guard lock already taken */
 VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_acs_map_srv_ionics_srv_base_decode)
 {
@@ -1571,8 +1596,9 @@ VEX_OPS_DECLARE_OP_FN(decode, static, vex_ach_acs_map_srv_ionics_srv_base_decode
 	memcpy(ctx->lionic->gid.raw, lnic->gid, 16);
 
 	rv = CALL_VEX_OP(decode_container,
-				vex_ach_acs_map_clnt_ionics_srv_ops, BASE_ONLY,
+				vex_ach_acs_map_clnt_ionics_srv_ops, ONE_EXT,
 					base, vex_ach_acs_map_clnt_ionics_srv_base_decode,
+					ext1, vex_ach_acs_map_clnt_ionics_srv_ext1_decode,
 						vex_ops, &lnic->clnt_ionics_map, wire_buf_end, ctx);
 
 	if (rv < 0)

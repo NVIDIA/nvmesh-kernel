@@ -59,10 +59,12 @@ VEX_OPS(vex_ach_get_io_port_info, VEX_S_CLIENT_C_DECL_OR_DEF_STRUCT, VEX_S_CLIEN
 					encode, static, vex_ach_get_io_port_info_srv_ext3_encode);
 
 /* VEX: vex_ach_acs_map_clnt_ionics */
-VEX_OPS(vex_ach_acs_map_clnt_ionics, VEX_S_CLIENT_C_DECL_OR_DEF_STRUCT, VEX_S_CLIENT_C_DECL_OR_DEF_FN, BASE_ONLY, ONE_OP,
+VEX_OPS(vex_ach_acs_map_clnt_ionics, VEX_S_CLIENT_C_DECL_OR_DEF_STRUCT, VEX_S_CLIENT_C_DECL_OR_DEF_FN, ONE_EXT, ONE_OP,
 			vex_ach_acs_map_clnt_ionics_srv_ops, "CltIoNic",
 				base, (NVMEIB_BASE_VERSION_INIT), wire_acs_map_clnt_ionics_base, const_sz,
-					decode, static, vex_ach_acs_map_clnt_ionics_srv_base_decode);
+					decode, static, vex_ach_acs_map_clnt_ionics_srv_base_decode,
+				ext1, (NVMEIB_3p4_VERSION_INIT), wire_acs_map_clnt_ionics_ext1, const_sz,
+					decode, static, vex_ach_acs_map_clnt_ionics_srv_ext1_decode);
 
 /* VEX: vex_ach_acs_map_srv_ionics */
 VEX_OPS(vex_ach_acs_map_srv_ionics, VEX_S_CLIENT_C_DECL_OR_DEF_STRUCT, VEX_S_CLIENT_C_DECL_OR_DEF_FN, BASE_ONLY, ONE_OP,

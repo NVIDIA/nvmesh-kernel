@@ -73,6 +73,8 @@ struct nvmeibs_rionic {
 	   when they become active without doing
 	   rediscovery */
 	bool may_access;
+	/* MR page size (bytes) for this client ionic; from access-map wire ext1 */
+	u32 mr_page_size;
 	struct nvmeibs_rionic_ka keep_alive;
 };
 

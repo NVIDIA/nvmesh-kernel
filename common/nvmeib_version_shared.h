@@ -195,8 +195,19 @@ static const union version 		nvmeib_3p3_product_version = NVMEIB_3p3_PRODUCT_VER
 static const union version 		nvmeib_3p3_protocol_version = NVMEIB_3p3_PROTOCOL_VERSION;
 static const union nvmeib_version 	nvmeib_3p3_version = NVMEIB_3p3_VERSION_INIT;
 
+/* version 3.4 - changes:
+   wire_acs_map_clnt_ionics ext1: per client ionic MR page size (mr_page_size) */
+#define NVMEIB_3p4_PRODUCT_VERSION 	{.major = 3,.minor = 4}
+#define NVMEIB_3p4_PROTOCOL_VERSION 	{.major = 1,.minor = 12}
+#define NVMEIB_3p4_VERSION_INIT 	{.product 	= NVMEIB_3p4_PRODUCT_VERSION, \
+					.protocol 	= NVMEIB_3p4_PROTOCOL_VERSION}
+
+static const union version 		nvmeib_3p4_product_version = NVMEIB_3p4_PRODUCT_VERSION;
+static const union version 		nvmeib_3p4_protocol_version = NVMEIB_3p4_PROTOCOL_VERSION;
+static const union nvmeib_version 	nvmeib_3p4_version = NVMEIB_3p4_VERSION_INIT;
+
 #define NVMEIB_BASE_VERSION_INIT 		NVMEIB_13_VERSION_INIT
-#define NVMEIB_CURRENT_VERSION_INIT 	NVMEIB_3p3_VERSION_INIT
+#define NVMEIB_CURRENT_VERSION_INIT 	NVMEIB_3p4_VERSION_INIT
 
 #define NVMEIB_BASE_CLIENT_NAME_SIZE			64
 #define NVMEIB_BASE_DISK_MAX_NVMEXPRESS_ID_SIZE	40

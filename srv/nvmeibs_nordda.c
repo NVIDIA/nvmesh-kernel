@@ -3672,29 +3672,33 @@ static void nordda_ready_to_send(void *context)
 
 /* Calculate the required size of the Send Queue */
 static int calc_sq_size(struct nvmeibs_client *cl, int *max_send_wrs,
-			struct nvmeibs_ib_port *ib_port)
+			struct nvmeibs_ib_port *ib_port,
+			struct nvmeibs_rionic *rionic)
 {
 	int n_wrs_rd_io = 1; /* Each IO requires at least a RDMA Send for the response */
 	struct nvmeibs_disk_info *di = cl->di;
-	int max_pages_per_io = DIV_ROUND_UP(
-		(di->max_request_size << di->block_shift), PAGE_SIZE);
+	/* This is not the actual max. Technically speaking there can be BIO_MAX_VECS (256U) SGEs per IO, 
+	each on a different page, but we don't see that in practice. */
+	int max_bio_sges_per_io = DIV_ROUND_UP(
+		(di->max_request_size << di->block_shift), NVMEIBC_SECTOR_SIZE);
 	int sq_size;
 
 	if (di->metadata && di->mtdt_extd) {
 		/* If the metadata is inline (extends the page), then we need to un-mix it.
-		* This requires 2 WRs per page of data
+		* This requires 2 WRs per sge of data
 		* One to RDMA Write the data to the BIO and the other to RDMA Write the MD to the MD buffer */
-		n_wrs_rd_io += max_pages_per_io * 2;
-	} else if (NVMEIBS_NORDDA_ASSUME_DATA_MR(ib_port->hw_type) && !cl->max_wrs_per_req) {
+		n_wrs_rd_io += max_bio_sges_per_io * 2;
+	} else if (NVMEIBS_NORDDA_ASSUME_DATA_MR(ib_port->hw_type) && !cl->max_wrs_per_req &&
+		   rionic->mr_page_size <= NVMEIBC_SECTOR_SIZE) {
 		/* Otherwise (Seperate MD or no MD), we only need 1 WR for the data
-		 * (if we assume the client always uses an MR for the data) */
+		 * (if we assume the client always uses an MR for the data and that the MR page size is less than or equal to the sector size) */
 		n_wrs_rd_io += 1 + (di->metadata ? 1 : 0);
 	} else if (cl->max_wrs_per_req) {
 		/* From user to allow mem usage control */
 		n_wrs_rd_io += cl->max_wrs_per_req + (di->metadata ? 1 : 0);
 	} else {
-		/* We assume the client cannot always use an MR for the data so will need 1 WR per page of the BB */
-		n_wrs_rd_io += max_pages_per_io + (di->metadata ? 1 : 0);
+		/* We assume the client cannot always use an MR (or the MR cannot aggregate all SGL entries) so will need 1 WR per BIO SGE entries */
+		n_wrs_rd_io += max_bio_sges_per_io + (di->metadata ? 1 : 0);
 	}
 
 	if (max_send_wrs)
@@ -3703,7 +3707,7 @@ static int calc_sq_size(struct nvmeibs_client *cl, int *max_send_wrs,
 
 	_NT(trace_nordda_calc_sq_size, "Disk @DISK_ID_STR: h=@HW_TYPE m=@MAX_REQUEST_SIZE, s=@BLOCK_SHIFT_INT, p=@MAX_PAGES_PER_IO c=@UINT --> n=@N_WRS_RD_IO, s=@SQ_SIZE",
 		di->disk_id, ib_port->hw_type, di->max_request_size,
-		di->block_shift, max_pages_per_io, cl->max_wrs_per_req,
+		di->block_shift, max_bio_sges_per_io, cl->max_wrs_per_req,
 		n_wrs_rd_io, sq_size);
 	return sq_size;
 }
@@ -3802,7 +3806,7 @@ static void connect_nordda_channel_work(struct workqe_struct *work)
 	/* send */
 	params->s_msg_size = NVMEIBS_NORDDA_SERVER_MSG_SIZE;
 	params->max_send_sge = NVMEIBS_SERVER_DEFAULT_MAX_SGES;
-	params->sendq_size = calc_sq_size(cl, &nrch->max_send_wrs, ib_port);
+	params->sendq_size = calc_sq_size(cl, &nrch->max_send_wrs, ib_port, rionic);
 	params->scq_size = params->sendq_size;
 	/* recv */
 	params->rcq_size = params->sendq_size;
