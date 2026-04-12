@@ -1186,9 +1186,39 @@ struct generic_CMD_params_ctx {							// A ~ 8.5[KB] struct
 	};
 };
 
+static void parse_CMD_report_disk(struct resend_report_disk_ctx *rp, const struct mm_json_dict *json)
+{
+	for (int l = 0; l < json->len; l++) {
+		const struct mm_json_kv_pair *kv = &(json->elements[l]);
+		if	(!strcmp(kv->key, "diskID")) {		nvmeibt_strlcpy( rp->ldiskID, kv->value->str, sizeof(rp->ldiskID));
+		} else if	(!strcmp(kv->key, "vendor")) {				 rp->vendor = kv->value->num;	// Such as 0x144d
+		} else if	(!strcmp(kv->key, "reappearingCounter")) {	 rp->reappearingCounter =   kv->value->num;
+		} else if	(!strcmp(kv->key, "reappearingOutOfSync")) { rp->reappearingOutOfSync = kv->value->num;
+		} else { N_Tf(cbheujw, "Unknown key @STR skipped", kv->key);		// Future compatibility
+		}
+	}
+	N_Tf(rvchs8k, "diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL", rp->ldiskID, rp->vendor, rp->reappearingCounter, rp->reappearingOutOfSync);
+}
+
+static void parse_CMD_report_praid(struct send_praid_report_ctx *rp, const struct mm_json_dict *json)
+{
+	for (int l = 0; l < json->len; l++) {
+		const struct mm_json_kv_pair *kv = &(json->elements[l]);
+		if (!strcmp(kv->key, "uuid")) {
+			nvmeibt_strlcpy(rp->praid_uuid, kv->value->str, sizeof(rp->praid_uuid));
+		} else if (!strcmp(kv->key, "lastKnownVersion")) {	// "lastKnownVersion": "<major,minor,raftTerm>"
+			const int scanf_rv = sscanf(kv->value->str, "<%d,%d,%lu>", &rp->lastKnownVersion_major, &rp->lastKnownVersion_minor, &rp->lastKnownVersion_raft_term);
+			if (scanf_rv != 3)
+				N_Ef(__AUTOID__, "praid report cannot parse known version |@STR|", kv->value->str);
+		} else {
+			N_Tf(__AUTOID__, "Unknown key @STR skipped", kv->key);		// Future compatibility
+		}
+	}
+}
+
 static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
 	// Somewhat slopy. Parse all the commands parameters at once.  DHS: There are many different cmd messages but a few payloads, so payload parsing code is generic
-	int i, j, k, l, rv = 0;
+	int i, j, k, rv = 0;
 	NFIN;
 	for (i = 0; i < root->dict.len; i++) {
 		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
@@ -1196,9 +1226,9 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			continue;
 		N_Tf(657sniw, "parsing payload");
 		for (j = 0; j < root_kv->value->dict.len; j++) {
-			struct mm_json_kv_pair *payload_kv = &(root_kv->value->dict.elements[j]);
+			const struct mm_json_kv_pair *payload_kv = &(root_kv->value->dict.elements[j]);
 			if (!strcmp(payload_kv->key, "drives")) {
-				struct mm_json_elem	*arr = payload_kv->value;
+				const struct mm_json_elem	*arr = payload_kv->value;
 				if (arr->type != JSON_E_ARRAY) {
 					N_Ef(bi3jsia, "@STR is supposed to be array", payload_kv->key);
 					rv = -1;
@@ -1207,27 +1237,10 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				CMD_params->report_disks.num = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->report_disks.arr));
 				if (arr->array.len > CMD_params->report_disks.num)
 					N_Wf(f67fbhw, "@STR arr.len=@INT truncated", payload_kv->key, arr->array.len);
-				for (k = 0; k < CMD_params->report_disks.num; k++) {
-					struct mm_json_dict *drive_json_dict = &(arr->array.elements[k]->dict);
-					struct resend_report_disk_ctx *report = &CMD_params->report_disks.arr[k];
-					for (l = 0; l < drive_json_dict->len; l++) {
-						struct mm_json_kv_pair *kv = &(drive_json_dict->elements[l]);
-						if	(!strcmp(kv->key, "diskID")) {
-							nvmeibt_strlcpy(report->ldiskID, kv->value->str, sizeof(report->ldiskID));
-						} else if	(!strcmp(kv->key, "vendor")) {
-							report->vendor = kv->value->num;	// Such as 0x144d
-						} else if	(!strcmp(kv->key, "reappearingCounter")) {
-							report->reappearingCounter = kv->value->num;
-						} else if	(!strcmp(kv->key, "reappearingOutOfSync")) {
-							report->reappearingOutOfSync = kv->value->num;
-						} else {
-							N_Tf(cbheujw, "Unknown key @STR skipped", kv->key);		// Future compatibility
-						}
-					}
-					N_Tf(rvchs8k, "diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL", report->ldiskID, report->vendor, report->reappearingCounter, report->reappearingOutOfSync);
-				}
+				for (k = 0; k < CMD_params->report_disks.num; k++)
+					parse_CMD_report_disk(&CMD_params->report_disks.arr[k], &(arr->array.elements[k]->dict));
 			} else if (!strcmp(payload_kv->key, "pRaids")) {
-				struct mm_json_elem	*arr = payload_kv->value;
+				const struct mm_json_elem	*arr = payload_kv->value;
 				if (arr->type != JSON_E_ARRAY) {
 					N_Ef(4vhdj56, "@STR is supposed to be array", payload_kv->key);
 					rv = -1;
@@ -1236,22 +1249,8 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				CMD_params->report_praids.num = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->report_praids.arr));
 				if (arr->array.len > CMD_params->report_praids.num)
 					N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-				for (k = 0; k < CMD_params->report_praids.num; k++) {
-					struct mm_json_dict *praid_json_dict = &(arr->array.elements[k]->dict);
-					struct send_praid_report_ctx *pr_rep = &CMD_params->report_praids.arr[k];
-					for (l = 0; l < praid_json_dict->len; l++) {
-						struct mm_json_kv_pair *kv = &(praid_json_dict->elements[l]);
-						if (!strcmp(kv->key, "uuid")) {
-							nvmeibt_strlcpy(pr_rep->praid_uuid, kv->value->str, sizeof(pr_rep->praid_uuid));
-						} else if (!strcmp(kv->key, "lastKnownVersion")) {	// "lastKnownVersion": "<major,minor,raftTerm>"
-							const int scanf_rv = sscanf(kv->value->str, "<%d,%d,%lu>", &(pr_rep->lastKnownVersion_major), &(pr_rep->lastKnownVersion_minor), &(pr_rep->lastKnownVersion_raft_term));
-							if (scanf_rv != 3)
-								N_Ef(__AUTOID__, "praid report cannot parse known version |@STR|", kv->value->str);
-						} else {
-							N_Tf(__AUTOID__, "Unknown key @STR skipped", kv->key);		// Future compatibility
-						}
-					}
-				}
+				for (k = 0; k < CMD_params->report_praids.num; k++)
+					parse_CMD_report_praid(&CMD_params->report_praids.arr[k], &arr->array.elements[k]->dict);
 			} else if (!strcmp(payload_kv->key, "tomaToken")) {
 				CMD_params->tomaToken = payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "diskID")) {
