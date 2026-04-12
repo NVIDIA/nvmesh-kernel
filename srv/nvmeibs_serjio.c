@@ -1717,11 +1717,11 @@ static ssize_t stats_clear(void *arg, char *buffer, size_t len)
 	return len;
 }
 
-static ssize_t fill_serjio_stats(void *arg, char *buffer, size_t len)
+static int show_serjio_stats(struct seq_file *m, void *arg)
 {
 	struct nvmeibs_serjio_disk_private_data *serjio_pd = arg;
 
-	return nvmeibs_serjio_fill_serjio_stats_json(&serjio_pd->stats, buffer, len);
+	return nvmeibs_serjio_show_stats_json(&serjio_pd->stats, m);
 }
 
 // Human-readable stats printing routine
@@ -2665,8 +2665,8 @@ static int create_disk_proc_files(struct nvmeibs_serjio_disk_private_data *serji
 		goto remove_proc;
 	}
 	if (!(serjio_pd->serjio_stats_proc_file =
-		nvmeib_public_proc_create("stats.json", serjio_pd->disk_proc_dir,
-				fill_serjio_stats, stats_clear, serjio_pd))) {
+		nvmeib_public_proc_create_oneshot_data("stats.json", serjio_pd->disk_proc_dir,
+				show_serjio_stats, stats_clear, serjio_pd))) {
 		_NEs(error_16_serjio_create_disk_proc_files, serjio_pd, "Failed to create /proc file stats.json");
 		rv = -EFAULT;
 		goto remove_proc;

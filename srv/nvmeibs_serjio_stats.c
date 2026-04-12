@@ -330,12 +330,11 @@ inline static u64 __get_avg(struct nvmeibs_serjio_min_max_avg_stats *stats)
                                         STATS_JDR_ARGS((_stats), (__jdr)); \
                                     }
 
-ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serjio_stats, char *buffer, size_t len)
+int nvmeibs_serjio_show_stats_json(struct nvmeibs_serjio_stats *serjio_stats, struct seq_file *m)
 {
     unsigned long flags = 0;
     int i;
-    struct jdr jdr = jdr_make((struct charvec){.base = buffer, .len = len});
-    struct charvec result;
+    struct jdr jdr = jdr_make_seq(m);
     spin_lock_irqsave(&serjio_stats->lock, flags);
     {
 		jdr_array_scope(&jdr, "work_stats");
@@ -498,8 +497,8 @@ ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serji
 	}
     nvmeib_proc_add_jdr_proc_epilog(CORE_SERVER_STATS_PROC_FRMT_VER, &jdr);
     spin_unlock_irqrestore(&serjio_stats->lock, flags);
-    result = jdr_finalize(&jdr);
-    return result.len;
+    jdr_finalize(&jdr);
+    return 0;
 }
 
 

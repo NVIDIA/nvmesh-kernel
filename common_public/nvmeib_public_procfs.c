@@ -12,6 +12,7 @@
 struct nvmeib_public_procfs_ent {
 	proc_fill_t *fill;
 	proc_chng_t *chng;
+	proc_oneshot_show_t *show;
 	void *arg;
 	struct proc_dir_entry *dir;
 	char *name;
@@ -20,7 +21,24 @@ struct nvmeib_public_procfs_ent {
 	size_t len;
 	struct mutex mutex;
 	atomic_t num_open;
+	bool removed;
 };
+
+static void nvmeib_public_procfs_ent_free(struct nvmeib_public_procfs_ent *p)
+{
+	if (p == NULL)
+		return;
+	if (p->buf != NULL)
+		vfree(p->buf);
+	kfree(p->name);
+	kfree(p);
+}
+
+static void nvmeib_public_procfs_ent_maybe_free(struct nvmeib_public_procfs_ent *p)
+{
+	if (p != NULL && p->removed && atomic_read(&p->num_open) == 0)
+		nvmeib_public_procfs_ent_free(p);
+}
 
 static ssize_t generic_proc_read(struct file *file, char __user *userbuf,
 	size_t len, loff_t *offset_p)
@@ -125,6 +143,8 @@ static int generic_proc_open(struct inode *inode, struct file *file) {
 	struct nvmeib_public_procfs_ent *p = file_get_priv_data(file);
 
 	(void)inode;
+	if (p == NULL || p->removed)
+		return -ENXIO;
 	atomic_add(1, &p->num_open);
 	return 0;
 }
@@ -133,7 +153,10 @@ static int generic_proc_release(struct inode *inode, struct file *file) {
 	struct nvmeib_public_procfs_ent *p = file_get_priv_data(file);
 
 	(void)inode;
-	atomic_sub(1, &p->num_open);
+	if (p != NULL) {
+		atomic_sub(1, &p->num_open);
+		nvmeib_public_procfs_ent_maybe_free(p);
+	}
 	return 0;
 }
 
@@ -154,6 +177,63 @@ static int generic_proc_release(struct inode *inode, struct file *file) {
 	};
 #endif
 
+static int proc_oneshot_show(struct seq_file *m, void *data)
+{
+	struct nvmeib_public_procfs_ent *p = m->private;
+
+	(void)data;
+	if (p == NULL || p->show == NULL)
+		return -ENXIO;
+	return p->show(m, p->arg);
+}
+
+static int proc_oneshot_open(struct inode *inode, struct file *file)
+{
+	struct nvmeib_public_procfs_ent *p = file_get_priv_data(file);
+	int rv;
+
+	(void)inode;
+	if (p == NULL || p->removed)
+		return -ENXIO;
+	atomic_add(1, &p->num_open);
+	rv = single_open(file, proc_oneshot_show, p);
+	if (rv != 0) {
+		atomic_sub(1, &p->num_open);
+		nvmeib_public_procfs_ent_maybe_free(p);
+	}
+	return rv;
+}
+
+static int proc_oneshot_release(struct inode *inode, struct file *file)
+{
+	struct nvmeib_public_procfs_ent *p = file_get_priv_data(file);
+	int rv = single_release(inode, file);
+
+	if (p != NULL) {
+		atomic_sub(1, &p->num_open);
+		nvmeib_public_procfs_ent_maybe_free(p);
+	}
+	return rv;
+}
+
+#if !KS_HAS_PROC_FS
+	static const struct file_operations proc_oneshot_fops = {
+		.open = proc_oneshot_open,
+		.read = seq_read,
+		.write = generic_proc_write,
+		.llseek = seq_lseek,
+		.release = proc_oneshot_release,
+	};
+#else
+	static const struct proc_ops proc_oneshot_fops = {
+		.proc_open = proc_oneshot_open,
+		.proc_read = seq_read,
+		.proc_write = generic_proc_write,
+		.proc_lseek = seq_lseek,
+		.proc_release = proc_oneshot_release,
+	};
+#endif
+
 struct nvmeib_public_procfs_ent *nvmeib_public_proc_create(const char *name,
 	struct proc_dir_entry *dir, proc_fill_t *fill, proc_chng_t *chng, void *arg)
 {
@@ -169,6 +249,7 @@ struct nvmeib_public_procfs_ent *nvmeib_public_proc_create(const char *name,
 	if ((p = kzalloc(sizeof *p, GFP_KERNEL)) == NULL)
 		return NULL;
 	mutex_init(&p->mutex);
+	atomic_set(&p->num_open, 1);
 	p->fill = fill;
 	p->chng = chng;
 	p->arg = arg;
@@ -176,6 +257,7 @@ struct nvmeib_public_procfs_ent *nvmeib_public_proc_create(const char *name,
 	p->name = kstrdup(name, GFP_KERNEL);
 	p->buf = NULL;
 	p->len = 1;
+	p->removed = false;
 	if (!p->name)
 		goto err_free_ent;
 
@@ -186,21 +268,63 @@ struct nvmeib_public_procfs_ent *nvmeib_public_proc_create(const char *name,
 	return p;
 
 err_free_name:
-	kfree(p->name);
 err_free_ent:
-	kfree(p);
+	nvmeib_public_procfs_ent_free(p);
 
 	return NULL;
 }
 EXPORT_SYMBOL(nvmeib_public_proc_create);
+
+struct nvmeib_public_procfs_ent *nvmeib_public_proc_create_oneshot_data(const char *name,
+	struct proc_dir_entry *dir, proc_oneshot_show_t *show, proc_chng_t *chng, void *arg)
+{
+	struct nvmeib_public_procfs_ent *p;
+	int mode = 0;
+
+	if (show != NULL)
+		mode |= 0444;
+	if (chng != NULL)
+		mode |= 0200;
+	if (mode == 0)
+		return NULL;
+	if ((p = kzalloc(sizeof *p, GFP_KERNEL)) == NULL)
+		return NULL;
+
+	mutex_init(&p->mutex);
+	atomic_set(&p->num_open, 1);
+	p->show = show;
+	p->chng = chng;
+	p->arg = arg;
+	p->dir = dir;
+	p->name = kstrdup(name, GFP_KERNEL);
+	p->buf = NULL;
+	p->len = 1;
+	p->removed = false;
+	if (!p->name)
+		goto err_free_ent;
+
+	p->ent = proc_create_data(name, mode, dir, &proc_oneshot_fops, p);
+	if (!p->ent)
+		goto err_free_name;
+
+	return p;
+
+err_free_name:
+err_free_ent:
+	nvmeib_public_procfs_ent_free(p);
+
+	return NULL;
+}
+EXPORT_SYMBOL(nvmeib_public_proc_create_oneshot_data);
 
 void nvmeib_public_proc_remove(struct nvmeib_public_procfs_ent *p)
 {
 	if (p == NULL)
 		return;
 	remove_proc_entry(p->name, p->dir);
-	kfree(p->name);
-	kfree(p);
+	p->removed = true;
+	atomic_sub(1, &p->num_open);
+	nvmeib_public_procfs_ent_maybe_free(p);
 }
 EXPORT_SYMBOL(nvmeib_public_proc_remove);
 
