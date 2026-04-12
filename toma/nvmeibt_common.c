@@ -246,12 +246,12 @@ static inline long get_current_rss_bytes(void)
 	#endif
 }
 
+extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 void nvmeibt_validate_alloc_free_summary_table(void)
 {
 	const size_t MAX_UNFREED_BYTES = (30UL << 30);	// N[GB] mem. Todo: make configurable like raft_leader_heartbeat_timeout_usec
 	const size_t total_alloc_minus_free_bytes = get_current_rss_bytes();
 	if (total_alloc_minus_free_bytes >= MAX_UNFREED_BYTES) {		// Crash...
-		extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 		struct nvmeibt_Str *mem_print = NNVMEIBT_STR_ALLOC(ttvafst0);
 		NNVMEIBT_STR_RESIZE_BUF(ttvafst1, mem_print, (1<<14));
 		print_status_str(NVMEIBS_TOMA_STATUS_MEM_ALLOC, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, mem_print);
