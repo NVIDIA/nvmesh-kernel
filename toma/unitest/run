@@ -151,6 +151,7 @@ case "$1" in
   live*)		T_SANDBOX_main_live_run;;
   gpt*)			T_SANDBOX_gpt_util_self_unit_test ${@:2};;
   persi*)		T_SANDBOX_toma_persist_json_test;;
+  gen_logs*)	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > ${TOMA_TXT_LOGS};;
   ci*)
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
@@ -179,6 +180,7 @@ case "$1" in
 	echo "    rebuild           - Fully recompile Toma. Pass additional make params like release compilation"
 	echo "    live              - Launch Toma to be able to manually play with it, RPC and others";
 	echo "    ci                - Nightly/CI run";
+	echo "    gen_logs          - Convert binary traces to ${TOMA_TXT_LOGS} file";
 	exit 2
 esac
 RETVAL=$?
