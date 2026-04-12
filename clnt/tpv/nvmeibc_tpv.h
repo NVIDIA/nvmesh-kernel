@@ -45,6 +45,7 @@ enum nvmeibc_volume_class {
 struct nvmeibc_tpv_extent_entry {
 	u64 phys_offset;
 	u64 cdv_extent_index;	/* data CDV_extent index; for ref-count bookkeeping on free */
+	struct rcu_head rcu;	/* deferred free via kfree_rcu after xa_erase */
 };
 
 /*

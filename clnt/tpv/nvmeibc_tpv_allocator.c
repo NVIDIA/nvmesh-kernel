@@ -292,7 +292,7 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 
 		pr_warn_ratelimited("nvmeibc_tpv: %s: kzalloc failed in free_extent virt_idx=%llu; slot lost until recovery\n",
 				    tpv->tpv_name, virt_idx);
-		kfree(entry);
+		kfree_rcu(entry, rcu);
 
 		/* Still update allocated_count so the CDV_extent isn't leaked. */
 		spin_lock(&alloc->lock);
@@ -309,7 +309,7 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 	slot->phys_offset      = entry->phys_offset;
 	slot->cdv_extent_index = entry->cdv_extent_index;
 	INIT_LIST_HEAD(&slot->node);
-	kfree(entry);
+	kfree_rcu(entry, rcu);
 
 	spin_lock(&alloc->lock);
 
@@ -536,6 +536,7 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	u64      client_gen;
 	unsigned long flags;
 	int      rv;
+	bool     retry_pending = false;
 
 	if (atomic_read(&tpv->state) == TPV_DETACHING)
 		goto out_clear_pending;
@@ -590,7 +591,7 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 			pr_err("nvmeibc_tpv: %s: tpv_on_cdv_alloc_ok(%llu) failed (%d)\n",
 			       tpv->tpv_name, resp.extent_index, rv);
 		else
-			nvmeibc_tpv_retry_pending_bios(tpv);
+			retry_pending = true;
 		break;
 
 	case NVMEIBC_CDV_ALLOC_CDV_FULL:
@@ -622,5 +623,14 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 
 out_clear_pending:
 	atomic_set(&tpv->cdv_alloc_pending, 0);
+
+	/*
+	 * Retry pending bios AFTER clearing cdv_alloc_pending.  This way, if
+	 * the pool refill was partial and some retried bios still hit -EAGAIN,
+	 * nvmeibc_tpv_alloc_extent() can successfully re-arm cdv_alloc_pending
+	 * (seeing 0, not 1) and re-schedule this work for another CDV_extent.
+	 */
+	if (retry_pending)
+		nvmeibc_tpv_retry_pending_bios(tpv);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_alloc_work_fn);

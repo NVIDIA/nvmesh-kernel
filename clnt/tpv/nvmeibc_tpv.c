@@ -467,7 +467,25 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	cancel_work_sync(&tpv->cdv_alloc_work);
 	cancel_work_sync(&tpv->persist_work);
 
-	/* ── 1b. Fail any bios parked waiting for CDV_extent allocation ─── */
+	/* ── 2. Flush dirty allocator state synchronously ───────────────── */
+	if (tpv->dirty) {
+		int rv = nvmeibc_tpv_flush_state(tpv);
+
+		if (rv)
+			pr_warn("nvmeibc_tpv: flush_state failed for %s (%d); "
+				"state may be lost\n", tpv->tpv_name, rv);
+	}
+
+	/* ── 3. Unregister block device (quiesces IO via queue freeze) ──── */
+	nvmeibc_tpv_blkdev_unregister(tpv);
+
+	/*
+	 * ── 3b. Fail any bios parked waiting for CDV_extent allocation ──
+	 *
+	 * Safe after blkdev_unregister: del_gendisk + queue cleanup
+	 * guarantee that no make_request call is in-flight, so no new
+	 * bios can be added to pending_bios after this point.
+	 */
 	{
 		struct bio_list  pending;
 		struct bio      *bio;
@@ -482,18 +500,6 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 		while ((bio = bio_list_pop(&pending)) != NULL)
 			bio_endio(bio, -EIO);
 	}
-
-	/* ── 2. Flush dirty allocator state synchronously ───────────────── */
-	if (tpv->dirty) {
-		int rv = nvmeibc_tpv_flush_state(tpv);
-
-		if (rv)
-			pr_warn("nvmeibc_tpv: flush_state failed for %s (%d); "
-				"state may be lost\n", tpv->tpv_name, rv);
-	}
-
-	/* ── 3. Unregister block device (quiesces IO via queue freeze) ──── */
-	nvmeibc_tpv_blkdev_unregister(tpv);
 
 	/* ── 4. Free allocator state ─────────────────────────────────────── */
 	nvmeibc_tpv_allocator_free(&tpv->allocator);

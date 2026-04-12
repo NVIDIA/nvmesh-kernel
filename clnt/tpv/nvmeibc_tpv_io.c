@@ -11,8 +11,11 @@
  *   nvmeibc_tpv_retry_pending_bios() — drains write-blocked bios after pool
  *                                      replenishment (called from work context).
  *
- * IO dispatch per operation (each bio is guaranteed single-extent by
- * blk_queue_chunk_sectors set in nvmeibc_tpv_blkdev_register):
+ * IO dispatch per operation:
+ *
+ *   READ/WRITE bios are guaranteed single-extent by blk_queue_chunk_sectors
+ *   set in nvmeibc_tpv_blkdev_register.  DISCARD bios may span multiple
+ *   extents (chunk_sectors does not constrain DISCARDs).
  *
  *   READ  + unmapped → zero-fill pages and complete immediately.
  *   WRITE + unmapped → nvmeibc_tpv_alloc_extent():
@@ -21,7 +24,7 @@
  *                                  pre-fetch is already scheduled.
  *                       other   → fail bio with the error code.
  *   READ/WRITE + mapped → forward to CDV at physical offset.
- *   DISCARD → nvmeibc_tpv_free_extent(); complete immediately.
+ *   DISCARD → free all extents covered by the bio; complete immediately.
  */
 
 #include "common/kr_incs.h"
@@ -52,9 +55,9 @@ extern void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 static inline u64 tpv_bio_start_bytes(const struct bio *bio)
 {
 #if KS_BVEC_ITER
-	return (u64)(bio)->bi_iter.bi_sector << KERNEL_SECTOR_SHIFT;
+	return (u64)bio->bi_iter.bi_sector << KERNEL_SECTOR_SHIFT;
 #else
-	return (u64)(bio)->bi_sector << KERNEL_SECTOR_SHIFT;
+	return (u64)bio->bi_sector << KERNEL_SECTOR_SHIFT;
 #endif
 }
 
@@ -78,9 +81,12 @@ static inline bool tpv_bio_is_discard(const struct bio *bio)
 /* ── tpv_handle_one_bio — dispatch one extent-aligned bio ──────────────── */
 
 /*
- * Pre-conditions (enforced by caller and blk_queue_chunk_sectors):
- *   • bio is fully contained within a single TPV_extent.
- *   • tpv->state == TPV_ATTACHED.
+ * Pre-conditions:
+ *   • READ/WRITE bios are fully contained within a single TPV_extent
+ *     (enforced by blk_queue_chunk_sectors in the registration path).
+ *   • DISCARD bios may span multiple extents (chunk_sectors does not
+ *     constrain DISCARDs; the kernel uses max_discard_sectors instead).
+ *   • tpv->state == TPV_ATTACHED (checked by caller).
  *
  * Returns  0        — bio dispatched or completed.
  * Returns -EAGAIN   — bio has been added to pending_bios; caller must not
@@ -95,38 +101,52 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	u64 virt_idx     = virt_offset / extent_bytes;
 	u64 intra_offset = virt_offset % extent_bytes;
 	struct nvmeibc_tpv_extent_entry *entry;
-	bool is_discard  = tpv_bio_is_discard(bio);
 	bool is_write;
+	u64  phys_off;
 	int  rv;
 
-	/* ── DISCARD ──────────────────────────────────────────────────────── */
-	if (is_discard) {
-		nvmeibc_tpv_free_extent(tpv, virt_idx);
+	/* ── DISCARD — may span multiple extents ──────────────────────────── */
+	if (tpv_bio_is_discard(bio)) {
+		u64 discard_bytes = (u64)bio_sectors(bio) << KERNEL_SECTOR_SHIFT;
+		u64 end_byte      = virt_offset + discard_bytes;
+		u64 idx;
+
+		for (idx = virt_idx; idx * extent_bytes < end_byte; idx++)
+			nvmeibc_tpv_free_extent(tpv, idx);
 		bio_endio(bio, 0);
 		return 0;
 	}
 
 	is_write = (bio_data_dir(bio) == WRITE);
 
-	/* ── Extent map lookup (lock-free xarray read) ───────────────────── */
+	/*
+	 * Extent map lookup under RCU.  xa_load requires either xa_lock or
+	 * rcu_read_lock; the entry is freed via kfree_rcu in free_extent,
+	 * so dereferencing the returned pointer is safe within the RCU
+	 * read-side critical section.
+	 */
+	rcu_read_lock();
 	entry = xa_load(&alloc->extent_map, virt_idx);
 
-	/* ── READ on unmapped extent → zero-fill and complete ────────────── */
-	if (!entry && !is_write) {
-		zero_fill_bio(bio);
-		bio_endio(bio, 0);
-		return 0;
-	}
-
-	/* ── WRITE on unmapped extent → allocate physical slot ───────────── */
 	if (!entry) {
+		rcu_read_unlock();
+
+		/* ── READ on unmapped extent → zero-fill and complete ────── */
+		if (!is_write) {
+			zero_fill_bio(bio);
+			bio_endio(bio, 0);
+			return 0;
+		}
+
+		/* ── WRITE on unmapped extent → allocate physical slot ────── */
 		rv = nvmeibc_tpv_alloc_extent(tpv, virt_idx, &entry);
 		if (rv == -EAGAIN) {
 			/*
-			 * Free pool exhausted.  Park bio on pending_bios; it will
-			 * be retried by nvmeibc_tpv_retry_pending_bios() once the
-			 * CDV allocator work function replenishes the pool.
-			 * cdv_alloc_work is already scheduled by alloc_extent().
+			 * Free pool exhausted.  Park bio on pending_bios; it
+			 * will be retried by nvmeibc_tpv_retry_pending_bios()
+			 * once the CDV allocator work function replenishes the
+			 * pool.  cdv_alloc_work is already scheduled by
+			 * alloc_extent().
 			 */
 			unsigned long flags;
 
@@ -139,10 +159,21 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 			bio_endio(bio, rv);
 			return rv;
 		}
+
+		/*
+		 * Freshly allocated entry — not yet visible to concurrent
+		 * erasers, so direct access is safe without RCU.
+		 */
+		nvmeibc_tpv_cdv_submit_bio(tpv, bio,
+					   entry->phys_offset + intra_offset);
+		return 0;
 	}
 
-	/* ── Mapped READ or WRITE → forward bio to CDV ───────────────────── */
-	nvmeibc_tpv_cdv_submit_bio(tpv, bio, entry->phys_offset + intra_offset);
+	/* ── Mapped READ or WRITE — snapshot offset under RCU ─────────────── */
+	phys_off = entry->phys_offset + intra_offset;
+	rcu_read_unlock();
+
+	nvmeibc_tpv_cdv_submit_bio(tpv, bio, phys_off);
 	return 0;
 }
 
@@ -151,9 +182,8 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 /*
  * Called by the block layer for every bio targeting the TPV gendisk.
  *
- * blk_queue_chunk_sectors() in nvmeibc_tpv_blkdev_register() ensures every
- * incoming bio is contained within a single TPV_extent, so no bio_split is
- * needed here.
+ * blk_queue_chunk_sectors() ensures READ/WRITE bios are single-extent.
+ * DISCARD bios may span multiple extents and are handled accordingly.
  *
  * On old kernels (KS_REQUEST_QUEUE_HAS_REQUEST_FN): registered via
  *   blk_queue_make_request(queue, nvmeibc_tpv_make_request).
