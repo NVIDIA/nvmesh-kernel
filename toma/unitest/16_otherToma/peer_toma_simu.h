@@ -5,7 +5,6 @@
 #pragma once
 /* Implements other Tomas in raft quorum of the alive Toma */
 #include "../sandbox_util.h"
-#include "common_public/nvmeib_uuid_be.h"
 
 #define PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES 8
 
@@ -14,8 +13,8 @@ struct peer_toma_simu {
 	bool ignore_append_entries;			                // Emulates infinitely slow local disk response time, does not commit raft leaders topo
 	unsigned long long ser_ver_counter;					// Incrementing ACT_TOPO serialization version
 	struct {
-		union nvmeib_uuid uuid;
-		unsigned int state;
+		uint32_t uuid;
+		uint32_t state;
 	} dirty_bits_overrides[PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES];
 	int n_dirty_bits_overrides;
 };
@@ -36,5 +35,4 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer,
 /** Set a dirty_bits_state override for a segment. When building the ACT_TOPO
  *  reply, if a segment matches this UUID, the override state is used instead
  *  of the leader's value. Used by the eviction test to fake recovery completion. */
-void peer_toma_simu_set_seg_dirty_bits(struct peer_toma_simu *peer,
-	union nvmeib_uuid seg_uuid, unsigned int dirty_bits_state);
+void peer_toma_simu_set_seg_dirty_bits(struct peer_toma_simu *peer, uint32_t seg_uuid, uint32_t dirty_bits_state);

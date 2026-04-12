@@ -33,17 +33,16 @@ void peer_toma_simu_resume_append_entries_by_node(int node_idx) {
 	cfg->nodes[node_idx].peer->ignore_append_entries = false;
 }
 
-static unsigned int peer_toma_simu_lookup_dirty_bits_override(struct peer_toma_simu *peer, const union nvmeib_uuid *seg_uuid, unsigned int default_state) {
+static unsigned int peer_toma_simu_lookup_dirty_bits_override(struct peer_toma_simu *peer, const uint32_t seg_uuid, unsigned int default_state) {
 	for (int i = 0; i < peer->n_dirty_bits_overrides; i++)
-		if (ARE_UUID_EQ(&peer->dirty_bits_overrides[i].uuid, seg_uuid))
+		if (peer->dirty_bits_overrides[i].uuid == seg_uuid)
 			return peer->dirty_bits_overrides[i].state;
 	return default_state;
 }
 
-void peer_toma_simu_set_seg_dirty_bits(struct peer_toma_simu *peer,	union nvmeib_uuid seg_uuid, unsigned int dirty_bits_state) {
-
+void peer_toma_simu_set_seg_dirty_bits(struct peer_toma_simu *peer,	uint32_t seg_uuid, uint32_t dirty_bits_state) {
 	for (int i = 0; i < peer->n_dirty_bits_overrides; i++) {	// Update existing override if present
-		if (ARE_UUID_EQ(&peer->dirty_bits_overrides[i].uuid, &seg_uuid)) {
+		if (peer->dirty_bits_overrides[i].uuid == seg_uuid) {
 			peer->dirty_bits_overrides[i].state = dirty_bits_state;
 			return;
 		}
@@ -89,7 +88,7 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const char 
 			act_seg->uuid = ld_seg.uuid;
 			act_seg->active_praid_version_major = ld_seg.praid_version_major;
 			act_seg->active_praid_version_minor = ld_seg.praid_version_minor;
-			act_seg->dirty_bits_state = peer_toma_simu_lookup_dirty_bits_override(peer, &ld_seg.uuid, ld_seg.dirty_bits_state);
+			act_seg->dirty_bits_state = peer_toma_simu_lookup_dirty_bits_override(peer, sb_seg->uuid, ld_seg.dirty_bits_state);
 			act_seg->dirty_bits_init_mode =  ld_seg.dirty_bits_init_mode;
 			act_seg->stale_locks_init_mode = ld_seg.stale_locks_init_mode;
 			act_seg->active_seg_ser_ver = ++peer->ser_ver_counter;
@@ -97,7 +96,6 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const char 
 		}
 		wire_praid = (struct nvmeibt_praid_serialized_topo *)&wire_seg[ld_praid.segs_num];
 	}
-
 	nvmeibt_act_topo_builder_to_wire(&builder);
 	return builder.topo_len;
 }
