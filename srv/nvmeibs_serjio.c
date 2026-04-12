@@ -7305,7 +7305,6 @@ write_db:
 		chk_launch_new_jgc(serjio_pd, false);
 	}
 	nvmeib_ref_init(&ret_entry->alloc_ref);
-	rv = ret_entry->range_idx;
 
 out:
 	if (rv < 0)
