@@ -291,8 +291,13 @@ case "$1" in
 			runcmd="./blk_unitest $e_arg $CI_FLAGS -nRep $REPEAT 2>&1 | tee out.txt"
 			execute_unitest &
 			ppid=$!
-			wait $ppid
-			retcode=$?
+			# wait returns the child's status on failure; with set -e a failing wait
+			# would exit the script before core/result handling unless conditional.
+			if wait "$ppid"; then
+				retcode=0
+			else
+				retcode=$?
+			fi
 			dir=`pwd`
 			log_file="$dir/build_block_testing.log"
 			result_file="$dir/result.txt"
