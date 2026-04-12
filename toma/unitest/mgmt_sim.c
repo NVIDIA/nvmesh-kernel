@@ -41,14 +41,15 @@ struct mgmt_sim_disk_status {			// Per-disk status extracted from reportTarget
 	} format;
 };
 
+#define DISK_ID_FMT "\"diskID\":\"%s.%d\",\"uuid\":\"" UUID_from_U32 "\""		// Sends ID of 'struct sb_disk_conf *' to Toma
+#define DISK_ID_VAL(D) (D)->serial, (D)->name_space_id, (D)->uuid
 static int make_msg_format_drive(char *buf, size_t capacity, const struct mgmt_sim_disk_status *d, unsigned long boot_time) {
 	return snprintf(buf, capacity,
-		"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1"
-		",\"payload\":{\"diskID\":\"%s.%d\",\"uuid\":\"" UUID_from_U32 "\",\"vendor\":%u"
+		"{\"messageType\":\"formatDrive\",\"messageTypeVersion\":1,\"payload\":{" DISK_ID_FMT ",\"vendor\":%u"
 		",\"formatType\":\"format_ec\",\"formatRequestCounter\":%u"
 		",\"blockSize\":4096,\"metadataSize\":8,\"bootTime\":%lu"
 		", " MGMT_DB_UUID_JSON "}}",
-		d->conf->serial, d->conf->name_space_id, d->conf->uuid, d->conf->vendor, d->format.counter_sent, boot_time);
+		DISK_ID_VAL(d->conf), d->conf->vendor, d->format.counter_sent, boot_time);
 }
 
 /* Management simulator state */
@@ -248,8 +249,8 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 			N->uuid>>16, N->hostname, N->uuid);
 		for (i = 0; i < (int)ARRAY_SIZE(N->disks); i++) {
 			const struct sb_disk_conf *D = &N->disks[i];
-			BUF_ADD("{\"diskID\":\"%s\",\"blocks\":%u,\"block_size\":%u,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"uuid\":\"" UUID_from_U32 "\",\"version\":7,\"isOutOfService\":%s},",
-				D->serial, D->num_blocks, D->block_size, D->vendor, D->uuid, (D->is_out_of_service ? "true" : "false"));
+			BUF_ADD("{" DISK_ID_FMT ",\"blocks\":%u,\"block_size\":%u,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"version\":7,\"isOutOfService\":%s},",
+				DISK_ID_VAL(D), D->num_blocks, D->block_size, D->vendor, (D->is_out_of_service ? "true" : "false"));
 		}
 		rv--;	// Remove the last uneeded ',' of the above array
 		BUF_ADD("],\"nics\":[");
@@ -501,8 +502,8 @@ void mgmt_sim_send_disk_report_req(const u32 disk_idx) {
 	const struct mgmt_sim_disk_status *d = &m->disks_st[disk_idx];
 	char *buf = malloc(512);
 	size_t len = snprintf(buf, 512,
-		"{\"messageType\":\"resendReport\",\"messageTypeVersion\":1,\"payload\":{\"drives\":[{\"diskID\":\"%s.%d\",\"uuid\":\"" UUID_from_U32 "\",\"vendor\":%u,\"reappearingCounter\":789576,\"reappearingOutOfSync\":1}],\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
-		d->conf->serial, d->conf->name_space_id, d->conf->uuid, d->conf->vendor, m->boot_time);
+		"{\"messageType\":\"resendReport\",\"messageTypeVersion\":1,\"payload\":{\"drives\":[{" DISK_ID_FMT ",\"vendor\":%u,\"reappearingCounter\":789576,\"reappearingOutOfSync\":1}],\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
+		DISK_ID_VAL(d->conf), d->conf->vendor, m->boot_time);
 	// Todo: Inject field reappearingCounter, from incomming message segmentsDirtyBitsUpdate
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
