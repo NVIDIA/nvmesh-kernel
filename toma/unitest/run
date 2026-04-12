@@ -155,10 +155,10 @@ case "$1" in
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
 	T_SANDBOX_main_self_unit_test;
+	T_SANDBOX_main_self_reuse_persistency_unit_test;
 	rm -f ${TOMA_TXT_LOGS};			# Not needed, if run succeeded, CI does not have to save the logs.
 	T_SANDBOX_incremental_topo_main;
 	rm -f ${TOMA_TXT_LOGS};			# Not needed, if run succeeded, CI does not have to save the logs.
-	T_SANDBOX_main_self_reuse_persistency_unit_test;
 	T_SANDBOX_toma_persist_json_test;
 	T_SANDBOX_gpt_util_self_unit_test;
 	T_SANDBOX_test_framework;
