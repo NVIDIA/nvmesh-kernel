@@ -45,6 +45,15 @@ extern void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
 /* nvmeibc_tpv_persist.c */
 extern void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
 
+/* ── Block device fops ─────────────────────────────────────────────────── */
+
+static const struct block_device_operations nvmeibc_tpv_fops = {
+	.owner     = THIS_MODULE,
+#if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
+	.submit_bio = nvmeibc_tpv_make_request,
+#endif
+};
+
 /* ── Module-level active-TPV list ──────────────────────────────────────
  *
  * All attached TPVs are registered here so that the MCS detach handler
@@ -139,7 +148,12 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 		kfree(ref);
 	}
 
-	/* free_tpv_extents entries are embedded in CDV_extent_refs; already freed. */
+	/*
+	 * free_tpv_extents entries: these track available physical slots within
+	 * allocated CDV_extents.  The concrete struct is defined in
+	 * nvmeibc_tpv_allocator.c (step 11b); freeing logic will be added there.
+	 * For now, reset the list head and counters.
+	 */
 	INIT_LIST_HEAD(&alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count = 0;
 	alloc->cdv_extents_count     = 0;
@@ -202,7 +216,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	/* ── Configure disk ─────────────────────────────────────────────── */
 	disk->major       = 0;		/* dynamic major via BLOCK_EXT_MAJOR */
 	disk->minors      = 1;
-	disk->fops        = NULL;	/* no ioctl; IO goes via make_request */
+	disk->fops        = &nvmeibc_tpv_fops;
 	disk->private_data = tpv;
 	queue->queuedata   = tpv;
 
@@ -254,18 +268,19 @@ static void nvmeibc_tpv_blkdev_unregister(struct nvmeibc_tpv *tpv)
 		return;
 
 	/*
-	 * Freeze the queue: waits for all in-flight make_request calls to
-	 * return and prevents new ones from starting.
+	 * del_gendisk marks the device as going away and prevents new
+	 * references.  On kernels >=5.15 it also drains in-flight IO.
 	 */
-	blk_mq_freeze_queue(tpv->queue);
-
 	del_gendisk(tpv->disk);
 
-#if KS_HAS_BLK_ALLOC_DISK || KS_HAS_BLK_CLEANUP_DISK
+#if KS_HAS_BLK_CLEANUP_DISK
+	/* blk_cleanup_disk does put_disk + queue cleanup */
 	blk_cleanup_disk(tpv->disk);
 #else
-	blk_cleanup_queue(tpv->queue);
 	put_disk(tpv->disk);
+#  if !KS_HAS_BLK_ALLOC_DISK
+	blk_cleanup_queue(tpv->queue);
+#  endif
 #endif
 
 	tpv->disk  = NULL;
@@ -330,11 +345,11 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
-	/* ── 3. Initialise allocator ────────────────────────────────────── */
+	/* ── 3a. Initialise allocator ───────────────────────────────────── */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
 				   virtual_size_bytes);
 
-	/* ── 3. Load allocator state from CDV_extent[0] ─────────────────── */
+	/* ── 3b. Load allocator state from CDV_extent[0] ────────────────── */
 	rv = nvmeibc_tpv_load_state(tpv);
 	if (rv < 0) {
 		pr_err("nvmeibc_tpv: load_state failed for %s (%d)\n",
@@ -487,4 +502,4 @@ void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 	tpv->allocator_generation = generation;
 	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
 }
-EXPORT_SYMBOL_GPL(nvmeibc_tpv_update_allocator_id);
+EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_id);

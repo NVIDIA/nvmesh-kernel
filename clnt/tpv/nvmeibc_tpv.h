@@ -22,7 +22,6 @@
 
 /* Forward declarations — full definitions live outside this header. */
 struct nvmeibc_volume;
-struct nvmeibc_block_device;
 
 /* ── Volume class discriminator ────────────────────────────────────────── */
 
