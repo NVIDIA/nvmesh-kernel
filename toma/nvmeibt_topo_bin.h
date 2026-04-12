@@ -23,31 +23,17 @@ void nvmeibt_convert_topo_le_be(void *src_topo, void* dst_topo, BOOL is_src_the_
 bool nvmeibt_topology_is_global_bin_topo(const void *topo_ptr);
 bool nvmeibt_topology_is_active_bin_topo(const void *topo_ptr);
 
-/**
- * Builder for constructing an ACT_TOPO wire buffer.
- *
- * Usage: init -> append (repeated) -> to_wire.
- * Caller fills each appended segment's fields via the returned pointer.
- */
-struct nvmeibt_act_topo_builder {
+// Expose: Builder for constructing an ACT_TOPO wire buffer. To be exeternally used by test environment
+// Usage: init -> append (repeated) -> to_wire. Caller fills each appended segment's fields via the returned pointer.
+ struct nvmeibt_act_topo_builder {
 	char											*buf;
 	int												buf_size;
 	int												n_segs;
 	int												topo_len;
 	struct nvmeibt_serialized_seg_active_topo		*next_seg;
 };
-
-/** Initialize builder. Caller provides output buffer. */
-void nvmeibt_act_topo_builder_init(struct nvmeibt_act_topo_builder *b,
-	char *buf, int buf_size);
-
-/** Reserve the next segment slot. Returns pointer for caller to fill,
- *  or NULL if buffer is full. Advances internal cursor and count. */
-struct nvmeibt_serialized_seg_active_topo *
-nvmeibt_act_topo_builder_append(struct nvmeibt_act_topo_builder *b);
-
-/** Write ACT_TOPO header and byte-swap everything to wire format.
- *  Buffer length is in b->topo_len. */
-void nvmeibt_act_topo_builder_to_wire(struct nvmeibt_act_topo_builder *b);
+void nvmeibt_act_topo_builder_init(struct nvmeibt_act_topo_builder *b, char *output_buf, int buf_size);		// Non null output buffer.
+struct nvmeibt_serialized_seg_active_topo *nvmeibt_act_topo_builder_append(struct nvmeibt_act_topo_builder *b);	// Reserve the next segment slot. or NULL if no space
+void nvmeibt_act_topo_builder_to_wire(const struct nvmeibt_act_topo_builder *b);							// Serialize built topology (buffer of size b->topo_len)
 
 #endif

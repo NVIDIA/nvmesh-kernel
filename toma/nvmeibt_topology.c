@@ -1252,7 +1252,6 @@ int nvmeibt_topology_serialize_active_topology(void)
 	nvmeibt_topology_follower_print((nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, print_s, serialized_and_wire_topo_buf->data_buf);
 	NVMEIBT_LONG_TRACE_WRAPPER(bhui345, 0, "SERIALIZED ACTIVE TOPOLOGY", nvmeibt_Str_str(print_s), nvmeibt_Str_strlen(print_s));
 	NNVMEIBT_STR_FREE(fy67tu9, print_s);
-	// Write header and convert header+segments to wire byte order
 	nvmeibt_act_topo_builder_to_wire(&builder);
 	// Slightly inefficient. First serialize into the topo_buf, and then copy it into the follower_to_leader_wire_buf
 	//  Memory wise, I could first allocate the follower_to_leader_wire_buf and serialize the topo in there
