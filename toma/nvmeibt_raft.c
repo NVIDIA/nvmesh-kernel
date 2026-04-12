@@ -4110,9 +4110,7 @@ static int raft_handle_append_entries(struct raft_msg *msg, struct nvmeibt_node 
 	}
 
 send_rep:
-#ifndef TOMA_SIMULATOR
 	nvmeibt_topology_serialize_active_topology();
-#endif
 	// Since I know nothing about the leader, and my topology buf is small, and already in
 	//  memory, I always send it.
 	if (rep_rv == RAFT_FOLLOWER_REP_RV_DEFERRED) {
