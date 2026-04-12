@@ -601,7 +601,7 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 			rd_kafka_destroy(rv);
 			rv = NULL;
 			// rd_kafka_topic_conf_destroy(topic_conf);
-		} else {} // topic destroys its conf as per rdkafka.h
+		} else { /* topic destroys its conf as per rdkafka.h */ }
 	}
 _out:
 	if (*cfg) {
