@@ -553,7 +553,7 @@ static void ldisk_jrnl_work(struct workqe_struct *work)
 		cl->jrnl_rng_n_ent = 0;
 		goto out;
 	} else {
-		cl->jrnl_rng = rv;
+		cl->jrnl_rng = ldisk->jrnl.rng_idx;
 		cl->jrnl_rng_binje = ldisk->jrnl.rng_binje;
 		cl->jrnl_rng_n_ent = ldisk->jrnl.n_ents;
 		if (IS_ERR(w->jrange_handle = nvmeibs_serjio_get_jrange_handle(
@@ -3588,7 +3588,7 @@ static void get_jrange(struct nvmeibs_client *cl, struct nvmeib_iu *recv_ioctx,
 		cl->jrnl_rng_binje = NVMEIB_EC_INVALID_JOURNAL_BINJE;
 		cl->jrnl_rng_n_ent = 0;
 	} else {
-		cl->jrnl_rng = rv;
+		cl->jrnl_rng = ctx.rsp->rng_idx;
 		cl->jrnl_rng_binje = ctx.rsp->rng_binje;
 		cl->jrnl_rng_n_ent = ctx.rsp->n_ents;
 
