@@ -311,8 +311,15 @@ case "$1" in
 				if [ "$expected_pid" -gt "$max_pid" ]; then
 					expected_pid=1
 				fi
-				core_file=`ls -t core*|head -1`
-				if [ -z $core_file ]; then
+				core_file=$(ls -t core* 2>/dev/null | head -1)
+				if [ -z "$core_file" ] && command -v coredumpctl >/dev/null 2>&1; then
+					# systemd-coredump: extract by crashing PID, same filename as in-cwd cores
+					exp_core="$dir/core.$expected_pid"
+					if coredumpctl dump -o "$exp_core" "$expected_pid" 2>/dev/null && [ -s "$exp_core" ]; then
+						core_file="core.$expected_pid"
+					fi
+				fi
+				if [ -z "$core_file" ]; then
 					core_pat=`cat /proc/sys/kernel/core_pattern`
 					write_mutiple "Could not find core file in current directory $dir, expected core pattern: $core_pat, expected core name core.$expected_pid"
 					echo "CORE:None" >> $result_file
