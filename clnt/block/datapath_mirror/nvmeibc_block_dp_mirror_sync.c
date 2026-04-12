@@ -8,6 +8,7 @@
 #include "block/recovery/nvmeibc_block_dp_sync_no_write_hole.h"
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"
+#include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 #include "../datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"

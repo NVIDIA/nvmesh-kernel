@@ -322,6 +322,80 @@ static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_co
 	}
 }
 
+/*
+ * Mirror/EC sync disk completions go through dp_[mirror|ec]_block_completion -> dp_[mirror|ec]_sync_cmd_cb,
+ * not dp_cmds_analyze_rv_and_complete, so __nvmeibc_cmd_completion_pet_describe() never runs for
+ * RECOVER_DB / stale / etc.
+ * READ batch: disk_io.response + completion content per leg (ndb).
+ * WRITE batch: disk_io.response only (content on write *completion* is suppressed by
+ * __nvmeibc_cmd_data_and_metadata_pet_should_describe; request-time content still comes from execute PET).
+ */
+void nvmeibc_sync_cmd_response_pet_describe(struct nvmeibc_block_command *trigger_cmd)
+{
+	struct nvmeibc_block_command *cmds, *rldr;
+	int i, li, ncmds;
+	int top_op;
+	bool standalone_io_per_segment;
+
+	if (!trigger_cmd || !trigger_cmd->cmdarr)
+		return;
+	top_op = trigger_cmd->iocmd->reqs1.op;
+	cmds = trigger_cmd->cmdarr;
+	li = trigger_cmd->my_leader;
+	BUG_ON(li != 0); // Sync in mirror and EC datapath assumes first command is the leader.
+	rldr = &cmds[li];
+	BUG_ON(rldr->o == NULL);
+	/**
+	 * For typical mirror/EC datapath IO, command array (trigger_cmd->cmdarr) and
+	 * operation's command array (rldr->o->cmds) stay equal.
+	 * Hot recovery is a special case where each segment is handled as a standalone IO.
+	 * This is done by setting .nraid_siblings to 0 and allocating a new set of
+	 * commands for each batch not linking to the operation's command array.
+	 *
+	 * There is no dedicated op code for hot recovery, but only NVMEIB_BLOCK_IO_OP_RECOVER_STALE
+	 * is used.
+	 */
+	standalone_io_per_segment = (trigger_cmd->cmdarr != rldr->o->cmds);
+	/**
+	 * Skip PET if nraid_siblings is 0 and standalone_io_per_segment is
+	 * true(e.g., Hot recovery), for all the standalone I/Os will compete
+	 * the PET journal access.
+	 *
+	 * Mirror datapath does not initialize .nraid_siblings but its command array
+	 * is the same as the operation's command array. So we fall back to .ncmds
+	 * to get the number of commands.
+	 */
+	ncmds = cmds[li].nraid_siblings;
+	if (ncmds == 0 && !standalone_io_per_segment) {
+		ncmds = cmds[li].ncmds;
+	}
+	/*
+	 * Only handles reads and writes. Walk through all commands in the same stage and log
+	 * the response and data/metadata.
+	 */
+	if (top_op == NVMEIB_BLOCK_IO_OP_READ) {
+		for (i = li; i < li + ncmds; ++i) {
+			struct nvmeibc_block_command *cmd = &cmds[i];
+			if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
+				continue;
+			if (cmd->iocmd->reqs1.op != NVMEIB_BLOCK_IO_OP_READ || !cmd->iocmd->reqs1.ndb)
+				continue;
+			nvmeibc_cmd_disk_io_complete_response_pet_describe(cmds->o, cmd);
+			__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, true);
+		}
+	} else if (top_op == NVMEIB_BLOCK_IO_OP_WRITE) {
+		// Handles all writes altogether, as read and write cmds can be interleaved in the same stage.
+		for (i = li; i < li + ncmds; ++i) {
+			struct nvmeibc_block_command *cmd = &cmds[i];
+			if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
+				continue;
+			if (cmd->iocmd->reqs1.op != NVMEIB_BLOCK_IO_OP_WRITE)
+				continue;
+			nvmeibc_cmd_disk_io_complete_response_pet_describe(cmds->o, cmd);
+		}
+	}
+}
+
 static void __nvmeibc_cmd_piggyback_request_pet_describe(struct operation *o, struct nvmeibc_disk_io_command const *cmd)
 {
 	struct nvmeibc_d_rdma_comp const *rdma_comp;
@@ -794,7 +868,7 @@ static void __nvmeibc_cmd_piggyback_response_pet_describe(struct operation *o, s
 	}
 }
 
-static void __nvmeibc_cmd_disk_io_complete_response_pet_describe(struct operation *o, struct nvmeibc_block_command *cmd)
+void nvmeibc_cmd_disk_io_complete_response_pet_describe(struct operation *o, struct nvmeibc_block_command *cmd)
 {
 	NVMEIBC_IO_PET_MSG(&o->journal,
 		"disk_io.response(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
@@ -811,7 +885,7 @@ static inline void __nvmeibc_cmd_completion_pet_describe(struct operation *o, st
 		struct nvmeibc_block_command *cmd = &cmds[i];
 		if (rldr->raid_cur_stage != cmd->my_stage || cmd->do_not_send)
 			continue;
-		__nvmeibc_cmd_disk_io_complete_response_pet_describe(o, cmd);
+		nvmeibc_cmd_disk_io_complete_response_pet_describe(o, cmd);
 		__nvmeibc_cmd_piggyback_response_pet_describe(o, rldr, cmd);
 		__nvmeibc_cmd_data_and_metadata_pet_describe(rldr, /*is_completion=*/true);
 	}

@@ -355,15 +355,15 @@ void recovery_sync_stack_to_string(const struct recovery_sync_stack *st, char bu
 static inline int dp_sync_cmd_generic_cb(struct nvmeibc_block_command *cmd)
 {
 	struct nvmeibc_block_command *c0 = cmd->cmdarr;
-	int rv, i;
+	int n_uncompleted_cmds;
 	cmd->o_rv = cmd->iocmd->comp.comp_code;			// Note: Works for iocmd, irrelevant for cmd->gen_cmd
 	WARN_ON_ONCE((u32)(cmd-c0) >= (u32)c0->ncmds); /* Not: c0 <= cmd < ncmds */
 	/* WARNING: Do the dec only after we update status of cmd and all OTHER
 	   thats other commands may access! */
-	rv = nvmeibc_atomic_dec_return(&c0->n_uncompleted_cmds);
-	WARN_ON(rv < 0);
+	n_uncompleted_cmds = nvmeibc_atomic_dec_return(&c0->n_uncompleted_cmds);
+	WARN_ON(n_uncompleted_cmds < 0);
 	#if defined(DEBUG_TRANSFERS) && defined(DEBUG_TRANSFERS_DETECT_FAIL_TO_UNMAP)
-	if (rv == 0) {
+	if (n_uncompleted_cmds == 0) {
 		int i;
 		for (i = 0; i < c0->nraid_siblings; i++) {
 			if (c0[i].iocmd && c0[i].iocmd->disk_cmd.in_flight) {
@@ -379,18 +379,10 @@ static inline int dp_sync_cmd_generic_cb(struct nvmeibc_block_command *cmd)
 		}
 	}
 	#endif
-	if (rv == 0) {
-		for (i = 0; i < c0->nraid_siblings; ++i) {
-			if (c0[i].do_not_send)
-				continue; // Skip commands that were not sent
-			NVMEIBC_IO_PET_MSG_NORM(
-				&cmd->o->journal,
-				"sync_cmd.response(op=0x%hhu<enum nvmeib_block_io_op>, seg_idx=%hhu) = %d",
-				(u8)cmd->iocmd->reqs1.op, numeric_downcast(u8, nvmeibc_dp_get_sgmnt_idx_from_ds(c0[i].ds)),
-				c0[i].o_rv);
-		}
+	if (n_uncompleted_cmds == 0) {
+		nvmeibc_sync_cmd_response_pet_describe(cmd);
 	}
-	return rv;
+	return n_uncompleted_cmds;
 }
 
 static inline void nvmeibc_sync_set_uncompleted_cmds(struct recovery_sync_op *so, int n_cmds)

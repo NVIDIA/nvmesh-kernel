@@ -155,6 +155,11 @@ size_t                        dp_cmds_calc_size(    u32 ncmds);										// Calc
 void dp_cmds_free_all(  struct nvmeibc_block_command *cmds);
 void dp_cmds_free_split(struct nvmeibc_block_command *cmds);	// After TRIM split, free previous unneeded commands
 
+/* PET for sync commands: after a parallel disk batch finishes; PET read response+ndb per leg, write response only. */
+void nvmeibc_sync_cmd_response_pet_describe(struct nvmeibc_block_command *trigger_cmd);
+/* PET for disk IO commands: after a command finishes; PET response+content. */
+void nvmeibc_cmd_disk_io_complete_response_pet_describe(struct operation *o, struct nvmeibc_block_command *cmd);
+
 u64  dp_cmds_req_alloc_unique_id(void);
 
 /* Fill request to transport layer of n'th command in the array*/
