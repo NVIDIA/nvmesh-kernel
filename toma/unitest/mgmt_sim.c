@@ -249,8 +249,9 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 			N->uuid>>16, N->hostname, N->uuid);
 		for (i = 0; i < (int)ARRAY_SIZE(N->disks); i++) {
 			const struct sb_disk_conf *D = &N->disks[i];
-			BUF_ADD("{" DISK_ID_FMT ",\"blocks\":%u,\"block_size\":%u,\"activeFormatRequestCounter\":1,\"vendorID\":%d,\"version\":7,\"isOutOfService\":%s},",
-				DISK_ID_VAL(D), D->num_blocks, D->block_size, D->vendor, (D->is_out_of_service ? "true" : "false"));
+			const u32 fmt_counter = (n==0) ? m->disks_st[i].format.counter_sent : 1;	// Live toma formats disks, for simulated toma generation is irrelevant.
+			BUF_ADD("{" DISK_ID_FMT ",\"blocks\":%u,\"block_size\":%u,\"activeFormatRequestCounter\":%u,\"vendorID\":%d,\"version\":7,\"isOutOfService\":%s},",
+				DISK_ID_VAL(D), D->num_blocks, D->block_size, fmt_counter, D->vendor, (D->is_out_of_service ? "true" : "false"));
 		}
 		rv--;	// Remove the last uneeded ',' of the above array
 		BUF_ADD("],\"nics\":[");
