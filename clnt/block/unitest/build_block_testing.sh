@@ -303,7 +303,11 @@ case "$1" in
 				echo "RC:$retcode" > $result_file
 				write_mutiple "Failed with exit code: $retcode"
 				expected_pid=$((ppid + 1))
-				max_pid=32768
+				if [ -r /proc/sys/kernel/pid_max ]; then
+					max_pid=$(cat /proc/sys/kernel/pid_max)
+				else
+					max_pid=32768
+				fi
 				if [ "$expected_pid" -gt "$max_pid" ]; then
 					expected_pid=1
 				fi
