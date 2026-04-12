@@ -115,6 +115,13 @@ extern int nvmeibc_ib_admin_cdv_free_extent(
 extern int nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv,
 					   u64 extent_index);
 
+/*
+ * Monotonically increasing request ID across all CDV_ALLOC_EXTENT requests
+ * from all TPVs on this client node.  Provides idempotency on the TOMA side
+ * if the same request is retried after allocator failover.
+ */
+static atomic64_t nvmeibc_tpv_req_id_counter = ATOMIC64_INIT(0);
+
 /* ── nvmeibc_tpv_free_slots_list ────────────────────────────────────────────
  *
  * Walk and free all nvmeibc_tpv_free_slot entries on a list.  Called from
@@ -274,15 +281,28 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 
 	/*
 	 * Allocate a free_slot to re-insert the physical region.  GFP_ATOMIC
-	 * because we may be in IO context.  On failure the physical region is
-	 * not returned to the free pool; it becomes a "dark" slot that persists
-	 * until the next TPV re-attach / recovery.
+	 * because we may be in IO context.  On failure the physical slot is
+	 * not returned to the free pool, but we still decrement allocated_count
+	 * so the owning CDV_extent can eventually be returned to TOMA.  The
+	 * "dark" slot persists until the next TPV re-attach / recovery.
 	 */
 	slot = kzalloc(sizeof(*slot), GFP_ATOMIC);
 	if (!slot) {
-		pr_warn_ratelimited("nvmeibc_tpv: %s: kzalloc failed in free_extent virt_idx=%llu; slot inaccessible until recovery\n",
+		u64 lost_idx = entry->cdv_extent_index;
+
+		pr_warn_ratelimited("nvmeibc_tpv: %s: kzalloc failed in free_extent virt_idx=%llu; slot lost until recovery\n",
 				    tpv->tpv_name, virt_idx);
 		kfree(entry);
+
+		/* Still update allocated_count so the CDV_extent isn't leaked. */
+		spin_lock(&alloc->lock);
+		list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+			if (ref->extent_index == lost_idx) {
+				ref->allocated_count--;
+				break;
+			}
+		}
+		spin_unlock(&alloc->lock);
 		return 0;	/* bio still completes; slot loss is non-fatal */
 	}
 
@@ -305,34 +325,36 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 		}
 	}
 
-	if (!WARN_ON(!found_ref) && found_ref->allocated_count > 0) {
-		found_ref->allocated_count--;
+	if (WARN_ON(!found_ref))
+		goto out_unlock;
 
-		if (found_ref->allocated_count == 0) {
-			/*
-			 * All TPV_extents within this CDV_extent are free.
-			 * Remove all its slots from free_tpv_extents (they
-			 * cannot be reused once the extent is returned) and
-			 * move the ref to pending_return_list for deferred
-			 * CDV_FREE_EXTENT processing.
-			 */
-			list_del(&found_ref->node);
-			alloc->cdv_extents_count--;
+	found_ref->allocated_count--;
 
-			list_for_each_entry_safe(s, stmp,
-						 &alloc->free_tpv_extents, node) {
-				if (s->cdv_extent_index == found_ref->extent_index) {
-					list_del(&s->node);
-					alloc->free_tpv_extent_count--;
-					kfree(s);
-				}
+	if (found_ref->allocated_count == 0) {
+		/*
+		 * All TPV_extents within this CDV_extent are free.
+		 * Remove all its slots from free_tpv_extents (they
+		 * cannot be reused once the extent is returned) and
+		 * move the ref to pending_return_list for deferred
+		 * CDV_FREE_EXTENT processing.
+		 */
+		list_del(&found_ref->node);
+		alloc->cdv_extents_count--;
+
+		list_for_each_entry_safe(s, stmp,
+					 &alloc->free_tpv_extents, node) {
+			if (s->cdv_extent_index == found_ref->extent_index) {
+				list_del(&s->node);
+				alloc->free_tpv_extent_count--;
+				kfree(s);
 			}
-
-			list_add_tail(&found_ref->node, &alloc->pending_return_list);
-			schedule_work_flag = true;
 		}
+
+		list_add_tail(&found_ref->node, &alloc->pending_return_list);
+		schedule_work_flag = true;
 	}
 
+out_unlock:
 	spin_unlock(&alloc->lock);
 
 	/* Mark dirty: the tree leaf for this virt_idx must be cleared. */
@@ -420,7 +442,8 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 {
 	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
 	struct nvmeibc_cdv_extent_ref *ref;
-	struct nvmeibc_tpv_free_slot  **slots;
+	struct nvmeibc_tpv_free_slot  *fs, *fstmp;
+	LIST_HEAD(batch);
 	u64 n_slots;
 	u64 s;
 	int rv;
@@ -438,7 +461,7 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 		return rv;
 	}
 
-	ref = kzalloc(sizeof(*ref), GFP_KERNEL);
+	ref = kzalloc(sizeof(*ref), GFP_NOIO);
 	if (!ref)
 		return -ENOMEM;
 
@@ -446,40 +469,36 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	ref->allocated_count = 0;
 	INIT_LIST_HEAD(&ref->node);
 
-	/* Allocate all slot structs upfront (not under the spinlock). */
-	slots = kmalloc_array(n_slots, sizeof(*slots), GFP_KERNEL);
-	if (!slots) {
-		kfree(ref);
-		return -ENOMEM;
-	}
-
+	/*
+	 * Allocate all slot structs into a local batch list (no pointer array).
+	 * This avoids a large contiguous allocation that would fail at extreme
+	 * n_slots (e.g. 1M when CDV extent = 64 GB, TPV extent = 64 KB).
+	 *
+	 * GFP_NOIO: we are a storage driver — GFP_KERNEL can trigger writeback
+	 * that re-enters this driver, causing deadlock.
+	 */
 	for (s = 0; s < n_slots; s++) {
-		slots[s] = kzalloc(sizeof(**slots), GFP_KERNEL);
-		if (!slots[s]) {
-			u64 i;
-
-			for (i = 0; i < s; i++)
-				kfree(slots[i]);
-			kfree(slots);
+		fs = kzalloc(sizeof(*fs), GFP_NOIO);
+		if (!fs) {
+			list_for_each_entry_safe(fs, fstmp, &batch, node) {
+				list_del(&fs->node);
+				kfree(fs);
+			}
 			kfree(ref);
 			return -ENOMEM;
 		}
-		slots[s]->phys_offset      = tpv_slot_phys_offset(alloc, extent_index, s);
-		slots[s]->cdv_extent_index = extent_index;
-		INIT_LIST_HEAD(&slots[s]->node);
+		fs->phys_offset      = tpv_slot_phys_offset(alloc, extent_index, s);
+		fs->cdv_extent_index = extent_index;
+		list_add_tail(&fs->node, &batch);
 	}
 
-	/* Insert everything under the allocator lock. */
+	/* Splice everything into the allocator under the lock. */
 	spin_lock(&alloc->lock);
 	list_add_tail(&ref->node, &alloc->cdv_extent_list);
 	alloc->cdv_extents_count++;
-	for (s = 0; s < n_slots; s++) {
-		list_add_tail(&slots[s]->node, &alloc->free_tpv_extents);
-		alloc->free_tpv_extent_count++;
-	}
+	list_splice_tail(&batch, &alloc->free_tpv_extents);
+	alloc->free_tpv_extent_count += n_slots;
 	spin_unlock(&alloc->lock);
-
-	kfree(slots);		/* pointer array done; individual structs are on the list */
 
 	pr_info("nvmeibc_tpv: %s: CDV_extent[%llu] ready, %llu slots added (pool total: %llu)\n",
 		tpv->tpv_name, extent_index, n_slots,
@@ -518,13 +537,6 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	unsigned long flags;
 	int      rv;
 
-	/*
-	 * req_id counter: monotonically increasing across all CDV_ALLOC_EXTENT
-	 * requests for all TPVs on this client node.  Provides idempotency on
-	 * TOMA side if the same request is retried.
-	 */
-	static atomic64_t req_id_counter = ATOMIC64_INIT(0);
-
 	if (atomic_read(&tpv->state) == TPV_DETACHING)
 		goto out_clear_pending;
 
@@ -556,7 +568,7 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	memset(&req, 0, sizeof(req));
 	strncpy(req.tpv_uuid, tpv->tpv_uuid, sizeof(req.tpv_uuid) - 1);
 	strncpy(req.cdv_uuid, tpv->cdv_vol->hdr.uuid, sizeof(req.cdv_uuid) - 1);
-	req.req_id            = (u64)atomic64_inc_return(&req_id_counter);
+	req.req_id            = (u64)atomic64_inc_return(&nvmeibc_tpv_req_id_counter);
 	req.client_generation = client_gen;
 
 	pr_debug("nvmeibc_tpv: %s: CDV_ALLOC_EXTENT → %s gen=%llu req_id=%llu\n",
