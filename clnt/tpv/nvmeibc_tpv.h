@@ -87,9 +87,12 @@ enum nvmeibc_tpv_state {
 struct nvmeibc_tpv {
 	struct nvmeibc_volume        *cdv_vol;		/* parent CDV volume pointer */
 	struct nvmeibc_tpv_allocator  allocator;
-	struct nvmeibc_block_device  *block_dev;	/* virtual gendisk for this TPV */
+
+	struct gendisk               *disk;		/* virtual gendisk visible to user space */
+	struct request_queue         *queue;		/* IO queue pointing to tpv_make_request */
 
 	char                          tpv_uuid[NVMEIBC_BD_UUID_LEN];
+	char                          tpv_name[NVMEIBC_BD_NAME_LEN];	/* human-readable name */
 	u64                           virtual_size;	/* bytes */
 	atomic_t                      state;		/* enum nvmeibc_tpv_state */
 
@@ -109,6 +112,9 @@ struct nvmeibc_tpv {
 	struct work_struct            persist_work;
 	spinlock_t                    persist_lock;
 	bool                          dirty;
+
+	/* Entry in the per-client active TPV list. */
+	struct list_head              list_node;
 };
 
 /* ── L1/L2/L3 tree on-disk entry format (CDV_extent[0]) ───────────────── */
@@ -128,12 +134,29 @@ struct tpv_tree_entry {
 
 /* ── Public API (implemented in nvmeibc_tpv.c) ────────────────────────── */
 
-int  nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
-			const char *tpv_uuid,
-			u64 virtual_size_bytes,
-			u32 tpv_extent_size_kb);
+/* Returns the new nvmeibc_tpv on success, NULL on error. */
+struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
+					const char *tpv_name,
+					const char *tpv_uuid,
+					u64 virtual_size_bytes,
+					u32 tpv_extent_size_kb);
 
 void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv);
+
+/* Handle UpdateVolume MCS: grow virtual size and update gendisk capacity. */
+void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes);
+
+/* Look up an active TPV by UUID across all instances. */
+struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid);
+
+/*
+ * Update the CDV.allocator TOMA identity after a topology push.
+ * Callers must fence in-flight CDV_ALLOC_EXTENT requests with the old
+ * generation before accepting responses from the new allocator.
+ */
+void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
+				     const char *toma_id,
+				     u64 generation);
 
 /* ── Allocator API (implemented in nvmeibc_tpv_allocator.c) ───────────── */
 
