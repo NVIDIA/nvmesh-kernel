@@ -589,6 +589,8 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		if (rv)
 			pr_err("nvmeibc_tpv: %s: tpv_on_cdv_alloc_ok(%llu) failed (%d)\n",
 			       tpv->tpv_name, resp.extent_index, rv);
+		else
+			nvmeibc_tpv_retry_pending_bios(tpv);
 		break;
 
 	case NVMEIBC_CDV_ALLOC_CDV_FULL:

@@ -48,10 +48,25 @@ extern void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
 
 /* ── Block device fops ─────────────────────────────────────────────────── */
 
+/*
+ * On kernels without make_request_fn (≥5.9), submit_bio fops takes a single
+ * (struct bio *) argument, not (queue *, bio *).  Bridge the gap here so
+ * nvmeibc_tpv_make_request keeps the canonical (q, bio) signature used by all
+ * NVMesh make_request implementations.
+ */
+#if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
+static REQ_RET nvmeibc_tpv_submit_bio_wrapper(struct bio *bio)
+{
+	struct nvmeibc_tpv *tpv = bio_gendisk(bio)->private_data;
+
+	return nvmeibc_tpv_make_request(tpv->queue, bio);
+}
+#endif
+
 static const struct block_device_operations nvmeibc_tpv_fops = {
 	.owner     = THIS_MODULE,
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
-	.submit_bio = nvmeibc_tpv_make_request,
+	.submit_bio = nvmeibc_tpv_submit_bio_wrapper,
 #endif
 };
 
@@ -238,6 +253,15 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, queue);
 
 	/*
+	 * Instruct the block layer to split bios at TPV_extent boundaries.
+	 * This guarantees that every bio arriving in nvmeibc_tpv_make_request
+	 * is fully contained within one TPV_extent (no cross-extent splits in
+	 * the IO path).  chunk_sectors is in 512-byte units.
+	 */
+	blk_queue_chunk_sectors(queue,
+		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1));
+
+	/*
 	 * Add with zero capacity first to avoid deadlock (see comment in
 	 * __add_disk_io_starts_b4_func_ends in nvmeibc_block_api_os.c).
 	 */
@@ -357,6 +381,9 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
+	bio_list_init(&tpv->pending_bios);
+	spin_lock_init(&tpv->pending_bio_lock);
+
 	/* ── 3a. Initialise allocator ───────────────────────────────────── */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
 				   virtual_size_bytes, cdv_extent_size_mb,
@@ -439,6 +466,22 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	/* ── 1. Remove from active list and cancel pending work ────────── */
 	cancel_work_sync(&tpv->cdv_alloc_work);
 	cancel_work_sync(&tpv->persist_work);
+
+	/* ── 1b. Fail any bios parked waiting for CDV_extent allocation ─── */
+	{
+		struct bio_list  pending;
+		struct bio      *bio;
+		unsigned long    flags;
+
+		bio_list_init(&pending);
+		spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+		bio_list_merge(&pending, &tpv->pending_bios);
+		bio_list_init(&tpv->pending_bios);
+		spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+		while ((bio = bio_list_pop(&pending)) != NULL)
+			bio_endio(bio, -EIO);
+	}
 
 	/* ── 2. Flush dirty allocator state synchronously ───────────────── */
 	if (tpv->dirty) {

@@ -128,6 +128,15 @@ struct nvmeibc_tpv {
 	struct work_struct            cdv_alloc_work;
 	atomic_t                      cdv_alloc_pending;
 
+	/*
+	 * Bios blocked waiting for free TPV_extent slots.
+	 * Protected by pending_bio_lock (irqsave).
+	 * Drained by nvmeibc_tpv_retry_pending_bios() after new CDV_extent slots
+	 * arrive via tpv_on_cdv_alloc_ok().
+	 */
+	struct bio_list               pending_bios;
+	spinlock_t                    pending_bio_lock;
+
 	/* Deferred persistence of allocator state to CDV_extent[0]. */
 	struct work_struct            persist_work;
 	spinlock_t                    persist_lock;
@@ -151,6 +160,14 @@ struct tpv_tree_entry {
 };
 
 #define TPV_TREE_NULL  0ULL
+
+/* ── IO API (implemented in nvmeibc_tpv_io.c) ─────────────────────────── */
+
+/*
+ * Re-dispatch bios parked on tpv->pending_bios after new TPV_extent slots
+ * arrive.  Called from cdv_alloc_work context (process context, may sleep).
+ */
+void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv);
 
 /* ── Public API (implemented in nvmeibc_tpv.c) ────────────────────────── */
 

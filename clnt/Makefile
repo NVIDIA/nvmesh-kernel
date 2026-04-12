@@ -110,6 +110,9 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	block/derived_apis/nvmeibc_block_api_d_carrier.o \
 	../toma/clnt/nvmeibt_client_protocol.o \
 	vex/nvmeibc_vex_shared.o \
+	tpv/nvmeibc_tpv.o \
+	tpv/nvmeibc_tpv_allocator.o \
+	tpv/nvmeibc_tpv_io.o \
 	traces_ids.o
 
 ifneq ($(filter $(CORE_UNITEST), true yes),)
