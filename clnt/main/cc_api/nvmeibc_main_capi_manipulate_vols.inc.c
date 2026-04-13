@@ -435,6 +435,11 @@ static void __detach_all_volumes_of_inst_work(struct workqe_struct *_w)
 	const struct nvmeibc_vol_detach_cmd how = (w->is_upgrade) ? nvmeibc_vol_detach_cmd_upgrade() : nvmeibc_vol_detach_cmd_shutdown();
 	struct nvmeibc_volume *volume, *tvolume;
 	nvmeibc_assert_on_main_wq(w->p);
+
+	/* Detach TPVs first (synchronous, no multi_completion needed) so their
+	 * cdv_vol pointers are still valid when we detach the CDVs below. */
+	nvmeibc_tpv_detach_all_for_inst(w->p);
+
 	nvmeibc_multi_completion_add_aux_jobs(&w->on_finish, num_devs);
 	_NI(i_01_main_davw, "Instance @STR, Starting to detach all: @INT volumes", w->p->proc_dir_root_name, num_devs);
 	list_for_each_entry_safe(volume, tvolume, nvmeibc_get_mt_volumes(w->p), link) {

@@ -106,6 +106,36 @@ struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid)
 	return NULL;
 }
 
+/*
+ * nvmeibc_tpv_detach_all_for_inst — detach every active TPV that belongs to
+ * client instance @cinst (identified by tpv->cdv_vol->p).
+ *
+ * Must be called BEFORE the CDVs of the same instance are detached, so that
+ * tpv->cdv_vol is still valid when we read its ->p field.  Called from
+ * __detach_all_volumes_of_inst_work() in nvmeibc_main_capi_manipulate_vols.
+ *
+ * Each nvmeibc_tpv_detach() removes the TPV from nvmeibc_tpv_active_list
+ * internally, so we restart the search from the list head after each detach.
+ */
+void nvmeibc_tpv_detach_all_for_inst(const struct nvmeibc_cinst_params_main *cinst)
+{
+	struct nvmeibc_tpv *tpv;
+	unsigned long flags;
+
+again:
+	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
+	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
+		if (tpv->cdv_vol && tpv->cdv_vol->p == cinst) {
+			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+			_NI(tpv_shutdown_detach, "TPV: @STR detaching as part of instance shutdown",
+			    tpv->tpv_name);
+			nvmeibc_tpv_detach(tpv);
+			goto again;
+		}
+	}
+	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+}
+
 /* ── Allocator helpers ─────────────────────────────────────────────────── */
 
 /*
@@ -355,6 +385,10 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 * gap or status-reporting race).  If the TPV is already in the
 	 * active list, return it so the caller sends ACK_ATTACHED again
 	 * without touching the disk or allocator.
+	 *
+	 * Also refresh cdv_vol in case the CDV was detached and re-attached
+	 * (new nvmeibc_volume object) while the TPV was still live — without
+	 * this, tpv->cdv_vol would be a dangling pointer.
 	 */
 	{
 		struct nvmeibc_tpv *existing = nvmeibc_tpv_find_by_uuid(tpv_uuid);
@@ -363,6 +397,12 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 			_NI(tpv_already_attached,
 			    "TPV: @STR already attached; returning existing tpv",
 			    tpv_name);
+			if (existing->cdv_vol != cdv) {
+				_NI(tpv_cdv_ptr_refreshed,
+				    "TPV: @STR refreshing stale cdv_vol pointer",
+				    tpv_name);
+				existing->cdv_vol = cdv;
+			}
 			return existing;
 		}
 	}

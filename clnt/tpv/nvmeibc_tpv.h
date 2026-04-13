@@ -23,6 +23,7 @@
 
 /* Forward declarations — full definitions live outside this header. */
 struct nvmeibc_volume;
+struct nvmeibc_cinst_params_main;
 
 /* ── Volume class discriminator ────────────────────────────────────────── */
 
@@ -237,6 +238,12 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes);
 
 /* Look up an active TPV by UUID across all instances. */
 struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid);
+
+/*
+ * Detach every active TPV whose parent CDV belongs to @cinst.
+ * Must be called BEFORE the CDVs of the same instance are detached.
+ */
+void nvmeibc_tpv_detach_all_for_inst(const struct nvmeibc_cinst_params_main *cinst);
 
 /*
  * Update the CDV.allocator TOMA identity after a topology push.

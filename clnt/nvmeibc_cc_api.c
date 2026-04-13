@@ -22,6 +22,7 @@
 #include "nvmeib_public_procfs.h"
 #include "nvmeib_msgloop.h"
 #include "nvmeibc_volume.h"					// Todo: Remove
+#include "tpv/nvmeibc_tpv.h"				/* nvmeibc_tpv_find_by_uuid, nvmeibc_tpv_detach */
 #include "atom/nvmeiba_nvmesh_api.h"
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"
 #include "nvmeib_public.h"
@@ -833,13 +834,28 @@ static int __detach_vol_by_uuid_on_main_wq(void *_p)
 	struct nvmeibc_volume *volume = nvmeibc_volume_get_by_uuid(i, volume_uuid, UNKNOWN_ILLEGAL);
 	if (!volume) {
 		struct nvmeibc_volume_header hdr = {0};
+		struct nvmeibc_tpv *tpv;
 		__nvmeibc_volume_header_create_from_uuid(&hdr, volume_uuid);
-		#if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)
-			send_unknown_volume_to_cli(cc_api, volume_uuid, true); // TODO - replace cli parsing with MCS response for simulator
-		#endif
-		// Should we update mgmt (MCS) with detached status? If the volume is not found (not attached) it is certainly detached - Ask Tom
-		_NE(t0dvbuomq, "Incorrect volume @HDR_UUID", volume_uuid);
-		nvmeibc_cc_api_reply_vol_cmd_status(i, &hdr, NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED_UNKNOWN_VOLUME, NVMEIB_C_TO_M_IO_TYPE_PERMIT_NEVER, false /*send_to_cli*/, true/*send_to_mcs*/, 0 /* inc_report_id_if_needed */);
+
+		/* TPVs are not tracked in the nvmeibc_volume list; look them up
+		 * in the separate nvmeibc_tpv_active_list and detach directly. */
+		tpv = nvmeibc_tpv_find_by_uuid(volume_uuid);
+		if (tpv) {
+			_NI(tpv_mcs_detach, "TPV @HDR_UUID: MCS detach dispatched to nvmeibc_tpv_detach", volume_uuid);
+			nvmeibc_tpv_detach(tpv);
+			nvmeibc_cc_api_reply_vol_cmd_status(i, &hdr, NVMEIB_C_TO_M_VOLUME_ACK_DETACHED,
+				NVMEIB_C_TO_M_IO_TYPE_PERMIT_NEVER, false /*send_to_cli*/, true /*send_to_mcs*/,
+				0 /* inc_report_id_if_needed */);
+		} else {
+			#if defined(BLKDEV_SIMULATOR) && (BLKDEV_SIMULATOR==1)
+				send_unknown_volume_to_cli(cc_api, volume_uuid, true); // TODO - replace cli parsing with MCS response for simulator
+			#endif
+			// Should we update mgmt (MCS) with detached status? If the volume is not found (not attached) it is certainly detached - Ask Tom
+			_NE(t0dvbuomq, "Incorrect volume @HDR_UUID", volume_uuid);
+			nvmeibc_cc_api_reply_vol_cmd_status(i, &hdr, NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED_UNKNOWN_VOLUME,
+				NVMEIB_C_TO_M_IO_TYPE_PERMIT_NEVER, false /*send_to_cli*/, true /*send_to_mcs*/,
+				0 /* inc_report_id_if_needed */);
+		}
 	} else {
 		const int mcs_av = p->attachment_version;
 		const int vol_av = volume->hdr.attachment_version;
