@@ -179,6 +179,7 @@ struct nvmeibc_tpv {
 	struct nvmeib_public_procfs_ent      *proc_allocator;
 	struct nvmeib_public_procfs_ent      *proc_extent_map;
 	struct nvmeib_public_procfs_ent      *proc_stats;
+	struct nvmeib_public_procfs_ent      *proc_selftest;
 };
 
 /* ── L1/L2/L3 tree on-disk entry format (CDV_extent[0]) ───────────────── */

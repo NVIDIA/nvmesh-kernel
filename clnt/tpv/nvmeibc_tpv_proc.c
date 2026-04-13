@@ -28,6 +28,7 @@
 
 #include "common/kr_incs.h"
 #include "nvmeibc_tpv.h"
+#include "nvmeibc_tpv_test.h"		/* nvmeibc_tpv_run_selftests */
 #include "module/nvmeibc_module_main.h"	/* nvmeibc_get_module_proc_dir_entry */
 
 /* ── Module-level TPV proc root (/proc/nvmeibc/tpv/) ───────────────────── */
@@ -265,6 +266,8 @@ void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv)
 		"extent_map", tpv->proc_dir, tpv_proc_extent_map_fill, NULL, tpv);
 	tpv->proc_stats = nvmeib_public_proc_create(
 		"stats", tpv->proc_dir, tpv_proc_stats_fill, tpv_proc_stats_reset, tpv);
+	tpv->proc_selftest = nvmeib_public_proc_create(
+		"selftest", tpv->proc_dir, nvmeibc_tpv_run_selftests, NULL, tpv);
 
 	_ND(tpv_proc_registered, "TPV: @STR: proc entries registered", tpv->tpv_name);
 }
@@ -275,6 +278,7 @@ void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv)
 	if (!tpv->proc_dir)
 		return;
 
+	nvmeib_public_proc_remove(tpv->proc_selftest);
 	nvmeib_public_proc_remove(tpv->proc_stats);
 	nvmeib_public_proc_remove(tpv->proc_extent_map);
 	nvmeib_public_proc_remove(tpv->proc_allocator);

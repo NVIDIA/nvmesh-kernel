@@ -116,6 +116,7 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	tpv/nvmeibc_tpv_persist.o \
 	tpv/nvmeibc_tpv_proc.o \
 	tpv/nvmeibc_tpv_recovery.o \
+	tpv/nvmeibc_tpv_test.o \
 	traces_ids.o
 
 ifneq ($(filter $(CORE_UNITEST), true yes),)
