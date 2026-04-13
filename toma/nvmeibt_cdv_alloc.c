@@ -425,79 +425,334 @@ static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
 }
 
 /*
- * handle_cdv_alloc_extent — CDV_ALLOC_EXTENT stub.
+ * handle_cdv_alloc_extent — pick a free CDV_extent, record it, and reply.
  *
- * Step 12c will implement: pick a free CDV_extent from the allocator,
- * call nvmeibt_cdv_alloc_add_extent(), send back nvmeibt_cdv_alloc_resp.
+ * Algorithm:
+ *   1. Look up (or note absence of) the per-CDV allocator.
+ *   2. Check allocator_generation against client's client_generation.
+ *   3. Find the first unallocated extent index in [0, total_data_extents).
+ *   4. Record via cdv_alloc_insert() and persist atomically.
+ *   5. On persist failure, undo the in-memory insert and return ERROR.
  */
 static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 {
-	struct nvmeibt_cdv_alloc_resp resp;
+	const struct nvmeibt_cdv_alloc_req *req;
+	struct nvmeibt_cdv_alloc_resp       resp;
+	struct nvmeibt_cdv_alloc           *alloc;
+	struct nvmeibt_cdv_extent_entry    *entry;
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	uint64_t candidate, total, i;
+	bool     first_alloc, found, occupied;
+	int      rv;
 
-	if (msg->data_length < (int)sizeof(struct nvmeibt_cdv_alloc_req)) {
+	if (msg->data_length < (int)sizeof(*req)) {
 		N_Ef(cdv_handle_alloc_short,
-		     "CDV-handle: ALLOC_EXTENT payload too short len=@INT", msg->data_length);
+		     "CDV: ALLOC_EXTENT short len=@INT", msg->data_length);
 		return -EINVAL;
 	}
 
-	N_Tf(cdv_handle_alloc_stub,
-	     "CDV-handle: ALLOC_EXTENT stub — returning ENOSYS");
+	req = (const struct nvmeibt_cdv_alloc_req *)msg->msg_data;
+
+	/* NUL-terminate defensively into local buffers. */
+	memcpy(cdv_uuid, req->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	memcpy(tpv_uuid, req->tpv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 
 	memset(&resp, 0, sizeof(resp));
-	resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+	resp.req_id = req->req_id;
 
+	alloc       = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	first_alloc = (alloc == NULL);
+
+	/* ── Generation check ────────────────────────────────────────────────── */
+	if (first_alloc && req->client_generation != 0) {
+		/*
+		 * No persisted state for this CDV; client carries a non-zero
+		 * generation (stale from before a TOMA restart).  Return WRONG_GEN
+		 * so the client re-syncs via the next topology push.
+		 */
+		N_Wf(cdv_alloc_wrong_gen_new,
+		     "CDV: ALLOC no state cdv=@STR client_gen=@LLU => WRONG_GEN",
+		     cdv_uuid, req->client_generation);
+		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
+		resp.allocator_generation = 0;
+		goto send;
+	}
+	if (!first_alloc && req->client_generation != alloc->allocator_generation) {
+		N_If(cdv_alloc_wrong_gen,
+		     "CDV: ALLOC WRONG_GEN cdv=@STR client=@LLU toma=@LLU",
+		     cdv_uuid, req->client_generation, alloc->allocator_generation);
+		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
+		resp.allocator_generation = alloc->allocator_generation;
+		goto send;
+	}
+
+	/* ── Capacity info ───────────────────────────────────────────────────── */
+	if (first_alloc && req->total_data_extents == 0) {
+		N_Ef(cdv_alloc_no_cap,
+		     "CDV: ALLOC cdv=@STR total_data_extents=0 on first alloc; refusing",
+		     cdv_uuid);
+		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+		goto send;
+	}
+
+	/* Refresh cached capacity after a TOMA restart (stored value is 0). */
+	if (!first_alloc && alloc->total_data_extents == 0 && req->total_data_extents > 0)
+		alloc->total_data_extents = req->total_data_extents;
+
+	total = first_alloc ? req->total_data_extents : alloc->total_data_extents;
+
+	if (total == 0) {
+		/* alloc exists but capacity unknown; client sent 0 too */
+		N_Ef(cdv_alloc_no_cap_post_restart,
+		     "CDV: ALLOC cdv=@STR no capacity known after restart; refusing",
+		     cdv_uuid);
+		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+		goto send;
+	}
+
+	/* ── CDV-full check ──────────────────────────────────────────────────── */
+	if (!first_alloc && alloc->n_allocated >= total) {
+		N_Wf(cdv_alloc_full,
+		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU total=@LLU",
+		     cdv_uuid, alloc->n_allocated, total);
+		resp.status = NVMEIBT_CDV_ALLOC_CDV_FULL;
+		resp.allocator_generation = alloc->allocator_generation;
+		goto send;
+	}
+
+	/* ── Find first free extent index ────────────────────────────────────── */
+	if (first_alloc) {
+		candidate = 0;     /* no extents allocated yet */
+		found     = true;
+	} else {
+		candidate = 0;
+		found     = false;
+		for (i = 0; i < total; i++) {
+			occupied = false;
+			XDLIST_FOREACH(entry, &alloc->extents) {
+				if (entry->extent_index == i) {
+					occupied = true;
+					break;
+				}
+			}
+			if (!occupied) {
+				candidate = i;
+				found = true;
+				break;
+			}
+		}
+	}
+
+	if (!found) {
+		/* n_allocated < total yet no free slot — internal inconsistency */
+		N_Ef(cdv_alloc_scan_bug,
+		     "CDV: ALLOC scan bug cdv=@STR n=@LLU total=@LLU",
+		     cdv_uuid, alloc->n_allocated, total);
+		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+		goto send;
+	}
+
+	/* ── Record the allocation ───────────────────────────────────────────── */
+	rv = cdv_alloc_insert(cdv_uuid, candidate, tpv_uuid);
+	if (rv) {
+		N_Ef(cdv_alloc_insert_fail,
+		     "CDV: ALLOC insert failed rv=@INT cdv=@STR idx=@LLU",
+		     rv, cdv_uuid, candidate);
+		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+		goto send;
+	}
+
+	/*
+	 * Re-look up alloc: if this was the first allocation, cdv_alloc_insert
+	 * just created the struct and added it to the hash.
+	 */
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+
+	/* Populate cached capacity on freshly created allocator. */
+	if (alloc && alloc->total_data_extents == 0)
+		alloc->total_data_extents = req->total_data_extents;
+
+	/* Persist atomically; on failure, roll back to stay consistent. */
+	rv = nvmeibt_cdv_alloc_persist();
+	if (rv) {
+		N_Ef(cdv_alloc_persist_fail,
+		     "CDV: ALLOC persist failed rv=@INT; rolling back idx=@LLU",
+		     rv, candidate);
+		if (alloc) {
+			XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+				if (entry->extent_index == candidate) {
+					XDLIST_ELEM_DEL(&alloc->extents, entry);
+					alloc->n_allocated--;
+					NNVMEIBT_BM_FREE(cdv_alloc_rollback, entry);
+					break;
+				}
+			}
+		}
+		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+		goto send;
+	}
+
+	resp.extent_index         = candidate;
+	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
+	resp.status               = NVMEIBT_CDV_ALLOC_OK;
+
+	N_If(cdv_alloc_ok,
+	     "CDV: ALLOC OK cdv=@STR idx=@LLU tpv=@STR req_id=@LLU gen=@LLU",
+	     cdv_uuid, candidate, tpv_uuid, req->req_id, resp.allocator_generation);
+
+send:
 	return cdv_send_response(&msg->registrant_ctx,
 				 NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP,
 				 sizeof(resp), &resp);
 }
 
 /*
- * handle_cdv_free_extent — CDV_FREE_EXTENT stub.
+ * handle_cdv_free_extent — CDV_FREE_EXTENT: validate ownership, free the extent.
  *
- * Step 12c will implement: validate ownership, call
- * nvmeibt_cdv_alloc_remove_extent().  Fire-and-forget — no response.
+ * Fire-and-forget: no response is sent.  The handler is idempotent — freeing
+ * an already-free or unknown extent is a no-op (logged at WARN).
  */
 static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 {
-	if (msg->data_length < (int)sizeof(struct nvmeibt_cdv_free_req)) {
+	const struct nvmeibt_cdv_free_req *req;
+	struct nvmeibt_cdv_alloc          *alloc;
+	struct nvmeibt_cdv_extent_entry   *entry;
+	char cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+
+	if (msg->data_length < (int)sizeof(*req)) {
 		N_Ef(cdv_handle_free_short,
-		     "CDV-handle: FREE_EXTENT payload too short len=@INT", msg->data_length);
+		     "CDV: FREE_EXTENT short len=@INT", msg->data_length);
 		return -EINVAL;
 	}
 
-	N_Tf(cdv_handle_free_stub,
-	     "CDV-handle: FREE_EXTENT stub — ignoring");
+	req = (const struct nvmeibt_cdv_free_req *)msg->msg_data;
 
-	/* No response: CDV_FREE_EXTENT is fire-and-forget. */
+	memcpy(cdv_uuid, req->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	memcpy(tpv_uuid, req->tpv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc) {
+		N_Wf(cdv_free_no_cdv,
+		     "CDV: FREE cdv=@STR idx=@LLU no allocator found (already freed?)",
+		     cdv_uuid, req->extent_index);
+		return 0;
+	}
+
+	XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+		if (entry->extent_index != req->extent_index)
+			continue;
+
+		/* Ownership check: only the owning TPV may free the extent. */
+		if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0) {
+			N_Wf(cdv_free_wrong_owner,
+			     "CDV: FREE cdv=@STR idx=@LLU owner=@STR requester=@STR; ignoring",
+			     cdv_uuid, req->extent_index, entry->tpv_uuid, tpv_uuid);
+			return 0;
+		}
+
+		XDLIST_ELEM_DEL(&alloc->extents, entry);
+		alloc->n_allocated--;
+
+		N_If(cdv_free_ok,
+		     "CDV: FREE OK cdv=@STR idx=@LLU tpv=@STR remaining=@LLU",
+		     cdv_uuid, req->extent_index, tpv_uuid, alloc->n_allocated);
+
+		NNVMEIBT_BM_FREE(cdv_free_entry, entry);
+
+		/* Best-effort persist; loss is non-fatal (NVCK reclaims orphans). */
+		nvmeibt_cdv_alloc_persist();
+		return 0;
+	}
+
+	N_Wf(cdv_free_notfound,
+	     "CDV: FREE cdv=@STR idx=@LLU tpv=@STR not found (already freed?)",
+	     cdv_uuid, req->extent_index, tpv_uuid);
 	return 0;
 }
 
 /*
- * handle_cdv_list_extents — CDV_LIST_EXTENTS stub.
+ * handle_cdv_list_extents — CDV_LIST_EXTENTS: return all extents owned by tpv.
  *
- * Step 12c will implement: call nvmeibt_cdv_alloc_list_for_tpv(),
- * build variable-length response with nvmeibt_cdv_list_resp + index array.
+ * Sends a variable-length response: nvmeibt_cdv_list_resp header followed
+ * immediately by n_extents × uint64_t extent indices.
  */
 static int handle_cdv_list_extents(struct nvmeibt_register_msg *msg)
 {
-	struct nvmeibt_cdv_list_resp resp;
+	const struct nvmeibt_cdv_list_req *req;
+	struct nvmeibt_cdv_list_resp      *resp;
+	struct nvmeibt_cdv_list_resp       err_resp;
+	uint64_t *indices;
+	uint64_t *dst;
+	uint64_t  n_extents, i;
+	char      cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char      tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	size_t    resp_size;
+	int       rv;
 
-	if (msg->data_length < (int)sizeof(struct nvmeibt_cdv_list_req)) {
+	if (msg->data_length < (int)sizeof(*req)) {
 		N_Ef(cdv_handle_list_short,
-		     "CDV-handle: LIST_EXTENTS payload too short len=@INT", msg->data_length);
+		     "CDV: LIST_EXTENTS short len=@INT", msg->data_length);
 		return -EINVAL;
 	}
 
-	N_Tf(cdv_handle_list_stub,
-	     "CDV-handle: LIST_EXTENTS stub — returning empty list");
+	req = (const struct nvmeibt_cdv_list_req *)msg->msg_data;
 
-	memset(&resp, 0, sizeof(resp));
-	resp.n_extents = 0;
-	resp.status    = 0;
+	memcpy(cdv_uuid, req->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	memcpy(tpv_uuid, req->tpv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 
-	return cdv_send_response(&msg->registrant_ctx,
-				 NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
-				 sizeof(resp), &resp);
+	rv = nvmeibt_cdv_alloc_list_for_tpv(cdv_uuid, tpv_uuid, &indices, &n_extents);
+	if (rv) {
+		N_Ef(cdv_list_query_fail,
+		     "CDV: LIST_EXTENTS query failed rv=@INT cdv=@STR tpv=@STR",
+		     rv, cdv_uuid, tpv_uuid);
+		memset(&err_resp, 0, sizeof(err_resp));
+		err_resp.status = 1;
+		return cdv_send_response(&msg->registrant_ctx,
+					 NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
+					 sizeof(err_resp), &err_resp);
+	}
+
+	resp_size = sizeof(*resp) + n_extents * sizeof(*dst);
+	resp      = NNVMEIBT_BM_ALLOC(cdv_list_resp_alloc, resp_size);
+	if (!resp) {
+		N_Ef(cdv_list_resp_oom,
+		     "CDV: LIST_EXTENTS OOM cdv=@STR tpv=@STR n=@LLU",
+		     cdv_uuid, tpv_uuid, n_extents);
+		if (indices)
+			NNVMEIBT_BM_FREE(cdv_list_indices_free, indices);
+		memset(&err_resp, 0, sizeof(err_resp));
+		err_resp.status = 1;
+		return cdv_send_response(&msg->registrant_ctx,
+					 NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
+					 sizeof(err_resp), &err_resp);
+	}
+
+	resp->n_extents = n_extents;
+	resp->status    = 0;
+	dst = (uint64_t *)((uint8_t *)resp + sizeof(*resp));
+	for (i = 0; i < n_extents; i++)
+		dst[i] = indices[i];
+
+	if (indices)
+		NNVMEIBT_BM_FREE(cdv_list_indices_free2, indices);
+
+	N_If(cdv_list_ok,
+	     "CDV: LIST_EXTENTS OK cdv=@STR tpv=@STR n=@LLU",
+	     cdv_uuid, tpv_uuid, n_extents);
+
+	rv = cdv_send_response(&msg->registrant_ctx,
+			       NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
+			       (int)resp_size, resp);
+	NNVMEIBT_BM_FREE(cdv_list_resp_free, resp);
+	return rv;
 }
 
 int nvmeibt_cdv_handle_incoming_msg(struct nvmeibt_register_msg *msg)

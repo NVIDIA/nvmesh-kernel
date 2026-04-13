@@ -566,6 +566,19 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	req.req_id            = (u64)atomic64_inc_return(&nvmeibc_tpv_req_id_counter);
 	req.client_generation = client_gen;
 
+	/*
+	 * Provide CDV capacity so TOMA can determine when the CDV is full.
+	 * CDV size in 4 KB sectors → bytes; subtract metadata region offset
+	 * (allocator_size_gb GB); divide by extent size (cdv_extent_size_mb MB).
+	 */
+	if (alloc->cdv_extent_size_mb > 0) {
+		u64 cdv_bytes   = (u64)nvmeibc_volume_get_size(tpv->cdv_vol)
+				  << NVMEIBC_SECTOR_SHIFT;
+		u64 meta_bytes  = (u64)alloc->allocator_size_gb << 30;
+		u64 data_bytes  = (cdv_bytes > meta_bytes) ? cdv_bytes - meta_bytes : 0;
+		req.total_data_extents = data_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
+	}
+
 	_ND(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU",
 	    tpv->tpv_name, toma_id, client_gen, req.req_id);
 

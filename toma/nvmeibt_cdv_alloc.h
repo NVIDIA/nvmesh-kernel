@@ -93,6 +93,8 @@ struct nvmeibt_cdv_extent_entry {
 struct nvmeibt_cdv_alloc {
 	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN]; /* hash key; must be first field */
 	uint64_t n_allocated;
+	uint64_t total_data_extents;	/* CDV capacity in data extents; populated from first ALLOC */
+	uint64_t allocator_generation;	/* current epoch; echoed in ALLOC responses; not persisted */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
@@ -160,6 +162,7 @@ struct nvmeibt_cdv_alloc_req {
 	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 	uint64_t req_id;
 	uint64_t client_generation;
+	uint64_t total_data_extents;	/* CDV data capacity in extents; TOMA uses for full-check */
 };
 
 /* CDV_ALLOC_EXTENT response status codes */

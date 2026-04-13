@@ -345,6 +345,7 @@ struct nvmeibc_cdv_alloc_req {
 	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* parent CDV UUID (ASCII string) */
 	u64  req_id;				/* monotonically increasing per-TPV; for idempotency */
 	u64  client_generation;			/* allocator_generation client believes is current */
+	u64  total_data_extents;		/* CDV data capacity in extents; TOMA uses for full-check */
 };
 
 /* NVMEIBC_MA_CDV_ALLOC_EXTENT response status codes */
