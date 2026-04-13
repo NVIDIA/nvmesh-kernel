@@ -161,6 +161,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
 		spin_unlock(&alloc->lock);
+		atomic64_inc(&alloc->stat_tpv_alloc_eagain);
 		return -EAGAIN;
 	}
 
@@ -191,6 +192,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 			}
 		}
 		spin_unlock(&alloc->lock);
+		atomic64_inc(&alloc->stat_tpv_alloc_enomem);
 		return -ENOMEM;
 	}
 
@@ -215,6 +217,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 			}
 		}
 		spin_unlock(&alloc->lock);
+		atomic64_inc(&alloc->stat_tpv_alloc_enomem);
 		return rv;
 	}
 
@@ -238,6 +241,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	}
 	spin_unlock(&tpv->persist_lock);
 
+	atomic64_inc(&alloc->stat_tpv_alloc_ok);
 	*out = entry;
 	return 0;
 }
@@ -362,6 +366,7 @@ out_unlock:
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
 
+	atomic64_inc(&alloc->stat_tpv_free_ok);
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_extent);
@@ -412,6 +417,7 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 		} else {
 			_ND(tpv_cdv_ext_returned, "TPV: @STR: CDV_extent[@LLU] returned to TOMA",
 			    tpv->tpv_name, ref->extent_index);
+			atomic64_inc(&tpv->allocator.stat_cdv_free_ok);
 			list_del(&ref->node);
 			kfree(ref);
 		}
@@ -529,6 +535,7 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	char     toma_id[NVMEIB_HOST_NAME_LEN];
 	u64      client_gen;
 	unsigned long flags;
+	ktime_t  t_start;
 	int      rv;
 	bool     retry_pending = false;
 
@@ -583,9 +590,11 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	    tpv->tpv_name, toma_id, client_gen, req.req_id);
 
 	memset(&resp, 0, sizeof(resp));
+	t_start = ktime_get();
 	rv = nvmeibc_ib_admin_cdv_alloc_extent(tpv->cdv_vol, toma_id, &req,
 					       &resp);
 	if (rv) {
+		atomic64_inc(&alloc->stat_cdv_alloc_err);
 		_NE(tpv_cdv_alloc_send_fail, "TPV: @STR: CDV_ALLOC_EXTENT send error rv=@INT",
 		    tpv->tpv_name, rv);
 		goto out_clear_pending;
@@ -598,8 +607,12 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 			_NE(tpv_cdv_alloc_ok_fail,
 			    "TPV: @STR: tpv_on_cdv_alloc_ok(@LLU) failed rv=@INT",
 			    tpv->tpv_name, resp.extent_index, rv);
-		else
+		else {
+			atomic64_add(ktime_to_ns(ktime_sub(ktime_get(), t_start)),
+				     &alloc->stat_cdv_alloc_ns);
+			atomic64_inc(&alloc->stat_cdv_alloc_ok);
 			retry_pending = true;
+		}
 		break;
 
 	case NVMEIBC_CDV_ALLOC_CDV_FULL:
@@ -607,6 +620,7 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		 * CDV is at capacity.  TOMA sends CDVCapacityWarning to
 		 * management.  IOs needing allocation remain queued.
 		 */
+		atomic64_inc(&alloc->stat_cdv_alloc_full);
 		_NW(tpv_cdv_full, "TPV: @STR: CDV full; IOs blocked until CDV is extended",
 		    tpv->tpv_name);
 		break;
@@ -619,6 +633,7 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		 * below-watermark event will re-schedule this work with the
 		 * new generation.
 		 */
+		atomic64_inc(&alloc->stat_cdv_alloc_wgen);
 		_NI(tpv_cdv_wrong_gen,
 		    "TPV: @STR: WRONG_GEN ours=@LLU TOMA=@LLU; awaiting topology update",
 		    tpv->tpv_name, client_gen, resp.allocator_generation);

@@ -114,6 +114,7 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	tpv/nvmeibc_tpv_allocator.o \
 	tpv/nvmeibc_tpv_io.o \
 	tpv/nvmeibc_tpv_persist.o \
+	tpv/nvmeibc_tpv_proc.o \
 	tpv/nvmeibc_tpv_recovery.o \
 	traces_ids.o
 

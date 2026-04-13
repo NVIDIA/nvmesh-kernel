@@ -19,6 +19,7 @@
 
 #include <linux/xarray.h>		/* struct xarray, xa_store/xa_load */
 #include "common/nvmeib.h"		/* NVMEIBC_BD_UUID_LEN, NVMEIB_HOST_NAME_LEN */
+#include "common_public/nvmeib_public_procfs.h"	/* nvmeib_public_procfs_ent, proc_fill_t */
 
 /* Forward declarations — full definitions live outside this header. */
 struct nvmeibc_volume;
@@ -104,6 +105,21 @@ struct nvmeibc_tpv_allocator {
 
 	u64              low_watermark;		/* schedule CDV alloc when count drops below */
 						/* default: 50 MB / tpv_extent_size */
+
+	/*
+	 * Per-allocator statistics — updated via atomic ops (no lock required).
+	 * Readable at any time from /proc; reset via the stats proc entry.
+	 */
+	atomic64_t       stat_tpv_alloc_ok;	/* successful alloc_extent() calls */
+	atomic64_t       stat_tpv_alloc_eagain; /* pool-empty hits (-EAGAIN) */
+	atomic64_t       stat_tpv_alloc_enomem; /* OOM failures (-ENOMEM) */
+	atomic64_t       stat_tpv_free_ok;	/* successful free_extent() calls */
+	atomic64_t       stat_cdv_alloc_ok;	/* CDV_ALLOC_EXTENT OK responses */
+	atomic64_t       stat_cdv_alloc_full;	/* CDV_ALLOC_EXTENT CDV_FULL responses */
+	atomic64_t       stat_cdv_alloc_wgen;	/* CDV_ALLOC_EXTENT WRONG_GEN responses */
+	atomic64_t       stat_cdv_alloc_err;	/* CDV_ALLOC_EXTENT transport send failures */
+	atomic64_t       stat_cdv_free_ok;	/* CDV_FREE_EXTENT sends (successful) */
+	atomic64_t       stat_cdv_alloc_ns;	/* cumulative CDV alloc round-trip time (ns) */
 };
 
 /* ── TPV state enum ────────────────────────────────────────────────────── */
@@ -156,6 +172,13 @@ struct nvmeibc_tpv {
 
 	/* Entry in the per-client active TPV list. */
 	struct list_head              list_node;
+
+	/* /proc/nvmeibc/tpv/<name>/ entries; NULL until attach completes. */
+	struct proc_dir_entry                *proc_dir;
+	struct nvmeib_public_procfs_ent      *proc_status;
+	struct nvmeib_public_procfs_ent      *proc_allocator;
+	struct nvmeib_public_procfs_ent      *proc_extent_map;
+	struct nvmeib_public_procfs_ent      *proc_stats;
 };
 
 /* ── L1/L2/L3 tree on-disk entry format (CDV_extent[0]) ───────────────── */
@@ -238,5 +261,20 @@ int  nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv);
 /* ── Recovery API (implemented in nvmeibc_tpv_recovery.c) ─────────────── */
 
 int  nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv);
+
+/* ── Proc API (implemented in nvmeibc_tpv_proc.c) ─────────────────────── */
+
+/*
+ * nvmeibc_tpv_proc_register — create /proc/nvmeibc/tpv/<name>/ entries.
+ * Called from nvmeibc_tpv_attach() after the TPV is added to the active list.
+ * Silently skips registration if the module proc root is not yet available.
+ */
+void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv);
+
+/*
+ * nvmeibc_tpv_proc_deregister — remove /proc/nvmeibc/tpv/<name>/ entries.
+ * Called from nvmeibc_tpv_detach() before the allocator is freed.
+ */
+void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv);
 
 #endif /* NVMEIBC_TPV_H */

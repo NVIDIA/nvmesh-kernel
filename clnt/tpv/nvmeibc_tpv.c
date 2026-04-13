@@ -446,6 +446,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	nvmeibc_tpv_list_add(tpv);
 	atomic_set(&tpv->state, TPV_ATTACHED);
 
+	nvmeibc_tpv_proc_register(tpv);
+
 	_NI(tpv_attached,
 	    "TPV: @STR (uuid=@STR) attached vsize=@LLU MB tpv_ext=@UINT KB cdv_ext=@UINT MB alloc=@LLU GB wmark=@LLU",
 	    tpv_name, tpv_uuid,
@@ -515,7 +517,8 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 			bio_endio(bio, -EIO);
 	}
 
-	/* ── 4. Free allocator state ─────────────────────────────────────── */
+	/* ── 4. Deregister proc entries and free allocator state ────────── */
+	nvmeibc_tpv_proc_deregister(tpv);
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
 
 	_NI(tpv_detached, "TPV: @STR (uuid=@STR) detached", tpv->tpv_name, tpv->tpv_uuid);
