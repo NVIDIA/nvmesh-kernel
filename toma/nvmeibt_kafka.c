@@ -297,10 +297,10 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 //static int	k_fetch_max_wait_ms = 500;					// fetch.max.wait.ms (default 500ms) // If no answer, Configuration property `fetch.wait.max.ms` (500) should be set lower than `socket.timeout.ms` (600) by at least 1000ms to avoid blocking and timing out sub-sequent requests
 //static int	k_receive_buffer_bytes = (64 * 1024);		// receive.buffer.bytes (default 64K) // TCP receive buffer . (-1 for OS default)
 //static int	k_max_partition_fetch_bytes;				// max.partition.fetch.bytes	(default 1M) // The requestor specifies
-//static int	k_isolation_level;							// isolation.level (default read_uncommitted - also returnes aborted and not fully committed)
+//static int	k_isolation_level;							// isolation.level (default read_uncommitted - also returns aborted and not fully committed)
 //static int	k_auto_commit_interval_ms = 5000;			// auto.commit.interval.ms (default 5s) // Afterwards, consumer offsets are auto-committed to Kafka if enable.auto.commit
 //static int	k_check_crcs = true;						// check.crcs // (broker-->consumer)
-//static long	k_reconnect_backoff_max_ms = 1000;			// reconnect.backoff.max.ms (fefault 1s) // Per Host. The exponential reconnect backouff max
+//static long	k_reconnect_backoff_max_ms = 1000;			// reconnect.backoff.max.ms (default 1s) // Per Host. The exponential reconnect backoff max
 //static long	k_reconnect_backoff_ms = 50;				// reconnect.backoff.ms (default 50ms) // Per Host. backoff initial value
 //static long	k_retry_backoff_ms = 100;					// retry.backoff.ms (default 100) // Per topic partition
 //static long	k_socket_connection_setup_timeout_max_ms = 30000;	// socket.connection.setup.timeout.max.ms (default 30s) // Max backoff
@@ -308,7 +308,7 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 
 #define K_DEFAULT_CONSUMER_CONFIG \
 	{"socket.timeout.ms",			"600"},				\
-	{"enable.auto.commit",			"false"},			/* enable.auto.commit (default true), Kafka commits consumer's offset in the background. We disable it and use explicit commit when we done asyncronously processing the message*/ \
+	{"enable.auto.commit",			"false"},			/* enable.auto.commit (default true), Kafka commits consumer's offset in the background. We disable it and use explicit commit when we done asynchronously processing the message*/ \
 	{"auto.offset.reset",			"earliest"},		/* Start on the msg following the last committed one. Can use "latest".  none: throw exception to the consumer if no previous offset is found for the consumer's group*/ \
 	{"bootstrap.servers",			""},				/* Overridden by the value of KAFKA_SERVERS from nvmesh.conf*/ \
 	{"group.id",					""},				/* Overriden with machine name. We need that to track offset separately for each Toma/group*/ \
