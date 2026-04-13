@@ -83,6 +83,14 @@ struct nvmeibt_cdv_extent_entry {
 	struct xdlist link;
 };
 
+/*
+ * Capacity watermarks for CDVCapacityWarning Kafka events.
+ * A warning is emitted when usage rises to WARN_PCT; the flag clears when
+ * usage falls back below WARN_CLEAR_PCT (hysteresis prevents Kafka floods).
+ */
+#define NVMEIBT_CDV_WARN_PCT       90   /* fire warning at >= 90% used */
+#define NVMEIBT_CDV_WARN_CLEAR_PCT 85   /* clear flag when usage drops below 85% */
+
 /* ── Per-CDV allocator ──────────────────────────────────────────────────────
  *
  * One instance per CDV that has had at least one extent allocated.
@@ -95,6 +103,7 @@ struct nvmeibt_cdv_alloc {
 	uint64_t n_allocated;
 	uint64_t total_data_extents;	/* CDV capacity in data extents; populated from first ALLOC */
 	uint64_t allocator_generation;	/* current epoch; echoed in ALLOC responses; not persisted */
+	bool     capacity_warning_sent;	/* true after CDVCapacityWarning sent; cleared on hysteresis */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
@@ -147,6 +156,18 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 /* ── Persistence (also callable for an explicit flush) ──────────────────── */
 int nvmeibt_cdv_alloc_persist(void);
 int nvmeibt_cdv_alloc_load(void);
+
+/*
+ * nvmeibt_cdv_alloc_startup_scan — log restored state after load.
+ *
+ * Called from nvmeibt_cdv_alloc_one_time_init() after a successful load.
+ * Iterates all loaded CDV allocators, logs per-CDV statistics, and emits
+ * CDVCapacityWarning events for any CDV whose capacity is already known
+ * (total_data_extents > 0) and above the warning threshold.
+ * At startup total_data_extents is typically 0 (not persisted); capacity
+ * checks are deferred to the first ALLOC request per CDV.
+ */
+void nvmeibt_cdv_alloc_startup_scan(void);
 
 /* ── CDV wire-format structs (TOMA-local copies) ─────────────────────────────
  *

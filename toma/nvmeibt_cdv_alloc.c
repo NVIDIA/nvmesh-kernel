@@ -25,6 +25,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_register.h"		/* struct nvmeibt_register_msg */
 #include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client */
+#include "nvmeibt_kafka.h"		/* nvmeibt_kafka_outgoing_msgs_queue_add, KAFKA_PRODUCER_MSG_HEADER_* */
 #include "../common/nvmeib_hash.h"
 
 /* ── Persistence paths ───────────────────────────────────────────────────── */
@@ -368,6 +369,9 @@ int nvmeibt_cdv_alloc_one_time_init(void)
 		     rv);
 	}
 
+	/* Log restored state; fire capacity warnings for any already-full CDVs. */
+	nvmeibt_cdv_alloc_startup_scan();
+
 	return 0;
 }
 
@@ -401,6 +405,96 @@ void nvmeibt_cdv_alloc_destroy(void)
 	}
 
 	NVMEIB_HASH_TBL_FREE(cdv_alloc_hash_free, cdv_alloc_hash);
+}
+
+/* ── Capacity monitoring ─────────────────────────────────────────────────── */
+
+/*
+ * cdv_maybe_warn_capacity — check CDV usage and fire a Kafka CDVCapacityWarning
+ * when the utilisation crosses NVMEIBT_CDV_WARN_PCT.
+ *
+ * Deduplication: the flag alloc->capacity_warning_sent suppresses repeated
+ * events while usage stays above the threshold.  The flag is cleared when
+ * usage drops below NVMEIBT_CDV_WARN_CLEAR_PCT (hysteresis) so that a later
+ * rise above WARN_PCT fires a fresh event.
+ *
+ * Safe to call with total_data_extents == 0 (returns immediately).
+ */
+static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
+{
+	struct nvmeibt_Str *json;
+	unsigned int used_pct;
+
+	if (alloc->total_data_extents == 0)
+		return;   /* capacity unknown — cannot compute ratio */
+
+	used_pct = (unsigned int)(alloc->n_allocated * 100 / alloc->total_data_extents);
+
+	if (used_pct < NVMEIBT_CDV_WARN_CLEAR_PCT) {
+		/* Usage safely below hysteresis threshold — reset flag. */
+		alloc->capacity_warning_sent = false;
+		return;
+	}
+
+	if (alloc->capacity_warning_sent)
+		return;   /* already warned; suppress duplicate */
+
+	json = NNVMEIBT_STR_ALLOC(cdv_cap_warn_json_alloc);
+	if (!json) {
+		N_Ef(cdv_cap_warn_oom,
+		     "CDV: CDVCapacityWarning OOM cdv=@STR used_pct=@UINT",
+		     alloc->cdv_uuid, used_pct);
+		return;
+	}
+
+	nvmeibt_Str_sprintf(json,
+		"{" KAFKA_PRODUCER_MSG_HEADER_FMT
+		"\"payload\": {\"cdvUUID\": \"%s\", "
+		"\"nAllocated\": %llu, \"totalExtents\": %llu, \"usedPct\": %u}}",
+		KAFKA_PRODUCER_MSG_HEADER_VAR("cdvCapacityWarning", 1),
+		alloc->cdv_uuid,
+		alloc->n_allocated, alloc->total_data_extents, used_pct);
+
+	N_Wf(cdv_cap_warn,
+	     "CDV: CDVCapacityWarning cdv=@STR used_pct=@UINT n=@LLU total=@LLU",
+	     alloc->cdv_uuid, used_pct, alloc->n_allocated, alloc->total_data_extents);
+
+	nvmeibt_kafka_outgoing_msgs_queue_add(
+		alloc->cdv_uuid,    /* unique_key: dedup by CDV UUID in the Kafka queue */
+		nvmeibt_Str_str(json),
+		nvmeibt_Str_strlen(json) + 1,
+		NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+
+	alloc->capacity_warning_sent = true;
+	NNVMEIBT_STR_FREE(cdv_cap_warn_json_free, json);
+}
+
+/* ── Startup recovery scan ───────────────────────────────────────────────── */
+
+void nvmeibt_cdv_alloc_startup_scan(void)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+	uint64_t n_cdvs         = 0;
+	uint64_t n_extents_total = 0;
+
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+		N_If(cdv_startup_cdv,
+		     "CDV startup: cdv=@STR n_allocated=@LLU",
+		     alloc->cdv_uuid, alloc->n_allocated);
+		/*
+		 * total_data_extents is 0 here (not persisted); capacity checks
+		 * will fire automatically on the first ALLOC request per CDV.
+		 * If, via future management config, total_data_extents is set
+		 * before this call, cdv_maybe_warn_capacity handles it.
+		 */
+		cdv_maybe_warn_capacity(alloc);
+		n_cdvs++;
+		n_extents_total += alloc->n_allocated;
+	}
+
+	N_If(cdv_startup_done,
+	     "CDV startup: @LLU CDVs with @LLU total allocated extents restored",
+	     n_cdvs, n_extents_total);
 }
 
 /* ── Incoming-message handler ────────────────────────────────────────────── */
@@ -518,6 +612,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		N_Wf(cdv_alloc_full,
 		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU total=@LLU",
 		     cdv_uuid, alloc->n_allocated, total);
+		cdv_maybe_warn_capacity(alloc);   /* ensure Kafka event reaches management */
 		resp.status = NVMEIBT_CDV_ALLOC_CDV_FULL;
 		resp.allocator_generation = alloc->allocator_generation;
 		goto send;
@@ -599,6 +694,10 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
 	resp.status               = NVMEIBT_CDV_ALLOC_OK;
 
+	/* Check if this allocation pushed the CDV above the warning watermark. */
+	if (alloc)
+		cdv_maybe_warn_capacity(alloc);
+
 	N_If(cdv_alloc_ok,
 	     "CDV: ALLOC OK cdv=@STR idx=@LLU tpv=@STR req_id=@LLU gen=@LLU",
 	     cdv_uuid, candidate, tpv_uuid, req->req_id, resp.allocator_generation);
@@ -664,6 +763,13 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 		     cdv_uuid, req->extent_index, tpv_uuid, alloc->n_allocated);
 
 		NNVMEIBT_BM_FREE(cdv_free_entry, entry);
+
+		/*
+		 * Hysteresis check: if the free dropped usage below
+		 * NVMEIBT_CDV_WARN_CLEAR_PCT, clear capacity_warning_sent so the
+		 * next rise above WARN_PCT fires a fresh Kafka event.
+		 */
+		cdv_maybe_warn_capacity(alloc);
 
 		/* Best-effort persist; loss is non-fatal (NVCK reclaims orphans). */
 		nvmeibt_cdv_alloc_persist();
