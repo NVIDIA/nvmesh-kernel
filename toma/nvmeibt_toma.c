@@ -2085,12 +2085,13 @@ int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *p
 	struct tm	tmp_tm;
 
 	if (timespec_eq(ts, TIMESPEC_ZERO)) {
+		(*printf_fn)(printf_ctx, "Not Set      ");
+	} else {
 		localtime_r(&ts.tv_sec, &tmp_tm);
 		strf_len = strftime(time_str, sizeof(time_str), "%H:%M:%S", &tmp_tm);
 		sprintf(time_str + strf_len, ".%03lld", NSEC_TO_MSEC(ts.tv_nsec));
 		(*printf_fn)(printf_ctx, "%s", time_str);
-	} else
-		(*printf_fn)(printf_ctx, "Not Set      ");
+	}
 	return 0;
 }
 
