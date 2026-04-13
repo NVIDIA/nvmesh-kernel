@@ -254,7 +254,18 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		return -ENOMEM;
 
 	rv = nvmeibc_tpv_cdv_sync_read(tpv, l1_off, l1, l1_size);
-	if (rv) {
+	if (rv == -ENOTSUPP) {
+		/*
+		 * CDV block-layer integration (nvmeibc_tpv_cdv.c) not yet
+		 * present — the stub returns -ENOTSUPP.  Treat as a fresh TPV
+		 * with no persisted state: the L1 table is implicitly all-zero
+		 * (vzalloc'd above), so the Phase 1 loop below produces an
+		 * empty allocator, which is correct for first attach.
+		 */
+		_NI(tpv_load_no_cdv_bl,
+		    "TPV: @STR: CDV block layer not available; starting with empty allocator",
+		    tpv->tpv_name);
+	} else if (rv) {
 		_NE(tpv_load_read_fail, "TPV: @STR: load_state read failed rv=@INT",
 		    tpv->tpv_name, rv);
 		vfree(l1);
