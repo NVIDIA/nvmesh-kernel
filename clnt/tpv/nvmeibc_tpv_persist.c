@@ -229,10 +229,9 @@ static void persist_free_le_list(struct list_head *le_list)
  * Read CDV_extent[0], reconstruct the xarray and the CDV_extent ref /
  * free-slot lists.
  *
- * Returns  0   — success, allocator fully populated.
- * Returns >0   — success, but orphan-like inconsistencies detected
- *                (caller should run nvmeibc_tpv_recovery).
- * Returns <0   — hard error, attach should fail.
+ * Returns 0 on success, negative errno on hard error (attach should fail).
+ * Orphan detection is handled separately by nvmeibc_tpv_recovery(), which
+ * the caller always invokes after load_state succeeds.
  *
  * Called at attach time (no concurrent IO, single-threaded).
  * Uses GFP_NOIO: we are a storage driver.
@@ -373,14 +372,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	    tpv->tpv_name, loaded, alloc->cdv_extents_count,
 	    alloc->free_tpv_extent_count);
 
-	/*
-	 * Return 1 if the tree contained any CDV_extents so that
-	 * nvmeibc_tpv_attach() will invoke nvmeibc_tpv_recovery() to
-	 * cross-check the TOMA extent list for orphaned CDV_extents.
-	 * A fresh volume (no prior allocations) returns 0 — no recovery
-	 * needed.
-	 */
-	return alloc->cdv_extents_count > 0 ? 1 : 0;
+	return 0;
 
 out_free:
 	persist_free_le_list(&le_list);

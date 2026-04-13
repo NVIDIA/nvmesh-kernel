@@ -406,26 +406,25 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 	/* ── 3b. Load allocator state from CDV_extent[0] ────────────────── */
 	rv = nvmeibc_tpv_load_state(tpv);
-	if (rv < 0) {
+	if (rv) {
 		_NE(tpv_load_state_fail, "TPV: load_state failed for @STR rv=@INT",
 		    tpv_name, rv);
 		goto err_free_alloc;
 	}
 
-	/* ── 4. Recovery if tree inconsistency detected ─────────────────── */
-	if (rv > 0) {
-		/*
-		 * nvmeibc_tpv_load_state returns > 0 when it detects
-		 * orphaned cdv_extent_md entries (DATA extent for this TPV
-		 * but no corresponding leaf in the tree).  Call recovery to
-		 * reconcile before opening IO gates.
-		 */
-		rv = nvmeibc_tpv_recovery(tpv);
-		if (rv) {
-			_NE(tpv_recovery_fail, "TPV: recovery failed for @STR rv=@INT",
-			    tpv_name, rv);
-			goto err_free_alloc;
-		}
+	/* ── 4. Recovery: cross-check TOMA for orphaned CDV_extents ─────
+	 *
+	 * Always run recovery regardless of what load_state found in the
+	 * tree.  We do not know what happened while the TPV was offline:
+	 * TOMA may have allocated CDV_extents that were never flushed to
+	 * the tree (client crash between CDV_ALLOC_OK and persist_work).
+	 * The only way to find these orphans is to ask TOMA.
+	 */
+	rv = nvmeibc_tpv_recovery(tpv);
+	if (rv) {
+		_NE(tpv_recovery_fail, "TPV: recovery failed for @STR rv=@INT",
+		    tpv_name, rv);
+		goto err_free_alloc;
 	}
 
 	/* ── 5. Schedule initial CDV_extent pre-allocation if pool empty ── */

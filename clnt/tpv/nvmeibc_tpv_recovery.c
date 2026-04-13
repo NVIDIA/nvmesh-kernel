@@ -19,10 +19,12 @@
  *
  * Recovery
  * ────────
- * nvmeibc_tpv_recovery() is called from nvmeibc_tpv_attach() when
- * nvmeibc_tpv_load_state() returns > 0 (i.e. it found at least one
- * CDV_extent in the tree, which means this is not the TPV's first-ever
- * attach and a crash window existed).
+ * nvmeibc_tpv_recovery() is called unconditionally from
+ * nvmeibc_tpv_attach() after nvmeibc_tpv_load_state() succeeds.  We
+ * do not know what happened while the TPV was offline, so the TOMA
+ * extent list must always be cross-checked — even for a volume whose
+ * tree is empty (all CDV_extents may have been allocated after the
+ * last flush, or the volume may have been fully DISCARDed).
  *
  * Algorithm:
  *   1. Snapshot the CDV allocator TOMA identity (toma_id, generation).
