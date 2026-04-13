@@ -184,7 +184,7 @@
         "nvmeibc_volume_conf" : {
                 "//" : "volume configuration",
                 "__type" : "used",
-                "RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Concatenated' : 2, 'RAID-5': 5, 'RAID-6' : 6, 'Striped & Mirrored RAID-10' : 10, 'Striped & RAID-5' : 50, 'Striped & RAID-6' : 60, 'Erasure Coding' : 60, 'ELECT' : 80})",
+                "RAIDLevel" : "__codec MultiValCodec({'Striped RAID-0' : 0, 'Mirrored RAID-1' : 1, 'Concatenated' : 2, 'RAID-5': 5, 'RAID-6' : 6, 'Striped & Mirrored RAID-10' : 10, 'Striped & RAID-5' : 50, 'Striped & RAID-6' : 60, 'Erasure Coding' : 60, 'Striped Erasure Coding' : 60, 'ELECT' : 80})",
                 "numberOfMirrors" : "__codec WithDefaultCodec(PodCodec('H'), 0)",
                 "stripeSize" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "stripeWidth" : "__codec WithDefaultCodec(PodCodec('H'), 1)",
