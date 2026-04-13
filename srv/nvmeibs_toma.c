@@ -972,7 +972,7 @@ static int process_disk_segment_lock_gid_get(
 	struct nvmeibs_toma_disk_segment_lock_gid_req *req)
 {
 	int num_gids = MAX_PORTS_FOR_LOCKS_GIDS;
-	union ib_gid gids[num_gids];
+	union ib_gid gids[MAX_PORTS_FOR_LOCKS_GIDS];
 	struct nvmeibs_toma_server_proc_buf proc_buf;
 	struct nvmeibs_toma_disk_segment_lock_gid_rsp *rsp;
 	int rv = -1;

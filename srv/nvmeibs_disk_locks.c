@@ -851,7 +851,7 @@ int nvmeibs_disk_locks_get_dev(char *selected_disk_name, union ib_gid *out_gids,
 	struct nvmeibs_disk_info *disk;
 	int n_lock_ports = *num_gids < MAX_PORTS_FOR_LOCKS_GIDS ?
 		*num_gids : MAX_PORTS_FOR_LOCKS_GIDS;
-	struct nvmeibs_ib_port *lock_ports[n_lock_ports];
+	struct nvmeibs_ib_port *lock_ports[MAX_PORTS_FOR_LOCKS_GIDS];
 	struct nvmeibs_disk_private_data *disk_private_data;
 	int rv = -ENODEV;
 	int i;
