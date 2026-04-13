@@ -1027,16 +1027,18 @@ static bool is_core_file_new(void)
 	struct dirent		*entry;
 	char				core_full_path[256];
 	uint32_t			newest_core_timestamp_sec = 0;
-	const char			systemd_coredump_dir[] = "/var/lib/systemd/coredump/";
-	const char			ubuntu_coredump_dir[] = "/var/lib/apport/coredump/";
+	const char			systemd_coredump_dir[] = TOMA_ROOT_DIR "var/lib/systemd/coredump/";
+	const char			ubuntu_coredump_dir[] =  TOMA_ROOT_DIR "var/lib/apport/coredump/";
 	size_t				dir_name_len;
 	struct stat			st;
-	const char			leader_file_name[] = TOMA_LOG_DIR"/toma_leader_name";
+	const char			leader_file_name[] = TOMA_LOG_DIR "/toma_leader_name";
 	time_t				leader_file_timestamp_sec = 0;
 	bool				is_new = 0;
 	int					rc;
+	struct timespec		now;
 
 	NFIN;
+	getnstimeofday(&now);
 	// Get the newest_core_timestamp_sec
 	// Unfortunatelly, there is no simple generic method to locate the coredump directory
 	d = opendir(systemd_coredump_dir);
@@ -1075,8 +1077,8 @@ static bool is_core_file_new(void)
 		goto out;
 	}
 	// Now that we have the core's date, decide whether is_new
-	if (nvmeibt_global_get_cur_event_start_time().tv_sec - newest_core_timestamp_sec < (2 * 24 * 3600)) {
-		N_Tf(2okex6z, "core=@STR is_new @LLD sec old", core_full_path, nvmeibt_global_get_cur_event_start_time().tv_sec - newest_core_timestamp_sec);
+	if (now.tv_sec - newest_core_timestamp_sec < (2 * 24 * 3600)) {
+		N_Tf(2okex6z, "core=@STR is_new @LLD sec old", core_full_path, now.tv_sec - newest_core_timestamp_sec);
 		is_new = 1;
 	}
 	// Try to detect whether the last TOMA run ended-up with a core dump
@@ -1106,14 +1108,14 @@ static int n_toma_restarts_in_the_last_5_days(void)
 {
 	char		cmd[256];
 	char		n_restarts_file_name[64];
-	char		n_as_str[10];
+	char		n_as_str[10] = {0};
 	int			fd = 0;
 	int			rv = 0;
 	int			n_bytes_read;
 	int			system_status;
-
-	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), "/tmp/jctl_%d", getpid());
-	snprintf(cmd, sizeof(cmd), "journalctl -u nvmeshtoma --since='-5days' --grep='Starting NVMesh Toma' | grep nvmeshtarget | wc -l > %s", n_restarts_file_name);
+	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), TOMA_ROOT_DIR "tmp/jctl_%d", getpid());
+	snprintf(cmd, sizeof(cmd), TOMA_BINLOG_DIR "/pager " TOMA_BINLOG_DIR " -l toma.eter.binlog -t now-120h --nogreet -f 'trace=trace_toma_nvmeibt_toma_init' | wc -l > %s", n_restarts_file_name);
+	// Todo: Consider using faster code instead: snprintf(cmd, sizeof(cmd), "find " TOMA_ROOT_DIR " -name toma.binlog_marker* -mmin -7200 | wc -l > %s", n_restarts_file_name);
 	N_Tf(0kkdoks, "@STR", cmd);
 	system_status = system(cmd);
 	if (!WIFEXITED(system_status) || WEXITSTATUS(system_status)) {
@@ -1139,7 +1141,7 @@ out:
 
 /************************  logs_snapshotting_WQ  ******************************/
 
-static bool is_logs_snapshotting_slowpath_wq_in_the_air = 0;
+static bool is_logs_snapshotting_slowpath_wq_in_the_air = 0;	// Not atomic becuases accesses only from Toma main thread
 struct logs_snapshotting_slowpath_wq_entry {
 	struct nvmeibt_wq_entry 		wq_entry;
 	bool							is_first_run_after_boot;
@@ -1309,9 +1311,13 @@ out:
 
 void nvmeibt_log_snapshotting_shutdown(void)
 {
-	while (is_logs_snapshotting_slowpath_wq_in_the_air) {
+	int i;
+	for (i = 0; (i < 20) && is_logs_snapshotting_slowpath_wq_in_the_air; i++) {
 		N_Tf(rftsikl, "Awaiting for the running task to end");
 		nanosleep(&(struct timespec){0, MSEC_TO_NSEC(100)}, NULL); // 100ms
+	}
+	if (is_logs_snapshotting_slowpath_wq_in_the_air) {
+		N_Ef(rftsikk, "Work still running, not waiting anymore, application may crash...");
 	}
 }
 
