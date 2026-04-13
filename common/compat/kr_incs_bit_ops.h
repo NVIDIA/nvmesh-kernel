@@ -16,6 +16,8 @@
 	#endif
 #else
 	// Kernel already has those functions. Define as compatibility for user-space
+	#include <assert.h>
+	#include <stdlib.h>
 	#include "../nvmeib_math.h"
 	#include "kr_incs_types.h"
 
@@ -325,16 +327,16 @@ static inline void bitmap_zero(unsigned long *dst, unsigned int nbits) {
 
 /*
  * bitmap_zalloc / bitmap_free — allocate and free a zero-initialised bitmap.
- * In the kernel these are wrappers around kcalloc; here they use kzalloc/kfree.
  */
 static inline unsigned long *bitmap_zalloc(unsigned int nbits, gfp_t flags)
 {
-	return kzalloc(BITS_TO_LONGS(nbits) * sizeof(unsigned long), flags);
+	(void)flags;
+	return calloc(BITS_TO_LONGS(nbits), sizeof(unsigned long));
 }
 
 static inline void bitmap_free(unsigned long *bitmap)
 {
-	kfree(bitmap);
+	free(bitmap);
 }
 
 static inline void __bitmap_shift_left(unsigned long *dst, const unsigned long *src,

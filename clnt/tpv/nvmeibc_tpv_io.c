@@ -32,7 +32,10 @@
 #include "clnt/nvmeibc_block.h"			/* KERNEL_SECTOR_SHIFT */
 #include "common/nvmeib_common_os_block_api.h"	/* REQ_RET, REQ_RET_ZERO */
 
-/* ── Forward declaration ────────────────────────────────────────────────── */
+/* ── Forward declarations ────────────────────────────────────────────────── */
+
+/* Satisfy -Werror=missing-prototypes: REQ_RET is defined in the include above. */
+REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio);
 
 /*
  * nvmeibc_tpv_cdv_submit_bio — forward a mapped bio to the CDV IB transport.

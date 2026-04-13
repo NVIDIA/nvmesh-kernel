@@ -12,6 +12,7 @@
 #include "clnt/nvmeibt_client_protocol.h"
 #include "../common/nvmeib_shared.h"
 #include "clnt/nvmeibt_client.h"
+#include "nvmeibt_disk_segment.h"		/* struct nvmeibt_seg_lot */
 
 /*******************    Registrant    **********************/
 

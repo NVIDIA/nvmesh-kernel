@@ -254,10 +254,22 @@ int  nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 
 int  nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx);
 
+/* Free all nvmeibc_tpv_free_slot entries on a list. Called at detach. */
+void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
+
+/* Background work handler: return empty CDV_extents, then request new ones. */
+void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
+
 /* ── Persistence API (implemented in nvmeibc_tpv_persist.c) ───────────── */
 
 int  nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv);
 int  nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv);
+
+/* Install a newly allocated data CDV_extent into the L1 tree (no-op in flat-L1 model). */
+int  nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv, u64 extent_index);
+
+/* Background work handler: flush dirty allocator state to CDV_extent[0]. */
+void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
 
 /* ── Recovery API (implemented in nvmeibc_tpv_recovery.c) ─────────────── */
 

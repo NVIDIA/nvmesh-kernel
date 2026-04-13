@@ -62,21 +62,29 @@
 #include "clnt/nvmeibc_msgs_shared.h"	/* nvmeibc_cdv_alloc_req/resp, free_req */
 #include "nvmeibc_tpv_test.h"
 
-/* ── Forward declarations for exported helpers used here ────────────────── */
-
+/* ── Forward declarations (CDV transport stubs defined below) ───────────── */
 /*
- * nvmeibc_tpv_persist_work_fn and nvmeibc_tpv_cdv_alloc_work_fn are
- * EXPORT_SYMBOL'd in their respective .c files; declare them here so
- * INIT_WORK can reference them.
+ * These six functions are the only kernel implementations of CDV transport
+ * externs declared in persist.c, io.c, allocator.c, and recovery.c.
+ * Prototypes here satisfy -Werror=missing-prototypes at the definition sites.
  */
-extern void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
-extern void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
-
-/*
- * nvmeibc_tpv_free_slots_list is EXPORT_SYMBOL'd in nvmeibc_tpv_allocator.c.
- * Frees all nvmeibc_tpv_free_slot entries on a list.
- */
-extern void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
+int  nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
+				u64 cdv_offset, void *buf, u64 len);
+int  nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
+				 u64 cdv_offset, const void *buf, u64 len);
+void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
+				 struct bio *bio, u64 cdv_phys_offset);
+int  nvmeibc_ib_admin_cdv_alloc_extent(struct nvmeibc_volume *cdv,
+					const char *toma_id,
+					const struct nvmeibc_cdv_alloc_req *req,
+					struct nvmeibc_cdv_alloc_resp *resp);
+int  nvmeibc_ib_admin_cdv_free_extent(struct nvmeibc_volume *cdv,
+				       const char *toma_id,
+				       const struct nvmeibc_cdv_free_req *req);
+int  nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
+					const char *toma_id,
+					const char *tpv_uuid,
+					u64 **out_indices, u64 *out_count);
 
 /* ── Test geometry constants ────────────────────────────────────────────── */
 

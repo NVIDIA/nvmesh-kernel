@@ -102,9 +102,8 @@ extern int nvmeibc_ib_admin_cdv_free_extent(
  * before, the extent remains orphaned (NVCK-detectable).
  *
  * Implemented in nvmeibc_tpv_persist.c (step 11d).  Returns 0 on success.
+ * Prototype in nvmeibc_tpv.h.
  */
-extern int nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv,
-					   u64 extent_index);
 
 /*
  * Monotonically increasing request ID across all CDV_ALLOC_EXTENT requests

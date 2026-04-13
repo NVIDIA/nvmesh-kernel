@@ -380,6 +380,10 @@
 #ifndef KS_HAS_BLK_ALLOC_DISK
 #      define KS_HAS_BLK_ALLOC_DISK KERNEL_VERSION_GE(5,14,0)
 #endif
+#ifndef KS_HAS_BLK_CLEANUP_DISK
+/* blk_cleanup_disk: introduced in 5.14 (with blk_alloc_disk), removed in 6.8. */
+#      define KS_HAS_BLK_CLEANUP_DISK (KERNEL_VERSION_GE(5,14,0) && KERNEL_VERSION_LT(6,8,0))
+#endif
 #ifndef KS_HAS_IOREMAP_NOCACHE
 #      define KS_HAS_IOREMAP_NOCACHE KERNEL_VERSION_LT(5,6,0)
 #endif

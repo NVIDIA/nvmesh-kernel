@@ -39,13 +39,6 @@
 /* nvmeibc_tpv_io.c */
 extern REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio);
 
-/* nvmeibc_tpv_allocator.c */
-extern void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
-extern void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
-
-/* nvmeibc_tpv_persist.c */
-extern void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
-
 /* ── Block device fops ─────────────────────────────────────────────────── */
 
 /*
@@ -287,11 +280,13 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 #if KS_ADD_DISK_INT_RV
 err_put_disk:
 #endif
-#if KS_HAS_BLK_ALLOC_DISK
+#if KS_HAS_BLK_CLEANUP_DISK
 	blk_cleanup_disk(disk);
 #else
 	put_disk(disk);
+#  if !KS_HAS_BLK_ALLOC_DISK
 	blk_cleanup_queue(queue);
+#  endif
 #endif
 	return rv;
 }
