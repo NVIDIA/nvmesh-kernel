@@ -193,7 +193,7 @@ class ClientControlAgent(Daemon):
 		self.lunIDCounter = 0
 		self.configProfileInfo = {}
 		self.shouldSignalMainProcess = None
-		self.featureCompatibilityVersion = 1 # must match client's reported version
+		self.featureCompatibilityVersion = 2 # must match client's reported version
 
 		pidfile = os.path.join(PID_DIR, 'managementAgent.pid')
 		lockfile = os.path.join(PID_DIR, 'managementAgent.lock')

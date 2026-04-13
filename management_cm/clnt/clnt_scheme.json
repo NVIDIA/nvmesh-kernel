@@ -8,7 +8,7 @@
                 "__type": "enum",
                 "__def": {
                         "//": "client to management feature compatibility version; the version must be incremented every time, the client functionality is changed",
-                        "NVMEIB_C_TO_M_FEATURE_COMPATIBILITY_VERSION" : 1
+                        "NVMEIB_C_TO_M_FEATURE_COMPATIBILITY_VERSION" : 2
                 }
         },
         "enum_vol_status": {

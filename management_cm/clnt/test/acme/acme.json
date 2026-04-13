@@ -9,7 +9,7 @@
                 "__type": "enum",
                 "__def": {
                         "//": "WARNING: increment compatibility version on every new client feature; every means 'every', even extended EC journal support",
-                        "NVMEIB_C_TO_M_FEATURE_COMPATIBILITY_VERSION" : 1
+                        "NVMEIB_C_TO_M_FEATURE_COMPATIBILITY_VERSION" : 2
                 }
         },
         "header": {
