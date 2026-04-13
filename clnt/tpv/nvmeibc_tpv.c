@@ -232,8 +232,17 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 #endif	/* KS_HAS_BLK_ALLOC_DISK */
 
 	/* ── Configure disk ─────────────────────────────────────────────── */
-	disk->major       = 0;		/* dynamic major via BLOCK_EXT_MAJOR */
-	disk->minors      = 1;
+	/*
+	 * Use extended devt (blkext) for dynamic major assignment.
+	 * major=0 + minors=0 + GENHD_FL_EXT_DEVT is the required combination;
+	 * major=0 with minors>0 is invalid and causes add_disk() to return
+	 * -EINVAL.  This mirrors what nvmeibc_block_api_os.c does when
+	 * nvmeibc_use_block_external_major is true.
+	 */
+	disk->major       = 0;
+	disk->first_minor = 0;
+	disk->minors      = 0;
+	disk->flags      |= GENHD_FL_EXT_DEVT;
 	disk->fops        = &nvmeibc_tpv_fops;
 	disk->private_data = tpv;
 	queue->queuedata   = tpv;
