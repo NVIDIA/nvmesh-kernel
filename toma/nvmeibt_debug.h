@@ -21,7 +21,7 @@
 
 
 #define TOMA_SW_COMPATIBILITY_VER							0x00000350U		// unint32, Current version,
-#define TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED	0x00000350U		// First TOMA software version whose followers can merge incremental wire buffers. NDU supported from 330U
+#define TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED	0x00000350U		// First TOMA software version whose followers can merge incremental wire buffers, and support N mirror. NDU supported from 330U
 
 #define WARN(x...) ({})		// Just in order to compile
 
