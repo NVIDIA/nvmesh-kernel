@@ -1319,6 +1319,8 @@ else
 cflags += -DENABLE_SIW=0
 endif
 
+subdir-ccflags-y += $(cflags)
+
 # ofed_symbol_version
 ifneq ($(OFED_SYM_VER),)
     OFED_SYMVERS = $(OFED_SYM_VER)
