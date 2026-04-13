@@ -297,4 +297,11 @@ void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv);
  */
 void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv);
 
+/*
+ * nvmeibc_tpv_proc_destroy_root — remove /proc/nvmeibc/tpv/ at module unload.
+ * Must be called after all per-TPV entries are gone and before the parent
+ * /proc/nvmeibc/ directory is removed.
+ */
+void nvmeibc_tpv_proc_destroy_root(void);
+
 #endif /* NVMEIBC_TPV_H */

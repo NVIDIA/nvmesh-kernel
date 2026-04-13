@@ -290,3 +290,22 @@ void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv)
 	_ND(tpv_proc_deregistered, "TPV: @STR: proc entries removed", tpv->tpv_name);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_proc_deregister);
+
+/*
+ * nvmeibc_tpv_proc_destroy_root — remove /proc/nvmeibc/tpv/.
+ *
+ * Called at module unload (nvmeibc_module_procs_destroy) BEFORE the parent
+ * /proc/nvmeibc/ directory is removed.  All per-TPV subdirectories must
+ * already be gone (nvmeibc_tpv_proc_deregister called for each detached TPV)
+ * before this function is invoked; otherwise remove_proc_entry will warn.
+ */
+void nvmeibc_tpv_proc_destroy_root(void)
+{
+	mutex_lock(&nvmeibc_tpv_proc_root_lock);
+	if (nvmeibc_tpv_proc_root) {
+		remove_proc_entry("tpv", nvmeibc_get_module_proc_dir_entry());
+		nvmeibc_tpv_proc_root = NULL;
+	}
+	mutex_unlock(&nvmeibc_tpv_proc_root_lock);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_proc_destroy_root);
