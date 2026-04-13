@@ -349,6 +349,24 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		    !tpv_extent_size_kb))
 		return NULL;
 
+	/* ── 0. Idempotency: return existing TPV if already attached ─────
+	 *
+	 * Management may re-send an attach command (e.g. after a keepalive
+	 * gap or status-reporting race).  If the TPV is already in the
+	 * active list, return it so the caller sends ACK_ATTACHED again
+	 * without touching the disk or allocator.
+	 */
+	{
+		struct nvmeibc_tpv *existing = nvmeibc_tpv_find_by_uuid(tpv_uuid);
+
+		if (existing) {
+			_NI(tpv_already_attached,
+			    "TPV: @STR already attached; returning existing tpv",
+			    tpv_name);
+			return existing;
+		}
+	}
+
 	/* ── 1. Verify CDV is attached ──────────────────────────────────── */
 	/*
 	 * The CDV must already be in the volumes list (attached hidden,
@@ -467,6 +485,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	return tpv;
 
 err_free_alloc:
+	/* Unregister the block device if blkdev_register already succeeded. */
+	nvmeibc_tpv_blkdev_unregister(tpv);
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
 	kfree(tpv);
 	return NULL;
