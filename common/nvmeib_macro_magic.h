@@ -753,8 +753,8 @@ IIF(BITAND(IS_COMPARABLE(x))(IS_COMPARABLE(y)) ) \
 
 #define EQUAL(x, y) COMPL(NOT_EQUAL(x, y))
 
-#define COMMA() ,
+#define NV_COMMA() ,
 
-#define COMMA_IF(n) IF(n)(COMMA, EAT)()
+#define COMMA_IF(n) IF(n)(NV_COMMA, EAT)()
 
 #endif
