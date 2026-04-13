@@ -2340,6 +2340,12 @@
             "0x%llx": 58
         }
     },
+    "@COMMIT_ID_STR": {
+        "size": "string",
+        "type": "string",
+        "fmt": "%s",
+        "final": true
+    },
     "@COMMIT_ID_LONG": {
         "size": 64,
         "type": "long",

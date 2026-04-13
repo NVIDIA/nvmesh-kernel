@@ -319,7 +319,7 @@ int main(int argc, char* argv[])
 			}
 
 			/* Initialize IO PET channel */
-			snprintf(pet_filename, sizeof(pet_filename), "%s_%012lx", IO_PET_CHANNEL_NAME, (uint64_t)COMMIT_ID);
+			snprintf(pet_filename, sizeof(pet_filename), "%s_%s", IO_PET_CHANNEL_NAME, COMMIT_ID_STR);
 			_info("Initializing IO PET channel %s", pet_filename);
 			io_pet_ch = init_io_pet_channel(dir, pet_filename);
 			if(!io_pet_ch){

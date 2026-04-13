@@ -13,6 +13,9 @@
 #ifndef COMMIT_ID
 	#define COMMIT_ID 0xdeadbeef
 #endif
+#ifndef COMMIT_ID_STR
+	#define COMMIT_ID_STR "deadbeef"
+#endif
 #define OUT_SIZE (4*NVMEIBC_SECTOR_SIZE)
 int main(int argc, char *argv[]) {
 	char binary_block[NVMEIBC_SECTOR_SIZE], out[OUT_SIZE];
@@ -22,7 +25,7 @@ int main(int argc, char *argv[]) {
 	FILE *f, *f2;
 	if (argc < 3) {
 		fprintf(stderr, "Version: " VERSION "\n");
-		fprintf(stderr, "commit 0x%lx. Args <binary_block_file> <output_txt_file>\n", (unsigned long)COMMIT_ID);
+		fprintf(stderr, "commit %s. Args <binary_block_file> <output_txt_file>\n", COMMIT_ID_STR);
 		return 255;
 	}
 	f = fopen(fn, "rb");

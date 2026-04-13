@@ -20,8 +20,8 @@ static ssize_t fill_version_json(void *dummy, char *buffer, size_t len)
 	(void)dummy;
 
 	count += scnprintf(buffer + count, len - count,
-					   "{\"module\" : \"clnt\", \"commit\" : \"%llx\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
-		(u64)COMMIT_ID, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER), __stringify(BUILD_DISTRO));
+					   "{\"module\" : \"clnt\", \"commit\" : \"%s\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
+		COMMIT_ID_STR, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER), __stringify(BUILD_DISTRO));
 	count += nvmeib_proc_add_json_proc_epilog(VERSION_PROC_FRMT_VER, buffer + count, len - count);
 	count += scnprintf(buffer + count, len - count, "}\n");
 	corecomm_inj_code(({

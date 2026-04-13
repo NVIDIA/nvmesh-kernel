@@ -7016,7 +7016,7 @@ static const struct blk_unittest_conf * __parseArgs(int argc, char* argv[]){
 }
 
 static void __print_status_header(const struct blk_unittest_conf *ut_conf) {
-	unitest_print("\tCompiled @ " __DATE__ "/" __TIME__ ", git (commit:" KERN_COL_YELLOW "%07lx" KERN_COL_RESET ", tag:%s, branch:%s), USE_RELEASE=%d %s debugger, %d[b] blocks, dbg:%d, nRep:%d, sync:%d, max-pcpu-io=%d\n", (unsigned long)COMMIT_ID, __stringify(VER_TAGID), __stringify(BRANCH_NAME), USE_RELEASE, (is_debugger_present() ? "with" : "no"), NVMEIBC_SECTOR_SIZE, nvmeibc_debug_level, ut_conf->bunitest.nRep, ut_conf->transport.is_disk_callback_sync, max_ios_per_cpu);
+	unitest_print("\tCompiled @ " __DATE__ "/" __TIME__ ", git (commit:" KERN_COL_YELLOW "%s" KERN_COL_RESET ", tag:%s, branch:%s), USE_RELEASE=%d %s debugger, %d[b] blocks, dbg:%d, nRep:%d, sync:%d, max-pcpu-io=%d\n", COMMIT_ID_STR, __stringify(VER_TAGID), __stringify(BRANCH_NAME), USE_RELEASE, (is_debugger_present() ? "with" : "no"), NVMEIBC_SECTOR_SIZE, nvmeibc_debug_level, ut_conf->bunitest.nRep, ut_conf->transport.is_disk_callback_sync, max_ios_per_cpu);
 	unitest_print("\tECPUs="  KERN_COL_YELLOW "%d" KERN_COL_RESET " TimerCPUs=%d PerCPUs=%d, is_valgrind=%c |\n", ut_conf->kernel_prm.num_ecpu, MAX_NUM_TIMERS_ENGINE, CONFIG_NR_CPUS, bool_to_yes_no(ut_conf->base.is_valgrind));
 	_ND(trace_0_bunitest_parseArgs, "D() - is active");		// pr_debug() Display the active prints in the log
 	_NT(trace_1_bunitest_parseArgs, "T() - is active");
@@ -7882,7 +7882,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 			unitest_print("*** gf performance tests\n");
 			rv |= gf_perf();
 		}
-		pr_alert("--------------------commit ID: %07lx, Round " KERN_COL_WHITE_BOLD "%3d" KERN_COL_RESET " of %d - %s--------------------\n", (unsigned long)COMMIT_ID, sr + 1, buni->conf->bunitest.nRep, unitest_rv_to_string(rv));
+		pr_alert("--------------------commit ID: %s, Round " KERN_COL_WHITE_BOLD "%3d" KERN_COL_RESET " of %d - %s--------------------\n", COMMIT_ID_STR, sr + 1, buni->conf->bunitest.nRep, unitest_rv_to_string(rv));
 	}	// for (sr=0; sr < buni->conf->bunitest.nRep; sr++)
 	sim_kfree(buni);
 	rv |= nvmesh_error_tags_dump_to_file("error_tags_run_end.json", __start_nvmeibc_error_tags, __stop_nvmeibc_error_tags);

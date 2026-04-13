@@ -217,13 +217,13 @@ static const union nvmeib_version 	nvmeib_3p4_version = NVMEIB_3p4_VERSION_INIT;
 #endif
 
 #define NVMEIB_VERSION_PRINT_FMT() \
-	"{\"module\" : \"comn\", \"commit\" : \"%" PRIx64 "\", \"NVMesh\" : \"%d.%d.%d.%d\", \"Protocol\" : \"%d.%d.%d.%d\"}"
+	"{\"module\" : \"comn\", \"commit\" : \"%s\", \"NVMesh\" : \"%d.%d.%d.%d\", \"Protocol\" : \"%d.%d.%d.%d\"}"
 
 #define NVMEIB_VERSION_TRACE_FMT() \
-	"{\"module\" : \"comn\", \"commit\" : \"@COMMIT_ID\", \"NVMesh\" : \"@MAJOR.@MINOR.@SUBMINOR.@MR\", \"Protocol\" : \"@MAJOR.@MINOR.@SUBMINOR.@MR\"}"
+	"{\"module\" : \"comn\", \"commit\" : \"@COMMIT_ID_STR\", \"NVMesh\" : \"@MAJOR.@MINOR.@SUBMINOR.@MR\", \"Protocol\" : \"@MAJOR.@MINOR.@SUBMINOR.@MR\"}"
 
 #define NVMEIB_VERSION_PRINT_ARG(_v_) \
-		(u64)COMMIT_ID, \
+		COMMIT_ID_STR, \
 		(_v_)->product.major, \
 		(_v_)->product.minor, \
 		(_v_)->product.subminor, \

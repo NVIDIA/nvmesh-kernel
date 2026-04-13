@@ -25,8 +25,8 @@ static ssize_t fill_version_json(void *a, char *buffer, size_t len)
 	(void)a;
 	count += scnprintf(
 		buffer + count, len - count,
-		"{\"module\" : \"atom\", \"commit\" : \"%llx\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
-		(u64)COMMIT_ID, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER),
+		"{\"module\" : \"atom\", \"commit\" : \"%s\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
+		COMMIT_ID_STR, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER),
 		__stringify(BUILD_DISTRO));
 	count += scnprintf(buffer + count, len - count, "}\n");
 
