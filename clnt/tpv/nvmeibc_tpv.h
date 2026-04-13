@@ -49,6 +49,17 @@ struct nvmeibc_tpv_extent_entry {
 };
 
 /*
+ * Tracks one available physical TPV_extent slot within an already-allocated
+ * CDV_extent.  Lives on nvmeibc_tpv_allocator.free_tpv_extents.
+ * Shared between allocator and persistence code.
+ */
+struct nvmeibc_tpv_free_slot {
+	u64              phys_offset;		/* CDV byte offset of this slot */
+	u64              cdv_extent_index;	/* CDV_extent containing this slot */
+	struct list_head node;
+};
+
+/*
  * Tracks a single data CDV_extent allocated from the CDV.allocator (TOMA).
  * One CDV_extent holds n_slots = (cdv_extent_size / tpv_extent_size) TPV_extents.
  */
@@ -154,10 +165,20 @@ struct nvmeibc_tpv {
  * extent_index == TPV_TREE_NULL means the slot is empty / not present.
  * CDV_extent[0] is the permanent L1 root and is never a valid child target,
  * so 0 is safe as the null sentinel.
+ *
+ * Flat-L1 model (current implementation):
+ *   CDV_extent[0] is used as a flat array of N = E/16 leaf entries,
+ *   indexed directly by virtual extent index V.  Each leaf:
+ *     extent_index = data CDV_extent index holding V's data
+ *     debug_meta   = slot number within that CDV_extent
+ *   phys_offset = A + extent_index×E + debug_meta×T.
+ *   Max V = N−1.  For E=64 MB: 4 Mi entries → 256 GiB virtual capacity
+ *   (at T=64 KiB per extent).  L2/L3 indirection for larger volumes is
+ *   reserved for a future extension.
  */
 struct tpv_tree_entry {
 	u64 extent_index;		/* CDV_extent index of child table or data extent */
-	u64 debug_meta;			/* sequence number, extent_type hint, reserved */
+	u64 debug_meta;			/* leaf: slot within CDV_extent; intermediate: reserved */
 };
 
 #define TPV_TREE_NULL  0ULL

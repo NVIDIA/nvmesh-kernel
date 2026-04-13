@@ -41,16 +41,7 @@
 #include "clnt/nvmeibc_volume.h"	/* nvmeibc_volume, hdr.uuid */
 #include "clnt/nvmeibc_msgs_shared.h"	/* nvmeibc_cdv_alloc_req/resp, nvmeibc_cdv_free_req */
 
-/* ── Private type ───────────────────────────────────────────────────────────
- *
- * Tracks one available physical TPV_extent slot within an already-allocated
- * CDV_extent.  Lives on nvmeibc_tpv_allocator.free_tpv_extents.
- */
-struct nvmeibc_tpv_free_slot {
-	u64              phys_offset;		/* CDV byte offset of this slot */
-	u64              cdv_extent_index;	/* CDV_extent containing this slot */
-	struct list_head node;
-};
+/* struct nvmeibc_tpv_free_slot is now in nvmeibc_tpv.h (shared with persist) */
 
 /* ── Geometry helpers ───────────────────────────────────────────────────── */
 

@@ -389,6 +389,20 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 				   virtual_size_bytes, cdv_extent_size_mb,
 				   allocator_size_gb);
 
+	/* ── 3a-check. Verify flat-L1 tree can address all virtual extents. */
+	{
+		u64 l1_capacity = ((u64)cdv_extent_size_mb << 20) /
+				  sizeof(struct tpv_tree_entry);
+
+		if (tpv->allocator.virtual_extents_total > l1_capacity) {
+			pr_err("nvmeibc_tpv: %s: virtual_extents %llu exceeds flat-L1 capacity %llu\n",
+			       tpv_name,
+			       tpv->allocator.virtual_extents_total,
+			       l1_capacity);
+			goto err_free_alloc;
+		}
+	}
+
 	/* ── 3b. Load allocator state from CDV_extent[0] ────────────────── */
 	rv = nvmeibc_tpv_load_state(tpv);
 	if (rv < 0) {
