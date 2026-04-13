@@ -373,7 +373,14 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	    tpv->tpv_name, loaded, alloc->cdv_extents_count,
 	    alloc->free_tpv_extent_count);
 
-	return 0;
+	/*
+	 * Return 1 if the tree contained any CDV_extents so that
+	 * nvmeibc_tpv_attach() will invoke nvmeibc_tpv_recovery() to
+	 * cross-check the TOMA extent list for orphaned CDV_extents.
+	 * A fresh volume (no prior allocations) returns 0 — no recovery
+	 * needed.
+	 */
+	return alloc->cdv_extents_count > 0 ? 1 : 0;
 
 out_free:
 	persist_free_le_list(&le_list);
