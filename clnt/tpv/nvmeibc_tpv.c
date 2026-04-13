@@ -241,18 +241,21 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	snprintf(disk->disk_name, DISK_NAME_LEN, "%s/%.30s",
 		 NVMEIBC_TPV_DISK_PREFIX, tpv->tpv_name);
 
+	/* chunk_sectors: 512-byte units; guarantees each READ/WRITE bio arriving
+	 * in nvmeibc_tpv_make_request is contained within one TPV_extent.  */
+#if KS_BLK_ALLOC_DISK_2PARAMS
+	/* 6.8+: blk_queue_* setters removed; write limits directly. */
+	queue->limits.logical_block_size  = 512;
+	queue->limits.physical_block_size = 512;
+	queue->limits.chunk_sectors =
+		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1);
+#else
 	blk_queue_logical_block_size(queue,  512);
 	blk_queue_physical_block_size(queue, 512);
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, queue);
-
-	/*
-	 * Instruct the block layer to split bios at TPV_extent boundaries.
-	 * This guarantees that every bio arriving in nvmeibc_tpv_make_request
-	 * is fully contained within one TPV_extent (no cross-extent splits in
-	 * the IO path).  chunk_sectors is in 512-byte units.
-	 */
 	blk_queue_chunk_sectors(queue,
 		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1));
+#endif
 
 	/*
 	 * Add with zero capacity first to avoid deadlock (see comment in
