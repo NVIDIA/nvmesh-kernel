@@ -66,6 +66,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 						ps->uuid = (pr->uuid | (s+1));
 						ps->block_end = ps->block_start + (disk_seg_n_blocks - 1);	// Assuming 1 chunk here, Non EC
 					}
+					pv->topo_chunks[c].raids[r].cfg = pr;			// Toma Topology section points to configuration
 				}
 				pc->vlba_start = (c == 0) ? 0 : (pc[-1].vlba_end + 1);
 				pc->vlba_end = pc->vlba_start + (pc->n_raids * pc->raids[0].D * disk_seg_n_blocks) - 1;
@@ -77,6 +78,18 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 
 const struct sb_seg_conf* sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *D, uint32_t u) { // The above uuid design was for easy retrieval of object by uuid.
 	return &D->vols[((u>>16)&0xF)-1].chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1].segs[((u)&0xF)-1];
+}
+
+struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid(struct sb_cluster_conf *D, const char *raid_uuid) {
+	unsigned u;
+	BUG_ON(sscanf(raid_uuid, "%x", &u) != 1);	// Scan 1 argument
+	return &D->vols[((u>>16)&0xF)-1].topo_chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1];
+}
+
+struct sb_seg_topo* sb_cluster_get_topo_seg_ptr_from_uuid( struct sb_cluster_conf *D, const char *seg_uuid) {
+	unsigned u;
+	BUG_ON(sscanf(seg_uuid, "%x", &u) != 1);	// Scan 1 argument
+	return &D->vols[((u>>16)&0xF)-1].topo_chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1].segs[((u)&0xF)-1];
 }
 
 int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, const char *host_name) {

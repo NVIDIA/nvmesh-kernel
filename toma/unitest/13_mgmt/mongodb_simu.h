@@ -9,6 +9,7 @@
 #include "../../../autogen/clnt/nvmeibc_mcs_stub.h"	// Client simulator - report to mgmt simulator
 #define SB_CLUSTER_CONF_N_NODES_TOTAL (3)			// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n39
 #define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
+#define SB_CLUSTER_CONF_MAX_CHUNKS    (2)			// Maximum number of chunks in a volume, For now, 2 chunks only, Support for volume extend once
 
 struct sb_cluster_conf {
 	struct sb_node_conf {
@@ -35,6 +36,7 @@ struct sb_cluster_conf {
 	} nodes[SB_CLUSTER_CONF_N_NODES_TOTAL], *live, *other;
 	int n_nodes;
 	struct sb_volume_conf {							// All volumes configuration
+		// --------------- Volume config
 		const char* name;
 		uint32_t uuid;								// For simplicity all uuids are u32
 		unsigned num_blocks;						// Volume size (num of 4KB blocks)
@@ -54,13 +56,26 @@ struct sb_cluster_conf {
 					unsigned block_end;				// All disk segments in chunk have identical length
 				} segs[4];							// Up to 3+1 EC, for now
 			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
-		} chunks[2];								// For now, 2 chunks only, Support for volume extend once
+		} chunks[SB_CLUSTER_CONF_MAX_CHUNKS];
+		// --------------- Client reports
 		struct sb_attachment_info {					// Each client can be attached to each volume
 			uint32_t attachment_version;			// 0 if not attached.
 			struct nvmeibc_reservation reserv;		// Todo: Use this to test enforcing reservation version attached by Toma
 			bool ioEnabled;							// Client reports that its IO is enabled (after conversation with Toma).
 			bool is_recovery_attach;
 		} clnts[SB_CLUSTER_CONF_N_NODES_TOTAL];		//
+		// --------------- Toma reports
+		struct sb_chunk_topo {
+			struct sb_praid_topo {
+				const struct sb_praid_conf *cfg;	// Pointer to config of praid
+				uint16_t version_major;
+				uint16_t version_minor;
+				struct sb_seg_topo {
+					enum seg_topo_state { mdb_seg_UNK = 0, mdb_seg_BOOT = 'B', mdb_seg_ZERO = '0', mdb_seg_INIT = 'I', mdb_seg_CORRUPTED = '!', mdb_seg_RW = 'R', mdb_DEAD = 'D', mdb_WRITE = 'W', mdb_seg_dep='v', mdb_seg_rep='^',  } status;
+					bool vitality;					// True = reports to leader, false = node not conencted to leader
+				} segs[4];							// Up to 3+1 EC, for now
+			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
+		} topo_chunks[SB_CLUSTER_CONF_MAX_CHUNKS];
 	} vols[SB_CLUSTER_CONF_MAX_VOLS];				// For now, up to 4 volumes
 	int n_vols;
 	int zone_idx;									// All those volume exist in a specific zone
@@ -76,6 +91,8 @@ int  sb_cluster_get_node_idx_from_disk_uuid(const struct sb_cluster_conf *, uint
 bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
 void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
 
-const struct sb_seg_conf* sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *, uint32_t seg_uuid);
+const struct sb_seg_conf*   sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *, uint32_t  seg_uuid);
+      struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid( struct sb_cluster_conf *, const char *raid_uuid);
+      struct sb_seg_topo*   sb_cluster_get_topo_seg_ptr_from_uuid( struct sb_cluster_conf *, const char *seg_uuid);
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation

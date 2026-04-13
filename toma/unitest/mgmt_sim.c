@@ -391,6 +391,34 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	// N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD", m->boot_time);
 }
 
+static void __mongodb_insert_praid_hdr(struct sb_praid_topo *pr, struct mm_json_elem *j) {
+	const int64_t pr_maj = json_get_dict_num(j, "pRaidMajorVersion", -1);
+	const int64_t pr_min = json_get_dict_num(j, "pRaidMinorVersion", -1);
+	BUG_ON((pr_maj < (int64_t)pr->version_major) || (pr_min < (int64_t)pr->version_minor));			// Can never go back
+	pr->version_major = pr_maj;
+	pr->version_minor = pr_min;
+}
+
+static void __mongodb_insert_praid_seg(struct sb_cluster_conf *cfg, struct mm_json_elem *j) {
+	const char *uuid = json_get_dict_str(j, "segmentID", NULL);
+	const char *status = json_get_dict_str(j, "status",   "unknown");
+	const char *vital =  json_get_dict_str(j, "vitality", "unknown");
+	struct sb_seg_topo *ps = sb_cluster_get_topo_seg_ptr_from_uuid(cfg, uuid);
+	if      (!strncmp(vital, "up",   2))	ps->vitality = true;
+	else if (!strncmp(vital, "down", 4))	ps->vitality = false;
+	else BUG_ON(true);						// Unknown invalid value
+	if      (!strncmp(status, "under_", 6))	ps->status = mdb_WRITE;		// under recovery
+	else if (!strncmp(status, "normal", 6))	ps->status = mdb_seg_RW;
+	else if (!strncmp(status, "deprec", 6))	ps->status = mdb_seg_dep;	// Deprecated
+	else if (!strncmp(status, "dead",   4))	ps->status = mdb_DEAD;
+	else if (!strncmp(status, "replac", 6))	ps->status = mdb_seg_rep;	// Replacement for deprecated
+	else if (!strncmp(status, "conf_c", 6))	ps->status = mdb_seg_CORRUPTED;
+	else if (!strncmp(status, "bootin", 6))	ps->status = mdb_seg_BOOT;
+	else if (!strncmp(status, "zeroin", 6))	ps->status = mdb_seg_ZERO;
+	else if (!strncmp(status, "initia", 6))	ps->status = mdb_seg_INIT;
+	else BUG_ON(true);													// Unknown invalid value
+}
+
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	struct mm_json_elem *payload = json_get_dict_value(root, "payload");
 	struct mm_json_elem *praids_update = json_get_dict_value(payload, "pRaidsUpdate");
@@ -399,33 +427,27 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	BUG_ON(!praids_update || (praids_update->type != JSON_E_ARRAY));
 	for (int i = 0; i < praids_update->array.len; i++) {
 		struct mm_json_elem *entry = praids_update->array.elements[i];
+		struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
 		const char *uuid = json_get_dict_str(entry, "uuid", NULL);
-		unsigned uuid_u32 = 0;
-		BUG_ON(!entry || (entry->type != JSON_E_DICT) || !uuid);
-		BUG_ON(sscanf(uuid, "%x", &uuid_u32) != 1);	// Scan 1 argument
-		if (m->cfg->vols[1].chunks[0].raids[0].uuid == uuid_u32) {
+		struct sb_praid_topo *pr = sb_cluster_get_topo_prd_ptr_from_uuid(m->cfg, uuid);
+		const int n_segs = pr->cfg->D + pr->cfg->P;
+		BUG_ON(!segments || (segments->type != JSON_E_ARRAY) || (segments->array.len != n_segs));
+		__mongodb_insert_praid_hdr(pr, entry);
+		for (int j = 0; j < n_segs; j++)
+			__mongodb_insert_praid_seg(m->cfg, segments->array.elements[j]);
+
+		if (&m->cfg->vols[1].topo_chunks[0].raids[0] == pr) {
 			const struct sb_volume_conf* V = &m->cfg->vols[1];
-			struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
-			N_IMf(msim_praid, "matched @STR pRaid UUID", V->name);
+			bool all_deprecated = true;
 			m->v_r1_praid_reported = true;
 			v_r1_found = true;
 
 			/* Check if all segments have status "deprecated" */
-			if (segments && segments->type == JSON_E_ARRAY && segments->array.len > 0) {
-				bool all_deprecated = true;
-				int j;
-				for (j = 0; j < segments->array.len; j++) {
-					struct mm_json_elem *seg = segments->array.elements[j];
-					const char *status = json_get_dict_str(seg, "status", "");
-					if (strcmp(status, "deprecated") != 0) {
-						all_deprecated = false;
-						break;
-					}
-				}
-				if (all_deprecated) {
-					m->v_r1_praid_deprecated = true;
-					N_IMf(msim_praid_dep, "@STR all segments deprecated", V->name);
-				}
+			for (int j = 0; (j < n_segs) && all_deprecated; j++)
+				all_deprecated &= (pr->segs[j].status == mdb_seg_dep);
+			if (all_deprecated) {
+				m->v_r1_praid_deprecated = true;
+				N_IMf(msim_praid_dep, "@STR all segments deprecated", V->name);
 			}
 		}
 	}
