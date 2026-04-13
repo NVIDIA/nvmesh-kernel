@@ -49,8 +49,11 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 			{ "leader", NVMEIBS_TOMA_STATUS_LEADER },
 			{ "local_disks", NVMEIBS_TOMA_STATUS_LOCAL_DISKS },
 			{ "memory", NVMEIBS_TOMA_STATUS_MEM_ALLOC },
-			{ "zeroing", NVMEIBS_TOMA_STATUS_ZEROING },
+			{ "all.json", NVMEIBS_TOMA_STATUS_ALL_JSON },
 			{ "nm_json", NVMEIBS_TOMA_STATUS_NM_JSON },
+			{ "kafka",   NVMEIBS_TOMA_STATUS_KAFKA_INFO },
+			{ "cdv",     NVMEIBS_TOMA_STATUS_CDV },
+			{ "zeroing", NVMEIBS_TOMA_STATUS_ZEROING },
 	};
 
 	if (argc<2) {

@@ -184,6 +184,19 @@ struct nvmeibt_cdv_list_resp {
 	uint8_t  status;
 };
 
+/* ── Status / observability ──────────────────────────────────────────────── */
+
+/*
+ * nvmeibt_cdv_alloc_print_status — print CDV extent allocator state.
+ *
+ * For each CDV known to this TOMA node, prints: cdv_uuid, n_allocated,
+ * total_data_extents (if known), allocator_generation, capacity percentage,
+ * and this TOMA's own hostname (which is the allocator for all CDVs it serves).
+ * Called from print_status_str() for NVMEIBS_TOMA_STATUS_ALL and
+ * NVMEIBS_TOMA_STATUS_CDV.
+ */
+void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+
 /* ── Incoming-message handler (wired from nvmeibt_client.c dispatch) ─────── */
 
 struct nvmeibt_register_msg;	/* forward; defined in nvmeibt_register.h */

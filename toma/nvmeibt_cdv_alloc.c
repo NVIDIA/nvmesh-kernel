@@ -354,6 +354,43 @@ void nvmeibt_cdv_alloc_startup_scan(void)
 	     n_cdvs, n_extents_total);
 }
 
+/* ── Status / observability ──────────────────────────────────────────────── */
+
+void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+	uint64_t n_cdvs = 0;
+
+	(*printf_fn)(printf_ctx,
+		     "CDV ALLOCATOR (this node: %s)\n",
+		     nvmeibt_get_my_hostname());
+
+	if (!cdv_alloc_hash || nvmeib_hash_get_n_elements(cdv_alloc_hash) == 0) {
+		(*printf_fn)(printf_ctx, "\t(no CDVs)\n");
+		return;
+	}
+
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+		unsigned int used_pct = 0;
+
+		if (alloc->total_data_extents > 0)
+			used_pct = (unsigned int)(alloc->n_allocated * 100
+						  / alloc->total_data_extents);
+
+		(*printf_fn)(printf_ctx,
+			     "\t- cdv=%-40s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s\n",
+			     alloc->cdv_uuid,
+			     alloc->allocator_generation,
+			     alloc->n_allocated,
+			     alloc->total_data_extents,
+			     used_pct,
+			     alloc->capacity_warning_sent ? " [CAPACITY WARNING]" : "");
+		n_cdvs++;
+	}
+
+	(*printf_fn)(printf_ctx, "\t%llu CDV(s) total\n", n_cdvs);
+}
+
 /* ── Incoming-message handler ────────────────────────────────────────────── */
 
 /*

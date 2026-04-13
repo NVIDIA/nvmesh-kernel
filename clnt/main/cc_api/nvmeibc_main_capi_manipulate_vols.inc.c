@@ -43,6 +43,13 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	u32 tpv_extent_size_kb;
 	u32 cdv_extent_size_mb;
 	u64 allocator_size_gb;
+	/*
+	 * sourceUUID is repurposed by management to carry the initial CDV allocator
+	 * TOMA hostname (node_id of the first RW segment of the CDV's first pRAID).
+	 * This is a best-effort hint; if RAFT elects a different leader, a later
+	 * nvmeibc_tpv_update_allocator_id() call from the topology push corrects it.
+	 */
+	char allocator_toma_id[NVMEIB_HOST_NAME_LEN];
 
 	/* Locate the parent CDV by the UUID encoded in conf->mdvUUID. */
 	if (!conf->mdvUUID[0]) {
@@ -67,6 +74,9 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	tpv_extent_size_kb  = (u32)conf->stripeSize;
 	cdv_extent_size_mb  = (u32)conf->dataBlocks;
 	allocator_size_gb   = (u64)(unsigned int)conf->parityBlocks;
+	/* sourceUUID carries the initial CDV allocator TOMA hostname (may be empty). */
+	strncpy(allocator_toma_id, conf->sourceUUID, sizeof(allocator_toma_id) - 1);
+	allocator_toma_id[sizeof(allocator_toma_id) - 1] = '\0';
 
 	if (!virtual_size_bytes || !tpv_extent_size_kb ||
 	    !cdv_extent_size_mb || !allocator_size_gb) {
@@ -85,6 +95,18 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 		    "TPV @STR: nvmeibc_tpv_attach() failed", conf->name);
 		return -EIO;
 	}
+
+	if (allocator_toma_id[0]) {
+		_NI(tpv_setup_alloc_toma,
+		    "TPV @STR: initial CDV allocator TOMA = @STR (from management hint)",
+		    conf->name, allocator_toma_id);
+		nvmeibc_tpv_update_allocator_id(tpv, allocator_toma_id, 0);
+	} else {
+		_NW(tpv_setup_no_alloc_toma,
+		    "TPV @STR: management did not supply allocator TOMA hostname; CDV work deferred until topology push",
+		    conf->name);
+	}
+
 	_NI(tpv_setup_ok, "TPV @STR attached successfully", conf->name);
 	return 0;
 }

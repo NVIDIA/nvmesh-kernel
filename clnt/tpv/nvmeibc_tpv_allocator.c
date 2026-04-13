@@ -626,16 +626,21 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 
 	case NVMEIBC_CDV_ALLOC_WRONG_GEN:
 		/*
-		 * Stale generation: a new allocator has been elected.  The
-		 * updated CDV topology push will call
-		 * nvmeibc_tpv_update_allocator_id(); the next alloc_extent()
-		 * below-watermark event will re-schedule this work with the
-		 * new generation.
+		 * Stale generation: the allocator's generation changed (RAFT
+		 * re-election or rollover).  Update our cached generation so
+		 * the next request uses the correct value.  toma_id is kept
+		 * unchanged — if the RAFT leader moved to a different TOMA node
+		 * a management topology push will supply the new hostname via
+		 * nvmeibc_tpv_update_allocator_id().
 		 */
 		atomic64_inc(&alloc->stat_cdv_alloc_wgen);
 		_NI(tpv_cdv_wrong_gen,
-		    "TPV: @STR: WRONG_GEN ours=@LLU TOMA=@LLU; awaiting topology update",
+		    "TPV: @STR: WRONG_GEN ours=@LLU TOMA=@LLU; updating generation and re-arming",
 		    tpv->tpv_name, client_gen, resp.allocator_generation);
+		nvmeibc_tpv_update_allocator_id(tpv, toma_id, resp.allocator_generation);
+		/* Re-arm so the corrected generation is used on the next attempt. */
+		if (atomic_cmpxchg(&tpv->cdv_alloc_pending, 0, 1) == 0)
+			schedule_work(&tpv->cdv_alloc_work);
 		break;
 
 	default:

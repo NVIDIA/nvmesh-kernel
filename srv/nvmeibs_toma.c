@@ -1910,6 +1910,7 @@ static const char *toma_stat_proc_fname[] = {
 	"all.json",
 	"nm.json",
 	"kafka.txt",
+	"cdv",
 };
 
 static int toma_req_status_mmap_fault(void *arg, unsigned long pg_offset, struct page **page)
