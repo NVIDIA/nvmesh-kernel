@@ -54,7 +54,7 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	cdv = (struct nvmeibc_volume *)nvmeibc_volume_get_by_uuid(
 		p, conf->mdvUUID, UNKNOWN_ILLEGAL);
 	if (!cdv) {
-		_NE(tpv_setup_cdv_not_found,
+		_NI(tpv_cdv_not_found_yet,
 		    "TPV @STR: parent CDV @STR not found (not yet attached?)",
 		    conf->name, conf->mdvUUID);
 		return -ENODEV;
@@ -249,6 +249,79 @@ static enum_vol_status _calc_reply_on_attach(const char *vol_name, const struct 
 	}
 }
 
+/* ── CDV-not-ready retry for TPV attach ─────────────────────────────────────
+ *
+ * Management may send the TPV config before the parent CDV config because
+ * MongoDB query result order is non-deterministic.  When __setup_tpv()
+ * returns -ENODEV we schedule a delayed retry instead of immediately
+ * replying ATTACH_FAILED (which would be silently dropped anyway because the
+ * client token is not yet established during the initial handshake).
+ *
+ * The management-side fix (sorting volumes CDV-before-TPV in the Kafka
+ * message) eliminates the race for matching versions; this retry is a
+ * defence-in-depth for mismatched versions or future regressions.
+ *
+ * Lifetime note: 'p' is valid as long as the instance lives.  This retry
+ * fires only during instance startup; teardown within the 10-second window
+ * is an extreme edge case.  A per-instance cancel list can be added later.
+ */
+#define TPV_CDV_RETRY_MAX  20	/* at most 20 retry attempts                    */
+#define TPV_CDV_RETRY_MS  500	/* 500 ms between attempts → 10 seconds total   */
+
+struct nvmeibc_tpv_cdv_retry {
+	struct delayed_work dwork;
+	const struct nvmeibc_cinst_params_main *p;
+	const struct nvmeib_mgmt_to_client_volume_configuration *msg;
+	int retries_left;
+};
+
+static void tpv_cdv_retry_work_fn(struct work_struct *_w)
+{
+	struct nvmeibc_tpv_cdv_retry *ctx =
+		container_of(to_delayed_work(_w),
+			     struct nvmeibc_tpv_cdv_retry, dwork);
+	const struct nvmeibc_cinst_params_main *p   = ctx->p;
+	const struct nvmeib_mgmt_to_client_volume_configuration *msg = ctx->msg;
+	const struct nvmeibc_volume_conf *hdr = &msg->volumes[0];
+	struct nvmeibc_volume_header reply_hdr = {0};
+	enum_vol_status res;
+	int rv;
+
+	rv = __setup_tpv(p, msg);
+
+	if (rv == -ENODEV && ctx->retries_left > 0) {
+		/* CDV still absent — schedule the next attempt. */
+		ctx->retries_left--;
+		_NI(tpv_cdv_retry_waiting,
+		    "TPV @STR: CDV not yet attached, @INT retries left",
+		    hdr->name, ctx->retries_left);
+		schedule_delayed_work(&ctx->dwork,
+				      msecs_to_jiffies(TPV_CDV_RETRY_MS));
+		return; /* ctx and msg still owned by the pending work */
+	}
+
+	/* Success, non-retryable error, or retries exhausted. */
+	if (rv == -ENODEV)
+		_NE(tpv_cdv_retry_exhausted,
+		    "TPV @STR: CDV still not found after @INT retries, giving up",
+		    hdr->name, TPV_CDV_RETRY_MAX);
+
+	nvmeibc_volume_header_create_from_msg(&reply_hdr, hdr,
+					      msg->attachmentsVersion, false);
+	res = _calc_reply_on_attach(hdr->name, NULL /* no nvmeibc_volume */,
+				    rv, false /* resrv_inc_ignored */, &reply_hdr);
+	nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res,
+					    NVMEIBC_IO_PERM_USE_CURR_PERMS,
+					    false /* send_to_cli */,
+					    true  /* send_to_mcs */,
+					    1     /* inc_report_id_if_needed */);
+	nvmeibc_cc_api_free_config_msg((void *)msg);
+	kfree(msg);		/* free the outer struct (setup_block_device_work skipped this) */
+	nvmeibc_volume_header_destroy(&reply_hdr,
+				      NVMEIBC_VOLUME_HEADER_DESTROY_TOTAL);
+	kfree(ctx);
+}
+
 struct update_targets_nics_args {
 	const struct nvmeibc_cinst_params_main *cinst;
 	struct nvmeib_mgmt_to_client_update_targets_nics* conf;
@@ -308,6 +381,30 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		 */
 		_NI(tpv_dispatch_attach, "TPV @STR: dispatching to __setup_tpv", hdr->name);
 		rv = __setup_tpv(p, msg);
+		if (rv == -ENODEV) {
+			/* CDV not yet attached.  Try to defer with a retry context
+			 * so we don't send ATTACH_FAILED immediately (it would be
+			 * silently dropped while the client token is being set up).
+			 */
+			struct nvmeibc_tpv_cdv_retry *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+			if (ctx) {
+				INIT_DELAYED_WORK(&ctx->dwork, tpv_cdv_retry_work_fn);
+				ctx->p = p;
+				ctx->msg = msg;
+				ctx->retries_left = TPV_CDV_RETRY_MAX - 1;
+				_NI(tpv_cdv_retry_deferred,
+				    "TPV @STR: CDV not yet attached, deferring (up to @INT retries, @INT ms apart)",
+				    hdr->name, TPV_CDV_RETRY_MAX, TPV_CDV_RETRY_MS);
+				schedule_delayed_work(&ctx->dwork,
+						      msecs_to_jiffies(TPV_CDV_RETRY_MS));
+				rv = -EAGAIN; /* retry context owns msg; skip reply and free */
+				goto _out_defer;
+			}
+			/* OOM: fall through and report ATTACH_FAILED immediately. */
+			_NE(tpv_cdv_retry_oom,
+			    "TPV @STR: kzalloc for CDV retry ctx failed, reporting ATTACH_FAILED",
+			    hdr->name);
+		}
 		res = _calc_reply_on_attach(hdr->name, NULL /* no nvmeibc_volume */,
 					    rv, resrv_inc_ignored, &reply_hdr);
 	} else {
@@ -334,6 +431,10 @@ _out:
 	nvmeibc_volume_header_destroy(&reply_hdr, NVMEIBC_VOLUME_HEADER_DESTROY_TOTAL);
 	NFOUT;
 	return rv;
+_out_defer: /* retry context owns msg; no immediate reply, no msg free */
+	nvmeibc_volume_header_destroy(&reply_hdr, NVMEIBC_VOLUME_HEADER_DESTROY_TOTAL);
+	NFOUT;
+	return rv;
 }
 
 static void setup_block_device_work(struct workqe_struct *_w)
@@ -343,7 +444,10 @@ static void setup_block_device_work(struct workqe_struct *_w)
 	if (w->m) {
 		w->rv = try_setup_block_device(w->p, w->m, w->update_only);
 		WARN_ON(w->rv == -EBUSY);	// Can no longer happen
-		kfree(w->m);
+		/* -EAGAIN means a CDV-not-ready retry context now owns the msg;
+		 * ownership of the outer struct was already transferred there. */
+		if (w->rv != -EAGAIN)
+			kfree(w->m);
 	} else {
 		_NE(error_main_setup_block_device_work, DMESG_PREFIX() ": missing config argument. Attach will fail");
 		kfree(w->m); // This is not necessary
