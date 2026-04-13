@@ -4,20 +4,12 @@
 */
 
 /*
- * nvmeibt_cdv_alloc.c — CDV extent allocator: in-memory state and persistence.
+ * nvmeibt_cdv_alloc.c — CDV extent allocator: in-memory state.
  *
  * See nvmeibt_cdv_alloc.h for a full description.
- *
- * Persistence layout (TOMA_DIR_OPT_NVMESH "/toma/cdv_alloc.bin"):
- *
- *   [nvmeibt_cdv_alloc_file_hdr]      24 bytes
- *   [nvmeibt_cdv_extent_md] × n       152 bytes each
- *
- * Written atomically: temp file → rename(2).
- * Loaded once at startup to reconstruct in-memory state.
+ * State is distributed and persisted via RAFT; no local file I/O.
  */
 
-#include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include "nvmeibt_cdv_alloc.h"
@@ -28,22 +20,16 @@
 #include "nvmeibt_kafka.h"		/* nvmeibt_kafka_outgoing_msgs_queue_add, KAFKA_PRODUCER_MSG_HEADER_* */
 #include "../common/nvmeib_hash.h"
 
-/* ── Persistence paths ───────────────────────────────────────────────────── */
-
-#define CDV_ALLOC_PATH     (TOMA_DIR_OPT_NVMESH "/toma/cdv_alloc.bin")
-#define CDV_ALLOC_TMP_PATH (TOMA_DIR_OPT_NVMESH "/toma/cdv_alloc.bin.tmp")
-
 /* ── Global state ────────────────────────────────────────────────────────── */
 
 /* cdv_uuid (ASCII string) → nvmeibt_cdv_alloc * */
 static struct nvmeib_hash_table *cdv_alloc_hash;
 
-/* ── Internal: insert an entry without immediately persisting ───────────── */
+/* ── Internal helpers ───────────────────────────────────────────────────── */
 
 /*
  * cdv_alloc_insert — find (or create) the per-CDV allocator and append a new
- * extent entry to it.  Does NOT call persist().  Returns 0 on success,
- * negative errno on OOM.
+ * extent entry to it.  Returns 0 on success, negative errno on OOM.
  */
 static int cdv_alloc_insert(const char *cdv_uuid,
 			    uint64_t    extent_index,
@@ -65,10 +51,11 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 		XDLIST_HEAD_INIT(&alloc->extents);
 		alloc->n_allocated = 0;
 		nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
-		N_Tf(cdv_alloc_new_cdv, "CDV-alloc: new per-CDV allocator cdv=@STR", cdv_uuid);
+		N_Tf(cdv_alloc_new_cdv, "CDV-alloc: new per-CDV allocator cdv=@STR",
+		     cdv_uuid);
 	}
 
-	/* Guard against duplicate extent_index (corrupted file, replayed alloc). */
+	/* Guard against duplicate extent_index (replayed RAFT entry). */
 	{
 		struct nvmeibt_cdv_extent_entry *dup;
 		XDLIST_FOREACH(dup, &alloc->extents) {
@@ -117,7 +104,7 @@ int nvmeibt_cdv_alloc_add_extent(const char *cdv_uuid,
 	     "CDV-alloc: allocated cdv=@STR idx=@LLU tpv=@STR",
 	     cdv_uuid, extent_index, tpv_uuid);
 
-	return nvmeibt_cdv_alloc_persist();
+	return 0;
 }
 
 int nvmeibt_cdv_alloc_remove_extent(const char *cdv_uuid, uint64_t extent_index)
@@ -145,7 +132,7 @@ int nvmeibt_cdv_alloc_remove_extent(const char *cdv_uuid, uint64_t extent_index)
 		     cdv_uuid, extent_index, entry->tpv_uuid, alloc->n_allocated);
 
 		NNVMEIBT_BM_FREE(cdv_alloc_rm_free, entry);
-		return nvmeibt_cdv_alloc_persist();
+		return 0;
 	}
 
 	N_Wf(cdv_alloc_rm_notfound,
@@ -199,155 +186,36 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	return 0;
 }
 
-/* ── Persistence ─────────────────────────────────────────────────────────── */
-
-int nvmeibt_cdv_alloc_persist(void)
+void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
 {
-	struct nvmeibt_cdv_alloc_file_hdr hdr;
-	struct nvmeibt_cdv_extent_md      rec;
-	struct nvmeibt_cdv_alloc         *alloc;
-	struct nvmeibt_cdv_extent_entry  *entry;
-	uint64_t n_total = 0;
-	FILE *f;
+	struct nvmeibt_cdv_alloc *alloc;
 
-	/* Count total records across all CDVs. */
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash)
-		n_total += alloc->n_allocated;
-
-	f = fopen(CDV_ALLOC_TMP_PATH, "wb");
-	if (!f) {
-		N_Ef(cdv_alloc_persist_open,
-		     "CDV-alloc: fopen cdv_alloc.bin.tmp failed errno=@INT", errno);
-		return -errno;
-	}
-
-	hdr.magic     = NVMEIBT_CDV_ALLOC_FILE_MAGIC;
-	hdr.version   = NVMEIBT_CDV_ALLOC_FILE_VERSION;
-	hdr._pad      = 0;
-	hdr.n_records = n_total;
-
-	if (fwrite(&hdr, sizeof(hdr), 1, f) != 1) {
-		N_Ef(cdv_alloc_persist_whdr, "CDV-alloc: header write failed errno=@INT", errno);
-		fclose(f);
-		return -EIO;
-	}
-
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
-		XDLIST_FOREACH(entry, &alloc->extents) {
-			rec.magic        = NVMEIBT_CDV_EXTENT_MD_MAGIC;
-			rec.version      = NVMEIBT_CDV_EXTENT_MD_VERSION;
-			rec._pad         = 0;
-			rec.extent_index = entry->extent_index;
-			memcpy(rec.cdv_uuid, alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN);
-			memcpy(rec.tpv_uuid, entry->tpv_uuid,  NVMEIBT_CDV_UUID_STRLEN);
-			if (fwrite(&rec, sizeof(rec), 1, f) != 1) {
-				N_Ef(cdv_alloc_persist_wrec,
-				     "CDV-alloc: record write failed errno=@INT", errno);
-				fclose(f);
-				return -EIO;
-			}
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc) {
+		alloc = NNVMEIBT_BM_CALLOC(cdv_alloc_set_gen_alloc, sizeof(*alloc));
+		if (!alloc) {
+			N_Ef(cdv_alloc_set_gen_oom,
+			     "CDV-alloc: set_generation calloc failed cdv=@STR",
+			     cdv_uuid);
+			return;
 		}
+		strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+		alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+		XDLIST_HEAD_INIT(&alloc->extents);
+		nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
 	}
 
-	if (fclose(f) != 0) {
-		N_Ef(cdv_alloc_persist_close, "CDV-alloc: fclose failed errno=@INT", errno);
-		return -EIO;
-	}
+	N_If(cdv_alloc_set_gen,
+	     "CDV-alloc: set generation cdv=@STR old=@LLU new=@LLU",
+	     cdv_uuid, alloc->allocator_generation, generation);
 
-	if (rename(CDV_ALLOC_TMP_PATH, CDV_ALLOC_PATH) != 0) {
-		N_Ef(cdv_alloc_persist_rename,
-		     "CDV-alloc: rename to cdv_alloc.bin failed errno=@INT", errno);
-		return -errno;
-	}
-
-	N_Tf(cdv_alloc_persist_ok, "CDV-alloc: persisted @LLU records", n_total);
-	return 0;
-}
-
-int nvmeibt_cdv_alloc_load(void)
-{
-	struct nvmeibt_cdv_alloc_file_hdr hdr;
-	struct nvmeibt_cdv_extent_md      rec;
-	uint64_t i;
-	int      rv;
-	FILE    *f;
-
-	f = fopen(CDV_ALLOC_PATH, "rb");
-	if (!f) {
-		if (errno == ENOENT) {
-			N_If(cdv_alloc_load_fresh,
-			     "CDV-alloc: no persistence file; starting fresh");
-			return 0;
-		}
-		N_Ef(cdv_alloc_load_open,
-		     "CDV-alloc: fopen cdv_alloc.bin failed errno=@INT", errno);
-		return -errno;
-	}
-
-	if (fread(&hdr, sizeof(hdr), 1, f) != 1) {
-		N_Ef(cdv_alloc_load_rhdr, "CDV-alloc: header read failed errno=@INT", errno);
-		fclose(f);
-		return -EIO;
-	}
-
-	if (hdr.magic != NVMEIBT_CDV_ALLOC_FILE_MAGIC) {
-		N_Ef(cdv_alloc_load_magic,
-		     "CDV-alloc: bad magic @LLU_TX in cdv_alloc.bin; ignoring file",
-		     hdr.magic);
-		fclose(f);
-		return -EINVAL;
-	}
-
-	if (hdr.version != NVMEIBT_CDV_ALLOC_FILE_VERSION) {
-		N_Ef(cdv_alloc_load_ver,
-		     "CDV-alloc: unknown version @UINT in cdv_alloc.bin; ignoring file",
-		     hdr.version);
-		fclose(f);
-		return -EINVAL;
-	}
-
-	for (i = 0; i < hdr.n_records; i++) {
-		if (fread(&rec, sizeof(rec), 1, f) != 1) {
-			N_Ef(cdv_alloc_load_rrec,
-			     "CDV-alloc: record @LLU read failed errno=@INT", i, errno);
-			fclose(f);
-			return -EIO;
-		}
-		if (rec.magic != NVMEIBT_CDV_EXTENT_MD_MAGIC) {
-			N_Wf(cdv_alloc_load_rmagic,
-			     "CDV-alloc: rec @LLU bad magic @LLU_TX; skipping", i, rec.magic);
-			continue;
-		}
-		/* NUL-terminate defensively before use. */
-		rec.cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-		rec.tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-
-		/*
-		 * Insert directly without persist — we're restoring state, not
-		 * generating new allocations.  Suppress the per-record persist cost
-		 * during a potentially large startup load.
-		 */
-		rv = cdv_alloc_insert(rec.cdv_uuid, rec.extent_index, rec.tpv_uuid);
-		if (rv) {
-			N_Ef(cdv_alloc_load_add,
-			     "CDV-alloc: insert failed rec=@LLU rv=@INT; extent becomes orphan",
-			     i, rv);
-			/* Non-fatal: NVCK will reclaim the orphan. */
-		}
-	}
-
-	fclose(f);
-	N_If(cdv_alloc_load_ok,
-	     "CDV-alloc: loaded @LLU records from cdv_alloc.bin", hdr.n_records);
-	return 0;
+	alloc->allocator_generation = generation;
 }
 
 /* ── One-time init / shutdown ────────────────────────────────────────────── */
 
 int nvmeibt_cdv_alloc_one_time_init(void)
 {
-	int rv;
-
 	cdv_alloc_hash = NVMEIB_HASH_CREATE(cdv_alloc_hash_create,
 					    5,                /* 32 initial buckets */
 					    "cdv_alloc_hash",
@@ -357,20 +225,6 @@ int nvmeibt_cdv_alloc_one_time_init(void)
 		N_Ef(cdv_alloc_init_hash, "CDV-alloc: hash_create failed");
 		return -ENOMEM;
 	}
-
-	rv = nvmeibt_cdv_alloc_load();
-	if (rv) {
-		/*
-		 * Load failure is non-fatal: log it and continue with an empty
-		 * allocator.  Any orphaned extents will be reclaimed by NVCK.
-		 */
-		N_Wf(cdv_alloc_init_load_fail,
-		     "CDV-alloc: startup load failed rv=@INT; orphans expected until NVCK",
-		     rv);
-	}
-
-	/* Log restored state; fire capacity warnings for any already-full CDVs. */
-	nvmeibt_cdv_alloc_startup_scan();
 
 	return 0;
 }
@@ -435,6 +289,9 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 		alloc->capacity_warning_sent = false;
 		return;
 	}
+
+	if (used_pct < NVMEIBT_CDV_WARN_PCT)
+		return;   /* in hysteresis band [85–90%) — don't fire yet */
 
 	if (alloc->capacity_warning_sent)
 		return;   /* already warned; suppress duplicate */
@@ -563,9 +420,10 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	/* ── Generation check ────────────────────────────────────────────────── */
 	if (first_alloc && req->client_generation != 0) {
 		/*
-		 * No persisted state for this CDV; client carries a non-zero
-		 * generation (stale from before a TOMA restart).  Return WRONG_GEN
-		 * so the client re-syncs via the next topology push.
+		 * No allocator for this CDV yet (RAFT has not assigned one, or
+		 * state was lost).  Client carries a stale non-zero generation.
+		 * Return WRONG_GEN with 0; client will re-sync when RAFT
+		 * distributes the current generation.
 		 */
 		N_Wf(cdv_alloc_wrong_gen_new,
 		     "CDV: ALLOC no state cdv=@STR client_gen=@LLU => WRONG_GEN",
@@ -670,26 +528,6 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	if (alloc && alloc->total_data_extents == 0)
 		alloc->total_data_extents = req->total_data_extents;
 
-	/* Persist atomically; on failure, roll back to stay consistent. */
-	rv = nvmeibt_cdv_alloc_persist();
-	if (rv) {
-		N_Ef(cdv_alloc_persist_fail,
-		     "CDV: ALLOC persist failed rv=@INT; rolling back idx=@LLU",
-		     rv, candidate);
-		if (alloc) {
-			XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
-				if (entry->extent_index == candidate) {
-					XDLIST_ELEM_DEL(&alloc->extents, entry);
-					alloc->n_allocated--;
-					NNVMEIBT_BM_FREE(cdv_alloc_rollback, entry);
-					break;
-				}
-			}
-		}
-		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
-		goto send;
-	}
-
 	resp.extent_index         = candidate;
 	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
 	resp.status               = NVMEIBT_CDV_ALLOC_OK;
@@ -770,9 +608,6 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 		 * next rise above WARN_PCT fires a fresh Kafka event.
 		 */
 		cdv_maybe_warn_capacity(alloc);
-
-		/* Best-effort persist; loss is non-fatal (NVCK reclaims orphans). */
-		nvmeibt_cdv_alloc_persist();
 		return 0;
 	}
 
