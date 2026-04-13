@@ -230,9 +230,9 @@ cflags += -O3 -DMGMT_STATS
 cflags += -DTRACE_CPUID
 
 ifneq ($(COMMIT_ID),)
-cflags +=-DCOMMIT_ID=0x$(COMMIT_ID)
+cflags +=-DCOMMIT_ID=0x$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID)\"
 else
-cflags += -DCOMMIT_ID=0x0
+cflags += -DCOMMIT_ID=0x0 -DCOMMIT_ID_STR=\"0\"
 endif
 
 # if V = 1 we get a full trace of the compile command

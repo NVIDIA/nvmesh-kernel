@@ -11,7 +11,11 @@ ifeq ($(COMMIT_ID),)
 COMMIT_ID = 0x$(shell /bin/bash -c 'source ../../build_common.sh; git_commit_id')
 endif
 
-CFLAGS  := -ggdb3 -Wall -Werror -D_GNU_SOURCE -DCOMMIT_ID=$(COMMIT_ID)
+ifeq ($(COMMIT_ID_STR),)
+COMMIT_ID_STR = $(shell /bin/bash -c 'source ../../build_common.sh; git_commit_id')
+endif
+
+CFLAGS  := -ggdb3 -Wall -Werror -D_GNU_SOURCE -DCOMMIT_ID=$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID_STR)\"
 LDFLAGS := -pthread
 TEST_CFLAGS := $(CFLAGS)
 #TEST_CFLAGS := $(CFLAGS) -fsanitize=address -fsanitize=undefined

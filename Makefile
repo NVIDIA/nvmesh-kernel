@@ -424,10 +424,10 @@ cflags += -DTRACE_CPUID
 # cflags += -DSRQ_TRACE
 
 ifneq ($(COMMIT_ID),)
-    cflags +=-DCOMMIT_ID=0x$(COMMIT_ID)
-    UTILSFLAGS += -DCOMMIT_ID=0x$(COMMIT_ID)
+    cflags +=-DCOMMIT_ID=0x$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID)\"
+    UTILSFLAGS += -DCOMMIT_ID=0x$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID)\"
 else
-    cflags += -DCOMMIT_ID=0x0
+    cflags += -DCOMMIT_ID=0x0 -DCOMMIT_ID_STR=\"0\"
 endif
 
 
@@ -501,13 +501,13 @@ export AUTOGEN_SUBDIRS_TOMA = common toma
 COMPILE_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 BUILD_SHARED=no BUILD_STATIC=yes lib-release
 COMPILE_COMPRESS = +$(MAKE) -C $(TOOLS_DIR)/trace_compress_lib all
 COMPILE_AUTOGEN = +$(MAKE) -C $(AUTOGEN_DIR) NVMESH_SRC_DIR=$(NVMESH_SRC_DIR) all
-COMPILE_TRACE_DAEMON_2 = +$(MAKE) -C $(TOOLS_DIR)/trace_daemon_2.0 BUILD_DIR=$(NVMESH_SRC_DIR) COMMIT_ID=0x$(COMMIT_ID)
+COMPILE_TRACE_DAEMON_2 = +$(MAKE) -C $(TOOLS_DIR)/trace_daemon_2.0 BUILD_DIR=$(NVMESH_SRC_DIR) COMMIT_ID=0x$(COMMIT_ID) COMMIT_ID_STR=$(COMMIT_ID)
 COMPILE_PIPE_TRACER = +$(MAKE) -C $(TOOLS_DIR)/pipe_tracer
 COMPILE_PAGER = +$(MAKE) -C $(TOOLS_DIR)/traces_post_processor pager NVMESH_SRC_DIR=$(NVMESH_SRC_DIR)
 COMPILE_FORMATTERS = +$(MAKE) -C $(TOOLS_DIR)/traces_post_processor/formatters SSDA=$(NVMESH_SRC_DIR)
 COMPILE_SHARED_INFRA = +$(MAKE) -C $(TOOLS_DIR)/infra_shared SSDA=$(NVMESH_SRC_DIR)
 COMPILE_NVME= +$(MAKE) -C $(SCRIPTS_DIR)/target/nvme-cli CFLAGS="-std=c99 -Wall"
-COMPILE_PET = +$(MAKE) -C $(PET_DIR) fast_build COMMIT_ID=0x$(COMMIT_ID)
+COMPILE_PET = +$(MAKE) -C $(PET_DIR) fast_build COMMIT_ID=0x$(COMMIT_ID) COMMIT_ID_STR=$(COMMIT_ID)
 # Pass COMMIT_ID so tarball content is under <commit>/ for dictionary binding to log files.
 # To disable PET dictionary build, set PET_MODULE to empty or undefined (PET_MODULE=$(PET_MODULE)). To enable, set it to the module default location (PET_MODULE=clnt/nvmeibc.ko), otherwise PET_MODULE=<path/to/nvmeibc.ko> if client module is built elsewhere.
 PET_MODULE?=clnt/nvmeibc.ko

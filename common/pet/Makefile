@@ -13,8 +13,12 @@ ifeq ($(COMMIT_ID),)
 COMMIT_ID = 0x$(shell source ../../build_common.sh; git_commit_id)
 endif
 
+ifeq ($(COMMIT_ID_STR),)
+COMMIT_ID_STR = $(shell source ../../build_common.sh; git_commit_id)
+endif
+
 CC := gcc
-CFLAGS := -Wall -Wextra -ggdb -O2 -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID)
+CFLAGS := -Wall -Wextra -ggdb -O2 -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID_STR)\"
 
 TEST_EXE := $(BUILD_DIR)/test
 TEST_OBJ := $(BUILD_DIR)/test.o
