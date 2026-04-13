@@ -686,9 +686,11 @@ grep_ksrc_func_var "KS_HAS___CRC32C_LE_COMBINE" "__crc32c_le_combine" "" "includ
 grep_ksrc_func_var "KS_HAS_HRTIMER_INIT" "hrtimer_init" "" "include/linux/hrtimer.h"
 grep_rdma_func_ptr_var "KS_IB_REG_USER_MR_HAS_DMAH" "reg_user_mr" "ib_dmah" "include/rdma/ib_verbs.h"
 grep_rdma_func_var "KS_HAS_MLX5_GET_UARS_PAGE" "mlx5_get_uars_page" "" "include/linux/mlx5/driver.h"
+grep_ksrc_macro_param "KS_HAS_TIMER_CONTAINER_OF" "timer_container_of" "" "include/linux/timer.h"
 
 # Verify tcp_setsockopt is actually exported (declared but unexported in 6.12+)
 grep_kern_symvers "KS_TCP_SETSOCKOPT_EXPORTED" "tcp_setsockopt"
+
 
 ###############################################################################
 # Output

@@ -3271,7 +3271,11 @@ EXPORT_SYMBOL(nvmeib_alloc_fast_reg_pool);
 
 static void fr_pool_percpu_idle_timer_fn(struct timer_list *timer)
 {
+#if KS_HAS_TIMER_CONTAINER_OF
+	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = timer_container_of(pcpu_cache, timer, idle_timer);
+#else
 	struct nvmeib_fr_pool_percpu_cache *pcpu_cache = from_timer(pcpu_cache, timer, idle_timer);
+#endif
 	struct nvmeib_fr_pool *pool = pcpu_cache->pool;
 	unsigned long jif = jiffies;
 	unsigned long flags;
