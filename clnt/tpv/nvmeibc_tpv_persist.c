@@ -150,9 +150,9 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		u64 V = idx;
 
 		if (unlikely(V >= n_entries)) {
-			pr_warn_ratelimited(
-				"nvmeibc_tpv: %s: virt_idx %llu exceeds L1 capacity %llu; skipped\n",
-				tpv->tpv_name, V, n_entries);
+			_NW(tpv_flush_virt_overflow,
+			    "TPV: @STR: virt_idx @LLU exceeds L1 capacity @LLU; skipped",
+			    tpv->tpv_name, V, n_entries);
 			continue;
 		}
 
@@ -167,8 +167,8 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	vfree(l1);
 
 	if (rv)
-		pr_err("nvmeibc_tpv: %s: flush_state write failed (%d)\n",
-		       tpv->tpv_name, rv);
+		_NE(tpv_flush_write_fail, "TPV: @STR: flush_state write failed rv=@INT",
+		    tpv->tpv_name, rv);
 
 	return rv;
 }
@@ -256,8 +256,8 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 	rv = nvmeibc_tpv_cdv_sync_read(tpv, l1_off, l1, l1_size);
 	if (rv) {
-		pr_err("nvmeibc_tpv: %s: load_state read failed (%d)\n",
-		       tpv->tpv_name, rv);
+		_NE(tpv_load_read_fail, "TPV: @STR: load_state read failed rv=@INT",
+		    tpv->tpv_name, rv);
 		vfree(l1);
 		return rv;
 	}
@@ -276,14 +276,16 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 		/* CDV_extent[0] is the L1 table itself; data extents start at 1. */
 		if (unlikely(data_idx == 0)) {
-			pr_warn("nvmeibc_tpv: %s: V=%llu has data_idx=0 (L1 root); corrupt entry skipped\n",
-				tpv->tpv_name, V);
+			_NW(tpv_load_data_idx_zero,
+			    "TPV: @STR: V=@LLU has data_idx=0 (L1 root); corrupt entry skipped",
+			    tpv->tpv_name, V);
 			continue;
 		}
 
 		if (unlikely(slot >= n_slots)) {
-			pr_warn("nvmeibc_tpv: %s: V=%llu slot=%llu >= n_slots=%llu; skipped\n",
-				tpv->tpv_name, V, slot, n_slots);
+			_NW(tpv_load_slot_overflow,
+			    "TPV: @STR: V=@LLU slot=@LLU >= n_slots=@LLU; skipped",
+			    tpv->tpv_name, V, slot, n_slots);
 			continue;
 		}
 
@@ -366,9 +368,10 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 	persist_free_le_list(&le_list);
 
-	pr_info("nvmeibc_tpv: %s: loaded %llu mapped extents across %llu CDV_extents (%llu free slots)\n",
-		tpv->tpv_name, loaded, alloc->cdv_extents_count,
-		alloc->free_tpv_extent_count);
+	_NI(tpv_load_done,
+	    "TPV: @STR: loaded @LLU mapped extents across @LLU CDV_extents (@LLU free slots)",
+	    tpv->tpv_name, loaded, alloc->cdv_extents_count,
+	    alloc->free_tpv_extent_count);
 
 	return 0;
 
@@ -407,8 +410,8 @@ void nvmeibc_tpv_persist_work_fn(struct work_struct *work)
 
 	rv = nvmeibc_tpv_flush_state(tpv);
 	if (rv)
-		pr_err("nvmeibc_tpv: %s: background flush failed (%d)\n",
-		       tpv->tpv_name, rv);
+		_NE(tpv_bg_flush_fail, "TPV: @STR: background flush failed rv=@INT",
+		    tpv->tpv_name, rv);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_persist_work_fn);
 

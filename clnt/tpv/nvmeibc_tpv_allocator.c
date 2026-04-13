@@ -281,8 +281,9 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 	if (!slot) {
 		u64 lost_idx = entry->cdv_extent_index;
 
-		pr_warn_ratelimited("nvmeibc_tpv: %s: kzalloc failed in free_extent virt_idx=%llu; slot lost until recovery\n",
-				    tpv->tpv_name, virt_idx);
+		_NW(tpv_free_ext_alloc_fail,
+		    "TPV: @STR: kzalloc failed in free_extent virt_idx=@LLU; slot lost until recovery",
+		    tpv->tpv_name, virt_idx);
 		kfree_rcu(entry, rcu);
 
 		/* Still update allocated_count so the CDV_extent isn't leaked. */
@@ -402,14 +403,15 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 			 * and its slots are removed from free_tpv_extents, so it
 			 * is effectively dead until it is successfully returned.
 			 */
-			pr_warn("nvmeibc_tpv: %s: CDV_FREE_EXTENT extent=%llu failed (%d); will retry\n",
-				tpv->tpv_name, ref->extent_index, rv);
+			_NW(tpv_cdv_free_fail,
+			    "TPV: @STR: CDV_FREE_EXTENT extent=@LLU failed rv=@INT; will retry",
+			    tpv->tpv_name, ref->extent_index, rv);
 			spin_lock(&alloc->lock);
 			list_add_tail(&ref->node, &alloc->pending_return_list);
 			spin_unlock(&alloc->lock);
 		} else {
-			pr_debug("nvmeibc_tpv: %s: CDV_extent[%llu] returned to TOMA\n",
-				 tpv->tpv_name, ref->extent_index);
+			_ND(tpv_cdv_ext_returned, "TPV: @STR: CDV_extent[@LLU] returned to TOMA",
+			    tpv->tpv_name, ref->extent_index);
 			list_del(&ref->node);
 			kfree(ref);
 		}
@@ -447,8 +449,9 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	 */
 	rv = nvmeibc_tpv_install_data_extent(tpv, extent_index);
 	if (rv) {
-		pr_err("nvmeibc_tpv: %s: install_data_extent(%llu) failed (%d); CDV_extent orphaned until NVCK\n",
-		       tpv->tpv_name, extent_index, rv);
+		_NE(tpv_install_ext_fail,
+		    "TPV: @STR: install_data_extent(@LLU) failed rv=@INT; CDV_extent orphaned until NVCK",
+		    tpv->tpv_name, extent_index, rv);
 		return rv;
 	}
 
@@ -491,9 +494,9 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	alloc->free_tpv_extent_count += n_slots;
 	spin_unlock(&alloc->lock);
 
-	pr_info("nvmeibc_tpv: %s: CDV_extent[%llu] ready, %llu slots added (pool total: %llu)\n",
-		tpv->tpv_name, extent_index, n_slots,
-		alloc->free_tpv_extent_count);
+	_NI(tpv_cdv_ext_ready,
+	    "TPV: @STR: CDV_extent[@LLU] ready @LLU slots added (pool total: @LLU)",
+	    tpv->tpv_name, extent_index, n_slots, alloc->free_tpv_extent_count);
 	return 0;
 }
 
@@ -544,8 +547,8 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		 * Allocator TOMA identity not yet known (topology push has not
 		 * arrived).  Clear pending so alloc_extent() can re-arm later.
 		 */
-		pr_warn_ratelimited("nvmeibc_tpv: %s: no allocator TOMA ID yet; deferring CDV work\n",
-				    tpv->tpv_name);
+		_NW(tpv_no_toma_id, "TPV: @STR: no allocator TOMA ID yet; deferring CDV work",
+		    tpv->tpv_name);
 		goto out_clear_pending;
 	}
 
@@ -563,15 +566,15 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	req.req_id            = (u64)atomic64_inc_return(&nvmeibc_tpv_req_id_counter);
 	req.client_generation = client_gen;
 
-	pr_debug("nvmeibc_tpv: %s: CDV_ALLOC_EXTENT → %s gen=%llu req_id=%llu\n",
-		 tpv->tpv_name, toma_id, client_gen, req.req_id);
+	_ND(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU",
+	    tpv->tpv_name, toma_id, client_gen, req.req_id);
 
 	memset(&resp, 0, sizeof(resp));
 	rv = nvmeibc_ib_admin_cdv_alloc_extent(tpv->cdv_vol, toma_id, &req,
 					       &resp);
 	if (rv) {
-		pr_err("nvmeibc_tpv: %s: CDV_ALLOC_EXTENT send error (%d)\n",
-		       tpv->tpv_name, rv);
+		_NE(tpv_cdv_alloc_send_fail, "TPV: @STR: CDV_ALLOC_EXTENT send error rv=@INT",
+		    tpv->tpv_name, rv);
 		goto out_clear_pending;
 	}
 
@@ -579,8 +582,9 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	case NVMEIBC_CDV_ALLOC_OK:
 		rv = tpv_on_cdv_alloc_ok(tpv, resp.extent_index);
 		if (rv)
-			pr_err("nvmeibc_tpv: %s: tpv_on_cdv_alloc_ok(%llu) failed (%d)\n",
-			       tpv->tpv_name, resp.extent_index, rv);
+			_NE(tpv_cdv_alloc_ok_fail,
+			    "TPV: @STR: tpv_on_cdv_alloc_ok(@LLU) failed rv=@INT",
+			    tpv->tpv_name, resp.extent_index, rv);
 		else
 			retry_pending = true;
 		break;
@@ -590,8 +594,8 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		 * CDV is at capacity.  TOMA sends CDVCapacityWarning to
 		 * management.  IOs needing allocation remain queued.
 		 */
-		pr_warn_ratelimited("nvmeibc_tpv: %s: CDV full; IOs blocked until CDV is extended\n",
-				    tpv->tpv_name);
+		_NW(tpv_cdv_full, "TPV: @STR: CDV full; IOs blocked until CDV is extended",
+		    tpv->tpv_name);
 		break;
 
 	case NVMEIBC_CDV_ALLOC_WRONG_GEN:
@@ -602,13 +606,15 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		 * below-watermark event will re-schedule this work with the
 		 * new generation.
 		 */
-		pr_info("nvmeibc_tpv: %s: WRONG_GEN (ours=%llu TOMA=%llu); awaiting topology update\n",
-			tpv->tpv_name, client_gen, resp.allocator_generation);
+		_NI(tpv_cdv_wrong_gen,
+		    "TPV: @STR: WRONG_GEN ours=@LLU TOMA=@LLU; awaiting topology update",
+		    tpv->tpv_name, client_gen, resp.allocator_generation);
 		break;
 
 	default:
-		pr_err("nvmeibc_tpv: %s: CDV_ALLOC_EXTENT unexpected status=%u\n",
-		       tpv->tpv_name, resp.status);
+		_NE(tpv_cdv_alloc_bad_status,
+		    "TPV: @STR: CDV_ALLOC_EXTENT unexpected status=@UINT",
+		    tpv->tpv_name, resp.status);
 		break;
 	}
 

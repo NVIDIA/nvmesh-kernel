@@ -209,7 +209,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	disk = blk_alloc_disk(NUMA_NO_NODE);
 #  endif
 	if (IS_ERR_OR_NULL(disk)) {
-		pr_err("nvmeibc_tpv: blk_alloc_disk failed for %s\n", tpv->tpv_name);
+		_NE(tpv_blkalloc_disk_fail, "TPV: blk_alloc_disk failed for @STR", tpv->tpv_name);
 		return -ENOMEM;
 	}
 	queue = disk->queue;
@@ -219,7 +219,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 #else	/* !KS_HAS_BLK_ALLOC_DISK */
 	disk = alloc_disk(0);
 	if (!disk) {
-		pr_err("nvmeibc_tpv: alloc_disk failed for %s\n", tpv->tpv_name);
+		_NE(tpv_alloc_disk_fail, "TPV: alloc_disk failed for @STR", tpv->tpv_name);
 		return -ENOMEM;
 	}
 #  if KS_HAS_NEW_BLK_ALLOC_QUEUE
@@ -228,7 +228,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	queue = blk_alloc_queue(GFP_KERNEL);
 #  endif
 	if (!queue) {
-		pr_err("nvmeibc_tpv: blk_alloc_queue failed for %s\n", tpv->tpv_name);
+		_NE(tpv_alloc_queue_fail, "TPV: blk_alloc_queue failed for @STR", tpv->tpv_name);
 		put_disk(disk);
 		return -ENOMEM;
 	}
@@ -270,8 +270,8 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 #if KS_ADD_DISK_INT_RV
 	rv = add_disk(disk);
 	if (rv) {
-		pr_err("nvmeibc_tpv: add_disk failed for %s (%d)\n",
-		       tpv->tpv_name, rv);
+		_NE(tpv_add_disk_fail, "TPV: add_disk failed for @STR rv=@INT",
+		    tpv->tpv_name, rv);
 		goto err_put_disk;
 	}
 #else
@@ -350,15 +350,15 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 */
 	if (WARN_ON(cdv->status != NVS_ATTACHED &&
 		    cdv->status != NVS_ATTACHING_HAVE_BDEV)) {
-		pr_err("nvmeibc_tpv: CDV %s not yet ATTACHED (status=%d)\n",
-		       cdv->hdr.uuid, cdv->status);
+		_NE(tpv_cdv_not_attached, "TPV: CDV @STR not yet ATTACHED status=@INT",
+		    cdv->hdr.uuid, cdv->status);
 		return NULL;
 	}
 
 	/* ── 2. Allocate struct nvmeibc_tpv ─────────────────────────────── */
 	tpv = kzalloc(sizeof(*tpv), GFP_KERNEL);
 	if (!tpv) {
-		pr_err("nvmeibc_tpv: kzalloc failed for %s\n", tpv_name);
+		_NE(tpv_attach_kzalloc_fail, "TPV: kzalloc failed for @STR", tpv_name);
 		return NULL;
 	}
 
@@ -395,10 +395,11 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 				  sizeof(struct tpv_tree_entry);
 
 		if (tpv->allocator.virtual_extents_total > l1_capacity) {
-			pr_err("nvmeibc_tpv: %s: virtual_extents %llu exceeds flat-L1 capacity %llu\n",
-			       tpv_name,
-			       tpv->allocator.virtual_extents_total,
-			       l1_capacity);
+			_NE(tpv_l1_capacity_exceeded,
+			    "TPV: @STR: virtual_extents @LLU exceeds flat-L1 capacity @LLU",
+			    tpv_name,
+			    tpv->allocator.virtual_extents_total,
+			    l1_capacity);
 			goto err_free_alloc;
 		}
 	}
@@ -406,8 +407,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	/* ── 3b. Load allocator state from CDV_extent[0] ────────────────── */
 	rv = nvmeibc_tpv_load_state(tpv);
 	if (rv < 0) {
-		pr_err("nvmeibc_tpv: load_state failed for %s (%d)\n",
-		       tpv_name, rv);
+		_NE(tpv_load_state_fail, "TPV: load_state failed for @STR rv=@INT",
+		    tpv_name, rv);
 		goto err_free_alloc;
 	}
 
@@ -421,16 +422,16 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		 */
 		rv = nvmeibc_tpv_recovery(tpv);
 		if (rv) {
-			pr_err("nvmeibc_tpv: recovery failed for %s (%d)\n",
-			       tpv_name, rv);
+			_NE(tpv_recovery_fail, "TPV: recovery failed for @STR rv=@INT",
+			    tpv_name, rv);
 			goto err_free_alloc;
 		}
 	}
 
 	/* ── 5. Schedule initial CDV_extent pre-allocation if pool empty ── */
 	if (tpv->allocator.free_tpv_extent_count == 0) {
-		pr_info("nvmeibc_tpv: %s pool empty at attach; scheduling CDV alloc\n",
-			tpv_name);
+		_NI(tpv_pool_empty_at_attach, "TPV: @STR pool empty at attach; scheduling CDV alloc",
+		    tpv_name);
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
 	}
@@ -438,23 +439,22 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	/* ── 6. Register block device and open IO gates ─────────────────── */
 	rv = nvmeibc_tpv_blkdev_register(tpv);
 	if (rv) {
-		pr_err("nvmeibc_tpv: blkdev_register failed for %s (%d)\n",
-		       tpv_name, rv);
+		_NE(tpv_blkdev_register_fail, "TPV: blkdev_register failed for @STR rv=@INT",
+		    tpv_name, rv);
 		goto err_free_alloc;
 	}
 
 	nvmeibc_tpv_list_add(tpv);
 	atomic_set(&tpv->state, TPV_ATTACHED);
 
-	pr_info("nvmeibc_tpv: %s (uuid=%s) attached, virtual_size=%llu MB, "
-		"tpv_extent=%u KB, cdv_extent=%u MB, allocator=%llu GB, "
-		"watermark=%llu extents\n",
-		tpv_name, tpv_uuid,
-		virtual_size_bytes >> 20,
-		tpv_extent_size_kb,
-		cdv_extent_size_mb,
-		allocator_size_gb,
-		tpv->allocator.low_watermark);
+	_NI(tpv_attached,
+	    "TPV: @STR (uuid=@STR) attached vsize=@LLU MB tpv_ext=@UINT KB cdv_ext=@UINT MB alloc=@LLU GB wmark=@LLU",
+	    tpv_name, tpv_uuid,
+	    virtual_size_bytes >> 20,
+	    tpv_extent_size_kb,
+	    cdv_extent_size_mb,
+	    allocator_size_gb,
+	    tpv->allocator.low_watermark);
 
 	return tpv;
 
@@ -486,8 +486,9 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 		int rv = nvmeibc_tpv_flush_state(tpv);
 
 		if (rv)
-			pr_warn("nvmeibc_tpv: flush_state failed for %s (%d); "
-				"state may be lost\n", tpv->tpv_name, rv);
+			_NW(tpv_detach_flush_fail,
+			    "TPV: flush_state failed for @STR rv=@INT; state may be lost",
+			    tpv->tpv_name, rv);
 	}
 
 	/* ── 3. Unregister block device (quiesces IO via queue freeze) ──── */
@@ -518,8 +519,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	/* ── 4. Free allocator state ─────────────────────────────────────── */
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
 
-	pr_info("nvmeibc_tpv: %s (uuid=%s) detached\n",
-		tpv->tpv_name, tpv->tpv_uuid);
+	_NI(tpv_detached, "TPV: @STR (uuid=@STR) detached", tpv->tpv_name, tpv->tpv_uuid);
 
 	/* ── 5. MCS notification is sent by the caller (the MCS handler) ── */
 	/*
@@ -556,8 +556,8 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 		set_capacity(tpv->disk,
 			     new_virtual_size_bytes >> KERNEL_SECTOR_SHIFT);
 
-	pr_info("nvmeibc_tpv: %s grown to %llu MB (%llu virtual extents)\n",
-		tpv->tpv_name, new_virtual_size_bytes >> 20, new_total_extents);
+	_NI(tpv_grown, "TPV: @STR grown to @LLU MB (@LLU virtual extents)",
+	    tpv->tpv_name, new_virtual_size_bytes >> 20, new_total_extents);
 }
 
 /* ── Allocator identity update (called on CDV topology push) ───────────── */
