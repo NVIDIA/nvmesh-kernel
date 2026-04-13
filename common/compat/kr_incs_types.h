@@ -22,7 +22,7 @@
 
 	// Generic types.
 	typedef uint8_t		u8,	__u8;
-	typedef uint16_t	u16,__u16, __be16, umode_t, efi_char16_t;
+	typedef uint16_t	u16,__u16, __be16, __le16, umode_t, efi_char16_t;
 	typedef uint32_t	u32,__u32, __be32, __le32, gfp_t, fmode_t /*, dev_t*/;
 	typedef unsigned long long int /*uint64_t*/ u64,__u64, __le64, __be64, dma_addr_t, sector_t; // Wrong: NVMesh uses wrong definition of 64 bits as long long (which might be 128bits)
 	#if !(defined(NVASSERT_H_INCLUDED))				// UM_APP, In UM app/common/nvassert.h -> includes spdk rte_log.h -> rte_common.h which defines this.

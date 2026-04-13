@@ -6,7 +6,9 @@
 #ifndef NVMEIBC_MATH_H
 #define NVMEIBC_MATH_H
 
+#ifdef __KERNEL__
 #include <linux/const.h>
+#endif
 
 #ifndef __KERNEL__
 	#include <stdint.h>

@@ -264,6 +264,19 @@ SOURCES += $(SDIR)/management_utils_common/nvmeibc_management_capi_parse_conf.c
 SOURCES += $(SDIR)/management_utils_common/nvmeibc_management_volume_conf_checks.c
 #SOURCES += $(SDIR)/nvmeibc_ib_nordda_channel.c
 
+# Production code: /clnt/tpv/
+TPVDIR = $(SSDA)/clnt/tpv
+SOURCES += $(TPVDIR)/nvmeibc_tpv.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_allocator.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_io.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_persist.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_proc.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_recovery.c
+
+# TPV simulator and test scenarios
+SOURCES += ./tpv/nvmeibc_tpv_simu.c
+SOURCES += ./uni_scenarios/uni_scenario_tpv.c
+
 # Enable internal binary tracing by default
 SOURCES += $(SSDA)/tools/nvmeib_trace_userspace.c $(SSDA)/tools/nvmeib_trace_userspace_poller.c
 CFLAGS += -I$(SSDA)/tools/ -DUSER_SPACE_TRACING

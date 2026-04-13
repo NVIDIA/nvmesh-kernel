@@ -22,7 +22,9 @@
 #include <stdlib.h>
 #include <semaphore.h>
 #include <stdarg.h>
+#ifndef __APPLE__
 #include <sys/auxv.h>
+#endif
 #include "nvmeib_uuid_be.h"
 #include "nvmeib_str.h"
 #include "nvmeib_math.h"
@@ -46,6 +48,30 @@ void sim_vfree(const void *addr);
 #include "../common/compat/kr_incs_sched.h"
 #include "../common/compat/kr_incs_percpu.h"
 #include "../common/compat/kr_incs_locks.h"
+#include "../common/compat/kr_incs_xarray.h"
+
+/* ── RCU stubs ───────────────────────────────────────────────────────────────
+ *
+ * The simulator is single-threaded (or uses explicit locks), so RCU reduces
+ * to no-ops.  kfree_rcu becomes an immediate kfree because there are no RCU
+ * grace periods to wait for.
+ */
+struct rcu_head {
+	struct rcu_head *next;
+	void (*func)(struct rcu_head *head);
+};
+
+#define rcu_read_lock()		do {} while (0)
+#define rcu_read_unlock()	do {} while (0)
+#define rcu_assign_pointer(p, v)	((p) = (v))
+#define rcu_dereference(p)		(p)
+
+/*
+ * kfree_rcu(ptr, rcu_field) — free ptr immediately (no deferred grace period).
+ * The @rcu_field argument is ignored; the whole struct is freed via kfree.
+ */
+#define kfree_rcu(ptr, rcu_field)	kfree(ptr)
+
 /******************************* Simulator Build Config ********************************/
 
 /*
@@ -1142,6 +1168,10 @@ static inline void kobject_put(struct kobject *kobj){
 	})
 #endif
 
+#ifdef __APPLE__
+/* macOS: getauxval() is not available; provide a no-op stub. */
+static inline unsigned long getauxval(unsigned long type) { (void)type; return 0UL; }
+#else
 // /include/sys/auxv.y
 #ifndef _SYS_AUXV_H
 	#define _SYS_AUXV_H 1
@@ -1153,6 +1183,7 @@ static inline void kobject_put(struct kobject *kobj){
 	extern unsigned long int getauxval (unsigned long int __type) __THROW __attribute_const__;
 	__END_DECLS
 #endif /* sys/auxv.h */
+#endif /* __APPLE__ */
 
 #define __user
 #define __kernel
@@ -1298,6 +1329,16 @@ static inline bool schedule_delayed_work(            struct delayed_work *dwork,
 bool cancel_delayed_work_sync(struct delayed_work *dwork);	// return true if dwork was pending, false otherwise.
 bool cancel_work(struct workqueue_struct *wq, struct work_struct *work);
 bool flush_work(struct workqueue_struct *wq, struct work_struct *work);
+/*
+ * cancel_work_sync — wait for @work to finish, then cancel any pending
+ * re-queue.  In the simulator we flush the whole system_wq (conservative but
+ * correct for single-threaded tests) and then attempt cancellation.
+ */
+static inline bool cancel_work_sync(struct work_struct *work)
+{
+	flush_workqueue(system_wq);
+	return cancel_work(system_wq, work);
+}
 #define nvmeib_schedule_work_on schedule_work_on
 
 struct completion {

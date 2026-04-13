@@ -28,6 +28,7 @@
 #include "uni_framework/cond_wait_algorithms.h"
 #include "uni_scenarios/uni_enumerators.h"
 #include "uni_scenarios/uni_recoveries.h"
+#include "uni_scenarios/uni_scenario_tpv.h"
 #include "nvmeibc_tracer_unitest.h"
 #include "uni_framework/simu_test.h"
 #include "tests_conf.h"
@@ -7173,6 +7174,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 			rv |= SIMU_RUN_TEST(unitest_delayed_work, sys);
 			rv |= SIMU_RUN_TEST(test_basic_percpu, sys);
 			rv |= SIMU_RUN_TEST(unitest_io_stats, sys);
+			rv |= SIMU_RUN_TEST(unitest_tpv_AllTests, sys);
 			rv |= SIMU_RUN_TEST(unitest_txbm_compression, sys);
 			rv |= SIMU_RUN_TEST(unitest_update_targets_nics_clone, sys);
 			rv |= SIMU_RUN_TEST(unitest_client_update_targets_nics, sys);

@@ -145,7 +145,12 @@
 
 	extern struct timezone sys_tz;			// Daniel set it to represent Israel.
 	static inline void do_gettimeofday(struct timeval *tv)	{ gettimeofday(tv, &sys_tz); }
-	static inline int getnstimeofday(struct timespec *ts)	{ return clock_gettime(CLOCK_REALTIME, ts); }
+	static inline int getnstimeofday(struct timespec *ts)		{ return clock_gettime(CLOCK_REALTIME, ts); }
+	static inline int getnstimeofday_real(struct timespec *ts)	{ return clock_gettime(CLOCK_REALTIME, ts); }
+#ifndef CLOCK_BOOTTIME
+#define CLOCK_BOOTTIME CLOCK_MONOTONIC		/* macOS: closest equivalent */
+#endif
+	static inline int getnstimeofday_boot(struct timespec *ts)	{ return clock_gettime(CLOCK_BOOTTIME, ts); }
 
 /***********************         TIMESPEC         *****************************/
 

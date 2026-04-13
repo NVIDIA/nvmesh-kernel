@@ -323,6 +323,20 @@ static inline void bitmap_zero(unsigned long *dst, unsigned int nbits) {
 	}
 }
 
+/*
+ * bitmap_zalloc / bitmap_free — allocate and free a zero-initialised bitmap.
+ * In the kernel these are wrappers around kcalloc; here they use kzalloc/kfree.
+ */
+static inline unsigned long *bitmap_zalloc(unsigned int nbits, gfp_t flags)
+{
+	return kzalloc(BITS_TO_LONGS(nbits) * sizeof(unsigned long), flags);
+}
+
+static inline void bitmap_free(unsigned long *bitmap)
+{
+	kfree(bitmap);
+}
+
 static inline void __bitmap_shift_left(unsigned long *dst, const unsigned long *src,
 		unsigned int shift, unsigned int nbits)
 {
