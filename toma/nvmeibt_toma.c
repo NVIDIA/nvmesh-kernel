@@ -1047,11 +1047,12 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 	return ret;
 }
 
-struct toma_wakeup_args {
+struct __attribute__((aligned(16))) toma_wakeup_args {
 	void	*ptr;
 	int		type;
 	int32_t	filler_to_16_bytes_align;
 };
+_Static_assert(sizeof(struct toma_wakeup_args) == 16, "sizeof(struct toma_wakeup_args) != 16, Not sure this is mandatory");
 
 /* request wakeup of TOMA main thread */
 int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
@@ -1854,20 +1855,17 @@ static volatile sig_atomic_t got_sigusr2 = 0;		// Non critical signal
 static volatile int received_sig_no;				// Critical shutting down signal
 static void sig_handler(int32_t n, uint64_t addr)
 {
-	fprintf(stderr, "%s[%d]:%s(): n=%d   addr=0x%lx\n",__FILE__, __LINE__,
-			__FUNCTION__,  n, addr);
-	if (n == SIGCHLD) {
-		/* got_sigchld = 1;*/
-	} else if (n == SIGUSR1) {
+	if (n == SIGCHLD)
+		return; /* do nothing, no logs, got_sigchld = 1;*/
+	N_IMf(ttsgh1, "got signal=@INT addr=@LX", n, addr);
+	if (n == SIGUSR1) {
 		got_sigusr1 = 1; /* SIGUSR1 is used for dumping status */
 	} else if (n == SIGUSR2) {
 		got_sigusr2 = 1; /* SIGUSR2 is used to start/stop logging */
 	} else if (n == SIGHUP) {
 		nvmeibt_global_mark_is_reread_nvmesh_conf_required();
 	} else {
-		N_IMf(trace_toma_sig_handler, "got signal=@SIGNAL", n);
-		fprintf(stderr, "%s[%d]:%s(): signal=%d\n",__FILE__, __LINE__, __FUNCTION__,  n);
-		received_sig_no = n;
+		received_sig_no = n;	// Unknown signal, will cause shutdown.
 	}
 }
 /******************************************************************************/
