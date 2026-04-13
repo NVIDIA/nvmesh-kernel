@@ -47,6 +47,7 @@
 #include "nvmeibt_rpc.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_kafka.h"
+#include "nvmeibt_cdv_alloc.h"
 
 #pragma GCC diagnostic ignored "-Wshadow"
 
@@ -2910,6 +2911,10 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	}
 	if (nvmeibt_local_disk_one_time_init() < 0) {
 		N_Ef(6fgs8j3, "Failed local_disk_one_time_init()");
+		goto out;
+	}
+	if (nvmeibt_cdv_alloc_one_time_init() < 0) {
+		N_Ef(cdv_alloc_init_fail, "Failed nvmeibt_cdv_alloc_one_time_init()");
 		goto out;
 	}
 	if (nvmeibt_seg_active_global_scrubbing_one_time_init() < 0) {

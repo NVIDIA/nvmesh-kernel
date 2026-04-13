@@ -324,6 +324,7 @@ enum nvmeibc_config_ops {
 	 */
 	NVMEIBC_MA_CDV_ALLOC_EXTENT	= 0x20,
 	NVMEIBC_MA_CDV_FREE_EXTENT	= 0x21,
+	NVMEIBC_MA_CDV_LIST_EXTENTS	= 0x22,	/* recovery: list all extents owned by a TPV */
 };
 
 /* ── CDV_extent allocation protocol (§2.8) ──────────────────────────────────
@@ -367,6 +368,24 @@ struct nvmeibc_cdv_free_req {
 	char tpv_uuid[NVMEIBC_BD_UUID_LEN];	/* owning TPV UUID */
 	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* parent CDV UUID */
 	u64  extent_index;			/* data CDV_extent index to return to the pool */
+};
+
+/* NVMEIBC_MA_CDV_LIST_EXTENTS request — sent by the recovery path */
+struct nvmeibc_cdv_list_req {
+	char tpv_uuid[NVMEIBC_BD_UUID_LEN];	/* whose extents to list */
+	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* which CDV to query */
+};
+
+/*
+ * NVMEIBC_MA_CDV_LIST_EXTENTS response — variable-length.
+ *
+ * Followed immediately by n_extents × u64 extent indices.
+ * The response is reassembled in the client's admin-channel receive path
+ * (nvmeibc_ib_admin_channel.c §2.8) and returned as a vmalloc'd array.
+ */
+struct nvmeibc_cdv_list_resp {
+	u64  n_extents;		/* number of u64 extent indices that follow */
+	u8   status;		/* 0 = OK, non-zero = error */
 };
 
 /* ── end CDV_extent allocation protocol ──────────────────────────────────── */
