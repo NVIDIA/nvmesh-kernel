@@ -95,4 +95,6 @@ const struct sb_seg_conf*   sb_cluster_get_seg_ptr_from_uuid(const struct sb_clu
       struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid( struct sb_cluster_conf *, const char *raid_uuid);
       struct sb_seg_topo*   sb_cluster_get_topo_seg_ptr_from_uuid( struct sb_cluster_conf *, const char *seg_uuid);
 
+bool sb_cluster_topo_prd_is_ioable(const struct sb_praid_topo*);
+
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation

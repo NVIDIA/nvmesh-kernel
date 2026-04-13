@@ -145,3 +145,13 @@ int sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *sb, con
 void sb_cluster_conf_destroy(struct sb_cluster_conf *sb) {
 	(void)sb;
 }
+
+bool sb_cluster_topo_prd_is_ioable(const struct sb_praid_topo* pr) {
+	int i, n_segs = pr->cfg->D + pr->cfg->P;
+	unsigned n_rw_segs = 0;
+	for (i = 0; i < n_segs; i++ ) {
+		if (pr->segs[i].status == mdb_seg_RW)
+			n_rw_segs++;
+	}
+	return (n_rw_segs >= pr->cfg->D);
+}

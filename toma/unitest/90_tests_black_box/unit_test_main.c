@@ -146,6 +146,20 @@ void scenario_nvmeibs_messages(void) {
 	SCENARIO_PRINT(__AUTOID__, "sent");										yield();
 }
 
+void scenario_attach_good_path_io_detach_on_volume(int v) {
+	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
+	const struct sb_volume_conf *vol = &cfg->vols[v];
+	const struct sb_praid_conf *pr_c = &vol->chunks[0].raids[0];
+	const struct sb_praid_topo *pr_t = &vol->topo_chunks[0].raids[0];
+	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME to be ioable", vol->name);
+	for (unsigned s = 0; s < (pr_c->D + pr_c->P); s++ ) {
+		int node_idx = sb_cluster_get_node_idx_from_disk_uuid(cfg, pr_c->segs[s].disk_uuid);
+		peer_toma_simu_set_seg_dirty_bits(cfg->nodes[node_idx].peer, pr_c->segs[s].uuid, (0x1 << 14));		// This is just a hack which does not work. Fix it properly. Let other Tomas initialize the praid properly
+	}
+	WAIT_UNTIL(sb_cluster_topo_prd_is_ioable(pr_t));
+	SCENARIO_PRINT(__AUTOID__, "Attaching clients, todo...");
+}
+
 static void scenario_create_remove_r1(void) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
 	struct sim_broker_topic *kb_vol = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
@@ -193,6 +207,7 @@ static void scenario_create_remove_r1(void) {
 
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();
+	if (0) scenario_attach_good_path_io_detach_on_volume(0);
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);
