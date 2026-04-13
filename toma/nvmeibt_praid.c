@@ -2723,13 +2723,10 @@ static int8_t recalc_praid_report_to_mgmt_json(struct nvmeibt_praid *praid, stru
 	struct nvmeibt_praid_lot				*to_report_praid_lot;
 	struct nvmeibt_seg_lot					*to_report_seg_lot;
 	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	struct nvmeibt_disk_segment_topo_ctx	*seg_remote_topo_ctx;
 	struct nvmeibt_praid_topo_ctx			*praid_topo_ctx;
-	struct nvmeibt_disk						*disk;
 	BOOL									is_praid_activated;
 	BOOL									is_praid_booting, is_seg_booting;
 	enum SEGMENT_STATUS_FOR_MGMT			new_reported_persistent_status;
-	enum SEGMENT_VITALITY_FOR_MGMT			new_reported_vitality;
 
 	TODO(Discuss with Tom and Yaniv, how we handle praid-down with no leader)
 	//
@@ -2752,26 +2749,19 @@ static int8_t recalc_praid_report_to_mgmt_json(struct nvmeibt_praid *praid, stru
 						praid_topo_ctx->praid_version_major,
 						nvmeibt_raft_is_leader());
 	XDLIST_FOREACH_SAFE(to_report_seg_lot, &(to_report_praid_lot->all_seg_lot_list)) {
-		disk = nvmeibt_seg_lot_get_disk(to_report_seg_lot);
 		seg_topo_ctx = &to_report_seg_lot->seg_topo;
-		seg_remote_topo_ctx = &(to_report_seg_lot->my_seg->seg_leader.remote_seg_topo);
 
 		is_seg_booting = is_praid_booting |
 						 (nvmeibt_disk_segment_leader_is_remote_active_mem_tbl_init_command(seg_topo_ctx) &&
 						  nvmeibt_disk_segment_is_de_facto_owner(seg_topo_ctx));
 		new_reported_persistent_status = calc_seg_lot_status_for_mgmt(to_report_seg_lot, seg_topo_ctx, is_praid_activated, is_seg_booting);
-		new_reported_vitality = (nvmeibt_raft_is_shutdown_triggered() ||
-								 nvmeibt_disk_segment_is_dirty_bits_state_down(seg_remote_topo_ctx->dirty_bits_state) ||
-								 !disk ||
-								 !disk->leader_its_raft_member) ?
-			 SEGMENT_VITALITY_DOWN : SEGMENT_VITALITY_UP;
 		nvmeibt_Str_sprintf(json_payload,
 							"{\"segmentID\":\"%s\","
 							"\"status\":\"%s\","
 							"\"vitality\":\"%s\"},",
 							nvmeibt_seg_lot_id_str(to_report_seg_lot),
 							nvmeibt_mm_segment_persistent_status_to_str(new_reported_persistent_status),
-							nvmeibt_mm_segment_vitality_to_str(new_reported_vitality));
+							nvmeibt_mm_segment_vitality_to_str(SEGMENT_VITALITY_UP));
 	}
 	if (XDLIST_N_ELEMNTS(&(to_report_praid_lot->all_seg_lot_list))) {
 		nvmeibt_Str_chop_last_char(json_payload); // Remove the last "," after the last seg report
