@@ -6,10 +6,88 @@
 #include "main/cc_api/nvmeibc_main_capi_manipulate_vols.h"
 #include "main/cc_api/nvmeibc_main_capi_parse_conf.h"
 #include "block/nvmeibc_block_common.h"
+#include "utils/nvmeib_jdr/nvmeib_txt.h"
+#include "utils/nvmeib_jdr/nvmeib_jdr.h"
+#include "tpv/nvmeibc_tpv.h"
 
 #pragma push_macro("__FILE_LITERAL__")
 #undef __FILE_LITERAL__
 #define __FILE_LITERAL__ nvmeibc_main_capi_manipulate_vols_inc_c
+
+/*
+ * __setup_tpv — attach a Thin-Provisioned Volume (TPV).
+ *
+ * Called from try_setup_block_device() when the volume config has the
+ * AUTO_EXTEND_VOLUME bit set (type & 0x4).
+ *
+ * Because the binary MCS protocol predates the TPV/CDV feature and has no
+ * dedicated fields for TPV geometry, the management layer encodes the
+ * required parameters in fields that are otherwise unused for TPV volumes:
+ *
+ *   conf->blocks        - virtual size in 4 KiB management blocks
+ *   conf->mdvUUID       - parent CDV UUID (for lookup in the volumes list)
+ *   conf->stripeSize    - TPV extent size in KiB  (tpv_extent_size_kb)
+ *   conf->dataBlocks    - CDV extent size in MiB  (cdv_extent_size_mb)
+ *   conf->parityBlocks  - allocator size in GiB   (allocator_size_gb)
+ *
+ * The CDV must already be attached as a regular (hidden) volume before this
+ * function is called.
+ */
+static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
+		       const struct nvmeib_mgmt_to_client_volume_configuration *msg)
+{
+	const struct nvmeibc_volume_conf *conf = &msg->volumes[0];
+	struct nvmeibc_volume *cdv;
+	struct nvmeibc_tpv *tpv;
+	u64 virtual_size_bytes;
+	u32 tpv_extent_size_kb;
+	u32 cdv_extent_size_mb;
+	u64 allocator_size_gb;
+
+	/* Locate the parent CDV by the UUID encoded in conf->mdvUUID. */
+	if (!conf->mdvUUID[0]) {
+		_NE(tpv_setup_no_cdv_uuid,
+		    "TPV @STR: mdvUUID is empty - management did not set CDV UUID",
+		    conf->name);
+		return -EINVAL;
+	}
+	cdv = (struct nvmeibc_volume *)nvmeibc_volume_get_by_uuid(
+		p, conf->mdvUUID, UNKNOWN_ILLEGAL);
+	if (!cdv) {
+		_NE(tpv_setup_cdv_not_found,
+		    "TPV @STR: parent CDV @STR not found (not yet attached?)",
+		    conf->name, conf->mdvUUID);
+		return -ENODEV;
+	}
+
+	/* conf->blocks is in 4 KiB management units; convert to bytes. */
+	virtual_size_bytes  = (u64)conf->blocks << 12;  /* × 4096 */
+
+	/* Decode repurposed fields. */
+	tpv_extent_size_kb  = (u32)conf->stripeSize;
+	cdv_extent_size_mb  = (u32)conf->dataBlocks;
+	allocator_size_gb   = (u64)(unsigned int)conf->parityBlocks;
+
+	if (!virtual_size_bytes || !tpv_extent_size_kb ||
+	    !cdv_extent_size_mb || !allocator_size_gb) {
+		_NE(tpv_setup_bad_params,
+		    "TPV @STR: invalid params vsize=@LLU tpv_ext_kb=@UINT cdv_ext_mb=@UINT alloc_gb=@LLU",
+		    conf->name, virtual_size_bytes,
+		    tpv_extent_size_kb, cdv_extent_size_mb, allocator_size_gb);
+		return -EINVAL;
+	}
+
+	tpv = nvmeibc_tpv_attach(cdv, conf->name, conf->uuid,
+				 virtual_size_bytes, tpv_extent_size_kb,
+				 cdv_extent_size_mb, allocator_size_gb);
+	if (!tpv) {
+		_NE(tpv_setup_attach_failed,
+		    "TPV @STR: nvmeibc_tpv_attach() failed", conf->name);
+		return -EIO;
+	}
+	_NI(tpv_setup_ok, "TPV @STR attached successfully", conf->name);
+	return 0;
+}
 
 /* Volume work structure (Attach/Detach/Update Works) */
 struct avolume_workq {				/* Volume command work */
@@ -223,6 +301,15 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		_NE(t_tsbd05, DMESG_PREFIX("@DEV_NAME") ": not found in full-configuration message, skipping update", hdr->name);
                 nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 0);
 		goto _out;
+	} else if ((hdr->type & AUTO_EXTEND_VOLUME) && !update_only) {
+		/* TPV attach: no physical disk segments; backed by a CDV.
+		 * Route to nvmeibc_tpv_attach() - bypasses nvmeibc_volume_attach()
+		 * entirely as TPVs are not tracked in the nvmeibc_volume list.
+		 */
+		_NI(tpv_dispatch_attach, "TPV @STR: dispatching to __setup_tpv", hdr->name);
+		rv = __setup_tpv(p, msg);
+		res = _calc_reply_on_attach(hdr->name, NULL /* no nvmeibc_volume */,
+					    rv, resrv_inc_ignored, &reply_hdr);
 	} else {
 		rv = nvmeibc_volume_attach(p, msg);
 		res = _calc_reply_on_attach(hdr->name, volume, rv, resrv_inc_ignored, &reply_hdr);

@@ -35,7 +35,14 @@ void nvmeibc_management_try_setup_stripe_size_safe(struct nvmeibc_chunk_conf *cu
 // Segment with index 0
 int __check_striping_length_and_chunk(u32 binje, const struct nvmeibc_volume_conf *conf);
 
-#define nvmeibc_managment_does_vol_need_disks(conf)  (true)
+/*
+ * Returns true iff the volume requires physical disk segments to be present
+ * before the block device can be initialised.
+ * AUTO_EXTEND_VOLUME (0x4) is the type bit used for TPV (Thin-Provisioned
+ * Volumes): they are backed by a CDV, not by direct disk segments.
+ */
+#define nvmeibc_managment_does_vol_need_disks(hdr)  \
+	(!((hdr)->type & AUTO_EXTEND_VOLUME))
 
 int nvmeibc_management_does_vol_have_disks(const struct nvmeib_mgmt_to_client_volume_configuration* conf);
 
