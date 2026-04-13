@@ -146,4 +146,71 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 int nvmeibt_cdv_alloc_persist(void);
 int nvmeibt_cdv_alloc_load(void);
 
+/* ── CDV wire-format structs (TOMA-local copies) ─────────────────────────────
+ *
+ * Mirror the definitions in clnt/nvmeibc_msgs_shared.h so that TOMA
+ * (user-space) can decode/encode CDV request and response payloads
+ * without pulling in the kernel client header chain.
+ * Field layout MUST stay in sync with the client-side definitions.
+ */
+
+/* CDV_ALLOC_EXTENT request */
+struct nvmeibt_cdv_alloc_req {
+	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	uint64_t req_id;
+	uint64_t client_generation;
+};
+
+/* CDV_ALLOC_EXTENT response status codes */
+enum nvmeibt_cdv_alloc_status {
+	NVMEIBT_CDV_ALLOC_OK		= 0,
+	NVMEIBT_CDV_ALLOC_CDV_FULL	= 1,
+	NVMEIBT_CDV_ALLOC_WRONG_GEN	= 2,
+	NVMEIBT_CDV_ALLOC_ERROR		= 3,
+};
+
+/* CDV_ALLOC_EXTENT response */
+struct nvmeibt_cdv_alloc_resp {
+	uint64_t req_id;
+	uint64_t extent_index;
+	uint64_t allocator_generation;
+	uint8_t  status;			/* enum nvmeibt_cdv_alloc_status */
+};
+
+/* CDV_FREE_EXTENT request (fire-and-forget; no dedicated response) */
+struct nvmeibt_cdv_free_req {
+	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	uint64_t extent_index;
+};
+
+/* CDV_LIST_EXTENTS request */
+struct nvmeibt_cdv_list_req {
+	char tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+};
+
+/* CDV_LIST_EXTENTS response header; followed by n_extents × uint64_t */
+struct nvmeibt_cdv_list_resp {
+	uint64_t n_extents;
+	uint8_t  status;
+};
+
+/* ── Incoming-message handler (wired from nvmeibt_client.c dispatch) ─────── */
+
+struct nvmeibt_register_msg;	/* forward; defined in nvmeibt_register.h */
+
+/*
+ * nvmeibt_cdv_handle_incoming_msg — dispatch CDV_ALLOC/FREE/LIST messages.
+ *
+ * Called from nvmeibt_client_handle_incoming_message() when the message
+ * signature is NVMEIBT_PROTOCOL_SIGNATURE_CDV.  The request payload is in
+ * msg->msg_data with length msg->data_length.  Responses are sent back
+ * via nvmeibt_toma_send_msg_to_client().
+ *
+ * Returns 0 on success, negative on dispatch/handler error.
+ */
+int nvmeibt_cdv_handle_incoming_msg(struct nvmeibt_register_msg *msg);
+
 #endif /* NVMEIBT_CDV_ALLOC_H */

@@ -11,6 +11,7 @@
 #include "nvmeibt_toma.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_register.h"
+#include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_global.h"
 
 /**********************                       ***************************/
@@ -223,6 +224,9 @@ int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *
 		break;
 	case NVMEIBT_PROTOCOL_SIGNATURE_TOMA_REBUILD:
 		rv = nvmeibt_recovery_handle_incoming_msg(&registrant_msg);
+		break;
+	case NVMEIBT_PROTOCOL_SIGNATURE_CDV:
+		rv = nvmeibt_cdv_handle_incoming_msg(&registrant_msg);
 		break;
 	default:
 		rv = -1;

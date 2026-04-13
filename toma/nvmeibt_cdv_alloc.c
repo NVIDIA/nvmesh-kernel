@@ -23,6 +23,8 @@
 #include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
+#include "nvmeibt_register.h"		/* struct nvmeibt_register_msg */
+#include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client */
 #include "../common/nvmeib_hash.h"
 
 /* ── Persistence paths ───────────────────────────────────────────────────── */
@@ -399,4 +401,124 @@ void nvmeibt_cdv_alloc_destroy(void)
 	}
 
 	NVMEIB_HASH_TBL_FREE(cdv_alloc_hash_free, cdv_alloc_hash);
+}
+
+/* ── Incoming-message handler ────────────────────────────────────────────── */
+
+/*
+ * Helper: send a CDV response to the requesting client.
+ *
+ * Wraps nvmeibt_toma_send_msg_to_client() with a CDV-appropriate praid_version
+ * (always 0 — CDV operations are topology-independent) and a unique msg_id.
+ */
+static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
+			     enum NVMEIBT_CLIENT_MSG_TYPES msg_type,
+			     int data_length, void *data)
+{
+	u64 msg_id = (u64)nvmeib_public_rdtsc();
+
+	return nvmeibt_toma_send_msg_to_client(reg_ctx,
+					       0,		/* praid_version: N/A for CDV */
+					       msg_type,
+					       NVMEIBT_CLIENT_TR_REASON_NONE,
+					       data_length, data, msg_id);
+}
+
+/*
+ * handle_cdv_alloc_extent — CDV_ALLOC_EXTENT stub.
+ *
+ * Step 12c will implement: pick a free CDV_extent from the allocator,
+ * call nvmeibt_cdv_alloc_add_extent(), send back nvmeibt_cdv_alloc_resp.
+ */
+static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
+{
+	struct nvmeibt_cdv_alloc_resp resp;
+
+	if (msg->data_length < (int)sizeof(struct nvmeibt_cdv_alloc_req)) {
+		N_Ef(cdv_handle_alloc_short,
+		     "CDV-handle: ALLOC_EXTENT payload too short len=@INT", msg->data_length);
+		return -EINVAL;
+	}
+
+	N_Tf(cdv_handle_alloc_stub,
+	     "CDV-handle: ALLOC_EXTENT stub — returning ENOSYS");
+
+	memset(&resp, 0, sizeof(resp));
+	resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+
+	return cdv_send_response(&msg->registrant_ctx,
+				 NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP,
+				 sizeof(resp), &resp);
+}
+
+/*
+ * handle_cdv_free_extent — CDV_FREE_EXTENT stub.
+ *
+ * Step 12c will implement: validate ownership, call
+ * nvmeibt_cdv_alloc_remove_extent().  Fire-and-forget — no response.
+ */
+static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
+{
+	if (msg->data_length < (int)sizeof(struct nvmeibt_cdv_free_req)) {
+		N_Ef(cdv_handle_free_short,
+		     "CDV-handle: FREE_EXTENT payload too short len=@INT", msg->data_length);
+		return -EINVAL;
+	}
+
+	N_Tf(cdv_handle_free_stub,
+	     "CDV-handle: FREE_EXTENT stub — ignoring");
+
+	/* No response: CDV_FREE_EXTENT is fire-and-forget. */
+	return 0;
+}
+
+/*
+ * handle_cdv_list_extents — CDV_LIST_EXTENTS stub.
+ *
+ * Step 12c will implement: call nvmeibt_cdv_alloc_list_for_tpv(),
+ * build variable-length response with nvmeibt_cdv_list_resp + index array.
+ */
+static int handle_cdv_list_extents(struct nvmeibt_register_msg *msg)
+{
+	struct nvmeibt_cdv_list_resp resp;
+
+	if (msg->data_length < (int)sizeof(struct nvmeibt_cdv_list_req)) {
+		N_Ef(cdv_handle_list_short,
+		     "CDV-handle: LIST_EXTENTS payload too short len=@INT", msg->data_length);
+		return -EINVAL;
+	}
+
+	N_Tf(cdv_handle_list_stub,
+	     "CDV-handle: LIST_EXTENTS stub — returning empty list");
+
+	memset(&resp, 0, sizeof(resp));
+	resp.n_extents = 0;
+	resp.status    = 0;
+
+	return cdv_send_response(&msg->registrant_ctx,
+				 NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
+				 sizeof(resp), &resp);
+}
+
+int nvmeibt_cdv_handle_incoming_msg(struct nvmeibt_register_msg *msg)
+{
+	N_Tf(cdv_handle_dispatch,
+	     "CDV-handle: msg_type=@MSG_TYPE data_len=@DATA_LEN cookie=@COOKIE",
+	     msg->msg_type, msg->data_length, msg->cookie);
+
+	switch (msg->msg_type) {
+	case NVMEIBT_CLIENT_MSG_RT_CDV_ALLOC_EXTENT:
+		return handle_cdv_alloc_extent(msg);
+
+	case NVMEIBT_CLIENT_MSG_RT_CDV_FREE_EXTENT:
+		return handle_cdv_free_extent(msg);
+
+	case NVMEIBT_CLIENT_MSG_RT_CDV_LIST_EXTENTS:
+		return handle_cdv_list_extents(msg);
+
+	default:
+		N_Ef(cdv_handle_unknown,
+		     "CDV-handle: unexpected msg_type=@MSG_TYPE", msg->msg_type);
+		return -EINVAL;
+	}
 }
