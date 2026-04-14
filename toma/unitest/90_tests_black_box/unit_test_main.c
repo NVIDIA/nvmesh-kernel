@@ -154,7 +154,7 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME {@INT+@INT} to be ioable", vol->name, pr_c->D, pr_c->P);
 	/*for (unsigned s = 0; s < (pr_c->D + pr_c->P); s++ ) {
 		int node_idx = sb_cluster_get_node_idx_from_disk_uuid(cfg, pr_c->segs[s].disk_uuid);
-		peer_toma_simu_set_seg_inject(cfg->nodes[node_idx].peer, {pr_c->segs[s].uuid, });
+		peer_toma_simu_set_seg_inject(cfg->nodes[node_idx].peer, {pr_c->segs[s].uuid, });	// Inject degraded mode
 	}*/
 	WAIT_UNTIL(sb_cluster_topo_prd_is_ioable(pr_t));
 	if (sb_cluster_vol_has_any_live_toma_local_segs(cfg, v)) {		// Otherwise no work will be done by the real toma.
@@ -210,7 +210,7 @@ static void scenario_create_remove_r1(void) {
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();
 	scenario_attach_good_path_io_detach_on_volume(0);
-	//scenario_attach_good_path_io_detach_on_volume(1);
+	scenario_attach_good_path_io_detach_on_volume(1);
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);
