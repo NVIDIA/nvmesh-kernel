@@ -1665,7 +1665,7 @@ int nvmeibt_local_disk_update_serjio_state(const char *ldisk_id_str, const char 
 		if (serjio_status == NVMEIBS_SERJIO_STATUS_ERROR)
 			N_Wf(o7w8wd7, "disk=@STR serjio_status=SERJIO_ERROR", nvmeibt_local_disk_display(local_disk));
 		else
-			N_Tf(oo08wd7, "disk=@STR setting serjio_STSTUS=@SERJIO_STATE", nvmeibt_local_disk_display(local_disk), serjio_status);
+			N_Tf(oo08wd7, "disk=@STR setting serjio_STATUS=@SERJIO_STATUS", nvmeibt_local_disk_display(local_disk), serjio_status);
 		if (local_disk->serjio_status != serjio_status) {
 			if ((local_disk->serjio_status == NVMEIBS_SERJIO_STATUS_READY) ||
 				(serjio_status == NVMEIBS_SERJIO_STATUS_READY)) {

@@ -1824,7 +1824,7 @@ static void handle_serjio_state_changed(const char* ldisk_id_str, u16 vendor_id,
 	struct nvmeibt_wq				*wq;
 
 	event_serjio_state_task = NNVMEIBT_BM_CALLOC(u87hdy6, sizeof(*event_serjio_state_task));
-	N_Tf(hyuytu7, "got DISK_CHANGE_EVENT from SERJIO state=@INT, disk=@STR", serjio_status, ldisk_id_str);
+	N_Tf(hyuytu7, "got DISK_CHANGE_EVENT from SERJIO serjio_STATUS=@SERJIO_STATUS, disk=@STR", serjio_status, ldisk_id_str);
 	event_serjio_state_task->wq_entry.type = "DISK_CHANGE_EVENT";
 	event_serjio_state_task->wq_entry.execute = disk_change_event_wrapper;
 	event_serjio_state_task->wq_entry.finalize = disk_change_event_finalize;

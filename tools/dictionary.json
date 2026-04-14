@@ -15724,6 +15724,12 @@
         "fmt": "%d",
         "fmt_func": "fmt_serjio_state"
     },
+    "@SERJIO_STATUS": {
+        "size": 8,
+        "type": "u8",
+        "fmt": "%d",
+        "fmt_func": "fmt_serjio_status"
+    },
     "@SERVER": {
         "size": "string",
         "type": "string",
