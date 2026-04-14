@@ -155,6 +155,27 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 
 	spin_lock(&alloc->lock);
 
+	/*
+	 * Double-check: another bio for the same virt_idx may have raced
+	 * past the caller's unlocked xa_load()==NULL and already allocated
+	 * a slot.  This happens under iodepth>1 with overlapping random
+	 * writes — two bios target the same unmapped extent concurrently.
+	 *
+	 * Without this check, xa_store below silently overwrites the first
+	 * entry, leaking its physical slot and causing the first bio's data
+	 * to become unreachable while the xarray points to a different slot.
+	 */
+	{
+		struct nvmeibc_tpv_extent_entry *existing;
+
+		existing = xa_load(&alloc->extent_map, virt_idx);
+		if (existing) {
+			spin_unlock(&alloc->lock);
+			*out = existing;
+			return 0;
+		}
+	}
+
 	if (list_empty(&alloc->free_tpv_extents)) {
 		/* Pool empty — arm CDV_extent pre-fetch if not already pending. */
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
