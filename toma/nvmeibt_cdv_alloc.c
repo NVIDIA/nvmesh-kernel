@@ -191,10 +191,14 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 
 	rv = cdv_resolve_disk_io(cdv_uuid, &fd, &seg_pbyte_s, &pblk_size);
 	if (rv) {
+		/*
+		 * Disk not ready yet (e.g. topo_segs not populated during early
+		 * startup or RAFT replay).  Do NOT mark ondisk_loaded — allow the
+		 * caller to retry once the disk I/O path is available.
+		 */
 		N_Wf(cdv_scan_no_disk,
-		     "CDV-alloc: scan cdv=@STR cannot resolve disk rv=@INT; treating as empty",
+		     "CDV-alloc: scan cdv=@STR cannot resolve disk rv=@INT; will retry",
 		     cdv_uuid, rv);
-		alloc->ondisk_loaded = true;
 		return 0;
 	}
 
@@ -646,7 +650,16 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 				     "CDV-alloc: elect sticky cdv=@STR allocator=@STR gen=@LLU",
 				     cdv_uuid, alloc->allocator_toma_id,
 				     alloc->allocator_generation);
-				return 0;   /* no change needed */
+				/*
+				 * No change to allocator — but still scan the CDV
+				 * if we haven't loaded the on-disk extent records yet
+				 * (e.g. first call after TOMA restart when topology was
+				 * already stable and the disk I/O path was not ready on
+				 * the previous attempt).
+				 */
+				if (!alloc->ondisk_loaded)
+					cdv_ondisk_scan(cdv_uuid, alloc);
+				return 0;   /* 0 = sticky, no push needed */
 			}
 		}
 	}
@@ -687,7 +700,7 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			cdv_ondisk_write_header(fd, seg_pbyte_s, pblk_size, alloc);
 	}
 
-	return 0;
+	return 1;   /* 1 = newly elected — caller should push CDV_ALLOCATOR_UPDATE */
 }
 
 int nvmeibt_cdv_alloc_get_allocator(const char *cdv_uuid,

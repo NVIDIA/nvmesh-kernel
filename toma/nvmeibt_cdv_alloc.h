@@ -214,19 +214,27 @@ void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
 /*
  * nvmeibt_cdv_alloc_elect — elect the CDV allocator TOMA for a CDV.
  *
- * Called by the RAFT leader when a CDV is first seen, or when the current
- * allocator TOMA leaves the RAFT group.
+ * Called by the RAFT leader for every stable CDV pRAID on each topo
+ * recalculation — including on TOMA restart when topology has not changed.
+ * This ensures the CDV alloc hash entry is always populated after startup.
  *
- * Election rule: if the current allocator is in @candidates, keep it (sticky).
- * Otherwise pick one from @candidates at random.
+ * Election rule: if the current allocator is in @candidates, keep it (sticky)
+ * and return 0.  Otherwise pick one from @candidates at random, increment
+ * allocator_generation, and return 1 (newly elected — caller should push
+ * CDV_ALLOCATOR_UPDATE to registrants).
+ *
+ * The on-disk extent records are scanned (and the hash rebuilt) whenever
+ * ondisk_loaded is false, regardless of whether the sticky rule fired.
+ * If the disk I/O path is not yet ready, the scan is deferred and retried
+ * on the next call (e.g. next heartbeat).
  *
  * @cdv_uuid:       CDV UUID string.
  * @candidates:     Array of TOMA node hostname strings (first-pRAID RW nodes).
  * @n_candidates:   Number of entries in @candidates.
  *
- * On success, sets allocator_toma_id and increments allocator_generation
- * in the per-CDV allocator.  Returns 0 on success, -EINVAL if n_candidates
- * is 0, -ENOMEM on OOM.
+ * Returns  1 if a new allocator was elected (push_to_registrants needed),
+ *          0 if the current allocator is sticky (no push needed),
+ *         -EINVAL if n_candidates is 0, -ENOMEM on OOM.
  */
 int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			    const char **candidates,
