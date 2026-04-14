@@ -399,8 +399,8 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 			reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
 		} else {
 			_NE(tpv_grow_not_found,
-			    "TPV @STR: grow failed - tpv=%p new_size=@LLU",
-			    hdr->name, (void *)tpv, new_virtual_size_bytes);
+			    "TPV @STR: grow failed - uuid not found or new_size=@LLU is zero",
+			    hdr->name, new_virtual_size_bytes);
 			res = NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED;
 		}
 		nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
