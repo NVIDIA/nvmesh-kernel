@@ -16,6 +16,7 @@
 #else
 	#define LE_SWAP64(x)	({ _Static_assert(sizeof(x) == 8, "sizeof(x) != 8");	                 (x); })
 	#define LE_SWAP32(x)	({ _Static_assert(sizeof(x) == 4, "sizeof(x) != 4");	                 (x); })
+	#define LE_SWAP16(x)	({ _Static_assert(sizeof(x) == 2, "sizeof(x) != 2");	                 (x); })
 	#define LE_SWAP8(x)		({ _Static_assert(sizeof(x) == 1, "sizeof(x) != 1");	                 (x); })
 	#define LE_SWAP32_BITFIELD(x)	({												                 (x); })
 #endif
