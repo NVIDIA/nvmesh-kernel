@@ -520,6 +520,40 @@ void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
 	alloc->allocator_generation = generation;
 }
 
+/* ── CDV removal ────────────────────────────────────────────────────────── */
+
+void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
+{
+	struct nvmeibt_cdv_alloc        *alloc;
+	struct nvmeibt_cdv_extent_entry *entry;
+
+	if (!cdv_alloc_hash)
+		return;
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc) {
+		N_If(cdv_alloc_remove_notfound,
+		     "CDV-alloc: remove called for unknown cdv=@STR (already absent)", cdv_uuid);
+		return;
+	}
+
+	N_If(cdv_alloc_remove,
+	     "CDV-alloc: removing cdv=@STR allocated=@LLU", cdv_uuid, alloc->n_allocated);
+
+	/* Free all extent entries before removing the allocator itself. */
+	while (!XDLIST_EMPTY(&alloc->extents)) {
+		entry = XDLIST_FIRST(&alloc->extents);
+		XDLIST_ELEM_DEL(&alloc->extents, entry);
+		NNVMEIBT_BM_FREE(cdv_alloc_remove_entry, entry);
+	}
+
+	nvmeib_hash_delete_ascii_str(cdv_alloc_hash, cdv_uuid);
+	NNVMEIBT_BM_FREE(cdv_alloc_remove_alloc, alloc);
+
+	/* Persist the updated (smaller) hash so TOMA restart stays clean. */
+	nvmeibt_cdv_alloc_save_state();
+}
+
 /* ── Allocator election ─────────────────────────────────────────────────── */
 
 /*

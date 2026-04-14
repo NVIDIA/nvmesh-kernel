@@ -133,6 +133,19 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 				    uint64_t    *out_count);
 
 /*
+ * nvmeibt_cdv_alloc_remove — tear down the per-CDV allocator when a CDV is
+ * deleted.
+ *
+ * Removes the entry for @cdv_uuid from the global hash, frees all in-memory
+ * extent records, and atomically rewrites the state file so that a subsequent
+ * TOMA restart does not reload the stale entry.
+ *
+ * Must be called from block_device_remove() for CDV blkdevs only.
+ * Safe to call if the CDV was never allocated (no-op with an info log).
+ */
+void nvmeibt_cdv_alloc_remove(const char *cdv_uuid);
+
+/*
  * nvmeibt_cdv_alloc_set_generation — update the allocator_generation for a CDV.
  *
  * Called from the RAFT distribution path when the leader assigns (or

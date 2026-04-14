@@ -8,6 +8,7 @@
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_seg_active.h"
+#include "../nvmeibt_cdv_alloc.h"
 
 BOOL nvmeibt_block_device_is_deprecated_in_config(struct nvmeibt_block_device *block_device)
 {
@@ -48,6 +49,8 @@ static int block_device_remove(struct nvmeibt_block_device *block_device)
 
 	N_Tf(fhu8236, "Removing block_device=@UUID_LE", nvmeibt_block_device_UUID(block_device));
 
+	if (block_device->from_config.is_cdv)
+		nvmeibt_cdv_alloc_remove(block_device->urn_uuid.str);
 	NNVMEIBT_HASH_DEL_OBJ(fhuu87w, &nvmeibt_global_get_global()->block_devices_hash, block_device, block_device);
 	if (block_device->encrypt_params) { // Don't del the block_device if in the middle of encrypt operation
 		block_device->encrypt_params = NULL;
