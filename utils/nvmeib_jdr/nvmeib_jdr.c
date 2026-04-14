@@ -32,12 +32,10 @@ static void __jdr_append_buffer(struct jdr* self, char const * const fmt, va_lis
 	}
 }
 
-#ifdef __KERNEL__
 static void __jdr_append_seq(struct jdr* self, char const * const fmt, va_list args)
 {
 	seq_vprintf(self->impl.seq, fmt, args);
 }
-#endif
 
 static void __attribute__((format (printf, 2, 3))) __jdr_append(struct jdr* self, char const * const fmt, ...)
 {
@@ -275,7 +273,6 @@ static struct charvec __jdr_finalize_buffer(struct jdr* self)
 	}
 }
 
-#ifdef __KERNEL__
 static struct charvec __jdr_finalize_seq(struct jdr* self)
 {
 	if (seq_has_overflowed(self->impl.seq)) {
@@ -284,7 +281,6 @@ static struct charvec __jdr_finalize_seq(struct jdr* self)
 		return (struct charvec){.base = self->impl.seq->buf, .len = self->impl.seq->count};
 	}
 }
-#endif
 
 static struct jdr jdr_get_default(void)
 {
@@ -333,7 +329,6 @@ struct jdr jdr_make(struct charvec buffer)
 	return jdr;
 }
 
-#ifdef __KERNEL__
 struct jdr jdr_make_seq(struct seq_file *seq)
 {
 	struct jdr jdr = jdr_get_default();
@@ -343,7 +338,6 @@ struct jdr jdr_make_seq(struct seq_file *seq)
 	__jdr_start_document(&jdr);
 	return jdr;
 }
-#endif
 
 struct charvec jdr_finalize(struct jdr* jdr)
 {

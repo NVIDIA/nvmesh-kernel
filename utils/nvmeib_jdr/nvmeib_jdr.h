@@ -23,6 +23,7 @@
 	#include <string.h>
 	#include <stdarg.h>    // va_list
 	#define JDR_ASSERT(cond) assert(cond)
+	struct seq_file;
 #endif
 
 #ifndef UUID_BE
@@ -45,9 +46,7 @@ struct jdr{
 		struct charvec remaining;
 		uint32_t nesting;
 		bool is_first_value;
-#ifdef __KERNEL__
-		struct seq_file *seq; // if non-NULL, output to seq_file instead of buffer
-#endif
+		struct seq_file *seq;
 	void (*append)(struct jdr* self, char const * const fmt, va_list args);
 	struct charvec (*finalize)(struct jdr* self);
 
@@ -88,9 +87,7 @@ struct jdr{
 void jdr_write_key_value_str(struct jdr *jdr, const char *key, const char *value);
 
 struct jdr jdr_make(struct charvec buffer);
-#ifdef __KERNEL__
 struct jdr jdr_make_seq(struct seq_file *seq);
-#endif
 
 //once you done serializing all your objects into the jdr archive - you should call jdr_finalize function;
 //the function should be called before jdr_free

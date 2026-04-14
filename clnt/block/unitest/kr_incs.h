@@ -1840,6 +1840,9 @@ struct proc_dir_entry {					// Single proc file
 struct seq_file {
 	void *private;
 	const struct seq_operations *ops;
+	char *buf;
+	size_t count;
+	size_t size;
 };
 
 struct seq_operations {
@@ -1850,10 +1853,14 @@ struct seq_operations {
 };
 
 void seq_printf(struct seq_file *m, const char *fmt, ...);
+void seq_vprintf(struct seq_file *m, const char *fmt, va_list args);
+static inline bool seq_has_overflowed(struct seq_file *m) { (void)m; return false; }
 int seq_open(struct file *, const struct seq_operations *);
 int seq_release(struct inode* inode, struct file* file);
 ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos);
 loff_t seq_lseek(struct file *file, loff_t offset, int whence);
+int single_open(struct file *file, int (*show)(struct seq_file *, void *), void *data);
+int single_release(struct inode *inode, struct file *file);
 
 struct proc_dir_entry *proc_mkdir(const char *name, struct proc_dir_entry *parent);
 void  remove_proc_entry(const char *name, struct proc_dir_entry *parent);

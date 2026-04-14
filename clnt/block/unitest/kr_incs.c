@@ -3047,6 +3047,13 @@ void seq_printf(struct seq_file *m, const char *fmt, ...)
 	(void)fmt;
 }
 
+void seq_vprintf(struct seq_file *m, const char *fmt, va_list args)
+{
+	(void)m;
+	(void)fmt;
+	(void)args;
+}
+
 int seq_open(struct file *file, const struct seq_operations *ops)
 {
 	(void)file;
@@ -3075,6 +3082,21 @@ loff_t seq_lseek(struct file *file, loff_t offset, int whence)
 	(void)file;
 	(void)offset;
 	(void)whence;
+	return 0;
+}
+
+int single_open(struct file *file, int (*show)(struct seq_file *, void *), void *data)
+{
+	(void)file;
+	(void)show;
+	(void)data;
+	return 0;
+}
+
+int single_release(struct inode *inode, struct file *file)
+{
+	(void)inode;
+	(void)file;
 	return 0;
 }
 
