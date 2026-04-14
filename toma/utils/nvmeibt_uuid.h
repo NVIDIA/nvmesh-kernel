@@ -3,54 +3,22 @@
 * SPDX-License-Identifier: Apache-2.0
 */
 
-/*
- * nvmeibt_uuid.h
- *
- *  Created on: Aug 26, 2020
- *      Author: yair
- */
-
 #ifndef TOMA_NVMEIBT_UUID_H_
 #define TOMA_NVMEIBT_UUID_H_
 
-// TODO: use "nvmeib_uuid_be.h" and consolidate implementation
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define LE_SWAP64(x)	({											\
-	_Static_assert(sizeof(x) == 8, "sizeof(x) != 8");				\
-    __builtin_bswap64(x);											\
-})
-#define LE_SWAP32(x)	({											\
-	{ _Static_assert(sizeof(x) == 4, "sizeof(x) != 4"); }			\
-    __builtin_bswap32(x);											\
-})
-#define LE_SWAP16(x)	({											\
-	{ _Static_assert(sizeof(x) == 2, "sizeof(x) != 2"); }			\
-    __builtin_bswap16(x);											\
-})
-#define LE_SWAP8(x)	({												\
-	{ _Static_assert(sizeof(x) == 1, "sizeof(x) != 1"); }			\
-    (x);															\
-})
-#define LE_SWAP32_BITFIELD(x)	({									\
-    __builtin_bswap32(x);											\
-})
-#else	// #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define LE_SWAP64(x)	({											\
-	{ _Static_assert(sizeof(x) == 8, "sizeof(x) != 8"); }			\
-    (x);															\
-})
-#define LE_SWAP32(x)	({											\
-	{ _Static_assert(sizeof(x) == 4, "sizeof(x) != 4"); }			\
-    (x);															\
-})
-#define LE_SWAP8(x)	({												\
-	{ _Static_assert(sizeof(x) == 1, "sizeof(x) != 1"); }			\
-    (x);															\
-})
-#define LE_SWAP32_BITFIELD(x)	({									\
-    (x);															\
-})
-#endif	// #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+// TODO: already defined in nvmeib_shared.h, remove from here!
+#if (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+	#define LE_SWAP64(x)	({ _Static_assert(sizeof(x) == 8, "sizeof(x) != 8");	__builtin_bswap64(x); })
+	#define LE_SWAP32(x)	({ _Static_assert(sizeof(x) == 4, "sizeof(x) != 4");	__builtin_bswap32(x); })
+	#define LE_SWAP16(x)	({ _Static_assert(sizeof(x) == 2, "sizeof(x) != 2");	__builtin_bswap16(x); })
+	#define LE_SWAP8(x)		({ _Static_assert(sizeof(x) == 1, "sizeof(x) != 1");	                 (x); })
+	#define LE_SWAP32_BITFIELD(x)	({												__builtin_bswap32(x); })
+#else
+	#define LE_SWAP64(x)	({ _Static_assert(sizeof(x) == 8, "sizeof(x) != 8");	                 (x); })
+	#define LE_SWAP32(x)	({ _Static_assert(sizeof(x) == 4, "sizeof(x) != 4");	                 (x); })
+	#define LE_SWAP8(x)		({ _Static_assert(sizeof(x) == 1, "sizeof(x) != 1");	                 (x); })
+	#define LE_SWAP32_BITFIELD(x)	({												                 (x); })
+#endif
 
 #define SWAP64_STR_FIELD(s,f)	s->f = LE_SWAP64(s->f)
 #define SWAP32_STR_FIELD(s,f)	s->f = LE_SWAP32(s->f)
@@ -64,6 +32,7 @@
 #define COPY_SWAP8_STR_FIELD(s,d,f)		d->f = LE_SWAP8(s->f)
 #define COPY_SWAP32_STR_BITFIELD(s,d,f)	d->f = LE_SWAP32_BITFIELD(s->f)
 
+// TODO: use "nvmeib_uuid_be.h" and consolidate implementation
 union _uuid_swapper {
 	uint64_t ll[2];
 	uint32_t lw[4];
