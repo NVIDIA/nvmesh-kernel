@@ -775,11 +775,6 @@ the other replica.
 integrity check. Reads all replicas and compares them. If a mismatch is
 found, copies from the authoritative source.
 
-**FIX_UNKNOWN_BINFO** (`nvmeibc_sync_unknown_binfo_recov`) —
-Resolve unknown blockset info. After cold recovery (all clients crashed),
-binfo may be lost. This operation reads the data state and reconstructs the
-correct binfo.
-
 #### Commandless sync operations (lock manipulation only, no disk I/O)
 
 **REC_R1_COMMIT_STALE** (`nvmeibc_sync_commit_stale_lock`) —
@@ -833,7 +828,6 @@ Recovery types relevant to mirror (`enum NVMEIBT_RECOVERY_TYPE`,
 | DIRTY_REBUILD       | `nvmeibc_sync_recover_dirty`            |
 | STALE_REBUILD       | `nvmeibc_sync_fix_stale`                |
 | SCRUBBING           | `nvmeibc_sync_scrubbing`                |
-| EC_FIX_UNK_BINFO    | `nvmeibc_sync_unknown_binfo_recov`      |
 
 **DIRTY_REBUILD** — Segment returns after failure. TOMA marks it as
 `W`. Default sync is `nvmeibc_sync_recover_dirty`, but the
@@ -858,9 +852,6 @@ Uses `nvmeibc_sync_scrubbing` for every blockset.
 Uses `nvmeibc_sync_turn_on_dirty_convict` for every blockset. Despite the
 "EC" prefix in the enum name, this also applies to mirror. Despite being a 
 recovery enum value, TOMA does not request it.
-
-**EC_FIX_UNK_BINFO** — Resolve unknown binfo across a range. Uses
-`nvmeibc_sync_unknown_binfo_recov` for every blockset.
 
 The recovery loop (`recovery/nvmeibc_raid_recovery.c:__recover_next_blockset()`) runs up to 64
 sync operations in parallel per recovery, processing blocksets in batches
