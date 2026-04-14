@@ -1214,7 +1214,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 			if (shutdown_state == NVMEIBT_SHUTDOWN_NONE) {
 				struct nvmeibt_serialized_seg_active_topo *seg_wire = nvmeibt_act_topo_builder_append(&builder);
 				applied_seg_topo_ctx = &disk_segment->seg_follower.applied_seg_lot.seg_topo;
-				nvmeibt_strlcpy(seg_wire->eyecatcher, "SFW", sizeof(seg_wire->eyecatcher));
+				nvmeibt_strlcpy(seg_wire->eyecatcher, "SFW", sizeof(seg_wire->eyecatcher));		// S-segment, F-follower, W-wire
 				seg_wire->uuid = *nvmeibt_seg_UUID(disk_segment);
 				seg_wire->dirty_bits_state = active_seg_topo_ctx->dirty_bits_state;
 				seg_wire->active_praid_version_major = applied_seg_topo_ctx->seg_praid_version_major;
@@ -1223,7 +1223,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 				seg_wire->active_seg_flags.is_drive_write_error |= (disk_segment->is_drive_write_error | disk->is_drive_write_error);
 				seg_wire->dirty_bits_init_mode = active_seg_topo_ctx->dirty_bits_init_mode;
 				seg_wire->stale_locks_init_mode = active_seg_topo_ctx->stale_locks_init_mode;
-				seg_wire->active_seg_ser_ver = 0; // for comparation
+				seg_wire->active_seg_ser_ver = 0; // for comparison
 
 				if (memcmp(seg_wire, &seg_active->prev_serialized_topo, sizeof(*seg_wire))) {
 					seg_active->prev_serialized_topo = *seg_wire;
