@@ -319,6 +319,8 @@ static void tpv_cdv_retry_work_fn(struct work_struct *_w)
 					      msg->attachmentsVersion, false);
 	res = _calc_reply_on_attach(hdr->name, NULL /* no nvmeibc_volume */,
 				    rv, false /* resrv_inc_ignored */, &reply_hdr);
+	if (!rv)
+		reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
 	nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res,
 					    NVMEIBC_IO_PERM_USE_CURR_PERMS,
 					    false /* send_to_cli */,
@@ -416,6 +418,12 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		}
 		res = _calc_reply_on_attach(hdr->name, NULL /* no nvmeibc_volume */,
 					    rv, resrv_inc_ignored, &reply_hdr);
+		/* TPVs bypass the topology/IO-permission lifecycle — IO is
+		 * always enabled once attached.  Override the default
+		 * PERMIT_NEVER set by nvmeibc_volume_header_create_from_msg()
+		 * so management receives ioEnabled=1. */
+		if (!rv)
+			reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
 	} else {
 		rv = nvmeibc_volume_attach(p, msg);
 		res = _calc_reply_on_attach(hdr->name, volume, rv, resrv_inc_ignored, &reply_hdr);
