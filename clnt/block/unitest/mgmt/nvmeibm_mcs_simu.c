@@ -229,8 +229,14 @@ int mgmt_incoming_msg_from_clnt_cb(void* _mcs, const char *buf, size_t len) {
 	void *msg = &_msg[1];		// Skip the message header and go the payload
 	int rv = 0;
 	const int opcode = nvmeib_mcs_get_opcode(msg);
+	const long long expected_sequence_number = mcs->expected_sequence_num;
+	const long long expected_client_token = mcs->expected_client_token;
+	const long long expected_report_id = mcs->expected_reportID;
+	const unsigned long expected_keepalive_interval = mcs->expected_keepalive_interval;
+	const u32 expected_message_type_id = mcs->expected_messageTypeVersion;
 	long long actual_sequence_number = -1;
 	long long actual_client_token = -1;
+	long long actual_report_id = -1;
 	unsigned long actual_keepalive_interval = 0;
 	u32 actual_message_type_id = 0;
 
@@ -254,6 +260,7 @@ int mgmt_incoming_msg_from_clnt_cb(void* _mcs, const char *buf, size_t len) {
 			struct nvmeibc_volume_status_payload *pl = inm->attachments;
 			const enum_vol_status status = (enum_vol_status)pl->vol_status;
 			const uint reportID_diff = (inm->reportID - mcs->expected_reportID);
+			actual_report_id = inm->reportID;
 			fill_actual_counters_from_kafka_hdr(&inm->upstream_header,
 				&actual_sequence_number, &actual_client_token, &actual_keepalive_interval, &actual_message_type_id);
 			if (       enum_vol_status_is_detached(status)) {
@@ -264,6 +271,11 @@ int mgmt_incoming_msg_from_clnt_cb(void* _mcs, const char *buf, size_t len) {
 				mongo_db_simu_update_clnt_vol_attachment((void*)mcs_simu_get_mdb(mcs), mcs->inst_id, pl, true );
 			} else {
 				BUG(); // Unsupported volume status
+			}
+			if (reportID_diff > 1) {
+				pr_emerg("Invalid reportID diff: opcode=%d actualReportID=%lld expectedReportID=%lld diff=%u actualSequence=%lld expectedSequence=%lld actualClientToken=%lld expectedClientToken=%lld\n",
+					 opcode, actual_report_id, expected_report_id, reportID_diff, actual_sequence_number, expected_sequence_number,
+					 actual_client_token, expected_client_token);
 			}
 			BUG_ON(reportID_diff > 1);					// Diff == {0,1}
 			mcs->expected_reportID = inm->reportID;
@@ -311,6 +323,12 @@ int mgmt_incoming_msg_from_clnt_cb(void* _mcs, const char *buf, size_t len) {
 	BUG_ON(!mcs_is_message_type_version_valid(mcs, actual_message_type_id));
 	BUG_ON(!mcs_is_message_seq_valid(mcs, actual_sequence_number));
 	increment_expected_sequence_num(mcs);
+	if (!mcs_is_client_token_valid(mcs, actual_client_token)) {
+		pr_emerg("Invalid client token: opcode=%d actualClientToken=%lld expectedClientToken=%lld actualSequence=%lld expectedSequence=%lld actualReportID=%lld expectedReportID=%lld actualKeepalive=%lu expectedKeepalive=%lu actualMessageTypeVersion=%u expectedMessageTypeVersion=%u\n",
+			 opcode, actual_client_token, expected_client_token, actual_sequence_number, expected_sequence_number,
+			 actual_report_id, expected_report_id, actual_keepalive_interval, expected_keepalive_interval,
+			 actual_message_type_id, expected_message_type_id);
+	}
 	BUG_ON(!mcs_is_client_token_valid(mcs, actual_client_token));
 	return rv;
 }
