@@ -247,7 +247,17 @@ EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_write);
  * physical byte offset.
  *
  * Re-targets the bio at the CDV block device (updating bi_sector and
- * bi_disk/bi_bdev) and directly invokes the CDV queue's submit function.
+ * bi_disk/bi_bdev) and submits it through the generic block layer so that
+ * the CDV's queue limits (chunk_sectors, max_sectors, max_segments) are
+ * enforced.  This is the standard Linux stacking-device pattern.
+ *
+ * Using submit_bio_noacct / generic_make_request instead of calling the
+ * CDV's make_request directly is critical: the TPV's chunk_sectors (= TPV
+ * extent size) may be larger than the CDV's internal alignment, and a bio
+ * that exceeds the CDV's alignment can be split incorrectly inside the
+ * CDV datapath — the split portions get independent address translations
+ * and can land at wrong disk offsets.
+ *
  * After this call the bio is owned by the CDV transport; the caller must
  * not access it again.
  *
@@ -297,6 +307,21 @@ void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 	bio_set_dev(bio, disk_part0_bdev(cdv_disk));
 #endif
 
-	CALL_SUBMIT_BIO_FN(os->atom.queue, cdv_disk, bio);
+	/*
+	 * Submit through the generic block layer so the CDV's queue limits
+	 * are enforced.  submit_bio_noacct (>= 5.9) / generic_make_request
+	 * (< 5.9) splits the bio at the CDV's chunk_sectors and max_sectors
+	 * before calling the CDV's make_request, preventing oversized bios
+	 * from being mishandled by the CDV datapath.
+	 *
+	 * KS_REQUEST_QUEUE_HAS_REQUEST_FN tracks the same 5.9 boundary:
+	 * kernels with make_request_fn use generic_make_request; kernels
+	 * without it (>= 5.9) use submit_bio_noacct.
+	 */
+#if KS_REQUEST_QUEUE_HAS_REQUEST_FN
+	generic_make_request(bio);
+#else
+	submit_bio_noacct(bio);
+#endif
 }
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_submit_bio);
