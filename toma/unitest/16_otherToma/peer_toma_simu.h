@@ -27,10 +27,6 @@ void                   peer_toma_simu_destroy(struct peer_toma_simu *);
 void                   peer_toma_simu_ignore_append_entries_by_node(int node_idx);
 void                   peer_toma_simu_resume_append_entries_by_node(int node_idx);
 
-/** Build a per-peer ACT_TOPO reply from the leader's BIN_TOPO.
- *  Decodes the leader's topology, filters to segments on this peer's disks,
- *  maps fields, applies dirty_bits overrides, and encodes as ACT_TOPO.
- *  Returns the ACT_TOPO byte length written to out_buf, or 0 on error. */
 struct nvmeibt_topology_serialized_topo_header;
 int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const struct nvmeibt_topology_serialized_topo_header *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size);
 

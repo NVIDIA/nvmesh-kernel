@@ -1071,8 +1071,8 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 						msg->data_len = req->msg_len + new_data_len; // Update total message data length
 					}
 				}
-					peer->append_entries_rep_ser_ver++;
-					out_r_msg->local_serialization_version = LE_SWAP64(peer->append_entries_rep_ser_ver);	// Much like in raft_send_msg_to_peer()
+				peer->append_entries_rep_ser_ver++;
+				out_r_msg->local_serialization_version = LE_SWAP64(peer->append_entries_rep_ser_ver);	// Much like in raft_send_msg_to_peer()
 				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
 			}
