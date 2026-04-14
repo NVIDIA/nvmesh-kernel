@@ -7,11 +7,18 @@
  * nvmeibt_cdv_alloc.c — CDV extent allocator: in-memory state.
  *
  * See nvmeibt_cdv_alloc.h for a full description.
- * State is distributed and persisted via RAFT; no local file I/O.
+ * Allocator identity and extent table are persisted to a small binary file
+ * (NVMEIBT_CDV_ALLOC_STATE_FILE) after each election and extent operation so
+ * that state is fully restored on TOMA restart without waiting for clients to
+ * reconnect.  The file is updated atomically (write-rename).
+ *
+ * Future work: wire this state into the RAFT persist_and_wire_buf TLV sections
+ * so that it is also replicated to follower nodes in multi-TOMA deployments.
  */
 
 #include <string.h>
 #include <errno.h>
+#include <sys/stat.h>
 #include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
@@ -27,6 +34,304 @@
 
 /* cdv_uuid (ASCII string) → nvmeibt_cdv_alloc * */
 static struct nvmeib_hash_table *cdv_alloc_hash;
+
+/* ── Local file persistence ──────────────────────────────────────────────── */
+
+#define NVMEIBT_CDV_ALLOC_STATE_FILE  (NVMEIBT_PERSISTENCY_CACHE_DIR "cdv_alloc_state.bin")
+#define NVMEIBT_CDV_ALLOC_STATE_MAGIC (0x43445631U)	/* 'CDV1' in little-endian */
+
+/*
+ * Wire record layouts (all integer fields little-endian):
+ *
+ *   File:
+ *     [uint32 magic][uint32 n_cdvs]
+ *     for each CDV:
+ *       [char cdv_uuid[64]][char allocator_toma_id[64]]
+ *       [uint64 allocator_generation][uint32 n_extents]
+ *       for each extent:
+ *         [uint64 extent_index][char tpv_uuid[64]]
+ *     [uint32 crc32]   -- crc32(0, entire file excluding this field)
+ */
+
+/* Write @size bytes from @buf to @fd, retrying on EINTR. */
+static int cdv_write_all(int fd, const void *buf, size_t size)
+{
+	const char *ptr = (const char *)buf;
+
+	while (size > 0) {
+		ssize_t n = write(fd, ptr, size);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		ptr  += n;
+		size -= (size_t)n;
+	}
+	return 0;
+}
+
+/*
+ * nvmeibt_cdv_alloc_save_state — atomically persist cdv_alloc_hash.
+ *
+ * Builds the entire file content in memory, then writes via a temp file and
+ * rename.  Called after election, extent allocation, and extent free so that
+ * state survives TOMA restarts.
+ */
+static void nvmeibt_cdv_alloc_save_state(void)
+{
+	struct nvmeibt_cdv_alloc        *alloc;
+	struct nvmeibt_cdv_extent_entry *entry;
+	const char *path     = NVMEIBT_CDV_ALLOC_STATE_FILE;
+	char        tmp_path[256];
+	int         fd       = -1;
+	uint32_t    magic_le = LE_SWAP32(NVMEIBT_CDV_ALLOC_STATE_MAGIC);
+	uint32_t    n_cdvs   = 0;
+	uint32_t    n_cdvs_le;
+	uint32_t    crc      = 0;
+
+	if (!cdv_alloc_hash)
+		return;
+
+	snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+	/* Count CDVs */
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash)
+		n_cdvs++;
+
+	fd = NNVMEIBT_OPEN(cdv_save_open, tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	if (fd < 0) {
+		N_Ef(cdv_save_open_err,
+		     "CDV-alloc: save: open @PATH @AUTO_ERRNO", tmp_path);
+		return;
+	}
+
+/*
+ * CDV_WRIT: write @sz_ bytes from @ptr_, accumulate CRC, jump to out_write_err
+ * on failure.  The macro does NOT embed a trace tag so it is safe to use in
+ * loops — the single error label below carries the unique trace.
+ */
+#define CDV_WRIT(ptr_, sz_) do {					\
+	if (cdv_write_all(fd, (ptr_), (sz_)) < 0)			\
+		goto out_write_err;					\
+	crc = crc32(crc, (ptr_), (sz_));				\
+} while (0)
+
+	/* Header: magic + n_cdvs */
+	CDV_WRIT(&magic_le, sizeof(magic_le));
+	n_cdvs_le = LE_SWAP32(n_cdvs);
+	CDV_WRIT(&n_cdvs_le, sizeof(n_cdvs_le));
+
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+		uint64_t gen_le      = LE_SWAP64(alloc->allocator_generation);
+		uint32_t n_ext_le    = LE_SWAP32((uint32_t)alloc->n_allocated);
+
+		CDV_WRIT(alloc->cdv_uuid,          NVMEIBT_CDV_UUID_STRLEN);
+		CDV_WRIT(alloc->allocator_toma_id, NVMEIBT_CDV_HOSTNAME_LEN);
+		CDV_WRIT(&gen_le,                  sizeof(gen_le));
+		CDV_WRIT(&n_ext_le,                sizeof(n_ext_le));
+
+		XDLIST_FOREACH(entry, &alloc->extents) {
+			uint64_t idx_le = LE_SWAP64(entry->extent_index);
+
+			CDV_WRIT(&idx_le,          sizeof(idx_le));
+			CDV_WRIT(entry->tpv_uuid,  NVMEIBT_CDV_UUID_STRLEN);
+		}
+	}
+	goto past_write_err;
+out_write_err:
+	N_Ef(cdv_save_write_err, "CDV-alloc: save: write @AUTO_ERRNO");
+	goto out;
+past_write_err:
+#undef CDV_WRIT
+
+	/* Trailing CRC (not included in the checksum itself) */
+	{
+		uint32_t crc_le = LE_SWAP32(crc);
+
+		if (cdv_write_all(fd, &crc_le, sizeof(crc_le)) < 0) {
+			N_Ef(cdv_save_crc_err,
+			     "CDV-alloc: save: CRC write @AUTO_ERRNO");
+			goto out;
+		}
+	}
+
+	if (NNVMEIBT_FSYNC(cdv_save_fsync, fd) < 0)
+		N_Wf(cdv_save_fsync_warn, "CDV-alloc: save: fsync @AUTO_ERRNO");
+
+	NNVMEIBT_CLOSE(cdv_save_close1, fd);
+	fd = -1;
+
+	if (NNVMEIBT_RENAME(cdv_save_rename, tmp_path, path) < 0) {
+		N_Ef(cdv_save_rename_err,
+		     "CDV-alloc: save: rename to @PATH @AUTO_ERRNO", path);
+		goto out;
+	}
+
+	N_If(cdv_save_ok,
+	     "CDV-alloc: saved n_cdvs=@UINT to @PATH", n_cdvs, path);
+
+out:
+	if (fd >= 0)
+		NNVMEIBT_CLOSE(cdv_save_close2, fd);
+}
+
+/*
+ * nvmeibt_cdv_alloc_load_state — restore cdv_alloc_hash from the state file.
+ *
+ * Called from nvmeibt_cdv_alloc_one_time_init() before RAFT log replay so
+ * that CDV allocator state is available immediately on startup.  A missing or
+ * corrupt file is treated as empty (first run).
+ */
+static void nvmeibt_cdv_alloc_load_state(void)
+{
+	const char          *path = NVMEIBT_CDV_ALLOC_STATE_FILE;
+	int                  fd   = -1;
+	struct nvmeibt_Str  *buf  = NULL;
+	const char          *ptr;
+	size_t               file_len;
+	uint32_t             magic_le, n_cdvs_le, n_cdvs, crc, stored_crc_le, stored_crc;
+	uint32_t             cdv_i;
+
+	if (access(path, F_OK) < 0) {
+		N_Tf(cdv_load_no_file,
+		     "CDV-alloc: no state file @PATH (first run)", path);
+		return;
+	}
+
+	fd = NNVMEIBT_OPEN_READ(cdv_load_open, path, 1);
+	if (fd < 0) {
+		N_Ef(cdv_load_open_err,
+		     "CDV-alloc: load: open @PATH @AUTO_ERRNO", path);
+		return;
+	}
+
+	buf = NNVMEIBT_STR_ALLOC(cdv_load_str_alloc);
+	if (!buf) {
+		N_Ef(cdv_load_oom, "CDV-alloc: load: OOM for read buffer");
+		goto out;
+	}
+
+	NNVMEIBT_STR_FREAD(cdv_load_fread, buf, fd);
+	file_len = nvmeibt_Str_strlen(buf);
+
+	/* Minimum: magic(4) + n_cdvs(4) + crc(4) */
+	if (file_len < 3 * sizeof(uint32_t)) {
+		N_Ef(cdv_load_short,
+		     "CDV-alloc: load: file too short size=@SIZE_T", file_len);
+		goto out;
+	}
+
+	/* Verify CRC over all bytes except the trailing 4 */
+	ptr = nvmeibt_Str_str(buf);
+	crc = crc32(0, ptr, file_len - sizeof(uint32_t));
+	memcpy(&stored_crc_le, ptr + file_len - sizeof(uint32_t), sizeof(uint32_t));
+	stored_crc = LE_SWAP32(stored_crc_le);
+	if (crc != stored_crc) {
+		N_Ef(cdv_load_crc,
+		     "CDV-alloc: load: CRC mismatch computed=@X stored=@X; ignoring",
+		     crc, stored_crc);
+		goto out;
+	}
+
+	/* Parse header */
+	memcpy(&magic_le, ptr, sizeof(magic_le));
+	if (LE_SWAP32(magic_le) != NVMEIBT_CDV_ALLOC_STATE_MAGIC) {
+		N_Ef(cdv_load_magic,
+		     "CDV-alloc: load: bad magic=@X", LE_SWAP32(magic_le));
+		goto out;
+	}
+	ptr += sizeof(magic_le);
+
+	memcpy(&n_cdvs_le, ptr, sizeof(n_cdvs_le));
+	n_cdvs = LE_SWAP32(n_cdvs_le);
+	ptr += sizeof(n_cdvs_le);
+
+	N_If(cdv_load_start,
+	     "CDV-alloc: loading n_cdvs=@UINT from @PATH", n_cdvs, path);
+
+	for (cdv_i = 0; cdv_i < n_cdvs; cdv_i++) {
+		char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+		char     allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN];
+		uint64_t gen_le, generation;
+		uint32_t n_ext_le, n_extents, ext_i;
+		struct nvmeibt_cdv_alloc *alloc;
+
+		/* Bounds: uuid + toma_id + generation + n_extents */
+		if ((size_t)(ptr - nvmeibt_Str_str(buf)) +
+		    NVMEIBT_CDV_UUID_STRLEN + NVMEIBT_CDV_HOSTNAME_LEN +
+		    sizeof(uint64_t) + sizeof(uint32_t) >
+		    file_len - sizeof(uint32_t)) {
+			N_Ef(cdv_load_trunc,
+			     "CDV-alloc: load: truncated at CDV @LLU", cdv_i);
+			goto out;
+		}
+
+		memcpy(cdv_uuid, ptr, NVMEIBT_CDV_UUID_STRLEN);
+		cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+		ptr += NVMEIBT_CDV_UUID_STRLEN;
+
+		memcpy(allocator_toma_id, ptr, NVMEIBT_CDV_HOSTNAME_LEN);
+		allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
+		ptr += NVMEIBT_CDV_HOSTNAME_LEN;
+
+		memcpy(&gen_le, ptr, sizeof(gen_le));
+		generation = LE_SWAP64(gen_le);
+		ptr += sizeof(gen_le);
+
+		memcpy(&n_ext_le, ptr, sizeof(n_ext_le));
+		n_extents = LE_SWAP32(n_ext_le);
+		ptr += sizeof(n_ext_le);
+
+		/* Create allocator entry with persisted generation */
+		nvmeibt_cdv_alloc_set_generation(cdv_uuid, generation);
+
+		/* Restore allocator_toma_id (set_generation leaves it empty) */
+		alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+		if (alloc && allocator_toma_id[0]) {
+			strncpy(alloc->allocator_toma_id, allocator_toma_id,
+				NVMEIBT_CDV_HOSTNAME_LEN - 1);
+			alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
+		}
+
+		for (ext_i = 0; ext_i < n_extents; ext_i++) {
+			uint64_t idx_le, idx;
+			char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+
+			if ((size_t)(ptr - nvmeibt_Str_str(buf)) +
+			    sizeof(uint64_t) + NVMEIBT_CDV_UUID_STRLEN >
+			    file_len - sizeof(uint32_t)) {
+				N_Ef(cdv_load_trunc_ext,
+				     "CDV-alloc: load: truncated at extent @LLU/@LLU cdv=@STR",
+				     ext_i, n_extents, cdv_uuid);
+				goto out;
+			}
+
+			memcpy(&idx_le, ptr, sizeof(idx_le));
+			idx = LE_SWAP64(idx_le);
+			ptr += sizeof(idx_le);
+
+			memcpy(tpv_uuid, ptr, NVMEIBT_CDV_UUID_STRLEN);
+			tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+			ptr += NVMEIBT_CDV_UUID_STRLEN;
+
+			if (nvmeibt_cdv_alloc_add_extent(cdv_uuid, idx, tpv_uuid) < 0)
+				N_Ef(cdv_load_add_fail,
+				     "CDV-alloc: load: add_extent failed cdv=@STR idx=@LLU",
+				     cdv_uuid, idx);
+		}
+	}
+
+	N_If(cdv_load_ok,
+	     "CDV-alloc: loaded n_cdvs=@UINT from @PATH", n_cdvs, path);
+	nvmeibt_cdv_alloc_startup_scan();
+
+out:
+	if (buf)
+		NNVMEIBT_STR_FREE(cdv_load_str_free, buf);
+	NNVMEIBT_CLOSE(cdv_load_close, fd);
+}
 
 /* ── Internal helpers ───────────────────────────────────────────────────── */
 
@@ -297,6 +602,7 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
 	alloc->allocator_generation++;
 
+	nvmeibt_cdv_alloc_save_state();
 	return 0;
 }
 
@@ -422,6 +728,12 @@ int nvmeibt_cdv_alloc_one_time_init(void)
 		N_Ef(cdv_alloc_init_hash, "CDV-alloc: hash_create failed");
 		return -ENOMEM;
 	}
+
+	/* Restore allocator state from the previous run's persistence file.
+	 * This populates cdv_alloc_hash before RAFT log replay so that
+	 * CDV status is immediately available after restart even with no
+	 * clients attached. */
+	nvmeibt_cdv_alloc_load_state();
 
 	return 0;
 }
@@ -793,6 +1105,9 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	     "CDV: ALLOC OK cdv=@STR idx=@LLU tpv=@STR req_id=@LLU gen=@LLU",
 	     cdv_uuid, candidate, tpv_uuid, req->req_id, resp.allocator_generation);
 
+	/* Persist the new allocation so it survives a TOMA restart. */
+	nvmeibt_cdv_alloc_save_state();
+
 send:
 	return cdv_send_response(&msg->registrant_ctx,
 				 NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP,
@@ -854,6 +1169,9 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 		     cdv_uuid, req->extent_index, tpv_uuid, alloc->n_allocated);
 
 		NNVMEIBT_BM_FREE(cdv_free_entry, entry);
+
+		/* Persist the freed allocation so TOMA restart doesn't re-use this slot. */
+		nvmeibt_cdv_alloc_save_state();
 
 		/*
 		 * Hysteresis check: if the free dropped usage below

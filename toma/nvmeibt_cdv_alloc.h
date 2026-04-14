@@ -18,14 +18,16 @@
  * CDV allocator identity (allocator_toma_id, allocator_generation) is elected
  * by the RAFT leader via nvmeibt_cdv_alloc_elect() and distributed to all
  * TOMAs and clients:
- *   - TOMAs: via RAFT replication (nvmeibt_cdv_alloc_set_generation called
- *     during RAFT log replay on followers).
+ *   - TOMAs: via a local binary state file written atomically after each
+ *     election and extent operation (nvmeibt_cdv_alloc_save_state, called
+ *     internally).  On startup, nvmeibt_cdv_alloc_one_time_init() restores
+ *     the full extent table before RAFT log replay.
  *   - Clients: via CDV_ALLOCATOR_UPDATE messages pushed to all registrants
  *     (nvmeibt_cdv_alloc_push_to_registrants).
  *
- * Extent allocation state is distributed and persisted via RAFT; there is no
- * local persistence file.  On startup, in-memory state is rebuilt from RAFT
- * log replay.
+ * Future work: wire CDV allocator state into the RAFT persist_and_wire_buf
+ * TLV sections so that it is also replicated to follower nodes in multi-TOMA
+ * deployments (see nvmeibt_persistency_info.h).
  *
  * Threading:
  *   All public functions must be called from TOMA's single main thread (or
@@ -202,12 +204,13 @@ struct nvmeibt_registrant_ctx;
 void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx);
 
 /*
- * nvmeibt_cdv_alloc_startup_scan — log in-memory state.
+ * nvmeibt_cdv_alloc_startup_scan — log in-memory state after restore.
  *
- * Called after RAFT log replay has populated the allocators.
- * Iterates all CDV allocators, logs per-CDV statistics, and emits
- * CDVCapacityWarning events for any CDV whose capacity is already known
- * (total_data_extents > 0) and above the warning threshold.
+ * Called from nvmeibt_cdv_alloc_one_time_init() after the local state file
+ * has been loaded (nvmeibt_cdv_alloc_load_state).  Iterates all CDV
+ * allocators, logs per-CDV statistics, and emits CDVCapacityWarning events
+ * for any CDV whose capacity is already known (total_data_extents > 0) and
+ * above the warning threshold.
  */
 void nvmeibt_cdv_alloc_startup_scan(void);
 
