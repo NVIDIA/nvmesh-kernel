@@ -83,6 +83,25 @@ static void tpv_cdv_bio_end(struct bio *bio, int error_arg)
 }
 #endif
 
+/*
+ * disk_part0_bdev — return the whole-disk struct block_device * from a gendisk.
+ *
+ * The shape of gendisk.part0 changed across kernel versions:
+ *   5.11–~6.8 : struct block_device part0  (embedded value) → &disk->part0
+ *   ≥ ~6.9    : struct block_device *part0 (pointer field)  →  disk->part0
+ *
+ * __builtin_choose_expr + __builtin_types_compatible_p selects the right form
+ * purely from the actual type at compile time — no compat-script macro needed.
+ * The non-taken branch is parsed but never evaluated; both are syntactically
+ * valid expressions so the compiler does not warn about the discarded form.
+ */
+#define disk_part0_bdev(disk)							\
+	__builtin_choose_expr(							\
+		__builtin_types_compatible_p(__typeof__((disk)->part0),		\
+					     struct block_device *),		\
+		(disk)->part0,							\
+		&(disk)->part0)
+
 /* ── tpv_cdv_sync_io — page-by-page synchronous CDV block I/O ───────────── */
 
 /*
@@ -96,14 +115,28 @@ static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 			    void *buf, u64 len, bool is_write)
 {
 	struct nvmeibc_os_api  *os   = nvmeibc_block_get_os_api(tpv->cdv_vol->block_dev);
-	struct block_device    *bdev = block_api_os_get_bdev(os);
 	struct gendisk         *disk = os->atom.disk;
 	u8                     *ptr  = (u8 *)buf;
 	u64                     remaining = len;
 	u64                     off       = cdv_off;
 
-	if (unlikely(!bdev))
-		return -ENODEV;
+	/*
+	 * We must NOT use block_api_os_get_bdev() here — that helper reads
+	 * os->unsafe_self_ref.bdev_during_detach, which is NULL during normal
+	 * operation (it is only populated by block_api_os_get(), a detach-path
+	 * routine that cannot be called mid-I/O due to its "get() twice" guard).
+	 *
+	 * On kernels that address bios via bi_disk (KS_BIO_HAS_BI_GENDISK_PTR,
+	 * 4.14–5.12), we set bi_disk/bi_partno directly — no bdev needed.
+	 *
+	 * On bi_bdev kernels (>= 5.12), disk_part0_bdev() returns the
+	 * whole-disk struct block_device * from the gendisk, handling both the
+	 * embedded-struct layout (5.11–~6.8) and the pointer-field layout
+	 * (≥ ~6.9) transparently.
+	 */
+#if !KS_BIO_HAS_BI_GENDISK_PTR
+	struct block_device *bdev = disk_part0_bdev(disk);
+#endif
 
 	while (remaining > 0) {
 		unsigned int          page_off = (unsigned int)((uintptr_t)ptr & (PAGE_SIZE - 1));
@@ -122,7 +155,12 @@ static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 #else
 		bio = bio_alloc(GFP_NOIO, 1);
 		if (bio) {
+#if KS_BIO_HAS_BI_GENDISK_PTR
+			bio->bi_disk   = disk;
+			bio->bi_partno = 0;
+#else
 			bio_set_dev(bio, bdev);
+#endif
 			__SET_BI_RW(bio, is_write ? WRITE : READ);
 		}
 #endif
@@ -245,16 +283,18 @@ void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 	 * block_api_os_get_os(bio) resolves to the CDV's nvmeibc_os_api,
 	 * directing I/O to the CDV's RDMA transport.
 	 *
-	 * bio_set_dev() (or its compat shim) covers both the KS_BIO_HAS_BI_BDEV_PTR
-	 * variant (kernels < 4.14 and >= 5.12) and sets the internal bdev pointer.
-	 * For the KS_BIO_HAS_BI_GENDISK_PTR variant (4.14 ≤ kernel < 5.12) the bio
-	 * has bi_disk + bi_partno instead of bi_bdev, so we set those directly.
+	 * For KS_BIO_HAS_BI_GENDISK_PTR (4.14–5.12): set bi_disk/bi_partno.
+	 * For bi_bdev kernels (>= 5.12): disk_part0_bdev() returns the
+	 * whole-disk bdev from the gendisk, handling both the embedded-struct
+	 * layout (5.11–~6.8) and the pointer-field layout (>= ~6.9).
+	 * We must NOT use block_api_os_get_bdev() — it reads unsafe_self_ref
+	 * which is NULL except during the detach sequence.
 	 */
 #if KS_BIO_HAS_BI_GENDISK_PTR
 	bio->bi_disk   = cdv_disk;
 	bio->bi_partno = 0;
-#else /* KS_BIO_HAS_BI_BDEV_PTR */
-	bio_set_dev(bio, block_api_os_get_bdev(os));
+#else
+	bio_set_dev(bio, disk_part0_bdev(cdv_disk));
 #endif
 
 	CALL_SUBMIT_BIO_FN(os->atom.queue, cdv_disk, bio);

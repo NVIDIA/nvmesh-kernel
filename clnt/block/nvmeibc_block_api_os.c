@@ -277,8 +277,13 @@ _critical_error:
 
 /*
  * block_api_os_get_bdev — extract the underlying struct block_device *
- * from an nvmeibc_os_api's unsafe_self_ref.  The pointer is valid for the
- * full attachment lifetime (set by block_api_os_get, cleared by block_api_os_put).
+ * from an nvmeibc_os_api's unsafe_self_ref.
+ *
+ * WARNING: this returns NULL during normal I/O.  unsafe_self_ref.bdev_during_detach
+ * is only set by block_api_os_get() (called as part of the detach sequence) and
+ * cleared by block_api_os_put().  Do NOT call this outside the detach path.
+ * For CDV/TPV I/O use disk_part0_bdev(os->atom.disk) (bi_bdev kernels >= 5.12)
+ * or bi_disk/bi_partno (KS_BIO_HAS_BI_GENDISK_PTR kernels) instead.
  */
 struct block_device *block_api_os_get_bdev(const struct nvmeibc_os_api *os)
 {
