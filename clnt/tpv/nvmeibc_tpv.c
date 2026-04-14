@@ -286,17 +286,27 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	snprintf(disk->disk_name, DISK_NAME_LEN, "%s/%.30s",
 		 NVMEIBC_TPV_DISK_PREFIX, tpv->tpv_name);
 
-	/* chunk_sectors: 512-byte units; guarantees each READ/WRITE bio arriving
-	 * in nvmeibc_tpv_make_request is contained within one TPV_extent.  */
+	/*
+	 * Block size must match the CDV (4 KiB) so that every bio forwarded
+	 * to the CDV is 4 KiB-aligned.  A 512-byte logical block size would
+	 * allow sub-4 KiB writes that the CDV's RDMA transport and the
+	 * target's NVMe command path cannot handle atomically — two
+	 * concurrent sub-4 KiB writes to the same physical 4 KiB block race
+	 * in the target's read-modify-write path, and one write is lost.
+	 *
+	 * chunk_sectors (512-byte units): guarantees each READ/WRITE bio
+	 * arriving in nvmeibc_tpv_make_request is contained within one
+	 * TPV_extent.
+	 */
 #if KS_BLK_ALLOC_DISK_2PARAMS
 	/* 6.8+: blk_queue_* setters removed; write limits directly. */
-	queue->limits.logical_block_size  = 512;
-	queue->limits.physical_block_size = 512;
+	queue->limits.logical_block_size  = 4096;
+	queue->limits.physical_block_size = 4096;
 	queue->limits.chunk_sectors =
 		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1);
 #else
-	blk_queue_logical_block_size(queue,  512);
-	blk_queue_physical_block_size(queue, 512);
+	blk_queue_logical_block_size(queue,  4096);
+	blk_queue_physical_block_size(queue, 4096);
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, queue);
 	blk_queue_chunk_sectors(queue,
 		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1));
