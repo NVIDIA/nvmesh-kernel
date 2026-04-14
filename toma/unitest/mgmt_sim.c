@@ -394,14 +394,16 @@ static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 static void __mongodb_insert_praid_hdr(struct sb_praid_topo *pr, struct mm_json_elem *j) {
 	const int64_t pr_maj = json_get_dict_num(j, "pRaidMajorVersion", -1);
 	const int64_t pr_min = json_get_dict_num(j, "pRaidMinorVersion", -1);
-	BUG_ON((pr_maj < (int64_t)pr->version_major) || (pr_min < (int64_t)pr->version_minor));			// Can never go back
+	BUG_ON(pr_maj < (int64_t)pr->version_major);						// Major version can never go back
+	if (pr_min < (int64_t)pr->version_minor)
+		BUG_ON(pr_maj <= (int64_t)pr->version_major);					// Minor can decrease only if major increases
 	pr->version_major = pr_maj;
 	pr->version_minor = pr_min;
 }
 
 static void __mongodb_insert_praid_seg(struct sb_cluster_conf *cfg, struct mm_json_elem *j) {
 	const char *uuid = json_get_dict_str(j, "segmentID", NULL);
-	const char *status = json_get_dict_str(j, "status",   "unknown");
+	const char *status = json_get_dict_str(j, "status",   "unknown");	// Generated with nvmeibt_mm_segment_persistent_status_to_str()
 	const char *vital =  json_get_dict_str(j, "vitality", "unknown");
 	struct sb_seg_topo *ps = sb_cluster_get_topo_seg_ptr_from_uuid(cfg, uuid);
 	if      (!strncmp(vital, "up",   2))	ps->vitality = true;
