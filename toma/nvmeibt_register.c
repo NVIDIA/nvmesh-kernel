@@ -5,6 +5,7 @@
 
 #include <time.h>
 #include <sys/time.h>
+#include "nvmeibt_cdv_alloc.h"		/* nvmeibt_cdv_alloc_push_all_to_new_registrant */
 #include "nvmeibt_common.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_disk_segment.h"
@@ -2749,6 +2750,10 @@ static int handle_register_registrant_on_disk_segment(struct nvmeibt_registrant_
 		}
 		goto out;
 	}
+	/* Notify the newly-registered client of all elected CDV allocators.
+	 * A client that attaches after the initial election never received the
+	 * broadcast push; sending it here closes that timing window. */
+	nvmeibt_cdv_alloc_push_all_to_new_registrant(new_ctx);
 	if (new_ctx->is_recoverer) {    // Attach for recovery per TOMA req (of interest only for the local_clnt)
 		// notify recovery tasks of a new registrant
 		nvmeibt_recovery_handle_client_registered(new_ctx);

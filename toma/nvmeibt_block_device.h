@@ -36,6 +36,7 @@ struct nvmeibt_block_device_config {
 	struct nvmeibt_block_device_atributes attr;
 	uint8_t 					stripe_size;
 	uint8_t 					stripe_width;
+	bool						is_cdv;			/* volume is a CDV backing store */
 };
 
 struct run_exec_on_blkdev_ctx;

@@ -190,6 +190,18 @@ int nvmeibt_cdv_alloc_get_allocator(const char *cdv_uuid,
 void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid);
 
 /*
+ * nvmeibt_cdv_alloc_push_all_to_new_registrant — unicast CDV_ALLOCATOR_UPDATE
+ * for every known elected CDV allocator to a single newly-registered client.
+ *
+ * Called after a successful RT_REGISTER_DISK_SEGMENT so that clients which
+ * register after the initial election still receive allocator identity.
+ *
+ * @reg_ctx:  The newly-active registrant to notify.
+ */
+struct nvmeibt_registrant_ctx;
+void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx);
+
+/*
  * nvmeibt_cdv_alloc_startup_scan — log in-memory state.
  *
  * Called after RAFT log replay has populated the allocators.

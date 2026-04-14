@@ -374,6 +374,41 @@ void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
 	}
 }
 
+/*
+ * nvmeibt_cdv_alloc_push_all_to_new_registrant — unicast CDV_ALLOCATOR_UPDATE
+ * for every elected CDV allocator to a single newly-registered client.
+ *
+ * Called right after a client's RT_REGISTER_DISK_SEGMENT succeeds so that
+ * clients that register after the election still learn the allocator identity.
+ */
+void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+		struct nvmeibt_cdv_allocator_update msg;
+
+		if (alloc->allocator_toma_id[0] == '\0')
+			continue;
+
+		memset(&msg, 0, sizeof(msg));
+		strncpy(msg.cdv_uuid, alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+		strncpy(msg.allocator_toma_id, alloc->allocator_toma_id,
+			NVMEIBT_CDV_HOSTNAME_LEN - 1);
+		msg.allocator_generation = alloc->allocator_generation;
+
+		N_If(cdv_push_alloc_update_new_reg,
+		     "CDV-alloc: push CDV_ALLOCATOR_UPDATE to new registrant cdv=@STR toma=@STR gen=@LLU",
+		     msg.cdv_uuid, msg.allocator_toma_id, msg.allocator_generation);
+
+		nvmeibt_register_send_msg_to_registrant(
+			reg_ctx,
+			NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE,
+			NVMEIBT_CLIENT_TR_REASON_NONE,
+			sizeof(msg), &msg);
+	}
+}
+
 /* ── One-time init / shutdown ────────────────────────────────────────────── */
 
 int nvmeibt_cdv_alloc_one_time_init(void)

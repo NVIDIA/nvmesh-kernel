@@ -24,6 +24,8 @@
 #include <sys/stat.h>
 #include "nvmeibt_global.h"
 #include "nvmeibt_seg_active.h"
+#include "../common/nvmeib_hash.h"
+#include "nvmeibt_cdv_alloc.h"		/* nvmeibt_cdv_alloc_elect, nvmeibt_cdv_alloc_push_to_registrants */
 extern struct nvmeibt_nm_local_node *nw_node;
 
 enum replacement_action_t {
@@ -1732,6 +1734,32 @@ void nvmeibt_topology_calc_topology(void)
 		if (is_conf_changed || is_topo_changed) {
 			// The calculation yielded a new valid topology
 			nvmeibt_praid_leader_we_have_a_new_baseline(praid, &praid_leader->calculated_praid_lot);
+
+			/*
+			 * CDV allocator election: when the first pRAID of a CDV
+			 * becomes STABLE, elect this leader as allocator and push
+			 * the identity to all registered clients.
+			 *
+			 * Candidates: for now, only this RAFT leader node (single-TOMA
+			 * setup).  The sticky rule in nvmeibt_cdv_alloc_elect() makes
+			 * repeated calls on every topo-calc idempotent.
+			 */
+			{
+				struct nvmeibt_block_device *blkdev = nvmeibt_praid_get_blkdev(praid);
+				bool is_first_praid = (blkdev &&
+					praid->praid_mgmt.stripe_idx == 0 &&
+					praid->praid_mgmt.its_chunk->its_idx_in_block_device == 0);
+				bool is_stable = !!(praid_leader->baseline_praid_lot.topo_ctx.registrants_sync_cmd
+						    & PRAID_REGISTRANTS_SYNC_CMD_STABLE);
+
+				if (is_first_praid && is_stable && blkdev->from_config.is_cdv) {
+					const char *candidates[1] = { nvmeibt_get_my_hostname() };
+					const char *cdv_uuid = blkdev->urn_uuid.str;
+
+					nvmeibt_cdv_alloc_elect(cdv_uuid, candidates, 1);
+					nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
+				}
+			}
 		}
 	}
 	nvmeibt_topology_serialize_conf_and_topo_if_needed();

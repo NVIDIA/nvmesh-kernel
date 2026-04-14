@@ -756,6 +756,7 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_ASSIGN_VALIDATE_STR_OPTIONAL(hsk0xmr, "eyecatcher", "VOL", s);	// Exists in persistence->JSON
 			JSON_ASSIGN_OPTIONAL(0ecdaun, "dataBlocks");	// MGMT sends depending on raidType (Dec 24)
 			JSON_ASSIGN_OPTIONAL(4bs8o4e, "parityBlocks");	// MGMT sends depending on raidType (Dec 24)
+			JSON_ASSIGN_PLAIN_OPTIONAL(v8c2dka, "volumeClass", vol->is_cdv, (uint8_t)(s && !strcmp(s, "CDV")));
 			JSON_LOOP_ITERATION_END(4gt67sk, kv->key);
 		}
 	}
