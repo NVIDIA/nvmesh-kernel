@@ -33,30 +33,53 @@ void peer_toma_simu_resume_append_entries_by_node(int node_idx) {
 	cfg->nodes[node_idx].peer->ignore_append_entries = false;
 }
 
-static unsigned int peer_toma_simu_lookup_dirty_bits_override(struct peer_toma_simu *peer, const uint32_t seg_uuid, unsigned int default_state) {
-	for (int i = 0; i < peer->n_dirty_bits_overrides; i++)
-		if (peer->dirty_bits_overrides[i].uuid == seg_uuid)
-			return peer->dirty_bits_overrides[i].state;
-	return default_state;
-}
-
-void peer_toma_simu_set_seg_dirty_bits(struct peer_toma_simu *peer,	uint32_t seg_uuid, uint32_t dirty_bits_state) {
-	for (int i = 0; i < peer->n_dirty_bits_overrides; i++) {	// Update existing override if present
-		if (peer->dirty_bits_overrides[i].uuid == seg_uuid) {
-			peer->dirty_bits_overrides[i].state = dirty_bits_state;
-			return;
-		}
+static struct toma_simu_inject_seg_state_t *__find_seg_inject(struct peer_toma_simu *T, uint32_t seg_uuid) {
+	for (int i = 0; i < T->n_seg_overrides; i++) {
+		if (T->segs_overrides[i].uuid == seg_uuid)
+			return &T->segs_overrides[i];
 	}
-	// Add new override
-	BUG_ON(peer->n_dirty_bits_overrides >= PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES);
-	peer->dirty_bits_overrides[peer->n_dirty_bits_overrides].uuid = seg_uuid;
-	peer->dirty_bits_overrides[peer->n_dirty_bits_overrides].state = dirty_bits_state;
-	peer->n_dirty_bits_overrides++;
+	return NULL;
 }
 
-int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const char *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size) {
+static void __gen_seg_reply_to_leader(struct peer_toma_simu *T, const struct sb_seg_conf *sb_seg, const struct nvmeibt_serialized_seg_leader_topo *ld_seg, struct nvmeibt_serialized_seg_active_topo *act_seg) {
+	struct toma_simu_inject_seg_state_t *inj = __find_seg_inject(T, sb_seg->uuid);
+	BUG_ON(!act_seg);
+	nvmeibt_strlcpy(act_seg->eyecatcher, "SFW", sizeof(act_seg->eyecatcher));					// Map BIN_TOPO seg fields -> ACT_TOPO seg fields: Todo unify with nvmeibt_topology_serialize_active_topology()
+	act_seg->uuid = ld_seg->uuid;																// Copy everything from the leader
+	act_seg->active_praid_version_major = ld_seg->praid_version_major;
+	act_seg->active_praid_version_minor = ld_seg->praid_version_minor;
+	act_seg->dirty_bits_state =           ld_seg->dirty_bits_state;
+	act_seg->dirty_bits_init_mode =       ld_seg->dirty_bits_init_mode;
+	act_seg->stale_locks_init_mode =      ld_seg->stale_locks_init_mode;
+	act_seg->active_seg_ser_ver = ++T->ser_ver_per_seg_counter;
+	act_seg->active_seg_flags.are_praid_registrants_aligned_with_sync_cmd = 1;
+
+	// Now Apply the injected changes according to unitest scenario
+	if (!T->ignore_segs_initialization) {
+		if (act_seg->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER)
+			act_seg->dirty_bits_init_mode =  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
+		if (act_seg->stale_locks_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER)
+			act_seg->stale_locks_init_mode =  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
+	}
+	if (inj) {
+		act_seg->active_seg_flags.is_drive_write_error = inj->disk_error;
+		act_seg->dirty_bits_state = inj->dbits_state;											// Here, inject degraded mode instead of owner idle, etc
+		return;
+	}
+}
+
+void peer_toma_simu_set_seg_inject(struct peer_toma_simu *T, const struct toma_simu_inject_seg_state_t *inj) {
+	struct toma_simu_inject_seg_state_t *dst = __find_seg_inject(T, inj->uuid);	// Update existing override if present, or create a new one
+	if (!dst) {
+		dst = &T->segs_overrides[T->n_seg_overrides++];
+		BUG_ON(T->n_seg_overrides > PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES);
+	}
+	*dst = *inj;
+}
+
+int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *T, const struct nvmeibt_topology_serialized_topo_header *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
-	const int my_node_idx = (int)(peer->node - cfg->nodes);
+	const int my_node_idx = (int)(T->node - cfg->nodes);
 	struct nvmeibt_act_topo_builder builder;
 	char tmp[4096];
 	struct nvmeibt_topology_serialized_topo_header hdr;
@@ -73,28 +96,15 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const char 
 		struct nvmeibt_serialized_seg_leader_topo *wire_seg = (typeof(wire_seg))(&wire_praid[1]);
 		nvmeibt_praid_convert_topo_le_be(wire_praid, &ld_praid, TOMA_SW_COMPATIBILITY_VER);
 		for (int j = 0; j < ld_praid.segs_num; j++) {
-			struct nvmeibt_serialized_seg_leader_topo  ld_seg;
-			struct nvmeibt_serialized_seg_active_topo *act_seg;
+			struct nvmeibt_serialized_seg_leader_topo ld_seg;
 			const struct sb_seg_conf *sb_seg;
-
 			nvmeibt_disk_segment_convert_topo_le_be(&wire_seg[j], &ld_seg);
 			sb_seg = sb_cluster_get_seg_ptr_from_uuid(cfg, (uint32_t)ld_seg.uuid.ll[0]);
-			BUG_ON(!sb_seg);
 			if (sb_cluster_get_node_idx_from_disk_uuid(cfg, sb_seg->disk_uuid) != my_node_idx)			// Filter: does this segment belong to this peer?
 				continue;
-			act_seg = nvmeibt_act_topo_builder_append(&builder);
-			BUG_ON(!act_seg);
-			nvmeibt_strlcpy(act_seg->eyecatcher, "SFW", sizeof(act_seg->eyecatcher));					// Map BIN_TOPO seg fields -> ACT_TOPO seg fields: Todo unify with nvmeibt_topology_serialize_active_topology()
-			act_seg->uuid = ld_seg.uuid;
-			act_seg->active_praid_version_major = ld_seg.praid_version_major;
-			act_seg->active_praid_version_minor = ld_seg.praid_version_minor;
-			act_seg->dirty_bits_state = peer_toma_simu_lookup_dirty_bits_override(peer, sb_seg->uuid, ld_seg.dirty_bits_state);
-			act_seg->dirty_bits_init_mode =  ld_seg.dirty_bits_init_mode;
-			act_seg->stale_locks_init_mode = ld_seg.stale_locks_init_mode;
-			act_seg->active_seg_ser_ver = ++peer->ser_ver_counter;
-			act_seg->active_seg_flags.are_praid_registrants_aligned_with_sync_cmd = 1;
+			__gen_seg_reply_to_leader(T, sb_seg, &ld_seg, nvmeibt_act_topo_builder_append(&builder));
 		}
-		wire_praid = (struct nvmeibt_praid_serialized_topo *)&wire_seg[ld_praid.segs_num];
+		wire_praid = (typeof(wire_praid))&wire_seg[ld_praid.segs_num];
 	}
 	nvmeibt_act_topo_builder_to_wire(&builder);
 	return builder.topo_len;

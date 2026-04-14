@@ -10,13 +10,16 @@
 
 struct peer_toma_simu {
 	struct sb_node_conf *node;							// Reference to node configuration in mongo-db
-	bool ignore_append_entries;			                // Emulates infinitely slow local disk response time, does not commit raft leaders topo
-	unsigned long long ser_ver_counter;					// Incrementing ACT_TOPO serialization version
-	struct {
+	bool ignore_append_entries;							// Emulates infinitely slow local disk response time, does not commit raft leaders topo, Much like real Toma 'enum raft_pause_mode_enm'
+	bool ignore_segs_initialization;					// Emulates as if Toma cannot initialize any local segment
+	unsigned long long ser_ver_per_seg_counter;			// Incrementing ACT_TOPO serialization version
+	unsigned long long append_entries_rep_ser_ver;		// Monotonic counter for raft-follower-msg.local_serialization_version on each APPEND_ENTRIES_REP. Increased so leader will take this reply
+	struct toma_simu_inject_seg_state_t {				// Specific actions to apply to the segment according to unitest scenario
 		uint32_t uuid;
-		uint32_t state;
-	} dirty_bits_overrides[PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES];
-	int n_dirty_bits_overrides;
+		uint32_t dbits_state;
+		bool     disk_error;
+	} segs_overrides[PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES];
+	int n_seg_overrides;
 };
 
 struct peer_toma_simu *peer_toma_simu_create( struct sb_node_conf *node);
@@ -28,11 +31,7 @@ void                   peer_toma_simu_resume_append_entries_by_node(int node_idx
  *  Decodes the leader's topology, filters to segments on this peer's disks,
  *  maps fields, applies dirty_bits overrides, and encodes as ACT_TOPO.
  *  Returns the ACT_TOPO byte length written to out_buf, or 0 on error. */
-int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer,
-	const char *leader_topo_data, int leader_topo_len,
-	char *out_buf, int out_buf_size);
+struct nvmeibt_topology_serialized_topo_header;
+int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const struct nvmeibt_topology_serialized_topo_header *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size);
 
-/** Set a dirty_bits_state override for a segment. When building the ACT_TOPO
- *  reply, if a segment matches this UUID, the override state is used instead
- *  of the leader's value. Used by the eviction test to fake recovery completion. */
-void peer_toma_simu_set_seg_dirty_bits(struct peer_toma_simu *peer, uint32_t seg_uuid, uint32_t dirty_bits_state);
+void peer_toma_simu_set_seg_inject(struct peer_toma_simu *peer, const struct toma_simu_inject_seg_state_t *inj);
