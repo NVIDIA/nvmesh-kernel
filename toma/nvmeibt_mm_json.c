@@ -1261,7 +1261,7 @@ struct _packed_mm_vol_conf {
 	uint8_t num_chunks;						// 6
 	uint16_t blockSize;						// 8
 	uint32_t version;						// 12
-	uint8_t version_minor;					// 13
+	uint8_t is_cdv;							// 13
 	char action;							// 14
 	char res_type;							// 15	// Obsolete Elect
 	uint8_t relativeRebuildPriority;		// 16
@@ -1364,7 +1364,7 @@ static uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *sr
 	SWAP8_FIELD(num_chunks);
 	SWAP16_FIELD(blockSize);
 	SWAP32_FIELD(version);
-	SWAP8_FIELD(version_minor);
+	SWAP8_FIELD(is_cdv);
 	COPY_FIELD(name);
 	SWAP8_FIELD(action);
 	SWAP8_FIELD(relativeRebuildPriority);
