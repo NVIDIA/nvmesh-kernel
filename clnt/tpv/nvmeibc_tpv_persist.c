@@ -425,6 +425,73 @@ void nvmeibc_tpv_persist_work_fn(struct work_struct *work)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_persist_work_fn);
 
+/* ── nvmeibc_tpv_load_state_work_fn ───────────────────────────────────── */
+
+/*
+ * Background worker: load allocator state from CDV_extent[0], run recovery,
+ * then open the IO gates by setting state_loaded.
+ *
+ * Scheduled at attach with zero delay.  If load_state fails (CDV block
+ * device not ready, transport error, etc.) the worker re-arms itself after
+ * a 1-second delay.  This makes TPV attach succeed immediately regardless
+ * of CDV readiness; IO is parked on pending_bios until state_loaded is set.
+ */
+#define TPV_LOAD_STATE_RETRY_DELAY	HZ	/* 1 second */
+
+void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
+{
+	struct nvmeibc_tpv *tpv = container_of(work, struct nvmeibc_tpv,
+					       load_state_work.work);
+	unsigned long flags;
+	int rv;
+
+	if (atomic_read(&tpv->state) == TPV_DETACHING)
+		return;
+
+	rv = nvmeibc_tpv_load_state(tpv);
+	if (rv) {
+		_NW(tpv_load_state_retry,
+		    "TPV: @STR: load_state failed rv=@INT; retrying in 1s",
+		    tpv->tpv_name, rv);
+		schedule_delayed_work(&tpv->load_state_work,
+				      TPV_LOAD_STATE_RETRY_DELAY);
+		return;
+	}
+
+	/*
+	 * Recovery is non-fatal — orphans are left for NVCK if TOMA is
+	 * unreachable.  Always returns 0 in current implementation.
+	 */
+	nvmeibc_tpv_recovery(tpv);
+
+	/*
+	 * Mark state as loaded under pending_bio_lock.  The IO path uses
+	 * double-checked locking (READ_ONCE outside, re-check under lock)
+	 * so setting state_loaded under the lock provides the required
+	 * ordering: any bio added before this point is already in the list
+	 * and will be drained by retry_pending_bios below; any bio arriving
+	 * after will see state_loaded == true.
+	 */
+	spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+	tpv->state_loaded = true;
+	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+	_NI(tpv_state_loaded, "TPV: @STR: state loaded; draining pending bios",
+	    tpv->tpv_name);
+
+	nvmeibc_tpv_retry_pending_bios(tpv);
+
+	/* Schedule initial CDV_extent pre-allocation if the pool is empty. */
+	if (tpv->allocator.free_tpv_extent_count == 0) {
+		_NI(tpv_pool_empty_after_load,
+		    "TPV: @STR: pool empty after load; scheduling CDV alloc",
+		    tpv->tpv_name);
+		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+			schedule_work(&tpv->cdv_alloc_work);
+	}
+}
+EXPORT_SYMBOL(nvmeibc_tpv_load_state_work_fn);
+
 /* ── nvmeibc_tpv_install_data_extent ───────────────────────────────────── */
 
 /*

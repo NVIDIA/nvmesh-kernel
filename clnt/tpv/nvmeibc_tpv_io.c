@@ -201,6 +201,27 @@ REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
 		return REQ_RET_ZERO;
 	}
 
+	/*
+	 * Allocator state may still be loading from CDV_extent[0] in the
+	 * background.  Park the bio until load_state_work completes.
+	 *
+	 * Double-checked locking: READ_ONCE avoids the lock in steady state
+	 * (state_loaded is set once and never cleared).  The re-check under
+	 * pending_bio_lock synchronises with load_state_work_fn which sets
+	 * state_loaded under the same lock.
+	 */
+	if (unlikely(!READ_ONCE(tpv->state_loaded))) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+		if (!tpv->state_loaded) {
+			bio_list_add(&tpv->pending_bios, bio);
+			spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+			return REQ_RET_ZERO;
+		}
+		spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+	}
+
 	tpv_handle_one_bio(tpv, bio);
 	return REQ_RET_ZERO;
 }

@@ -541,6 +541,14 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	if (atomic_read(&tpv->state) == TPV_DETACHING)
 		goto out_clear_pending;
 
+	/*
+	 * Allocator state not yet loaded from CDV — do not request new
+	 * CDV_extents until load_state_work_fn populates the extent map.
+	 * load_state_work_fn will re-schedule us after load completes.
+	 */
+	if (!READ_ONCE(tpv->state_loaded))
+		goto out_clear_pending;
+
 	/* Snapshot (toma_id, generation) atomically. */
 	spin_lock_irqsave(&tpv->allocator_id_lock, flags);
 	strncpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id) - 1);

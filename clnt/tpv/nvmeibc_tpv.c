@@ -15,10 +15,16 @@
  * Attach flow (§3.8):
  *   1. Assert CDV is present in the volumes list.
  *   2. Allocate and initialise struct nvmeibc_tpv.
- *   3. Load allocator state from CDV_extent[0] (nvmeibc_tpv_load_state).
- *   4. Run recovery if tree inconsistency detected (nvmeibc_tpv_recovery).
- *   5. Set low-watermark; schedule initial CDV_extent request if pool empty.
- *   6. Register gendisk.  Open IO gates.
+ *   3. Schedule deferred load_state_work (CDV_extent[0] read + recovery).
+ *   4. Register gendisk.  IO arriving before load completes is parked on
+ *      pending_bios and drained once state_loaded is set by the worker.
+ *
+ * Background load_state_work (nvmeibc_tpv_persist.c):
+ *   a. Load allocator state from CDV_extent[0] (nvmeibc_tpv_load_state).
+ *      Retries on failure (CDV not ready, transport error) every 1 second.
+ *   b. Run recovery (nvmeibc_tpv_recovery) — always, regardless of tree state.
+ *   c. Set state_loaded; drain pending_bios.
+ *   d. Schedule initial CDV_extent request if pool empty.
  *
  * Detach flow (§3.8):
  *   1. Quiesce IO (freeze queue).
@@ -444,6 +450,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	INIT_LIST_HEAD(&tpv->list_node);
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
+	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
+	tpv->state_loaded = false;
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
 	bio_list_init(&tpv->pending_bios);
@@ -469,38 +477,21 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		}
 	}
 
-	/* ── 3b. Load allocator state from CDV_extent[0] ────────────────── */
-	rv = nvmeibc_tpv_load_state(tpv);
-	if (rv) {
-		_NE(tpv_load_state_fail, "TPV: load_state failed for @STR rv=@INT",
-		    tpv_name, rv);
-		goto err_free_alloc;
-	}
-
-	/* ── 4. Recovery: cross-check TOMA for orphaned CDV_extents ─────
+	/*
+	 * ── 3b. Schedule deferred load of allocator state ──────────────
 	 *
-	 * Always run recovery regardless of what load_state found in the
-	 * tree.  We do not know what happened while the TPV was offline:
-	 * TOMA may have allocated CDV_extents that were never flushed to
-	 * the tree (client crash between CDV_ALLOC_OK and persist_work).
-	 * The only way to find these orphans is to ask TOMA.
+	 * load_state (CDV_extent[0] read), recovery (TOMA orphan check), and
+	 * the initial CDV_extent pre-allocation run in the background via
+	 * load_state_work.  IO arriving before load completes is parked on
+	 * pending_bios and drained once state_loaded is set.
+	 *
+	 * This allows attach to succeed even when the CDV block device is
+	 * temporarily unavailable (transport flap, CDV still attaching).
+	 * The worker retries until CDV IO succeeds.
 	 */
-	rv = nvmeibc_tpv_recovery(tpv);
-	if (rv) {
-		_NE(tpv_recovery_fail, "TPV: recovery failed for @STR rv=@INT",
-		    tpv_name, rv);
-		goto err_free_alloc;
-	}
+	schedule_delayed_work(&tpv->load_state_work, 0);
 
-	/* ── 5. Schedule initial CDV_extent pre-allocation if pool empty ── */
-	if (tpv->allocator.free_tpv_extent_count == 0) {
-		_NI(tpv_pool_empty_at_attach, "TPV: @STR pool empty at attach; scheduling CDV alloc",
-		    tpv_name);
-		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
-			schedule_work(&tpv->cdv_alloc_work);
-	}
-
-	/* ── 6. Register block device and open IO gates ─────────────────── */
+	/* ── 4. Register block device and open IO gates ─────────────────── */
 	rv = nvmeibc_tpv_blkdev_register(tpv);
 	if (rv) {
 		_NE(tpv_blkdev_register_fail, "TPV: blkdev_register failed for @STR rv=@INT",
@@ -525,6 +516,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	return tpv;
 
 err_free_alloc:
+	cancel_delayed_work_sync(&tpv->load_state_work);
 	/* Unregister the block device if blkdev_register already succeeded. */
 	nvmeibc_tpv_blkdev_unregister(tpv);
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
@@ -546,6 +538,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	nvmeibc_tpv_list_remove(tpv);
 
 	/* ── 1. Remove from active list and cancel pending work ────────── */
+	cancel_delayed_work_sync(&tpv->load_state_work);
 	cancel_work_sync(&tpv->cdv_alloc_work);
 	cancel_work_sync(&tpv->persist_work);
 

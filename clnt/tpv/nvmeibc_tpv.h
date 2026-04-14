@@ -166,6 +166,15 @@ struct nvmeibc_tpv {
 	struct bio_list               pending_bios;
 	spinlock_t                    pending_bio_lock;
 
+	/*
+	 * Deferred load of allocator state from CDV_extent[0].
+	 * Scheduled at attach; retries on I/O failure (CDV not ready).
+	 * state_loaded is set under pending_bio_lock; readers use
+	 * double-checked locking (READ_ONCE + re-check under lock).
+	 */
+	struct delayed_work           load_state_work;
+	bool                          state_loaded;
+
 	/* Deferred persistence of allocator state to CDV_extent[0]. */
 	struct work_struct            persist_work;
 	spinlock_t                    persist_lock;
@@ -291,6 +300,9 @@ int  nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv, u64 extent_index);
 
 /* Background work handler: flush dirty allocator state to CDV_extent[0]. */
 void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
+
+/* Background work handler: load allocator state from CDV_extent[0] + recovery. */
+void nvmeibc_tpv_load_state_work_fn(struct work_struct *work);
 
 /* ── Recovery API (implemented in nvmeibc_tpv_recovery.c) ─────────────── */
 
