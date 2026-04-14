@@ -181,7 +181,7 @@ static int cdv_toma_send(struct nvmeibc_disk_segment *seg,
 	env.recv_rsp_cb = NULL;
 	env.arg = NULL;
 
-	rv = ops->toma_send(ops, seg->disk, (u64)handle_of(seg), &env);
+	rv = ops->toma_send(ops, seg->disk, seg->toma_reg->handle, &env);
 
 	kfree(msg);
 	return rv;

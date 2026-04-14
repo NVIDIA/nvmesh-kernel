@@ -410,6 +410,13 @@ static inline bool nvmeibt_protocol_client_msg_is_valid(enum NVMEIBT_CLIENT_MSG_
 	case NVMEIBT_CLIENT_MSG_RT_RECOVER_FINISH:
 	case NVMEIBT_CLIENT_MSG_RT_RECOVER_PROGRESS:
 	case NVMEIBT_CLIENT_MSG_TR_RECOVER_PING:
+	/* CDV thin-provisioning messages */
+	case NVMEIBT_CLIENT_MSG_RT_CDV_ALLOC_EXTENT:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP:
+	case NVMEIBT_CLIENT_MSG_RT_CDV_FREE_EXTENT:
+	case NVMEIBT_CLIENT_MSG_RT_CDV_LIST_EXTENTS:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE:
 		return true;
 	default:
 		return false;
@@ -742,6 +749,14 @@ struct nvmeibt_client_msg *nvmeibt_client_decode(u8 *buf, s32 len)
 		}
 		break;
 	}
+	/* CDV thin-provisioning messages: payloads are raw structs, no field conversion */
+	case NVMEIBT_CLIENT_MSG_RT_CDV_ALLOC_EXTENT:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP:
+	case NVMEIBT_CLIENT_MSG_RT_CDV_FREE_EXTENT:
+	case NVMEIBT_CLIENT_MSG_RT_CDV_LIST_EXTENTS:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE:
+		break;
 	default:
 		NCLIENT_PROTO_ASSERT(t_15_clnt_toma_proto_decode, false, err_msg, len, (int)sizeof(*msg), msg->hdr.msg_type);
 		break;
@@ -854,6 +869,14 @@ enum NVMEIBT_CLIENT_MSG_DECODE_RES nvmeibt_client_decode_new(u8 *buf, s32 len, s
 		}
 		break;
 	}
+	/* CDV thin-provisioning messages: payloads are raw structs, no field conversion */
+	case NVMEIBT_CLIENT_MSG_RT_CDV_ALLOC_EXTENT:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP:
+	case NVMEIBT_CLIENT_MSG_RT_CDV_FREE_EXTENT:
+	case NVMEIBT_CLIENT_MSG_RT_CDV_LIST_EXTENTS:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP:
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE:
+		break;
 	default:
 		NCLIENT_PROTO_ASSERT(du87uhy, false, err_msg, len, (int)sizeof(*msg), msg->hdr.msg_type);
 		break;
