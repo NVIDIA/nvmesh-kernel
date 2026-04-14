@@ -157,7 +157,9 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 		peer_toma_simu_set_seg_inject(cfg->nodes[node_idx].peer, {pr_c->segs[s].uuid, });
 	}*/
 	WAIT_UNTIL(sb_cluster_topo_prd_is_ioable(pr_t));
-	SCENARIO_PRINT(__AUTOID__, "Attaching clients, todo...");
+	if (sb_cluster_vol_has_any_live_toma_local_segs(cfg, v)) {		// Otherwise no work will be done by the real toma.
+		SCENARIO_PRINT(__AUTOID__, "Attaching clients, todo...");
+	}
 }
 
 static void scenario_create_remove_r1(void) {

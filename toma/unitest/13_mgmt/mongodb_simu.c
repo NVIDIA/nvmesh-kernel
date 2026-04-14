@@ -155,3 +155,19 @@ bool sb_cluster_topo_prd_is_ioable(const struct sb_praid_topo* pr) {
 	}
 	return (n_rw_segs >= pr->cfg->D);
 }
+
+bool sb_cluster_vol_has_any_live_toma_local_segs(const struct sb_cluster_conf *sb, uint32_t vol_idx) {
+	const struct sb_volume_conf *vol = &sb->vols[vol_idx];
+	unsigned ci, ri, si;
+	for (ci = 0; ci < vol->num_chunks; ci++) {
+		const struct sb_chunk_conf *c = &vol->chunks[ci];
+		for (ri = 0; ri < c->n_raids; ri++) {
+			const struct sb_praid_conf *r = &c->raids[ri];
+			for (si = 0; si < (r->D + r->P); si++) {
+				if (sb_cluster_get_node_idx_from_disk_uuid(sb, r->segs[si].disk_uuid) == 0)
+					return true;
+			}
+		}
+	}
+	return false;
+}
