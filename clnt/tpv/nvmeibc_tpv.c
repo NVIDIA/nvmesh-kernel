@@ -692,7 +692,7 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 
 	if (n_updated == 0)
 		_ND(tpv_allocator_cdv_no_match,
-		    "TPV: CDV allocator update cdv=@STR toma=@STR gen=@LLU — no matching TPVs",
+		    "TPV: CDV allocator update cdv=@STR toma=@STR gen=@LLU -- no matching TPVs",
 		    cdv_uuid, toma_id, generation);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_for_cdv);
