@@ -101,6 +101,11 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 		    "TPV @STR: initial CDV allocator TOMA = @STR (from management hint)",
 		    conf->name, allocator_toma_id);
 		nvmeibc_tpv_update_allocator_id(tpv, allocator_toma_id, 0);
+		/* cdv_alloc_work may have already run and deferred (empty TOMA ID at the
+		 * time) before we set the TOMA ID above.  Re-arm it now so the first
+		 * CDV_ALLOC_EXTENT is sent without waiting for a topology push. */
+		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+			schedule_work(&tpv->cdv_alloc_work);
 	} else {
 		_NW(tpv_setup_no_alloc_toma,
 		    "TPV @STR: management did not supply allocator TOMA hostname; CDV work deferred until topology push",
