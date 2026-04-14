@@ -908,6 +908,58 @@ By handling it client-side, the client atomically inspects its topology,
 chains the prerequisite, and runs both recoveries in a single session — no
 extra TOMA round-trips, no ordering races.
 
+#### Optimization: zero-init of W-segment RAM dirty bits in R1-2
+
+When TOMA places a segment into W mode it initializes that segment's server
+lock RAM before the client connects. For dirty bits, the conservative choice
+is to write unknown markers (`0xF` nibbles) — this forces dirty rebuild to
+treat every blockset as potentially needing sync. That is always correct, but
+it causes dirty rebuild to commit binfo for every blockset even when most of
+them are actually clean.
+
+For **R1-2** (two-replica mirror), TOMA instead initializes the W segment's
+RAM dirty bits to **zero**. This is safe because R1-2 has only two segments.
+There is no third segment that a dbit could reference, so zero dirty bits
+truthfully represent "no known dirty state." Dirty rebuild then queries the
+server, receives zero dbits for clean blocksets, and skips the binfo commit
+for those blocksets — a significant speedup on large volumes where only a
+small fraction of blocksets were dirtied while the segment was down.
+
+The optimization is also safe because TOMA **never promotes the segment to
+RW until dirty rebuild has fully completed**. By the time the segment enters
+service as RW, all dirtied blocksets (those with non-zero dbits, correctly
+preserved by the writes-during-failure path) have been fully synchronized.
+Blocksets with zero dbits were genuinely clean and required no sync. The two
+properties together — no phantom third-segment dbits, and full sync before
+promotion — guarantee the segment's data is complete and consistent when it
+becomes authoritative.
+
+For **R1-3** (three-replica mirror), zero-init is **not safe** and unknown
+markers must be used. The hazard arises as follows:
+
+1. Topology is `[RW, W, DEAD]`. The RW segment's binfo for some blockset
+   records a dbit pointing to DEAD — written before DEAD died, never synced
+   back.
+2. W's RAM dirty bits are initialized to zero. Dirty rebuild queries the
+   server, sees no dbit on W for that blockset, and **skips committing binfo
+   from RW to W**. W's copy-owner lock for that blockset is never updated
+   from RW's authoritative value.
+3. Dirty rebuild completes and W is promoted to RW. Its binfo for the
+   skipped blockset still reflects the zeroed initial state — it has no
+   record of DEAD's dbit.
+4. The original RW now fails. W (now the sole RW) is the only source of
+   binfo. That binfo is missing the DEAD dbit entirely.
+5. When DEAD eventually returns and requests a dirty rebuild, the new RW
+   reports no dirty bits for DEAD on those blocksets. The rebuild skips
+   them, leaving DEAD with stale data and no record of the gap.
+
+Using unknown markers for W in R1-3 forces dirty rebuild to commit binfo
+from RW to W for every blockset that has any dbit activity, ensuring W
+learns about DEAD's dbit before it can become the sole source of truth.
+
+Implemented in `nvmeib_dbits_entry_build_unknowns_generic()`
+(`common/nvmeib_shared.h`).
+
 ### 9.4 Cold Recovery (all servers reboot)
 
 Clients are stateless — all lock state (lock values, TxID, dirty bits)
@@ -926,9 +978,11 @@ For each RW (owner) segment, TOMA writes:
   (`nvmeib_stale_special_raid1`). This marks every blockset as "unknown
   state after RAM loss."
 - **TxID** → set to 0 (`INITIAL_LAZY_READ_TXID` — unknown).
-- **Dirty bits** → set to worst-case unknowns based on topology. In normal
-  mode (all RW), dirty bits can be set to zero since no segment is out of
-  sync. In degraded mode, unknown dirty bit markers are used.
+- **Dirty bits** → set based on topology. In normal mode (all RW), dirty
+  bits are zero — no segment is out of sync. In degraded mode, unknown
+  dirty bit markers (`0xF` nibbles) are used, except for R1-2 where
+  W-segment dirty bits are zero-initialized as an optimization (see
+  section 9.3).
 
 **Optimization: orderly shutdown.** If TOMA can perform a graceful shutdown
 (not a crash), it saves TxID, dirty bits, and stale lock values to disk
