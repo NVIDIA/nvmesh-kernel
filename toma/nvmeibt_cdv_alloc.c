@@ -17,6 +17,7 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_register.h"		/* struct nvmeibt_register_msg, nvmeibt_register_send_msg_to_registrant */
 #include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client, nvmeibt_global_get_global */
+#include "nvmeibt_global.h"		/* struct nvmeibt_topology (full definition) */
 #include "nvmeibt_kafka.h"		/* nvmeibt_kafka_outgoing_msgs_queue_add, KAFKA_PRODUCER_MSG_HEADER_* */
 #include "nvmeibt_local_disk.h"		/* struct nvmeibt_local_disk */
 #include "nvmeibt_seg_active.h"		/* struct nvmeibt_seg_active, registrant iteration */
