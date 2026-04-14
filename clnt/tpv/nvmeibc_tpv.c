@@ -302,11 +302,15 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	/* 6.8+: blk_queue_* setters removed; write limits directly. */
 	queue->limits.logical_block_size  = 4096;
 	queue->limits.physical_block_size = 4096;
+	queue->limits.io_min              = 4096;
+	queue->limits.io_opt              = (unsigned int)tpv->allocator.tpv_extent_size_kb << 10;
 	queue->limits.chunk_sectors =
 		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1);
 #else
 	blk_queue_logical_block_size(queue,  4096);
 	blk_queue_physical_block_size(queue, 4096);
+	blk_queue_io_min(queue, 4096);
+	blk_queue_io_opt(queue, (unsigned int)tpv->allocator.tpv_extent_size_kb << 10);
 	blk_queue_flag_set(QUEUE_FLAG_NONROT, queue);
 	blk_queue_chunk_sectors(queue,
 		(unsigned int)((u64)tpv->allocator.tpv_extent_size_kb << 1));
