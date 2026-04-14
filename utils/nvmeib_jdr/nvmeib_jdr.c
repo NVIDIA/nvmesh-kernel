@@ -17,6 +17,23 @@
 
 static size_t indent = 4;
 
+#if !defined(__KERNEL__) && !defined(BLKDEV_SIMULATOR)
+struct seq_file {
+	void *private;
+	const struct seq_operations *ops;
+	char *buf;
+	size_t count;
+	size_t size;
+};
+static inline bool seq_has_overflowed(struct seq_file *m) { (void)m; return false; }
+void seq_vprintf(struct seq_file *m, const char *fmt, va_list args)
+{
+	(void)m;
+	(void)fmt;
+	(void)args;
+}
+#endif
+
 static void __jdr_append_buffer(struct jdr* self, char const * const fmt, va_list args)
 {
 	int rc = vsnprintf(self->impl.remaining.base, self->impl.remaining.len, fmt, args);
