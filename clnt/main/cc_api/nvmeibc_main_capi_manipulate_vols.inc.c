@@ -381,6 +381,30 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	if ((msg->updateType != UPDATETYPE_TOMA_VOL_CONFIG_TO_LOCAL_CLNT &&
 	     __verify_reservation_version_correctness(&msg->volumes[0], volume, p, &resrv_inc_ignored))) { // Verify reservation info, if fails send current volume information
 		res = _calc_reply_on_attach(hdr->name, volume, -1, resrv_inc_ignored, &reply_hdr);
+	} else if ((hdr->type & AUTO_EXTEND_VOLUME) && update_only) {
+		/* TPV grow: management has extended the virtual size.
+		 * TPVs are not tracked in the regular nvmeibc_volume list so
+		 * !found is expected.  Look up the live TPV by UUID and call
+		 * nvmeibc_tpv_grow() to resize the block device in-place.
+		 */
+		const struct nvmeibc_volume_conf *conf = &msg->volumes[0];
+		u64 new_virtual_size_bytes = (u64)conf->blocks << 12;  /* 4 KiB units → bytes */
+		struct nvmeibc_tpv *tpv = nvmeibc_tpv_find_by_uuid(hdr->uuid);
+
+		if (tpv && new_virtual_size_bytes) {
+			_NI(tpv_grow_dispatch,
+			    "TPV @STR: live grow to @LLU bytes", hdr->name, new_virtual_size_bytes);
+			nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
+			res = NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED;
+			reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
+		} else {
+			_NE(tpv_grow_not_found,
+			    "TPV @STR: grow failed - tpv=%p new_size=@LLU",
+			    hdr->name, (void *)tpv, new_virtual_size_bytes);
+			res = NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED;
+		}
+		nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
+		goto _out;
 	} else if (update_only && !found) {
 		_NE(t_tsbd05, DMESG_PREFIX("@DEV_NAME") ": not found in full-configuration message, skipping update", hdr->name);
                 nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 0);
