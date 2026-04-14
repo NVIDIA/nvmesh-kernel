@@ -80,6 +80,16 @@ struct nvmeibc_volume {
 	struct nvmeibc_volume_detach_t detach;		// Assist struct for performing force detach (like unsafe usb removal)
 	struct list_head link;						// Link List of volumes
 	struct nvmeibc_volume_info info;		// a volume configuration info
+	/*
+	 * CDV allocator identity — valid only for volumes with volume_class CDV.
+	 * Populated when a CDV_ALLOCATOR_UPDATE topology message arrives.
+	 * Read by nvmeibc_tpv_attach() to seed newly-created TPVs with the
+	 * already-known allocator, avoiding the attach→allocator-update race.
+	 * Protected by spinlock above.
+	 */
+	char cdv_allocator_toma_id[NVMEIB_HOST_NAME_LEN];
+	u64  cdv_allocator_generation;
+
 	/* -------------- Polymorphic code -------------- */
 	struct nvmeibc_block_device  *block_dev;	// The default block device interface
 	union {				// Derrived API's of volumes (C++ inherritance)

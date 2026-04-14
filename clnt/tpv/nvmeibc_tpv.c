@@ -36,7 +36,7 @@
 
 #include "common/kr_incs.h"			/* kernel headers, logging, u64, etc. */
 #include "nvmeibc_tpv.h"
-#include "clnt/nvmeibc_volume.h"		/* nvmeibc_volume, nvmeibc_volume_get_by_uuid */
+#include "clnt/nvmeibc_volume.h"		/* nvmeibc_volume, cdv_allocator_toma_id */
 #include "common/nvmeib_common_os_block_api.h"	/* REQ_RET, REQ_RET_ZERO */
 #include "clnt/nvmeibc_block.h"			/* KERNEL_SECTOR_SHIFT */
 
@@ -439,10 +439,35 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	strncpy(tpv->tpv_name, tpv_name, sizeof(tpv->tpv_name) - 1);
 	atomic_set(&tpv->state, TPV_ATTACHING);
 
-	/* Allocator identity is set to zero; updated via CDV topology push. */
+	/*
+	 * Seed allocator identity from the CDV volume's cached value.
+	 *
+	 * The CDV_ALLOCATOR_UPDATE topology push arrives when the CDV segment
+	 * is first registered, which happens BEFORE the TPV is attached.
+	 * nvmeibc_topology.c caches the identity on cdv->cdv_allocator_toma_id
+	 * so we can pick it up here instead of waiting for the next push.
+	 * If the CDV cache is still empty (very early attach before any push),
+	 * the work function will defer until the next CDV_ALLOCATOR_UPDATE.
+	 */
 	spin_lock_init(&tpv->allocator_id_lock);
-	memset(tpv->allocator_toma_id, 0, sizeof(tpv->allocator_toma_id));
-	tpv->allocator_generation = 0;
+	{
+		unsigned long vflags;
+
+		spin_lock_irqsave(&cdv->spinlock, vflags);
+		strncpy(tpv->allocator_toma_id, cdv->cdv_allocator_toma_id,
+			sizeof(tpv->allocator_toma_id) - 1);
+		tpv->allocator_toma_id[sizeof(tpv->allocator_toma_id) - 1] = '\0';
+		tpv->allocator_generation = cdv->cdv_allocator_generation;
+		spin_unlock_irqrestore(&cdv->spinlock, vflags);
+	}
+	if (tpv->allocator_toma_id[0])
+		_NI(tpv_allocator_seeded,
+		    "TPV @STR: seeded allocator from CDV cache: toma=@STR gen=@LLU",
+		    tpv_name, tpv->allocator_toma_id, tpv->allocator_generation);
+	else
+		_ND(tpv_allocator_no_cache,
+		    "TPV @STR: CDV allocator not yet known; will wait for CDV_ALLOCATOR_UPDATE push",
+		    tpv_name);
 
 	spin_lock_init(&tpv->persist_lock);
 	tpv->dirty = false;

@@ -19,6 +19,7 @@
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "main/cc_api/nvmeibc_main_capi_manipulate_vols.h"	// For attach_t
 #include "tpv/nvmeibc_tpv.h"					// nvmeibc_tpv_update_allocator_id
+#include "nvmeibc_volume.h"					// nvmeibc_volume, nvmeibc_volume_get_by_uuid
 #include "management_utils_common/nvmeibc_management_volume_conf_checks.h"
 #include "common/compat/kr_incs_compiler_types.h"
 #include "common/proc_epilog.h"
@@ -2744,6 +2745,37 @@ static void __block_toma_msg_handler(void *unused_cinst, u64 handle, u8 *buf, in
 			break;
 		}
 		upd = (const struct nvmeibc_cdv_allocator_update *)&pl[1];
+
+		/*
+		 * Cache allocator identity on the CDV volume before updating TPVs.
+		 * nvmeibc_tpv_attach() reads cdv->cdv_allocator_toma_id to seed
+		 * newly-created TPVs, closing the attach-time race where the push
+		 * arrives during CDV segment registration — before the TPV is in
+		 * nvmeibc_tpv_active_list.
+		 */
+		{
+			const struct nvmeibc_block_device   *nd = nt->nd;
+			const struct nvmeibc_cinst_params_main *pmain =
+						nvmeibc_cinst_get_blok_m(nd);
+			struct nvmeibc_volume *cdv_vol =
+					nvmeibc_volume_get_by_uuid(pmain,
+						upd->cdv_uuid,
+						UNKNOWN_ILLEGAL);
+			if (cdv_vol) {
+				unsigned long vflags;
+
+				spin_lock_irqsave(&cdv_vol->spinlock, vflags);
+				strncpy(cdv_vol->cdv_allocator_toma_id,
+					upd->allocator_toma_id,
+					sizeof(cdv_vol->cdv_allocator_toma_id) - 1);
+				cdv_vol->cdv_allocator_toma_id[
+					sizeof(cdv_vol->cdv_allocator_toma_id) - 1] = '\0';
+				cdv_vol->cdv_allocator_generation =
+					upd->allocator_generation;
+				spin_unlock_irqrestore(&cdv_vol->spinlock, vflags);
+			}
+		}
+
 		nvmeibc_tpv_update_allocator_for_cdv(
 			upd->cdv_uuid,
 			upd->allocator_toma_id,
