@@ -200,8 +200,14 @@ void nvmeibc_cdv_dispatch_alloc_response(const struct nvmeibc_cdv_alloc_resp *re
 			pending->resp_status = resp->status;
 			pending->resp_extent_index = resp->extent_index;
 			pending->resp_allocator_generation = resp->allocator_generation;
-			spin_unlock_irqrestore(&cdv_pending_lock, flags);
+			/*
+			 * complete() must be called inside the lock.  If we
+			 * unlock first, a concurrent timeout in the waiter can
+			 * run list_del() and return (freeing the stack frame)
+			 * before complete() touches pending->done — UAF.
+			 */
 			complete(&pending->done);
+			spin_unlock_irqrestore(&cdv_pending_lock, flags);
 			return;
 		}
 	}
@@ -233,8 +239,10 @@ void nvmeibc_cdv_dispatch_list_response(const struct nvmeibc_cdv_list_resp *resp
 				else
 					pending->list_count = 0;
 			}
-			spin_unlock_irqrestore(&cdv_pending_lock, flags);
+			/* complete() inside the lock — same reason as in
+			 * nvmeibc_cdv_dispatch_alloc_response(). */
 			complete(&pending->done);
+			spin_unlock_irqrestore(&cdv_pending_lock, flags);
 			return;
 		}
 	}
@@ -293,12 +301,29 @@ int nvmeibc_ib_admin_cdv_alloc_extent(
 	/* Wait for TOMA response */
 	remaining = wait_for_completion_timeout(
 		&pending.done, CDV_ADMIN_TIMEOUT_SECS * HZ);
+
+	/*
+	 * Always remove from the pending list before returning.
+	 *
+	 * The success path must also call list_del: the pending entry lives
+	 * on our stack, and leaving it in the list after we return causes
+	 * dispatch_alloc_response to walk stale memory the next time a
+	 * response arrives — UAF and spinlock corruption.
+	 *
+	 * complete() is called inside cdv_pending_lock in the dispatch
+	 * functions, so by the time wait_for_completion_timeout() returns
+	 * the dispatch is done touching pending.done.  It is safe to
+	 * list_del here without waiting further.
+	 */
+	spin_lock_irqsave(&cdv_pending_lock, flags);
+	list_del(&pending.node);
+	spin_unlock_irqrestore(&cdv_pending_lock, flags);
+
 	if (!remaining) {
 		_NE(cdv_alloc_timeout,
 		    "CDV: ALLOC timeout after @INT seconds for req_id=@LLU",
 		    CDV_ADMIN_TIMEOUT_SECS, req->req_id);
-		rv = -ETIMEDOUT;
-		goto out_remove;
+		return -ETIMEDOUT;
 	}
 
 	/* Copy response */
@@ -399,15 +424,21 @@ int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 
 	remaining = wait_for_completion_timeout(
 		&pending.done, CDV_ADMIN_TIMEOUT_SECS * HZ);
+
+	/* Always remove from list before returning — see alloc_extent for the
+	 * full explanation of why the success path also needs list_del. */
+	spin_lock_irqsave(&cdv_pending_lock, flags);
+	list_del(&pending.node);
+	spin_unlock_irqrestore(&cdv_pending_lock, flags);
+
 	if (!remaining) {
-		rv = -ETIMEDOUT;
-		goto out_remove;
+		kvfree(pending.list_indices);
+		return -ETIMEDOUT;
 	}
 
 	/* Transfer ownership of the vmalloc'd index array to the caller. */
 	*out_indices = pending.list_indices;
 	*out_count   = pending.list_count;
-	pending.list_indices = NULL;   /* prevent out_remove cleanup */
 	return 0;
 
 out_remove:
