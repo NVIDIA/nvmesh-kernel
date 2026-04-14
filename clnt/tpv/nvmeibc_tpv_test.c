@@ -161,16 +161,13 @@ static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv,
 }
 
 /*
- * CDV extent allocation from TOMA (IB admin channel).
+ * CDV extent allocation from TOMA (IB admin channel) — test stub.
  * Simulates the TOMA response: CDV_FULL / WRONG_GEN injection, or hands
  * out the next sequential extent index.
  *
- * Called from nvmeibc_tpv_allocator.c:nvmeibc_tpv_cdv_alloc_work_fn().
- * The cdv parameter is unused in tests (tests set toma_id to "" so the
- * work function bails before reaching this for most tests, or provide a
- * fake that doesn't need dereferencing here).
+ * Installed as nvmeibc_tpv_test_cdv_alloc_fn hook during self-tests.
  */
-int nvmeibc_ib_admin_cdv_alloc_extent(
+static int ktest_cdv_alloc_extent(
 	struct nvmeibc_volume                *cdv,
 	const char                           *toma_id,
 	const struct nvmeibc_cdv_alloc_req   *req,
@@ -198,51 +195,17 @@ int nvmeibc_ib_admin_cdv_alloc_extent(
 	resp->status               = NVMEIBC_CDV_ALLOC_OK;
 	return 0;
 }
-EXPORT_SYMBOL(nvmeibc_ib_admin_cdv_alloc_extent);
 
 /*
  * CDV extent return to TOMA: always succeeds in tests.
- * Called from nvmeibc_tpv_allocator.c:tpv_drain_pending_returns().
  */
-int nvmeibc_ib_admin_cdv_free_extent(
+static int ktest_cdv_free_extent(
 	struct nvmeibc_volume                *cdv,
 	const char                           *toma_id,
 	const struct nvmeibc_cdv_free_req    *req)
 {
 	return 0;
 }
-EXPORT_SYMBOL(nvmeibc_ib_admin_cdv_free_extent);
-
-/*
- * CDV extent list query for recovery: returns the pre-configured test list.
- * The caller (nvmeibc_tpv_recovery.c) vfree()s *out_indices.
- *
- * Called from nvmeibc_tpv_recovery.c:nvmeibc_tpv_recovery().
- */
-int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
-				       const char *toma_id,
-				       const char *tpv_uuid,
-				       u64 **out_indices,
-				       u64 *out_count)
-{
-	u64 *arr;
-
-	if (!g_tc.recovery_extents || g_tc.recovery_count == 0) {
-		*out_indices = NULL;
-		*out_count   = 0;
-		return 0;
-	}
-
-	arr = vmalloc(g_tc.recovery_count * sizeof(u64));
-	if (!arr)
-		return -ENOMEM;
-
-	memcpy(arr, g_tc.recovery_extents, g_tc.recovery_count * sizeof(u64));
-	*out_indices = arr;
-	*out_count   = g_tc.recovery_count;
-	return 0;
-}
-EXPORT_SYMBOL(nvmeibc_ib_admin_cdv_list_extents);
 
 /* ── Test helper: output accumulator ────────────────────────────────────── */
 
@@ -902,6 +865,10 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
 	nvmeibc_tpv_cdv_test_sync_read_fn  = ktest_cdv_sync_read;
 	nvmeibc_tpv_cdv_test_sync_write_fn = ktest_cdv_sync_write;
 
+	/* Route CDV IB admin through the test stubs. */
+	nvmeibc_tpv_test_cdv_alloc_fn = ktest_cdv_alloc_extent;
+	nvmeibc_tpv_test_cdv_free_fn  = ktest_cdv_free_extent;
+
 	KTO_ADD(&kto,
 		"TPV kernel self-tests  "
 		"(A=%uGB E=%uMB T=%uKB slots=%llu):\n",
@@ -922,9 +889,11 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
 		KTO_ADD(&kto, "%d/%d test(s) FAILED\n",
 			kto.failures, TPV_KTEST_N_TESTS);
 
-	/* Restore production CDV sync I/O path. */
+	/* Restore production CDV sync I/O and IB admin paths. */
 	nvmeibc_tpv_cdv_test_sync_read_fn  = NULL;
 	nvmeibc_tpv_cdv_test_sync_write_fn = NULL;
+	nvmeibc_tpv_test_cdv_alloc_fn      = NULL;
+	nvmeibc_tpv_test_cdv_free_fn       = NULL;
 
 	vfree(g_tc.cdv_buf);
 	g_tc.cdv_buf = NULL;

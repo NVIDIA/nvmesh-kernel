@@ -331,12 +331,14 @@ struct nvmeibt_cdv_free_req {
 
 /* CDV_LIST_EXTENTS request */
 struct nvmeibt_cdv_list_req {
-	char tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
-	char cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	uint64_t req_id;
 };
 
 /* CDV_LIST_EXTENTS response header; followed by n_extents × uint64_t */
 struct nvmeibt_cdv_list_resp {
+	uint64_t req_id;
 	uint64_t n_extents;
 	uint8_t  status;
 };

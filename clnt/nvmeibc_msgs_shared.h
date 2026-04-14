@@ -375,16 +375,19 @@ struct nvmeibc_cdv_free_req {
 struct nvmeibc_cdv_list_req {
 	char tpv_uuid[NVMEIBC_BD_UUID_LEN];	/* whose extents to list */
 	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* which CDV to query */
+	u64  req_id;				/* monotonic request ID for response correlation */
 };
 
 /*
  * NVMEIBC_MA_CDV_LIST_EXTENTS response — variable-length.
  *
  * Followed immediately by n_extents × u64 extent indices.
- * The response is reassembled in the client's admin-channel receive path
- * (nvmeibc_ib_admin_channel.c §2.8) and returned as a vmalloc'd array.
+ * The response is dispatched by nvmeibc_cdv_dispatch_list_response()
+ * in nvmeibc_tpv_ib_admin.c, which matches the response to the pending
+ * request by req_id.
  */
 struct nvmeibc_cdv_list_resp {
+	u64  req_id;		/* echoes request req_id */
 	u64  n_extents;		/* number of u64 extent indices that follow */
 	u8   status;		/* 0 = OK, non-zero = error */
 };

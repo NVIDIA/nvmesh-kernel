@@ -28,6 +28,7 @@
 
 #include "common/kr_incs.h"
 #include "nvmeibc_tpv.h"
+#include "clnt/nvmeibc_volume.h"	/* nvmeibc_volume_get_size, NVMEIBC_SECTOR_SHIFT */
 #include "nvmeibc_tpv_test.h"		/* nvmeibc_tpv_run_selftests */
 #include "module/nvmeibc_module_main.h"	/* nvmeibc_get_module_proc_dir_entry */
 
@@ -78,6 +79,8 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
 	char   toma_id[NVMEIB_HOST_NAME_LEN];
 	u64    gen;
+	u64    cdv_extents_allocated, free_tpv_slots;
+	u64    cdv_extents_total = 0;
 	unsigned long flags;
 	ssize_t count = 0;
 
@@ -87,6 +90,21 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	memcpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id));
 	gen = tpv->allocator_generation;
 	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
+
+	spin_lock(&alloc->lock);
+	cdv_extents_allocated = alloc->cdv_extents_count;
+	free_tpv_slots        = alloc->free_tpv_extent_count;
+	spin_unlock(&alloc->lock);
+
+	/* Compute total data extents available in the CDV (same formula as the
+	 * CDV_ALLOC_EXTENT request: subtract allocator region, divide by extent size). */
+	if (tpv->cdv_vol && alloc->cdv_extent_size_mb > 0) {
+		u64 cdv_bytes  = (u64)nvmeibc_volume_get_size(tpv->cdv_vol)
+				  << NVMEIBC_SECTOR_SHIFT;
+		u64 meta_bytes = alloc->allocator_size_gb << 30;
+		u64 data_bytes = (cdv_bytes > meta_bytes) ? cdv_bytes - meta_bytes : 0;
+		cdv_extents_total = data_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
+	}
 
 	BUF_ADD("name:                %s\n",  tpv->tpv_name);
 	BUF_ADD("uuid:                %s\n",  tpv->tpv_uuid);
@@ -98,6 +116,9 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("allocator_size_gb:   %llu\n", alloc->allocator_size_gb);
 	BUF_ADD("virtual_extents:     %llu\n", alloc->virtual_extents_total);
 	BUF_ADD("low_watermark:       %llu\n", alloc->low_watermark);
+	BUF_ADD("cdv_extents_allocated: %llu / %llu\n",
+		cdv_extents_allocated, cdv_extents_total);
+	BUF_ADD("free_tpv_slots:      %llu\n", free_tpv_slots);
 	BUF_ADD("allocator_toma:      %s\n",  toma_id[0] ? toma_id : "(none)");
 	BUF_ADD("allocator_gen:       %llu\n", gen);
 

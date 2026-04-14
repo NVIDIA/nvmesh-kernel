@@ -2788,6 +2788,36 @@ static void __block_toma_msg_handler(void *unused_cinst, u64 handle, u8 *buf, in
 		break;
 	}
 
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP: {
+		const struct nvmeibc_cdv_alloc_resp *rsp;
+
+		if (len < (int)sizeof(*rsp)) {
+			_NETR(tpv_alloc_rsp_short,
+			      "CDV_ALLOC_EXTENT_RSP short len=@INT", len);
+			break;
+		}
+		rsp = (const struct nvmeibc_cdv_alloc_resp *)&pl[1];
+		nvmeibc_cdv_dispatch_alloc_response(rsp);
+		break;
+	}
+
+	case NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP: {
+		const struct nvmeibc_cdv_list_resp *rsp;
+		const u64 *indices;
+		u64 n_idx;
+
+		if (len < (int)sizeof(*rsp)) {
+			_NETR(tpv_list_rsp_short,
+			      "CDV_LIST_EXTENTS_RSP short len=@INT", len);
+			break;
+		}
+		rsp = (const struct nvmeibc_cdv_list_resp *)&pl[1];
+		n_idx = rsp->n_extents;
+		indices = (const u64 *)((const u8 *)rsp + sizeof(*rsp));
+		nvmeibc_cdv_dispatch_list_response(rsp, indices, n_idx);
+		break;
+	}
+
 	default:	/* Unsupported messages */
 		WARN(true, "nvmeibc bug. unsupported msg_type=0x%x\n", msg_type);
 		break;

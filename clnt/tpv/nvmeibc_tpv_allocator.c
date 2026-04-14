@@ -593,8 +593,8 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		req.total_data_extents = data_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
 	}
 
-	_ND(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU",
-	    tpv->tpv_name, toma_id, client_gen, req.req_id);
+	_ND(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU total_extents=@LLU",
+	    tpv->tpv_name, toma_id, client_gen, req.req_id, req.total_data_extents);
 
 	memset(&resp, 0, sizeof(resp));
 	t_start = ktime_get();

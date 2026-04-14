@@ -1199,6 +1199,24 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	if (alloc && alloc->total_data_extents == 0)
 		alloc->total_data_extents = req->total_data_extents;
 
+	/*
+	 * Mark ondisk_loaded on first-ever allocation.
+	 *
+	 * cdv_alloc_insert() creates the alloc struct with ondisk_loaded=false.
+	 * Without this, the next ALLOC request would see (alloc && !ondisk_loaded)
+	 * and call cdv_ondisk_scan(), which would re-read the just-written on-disk
+	 * record for extent[0] and call cdv_alloc_insert() again — doubling
+	 * n_allocated.  With a small CDV (1–2 data extents) that pushes
+	 * n_allocated >= total_data_extents and causes a false CDV_FULL.
+	 *
+	 * Setting ondisk_loaded=true here is safe: in-memory state was built from
+	 * live ALLOC requests and is authoritative; no disk scan is needed.
+	 * The scan path (ondisk_loaded=false on entry) is reserved for the
+	 * post-restart case where alloc exists but extent list was not yet rebuilt.
+	 */
+	if (alloc && first_alloc)
+		alloc->ondisk_loaded = true;
+
 	resp.extent_index         = candidate;
 	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
 	resp.status               = NVMEIBT_CDV_ALLOC_OK;
@@ -1356,6 +1374,7 @@ static int handle_cdv_list_extents(struct nvmeibt_register_msg *msg)
 		     "CDV: LIST_EXTENTS query failed rv=@INT cdv=@STR tpv=@STR",
 		     rv, cdv_uuid, tpv_uuid);
 		memset(&err_resp, 0, sizeof(err_resp));
+		err_resp.req_id = req->req_id;
 		err_resp.status = 1;
 		return cdv_send_response(&msg->registrant_ctx,
 					 NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
@@ -1371,12 +1390,14 @@ static int handle_cdv_list_extents(struct nvmeibt_register_msg *msg)
 		if (indices)
 			NNVMEIBT_BM_FREE(cdv_list_indices_free, indices);
 		memset(&err_resp, 0, sizeof(err_resp));
+		err_resp.req_id = req->req_id;
 		err_resp.status = 1;
 		return cdv_send_response(&msg->registrant_ctx,
 					 NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP,
 					 sizeof(err_resp), &err_resp);
 	}
 
+	resp->req_id    = req->req_id;
 	resp->n_extents = n_extents;
 	resp->status    = 0;
 	dst = (uint64_t *)((uint8_t *)resp + sizeof(*resp));

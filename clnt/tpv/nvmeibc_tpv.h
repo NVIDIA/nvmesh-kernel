@@ -277,6 +277,25 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 					   const char *toma_id,
 					   u64 generation);
 
+/* ── IB admin CDV response dispatch (implemented in nvmeibc_tpv_ib_admin.c) ── */
+
+struct nvmeibc_cdv_alloc_resp;
+struct nvmeibc_cdv_list_resp;
+void nvmeibc_cdv_dispatch_alloc_response(const struct nvmeibc_cdv_alloc_resp *resp);
+void nvmeibc_cdv_dispatch_list_response(const struct nvmeibc_cdv_list_resp *resp,
+					const u64 *indices, u64 n_indices);
+
+/* Test hook pointers (NULL in production; set by nvmeibc_tpv_test.c) */
+struct nvmeibc_cdv_alloc_req;
+struct nvmeibc_cdv_free_req;
+extern int (*nvmeibc_tpv_test_cdv_alloc_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const struct nvmeibc_cdv_alloc_req *req,
+	struct nvmeibc_cdv_alloc_resp *resp);
+extern int (*nvmeibc_tpv_test_cdv_free_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const struct nvmeibc_cdv_free_req *req);
+
 /* ── Allocator API (implemented in nvmeibc_tpv_allocator.c) ───────────── */
 
 int  nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
