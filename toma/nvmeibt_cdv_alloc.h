@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibt_cdv_alloc.h — CDV extent allocator: in-memory state.
+ * nvmeibt_cdv_alloc.h — CDV extent allocator: in-memory state + on-CDV persistence.
  *
  * TOMA maintains, for each CDV (Carrier Direct Volume), a table of which data
  * CDV_extents have been allocated to which TPV (Thin-Provisioned Volume).
@@ -15,19 +15,19 @@
  *   - nvmeibt_cdv_alloc: per-CDV allocator, held in a global hash table keyed
  *     by CDV UUID string.
  *
+ * Persistence:
+ *   Extent allocation metadata is stored on the CDV block device itself, in
+ *   the allocator region at the beginning of the volume (before the data
+ *   extents).  Each allocation/free writes a single 4 KiB record to the CDV
+ *   synchronously via O_DIRECT|O_SYNC pwrite.  On allocator election (or on
+ *   the first ALLOC request after TOMA restart), the allocator region is
+ *   scanned to rebuild in-memory state.  No local state file is used.
+ *
  * CDV allocator identity (allocator_toma_id, allocator_generation) is elected
  * by the RAFT leader via nvmeibt_cdv_alloc_elect() and distributed to all
  * TOMAs and clients:
- *   - TOMAs: via a local binary state file written atomically after each
- *     election and extent operation (nvmeibt_cdv_alloc_save_state, called
- *     internally).  On startup, nvmeibt_cdv_alloc_one_time_init() restores
- *     the full extent table before RAFT log replay.
  *   - Clients: via CDV_ALLOCATOR_UPDATE messages pushed to all registrants
  *     (nvmeibt_cdv_alloc_push_to_registrants).
- *
- * Future work: wire CDV allocator state into the RAFT persist_and_wire_buf
- * TLV sections so that it is also replicated to follower nodes in multi-TOMA
- * deployments (see nvmeibt_persistency_info.h).
  *
  * Threading:
  *   All public functions must be called from TOMA's single main thread (or
@@ -63,6 +63,46 @@ struct nvmeibt_cdv_extent_entry {
 #define NVMEIBT_CDV_WARN_PCT       90   /* fire warning at >= 90% used */
 #define NVMEIBT_CDV_WARN_CLEAR_PCT 85   /* clear flag when usage drops below 85% */
 
+/* ── On-CDV metadata format ─────────────────────────────────────────────────
+ *
+ * Extent allocation records are stored at the beginning of the CDV volume
+ * (the "allocator region", bytes 0 to allocator_size_gb * 1 GiB - 1).
+ *
+ * Layout on the CDV:
+ *   Offset 0:                    Header  (CDV_ONDISK_BLOCK_SIZE bytes)
+ *   Offset CDV_ONDISK_BLOCK_SIZE:  Record for extent_index 0
+ *   Offset 2 * CDV_ONDISK_BLOCK_SIZE: Record for extent_index 1
+ *   ...
+ *
+ * Each block is 4 KiB (PAGE_SIZE), matching the NVMe physical block size
+ * for atomic single-block writes.  With a 1 GiB allocator region this
+ * supports (1 GiB / 4 KiB) - 1 = 262,143 extent slots.
+ */
+
+#define CDV_ONDISK_BLOCK_SIZE   4096U
+#define CDV_ONDISK_MAGIC        0x43444D31U     /* 'CDM1' */
+#define CDV_ONDISK_VERSION      1
+
+struct cdv_alloc_ondisk_header {
+	uint32_t magic;                                  /* CDV_ONDISK_MAGIC */
+	uint32_t version;                                /* CDV_ONDISK_VERSION */
+	uint64_t total_data_extents;
+	char     allocator_toma_id[NVMEIBT_CDV_UUID_STRLEN]; /* 64 bytes */
+	uint64_t allocator_generation;
+	uint32_t crc32;
+	uint8_t  reserved[CDV_ONDISK_BLOCK_SIZE - 4 - 4 - 8 - 64 - 8 - 4];
+} __attribute__((__packed__));
+
+#define CDV_ONDISK_RECORD_FLAG_ALLOCATED  0x01
+
+struct cdv_alloc_ondisk_record {
+	uint8_t  flags;                                  /* CDV_ONDISK_RECORD_FLAG_ALLOCATED or 0 */
+	uint8_t  reserved1[7];
+	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];     /* 64 bytes; zeroed if free */
+	uint32_t crc32;
+	uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4];
+} __attribute__((__packed__));
+
 /* ── Per-CDV allocator ──────────────────────────────────────────────────────
  *
  * One instance per CDV that has had at least one extent allocated.
@@ -85,6 +125,7 @@ struct nvmeibt_cdv_alloc {
 	char     allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN];
 	uint64_t allocator_generation;	/* incremented on each allocator change; echoed in ALLOC responses */
 	bool     capacity_warning_sent;	/* true after CDVCapacityWarning sent; cleared on hysteresis */
+	bool     ondisk_loaded;		/* true after CDV allocator region has been scanned */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
@@ -94,7 +135,8 @@ struct nvmeibt_cdv_alloc {
  * nvmeibt_cdv_alloc_one_time_init — allocate the global hash table.
  * Called from nvmeibt_toma_init(), after nvmeibt_local_disk_one_time_init().
  * Returns 0 on success, negative errno on fatal hash-create failure.
- * In-memory state is rebuilt by RAFT log replay after init completes.
+ * In-memory state is rebuilt lazily: the CDV allocator region is scanned
+ * on the first ALLOC request for each CDV (when the disk is available).
  */
 int  nvmeibt_cdv_alloc_one_time_init(void);
 
@@ -137,12 +179,9 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
  * longer have a matching live bdev.
  *
  * Iterates the global CDV allocator hash and removes any entry whose CDV UUID
- * does not resolve to a live, non-being-deleted CDV bdev.  This catches stale
- * entries from:
- *   - State files written before the nvmeibt_cdv_alloc_remove() fix was
- *     deployed (old cdv_alloc_state.bin with deleted CDVs still listed).
- *   - Any future code path that creates an allocator entry without a matching
- *     bdev lifecycle hook.
+ * does not resolve to a live, non-being-deleted CDV bdev.  This catches any
+ * code path that creates an allocator entry without a matching bdev lifecycle
+ * hook.
  *
  * Safe to call repeatedly; no-op when the hash is fully consistent.
  * Called from garbage_collect_as_needed() after block-device GC.
@@ -153,9 +192,9 @@ void nvmeibt_cdv_alloc_gc_stale_entries(void);
  * nvmeibt_cdv_alloc_remove — tear down the per-CDV allocator when a CDV is
  * deleted.
  *
- * Removes the entry for @cdv_uuid from the global hash, frees all in-memory
- * extent records, and atomically rewrites the state file so that a subsequent
- * TOMA restart does not reload the stale entry.
+ * Removes the entry for @cdv_uuid from the global hash and frees all
+ * in-memory extent records.  The on-CDV metadata is not explicitly cleared —
+ * it is discarded with the volume itself.
  *
  * Must be called from block_device_remove() for CDV blkdevs only.
  * Safe to call if the CDV was never allocated (no-op with an info log).
@@ -234,13 +273,11 @@ struct nvmeibt_registrant_ctx;
 void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx);
 
 /*
- * nvmeibt_cdv_alloc_startup_scan — log in-memory state after restore.
+ * nvmeibt_cdv_alloc_startup_scan — log in-memory state.
  *
- * Called from nvmeibt_cdv_alloc_one_time_init() after the local state file
- * has been loaded (nvmeibt_cdv_alloc_load_state).  Iterates all CDV
- * allocators, logs per-CDV statistics, and emits CDVCapacityWarning events
- * for any CDV whose capacity is already known (total_data_extents > 0) and
- * above the warning threshold.
+ * Iterates all CDV allocators, logs per-CDV statistics, and emits
+ * CDVCapacityWarning events for any CDV whose capacity is already known
+ * (total_data_extents > 0) and above the warning threshold.
  */
 void nvmeibt_cdv_alloc_startup_scan(void);
 
