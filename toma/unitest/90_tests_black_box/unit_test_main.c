@@ -149,9 +149,9 @@ void scenario_nvmeibs_messages(void) {
 void scenario_attach_good_path_io_detach_on_volume(int v) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
 	const struct sb_volume_conf *vol = &cfg->vols[v];
-	//const struct sb_praid_conf *pr_c = &vol->chunks[0].raids[0];
+	const struct sb_praid_conf *pr_c = &vol->chunks[0].raids[0];
 	const struct sb_praid_topo *pr_t = &vol->topo_chunks[0].raids[0];
-	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME to be ioable", vol->name);
+	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME {@INT+@INT} to be ioable", vol->name, pr_c->D, pr_c->P);
 	/*for (unsigned s = 0; s < (pr_c->D + pr_c->P); s++ ) {
 		int node_idx = sb_cluster_get_node_idx_from_disk_uuid(cfg, pr_c->segs[s].disk_uuid);
 		peer_toma_simu_set_seg_inject(cfg->nodes[node_idx].peer, {pr_c->segs[s].uuid, });
@@ -182,19 +182,19 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
 	mgmt_sim_send_leader_keep_alive();
 
-	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_REMOTE1, waiting for report target");
-	mgmt_sim_send_add_volume_remote1();
+	SCENARIO_PRINT(__AUTOID__, "sending addVolume @DEV_NAME, waiting for report target", cfg->vols[0].name);
+	mgmt_sim_send_add_volume(0);
 	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
 	if (1) {		// Simulate as if kafka resent an old message again
 		WAIT_UNTIL(sim_broker_topic_is_empty(kb_vol));
 		SCENARIO_PRINT(__AUTOID__, "sending old(-1) add volume msg, Will be ignored by Toma");
 		sim_broker_topic_msg_inject_next_msg_offset(kb_vol, -1);
-		mgmt_sim_send_add_volume_r1();		// Will be ignored by Toma
+		mgmt_sim_send_add_volume(1);		// Will be ignored by Toma
 	}
 
 	mgmt_sim_send_leader_keep_alive();
-	SCENARIO_PRINT(__AUTOID__, "sending addVolume V_R1, waiting for V_R1 pRaid report");
-	mgmt_sim_send_add_volume_r1();
+	SCENARIO_PRINT(__AUTOID__, "sending addVolume @DEV_NAME, waiting for pRaid report", cfg->vols[1].name);
+	mgmt_sim_send_add_volume(1);
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_reported());
 	mgmt_sim_send_leader_keep_alive();
 	mgmt_sim_send_praid_report_req(cfg->vols[0].chunks[0].raids[0].uuid);		// Todo: Send a real value and verify it
@@ -202,12 +202,13 @@ static void scenario_create_remove_r1(void) {
 	if (1) {		// Simulate as if kafka resent a very old message again
 		SCENARIO_PRINT(__AUTOID__, "sending old(-2) add volume msg, Will be ignored by Toma");
 		sim_broker_topic_msg_inject_next_msg_offset(kb_vol, -2);
-		mgmt_sim_send_add_volume_r1();		// Will be ignored by Toma
+		mgmt_sim_send_add_volume(1);		// Will be ignored by Toma
 	}
 
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();
 	scenario_attach_good_path_io_detach_on_volume(0);
+	//scenario_attach_good_path_io_detach_on_volume(1);
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);

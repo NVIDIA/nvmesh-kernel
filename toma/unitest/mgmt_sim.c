@@ -113,7 +113,7 @@ struct mgmt_sim_state *mgmt_sim_init(struct sb_cluster_conf *initialized_cfg) {
 	return m;
 }
 
-static void __send_msg_volume_add(int vol_idx) {
+void mgmt_sim_send_add_volume(int vol_idx) {
 	#define BUF_ADD(...) rv += snprintf(&buf[rv], msg_size-rv, __VA_ARGS__)
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	const struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
@@ -143,7 +143,7 @@ static void __send_msg_volume_add(int vol_idx) {
 		}
 	}
 	BUF_ADD("]}]}]}}");
-	N_IMf(__AUTOID__, "vol=@STR sending msg addVolume, @INT[b]", m->cfg->vols[vol_idx].name, rv);
+	N_IMf(__AUTOID__, "vol=@DEV_NAME sending msg addVolume, @INT[b]", m->cfg->vols[vol_idx].name, rv);
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
 }
 
@@ -545,9 +545,6 @@ void mgmt_sim_send_leader_keep_alive(void) {
 	const size_t len = make_msg_update_leader_keepalive_token(payload, 256);
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
 }
-
-void mgmt_sim_send_add_volume_remote1(void)         { __send_msg_volume_add(0); }
-void mgmt_sim_send_add_volume_r1(     void)         { __send_msg_volume_add(1); }
 
 void mgmt_sim_send_delete_volume_r1(  void)         { __send_msg_volume_del(1, false); }
 void mgmt_sim_send_delete_volume_completed_r1(void) {
