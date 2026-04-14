@@ -115,6 +115,8 @@ static int cdv_ondisk_write_record(int fd, uint64_t seg_pbyte_s,
 	uint64_t off;
 	ssize_t  rv;
 
+	(void)pblk_size;
+
 	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_ondisk_wr_alloc,
 					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
 	if (!rec)
@@ -146,6 +148,8 @@ static int cdv_ondisk_write_header(int fd, uint64_t seg_pbyte_s,
 {
 	struct cdv_alloc_ondisk_header *hdr;
 	ssize_t rv;
+
+	(void)pblk_size;
 
 	hdr = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_ondisk_hdr_alloc,
 					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
@@ -577,7 +581,7 @@ void nvmeibt_cdv_alloc_gc_stale_entries(void)
 			n_stale++;
 		} else {
 			N_Wf(cdv_alloc_gc_overflow,
-			     "CDV-alloc: GC stale-list full (%d entries); will retry next pass",
+			     "CDV-alloc: GC stale-list full (@INT entries); will retry next pass",
 			     CDV_ALLOC_GC_MAX_STALE);
 			break;
 		}
