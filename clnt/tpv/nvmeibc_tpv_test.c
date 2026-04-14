@@ -62,18 +62,15 @@
 #include "clnt/nvmeibc_msgs_shared.h"	/* nvmeibc_cdv_alloc_req/resp, free_req */
 #include "nvmeibc_tpv_test.h"
 
-/* ── Forward declarations (CDV transport stubs defined below) ───────────── */
+/* ── Forward declarations (IB admin stubs defined below) ────────────────── */
 /*
- * These six functions are the only kernel implementations of CDV transport
- * externs declared in persist.c, io.c, allocator.c, and recovery.c.
- * Prototypes here satisfy -Werror=missing-prototypes at the definition sites.
+ * The three IB admin functions are the only stubs still provided here.
+ * The CDV block-layer transport functions (sync_read, sync_write, submit_bio)
+ * are now implemented in nvmeibc_tpv_cdv.c; self-tests redirect them via the
+ * nvmeibc_tpv_cdv_test_sync_{read,write}_fn hook pointers below.
+ *
+ * Prototypes satisfy -Werror=missing-prototypes at the definition sites.
  */
-int  nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
-				u64 cdv_offset, void *buf, u64 len);
-int  nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
-				 u64 cdv_offset, const void *buf, u64 len);
-void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
-				 struct bio *bio, u64 cdv_phys_offset);
 int  nvmeibc_ib_admin_cdv_alloc_extent(struct nvmeibc_volume *cdv,
 					const char *toma_id,
 					const struct nvmeibc_cdv_alloc_req *req,
@@ -125,19 +122,23 @@ static struct nvmeibc_tpv_ktest_ctx {
 
 static DEFINE_MUTEX(g_tc_lock);	/* serialises concurrent selftest invocations */
 
-/* ── CDV transport stub implementations ─────────────────────────────────── */
+/* ── CDV sync I/O test hooks ─────────────────────────────────────────────── */
 
 /*
- * Synchronous read: memcpy from the in-memory CDV buffer.
- *
- * Called from nvmeibc_tpv_persist.c:nvmeibc_tpv_load_state() and
- * nvmeibc_tpv_flush_state() during attach, detach, and background flush.
- *
- * Outside a self-test (cdv_buf == NULL) returns -ENOTSUPP.  This is the
- * expected pre-production state: load_state is not called in production
- * until the CDV block-layer integration (nvmeibc_tpv_cdv.c) is added.
+ * The real CDV transport functions live in nvmeibc_tpv_cdv.c.  During kernel
+ * self-tests the TPV structs have cdv_vol == NULL (no real block device), so
+ * the real functions would fail.  nvmeibc_tpv_cdv.c exposes two function-
+ * pointer hooks; we set them to the in-memory helpers below for the duration
+ * of the test run and clear them afterward.
  */
-int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
+extern int (*nvmeibc_tpv_cdv_test_sync_read_fn)(struct nvmeibc_tpv *tpv,
+						  u64 cdv_offset, void *buf,
+						  u64 len);
+extern int (*nvmeibc_tpv_cdv_test_sync_write_fn)(struct nvmeibc_tpv *tpv,
+						   u64 cdv_offset,
+						   const void *buf, u64 len);
+
+static int ktest_cdv_sync_read(struct nvmeibc_tpv *tpv,
 			       u64 cdv_offset, void *buf, u64 len)
 {
 	if (!g_tc.cdv_buf)
@@ -147,15 +148,8 @@ int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 	memcpy(buf, (char *)g_tc.cdv_buf + cdv_offset, len);
 	return 0;
 }
-EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_read);
 
-/*
- * Synchronous write: memcpy to the in-memory CDV buffer.
- *
- * Called from nvmeibc_tpv_persist.c:nvmeibc_tpv_flush_state() during
- * background persist and at detach.  Outside a self-test returns -ENOTSUPP.
- */
-int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
+static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv,
 				u64 cdv_offset, const void *buf, u64 len)
 {
 	if (!g_tc.cdv_buf)
@@ -165,20 +159,6 @@ int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 	memcpy((char *)g_tc.cdv_buf + cdv_offset, buf, len);
 	return 0;
 }
-EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_write);
-
-/*
- * Async bio submission to the CDV: not exercised by kernel self-tests.
- * The IO path (nvmeibc_tpv_make_request) is not tested here; this stub
- * exists only to satisfy the linker.  WARN_ON_ONCE fires if reached.
- */
-void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
-				 struct bio *bio,
-				 u64 cdv_phys_offset)
-{
-	WARN_ON_ONCE(1);	/* should never be called during self-tests */
-}
-EXPORT_SYMBOL(nvmeibc_tpv_cdv_submit_bio);
 
 /*
  * CDV extent allocation from TOMA (IB admin channel).
@@ -918,6 +898,10 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
 	g_tc.recovery_extents = NULL;
 	g_tc.recovery_count   = 0;
 
+	/* Route CDV sync I/O through the in-memory test buffer. */
+	nvmeibc_tpv_cdv_test_sync_read_fn  = ktest_cdv_sync_read;
+	nvmeibc_tpv_cdv_test_sync_write_fn = ktest_cdv_sync_write;
+
 	KTO_ADD(&kto,
 		"TPV kernel self-tests  "
 		"(A=%uGB E=%uMB T=%uKB slots=%llu):\n",
@@ -937,6 +921,10 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
 	else
 		KTO_ADD(&kto, "%d/%d test(s) FAILED\n",
 			kto.failures, TPV_KTEST_N_TESTS);
+
+	/* Restore production CDV sync I/O path. */
+	nvmeibc_tpv_cdv_test_sync_read_fn  = NULL;
+	nvmeibc_tpv_cdv_test_sync_write_fn = NULL;
 
 	vfree(g_tc.cdv_buf);
 	g_tc.cdv_buf = NULL;

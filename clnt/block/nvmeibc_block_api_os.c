@@ -275,6 +275,24 @@ _critical_error:
 	return -ENODEV;
 }
 
+/*
+ * block_api_os_get_bdev — extract the underlying struct block_device *
+ * from an nvmeibc_os_api's unsafe_self_ref.  The pointer is valid for the
+ * full attachment lifetime (set by block_api_os_get, cleared by block_api_os_put).
+ */
+struct block_device *block_api_os_get_bdev(const struct nvmeibc_os_api *os)
+{
+#if KS_HAS_BDEV_FILE_OPEN_BY_PATH
+	struct file *f = os->unsafe_self_ref.bdev_during_detach;
+	return f ? file_bdev(f) : NULL;
+#elif KS_HAS_BDEV_OPEN_BY_PATH
+	struct bdev_handle *h = os->unsafe_self_ref.bdev_during_detach;
+	return h ? h->bdev : NULL;
+#else
+	return os->unsafe_self_ref.bdev_during_detach;
+#endif
+}
+
 /* Do self close: -2 ref to gendisk/bdev */
 void block_api_os_put(struct nvmeibc_os_api *os)
 {

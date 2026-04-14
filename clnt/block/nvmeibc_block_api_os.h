@@ -193,6 +193,15 @@ const struct nvmeibc_os_api* block_api_os_get_os(const struct bio *bio);
 struct nvmeibc_block_device* block_api_os_get_base_bdev(const struct nvmeibc_os_api* os, ulong *sub_offset, ulong *sub_len);
 int block_api_os_verify_bio_geometry(const struct bio *bio);
 
+/*
+ * block_api_os_get_bdev — return the struct block_device * associated with an
+ * attached nvmeibc_os_api.  The returned pointer is valid for as long as the
+ * volume is attached (unsafe_self_ref is cleared at detach).
+ *
+ * Kernel-version-aware: the stored type varies across kernel generations.
+ */
+struct block_device *block_api_os_get_bdev(const struct nvmeibc_os_api *os);
+
 #include "block/datapath_utils_generic/operation/nvmeibc_block_dp_submit_bio_part.h"
 
 u64 block_api_os_get_max_supported_trim_blks(struct nvmeibc_os_api *os);

@@ -112,6 +112,7 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	vex/nvmeibc_vex_shared.o \
 	tpv/nvmeibc_tpv.o \
 	tpv/nvmeibc_tpv_allocator.o \
+	tpv/nvmeibc_tpv_cdv.o \
 	tpv/nvmeibc_tpv_io.o \
 	tpv/nvmeibc_tpv_persist.o \
 	tpv/nvmeibc_tpv_proc.o \
