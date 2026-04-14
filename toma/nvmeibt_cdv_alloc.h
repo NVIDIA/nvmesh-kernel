@@ -133,6 +133,23 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 				    uint64_t    *out_count);
 
 /*
+ * nvmeibt_cdv_alloc_gc_stale_entries — remove CDV allocator entries that no
+ * longer have a matching live bdev.
+ *
+ * Iterates the global CDV allocator hash and removes any entry whose CDV UUID
+ * does not resolve to a live, non-being-deleted CDV bdev.  This catches stale
+ * entries from:
+ *   - State files written before the nvmeibt_cdv_alloc_remove() fix was
+ *     deployed (old cdv_alloc_state.bin with deleted CDVs still listed).
+ *   - Any future code path that creates an allocator entry without a matching
+ *     bdev lifecycle hook.
+ *
+ * Safe to call repeatedly; no-op when the hash is fully consistent.
+ * Called from garbage_collect_as_needed() after block-device GC.
+ */
+void nvmeibt_cdv_alloc_gc_stale_entries(void);
+
+/*
  * nvmeibt_cdv_alloc_remove — tear down the per-CDV allocator when a CDV is
  * deleted.
  *

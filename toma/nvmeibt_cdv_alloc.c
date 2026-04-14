@@ -29,6 +29,8 @@
 #include "nvmeibt_local_disk.h"		/* struct nvmeibt_local_disk */
 #include "nvmeibt_seg_active.h"		/* struct nvmeibt_seg_active, registrant iteration */
 #include "../common/nvmeib_hash.h"
+#include "vol/nvmeibt_block_device.h"	/* nvmeibt_block_device_get_block_device_by_id, nvmeibt_blkdev_is_being_deleted */
+#include "utils/nvmeibt_uuid.h"		/* nvmeibt_urn_uuid_str_to_union_uuid */
 
 /* ── Global state ────────────────────────────────────────────────────────── */
 
@@ -552,6 +554,80 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 
 	/* Persist the updated (smaller) hash so TOMA restart stays clean. */
 	nvmeibt_cdv_alloc_save_state();
+}
+
+/* ── Stale-entry garbage collection ─────────────────────────────────────── */
+
+/*
+ * Maximum number of stale CDV allocator entries that can be cleaned up in a
+ * single GC pass.  Enough for any realistic deployment; entries beyond this
+ * limit will be caught on the next pass.
+ */
+#define CDV_ALLOC_GC_MAX_STALE 64
+
+void nvmeibt_cdv_alloc_gc_stale_entries(void)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+	char stale[CDV_ALLOC_GC_MAX_STALE][NVMEIBT_CDV_UUID_STRLEN];
+	int n_stale = 0;
+	int i;
+
+	if (!cdv_alloc_hash)
+		return;
+
+	/*
+	 * First pass: collect stale UUIDs.  We must not call
+	 * nvmeibt_cdv_alloc_remove() (which modifies the hash) while
+	 * NVMEIB_HASH_FOREACH is active.
+	 */
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+		union nvmeib_uuid bdev_uuid;
+		struct nvmeibt_block_device *bdev;
+
+		if (nvmeibt_urn_uuid_str_to_union_uuid(&bdev_uuid, alloc->cdv_uuid) < 0) {
+			N_Wf(cdv_alloc_gc_bad_uuid,
+			     "CDV-alloc: GC skipping entry with unparseable uuid=@STR",
+			     alloc->cdv_uuid);
+			continue;
+		}
+
+		bdev = nvmeibt_block_device_get_block_device_by_id(&bdev_uuid);
+
+		/* Live CDV bdev — nothing to do. */
+		if (bdev && bdev->from_config.is_cdv && !nvmeibt_blkdev_is_being_deleted(bdev))
+			continue;
+
+		if (bdev && !bdev->from_config.is_cdv) {
+			N_Ef(cdv_alloc_gc_not_cdv,
+			     "CDV-alloc: GC found allocator entry for non-CDV bdev uuid=@STR; removing",
+			     alloc->cdv_uuid);
+		} else if (bdev) {
+			/* bdev exists but is already being deleted; block_device_remove()
+			 * will call nvmeibt_cdv_alloc_remove() once GC runs, so skip here
+			 * to avoid a double-remove race.
+			 */
+			continue;
+		} else {
+			N_Wf(cdv_alloc_gc_no_bdev,
+			     "CDV-alloc: GC found stale entry for gone CDV uuid=@STR allocated=@LLU; removing",
+			     alloc->cdv_uuid, alloc->n_allocated);
+		}
+
+		if (n_stale < CDV_ALLOC_GC_MAX_STALE) {
+			strncpy(stale[n_stale], alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+			stale[n_stale][NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+			n_stale++;
+		} else {
+			N_Wf(cdv_alloc_gc_overflow,
+			     "CDV-alloc: GC stale-list full (%d entries); will retry next pass",
+			     CDV_ALLOC_GC_MAX_STALE);
+			break;
+		}
+	}
+
+	/* Second pass: remove outside of hash iteration. */
+	for (i = 0; i < n_stale; i++)
+		nvmeibt_cdv_alloc_remove(stale[i]);
 }
 
 /* ── Allocator election ─────────────────────────────────────────────────── */

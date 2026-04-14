@@ -16,6 +16,7 @@
 
 #include "nvmeibt_topology.h"
 #include "nvmeibt_kafka.h"
+#include "nvmeibt_cdv_alloc.h"		/* nvmeibt_cdv_alloc_gc_stale_entries */
 #include "interfaces/log/nvmeibt_binary_tracing.h"
 
 struct nvmeibt_topology global_ctx;
@@ -778,6 +779,11 @@ static void garbage_collect_as_needed(void)
 	nvmeibt_block_devices_garbage_collect(&is_any_garbage_collected, &is_all_garbage_collected);
 	is_modified = (is_modified || is_any_garbage_collected);
 	is_done_fully = (is_done_fully && is_all_garbage_collected);
+	/* Sanity: remove CDV allocator entries whose bdev is already gone.
+	 * Catches stale entries from old state files and any edge case that
+	 * bypasses the block_device_remove() cleanup path.
+	 */
+	nvmeibt_cdv_alloc_gc_stale_entries();
 
 	if (is_modified) {
 		N_Tf(gjii962, "Running setup_relationships again, because garbage collection removed something. And we had conf_corrupted");
