@@ -1015,7 +1015,6 @@ const struct sb_cluster_conf *sb_cluster_get_const_conf(void) { return &sys->cfg
 
 int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
 	const struct raft_msg *in_r_msg = (typeof(in_r_msg))req->cnst_msg;
-	const struct nvmeibt_persist_and_wire_buf *r_topo = (typeof(r_topo))req->cnst_data;
 	const enum nvmeibt_raft_msg_type in_msg_type = LE_SWAP32((uint32_t)in_r_msg->msg_type);
 	N_Tf(__AUTOID__, "node: @STR, received msg=@STR[@X], @INT[b]", node->from_config.name, nvmeibt_ib_protocol_signature_to_str(req->msg_type), in_msg_type, req->msg_len);
 	if (req->cbs.send_c) {
@@ -1049,28 +1048,31 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 					NNVMEIBT_BM_FREE(__AUTOID__, msg);
 					return 0;
 				}
-				if (req->data_len) {
+				if (in_r_msg->is_with_raft_log) {			// Follower logic like in raft_send_msg_to_peer()
+					const struct nvmeibt_topology_serialized_topo_header *r_topo = (typeof(r_topo))req->cnst_data;									// Leaders topology
+					      struct nvmeibt_active_topo_header              *f_topo = (typeof(f_topo))out_r_msg->persist_and_wire_buf.data;			// Folowers topology reply
 					const int leader_topo_len = LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len);
 					const int non_topo_len = (int)req->data_len - leader_topo_len;
-					const int act_topo_len = peer_toma_simu_build_act_topo_reply(peer, req->cnst_data, leader_topo_len, out_r_msg->persist_and_wire_buf.data, (int)req->data_len);		// Build peer's ACT_TOPO directly into reply buffer
+					const int act_topo_len = peer_toma_simu_build_act_topo_reply(peer, r_topo, leader_topo_len, (char*)f_topo, (int)req->data_len);		// Build peer's ACT_TOPO directly into reply buffer
 					struct nvmeibt_wire_type_len_value *out_topo_ctx = &out_r_msg->persist_and_wire_buf.topo_ctx;
-					if (non_topo_len > 0)		// Copy non-topo sections from leader after the ACT_TOPO
-						memcpy(out_r_msg->persist_and_wire_buf.data + act_topo_len, (const char *)req->cnst_data + leader_topo_len, (size_t)non_topo_len);
-
+					if (non_topo_len > 0)		// Copy non-topo (config, raft quorum,...) sections from leader after the ACT_TOPO
+						memcpy((char*)f_topo + act_topo_len, (const char *)r_topo + leader_topo_len, (size_t)non_topo_len);
 					// Update topo TLV: length and CRC (CRC covers TLV header + data)
 					out_topo_ctx->tlv_len = LE_SWAP32(act_topo_len);
 					out_topo_ctx->tlv_crc = 0;
 					{
 						uint32_t crc = crc32(0, out_topo_ctx, sizeof(*out_topo_ctx));
-						crc = crc32(crc, out_r_msg->persist_and_wire_buf.data, (size_t)act_topo_len);
+						crc = crc32(crc, f_topo, (size_t)act_topo_len);
 						out_topo_ctx->tlv_crc = LE_SWAP32(crc);
 					}
-					{	// Update persist_and_wire_total_len = header + all section lengths
+					{	// Update persist_and_wire_total_len = header + all section lengths: Calculated in persist_and_wire_recalc_total_len()
 						const int new_data_len = act_topo_len + non_topo_len;
 						out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + new_data_len);
 						msg->data_len = req->msg_len + new_data_len; // Update total message data length
 					}
 				}
+					peer->append_entries_rep_ser_ver++;
+					out_r_msg->local_serialization_version = LE_SWAP64(peer->append_entries_rep_ser_ver);	// Much like in raft_send_msg_to_peer()
 				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
 			}
