@@ -255,8 +255,8 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 	N_If(cdv_scan_start,
 	     "CDV-alloc: scanning cdv=@STR total_data_extents=@LLU", cdv_uuid, total);
 
-	/* Read each extent record */
-	for (i = 0; i < total; i++) {
+	/* Read each extent record; skip index 0 (reserved for client L1 tree). */
+	for (i = 1; i < total; i++) {
 		uint64_t off = cdv_ondisk_record_offset(seg_pbyte_s, i);
 		uint32_t expected_crc;
 
@@ -884,10 +884,11 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 	struct nvmeibt_Str *json;
 	unsigned int used_pct;
 
-	if (alloc->total_data_extents == 0)
-		return;   /* capacity unknown — cannot compute ratio */
+	if (alloc->total_data_extents <= 1)
+		return;   /* capacity unknown or only the reserved L1 extent */
 
-	used_pct = (unsigned int)(alloc->n_allocated * 100 / alloc->total_data_extents);
+	/* Usable extents exclude index 0 (reserved for client L1 tree). */
+	used_pct = (unsigned int)(alloc->n_allocated * 100 / (alloc->total_data_extents - 1));
 
 	if (used_pct < NVMEIBT_CDV_WARN_CLEAR_PCT) {
 		/* Usage safely below hysteresis threshold — reset flag. */
@@ -1136,25 +1137,31 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/* ── CDV-full check ──────────────────────────────────────────────────── */
-	if (!first_alloc && alloc->n_allocated >= total) {
+	/* ── CDV-full check (extent 0 reserved for L1 tree) ─────────────────── */
+	if (!first_alloc && alloc->n_allocated >= total - 1) {
 		N_Wf(cdv_alloc_full,
-		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU total=@LLU",
-		     cdv_uuid, alloc->n_allocated, total);
+		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU usable=@LLU",
+		     cdv_uuid, alloc->n_allocated, total - 1);
 		cdv_maybe_warn_capacity(alloc);   /* ensure Kafka event reaches management */
 		resp.status = NVMEIBT_CDV_ALLOC_CDV_FULL;
 		resp.allocator_generation = alloc->allocator_generation;
 		goto send;
 	}
 
-	/* ── Find first free extent index ────────────────────────────────────── */
+	/*
+	 * ── Find first free extent index ────────────────────────────────────
+	 *
+	 * CDV_extent[0] is reserved for the client-side L1 metadata tree
+	 * (tpv_tree_entry array persisted by nvmeibc_tpv_flush_state).
+	 * Data extents start at index 1.
+	 */
 	if (first_alloc) {
-		candidate = 0;     /* no extents allocated yet */
+		candidate = 1;
 		found     = true;
 	} else {
 		candidate = 0;
 		found     = false;
-		for (i = 0; i < total; i++) {
+		for (i = 1; i < total; i++) {
 			occupied = false;
 			XDLIST_FOREACH(entry, &alloc->extents) {
 				if (entry->extent_index == i) {
