@@ -651,3 +651,49 @@ void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_id);
+
+/*
+ * nvmeibc_tpv_update_allocator_for_cdv — update allocator for all TPVs on a CDV.
+ *
+ * Iterates the active TPV list, finds all TPVs whose parent CDV UUID matches,
+ * and calls nvmeibc_tpv_update_allocator_id() + re-arms cdv_alloc_work on each.
+ */
+void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
+					   const char *toma_id,
+					   u64 generation)
+{
+	struct nvmeibc_tpv *tpv;
+	unsigned long flags;
+	int n_updated = 0;
+
+	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
+	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
+		if (!tpv->cdv_vol)
+			continue;
+		if (strncmp(tpv->cdv_vol->hdr.uuid, cdv_uuid,
+			    NVMEIBC_BD_UUID_LEN) != 0)
+			continue;
+
+		_NI(tpv_allocator_cdv_update,
+		    "TPV @STR: CDV allocator update cdv=@STR toma=@STR gen=@LLU",
+		    tpv->tpv_name, cdv_uuid, toma_id, generation);
+
+		nvmeibc_tpv_update_allocator_id(tpv, toma_id, generation);
+
+		/*
+		 * Re-arm cdv_alloc_work in case it had previously deferred due
+		 * to an empty allocator_toma_id.
+		 */
+		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+			schedule_work(&tpv->cdv_alloc_work);
+		n_updated++;
+	}
+	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+
+	if (n_updated == 0)
+		_ND(tpv_allocator_cdv_no_match,
+		    "TPV: CDV allocator update cdv=@STR toma=@STR gen=@LLU — no matching TPVs",
+		    cdv_uuid, toma_id, generation);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_for_cdv);
+

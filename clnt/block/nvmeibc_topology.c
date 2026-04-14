@@ -18,6 +18,7 @@
 #include "block/controlpath/nvmeibc_b_cp_topo_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "main/cc_api/nvmeibc_main_capi_manipulate_vols.h"	// For attach_t
+#include "tpv/nvmeibc_tpv.h"					// nvmeibc_tpv_update_allocator_id
 #include "management_utils_common/nvmeibc_management_volume_conf_checks.h"
 #include "common/compat/kr_incs_compiler_types.h"
 #include "common/proc_epilog.h"
@@ -2733,6 +2734,22 @@ static void __block_toma_msg_handler(void *unused_cinst, u64 handle, u8 *buf, in
 	case NVMEIBT_CLIENT_MSG_TR_INVALID_DISK_SEGMENT_ID:
 		__do_on_invalid_seg_message(tr);
 		break;
+
+	case NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE: {
+		const struct nvmeibc_cdv_allocator_update *upd;
+
+		if (len < (int)sizeof(*upd)) {
+			_NETR(tpv_alloc_upd_short,
+			      "CDV_ALLOCATOR_UPDATE short len=@INT", len);
+			break;
+		}
+		upd = (const struct nvmeibc_cdv_allocator_update *)&pl[1];
+		nvmeibc_tpv_update_allocator_for_cdv(
+			upd->cdv_uuid,
+			upd->allocator_toma_id,
+			upd->allocator_generation);
+		break;
+	}
 
 	case NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED: {
 		stale_lock_resolver_set_resolved(&tr->hdr->slr, tr->seg, (void*)&pl[1]);

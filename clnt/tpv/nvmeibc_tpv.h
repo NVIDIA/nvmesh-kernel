@@ -254,6 +254,20 @@ void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 				     const char *toma_id,
 				     u64 generation);
 
+/*
+ * nvmeibc_tpv_update_allocator_for_cdv — update allocator identity for all
+ * TPVs backed by the given CDV UUID.
+ *
+ * Called from the topology handler when a CDV_ALLOCATOR_UPDATE message is
+ * received from TOMA.  Iterates the active TPV list, matches by parent CDV
+ * UUID, and calls nvmeibc_tpv_update_allocator_id() on each match.
+ *
+ * Safe to call from any context (uses spinlock internally).
+ */
+void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
+					   const char *toma_id,
+					   u64 generation);
+
 /* ── Allocator API (implemented in nvmeibc_tpv_allocator.c) ───────────── */
 
 int  nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,

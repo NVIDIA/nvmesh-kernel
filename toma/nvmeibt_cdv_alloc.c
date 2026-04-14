@@ -15,9 +15,11 @@
 #include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
-#include "nvmeibt_register.h"		/* struct nvmeibt_register_msg */
-#include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client */
+#include "nvmeibt_register.h"		/* struct nvmeibt_register_msg, nvmeibt_register_send_msg_to_registrant */
+#include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client, nvmeibt_global_get_global */
 #include "nvmeibt_kafka.h"		/* nvmeibt_kafka_outgoing_msgs_queue_add, KAFKA_PRODUCER_MSG_HEADER_* */
+#include "nvmeibt_local_disk.h"		/* struct nvmeibt_local_disk */
+#include "nvmeibt_seg_active.h"		/* struct nvmeibt_seg_active, registrant iteration */
 #include "../common/nvmeib_hash.h"
 
 /* ── Global state ────────────────────────────────────────────────────────── */
@@ -212,6 +214,165 @@ void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
 	alloc->allocator_generation = generation;
 }
 
+/* ── Allocator election ─────────────────────────────────────────────────── */
+
+/*
+ * find_or_create_alloc — look up the per-CDV allocator; create if absent.
+ */
+static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (alloc)
+		return alloc;
+
+	alloc = NNVMEIBT_BM_CALLOC(cdv_alloc_elect_alloc, sizeof(*alloc));
+	if (!alloc) {
+		N_Ef(cdv_alloc_elect_oom,
+		     "CDV-alloc: elect calloc failed cdv=@STR", cdv_uuid);
+		return NULL;
+	}
+	strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	alloc->allocator_toma_id[0] = '\0';
+	XDLIST_HEAD_INIT(&alloc->extents);
+	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
+	return alloc;
+}
+
+int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
+			    const char **candidates,
+			    int n_candidates)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+	const char *chosen;
+	int i;
+
+	if (n_candidates <= 0) {
+		N_Ef(cdv_alloc_elect_no_cand,
+		     "CDV-alloc: elect with 0 candidates cdv=@STR", cdv_uuid);
+		return -EINVAL;
+	}
+
+	alloc = find_or_create_alloc(cdv_uuid);
+	if (!alloc)
+		return -ENOMEM;
+
+	/* Sticky rule: keep the current allocator if it is still a candidate. */
+	if (alloc->allocator_toma_id[0]) {
+		for (i = 0; i < n_candidates; i++) {
+			if (strncmp(alloc->allocator_toma_id, candidates[i],
+				    NVMEIBT_CDV_HOSTNAME_LEN) == 0) {
+				N_If(cdv_alloc_elect_sticky,
+				     "CDV-alloc: elect sticky cdv=@STR allocator=@STR gen=@LLU",
+				     cdv_uuid, alloc->allocator_toma_id,
+				     alloc->allocator_generation);
+				return 0;   /* no change needed */
+			}
+		}
+	}
+
+	/* Pick a candidate: single → use it; multiple → random. */
+	if (n_candidates == 1) {
+		chosen = candidates[0];
+	} else {
+		/*
+		 * Simple deterministic hash (rdtsc-seeded) for randomness.
+		 * TOMA is single-threaded; no race concern.
+		 */
+		uint64_t seed = (uint64_t)nvmeib_public_rdtsc();
+		chosen = candidates[(unsigned int)(seed % (unsigned int)n_candidates)];
+	}
+
+	N_If(cdv_alloc_elect_new,
+	     "CDV-alloc: elect cdv=@STR old=@STR new=@STR gen @LLU -> @LLU",
+	     cdv_uuid,
+	     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(none)",
+	     chosen,
+	     alloc->allocator_generation, alloc->allocator_generation + 1);
+
+	strncpy(alloc->allocator_toma_id, chosen, NVMEIBT_CDV_HOSTNAME_LEN - 1);
+	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
+	alloc->allocator_generation++;
+
+	return 0;
+}
+
+int nvmeibt_cdv_alloc_get_allocator(const char *cdv_uuid,
+				    char *out_toma_id,
+				    uint64_t *out_generation)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc || alloc->allocator_toma_id[0] == '\0') {
+		out_toma_id[0] = '\0';
+		*out_generation = 0;
+		return -ENOENT;
+	}
+
+	strncpy(out_toma_id, alloc->allocator_toma_id, NVMEIBT_CDV_HOSTNAME_LEN);
+	*out_generation = alloc->allocator_generation;
+	return 0;
+}
+
+/*
+ * nvmeibt_cdv_alloc_push_to_registrants — broadcast CDV allocator identity.
+ *
+ * We reuse the CDV protocol signature + CDV_ALLOCATOR_UPDATE message type.
+ * The message is sent to every active registrant on this TOMA node — only
+ * clients that have the CDV attached will process it (matching by cdv_uuid).
+ */
+void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+	struct nvmeibt_cdv_allocator_update msg;
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc || alloc->allocator_toma_id[0] == '\0') {
+		N_Wf(cdv_push_no_alloc,
+		     "CDV-alloc: push_to_registrants cdv=@STR no allocator elected",
+		     cdv_uuid);
+		return;
+	}
+
+	memset(&msg, 0, sizeof(msg));
+	strncpy(msg.cdv_uuid, alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	strncpy(msg.allocator_toma_id, alloc->allocator_toma_id,
+		NVMEIBT_CDV_HOSTNAME_LEN - 1);
+	msg.allocator_generation = alloc->allocator_generation;
+
+	N_If(cdv_push_alloc_update,
+	     "CDV-alloc: push CDV_ALLOCATOR_UPDATE cdv=@STR toma=@STR gen=@LLU",
+	     msg.cdv_uuid, msg.allocator_toma_id, msg.allocator_generation);
+
+	/*
+	 * Broadcast to all active registrants on this TOMA node.  Every client
+	 * that has the CDV attached (any disk segment of it) will receive this.
+	 * Clients that don't have this CDV will ignore the unknown cdv_uuid.
+	 */
+	{
+		struct nvmeibt_local_disk   *local_disk;
+		struct nvmeibt_seg_active   *seg_active;
+		struct nvmeibt_registrant_ctx *reg_ctx;
+
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
+			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+				NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
+					if (nvmeibt_register_is_processing_registrant_removal(reg_ctx))
+						continue;
+					nvmeibt_register_send_msg_to_registrant(
+						reg_ctx,
+						NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE,
+						NVMEIBT_CLIENT_TR_REASON_NONE,
+						sizeof(msg), &msg);
+				}
+			}
+		}
+	}
+}
+
 /* ── One-time init / shutdown ────────────────────────────────────────────── */
 
 int nvmeibt_cdv_alloc_one_time_init(void)
@@ -378,8 +539,9 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 						  / alloc->total_data_extents);
 
 		(*printf_fn)(printf_ctx,
-			     "\t- cdv=%-40s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s\n",
+			     "\t- cdv=%-40s allocator=%-20s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s\n",
 			     alloc->cdv_uuid,
+			     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(unelected)",
 			     alloc->allocator_generation,
 			     alloc->n_allocated,
 			     alloc->total_data_extents,
@@ -453,6 +615,24 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 
 	alloc       = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
 	first_alloc = (alloc == NULL);
+
+	/*
+	 * ── Verify we are the elected allocator for this CDV ────────────────
+	 *
+	 * Only the elected allocator TOMA should serve ALLOC requests.  If
+	 * the allocator has been elected but it's a different node, reject
+	 * with WRONG_GEN so the client re-syncs from the CDV topology push.
+	 */
+	if (!first_alloc && alloc->allocator_toma_id[0] &&
+	    strncmp(alloc->allocator_toma_id, nvmeibt_get_my_hostname(),
+		    NVMEIBT_CDV_HOSTNAME_LEN) != 0) {
+		N_Wf(cdv_alloc_not_allocator,
+		     "CDV: ALLOC cdv=@STR rejected: this node=@STR is not allocator=@STR",
+		     cdv_uuid, nvmeibt_get_my_hostname(), alloc->allocator_toma_id);
+		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
+		resp.allocator_generation = alloc->allocator_generation;
+		goto send;
+	}
 
 	/* ── Generation check ────────────────────────────────────────────────── */
 	if (first_alloc && req->client_generation != 0) {

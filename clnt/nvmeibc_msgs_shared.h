@@ -389,6 +389,23 @@ struct nvmeibc_cdv_list_resp {
 	u8   status;		/* 0 = OK, non-zero = error */
 };
 
+/*
+ * CDV_ALLOCATOR_UPDATE — TOMA → client push.
+ *
+ * Received from TOMA when the CDV allocator identity is elected or changes.
+ * The client matches cdv_uuid to find all TPVs backed by this CDV and updates
+ * their allocator_toma_id / allocator_generation via
+ * nvmeibc_tpv_update_allocator_id().
+ *
+ * Field layout MUST stay in sync with struct nvmeibt_cdv_allocator_update
+ * in toma/nvmeibt_cdv_alloc.h.
+ */
+struct nvmeibc_cdv_allocator_update {
+	char cdv_uuid[NVMEIBC_BD_UUID_LEN];
+	char allocator_toma_id[NVMEIB_HOST_NAME_LEN];
+	u64  allocator_generation;
+};
+
 /* ── end CDV_extent allocation protocol ──────────────────────────────────── */
 
 enum {
