@@ -263,7 +263,7 @@ static void TSB_netlink_send_disk_response(const struct sandbox_nvme_device *dev
 	rep->base.error = csce_ok;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
 	__fill_disk_info(&rep->dinfo.disk, dev, true);
-	rep->dinfo.serjio_status = 0;  // nvmeibs_serjio_status_ok
+	rep->dinfo.serjio_status = NVMEIBS_SERJIO_STATUS_READY;
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
 
@@ -336,7 +336,7 @@ static void TSB_netlink_send_disk_change_event(const struct sandbox_nvme_device 
 	rep->base.error = csce_ok;
 	rep->selector = nvmeib_disk_info_reply_dinfo;
 	__fill_disk_info(&rep->dinfo.disk, dev, is_add);
-	rep->dinfo.serjio_status = 0;
+	rep->dinfo.serjio_status = NVMEIBS_SERJIO_STATUS_READY;
 	N_Tf(nl_disk_event, "Queuing disk @STR event for disk_id=@STR", is_add ? "ADD" : "REMOVE", rep->dinfo.disk.disk_id);
 	TSB_netlink_queue_enqueue(buf, nlh->nlmsg_len);
 }
