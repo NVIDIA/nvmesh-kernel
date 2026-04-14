@@ -13,9 +13,11 @@
  *
  * IO dispatch per operation:
  *
- *   READ/WRITE bios are guaranteed single-extent by blk_queue_chunk_sectors
- *   set in nvmeibc_tpv_blkdev_register.  DISCARD bios may span multiple
- *   extents (chunk_sectors does not constrain DISCARDs).
+ *   READ/WRITE bios are split to single-extent granularity at the top of
+ *   tpv_handle_one_bio.  On modern kernels (>= 5.9) with fops->submit_bio,
+ *   the generic block layer does NOT enforce chunk_sectors — the driver must
+ *   split bios itself.  DISCARD bios may span multiple extents and are
+ *   handled by the DISCARD loop inside tpv_handle_one_bio.
  *
  *   READ  + unmapped → zero-fill pages and complete immediately.
  *   WRITE + unmapped → nvmeibc_tpv_alloc_extent():
@@ -31,6 +33,23 @@
 #include "nvmeibc_tpv.h"
 #include "clnt/nvmeibc_block.h"			/* KERNEL_SECTOR_SHIFT */
 #include "common/nvmeib_common_os_block_api.h"	/* REQ_RET, REQ_RET_ZERO */
+
+/* ── Bio-split bioset for extent-boundary splitting ─────────────────────── */
+
+static struct bio_set tpv_split_bio_set;
+
+int nvmeibc_tpv_io_init(void)
+{
+	return bioset_init(&tpv_split_bio_set, BIO_POOL_SIZE, 0,
+			   BIOSET_NEED_BVECS);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_io_init);
+
+void nvmeibc_tpv_io_exit(void)
+{
+	bioset_exit(&tpv_split_bio_set);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_io_exit);
 
 /* ── Forward declarations ────────────────────────────────────────────────── */
 
@@ -107,6 +126,53 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	bool is_write;
 	u64  phys_off;
 	int  rv;
+
+	/*
+	 * ── Extent-boundary split ────────────────────────────────────────
+	 *
+	 * On modern kernels (>= 5.9) the generic block layer does not
+	 * enforce chunk_sectors for devices that provide fops->submit_bio,
+	 * so a single READ/WRITE bio may span multiple TPV extents.  Split
+	 * it here: carve off the head (up to the next extent boundary),
+	 * resubmit the tail back to make_request (which re-enters this
+	 * function for the next chunk), and fall through to single-extent
+	 * handling for the head.
+	 *
+	 * DISCARDs are excluded — they have their own multi-extent loop.
+	 */
+	if (!tpv_bio_is_discard(bio)) {
+		u64 extent_sectors = (u64)alloc->tpv_extent_size_kb << 1;
+		unsigned int to_boundary = (unsigned int)
+			(extent_sectors - (tpv_bio_start_bytes(bio) >>
+					   KERNEL_SECTOR_SHIFT) % extent_sectors);
+
+		if (bio_sectors(bio) > to_boundary) {
+			struct bio *first;
+
+			first = bio_split(bio, to_boundary,
+					  GFP_NOIO, &tpv_split_bio_set);
+			bio_chain(first, bio);
+
+			/*
+			 * Resubmit the remainder (bio) to our own
+			 * make_request via the generic block layer.
+			 * submit_bio_noacct / generic_make_request
+			 * handles the recursion safely via per-task
+			 * bio lists.
+			 */
+#if KS_REQUEST_QUEUE_HAS_REQUEST_FN
+			generic_make_request(bio);
+#else
+			submit_bio_noacct(bio);
+#endif
+			bio = first;
+
+			/* Recompute offsets for the (now trimmed) bio. */
+			virt_offset  = tpv_bio_start_bytes(bio);
+			virt_idx     = virt_offset / extent_bytes;
+			intra_offset = virt_offset % extent_bytes;
+		}
+	}
 
 	/* ── DISCARD — may span multiple extents ──────────────────────────── */
 	if (tpv_bio_is_discard(bio)) {

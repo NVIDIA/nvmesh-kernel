@@ -165,6 +165,7 @@ static void nvmeibc_module_procs_destroy(struct t_main_module_single_instance_gl
 	/* Remove /proc/nvmeibc/tpv/ before removing its parent /proc/nvmeibc/.
 	 * The per-TPV subdirs are gone by now (nvmeibc_tpv_detach_all_for_inst
 	 * was called during volume shutdown, which invoked proc_deregister). */
+	nvmeibc_tpv_io_exit();
 	nvmeibc_tpv_proc_destroy_root();
 	remove_proc_entry(_mg->proc_dir.root_name, NULL);
 	NFOUT;
@@ -182,6 +183,8 @@ int main_module_single_instance_globals_init(void)
 		rv = nvmeibc_module_procs_create(&mod_globals);
 	if (!rv)
 		rv = __t_md_area_alloc(md);
+	if (!rv)
+		rv = nvmeibc_tpv_io_init();
 	nvmeibc_cinst_array_init();
 	return rv;
 }

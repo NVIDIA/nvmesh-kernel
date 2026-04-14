@@ -220,6 +220,13 @@ struct tpv_tree_entry {
 /* ── IO API (implemented in nvmeibc_tpv_io.c) ─────────────────────────── */
 
 /*
+ * Module-level init/exit for the IO subsystem (bioset for bio splitting).
+ * Must be called once at module load/unload.
+ */
+int  nvmeibc_tpv_io_init(void);
+void nvmeibc_tpv_io_exit(void);
+
+/*
  * Re-dispatch bios parked on tpv->pending_bios after new TPV_extent slots
  * arrive.  Called from cdv_alloc_work context (process context, may sleep).
  */
