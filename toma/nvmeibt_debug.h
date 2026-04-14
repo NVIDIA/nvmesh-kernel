@@ -19,7 +19,6 @@
 #define TOMA_LOG_DIR        TOMA_ROOT_DIR "var/log/nvmesh"	// Logs directory
 #define TOMA_BINLOG_DIR     TOMA_LOG_DIR  "/trace_daemon"
 
-
 #define TOMA_SW_COMPATIBILITY_VER							0x00000350U		// unint32, Current version,
 #define TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED	0x00000350U		// First TOMA software version whose followers can merge incremental wire buffers, and support N mirror. NDU supported from 330U
 
@@ -29,31 +28,9 @@
 #define MACRO_DEF_TO_STR(s) __stringify(s)
 
 /*
- * The behavior of logging and trace-logging depends on the compilation mode:
- *
- * Compilation         "stdlog" destination           trace.config
- * -----------   --------------------------------     ------------
- *  "release"              system syslog                enabled
- *  "delease"    TOMA_LOG_DIR/toma_0.{log,err}   disabled
- *   "debug"     TOMA_LOG_DIR/toma_0.{log,err}   disabled
- *
- * Logging macros (info, error, warn, debug, info-major, trace):
- * ------------------------------------------------------------
- *
- * _If(), _Ef(), _Wf(), _Df() are sent to "stdlog"
- * _IMf() is sent to syslog by standard and alos to stdout
- * _Tf() is first filtered per trace.config and sent to "stdlog"
- * FIN, FOUT, ... are translated to _Df()
- *
- * **** Use of _Tf() is highly encouraged *****
- *
- * Trace log and filtering:
- * -----------------------
- *
  * By default everything is filtered out, nothing is logged. When TOMA starts
  * it generates "tracelist.txt" in its LOG directory. The file shows all the
  * available TRACEABLE LOG entries.
- *
  * Filtering of traceable log entries is controled by "toma_trace.config" (in the
  * same directory). Normally that file does not exist. The file holds entries
  * to add or remove traces. It is read line by line, and latter instructions
@@ -65,9 +42,6 @@
  *   [+-] filename <FILENAME>           : add/remove traces in a file
  *   [+-] line <FILENAME> <LINENUMBER>  : add/remove traces in a line
  * The "+" adds traces that meet the criteria, and the "-" remove such traces.
- *
- * Other available entires:
- *   [+-] record                        : turn TOMA recording on/off
  */
 
 // default logging settings
@@ -84,7 +58,7 @@
 #include "../common/nvmeib_macro_utils.h"
 #include "../common/compat/kr_incs_time.h"  // getnstimeofday_boot, MSEC_TO_NSEC, timespec_diff_ns, etc.
 
-	// config params defaults
+// config params defaults
 #define RAFT_LEADER_HEARTBEAT_TIMEOUT_NSEC_DEFAULT				MSEC_TO_NSEC(200)
 #define RAFT_MIN_ELECTION_TIMEOUT_FACTOR_DEFAULT				3
 #define MAX_N_SIMULTANEOUS_DIRTY_REBUILD_DEFAULT				2
@@ -128,10 +102,8 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 
 // log msg prefixesd
 
-#define VERY_MIN_TIME_BETWEEN_SYSLOG_NS MSEC_TO_NSEC(50)
 #define OK_AVG_TIME_BETWEEN_SYSLOG_NS MSEC_TO_NSEC(250)
 #define CLIP_MAX_TIME_BETWEEN_SYSLOG_NS (OK_AVG_TIME_BETWEEN_SYSLOG_NS * 5)
-#define THROTTLE_IIR_SIZE 10
 #include "../common/nvmeib_iir.h"
 
 #define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...)	({													\
@@ -145,9 +117,9 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 	getnstimeofday_boot(&_now_);																					\
 	now_ns = timespec_to_nsec(_now_);								        									  	\
 	time_since_prev_ns = now_ns - prev_write_time_ns;						       									\
-	if (time_since_prev_ns > VERY_MIN_TIME_BETWEEN_SYSLOG_NS) {														\
+	if (time_since_prev_ns > MSEC_TO_NSEC(50)) {														\
 		if (avg_ns_between_writes_IIR.new_sample_weight == 0.0) {				      								\
-			nvmeib_iir_set_new_sample_weight(&avg_ns_between_writes_IIR, (1.0 / THROTTLE_IIR_SIZE));			   	\
+			nvmeib_iir_set_new_sample_weight(&avg_ns_between_writes_IIR, 0.1);			   	\
 		}											      							      							\
 		saved_IIR = avg_ns_between_writes_IIR;																		\
 		nvmeib_iir_add_sample(&avg_ns_between_writes_IIR, min(CLIP_MAX_TIME_BETWEEN_SYSLOG_NS, time_since_prev_ns));\
