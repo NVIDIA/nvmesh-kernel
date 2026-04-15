@@ -176,7 +176,7 @@ enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE {
 
 enum NVMEIBT_MEM_TBL_INIT_MODE {
 	NVMEIBT_MEM_TBL_INIT_MODE_UNUSED_0 = (0x0),								// Invalid value, initialize and should be overriden by calculations to valid value
-	NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN = (0x1 << 0),								// Invalid value, initialize and should be overriden by calculations to valid value
+	NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN = (0x1 << 0),							// Invalid value, initialize and should be overriden by calculations to valid value
 	NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED = (0x1 << 1),					// Same as above TODO(remove)
 	NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE = (0x1 << 2),						// Required initialization was successfully done
 	NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT = (0x1 << 3),					// Fallback to INIT_DONE

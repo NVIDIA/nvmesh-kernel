@@ -463,7 +463,6 @@ static inline struct nvmeibt_praid *nvmeibt_seg_active_get_praid(struct nvmeibt_
 static inline struct nvmeibt_block_device *nvmeibt_seg_active_get_blkdev(struct nvmeibt_seg_active *seg_active);
 static inline const char *nvmeibt_seg_active_blkdev_name(struct nvmeibt_seg_active *seg_active);
 static inline struct nvmeibt_praid_lot *nvmeibt_seg_active_get_applied_praid_lot(struct nvmeibt_seg_active *seg_active);
-static inline struct nvmeibt_praid_lot *nvmeibt_seg_active_get_committed_praid_lot(struct nvmeibt_seg_active *seg_active);
 static inline struct nvmeibt_seg_lot *nvmeibt_seg_active_get_applied_seg_lot(struct nvmeibt_seg_active *seg_active);
 static inline struct nvmeibt_seg_lot *nvmeibt_seg_active_get_committed_seg_lot(struct nvmeibt_seg_active *seg_active);
 static inline bool nvmeibt_seg_active_is_deprecated_in_config(struct nvmeibt_seg_active *seg_active);
@@ -645,12 +644,6 @@ static inline struct nvmeibt_praid_lot *nvmeibt_seg_active_get_applied_praid_lot
 {
 	struct nvmeibt_praid *praid = nvmeibt_seg_active_get_praid(seg_active);
 	return (praid ? &praid->praid_follower.applied_praid_lot : NULL);
-}
-
-static inline struct nvmeibt_praid_lot *nvmeibt_seg_active_get_committed_praid_lot(struct nvmeibt_seg_active *seg_active)
-{
-	struct nvmeibt_praid *praid = nvmeibt_seg_active_get_praid(seg_active);
-	return (praid ? &praid->praid_follower.committed_praid_lot : NULL);
 }
 
 static inline struct nvmeibt_seg_lot *nvmeibt_seg_active_get_applied_seg_lot(struct nvmeibt_seg_active *seg_active)

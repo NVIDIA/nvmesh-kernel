@@ -44,7 +44,7 @@ void nvmeibt_ds_blkset_entries_sanitize_packed(
 
 static u16 calc_dirty_bits_by_topo(struct nvmeibt_seg_active *seg_active)
 {
-	struct nvmeibt_praid_lot				*praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
+	const struct nvmeibt_praid_lot			*praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
 	int8_t									n_parity;
 	int8_t									n_non_owners = 0;
 	bool									is_seg_degraded;
@@ -64,34 +64,25 @@ static u16 calc_dirty_bits_by_topo(struct nvmeibt_seg_active *seg_active)
 	return nvmeib_dbits_entry_build_unknowns_generic(n_non_owners, praid_lot->n_topo_seg_lots, n_parity, is_seg_degraded).all_bits;
 }
 
-/* Prepare dirty in dirty_plus_txid_init_val in case needed for init
- * Side effect on @disk_segment: if init mode is INIT_IRRELEVANT will convert it to INIT_DONE.
- */
-static int ds_metadata_init_EC_prepare_dirty_and_txid_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *dirty_plus_txid_init_val)
+static int ds_metadata_init_EC_prepare_dirty_and_txid_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *binfo)
 {
 	const enum NVMEIBT_MEM_TBL_INIT_MODE mode = seg_active->active_seg_topo.dirty_bits_init_mode;
-	int rv = 0;
-
 	switch (mode) {
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
-		dirty_plus_txid_init_val->bits.dirty = 0;
-		dirty_plus_txid_init_val->bits.txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS;
-		break;
+		binfo->bits.dirty = 0;
+		binfo->bits.txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS;
+		return 0;
 	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
-		dirty_plus_txid_init_val->bits.dirty = calc_dirty_bits_by_topo(seg_active);
-		dirty_plus_txid_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
-		break;
+		binfo->bits.dirty = calc_dirty_bits_by_topo(seg_active);
+		binfo->bits.txid = INITIAL_LAZY_READ_TXID;
+		return 0;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
-	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED:
+		return 0;
 	default:
-		N_Ef(dgy76gr, "EC: illegal init_mode=@INIT_MODE_STR", mem_tbl_init_mode_str(mode));
-		rv = -1;
+		N_Ef(dgy76gr, "seg=@UUID_8, illegal init_mode=@INIT_MODE_STR", nvmeibt_seg_active_UUID_8(seg_active), mem_tbl_init_mode_str(mode));
+		return -1;
 	}
-
-	return rv;
 }
 
 static void __attribute__ ((unused)) blkset_LUT_debug(int n_topo_segs, const bool l[NVMEIBT_MAX_N_SEGMENTS_IN_PRAID])
@@ -141,18 +132,12 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 {
 	bool									is_stale_rebuild_required = 0;
 	union nvmeib_lock_blkset_entry			init_val = {.all = 0};
-	bool									is_init_dirty_required;
-	bool									is_init_stale_required;
 	union nvmeib_lock_blkset_entry			*mmapped_locks_table;
 	const struct nvmeibt_local_disk			*local_disk;
-	struct nvmeibt_disk_segment				*disk_segment;
-	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	struct nvmeibt_praid_lot				*applied_praid_lot;
-	struct nvmeibt_praid_topo_ctx			*praid_topo_ctx;
+	struct nvmeibt_disk_segment				*disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
+	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
+	struct nvmeibt_praid_topo_ctx			*praid_topo_ctx = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
 
-	disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
-	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
-	praid_topo_ctx = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
 	N_Tf(gtyu765, "seg=@UUID_8 lock_init_mode=@LOCK_INIT_MODE dirty_init_mode=@DIRTY_INIT_MODE",
 		nvmeibt_seg_active_UUID_8(seg_active),
 		mem_tbl_init_mode_str(seg_topo_ctx->stale_locks_init_mode),
@@ -202,23 +187,16 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 		goto out;
 
 	// Stale_locks are always OFF for EC, nothing to init
-
-	// Now we are left with one of TURN_ALL_OFF or TURN_ALL_ON or INIT_DONE
-	// Since one u64 holds both the lock and the dirty, we prepare a value that is based
-	// on a combination of the two, and try to write it at once
-	// If any of the two is already initialized, then we keep its old value
-
-	is_init_dirty_required = (seg_topo_ctx->dirty_bits_init_mode !=  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-	is_init_stale_required = (seg_topo_ctx->stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-
+	// Now we are left with BY_TOPO or INIT_DONE, and 'init_val' to use
 	// Write over all the locks in a loop
 	if (1) { // Todo: Move to separate function
 		const uint64_t n_blksets = num_blksets_in_disk_segment(disk_segment);
 		uint64_t i;
+		const bool is_init_dirty_required = (seg_topo_ctx->dirty_bits_init_mode !=  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
+		const bool is_init_stale_required = (seg_topo_ctx->stale_locks_init_mode != NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 		bool is_init_all = (is_init_stale_required && is_init_dirty_required);
 		bool is_blkset_used_LUT[NVMEIBT_MAX_N_SEGMENTS_IN_PRAID];
-
-		applied_praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
+		const struct nvmeibt_praid_lot *applied_praid_lot = nvmeibt_seg_active_get_applied_praid_lot(seg_active);
 		init_is_blkset_used_LUT(applied_praid_lot, nvmeibt_disk_segment_idx_in_praid(disk_segment), is_blkset_used_LUT);
 		N_Tf(sdrt6b2, "Looping over n_blksets=@UINT64_TX init_dirty_required=@BOOL is_init_stale_required=@BOOL init_val=@LLX",
 			 n_blksets, is_init_dirty_required, is_init_stale_required, init_val.all);
@@ -415,7 +393,7 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 		goto out;
 	is_init_stale_required = rv;
 	rv = 0;
-	
+
 	NTOMA_ASSERT(hq123xc, (is_init_stale_required && is_init_dirty_required), "Init modes mismatch");
 
 	idx_in_praid = nvmeibt_disk_segment_idx_in_praid(disk_segment);
