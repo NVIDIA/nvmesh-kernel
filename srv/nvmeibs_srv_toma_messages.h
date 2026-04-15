@@ -27,6 +27,7 @@ enum nvmeibs_toma_status_type {		// Server requests Toma for the current status 
 	NVMEIBS_TOMA_STATUS_NM_JSON,
 	NVMEIBS_TOMA_STATUS_KAFKA_INFO,
 	NVMEIBS_TOMA_STATUS_CDV,	/* CDV extent allocator state: per-CDV usage, generation, allocator hostname */
+	NVMEIBS_TOMA_STATUS_CDV_DETAILED,	/* Per-CDV extent table: extent_index, tpv_uuid for each allocated extent */
 	NVMEIBS_TOMA_STATUS_AUTO_MAX, // The statuses after this will not be generated automatically by the server
 	NVMEIBS_TOMA_STATUS_ZEROING,
 };

@@ -2260,6 +2260,8 @@ static void print_status_str(enum nvmeibs_toma_status_type status_type, int (*pr
 			nvmeibt_local_disk_print_status(printf_fn, printf_ctx);
 		if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_CDV)
 			nvmeibt_cdv_alloc_print_status(printf_fn, printf_ctx);
+		if (status_type == NVMEIBS_TOMA_STATUS_CDV_DETAILED)
+			nvmeibt_cdv_alloc_print_status_detailed(printf_fn, printf_ctx);
 	}
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_MEM_ALLOC)
 		nvmeibt_print_alloc_free_summary_table(printf_fn, printf_ctx);

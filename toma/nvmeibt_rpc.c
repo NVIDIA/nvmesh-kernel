@@ -53,6 +53,7 @@ static int nvmeibt_rpc_command_status(int argc, char *argv[], struct nvmeibt_Str
 			{ "nm_json", NVMEIBS_TOMA_STATUS_NM_JSON },
 			{ "kafka",   NVMEIBS_TOMA_STATUS_KAFKA_INFO },
 			{ "cdv",     NVMEIBS_TOMA_STATUS_CDV },
+			{ "cdv_detailed", NVMEIBS_TOMA_STATUS_CDV_DETAILED },
 			{ "zeroing", NVMEIBS_TOMA_STATUS_ZEROING },
 	};
 

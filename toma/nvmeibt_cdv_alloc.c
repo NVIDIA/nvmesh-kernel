@@ -37,25 +37,33 @@ static struct nvmeib_hash_table *cdv_alloc_hash;
 /* ── On-CDV disk I/O ────────────────────────────────────────────────────── */
 
 /*
- * cdv_resolve_disk_io — resolve a CDV UUID to its physical disk I/O parameters.
+ * cdv_resolve_vol_io — resolve a CDV UUID to a file descriptor for I/O.
  *
- * CDVs are JBOD volumes: single chunk, single praid, single segment.
- * This function traverses bdev → chunk → praid → segment → local_disk
- * to obtain the disk fd and the segment's physical byte start.
+ * Opens /dev/nvmesh/<name> (the NVMesh block device) so that all I/O goes
+ * through the NVMesh RAID/RDMA transport.  This ensures CDV allocator
+ * metadata is replicated for availability and accessible from any TOMA
+ * that can serve as the CDV allocator.
+ *
+ * If the alloc struct already has a cached fd, returns it.  Otherwise opens
+ * the device and caches the fd.
  *
  * Returns 0 on success, negative errno on failure.
  */
-static int cdv_resolve_disk_io(const char *cdv_uuid,
-			       int *out_fd,
-			       uint64_t *out_seg_pbyte_s,
-			       int *out_pblk_size)
+#define CDV_DEV_PATH_PREFIX	"/dev/nvmesh/"
+
+static int cdv_resolve_vol_io(const char *cdv_uuid,
+			      struct nvmeibt_cdv_alloc *alloc,
+			      int *out_fd)
 {
 	union nvmeib_uuid bdev_uuid;
 	struct nvmeibt_block_device *bdev;
-	struct nvmeibt_chunk *chunk;
-	struct nvmeibt_praid *praid;
-	struct nvmeibt_disk_segment *seg;
-	struct nvmeibt_local_disk *ldisk;
+	char path[sizeof(CDV_DEV_PATH_PREFIX) + 32];
+
+	/* Return cached fd if already open. */
+	if (alloc && alloc->cdv_fd > 0) {
+		*out_fd = alloc->cdv_fd;
+		return 0;
+	}
 
 	if (nvmeibt_urn_uuid_str_to_union_uuid(&bdev_uuid, cdv_uuid) < 0)
 		return -EINVAL;
@@ -64,39 +72,35 @@ static int cdv_resolve_disk_io(const char *cdv_uuid,
 	if (!bdev || !bdev->from_config.is_cdv)
 		return -ENOENT;
 
-	if (bdev->n_chunks < 1 || !bdev->chunks[0])
-		return -ENOENT;
-	chunk = bdev->chunks[0];
+	snprintf(path, sizeof(path), "%s%s",
+		 CDV_DEV_PATH_PREFIX, bdev->from_config.client_blkdev_name);
 
-	if (chunk->n_praids < 1 || !chunk->praids[0])
-		return -ENOENT;
-	praid = chunk->praids[0];
+	{
+		int fd = NNVMEIBT_OPEN_LOCAL_DISK_WRITE(cdv_vol_open, path);
 
-	seg = praid->praid_mgmt.topo_segs[0];
-	if (!seg)
-		return -ENOENT;
+		if (fd < 0)
+			return -ENODEV;
 
-	ldisk = nvmeibt_disk_segment_get_local_disk(seg);
-	if (!ldisk)
-		return -ENOENT;
+		if (alloc)
+			alloc->cdv_fd = fd;
 
-	*out_fd         = nvmeibt_local_disk_dev_file_fd(ldisk);
-	*out_pblk_size  = nvmeibt_local_disk_pblk_size(ldisk);
-	*out_seg_pbyte_s = seg->seg_mgmt.pba_s * (uint64_t)*out_pblk_size;
-
-	if (*out_fd <= 2 || *out_pblk_size == 0 || *out_seg_pbyte_s == 0)
-		return -ENODEV;
-
+		*out_fd = fd;
+	}
 	return 0;
 }
 
 /*
- * cdv_ondisk_record_offset — byte offset on disk for extent_index's record.
+ * cdv_ondisk_record_offset — byte offset within the CDV for extent_index's record.
+ *
+ * Layout at the start of the CDV:
+ *   Offset 0:                      Header (4 KiB)
+ *   Offset CDV_ONDISK_BLOCK_SIZE:  Record for extent_index 0
+ *   Offset 2 * CDV_ONDISK_BLOCK_SIZE: Record for extent_index 1
+ *   ...
  */
-static inline uint64_t cdv_ondisk_record_offset(uint64_t seg_pbyte_s,
-						uint64_t extent_index)
+static inline uint64_t cdv_ondisk_record_offset(uint64_t extent_index)
 {
-	return seg_pbyte_s + (uint64_t)CDV_ONDISK_BLOCK_SIZE * (1 + extent_index);
+	return (uint64_t)CDV_ONDISK_BLOCK_SIZE * (1 + extent_index);
 }
 
 /*
@@ -106,16 +110,13 @@ static inline uint64_t cdv_ondisk_record_offset(uint64_t seg_pbyte_s,
  * issues a synchronous pwrite.  If tpv_uuid is NULL, the record is
  * written as free (zeroed flags).
  */
-static int cdv_ondisk_write_record(int fd, uint64_t seg_pbyte_s,
-				   int pblk_size,
+static int cdv_ondisk_write_record(int fd,
 				   uint64_t extent_index,
 				   const char *tpv_uuid)
 {
 	struct cdv_alloc_ondisk_record *rec;
 	uint64_t off;
 	ssize_t  rv;
-
-	(void)pblk_size;
 
 	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_ondisk_wr_alloc,
 					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
@@ -127,13 +128,12 @@ static int cdv_ondisk_write_record(int fd, uint64_t seg_pbyte_s,
 		strncpy(rec->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 		rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 	}
-	/* else: calloc zeroed everything — flags=0 means free */
 
 	rec->crc32 = crc32_seedless(rec, offsetof(struct cdv_alloc_ondisk_record, crc32));
 
-	off = cdv_ondisk_record_offset(seg_pbyte_s, extent_index);
+	off = cdv_ondisk_record_offset(extent_index);
 	rv = NNVMEIBT_PWRITE(cdv_ondisk_wr, fd, rec, CDV_ONDISK_BLOCK_SIZE,
-			     off, seg_pbyte_s);
+			     off, 0ULL);
 
 	NNVMEIBT_BM_FREE(cdv_ondisk_wr_free, rec);
 	return (rv < 0) ? -EIO : 0;
@@ -142,14 +142,11 @@ static int cdv_ondisk_write_record(int fd, uint64_t seg_pbyte_s,
 /*
  * cdv_ondisk_write_header — write the allocator header to CDV byte 0.
  */
-static int cdv_ondisk_write_header(int fd, uint64_t seg_pbyte_s,
-				   int pblk_size,
+static int cdv_ondisk_write_header(int fd,
 				   const struct nvmeibt_cdv_alloc *alloc)
 {
 	struct cdv_alloc_ondisk_header *hdr;
 	ssize_t rv;
-
-	(void)pblk_size;
 
 	hdr = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_ondisk_hdr_alloc,
 					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
@@ -165,7 +162,7 @@ static int cdv_ondisk_write_header(int fd, uint64_t seg_pbyte_s,
 	hdr->crc32 = crc32_seedless(hdr, offsetof(struct cdv_alloc_ondisk_header, crc32));
 
 	rv = NNVMEIBT_PWRITE(cdv_ondisk_hdr_wr, fd, hdr, CDV_ONDISK_BLOCK_SIZE,
-			     seg_pbyte_s, seg_pbyte_s);
+			     0ULL, 0ULL);
 
 	NNVMEIBT_BM_FREE(cdv_ondisk_hdr_free, hdr);
 	return (rv < 0) ? -EIO : 0;
@@ -184,20 +181,19 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 {
 	struct cdv_alloc_ondisk_header *hdr = NULL;
 	struct cdv_alloc_ondisk_record *rec = NULL;
-	int      fd, pblk_size;
-	uint64_t seg_pbyte_s;
+	int      fd;
 	uint64_t i, total, n_loaded = 0;
 	int      rv;
 
-	rv = cdv_resolve_disk_io(cdv_uuid, &fd, &seg_pbyte_s, &pblk_size);
+	rv = cdv_resolve_vol_io(cdv_uuid, alloc, &fd);
 	if (rv) {
 		/*
-		 * Disk not ready yet (e.g. topo_segs not populated during early
-		 * startup or RAFT replay).  Do NOT mark ondisk_loaded — allow the
-		 * caller to retry once the disk I/O path is available.
+		 * CDV volume not available yet (e.g. /dev/nvmesh/<name> not
+		 * created, or CDV not yet attached to this node).  Do NOT mark
+		 * ondisk_loaded — allow the caller to retry.
 		 */
 		N_Wf(cdv_scan_no_disk,
-		     "CDV-alloc: scan cdv=@STR cannot resolve disk rv=@INT; will retry",
+		     "CDV-alloc: scan cdv=@STR cannot open CDV volume rv=@INT; will retry",
 		     cdv_uuid, rv);
 		return 0;
 	}
@@ -213,7 +209,7 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 
 	/* Read header at CDV byte 0 */
 	if (NNVMEIBT_PREAD(cdv_scan_hdr_rd, fd, hdr, CDV_ONDISK_BLOCK_SIZE,
-			   seg_pbyte_s, 1) < 0) {
+			   0ULL, 1) < 0) {
 		N_Wf(cdv_scan_hdr_err,
 		     "CDV-alloc: scan cdv=@STR header read failed; treating as fresh",
 		     cdv_uuid);
@@ -248,16 +244,14 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 	if (alloc->total_data_extents == 0 && total > 0)
 		alloc->total_data_extents = total;
 
-	/* If no allocator_generation yet, adopt from on-disk header. */
 	if (alloc->allocator_generation == 0 && hdr->allocator_generation > 0)
 		alloc->allocator_generation = hdr->allocator_generation;
 
 	N_If(cdv_scan_start,
 	     "CDV-alloc: scanning cdv=@STR total_data_extents=@LLU", cdv_uuid, total);
 
-	/* Read each extent record; skip index 0 (reserved for client L1 tree). */
 	for (i = 1; i < total; i++) {
-		uint64_t off = cdv_ondisk_record_offset(seg_pbyte_s, i);
+		uint64_t off = cdv_ondisk_record_offset(i);
 		uint32_t expected_crc;
 
 		if (NNVMEIBT_PREAD(cdv_scan_rec_rd, fd, rec, CDV_ONDISK_BLOCK_SIZE,
@@ -449,8 +443,29 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 			return -ENOMEM;
 	}
 
-	if (!alloc->ondisk_loaded)
+	if (!alloc->ondisk_loaded) {
 		cdv_ondisk_scan(cdv_uuid, alloc);
+		if (!alloc->ondisk_loaded) {
+			/*
+			 * Disk I/O not available yet (CDV segments not ready).
+			 * If the allocator has known in-memory extents, we must
+			 * retry (we might be missing some from disk).  If it has
+			 * none, return 0 extents — either this is a fresh CDV
+			 * or a restart scenario where recovery will adopt
+			 * orphans once TOMA disk I/O is available.
+			 */
+			if (alloc->n_allocated > 0) {
+				N_Wf(cdv_list_not_ready,
+				     "CDV-alloc: list cdv=@STR tpv=@STR ondisk scan not ready (n_alloc=@LLU); returning EAGAIN",
+				     cdv_uuid, tpv_uuid, alloc->n_allocated);
+				return -EAGAIN;
+			}
+			N_Wf(cdv_list_scan_deferred,
+			     "CDV-alloc: list cdv=@STR tpv=@STR disk not ready, 0 in-memory extents; returning empty",
+			     cdv_uuid, tpv_uuid);
+			/* Fall through — return 0 extents. */
+		}
+	}
 
 	/* Count matches first to size the output array. */
 	XDLIST_FOREACH(entry, &alloc->extents) {
@@ -532,6 +547,10 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 		XDLIST_ELEM_DEL(&alloc->extents, entry);
 		NNVMEIBT_BM_FREE(cdv_alloc_remove_entry, entry);
 	}
+
+	/* Close the cached CDV volume fd if open. */
+	if (alloc->cdv_fd > 0)
+		NNVMEIBT_CLOSE(cdv_alloc_remove_close, alloc->cdv_fd);
 
 	nvmeib_hash_delete_ascii_str(cdv_alloc_hash, cdv_uuid);
 	NNVMEIBT_BM_FREE(cdv_alloc_remove_alloc, alloc);
@@ -633,6 +652,7 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 	strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 	alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 	alloc->allocator_toma_id[0] = '\0';
+	alloc->cdv_fd = -1;
 	XDLIST_HEAD_INIT(&alloc->extents);
 	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
 	return alloc;
@@ -708,11 +728,10 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 
 	/* Write updated allocator identity to CDV header (best-effort). */
 	{
-		int fd, pblk_size;
-		uint64_t seg_pbyte_s;
+		int fd;
 
-		if (cdv_resolve_disk_io(cdv_uuid, &fd, &seg_pbyte_s, &pblk_size) == 0)
-			cdv_ondisk_write_header(fd, seg_pbyte_s, pblk_size, alloc);
+		if (cdv_resolve_vol_io(cdv_uuid, alloc, &fd) == 0)
+			cdv_ondisk_write_header(fd, alloc);
 	}
 
 	return 1;   /* 1 = newly elected — caller should push CDV_ALLOCATOR_UPDATE */
@@ -1059,6 +1078,53 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 	(*printf_fn)(printf_ctx, "\t%llu CDV(s) total\n", n_cdvs);
 }
 
+void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+
+	(*printf_fn)(printf_ctx,
+		     "CDV ALLOCATOR DETAILED (this node: %s)\n",
+		     nvmeibt_get_my_hostname());
+
+	if (!cdv_alloc_hash || nvmeib_hash_get_n_elements(cdv_alloc_hash) == 0) {
+		(*printf_fn)(printf_ctx, "\t(no CDVs)\n");
+		return;
+	}
+
+	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+		struct nvmeibt_cdv_extent_entry *entry;
+		unsigned int used_pct = 0;
+
+		if (alloc->total_data_extents > 0)
+			used_pct = (unsigned int)(alloc->n_allocated * 100
+						  / alloc->total_data_extents);
+
+		(*printf_fn)(printf_ctx,
+			     "\tcdv=%s  allocator=%s  gen=%llu  allocated=%llu/%llu (%u%%)  ondisk_loaded=%s\n",
+			     alloc->cdv_uuid,
+			     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(unelected)",
+			     alloc->allocator_generation,
+			     alloc->n_allocated,
+			     alloc->total_data_extents,
+			     used_pct,
+			     alloc->ondisk_loaded ? "yes" : "no");
+
+		if (!XDLIST_EMPTY(&alloc->extents)) {
+			(*printf_fn)(printf_ctx,
+				     "\t  %-8s  %s\n",
+				     "ext_idx", "tpv_uuid");
+			XDLIST_FOREACH(entry, &alloc->extents) {
+				(*printf_fn)(printf_ctx,
+					     "\t  %-8llu  %s\n",
+					     entry->extent_index,
+					     entry->tpv_uuid);
+			}
+		} else {
+			(*printf_fn)(printf_ctx, "\t  (no extents)\n");
+		}
+	}
+}
+
 /* ── TPV deletion: free all extents + zero L1 tree ───────────────────────── */
 
 int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
@@ -1068,32 +1134,26 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 {
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
-	int      fd, pblk_size;
-	uint64_t seg_pbyte_s;
-	uint64_t l1_offset, l1_size, off;
+	int      fd;
 	uint64_t n_freed = 0;
-	void    *zero_buf;
-	ssize_t  wr;
 	int      rv;
 
-	rv = cdv_resolve_disk_io(cdv_uuid, &fd, &seg_pbyte_s, &pblk_size);
-	if (rv) {
-		N_Ef(cdv_free_all_no_disk,
-		     "CDV-alloc: free_all cdv=@STR tpv=@STR cannot resolve disk rv=@INT",
-		     cdv_uuid, tpv_uuid, rv);
-		return rv;
-	}
+	(void)allocator_size_gb;
+	(void)cdv_extent_size_mb;
 
 	/* ── 1. Find or create the per-CDV allocator; scan if stale ── */
 	alloc = find_or_create_alloc(cdv_uuid);
 	if (!alloc)
 		return -ENOMEM;
 
-	/*
-	 * If the extent list has not been loaded from disk yet (e.g. TOMA
-	 * restarted after extents were allocated), scan now so we can free
-	 * the correct entries.
-	 */
+	rv = cdv_resolve_vol_io(cdv_uuid, alloc, &fd);
+	if (rv) {
+		N_Ef(cdv_free_all_no_disk,
+		     "CDV-alloc: free_all cdv=@STR tpv=@STR cannot open CDV volume rv=@INT",
+		     cdv_uuid, tpv_uuid, rv);
+		return rv;
+	}
+
 	if (!alloc->ondisk_loaded)
 		cdv_ondisk_scan(cdv_uuid, alloc);
 
@@ -1102,8 +1162,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 		if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
 			continue;
 
-		if (cdv_ondisk_write_record(fd, seg_pbyte_s, pblk_size,
-					    entry->extent_index, NULL) < 0)
+		if (cdv_ondisk_write_record(fd, entry->extent_index, NULL) < 0)
 			N_Wf(cdv_free_all_rec_err,
 			     "CDV-alloc: free_all cdv=@STR idx=@LLU write_record failed; continuing",
 			     cdv_uuid, entry->extent_index);
@@ -1116,7 +1175,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 
 	/* ── 3. Rewrite header to reflect updated n_allocated ── */
 	if (n_freed > 0)
-		cdv_ondisk_write_header(fd, seg_pbyte_s, pblk_size, alloc);
+		cdv_ondisk_write_header(fd, alloc);
 
 	/* Check whether the capacity warning flag can be cleared. */
 	cdv_maybe_warn_capacity(alloc);
@@ -1125,37 +1184,20 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	     "CDV-alloc: free_all cdv=@STR tpv=@STR freed=@LLU remaining=@LLU",
 	     cdv_uuid, tpv_uuid, n_freed, alloc->n_allocated);
 
-	/* ── 4. Zero CDV_extent[0] (flat-L1 tree written by the client) ── */
-	l1_offset = seg_pbyte_s +
-		    (uint64_t)allocator_size_gb * (1024ULL * 1024ULL * 1024ULL);
-	l1_size   = (uint64_t)cdv_extent_size_mb * (1024ULL * 1024ULL);
-
-	zero_buf = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_free_all_zero_alloc,
-					       PAGE_SIZE, PAGE_SIZE);
-	if (!zero_buf) {
-		N_Ef(cdv_free_all_zero_oom,
-		     "CDV-alloc: free_all cdv=@STR tpv=@STR zero-buf OOM; L1 tree NOT zeroed",
-		     cdv_uuid, tpv_uuid);
-		return -ENOMEM;
-	}
-
-	for (off = 0; off < l1_size; off += PAGE_SIZE) {
-		wr = NNVMEIBT_PWRITE(cdv_free_all_zero_wr, fd, zero_buf, PAGE_SIZE,
-				     l1_offset + off, seg_pbyte_s);
-		if (wr < 0) {
-			N_Ef(cdv_free_all_zero_err,
-			     "CDV-alloc: free_all cdv=@STR zero L1 at off=@LLU failed; stopping",
-			     cdv_uuid, off);
-			NNVMEIBT_BM_FREE(cdv_free_all_zero_free1, zero_buf);
-			return -EIO;
-		}
-	}
-
-	NNVMEIBT_BM_FREE(cdv_free_all_zero_free2, zero_buf);
-
-	N_If(cdv_free_all_l1_zeroed,
-	     "CDV-alloc: free_all cdv=@STR tpv=@STR L1 tree zeroed @LLU bytes at @LLX",
-	     cdv_uuid, tpv_uuid, l1_size, l1_offset - seg_pbyte_s);
+	/*
+	 * ── 4. Zero the TPV's tree extent L1 header ──
+	 *
+	 * The TPV's L1/L2 tree lives in one of the freed CDV_extents (the
+	 * "tree extent"), identified by a magic header at slot 0.  The L1
+	 * header was already cleared when cdv_ondisk_write_record(NULL) reset
+	 * the on-disk record for that extent in step 2.  The physical slot
+	 * data (L1/L2 tables in the CDV data region) will be zeroed by the
+	 * NEEDS_ZEROING → background-zero path before the extent is reused.
+	 *
+	 * No additional zeroing is needed here.  The old flat-L1 code zeroed
+	 * CDV_extent[0] (the shared L1), which is no longer applicable —
+	 * each TPV has its own tree extent.
+	 */
 
 	return 0;
 }
@@ -1402,17 +1444,15 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 
 	/* Persist the allocation record to the CDV itself. */
 	{
-		int _fd, _pblk;
-		uint64_t _seg_s;
+		int _fd;
 
-		if (cdv_resolve_disk_io(cdv_uuid, &_fd, &_seg_s, &_pblk) == 0) {
-			if (cdv_ondisk_write_record(_fd, _seg_s, _pblk, candidate, tpv_uuid) < 0)
+		if (cdv_resolve_vol_io(cdv_uuid, alloc, &_fd) == 0) {
+			if (cdv_ondisk_write_record(_fd, candidate, tpv_uuid) < 0)
 				N_Wf(cdv_alloc_persist_fail,
 				     "CDV: ALLOC cdv=@STR idx=@LLU on-CDV write failed",
 				     cdv_uuid, candidate);
-			/* Also update header with latest capacity/generation. */
 			if (alloc)
-				cdv_ondisk_write_header(_fd, _seg_s, _pblk, alloc);
+				cdv_ondisk_write_header(_fd, alloc);
 		}
 	}
 
@@ -1480,11 +1520,10 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 
 		/* Clear the extent record on the CDV itself. */
 		{
-			int _fd, _pblk;
-			uint64_t _seg_s;
+			int _fd;
 
-			if (cdv_resolve_disk_io(cdv_uuid, &_fd, &_seg_s, &_pblk) == 0) {
-				if (cdv_ondisk_write_record(_fd, _seg_s, _pblk,
+			if (cdv_resolve_vol_io(cdv_uuid, alloc, &_fd) == 0) {
+				if (cdv_ondisk_write_record(_fd,
 							   req->extent_index, NULL) < 0)
 					N_Wf(cdv_free_persist_fail,
 					     "CDV: FREE cdv=@STR idx=@LLU on-CDV clear failed",

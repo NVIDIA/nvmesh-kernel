@@ -126,6 +126,7 @@ struct nvmeibt_cdv_alloc {
 	uint64_t allocator_generation;	/* incremented on each allocator change; echoed in ALLOC responses */
 	bool     capacity_warning_sent;	/* true after CDVCapacityWarning sent; cleared on hysteresis */
 	bool     ondisk_loaded;		/* true after CDV allocator region has been scanned */
+	int      cdv_fd;		/* cached fd for /dev/nvmesh/<name>; -1 = not open */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
@@ -398,6 +399,14 @@ struct nvmeibt_cdv_allocator_update {
  * NVMEIBS_TOMA_STATUS_CDV.
  */
 void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+
+/*
+ * nvmeibt_cdv_alloc_print_status_detailed — per-CDV extent table dump.
+ *
+ * For each CDV, prints every allocated extent entry (extent_index + tpv_uuid).
+ * Called from print_status_str() for NVMEIBS_TOMA_STATUS_CDV_DETAILED.
+ */
+void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 
 /* ── Incoming-message handler (wired from nvmeibt_client.c dispatch) ─────── */
 

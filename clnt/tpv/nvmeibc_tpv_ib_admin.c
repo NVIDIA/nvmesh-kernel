@@ -445,6 +445,12 @@ int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 		return -ETIMEDOUT;
 	}
 
+	/* Check TOMA response status (non-zero = error / not ready). */
+	if (pending.resp_status != 0) {
+		kvfree(pending.list_indices);
+		return -EAGAIN;
+	}
+
 	/* Transfer ownership of the vmalloc'd index array to the caller. */
 	*out_indices = pending.list_indices;
 	*out_count   = pending.list_count;
