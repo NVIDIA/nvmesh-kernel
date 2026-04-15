@@ -40,6 +40,15 @@
 #include "common/nvmeib_common_os_block_api.h"	/* REQ_RET, REQ_RET_ZERO */
 #include "clnt/nvmeibc_block.h"			/* KERNEL_SECTOR_SHIFT */
 
+/*
+ * IO_TIME_OUT_ATTACH / IO_TIME_OUT_NORMAL are local to nvmeibc_block.c;
+ * duplicate the values here for the ?: fallback when io_max_retry_secs == 0.
+ */
+#define TPV_IO_TIME_OUT_ATTACH	30			/* seconds */
+#define TPV_IO_TIME_OUT_NORMAL	((unsigned long)(1 << 20))	/* ~12 days */
+
+extern unsigned nvmeibc_io_max_retry_secs;
+
 /* ── Forward declarations for sibling implementation files ────────────── */
 
 /* nvmeibc_tpv_io.c */
@@ -510,12 +519,13 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
 	/*
-	 * Start with the attach timeout (30 s).  Bios arriving before
-	 * state_loaded will be parked and failed after this timeout if the
-	 * CDV tree never becomes readable.  Upgraded to the normal (long)
-	 * timeout by load_state_work_fn after state_loaded is set.
+	 * Start with the attach timeout.  When io_max_retry_secs is 0
+	 * (default), fall back to 30 s — same as IO_TIME_OUT_ATTACH for
+	 * regular volumes.  Upgraded to the normal (long) timeout by
+	 * load_state_work_fn after state_loaded is set.
 	 */
-	tpv->max_retry_jiffies = TPV_IO_TIMEOUT_ATTACH * HZ;
+	tpv->max_retry_jiffies =
+		(nvmeibc_io_max_retry_secs ? : TPV_IO_TIME_OUT_ATTACH) * HZ;
 
 	bio_list_init(&tpv->pending_bios);
 	bio_list_init(&tpv->pending_l1_flush_bios);

@@ -220,9 +220,10 @@ struct nvmeibc_tpv {
 
 	/*
 	 * IO timeout for parked bios — mirrors regular volume max_retry_jiffies.
-	 * Set to TPV_IO_TIMEOUT_ATTACH * HZ at attach (30 s), upgraded to
-	 * normal (effectively infinite or io_max_retry_secs) after state_loaded,
-	 * reduced to HZ / 100 (10 ms) at detach for fast drain.
+	 * Uses nvmeibc_io_max_retry_secs module param (shared with regular
+	 * volumes); when 0, falls back to IO_TIME_OUT_ATTACH (30 s) at
+	 * attach or IO_TIME_OUT_NORMAL (~infinite) after state_loaded.
+	 * Reduced to HZ / 100 (10 ms) at detach for fast drain.
 	 */
 	unsigned long                 max_retry_jiffies;
 
@@ -290,16 +291,6 @@ struct tpv_l1_header {
 	u64 n_l2_slots_used;		/* number of L2 slots consumed */
 	u8  reserved[16];		/* pad to 64 bytes total */
 };
-
-/* ── IO timeout constants ─────────────────────────────────────────────── */
-
-/*
- * Defaults mirror IO_TIME_OUT_ATTACH and IO_TIME_OUT_NORMAL from
- * nvmeibc_block.c.  The normal-operation timeout may be overridden by the
- * nvmeibc_io_max_retry_secs module parameter (shared with regular volumes).
- */
-#define TPV_IO_TIMEOUT_ATTACH	30		/* seconds; blocking IO during attach */
-#define TPV_IO_TIMEOUT_NORMAL	(1 << 20)	/* seconds; virtually infinite */
 
 /* ── IO API (implemented in nvmeibc_tpv_io.c) ─────────────────────────── */
 

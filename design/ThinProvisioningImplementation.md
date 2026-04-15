@@ -3373,14 +3373,17 @@ that fires when parked bios have waited too long.
 
 #### Timeout values by state
 
+TPV uses the same `nvmeibc_io_max_retry_secs` module parameter as regular volumes.
+When the parameter is 0 (default), the same fallback values apply:
+
 | State | `max_retry_jiffies` | Source |
 |-------|---------------------|--------|
-| Attaching (state\_loaded == false) | `TPV_IO_TIMEOUT_ATTACH * HZ` (30 s) | Matches regular volume attach timeout |
-| Attached (normal operation) | `(nvmeibc_io_max_retry_secs ?: TPV_IO_TIMEOUT_NORMAL) * HZ` | Shares the existing module parameter; defaults to ~∞ |
+| Attaching (state\_loaded == false) | `(nvmeibc_io_max_retry_secs ?: 30) * HZ` | Same as `IO_TIME_OUT_ATTACH` in `nvmeibc_block.c` |
+| Attached (normal operation) | `(nvmeibc_io_max_retry_secs ?: (1 << 20)) * HZ` | Same as `IO_TIME_OUT_NORMAL` in `nvmeibc_block.c` |
 | Detaching | `HZ / 100` (10 ms) | Matches regular volume detach drain |
 
-`TPV_IO_TIMEOUT_ATTACH = 30`, `TPV_IO_TIMEOUT_NORMAL = (1 << 20)` — same constants
-as `IO_TIME_OUT_ATTACH` and `IO_TIME_OUT_NORMAL` in `nvmeibc_block.c`.
+When `nvmeibc_io_max_retry_secs` is nonzero, the configured value is used at all
+stages (attach, normal, detach override to 10 ms is always applied).
 
 #### Timeout work lifecycle
 
@@ -3412,9 +3415,10 @@ the 30-second attach timeout.
      /* ... existing fields ... */
 +
 +    /*
-+     * IO timeout for parked bios — matches regular volume max_retry_jiffies.
-+     * Set to TPV_IO_TIMEOUT_ATTACH at attach, upgraded to normal after
-+     * state_loaded, reduced to HZ/100 at detach.
++     * IO timeout for parked bios — mirrors regular volume max_retry_jiffies.
++     * Uses nvmeibc_io_max_retry_secs module param (shared with regular
++     * volumes); when 0, falls back to IO_TIME_OUT_ATTACH / IO_TIME_OUT_NORMAL.
++     * Reduced to HZ / 100 at detach for fast drain.
 +     */
 +    unsigned long                 max_retry_jiffies;
 +
