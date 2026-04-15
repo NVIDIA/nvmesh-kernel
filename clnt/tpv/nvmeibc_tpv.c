@@ -767,10 +767,14 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 		nvmeibc_tpv_update_allocator_id(tpv, toma_id, generation);
 
 		/*
-		 * Re-arm cdv_alloc_work in case it had previously deferred due
-		 * to an empty allocator_toma_id.
+		 * Re-arm load_state_work if the allocator state hasn't been
+		 * loaded yet — load_state retries may have stalled waiting
+		 * for the TOMA identity.  Otherwise re-arm cdv_alloc_work
+		 * in case it deferred due to an empty allocator_toma_id.
 		 */
-		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+		if (!READ_ONCE(tpv->state_loaded))
+			schedule_delayed_work(&tpv->load_state_work, 0);
+		else if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
 		n_updated++;
 	}
