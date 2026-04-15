@@ -932,6 +932,52 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 	NNVMEIBT_STR_FREE(cdv_cap_warn_json_free, json);
 }
 
+/*
+ * cdv_publish_alloc_stats — push a CDVAllocatorStats Kafka event.
+ *
+ * Sends current allocation counters (allocated / total data extents) to
+ * management so the UI can display them without polling.  Uses a
+ * stats-specific unique_key ("S_<cdv_uuid>") to avoid displacing the
+ * CDVCapacityWarning event, which uses the bare cdv_uuid as its key.
+ *
+ * Called after every successful CDV_ALLOC_EXTENT and CDV_FREE_EXTENT.
+ * The Kafka queue dedup mechanism coalesces rapid alloc/free sequences into
+ * a single message per CDV, so the Kafka traffic is bounded.
+ */
+static void cdv_publish_alloc_stats(struct nvmeibt_cdv_alloc *alloc)
+{
+	struct nvmeibt_Str *json;
+	char stats_key[NVMEIBT_CDV_UUID_STRLEN + 3];
+
+	if (alloc->total_data_extents == 0)
+		return; /* capacity not yet known; skip */
+
+	snprintf(stats_key, sizeof(stats_key), "S_%s", alloc->cdv_uuid);
+
+	json = NNVMEIBT_STR_ALLOC(cdv_stats_json_alloc);
+	if (!json) {
+		N_Ef(cdv_stats_json_oom,
+		     "CDV: cdvAllocatorStats OOM cdv=@STR", alloc->cdv_uuid);
+		return;
+	}
+
+	nvmeibt_Str_sprintf(json,
+		"{" KAFKA_PRODUCER_MSG_HEADER_FMT
+		"\"payload\": {\"cdvUUID\": \"%s\", "
+		"\"allocatedExtents\": %llu, \"totalDataExtents\": %llu}}",
+		KAFKA_PRODUCER_MSG_HEADER_VAR("cdvAllocatorStats", 1),
+		alloc->cdv_uuid,
+		alloc->n_allocated, alloc->total_data_extents);
+
+	nvmeibt_kafka_outgoing_msgs_queue_add(
+		stats_key,
+		nvmeibt_Str_str(json),
+		nvmeibt_Str_strlen(json) + 1,
+		NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
+
+	NNVMEIBT_STR_FREE(cdv_stats_json_free, json);
+}
+
 /* ── Startup recovery scan ───────────────────────────────────────────────── */
 
 void nvmeibt_cdv_alloc_startup_scan(void)
@@ -1330,8 +1376,10 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	resp.status               = NVMEIBT_CDV_ALLOC_OK;
 
 	/* Check if this allocation pushed the CDV above the warning watermark. */
-	if (alloc)
+	if (alloc) {
 		cdv_maybe_warn_capacity(alloc);
+		cdv_publish_alloc_stats(alloc);
+	}
 
 	N_If(cdv_alloc_ok,
 	     "CDV: ALLOC OK cdv=@STR idx=@LLU tpv=@STR req_id=@LLU gen=@LLU",
@@ -1435,6 +1483,7 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 		 * next rise above WARN_PCT fires a fresh Kafka event.
 		 */
 		cdv_maybe_warn_capacity(alloc);
+		cdv_publish_alloc_stats(alloc);
 		return 0;
 	}
 
