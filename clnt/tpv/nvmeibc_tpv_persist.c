@@ -61,6 +61,16 @@ extern int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 /* Module param: enable L1/L2 ownership sanity checks during load_state. */
 extern bool tp_verify_l1_l2_extent_ownership;
 
+/*
+ * Bail early from load_state / flush_state when the TPV is being detached.
+ * Without this, sync_read/sync_write can block indefinitely waiting for a
+ * CDV bio that will never complete (TOMA already down during shutdown).
+ */
+static inline bool tpv_is_detaching(const struct nvmeibc_tpv *tpv)
+{
+	return atomic_read(&tpv->state) == TPV_DETACHING;
+}
+
 /* ── Geometry helpers ──────────────────────────────────────────────────── */
 
 static inline u64 persist_alloc_bytes(const struct nvmeibc_tpv_allocator *a)
@@ -155,6 +165,9 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	u64  prev_l1_idx = (u64)-1;
 	int  rv = 0;
 
+	if (tpv_is_detaching(tpv))
+		return -ECANCELED;
+
 	if (tree_ei == 0) {
 		_NW(tpv_flush_no_tree,
 		    "TPV: @STR: flush_state: no tree extent; nothing to flush",
@@ -240,6 +253,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 				}
 
 				/* Write L2 to CDV. */
+				if (tpv_is_detaching(tpv)) {
+					rv = -ECANCELED;
+					goto out;
+				}
 				rv = nvmeibc_tpv_cdv_sync_write(tpv,
 					persist_tree_slot_offset(alloc, tree_ei, l2_slot),
 					l2, T);
@@ -293,6 +310,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			l2_slot = xa_to_value(slot_p);
 		}
 
+		if (tpv_is_detaching(tpv)) {
+			rv = -ECANCELED;
+			goto out;
+		}
 		rv = nvmeibc_tpv_cdv_sync_write(tpv,
 			persist_tree_slot_offset(alloc, tree_ei, l2_slot),
 			l2, T);
@@ -329,6 +350,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			 * This L2 table has no mapped entries.  Write a zeroed L2
 			 * table so load_state sees all-null leaves.
 			 */
+			if (tpv_is_detaching(tpv)) {
+				rv = -ECANCELED;
+				goto out;
+			}
 			memset(l2, 0, T);
 			rv = nvmeibc_tpv_cdv_sync_write(tpv,
 				persist_tree_slot_offset(alloc, tree_ei, l2_slot),
@@ -345,6 +370,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	}
 
 	/* Finalize header and write L1 to CDV. */
+	if (tpv_is_detaching(tpv)) {
+		rv = -ECANCELED;
+		goto out;
+	}
 	hdr->n_l2_slots_used = alloc->n_l2_slots_used;
 
 	rv = nvmeibc_tpv_cdv_sync_write(tpv,
@@ -447,6 +476,9 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	unsigned long flags;
 	LIST_HEAD(le_list);
 
+	if (tpv_is_detaching(tpv))
+		return -ECANCELED;
+
 	/* ── 1. Snapshot TOMA identity ────────────────────────────────── */
 	spin_lock_irqsave(&tpv->allocator_id_lock, flags);
 	strncpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id) - 1);
@@ -501,6 +533,10 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			u64 off = persist_tree_slot_offset(alloc,
 							   toma_indices[i], 0);
 
+			if (tpv_is_detaching(tpv)) {
+				rv = -ECANCELED;
+				goto out_free;
+			}
 			rv = nvmeibc_tpv_cdv_sync_read(tpv, off, &probe,
 						       sizeof(probe));
 			if (rv)
@@ -536,6 +572,10 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		goto out_free;
 	}
 
+	if (tpv_is_detaching(tpv)) {
+		rv = -ECANCELED;
+		goto out_free;
+	}
 	rv = nvmeibc_tpv_cdv_sync_read(tpv,
 		persist_tree_slot_offset(alloc, tree_ei, 0),
 		l1_buf, T);
@@ -601,6 +641,10 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			 xa_mk_value(l2_slot), GFP_NOIO);
 
 		/* Read L2 table from CDV. */
+		if (tpv_is_detaching(tpv)) {
+			rv = -ECANCELED;
+			goto out_free;
+		}
 		rv = nvmeibc_tpv_cdv_sync_read(tpv,
 			persist_tree_slot_offset(alloc, l2_extent_idx, l2_slot),
 			l2, T);
