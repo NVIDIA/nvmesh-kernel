@@ -475,9 +475,13 @@ static void cdv_ondisk_scan_async(const char *cdv_uuid,
  * don't block the main thread.  The main thread prepares the 4 KiB write
  * buffer (including CRC), hands it to the worker, and proceeds immediately.
  *
- * Writes are fire-and-forget: the finalize callback logs errors but takes no
- * corrective action.  The in-memory state is authoritative; on-disk records
- * are best-effort persistence.
+ * Two flavors:
+ *   - Fire-and-forget: for FREE, FREE_ALL, election header.  The finalize
+ *     callback logs errors but takes no corrective action.
+ *   - Persist-then-respond: for ALLOC.  The response to the client is sent
+ *     from the finalize callback ONLY after the worker confirms the pwrite
+ *     succeeded.  This guarantees the allocation record is on disk before the
+ *     client acts on it (crash safety).
  */
 
 /* WQ entry for a single CDV write (record or header). */
@@ -623,6 +627,165 @@ static void cdv_async_write_header(struct nvmeibt_cdv_alloc *alloc)
 		offsetof(struct cdv_alloc_ondisk_header, crc32));
 
 	cdv_dispatch_write(alloc, hdr, 0ULL);
+}
+
+/* ── Persist-then-respond: ALLOC write with deferred client response ────── */
+
+/*
+ * WQ entry for the ALLOC path: writes record + header on the worker thread,
+ * then sends the ALLOC response to the client from the finalize callback
+ * (main thread) ONLY after the on-disk record is confirmed written.
+ *
+ * This guarantees crash safety: if TOMA dies between alloc and response, the
+ * client never learns about the extent.  If TOMA dies after the response,
+ * the record is already on disk and will be found on scan.
+ */
+struct cdv_alloc_persist_wq_entry {
+	struct nvmeibt_wq_entry          wq_entry;
+	struct nvmeibt_cdv_alloc        *alloc;
+
+	/* Buffers prepared by main thread, written by worker. */
+	void    *record_buf;
+	uint64_t record_offset;
+	void    *header_buf;
+
+	/* Response to send from finalize after write completes. */
+	struct nvmeibt_registrant_ctx    reg_ctx;	/* copy — msg may be freed */
+	struct nvmeibt_cdv_alloc_resp    resp;
+
+	int      write_rv;				/* result from pwrite */
+};
+
+static void cdv_alloc_persist_execute(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_alloc_persist_wq_entry *e =
+		container_of(wq_entry, struct cdv_alloc_persist_wq_entry, wq_entry);
+	int fd;
+
+	e->write_rv = 0;
+	fd = cdv_worker_open_fd(e->alloc);
+	if (fd < 0) {
+		e->write_rv = -ENODEV;
+		goto done;
+	}
+
+	/* Write the allocation record — this is the critical write. */
+	if (NNVMEIBT_PWRITE(cdv_alloc_persist_rec_wr, fd, e->record_buf,
+			    CDV_ONDISK_BLOCK_SIZE, e->record_offset, 0ULL) < 0) {
+		e->write_rv = -EIO;
+		goto done;
+	}
+
+	/* Write the updated header (best-effort; record write is the important one). */
+	if (e->header_buf) {
+		if (NNVMEIBT_PWRITE(cdv_alloc_persist_hdr_wr, fd, e->header_buf,
+				    CDV_ONDISK_BLOCK_SIZE, 0ULL, 0ULL) < 0)
+			N_Wf(cdv_alloc_persist_hdr_fail,
+			     "CDV-alloc: ALLOC persist header write failed (record OK)");
+	}
+
+done:
+	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, &e->wq_entry);
+}
+
+static void cdv_alloc_persist_finalize(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_alloc_persist_wq_entry *e =
+		container_of(wq_entry, struct cdv_alloc_persist_wq_entry, wq_entry);
+
+	if (wq_entry->is_canceled || e->write_rv < 0) {
+		N_Ef(cdv_alloc_persist_fin_err,
+		     "CDV-alloc: ALLOC persist failed rv=@INT canceled=@INT; sending ERROR to client",
+		     e->write_rv, wq_entry->is_canceled);
+		e->resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+	}
+
+	/* Send the response to the client — on success the record is on disk. */
+	cdv_send_response(&e->reg_ctx,
+			  NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP,
+			  sizeof(e->resp), &e->resp);
+}
+
+static void cdv_alloc_persist_free(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_alloc_persist_wq_entry *e =
+		container_of(wq_entry, struct cdv_alloc_persist_wq_entry, wq_entry);
+
+	if (e->record_buf)
+		NNVMEIBT_BM_FREE(cdv_alloc_persist_rec_free, e->record_buf);
+	if (e->header_buf)
+		NNVMEIBT_BM_FREE(cdv_alloc_persist_hdr_free, e->header_buf);
+	NNVMEIBT_BM_FREE(cdv_alloc_persist_wqe_free, e);
+}
+
+/*
+ * cdv_dispatch_alloc_persist — persist an ALLOC record and defer the client
+ * response until the write completes.
+ *
+ * Returns 0 if the work was successfully dispatched (response will be sent
+ * from finalize).  Returns < 0 on dispatch failure (caller must send the
+ * response itself).
+ */
+static int cdv_dispatch_alloc_persist(struct nvmeibt_cdv_alloc *alloc,
+				      uint64_t extent_index,
+				      const char *tpv_uuid,
+				      const struct nvmeibt_registrant_ctx *reg_ctx,
+				      const struct nvmeibt_cdv_alloc_resp *resp)
+{
+	struct cdv_alloc_persist_wq_entry *e;
+	struct cdv_alloc_ondisk_record *rec;
+	struct cdv_alloc_ondisk_header *hdr;
+
+	if (!alloc->io_wq)
+		return -ENODEV;
+
+	e = NNVMEIBT_BM_CALLOC(cdv_alloc_persist_wqe_alloc, sizeof(*e));
+	if (!e)
+		return -ENOMEM;
+
+	/* Prepare the record buffer. */
+	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_alloc_persist_rec_buf,
+					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
+	if (!rec) {
+		NNVMEIBT_BM_FREE(cdv_alloc_persist_wqe_oom, e);
+		return -ENOMEM;
+	}
+	rec->flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED;
+	strncpy(rec->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	rec->crc32 = crc32_seedless(rec,
+		offsetof(struct cdv_alloc_ondisk_record, crc32));
+
+	/* Prepare the header buffer. */
+	hdr = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_alloc_persist_hdr_buf,
+					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
+	if (hdr) {
+		hdr->magic   = CDV_ONDISK_MAGIC;
+		hdr->version = CDV_ONDISK_VERSION;
+		hdr->total_data_extents   = alloc->total_data_extents;
+		hdr->allocator_generation = alloc->allocator_generation;
+		strncpy(hdr->allocator_toma_id, alloc->allocator_toma_id,
+			NVMEIBT_CDV_UUID_STRLEN - 1);
+		hdr->crc32 = crc32_seedless(hdr,
+			offsetof(struct cdv_alloc_ondisk_header, crc32));
+	}
+	/* hdr alloc failure is non-fatal — header write is best-effort. */
+
+	e->wq_entry.type     = "CDV_ALLOC_PERSIST";
+	e->wq_entry.execute  = cdv_alloc_persist_execute;
+	e->wq_entry.finalize = cdv_alloc_persist_finalize;
+	e->wq_entry.abort    = nvmeibt_toma_wakeup_wq_abort_func;
+	e->wq_entry.free     = cdv_alloc_persist_free;
+
+	e->alloc         = alloc;
+	e->record_buf    = rec;
+	e->record_offset = cdv_ondisk_record_offset(extent_index);
+	e->header_buf    = hdr;
+	e->reg_ctx       = *reg_ctx;	/* struct copy */
+	e->resp          = *resp;	/* struct copy */
+
+	nvmeibt_wq_addw(alloc->io_wq, &e->wq_entry);
+	return 0;
 }
 
 /* ── Internal helpers ───────────────────────────────────────────────────── */
@@ -1793,11 +1956,26 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	     "CDV: ALLOC OK cdv=@STR idx=@LLU tpv=@STR req_id=@LLU gen=@LLU",
 	     cdv_uuid, candidate, tpv_uuid, req->req_id, resp.allocator_generation);
 
-	/* Persist the allocation record to the CDV (async, best-effort). */
-	if (alloc) {
-		cdv_async_write_record(alloc, candidate, tpv_uuid);
-		cdv_async_write_header(alloc);
-	}
+	/*
+	 * Persist the allocation record to the CDV and THEN send the response.
+	 * The client must not learn about the extent until the on-disk record
+	 * is confirmed written — otherwise a TOMA crash between response and
+	 * write would leave the client holding an untracked extent.
+	 *
+	 * cdv_dispatch_alloc_persist() queues the write on the per-CDV I/O WQ;
+	 * the response is sent from the finalize callback on the main thread
+	 * after the worker confirms the pwrite succeeded.
+	 *
+	 * If dispatch fails (OOM, no WQ), fall through to synchronous response
+	 * with ERROR status so the client retries.
+	 */
+	if (alloc && cdv_dispatch_alloc_persist(alloc, candidate, tpv_uuid,
+						&msg->registrant_ctx, &resp) == 0)
+		return 0;   /* response will be sent from finalize */
+
+	/* Dispatch failed — send error response immediately. */
+	if (resp.status == NVMEIBT_CDV_ALLOC_OK)
+		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
 
 send:
 	return cdv_send_response(&msg->registrant_ctx,
