@@ -689,7 +689,7 @@ static void inc_topo_cntr(struct nvmeibc_topology *t)
 static bool topo_is_del_allowed(struct nvmeibc_topology *t)
 {
 	const int sum = nvmeibc_topo_get_topo_users(t);
-	_ND_TOPO(trace_topology_topo_is_del_allowed, t, "sum=@SUM", sum);
+	_NT_TOPO(trace_topology_topo_is_del_allowed, t, "sum=@SUM", sum);
 	WARN_TOPO(sum < 0, t, "io can stuck. sum=%d\n", sum);
 	return (sum == 0);
 }
