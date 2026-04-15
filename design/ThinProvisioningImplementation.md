@@ -2974,3 +2974,375 @@ Both screens show `—` when `runtimeStats` is absent (TPV not yet attached, or 
 
 ---
 
+## Part 11 — TPV Hot Upgrade (NDU)
+
+### 11.1 Problem Statement
+
+During a Non-Disruptive Upgrade (NDU), the `nvmeibc` kernel module is unloaded and a
+new version is loaded in its place.  Regular NVMesh volumes survive this transition
+transparently — the ATOM module (`nvmeiba`) owns their gendisk and request queue,
+buffers incoming BIOs while `nvmeibc` is absent, and replays them when the new
+instance adopts the orphaned volumes.
+
+TPVs do **not** benefit from this mechanism today.  Their gendisk and queue are
+allocated directly by `nvmeibc_tpv_blkdev_register()` (via `blk_alloc_disk()` /
+`add_disk()`), and `nvmeibc_tpv_fops` has `.owner = THIS_MODULE` (nvmeibc).
+During NDU the current code path is:
+
+1. `__detach_all_volumes_of_inst_work()` calls `nvmeibc_tpv_detach_all_for_inst()` unconditionally — even when `w->is_upgrade` is true.
+2. `nvmeibc_tpv_detach()` calls `del_gendisk()`, `put_disk()`, `kfree(tpv)`.
+3. The TPV block device disappears from `/dev/`.  Any application with an open file descriptor gets EIO.
+4. After the new module loads and management re-sends the attach command, a fresh TPV is created and the block device reappears — but with a different dev_t, breaking mounts and LVM.
+
+Goal: Make TPVs survive NDU with the same guarantees as regular volumes — the block
+device stays in `/dev/`, opens are preserved, BIOs are buffered (not failed), and the
+new module instance resumes IO transparently.
+
+### 11.2 Design Overview
+
+Integrate TPV gendisk/queue lifecycle with ATOM, mirroring the pattern used by
+regular volumes in `nvmeibc_block_api_os.c`:
+
+1. **Embed** `nvmeiba_atom_os_api` in `struct nvmeibc_tpv`.
+2. **Allocate** the gendisk and queue through ATOM (so `.owner` is `nvmeiba` and the
+   disk survives module unload).
+3. On NDU **abandon**: flush persistent state, cancel workers, orphan the atom via
+   `nvmeiba_os_api_orphan_abandon()`.  ATOM switches `submit_bio` to
+   `nvmeiba_b_req_push` and buffers new BIOs.
+4. On NDU **adopt**: the new `nvmeibc` instance discovers orphaned TPV atoms in ATOM's
+   registry, reconnects them to the (also-adopted) CDV, re-initialises work structs
+   with new function pointers, atomically restores the TPV `submit_bio`, and drains
+   the buffered BIO list.
+
+### 11.3 Struct Changes
+
+#### `struct nvmeibc_tpv` — embed ATOM atom
+
+```c
+ struct nvmeibc_tpv {
++    struct nvmeiba_atom_os_api    atom;        /* MUST be first for container_of */
+     struct nvmeibc_volume        *cdv_vol;
+     struct nvmeibc_tpv_allocator  allocator;
+-    struct gendisk               *disk;
+-    struct request_queue         *queue;
+     /* ... rest unchanged ... */
++
++    /* Per-TPV copy of fops, kept in kzalloc'd memory so it survives NDU.
++     * .owner = nvmeiba module, .open/.close = nvmeiba handlers,
++     * .submit_bio = nvmeibc_tpv_submit_bio_wrapper (set at adopt/attach). */
++    struct block_device_operations tpv_live_fops;
+ };
+```
+
+After this change `tpv->disk` and `tpv->queue` are accessed via `tpv->atom.disk` and
+`tpv->atom.queue` respectively.  A pair of accessor macros keeps call sites clean:
+
+```c
+#define tpv_disk(tpv)   ((tpv)->atom.disk)
+#define tpv_queue(tpv)  ((tpv)->atom.queue)
+```
+
+#### `enum nvmeibc_tpv_state` — add orphan state
+
+```c
+ enum nvmeibc_tpv_state {
+     TPV_ATTACHING  = 0,
+     TPV_ATTACHED   = 1,
+     TPV_DETACHING  = 2,
++    TPV_ORPHAN     = 3,   /* NDU: nvmeibc gone, ATOM buffering BIOs */
+ };
+```
+
+### 11.4 Registration Through ATOM
+
+Replace `nvmeibc_tpv_blkdev_register()` internals.  Instead of calling
+`blk_alloc_disk()` + `add_disk()` directly, delegate to ATOM:
+
+1. Call `nvmeiba_os_api_constructor(&tpv->atom, tpv_name, false)`.
+   ATOM allocates the gendisk and queue with `.owner = nvmeiba_module`.
+2. Populate `tpv_live_fops` by copying ATOM's `default_fops` (obtained from the
+   `nvmeiba_to_c_handover` returned by `nvmeiba_os_do_on_nvmeibc_up()`), then
+   override `.submit_bio = nvmeibc_tpv_submit_bio_wrapper`.
+3. Set `tpv->atom.disk->fops = &tpv->tpv_live_fops`.
+4. On older kernels (`KS_REQUEST_QUEUE_HAS_REQUEST_FN`): also set
+   `tpv->atom.queue->make_request_fn = nvmeibc_tpv_make_request`.
+5. Configure queue limits (block size, chunk_sectors, etc.) as today.
+6. Set `tpv->atom.disk->private_data = tpv`, `tpv->atom.queue->queuedata = tpv`.
+7. `set_capacity(disk, 0)` → `add_disk(disk)` → `set_capacity(disk, capacity)`.
+8. Transition atom status to `nvmeiba_status_live`.
+
+The TPV now appears at `/dev/nvmesh-tpv/<name>` with ATOM-managed reference counting
+(`nvmeiba_bdev_open` / `nvmeiba_bdev_close`), and `.owner = nvmeiba` ensures module
+reference counting keeps nvmeiba (not nvmeibc) pinned by open handles.
+
+### 11.5 Abandon Sequence (Old nvmeibc Going Down)
+
+Triggered from `__detach_all_volumes_of_inst_work()` when `w->is_upgrade == true`.
+
+Replace the current unconditional `nvmeibc_tpv_detach_all_for_inst(w->p)` call:
+
+```c
+ /* in __detach_all_volumes_of_inst_work() */
+-nvmeibc_tpv_detach_all_for_inst(w->p);
++if (w->is_upgrade)
++    nvmeibc_tpv_abandon_all_for_inst(w->p);
++else
++    nvmeibc_tpv_detach_all_for_inst(w->p);
+```
+
+**`nvmeibc_tpv_abandon_all_for_inst(cinst)`** iterates every active TPV for the
+instance and, for each:
+
+| Step | Action | Why |
+|------|--------|-----|
+| 1 | `cancel_work_sync(&tpv->cdv_alloc_work)` | Stop background CDV\_extent requests — TOMA connection is about to go away. |
+| 2 | `cancel_work_sync(&tpv->persist_work)` | Ensure no persist work is in-flight before the flush in step 3. |
+| 3 | `cancel_delayed_work_sync(&tpv->load_state_work)` | Stop deferred state loader. |
+| 4 | If `tpv->dirty`: `nvmeibc_tpv_flush_state(tpv)` | Write the latest L1/L2 tree to the CDV while the CDV is still attached.  If flush fails, log a warning — the tree extent may be stale, and recovery (step A3 below) will reconcile on adopt. |
+| 5 | `nvmeiba_os_api_orphan_abandon(&tpv->atom)` | ATOM switches `disk->fops` to `upgrade_fops` (`nvmeiba_b_req_push`). New BIOs are now buffered by ATOM. |
+| 6 | Drain in-flight IOs: wait until no `nvmeibc_tpv_make_request` call is executing. Use a per-TPV `atomic_t io_inflight` counter (see §11.7). | Ensures all BIOs currently in the TPV I/O path complete before we disconnect the CDV. |
+| 7 | `tpv->atom.queue->queuedata = NULL` | Disconnect nvmeibc context.  Any stale reference to queuedata from a racing code path sees NULL. |
+| 8 | `tpv->cdv_vol = NULL` | CDV volume object will be freed when the CDV itself is abandoned/detached. |
+| 9 | `nvmeibc_tpv_list_remove(tpv)` | Remove from module-local `nvmeibc_tpv_active_list` (safe: `list_del_init` leaves `list_node` self-linked). |
+| 10 | `nvmeibc_tpv_proc_deregister(tpv)` | Remove `/proc/nvmeibc/tpv/<name>/` entries.  They belong to nvmeibc's procfs tree which is going away. |
+| 11 | `atomic_set(&tpv->state, TPV_ORPHAN)` | Mark as orphaned. |
+
+**Ordering constraint:** TPV abandon **must** run before CDV abandon because step 4
+(flush) issues synchronous IO to the CDV.  This is already satisfied by the current
+code ordering in `__detach_all_volumes_of_inst_work()` where TPV teardown precedes
+volume teardown.
+
+After abandon, the `nvmeibc_tpv` allocation is anchored in memory by its embedded
+`tpv->atom` entry in ATOM's global `all.list`.  The following state survives nvmeibc
+unload:
+
+| Preserved | Destroyed |
+|-----------|-----------|
+| `atom` (disk, queue, pender, users, status=orphan) | `cdv_vol` pointer (nulled) |
+| `allocator` (xarray extent\_map, free lists, CDV extent refs) | work\_struct function pointers (stale text addresses) |
+| `tpv_uuid`, `tpv_name`, `virtual_size` | `/proc` entries |
+| `allocator_toma_id`, `allocator_generation` | `queue->queuedata` (nulled) |
+| `pending_bios` (bios parked before abandon) | Module-local list membership |
+| `tpv_live_fops` (memory allocation, but `.submit_bio` is stale) | |
+| `dirty` flag, `sync_flush` flag | |
+
+### 11.6 Adopt Sequence (New nvmeibc Coming Up)
+
+#### Discovery
+
+After the new `nvmeibc` module initialises and calls `nvmeiba_os_do_on_nvmeibc_up()`
+(which returns `n_orphan_osapi > 0`), it runs the regular volume adoption loop.  CDVs
+are adopted as part of this loop (they are regular hidden-attach volumes with ATOM
+atoms).
+
+TPV adoption runs **after** CDV adoption, because adopt needs a valid `cdv_vol`
+pointer.  Two possible triggers:
+
+- **Trigger A (preferred): Management re-sends `AttachVolumes`** — Management sees
+  the client reconnect and re-sends the full volume configuration.  When the TPV
+  `AttachVolumes` message arrives at `__setup_tpv()` → `nvmeibc_tpv_attach()`, the
+  attach function detects the ATOM orphan and adopts instead of creating fresh.
+- **Trigger B (proactive scan):** After CDV adoption completes, scan ATOM's list for
+  atoms with `status == nvmeiba_status_orphan` whose `disk_name` starts with the TPV
+  prefix (`nvmesh-tpv/`).  For each, adopt immediately without waiting for management.
+  This provides faster resume at the cost of running before management confirms the
+  TPV should still be attached.
+
+**Trigger A is recommended** because it matches the regular volume pattern (management
+drives the attach), handles the case where management intentionally does not re-attach
+a TPV, and requires minimal new code paths.
+
+#### `nvmeibc_tpv_attach()` — Adopt Path
+
+Extend the existing idempotency check at the top of `nvmeibc_tpv_attach()`:
+
+```c
+ struct nvmeibc_tpv *nvmeibc_tpv_attach(...)
+ {
+-    /* 0. Idempotency: return existing if already in active list */
+-    struct nvmeibc_tpv *existing = nvmeibc_tpv_find_by_uuid(tpv_uuid);
+-    if (existing) { ... return existing; }
++    /* 0a. Idempotency: return existing if already in active list */
++    struct nvmeibc_tpv *existing = nvmeibc_tpv_find_by_uuid(tpv_uuid);
++    if (existing) { ... return existing; }
++
++    /* 0b. NDU orphan: check ATOM for an orphaned TPV with matching name */
++    {
++        char dev_name[DISK_NAME_LEN];
++        snprintf(dev_name, sizeof(dev_name), "%s/%.30s",
++                 NVMEIBC_TPV_DISK_PREFIX, tpv_name);
++        struct nvmeiba_atom_os_api *orphan_atom =
++            nvmeiba_os_api_orphan_adopt(dev_dir, dev_name);
++        if (orphan_atom) {
++            struct nvmeibc_tpv *tpv = container_of(orphan_atom,
++                                                    struct nvmeibc_tpv, atom);
++            return nvmeibc_tpv_adopt(tpv, cdv, ...);
++        }
++    }
+ 
+     /* 1. Fresh creation path (unchanged) ... */
+ }
+```
+
+#### `nvmeibc_tpv_adopt()` — Reconnection Steps
+
+| Step | Action | Notes |
+|------|--------|-------|
+| A1 | Verify `tpv->tpv_uuid` matches `tpv_uuid` argument | Sanity check: ATOM matched by name; verify UUID too. |
+| A2 | `tpv->cdv_vol = cdv` | Reconnect to the (now-adopted) CDV volume object. |
+| A3 | Re-initialise work structs: `INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn)`, `INIT_WORK(&tpv->persist_work, nvmeibc_tpv_persist_work_fn)`, `INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn)` | Function pointers in work\_struct pointed to old module text.  `INIT_WORK` resets the function pointer and reinitialises the work struct internals.  The work is not scheduled here — it was not pending (cancelled in step 3 of abandon). |
+| A4 | Refresh `allocator_toma_id` / `allocator_generation` from CDV cache | Same as fresh attach: `spin_lock(cdv->spinlock)`, copy `cdv->cdv_allocator_toma_id`.  May have changed during NDU window. |
+| A5 | `tpv->atom.queue->queuedata = tpv` | Reconnect queue context. |
+| A6 | Populate `tpv_live_fops`: copy ATOM `default_fops`, set `.submit_bio = nvmeibc_tpv_submit_bio_wrapper` | Must use the *new* module's function pointer (not the stale one from the old module). |
+| A7 | Atomically redirect new BIOs: `spin_lock(&tpv->atom.pender.lock)`, set `tpv->atom.disk->fops = &tpv->tpv_live_fops`, `wmb()`, `spin_unlock(...)` | After this point, new BIOs from the kernel go directly to TPV's make\_request — not to ATOM's buffer. |
+| A8 | Drain ATOM pending list: pop every BIO from `tpv->atom.pender.bio_list`, submit via `nvmeibc_tpv_make_request()` | These are BIOs that arrived during the NDU window.  They are replayed in order. |
+| A9 | Drain TPV pending bios: `nvmeibc_tpv_retry_pending_bios(tpv)` | These are BIOs that were parked before abandon because the CDV extent pool was empty.  Now that the CDV is reconnected, `cdv_alloc_work` can run again. |
+| A10 | `nvmeibc_tpv_list_add(tpv)` | Re-add to module-local active list. |
+| A11 | `nvmeibc_tpv_proc_register(tpv)` | Re-create `/proc/nvmeibc/tpv/<name>/` entries. |
+| A12 | `atomic_set(&tpv->state, TPV_ATTACHED)` | Resume normal operation. |
+| A13 | Schedule `cdv_alloc_work` if free pool is below `low_watermark` | Kick background pre-fetch now that TOMA connectivity is restored. |
+| A14 | Optionally schedule `load_state_work` for state reconciliation | Verifies in-memory extent map against the CDV tree extent. Handles the edge case where the flush in abandon step 4 failed and the tree is stale — recovery (TOMA `CDV_LIST_EXTENTS`) adopts any orphan extents. |
+
+**Ordering constraint:** A7 must happen before A8.  The lock in A7 is the same lock
+that `nvmeiba_b_req_push` holds when adding BIOs to the pender list.  By holding the
+lock while swapping fops, we guarantee that no BIO is lost between the redirect and
+the drain: any BIO that arrived before the lock was acquired is on the pender list and
+will be drained in A8; any BIO arriving after the lock release goes to TPV's make\_request.
+
+### 11.7 In-Flight IO Draining
+
+ATOM provides `nvmeiba_atom_drain_io()` which waits for an IO refcount to reach zero.
+For regular volumes this refcount is managed by `nvmeibc_block_api_os.c` (incremented
+on make\_request entry, decremented on BIO completion).
+
+TPVs need an analogous mechanism.  Two options:
+
+**Option A — Use ATOM's existing scalable refcount.**
+- `nvmeibc_tpv_make_request` entry: `nvmeiba_atom_io_ref_get(&tpv->atom)`
+- BIO completion (endio callback or sync return): `nvmeiba_atom_io_ref_put(&tpv->atom)`
+- Abandon step 6: `nvmeiba_atom_drain_io(&tpv->atom)`
+- Pro: Reuses existing ATOM infrastructure.
+- Con: Requires TPV to track every forwarded-to-CDV BIO's completion, which it currently does not intercept (the BIO goes to CDV and completes via CDV's endio).
+
+**Option B — TPV-local `atomic_t io_inflight` counter.**
+- Lighter weight.  Increment on `nvmeibc_tpv_make_request` entry, decrement at the
+  point where the TPV no longer needs `tpv->cdv_vol` (i.e., after `nvmeibc_tpv_cdv_submit_bio` returns — at that point the BIO is in CDV's hands).
+- Abandon drain: `while (atomic_read(&tpv->io_inflight)) msleep(1);`
+- Pro: Simple, no endio interception needed.
+- Con: Custom drain loop (but trivial).
+
+**Recommendation: Option B.** The TPV make\_request hands off BIOs to the CDV (via
+`submit_bio_noacct`/`generic_make_request`), and from that point the BIO's lifetime is
+CDV's concern.  We only need to ensure no code is executing between make\_request entry
+and the CDV hand-off.  An `atomic_t` counter with increment-on-entry /
+decrement-after-CDV-submit is sufficient and avoids coupling TPV to ATOM's refcount
+API.
+
+### 11.8 CDV Ordering During NDU
+
+Both CDV (a regular volume) and its TPVs go through the NDU abandon/adopt cycle.  The
+ordering requirements are:
+
+| Phase | Required Order | Reason |
+|-------|---------------|--------|
+| Abandon | TPVs first, then CDV | TPV flush (step 4) issues synchronous IO to the CDV. |
+| Adopt | CDV first, then TPVs | TPV adopt (step A2) needs a valid `cdv_vol` pointer. |
+
+**Abandon ordering** is already guaranteed: `__detach_all_volumes_of_inst_work()` calls
+`nvmeibc_tpv_abandon_all_for_inst()` before entering the volume detach loop.
+
+**Adopt ordering** is naturally guaranteed by Trigger A: management sends
+`AttachVolumes` for the CDV before the TPV.  The CDV attach goes through the regular
+volume adopt path (ATOM orphan → reconnect → live).  The subsequent TPV
+`AttachVolumes` calls `nvmeibc_tpv_attach()` which finds the CDV already adopted.
+If the CDV attach message hasn't arrived yet (race), the existing `tpv_cdv_retry`
+mechanism (deferred retry with `TPV_CDV_RETRY_MAX` attempts) handles it.
+
+### 11.9 Pending BIO Lifecycle Across NDU
+
+Three separate BIO parking lists interact during NDU:
+
+| List | Owner | Contents During NDU |
+|------|-------|---------------------|
+| `tpv->atom.pender.bio_list` | ATOM | BIOs arriving while nvmeibc is absent.  Drained in adopt step A8. |
+| `tpv->pending_bios` | TPV | BIOs parked before abandon because the free TPV\_extent pool was empty.  Survive in memory.  Retried in adopt step A9 (may park again if pool is still empty — `cdv_alloc_work` will eventually replenish). |
+| `tpv->pending_l1_flush_bios` | TPV | BIOs waiting for L1 flush (sync\_flush mode only).  The flush completed (or was forced) in abandon step 4.  If any remain, they are retried in adopt step A9. |
+
+No BIOs are lost or failed during NDU.
+
+### 11.10 `nvmeibc_tpv_submit_bio_wrapper` and Module Text Safety
+
+The `submit_bio` function pointer stored in `tpv_live_fops.submit_bio` points to
+`nvmeibc_tpv_submit_bio_wrapper`, which lives in nvmeibc's `.text` section.  When
+nvmeibc is unloaded, this address becomes invalid.
+
+This is safe because:
+
+1. During abandon (step 5), ATOM atomically replaces `disk->fops` with
+   `upgrade_fops`, which has `.submit_bio = nvmeiba_b_req_push` (in ATOM's `.text`).
+2. Between abandon and adopt, no code path reaches `tpv_live_fops.submit_bio`.
+3. During adopt (step A6), the **new** module's `nvmeibc_tpv_submit_bio_wrapper`
+   address is written into `tpv_live_fops.submit_bio` before `disk->fops` is swapped
+   back to `tpv_live_fops` (step A7).
+
+The `tpv_live_fops` memory itself (part of the kzalloc'd `nvmeibc_tpv`) persists — only
+the function pointer value is stale between module unload and adopt step A6.
+
+### 11.11 ATOM Discovery — Distinguishing TPV Atoms from Regular Atoms
+
+ATOM's `nvmeiba_os_api_orphan_adopt(dev_dir, dev_name)` matches by directory and name.
+TPV disk names use the `nvmesh-tpv/` prefix (e.g., `nvmesh-tpv/my-tpv-01`), which is
+distinct from regular volume names.  No additional type field in the atom is needed.
+
+For proactive scan (Trigger B, if implemented in the future): iterate ATOM's list via
+`nvmeiba_os_api_exec_for_each_atom()`, filter by `strncmp(atom->dev_name, "nvmesh-tpv/", 11)`.
+
+### 11.12 Implementation Checklist
+
+#### New files
+*(none)*
+
+#### Modified files
+
+| File | Changes |
+|------|---------|
+| `clnt/tpv/nvmeibc_tpv.h` | Embed `nvmeiba_atom_os_api atom` in `struct nvmeibc_tpv`; add `tpv_live_fops` field; add `TPV_ORPHAN` state; add `atomic_t io_inflight`; add `tpv_disk()`/`tpv_queue()` accessor macros; declare `nvmeibc_tpv_abandon_all_for_inst()`. |
+| `clnt/tpv/nvmeibc_tpv.c` | Rewrite `nvmeibc_tpv_blkdev_register()` to use ATOM constructor + `add_disk()`.  Rewrite `nvmeibc_tpv_blkdev_unregister()` to use ATOM destructor.  Add `nvmeibc_tpv_adopt()` (steps A1–A14).  Add `nvmeibc_tpv_abandon_all_for_inst()` (steps 1–11).  Extend `nvmeibc_tpv_attach()` with orphan-adopt check (step 0b).  Replace all `tpv->disk` / `tpv->queue` with `tpv_disk(tpv)` / `tpv_queue(tpv)`. |
+| `clnt/tpv/nvmeibc_tpv_io.c` | Add `io_inflight` increment at `nvmeibc_tpv_make_request` entry and decrement after CDV hand-off.  Replace `tpv->queue` references. |
+| `clnt/tpv/nvmeibc_tpv_cdv.c` | Replace `tpv->disk` / `tpv->queue` with accessors. |
+| `clnt/tpv/nvmeibc_tpv_persist.c` | Replace `tpv->disk` / `tpv->queue` with accessors. |
+| `clnt/tpv/nvmeibc_tpv_proc.c` | Replace `tpv->disk` / `tpv->queue` with accessors. |
+| `clnt/tpv/nvmeibc_tpv_test.c` | Adapt test harness for ATOM-based registration. |
+| `clnt/main/cc_api/nvmeibc_main_capi_manipulate_vols.inc.c` | In `__detach_all_volumes_of_inst_work()`: branch on `w->is_upgrade` to call `nvmeibc_tpv_abandon_all_for_inst()` vs `nvmeibc_tpv_detach_all_for_inst()`. |
+| `clnt/block/nvmeibc_block_api_os.c` *(possibly)* | Expose helper to obtain `nvmeiba_to_c_handover.fops` pointer for TPV `tpv_live_fops` initialisation, if not already accessible. |
+
+#### Not modified
+| File | Why |
+|------|-----|
+| `clnt/atom/*` | No changes to ATOM itself — the existing orphan-abandon / orphan-adopt API is sufficient. |
+| Management server | Management already re-sends `AttachVolumes` on client reconnect; no protocol changes needed. |
+
+### 11.13 Edge Cases and Failure Modes
+
+| Scenario | Handling |
+|----------|----------|
+| **Flush fails during abandon** (CDV IO error) | Log warning, proceed with abandon.  In-memory extent map is still valid.  On adopt, step A14 runs recovery (`CDV_LIST_EXTENTS`) which reconciles any divergence between the tree extent and TOMA's allocator state. |
+| **CDV not yet adopted when TPV attach arrives** | Existing `tpv_cdv_retry` mechanism retries up to `TPV_CDV_RETRY_MAX` times at `TPV_CDV_RETRY_MS` intervals.  Works unchanged because the retry looks up the CDV by UUID in the volume list. |
+| **Management does not re-send TPV attach** (TPV was deleted during NDU window) | The orphaned TPV atom remains in ATOM's list indefinitely.  Acceptable for the NDU window (seconds).  If management explicitly sends a detach for the TPV, the new nvmeibc can look up the orphan by name, adopt it, and immediately detach it (which calls `del_gendisk` properly). |
+| **Module crash during abandon** (between flush and orphan) | Equivalent to a hard restart — TPV block device is gone.  Recovery on next clean attach rebuilds from the tree extent + `CDV_LIST_EXTENTS`.  No worse than today. |
+| **Two TPVs on same CDV, different clients** | Each TPV is per-client-instance.  `nvmeibc_tpv_abandon_all_for_inst(cinst)` only touches TPVs whose `cdv_vol->p == cinst`.  Independent. |
+| **Allocator identity changes during NDU** | On adopt (step A4), `allocator_toma_id` is refreshed from the CDV cache.  `cdv_alloc_work` (step A13) sends requests with the current generation; stale-generation responses (`CDV_ALLOC_WRONG_GEN`) are handled normally. |
+| **open() / close() during NDU** | Handled by ATOM's `nvmeiba_bdev_open()` / `nvmeiba_bdev_close()`.  The atom's `users.n_opens` refcount tracks open handles.  The block device remains in `/dev/` throughout. |
+
+### 11.14 Testing
+
+| Test | Method |
+|------|--------|
+| **Basic NDU round-trip** | Attach CDV + TPV, write data, trigger NDU (unload + reload nvmeibc), verify `/dev/` device persists, read data back. |
+| **IO continuity across NDU** | Start sustained write workload (fio), trigger NDU mid-flight, verify no IO errors and all writes landed.  Expect latency spike during NDU window. |
+| **Multiple TPVs on same CDV** | Two TPVs, both active during NDU, both survive. |
+| **Dirty state flush failure** | Inject CDV IO error during abandon flush; verify recovery on adopt reconciles extent map via `CDV_LIST_EXTENTS`. |
+| **CDV retry on adopt** | Delay CDV adoption (slow management message); verify TPV attach retries and succeeds. |
+| **Orphan cleanup on non-reattach** | Adopt + immediately detach a TPV that management didn't re-send. |
+| **Self-test adaptation** | Extend `nvmeibc_tpv_test.c` with a `tpv_ktest_ndu_roundtrip` that simulates abandon → adopt at the allocator level (mock ATOM orphan/adopt). |
+
