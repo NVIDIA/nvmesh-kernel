@@ -313,7 +313,6 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 			mgmt_sim_parse_report_target(root);
 		} else  if (strcmp(message_type, "updatePRaidReport") == 0) {
 			mgmt_sim_parse_praid_report(root);
-		 	// {"originType":"TOMA","messageType":"updatePRaidReport","messageTypeVersion":1,"hostname":"nvme39.nvidia.com","tomaToken":2,"messageSequence":85,"leaderToken":1,"payload":{"pRaidsUpdate":[{"uuid":"b60b04b1-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60b04b0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60b2bc0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]},{"uuid":"b60ab692-e97b-11f0-995c-3792ee0db955","raftTerm":5,"pRaidMinorVersion":0,"pRaidMajorVersion":257,"isRaftLeader":1,"segments":[{"segmentID":"b60ab691-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"},{"segmentID":"b60adda0-e97b-11f0-995c-3792ee0db955","status":"booting","vitality":"up"}]}]}}
 		} else if (strcmp(message_type, "segmentZeroingProgress") == 0) {
 			// {"originType":"TOMA","messageType":"segmentZeroingProgress","messageTypeVersion":1,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":335,"leaderToken":null,"payload":{"praidVersion":"258.0","segmentUUID":"98e46d20-ea22-11f0-bad8-af65dd8e6ead","pRaidUUID":"98e44612-ea22-11f0-bad8-af65dd8e6ead","nZeroedBlks":262144}}
 			struct mm_json_elem *payload = json_get_dict_value(root, "payload");
@@ -407,7 +406,7 @@ static void __mongodb_insert_praid_seg(struct sb_cluster_conf *cfg, struct mm_js
 	const char *vital =  json_get_dict_str(j, "vitality", "unknown");
 	struct sb_seg_topo *ps = sb_cluster_get_topo_seg_ptr_from_uuid(cfg, uuid);
 	if      (!strncmp(vital, "up",   2))	ps->vitality = true;
-	else if (!strncmp(vital, "down", 4))	ps->vitality = false;
+  //else if (!strncmp(vital, "down", 4))	ps->vitality = false;		// Removed
 	else BUG_ON(true);						// Unknown invalid value
 	if      (!strncmp(status, "under_", 6))	ps->status = mdb_WRITE;		// under recovery
 	else if (!strncmp(status, "normal", 6))	ps->status = mdb_seg_RW;
