@@ -1085,12 +1085,12 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 			N_Ef(cdv_free_all_zero_err,
 			     "CDV-alloc: free_all cdv=@STR zero L1 at off=@LLU failed; stopping",
 			     cdv_uuid, off);
-			NNVMEIBT_BM_FREE(cdv_free_all_zero_free, zero_buf);
+			NNVMEIBT_BM_FREE(cdv_free_all_zero_free1, zero_buf);
 			return -EIO;
 		}
 	}
 
-	NNVMEIBT_BM_FREE(cdv_free_all_zero_free, zero_buf);
+	NNVMEIBT_BM_FREE(cdv_free_all_zero_free2, zero_buf);
 
 	N_If(cdv_free_all_l1_zeroed,
 	     "CDV-alloc: free_all cdv=@STR tpv=@STR L1 tree zeroed @LLU bytes at @LLX",
